@@ -36,6 +36,8 @@ function deferred<T>(): { promise: Promise<T>; resolve: (value: T) => void; reje
 
 interface SpyOptions {
   pausable?: boolean;
+  /** Runs while the factory builds the scene; throwing here is a broken module. */
+  construct?: () => void;
   enter?: () => Promise<void> | void;
   update?: (dt: number) => void;
 }
@@ -173,7 +175,9 @@ function harness(config: Partial<Record<SceneId, SpyOptions>> = {}): Harness {
     <K extends SceneId>(id: K) =>
     (): Scene<K> => {
       trace.push(`${id}:construct`);
-      const scene = new SpyScene(id, trace, config[id] ?? {});
+      const options = config[id] ?? {};
+      options.construct?.();
+      const scene = new SpyScene(id, trace, options);
       built.push(scene);
       return scene as unknown as Scene<K>;
     };
@@ -731,6 +735,22 @@ describe('pause and resume', () => {
 // ------------------------------------------------------------------- misc
 
 describe('housekeeping', () => {
+  it('does not stay locked when a scene module itself is broken', async () => {
+    const h = harness({
+      station: {
+        construct: () => {
+          throw new Error('broken scene module');
+        },
+      },
+    });
+    await atMenu(h);
+    await expect(h.manager.go('station', {})).rejects.toThrow('broken scene module');
+    expect(h.manager.transitioning).toBe(false);
+    expect(h.manager.current).toBeNull();
+    // …and the machine still accepts the next request.
+    await expect(h.manager.go('menu', { reason: 'error' })).resolves.toBe(true);
+  });
+
   it('forwards onContextRestored only when there is a scene (AC-87, AC-88)', async () => {
     const h = harness();
     expect(() => h.manager.onContextRestored()).not.toThrow();

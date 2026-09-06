@@ -194,57 +194,62 @@ export class SceneManager {
     const { events, ui, renderer } = this.#services;
     events.emit('scene:transition', { from, to: id });
 
-    const old = this.#current;
-    if (old !== null) await ui.fadeOut(fadeMs()); // skipped on the first transition (D-12)
-    this.#current = null;
-    this.#paused = false;
-    if (old !== null) {
-      old.exit();
-      old.dispose();
-      if (import.meta.env.DEV) events.assertNoOwner(old);
-    }
-
-    let next: Scene = this.#factory[id](this.#services);
-    const loadingTimer = setTimeout(() => ui.showLoading(), LOADING_DELAY_MS);
-    let ok = true;
     try {
-      await next.enter(params);
-    } catch (error) {
-      log.error('scene', `enter("${id}") failed`, error);
-      next.dispose();
-      ok = false;
-      events.emit('ui:toast', { kind: 'error', text: SCENE_ENTER_FAILED_TEXT });
-      try {
-        next = this.#factory.menu(this.#services);
-        await next.enter({ reason: 'error' });
-      } catch (fallbackError) {
-        log.error('scene', 'menu fallback failed', fallbackError);
-        clearTimeout(loadingTimer);
-        ui.hideLoading();
-        ui.showError(FATAL_TRANSITION_TEXT);
-        this.#pauseRequested = false;
-        this.#transitioning = false; // `current` stays null (D-19)
-        return false;
+      const old = this.#current;
+      if (old !== null) await ui.fadeOut(fadeMs()); // skipped on the first transition (D-12)
+      this.#current = null;
+      this.#paused = false;
+      if (old !== null) {
+        old.exit();
+        old.dispose();
+        if (import.meta.env.DEV) events.assertNoOwner(old);
       }
-    }
-    clearTimeout(loadingTimer);
-    ui.hideLoading();
 
-    this.#current = next;
-    events.emit('scene:entered', { id: next.id });
-    renderer.resize(); // cameras are built in enter(); give them the size
-    if (this.#pauseRequested) {
+      let next: Scene = this.#factory[id](this.#services);
+      const loadingTimer = setTimeout(() => ui.showLoading(), LOADING_DELAY_MS);
+      let ok = true;
+      try {
+        await next.enter(params);
+      } catch (error) {
+        log.error('scene', `enter("${id}") failed`, error);
+        next.dispose();
+        ok = false;
+        events.emit('ui:toast', { kind: 'error', text: SCENE_ENTER_FAILED_TEXT });
+        try {
+          next = this.#factory.menu(this.#services);
+          await next.enter({ reason: 'error' });
+        } catch (fallbackError) {
+          log.error('scene', 'menu fallback failed', fallbackError);
+          clearTimeout(loadingTimer);
+          ui.hideLoading();
+          ui.showError(FATAL_TRANSITION_TEXT);
+          return false; // `current` stays null (D-19)
+        }
+      }
+      clearTimeout(loadingTimer);
+      ui.hideLoading();
+
+      this.#current = next;
+      events.emit('scene:entered', { id: next.id });
+      renderer.resize(); // cameras are built in enter(); give them the size
+      this.#applyRequestedPause();
+      await ui.fadeIn(fadeMs());
+      // A pause that landed during the fade-in applies now rather than leaking
+      // into the next transition.
+      this.#applyRequestedPause();
+      return ok;
+    } finally {
+      // However this ended — including a factory or an overlay that threw —
+      // the machine must not stay locked (D-4).
       this.#pauseRequested = false;
-      this.#applyPause();
+      this.#transitioning = false;
     }
-    await ui.fadeIn(fadeMs());
-    this.#transitioning = false;
-    // A pause that landed during the fade-in applies now rather than leaking
-    // into the next transition.
-    if (this.#pauseRequested) {
-      this.#pauseRequested = false;
-      this.#applyPause();
-    }
-    return ok;
+  }
+
+  /** The `app:paused` that arrived while this transition was running (D-40). */
+  #applyRequestedPause(): void {
+    if (!this.#pauseRequested) return;
+    this.#pauseRequested = false;
+    this.#applyPause();
   }
 }
