@@ -38,3 +38,116 @@ body {
   font-size: 12px;
   opacity: 0.7;
 }
+
+/* ------------------------------------------------- scene machine (SPEC-003) */
+
+/* The fade the tear-down hides behind. While it is active it also swallows
+   pointer events, so nothing behind it can be clicked mid-transition (D-15). */
+.overlay-fade {
+  position: fixed;
+  inset: 0;
+  background: #000;
+  opacity: 0;
+  pointer-events: none;
+  z-index: 20;
+}
+
+.overlay-fade.is-active {
+  pointer-events: auto;
+}
+
+/* Panels are interactive, so they opt back into pointer events. */
+.overlay-panel {
+  position: fixed;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  display: none;
+  padding: 16px 20px;
+  border: 1px solid #22303c;
+  border-radius: 8px;
+  background: #111820;
+  pointer-events: auto;
+  text-align: center;
+  z-index: 30;
+}
+
+.overlay-panel.is-visible {
+  display: block;
+}
+
+.overlay-loading,
+.overlay-error {
+  z-index: 40;
+}
+
+.overlay-boot {
+  min-width: 200px;
+}
+
+.boot-error {
+  display: none;
+  margin-top: 12px;
+}
+
+.boot-error.is-visible {
+  display: block;
+}
+
+.boot-progress,
+.boot-error-text,
+.pause-title {
+  margin: 0 0 8px;
+}
+
+button.boot-retry,
+button.pause-resume,
+button.scene-nav-button {
+  font: inherit;
+  color: inherit;
+  padding: 6px 14px;
+  border: 1px solid #33465a;
+  border-radius: 6px;
+  background: #16202b;
+  cursor: pointer;
+}
+
+button.boot-retry:hover,
+button.pause-resume:hover,
+button.scene-nav-button:hover {
+  background: #1d2a38;
+}
+
+/* Every scene mounts its own layer; it goes away with the scene (D-20). */
+.scene-layer {
+  position: absolute;
+  inset: 0;
+}
+
+.scene-label {
+  position: absolute;
+  left: max(12px, env(safe-area-inset-left));
+  top: max(12px, env(safe-area-inset-top));
+  margin: 0;
+  font-size: 20px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.scene-nav {
+  position: absolute;
+  right: max(12px, env(safe-area-inset-right));
+  top: max(12px, env(safe-area-inset-top));
+  display: flex;
+  gap: 8px;
+  pointer-events: auto;
+}
+
+.overlay-debug {
+  position: absolute;
+  right: max(12px, env(safe-area-inset-right));
+  bottom: max(12px, env(safe-area-inset-bottom));
+  font-size: 12px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  opacity: 0.8;
+}
