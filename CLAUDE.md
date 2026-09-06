@@ -4,12 +4,12 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project
 
-"Starfall Salvage": a single-player, offline, desktop + mobile browser RPG (Three.js, TypeScript, Vite). **There is no code yet.** The repository holds the design (`PLAN.md`) and implementation specs (`specs/`); implementation starts at milestone M0.
+"Starfall Salvage": a single-player, offline, desktop + mobile browser RPG (Three.js, TypeScript, Vite). **There is no code yet.** The repository holds the design (`PLAN.md`); the implementation specs live in the sibling repository `../reallm-specs` (https://github.com/mdzunic/reallm-specs). Implementation starts at milestone M0.
 
 Read in this order before touching anything:
 
 1. `PLAN.md` — the locked design and source of truth. §13 is the edge-case register (E1…E26); every entry names the spec that implements it.
-2. `specs/README.md` — index, spec status, and the milestone implementation order. `specs/` is a **separate git repository** (github.com/mdzunic/reallm-specs) checked out inside this working tree and ignored by this repo; after cloning this repo, clone that one into `specs/`. Commit spec changes there, code and PLAN changes here.
+2. `../reallm-specs/README.md` — index, spec status, and the milestone implementation order. The specs are a **separate git repository** (github.com/mdzunic/reallm-specs); clone it next to this one so it sits at `../reallm-specs`. Commit spec changes there, code and PLAN changes here.
 3. The spec(s) for the milestone you are working on. Specs contain the canonical TypeScript interfaces, algorithms, numbered edge cases, the exact unit tests to write, and acceptance criteria.
 
 Rules for the docs themselves:
@@ -17,11 +17,11 @@ Rules for the docs themselves:
 - Where PLAN and a spec disagree, PLAN wins. A design change needs a new entry in PLAN's refinement log (R2, R3, …) *before* the spec and code change.
 - Names in a spec's **Interfaces** section are canonical. Rename in the spec first, then in code.
 - Numbers marked *initial tuning* may be retuned without a log entry as long as the invariant tests (specs 08, 09, 15) stay green. Pinned constants in tests (XP table, token totals, layout hashes) are explicit literals; change them deliberately.
-- When a spec is implemented and its acceptance list is green, set its status to `done` in `specs/README.md`.
+- When a spec is implemented and its acceptance list is green, set its status to `done` in `../reallm-specs/README.md`.
 
 ## Commands
 
-Defined in spec 00 (`specs/00-conventions.md`); `package.json` is created in M0 with exactly these scripts.
+Defined in spec 00 (`../reallm-specs/00-conventions.md`); `package.json` is created in M0 with exactly these scripts.
 
 ```bash
 npm run dev          # Vite dev server with --host (open on a phone over LAN)

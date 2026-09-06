@@ -3,7 +3,7 @@
 Space post-apocalyptic RPG browser game. Single-player, fully offline, playable on desktop and mobile.
 
 > Status: plan locked. This document is the source of truth for implementation.
-> Detailed, implementable specs live in [`specs/`](specs/README.md). Where PLAN and a spec disagree, PLAN wins; open a refinement entry below and fix the spec.
+> Detailed, implementable specs live in the separate repository [mdzunic/reallm-specs](https://github.com/mdzunic/reallm-specs), cloned next to this one as `../reallm-specs`. Where PLAN and a spec disagree, PLAN wins; open a refinement entry below and fix the spec.
 
 ### Refinement log
 
@@ -271,7 +271,7 @@ Landing at The Hive requires clearing the arrival wave, so `c5_m1` completes nat
 
 Total sink ≈ **2,010** tokens (ship 1,095 · gear 500 · companions 415), so a completionist affords ~62 % of everything and specialization is forced. XP curve: `xpToNext(L) = 100 + 50·L` (11,400 XP to reach L20), level cap 30.
 
-Balance invariants (unit-tested, see [specs/09](specs/09-economy-progression.md)):
+Balance invariants (unit-tested, see [spec 09](https://github.com/mdzunic/reallm-specs/blob/main/09-economy-progression.md)):
 
 - Recommended loadout for chapter N costs ≤ tokens guaranteed by the end of chapter N−1 counting **main missions only** and **mission XP only** (worst case). Ferrum's shield-2 gate (140 tokens) is 39 % of that worst case (360).
 - Base cargo cap (400) ≥ largest collect objective (300) + 100.
@@ -342,7 +342,7 @@ Storage rules: 3 slots, key per slot plus a `.bak` copy of the previous good sav
 | Risk | Mitigation |
 |---|---|
 | Scope creep (biggest risk) | Data-driven content, hard milestone gates; M3/M4 are the proof-of-fun checkpoints |
-| Mobile perf with Three.js | Pooling, instancing, quality presets from day one (M0); perf budgets in [specs/14](specs/14-mobile-performance.md) |
+| Mobile perf with Three.js | Pooling, instancing, quality presets from day one (M0); perf budgets in [spec 14](https://github.com/mdzunic/reallm-specs/blob/main/14-mobile-performance.md) |
 | First-person feel without complex physics | Rail flight model only; cockpit HUD sells immersion |
 | Asset consistency | Kenney CC0 families (Space Kit, Mini Characters) for humans/ships; enemies and props procedural |
 | Save loss on iOS (7-day eviction, private mode, quota) | Export/import code, `.bak` slot, `persist()`, PWA install prompt, graceful "storage unavailable" mode |
@@ -388,4 +388,4 @@ Each entry names the owning spec. "Casual" = casual difficulty.
 
 ## 14. Spec index
 
-See [specs/README.md](specs/README.md). Specs are numbered by dependency order and tagged with the milestone that implements them.
+See the [specs index](https://github.com/mdzunic/reallm-specs/blob/main/README.md) in the reallm-specs repository (local checkout: `../reallm-specs/README.md`). Specs are numbered by dependency order and tagged with the milestone that implements them.
