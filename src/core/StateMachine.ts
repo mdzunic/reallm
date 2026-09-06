@@ -192,9 +192,8 @@ export class SceneManager {
     // A microtask, so a `go()` issued from inside `update()` unwinds first (D-5).
     await Promise.resolve();
     const { events, ui, renderer } = this.#services;
-    events.emit('scene:transition', { from, to: id });
-
     try {
+      events.emit('scene:transition', { from, to: id });
       const old = this.#current;
       if (old !== null) await ui.fadeOut(fadeMs()); // skipped on the first transition (D-12)
       this.#current = null;

@@ -175,7 +175,7 @@ function harness(config: Partial<Record<SceneId, SpyOptions>> = {}): Harness {
     <K extends SceneId>(id: K) =>
     (): Scene<K> => {
       trace.push(`${id}:construct`);
-      const options = config[id] ?? {};
+      const options: SpyOptions = config[id] ?? {};
       options.construct?.();
       const scene = new SpyScene(id, trace, options);
       built.push(scene);
