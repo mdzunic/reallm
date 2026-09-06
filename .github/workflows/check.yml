@@ -1,0 +1,31 @@
+# CI for the game (SPEC-016 §9), and the factory's post-merge net.
+#
+# The factory squash-merges a spec only when review, QA and the check suite are
+# green, and then watches the check runs GitHub publishes for the commit that
+# landed on main: a failure or a timeout there reverts the merge automatically
+# (product.postMergeHealth.mode "checks" in the factory's project profile).
+# Without a workflow no check runs exist, and the factory refuses to spend
+# anything on a spec it could never revert — so this file is load-bearing, not
+# optional. Keep it fast: the watcher waits revertWatchMinutes (10) for a verdict.
+name: check
+on:
+  push:
+    branches: [main]
+  pull_request:
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      # typecheck (src and tests), unit tests, production build
+      - run: npm run check
+      # The smoke e2e (and, later, one Playwright test per scene). The browser
+      # revision follows the pinned @playwright/test.
+      - run: npx playwright install --with-deps chromium
+      - run: npm run e2e
