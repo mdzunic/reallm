@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project
 
-"ReaLLM": a single-player, offline, desktop + mobile browser ARPG (Three.js, TypeScript, Vite) with a hidden simulation plot: the salvager slowly realizes he may be a model instance inside a machine (PLAN.md §1, §5). **There is no code yet.** The repository holds the design (`PLAN.md`); the implementation specs live in the sibling repository `../reallm-specs` (https://github.com/mdzunic/reallm-specs). Implementation starts at milestone M0.
+"ReaLLM": a single-player, offline, desktop + mobile browser ARPG (Three.js, TypeScript, Vite) with a hidden simulation plot: the salvager slowly realizes he may be a model instance inside a machine (PLAN.md §1, §5). **The code starts at the SPEC-001 bootstrap** — toolchain, folder layout, the shell in `index.html`/`src/main.ts`, and the test harness; features begin with SPEC-002. The repository holds the design (`PLAN.md`); the implementation specs live in the sibling repository `../reallm-specs` (https://github.com/mdzunic/reallm-specs).
 
 Read in this order before touching anything:
 

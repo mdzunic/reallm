@@ -1,1 +1,10 @@
 .DS_Store
+node_modules/
+dist/
+.vitest/
+test-results/
+playwright-report/
+*.local
+.vscode/*
+!.vscode/extensions.json
+.idea/
