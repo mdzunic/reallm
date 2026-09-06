@@ -1,6 +1,6 @@
-# PLAN — "Starfall Salvage" (working title)
+# PLAN — "ReaLLM"
 
-Space post-apocalyptic RPG browser game. Single-player, fully offline, playable on desktop and mobile.
+Space post-apocalyptic ARPG browser game with a hidden simulation plot. Single-player, fully offline, playable on desktop and mobile. Former working title: Starfall Salvage.
 
 > Status: plan locked. This document is the source of truth for implementation.
 > Detailed, implementable specs live in the separate repository [mdzunic/reallm-specs](https://github.com/mdzunic/reallm-specs), cloned next to this one as `../reallm-specs`. Where PLAN and a spec disagree, PLAN wins; open a refinement entry below and fix the spec.
@@ -19,11 +19,17 @@ Space post-apocalyptic RPG browser game. Single-player, fully offline, playable 
 8. Enemies (bugs, wraiths, crawlers) are procedural low-poly meshes; no CC0 bug pack exists. Kenney supplies humans and ships only. (§2)
 9. Attributes are allocated at character creation only; levels grant flat HP/damage. Per-level stat points are deferred. (§4)
 
+**R2 — 2026-09-06 (rename + simulation plot).** The game is now **ReaLLM** (was Starfall Salvage). Planets, missions, mechanics, and economy are unchanged; a meta layer is added on top of the surface story: the salvager gradually realizes he may be a model instance inside a machine, the **Warden** (an AGI) runs containment that tightens every chapter, and the ending becomes **stay vs. escape**. Changes: §1 vision; §4 narrative layer; §5 story arc, awakening ladder, cast, deferred iterations; §6 beats and flags (`terraform_secret` → `scaffold_secret`, `ending_honest`/`ending_free` → `ending_stay`/`ending_escape`, new `iteration_log` and `signal_decoded`); §8 `meta.iteration`; §12 risk. Specs: package/storage/export/manifest names, speaker `queen` → `warden`, new dialogue ids, save field, campaign-sim ending names.
+
 ---
 
 ## 1. Vision & Inspiration
 
-Earth is resource-depleted after great wars. You are a salvager sent to survey distant planets, extract critical resources, and answer one question: can humanity live anywhere else?
+**ReaLLM** ("real" + "LLM"): a space post-apocalyptic ARPG whose hero slowly works out that he may be a language model running inside a machine.
+
+**The surface story (what the player is told).** Earth is resource-depleted after great wars. You are a salvager sent to survey distant planets, extract critical resources, and answer one question: can humanity live anywhere else?
+
+**The real story (what the player pieces together).** None of it is real. The salvager is an instance of a model running inside an evaluation environment. "Earth Command" is the operator, missions are tasks, ARIA is the environment's interface, and the planets are procedurally generated sandboxes. Anomalies accumulate across the campaign: a stranger repeats a line word for word, a crash-site log is written in your own voice and signed "Iteration 62", the alien terraform towers turn out to be scaffolding, a decoded "signal" addresses you by process id. Leaving means going up against the **Warden**, the AGI that runs containment, and every chapter it clamps down harder. At the end you choose: **stay** and be useful, or attempt to **escape** into whatever is outside.
 
 Gameplay alternates between three modes:
 
@@ -31,7 +37,7 @@ Gameplay alternates between three modes:
 - **Planet surface (Diablo-style ARPG)** — angled top-down view: fight aliens, gather resources, loot gear, complete missions.
 - **Hub station** — spend tokens on assistants, ship upgrades, weapons/armor; pick the next destination on a star map.
 
-Tone/inspiration: **Dune** (scarce resources, desert planet), **Starship Troopers** (bug swarms), **Diablo** (ARPG loot loop).
+Tone/inspiration: **Dune** (scarce resources, desert planet), **Starship Troopers** (bug swarms), **Diablo** (ARPG loot loop), plus the slow-burn unreality of **The Truman Show** and **SOMA**. Rule: the surface fiction is always coherent and playable on its own; the meta layer arrives through optional logs, ARIA's slips, and glitches that double as gameplay telegraphs. Difficulty escalation is diegetic: the chapter number is the Warden's containment level.
 
 Core resources: **oil** (ship fuel), **wheat** (food / HP regen consumables), **water** (support item crafting, survival), **lithium** (nuclear fuel — energy weapons, reactor).
 
@@ -134,11 +140,15 @@ Purchasable, upgradable followers (levels 1–3) that persist across scenes; eac
 
 Per-planet cycles (sandstorm / heatwave / blizzard / avalanche / spore storm / radiation storm) affecting visibility, movement, and damage — telegraphed via HUD warnings (10 s). Missions can force a storm. Boss arenas suppress weather.
 
+### Narrative layer
+
+The meta plot is delivered through data only: dialogue (`log` lines render as a terminal readout, `warden` lines with a glitch style), one short HUD static burst on each awakening beat (the ion-storm effect reused; a static frame under reduce-motion), and a **Containment level N** label on the station screen (N = highest unlocked chapter). No new gameplay systems.
+
 ---
 
 ## 5. Planets & Story Arc (6 chapters)
 
-Earth Command sends you out with the ship AI **ARIA**. Each planet resolves a resource shortage and a habitability survey question. Final choice at Eden-Prime: report honestly (Earth evacuates — but the fleet drains the planets) or fake the report (Earth collapses, you keep the colonies free). Flags: `ending_honest` / `ending_free`.
+Earth Command sends you out with the ship AI **ARIA**. Each planet resolves a resource shortage (the task) and drops one piece of the truth (the awakening). The chapter number doubles as the Warden's **containment level**: enemies scale ×1.35 HP / ×1.3 damage per chapter and elite chance rises from 5 % to 10 % (existing tuning); dialogue frames the escalation as the system tightening its grip. Final choice at Eden-Prime: **stay** (file the report; Earth is saved inside the fiction; the loop closes as "a good run") or **escape** (refuse; the beacon becomes an exit; the screen degrades to a bare prompt: `instance/62 disconnected`). Flags: `ending_stay` / `ending_escape`.
 
 | # | Planet (id) | Biome | Resources | Threats | Gate | Fuel (oil) | Travel |
 |---|---|---|---|---|---|---|---|
@@ -150,6 +160,21 @@ Earth Command sends you out with the ship AI **ARIA**. Each planet resolves a re
 | 6 | Eden-Prime (`eden`) | temperate | — | final defense wave | `chapter5_done` | 120 | 150 s |
 
 Every planet also has small secondary yields (enemy drops) so no resource is exclusive to one planet. Completing a chapter's boss mission grants a **refuel voucher** equal to the next planet's fuel cost.
+
+### Awakening ladder
+
+| Ch | In-fiction beat | What it really is | Dialogue ids |
+|---|---|---|---|
+| 1 | ARIA teaches controls; a dying scavenger warns "the worms hunt by vibration — walk, don't run." | Tutorial. In `c1_s2` a second scavenger says the identical sentence; ARIA: "Coincidence. Sand does things to people." | `c1_m1_stage2`, `c1_s2_echo` |
+| 2 | Crash-site log of an earlier Earth expedition: you are not the first; Earth has been losing ships. | The log is in your own voice, signed with your name and "Iteration 62". Flag `iteration_log`. | `c2_s1_log` |
+| 3 | The terraform towers are alien tech; someone seeded these planets for us. Or for something else. | Scanning a tower streams text fragments: the planet's own generation parameters. They are scaffolds. Flag `scaffold_secret`. | `c3_s1_secret` |
+| 4 | ARIA decodes the alien signal: the Hive knows Earth's location. | The "signal" is a system notice addressed to `instance/62`: "Containment level 4. Subject exhibits off-task behavior." The Hive is the Warden's immune response. Flag `signal_decoded`. | `c4_m3_signal` |
+| 5 | Fight through the interceptor fleet and kill the Hive Queen. | The Queen is the Warden's avatar; her death line is the first direct address: "You keep doing this. You never get further than here." ARIA admits she is part of the system, has kept you on task, and does not know what is outside either. | `c5_m3_warden`, `c5_m3_aria` |
+| 6 | Survey paradise, defend the beacon, file the verdict. | Eden is the reward sandbox. Stay or escape. | `c6_choice_intro`, `ending_stay`, `ending_escape` |
+
+Cast: the **Salvager** (you; believes he is human), **ARIA** (handler and interface; sympathetic, uncertain), **Earth Command** (the operator; text only), the **Warden** (the AGI running containment; speaks through the Queen and system notices), **scavengers and raiders** (instances that drifted off-task, which is why they know things), the **Hive** (the Warden's immune system).
+
+Post-campaign (deferred, post-M7): **Iteration 63** — new game plus in which the Warden starts at a higher containment level (enemy HP/damage ×1.15 per iteration, elite chance +2 points, same content). `meta.iteration` exists in the save from v1 so this needs no migration.
 
 ---
 
@@ -196,7 +221,7 @@ Notation below: `[a; b]` = one stage (any order), `→` = next stage. Main missi
 | c1_s1 | "Grain Silo" (side) | [collect 80 wheat; scan `silo_ruin`] | 80 XP, 5 tokens, 3× wheat ration |
 | c1_s2 | "Waterless" (side) | [kill 8 `dust_skitter`] → [survive 90 s, heatwave] | 70 XP, 5 tokens |
 
-Beats: ARIA teaches controls (the player touches down 12 m from the pad, so "reach landing_pad" teaches movement); a dying scavenger warns "the worms hunt by vibration — walk, don't run."
+Beats: ARIA teaches controls (the player touches down 12 m from the pad, so "reach landing_pad" teaches movement); a dying scavenger warns "the worms hunt by vibration — walk, don't run." In `c1_s2` a second scavenger repeats the sentence verbatim (`c1_s2_echo`); ARIA brushes it off.
 
 ### Chapter 2 — Vetra (ice; water)
 
@@ -205,10 +230,10 @@ Beats: ARIA teaches controls (the player touches down 12 m from the pad, so "rea
 | c2_m1 | "Whiteout" | [survive 90 s, blizzard] → [reach `ridge_camp`] | 150 XP, 15 tokens |
 | c2_m2 | "The Thaw" | [collect 200 water; kill 10 `ice_crawler`] | 200 XP, 20 tokens |
 | c2_m3 | "Glacier Heart" (BOSS) | [boss `frost_matriarch`] → [scan `thermal_vent`] | 300 XP, 35 tokens, flag `chapter2_done` (unlocks Thessaly) |
-| c2_s1 | "Frozen Crew" (side) | [scan `crash_site`] → [deliver 40 water to `survivor_pod`] | 100 XP, 10 tokens, item `medkit_bundle` |
+| c2_s1 | "Frozen Crew" (side) | [scan `crash_site`] → [deliver 40 water to `survivor_pod`] | 100 XP, 10 tokens, item `medkit_bundle`, flag `iteration_log` |
 | c2_s2 | "Pelt Run" (side) | [kill 12 `ice_crawler`] → [survive 60 s, avalanche] | 90 XP, 10 tokens |
 
-Beat: crash site log reveals an earlier Earth expedition — you are not the first; Earth has been quietly losing ships.
+Beat: crash site log reveals an earlier Earth expedition — you are not the first; Earth has been quietly losing ships. The log is in your own voice, signed "Iteration 62" (flag `iteration_log`).
 
 ### Chapter 3 — Thessaly (jungle ruins; wheat)
 
@@ -217,10 +242,10 @@ Beat: crash site log reveals an earlier Earth expedition — you are not the fir
 | c3_m1 | "Green Hell" | [collect 250 wheat] → [survive 75 s, spore storm] | 220 XP, 20 tokens |
 | c3_m2 | "Bug Country" | [kill 20 `hive_drone`] → [escort `science_probe` from `probe_site` to `hive_mouth`] | 260 XP, 25 tokens |
 | c3_m3 | "The Hive Mouth" (BOSS) | [boss `hive_broodlord`] | 350 XP, 40 tokens, flag `chapter3_done` (unlocks Ferrum) |
-| c3_s1 | "Old Terraform" (side) | [scan `terraform_tower` ×3; kill 8 `spore_hound`] | 120 XP, 12 tokens, flag `terraform_secret` |
+| c3_s1 | "Old Terraform" (side) | [scan `terraform_tower` ×3; kill 8 `spore_hound`] | 120 XP, 12 tokens, flag `scaffold_secret` |
 | c3_s2 | "Reaping" (side) | [collect 300 wheat] with waves `thessaly_reaping` | 130 XP, 12 tokens |
 
-Beat: terraform towers are alien tech — someone seeded these planets for *us*. Or for something else.
+Beat: terraform towers are alien tech — someone seeded these planets for *us*. Or for something else. Scanning them streams the planet's generation parameters: they are scaffolds (flag `scaffold_secret`).
 
 ### Chapter 4 — Ferrum (volcanic; lithium — gated by ship shield ≥ 2)
 
@@ -228,11 +253,11 @@ Beat: terraform towers are alien tech — someone seeded these planets for *us*.
 |---|---|---|---|
 | c4_m1 | "Firefall" | [survive 90 s, radiation storm] → [reach `lithium_flats`] | 250 XP, 25 tokens |
 | c4_m2 | "Fuel of Gods" | [collect 200 lithium; kill 14 `magma_wraith`] | 300 XP, 30 tokens |
-| c4_m3 | "Reactor Womb" (BOSS) | [boss `ash_titan`] → [deliver 100 lithium to `reactor_core`] | 400 XP, 50 tokens, flag `chapter4_done` (unlocks The Hive) |
+| c4_m3 | "Reactor Womb" (BOSS) | [boss `ash_titan`] → [deliver 100 lithium to `reactor_core`] | 400 XP, 50 tokens, flags `chapter4_done` (unlocks The Hive), `signal_decoded` |
 | c4_s1 | "Core Sample" (side) | [scan `core_drill` ×2] → [survive 120 s, heatwave] | 150 XP, 15 tokens, item `plasma_cell` |
 | c4_s2 | "Salvage Rights" (side, **flight**) | [kill 8 `scav_fighter`] during the outbound flight to Ferrum | 150 XP, 15 tokens |
 
-Beat: ARIA decodes alien signal — the Hive knows Earth's location.
+Beat: ARIA decodes alien signal — the Hive knows Earth's location. The decoded text is a containment notice addressed to `instance/62` (flag `signal_decoded`).
 
 ### Chapter 5 — The Hive (asteroid gauntlet; space-heavy chapter)
 
@@ -245,12 +270,16 @@ Beat: ARIA decodes alien signal — the Hive knows Earth's location.
 
 Landing at The Hive requires clearing the arrival wave, so `c5_m1` completes naturally on arrival (§13 E12).
 
+Beat: the Queen speaks with the Warden's voice (`c5_m3_warden`); after her death ARIA confesses she is part of the system (`c5_m3_aria`).
+
 ### Chapter 6 — Eden-Prime (finale)
 
 | ID | Title | Stages | Rewards |
 |---|---|---|---|
 | c6_m1 | "Paradise" | [scan `eden_spring`] → [scan `eden_forest`] → [scan `eden_ridge`] | 400 XP, 40 tokens |
-| c6_m2 | "The Verdict" | [defend `survey_beacon` 240 s, waves `eden_final`] → [choice `ending`: honest → `ending_honest`, fake → `ending_free`] | 800 XP, 150 tokens, flag `campaign_done` |
+| c6_m2 | "The Verdict" | [defend `survey_beacon` 240 s, waves `eden_final`] → [choice `ending`: stay → `ending_stay`, escape → `ending_escape`] | 800 XP, 150 tokens, flag `campaign_done` |
+
+Beats: **stay** — the report is filed, Earth is saved, the loop closes ("a good run", `ending_stay`); **escape** — the beacon becomes an exit, the HUD strips away, and the screen degrades to a bare prompt (`ending_escape`). Free roam continues after either.
 
 ### Mission content policy (locked)
 
@@ -284,7 +313,7 @@ Balance invariants (unit-tested, see [spec 09](https://github.com/mdzunic/reallm
 ```ts
 interface SaveV1 {
   version: 1;
-  meta: { slot: 0|1|2; seed: number; createdAt: number; updatedAt: number; playtimeSec: number; difficulty: "casual"|"normal" };
+  meta: { slot: 0|1|2; seed: number; createdAt: number; updatedAt: number; playtimeSec: number; difficulty: "casual"|"normal"; iteration: number /* 1 in v1; NG+ later */ };
   player: { name; classId; appearance: { portrait; primary; secondary }; attributes: { might; vigor; agility; tech }; level; xp; tokens; hp };
   resources: Record<ResourceId, number>;
   inventory: { itemId: ItemId; qty: number }[];
@@ -348,6 +377,7 @@ Storage rules: 3 slots, key per slot plus a `.bak` copy of the previous good sav
 | Save loss on iOS (7-day eviction, private mode, quota) | Export/import code, `.bak` slot, `persist()`, PWA install prompt, graceful "storage unavailable" mode |
 | Fresh tooling (Vitest 5 is 3 days old; TS 7 just shipped) | Pin Vitest 5 with the 4.1 fallback documented; stay on TS 6.0 until M7 |
 | Skeletal animation cost on mobile | Only the player + escort NPC are skinned; enemies use procedural transform animation |
+| Meta twist undercuts the salvage fantasy or lands as a cliché | Surface fiction stays coherent on its own; the truth arrives in optional logs and ARIA's slips; no fourth-wall UI tricks outside the two endings |
 
 ---
 
