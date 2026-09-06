@@ -9,7 +9,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 Read in this order before touching anything:
 
 1. `PLAN.md` — the locked design and source of truth. §13 is the edge-case register (E1…E26); every entry names the spec that implements it.
-2. `specs/README.md` — index, spec status, and the milestone implementation order.
+2. `specs/README.md` — index, spec status, and the milestone implementation order. `specs/` is a **separate git repository** (github.com/mdzunic/reallm-specs) checked out inside this working tree and ignored by this repo; after cloning this repo, clone that one into `specs/`. Commit spec changes there, code and PLAN changes here.
 3. The spec(s) for the milestone you are working on. Specs contain the canonical TypeScript interfaces, algorithms, numbered edge cases, the exact unit tests to write, and acceptance criteria.
 
 Rules for the docs themselves:
@@ -67,4 +67,4 @@ Toolchain pins: Node ≥ 22.12, Vite 8 (Rolldown; config key is `oxc`, not `esbu
 
 ## Milestones
 
-M0 bootstrap → M1 core (state machine, events, save, RNG, audio) → M2 menus/creation/station shell → M3 surface scene on Cinder-4 → M4 flight → M5 economy/shop + campaign simulation → M6 all six planets and both endings → M7 mobile tuning, PWA, balancing. Definition of done per milestone (spec 00 §11): `npm run check` green, acceptance verified on desktop and one phone and recorded in `docs/playtest-log.md`, spec statuses updated, git tag `mN`. The folder is not a git repository yet; `git init` is the first M0 task.
+M0 bootstrap → M1 core (state machine, events, save, RNG, audio) → M2 menus/creation/station shell → M3 surface scene on Cinder-4 → M4 flight → M5 economy/shop + campaign simulation → M6 all six planets and both endings → M7 mobile tuning, PWA, balancing. Definition of done per milestone (spec 00 §11): `npm run check` green, acceptance verified on desktop and one phone and recorded in `docs/playtest-log.md`, spec statuses updated, git tag `mN`. M0 starts from the current `main` (design docs only).
