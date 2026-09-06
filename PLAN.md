@@ -3,7 +3,7 @@
 Space post-apocalyptic ARPG browser game with a hidden simulation plot. Single-player, fully offline, playable on desktop and mobile. Former working title: Starfall Salvage.
 
 > Status: plan locked. This document is the source of truth for implementation.
-> Detailed, implementable specs live in the separate repository [mdzunic/reallm-specs](https://github.com/mdzunic/reallm-specs), cloned next to this one as `../reallm-specs`. Where PLAN and a spec disagree, PLAN wins; open a refinement entry below and fix the spec.
+> Detailed, implementable specs live in the separate repository [mdzunic/reallm-specs](https://github.com/mdzunic/reallm-specs) under `specs/` (cloned next to this one as `../reallm-specs`); each is a factory work order with `id: SPEC-NNN` in its frontmatter. Where PLAN and a spec disagree, PLAN wins; open a refinement entry below and fix the spec.
 
 ### Refinement log
 
@@ -20,6 +20,8 @@ Space post-apocalyptic ARPG browser game with a hidden simulation plot. Single-p
 9. Attributes are allocated at character creation only; levels grant flat HP/damage. Per-level stat points are deferred. (§4)
 
 **R2 — 2026-09-06 (rename + simulation plot).** The game is now **ReaLLM** (was Starfall Salvage). Planets, missions, mechanics, and economy are unchanged; a meta layer is added on top of the surface story: the salvager gradually realizes he may be a model instance inside a machine, the **Warden** (an AGI) runs containment that tightens every chapter, and the ending becomes **stay vs. escape**. Changes: §1 vision; §4 narrative layer; §5 story arc, awakening ladder, cast, deferred iterations; §6 beats and flags (`terraform_secret` → `scaffold_secret`, `ending_honest`/`ending_free` → `ending_stay`/`ending_escape`, new `iteration_log` and `signal_decoded`); §8 `meta.iteration`; §12 risk. Specs: package/storage/export/manifest names, speaker `queen` → `warden`, new dialogue ids, save field, campaign-sim ending names.
+
+**R3 — 2026-09-06 (factory spec format + Playwright).** Specs are now build-factory work orders: `specs/NNN-slug.md` in mdzunic/reallm-specs with frontmatter `id: SPEC-NNN` matching the GitHub Issue title, then `## Why`, `## Acceptance criteria` (checkboxes), `## Out of scope`, and the detailed design under `## Reference`. Numbering shifted by one (SPEC-000 is the roadmap; old spec NN is SPEC-(NN+1)) and every cross-reference in this file now uses SPEC ids. `@playwright/test` joins the dev toolchain because the factory's QA gate runs an e2e suite; it is test tooling, not a runtime dependency. (§2, §11, §13, §14)
 
 ---
 
@@ -53,7 +55,7 @@ Core resources: **oil** (ship fuel), **wheat** (food / HP regen consumables), **
 | Audio | **Howler.js** | `howler ^2.2.4`, `@types/howler` | Small; solves iOS/Android audio-unlock |
 | UI | **Plain HTML/CSS overlay** (no framework) | — | Responsive menus/HUD, cheap on mobile |
 | Save | **localStorage** (versioned schema) | — | Fully offline; save size is < 100 KB |
-| Tests | **Vitest** | `vitest ^5.0.0` (released 2026-09-03; fall back to `^4.1.11` only if a blocking bug appears) | Unit-test pure game logic |
+| Tests | **Vitest** + **Playwright** | `vitest ^5.0.0` (released 2026-09-03; fall back to `^4.1.11` only if a blocking bug appears), `@playwright/test` latest | Unit-test pure game logic; a headless Chromium e2e suite (smoke + the factory's per-spec QA tests) |
 | Offline shell | `vite-plugin-pwa` (**M7, build-time only**) | `^1.3.0` | Service worker + manifest = real offline + installable = exempt from Safari 7-day storage eviction |
 | Assets | **Procedural** (planets, effects, UI, **enemies**) + **Kenney.nl CC0** (humans: Mini Characters, 32 animations, GLB; ships/props: Space Kit, glTF) | — | No artist needed |
 
@@ -300,7 +302,7 @@ Beats: **stay** — the report is filed, Earth is saved, the loop closes ("a goo
 
 Total sink ≈ **2,010** tokens (ship 1,095 · gear 500 · companions 415), so a completionist affords ~62 % of everything and specialization is forced. XP curve: `xpToNext(L) = 100 + 50·L` (11,400 XP to reach L20), level cap 30.
 
-Balance invariants (unit-tested, see [spec 09](https://github.com/mdzunic/reallm-specs/blob/main/09-economy-progression.md)):
+Balance invariants (unit-tested, see [SPEC-010](https://github.com/mdzunic/reallm-specs/blob/main/specs/010-economy-and-progression.md)):
 
 - Recommended loadout for chapter N costs ≤ tokens guaranteed by the end of chapter N−1 counting **main missions only** and **mission XP only** (worst case). Ferrum's shield-2 gate (140 tokens) is 39 % of that worst case (360).
 - Base cargo cap (400) ≥ largest collect objective (300) + 100.
@@ -358,7 +360,7 @@ Storage rules: 3 slots, key per slot plus a `.bak` copy of the previous good sav
 
 ## 11. Testing & Verification
 
-- `npm run typecheck` (tsc --noEmit), `npm run test` (Vitest), `npm run build && npm run preview` each milestone.
+- `npm run typecheck` (tsc --noEmit), `npm run test` (Vitest), `npm run e2e` (Playwright, headless Chromium), `npm run build && npm run preview` each milestone.
 - Unit tests target pure systems: economy math, save migration/corruption, combat formulas, mission runtime, seeded level generation determinism.
 - **Content invariants** test: every id referenced by missions/planets/loot exists; requirement graph is acyclic; each planet layout contains every POI its missions need (with counts); kill targets exist in the planet spawn table; flight missions fit inside the flight duration.
 - **Campaign simulation** test: drives the mission runtime and economy with a scripted main-path player and asserts every gate (flags, shield-2, fuel) is satisfiable with guaranteed rewards only.
@@ -371,7 +373,7 @@ Storage rules: 3 slots, key per slot plus a `.bak` copy of the previous good sav
 | Risk | Mitigation |
 |---|---|
 | Scope creep (biggest risk) | Data-driven content, hard milestone gates; M3/M4 are the proof-of-fun checkpoints |
-| Mobile perf with Three.js | Pooling, instancing, quality presets from day one (M0); perf budgets in [spec 14](https://github.com/mdzunic/reallm-specs/blob/main/14-mobile-performance.md) |
+| Mobile perf with Three.js | Pooling, instancing, quality presets from day one (M0); perf budgets in [SPEC-015](https://github.com/mdzunic/reallm-specs/blob/main/specs/015-mobile-performance-pwa.md) |
 | First-person feel without complex physics | Rail flight model only; cockpit HUD sells immersion |
 | Asset consistency | Kenney CC0 families (Space Kit, Mini Characters) for humans/ships; enemies and props procedural |
 | Save loss on iOS (7-day eviction, private mode, quota) | Export/import code, `.bak` slot, `persist()`, PWA install prompt, graceful "storage unavailable" mode |
@@ -387,35 +389,35 @@ Each entry names the owning spec. "Casual" = casual difficulty.
 
 | # | Situation | Decision | Spec |
 |---|---|---|---|
-| E1 | Player can't afford fuel to any unlocked planet | On entering the station, `oil = max(oil, cheapest unlocked jump)`; ARIA line "Earth Command wired an emergency ration". Boss missions also grant a refuel voucher | 09 |
-| E2 | Player spent all tokens and can't meet the shield-2 gate | Completed missions replayable at 50 % rewards; invariant guarantees worst-case tokens ≥ loadout | 09 |
-| E3 | Cargo full during a collect objective | Base cap 400 ≥ any objective; pickups stop with a "CARGO FULL" toast; invariant tested | 09 |
-| E4 | Death on the surface | Respawn at pad, full HP, 2 s invulnerability, −10 % carried resources (0 % casual), timed/escort/defend stages restart, enemies within 40 m of pad despawn, boss resets | 11 |
-| E5 | Death in flight | Emergency recall to station; fuel lost; cargo kept; flight mission stage resets | 12 |
-| E6 | Tab hidden / phone locked mid-combat | Loop pauses, audio suspends, accumulator reset on resume (no catch-up), best-effort save on `pagehide` | 01, 06 |
-| E7 | WebGL context lost (iOS memory pressure) | Pause + overlay; on restore, renderer re-inits; if not restored in 5 s, offer reload (save is at last safe point) | 01 |
-| E8 | localStorage unavailable/quota exceeded/corrupt | Boot in "no-save" mode with a warning; quota → drop `.bak` and retry once; corrupt → offer `.bak` or reset; export code always available | 06 |
-| E9 | Save from a newer app version | Refuse to load; show version + export option | 06 |
-| E10 | Stuck keys after alt-tab / focus loss | `blur` and `visibilitychange` release all actions; `pointercancel` releases touch | 04 |
-| E11 | Multi-touch: joystick + fire simultaneously | Per-pointer ownership by `pointerId`; left zone = move, right zone = aim/fire | 04 |
-| E12 | Flight kill objective not met at arrival | Landing blocked until the arrival wave is cleared ("can't land with hostiles on our tail"); waves spawn ≥ 2× required kills | 12 |
-| E13 | Escort follower dies / defend POI destroyed | Stage restarts (follower respawns at `from`, POI HP refills) with a toast; no mission failure state | 11 |
-| E14 | Kill objective but the enemy type doesn't spawn nearby | Spawn director triples the weight of objective enemies and guarantees one spawn per 20 s | 11 |
-| E15 | Boss fight during a storm | Boss arena suppresses weather; forced mission weather ends when the boss stage starts | 11 |
-| E16 | Deliver objective with insufficient held resources | POI shows "need N more"; player can leave and return; delivery consumes resources atomically | 11 |
-| E17 | POI unreachable due to procedural obstacles | Layout keeps a clear corridor (8 m) from the pad to every POI and re-rolls the sub-seed if flood-fill fails | 11 |
-| E18 | Player accepts several missions on one planet | All accepted missions for the planet are active in parallel; HUD tracks one pinned mission; counters are per mission | 11 |
-| E19 | Reload mid-mission | Active missions persist with stage + counters; timed objectives restart from 0 | 06, 11 |
-| E20 | Level-up during combat | Tokens/HP apply immediately; toast only (no modal) | 09 |
-| E21 | Audio blocked until user gesture (iOS) | Boot shows "Tap to start"; the tap unlocks audio, requests wake lock, and (Android) fullscreen | 05 |
-| E22 | Portrait phone | Rotate prompt in gameplay scenes; menus stay usable | 14 |
-| E23 | 120 Hz displays / very slow frames | Fixed 60 Hz update, max 5 steps per frame, frame delta clamped to 250 ms | 01 |
-| E24 | Both endings in one save | Impossible by design; `campaign_done` locks `c6_m2`; free roam continues | 08, 11 |
-| E25 | Inventory full on gear drop | Gear stays on the ground 60 s with a toast; resources have their own cap | 10 |
-| E26 | Story flag or item referenced but never defined | Content-invariant test fails CI | 08, 15 |
+| E1 | Player can't afford fuel to any unlocked planet | On entering the station, `oil = max(oil, cheapest unlocked jump)`; ARIA line "Earth Command wired an emergency ration". Boss missions also grant a refuel voucher | SPEC-010 |
+| E2 | Player spent all tokens and can't meet the shield-2 gate | Completed missions replayable at 50 % rewards; invariant guarantees worst-case tokens ≥ loadout | SPEC-010 |
+| E3 | Cargo full during a collect objective | Base cap 400 ≥ any objective; pickups stop with a "CARGO FULL" toast; invariant tested | SPEC-010 |
+| E4 | Death on the surface | Respawn at pad, full HP, 2 s invulnerability, −10 % carried resources (0 % casual), timed/escort/defend stages restart, enemies within 40 m of pad despawn, boss resets | SPEC-012 |
+| E5 | Death in flight | Emergency recall to station; fuel lost; cargo kept; flight mission stage resets | SPEC-013 |
+| E6 | Tab hidden / phone locked mid-combat | Loop pauses, audio suspends, accumulator reset on resume (no catch-up), best-effort save on `pagehide` | SPEC-002, SPEC-007 |
+| E7 | WebGL context lost (iOS memory pressure) | Pause + overlay; on restore, renderer re-inits; if not restored in 5 s, offer reload (save is at last safe point) | SPEC-002 |
+| E8 | localStorage unavailable/quota exceeded/corrupt | Boot in "no-save" mode with a warning; quota → drop `.bak` and retry once; corrupt → offer `.bak` or reset; export code always available | SPEC-007 |
+| E9 | Save from a newer app version | Refuse to load; show version + export option | SPEC-007 |
+| E10 | Stuck keys after alt-tab / focus loss | `blur` and `visibilitychange` release all actions; `pointercancel` releases touch | SPEC-005 |
+| E11 | Multi-touch: joystick + fire simultaneously | Per-pointer ownership by `pointerId`; left zone = move, right zone = aim/fire | SPEC-005 |
+| E12 | Flight kill objective not met at arrival | Landing blocked until the arrival wave is cleared ("can't land with hostiles on our tail"); waves spawn ≥ 2× required kills | SPEC-013 |
+| E13 | Escort follower dies / defend POI destroyed | Stage restarts (follower respawns at `from`, POI HP refills) with a toast; no mission failure state | SPEC-012 |
+| E14 | Kill objective but the enemy type doesn't spawn nearby | Spawn director triples the weight of objective enemies and guarantees one spawn per 20 s | SPEC-012 |
+| E15 | Boss fight during a storm | Boss arena suppresses weather; forced mission weather ends when the boss stage starts | SPEC-012 |
+| E16 | Deliver objective with insufficient held resources | POI shows "need N more"; player can leave and return; delivery consumes resources atomically | SPEC-012 |
+| E17 | POI unreachable due to procedural obstacles | Layout keeps a clear corridor (8 m) from the pad to every POI and re-rolls the sub-seed if flood-fill fails | SPEC-012 |
+| E18 | Player accepts several missions on one planet | All accepted missions for the planet are active in parallel; HUD tracks one pinned mission; counters are per mission | SPEC-012 |
+| E19 | Reload mid-mission | Active missions persist with stage + counters; timed objectives restart from 0 | SPEC-007, SPEC-012 |
+| E20 | Level-up during combat | Tokens/HP apply immediately; toast only (no modal) | SPEC-010 |
+| E21 | Audio blocked until user gesture (iOS) | Boot shows "Tap to start"; the tap unlocks audio, requests wake lock, and (Android) fullscreen | SPEC-006 |
+| E22 | Portrait phone | Rotate prompt in gameplay scenes; menus stay usable | SPEC-015 |
+| E23 | 120 Hz displays / very slow frames | Fixed 60 Hz update, max 5 steps per frame, frame delta clamped to 250 ms | SPEC-002 |
+| E24 | Both endings in one save | Impossible by design; `campaign_done` locks `c6_m2`; free roam continues | SPEC-009, SPEC-012 |
+| E25 | Inventory full on gear drop | Gear stays on the ground 60 s with a toast; resources have their own cap | SPEC-011 |
+| E26 | Story flag or item referenced but never defined | Content-invariant test fails CI | SPEC-009, SPEC-016 |
 
 ---
 
 ## 14. Spec index
 
-See the [specs index](https://github.com/mdzunic/reallm-specs/blob/main/README.md) in the reallm-specs repository (local checkout: `../reallm-specs/README.md`). Specs are numbered by dependency order and tagged with the milestone that implements them.
+See the roadmap [SPEC-000](https://github.com/mdzunic/reallm-specs/blob/main/specs/000-roadmap.md) in the reallm-specs repository (local checkout: `../reallm-specs/specs/000-roadmap.md`). Each spec is a factory work order `specs/NNN-slug.md` with `id: SPEC-NNN` in its frontmatter; the GitHub Issue that triggers its build carries the same id in its title. Old two-digit spec numbers map to SPEC-(NN+1); SPEC-000 is the roadmap.
