@@ -23,6 +23,8 @@ Space post-apocalyptic ARPG browser game with a hidden simulation plot. Single-p
 
 **R3 — 2026-09-06 (factory spec format + Playwright).** Specs are now build-factory work orders: `specs/NNN-slug.md` in mdzunic/reallm-specs with frontmatter `id: SPEC-NNN` matching the GitHub Issue title, then `## Why`, `## Acceptance criteria` (checkboxes), `## Out of scope`, and the detailed design under `## Reference`. Numbering shifted by one (SPEC-000 is the roadmap; old spec NN is SPEC-(NN+1)) and every cross-reference in this file now uses SPEC ids. `@playwright/test` joins the dev toolchain because the factory's QA gate runs an e2e suite; it is test tooling, not a runtime dependency. (§2, §11, §13, §14)
 
+**R4 — 2026-09-06 (dependency audit).** Every spec's `depends_on` now lists what its interfaces and acceptance criteria actually consume (event bus for the renderer, settings store for input and audio, `computePlayerStats` for the creation preview, the HUD classes for both scenes), and SPEC-000 orders the queue topologically: 001, 004, 002, 008, 009, 007, 006, 005, 003, 010, 011, 014, 012, 013, 015, 016. PLAN milestones stay the playable checkpoints of §10; because whole specs build at once, the station/menu spec (SPEC-014, checkpoint M2) builds after economy (SPEC-010) and combat (SPEC-011). (§10, §14)
+
 ---
 
 ## 1. Vision & Inspiration
@@ -420,4 +422,4 @@ Each entry names the owning spec. "Casual" = casual difficulty.
 
 ## 14. Spec index
 
-See the roadmap [SPEC-000](https://github.com/mdzunic/reallm-specs/blob/main/specs/000-roadmap.md) in the reallm-specs repository (local checkout: `../reallm-specs/specs/000-roadmap.md`). Each spec is a factory work order `specs/NNN-slug.md` with `id: SPEC-NNN` in its frontmatter; the GitHub Issue that triggers its build carries the same id in its title. Old two-digit spec numbers map to SPEC-(NN+1); SPEC-000 is the roadmap.
+See the roadmap [SPEC-000](https://github.com/mdzunic/reallm-specs/blob/main/specs/000-roadmap.md) in the reallm-specs repository (local checkout: `../reallm-specs/specs/000-roadmap.md`). Each spec is a factory work order `specs/NNN-slug.md` with `id: SPEC-NNN` in its frontmatter; the GitHub Issue that triggers its build carries the same id in its title. Old two-digit spec numbers map to SPEC-(NN+1); SPEC-000 is the roadmap. Build order follows `depends_on` (a topological sort listed in SPEC-000), not the milestone numbers, which remain the playable checkpoints.
