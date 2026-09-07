@@ -93,9 +93,11 @@ const game = new Game({
 });
 running = game;
 
-/** Escape toggles the pause menu of a pausable scene (SPEC-003 §4.5, D-38). */
+/** Escape and P toggle the pause menu of a pausable scene (SPEC-003 §4.5, D-38, SPEC-014 AC-82). */
 function onEscape(event: KeyboardEvent): void {
-  if (event.key !== 'Escape') return;
+  if (event.key !== 'Escape' && event.code !== 'KeyP') return;
+  // P while typing a name is a letter, not a pause (Escape stays a pause).
+  if (event.code === 'KeyP' && (event.target instanceof HTMLInputElement || event.target instanceof HTMLTextAreaElement)) return;
   if (game.scenes.paused) game.requestResume();
   else game.scenes.pause();
 }

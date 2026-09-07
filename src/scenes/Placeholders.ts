@@ -115,7 +115,7 @@ class PlaceholderScene<K extends SceneId> implements Scene<K> {
     // single continuous piece.
     if (this.music !== undefined) this.services.audio.music(this.music);
     if (this.pausable) {
-      const menu = new PauseMenu(uiRoot(), () => this.services.requestResume());
+      const menu = new PauseMenu(this.services, () => this.services.requestResume());
       this.#pauseMenu = menu;
       this.disposer.add(() => menu.dispose());
       // Quitting straight out of the pause menu never calls `resume()`, so the

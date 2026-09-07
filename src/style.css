@@ -880,3 +880,142 @@ button.slot-button {
     transition: none;
   }
 }
+
+/* --------------------------------------------------------------- settings */
+.settings {
+  position: absolute;
+  inset: max(10px, env(safe-area-inset-top)) auto max(10px, env(safe-area-inset-bottom)) 50%;
+  transform: translateX(-50%);
+  width: min(520px, 100vw - 20px);
+  overflow-y: auto;
+  z-index: 45;
+}
+
+.settings.is-hidden {
+  display: none;
+}
+
+.settings-body {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 14px;
+}
+
+.settings-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.settings-title,
+.settings-subtitle {
+  margin: 0;
+  font-weight: 700;
+}
+
+.settings-section {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  border-top: 1px solid var(--panel-edge);
+  padding-top: 10px;
+}
+
+.settings-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+  border-top: 1px solid var(--panel-edge);
+  padding-top: 10px;
+}
+
+.settings-section .settings-row {
+  border-top: none;
+  padding-top: 0;
+}
+
+.settings-row input[type='range'] {
+  flex: 1;
+  max-width: 260px;
+  min-height: 44px;
+}
+
+.settings-row input[type='checkbox'] {
+  width: 28px;
+  height: 28px;
+  margin: 8px;
+}
+
+.settings-seg {
+  display: flex;
+  gap: 4px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.ui-btn.seg.is-active {
+  background: #24435e;
+  border-color: var(--shield);
+}
+
+.settings-note {
+  color: var(--ink-dim);
+}
+
+.settings-code {
+  flex: 1;
+  min-width: 0;
+  background: #0a0f15;
+  color: var(--ink);
+  border: 1px solid var(--panel-edge);
+  border-radius: 6px;
+  font: inherit;
+  padding: 6px;
+}
+
+.settings-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.settings-version {
+  margin: 0;
+  color: var(--ink-dim);
+}
+
+.settings-version a {
+  color: var(--shield);
+}
+
+/* ------------------------------------------------------------- pause menu */
+.pause-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-width: 220px;
+}
+
+.pause-sheet {
+  margin-top: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  text-align: left;
+}
+
+.pause-sheet.is-hidden {
+  display: none;
+}
+
+.pause-sheet-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.pause-sheet-what {
+  color: var(--ink-dim);
+}
