@@ -13,12 +13,12 @@
 // with `#private` fields could ever be.
 import type { Assets } from '@/core/Assets';
 import type { Audio } from '@/core/Audio';
+import type { EmitArgs, GameEvents } from '@/core/Events';
 import type { Input } from '@/core/Input';
 import type { Loop } from '@/core/Loop';
 import type { Renderer } from '@/core/Renderer';
 import type { SaveStore } from '@/core/Save';
 import type { SettingsStore } from '@/core/Settings';
-import type { EmitArgs, GameEvents } from '@/core/Events';
 import type { SceneId, SceneManager, SceneParams, TransitionUi } from '@/core/StateMachine';
 
 /** The canonical event map and its emit-argument helper now live in `core/Events.ts`. */
