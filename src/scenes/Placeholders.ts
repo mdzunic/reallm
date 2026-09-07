@@ -22,6 +22,10 @@ import { log } from '@/core/Log';
 import type { GameServices } from '@/core/Services';
 import type { Renderer } from '@/core/Renderer';
 import { ALLOWED_TRANSITIONS, type Scene, type SceneFactory, type SceneId, type SceneParams } from '@/core/StateMachine';
+import { cargoCap, maxHp } from '@/core/Save';
+import { cumulativeXp, xpToNext } from '@/systems/Progression';
+import { uiLayers } from '@/ui/dom';
+import { Hud } from '@/ui/Hud';
 import { PauseMenu } from '@/ui/PauseMenu';
 import { SavePanel } from '@/ui/SavePanel';
 import { TouchControls } from '@/ui/TouchControls';
@@ -86,6 +90,7 @@ class PlaceholderScene<K extends SceneId> implements Scene<K> {
   protected readonly music: MusicId | undefined;
   #spin: THREE.Object3D | null = null;
   #pauseMenu: PauseMenu | null = null;
+  #hud: Hud | null = null;
   #elapsed = 0;
   #renders = 0;
 
@@ -122,6 +127,14 @@ class PlaceholderScene<K extends SceneId> implements Scene<K> {
       const touch = new TouchControls(uiRoot(), this.services.input, this.services.settings);
       touch.show(this.id === 'flight' ? 'flight' : 'surface');
       this.disposer.add(() => touch.dispose());
+      // SPEC-014 §4.5: the two gameplay scenes carry the HUD. The placeholder
+      // feeds it the save's own numbers each update; SPEC-012/013 replace the
+      // feed, not the component. Its flush runs from the frame loop's
+      // `ui:flush` phase, never from here.
+      const hud = new Hud(uiLayers(uiRoot()), this.id === 'flight' ? 'flight' : 'surface');
+      this.#hud = hud;
+      this.disposer.add(() => hud.dispose());
+      this.disposer.add(this.services.events.on('player:damaged', () => hud.damageFlash(), this));
     }
   }
 
@@ -132,6 +145,35 @@ class PlaceholderScene<K extends SceneId> implements Scene<K> {
   update(dt: number): void {
     this.#elapsed += dt;
     if (this.#spin) this.#spin.rotation.y = this.#elapsed * 0.6;
+    // SPEC-014 AC-82: the touch pause button pauses through the input action.
+    // Keyboard Escape/P stay with the composition root's toggle — consuming
+    // the action here too would re-pause on the same keypress that resumed.
+    if (this.pausable && this.services.input.state.scheme === 'touch' && this.services.input.state.buttons.pause.justPressed) {
+      this.services.scenes.pause();
+    }
+    this.#feedHud();
+  }
+
+  /** The save's numbers into the HUD model, in place (no allocations in update). */
+  #feedHud(): void {
+    const hud = this.#hud;
+    const data = this.services.save.current;
+    if (hud === null || data === null) return;
+    const model = hud.model;
+    const { player } = data;
+    model.hp[0] = player.hp;
+    model.hp[1] = maxHp(player.classId, player.attributes, player.level);
+    model.xp[0] = player.xp - cumulativeXp(player.level);
+    model.xp[1] = xpToNext(player.level);
+    model.level = player.level;
+    model.tokens = player.tokens;
+    model.resources.oil = data.resources.oil;
+    model.resources.wheat = data.resources.wheat;
+    model.resources.water = data.resources.water;
+    model.resources.lithium = data.resources.lithium;
+    // The tier cap only; the quartermaster bonus is Economy's and arrives with
+    // the scene that owns an Economy instance (SPEC-012).
+    model.cargoCap = cargoCap(data.ship);
   }
 
   render(renderer: Renderer): void {

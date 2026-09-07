@@ -3,14 +3,16 @@
 // dead-end error panel. Implements `TransitionUi`, which `core/StateMachine.ts`
 // declares because `core/` must not import `ui/` (D-17).
 import type { TransitionUi } from '@/core/StateMachine';
-import { el, testId } from '@/ui/dom';
+import { el, testId, uiLayers } from '@/ui/dom';
 
 export class TransitionOverlay implements TransitionUi {
+  readonly #root: HTMLElement;
   readonly #fade: HTMLDivElement;
   readonly #loading: HTMLDivElement;
   readonly #error: HTMLDivElement;
 
   constructor(root: HTMLElement) {
+    this.#root = root;
     this.#fade = testId(el('div', 'overlay-fade'), 'transition-fade');
     this.#fade.setAttribute('aria-hidden', 'true');
 
@@ -31,6 +33,16 @@ export class TransitionOverlay implements TransitionUi {
   async fadeIn(ms: number): Promise<void> {
     await this.#fadeTo(1, 0, ms);
     this.#fade.classList.remove('is-active');
+  }
+
+  /**
+   * Driven by `Game` after render, once a frame (SPEC-002's `ui:flush` phase
+   * probes for exactly this method): the batched UI flush of SPEC-014 §2 —
+   * every mounted HUD diffs its model and touches the DOM here, never in
+   * `update()`.
+   */
+  flush(): void {
+    uiLayers(this.#root).flush();
   }
 
   showLoading(): void {

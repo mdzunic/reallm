@@ -590,3 +590,190 @@ button.slot-button {
     animation: none;
   }
 }
+
+/* -------------------------------------------------------------------- HUD */
+/* Safe-area padded corners (AC-60); the whole layer never selects (AC-67). */
+.hud {
+  position: absolute;
+  inset: 0;
+  user-select: none;
+  -webkit-user-select: none;
+  pointer-events: none;
+}
+
+.hud-tl,
+.hud-tr,
+.hud-tc,
+.hud-bl,
+.hud-br,
+.hud-bc {
+  position: absolute;
+  display: flex;
+  gap: 6px;
+}
+
+.hud-tl {
+  top: max(10px, env(safe-area-inset-top));
+  left: max(10px, env(safe-area-inset-left));
+  flex-direction: column;
+}
+
+.hud-tr {
+  top: max(10px, env(safe-area-inset-top));
+  right: max(10px, env(safe-area-inset-right));
+  flex-direction: column;
+  align-items: flex-end;
+}
+
+.hud-tc {
+  top: max(10px, env(safe-area-inset-top));
+  left: 50%;
+  transform: translateX(-50%);
+  flex-direction: column;
+  align-items: center;
+}
+
+.hud-bl {
+  bottom: max(10px, env(safe-area-inset-bottom));
+  left: max(10px, env(safe-area-inset-left));
+}
+
+.hud-br {
+  bottom: max(10px, env(safe-area-inset-bottom));
+  right: max(10px, env(safe-area-inset-right));
+  flex-direction: column;
+  align-items: flex-end;
+}
+
+.hud-bc {
+  bottom: max(48px, calc(env(safe-area-inset-bottom) + 38px));
+  left: 50%;
+  transform: translateX(-50%);
+}
+
+.bar-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.bar {
+  width: 140px;
+  height: 10px;
+  border-radius: 5px;
+  background: rgba(255, 255, 255, 0.12);
+  overflow: hidden;
+}
+
+/* Bars move with transform only — no layout, no paint area growth (AC-61). */
+.bar-fill {
+  width: 100%;
+  height: 100%;
+  transform-origin: left center;
+  transform: scaleX(0);
+}
+
+.bar-hp { background: var(--hp); }
+.bar-xp { background: var(--good); height: 100%; }
+.bar-shield { background: var(--shield); }
+.bar-hull { background: var(--warn); }
+.bar-boss { background: var(--hp); }
+
+.bar-row:has(.bar-xp) .bar { height: 4px; }
+
+.bar-text,
+.hud-level,
+.hud-tokens {
+  font-size: 14px;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.8);
+}
+
+.res {
+  display: flex;
+  gap: 4px;
+  align-items: center;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.8);
+}
+
+/* At cap the counter goes red — with the glyph beside it, never hue alone. */
+.res.at-cap .res-count {
+  color: var(--hp);
+  font-weight: 700;
+}
+
+.hud-weather {
+  padding: 4px 12px;
+  border-radius: 6px;
+  background: rgba(0, 0, 0, 0.55);
+  color: var(--warn);
+}
+
+.hud-objective {
+  padding: 4px 12px;
+  border-radius: 6px;
+  background: rgba(0, 0, 0, 0.55);
+  white-space: nowrap;
+}
+
+.hud-consumable {
+  padding: 8px 12px;
+}
+
+.hud-interact {
+  padding: 6px 12px;
+  border-radius: 6px;
+  background: rgba(0, 0, 0, 0.55);
+}
+
+.hud .is-hidden {
+  display: none;
+}
+
+/* AC-59: above the touch buttons, which sit in the same corner at 56 px. */
+.minimap {
+  width: 96px;
+  height: 96px;
+  border: 1px solid var(--panel-edge);
+  border-radius: 6px;
+  background: rgba(0, 0, 0, 0.45);
+  margin-bottom: 132px;
+}
+
+/* AC-63: the damage vignette; flashes for 150 ms when the class lands. */
+.hud-vignette {
+  position: absolute;
+  inset: 0;
+  box-shadow: inset 0 0 60px 20px var(--hp);
+  opacity: 0;
+  transition: opacity 60ms linear;
+}
+
+.hud-vignette.is-flashing {
+  opacity: 0.8;
+}
+
+/* AC-64 / AC-65: the two pulses ride the same keyframes. */
+.hud.is-low-hp .bar-hp {
+  animation: hud-pulse 1s ease-in-out infinite;
+}
+
+.hud.is-cargo-full .res.at-cap {
+  animation: hud-pulse 1s ease-in-out infinite;
+}
+
+@keyframes hud-pulse {
+  50% { opacity: 0.4; }
+}
+
+/* AC-66: static versions — the state stays visible, nothing moves. */
+@media (prefers-reduced-motion: reduce) {
+  .hud.is-low-hp .bar-hp,
+  .hud.is-cargo-full .res.at-cap {
+    animation: none;
+    outline: 1px solid var(--hp);
+  }
+
+  .hud-vignette {
+    transition: none;
+  }
+}
