@@ -126,6 +126,28 @@ function fail(reason: FailReason): Fail {
 }
 
 /**
+ * The requirements of `reqs` this save does not meet, in the given order. A
+ * free function as well as a method: the star map and the mission board
+ * (SPEC-014) read requirement state for saves the shop's `Economy` instance
+ * does not wrap, and the check itself only ever reads the save.
+ */
+export function missingRequirements(save: SaveV1, reqs: readonly Requirement[]): Requirement[] {
+  const progress = save.progress;
+  return reqs.filter((requirement) => {
+    switch (requirement.kind) {
+      case 'flag':
+        return !progress.flags.includes(requirement.flag);
+      case 'mission':
+        return !(progress.missionsDone as readonly string[]).includes(requirement.id);
+      case 'ship':
+        return save.ship[requirement.system] < requirement.tier;
+      case 'level':
+        return save.player.level < requirement.level;
+    }
+  });
+}
+
+/**
  * §4.2: `max(1, ceil(tokens × (1 − d)))`. The floor of 1 applies to a price,
  * not to a freebie — ARIA costs 0 and a recipe costs no tokens at all, and
  * neither becomes a 1-token purchase because a discount was applied to it.
@@ -489,19 +511,7 @@ export class Economy {
 
   /** The requirements of `reqs` this save does not meet, in the given order. */
   missingRequirements(reqs: readonly Requirement[]): Requirement[] {
-    const progress = this.#save.progress;
-    return reqs.filter((requirement) => {
-      switch (requirement.kind) {
-        case 'flag':
-          return !progress.flags.includes(requirement.flag);
-        case 'mission':
-          return !(progress.missionsDone as readonly string[]).includes(requirement.id);
-        case 'ship':
-          return this.#save.ship[requirement.system] < requirement.tier;
-        case 'level':
-          return this.#save.player.level < requirement.level;
-      }
-    });
+    return missingRequirements(this.#save, reqs);
   }
 
   /** §4.6. `needOil` is the shortfall, which is exactly what a subsidy grants. */
