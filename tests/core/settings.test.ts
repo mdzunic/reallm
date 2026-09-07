@@ -1,8 +1,19 @@
-// Persisted settings (SPEC-002 §6.1, §4.8). Storage is injected, so quota
-// failures, private mode and corrupt content are all reachable here (02-h).
+// Persisted settings (SPEC-002 §6.1, §4.8; SPEC-007 §3, §6). Storage is
+// injected, so quota failures, private mode and corrupt content are all
+// reachable here (02-h, 07-e).
 import { afterEach, describe, expect, it } from 'vitest';
+import type { GameEvents } from '@/core/Events';
 import { setLogSink, type LogSink } from '@/core/Log';
-import { createSettings, MAX_BUTTON_SCALE, MIN_BUTTON_SCALE, SETTINGS_KEY } from '@/core/Settings';
+import {
+  createSettings,
+  defaultSettings,
+  MAX_BUTTON_SCALE,
+  MIN_BUTTON_SCALE,
+  SETTINGS_KEY,
+  SETTINGS_VERSION,
+  type Settings,
+  type SettingsEvents,
+} from '@/core/Settings';
 
 interface FakeStorage {
   storage: Storage;
@@ -187,5 +198,148 @@ describe('createSettings', () => {
     expect(settings.showFps).toBe(false);
     settings.setShowFps(true);
     expect(settings.showFps).toBe(true);
+  });
+});
+
+// ------------------------------------------------------------------ SPEC-007
+
+/** Collects `settings:changed`, the only event this store emits. */
+function eventRecorder(): SettingsEvents & { patches: Array<Partial<Settings>> } {
+  const patches: Array<Partial<Settings>> = [];
+  return {
+    patches,
+    emit(name, ...args) {
+      if (name === 'settings:changed') patches.push((args[0] as GameEvents['settings:changed']).patch);
+    },
+  };
+}
+
+describe('the settings object (SPEC-007 §3)', () => {
+  it('defaults to the values of Reference §3 (AC-48)', () => {
+    const settings = createSettings(fakeStorage().storage).get();
+    expect(settings).toEqual({
+      version: SETTINGS_VERSION,
+      master: 1,
+      music: 0.7,
+      sfx: 1,
+      quality: null,
+      reduceMotion: false,
+      autoFire: 'touch',
+      joystickSide: 'left',
+      // SPEC-005's setting, and SPEC-005's default: flight aim-assist is off
+      // until the player asks for it.
+      flightMouseSteer: false,
+      buttonScale: MIN_BUTTON_SCALE,
+      showFps: false,
+      lastSlot: null,
+      persistGranted: null,
+      installHintShownAt: null,
+      fullscreen: null,
+      benchmark: null,
+    });
+  });
+
+  it('reads every stored key back, and writes it under reallm:settings (AC-48)', () => {
+    const fake = fakeStorage();
+    const events = eventRecorder();
+    const settings = createSettings(fake.storage, events);
+    const patch: Partial<Settings> = {
+      master: 0.5,
+      music: 0.25,
+      sfx: 0.75,
+      quality: 'low',
+      reduceMotion: true,
+      lastSlot: 2,
+      persistGranted: true,
+      installHintShownAt: 1_700_000_000_000,
+      fullscreen: false,
+      benchmark: { preset: 'high', msPerFrame: 8.5, at: 1_700_000_000_000 },
+    };
+    settings.set(patch);
+
+    expect(stored(fake)).toEqual(patch);
+    expect(createSettings(fake.storage).get()).toMatchObject(patch);
+  });
+
+  it('clamps volumes to 0..1 and refuses values that are not numbers (AC-49)', () => {
+    const settings = createSettings(fakeStorage().storage);
+    settings.set({ master: 4, music: -2, sfx: Number.NaN });
+    expect(settings.get().master).toBe(1);
+    expect(settings.get().music).toBe(0);
+    expect(settings.get().sfx).toBe(1); // NaN keeps what was there
+
+    settings.set({ master: 'loud' as unknown as number });
+    expect(settings.get().master).toBe(1);
+
+    // …and the same rule on the way in.
+    expect(createSettings(fakeStorage('{"master":9,"music":"x","sfx":0.3}').storage).get()).toMatchObject({
+      master: 1,
+      music: 0.7,
+      sfx: 0.3,
+    });
+  });
+
+  it('validates the rest of the object on set as well as on load (AC-49)', () => {
+    const settings = createSettings(fakeStorage().storage);
+    settings.set({
+      quality: 'ultra' as unknown as Settings['quality'],
+      autoFire: 'always' as unknown as Settings['autoFire'],
+      lastSlot: 7 as unknown as Settings['lastSlot'],
+      installHintShownAt: Number.POSITIVE_INFINITY,
+      benchmark: { preset: 'nope', msPerFrame: 1, at: 1 } as unknown as Settings['benchmark'],
+      buttonScale: 99,
+    });
+    expect(settings.get()).toMatchObject({
+      quality: null,
+      autoFire: 'touch',
+      lastSlot: null,
+      installHintShownAt: null,
+      benchmark: null,
+      buttonScale: MAX_BUTTON_SCALE,
+    });
+  });
+
+  it('writes immediately and emits settings:changed (AC-50)', () => {
+    const fake = fakeStorage();
+    const events = eventRecorder();
+    const settings = createSettings(fake.storage, events);
+
+    settings.set({ persistGranted: true });
+    expect(stored(fake)).toEqual({ persistGranted: true });
+    expect(events.patches).toEqual([{ persistGranted: true }]);
+
+    // The per-setting accessors are the same call, so they emit too.
+    settings.setQuality('medium');
+    expect(events.patches).toEqual([{ persistGranted: true }, { quality: 'medium' }]);
+    // The payload carries the *validated* value, not the one that was asked for.
+    settings.set({ master: 12 });
+    expect(events.patches.at(-1)).toEqual({ master: 1 });
+    // A patch with nothing this store owns changes nothing and says nothing.
+    settings.set({ nonsense: 1 } as unknown as Partial<Settings>);
+    expect(events.patches).toHaveLength(3);
+  });
+
+  it('replaces corrupt settings with the defaults and rewrites them, unprompted (07-e, AC-51)', () => {
+    muteLog();
+    for (const content of ['not json at all', '[1,2,3]', '"a string"']) {
+      const fake = fakeStorage(content);
+      const settings = createSettings(fake.storage);
+      expect(settings.get()).toEqual(defaultSettings());
+      // Rewritten, so the next boot reads an object instead of the wreckage.
+      expect(stored(fake)).toEqual(defaultSettings());
+    }
+  });
+
+  it('leaves storage alone when there is simply nothing stored yet', () => {
+    const fake = fakeStorage();
+    createSettings(fake.storage);
+    expect(fake.data.has(SETTINGS_KEY)).toBe(false);
+  });
+
+  it('never lets the stored version be anything but the current one', () => {
+    const settings = createSettings(fakeStorage('{"version":99}').storage);
+    expect(settings.get().version).toBe(SETTINGS_VERSION);
+    settings.set({ version: 99 as unknown as 1 });
+    expect(settings.get().version).toBe(SETTINGS_VERSION);
   });
 });

@@ -1,0 +1,36 @@
+{
+  "version": 0,
+  "slot": 1,
+  "seed": 123456,
+  "createdAt": 1700000000000,
+  "updatedAt": 1700000600000,
+  "playtimeSec": 612,
+  "appVersion": "0.0.0-alpha",
+  "player": {
+    "name": "Kestrel",
+    "classId": "scout",
+    "difficulty": "casual",
+    "appearance": { "portrait": 2, "primary": "#3a8fb7", "secondary": "#f0c419" },
+    "attributes": { "might": 2, "vigor": 3, "agility": 6, "tech": 2 },
+    "level": 4,
+    "xp": 320,
+    "tokens": 75,
+    "hp": 118
+  },
+  "resources": { "oil": 120, "wheat": 35, "water": 44, "lithium": 0 },
+  "inventory": [
+    { "itemId": "wheat_ration", "qty": 2 },
+    { "itemId": "medkit", "qty": 1 }
+  ],
+  "equipped": { "weapon": "weapon_laser", "armor": "armor_scrap" },
+  "ship": { "engine": 1, "hull": 1, "shield": 0, "cargo": 0, "weapon": 1 },
+  "companions": [{ "id": "aria", "level": 1, "enabled": true }],
+  "progress": {
+    "missionsDone": ["c1_m1"],
+    "missionsActive": [{ "id": "c1_m2", "stage": 0, "counters": { "0:0": 40 } }],
+    "flags": ["c1_oil"],
+    "currentPlanet": "cinder4",
+    "location": "surface",
+    "poisDiscovered": ["cinder4:dune_sea:0"]
+  }
+}

@@ -1,0 +1,44 @@
+{
+  "version": 1,
+  "meta": {
+    "slot": 2,
+    "seed": 987654321,
+    "createdAt": 1700100000000,
+    "updatedAt": 1700103600000,
+    "playtimeSec": 3600,
+    "difficulty": "normal",
+    "iteration": 1,
+    "appVersion": "0.0.0"
+  },
+  "player": {
+    "name": "Vance",
+    "classId": "marine",
+    "appearance": { "portrait": 0, "primary": "#b7472a", "secondary": "#2a3b4c" },
+    "attributes": { "might": 6, "vigor": 5, "agility": 1, "tech": 1 },
+    "level": 9,
+    "xp": 1240,
+    "tokens": 40,
+    "hp": 150
+  },
+  "resources": { "oil": 210, "wheat": 80, "water": 65, "lithium": 12 },
+  "inventory": [
+    { "itemId": "wheat_ration", "qty": 5 },
+    { "itemId": "coolant_pack", "qty": 2 }
+  ],
+  "equipped": { "weapon": "weapon_plasma", "armor": "armor_composite" },
+  "ship": { "engine": 2, "hull": 1, "shield": 2, "cargo": 1, "weapon": 2 },
+  "companions": [
+    { "id": "aria", "level": 2, "enabled": true },
+    { "id": "combat_drone", "level": 1, "enabled": false }
+  ],
+  "progress": {
+    "missionsDone": ["c1_m1", "c1_m2", "c1_m3", "c2_m1"],
+    "missionsActive": [{ "id": "c2_m2", "stage": 0, "counters": { "0:0": 120, "0:1": 3 } }],
+    "flags": ["c1_oil", "chapter1_done"],
+    "currentPlanet": "vetra",
+    "location": "station",
+    "poisDiscovered": ["cinder4:dune_sea:0", "vetra:ridge_camp:0"],
+    "visits": { "cinder4": 3, "vetra": 1 },
+    "endingSeen": false
+  }
+}
