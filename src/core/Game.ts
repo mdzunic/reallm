@@ -14,8 +14,9 @@ import { PageLifecycle } from '@/core/Lifecycle';
 import { log } from '@/core/Log';
 import { DEFAULT_MAX_STEPS, Loop } from '@/core/Loop';
 import { createRenderer, type QualityPreset, type Renderer } from '@/core/Renderer';
+import { RngRoot } from '@/core/Rng';
 import { createNullSave, type SaveStore } from '@/core/Save';
-import { createStubRng, type EventBus, type GameServices, type RngRoot } from '@/core/Services';
+import type { EventBus, GameServices } from '@/core/Services';
 import { createSettings, type SettingsStore } from '@/core/Settings';
 import {
   BOOT_SCENE,
@@ -68,6 +69,12 @@ export interface StatsSnapshot {
   readonly state: 'running' | 'paused' | 'hidden' | 'context-lost' | 'stopped';
   /** `navigator.storage.persist()`'s answer; `null` until asked (SPEC-007 §4.7). */
   readonly persistGranted: boolean | null;
+  /** SPEC-008 §7: the one number the whole deterministic world hangs off. */
+  readonly seed: number;
+  /** The planet the layout hash below belongs to; `null` when off-planet. */
+  readonly planet: PlanetId | null;
+  /** `rng.layoutSeed(planet)` — identical on every landing (SPEC-008 §7). */
+  readonly layoutSeed: number | null;
 }
 
 export interface StatsUi {
@@ -85,7 +92,7 @@ export interface DevFlags {
   readonly debug: boolean;
   readonly scene: string | null;
   readonly planet: string | null;
-  /** Parsed, unused here (SPEC-008). */
+  /** `?seed=`: the RNG root before a save is loaded (SPEC-008 §3). */
   readonly seed: number | null;
   readonly quality: QualityPreset | null;
   /** Parsed, unused here (SPEC-015). */
@@ -148,6 +155,12 @@ export const VERSION_TAP_WINDOW_MS = 2000;
 export const VERSION_TAP_COUNT = 5;
 /** The simulator button restores the context this long after losing it (§4.7). */
 export const SIMULATED_RESTORE_MS = 1000;
+/**
+ * The RNG root's seed in a session with neither a loaded save nor `?seed=` —
+ * the menu, an e2e run, a jump straight into a scene. A real run always has a
+ * save seed by the time anything is generated (SPEC-007 §4.1).
+ */
+export const DEFAULT_SEED = 1;
 
 const PHASE_INPUT_BEGIN = 'input:begin';
 const PHASE_UPDATE = 'update';
@@ -176,7 +189,9 @@ export class Game implements GameServices {
   readonly #audio: Audio;
   readonly #save: SaveStore;
   readonly #settings: SettingsStore;
-  readonly #rng: RngRoot;
+  /** An explicitly injected root wins over the save's seed for the whole session. */
+  readonly #injectedRng: RngRoot | null;
+  #rng: RngRoot;
   readonly #assets: Assets;
   readonly #renderer: Renderer;
   readonly #loop: Loop;
@@ -201,6 +216,8 @@ export class Game implements GameServices {
 
   /** The scene instance whose render() already logged, so a broken scene logs once (02-e). */
   #renderErrorScene: Scene | null = null;
+  /** The planet of the last `surface` transition (SPEC-008 §7). */
+  #surfacePlanet: PlanetId | null = null;
   #taps = 0;
   #tapTimer: number | null = null;
 
@@ -219,7 +236,8 @@ export class Game implements GameServices {
     this.#audio = injected.audio ?? createNullAudio();
     this.#save = injected.save ?? createNullSave();
     this.#settings = injected.settings ?? createSettings(undefined, this.#events);
-    this.#rng = injected.rng ?? createStubRng(this.#flags.seed ?? 1);
+    this.#injectedRng = injected.rng ?? null;
+    this.#rng = this.#injectedRng ?? new RngRoot(this.#seed());
 
     // §4.5 step 1: `?quality=` wins but is never persisted, then the stored
     // preset, then the default. SPEC-015's benchmark replaces this later (D-G).
@@ -280,8 +298,33 @@ export class Game implements GameServices {
   get loop(): Loop {
     return this.#loop;
   }
+  /**
+   * SPEC-008 §3. The root follows the active save: a slot loaded after boot
+   * brings its own seed, and every stream is re-derived from it. Rebuilding
+   * costs one object because the root holds no generator state at all — that is
+   * the same property that keeps RNG state out of the save (SPEC-008 §2).
+   */
   get rng(): RngRoot {
+    if (this.#injectedRng !== null) return this.#injectedRng;
+    const seed = this.#seed();
+    if (this.#rng.seed !== seed) this.#rng = new RngRoot(seed);
     return this.#rng;
+  }
+
+  /** The loaded save's seed; before there is one, `?seed=`, then the default. */
+  #seed(): number {
+    return (this.#save.current?.meta.seed ?? this.#flags.seed ?? DEFAULT_SEED) >>> 0;
+  }
+
+  /**
+   * The planet whose layout hash the overlay prints. The surface scene's own
+   * parameter is what M1 knows it from; `progress.currentPlanet` is preferred
+   * whenever a save is loaded and the player is not standing on a planet,
+   * because that is the field SPEC-012 and SPEC-014 maintain.
+   */
+  #planet(): PlanetId | null {
+    if (this.#scenes.current?.id === 'surface' && this.#surfacePlanet !== null) return this.#surfacePlanet;
+    return this.#save.current?.progress.currentPlanet ?? null;
   }
   get ui(): TransitionUi {
     return this.#transitionUi;
@@ -294,7 +337,14 @@ export class Game implements GameServices {
   }
 
   go<K extends SceneId>(id: K, params: SceneParams[K]): Promise<boolean> {
+    this.#rememberPlanet(id, params);
     return this.#scenes.go(id, params);
+  }
+
+  /** Every landing names its planet in the scene params; this is where it is kept. */
+  #rememberPlanet<K extends SceneId>(id: K, params: SceneParams[K]): void {
+    if (id !== 'surface') return;
+    this.#surfacePlanet = (params as SceneParams['surface']).planet;
   }
 
   requestResume(): void {
@@ -312,6 +362,8 @@ export class Game implements GameServices {
     const info = this.#renderer.gl.info;
     const size = this.#renderer.size;
     const scene = this.#scenes.current;
+    const rng = this.rng;
+    const planet = this.#planet();
     return {
       fps: loop.fps,
       // `fps` is 1 / the frame-time EMA, so this is that EMA in milliseconds.
@@ -332,6 +384,9 @@ export class Game implements GameServices {
       sceneInfo: scene?.debugInfo?.() ?? null,
       state: this.#state(),
       persistGranted: this.#settings.get().persistGranted,
+      seed: rng.seed,
+      planet,
+      layoutSeed: planet === null ? null : rng.layoutSeed(planet),
     };
   }
 
@@ -627,6 +682,7 @@ export class Game implements GameServices {
       return;
     }
     const id = target as SceneId;
+    this.#rememberPlanet(id, params[id] as SceneParams[SceneId]);
     void this.#scenes.go(id, params[id] as SceneParams[SceneId], { force: true });
   }
 

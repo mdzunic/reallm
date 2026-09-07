@@ -17,6 +17,7 @@ import type { EmitArgs, GameEvents } from '@/core/Events';
 import type { Input } from '@/core/Input';
 import type { Loop } from '@/core/Loop';
 import type { Renderer } from '@/core/Renderer';
+import type { Rng, RngRoot } from '@/core/Rng';
 import type { SaveStore } from '@/core/Save';
 import type { SettingsStore } from '@/core/Settings';
 import type { SceneId, SceneManager, SceneParams, TransitionUi } from '@/core/StateMachine';
@@ -34,54 +35,13 @@ export interface EventBus {
 
 // ------------------------------------------------------------------- RNG seam
 
-export interface RngStream {
-  /** [0, 1) */
-  next(): number;
-}
-
-export interface RngRoot {
-  readonly seed: number;
-  /** A named deterministic sub-stream. */
-  stream(name: string): RngStream;
-}
-
-/** FNV-1a over the stream name, so a name always maps to the same offset. */
-function hashName(name: string): number {
-  let hash = 0x811c9dc5;
-  for (let i = 0; i < name.length; i++) {
-    hash ^= name.charCodeAt(i);
-    hash = Math.imul(hash, 0x01000193);
-  }
-  return hash >>> 0;
-}
-
 /**
- * The RNG seam of SPEC-002 §3.7, with a deterministic counter-based stub.
- * SPEC-008 replaces the implementation in `core/Rng.ts`; the stub lives here so
- * this spec does not occupy that filename. Nothing here reaches for the
- * platform's own random source — that is banned outside `core/Rng.ts`
- * (SPEC-001 §7) and the ban is test-enforced.
+ * The RNG seam of SPEC-002 §3.7. SPEC-008 landed the real generator in
+ * `core/Rng.ts` and the counter-based stub that stood here until then is gone;
+ * the names are re-exported so every import site that reached for them through
+ * this module keeps working.
  */
-export function createStubRng(seed = 1): RngRoot {
-  return {
-    seed,
-    stream(name: string): RngStream {
-      let counter = (seed ^ hashName(name)) >>> 0;
-      return {
-        next(): number {
-          // splitmix32: a counter through an avalanche, so successive draws of
-          // one stream are uncorrelated and every stream starts somewhere else.
-          counter = (counter + 0x9e3779b9) >>> 0;
-          let z = counter;
-          z = Math.imul(z ^ (z >>> 16), 0x21f0aaad) >>> 0;
-          z = Math.imul(z ^ (z >>> 15), 0x735a2d97) >>> 0;
-          z = (z ^ (z >>> 15)) >>> 0;
-          return z / 0x1_0000_0000;
-        },
-      };
-    },
-  };
-}
+export type { Rng, RngRoot };
 
 // -------------------------------------------------------------- the container
 
@@ -97,7 +57,7 @@ export interface GameServices {
   readonly assets: Assets;
   readonly renderer: Renderer;
   readonly loop: Loop;
-  /** SPEC-008 replaces the stub behind this name. */
+  /** The per-save root every deterministic stream is derived from (SPEC-008 §3). */
   readonly rng: RngRoot;
   /** SPEC-003's transition overlays — unchanged (SPEC-002 D-E). */
   readonly ui: TransitionUi;

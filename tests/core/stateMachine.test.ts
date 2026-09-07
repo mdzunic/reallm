@@ -8,8 +8,9 @@ import { createNullInput } from '@/core/Input';
 import { setLogSink, type LogSink } from '@/core/Log';
 import { Loop } from '@/core/Loop';
 import type { Renderer } from '@/core/Renderer';
+import { RngRoot } from '@/core/Rng';
 import { createNullSave } from '@/core/Save';
-import { createStubRng, type EventBus, type GameEvents, type GameServices } from '@/core/Services';
+import type { EventBus, GameEvents, GameServices } from '@/core/Services';
 import { createSettings } from '@/core/Settings';
 import {
   ALLOWED_TRANSITIONS,
@@ -209,7 +210,7 @@ function harness(config: Partial<Record<SceneId, SpyOptions>> = {}): Harness {
     save: createNullSave(),
     settings: createSettings(),
     loop: new Loop(),
-    rng: createStubRng(),
+    rng: new RngRoot(1),
     uiRoot: {} as HTMLElement,
     get scenes(): SceneManager {
       return manager;
