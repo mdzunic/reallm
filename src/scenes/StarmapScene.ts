@@ -157,6 +157,11 @@ export class StarmapScene extends UiScene<'starmap'> {
       this.camera.aspect = width / height;
       this.camera.updateProjectionMatrix();
     }
+    // On enter this runs before the first render, and `lookAt()` refreshes
+    // `matrixWorldInverse` *before* it writes the new quaternion — so without
+    // this the projection still uses the orientation `base.enter()` left
+    // behind and every button lands off-screen.
+    this.camera.updateMatrixWorld(true);
     const buttons = PLANET_IDS.map((planet, index) => {
       const projected = this.#worldOf(index).project(this.camera);
       const x = (projected.x * 0.5 + 0.5) * width;
@@ -210,7 +215,10 @@ export class StarmapScene extends UiScene<'starmap'> {
     const data = this.services.save.current;
     const economy = this.#economy;
     if (data === null || economy === null) {
-      info.replaceChildren(h('p', { class: 'starmap-name' }, planet.name), h('p', { class: 'settings-note' }, 'No save loaded.'));
+      info.replaceChildren(
+        testId(h('p', { class: 'starmap-name' }, planet.name), 'starmap-info-name'),
+        h('p', { class: 'settings-note' }, 'No save loaded.'),
+      );
       return;
     }
     const fuel = economy.fuelCost(this.#selected);
