@@ -114,6 +114,11 @@ export interface StatsSnapshot {
   state: string;
   /** SPEC-007 §4.7: `null` until `navigator.storage.persist()` has answered. */
   persistGranted: boolean | null;
+  /** SPEC-008 §7: the active save's seed, or `?seed=` before one is loaded. */
+  seed: number;
+  planet: string | null;
+  /** `hash32(seed, planet, 'layout')`; `null` when off-planet. */
+  layoutSeed: number | null;
 }
 
 declare global {

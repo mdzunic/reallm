@@ -216,8 +216,6 @@ export class Game implements GameServices {
 
   /** The scene instance whose render() already logged, so a broken scene logs once (02-e). */
   #renderErrorScene: Scene | null = null;
-  /** The planet of the last `surface` transition (SPEC-008 §7). */
-  #surfacePlanet: PlanetId | null = null;
   #taps = 0;
   #tapTimer: number | null = null;
 
@@ -317,13 +315,18 @@ export class Game implements GameServices {
   }
 
   /**
-   * The planet whose layout hash the overlay prints. The surface scene's own
-   * parameter is what M1 knows it from; `progress.currentPlanet` is preferred
-   * whenever a save is loaded and the player is not standing on a planet,
-   * because that is the field SPEC-012 and SPEC-014 maintain.
+   * The planet whose layout hash the overlay prints (SPEC-008 §7). While the
+   * player is standing on one, it is the surface scene's own parameter — read
+   * from the scene machine, so every route in gets it: `go()`, the `?scene=`
+   * flag and the dev bridge. Off-planet it falls back to the save's
+   * `progress.currentPlanet`, the field SPEC-012 and SPEC-014 maintain.
    */
   #planet(): PlanetId | null {
-    if (this.#scenes.current?.id === 'surface' && this.#surfacePlanet !== null) return this.#surfacePlanet;
+    if (this.#scenes.current?.id === 'surface') {
+      const params = this.#scenes.currentParams as SceneParams['surface'] | undefined;
+      const planet = params?.planet;
+      if (planet !== undefined && (PLANET_IDS as readonly string[]).includes(planet)) return planet;
+    }
     return this.#save.current?.progress.currentPlanet ?? null;
   }
   get ui(): TransitionUi {
@@ -337,14 +340,7 @@ export class Game implements GameServices {
   }
 
   go<K extends SceneId>(id: K, params: SceneParams[K]): Promise<boolean> {
-    this.#rememberPlanet(id, params);
     return this.#scenes.go(id, params);
-  }
-
-  /** Every landing names its planet in the scene params; this is where it is kept. */
-  #rememberPlanet<K extends SceneId>(id: K, params: SceneParams[K]): void {
-    if (id !== 'surface') return;
-    this.#surfacePlanet = (params as SceneParams['surface']).planet;
   }
 
   requestResume(): void {
@@ -682,7 +678,6 @@ export class Game implements GameServices {
       return;
     }
     const id = target as SceneId;
-    this.#rememberPlanet(id, params[id] as SceneParams[SceneId]);
     void this.#scenes.go(id, params[id] as SceneParams[SceneId], { force: true });
   }
 

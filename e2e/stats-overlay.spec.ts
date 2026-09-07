@@ -1,7 +1,9 @@
 // The dev stats overlay (SPEC-002 §4.6, §6.2). Its content is a closed list —
-// fourteen rows and two buttons, nothing else — because every later performance
+// sixteen rows and two buttons, nothing else — because every later performance
 // claim in this project is read off it. The fourteenth is SPEC-007's `persist`
-// row (§7, M7).
+// row (§7, M7); the next two are SPEC-008's seed and layout hash (§7), which is
+// how "the same planet every landing" is checked. `e2e/SPEC-008.spec.ts` is
+// what asserts their content; here they only have to be present and formatted.
 import { expect, test, type Page } from '@playwright/test';
 import { start } from './start';
 
@@ -22,6 +24,10 @@ const ROWS: ReadonlyArray<readonly [string, RegExp]> = [
   // SPEC-007 §7: `unknown` until `navigator.storage.persist()` has answered,
   // which it only does after the first save of a session.
   ['debug-persist', /^persist (?:granted|denied|unknown)$/],
+  // SPEC-008 §7: the menu has no planet under it, so the layout row is `-`
+  // there; the hash appears on a landing.
+  ['debug-seed', /^seed \d+$/],
+  ['debug-layout', /^layout (?:-|[a-z0-9_]+ [0-9a-f]{8})$/],
   ['debug-events', /\d+\.\d{2} \S+/],
 ];
 
@@ -47,7 +53,7 @@ async function overlayChildren(page: Page): Promise<string[]> {
   );
 }
 
-test('holds exactly the fourteen rows and the two buttons, in order (AC-27 … AC-30)', async ({ page }) => {
+test('holds exactly the sixteen rows and the two buttons, in order (AC-27 … AC-30)', async ({ page }) => {
   await start(page, '/?debug');
 
   for (const [id, format] of ROWS) {

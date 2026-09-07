@@ -94,6 +94,7 @@ export class SceneManager {
   readonly #services: GameServices;
   readonly #factory: SceneFactory;
   #current: Scene | null = null;
+  #currentParams: unknown = undefined;
   #transitioning = false;
   #paused = false;
   /** An `app:paused` that arrived mid-transition, to apply after `scene:entered` (D-40). */
@@ -107,6 +108,18 @@ export class SceneManager {
 
   get current(): Scene | null {
     return this.#current;
+  }
+
+  /**
+   * The params `current` was actually entered with — the fallback menu's own,
+   * when a scene's `enter()` threw (D-19). Half of a scene's identity lives
+   * here rather than in its id: which planet the surface scene is showing is
+   * not derivable from `'surface'`, and SPEC-008 §7 needs it for the layout
+   * hash in the `?debug` overlay. Typed `unknown` because every caller already
+   * knows which scene it is asking about.
+   */
+  get currentParams(): unknown {
+    return this.#currentParams;
   }
 
   get transitioning(): boolean {
@@ -197,6 +210,7 @@ export class SceneManager {
       const old = this.#current;
       if (old !== null) await ui.fadeOut(fadeMs()); // skipped on the first transition (D-12)
       this.#current = null;
+      this.#currentParams = undefined;
       this.#paused = false;
       if (old !== null) {
         old.exit();
@@ -205,6 +219,7 @@ export class SceneManager {
       }
 
       let next: Scene = this.#factory[id](this.#services);
+      let entered: unknown = params;
       const loadingTimer = setTimeout(() => ui.showLoading(), LOADING_DELAY_MS);
       let ok = true;
       try {
@@ -216,7 +231,9 @@ export class SceneManager {
         events.emit('ui:toast', { kind: 'error', text: SCENE_ENTER_FAILED_TEXT });
         try {
           next = this.#factory.menu(this.#services);
-          await next.enter({ reason: 'error' });
+          const fallback = { reason: 'error' } as const satisfies SceneParams['menu'];
+          await next.enter(fallback);
+          entered = fallback;
         } catch (fallbackError) {
           log.error('scene', 'menu fallback failed', fallbackError);
           clearTimeout(loadingTimer);
@@ -229,6 +246,7 @@ export class SceneManager {
       ui.hideLoading();
 
       this.#current = next;
+      this.#currentParams = entered;
       events.emit('scene:entered', { id: next.id });
       renderer.resize(); // cameras are built in enter(); give them the size
       this.#applyRequestedPause();
