@@ -329,7 +329,7 @@ export class Input {
   // -------------------------------------------------------------- driver API
 
   /** Adds `source` to the action's holders; the first holder queues `justPressed`. */
-  pressAction(action: Action, source: Scheme = 'keyboard'): void {
+  pressAction(action: Action, source: Scheme): void {
     if (!this.#enabled) return;
     const track = this.#track[action];
     if (track.sources.has(source)) return; // already holding: not a new edge
@@ -339,7 +339,7 @@ export class Input {
   }
 
   /** Removes one holder; only the last one to let go queues `justReleased` (AC-22). */
-  releaseAction(action: Action, source: Scheme = 'keyboard'): void {
+  releaseAction(action: Action, source: Scheme): void {
     const track = this.#track[action];
     if (!track.sources.delete(source)) return;
     if (track.sources.size > 0) return;
@@ -348,7 +348,7 @@ export class Input {
   }
 
   /** The raw move vector of one source; the state's `move` is the shaped sum (AC-8). */
-  setMove(x: number, y: number, source: Scheme = 'keyboard'): void {
+  setMove(x: number, y: number, source: Scheme): void {
     if (!this.#enabled) return;
     let raw = this.#rawMove.get(source);
     if (raw === undefined) {
@@ -361,7 +361,7 @@ export class Input {
   }
 
   /** Screen aim in CSS px inside the canvas box, plus its NDC (AC-24). */
-  setAimPointer(screenX: number, screenY: number, source: Scheme = 'keyboard'): void {
+  setAimPointer(screenX: number, screenY: number, source: Scheme): void {
     if (!this.#enabled) return;
     this.setScheme(source);
     const aim = this.#state.aim;
