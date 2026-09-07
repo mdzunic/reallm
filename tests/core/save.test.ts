@@ -486,15 +486,17 @@ describe('storage that will not cooperate (E8, E9)', () => {
   });
 
   it('lets go of a deleted character even with nowhere to delete it from (AC-63)', async () => {
-    const fake = fakeStorage();
-    fake.failAlways();
-    const saves = store(fake, recorder());
+    // A store with no storage at all, which is what private mode and the null
+    // store both are.
+    const saves = new SaveStore(recorder(), null, { window: null });
     saves.bind(newSave(0, CREATION, 1, 1_700_000_000_000));
     muteLog();
 
     saves.delete(0);
     // E8: a memory-only session that deletes the slot it is playing must not go
     // on mutating and exporting that character.
+    expect(saves.current).toBeNull();
+    saves.addPlaytime(10);
     expect(saves.current).toBeNull();
     await expect(saves.exportCode(0)).rejects.toThrow();
   });
