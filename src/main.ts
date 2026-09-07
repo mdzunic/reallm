@@ -5,7 +5,9 @@
 import './style.css';
 import { EventBus, type GameEvents } from '@/core/Events';
 import { Game, parseFlags, SIMULATED_RESTORE_MS } from '@/core/Game';
+import { Input } from '@/core/Input';
 import { log } from '@/core/Log';
+import { createSettings } from '@/core/Settings';
 import type { SceneId } from '@/core/StateMachine';
 import { ASSETS } from '@/data/assets';
 import { PLACEHOLDER_SCENES } from '@/scenes/Placeholders';
@@ -32,6 +34,14 @@ uiRoot.append(note);
 const events = new EventBus<GameEvents>();
 const flags = parseFlags(globalThis.location.search);
 
+/**
+ * SPEC-005's input system. The settings store is built here rather than left to
+ * `Game`, because `Input` and `Game` have to read the same one — `autoFire`,
+ * `joystickSide` and `flightMouseSteer` live next to `quality` and `showFps`.
+ */
+const settings = createSettings();
+const input = new Input(canvas, events, settings);
+
 // The overlay buttons need the game they drive, and the game needs the overlay:
 // the simulators reach it late, through a click, so a holder is enough.
 let running: Game | undefined;
@@ -53,6 +63,7 @@ const game = new Game({
     contextLost: new ContextLostOverlay(uiRoot),
     stats: statsOverlay,
   },
+  services: { input, settings },
 });
 running = game;
 

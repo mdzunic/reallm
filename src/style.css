@@ -27,11 +27,14 @@ body {
 }
 
 /* The DOM UI layer over the canvas. Gameplay pointers go to the canvas;
-   interactive panels opt in with `pointer-events: auto` (SPEC-014). */
+   interactive panels opt in with `pointer-events: auto` (SPEC-014).
+   `touch-action: none` matches the canvas so a thumb dragged across a HUD
+   element never scrolls or double-tap-zooms the page (SPEC-005 AC-26). */
 #ui {
   position: fixed;
   inset: 0;
   pointer-events: none;
+  touch-action: none;
 }
 
 /* The version label. It opts into pointer events because five taps on it are
@@ -193,6 +196,117 @@ button.boot-start.is-visible {
   display: flex;
   gap: 8px;
   pointer-events: auto;
+  /* Above the touch layer (z-index 10), so the placeholder navigation is still
+     reachable on a phone (SPEC-005 §4.3). */
+  z-index: 12;
+}
+
+/* ------------------------------------------- touch controls (SPEC-005 §4.3) */
+
+/* The whole layer is mounted only while the touch scheme is active (AC-20) and
+   sits below the panels (z-index 20/30) so a pause menu still covers it. */
+.touch-controls {
+  --touch-scale: 1;
+
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 10;
+}
+
+/* One surface for both zones: which one a pointer belongs to is decided in
+   `zoneFor()` at pointerdown, not by the box it landed in (AC-14, AC-30). */
+.touch-surface {
+  position: absolute;
+  inset: 0;
+  pointer-events: auto;
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
+}
+
+/* The floating stick: `transform` puts its centre where the thumb landed, and
+   the origin follows a drift past 1.6× the radius (AC-11). */
+.touch-stick {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 112px;
+  height: 112px;
+  margin: -56px 0 0 -56px;
+  border: 2px solid rgb(230 237 243 / 35%);
+  border-radius: 50%;
+  background: rgb(11 15 20 / 25%);
+  pointer-events: none;
+}
+
+.touch-stick-knob {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 48px;
+  height: 48px;
+  margin: -24px 0 0 -24px;
+  border-radius: 50%;
+  background: rgb(230 237 243 / 45%);
+}
+
+/* Flight aims itself inside the fire zone; the reticle is what says so (AC-28). */
+.touch-reticle {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 28px;
+  height: 28px;
+  margin: -14px 0 0 -14px;
+  border: 2px solid rgb(230 237 243 / 55%);
+  border-radius: 50%;
+  pointer-events: none;
+}
+
+.touch-buttons {
+  position: absolute;
+  right: max(16px, env(safe-area-inset-right));
+  bottom: max(16px, env(safe-area-inset-bottom));
+  display: flex;
+  flex-direction: row-reverse;
+  gap: 12px;
+  pointer-events: none;
+}
+
+/* Left-handed layout: the stick moves to the right half, so the buttons move
+   to the left one (AC-11). */
+.touch-controls[data-side='right'] .touch-buttons {
+  right: auto;
+  left: max(16px, env(safe-area-inset-left));
+  flex-direction: row;
+}
+
+/* AC-16: never below the 56 px base, `buttonScale` only ever grows it, and a
+   long press neither selects text nor opens the iOS callout. */
+button.touch-button {
+  min-width: 56px;
+  min-height: 56px;
+  width: calc(56px * var(--touch-scale));
+  height: calc(56px * var(--touch-scale));
+  padding: 0;
+  font: inherit;
+  font-size: 13px;
+  letter-spacing: 0.08em;
+  color: inherit;
+  border: 1px solid #33465a;
+  border-radius: 50%;
+  background: rgb(22 32 43 / 80%);
+  pointer-events: auto;
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
+}
+
+.touch-controls .is-hidden {
+  display: none;
 }
 
 /* --------------------------------------------- stats overlay (SPEC-002 §4.6) */
