@@ -8,8 +8,9 @@ import { createNullInput } from '@/core/Input';
 import { setLogSink, type LogSink } from '@/core/Log';
 import { Loop } from '@/core/Loop';
 import type { Renderer } from '@/core/Renderer';
+import { RngRoot } from '@/core/Rng';
 import { createNullSave } from '@/core/Save';
-import { createStubRng, type EventBus, type GameEvents, type GameServices } from '@/core/Services';
+import type { EventBus, GameEvents, GameServices } from '@/core/Services';
 import { createSettings } from '@/core/Settings';
 import {
   ALLOWED_TRANSITIONS,
@@ -209,7 +210,7 @@ function harness(config: Partial<Record<SceneId, SpyOptions>> = {}): Harness {
     save: createNullSave(),
     settings: createSettings(),
     loop: new Loop(),
-    rng: createStubRng(),
+    rng: new RngRoot(1),
     uiRoot: {} as HTMLElement,
     get scenes(): SceneManager {
       return manager;
@@ -321,6 +322,15 @@ describe('go()', () => {
     await atMenu(h);
     await h.manager.go('creation', { slot: 2 });
     expect(h.scene('creation').params).toEqual({ slot: 2 });
+  });
+
+  it('keeps the params the current scene was entered with (SPEC-008 §7)', async () => {
+    const h = harness();
+    expect(h.manager.currentParams).toBeUndefined();
+    await atMenu(h);
+    expect(h.manager.currentParams).toEqual({ reason: 'start' });
+    await h.manager.go('creation', { slot: 2 });
+    expect(h.manager.currentParams).toEqual({ slot: 2 });
   });
 
   it('fades in but not out on the first transition after boot (AC-14)', async () => {
@@ -471,6 +481,10 @@ describe('a failing enter()', () => {
     expect(h.manager.current?.id).toBe('menu');
     expect(h.scene('menu').params).toEqual({ reason: 'error' });
     expect(errors(h).join('\n')).toContain('asset missing');
+    // The params follow the scene that actually entered, not the one that was
+    // asked for — otherwise a reader would think the menu is a station
+    // (SPEC-008 §7 reads the surface planet off this).
+    expect(h.manager.currentParams).toEqual({ reason: 'error' });
   });
 
   it('emits the error toast and resolves false (AC-18, AC-19)', async () => {
@@ -496,6 +510,7 @@ describe('a failing enter()', () => {
 
     await expect(h.manager.go('station', {}, { force: true })).resolves.toBe(false);
     expect(h.manager.current).toBeNull();
+    expect(h.manager.currentParams).toBeUndefined();
     expect(h.manager.transitioning).toBe(false);
     expect(errors(h).join('\n')).toContain('menu is broken too');
     expect(h.trace).toContain(`showError:${FATAL_TRANSITION_TEXT}`);

@@ -35,6 +35,11 @@ const ROWS = [
   // SPEC-007 §7 (M7): whether the browser granted persistent storage, which is
   // what stands between an iOS player and Safari's seven-day eviction.
   'debug-persist',
+  // SPEC-008 §7: the save seed, and the current planet's layout hash. Landing
+  // twice on a planet has to print the same hash — that is how "the world is
+  // the same every time" is checked without eyeballing rock positions.
+  'debug-seed',
+  'debug-layout',
   'debug-events',
 ] as const;
 
@@ -45,6 +50,11 @@ export interface StatsOverlayOptions {
   onLoseContext(restoreAfterMs: number | null): void;
   /** The delay the non-fatal simulator restores after (SPEC-002 §4.7). */
   restoreAfterMs: number;
+}
+
+/** Uint32s are shown as eight hex digits, the way the save code's crc is. */
+function hex32(value: number): string {
+  return (value >>> 0).toString(16).padStart(8, '0');
 }
 
 /** `props=3 clip=Idle` — `debugInfo()` pairs in insertion order (AC-31). */
@@ -109,6 +119,15 @@ export class StatsOverlay implements StatsUi {
     this.#set(
       'debug-persist',
       `persist ${snapshot.persistGranted === null ? 'unknown' : snapshot.persistGranted ? 'granted' : 'denied'}`,
+    );
+    // SPEC-008 §7. Off-planet there is no layout to hash, so the row says so
+    // rather than printing a stale one from the last landing.
+    this.#set('debug-seed', `seed ${snapshot.seed >>> 0}`);
+    this.#set(
+      'debug-layout',
+      snapshot.planet === null || snapshot.layoutSeed === null
+        ? 'layout -'
+        : `layout ${snapshot.planet} ${hex32(snapshot.layoutSeed)}`,
     );
   }
 
