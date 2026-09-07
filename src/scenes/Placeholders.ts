@@ -72,7 +72,7 @@ function swatchTexture(tint: number): THREE.DataTexture {
   return texture;
 }
 
-class PlaceholderScene<K extends SceneId> implements Scene<K> {
+export class PlaceholderScene<K extends SceneId> implements Scene<K> {
   readonly id: K;
   readonly pausable: boolean;
   protected readonly services: GameServices;
@@ -296,7 +296,9 @@ class MenuScene extends PlaceholderScene<'menu'> {
 /**
  * The factory the composition root hands to `SceneManager` (D-17). `menu` enters
  * synchronously and loads nothing of its own, which is what makes it a safe
- * fallback after a failed `enter()` (D-19).
+ * fallback after a failed `enter()` (D-19). `main.ts` overrides the `surface`
+ * entry with SPEC-011's combat verification harness
+ * (`scenes/SurfaceCombatDemo.ts`) until SPEC-012 lands the real scene.
  */
 export const PLACEHOLDER_SCENES: SceneFactory = {
   menu: (services) => new MenuScene(services),
