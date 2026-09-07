@@ -113,9 +113,11 @@ function prefersReducedMotion(): boolean {
 }
 
 /**
- * The defaults of SPEC-007 §3. `flightMouseSteer` stays `false`: the setting
- * belongs to SPEC-005, whose shipped behaviour and tests have flight aim-assist
- * off until the player asks for it.
+ * The defaults of SPEC-007 §3, which owns this table — including
+ * `flightMouseSteer: true`. SPEC-005 built the setting and the aim-assist
+ * behind it (SPEC-005 AC-29: the blend applies only while the setting is on)
+ * but names no default; §3 does, so flight steering blends toward the mouse
+ * until the player turns it off.
  */
 export function defaultSettings(): Settings {
   return {
@@ -127,7 +129,7 @@ export function defaultSettings(): Settings {
     reduceMotion: prefersReducedMotion(),
     autoFire: 'touch',
     joystickSide: 'left',
-    flightMouseSteer: false,
+    flightMouseSteer: true,
     buttonScale: MIN_BUTTON_SCALE,
     showFps: false,
     lastSlot: null,
@@ -196,6 +198,15 @@ function oneOf<T extends string>(value: unknown, allowed: readonly T[], fallback
   return typeof value === 'string' && (allowed as readonly string[]).includes(value) ? (value as T) : fallback;
 }
 
+/**
+ * A stored boolean, or `fallback`. Only needed where the default is `true`:
+ * `value === true` would read every unusable value as `false`, which is a value
+ * the player never chose.
+ */
+function bool(value: unknown, fallback: boolean): boolean {
+  return typeof value === 'boolean' ? value : fallback;
+}
+
 function boolOrNull(value: unknown, fallback: boolean | null): boolean | null {
   if (typeof value === 'boolean' || value === null) return value;
   return fallback;
@@ -239,7 +250,7 @@ function coerce<K extends keyof Settings>(key: K, value: unknown, current: Setti
       case 'joystickSide':
         return oneOf(value, JOYSTICK_SIDES, current.joystickSide);
       case 'flightMouseSteer':
-        return value === true;
+        return bool(value, current.flightMouseSteer);
       case 'buttonScale':
         return clampScale(value);
       case 'showFps':
@@ -302,6 +313,9 @@ export function createSettings(storage?: Storage | null, events?: SettingsEvents
     try {
       const merged = read(store).data;
       for (const [key, value] of Object.entries(patch)) merged[key] = value;
+      // `set` refuses to change `version`, but what is on disk still has to say
+      // which shape it is, or the first settings migration has nothing to read.
+      merged['version'] = SETTINGS_VERSION;
       store.setItem(SETTINGS_KEY, JSON.stringify(merged));
     } catch (error) {
       const keys = Object.keys(patch).join(', ');

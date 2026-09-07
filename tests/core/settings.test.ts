@@ -111,7 +111,9 @@ describe('createSettings', () => {
     settings.setShowFps(true);
     expect(settings.showFps).toBe(true);
 
-    expect(stored(fake)).toEqual({ musicVolume: 0.4, lastSlot: 2, quality: 'high', showFps: true });
+    // `version` is stamped on every write, so a future migration knows what it
+    // is reading (SPEC-007 §3).
+    expect(stored(fake)).toEqual({ version: SETTINGS_VERSION, musicVolume: 0.4, lastSlot: 2, quality: 'high', showFps: true });
     // …and a fresh store reads them back.
     const reloaded = createSettings(fake.storage);
     expect(reloaded.quality).toBe('high');
@@ -125,7 +127,7 @@ describe('createSettings', () => {
     // Another spec's store writes in between.
     fake.data.set(SETTINGS_KEY, JSON.stringify({ ...stored(fake), reduceMotion: true }));
     settings.setShowFps(true);
-    expect(stored(fake)).toEqual({ quality: 'low', reduceMotion: true, showFps: true });
+    expect(stored(fake)).toEqual({ version: SETTINGS_VERSION, quality: 'low', reduceMotion: true, showFps: true });
   });
 
   it('swallows a storage that throws while still updating in memory (02-h, AC-64)', () => {
@@ -142,12 +144,14 @@ describe('createSettings', () => {
     expect(warnings.join('\n')).toContain('could not persist');
   });
 
-  it('defaults the control options to touch auto-fire, a left stick and no assist (SPEC-005 AC-18, AC-11)', () => {
+  it('defaults the control options to touch auto-fire and a left stick (SPEC-005 AC-18, AC-11)', () => {
     const settings = createSettings(fakeStorage().storage);
     expect(settings.autoFire).toBe('touch');
     expect(settings.joystickSide).toBe('left');
-    expect(settings.flightMouseSteer).toBe(false);
     expect(settings.buttonScale).toBe(MIN_BUTTON_SCALE);
+    // The default of the fourth option is SPEC-007 §3's, asserted with the rest
+    // of that table below.
+    expect(settings.flightMouseSteer).toBe(true);
   });
 
   it('reads, validates and persists the control options', () => {
@@ -172,6 +176,7 @@ describe('createSettings', () => {
     store.setFlightMouseSteer(true);
     store.setButtonScale(1.25);
     expect(stored(written)).toEqual({
+      version: SETTINGS_VERSION,
       autoFire: 'off',
       joystickSide: 'right',
       flightMouseSteer: true,
@@ -226,9 +231,9 @@ describe('the settings object (SPEC-007 §3)', () => {
       reduceMotion: false,
       autoFire: 'touch',
       joystickSide: 'left',
-      // SPEC-005's setting, and SPEC-005's default: flight aim-assist is off
-      // until the player asks for it.
-      flightMouseSteer: false,
+      // §3 annotates this one `default true`. SPEC-005 owns the aim-assist
+      // itself and only requires that it apply while the setting is on.
+      flightMouseSteer: true,
       buttonScale: MIN_BUTTON_SCALE,
       showFps: false,
       lastSlot: null,
@@ -257,7 +262,7 @@ describe('the settings object (SPEC-007 §3)', () => {
     };
     settings.set(patch);
 
-    expect(stored(fake)).toEqual(patch);
+    expect(stored(fake)).toEqual({ version: SETTINGS_VERSION, ...patch });
     expect(createSettings(fake.storage).get()).toMatchObject(patch);
   });
 
@@ -299,13 +304,25 @@ describe('the settings object (SPEC-007 §3)', () => {
     });
   });
 
+  it('keeps a default-on boolean on when the stored value is unusable (AC-49)', () => {
+    muteLog();
+    // `false` is a choice the player made; `"yes"` is not a value at all, and
+    // reading it as `false` would silently turn a default-on setting off.
+    expect(createSettings(fakeStorage('{"flightMouseSteer":false}').storage).get().flightMouseSteer).toBe(false);
+    expect(createSettings(fakeStorage('{"flightMouseSteer":"yes"}').storage).get().flightMouseSteer).toBe(true);
+    const settings = createSettings(fakeStorage().storage);
+    settings.set({ flightMouseSteer: 1 as unknown as boolean });
+    expect(settings.get().flightMouseSteer).toBe(true);
+  });
+
   it('writes immediately and emits settings:changed (AC-50)', () => {
     const fake = fakeStorage();
     const events = eventRecorder();
     const settings = createSettings(fake.storage, events);
 
     settings.set({ persistGranted: true });
-    expect(stored(fake)).toEqual({ persistGranted: true });
+    expect(stored(fake)).toEqual({ version: SETTINGS_VERSION, persistGranted: true });
+    // The event carries only what changed; `version` is not a settable key.
     expect(events.patches).toEqual([{ persistGranted: true }]);
 
     // The per-setting accessors are the same call, so they emit too.

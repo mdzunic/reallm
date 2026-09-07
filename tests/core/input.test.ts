@@ -492,6 +492,8 @@ describe('aim (AC-13, AC-24)', () => {
 describe('flight aim-assist (AC-29)', () => {
   it('blends keyboard steering toward the reticle only when the setting is on', () => {
     const settings = createSettings();
+    // SPEC-007 §3 ships the setting on, so the "off" half says so out loud.
+    settings.setFlightMouseSteer(false);
     const input = new Input(null, null, settings);
     input.setViewport(800, 600);
     input.setMode('flight');

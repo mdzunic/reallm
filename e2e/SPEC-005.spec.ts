@@ -490,7 +490,11 @@ test.describe('flight aim-assist (AC-29)', () => {
     expect(withAssist.y).toBeGreaterThan(0.5);
   });
 
-  test('the default (off) leaves keyboard steering alone', async ({ page }) => {
+  test('turning the setting off leaves keyboard steering alone', async ({ page }) => {
+    // Written out rather than relying on the default: SPEC-007 §3 ships
+    // `flightMouseSteer` on, and what AC-29 asks is that the blend follow the
+    // setting — so both halves of it name the value they are testing.
+    await page.addInitScript(() => localStorage.setItem('reallm:settings', JSON.stringify({ flightMouseSteer: false })));
     await start(page, '/?scene=flight');
     await settle(page, 'flight');
 
