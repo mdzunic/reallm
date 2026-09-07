@@ -33,6 +33,8 @@ export interface SaveBridge {
   readonly codesSupported: boolean;
   /** 07-a: true once another tab has written this slot (SPEC-007 §4.5). */
   readonly refusingAutosaves: boolean;
+  /** The live save the scenes mutate; `null` before any create/load. */
+  readonly current: SaveSnapshot | null;
   list(): Array<{
     slot: number;
     empty: boolean;
