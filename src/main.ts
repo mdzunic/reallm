@@ -16,6 +16,7 @@ import { ASSETS } from '@/data/assets';
 import { GAME_SCENES } from '@/scenes/index';
 import { BootOverlay } from '@/ui/BootOverlay';
 import { ContextLostOverlay } from '@/ui/ContextLostOverlay';
+import { uiLayers } from '@/ui/dom';
 import { StatsOverlay } from '@/ui/StatsOverlay';
 import { TransitionOverlay } from '@/ui/TransitionOverlay';
 import { UpdateOverlay } from '@/ui/UpdateOverlay';
@@ -74,6 +75,15 @@ const audio = createAudio({
 let running: Game | undefined;
 // SPEC-014 AC-103: dormant until M7's service worker gives it a signal.
 new UpdateOverlay(uiRoot);
+
+/**
+ * The `ui:toast` bridge (SPEC-014 §4.6): systems that may not import `ui/` —
+ * the save store's "Code is damaged", the economy's cargo warnings — emit the
+ * event; the composition root is the one place that knows both halves. The
+ * audio layer plays its blip off the same event independently.
+ */
+const toastOwner = {};
+events.on('ui:toast', ({ text, kind, ms }) => uiLayers(uiRoot).toast(text, kind ?? 'info', ms), toastOwner);
 const statsOverlay = new StatsOverlay(uiRoot, {
   onLoseContext: (restoreAfterMs) => running?.loseContext(restoreAfterMs),
   restoreAfterMs: SIMULATED_RESTORE_MS,
