@@ -710,7 +710,8 @@ export class Combat {
     if (best === null) return; // stays armed until a target appears
     this.#droneCooldown = 1 / (drone.droneFireRate ?? 1);
     const stats = this.#world.stats;
-    const damage = Math.round(this.#weapon.damage * stats.damageMult * (drone.droneDamageFraction ?? 0) * stats.companionMult);
+    // AC-5: every damage calculation floors at 1, this path included.
+    const damage = Math.max(1, Math.round(this.#weapon.damage * stats.damageMult * (drone.droneDamageFraction ?? 0) * stats.companionMult));
     const dx = best.x - p.x;
     const dz = best.z - p.z;
     const len = Math.hypot(dx, dz);

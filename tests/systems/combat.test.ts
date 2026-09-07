@@ -442,7 +442,7 @@ describe('combat drone (§4.3)', () => {
     const p = h.world.projectiles.at(0);
     expect(p.owner).toBe('drone');
     const stats = h.world.stats;
-    expect(p.damage).toBe(Math.round(12 * stats.damageMult * 0.5 * stats.companionMult));
+    expect(p.damage).toBe(Math.max(1, Math.round(12 * stats.damageMult * 0.5 * stats.companionMult)));
     // Every 1/droneFireRate seconds (L1: 1/s) — shots at t≈0 and t≈1 within 1.6 s.
     h.run(1.6);
     expect(h.of('enemy:spawned').length).toBe(1); // sanity: still just the egg
