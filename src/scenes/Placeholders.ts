@@ -89,11 +89,7 @@ class PlaceholderScene<K extends SceneId> implements Scene<K> {
   #elapsed = 0;
   #renders = 0;
 
-  constructor(
-    services: GameServices,
-    id: K,
-    options: { pausable?: boolean; props?: number; music?: MusicId } = {},
-  ) {
+  constructor(services: GameServices, id: K, options: { pausable?: boolean; props?: number; music?: MusicId } = {}) {
     this.services = services;
     this.id = id;
     this.pausable = options.pausable ?? false;

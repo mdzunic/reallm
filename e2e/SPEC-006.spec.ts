@@ -60,9 +60,7 @@ test('the boot tap unlocks, and audio:unlocked is emitted exactly once (AC-7, AC
   expect(events.filter((text) => text.startsWith('[events] audio:unlocked'))).toHaveLength(1);
 });
 
-test('after unlock the first play returns a Voice, and a dead bank then returns null with one warning (AC-9, AC-60)', async ({
-  page,
-}) => {
+test('the first play returns a Voice, then a dead bank returns null and warns once (AC-9, AC-60)', async ({ page }) => {
   const messages: string[] = [];
   page.on('console', (message) => messages.push(message.text()));
   await start(page);

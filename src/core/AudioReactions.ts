@@ -22,7 +22,9 @@ import type { DialogueId, EnemyId, ResourceId } from '@/data/index';
  * What one event sounds like. Pure: it reads the payload and names a sound, and
  * `core/Audio.ts` decides whether the mixer can actually play it.
  */
-export type Reaction<K extends keyof GameEvents> = (payload: GameEvents[K]) => { id: SoundId; opts?: PlayOptions } | null;
+export type Reaction<K extends keyof GameEvents> = (
+  payload: GameEvents[K],
+) => { id: SoundId; opts?: PlayOptions } | null;
 
 // --------------------------------------------------------------- lookup maps
 
