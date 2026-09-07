@@ -582,13 +582,14 @@ button.slot-button {
   from { opacity: 0; transform: translateY(16px); }
 }
 
-/* Every animated affordance goes static when the player asked for less
-   motion (AC-66, AC-71, AC-110); the JS half checks the same query. */
-@media (prefers-reduced-motion: reduce) {
-  .toast,
-  .sheet {
-    animation: none;
-  }
+/* Every animated affordance goes static when the player asked for less motion
+   (AC-66, AC-71, AC-88, AC-110). The gate is the `reduce-motion` class the
+   composition root keeps on <html> from the setting — which defaults from
+   `prefers-reduced-motion`, so the OS preference and the in-app toggle arrive
+   through the same door. */
+html.reduce-motion .toast,
+html.reduce-motion .sheet {
+  animation: none;
 }
 
 /* -------------------------------------------------------------------- HUD */
@@ -766,16 +767,14 @@ button.slot-button {
 }
 
 /* AC-66: static versions — the state stays visible, nothing moves. */
-@media (prefers-reduced-motion: reduce) {
-  .hud.is-low-hp .bar-hp,
-  .hud.is-cargo-full .res.at-cap {
-    animation: none;
-    outline: 1px solid var(--hp);
-  }
+html.reduce-motion .hud.is-low-hp .bar-hp,
+html.reduce-motion .hud.is-cargo-full .res.at-cap {
+  animation: none;
+  outline: 1px solid var(--hp);
+}
 
-  .hud-vignette {
-    transition: none;
-  }
+html.reduce-motion .hud-vignette {
+  transition: none;
 }
 
 /* --------------------------------------------------------------- dialogue */
@@ -867,18 +866,16 @@ button.slot-button {
 }
 
 /* AC-71: both speaker styles go static when the player asked for less motion. */
-@media (prefers-reduced-motion: reduce) {
-  .dialogue-warden {
-    animation: none;
-  }
+html.reduce-motion .dialogue-warden {
+  animation: none;
+}
 
-  .dialogue-warden .dialogue-text {
-    text-shadow: none;
-  }
+html.reduce-motion .dialogue-warden .dialogue-text {
+  text-shadow: none;
+}
 
-  .dialogue-dim {
-    transition: none;
-  }
+html.reduce-motion .dialogue-dim {
+  transition: none;
 }
 
 /* --------------------------------------------------------------- settings */
@@ -1153,19 +1150,17 @@ button.slot-button {
   opacity: 1;
 }
 
-@media (prefers-reduced-motion: reduce) {
-  .overlay-loading::before {
-    animation: none;
-  }
+html.reduce-motion .overlay-loading::before {
+  animation: none;
+}
 
-  .death-respawn {
-    animation: none;
-  }
+html.reduce-motion .death-respawn {
+  animation: none;
+}
 
-  .overlay-ending-escape,
-  .overlay-ending-escape .ending-prompt {
-    transition: none;
-  }
+html.reduce-motion .overlay-ending-escape,
+html.reduce-motion .overlay-ending-escape .ending-prompt {
+  transition: none;
 }
 
 /* ------------------------------------------------------------- real scenes */

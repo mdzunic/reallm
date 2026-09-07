@@ -14,8 +14,9 @@ import { el, h, testId } from '@/ui/dom';
 export const ESCAPE_SEQUENCE_MS = 3000;
 export const ESCAPE_PROMPT_TEXT = 'instance/62 disconnected';
 
+/** The `reduce-motion` class the composition root keeps on `<html>` (AC-88). */
 function reducedMotion(): boolean {
-  return globalThis.matchMedia?.('(prefers-reduced-motion: reduce)').matches === true;
+  return document.documentElement.classList.contains('reduce-motion');
 }
 
 export class EndingOverlay {

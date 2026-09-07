@@ -48,6 +48,31 @@ const settings = createSettings(undefined, events);
 const input = new Input(canvas, events, settings);
 
 /**
+ * SPEC-014 AC-88/AC-110: reduced motion is one DOM contract — a `reduce-motion`
+ * class on `<html>` that every static-version CSS rule gates on. The setting
+ * *defaults* from `prefers-reduced-motion` (core/Settings.ts), the panel's
+ * toggle overrides it, and a live OS flip below folds back into the same
+ * setting — so the CSS and the JS halves can never disagree.
+ */
+const motionOwner = {};
+const applyReduceMotion = (): void => {
+  document.documentElement.classList.toggle('reduce-motion', settings.get().reduceMotion);
+};
+applyReduceMotion();
+events.on(
+  'settings:changed',
+  ({ patch }) => {
+    if (patch.reduceMotion !== undefined) applyReduceMotion();
+  },
+  motionOwner,
+);
+if (typeof globalThis.matchMedia === 'function') {
+  globalThis.matchMedia('(prefers-reduced-motion: reduce)').addEventListener('change', (event) => {
+    settings.set({ reduceMotion: event.matches });
+  });
+}
+
+/**
  * SPEC-007's slot store. Built here rather than left to `Game` because it needs
  * the same settings store — `persistGranted` and `installHintShownAt` are where
  * §4.7 records what the browser answered.
