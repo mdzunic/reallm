@@ -2,12 +2,18 @@
 // (SPEC-002 §3.9, SPEC-003 §3). `GameServices` is the whole set `core/Game.ts`
 // implements; every member SPEC-003 already consumes keeps its name and type.
 //
-// `GameEvents` and `EventBus` live here until SPEC-004 lands `core/Events.ts`,
-// which moves both without changing a single name or payload. Both are
-// structural interfaces: the real implementations satisfy them without changing
-// this file.
+// `GameEvents` and `EmitArgs` moved to `core/Events.ts` with SPEC-004 — not one
+// name or payload changed — and are re-exported here, so every import site that
+// already reaches for them keeps working (SPEC-004 D-7, AC-25).
+//
+// The `EventBus` below stays what it has always been: a narrow *structural*
+// port, the three members this layer consumes. `core/Events.ts` exports the
+// concrete class, which satisfies this port; keeping the port structural is
+// what lets a test hand the scene machine an object literal, which no class
+// with `#private` fields could ever be.
 import type { Assets } from '@/core/Assets';
 import type { Audio } from '@/core/Audio';
+import type { EmitArgs, GameEvents } from '@/core/Events';
 import type { Input } from '@/core/Input';
 import type { Loop } from '@/core/Loop';
 import type { Renderer } from '@/core/Renderer';
@@ -15,32 +21,8 @@ import type { SaveStore } from '@/core/Save';
 import type { SettingsStore } from '@/core/Settings';
 import type { SceneId, SceneManager, SceneParams, TransitionUi } from '@/core/StateMachine';
 
-/**
- * Every event the game emits. SPEC-004 owns the full map; every name and
- * payload below joins it unchanged (SPEC-003 D-22). Emitting a name that is not
- * in the map is a compile error.
- */
-export interface GameEvents {
-  'scene:transition': { from: SceneId | null; to: SceneId };
-  'scene:entered': { id: SceneId };
-  'ui:toast': { kind: 'info' | 'warn' | 'error'; text: string };
-  /**
-   * The tab was hidden or the phone locked (SPEC-002 §4.4); never auto-resumes
-   * (E6, SPEC-003 D-38). The payload stays `void` — the reason is read from
-   * `game.pauseReason` and written to the debug event log (SPEC-002 D-D).
-   */
-  'app:paused': void;
-  'app:resumed': void;
-  /** Emitted after every applied resize, so scenes fix camera aspect (SPEC-002 §4.3). */
-  'renderer:resized': { width: number; height: number; dpr: number };
-  'renderer:context-lost': void;
-  'renderer:context-restored': void;
-  /** The rotate prompt itself is SPEC-015 §6; this is the signal it listens to. */
-  'ui:orientation': { orientation: 'portrait' | 'landscape' };
-}
-
-/** `[]` for a `void` payload, `[payload]` otherwise — so `emit('app:paused')` reads right. */
-export type EmitArgs<K extends keyof GameEvents> = GameEvents[K] extends void ? [] : [payload: GameEvents[K]];
+/** The canonical event map and its emit-argument helper now live in `core/Events.ts`. */
+export type { EmitArgs, GameEvents };
 
 export interface EventBus {
   emit<K extends keyof GameEvents>(name: K, ...args: EmitArgs<K>): void;

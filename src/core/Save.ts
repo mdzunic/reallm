@@ -8,9 +8,16 @@
 // away.
 import { log } from '@/core/Log';
 
+/**
+ * Why an autosave was asked for. A placeholder alias until SPEC-007 narrows it
+ * to that spec's own list of safe points; `save:written` carries it
+ * (SPEC-004 §3.2, D-3).
+ */
+export type SaveReason = string;
+
 export interface SaveStore {
   /** Ask for an autosave at a safe point; never writes inside `update()`. */
-  request(reason: string): void;
+  request(reason: SaveReason): void;
   /** Called once per frame after render: writes a pending request, if any. */
   tick(): void;
   /** Write now, synchronously (pagehide, hidden tab). */
@@ -21,7 +28,7 @@ export interface SaveStore {
 /** Records the last reason for the debug log and writes nothing. */
 export function createNullSave(): SaveStore {
   return {
-    request(reason: string): void {
+    request(reason: SaveReason): void {
       log.debug('save', `requested (${reason}) — no store until SPEC-007`);
     },
     tick(): void {},

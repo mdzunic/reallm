@@ -12,6 +12,13 @@ import { log } from '@/core/Log';
 
 export const SETTINGS_KEY = 'reallm:settings';
 
+/**
+ * The data-only shape of `SettingsStore` — what `settings:changed` carries a
+ * `Partial<>` of (SPEC-004 §3.2). SPEC-006/007 add volumes, reduce motion,
+ * control options and `lastSlot` here as they land them on the store.
+ */
+export type Settings = { quality: QualityPreset | null; showFps: boolean };
+
 export interface SettingsStore {
   /** `null` = never chosen; the boot sequence then picks a default (§4.5). */
   readonly quality: QualityPreset | null;
