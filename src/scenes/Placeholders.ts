@@ -24,9 +24,11 @@ import type { Renderer } from '@/core/Renderer';
 import { ALLOWED_TRANSITIONS, type Scene, type SceneFactory, type SceneId, type SceneParams } from '@/core/StateMachine';
 import { cargoCap, maxHp } from '@/core/Save';
 import { cumulativeXp, xpToNext } from '@/systems/Progression';
+import { DeathOverlay } from '@/ui/DeathOverlay';
 import { uiLayers } from '@/ui/dom';
 import { Hud } from '@/ui/Hud';
 import { PauseMenu } from '@/ui/PauseMenu';
+import { RotateOverlay } from '@/ui/RotateOverlay';
 import { SavePanel } from '@/ui/SavePanel';
 import { TouchControls } from '@/ui/TouchControls';
 
@@ -135,6 +137,15 @@ class PlaceholderScene<K extends SceneId> implements Scene<K> {
       this.#hud = hud;
       this.disposer.add(() => hud.dispose());
       this.disposer.add(this.services.events.on('player:damaged', () => hud.damageFlash(), this));
+      // SPEC-014 §4.9: death and rotate overlays belong to the gameplay scenes.
+      // The penalty numbers arrive with SPEC-012's death flow; the overlay
+      // itself and its wiring are this spec's (AC-99, AC-101).
+      const death = new DeathOverlay(uiRoot());
+      this.disposer.add(() => death.dispose());
+      this.disposer.add(this.services.events.on('player:died', () => death.show(), this));
+      this.disposer.add(this.services.events.on('player:respawned', () => death.hide(), this));
+      const rotate = new RotateOverlay(uiRoot(), this.services.events);
+      this.disposer.add(() => rotate.dispose());
     }
   }
 

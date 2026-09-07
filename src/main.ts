@@ -18,6 +18,7 @@ import { BootOverlay } from '@/ui/BootOverlay';
 import { ContextLostOverlay } from '@/ui/ContextLostOverlay';
 import { StatsOverlay } from '@/ui/StatsOverlay';
 import { TransitionOverlay } from '@/ui/TransitionOverlay';
+import { UpdateOverlay } from '@/ui/UpdateOverlay';
 
 const canvas = document.getElementById('game');
 if (!(canvas instanceof HTMLCanvasElement)) throw new Error('index.html must carry <canvas id="game">');
@@ -71,6 +72,8 @@ const audio = createAudio({
 // The overlay buttons need the game they drive, and the game needs the overlay:
 // the simulators reach it late, through a click, so a holder is enough.
 let running: Game | undefined;
+// SPEC-014 AC-103: dormant until M7's service worker gives it a signal.
+new UpdateOverlay(uiRoot);
 const statsOverlay = new StatsOverlay(uiRoot, {
   onLoseContext: (restoreAfterMs) => running?.loseContext(restoreAfterMs),
   restoreAfterMs: SIMULATED_RESTORE_MS,

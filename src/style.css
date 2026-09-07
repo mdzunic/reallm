@@ -1019,3 +1019,151 @@ button.slot-button {
 .pause-sheet-what {
   color: var(--ink-dim);
 }
+
+/* --------------------------------------------------------------- overlays */
+/* AC-98: the loading overlay carries a spinner once it appears (250 ms). */
+.overlay-loading::before {
+  content: '';
+  display: inline-block;
+  width: 18px;
+  height: 18px;
+  margin-right: 10px;
+  vertical-align: -4px;
+  border: 2px solid var(--ink-dim);
+  border-top-color: var(--ink);
+  border-radius: 50%;
+  animation: spinner-turn 800ms linear infinite;
+}
+
+@keyframes spinner-turn {
+  to { transform: rotate(360deg); }
+}
+
+.overlay-death {
+  flex-direction: column;
+  gap: 8px;
+  background: rgba(10, 4, 6, 0.82);
+}
+
+.death-title {
+  margin: 0;
+  font-size: clamp(22px, 4vmin, 34px);
+  letter-spacing: 0.3em;
+  color: var(--hp);
+}
+
+.death-lost {
+  margin: 0;
+  color: var(--warn);
+}
+
+.death-lost:empty {
+  display: none;
+}
+
+.death-respawn {
+  margin: 0;
+  color: var(--ink-dim);
+  animation: hud-pulse 1.2s ease-in-out infinite;
+}
+
+.overlay-rotate {
+  flex-direction: column;
+  gap: 6px;
+}
+
+.rotate-glyph {
+  margin: 0;
+  font-size: 42px;
+}
+
+.rotate-text {
+  margin: 0;
+}
+
+/* AC-103: a banner, not a wall — play continues under it. */
+.update-banner {
+  position: absolute;
+  top: max(10px, env(safe-area-inset-top));
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 8px 14px;
+  border-radius: 6px;
+  background: var(--panel);
+  border: 1px solid var(--good);
+  color: var(--ink);
+  display: none;
+  z-index: 56;
+}
+
+.update-banner.is-visible {
+  display: block;
+}
+
+/* ---------------------------------------------------------------- endings */
+.overlay-ending {
+  z-index: 70;
+}
+
+.ending-report {
+  max-width: min(460px, 90vw);
+  padding: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  font-family: ui-monospace, 'Cascadia Mono', 'SF Mono', Menlo, Consolas, monospace;
+}
+
+.ending-report-head {
+  margin: 0;
+  color: var(--good);
+}
+
+.ending-report-line {
+  margin: 0;
+  color: var(--ink);
+}
+
+/* AC-105: everything sinks to black except one line of terminal. */
+.overlay-ending-escape {
+  position: absolute;
+  inset: 0;
+  z-index: 80;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgb(0 0 0 / 0%);
+  pointer-events: auto;
+  transition: background 3s linear;
+}
+
+.overlay-ending-escape .ending-prompt {
+  margin: 0;
+  font-family: ui-monospace, 'Cascadia Mono', 'SF Mono', Menlo, Consolas, monospace;
+  color: var(--good);
+  opacity: 0;
+  transition: opacity 2s linear 1s;
+}
+
+.overlay-ending-escape.is-final {
+  background: rgb(0 0 0 / 100%);
+}
+
+.overlay-ending-escape.is-final .ending-prompt {
+  opacity: 1;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .overlay-loading::before {
+    animation: none;
+  }
+
+  .death-respawn {
+    animation: none;
+  }
+
+  .overlay-ending-escape,
+  .overlay-ending-escape .ending-prompt {
+    transition: none;
+  }
+}
