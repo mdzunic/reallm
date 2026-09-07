@@ -161,11 +161,18 @@ export class CreationScene extends UiScene<'creation'> {
     }
   }
 
-  /** AC-16: primary tints the body, secondary every other material slot. */
+  /**
+   * AC-16: primary is the body colour, secondary an emissive cast. The Kenney
+   * character carries a single material, so any split by material slot would
+   * leave one picker dead — this way both swatch rows visibly tint the model
+   * whatever the asset exposes.
+   */
   #applyTint(): void {
-    this.#tintable.forEach((material, index) => {
-      material.color.set(index % 2 === 0 ? this.#primary : this.#secondary);
-    });
+    for (const material of this.#tintable) {
+      material.color.set(this.#primary);
+      material.emissive.set(this.#secondary);
+      material.emissiveIntensity = 0.3;
+    }
   }
 
   /** The preview box in renderer coordinates; measured outside the loop. */
@@ -191,6 +198,11 @@ export class CreationScene extends UiScene<'creation'> {
     // The preview box lives *beside* the opaque form panel: the scissor pass
     // draws on the canvas underneath, so nothing solid may cover the box.
     this.#previewBox = testId(el('div', 'creation-preview'), 'creation-preview');
+    // A passive layout shift (font swap, a scrollbar appearing) moves the box
+    // without a resize event; the observer keeps the scissor pass honest.
+    const observer = new ResizeObserver(() => this.#measure());
+    observer.observe(this.#previewBox);
+    this.disposer.add(() => observer.disconnect());
     const side = el('div', 'creation-side');
     side.append(this.#previewBox, el('p', 'creation-preview-label', 'Preview'));
     this.#root = testId(el('div', 'creation-root'), 'creation-root');
