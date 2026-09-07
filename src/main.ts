@@ -7,6 +7,7 @@ import { EventBus, type GameEvents } from '@/core/Events';
 import { Game, parseFlags, SIMULATED_RESTORE_MS } from '@/core/Game';
 import { Input } from '@/core/Input';
 import { log } from '@/core/Log';
+import { SaveStore } from '@/core/Save';
 import { createSettings } from '@/core/Settings';
 import type { SceneId } from '@/core/StateMachine';
 import { ASSETS } from '@/data/assets';
@@ -39,8 +40,15 @@ const flags = parseFlags(globalThis.location.search);
  * `Game`, because `Input` and `Game` have to read the same one — `autoFire`,
  * `joystickSide` and `flightMouseSteer` live next to `quality` and `showFps`.
  */
-const settings = createSettings();
+const settings = createSettings(undefined, events);
 const input = new Input(canvas, events, settings);
+
+/**
+ * SPEC-007's slot store. Built here rather than left to `Game` because it needs
+ * the same settings store — `persistGranted` and `installHintShownAt` are where
+ * §4.7 records what the browser answered.
+ */
+const save = new SaveStore(events, undefined, { settings });
 
 // The overlay buttons need the game they drive, and the game needs the overlay:
 // the simulators reach it late, through a click, so a holder is enough.
@@ -63,7 +71,7 @@ const game = new Game({
     contextLost: new ContextLostOverlay(uiRoot),
     stats: statsOverlay,
   },
-  services: { input, settings },
+  services: { input, settings, save },
 });
 running = game;
 

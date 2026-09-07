@@ -1,16 +1,24 @@
-// Persisted player settings (SPEC-002 §3.8, §4.8). One `localStorage` key holds
-// a JSON object shared by every spec that owns a setting; SPEC-002 reads and
-// writes only `quality` and `showFps`.
+// Persisted player settings (SPEC-007 §3, §4.7; SPEC-002 §3.8, §4.8). One
+// `localStorage` key holds a JSON object shared by every spec that owns a
+// setting: audio volumes and reduce-motion (SPEC-006), the four control options
+// (SPEC-005), quality and the benchmark (SPEC-015), and the storage bookkeeping
+// this spec adds — `lastSlot`, `persistGranted`, `installHintShownAt`.
 //
-// A write re-reads the stored object and merges, so the settings other specs
-// add (audio volumes, reduce motion, control options, `lastSlot`) survive a
-// write from here. Storage itself is never trusted: private mode, a full quota
-// and a disabled store all throw, and all of them are swallowed — the
-// in-memory value still updates, so the session behaves normally (02-h).
+// Settings are global, not per slot: they are about the device, not the
+// character (SPEC-007 §2).
+//
+// A write re-reads the stored object and merges the changed keys only, so a
+// setting another store wrote in between survives. Storage itself is never
+// trusted: private mode, a full quota and a disabled store all throw, and all
+// of them are swallowed — the in-memory value still updates, so the session
+// behaves normally (02-h). Content that will not parse is replaced with the
+// defaults and rewritten, with no prompt (07-e).
 import type { QualityPreset } from '@/core/Renderer';
+import type { EmitArgs, GameEvents } from '@/core/Events';
 import { log } from '@/core/Log';
 
 export const SETTINGS_KEY = 'reallm:settings';
+export const SETTINGS_VERSION = 1 as const;
 
 /**
  * `'touch'` (the default) auto-fires only while the touch scheme is active,
@@ -24,24 +32,52 @@ export type JoystickSide = 'left' | 'right';
 export const MIN_BUTTON_SCALE = 1;
 export const MAX_BUTTON_SCALE = 2;
 
+/** SPEC-015 §4 stores what the boot benchmark measured, so it runs once. */
+export interface BenchmarkResult {
+  preset: QualityPreset;
+  msPerFrame: number;
+  at: number;
+}
+
 /**
  * The data-only shape of `SettingsStore` — what `settings:changed` carries a
- * `Partial<>` of (SPEC-004 §3.2). SPEC-006/007 add volumes, reduce motion and
- * `lastSlot` here as they land them on the store; the four control options are
- * SPEC-005's.
+ * `Partial<>` of (SPEC-004 §3.2).
  */
 export type Settings = {
+  version: 1;
+  /** 0..1 (SPEC-006). */
+  master: number;
+  music: number;
+  sfx: number;
+  /** `null` = auto; the boot benchmark decides (SPEC-015 §4). */
   quality: QualityPreset | null;
-  showFps: boolean;
+  /** Defaults from `prefers-reduced-motion`. */
+  reduceMotion: boolean;
   autoFire: AutoFireMode;
   joystickSide: JoystickSide;
-  /** Flight only: blend keyboard steering toward the mouse reticle (AC-29). */
+  /** Flight only: blend keyboard steering toward the mouse reticle (SPEC-005 AC-29). */
   flightMouseSteer: boolean;
-  /** Multiplies the 56 px touch-button base; never below 1 (AC-16). */
+  /** Multiplies the 56 px touch-button base; never below 1 (SPEC-005 AC-16). */
   buttonScale: number;
+  showFps: boolean;
+  lastSlot: 0 | 1 | 2 | null;
+  /** The result of `navigator.storage.persist()` (SPEC-007 §4.7). */
+  persistGranted: boolean | null;
+  /** When the iOS Home Screen hint was last shown (SPEC-007 §4.7). */
+  installHintShownAt: number | null;
+  /** `null` = ask once on boot (Android/desktop); SPEC-015 §7. */
+  fullscreen: boolean | null;
+  benchmark: BenchmarkResult | null;
 };
 
 export interface SettingsStore {
+  /** The whole object, for the settings menu and the `persist` row of the overlay. */
+  get(): Readonly<Settings>;
+  /** Validates, writes immediately and emits `settings:changed` (SPEC-007 §3). */
+  set(patch: Partial<Settings>): void;
+
+  // The per-setting accessors SPEC-002 and SPEC-005 already consume; each one
+  // is `set()` with a single key.
   /** `null` = never chosen; the boot sequence then picks a default (§4.5). */
   readonly quality: QualityPreset | null;
   setQuality(preset: QualityPreset): void;
@@ -57,9 +93,50 @@ export interface SettingsStore {
   setButtonScale(value: number): void;
 }
 
+/** The slice of the bus this module uses; a structural port (SPEC-004 D-7). */
+export interface SettingsEvents {
+  emit<K extends keyof GameEvents>(name: K, ...args: EmitArgs<K>): void;
+}
+
 const PRESETS: readonly string[] = ['low', 'medium', 'high'];
-const AUTO_FIRE_MODES: readonly string[] = ['touch', 'on', 'off'];
-const JOYSTICK_SIDES: readonly string[] = ['left', 'right'];
+const AUTO_FIRE_MODES: readonly AutoFireMode[] = ['touch', 'on', 'off'];
+const JOYSTICK_SIDES: readonly JoystickSide[] = ['left', 'right'];
+
+/** `prefers-reduced-motion: reduce` where the platform reports it. */
+function prefersReducedMotion(): boolean {
+  const scope = globalThis as { matchMedia?: (query: string) => { matches: boolean } };
+  try {
+    return scope.matchMedia?.('(prefers-reduced-motion: reduce)').matches === true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * The defaults of SPEC-007 §3. `flightMouseSteer` stays `false`: the setting
+ * belongs to SPEC-005, whose shipped behaviour and tests have flight aim-assist
+ * off until the player asks for it.
+ */
+export function defaultSettings(): Settings {
+  return {
+    version: SETTINGS_VERSION,
+    master: 1,
+    music: 0.7,
+    sfx: 1,
+    quality: null,
+    reduceMotion: prefersReducedMotion(),
+    autoFire: 'touch',
+    joystickSide: 'left',
+    flightMouseSteer: false,
+    buttonScale: MIN_BUTTON_SCALE,
+    showFps: false,
+    lastSlot: null,
+    persistGranted: null,
+    installHintShownAt: null,
+    fullscreen: null,
+    benchmark: null,
+  };
+}
 
 /** `localStorage` where there is one; node tests and locked-down browsers get null. */
 function defaultStorage(): Storage | null {
@@ -71,111 +148,220 @@ function defaultStorage(): Storage | null {
   }
 }
 
-/** The stored object, or `{}` for absent, unreadable, unparseable or non-object content. */
-function read(storage: Storage | null): Record<string, unknown> {
-  if (storage === null) return {};
+/**
+ * The stored object, or `{}` for absent, unreadable, unparseable or non-object
+ * content. `corrupt` separates "nothing stored yet" from "stored something we
+ * cannot read", which is what 07-e rewrites.
+ */
+function read(storage: Storage | null): { data: Record<string, unknown>; corrupt: boolean } {
+  if (storage === null) return { data: {}, corrupt: false };
   let raw: string | null;
   try {
     raw = storage.getItem(SETTINGS_KEY);
   } catch (error) {
     log.warn('settings', 'could not read settings; using defaults', error);
-    return {};
+    return { data: {}, corrupt: false };
   }
-  if (raw === null) return {};
+  if (raw === null) return { data: {}, corrupt: false };
   let parsed: unknown;
   try {
     parsed = JSON.parse(raw);
   } catch (error) {
     log.warn('settings', 'stored settings are not valid JSON; using defaults', error);
-    return {};
+    return { data: {}, corrupt: true };
   }
   if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
     log.warn('settings', 'stored settings are not an object; using defaults');
-    return {};
+    return { data: {}, corrupt: true };
   }
-  return parsed as Record<string, unknown>;
+  return { data: parsed as Record<string, unknown>, corrupt: false };
+}
+
+function clamp(value: number, low: number, high: number): number {
+  return Math.min(high, Math.max(low, value));
+}
+
+/** A volume outside 0..1, or NaN, reads as the default for that channel. */
+function volume(value: unknown, fallback: number): number {
+  return typeof value === 'number' && Number.isFinite(value) ? clamp(value, 0, 1) : fallback;
 }
 
 /** A stored scale outside the range, or NaN, reads as the 1× base (AC-16). */
-function clampScale(value: number): number {
-  if (!Number.isFinite(value)) return MIN_BUTTON_SCALE;
-  return Math.min(MAX_BUTTON_SCALE, Math.max(MIN_BUTTON_SCALE, value));
+function clampScale(value: unknown): number {
+  if (typeof value !== 'number' || !Number.isFinite(value)) return MIN_BUTTON_SCALE;
+  return clamp(value, MIN_BUTTON_SCALE, MAX_BUTTON_SCALE);
 }
 
-/** `storage` defaults to `localStorage`; tests pass a fake. Never throws. */
-export function createSettings(storage?: Storage): SettingsStore {
-  const store = storage ?? defaultStorage();
-  const initial = read(store);
-  const storedQuality = initial['quality'];
-  let quality: QualityPreset | null =
-    typeof storedQuality === 'string' && PRESETS.includes(storedQuality) ? (storedQuality as QualityPreset) : null;
-  let showFps = initial['showFps'] === true;
-  const storedAutoFire = initial['autoFire'];
-  let autoFire: AutoFireMode =
-    typeof storedAutoFire === 'string' && AUTO_FIRE_MODES.includes(storedAutoFire)
-      ? (storedAutoFire as AutoFireMode)
-      : 'touch';
-  const storedSide = initial['joystickSide'];
-  let joystickSide: JoystickSide =
-    typeof storedSide === 'string' && JOYSTICK_SIDES.includes(storedSide) ? (storedSide as JoystickSide) : 'left';
-  let flightMouseSteer = initial['flightMouseSteer'] === true;
-  const storedScale = initial['buttonScale'];
-  let buttonScale = typeof storedScale === 'number' ? clampScale(storedScale) : MIN_BUTTON_SCALE;
+function oneOf<T extends string>(value: unknown, allowed: readonly T[], fallback: T): T {
+  return typeof value === 'string' && (allowed as readonly string[]).includes(value) ? (value as T) : fallback;
+}
 
-  /** Merge one key into whatever is stored now, so another spec's keys survive. */
-  function write(key: string, value: unknown): void {
-    if (store === null) return;
+function boolOrNull(value: unknown, fallback: boolean | null): boolean | null {
+  if (typeof value === 'boolean' || value === null) return value;
+  return fallback;
+}
+
+function benchmarkOrNull(value: unknown, fallback: BenchmarkResult | null): BenchmarkResult | null {
+  if (value === null) return null;
+  if (typeof value !== 'object' || value === undefined || Array.isArray(value)) return fallback;
+  const bag = value as Record<string, unknown>;
+  const preset = bag['preset'];
+  const msPerFrame = bag['msPerFrame'];
+  const at = bag['at'];
+  if (typeof preset !== 'string' || !PRESETS.includes(preset)) return fallback;
+  if (typeof msPerFrame !== 'number' || !Number.isFinite(msPerFrame)) return fallback;
+  if (typeof at !== 'number' || !Number.isFinite(at)) return fallback;
+  return { preset: preset as QualityPreset, msPerFrame, at };
+}
+
+/**
+ * One key of a raw bag, validated against `current`. The same function runs on
+ * load (against the defaults) and on `set` (against what is in memory now), so
+ * a value the store refuses to store is also a value it refuses to read.
+ */
+function coerce<K extends keyof Settings>(key: K, value: unknown, current: Settings): Settings[K] {
+  const out = ((): Settings[keyof Settings] => {
+    switch (key) {
+      case 'version':
+        return SETTINGS_VERSION;
+      case 'master':
+        return volume(value, current.master);
+      case 'music':
+        return volume(value, current.music);
+      case 'sfx':
+        return volume(value, current.sfx);
+      case 'quality':
+        return typeof value === 'string' && PRESETS.includes(value) ? (value as QualityPreset) : null;
+      case 'reduceMotion':
+        return value === true;
+      case 'autoFire':
+        return oneOf(value, AUTO_FIRE_MODES, current.autoFire);
+      case 'joystickSide':
+        return oneOf(value, JOYSTICK_SIDES, current.joystickSide);
+      case 'flightMouseSteer':
+        return value === true;
+      case 'buttonScale':
+        return clampScale(value);
+      case 'showFps':
+        return value === true;
+      case 'lastSlot':
+        return value === 0 || value === 1 || value === 2 ? value : null;
+      case 'persistGranted':
+        return boolOrNull(value, null);
+      case 'installHintShownAt':
+        return typeof value === 'number' && Number.isFinite(value) ? Math.max(0, value) : null;
+      case 'fullscreen':
+        return boolOrNull(value, null);
+      case 'benchmark':
+        return benchmarkOrNull(value, null);
+      default:
+        return current[key];
+    }
+  })();
+  return out as Settings[K];
+}
+
+const KEYS = Object.keys(defaultSettings()) as Array<keyof Settings>;
+
+/**
+ * `target[key] = value` for a `key` that is only known to be *some* member of
+ * the union: TypeScript collapses the assignable type to `never` there, and a
+ * generic wrapper is the standard way to keep the call site itself checked.
+ */
+function assign<K extends keyof Settings>(target: Settings, key: K, value: Settings[K]): void {
+  target[key] = value;
+}
+
+/**
+ * `storage` defaults to `localStorage` and `events` is optional, so the stores
+ * built before the bus exists (and the ones in unit tests) still work. Never
+ * throws.
+ */
+export function createSettings(storage?: Storage | null, events?: SettingsEvents): SettingsStore {
+  const store = storage === undefined ? defaultStorage() : storage;
+  const values = defaultSettings();
+  const initial = read(store);
+  for (const key of KEYS) {
+    if (key === 'version') continue;
+    if (!(key in initial.data)) continue;
+    assign(values, key, coerce(key, initial.data[key], values));
+  }
+
+  /** 07-e: unreadable content is replaced with the defaults, with no prompt. */
+  if (initial.corrupt && store !== null) {
     try {
-      const merged = read(store);
-      merged[key] = value;
-      store.setItem(SETTINGS_KEY, JSON.stringify(merged));
+      store.setItem(SETTINGS_KEY, JSON.stringify(values));
     } catch (error) {
-      log.warn('settings', `could not persist ${key}; it applies to this session only`, error);
+      log.warn('settings', 'could not rewrite the corrupt settings; they apply to this session only', error);
     }
   }
 
+  /** Merge the changed keys into whatever is stored now, so other writes survive. */
+  function write(patch: Partial<Settings>): void {
+    if (store === null) return;
+    try {
+      const merged = read(store).data;
+      for (const [key, value] of Object.entries(patch)) merged[key] = value;
+      store.setItem(SETTINGS_KEY, JSON.stringify(merged));
+    } catch (error) {
+      const keys = Object.keys(patch).join(', ');
+      log.warn('settings', `could not persist ${keys}; it applies to this session only`, error);
+    }
+  }
+
+  function set(patch: Partial<Settings>): void {
+    const applied: Partial<Settings> = {};
+    for (const key of Object.keys(patch) as Array<keyof Settings>) {
+      if (!KEYS.includes(key) || key === 'version') continue;
+      const value = coerce(key, patch[key], values);
+      assign(values, key, value);
+      assign(applied as Settings, key, value);
+    }
+    if (Object.keys(applied).length === 0) return;
+    write(applied);
+    events?.emit('settings:changed', { patch: applied });
+  }
+
   return {
+    get(): Readonly<Settings> {
+      return values;
+    },
+    set,
     get quality(): QualityPreset | null {
-      return quality;
+      return values.quality;
     },
     setQuality(preset: QualityPreset): void {
-      quality = preset;
-      write('quality', preset);
+      set({ quality: preset });
     },
     get showFps(): boolean {
-      return showFps;
+      return values.showFps;
     },
     setShowFps(value: boolean): void {
-      showFps = value;
-      write('showFps', value);
+      set({ showFps: value });
     },
     get autoFire(): AutoFireMode {
-      return autoFire;
+      return values.autoFire;
     },
     setAutoFire(mode: AutoFireMode): void {
-      autoFire = mode;
-      write('autoFire', mode);
+      set({ autoFire: mode });
     },
     get joystickSide(): JoystickSide {
-      return joystickSide;
+      return values.joystickSide;
     },
     setJoystickSide(side: JoystickSide): void {
-      joystickSide = side;
-      write('joystickSide', side);
+      set({ joystickSide: side });
     },
     get flightMouseSteer(): boolean {
-      return flightMouseSteer;
+      return values.flightMouseSteer;
     },
     setFlightMouseSteer(value: boolean): void {
-      flightMouseSteer = value;
-      write('flightMouseSteer', value);
+      set({ flightMouseSteer: value });
     },
     get buttonScale(): number {
-      return buttonScale;
+      return values.buttonScale;
     },
     setButtonScale(value: number): void {
-      buttonScale = clampScale(value);
-      write('buttonScale', buttonScale);
+      set({ buttonScale: value });
     },
   };
 }
