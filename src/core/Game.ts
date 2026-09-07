@@ -247,6 +247,7 @@ export class Game implements GameServices {
     );
 
     this.#watchEvents();
+    this.#watchEventsForDebug();
     this.#watchStatsToggles();
     this.#setStatsVisible(this.#flags.debug || this.#settings.showFps);
   }
@@ -721,6 +722,25 @@ export class Game implements GameServices {
         this,
       ),
     );
+  }
+
+  /**
+   * `?debug`: one wildcard subscription that writes every emitted event to the
+   * console (SPEC-004 §4.6, D-4). It goes on the same teardown list as the rest,
+   * so `stop()` releases it. The stats overlay's own twelve-line event log is a
+   * separate, bounded display and gains no names from this.
+   *
+   * `GameServices.events` is the narrow structural port of SPEC-004 D-7, which
+   * has no `onAny` — only the concrete bus does — so this asks the injected bus
+   * whether it can do it rather than widening the port for a dev-only feature.
+   */
+  #watchEventsForDebug(): void {
+    if (!import.meta.env.DEV || !this.#flags.debug) return;
+    const bus = this.#events as EventBus & {
+      onAny?: (listener: (name: string, payload: unknown) => void) => () => void;
+    };
+    if (typeof bus.onAny !== 'function') return;
+    this.#teardown.push(bus.onAny((name, payload) => log.debug('events', name, payload)));
   }
 
   /** Backtick on desktop, five taps on the version label on a phone (§4.6). */

@@ -2,14 +2,10 @@
 // both halves of the game: `core/` may not import `ui/` or `scenes/`
 // (SPEC-001 §4), so the overlays and the scene factory are built here and
 // injected into `Game`.
-//
-// One seam is still a stand-in and is marked as such: the event bus belongs to
-// SPEC-004, which replaces `createEventBus` with `core/Events.ts` without
-// changing a name or a payload.
 import './style.css';
+import { EventBus, type GameEvents } from '@/core/Events';
 import { Game, parseFlags, SIMULATED_RESTORE_MS } from '@/core/Game';
 import { log } from '@/core/Log';
-import type { EmitArgs, EventBus, GameEvents } from '@/core/Services';
 import type { SceneId } from '@/core/StateMachine';
 import { ASSETS } from '@/data/assets';
 import { PLACEHOLDER_SCENES } from '@/scenes/Placeholders';
@@ -32,40 +28,8 @@ note.dataset['testid'] = 'version-label';
 note.textContent = `ReaLLM ${__APP_VERSION__} · M0 engine`;
 uiRoot.append(note);
 
-/**
- * A stand-in for SPEC-004's typed bus: emit, subscribe with an owner, and the
- * dev-only leak check the scene machine runs after a scene is disposed (D-23).
- * `core/Events.ts` replaces it wholesale.
- */
-function createEventBus(): EventBus {
-  const subscriptions = new Set<{ name: keyof GameEvents; handler: (payload: unknown) => void; owner: object }>();
-  return {
-    emit<K extends keyof GameEvents>(name: K, ...args: EmitArgs<K>): void {
-      const payload = (args as unknown[])[0];
-      for (const subscription of [...subscriptions]) {
-        if (subscription.name === name) subscription.handler(payload);
-      }
-    },
-    on<K extends keyof GameEvents>(name: K, handler: (payload: GameEvents[K]) => void, owner: object): () => void {
-      const subscription = { name, handler: handler as (payload: unknown) => void, owner };
-      subscriptions.add(subscription);
-      return () => {
-        subscriptions.delete(subscription);
-      };
-    },
-    assertNoOwner(owner: object): void {
-      const leaked = [...subscriptions].filter((subscription) => subscription.owner === owner);
-      if (leaked.length === 0) return;
-      log.warn(
-        'events',
-        `${leaked.length} subscription(s) outlived their owner`,
-        leaked.map((subscription) => subscription.name),
-      );
-    },
-  };
-}
-
-const events = createEventBus();
+/** SPEC-004's bus: the one instance, injected into `Game` as `GameServices.events`. */
+const events = new EventBus<GameEvents>();
 const flags = parseFlags(globalThis.location.search);
 
 // The overlay buttons need the game they drive, and the game needs the overlay:
