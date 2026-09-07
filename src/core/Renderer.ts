@@ -140,7 +140,12 @@ function createContext(canvas: HTMLCanvasElement, antialias: boolean): WebGLRend
     antialias,
     powerPreference: 'high-performance',
   };
-  const context = canvas.getContext('webgl2', attributes);
+  let context: WebGL2RenderingContext | null = null;
+  try {
+    context = canvas.getContext('webgl2', attributes);
+  } catch (error) {
+    log.warn('renderer', 'creating the webgl2 context threw', error);
+  }
   if (context === null) {
     log.warn('renderer', 'no webgl2 context with the requested attributes; letting three try');
     return null;
