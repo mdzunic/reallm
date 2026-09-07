@@ -256,7 +256,8 @@ type Source = 'stored' | 'set';
  * load (against the defaults) and on `set` (against what is in memory now), so
  * a value the store refuses to store is also a value it refuses to read — with
  * one deliberate split: an out-of-range volume is clamped on the way in from a
- * setter and replaced by the default on the way in from storage (§6 above).
+ * setter and replaced by the default on the way in from storage (the two
+ * helpers above; SPEC-006 §6, AC-17 and AC-18).
  */
 function coerce<K extends keyof Settings>(key: K, value: unknown, current: Settings, source: Source): Settings[K] {
   const bus = source === 'stored' ? storedVolume : volume;
