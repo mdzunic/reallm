@@ -140,16 +140,17 @@ export class DialogueUI {
    */
   play(id: DialogueId, opts: { modal?: boolean; onChoice?: (index: number) => void } = {}): Promise<void> {
     const def = DIALOGUE_TABLE[id];
+    let seen: Set<DialogueId> | null = null;
     if (def.once === true) {
       const key = this.#saveKey?.() ?? null;
       if (key !== null) {
-        let seen = SEEN.get(key);
-        if (seen === undefined) {
-          seen = new Set();
-          SEEN.set(key, seen);
+        let set = SEEN.get(key);
+        if (set === undefined) {
+          set = new Set();
+          SEEN.set(key, set);
         }
-        if (seen.has(id)) return Promise.resolve();
-        seen.add(id);
+        if (set.has(id)) return Promise.resolve();
+        seen = set;
       }
     }
     return new Promise((resolve) => {
@@ -157,6 +158,9 @@ export class DialogueUI {
         resolve(); // AC-74: the sixth is dropped, silently
         return;
       }
+      // Only a queued `once` counts as played: one dropped for a full queue
+      // must stay eligible for its next trigger.
+      seen?.add(id);
       this.#queue.push({ id, modal: opts.modal ?? def.modal === true, onChoice: opts.onChoice, resolve });
       if (this.#active === null) this.#next();
     });
