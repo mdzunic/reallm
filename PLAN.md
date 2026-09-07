@@ -25,6 +25,8 @@ Space post-apocalyptic ARPG browser game with a hidden simulation plot. Single-p
 
 **R4 — 2026-09-06 (dependency audit).** Every spec's `depends_on` now lists what its interfaces and acceptance criteria actually consume (event bus for the renderer, settings store for input and audio, `computePlayerStats` for the creation preview, the HUD classes for both scenes), and SPEC-000 orders the queue topologically: 001, 004, 002, 008, 009, 007, 006, 005, 003, 010, 011, 014, 012, 013, 015, 016. PLAN milestones stay the playable checkpoints of §10; because whole specs build at once, the station/menu spec (SPEC-014, checkpoint M2) builds after economy (SPEC-010) and combat (SPEC-011). (§10, §14)
 
+**R5 — 2026-09-07 (mission count corrected in §7).** §7's summary row read "Main missions (18)". §6 enumerates **17** main missions — three per chapter for chapters 1–5, two for chapter 6 — and the same row's own subtotals (55 · 70 · 85 · 105 · 165 · 190) add to 670 across exactly those 17. The enumeration and the subtotals are the design; the header digit was the typo, and it now reads "(17)". No mission is added, removed, or retuned: the campaign is **17 main + 9 side = 26** missions and the 670 / 104 totals are unchanged. Specs: SPEC-009's acceptance criterion "all 27 missions" becomes **26** — `tests/data/content.test.ts` pins 17 / 9 beside the 670 / 104 totals, so the roster and its payout can only move together. (§7)
+
 ---
 
 ## 1. Vision & Inspiration
@@ -297,7 +299,7 @@ Beats: **stay** — the report is filed, Earth is saved, the loop closes ("a goo
 
 | Source | Tokens |
 |---|---|
-| Main missions (18) | 670 (ch1 55 · ch2 70 · ch3 85 · ch4 105 · ch5 165 · ch6 190) |
+| Main missions (17) | 670 (ch1 55 · ch2 70 · ch3 85 · ch4 105 · ch5 165 · ch6 190) |
 | Side missions (9) | 104 |
 | Level-ups (25 each) | ~400 main-path (≈ L17) · ~475 completionist (≈ L20) |
 | **Total** | **~1,070 main-path · ~1,250 completionist** |

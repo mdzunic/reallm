@@ -1,0 +1,66 @@
+// The content barrel (SPEC-009 §5). Every data module is imported statically —
+// there is no async content loading — and re-exported here so a consumer names
+// one module instead of twelve, and so the id unions have a single import site.
+//
+// `CONTENT` is the same tables in one object, for code that wants to walk the
+// whole content set (the invariant test, the campaign simulation of SPEC-016).
+//
+// The id unions of §3 that name a table — `ClassId`, `CompanionId`, `PlanetId`,
+// `ShipSystem`, `WeatherId` — are declared as arrays in `ids.ts` and the tables
+// that use them are `satisfies Record<ThatUnion, Def>`, which is stronger than
+// `keyof typeof`: it makes a missing entry a compile error rather than a
+// narrower union. `tests/data/content.test.ts` pins that the keys and the arrays
+// still agree. Every other table derives its ids with `keyof typeof`.
+//
+// Data modules are plain objects: no imports but other data, no functions
+// (SPEC-001 §4, §8).
+export * from '@/data/assets';
+export * from '@/data/characters';
+export * from '@/data/companions';
+export * from '@/data/dialogue';
+export * from '@/data/enemies';
+export * from '@/data/followers';
+export * from '@/data/ids';
+export * from '@/data/items';
+export * from '@/data/loot';
+export * from '@/data/missions';
+export * from '@/data/planets';
+export * from '@/data/pois';
+export * from '@/data/recipes';
+export * from '@/data/tuning';
+export * from '@/data/upgrades';
+export * from '@/data/waves';
+
+import { ASSETS } from '@/data/assets';
+import { CLASSES } from '@/data/characters';
+import { COMPANIONS } from '@/data/companions';
+import { DIALOGUE } from '@/data/dialogue';
+import { ENEMIES } from '@/data/enemies';
+import { FOLLOWERS } from '@/data/followers';
+import { ITEMS } from '@/data/items';
+import { LOOT_TABLES } from '@/data/loot';
+import { MISSIONS } from '@/data/missions';
+import { PLANETS } from '@/data/planets';
+import { POI_LABELS } from '@/data/pois';
+import { RECIPES } from '@/data/recipes';
+import { TUNING } from '@/data/tuning';
+import { UPGRADES } from '@/data/upgrades';
+import { WAVES } from '@/data/waves';
+
+export const CONTENT = {
+  assets: ASSETS,
+  classes: CLASSES,
+  companions: COMPANIONS,
+  dialogue: DIALOGUE,
+  enemies: ENEMIES,
+  followers: FOLLOWERS,
+  items: ITEMS,
+  loot: LOOT_TABLES,
+  missions: MISSIONS,
+  planets: PLANETS,
+  poiLabels: POI_LABELS,
+  recipes: RECIPES,
+  tuning: TUNING,
+  upgrades: UPGRADES,
+  waves: WAVES,
+} as const;

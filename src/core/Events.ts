@@ -18,6 +18,10 @@ import { log } from '@/core/Log';
 import type { SaveReason } from '@/core/Save';
 import type { Settings } from '@/core/Settings';
 import type { SceneId } from '@/core/StateMachine';
+// SPEC-009 landed the content tables, so these ids are the string-literal
+// unions of the tables themselves rather than `string` aliases. The barrel is
+// the single import site (SPEC-009 §5); no event name and no payload field
+// moved when they narrowed (SPEC-004 D-3).
 import type {
   DamageSource,
   DialogueId,
@@ -30,7 +34,7 @@ import type {
   ResourceId,
   WaveId,
   WeatherId,
-} from '@/data/ids';
+} from '@/data/index';
 
 export type Unsubscribe = () => void;
 export type Handler<P> = (payload: P) => void;

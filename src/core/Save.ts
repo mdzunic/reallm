@@ -20,12 +20,22 @@
 // share. Nothing here reaches for `three`, `systems/`, `scenes/` or `ui/`.
 import type { EmitArgs, GameEvents } from '@/core/Events';
 import { log } from '@/core/Log';
+// SPEC-009 landed the content tables. The ids below are now the string-literal
+// unions of those tables rather than `string` aliases, and `SAVE_CONTENT` reads
+// the real universes instead of the PLAN-locked placeholder lists it carried
+// while `data/` was empty. The seam — `SaveContent` as a parameter — has not
+// moved (§4.4).
 import {
+  CLASSES,
   CLASS_IDS,
   COMPANION_IDS,
+  ITEMS,
+  MISSIONS,
   PLANET_IDS,
   RESOURCE_IDS,
   SHIP_SYSTEMS,
+  STORY_FLAGS,
+  TUNING,
   type ClassId,
   type CompanionId,
   type ItemId,
@@ -33,8 +43,7 @@ import {
   type PlanetId,
   type ResourceId,
   type ShipSystem,
-} from '@/data/ids';
-import { TUNING } from '@/data/tuning';
+} from '@/data/index';
 
 export const SAVE_VERSION = 1 as const;
 
@@ -188,12 +197,11 @@ export interface SaveContent {
   readonly starterArmor: ItemId;
 }
 
+const ITEM_IDS = Object.keys(ITEMS) as ItemId[];
 /** PLAN §4: kinetic → laser → plasma → lithium-edged. */
-const WEAPON_IDS = ['weapon_kinetic', 'weapon_laser', 'weapon_plasma', 'weapon_lithium'] as const;
+const WEAPON_IDS = ITEM_IDS.filter((id) => ITEMS[id].kind === 'weapon');
 /** PLAN §4: scrap → composite → reactive → ablative. */
-const ARMOR_IDS = ['armor_scrap', 'armor_composite', 'armor_reactive', 'armor_ablative'] as const;
-/** PLAN §4: the three station recipes. */
-const CRAFTED_IDS = ['wheat_ration', 'medkit', 'coolant_pack'] as const;
+const ARMOR_IDS = ITEM_IDS.filter((id) => ITEMS[id].kind === 'armor');
 
 /** The starting armor of §4.1 and the fallback of §4.4. */
 export const STARTER_ARMOR: ItemId = 'armor_scrap';
@@ -201,68 +209,37 @@ export const STARTER_ARMOR: ItemId = 'armor_scrap';
 export const WHEAT_RATION: ItemId = 'wheat_ration';
 
 /**
- * PLAN §6, chapter by chapter: mission id → stage count, counted from the
- * `[…] → […]` chains of the chapter tables. SPEC-012 owns the real stage
- * lists; only the count matters here, for the `stage` clamp of §4.4.
+ * Mission id → stage count, for the `stage` clamp of §4.4. SPEC-009 §4.7 owns
+ * the stage lists; only their length matters here.
  */
-const MISSION_STAGES: Record<string, number> = {
-  c1_m1: 3,
-  c1_m2: 1,
-  c1_m3: 2,
-  c2_m1: 2,
-  c2_m2: 1,
-  c2_m3: 2,
-  c3_m1: 2,
-  c3_m2: 2,
-  c3_m3: 1,
-  c4_m1: 2,
-  c4_m2: 1,
-  c4_m3: 2,
-  c5_m1: 1,
-  c5_m2: 1,
-  c5_m3: 1,
-  c6_m1: 3,
-  c6_m2: 2,
-};
-
-/** The story flags PLAN §5 and §6 name. SPEC-009's content test owns the rest. */
-const FLAG_IDS = [
-  'c1_oil',
-  'chapter1_done',
-  'chapter2_done',
-  'chapter3_done',
-  'chapter4_done',
-  'chapter5_done',
-  'signal_decoded',
-  'campaign_done',
-  'ending_stay',
-  'ending_escape',
-] as const;
+const MISSION_STAGES: Record<MissionId, number> = Object.fromEntries(
+  (Object.keys(MISSIONS) as MissionId[]).map((id) => [id, MISSIONS[id].stages.length]),
+) as Record<MissionId, number>;
 
 /**
  * PLAN §4: eight points of class base, then five allocated at creation. The
  * split expresses each class's bias — Marine damage/HP, Engineer tech, Scout
- * speed — and is *initial tuning*: SPEC-009 may retune it without a PLAN entry.
+ * speed. SPEC-009 §4.1 owns the numbers.
  */
 const CLASS_BASE: Record<ClassId, Attributes> = {
-  marine: { might: 3, vigor: 3, agility: 1, tech: 1 },
-  engineer: { might: 1, vigor: 2, agility: 1, tech: 4 },
-  scout: { might: 2, vigor: 1, agility: 4, tech: 1 },
+  marine: CLASSES.marine.baseAttributes,
+  engineer: CLASSES.engineer.baseAttributes,
+  scout: CLASSES.scout.baseAttributes,
 };
 
-/** SPEC-009 §4.2 owns the real per-class table; every class starts at tier 0. */
+/** SPEC-009 §4.1: the weapon each class lands with. */
 const CLASS_STARTER_WEAPON: Record<ClassId, ItemId> = {
-  marine: 'weapon_kinetic',
-  engineer: 'weapon_kinetic',
-  scout: 'weapon_kinetic',
+  marine: CLASSES.marine.startingWeapon,
+  engineer: CLASSES.engineer.startingWeapon,
+  scout: CLASSES.scout.startingWeapon,
 };
 
 export const SAVE_CONTENT: SaveContent = {
-  items: [...WEAPON_IDS, ...ARMOR_IDS, ...CRAFTED_IDS],
+  items: ITEM_IDS,
   weapons: WEAPON_IDS,
   armors: ARMOR_IDS,
   missions: MISSION_STAGES,
-  flags: FLAG_IDS,
+  flags: STORY_FLAGS,
   classBase: CLASS_BASE,
   starterWeapon: CLASS_STARTER_WEAPON,
   starterArmor: STARTER_ARMOR,
@@ -556,11 +533,12 @@ function validateInventory(raw: unknown[], content: SaveContent, warnings: strin
   const byId = new Map<ItemId, number>();
   for (const entry of raw) {
     if (!isBag(entry)) continue;
-    const itemId = entry['itemId'];
-    if (typeof itemId !== 'string' || !content.items.includes(itemId)) {
-      warnings.push(`inventory: unknown item ${JSON.stringify(itemId)} dropped`);
+    const raw = entry['itemId'];
+    if (typeof raw !== 'string' || !(content.items as readonly string[]).includes(raw)) {
+      warnings.push(`inventory: unknown item ${JSON.stringify(raw)} dropped`);
       continue;
     }
+    const itemId = raw as ItemId;
     const qty = Math.round(num(entry['qty'], 0));
     if (qty <= 0) {
       warnings.push(`inventory.${itemId}: quantity ${JSON.stringify(entry['qty'])} dropped`);
@@ -576,13 +554,13 @@ function validateInventory(raw: unknown[], content: SaveContent, warnings: strin
 function validateEquipped(raw: Bag, classId: ClassId, content: SaveContent, warnings: string[]): SaveV1['equipped'] {
   const weapon = raw['weapon'];
   const armor = raw['armor'];
-  const okWeapon = typeof weapon === 'string' && content.weapons.includes(weapon);
-  const okArmor = typeof armor === 'string' && content.armors.includes(armor);
+  const okWeapon = typeof weapon === 'string' && (content.weapons as readonly string[]).includes(weapon);
+  const okArmor = typeof armor === 'string' && (content.armors as readonly string[]).includes(armor);
   if (!okWeapon) warnings.push(`equipped.weapon: unknown ${JSON.stringify(weapon)} fell back to the class starter`);
   if (!okArmor) warnings.push(`equipped.armor: unknown ${JSON.stringify(armor)} fell back to the class starter`);
   return {
-    weapon: okWeapon ? weapon : content.starterWeapon[classId],
-    armor: okArmor ? armor : content.starterArmor,
+    weapon: okWeapon ? (weapon as ItemId) : content.starterWeapon[classId],
+    armor: okArmor ? (armor as ItemId) : content.starterArmor,
   };
 }
 
@@ -629,11 +607,11 @@ function validateProgress(raw: Bag, content: SaveContent, warnings: string[]): S
     if (missionStages(content, id) !== undefined) return true;
     warnings.push(`progress.missionsDone: unknown mission ${JSON.stringify(id)} dropped`);
     return false;
-  });
-  const done = new Set(missionsDone);
+  }) as MissionId[];
+  const done = new Set<string>(missionsDone);
 
   const missionsActive: SaveV1['progress']['missionsActive'] = [];
-  const activeSeen = new Set<MissionId>();
+  const activeSeen = new Set<string>();
   for (const entry of arrayAt(raw, 'missionsActive')) {
     if (!isBag(entry)) continue;
     const id = entry['id'];
@@ -655,7 +633,7 @@ function validateProgress(raw: Bag, content: SaveContent, warnings: string[]): S
     if (entry['stage'] !== stage) {
       warnings.push(`progress.missionsActive.${id}.stage: clamped to 0..${stages - 1}`);
     }
-    missionsActive.push({ id, stage, counters: validateCounters(bagAt(entry, 'counters')) });
+    missionsActive.push({ id: id as MissionId, stage, counters: validateCounters(bagAt(entry, 'counters')) });
   }
 
   const flags = uniqueStrings(arrayAt(raw, 'flags')).filter((flag) => {
