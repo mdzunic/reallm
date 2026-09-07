@@ -12,10 +12,10 @@
 // (PLAN §7, invariant §7.16). Chapter subtotals are 55 · 70 · 85 · 105 · 165 ·
 // 190. Changing a reward means changing the pin, deliberately.
 //
-// PLAN §6 lists 17 main and 9 side missions. Its §7 header says "Main missions
-// (18)", which the chapter tables it summarises do not bear out — the per-chapter
-// token subtotals there add to 670 across exactly these 17. PLAN wins over the
-// spec (CLAUDE.md), so the roster below is PLAN §6 verbatim.
+// The campaign is 17 main and 9 side missions — 26, the roster PLAN §6 lists and
+// locks, reproduced below verbatim. §7's header used to read "Main missions (18)"
+// and the chapter tables it summarises never bore that out; the per-chapter
+// subtotals add to 670 across exactly these 17, so PLAN R5 corrected the digit.
 //
 // Data modules are plain objects: no imports but other data, no functions
 // (SPEC-001 §4, §8).
