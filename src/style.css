@@ -430,3 +430,163 @@ button.slot-button {
   font-size: 12px;
   resize: vertical;
 }
+
+/* ================================================================ SPEC-014 */
+/* The unified DOM UI. Colors are variables so a retint touches one block;
+   the pairs are colorblind-safe by glyph, not hue alone (AC-68, AC-106). */
+:root {
+  --hp: #e5484d;
+  --shield: #4c9aff;
+  --warn: #f5a623;
+  --good: #46c973;
+  --panel: #111820;
+  --panel-edge: #22303c;
+  --ink: #e6edf3;
+  --ink-dim: #8a97a3;
+}
+
+/* Font floor 14 px (AC-107); larger sizes clamp with the viewport (AC-60). */
+#ui {
+  font-size: clamp(14px, 1.6vmin + 8px, 18px);
+}
+
+/* Visible focus for keyboard players (AC-12); never removed, only styled. */
+#ui :focus-visible {
+  outline: 2px solid var(--shield);
+  outline-offset: 2px;
+}
+
+/* The three stacking layers of UiRoot: hud under panels under overlays. */
+.ui-layer {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+.ui-layer-hud { z-index: 10; }
+.ui-layer-panel { z-index: 30; }
+.ui-layer-overlay { z-index: 50; }
+
+.ui-fade { z-index: 60; }
+
+/* Anything interactive opts back into pointer events (SPEC-014 §2). */
+.panel {
+  pointer-events: auto;
+  background: var(--panel);
+  border: 1px solid var(--panel-edge);
+  border-radius: 8px;
+  color: var(--ink);
+}
+
+/* Buttons are real buttons with a 44 px floor (AC-108, 14-f). */
+.ui-btn {
+  min-height: 44px;
+  min-width: 44px;
+  padding: 8px 16px;
+  border: 1px solid var(--panel-edge);
+  border-radius: 6px;
+  background: #1a232e;
+  color: var(--ink);
+  font: inherit;
+  cursor: pointer;
+  touch-action: manipulation;
+}
+
+.ui-btn:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.ui-btn.is-primary {
+  background: #24435e;
+  border-color: var(--shield);
+}
+
+.ui-btn.is-danger {
+  border-color: var(--hp);
+}
+
+/* ------------------------------------------------------------------ toasts */
+.toast-rack {
+  position: absolute;
+  top: max(10px, env(safe-area-inset-top));
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  align-items: center;
+  z-index: 55;
+}
+
+.toast {
+  padding: 8px 14px;
+  border-radius: 6px;
+  background: var(--panel);
+  border: 1px solid var(--panel-edge);
+  color: var(--ink);
+  max-width: 80vw;
+  animation: toast-in 150ms ease-out;
+}
+
+.toast-warn { border-color: var(--warn); }
+.toast-error { border-color: var(--hp); }
+.toast-good { border-color: var(--good); }
+
+.toast-count {
+  margin-left: 8px;
+  color: var(--ink-dim);
+}
+
+@keyframes toast-in {
+  from { opacity: 0; transform: translateY(-6px); }
+}
+
+/* ----------------------------------------------------------- confirm sheet */
+.sheet-backdrop {
+  position: absolute;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.5);
+  pointer-events: auto;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  z-index: 52;
+}
+
+.sheet {
+  width: min(480px, 100vw - 24px);
+  margin-bottom: max(12px, env(safe-area-inset-bottom));
+  padding: 16px;
+  animation: sheet-in 150ms ease-out;
+}
+
+.sheet-title {
+  margin: 0 0 10px;
+  font-weight: 600;
+}
+
+.sheet-body {
+  margin: 0 0 14px;
+  color: var(--ink-dim);
+  white-space: pre-line;
+}
+
+.sheet-actions {
+  display: flex;
+  gap: 10px;
+  justify-content: flex-end;
+}
+
+@keyframes sheet-in {
+  from { opacity: 0; transform: translateY(16px); }
+}
+
+/* Every animated affordance goes static when the player asked for less
+   motion (AC-66, AC-71, AC-110); the JS half checks the same query. */
+@media (prefers-reduced-motion: reduce) {
+  .toast,
+  .sheet {
+    animation: none;
+  }
+}
