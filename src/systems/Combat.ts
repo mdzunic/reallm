@@ -572,10 +572,11 @@ export class Combat {
 
   /** §4.4: i-frames do not block the projectile, only the damage (AC-51). */
   #projectileHitPlayer(p: ProjectileEntity): void {
+    if (p.enemyId === null) return; // every enemy shot carries its shooter (§3)
     const stats = this.#world.stats;
     const amount = hitDamage(p.damage, p.elite, stats, this.#difficulty);
     this.#knockbackPlayer(p.vx, p.vz, PLAYER_KNOCKBACK);
-    this.damagePlayer(amount, { kind: 'projectile', enemyId: p.enemyId ?? 'dust_skitter' });
+    this.damagePlayer(amount, { kind: 'projectile', enemyId: p.enemyId });
   }
 
   #projectileHitFollower(p: ProjectileEntity): void {
