@@ -20,6 +20,7 @@ import {
   pruneToasts,
   pushToast,
   requirementText,
+  passiveText,
   slotLine,
   TOAST_COALESCE_MS,
   TOAST_DEFAULT_MS,
@@ -296,5 +297,22 @@ describe('slotLine (AC-4)', () => {
   it('empty and corrupt slots keep SPEC-007 wording', () => {
     expect(slotLine({ slot: 2, empty: true })).toBe('Empty');
     expect(slotLine({ slot: 2, empty: false, corrupt: true })).toBe('Corrupt');
+  });
+});
+
+describe('passiveText (AC-14)', () => {
+  it('prints every effect the marine passive carries', () => {
+    expect(passiveText({ damageMult: 1.15, maxHpBonus: 20 })).toBe('+15% damage · +20 max HP');
+  });
+
+  it('covers discounts, multipliers and the radar flag', () => {
+    expect(passiveText({ shipTokenDiscount: 0.15, companionEffectMult: 1.25 })).toBe('−15% ship prices · +25% companion effect');
+    expect(passiveText({ moveSpeedMult: 1.15, pickupRadiusMult: 1.25, nodeRadar: true })).toBe(
+      '+15% move speed · +25% pickup radius · resource radar',
+    );
+  });
+
+  it('an empty passive is an empty line, not a crash', () => {
+    expect(passiveText({})).toBe('');
   });
 });

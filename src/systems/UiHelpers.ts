@@ -46,6 +46,29 @@ export function formatTime(seconds: number): string {
   return `${total}s`;
 }
 
+/** `1.15` → `+15%`, `0.85` → `−15%` — passives and effect lines share it. */
+function pct(mult: number): string {
+  const delta = Math.round((mult - 1) * 100);
+  return `${delta >= 0 ? '+' : '−'}${Math.abs(delta)}%`;
+}
+
+/**
+ * The one line a class card prints under its blurb (AC-14): every effect the
+ * passive carries, joined. The numbers come straight off the table, so a
+ * retune never leaves the card lying.
+ */
+export function passiveText(passive: Class['passive']): string {
+  const parts: string[] = [];
+  if (passive.damageMult !== undefined) parts.push(`${pct(passive.damageMult)} damage`);
+  if (passive.maxHpBonus !== undefined) parts.push(`+${passive.maxHpBonus} max HP`);
+  if (passive.shipTokenDiscount !== undefined) parts.push(`−${Math.round(passive.shipTokenDiscount * 100)}% ship prices`);
+  if (passive.companionEffectMult !== undefined) parts.push(`${pct(passive.companionEffectMult)} companion effect`);
+  if (passive.moveSpeedMult !== undefined) parts.push(`${pct(passive.moveSpeedMult)} move speed`);
+  if (passive.pickupRadiusMult !== undefined) parts.push(`${pct(passive.pickupRadiusMult)} pickup radius`);
+  if (passive.nodeRadar === true) parts.push('resource radar');
+  return parts.join(' · ');
+}
+
 /**
  * One line per occupied slot for the Load list (AC-4): name, class, level,
  * planet, playtime — in the order a player reads them. `Corrupt` and `Empty`

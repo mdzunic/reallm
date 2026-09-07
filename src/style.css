@@ -1324,3 +1324,210 @@ button.slot-button {
     flex: 1;
   }
 }
+
+/* --------------------------------------------------------------- creation */
+.creation-root {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  justify-content: center;
+  gap: 16px;
+  padding: max(10px, env(safe-area-inset-top)) max(10px, env(safe-area-inset-right)) max(10px, env(safe-area-inset-bottom)) max(10px, env(safe-area-inset-left));
+  overflow-y: auto;
+}
+
+.creation-form {
+  width: min(640px, 100%);
+  align-self: safe center;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 16px;
+  max-height: 100%;
+  overflow-y: auto;
+}
+
+.creation-title {
+  margin: 0;
+  font-weight: 700;
+  font-size: clamp(18px, 3vmin, 24px);
+}
+
+.creation-subtitle {
+  margin: 0;
+  color: var(--ink-dim);
+}
+
+.creation-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.creation-name {
+  flex: 1;
+  min-width: 160px;
+  max-width: 280px;
+  min-height: 44px;
+  padding: 6px 10px;
+  background: #0a0f15;
+  color: var(--ink);
+  border: 1px solid var(--panel-edge);
+  border-radius: 6px;
+  font: inherit;
+}
+
+.class-cards {
+  display: flex;
+  gap: 10px;
+}
+
+.class-card {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  text-align: left;
+  padding: 10px;
+  min-height: 44px;
+  background: #1a232e;
+  color: var(--ink);
+  border: 1px solid var(--panel-edge);
+  border-radius: 8px;
+  font: inherit;
+  cursor: pointer;
+}
+
+.class-card.is-selected {
+  border-color: var(--shield);
+  background: #24435e;
+}
+
+.class-name {
+  font-weight: 700;
+}
+
+.class-blurb,
+.class-base {
+  color: var(--ink-dim);
+  font-size: 14px;
+}
+
+.class-passive {
+  color: var(--good);
+  font-size: 14px;
+}
+
+.portrait-row,
+.swatch-row {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.portrait {
+  width: 44px;
+  height: 44px;
+  font-size: 22px;
+  background: #1a232e;
+  color: var(--ink);
+  border: 1px solid var(--panel-edge);
+  border-radius: 8px;
+  cursor: pointer;
+}
+
+.swatch {
+  width: 44px;
+  height: 44px;
+  border: 2px solid var(--panel-edge);
+  border-radius: 8px;
+  cursor: pointer;
+}
+
+.portrait.is-selected,
+.swatch.is-selected {
+  border-color: var(--shield);
+  outline: 2px solid var(--shield);
+  outline-offset: 1px;
+}
+
+.creation-attrs {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.attr-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.attr-name {
+  flex: 1;
+  text-transform: capitalize;
+}
+
+.attr-value {
+  min-width: 2ch;
+  text-align: center;
+  font-weight: 700;
+}
+
+.creation-stats {
+  display: flex;
+  gap: 16px;
+  flex-wrap: wrap;
+  color: var(--ink);
+}
+
+.creation-difficulty {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.creation-foot {
+  display: flex;
+  justify-content: flex-end;
+}
+
+/* AC-19: the scissor viewport tracks this box; the canvas shows through it,
+   so the box and everything over it stay transparent. */
+.creation-side {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  align-self: safe center;
+}
+
+.creation-preview {
+  width: clamp(120px, 22vmin, 200px);
+  height: clamp(150px, 30vmin, 240px);
+  border: 1px solid var(--panel-edge);
+  border-radius: 8px;
+  background: transparent;
+}
+
+.creation-preview-label {
+  margin: 0;
+  color: var(--ink-dim);
+}
+
+.creation-confirm {
+  min-width: 140px;
+}
+
+@media (max-width: 620px) {
+  .class-cards {
+    flex-direction: column;
+  }
+
+  .creation-root {
+    flex-direction: column-reverse;
+    align-items: center;
+  }
+}

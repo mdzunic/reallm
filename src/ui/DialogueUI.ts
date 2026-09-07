@@ -9,7 +9,7 @@
 import type { EmitArgs, GameEvents } from '@/core/Events';
 import type { Unsubscribe } from '@/core/Events';
 import { DIALOGUE, type DialogueDef, type DialogueId, type SpeakerId } from '@/data/index';
-import { el, h, testId, type UiRoot } from '@/ui/dom';
+import { el, h, testId, uiLayers, type UiRoot } from '@/ui/dom';
 
 // The schema-typed view of the table: on the `as const` literal types an absent
 // optional — a dialogue with no `modal` — is not a property at all (the same
@@ -57,6 +57,28 @@ interface Job {
  * reload. Keyed by the save object, not the slot, so a New Game replays them.
  */
 const SEEN = new WeakMap<object, Set<DialogueId>>();
+
+const INSTANCES = new WeakMap<HTMLElement, DialogueUI>();
+
+/**
+ * The shared dialogue layer for a `#ui` element — the `uiLayers()` pattern:
+ * scenes reach one page-lifetime instance instead of mounting rivals, the
+ * queue survives the caller (a creation scene that has already been disposed
+ * still gets its intro line out), and `scene:transition` keeps clearing it.
+ * The first caller's options win; every later call reuses the instance.
+ */
+export function dialogueLayer(
+  root: HTMLElement,
+  events: DialogueEvents,
+  options: { input?: DialogueInput; saveKey?: () => object | null } = {},
+): DialogueUI {
+  let instance = INSTANCES.get(root);
+  if (instance === undefined) {
+    instance = new DialogueUI(uiLayers(root), events, options);
+    INSTANCES.set(root, instance);
+  }
+  return instance;
+}
 
 export class DialogueUI {
   readonly #ui: UiRoot;
