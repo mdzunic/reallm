@@ -24,4 +24,12 @@ generated in-repo, the precedent `models/crate.glb` already set. The manifest
 ids, the code path and this table are the same either way. The Kenney packs land
 with the scenes that need them.
 
+`audio/` is still empty. SPEC-006 declares what will go in it — three sfx sprite
+banks (`audio/sfx/{ui,surface,flight}.{webm,mp3}`) and seven looping tracks
+(`audio/music/{menu,station,flight,surface_calm,surface_combat,boss,ending}.{webm,mp3}`)
+— but producing the CC0 sound files is out of that spec's scope, and the audio
+layer is built so a bank that will not decode falls back to silence with one
+warning rather than a failure (SPEC-006 06-e). Each file gets its row here on
+the day it lands; the 12 MB audio budget above is what they share.
+
 Outside this folder: `public/favicon.svg` is original to this repository, CC0.

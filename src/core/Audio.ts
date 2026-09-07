@@ -548,6 +548,12 @@ class HowlerAudio implements Audio {
       preload: true,
       onloaderror: (_soundId, error) => {
         bank.failed = true;
+        // The play that built this bank is still queued inside Howler and will
+        // never reach `end` now, so its voice would hold a slot for the rest of
+        // the session. Nothing from this bank can be heard again either way.
+        for (const [key, voice] of [...this.#voices]) {
+          if (voice.howl === bank.howl) this.#release(key);
+        }
         if (bank.warned) return;
         bank.warned = true;
         log.warn('audio', `the "${bankId}" sound bank could not be decoded; its sounds are silent`, error);
