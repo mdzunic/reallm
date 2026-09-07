@@ -40,7 +40,11 @@ async function denyStorage(page: Page): Promise<void> {
   });
 }
 
-/** Both keys of a slot filled with something that is not a save (E8, AC-20). */
+/**
+ * Both keys of a slot filled with something that is not a save (E8, AC-20).
+ * Always a slot no save is bound to: a bound one is written back on `pagehide`
+ * (§4.5), which would repair the very slot the test is about.
+ */
 async function corruptSlot(page: Page, slot: number): Promise<void> {
   await page.evaluate((n) => {
     localStorage.setItem(`reallm:slot:${n}`, '{"version":1,"player":'); // a torn write
@@ -176,10 +180,12 @@ test('storage that refuses every write leaves a playable memory-only session (AC
 
 test('a slot with neither a readable save nor a readable backup offers Import (AC-20)', async ({ page }) => {
   await start(page);
+  // The character lives in slot 0; slot 1 is the wreck the panel has to offer a
+  // way out of.
   const code = await page.evaluate(async (creation) => {
     const save = window.__reallm.save();
-    save.create(1, creation);
-    return save.exportCode(1);
+    save.create(0, creation);
+    return save.exportCode(0);
   }, CREATION);
   await corruptSlot(page, 1);
   await start(page); // a reload: the menu builds its rows from what is in storage
@@ -201,7 +207,6 @@ test('a slot with neither a readable save nor a readable backup offers Import (A
 
 test('a corrupt slot can be deleted from the menu, backup and all (AC-20, AC-58)', async ({ page }) => {
   await start(page);
-  await page.evaluate((creation) => window.__reallm.save().create(2, creation), CREATION);
   await corruptSlot(page, 2);
   await start(page);
 
@@ -218,7 +223,6 @@ test('a browser without CompressionStream offers Delete but not Import (AC-20, A
     delete (window as { DecompressionStream?: unknown }).DecompressionStream;
   });
   await start(page);
-  await page.evaluate((creation) => window.__reallm.save().create(0, creation), CREATION);
   await corruptSlot(page, 0);
   await start(page);
 
