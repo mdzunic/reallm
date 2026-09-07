@@ -19,6 +19,12 @@ export type ClassId = (typeof CLASS_IDS)[number];
 
 /** PLAN §4: fuel, consumable crafting, support crafting, tier-3 energy tech. */
 export const RESOURCE_IDS = ['oil', 'wheat', 'water', 'lithium'] as const;
+/**
+ * Already a union, unlike the placeholder aliases below: `SaveV1.resources` is
+ * a `Record<ResourceId, number>` and SPEC-007's validator clamps it key by key,
+ * neither of which means anything against a bare `string`.
+ */
+export type ResourceId = (typeof RESOURCE_IDS)[number];
 
 /** The five ship systems of PLAN §4 and §8, each a 0–3 tier in the save. */
 export const SHIP_SYSTEMS = ['engine', 'hull', 'shield', 'cargo', 'weapon'] as const;
@@ -35,13 +41,6 @@ export type CompanionId = (typeof COMPANION_IDS)[number];
 // Types only: `data/` imports nothing and carries no runtime code
 // (SPEC-001 §4, §8).
 
-/**
- * The four resources of PLAN §4, already a union: `SaveV1.resources` is a
- * `Record<ResourceId, number>` and SPEC-007's validator clamps it key by key,
- * neither of which means anything against a bare `string`. SPEC-009 re-exports
- * the same union from `data/resources.ts` keys.
- */
-export type ResourceId = (typeof RESOURCE_IDS)[number];
 /** SPEC-009 narrows this to the union of `data/items.ts` keys. */
 export type ItemId = string;
 /** SPEC-009 narrows this to the union of `data/enemies.ts` keys. */

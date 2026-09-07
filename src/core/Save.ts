@@ -1208,11 +1208,7 @@ export class SaveStore {
     }
 
     const first = this.#writeWithBackup(slot, json);
-    if (first === null) {
-      this.#events.emit('save:written', { slot, reason });
-      this.#afterFirstWrite(data);
-      return true;
-    }
+    if (first === null) return this.#succeed(slot, reason, data);
     // §4.2: a full quota is usually the backup's fault, so drop it and retry.
     if (isQuota(first) && this.#read(this.#key(slot) + BAK_SUFFIX) !== null) {
       try {
@@ -1221,14 +1217,15 @@ export class SaveStore {
         log.warn('save', 'could not drop the backup', error);
       }
       const second = this.#writeWithBackup(slot, json, false);
-      if (second === null) {
-        this.#events.emit('save:written', { slot, reason });
-        this.#afterFirstWrite(data);
-        return true;
-      }
-      return this.#fail(slot, second);
+      return second === null ? this.#succeed(slot, reason, data) : this.#fail(slot, second);
     }
     return this.#fail(slot, first);
+  }
+
+  #succeed(slot: SlotId, reason: SaveReason, data: SaveV1): boolean {
+    this.#events.emit('save:written', { slot, reason });
+    this.#afterWrite(data);
+    return true;
   }
 
   /** Returns `null` on success, or whatever went wrong. */
@@ -1266,8 +1263,8 @@ export class SaveStore {
 
   // ------------------------------------------------------- persistence hints
 
-  /** §4.7, on the first successful write of the session. */
-  #afterFirstWrite(data: SaveV1): void {
+  /** §4.7: persistence is asked for once a session, the hint once a fortnight. */
+  #afterWrite(data: SaveV1): void {
     if (!this.#persistAsked) {
       this.#persistAsked = true;
       this.#requestPersistence();
