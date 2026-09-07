@@ -106,7 +106,7 @@ export class SurfaceCombatDemo extends PlaceholderScene<'surface'> {
   readonly #aliveCounts = new Map<EnemyId, number>();
 
   constructor(services: GameServices) {
-    super(services, 'surface', { pausable: true });
+    super(services, 'surface', { pausable: true, music: 'surface_calm' });
   }
 
   override enter(params: SceneParams['surface']): void {
