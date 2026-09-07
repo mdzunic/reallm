@@ -605,9 +605,11 @@ class HowlerAudio implements Audio {
     // 06-d: never more than one instance on its way out. A crossfade started
     // while one is running stops that outgoing track immediately rather than
     // layering a third — unless the track now being asked for *is* the one on
-    // its way out, in which case it rides back up from where it got to. A
-    // station → menu → station bounce inside the 1500 ms is a real path, and
-    // stopping that instance would restart the bed from its first bar.
+    // its way out. There, "stop the outgoing instance and fade the new one from
+    // its current volume" (AC-25) is one instance, not two: it rides back up
+    // from where it got to. A station → menu → station bounce inside the
+    // 1500 ms is a real path, and stopping it would restart the bed from its
+    // first bar mid-fade, which is the click 06-d exists to avoid.
     const stale = this.#outgoing;
     this.#outgoing = null;
     const revived = stale !== null && stale.id === id ? stale : null;
