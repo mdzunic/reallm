@@ -126,19 +126,29 @@ test('the whole layer survives a scene cycle, a duck and a teardown without thro
   // The pause menu's duck, and the surface listener a positioned sound needs.
   await page.evaluate(() => window.__reallm.go('station', {}));
   await expect(page.locator('[data-testid="scene-label"]')).toHaveText('station');
-  await page.evaluate(() => {
+  const positioned = await page.evaluate(() => {
     const audio = window.__reallm.audio();
     audio.setListener(10, 10);
     audio.duck(true);
     audio.duck(false);
-    // AC-35: 60 m from the listener is past the 45 m cut-off.
-    audio.play('bug_pop', { x: 70, z: 10 });
+    // AC-35 first, on a bank nothing has touched yet: it is built by this call
+    // and cannot have failed to decode inside the same tick, so `null` here can
+    // only be the 45 m cut-off — 60 m away, and refused…
+    const far = audio.play('bug_pop', { x: 70, z: 10 });
+    // …while the same sound on top of the listener is admitted, which is what
+    // rules out a dead bank as the reason for the refusal above.
+    const near = audio.play('bug_pop', { x: 10, z: 10 });
+    return { far, near: near !== null };
   });
+  expect(positioned.far).toBeNull();
+  expect(positioned.near).toBe(true);
 
-  // AC-59: `stop()` disposes the audio layer, and a second one is a no-op.
+  // AC-59 / 06-k: `stop()` disposes the audio layer, and disposing it again is
+  // a no-op. `Game.stop()` guards itself, so the second call has to go to the
+  // audio layer directly or nothing exercises its own guard.
   await page.evaluate(() => {
     window.__reallm.stop();
-    window.__reallm.stop();
+    window.__reallm.audio().dispose();
   });
   expect(crashes).toEqual([]);
 });
