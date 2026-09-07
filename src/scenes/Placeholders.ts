@@ -11,6 +11,10 @@
 // `assets.loaded` so `menu` stays the safe fallback for a failed `enter()`
 // (SPEC-003 D-19). `station` and `starmap` build a few meshes and textures of
 // their own so that cycling between them exercises real GPU allocations (AC-13).
+//
+// `menu` also mounts SPEC-007's `SavePanel`: the storage banner and the corrupt
+// slot's Import/Delete actions are that spec's own UI (E8), so they live in
+// `ui/` and move to the real menu with SPEC-014 rather than being rebuilt.
 import * as THREE from 'three';
 import { Disposer, disposeObject3D } from '@/core/Disposer';
 import { log } from '@/core/Log';
