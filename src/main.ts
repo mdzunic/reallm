@@ -100,6 +100,8 @@ if (import.meta.env.DEV) {
     stats: () => game.stats,
     /** SPEC-005: the touch layer is DOM, so the e2e suite reads what it wrote. */
     input: () => game.input.state,
+    /** SPEC-007 §7: the M1 acceptance run drives the slots through this. */
+    save: () => save,
     trace: () => game.trace(),
     loseContext: (restoreAfterMs: number | null) => game.loseContext(restoreAfterMs),
     stop: () => game.stop(),

@@ -13,9 +13,34 @@ export interface DevBridge {
   stats(): StatsSnapshot;
   /** The live `Input.state` (SPEC-005 §3); the object is mutated in place. */
   input(): InputSnapshot;
+  /** SPEC-007's slot store, for the M1 acceptance suite (§7). */
+  save(): SaveBridge;
   trace(): string[];
   loseContext(restoreAfterMs: number | null): void;
   stop(): void;
+}
+
+/**
+ * The part of `SaveStore` the suites drive (SPEC-007 §3). `SaveV1` itself stays
+ * loose here: `e2e/` may not import `src/`, and the suites only ever read the
+ * two or three fields they assert on.
+ */
+export interface SaveBridge {
+  readonly available: boolean;
+  list(): Array<{ slot: number; empty: boolean; name?: string; classId?: string; level?: number; corrupt?: boolean }>;
+  load(slot: number): { ok: boolean; source?: string; reason?: string; data?: SaveSnapshot };
+  create(slot: number, creation: unknown, seed?: number): SaveSnapshot;
+  flush(): boolean;
+  delete(slot: number): void;
+  exportCode(slot: number): Promise<string>;
+  importCode(code: string, slot: number): Promise<{ ok: boolean; reason?: string; data?: SaveSnapshot }>;
+}
+
+export interface SaveSnapshot {
+  version: number;
+  meta: { slot: number; seed: number; playtimeSec: number; updatedAt: number };
+  player: { name: string; classId: string; level: number; tokens: number };
+  progress: { flags: string[] };
 }
 
 /** The part of `InputState` the suites assert on (SPEC-005 §3). */
@@ -45,6 +70,8 @@ export interface StatsSnapshot {
   scene: string | null;
   sceneInfo: Record<string, number | string> | null;
   state: string;
+  /** SPEC-007 §4.7: `null` until `navigator.storage.persist()` has answered. */
+  persistGranted: boolean | null;
 }
 
 declare global {

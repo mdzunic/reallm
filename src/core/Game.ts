@@ -501,7 +501,9 @@ export class Game implements GameServices {
     this.#input.releaseAll();
     this.#events.emit('app:paused');
     try {
-      this.#save.flush();
+      // SPEC-007 §4.5: `pagehide` is the immediate reason — a hidden tab may
+      // never get another frame, so this cannot wait for the debounce.
+      this.#save.request('pagehide');
     } catch (error) {
       log.warn('game', 'the save could not be flushed on hide', error);
     }
@@ -531,8 +533,9 @@ export class Game implements GameServices {
   }
 
   #onPageHide(): void {
-    // Synchronous by contract: the page may not exist by the next task.
-    this.#save.flush();
+    // Synchronous by contract: the page may not exist by the next task, which
+    // is exactly why `pagehide` skips the debounce (SPEC-007 §4.5).
+    this.#save.request('pagehide');
     this.#logEvent('app:pagehide');
   }
 
