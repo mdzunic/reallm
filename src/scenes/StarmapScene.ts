@@ -10,7 +10,6 @@
 // double-tap (14-b).
 import * as THREE from 'three';
 import type { GameServices } from '@/core/Services';
-import type { Renderer } from '@/core/Renderer';
 import type { SceneParams } from '@/core/StateMachine';
 import {
   ENEMIES,
@@ -67,10 +66,6 @@ export class StarmapScene extends UiScene<'starmap'> {
 
   protected override onUpdate(_dt: number): void {
     if (this.#ring) this.#ring.rotation.z = this.elapsed * 0.8;
-  }
-
-  override render(renderer: Renderer): void {
-    super.render(renderer);
   }
 
   // ------------------------------------------------------------------ Three
