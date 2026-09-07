@@ -117,6 +117,7 @@ button.boot-retry,
 button.boot-start,
 button.pause-resume,
 button.scene-nav-button,
+button.slot-button,
 button.context-lost-reload {
   font: inherit;
   color: inherit;
@@ -131,6 +132,7 @@ button.boot-retry:hover,
 button.boot-start:hover,
 button.pause-resume:hover,
 button.scene-nav-button:hover,
+button.slot-button:hover,
 button.context-lost-reload:hover {
   background: #1d2a38;
 }
@@ -347,4 +349,84 @@ button.debug-button {
 
 button.debug-button:hover {
   background: #1d2a38;
+}
+
+/* -------------------------------------------------- saves (SPEC-007 E8, §7) */
+
+/* The menu's save surface. Bottom-left, above the version label: the top-left
+   corner belongs to the scene label and the stats overlay, the top-right to the
+   navigation. Interactive, so it opts back into pointer events, and above the
+   touch layer (z-index 10) so its buttons stay reachable on a phone. */
+.save-panel {
+  position: absolute;
+  left: max(12px, env(safe-area-inset-left));
+  bottom: calc(max(12px, env(safe-area-inset-bottom)) + 30px);
+  width: min(360px, calc(100% - 24px));
+  pointer-events: auto;
+  z-index: 12;
+}
+
+/* E8: a memory-only session, said once and left on screen. */
+.save-banner {
+  margin: 0 0 8px;
+  padding: 6px 8px;
+  border: 1px solid #6b4a1f;
+  border-radius: 6px;
+  background: rgb(36 26 13 / 92%);
+  font-size: 13px;
+  line-height: 1.35;
+}
+
+.slot-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.slot-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  border: 1px solid #22303c;
+  border-radius: 6px;
+  background: rgb(17 24 32 / 88%);
+  font-size: 13px;
+}
+
+.slot-text {
+  flex: 1 1 auto;
+}
+
+.slot-actions {
+  display: flex;
+  gap: 6px;
+}
+
+button.slot-button {
+  padding: 3px 10px;
+  font-size: 12px;
+}
+
+/* The paste field of §4.6, on its own line under the row it belongs to. */
+.slot-import {
+  display: flex;
+  flex: 1 1 100%;
+  gap: 6px;
+}
+
+.slot-code {
+  flex: 1 1 auto;
+  padding: 4px 6px;
+  border: 1px solid #33465a;
+  border-radius: 6px;
+  background: #0d141b;
+  color: inherit;
+  font: inherit;
+  font-size: 12px;
+  resize: vertical;
 }

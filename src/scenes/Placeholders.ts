@@ -18,6 +18,7 @@ import type { GameServices } from '@/core/Services';
 import type { Renderer } from '@/core/Renderer';
 import { ALLOWED_TRANSITIONS, type Scene, type SceneFactory, type SceneId, type SceneParams } from '@/core/StateMachine';
 import { PauseMenu } from '@/ui/PauseMenu';
+import { SavePanel } from '@/ui/SavePanel';
 import { TouchControls } from '@/ui/TouchControls';
 
 /** The DOM layer every scene mounts its own UI into (SPEC-001 shell). */
@@ -228,6 +229,12 @@ class MenuScene extends PlaceholderScene<'menu'> {
 
   override enter(params: SceneParams['menu']): void {
     super.enter(params);
+    // SPEC-007 E8: the menu is where a memory-only session is told so (AC-17)
+    // and where a slot with neither a readable save nor a readable backup gets
+    // its Import and Delete actions (AC-20). The panel belongs to SPEC-007, so
+    // SPEC-014's real menu mounts the same one.
+    const saves = new SavePanel(uiRoot(), this.services.save);
+    this.disposer.add(() => saves.dispose());
     if (!this.services.assets.loaded) return;
     try {
       this.#buildSpike();
