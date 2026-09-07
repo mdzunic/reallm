@@ -604,10 +604,14 @@ class HowlerAudio implements Audio {
   #crossfade(id: MusicId | null, fadeMs: number): void {
     // 06-d: never more than one instance on its way out. A crossfade started
     // while one is running stops that outgoing track immediately rather than
-    // layering a third.
+    // layering a third — unless the track now being asked for *is* the one on
+    // its way out, in which case it rides back up from where it got to. A
+    // station → menu → station bounce inside the 1500 ms is a real path, and
+    // stopping that instance would restart the bed from its first bar.
     const stale = this.#outgoing;
     this.#outgoing = null;
-    if (stale !== null) this.#stopTrack(stale);
+    const revived = stale !== null && stale.id === id ? stale : null;
+    if (stale !== null && revived === null) this.#stopTrack(stale);
 
     const previous = this.#current;
     this.#current = null;
@@ -619,16 +623,23 @@ class HowlerAudio implements Audio {
     }
 
     if (id !== null) {
-      const howl = this.#musicHowl(id);
-      if (howl !== null) {
-        const howlId = howl.play();
-        const track: MusicTrack = { id, howl, howlId, gain: 0, ramp: null };
+      const track = revived ?? this.#startTrack(id);
+      if (track !== null) {
+        // Also from wherever it is: a revived track is already audible, and a
+        // fresh one starts at silence (AC-22, AC-25).
         track.ramp = { from: track.gain, to: 1, startedAt: this.#now(), durationMs: fadeMs };
         this.#current = track;
       }
     }
     this.#startTicker();
     this.#tick();
+  }
+
+  /** A second instance of `id` at silence; `#crossfade` owns the ramp up. */
+  #startTrack(id: MusicId): MusicTrack | null {
+    const howl = this.#musicHowl(id);
+    if (howl === null) return null;
+    return { id, howl, howlId: howl.play(), gain: 0, ramp: null };
   }
 
   #stopTrack(track: MusicTrack): void {
