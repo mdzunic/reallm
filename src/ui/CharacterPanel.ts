@@ -5,7 +5,7 @@
 import { maxHp, type SaveStore, type SaveV1 } from '@/core/Save';
 import { ITEMS, RESOURCE_IDS, type ItemId } from '@/data/index';
 import { INVENTORY_SLOTS, type Economy } from '@/systems/Economy';
-import { computePlayerStats, failText, gearCompareText } from '@/systems/UiHelpers';
+import { computePlayerStats, failText, gearCompareText, gearTooltip } from '@/systems/UiHelpers';
 import { confirmSheet } from '@/ui/ConfirmSheet';
 import { el, h, testId, type UiRoot } from '@/ui/dom';
 
@@ -64,7 +64,7 @@ export class CharacterPanel {
 
   // ------------------------------------------------------------------- gear
 
-  /** AC-47: the two worn pieces; the tooltip is the piece's own stat line. */
+  /** AC-47: the two worn pieces; the tooltip compares this tier to the next. */
   #gearBlock(): HTMLElement {
     const { equipped } = this.#deps.data;
     const card = (slot: 'weapon' | 'armor', id: ItemId): HTMLElement => {
@@ -79,7 +79,7 @@ export class CharacterPanel {
       return testId(
         h(
           'div',
-          { class: 'gear-card', title: `T${tier} — ${line}` },
+          { class: 'gear-card', title: gearTooltip(id) },
           h('span', { class: 'settings-note' }, slot),
           h('span', { class: 'gear-name' }, `${item.name} · T${tier}`),
           h('span', { class: 'gear-line' }, line),

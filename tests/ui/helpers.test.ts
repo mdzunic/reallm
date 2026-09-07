@@ -23,6 +23,7 @@ import {
   companionEffectText,
   failText,
   gearCompareText,
+  gearTooltip,
   passiveText,
   rewardsText,
   slotLine,
@@ -380,5 +381,24 @@ describe('gearCompareText (AC-47)', () => {
   it('crossing kinds compares nothing', () => {
     expect(gearCompareText('weapon_kinetic', 'armor_scrap')).toBe('');
     expect(gearCompareText('weapon_kinetic', 'medkit')).toBe('');
+  });
+});
+
+describe('gearTooltip (AC-47)', () => {
+  it('compares an equipped weapon to the next tier in its ladder', () => {
+    expect(gearTooltip('weapon_kinetic')).toBe('T0 → T1 · damage 12 → 18 · fire rate 3 → 4 · range 14 → 18');
+  });
+
+  it('compares an equipped armor to the next tier in its ladder', () => {
+    expect(gearTooltip('armor_scrap')).toBe('T0 → T1 · armor 0 → 15 · hazard resist 0 → 0.25');
+  });
+
+  it('the top tier states it plainly instead of comparing to nothing', () => {
+    expect(gearTooltip('weapon_lithium')).toBe('T3 — top tier');
+    expect(gearTooltip('armor_ablative')).toBe('T3 — top tier');
+  });
+
+  it('a non-gear id compares nothing', () => {
+    expect(gearTooltip('medkit')).toBe('');
   });
 });

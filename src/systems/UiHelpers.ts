@@ -299,6 +299,23 @@ export function gearCompareText(equipped: ItemId, candidate: ItemId): string {
   return parts.join(' · ');
 }
 
+/**
+ * AC-47: the equipped card's tooltip — where this piece's ladder goes next, as
+ * tier → stat deltas through `gearCompareText`. The top tier has nothing above
+ * it, so it says so instead of comparing to nothing; a non-gear id compares
+ * nothing and returns the same empty string `gearCompareText` would.
+ */
+export function gearTooltip(id: ItemId): string {
+  const item = ITEM_TABLE[id];
+  if (item.kind !== 'weapon' && item.kind !== 'armor') return '';
+  const next = (Object.keys(ITEM_TABLE) as ItemId[]).find((other) => {
+    const candidate = ITEM_TABLE[other];
+    return candidate.kind === item.kind && candidate.tier === item.tier + 1;
+  });
+  if (next === undefined) return `T${item.tier} — top tier`;
+  return gearCompareText(id, next);
+}
+
 // ------------------------------------------------------------------ HUD diff
 
 /**
