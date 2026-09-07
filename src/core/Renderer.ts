@@ -215,10 +215,11 @@ class CanvasRenderer implements Renderer {
     if (this.#disposed) return;
     this.#disposed = true;
     for (const release of this.#teardown.splice(0).reverse()) release();
-    this.gl.dispose();
     // Hand the context back rather than waiting for the GC; a second `Game` in
-    // the same page (HMR, 02-d) would otherwise sit on two of them.
+    // the same page (HMR, 02-d) would otherwise sit on two of them. Losing the
+    // context first is the order three documents.
     this.gl.forceContextLoss();
+    this.gl.dispose();
   }
 
   /**

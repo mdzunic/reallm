@@ -19,10 +19,11 @@ test('the simulator shows the panel, and the scene keeps running after the resto
   await expect(page.locator(panel)).toBeVisible();
   await expect(page.locator(panel)).toContainText('Graphics context lost. Recovering…');
   await expect(page.locator('[data-testid="debug-state"]')).toHaveText('state context-lost');
-  // Paused: nothing simulates against a context that is gone.
-  const paused = await page.evaluate(() => window.__reallm.stats());
-  await frames(page, 2).catch(() => {});
-  expect(paused.state).toBe('context-lost');
+  // Paused: nothing simulates against a context that is gone, so the frame
+  // counter stops while the panel is up.
+  const lost = await page.evaluate(() => window.__reallm.stats().frame);
+  await frames(page, 2);
+  expect(await page.evaluate(() => window.__reallm.stats().frame)).toBe(lost);
 
   // The simulator restores after 1000 ms.
   await expect(page.locator(panel)).toBeHidden({ timeout: 5000 });

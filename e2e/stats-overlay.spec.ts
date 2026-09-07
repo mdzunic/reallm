@@ -115,22 +115,41 @@ test('the event log holds at most the last twelve permitted names (AC-32)', asyn
   }
 });
 
+/** The newest `frame:order` line, the bridge's trace, and whether they agree. */
+async function lastTrace(page: Page): Promise<{ line: string; trace: string[]; agrees: boolean }> {
+  return page.evaluate(() => {
+    const text = document.querySelector('[data-testid="debug-events"]')?.textContent ?? '';
+    const line = text.split('\n').filter((entry) => entry.includes('frame:order')).pop() ?? '';
+    const trace = window.__reallm.trace();
+    return { line, trace, agrees: line !== '' && line.endsWith(trace.join('>')) };
+  });
+}
+
 test('records one frame:order per second and the dev bridge agrees (AC-54, AC-56)', async ({ page }) => {
   await start(page, '/?debug');
   const events = page.locator('[data-testid="debug-events"]');
-  await expect(events).toHaveText(/frame:order/, { timeout: 5000 });
+  // A frame runs 0 to 5 fixed updates (§4.2), and a traced frame that happened
+  // to be short enough for none is a legitimate `input:begin>render>…` line —
+  // so wait for one that did update, which is the interesting case.
+  await expect
+    .poll(async () => ((await events.textContent()) ?? '').includes('frame:order input:begin>update>'), {
+      timeout: 15_000,
+    })
+    .toBe(true);
 
-  const observed = await page.evaluate(() => {
-    const text = document.querySelector('[data-testid="debug-events"]')?.textContent ?? '';
-    const line = text.split('\n').filter((entry) => entry.includes('frame:order')).pop() ?? '';
-    return { line, trace: window.__reallm.trace() };
-  });
+  // The line is formatted at the next 4 Hz refresh while `trace()` is written
+  // during the frame itself (§4.6.2), so the two agree from one refresh after
+  // the recording until the next one is taken — poll for that window rather
+  // than assuming which side of it a single read lands on.
+  await expect
+    .poll(async () => (await lastTrace(page)).agrees, { timeout: 10_000 })
+    .toBe(true);
 
-  expect(observed.line).toMatch(/^\d+\.\d{2} frame:order input:begin>(?:update>)+render>ui:flush>input:end$/);
+  const observed = await lastTrace(page);
+  expect(observed.line).toMatch(/^\d+\.\d{2} frame:order input:begin>(?:update>)*render>ui:flush>input:end$/);
   expect(observed.trace[0]).toBe('input:begin');
   expect(observed.trace.slice(-3)).toEqual(['render', 'ui:flush', 'input:end']);
   expect(observed.trace.slice(1, -3).every((phase) => phase === 'update')).toBe(true);
-  expect(observed.line.endsWith(observed.trace.join('>'))).toBe(true);
 });
 
 test.describe('immediate refreshes', () => {
