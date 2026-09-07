@@ -165,6 +165,8 @@ interface LiveVoice {
   readonly key: string;
   readonly howl: Howl;
   readonly howlId: number;
+  /** The distance gain of §4.2, fixed for the life of the voice. */
+  readonly attenuation: number;
   base: number;
 }
 
@@ -478,7 +480,10 @@ class HowlerAudio implements Audio {
     }
 
     const now = this.#now();
-    if (!this.#rateLimiter.allow(id, now, opts.minIntervalMs ?? DEFAULT_MIN_INTERVAL_MS)) return null; // AC-33
+    const minIntervalMs = opts.minIntervalMs ?? DEFAULT_MIN_INTERVAL_MS;
+    // AC-33: the window is only *read* here, before the voice limiter is asked
+    // for a slot, so a repeat inside it never evicts anything…
+    if (this.#rateLimiter.blocked(id, now, minIntervalMs)) return null;
     const priority: Priority = opts.priority ?? 1; // AC-32
     const key = `${id}#${++this.#seq}`;
     const admitted = this.#limiter.admit(key, priority, now);
@@ -490,8 +495,17 @@ class HowlerAudio implements Audio {
       this.#limiter.release(key);
       return null;
     }
+    // …and it only starts once the sound is actually playing, so a call the
+    // 24-voice cap refused does not go on to silence the next one (AC-33).
+    this.#rateLimiter.mark(id, now);
     const loop = opts.loop ?? false;
-    const voice: LiveVoice = { key, howl: bank.howl, howlId, base: clamp01(opts.volume ?? 1) * gain };
+    const voice: LiveVoice = {
+      key,
+      howl: bank.howl,
+      howlId,
+      attenuation: gain,
+      base: clamp01(opts.volume ?? 1) * gain,
+    };
     this.#voices.set(key, voice);
     bank.howl.loop(loop, howlId);
     // AC-37: 1 ± 0.06 off the seeded stream, so a swarm does not phase.
@@ -506,7 +520,10 @@ class HowlerAudio implements Audio {
       stop: () => this.#release(key),
       setVolume: (v: number) => {
         if (!Number.isFinite(v)) return;
-        voice.base = clamp01(v);
+        // `v` is the caller's `opts.volume`, not the whole base: AC-19 keeps the
+        // distance gain inside it, so turning a positioned loop down must not
+        // also move it back on top of the listener.
+        voice.base = clamp01(v) * voice.attenuation;
         this.#applyGains();
       },
       get playing(): boolean {

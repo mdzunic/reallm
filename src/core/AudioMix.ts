@@ -163,10 +163,25 @@ export class VoiceLimiter {
 export class RateLimiter {
   readonly #last = new Map<string, number>();
 
-  allow(id: string, now: number, minIntervalMs: number = DEFAULT_MIN_INTERVAL_MS): boolean {
+  /**
+   * Whether `id` is still inside its window. Pure: asking does not consume it,
+   * so a caller that has other reasons to refuse the sound can check first and
+   * only `mark` once the sound really plays.
+   */
+  blocked(id: string, now: number, minIntervalMs: number = DEFAULT_MIN_INTERVAL_MS): boolean {
     const last = this.#last.get(id);
-    if (last !== undefined && now - last < minIntervalMs) return false;
+    return last !== undefined && now - last < minIntervalMs;
+  }
+
+  /** Opens a fresh window for `id`. */
+  mark(id: string, now: number): void {
     this.#last.set(id, now);
+  }
+
+  /** `blocked` and `mark` in one, for a caller with nothing else to weigh. */
+  allow(id: string, now: number, minIntervalMs: number = DEFAULT_MIN_INTERVAL_MS): boolean {
+    if (this.blocked(id, now, minIntervalMs)) return false;
+    this.mark(id, now);
     return true;
   }
 

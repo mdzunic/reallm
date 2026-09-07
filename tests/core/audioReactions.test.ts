@@ -326,6 +326,22 @@ describe('the rate limiter (SPEC-006 §4.2)', () => {
     limiter.clear();
     expect(limiter.allow('ui_blip', 1)).toBe(true);
   });
+
+  it('separates asking from consuming, so a sound refused elsewhere keeps its turn', () => {
+    const limiter = new RateLimiter();
+    // `play()` asks before the voice limiter has spoken; the answer alone must
+    // not open a window, or a sound the 24-voice cap refused would silence the
+    // next call for it too.
+    expect(limiter.blocked('bug_pop', 0)).toBe(false);
+    expect(limiter.blocked('bug_pop', 10)).toBe(false);
+
+    limiter.mark('bug_pop', 10);
+    expect(limiter.blocked('bug_pop', 20)).toBe(true);
+    expect(limiter.blocked('bug_pop', 10 + DEFAULT_MIN_INTERVAL_MS)).toBe(false);
+    // …and only that id is held, on its own explicit interval as well.
+    expect(limiter.blocked('ui_blip', 20)).toBe(false);
+    expect(limiter.blocked('bug_pop', 100, 120)).toBe(true);
+  });
 });
 
 describe('pitch variation (SPEC-006 §4.2)', () => {
