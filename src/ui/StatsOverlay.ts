@@ -108,7 +108,9 @@ export class StatsOverlay implements StatsUi {
   /** One line per entry, oldest first, `<seconds since boot, 2 decimals> <name>`. */
   logEvent(name: string, atSeconds: number): void {
     this.#events.push(`${atSeconds.toFixed(2)} ${name}`);
-    if (this.#events.length > EVENT_LOG_LIMIT) this.#events.splice(0, this.#events.length - EVENT_LOG_LIMIT);
+    // `shift`, not `splice`: splice allocates the array of what it removed, and
+    // this list is trimmed on every entry once it is full.
+    while (this.#events.length > EVENT_LOG_LIMIT) this.#events.shift();
     this.#writeEvents();
   }
 

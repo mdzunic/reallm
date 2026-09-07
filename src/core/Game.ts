@@ -105,7 +105,10 @@ export function parseFlags(search: string): DevFlags {
   let seed: number | null = null;
   if (rawSeed !== null) {
     const parsed = Number(rawSeed);
-    if (Number.isFinite(parsed)) seed = parsed;
+    // `Number('')` and `Number(' ')` are both 0, so an empty `?seed=` would
+    // otherwise read as the perfectly valid seed 0 that SPEC-008 then sows a
+    // whole world from. A missing value is a missing value.
+    if (rawSeed.trim() !== '' && Number.isFinite(parsed)) seed = parsed;
     else log.warn('boot', `?seed=${rawSeed} is not a number; ignoring it`);
   }
   return {
@@ -472,7 +475,10 @@ export class Game implements GameServices {
 
   #onHidden(): void {
     this.#loop.pause();
-    this.#pauseReason = 'hidden';
+    // A lost context outranks a hidden page. Overwriting the reason here would
+    // let the next `visibilitychange` resume fixed updates behind the
+    // "Recovering…" panel, with the state row claiming `running` (02-g).
+    if (this.#pauseReason !== 'context-lost') this.#pauseReason = 'hidden';
     this.#audio.suspend();
     this.#input.releaseAll();
     this.#events.emit('app:paused');
@@ -534,8 +540,12 @@ export class Game implements GameServices {
     this.#scenes.onContextRestored();
     this.#contextLostUi.hide();
     if (this.#pauseReason === 'context-lost') {
-      this.#pauseReason = null;
-      this.#loop.resume();
+      // Restored while the page is hidden: hand the pause back to the lifecycle
+      // rather than running frames nobody can see, and let `#onVisible` start
+      // the loop again on the way back.
+      const hidden = document.hidden;
+      this.#pauseReason = hidden ? 'hidden' : null;
+      if (!hidden) this.#loop.resume();
     }
     this.#logEvent('renderer:context-restored');
     this.#refreshStats();

@@ -1,16 +1,8 @@
 // Page lifecycle in a real browser (SPEC-002 §4.4, §6.2). A phone that locks
 // mid-game is the case that matters: the loop must stop, and coming back must
 // not fire a minute of catch-up updates at the player (E6).
-import { expect, test, type Page } from '@playwright/test';
-import { frames, start } from './start';
-
-/** A synthetic visibilitychange; a real one needs a second tab. */
-async function setHidden(page: Page, hidden: boolean): Promise<void> {
-  await page.evaluate((value) => {
-    Object.defineProperty(document, 'hidden', { value, configurable: true });
-    document.dispatchEvent(new Event('visibilitychange'));
-  }, hidden);
-}
+import { expect, test } from '@playwright/test';
+import { frames, setHidden, start } from './start';
 
 test('hiding pauses the loop and logs app:paused (AC-38, AC-39)', async ({ page }) => {
   await start(page, '/?debug');

@@ -248,11 +248,16 @@ class CanvasRenderer implements Renderer {
     // `false`: CSS owns the layout size, the renderer owns the backing store.
     this.gl.setSize(width, height, false);
 
+    if (changed || force) this.#events.emit('renderer:resized', { width, height, dpr });
+
+    // A 0×0 measurement clamps to 1×1, which reads as landscape and is not an
+    // orientation at all. Seeding from it would make a phone's first real
+    // layout — portrait — look like a rotation, so leave `#orientation` unset
+    // until there is a box to judge (02-b).
+    if (measuredAtZero) return;
     const orientation: Orientation = width >= height ? 'landscape' : 'portrait';
     const rotated = this.#orientation !== null && this.#orientation !== orientation;
     this.#orientation = orientation;
-
-    if (changed || force) this.#events.emit('renderer:resized', { width, height, dpr });
     if (rotated) this.#events.emit('ui:orientation', { orientation });
   }
 

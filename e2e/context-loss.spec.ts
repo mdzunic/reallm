@@ -3,7 +3,7 @@
 // the stats overlay are the only way to exercise the recovery by hand, so the
 // suite drives exactly those.
 import { expect, test } from '@playwright/test';
-import { frames, start } from './start';
+import { frames, setHidden, start } from './start';
 
 const panel = '[data-testid="context-lost"]';
 const reload = '[data-testid="context-lost-reload"]';
@@ -51,6 +51,23 @@ test('a context that never returns offers Reload after 5 s (AC-47, AC-49)', asyn
   // It really reloads: the page comes back at the gate.
   await page.locator(reload).click();
   await expect(page.locator('[data-testid="boot-start"]')).toBeVisible();
+});
+
+test('hiding and showing the page does not resume a lost context (AC-40, AC-45)', async ({ page }) => {
+  await start(page, '/?debug');
+  await page.locator('[data-testid="debug-lose-context-fatal"]').click();
+  await expect(page.locator(panel)).toBeVisible();
+  const lost = await page.evaluate(() => window.__reallm.stats().frame);
+
+  // Locking and unlocking the phone while the context is gone: the pause
+  // belongs to the recovery, so the loop may not come back with the page.
+  await setHidden(page, true);
+  await setHidden(page, false);
+
+  await expect(page.locator('[data-testid="debug-state"]')).toHaveText('state context-lost');
+  await expect(page.locator(panel)).toBeVisible();
+  await page.waitForTimeout(300);
+  expect(await page.evaluate(() => window.__reallm.stats().frame)).toBe(lost);
 });
 
 test('the dev bridge drives the same path (AC-46)', async ({ page }) => {

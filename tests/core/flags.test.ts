@@ -71,4 +71,14 @@ describe('parseFlags (AC-67)', () => {
     expect(parseFlags('?seed=abc').seed).toBeNull();
     expect(warnings.join('\n')).toContain('?seed=abc');
   });
+
+  it('treats an empty seed as absent, but keeps seed 0', () => {
+    captureWarnings();
+    // `Number('')` is 0, so this is the one falsy case that must not survive
+    // the parse as a seed SPEC-008 would happily generate a world from.
+    expect(parseFlags('?seed=').seed).toBeNull();
+    expect(parseFlags('?seed=%20').seed).toBeNull();
+    expect(parseFlags('?seed=0').seed).toBe(0);
+    expect(parseFlags('?seed=-1.5').seed).toBe(-1.5);
+  });
 });

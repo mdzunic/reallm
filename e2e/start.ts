@@ -66,6 +66,17 @@ export async function start(page: Page, url = '/'): Promise<void> {
   await expect(page.locator('[data-testid="transition-fade"]')).toHaveCSS('pointer-events', 'none');
 }
 
+/**
+ * A synthetic `visibilitychange`; a real one needs a second tab. Shared because
+ * both the lifecycle suite and the context-loss suite hide the page.
+ */
+export async function setHidden(page: Page, hidden: boolean): Promise<void> {
+  await page.evaluate((value) => {
+    Object.defineProperty(document, 'hidden', { value, configurable: true });
+    document.dispatchEvent(new Event('visibilitychange'));
+  }, hidden);
+}
+
 /** Resolve after `count` animation frames have been rendered. */
 export async function frames(page: Page, count = 2): Promise<void> {
   await page.evaluate(async (n) => {
