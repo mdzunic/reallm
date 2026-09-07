@@ -3,9 +3,14 @@
 // immediately — tests exercise pure code and never import `scenes/` or `ui/`
 // (SPEC-001 §4).
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { createNullAudio } from '@/core/Audio';
+import { createNullInput } from '@/core/Input';
 import { setLogSink, type LogSink } from '@/core/Log';
+import { Loop } from '@/core/Loop';
 import type { Renderer } from '@/core/Renderer';
-import type { EventBus, GameEvents, GameServices } from '@/core/Services';
+import { createNullSave } from '@/core/Save';
+import { createStubRng, type EventBus, type GameEvents, type GameServices } from '@/core/Services';
+import { createSettings } from '@/core/Settings';
 import {
   ALLOWED_TRANSITIONS,
   BOOT_SCENE,
@@ -190,11 +195,25 @@ function harness(config: Partial<Record<SceneId, SpyOptions>> = {}): Harness {
     surface: build('surface'),
   };
 
+  // SPEC-002 §3.9 widened `GameServices` with the seams the frame loop needs
+  // (AC-62). The state machine consumes the same six members it always did;
+  // the rest are the null implementations SPEC-002 ships, and nothing below
+  // asserts on them.
   const services = {
     events,
     ui,
     renderer,
     assets: {} as GameServices['assets'],
+    input: createNullInput(),
+    audio: createNullAudio(),
+    save: createNullSave(),
+    settings: createSettings(),
+    loop: new Loop(),
+    rng: createStubRng(),
+    uiRoot: {} as HTMLElement,
+    get scenes(): SceneManager {
+      return manager;
+    },
     go: () => Promise.resolve(false),
     requestResume: () => {},
   } satisfies GameServices;

@@ -5,11 +5,15 @@
 // spec: SPEC-012 (surface), SPEC-013 (flight), SPEC-014 (menu, creation,
 // station, starmap).
 //
-// They are asset-free: nothing here reads the asset registry. `station` and
-// `starmap` build a few meshes and textures of their own so that cycling
-// between them exercises real GPU allocations (AC-13).
+// They are asset-free with one exception: `menu` also carries SPEC-002's asset
+// spike (§4.5, D-I) — a rigged character through `SkeletonUtils.clone` and an
+// `AnimationMixer`, and a ship with its own sRGB colour map — guarded by
+// `assets.loaded` so `menu` stays the safe fallback for a failed `enter()`
+// (SPEC-003 D-19). `station` and `starmap` build a few meshes and textures of
+// their own so that cycling between them exercises real GPU allocations (AC-13).
 import * as THREE from 'three';
 import { Disposer, disposeObject3D } from '@/core/Disposer';
+import { log } from '@/core/Log';
 import type { GameServices } from '@/core/Services';
 import type { Renderer } from '@/core/Renderer';
 import { ALLOWED_TRANSITIONS, type Scene, type SceneFactory, type SceneId, type SceneParams } from '@/core/StateMachine';
@@ -74,6 +78,7 @@ class PlaceholderScene<K extends SceneId> implements Scene<K> {
   #spin: THREE.Object3D | null = null;
   #pauseMenu: PauseMenu | null = null;
   #elapsed = 0;
+  #renders = 0;
 
   constructor(services: GameServices, id: K, options: { pausable?: boolean; props?: number } = {}) {
     this.services = services;
@@ -106,6 +111,9 @@ class PlaceholderScene<K extends SceneId> implements Scene<K> {
   }
 
   render(renderer: Renderer): void {
+    // Reported by `debugInfo()`: it is how the 30 fps render skip of SPEC-002
+    // §4.2 is observable from outside — updates keep their rate, draws halve.
+    this.#renders++;
     const aspect = renderer.width / renderer.height;
     if (this.camera.aspect !== aspect) {
       this.camera.aspect = aspect;
@@ -126,8 +134,14 @@ class PlaceholderScene<K extends SceneId> implements Scene<K> {
     this.#pauseMenu?.hide();
   }
 
+  /**
+   * The pairs the stats overlay prints after the scene id (SPEC-002 §4.6.1,
+   * AC-31). The id itself is not repeated here — the row already shows it.
+   */
   debugInfo(): Record<string, number | string> {
-    return { scene: this.id, props: this.props };
+    const info: Record<string, number | string> = { props: this.props, renders: this.#renders };
+    if (this.#spin) info['spin'] = this.#spin.rotation.y;
+    return info;
   }
 
   /** A few own meshes, each with its own geometry, material and texture. */
@@ -172,13 +186,102 @@ class PlaceholderScene<K extends SceneId> implements Scene<K> {
   }
 }
 
+/** `''` when the model carries no colour map at all. */
+function colourMapSpace(root: THREE.Object3D): string {
+  let space = '';
+  root.traverse((node) => {
+    if (space !== '') return;
+    const material = (node as THREE.Mesh).material;
+    for (const entry of Array.isArray(material) ? material : [material]) {
+      const map = (entry as THREE.MeshStandardMaterial | undefined)?.map;
+      if (map) space = map.colorSpace === THREE.SRGBColorSpace ? 'srgb' : (map.colorSpace || 'none');
+    }
+  });
+  return space;
+}
+
+/**
+ * The menu placeholder, plus SPEC-002's asset spike (§4.5, D-I): the rotating
+ * prop the M0 acceptance list looks for, a rigged character playing a named
+ * clip, and a ship rendering with its own colour map.
+ *
+ * The spike is guarded and its failure is only a warning, because `menu` is
+ * what the state machine falls back to when another scene's `enter()` throws
+ * (SPEC-003 D-19) — it may never be the scene that fails.
+ */
+class MenuScene extends PlaceholderScene<'menu'> {
+  #mixer: THREE.AnimationMixer | null = null;
+  #action: THREE.AnimationAction | null = null;
+  #clip = '';
+  #shipMap = '';
+
+  constructor(services: GameServices) {
+    super(services, 'menu', { props: 1 });
+  }
+
+  override enter(params: SceneParams['menu']): void {
+    super.enter(params);
+    if (!this.services.assets.loaded) return;
+    try {
+      this.#buildSpike();
+    } catch (error) {
+      log.warn('scene', 'the asset spike could not be built; the menu runs without it', error);
+    }
+  }
+
+  override update(dt: number): void {
+    super.update(dt);
+    // AC-51: the clip is advanced from the scene's fixed update, never from a
+    // clock of its own, so it stops with the loop and never runs while paused.
+    this.#mixer?.update(dt);
+  }
+
+  override debugInfo(): Record<string, number | string> {
+    const info = super.debugInfo();
+    if (this.#clip !== '') {
+      info['clip'] = this.#clip;
+      info['clipTime'] = this.#action?.time ?? 0;
+    }
+    if (this.#shipMap !== '') info['shipMap'] = this.#shipMap;
+    return info;
+  }
+
+  #buildSpike(): void {
+    const assets = this.services.assets;
+    // `Assets.model()` clones a rigged model with `SkeletonUtils.clone`, the
+    // only clone that rebinds the skeleton to the cloned bones (AC-50).
+    const character = assets.model('character');
+    character.position.set(-1.7, -0.9, 0);
+    this.scene.add(character);
+    const clip = assets.animations('character')[0];
+    if (clip) {
+      const mixer = new THREE.AnimationMixer(character);
+      this.#mixer = mixer;
+      this.#action = mixer.clipAction(clip);
+      this.#action.play();
+      this.#clip = clip.name;
+      this.disposer.add(() => {
+        mixer.stopAllAction();
+        mixer.uncacheRoot(character);
+      });
+    }
+
+    const ship = assets.model('ship');
+    ship.position.set(1.7, 0, 0);
+    ship.rotation.y = -0.6;
+    this.scene.add(ship);
+    // AC-52: GLTFLoader tags a baseColorTexture as sRGB; this is that read-back.
+    this.#shipMap = colourMapSpace(ship);
+  }
+}
+
 /**
  * The factory the composition root hands to `SceneManager` (D-17). `menu` enters
- * synchronously and loads nothing, which is what makes it a safe fallback after
- * a failed `enter()` (D-19).
+ * synchronously and loads nothing of its own, which is what makes it a safe
+ * fallback after a failed `enter()` (D-19).
  */
 export const PLACEHOLDER_SCENES: SceneFactory = {
-  menu: (services) => new PlaceholderScene(services, 'menu'),
+  menu: (services) => new MenuScene(services),
   creation: (services) => new PlaceholderScene(services, 'creation'),
   station: (services) => new PlaceholderScene(services, 'station', { props: 3 }),
   starmap: (services) => new PlaceholderScene(services, 'starmap', { props: 4 }),

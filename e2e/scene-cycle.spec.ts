@@ -4,19 +4,12 @@
 //
 // Transitions are driven through the dev-only `window.__reallm` bridge so the
 // test awaits the transition's own outcome instead of racing the UI.
+//
+// SPEC-002 §4.5 put a start gate in front of the game and its stats overlay
+// took over the `debug-memory` row, keeping its exact text (D-K, AC-36). No
+// assertion below changed.
 import { expect, test, type Page } from '@playwright/test';
-
-interface SceneBridge {
-  go(id: string, params: unknown, opts?: { force?: boolean }): Promise<boolean>;
-  scene(): string | null;
-  memory(): { geometries: number; textures: number };
-}
-
-declare global {
-  interface Window {
-    __reallm: SceneBridge;
-  }
-}
+import { start } from './start';
 
 /** One transition, plus the frame that actually draws the scene we landed in. */
 async function go(page: Page, id: string, params: unknown = {}): Promise<boolean> {
@@ -30,8 +23,18 @@ async function go(page: Page, id: string, params: unknown = {}): Promise<boolean
   );
 }
 
+/**
+ * SPEC-002's stats overlay rewrites its rows 4 times a second (§4.6.1, AC-33)
+ * and a scene's geometries only reach `gl.info.memory` once it has actually
+ * been drawn, so the row is read after a refresh that lands past the first
+ * renders of the current scene. It is cross-checked against the live counter,
+ * which is the same number without the 250 ms of latency.
+ */
 async function memory(page: Page): Promise<{ geo: number; tex: number }> {
+  await page.waitForTimeout(400);
+  const live = await page.evaluate(() => window.__reallm.memory());
   const text = (await page.locator('[data-testid="debug-memory"]').textContent()) ?? '';
+  expect(text).toBe(`geo ${live.geometries} tex ${live.textures}`);
   const match = /geo (\d+) tex (\d+)/.exec(text);
   if (!match) throw new Error(`unexpected ?debug readout: "${text}"`);
   return { geo: Number(match[1]), tex: Number(match[2]) };
@@ -42,7 +45,7 @@ test.describe('scene cycling', () => {
   test.use({ reducedMotion: 'reduce' });
 
   test('station ↔ starmap 20 times leaves GPU memory where it started (AC-33, AC-34)', async ({ page }) => {
-    await page.goto('/?debug');
+    await start(page, '/?debug');
     await expect(page.locator('[data-testid="scene-label"]')).toHaveText('menu');
 
     expect(await go(page, 'station', {})).toBe(true);
@@ -67,7 +70,7 @@ test.describe('scene cycling', () => {
 });
 
 test('the fade covers the screen for its whole 300 ms (AC-38, AC-39)', async ({ page }) => {
-  await page.goto('/');
+  await start(page);
   await expect(page.locator('[data-testid="scene-label"]')).toHaveText('menu');
   const fade = page.locator('[data-testid="transition-fade"]');
   await expect(fade).toHaveCSS('pointer-events', 'none');

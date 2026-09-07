@@ -12,6 +12,10 @@
 export const ASSETS = {
   models: {
     crate: 'assets/models/crate.glb',
+    /** Rigged, with one named clip — the skinning/animation spike of SPEC-002 §4.5. */
+    character: 'assets/models/character.glb',
+    /** Carries its own colour map, so the sRGB path is exercised end to end. */
+    ship: 'assets/models/ship.glb',
   },
   textures: {
     grid: { url: 'assets/textures/grid.png', kind: 'color' },

@@ -1,22 +1,21 @@
-// The composition root. SPEC-001 gave the repository its shell; SPEC-003 wires
-// the pieces its state machine needs: the asset registry, the overlays, the
-// scene factory and a frame loop to drive them.
+// The composition root (SPEC-002 §3.10, D-F). It is the only file that knows
+// both halves of the game: `core/` may not import `ui/` or `scenes/`
+// (SPEC-001 §4), so the overlays and the scene factory are built here and
+// injected into `Game`.
 //
-// Two seams here belong to specs that have not been built yet and are marked as
-// such: the event bus is SPEC-004's, and the renderer, the fixed-step loop, the
-// boot gate and visibility handling are SPEC-002's. Both are kept to the
-// smallest shape SPEC-003 consumes, so replacing them is a deletion.
+// One seam is still a stand-in and is marked as such: the event bus belongs to
+// SPEC-004, which replaces `createEventBus` with `core/Events.ts` without
+// changing a name or a payload.
 import './style.css';
-import { Assets } from '@/core/Assets';
-import { createRenderer } from '@/core/Renderer';
+import { Game, parseFlags, SIMULATED_RESTORE_MS } from '@/core/Game';
 import { log } from '@/core/Log';
-import { BOOT_SCENE, SceneManager, type SceneId, type SceneParams } from '@/core/StateMachine';
-import type { EmitArgs, EventBus, GameEvents, GameServices } from '@/core/Services';
+import type { EmitArgs, EventBus, GameEvents } from '@/core/Services';
+import type { SceneId } from '@/core/StateMachine';
 import { ASSETS } from '@/data/assets';
-import { PLANET_IDS, type PlanetId } from '@/data/ids';
 import { PLACEHOLDER_SCENES } from '@/scenes/Placeholders';
 import { BootOverlay } from '@/ui/BootOverlay';
-import { DebugOverlay } from '@/ui/DebugOverlay';
+import { ContextLostOverlay } from '@/ui/ContextLostOverlay';
+import { StatsOverlay } from '@/ui/StatsOverlay';
 import { TransitionOverlay } from '@/ui/TransitionOverlay';
 
 const canvas = document.getElementById('game');
@@ -24,11 +23,13 @@ if (!(canvas instanceof HTMLCanvasElement)) throw new Error('index.html must car
 const uiRoot = document.getElementById('ui');
 if (!(uiRoot instanceof HTMLDivElement)) throw new Error('index.html must carry <div id="ui">');
 
-log.info('boot', `ReaLLM ${__APP_VERSION__} — M1 scenes (SPEC-003)`);
+log.info('boot', `ReaLLM ${__APP_VERSION__} — M0 engine (SPEC-002)`);
 
+/** The version label, which is also the stats overlay's five-tap toggle (§4.6). */
 const note = document.createElement('p');
 note.className = 'boot-note';
-note.textContent = `ReaLLM ${__APP_VERSION__} · M1 scenes`;
+note.dataset['testid'] = 'version-label';
+note.textContent = `ReaLLM ${__APP_VERSION__} · M0 engine`;
 uiRoot.append(note);
 
 /**
@@ -65,110 +66,68 @@ function createEventBus(): EventBus {
 }
 
 const events = createEventBus();
-const assets = new Assets();
-const renderer = createRenderer(canvas);
-const transitionUi = new TransitionOverlay(uiRoot);
-const bootOverlay = new BootOverlay(uiRoot);
+const flags = parseFlags(globalThis.location.search);
 
-const services: GameServices = {
+// The overlay buttons need the game they drive, and the game needs the overlay:
+// the simulators reach it late, through a click, so a holder is enough.
+let running: Game | undefined;
+const statsOverlay = new StatsOverlay(uiRoot, {
+  onLoseContext: (restoreAfterMs) => running?.loseContext(restoreAfterMs),
+  restoreAfterMs: SIMULATED_RESTORE_MS,
+});
+
+const game = new Game({
+  canvas,
+  uiRoot,
+  manifest: ASSETS,
+  factory: PLACEHOLDER_SCENES,
   events,
-  ui: transitionUi,
-  assets,
-  renderer,
-  go: (id, params) => manager.go(id, params),
-  requestResume: () => manager.resume(),
-};
-const manager = new SceneManager(services, PLACEHOLDER_SCENES);
+  flags,
+  ui: {
+    transition: new TransitionOverlay(uiRoot),
+    boot: new BootOverlay(uiRoot),
+    contextLost: new ContextLostOverlay(uiRoot),
+    stats: statsOverlay,
+  },
+});
+running = game;
 
-// ----------------------------------------------------------------- dev flags
-const flags = new URLSearchParams(globalThis.location.search);
-const debugOverlay = flags.has('debug') ? new DebugOverlay(uiRoot) : null;
-
-/** `go()` with the params typed away, for the dev-only URL flag and test bridge. */
-const devGo = manager.go.bind(manager) as (
-  id: SceneId,
-  params: unknown,
-  opts?: { force?: boolean },
-) => Promise<boolean>;
-
-/** `?scene=surface&planet=cinder4` (SPEC-001 §9) — the one use of `force` (D-11). */
-function jumpFromUrl(): void {
-  const target = flags.get('scene');
-  if (target === null || target === BOOT_SCENE) return;
-  const requested = flags.get('planet') ?? '';
-  const planet: PlanetId = (PLANET_IDS as readonly string[]).includes(requested)
-    ? (requested as PlanetId)
-    : 'cinder4';
-  const params: Partial<Record<SceneId, SceneParams[SceneId]>> = {
-    creation: { slot: 0 },
-    station: {},
-    starmap: undefined,
-    flight: { destination: planet },
-    surface: { planet, firstLanding: true },
-  };
-  if (!(target in params)) {
-    log.warn('boot', `?scene=${target} is not a scene the URL flag can open`);
-    return;
-  }
-  void devGo(target as SceneId, params[target as SceneId], { force: true });
+/** Escape toggles the pause menu of a pausable scene (SPEC-003 §4.5, D-38). */
+function onEscape(event: KeyboardEvent): void {
+  if (event.key !== 'Escape') return;
+  if (game.scenes.paused) game.requestResume();
+  else game.scenes.pause();
 }
+globalThis.addEventListener('keydown', onEscape);
 
 if (import.meta.env.DEV) {
-  // The e2e suite drives transitions through this bridge so it can await the
-  // outcome instead of racing the UI. Dev builds only.
+  /** `go()` with the params typed away, for the dev-only URL flag and test bridge. */
+  const devGo = game.scenes.go.bind(game.scenes) as (
+    id: SceneId,
+    params: unknown,
+    opts?: { force?: boolean },
+  ) => Promise<boolean>;
+
+  // The e2e suite drives the game through this bridge so it can await outcomes
+  // instead of racing the UI (SPEC-002 §3.11). Dev builds only.
   (globalThis as unknown as { __reallm: unknown }).__reallm = {
     go: devGo,
-    scene: () => manager.current?.id ?? null,
-    memory: () => ({ ...renderer.gl.info.memory }),
+    scene: () => game.scenes.current?.id ?? null,
+    memory: () => ({ ...game.renderer.gl.info.memory }),
+    stats: () => game.stats,
+    trace: () => game.trace(),
+    loseContext: (restoreAfterMs: number | null) => game.loseContext(restoreAfterMs),
+    stop: () => game.stop(),
   };
-  // A hot update would leave orphaned scenes and subscriptions behind (03-f).
+
+  // A hot update would leave orphaned scenes and subscriptions behind (03-f)…
   import.meta.hot?.accept(() => globalThis.location.reload());
+  // …and, until that reload lands, a second loop rendering over the first
+  // (02-d, AC-61).
+  import.meta.hot?.dispose(() => {
+    globalThis.removeEventListener('keydown', onEscape);
+    game.stop();
+  });
 }
 
-// ----------------------------------------------------------------- lifecycle
-globalThis.addEventListener('resize', () => renderer.resize());
-document.addEventListener('visibilitychange', () => {
-  // Hiding pauses; becoming visible never resumes — that takes an explicit
-  // action from the player (E6, D-38).
-  events.emit(document.hidden ? 'app:paused' : 'app:resumed');
-});
-globalThis.addEventListener('keydown', (event) => {
-  if (event.key !== 'Escape') return;
-  if (manager.paused) manager.resume();
-  else manager.pause();
-});
-
-/** SPEC-002 replaces this with the fixed 60 Hz accumulator; the delta is clamped either way. */
-const MAX_FRAME_SECONDS = 0.25;
-let previous = performance.now();
-function frame(now: number): void {
-  const dt = Math.min((now - previous) / 1000, MAX_FRAME_SECONDS);
-  previous = now;
-  manager.update(dt);
-  manager.render(renderer);
-  if (debugOverlay) {
-    const memory = renderer.gl.info.memory;
-    debugOverlay.setMemory(memory.geometries, memory.textures);
-  }
-  requestAnimationFrame(frame);
-}
-requestAnimationFrame(frame);
-
-async function start(): Promise<void> {
-  try {
-    await assets.load(ASSETS, (done, total) => bootOverlay.setProgress(done, total));
-  } catch (error) {
-    log.error('boot', 'asset load failed', error);
-    bootOverlay.showError(() => {
-      bootOverlay.hideError();
-      void start();
-    });
-    return;
-  }
-  assets.setMaxAnisotropy(renderer.gl.capabilities.getMaxAnisotropy());
-  bootOverlay.hide();
-  await manager.go(BOOT_SCENE, { reason: 'start' });
-  jumpFromUrl();
-}
-
-void start();
+void game.boot();
