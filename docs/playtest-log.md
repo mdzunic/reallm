@@ -36,7 +36,7 @@ ticked here for desktop and one phone, zero open P0, and spec statuses updated
 - **Checklist (SPEC-001):**
   - [x] `npm ci && npm run check` green on a clean clone — 12 files, 102 tests,
         typecheck and production build clean
-  - [x] `npm run e2e` green headless — 51 tests across 12 suites
+  - [x] `npm run e2e` green headless — 52 tests across 12 suites
   - [x] `npm run dev` serves `ReaLLM` on 5173, canvas and `#ui` overlay present
         (`e2e/smoke.spec.ts`); **opening it on a phone over LAN is still open**
   - [x] architecture tests pass (import boundaries, `Math.random` ban)
@@ -88,11 +88,15 @@ ticked here for desktop and one phone, zero open P0, and spec statuses updated
         `AnimationMixer` advanced from `update(dt)`; `ship.glb` renders with its
         colour map reporting `srgb` (`e2e/asset-spike.spec.ts`)
   6. [x] `npm run check` and `npm run e2e` green
-- **Bugs:** none open. Two found and fixed while building SPEC-002: the debug
+- **Bugs:** none open. Three found and fixed while building SPEC-002: the debug
   event log could print an entry out of order because `frame:order` is
-  formatted a refresh after it is recorded (AC-32), and the fixed-step
-  accumulator ran one update where two were due because `1/60` has no exact
-  binary representation (AC-2).
+  formatted a refresh after it is recorded (AC-32); the fixed-step accumulator
+  ran one update where two were due because `1/60` has no exact binary
+  representation (AC-2); and the canvas was compositing with the page although
+  the renderer was created with `alpha: false`, because three r185 hardcodes
+  `alpha: true` in the attributes it hands to `getContext()` — the context is
+  now created in `core/Renderer.ts` and passed to three, and the live context
+  reports `alpha false` (AC-11).
 - **Notes:** items 2 and 3 are the manual §7 items that want a handset, and this
   build environment has none — no display, no attached device, and no LAN with a
   phone on it, so `npm run dev --host` has nothing to serve to. They were run
