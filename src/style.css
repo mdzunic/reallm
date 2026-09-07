@@ -12,13 +12,17 @@ body {
   font: 14px/1.4 system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
 }
 
-/* The one canvas, full viewport; the renderer sizes its backing store (SPEC-002). */
+/* The one canvas, full viewport; the renderer sizes its backing store, CSS owns
+   the layout size (SPEC-002 §4.3). `100dvh` follows `100vh` so a browser that
+   does not know dynamic viewport units still gets a full-height canvas — and
+   the ones that do stop resizing it every time a mobile URL bar slides away. */
 #game {
   position: fixed;
   inset: 0;
   display: block;
   width: 100vw;
   height: 100vh;
+  height: 100dvh;
   touch-action: none;
 }
 
@@ -30,13 +34,19 @@ body {
   pointer-events: none;
 }
 
+/* The version label. It opts into pointer events because five taps on it are
+   how the stats overlay is toggled on a phone (SPEC-002 §4.6, AC-35). */
 #ui .boot-note {
   position: absolute;
   left: max(12px, env(safe-area-inset-left));
   bottom: max(12px, env(safe-area-inset-bottom));
   margin: 0;
+  padding: 4px 6px;
   font-size: 12px;
   opacity: 0.7;
+  pointer-events: auto;
+  touch-action: manipulation;
+  user-select: none;
 }
 
 /* ------------------------------------------------- scene machine (SPEC-003) */
@@ -101,8 +111,10 @@ body {
 }
 
 button.boot-retry,
+button.boot-start,
 button.pause-resume,
-button.scene-nav-button {
+button.scene-nav-button,
+button.context-lost-reload {
   font: inherit;
   color: inherit;
   padding: 6px 14px;
@@ -113,9 +125,49 @@ button.scene-nav-button {
 }
 
 button.boot-retry:hover,
+button.boot-start:hover,
 button.pause-resume:hover,
-button.scene-nav-button:hover {
+button.scene-nav-button:hover,
+button.context-lost-reload:hover {
   background: #1d2a38;
+}
+
+/* ------------------------------------------------- boot gate (SPEC-002 §4.5) */
+
+/* The progress bar: the track is the full width, the fill is done/total. */
+.boot-bar-track {
+  height: 4px;
+  margin: 0 0 12px;
+  border-radius: 2px;
+  background: #1b2530;
+  overflow: hidden;
+}
+
+.boot-bar {
+  height: 100%;
+  width: 0;
+  background: #4c8fbd;
+}
+
+/* Hidden until the manifest has loaded: the gate never appears over a failure
+   (AC-25). */
+button.boot-start {
+  display: none;
+  letter-spacing: 0.12em;
+}
+
+button.boot-start.is-visible {
+  display: inline-block;
+}
+
+/* ------------------------------------------ context loss (SPEC-002 §4.7, E7) */
+
+.overlay-context-lost {
+  z-index: 50;
+}
+
+.context-lost-text {
+  margin: 0 0 8px;
 }
 
 /* Every scene mounts its own layer; it goes away with the scene (D-20). */
@@ -143,11 +195,42 @@ button.scene-nav-button:hover {
   pointer-events: auto;
 }
 
+/* --------------------------------------------- stats overlay (SPEC-002 §4.6) */
+
+/* Top-left, offset far enough below `.scene-label` that both stay legible
+   (AC-28). It opts into pointer events for the two simulator buttons. */
 .overlay-debug {
   position: absolute;
-  right: max(12px, env(safe-area-inset-right));
-  bottom: max(12px, env(safe-area-inset-bottom));
+  left: max(12px, env(safe-area-inset-left));
+  top: calc(max(12px, env(safe-area-inset-top)) + 34px);
+  max-width: min(60vw, 420px);
+  padding: 6px 8px;
+  border-radius: 6px;
+  background: rgb(11 15 20 / 65%);
   font-size: 12px;
+  line-height: 1.35;
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  opacity: 0.8;
+  pointer-events: auto;
+  z-index: 25;
+}
+
+/* The event log is a block of lines inside one row, so it keeps its newlines. */
+.debug-row {
+  white-space: pre-wrap;
+}
+
+button.debug-button {
+  display: block;
+  margin-top: 6px;
+  padding: 3px 8px;
+  font: inherit;
+  color: inherit;
+  border: 1px solid #33465a;
+  border-radius: 4px;
+  background: #16202b;
+  cursor: pointer;
+}
+
+button.debug-button:hover {
+  background: #1d2a38;
 }
