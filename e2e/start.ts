@@ -15,6 +15,8 @@ export interface DevBridge {
   input(): InputSnapshot;
   /** SPEC-007's slot store, for the M1 acceptance suite (§7). */
   save(): SaveBridge;
+  /** SPEC-006's audio layer, for the M1 acceptance suite (§9). */
+  audio(): AudioBridge;
   trace(): string[];
   loseContext(restoreAfterMs: number | null): void;
   stop(): void;
@@ -83,6 +85,23 @@ export interface SaveSnapshot {
     visits: Record<string, number>;
     endingSeen: boolean;
   };
+}
+
+/**
+ * The part of `Audio` the suites drive (SPEC-006 §3). `Voice` is `null` for
+ * every refusal the spec defines — before unlock, past 45 m, over the voice
+ * limit, inside the rate limit, or from a bank that would not decode.
+ */
+export interface AudioBridge {
+  readonly unlocked: boolean;
+  play(id: string, opts?: Record<string, number | boolean>): { stop(): void; playing: boolean } | null;
+  music(id: string | null, opts?: { fadeMs?: number }): void;
+  setBus(bus: 'master' | 'music' | 'sfx', volume: number): void;
+  duck(active: boolean): void;
+  setListener(x: number, z: number): void;
+  preloadMusic(ids: string[]): Promise<void>;
+  /** `Game.stop()` already called this once; the suite calls it again for 06-k. */
+  dispose(): void;
 }
 
 /** The part of `InputState` the suites assert on (SPEC-005 §3). */

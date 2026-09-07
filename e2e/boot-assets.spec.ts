@@ -6,6 +6,16 @@
 import { expect, test } from '@playwright/test';
 import { passGate } from './start';
 
+/**
+ * A request the boot loader is answerable for. `ASSETS.models` and
+ * `ASSETS.textures` are the whole manifest it fetches; `/assets/audio/` is
+ * Howler's, loaded lazily on scene `enter()` well after the gate (SPEC-006
+ * §4.3, D-27), so it is not traffic AC-48 is measuring.
+ */
+function isManifestAsset(path: string): boolean {
+  return path.includes('/assets/') && !path.includes('/assets/audio/');
+}
+
 test('the boot overlay reports asset progress (AC-45)', async ({ page }) => {
   // Slow the assets down so the counter is observable rather than a flash.
   await page.route('**/assets/**', async (route) => {
@@ -23,7 +33,7 @@ test('a failed asset offers Retry, which fetches only what is missing (AC-46, AC
   const fetched: string[] = [];
   page.on('request', (request) => {
     const path = new URL(request.url()).pathname;
-    if (path.includes('/assets/')) fetched.push(path);
+    if (isManifestAsset(path)) fetched.push(path);
   });
 
   let offline = true;
