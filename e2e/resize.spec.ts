@@ -31,6 +31,16 @@ async function measure(page: Page): Promise<Measurement> {
   });
 }
 
+/** The timestamp of the newest `renderer:resized` line in the debug event log. */
+async function lastResizeAt(page: Page): Promise<number> {
+  const text = (await page.locator('[data-testid="debug-events"]').textContent()) ?? '';
+  const stamps = text
+    .split('\n')
+    .filter((line) => line.includes('renderer:resized'))
+    .map((line) => Number(/^(\d+\.\d{2})/.exec(line)?.[1] ?? -1));
+  return stamps.length === 0 ? -1 : Math.max(...stamps);
+}
+
 function expectMatchesCss(m: Measurement): void {
   expect(Math.abs(m.bufferWidth - Math.round(m.cssWidth * m.dpr))).toBeLessThanOrEqual(1);
   expect(Math.abs(m.bufferHeight - Math.round(m.cssHeight * m.dpr))).toBeLessThanOrEqual(1);
@@ -84,18 +94,16 @@ test('the size row reports CSS pixels (AC-12)', async ({ page }) => {
 test('every applied resize emits renderer:resized (AC-15)', async ({ page }) => {
   await page.setViewportSize({ width: 900, height: 600 });
   await start(page, '/?debug');
-  const events = page.locator('[data-testid="debug-events"]');
-  await expect(events).toContainText('renderer:resized');
 
   // A rotation goes down the same path, so the event fires again and the
   // reported size follows. (`ui:orientation`, emitted beside it, has no
   // consumer until SPEC-015 §6 and is not one of the twelve names §4.6.2
-  // permits in this log.)
-  const before = ((await events.textContent()) ?? '').split('renderer:resized').length;
+  // permits in this log.) The log keeps only the last twelve entries, so this
+  // compares timestamps rather than counting occurrences.
+  const before = await lastResizeAt(page);
   await page.setViewportSize({ width: 600, height: 900 });
   await frames(page, 3);
-  const after = ((await events.textContent()) ?? '').split('renderer:resized').length;
-  expect(after).toBeGreaterThan(before);
+  await expect.poll(() => lastResizeAt(page)).toBeGreaterThan(before);
 
   const rotated = await page.evaluate(() => window.__reallm.stats());
   expect(rotated.height).toBeGreaterThan(rotated.width);

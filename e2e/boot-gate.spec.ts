@@ -84,21 +84,23 @@ test('later gestures do nothing (02-i, AC-21)', async ({ page }) => {
   await expect(page.locator(label)).toHaveText('menu');
 });
 
-test('the audio context is unlocked by the gesture (AC-22)', async ({ page }) => {
-  await page.goto('/');
+test('nothing past the gate runs until the gesture arrives (AC-22, AC-23)', async ({ page }) => {
+  await page.goto('/?debug');
   await awaitGate(page);
-  // A real AudioContext started before a gesture is 'suspended'; after the
-  // gate the page is allowed to run one.
-  const before = await page.evaluate(() => new AudioContext().state);
-  expect(before).toBe('suspended');
+
+  const events = page.locator('[data-testid="debug-events"]');
+  await expect(events).toContainText('boot:assets');
+  // Step 4 of §4.5 has not run: no audio unlock, no wake lock, no loop.
+  await expect(events).not.toContainText('boot:started');
 
   await passGate(page);
-  const after = await page.evaluate(async () => {
-    const context = new AudioContext();
-    await context.resume();
-    return context.state;
-  });
-  expect(after).toBe('running');
+  // `boot:started` is logged only after `await audio.unlock()` has returned and
+  // the wake-lock and fullscreen requests have been made, so its presence is
+  // the whole of step 4 having run — including a refusal of either, which is
+  // ignored so the game keeps running in the page (02-f).
+  await expect(events).toContainText('boot:started');
+  await expect(page.locator(label)).toHaveText('menu');
+  expect(await page.evaluate(() => window.__reallm.stats().state)).toBe('running');
 });
 
 test('the loop starts and the menu prop turns (AC-22, AC-24)', async ({ page }) => {

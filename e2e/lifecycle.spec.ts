@@ -34,26 +34,38 @@ test('becoming visible resumes without a catch-up burst (AC-40, AC-41, E6)', asy
 
   await setHidden(page, true);
   await page.waitForTimeout(1200); // stands in for a locked phone
-  await setHidden(page, false);
+  const paused = await page.evaluate(() => window.__reallm.stats());
 
-  await expect(page.locator('[data-testid="debug-events"]')).toContainText('app:resumed');
-  await expect(page.locator('[data-testid="debug-state"]')).toHaveText('state running');
-
-  // Sample the first frames after the resume: none of them may run a burst.
-  const samples = await page.evaluate(async () => {
+  // The resume and the frames that follow it happen in one page task, so these
+  // really are the first frames after the resume — a round trip in between
+  // would let the browser run several before the first sample.
+  const FRAMES = 12;
+  const samples = await page.evaluate(async (count) => {
+    Object.defineProperty(document, 'hidden', { value: false, configurable: true });
+    document.dispatchEvent(new Event('visibilitychange'));
     const seen: number[] = [];
-    for (let i = 0; i < 12; i++) {
+    for (let i = 0; i < count; i++) {
       await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
       seen.push(window.__reallm.stats().updates);
     }
     return seen;
-  });
+  }, FRAMES);
+
+  await expect(page.locator('[data-testid="debug-events"]')).toContainText('app:resumed');
+  await expect(page.locator('[data-testid="debug-state"]')).toHaveText('state running');
+
+  // The step cap holds, and the hidden 1.2 s was never replayed: twelve frames
+  // of ordinary 60 Hz work is a dozen or so updates, while replaying 1.2 s
+  // would be about seventy.
+  const total = samples.reduce((sum, updates) => sum + updates, 0);
   expect(Math.max(...samples)).toBeLessThanOrEqual(5);
-  expect(samples[0]).toBeLessThanOrEqual(1);
+  expect(total).toBeLessThan(2 * FRAMES);
 
   const after = await page.evaluate(() => window.__reallm.stats());
+  expect(after.frame).toBeGreaterThan(paused.frame);
   expect(after.frame).toBeGreaterThan(before.frame);
-  // The hidden interval was discarded, not simulated and not counted as dropped.
+  // Decisive: a catch-up would have clamped the delta to 250 ms, run five steps
+  // and left the remaining ~950 ms in droppedTime.
   expect(after.droppedTime).toBeCloseTo(before.droppedTime, 5);
 });
 

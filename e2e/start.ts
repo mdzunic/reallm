@@ -54,11 +54,16 @@ export async function passGate(page: Page): Promise<void> {
   await expect(page.locator('[data-testid="boot-overlay"]')).toBeHidden();
 }
 
-/** Navigate, pass the gate, and wait until a scene is on screen. */
+/**
+ * Navigate, pass the gate, and wait until a scene is on screen and its
+ * transition has settled — the fade still runs after the label appears
+ * (SPEC-003 AC-14), and a `go()` issued during it would be refused (D-2).
+ */
 export async function start(page: Page, url = '/'): Promise<void> {
   await page.goto(url);
   await passGate(page);
   await expect(page.locator('[data-testid="scene-label"]')).toBeVisible();
+  await expect(page.locator('[data-testid="transition-fade"]')).toHaveCSS('pointer-events', 'none');
 }
 
 /** Resolve after `count` animation frames have been rendered. */

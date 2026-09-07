@@ -192,7 +192,6 @@ export class Game implements GameServices {
   #phaseCount = 0;
   #tracing = false;
   #tracePending = false;
-  #traceAt = 0;
   #lastTraceMs = 0;
 
   /** The scene instance whose render() already logged, so a broken scene logs once (02-e). */
@@ -632,7 +631,10 @@ export class Game implements GameServices {
     this.#statsUi.update(this.stats);
     if (!this.#tracePending) return;
     this.#tracePending = false;
-    this.#statsUi.logEvent(`frame:order ${this.#phases.slice(0, this.#phaseCount).join('>')}`, this.#traceAt);
+    // Stamped where it is appended, not where it was recorded: entries land in
+    // the log oldest first, and a line deferred by up to one refresh would
+    // otherwise arrive with a timestamp behind the line before it (AC-32).
+    this.#logEvent(`frame:order ${this.#phases.slice(0, this.#phaseCount).join('>')}`);
   }
 
   #logEvent(name: string): void {
@@ -652,7 +654,6 @@ export class Game implements GameServices {
     this.#lastTraceMs = now;
     this.#tracing = true;
     this.#phaseCount = 0;
-    this.#traceAt = (now - this.#bootAt) / 1000;
   }
 
   /** One branch and one array write; no allocation on the hot path (§4.6.2). */
