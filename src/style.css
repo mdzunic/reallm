@@ -777,3 +777,106 @@ button.slot-button {
     transition: none;
   }
 }
+
+/* --------------------------------------------------------------- dialogue */
+/* Bottom-center, above the objective line's slot (AC-69). */
+.dialogue {
+  position: absolute;
+  bottom: max(96px, calc(env(safe-area-inset-bottom) + 86px));
+  left: 50%;
+  transform: translateX(-50%);
+  width: min(560px, 100vw - 24px);
+  padding: 12px 16px;
+  z-index: 40;
+}
+
+.dialogue.is-hidden {
+  display: none;
+}
+
+.dialogue-speaker {
+  display: block;
+  font-weight: 700;
+  margin-bottom: 4px;
+}
+
+/* AC-70: each speaker carries a colour beside its name, never colour alone. */
+.dialogue[data-speaker='aria'] .dialogue-speaker { color: var(--shield); }
+.dialogue[data-speaker='command'] .dialogue-speaker { color: var(--warn); }
+.dialogue[data-speaker='scav'] .dialogue-speaker { color: var(--good); }
+.dialogue[data-speaker='player'] .dialogue-speaker { color: var(--ink); }
+.dialogue[data-speaker='log'] .dialogue-speaker { color: var(--good); }
+.dialogue[data-speaker='warden'] .dialogue-speaker { color: var(--hp); }
+
+.dialogue-text {
+  margin: 0;
+  min-height: 2.6em;
+}
+
+/* AC-70: `log` reads as a terminal readout. */
+.dialogue-log {
+  font-family: ui-monospace, 'Cascadia Mono', 'SF Mono', Menlo, Consolas, monospace;
+  background: #04140a;
+  border-color: var(--good);
+}
+
+.dialogue-log .dialogue-text {
+  color: var(--good);
+}
+
+/* AC-70: `warden` glitches; AC-71 pins it still under reduce-motion. */
+.dialogue-warden {
+  border-color: var(--hp);
+  animation: dialogue-glitch 240ms steps(2) infinite;
+}
+
+.dialogue-warden .dialogue-text {
+  color: var(--hp);
+  text-shadow: 1px 0 var(--shield), -1px 0 var(--warn);
+}
+
+@keyframes dialogue-glitch {
+  25% { transform: translateX(calc(-50% + 1px)); }
+  75% { transform: translateX(calc(-50% - 1px)); }
+}
+
+/* AC-77: the modal dim under a `choice`; input is disabled beside it. */
+.dialogue-dim {
+  position: absolute;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.55);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 150ms linear;
+}
+
+.dialogue-dim.is-visible {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.dialogue-choices {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.dialogue-choices:empty {
+  display: none;
+}
+
+/* AC-71: both speaker styles go static when the player asked for less motion. */
+@media (prefers-reduced-motion: reduce) {
+  .dialogue-warden {
+    animation: none;
+  }
+
+  .dialogue-warden .dialogue-text {
+    text-shadow: none;
+  }
+
+  .dialogue-dim {
+    transition: none;
+  }
+}

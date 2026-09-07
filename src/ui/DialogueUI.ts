@@ -8,8 +8,13 @@
 // and `dialogue:started`/`dialogue:ended` bracket each one that actually runs.
 import type { EmitArgs, GameEvents } from '@/core/Events';
 import type { Unsubscribe } from '@/core/Events';
-import { DIALOGUE, type DialogueId, type SpeakerId } from '@/data/index';
+import { DIALOGUE, type DialogueDef, type DialogueId, type SpeakerId } from '@/data/index';
 import { el, h, testId, type UiRoot } from '@/ui/dom';
+
+// The schema-typed view of the table: on the `as const` literal types an absent
+// optional — a dialogue with no `modal` — is not a property at all (the same
+// pattern `systems/UiHelpers.ts` uses for `CLASSES` and `ITEMS`).
+const DIALOGUE_TABLE: Readonly<Record<DialogueId, DialogueDef>> = DIALOGUE;
 
 /** §4.6: 40 chars/s. */
 export const TYPE_CHARS_PER_SEC = 40;
@@ -112,7 +117,7 @@ export class DialogueUI {
    * played for this save.
    */
   play(id: DialogueId, opts: { modal?: boolean; onChoice?: (index: number) => void } = {}): Promise<void> {
-    const def = DIALOGUE[id];
+    const def = DIALOGUE_TABLE[id];
     if (def.once === true) {
       const key = this.#saveKey?.() ?? null;
       if (key !== null) {
@@ -209,7 +214,7 @@ export class DialogueUI {
     if (job === null) return;
     this.#stopTimers();
     this.#lineIndex++;
-    const line = DIALOGUE[job.id].lines[this.#lineIndex];
+    const line = DIALOGUE_TABLE[job.id].lines[this.#lineIndex];
     if (line === undefined) {
       this.#end(job);
       return;
@@ -236,7 +241,7 @@ export class DialogueUI {
     if (job === null) return;
     if (this.#typeTimer !== null) clearInterval(this.#typeTimer);
     this.#typeTimer = null;
-    const line = DIALOGUE[job.id].lines[this.#lineIndex];
+    const line = DIALOGUE_TABLE[job.id].lines[this.#lineIndex];
     if (line !== undefined) this.#text.textContent = line.text;
     this.#lineDone = true;
   }
