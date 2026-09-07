@@ -24,7 +24,16 @@ export function confirmSheet(ui: UiRoot, options: ConfirmOptions, onConfirm?: ()
     const previous = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     const backdrop = testId(h('div', { class: 'sheet-backdrop' }), 'confirm-sheet');
 
+    // AC-56: an answered sheet takes no second answer. Removing the backdrop
+    // does not silence a listener on a retained button node — a double-tap (or
+    // a synthetic `.click()`) would re-run `onConfirm`, and for depart that
+    // callback *is* the fuel charge. The flag settles first, the buttons grey.
+    let settled = false;
     const close = (answer: boolean): void => {
+      if (settled) return;
+      settled = true;
+      confirm.disabled = true;
+      cancel.disabled = true;
       backdrop.remove();
       previous?.focus();
       resolve(answer);
@@ -39,6 +48,7 @@ export function confirmSheet(ui: UiRoot, options: ConfirmOptions, onConfirm?: ()
       'confirm-yes',
     );
     confirm.addEventListener('click', () => {
+      if (settled) return;
       if (onConfirm !== undefined && !onConfirm()) return; // 14-c: stays open
       close(true);
     });
