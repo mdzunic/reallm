@@ -133,6 +133,59 @@ test('records one frame:order per second and the dev bridge agrees (AC-54, AC-56
   expect(observed.line.endsWith(observed.trace.join('>'))).toBe(true);
 });
 
+test.describe('immediate refreshes', () => {
+  // 0 ms fades, so `go()` resolves right after `scene:entered` and the row
+  // below cannot have been updated by an ordinary 250 ms tick in between.
+  test.use({ reducedMotion: 'reduce' });
+
+  test('the rows refresh on scene:entered without waiting for the next tick (AC-33)', async ({ page }) => {
+    await start(page, '/?debug');
+    const row = page.locator('[data-testid="debug-scene"]');
+    await expect(row).toHaveText(/^scene menu/);
+
+    expect(await page.evaluate(() => window.__reallm.go('station', {}))).toBe(true);
+    // Read once, with no retry: the refresh has to have happened already.
+    expect(await row.textContent()).toMatch(/^scene station/);
+  });
+});
+
+/** `loop.stats.frame` and the current scene's own render count, read together. */
+async function frameAndRenders(page: Page): Promise<{ frame: number; renders: number }> {
+  return page.evaluate(() => {
+    const stats = window.__reallm.stats();
+    return { frame: stats.frame, renders: Number(stats.sceneInfo?.['renders'] ?? 0) };
+  });
+}
+
+test('quality.targetFps 30 skips every second render, updates untouched (AC-57)', async ({ page }) => {
+  await start(page, '/?debug&quality=low');
+  expect((await page.evaluate(() => window.__reallm.stats())).preset).toBe('low');
+
+  const before = await frameAndRenders(page);
+  await page.waitForTimeout(1000);
+  const after = await frameAndRenders(page);
+
+  const frames = after.frame - before.frame;
+  const renders = after.renders - before.renders;
+  expect(frames).toBeGreaterThan(20); // the loop really ran
+  expect(renders / frames).toBeGreaterThan(0.4);
+  expect(renders / frames).toBeLessThan(0.6);
+  // The fixed updates kept their own rate: a second of frames at ~60 Hz.
+  expect((await page.evaluate(() => window.__reallm.stats())).fps).toBeGreaterThan(40);
+});
+
+test('the other presets render every frame (AC-57)', async ({ page }) => {
+  await start(page, '/?debug&quality=high');
+  const before = await frameAndRenders(page);
+  await page.waitForTimeout(1000);
+  const after = await frameAndRenders(page);
+
+  const frames = after.frame - before.frame;
+  const renders = after.renders - before.renders;
+  expect(frames).toBeGreaterThan(20);
+  expect(renders / frames).toBeGreaterThan(0.9);
+});
+
 test('the backtick key toggles it on desktop (AC-34)', async ({ page }) => {
   await start(page, '/?debug');
   const panel = page.locator('.overlay-debug');

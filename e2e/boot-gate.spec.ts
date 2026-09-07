@@ -120,6 +120,59 @@ test('the loop starts and the menu prop turns (AC-22, AC-24)', async ({ page }) 
   expect(spinAfter).toBeGreaterThan(spinBefore);
 });
 
+/** Record what the gate asks the platform for, and refuse both (02-f). */
+async function stubPlatformRequests(page: import('@playwright/test').Page): Promise<void> {
+  await page.addInitScript(() => {
+    const calls: string[] = [];
+    (window as unknown as { __asked: string[] }).__asked = calls;
+    Object.defineProperty(navigator, 'wakeLock', {
+      configurable: true,
+      value: {
+        request(type: string) {
+          calls.push(`wakeLock:${type}`);
+          return Promise.reject(new Error('denied by the test'));
+        },
+      },
+    });
+    // On the prototype, not on `document.documentElement`, which does not
+    // exist yet when an init script runs.
+    Element.prototype.requestFullscreen = function requestFullscreen(): Promise<void> {
+      calls.push('fullscreen');
+      return Promise.reject(new Error('denied by the test'));
+    };
+  });
+}
+
+const asked = (page: import('@playwright/test').Page): Promise<string[]> =>
+  page.evaluate(() => (window as unknown as { __asked: string[] }).__asked);
+
+test('the gate asks for the wake lock and shrugs off the refusal (AC-23, 02-f)', async ({ page }) => {
+  await stubPlatformRequests(page);
+  await page.goto('/');
+  await awaitGate(page);
+  expect(await asked(page)).toEqual([]);
+
+  await page.locator(gate).click();
+  await expect(page.locator(label)).toHaveText('menu'); // both refusals ignored
+  expect(await asked(page)).toEqual(['wakeLock:screen']); // no fullscreen on desktop
+});
+
+test.describe('on Android', () => {
+  test.use({
+    userAgent:
+      'Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36',
+  });
+
+  test('the gate also asks for fullscreen (AC-23)', async ({ page }) => {
+    await stubPlatformRequests(page);
+    await page.goto('/');
+    await awaitGate(page);
+    await page.locator(gate).click();
+    await expect(page.locator(label)).toHaveText('menu');
+    expect(await asked(page)).toEqual(['wakeLock:screen', 'fullscreen']);
+  });
+});
+
 test('a failed asset shows Retry and no gate until the load succeeds (AC-25)', async ({ page }) => {
   let offline = true;
   await page.route('**/assets/textures/noise.png', async (route) => {

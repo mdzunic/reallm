@@ -78,6 +78,7 @@ class PlaceholderScene<K extends SceneId> implements Scene<K> {
   #spin: THREE.Object3D | null = null;
   #pauseMenu: PauseMenu | null = null;
   #elapsed = 0;
+  #renders = 0;
 
   constructor(services: GameServices, id: K, options: { pausable?: boolean; props?: number } = {}) {
     this.services = services;
@@ -110,6 +111,9 @@ class PlaceholderScene<K extends SceneId> implements Scene<K> {
   }
 
   render(renderer: Renderer): void {
+    // Reported by `debugInfo()`: it is how the 30 fps render skip of SPEC-002
+    // §4.2 is observable from outside — updates keep their rate, draws halve.
+    this.#renders++;
     const aspect = renderer.width / renderer.height;
     if (this.camera.aspect !== aspect) {
       this.camera.aspect = aspect;
@@ -135,7 +139,7 @@ class PlaceholderScene<K extends SceneId> implements Scene<K> {
    * AC-31). The id itself is not repeated here — the row already shows it.
    */
   debugInfo(): Record<string, number | string> {
-    const info: Record<string, number | string> = { props: this.props };
+    const info: Record<string, number | string> = { props: this.props, renders: this.#renders };
     if (this.#spin) info['spin'] = this.#spin.rotation.y;
     return info;
   }

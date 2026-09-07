@@ -184,7 +184,7 @@ export class Game implements GameServices {
 
   #pauseReason: 'hidden' | 'context-lost' | 'user' | null = null;
   #stopped = false;
-  #statsTimer: number | null = null;
+  #lastStatsMs = 0;
   #contextLostTimer: number | null = null;
 
   /** Preallocated: the traced frame writes into it and allocates nothing (§4.6.2). */
@@ -377,8 +377,6 @@ export class Game implements GameServices {
     this.#tapTimer = null;
     if (this.#contextLostTimer !== null) clearTimeout(this.#contextLostTimer);
     this.#contextLostTimer = null;
-    if (this.#statsTimer !== null) clearInterval(this.#statsTimer);
-    this.#statsTimer = null;
     for (const release of this.#teardown.splice(0).reverse()) {
       try {
         release();
@@ -432,6 +430,7 @@ export class Game implements GameServices {
     this.#phase(PHASE_UI_FLUSH);
     this.#save.tick();
     (this.#transitionUi as Flushable).flush?.();
+    this.#refreshStatsIfDue();
     this.#phase(PHASE_INPUT_END);
     this.#input.endFrame();
     this.#endTrace();
@@ -613,21 +612,28 @@ export class Game implements GameServices {
   #setStatsVisible(visible: boolean): void {
     if (visible === this.#statsUi.visible) return;
     this.#statsUi.setVisible(visible);
-    if (visible) {
-      this.#refreshStats();
-      this.#statsTimer = setInterval(() => this.#refreshStats(), STATS_REFRESH_MS);
-      return;
-    }
-    if (this.#statsTimer !== null) clearInterval(this.#statsTimer);
-    this.#statsTimer = null;
+    if (visible) this.#refreshStats();
+  }
+
+  /**
+   * Step 4 of §4.2, throttled to the 4 Hz of §4.6.1. While the overlay is
+   * hidden this is one boolean: no DOM write, no `gl.info` read and no
+   * allocation (AC-37).
+   */
+  #refreshStatsIfDue(): void {
+    if (!this.#statsUi.visible) return;
+    if (performance.now() - this.#lastStatsMs < STATS_REFRESH_MS) return;
+    this.#refreshStats();
   }
 
   /**
    * The only place the overlay's DOM is written and the only place `gl.info` is
-   * read; while the overlay is hidden the frame does none of it (AC-37).
+   * read. Called on the 4 Hz tick and, immediately, after `scene:entered`, a
+   * context restore, a quality change and a pause state change (AC-33).
    */
   #refreshStats(): void {
     if (!this.#statsUi.visible) return;
+    this.#lastStatsMs = performance.now();
     this.#statsUi.update(this.stats);
     if (!this.#tracePending) return;
     this.#tracePending = false;
