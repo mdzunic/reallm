@@ -246,7 +246,10 @@ class PlaceholderScene<K extends SceneId> implements Scene<K> {
     const layer = document.createElement('div');
     layer.className = 'scene-layer';
     const label = document.createElement('p');
-    label.className = 'scene-label';
+    // The same quiet corner tag the real scenes wear (base.ts): the old
+    // `scene-label` block is 20 px and full-opacity, which sat on top of the
+    // HUD's HP glyph once SPEC-014 put a HUD in these scenes.
+    label.className = 'scene-tag';
     label.dataset['testid'] = 'scene-label';
     label.textContent = this.id;
     layer.append(label);

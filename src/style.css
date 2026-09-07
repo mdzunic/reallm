@@ -181,16 +181,6 @@ button.boot-start.is-visible {
   inset: 0;
 }
 
-.scene-label {
-  position: absolute;
-  left: max(12px, env(safe-area-inset-left));
-  top: max(12px, env(safe-area-inset-top));
-  margin: 0;
-  font-size: 20px;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-}
-
 .scene-nav {
   position: absolute;
   right: max(12px, env(safe-area-inset-right));
@@ -313,7 +303,7 @@ button.touch-button {
 
 /* --------------------------------------------- stats overlay (SPEC-002 §4.6) */
 
-/* Top-left, offset far enough below `.scene-label` that both stay legible
+/* Top-left, offset far enough below `.scene-tag` that both stay legible
    (AC-28). It opts into pointer events for the two simulator buttons. */
 .overlay-debug {
   position: absolute;
