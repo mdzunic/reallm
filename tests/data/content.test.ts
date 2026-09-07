@@ -33,6 +33,7 @@ import {
   type DialogueId,
   type Enemy,
   type EnemyId,
+  type FlagId,
   type Item,
   type LootEntry,
   type LootTableId,
@@ -571,11 +572,11 @@ describe('content invariants (SPEC-009 §7)', () => {
     expect(sum('main')).toBe(670);
     expect(sum('side')).toBe(104);
 
-    // The roster the totals are a sum of, pinned alongside them. PLAN §6
-    // enumerates 17 main and 9 side missions and locks the set; PLAN §7's
-    // "Main missions (18)" header does not match the chapter tables it
-    // summarises, and there is no 18th main mission that leaves 670 intact.
-    // If a refinement adds one, this pin and the totals move together.
+    // The roster the totals are a sum of, pinned alongside them: PLAN §6
+    // enumerates 17 main and 9 side missions and locks the set, and §7 counts
+    // the same 17 since R5 corrected a header that read "(18)". There is no
+    // 18th main mission that leaves 670 intact, so the two must stay together —
+    // if a refinement adds one, this pin and the totals move in the same edit.
     expect(missions.filter((mission) => mission.type === 'main')).toHaveLength(17);
     expect(missions.filter((mission) => mission.type === 'side')).toHaveLength(9);
     // PLAN §7 also fixes the shape of the main total, chapter by chapter.
@@ -601,20 +602,35 @@ describe('content invariants (SPEC-009 §7)', () => {
   });
 });
 
+// `@ts-expect-error` on its own only claims that *some* error occurred on the
+// line below it, so each case here pairs one with a positive assertion naming
+// the union under test: the bad id sits outside it, the good id inside. Those
+// two lines suppress nothing, so if an id union ever widened to `string` they
+// would fail on their own rather than quietly keeping the suppression happy.
+type IsAssignable<Candidate, Union> = Candidate extends Union ? true : false;
+
 describe('unknown ids are compile errors (SPEC-009 §6, E26)', () => {
   it('a mission objective cannot name an enemy that does not exist', () => {
+    const sandGhostIsNotAnEnemy: IsAssignable<'sand_ghost', EnemyId> = false;
+    const scavRaiderIsAnEnemy: IsAssignable<'scav_raider', EnemyId> = true;
+
     // The id must resolve against `ENEMIES`; `sand_ghost` does not, so this line
     // fails `tsc` — and if it ever stopped failing, `@ts-expect-error` would.
     // @ts-expect-error
     const bad: Objective = { kind: 'kill', enemy: 'sand_ghost', amount: 6 };
     const good: Objective = { kind: 'kill', enemy: 'scav_raider', amount: 6 };
     expect([bad.kind, good.kind]).toEqual(['kill', 'kill']);
+    expect([sandGhostIsNotAnEnemy, scavRaiderIsAnEnemy]).toEqual([false, true]);
   });
 
   it('a planet unlock cannot name a flag that does not exist', () => {
+    const chapter9IsNotAFlag: IsAssignable<'chapter9_done', FlagId> = false;
+    const chapter1IsAFlag: IsAssignable<'chapter1_done', FlagId> = true;
+
     // @ts-expect-error
     const bad: PlanetDef['unlock'] = [{ kind: 'flag', flag: 'chapter9_done' }];
     const good: PlanetDef['unlock'] = [{ kind: 'flag', flag: 'chapter1_done' }];
     expect([bad.length, good.length]).toEqual([1, 1]);
+    expect([chapter9IsNotAFlag, chapter1IsAFlag]).toEqual([false, true]);
   });
 });
