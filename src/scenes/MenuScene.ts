@@ -185,6 +185,12 @@ export class MenuScene extends UiScene<'menu'> {
     document.addEventListener('keydown', onKey);
     this.disposer.add(() => document.removeEventListener('keydown', onKey));
 
+    // A save appearing while the menu is open — the dev bridge, an import, the
+    // E8 memory-only create whose first flush reports `unavailable` — must
+    // surface Continue without a reload (AC-2).
+    this.disposer.add(this.services.events.on('save:written', () => this.#refresh(), this));
+    this.disposer.add(this.services.events.on('save:failed', () => this.#refresh(), this));
+
     this.#refresh();
     this.#buttons.querySelector('button')?.focus();
   }

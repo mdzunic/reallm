@@ -1169,13 +1169,16 @@ button.slot-button {
 }
 
 /* ------------------------------------------------------------- real scenes */
-/* The `scene-label` hook the e2e fleet reads, worn as a quiet corner tag. */
+/* The `scene-label` hook the e2e fleet reads, worn as a quiet corner tag.
+   Top-left like the placeholder banner it replaces: the ?debug overlay docks
+   itself below whatever sits here (SPEC-002 AC-28). */
 .scene-tag {
   position: absolute;
-  right: max(12px, env(safe-area-inset-right));
-  bottom: max(12px, env(safe-area-inset-bottom));
+  left: max(12px, env(safe-area-inset-left));
+  top: max(12px, env(safe-area-inset-top));
   margin: 0;
   font-size: 14px;
+  line-height: 1.2;
   color: var(--ink-dim);
   opacity: 0.55;
   pointer-events: none;
