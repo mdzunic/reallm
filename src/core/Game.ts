@@ -66,6 +66,8 @@ export interface StatsSnapshot {
   readonly scene: string | null;
   readonly sceneInfo: Record<string, number | string> | null;
   readonly state: 'running' | 'paused' | 'hidden' | 'context-lost' | 'stopped';
+  /** `navigator.storage.persist()`'s answer; `null` until asked (SPEC-007 §4.7). */
+  readonly persistGranted: boolean | null;
 }
 
 export interface StatsUi {
@@ -216,7 +218,7 @@ export class Game implements GameServices {
     this.#input = injected.input ?? createNullInput();
     this.#audio = injected.audio ?? createNullAudio();
     this.#save = injected.save ?? createNullSave();
-    this.#settings = injected.settings ?? createSettings();
+    this.#settings = injected.settings ?? createSettings(undefined, this.#events);
     this.#rng = injected.rng ?? createStubRng(this.#flags.seed ?? 1);
 
     // §4.5 step 1: `?quality=` wins but is never persisted, then the stored
@@ -329,6 +331,7 @@ export class Game implements GameServices {
       scene: scene?.id ?? null,
       sceneInfo: scene?.debugInfo?.() ?? null,
       state: this.#state(),
+      persistGranted: this.#settings.get().persistGranted,
     };
   }
 
@@ -498,7 +501,9 @@ export class Game implements GameServices {
     this.#input.releaseAll();
     this.#events.emit('app:paused');
     try {
-      this.#save.flush();
+      // SPEC-007 §4.5: `pagehide` is the immediate reason — a hidden tab may
+      // never get another frame, so this cannot wait for the debounce.
+      this.#save.request('pagehide');
     } catch (error) {
       log.warn('game', 'the save could not be flushed on hide', error);
     }
@@ -528,8 +533,9 @@ export class Game implements GameServices {
   }
 
   #onPageHide(): void {
-    // Synchronous by contract: the page may not exist by the next task.
-    this.#save.flush();
+    // Synchronous by contract: the page may not exist by the next task, which
+    // is exactly why `pagehide` skips the debounce (SPEC-007 §4.5).
+    this.#save.request('pagehide');
     this.#logEvent('app:pagehide');
   }
 

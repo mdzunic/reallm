@@ -1,8 +1,19 @@
-// Persisted settings (SPEC-002 §6.1, §4.8). Storage is injected, so quota
-// failures, private mode and corrupt content are all reachable here (02-h).
+// Persisted settings (SPEC-002 §6.1, §4.8; SPEC-007 §3, §6). Storage is
+// injected, so quota failures, private mode and corrupt content are all
+// reachable here (02-h, 07-e).
 import { afterEach, describe, expect, it } from 'vitest';
+import type { GameEvents } from '@/core/Events';
 import { setLogSink, type LogSink } from '@/core/Log';
-import { createSettings, MAX_BUTTON_SCALE, MIN_BUTTON_SCALE, SETTINGS_KEY } from '@/core/Settings';
+import {
+  createSettings,
+  defaultSettings,
+  MAX_BUTTON_SCALE,
+  MIN_BUTTON_SCALE,
+  SETTINGS_KEY,
+  SETTINGS_VERSION,
+  type Settings,
+  type SettingsEvents,
+} from '@/core/Settings';
 
 interface FakeStorage {
   storage: Storage;
@@ -42,6 +53,19 @@ function stored(fake: FakeStorage): Record<string, unknown> {
 }
 
 /** Silence the warnings the corrupt-content cases are supposed to produce. */
+/** Runs `body` on a platform that asks for reduced motion (the §3 default). */
+function withReducedMotion(body: () => void): void {
+  const scope = globalThis as { matchMedia?: (query: string) => { matches: boolean } };
+  const before = scope.matchMedia;
+  scope.matchMedia = (query: string) => ({ matches: query.includes('prefers-reduced-motion') });
+  try {
+    body();
+  } finally {
+    if (before === undefined) delete scope.matchMedia;
+    else scope.matchMedia = before;
+  }
+}
+
 function muteLog(): string[] {
   const warnings: string[] = [];
   const sink: LogSink = {
@@ -100,7 +124,9 @@ describe('createSettings', () => {
     settings.setShowFps(true);
     expect(settings.showFps).toBe(true);
 
-    expect(stored(fake)).toEqual({ musicVolume: 0.4, lastSlot: 2, quality: 'high', showFps: true });
+    // `version` is stamped on every write, so a future migration knows what it
+    // is reading (SPEC-007 §3).
+    expect(stored(fake)).toEqual({ version: SETTINGS_VERSION, musicVolume: 0.4, lastSlot: 2, quality: 'high', showFps: true });
     // …and a fresh store reads them back.
     const reloaded = createSettings(fake.storage);
     expect(reloaded.quality).toBe('high');
@@ -114,7 +140,7 @@ describe('createSettings', () => {
     // Another spec's store writes in between.
     fake.data.set(SETTINGS_KEY, JSON.stringify({ ...stored(fake), reduceMotion: true }));
     settings.setShowFps(true);
-    expect(stored(fake)).toEqual({ quality: 'low', reduceMotion: true, showFps: true });
+    expect(stored(fake)).toEqual({ version: SETTINGS_VERSION, quality: 'low', reduceMotion: true, showFps: true });
   });
 
   it('swallows a storage that throws while still updating in memory (02-h, AC-64)', () => {
@@ -131,12 +157,14 @@ describe('createSettings', () => {
     expect(warnings.join('\n')).toContain('could not persist');
   });
 
-  it('defaults the control options to touch auto-fire, a left stick and no assist (SPEC-005 AC-18, AC-11)', () => {
+  it('defaults the control options to touch auto-fire and a left stick (SPEC-005 AC-18, AC-11)', () => {
     const settings = createSettings(fakeStorage().storage);
     expect(settings.autoFire).toBe('touch');
     expect(settings.joystickSide).toBe('left');
-    expect(settings.flightMouseSteer).toBe(false);
     expect(settings.buttonScale).toBe(MIN_BUTTON_SCALE);
+    // The default of the fourth option is SPEC-007 §3's, asserted with the rest
+    // of that table below.
+    expect(settings.flightMouseSteer).toBe(true);
   });
 
   it('reads, validates and persists the control options', () => {
@@ -161,6 +189,7 @@ describe('createSettings', () => {
     store.setFlightMouseSteer(true);
     store.setButtonScale(1.25);
     expect(stored(written)).toEqual({
+      version: SETTINGS_VERSION,
       autoFire: 'off',
       joystickSide: 'right',
       flightMouseSteer: true,
@@ -187,5 +216,172 @@ describe('createSettings', () => {
     expect(settings.showFps).toBe(false);
     settings.setShowFps(true);
     expect(settings.showFps).toBe(true);
+  });
+});
+
+// ------------------------------------------------------------------ SPEC-007
+
+/** Collects `settings:changed`, the only event this store emits. */
+function eventRecorder(): SettingsEvents & { patches: Array<Partial<Settings>> } {
+  const patches: Array<Partial<Settings>> = [];
+  return {
+    patches,
+    emit(name, ...args) {
+      if (name === 'settings:changed') patches.push((args[0] as GameEvents['settings:changed']).patch);
+    },
+  };
+}
+
+describe('the settings object (SPEC-007 §3)', () => {
+  it('defaults to the values of Reference §3 (AC-48)', () => {
+    const settings = createSettings(fakeStorage().storage).get();
+    expect(settings).toEqual({
+      version: SETTINGS_VERSION,
+      master: 1,
+      music: 0.7,
+      sfx: 1,
+      quality: null,
+      reduceMotion: false,
+      autoFire: 'touch',
+      joystickSide: 'left',
+      // §3 annotates this one `default true`. SPEC-005 owns the aim-assist
+      // itself and only requires that it apply while the setting is on.
+      flightMouseSteer: true,
+      buttonScale: MIN_BUTTON_SCALE,
+      showFps: false,
+      lastSlot: null,
+      persistGranted: null,
+      installHintShownAt: null,
+      fullscreen: null,
+      benchmark: null,
+    });
+  });
+
+  it('reads every stored key back, and writes it under reallm:settings (AC-48)', () => {
+    const fake = fakeStorage();
+    const events = eventRecorder();
+    const settings = createSettings(fake.storage, events);
+    const patch: Partial<Settings> = {
+      master: 0.5,
+      music: 0.25,
+      sfx: 0.75,
+      quality: 'low',
+      reduceMotion: true,
+      lastSlot: 2,
+      persistGranted: true,
+      installHintShownAt: 1_700_000_000_000,
+      fullscreen: false,
+      benchmark: { preset: 'high', msPerFrame: 8.5, at: 1_700_000_000_000 },
+    };
+    settings.set(patch);
+
+    expect(stored(fake)).toEqual({ version: SETTINGS_VERSION, ...patch });
+    expect(createSettings(fake.storage).get()).toMatchObject(patch);
+  });
+
+  it('clamps volumes to 0..1 and refuses values that are not numbers (AC-49)', () => {
+    const settings = createSettings(fakeStorage().storage);
+    settings.set({ master: 4, music: -2, sfx: Number.NaN });
+    expect(settings.get().master).toBe(1);
+    expect(settings.get().music).toBe(0);
+    expect(settings.get().sfx).toBe(1); // NaN keeps what was there
+
+    settings.set({ master: 'loud' as unknown as number });
+    expect(settings.get().master).toBe(1);
+
+    // …and the same rule on the way in.
+    expect(createSettings(fakeStorage('{"master":9,"music":"x","sfx":0.3}').storage).get()).toMatchObject({
+      master: 1,
+      music: 0.7,
+      sfx: 0.3,
+    });
+  });
+
+  it('validates the rest of the object on set as well as on load (AC-49)', () => {
+    const settings = createSettings(fakeStorage().storage);
+    settings.set({
+      quality: 'ultra' as unknown as Settings['quality'],
+      autoFire: 'always' as unknown as Settings['autoFire'],
+      lastSlot: 7 as unknown as Settings['lastSlot'],
+      installHintShownAt: Number.POSITIVE_INFINITY,
+      benchmark: { preset: 'nope', msPerFrame: 1, at: 1 } as unknown as Settings['benchmark'],
+      buttonScale: 99,
+    });
+    expect(settings.get()).toMatchObject({
+      quality: null,
+      autoFire: 'touch',
+      lastSlot: null,
+      installHintShownAt: null,
+      benchmark: null,
+      buttonScale: MAX_BUTTON_SCALE,
+    });
+  });
+
+  it('keeps a default-on boolean on when the stored value is unusable (AC-49)', () => {
+    muteLog();
+    // `false` is a choice the player made; `"yes"` is not a value at all, and
+    // reading it as `false` would silently turn a default-on setting off.
+    expect(createSettings(fakeStorage('{"flightMouseSteer":false}').storage).get().flightMouseSteer).toBe(false);
+    expect(createSettings(fakeStorage('{"flightMouseSteer":"yes"}').storage).get().flightMouseSteer).toBe(true);
+    const settings = createSettings(fakeStorage().storage);
+    settings.set({ flightMouseSteer: 1 as unknown as boolean });
+    expect(settings.get().flightMouseSteer).toBe(true);
+
+    // `reduceMotion` is the other one: its default is whatever the platform
+    // answers, so on a device that asks for reduced motion an unusable stored
+    // value must not quietly drop the accessibility preference.
+    withReducedMotion(() => {
+      expect(createSettings(fakeStorage().storage).get().reduceMotion).toBe(true);
+      expect(createSettings(fakeStorage('{"reduceMotion":false}').storage).get().reduceMotion).toBe(false);
+      expect(createSettings(fakeStorage('{"reduceMotion":"yes"}').storage).get().reduceMotion).toBe(true);
+      const store = createSettings(fakeStorage().storage);
+      store.set({ reduceMotion: 'off' as unknown as boolean });
+      expect(store.get().reduceMotion).toBe(true);
+    });
+  });
+
+  it('writes immediately and emits settings:changed (AC-50)', () => {
+    const fake = fakeStorage();
+    const events = eventRecorder();
+    const settings = createSettings(fake.storage, events);
+
+    settings.set({ persistGranted: true });
+    expect(stored(fake)).toEqual({ version: SETTINGS_VERSION, persistGranted: true });
+    // The event carries only what changed; `version` is not a settable key.
+    expect(events.patches).toEqual([{ persistGranted: true }]);
+
+    // The per-setting accessors are the same call, so they emit too.
+    settings.setQuality('medium');
+    expect(events.patches).toEqual([{ persistGranted: true }, { quality: 'medium' }]);
+    // The payload carries the *validated* value, not the one that was asked for.
+    settings.set({ master: 12 });
+    expect(events.patches.at(-1)).toEqual({ master: 1 });
+    // A patch with nothing this store owns changes nothing and says nothing.
+    settings.set({ nonsense: 1 } as unknown as Partial<Settings>);
+    expect(events.patches).toHaveLength(3);
+  });
+
+  it('replaces corrupt settings with the defaults and rewrites them, unprompted (07-e, AC-51)', () => {
+    muteLog();
+    for (const content of ['not json at all', '[1,2,3]', '"a string"']) {
+      const fake = fakeStorage(content);
+      const settings = createSettings(fake.storage);
+      expect(settings.get()).toEqual(defaultSettings());
+      // Rewritten, so the next boot reads an object instead of the wreckage.
+      expect(stored(fake)).toEqual(defaultSettings());
+    }
+  });
+
+  it('leaves storage alone when there is simply nothing stored yet', () => {
+    const fake = fakeStorage();
+    createSettings(fake.storage);
+    expect(fake.data.has(SETTINGS_KEY)).toBe(false);
+  });
+
+  it('never lets the stored version be anything but the current one', () => {
+    const settings = createSettings(fakeStorage('{"version":99}').storage);
+    expect(settings.get().version).toBe(SETTINGS_VERSION);
+    settings.set({ version: 99 as unknown as 1 });
+    expect(settings.get().version).toBe(SETTINGS_VERSION);
   });
 });

@@ -11,6 +11,10 @@
 // `assets.loaded` so `menu` stays the safe fallback for a failed `enter()`
 // (SPEC-003 D-19). `station` and `starmap` build a few meshes and textures of
 // their own so that cycling between them exercises real GPU allocations (AC-13).
+//
+// `menu` also mounts SPEC-007's `SavePanel`: the storage banner and the corrupt
+// slot's Import/Delete actions are that spec's own UI (E8), so they live in
+// `ui/` and move to the real menu with SPEC-014 rather than being rebuilt.
 import * as THREE from 'three';
 import { Disposer, disposeObject3D } from '@/core/Disposer';
 import { log } from '@/core/Log';
@@ -18,6 +22,7 @@ import type { GameServices } from '@/core/Services';
 import type { Renderer } from '@/core/Renderer';
 import { ALLOWED_TRANSITIONS, type Scene, type SceneFactory, type SceneId, type SceneParams } from '@/core/StateMachine';
 import { PauseMenu } from '@/ui/PauseMenu';
+import { SavePanel } from '@/ui/SavePanel';
 import { TouchControls } from '@/ui/TouchControls';
 
 /** The DOM layer every scene mounts its own UI into (SPEC-001 shell). */
@@ -228,6 +233,12 @@ class MenuScene extends PlaceholderScene<'menu'> {
 
   override enter(params: SceneParams['menu']): void {
     super.enter(params);
+    // SPEC-007 E8: the menu is where a memory-only session is told so (AC-17)
+    // and where a slot with neither a readable save nor a readable backup gets
+    // its Import and Delete actions (AC-20). The panel belongs to SPEC-007, so
+    // SPEC-014's real menu mounts the same one.
+    const saves = new SavePanel(uiRoot(), this.services.save);
+    this.disposer.add(() => saves.dispose());
     if (!this.services.assets.loaded) return;
     try {
       this.#buildSpike();

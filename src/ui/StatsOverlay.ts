@@ -1,4 +1,4 @@
-// The dev stats overlay (SPEC-002 §4.6). Thirteen rows and two buttons — the
+// The dev stats overlay (SPEC-002 §4.6). Fourteen rows and two buttons — the
 // complete content of the panel, in this order, each row with a fixed
 // `data-testid` and a fixed text format so both the e2e suite and a developer
 // squinting at a phone read the same thing.
@@ -32,6 +32,9 @@ const ROWS = [
   'debug-size',
   'debug-scene',
   'debug-state',
+  // SPEC-007 §7 (M7): whether the browser granted persistent storage, which is
+  // what stands between an iOS player and Safari's seven-day eviction.
+  'debug-persist',
   'debug-events',
 ] as const;
 
@@ -103,6 +106,10 @@ export class StatsOverlay implements StatsUi {
       snapshot.scene === null ? 'scene -' : `scene ${snapshot.scene}${pairs(snapshot.sceneInfo)}`,
     );
     this.#set('debug-state', `state ${snapshot.state}`);
+    this.#set(
+      'debug-persist',
+      `persist ${snapshot.persistGranted === null ? 'unknown' : snapshot.persistGranted ? 'granted' : 'denied'}`,
+    );
   }
 
   /** One line per entry, oldest first, `<seconds since boot, 2 decimals> <name>`. */

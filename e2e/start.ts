@@ -13,9 +13,76 @@ export interface DevBridge {
   stats(): StatsSnapshot;
   /** The live `Input.state` (SPEC-005 §3); the object is mutated in place. */
   input(): InputSnapshot;
+  /** SPEC-007's slot store, for the M1 acceptance suite (§7). */
+  save(): SaveBridge;
   trace(): string[];
   loseContext(restoreAfterMs: number | null): void;
   stop(): void;
+}
+
+/**
+ * The part of `SaveStore` the suites drive (SPEC-007 §3). `SaveV1` itself stays
+ * loose here: `e2e/` may not import `src/`, and the suites only ever read the
+ * two or three fields they assert on.
+ */
+export interface SaveBridge {
+  readonly available: boolean;
+  /** 07-f: false where the browser has no `CompressionStream` (SPEC-007 §4.6). */
+  readonly codesSupported: boolean;
+  /** 07-a: true once another tab has written this slot (SPEC-007 §4.5). */
+  readonly refusingAutosaves: boolean;
+  list(): Array<{
+    slot: number;
+    empty: boolean;
+    name?: string;
+    classId?: string;
+    level?: number;
+    planet?: string | null;
+    playtimeSec?: number;
+    updatedAt?: number;
+    corrupt?: boolean;
+  }>;
+  load(slot: number): { ok: boolean; source?: string; reason?: string; foundVersion?: number; data?: SaveSnapshot };
+  create(slot: number, creation: unknown, seed?: number): SaveSnapshot;
+  /** §4.5: a debounced autosave; `manual` and `pagehide` skip the debounce. */
+  request(reason: string): void;
+  addPlaytime(seconds: number): void;
+  flush(): boolean;
+  delete(slot: number): void;
+  exportCode(slot: number): Promise<string>;
+  importCode(
+    code: string,
+    slot: number,
+  ): Promise<{ ok: boolean; reason?: string; foundVersion?: number; data?: SaveSnapshot }>;
+}
+
+export interface SaveSnapshot {
+  version: number;
+  meta: { slot: number; seed: number; playtimeSec: number; updatedAt: number; iteration: number; difficulty: string };
+  player: {
+    name: string;
+    classId: string;
+    level: number;
+    xp: number;
+    tokens: number;
+    hp: number;
+    attributes: Record<string, number>;
+  };
+  resources: Record<string, number>;
+  inventory: Array<{ itemId: string; qty: number }>;
+  equipped: { weapon: string; armor: string };
+  ship: Record<string, number>;
+  companions: Array<{ id: string; level: number; enabled: boolean }>;
+  progress: {
+    missionsDone: string[];
+    missionsActive: Array<{ id: string; stage: number; counters: Record<string, number> }>;
+    flags: string[];
+    currentPlanet: string | null;
+    location: string;
+    poisDiscovered: string[];
+    visits: Record<string, number>;
+    endingSeen: boolean;
+  };
 }
 
 /** The part of `InputState` the suites assert on (SPEC-005 §3). */
@@ -45,6 +112,8 @@ export interface StatsSnapshot {
   scene: string | null;
   sceneInfo: Record<string, number | string> | null;
   state: string;
+  /** SPEC-007 §4.7: `null` until `navigator.storage.persist()` has answered. */
+  persistGranted: boolean | null;
 }
 
 declare global {

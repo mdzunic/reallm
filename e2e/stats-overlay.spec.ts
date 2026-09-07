@@ -1,6 +1,7 @@
 // The dev stats overlay (SPEC-002 §4.6, §6.2). Its content is a closed list —
-// thirteen rows and two buttons, nothing else — because every later performance
-// claim in this project is read off it.
+// fourteen rows and two buttons, nothing else — because every later performance
+// claim in this project is read off it. The fourteenth is SPEC-007's `persist`
+// row (§7, M7).
 import { expect, test, type Page } from '@playwright/test';
 import { start } from './start';
 
@@ -18,6 +19,9 @@ const ROWS: ReadonlyArray<readonly [string, RegExp]> = [
   ['debug-size', /^size \d+x\d+$/],
   ['debug-scene', /^scene menu(?: [\w-]+=[^\s]+)*$/],
   ['debug-state', /^state (?:running|paused|hidden|context-lost|stopped)$/],
+  // SPEC-007 §7: `unknown` until `navigator.storage.persist()` has answered,
+  // which it only does after the first save of a session.
+  ['debug-persist', /^persist (?:granted|denied|unknown)$/],
   ['debug-events', /\d+\.\d{2} \S+/],
 ];
 
@@ -43,7 +47,7 @@ async function overlayChildren(page: Page): Promise<string[]> {
   );
 }
 
-test('holds exactly the thirteen rows and the two buttons, in order (AC-27 … AC-30)', async ({ page }) => {
+test('holds exactly the fourteen rows and the two buttons, in order (AC-27 … AC-30)', async ({ page }) => {
   await start(page, '/?debug');
 
   for (const [id, format] of ROWS) {
