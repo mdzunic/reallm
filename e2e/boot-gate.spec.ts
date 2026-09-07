@@ -128,6 +128,8 @@ test('a failed asset shows Retry and no gate until the load succeeds (AC-25)', a
   });
 
   await page.goto('/');
+  // Visible, not merely present: the copy is in the markup from the start.
+  await expect(page.locator('[data-testid="boot-error"]')).toBeVisible();
   await expect(page.locator('[data-testid="boot-error"]')).toContainText('Could not load assets');
   await expect(page.locator(gate)).toBeHidden();
   await expect(page.locator(label)).toHaveCount(0);

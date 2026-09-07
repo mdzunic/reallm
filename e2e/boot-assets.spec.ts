@@ -33,6 +33,9 @@ test('a failed asset offers Retry, which fetches only what is missing (AC-46, AC
   });
 
   await page.goto('/');
+  // Visible, not merely present: the panel's copy is in the markup from the
+  // start, so waiting on the text alone would race the load itself.
+  await expect(page.locator('[data-testid="boot-error"]')).toBeVisible();
   await expect(page.locator('[data-testid="boot-error"]')).toContainText('Could not load assets — check connection');
   // The items before the failing one did get through.
   expect(fetched.some((path) => path.endsWith('crate.glb'))).toBe(true);

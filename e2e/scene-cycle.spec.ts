@@ -23,8 +23,18 @@ async function go(page: Page, id: string, params: unknown = {}): Promise<boolean
   );
 }
 
+/**
+ * SPEC-002's stats overlay rewrites its rows 4 times a second (§4.6.1, AC-33)
+ * and a scene's geometries only reach `gl.info.memory` once it has actually
+ * been drawn, so the row is read after a refresh that lands past the first
+ * renders of the current scene. It is cross-checked against the live counter,
+ * which is the same number without the 250 ms of latency.
+ */
 async function memory(page: Page): Promise<{ geo: number; tex: number }> {
+  await page.waitForTimeout(400);
+  const live = await page.evaluate(() => window.__reallm.memory());
   const text = (await page.locator('[data-testid="debug-memory"]').textContent()) ?? '';
+  expect(text).toBe(`geo ${live.geometries} tex ${live.textures}`);
   const match = /geo (\d+) tex (\d+)/.exec(text);
   if (!match) throw new Error(`unexpected ?debug readout: "${text}"`);
   return { geo: Number(match[1]), tex: Number(match[2]) };
