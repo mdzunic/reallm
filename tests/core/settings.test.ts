@@ -53,6 +53,19 @@ function stored(fake: FakeStorage): Record<string, unknown> {
 }
 
 /** Silence the warnings the corrupt-content cases are supposed to produce. */
+/** Runs `body` on a platform that asks for reduced motion (the §3 default). */
+function withReducedMotion(body: () => void): void {
+  const scope = globalThis as { matchMedia?: (query: string) => { matches: boolean } };
+  const before = scope.matchMedia;
+  scope.matchMedia = (query: string) => ({ matches: query.includes('prefers-reduced-motion') });
+  try {
+    body();
+  } finally {
+    if (before === undefined) delete scope.matchMedia;
+    else scope.matchMedia = before;
+  }
+}
+
 function muteLog(): string[] {
   const warnings: string[] = [];
   const sink: LogSink = {
@@ -313,6 +326,18 @@ describe('the settings object (SPEC-007 §3)', () => {
     const settings = createSettings(fakeStorage().storage);
     settings.set({ flightMouseSteer: 1 as unknown as boolean });
     expect(settings.get().flightMouseSteer).toBe(true);
+
+    // `reduceMotion` is the other one: its default is whatever the platform
+    // answers, so on a device that asks for reduced motion an unusable stored
+    // value must not quietly drop the accessibility preference.
+    withReducedMotion(() => {
+      expect(createSettings(fakeStorage().storage).get().reduceMotion).toBe(true);
+      expect(createSettings(fakeStorage('{"reduceMotion":false}').storage).get().reduceMotion).toBe(false);
+      expect(createSettings(fakeStorage('{"reduceMotion":"yes"}').storage).get().reduceMotion).toBe(true);
+      const store = createSettings(fakeStorage().storage);
+      store.set({ reduceMotion: 'off' as unknown as boolean });
+      expect(store.get().reduceMotion).toBe(true);
+    });
   });
 
   it('writes immediately and emits settings:changed (AC-50)', () => {

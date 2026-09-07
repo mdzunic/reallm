@@ -199,7 +199,7 @@ function oneOf<T extends string>(value: unknown, allowed: readonly T[], fallback
 }
 
 /**
- * A stored boolean, or `fallback`. Only needed where the default is `true`:
+ * A stored boolean, or `fallback`. Only needed where the default can be `true`:
  * `value === true` would read every unusable value as `false`, which is a value
  * the player never chose.
  */
@@ -244,7 +244,9 @@ function coerce<K extends keyof Settings>(key: K, value: unknown, current: Setti
       case 'quality':
         return typeof value === 'string' && PRESETS.includes(value) ? (value as QualityPreset) : null;
       case 'reduceMotion':
-        return value === true;
+        // The default is the platform's answer to `prefers-reduced-motion`, so
+        // this is the other setting an unusable stored value must not turn off.
+        return bool(value, current.reduceMotion);
       case 'autoFire':
         return oneOf(value, AUTO_FIRE_MODES, current.autoFire);
       case 'joystickSide':
