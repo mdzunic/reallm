@@ -1,6 +1,6 @@
-// Resize and DPR (SPEC-002 §4.3, §6.2). The one thing that must never happen is
-// a drawing buffer whose shape disagrees with the CSS box — that is what makes
-// a phone render a stretched picture.
+// The renderer: its drawing surface, resize and DPR (SPEC-002 §4.3, §6.2). The
+// one thing that must never happen is a drawing buffer whose shape disagrees
+// with the CSS box — that is what makes a phone render a stretched picture.
 import { expect, test, type Page } from '@playwright/test';
 import { frames, start } from './start';
 
@@ -41,6 +41,28 @@ async function lastResizeAt(page: Page): Promise<number> {
   return stamps.length === 0 ? -1 : Math.max(...stamps);
 }
 
+/**
+ * What the live GL context reports, not what was asked for. Asserting on the
+ * constructor arguments would have missed the whole defect this covers: three
+ * hardcodes `alpha: true` in the attributes it passes to `getContext()`, so the
+ * renderer's own options are not evidence of anything.
+ */
+async function contextAttributes(page: Page): Promise<Record<string, unknown>> {
+  return page.evaluate(() => {
+    const canvas = document.querySelector('canvas#game') as HTMLCanvasElement;
+    // Asking again for the same context type hands back the live context; the
+    // attributes argument is ignored on every call after the first.
+    const attributes = (canvas.getContext('webgl2') as WebGL2RenderingContext).getContextAttributes();
+    return {
+      alpha: attributes?.alpha ?? null,
+      stencil: attributes?.stencil ?? null,
+      antialias: attributes?.antialias ?? null,
+      powerPreference: attributes?.powerPreference ?? null,
+      canvases: document.querySelectorAll('canvas').length,
+    };
+  });
+}
+
 function expectMatchesCss(m: Measurement): void {
   expect(Math.abs(m.bufferWidth - Math.round(m.cssWidth * m.dpr))).toBeLessThanOrEqual(1);
   expect(Math.abs(m.bufferHeight - Math.round(m.cssHeight * m.dpr))).toBeLessThanOrEqual(1);
@@ -49,6 +71,26 @@ function expectMatchesCss(m: Measurement): void {
   expect(m.styleWidth).toBe('');
   expect(m.styleHeight).toBe('');
 }
+
+test('the one context is opaque, stencil-free and high-performance (AC-11)', async ({ page }) => {
+  await start(page, '/?debug&quality=high');
+  const high = await contextAttributes(page);
+  // One canvas, therefore one renderer: nothing else in the app makes a context.
+  expect(high.canvases).toBe(1);
+  // The compositor blends a transparent buffer on every frame, and a stencil
+  // buffer nothing uses still costs bandwidth: both are fill rate a phone does
+  // not have to spare (SPEC-002 §2).
+  expect(high.alpha).toBe(false);
+  expect(high.stencil).toBe(false);
+  expect(high.powerPreference).toBe('high-performance');
+  expect(high.antialias).toBe(true); // only on `high`
+
+  await start(page, '/?debug&quality=medium');
+  const medium = await contextAttributes(page);
+  expect(medium.alpha).toBe(false);
+  expect(medium.stencil).toBe(false);
+  expect(medium.antialias).toBe(false);
+});
 
 test('the drawing buffer tracks CSS size × dpr through resizes and rotation (AC-13, AC-14)', async ({ page }) => {
   await page.setViewportSize({ width: 1024, height: 640 });

@@ -116,6 +116,40 @@ function deviceDpr(): number {
   return typeof value === 'number' && value > 0 ? value : 1;
 }
 
+/**
+ * The drawing surface AC-11 asks for, created here rather than left to three.
+ *
+ * three r185 builds its own attribute object for `canvas.getContext()` with
+ * `alpha: true` hardcoded (`three.module.js`, the `contextAttributes` literal)
+ * and reads its `alpha` option only to pick the clear alpha — so a renderer
+ * "created with `alpha: false`" still lands on a blended, non-opaque drawing
+ * buffer that the compositor pays for on every frame. Creating the context here
+ * and handing it over is three's own supported seam: it keeps the context it is
+ * given and derives its internal alpha from `getContextAttributes().alpha`.
+ *
+ * `null` (no WebGL2) falls back to letting three do it, which throws the error
+ * the boot path already surfaces.
+ */
+function createContext(canvas: HTMLCanvasElement, antialias: boolean): WebGLRenderingContext | null {
+  const attributes: WebGLContextAttributes = {
+    // Opaque and never composited with the page, and nothing stencils: both
+    // cost fill rate on a phone for nothing (SPEC-002 §2).
+    alpha: false,
+    stencil: false,
+    depth: true,
+    antialias,
+    powerPreference: 'high-performance',
+  };
+  const context = canvas.getContext('webgl2', attributes);
+  if (context === null) {
+    log.warn('renderer', 'no webgl2 context with the requested attributes; letting three try');
+    return null;
+  }
+  // `WebGL2RenderingContext` is what three has wanted since r163; the published
+  // types still say `WebGLRenderingContext` (which r163 rejects outright).
+  return context as unknown as WebGLRenderingContext;
+}
+
 class CanvasRenderer implements Renderer {
   readonly gl: WebGLRenderer;
   readonly #canvas: HTMLCanvasElement;
@@ -144,13 +178,16 @@ class CanvasRenderer implements Renderer {
     this.#canvas = canvas;
     this.#events = options.events;
     this.#preset = options.preset;
+    const antialias = QUALITY[options.preset].antialias;
     this.gl = new WebGLRenderer({
       canvas,
-      // The canvas is opaque and never composites with the page, and nothing
-      // stencils: both cost fill rate on a phone for nothing (SPEC-002 §2).
+      // The attributes the GL context actually gets (AC-11) — see createContext.
+      context: createContext(canvas, antialias) ?? undefined,
+      // Passed as well so three agrees with the context it is handed, and so
+      // the fallback path (no WebGL2 above) still asks for the same surface.
       alpha: false,
       stencil: false,
-      antialias: QUALITY[options.preset].antialias,
+      antialias,
       powerPreference: 'high-performance',
     });
 
