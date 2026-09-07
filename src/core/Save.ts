@@ -50,6 +50,13 @@ export type SlotId = (typeof SLOTS)[number];
 export const AUTOSAVE_DEBOUNCE_MS = 500;
 /** §4.2: past this the save is logged as suspicious — and still written. */
 export const LARGE_SAVE_BYTES = 500_000;
+/**
+ * 07-c: the longest a pending write is held for a scene swap. A transition that
+ * ends by throwing on both the scene and the menu fallback never emits
+ * `scene:entered` (SPEC-003 §4), and a hold with no end would silently stop
+ * autosaving for the rest of the session.
+ */
+export const TRANSITION_HOLD_MAX_MS = 10_000;
 /** §4.7: the Home Screen hint is never shown twice inside this window. */
 export const INSTALL_HINT_INTERVAL_MS = 14 * 24 * 60 * 60 * 1000;
 
@@ -141,9 +148,9 @@ export interface SlotSummary {
 }
 
 /**
- * Defined here rather than in `data/characters.ts` because `core` may import
- * only `data/ids` from `data` (SPEC-001 §4); SPEC-014 builds the creation UI
- * that fills it in.
+ * Defined here rather than in `data/characters.ts`, which is one of SPEC-009's
+ * content tables: from `data`, `core` reads only the id unions and the tuning
+ * constants (SPEC-001 §4). SPEC-014 builds the creation UI that fills it in.
  */
 export interface CharacterCreation {
   name: string;
@@ -604,9 +611,22 @@ function validateCompanions(raw: unknown[], warnings: string[]): SaveV1['compani
   return out;
 }
 
+/**
+ * The stage count of a mission the save *names*, or `undefined` for anything
+ * that is not one of ours. Plain-indexing the table would resolve inherited
+ * keys, so `'toString'` and `'constructor'` would read as real missions and
+ * carry a function into the `stage` clamp of §4.4; the id universe is only the
+ * table's own keys.
+ */
+function missionStages(content: SaveContent, id: unknown): number | undefined {
+  if (typeof id !== 'string' || !Object.hasOwn(content.missions, id)) return undefined;
+  const stages = (content.missions as Readonly<Record<string, unknown>>)[id];
+  return typeof stages === 'number' && Number.isFinite(stages) ? stages : undefined;
+}
+
 function validateProgress(raw: Bag, content: SaveContent, warnings: string[]): SaveV1['progress'] {
   const missionsDone = uniqueStrings(arrayAt(raw, 'missionsDone')).filter((id) => {
-    if (content.missions[id] !== undefined) return true;
+    if (missionStages(content, id) !== undefined) return true;
     warnings.push(`progress.missionsDone: unknown mission ${JSON.stringify(id)} dropped`);
     return false;
   });
@@ -617,7 +637,7 @@ function validateProgress(raw: Bag, content: SaveContent, warnings: string[]): S
   for (const entry of arrayAt(raw, 'missionsActive')) {
     if (!isBag(entry)) continue;
     const id = entry['id'];
-    const stages = typeof id === 'string' ? content.missions[id] : undefined;
+    const stages = missionStages(content, id);
     if (typeof id !== 'string' || stages === undefined) {
       warnings.push(`progress.missionsActive: unknown mission ${JSON.stringify(id)} dropped`);
       continue;
@@ -832,9 +852,13 @@ async function pump(stream: ReadableStream<Uint8Array>): Promise<Uint8Array> {
 async function through(bytes: Uint8Array, transform: GenericTransformStream): Promise<Uint8Array> {
   const writer = transform.writable.getWriter();
   // Not awaited: with a transform stream the write promise settles only once
-  // the other end is read, so awaiting it here would deadlock.
-  void writer.write(bytes);
-  void writer.close();
+  // the other end is read, so awaiting it here would deadlock. A payload that
+  // passes the crc but will not inflate rejects both of them, and an unhandled
+  // rejection in a game that is otherwise fine would take the page down — the
+  // error the caller acts on is the one `pump()` throws.
+  const swallow = (): void => {};
+  writer.write(bytes).catch(swallow);
+  writer.close().catch(swallow);
   return pump(transform.readable as ReadableStream<Uint8Array>);
 }
 
@@ -931,10 +955,37 @@ function seedFromLocation(): number | null {
  * anyway: it is the one number the whole deterministic world hangs off.
  */
 function randomSeed(): number {
-  const scope = globalThis as { crypto?: { getRandomValues?: (array: Uint32Array) => Uint32Array } };
+  const scope = globalThis as {
+    crypto?: { getRandomValues?: (array: Uint32Array) => Uint32Array };
+    performance?: { now?: () => number };
+  };
   const values = new Uint32Array(1);
-  scope.crypto?.getRandomValues?.(values);
-  return (values[0] as number) >>> 0;
+  if (typeof scope.crypto?.getRandomValues === 'function') {
+    scope.crypto.getRandomValues(values);
+    return (values[0] as number) >>> 0;
+  }
+  // No CSPRNG at all: the array would stay zeroed and every fresh save on this
+  // platform would generate the same world. The clock is a poor seed but a
+  // varying one, and the un-seeded generator is banned here (SPEC-001 §7).
+  log.warn('save', 'crypto.getRandomValues is unavailable; the seed comes from the clock');
+  const clock = Date.now() ^ Math.round((scope.performance?.now?.() ?? 0) * 1000);
+  return clock >>> 0;
+}
+
+/**
+ * Whether a stored string is plausibly one of our saves — parseable, an object,
+ * and versioned. Deliberately structural rather than a full `validateSave`:
+ * this runs on the backup copy of every flush, and §4.3 is what decides whether
+ * a save is *usable*.
+ */
+function looksLikeSave(raw: string): boolean {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    return false;
+  }
+  return isBag(parsed) && typeof parsed['version'] === 'number' && Number.isInteger(parsed['version']);
 }
 
 function isIosSafari(): boolean {
@@ -976,6 +1027,8 @@ export class SaveStore {
   #pendingSince = 0;
   /** 07-c: set between `scene:transition` and `scene:entered`. */
   #transitioning = false;
+  /** When that hold started, so a transition that never lands cannot outlast it. */
+  #transitionSince = 0;
   /** 07-a: another tab wrote our slot; autosaves stop until the page reloads. */
   #foreignWrite = false;
   #unavailableReported = false;
@@ -1126,15 +1179,16 @@ export class SaveStore {
 
   /** Removes the main key *and* the backup (§3, M1 acceptance). */
   delete(slot: SlotId): void {
-    if (this.#storage === null) return;
     for (const key of [this.#key(slot), this.#key(slot) + BAK_SUFFIX]) {
       try {
-        this.#storage.removeItem(key);
+        this.#storage?.removeItem(key);
       } catch (error) {
         log.warn('save', `could not remove ${key}`, error);
       }
     }
-    // Otherwise the next autosave writes the deleted character straight back.
+    // Otherwise the next autosave writes the deleted character straight back —
+    // and in a memory-only session (E8) the deleted character would go on being
+    // played and exported.
     if (this.#current?.meta.slot === slot) {
       this.#current = null;
       this.#pending = null;
@@ -1173,7 +1227,13 @@ export class SaveStore {
     if (this.#pending === null) return;
     // 07-c: a scene swap is halfway through disposing its state; the write goes
     // out on the far side of it.
-    if (this.#transitioning) return;
+    if (this.#transitioning) {
+      if (now - this.#transitionSince < TRANSITION_HOLD_MAX_MS) return;
+      // A transition that fell over before `scene:entered`: keep saving rather
+      // than hold every write for the rest of the session.
+      this.#transitioning = false;
+      log.warn('save', 'no scene:entered within the transition hold; autosaves resume');
+    }
     if (now - this.#pendingSince < AUTOSAVE_DEBOUNCE_MS) return;
     this.#flush(this.#pending);
   }
@@ -1234,7 +1294,11 @@ export class SaveStore {
     try {
       if (backup) {
         const previous = this.#read(key);
-        if (previous !== null) this.#storage?.setItem(key + BAK_SUFFIX, previous);
+        // §4.2 backs up the previous *good* save. If the main key was mangled
+        // out-of-band (another tab, a hand edit, a torn write), copying it over
+        // `:bak` would destroy the one copy §4.3 recovers from.
+        if (previous !== null && looksLikeSave(previous)) this.#storage?.setItem(key + BAK_SUFFIX, previous);
+        else if (previous !== null) log.warn('save', `slot ${slot}: the stored save is unreadable; the backup was kept`);
       }
       this.#storage?.setItem(key, json);
       // §4.2: Safari can silently truncate at quota, so the only proof a write
@@ -1368,7 +1432,15 @@ export class SaveStore {
     const on = this.#events.on;
     if (typeof on !== 'function') return;
     this.#release.push(
-      on.call(this.#events, 'scene:transition', () => void (this.#transitioning = true), this),
+      on.call(
+        this.#events,
+        'scene:transition',
+        () => {
+          this.#transitioning = true;
+          this.#transitionSince = this.#now();
+        },
+        this,
+      ),
       on.call(this.#events, 'scene:entered', () => void (this.#transitioning = false), this),
     );
   }

@@ -32,6 +32,7 @@ import {
   SLOT_KEY_PREFIX,
   SLOTS,
   STORAGE_UNAVAILABLE_TEXT,
+  TRANSITION_HOLD_MAX_MS,
   validateSave,
   type CharacterCreation,
   type SaveEvents,
@@ -257,6 +258,16 @@ describe('create (AC-6, AC-62)', () => {
     const saves = store(fakeStorage(), recorder());
     expect(saves.create(0, CREATION).meta.seed).toBe(4242);
   });
+
+  it('still varies the seed on a platform with no CSPRNG at all', () => {
+    // A zeroed Uint32Array would hand every player on that platform the same
+    // world; `Math.random` is banned here (SPEC-001 §7), so the clock stands in.
+    vi.stubGlobal('crypto', undefined);
+    const warnings = muteLog();
+    const saves = store(fakeStorage(), recorder());
+    expect(saves.create(0, CREATION).meta.seed).not.toBe(0);
+    expect(warnings.join('\n')).toContain('getRandomValues');
+  });
 });
 
 // ------------------------------------------------------------- slots & flush
@@ -386,6 +397,23 @@ describe('slots (§4.2)', () => {
     expect([...fake.data.keys()]).toEqual([]);
   });
 
+  it('keeps a good backup rather than copying a mangled main over it (AC-12, AC-19)', () => {
+    const fake = fakeStorage();
+    const saves = store(fake, recorder());
+    saves.create(0, CREATION);
+    saves.current!.player.tokens = 11;
+    saves.flush();
+    const good = fake.data.get(`reallm:slot:0${BAK_SUFFIX}`) as string;
+    muteLog();
+
+    // Another tab, a hand edit, a torn write: main is wreckage and the next
+    // flush lands before anything reads it. §4.2 backs up the previous *good*
+    // save, so the copy AC-19 recovers from has to survive this.
+    fake.data.set('reallm:slot:0', '{"version":1,"player":');
+    expect(saves.flush()).toBe(true);
+    expect(fake.data.get(`reallm:slot:0${BAK_SUFFIX}`)).toBe(good);
+  });
+
   it('accumulates playtime and stores it on flush (AC-60)', () => {
     const fake = fakeStorage();
     const saves = store(fake, recorder());
@@ -455,6 +483,20 @@ describe('storage that will not cooperate (E8, E9)', () => {
     saves.addPlaytime(10);
     expect(saves.current?.meta.playtimeSec).toBe(10);
     expect(await saves.exportCode(0)).toMatch(/^RLM1\./);
+  });
+
+  it('lets go of a deleted character even with nowhere to delete it from (AC-63)', async () => {
+    const fake = fakeStorage();
+    fake.failAlways();
+    const saves = store(fake, recorder());
+    saves.bind(newSave(0, CREATION, 1, 1_700_000_000_000));
+    muteLog();
+
+    saves.delete(0);
+    // E8: a memory-only session that deletes the slot it is playing must not go
+    // on mutating and exporting that character.
+    expect(saves.current).toBeNull();
+    await expect(saves.exportCode(0)).rejects.toThrow();
   });
 
   it('loads the backup when main is unusable, rewrites main and toasts (AC-19)', () => {
@@ -624,6 +666,32 @@ describe('validateSave (§4.4)', () => {
     );
     expect(ok.data.progress.missionsActive).toEqual([{ id: 'c6_m1', stage: 2, counters: { '0:0': 4 } }]);
     expect(ok.warnings.join('\n')).toContain('c1_m1 is already done');
+  });
+
+  it('does not mistake an Object.prototype key for a mission (AC-27, AC-30)', () => {
+    // The stage table is a plain object, so `missions['toString']` resolves to
+    // a function that is very much `!== undefined`. An imported code naming one
+    // of those would otherwise be stored as a real mission — and `stages - 1` is
+    // `NaN`, so its `stage` would be persisted as `null`.
+    const progress = newSave(0, CREATION, 1, 0).progress;
+    const ok = expectOk(
+      withPatch({
+        progress: {
+          ...progress,
+          missionsDone: ['toString', 'valueOf'],
+          missionsActive: [
+            { id: 'constructor', stage: 0, counters: {} },
+            { id: 'hasOwnProperty', stage: 3, counters: {} },
+            { id: 'c6_m1', stage: 1, counters: {} }, // a real one, to prove the filter is not "drop everything"
+          ],
+        },
+      }),
+    );
+    expect(ok.data.progress.missionsDone).toEqual([]);
+    expect(ok.data.progress.missionsActive).toEqual([{ id: 'c6_m1', stage: 1, counters: {} }]);
+    const warnings = ok.warnings.join('\n');
+    expect(warnings).toContain('toString');
+    expect(warnings).toContain('constructor');
   });
 
   it('strips keys it does not know by rebuilding the object (AC-31)', () => {
@@ -953,6 +1021,34 @@ describe('autosave (§4.5)', () => {
     events.fire('scene:entered', { id: 'station' });
     saves.tick();
     expect(events.of('save:written')).toEqual([{ slot: 0, reason: 'station_enter' }]);
+  });
+
+  it('gives up the hold when a transition never lands (07-c)', () => {
+    const fake = fakeStorage();
+    const events = recorder();
+    const time = clock();
+    const saves = new SaveStore(events, fake.storage, { window: null, now: time.now });
+    saves.bind(newSave(0, CREATION, 1, time.now()));
+    muteLog();
+
+    // A scene whose enter() throws *and* whose menu fallback throws never emits
+    // `scene:entered` (SPEC-003 §4). Holding for that forever would silently end
+    // autosaving for the rest of the session.
+    events.fire('scene:transition', { from: 'menu', to: 'station' });
+    saves.request('stage');
+    time.advance(TRANSITION_HOLD_MAX_MS - 1);
+    saves.tick();
+    expect(events.of('save:written')).toEqual([]);
+
+    time.advance(1);
+    saves.tick();
+    expect(events.of('save:written')).toEqual([{ slot: 0, reason: 'stage' }]);
+
+    // …and the next request is not held either.
+    saves.request('stage');
+    time.advance(AUTOSAVE_DEBOUNCE_MS);
+    saves.tick();
+    expect(events.of('save:written')).toHaveLength(2);
   });
 
   it('does nothing at all until a save is bound', () => {
