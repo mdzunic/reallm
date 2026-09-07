@@ -201,6 +201,21 @@ function context(): AudioContext | null {
 }
 
 /**
+ * Howler builds its `AudioContext` lazily — on the first `Howl`, or on a touch
+ * of the global volume or mute. `unlock()` needs one to resume *inside* the
+ * gesture, and boot fetches no audio (§2.4), so there is no Howl yet at that
+ * moment: reading the global volume is the cheapest public call that forces the
+ * setup. Creating the context inside the gesture is also the better of the two
+ * orders on iOS, where a context built there starts `running` already.
+ */
+function ensureContext(): AudioContext | null {
+  const existing = context();
+  if (existing !== null) return existing;
+  Howler.volume();
+  return context();
+}
+
+/**
  * Safari reports `'interrupted'` after a phone call, which is not in the DOM
  * `AudioContextState` union — hence the widening (06-a).
  */
@@ -232,6 +247,8 @@ class HowlerAudio implements Audio {
   readonly #bankOf = new Map<string, string>();
 
   readonly #music = new Map<MusicId, Howl>();
+  /** Tracks whose sources both failed; one warning each, and no second wait. */
+  readonly #musicFailed = new Set<MusicId>();
   #current: MusicTrack | null = null;
   #outgoing: MusicTrack | null = null;
   /** The current *or* pending id, which is what makes a repeat call a no-op (06-c). */
@@ -247,8 +264,12 @@ class HowlerAudio implements Audio {
   #deathTimer: number | null = null;
   readonly #timers = new Set<number>();
   readonly #teardown: Array<() => void> = [];
-  /** Resolvers of in-flight `preloadMusic` waits, so `dispose()` cannot hang one. */
-  readonly #preloading = new Set<() => void>();
+  /**
+   * Resolvers of every wait that depends on a callback — the unlock poll and
+   * each `preloadMusic` track. `dispose()` settles them, because the boot gate
+   * awaits `unlock()` and a promise nothing can answer any more would hold it.
+   */
+  readonly #waiting = new Set<() => void>();
 
   constructor(deps: AudioDeps) {
     this.#events = deps.events;
@@ -286,10 +307,16 @@ class HowlerAudio implements Audio {
    */
   async unlock(): Promise<void> {
     if (this.#disposed || this.#unlocked) return;
-    const ctx = context();
+    const ctx = ensureContext();
     if (ctx !== null) {
+      // The resume is started, not awaited: the 1000 ms deadline has to bound
+      // the whole call, and a `resume()` promise that never settles — which is
+      // what a browser refusing the gesture looks like — would otherwise hold
+      // the boot gate open forever.
       try {
-        await ctx.resume();
+        void Promise.resolve(ctx.resume()).catch((error: unknown) =>
+          log.warn('audio', 'the audio context refused to resume', error),
+        );
       } catch (error) {
         log.warn('audio', 'the audio context refused to resume', error);
       }
@@ -308,8 +335,10 @@ class HowlerAudio implements Audio {
         this.#timers.delete(poll);
         clearTimeout(timeout);
         this.#timers.delete(timeout);
+        this.#waiting.delete(finish);
         resolve();
       };
+      this.#waiting.add(finish);
       poll = setInterval(() => {
         if (ctx.state === 'running') finish();
       }, UNLOCK_POLL_MS);
@@ -492,6 +521,10 @@ class HowlerAudio implements Audio {
     const voice = this.#voices.get(key);
     if (voice === undefined) return;
     this.#voices.delete(key);
+    // `stop()` does not emit `end`, so a stolen or stopped voice would otherwise
+    // leave its one-shot listener on the bank's Howl for the rest of the
+    // session — and voice stealing happens hundreds of times in one fight.
+    voice.howl.off('end', undefined, voice.howlId);
     voice.howl.stop(voice.howlId);
   }
 
@@ -595,8 +628,11 @@ class HowlerAudio implements Audio {
       loop: entry.loop ?? true,
       preload: true,
       volume: 0, // every track fades up from silence; `#applyGains` owns it after
-      onloaderror: (_soundId, error) =>
-        log.warn('audio', `the "${bankId}" music track could not be decoded; it stays silent`, error),
+      onloaderror: (_soundId, error) => {
+        if (this.#musicFailed.has(id)) return;
+        this.#musicFailed.add(id);
+        log.warn('audio', `the "${bankId}" music track could not be decoded; it stays silent`, error);
+      },
     });
     this.#music.set(id, howl);
     return howl;
@@ -613,16 +649,18 @@ class HowlerAudio implements Audio {
 
   #load(id: MusicId): Promise<void> {
     const howl = this.#musicHowl(id);
-    if (howl === null || howl.state() === 'loaded') return Promise.resolve();
+    // A Howl that failed stays in `loading` for ever and will emit neither event
+    // again, so a second preload of the same track has to answer from here.
+    if (howl === null || howl.state() === 'loaded' || this.#musicFailed.has(id)) return Promise.resolve();
     return new Promise<void>((resolve) => {
       let settled = false;
       const finish = (): void => {
         if (settled) return;
         settled = true;
-        this.#preloading.delete(finish);
+        this.#waiting.delete(finish);
         resolve();
       };
-      this.#preloading.add(finish);
+      this.#waiting.add(finish);
       howl.once('load', finish);
       howl.once('loaderror', finish);
     });
@@ -649,7 +687,10 @@ class HowlerAudio implements Audio {
       return;
     }
     const target = holds.size > 0 ? DUCK_LEVEL : 1;
-    if (this.#duckRamp[bus] === null && this.#duckGain[bus] === target) return;
+    // AC-53: ducked *once*. A second hold arriving while the bus is already on
+    // its way to 30 % adds nothing to ramp — it only has to keep it there.
+    const ramp = this.#duckRamp[bus];
+    if (ramp === null ? this.#duckGain[bus] === target : ramp.to === target) return;
     this.#duckRamp[bus] = { from: this.#duckGain[bus], to: target, startedAt: this.#now(), durationMs: DUCK_FADE_MS };
     this.#startTicker();
   }
@@ -739,6 +780,11 @@ class HowlerAudio implements Audio {
    */
   #subscribe(): void {
     for (const name of REACTED_EVENTS) {
+      // Indexing the table with a union of keys gives a union of reaction
+      // *functions*, which TypeScript will not let you call — the payload the
+      // bus delivers is the one that matches `name`, and only the loop knows
+      // that. `EventBus.#add` widens the same way for the same reason
+      // (SPEC-004); the table's own declaration is what keeps each row honest.
       const reaction = AUDIO_REACTIONS[name] as (payload: GameEvents[ReactedEvent]) => {
         id: SoundId;
         opts?: PlayOptions;
@@ -787,9 +833,9 @@ class HowlerAudio implements Audio {
         log.error('audio', 'a subscription could not be released', error);
       }
     }
-    // A wait that will never be answered now that the Howls are gone.
-    for (const resolve of [...this.#preloading]) resolve();
-    this.#preloading.clear();
+    // Waits nothing can answer now that the Howls and the timers are gone.
+    for (const resolve of [...this.#waiting]) resolve();
+    this.#waiting.clear();
 
     for (const key of [...this.#voices.keys()]) this.#release(key);
     this.#voices.clear();

@@ -197,6 +197,36 @@ describe('createSettings', () => {
     });
   });
 
+  it('exposes the three audio buses with setters, over the shared key (SPEC-006 AC-14, AC-16)', () => {
+    const fake = fakeStorage('{"lastSlot":1}');
+    const settings = createSettings(fake.storage);
+    expect(settings.master).toBe(1);
+    expect(settings.music).toBe(0.7);
+    expect(settings.sfx).toBe(1);
+
+    settings.setMaster(0.8);
+    settings.setMusic(0.2);
+    settings.setSfx(0.45);
+    expect([settings.master, settings.music, settings.sfx]).toEqual([0.8, 0.2, 0.45]);
+    // The merge-write keeps what another spec put there (AC-14)…
+    expect(stored(fake)).toEqual({ version: SETTINGS_VERSION, lastSlot: 1, master: 0.8, music: 0.2, sfx: 0.45 });
+    // …and the values come back on the next boot (AC-16).
+    const reloaded = createSettings(fake.storage);
+    expect([reloaded.master, reloaded.music, reloaded.sfx]).toEqual([0.8, 0.2, 0.45]);
+  });
+
+  it('clamps a bus setter and ignores a value that is not a number (SPEC-006 AC-18)', () => {
+    const settings = createSettings(fakeStorage().storage);
+    settings.setMusic(5);
+    expect(settings.music).toBe(1);
+    settings.setMusic(-1);
+    expect(settings.music).toBe(0);
+    settings.setMusic(Number.NaN);
+    expect(settings.music).toBe(0); // NaN keeps what was there
+    settings.setMusic(Number.POSITIVE_INFINITY);
+    expect(settings.music).toBe(0);
+  });
+
   it('never lets the touch buttons shrink below their 56 px base (SPEC-005 AC-16)', () => {
     const settings = createSettings(fakeStorage().storage);
     settings.setButtonScale(0.2);
