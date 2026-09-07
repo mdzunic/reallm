@@ -1934,3 +1934,120 @@ button.slot-button {
   color: var(--hp);
   font-weight: 700;
 }
+
+/* --------------------------------------------------------------- star map */
+.starmap-root {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+.starmap-nodes {
+  position: absolute;
+  inset: 0;
+}
+
+/* AC-52: 56 px touch targets, centred on the projected node. */
+.starmap-node {
+  position: absolute;
+  width: 56px;
+  height: 56px;
+  transform: translate(-50%, -50%);
+  background: transparent;
+  border: none;
+  border-radius: 50%;
+  color: var(--ink);
+  font: inherit;
+  font-size: 14px;
+  cursor: pointer;
+  pointer-events: auto;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-end;
+  padding-bottom: 0;
+}
+
+.starmap-node-name {
+  transform: translateY(26px);
+  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.9);
+  white-space: nowrap;
+}
+
+.starmap-node.is-locked {
+  color: var(--ink-dim);
+}
+
+.starmap-lock {
+  position: absolute;
+  top: 4px;
+  right: 2px;
+  font-size: 14px;
+}
+
+.starmap-info {
+  position: absolute;
+  top: max(10px, env(safe-area-inset-top));
+  right: max(10px, env(safe-area-inset-right));
+  width: min(320px, calc(100vw - 20px));
+  max-height: calc(100dvh - 80px);
+  overflow-y: auto;
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.starmap-name {
+  margin: 0;
+  font-weight: 700;
+  font-size: clamp(16px, 2.6vmin, 22px);
+}
+
+.starmap-line {
+  margin: 0;
+  font-size: 14px;
+}
+
+.starmap-line.is-short {
+  color: var(--warn);
+}
+
+.starmap-reqs,
+.starmap-missions {
+  margin: 0;
+  padding-left: 4px;
+  list-style: none;
+  font-size: 14px;
+}
+
+.req-met {
+  color: var(--good);
+}
+
+.req-unmet {
+  color: var(--warn);
+}
+
+.starmap-depart-line {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.starmap-back {
+  position: absolute;
+  left: max(10px, env(safe-area-inset-left));
+  bottom: max(10px, env(safe-area-inset-bottom));
+  pointer-events: auto;
+}
+
+@media (max-width: 700px) {
+  .starmap-info {
+    top: auto;
+    bottom: max(10px, env(safe-area-inset-bottom));
+    right: max(10px, env(safe-area-inset-right));
+    max-height: 44dvh;
+  }
+}
