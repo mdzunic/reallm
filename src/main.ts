@@ -13,7 +13,7 @@ import { SaveStore } from '@/core/Save';
 import { createSettings } from '@/core/Settings';
 import type { SceneId } from '@/core/StateMachine';
 import { ASSETS } from '@/data/assets';
-import { PLACEHOLDER_SCENES } from '@/scenes/Placeholders';
+import { GAME_SCENES } from '@/scenes/index';
 import { BootOverlay } from '@/ui/BootOverlay';
 import { ContextLostOverlay } from '@/ui/ContextLostOverlay';
 import { StatsOverlay } from '@/ui/StatsOverlay';
@@ -83,7 +83,7 @@ const game = new Game({
   canvas,
   uiRoot,
   manifest: ASSETS,
-  factory: PLACEHOLDER_SCENES,
+  factory: GAME_SCENES,
   events,
   flags,
   ui: {

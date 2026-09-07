@@ -7,11 +7,12 @@
 // Nothing here touches the DOM, `three`, or `Math.random`, and nothing mutates
 // its inputs except the two mission helpers, which edit the save the way every
 // `systems/` class does (SPEC-010's `Economy` is the model).
-import { maxHp, type SaveV1 } from '@/core/Save';
+import { maxHp, type SaveV1, type SlotSummary } from '@/core/Save';
 import {
   CLASSES,
   ITEMS,
   MISSIONS,
+  PLANETS,
   TUNING,
   UPGRADES,
   type Attributes,
@@ -43,6 +44,20 @@ export function formatTime(seconds: number): string {
   if (hours > 0) return `${hours}h ${String(minutes).padStart(2, '0')}m`;
   if (minutes > 0) return `${minutes}m`;
   return `${total}s`;
+}
+
+/**
+ * One line per occupied slot for the Load list (AC-4): name, class, level,
+ * planet, playtime — in the order a player reads them. `Corrupt` and `Empty`
+ * match SPEC-007's SavePanel wording; a run parked at the station has no
+ * `currentPlanet` and reads as `Station`.
+ */
+export function slotLine(summary: SlotSummary): string {
+  if (summary.corrupt === true) return 'Corrupt';
+  if (summary.empty) return 'Empty';
+  const cls = summary.classId !== undefined ? CLASS_TABLE[summary.classId].name : '';
+  const planet = summary.planet != null ? PLANETS[summary.planet].name : 'Station';
+  return `${summary.name ?? ''} · ${cls} · Lv ${summary.level ?? 1} · ${planet} · ${formatTime(summary.playtimeSec ?? 0)}`;
 }
 
 /**

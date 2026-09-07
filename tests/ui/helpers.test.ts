@@ -20,6 +20,7 @@ import {
   pruneToasts,
   pushToast,
   requirementText,
+  slotLine,
   TOAST_COALESCE_MS,
   TOAST_DEFAULT_MS,
   TOAST_MAX,
@@ -276,5 +277,24 @@ describe('accept/abandon mission helpers', () => {
     const data = save((d) => d.progress.missionsDone.push('c1_m1'));
     expect(acceptMission(data, OPEN)).toBe(true);
     expect(data.progress.missionsDone).toContain('c1_m1');
+  });
+});
+
+describe('slotLine (AC-4)', () => {
+  it('prints name, class, level, planet and playtime in reading order', () => {
+    expect(
+      slotLine({ slot: 0, empty: false, name: 'Vance', classId: 'marine', level: 7, planet: 'cinder4', playtimeSec: 3840 }),
+    ).toBe('Vance · Marine · Lv 7 · Cinder-4 · 1h 04m');
+  });
+
+  it('a run parked at the station has no planet and reads Station', () => {
+    expect(slotLine({ slot: 1, empty: false, name: 'V', classId: 'scout', level: 1, planet: null, playtimeSec: 60 })).toBe(
+      'V · Scout · Lv 1 · Station · 1m',
+    );
+  });
+
+  it('empty and corrupt slots keep SPEC-007 wording', () => {
+    expect(slotLine({ slot: 2, empty: true })).toBe('Empty');
+    expect(slotLine({ slot: 2, empty: false, corrupt: true })).toBe('Corrupt');
   });
 });
