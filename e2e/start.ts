@@ -11,9 +11,20 @@ export interface DevBridge {
   scene(): string | null;
   memory(): { geometries: number; textures: number };
   stats(): StatsSnapshot;
+  /** The live `Input.state` (SPEC-005 §3); the object is mutated in place. */
+  input(): InputSnapshot;
   trace(): string[];
   loseContext(restoreAfterMs: number | null): void;
   stop(): void;
+}
+
+/** The part of `InputState` the suites assert on (SPEC-005 §3). */
+export interface InputSnapshot {
+  move: { x: number; y: number };
+  aim: { dragging: boolean; dirX: number; dirY: number; hasPointer: boolean };
+  buttons: Record<string, { down: boolean; justPressed: boolean; justReleased: boolean; heldFor: number }>;
+  scheme: string;
+  autoFire: boolean;
 }
 
 export interface StatsSnapshot {

@@ -2,7 +2,7 @@
 // failures, private mode and corrupt content are all reachable here (02-h).
 import { afterEach, describe, expect, it } from 'vitest';
 import { setLogSink, type LogSink } from '@/core/Log';
-import { createSettings, SETTINGS_KEY } from '@/core/Settings';
+import { createSettings, MAX_BUTTON_SCALE, MIN_BUTTON_SCALE, SETTINGS_KEY } from '@/core/Settings';
 
 interface FakeStorage {
   storage: Storage;
@@ -129,6 +129,53 @@ describe('createSettings', () => {
     expect(settings.showFps).toBe(true);
     expect(stored(fake)).toEqual({}); // nothing was written
     expect(warnings.join('\n')).toContain('could not persist');
+  });
+
+  it('defaults the control options to touch auto-fire, a left stick and no assist (SPEC-005 AC-18, AC-11)', () => {
+    const settings = createSettings(fakeStorage().storage);
+    expect(settings.autoFire).toBe('touch');
+    expect(settings.joystickSide).toBe('left');
+    expect(settings.flightMouseSteer).toBe(false);
+    expect(settings.buttonScale).toBe(MIN_BUTTON_SCALE);
+  });
+
+  it('reads, validates and persists the control options', () => {
+    muteLog();
+    const fake = fakeStorage('{"autoFire":"on","joystickSide":"right","flightMouseSteer":true,"buttonScale":1.5}');
+    expect(createSettings(fake.storage).autoFire).toBe('on');
+    expect(createSettings(fake.storage).joystickSide).toBe('right');
+    expect(createSettings(fake.storage).flightMouseSteer).toBe(true);
+    expect(createSettings(fake.storage).buttonScale).toBe(1.5);
+
+    // Content the store cannot use falls back, exactly as `quality` does.
+    const bad = fakeStorage('{"autoFire":"always","joystickSide":"middle","buttonScale":"big"}');
+    const settings = createSettings(bad.storage);
+    expect(settings.autoFire).toBe('touch');
+    expect(settings.joystickSide).toBe('left');
+    expect(settings.buttonScale).toBe(MIN_BUTTON_SCALE);
+
+    const written = fakeStorage('{}');
+    const store = createSettings(written.storage);
+    store.setAutoFire('off');
+    store.setJoystickSide('right');
+    store.setFlightMouseSteer(true);
+    store.setButtonScale(1.25);
+    expect(stored(written)).toEqual({
+      autoFire: 'off',
+      joystickSide: 'right',
+      flightMouseSteer: true,
+      buttonScale: 1.25,
+    });
+  });
+
+  it('never lets the touch buttons shrink below their 56 px base (SPEC-005 AC-16)', () => {
+    const settings = createSettings(fakeStorage().storage);
+    settings.setButtonScale(0.2);
+    expect(settings.buttonScale).toBe(MIN_BUTTON_SCALE);
+    settings.setButtonScale(99);
+    expect(settings.buttonScale).toBe(MAX_BUTTON_SCALE);
+    settings.setButtonScale(Number.NaN);
+    expect(settings.buttonScale).toBe(MIN_BUTTON_SCALE);
   });
 
   it('works with no storage at all', () => {

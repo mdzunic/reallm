@@ -90,6 +90,8 @@ if (import.meta.env.DEV) {
     scene: () => game.scenes.current?.id ?? null,
     memory: () => ({ ...game.renderer.gl.info.memory }),
     stats: () => game.stats,
+    /** SPEC-005: the touch layer is DOM, so the e2e suite reads what it wrote. */
+    input: () => game.input.state,
     trace: () => game.trace(),
     loseContext: (restoreAfterMs: number | null) => game.loseContext(restoreAfterMs),
     stop: () => game.stop(),

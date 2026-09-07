@@ -212,8 +212,14 @@ export class TouchControls {
     if (zone === 'move' && this.#move !== null) return;
     if (zone === 'aim' && this.#aim !== null) return;
     event.preventDefault();
-    // AC-25: the thumb keeps being tracked once it leaves the element.
-    this.#surface.setPointerCapture?.(event.pointerId);
+    // AC-25: the thumb keeps being tracked once it leaves the element. A
+    // pointer id the browser no longer knows about throws rather than
+    // returning, and losing capture must not cost the player the whole gesture.
+    try {
+      this.#surface.setPointerCapture(event.pointerId);
+    } catch {
+      // no capture: the pointer is tracked only while it stays on the surface
+    }
     const claimed: ZonePointer = { id: event.pointerId, startX: x, startY: y, originX: x, originY: y, dragging: false };
     if (zone === 'move') {
       this.#move = claimed;
