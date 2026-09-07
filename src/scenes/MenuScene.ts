@@ -511,6 +511,10 @@ export class MenuScene extends UiScene<'menu'> {
 
   #onArrows(event: KeyboardEvent): void {
     if (event.key !== 'ArrowDown' && event.key !== 'ArrowUp') return;
+    // The import-code textarea keeps its caret keys, and a confirm sheet
+    // keeps its focus: neither may lose arrows to the button walk.
+    const target = event.target;
+    if (target instanceof Element && target.closest('textarea, input, select, .sheet-backdrop') !== null) return;
     const root = this.#root;
     if (root === null) return;
     const buttons = [...root.querySelectorAll<HTMLButtonElement>('button:not(:disabled)')];

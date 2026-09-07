@@ -197,6 +197,10 @@ export class StarmapScene extends UiScene<'starmap'> {
 
   /** AC-52: arrows walk the circle. */
   #onArrows(event: KeyboardEvent): void {
+    // With the depart sheet up (focus lives inside it), arrows must not
+    // re-aim the departure behind the question being asked.
+    const target = event.target;
+    if (target instanceof Element && target.closest('textarea, input, select, .sheet-backdrop') !== null) return;
     const step =
       event.key === 'ArrowRight' || event.key === 'ArrowDown' ? 1 : event.key === 'ArrowLeft' || event.key === 'ArrowUp' ? -1 : 0;
     if (step === 0) return;
