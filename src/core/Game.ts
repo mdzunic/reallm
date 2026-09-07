@@ -389,6 +389,20 @@ export class Game implements GameServices {
     }
     this.#lifecycle.dispose();
     this.#statsUi.dispose();
+    // The scene owns a DOM layer and Three resources, and nothing else will
+    // release them: `stop()` is the `import.meta.hot.dispose` path (AC-61), so
+    // without this the old scene outlives the module that built it. Same order
+    // SceneManager uses when it swaps scenes, and before the renderer goes so
+    // the GPU resources are freed against a live context.
+    const scene = this.#scenes.current;
+    if (scene !== null) {
+      try {
+        scene.exit();
+        scene.dispose();
+      } catch (error) {
+        log.error('game', 'the scene threw while being disposed', error);
+      }
+    }
     this.#input.dispose();
     this.#audio.dispose();
     this.#save.dispose();

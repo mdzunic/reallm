@@ -35,6 +35,11 @@ test('stop() releases the listeners it registered (AC-58)', async ({ page }) => 
   await page.keyboard.press('Backquote');
   await expect(page.locator('.overlay-debug')).toHaveCount(0);
 
+  // The scene goes with it. `stop()` is the hot-update path, so a scene left
+  // mounted here would have its DOM layer sitting under the reloaded module's.
+  await expect(page.locator('[data-testid="scene-label"]')).toHaveCount(0);
+  await expect(page.locator('.scene-layer')).toHaveCount(0);
+
   // Hiding the page no longer reaches a loop that is not there.
   const errors: string[] = [];
   page.on('pageerror', (error) => errors.push(error.message));
