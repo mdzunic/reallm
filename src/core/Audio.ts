@@ -324,6 +324,9 @@ class HowlerAudio implements Audio {
       }
       await this.#awaitRunning(ctx);
     }
+    // `dispose()` settles every waiter, so an unlock in flight lands here on a
+    // layer that is already gone. It has nothing left to unlock.
+    if (this.#disposed) return;
     this.#markUnlocked();
   }
 

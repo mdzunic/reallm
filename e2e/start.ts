@@ -100,6 +100,8 @@ export interface AudioBridge {
   duck(active: boolean): void;
   setListener(x: number, z: number): void;
   preloadMusic(ids: string[]): Promise<void>;
+  /** `Game.stop()` already called this once; the suite calls it again for 06-k. */
+  dispose(): void;
 }
 
 /** The part of `InputState` the suites assert on (SPEC-005 §3). */
