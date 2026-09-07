@@ -14,6 +14,7 @@ import { createSettings } from '@/core/Settings';
 import type { SceneId } from '@/core/StateMachine';
 import { ASSETS } from '@/data/assets';
 import { PLACEHOLDER_SCENES } from '@/scenes/Placeholders';
+import { SurfaceCombatDemo } from '@/scenes/SurfaceCombatDemo';
 import { BootOverlay } from '@/ui/BootOverlay';
 import { ContextLostOverlay } from '@/ui/ContextLostOverlay';
 import { StatsOverlay } from '@/ui/StatsOverlay';
@@ -80,7 +81,8 @@ const game = new Game({
   canvas,
   uiRoot,
   manifest: ASSETS,
-  factory: PLACEHOLDER_SCENES,
+  // SPEC-011's browser harness stands in for the surface scene until SPEC-012.
+  factory: { ...PLACEHOLDER_SCENES, surface: (services) => new SurfaceCombatDemo(services) },
   events,
   flags,
   ui: {

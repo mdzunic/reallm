@@ -110,9 +110,7 @@ export const MUSIC_IDS = [
 ] as const;
 export type MusicId = (typeof MUSIC_IDS)[number];
 
-/**
- * Still a placeholder alias: SPEC-009 §3 does not enumerate damage sources, so
- * narrowing it would be inventing content. SPEC-011 owns the combat model and
- * the union it damages the player from.
- */
-export type DamageSource = string;
+// `DamageSource` used to live here as a `string` placeholder. SPEC-011 owns
+// the combat model, and its union needs `EnemyId` — a table-derived id this
+// leaf file cannot name — so the real type is declared in `data/index.ts` and
+// re-exported by `systems/Combat.ts`.
