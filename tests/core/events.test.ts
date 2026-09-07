@@ -198,6 +198,36 @@ describe('EventBus once (§4.1)', () => {
     expect(events.count('a')).toBe(0);
   });
 
+  it('fires exactly once when an earlier handler re-emits the same event', () => {
+    // AC-13 / 04-b, the nested variant: the once runs inside the inner emit, so
+    // the outer emit is still iterating a snapshot that contains it.
+    const events = bus();
+    let fired = 0;
+    let reentered = false;
+    events.on('a', () => {
+      if (reentered) return;
+      reentered = true;
+      events.emit('a');
+    });
+    events.once('a', () => void fired++);
+    events.emit('a');
+    expect(fired).toBe(1);
+    expect(events.count('a')).toBe(1); // only the `on` is left
+  });
+
+  it('still runs a once that another handler unsubscribed mid-delivery', () => {
+    // AC-8 / 04-d applies to `once` too: removed but not yet fired, so the
+    // current emit still delivers it — and the next one does not.
+    const events = bus();
+    let fired = 0;
+    events.on('a', () => off());
+    const off = events.once('a', () => void fired++);
+    events.emit('a');
+    expect(fired).toBe(1);
+    events.emit('a');
+    expect(fired).toBe(1);
+  });
+
   it('cancels a pending once, and is a no-op once the handler has fired', () => {
     // AC-14.
     const events = bus();
