@@ -167,6 +167,12 @@ describe('discounts (§4.2)', () => {
     expect(economy.price('ship', 'shield')).toBeNull();
     expect(economy.price('gear', 'armor_scrap')).toBeNull(); // the starter is not for sale
     expect(economy.price('gear', 'nothing_like_this')).toBeNull();
+    // ARIA is owned from the first save, so her next step is level 2; a
+    // companion at 3 has no next step at all.
+    expect(economy.price('companion', 'aria')?.tokens).toBe(discountTokens(30, economy.discount('companion')));
+    data.companions = [{ id: 'aria', level: 3, enabled: true }];
+    expect(economy.price('companion', 'aria')).toBeNull();
+    expect(economy.price('companion', 'nothing_like_this')).toBeNull();
     expect(economy.price('craft', 'medkit')).toEqual({ tokens: 0, resources: RECIPES.medkit.cost });
   });
 });
@@ -264,6 +270,12 @@ describe('gear purchases (§4.3)', () => {
     expect(economy.count('weapon_kinetic')).toBe(1); // the starter came off into the hold
     expect(economy.count('weapon_laser')).toBe(0);
     expect(events.of('gear:equipped')).toEqual([{ slot: 'weapon', itemId: 'weapon_laser' }]);
+
+    // The next tier up is owned *because it is worn*: the prerequisite reads
+    // the body as well as the hold, and the new tier lands in the hold (10-g).
+    expect(economy.buyGear('weapon_plasma')).toEqual({ ok: true });
+    expect(data.equipped.weapon).toBe('weapon_laser');
+    expect(economy.count('weapon_plasma')).toBe(1);
 
     // And back again, which is the same swap in the other direction.
     expect(economy.equip('weapon_kinetic')).toEqual({ ok: true });

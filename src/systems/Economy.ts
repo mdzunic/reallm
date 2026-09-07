@@ -247,7 +247,9 @@ export class Economy {
     if (kind === 'companion') {
       if (!Object.hasOwn(COMPANIONS, id)) return null;
       const companion = COMPANION_TABLE[id as CompanionId];
-      const level = tier ?? Math.min(3, this.#levelOf(id as CompanionId) + 1);
+      // Past level 3 there is no next step, and `upgradeCosts` runs out — which
+      // is what makes a maxed companion price as `null`.
+      const level = tier ?? this.#levelOf(id as CompanionId) + 1;
       if (level === 1) return { tokens: companion.cost };
       const upgrade = companion.upgradeCosts[level - 2];
       return upgrade === undefined ? null : { tokens: upgrade };
