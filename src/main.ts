@@ -120,6 +120,8 @@ if (import.meta.env.DEV) {
     input: () => game.input.state,
     /** SPEC-007 §7: the M1 acceptance run drives the slots through this. */
     save: () => save,
+    /** SPEC-006 §9: unlock, buses and voice handles, for the M1 audio suite. */
+    audio: () => audio,
     trace: () => game.trace(),
     loseContext: (restoreAfterMs: number | null) => game.loseContext(restoreAfterMs),
     stop: () => game.stop(),
