@@ -27,20 +27,62 @@ export interface DevBridge {
  */
 export interface SaveBridge {
   readonly available: boolean;
-  list(): Array<{ slot: number; empty: boolean; name?: string; classId?: string; level?: number; corrupt?: boolean }>;
-  load(slot: number): { ok: boolean; source?: string; reason?: string; data?: SaveSnapshot };
+  /** 07-f: false where the browser has no `CompressionStream` (SPEC-007 §4.6). */
+  readonly codesSupported: boolean;
+  /** 07-a: true once another tab has written this slot (SPEC-007 §4.5). */
+  readonly refusingAutosaves: boolean;
+  list(): Array<{
+    slot: number;
+    empty: boolean;
+    name?: string;
+    classId?: string;
+    level?: number;
+    planet?: string | null;
+    playtimeSec?: number;
+    updatedAt?: number;
+    corrupt?: boolean;
+  }>;
+  load(slot: number): { ok: boolean; source?: string; reason?: string; foundVersion?: number; data?: SaveSnapshot };
   create(slot: number, creation: unknown, seed?: number): SaveSnapshot;
+  /** §4.5: a debounced autosave; `manual` and `pagehide` skip the debounce. */
+  request(reason: string): void;
+  addPlaytime(seconds: number): void;
   flush(): boolean;
   delete(slot: number): void;
   exportCode(slot: number): Promise<string>;
-  importCode(code: string, slot: number): Promise<{ ok: boolean; reason?: string; data?: SaveSnapshot }>;
+  importCode(
+    code: string,
+    slot: number,
+  ): Promise<{ ok: boolean; reason?: string; foundVersion?: number; data?: SaveSnapshot }>;
 }
 
 export interface SaveSnapshot {
   version: number;
-  meta: { slot: number; seed: number; playtimeSec: number; updatedAt: number };
-  player: { name: string; classId: string; level: number; tokens: number };
-  progress: { flags: string[] };
+  meta: { slot: number; seed: number; playtimeSec: number; updatedAt: number; iteration: number; difficulty: string };
+  player: {
+    name: string;
+    classId: string;
+    level: number;
+    xp: number;
+    tokens: number;
+    hp: number;
+    attributes: Record<string, number>;
+  };
+  resources: Record<string, number>;
+  inventory: Array<{ itemId: string; qty: number }>;
+  equipped: { weapon: string; armor: string };
+  ship: Record<string, number>;
+  companions: Array<{ id: string; level: number; enabled: boolean }>;
+  progress: {
+    missionsDone: string[];
+    missionsActive: Array<{ id: string; stage: number; counters: Record<string, number> }>;
+    flags: string[];
+    currentPlanet: string | null;
+    location: string;
+    poisDiscovered: string[];
+    visits: Record<string, number>;
+    endingSeen: boolean;
+  };
 }
 
 /** The part of `InputState` the suites assert on (SPEC-005 §3). */
