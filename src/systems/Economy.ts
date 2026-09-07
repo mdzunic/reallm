@@ -458,6 +458,8 @@ export class Economy {
     this.#save.equipped[slot] = itemId;
     if (previous !== itemId) this.addItem(previous, 1);
     this.#events.emit('gear:equipped', { slot, itemId });
+    // SPEC-014 AC-45: equips autosave the same way purchases do.
+    this.#saves?.request('purchase');
     return { ok: true };
   }
 

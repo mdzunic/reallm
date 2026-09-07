@@ -20,7 +20,11 @@ import {
   pruneToasts,
   pushToast,
   requirementText,
+  companionEffectText,
+  failText,
+  gearCompareText,
   passiveText,
+  rewardsText,
   slotLine,
   TOAST_COALESCE_MS,
   TOAST_DEFAULT_MS,
@@ -314,5 +318,67 @@ describe('passiveText (AC-14)', () => {
 
   it('an empty passive is an empty line, not a crash', () => {
     expect(passiveText({})).toBe('');
+  });
+});
+
+describe('failText (AC-42)', () => {
+  it('covers every FailReason with a printable line', () => {
+    const reasons = [
+      'insufficient_tokens',
+      'insufficient_resources',
+      'max_tier',
+      'prerequisite',
+      'not_found',
+      'inventory_full',
+      'cargo_full',
+      'locked',
+    ] as const;
+    for (const reason of reasons) {
+      expect(failText(reason)).not.toBe('');
+    }
+    expect(failText('insufficient_tokens')).toBe('Not enough tokens');
+    expect(failText('prerequisite')).toBe('Requires the previous tier');
+  });
+});
+
+describe('rewardsText', () => {
+  it('prints xp, tokens, resources and items in order', () => {
+    expect(
+      rewardsText({ xp: 120, tokens: 40, resources: { lithium: 20 }, items: [{ itemId: 'medkit', qty: 2 }] }),
+    ).toBe('+120 XP · +40 ◈ · +20 lithium · Medkit ×2');
+  });
+
+  it('a replay halves xp and tokens and drops everything else (E2)', () => {
+    expect(rewardsText({ xp: 125, tokens: 41, resources: { oil: 30 }, items: [{ itemId: 'medkit', qty: 1 }] }, true)).toBe(
+      '+62 XP · +20 ◈',
+    );
+  });
+});
+
+describe('companionEffectText (AC-39)', () => {
+  it('reads the scanner drone levels off the table', () => {
+    expect(companionEffectText({ autoCollectRadius: 6, nodeRadar: true })).toBe('collects within 6 m · node radar');
+  });
+
+  it('covers station and flight domains', () => {
+    expect(companionEffectText({ cargoBonus: 100, shopDiscount: 0.1 })).toBe('+100 cargo · −10% gear and craft prices');
+    expect(companionEffectText({ shieldRegen: 2, autoAim: true, hullBonus: 20 })).toBe('+2/s shield regen · auto-aim · +20 hull');
+  });
+});
+
+describe('gearCompareText (AC-47)', () => {
+  it('prints tier and the stats that move between two weapons', () => {
+    const text = gearCompareText('weapon_kinetic', 'weapon_laser');
+    expect(text).toMatch(/^T0 → T1/);
+    expect(text).toContain('damage');
+  });
+
+  it('compares armor by armor stats', () => {
+    expect(gearCompareText('armor_scrap', 'armor_composite')).toMatch(/^T0 → T1 · armor \d+ → \d+/);
+  });
+
+  it('crossing kinds compares nothing', () => {
+    expect(gearCompareText('weapon_kinetic', 'armor_scrap')).toBe('');
+    expect(gearCompareText('weapon_kinetic', 'medkit')).toBe('');
   });
 });

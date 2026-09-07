@@ -18,6 +18,7 @@ import {
   type Attributes,
   type ClassId,
   type ItemId,
+  type CompanionEffect,
   type MissionDef,
   type MissionId,
   type Price,
@@ -25,7 +26,7 @@ import {
   type ResourceId,
   type WeatherId,
 } from '@/data/index';
-import { discountTokens, missingRequirements, type DepartResult } from '@/systems/Economy';
+import { discountTokens, missingRequirements, type DepartResult, type FailReason } from '@/systems/Economy';
 import type { Class, Item } from '@/data/index';
 
 // The schema-typed views of the content tables: on the `as const` literal types
@@ -143,6 +144,65 @@ export function departReason(result: DepartResult): string {
   }
 }
 
+/**
+ * AC-42: the one line a disabled shop button carries per `FailReason` — the
+ * refusal is SPEC-010's, the phrasing is this spec's.
+ */
+export function failText(reason: FailReason): string {
+  switch (reason) {
+    case 'insufficient_tokens':
+      return 'Not enough tokens';
+    case 'insufficient_resources':
+      return 'Not enough resources';
+    case 'max_tier':
+      return 'Already at the top tier';
+    case 'prerequisite':
+      return 'Requires the previous tier';
+    case 'inventory_full':
+      return 'Inventory full';
+    case 'cargo_full':
+      return 'Cargo full';
+    case 'locked':
+      return 'Locked';
+    case 'not_found':
+      return 'Unavailable';
+  }
+}
+
+/** AC-39: one line per companion level, straight off the effect table. */
+export function companionEffectText(effect: CompanionEffect): string {
+  const parts: string[] = [];
+  if (effect.autoCollectRadius !== undefined) parts.push(`collects within ${effect.autoCollectRadius} m`);
+  if (effect.nodeRadar === true) parts.push('node radar');
+  if (effect.droneDamageFraction !== undefined) parts.push(`drone at ${Math.round(effect.droneDamageFraction * 100)}% of your damage`);
+  if (effect.droneFireRate !== undefined) parts.push(`${effect.droneFireRate}/s drone fire`);
+  if (effect.regenOutOfCombat !== undefined) parts.push(`${Math.round(effect.regenOutOfCombat * 100)}%/s regen out of combat`);
+  if (effect.regenInCombat !== undefined) parts.push(`${Math.round(effect.regenInCombat * 100)}%/s regen in combat`);
+  if (effect.cargoBonus !== undefined) parts.push(`+${effect.cargoBonus} cargo`);
+  if (effect.shopDiscount !== undefined) parts.push(`−${Math.round(effect.shopDiscount * 100)}% gear and craft prices`);
+  if (effect.shieldRegen !== undefined) parts.push(`+${effect.shieldRegen}/s shield regen`);
+  if (effect.autoAim === true) parts.push('auto-aim');
+  if (effect.hullBonus !== undefined) parts.push(`+${effect.hullBonus} hull`);
+  return parts.join(' · ');
+}
+
+/** The rewards line of a mission row (§4.3): XP, tokens, resources, items. */
+export function rewardsText(rewards: MissionDef['rewards'], replay = false): string {
+  const half = (value: number): number => (replay ? Math.floor(value / 2) : value);
+  const parts: string[] = [];
+  if (rewards.xp > 0) parts.push(`+${half(rewards.xp)} XP`);
+  if (rewards.tokens > 0) parts.push(`+${half(rewards.tokens)} ◈`);
+  if (!replay) {
+    for (const [resource, amount] of Object.entries(rewards.resources ?? {})) {
+      if ((amount ?? 0) > 0) parts.push(`+${amount} ${resource}`);
+    }
+    for (const item of rewards.items ?? []) {
+      parts.push(`${ITEM_TABLE[item.itemId].name} ×${item.qty}`);
+    }
+  }
+  return parts.join(' · ');
+}
+
 // ------------------------------------------------------------------ missions
 
 /** Where a mission row is being read; the station is where replays start. */
@@ -209,6 +269,34 @@ export function computePlayerStats(
     damage: Math.round(base * (1 + 0.04 * attributes.might) * (cls.passive.damageMult ?? 1) * 10) / 10,
     speed: Math.round(TUNING.PLAYER_SPEED * (1 + 0.02 * attributes.agility) * (cls.passive.moveSpeedMult ?? 1) * 100) / 100,
   };
+}
+
+/**
+ * AC-47: the compare line between the equipped piece and a candidate — tier
+ * first, then every stat that moves, signed. Same-kind items only; crossing
+ * kinds compares nothing and says so with an empty string.
+ */
+export function gearCompareText(equipped: ItemId, candidate: ItemId): string {
+  const a = ITEM_TABLE[equipped];
+  const b = ITEM_TABLE[candidate];
+  const parts: string[] = [];
+  const delta = (label: string, from: number, to: number): void => {
+    if (from !== to) parts.push(`${label} ${from} → ${to}`);
+  };
+  if (a.kind === 'weapon' && b.kind === 'weapon') {
+    parts.push(`T${a.tier} → T${b.tier}`);
+    delta('damage', a.damage, b.damage);
+    delta('fire rate', a.fireRate, b.fireRate);
+    delta('range', a.range, b.range);
+    delta('pierce', a.pierce, b.pierce);
+  } else if (a.kind === 'armor' && b.kind === 'armor') {
+    parts.push(`T${a.tier} → T${b.tier}`);
+    delta('armor', a.armor, b.armor);
+    delta('hazard resist', a.hazardResist, b.hazardResist);
+  } else {
+    return '';
+  }
+  return parts.join(' · ');
 }
 
 // ------------------------------------------------------------------ HUD diff

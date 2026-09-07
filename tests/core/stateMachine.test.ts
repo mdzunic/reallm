@@ -273,7 +273,8 @@ describe('the scene graph (§4.2)', () => {
   it('is exactly the table, boot included', () => {
     expect(isAllowedTransition(null, 'menu')).toBe(true);
     expect(isAllowedTransition(null, 'station')).toBe(false);
-    expect(ALLOWED_TRANSITIONS.station).toEqual(['starmap']);
+    // SPEC-014 AC-29: the station's Quit tab added its route to the menu.
+    expect(ALLOWED_TRANSITIONS.station).toEqual(['starmap', 'menu']);
     expect(BOOT_SCENE).toBe('menu');
   });
 
@@ -283,10 +284,13 @@ describe('the scene graph (§4.2)', () => {
     }
   });
 
-  it('lets the pausable scenes quit to the menu and no one else (D-10)', () => {
+  it('lets the pausable scenes and the station quit to the menu (D-10, SPEC-014 AC-29)', () => {
     expect(isAllowedTransition('flight', 'menu')).toBe(true);
     expect(isAllowedTransition('surface', 'menu')).toBe(true);
-    expect(isAllowedTransition('station', 'menu')).toBe(false);
+    // The station earned its row with SPEC-014's Quit tab.
+    expect(isAllowedTransition('station', 'menu')).toBe(true);
+    expect(isAllowedTransition('creation', 'menu')).toBe(false);
+    expect(isAllowedTransition('starmap', 'menu')).toBe(false);
   });
 });
 

@@ -5,9 +5,11 @@ import type { SceneFactory } from '@/core/StateMachine';
 import { CreationScene } from '@/scenes/CreationScene';
 import { MenuScene } from '@/scenes/MenuScene';
 import { PLACEHOLDER_SCENES } from '@/scenes/Placeholders';
+import { StationScene } from '@/scenes/StationScene';
 
 export const GAME_SCENES: SceneFactory = {
   ...PLACEHOLDER_SCENES,
   menu: (services) => new MenuScene(services),
   creation: (services) => new CreationScene(services),
+  station: (services) => new StationScene(services),
 };
