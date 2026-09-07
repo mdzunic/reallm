@@ -781,6 +781,11 @@ export function crc32(bytes: Uint8Array): number {
   return (crc ^ 0xffffffff) >>> 0;
 }
 
+/** Eight lower-case hex digits — the conventional way to write a CRC-32. */
+export function crcText(bytes: Uint8Array): string {
+  return crc32(bytes).toString(16).padStart(8, '0');
+}
+
 export function toBase64Url(bytes: Uint8Array): string {
   let binary = '';
   // Chunked: `String.fromCharCode(...bytes)` blows the argument limit on a
@@ -837,7 +842,7 @@ async function through(bytes: Uint8Array, transform: GenericTransformStream): Pr
 export async function encodeSave(json: string): Promise<string> {
   if (!codesSupported()) throw new SaveCodeError('unsupported', 'CompressionStream is unavailable');
   const compressed = await through(new TextEncoder().encode(json), new CompressionStream('deflate-raw'));
-  return `${CODE_PREFIX}.${toBase64Url(compressed)}.${crc32(compressed).toString(36)}`;
+  return `${CODE_PREFIX}.${toBase64Url(compressed)}.${crcText(compressed)}`;
 }
 
 /** Verifies the crc of the compressed bytes *before* decompressing them (§4.6). */
@@ -854,7 +859,7 @@ export async function decodeSave(code: string): Promise<string> {
   } catch {
     throw new SaveCodeError('damaged', 'the payload is not base64url');
   }
-  if (crc32(compressed).toString(36) !== parts[2]) throw new SaveCodeError('damaged', 'the checksum does not match');
+  if (crcText(compressed) !== parts[2]) throw new SaveCodeError('damaged', 'the checksum does not match');
   try {
     return new TextDecoder().decode(await through(compressed, new DecompressionStream('deflate-raw')));
   } catch {
@@ -983,9 +988,11 @@ export class SaveStore {
     this.#content = options.content ?? SAVE_CONTENT;
     this.#settings = options.settings ?? null;
     this.available = this.#probe();
-    if (!this.available) {
-      // E8: a banner in the menu (SPEC-014 reads `available`) and one toast, so
-      // a private-mode session is told once and then left alone to play.
+    // E8: a banner in the menu (SPEC-014 reads `available`) and one toast, so a
+    // private-mode session is told once and then left alone to play. A caller
+    // that passed `null` asked for a memory-only store on purpose — the null
+    // store, a unit test — and is not told anything.
+    if (!this.available && storage !== null) {
       log.warn('save', 'storage is unavailable; this session is memory-only');
       this.#events.emit('ui:toast', { kind: 'warn', text: STORAGE_UNAVAILABLE_TEXT, ms: 8000 });
     }

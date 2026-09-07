@@ -16,7 +16,10 @@ import {
   CODES_UNSUPPORTED_TEXT,
   CROSS_TAB_TEXT,
   crc32,
+  crcText,
   createNullSave,
+  fromBase64Url,
+  toBase64Url,
   INSTALL_HINT_INTERVAL_MS,
   INSTALL_HINT_TEXT,
   migrate,
@@ -755,7 +758,8 @@ describe('export and import codes (§4.6)', () => {
     expect(parts).toHaveLength(3);
     expect(parts[0]).toBe(CODE_PREFIX);
     expect(parts[1]).toMatch(/^[A-Za-z0-9_-]+$/); // base64url: no +, no /, no =
-    expect(parts[2]).toMatch(/^[0-9a-z]+$/);
+    expect(parts[2]).toMatch(/^[0-9a-f]{8}$/); // crc32 as eight hex digits
+    expect(parts[2]).toBe(crcText(fromBase64Url(parts[1] as string)));
   });
 
   it('restores the character in another browser (AC-38, AC-39, AC-59)', async () => {
@@ -802,7 +806,7 @@ describe('export and import codes (§4.6)', () => {
     const parts = code.split('.');
     events.clear();
 
-    const wrongCrc = `${parts[0]}.${parts[1]}.${(Number.parseInt(parts[2] as string, 36) + 1).toString(36)}`;
+    const wrongCrc = `${parts[0]}.${parts[1]}.${(Number.parseInt(parts[2] as string, 16) + 1).toString(16).padStart(8, '0')}`;
     const result = await saves.importCode(wrongCrc, 1);
     expect(result.ok).toBe(false);
     expect(events.toasts).toEqual([CODE_DAMAGED_TEXT]);
@@ -862,7 +866,18 @@ describe('export and import codes (§4.6)', () => {
   it('computes the standard CRC-32', () => {
     // The pinned check value of the IEEE polynomial: crc32("123456789").
     expect(crc32(new TextEncoder().encode('123456789'))).toBe(0xcbf43926);
+    expect(crcText(new TextEncoder().encode('123456789'))).toBe('cbf43926');
     expect(crc32(new Uint8Array(0))).toBe(0);
+    expect(crcText(new Uint8Array(0))).toBe('00000000');
+  });
+
+  it('round-trips base64url without padding or the two url-hostile characters', () => {
+    for (let length = 0; length < 8; length++) {
+      const bytes = Uint8Array.from({ length }, (_, i) => (i * 71 + 251) & 0xff);
+      const text = toBase64Url(bytes);
+      expect(text).not.toMatch(/[+/=]/);
+      expect([...fromBase64Url(text)]).toEqual([...bytes]);
+    }
   });
 });
 
