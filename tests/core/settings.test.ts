@@ -215,6 +215,28 @@ describe('createSettings', () => {
     expect([reloaded.master, reloaded.music, reloaded.sfx]).toEqual([0.8, 0.2, 0.45]);
   });
 
+  it('reads an unusable stored bus as its channel default (SPEC-006 AC-17)', () => {
+    // The four classes AC-17 names, one per boot. Out-of-range is the one the
+    // setter treats differently: a slider clamps, a stored 5 is a value nobody
+    // chose, so it reads as 0.7 rather than as "as loud as it goes".
+    const missing = createSettings(fakeStorage('{"lastSlot":0}').storage);
+    expect([missing.master, missing.music, missing.sfx]).toEqual([1, 0.7, 1]);
+
+    const nonNumeric = createSettings(fakeStorage('{"master":"loud","music":null,"sfx":[0.5]}').storage);
+    expect([nonNumeric.master, nonNumeric.music, nonNumeric.sfx]).toEqual([1, 0.7, 1]);
+
+    // `1e999` is how a non-finite number survives a round trip through JSON.
+    const nonFinite = createSettings(fakeStorage('{"master":1e999,"music":-1e999,"sfx":1e999}').storage);
+    expect([nonFinite.master, nonFinite.music, nonFinite.sfx]).toEqual([1, 0.7, 1]);
+
+    const outOfRange = createSettings(fakeStorage('{"master":9,"music":5,"sfx":-0.5}').storage);
+    expect([outOfRange.master, outOfRange.music, outOfRange.sfx]).toEqual([1, 0.7, 1]);
+
+    // The edges themselves are usable values and survive untouched.
+    const edges = createSettings(fakeStorage('{"master":0,"music":1,"sfx":0.45}').storage);
+    expect([edges.master, edges.music, edges.sfx]).toEqual([0, 1, 0.45]);
+  });
+
   it('clamps a bus setter and ignores a value that is not a number (SPEC-006 AC-18)', () => {
     const settings = createSettings(fakeStorage().storage);
     settings.setMusic(5);
@@ -225,6 +247,13 @@ describe('createSettings', () => {
     expect(settings.music).toBe(0); // NaN keeps what was there
     settings.setMusic(Number.POSITIVE_INFINITY);
     expect(settings.music).toBe(0);
+
+    // What the setter clamped is a value the player did choose, so it is stored
+    // and read back as itself — the AC-17 fallback is about the way *in* only.
+    const fake = fakeStorage();
+    createSettings(fake.storage).setMusic(5);
+    expect(stored(fake)['music']).toBe(1);
+    expect(createSettings(fake.storage).music).toBe(1);
   });
 
   it('never lets the touch buttons shrink below their 56 px base (SPEC-005 AC-16)', () => {
@@ -319,7 +348,8 @@ describe('the settings object (SPEC-007 §3)', () => {
     settings.set({ master: 'loud' as unknown as number });
     expect(settings.get().master).toBe(1);
 
-    // …and the same rule on the way in.
+    // …and on the way in, where an unusable value reads as the channel default
+    // rather than being clamped (SPEC-006 AC-17; the case above pins both).
     expect(createSettings(fakeStorage('{"master":9,"music":"x","sfx":0.3}').storage).get()).toMatchObject({
       master: 1,
       music: 0.7,

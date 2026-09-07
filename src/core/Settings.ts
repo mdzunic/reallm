@@ -191,9 +191,24 @@ function clamp(value: number, low: number, high: number): number {
   return Math.min(high, Math.max(low, value));
 }
 
-/** A volume outside 0..1, or NaN, reads as the default for that channel. */
+/**
+ * What a *setter* does with a volume: a finite number is clamped into 0..1, and
+ * anything else keeps what was there (SPEC-006 AC-18, SPEC-007 AC-49). The
+ * argument came from a slider, so 1.2 means "as loud as it goes".
+ */
 function volume(value: unknown, fallback: number): number {
   return typeof value === 'number' && Number.isFinite(value) ? clamp(value, 0, 1) : fallback;
+}
+
+/**
+ * What a *stored* volume does: every unusable value reads as the channel
+ * default, out-of-range included (SPEC-006 §6, AC-17). A 9 on disk is not a
+ * setting the player ever chose — some other writer put it there — so clamping
+ * it to 1.0 would invent a preference; the default is the honest answer.
+ */
+function storedVolume(value: unknown, fallback: number): number {
+  if (typeof value !== 'number' || !Number.isFinite(value)) return fallback;
+  return value >= 0 && value <= 1 ? value : fallback;
 }
 
 /** A stored scale outside the range, or NaN, reads as the 1× base (AC-16). */
@@ -233,22 +248,28 @@ function benchmarkOrNull(value: unknown, fallback: BenchmarkResult | null): Benc
   return { preset: preset as QualityPreset, msPerFrame, at };
 }
 
+/** Which side of the store a value arrived from; only the volumes read differently. */
+type Source = 'stored' | 'set';
+
 /**
  * One key of a raw bag, validated against `current`. The same function runs on
  * load (against the defaults) and on `set` (against what is in memory now), so
- * a value the store refuses to store is also a value it refuses to read.
+ * a value the store refuses to store is also a value it refuses to read — with
+ * one deliberate split: an out-of-range volume is clamped on the way in from a
+ * setter and replaced by the default on the way in from storage (§6 above).
  */
-function coerce<K extends keyof Settings>(key: K, value: unknown, current: Settings): Settings[K] {
+function coerce<K extends keyof Settings>(key: K, value: unknown, current: Settings, source: Source): Settings[K] {
+  const bus = source === 'stored' ? storedVolume : volume;
   const out = ((): Settings[keyof Settings] => {
     switch (key) {
       case 'version':
         return SETTINGS_VERSION;
       case 'master':
-        return volume(value, current.master);
+        return bus(value, current.master);
       case 'music':
-        return volume(value, current.music);
+        return bus(value, current.music);
       case 'sfx':
-        return volume(value, current.sfx);
+        return bus(value, current.sfx);
       case 'quality':
         return typeof value === 'string' && PRESETS.includes(value) ? (value as QualityPreset) : null;
       case 'reduceMotion':
@@ -305,7 +326,7 @@ export function createSettings(storage?: Storage | null, events?: SettingsEvents
   for (const key of KEYS) {
     if (key === 'version') continue;
     if (!(key in initial.data)) continue;
-    assign(values, key, coerce(key, initial.data[key], values));
+    assign(values, key, coerce(key, initial.data[key], values, 'stored'));
   }
 
   /** 07-e: unreadable content is replaced with the defaults, with no prompt. */
@@ -337,7 +358,7 @@ export function createSettings(storage?: Storage | null, events?: SettingsEvents
     const applied: Partial<Settings> = {};
     for (const key of Object.keys(patch) as Array<keyof Settings>) {
       if (!KEYS.includes(key) || key === 'version') continue;
-      const value = coerce(key, patch[key], values);
+      const value = coerce(key, patch[key], values, 'set');
       assign(values, key, value);
       assign(applied as Settings, key, value);
     }
