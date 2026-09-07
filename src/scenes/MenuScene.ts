@@ -85,6 +85,9 @@ export class MenuScene extends UiScene<'menu'> {
 
   override debugInfo(): Record<string, number | string> {
     const info = super.debugInfo();
+    // SPEC-002 D-I / AC-22: the menu's rotating object, readable from outside.
+    // The starfield is that object now; the boot-gate suite watches it turn.
+    if (this.#stars) info['spin'] = this.#stars.rotation.y;
     if (this.#clip !== '') {
       info['clip'] = this.#clip;
       info['clipTime'] = this.#action?.time ?? 0;
