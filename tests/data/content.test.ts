@@ -108,6 +108,7 @@ function countIn(waveIdList: readonly WaveId[], enemy: EnemyId): number {
 
 describe('content invariants (SPEC-009 §7)', () => {
   it('1. every requirement exists, and every mission is reachable without a cycle', () => {
+    expect(Object.keys(UPGRADES)).toEqual([...SHIP_SYSTEMS]);
     const problems: string[] = [];
     const check = (requirement: Requirement, where: string): void => {
       if (requirement.kind === 'flag' && !flagSet.has(requirement.flag)) {
@@ -119,6 +120,9 @@ describe('content invariants (SPEC-009 §7)', () => {
       if (requirement.kind === 'ship') {
         if (!shipSystems.has(requirement.system)) problems.push(`${where}: unknown ship system ${requirement.system}`);
         if (requirement.tier < 1 || requirement.tier > 3) problems.push(`${where}: ship tier ${requirement.tier} is out of range`);
+        // A gate on a tier nothing sells is a gate nobody can open (E2).
+        const ladder = Object.hasOwn(UPGRADES, requirement.system) ? UPGRADES[requirement.system].tiers : [];
+        if (ladder.length < requirement.tier) problems.push(`${where}: ${requirement.system} has no tier ${requirement.tier} to buy`);
       }
       if (requirement.kind === 'level' && requirement.level < 1) problems.push(`${where}: level ${requirement.level} is out of range`);
     };
@@ -176,7 +180,9 @@ describe('content invariants (SPEC-009 §7)', () => {
   });
 
   it('3. every POI a surface objective names is on the planet, in a compatible kind and count', () => {
-    /** Which POI kinds each objective kind accepts (§7.3). */
+    // Which POI kinds each objective kind accepts (§7.3). `boss` is absent
+    // because a boss objective names an enemy, not a POI; invariant 5 checks
+    // that its planet has exactly one arena holding it.
     const accepts: Record<'reach' | 'scan' | 'deliver' | 'defend', readonly PoiDef['kind'][]> = {
       reach: ['landing_pad', 'scan', 'reach', 'deliver', 'arena', 'defend', 'escort_start', 'landmark'],
       scan: ['scan', 'landmark'],
@@ -349,8 +355,34 @@ describe('content invariants (SPEC-009 §7)', () => {
   });
 
   it('9. enemy stats hold, static enemies stand still, and boss phases descend from full', () => {
+    // §4.3 writes each enemy's numbers down rather than computing them at load
+    // time, so nothing but this check says they were derived from the archetype
+    // base and the chapter formula instead of typed in. Retuning means moving a
+    // base or the formula here, which is the point: one stat block per
+    // archetype, scaled (09-a).
+    const archetypeBase: Record<string, { hp: number; damage: number }> = {
+      swarm: { hp: 18, damage: 4 },
+      rusher: { hp: 45, damage: 9 },
+      ranged: { hp: 35, damage: 7 },
+      static: { hp: 60, damage: 0 },
+      boss: { hp: 900, damage: 18 },
+      fighter: { hp: 40, damage: 8 },
+      interceptor: { hp: 25, damage: 12 },
+    };
     const problems: string[] = [];
     for (const enemy of enemies) {
+      const base = archetypeBase[enemy.archetype];
+      if (base === undefined) problems.push(`${enemy.id}: no base for archetype ${enemy.archetype}`);
+      else {
+        const hp = Math.round(base.hp * 1.35 ** (enemy.chapter - 1));
+        const damage = Math.round(base.damage * 1.3 ** (enemy.chapter - 1));
+        if (enemy.hp !== hp) problems.push(`${enemy.id}: hp ${enemy.hp}, but a chapter-${enemy.chapter} ${enemy.archetype} is ${hp}`);
+        if (enemy.damage !== damage) problems.push(`${enemy.id}: damage ${enemy.damage}, but a chapter-${enemy.chapter} ${enemy.archetype} is ${damage}`);
+        // Boss xp is the one stat §4.3 scales explicitly.
+        if (enemy.archetype === 'boss' && enemy.xp !== 100 + 100 * enemy.chapter) {
+          problems.push(`${enemy.id}: xp ${enemy.xp}, but a chapter-${enemy.chapter} boss is ${100 + 100 * enemy.chapter}`);
+        }
+      }
       if (enemy.hp <= 0) problems.push(`${enemy.id}: hp ${enemy.hp}`);
       if (enemy.speed < 0) problems.push(`${enemy.id}: speed ${enemy.speed}`);
       if (enemy.archetype === 'static' && (enemy.attack.kind !== 'none' || enemy.speed !== 0)) {
@@ -538,6 +570,14 @@ describe('content invariants (SPEC-009 §7)', () => {
       missions.filter((mission) => mission.type === type).reduce((total, mission) => total + mission.rewards.tokens, 0);
     expect(sum('main')).toBe(670);
     expect(sum('side')).toBe(104);
+
+    // The roster the totals are a sum of, pinned alongside them. PLAN §6
+    // enumerates 17 main and 9 side missions and locks the set; PLAN §7's
+    // "Main missions (18)" header does not match the chapter tables it
+    // summarises, and there is no 18th main mission that leaves 670 intact.
+    // If a refinement adds one, this pin and the totals move together.
+    expect(missions.filter((mission) => mission.type === 'main')).toHaveLength(17);
+    expect(missions.filter((mission) => mission.type === 'side')).toHaveLength(9);
     // PLAN §7 also fixes the shape of the main total, chapter by chapter.
     const byChapter = [1, 2, 3, 4, 5, 6].map((chapter) =>
       missions
