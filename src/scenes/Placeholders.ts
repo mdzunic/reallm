@@ -18,6 +18,7 @@ import type { GameServices } from '@/core/Services';
 import type { Renderer } from '@/core/Renderer';
 import { ALLOWED_TRANSITIONS, type Scene, type SceneFactory, type SceneId, type SceneParams } from '@/core/StateMachine';
 import { PauseMenu } from '@/ui/PauseMenu';
+import { TouchControls } from '@/ui/TouchControls';
 
 /** The DOM layer every scene mounts its own UI into (SPEC-001 shell). */
 function uiRoot(): HTMLElement {
@@ -98,6 +99,12 @@ class PlaceholderScene<K extends SceneId> implements Scene<K> {
       const menu = new PauseMenu(uiRoot(), () => this.services.requestResume());
       this.#pauseMenu = menu;
       this.disposer.add(() => menu.dispose());
+      // The two pausable placeholders are the two gameplay scenes, so they are
+      // the ones that own a touch layout (SPEC-005 AC-27). It mounts itself
+      // only while the touch scheme is active (AC-20).
+      const touch = new TouchControls(uiRoot(), this.services.input, this.services.settings);
+      touch.show(this.id === 'flight' ? 'flight' : 'surface');
+      this.disposer.add(() => touch.dispose());
     }
   }
 
