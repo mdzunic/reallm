@@ -16,6 +16,7 @@
 // slot's Import/Delete actions are that spec's own UI (E8), so they live in
 // `ui/` and move to the real menu with SPEC-014 rather than being rebuilt.
 import * as THREE from 'three';
+import type { MusicId } from '@/core/Audio';
 import { Disposer, disposeObject3D } from '@/core/Disposer';
 import { log } from '@/core/Log';
 import type { GameServices } from '@/core/Services';
@@ -81,16 +82,23 @@ class PlaceholderScene<K extends SceneId> implements Scene<K> {
   protected readonly camera = new THREE.PerspectiveCamera(60, 1, 0.1, 100);
   /** How many own meshes this placeholder builds; two of them build some (D-20). */
   protected readonly props: number;
+  /** The bed this scene asks for on enter; `undefined` keeps whatever is playing. */
+  protected readonly music: MusicId | undefined;
   #spin: THREE.Object3D | null = null;
   #pauseMenu: PauseMenu | null = null;
   #elapsed = 0;
   #renders = 0;
 
-  constructor(services: GameServices, id: K, options: { pausable?: boolean; props?: number } = {}) {
+  constructor(
+    services: GameServices,
+    id: K,
+    options: { pausable?: boolean; props?: number; music?: MusicId } = {},
+  ) {
     this.services = services;
     this.id = id;
     this.pausable = options.pausable ?? false;
     this.props = options.props ?? 0;
+    this.music = options.music;
   }
 
   enter(_params: SceneParams[K]): void {
@@ -100,10 +108,18 @@ class PlaceholderScene<K extends SceneId> implements Scene<K> {
     this.disposer.add(() => disposeObject3D(this.scene));
     this.#buildProps();
     this.#mountLayer();
+    // SPEC-006 §4.3: the bed changes on `enter()`, so the crossfade runs across
+    // the transition rather than after it. A scene that names no track leaves
+    // the current one playing, which is what makes menu → creation → station a
+    // single continuous piece.
+    if (this.music !== undefined) this.services.audio.music(this.music);
     if (this.pausable) {
       const menu = new PauseMenu(uiRoot(), () => this.services.requestResume());
       this.#pauseMenu = menu;
       this.disposer.add(() => menu.dispose());
+      // Quitting straight out of the pause menu never calls `resume()`, so the
+      // duck is released here too rather than surviving the scene.
+      this.disposer.add(() => this.services.audio.duck(false));
       // The two pausable placeholders are the two gameplay scenes, so they are
       // the ones that own a touch layout (SPEC-005 AC-27). It mounts itself
       // only while the touch scheme is active (AC-20).
@@ -140,10 +156,14 @@ class PlaceholderScene<K extends SceneId> implements Scene<K> {
 
   pause(): void {
     this.#pauseMenu?.show();
+    // SPEC-006 AC-54: the menu holds a duck for as long as it is open, so the
+    // bed sits under it instead of over it.
+    this.services.audio.duck(true);
   }
 
   resume(): void {
     this.#pauseMenu?.hide();
+    this.services.audio.duck(false);
   }
 
   /**
@@ -228,11 +248,15 @@ class MenuScene extends PlaceholderScene<'menu'> {
   #shipMap = '';
 
   constructor(services: GameServices) {
-    super(services, 'menu', { props: 1 });
+    super(services, 'menu', { props: 1, music: 'menu' });
   }
 
   override enter(params: SceneParams['menu']): void {
     super.enter(params);
+    // SPEC-006 AC-28: the menu warms both of the tracks it can crossfade into
+    // next, so menu → station has no gap to click across. It resolves even when
+    // a track fails to load, so nothing here has to be awaited.
+    void this.services.audio.preloadMusic(['menu', 'station']);
     // SPEC-007 E8: the menu is where a memory-only session is told so (AC-17)
     // and where a slot with neither a readable save nor a readable backup gets
     // its Import and Delete actions (AC-20). The panel belongs to SPEC-007, so
@@ -300,9 +324,11 @@ class MenuScene extends PlaceholderScene<'menu'> {
  */
 export const PLACEHOLDER_SCENES: SceneFactory = {
   menu: (services) => new MenuScene(services),
+  // `creation` and `starmap` name no track on purpose: they sit between two
+  // scenes that do, and re-stating the bed would restart a fade for nothing.
   creation: (services) => new PlaceholderScene(services, 'creation'),
-  station: (services) => new PlaceholderScene(services, 'station', { props: 3 }),
+  station: (services) => new PlaceholderScene(services, 'station', { props: 3, music: 'station' }),
   starmap: (services) => new PlaceholderScene(services, 'starmap', { props: 4 }),
-  flight: (services) => new PlaceholderScene(services, 'flight', { pausable: true }),
-  surface: (services) => new PlaceholderScene(services, 'surface', { pausable: true }),
+  flight: (services) => new PlaceholderScene(services, 'flight', { pausable: true, music: 'flight' }),
+  surface: (services) => new PlaceholderScene(services, 'surface', { pausable: true, music: 'surface_calm' }),
 };

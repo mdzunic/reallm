@@ -3,10 +3,12 @@
 // (SPEC-001 §4), so the overlays and the scene factory are built here and
 // injected into `Game`.
 import './style.css';
+import { createAudio } from '@/core/Audio';
 import { EventBus, type GameEvents } from '@/core/Events';
-import { Game, parseFlags, SIMULATED_RESTORE_MS } from '@/core/Game';
+import { DEFAULT_SEED, Game, parseFlags, SIMULATED_RESTORE_MS } from '@/core/Game';
 import { Input } from '@/core/Input';
 import { log } from '@/core/Log';
+import { RngRoot } from '@/core/Rng';
 import { SaveStore } from '@/core/Save';
 import { createSettings } from '@/core/Settings';
 import type { SceneId } from '@/core/StateMachine';
@@ -50,6 +52,22 @@ const input = new Input(canvas, events, settings);
  */
 const save = new SaveStore(events, undefined, { settings });
 
+/**
+ * SPEC-006's audio layer. Built here for the same reason as the two above — it
+ * needs the settings store the volume sliders write to.
+ *
+ * Its RNG root is its own rather than `Game`'s: the only randomness in the
+ * audio layer is pitch variation, which comes off `ephemeral('audio')` and is
+ * mixed with the clock anyway (SPEC-008 §3), so tying it to the save's seed
+ * would suggest a determinism it deliberately does not have.
+ */
+const audio = createAudio({
+  events,
+  settings,
+  rng: new RngRoot(flags.seed ?? DEFAULT_SEED),
+  manifest: ASSETS,
+});
+
 // The overlay buttons need the game they drive, and the game needs the overlay:
 // the simulators reach it late, through a click, so a holder is enough.
 let running: Game | undefined;
@@ -71,7 +89,7 @@ const game = new Game({
     contextLost: new ContextLostOverlay(uiRoot),
     stats: statsOverlay,
   },
-  services: { input, settings, save },
+  services: { input, settings, save, audio },
 });
 running = game;
 

@@ -76,8 +76,16 @@ export interface SettingsStore {
   /** Validates, writes immediately and emits `settings:changed` (SPEC-007 §3). */
   set(patch: Partial<Settings>): void;
 
-  // The per-setting accessors SPEC-002 and SPEC-005 already consume; each one
-  // is `set()` with a single key.
+  // The per-setting accessors SPEC-002, SPEC-005 and SPEC-006 consume; each one
+  // is `set()` with a single key, so the merge-write of §4.7 keeps every other
+  // spec's keys (SPEC-006 AC-14).
+  /** The three audio buses, 0..1 (SPEC-006 §6). `Audio.setBus` writes through these. */
+  readonly master: number;
+  setMaster(value: number): void;
+  readonly music: number;
+  setMusic(value: number): void;
+  readonly sfx: number;
+  setSfx(value: number): void;
   /** `null` = never chosen; the boot sequence then picks a default (§4.5). */
   readonly quality: QualityPreset | null;
   setQuality(preset: QualityPreset): void;
@@ -343,6 +351,24 @@ export function createSettings(storage?: Storage | null, events?: SettingsEvents
       return values;
     },
     set,
+    get master(): number {
+      return values.master;
+    },
+    setMaster(value: number): void {
+      set({ master: value });
+    },
+    get music(): number {
+      return values.music;
+    },
+    setMusic(value: number): void {
+      set({ music: value });
+    },
+    get sfx(): number {
+      return values.sfx;
+    },
+    setSfx(value: number): void {
+      set({ sfx: value });
+    },
     get quality(): QualityPreset | null {
       return values.quality;
     },
