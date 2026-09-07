@@ -4,19 +4,12 @@
 //
 // Transitions are driven through the dev-only `window.__reallm` bridge so the
 // test awaits the transition's own outcome instead of racing the UI.
+//
+// SPEC-002 §4.5 put a start gate in front of the game and its stats overlay
+// took over the `debug-memory` row, keeping its exact text (D-K, AC-36). No
+// assertion below changed.
 import { expect, test, type Page } from '@playwright/test';
-
-interface SceneBridge {
-  go(id: string, params: unknown, opts?: { force?: boolean }): Promise<boolean>;
-  scene(): string | null;
-  memory(): { geometries: number; textures: number };
-}
-
-declare global {
-  interface Window {
-    __reallm: SceneBridge;
-  }
-}
+import { start } from './start';
 
 /** One transition, plus the frame that actually draws the scene we landed in. */
 async function go(page: Page, id: string, params: unknown = {}): Promise<boolean> {
@@ -42,7 +35,7 @@ test.describe('scene cycling', () => {
   test.use({ reducedMotion: 'reduce' });
 
   test('station ↔ starmap 20 times leaves GPU memory where it started (AC-33, AC-34)', async ({ page }) => {
-    await page.goto('/?debug');
+    await start(page, '/?debug');
     await expect(page.locator('[data-testid="scene-label"]')).toHaveText('menu');
 
     expect(await go(page, 'station', {})).toBe(true);
@@ -67,7 +60,7 @@ test.describe('scene cycling', () => {
 });
 
 test('the fade covers the screen for its whole 300 ms (AC-38, AC-39)', async ({ page }) => {
-  await page.goto('/');
+  await start(page);
   await expect(page.locator('[data-testid="scene-label"]')).toHaveText('menu');
   const fade = page.locator('[data-testid="transition-fade"]');
   await expect(fade).toHaveCSS('pointer-events', 'none');

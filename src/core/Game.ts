@@ -52,6 +52,8 @@ export interface StatsSnapshot {
   readonly frameMs: number;
   readonly updates: number;
   readonly droppedTime: number;
+  /** `loop.stats.frame` — the e2e suites of §6.2 watch it grow, stop and freeze. */
+  readonly frame: number;
   readonly drawCalls: number;
   readonly triangles: number;
   readonly geometries: number;
@@ -311,6 +313,7 @@ export class Game implements GameServices {
       frameMs: loop.fps > 0 ? 1000 / loop.fps : 0,
       updates: loop.updatesLastFrame,
       droppedTime: loop.droppedTime,
+      frame: loop.frame,
       drawCalls: info.render.calls,
       triangles: info.render.triangles,
       geometries: info.memory.geometries,

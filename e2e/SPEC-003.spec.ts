@@ -4,22 +4,14 @@
 // concurrency (D-2), the transition-table guard and its `force` escape hatch
 // (D-8, D-11), and prefers-reduced-motion (D-16), all exercised against the
 // real bundle in a real browser rather than the spy-scene unit harness.
+//
+// SPEC-002 §4.5 put a start gate in front of the game, so `atMenu` walks
+// through the shared helper (D-K). No assertion below changed.
 import { expect, test, type Page } from '@playwright/test';
-
-interface SceneBridge {
-  go(id: string, params: unknown, opts?: { force?: boolean }): Promise<boolean>;
-  scene(): string | null;
-  memory(): { geometries: number; textures: number };
-}
-
-declare global {
-  interface Window {
-    __reallm: SceneBridge;
-  }
-}
+import { start } from './start';
 
 async function atMenu(page: Page): Promise<void> {
-  await page.goto('/');
+  await start(page);
   await expect(page.locator('[data-testid="scene-label"]')).toHaveText('menu');
   // The boot → menu transition still fades in after the label appears (AC-14);
   // wait for it to settle so it cannot itself be mistaken for "a transition is
