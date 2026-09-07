@@ -148,6 +148,26 @@ describe('rusher archetype (wurmling)', () => {
     expect(e.aggro).toBe(false);
     expect(e.state).toBe('wander');
   });
+
+  it('keeps wandering after the player dies even with a live follower in aggro range', () => {
+    const h = harness({ follower: true });
+    const e = h.spawn('wurmling', 10, 0);
+    h.step();
+    expect(e.state).toBe('chase');
+    h.combat.damagePlayer(10_000, { kind: 'fall' });
+    const x0 = e.x;
+    const z0 = e.z;
+    // The follower sits at (0, -2), inside the 20 m aggroRadius. Re-acquiring
+    // it would flip wander→chase every step and freeze the enemy in place.
+    let moved = 0;
+    for (let i = 0; i < Math.round(3 / STEP); i++) {
+      h.step();
+      expect(e.state).toBe('wander');
+      moved = Math.max(moved, Math.hypot(e.x - x0, e.z - z0));
+    }
+    expect(e.aggro).toBe(false);
+    expect(moved).toBeGreaterThan(0.5); // it wanders — not frozen mid-flip
+  });
 });
 
 // ------------------------------------------------------------------ ranged

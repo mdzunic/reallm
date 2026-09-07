@@ -223,14 +223,18 @@ function trackStuck(e: EnemyEntity, world: CombatWorld, dt: number, achieved: nu
 // -------------------------------------------------------------- archetypes
 
 function updateWander(e: EnemyEntity, world: CombatWorld, dt: number, rng: Rng): void {
-  selectTarget(e, world);
-  const target = targetOf(e, world);
-  if (target.alive) {
-    const d = distance(e.x, e.z, target.x, target.z);
-    if (e.aggro || (e.def.aggroRadius > 0 && d <= e.def.aggroRadius)) {
-      e.aggro = true;
-      enterState(e, 'chase');
-      return;
+  // §4.5 de-aggro: a dead player ends combat outright — acquiring the live
+  // follower here would undo the forced wander and flip states every step.
+  if (world.player.alive) {
+    selectTarget(e, world);
+    const target = targetOf(e, world);
+    if (target.alive) {
+      const d = distance(e.x, e.z, target.x, target.z);
+      if (e.aggro || (e.def.aggroRadius > 0 && d <= e.def.aggroRadius)) {
+        e.aggro = true;
+        enterState(e, 'chase');
+        return;
+      }
     }
   }
   if (world.time >= e.wanderAt) pickWanderPoint(e, world, rng);
