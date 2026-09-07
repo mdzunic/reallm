@@ -99,11 +99,6 @@ export const INVENTORY_SLOTS = 20;
 /** SPEC-009 §4.1: tech is worth −3 % on every token price. */
 export const TECH_DISCOUNT_PER_POINT = 0.03;
 
-/** §4.6, E1: what the station says when it tops the hold up. */
-export function subsidyText(oil: number): string {
-  return `Earth Command wired an emergency ration: +${oil} oil`;
-}
-
 /** §4.6: the boss-mission voucher that pays for the next chapter's jump. */
 export function refuelVoucherText(oil: number): string {
   return `Earth Command refuel voucher: +${oil} oil`;
@@ -529,9 +524,10 @@ export class Economy {
 
   /**
    * E1, called on every station `enter()`: if the hold cannot pay for the
-   * cheapest unlocked jump, top it up by exactly the shortfall and say so.
-   * Unlimited on purpose — the campaign is never blocked, and grinding
-   * Cinder-4 stays the honest path. Returns the oil granted, 0 for nothing.
+   * cheapest unlocked jump, top it up by exactly the shortfall. Unlimited on
+   * purpose — the campaign is never blocked, and grinding Cinder-4 stays the
+   * honest path. Returns the oil granted, 0 for nothing; the station shows
+   * ARIA's line off that number (§4.6), which is why nothing is said here.
    */
   applyStationSubsidy(): number {
     let cheapest = Infinity;
@@ -542,7 +538,6 @@ export class Economy {
     const grant = cheapest - this.#save.resources.oil;
     if (grant <= 0) return 0;
     this.addResource('oil', grant, 'subsidy');
-    this.#events.emit('ui:toast', { kind: 'good', text: subsidyText(grant) });
     return grant;
   }
 

@@ -17,7 +17,6 @@ import {
   discountTokens,
   noRoomText,
   refuelVoucherText,
-  subsidyText,
   type Fail,
 } from '@/systems/Economy';
 import { Progression, type EventSink } from '@/systems/Progression';
@@ -558,7 +557,10 @@ describe('anti-softlock (E1, E2)', () => {
     expect(economy.applyStationSubsidy()).toBe(40); // Cinder-4 is the cheapest unlocked jump
     expect(data.resources.oil).toBe(40);
     expect(economy.canDepart('cinder4')).toEqual({ ok: true });
-    expect(events.toasts()).toEqual([subsidyText(40)]);
+    // The grant is a resource event and a return value; the station is what
+    // turns it into ARIA's line (§4.6), so nothing is said here.
+    expect(events.of('resource:collected')).toEqual([{ resource: 'oil', amount: 40, total: 40 }]);
+    expect(events.toasts()).toEqual([]);
 
     // Already able to go somewhere: the station does nothing at all.
     events.clear();
