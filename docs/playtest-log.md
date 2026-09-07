@@ -22,9 +22,9 @@ ticked here for desktop and one phone, zero open P0, and spec statuses updated
     upload and the first scene transition share one frame: the 250 ms clamp
     absorbing a boot hitch is exactly the behaviour E23 asks for.
 - **Checklist (SPEC-001):**
-  - [x] `npm ci && npm run check` green on a clean clone — 12 files, 101 tests,
+  - [x] `npm ci && npm run check` green on a clean clone — 12 files, 102 tests,
         typecheck and production build clean
-  - [x] `npm run e2e` green headless — 50 tests across 12 suites
+  - [x] `npm run e2e` green headless — 51 tests across 12 suites
   - [x] `npm run dev` serves `ReaLLM` on 5173, canvas and `#ui` overlay present
         (`e2e/smoke.spec.ts`); **opening it on a phone over LAN is still open**
   - [x] architecture tests pass (import boundaries, `Math.random` ban)
