@@ -111,6 +111,8 @@ export class SurfaceCombatDemo extends PlaceholderScene<'surface'> {
 
   override enter(params: SceneParams['surface']): void {
     super.enter(params);
+    this.camera.far = 300; // the placeholder's 100 m clips a real planet
+    this.camera.updateProjectionMatrix();
     const planet = PLANETS[params.planet];
     const surface = planet.surface;
     this.#halfSize = surface.halfSize;
@@ -563,11 +565,13 @@ export class SurfaceCombatDemo extends PlaceholderScene<'surface'> {
 
   #paintHud(world: CombatWorld): void {
     const p = world.player;
-    const hp = Math.max(0, Math.round(p.hp));
+    // Keyed on both ends of the fraction: a level-up moves maxHp, not hp.
+    const hp = Math.max(0, Math.round(p.hp)) + world.stats.maxHp * 100_000;
     if (hp !== this.#lastHp && this.#hpFill !== null && this.#hpText !== null) {
       this.#lastHp = hp;
-      this.#hpFill.style.width = `${Math.max(0, Math.min(100, (hp / world.stats.maxHp) * 100))}%`;
-      this.#hpText.textContent = `HP ${hp}/${world.stats.maxHp}`;
+      const shown = Math.max(0, Math.round(p.hp));
+      this.#hpFill.style.width = `${Math.max(0, Math.min(100, (shown / world.stats.maxHp) * 100))}%`;
+      this.#hpText.textContent = `HP ${shown}/${world.stats.maxHp}`;
     }
     const counters = `spawned ${this.#spawned} · elites ${this.#elites} · kills ${this.#kills}`;
     if (counters !== this.#lastCounters && this.#counters !== null) {

@@ -405,9 +405,17 @@ function bossPhases(e: EnemyEntity, world: CombatWorld, hooks: AiHooks): void {
 function updateSpecial(e: EnemyEntity, world: CombatWorld, rng: Rng, hooks: AiHooks): void {
   if (world.time < e.specialUntil) return;
   if (e.specialKind === 'burrow_dig') {
-    // Resurface point: 5 m from the player's current position, then 1 s telegraph.
+    // Resurface point: 5 m from the player's current position, then 1 s
+    // telegraph. The distance is fixed; the angle re-rolls (a few times, so an
+    // open field costs exactly one draw) rather than surfacing inside a rock.
     const p = world.player;
-    const angle = rng.angle();
+    let angle = rng.angle();
+    for (let attempt = 0; attempt < 7; attempt++) {
+      const x = p.x + Math.cos(angle) * BURROW_RESURFACE_DISTANCE;
+      const z = p.z + Math.sin(angle) * BURROW_RESURFACE_DISTANCE;
+      if (!world.obstacles.hitsCircle(x, z, e.radius)) break;
+      angle = rng.angle();
+    }
     e.wanderX = p.x + Math.cos(angle) * BURROW_RESURFACE_DISTANCE;
     e.wanderZ = p.z + Math.sin(angle) * BURROW_RESURFACE_DISTANCE;
     e.specialKind = 'burrow_telegraph';
