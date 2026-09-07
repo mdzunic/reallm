@@ -526,42 +526,64 @@ test('two stage requests inside one window are a single write, after the render 
 
 test('a save requested during a scene transition waits for the far side of it (AC-47)', async ({ page }) => {
   await start(page);
-  const timing = await page.evaluate((creation) => {
-    const save = window.__reallm.save();
-    save.create(0, creation);
-    const writes: number[] = [];
-    const realSet = Storage.prototype.setItem;
-    Storage.prototype.setItem = function (key: string, value: string): void {
-      if (key === 'reallm:slot:0') writes.push(performance.now());
-      realSet.call(this, key, value);
-    };
-    let entered: number | null = null;
-    const poll = window.setInterval(() => {
-      if (entered === null && window.__reallm.scene() === 'station') entered = performance.now();
-    }, 5);
+  // At full speed a menu → station swap lands within a millisecond or two of
+  // the 500 ms debounce deadline, so "the write came after the scene entered"
+  // is a coin toss rather than a measurement. Throttling the CPU stretches the
+  // transition well past the deadline: the hold is then the only thing that can
+  // explain a write that is late (07-c).
+  const cdp = await page.context().newCDPSession(page);
+  await cdp.send('Emulation.setCPUThrottlingRate', { rate: 10 });
+  try {
+    const timing = await page.evaluate((creation) => {
+      const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
+      const save = window.__reallm.save();
+      save.create(0, creation);
+      const writes: number[] = [];
+      const realSet = Storage.prototype.setItem;
+      Storage.prototype.setItem = function (key: string, value: string): void {
+        if (key === 'reallm:slot:0') writes.push(performance.now());
+        realSet.call(this, key, value);
+      };
 
-    const started = performance.now();
-    const count = writes.length;
-    save.request('stage'); // 07-c: the debounce deadline falls inside the transition
-    return window.__reallm
-      .go('station', {})
-      .then(() => new Promise<void>((resolve) => setTimeout(resolve, 900)))
-      .then(() => {
-        window.clearInterval(poll);
-        Storage.prototype.setItem = realSet;
-        return {
-          writes: writes.length - count,
-          enteredAt: entered === null ? -1 : entered - started,
-          writeAt: writes.length > count ? writes[count]! - started : -1,
-        };
-      });
-  }, CREATION);
+      // The same request with nothing in its way: the debounce alone.
+      let count = writes.length;
+      const idleAt = performance.now();
+      save.request('stage');
+      return sleep(1400)
+        .then(() => {
+          const idle = { writes: writes.length - count, delay: writes.length > count ? writes[count]! - idleAt : -1 };
 
-  expect(await page.evaluate(() => window.__reallm.scene())).toBe('station');
-  expect(timing.writes).toBe(1);
-  expect(timing.enteredAt).toBeGreaterThan(0);
-  // The write is on the far side of the swap, not in the middle of it.
-  expect(timing.writeAt).toBeGreaterThanOrEqual(timing.enteredAt);
+          // …and now with a scene swap straddling the deadline.
+          count = writes.length;
+          const startedAt = performance.now();
+          save.request('stage');
+          return sleep(300)
+            .then(() => window.__reallm.go('station', {}))
+            .then(() => sleep(1400))
+            .then(() => {
+              Storage.prototype.setItem = realSet;
+              return {
+                idle,
+                held: {
+                  writes: writes.length - count,
+                  delay: writes.length > count ? writes[count]! - startedAt : -1,
+                },
+              };
+            });
+        });
+    }, CREATION);
+
+    expect(await page.evaluate(() => window.__reallm.scene())).toBe('station');
+    expect(timing.idle.writes).toBe(1);
+    expect(timing.held.writes).toBe(1);
+    expect(timing.idle.delay).toBeGreaterThanOrEqual(500);
+    // Held for the transition on top of its debounce: a scene swap is halfway
+    // through disposing its state, and the write goes out on the far side.
+    expect(timing.held.delay).toBeGreaterThan(timing.idle.delay + 100);
+  } finally {
+    await cdp.send('Emulation.setCPUThrottlingRate', { rate: 1 });
+    await cdp.detach();
+  }
 });
 
 test('the storage probe is written and removed once, at construction (AC-64)', async ({ page }) => {
