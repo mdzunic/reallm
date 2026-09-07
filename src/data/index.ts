@@ -47,6 +47,22 @@ import { TUNING } from '@/data/tuning';
 import { UPGRADES } from '@/data/upgrades';
 import { WAVES } from '@/data/waves';
 
+import type { EnemyId } from '@/data/enemies';
+import type { WeatherId } from '@/data/ids';
+
+/**
+ * What hurt the player (SPEC-011 §3). Declared here rather than in
+ * `systems/Combat.ts` — which re-exports it — because `core/Events.ts` carries
+ * it in `player:damaged`/`player:died` payloads and `core/` may not import
+ * `systems/` (SPEC-001 §4). `ids.ts` stays the leaf: `EnemyId` is derived from
+ * a table, so only the barrel can name it without a cycle.
+ */
+export type DamageSource =
+  | { kind: 'enemy'; enemyId: EnemyId }
+  | { kind: 'weather'; weather: WeatherId }
+  | { kind: 'projectile'; enemyId: EnemyId }
+  | { kind: 'fall' };
+
 export const CONTENT = {
   assets: ASSETS,
   classes: CLASSES,
