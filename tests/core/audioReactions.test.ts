@@ -456,12 +456,21 @@ describe('reaction outcomes (SPEC-006 §5.2)', () => {
   });
 
   it('player:damaged is rate-limited at 120 ms (AC-48)', () => {
-    const sound = AUDIO_REACTIONS['player:damaged']({ amount: 4, source: 'enemy', hp: 60 });
+    const sound = AUDIO_REACTIONS['player:damaged']({
+      amount: 4,
+      source: { kind: 'enemy', enemyId: 'dust_skitter' },
+      hp: 60,
+    });
     expect(sound).toEqual({ id: 'hit_player', opts: { minIntervalMs: 120 } });
   });
 
   it('player:died plays the death sound', () => {
-    expect(AUDIO_REACTIONS['player:died']({ cause: 'enemy', scene: 'surface' })?.id).toBe('player_death');
+    expect(
+      AUDIO_REACTIONS['player:died']({
+        cause: { kind: 'enemy', enemyId: 'dust_skitter' },
+        scene: 'surface',
+      })?.id,
+    ).toBe('player_death');
   });
 
   it('the four celebratory events play at priority 2 (AC-50)', () => {
