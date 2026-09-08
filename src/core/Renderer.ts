@@ -45,8 +45,11 @@ export const QUALITY = {
     drawDistance: 60,
     fogEnabled: true,
     targetFps: 30,
-    starfieldPoints: 400,
-    asteroidCap: 24,
+    // SPEC-013 §4.3 pins the flight caps: 40 asteroids on low, 60 otherwise
+    // (13-d), and a 2,000-point starfield on medium (§4.9). Initial tuning
+    // still, but these three rows now carry the numbers that spec tests.
+    starfieldPoints: 800,
+    asteroidCap: 40,
     textureMaxSize: 512,
   },
   medium: {
@@ -58,8 +61,8 @@ export const QUALITY = {
     drawDistance: 90,
     fogEnabled: true,
     targetFps: 60,
-    starfieldPoints: 900,
-    asteroidCap: 40,
+    starfieldPoints: 2000,
+    asteroidCap: 60,
     textureMaxSize: 1024,
   },
   high: {
@@ -71,8 +74,8 @@ export const QUALITY = {
     drawDistance: 140,
     fogEnabled: true,
     targetFps: 60,
-    starfieldPoints: 1600,
-    asteroidCap: 64,
+    starfieldPoints: 2600,
+    asteroidCap: 60,
     textureMaxSize: 2048,
   },
 } as const satisfies Record<QualityPreset, QualitySettings>;
