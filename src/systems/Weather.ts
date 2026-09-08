@@ -73,6 +73,16 @@ export class Weather {
     return this.#current;
   }
 
+  /** The storm a warning announced, for the HUD banner. */
+  get pending(): WeatherId | null {
+    return this.#pending;
+  }
+
+  /** Seconds left in the current phase — the banner's countdown (§4.12). */
+  get secondsLeft(): number {
+    return Math.max(0, this.#left);
+  }
+
   /** The active storm's table row, or calm — what the scene lerps toward. */
   get effects(): WeatherEffects {
     return this.#current === null ? CALM_EFFECTS : WEATHER_EFFECTS[this.#current];

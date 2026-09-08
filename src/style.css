@@ -777,6 +777,42 @@ html.reduce-motion .hud-vignette {
   transition: none;
 }
 
+/* SPEC-012 §4.11: the landing-pad terminal — accept missions, return to ship. */
+.pad-terminal {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  min-width: 280px;
+  max-width: min(420px, 90vw);
+  max-height: 70vh;
+  overflow-y: auto;
+  z-index: 12;
+}
+
+.pad-terminal.is-hidden {
+  display: none;
+}
+
+.pad-terminal .terminal-title {
+  margin: 0 0 8px;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+}
+
+.pad-terminal .terminal-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 6px 0;
+}
+
+.pad-terminal .terminal-active {
+  margin: 4px 0;
+  opacity: 0.8;
+}
+
 /* SPEC-012 §4.12: the storm overlay — the scene drives opacity from
    1 − visibility; the element only tints and never takes pointer events. */
 .hud-storm {

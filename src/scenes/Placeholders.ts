@@ -394,9 +394,8 @@ class MenuScene extends PlaceholderScene<'menu'> {
 /**
  * The factory the composition root hands to `SceneManager` (D-17). `menu` enters
  * synchronously and loads nothing of its own, which is what makes it a safe
- * fallback after a failed `enter()` (D-19). `main.ts` overrides the `surface`
- * entry with SPEC-011's combat verification harness
- * (`scenes/SurfaceCombatDemo.ts`) until SPEC-012 lands the real scene.
+ * fallback after a failed `enter()` (D-19). `scenes/index.ts` overrides the
+ * real scenes over these; only `flight` still ships a placeholder (SPEC-013).
  */
 export const PLACEHOLDER_SCENES: SceneFactory = {
   menu: (services) => new MenuScene(services),
