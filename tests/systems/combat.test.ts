@@ -169,6 +169,22 @@ describe('player damage, i-frames and death', () => {
     expect(h.world.player.hp).toBe(184);
   });
 
+  it('hazard resist reduces weather damage before the accumulator (SPEC-012 §4.6)', () => {
+    // armor_reactive: hazardResist 0.5 — a 4-point tick lands as 2.
+    const h = harness({ patch: (s) => (s.equipped.armor = 'armor_reactive') });
+    h.combat.damagePlayer(4, { kind: 'weather', weather: 'radiation_storm' }, true);
+    expect(h.world.player.hp).toBe(182);
+    // Fractional after resist: 0.8 × 0.5 = 0.4 per tick, whole points only.
+    h.combat.damagePlayer(0.8, { kind: 'weather', weather: 'radiation_storm' }, true);
+    expect(h.world.player.hp).toBe(182);
+    h.combat.damagePlayer(0.8, { kind: 'weather', weather: 'radiation_storm' }, true);
+    h.combat.damagePlayer(0.8, { kind: 'weather', weather: 'radiation_storm' }, true);
+    expect(h.world.player.hp).toBe(181); // 1.2 accumulated → 1 lands
+    // Non-weather damage is untouched by hazard resist.
+    h.combat.damagePlayer(10, { kind: 'fall' });
+    expect(h.world.player.hp).toBe(171);
+  });
+
   it('HP persists into the save and never regenerates naturally', () => {
     const h = harness();
     h.combat.damagePlayer(50, { kind: 'fall' });
