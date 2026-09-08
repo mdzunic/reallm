@@ -475,6 +475,8 @@ export class SurfaceScene extends UiScene<'surface'> {
     info['kills'] = this.#kills;
     if (this.#world !== null) {
       info['enemies'] = this.#world.enemies.size;
+      info['px'] = Math.round(this.#world.player.x * 10) / 10;
+      info['pz'] = Math.round(this.#world.player.z * 10) / 10;
       const boss = this.#findBoss(this.#world);
       info['boss'] = boss === null ? '-' : `p${boss.phase} ${boss.hp}/${boss.maxHp}`;
     }
@@ -897,6 +899,13 @@ export class SurfaceScene extends UiScene<'surface'> {
       strip.append(testId(h('button', { class: 'hud-button', type: 'button', click }, label), id));
     };
     button('surface-hurt', 'Hurt me', () => this.#combat?.damagePlayer(60, { kind: 'fall' }));
+    button('surface-goto-pad', 'To pad', () => {
+      const world = this.#world;
+      const pad = this.#pad;
+      if (world === null || pad === null || !world.player.alive) return;
+      world.player.x = pad.x;
+      world.player.z = pad.z;
+    });
     button('surface-spawn-boss', 'Wake boss', () => this.#debugSpawnBoss());
     button('surface-goto-boss', 'To boss', () => {
       const world = this.#world;
@@ -1271,6 +1280,12 @@ export class SurfaceScene extends UiScene<'surface'> {
         'mission:stageStarted',
         ({ id, stage }) => {
           this.#syncMissionStages();
+          // A reach objective for a POI the player is already standing in
+          // completes now — entry is edge-triggered, and the edge is behind us
+          // (accepting c1_m1 on the pad must not wait for a walk-out-and-back).
+          for (const state of this.#pois) {
+            if (state.inside) bus.emit('poi:reached', { poi: state.poi.poi, instance: state.poi.instance });
+          }
           const dialogueId = MISSION_TABLE[id].dialogue.onStage?.[stage];
           if (dialogueId !== undefined) this.#playDialogue(dialogueId);
           // §4.6: forced mission weather ends when a boss stage starts.

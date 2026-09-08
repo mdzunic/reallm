@@ -101,7 +101,7 @@ export class Hud {
     tr.append(tokens);
 
     const tc = el('div', 'hud-tc');
-    tc.append(this.#weather, this.#boss.root);
+    tc.append(this.#weather, testId(this.#boss.root, 'hud-boss'));
     this.#boss.root.classList.add('is-hidden');
 
     const bl = el('div', 'hud-bl');
