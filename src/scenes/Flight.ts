@@ -16,7 +16,7 @@ import { newSave, type CharacterCreation, type SaveV1 } from '@/core/Save';
 import type { GameServices } from '@/core/Services';
 import type { SceneParams } from '@/core/StateMachine';
 import { cargoCap, maxHp } from '@/core/Save';
-import { PLANETS, type PlanetDef } from '@/data/index';
+import { ENEMIES, PLANETS, type PlanetDef } from '@/data/index';
 import { Economy } from '@/systems/Economy';
 import {
   CONVERGE_DEPTH,
@@ -146,6 +146,62 @@ export class FlightScene extends UiScene<'flight'> {
       this.#flight = null;
       this.#save = null;
     });
+
+    // The dev-only flight hook, next to `window.__reallm` (SPEC-002 §3.11):
+    // a 90 s trip and a random crash are not things an e2e suite can wait
+    // for, so it can warp the simulation and land a deterministic hit. Dev
+    // builds only, removed with the scene.
+    if (import.meta.env.DEV) {
+      const idle: FlightInput = { ...this.#frameInput, aimX: 0, aimY: 0 };
+      const scope = globalThis as { __reallmFlight?: unknown };
+      scope.__reallmFlight = {
+        phase: () => flight.phase,
+        state: () => ({
+          progress: flight.progress,
+          shield: flight.ship.shield,
+          hull: flight.ship.hull,
+          throttle: flight.ship.throttle,
+          storm: flight.stormActive,
+          hostiles: flight.hostiles,
+          holding: flight.phase === 'holding',
+        }),
+        hit: (amount: number) => flight.hit(amount, 'asteroid', { kind: 'asteroid' }),
+        warp: (seconds: number) => {
+          const dt = 1 / 60;
+          for (let t = 0; t < seconds; t += dt) {
+            if (flight.phase === 'arrived' || flight.phase === 'recalled') break;
+            flight.update(dt, idle);
+          }
+        },
+        // A wave enemy that never leaves and never fires: descends forever, so
+        // the arrival check keeps failing and the holding pattern is reachable
+        // on a planet whose real waves would ram an idle ship.
+        blockArrival: () => {
+          const hazard = flight.hazards.alloc();
+          Object.assign(hazard, {
+            kind: 'fighter',
+            x: 0,
+            y: 0,
+            depth: 60,
+            vx: 0,
+            vy: 0,
+            vDepth: 0,
+            radius: ENEMIES.scav_fighter.radius,
+            hp: ENEMIES.scav_fighter.hp,
+            def: ENEMIES.scav_fighter,
+            elite: false,
+            ttl: 1_000_000,
+            fireCooldown: undefined,
+            pattern: 0,
+            holdDepth: -1_000_000,
+          });
+        },
+        clearSky: () => flight.hazards.clear(),
+      };
+      this.disposer.add(() => {
+        delete scope.__reallmFlight;
+      });
+    }
   }
 
   #mountUi(): void {
