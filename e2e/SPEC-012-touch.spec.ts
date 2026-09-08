@@ -6,7 +6,8 @@
 import { expect, test, type Page } from '@playwright/test';
 import { start, type InputSnapshot } from './start';
 
-test.use({ hasTouch: true, viewport: { width: 420, height: 800 } });
+// Landscape: the gameplay scenes mount RotateOverlay over a portrait phone.
+test.use({ hasTouch: true, viewport: { width: 800, height: 420 } });
 
 const CREATION = {
   name: 'Salvager',
@@ -24,6 +25,9 @@ async function land(page: Page): Promise<void> {
   await page.evaluate((creation) => void window.__reallm.save().create(0, creation, 123), CREATION);
   await page.evaluate(() => window.__reallm.go('surface', { planet: 'cinder4', firstLanding: true }, { force: true }));
   await expect(page.locator('[data-testid="scene-label"]')).toHaveText('surface');
+  // The entry fade eats pointers while it runs — the first tap must reach the
+  // canvas, or the scheme never flips (the touch-controls suite's settle()).
+  await expect(page.locator('[data-testid="transition-fade"]')).toHaveCSS('pointer-events', 'none');
 }
 
 interface Finger {
@@ -66,11 +70,20 @@ test('touch drives the surface: stick, yaw-rotated aim drag, terminal by tap (AC
   test.setTimeout(120_000);
   await land(page);
 
-  // The first finger flips the scheme and mounts the layer (SPEC-005 AC-19).
-  await finger(page, [
-    { type: 'pointerdown', x: 100, y: 700 },
-    { type: 'pointerup', x: 100, y: 700 },
-  ]);
+  // The first finger flips the scheme and mounts the layer (SPEC-005 AC-19) —
+  // a real context-level touch; the layer's own surface is not in the DOM yet.
+  // …and it must land on bare canvas: at 800×420 the ?debug overlays cover a
+  // fair share of the screen, so probe for an uncovered point first.
+  const point = await page.evaluate(() => {
+    for (let y = 100; y < window.innerHeight - 60; y += 37) {
+      for (let x = 60; x < window.innerWidth - 60; x += 41) {
+        if (document.elementFromPoint(x, y) instanceof HTMLCanvasElement) return { x, y };
+      }
+    }
+    return null;
+  });
+  if (point === null) throw new Error('no uncovered canvas point to tap');
+  await page.touchscreen.tap(point.x, point.y);
   await expect.poll(async () => (await page.evaluate(() => window.__reallm.input())).scheme).toBe('touch');
   await expect(page.locator('[data-testid="touch-controls"]')).toBeVisible();
 
@@ -78,11 +91,11 @@ test('touch drives the surface: stick, yaw-rotated aim drag, terminal by tap (AC
   // coordinates fall (§4.3, movement rotated by the camera yaw).
   const before = await info(page);
   await finger(page, [
-    { type: 'pointerdown', x: 100, y: 700 },
-    { type: 'pointermove', x: 100, y: 620 },
+    { type: 'pointerdown', x: 120, y: 330 },
+    { type: 'pointermove', x: 120, y: 250 },
   ]);
   await page.waitForTimeout(1000);
-  const mid = await finger(page, [{ type: 'pointerup', x: 100, y: 620 }]);
+  const mid = await finger(page, [{ type: 'pointerup', x: 120, y: 250 }]);
   expect(mid.scheme).toBe('touch');
   const after = await info(page);
   expect(Number(after['px'])).toBeLessThan(Number(before['px']) - 1);
@@ -91,8 +104,8 @@ test('touch drives the surface: stick, yaw-rotated aim drag, terminal by tap (AC
   // AC-11: an aim drag to screen-right must point the shot at world (+x, −z)
   // — the drag direction rotated by the 45° camera yaw, not raw screen axes.
   await finger(page, [
-    { type: 'pointerdown', x: 300, y: 400 },
-    { type: 'pointermove', x: 390, y: 400 },
+    { type: 'pointerdown', x: 560, y: 210 },
+    { type: 'pointermove', x: 650, y: 210 },
   ]);
   await expect
     .poll(async () => {
@@ -108,7 +121,7 @@ test('touch drives the surface: stick, yaw-rotated aim drag, terminal by tap (AC
       return dx > 1 && dz < -1 && Math.abs(dx + dz) < 1;
     })
     .toBe(true);
-  await finger(page, [{ type: 'pointerup', x: 390, y: 400 }]);
+  await finger(page, [{ type: 'pointerup', x: 650, y: 210 }]);
 
   // AC-73's accept/return flow by tap alone: onto the pad, the USE button
   // opens the terminal, a tap accepts c1_m1, a tap returns to the ship.

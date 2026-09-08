@@ -23,6 +23,7 @@ async function land(page: Page): Promise<void> {
   await page.evaluate((creation) => void window.__reallm.save().create(0, creation, 123), CREATION);
   await page.evaluate(() => window.__reallm.go('surface', { planet: 'cinder4', firstLanding: true }, { force: true }));
   await expect(page.locator('[data-testid="scene-label"]')).toHaveText('surface');
+  await expect(page.locator('[data-testid="transition-fade"]')).toHaveCSS('pointer-events', 'none');
 }
 
 /** Click through any open dialogue — chapter-1 beats are all non-modal. */
