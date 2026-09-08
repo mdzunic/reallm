@@ -126,6 +126,196 @@ test('the pad terminal toggles deterministically, accepts a mission, and the rou
   await expect(page.locator('[data-testid="hud"] .hud-objective')).toContainText('Scan');
 });
 
+/** Steer toward the nearest enemy by `nearDx/nearDz` (the SPEC-011 pattern). */
+async function hunt(page: Page, seconds: number, done: () => Promise<boolean>): Promise<void> {
+  const until = Date.now() + seconds * 1000;
+  while (Date.now() < until) {
+    if (await done()) return;
+    const s = await info(page);
+    const dx = Number(s['nearDx'] ?? 0);
+    const dz = Number(s['nearDz'] ?? 0);
+    const key = dx >= 0 ? (dz >= 0 ? 'KeyS' : 'KeyD') : (dz >= 0 ? 'KeyA' : 'KeyW');
+    await page.keyboard.down(key);
+    await page.waitForTimeout(600);
+    await page.keyboard.up(key);
+    await page.waitForTimeout(200);
+  }
+}
+
+test('mouse aim projects onto the ground plane (AC-10)', async ({ page }) => {
+  await land(page, { fresh: true });
+  const vp = page.viewportSize() as { width: number; height: number };
+  const cx = vp.width / 2;
+  const cy = vp.height / 2;
+
+  // Standing still, the screen centre IS the camera's ground look-at — the
+  // player. The projection must land on the pilot, not merely near them.
+  await page.mouse.move(cx, cy);
+  await expect
+    .poll(async () => {
+      const s = await info(page);
+      return Math.hypot(Number(s['aimX']) - Number(s['px']), Number(s['aimZ']) - Number(s['pz']));
+    })
+    .toBeLessThan(2);
+
+  // Screen-right at the fixed 45° yaw is world (+x, −z) in equal parts: the
+  // centre row of the screen images the ground line parallel to camera-right.
+  await page.mouse.move(cx + 250, cy);
+  await expect
+    .poll(async () => {
+      const s = await info(page);
+      const dx = Number(s['aimX']) - Number(s['px']);
+      const dz = Number(s['aimZ']) - Number(s['pz']);
+      return dx > 2 && dz < -2 && Math.abs(dx + dz) < 0.5;
+    })
+    .toBe(true);
+});
+
+test('a full hold bounces the pickup with one throttled CARGO FULL toast (AC-19, AC-70)', async ({ page }) => {
+  test.setTimeout(150_000);
+  await land(page, { fresh: true });
+
+  // Every resource at its per-resource cap: any resource orb now blocks.
+  await page.evaluate(() => {
+    const save = window.__reallm.save().current;
+    if (save === null) throw new Error('no save');
+    for (const key of Object.keys(save.resources)) save.resources[key] = 9999;
+  });
+
+  // Walk onto a victim and smite it — loot scatters at the feet, magnetizes,
+  // and the cap refuses it. The full path: Pickups → ui:toast → the shared rack.
+  const rack = page.locator('[data-testid="toasts"]');
+  const cargoFull = rack.locator('.toast', { hasText: 'CARGO FULL' });
+  await expect.poll(async () => Number((await info(page))['enemies'] ?? 0), { timeout: 30_000 }).toBeGreaterThan(0);
+  await hunt(page, 100, async () => {
+    if ((await cargoFull.count()) > 0) return true;
+    const s = await info(page);
+    if (Math.hypot(Number(s['nearDx'] ?? 99), Number(s['nearDz'] ?? 99)) < 2.5) {
+      await page.locator('[data-testid="surface-smite"]').click();
+      await page.waitForTimeout(400);
+    }
+    return (await cargoFull.count()) > 0;
+  });
+  await expect(cargoFull.first()).toBeVisible();
+  // AC-19: the blocked orb keeps knocking every frame, yet the throttle admits
+  // one toast per 3 s — a single rack row right after the first appears.
+  expect(await cargoFull.count()).toBe(1);
+});
+
+test('the minimap shows discovered POIs, objective marks, gated nodes and near enemies (AC-55..AC-59)', async ({ page }) => {
+  test.setTimeout(150_000);
+  await land(page, { fresh: true });
+
+  // AC-56: the pad is discovered on landing and sits inside the 160 m window.
+  await expect.poll(async () => Number((await info(page))['mmPois'] ?? 0)).toBeGreaterThanOrEqual(1);
+  // AC-58, the gate's closed half: a marine with no scanner drone sees no nodes.
+  expect(Number((await info(page))['mmNodes'] ?? -1)).toBe(0);
+
+  // AC-57: accepting c1_m1 pins its scan POI — a mark in-window or an edge
+  // arrow beyond it.
+  await page.locator('[data-testid="surface-goto-pad"]').click();
+  await page.keyboard.press('KeyE');
+  await expect(page.locator('[data-testid="pad-terminal"]')).toBeVisible();
+  await page.locator('[data-testid="terminal-accept-c1_m1"]').click();
+  await page.locator('[data-testid="terminal-close"]').click();
+  await expect
+    .poll(async () => {
+      const s = await info(page);
+      return Number(s['mmObjectives'] ?? 0) + Number(s['mmArrows'] ?? 0);
+    })
+    .toBeGreaterThanOrEqual(1);
+
+  // AC-58, open half: a scanner drone at L2 turns the node layer on.
+  await page.evaluate(() => {
+    const save = window.__reallm.save().current;
+    if (save === null) throw new Error('no save');
+    save.companions.push({ id: 'scanner_drone', level: 2, enabled: true });
+  });
+  await expect.poll(async () => Number((await info(page))['mmNodes'] ?? 0), { timeout: 10_000 }).toBeGreaterThanOrEqual(1);
+
+  // AC-59: enemies appear once within 25 m — walk at the nearest one.
+  await expect.poll(async () => Number((await info(page))['enemies'] ?? 0), { timeout: 30_000 }).toBeGreaterThan(0);
+  await hunt(page, 90, async () => {
+    const s = await info(page);
+    return Math.hypot(Number(s['nearDx'] ?? 99), Number(s['nearDz'] ?? 99)) < 18;
+  });
+  await expect.poll(async () => Number((await info(page))['mmEnemies'] ?? 0), { timeout: 15_000 }).toBeGreaterThanOrEqual(1);
+});
+
+test('death sweeps the pad ring and resets a live boss (AC-48, AC-49)', async ({ page }) => {
+  test.setTimeout(120_000);
+  await land(page, { fresh: true });
+  await page.locator('[data-testid="surface-goto-pad"]').click();
+
+  // A live boss and at least one enemy inside the 40 m sweep.
+  await page.locator('[data-testid="surface-spawn-boss"]').click();
+  await expect.poll(async () => (await info(page))['boss']).not.toBe('-');
+  await expect.poll(async () => Number((await info(page))['enemiesNearPad'] ?? 0), { timeout: 45_000 }).toBeGreaterThanOrEqual(1);
+
+  for (let i = 0; i < 4; i++) {
+    await page.locator('[data-testid="surface-hurt"]').click();
+    await page.waitForTimeout(400);
+  }
+  await expect(page.locator('[data-testid="death-overlay"]')).toBeVisible();
+  await expect(page.locator('[data-testid="death-overlay"]')).toBeHidden({ timeout: 10_000 });
+
+  // §4.8 step 2, observed: the sweep removed what stood near the pad, and the
+  // boss is gone without a defeat (silent despawn, arena torn down).
+  const s = await info(page);
+  expect(Number(s['despawnedAtDeath'])).toBeGreaterThanOrEqual(1);
+  expect(s['boss']).toBe('-');
+});
+
+test('death restarts a timed survive stage (AC-49)', async ({ page }) => {
+  test.setTimeout(150_000);
+  await land(page, { fresh: true });
+
+  // Accept c1_m1 on the pad (reach completes standing there), then scan.
+  await page.locator('[data-testid="surface-goto-pad"]').click();
+  await page.keyboard.press('KeyE');
+  await expect(page.locator('[data-testid="pad-terminal"]')).toBeVisible();
+  await page.locator('[data-testid="terminal-accept-c1_m1"]').click();
+  await page.locator('[data-testid="terminal-close"]').click();
+  await dismissDialogues(page);
+  await page.locator('[data-testid="surface-goto-objective"]').click();
+  await expect
+    .poll(async () =>
+      page.evaluate(() => {
+        const active = window.__reallm.save().current?.progress.missionsActive ?? [];
+        return active.find((m) => m.id === 'c1_m1')?.stage ?? -1;
+      }),
+      { timeout: 20_000 },
+    )
+    .toBe(2);
+
+  // Let the survive timer run, then die: the stage must restart from zero.
+  const survived = async (): Promise<number> => {
+    const text = (await page.locator('[data-testid="hud"] .hud-objective').textContent()) ?? '';
+    const match = /\((\d+)\/60\)/.exec(text);
+    return match === null ? -1 : Number(match[1]);
+  };
+  await expect.poll(survived, { timeout: 30_000 }).toBeGreaterThanOrEqual(8);
+  for (let i = 0; i < 4; i++) {
+    await page.locator('[data-testid="surface-hurt"]').click();
+    await page.waitForTimeout(400);
+  }
+  await expect(page.locator('[data-testid="death-overlay"]')).toBeVisible();
+  await expect(page.locator('[data-testid="death-overlay"]')).toBeHidden({ timeout: 10_000 });
+  const after = await survived();
+  expect(after).toBeGreaterThanOrEqual(0);
+  expect(after).toBeLessThanOrEqual(5);
+});
+
+/** Click through any open dialogue: first tap fills the line, the next advances. */
+async function dismissDialogues(page: Page): Promise<void> {
+  const dialogue = page.locator('[data-testid="dialogue"]');
+  for (let i = 0; i < 40; i++) {
+    if (!(await dialogue.isVisible().catch(() => false))) return;
+    await dialogue.click({ force: true });
+    await page.waitForTimeout(120);
+  }
+}
+
 test('death shows SIGNAL LOST with the loss, and respawns at the pad with full HP (AC-45..AC-47)', async ({ page }) => {
   await land(page, { fresh: true });
 
