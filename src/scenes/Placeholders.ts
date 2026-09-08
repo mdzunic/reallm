@@ -22,8 +22,9 @@ import { log } from '@/core/Log';
 import type { GameServices } from '@/core/Services';
 import type { Renderer } from '@/core/Renderer';
 import { ALLOWED_TRANSITIONS, type Scene, type SceneFactory, type SceneId, type SceneParams } from '@/core/StateMachine';
-import { cargoCap, maxHp } from '@/core/Save';
+import { cargoCap, maxHp, type SaveV1 } from '@/core/Save';
 import { cumulativeXp, xpToNext } from '@/systems/Progression';
+import type { HudModel } from '@/systems/UiHelpers';
 import { DeathOverlay } from '@/ui/DeathOverlay';
 import { uiLayers } from '@/ui/dom';
 import { Hud } from '@/ui/Hud';
@@ -175,15 +176,18 @@ export class PlaceholderScene<K extends SceneId> implements Scene<K> {
     if (this.pausable && this.services.input.state.scheme === 'touch' && this.services.input.state.buttons.pause.justPressed) {
       this.services.scenes.pause();
     }
-    this.#feedHud();
+    const hud = this.#hud;
+    if (hud !== null) this.feedHud(hud.model);
   }
 
-  /** The save's numbers into the HUD model, in place (no allocations in update). */
-  #feedHud(): void {
-    const hud = this.#hud;
-    const data = this.services.save.current;
-    if (hud === null || data === null) return;
-    const model = hud.model;
+  /**
+   * The save's numbers into the HUD model, in place (no allocations in update).
+   * Protected so the one scene with live combat state can lay its numbers over
+   * the save's copy instead of painting a second HUD (AC-58: one HP readout).
+   */
+  protected feedHud(model: HudModel): void {
+    const data = this.hudSave();
+    if (data === null) return;
     const { player } = data;
     model.hp[0] = player.hp;
     model.hp[1] = maxHp(player.classId, player.attributes, player.level);
@@ -198,6 +202,11 @@ export class PlaceholderScene<K extends SceneId> implements Scene<K> {
     // The tier cap only; the quartermaster bonus is Economy's and arrives with
     // the scene that owns an Economy instance (SPEC-012).
     model.cargoCap = cargoCap(data.ship);
+  }
+
+  /** Where `feedHud` reads from; the combat demo substitutes its in-memory save. */
+  protected hudSave(): SaveV1 | null {
+    return this.services.save.current;
   }
 
   render(renderer: Renderer): void {

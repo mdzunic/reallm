@@ -80,7 +80,8 @@ export class Hud {
 
     this.#root = testId(el('div', `hud hud-${mode}`), 'hud');
     const tl = el('div', 'hud-tl');
-    tl.append(this.#hp.root, this.#xp.root, this.#level);
+    // `hud-hp` is the scene's one HP readout (AC-58); the SPEC-011 e2e reads it.
+    tl.append(testId(this.#hp.root, 'hud-hp'), this.#xp.root, this.#level);
     if (mode === 'flight') tl.append(this.#shield.root, this.#hull.root);
 
     const tr = el('div', 'hud-tr');

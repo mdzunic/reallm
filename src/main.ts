@@ -121,8 +121,10 @@ const game = new Game({
   manifest: ASSETS,
   // SPEC-014's real menu/creation/station/starmap over the placeholders, with
   // SPEC-011's browser harness still standing in for surface until SPEC-012.
-  // It extends PlaceholderScene, so it keeps the HUD, pause menu, touch layer
-  // and overlays that shell mounts.
+  // It extends PlaceholderScene and keeps that shell's pause menu, touch layer
+  // and rotate overlay — but it owns the death moment (its own panel and
+  // respawn path, the shared overlay declined) and feeds the shell's HUD its
+  // live combat numbers, so the scene shows one death panel and one HP readout.
   factory: { ...GAME_SCENES, surface: (services) => new SurfaceCombatDemo(services) },
   events,
   flags,
