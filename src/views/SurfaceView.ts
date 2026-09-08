@@ -160,6 +160,18 @@ function poiGeometry(kind: PoiKind): THREE.BufferGeometry {
   }
 }
 
+/**
+ * AC-24: fill (0..1) → the node crystal's scale — height is the visible fill
+ * readout, footprint shrinks with it. Pure, so the mapping pins in node.
+ */
+export function nodeCrystalScale(fill: number, out: { x: number; y: number; z: number }): void {
+  out.x = 0.6 + fill * 0.6;
+  out.y = 0.25 + fill * 1.1;
+  out.z = 0.6 + fill * 0.6;
+}
+
+const scratchScale = { x: 0, y: 0, z: 0 };
+
 /** Grow-and-hide instanced sync; `place` composes into `scratchMatrix`. */
 function syncInstances(mesh: THREE.InstancedMesh, count: number, place: (index: number) => void): void {
   const n = Math.min(count, mesh.instanceMatrix.count);
@@ -387,7 +399,8 @@ export class SurfaceView {
     // Nodes: fill drives crystal height (AC-24); a harvested node glows white.
     frame.nodes.forEach((node, i) => {
       const fill = node.capacity <= 0 ? 0 : node.remaining / node.capacity;
-      scratchMatrix.makeScale(0.6 + fill * 0.6, 0.25 + fill * 1.1, 0.6 + fill * 0.6);
+      nodeCrystalScale(fill, scratchScale);
+      scratchMatrix.makeScale(scratchScale.x, scratchScale.y, scratchScale.z);
       scratchMatrix.setPosition(node.x, 0, node.z);
       this.#nodeCrystals.setMatrixAt(i, scratchMatrix);
       scratchColor.set(RESOURCE_COLORS[node.resource]);

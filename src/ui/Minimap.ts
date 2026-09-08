@@ -47,6 +47,13 @@ export class Minimap {
   readonly #ctx: CanvasRenderingContext2D | null;
   readonly #point: MinimapPoint = { x: 0, y: 0, inside: true, angle: 0 };
 
+  /**
+   * What the last `draw()` actually put on the canvas (AC-55..AC-59) — the
+   * scene's `debugInfo()` reports these so the acceptance run can see through
+   * the canvas. One object, mutated in place.
+   */
+  readonly lastDrawn = { pois: 0, objectives: 0, arrows: 0, nodes: 0, enemies: 0 };
+
   constructor(canvas: HTMLCanvasElement) {
     this.#canvas = canvas;
     // §4.12: 160 px backing at 1 px = 1 m; the HUD's CSS box scales it down.
@@ -62,6 +69,12 @@ export class Minimap {
   draw(frame: MinimapFrame): void {
     const ctx = this.#ctx;
     if (ctx === null) return;
+    const drawn = this.lastDrawn;
+    drawn.pois = 0;
+    drawn.objectives = 0;
+    drawn.arrows = 0;
+    drawn.nodes = 0;
+    drawn.enemies = 0;
     const size = MINIMAP_SIZE;
     ctx.clearRect(0, 0, size, size);
     ctx.fillStyle = COLORS.background;
@@ -84,12 +97,15 @@ export class Minimap {
         if (p.inside) {
           ctx.fillStyle = COLORS.objective;
           ctx.fillRect(p.x - 3, p.y - 3, 6, 6);
+          drawn.objectives++;
         } else {
           this.#arrow(ctx, p, COLORS.objective);
+          drawn.arrows++;
         }
       } else if (p.inside) {
         ctx.fillStyle = COLORS.poi;
         ctx.fillRect(p.x - 2, p.y - 2, 4, 4);
+        drawn.pois++;
       }
     }
 
@@ -97,7 +113,10 @@ export class Minimap {
       ctx.fillStyle = COLORS.node;
       for (const node of frame.nodes) {
         const p = minimapProject(frame.playerX, frame.playerZ, node.x, node.z, this.#point);
-        if (p.inside) ctx.fillRect(p.x - 1.5, p.y - 1.5, 3, 3);
+        if (p.inside) {
+          ctx.fillRect(p.x - 1.5, p.y - 1.5, 3, 3);
+          drawn.nodes++;
+        }
       }
     }
 
@@ -108,6 +127,7 @@ export class Minimap {
       ctx.beginPath();
       ctx.arc(p.x, p.y, 2, 0, Math.PI * 2);
       ctx.fill();
+      drawn.enemies++;
     }
 
     // The player: a heading triangle at the centre.

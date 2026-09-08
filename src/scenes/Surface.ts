@@ -198,6 +198,28 @@ export class SurfaceScene extends UiScene<'surface'> {
   #spawned = 0;
   #elites = 0;
   #kills = 0;
+  /** What the last death sweep removed (AC-48; e2e reads it). */
+  #despawnedAtDeath = 0;
+  /** The last mouse/touch aim ground projection (AC-10/11; e2e reads it). */
+  readonly #aimDebug = { x: 0, z: 0, has: false };
+
+  // The per-step mission context, built once — closures over live state, no
+  // per-step allocation (SPEC-001 §7). `player`/`follower` are mutable
+  // snapshots refreshed in place each step.
+  readonly #ctxPlayer = { x: 0, z: 0, alive: true };
+  readonly #ctxFollower = { x: 0, z: 0, alive: true };
+  #ctx: MissionContext | null = null;
+
+  // HUD model scratch (SPEC-001 §7): `Hud.flush` diffs against a clone, so the
+  // model may point at these reused objects.
+  readonly #objScratch = { title: '', line: '', value: 0, target: 1 };
+  #consumableScratch: { itemId: ItemId; qty: number } | null = null;
+
+  // Defend/escort stages resync only when their identity changes — accepting
+  // or completing an unrelated mission must not restart the wave or respawn
+  // the follower (the adjudication round's nonblocking note).
+  #defendKey: string | null = null;
+  #escortKey: string | null = null;
 
   // Scratch buffers — reused every frame (SPEC-001 §7).
   readonly #aimScratch = new THREE.Vector3();
@@ -306,6 +328,23 @@ export class SurfaceScene extends UiScene<'surface'> {
     }));
     this.#pad = layout.pois.find((p) => p.kind === 'landing_pad') ?? null;
     this.#arenaPoi = layout.pois.find((p) => p.kind === 'arena') ?? null;
+
+    // The mission context: one object for the scene's lifetime; `#missionCtx`
+    // refreshes the player/follower snapshots in place each step.
+    this.#ctx = {
+      player: this.#ctxPlayer,
+      poiAt: (id: PoiId) => layout.pois.filter((p) => p.poi === id),
+      heldResource: (r: ResourceId) => save.resources[r] ?? 0,
+      nearPoi: (id: PoiId, radius?: number) => {
+        for (const p of layout.pois) {
+          if (p.poi !== id) continue;
+          const reach = radius ?? p.radius;
+          if (Math.hypot(world.player.x - p.x, world.player.z - p.z) <= reach) return p;
+        }
+        return null;
+      },
+      follower: null,
+    };
 
     // §4.1 step 2: the world view.
     const view = new SurfaceView(this.scene, layout, planet);
@@ -496,6 +535,53 @@ export class SurfaceScene extends UiScene<'surface'> {
       }
       const boss = this.#findBoss(world);
       info['boss'] = boss === null ? '-' : `p${boss.phase} ${boss.hp}/${boss.maxHp}`;
+      // AC-48: how many the pad sweep can reach right now, and what the last
+      // death sweep actually removed.
+      const pad = this.#pad;
+      if (pad !== null) {
+        let near = 0;
+        for (let i = 0; i < world.enemies.size; i++) {
+          const e = world.enemies.at(i);
+          if (e.state === 'dead' || e.def.archetype === 'boss') continue;
+          if (Math.hypot(e.x - pad.x, e.z - pad.z) <= DEATH_DESPAWN_RADIUS) near++;
+        }
+        info['enemiesNearPad'] = near;
+      }
+      info['despawnedAtDeath'] = this.#despawnedAtDeath;
+      // AC-10/11: the last aim ground projection.
+      if (this.#aimDebug.has) {
+        info['aimX'] = Math.round(this.#aimDebug.x * 10) / 10;
+        info['aimZ'] = Math.round(this.#aimDebug.z * 10) / 10;
+      }
+      // AC-24: the nearest node's resource and fill fraction.
+      const nodes = this.#nodes;
+      if (nodes !== null) {
+        let best: number | null = null;
+        let bestD = Infinity;
+        for (let i = 0; i < nodes.states.length; i++) {
+          const node = nodes.states[i] as (typeof nodes.states)[number];
+          const d = Math.hypot(node.x - world.player.x, node.z - world.player.z);
+          if (d < bestD) {
+            bestD = d;
+            best = i;
+          }
+        }
+        if (best !== null) {
+          const node = nodes.states[best] as (typeof nodes.states)[number];
+          info['nodeRes'] = node.resource;
+          info['nodeFill'] = Math.round(nodes.fill(node) * 1000) / 1000;
+          info['nodeDist'] = Math.round(bestD * 10) / 10;
+        }
+      }
+    }
+    // AC-55..AC-59: what the minimap painter drew on its last repaint.
+    const drawn = this.#minimap?.lastDrawn;
+    if (drawn !== undefined) {
+      info['mmPois'] = drawn.pois;
+      info['mmObjectives'] = drawn.objectives;
+      info['mmArrows'] = drawn.arrows;
+      info['mmNodes'] = drawn.nodes;
+      info['mmEnemies'] = drawn.enemies;
     }
     if (this.#layout !== null) info['layoutHash'] = this.#layout.hash;
     return info;
@@ -535,7 +621,7 @@ export class SurfaceScene extends UiScene<'surface'> {
       const wz = (-aim.dirX - aim.dirY) * inv;
       this.#aimPoint.x = p.x + wx * AIM_DRAG_DISTANCE;
       this.#aimPoint.z = p.z + wz * AIM_DRAG_DISTANCE;
-      return this.#aimPoint;
+      return this.#noteAim(this.#aimPoint);
     }
     if (!aim.hasPointer) return null;
     const v = this.#aimScratch.set(aim.ndcX, aim.ndcY, 0.5).unproject(this.camera);
@@ -544,7 +630,15 @@ export class SurfaceScene extends UiScene<'surface'> {
     const t = -this.camera.position.y / v.y;
     this.#aimPoint.x = this.camera.position.x + v.x * t;
     this.#aimPoint.z = this.camera.position.z + v.z * t;
-    return this.#aimPoint;
+    return this.#noteAim(this.#aimPoint);
+  }
+
+  /** Mirrors the projection into a debug slot `#bossTelegraph` can't clobber. */
+  #noteAim(point: { x: number; z: number }): { x: number; z: number } {
+    this.#aimDebug.x = point.x;
+    this.#aimDebug.z = point.z;
+    this.#aimDebug.has = true;
+    return point;
   }
 
   /** §4.3: smoothed follow at 1 − e^(−8·dt), fixed yaw/pitch offset. */
@@ -613,24 +707,19 @@ export class SurfaceScene extends UiScene<'surface'> {
   // ------------------------------------------------------------------ POIs
 
   #missionContext(world: CombatWorld): MissionContext {
-    const layout = this.#layout as Layout;
-    return {
-      player: { x: world.player.x, z: world.player.z, alive: world.player.alive },
-      poiAt: (id: PoiId) => layout.pois.filter((p) => p.poi === id),
-      heldResource: (r: ResourceId) => (this.#save as SaveV1).resources[r] ?? 0,
-      nearPoi: (id: PoiId, radius?: number) => {
-        for (const p of layout.pois) {
-          if (p.poi !== id) continue;
-          const reach = radius ?? p.radius;
-          if (Math.hypot(world.player.x - p.x, world.player.z - p.z) <= reach) return p;
-        }
-        return null;
-      },
-      follower:
-        world.follower === null
-          ? null
-          : { x: world.follower.x, z: world.follower.z, alive: world.follower.alive },
-    };
+    const ctx = this.#ctx as MissionContext;
+    this.#ctxPlayer.x = world.player.x;
+    this.#ctxPlayer.z = world.player.z;
+    this.#ctxPlayer.alive = world.player.alive;
+    if (world.follower === null) {
+      ctx.follower = null;
+    } else {
+      this.#ctxFollower.x = world.follower.x;
+      this.#ctxFollower.z = world.follower.z;
+      this.#ctxFollower.alive = world.follower.alive;
+      ctx.follower = this.#ctxFollower;
+    }
+    return ctx;
   }
 
   #updatePois(world: CombatWorld, dt: number): void {
@@ -853,7 +942,17 @@ export class SurfaceScene extends UiScene<'surface'> {
     const save = this.#save as SaveV1;
     for (const entry of save.inventory) {
       if (ITEM_TABLE[entry.itemId].kind === 'consumable' && entry.qty > 0) {
-        return { itemId: entry.itemId, qty: entry.qty };
+        // One lazily created scratch, reused per frame (SPEC-001 §7); the HUD
+        // diffs against a clone, so in-place writes still register.
+        let slot = this.#consumableScratch;
+        if (slot === null) {
+          slot = { itemId: entry.itemId, qty: entry.qty };
+          this.#consumableScratch = slot;
+        } else {
+          slot.itemId = entry.itemId;
+          slot.qty = entry.qty;
+        }
+        return slot;
       }
     }
     return null;
@@ -875,7 +974,7 @@ export class SurfaceScene extends UiScene<'surface'> {
     if (this.#terminalOpen) this.#closeTerminal();
 
     // §4.8 step 2: the sweep, the boss reset, the timed stages (via the event).
-    this.#spawn?.despawnNear(layout.pad.x, layout.pad.z, DEATH_DESPAWN_RADIUS);
+    this.#despawnedAtDeath = this.#spawn?.despawnNear(layout.pad.x, layout.pad.z, DEATH_DESPAWN_RADIUS) ?? 0;
     const boss = this.#findBoss(world);
     if (boss !== null) boss.state = 'dead'; // silent — no loot, no defeat event
     this.#bossId = null;
@@ -937,8 +1036,73 @@ export class SurfaceScene extends UiScene<'surface'> {
       // 11-f: a boss mid-special ignores damage, the shortcut included.
       if (boss !== null && !boss.invulnerable) boss.hp = Math.max(1, boss.hp - Math.round(boss.maxHp * 0.25));
     });
+    // The acceptance run's time compressors: kills go through the real
+    // `killEnemy(e, 'player')` path (loot, XP, mission counters), and travel
+    // jumps to the pinned objective — nothing else is short-circuited.
+    button('surface-smite', 'Smite', () => this.#debugSmite());
+    button('surface-goto-objective', 'To objective', () => this.#debugGotoObjective());
     this.services.uiRoot.append(strip);
     this.disposer.add(() => strip.remove());
+  }
+
+  /** Kill the nearest live enemy within 80 m through the real player-kill path. */
+  #debugSmite(): void {
+    const world = this.#world;
+    const combat = this.#combat;
+    if (world === null || combat === null || !world.player.alive) return;
+    let best: EnemyEntity | null = null;
+    let bestD = 80;
+    for (let i = 0; i < world.enemies.size; i++) {
+      const e = world.enemies.at(i);
+      // 11-f: a boss mid-special ignores damage, the shortcut included.
+      if (e.state === 'dead' || e.invulnerable) continue;
+      const d = Math.hypot(e.x - world.player.x, e.z - world.player.z);
+      if (d < bestD) {
+        bestD = d;
+        best = e;
+      }
+    }
+    if (best !== null) combat.killEnemy(best, 'player');
+  }
+
+  /** Teleport to the pinned mission's first undone objective's target. */
+  #debugGotoObjective(): void {
+    const world = this.#world;
+    const missions = this.#missions;
+    const layout = this.#layout;
+    if (world === null || missions === null || layout === null || !world.player.alive) return;
+    const pinned = missions.pinned;
+    if (pinned === null) return;
+    const next = missions.currentObjectives(pinned).find((o) => !o.done);
+    if (next === undefined) return;
+    const objective = next.objective;
+    let target: { x: number; z: number } | null = null;
+    if (objective.kind === 'collect') {
+      // The nearest node that still holds the resource.
+      let bestD = Infinity;
+      for (const node of (this.#nodes as Nodes).states) {
+        if (node.resource !== objective.resource || node.remaining < 1) continue;
+        const d = Math.hypot(node.x - world.player.x, node.z - world.player.z);
+        if (d < bestD) {
+          bestD = d;
+          target = node;
+        }
+      }
+    } else if (objective.kind === 'boss') {
+      const nest = this.#arenaPoi;
+      if (nest !== null) target = { x: nest.x, z: nest.z + 6 };
+    } else if (objective.kind === 'scan') {
+      // A not-yet-scanned instance, so repeat visits progress the count.
+      const state = this.#pois.find((p) => p.poi.poi === objective.poi && !p.scanned);
+      if (state !== undefined) target = state.poi;
+    } else if ('poi' in objective) {
+      target = layout.pois.find((p) => p.poi === objective.poi) ?? null;
+    } else if (objective.kind === 'escort') {
+      target = layout.pois.find((p) => p.poi === objective.to) ?? null;
+    }
+    if (target === null) return;
+    world.player.x = target.x;
+    world.player.z = target.z;
   }
 
   /** The mission-less half of the SPEC-011 acceptance run: wake the nest boss. */
@@ -1105,23 +1269,27 @@ export class SurfaceScene extends UiScene<'surface'> {
     for (const key of Object.keys(m.resources) as ResourceId[]) m.resources[key] = save.resources[key] ?? 0;
     m.cargoCap = (this.#economy as Economy).cargoCap();
 
-    // E18: the pinned mission's first undone objective, with progress.
+    // E18: the pinned mission's first undone objective, with progress. The
+    // model reuses one scratch object — `Hud.flush` diffs against a clone, so
+    // in-place writes still register (SPEC-001 §7: no per-frame allocation).
     const pinned = missions.pinned;
     if (pinned === null) {
       m.objective = null;
     } else {
       const def = MISSION_TABLE[pinned];
+      const obj = this.#objScratch;
       const next = missions.currentObjectives(pinned).find((o) => !o.done);
+      obj.title = def.title;
       if (next === undefined) {
-        m.objective = { title: def.title, line: 'Stage complete', value: 1, target: 1 };
+        obj.line = 'Stage complete';
+        obj.value = 1;
+        obj.target = 1;
       } else {
-        m.objective = {
-          title: def.title,
-          line: this.#objectiveLine(next.objective),
-          value: Math.floor(next.value),
-          target: next.target,
-        };
+        obj.line = this.#objectiveLine(next.objective);
+        obj.value = Math.floor(next.value);
+        obj.target = next.target;
       }
+      m.objective = obj;
     }
 
     m.weather.active = weather.current;
@@ -1363,13 +1531,28 @@ export class SurfaceScene extends UiScene<'surface'> {
     for (const release of releases) this.disposer.add(release);
   }
 
-  /** Re-derive everything that hangs off the set of current stages. */
+  /**
+   * Re-derive everything that hangs off the set of current stages. Defend and
+   * escort rebuild only when their stage identity changes — `#syncDefend`
+   * refills the POI and restarts the wave, `#syncEscort` respawns the
+   * follower, and an unrelated mission event must not reset either.
+   */
   #syncMissionStages(): void {
     const missions = this.#missions;
     const spawn = this.#spawn;
     if (missions === null || spawn === null) return;
     spawn.setObjectiveEnemies(missions.objectiveEnemies());
-    this.#syncDefend();
-    this.#syncEscort();
+    const defend = missions.defendStage();
+    const defendKey = defend === null ? null : `${defend.poi}:${defend.wave}:${defend.seconds}`;
+    if (defendKey !== this.#defendKey) {
+      this.#defendKey = defendKey;
+      this.#syncDefend();
+    }
+    const escort = missions.escortStage();
+    const escortKey = escort === null ? null : `${escort.from}:${escort.to}:${escort.follower}`;
+    if (escortKey !== this.#escortKey) {
+      this.#escortKey = escortKey;
+      this.#syncEscort();
+    }
   }
 }
