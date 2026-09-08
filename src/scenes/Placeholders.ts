@@ -90,18 +90,25 @@ export class PlaceholderScene<K extends SceneId> implements Scene<K> {
   protected readonly props: number;
   /** The bed this scene asks for on enter; `undefined` keeps whatever is playing. */
   protected readonly music: MusicId | undefined;
+  /** Whether a pausable scene mounts the shared death overlay; the one that shows a death panel of its own declines. */
+  protected readonly deathOverlay: boolean;
   #spin: THREE.Object3D | null = null;
   #pauseMenu: PauseMenu | null = null;
   #hud: Hud | null = null;
   #elapsed = 0;
   #renders = 0;
 
-  constructor(services: GameServices, id: K, options: { pausable?: boolean; props?: number; music?: MusicId } = {}) {
+  constructor(
+    services: GameServices,
+    id: K,
+    options: { pausable?: boolean; props?: number; music?: MusicId; deathOverlay?: boolean } = {},
+  ) {
     this.services = services;
     this.id = id;
     this.pausable = options.pausable ?? false;
     this.props = options.props ?? 0;
     this.music = options.music;
+    this.deathOverlay = options.deathOverlay ?? true;
   }
 
   enter(_params: SceneParams[K]): void {
@@ -139,11 +146,17 @@ export class PlaceholderScene<K extends SceneId> implements Scene<K> {
       this.disposer.add(this.services.events.on('player:damaged', () => hud.damageFlash(), this));
       // SPEC-014 §4.9: death and rotate overlays belong to the gameplay scenes.
       // The penalty numbers arrive with SPEC-012's death flow; the overlay
-      // itself and its wiring are this spec's (AC-99, AC-101).
-      const death = new DeathOverlay(uiRoot());
-      this.disposer.add(() => death.dispose());
-      this.disposer.add(this.services.events.on('player:died', () => death.show(), this));
-      this.disposer.add(this.services.events.on('player:respawned', () => death.hide(), this));
+      // itself and its wiring are this spec's (AC-99, AC-101). A scene that
+      // shows a death panel of its own must decline the shared one: both hang
+      // off `player:died`, and this fixed centred panel (z 30) would cover the
+      // other's respawn control (combat HUD, z 11) — the only emitter of the
+      // `player:respawned` that hides them again.
+      if (this.deathOverlay) {
+        const death = new DeathOverlay(uiRoot());
+        this.disposer.add(() => death.dispose());
+        this.disposer.add(this.services.events.on('player:died', () => death.show(), this));
+        this.disposer.add(this.services.events.on('player:respawned', () => death.hide(), this));
+      }
       const rotate = new RotateOverlay(uiRoot(), this.services.events);
       this.disposer.add(() => rotate.dispose());
     }

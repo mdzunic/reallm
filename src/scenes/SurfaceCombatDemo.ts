@@ -106,7 +106,10 @@ export class SurfaceCombatDemo extends PlaceholderScene<'surface'> {
   readonly #aliveCounts = new Map<EnemyId, number>();
 
   constructor(services: GameServices) {
-    super(services, 'surface', { pausable: true, music: 'surface_calm' });
+    // `deathOverlay: false`: the demo dies into its own `.hud-death` panel,
+    // and its Respawn button is the only path back — the shared SPEC-014
+    // overlay would sit on top of that button and swallow the click.
+    super(services, 'surface', { pausable: true, music: 'surface_calm', deathOverlay: false });
   }
 
   override enter(params: SceneParams['surface']): void {

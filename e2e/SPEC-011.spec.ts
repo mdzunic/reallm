@@ -92,6 +92,10 @@ test('the player dies, respawns, and the brains re-acquire them (AC-41)', async 
   await expect(page.locator('[data-testid="hud-death"]')).toBeVisible();
   await expect(page.locator('[data-testid="hud-death"]')).toContainText('Cause: fall');
 
+  // The demo's panel is the only death surface in this scene: the shared
+  // SPEC-014 overlay stays unmounted here, because at z 30 over the combat
+  // HUD's z 11 it would cover the Respawn button that the next line clicks.
+  await expect(page.locator('[data-testid="death-overlay"]')).toHaveCount(0);
   await page.locator('[data-testid="demo-respawn"]').click();
   await expect(page.locator('[data-testid="hud-death"]')).toBeHidden();
   await expect(page.locator('[data-testid="hud-hp"]')).toContainText('HP 184/184');
