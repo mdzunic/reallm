@@ -2247,6 +2247,11 @@ button.hud-button {
   border-radius: 4px;
 }
 
+/* Mounted beside the .hud root, not inside it, so it needs its own rule. */
+.flight-skip-hint.is-hidden {
+  display: none;
+}
+
 .flight-explosion {
   position: absolute;
   inset: 0;

@@ -47,8 +47,8 @@ export const QUALITY = {
     targetFps: 30,
     // SPEC-013 §4.3 pins the flight caps: 40 asteroids on low, 60 otherwise
     // (13-d), and a 2,000-point starfield on medium (§4.9). Initial tuning
-    // still, but these three rows now carry the numbers that spec tests.
-    starfieldPoints: 800,
+    // still, but the asteroid caps now carry the numbers that spec tests.
+    starfieldPoints: 400,
     asteroidCap: 40,
     textureMaxSize: 512,
   },
