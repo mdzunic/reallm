@@ -63,6 +63,19 @@ export interface ObjectiveProgress {
   done: boolean;
 }
 
+/**
+ * One HUD line: the first incomplete objective of the pinned mission. The
+ * flight HUD reads this (SPEC-013 §4.8) and the surface HUD phrases the same
+ * fields, so the wording lives here rather than in either scene.
+ */
+export interface ObjectiveLine {
+  readonly id: MissionId;
+  readonly title: string;
+  readonly line: string;
+  readonly value: number;
+  readonly target: number;
+}
+
 type ResetReason = GameEvents['mission:stageReset']['reason'];
 
 /** The objective kinds whose progress is a running timer (E4, E19). */
@@ -273,6 +286,63 @@ export class Missions {
     return null;
   }
 
+  /**
+   * The HUD's objective row: the first incomplete objective, pinned mission
+   * first and then the rest in acceptance order (E18). Walks the ring the way
+   * `cyclePinned` does, so nothing is allocated to put the pin at the front.
+   */
+  objective(): ObjectiveLine | null {
+    const count = this.#states.length;
+    if (count === 0) return null;
+    const pinnedAt = this.#states.findIndex((s) => s.id === this.#pinned);
+    const start = pinnedAt < 0 ? 0 : pinnedAt;
+    for (let n = 0; n < count; n++) {
+      const state = this.#states[(start + n) % count] as MissionState;
+      for (const { objective, value, target, done } of this.currentObjectives(state.id)) {
+        if (done) continue;
+        return { id: state.id, title: MISSIONS[state.id].title, line: describe(objective), value: Math.floor(value), target };
+      }
+    }
+    return null;
+  }
+
+  /**
+   * The longest unfinished `survive` requirement, in seconds. Flight turns it
+   * into the throttle hint when the timer cannot fit the remaining trip
+   * (SPEC-013 §4.8, AC-89); 0 when nothing live is timed.
+   */
+  longestSurvive(): number {
+    let longest = 0;
+    for (const state of this.#states) {
+      for (const { objective, done } of this.currentObjectives(state.id)) {
+        if (objective.kind !== 'survive' || done) continue;
+        longest = Math.max(longest, objective.seconds);
+      }
+    }
+    return longest;
+  }
+
+  /**
+   * E5 / 13-g: the whole current stage goes back to zero and every mission
+   * stays accepted. This is flight's recall rule, and the scene calls it
+   * explicitly — the surface's death is E4, which restarts the timed stages
+   * and *keeps* the counts, so that path runs through `player:died` instead.
+   * The two edge cases genuinely differ; each caller asks for the one it owns.
+   */
+  resetStages(reason: ResetReason): void {
+    for (const state of this.#states) {
+      const stage = MISSIONS[state.id].stages[state.stage] ?? [];
+      if (stage.length === 0) continue;
+      for (let index = 0; index < stage.length; index++) {
+        const key = `${state.stage}:${index}`;
+        delete state.counters[key];
+        delete state.counters[`${key}:mask`]; // a scan's distinct-instance set
+        delete state.timers[key];
+      }
+      this.#events.emit('mission:stageReset', { id: state.id, stage: state.stage, reason });
+    }
+  }
+
   // ----------------------------------------------------------------- update
 
   update(dt: number, ctx: MissionContext): void {
@@ -424,8 +494,14 @@ export class Missions {
     }
   }
 
-  /** E4: timed stages restart; counters stay (§4.8 step 2 routes through here). */
+  /**
+   * E4: timed stages restart; counters stay (§4.8 step 2 routes through here).
+   * Surface only — flight emits `player:died` too, but its recall is E5 and
+   * the scene drives it through `resetStages('death')`; reacting here as well
+   * would reset the stage twice and emit two `mission:stageReset` events.
+   */
   #onPlayerDied(): void {
+    if (this.#scene !== 'surface') return;
     for (const state of this.#states) {
       const stage = MISSIONS[state.id].stages[state.stage] ?? [];
       if (stage.some(isTimed)) this.#resetStage(state, 'death');
@@ -568,6 +644,48 @@ export class Missions {
 
 /** §4.7: replay pays half; re-exported so the HUD can phrase it. */
 export const REPLAY_REWARD_FRACTION = TUNING.REPLAY_REWARD_FRACTION;
+
+const NO_POIS: readonly LayoutPoi[] = Object.freeze([]);
+
+/**
+ * What the rail scene hands `update`. Flight has no POIs, no cargo pickups and
+ * no follower — only `survive` and `kill` run there (SPEC-013 §4.8) — and its
+ * three update calls are already gated on a live ship, so the context is a
+ * frozen constant rather than an object built every frame (SPEC-001 §7).
+ */
+export const FLIGHT_MISSION_CONTEXT: MissionContext = Object.freeze({
+  player: Object.freeze({ x: 0, z: 0, alive: true }),
+  poiAt: () => NO_POIS as LayoutPoi[],
+  heldResource: () => 0,
+  nearPoi: () => null,
+  follower: null,
+});
+
+/** A short player-facing description of one objective, for the HUD row. */
+function describe(objective: Objective): string {
+  switch (objective.kind) {
+    case 'kill':
+      return `Destroy ${objective.amount}`;
+    case 'survive':
+      return `Survive ${objective.seconds} s`;
+    case 'scan':
+      return `Scan ${objective.count}`;
+    case 'collect':
+      return `Collect ${objective.amount}`;
+    case 'deliver':
+      return `Deliver ${objective.amount}`;
+    case 'reach':
+      return 'Reach the marker';
+    case 'boss':
+      return 'Defeat the boss';
+    case 'defend':
+      return `Defend for ${objective.seconds} s`;
+    case 'escort':
+      return 'Escort';
+    case 'choice':
+      return 'Decide';
+  }
+}
 
 function fail(reason: Fail['reason']): Fail {
   return { ok: false, reason };

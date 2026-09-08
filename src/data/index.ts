@@ -61,7 +61,11 @@ export type DamageSource =
   | { kind: 'enemy'; enemyId: EnemyId }
   | { kind: 'weather'; weather: WeatherId }
   | { kind: 'projectile'; enemyId: EnemyId }
-  | { kind: 'fall' };
+  | { kind: 'fall' }
+  // The two flight-only causes (SPEC-013 §4.3, §4.5): an asteroid has no
+  // `EnemyId` and a storm is the ship's weather, not the suit's.
+  | { kind: 'asteroid' }
+  | { kind: 'storm' };
 
 export const CONTENT = {
   assets: ASSETS,

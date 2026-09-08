@@ -1,8 +1,9 @@
 // The live scene factory (SPEC-003 D-17). SPEC-014's real scenes took over
-// from the placeholders, SPEC-012 landed the real surface; `flight` stays a
-// placeholder until SPEC-013.
+// from the placeholders, SPEC-012 landed the real surface, SPEC-013 landed
+// flight.
 import type { SceneFactory } from '@/core/StateMachine';
 import { CreationScene } from '@/scenes/CreationScene';
+import { FlightScene } from '@/scenes/Flight';
 import { MenuScene } from '@/scenes/MenuScene';
 import { PLACEHOLDER_SCENES } from '@/scenes/Placeholders';
 import { StarmapScene } from '@/scenes/StarmapScene';
@@ -16,4 +17,5 @@ export const GAME_SCENES: SceneFactory = {
   station: (services) => new StationScene(services),
   starmap: (services) => new StarmapScene(services),
   surface: (services) => new SurfaceScene(services),
+  flight: (services) => new FlightScene(services),
 };
