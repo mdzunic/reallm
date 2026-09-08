@@ -649,8 +649,12 @@ describe('missions in flight', () => {
     expect(w.save.progress.missionsActive.find((m) => m.id === 'c4_s2')).toBeUndefined();
     expect(w.save.player.tokens).toBeGreaterThanOrEqual(before + def.rewards.tokens);
 
-    // Replay at 50 % (SPEC-010 §4.7): re-accept, complete again.
-    w.save.progress.missionsActive.push({ id: 'c4_s2', stage: 0, counters: {} });
+    // Replay at 50 % (SPEC-010 §4.7): re-accept, complete again. The runtime
+    // owns its own state, so the second run goes through `accept` — a raw push
+    // into the save is not an acceptance — and that is the path the station
+    // takes anyway. `c4_s2` requires `c4_m1`, which the first flight implies.
+    w.save.progress.missionsDone.push('c4_m1');
+    expect(w.missions.accept('c4_s2')).toEqual({ ok: true });
     const replayBefore = w.save.player.tokens;
     for (let i = 0; i < 8; i++) w.events.emit('enemy:killed', { enemyId: 'scav_fighter', elite: false, x: 0, z: 0, xp: 12 });
     expect(w.of('mission:completed').at(-1)).toEqual({ id: 'c4_s2', replay: true });
