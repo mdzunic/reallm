@@ -59,7 +59,9 @@ test('the HUD and minimap mount with the scene (AC-55, AC-60..AC-70)', async ({ 
   // the four resource counters, and the minimap canvas at its §4.12 backing
   // resolution — 160 px, 1 px = 1 m.
   await expect(page.locator('[data-testid="hud-hp"]')).toContainText('184/184');
-  await expect(page.locator('[data-testid="res-oil"]')).toHaveText('0');
+  // The oil counter shows the save's real balance (a fresh save starts stocked).
+  const oil = await page.evaluate(() => window.__reallm.save().current?.resources['oil'] ?? -1);
+  await expect(page.locator('[data-testid="res-oil"]')).toHaveText(String(oil));
   const minimap = page.locator('[data-testid="minimap"]');
   await expect(minimap).toHaveCount(1);
   expect(await minimap.evaluate((el) => [(el as HTMLCanvasElement).width, (el as HTMLCanvasElement).height])).toEqual([
@@ -108,8 +110,12 @@ test('the pad terminal toggles deterministically, accepts a mission, and the rou
     }),
   ).toEqual({ location: 'station', planet: null });
 
-  // E18/E19: the mission survives the round trip with its counters.
-  await page.evaluate(() => window.__reallm.go('surface', { planet: 'cinder4', firstLanding: false }, { force: true }));
+  // E18/E19: the mission survives the round trip with its counters. The go()
+  // waits for the station's entry fade — a transition in flight refuses it.
+  await expect(page.locator('[data-testid="transition-fade"]')).toHaveCSS('pointer-events', 'none');
+  expect(
+    await page.evaluate(() => window.__reallm.go('surface', { planet: 'cinder4', firstLanding: false }, { force: true })),
+  ).toBe(true);
   await expect(page.locator('[data-testid="scene-label"]')).toHaveText('surface');
   expect(
     await page.evaluate(() => {

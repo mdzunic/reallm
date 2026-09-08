@@ -21,7 +21,29 @@ const autoFire = async (page: Page): Promise<void> => {
   await page.addInitScript(() => localStorage.setItem('reallm:settings', JSON.stringify({ autoFire: 'on' })));
 };
 
+/**
+ * Walk toward the nearest enemy until `done` reads true (or the budget runs
+ * out). Enemies wander near their §4.5 spawn ring, 25–40 m out and past a
+ * skitter's 18 m aggro, so an idle pilot sees no combat — the patrol closes
+ * the distance and auto-fire does the rest. Movement is camera-relative
+ * (§4.3): each of WASD covers exactly one world quadrant, so steering is a
+ * sign check on the offset `debugInfo()` reports.
+ */
+async function hunt(page: Page, seconds: number, done: () => Promise<boolean>): Promise<void> {
+  for (let i = 0; i < seconds && !(await done()); i++) {
+    const s = await info(page);
+    const dx = Number(s['nearDx'] ?? 0);
+    const dz = Number(s['nearDz'] ?? 0);
+    const key = dx >= 0 ? (dz >= 0 ? 'KeyS' : 'KeyD') : (dz >= 0 ? 'KeyA' : 'KeyW');
+    await page.keyboard.down(key);
+    await page.waitForTimeout(700);
+    await page.keyboard.up(key);
+    await page.waitForTimeout(300);
+  }
+}
+
 test('enemies spawn and engage on Cinder-4 (AC-36, AC-37, AC-38)', async ({ page }) => {
+  test.setTimeout(150_000);
   await autoFire(page);
   await start(page, '/?debug&scene=surface&planet=cinder4');
   await expect(page.locator('[data-testid="scene-label"]')).toHaveText('surface');
@@ -34,12 +56,15 @@ test('enemies spawn and engage on Cinder-4 (AC-36, AC-37, AC-38)', async ({ page
   await expect.poll(async () => Number((await info(page))['enemies'] ?? 0), { timeout: 20_000 }).toBeGreaterThan(4);
   await expect.poll(async () => Number((await info(page))['spawned'] ?? 0), { timeout: 20_000 }).toBeGreaterThan(8);
 
-  // They close in and fight: with auto-fire on, both sides land hits without
-  // any input from the player.
-  await expect.poll(async () => Number((await info(page))['kills'] ?? 0), { timeout: 30_000 }).toBeGreaterThan(2);
-  await expect
-    .poll(async () => (await page.locator('[data-testid="hud-hp"]').textContent()) ?? '', { timeout: 30_000 })
-    .not.toContain('184/184');
+  // They close in and fight: hunt the field with auto-fire on until both
+  // sides have landed hits — kills climb AND the melee swarm has drawn blood.
+  const engaged = async (): Promise<boolean> => {
+    const kills = Number((await info(page))['kills'] ?? 0);
+    const hp = (await page.locator('[data-testid="hud-hp"]').textContent()) ?? '';
+    return kills > 2 && !hp.includes('184/184');
+  };
+  await hunt(page, 120, engaged);
+  expect(await engaged()).toBe(true);
 });
 
 /**
@@ -106,9 +131,11 @@ test('the player dies into SIGNAL LOST, respawns, and the brains re-acquire them
   await expect(page.locator('[data-testid="hud-hp"]')).toContainText('184/184');
 
   // §4.5's "player dead → wander" is sticky, so the interesting half is what
-  // happens *after*: kills climbing again proves the brains came back.
+  // happens *after*: kills climbing again proves the brains came back. The
+  // respawned pilot hunts the field again (spawns sit past aggro range).
   const after = Number((await info(page))['kills'] ?? 0);
-  await expect.poll(async () => Number((await info(page))['kills'] ?? 0), { timeout: 45_000 }).toBeGreaterThan(after);
+  await hunt(page, 60, async () => Number((await info(page))['kills'] ?? 0) > after);
+  expect(Number((await info(page))['kills'] ?? 0)).toBeGreaterThan(after);
 });
 
 test('the dune wurm burrows into phase 2 and is untouchable while under (AC-39)', async ({ page }) => {

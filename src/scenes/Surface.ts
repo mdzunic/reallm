@@ -474,10 +474,23 @@ export class SurfaceScene extends UiScene<'surface'> {
     info['elites'] = this.#elites;
     info['kills'] = this.#kills;
     if (this.#world !== null) {
-      info['enemies'] = this.#world.enemies.size;
-      info['px'] = Math.round(this.#world.player.x * 10) / 10;
-      info['pz'] = Math.round(this.#world.player.z * 10) / 10;
-      const boss = this.#findBoss(this.#world);
+      const world = this.#world;
+      info['enemies'] = world.enemies.size;
+      info['px'] = Math.round(world.player.x * 10) / 10;
+      info['pz'] = Math.round(world.player.z * 10) / 10;
+      // The nearest live enemy's offset — the e2e patrol steers by it.
+      let nearD = Infinity;
+      for (let i = 0; i < world.enemies.size; i++) {
+        const e = world.enemies.at(i);
+        if (e.state === 'dead') continue;
+        const d = Math.hypot(e.x - world.player.x, e.z - world.player.z);
+        if (d < nearD) {
+          nearD = d;
+          info['nearDx'] = Math.round((e.x - world.player.x) * 10) / 10;
+          info['nearDz'] = Math.round((e.z - world.player.z) * 10) / 10;
+        }
+      }
+      const boss = this.#findBoss(world);
       info['boss'] = boss === null ? '-' : `p${boss.phase} ${boss.hp}/${boss.maxHp}`;
     }
     if (this.#layout !== null) info['layoutHash'] = this.#layout.hash;
