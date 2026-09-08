@@ -33,7 +33,7 @@ import {
 import type { GameEvents } from '@/core/Events';
 import { Rng } from '@/core/Rng';
 import { ASSETS, type SoundId } from '@/data/assets';
-import type { EnemyId, ResourceId } from '@/data/index';
+import { DIALOGUE, type Dialogue, type DialogueId, type EnemyId, type ResourceId } from '@/data/index';
 
 // ---------------------------------------------------------------- type pins
 
@@ -557,9 +557,20 @@ describe('reaction outcomes (SPEC-006 §5.2)', () => {
     expect(react({ shield: -1, hull: 90, source: 'enemy' })?.id).toBe('ship_hit_hull');
   });
 
-  it('dialogue:started opens normally while the glitch set is empty (AC-49)', () => {
-    expect(GLITCH_DIALOGUE_IDS.size).toBe(0);
+  it('dialogue:started opens normally, or with the glitch sting for the marked beats (AC-49, SPEC-012 §4.12)', () => {
+    // SPEC-006 shipped the set empty; SPEC-012 populates it from the table's
+    // `glitch` marks, so membership and the data can never drift apart.
+    const glitched = (Object.keys(DIALOGUE) as DialogueId[]).filter(
+      (id) => (DIALOGUE as Readonly<Record<DialogueId, Dialogue>>)[id].glitch === true,
+    );
+    expect(glitched.length).toBeGreaterThan(0);
+    expect([...GLITCH_DIALOGUE_IDS].sort()).toEqual(glitched.sort());
     expect(AUDIO_REACTIONS['dialogue:started']({ id: 'intro_command' })).toEqual({ id: 'ui_dialogue_open' });
+    const glitchId = glitched[0] as DialogueId;
+    expect(AUDIO_REACTIONS['dialogue:started']({ id: glitchId })).toEqual({
+      id: 'ui_glitch',
+      opts: { priority: 2 },
+    });
   });
 
   it('the remaining rows of §5.2 name their sound', () => {

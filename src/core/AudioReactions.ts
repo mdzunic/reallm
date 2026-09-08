@@ -16,7 +16,7 @@
 import type { GameEvents } from '@/core/Events';
 import type { PlayOptions } from '@/core/Audio';
 import { ASSETS, type SoundId } from '@/data/assets';
-import type { DialogueId, EnemyId, ResourceId } from '@/data/index';
+import { DIALOGUE, type DialogueDef, type DialogueId, type EnemyId, type ResourceId } from '@/data/index';
 
 /**
  * What one event sounds like. Pure: it reads the payload and names a sound, and
@@ -52,10 +52,13 @@ export const ENEMY_DEATH_SOUNDS: Readonly<Record<string, SoundId>> = {
 /**
  * Dialogue that gets the glitch sting instead of the normal open (§5.2). The
  * payload carries only `{ id }`, so membership here is the only thing a pure
- * reaction can test. Ships empty; it is populated when the simulation-plot
- * lines are chosen (out of scope, AC-49).
+ * reaction can test. Derived from the table's `glitch` marks (SPEC-012
+ * §4.12): the same beats that fire the HUD static burst.
  */
-export const GLITCH_DIALOGUE_IDS: ReadonlySet<DialogueId> = new Set<DialogueId>();
+const DIALOGUE_TABLE: Readonly<Record<DialogueId, DialogueDef>> = DIALOGUE;
+export const GLITCH_DIALOGUE_IDS: ReadonlySet<DialogueId> = new Set<DialogueId>(
+  (Object.keys(DIALOGUE_TABLE) as DialogueId[]).filter((id) => DIALOGUE_TABLE[id].glitch === true),
+);
 
 /** Every sprite key that actually exists in a bank, for the `pickup_*` lookup. */
 const SPRITE_KEYS: ReadonlySet<string> = new Set(
