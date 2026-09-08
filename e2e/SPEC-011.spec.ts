@@ -95,19 +95,18 @@ test('elites arrive at roughly the planet rate of 1 in 20 (AC-40)', async ({ pag
   await autoFire(page);
   await start(page, '/?debug&scene=surface&planet=cinder4');
 
-  // The wait is a positive signal, so it ends as soon as the first elite rolls
-  // — a minute or so at cinder4's eliteChance of 0.05 and ~0.3 spawns/s. The
-  // real scene respawns a dead pilot by itself after 2.5 s, so the long polls
-  // need no revive clicks.
-  await expect
-    .poll(async () => Number((await info(page))['elites'] ?? 0), { timeout: 300_000, intervals: [1000] })
-    .toBeGreaterThanOrEqual(1);
+  // The director only spawns below the population target, so an idle field
+  // stalls at ~9 spawns — the pilot hunts to churn it. The first wait is a
+  // positive signal: it ends as soon as the first elite rolls, and the budget
+  // covers well over a hundred spawns at cinder4's eliteChance of 0.05. The
+  // scene respawns a dead pilot by itself after 2.5 s, so no revive clicks.
+  await hunt(page, 300, async () => Number((await info(page))['elites'] ?? 0) >= 1);
+  expect(Number((await info(page))['elites'] ?? 0)).toBeGreaterThanOrEqual(1);
 
   // The other half of "about 1 in 20": common enemies stay common.
-  await expect
-    .poll(async () => Number((await info(page))['spawned'] ?? 0), { timeout: 150_000, intervals: [1000] })
-    .toBeGreaterThanOrEqual(40);
+  await hunt(page, 150, async () => Number((await info(page))['spawned'] ?? 0) >= 40);
   const seen = await info(page);
+  expect(Number(seen['spawned'])).toBeGreaterThanOrEqual(40);
   expect(Number(seen['elites']) / Number(seen['spawned'])).toBeLessThan(0.25);
 });
 
