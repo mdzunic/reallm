@@ -667,7 +667,10 @@ describe('missions in flight', () => {
     w.flight.hit(10_000, 'asteroid', { kind: 'asteroid' });
     // E5 is a whole-stage reset, and exactly one — the scene asks for it, and
     // the runtime's own `player:died` rule (E4, surface) stays out of flight.
-    expect(w.of('mission:stageReset')).toEqual([{ id: 'c5_m1', stage: 0, reason: 'death' }]);
+    // (The entry announces its own timed restart on load first, E19.)
+    expect(w.of('mission:stageReset').filter((r) => r.reason === 'death')).toEqual([
+      { id: 'c5_m1', stage: 0, reason: 'death' },
+    ]);
     expect(w.missions.currentObjectives('c5_m1')[0]!.value).toBe(0);
     expect(entry.counters['0:1']).toBeUndefined();
     expect(w.save.progress.missionsActive.map((m) => m.id)).toContain('c5_m1');
