@@ -64,12 +64,12 @@ export const FATAL_TRANSITION_TEXT = 'Something went wrong — reload the page.'
  * are rejected (D-9); a planet change goes through the station. `flight` and
  * `surface` are the pausable scenes, which is where "quit to menu" comes from
  * (D-10) — the other scenes get their route back when the spec that adds the UI
- * for it adds the row.
+ * for it adds the row. SPEC-014's Quit tab (AC-29) added `station → menu`.
  */
 export const ALLOWED_TRANSITIONS = {
   menu: ['creation', 'station'],
   creation: ['station'],
-  station: ['starmap'],
+  station: ['starmap', 'menu'],
   starmap: ['station', 'flight'],
   flight: ['surface', 'station', 'menu'],
   surface: ['station', 'menu'],

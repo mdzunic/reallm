@@ -22,7 +22,14 @@ import { log } from '@/core/Log';
 import type { GameServices } from '@/core/Services';
 import type { Renderer } from '@/core/Renderer';
 import { ALLOWED_TRANSITIONS, type Scene, type SceneFactory, type SceneId, type SceneParams } from '@/core/StateMachine';
+import { cargoCap, maxHp, type SaveV1 } from '@/core/Save';
+import { cumulativeXp, xpToNext } from '@/systems/Progression';
+import type { HudModel } from '@/systems/UiHelpers';
+import { DeathOverlay } from '@/ui/DeathOverlay';
+import { uiLayers } from '@/ui/dom';
+import { Hud } from '@/ui/Hud';
 import { PauseMenu } from '@/ui/PauseMenu';
+import { RotateOverlay } from '@/ui/RotateOverlay';
 import { SavePanel } from '@/ui/SavePanel';
 import { TouchControls } from '@/ui/TouchControls';
 
@@ -84,17 +91,25 @@ export class PlaceholderScene<K extends SceneId> implements Scene<K> {
   protected readonly props: number;
   /** The bed this scene asks for on enter; `undefined` keeps whatever is playing. */
   protected readonly music: MusicId | undefined;
+  /** Whether a pausable scene mounts the shared death overlay; the one that shows a death panel of its own declines. */
+  protected readonly deathOverlay: boolean;
   #spin: THREE.Object3D | null = null;
   #pauseMenu: PauseMenu | null = null;
+  #hud: Hud | null = null;
   #elapsed = 0;
   #renders = 0;
 
-  constructor(services: GameServices, id: K, options: { pausable?: boolean; props?: number; music?: MusicId } = {}) {
+  constructor(
+    services: GameServices,
+    id: K,
+    options: { pausable?: boolean; props?: number; music?: MusicId; deathOverlay?: boolean } = {},
+  ) {
     this.services = services;
     this.id = id;
     this.pausable = options.pausable ?? false;
     this.props = options.props ?? 0;
     this.music = options.music;
+    this.deathOverlay = options.deathOverlay ?? true;
   }
 
   enter(_params: SceneParams[K]): void {
@@ -110,7 +125,7 @@ export class PlaceholderScene<K extends SceneId> implements Scene<K> {
     // single continuous piece.
     if (this.music !== undefined) this.services.audio.music(this.music);
     if (this.pausable) {
-      const menu = new PauseMenu(uiRoot(), () => this.services.requestResume());
+      const menu = new PauseMenu(this.services, () => this.services.requestResume());
       this.#pauseMenu = menu;
       this.disposer.add(() => menu.dispose());
       // Quitting straight out of the pause menu never calls `resume()`, so the
@@ -122,6 +137,29 @@ export class PlaceholderScene<K extends SceneId> implements Scene<K> {
       const touch = new TouchControls(uiRoot(), this.services.input, this.services.settings);
       touch.show(this.id === 'flight' ? 'flight' : 'surface');
       this.disposer.add(() => touch.dispose());
+      // SPEC-014 §4.5: the two gameplay scenes carry the HUD. The placeholder
+      // feeds it the save's own numbers each update; SPEC-012/013 replace the
+      // feed, not the component. Its flush runs from the frame loop's
+      // `ui:flush` phase, never from here.
+      const hud = new Hud(uiLayers(uiRoot()), this.id === 'flight' ? 'flight' : 'surface');
+      this.#hud = hud;
+      this.disposer.add(() => hud.dispose());
+      this.disposer.add(this.services.events.on('player:damaged', () => hud.damageFlash(), this));
+      // SPEC-014 §4.9: death and rotate overlays belong to the gameplay scenes.
+      // The penalty numbers arrive with SPEC-012's death flow; the overlay
+      // itself and its wiring are this spec's (AC-99, AC-101). A scene that
+      // shows a death panel of its own must decline the shared one: both hang
+      // off `player:died`, and this fixed centred panel (z 30) would cover the
+      // other's respawn control (combat HUD, z 11) — the only emitter of the
+      // `player:respawned` that hides them again.
+      if (this.deathOverlay) {
+        const death = new DeathOverlay(uiRoot());
+        this.disposer.add(() => death.dispose());
+        this.disposer.add(this.services.events.on('player:died', () => death.show(), this));
+        this.disposer.add(this.services.events.on('player:respawned', () => death.hide(), this));
+      }
+      const rotate = new RotateOverlay(uiRoot(), this.services.events);
+      this.disposer.add(() => rotate.dispose());
     }
   }
 
@@ -132,6 +170,43 @@ export class PlaceholderScene<K extends SceneId> implements Scene<K> {
   update(dt: number): void {
     this.#elapsed += dt;
     if (this.#spin) this.#spin.rotation.y = this.#elapsed * 0.6;
+    // SPEC-014 AC-82: the touch pause button pauses through the input action.
+    // Keyboard Escape/P stay with the composition root's toggle — consuming
+    // the action here too would re-pause on the same keypress that resumed.
+    if (this.pausable && this.services.input.state.scheme === 'touch' && this.services.input.state.buttons.pause.justPressed) {
+      this.services.scenes.pause();
+    }
+    const hud = this.#hud;
+    if (hud !== null) this.feedHud(hud.model);
+  }
+
+  /**
+   * The save's numbers into the HUD model, in place (no allocations in update).
+   * Protected so the one scene with live combat state can lay its numbers over
+   * the save's copy instead of painting a second HUD (AC-58: one HP readout).
+   */
+  protected feedHud(model: HudModel): void {
+    const data = this.hudSave();
+    if (data === null) return;
+    const { player } = data;
+    model.hp[0] = player.hp;
+    model.hp[1] = maxHp(player.classId, player.attributes, player.level);
+    model.xp[0] = player.xp - cumulativeXp(player.level);
+    model.xp[1] = xpToNext(player.level);
+    model.level = player.level;
+    model.tokens = player.tokens;
+    model.resources.oil = data.resources.oil;
+    model.resources.wheat = data.resources.wheat;
+    model.resources.water = data.resources.water;
+    model.resources.lithium = data.resources.lithium;
+    // The tier cap only; the quartermaster bonus is Economy's and arrives with
+    // the scene that owns an Economy instance (SPEC-012).
+    model.cargoCap = cargoCap(data.ship);
+  }
+
+  /** Where `feedHud` reads from; the combat demo substitutes its in-memory save. */
+  protected hudSave(): SaveV1 | null {
+    return this.services.save.current;
   }
 
   render(renderer: Renderer): void {
@@ -193,7 +268,10 @@ export class PlaceholderScene<K extends SceneId> implements Scene<K> {
     const layer = document.createElement('div');
     layer.className = 'scene-layer';
     const label = document.createElement('p');
-    label.className = 'scene-label';
+    // The same quiet corner tag the real scenes wear (base.ts): the old
+    // `scene-label` block is 20 px and full-opacity, which sat on top of the
+    // HUD's HP glyph once SPEC-014 put a HUD in these scenes.
+    label.className = 'scene-tag';
     label.dataset['testid'] = 'scene-label';
     label.textContent = this.id;
     layer.append(label);

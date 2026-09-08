@@ -181,21 +181,17 @@ button.boot-start.is-visible {
   inset: 0;
 }
 
-.scene-label {
-  position: absolute;
-  left: max(12px, env(safe-area-inset-left));
-  top: max(12px, env(safe-area-inset-top));
-  margin: 0;
-  font-size: 20px;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-}
-
 .scene-nav {
   position: absolute;
-  right: max(12px, env(safe-area-inset-right));
-  top: max(12px, env(safe-area-inset-top));
+  /* Mid-left: the HUD owns all four corners (SPEC-014 AC-58 — top-right is
+     the resource column these buttons used to cover), the minimap and touch
+     buttons own the bottom ones, and the top-left column ends well above the
+     vertical centre at every supported size. */
+  left: max(12px, env(safe-area-inset-left));
+  top: 50%;
+  transform: translateY(-50%);
   display: flex;
+  flex-direction: column;
   gap: 8px;
   pointer-events: auto;
   /* Above the touch layer (z-index 10), so the placeholder navigation is still
@@ -313,7 +309,7 @@ button.touch-button {
 
 /* --------------------------------------------- stats overlay (SPEC-002 §4.6) */
 
-/* Top-left, offset far enough below `.scene-label` that both stay legible
+/* Top-left, offset far enough below `.scene-tag` that both stay legible
    (AC-28). It opts into pointer events for the two simulator buttons. */
 .overlay-debug {
   position: absolute;
@@ -431,6 +427,1626 @@ button.slot-button {
   resize: vertical;
 }
 
+/* ================================================================ SPEC-014 */
+/* The unified DOM UI. Colors are variables so a retint touches one block;
+   the pairs are colorblind-safe by glyph, not hue alone (AC-68, AC-106). */
+:root {
+  --hp: #e5484d;
+  --shield: #4c9aff;
+  --warn: #f5a623;
+  --good: #46c973;
+  --panel: #111820;
+  --panel-edge: #22303c;
+  --ink: #e6edf3;
+  --ink-dim: #8a97a3;
+}
+
+/* Font floor 14 px (AC-107); larger sizes clamp with the viewport (AC-60). */
+#ui {
+  font-size: clamp(14px, 1.6vmin + 8px, 18px);
+}
+
+/* Visible focus for keyboard players (AC-12); never removed, only styled. */
+#ui :focus-visible {
+  outline: 2px solid var(--shield);
+  outline-offset: 2px;
+}
+
+/* The three stacking layers of UiRoot: hud under panels under overlays. */
+.ui-layer {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+.ui-layer-hud { z-index: 10; }
+.ui-layer-panel { z-index: 30; }
+.ui-layer-overlay { z-index: 50; }
+
+.ui-fade { z-index: 60; }
+
+/* Anything interactive opts back into pointer events (SPEC-014 §2). */
+.panel {
+  pointer-events: auto;
+  background: var(--panel);
+  border: 1px solid var(--panel-edge);
+  border-radius: 8px;
+  color: var(--ink);
+}
+
+/* Buttons are real buttons with a 44 px floor (AC-108, 14-f). */
+.ui-btn {
+  min-height: 44px;
+  min-width: 44px;
+  padding: 8px 16px;
+  border: 1px solid var(--panel-edge);
+  border-radius: 6px;
+  background: #1a232e;
+  color: var(--ink);
+  font: inherit;
+  cursor: pointer;
+  touch-action: manipulation;
+}
+
+.ui-btn:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.ui-btn.is-primary {
+  background: #24435e;
+  border-color: var(--shield);
+}
+
+.ui-btn.is-danger {
+  border-color: var(--hp);
+}
+
+/* ------------------------------------------------------------------ toasts */
+.toast-rack {
+  position: absolute;
+  top: max(10px, env(safe-area-inset-top));
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  align-items: center;
+  z-index: 55;
+}
+
+.toast {
+  padding: 8px 14px;
+  border-radius: 6px;
+  background: var(--panel);
+  border: 1px solid var(--panel-edge);
+  color: var(--ink);
+  max-width: 80vw;
+  animation: toast-in 150ms ease-out;
+}
+
+.toast-warn { border-color: var(--warn); }
+.toast-warn .glyph {
+  color: var(--warn);
+  margin-right: 8px;
+}
+.toast-error { border-color: var(--hp); }
+.toast-good { border-color: var(--good); }
+
+.toast-count {
+  margin-left: 8px;
+  color: var(--ink-dim);
+}
+
+@keyframes toast-in {
+  from { opacity: 0; transform: translateY(-6px); }
+}
+
+/* ----------------------------------------------------------- confirm sheet */
+.sheet-backdrop {
+  position: absolute;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.5);
+  pointer-events: auto;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  z-index: 52;
+}
+
+.sheet {
+  width: min(480px, 100vw - 24px);
+  margin-bottom: max(12px, env(safe-area-inset-bottom));
+  padding: 16px;
+  animation: sheet-in 150ms ease-out;
+}
+
+.sheet-title {
+  margin: 0 0 10px;
+  font-weight: 600;
+}
+
+.sheet-body {
+  margin: 0 0 14px;
+  color: var(--ink-dim);
+  white-space: pre-line;
+}
+
+.sheet-actions {
+  display: flex;
+  gap: 10px;
+  justify-content: flex-end;
+}
+
+@keyframes sheet-in {
+  from { opacity: 0; transform: translateY(16px); }
+}
+
+/* Every animated affordance goes static when the player asked for less motion
+   (AC-66, AC-71, AC-88, AC-110). The gate is the `reduce-motion` class the
+   composition root keeps on <html> from the setting — which defaults from
+   `prefers-reduced-motion`, so the OS preference and the in-app toggle arrive
+   through the same door. */
+html.reduce-motion .toast,
+html.reduce-motion .sheet {
+  animation: none;
+}
+
+/* -------------------------------------------------------------------- HUD */
+/* Safe-area padded corners (AC-60); the whole layer never selects (AC-67). */
+.hud {
+  position: absolute;
+  inset: 0;
+  user-select: none;
+  -webkit-user-select: none;
+  pointer-events: none;
+}
+
+.hud-tl,
+.hud-tr,
+.hud-tc,
+.hud-bl,
+.hud-br,
+.hud-bc {
+  position: absolute;
+  display: flex;
+  gap: 6px;
+}
+
+.hud-tl {
+  top: max(10px, env(safe-area-inset-top));
+  left: max(10px, env(safe-area-inset-left));
+  flex-direction: column;
+}
+
+.hud-tr {
+  top: max(10px, env(safe-area-inset-top));
+  right: max(10px, env(safe-area-inset-right));
+  flex-direction: column;
+  align-items: flex-end;
+}
+
+.hud-tc {
+  top: max(10px, env(safe-area-inset-top));
+  left: 50%;
+  transform: translateX(-50%);
+  flex-direction: column;
+  align-items: center;
+}
+
+.hud-bl {
+  bottom: max(10px, env(safe-area-inset-bottom));
+  left: max(10px, env(safe-area-inset-left));
+}
+
+.hud-br {
+  bottom: max(10px, env(safe-area-inset-bottom));
+  right: max(10px, env(safe-area-inset-right));
+  flex-direction: column;
+  align-items: flex-end;
+}
+
+.hud-bc {
+  bottom: max(48px, calc(env(safe-area-inset-bottom) + 38px));
+  left: 50%;
+  transform: translateX(-50%);
+}
+
+.bar-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.bar {
+  width: 140px;
+  height: 10px;
+  border-radius: 5px;
+  background: rgba(255, 255, 255, 0.12);
+  overflow: hidden;
+}
+
+/* Bars move with transform only — no layout, no paint area growth (AC-61). */
+.bar-fill {
+  width: 100%;
+  height: 100%;
+  transform-origin: left center;
+  transform: scaleX(0);
+}
+
+.bar-hp { background: var(--hp); }
+.bar-xp { background: var(--good); height: 100%; }
+.bar-shield { background: var(--shield); }
+.bar-hull { background: var(--warn); }
+.bar-boss { background: var(--hp); }
+
+.bar-row:has(.bar-xp) .bar { height: 4px; }
+
+.bar-text,
+.hud-level,
+.hud-tokens {
+  font-size: 14px;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.8);
+}
+
+.res {
+  display: flex;
+  gap: 4px;
+  align-items: center;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.8);
+}
+
+/* At cap the counter goes red — with the glyph beside it, never hue alone. */
+.res.at-cap .res-count {
+  color: var(--hp);
+  font-weight: 700;
+}
+
+.hud-weather {
+  padding: 4px 12px;
+  border-radius: 6px;
+  background: rgba(0, 0, 0, 0.55);
+  color: var(--warn);
+}
+
+.hud-objective {
+  padding: 4px 12px;
+  border-radius: 6px;
+  background: rgba(0, 0, 0, 0.55);
+  white-space: nowrap;
+}
+
+.hud-consumable {
+  padding: 8px 12px;
+}
+
+.hud-interact {
+  padding: 6px 12px;
+  border-radius: 6px;
+  background: rgba(0, 0, 0, 0.55);
+}
+
+.hud .is-hidden {
+  display: none;
+}
+
+/* AC-59: above the touch buttons, which sit in the same corner at 56 px. */
+.minimap {
+  width: 96px;
+  height: 96px;
+  border: 1px solid var(--panel-edge);
+  border-radius: 6px;
+  background: rgba(0, 0, 0, 0.45);
+  margin-bottom: 132px;
+}
+
+/* AC-63: the damage vignette; flashes for 150 ms when the class lands. */
+.hud-vignette {
+  position: absolute;
+  inset: 0;
+  box-shadow: inset 0 0 60px 20px var(--hp);
+  opacity: 0;
+  transition: opacity 60ms linear;
+}
+
+.hud-vignette.is-flashing {
+  opacity: 0.8;
+}
+
+/* AC-64 / AC-65: the two pulses ride the same keyframes. */
+.hud.is-low-hp .bar-hp {
+  animation: hud-pulse 1s ease-in-out infinite;
+}
+
+.hud.is-cargo-full .res.at-cap {
+  animation: hud-pulse 1s ease-in-out infinite;
+}
+
+@keyframes hud-pulse {
+  50% { opacity: 0.4; }
+}
+
+/* AC-66: static versions — the state stays visible, nothing moves. */
+html.reduce-motion .hud.is-low-hp .bar-hp,
+html.reduce-motion .hud.is-cargo-full .res.at-cap {
+  animation: none;
+  outline: 1px solid var(--hp);
+}
+
+html.reduce-motion .hud-vignette {
+  transition: none;
+}
+
+/* --------------------------------------------------------------- dialogue */
+/* Bottom-center, above the objective line's slot (AC-69). */
+.dialogue {
+  position: absolute;
+  bottom: max(96px, calc(env(safe-area-inset-bottom) + 86px));
+  left: 50%;
+  transform: translateX(-50%);
+  width: min(560px, 100vw - 24px);
+  padding: 12px 16px;
+  z-index: 40;
+}
+
+.dialogue.is-hidden {
+  display: none;
+}
+
+.dialogue-speaker {
+  display: block;
+  font-weight: 700;
+  margin-bottom: 4px;
+}
+
+/* AC-70: each speaker carries a colour beside its name, never colour alone. */
+.dialogue[data-speaker='aria'] .dialogue-speaker { color: var(--shield); }
+.dialogue[data-speaker='command'] .dialogue-speaker { color: var(--warn); }
+.dialogue[data-speaker='scav'] .dialogue-speaker { color: var(--good); }
+.dialogue[data-speaker='player'] .dialogue-speaker { color: var(--ink); }
+.dialogue[data-speaker='log'] .dialogue-speaker { color: var(--good); }
+.dialogue[data-speaker='warden'] .dialogue-speaker { color: var(--hp); }
+
+.dialogue-text {
+  margin: 0;
+  min-height: 2.6em;
+}
+
+/* AC-70: `log` reads as a terminal readout. */
+.dialogue-log {
+  font-family: ui-monospace, 'Cascadia Mono', 'SF Mono', Menlo, Consolas, monospace;
+  background: #04140a;
+  border-color: var(--good);
+}
+
+.dialogue-log .dialogue-text {
+  color: var(--good);
+}
+
+/* AC-70: `warden` glitches; AC-71 pins it still under reduce-motion. */
+.dialogue-warden {
+  border-color: var(--hp);
+  animation: dialogue-glitch 240ms steps(2) infinite;
+}
+
+.dialogue-warden .dialogue-text {
+  color: var(--hp);
+  text-shadow: 1px 0 var(--shield), -1px 0 var(--warn);
+}
+
+@keyframes dialogue-glitch {
+  25% { transform: translateX(calc(-50% + 1px)); }
+  75% { transform: translateX(calc(-50% - 1px)); }
+}
+
+/* AC-77: the modal dim under a `choice`; input is disabled beside it. */
+.dialogue-dim {
+  position: absolute;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.55);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 150ms linear;
+}
+
+.dialogue-dim.is-visible {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.dialogue-choices {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.dialogue-choices:empty {
+  display: none;
+}
+
+/* AC-71: both speaker styles go static when the player asked for less motion. */
+html.reduce-motion .dialogue-warden {
+  animation: none;
+}
+
+html.reduce-motion .dialogue-warden .dialogue-text {
+  text-shadow: none;
+}
+
+html.reduce-motion .dialogue-dim {
+  transition: none;
+}
+
+/* --------------------------------------------------------------- settings */
+.settings {
+  position: absolute;
+  inset: max(10px, env(safe-area-inset-top)) auto max(10px, env(safe-area-inset-bottom)) 50%;
+  transform: translateX(-50%);
+  width: min(520px, 100vw - 20px);
+  overflow-y: auto;
+  z-index: 45;
+}
+
+.settings.is-hidden {
+  display: none;
+}
+
+.settings-body {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 14px;
+}
+
+.settings-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.settings-title,
+.settings-subtitle {
+  margin: 0;
+  font-weight: 700;
+}
+
+.settings-section {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  border-top: 1px solid var(--panel-edge);
+  padding-top: 10px;
+}
+
+.settings-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+  border-top: 1px solid var(--panel-edge);
+  padding-top: 10px;
+}
+
+.settings-section .settings-row {
+  border-top: none;
+  padding-top: 0;
+}
+
+.settings-row input[type='range'] {
+  flex: 1;
+  max-width: 260px;
+  min-height: 44px;
+}
+
+.settings-row input[type='checkbox'] {
+  width: 28px;
+  height: 28px;
+  margin: 8px;
+}
+
+.settings-seg {
+  display: flex;
+  gap: 4px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.ui-btn.seg.is-active {
+  background: #24435e;
+  border-color: var(--shield);
+}
+
+.settings-note {
+  color: var(--ink-dim);
+}
+
+.settings-code {
+  flex: 1;
+  min-width: 0;
+  background: #0a0f15;
+  color: var(--ink);
+  border: 1px solid var(--panel-edge);
+  border-radius: 6px;
+  font: inherit;
+  padding: 6px;
+}
+
+.settings-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.settings-version {
+  margin: 0;
+  color: var(--ink-dim);
+}
+
+.settings-version a {
+  color: var(--shield);
+}
+
+/* ------------------------------------------------------------- pause menu */
+.pause-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-width: 220px;
+}
+
+.pause-sheet {
+  margin-top: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  text-align: left;
+}
+
+.pause-sheet.is-hidden {
+  display: none;
+}
+
+.pause-sheet-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.pause-sheet-what {
+  color: var(--ink-dim);
+}
+
+/* --------------------------------------------------------------- overlays */
+/* AC-98: the loading overlay carries a spinner once it appears (250 ms). */
+.overlay-loading::before {
+  content: '';
+  display: inline-block;
+  width: 18px;
+  height: 18px;
+  margin-right: 10px;
+  vertical-align: -4px;
+  border: 2px solid var(--ink-dim);
+  border-top-color: var(--ink);
+  border-radius: 50%;
+  animation: spinner-turn 800ms linear infinite;
+}
+
+@keyframes spinner-turn {
+  to { transform: rotate(360deg); }
+}
+
+.overlay-death {
+  flex-direction: column;
+  gap: 8px;
+  background: rgba(10, 4, 6, 0.82);
+}
+
+.death-title {
+  margin: 0;
+  font-size: clamp(22px, 4vmin, 34px);
+  letter-spacing: 0.3em;
+  color: var(--hp);
+}
+
+.death-lost {
+  margin: 0;
+  color: var(--warn);
+}
+
+.death-lost:empty {
+  display: none;
+}
+
+.death-respawn {
+  margin: 0;
+  color: var(--ink-dim);
+  animation: hud-pulse 1.2s ease-in-out infinite;
+}
+
+.overlay-rotate {
+  flex-direction: column;
+  gap: 6px;
+}
+
+.rotate-glyph {
+  margin: 0;
+  font-size: 42px;
+}
+
+.rotate-text {
+  margin: 0;
+}
+
+/* AC-103: a banner, not a wall — play continues under it. */
+.update-banner {
+  position: absolute;
+  top: max(10px, env(safe-area-inset-top));
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 8px 14px;
+  border-radius: 6px;
+  background: var(--panel);
+  border: 1px solid var(--good);
+  color: var(--ink);
+  display: none;
+  z-index: 56;
+}
+
+.update-banner.is-visible {
+  display: block;
+}
+
+/* ---------------------------------------------------------------- endings */
+.overlay-ending {
+  z-index: 70;
+}
+
+.ending-report {
+  max-width: min(460px, 90vw);
+  padding: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  font-family: ui-monospace, 'Cascadia Mono', 'SF Mono', Menlo, Consolas, monospace;
+}
+
+.ending-report-head {
+  margin: 0;
+  color: var(--good);
+}
+
+.ending-report-line {
+  margin: 0;
+  color: var(--ink);
+}
+
+/* AC-105: everything sinks to black except one line of terminal. */
+.overlay-ending-escape {
+  position: absolute;
+  inset: 0;
+  z-index: 80;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgb(0 0 0 / 0%);
+  pointer-events: auto;
+  transition: background 3s linear;
+}
+
+.overlay-ending-escape .ending-prompt {
+  margin: 0;
+  font-family: ui-monospace, 'Cascadia Mono', 'SF Mono', Menlo, Consolas, monospace;
+  color: var(--good);
+  opacity: 0;
+  transition: opacity 2s linear 1s;
+}
+
+.overlay-ending-escape.is-final {
+  background: rgb(0 0 0 / 100%);
+}
+
+.overlay-ending-escape.is-final .ending-prompt {
+  opacity: 1;
+}
+
+html.reduce-motion .overlay-loading::before {
+  animation: none;
+}
+
+html.reduce-motion .death-respawn {
+  animation: none;
+}
+
+html.reduce-motion .overlay-ending-escape,
+html.reduce-motion .overlay-ending-escape .ending-prompt {
+  transition: none;
+}
+
+/* ------------------------------------------------------------- real scenes */
+/* The `scene-label` hook the e2e fleet reads, worn as a quiet corner tag.
+   Top-left like the placeholder banner it replaces: the ?debug overlay docks
+   itself below whatever sits here (SPEC-002 AC-28). */
+.scene-tag {
+  position: absolute;
+  left: max(12px, env(safe-area-inset-left));
+  top: max(12px, env(safe-area-inset-top));
+  margin: 0;
+  font-size: 14px;
+  line-height: 1.2;
+  color: var(--ink-dim);
+  opacity: 0.55;
+  pointer-events: none;
+}
+
+/* ------------------------------------------------------------------- menu */
+.menu-root {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 18px;
+  padding: max(12px, env(safe-area-inset-top)) max(12px, env(safe-area-inset-right)) max(12px, env(safe-area-inset-bottom)) max(12px, env(safe-area-inset-left));
+  overflow-y: auto;
+}
+
+.menu-title {
+  margin: 0;
+  font-size: clamp(34px, 8vmin, 64px);
+  letter-spacing: 0.18em;
+  color: var(--ink);
+  text-shadow: 0 0 24px rgba(76, 154, 255, 0.55);
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.menu-buttons {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-width: min(280px, 80vw);
+}
+
+.menu-buttons .ui-btn {
+  pointer-events: auto;
+}
+
+.menu-sub {
+  width: min(560px, 100vw - 20px);
+}
+
+.menu-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 14px;
+  max-height: 46dvh;
+  overflow-y: auto;
+}
+
+.menu-list-title {
+  margin: 0;
+  font-weight: 700;
+}
+
+.menu-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  border-top: 1px solid var(--panel-edge);
+  padding-top: 10px;
+}
+
+.menu-row:first-of-type {
+  border-top: none;
+  padding-top: 0;
+}
+
+.menu-slot {
+  flex: 1;
+  text-align: left;
+}
+
+.menu-slot-label {
+  color: var(--ink-dim);
+  min-width: 52px;
+}
+
+.menu-slot-text {
+  flex: 1;
+  min-width: 140px;
+}
+
+.menu-slot-actions {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.menu-import {
+  display: flex;
+  gap: 6px;
+  width: 100%;
+}
+
+.menu-code {
+  flex: 1;
+  min-width: 0;
+  background: #0a0f15;
+  color: var(--ink);
+  border: 1px solid var(--panel-edge);
+  border-radius: 6px;
+  font: inherit;
+  padding: 6px;
+}
+
+.menu-hint {
+  margin: 0;
+  padding: 6px 12px;
+  border-radius: 6px;
+  border: 1px solid var(--warn);
+  background: var(--panel);
+  color: var(--warn);
+  pointer-events: auto;
+}
+
+.credits .credits-text {
+  margin: 0;
+  white-space: pre-wrap;
+  font-size: 14px;
+  color: var(--ink-dim);
+  overflow-y: auto;
+  max-height: 40dvh;
+  user-select: text;
+  -webkit-user-select: text;
+}
+
+/* E22: menus reflow to one column on a portrait phone; no rotate wall here. */
+@media (max-width: 520px) {
+  .menu-row {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .menu-slot-actions {
+    justify-content: stretch;
+  }
+
+  .menu-slot-actions .ui-btn {
+    flex: 1;
+  }
+}
+
+/* --------------------------------------------------------------- creation */
+.creation-root {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  justify-content: center;
+  gap: 16px;
+  padding: max(10px, env(safe-area-inset-top)) max(10px, env(safe-area-inset-right)) max(10px, env(safe-area-inset-bottom)) max(10px, env(safe-area-inset-left));
+  overflow-y: auto;
+}
+
+.creation-form {
+  width: min(640px, 100%);
+  align-self: safe center;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 16px;
+  max-height: 100%;
+  overflow-y: auto;
+}
+
+.creation-title {
+  margin: 0;
+  font-weight: 700;
+  font-size: clamp(18px, 3vmin, 24px);
+}
+
+.creation-subtitle {
+  margin: 0;
+  color: var(--ink-dim);
+}
+
+.creation-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.creation-name {
+  flex: 1;
+  min-width: 160px;
+  max-width: 280px;
+  min-height: 44px;
+  padding: 6px 10px;
+  background: #0a0f15;
+  color: var(--ink);
+  border: 1px solid var(--panel-edge);
+  border-radius: 6px;
+  font: inherit;
+}
+
+.class-cards {
+  display: flex;
+  gap: 10px;
+}
+
+.class-card {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  text-align: left;
+  padding: 10px;
+  min-height: 44px;
+  background: #1a232e;
+  color: var(--ink);
+  border: 1px solid var(--panel-edge);
+  border-radius: 8px;
+  font: inherit;
+  cursor: pointer;
+}
+
+.class-card.is-selected {
+  border-color: var(--shield);
+  background: #24435e;
+}
+
+.class-name {
+  font-weight: 700;
+}
+
+.class-blurb,
+.class-base {
+  color: var(--ink-dim);
+  font-size: 14px;
+}
+
+.class-passive {
+  color: var(--good);
+  font-size: 14px;
+}
+
+.portrait-row,
+.swatch-row {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.portrait {
+  width: 44px;
+  height: 44px;
+  font-size: 22px;
+  background: #1a232e;
+  color: var(--ink);
+  border: 1px solid var(--panel-edge);
+  border-radius: 8px;
+  cursor: pointer;
+}
+
+.swatch {
+  width: 44px;
+  height: 44px;
+  border: 2px solid var(--panel-edge);
+  border-radius: 8px;
+  cursor: pointer;
+}
+
+.portrait.is-selected,
+.swatch.is-selected {
+  border-color: var(--shield);
+  outline: 2px solid var(--shield);
+  outline-offset: 1px;
+}
+
+.creation-attrs {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.attr-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.attr-name {
+  flex: 1;
+  text-transform: capitalize;
+}
+
+.attr-value {
+  min-width: 2ch;
+  text-align: center;
+  font-weight: 700;
+}
+
+.creation-stats {
+  display: flex;
+  gap: 16px;
+  flex-wrap: wrap;
+  color: var(--ink);
+}
+
+.creation-difficulty {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.creation-foot {
+  display: flex;
+  justify-content: flex-end;
+}
+
+/* AC-19: the scissor viewport tracks this box; the canvas shows through it,
+   so the box and everything over it stay transparent. */
+.creation-side {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  align-self: safe center;
+}
+
+.creation-preview {
+  width: clamp(120px, 22vmin, 200px);
+  height: clamp(150px, 30vmin, 240px);
+  border: 1px solid var(--panel-edge);
+  border-radius: 8px;
+  background: transparent;
+}
+
+.creation-preview-label {
+  margin: 0;
+  color: var(--ink-dim);
+}
+
+.creation-confirm {
+  min-width: 140px;
+}
+
+@media (max-width: 620px) {
+  .class-cards {
+    flex-direction: column;
+  }
+
+  .creation-root {
+    flex-direction: column-reverse;
+    align-items: center;
+  }
+}
+
+/* ---------------------------------------------------------------- station */
+.station-root {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  grid-template-areas: 'head head' 'rail panel';
+  grid-template-columns: auto 1fr;
+  grid-template-rows: auto 1fr;
+  gap: 10px;
+  padding: max(10px, env(safe-area-inset-top)) max(10px, env(safe-area-inset-right)) max(10px, env(safe-area-inset-bottom)) calc(max(10px, env(safe-area-inset-left)) + 120px);
+  pointer-events: none;
+}
+
+.station-head {
+  grid-area: head;
+  text-align: center;
+}
+
+.station-name {
+  margin: 0;
+  font-size: clamp(18px, 3vmin, 26px);
+  font-weight: 700;
+  letter-spacing: 0.12em;
+}
+
+/* AC-27: the diegetic difficulty label, right under the name. */
+.station-containment {
+  margin: 0;
+  color: var(--warn);
+}
+
+.station-rail {
+  grid-area: rail;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  align-self: start;
+  pointer-events: auto;
+}
+
+.station-panel {
+  grid-area: panel;
+  overflow-y: auto;
+  padding: 12px;
+  max-width: 720px;
+  width: 100%;
+  justify-self: center;
+}
+
+.station-empty {
+  margin: 0;
+}
+
+/* AC-25: the recall banner over everything else on the screen. */
+.station-recall {
+  position: absolute;
+  top: max(48px, calc(env(safe-area-inset-top) + 38px));
+  left: 50%;
+  transform: translateX(-50%);
+  margin: 0;
+  padding: 8px 16px;
+  border-radius: 6px;
+  border: 1px solid var(--hp);
+  background: var(--panel);
+  color: var(--hp);
+  font-weight: 700;
+}
+
+/* AC-28: on phones the rail becomes a bottom bar. */
+@media (max-width: 700px) {
+  .station-root {
+    grid-template-areas: 'head' 'panel' 'rail';
+    grid-template-columns: 1fr;
+    grid-template-rows: auto 1fr auto;
+    padding: max(8px, env(safe-area-inset-top)) max(8px, env(safe-area-inset-right)) max(8px, env(safe-area-inset-bottom)) max(8px, env(safe-area-inset-left));
+  }
+
+  .station-rail {
+    flex-direction: row;
+    flex-wrap: wrap;
+    justify-content: center;
+    align-self: end;
+  }
+
+  .station-tab {
+    flex: 1;
+    min-width: 30%;
+  }
+}
+
+/* ---------------------------------------------------------- mission board */
+.board,
+.board-group {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.board-planet {
+  margin: 0;
+  font-weight: 700;
+  color: var(--shield);
+}
+
+.board-row {
+  border: 1px solid var(--panel-edge);
+  border-radius: 8px;
+  padding: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.board-row.is-locked {
+  opacity: 0.7;
+}
+
+.board-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  background: none;
+  border: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  padding: 0;
+  min-height: 44px;
+  cursor: pointer;
+}
+
+.board-title {
+  font-weight: 700;
+}
+
+.board-status {
+  margin-left: auto;
+  color: var(--ink-dim);
+}
+
+.badge {
+  padding: 2px 8px;
+  border-radius: 10px;
+  border: 1px solid var(--panel-edge);
+  font-size: 14px;
+  color: var(--ink-dim);
+}
+
+.badge-main { border-color: var(--warn); color: var(--warn); }
+.badge-flight { border-color: var(--shield); color: var(--shield); }
+.badge-replay { border-color: var(--good); color: var(--good); }
+.badge-pin { border-color: var(--good); color: var(--good); }
+.badge-owned { color: var(--good); border-color: var(--good); }
+.badge-equipped { color: var(--shield); border-color: var(--shield); }
+
+.board-rewards {
+  margin: 0;
+  color: var(--good);
+  font-size: 14px;
+}
+
+/* 14-e: long briefs scroll inside the panel, never the body. */
+.board-brief {
+  margin: 0;
+  color: var(--ink-dim);
+}
+
+.board-locked {
+  margin: 0;
+  color: var(--warn);
+  font-size: 14px;
+}
+
+.board-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+/* ------------------------------------------------------------------- shop */
+.shop {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.shop-tabs {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.shop-body {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.shop-row {
+  border: 1px solid var(--panel-edge);
+  border-radius: 8px;
+  padding: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.shop-row-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.shop-name {
+  font-weight: 700;
+}
+
+.shop-note,
+.shop-deltas {
+  margin: 0;
+  color: var(--ink-dim);
+  font-size: 14px;
+}
+
+.shop-effect {
+  margin: 0;
+  color: var(--ink-dim);
+  font-size: 14px;
+}
+
+.shop-effect.is-current {
+  color: var(--good);
+}
+
+.shop-buy-line {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+/* AC-41: the discount reads base → paid, in the good colour. */
+.shop-price {
+  color: var(--good);
+}
+
+/* AC-42: the reason a button refuses, next to the button that refuses. */
+.shop-reason {
+  color: var(--warn);
+  font-size: 14px;
+}
+
+.shop-toggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.shop-toggle input[type='checkbox'] {
+  width: 28px;
+  height: 28px;
+}
+
+.craft-stepper {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-left: auto;
+}
+
+.craft-qty {
+  min-width: 2ch;
+  text-align: center;
+  font-weight: 700;
+}
+
+/* -------------------------------------------------------- character panel */
+.character {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.char-block {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.char-title {
+  margin: 0;
+  font-weight: 700;
+}
+
+.char-stats {
+  display: flex;
+  gap: 14px;
+  flex-wrap: wrap;
+}
+
+.char-attrs {
+  margin: 0;
+  color: var(--ink-dim);
+}
+
+.char-gear {
+  flex-direction: row;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.gear-card {
+  flex: 1;
+  min-width: 180px;
+  border: 1px solid var(--panel-edge);
+  border-radius: 8px;
+  padding: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.gear-name {
+  font-weight: 700;
+}
+
+.gear-line {
+  color: var(--ink-dim);
+  font-size: 14px;
+}
+
+/* AC-48: the twenty slots. */
+.inv-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(96px, 1fr));
+  gap: 6px;
+}
+
+.inv-cell {
+  min-height: 56px;
+  border: 1px solid var(--panel-edge);
+  border-radius: 6px;
+  background: #131b24;
+  color: var(--ink);
+  font: inherit;
+  font-size: 14px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  padding: 4px;
+  cursor: pointer;
+}
+
+.inv-cell.is-empty {
+  opacity: 0.35;
+  cursor: default;
+}
+
+.inv-cell.is-selected {
+  border-color: var(--shield);
+}
+
+.inv-qty {
+  color: var(--ink-dim);
+}
+
+.inv-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  border-top: 1px solid var(--panel-edge);
+  padding-top: 8px;
+}
+
+.inv-action-name {
+  font-weight: 700;
+}
+
+.inv-compare {
+  color: var(--good);
+  font-size: 14px;
+}
+
+.res-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.res-row .res-name {
+  text-transform: capitalize;
+}
+
+.res-row.at-cap .res-count {
+  color: var(--hp);
+  font-weight: 700;
+}
+
+/* --------------------------------------------------------------- star map */
+.starmap-root {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+.starmap-nodes {
+  position: absolute;
+  inset: 0;
+}
+
+/* AC-52: 56 px touch targets, centred on the projected node. */
+.starmap-node {
+  position: absolute;
+  width: 56px;
+  height: 56px;
+  transform: translate(-50%, -50%);
+  background: transparent;
+  border: none;
+  border-radius: 50%;
+  color: var(--ink);
+  font: inherit;
+  font-size: 14px;
+  cursor: pointer;
+  pointer-events: auto;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-end;
+  padding-bottom: 0;
+}
+
+.starmap-node-name {
+  transform: translateY(26px);
+  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.9);
+  white-space: nowrap;
+}
+
+.starmap-node.is-locked {
+  color: var(--ink-dim);
+}
+
+.starmap-lock {
+  position: absolute;
+  top: 4px;
+  right: 2px;
+  font-size: 14px;
+}
+
+.starmap-info {
+  position: absolute;
+  top: max(10px, env(safe-area-inset-top));
+  right: max(10px, env(safe-area-inset-right));
+  width: min(320px, calc(100vw - 20px));
+  max-height: calc(100dvh - 80px);
+  overflow-y: auto;
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.starmap-name {
+  margin: 0;
+  font-weight: 700;
+  font-size: clamp(16px, 2.6vmin, 22px);
+}
+
+.starmap-line {
+  margin: 0;
+  font-size: 14px;
+}
+
+.starmap-line.is-short {
+  color: var(--warn);
+}
+
+.starmap-reqs,
+.starmap-missions {
+  margin: 0;
+  padding-left: 4px;
+  list-style: none;
+  font-size: 14px;
+}
+
+.req-met {
+  color: var(--good);
+}
+
+.req-unmet {
+  color: var(--warn);
+}
+
+.starmap-depart-line {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.starmap-back {
+  position: absolute;
+  left: max(10px, env(safe-area-inset-left));
+  bottom: max(10px, env(safe-area-inset-bottom));
+  pointer-events: auto;
+}
+
+@media (max-width: 700px) {
+  .starmap-info {
+    top: auto;
+    bottom: max(10px, env(safe-area-inset-bottom));
+    right: max(10px, env(safe-area-inset-right));
+    max-height: 44dvh;
+  }
+}
+
 /* --------------------------- SPEC-011 surface combat demo HUD (SPEC-012 replaces it) */
 
 /* Read-only chrome never eats a tap; only the buttons opt back in. */
@@ -439,34 +2055,6 @@ button.slot-button {
   inset: 0;
   pointer-events: none;
   z-index: 11;
-}
-
-.hud-hp {
-  position: absolute;
-  left: 50%;
-  bottom: max(18px, env(safe-area-inset-bottom));
-  width: 220px;
-  height: 18px;
-  transform: translateX(-50%);
-  border: 1px solid #33465a;
-  border-radius: 6px;
-  background: #0d141bcc;
-  overflow: hidden;
-}
-
-.hud-hp-fill {
-  height: 100%;
-  width: 100%;
-  background: #4a8ad0;
-  transition: width 120ms linear;
-}
-
-.hud-hp-text {
-  position: absolute;
-  inset: 0;
-  text-align: center;
-  font-size: 12px;
-  line-height: 18px;
 }
 
 .hud-counters {

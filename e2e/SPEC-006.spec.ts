@@ -598,8 +598,20 @@ test('a scene change crossfades over 1500 ms and stops the outgoing track at 0 (
   expect(afterMenu?.gain).toBeCloseTo(MUSIC_FULL, 2); // no re-fade
   expect(afterMenu?.seek ?? 0).toBeGreaterThan(beforeMenu?.seek ?? 0); // and no restart
 
-  // AC-22: the real transition, driven by the button a player would press. The
-  // sampler is started but *not* awaited, so the click lands inside its window.
+  // AC-22: the real transition, driven by the button a player would press.
+  // SPEC-014's menu offers Continue (`go-station`) only when there is a save
+  // to continue, so one is created through the bridge first — which is also
+  // the honest shape of the scenario: a player continuing a run.
+  await page.evaluate(() => {
+    window.__reallm.save().create(0, {
+      name: 'Vance',
+      classId: 'marine',
+      appearance: { portrait: 1, primary: '#b7472a', secondary: '#2a3b4c' },
+      attributes: { might: 6, vigor: 5, agility: 1, tech: 1 },
+      difficulty: 'normal',
+    });
+  });
+  // The sampler is started but *not* awaited, so the click lands inside its window.
   const samples = page.evaluate(() => window.__qaSample(2600, 100));
   await page.locator('[data-testid="go-station"]').click();
   const trace = await samples;

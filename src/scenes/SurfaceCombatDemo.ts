@@ -29,6 +29,7 @@ import { CircleObstacles, type ArenaState, type ObstacleCircle } from '@/entitie
 import { Combat, computePlayerStats, rollElite, type CombatWorld, type LootDrop } from '@/systems/Combat';
 import { Economy } from '@/systems/Economy';
 import { Progression } from '@/systems/Progression';
+import type { HudModel } from '@/systems/UiHelpers';
 import { PlaceholderScene } from '@/scenes/Placeholders';
 import { SurfaceCombatView } from '@/views/SurfaceCombatView';
 import type { SceneParams } from '@/core/StateMachine';
@@ -86,15 +87,14 @@ export class SurfaceCombatDemo extends PlaceholderScene<'surface'> {
   readonly #orbs: Orb[] = [];
 
   // HUD nodes and their last-painted values, so the loop only writes deltas.
-  #hpFill: HTMLElement | null = null;
-  #hpText: HTMLElement | null = null;
+  // HP is not among them: the scene feeds the shared SPEC-014 HUD instead of
+  // painting a rival readout (`feedHud` below).
   #counters: HTMLElement | null = null;
   #bossBar: HTMLElement | null = null;
   #bossFill: HTMLElement | null = null;
   #toast: HTMLElement | null = null;
   #death: HTMLElement | null = null;
   #deathCause: HTMLElement | null = null;
-  #lastHp = -1;
   #lastCounters = '';
   #lastBossFrac = -1;
   #toastUntil = 0;
@@ -106,7 +106,10 @@ export class SurfaceCombatDemo extends PlaceholderScene<'surface'> {
   readonly #aliveCounts = new Map<EnemyId, number>();
 
   constructor(services: GameServices) {
-    super(services, 'surface', { pausable: true, music: 'surface_calm' });
+    // `deathOverlay: false`: the demo dies into its own `.hud-death` panel,
+    // and its Respawn button is the only path back — the shared SPEC-014
+    // overlay would sit on top of that button and swallow the click.
+    super(services, 'surface', { pausable: true, music: 'surface_calm', deathOverlay: false });
   }
 
   override enter(params: SceneParams['surface']): void {
@@ -227,6 +230,25 @@ export class SurfaceCombatDemo extends PlaceholderScene<'surface'> {
       time: world.time,
     });
     this.#paintHud(world);
+  }
+
+  /** The demo's save is in memory when no slot is bound; the HUD reads it all the same. */
+  protected override hudSave(): SaveV1 | null {
+    return this.#save;
+  }
+
+  /**
+   * One HP readout in this scene (SPEC-014 AC-58): the shared HUD's ♥ bar,
+   * fed the world's live numbers over the save's copy — mid-fight HP lives on
+   * the entity until the next safe point, and `computePlayerStats` counts gear
+   * and level where `core/Save`'s baseline does not.
+   */
+  protected override feedHud(model: HudModel): void {
+    super.feedHud(model);
+    const world = this.#world;
+    if (world === null) return;
+    model.hp[0] = Math.max(0, Math.round(world.player.hp));
+    model.hp[1] = world.stats.maxHp;
   }
 
   override debugInfo(): Record<string, number | string> {
@@ -479,15 +501,6 @@ export class SurfaceCombatDemo extends PlaceholderScene<'surface'> {
     const hud = document.createElement('div');
     hud.className = 'combat-hud';
 
-    const hp = document.createElement('div');
-    hp.className = 'hud-hp';
-    hp.dataset['testid'] = 'hud-hp';
-    const hpFill = document.createElement('div');
-    hpFill.className = 'hud-hp-fill';
-    const hpText = document.createElement('span');
-    hpText.className = 'hud-hp-text';
-    hp.append(hpFill, hpText);
-
     const counters = document.createElement('p');
     counters.className = 'hud-counters';
     counters.dataset['testid'] = 'hud-counters';
@@ -519,13 +532,11 @@ export class SurfaceCombatDemo extends PlaceholderScene<'surface'> {
     respawn.addEventListener('click', () => this.#respawn());
     death.append(deathTitle, deathCause, respawn);
 
-    hud.append(hp, counters, bossBar, toast, death);
+    hud.append(counters, bossBar, toast, death);
     if (new URLSearchParams(globalThis.location.search).has('debug')) hud.append(this.#buildDebugStrip());
     root.append(hud);
     this.disposer.add(() => hud.remove());
 
-    this.#hpFill = hpFill;
-    this.#hpText = hpText;
     this.#counters = counters;
     this.#bossBar = bossBar;
     this.#bossFill = bossFill;
@@ -564,15 +575,6 @@ export class SurfaceCombatDemo extends PlaceholderScene<'surface'> {
   }
 
   #paintHud(world: CombatWorld): void {
-    const p = world.player;
-    // Keyed on both ends of the fraction: a level-up moves maxHp, not hp.
-    const hp = Math.max(0, Math.round(p.hp)) + world.stats.maxHp * 100_000;
-    if (hp !== this.#lastHp && this.#hpFill !== null && this.#hpText !== null) {
-      this.#lastHp = hp;
-      const shown = Math.max(0, Math.round(p.hp));
-      this.#hpFill.style.width = `${Math.max(0, Math.min(100, (shown / world.stats.maxHp) * 100))}%`;
-      this.#hpText.textContent = `HP ${shown}/${world.stats.maxHp}`;
-    }
     const counters = `spawned ${this.#spawned} · elites ${this.#elites} · kills ${this.#kills}`;
     if (counters !== this.#lastCounters && this.#counters !== null) {
       this.#lastCounters = counters;
@@ -614,7 +616,6 @@ export class SurfaceCombatDemo extends PlaceholderScene<'surface'> {
     p.boosts.length = 0;
     p.hazardImmuneUntil = 0;
     save.player.hp = p.hp; // §4.8: respawn sets the saved HP to full
-    this.#lastHp = -1;
     this.#death?.classList.remove('is-visible');
     this.services.events.emit('player:respawned');
   }

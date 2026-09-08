@@ -30,8 +30,10 @@ test('enemies spawn and engage on Cinder-4 (AC-36, AC-37, AC-38)', async ({ page
   await start(page, '/?debug&scene=surface&planet=cinder4');
   await expect(page.locator('[data-testid="scene-label"]')).toHaveText('surface');
 
-  // Landing HP: marine demo pilot at full (the §6 pin, 184).
-  await expect(page.locator('[data-testid="hud-hp"]')).toContainText('HP 184/184');
+  // Landing HP: marine demo pilot at full (the §6 pin, 184). `hud-hp` is the
+  // shared SPEC-014 HUD's ♥ bar — the scene feeds it its live numbers rather
+  // than painting a rival readout.
+  await expect(page.locator('[data-testid="hud-hp"]')).toContainText('184/184');
 
   // The spawn director fills the field (plus the boss in its nest).
   await expect.poll(async () => Number((await info(page))['enemies'] ?? 0), { timeout: 20_000 }).toBeGreaterThan(4);
@@ -43,7 +45,35 @@ test('enemies spawn and engage on Cinder-4 (AC-36, AC-37, AC-38)', async ({ page
   await expect.poll(async () => (await counters(page)).kills, { timeout: 30_000 }).toBeGreaterThan(2);
   await expect
     .poll(async () => (await page.locator('[data-testid="hud-hp"]').textContent()) ?? '', { timeout: 30_000 })
-    .not.toContain('HP 184/184');
+    .not.toContain('184/184');
+});
+
+/**
+ * The merge put SPEC-014's HUD and SPEC-011's combat chrome in one scene, and
+ * QA caught them colliding twice: two HP readouts disagreeing mid-fight, and
+ * the placeholder nav buttons sitting on the HUD's resource column. Both are
+ * composition defects only this merged tree can show (SPEC-014 AC-58).
+ */
+test('the merged scene wears one HUD: a single HP readout, resources uncovered', async ({ page }) => {
+  await start(page, '/?debug&scene=surface&planet=cinder4');
+  await expect(page.locator('[data-testid="scene-label"]')).toHaveText('surface');
+
+  // One HP readout on the whole page — the shared HUD's, at the world's live
+  // numbers even with no save slot bound (never the model's 0/1 default).
+  await expect(page.locator('[data-testid="hud-hp"]')).toHaveCount(1);
+  await expect(page.locator('[data-testid="hud-hp"]')).toContainText('184/184');
+
+  // QA's occlusion probe: the hit at the oil counter's centre resolves inside
+  // no nav button (the nav lives mid-left now, off the HUD's corners).
+  expect(
+    await page.evaluate(() => {
+      const oil = document.querySelector('[data-testid="res-oil"]');
+      if (oil === null) return 'res-oil missing';
+      const box = oil.getBoundingClientRect();
+      const hit = document.elementFromPoint(box.x + box.width / 2, box.y + box.height / 2);
+      return hit !== null && hit.closest('.scene-nav') !== null ? 'covered by scene-nav' : null;
+    }),
+  ).toBeNull();
 });
 
 test('elites arrive at roughly the planet rate of 1 in 20 (AC-40)', async ({ page }) => {
@@ -82,7 +112,7 @@ test('elites arrive at roughly the planet rate of 1 in 20 (AC-40)', async ({ pag
 test('the player dies, respawns, and the brains re-acquire them (AC-41)', async ({ page }) => {
   test.setTimeout(90_000);
   await start(page, '/?debug&scene=surface&planet=cinder4');
-  await expect(page.locator('[data-testid="hud-hp"]')).toContainText('HP 184/184');
+  await expect(page.locator('[data-testid="hud-hp"]')).toContainText('184/184');
 
   // 60 a click against 184 HP; clicks are spaced past the 0.3 s i-frames.
   for (let i = 0; i < 4; i++) {
@@ -92,9 +122,13 @@ test('the player dies, respawns, and the brains re-acquire them (AC-41)', async 
   await expect(page.locator('[data-testid="hud-death"]')).toBeVisible();
   await expect(page.locator('[data-testid="hud-death"]')).toContainText('Cause: fall');
 
+  // The demo's panel is the only death surface in this scene: the shared
+  // SPEC-014 overlay stays unmounted here, because at z 30 over the combat
+  // HUD's z 11 it would cover the Respawn button that the next line clicks.
+  await expect(page.locator('[data-testid="death-overlay"]')).toHaveCount(0);
   await page.locator('[data-testid="demo-respawn"]').click();
   await expect(page.locator('[data-testid="hud-death"]')).toBeHidden();
-  await expect(page.locator('[data-testid="hud-hp"]')).toContainText('HP 184/184');
+  await expect(page.locator('[data-testid="hud-hp"]')).toContainText('184/184');
 
   // §4.5's "player dead → wander" is sticky, so the interesting half is what
   // happens *after*: the enemies must come back for the respawned player rather

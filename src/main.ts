@@ -13,12 +13,14 @@ import { SaveStore } from '@/core/Save';
 import { createSettings } from '@/core/Settings';
 import type { SceneId } from '@/core/StateMachine';
 import { ASSETS } from '@/data/assets';
-import { PLACEHOLDER_SCENES } from '@/scenes/Placeholders';
+import { GAME_SCENES } from '@/scenes/index';
 import { SurfaceCombatDemo } from '@/scenes/SurfaceCombatDemo';
 import { BootOverlay } from '@/ui/BootOverlay';
 import { ContextLostOverlay } from '@/ui/ContextLostOverlay';
+import { uiLayers } from '@/ui/dom';
 import { StatsOverlay } from '@/ui/StatsOverlay';
 import { TransitionOverlay } from '@/ui/TransitionOverlay';
+import { UpdateOverlay } from '@/ui/UpdateOverlay';
 
 const canvas = document.getElementById('game');
 if (!(canvas instanceof HTMLCanvasElement)) throw new Error('index.html must carry <canvas id="game">');
@@ -47,6 +49,31 @@ const settings = createSettings(undefined, events);
 const input = new Input(canvas, events, settings);
 
 /**
+ * SPEC-014 AC-88/AC-110: reduced motion is one DOM contract — a `reduce-motion`
+ * class on `<html>` that every static-version CSS rule gates on. The setting
+ * *defaults* from `prefers-reduced-motion` (core/Settings.ts), the panel's
+ * toggle overrides it, and a live OS flip below folds back into the same
+ * setting — so the CSS and the JS halves can never disagree.
+ */
+const motionOwner = {};
+const applyReduceMotion = (): void => {
+  document.documentElement.classList.toggle('reduce-motion', settings.get().reduceMotion);
+};
+applyReduceMotion();
+events.on(
+  'settings:changed',
+  ({ patch }) => {
+    if (patch.reduceMotion !== undefined) applyReduceMotion();
+  },
+  motionOwner,
+);
+if (typeof globalThis.matchMedia === 'function') {
+  globalThis.matchMedia('(prefers-reduced-motion: reduce)').addEventListener('change', (event) => {
+    settings.set({ reduceMotion: event.matches });
+  });
+}
+
+/**
  * SPEC-007's slot store. Built here rather than left to `Game` because it needs
  * the same settings store — `persistGranted` and `installHintShownAt` are where
  * §4.7 records what the browser answered.
@@ -72,6 +99,17 @@ const audio = createAudio({
 // The overlay buttons need the game they drive, and the game needs the overlay:
 // the simulators reach it late, through a click, so a holder is enough.
 let running: Game | undefined;
+// SPEC-014 AC-103: dormant until M7's service worker gives it a signal.
+new UpdateOverlay(uiRoot);
+
+/**
+ * The `ui:toast` bridge (SPEC-014 §4.6): systems that may not import `ui/` —
+ * the save store's "Code is damaged", the economy's cargo warnings — emit the
+ * event; the composition root is the one place that knows both halves. The
+ * audio layer plays its blip off the same event independently.
+ */
+const toastOwner = {};
+events.on('ui:toast', ({ text, kind, ms }) => uiLayers(uiRoot).toast(text, kind ?? 'info', ms), toastOwner);
 const statsOverlay = new StatsOverlay(uiRoot, {
   onLoseContext: (restoreAfterMs) => running?.loseContext(restoreAfterMs),
   restoreAfterMs: SIMULATED_RESTORE_MS,
@@ -81,8 +119,13 @@ const game = new Game({
   canvas,
   uiRoot,
   manifest: ASSETS,
-  // SPEC-011's browser harness stands in for the surface scene until SPEC-012.
-  factory: { ...PLACEHOLDER_SCENES, surface: (services) => new SurfaceCombatDemo(services) },
+  // SPEC-014's real menu/creation/station/starmap over the placeholders, with
+  // SPEC-011's browser harness still standing in for surface until SPEC-012.
+  // It extends PlaceholderScene and keeps that shell's pause menu, touch layer
+  // and rotate overlay — but it owns the death moment (its own panel and
+  // respawn path, the shared overlay declined) and feeds the shell's HUD its
+  // live combat numbers, so the scene shows one death panel and one HP readout.
+  factory: { ...GAME_SCENES, surface: (services) => new SurfaceCombatDemo(services) },
   events,
   flags,
   ui: {
@@ -95,9 +138,11 @@ const game = new Game({
 });
 running = game;
 
-/** Escape toggles the pause menu of a pausable scene (SPEC-003 §4.5, D-38). */
+/** Escape and P toggle the pause menu of a pausable scene (SPEC-003 §4.5, D-38, SPEC-014 AC-82). */
 function onEscape(event: KeyboardEvent): void {
-  if (event.key !== 'Escape') return;
+  if (event.key !== 'Escape' && event.code !== 'KeyP') return;
+  // P while typing a name is a letter, not a pause (Escape stays a pause).
+  if (event.code === 'KeyP' && (event.target instanceof HTMLInputElement || event.target instanceof HTMLTextAreaElement)) return;
   if (game.scenes.paused) game.requestResume();
   else game.scenes.pause();
 }
@@ -124,6 +169,9 @@ if (import.meta.env.DEV) {
     save: () => save,
     /** SPEC-006 §9: unlock, buses and voice handles, for the M1 audio suite. */
     audio: () => audio,
+    /** SPEC-014 §4.6: raises a toast of any kind, for the toast-layer acceptance run. */
+    toast: (text: string, kind?: GameEvents['ui:toast']['kind'], ms?: number) =>
+      events.emit('ui:toast', { text, kind, ms }),
     trace: () => game.trace(),
     loseContext: (restoreAfterMs: number | null) => game.loseContext(restoreAfterMs),
     stop: () => game.stop(),
