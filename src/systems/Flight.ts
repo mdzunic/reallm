@@ -170,6 +170,12 @@ const FIGHTER_APPROACH = 25;
 const INTERCEPTOR_ENTER_DEPTH = 160;
 const INTERCEPTOR_DIVE = 55;
 const REAIM_DEPTH = 60;
+/**
+ * A ram costs a flat 15 hull (the spec's acceptance line). §4.4's
+ * `def.damage` formula cannot hold here: SPEC-009's chapter scaling pins
+ * `hive_interceptor.damage` at 34 (content test), not the 12 §4.4 annotates.
+ */
+export const INTERCEPTOR_RAM_DAMAGE = 15;
 const ENEMY_SHOT_VDEPTH = -45;
 const ENEMY_SHOT_RADIUS = 0.4;
 /** Ion storms: window and gap bounds, and the hull tick while shields are down (§4.5). */
@@ -346,6 +352,8 @@ export class Flight {
       this.#launchT += dt;
       this.#updateReticle(dt, input); // empty sky: the raw aim owns the reticle
       this.#steer(dt, input);
+      // §4.8: survive timers are flight time while alive — launch counts too.
+      this.#missions.update(dt);
       if (this.#launchT >= LAUNCH_SECONDS) this.#phase = 'cruise';
       return; // §4.1: no hazards, no weapons, no storms during launch
     }
@@ -353,6 +361,9 @@ export class Flight {
     if (this.#phase === 'cruise') {
       this.#covered += dt * this.#speedMult * this.#throttleLive;
       if (this.progress >= 1) {
+        // A group placed at the trip's very end (frac 1) fires before the
+        // arrival check, so it can never be skipped past.
+        this.#spawnGroups();
         // §4.1: every group spawned and no wave enemy alive → arrived, else hold.
         if (this.#waveClear()) {
           this.#arrive();
@@ -399,7 +410,16 @@ export class Flight {
       const factor = this.#throttleLive / before;
       for (let i = 0; i < this.hazards.size; i++) {
         const hazard = this.hazards.at(i);
-        if (hazard.kind === 'asteroid' || hazard.kind === 'enemy_shot') hazard.vDepth *= factor;
+        if (hazard.kind === 'asteroid' || hazard.kind === 'enemy_shot') {
+          hazard.vDepth *= factor;
+        } else if (hazard.kind === 'interceptor') {
+          // The whole dive vector scales, so the aim line holds while the
+          // closing speed follows the throttle. Fighters re-derive their
+          // approach from the live throttle every frame instead.
+          hazard.vx *= factor;
+          hazard.vy *= factor;
+          hazard.vDepth *= factor;
+        }
       }
     }
   }
@@ -572,7 +592,11 @@ export class Flight {
     // §4.3: Poisson at `asteroidDensity × throttle` per second, capped per preset.
     const rate = this.#cfg.planet.flight.asteroidDensity * this.#throttleLive;
     if (this.#rng.next() < rate * dt && this.#asteroidCount() < this.#asteroidCap) this.spawnAsteroid();
-    // §4.4: wave groups fire at their trip fraction — throttle-scaled seconds.
+    this.#spawnGroups();
+  }
+
+  /** §4.4: wave groups fire at their trip fraction — throttle-scaled seconds. */
+  #spawnGroups(): void {
     for (const group of this.#groups) {
       if (group.spawned || this.progress < group.frac) continue;
       group.spawned = true;
@@ -639,7 +663,7 @@ export class Flight {
     }
     hazard.kind = 'fighter';
     hazard.depth = FIGHTER_ENTER_DEPTH;
-    hazard.vDepth = -FIGHTER_APPROACH;
+    hazard.vDepth = -FIGHTER_APPROACH * this.#throttleLive;
     hazard.holdDepth = rng.float(FIGHTER_HOLD_MIN, FIGHTER_HOLD_MAX);
     hazard.ttl = FIGHTER_LEAVE_SECONDS;
     hazard.pattern = rng.angle();
@@ -648,8 +672,9 @@ export class Flight {
 
   /** §4.4: straight at the ship's position, sampled now; `vDepth` stays the dive. */
   #aimDive(hazard: Hazard): void {
-    const eta = (hazard.depth - RAIL.hitDepth) / INTERCEPTOR_DIVE;
-    hazard.vDepth = -INTERCEPTOR_DIVE;
+    const dive = INTERCEPTOR_DIVE * this.#throttleLive;
+    const eta = (hazard.depth - RAIL.hitDepth) / dive;
+    hazard.vDepth = -dive;
     hazard.vx = (this.ship.x - hazard.x) / eta;
     hazard.vy = (this.ship.y - hazard.y) / eta;
   }
@@ -669,7 +694,8 @@ export class Flight {
           }
           const hold = hazard.holdDepth ?? FIGHTER_HOLD_MIN;
           if (hazard.depth > hold) {
-            hazard.vDepth = -FIGHTER_APPROACH;
+            // §4.1: closing speed follows the live throttle, like every hazard.
+            hazard.vDepth = -FIGHTER_APPROACH * this.#throttleLive;
             hazard.depth += hazard.vDepth * dt;
           } else {
             hazard.vDepth = 0;
@@ -701,8 +727,9 @@ export class Flight {
             const def = hazard.def;
             this.#burst(hazard.x, hazard.y, hazard.depth, hazard.radius);
             this.hazards.free(i);
-            // §4.4: the ram costs `def.damage` and the interceptor with it.
-            this.hit(def?.damage ?? 12, 'enemy', def === undefined ? { kind: 'asteroid' } : { kind: 'enemy', enemyId: def.id as EnemyId });
+            // The ram costs a flat 15 and the interceptor with it (see the
+            // constant for why §4.4's `def.damage` cannot apply).
+            this.hit(INTERCEPTOR_RAM_DAMAGE, 'enemy', def === undefined ? { kind: 'asteroid' } : { kind: 'enemy', enemyId: def.id as EnemyId });
             continue;
           }
           if (hazard.depth < -5) this.hazards.free(i);

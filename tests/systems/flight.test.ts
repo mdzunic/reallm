@@ -192,6 +192,44 @@ describe('duration by engine tier and throttle', () => {
     step(flight, 0.6);
     expect(flight.throttleLive).toBeCloseTo(1.2, 5);
   });
+
+  it('scales fighter approach and interceptor dive with the throttle (AC-56)', () => {
+    const w = world({ planet: quietPlanet(PLANETS.hive, 300) });
+    step(w.flight, LAUNCH_SECONDS + DT);
+    // A fighter still approaching (25/s) and an already-aimed diving interceptor (55/s).
+    const fighter = inject(w.flight, {
+      kind: 'fighter',
+      depth: 90,
+      def: ENEMIES.scav_fighter,
+      radius: ENEMIES.scav_fighter.radius,
+      hp: ENEMIES.scav_fighter.hp,
+      ttl: 1_000,
+      holdDepth: 5,
+      fireCooldown: 1_000,
+      vDepth: -25,
+    });
+    const interceptor = inject(w.flight, {
+      kind: 'interceptor',
+      depth: 160,
+      x: 4,
+      y: 3,
+      vx: -1,
+      vy: -1,
+      vDepth: -55,
+      def: ENEMIES.hive_interceptor,
+      radius: ENEMIES.hive_interceptor.radius,
+      hp: ENEMIES.hive_interceptor.hp,
+      pattern: 1, // already re-aimed
+    });
+    step(w.flight, DT, { throttleUp: true });
+    step(w.flight, 1.1); // the lerp completes at one notch per second
+    expect(w.flight.throttleLive).toBeCloseTo(1.2, 5);
+    expect(fighter.vDepth).toBeCloseTo(-25 * 1.2, 3);
+    // The interceptor scales its whole dive vector, so the aim line holds.
+    expect(interceptor.vDepth).toBeCloseTo(-55 * 1.2, 3);
+    expect(interceptor.vx).toBeCloseTo(-1 * 1.2, 3);
+    expect(interceptor.vy).toBeCloseTo(-1 * 1.2, 3);
+  });
 });
 
 // ----------------------------------------------------------------- steering
@@ -398,6 +436,15 @@ describe('waves, arrival and holding', () => {
     expect(w.flight.phase).toBe('arrived');
   });
 
+  it('spawns a frac-1 group on the arrival frame instead of skipping it', () => {
+    // Vetra's group at 45 s of a 45 s trip lands exactly on the frame progress
+    // crosses 1: it must still spawn and hold the ship, not vanish unspawned.
+    const w = world({ planet: { ...wavesOnly(PLANETS.vetra), travelSeconds: 45 } });
+    step(w.flight, LAUNCH_SECONDS + 45 + 2 * DT);
+    expect(w.flight.phase).toBe('holding');
+    expect(w.flight.hostiles).toBe(2);
+  });
+
   it('caps the holding pattern at 90 s and lands anyway (AC-26)', () => {
     const w = world({ planet: quietPlanet(PLANETS.hive, 20) });
     step(w.flight, LAUNCH_SECONDS + DT);
@@ -407,6 +454,33 @@ describe('waves, arrival and holding', () => {
     step(w.flight, 4);
     expect(w.flight.phase).toBe('arrived');
     expect(w.flight.holdSeconds).toBeGreaterThanOrEqual(TUNING.HOLD_PATTERN_MAX_SECONDS);
+  });
+});
+
+// ---------------------------------------------------------------- ram damage
+
+describe('interceptor ram', () => {
+  it('rams at hitDepth for a flat 15 through the shield (AC-10)', () => {
+    const w = world({ planet: quietPlanet(PLANETS.hive, 300) });
+    step(w.flight, LAUNCH_SECONDS + DT);
+    // Aimed dead-on and past the re-aim depth: the next half second rams.
+    inject(w.flight, {
+      kind: 'interceptor',
+      depth: 10,
+      vDepth: -55,
+      def: ENEMIES.hive_interceptor,
+      radius: ENEMIES.hive_interceptor.radius,
+      hp: ENEMIES.hive_interceptor.hp,
+      pattern: 1,
+    });
+    step(w.flight, 0.5);
+    expect(w.flight.hostiles).toBe(0); // the interceptor dies with the ram
+    // AC-10 pins the flat 15 — not ENEMIES.hive_interceptor.damage (34), which
+    // SPEC-009's chapter scaling owns, nor the 12 §4.4 annotates.
+    expect(w.flight.ship.shield).toBe(w.flight.ship.maxShield - 15);
+    expect(w.flight.ship.hull).toBe(w.flight.ship.maxHull);
+    expect(w.of('ship:damaged').at(-1)).toEqual({ shield: w.flight.ship.maxShield - 15, hull: w.flight.ship.maxHull, source: 'enemy' });
+    expect(w.of('enemy:killed')).toEqual([]); // a ram is not a player kill
   });
 });
 
@@ -542,14 +616,15 @@ describe('missions in flight', () => {
     expect(w.missions.active).toEqual(['c5_m1']);
   });
 
-  it('counts survive through cruise and holding (AC-88, AC-113)', () => {
+  it('counts survive through launch, cruise and holding (AC-88, AC-113)', () => {
     const w = world({ planet: quietPlanet(PLANETS.hive, 20), accept: ['c5_m1'] });
     step(w.flight, LAUNCH_SECONDS + DT);
     blocker(w.flight);
-    step(w.flight, 30); // 20 s cruise + 10 s holding
+    step(w.flight, 30); // 20 s cruise + 10 s holding, after the 3 s launch
     expect(w.flight.phase).toBe('holding');
     const entry = w.save.progress.missionsActive.find((m) => m.id === 'c5_m1')!;
-    expect(entry.counters['0:0']).toBeCloseTo(30, 0);
+    // §4.8: the timer is flight time while alive — the launch seconds count.
+    expect(entry.counters['0:0']).toBeCloseTo(LAUNCH_SECONDS + 30, 0);
   });
 
   it('counts kills for the named enemy only (AC-113)', () => {
