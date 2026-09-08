@@ -344,6 +344,9 @@ export class SurfaceScene extends UiScene<'surface'> {
     const pauseMenu = new PauseMenu(services, () => services.requestResume());
     this.#pauseMenu = pauseMenu;
     this.disposer.add(() => pauseMenu.dispose());
+    // Quitting out of an open pause menu never calls resume(); the disposer is
+    // what releases the duck (SPEC-006 AC-54).
+    this.disposer.add(() => services.audio.duck(false));
     const rotate = new RotateOverlay(services.uiRoot, services.events);
     this.disposer.add(() => rotate.dispose());
     this.#dialogue = dialogueLayer(services.uiRoot, services.events, {
