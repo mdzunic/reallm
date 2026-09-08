@@ -192,6 +192,7 @@ export class SurfaceScene extends UiScene<'surface'> {
   #music: 'surface_calm' | 'surface_combat' | 'boss' = 'surface_calm';
   #musicHold = 0;
   #minimapIn = 0;
+  #touchHint: string | null = null;
 
   // Debug-overlay counters (`?debug`, §4.5 observability; e2e reads them).
   #spawned = 0;
@@ -1128,7 +1129,14 @@ export class SurfaceScene extends UiScene<'surface'> {
     m.boss = boss === null ? null : { name: boss.def.name, hp: Math.max(0, Math.round(boss.hp)), max: boss.maxHp };
     m.consumable = this.#consumableSlot();
     m.interact = this.#interactHint(world);
-    this.#touch?.setInteractHint(m.interact === null ? null : 'USE');
+    // Only on change: `setInteractHint` re-applies the touch layout, which
+    // resets the floating stick — calling it per frame would kill the stick
+    // the moment a thumb raises it.
+    const hint = m.interact === null ? null : 'USE';
+    if (hint !== this.#touchHint) {
+      this.#touchHint = hint;
+      this.#touch?.setInteractHint(hint);
+    }
   }
 
   /** The interact prompt (§4.12), including the deliver shortfall hint (E16). */
