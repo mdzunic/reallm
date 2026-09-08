@@ -2036,3 +2036,130 @@ html.reduce-motion .overlay-ending-escape .ending-prompt {
     max-height: 44dvh;
   }
 }
+
+/* --------------------------- SPEC-011 surface combat demo HUD (SPEC-012 replaces it) */
+
+/* Read-only chrome never eats a tap; only the buttons opt back in. */
+.combat-hud {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 11;
+}
+
+.hud-hp {
+  position: absolute;
+  left: 50%;
+  bottom: max(18px, env(safe-area-inset-bottom));
+  width: 220px;
+  height: 18px;
+  transform: translateX(-50%);
+  border: 1px solid #33465a;
+  border-radius: 6px;
+  background: #0d141bcc;
+  overflow: hidden;
+}
+
+.hud-hp-fill {
+  height: 100%;
+  width: 100%;
+  background: #4a8ad0;
+  transition: width 120ms linear;
+}
+
+.hud-hp-text {
+  position: absolute;
+  inset: 0;
+  text-align: center;
+  font-size: 12px;
+  line-height: 18px;
+}
+
+.hud-counters {
+  position: absolute;
+  left: 50%;
+  bottom: calc(max(18px, env(safe-area-inset-bottom)) + 24px);
+  transform: translateX(-50%);
+  margin: 0;
+  font-size: 12px;
+  opacity: 0.85;
+}
+
+.hud-boss {
+  position: absolute;
+  left: 50%;
+  top: max(52px, calc(env(safe-area-inset-top) + 40px));
+  width: 280px;
+  height: 12px;
+  transform: translateX(-50%);
+  border: 1px solid #7a4a22;
+  border-radius: 6px;
+  background: #0d141bcc;
+  overflow: hidden;
+  display: none;
+}
+
+.hud-boss.is-visible {
+  display: block;
+}
+
+.hud-boss-fill {
+  height: 100%;
+  width: 100%;
+  background: #d05a3a;
+  transition: width 120ms linear;
+}
+
+.hud-toast {
+  position: absolute;
+  left: 50%;
+  top: max(76px, calc(env(safe-area-inset-top) + 64px));
+  transform: translateX(-50%);
+  margin: 0;
+  font-size: 14px;
+  text-shadow: 0 1px 3px #000;
+}
+
+.hud-death {
+  position: absolute;
+  inset: 0;
+  display: none;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  background: #0d141bd0;
+  pointer-events: auto;
+}
+
+.hud-death.is-visible {
+  display: flex;
+}
+
+.hud-death-title {
+  margin: 0;
+  font-size: 26px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.hud-death-cause {
+  margin: 0;
+  font-size: 14px;
+  opacity: 0.8;
+}
+
+.hud-debug {
+  position: absolute;
+  right: max(12px, env(safe-area-inset-right));
+  bottom: max(18px, env(safe-area-inset-bottom));
+  display: flex;
+  gap: 6px;
+  pointer-events: auto;
+}
+
+button.hud-button {
+  padding: 6px 14px;
+  font-size: 13px;
+  pointer-events: auto;
+}

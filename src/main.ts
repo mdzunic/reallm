@@ -14,6 +14,7 @@ import { createSettings } from '@/core/Settings';
 import type { SceneId } from '@/core/StateMachine';
 import { ASSETS } from '@/data/assets';
 import { GAME_SCENES } from '@/scenes/index';
+import { SurfaceCombatDemo } from '@/scenes/SurfaceCombatDemo';
 import { BootOverlay } from '@/ui/BootOverlay';
 import { ContextLostOverlay } from '@/ui/ContextLostOverlay';
 import { uiLayers } from '@/ui/dom';
@@ -118,7 +119,11 @@ const game = new Game({
   canvas,
   uiRoot,
   manifest: ASSETS,
-  factory: GAME_SCENES,
+  // SPEC-014's real menu/creation/station/starmap over the placeholders, with
+  // SPEC-011's browser harness still standing in for surface until SPEC-012.
+  // It extends PlaceholderScene, so it keeps the HUD, pause menu, touch layer
+  // and overlays that shell mounts.
+  factory: { ...GAME_SCENES, surface: (services) => new SurfaceCombatDemo(services) },
   events,
   flags,
   ui: {
