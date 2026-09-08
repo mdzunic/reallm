@@ -111,6 +111,179 @@ test.describe('depart confirm sheet', () => {
   });
 });
 
+test.describe('the toast layer', () => {
+  // The rack is the one piece of UI every system talks to, and the only path a
+  // browser has to two of its four kinds is the DEV bridge (SPEC-014 §4.6).
+  test.use({ reducedMotion: 'reduce' });
+
+  test('all four kinds render, and warn carries the ▲ of its colourblind pair (AC-68, AC-79)', async ({
+    page,
+  }) => {
+    await start(page);
+    // Long-lived so the assertions are not racing the 2.5 s default.
+    await page.evaluate(() => {
+      window.__reallm.toast('Cargo full', 'warn', 60_000);
+      window.__reallm.toast('Level up', 'good', 60_000);
+      window.__reallm.toast('Not enough tokens', 'error', 60_000);
+    });
+    const rack = page.locator('.toast-rack');
+    await expect(rack.locator('.toast')).toHaveCount(3);
+
+    const warn = rack.locator('.toast-warn');
+    // Amber alone is the thing AC-68 forbids: the glyph is the other half.
+    await expect(warn.locator('.glyph')).toHaveText('▲');
+    await expect(warn).toHaveCSS('border-color', 'rgb(245, 166, 35)');
+    await expect(rack.locator('.toast-good')).toHaveCSS('border-color', 'rgb(70, 201, 115)');
+    await expect(rack.locator('.toast-error')).toHaveCSS('border-color', 'rgb(229, 72, 77)');
+
+    // The fourth kind, and the cap: a fourth toast evicts the oldest (AC-78).
+    await page.evaluate(() => window.__reallm.toast('Docking subsidy logged', 'info', 60_000));
+    await expect(rack.locator('.toast')).toHaveCount(3);
+    await expect(rack.locator('.toast-info')).toHaveCount(1);
+    await expect(rack.locator('.toast-warn')).toHaveCount(0); // the oldest went
+  });
+
+  test('identical text inside the window coalesces behind a counter (AC-80)', async ({ page }) => {
+    await start(page);
+    const rack = page.locator('.toast-rack');
+    // One raise per assertion so the coalescing window is never the variable.
+    await page.evaluate(() => window.__reallm.toast('Cargo full', 'warn', 60_000));
+    await expect(rack.locator('.toast')).toHaveCount(1);
+    await expect(rack.locator('.toast-warn')).toHaveText('▲Cargo full');
+
+    await page.evaluate(() => window.__reallm.toast('Cargo full', 'warn', 60_000));
+    await expect(rack.locator('.toast')).toHaveCount(1);
+    await expect(rack.locator('.toast-warn')).toHaveText('▲Cargo full×2');
+
+    await page.evaluate(() => window.__reallm.toast('Cargo full', 'warn', 60_000));
+    await expect(rack.locator('.toast')).toHaveCount(1);
+    await expect(rack.locator('.toast-warn')).toHaveText('▲Cargo full×3');
+
+    // A different text is a different toast, not a fourth tick of the counter.
+    await page.evaluate(() => window.__reallm.toast('Hold is heavy', 'warn', 60_000));
+    await expect(rack.locator('.toast')).toHaveCount(2);
+  });
+});
+
+test.describe('the purchase confirm sheet', () => {
+  test.use({ reducedMotion: 'reduce' });
+
+  test('re-validates on confirm and stays open when the tokens have gone (AC-43, AC-44)', async ({
+    page,
+  }) => {
+    await start(page);
+    await page.evaluate((creation) => {
+      const data = window.__reallm.save().create(0, creation);
+      data.player.tokens = 500;
+    }, CREATION);
+    expect(await go(page, 'station', {})).toBe(true);
+    await page.locator('[data-testid="station-tab-shop"]').click();
+
+    await page.locator('[data-testid="shop-ship-hull-buy"]').click();
+    const sheet = page.locator('.sheet-backdrop');
+    // The AC's own shape: what, which tier, and what it costs (AC-43).
+    await expect(sheet).toContainText(/Buy Hull Tier 1 for \d+ tokens\?/);
+    await expect(page.locator('[data-testid="confirm-no"]')).toBeVisible();
+
+    // The tokens leave while the sheet is open — the case a stale render misses.
+    await page.evaluate(() => {
+      const data = window.__reallm.save().current;
+      if (!data) throw new Error('no save bound');
+      data.player.tokens = 1;
+    });
+    await page.locator('[data-testid="confirm-yes"]').click();
+
+    await expect(page.locator('.toast-error')).toHaveText('Not enough tokens');
+    await expect(sheet).toBeVisible(); // it does not close on a refusal
+    expect(await page.evaluate(() => window.__reallm.save().current?.ship['hull'])).toBe(0);
+
+    // With the tokens back, the same sheet completes the purchase.
+    await page.evaluate(() => {
+      const data = window.__reallm.save().current;
+      if (!data) throw new Error('no save bound');
+      data.player.tokens = 500;
+    });
+    await page.locator('[data-testid="confirm-yes"]').click();
+    await expect(sheet).toBeHidden();
+    expect(await page.evaluate(() => window.__reallm.save().current?.ship['hull'])).toBe(1);
+  });
+});
+
+test.describe('the pause menu', () => {
+  test.use({ reducedMotion: 'reduce' });
+
+  test('Escape and P both raise the same four entries (AC-81, AC-82)', async ({ page }) => {
+    await start(page);
+    await page.evaluate((creation) => window.__reallm.save().create(0, creation), CREATION);
+    // The graph runs menu → station ↔ starmap → flight → surface (SPEC-003 §3).
+    expect(await go(page, 'station', {})).toBe(true);
+    expect(await go(page, 'starmap', undefined)).toBe(true);
+    expect(await go(page, 'flight', { destination: 'cinder4' })).toBe(true);
+    expect(await go(page, 'surface', { planet: 'cinder4' })).toBe(true);
+
+    const pause = page.locator('.overlay-pause');
+    await expect(pause).toBeHidden();
+
+    await page.keyboard.press('Escape');
+    await expect(pause).toBeVisible();
+    for (const id of ['pause-resume', 'pause-settings', 'pause-controls', 'pause-quit']) {
+      const entry = page.locator(`[data-testid="${id}"]`);
+      await expect(entry).toBeVisible();
+      const box = await entry.boundingBox();
+      if (!box) throw new Error(`${id} has no box`);
+      expect(box.height, `${id} touch target`).toBeGreaterThanOrEqual(44); // AC-108
+    }
+
+    await page.keyboard.press('Escape');
+    await expect(pause).toBeHidden();
+    await page.keyboard.press('p');
+    await expect(pause).toBeVisible();
+  });
+});
+
+test.describe('the batched HUD', () => {
+  test.use({ reducedMotion: 'reduce' });
+
+  test('an unchanged model writes nothing to the DOM (AC-61, AC-62)', async ({ page }) => {
+    await start(page);
+    await page.evaluate((creation) => window.__reallm.save().create(0, creation), CREATION);
+    // The flight placeholder holds a still HUD: nothing feeds the model, so
+    // every flush of it must diff to the empty set. Reached the way the graph
+    // allows — menu → station → starmap → flight (SPEC-003 §3).
+    expect(await go(page, 'station', {})).toBe(true);
+    expect(await go(page, 'starmap', undefined)).toBe(true);
+    expect(await go(page, 'flight', { destination: 'cinder4' })).toBe(true);
+    await expect(page.locator('.hud-tl')).toBeVisible();
+
+    // Bars are scaled, never re-laid-out: a width write would show up here as a
+    // changing computed width instead of a changing matrix (AC-61).
+    const bar = page.locator('.hud-tl .bar-hp');
+    await expect(bar).toHaveCSS('transform', /^matrix\(/);
+
+    const mutations = await page.evaluate(async () => {
+      const root = document.querySelector('.hud-tl');
+      if (!root) throw new Error('no HUD');
+      let count = 0;
+      const observer = new MutationObserver((records) => {
+        count += records.length;
+      });
+      observer.observe(root, { subtree: true, attributes: true, characterData: true, childList: true });
+      const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
+      // The scene's own first paint is a write; under load it can land after the
+      // entry await. Let the HUD settle first, then hold it to the contract.
+      for (let i = 0; i < 25 && count > 0; i++) {
+        count = 0;
+        await sleep(200);
+      }
+      count = 0;
+      await sleep(1000); // ~60 flushes of an unchanged model
+      observer.disconnect();
+      return count;
+    });
+    expect(mutations).toBe(0);
+  });
+});
+
 test.describe('reduce motion', () => {
   test('the in-app toggle drives html.reduce-motion both ways (AC-88, AC-110)', async ({ page }) => {
     await start(page);

@@ -17,6 +17,8 @@ export interface DevBridge {
   save(): SaveBridge;
   /** SPEC-006's audio layer, for the M1 acceptance suite (§9). */
   audio(): AudioBridge;
+  /** SPEC-014 §4.6: raises a toast of any kind, for the toast-layer suite. */
+  toast(text: string, kind?: string, ms?: number): void;
   trace(): string[];
   loseContext(restoreAfterMs: number | null): void;
   stop(): void;
