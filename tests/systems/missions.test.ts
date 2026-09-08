@@ -186,7 +186,6 @@ describe('Missions — survive (AC-33, AC-40, AC-44)', () => {
 
 describe('Missions — defend resets when the POI dies (AC-34, AC-42)', () => {
   it('poi:damaged at 0 hp restarts the timer, once (12-d)', () => {
-    const h = harness();
     // c6_m2 is Eden's; drive a synthetic defend through the same machinery by
     // reusing its schema on this planet is impossible — so test via the real
     // Eden mission on an Eden runtime.

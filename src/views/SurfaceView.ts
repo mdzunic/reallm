@@ -12,18 +12,52 @@ import type { EnemyEntity } from '@/entities/Enemy';
 import type { FollowerEntity } from '@/entities/Follower';
 import type { PlayerEntity } from '@/entities/Player';
 import type { ProjectileEntity } from '@/entities/Projectile';
-import type { Layout, LayoutPoi, ObstacleKind } from '@/systems/Layout';
-import type { NodeState, PickupEntity } from '@/systems/Pickups';
-import type { WeatherEffects } from '@/systems/Weather';
 import { EnemyMeshes } from '@/views/ProceduralMeshes';
+
+// Structural mirrors of the `systems/` shapes this view reads. Views must not
+// import `systems` (SPEC-001 §4), and the scene passes the real objects — the
+// compiler checks the fit at the call site.
+export type ObstacleKind = 'rock' | 'ruin' | 'spire' | 'vent' | 'tree';
+export type PoiKind = 'landing_pad' | 'scan' | 'reach' | 'deliver' | 'arena' | 'defend' | 'escort_start' | 'landmark';
+export type ParticleKind = 'sand' | 'snow' | 'spores' | 'ash' | 'heat' | 'none';
+
+export interface ViewWeather {
+  fogMult: number;
+  particles: ParticleKind;
+}
+
+export interface ViewLayout {
+  halfSize: number;
+  pois: readonly { kind: PoiKind; x: number; z: number; radius: number }[];
+  obstacles: readonly { x: number; z: number; radius: number; kind: ObstacleKind }[];
+  nodes: readonly { resource: ResourceId; x: number; z: number }[];
+  props: readonly { x: number; z: number; rot: number; scale: number; kind: string }[];
+}
+
+export interface ViewNode {
+  resource: ResourceId;
+  x: number;
+  z: number;
+  capacity: number;
+  remaining: number;
+  harvesting: boolean;
+}
+
+export interface ViewPickup {
+  kind: 'resource' | 'item' | 'gear';
+  x: number;
+  z: number;
+  seed: number;
+  resource: ResourceId;
+}
 
 export interface SurfaceFrame {
   player: PlayerEntity;
   follower: FollowerEntity | null;
   enemies: Pool<EnemyEntity>;
   projectiles: Pool<ProjectileEntity>;
-  pickups: Pool<PickupEntity>;
-  nodes: readonly NodeState[];
+  pickups: Pool<ViewPickup>;
+  nodes: readonly ViewNode[];
   /** The wurm's resurface telegraph, or `null`. */
   telegraph: { x: number; z: number } | null;
   time: number;
@@ -36,7 +70,7 @@ const RESOURCE_COLORS: Record<ResourceId, string> = {
   lithium: '#c8b8ff',
 };
 
-const PARTICLE_COLORS: Record<WeatherEffects['particles'], string> = {
+const PARTICLE_COLORS: Record<ParticleKind, string> = {
   sand: '#e0b070',
   snow: '#ffffff',
   spores: '#b0e080',
@@ -74,7 +108,7 @@ function obstacleGeometry(kind: ObstacleKind): THREE.BufferGeometry {
   }
 }
 
-function poiGeometry(kind: LayoutPoi['kind']): THREE.BufferGeometry {
+function poiGeometry(kind: PoiKind): THREE.BufferGeometry {
   switch (kind) {
     case 'landing_pad': {
       const g = new THREE.CylinderGeometry(5, 5.4, 0.4, 16);
@@ -161,10 +195,10 @@ export class SurfaceView {
   readonly #particles: THREE.Points;
   readonly #particleMaterial: THREE.PointsMaterial;
   readonly #particlePositions: Float32Array;
-  #particleKind: WeatherEffects['particles'] = 'none';
+  #particleKind: ParticleKind = 'none';
   #particleIntensity = 0;
 
-  constructor(scene: THREE.Scene, layout: Layout, planet: PlanetDef) {
+  constructor(scene: THREE.Scene, layout: ViewLayout, planet: PlanetDef) {
     this.#scene = scene;
     scene.add(this.#root);
     const palette = planet.surface.palette;
@@ -313,7 +347,7 @@ export class SurfaceView {
   }
 
   /** Fog, overlay hue and particle look, lerped by the scene over 3 s (§4.6). */
-  setWeather(effects: WeatherEffects, intensity: number): void {
+  setWeather(effects: ViewWeather, intensity: number): void {
     this.#fog.density = this.#baseFog * (1 + (effects.fogMult - 1) * intensity);
     this.#particleKind = effects.particles;
     this.#particleIntensity = intensity;

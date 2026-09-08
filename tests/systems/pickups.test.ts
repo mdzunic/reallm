@@ -3,12 +3,11 @@
 import { describe, expect, it } from 'vitest';
 import { EventBus, type GameEvents } from '@/core/Events';
 import { newSave, type SaveV1 } from '@/core/Save';
-import { RESOURCE_IDS, type ResourceId } from '@/data/index';
+import { type ResourceId } from '@/data/index';
 import { Economy } from '@/systems/Economy';
 import {
   CARGO_TOAST_SECONDS,
   CARGO_TOAST_TEXT,
-  CONTACT_DISTANCE,
   HARVEST_RADIUS,
   HARVEST_RATE,
   MAGNET_BONUS,

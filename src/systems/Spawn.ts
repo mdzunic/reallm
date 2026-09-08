@@ -11,7 +11,7 @@ import type { EventBus, GameEvents } from '@/core/Events';
 import type { Pool } from '@/core/Pool';
 import type { QualitySettings } from '@/core/Renderer';
 import type { Rng, WeightedEntry } from '@/core/Rng';
-import { ENEMIES, WAVES, type EnemyId, type PlanetDef, type WaveId } from '@/data/index';
+import { ENEMIES, WAVES, type EnemyId, type PlanetDef, type Wave, type WaveId } from '@/data/index';
 import type { EnemyEntity } from '@/entities/Enemy';
 import type { Layout } from '@/systems/Layout';
 import { rollElite } from '@/systems/Combat';
@@ -242,7 +242,7 @@ export class SpawnDirector {
 
   #updateWaves(dt: number, player: { x: number; z: number }): void {
     for (const run of this.#waves) {
-      const def = WAVES[run.wave];
+      const def: Wave = WAVES[run.wave];
       run.at += dt;
 
       // Ceiling room opens: delayed spawns spill before new groups (12-g).
@@ -288,7 +288,7 @@ export class SpawnDirector {
   }
 
   #spawnWaveEnemy(run: WaveRun, id: EnemyId, elite: boolean, player: { x: number; z: number }): void {
-    const def = WAVES[run.wave];
+    const def: Wave = WAVES[run.wave];
     const center = run.center === 'player' ? player : run.center;
     const angle = this.#rng.angle();
     const d = this.#rng.float(def.spawnBand[0], def.spawnBand[1]);
