@@ -167,6 +167,9 @@ if (import.meta.env.DEV) {
     save: () => save,
     /** SPEC-006 §9: unlock, buses and voice handles, for the M1 audio suite. */
     audio: () => audio,
+    /** SPEC-014 §4.6: raises a toast of any kind, for the toast-layer acceptance run. */
+    toast: (text: string, kind?: GameEvents['ui:toast']['kind'], ms?: number) =>
+      events.emit('ui:toast', { text, kind, ms }),
     trace: () => game.trace(),
     loseContext: (restoreAfterMs: number | null) => game.loseContext(restoreAfterMs),
     stop: () => game.stop(),
