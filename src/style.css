@@ -520,6 +520,10 @@ button.slot-button {
 }
 
 .toast-warn { border-color: var(--warn); }
+.toast-warn .glyph {
+  color: var(--warn);
+  margin-right: 8px;
+}
 .toast-error { border-color: var(--hp); }
 .toast-good { border-color: var(--good); }
 

@@ -168,6 +168,8 @@ export class UiRoot {
         h(
           'div',
           { class: `toast toast-${entry.kind}` },
+          // AC-68: the warn pair is amber *and* ▲, never hue alone.
+          entry.kind === 'warn' ? el('span', 'glyph', '▲') : null,
           entry.text,
           entry.count > 1 ? el('span', 'toast-count', `×${entry.count}`) : null,
         ),
