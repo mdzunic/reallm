@@ -777,6 +777,81 @@ html.reduce-motion .hud-vignette {
   transition: none;
 }
 
+/* SPEC-012 §4.11: the landing-pad terminal — accept missions, return to ship. */
+.pad-terminal {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  min-width: 280px;
+  max-width: min(420px, 90vw);
+  max-height: 70vh;
+  overflow-y: auto;
+  z-index: 12;
+}
+
+.pad-terminal.is-hidden {
+  display: none;
+}
+
+.pad-terminal .terminal-title {
+  margin: 0 0 8px;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+}
+
+.pad-terminal .terminal-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 6px 0;
+}
+
+.pad-terminal .terminal-active {
+  margin: 4px 0;
+  opacity: 0.8;
+}
+
+/* SPEC-012 §4.12: the storm overlay — the scene drives opacity from
+   1 − visibility; the element only tints and never takes pointer events. */
+.hud-storm {
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(ellipse at center, transparent 30%, rgba(30, 24, 16, 0.9));
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 400ms linear;
+}
+
+/* SPEC-012 AC-71: the 0.6 s static burst a `glitch` dialogue fires. */
+.hud-static {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  opacity: 0;
+  background:
+    repeating-linear-gradient(0deg, rgba(255, 255, 255, 0.14) 0 1px, transparent 1px 3px),
+    repeating-linear-gradient(90deg, rgba(160, 200, 255, 0.05) 0 2px, transparent 2px 5px);
+}
+
+.hud.is-static .hud-static {
+  opacity: 1;
+  animation: hud-static 90ms steps(3) infinite;
+}
+
+@keyframes hud-static {
+  0% { transform: translateY(0); }
+  50% { transform: translateY(-2px); }
+  100% { transform: translateY(1px); }
+}
+
+/* A static frame under reduce-motion — the burst shows, nothing moves. */
+html.reduce-motion .hud.is-static .hud-static {
+  animation: none;
+  opacity: 0.6;
+}
+
 /* --------------------------------------------------------------- dialogue */
 /* Bottom-center, above the objective line's slot (AC-69). */
 .dialogue {

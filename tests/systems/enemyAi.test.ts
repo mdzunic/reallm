@@ -47,6 +47,19 @@ describe('swarm archetype (dust_skitter)', () => {
     expect(e.state).toBe('chase');
   });
 
+  it('storm visibility narrows the aggro radius (SPEC-012 §4.6)', () => {
+    const h = harness();
+    // Sandstorm visibility 0.4: 18 m aggro shrinks to 7.2 — 12 m is unseen.
+    h.world.aggroMult = 0.4;
+    const e = h.spawn('dust_skitter', 12, 0);
+    h.run(1);
+    expect(e.aggro).toBe(false);
+    // The storm lifts: the same enemy acquires at the full radius again.
+    h.world.aggroMult = 1;
+    h.step();
+    expect(e.aggro).toBe(true);
+  });
+
   it('adds the lateral sine offset (±1 m, 1.5 Hz) while chasing', () => {
     const h = harness();
     const e = h.spawn('dust_skitter', 14, 0);

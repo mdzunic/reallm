@@ -230,7 +230,9 @@ function updateWander(e: EnemyEntity, world: CombatWorld, dt: number, rng: Rng):
     const target = targetOf(e, world);
     if (target.alive) {
       const d = distance(e.x, e.z, target.x, target.z);
-      if (e.aggro || (e.def.aggroRadius > 0 && d <= e.def.aggroRadius)) {
+      // SPEC-012 §4.6: storm visibility narrows the aggro radius.
+      const aggroRadius = e.def.aggroRadius * (world.aggroMult ?? 1);
+      if (e.aggro || (aggroRadius > 0 && d <= aggroRadius)) {
         e.aggro = true;
         enterState(e, 'chase');
         return;

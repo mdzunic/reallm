@@ -60,6 +60,9 @@ export class Hud {
   readonly #interact = el('div', 'hud-interact');
   readonly #objective = el('div', 'hud-objective');
   readonly #vignette = el('div', 'hud-vignette');
+  readonly #static = el('div', 'hud-static');
+  #minimap: HTMLCanvasElement | null = null;
+  #staticTimer: ReturnType<typeof setTimeout> | null = null;
 
   // Flight instruments (SPEC-013 §4.10); built only in flight mode.
   readonly #reticle = testId(el('div', 'hud-reticle'), 'reticle');
@@ -69,7 +72,6 @@ export class Hud {
   readonly #markers = el('div', 'hud-progress-markers');
   readonly #hostiles = testId(el('div', 'hud-hostiles'), 'hud-hostiles');
   readonly #storm = testId(el('div', 'hud-storm'), 'storm-warning');
-  readonly #static = el('div', 'hud-static');
   readonly #holding = testId(el('div', 'hud-holding'), 'holding-banner');
 
   constructor(root: UiRoot, mode: HudMode) {
@@ -109,7 +111,7 @@ export class Hud {
     tr.append(tokens);
 
     const tc = el('div', 'hud-tc');
-    tc.append(this.#weather, this.#boss.root);
+    tc.append(this.#weather, testId(this.#boss.root, 'hud-boss'));
     this.#boss.root.classList.add('is-hidden');
     // SPEC-013 §4.10: trip progress with wave markers, the hostiles counter,
     // the storm warning + static, the holding banner, and the reticle.
@@ -137,6 +139,7 @@ export class Hud {
       minimap.width = 96;
       minimap.height = 96;
       br.append(minimap);
+      this.#minimap = minimap;
     }
     br.append(this.#interact);
     this.#interact.classList.add('is-hidden');
@@ -145,11 +148,23 @@ export class Hud {
     bc.append(this.#objective);
     this.#objective.classList.add('is-hidden');
 
-    this.#root.append(this.#vignette, tl, tr, tc, bl, br, bc);
-    if (mode === 'flight') this.#root.append(this.#static, this.#reticle);
+    this.#root.append(this.#vignette, this.#static, tl, tr, tc, bl, br, bc);
+    if (mode === 'flight') this.#root.append(this.#reticle);
     root.mount(this.#root, 'hud');
     this.#unregister = root.register(this);
     this.#renderAll();
+  }
+
+  /** The box SPEC-012 draws its minimap into; `null` in flight mode. */
+  get minimapCanvas(): HTMLCanvasElement | null {
+    return this.#minimap;
+  }
+
+  /** SPEC-012 §4.12: the glitch dialogue static burst; CSS owns the look. */
+  staticBurst(ms: number): void {
+    this.#root.classList.add('is-static');
+    if (this.#staticTimer !== null) clearTimeout(this.#staticTimer);
+    this.#staticTimer = setTimeout(() => this.#root.classList.remove('is-static'), ms);
   }
 
   /**
@@ -193,6 +208,7 @@ export class Hud {
 
   dispose(): void {
     if (this.#flashTimer !== null) clearTimeout(this.#flashTimer);
+    if (this.#staticTimer !== null) clearTimeout(this.#staticTimer);
     this.#unregister();
     this.#ui.unmount(this.#root);
   }

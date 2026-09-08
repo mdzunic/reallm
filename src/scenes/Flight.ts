@@ -11,6 +11,7 @@
 // persisted: every trip starts at `maxHull`, which is §4.6's "restored at the
 // station and on landing" with no bookkeeping to get wrong.
 import * as THREE from 'three';
+import type { EventBus, GameEvents } from '@/core/Events';
 import type { InputState } from '@/core/Input';
 import { newSave, type CharacterCreation, type SaveV1 } from '@/core/Save';
 import type { GameServices } from '@/core/Services';
@@ -96,7 +97,11 @@ export class FlightScene extends UiScene<'flight'> {
     const visitRng = services.rng.visit(this.#planet.id, visits);
     const progression = new Progression(save, services.events);
     const economy = new Economy(save, services.events, progression, bound === null ? undefined : services.save);
-    const missions = new Missions(save, { scene: 'flight', planet: this.#planet.id }, economy, services.events);
+    // The runtime subscribes with an owner and releases the whole owner on
+    // dispose, which the narrow structural bus in `Services` cannot express —
+    // the same cast the surface scene makes for the same reason.
+    const bus = services.events as EventBus<GameEvents>;
+    const missions = new Missions(save, economy, bus, 'flight', this.#planet.id);
     this.#missions = missions;
     const flight = new Flight(
       {

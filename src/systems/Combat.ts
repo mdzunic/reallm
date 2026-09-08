@@ -176,6 +176,11 @@ export interface CombatWorld {
   obstacles: ObstacleGrid;
   arena: ArenaState | null;
   time: number;
+  /**
+   * Storm visibility narrowing every enemy's aggro radius (SPEC-012 §4.6:
+   * `aggroRadius × visibility`). Absent or 1 in calm weather.
+   */
+  aggroMult?: number;
 }
 
 /** What `killEnemy` rolled; SPEC-012 drains these into pickup entities (§4.7). */
@@ -346,9 +351,13 @@ export class Combat {
     const time = this.#world.time;
     if (!p.alive) return;
     if (source.kind === 'weather' && time < p.hazardImmuneUntil) return;
-    let applied = amount;
+    // SPEC-012 §4.6: weather damage is reduced by hazardResist before the
+    // fractional accumulator. The resist comes from a single armor slot capped
+    // at 0.75 (data/items.ts), so the product can never go negative.
+    const incoming = source.kind === 'weather' ? amount * (1 - this.#world.stats.hazardResist) : amount;
+    let applied = incoming;
     if (ignoreInvuln) {
-      this.#weatherAccum += amount;
+      this.#weatherAccum += incoming;
       applied = Math.floor(this.#weatherAccum);
       if (applied <= 0) return;
       this.#weatherAccum -= applied;

@@ -1,70 +1,84 @@
-// SPEC-011's browser acceptance run on Cinder-4, against the combat demo
-// harness (`scenes/SurfaceCombatDemo.ts`). The archetype mechanics, the damage
-// formulas, the loot streams and the spatial hash are pinned in node
-// (`tests/systems/`); what this suite proves is the wiring only a browser
-// shows — enemies actually spawn and engage on a real planet, elites arrive at
-// the planet's rate, the wurm's burrow really makes it untouchable, the die →
-// respawn round trip closes *and* the brains re-acquire the player afterwards,
-// and the surface scene still starts (and ducks) its own music bed.
+// SPEC-011's browser acceptance run on Cinder-4, now against the real surface
+// scene (`scenes/Surface.ts`, SPEC-012) — the combat demo harness it used to
+// drive was replaced wholesale, as that harness's own header promised. The
+// archetype mechanics, the damage formulas, the loot streams and the spatial
+// hash stay pinned in node (`tests/systems/`); what this suite proves is the
+// wiring only a browser shows — enemies actually spawn and engage on a real
+// planet, elites arrive at the planet's rate, the wurm's burrow really makes
+// it untouchable, the die → respawn round trip closes *and* the brains
+// re-acquire the player afterwards, and the surface scene still starts (and
+// ducks) its own music bed. The QA shortcuts moved to the real scene's
+// `?debug` strip (`surface-hurt`, `surface-spawn-boss`, …); the spawn/elite/
+// kill counters moved into `debugInfo()`.
 import { expect, test, type Page } from '@playwright/test';
 import { passGate, start } from './start';
 
 const info = async (page: Page): Promise<Record<string, number | string>> =>
   (await page.evaluate(() => window.__reallm.stats())).sceneInfo ?? {};
 
-const counters = async (page: Page): Promise<{ spawned: number; elites: number; kills: number }> => {
-  const text = (await page.locator('[data-testid="hud-counters"]').textContent()) ?? '';
-  const read = (key: string): number => Number((text.match(new RegExp(`${key} (\\d+)`)) ?? ['', '0'])[1]);
-  return { spawned: read('spawned'), elites: read('elites'), kills: read('kills') };
+/** Auto-fire on, so combat runs hands-free while an observation poll waits. */
+const autoFire = async (page: Page): Promise<void> => {
+  await page.addInitScript(() => localStorage.setItem('reallm:settings', JSON.stringify({ autoFire: 'on' })));
 };
 
-/** The demo lets the pilot die while a long observation runs; put them back up. */
-const reviveIfDead = async (page: Page): Promise<void> => {
-  const death = page.locator('[data-testid="hud-death"]');
-  if (await death.evaluate((el) => el.classList.contains('is-visible'))) {
-    await page.locator('[data-testid="demo-respawn"]').click();
+/**
+ * Walk toward the nearest enemy until `done` reads true (or the budget runs
+ * out). Enemies wander near their §4.5 spawn ring, 25–40 m out and past a
+ * skitter's 18 m aggro, so an idle pilot sees no combat — the patrol closes
+ * the distance and auto-fire does the rest. Movement is camera-relative
+ * (§4.3): each of WASD covers exactly one world quadrant, so steering is a
+ * sign check on the offset `debugInfo()` reports.
+ */
+async function hunt(page: Page, seconds: number, done: () => Promise<boolean>): Promise<void> {
+  for (let i = 0; i < seconds && !(await done()); i++) {
+    const s = await info(page);
+    const dx = Number(s['nearDx'] ?? 0);
+    const dz = Number(s['nearDz'] ?? 0);
+    const key = dx >= 0 ? (dz >= 0 ? 'KeyS' : 'KeyD') : (dz >= 0 ? 'KeyA' : 'KeyW');
+    await page.keyboard.down(key);
+    await page.waitForTimeout(700);
+    await page.keyboard.up(key);
+    await page.waitForTimeout(300);
   }
-};
+}
 
 test('enemies spawn and engage on Cinder-4 (AC-36, AC-37, AC-38)', async ({ page }) => {
+  test.setTimeout(150_000);
+  await autoFire(page);
   await start(page, '/?debug&scene=surface&planet=cinder4');
   await expect(page.locator('[data-testid="scene-label"]')).toHaveText('surface');
 
-  // Landing HP: marine demo pilot at full (the §6 pin, 184). `hud-hp` is the
-  // shared SPEC-014 HUD's ♥ bar — the scene feeds it its live numbers rather
-  // than painting a rival readout.
+  // Landing HP: marine stand-in pilot at full (the §6 pin, 184). `hud-hp` is
+  // the shared SPEC-014 HUD's ♥ bar, fed the world's live numbers.
   await expect(page.locator('[data-testid="hud-hp"]')).toContainText('184/184');
 
-  // The spawn director fills the field (plus the boss in its nest).
+  // The spawn director fills the field toward the population target.
   await expect.poll(async () => Number((await info(page))['enemies'] ?? 0), { timeout: 20_000 }).toBeGreaterThan(4);
   await expect.poll(async () => Number((await info(page))['spawned'] ?? 0), { timeout: 20_000 }).toBeGreaterThan(8);
-  await expect(page.locator('[data-testid="hud-counters"]')).toContainText('spawned');
 
-  // They close in and fight: with auto-fire on and skitters spawning 14 m out,
-  // both sides land hits without any input from the player.
-  await expect.poll(async () => (await counters(page)).kills, { timeout: 30_000 }).toBeGreaterThan(2);
-  await expect
-    .poll(async () => (await page.locator('[data-testid="hud-hp"]').textContent()) ?? '', { timeout: 30_000 })
-    .not.toContain('184/184');
+  // They close in and fight: hunt the field with auto-fire on until both
+  // sides have landed hits — kills climb AND the melee swarm has drawn blood.
+  const engaged = async (): Promise<boolean> => {
+    const kills = Number((await info(page))['kills'] ?? 0);
+    const hp = (await page.locator('[data-testid="hud-hp"]').textContent()) ?? '';
+    return kills > 2 && !hp.includes('184/184');
+  };
+  await hunt(page, 120, engaged);
+  expect(await engaged()).toBe(true);
 });
 
 /**
- * The merge put SPEC-014's HUD and SPEC-011's combat chrome in one scene, and
- * QA caught them colliding twice: two HP readouts disagreeing mid-fight, and
- * the placeholder nav buttons sitting on the HUD's resource column. Both are
- * composition defects only this merged tree can show (SPEC-014 AC-58).
+ * QA caught the merged scene showing two HP readouts and nav buttons covering
+ * the resource column. The real scene keeps the guarantee: one shared HUD,
+ * nothing over its corners (SPEC-014 AC-58).
  */
-test('the merged scene wears one HUD: a single HP readout, resources uncovered', async ({ page }) => {
+test('the surface scene wears one HUD: a single HP readout, resources uncovered', async ({ page }) => {
   await start(page, '/?debug&scene=surface&planet=cinder4');
   await expect(page.locator('[data-testid="scene-label"]')).toHaveText('surface');
 
-  // One HP readout on the whole page — the shared HUD's, at the world's live
-  // numbers even with no save slot bound (never the model's 0/1 default).
   await expect(page.locator('[data-testid="hud-hp"]')).toHaveCount(1);
   await expect(page.locator('[data-testid="hud-hp"]')).toContainText('184/184');
 
-  // QA's occlusion probe: the hit at the oil counter's centre resolves inside
-  // no nav button (the nav lives mid-left now, off the HUD's corners).
   expect(
     await page.evaluate(() => {
       const oil = document.querySelector('[data-testid="res-oil"]');
@@ -78,77 +92,67 @@ test('the merged scene wears one HUD: a single HP readout, resources uncovered',
 
 test('elites arrive at roughly the planet rate of 1 in 20 (AC-40)', async ({ page }) => {
   test.setTimeout(480_000);
+  await autoFire(page);
   await start(page, '/?debug&scene=surface&planet=cinder4');
 
-  // The wait is a positive signal, so it ends as soon as the first elite rolls
-  // — a minute or so at cinder4's eliteChance of 0.05 and ~0.3 spawns/s. The
-  // budget is long enough that never seeing one means the roll is broken, not
-  // that the run was unlucky: it covers well over a hundred spawns.
-  await expect
-    .poll(
-      async () => {
-        await reviveIfDead(page);
-        return (await counters(page)).elites;
-      },
-      { timeout: 300_000, intervals: [1000] },
-    )
-    .toBeGreaterThanOrEqual(1);
+  // The director only spawns below the population target, so an idle field
+  // stalls at ~9 spawns — the pilot hunts to churn it. The first wait is a
+  // positive signal: it ends as soon as the first elite rolls, and the budget
+  // covers well over a hundred spawns at cinder4's eliteChance of 0.05. The
+  // scene respawns a dead pilot by itself after 2.5 s, so no revive clicks.
+  await hunt(page, 300, async () => Number((await info(page))['elites'] ?? 0) >= 1);
+  expect(Number((await info(page))['elites'] ?? 0)).toBeGreaterThanOrEqual(1);
 
-  // The other half of "about 1 in 20": common enemies stay common. Measured
-  // once the run is long enough for the ratio to mean anything.
-  await expect
-    .poll(
-      async () => {
-        await reviveIfDead(page);
-        return (await counters(page)).spawned;
-      },
-      { timeout: 150_000, intervals: [1000] },
-    )
-    .toBeGreaterThanOrEqual(40);
-  const seen = await counters(page);
-  expect(seen.elites / seen.spawned).toBeLessThan(0.25);
+  // The other half of "about 1 in 20": common enemies stay common.
+  await hunt(page, 150, async () => Number((await info(page))['spawned'] ?? 0) >= 40);
+  const seen = await info(page);
+  expect(Number(seen['spawned'])).toBeGreaterThanOrEqual(40);
+  expect(Number(seen['elites']) / Number(seen['spawned'])).toBeLessThan(0.25);
 });
 
-test('the player dies, respawns, and the brains re-acquire them (AC-41)', async ({ page }) => {
+test('the player dies into SIGNAL LOST, respawns, and the brains re-acquire them (AC-41, SPEC-012 §4.8)', async ({ page }) => {
   test.setTimeout(90_000);
+  await autoFire(page);
   await start(page, '/?debug&scene=surface&planet=cinder4');
   await expect(page.locator('[data-testid="hud-hp"]')).toContainText('184/184');
 
   // 60 a click against 184 HP; clicks are spaced past the 0.3 s i-frames.
   for (let i = 0; i < 4; i++) {
-    await page.locator('[data-testid="demo-hurt"]').click();
+    await page.locator('[data-testid="surface-hurt"]').click();
     await page.waitForTimeout(400);
   }
-  await expect(page.locator('[data-testid="hud-death"]')).toBeVisible();
-  await expect(page.locator('[data-testid="hud-death"]')).toContainText('Cause: fall');
+  // The shared SPEC-014 overlay is the scene's one death surface (§4.8).
+  await expect(page.locator('[data-testid="death-overlay"]')).toBeVisible();
+  await expect(page.locator('[data-testid="death-overlay"]')).toContainText('SIGNAL LOST');
 
-  // The demo's panel is the only death surface in this scene: the shared
-  // SPEC-014 overlay stays unmounted here, because at z 30 over the combat
-  // HUD's z 11 it would cover the Respawn button that the next line clicks.
-  await expect(page.locator('[data-testid="death-overlay"]')).toHaveCount(0);
-  await page.locator('[data-testid="demo-respawn"]').click();
-  await expect(page.locator('[data-testid="hud-death"]')).toBeHidden();
+  // §4.8 step 2/3: after 2.5 s the scene respawns by itself, at full HP.
+  await expect(page.locator('[data-testid="death-overlay"]')).toBeHidden({ timeout: 10_000 });
   await expect(page.locator('[data-testid="hud-hp"]')).toContainText('184/184');
 
   // §4.5's "player dead → wander" is sticky, so the interesting half is what
-  // happens *after*: the enemies must come back for the respawned player rather
-  // than wander for ever. Kills climbing again is that proof.
-  const after = await counters(page);
-  await expect.poll(async () => (await counters(page)).kills, { timeout: 45_000 }).toBeGreaterThan(after.kills);
+  // happens *after*: kills climbing again proves the brains came back. The
+  // respawned pilot hunts the field again (spawns sit past aggro range).
+  const after = Number((await info(page))['kills'] ?? 0);
+  await hunt(page, 60, async () => Number((await info(page))['kills'] ?? 0) > after);
+  expect(Number((await info(page))['kills'] ?? 0)).toBeGreaterThan(after);
 });
 
 test('the dune wurm burrows into phase 2 and is untouchable while under (AC-39)', async ({ page }) => {
   test.setTimeout(90_000);
   await start(page, '/?debug&scene=surface&planet=cinder4');
+
+  // The real scene spawns the wurm for a boss mission stage; the debug strip's
+  // Wake button covers the mission-less acceptance run.
+  await page.locator('[data-testid="surface-spawn-boss"]').click();
   await expect.poll(async () => String((await info(page))['boss'] ?? ''), { timeout: 15_000 }).toMatch(/^p1 /);
 
-  // Into the nest: the boss aggroes (its bar appears) and the arena arms.
-  await page.locator('[data-testid="demo-goto-boss"]').click();
+  // Into the nest: the boss aggroes and the shared HUD's bar appears.
+  await page.locator('[data-testid="surface-goto-boss"]').click();
   await expect(page.locator('[data-testid="hud-boss"]')).toBeVisible({ timeout: 15_000 });
 
   // Three 25 % wounds cross the 0.4 threshold and the wurm burrows.
   for (let i = 0; i < 3; i++) {
-    await page.locator('[data-testid="demo-wound-boss"]').click();
+    await page.locator('[data-testid="surface-wound-boss"]').click();
     await page.waitForTimeout(300);
   }
   await expect.poll(async () => String((await info(page))['boss'] ?? ''), { timeout: 15_000 }).toMatch(/^p2 /);
@@ -157,7 +161,7 @@ test('the dune wurm burrows into phase 2 and is untouchable while under (AC-39)'
   // just took a quarter of its health off does nothing for the next ~3 s.
   const buried = String((await info(page))['boss'] ?? '');
   for (let i = 0; i < 4; i++) {
-    await page.locator('[data-testid="demo-wound-boss"]').click();
+    await page.locator('[data-testid="surface-wound-boss"]').click();
     await page.waitForTimeout(300);
   }
   expect(String((await info(page))['boss'] ?? '')).toBe(buried);
@@ -166,7 +170,7 @@ test('the dune wurm burrows into phase 2 and is untouchable while under (AC-39)'
   await expect
     .poll(
       async () => {
-        await page.locator('[data-testid="demo-wound-boss"]').click();
+        await page.locator('[data-testid="surface-wound-boss"]').click();
         return String((await info(page))['boss'] ?? '');
       },
       { timeout: 20_000, intervals: [400] },
@@ -209,10 +213,9 @@ interface BedProbe {
 }
 
 /**
- * The surface scene is SPEC-011's own file, and dropping the placeholder's
- * `music: 'surface_calm'` from it once already broke SPEC-006 AC-51/AC-54. This
- * guards the contract from this side too: the bed starts on Cinder-4, the pause
- * menu ducks it, and resuming lets it go.
+ * Dropping the placeholder's `music: 'surface_calm'` once already broke
+ * SPEC-006 AC-51/AC-54. This guards the contract from this side too: the bed
+ * starts on Cinder-4, the pause menu ducks it, and resuming lets it go.
  */
 test('entering Cinder-4 starts the surface bed, and the pause menu ducks it', async ({ page }) => {
   const MUSIC_FULL = 0.7;

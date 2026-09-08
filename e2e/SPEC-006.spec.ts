@@ -1068,7 +1068,9 @@ test('the reactions table is what the game actually hears (AC-38 … AC-50, AC-5
   expect(reactions.counts.reacted).toBe(15);
   expect(reactions.counts.silent).toBe(37);
   expect(reactions.counts.overlap).toEqual([]);
-  expect(reactions.counts.glitch).toBe(0); // GLITCH_DIALOGUE_IDS ships empty
+  // SPEC-012 §4.12 populated the set from the dialogue table's `glitch` marks
+  // (it shipped empty under SPEC-006); the unit suite pins it to those marks.
+  expect(reactions.counts.glitch).toBeGreaterThan(0);
 
   // AC-50: with every slot held by a priority-1 voice, only a priority-2
   // reaction can still be heard.

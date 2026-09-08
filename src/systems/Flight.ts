@@ -36,7 +36,7 @@ import {
   type PlanetDef,
 } from '@/data/index';
 import type { Economy } from '@/systems/Economy';
-import type { Missions } from '@/systems/Missions';
+import { FLIGHT_MISSION_CONTEXT, type Missions } from '@/systems/Missions';
 import type { Progression } from '@/systems/Progression';
 
 /** The emit slice of the bus (SPEC-004 D-7); `EventBus<GameEvents>` satisfies it. */
@@ -353,7 +353,7 @@ export class Flight {
       this.#updateReticle(dt, input); // empty sky: the raw aim owns the reticle
       this.#steer(dt, input);
       // §4.8: survive timers are flight time while alive — launch counts too.
-      this.#missions.update(dt);
+      this.#missions.update(dt, FLIGHT_MISSION_CONTEXT);
       if (this.#launchT >= LAUNCH_SECONDS) this.#phase = 'cruise';
       return; // §4.1: no hazards, no weapons, no storms during launch
     }
@@ -391,7 +391,7 @@ export class Flight {
     if (!this.ship.alive) return;
     this.#regenShield(dt);
     // §4.8: survive timers are real seconds while alive — cruise and holding.
-    this.#missions.update(dt);
+    this.#missions.update(dt, FLIGHT_MISSION_CONTEXT);
   }
 
   // ----------------------------------------------------------------- steering

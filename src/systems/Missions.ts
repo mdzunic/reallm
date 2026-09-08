@@ -1,45 +1,73 @@
-// The mission runner (SPEC-013 §4.8; the schema is SPEC-009 §4.7's). One
-// instance per gameplay scene, scoped to a `(scene, planet)` pair: only
-// missions the player accepted at the station whose def names this scene and
-// this planet are live — everything else in `missionsActive` is carried, not
-// run (AC-84). SPEC-012's surface scene will construct the same class with
-// `scene: 'surface'` and teach it the ground objective kinds; flight needs
-// `survive` and `kill`, so those are the two implemented here. An objective
-// kind this instance does not know simply never progresses — it can neither
-// complete a stage early nor crash a trip.
+// The mission runtime (SPEC-012 §4.7), shared by the surface and flight scenes.
+// Pure: no Three, no DOM — progress arrives through the event bus and the
+// per-step `MissionContext`, and everything that must survive a reload lives in
+// `save.progress.missionsActive` (stage + counters; timers deliberately not,
+// E19).
 //
-// Three rules the rest of the game leans on:
-//   - counters persist in the save (`${stage}:${objectiveIndex}`,
-//     SPEC-009 §4.7), but timed objectives restart on entry: a reloaded
-//     `survive` starts at 0, a reloaded `kill` keeps its count;
-//   - a death resets the *current stage* and the mission stays accepted
-//     (E5, 13-g): counters back to zero, `mission:stageReset`, no abandon;
-//   - completion pays immediately through `Economy.applyRewards` — before
-//     landing (AC-87) — with the replay half-rate when the mission was
-//     already in `missionsDone` (SPEC-010 §4.7).
-//
-// Pure: no `three`, no DOM, no `Math.random` (SPEC-001 §4, §7).
-import type { EmitArgs, GameEvents } from '@/core/Events';
+// Stages are sequential; the objectives inside one complete in any order.
+// Progress is keyed `${stage}:${objectiveIndex}` in the counters record —
+// `scan` keeps a distinct-instance bitmask under `${key}:mask` alongside the
+// count, which is still a plain number and therefore round-trips the save
+// unchanged.
+import type { EventBus, GameEvents } from '@/core/Events';
 import type { SaveV1 } from '@/core/Save';
-import { MISSIONS, type MissionDef, type MissionId, type Objective, type PlanetId } from '@/data/index';
-import type { Economy } from '@/systems/Economy';
+import {
+  MISSIONS,
+  TUNING,
+  type EnemyId,
+  type FollowerId,
+  type MissionDef,
+  type MissionId,
+  type Objective,
+  type PlanetId,
+  type PoiId,
+  type ResourceId,
+  type WaveId,
+  type WeatherId,
+} from '@/data/index';
+import type { Fail, Result, SaveRequester } from '@/systems/Economy';
+import type { LayoutPoi } from '@/systems/Layout';
+
+/** The slice of SPEC-010's `Economy` the runtime needs. */
+export interface MissionEconomy {
+  missingRequirements(reqs: MissionDef['requires']): unknown[];
+  applyRewards(mission: MissionDef, replay: boolean): void;
+  spendResources(cost: Partial<Record<ResourceId, number>>, reason: string): boolean;
+}
+
+export interface MissionState {
+  id: MissionId;
+  stage: number;
+  counters: Record<string, number>;
+  timers: Record<string, number>;
+  complete: boolean;
+}
 
 /**
- * The slice of the bus this system needs: emit, plus `on` for `enemy:killed`.
- * Structural (SPEC-004 D-7), so a test hands over an object literal or the
- * real `EventBus` — both satisfy it.
+ * What the scene knows each step. `follower` extends the spec's interface —
+ * the escort objective completes on the *follower's* position (§4.7), which no
+ * player-relative query can answer.
  */
-export interface MissionEvents {
-  emit<K extends keyof GameEvents>(name: K, ...args: EmitArgs<K>): void;
-  on<K extends keyof GameEvents>(name: K, handler: (payload: GameEvents[K]) => void, owner: object): () => void;
+export interface MissionContext {
+  player: { x: number; z: number; alive: boolean };
+  poiAt(id: PoiId): LayoutPoi[];
+  heldResource(r: ResourceId): number;
+  nearPoi(id: PoiId, radius?: number): LayoutPoi | null;
+  follower?: { x: number; z: number; alive: boolean } | null;
 }
 
-export interface MissionScope {
-  readonly scene: 'surface' | 'flight';
-  readonly planet: PlanetId;
+export interface ObjectiveProgress {
+  objective: Objective;
+  value: number;
+  target: number;
+  done: boolean;
 }
 
-/** One HUD line: the first incomplete objective of the first live mission. */
+/**
+ * One HUD line: the first incomplete objective of the pinned mission. The
+ * flight HUD reads this (SPEC-013 §4.8) and the surface HUD phrases the same
+ * fields, so the wording lives here rather than in either scene.
+ */
 export interface ObjectiveLine {
   readonly id: MissionId;
   readonly title: string;
@@ -48,215 +76,592 @@ export interface ObjectiveLine {
   readonly target: number;
 }
 
-/** The save entry a live mission runs against. */
-type ActiveEntry = SaveV1['progress']['missionsActive'][number];
+type ResetReason = GameEvents['mission:stageReset']['reason'];
 
-function counterKey(stage: number, objective: number): string {
-  return `${stage}:${objective}`;
+/** The objective kinds whose progress is a running timer (E4, E19). */
+function isTimed(objective: Objective): boolean {
+  return objective.kind === 'survive' || objective.kind === 'defend';
 }
 
-/** What an objective needs to be done, for the kinds a counter can measure. */
-function targetOf(objective: Objective): number {
-  switch (objective.kind) {
-    case 'kill':
-      return objective.amount;
-    case 'survive':
-      return objective.seconds;
-    case 'scan':
-      return objective.count;
-    case 'collect':
-    case 'deliver':
-      return objective.amount;
-    default:
-      return 1;
+function popcount(v: number): number {
+  let n = v >>> 0;
+  let count = 0;
+  while (n !== 0) {
+    n &= n - 1;
+    count++;
   }
+  return count;
 }
 
 export class Missions {
   readonly #save: SaveV1;
-  readonly #scope: MissionScope;
-  readonly #economy: Economy;
-  readonly #events: MissionEvents;
-  readonly #offKilled: () => void;
+  readonly #economy: MissionEconomy;
+  readonly #events: EventBus<GameEvents>;
+  readonly #scene: 'surface' | 'flight';
+  readonly #planet: PlanetId;
+  readonly #saves: SaveRequester | null;
+  readonly #states: MissionState[] = [];
+  #pinned: MissionId | null = null;
 
-  constructor(save: SaveV1, scope: MissionScope, economy: Economy, events: MissionEvents) {
+  constructor(
+    save: SaveV1,
+    economy: MissionEconomy,
+    events: EventBus<GameEvents>,
+    scene: 'surface' | 'flight',
+    planet: PlanetId,
+    saves?: SaveRequester,
+  ) {
     this.#save = save;
-    this.#scope = scope;
     this.#economy = economy;
     this.#events = events;
-    // Timed objectives restart on entry (CLAUDE.md): a survive counter loaded
-    // from the save is stale by definition — the timer only runs live.
-    for (const entry of this.#live()) {
+    this.#scene = scene;
+    this.#planet = planet;
+    this.#saves = saves ?? null;
+
+    // E19: rebuild from the save — counters kept, timers zeroed. A timed stage
+    // in flight restarts from its beginning, announced as a reload reset.
+    for (const entry of save.progress.missionsActive) {
       const def = MISSIONS[entry.id];
-      def.stages[entry.stage]?.forEach((objective, index) => {
-        if (objective.kind === 'survive') delete entry.counters[counterKey(entry.stage, index)];
-      });
+      if (def.planet !== planet || def.scene !== scene) continue;
+      const state: MissionState = { id: entry.id, stage: entry.stage, counters: entry.counters, timers: {}, complete: false };
+      this.#states.push(state);
+      if (this.#pinned === null) this.#pinned = entry.id;
+      if ((def.stages[state.stage] ?? []).some(isTimed)) {
+        this.#events.emit('mission:stageReset', { id: state.id, stage: state.stage, reason: 'reload' });
+      }
     }
-    this.#offKilled = events.on('enemy:killed', (payload) => this.#onKilled(payload.enemyId), this);
+
+    events.on('enemy:killed', (p) => this.#onKill(p.enemyId), this);
+    events.on('resource:collected', (p) => this.#onCollect(p.resource, p.amount), this);
+    events.on('poi:reached', (p) => this.#onReach(p.poi), this);
+    events.on('poi:scanned', (p) => this.#onScan(p.poi, p.instance), this);
+    events.on('boss:defeated', (p) => this.#onBoss(p.boss), this);
+    events.on('follower:died', () => this.#onFollowerDied(), this);
+    events.on('poi:damaged', (p) => {
+      if (p.hp <= 0) this.#onPoiDestroyed(p.poi);
+    }, this);
+    events.on('player:died', () => this.#onPlayerDied(), this);
   }
 
-  /** The accepted missions this scope runs, in acceptance order (AC-84). */
-  get active(): readonly MissionId[] {
-    return this.#live().map((entry) => entry.id);
+  /** Releases the bus subscriptions; the scene's `Disposer` calls it. */
+  dispose(): void {
+    this.#events.releaseOwner(this);
   }
 
-  /**
-   * Advances every live `survive` objective by `dt`. The caller owns the gate:
-   * flight calls this only while the ship is alive, through both cruise and
-   * holding (§4.8, AC-88) — the timer is real seconds, not trip progress.
-   */
-  update(dt: number): void {
-    if (!(dt > 0)) return;
-    for (const entry of this.#live()) {
-      const def = MISSIONS[entry.id];
-      const stage = def.stages[entry.stage];
-      if (stage === undefined) continue;
-      let moved = false;
-      stage.forEach((objective, index) => {
-        if (objective.kind !== 'survive') return;
-        const key = counterKey(entry.stage, index);
-        const before = entry.counters[key] ?? 0;
-        if (before >= objective.seconds) return;
-        const now = Math.min(objective.seconds, before + dt);
-        entry.counters[key] = now;
-        moved = true;
-        // A per-frame float tick is not a HUD event; whole seconds are (§4.8).
-        if (Math.floor(now) > Math.floor(before) || now >= objective.seconds) {
-          this.#events.emit('mission:progress', {
-            id: entry.id,
-            stage: entry.stage,
-            objective: index,
-            value: Math.floor(now),
-            target: objective.seconds,
-          });
+  get active(): MissionState[] {
+    return this.#states;
+  }
+
+  get pinned(): MissionId | null {
+    return this.#pinned;
+  }
+
+  // ------------------------------------------------------------- accept flow
+
+  /** §4.7 + 12-j: acceptable here — scene matches, requirements met, not active. */
+  available(): MissionDef[] {
+    const out: MissionDef[] = [];
+    for (const def of Object.values(MISSIONS)) {
+      if (def.planet !== this.#planet || def.scene !== this.#scene) continue;
+      if (this.#stateOf(def.id as MissionId) !== null) continue;
+      if (this.#economy.missingRequirements(def.requires).length > 0) continue;
+      out.push(def);
+    }
+    return out;
+  }
+
+  /** A completed mission may be accepted again; its rewards then pay 50 % (AC-43). */
+  isReplay(id: MissionId): boolean {
+    return this.#save.progress.missionsDone.includes(id);
+  }
+
+  accept(id: MissionId): Result {
+    const def = MISSIONS[id];
+    if (def.planet !== this.#planet || def.scene !== this.#scene) return fail('not_found');
+    if (this.#stateOf(id) !== null) return fail('prerequisite');
+    if (this.#economy.missingRequirements(def.requires).length > 0) return fail('locked');
+    const entry = { id, stage: 0, counters: {} as Record<string, number> };
+    this.#save.progress.missionsActive.push(entry);
+    const state: MissionState = { id, stage: 0, counters: entry.counters, timers: {}, complete: false };
+    this.#states.push(state);
+    if (this.#pinned === null) this.#pinned = id;
+    this.#events.emit('mission:accepted', { id });
+    this.#events.emit('mission:stageStarted', { id, stage: 0 });
+    this.#saves?.request('stage');
+    return { ok: true };
+  }
+
+  /** §4.7: counters are lost, no penalty. */
+  abandon(id: MissionId): void {
+    const at = this.#states.findIndex((s) => s.id === id);
+    if (at < 0) return;
+    this.#states.splice(at, 1);
+    this.#dropSaveEntry(id);
+    if (this.#pinned === id) this.#pinned = this.#states[0]?.id ?? null;
+    this.#events.emit('mission:abandoned', { id });
+  }
+
+  pin(id: MissionId): void {
+    if (this.#stateOf(id) !== null) this.#pinned = id;
+  }
+
+  /** E18: the map key cycles which active mission the HUD pins. */
+  cyclePinned(): void {
+    if (this.#states.length === 0) return;
+    const at = this.#states.findIndex((s) => s.id === this.#pinned);
+    this.#pinned = (this.#states[(at + 1) % this.#states.length] as MissionState).id;
+  }
+
+  // ---------------------------------------------------------------- queries
+
+  currentObjectives(id: MissionId): ObjectiveProgress[] {
+    const state = this.#stateOf(id);
+    if (state === null) return [];
+    const stage = MISSIONS[id].stages[state.stage] ?? [];
+    return stage.map((objective, index) => this.#progressOf(state, objective, index));
+  }
+
+  /** For the spawn director's ×3 weighting (E14): undone kill targets. */
+  objectiveEnemies(): EnemyId[] {
+    const out: EnemyId[] = [];
+    for (const state of this.#states) {
+      for (const { objective, done } of this.currentObjectives(state.id)) {
+        if (objective.kind === 'kill' && !done && !out.includes(objective.enemy)) out.push(objective.enemy);
+      }
+    }
+    return out;
+  }
+
+  /** The storm an active survive stage forces on the scene (AC-26). */
+  requiredWeather(): { weather: WeatherId; seconds: number } | null {
+    for (const state of this.#states) {
+      for (const { objective, done } of this.currentObjectives(state.id)) {
+        if (objective.kind === 'survive' && objective.weather !== undefined && !done) {
+          return { weather: objective.weather, seconds: objective.seconds };
         }
-      });
-      if (moved) this.#settle(entry);
-    }
-  }
-
-  /**
-   * E5 / 13-g: a recall resets the current stage of every live mission — the
-   * counters, never the acceptance. Both the side mission and the main mission
-   * come back zeroed and still accepted (AC-103).
-   */
-  resetStages(reason: 'death' | 'reload'): void {
-    for (const entry of this.#live()) {
-      const def = MISSIONS[entry.id];
-      const stage = def.stages[entry.stage];
-      if (stage === undefined) continue;
-      stage.forEach((_objective, index) => {
-        delete entry.counters[counterKey(entry.stage, index)];
-      });
-      this.#events.emit('mission:stageReset', { id: entry.id, stage: entry.stage, reason });
-    }
-  }
-
-  /** The HUD's objective row: first incomplete objective of the first live mission. */
-  objective(): ObjectiveLine | null {
-    for (const entry of this.#live()) {
-      const def = MISSIONS[entry.id];
-      const stage = def.stages[entry.stage];
-      if (stage === undefined) continue;
-      for (const [index, objective] of stage.entries()) {
-        const target = targetOf(objective);
-        const value = Math.min(target, Math.floor(entry.counters[counterKey(entry.stage, index)] ?? 0));
-        if (value >= target) continue;
-        return { id: entry.id, title: def.title, line: describe(objective), value, target };
       }
     }
     return null;
   }
 
-  /** The live `survive` objective with the longest requirement, for the HUD hint (AC-89). */
+  /** The boss a current stage wants; the arena spawns it on entry (§4.7). */
+  bossStage(): EnemyId | null {
+    for (const state of this.#states) {
+      for (const { objective, done } of this.currentObjectives(state.id)) {
+        if (objective.kind === 'boss' && !done) return objective.enemy;
+      }
+    }
+    return null;
+  }
+
+  /** The defend wave of a current stage, for the scene to start (§4.7). */
+  defendStage(): { poi: PoiId; wave: WaveId; seconds: number } | null {
+    for (const state of this.#states) {
+      for (const { objective, done } of this.currentObjectives(state.id)) {
+        if (objective.kind === 'defend' && !done) {
+          return { poi: objective.poi, wave: objective.wave, seconds: objective.seconds };
+        }
+      }
+    }
+    return null;
+  }
+
+  /** The escort leg of a current stage, for the scene's follower (§4.7). */
+  escortStage(): { from: PoiId; to: PoiId; follower: FollowerId } | null {
+    for (const state of this.#states) {
+      for (const { objective, done } of this.currentObjectives(state.id)) {
+        if (objective.kind === 'escort' && !done) {
+          return { from: objective.from, to: objective.to, follower: objective.follower };
+        }
+      }
+    }
+    return null;
+  }
+
+  /** The current choice objective's prompt and options, or `null` (§4.7). */
+  choiceStage(id: MissionId): Extract<Objective, { kind: 'choice' }> | null {
+    for (const { objective, done } of this.currentObjectives(id)) {
+      if (objective.kind === 'choice' && !done) return objective;
+    }
+    return null;
+  }
+
+  /**
+   * The HUD's objective row: the first incomplete objective, pinned mission
+   * first and then the rest in acceptance order (E18). Walks the ring the way
+   * `cyclePinned` does, so nothing is allocated to put the pin at the front.
+   */
+  objective(): ObjectiveLine | null {
+    const count = this.#states.length;
+    if (count === 0) return null;
+    const pinnedAt = this.#states.findIndex((s) => s.id === this.#pinned);
+    const start = pinnedAt < 0 ? 0 : pinnedAt;
+    for (let n = 0; n < count; n++) {
+      const state = this.#states[(start + n) % count] as MissionState;
+      for (const { objective, value, target, done } of this.currentObjectives(state.id)) {
+        if (done) continue;
+        return { id: state.id, title: MISSIONS[state.id].title, line: describe(objective), value: Math.floor(value), target };
+      }
+    }
+    return null;
+  }
+
+  /**
+   * The longest unfinished `survive` requirement, in seconds. Flight turns it
+   * into the throttle hint when the timer cannot fit the remaining trip
+   * (SPEC-013 §4.8, AC-89); 0 when nothing live is timed.
+   */
   longestSurvive(): number {
     let longest = 0;
-    for (const entry of this.#live()) {
-      const stage = MISSIONS[entry.id].stages[entry.stage];
-      if (stage === undefined) continue;
-      for (const [index, objective] of stage.entries()) {
-        if (objective.kind !== 'survive') continue;
-        if ((entry.counters[counterKey(entry.stage, index)] ?? 0) >= objective.seconds) continue;
+    for (const state of this.#states) {
+      for (const { objective, done } of this.currentObjectives(state.id)) {
+        if (objective.kind !== 'survive' || done) continue;
         longest = Math.max(longest, objective.seconds);
       }
     }
     return longest;
   }
 
-  dispose(): void {
-    this.#offKilled();
-  }
-
-  // ---------------------------------------------------------------- internals
-
-  /** The accepted entries whose def matches this scope. Recomputed, never cached. */
-  #live(): ActiveEntry[] {
-    return this.#save.progress.missionsActive.filter((entry) => {
-      const def: MissionDef | undefined = MISSIONS[entry.id];
-      return def !== undefined && def.scene === this.#scope.scene && def.planet === this.#scope.planet;
-    });
-  }
-
-  /** Kills count only for the enemy an objective names (AC-113). */
-  #onKilled(enemyId: GameEvents['enemy:killed']['enemyId']): void {
-    for (const entry of this.#live()) {
-      const def = MISSIONS[entry.id];
-      const stage = def.stages[entry.stage];
-      if (stage === undefined) continue;
-      let moved = false;
-      stage.forEach((objective, index) => {
-        if (objective.kind !== 'kill' || objective.enemy !== enemyId) return;
-        const key = counterKey(entry.stage, index);
-        const before = entry.counters[key] ?? 0;
-        if (before >= objective.amount) return;
-        entry.counters[key] = before + 1;
-        moved = true;
-        this.#events.emit('mission:progress', {
-          id: entry.id,
-          stage: entry.stage,
-          objective: index,
-          value: before + 1,
-          target: objective.amount,
-        });
-      });
-      if (moved) this.#settle(entry);
+  /**
+   * E5 / 13-g: the whole current stage goes back to zero and every mission
+   * stays accepted. This is flight's recall rule, and the scene calls it
+   * explicitly — the surface's death is E4, which restarts the timed stages
+   * and *keeps* the counts, so that path runs through `player:died` instead.
+   * The two edge cases genuinely differ; each caller asks for the one it owns.
+   */
+  resetStages(reason: ResetReason): void {
+    for (const state of this.#states) {
+      const stage = MISSIONS[state.id].stages[state.stage] ?? [];
+      if (stage.length === 0) continue;
+      for (let index = 0; index < stage.length; index++) {
+        const key = `${state.stage}:${index}`;
+        delete state.counters[key];
+        delete state.counters[`${key}:mask`]; // a scan's distinct-instance set
+        delete state.timers[key];
+      }
+      this.#events.emit('mission:stageReset', { id: state.id, stage: state.stage, reason });
     }
   }
 
-  /** Advance the stage when every objective in it is done; complete at the end. */
-  #settle(entry: ActiveEntry): void {
-    const def = MISSIONS[entry.id];
-    const stage = def.stages[entry.stage];
-    if (stage === undefined) return;
-    const done = stage.every((objective, index) => {
-      const value = entry.counters[counterKey(entry.stage, index)] ?? 0;
-      return value >= targetOf(objective);
-    });
-    if (!done) return;
-    if (entry.stage + 1 < def.stages.length) {
-      entry.stage += 1;
-      this.#events.emit('mission:stageStarted', { id: entry.id, stage: entry.stage });
-      // The freshly-entered stage may be empty in data terms; settle again so a
-      // zero-objective stage cannot strand the mission.
-      this.#settle(entry);
+  // ----------------------------------------------------------------- update
+
+  update(dt: number, ctx: MissionContext): void {
+    for (const state of this.#states.slice()) {
+      const stage = MISSIONS[state.id].stages[state.stage] ?? [];
+      for (let index = 0; index < stage.length; index++) {
+        const objective = stage[index] as Objective;
+        const key = `${state.stage}:${index}`;
+        switch (objective.kind) {
+          case 'survive': {
+            if (this.#done(state, objective, index)) break;
+            if (!ctx.player.alive) break;
+            state.timers[key] = (state.timers[key] ?? 0) + dt;
+            if ((state.timers[key] as number) >= objective.seconds) {
+              this.#markDone(state, index);
+            }
+            break;
+          }
+          case 'defend': {
+            if (this.#done(state, objective, index)) break;
+            state.timers[key] = (state.timers[key] ?? 0) + dt;
+            if ((state.timers[key] as number) >= objective.seconds) {
+              this.#markDone(state, index);
+            }
+            break;
+          }
+          case 'deliver': {
+            if (this.#done(state, objective, index)) break;
+            if (ctx.nearPoi(objective.poi) === null) break;
+            if (ctx.heldResource(objective.resource) < objective.amount) break;
+            // E16: atomic — all units or none, never a partial delivery.
+            if (!this.#economy.spendResources({ [objective.resource]: objective.amount }, `deliver:${state.id}`)) break;
+            this.#events.emit('poi:delivered', { poi: objective.poi, resource: objective.resource, amount: objective.amount });
+            this.#markDone(state, index);
+            break;
+          }
+          case 'escort': {
+            if (this.#done(state, objective, index)) break;
+            const follower = ctx.follower;
+            if (follower === undefined || follower === null || !follower.alive) break;
+            const to = ctx.poiAt(objective.to)[0];
+            if (to === undefined) break;
+            if (Math.hypot(follower.x - to.x, follower.z - to.z) <= to.radius) this.#markDone(state, index);
+            break;
+          }
+          default:
+            break;
+        }
+      }
+      this.#checkStage(state);
+    }
+  }
+
+  /** §4.7: a choice objective completes through this, setting its flags. */
+  choose(id: MissionId, optionIndex: number): void {
+    const state = this.#stateOf(id);
+    if (state === null) return;
+    const stage = MISSIONS[id].stages[state.stage] ?? [];
+    for (let index = 0; index < stage.length; index++) {
+      const objective = stage[index] as Objective;
+      if (objective.kind !== 'choice' || this.#done(state, objective, index)) continue;
+      const option = objective.options[optionIndex];
+      if (option === undefined) return;
+      for (const flag of option.flags) {
+        if (!this.#save.progress.flags.includes(flag)) {
+          this.#save.progress.flags.push(flag);
+          this.#events.emit('flag:set', { flag });
+        }
+      }
+      this.#markDone(state, index);
+      this.#checkStage(state);
       return;
     }
-    this.#complete(entry, def);
   }
 
-  /** §4.8: rewards land immediately, before any landing (AC-87). */
-  #complete(entry: ActiveEntry, def: MissionDef): void {
-    const at = this.#save.progress.missionsActive.indexOf(entry);
-    if (at >= 0) this.#save.progress.missionsActive.splice(at, 1);
-    const doneList = this.#save.progress.missionsDone;
-    const replay = (doneList as readonly string[]).includes(def.id);
-    if (!replay) doneList.push(def.id as MissionId);
+  // -------------------------------------------------------- event reactions
+
+  #onKill(enemyId: EnemyId): void {
+    this.#forEachObjective((state, objective, index) => {
+      if (objective.kind !== 'kill' || objective.enemy !== enemyId) return;
+      if (this.#done(state, objective, index)) return;
+      this.#bump(state, index, 1, objective.amount);
+      this.#checkStage(state);
+    });
+  }
+
+  #onCollect(resource: ResourceId, amount: number): void {
+    if (amount <= 0) return; // a fully blocked pickup adds nothing (E3)
+    this.#forEachObjective((state, objective, index) => {
+      if (objective.kind !== 'collect' || objective.resource !== resource) return;
+      if (this.#done(state, objective, index)) return;
+      this.#bump(state, index, amount, objective.amount);
+      this.#checkStage(state);
+    });
+  }
+
+  #onReach(poi: PoiId): void {
+    this.#forEachObjective((state, objective, index) => {
+      if (objective.kind !== 'reach' || objective.poi !== poi) return;
+      if (this.#done(state, objective, index)) return;
+      this.#markDone(state, index);
+      this.#checkStage(state);
+    });
+  }
+
+  /** §4.7: distinct instances only, kept as a bitmask beside the count. */
+  #onScan(poi: PoiId, instance: number): void {
+    this.#forEachObjective((state, objective, index) => {
+      if (objective.kind !== 'scan' || objective.poi !== poi) return;
+      if (this.#done(state, objective, index)) return;
+      const key = `${state.stage}:${index}`;
+      const mask = (state.counters[`${key}:mask`] ?? 0) | (1 << instance);
+      state.counters[`${key}:mask`] = mask;
+      const value = Math.min(popcount(mask), objective.count);
+      state.counters[key] = value;
+      this.#events.emit('mission:progress', { id: state.id, stage: state.stage, objective: index, value, target: objective.count });
+      this.#checkStage(state);
+    });
+  }
+
+  #onBoss(boss: EnemyId): void {
+    this.#forEachObjective((state, objective, index) => {
+      if (objective.kind !== 'boss' || objective.enemy !== boss) return;
+      if (this.#done(state, objective, index)) return;
+      this.#markDone(state, index);
+      this.#checkStage(state);
+    });
+  }
+
+  /** E13: the stage restarts; the scene respawns the follower at `from`. */
+  #onFollowerDied(): void {
+    for (const state of this.#states) {
+      const stage = MISSIONS[state.id].stages[state.stage] ?? [];
+      if (stage.some((objective) => objective.kind === 'escort')) this.#resetStage(state, 'follower_died');
+    }
+  }
+
+  /** §4.7 defend: 0 HP restarts the stage — POI HP and wave are scene-side. */
+  #onPoiDestroyed(poi: PoiId): void {
+    for (const state of this.#states) {
+      const stage = MISSIONS[state.id].stages[state.stage] ?? [];
+      const guards = stage.some((objective) => objective.kind === 'defend' && objective.poi === poi);
+      if (!guards) continue;
+      // 12-d: destroyed while the stage is already back at zero (the death
+      // reset just ran) — reset once, not twice.
+      const key = stage.findIndex((objective) => objective.kind === 'defend');
+      if ((state.timers[`${state.stage}:${key}`] ?? 0) === 0) continue;
+      this.#resetStage(state, 'poi_destroyed');
+    }
+  }
+
+  /**
+   * E4: timed stages restart; counters stay (§4.8 step 2 routes through here).
+   * Surface only — flight emits `player:died` too, but its recall is E5 and
+   * the scene drives it through `resetStages('death')`; reacting here as well
+   * would reset the stage twice and emit two `mission:stageReset` events.
+   */
+  #onPlayerDied(): void {
+    if (this.#scene !== 'surface') return;
+    for (const state of this.#states) {
+      const stage = MISSIONS[state.id].stages[state.stage] ?? [];
+      if (stage.some(isTimed)) this.#resetStage(state, 'death');
+    }
+  }
+
+  // -------------------------------------------------------------- internals
+
+  #stateOf(id: MissionId): MissionState | null {
+    return this.#states.find((s) => s.id === id) ?? null;
+  }
+
+  #forEachObjective(fn: (state: MissionState, objective: Objective, index: number) => void): void {
+    for (const state of this.#states.slice()) {
+      if (state.complete) continue;
+      const stage = MISSIONS[state.id].stages[state.stage] ?? [];
+      for (let index = 0; index < stage.length; index++) fn(state, stage[index] as Objective, index);
+    }
+  }
+
+  #progressOf(state: MissionState, objective: Objective, index: number): ObjectiveProgress {
+    const key = `${state.stage}:${index}`;
+    let target = 1;
+    let value = state.counters[key] ?? 0;
+    switch (objective.kind) {
+      case 'collect':
+      case 'kill':
+        target = objective.amount;
+        break;
+      case 'scan':
+        target = objective.count;
+        break;
+      case 'survive':
+      case 'defend':
+        target = objective.seconds;
+        value = Math.min(objective.seconds, state.timers[key] ?? 0);
+        break;
+      default:
+        break;
+    }
+    if (objective.kind === 'survive' || objective.kind === 'defend') {
+      // A finished timer is recorded as done in the counters, surviving reload.
+      if ((state.counters[key] ?? 0) >= 1) value = target;
+    }
+    return { objective, value, target, done: this.#done(state, objective, index) };
+  }
+
+  #done(state: MissionState, objective: Objective, index: number): boolean {
+    const key = `${state.stage}:${index}`;
+    const value = state.counters[key] ?? 0;
+    switch (objective.kind) {
+      case 'collect':
+      case 'kill':
+        return value >= objective.amount;
+      case 'scan':
+        return value >= objective.count;
+      default:
+        return value >= 1;
+    }
+  }
+
+  #bump(state: MissionState, index: number, by: number, target: number): void {
+    const key = `${state.stage}:${index}`;
+    const value = Math.min(target, (state.counters[key] ?? 0) + by);
+    state.counters[key] = value;
+    this.#events.emit('mission:progress', { id: state.id, stage: state.stage, objective: index, value, target });
+  }
+
+  /** Non-count objectives record done as a 1; timers clear their key. */
+  #markDone(state: MissionState, index: number): void {
+    const key = `${state.stage}:${index}`;
+    state.counters[key] = Math.max(1, state.counters[key] ?? 0);
+    const stage = MISSIONS[state.id].stages[state.stage] ?? [];
+    const objective = stage[index] as Objective;
+    const target = objective.kind === 'survive' || objective.kind === 'defend' ? objective.seconds : 1;
+    this.#events.emit('mission:progress', {
+      id: state.id,
+      stage: state.stage,
+      objective: index,
+      value: target,
+      target,
+    });
+  }
+
+  #resetStage(state: MissionState, reason: ResetReason): void {
+    const stage = MISSIONS[state.id].stages[state.stage] ?? [];
+    for (let index = 0; index < stage.length; index++) {
+      const objective = stage[index] as Objective;
+      if (!isTimed(objective)) continue;
+      const key = `${state.stage}:${index}`;
+      state.timers[key] = 0;
+      if (!this.#done(state, objective, index)) delete state.counters[key];
+    }
+    this.#events.emit('mission:stageReset', { id: state.id, stage: state.stage, reason });
+  }
+
+  #checkStage(state: MissionState): void {
+    if (state.complete) return;
+    const def = MISSIONS[state.id];
+    const stage = def.stages[state.stage] ?? [];
+    for (let index = 0; index < stage.length; index++) {
+      if (!this.#done(state, stage[index] as Objective, index)) return;
+    }
+    if (state.stage + 1 < def.stages.length) {
+      state.stage += 1;
+      state.timers = {};
+      this.#syncStage(state);
+      this.#events.emit('mission:stageStarted', { id: state.id, stage: state.stage });
+      this.#saves?.request('stage');
+      return;
+    }
+    this.#completeMission(state, def);
+  }
+
+  #completeMission(state: MissionState, def: MissionDef): void {
+    state.complete = true;
+    const replay = this.isReplay(state.id);
+    const at = this.#states.indexOf(state);
+    if (at >= 0) this.#states.splice(at, 1);
+    this.#dropSaveEntry(state.id);
+    if (!replay) this.#save.progress.missionsDone.push(state.id);
+    // Rewards fire after the books close, so a rewarded resource can never
+    // count toward the collect objective that just finished (§4.7).
     this.#economy.applyRewards(def, replay);
-    this.#events.emit('mission:completed', { id: def.id as MissionId, replay });
+    if (this.#pinned === state.id) this.#pinned = this.#states[0]?.id ?? null;
+    this.#events.emit('mission:completed', { id: state.id, replay });
+    this.#saves?.request('mission');
+  }
+
+  #syncStage(state: MissionState): void {
+    const entry = this.#save.progress.missionsActive.find((e) => e.id === state.id);
+    if (entry !== undefined) entry.stage = state.stage;
+  }
+
+  #dropSaveEntry(id: MissionId): void {
+    const at = this.#save.progress.missionsActive.findIndex((e) => e.id === id);
+    if (at >= 0) this.#save.progress.missionsActive.splice(at, 1);
   }
 }
 
-/** A short player-facing description of one objective. */
+/** §4.7: replay pays half; re-exported so the HUD can phrase it. */
+export const REPLAY_REWARD_FRACTION = TUNING.REPLAY_REWARD_FRACTION;
+
+const NO_POIS: readonly LayoutPoi[] = Object.freeze([]);
+
+/**
+ * What the rail scene hands `update`. Flight has no POIs, no cargo pickups and
+ * no follower — only `survive` and `kill` run there (SPEC-013 §4.8) — and its
+ * three update calls are already gated on a live ship, so the context is a
+ * frozen constant rather than an object built every frame (SPEC-001 §7).
+ */
+export const FLIGHT_MISSION_CONTEXT: MissionContext = Object.freeze({
+  player: Object.freeze({ x: 0, z: 0, alive: true }),
+  poiAt: () => NO_POIS as LayoutPoi[],
+  heldResource: () => 0,
+  nearPoi: () => null,
+  follower: null,
+});
+
+/** A short player-facing description of one objective, for the HUD row. */
 function describe(objective: Objective): string {
   switch (objective.kind) {
     case 'kill':
@@ -280,4 +685,8 @@ function describe(objective: Objective): string {
     case 'choice':
       return 'Decide';
   }
+}
+
+function fail(reason: Fail['reason']): Fail {
+  return { ok: false, reason };
 }

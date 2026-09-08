@@ -80,7 +80,7 @@ function world(options: WorldOptions = {}): World {
   const progression = new Progression(save, events);
   const economy = new Economy(save, events, progression);
   const planet = options.planet ?? PLANETS.cinder4;
-  const missions = new Missions(save, { scene: 'flight', planet: planet.id }, economy, events);
+  const missions = new Missions(save, economy, events, 'flight', planet.id);
   const cfg: FlightConfig = {
     planet,
     ship: save.ship,
@@ -613,7 +613,7 @@ describe('ion storms', () => {
 describe('missions in flight', () => {
   it('runs only accepted missions matching the scene and planet (AC-84)', () => {
     const w = world({ planet: quietPlanet(PLANETS.hive, 30), accept: ['c5_m1', 'c4_s2', 'c1_m1'] });
-    expect(w.missions.active).toEqual(['c5_m1']);
+    expect(w.missions.active.map((m) => m.id)).toEqual(['c5_m1']);
   });
 
   it('counts survive through launch, cruise and holding (AC-88, AC-113)', () => {
@@ -622,9 +622,12 @@ describe('missions in flight', () => {
     blocker(w.flight);
     step(w.flight, 30); // 20 s cruise + 10 s holding, after the 3 s launch
     expect(w.flight.phase).toBe('holding');
-    const entry = w.save.progress.missionsActive.find((m) => m.id === 'c5_m1')!;
     // §4.8: the timer is flight time while alive — the launch seconds count.
-    expect(entry.counters['0:0']).toBeCloseTo(LAUNCH_SECONDS + 30, 0);
+    // It lives in `timers` (E19: counters persist, timers do not), so the
+    // elapsed seconds are read through the runtime's progress view.
+    const survive = w.missions.currentObjectives('c5_m1')[0]!;
+    expect(survive.objective.kind).toBe('survive');
+    expect(survive.value).toBeCloseTo(LAUNCH_SECONDS + 30, 0);
   });
 
   it('counts kills for the named enemy only (AC-113)', () => {
@@ -646,8 +649,12 @@ describe('missions in flight', () => {
     expect(w.save.progress.missionsActive.find((m) => m.id === 'c4_s2')).toBeUndefined();
     expect(w.save.player.tokens).toBeGreaterThanOrEqual(before + def.rewards.tokens);
 
-    // Replay at 50 % (SPEC-010 §4.7): re-accept, complete again.
-    w.save.progress.missionsActive.push({ id: 'c4_s2', stage: 0, counters: {} });
+    // Replay at 50 % (SPEC-010 §4.7): re-accept, complete again. The runtime
+    // owns its own state, so the second run goes through `accept` — a raw push
+    // into the save is not an acceptance — and that is the path the station
+    // takes anyway. `c4_s2` requires `c4_m1`, which the first flight implies.
+    w.save.progress.missionsDone.push('c4_m1');
+    expect(w.missions.accept('c4_s2')).toEqual({ ok: true });
     const replayBefore = w.save.player.tokens;
     for (let i = 0; i < 8; i++) w.events.emit('enemy:killed', { enemyId: 'scav_fighter', elite: false, x: 0, z: 0, xp: 12 });
     expect(w.of('mission:completed').at(-1)).toEqual({ id: 'c4_s2', replay: true });
@@ -659,25 +666,35 @@ describe('missions in flight', () => {
     step(w.flight, LAUNCH_SECONDS + 10);
     w.events.emit('enemy:killed', { enemyId: 'hive_interceptor', elite: false, x: 0, z: 0, xp: 10 });
     const entry = w.save.progress.missionsActive.find((m) => m.id === 'c5_m1')!;
-    expect(entry.counters['0:0']).toBeGreaterThan(5);
+    expect(w.missions.currentObjectives('c5_m1')[0]!.value).toBeGreaterThan(5);
     expect(entry.counters['0:1']).toBe(1);
     w.flight.hit(10_000, 'asteroid', { kind: 'asteroid' });
-    expect(w.of('mission:stageReset')).toEqual([{ id: 'c5_m1', stage: 0, reason: 'death' }]);
-    expect(entry.counters['0:0']).toBeUndefined();
+    // E5 is a whole-stage reset, and exactly one — the scene asks for it, and
+    // the runtime's own `player:died` rule (E4, surface) stays out of flight.
+    // (The entry announces its own timed restart on load first, E19.)
+    expect(w.of('mission:stageReset').filter((r) => r.reason === 'death')).toEqual([
+      { id: 'c5_m1', stage: 0, reason: 'death' },
+    ]);
+    expect(w.missions.currentObjectives('c5_m1')[0]!.value).toBe(0);
     expect(entry.counters['0:1']).toBeUndefined();
     expect(w.save.progress.missionsActive.map((m) => m.id)).toContain('c5_m1');
   });
 
-  it('restarts a loaded survive counter but keeps a loaded kill counter', () => {
+  it('restarts a loaded survive timer but keeps a loaded kill counter (E19)', () => {
     const save = newSave(0, PILOT, 42, 1_700_000_000_000);
-    save.progress.missionsActive.push({ id: 'c5_m1', stage: 0, counters: { '0:0': 120, '0:1': 4 } });
+    // E19: a part-run survive persists nothing — only the kill count does.
+    save.progress.missionsActive.push({ id: 'c5_m1', stage: 0, counters: { '0:1': 4 } });
     const events = new EventBus<GameEvents>({ dev: false });
+    const recorded: string[] = [];
+    events.onAny((name) => recorded.push(name as string));
     const progression = new Progression(save, events);
     const economy = new Economy(save, events, progression);
-    new Missions(save, { scene: 'flight', planet: 'hive' }, economy, events);
+    const missions = new Missions(save, economy, events, 'flight', 'hive');
     const entry = save.progress.missionsActive[0]!;
-    expect(entry.counters['0:0']).toBeUndefined();
+    expect(missions.currentObjectives('c5_m1')[0]!.value).toBe(0);
     expect(entry.counters['0:1']).toBe(4);
+    // The timed stage announces its restart, so the HUD can say so.
+    expect(recorded).toContain('mission:stageReset');
   });
 
   it('reports the longest live survive objective for the HUD hint (AC-89)', () => {
