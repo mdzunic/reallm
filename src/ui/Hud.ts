@@ -61,6 +61,17 @@ export class Hud {
   readonly #objective = el('div', 'hud-objective');
   readonly #vignette = el('div', 'hud-vignette');
 
+  // Flight instruments (SPEC-013 §4.10); built only in flight mode.
+  readonly #reticle = testId(el('div', 'hud-reticle'), 'reticle');
+  readonly #throttle = testId(el('span', 'hud-throttle'), 'hud-throttle');
+  readonly #progress = testId(el('div', 'hud-progress'), 'hud-progress');
+  readonly #progressFill = el('div', 'hud-progress-fill');
+  readonly #markers = el('div', 'hud-progress-markers');
+  readonly #hostiles = testId(el('div', 'hud-hostiles'), 'hud-hostiles');
+  readonly #storm = testId(el('div', 'hud-storm'), 'storm-warning');
+  readonly #static = el('div', 'hud-static');
+  readonly #holding = testId(el('div', 'hud-holding'), 'holding-banner');
+
   constructor(root: UiRoot, mode: HudMode) {
     this.#ui = root;
     this.#mode = mode;
@@ -82,7 +93,7 @@ export class Hud {
     const tl = el('div', 'hud-tl');
     // `hud-hp` is the scene's one HP readout (AC-58); the SPEC-011 e2e reads it.
     tl.append(testId(this.#hp.root, 'hud-hp'), this.#xp.root, this.#level);
-    if (mode === 'flight') tl.append(this.#shield.root, this.#hull.root);
+    if (mode === 'flight') tl.append(this.#shield.root, this.#hull.root, this.#throttle);
 
     const tr = el('div', 'hud-tr');
     for (const resource of RESOURCE_IDS) {
@@ -100,6 +111,19 @@ export class Hud {
     const tc = el('div', 'hud-tc');
     tc.append(this.#weather, this.#boss.root);
     this.#boss.root.classList.add('is-hidden');
+    // SPEC-013 §4.10: trip progress with wave markers, the hostiles counter,
+    // the storm warning + static, the holding banner, and the reticle.
+    if (mode === 'flight') {
+      this.#progress.append(this.#progressFill, this.#markers);
+      this.#progress.setAttribute('aria-label', 'Trip progress');
+      this.#storm.textContent = '▲ Ion storm';
+      this.#holding.textContent = 'Holding pattern — clear the hostiles';
+      this.#hostiles.classList.add('is-hidden');
+      this.#storm.classList.add('is-hidden');
+      this.#static.classList.add('is-hidden');
+      this.#holding.classList.add('is-hidden');
+      tc.append(this.#progress, this.#hostiles, this.#storm, this.#holding);
+    }
 
     const bl = el('div', 'hud-bl');
     bl.append(this.#consumable);
@@ -122,9 +146,34 @@ export class Hud {
     this.#objective.classList.add('is-hidden');
 
     this.#root.append(this.#vignette, tl, tr, tc, bl, br, bc);
+    if (mode === 'flight') this.#root.append(this.#static, this.#reticle);
     root.mount(this.#root, 'hud');
     this.#unregister = root.register(this);
     this.#renderAll();
+  }
+
+  /**
+   * The wave markers on the trip bar (SPEC-013 §4.10): one tick per scheduled
+   * group, at its trip fraction. Set once on enter — the schedule never moves.
+   */
+  setWaveMarkers(fractions: readonly number[]): void {
+    this.#markers.replaceChildren(
+      ...fractions.map((fraction) => {
+        const tick = el('span', 'hud-progress-marker');
+        tick.style.left = `${Math.round(fraction * 100)}%`;
+        return tick;
+      }),
+    );
+  }
+
+  /**
+   * The reticle, in NDC (y up). Written directly rather than through the diff —
+   * it moves every frame the pointer does, and a transform write is the cheap
+   * path the bars already use.
+   */
+  setReticle(ndcX: number, ndcY: number): void {
+    this.#reticle.style.left = `${(ndcX * 0.5 + 0.5) * 100}%`;
+    this.#reticle.style.top = `${(-ndcY * 0.5 + 0.5) * 100}%`;
   }
 
   /** AC-63: the red edge vignette, 150 ms; a static frame under reduce-motion. */
@@ -232,6 +281,15 @@ export class Hud {
         if (m.flight === undefined || this.#mode !== 'flight') return;
         this.#setBar(this.#shield, m.flight.shield);
         this.#setBar(this.#hull, m.flight.hull);
+        const throttle = `THR ${m.flight.throttle.toFixed(1)}×`;
+        if (this.#throttle.textContent !== throttle) this.#throttle.textContent = throttle;
+        this.#progressFill.style.transform = `scaleX(${Math.max(0, Math.min(1, m.flight.progress))})`;
+        const hostiles = m.flight.hostiles > 0 ? `Hostiles: ${m.flight.hostiles}` : '';
+        if (this.#hostiles.textContent !== hostiles) this.#hostiles.textContent = hostiles;
+        this.#hostiles.classList.toggle('is-hidden', m.flight.hostiles === 0);
+        this.#storm.classList.toggle('is-hidden', !m.flight.storm);
+        this.#static.classList.toggle('is-hidden', !m.flight.storm);
+        this.#holding.classList.toggle('is-hidden', !m.flight.holding);
         return;
       }
     }

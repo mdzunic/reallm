@@ -2145,3 +2145,121 @@ button.hud-button {
   font-size: 13px;
   pointer-events: auto;
 }
+
+/* ------------------------------------------------- SPEC-013: flight HUD */
+/* The reticle: a fixed-size cross, positioned in % of the play area. */
+.hud-reticle {
+  position: absolute;
+  width: 28px;
+  height: 28px;
+  margin: -14px 0 0 -14px;
+  border: 1px solid var(--shield);
+  border-radius: 50%;
+  opacity: 0.85;
+}
+
+.hud-reticle::after {
+  content: '';
+  position: absolute;
+  inset: 11px;
+  background: var(--shield);
+  border-radius: 50%;
+}
+
+.hud-throttle {
+  font-size: 12px;
+  letter-spacing: 0.08em;
+  color: var(--ink-dim);
+}
+
+/* Trip progress with the wave markers riding on it (§4.10). */
+.hud-progress {
+  position: relative;
+  width: min(340px, 44vw);
+  height: 6px;
+  background: rgba(255, 255, 255, 0.12);
+  border-radius: 3px;
+}
+
+.hud-progress-fill {
+  position: absolute;
+  inset: 0;
+  background: var(--good);
+  border-radius: 3px;
+  transform: scaleX(0);
+  transform-origin: left center;
+}
+
+.hud-progress-marker {
+  position: absolute;
+  top: -3px;
+  width: 2px;
+  height: 12px;
+  background: var(--warn);
+}
+
+.hud-hostiles {
+  font-size: 13px;
+  color: var(--warn);
+}
+
+/* The storm warning wears the ▲ half of the colorblind pair in its text. */
+.hud-storm {
+  font-size: 13px;
+  color: var(--warn);
+  background: rgba(0, 0, 0, 0.45);
+  padding: 2px 10px;
+  border-radius: 4px;
+}
+
+/* The ion-storm static overlay: a repeating scanline sheet, no animation
+   needed to read as interference — safe under reduce-motion as-is. */
+.hud-static {
+  position: absolute;
+  inset: 0;
+  background: repeating-linear-gradient(
+    0deg,
+    rgba(160, 190, 220, 0.06) 0 1px,
+    transparent 1px 3px
+  );
+  mix-blend-mode: screen;
+}
+
+.hud-holding {
+  font-size: 14px;
+  color: var(--ink);
+  background: rgba(0, 0, 0, 0.55);
+  padding: 4px 14px;
+  border-radius: 4px;
+  border: 1px solid var(--warn);
+}
+
+/* The landing cutscene's skip hint and the recall flash live on the scene. */
+.flight-skip-hint {
+  position: absolute;
+  left: 50%;
+  bottom: 12%;
+  transform: translateX(-50%);
+  font-size: 13px;
+  color: var(--ink-dim);
+  background: rgba(0, 0, 0, 0.45);
+  padding: 4px 12px;
+  border-radius: 4px;
+}
+
+/* Mounted beside the .hud root, not inside it, so it needs its own rule. */
+.flight-skip-hint.is-hidden {
+  display: none;
+}
+
+.flight-explosion {
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(circle at 50% 55%, rgba(255, 170, 80, 0.85), rgba(120, 20, 10, 0.55) 45%, rgba(0, 0, 0, 0.9) 100%);
+  opacity: 0;
+  transition: opacity 200ms linear;
+}
+
+.flight-explosion.is-visible {
+  opacity: 1;
+}
