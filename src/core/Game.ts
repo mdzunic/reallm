@@ -203,13 +203,6 @@ export class Game implements GameServices {
   readonly #bootAt = performance.now();
 
   #pauseReason: 'hidden' | 'context-lost' | 'user' | null = null;
-  /**
-   * Fixed update steps run in the frame currently in flight. A frame whose
-   * accumulator held less than one step runs none, and its input edges must
-   * survive into the next frame rather than being cleared unseen —
-   * `Input.endFrame` takes this (§4.2, SPEC-005 AC-2).
-   */
-  #stepsThisFrame = 0;
   #stopped = false;
   #lastStatsMs = 0;
   #contextLostTimer: number | null = null;
@@ -492,14 +485,12 @@ export class Game implements GameServices {
   /** Phase 1 of §4.2. */
   #frame(frameDt: number): void {
     this.#beginTrace();
-    this.#stepsThisFrame = 0;
     this.#phase(PHASE_INPUT_BEGIN);
     this.#input.beginFrame(frameDt);
   }
 
   /** Phase 2, 0 to `maxSteps` times, always with `dt === step`. */
   #update(dt: number): void {
-    this.#stepsThisFrame++;
     this.#phase(PHASE_UPDATE);
     this.#scenes.update(dt);
   }
@@ -513,9 +504,7 @@ export class Game implements GameServices {
     (this.#transitionUi as Flushable).flush?.();
     this.#refreshStatsIfDue();
     this.#phase(PHASE_INPUT_END);
-    // A frame with no update step never showed its edges to gameplay; they are
-    // carried to the next frame instead of being dropped (SPEC-005 §4.1).
-    this.#input.endFrame(this.#stepsThisFrame > 0);
+    this.#input.endFrame();
     this.#endTrace();
   }
 

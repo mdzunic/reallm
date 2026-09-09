@@ -386,12 +386,10 @@ export class FlightScene extends UiScene<'flight'> {
     this.#leaving = true;
     const save = this.#save;
     if (save !== null && !this.#ephemeralSave) {
-      // AC-35: the landing commits the destination and writes at the safe
-      // point; the surface scene reads `firstLanding` from its params. The
-      // visit count itself belongs to the scene being visited — SPEC-012's
-      // surface `onEnter` increments it on every route in (the landing, and a
-      // forced `?scene=surface` jump alike), so counting it here as well would
-      // score one landing twice and skip a `rng.visit` stream (SPEC-008 §4.2).
+      // AC-35 / SPEC-008: the landing is the visit — count it and write at the
+      // safe point; the surface scene reads `firstLanding` from its params.
+      const visits = save.progress.visits[this.#planet.id] ?? 0;
+      save.progress.visits[this.#planet.id] = visits + 1;
       save.progress.currentPlanet = this.#planet.id;
       save.progress.location = 'surface';
       this.services.save.request('landing');

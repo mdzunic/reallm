@@ -14,13 +14,6 @@ export default defineConfig({
     // `PORT=5199 npm run e2e` (playwright.config.ts reads the same variable).
     port: Number(process.env.PORT ?? 5173),
     strictPort: true,
-    // The e2e run opens four pages the moment the port answers, and a cold dev
-    // server transforms the whole module graph on demand — four times over, in
-    // parallel, before the first boot gate can appear. Warming the entry from
-    // the app's own HTML moves that work to server start-up, where nothing is
-    // waiting on it. It costs a developer nothing either: `npm run dev` was
-    // already going to transform these on the first page load.
-    warmup: { clientFiles: ['./index.html', './src/main.ts'] },
   },
   build: {
     sourcemap: false,
