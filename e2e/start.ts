@@ -150,9 +150,24 @@ declare global {
   }
 }
 
+/**
+ * How long the gate may take to appear. Every other assertion in the suite
+ * keeps Playwright's 5 s default; this one wait is different in kind, because
+ * it spans the whole cold start rather than a UI reaction: navigation, the dev
+ * server's on-demand transform of the module graph, and then the serial
+ * manifest fetch (SPEC-003 D-30) — for every page of the first parallel wave at
+ * once, since Playwright launches all the workers the moment the port answers.
+ * Measured cold on a 10-core box, twelve pages at once reach the gate in ~2.9 s
+ * and four in ~0.8 s; the factory's check container is slower, and the four
+ * tests that opened it first there ran out at the 5 s default while everything
+ * that started after them passed. The budget belongs to the load, not to
+ * Playwright's generic default for an interaction.
+ */
+export const GATE_TIMEOUT_MS = 30_000;
+
 /** Waits for the manifest to finish loading, which is when the gate appears. */
 export async function awaitGate(page: Page): Promise<void> {
-  await expect(page.locator('[data-testid="boot-start"]')).toBeVisible();
+  await expect(page.locator('[data-testid="boot-start"]')).toBeVisible({ timeout: GATE_TIMEOUT_MS });
 }
 
 /** Waits for the gate, then passes it with a click on TAP TO START. */
