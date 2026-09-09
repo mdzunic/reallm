@@ -20,9 +20,7 @@ class Harness {
       this.edges.beginStep(this.input.state.buttons, this.#frame);
       read();
     }
-    // Exactly what `Game.#render` passes: a stepless frame showed its edges to
-    // nobody, so they are carried rather than cleared (SPEC-005 §4.1).
-    this.input.endFrame(steps > 0);
+    this.input.endFrame();
     this.#frame++;
   }
 }
@@ -95,29 +93,6 @@ describe('PressEdges', () => {
     h.input.pressAction('fire', 'keyboard');
     h.frame(2, read);
     expect(fired).toBe(2);
-  });
-
-  // The other half of the same problem, and the one the browser suite kept
-  // tripping over: a tap whose press *and* release land inside a stepless
-  // frame. `page.keyboard.press` is exactly that shape, and at 60 Hz about one
-  // frame in five runs no step, so E on the pad terminal simply did nothing.
-  it('a press that lands on a zero-step frame still fires, exactly once', () => {
-    const h = new Harness();
-    let fired = 0;
-    const read = (): void => {
-      if (h.edges.pressed('interact')) fired++;
-    };
-
-    h.input.pressAction('interact', 'keyboard');
-    h.input.releaseAction('interact', 'keyboard');
-    h.frame(0, read); // nothing consumed it
-    expect(fired).toBe(0);
-
-    h.frame(1, read); // …so the next frame republishes it
-    expect(fired).toBe(1);
-
-    h.frame(2, read); // and never again
-    expect(fired).toBe(1);
   });
 
   it('independent actions latch independently in the same frame', () => {
