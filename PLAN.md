@@ -27,6 +27,16 @@ Space post-apocalyptic ARPG browser game with a hidden simulation plot. Single-p
 
 **R5 — 2026-09-07 (mission count corrected in §7).** §7's summary row read "Main missions (18)". §6 enumerates **17** main missions — three per chapter for chapters 1–5, two for chapter 6 — and the same row's own subtotals (55 · 70 · 85 · 105 · 165 · 190) add to 670 across exactly those 17. The enumeration and the subtotals are the design; the header digit was the typo, and it now reads "(17)". No mission is added, removed, or retuned: the campaign is **17 main + 9 side = 26** missions and the 670 / 104 totals are unchanged. Specs: SPEC-009's acceptance criterion "all 27 missions" becomes **26** — `tests/data/content.test.ts` pins 17 / 9 beside the 670 / 104 totals, so the roster and its payout can only move together. (§7)
 
+**R6 — 2026-09-09 (art direction upgrade).** The bootstrap look — flat Lambert primitives, two lights, no tone mapping, no shadows, no post-processing, one 64² placeholder texture — is replaced by a modern **stylised-PBR** look ("Diablo in space", within a phone budget and CC0 assets), delivered as an art pass of four specs — SPEC-017 (render pipeline and lighting), SPEC-018 (surface environment), SPEC-019 (characters, enemies, combat VFX), SPEC-020 (flight, station, menus, UI theme) — that build after SPEC-013 and **before SPEC-015/016**, so the performance budgets and the boot benchmark are measured on the final visuals. The pass is milestone **M7a** and ends with tag `m7a`. Gameplay, data, the save format and the layout hash do not change: the pass lives in `views/`, `scenes/` and the renderer. Decisions:
+
+1. Post-processing (bloom, output, anti-aliasing, grade), ACES filmic tone mapping, a procedural environment map and one directional shadow map are allowed, gated by preset through a pure quality plan: post **off** on `low`, ¼-res bloom + FXAA on `medium`, ½-res bloom + MSAA (FXAA at dpr 2) on `high`; shadow map on `high` only, blob shadows on every preset; no half-float colour buffer → direct path. SPEC-015 §3 "post effects: none" is superseded and §5 counts draw calls as "scene + post". Every knob is a field of the pure plan, so a phone regression is a retune, not a redesign. (§2, §9, §12)
+2. `core/Quality.ts` (pure) and `core/PostChain.ts` join `Renderer`, `Assets`, `Disposer`, `Benchmark` as the only `core/` modules that may import three; `core/Noise.ts`, `core/HeightField.ts` and `core/CharacterState.ts` are pure and node-tested. (§3)
+3. Enemies stay procedural (R1-8) — sculpted, PBR, per-instance emissive, instanced as before. Props and POIs are procedural first with a per-kind GLB seam. Kenney CC0 supplies humans (Mini Characters), ships, station modules and props (Space Kit, Nature Kit) and VFX sprites (Particle Pack); ambientCG / Poly Haven CC0 photographic sets may replace the procedural ground layers through the same `GroundLayer` seam. The build factory has no internet, so those files are fetched and committed by hand (`scripts/assets/README.md`, checked by `scripts/assets/check.mjs`), each with a `LICENSES.md` row; every art spec keeps a procedural fallback so it builds without them. (§2, §12)
+4. "Visual-only displacement" (SPEC-012 §2) becomes a ≤ 0.5 m height field, flattened around POIs and the landing pad, with entity Y sampled in the view; the simulation, `layoutHash` and the aim ray on `y = 0` are unchanged. The camera keeps SPEC-012 §4.3's numbers, so the surface gets no sky dome (never on screen at 55° pitch) but a berm and silhouette ring at the arena edge; flight, being first-person, gets the nebula sky. (§3)
+5. Per-planet assets load lazily on scene enter; the boot manifest stays at five files. (§3)
+
+Specs: SPEC-000 queue and build order; SPEC-001 §4 (allow-list) and §10 (texture packing); SPEC-012 §2, §4.9, §4.10; SPEC-015 §3, §5, §8. (§2, §3, §9, §10, §12)
+
 ---
 
 ## 1. Vision & Inspiration
@@ -61,13 +71,13 @@ Core resources: **oil** (ship fuel), **wheat** (food / HP regen consumables), **
 | Save | **localStorage** (versioned schema) | — | Fully offline; save size is < 100 KB |
 | Tests | **Vitest** + **Playwright** | `vitest ^5.0.0` (released 2026-09-03; fall back to `^4.1.11` only if a blocking bug appears), `@playwright/test` latest | Unit-test pure game logic; a headless Chromium e2e suite (smoke + the factory's per-spec QA tests) |
 | Offline shell | `vite-plugin-pwa` (**M7, build-time only**) | `^1.3.0` | Service worker + manifest = real offline + installable = exempt from Safari 7-day storage eviction |
-| Assets | **Procedural** (planets, effects, UI, **enemies**) + **Kenney.nl CC0** (humans: Mini Characters, 32 animations, GLB; ships/props: Space Kit, glTF) | — | No artist needed |
+| Assets | **Procedural** (terrain, ground textures, sky, effects, UI, **enemies**) + **Kenney.nl CC0** (humans: Mini Characters, GLB with clips; ships/modules/props: Space Kit, Nature Kit, glTF → GLB; VFX sprites: Particle Pack) + **ambientCG / Poly Haven CC0** ground textures as an optional drop-in (R6) | — | No artist needed; every CC0 file is committed by hand with a `LICENSES.md` row |
 
 Nothing else — no React, no physics engine (arcade physics is enough), no backend, no schema library (hand-written validators).
 
 Supported platforms (floor): Safari/iOS 16.4+, Chrome/Edge 111+, Firefox 114+ (Vite 8 default build targets). Landscape orientation is recommended on phones; portrait shows a rotate prompt but stays playable in menus.
 
-Language: English UI. Art: procedural vector + CC0 low-poly mix.
+Language: English UI. Art: **stylised PBR** (R6) — procedural + CC0 low-poly meshes under ACES tone mapping, a directional key with shadows on `high`, image-based lighting, and a preset-gated post chain (bloom, anti-aliasing, vignette/grade); textured, normal-mapped ground with visual-only relief; sprite VFX.
 
 ---
 
@@ -78,7 +88,7 @@ Language: English UI. Art: procedural vector + CC0 low-poly mix.
 - **Event bus** (typed pub/sub) decouples UI ↔ gameplay (e.g. `resource:collected`, `player:leveledUp`). Subscriptions are owned by the scene and released on exit.
 - **Entity pooling** for projectiles/particles/asteroids; **instanced meshes** for swarms; **seeded RNG** per planet for reproducible procedural layout (layout stream is deterministic from save seed + planet; runtime streams are re-seeded per visit).
 - Gameplay simulation on the surface is **2D on the XZ plane** (circle collisions); Y is visual only. Flight is a bounded 2D steering plane with depth-sorted hazards. No 3D physics anywhere.
-- Pure logic (economy, combat math, missions, save) lives in framework-free modules → unit-testable. Three.js only appears in `scenes/`, `views/`, and `core/Renderer.ts`.
+- Pure logic (economy, combat math, missions, save) lives in framework-free modules → unit-testable. Three.js only appears in `scenes/`, `views/`, and the `core/` render modules (`Renderer`, `PostChain`, `Assets`, `Disposer`, `Benchmark`); every scene draws through the one `Renderer.render()` seam, which owns the post-processing chain (R6).
 
 ### Project structure
 
@@ -87,7 +97,7 @@ index.html  package.json  vite.config.ts  tsconfig.json
 public/assets/        # CC0 sprites/models (Kenney), CC0 audio, LICENSES.md
 src/
   main.ts
-  core/     Game.ts Loop.ts Renderer.ts StateMachine.ts Input.ts KeyboardMouseDriver.ts Audio.ts Save.ts Settings.ts Events.ts Rng.ts Assets.ts Disposer.ts Pool.ts SpatialHash.ts Benchmark.ts Log.ts
+  core/     Game.ts Loop.ts Renderer.ts Quality.ts PostChain.ts StateMachine.ts Input.ts KeyboardMouseDriver.ts Audio.ts Save.ts Settings.ts Events.ts Rng.ts Noise.ts HeightField.ts CharacterState.ts Assets.ts Disposer.ts Pool.ts SpatialHash.ts Benchmark.ts Log.ts
   scenes/   Boot Menu CharacterCreation Station StarMap Flight Surface
   systems/  Combat EnemyAi Projectiles Economy Progression Balance Weather Spawn Layout Missions Flight
   entities/ Player Companion Enemy Projectile Pickup Ship Asteroid   (plain data + pools; no Three imports)
@@ -340,7 +350,7 @@ Storage rules: 3 slots, key per slot plus a `.bak` copy of the previous good sav
 
 - Responsive canvas + UI breakpoints; one codebase, `pointer` events unify mouse/touch; `touch-action: none` on the canvas, safe-area insets, `100dvh`.
 - **Touch controls**: floating virtual joystick (left), aim-drag with auto-fire (right), action buttons, drag-to-steer in flight, auto-fire assist option, left/right-handed swap.
-- **Quality presets** (auto-detect by a 2-second boot benchmark, overridable): clamp `devicePixelRatio` (1 / 1.5 / 2), particles, draw distance, capped enemy count; target 60 fps desktop / 30+ fps mid-tier mobile.
+- **Quality presets** (auto-detect by a 2-second boot benchmark, overridable): clamp `devicePixelRatio` (1 / 1.5 / 2), particles, draw distance, capped enemy count, and the render plan (R6): post-processing off / ¼-res bloom + FXAA / ½-res bloom + MSAA, shadow map on `high` only, image-based lighting on `medium` and `high`; target 60 fps desktop / 30+ fps mid-tier mobile.
 - Screen wake lock during gameplay; pause + audio suspend when the tab is hidden; WebGL context-loss recovery overlay.
 - HUD/menu built as HTML/CSS overlay → naturally adapts to small screens; touch targets ≥ 44 px.
 - M7: PWA manifest + service worker (precache the whole build) → installable, truly offline, save exempt from Safari eviction.
@@ -358,6 +368,7 @@ Storage rules: 3 slots, key per slot plus a `.bak` copy of the previous good sav
 | M4 | Flight scene: cockpit, rail model, asteroids, enemy waves, fuel + subsidy, landing sequence, return autopilot | Survive travel to Cinder-4 on desktop + mobile touch |
 | M5 | Economy: tokens, XP/levels, shop, gear, assistants, upgrade trees, crafting, loadout + campaign simulation tests | Buy/upgrade everything; costs consumed correctly (tested); campaign sim proves every gate reachable |
 | M6 | Full content: all 6 planets, bosses, story dialogue, star map progression, both endings | Playable start-to-ending campaign (~2–3 h) |
+| M7a | Art pass (R6): render pipeline (ACES, post chain, IBL, shadows), surface environment (height-field terrain, splat ground shader, procedural textures, scatter, props, weather sprites), animated character, sculpted enemies, combat VFX, flight sky and ships, hub backdrops, UI theme (SPEC-017…SPEC-020) | Cinder-4 and every other planet read as a modern stylised-PBR game on desktop and on the reference phone; medium stays ≤ 80 scene + 16 post draws on the surface; screenshots per scene and preset in the playtest log; tag `m7a` |
 | M7 | Polish: mobile tuning, quality presets, balancing pass, PWA/offline, storage persistence, reduce-motion, save migration harness | 30+ fps on mid-tier phone; installable; full manual checklist green |
 
 ---
@@ -378,8 +389,9 @@ Storage rules: 3 slots, key per slot plus a `.bak` copy of the previous good sav
 |---|---|
 | Scope creep (biggest risk) | Data-driven content, hard milestone gates; M3/M4 are the proof-of-fun checkpoints |
 | Mobile perf with Three.js | Pooling, instancing, quality presets from day one (M0); perf budgets in [SPEC-015](https://github.com/mdzunic/reallm-specs/blob/main/specs/015-mobile-performance-pwa.md) |
+| Post-processing and PBR cost on phones (R6) | The pure quality plan of SPEC-017 gates everything: composer off on `low`, ¼-res bloom + FXAA on `medium`, shadow map on `high` only, no half-float → direct path; the cut order under a regression is grain → FXAA → bloom mips → post off, each one field |
 | First-person feel without complex physics | Rail flight model only; cockpit HUD sells immersion |
-| Asset consistency | Kenney CC0 families (Space Kit, Mini Characters) for humans/ships; enemies and props procedural |
+| Asset consistency | Kenney CC0 families (Mini Characters, Space Kit, Nature Kit, Particle Pack) for humans, ships, modules, props and VFX sprites; ambientCG / Poly Haven CC0 for ground textures; enemies procedural (sculpted, PBR); one lighting/grade pipeline over everything so procedural and CC0 meshes read as one world (R6) |
 | Save loss on iOS (7-day eviction, private mode, quota) | Export/import code, `.bak` slot, `persist()`, PWA install prompt, graceful "storage unavailable" mode |
 | Fresh tooling (Vitest 5 is 3 days old; TS 7 just shipped) | Pin Vitest 5 with the 4.1 fallback documented; stay on TS 6.0 until M7 |
 | Skeletal animation cost on mobile | Only the player + escort NPC are skinned; enemies use procedural transform animation |
