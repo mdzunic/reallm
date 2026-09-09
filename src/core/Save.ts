@@ -887,26 +887,6 @@ export interface SavePersistSettings {
   set(patch: { persistGranted?: boolean | null; installHintShownAt?: number | null }): void;
 }
 
-/**
- * The clock the store keeps time on. `Date.now()` truncates to whole
- * milliseconds, and the autosave window of §4.5 is an *interval* between two
- * reads of it: a request made at a true 1000.9 ms stamps 1000, so `tick()`
- * releases the write as soon as the clock reads 1500 — 499.1 ms after the
- * request, short of the 500 ms window AC-46 pins. `performance.now()` is
- * monotonic and sub-millisecond, and `timeOrigin` puts it back on the epoch so
- * one reading still serves both the interval and the wall-clock stamps of
- * `meta.createdAt` / `meta.updatedAt` (`#stamp()` rounds those, where whole
- * milliseconds are all that is wanted). Falls back to `Date.now` where the
- * timing API is missing.
- */
-export function epochClock(
-  perf: { now: () => number; timeOrigin: number } | undefined = globalThis.performance,
-): () => number {
-  if (typeof perf?.now !== 'function' || typeof perf.timeOrigin !== 'number') return Date.now;
-  const source = perf;
-  return () => source.timeOrigin + source.now();
-}
-
 export interface SaveStoreOptions {
   /** Wall clock. Injected so the debounce of §4.5 is testable. */
   now?: () => number;
@@ -1035,7 +1015,7 @@ export class SaveStore {
   constructor(events: SaveEvents, storage?: Storage | null, options: SaveStoreOptions = {}) {
     this.#events = events;
     this.#storage = storage === undefined ? defaultStorage() : storage;
-    this.#now = options.now ?? epochClock();
+    this.#now = options.now ?? Date.now;
     this.#content = options.content ?? SAVE_CONTENT;
     this.#settings = options.settings ?? null;
     this.available = this.#probe();
@@ -1163,7 +1143,7 @@ export class SaveStore {
   /** Writes immediately, with reason `'new'` (§3). */
   create(slot: SlotId, creation: CharacterCreation, seed?: number): SaveV1 {
     const resolved = seed ?? seedFromLocation() ?? randomSeed();
-    const data = newSave(slot, creation, resolved, this.#stamp());
+    const data = newSave(slot, creation, resolved, this.#now());
     this.bind(data);
     this.#flush('new');
     return data;
@@ -1236,15 +1216,6 @@ export class SaveStore {
     this.#flush(this.#pending);
   }
 
-  /**
-   * The clock as a persisted timestamp. The default clock reads finer than a
-   * millisecond so the window of §4.5 cannot close early; nothing written to
-   * disk wants that tail, so every stamp that leaves the store is whole.
-   */
-  #stamp(): number {
-    return Math.round(this.#now());
-  }
-
   /** Write now, synchronously (§4.2). Returns whether the save is on disk. */
   flush(): boolean {
     return this.#flush(this.#pending ?? 'manual');
@@ -1267,7 +1238,7 @@ export class SaveStore {
       return false;
     }
 
-    data.meta.updatedAt = this.#stamp();
+    data.meta.updatedAt = this.#now();
     data.meta.appVersion = APP_VERSION;
     const json = JSON.stringify(data);
     if (json.length > LARGE_SAVE_BYTES) {
@@ -1362,7 +1333,7 @@ export class SaveStore {
     if (this.#settings === null) return;
     if (!isIosSafari() || isStandalone()) return;
     const shownAt = this.#settings.get().installHintShownAt;
-    const now = this.#stamp();
+    const now = this.#now();
     if (shownAt !== null && now - shownAt < INSTALL_HINT_INTERVAL_MS) return;
     this.#settings.set({ installHintShownAt: now });
     this.#events.emit('ui:toast', { kind: 'info', text: INSTALL_HINT_TEXT, ms: 10000 });

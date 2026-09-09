@@ -4,7 +4,7 @@
 // SPEC-002 §4.5 added the start gate after the load, so reaching a scene now
 // goes through the shared helper (D-K). No assertion below changed.
 import { expect, test } from '@playwright/test';
-import { COLD_START, passGate } from './start';
+import { passGate } from './start';
 
 /**
  * A request the boot loader is answerable for. `ASSETS.models` and
@@ -24,10 +24,7 @@ test('the boot overlay reports asset progress (AC-45)', async ({ page }) => {
   });
 
   await page.goto('/');
-  // The first DOM wait of the test: it spans cold start, so it takes the
-  // cold-start budget rather than the 5 s default (this is the assertion that
-  // timed out on the merge gate's container).
-  await expect(page.locator('[data-testid="boot-progress"]')).toHaveText(/Loading \d+\/\d+/, COLD_START);
+  await expect(page.locator('[data-testid="boot-progress"]')).toHaveText(/Loading \d+\/\d+/);
   await passGate(page);
   await expect(page.locator('[data-testid="scene-label"]')).toHaveText('menu');
 });
@@ -47,9 +44,8 @@ test('a failed asset offers Retry, which fetches only what is missing (AC-46, AC
 
   await page.goto('/');
   // Visible, not merely present: the panel's copy is in the markup from the
-  // start, so waiting on the text alone would race the load itself. Cold-start
-  // budget: this is the first DOM wait after the navigation.
-  await expect(page.locator('[data-testid="boot-error"]')).toBeVisible(COLD_START);
+  // start, so waiting on the text alone would race the load itself.
+  await expect(page.locator('[data-testid="boot-error"]')).toBeVisible();
   await expect(page.locator('[data-testid="boot-error"]')).toContainText('Could not load assets — check connection');
   // The items before the failing one did get through.
   expect(fetched.some((path) => path.endsWith('crate.glb'))).toBe(true);

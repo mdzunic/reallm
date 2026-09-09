@@ -16,11 +16,6 @@ export default defineConfig({
   fullyParallel: true,
   retries: 0,
   reporter: 'list',
-  // Playwright's default is 30 s, which the cold-start budget of `awaitGate`
-  // (e2e/start.ts) could eat on its own on a slow container. The long suites
-  // already set their own — 90 s, 150 s, 540 s — so this floor hides no hang
-  // that the default was catching.
-  timeout: 60_000,
   use: {
     baseURL: `http://localhost:${port}`,
     trace: 'retain-on-failure',

@@ -1,9 +1,8 @@
 // One press-edge sampler per gameplay scene (SPEC-012 §4.3, §4.11). The
 // buttons' `justPressed` is a per-*frame* latch — `Input.beginFrame` raises it
-// and `Input.endFrame` clears it (or, on a frame that ran no step, re-queues
-// it), with 0 to 5 fixed update steps in between — so a scene that reads it
-// directly acts once per *step* and double-fires on every two-step frame
-// (routine at the 30 fps phone floor). Reading through
+// and `Input.endFrame` clears it, with 0 to 5 fixed update steps in between —
+// so a scene that reads it directly acts once per *step* and double-fires on
+// every two-step frame (routine at the 30 fps phone floor). Reading through
 // this class instead makes a press fire on exactly one update step: the first
 // step of the frame whose latch it is.
 //
@@ -13,10 +12,8 @@
 // is not the latch's own lifecycle either: a release that lands on a
 // zero-step frame is invisible from inside `update()`, which would make a
 // quick re-press indistinguishable from the same latch. `beginFrame` only
-// republishes `justPressed` for a press this side of the loop has not seen yet
-// — a newly queued one, or one a zero-step frame carried over (SPEC-005 §4.1)
-// — so "latch visible under a frame id this action has not fired for" is
-// exactly "a press that has not fired".
+// republishes `justPressed` when a *new* press was queued, so "latch visible
+// under a frame id this action has not fired for" is exactly "a new press".
 import { ACTIONS, type Action, type ButtonState } from '@/core/Input';
 
 export class PressEdges {
