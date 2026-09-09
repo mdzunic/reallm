@@ -18,6 +18,7 @@ import {
   crc32,
   crcText,
   createNullSave,
+  epochClock,
   fromBase64Url,
   toBase64Url,
   INSTALL_HINT_INTERVAL_MS,
@@ -986,6 +987,48 @@ describe('autosave (§4.5)', () => {
     // …and one request is one write: the next tick has nothing to do.
     saves.tick();
     expect(events.of('save:written')).toHaveLength(1);
+  });
+
+  it('keeps the window open for a full 500 ms when the request lands mid-millisecond (AC-43, AC-46)', () => {
+    // Real time does not arrive on whole milliseconds. `tick()` measures the
+    // window correctly whatever the clock's resolution — what used to break the
+    // 500 ms floor was `Date.now()` truncating the *stamp* underneath it, so
+    // the store's default clock is the other half of this (see `epochClock`
+    // below); e2e/SPEC-007 read the result as a `delay` of 499.9.
+    const fake = fakeStorage();
+    const events = recorder();
+    const time = clock(1_700_000_000_000.9);
+    const saves = new SaveStore(events, fake.storage, { window: null, now: time.now });
+    saves.bind(newSave(0, CREATION, 1, time.now()));
+
+    saves.request('stage');
+    time.advance(AUTOSAVE_DEBOUNCE_MS - 0.1); // 499.9 ms of real time
+    saves.tick();
+    expect(events.of('save:written')).toEqual([]);
+
+    time.advance(0.1);
+    saves.tick();
+    expect(events.of('save:written')).toEqual([{ slot: 0, reason: 'stage' }]);
+  });
+
+  it('stamps the save on a sub-millisecond epoch clock, rounded where it is written (AC-43)', () => {
+    // `epochClock` is what the app gets when no clock is injected: epoch
+    // milliseconds like `Date.now()`, but with the fraction that the interval
+    // of §4.5 needs kept.
+    expect(epochClock({ timeOrigin: 1_700_000_000_000, now: () => 1234.56 })()).toBeCloseTo(1_700_000_001_234.56, 1);
+    // A platform without the timing API falls back to the whole-millisecond clock.
+    expect(epochClock({ timeOrigin: 0 } as never)).toBe(Date.now);
+    expect(epochClock({ now: () => 0 } as never)).toBe(Date.now);
+
+    // …and nothing fractional reaches disk.
+    const fake = fakeStorage();
+    const saves = new SaveStore(recorder(), fake.storage, {
+      window: null,
+      now: () => 1_700_000_000_000.9,
+    });
+    const data = saves.create(0, CREATION, 1);
+    expect(Number.isInteger(data.meta.createdAt)).toBe(true);
+    expect(Number.isInteger(data.meta.updatedAt)).toBe(true);
   });
 
   it('collapses two requests inside the window into one write (AC-46)', () => {
