@@ -277,10 +277,27 @@ export class Input {
     }
   }
 
-  /** Clear the edges so the next frame starts clean (AC-2). */
-  endFrame(): void {
+  /**
+   * Clear the edges so the next frame starts clean (AC-2).
+   *
+   * `stepped` is false for a frame that ran no fixed update step — the
+   * accumulator held less than 1/60 s, so the loop rendered and moved on. Such
+   * a frame publishes the edges in `beginFrame` and would clear them here
+   * without a single `update()` ever seeing them, which silently eats the
+   * press: measured on an idle headless Chromium, roughly one frame in five
+   * runs zero steps, so about a fifth of every discrete tap — E to open the pad
+   * terminal, a throttle button, a pause — did nothing at all. The edges of
+   * such a frame are re-queued instead, so the next frame publishes them again
+   * and gameplay sees each press exactly once (§4.1, AC-2).
+   */
+  endFrame(stepped = true): void {
     for (const action of ACTIONS) {
-      const button = this.#track[action].button;
+      const track = this.#track[action];
+      const button = track.button;
+      if (!stepped) {
+        track.press ||= button.justPressed;
+        track.release ||= button.justReleased;
+      }
       button.justPressed = false;
       button.justReleased = false;
     }

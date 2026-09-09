@@ -150,9 +150,40 @@ declare global {
   }
 }
 
+/**
+ * How long cold start may take. Assertions that react to something the running
+ * game did keep Playwright's 5 s default; the waits that use this budget are
+ * different in kind, because they span the whole cold start rather than a UI
+ * reaction: navigation, the dev server's on-demand transform of the module
+ * graph, and then the serial manifest fetch (SPEC-003 D-30) — for every page of
+ * the first parallel wave at once, since Playwright launches all the workers the
+ * moment the port answers. Measured cold on a 10-core box, twelve pages at once
+ * reach the gate in ~2.9 s and four in ~0.8 s; the factory's check container is
+ * slower, and the four tests that opened it first there ran out at the 5 s
+ * default while everything that started after them passed. The budget belongs
+ * to the load, not to Playwright's generic default for an interaction.
+ */
+export const GATE_TIMEOUT_MS = 30_000;
+
+/**
+ * The assertion options for a wait that spans cold start. `main.ts` builds the
+ * whole boot overlay, so *nothing* in it — the progress line, the error panel,
+ * the version note, the gate — is in the DOM until the module graph has been
+ * transformed, served and evaluated. A wait that is the first DOM assertion
+ * after `page.goto()` therefore carries the same load as `awaitGate`, and every
+ * one of them takes this budget rather than the 5 s default: that default is
+ * what timed out on `boot-assets.spec.ts`'s progress line on the merge gate's
+ * container, while the identical waits in `boot-gate.spec.ts` and
+ * `smoke.spec.ts` passed only because they started later in the wave.
+ *
+ * It changes no assertion — only how long a cold container may take to satisfy
+ * one.
+ */
+export const COLD_START = { timeout: GATE_TIMEOUT_MS } as const;
+
 /** Waits for the manifest to finish loading, which is when the gate appears. */
 export async function awaitGate(page: Page): Promise<void> {
-  await expect(page.locator('[data-testid="boot-start"]')).toBeVisible();
+  await expect(page.locator('[data-testid="boot-start"]')).toBeVisible(COLD_START);
 }
 
 /** Waits for the gate, then passes it with a click on TAP TO START. */

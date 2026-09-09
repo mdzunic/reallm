@@ -2,7 +2,7 @@
 // user gesture — that is what lets the browser start an AudioContext (E21) —
 // so this suite covers what the player sees before it and what happens after.
 import { expect, test } from '@playwright/test';
-import { awaitGate, frames, passGate, start } from './start';
+import { awaitGate, COLD_START, frames, passGate, start } from './start';
 
 const overlay = '[data-testid="boot-overlay"]';
 const progress = '[data-testid="boot-progress"]';
@@ -26,8 +26,9 @@ test('the overlay shows a progress bar whose width is done/total (AC-19)', async
   });
 
   await page.goto('/');
-  await expect(page.locator(overlay)).toBeVisible();
-  await expect(page.locator(progress)).toHaveText(/Loading \d+\/\d+/);
+  // The overlay is built by `main.ts`, so these two waits span cold start.
+  await expect(page.locator(overlay)).toBeVisible(COLD_START);
+  await expect(page.locator(progress)).toHaveText(/Loading \d+\/\d+/, COLD_START);
 
   const during = await sample(page);
   const counts = /Loading (\d+)\/(\d+)/.exec(during.text);
@@ -48,7 +49,7 @@ test('TAP TO START appears only after the load, and a click passes the gate (AC-
 }) => {
   await page.goto('/');
   // Before the manifest is in, there is no gate and no scene.
-  await expect(page.locator(overlay)).toBeVisible();
+  await expect(page.locator(overlay)).toBeVisible(COLD_START);
 
   await awaitGate(page);
   await expect(page.locator(gate)).toHaveText('TAP TO START');
@@ -182,7 +183,8 @@ test('a failed asset shows Retry and no gate until the load succeeds (AC-25)', a
 
   await page.goto('/');
   // Visible, not merely present: the copy is in the markup from the start.
-  await expect(page.locator('[data-testid="boot-error"]')).toBeVisible();
+  // Cold-start budget: this is the first DOM wait after the navigation.
+  await expect(page.locator('[data-testid="boot-error"]')).toBeVisible(COLD_START);
   await expect(page.locator('[data-testid="boot-error"]')).toContainText('Could not load assets');
   await expect(page.locator(gate)).toBeHidden();
   await expect(page.locator(label)).toHaveCount(0);
