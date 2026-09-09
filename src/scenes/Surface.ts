@@ -254,7 +254,11 @@ export class SurfaceScene extends UiScene<'surface'> {
     const save = services.save.current ?? newSave(0, JUMP_CREATION, services.rng.seed, Date.now());
     this.#save = save;
 
-    // §4.1 step 1: the layout stream, then the per-visit runtime stream.
+    // §4.1 step 1: the layout stream, then the per-visit runtime stream. This
+    // is the one place the visit count moves (SPEC-008 §4.2): every route onto
+    // a planet — the flight scene's landing and a forced `?scene=surface` jump
+    // alike — arrives through this `onEnter`, so counting it here counts it
+    // once and keeps the visit streams consecutive.
     const layout = generateLayout(planet, services.rng.layout(planet.id));
     this.#layout = layout;
     const visits = (save.progress.visits[planet.id] ?? 0) + 1;

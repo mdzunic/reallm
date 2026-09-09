@@ -248,6 +248,68 @@ describe('edge semantics (AC-2)', () => {
     expect(input.state.buttons.interact.justPressed).toBe(false);
     expect(input.state.buttons.interact.down).toBe(true);
   });
+
+  // A frame whose accumulator held less than one step runs no update at all,
+  // so nothing in gameplay ever saw the edges it published. Roughly one frame
+  // in five is such a frame at 60 Hz, and clearing there swallowed that share
+  // of every discrete tap (E to open a terminal, a throttle notch, pause).
+  it('a frame that ran no update step carries its edges to the next frame', () => {
+    const input = new Input();
+    const interact = input.state.buttons.interact;
+    input.pressAction('interact', 'keyboard');
+    input.releaseAction('interact', 'keyboard');
+
+    input.beginFrame(DT);
+    expect(interact.justPressed).toBe(true);
+    input.endFrame(false); // no step ran: nothing consumed the pair
+
+    input.beginFrame(DT);
+    expect(interact.justPressed).toBe(true);
+    expect(interact.justReleased).toBe(true);
+    expect(interact.down).toBe(false);
+
+    // …and exactly once: the frame that did step clears them for good.
+    input.endFrame(true);
+    input.beginFrame(DT);
+    expect(interact.justPressed).toBe(false);
+    expect(interact.justReleased).toBe(false);
+  });
+
+  it('carries across a run of zero-step frames without duplicating the press', () => {
+    const input = new Input();
+    const fire = input.state.buttons.fire;
+    input.pressAction('fire', 'keyboard');
+
+    let published = 0;
+    for (let frame = 0; frame < 4; frame++) {
+      input.beginFrame(DT);
+      if (fire.justPressed) published++;
+      input.endFrame(false);
+    }
+    expect(published).toBe(4); // still pending on every one of them
+
+    input.beginFrame(DT);
+    expect(fire.justPressed).toBe(true);
+    input.endFrame(true);
+    input.beginFrame(DT);
+    expect(fire.justPressed).toBe(false);
+    expect(fire.down).toBe(true);
+  });
+
+  it('a zero-step frame does not resurrect an edge an earlier frame consumed', () => {
+    const input = new Input();
+    const pause = input.state.buttons.pause;
+    input.pressAction('pause', 'keyboard');
+    input.beginFrame(DT);
+    expect(pause.justPressed).toBe(true);
+    input.endFrame(true);
+
+    input.beginFrame(DT);
+    expect(pause.justPressed).toBe(false);
+    input.endFrame(false);
+    input.beginFrame(DT);
+    expect(pause.justPressed).toBe(false);
+  });
 });
 
 describe('heldFor (AC-3)', () => {
