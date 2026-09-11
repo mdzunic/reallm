@@ -28,6 +28,8 @@ export abstract class UiScene<K extends SceneId> implements Scene<K> {
   protected readonly camera = new THREE.PerspectiveCamera(60, 1, 0.1, 200);
   /** How many own meshes the backdrop builds; `debugInfo()` prints it first. */
   protected props = 0;
+  /** A scene that lights itself (flight; SPEC-017's `ownsLighting`) skips the flat ambient. */
+  protected readonly ownsLighting: boolean = false;
   protected elapsed = 0;
   readonly #music: MusicId | undefined;
   #renders = 0;
@@ -46,7 +48,7 @@ export abstract class UiScene<K extends SceneId> implements Scene<K> {
   enter(params: SceneParams[K]): void {
     this.camera.position.set(0, 1.4, 4);
     this.camera.lookAt(0, 0, 0);
-    this.scene.add(new THREE.AmbientLight(0x8899aa, 2));
+    if (!this.ownsLighting) this.scene.add(new THREE.AmbientLight(0x8899aa, 2));
     this.disposer.add(() => disposeObject3D(this.scene));
     this.#mountTag();
     // SPEC-006 §4.3: the bed changes on `enter()` so the crossfade spans the

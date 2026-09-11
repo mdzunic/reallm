@@ -5,7 +5,10 @@
 // The id unions below are derived from the table keys, so every `assets.model()`
 // / `assets.texture()` call is checked against what actually ships. `core/Assets`
 // describes the shape (`AssetManifest`) and checks it at the `load()` call site;
-// this file imports nothing, like every other data module (SPEC-001 §4).
+// this file imports only data ids, like every other data module (SPEC-001 §4).
+//
+// The flight scene's art (PLAN R8) is not in `ASSETS`: `FLIGHT_ASSETS` and
+// `PLANET_ART` below are fetched when a trip starts, never at boot.
 //
 // Audio (SPEC-006 §2): SFX are packed one sprite sheet per domain — `ui`,
 // `surface`, `flight` — so a domain costs one request and one decode, and music
@@ -18,6 +21,8 @@
 // is handled at runtime (SPEC-006 06-e).
 //
 // Every file is CC0 and listed in `public/assets/LICENSES.md`.
+
+import type { PlanetId } from '@/data/ids';
 
 export const ASSETS = {
   models: {
@@ -123,8 +128,79 @@ export const ASSETS = {
   },
 } as const;
 
-export type ModelId = keyof typeof ASSETS.models;
-export type TextureId = keyof typeof ASSETS.textures;
+/**
+ * The flight scene's shared art (PLAN R8, SPEC-020 §4.8): loaded by the flight
+ * scene when a trip starts and cached like the boot set — never at boot, whose
+ * e2e suites delay every request. Made by `scripts/assets/blender/`.
+ */
+export const FLIGHT_ASSETS = {
+  models: {
+    /** Baked `Hull` + flat `Glow`; the flight view instances both materials. */
+    fighter: 'assets/models/fighter.glb',
+    interceptor: 'assets/models/interceptor.glb',
+    /** Camera space: the pilot looks along −Z. */
+    cockpit: 'assets/models/cockpit.glb',
+    /** Two rock shapes, one mesh each, mean radius 1. */
+    asteroid: 'assets/models/asteroid.glb',
+  },
+  textures: {
+    /** Grey is cloud cover — the cloud layer's alpha map, so data, not colour. */
+    clouds: { url: 'assets/textures/flight/clouds.webp', kind: 'data' },
+    ember: { url: 'assets/textures/sprites/ember.webp', kind: 'color' },
+    flare: { url: 'assets/textures/sprites/flare.webp', kind: 'color' },
+  },
+  audio: {},
+} as const;
+
+/** One destination's flight maps (PLAN R8); `emissive` only where the world glows. */
+export interface PlanetArt {
+  /** The forward sky window (`SKY_WINDOW` in views/FlightView). */
+  readonly sky: string;
+  /** Equirect albedo for SphereGeometry UVs. */
+  readonly surface: string;
+  /** Relief normals, OpenGL convention. */
+  readonly normal: string;
+  readonly emissive?: string;
+}
+
+/** Per-destination maps, owned and released by the flight scene. */
+export const PLANET_ART: Readonly<Record<PlanetId, PlanetArt>> = {
+  cinder4: {
+    sky: 'assets/textures/flight/sky_cinder4.webp',
+    surface: 'assets/textures/flight/planet_cinder4.webp',
+    normal: 'assets/textures/flight/planet_cinder4_nr.webp',
+  },
+  vetra: {
+    sky: 'assets/textures/flight/sky_vetra.webp',
+    surface: 'assets/textures/flight/planet_vetra.webp',
+    normal: 'assets/textures/flight/planet_vetra_nr.webp',
+  },
+  thessaly: {
+    sky: 'assets/textures/flight/sky_thessaly.webp',
+    surface: 'assets/textures/flight/planet_thessaly.webp',
+    normal: 'assets/textures/flight/planet_thessaly_nr.webp',
+  },
+  ferrum: {
+    sky: 'assets/textures/flight/sky_ferrum.webp',
+    surface: 'assets/textures/flight/planet_ferrum.webp',
+    normal: 'assets/textures/flight/planet_ferrum_nr.webp',
+    emissive: 'assets/textures/flight/planet_ferrum_em.webp',
+  },
+  hive: {
+    sky: 'assets/textures/flight/sky_hive.webp',
+    surface: 'assets/textures/flight/planet_hive.webp',
+    normal: 'assets/textures/flight/planet_hive_nr.webp',
+    emissive: 'assets/textures/flight/planet_hive_em.webp',
+  },
+  eden: {
+    sky: 'assets/textures/flight/sky_eden.webp',
+    surface: 'assets/textures/flight/planet_eden.webp',
+    normal: 'assets/textures/flight/planet_eden_nr.webp',
+  },
+};
+
+export type ModelId = keyof typeof ASSETS.models | keyof typeof FLIGHT_ASSETS.models;
+export type TextureId = keyof typeof ASSETS.textures | keyof typeof FLIGHT_ASSETS.textures;
 
 /** Every key of `ASSETS.audio` — a sprite bank or a music track (§2.4). */
 export type AudioBankId = keyof typeof ASSETS.audio;
