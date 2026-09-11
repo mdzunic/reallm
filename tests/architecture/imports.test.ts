@@ -26,8 +26,12 @@ const FORBIDDEN: Record<Folder, readonly Target[]> = {
   ui: ['three'],
   root: [], // src/main.ts is a composition root, like a scene
 };
-/** The `core` modules allowed to import `three` (SPEC-001 §4). */
-const CORE_WITH_THREE = new Set(['Renderer', 'Assets', 'Disposer', 'Benchmark']);
+/**
+ * The `core` modules allowed to import `three` (SPEC-001 §4). PLAN R6-2 adds
+ * `PostChain`; `core/Quality.ts` is deliberately *not* here — the whole point
+ * of the render plan is that it reads without a GL context.
+ */
+const CORE_WITH_THREE = new Set(['Renderer', 'Assets', 'Disposer', 'Benchmark', 'PostChain']);
 /** Tests may exercise pure code only (SPEC-001 §4, last row). */
 const FORBIDDEN_FOR_TESTS: readonly Target[] = ['views', 'scenes', 'ui'];
 

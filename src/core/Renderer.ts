@@ -10,75 +10,29 @@
 //
 // `core/Renderer.ts` is one of the four core modules allowed to import `three`
 // (SPEC-001 §4).
-import { WebGLRenderer, type Camera, type Object3D } from 'three';
+import { ACESFilmicToneMapping, PCFSoftShadowMap, SRGBColorSpace, WebGLRenderer, type Camera, type Object3D } from 'three';
 import type { EventBus } from '@/core/Services';
 import { log } from '@/core/Log';
+import { PostChain } from '@/core/PostChain';
+import {
+  applyLook,
+  DEFAULT_LOOK,
+  postPlanFor,
+  QUALITY,
+  resolvePostPlan,
+  samePlan,
+  type Look,
+  type PostPlan,
+  type QualityPreset,
+  type QualitySettings,
+} from '@/core/Quality';
 
-export type QualityPreset = 'low' | 'medium' | 'high';
-
-export interface QualitySettings {
-  readonly maxDpr: number;
-  readonly antialias: boolean;
-  readonly shadows: boolean;
-  readonly maxParticles: number;
-  readonly maxEnemies: number;
-  readonly drawDistance: number;
-  readonly fogEnabled: boolean;
-  readonly targetFps: 30 | 60;
-  readonly starfieldPoints: number;
-  readonly asteroidCap: number;
-  readonly textureMaxSize: number;
-}
-
-/**
- * Initial tuning (SPEC-002 D-H). SPEC-015 §3 owns the final numbers and may
- * retune them without a PLAN entry. SPEC-002 honours `maxDpr`, `antialias` and
- * `targetFps`; the rest are declared here so later specs read one table.
- */
-export const QUALITY = {
-  low: {
-    maxDpr: 1,
-    antialias: false,
-    shadows: false,
-    maxParticles: 60,
-    maxEnemies: 12,
-    drawDistance: 60,
-    fogEnabled: true,
-    targetFps: 30,
-    // SPEC-013 §4.3 pins the flight caps: 40 asteroids on low, 60 otherwise
-    // (13-d), and a 2,000-point starfield on medium (§4.9). Initial tuning
-    // still, but the asteroid caps now carry the numbers that spec tests.
-    starfieldPoints: 400,
-    asteroidCap: 40,
-    textureMaxSize: 512,
-  },
-  medium: {
-    maxDpr: 1.5,
-    antialias: false,
-    shadows: false,
-    maxParticles: 150,
-    maxEnemies: 20,
-    drawDistance: 90,
-    fogEnabled: true,
-    targetFps: 60,
-    starfieldPoints: 2000,
-    asteroidCap: 60,
-    textureMaxSize: 1024,
-  },
-  high: {
-    maxDpr: 2,
-    antialias: true,
-    shadows: true,
-    maxParticles: 300,
-    maxEnemies: 32,
-    drawDistance: 140,
-    fogEnabled: true,
-    targetFps: 60,
-    starfieldPoints: 2600,
-    asteroidCap: 60,
-    textureMaxSize: 2048,
-  },
-} as const satisfies Record<QualityPreset, QualitySettings>;
+// SPEC-017 moved the table and its types into the pure `core/Quality.ts`; they
+// are re-exported here so every existing import site — `@/core/Renderer` — is
+// unchanged (17-n). `verbatimModuleSyntax` is on, so the types travel through
+// `export type` and the value through a plain `export`.
+export { QUALITY };
+export type { Look, PostPlan, QualityPreset, QualitySettings };
 
 export interface RendererSize {
   readonly width: number; // CSS px
@@ -96,10 +50,20 @@ export interface Renderer {
   readonly preset: QualityPreset;
   readonly quality: QualitySettings;
   readonly contextLost: boolean;
+  /** The *resolved* plan in force — what the chain was actually built from. */
+  readonly post: PostPlan;
   setQuality(preset: QualityPreset): void;
   /** Re-measure and apply now; called after every scene enters (SPEC-003 §4.1). */
   resize(): void;
   render(scene: Object3D, camera: Camera): void;
+  /** Merged into the current look; exposure applies on both paths (SPEC-017 §4.2). */
+  setLook(look: Partial<Look>): void;
+  /**
+   * A second, scissored pass straight to the canvas after `render()` — the
+   * creation portrait (17-e). `box` is in CSS px; the overlay is tone-mapped by
+   * its materials and gets no bloom and no grade.
+   */
+  renderOverlay(scene: Object3D, camera: Camera, box: { x: number; y: number; w: number; h: number }): void;
   dispose(): void;
 }
 
@@ -171,6 +135,14 @@ class CanvasRenderer implements Renderer {
   #orientation: Orientation | null = null;
   #contextLost = false;
   #disposed = false;
+  /** The post chain, or `null` on the direct path (`low`, or 17-a). */
+  #chain: PostChain | null = null;
+  #post: PostPlan;
+  /** 17-a's warning is a fact about the device, so it is logged once. */
+  #warnedNoHalfFloat = false;
+  /** Rendered frames; the grade's only time source, and reset on a loss (17-c). */
+  #frame = 0;
+  readonly #look: Look = { ...DEFAULT_LOOK, tint: [...DEFAULT_LOOK.tint] };
   /** Set by every resize signal; consumed at the start of the next render step. */
   #pending = true;
   #dprQuery: MediaQueryList | null = null;
@@ -186,7 +158,12 @@ class CanvasRenderer implements Renderer {
     this.#canvas = canvas;
     this.#events = options.events;
     this.#preset = options.preset;
-    const antialias = QUALITY[options.preset].antialias;
+    // SPEC-017 D-2: the context flag comes from the plan, not from
+    // `QUALITY[preset].antialias` — context MSAA never reaches the offscreen
+    // target the composer draws into, so it is off on every preset and the
+    // `high` row survives only as SPEC-015 §3 tuning data.
+    this.#post = postPlanFor(options.preset, deviceDpr());
+    const antialias = this.#post.contextAntialias;
     this.gl = new WebGLRenderer({
       canvas,
       // The attributes the GL context actually gets (AC-11) — see createContext.
@@ -198,6 +175,17 @@ class CanvasRenderer implements Renderer {
       antialias,
       powerPreference: 'high-performance',
     });
+    // SPEC-017 §4.2.1. `OutputPass` applies the same ACES curve on the composer
+    // path, so the image is identical whether or not the chain runs.
+    this.gl.outputColorSpace = SRGBColorSpace;
+    this.gl.toneMapping = ACESFilmicToneMapping;
+    this.gl.toneMappingExposure = DEFAULT_LOOK.exposure;
+    this.gl.shadowMap.type = PCFSoftShadowMap;
+    this.gl.shadowMap.enabled = QUALITY[options.preset].shadowMapSize > 0;
+    // The frame is counted here, not by three: with the composer on, one frame
+    // is a dozen draws and an auto-reset per `render()` would count the last
+    // quad only (§4.2.4).
+    this.gl.info.autoReset = false;
 
     this.#watchSize();
     this.#armDprQuery();
@@ -207,6 +195,7 @@ class CanvasRenderer implements Renderer {
     });
     this.#watchContext(options);
     this.resize();
+    this.#buildChain();
   }
 
   get width(): number {
@@ -233,14 +222,22 @@ class CanvasRenderer implements Renderer {
     return this.#contextLost;
   }
 
+  get post(): PostPlan {
+    return this.#post;
+  }
+
   /**
    * Swaps the preset and re-applies the pixel ratio on the same
    * `WebGLRenderer` — `antialias` is a context-creation flag and therefore
-   * stays where it was until the next reload (AC-16).
+   * stays where it was until the next reload (AC-16). SPEC-017 §4.2.7 adds the
+   * shadow-map switch and a forced `#apply`, which rebuilds the chain when the
+   * plan changed and emits `renderer:resized` — the signal views already use to
+   * re-read `quality`, so no new event name appears.
    */
   setQuality(preset: QualityPreset): void {
     if (preset === this.#preset) return;
     this.#preset = preset;
+    this.gl.shadowMap.enabled = QUALITY[preset].shadowMapSize > 0;
     this.#apply(true);
   }
 
@@ -253,18 +250,84 @@ class CanvasRenderer implements Renderer {
     // The start of the render step: one measurement per frame at most, and only
     // when something actually signalled a change (§4.3).
     if (this.#pending) this.#apply(false);
+    // Once per rendered frame, so `draws` and `tris` count scene + post +
+    // overlay rather than whatever three drew last (SPEC-017 §4.2.4). `info` is
+    // re-read on every use: three replaces the object on a context restore.
+    this.gl.info.reset();
+    this.#frame++;
+    if (this.#chain !== null) this.#chain.render(scene, camera, this.#frame);
+    else this.gl.render(scene, camera);
+  }
+
+  setLook(look: Partial<Look>): void {
+    applyLook(this.#look, look);
+    // Exposure is the one grade field three itself owns, so it applies on the
+    // direct path as well as through the chain.
+    this.gl.toneMappingExposure = this.#look.exposure;
+    this.#chain?.setLook(this.#look);
+  }
+
+  renderOverlay(scene: Object3D, camera: Camera, box: { x: number; y: number; w: number; h: number }): void {
+    if (this.#disposed || this.#contextLost) return;
+    // Straight to the canvas, after the chain has put the frame there. No
+    // `info.reset()` here: the overlay's draws belong to the same frame.
+    this.gl.setRenderTarget(null);
+    this.gl.setScissorTest(true);
+    this.gl.setScissor(box.x, box.y, box.w, box.h);
+    this.gl.setViewport(box.x, box.y, box.w, box.h);
+    this.gl.clearDepth();
     this.gl.render(scene, camera);
+    this.gl.setScissorTest(false);
+    this.gl.setViewport(0, 0, this.#width, this.#height);
   }
 
   dispose(): void {
     if (this.#disposed) return;
     this.#disposed = true;
     for (const release of this.#teardown.splice(0).reverse()) release();
+    this.#chain?.dispose();
+    this.#chain = null;
     // Hand the context back rather than waiting for the GC; a second `Game` in
     // the same page (HMR, 02-d) would otherwise sit on two of them. Losing the
     // context first is the order three documents.
     this.gl.forceContextLoss();
     this.gl.dispose();
+  }
+
+  /**
+   * §4.2.3. Re-plans for the current preset and dpr, resolves it against what
+   * the device can actually allocate, and rebuilds only when the resolved plan
+   * moved (D-3) — a plain window resize therefore resizes the chain and never
+   * churns its targets (17-q).
+   */
+  #buildChain(): void {
+    if (this.#disposed) return;
+    const halfFloat = this.#hasHalfFloat();
+    const plan = resolvePostPlan(postPlanFor(this.#preset, this.#dpr), { halfFloat });
+    if (!halfFloat && !this.#warnedNoHalfFloat) {
+      this.#warnedNoHalfFloat = true;
+      log.warn('renderer', 'no half-float colour buffer; post-processing off');
+    }
+    if (this.#chain !== null && samePlan(plan, this.#post)) {
+      this.#post = plan;
+      return;
+    }
+    this.#post = plan;
+    this.#chain?.dispose();
+    this.#chain = plan.composer
+      ? new PostChain(this.gl, plan, this.#width, this.#height, this.#dpr, this.#look)
+      : null;
+  }
+
+  /** 17-a: `UnrealBloomPass` hard-codes `HalfFloatType`, so this gates the chain. */
+  #hasHalfFloat(): boolean {
+    try {
+      const extensions = this.gl.extensions;
+      return extensions.has('EXT_color_buffer_half_float') || extensions.has('EXT_color_buffer_float');
+    } catch (error) {
+      log.warn('renderer', 'could not query the colour-buffer extensions', error);
+      return false;
+    }
   }
 
   /**
@@ -293,7 +356,14 @@ class CanvasRenderer implements Renderer {
     // `false`: CSS owns the layout size, the renderer owns the backing store.
     this.gl.setSize(width, height, false);
 
-    if (changed || force) this.#events.emit('renderer:resized', { width, height, dpr });
+    if (changed || force) {
+      // §4.2.6: re-plan first — a dpr move can flip `high` between MSAA and
+      // FXAA (17-b) — then hand the chain the new size. `#buildChain` no-ops
+      // when the plan is unchanged, so a plain resize is just `setSize`.
+      this.#buildChain();
+      this.#chain?.setSize(width, height, dpr);
+      this.#events.emit('renderer:resized', { width, height, dpr });
+    }
 
     // A 0×0 measurement clamps to 1×1, which reads as landscape and is not an
     // orientation at all. Seeding from it would make a phone's first real
@@ -343,6 +413,12 @@ class CanvasRenderer implements Renderer {
       // Without this the browser never fires `webglcontextrestored`.
       event.preventDefault();
       this.#contextLost = true;
+      // 17-c: nothing is disposed or recreated by hand — three re-creates the
+      // chain's targets lazily on the next `setRenderTarget`. The frame counter
+      // goes back to zero and the resize stays pending, so the first restored
+      // frame re-measures and the grade's clock restarts cleanly.
+      this.#frame = 0;
+      this.#pending = true;
       this.#events.emit('renderer:context-lost');
       options.onContextLost();
     });

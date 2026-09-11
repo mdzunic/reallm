@@ -37,6 +37,26 @@ test('the simulator shows the panel, and the scene keeps running after the resto
   await expect(page.locator(reload)).toHaveCount(0);
 });
 
+test('the post chain comes back with the context, untouched by hand (SPEC-017 17-c)', async ({ page }) => {
+  // `medium` is the preset that runs a composer at every ratio, so this is the
+  // case where a lost context leaves live render targets behind. Nothing is
+  // disposed or recreated on restore — three rebuilds the targets lazily on the
+  // next `setRenderTarget` — and the proof is that the frame after the restore
+  // draws a whole frame again rather than one quad or nothing.
+  await start(page, '/?debug&quality=medium');
+  await frames(page, 3);
+  expect((await page.evaluate(() => window.__reallm.stats())).preset).toBe('medium');
+
+  await page.evaluate(() => window.__reallm.loseContext(600));
+  await expect(page.locator(panel)).toBeVisible();
+  await expect(page.locator(panel)).toBeHidden({ timeout: 5000 });
+  await expect(page.locator('[data-testid="debug-state"]')).toHaveText('state running');
+
+  await frames(page, 10);
+  const after = await page.evaluate(() => window.__reallm.stats());
+  expect(after.drawCalls).toBeGreaterThan(1);
+});
+
 test('a context that never returns offers Reload after 5 s (AC-47, AC-49)', async ({ page }) => {
   test.setTimeout(30_000);
   await start(page, '/?debug');

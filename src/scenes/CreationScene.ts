@@ -18,6 +18,8 @@ import { ATTRIBUTE_MAX, CLASSES, CREATION_POINTS, type Attributes, type ClassId 
 import { computePlayerStats, passiveText } from '@/systems/UiHelpers';
 import { dialogueLayer } from '@/ui/DialogueUI';
 import { el, h, testId } from '@/ui/dom';
+import type { Look } from '@/core/Quality';
+import { NEUTRAL_SKY } from '@/views/Environment';
 import { UiScene } from '@/scenes/base';
 
 const CLASS_IDS = Object.keys(CLASSES) as ClassId[];
@@ -29,6 +31,10 @@ export const SECONDARY_SWATCHES = ['#2a3b4c', '#4c2a3b', '#3b4c2a', '#24243a', '
 
 /** AC-15: six faces — the class's own three, then three every class shares. */
 const SHARED_PORTRAITS = [9, 10, 11] as const;
+
+/** SPEC-017 §4.1 (*initial tuning*): creation shares the station's grade. */
+const CREATION_LOOK: Partial<Look> = { vignette: 0.35, bloomStrength: 0.3, tint: [0.96, 1, 1.04] };
+const HUB_ENVIRONMENT_INTENSITY = 0.9;
 const PORTRAIT_GLYPHS = ['☉', '☍', '⚙', '✦', '◈', '⌬', '☄', '♆', '⚑', '◮', '⌘', '✧'] as const;
 
 /** AC-18: the one-line explanation beside the toggle. */
@@ -68,8 +74,13 @@ export class CreationScene extends UiScene<'creation'> {
     super(services, 'creation');
   }
 
+  protected override look(): Partial<Look> {
+    return CREATION_LOOK;
+  }
+
   protected onEnter(params: SceneParams['creation']): void {
     this.#slot = params.slot;
+    this.useEnvironment(NEUTRAL_SKY, HUB_ENVIRONMENT_INTENSITY);
     this.#buildBackdrop();
     this.#buildPreviewScene();
     this.#mountUi();
@@ -84,19 +95,15 @@ export class CreationScene extends UiScene<'creation'> {
     super.render(renderer);
     const box = this.#viewport;
     if (box === null || box.w < 8 || box.h < 8) return;
-    const gl = renderer.gl;
     if (this.#previewCamera.aspect !== box.w / box.h) {
       this.#previewCamera.aspect = box.w / box.h;
       this.#previewCamera.updateProjectionMatrix();
     }
-    // AC-19: the main renderer, confined to the form's preview box.
-    gl.setScissorTest(true);
-    gl.setScissor(box.x, box.y, box.w, box.h);
-    gl.setViewport(box.x, box.y, box.w, box.h);
-    gl.clearDepth();
-    gl.render(this.#previewScene, this.#previewCamera);
-    gl.setScissorTest(false);
-    gl.setViewport(0, 0, renderer.width, renderer.height);
+    // AC-19, now through SPEC-017's seam (17-e): the one renderer, confined to
+    // the form's preview box, drawn straight to the canvas after the post chain
+    // has put the frame there. The portrait is tone-mapped by its materials and
+    // takes no bloom and no grade, which is what a preview swatch wants.
+    renderer.renderOverlay(this.#previewScene, this.#previewCamera, box);
   }
 
   override dispose(): void {
@@ -130,7 +137,8 @@ export class CreationScene extends UiScene<'creation'> {
   /** The tinted model (AC-19); its absence is a warning, never a wall. */
   #buildPreviewScene(): void {
     this.#previewScene.add(new THREE.AmbientLight(0xaabbcc, 1.6));
-    const key = new THREE.DirectionalLight(0xffffff, 2.2);
+    // +15 % over the pre-SPEC-017 value, to offset ACES mid-tone compression.
+    const key = new THREE.DirectionalLight(0xffffff, 2.53);
     key.position.set(1.5, 2.5, 2);
     this.#previewScene.add(key);
     this.#previewCamera.position.set(0, 1.0, 2.6);

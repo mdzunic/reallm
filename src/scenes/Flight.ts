@@ -36,6 +36,7 @@ import { PauseMenu } from '@/ui/PauseMenu';
 import { RotateOverlay } from '@/ui/RotateOverlay';
 import { TouchControls } from '@/ui/TouchControls';
 import { FlightView } from '@/views/FlightView';
+import type { Look } from '@/core/Quality';
 import { UiScene, uiRootEl } from '@/scenes/base';
 
 /** The stand-in pilot for a bare `?scene=flight` jump with no loaded save. */
@@ -52,6 +53,9 @@ const DEMO_CREATION: CharacterCreation = {
  * `travelSeconds` at the slowest throttle notch, plus the 90 s holding cap.
  */
 const DEV_SKIP_LIMIT_SECONDS = 1200;
+
+/** SPEC-017 §4.1 (*initial tuning*): engine glow and shots carry the trip. */
+const FLIGHT_LOOK: Partial<Look> = { bloomStrength: 0.55, bloomThreshold: 0.75, vignette: 0.3 };
 
 /** Landed or recalled — read through a call, so a caller's earlier check cannot narrow it. */
 function tripOver(flight: Flight): boolean {
@@ -95,6 +99,10 @@ export class FlightScene extends UiScene<'flight'> {
 
   constructor(services: GameServices) {
     super(services, 'flight', 'flight');
+  }
+
+  protected override look(): Partial<Look> {
+    return FLIGHT_LOOK;
   }
 
   protected onEnter(params: SceneParams['flight']): void {

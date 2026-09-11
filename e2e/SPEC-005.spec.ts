@@ -10,7 +10,7 @@
 // `setPointerCapture` fallback, the flight touch zones and the keyboard
 // aim-assist blend.
 import { expect, test, type Page } from '@playwright/test';
-import { start, type InputSnapshot } from './start';
+import { gameUrl, start, type InputSnapshot } from './start';
 
 async function settle(page: Page, scene: string): Promise<void> {
   await expect(page.locator('[data-testid="scene-label"]')).toHaveText(scene);
@@ -260,7 +260,7 @@ test.describe('touch layer: gaps the static review flagged', () => {
     // An isolated `Input`/`TouchControls` pair with nobody else driving its
     // frames lets the test step `beginFrame`/`endFrame` itself and observe the
     // pulse directly, using the exact same production modules the app ships.
-    await page.goto('/');
+    await page.goto(gameUrl('/'));
     const result = await page.evaluate(async () => {
       const { Input } = await import('/src/core/Input.ts');
       const { createSettings } = await import('/src/core/Settings.ts');
@@ -417,7 +417,7 @@ test.describe('isolated Input/TouchControls (no scene wires these yet)', () => {
   // AC-12 test above uses — which is still a real browser DOM, just not the
   // shared game singleton.
   test('setInteractHint shows, labels and re-hides the interact button (AC-17)', async ({ page }) => {
-    await page.goto('/');
+    await page.goto(gameUrl('/'));
     const result = await page.evaluate(async () => {
       const { Input } = await import('/src/core/Input.ts');
       const { createSettings } = await import('/src/core/Settings.ts');
@@ -444,7 +444,7 @@ test.describe('isolated Input/TouchControls (no scene wires these yet)', () => {
   });
 
   test('setEnabled(false) reads released and does not replay on re-enable (AC-21)', async ({ page }) => {
-    await page.goto('/');
+    await page.goto(gameUrl('/'));
     const result = await page.evaluate(async () => {
       const { Input } = await import('/src/core/Input.ts');
       const input = new Input();

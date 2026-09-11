@@ -4,9 +4,14 @@
 // moving, a hop for swarms, a breathe for statics, the windup puff — and the
 // hit flash and elite gold arrive through `instanceColor`.
 //
-// Parts per recipe stay ≤ 3 (legs merge into two alternating tripod groups),
-// so ten recipes worst-case cost ≤ 30 draw calls, inside §4.10's ≤ 40 budget.
-// A part with no live instance turns invisible and costs nothing.
+// Parts per recipe stay ≤ 4 (legs merge into two alternating tripod groups), so
+// the recipe variants a single planet's roster can put on screen at once stay
+// inside §4.10's ≤ 40 enemy-draw budget. A part with no live instance turns
+// invisible and costs nothing.
+//
+// SPEC-017 §4.7 swapped the one shared Lambert for a `MeshStandardMaterial` per
+// `recipe|emissive` variant, so a definition that glows (`look.emissive`) no
+// longer tints every other user of its recipe (17-m).
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { disposeObject3D } from '@/core/Disposer';
@@ -27,6 +32,14 @@ const WINDUP_SCALE = 1.15;
 const FLASH_COLOR = new THREE.Color('#ffffff');
 const ELITE_COLOR = new THREE.Color('#e0b34a');
 
+/** §4.7: the enemy-part surface — chalky, barely metallic, faceted. */
+const PART_ROUGHNESS = 0.7;
+const PART_METALNESS = 0.15;
+/** A definition's `look.emissive` is a whole-body glow, so it stays low. */
+const LOOK_EMISSIVE_INTENSITY = 0.35;
+/** A recipe part's own `def.emissive` (the wraith core) is a light source. */
+const PART_EMISSIVE_INTENSITY = 2;
+
 type PartRole = 'body' | 'legsA' | 'legsB' | 'head' | 'inner' | 'crown' | 'tail';
 
 interface PartDef {
@@ -34,6 +47,14 @@ interface PartDef {
   geometry: THREE.BufferGeometry;
   /** Emissive parts (the wraith core) get their own material. */
   emissive?: string;
+}
+
+/** What an `EnemyDef.look` carries that the meshes care about (SPEC-012 §4.9). */
+export interface EnemyLook {
+  readonly recipe: ProceduralRecipeId;
+  readonly scale: number;
+  readonly tint: string;
+  readonly emissive?: string;
 }
 
 /** A recipe's parts, built once and shared by every instance. */
@@ -186,11 +207,34 @@ function isMoving(e: EnemyEntity): boolean {
 
 export class EnemyMeshes {
   readonly #root = new THREE.Group();
-  readonly #material = new THREE.MeshLambertMaterial();
-  readonly #recipes = new Map<ProceduralRecipeId, RecipeMeshes>();
+  /**
+   * Keyed by `${recipe}|${emissive ?? ''}` (17-m): two definitions that share a
+   * recipe but glow differently need their own material, and therefore their
+   * own instanced meshes. The parts of that recipe are then paid for twice —
+   * still inside SPEC-012 §4.10's ≤ 40 enemy draws, because a planet's roster
+   * never spans every recipe at once.
+   */
+  readonly #recipes = new Map<string, RecipeMeshes>();
+  #shadows: boolean;
 
-  constructor(parent: THREE.Object3D) {
+  constructor(parent: THREE.Object3D, options?: { shadows?: boolean }) {
     parent.add(this.#root);
+    this.#shadows = options?.shadows ?? false;
+  }
+
+  /**
+   * SPEC-017 §4.8: a preset change while the surface is up flips the shadow map
+   * on or off, and the part meshes have to follow it — both the ones that
+   * already exist and the ones a later recipe builds.
+   */
+  setShadows(enabled: boolean): void {
+    this.#shadows = enabled;
+    for (const recipe of this.#recipes.values()) {
+      for (const part of recipe.parts) {
+        part.mesh.castShadow = enabled;
+        part.mesh.receiveShadow = enabled;
+      }
+    }
   }
 
   /** InstancedMeshes currently visible — the §4.10 budget's enemy share. */
@@ -210,7 +254,7 @@ export class EnemyMeshes {
     for (let i = 0; i < enemies.size; i++) {
       const e = enemies.at(i);
       if (e.state === 'dead' || e.specialKind === 'burrow_dig') continue;
-      const recipe = this.#recipeFor(e.def.look.recipe);
+      const recipe = this.#recipeFor(e.def.look);
       const slot = recipe.count;
       if (slot >= INSTANCES_PER_PART) continue; // clamped, never crashed
       recipe.count++;
@@ -279,14 +323,29 @@ export class EnemyMeshes {
     }
   }
 
-  #recipeFor(id: ProceduralRecipeId): RecipeMeshes {
-    let meshes = this.#recipes.get(id);
+  #recipeFor(look: EnemyLook): RecipeMeshes {
+    const key = `${look.recipe}|${look.emissive ?? ''}`;
+    let meshes = this.#recipes.get(key);
     if (meshes !== undefined) return meshes;
-    const parts = buildRecipe(id).map((def) => {
+    // One body material per variant: the definition's own glow, or none.
+    const body = new THREE.MeshStandardMaterial({
+      flatShading: true,
+      roughness: PART_ROUGHNESS,
+      metalness: PART_METALNESS,
+      emissive: new THREE.Color(look.emissive ?? '#000000'),
+      emissiveIntensity: LOOK_EMISSIVE_INTENSITY,
+    });
+    const parts = buildRecipe(look.recipe).map((def) => {
       const material =
         def.emissive === undefined
-          ? this.#material
-          : new THREE.MeshLambertMaterial({ emissive: def.emissive, emissiveIntensity: 1 });
+          ? body
+          : new THREE.MeshStandardMaterial({
+              flatShading: true,
+              roughness: PART_ROUGHNESS,
+              metalness: PART_METALNESS,
+              emissive: new THREE.Color(def.emissive),
+              emissiveIntensity: PART_EMISSIVE_INTENSITY,
+            });
       const mesh = new THREE.InstancedMesh(def.geometry, material, INSTANCES_PER_PART);
       mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
       // Touch instanceColor once so the material compiles with instancing
@@ -295,17 +354,20 @@ export class EnemyMeshes {
       mesh.count = 0;
       mesh.visible = false;
       mesh.frustumCulled = false; // matrices change every frame; culling costs more
+      mesh.castShadow = this.#shadows;
+      mesh.receiveShadow = this.#shadows;
       this.#root.add(mesh);
       return { mesh, role: def.role };
     });
     meshes = { parts, count: 0 };
-    this.#recipes.set(id, meshes);
+    this.#recipes.set(key, meshes);
     return meshes;
   }
 
   dispose(): void {
     this.#root.parent?.remove(this.#root);
+    // Every part material is this view's own — `disposeObject3D` frees them
+    // with the meshes, and nothing here is tagged `shared`.
     disposeObject3D(this.#root);
-    this.#material.dispose();
   }
 }

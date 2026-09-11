@@ -8,8 +8,10 @@ import * as THREE from 'three';
 import type { MusicId } from '@/core/Audio';
 import { Disposer, disposeObject3D } from '@/core/Disposer';
 import type { GameServices } from '@/core/Services';
+import { DEFAULT_LOOK, type Look } from '@/core/Quality';
 import type { Renderer } from '@/core/Renderer';
 import type { Scene, SceneId, SceneParams } from '@/core/StateMachine';
+import { buildEnvironment, type SkyParams } from '@/views/Environment';
 import { el, testId, uiLayers, type UiRoot } from '@/ui/dom';
 
 /** The DOM layer every scene mounts its own UI into (SPEC-001 shell). */
@@ -45,11 +47,55 @@ export abstract class UiScene<K extends SceneId> implements Scene<K> {
     return uiLayers(this.services.uiRoot);
   }
 
+  /**
+   * The scene's own grade (SPEC-017 §4.1). Every field it leaves out comes back
+   * from `DEFAULT_LOOK` on `enter()`, which is what makes a grade revert when
+   * the next scene arrives (D-4).
+   */
+  protected look(): Partial<Look> {
+    return {};
+  }
+
+  /**
+   * Rebuild the applied look from the defaults and hand it to the renderer.
+   * Called once on `enter()`; a scene whose look only exists after it has built
+   * something (the surface's planet tint) calls it again.
+   */
+  protected applyLook(): void {
+    const look: Look = { ...DEFAULT_LOOK, ...this.look() };
+    // 17-j: the grain is the only part of the grade that moves, so reduce
+    // motion turns it off and leaves the static vignette alone.
+    if (this.services.settings.get().reduceMotion) look.grain = 0;
+    this.services.renderer.setLook(look);
+  }
+
+  /**
+   * SPEC-017 §4.4: build an environment map, hand it to the scene, and free it
+   * on exit — the owner is whoever built it, and nothing else touches it (D-10).
+   *
+   * Gated on `quality.ibl`, which is what PLAN §9 scopes image-based lighting
+   * to ("on `medium` and `high`") and what the `ibl` row exists to carry. On
+   * `low` the scene is lit by its lights alone and pays for neither the PMREM
+   * chain nor an env-map variant of every material — the same trade §4.4 spells
+   * out for the surface. `docs/BUGS.md` records the reading.
+   */
+  protected useEnvironment(params: SkyParams, intensity: number): void {
+    if (!this.services.renderer.quality.ibl) return;
+    const texture = buildEnvironment(params);
+    this.scene.environment = texture;
+    this.scene.environmentIntensity = intensity;
+    this.disposer.add(() => {
+      this.scene.environment = null;
+      texture.dispose();
+    });
+  }
+
   enter(params: SceneParams[K]): void {
     this.camera.position.set(0, 1.4, 4);
     this.camera.lookAt(0, 0, 0);
     if (!this.ownsLighting) this.scene.add(new THREE.AmbientLight(0x8899aa, 2));
     this.disposer.add(() => disposeObject3D(this.scene));
+    this.applyLook();
     this.#mountTag();
     // SPEC-006 §4.3: the bed changes on `enter()` so the crossfade spans the
     // transition; a scene that names no track keeps the current one playing.

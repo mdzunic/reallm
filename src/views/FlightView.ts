@@ -22,6 +22,7 @@ import type { Pool } from '@/core/Pool';
 import type { QualitySettings } from '@/core/Renderer';
 import type { Rng } from '@/core/Rng';
 import type { EnemyDef, PlanetDef } from '@/data/index';
+import { buildEnvironment, skyParamsFor } from '@/views/Environment';
 
 // ------------------------------------------------------- the per-frame slice
 
@@ -142,6 +143,9 @@ const CLOUD_SPIN = 0.012;
 const REDUCED_CLOUD_SPIN = 0.004;
 
 const DEG = Math.PI / 180;
+
+/** SPEC-017 §4.4: image-based lighting is a fill in space, not the key. */
+const FLIGHT_ENVIRONMENT_INTENSITY = 0.5;
 
 function frac(x: number): number {
   return x - Math.floor(x);
@@ -286,6 +290,7 @@ export class FlightView {
   readonly #maxParticles: number;
   #nextParticle = 0;
 
+  readonly #environment: THREE.DataTexture | null = null;
   readonly #fogDensity: number;
   #shake = 0;
   #landing = 0;
@@ -312,10 +317,19 @@ export class FlightView {
     this.#fogDensity = 0.0035;
     scene.fog = new THREE.FogExp2(new THREE.Color(planet.surface.palette.fog).multiplyScalar(0.25), this.#fogDensity);
 
-    // The scene lights itself (it skips the UI scenes' flat ambient): a cool
-    // ambient, a warm key and a blue rim from behind.
-    scene.add(new THREE.AmbientLight(0x8899aa, 1.6));
-    const key = new THREE.DirectionalLight(0xfff2e0, 2.4);
+    // The scene lights itself (it skips the UI scenes' flat ambient). SPEC-017
+    // §4.5 replaces the flat ambient with a hemisphere wearing the destination's
+    // sky, so space gets a direction; the environment map below carries the
+    // speculars a warm key and a blue rim cannot.
+    scene.add(new THREE.HemisphereLight(sky, 0x101418, 0.4));
+    // PLAN §9 scopes image-based lighting to `medium` and `high`; `low` flies
+    // on the key, the rim and the hemisphere alone.
+    if (quality.ibl) {
+      this.#environment = buildEnvironment(skyParamsFor(planet.surface.palette));
+      scene.environment = this.#environment;
+      scene.environmentIntensity = FLIGHT_ENVIRONMENT_INTENSITY;
+    }
+    const key = new THREE.DirectionalLight(0xfff2e0, 2.2);
     key.position.copy(KEY_DIRECTION).multiplyScalar(10);
     scene.add(key);
     const rim = new THREE.DirectionalLight(0x7f9fff, 0.8);
@@ -483,6 +497,10 @@ export class FlightView {
   dispose(): void {
     this.#camera.remove(this.#cockpit);
     disposeObject3D(this.#cockpit);
+    // D-10: clear the reference, then free the texture — three drops the PMREM
+    // it derived from it on the dispose event.
+    this.#scene.environment = null;
+    this.#environment?.dispose();
     this.#scene.fog = null;
     this.#scene.background = null;
   }

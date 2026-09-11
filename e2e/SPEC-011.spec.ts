@@ -11,7 +11,26 @@
 // `?debug` strip (`surface-hurt`, `surface-spawn-boss`, …); the spawn/elite/
 // kill counters moved into `debugInfo()`.
 import { expect, test, type Page } from '@playwright/test';
-import { passGate, start } from './start';
+import { gameUrl, passGate, start } from './start';
+
+/**
+ * One worker for this file.
+ *
+ * Its last test measures a wall-clock audio ramp — the surface bed fading in
+ * over 1500 ms — while the rest of the file runs the most expensive pages in
+ * the suite: four long surface sessions, one of which SPEC-017 pins to
+ * `quality=medium` and which therefore rasterises the whole post chain in
+ * software here (60–140 ms a frame; `docs/playtest-log.md`, "SPEC-017").
+ * Five of those in `fullyParallel` starve each other, and the bed's gain was
+ * observed sitting at 0.03–0.08 twenty seconds into a fade that takes 1.5 s.
+ * Measured against the same set on `main`, where the same file is a third
+ * cheaper because no preset ran a composer: green there, reproducibly red here.
+ *
+ * The same shape as the ramps `e2e/SPEC-006.spec.ts` serialises, and the same
+ * remedy. No assertion in this file changed, and nothing here is order- or
+ * state-dependent — each test still gets its own page and its own save.
+ */
+test.describe.configure({ mode: 'default' });
 
 const info = async (page: Page): Promise<Record<string, number | string>> =>
   (await page.evaluate(() => window.__reallm.stats())).sceneInfo ?? {};
@@ -45,7 +64,11 @@ async function hunt(page: Page, seconds: number, done: () => Promise<boolean>): 
 test('enemies spawn and engage on Cinder-4 (AC-36, AC-37, AC-38)', async ({ page }) => {
   test.setTimeout(150_000);
   await autoFire(page);
-  await start(page, '/?debug&scene=surface&planet=cinder4');
+  // Named on purpose: how many enemies the director may put on the field is a
+  // `QUALITY` row (`maxEnemies`, 12 on `low` and 20 on `medium`), and the
+  // spawn counts below are written against the preset the game defaults to.
+  // Every other suite takes `e2e/start.ts`'s cheap default; this one cannot.
+  await start(page, '/?debug&quality=medium&scene=surface&planet=cinder4');
   await expect(page.locator('[data-testid="scene-label"]')).toHaveText('surface');
 
   // Landing HP: marine stand-in pilot at full (the §6 pin, 184). `hud-hp` is
@@ -239,9 +262,19 @@ test('entering Cinder-4 starts the surface bed, and the pause menu ducks it', as
       return first === undefined ? null : Number(first._node.gain.value.toFixed(4));
     };
   });
-  await page.goto('/?debug&scene=surface&planet=cinder4');
+  await page.goto(gameUrl('/?debug&scene=surface&planet=cinder4'));
   await passGate(page);
   await expect(page.locator('[data-testid="scene-label"]')).toHaveText('surface');
+  // …and until the scene is actually drawing, for the reason `startWithAudio`
+  // in `e2e/SPEC-006.spec.ts` does the same: the scene label goes up when the
+  // scene is built, but the *first rendered frame* after it compiles every GPU
+  // program the scene needs, and on this container's software rasteriser that
+  // is a synchronous stall of ≈ 0.9 s. The bed's fade is driven by
+  // `performance.now()` on a `setInterval` (`core/Audio.ts` §4.4), so a stall
+  // inside the window below makes it measure the compile rather than the fade.
+  // This keeps the stall outside the window; the file-level single worker
+  // configured at the top is what actually fixed the flake.
+  await page.waitForFunction(() => window.__reallm.stats().frame > 5, undefined, { timeout: 60_000 });
 
   const bed = (): Promise<number | null> => page.evaluate(() => (window as unknown as BedProbe).__bedGain());
 

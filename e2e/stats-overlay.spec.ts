@@ -186,6 +186,31 @@ async function frameAndRenders(page: Page): Promise<{ frame: number; renders: nu
   });
 }
 
+/**
+ * Wait until the loop has advanced past `frames` animation frames, and answer
+ * the reading that spans them.
+ *
+ * The sample used to be a flat second, which assumed a ~60 Hz frame. `high`
+ * cannot hold one here: SPEC-017 put a post-processing chain behind
+ * `Renderer.render()` and this container has no GPU, so its sixteen
+ * full-screen passes at 720p cost the software rasteriser ~110 ms a frame and
+ * a second buys nine frames, not sixty. The claim being tested is a *ratio* of
+ * renders to frames, which the frame rate does not enter — so the window is
+ * counted in frames and the assertions are untouched. `low` above takes the
+ * direct path and still keeps its 60 Hz second.
+ */
+async function overFrames(
+  page: Page,
+  frames: number,
+): Promise<{ frames: number; renders: number }> {
+  const before = await frameAndRenders(page);
+  await expect
+    .poll(async () => (await frameAndRenders(page)).frame - before.frame, { timeout: 30_000 })
+    .toBeGreaterThan(frames);
+  const after = await frameAndRenders(page);
+  return { frames: after.frame - before.frame, renders: after.renders - before.renders };
+}
+
 test('quality.targetFps 30 skips every second render, updates untouched (AC-57)', async ({ page }) => {
   await start(page, '/?debug&quality=low');
   expect((await page.evaluate(() => window.__reallm.stats())).preset).toBe('low');
@@ -205,12 +230,8 @@ test('quality.targetFps 30 skips every second render, updates untouched (AC-57)'
 
 test('the other presets render every frame (AC-57)', async ({ page }) => {
   await start(page, '/?debug&quality=high');
-  const before = await frameAndRenders(page);
-  await page.waitForTimeout(1000);
-  const after = await frameAndRenders(page);
+  const { frames, renders } = await overFrames(page, 20);
 
-  const frames = after.frame - before.frame;
-  const renders = after.renders - before.renders;
   expect(frames).toBeGreaterThan(20);
   expect(renders / frames).toBeGreaterThan(0.9);
 });

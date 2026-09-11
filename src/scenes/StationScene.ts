@@ -23,10 +23,16 @@ import { el, h, testId } from '@/ui/dom';
 import { MissionBoard } from '@/ui/MissionBoard';
 import { SettingsPanel } from '@/ui/SettingsPanel';
 import { ShopPanel } from '@/ui/ShopPanel';
+import type { Look } from '@/core/Quality';
+import { NEUTRAL_SKY } from '@/views/Environment';
 import { UiScene } from '@/scenes/base';
 
 /** Missions already debriefed this session, per save object (§4.3). */
 const DEBRIEFED = new WeakMap<SaveV1, Set<MissionId>>();
+
+/** SPEC-017 §4.1 (*initial tuning*): the station reads cool and clean. */
+const STATION_LOOK: Partial<Look> = { vignette: 0.35, bloomStrength: 0.3, tint: [0.96, 1, 1.04] };
+const HUB_ENVIRONMENT_INTENSITY = 0.9;
 
 type StationTab = 'missions' | 'shop' | 'character';
 
@@ -44,7 +50,12 @@ export class StationScene extends UiScene<'station'> {
     super(services, 'station', 'station');
   }
 
+  protected override look(): Partial<Look> {
+    return STATION_LOOK;
+  }
+
   protected onEnter(params: SceneParams['station']): void {
+    this.useEnvironment(NEUTRAL_SKY, HUB_ENVIRONMENT_INTENSITY);
     this.#buildBackdrop();
     const data = this.services.save.current;
     if (data !== null) {
@@ -94,7 +105,8 @@ export class StationScene extends UiScene<'station'> {
     ship.rotation.y = 0.5;
     group.add(ship);
     this.props = 3;
-    const key = new THREE.DirectionalLight(0xdfe8ff, 1.6);
+    // +15 % over the pre-SPEC-017 value, to offset ACES mid-tone compression.
+    const key = new THREE.DirectionalLight(0xdfe8ff, 1.84);
     key.position.set(2, 3, 2);
     this.scene.add(key, group);
     this.#ring = group;

@@ -7,12 +7,14 @@ import * as THREE from 'three';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { disposeObject3D } from '@/core/Disposer';
 import type { Pool } from '@/core/Pool';
+import type { Look, QualitySettings } from '@/core/Quality';
 import type { PlanetDef, ResourceId } from '@/data/index';
 import type { EnemyEntity } from '@/entities/Enemy';
 import type { FollowerEntity } from '@/entities/Follower';
 import type { PlayerEntity } from '@/entities/Player';
 import type { ProjectileEntity } from '@/entities/Projectile';
-import { EnemyMeshes } from '@/views/ProceduralMeshes';
+import { buildEnvironment, skyParamsFor } from '@/views/Environment';
+import { EnemyMeshes, INSTANCES_PER_PART } from '@/views/ProceduralMeshes';
 
 // Structural mirrors of the `systems/` shapes this view reads. Views must not
 // import `systems` (SPEC-001 §4), and the scene passes the real objects — the
@@ -72,7 +74,9 @@ const RESOURCE_COLORS: Record<ResourceId, string> = {
 
 const PARTICLE_COLORS: Record<ParticleKind, string> = {
   sand: '#e0b070',
-  snow: '#ffffff',
+  // 17-f: pure white snow sat above the 0.85 bloom threshold and smeared the
+  // whole storm into a glow. Held just under it, it reads as snow again.
+  snow: '#e6ecf2',
   spores: '#b0e080',
   ash: '#909090',
   heat: '#ffd0a0',
@@ -81,6 +85,28 @@ const PARTICLE_COLORS: Record<ParticleKind, string> = {
 
 const PARTICLE_COUNT = 150;
 const PARTICLE_BOX = 44;
+
+// -------------------------------------------------------- SPEC-017 §4.5–§4.7
+
+/** The shadow-casting key light's offset from the player, in metres. */
+const KEY_OFFSET = { x: 28, y: 46, z: 18 } as const;
+/** Half-extent of the orthographic shadow camera — a little past the draw distance. */
+const SHADOW_EXTENT = 34;
+/** Blob-shadow opacity with no shadow map, and with one (§4.6). */
+const BLOB_OPACITY_ALONE = 0.35;
+const BLOB_OPACITY_WITH_MAP = 0.18;
+/** Player, follower and every live enemy: 2 + the per-part instance cap = 66. */
+const BLOB_CAPACITY = 2 + INSTANCES_PER_PART;
+const BLOB_SCALE_PLAYER = 1.4;
+const BLOB_SCALE_FOLLOWER = 1;
+const BLOB_SCALE_ENEMY = 1.6;
+const BLOB_SCALE_ELITE = 1.3;
+/** How far the planet's fog colour pulls the grade off neutral (§4.1). */
+const TINT_TOWARD_FOG = 0.08;
+/** Projectile base colour: past 1, so the shots clear the bloom threshold (§4.7). */
+const PROJECTILE_GAIN = 2.5;
+/** Image-based lighting on the surface is a fill light, not the key (§4.4). */
+const ENVIRONMENT_INTENSITY = 0.6;
 
 const scratchMatrix = new THREE.Matrix4();
 const scratchColor = new THREE.Color();
@@ -172,6 +198,37 @@ export function nodeCrystalScale(fill: number, out: { x: number; y: number; z: n
 
 const scratchScale = { x: 0, y: 0, z: 0 };
 
+/**
+ * The blob-shadow falloff, 32 × 32 RGBA, computed in JS — deliberately not on a
+ * canvas, so the whole view constructs inside a node test (§4.6).
+ */
+function radialAlpha(size = 32): THREE.DataTexture {
+  const data = new Uint8Array(size * size * 4);
+  const centre = (size - 1) / 2;
+  for (let y = 0; y < size; y++) {
+    for (let x = 0; x < size; x++) {
+      const r = Math.hypot(x - centre, y - centre) / centre;
+      // Smooth to nothing at the rim; no hard edge to give the trick away.
+      const t = Math.min(1, Math.max(0, 1 - r));
+      const at = (y * size + x) * 4;
+      data[at] = 255;
+      data[at + 1] = 255;
+      data[at + 2] = 255;
+      data[at + 3] = Math.round(255 * t * t * (3 - 2 * t));
+    }
+  }
+  const texture = new THREE.DataTexture(data, size, size, THREE.RGBAFormat);
+  texture.minFilter = THREE.LinearFilter;
+  texture.magFilter = THREE.LinearFilter;
+  texture.needsUpdate = true;
+  return texture;
+}
+
+/** `[1, 1, 1]` pulled `amount` of the way toward `colour`, in linear space. */
+function tintToward(colour: THREE.Color, amount: number): [number, number, number] {
+  return [1 + (colour.r - 1) * amount, 1 + (colour.g - 1) * amount, 1 + (colour.b - 1) * amount];
+}
+
 /** Grow-and-hide instanced sync; `place` composes into `scratchMatrix`. */
 function syncInstances(mesh: THREE.InstancedMesh, count: number, place: (index: number) => void): void {
   const n = Math.min(count, mesh.instanceMatrix.count);
@@ -191,12 +248,23 @@ export class SurfaceView {
   readonly #scene: THREE.Scene;
   readonly #root = new THREE.Group();
   readonly enemies: EnemyMeshes;
+  /** The planet's base grade; `SurfaceScene` forwards it on enter (§4.1). */
+  readonly look: Readonly<Partial<Look>>;
 
   readonly #baseFog: number;
   #fog: THREE.FogExp2;
 
+  /** §4.5: hemisphere fill, warm key (the caster), cool rim, player torch. */
+  readonly #key: THREE.DirectionalLight;
+  readonly #keyTarget = new THREE.Object3D();
+  readonly #palette: PlanetDef['surface']['palette'];
+  #environment: THREE.DataTexture | null = null;
+
+  readonly #blobs: THREE.InstancedMesh;
+  readonly #blobMaterial: THREE.MeshBasicMaterial;
+
   readonly #player: THREE.Group;
-  readonly #playerMaterial: THREE.MeshLambertMaterial;
+  readonly #playerMaterial: THREE.MeshStandardMaterial;
   readonly #follower: THREE.Mesh;
   readonly #telegraph: THREE.Mesh;
   readonly #arenaRing: THREE.Mesh;
@@ -210,29 +278,51 @@ export class SurfaceView {
   #particleKind: ParticleKind = 'none';
   #particleIntensity = 0;
 
-  constructor(scene: THREE.Scene, layout: ViewLayout, planet: PlanetDef) {
+  constructor(scene: THREE.Scene, layout: ViewLayout, planet: PlanetDef, quality: QualitySettings) {
     this.#scene = scene;
     scene.add(this.#root);
     const palette = planet.surface.palette;
+    this.#palette = palette;
     scene.background = new THREE.Color(palette.sky);
     this.#baseFog = planet.surface.fogDensity;
     this.#fog = new THREE.FogExp2(palette.fog, this.#baseFog);
     scene.fog = this.#fog;
+    // SPEC-017 §4.1: the planet's own grade — a touch hotter and crisper than
+    // the hubs, pulled 8 % toward its fog colour so each world reads different.
+    this.look = {
+      exposure: 1.05,
+      contrast: 1.04,
+      saturation: 1.05,
+      tint: tintToward(new THREE.Color(palette.fog), TINT_TOWARD_FOG),
+    };
 
-    const sun = new THREE.DirectionalLight(0xfff2dd, 2.2);
-    sun.position.set(40, 70, 25);
-    this.#root.add(sun, new THREE.AmbientLight(0x8899aa, 1.6));
+    // §4.5: a hemisphere for the bounce, a warm key that follows the player and
+    // carries the shadow map, a cool rim from behind, and a torch on the
+    // player. No ambient — `SurfaceScene` sets `ownsLighting`.
+    const hemi = new THREE.HemisphereLight(palette.sky, palette.ground, 0.55);
+    this.#key = new THREE.DirectionalLight(0xffe0b8, 2.6);
+    this.#key.position.set(KEY_OFFSET.x, KEY_OFFSET.y, KEY_OFFSET.z);
+    this.#key.target = this.#keyTarget;
+    const rim = new THREE.DirectionalLight(0x7fa6ff, 0.6);
+    rim.position.set(-30, 20, -24);
+    this.#root.add(hemi, this.#key, this.#keyTarget, rim);
 
     // Ground: one mesh (§4.10).
     const ground = new THREE.Mesh(
       new THREE.PlaneGeometry(layout.halfSize * 2, layout.halfSize * 2),
-      new THREE.MeshLambertMaterial({ color: palette.ground }),
+      new THREE.MeshStandardMaterial({ color: palette.ground, roughness: 0.95, metalness: 0 }),
     );
     ground.rotation.x = -Math.PI / 2;
+    ground.receiveShadow = true;
     this.#root.add(ground);
 
     // Obstacles and props: instanced per kind (§4.10, ≤ 8 draw calls).
-    const accent = new THREE.MeshLambertMaterial({ color: palette.accent });
+    const accent = new THREE.MeshStandardMaterial({
+      color: palette.accent,
+      flatShading: true,
+      roughness: 0.85,
+      metalness: 0.05,
+    });
     const byKind = new Map<string, { x: number; z: number; scale: number; rot: number }[]>();
     for (const o of layout.obstacles) {
       const list = byKind.get(o.kind) ?? [];
@@ -255,16 +345,20 @@ export class SurfaceView {
         mesh.setMatrixAt(i, scratchMatrix);
       });
       mesh.instanceMatrix.needsUpdate = true;
+      mesh.castShadow = true;
+      mesh.receiveShadow = true;
       this.#root.add(mesh);
     }
 
     // POIs: one small mesh per instance, the arena ring scaled to its radius.
-    const poiMaterial = new THREE.MeshLambertMaterial({ color: palette.accent });
-    const padMaterial = new THREE.MeshLambertMaterial({ color: '#7a8aa0' });
+    const poiMaterial = new THREE.MeshStandardMaterial({ color: palette.accent, roughness: 0.6, metalness: 0.3 });
+    const padMaterial = new THREE.MeshStandardMaterial({ color: '#7a8aa0', roughness: 0.5, metalness: 0.6 });
     for (const poi of layout.pois) {
       const mesh = new THREE.Mesh(poiGeometry(poi.kind), poi.kind === 'landing_pad' ? padMaterial : poiMaterial);
       if (poi.kind === 'arena') mesh.scale.setScalar(poi.radius);
       mesh.position.set(poi.x, 0, poi.z);
+      // The pad is flat on the ground: its own shadow would only stripe it.
+      mesh.castShadow = poi.kind !== 'landing_pad';
       this.#root.add(mesh);
     }
 
@@ -283,14 +377,20 @@ export class SurfaceView {
     crystal.translate(0, 0.7, 0);
     this.#nodeCrystals = new THREE.InstancedMesh(
       crystal,
-      new THREE.MeshLambertMaterial(),
+      new THREE.MeshStandardMaterial({
+        roughness: 0.25,
+        metalness: 0.1,
+        emissive: new THREE.Color(0x222233),
+        emissiveIntensity: 0.4,
+      }),
       Math.max(1, layout.nodes.length),
     );
+    this.#nodeCrystals.receiveShadow = true;
     layout.nodes.forEach((node, i) => this.#nodeCrystals.setColorAt(i, scratchColor.set(RESOURCE_COLORS[node.resource])));
     this.#root.add(this.#nodeCrystals);
 
     // Pickups: three instanced meshes (§4.10).
-    const pickupMaterial = new THREE.MeshLambertMaterial();
+    const pickupMaterial = new THREE.MeshStandardMaterial({ roughness: 0.3, metalness: 0.5 });
     this.#pickupMeshes = {
       resource: new THREE.InstancedMesh(new THREE.OctahedronGeometry(0.28), pickupMaterial, 128),
       item: new THREE.InstancedMesh(new THREE.BoxGeometry(0.4, 0.4, 0.4), pickupMaterial, 64),
@@ -301,13 +401,17 @@ export class SurfaceView {
       mesh.setColorAt(0, scratchColor.set('#ffffff'));
       mesh.count = 0;
       mesh.frustumCulled = false;
+      mesh.receiveShadow = true;
       this.#root.add(mesh);
     }
 
-    // Projectiles: one instanced mesh, owner colour per instance.
+    // Projectiles: one instanced mesh, owner colour per instance. §4.7: the
+    // base colour is pushed past 1 so `instanceColor` lands above the bloom
+    // threshold and the shots actually glow; on `low` there is no bloom and the
+    // clamp to white in the framebuffer is the whole effect.
     this.#projectileMesh = new THREE.InstancedMesh(
       new THREE.SphereGeometry(1, 6, 5),
-      new THREE.MeshBasicMaterial(),
+      new THREE.MeshBasicMaterial({ color: new THREE.Color().setScalar(PROJECTILE_GAIN) }),
       256,
     );
     this.#projectileMesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
@@ -316,23 +420,38 @@ export class SurfaceView {
     this.#projectileMesh.frustumCulled = false;
     this.#root.add(this.#projectileMesh);
 
-    // The player: capsule body + nose cone showing facing.
-    this.#playerMaterial = new THREE.MeshLambertMaterial({ color: '#4a8ad0', transparent: true });
+    // The player: capsule body + nose cone showing facing. `transparent` stays
+    // on so the invulnerability blink can keep writing `opacity` (§4.7).
+    this.#playerMaterial = new THREE.MeshStandardMaterial({
+      color: '#4a8ad0',
+      transparent: true,
+      roughness: 0.45,
+      metalness: 0.35,
+    });
     const body = new THREE.Mesh(new THREE.CapsuleGeometry(0.45, 0.8, 3, 8), this.#playerMaterial);
     body.position.y = 0.9;
+    body.castShadow = true;
+    body.receiveShadow = true;
     const nose = new THREE.Mesh(new THREE.ConeGeometry(0.2, 0.6, 6), this.#playerMaterial);
     nose.rotation.z = -Math.PI / 2;
     nose.position.set(0.6, 0.9, 0);
+    nose.castShadow = true;
+    nose.receiveShadow = true;
     this.#player = new THREE.Group();
     this.#player.add(body, nose);
+    // The torch rides the player group, so it moves without `sync()` touching it.
+    const torch = new THREE.PointLight(0xffc98a, 6, 14, 2);
+    torch.position.y = 1.6;
+    this.#player.add(torch);
     this.#root.add(this.#player);
 
     // The escort probe.
     this.#follower = new THREE.Mesh(
       new THREE.SphereGeometry(0.5, 10, 8),
-      new THREE.MeshLambertMaterial({ color: '#c0d8e8' }),
+      new THREE.MeshStandardMaterial({ color: '#c0d8e8', roughness: 0.4, metalness: 0.6 }),
     );
     this.#follower.visible = false;
+    this.#follower.castShadow = true;
     this.#root.add(this.#follower);
 
     // The wurm's resurface telegraph.
@@ -355,7 +474,74 @@ export class SurfaceView {
     this.#particles.frustumCulled = false;
     this.#root.add(this.#particles);
 
-    this.enemies = new EnemyMeshes(this.#root);
+    // §4.6: one instanced blob layer on every preset — the thing that actually
+    // grounds a character, at one draw call and one 32² texture. The shadow map
+    // is a `high`-only luxury on top of it, and fades the blobs when it lands.
+    const blobGeometry = new THREE.PlaneGeometry(1, 1);
+    blobGeometry.rotateX(-Math.PI / 2);
+    this.#blobMaterial = new THREE.MeshBasicMaterial({
+      color: 0x000000,
+      map: radialAlpha(),
+      transparent: true,
+      depthWrite: false,
+      opacity: BLOB_OPACITY_ALONE,
+    });
+    this.#blobs = new THREE.InstancedMesh(blobGeometry, this.#blobMaterial, BLOB_CAPACITY);
+    this.#blobs.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+    this.#blobs.position.y = 0.02;
+    this.#blobs.renderOrder = 1;
+    this.#blobs.frustumCulled = false;
+    this.#blobs.count = 0;
+    this.#root.add(this.#blobs);
+
+    this.enemies = new EnemyMeshes(this.#root, { shadows: quality.shadowMapSize > 0 });
+    this.applyQuality(quality);
+  }
+
+  /**
+   * §4.5: the preset decides the shadow map and the environment, and both can
+   * change while the scene is up — `SurfaceScene` re-runs this on
+   * `renderer:resized`, which `setQuality` emits with `force` (17-d).
+   */
+  applyQuality(quality: QualitySettings): void {
+    const size = quality.shadowMapSize;
+    this.#key.castShadow = size > 0;
+    if (size > 0) {
+      const shadow = this.#key.shadow;
+      shadow.mapSize.set(size, size);
+      const camera = shadow.camera;
+      camera.left = -SHADOW_EXTENT;
+      camera.right = SHADOW_EXTENT;
+      camera.top = SHADOW_EXTENT;
+      camera.bottom = -SHADOW_EXTENT;
+      camera.near = 1;
+      camera.far = 120;
+      camera.updateProjectionMatrix();
+      // 17-h: a normal bias does the work on flat low-poly faces; the depth
+      // bias only takes the last sliver of acne.
+      shadow.bias = -0.0005;
+      shadow.normalBias = 0.6;
+    } else {
+      // Frees the depth texture the map was holding.
+      this.#key.shadow.dispose();
+    }
+    this.enemies.setShadows(size > 0);
+    this.#blobMaterial.opacity = size > 0 ? BLOB_OPACITY_WITH_MAP : BLOB_OPACITY_ALONE;
+
+    if (quality.ibl) {
+      if (this.#environment === null) this.#environment = buildEnvironment(skyParamsFor(this.#palette));
+      this.#scene.environment = this.#environment;
+      this.#scene.environmentIntensity = ENVIRONMENT_INTENSITY;
+    } else {
+      this.#clearEnvironment();
+    }
+  }
+
+  /** D-10: clear the reference first, then free the texture. */
+  #clearEnvironment(): void {
+    if (this.#scene.environment === this.#environment) this.#scene.environment = null;
+    this.#environment?.dispose();
+    this.#environment = null;
   }
 
   /** Fog, overlay hue and particle look, lerped by the scene over 3 s (§4.6). */
@@ -387,6 +573,11 @@ export class SurfaceView {
     const blinking = p.invulnUntil > frame.time && Math.sin(frame.time * 30) > 0;
     this.#playerMaterial.opacity = blinking ? 0.35 : 1;
 
+    // §4.5: the key and its target ride the player, so the 68 m shadow camera
+    // always covers what is on screen.
+    this.#key.position.set(p.x + KEY_OFFSET.x, KEY_OFFSET.y, p.z + KEY_OFFSET.z);
+    this.#keyTarget.position.set(p.x, 0, p.z);
+
     const follower = frame.follower;
     this.#follower.visible = follower !== null && follower.alive;
     if (follower !== null) this.#follower.position.set(follower.x, 0.8 + Math.sin(frame.time * 2) * 0.1, follower.z);
@@ -413,6 +604,34 @@ export class SurfaceView {
     this.#syncPickups(frame);
     this.#syncProjectiles(frame);
     this.#syncParticles(frame);
+    this.#syncBlobs(frame);
+  }
+
+  /** §4.6: player, follower and every live enemy, in one instanced layer. */
+  #syncBlobs(frame: SurfaceFrame): void {
+    const mesh = this.#blobs;
+    let n = 0;
+    const write = (x: number, z: number, scale: number): void => {
+      if (n >= BLOB_CAPACITY) return;
+      scratchMatrix.makeScale(scale, 1, scale);
+      scratchMatrix.setPosition(x, 0, z);
+      mesh.setMatrixAt(n, scratchMatrix);
+      n++;
+    };
+    const p = frame.player;
+    if (p.alive) write(p.x, p.z, BLOB_SCALE_PLAYER);
+    const follower = frame.follower;
+    if (follower !== null && follower.alive) write(follower.x, follower.z, BLOB_SCALE_FOLLOWER);
+    for (let i = 0; i < frame.enemies.size; i++) {
+      const e = frame.enemies.at(i);
+      // Exactly the enemies `EnemyMeshes` draws: a corpse and a burrowed wurm
+      // have nothing on the ground to cast from.
+      if (e.state === 'dead' || e.specialKind === 'burrow_dig') continue;
+      write(e.x, e.z, e.def.look.scale * BLOB_SCALE_ENEMY * (e.elite ? BLOB_SCALE_ELITE : 1));
+    }
+    mesh.count = n;
+    mesh.visible = n > 0;
+    if (n > 0) mesh.instanceMatrix.needsUpdate = true;
   }
 
   #syncPickups(frame: SurfaceFrame): void {
@@ -481,6 +700,7 @@ export class SurfaceView {
     this.enemies.dispose();
     this.#scene.remove(this.#root);
     disposeObject3D(this.#root);
+    this.#clearEnvironment();
     this.#scene.fog = null;
     this.#scene.background = null;
   }
