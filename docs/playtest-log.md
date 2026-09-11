@@ -176,12 +176,22 @@ GPU is for. Two consequences were recorded rather than papered over:
 
 - The one number that *is* portable is the draw and triangle count, which is
   what the budgets above are written in.
-- Three e2e assertions that were really measuring the clock had to stop doing
-  so: `e2e/stats-overlay.spec.ts` now samples its render/frame ratio over a
-  number of frames rather than over one second and drops its loop-alive floor
-  from 40 fps to 15, and `e2e/scene-cycle.spec.ts` gets 180 s for its forty
-  transitions. No assertion about behaviour changed. See the SPEC-017 commit
-  messages for the reasoning.
+- The e2e suite now names its preset per suite. Measured on this branch before
+  that change, `npm run e2e` was 133 passed / 29 failed in 15.6 min against a
+  baseline of 159 passed in 4.3 min, and not one of the 29 was a behaviour
+  regression: at 60–140 ms a frame the fixed-step loop sits on its
+  five-steps-per-frame ceiling, so the *simulation* runs slower than the wall
+  clock and every suite that waits on an in-game timer waits several times
+  longer. `e2e/start.ts` fills in `quality=low` — the direct path, exactly as
+  cheap as the whole game was before this spec — when a URL names no preset;
+  `post-chain`, `resize`, `context-loss`, `stats-overlay` and SPEC-011's spawn
+  case each name the preset they mean. No assertion was weakened.
+- One more number worth having on record: the **first rendered frame of a scene
+  with image-based lighting blocks the main thread for ≈ 0.9 s on `low` and
+  ≈ 1.5 s on `medium`** here, compiling the PMREM chain and an env-map variant
+  of every material. It is one-time per program and a real GPU compiles the same
+  set in tens of milliseconds, but it is why `e2e/SPEC-006.spec.ts` waits for
+  the renderer's first frames before it measures an audio ramp.
 - **Owed on hardware before `m7a`:** every ms/frame figure above, on a desktop
   GPU and on one handset, plus the manual §7 pass (soft shadows following the
   player on `high`; the wraith core, projectiles and node crystals glowing on
