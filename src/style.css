@@ -322,7 +322,12 @@ button.touch-button {
   font-size: 12px;
   line-height: 1.35;
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  pointer-events: auto;
+  /* The event log's height is data-dependent — twelve entries whose lines wrap
+     when a `frame:order` trace is long, which a slow frame makes it — so the
+     panel can grow far enough down the screen to sit over the version label.
+     Only the two buttons need to be clickable, so the panel itself takes no
+     pointer events and can never swallow a tap meant for what is under it. */
+  pointer-events: none;
   z-index: 25;
 }
 
@@ -333,6 +338,7 @@ button.touch-button {
 
 button.debug-button {
   display: block;
+  pointer-events: auto;
   margin-top: 6px;
   padding: 3px 8px;
   font: inherit;

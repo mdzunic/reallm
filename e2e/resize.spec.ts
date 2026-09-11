@@ -83,7 +83,10 @@ test('the one context is opaque, stencil-free and high-performance (AC-11)', asy
   expect(high.alpha).toBe(false);
   expect(high.stencil).toBe(false);
   expect(high.powerPreference).toBe('high-performance');
-  expect(high.antialias).toBe(true); // only on `high`
+  // SPEC-017 D-2: context MSAA never reaches the offscreen target the post
+  // chain draws into, so it is off on every preset now and `high` buys its
+  // anti-aliasing as `samples` on that target instead (or FXAA past dpr 1.5).
+  expect(high.antialias).toBe(false);
 
   await start(page, '/?debug&quality=medium');
   const medium = await contextAttributes(page);
