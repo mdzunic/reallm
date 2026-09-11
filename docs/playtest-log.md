@@ -192,6 +192,16 @@ GPU is for. Two consequences were recorded rather than papered over:
   of every material. It is one-time per program and a real GPU compiles the same
   set in tens of milliseconds, but it is why `e2e/SPEC-006.spec.ts` waits for
   the renderer's first frames before it measures an audio ramp.
+- **Two suites now run in one worker**, `e2e/SPEC-006.spec.ts` and
+  `e2e/SPEC-011.spec.ts`. Both measure wall-clock audio ramps beside the most
+  expensive pages in the suite, and `fullyParallel` had five of them starving
+  each other: SPEC-011's surface bed was caught sitting at a gain of 0.03–0.08
+  twenty seconds into a fade that takes 1.5 s, while a probe page under the same
+  load held the full 0.7 throughout. The same command is green on `main`, where
+  no preset runs a composer and the file is a third cheaper — so this is the
+  cost of the chain, not a regression in the audio layer. Serialising SPEC-011
+  takes it from ≈ 2.6 min to ≈ 3.4–5.0 min depending on scheduling; no
+  assertion in either file changed.
 - **Owed on hardware before `m7a`:** every ms/frame figure above, on a desktop
   GPU and on one handset, plus the manual §7 pass (soft shadows following the
   player on `high`; the wraith core, projectiles and node crystals glowing on
@@ -214,9 +224,9 @@ removed for the shot:
 
 - **Checklist:**
   - [x] `npm run check` green (typecheck, 42 vitest suites, production build)
-  - [x] `npm run e2e` — the suites this spec touches or drives are green;
-        `e2e/post-chain.spec.ts` is new, `resize`, `context-loss`,
-        `stats-overlay` and `scene-cycle` were re-run
+  - [x] `npm run e2e` — every spec file green, run in batches rather than as one
+        invocation: 163 tests, the 159 of the baseline plus the three of the new
+        `e2e/post-chain.spec.ts` and the one added to `e2e/context-loss.spec.ts`
   - [x] `three` chunk inside the 200 KB budget (162 943 B)
   - [ ] hardware GPU and handset numbers — owed, see above
 - **Bugs:** one found and fixed while building this: the dev stats overlay grows
