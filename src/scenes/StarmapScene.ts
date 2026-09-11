@@ -26,6 +26,8 @@ import { Progression } from '@/systems/Progression';
 import { departReason, formatTime, missionStatus, requirementText } from '@/systems/UiHelpers';
 import { confirmSheet } from '@/ui/ConfirmSheet';
 import { el, h, testId } from '@/ui/dom';
+import type { Look } from '@/core/Quality';
+import { NEUTRAL_SKY } from '@/views/Environment';
 import { UiScene } from '@/scenes/base';
 
 const MISSION_IDS = Object.keys(MISSIONS) as MissionId[];
@@ -33,6 +35,10 @@ const ENGINE: ShipSystemDef = UPGRADES.engine;
 
 /** The circle the six planets sit on, in world units. */
 const ORBIT_RADIUS = 3.1;
+
+/** SPEC-017 §4.1 (*initial tuning*): the map's nodes are meant to glow. */
+const STARMAP_LOOK: Partial<Look> = { bloomStrength: 0.6, bloomThreshold: 0.6, vignette: 0.4 };
+const HUB_ENVIRONMENT_INTENSITY = 0.9;
 
 export class StarmapScene extends UiScene<'starmap'> {
   #economy: Economy | null = null;
@@ -50,7 +56,12 @@ export class StarmapScene extends UiScene<'starmap'> {
     super(services, 'starmap');
   }
 
+  protected override look(): Partial<Look> {
+    return STARMAP_LOOK;
+  }
+
   protected onEnter(_params: SceneParams['starmap']): void {
+    this.useEnvironment(NEUTRAL_SKY, HUB_ENVIRONMENT_INTENSITY);
     const data = this.services.save.current;
     if (data !== null) {
       const progression = new Progression(data, this.services.events);
@@ -104,7 +115,8 @@ export class StarmapScene extends UiScene<'starmap'> {
     this.scene.add(ring);
     this.#ring = ring;
     this.props = PLANET_IDS.length + 2;
-    const key = new THREE.DirectionalLight(0xffffff, 1.4);
+    // +15 % over the pre-SPEC-017 value, to offset ACES mid-tone compression.
+    const key = new THREE.DirectionalLight(0xffffff, 1.61);
     key.position.set(2, 6, 1);
     this.scene.add(key);
     this.#moveRing();

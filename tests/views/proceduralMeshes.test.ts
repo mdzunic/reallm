@@ -7,7 +7,7 @@
 import { describe, expect, it } from 'vitest';
 import * as THREE from 'three';
 import { Pool } from '@/core/Pool';
-import { ENEMIES } from '@/data/index';
+import { ENEMIES, type EnemyDef } from '@/data/index';
 import { makeEnemy, type EnemyEntity } from '@/entities/Enemy';
 import { EnemyMeshes, INSTANCES_PER_PART } from '@/views/ProceduralMeshes';
 import { nodeCrystalScale } from '@/views/SurfaceView';
@@ -161,5 +161,98 @@ describe('nodeCrystalScale (AC-24)', () => {
       expect(a.y).toBeGreaterThan(last);
       last = a.y;
     }
+  });
+});
+
+// ---------------------------------------------------------------- SPEC-017 §6
+
+/** Every distinct material under `parent`, in traversal order. */
+function materials(parent: THREE.Object3D): THREE.MeshStandardMaterial[] {
+  const seen = new Set<THREE.MeshStandardMaterial>();
+  for (const mesh of instancedMeshes(parent)) seen.add(mesh.material as THREE.MeshStandardMaterial);
+  return [...seen];
+}
+
+describe('enemy materials (SPEC-017 §4.7, AC-88 … AC-91)', () => {
+  it('a definition that glows gets standard parts wearing its emissive', () => {
+    const parent = new THREE.Group();
+    const meshes = new EnemyMeshes(parent);
+    const pool = new Pool(makeEnemy);
+    spawn(pool, 'dune_wurm');
+    meshes.sync(pool, 0);
+    const body = materials(parent).find((m) => m.emissiveIntensity === 0.35);
+    expect(body).toBeDefined();
+    expect(body?.type).toBe('MeshStandardMaterial');
+    expect(body?.emissive.getHex()).toBe(new THREE.Color(ENEMIES.dune_wurm.look.emissive).getHex());
+    expect(ENEMIES.dune_wurm.look.emissive).toBeDefined();
+    meshes.dispose();
+  });
+
+  it('a definition with no emissive gets black, and never borrows another one', () => {
+    const parent = new THREE.Group();
+    const meshes = new EnemyMeshes(parent);
+    const pool = new Pool(makeEnemy);
+    spawn(pool, 'dust_skitter');
+    meshes.sync(pool, 0);
+    expect((ENEMIES.dust_skitter as EnemyDef).look.emissive).toBeUndefined();
+    for (const material of materials(parent)) expect(material.emissive.getHex()).toBe(0x000000);
+    meshes.dispose();
+  });
+
+  it('two definitions sharing a recipe but not an emissive get their own meshes (17-m)', () => {
+    const parent = new THREE.Group();
+    const meshes = new EnemyMeshes(parent);
+    const pool = new Pool(makeEnemy);
+    // `dust_skitter` and `hive_interceptor` are both the `bug` recipe; only
+    // the second one glows, so they may not share a material.
+    expect(ENEMIES.dust_skitter.look.recipe).toBe(ENEMIES.hive_interceptor.look.recipe);
+    spawn(pool, 'dust_skitter');
+    spawn(pool, 'hive_interceptor', { x: 9 });
+    meshes.sync(pool, 0);
+    const emissives = materials(parent).map((m) => m.emissive.getHex());
+    expect(new Set(emissives).size).toBe(2);
+    // Two variants of a three-part recipe: the parts are paid for twice.
+    expect(instancedMeshes(parent).filter((m) => m.visible)).toHaveLength(6);
+    expect(meshes.activeParts).toBe(6);
+    meshes.dispose();
+  });
+
+  it('a recipe part with its own emissive keeps its own material, at full strength', () => {
+    const parent = new THREE.Group();
+    const meshes = new EnemyMeshes(parent);
+    const pool = new Pool(makeEnemy);
+    spawn(pool, 'magma_wraith'); // the `wraith` recipe: body + an emissive core
+    meshes.sync(pool, 0);
+    const core = materials(parent).find((m) => m.emissiveIntensity === 2);
+    expect(core).toBeDefined();
+    expect(core?.emissive.getHex()).toBe(new THREE.Color('#9ff2ff').getHex());
+    // The body still wears the definition's own glow, not the core's.
+    const body = materials(parent).find((m) => m.emissiveIntensity === 0.35);
+    expect(body?.emissive.getHex()).toBe(new THREE.Color(ENEMIES.magma_wraith.look.emissive).getHex());
+    meshes.dispose();
+  });
+
+  it('casts and receives only when it was built with shadows, and follows a preset change', () => {
+    const parent = new THREE.Group();
+    const meshes = new EnemyMeshes(parent);
+    const pool = new Pool(makeEnemy);
+    spawn(pool, 'dust_skitter');
+    meshes.sync(pool, 0);
+    expect(instancedMeshes(parent).some((m) => m.castShadow)).toBe(false);
+
+    meshes.setShadows(true);
+    expect(instancedMeshes(parent).every((m) => m.castShadow && m.receiveShadow)).toBe(true);
+    // A recipe built after the switch inherits it.
+    spawn(pool, 'magma_wraith', { x: 9 });
+    meshes.sync(pool, 0);
+    expect(instancedMeshes(parent).every((m) => m.castShadow && m.receiveShadow)).toBe(true);
+
+    // And one built with the option on starts there.
+    const own = new THREE.Group();
+    const built = new EnemyMeshes(own, { shadows: true });
+    built.sync(pool, 0);
+    expect(instancedMeshes(own).every((m) => m.castShadow && m.receiveShadow)).toBe(true);
+    built.dispose();
+    meshes.dispose();
   });
 });

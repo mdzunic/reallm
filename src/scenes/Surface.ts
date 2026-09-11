@@ -12,6 +12,7 @@ import * as THREE from 'three';
 import type { EventBus, GameEvents } from '@/core/Events';
 import { Pool } from '@/core/Pool';
 import { PressEdges } from '@/core/PressEdges';
+import type { Look } from '@/core/Quality';
 import { newSave, type CharacterCreation, type SaveV1 } from '@/core/Save';
 import type { GameServices } from '@/core/Services';
 import type { SceneParams } from '@/core/StateMachine';
@@ -139,6 +140,11 @@ interface PoiRuntime {
 
 export class SurfaceScene extends UiScene<'surface'> {
   override readonly pausable = true;
+  /**
+   * SPEC-017 §4.5: `SurfaceView` brings its own hemisphere, key, rim and
+   * torch, so the base's flat ambient would only wash them out.
+   */
+  protected override readonly ownsLighting = true;
 
   readonly #edges = new PressEdges();
 
@@ -242,6 +248,10 @@ export class SurfaceScene extends UiScene<'surface'> {
 
   constructor(services: GameServices) {
     super(services, 'surface', 'surface_calm');
+  }
+
+  protected override look(): Partial<Look> {
+    return this.#view?.look ?? {};
   }
 
   protected onEnter(params: SceneParams['surface']): void {
@@ -351,9 +361,19 @@ export class SurfaceScene extends UiScene<'surface'> {
     };
 
     // §4.1 step 2: the world view.
-    const view = new SurfaceView(this.scene, layout, planet);
+    const view = new SurfaceView(this.scene, layout, planet, services.renderer.quality);
     this.#view = view;
     this.disposer.add(() => view.dispose());
+    // SPEC-017 §4.1: the planet's grade only exists once the view does, so the
+    // base's `enter()` pass ran without it — rebuild it now, through the same
+    // path, with `look()` below feeding it.
+    this.applyLook();
+    // §4.8 / 17-d: `setQuality` emits `renderer:resized` with `force`, so a
+    // preset change from the pause menu reaches the shadow map and the
+    // environment while the player is standing on the planet.
+    this.disposer.add(
+      services.events.on('renderer:resized', () => view.applyQuality(services.renderer.quality), this),
+    );
     this.props = this.scene.children.length;
 
     // §4.3: the fixed perspective camera.

@@ -18,9 +18,16 @@ import { confirmSheet } from '@/ui/ConfirmSheet';
 import { el, h, testId } from '@/ui/dom';
 import { SavePanel } from '@/ui/SavePanel';
 import { SettingsPanel } from '@/ui/SettingsPanel';
+import type { Look } from '@/core/Quality';
+import { NEUTRAL_SKY } from '@/views/Environment';
 import { UiScene, uiRootEl } from '@/scenes/base';
 
 const STAR_COUNT = 420;
+
+/** SPEC-017 §4.1 (*initial tuning*): a deep, slightly cool title screen. */
+const MENU_LOOK: Partial<Look> = { vignette: 0.45, bloomStrength: 0.5, bloomThreshold: 0.7, saturation: 0.95 };
+/** The hub environment intensity of §4.4. */
+const HUB_ENVIRONMENT_INTENSITY = 0.9;
 
 /** iPadOS reports MacIntel with touch; both are Safari without persist prompts. */
 function isIos(): boolean {
@@ -64,9 +71,14 @@ export class MenuScene extends UiScene<'menu'> {
     super(services, 'menu', 'menu');
   }
 
+  protected override look(): Partial<Look> {
+    return MENU_LOOK;
+  }
+
   protected onEnter(_params: SceneParams['menu']): void {
     // SPEC-006 AC-28: warm both tracks the menu can crossfade into next.
     void this.services.audio.preloadMusic(['menu', 'station']);
+    this.useEnvironment(NEUTRAL_SKY, HUB_ENVIRONMENT_INTENSITY);
     this.#buildStars();
     if (this.services.assets.loaded) {
       try {
