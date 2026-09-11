@@ -45,7 +45,11 @@ async function hunt(page: Page, seconds: number, done: () => Promise<boolean>): 
 test('enemies spawn and engage on Cinder-4 (AC-36, AC-37, AC-38)', async ({ page }) => {
   test.setTimeout(150_000);
   await autoFire(page);
-  await start(page, '/?debug&scene=surface&planet=cinder4');
+  // Named on purpose: how many enemies the director may put on the field is a
+  // `QUALITY` row (`maxEnemies`, 12 on `low` and 20 on `medium`), and the
+  // spawn counts below are written against the preset the game defaults to.
+  // Every other suite takes `e2e/start.ts`'s cheap default; this one cannot.
+  await start(page, '/?debug&quality=medium&scene=surface&planet=cinder4');
   await expect(page.locator('[data-testid="scene-label"]')).toHaveText('surface');
 
   // Landing HP: marine stand-in pilot at full (the §6 pin, 184). `hud-hp` is

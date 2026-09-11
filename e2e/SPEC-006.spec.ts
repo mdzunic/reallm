@@ -211,7 +211,28 @@ async function startWithAudio(page: Page, url = '/?debug'): Promise<void> {
   await passGate(page);
   await expect(page.locator('[data-testid="scene-label"]')).toBeVisible();
   await page.waitForFunction(() => window.__reallm.audio().unlocked === true);
+  // …and until the scene is actually drawing. The first rendered frame compiles
+  // every GPU program the scene needs, and since SPEC-017 gave the hub scenes
+  // image-based lighting that is the PMREM chain plus an env-map variant of
+  // every material — on this container's software rasteriser, seconds of
+  // blocked main thread. The music ramps below are wall-clock
+  // (`performance.now()`), so a compile landing inside a 100 ms sampler eats
+  // the samples rather than the fade. Nothing about the audio layer changes;
+  // this only stops the suite racing the renderer's first frame.
+  await page.waitForFunction(() => window.__reallm.stats().frame > 5, undefined, { timeout: 60_000 });
 }
+
+/**
+ * One worker for this file. Every assertion here is a wall-clock measurement of
+ * a ramp — a 1500 ms crossfade sampled every 40–200 ms, a duck, a fade-out —
+ * and `fullyParallel` runs five of these pages at once. Since SPEC-017 each of
+ * them compiles the PMREM chain and an env-map variant of every material on its
+ * first rendered frame, which on this container's software rasteriser is ≈ 1 s
+ * of blocked main thread per page; five at once turn a 40 ms sampler into a
+ * 200 ms one and the ramps stop being observable. Running the file in one
+ * worker restores the conditions these measurements need. No assertion changed.
+ */
+test.describe.configure({ mode: 'default' });
 
 // -------------------------------------------------------------- the manifest
 
@@ -731,8 +752,14 @@ test('a track asked for before the gesture fades in from silence on the tap (AC-
   await page.evaluate(() => window.__reallm.audio().music('menu'));
   expect(await page.evaluate(() => window.Howler?._howls.length ?? 0)).toBe(0);
 
-  // The sampler is started before the tap so the first audible frame is caught.
-  const samples = page.evaluate(() => window.__qaSample(3400, 100));
+  // The sampler is started before the tap so the first audible frame is caught,
+  // and it steps at 40 ms rather than 100: the tap is also what builds the first
+  // scene, whose first rendered frame compiles every GPU program it needs —
+  // with SPEC-017's image-based lighting that is ≈ 900 ms of blocked main
+  // thread on this container's software rasteriser, right inside the 1500 ms
+  // ramp. The finer step keeps more than eight observations of the climb on
+  // either side of it; every assertion below is unchanged.
+  const samples = page.evaluate(() => window.__qaSample(3400, 40));
   await page.locator('[data-testid="boot-start"]').click();
   const trace = await samples;
   const gains = trace.map((s) => gainOf(s, 'menu')).filter((value): value is number => value !== null);
