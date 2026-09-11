@@ -76,7 +76,21 @@ Manifest entries go into `SURFACE_ASSETS[biome].textures` as `<layer>_albedo: { 
 3. Run `node scripts/assets/check.mjs`, then `npm run check` and `npm run e2e`.
 4. Commit on a branch and open a PR titled `Asset drop: <what landed>`.
 
-## 4. Budgets (SPEC-001 §10, restated by the checker)
+## 4. Audio
+
+The sound set is synthesised, not fetched: `node scripts/assets/audio/build.mjs`
+renders every sprite bank and music track in `ASSETS.audio` and writes them to
+`public/assets/audio/`. libopus inside Playwright's Chromium encodes the Opus
+(`opus.mjs`, WebCodecs — `npx playwright install chromium`, as for the e2e
+suite) and `webm.mjs` muxes it into WebM, so it runs on any OS; `lame` on PATH
+(`brew install lame`) adds the `.mp3` fallbacks. The
+synths are `sfx.mjs` (one per sprite id) and `music.mjs` (one per `MusicId`);
+bank ids limit a rebuild to those banks, and `--wav=DIR` keeps uncompressed
+renders for listening. A CC0 pack can replace any file later: cut the sfx to the
+sprite offsets in `src/data/assets.ts`, keep music loops seamless, encode
+`.webm` (Opus) + `.mp3`, and change the file's `LICENSES.md` row.
+
+## 5. Budgets (SPEC-001 §10, restated by the checker)
 
 | Category | Folder | Budget |
 | --- | --- | --- |

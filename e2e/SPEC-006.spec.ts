@@ -5,16 +5,16 @@
 // reaching `localStorage`, the crossfade and duck ramps, the 24-voice cap, and
 // what a bank that will not decode does to `play()`.
 //
-// The CC0 sound files are out of SPEC-006's scope, so nothing under
-// `public/assets/audio/` exists yet. Two shapes of test follow from that:
+// `public/assets/audio/` ships placeholder banks (`scripts/assets/audio/`), and
+// no test depends on what they sound like. Two shapes of test follow from that:
 //
-//   - the tests that need the *failure* path (AC-9, AC-60, AC-27) run against
-//     the repository as it ships, where every bank ends in 06-e;
+//   - the tests that need the *failure* path (AC-9, AC-60, AC-27) answer
+//     `/assets/audio/**` with a body that is not audio (`serveBrokenAudio`), so
+//     every bank ends in 06-e whatever the repository ships;
 //   - the tests that need audio to actually play serve a decodable stand-in for
 //     `/assets/audio/**` with `page.route` (`serveAudio`), so gains, ramps,
 //     seek positions and voice counts are measured off the real Web Audio
-//     graph rather than inferred. Nothing in `src/` changes for it; the day the
-//     banks land the route simply stops being the thing under test.
+//     graph against one known buffer. Nothing in `src/` changes for either.
 //
 // §9's device acceptance (AC-10, and the audible half of AC-28) is what covers
 // "a blip is heard on a phone"; nothing headless can stand in for it.
@@ -60,6 +60,16 @@ const STAND_IN = wav();
 async function serveAudio(page: Page): Promise<void> {
   await page.route('**/assets/audio/**', (route) =>
     route.fulfill({ status: 200, contentType: 'audio/wav', body: STAND_IN }),
+  );
+}
+
+/**
+ * A 200 whose body is not audio — what the dev server's SPA fallback answers
+ * for a file that does not exist — so every bank fails to decode (06-e).
+ */
+async function serveBrokenAudio(page: Page): Promise<void> {
+  await page.route('**/assets/audio/**', (route) =>
+    route.fulfill({ status: 200, contentType: 'text/html', body: '<!doctype html><title>not audio</title>' }),
   );
 }
 
@@ -366,6 +376,7 @@ test('a context that never runs still opens the gate inside a second (AC-7, AC-1
 test('the first play returns a Voice, then a dead bank returns null and warns once (AC-9, AC-60)', async ({ page }) => {
   const messages: string[] = [];
   page.on('console', (message) => messages.push(message.text()));
+  await serveBrokenAudio(page);
   await start(page);
 
   // AC-9: the first call is what builds the bank and starts its load; Howler
@@ -387,8 +398,9 @@ test('the first play returns a Voice, then a dead bank returns null and warns on
 });
 
 test('preloadMusic resolves whether or not the track loads (AC-27)', async ({ page }) => {
+  await serveBrokenAudio(page);
   await start(page);
-  // Nothing under public/assets/audio/ exists, so both sources fail here.
+  // Every audio request answers with something that is not audio, so both tracks fail here.
   const failing = await page.evaluate(async () => {
     let resolved = false;
     let rejected: string | null = null;
@@ -408,6 +420,7 @@ test('preloadMusic resolves whether or not the track loads (AC-27)', async ({ pa
   expect(failing).toEqual({ resolved: true, rejected: null });
 
   // ...and with the banks answering, it resolves once they are loaded.
+  await page.unroute('**/assets/audio/**');
   await serveAudio(page);
   await page.goto('/?debug');
   await passGate(page);
@@ -1267,7 +1280,7 @@ test('the whole layer survives a scene cycle, a duck and a teardown without thro
   await start(page);
 
   // AC-28: the menu warms both tracks it can move to; resolving is the whole
-  // contract, since neither of them can actually load here (AC-27).
+  // contract, loaded or not (AC-27).
   await page.evaluate(() => window.__reallm.audio().preloadMusic(['menu', 'station']));
 
   // The pause menu's duck, and the surface listener a positioned sound needs.

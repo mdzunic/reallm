@@ -12,10 +12,10 @@
 // is one looping file per track. `.webm` (Opus) is listed before `.mp3`, which
 // is the order Howler tries them in: Opus everywhere it exists, MP3 for the
 // rest. Sprite offsets are `[offsetMs, durationMs]`; the layouts below are the
-// cut list the CC0 banks are assembled to, spaced so a slightly early or late
-// cut cannot bleed into its neighbour. Producing the files themselves is out of
-// SPEC-006's scope, and a bank that will not decode is handled at runtime
-// (SPEC-006 06-e), so nothing here has to wait for them.
+// cut list every bank is assembled to — `scripts/assets/audio/build.mjs` reads
+// them from here for the placeholder set it synthesises — spaced so a slightly
+// early or late cut cannot bleed into its neighbour. A bank that will not decode
+// is handled at runtime (SPEC-006 06-e).
 //
 // Every file is CC0 and listed in `public/assets/LICENSES.md`.
 

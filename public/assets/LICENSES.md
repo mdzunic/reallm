@@ -24,12 +24,26 @@ generated in-repo, the precedent `models/crate.glb` already set. The manifest
 ids, the code path and this table are the same either way. The Kenney packs land
 with the scenes that need them.
 
-`audio/` is still empty. SPEC-006 declares what will go in it — three sfx sprite
-banks (`audio/sfx/{ui,surface,flight}.{webm,mp3}`) and seven looping tracks
-(`audio/music/{menu,station,flight,surface_calm,surface_combat,boss,ending}.{webm,mp3}`)
-— but producing the CC0 sound files is out of that spec's scope, and the audio
-layer is built so a bank that will not decode falls back to silence with one
-warning rather than a failure (SPEC-006 06-e). Each file gets its row here on
-the day it lands; the 12 MB audio budget above is what they share.
+The audio files are placeholders in the same spirit (SPEC-006 §2): original
+sounds synthesised from code by `node scripts/assets/audio/build.mjs`, which
+reads the bank layout from `src/data/assets.ts` and is deterministic, so a
+rebuild writes the same samples. SPEC-006 pairs every `.webm` (Opus) with an
+`.mp3` fallback; the script writes those too when `lame` is installed, and until
+they land a browser without Opus stays silent with one warning (SPEC-006 06-e).
+A CC0 pack can replace any file under the same name, with its row changed to
+match. The 12 MB audio budget above is what they share.
+
+| File | Source | License | Modifications |
+| --- | --- | --- | --- |
+| `audio/sfx/ui.webm` | Original to this repository — synthesised by `scripts/assets/audio/sfx.mjs` | CC0 | — |
+| `audio/sfx/surface.webm` | Original to this repository — synthesised by `scripts/assets/audio/sfx.mjs` | CC0 | — |
+| `audio/sfx/flight.webm` | Original to this repository — synthesised by `scripts/assets/audio/sfx.mjs` | CC0 | — |
+| `audio/music/menu.webm` | Original to this repository — synthesised by `scripts/assets/audio/music.mjs` | CC0 | — |
+| `audio/music/station.webm` | Original to this repository — synthesised by `scripts/assets/audio/music.mjs` | CC0 | — |
+| `audio/music/flight.webm` | Original to this repository — synthesised by `scripts/assets/audio/music.mjs` | CC0 | — |
+| `audio/music/surface_calm.webm` | Original to this repository — synthesised by `scripts/assets/audio/music.mjs` | CC0 | — |
+| `audio/music/surface_combat.webm` | Original to this repository — synthesised by `scripts/assets/audio/music.mjs` | CC0 | — |
+| `audio/music/boss.webm` | Original to this repository — synthesised by `scripts/assets/audio/music.mjs` | CC0 | — |
+| `audio/music/ending.webm` | Original to this repository — synthesised by `scripts/assets/audio/music.mjs` | CC0 | — |
 
 Outside this folder: `public/favicon.svg` is original to this repository, CC0.
