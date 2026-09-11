@@ -23,16 +23,20 @@ extension the specs do not allow.
 | Generator (`scripts/assets/blender/`) | Writes | Consumer |
 | --- | --- | --- |
 | `character.py` (+ `lib/salvager.py`) | `models/character.glb` — the rigged salvager: one material on a 4 × 4 palette texture (base colour, metallic-roughness, emissive visor and lamps), rigid-skinned to 15 bones, clips `Idle` (first — the menu's asset spike plays clip 0), `Run`, `Attack`, `Hit`, `Death` | menu spike, creation preview, SPEC-019 §4.1 |
-| `ships.py` | `models/ship.glb` (the tug, with a WebP sRGB hull map — the asset-spike colour-map check), `fighter.glb`, `interceptor.glb`, `probe.glb` | menu, station, SPEC-020 §4.3, SPEC-019 §4.1 |
-| `station.py` | `models/station_ring.glb`, `dock.glb`, `cockpit.glb` (camera space), `crate.glb` (boot manifest, 0.6 m, centred) | SPEC-020 §4.3–§4.4, SPEC-018 §4.7 |
+| `ships.py` (+ `lib/bake.py`) | `models/ship.glb` (the tug, 1024² baked maps — its sRGB base colour is the asset-spike colour-map check), `fighter.glb`, `interceptor.glb`, `probe.glb` (512²): one baked `Hull` material each (base colour, ORM, normal, emissive) plus the flat `Glow` | menu, station, flight (`FLIGHT_ASSETS`), SPEC-019 §4.1 |
+| `station.py` | `models/cockpit.glb` (camera space; 1024² baked maps with the emissive dashboard screens), `station_ring.glb`, `dock.glb`, `crate.glb` (boot manifest, 0.6 m, centred) | flight, SPEC-020 §4.4, SPEC-018 §4.7 |
+| `flight.py` | `textures/flight/sky_<planet>.webp` (2048 × 1536 forward sky windows) and `sky_station.webp`, `planet_<planet>.webp` (2048 × 1024 equirect) + `_nr` (relief, 1024 × 512) + `_em` (Ferrum, Hive), `clouds.webp`, `models/asteroid.glb` (two rocks) | flight (`PLANET_ART`, `FLIGHT_ASSETS`), SPEC-020 §4.4 |
 | `props.py` | `models/props/<biome>_<kind>_<a|b>.glb` — 24 unit props for the twelve biome × obstacle-kind pairs of `systems/Layout.ts` | SPEC-018 §4.7 (`PROP_MODELS`) |
 | `ground.py` | `textures/ground/<layer>_albedo.webp` + `<layer>_nr.webp` for the 13 `GroundLayerId`s — seamless 512² | SPEC-018 §4.5, §4.10 |
 | `sprites.py` | `textures/sprites/{smoke,dirt,flare,spark,ember,muzzle,ring,magic,flake,streak}.webp` | SPEC-019 §4.4, SPEC-020 §4.3 |
 | `portraits.py` | `portraits/01.webp` … `12.webp` (256² EEVEE busts) + `portraits/manifest.json` | SPEC-020 §4.6 |
 
 `lib/common.py` holds the shared pieces (scene reset, part primitives, the
-bmesh `Builder`, materials, WebP writing, GLB export and rewrite), `lib/tex.py`
-the numpy texture helpers, `lib/preview.py` the QA renders.
+bmesh `Builder`, materials, WebP writing, GLB export and rewrite), `lib/nodes.py`
+the shader-node fields and the Cycles EMIT bake every texture starts from,
+`lib/bake.py` the hull maps (unique UVs, baked geometric fields, a numpy painter
+for seams, rivets, wear, grime, decals, markings and lamps), `lib/tex.py` the
+numpy texture helpers, `lib/preview.py` the QA renders.
 
 ## 2. Rebuild
 
@@ -40,7 +44,7 @@ Blender **5.2 LTS** (found through `$BLENDER`, then `/Applications/Blender.app`,
 `/usr/bin/blender`, the Windows default, then `PATH`):
 
 ```bash
-node scripts/assets/blender/build.mjs                          # everything (about 40 s)
+node scripts/assets/blender/build.mjs                          # everything (about 4 minutes)
 node scripts/assets/blender/build.mjs character ships          # some generators
 node scripts/assets/blender/build.mjs props --only=hive_rock_a # one item
 node scripts/assets/blender/build.mjs --preview=/tmp/art       # also write QA contact sheets
@@ -63,11 +67,25 @@ art and are never committed.
   runtime tint (`material.color = appearance.primary`) colours the suit and
   armour cells and leaves the dark cells dark; `emissive × emissiveMap` lights
   only the visor and lamps. Clip names follow SPEC-019's aliases, `Idle` first.
-- **Instanced models** (flight ships, props) use a `Body` material with the
-  colours in `COLOR_0` and, when something glows, a second `Glow` material —
-  SPEC-018 §4.7 / SPEC-020 §4.3 bake `Body` into the instanced geometry and keep
-  `Glow` as the glow part. Props are unit props: footprint radius 1, base on
-  z 0, because the surface scales an obstacle by its radius.
+- **Baked models** (the ships, the cockpit, the asteroids — PLAN R8) carry one
+  textured material: base colour (sRGB, AO folded in), metallic-roughness
+  (G roughness, B metal), an OpenGL tangent-space normal map and, where
+  something is lit, an emissive map, all WebP inside the GLB; a flat `Glow`
+  material may sit beside it. The build tags parts with `Col` masks (paint slot,
+  decal, wear) that only the painter reads — the final material does not, so
+  the exporter drops them. The flight view instances these materials as they
+  are (one instanced mesh per ship class, a geometry group per material).
+- **Instanced props** use a `Body` material with the colours in `COLOR_0` and,
+  when something glows, a second `Glow` material — SPEC-018 §4.7 bakes `Body`
+  into the instanced geometry and keeps `Glow` as the glow part. Props are unit
+  props: footprint radius 1, base on z 0, because the surface scales an
+  obstacle by its radius.
+- **Flight maps** (PLAN R8): a sky window covers three's
+  `SphereGeometry(r, …, π, π, π/8, 3π/4)` — ±90° × ±67.5° around −Z — and is
+  drawn from the inside; planet surfaces are equirect for `SphereGeometry` UVs
+  (u = φ/2π, v = 1 − θ/π) with `_nr` relief normals (OpenGL, +v north) and an
+  `_em` emissive map where the world glows; `clouds.webp` is grey cover read as
+  an alpha map, so it loads as data, not colour.
 - **Ground layers** are RGBA WebP pairs at 512²: `<layer>_albedo` (RGB albedo,
   sRGB; A height — except `lava_rock` and `flesh`, always slot B, whose A is
   the emissive crack/vein mask) and `<layer>_nr` (RGB OpenGL normal, A

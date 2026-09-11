@@ -28,13 +28,14 @@ rewritten by the build from the files on disk; do not edit it by hand.
 <!-- blender:start -->
 | File | Source | License | Modifications |
 | --- | --- | --- | --- |
+| `models/asteroid.glb` | Original to this repository — two rocks, normals baked from a displaced high-poly; generated in Blender by `scripts/assets/blender/flight.py` | CC0 | — |
 | `models/character.glb` | Original to this repository — rigged salvager, clips Idle · Run · Attack · Hit · Death; generated in Blender by `scripts/assets/blender/character.py` | CC0 | — |
-| `models/cockpit.glb` | Original to this repository — modelled from code; generated in Blender by `scripts/assets/blender/station.py` | CC0 | — |
+| `models/cockpit.glb` | Original to this repository — modelled from code, hull and screen maps baked in Cycles; generated in Blender by `scripts/assets/blender/station.py` | CC0 | — |
 | `models/crate.glb` | Original to this repository — modelled from code; generated in Blender by `scripts/assets/blender/station.py` | CC0 | — |
 | `models/dock.glb` | Original to this repository — modelled from code; generated in Blender by `scripts/assets/blender/station.py` | CC0 | — |
-| `models/fighter.glb` | Original to this repository — modelled from code; generated in Blender by `scripts/assets/blender/ships.py` | CC0 | — |
-| `models/interceptor.glb` | Original to this repository — modelled from code; generated in Blender by `scripts/assets/blender/ships.py` | CC0 | — |
-| `models/probe.glb` | Original to this repository — modelled from code; generated in Blender by `scripts/assets/blender/ships.py` | CC0 | — |
+| `models/fighter.glb` | Original to this repository — modelled from code, hull maps baked in Cycles; generated in Blender by `scripts/assets/blender/ships.py` | CC0 | — |
+| `models/interceptor.glb` | Original to this repository — modelled from code, hull maps baked in Cycles; generated in Blender by `scripts/assets/blender/ships.py` | CC0 | — |
+| `models/probe.glb` | Original to this repository — modelled from code, hull maps baked in Cycles; generated in Blender by `scripts/assets/blender/ships.py` | CC0 | — |
 | `models/props/desert_rock_a.glb` | Original to this repository — unit prop, biome colours in vertex colours; generated in Blender by `scripts/assets/blender/props.py` | CC0 | — |
 | `models/props/desert_rock_b.glb` | Original to this repository — unit prop, biome colours in vertex colours; generated in Blender by `scripts/assets/blender/props.py` | CC0 | — |
 | `models/props/desert_ruin_a.glb` | Original to this repository — unit prop, biome colours in vertex colours; generated in Blender by `scripts/assets/blender/props.py` | CC0 | — |
@@ -59,7 +60,7 @@ rewritten by the build from the files on disk; do not edit it by hand.
 | `models/props/volcanic_rock_b.glb` | Original to this repository — unit prop, biome colours in vertex colours; generated in Blender by `scripts/assets/blender/props.py` | CC0 | — |
 | `models/props/volcanic_vent_a.glb` | Original to this repository — unit prop, biome colours in vertex colours; generated in Blender by `scripts/assets/blender/props.py` | CC0 | — |
 | `models/props/volcanic_vent_b.glb` | Original to this repository — unit prop, biome colours in vertex colours; generated in Blender by `scripts/assets/blender/props.py` | CC0 | — |
-| `models/ship.glb` | Original to this repository — modelled from code; generated in Blender by `scripts/assets/blender/ships.py` | CC0 | — |
+| `models/ship.glb` | Original to this repository — modelled from code, hull maps baked in Cycles; generated in Blender by `scripts/assets/blender/ships.py` | CC0 | — |
 | `models/station_ring.glb` | Original to this repository — modelled from code; generated in Blender by `scripts/assets/blender/station.py` | CC0 | — |
 | `portraits/01.webp` | Original to this repository — EEVEE bust of the salvager; generated in Blender by `scripts/assets/blender/portraits.py` | CC0 | — |
 | `portraits/02.webp` | Original to this repository — EEVEE bust of the salvager; generated in Blender by `scripts/assets/blender/portraits.py` | CC0 | — |
@@ -74,6 +75,28 @@ rewritten by the build from the files on disk; do not edit it by hand.
 | `portraits/11.webp` | Original to this repository — EEVEE bust of the salvager; generated in Blender by `scripts/assets/blender/portraits.py` | CC0 | — |
 | `portraits/12.webp` | Original to this repository — EEVEE bust of the salvager; generated in Blender by `scripts/assets/blender/portraits.py` | CC0 | — |
 | `portraits/manifest.json` | Original to this repository — EEVEE bust of the salvager; generated in Blender by `scripts/assets/blender/portraits.py` | CC0 | — |
+| `textures/flight/clouds.webp` | Original to this repository — cloud cover baked from Noise fields; generated in Blender by `scripts/assets/blender/flight.py` | CC0 | — |
+| `textures/flight/planet_cinder4_nr.webp` | Original to this repository — planet map baked from Noise/Voronoi fields; generated in Blender by `scripts/assets/blender/flight.py` | CC0 | — |
+| `textures/flight/planet_cinder4.webp` | Original to this repository — planet map baked from Noise/Voronoi fields; generated in Blender by `scripts/assets/blender/flight.py` | CC0 | — |
+| `textures/flight/planet_eden_nr.webp` | Original to this repository — planet map baked from Noise/Voronoi fields; generated in Blender by `scripts/assets/blender/flight.py` | CC0 | — |
+| `textures/flight/planet_eden.webp` | Original to this repository — planet map baked from Noise/Voronoi fields; generated in Blender by `scripts/assets/blender/flight.py` | CC0 | — |
+| `textures/flight/planet_ferrum_em.webp` | Original to this repository — planet map baked from Noise/Voronoi fields; generated in Blender by `scripts/assets/blender/flight.py` | CC0 | — |
+| `textures/flight/planet_ferrum_nr.webp` | Original to this repository — planet map baked from Noise/Voronoi fields; generated in Blender by `scripts/assets/blender/flight.py` | CC0 | — |
+| `textures/flight/planet_ferrum.webp` | Original to this repository — planet map baked from Noise/Voronoi fields; generated in Blender by `scripts/assets/blender/flight.py` | CC0 | — |
+| `textures/flight/planet_hive_em.webp` | Original to this repository — planet map baked from Noise/Voronoi fields; generated in Blender by `scripts/assets/blender/flight.py` | CC0 | — |
+| `textures/flight/planet_hive_nr.webp` | Original to this repository — planet map baked from Noise/Voronoi fields; generated in Blender by `scripts/assets/blender/flight.py` | CC0 | — |
+| `textures/flight/planet_hive.webp` | Original to this repository — planet map baked from Noise/Voronoi fields; generated in Blender by `scripts/assets/blender/flight.py` | CC0 | — |
+| `textures/flight/planet_thessaly_nr.webp` | Original to this repository — planet map baked from Noise/Voronoi fields; generated in Blender by `scripts/assets/blender/flight.py` | CC0 | — |
+| `textures/flight/planet_thessaly.webp` | Original to this repository — planet map baked from Noise/Voronoi fields; generated in Blender by `scripts/assets/blender/flight.py` | CC0 | — |
+| `textures/flight/planet_vetra_nr.webp` | Original to this repository — planet map baked from Noise/Voronoi fields; generated in Blender by `scripts/assets/blender/flight.py` | CC0 | — |
+| `textures/flight/planet_vetra.webp` | Original to this repository — planet map baked from Noise/Voronoi fields; generated in Blender by `scripts/assets/blender/flight.py` | CC0 | — |
+| `textures/flight/sky_cinder4.webp` | Original to this repository — sky window baked from Noise/Voronoi fields; generated in Blender by `scripts/assets/blender/flight.py` | CC0 | — |
+| `textures/flight/sky_eden.webp` | Original to this repository — sky window baked from Noise/Voronoi fields; generated in Blender by `scripts/assets/blender/flight.py` | CC0 | — |
+| `textures/flight/sky_ferrum.webp` | Original to this repository — sky window baked from Noise/Voronoi fields; generated in Blender by `scripts/assets/blender/flight.py` | CC0 | — |
+| `textures/flight/sky_hive.webp` | Original to this repository — sky window baked from Noise/Voronoi fields; generated in Blender by `scripts/assets/blender/flight.py` | CC0 | — |
+| `textures/flight/sky_station.webp` | Original to this repository — sky window baked from Noise/Voronoi fields; generated in Blender by `scripts/assets/blender/flight.py` | CC0 | — |
+| `textures/flight/sky_thessaly.webp` | Original to this repository — sky window baked from Noise/Voronoi fields; generated in Blender by `scripts/assets/blender/flight.py` | CC0 | — |
+| `textures/flight/sky_vetra.webp` | Original to this repository — sky window baked from Noise/Voronoi fields; generated in Blender by `scripts/assets/blender/flight.py` | CC0 | — |
 | `textures/ground/basalt_albedo.webp` | Original to this repository — baked seamless 4D noise/Voronoi fields, packed with numpy; generated in Blender by `scripts/assets/blender/ground.py` | CC0 | — |
 | `textures/ground/basalt_nr.webp` | Original to this repository — baked seamless 4D noise/Voronoi fields, packed with numpy; generated in Blender by `scripts/assets/blender/ground.py` | CC0 | — |
 | `textures/ground/chitin_albedo.webp` | Original to this repository — baked seamless 4D noise/Voronoi fields, packed with numpy; generated in Blender by `scripts/assets/blender/ground.py` | CC0 | — |

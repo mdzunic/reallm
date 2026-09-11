@@ -19,76 +19,13 @@ import numpy as np  # noqa: E402
 
 import common as C  # noqa: E402
 import tex as T  # noqa: E402
+from nodes import Graph  # noqa: E402
 
 SIZE = 512
 TAU = 2 * math.pi
 
 
 # ---------------------------------------------------------------- field bake
-
-
-class Graph:
-    def __init__(self, mat):
-        self.nt = mat.node_tree
-        self.nt.nodes.clear()
-
-    def node(self, kind, **props):
-        n = self.nt.nodes.new(kind)
-        for k, v in props.items():
-            setattr(n, k, v)
-        return n
-
-    def link(self, a, b):
-        self.nt.links.new(a, b)
-
-    def math(self, op, a, b=None):
-        n = self.node('ShaderNodeMath', operation=op)
-        for i, x in enumerate((a, b)):
-            if x is None:
-                continue
-            if isinstance(x, (int, float)):
-                n.inputs[i].default_value = x
-            else:
-                self.link(x, n.inputs[i])
-        return n.outputs[0]
-
-    def torus(self):
-        tc = self.node('ShaderNodeTexCoord')
-        sep = self.node('ShaderNodeSeparateXYZ')
-        self.link(tc.outputs['UV'], sep.inputs[0])
-        r = 1 / TAU
-        u, v = self.math('MULTIPLY', sep.outputs['X'], TAU), self.math('MULTIPLY', sep.outputs['Y'], TAU)
-        comb = self.node('ShaderNodeCombineXYZ')
-        self.link(self.math('MULTIPLY', self.math('COSINE', u), r), comb.inputs[0])
-        self.link(self.math('MULTIPLY', self.math('SINE', u), r), comb.inputs[1])
-        self.link(self.math('MULTIPLY', self.math('COSINE', v), r), comb.inputs[2])
-        return comb.outputs[0], self.math('MULTIPLY', self.math('SINE', v), r)
-
-    def field(self, vec, w, kind, scale, seed, detail=4.0, rough=0.55, distortion=0.0):
-        off = self.node('ShaderNodeVectorMath', operation='ADD')
-        self.link(vec, off.inputs[0])
-        off.inputs[1].default_value = (seed * 3.13, seed * 1.71, seed * 2.37)
-        ws = self.math('ADD', w, seed * 1.37)
-        if kind == 'fbm':
-            n = self.node('ShaderNodeTexNoise', noise_dimensions='4D', noise_type='FBM', normalize=True)
-            n.inputs['Scale'].default_value = scale
-            n.inputs['Detail'].default_value = detail
-            n.inputs['Roughness'].default_value = rough
-            n.inputs['Distortion'].default_value = distortion
-            out = n.outputs['Fac']
-        else:
-            feature = {'edge': 'DISTANCE_TO_EDGE', 'f1': 'F1', 'smooth': 'SMOOTH_F1', 'cell': 'F1'}[kind]
-            n = self.node('ShaderNodeTexVoronoi', voronoi_dimensions='4D', feature=feature)
-            n.inputs['Scale'].default_value = scale
-            if kind == 'cell':
-                sep = self.node('ShaderNodeSeparateColor')
-                self.link(n.outputs['Color'], sep.inputs[0])
-                out = sep.outputs['Red']
-            else:
-                out = n.outputs['Distance']
-        self.link(off.outputs[0], n.inputs['Vector'])
-        self.link(ws, n.inputs['W'])
-        return out
 
 
 def bake_fields(specs):

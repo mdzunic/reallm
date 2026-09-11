@@ -13,10 +13,12 @@
 import * as THREE from 'three';
 import type { EventBus, GameEvents } from '@/core/Events';
 import type { InputState } from '@/core/Input';
+import { log } from '@/core/Log';
 import { newSave, type CharacterCreation, type SaveV1 } from '@/core/Save';
 import type { GameServices } from '@/core/Services';
 import type { SceneParams } from '@/core/StateMachine';
 import { cargoCap, maxHp } from '@/core/Save';
+import { FLIGHT_ASSETS, PLANET_ART } from '@/data/assets';
 import { ENEMIES, PLANETS, type PlanetDef } from '@/data/index';
 import { Economy } from '@/systems/Economy';
 import {
@@ -47,6 +49,8 @@ const DEMO_CREATION: CharacterCreation = {
 
 export class FlightScene extends UiScene<'flight'> {
   override readonly pausable = true;
+  /** FlightView brings its own key, rim and ambient (PLAN R8). */
+  protected override readonly ownsLighting = true;
 
   #planet: PlanetDef = PLANETS.cinder4;
   #save: SaveV1 | null = null;
@@ -133,6 +137,7 @@ export class FlightScene extends UiScene<'flight'> {
       this.#view?.dispose();
       this.#view = null;
     });
+    this.#dress();
 
     this.#mountUi();
 
@@ -260,6 +265,76 @@ export class FlightScene extends UiScene<'flight'> {
       document.removeEventListener('keydown', skip);
       document.removeEventListener('pointerdown', skip);
     });
+  }
+
+  /**
+   * PLAN R8: the trip's art arrives after the scene is up — the shared models
+   * and sprites through the asset cache (`FLIGHT_ASSETS`), the destination's
+   * own sky and surface maps (`PLANET_ART`) through a loader this scene owns
+   * and releases on exit. Until they land, and for good when they cannot, the
+   * view keeps its primitives: never a blocking load, never an error screen.
+   */
+  #dress(): void {
+    let alive = true;
+    const owned: THREE.Texture[] = [];
+    this.disposer.add(() => {
+      alive = false;
+      for (const texture of owned) texture.dispose();
+      owned.length = 0;
+    });
+    const loader = new THREE.TextureLoader();
+    const load = async (url: string | undefined, color: boolean): Promise<THREE.Texture | null> => {
+      if (url === undefined) return null;
+      try {
+        const texture = await loader.loadAsync(url);
+        texture.colorSpace = color ? THREE.SRGBColorSpace : THREE.NoColorSpace;
+        texture.anisotropy = 4; // three clamps to what the GPU offers
+        if (!alive) {
+          texture.dispose();
+          return null;
+        }
+        owned.push(texture);
+        return texture;
+      } catch (error) {
+        log.warn('scene', `flight art ${url} did not load; the primitive stays`, error);
+        return null;
+      }
+    };
+    const assets = this.services.assets;
+    const shared = assets.load(FLIGHT_ASSETS).then(
+      () => true,
+      (error: unknown) => {
+        log.warn('scene', 'the flight models did not load; the primitives stay', error);
+        return false;
+      },
+    );
+    const art = PLANET_ART[this.#planet.id];
+    void Promise.all([shared, load(art.sky, true), load(art.surface, true), load(art.normal, false), load(art.emissive, true)]).then(
+      ([ready, sky, surface, normal, emissive]) => {
+        const view = this.#view;
+        if (!alive || view === null) return;
+        // A load that joined another pass in flight may not hold every id.
+        const pick = <T>(get: () => T): T | null => {
+          if (!ready) return null;
+          try {
+            return get();
+          } catch {
+            return null;
+          }
+        };
+        view.useArt({
+          sky,
+          planet: surface === null ? null : { map: surface, normalMap: normal, emissiveMap: emissive },
+          clouds: pick(() => assets.texture('clouds')),
+          asteroid: pick(() => assets.model('asteroid')),
+          fighter: pick(() => assets.model('fighter')),
+          interceptor: pick(() => assets.model('interceptor')),
+          cockpit: pick(() => assets.model('cockpit')),
+          ember: pick(() => assets.texture('ember')),
+          flare: pick(() => assets.texture('flare')),
+        });
+      },
+    );
   }
 
   // ------------------------------------------------------------------- update

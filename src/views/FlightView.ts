@@ -3,15 +3,20 @@
 // `FlightFrame` — `views/` may not import `systems/` (SPEC-001 §4), so the
 // shapes are declared here and `systems/Flight.ts`'s pools satisfy them.
 //
-// Instancing per §4.9: asteroids are one InstancedMesh (icosahedron with
-// per-instance scale/rotation/tint), fighters and interceptors one instanced
-// mesh each (procedural silhouettes — enemies are never asset packs,
-// CLAUDE.md), player shots instanced capsules, enemy shots instanced spheres,
-// explosions one pooled particle cloud, the planet one sphere wearing a
-// procedural biome texture, and the cockpit a static frame glued to the
-// camera. The camera lags the ship at 10/s and rolls with the bank
-// (reduce-motion: roll capped at 8°, no shake).
+// Instancing per §4.9: asteroids are instanced meshes (one per rock shape) with
+// per-instance scale/rotation/tint, fighters and interceptors one instanced
+// mesh each, player shots instanced capsules, enemy shots instanced spheres,
+// explosions one pooled particle cloud, the planet one sphere, and the cockpit
+// a static frame glued to the camera. The camera lags the ship at 10/s and
+// rolls with the bank (reduce-motion: roll capped at 8°, no shake).
+//
+// Everything starts as primitives, which need no download, and `useArt()`
+// swaps in the art the scene loads for the trip (PLAN R8, SPEC-020 §4.8): the
+// sky window, the planet's maps with an atmosphere and a cloud layer, the
+// baked asteroid, fighter, interceptor and cockpit models, and sprite textures
+// for the stars and the explosions.
 import * as THREE from 'three';
+import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { disposeObject3D } from '@/core/Disposer';
 import type { Pool } from '@/core/Pool';
 import type { QualitySettings } from '@/core/Renderer';
@@ -63,6 +68,45 @@ export interface FlightFrame {
   time: number;
 }
 
+// ------------------------------------------------------------------ the art
+
+export interface PlanetMaps {
+  readonly map: THREE.Texture;
+  readonly normalMap?: THREE.Texture | null;
+  readonly emissiveMap?: THREE.Texture | null;
+}
+
+/** The trip's art (PLAN R8), handed over once loaded; every field may be missing. */
+export interface FlightArt {
+  /** The forward sky window of `SKY_WINDOW`. */
+  readonly sky?: THREE.Texture | null;
+  readonly planet?: PlanetMaps | null;
+  /** Grey = cover, used as the cloud layer's alpha map. */
+  readonly clouds?: THREE.Texture | null;
+  /** One mesh per rock shape, mean radius 1. */
+  readonly asteroid?: THREE.Object3D | null;
+  readonly fighter?: THREE.Object3D | null;
+  readonly interceptor?: THREE.Object3D | null;
+  /** Camera space: the pilot looks along −Z. */
+  readonly cockpit?: THREE.Object3D | null;
+  /** Soft sprite for the explosion particles. */
+  readonly ember?: THREE.Texture | null;
+  /** Glow sprite for the streaming stars. */
+  readonly flare?: THREE.Texture | null;
+}
+
+/**
+ * The sky window `scripts/assets/blender/flight.py` renders, as SphereGeometry
+ * arguments: φ π…2π, θ π/8…7π/8 — ±90° × ±67.5° around −Z, which covers every
+ * direction the flight camera can face (roll, pitch and the landing dive).
+ */
+export const SKY_WINDOW = {
+  phiStart: Math.PI,
+  phiLength: Math.PI,
+  thetaStart: Math.PI / 8,
+  thetaLength: (3 * Math.PI) / 4,
+} as const;
+
 // ------------------------------------------------------------------ tunables
 
 const STARFIELD_DEPTH = 400;
@@ -71,6 +115,9 @@ const STAR_SPREAD_Y = 45;
 /** Base planet radius; §4.1's 0.2 → 6 scale rides on top of it. */
 const PLANET_RADIUS = 30;
 const PLANET_Z = -320;
+const SKY_RADIUS = 500;
+const ATMOSPHERE_SCALE = 1.06;
+const CLOUD_SCALE = 1.015;
 const CAMERA_LERP_PER_S = 10;
 const CAMERA_Z = 2.5;
 /** Reduce-motion caps the roll here (§4.9). */
@@ -78,8 +125,27 @@ const REDUCED_ROLL_DEG = 8;
 const MAX_SHIPS = 40;
 const MAX_SHOTS = 64;
 const PARTICLE_LIFE = 0.7;
+/** Where the key light comes from (the atmosphere brightens on that side). */
+const KEY_DIRECTION = new THREE.Vector3(3, 5, 4).normalize();
+
+/** Cloud tint, cover and drift per biome (initial tuning). */
+const CLOUDS: Readonly<Record<PlanetDef['biome'], { readonly tint: string; readonly opacity: number }>> = {
+  desert: { tint: '#e2bc8a', opacity: 0.4 },
+  ice: { tint: '#ffffff', opacity: 0.55 },
+  jungle: { tint: '#ffffff', opacity: 0.85 },
+  volcanic: { tint: '#5e5048', opacity: 0.55 },
+  hive: { tint: '#8a6aa0', opacity: 0.35 },
+  temperate: { tint: '#ffffff', opacity: 0.8 },
+};
+const CLOUD_SPIN = 0.012;
+/** SPEC-020 20-b: reduce motion keeps the clouds nearly still. */
+const REDUCED_CLOUD_SPIN = 0.004;
 
 const DEG = Math.PI / 180;
+
+function frac(x: number): number {
+  return x - Math.floor(x);
+}
 
 interface ViewOptions {
   planet: PlanetDef;
@@ -110,19 +176,109 @@ function biomeTexture(planet: PlanetDef, rng: Rng): THREE.DataTexture {
   return texture;
 }
 
+const MODEL_ATTRIBUTES = new Set(['position', 'normal', 'uv']);
+
+/**
+ * Each mesh of a loaded model as (geometry, material), its transform applied
+ * and only position / normal / uv kept. The geometries are new and belong to
+ * the caller; the materials stay the model's own (shared with the asset cache).
+ */
+export function modelParts(root: THREE.Object3D): Array<{ geometry: THREE.BufferGeometry; material: THREE.Material }> {
+  root.updateMatrixWorld(true);
+  const parts: Array<{ geometry: THREE.BufferGeometry; material: THREE.Material }> = [];
+  root.traverse((node) => {
+    const mesh = node as THREE.Mesh;
+    if (mesh.isMesh !== true) return;
+    const geometry = mesh.geometry.clone();
+    geometry.applyMatrix4(mesh.matrixWorld);
+    for (const name of Object.keys(geometry.attributes)) {
+      if (!MODEL_ATTRIBUTES.has(name)) geometry.deleteAttribute(name);
+    }
+    geometry.clearGroups();
+    const material = Array.isArray(mesh.material) ? mesh.material[0] : mesh.material;
+    if (material !== undefined) parts.push({ geometry, material });
+  });
+  return parts;
+}
+
+/** A model as one geometry with a group per material — what one InstancedMesh draws. */
+export function mergeModel(root: THREE.Object3D): { geometry: THREE.BufferGeometry; materials: THREE.Material[] } | null {
+  const parts = modelParts(root);
+  if (parts.length === 0) return null;
+  const geometry = mergeGeometries(
+    parts.map((part) => part.geometry),
+    true,
+  ) as THREE.BufferGeometry | null;
+  for (const part of parts) part.geometry.dispose();
+  if (geometry === null) return null;
+  return { geometry, materials: parts.map((part) => part.material) };
+}
+
+/**
+ * The atmosphere shell (SPEC-020 §4.2): an additive fresnel halo that peaks
+ * just outside the planet's limb, fades to nothing at the shell's own edge,
+ * and is brighter on the lit side.
+ */
+function atmosphereMaterial(color: THREE.Color, strength: number): THREE.ShaderMaterial {
+  return new THREE.ShaderMaterial({
+    uniforms: {
+      uColor: { value: color },
+      uLight: { value: KEY_DIRECTION.clone() },
+      uEdge: { value: Math.sqrt(1 - 1 / (ATMOSPHERE_SCALE * ATMOSPHERE_SCALE)) },
+      uStrength: { value: strength },
+    },
+    vertexShader: /* glsl */ `
+      varying vec3 vNormal;
+      varying vec3 vView;
+      void main() {
+        vec4 mv = modelViewMatrix * vec4(position, 1.0);
+        vNormal = normalize(normalMatrix * normal);
+        vView = normalize(-mv.xyz);
+        gl_Position = projectionMatrix * mv;
+      }`,
+    fragmentShader: /* glsl */ `
+      uniform vec3 uColor;
+      uniform vec3 uLight;
+      uniform float uEdge;
+      uniform float uStrength;
+      varying vec3 vNormal;
+      varying vec3 vView;
+      void main() {
+        vec3 n = normalize(vNormal);
+        float d = max(dot(n, normalize(vView)), 0.0);
+        float halo = pow(1.0 - d, 3.0) * smoothstep(0.0, uEdge, d);
+        vec3 l = normalize((viewMatrix * vec4(uLight, 0.0)).xyz);
+        float lit = 0.2 + 0.8 * smoothstep(-0.35, 0.6, dot(n, l));
+        gl_FragColor = vec4(uColor * halo * lit * uStrength, 1.0);
+        #include <tonemapping_fragment>
+        #include <colorspace_fragment>
+      }`,
+    blending: THREE.AdditiveBlending,
+    transparent: true,
+    depthWrite: false,
+  });
+}
+
 export class FlightView {
   readonly #scene: THREE.Scene;
   readonly #camera: THREE.PerspectiveCamera;
   readonly #reduceMotion: boolean;
+  readonly #planetDef: PlanetDef;
+  readonly #rockTint: THREE.Color;
 
   readonly #stars: THREE.Points;
   readonly #starPositions: THREE.BufferAttribute;
-  readonly #asteroids: THREE.InstancedMesh;
+  #asteroids: THREE.InstancedMesh[];
+  readonly #asteroidCounts: number[] = [];
+  #rocksTextured = false;
   readonly #fighters: THREE.InstancedMesh;
   readonly #interceptors: THREE.InstancedMesh;
   readonly #shots: THREE.InstancedMesh;
   readonly #enemyShots: THREE.InstancedMesh;
   readonly #planet: THREE.Mesh;
+  #clouds: THREE.Mesh | null = null;
+  #sky: THREE.Mesh | null = null;
+  #dressed = false;
   readonly #cockpit: THREE.Group;
   readonly #particles: THREE.Points;
   readonly #particleData: Float32Array; // vx, vy, vz, life per particle
@@ -146,6 +302,8 @@ export class FlightView {
     this.#camera = camera;
     this.#reduceMotion = options.reduceMotion;
     const { planet, quality, rng } = options;
+    this.#planetDef = planet;
+    this.#rockTint = new THREE.Color(planet.surface.palette.ground);
 
     // Space wears a near-black cast of the planet's sky; fog carries its tint
     // (§4.9) and the storm triples the density (§4.5).
@@ -154,10 +312,15 @@ export class FlightView {
     this.#fogDensity = 0.0035;
     scene.fog = new THREE.FogExp2(new THREE.Color(planet.surface.palette.fog).multiplyScalar(0.25), this.#fogDensity);
 
-    scene.add(new THREE.AmbientLight(0x8899aa, 1.2));
-    const key = new THREE.DirectionalLight(0xfff2e0, 1.6);
-    key.position.set(3, 5, 4);
+    // The scene lights itself (it skips the UI scenes' flat ambient): a cool
+    // ambient, a warm key and a blue rim from behind.
+    scene.add(new THREE.AmbientLight(0x8899aa, 1.6));
+    const key = new THREE.DirectionalLight(0xfff2e0, 2.4);
+    key.position.copy(KEY_DIRECTION).multiplyScalar(10);
     scene.add(key);
+    const rim = new THREE.DirectionalLight(0x7f9fff, 0.8);
+    rim.position.set(-4, 2, -6);
+    scene.add(rim);
 
     // Starfield: `Points` with per-frame z streaming and wrap (§4.9).
     const starCount = quality.starfieldPoints;
@@ -177,15 +340,11 @@ export class FlightView {
     this.#stars.frustumCulled = false;
     scene.add(this.#stars);
 
-    // Asteroids: one InstancedMesh, per-instance scale/rotation/tint (§4.9).
-    this.#asteroids = new THREE.InstancedMesh(
-      new THREE.IcosahedronGeometry(1, 0),
-      new THREE.MeshStandardMaterial({ roughness: 0.95, metalness: 0.05 }),
-      quality.asteroidCap,
-    );
-    this.#asteroids.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
-    this.#asteroids.frustumCulled = false;
-    scene.add(this.#asteroids);
+    // Asteroids: instanced, per-instance scale/rotation/tint (§4.9); one rock
+    // shape until `useArt` brings the baked ones.
+    this.#asteroids = [
+      this.#rockMesh(new THREE.IcosahedronGeometry(1, 0), new THREE.MeshStandardMaterial({ roughness: 0.95, metalness: 0.05 }), quality.asteroidCap),
+    ];
 
     // Enemy ships: two instanced silhouettes, tinted from their defs (§4.9).
     const fighterGeometry = new THREE.ConeGeometry(1, 2.6, 4);
@@ -259,6 +418,16 @@ export class FlightView {
     scene.add(camera);
   }
 
+  #rockMesh(geometry: THREE.BufferGeometry, material: THREE.Material, capacity: number): THREE.InstancedMesh {
+    const mesh = new THREE.InstancedMesh(geometry, material, capacity);
+    mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+    mesh.frustumCulled = false;
+    mesh.count = 0;
+    this.#scene.add(mesh);
+    this.#asteroidCounts.push(0);
+    return mesh;
+  }
+
   #shipMesh(geometry: THREE.BufferGeometry, tint: string): THREE.InstancedMesh {
     const mesh = new THREE.InstancedMesh(
       geometry,
@@ -282,6 +451,23 @@ export class FlightView {
     this.#landing = Math.min(1, Math.max(0, progress));
   }
 
+  /**
+   * Swap the primitives for the trip's art (PLAN R8). Called once, when the
+   * scene's loads settle; anything missing keeps its primitive.
+   */
+  useArt(art: FlightArt): void {
+    if (this.#dressed) return;
+    this.#dressed = true;
+    if (art.sky) this.#useSky(art.sky);
+    if (art.planet) this.#usePlanet(art.planet, art.clouds ?? null);
+    if (art.asteroid) this.#useRocks(art.asteroid);
+    if (art.fighter) this.#useShip(this.#fighters, art.fighter);
+    if (art.interceptor) this.#useShip(this.#interceptors, art.interceptor);
+    if (art.cockpit) this.#useCockpit(art.cockpit);
+    if (art.ember) glowPoints(this.#particles.material as THREE.PointsMaterial, art.ember, 1.6);
+    if (art.flare) glowPoints(this.#stars.material as THREE.PointsMaterial, art.flare, 1.1);
+  }
+
   update(frame: FlightFrame, dt: number): void {
     this.#updateCamera(frame, dt);
     this.#updateStars(frame, dt);
@@ -289,6 +475,7 @@ export class FlightView {
     this.#updateShots(frame);
     this.#updateParticles(frame, dt);
     this.#updatePlanet(frame);
+    this.#sky?.position.copy(this.#camera.position);
     const fog = this.#scene.fog as THREE.FogExp2;
     fog.density = this.#fogDensity * (frame.stormActive ? 3 : 1); // §4.5
   }
@@ -298,6 +485,98 @@ export class FlightView {
     disposeObject3D(this.#cockpit);
     this.#scene.fog = null;
     this.#scene.background = null;
+  }
+
+  // ------------------------------------------------------------------- the art
+
+  #useSky(texture: THREE.Texture): void {
+    const { phiStart, phiLength, thetaStart, thetaLength } = SKY_WINDOW;
+    const dome = new THREE.Mesh(
+      new THREE.SphereGeometry(SKY_RADIUS, 48, 32, phiStart, phiLength, thetaStart, thetaLength),
+      new THREE.MeshBasicMaterial({ map: texture, side: THREE.BackSide, fog: false, depthWrite: false, depthTest: false }),
+    );
+    dome.renderOrder = -10;
+    dome.frustumCulled = false;
+    dome.position.copy(this.#camera.position);
+    this.#sky = dome;
+    this.#scene.add(dome);
+  }
+
+  #usePlanet(maps: PlanetMaps, clouds: THREE.Texture | null): void {
+    const planet = this.#planet;
+    const primitive = planet.material as THREE.MeshStandardMaterial;
+    primitive.map?.dispose();
+    primitive.dispose();
+    planet.geometry.dispose();
+    planet.geometry = new THREE.SphereGeometry(PLANET_RADIUS, 64, 40);
+    const glow = maps.emissiveMap ?? null;
+    planet.material = new THREE.MeshStandardMaterial({
+      map: maps.map,
+      normalMap: maps.normalMap ?? null,
+      emissiveMap: glow,
+      emissive: glow === null ? 0x000000 : 0xffffff,
+      emissiveIntensity: 1.3,
+      roughness: 0.92,
+      metalness: 0,
+      fog: false,
+    });
+    // The rim wears the sky's hue, lifted so even the Hive's dusk glows.
+    const hsl = { h: 0, s: 0, l: 0 };
+    const rim = new THREE.Color(this.#planetDef.surface.palette.sky);
+    rim.getHSL(hsl);
+    rim.setHSL(hsl.h, Math.min(1, hsl.s * 1.15), Math.max(0.55, hsl.l));
+    planet.add(new THREE.Mesh(new THREE.SphereGeometry(PLANET_RADIUS * ATMOSPHERE_SCALE, 48, 32), atmosphereMaterial(rim, 3.0)));
+    if (clouds !== null) {
+      const look = CLOUDS[this.#planetDef.biome];
+      const layer = new THREE.Mesh(
+        new THREE.SphereGeometry(PLANET_RADIUS * CLOUD_SCALE, 64, 40),
+        new THREE.MeshStandardMaterial({
+          color: new THREE.Color(look.tint),
+          alphaMap: clouds,
+          transparent: true,
+          opacity: look.opacity,
+          depthWrite: false,
+          roughness: 1,
+          metalness: 0,
+          fog: false,
+        }),
+      );
+      this.#clouds = layer;
+      planet.add(layer);
+    }
+  }
+
+  #useRocks(model: THREE.Object3D): void {
+    const parts = modelParts(model);
+    if (parts.length === 0) return;
+    const capacity = (this.#asteroids[0] as THREE.InstancedMesh).instanceMatrix.count;
+    for (const mesh of this.#asteroids) {
+      this.#scene.remove(mesh);
+      mesh.geometry.dispose();
+      (mesh.material as THREE.Material).dispose();
+      mesh.dispose();
+    }
+    this.#asteroids = [];
+    this.#asteroidCounts.length = 0;
+    for (const part of parts) this.#asteroids.push(this.#rockMesh(part.geometry, part.material, capacity));
+    this.#rocksTextured = true;
+  }
+
+  #useShip(mesh: THREE.InstancedMesh, model: THREE.Object3D): void {
+    const merged = mergeModel(model);
+    if (merged === null) return;
+    mesh.geometry.dispose();
+    (mesh.material as THREE.Material).dispose();
+    mesh.geometry = merged.geometry;
+    mesh.material = merged.materials;
+  }
+
+  #useCockpit(model: THREE.Object3D): void {
+    for (const child of [...this.#cockpit.children]) {
+      this.#cockpit.remove(child);
+      disposeObject3D(child);
+    }
+    this.#cockpit.add(model);
   }
 
   // ---------------------------------------------------------------- internals
@@ -336,7 +615,9 @@ export class FlightView {
   }
 
   #updateHazards(frame: FlightFrame): void {
-    let asteroids = 0;
+    const rocks = this.#asteroids;
+    const counts = this.#asteroidCounts;
+    for (let v = 0; v < counts.length; v++) counts[v] = 0;
     let fighters = 0;
     let interceptors = 0;
     let enemyShots = 0;
@@ -346,17 +627,23 @@ export class FlightView {
       this.#position.set(hazard.x, hazard.y, -hazard.depth);
       switch (hazard.kind) {
         case 'asteroid': {
-          if (asteroids >= this.#asteroids.count) break;
+          // Each rock keeps its shape, stretch and tint: all keyed to its radius.
+          const r = hazard.radius;
+          const variant = rocks.length > 1 ? Math.floor(frac(r * 7.31) * rocks.length) : 0;
+          const mesh = rocks[variant] as THREE.InstancedMesh;
+          const slot = counts[variant] as number;
+          if (slot >= mesh.instanceMatrix.count) break;
           // Slow tumble (§4.3, visual): phase keyed to the rock's own radius.
-          this.#euler.set(time * 0.4 + hazard.radius * 7, time * 0.3 + hazard.radius * 3, 0, 'XYZ');
+          this.#euler.set(time * 0.4 + r * 7, time * 0.3 + r * 3, 0, 'XYZ');
           this.#quaternion.setFromEuler(this.#euler);
-          this.#scale.setScalar(hazard.radius);
+          this.#scale.set(r * (0.85 + 0.3 * frac(r * 13.7)), r * (0.85 + 0.3 * frac(r * 5.3)), r);
           this.#matrix.compose(this.#position, this.#quaternion, this.#scale);
-          this.#asteroids.setMatrixAt(asteroids, this.#matrix);
+          mesh.setMatrixAt(slot, this.#matrix);
           // Tint varies with size so the field reads as rubble, not clones.
-          this.#color.setHSL(0.08, 0.15, 0.28 + (hazard.radius % 1) * 0.2);
-          this.#asteroids.setColorAt(asteroids, this.#color);
-          asteroids++;
+          if (this.#rocksTextured) this.#color.setHSL(0.08, 0.1, 0.72 + frac(r) * 0.2).lerp(this.#rockTint, 0.25);
+          else this.#color.setHSL(0.08, 0.15, 0.28 + frac(r) * 0.2);
+          mesh.setColorAt(slot, this.#color);
+          counts[variant] = slot + 1;
           break;
         }
         case 'fighter': {
@@ -389,7 +676,7 @@ export class FlightView {
         }
       }
     }
-    this.#writeCount(this.#asteroids, asteroids, true);
+    for (let v = 0; v < rocks.length; v++) this.#writeCount(rocks[v] as THREE.InstancedMesh, counts[v] as number, true);
     this.#writeCount(this.#fighters, fighters, false);
     this.#writeCount(this.#interceptors, interceptors, false);
     this.#writeCount(this.#enemyShots, enemyShots, false);
@@ -462,5 +749,18 @@ export class FlightView {
     this.#planet.scale.setScalar(scale);
     this.#planet.rotation.y = frame.time * 0.02;
     this.#planet.position.y = -this.#landing * 30; // it rises as the nose dips
+    if (this.#clouds !== null) {
+      this.#clouds.rotation.y = frame.time * (this.#reduceMotion ? REDUCED_CLOUD_SPIN : CLOUD_SPIN);
+    }
   }
+}
+
+/** Soft additive sprites instead of square points. */
+function glowPoints(material: THREE.PointsMaterial, sprite: THREE.Texture, grow: number): void {
+  material.map = sprite;
+  material.transparent = true;
+  material.blending = THREE.AdditiveBlending;
+  material.depthWrite = false;
+  material.size *= grow;
+  material.needsUpdate = true;
 }

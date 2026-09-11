@@ -1,7 +1,8 @@
 #!/usr/bin/env node
-// Builds the Blender-generated assets (PLAN R7): every model, ground texture,
-// VFX sprite and portrait under public/assets/ that is not audio. Each
-// generator is a Python script run by Blender headless; nothing is downloaded.
+// Builds the Blender-generated assets (PLAN R7, R8): every model, ground
+// texture, VFX sprite, portrait and flight map under public/assets/ that is not
+// audio. Each generator is a Python script run by Blender headless; nothing is
+// downloaded.
 //
 //   node scripts/assets/blender/build.mjs                    # everything
 //   node scripts/assets/blender/build.mjs character ships    # some generators
@@ -18,7 +19,7 @@ import { fileURLToPath } from 'node:url';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const OUT = resolve(HERE, '..', '..', '..', 'public', 'assets');
-const GENERATORS = ['character', 'ships', 'station', 'props', 'ground', 'sprites', 'portraits'];
+const GENERATORS = ['character', 'ships', 'station', 'props', 'ground', 'sprites', 'portraits', 'flight'];
 
 function findBlender() {
   if (process.env.BLENDER) return process.env.BLENDER;
@@ -74,8 +75,13 @@ console.log(`\ndone in ${((Date.now() - started) / 1000).toFixed(1)} s — now r
 function writeLicenses() {
   const GENERATED = [
     [/^models\/character\.glb$/, 'character.py', 'rigged salvager, clips Idle · Run · Attack · Hit · Death'],
-    [/^models\/(ship|fighter|interceptor|probe)\.glb$/, 'ships.py', 'modelled from code'],
-    [/^models\/(station_ring|dock|cockpit|crate)\.glb$/, 'station.py', 'modelled from code'],
+    [/^models\/(ship|fighter|interceptor|probe)\.glb$/, 'ships.py', 'modelled from code, hull maps baked in Cycles'],
+    [/^models\/cockpit\.glb$/, 'station.py', 'modelled from code, hull and screen maps baked in Cycles'],
+    [/^models\/(station_ring|dock|crate)\.glb$/, 'station.py', 'modelled from code'],
+    [/^models\/asteroid\.glb$/, 'flight.py', 'two rocks, normals baked from a displaced high-poly'],
+    [/^textures\/flight\/sky_.+\.webp$/, 'flight.py', 'sky window baked from Noise/Voronoi fields'],
+    [/^textures\/flight\/clouds\.webp$/, 'flight.py', 'cloud cover baked from Noise fields'],
+    [/^textures\/flight\/planet_.+\.webp$/, 'flight.py', 'planet map baked from Noise/Voronoi fields'],
     [/^models\/props\/.+\.glb$/, 'props.py', 'unit prop, biome colours in vertex colours'],
     [/^textures\/ground\/.+\.webp$/, 'ground.py', 'baked seamless 4D noise/Voronoi fields, packed with numpy'],
     [/^textures\/sprites\/.+\.webp$/, 'sprites.py', 'numpy radial and noise fields'],
