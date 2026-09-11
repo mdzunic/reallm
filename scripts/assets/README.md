@@ -1,16 +1,14 @@
-# Asset drop — the hand-made step of the art pass (PLAN R6-3)
+# Assets — how every file under `public/assets/` is made
 
-The build factory that implements the specs has no internet access, so every
-real file the art pass uses (SPEC-017 … SPEC-020) is fetched **once, by a
-person**, prepared with the steps below, committed under `public/assets/`, and
-given a row in `public/assets/LICENSES.md`. The specs consume the files by
-manifest id and keep a procedural fallback, so nothing is blocked on this
-step — it only makes the result better.
+Nothing under `public/assets/` is downloaded (PLAN R7). Models, ground
+textures, VFX sprites and portraits are generated from code by **Blender**
+running headless; the audio is synthesised by Node (section 4). The generators
+are committed, deterministic for a given tool version, and the files they write
+are committed too, so `npm run check`, the e2e suite and the build factory never
+need Blender — only a rebuild of the art does.
 
-Everything must be **CC0**. Verify the licence on the source page before
-downloading; if a pack is not CC0, do not use it.
-
-Run the checker after every change:
+Every file must be **CC0** and have a row in `public/assets/LICENSES.md`. Run the
+checker after every change:
 
 ```bash
 node scripts/assets/check.mjs
@@ -20,61 +18,72 @@ It fails when a category exceeds its byte budget (SPEC-001 §10), when a file
 under `public/assets/` has no row in `LICENSES.md`, or when a file has an
 extension the specs do not allow.
 
-## 1. What to fetch
+## 1. What the Blender build makes
 
-| Need | Consumer | Source (verify CC0 on the page) | Take |
-| --- | --- | --- | --- |
-| Player character, rigged, with clips | SPEC-019 §4.1 (`ASSETS.models.character`) | Kenney **Mini Characters 1** — https://kenney.nl/assets/mini-characters-1 (fallback: Kenney **Animated Characters 1/2/3**, or Quaternius **Universal Animation Library**, both CC0) | One or two humanoids as GLB with the animation clips; clip names should cover `idle`, `run`, `attack`, `hit`, `death` (aliases in SPEC-019 §4.1) |
-| Escort probe / drone | SPEC-019 §4.1 (`FOLLOWERS.science_probe.model`) | Kenney **Space Kit** — https://kenney.nl/assets/space-kit | One small drone or satellite model |
-| Fighters, interceptors, cockpit, station ring, dock | SPEC-020 §4.3, §4.4 (`ASSETS.models.fighter`, `interceptor`, `cockpit`, `station_ring`, `dock`) | Kenney **Space Kit** | Two ship silhouettes, one cockpit interior piece, one ring/hub module, one dock/pad module |
-| Rocks, cliffs, trees, mushrooms, ice crystals | SPEC-018 §4.7 (`PROP_MODELS`, `SURFACE_ASSETS[biome].models`) | Kenney **Nature Kit** — https://kenney.nl/assets/nature-kit and **Space Kit** (craters, rocks) | Roughly two or three per biome kind: `rock`, `ruin`, `spire`, `vent`, `tree` |
-| VFX sprites | SPEC-019 §4.4, SPEC-020 §4.3 (`textures/sprites/`) | Kenney **Particle Pack** — https://kenney.nl/assets/particle-pack | 8–10 sprites (smoke, flare, spark, dirt, magic, muzzle) |
-| Ground texture sets, one per `GroundLayerId` | SPEC-018 §4.10 (`SURFACE_ASSETS[biome].textures`) | **ambientCG** — https://ambientcg.com (CC0) or **Poly Haven** — https://polyhaven.com/textures (CC0) | `sand`, `cracked_earth`, `rock`, `snow`, `ice`, `moss`, `jungle_floor`, `basalt`, `lava_rock`, `chitin` (a leather/skin-like set), `flesh`, `grass`, `soil` — 1K downloads, Color + Displacement + NormalGL + Roughness |
-| Portraits (optional) | SPEC-020 §4.6 (`portraits/01.webp` … `12.webp` + `manifest.json`) | Generated originals (the `image-gen` skill) — original work, CC0 by the author | Twelve 256² faces matching the creation glyph order |
+| Generator (`scripts/assets/blender/`) | Writes | Consumer |
+| --- | --- | --- |
+| `character.py` (+ `lib/salvager.py`) | `models/character.glb` — the rigged salvager: one material on a 4 × 4 palette texture (base colour, metallic-roughness, emissive visor and lamps), rigid-skinned to 15 bones, clips `Idle` (first — the menu's asset spike plays clip 0), `Run`, `Attack`, `Hit`, `Death` | menu spike, creation preview, SPEC-019 §4.1 |
+| `ships.py` | `models/ship.glb` (the tug, with a WebP sRGB hull map — the asset-spike colour-map check), `fighter.glb`, `interceptor.glb`, `probe.glb` | menu, station, SPEC-020 §4.3, SPEC-019 §4.1 |
+| `station.py` | `models/station_ring.glb`, `dock.glb`, `cockpit.glb` (camera space), `crate.glb` (boot manifest, 0.6 m, centred) | SPEC-020 §4.3–§4.4, SPEC-018 §4.7 |
+| `props.py` | `models/props/<biome>_<kind>_<a|b>.glb` — 24 unit props for the twelve biome × obstacle-kind pairs of `systems/Layout.ts` | SPEC-018 §4.7 (`PROP_MODELS`) |
+| `ground.py` | `textures/ground/<layer>_albedo.webp` + `<layer>_nr.webp` for the 13 `GroundLayerId`s — seamless 512² | SPEC-018 §4.5, §4.10 |
+| `sprites.py` | `textures/sprites/{smoke,dirt,flare,spark,ember,muzzle,ring,magic,flake,streak}.webp` | SPEC-019 §4.4, SPEC-020 §4.3 |
+| `portraits.py` | `portraits/01.webp` … `12.webp` (256² EEVEE busts) + `portraits/manifest.json` | SPEC-020 §4.6 |
 
-Keep the pack archives out of the repository; only the prepared files land.
+`lib/common.py` holds the shared pieces (scene reset, part primitives, the
+bmesh `Builder`, materials, WebP writing, GLB export and rewrite), `lib/tex.py`
+the numpy texture helpers, `lib/preview.py` the QA renders.
 
-## 2. Prepare
+## 2. Rebuild
 
-Tools (any of these are fine; nothing is added to `package.json`):
+Blender **5.2 LTS** (found through `$BLENDER`, then `/Applications/Blender.app`,
+`/usr/bin/blender`, the Windows default, then `PATH`):
 
-- glTF → GLB: `npx @gltf-transform/cli copy input.gltf output.glb` (or Blender's exporter). Then `npx @gltf-transform/cli prune output.glb output.glb` to drop unused nodes, and for the character `npx @gltf-transform/cli optimize` is *not* recommended (it may rename clips) — trim clips in Blender instead.
-- Images: `cwebp -q 82 in.png -o out.webp` (libwebp) or ImageMagick `magick in.png -quality 82 out.webp`; resizing with `magick in.png -resize 512x512 out.png`.
+```bash
+node scripts/assets/blender/build.mjs                          # everything (about 40 s)
+node scripts/assets/blender/build.mjs character ships          # some generators
+node scripts/assets/blender/build.mjs props --only=hive_rock_a # one item
+node scripts/assets/blender/build.mjs --preview=/tmp/art       # also write QA contact sheets
+```
 
-### 2.1 Models → `public/assets/models/`
+The runner starts Blender with `--background --factory-startup
+--python-exit-code 1`, so a Python error fails the build. After the generators
+it rewrites the generated table of `LICENSES.md` (between the `blender:start` /
+`blender:end` markers) from the files on disk. `--preview=<dir>` renders lit
+3/4 views and writes `sheet_*.png` contact sheets; they are for judging the
+art and are never committed.
 
-| File | Rule |
-| --- | --- |
-| `character.glb` | replaces the in-repo spike; rigged; clips named so SPEC-019's aliases find them; ≤ 300 KB |
-| `probe.glb` | ≤ 60 KB |
-| `fighter.glb`, `interceptor.glb`, `cockpit.glb`, `station_ring.glb`, `dock.glb` | ≤ 120 KB each |
-| `props/<biome>_<kind>_<a|b|c>.glb` | e.g. `props/desert_rock_a.glb`; ≤ 60 KB each |
+## 3. Conventions (for a new generator or a hand-made replacement)
 
-Models must be GLB (SPEC-001 §10), Y-up, metres, origin at the base centre.
-
-### 2.2 Ground textures → `public/assets/textures/ground/`
-
-For each layer `<layer>`:
-
-1. `<layer>_albedo.webp` — 1024², **RGB = Color, A = Displacement** (height), sRGB. Build the RGBA with ImageMagick: `magick Color.jpg Displacement.jpg -resize 1024x1024 -alpha off -compose CopyOpacity -composite -define webp:alpha-quality=90 -quality 82 <layer>_albedo.webp`.
-2. `<layer>_nr.webp` — 512², **RGB = NormalGL (OpenGL, +Y up), A = Roughness**, linear data: `magick NormalGL.jpg Roughness.jpg -resize 512x512 -alpha off -compose CopyOpacity -composite -define webp:alpha-quality=95 -quality 90 <layer>_nr.webp`.
-
-Manifest entries go into `SURFACE_ASSETS[biome].textures` as `<layer>_albedo: { url, kind: 'color' }` and `<layer>_nr: { url, kind: 'data' }` (SPEC-018 §4.10). Budget for the whole set: ≤ 5 MB (the textures category is ≤ 6 MB in total).
-
-### 2.3 Sprites → `public/assets/textures/sprites/`
-
-256² PNG or WebP with alpha, one file per sprite (`smoke.webp`, `flare.webp`, `spark.webp`, `dirt.webp`, `muzzle.webp`, …). ≤ 400 KB in total.
-
-### 2.4 Portraits → `public/assets/portraits/`
-
-`01.webp` … `12.webp`, 256², plus `manifest.json` containing `[1, 2, …, 12]` (the indices that exist). ≤ 300 KB in total.
-
-## 3. Register
-
-1. Add one row per file to `public/assets/LICENSES.md`: `| \`models/fighter.glb\` | Kenney Space Kit — https://kenney.nl/assets/space-kit | CC0 | converted to GLB, pruned |`. The checker matches files by the backticked relative path.
-2. Add the ids to `src/data/assets.ts` (`ASSETS.models` for boot-loaded models — keep the boot list short, the e2e boot suites delay every request — and `SURFACE_ASSETS[biome]` for lazy per-planet files) and to `PROP_MODELS` in `src/views/SurfaceProps.ts` for prop kinds.
-3. Run `node scripts/assets/check.mjs`, then `npm run check` and `npm run e2e`.
-4. Commit on a branch and open a PR titled `Asset drop: <what landed>`.
+- **Models** are GLB (SPEC-001 §10), metres, Y-up, **front facing +Z** (Blender's
+  −Y), origin at the base centre — except the crate (centred, as the boot
+  manifest's crate always was), the flight ships and the probe (centred), and the
+  cockpit (camera space: the pilot looks along three's −Z, Blender's +Y).
+- **Characters** carry one material whose UVs sit on palette-cell centres, so the
+  runtime tint (`material.color = appearance.primary`) colours the suit and
+  armour cells and leaves the dark cells dark; `emissive × emissiveMap` lights
+  only the visor and lamps. Clip names follow SPEC-019's aliases, `Idle` first.
+- **Instanced models** (flight ships, props) use a `Body` material with the
+  colours in `COLOR_0` and, when something glows, a second `Glow` material —
+  SPEC-018 §4.7 / SPEC-020 §4.3 bake `Body` into the instanced geometry and keep
+  `Glow` as the glow part. Props are unit props: footprint radius 1, base on
+  z 0, because the surface scales an obstacle by its radius.
+- **Ground layers** are RGBA WebP pairs at 512²: `<layer>_albedo` (RGB albedo,
+  sRGB; A height — except `lava_rock` and `flesh`, always slot B, whose A is
+  the emissive crack/vein mask) and `<layer>_nr` (RGB OpenGL normal, A
+  roughness, linear). Every layer tiles seamlessly.
+- **Sprites** are white-to-grey RGB with straight alpha, 256² (the streak
+  256 × 64), so the instance colour tints them.
+- **Portraits** are 256² WebP; portrait index *i* (0-based, the creation
+  screen's glyph order) is file *i + 1*; `manifest.json` lists the file numbers
+  present.
+- **Registering** a file with the game (`ASSETS` / `SURFACE_ASSETS` in
+  `src/data/assets.ts`, `PROP_MODELS`) belongs to the spec that consumes it;
+  keep the boot manifest short (the boot e2e suites delay every request by up
+  to 250 ms under a 5 s expect); per-scene files load lazily.
+- **Replacing** a generated file with a CC0 pack: keep the name, move its row
+  out of the generated table into a hand-written one with the source URL, and
+  drop it from the generator so a rebuild does not overwrite it.
 
 ## 4. Audio
 

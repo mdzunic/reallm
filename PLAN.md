@@ -37,6 +37,15 @@ Space post-apocalyptic ARPG browser game with a hidden simulation plot. Single-p
 
 Specs: SPEC-000 queue and build order; SPEC-001 §4 (allow-list) and §10 (texture packing); SPEC-012 §2, §4.9, §4.10; SPEC-015 §3, §5, §8. (§2, §3, §9, §10, §12)
 
+**R7 — 2026-09-11 (assets generated in Blender, no downloads).** R6-3's hand-made asset drop no longer fetches Kenney, ambientCG or Poly Haven packs. Every model, ground layer, VFX sprite and portrait is generated from code committed under `scripts/assets/blender/`, by Blender 5.2 LTS running headless (`node scripts/assets/blender/build.mjs`; `--preview=<dir>` renders QA contact sheets) — the way the audio set is synthesised by `scripts/assets/audio/`. The files are original work, CC0, deterministic for a given Blender version, and listed in `LICENSES.md` by the build itself; a CC0 pack may still replace any file under the same name. Blender is a tool for rebuilding art only: `npm run check`, the e2e suite and the build factory consume the committed files. Enemies stay procedural at runtime (R1-8). What landed:
+
+1. `models/character.glb` — the rigged salvager: one material on a palette texture (the suit and armour cells take the runtime tint, the visor and lamps glow through an emissive map), 15 bones with rigid skinning, clips `Idle` (first, for the menu's asset spike) · `Run` · `Attack` · `Hit` · `Death`, front facing +Z like every glTF model, so SPEC-019's view turns it with `rotation.y = π/2 − facing`.
+2. `models/ship.glb` (the tug, keeping its sRGB hull map), `fighter`, `interceptor`, `probe`, `station_ring`, `dock`, `cockpit`, `crate` (still the boot manifest's 0.6 m centred crate), and 24 unit props `models/props/<biome>_<kind>_<a|b>.glb` with biome colours in vertex colours and a `Glow` material where something glows.
+3. 13 ground layers `textures/ground/<layer>_albedo.webp` + `<layer>_nr.webp`, seamless, **512²** for both maps — SPEC-018 §4.5 shows 512² already out-resolves the surface camera, and it keeps the set near 2.2 MB; the albedo alpha is height except for `lava_rock` and `flesh`, always slot B, where it is the emissive crack/vein mask.
+4. 10 VFX sprites `textures/sprites/*.webp` and 12 portraits `portraits/01…12.webp` with `manifest.json` (portrait index *i* is file *i + 1*).
+
+Specs: SPEC-001 §10 (sources); SPEC-018 §4.5 (alpha rule) and §4.10 (the files, 512²); SPEC-019 §4.1 (facing, palette material, emissive visor) and §4.8 (the prerequisite is met); SPEC-020 §4.3, §4.6, §4.8 (the files exist; portrait numbering); SPEC-000 (the asset drop is done). (§2, §12)
+
 ---
 
 ## 1. Vision & Inspiration
@@ -71,7 +80,7 @@ Core resources: **oil** (ship fuel), **wheat** (food / HP regen consumables), **
 | Save | **localStorage** (versioned schema) | — | Fully offline; save size is < 100 KB |
 | Tests | **Vitest** + **Playwright** | `vitest ^5.0.0` (released 2026-09-03; fall back to `^4.1.11` only if a blocking bug appears), `@playwright/test` latest | Unit-test pure game logic; a headless Chromium e2e suite (smoke + the factory's per-spec QA tests) |
 | Offline shell | `vite-plugin-pwa` (**M7, build-time only**) | `^1.3.0` | Service worker + manifest = real offline + installable = exempt from Safari 7-day storage eviction |
-| Assets | **Procedural** (terrain, ground textures, sky, effects, UI, **enemies**) + **Kenney.nl CC0** (humans: Mini Characters, GLB with clips; ships/modules/props: Space Kit, Nature Kit, glTF → GLB; VFX sprites: Particle Pack) + **ambientCG / Poly Haven CC0** ground textures as an optional drop-in (R6) | — | No artist needed; every CC0 file is committed by hand with a `LICENSES.md` row |
+| Assets | **Procedural at runtime** (terrain, sky, effects, UI, **enemies**) + **generated in Blender from committed scripts** (`scripts/assets/blender/`: the rigged salvager, ships, station pieces, props, ground layers, VFX sprites, portraits — R7) + **synthesised audio** (`scripts/assets/audio/`) | Blender 5.2 LTS (tool only, for rebuilding art) | No artist and no downloads; every file is original CC0 with a `LICENSES.md` row; a CC0 pack may replace any file under the same name |
 
 Nothing else — no React, no physics engine (arcade physics is enough), no backend, no schema library (hand-written validators).
 
@@ -391,7 +400,7 @@ Storage rules: 3 slots, key per slot plus a `.bak` copy of the previous good sav
 | Mobile perf with Three.js | Pooling, instancing, quality presets from day one (M0); perf budgets in [SPEC-015](https://github.com/mdzunic/reallm-specs/blob/main/specs/015-mobile-performance-pwa.md) |
 | Post-processing and PBR cost on phones (R6) | The pure quality plan of SPEC-017 gates everything: composer off on `low`, ¼-res bloom + FXAA on `medium`, shadow map on `high` only, no half-float → direct path; the cut order under a regression is grain → FXAA → bloom mips → post off, each one field |
 | First-person feel without complex physics | Rail flight model only; cockpit HUD sells immersion |
-| Asset consistency | Kenney CC0 families (Mini Characters, Space Kit, Nature Kit, Particle Pack) for humans, ships, modules, props and VFX sprites; ambientCG / Poly Haven CC0 for ground textures; enemies procedural (sculpted, PBR); one lighting/grade pipeline over everything so procedural and CC0 meshes read as one world (R6) |
+| Asset consistency | One generator library (`scripts/assets/blender/lib/`) builds every model in the same low-poly bevelled style with shared palettes, and one lighting/grade pipeline renders everything, so the salvager, ships, props and the procedural enemies read as one world (R6, R7) |
 | Save loss on iOS (7-day eviction, private mode, quota) | Export/import code, `.bak` slot, `persist()`, PWA install prompt, graceful "storage unavailable" mode |
 | Fresh tooling (Vitest 5 is 3 days old; TS 7 just shipped) | Pin Vitest 5 with the 4.1 fallback documented; stay on TS 6.0 until M7 |
 | Skeletal animation cost on mobile | Only the player + escort NPC are skinned; enemies use procedural transform animation |
