@@ -30,7 +30,7 @@ import {
 } from '@/systems/Flight';
 import { Missions } from '@/systems/Missions';
 import { cumulativeXp, Progression, xpToNext } from '@/systems/Progression';
-import { el, testId } from '@/ui/dom';
+import { el, h, testId } from '@/ui/dom';
 import { Hud } from '@/ui/Hud';
 import { PauseMenu } from '@/ui/PauseMenu';
 import { RotateOverlay } from '@/ui/RotateOverlay';
@@ -46,6 +46,17 @@ const DEMO_CREATION: CharacterCreation = {
   attributes: { might: 3, vigor: 8, agility: 1, tech: 1 },
   difficulty: 'normal',
 };
+
+/**
+ * Dev builds only: the most a skip may simulate — past any trip's
+ * `travelSeconds` at the slowest throttle notch, plus the 90 s holding cap.
+ */
+const DEV_SKIP_LIMIT_SECONDS = 1200;
+
+/** Landed or recalled — read through a call, so a caller's earlier check cannot narrow it. */
+function tripOver(flight: Flight): boolean {
+  return flight.phase === 'arrived' || flight.phase === 'recalled';
+}
 
 export class FlightScene extends UiScene<'flight'> {
   override readonly pausable = true;
@@ -254,6 +265,18 @@ export class FlightScene extends UiScene<'flight'> {
       this.#explosionEl = null;
       this.#skipHint = null;
     });
+
+    // Dev builds only (SPEC-001 §9): a shortcut past the trip. Vite folds
+    // `import.meta.env.DEV` to false in production, so neither the button nor
+    // its handler ships.
+    if (import.meta.env.DEV) {
+      const skipTrip = testId(
+        h('button', { class: 'ui-btn flight-dev-skip', type: 'button', onclick: () => this.#skipToPlanet() }, 'Skip to planet'),
+        'dev-skip-flight',
+      );
+      this.ui.mount(skipTrip, 'hud');
+      this.disposer.add(() => this.ui.unmount(skipTrip));
+    }
 
     // 13-f: the cutscene skips on any key or tap; the fade still runs (AC-102).
     const skip = (): void => {
@@ -472,6 +495,37 @@ export class FlightScene extends UiScene<'flight'> {
       this.services.save.request('landing');
     }
     void this.services.go('surface', { planet: this.#planet.id, firstLanding: this.#firstLanding });
+  }
+
+  /**
+   * Dev builds only: fast-forward the trip — the sky cleared and the shield
+   * topped up before every step, so no rock, ship or ion storm can end it
+   * early — until the flight arrives, then land at once (13-f's instant skip).
+   * The real `update()` runs throughout, so `flight:arrived`, the missions'
+   * timers and the landing's save write are the ones a flown trip makes.
+   * During the landing cutscene it just skips the cutscene.
+   */
+  #skipToPlanet(): void {
+    const flight = this.#flight;
+    if (flight === null || flight.phase === 'recalled') return;
+    const idle: FlightInput = {
+      steerX: 0,
+      steerY: 0,
+      fire: false,
+      aimX: flight.ship.x,
+      aimY: flight.ship.y,
+      throttleUp: false,
+      throttleDown: false,
+      autoFire: false,
+      mouseSteer: false,
+    };
+    const dt = 1 / 60;
+    for (let t = 0; t < DEV_SKIP_LIMIT_SECONDS && !tripOver(flight); t += dt) {
+      flight.hazards.clear();
+      flight.ship.shield = flight.ship.maxShield; // storms only bite through an empty shield (§4.5)
+      flight.update(dt, idle);
+    }
+    this.#landingSkipped = true;
   }
 
   #advanceRecall(dt: number): void {

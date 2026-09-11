@@ -2338,3 +2338,15 @@ button.hud-button {
 .flight-explosion.is-visible {
   opacity: 1;
 }
+
+/* Dev builds only (SPEC-001 §9): the skip-to-planet shortcut, under the HUD's
+   left column, dashed amber so it never passes for a game control. */
+.flight-dev-skip {
+  position: absolute;
+  left: max(12px, env(safe-area-inset-left));
+  top: calc(max(10px, env(safe-area-inset-top)) + 158px);
+  pointer-events: auto;
+  border-style: dashed;
+  border-color: var(--warn);
+  font-size: 14px;
+}
