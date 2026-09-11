@@ -13,6 +13,25 @@
 import { expect, test, type Page } from '@playwright/test';
 import { gameUrl, passGate, start } from './start';
 
+/**
+ * One worker for this file.
+ *
+ * Its last test measures a wall-clock audio ramp — the surface bed fading in
+ * over 1500 ms — while the rest of the file runs the most expensive pages in
+ * the suite: four long surface sessions, one of which SPEC-017 pins to
+ * `quality=medium` and which therefore rasterises the whole post chain in
+ * software here (60–140 ms a frame; `docs/playtest-log.md`, "SPEC-017").
+ * Five of those in `fullyParallel` starve each other, and the bed's gain was
+ * observed sitting at 0.03–0.08 twenty seconds into a fade that takes 1.5 s.
+ * Measured against the same set on `main`, where the same file is a third
+ * cheaper because no preset ran a composer: green there, reproducibly red here.
+ *
+ * The same shape as the ramps `e2e/SPEC-006.spec.ts` serialises, and the same
+ * remedy. No assertion in this file changed, and nothing here is order- or
+ * state-dependent — each test still gets its own page and its own save.
+ */
+test.describe.configure({ mode: 'default' });
+
 const info = async (page: Page): Promise<Record<string, number | string>> =>
   (await page.evaluate(() => window.__reallm.stats())).sceneInfo ?? {};
 
@@ -250,13 +269,11 @@ test('entering Cinder-4 starts the surface bed, and the pause menu ducks it', as
   // in `e2e/SPEC-006.spec.ts` does the same: the scene label goes up when the
   // scene is built, but the *first rendered frame* after it compiles every GPU
   // program the scene needs, and on this container's software rasteriser that
-  // is a synchronous stall of ≈ 0.9 s — several times that when the other
-  // workers in this file are saturating the CPUs. The bed's fade is driven by
-  // `performance.now()` on a `setInterval` (`core/Audio.ts` §4.4), so the stall
-  // blocks the ramp's ticker and this poll's `evaluate` alike, and the window
-  // below ends up measuring the compile instead of the fade. Waiting for the
-  // frames first puts the stall outside the window. No assertion changed; this
-  // is the flake that made the test fail in parallel and pass on its own.
+  // is a synchronous stall of ≈ 0.9 s. The bed's fade is driven by
+  // `performance.now()` on a `setInterval` (`core/Audio.ts` §4.4), so a stall
+  // inside the window below makes it measure the compile rather than the fade.
+  // This keeps the stall outside the window; the file-level single worker
+  // configured at the top is what actually fixed the flake.
   await page.waitForFunction(() => window.__reallm.stats().frame > 5, undefined, { timeout: 60_000 });
 
   const bed = (): Promise<number | null> => page.evaluate(() => (window as unknown as BedProbe).__bedGain());
