@@ -2,7 +2,7 @@
 // user gesture — that is what lets the browser start an AudioContext (E21) —
 // so this suite covers what the player sees before it and what happens after.
 import { expect, test } from '@playwright/test';
-import { awaitGate, COLD_START, frames, passGate, start } from './start';
+import { awaitGate, COLD_START, frames, gameUrl, passGate, start } from './start';
 
 const overlay = '[data-testid="boot-overlay"]';
 const progress = '[data-testid="boot-progress"]';
@@ -25,7 +25,7 @@ test('the overlay shows a progress bar whose width is done/total (AC-19)', async
     await route.continue();
   });
 
-  await page.goto('/');
+  await page.goto(gameUrl('/'));
   // The overlay is built by `main.ts`, so these two waits span cold start.
   await expect(page.locator(overlay)).toBeVisible(COLD_START);
   await expect(page.locator(progress)).toHaveText(/Loading \d+\/\d+/, COLD_START);
@@ -47,7 +47,7 @@ test('the overlay shows a progress bar whose width is done/total (AC-19)', async
 test('TAP TO START appears only after the load, and a click passes the gate (AC-20, AC-21, AC-22)', async ({
   page,
 }) => {
-  await page.goto('/');
+  await page.goto(gameUrl('/'));
   // Before the manifest is in, there is no gate and no scene.
   await expect(page.locator(overlay)).toBeVisible(COLD_START);
 
@@ -61,7 +61,7 @@ test('TAP TO START appears only after the load, and a click passes the gate (AC-
 });
 
 test('a key press anywhere passes the gate (AC-21)', async ({ page }) => {
-  await page.goto('/');
+  await page.goto(gameUrl('/'));
   await awaitGate(page);
   await page.keyboard.press('Space');
   await expect(page.locator(overlay)).toBeHidden();
@@ -69,7 +69,7 @@ test('a key press anywhere passes the gate (AC-21)', async ({ page }) => {
 });
 
 test('a pointerup anywhere in the document passes the gate (AC-21)', async ({ page }) => {
-  await page.goto('/');
+  await page.goto(gameUrl('/'));
   await awaitGate(page);
   // Deliberately not on the control: the whole document is the gesture target.
   await page.mouse.click(5, 5);
@@ -86,7 +86,7 @@ test('later gestures do nothing (02-i, AC-21)', async ({ page }) => {
 });
 
 test('nothing past the gate runs until the gesture arrives (AC-22, AC-23)', async ({ page }) => {
-  await page.goto('/?debug');
+  await page.goto(gameUrl('/?debug'));
   await awaitGate(page);
 
   const events = page.locator('[data-testid="debug-events"]');
@@ -149,7 +149,7 @@ const asked = (page: import('@playwright/test').Page): Promise<string[]> =>
 
 test('the gate asks for the wake lock and shrugs off the refusal (AC-23, 02-f)', async ({ page }) => {
   await stubPlatformRequests(page);
-  await page.goto('/');
+  await page.goto(gameUrl('/'));
   await awaitGate(page);
   expect(await asked(page)).toEqual([]);
 
@@ -166,7 +166,7 @@ test.describe('on Android', () => {
 
   test('the gate also asks for fullscreen (AC-23)', async ({ page }) => {
     await stubPlatformRequests(page);
-    await page.goto('/');
+    await page.goto(gameUrl('/'));
     await awaitGate(page);
     await page.locator(gate).click();
     await expect(page.locator(label)).toHaveText('menu');
@@ -181,7 +181,7 @@ test('a failed asset shows Retry and no gate until the load succeeds (AC-25)', a
     else await route.continue();
   });
 
-  await page.goto('/');
+  await page.goto(gameUrl('/'));
   // Visible, not merely present: the copy is in the markup from the start.
   // Cold-start budget: this is the first DOM wait after the navigation.
   await expect(page.locator('[data-testid="boot-error"]')).toBeVisible(COLD_START);
@@ -196,7 +196,7 @@ test('a failed asset shows Retry and no gate until the load succeeds (AC-25)', a
 });
 
 test('the ?scene= flag is applied after the gate (AC-26)', async ({ page }) => {
-  await page.goto('/?scene=surface&planet=cinder4');
+  await page.goto(gameUrl('/?scene=surface&planet=cinder4'));
   await awaitGate(page);
   // Still nothing: the jump target had to wait for the gesture too.
   await expect(page.locator(label)).toHaveCount(0);

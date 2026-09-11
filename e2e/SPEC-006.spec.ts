@@ -19,7 +19,7 @@
 // §9's device acceptance (AC-10, and the audible half of AC-28) is what covers
 // "a blip is heard on a phone"; nothing headless can stand in for it.
 import { expect, test, type Page } from '@playwright/test';
-import { awaitGate, passGate, start } from './start';
+import { awaitGate, gameUrl, passGate, start } from './start';
 
 const SETTINGS_KEY = 'reallm:settings';
 /** `master 1.0, music 0.7, sfx 1.0` are the defaults of §4.4 (AC-17). */
@@ -207,7 +207,7 @@ function audioWarnings(messages: string[]): string[] {
 async function startWithAudio(page: Page, url = '/?debug'): Promise<void> {
   await installProbe(page);
   await serveAudio(page);
-  await page.goto(url);
+  await page.goto(gameUrl(url));
   await passGate(page);
   await expect(page.locator('[data-testid="scene-label"]')).toBeVisible();
   await page.waitForFunction(() => window.__reallm.audio().unlocked === true);
@@ -216,7 +216,7 @@ async function startWithAudio(page: Page, url = '/?debug'): Promise<void> {
 // -------------------------------------------------------------- the manifest
 
 test('the manifest declares three sfx banks and seven music tracks (AC-3, AC-4, AC-5)', async ({ page }) => {
-  await page.goto('/');
+  await page.goto(gameUrl('/'));
   await awaitGate(page);
   const manifest = await page.evaluate(async () => {
     const { ASSETS } = (await import('/src/data/assets.ts')) as {
@@ -266,7 +266,7 @@ test('play() before the gate returns null and unlocked is false (AC-6)', async (
   page.on('pageerror', (error) => crashes.push(error.message));
 
   await installProbe(page);
-  await page.goto('/');
+  await page.goto(gameUrl('/'));
   await awaitGate(page);
 
   // The bridge exists from module load, so the pre-gesture state is reachable.
@@ -298,7 +298,7 @@ test('the boot tap unlocks, and audio:unlocked is emitted exactly once (AC-7, AC
     if (message.type() === 'debug') events.push(message.text());
   });
 
-  await page.goto('/?debug');
+  await page.goto(gameUrl('/?debug'));
   await awaitGate(page);
   // A double tap is the realistic unhappy path: the gate handler runs twice.
   await page.locator('[data-testid="boot-start"]').click({ clickCount: 2 });
@@ -336,7 +336,7 @@ test('a context that never runs still opens the gate inside a second (AC-7, AC-1
     window.__qaForceState = 'suspended';
   });
 
-  await page.goto('/?debug');
+  await page.goto(gameUrl('/?debug'));
   await awaitGate(page);
   const started = Date.now();
   await page.locator('[data-testid="boot-start"]').click();
@@ -422,7 +422,7 @@ test('preloadMusic resolves whether or not the track loads (AC-27)', async ({ pa
   // ...and with the banks answering, it resolves once they are loaded.
   await page.unroute('**/assets/audio/**');
   await serveAudio(page);
-  await page.goto('/?debug');
+  await page.goto(gameUrl('/?debug'));
   await passGate(page);
   const loaded = await page.evaluate(async () => {
     await window.__reallm.audio().preloadMusic(['menu', 'station', 'flight']);
@@ -464,7 +464,7 @@ test('setBus clamps, ignores NaN, persists and is read back on the next boot (AC
 });
 
 test('unreadable stored bus values fall back to the defaults (AC-17)', async ({ page }) => {
-  await page.goto('/');
+  await page.goto(gameUrl('/'));
   await awaitGate(page);
   const cases = await page.evaluate(async (key) => {
     const { createSettings } = (await import('/src/core/Settings.ts')) as {
@@ -724,7 +724,7 @@ test('music(null) fades out, and a call mid-crossfade never layers a third copy 
 test('a track asked for before the gesture fades in from silence on the tap (AC-26)', async ({ page }) => {
   await installProbe(page);
   await serveAudio(page);
-  await page.goto('/?debug');
+  await page.goto(gameUrl('/?debug'));
   await awaitGate(page);
   // `menu` is what the first scene asks for too, so the ramp that is heard can
   // only be the pending one — the scene's own call is the 06-c no-op.
@@ -1240,7 +1240,7 @@ test('the reactions table is what the game actually hears (AC-38 … AC-50, AC-5
 test('the pause menu ducks the bed and lets go, even when the player quits (AC-51, AC-54)', async ({ page }) => {
   await installProbe(page);
   await serveAudio(page);
-  await page.goto('/?debug&scene=surface&planet=cinder4');
+  await page.goto(gameUrl('/?debug&scene=surface&planet=cinder4'));
   await passGate(page);
   await expect(page.locator('[data-testid="scene-label"]')).toHaveText('surface');
   await expect

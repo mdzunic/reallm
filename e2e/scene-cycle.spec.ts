@@ -45,13 +45,6 @@ test.describe('scene cycling', () => {
   test.use({ reducedMotion: 'reduce' });
 
   test('station ↔ starmap 20 times leaves GPU memory where it started (AC-33, AC-34)', async ({ page }) => {
-    // Forty transitions, each waiting for the frame that draws the scene it
-    // landed in. SPEC-017 put a post-processing chain behind that frame from
-    // `medium` up, and the build container rasterises it in software at
-    // 70–110 ms a frame, so the run no longer fits Playwright's 60 s default.
-    // Nothing about what is asserted changed — only how long it takes to get
-    // there.
-    test.setTimeout(180_000);
     await start(page, '/?debug');
     await expect(page.locator('[data-testid="scene-label"]')).toHaveText('menu');
 

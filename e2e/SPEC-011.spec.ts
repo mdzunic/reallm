@@ -11,7 +11,7 @@
 // `?debug` strip (`surface-hurt`, `surface-spawn-boss`, …); the spawn/elite/
 // kill counters moved into `debugInfo()`.
 import { expect, test, type Page } from '@playwright/test';
-import { passGate, start } from './start';
+import { gameUrl, passGate, start } from './start';
 
 const info = async (page: Page): Promise<Record<string, number | string>> =>
   (await page.evaluate(() => window.__reallm.stats())).sceneInfo ?? {};
@@ -239,7 +239,7 @@ test('entering Cinder-4 starts the surface bed, and the pause menu ducks it', as
       return first === undefined ? null : Number(first._node.gain.value.toFixed(4));
     };
   });
-  await page.goto('/?debug&scene=surface&planet=cinder4');
+  await page.goto(gameUrl('/?debug&scene=surface&planet=cinder4'));
   await passGate(page);
   await expect(page.locator('[data-testid="scene-label"]')).toHaveText('surface');
 

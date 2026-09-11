@@ -194,12 +194,46 @@ export async function passGate(page: Page): Promise<void> {
 }
 
 /**
+ * The quality preset a page gets when its URL does not name one.
+ *
+ * The product default is `medium` (SPEC-002 D-G) and every suite used to run
+ * there. SPEC-017 put a post-processing chain behind `Renderer.render()` from
+ * `medium` up, and this container has no GPU at all: Chromium falls back to
+ * SwiftShader and rasterises the chain's sixteen full-screen passes on the CPU,
+ * which costs 60–140 ms a frame instead of 16 (the measurements are in
+ * `docs/playtest-log.md` under "SPEC-017"). Two things follow from that, and
+ * neither of them is about the code under test:
+ *
+ * - the fixed-step loop hits its five-steps-per-frame ceiling (SPEC-002 §4.2),
+ *   so the *simulation* advances more slowly than the wall clock and every
+ *   suite that waits on an in-game timer waits several times longer;
+ * - five Playwright workers doing that at once starve each other's animation
+ *   frames, which turns the wait into a multiple again.
+ *
+ * So a suite that is not about the renderer runs on `low`, which takes the
+ * direct path (`post: 'off'`) and is exactly as cheap as the whole game was
+ * before SPEC-017. The chain is not left untested by this: `post-chain.spec.ts`
+ * exercises it on the menu, the surface and the flight scene, and
+ * `resize.spec.ts`, `context-loss.spec.ts` and `stats-overlay.spec.ts` each
+ * name the preset they need. A preset already in the URL always wins, and
+ * `?quality=` is never persisted (SPEC-002 AC-67), so nothing leaks between
+ * tests.
+ */
+export const E2E_PRESET = 'low';
+
+/** `url` with `quality=` filled in, unless it already names one. */
+export function gameUrl(url: string): string {
+  if (/[?&]quality=/.test(url)) return url;
+  return `${url}${url.includes('?') ? '&' : '?'}quality=${E2E_PRESET}`;
+}
+
+/**
  * Navigate, pass the gate, and wait until a scene is on screen and its
  * transition has settled — the fade still runs after the label appears
  * (SPEC-003 AC-14), and a `go()` issued during it would be refused (D-2).
  */
 export async function start(page: Page, url = '/'): Promise<void> {
-  await page.goto(url);
+  await page.goto(gameUrl(url));
   await passGate(page);
   await expect(page.locator('[data-testid="scene-label"]')).toBeVisible();
   await expect(page.locator('[data-testid="transition-fade"]')).toHaveCSS('pointer-events', 'none');

@@ -69,6 +69,29 @@ test.describe('the post chain', () => {
     expect(high.tris - low.tris).toBe(15);
   });
 
+  test('runs over the real scenes, not only the menu backdrop', async ({ page }) => {
+    // The gameplay suites run on `low` (`e2e/start.ts`), so this is where the
+    // composer meets the two scenes that actually load something: the surface,
+    // with its lighting rig and blob shadows, and the trip, with its sky window
+    // and planet. Both have to come up and keep drawing through the chain.
+    test.setTimeout(180_000);
+    for (const scene of ['surface', 'flight'] as const) {
+      await start(page, `/?debug&quality=medium&scene=${scene}&planet=cinder4`);
+      await expect(page.locator('[data-testid="scene-label"]')).toHaveText(scene);
+      const from = await page.evaluate(() => window.__reallm.stats().frame);
+      await expect
+        .poll(async () => (await page.evaluate(() => window.__reallm.stats().frame)) - from, { timeout: 60_000 })
+        .toBeGreaterThan(10);
+      const stats = await page.evaluate(() => window.__reallm.stats());
+      expect(stats.preset, scene).toBe('medium');
+      // Sixteen quads on top of whatever the scene itself draws, and the scene
+      // is still drawing: a chain that had fallen over would leave one or the
+      // other of these at the floor.
+      expect(stats.drawCalls, scene).toBeGreaterThan(16);
+      expect(stats.triangles, scene).toBeGreaterThan(16);
+    }
+  });
+
   test('the chain survives a scene change without growing (17-l)', async ({ page }) => {
     await start(page, '/?debug&quality=medium');
     const menu = await page.evaluate(() => window.__reallm.stats().drawCalls);

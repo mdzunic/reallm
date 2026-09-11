@@ -190,13 +190,14 @@ async function frameAndRenders(page: Page): Promise<{ frame: number; renders: nu
  * Wait until the loop has advanced past `frames` animation frames, and answer
  * the reading that spans them.
  *
- * The sample used to be a flat second, which assumed a ~60 Hz frame. SPEC-017
- * put a post-processing chain behind `Renderer.render()` from `medium` up, and
- * this container has no GPU: sixteen full-screen passes at 720p cost the
- * software rasteriser 70–110 ms each frame, so a second buys ten frames, not
- * sixty. The claim being tested is a *ratio* of renders to frames, which the
- * frame rate does not enter — so the window is counted in frames and the
- * assertions below are untouched.
+ * The sample used to be a flat second, which assumed a ~60 Hz frame. `high`
+ * cannot hold one here: SPEC-017 put a post-processing chain behind
+ * `Renderer.render()` and this container has no GPU, so its sixteen
+ * full-screen passes at 720p cost the software rasteriser ~110 ms a frame and
+ * a second buys nine frames, not sixty. The claim being tested is a *ratio* of
+ * renders to frames, which the frame rate does not enter — so the window is
+ * counted in frames and the assertions are untouched. `low` above takes the
+ * direct path and still keeps its 60 Hz second.
  */
 async function overFrames(
   page: Page,
@@ -214,20 +215,17 @@ test('quality.targetFps 30 skips every second render, updates untouched (AC-57)'
   await start(page, '/?debug&quality=low');
   expect((await page.evaluate(() => window.__reallm.stats())).preset).toBe('low');
 
-  const { frames, renders } = await overFrames(page, 20);
+  const before = await frameAndRenders(page);
+  await page.waitForTimeout(1000);
+  const after = await frameAndRenders(page);
+
+  const frames = after.frame - before.frame;
+  const renders = after.renders - before.renders;
   expect(frames).toBeGreaterThan(20); // the loop really ran
   expect(renders / frames).toBeGreaterThan(0.4);
   expect(renders / frames).toBeLessThan(0.6);
-  // The loop is not clamped to `targetFps` — only the render is halved, which
-  // is what the ratio above pins. This floor is a sanity check on the loop
-  // rather than a performance claim: `npm run e2e` puts five workers on this
-  // container's ten cores with no GPU at all, and since SPEC-017 put a post
-  // chain behind `Renderer.render()` the sibling pages rasterise sixteen
-  // full-screen passes a frame in software, which starves every other page's
-  // animation frames (measured: a `low` page drops from 60 fps alone to ~20
-  // beside four of them). `low` itself takes the direct path and is exactly as
-  // cheap as it was before.
-  expect((await page.evaluate(() => window.__reallm.stats())).fps).toBeGreaterThan(15);
+  // The fixed updates kept their own rate: a second of frames at ~60 Hz.
+  expect((await page.evaluate(() => window.__reallm.stats())).fps).toBeGreaterThan(40);
 });
 
 test('the other presets render every frame (AC-57)', async ({ page }) => {
@@ -250,26 +248,6 @@ test('the backtick key toggles it on desktop (AC-34)', async ({ page }) => {
   await expect(panel).toBeVisible();
 });
 
-/**
- * Tap the version label `times`, as fast as a thumb does it.
- *
- * `locator.click()` waits for the element to be stable across two animation
- * frames  before each click; SPEC-017 put a post-processing chain behind
- * `Renderer.render()` from `medium` up, and on this container's software
- * rasteriser a frame costs 70–110 ms, so those waits can outlast the 2 s that
- * `Game` allows between taps (`VERSION_TAP_WINDOW_MS`) and the gesture never
- * completes. A mouse click at the measured centre still goes through the
- * browser's own hit testing, so anything covering the label swallows the tap
- * exactly as it would for a player — which is the part that matters here.
- */
-async function tapVersionLabel(page: Page, times: number): Promise<void> {
-  const box = await page.locator('[data-testid="version-label"]').boundingBox();
-  expect(box).not.toBeNull();
-  const x = (box?.x ?? 0) + (box?.width ?? 0) / 2;
-  const y = (box?.y ?? 0) + (box?.height ?? 0) / 2;
-  for (let i = 0; i < times; i++) await page.mouse.click(x, y);
-}
-
 test('five taps on the version label toggle it, and the counter resets (AC-35)', async ({ page }) => {
   await start(page);
   const panel = page.locator('.overlay-debug');
@@ -277,13 +255,13 @@ test('five taps on the version label toggle it, and the counter resets (AC-35)',
   await expect(panel).toHaveCount(0); // no ?debug and showFps is false
   await expect(label).toHaveCSS('pointer-events', 'auto');
 
-  await tapVersionLabel(page, 5);
+  for (let tap = 0; tap < 5; tap++) await label.click();
   await expect(panel).toBeVisible();
 
   // Four taps, a pause longer than the window, then one more: no toggle.
-  await tapVersionLabel(page, 4);
+  for (let tap = 0; tap < 4; tap++) await label.click();
   await page.waitForTimeout(2200);
-  await tapVersionLabel(page, 1);
+  await label.click();
   await expect(panel).toBeVisible();
 });
 
