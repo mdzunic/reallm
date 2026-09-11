@@ -72,8 +72,15 @@ export abstract class UiScene<K extends SceneId> implements Scene<K> {
   /**
    * SPEC-017 §4.4: build an environment map, hand it to the scene, and free it
    * on exit — the owner is whoever built it, and nothing else touches it (D-10).
+   *
+   * Gated on `quality.ibl`, which is what PLAN §9 scopes image-based lighting
+   * to ("on `medium` and `high`") and what the `ibl` row exists to carry. On
+   * `low` the scene is lit by its lights alone and pays for neither the PMREM
+   * chain nor an env-map variant of every material — the same trade §4.4 spells
+   * out for the surface. `docs/BUGS.md` records the reading.
    */
   protected useEnvironment(params: SkyParams, intensity: number): void {
+    if (!this.services.renderer.quality.ibl) return;
     const texture = buildEnvironment(params);
     this.scene.environment = texture;
     this.scene.environmentIntensity = intensity;

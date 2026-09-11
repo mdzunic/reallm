@@ -290,7 +290,7 @@ export class FlightView {
   readonly #maxParticles: number;
   #nextParticle = 0;
 
-  readonly #environment: THREE.DataTexture;
+  readonly #environment: THREE.DataTexture | null = null;
   readonly #fogDensity: number;
   #shake = 0;
   #landing = 0;
@@ -322,9 +322,13 @@ export class FlightView {
     // sky, so space gets a direction; the environment map below carries the
     // speculars a warm key and a blue rim cannot.
     scene.add(new THREE.HemisphereLight(sky, 0x101418, 0.4));
-    this.#environment = buildEnvironment(skyParamsFor(planet.surface.palette));
-    scene.environment = this.#environment;
-    scene.environmentIntensity = FLIGHT_ENVIRONMENT_INTENSITY;
+    // PLAN §9 scopes image-based lighting to `medium` and `high`; `low` flies
+    // on the key, the rim and the hemisphere alone.
+    if (quality.ibl) {
+      this.#environment = buildEnvironment(skyParamsFor(planet.surface.palette));
+      scene.environment = this.#environment;
+      scene.environmentIntensity = FLIGHT_ENVIRONMENT_INTENSITY;
+    }
     const key = new THREE.DirectionalLight(0xfff2e0, 2.2);
     key.position.copy(KEY_DIRECTION).multiplyScalar(10);
     scene.add(key);
@@ -496,7 +500,7 @@ export class FlightView {
     // D-10: clear the reference, then free the texture — three drops the PMREM
     // it derived from it on the dispose event.
     this.#scene.environment = null;
-    this.#environment.dispose();
+    this.#environment?.dispose();
     this.#scene.fog = null;
     this.#scene.background = null;
   }

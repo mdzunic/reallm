@@ -101,3 +101,29 @@ preset table.
 
 **No criterion contradicts PLAN.** Nothing was deviated from and no design
 change was made; this note exists so the check itself is on the record.
+
+### 4a. SPEC-017 AC-67 — which presets get image-based lighting
+
+AC-67 reads: "surface `scene.environment = env; scene.environmentIntensity = 0.6`
+only when `quality.ibl`; menu, creation, station and star map use `NEUTRAL_SKY`
+at 0.9; flight uses its planet's params at 0.5." Taken word for word, the
+`quality.ibl` gate belongs to the surface clause alone and the other five scenes
+would take an environment on **every** preset, `low` included. The intake's own
+ambiguity list flagged this criterion.
+
+`PLAN.md` §9 settles it: the quality presets carry "the render plan (R6):
+post-processing off / ¼-res bloom + FXAA / ½-res bloom + MSAA, shadow map on
+`high` only, **image-based lighting on `medium` and `high`**". `QUALITY.low.ibl`
+is `false` for exactly that reason, and a row that nothing reads is a row that
+lies.
+
+**Implemented:** every scene's environment is gated on `quality.ibl`, with the
+params and intensities AC-67 gives (`NEUTRAL_SKY` at 0.9 for the four hub
+scenes, the planet's params at 0.6 on the surface and 0.5 in flight). `low`
+therefore runs with no environment map anywhere, which is also what makes it the
+cheap preset the e2e suite runs its gameplay on: assigning one costs ≈ 0.9 s of
+shader compilation on the first rendered frame of a scene on this container's
+software rasteriser.
+
+Recorded here rather than silently decided, because the other reading is
+available in the text.
