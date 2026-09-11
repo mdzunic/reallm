@@ -246,6 +246,18 @@ test('entering Cinder-4 starts the surface bed, and the pause menu ducks it', as
   await page.goto(gameUrl('/?debug&scene=surface&planet=cinder4'));
   await passGate(page);
   await expect(page.locator('[data-testid="scene-label"]')).toHaveText('surface');
+  // …and until the scene is actually drawing, for the reason `startWithAudio`
+  // in `e2e/SPEC-006.spec.ts` does the same: the scene label goes up when the
+  // scene is built, but the *first rendered frame* after it compiles every GPU
+  // program the scene needs, and on this container's software rasteriser that
+  // is a synchronous stall of ≈ 0.9 s — several times that when the other
+  // workers in this file are saturating the CPUs. The bed's fade is driven by
+  // `performance.now()` on a `setInterval` (`core/Audio.ts` §4.4), so the stall
+  // blocks the ramp's ticker and this poll's `evaluate` alike, and the window
+  // below ends up measuring the compile instead of the fade. Waiting for the
+  // frames first puts the stall outside the window. No assertion changed; this
+  // is the flake that made the test fail in parallel and pass on its own.
+  await page.waitForFunction(() => window.__reallm.stats().frame > 5, undefined, { timeout: 60_000 });
 
   const bed = (): Promise<number | null> => page.evaluate(() => (window as unknown as BedProbe).__bedGain());
 
