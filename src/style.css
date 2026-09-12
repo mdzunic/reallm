@@ -70,6 +70,8 @@ body {
 }
 
 /* Panels are interactive, so they opt back into pointer events. */
+/* SPEC-020 §4.5 dresses these in the same glass as `.panel`; nothing about the
+   box moves. */
 .overlay-panel {
   position: fixed;
   left: 50%;
@@ -77,9 +79,14 @@ body {
   transform: translate(-50%, -50%);
   display: none;
   padding: 16px 20px;
-  border: 1px solid #22303c;
+  border: 1px solid var(--panel-edge);
   border-radius: 8px;
-  background: #111820;
+  background: var(--panel-glass);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+  box-shadow:
+    inset 0 0 0 1px var(--edge-glow),
+    0 8px 24px rgba(0, 0, 0, 0.45);
   pointer-events: auto;
   text-align: center;
   z-index: 30;
@@ -445,6 +452,18 @@ button.slot-button {
   --panel-edge: #22303c;
   --ink: #e6edf3;
   --ink-dim: #8a97a3;
+
+  /* SPEC-020 §4.5 — the dark sci-fi theme (*initial tuning*). Every rule below
+     is expressed through these, so a retheme is a token swap and never a
+     selector, size, spacing or z-index change. */
+  --panel-glass: rgba(14, 20, 28, 0.78);
+  --edge-glow: rgba(76, 154, 255, 0.35);
+  --accent: #4c9aff;
+  --accent-2: #f5a623;
+  --bar-hp: linear-gradient(90deg, #ff5a4a, #e5484d);
+  --bar-shield: linear-gradient(90deg, #7fc4ff, #4c9aff);
+  --bar-xp: linear-gradient(90deg, #ffd06a, #f5a623);
+  --text-glow: 0 0 12px rgba(76, 154, 255, 0.45);
 }
 
 /* Font floor 14 px (AC-107); larger sizes clamp with the viewport (AC-60). */
@@ -452,9 +471,10 @@ button.slot-button {
   font-size: clamp(14px, 1.6vmin + 8px, 18px);
 }
 
-/* Visible focus for keyboard players (AC-12); never removed, only styled. */
+/* Visible focus for keyboard players (AC-12); never removed, only styled.
+   §4.5: the ring is the accent now — the same blue, named for the theme. */
 #ui :focus-visible {
-  outline: 2px solid var(--shield);
+  outline: 2px solid var(--accent);
   outline-offset: 2px;
 }
 
@@ -471,23 +491,52 @@ button.slot-button {
 
 .ui-fade { z-index: 60; }
 
-/* Anything interactive opts back into pointer events (SPEC-014 §2). */
+/* Anything interactive opts back into pointer events (SPEC-014 §2).
+   §4.5: smoked glass with a lit inner edge — colour only, no geometry. */
 .panel {
   pointer-events: auto;
-  background: var(--panel);
+  background: var(--panel-glass);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
   border: 1px solid var(--panel-edge);
   border-radius: 8px;
+  box-shadow:
+    inset 0 0 0 1px var(--edge-glow),
+    0 8px 24px rgba(0, 0, 0, 0.45);
   color: var(--ink);
 }
 
-/* Buttons are real buttons with a 44 px floor (AC-108, 14-f). */
+/* 20-a: the blur is the one expensive part of the theme, so it goes when the
+   player asked for less transparency and on the `low` preset, which is the
+   same class contract `reduce-motion` uses. The panel stays opaque either way,
+   so nothing behind it ever shows through unblurred. */
+@media (prefers-reduced-transparency: reduce) {
+  .panel,
+  .overlay-panel,
+  .toast {
+    background: var(--panel);
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+  }
+}
+
+html.quality-low .panel,
+html.quality-low .overlay-panel,
+html.quality-low .toast {
+  background: var(--panel);
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+}
+
+/* Buttons are real buttons with a 44 px floor (AC-108, 14-f).
+   §4.5: a lit sheen over the glass, and the accent for primary. */
 .ui-btn {
   min-height: 44px;
   min-width: 44px;
   padding: 8px 16px;
   border: 1px solid var(--panel-edge);
   border-radius: 6px;
-  background: #1a232e;
+  background: linear-gradient(180deg, var(--edge-glow), transparent), var(--panel-glass);
   color: var(--ink);
   font: inherit;
   cursor: pointer;
@@ -500,8 +549,8 @@ button.slot-button {
 }
 
 .ui-btn.is-primary {
-  background: #24435e;
-  border-color: var(--shield);
+  background: linear-gradient(180deg, var(--edge-glow), var(--edge-glow)), var(--panel-glass);
+  border-color: var(--accent);
 }
 
 .ui-btn.is-danger {
@@ -521,11 +570,15 @@ button.slot-button {
   z-index: 55;
 }
 
+/* §4.5: toasts wear the same glass as the panels. */
 .toast {
   padding: 8px 14px;
   border-radius: 6px;
-  background: var(--panel);
+  background: var(--panel-glass);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
   border: 1px solid var(--panel-edge);
+  box-shadow: inset 0 0 0 1px var(--edge-glow);
   color: var(--ink);
   max-width: 80vw;
   animation: toast-in 150ms ease-out;
@@ -664,11 +717,14 @@ html.reduce-motion .sheet {
   gap: 6px;
 }
 
+/* §4.5: the track keeps its size; the 1 px inset darkens its lip so a full
+   bar still reads as a bar. */
 .bar {
   width: 140px;
   height: 10px;
   border-radius: 5px;
   background: rgba(255, 255, 255, 0.12);
+  box-shadow: inset 0 0 0 1px var(--panel-edge);
   overflow: hidden;
 }
 
@@ -680,11 +736,13 @@ html.reduce-motion .sheet {
   transform: scaleX(0);
 }
 
-.bar-hp { background: var(--hp); }
-.bar-xp { background: var(--good); height: 100%; }
-.bar-shield { background: var(--shield); }
+/* §4.5: the three gradient tokens; hull and boss keep their flat hues, which
+   are still the colourblind-safe pair the glyphs back up (AC-68). */
+.bar-hp { background: var(--bar-hp); }
+.bar-xp { background: var(--bar-xp); height: 100%; }
+.bar-shield { background: var(--bar-shield); }
 .bar-hull { background: var(--warn); }
-.bar-boss { background: var(--hp); }
+.bar-boss { background: var(--bar-hp); }
 
 .bar-row:has(.bar-xp) .bar { height: 4px; }
 
@@ -693,6 +751,11 @@ html.reduce-motion .sheet {
 .hud-tokens {
   font-size: 14px;
   text-shadow: 0 1px 2px rgba(0, 0, 0, 0.8);
+}
+
+/* §4.5: the token count is the HUD's one warm accent. */
+.hud-tokens {
+  color: var(--accent-2);
 }
 
 .res {
@@ -1297,7 +1360,8 @@ html.reduce-motion .overlay-ending-escape .ending-prompt {
   font-size: clamp(34px, 8vmin, 64px);
   letter-spacing: 0.18em;
   color: var(--ink);
-  text-shadow: 0 0 24px rgba(76, 154, 255, 0.55);
+  /* §4.5: the title's halo is the theme's, not its own. */
+  text-shadow: var(--text-glow);
   user-select: none;
   -webkit-user-select: none;
 }
