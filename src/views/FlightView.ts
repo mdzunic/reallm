@@ -686,6 +686,11 @@ export class FlightView {
   dispose(): void {
     this.#camera.remove(this.#cockpit);
     disposeObject3D(this.#cockpit);
+    // The flare owns two framebuffer textures and its elements' own maps, and
+    // `disposeObject3D`'s geometry/material walk reaches none of them — only
+    // its own `dispose()` does (D-10: the owner frees what it built).
+    this.#flare?.dispose();
+    this.#flare = null;
     // D-10: clear the reference, then free the texture — three drops the PMREM
     // it derived from it on the dispose event.
     this.#scene.environment = null;

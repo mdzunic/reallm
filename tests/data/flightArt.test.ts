@@ -2,7 +2,7 @@
 // public/assets, every planet has its art, and none of it rides the boot
 // manifest (the boot suites delay every boot request — README §3).
 import { describe, expect, it } from 'vitest';
-import { ASSETS, FLIGHT_ASSETS, PLANET_ART } from '@/data/assets';
+import { ASSETS, FLIGHT_ASSETS, HUB_ASSETS, PLANET_ART } from '@/data/assets';
 import { PLANET_IDS } from '@/data/ids';
 
 /** Paths as the game requests them (`assets/…`), found on disk by Vite's glob. */
@@ -32,5 +32,26 @@ describe('flight art manifest (PLAN R8)', () => {
   it('keeps the flight models out of the boot manifest', () => {
     for (const id of Object.keys(FLIGHT_ASSETS.models)) expect(Object.keys(ASSETS.models)).not.toContain(id);
     for (const id of Object.keys(FLIGHT_ASSETS.textures)) expect(Object.keys(ASSETS.textures)).not.toContain(id);
+  });
+});
+
+// SPEC-020 §4.4, §4.8. The hub set is the same bargain as the flight set: the
+// files ship, the scenes fetch them on `enter()`, and PLAN R6-5's five-file
+// boot manifest does not grow by two models and a texture.
+describe('hub backdrop manifest (SPEC-020 §4.8)', () => {
+  it('lists only files that ship', () => {
+    const urls = [...Object.values(HUB_ASSETS.models), ...Object.values(HUB_ASSETS.textures).map((entry) => entry.url)];
+    expect(urls).toHaveLength(3);
+    for (const url of urls) expect(ON_DISK.has(url), url).toBe(true);
+  });
+
+  it('stays out of the boot manifest, which is still five files (PLAN R6-5)', () => {
+    for (const id of Object.keys(HUB_ASSETS.models)) expect(Object.keys(ASSETS.models)).not.toContain(id);
+    for (const id of Object.keys(HUB_ASSETS.textures)) expect(Object.keys(ASSETS.textures)).not.toContain(id);
+    expect(Object.keys(ASSETS.models).length + Object.keys(ASSETS.textures).length).toBe(5);
+  });
+
+  it('ships the twelve portraits and the manifest the resolver reads (AC-28)', () => {
+    for (let n = 1; n <= 12; n++) expect(ON_DISK.has(`assets/portraits/${String(n).padStart(2, '0')}.webp`), String(n)).toBe(true);
   });
 });

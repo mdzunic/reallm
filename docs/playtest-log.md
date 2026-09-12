@@ -442,7 +442,7 @@ centre — the `#9fe3ff` quad, and nothing else in the scene is that colour.
 
 ### Checklist
 
-- [x] `npm run check` green (typecheck, 892 unit tests, production build)
+- [x] `npm run check` green (typecheck, 895 unit tests, production build)
 - [x] `e2e/flight-env.spec.ts` (new), `e2e/SPEC-014.spec.ts`,
       `e2e/stats-overlay.spec.ts`, `e2e/asset-spike.spec.ts`,
       `e2e/boot-assets.spec.ts`, `e2e/scene-cycle.spec.ts`,

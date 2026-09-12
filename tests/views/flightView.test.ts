@@ -313,6 +313,16 @@ describe('FlightView fx (SPEC-020 §4.3)', () => {
 
     const off = setup({ ...QUALITY, post: 'off' } as unknown as QualitySettings);
     expect(off.scene.children.some((node) => node instanceof THREE.DirectionalLight && node.children.length > 0)).toBe(false);
+
+    // The flare's framebuffer textures and its elements' maps are outside the
+    // geometry/material walk `disposeObject3D` does, so the view frees them.
+    const releasable = flare as unknown as { dispose: () => void };
+    let released = false;
+    releasable.dispose = (): void => {
+      released = true;
+    };
+    lit.view.dispose();
+    expect(released).toBe(true);
   });
 
   it('shifts the sky window toward the planet accent during an ion storm (AC-14, 20-g)', () => {
