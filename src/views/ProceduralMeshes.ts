@@ -248,7 +248,8 @@ export class EnemyMeshes {
     return n;
   }
 
-  sync(enemies: Pool<EnemyEntity>, time: number): void {
+  /** `ground` (SPEC-018 §4.3) lifts every part onto the height field; optional so callers without terrain keep compiling. */
+  sync(enemies: Pool<EnemyEntity>, time: number, ground?: (x: number, z: number) => number): void {
     for (const recipe of this.#recipes.values()) recipe.count = 0;
 
     for (let i = 0; i < enemies.size; i++) {
@@ -302,7 +303,7 @@ export class EnemyMeshes {
           case 'crown':
             break;
         }
-        scratchPos.set(e.x, y, e.z);
+        scratchPos.set(e.x, y + (ground === undefined ? 0 : ground(e.x, e.z)), e.z);
         scratchQuat.setFromEuler(scratchEuler.set(swing, yaw, 0, 'YXZ'));
         scratchScale.setScalar(partScale);
         scratchMatrix.compose(scratchPos, scratchQuat, scratchScale);

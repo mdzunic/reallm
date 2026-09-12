@@ -1,21 +1,23 @@
-// SPEC-017 §6 — the surface lighting rig, the shadow map, the blob layer and
-// the planet grade, pinned in node. The scene graph is plain three.js objects,
-// so what the GPU would be handed is readable here: which lights exist, what
-// casts, how many blobs a frame writes, and what a preset change does to all of
-// it. The browser run confirms it looks right; this suite pins the mechanics a
-// screenshot cannot.
+// SPEC-017 §6 and SPEC-018 — the surface rig, shadow map, blob layer, planet
+// grade, and now the environment: terrain off the shared height field, entity
+// Y in sync(), the weather grade and the lightning gate. The scene graph is
+// plain three.js objects, so what the GPU would be handed is readable here.
 import { describe, expect, it } from 'vitest';
 import * as THREE from 'three';
 import { Pool } from '@/core/Pool';
+import { hash01 } from '@/core/Noise';
+import { hash32 } from '@/core/Rng';
 import { QUALITY, type QualitySettings } from '@/core/Quality';
 import { ENEMIES, PLANETS, type PlanetDef } from '@/data/index';
 import { makeEnemy, type EnemyEntity } from '@/entities/Enemy';
 import { makePlayer } from '@/entities/Player';
 import { makeProjectile, type ProjectileEntity } from '@/entities/Projectile';
 import { INSTANCES_PER_PART } from '@/views/ProceduralMeshes';
+import { groundLayer } from '@/views/ProceduralTextures';
 import { SurfaceView, type SurfaceFrame, type ViewLayout, type ViewPickup } from '@/views/SurfaceView';
 
 const LAYOUT: ViewLayout = {
+  hash: 0x18a7c3d1,
   halfSize: 60,
   pois: [
     { kind: 'landing_pad', x: 0, z: 0, radius: 5 },
@@ -79,6 +81,15 @@ function directionals(scene: THREE.Scene): THREE.DirectionalLight[] {
   return found;
 }
 
+function hemisphere(scene: THREE.Scene): THREE.HemisphereLight {
+  let found: THREE.HemisphereLight | null = null;
+  scene.traverse((node) => {
+    if ((node as THREE.HemisphereLight).isHemisphereLight === true) found = node as THREE.HemisphereLight;
+  });
+  if (found === null) throw new Error('no hemisphere light');
+  return found;
+}
+
 /** The enemy part meshes: faceted, and sized for the per-part instance cap. */
 function enemyParts(scene: THREE.Scene): THREE.InstancedMesh[] {
   const found: THREE.InstancedMesh[] = [];
@@ -102,10 +113,34 @@ function blobLayer(scene: THREE.Scene): THREE.InstancedMesh {
   return found;
 }
 
-describe('the surface rig (SPEC-017 §4.5, AC-70, AC-71)', () => {
+/** The §4.1 sun direction for a planet's look, matching the view's formula. */
+function sunDir(planet: PlanetDef): { x: number; y: number; z: number } {
+  const sun = planet.surface.look.light.sun;
+  const azimuth = (sun.azimuth * Math.PI) / 180;
+  const elevation = (sun.elevation * Math.PI) / 180;
+  return {
+    x: Math.cos(elevation) * Math.sin(azimuth),
+    y: Math.sin(elevation),
+    z: Math.cos(elevation) * Math.cos(azimuth),
+  };
+}
+
+describe('the surface rig (SPEC-017 §4.5, SPEC-018 §4.1)', () => {
   it('is a hemisphere, a warm key, a cool rim and a torch — and no ambient', () => {
     const { scene, view } = setup();
     expect(lights(scene)).toEqual(['DirectionalLight', 'DirectionalLight', 'HemisphereLight', 'PointLight']);
+    view.dispose();
+  });
+
+  it('reads the look: sun colour and intensity, hemisphere sky/ground/ambient', () => {
+    const { scene, view } = setup();
+    const look = PLANETS.cinder4.surface.look;
+    const key = directionals(scene).find((light) => light.intensity === look.light.sun.intensity);
+    expect(key).toBeDefined();
+    expect(key?.color.getHexString()).toBe(new THREE.Color(look.light.sun.color).getHexString());
+    const hemi = hemisphere(scene);
+    expect(hemi.intensity).toBeCloseTo(look.light.ambient, 6);
+    expect(hemi.color.getHexString()).toBe(new THREE.Color(look.light.sky).getHexString());
     view.dispose();
   });
 
@@ -121,15 +156,15 @@ describe('the surface rig (SPEC-017 §4.5, AC-70, AC-71)', () => {
     view.dispose();
   });
 
-  it('walks the key and its target with the player', () => {
+  it('walks the key with the player along the look sun direction × 60 (§4.1)', () => {
     const { scene, view } = setup();
     view.sync(frame(new Pool<EnemyEntity>(() => makeEnemy())));
-    // The warm key is the one that moved off its fixed rim position.
-    const key = directionals(scene).find((light) => light.position.x > 0);
+    const dir = sunDir(PLANETS.cinder4);
+    const key = directionals(scene).find((light) => light.intensity === PLANETS.cinder4.surface.look.light.sun.intensity);
     expect(key).toBeDefined();
-    expect(key?.position.x).toBeCloseTo(2 + 28, 5); // player.x + the §4.5 offset
-    expect(key?.position.y).toBeCloseTo(46, 5);
-    expect(key?.position.z).toBeCloseTo(-2 + 18, 5);
+    expect(key?.position.x).toBeCloseTo(2 + dir.x * 60, 5); // player.x + dir × 60
+    expect(key?.position.y).toBeCloseTo(dir.y * 60, 5);
+    expect(key?.position.z).toBeCloseTo(-2 + dir.z * 60, 5);
     expect(key?.target.position.x).toBeCloseTo(2, 5);
     expect(key?.target.position.z).toBeCloseTo(-2, 5);
     // The target has to be in the graph or three never updates its matrix.
@@ -279,8 +314,8 @@ describe('the planet grade (SPEC-017 §4.1, AC-81)', () => {
   });
 });
 
-describe('materials (SPEC-017 §4.7, AC-84 … AC-86)', () => {
-  it('is standard, basic or points all the way down', () => {
+describe('materials (SPEC-017 §4.7, SPEC-018)', () => {
+  it('is standard or basic all the way down — the point cloud is gone', () => {
     const { scene, view } = setup();
     const kinds = new Set<string>();
     scene.traverse((node) => {
@@ -288,7 +323,7 @@ describe('materials (SPEC-017 §4.7, AC-84 … AC-86)', () => {
       if (material === undefined) return;
       for (const entry of Array.isArray(material) ? material : [material]) kinds.add(entry.type);
     });
-    expect([...kinds].sort()).toEqual(['MeshBasicMaterial', 'MeshStandardMaterial', 'PointsMaterial']);
+    expect([...kinds].sort()).toEqual(['MeshBasicMaterial', 'MeshStandardMaterial']);
     view.dispose();
   });
 
@@ -301,14 +336,13 @@ describe('materials (SPEC-017 §4.7, AC-84 … AC-86)', () => {
     let capsule: THREE.MeshStandardMaterial | undefined;
     scene.traverse((node) => {
       const material = (node as THREE.Mesh).material as THREE.MeshStandardMaterial | undefined;
-      if (material?.type === 'MeshStandardMaterial' && material.transparent) capsule = material;
+      if (material?.type === 'MeshStandardMaterial' && material.transparent && material.opacity < 1) capsule = material;
     });
     expect(capsule).toBeDefined();
-    expect(capsule?.opacity).toBeLessThan(1);
     view.dispose();
   });
 
-  it('the ground receives, the obstacles cast, and the landing pad does not', () => {
+  it('the terrain receives, the obstacles cast, and the landing pad does not', () => {
     const { scene, view } = setup();
     let groundReceives = false;
     let pad: THREE.Mesh | undefined;
@@ -316,13 +350,111 @@ describe('materials (SPEC-017 §4.7, AC-84 … AC-86)', () => {
       const mesh = node as THREE.Mesh;
       if (mesh.isMesh !== true) return;
       const geometry = mesh.geometry as THREE.BufferGeometry & { type?: string };
-      if (geometry.type === 'PlaneGeometry' && mesh.receiveShadow) groundReceives = true;
-      // The pad is the one cylinder sitting at the layout's origin POI.
-      if (geometry.type === 'CylinderGeometry' && mesh.position.x === 0 && mesh.position.z === 0) pad = mesh;
+      if (geometry.type === 'PlaneGeometry' && mesh.name === 'terrain' && mesh.receiveShadow) groundReceives = true;
+      if (mesh.name === 'poi:landing_pad') pad = mesh;
     });
     expect(groundReceives).toBe(true);
     expect(pad).toBeDefined();
     expect(pad?.castShadow).toBe(false);
+    view.dispose();
+  });
+});
+
+describe('the environment (SPEC-018)', () => {
+  it('hangs everything under one root and stays inside the mesh budget', () => {
+    const { scene, view } = setup();
+    expect(scene.children.length).toBe(1);
+    let meshes = 0;
+    scene.traverse((node) => {
+      if ((node as THREE.Mesh).isMesh === true) meshes++;
+    });
+    expect(meshes).toBeLessThanOrEqual(60);
+    view.dispose();
+  });
+
+  it('dispose removes the root and leaves fog and background null', () => {
+    const { scene, view } = setup();
+    view.dispose();
+    expect(scene.children.length).toBe(0);
+    expect(scene.fog).toBeNull();
+    expect(scene.background).toBeNull();
+  });
+
+  it('sync puts the player on the height field (§4.3)', () => {
+    const { scene, view } = setup();
+    const f = frame(new Pool<EnemyEntity>(() => makeEnemy()));
+    f.player.x = 33;
+    f.player.z = -27; // outside the pad clearing, where relief is non-zero
+    view.sync(f);
+    const h = view.field.heightAt(33, -27);
+    expect(h).not.toBe(0);
+    // The player group is the one holding the point-light torch.
+    let playerY: number | null = null;
+    scene.traverse((node) => {
+      if ((node as THREE.PointLight).isPointLight === true) playerY = node.parent?.position.y ?? null;
+    });
+    expect(playerY).not.toBeNull();
+    expect(Math.abs((playerY as unknown as number) - h)).toBeLessThanOrEqual(1e-4);
+    view.dispose();
+  });
+
+  it('setWeather writes the grade (§4.9)', () => {
+    const { view } = setup();
+    view.setWeather({ fogMult: 3, particles: 'sand', visibility: 0.4 }, 1);
+    expect(view.grade.vignette).toBeCloseTo(0.5 * 0.6, 6);
+    expect(view.grade.desaturate).toBeCloseTo(0.35, 6);
+    expect(view.grade.tint[0]).toBeCloseTo(1.05, 6);
+    expect(view.grade.tint[2]).toBeCloseTo(0.8, 6);
+    view.setWeather({ fogMult: 1, particles: 'none', visibility: 1 }, 0);
+    expect(view.grade.vignette).toBeCloseTo(0, 6);
+    expect(view.grade.tint).toEqual([1, 1, 1]);
+    view.dispose();
+  });
+
+  it('lightning flashes the hemisphere ×4, and is a no-op under reduce motion (18-j)', () => {
+    const { scene, view } = setup();
+    const base = PLANETS.cinder4.surface.look.light.ambient;
+    view.setWeather({ fogMult: 1.8, particles: 'ash', visibility: 0.7 }, 1);
+    // Find a 2.5 s window whose roll passes, exactly as the view rolls it.
+    const seed = hash32(LAYOUT.hash, 'lightning');
+    let tick = -1;
+    for (let candidate = 0; candidate < 400; candidate++) {
+      if (hash01(seed, candidate) < 0.15) {
+        tick = candidate;
+        break;
+      }
+    }
+    expect(tick).toBeGreaterThanOrEqual(0);
+    const f = frame(new Pool<EnemyEntity>(() => makeEnemy()));
+    f.time = tick * 2.5 + 0.01;
+    view.sync(f);
+    expect(hemisphere(scene).intensity).toBeCloseTo(base * 4, 6);
+    // Two frames later the flash has passed.
+    f.time = tick * 2.5 + 0.2;
+    view.sync(f);
+    expect(hemisphere(scene).intensity).toBeCloseTo(base, 6);
+    // Reduce motion: the same window stays dark.
+    view.reduceMotion = true;
+    f.time = tick * 2.5 + 0.01;
+    view.sync(f);
+    expect(hemisphere(scene).intensity).toBeCloseTo(base, 6);
+    view.dispose();
+  });
+
+  it('setGroundTextures swaps layers without a recompile (§4.10)', () => {
+    const { scene, view } = setup();
+    let terrain: THREE.Mesh | undefined;
+    scene.traverse((node) => {
+      if ((node as THREE.Mesh).name === 'terrain') terrain = node as THREE.Mesh;
+    });
+    expect(terrain).toBeDefined();
+    const material = terrain?.material as THREE.MeshStandardMaterial;
+    const version = material.version;
+    const a = { ...groundLayer('rock', 32), tileMetres: 4 };
+    const b = { ...groundLayer('basalt', 32), tileMetres: 6 };
+    view.setGroundTextures(a, b);
+    expect(material.map).toBe(a.albedo);
+    expect(material.version).toBe(version); // no needsUpdate, no recompile
     view.dispose();
   });
 });

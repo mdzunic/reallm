@@ -234,3 +234,64 @@ removed for the shot:
   long enough to wrap, reached the version label at the bottom of the screen and
   swallowed taps meant for it. The panel now takes no pointer events; only its
   two buttons do.
+
+## SPEC-018 — surface environment: terrain, ground, props, weather (M7a)
+
+- **Build:** `spec/SPEC-018` (PLAN R6-4) — untagged
+- **Devices:**
+  - desktop — headless Chromium (Playwright, Linux container, **software GL**;
+    treat every ms/fps number as a floor, not a device number)
+  - desktop, hardware GPU — _not run: no display and no GPU in the build container_
+  - phone, **emulated** — headless Chromium under Playwright's `Pixel 5`
+    descriptor (393×727 CSS px, dpr 2.75, touch, Android UA); a device-shaped
+    client on the container's software rasteriser, not a device
+  - phone, **physical over LAN** — _not run: no handset and no LAN in the build
+    container_
+
+### All six planets at `?quality=medium`, sampled after 90 rendered frames
+
+`draws` counts the whole frame (scene + post 16); budget is SPEC-018 §4.11 /
+AC: `draws ≤ 96`, `tris ≤ 120 000`. Desktop 1280×720; the two runs shared the
+container two workers at a time, so ms/frame is worst-case software GL.
+
+| Planet | draws (frame) | tris | geo | tex | budget ✔ | screenshot |
+|---|---|---|---|---|---|---|
+| cinder4 | 41 | 76 670 | 37 | 35 | ✔ | [medium](screenshots/spec-018/cinder4-medium.png) |
+| vetra | 46 | 27 898 | 42 | 35 | ✔ | [medium](screenshots/spec-018/vetra-medium.png) |
+| thessaly | 45 | 72 760 | 41 | 36 | ✔ | [medium](screenshots/spec-018/thessaly-medium.png) |
+| ferrum | 42 | 38 416 | 38 | 35 | ✔ | [medium](screenshots/spec-018/ferrum-medium.png) |
+| hive | 49 | 65 928 | 45 | 35 | ✔ | [medium](screenshots/spec-018/hive-medium.png) |
+| eden | 35 | 33 294 | 31 | 36 | ✔ | [medium](screenshots/spec-018/eden-medium.png) |
+
+Emulated phone (`Pixel 5` descriptor, same medium preset): cinder4 40 / 74 870,
+vetra 43 / 22 498, thessaly 43 / 69 160, ferrum 40 / 34 816, hive 46 / 60 528,
+eden 31 / 29 374 — every planet inside the same budget. `e2e/surface-env.spec.ts`
+pins the cinder4 row (draws ≤ 96, tris ≤ 120 000 after 30 frames) on every run.
+
+### Observations
+
+- Cinder-4 shows the two-layer splat clearly: rippled sand blending into
+  cracked earth on the slopes, normal-mapped at the §4.4 six-samples cost.
+- Ferrum's basalt carries the emissive crack veins (`texB.a` path) and the
+  30 % slag embers read as hot spots; the crack pulse animates with `uTime`.
+- Vetra initially blew out to a white field — the luminance-normalised macro
+  tint pushed the near-white palette past 1. The tint is now capped at
+  channel ≤ 1 and the snow layer's albedo darkened (*initial tuning*); the
+  §4.1 sun/hemisphere values are unchanged. It now reads as a foggy snowfield;
+  worth another tuning pass when a hardware GPU run is possible.
+- The berm and silhouette ring hide the clear colour at the arena edge on the
+  screenshots taken near the pad; the full walk-to-`halfSize − 2` sweep at
+  16:9 and 21:9 on all six planets (AC "manual") still needs a human pass on a
+  real display, as does the phone-over-LAN visit.
+
+### Checklist
+
+- [x] `npm run check` green (typecheck, 819 unit tests, production build)
+- [x] `e2e/SPEC-012.spec.ts`, `e2e/SPEC-017.spec.ts`, `e2e/SPEC-011.spec.ts`,
+      `e2e/dev-skip-flight.spec.ts`, `e2e/scene-cycle.spec.ts`,
+      `e2e/surface-env.spec.ts` green (two runs; one parallel-load flake each
+      in SPEC-017/SPEC-011 passed clean when re-run — same class as the
+      flaky set already tracked by the factory)
+- [x] `layoutHash` pins unchanged (`tests/systems/layout.test.ts`)
+- [ ] every planet visited **on hardware** (desktop GPU + reference phone) —
+      owed to a human playtest; the container has neither
