@@ -1608,7 +1608,8 @@ html.reduce-motion .overlay-ending-escape .ending-prompt {
   object-fit: cover;
 }
 
-/* The character panel wears the same tile beside the name line. */
+/* The character panel wears the same tile beside the name line — a label, not
+   a button, so it does not offer the pointer `.portrait` gives the choices. */
 .char-portrait {
   display: inline-flex;
   align-items: center;
@@ -1616,6 +1617,7 @@ html.reduce-motion .overlay-ending-escape .ending-prompt {
   overflow: hidden;
   vertical-align: middle;
   margin-right: 8px;
+  cursor: default;
 }
 
 .swatch {

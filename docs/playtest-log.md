@@ -377,6 +377,12 @@ parked fighter in frame.
 | star map | [png](screenshots/spec-020/starmap-low.png) | [png](screenshots/spec-020/starmap-medium.png) | [png](screenshots/spec-020/starmap-high.png) |
 | flight | [png](screenshots/spec-020/flight-low.png) | [png](screenshots/spec-020/flight-medium.png) | [png](screenshots/spec-020/flight-high.png) |
 
+Two more, for the criteria a full-screen capture does not settle: the
+[character panel](screenshots/spec-020/station-character.png) with the chosen
+bust beside the name line (AC-28 — the panel had no portrait before this spec),
+and the [engine glow](screenshots/spec-020/flight-engine-glow.png) close-up
+below.
+
 ### AC-15 — the flight frame with the field full
 
 Whole-frame `draws` (scene + post) and `tris` at the moment of capture. The
