@@ -18,6 +18,7 @@ import {
   EFFECT_KEYS_BY_DOMAIN,
   ENEMIES,
   FOLLOWERS,
+  GROUND_LAYER_IDS,
   ITEMS,
   LOOT_TABLES,
   MISSIONS,
@@ -599,6 +600,18 @@ describe('content invariants (SPEC-009 §7)', () => {
     }
     // Creation adds five to a base of eight, so a finished character has 13.
     expect(8 + CREATION_POINTS).toBe(13);
+  });
+
+  it('18. every surface look stays inside the SPEC-018 envelope', () => {
+    const layerIds = new Set<string>(GROUND_LAYER_IDS);
+    for (const planet of planets) {
+      const look = planet.surface.look;
+      // Relief past 0.5 m would push the aim-ray error over SPEC-012's bound.
+      expect(look.relief.amplitude, planet.id).toBeLessThanOrEqual(0.5);
+      for (const metres of look.ground.tileMetres) expect(metres, planet.id).toBeGreaterThan(0);
+      expect(look.relief.bermHeight, planet.id).toBeLessThanOrEqual(10);
+      for (const layer of look.ground.layers) expect(layerIds.has(layer), `${planet.id} layer ${layer}`).toBe(true);
+    }
   });
 });
 
