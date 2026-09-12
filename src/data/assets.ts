@@ -94,6 +94,28 @@ export const ASSETS = {
         laser_charge: [6850, 700],
       },
     },
+    /** The story films' cues (PLAN R9, SPEC-021 §6.2), played on the film clock. */
+    film: {
+      src: ['assets/audio/sfx/film.webm', 'assets/audio/sfx/film.mp3'],
+      bus: 'sfx',
+      sprite: {
+        film_hum: [0, 1600],
+        film_whoosh: [1700, 1400],
+        film_flash: [3200, 2500],
+        film_rumble: [5800, 3000],
+        film_wind: [8900, 3000],
+        film_powerdown: [12000, 1200],
+        film_lamp: [13300, 1500],
+        film_stamp: [14900, 400],
+        film_liftoff: [15400, 4000],
+        film_clamp: [19500, 800],
+        film_jump: [20400, 2000],
+        film_relay: [22500, 1600],
+        film_static: [24200, 600],
+        film_beam: [24900, 2500],
+        film_dissolve: [27500, 2000],
+      },
+    },
 
     // ----------------------------------------------------- music banks (§2.3)
     // One per `MusicId` (`core/Audio.ts`), reached by prefixing `music_`. No
@@ -122,6 +144,17 @@ export const ASSETS = {
     music_boss: { src: ['assets/audio/music/boss.webm', 'assets/audio/music/boss.mp3'], bus: 'music', loop: true },
     music_ending: {
       src: ['assets/audio/music/ending.webm', 'assets/audio/music/ending.mp3'],
+      bus: 'music',
+      loop: true,
+    },
+    // The story films' beds (PLAN R9, SPEC-021 §6.1).
+    music_film_dark: {
+      src: ['assets/audio/music/film_dark.webm', 'assets/audio/music/film_dark.mp3'],
+      bus: 'music',
+      loop: true,
+    },
+    music_film_hope: {
+      src: ['assets/audio/music/film_hope.webm', 'assets/audio/music/film_hope.mp3'],
       bus: 'music',
       loop: true,
     },

@@ -41,10 +41,11 @@ type Assert<T extends true> = T;
 type Equal<A, B> = (<T>() => T extends A ? 1 : 2) extends <T>() => T extends B ? 1 : 2 ? true : false;
 
 /**
- * The 29 sound ids of §2.2, pinned as an explicit literal (SPEC-001: pinned
- * constants in tests are literals). `SoundId` is derived from the sprite keys,
- * so this is what makes AC-5 a compile error rather than a surprise: recutting a
- * bank without updating the list fails here.
+ * The 44 sound ids — the 29 of §2.2 and the story films' 15 (SPEC-021 §6.3) —
+ * pinned as an explicit literal (SPEC-001: pinned constants in tests are
+ * literals). `SoundId` is derived from the sprite keys, so this is what makes
+ * AC-5 a compile error rather than a surprise: recutting a bank without
+ * updating the list fails here.
  */
 const SOUND_IDS = [
   'ui_blip',
@@ -76,6 +77,21 @@ const SOUND_IDS = [
   'landing_thrusters',
   'engine_hum',
   'laser_charge',
+  'film_hum',
+  'film_whoosh',
+  'film_flash',
+  'film_rumble',
+  'film_wind',
+  'film_powerdown',
+  'film_lamp',
+  'film_stamp',
+  'film_liftoff',
+  'film_clamp',
+  'film_jump',
+  'film_relay',
+  'film_static',
+  'film_beam',
+  'film_dissolve',
 ] as const;
 
 /** Exported so `noUnusedLocals` keeps it; it exists purely to be compiled. */
@@ -147,7 +163,9 @@ export type EventKeysAreTheWholeMap = Assert<Equal<keyof GameEvents, (typeof EVE
 // --------------------------------------------------------------- the manifest
 
 describe('the audio manifest (SPEC-006 §2)', () => {
-  const SFX_BANKS = ['ui', 'surface', 'flight'] as const;
+  // §2's three sfx banks and seven tracks, plus the story films' bank and two
+  // tracks (SPEC-021 §6.3)
+  const SFX_BANKS = ['ui', 'surface', 'flight', 'film'] as const;
   const MUSIC_BANKS = [
     'music_menu',
     'music_station',
@@ -156,9 +174,11 @@ describe('the audio manifest (SPEC-006 §2)', () => {
     'music_surface_combat',
     'music_boss',
     'music_ending',
+    'music_film_dark',
+    'music_film_hope',
   ] as const;
 
-  it('declares three sfx sprite banks, webm before mp3 (AC-3)', () => {
+  it('declares four sfx sprite banks, webm before mp3 (AC-3)', () => {
     for (const id of SFX_BANKS) {
       const bank = ASSETS.audio[id];
       expect(bank.bus).toBe('sfx');
@@ -168,7 +188,7 @@ describe('the audio manifest (SPEC-006 §2)', () => {
     }
   });
 
-  it('declares the seven looping music entries with no sprite (AC-4)', () => {
+  it('declares the nine looping music entries with no sprite (AC-4)', () => {
     for (const id of MUSIC_BANKS) {
       const track = ASSETS.audio[id];
       expect(track.bus).toBe('music');
@@ -179,18 +199,18 @@ describe('the audio manifest (SPEC-006 §2)', () => {
     }
   });
 
-  it('holds exactly the three sfx banks and the seven music banks', () => {
+  it('holds exactly the four sfx banks and the nine music banks', () => {
     expect(Object.keys(ASSETS.audio).sort()).toEqual([...SFX_BANKS, ...MUSIC_BANKS].sort());
   });
 
-  it('the sprite keys across the banks are the 29 sound ids of §2.2 (AC-5)', () => {
+  it('the sprite keys across the banks are the 44 sound ids (AC-5)', () => {
     const sprites = Object.values(ASSETS.audio).flatMap((entry) =>
       Object.keys((entry as { sprite?: object }).sprite ?? {}),
     );
     expect(sprites.slice().sort()).toEqual([...SOUND_IDS].sort());
-    expect(sprites).toHaveLength(29);
+    expect(sprites).toHaveLength(44);
     // No id appears in two banks: `SoundId` → bank has to be a function.
-    expect(new Set(sprites).size).toBe(29);
+    expect(new Set(sprites).size).toBe(44);
   });
 
   it('every sprite is a forward [offset, duration] span that does not overlap its neighbour', () => {

@@ -1,0 +1,325 @@
+{
+  "version": 1,
+  "fps": 24,
+  "width": 960,
+  "height": 540,
+  "films": {
+    "prologue": {
+      "file": "films/prologue.mp4",
+      "frames": 1728,
+      "bytes": 2658467,
+      "crf": 26,
+      "shots": [
+        {
+          "id": "earth_night",
+          "start": 0,
+          "end": 192,
+          "poster": "films/posters/prologue_earth_night.webp",
+          "posterBytes": 28990
+        },
+        {
+          "id": "machine_hall",
+          "start": 192,
+          "end": 384,
+          "poster": "films/posters/prologue_machine_hall.webp",
+          "posterBytes": 13938
+        },
+        {
+          "id": "launch",
+          "start": 384,
+          "end": 600,
+          "poster": "films/posters/prologue_launch.webp",
+          "posterBytes": 18680
+        },
+        {
+          "id": "city_flash",
+          "start": 600,
+          "end": 840,
+          "poster": "films/posters/prologue_city_flash.webp",
+          "posterBytes": 21816
+        },
+        {
+          "id": "stranded",
+          "start": 840,
+          "end": 1080,
+          "poster": "films/posters/prologue_stranded.webp",
+          "posterBytes": 5194
+        },
+        {
+          "id": "shelter",
+          "start": 1080,
+          "end": 1296,
+          "poster": "films/posters/prologue_shelter.webp",
+          "posterBytes": 9410
+        },
+        {
+          "id": "selection",
+          "start": 1296,
+          "end": 1488,
+          "poster": "films/posters/prologue_selection.webp",
+          "posterBytes": 12824
+        },
+        {
+          "id": "liftoff",
+          "start": 1488,
+          "end": 1656,
+          "poster": "films/posters/prologue_liftoff.webp",
+          "posterBytes": 7916
+        },
+        {
+          "id": "relay",
+          "start": 1656,
+          "end": 1728,
+          "poster": "films/posters/prologue_relay.webp",
+          "posterBytes": 9626
+        }
+      ]
+    },
+    "departure": {
+      "file": "films/departure.mp4",
+      "frames": 168,
+      "bytes": 257067,
+      "crf": 26,
+      "shots": [
+        {
+          "id": "undock",
+          "start": 0,
+          "end": 96,
+          "poster": "films/posters/departure_undock.webp",
+          "posterBytes": 9560
+        },
+        {
+          "id": "jump",
+          "start": 96,
+          "end": 168,
+          "poster": "films/posters/departure_jump.webp",
+          "posterBytes": 8612
+        }
+      ]
+    },
+    "interlude_c1": {
+      "file": "films/interlude_c1.mp4",
+      "frames": 336,
+      "bytes": 324310,
+      "crf": 26,
+      "shots": [
+        {
+          "id": "capsule",
+          "start": 0,
+          "end": 120,
+          "poster": "films/posters/interlude_c1_capsule.webp",
+          "posterBytes": 2922
+        },
+        {
+          "id": "shelter_light",
+          "start": 120,
+          "end": 240,
+          "poster": "films/posters/interlude_c1_shelter_light.webp",
+          "posterBytes": 15348
+        },
+        {
+          "id": "earth_c1",
+          "start": 240,
+          "end": 336,
+          "poster": "films/posters/interlude_c1_earth_c1.webp",
+          "posterBytes": 8192
+        }
+      ]
+    },
+    "interlude_c2": {
+      "file": "films/interlude_c2.mp4",
+      "frames": 336,
+      "bytes": 329254,
+      "crf": 26,
+      "shots": [
+        {
+          "id": "tanks",
+          "start": 0,
+          "end": 120,
+          "poster": "films/posters/interlude_c2_tanks.webp",
+          "posterBytes": 7876
+        },
+        {
+          "id": "tap",
+          "start": 120,
+          "end": 240,
+          "poster": "films/posters/interlude_c2_tap.webp",
+          "posterBytes": 12136
+        },
+        {
+          "id": "earth_c2",
+          "start": 240,
+          "end": 336,
+          "poster": "films/posters/interlude_c2_earth_c2.webp",
+          "posterBytes": 8260
+        }
+      ]
+    },
+    "interlude_c3": {
+      "file": "films/interlude_c3.mp4",
+      "frames": 336,
+      "bytes": 530201,
+      "crf": 29,
+      "shots": [
+        {
+          "id": "greenhouse",
+          "start": 0,
+          "end": 168,
+          "poster": "films/posters/interlude_c3_greenhouse.webp",
+          "posterBytes": 24050
+        },
+        {
+          "id": "earth_c3",
+          "start": 168,
+          "end": 336,
+          "poster": "films/posters/interlude_c3_earth_c3.webp",
+          "posterBytes": 9348
+        }
+      ]
+    },
+    "interlude_c4": {
+      "file": "films/interlude_c4.mp4",
+      "frames": 384,
+      "bytes": 562435,
+      "crf": 26,
+      "shots": [
+        {
+          "id": "reactor",
+          "start": 0,
+          "end": 144,
+          "poster": "films/posters/interlude_c4_reactor.webp",
+          "posterBytes": 6630
+        },
+        {
+          "id": "earth_c4",
+          "start": 144,
+          "end": 264,
+          "poster": "films/posters/interlude_c4_earth_c4.webp",
+          "posterBytes": 14394
+        },
+        {
+          "id": "watchers",
+          "start": 264,
+          "end": 384,
+          "poster": "films/posters/interlude_c4_watchers.webp",
+          "posterBytes": 8690
+        }
+      ]
+    },
+    "interlude_c5": {
+      "file": "films/interlude_c5.mp4",
+      "frames": 384,
+      "bytes": 446424,
+      "crf": 26,
+      "shots": [
+        {
+          "id": "hive_dark",
+          "start": 0,
+          "end": 144,
+          "poster": "films/posters/interlude_c5_hive_dark.webp",
+          "posterBytes": 11604
+        },
+        {
+          "id": "eden",
+          "start": 144,
+          "end": 288,
+          "poster": "films/posters/interlude_c5_eden.webp",
+          "posterBytes": 9700
+        },
+        {
+          "id": "cockpit",
+          "start": 288,
+          "end": 384,
+          "poster": "films/posters/interlude_c5_cockpit.webp",
+          "posterBytes": 14738
+        }
+      ]
+    },
+    "ending_stay": {
+      "file": "films/ending_stay.mp4",
+      "frames": 864,
+      "bytes": 1221308,
+      "crf": 26,
+      "shots": [
+        {
+          "id": "uplink",
+          "start": 0,
+          "end": 144,
+          "poster": "films/posters/ending_stay_uplink.webp",
+          "posterBytes": 7868
+        },
+        {
+          "id": "fleet",
+          "start": 144,
+          "end": 336,
+          "poster": "films/posters/ending_stay_fleet.webp",
+          "posterBytes": 10224
+        },
+        {
+          "id": "earth_full",
+          "start": 336,
+          "end": 504,
+          "poster": "films/posters/ending_stay_earth_full.webp",
+          "posterBytes": 33344
+        },
+        {
+          "id": "wall_63",
+          "start": 504,
+          "end": 720,
+          "poster": "films/posters/ending_stay_wall_63.webp",
+          "posterBytes": 7362
+        },
+        {
+          "id": "earth_again",
+          "start": 720,
+          "end": 864,
+          "poster": "films/posters/ending_stay_earth_again.webp",
+          "posterBytes": 28550
+        }
+      ]
+    },
+    "ending_escape": {
+      "file": "films/ending_escape.mp4",
+      "frames": 864,
+      "bytes": 1058224,
+      "crf": 26,
+      "shots": [
+        {
+          "id": "exit",
+          "start": 0,
+          "end": 144,
+          "poster": "films/posters/ending_escape_exit.webp",
+          "posterBytes": 6994
+        },
+        {
+          "id": "eden_unmade",
+          "start": 144,
+          "end": 336,
+          "poster": "films/posters/ending_escape_eden_unmade.webp",
+          "posterBytes": 36804
+        },
+        {
+          "id": "earth_unmade",
+          "start": 336,
+          "end": 528,
+          "poster": "films/posters/ending_escape_earth_unmade.webp",
+          "posterBytes": 3840
+        },
+        {
+          "id": "wall_same",
+          "start": 528,
+          "end": 696,
+          "poster": "films/posters/ending_escape_wall_same.webp",
+          "posterBytes": 10078
+        },
+        {
+          "id": "point",
+          "start": 696,
+          "end": 864,
+          "poster": "films/posters/ending_escape_point.webp",
+          "posterBytes": 2162
+        }
+      ]
+    }
+  }
+}

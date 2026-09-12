@@ -20,6 +20,12 @@ import { fileURLToPath } from 'node:url';
 const HERE = dirname(fileURLToPath(import.meta.url));
 const OUT = resolve(HERE, '..', '..', '..', 'public', 'assets');
 const GENERATORS = ['character', 'ships', 'station', 'props', 'ground', 'sprites', 'portraits', 'flight'];
+// Opt-in: a full film build takes hours, so `build.mjs` alone never starts one
+// (PLAN R9, SPEC-021 §5.1). `--frames=DIR`, `--draft`, `--stills`,
+// `--shots=a,b` and `--at=s,s` pass through to it.
+const OPT_IN = ['films'];
+const PASS = (arg) =>
+  arg.startsWith('--frames=') || arg.startsWith('--shots=') || arg.startsWith('--at=') || arg === '--draft' || arg === '--stills';
 
 function findBlender() {
   if (process.env.BLENDER) return process.env.BLENDER;
@@ -36,9 +42,9 @@ const args = process.argv.slice(2);
 const preview = args.find((arg) => arg.startsWith('--preview='));
 const only = args.find((arg) => arg.startsWith('--only='))?.slice('--only='.length).split(',').filter(Boolean) ?? [];
 const names = args.filter((arg) => !arg.startsWith('--'));
-const unknown = names.filter((name) => !GENERATORS.includes(name));
+const unknown = names.filter((name) => !GENERATORS.includes(name) && !OPT_IN.includes(name));
 if (unknown.length > 0) {
-  console.error(`unknown generator(s): ${unknown.join(', ')} — choose from ${GENERATORS.join(', ')}`);
+  console.error(`unknown generator(s): ${unknown.join(', ')} — choose from ${[...GENERATORS, ...OPT_IN].join(', ')}`);
   process.exit(2);
 }
 
@@ -49,7 +55,7 @@ for (const name of names.length > 0 ? names : GENERATORS) {
   console.log(`\n== ${name} ==`);
   const result = spawnSync(
     blender,
-    ['--background', '--factory-startup', '--python-exit-code', '1', '--python', script, '--', `--out=${OUT}`, ...(preview ? [preview] : []), ...only],
+    ['--background', '--factory-startup', '--python-exit-code', '1', '--python', script, '--', `--out=${OUT}`, ...(preview ? [preview] : []), ...args.filter(PASS), ...only],
     { stdio: ['ignore', 'pipe', 'inherit'], encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 },
   );
   // Blender is chatty; keep our own lines (ASSET/PREVIEW/WARN) and any traceback.
@@ -86,6 +92,9 @@ function writeLicenses() {
     [/^textures\/ground\/.+\.webp$/, 'ground.py', 'baked seamless 4D noise/Voronoi fields, packed with numpy'],
     [/^textures\/sprites\/.+\.webp$/, 'sprites.py', 'numpy radial and noise fields'],
     [/^portraits\/.+\.(webp|json)$/, 'portraits.py', 'EEVEE bust of the salvager'],
+    [/^films\/[^/]+\.mp4$/, 'films.py', 'story film rendered in EEVEE from code (PLAN R9)'],
+    [/^films\/posters\/.+\.webp$/, 'films.py', 'story film poster, a frame of its shot (PLAN R9)'],
+    [/^films\/manifest\.json$/, 'films.py', 'story film manifest (PLAN R9)'],
   ];
   const files = [];
   const walk = (dir) => {

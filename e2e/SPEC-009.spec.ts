@@ -226,7 +226,8 @@ test.describe('SPEC-009 content data layer', () => {
       'quartermaster',
       'aria',
     ]);
-    expect(c.idUnions['STORY_FLAGS']).toHaveLength(12);
+    // PLAN R9 added the five interlude flags (SPEC-021 §4.7) — a deliberate pin change.
+    expect(c.idUnions['STORY_FLAGS']).toHaveLength(17);
     expect(c.idUnions['STORY_FLAGS']).toContain('chapter1_done');
     expect(c.idUnions['SPEAKERS']).toEqual(['aria', 'command', 'scav', 'log', 'player', 'warden']);
     expect(c.idUnions['MESH_RECIPE_IDS']).toHaveLength(10);

@@ -1,5 +1,6 @@
-// The 29 placeholder sound effects (SPEC-006 §2.2), one synth per sprite id,
-// packed into the three banks at the offsets `src/data/assets.ts` declares.
+// The placeholder sound effects (SPEC-006 §2.2) and the story films' cues
+// (PLAN R9), one synth per sprite id, packed into the four banks at the offsets
+// `src/data/assets.ts` declares.
 // Each render gets the sample count it may fill: the sprite's length less a
 // small guard for one-shots, exactly the sprite's length for the loops.
 import {
@@ -517,6 +518,225 @@ const SOUNDS = {
       return fill(n, (t) => {
         const y = Math.sin(TAU * f * t + 0.8 * Math.sin(TAU * wob * t)) * 0.6 + 0.3 * Math.sin(TAU * g * t);
         return y * (0.6 + 0.4 * Math.sin(TAU * trem * t));
+      });
+    },
+  },
+
+  // --------------------------------------------------------------- films
+  // The story films' cues (PLAN R9, SPEC-021 §6.2), played on the film clock.
+  film_hum: {
+    peak: -10,
+    render: (n) => {
+      const a = osc('saw');
+      const lp = svf();
+      const bp = svf('bp');
+      const nz = noise(402);
+      const r = rng(401);
+      const ticks = [0.2, 0.55, 0.9, 1.25].map((at) => at + r() * 0.08);
+      const len = n / SR;
+      return fill(n, (t) => {
+        const env = adsr(t, len - 0.3, 0.25, 0.2, 0.9, 0.3);
+        const hum = lp(a(50), 300, 0.9) * 0.5 + Math.sin(TAU * 100 * t) * 0.25 + Math.sin(TAU * 150 * t) * 0.1;
+        let tick = 0;
+        for (const at of ticks) if (t >= at && t < at + 0.02) tick += decay(t - at, 0.003);
+        return hum * env * (0.9 + 0.1 * Math.sin(TAU * 3 * t)) + bp(nz(), 3000, 4) * tick * 0.6;
+      });
+    },
+  },
+  film_whoosh: {
+    peak: -6,
+    render: (n) => {
+      const nz = noise(403);
+      const bp = svf('bp');
+      const lp = svf();
+      const len = n / SR;
+      return fill(n, (t) => {
+        const env = Math.sin(Math.PI * clamp(t / len, 0, 1)) ** 1.5;
+        return (bp(nz(), sweep(t, 3200, 380, len), 1.6) * 0.9 + lp(nz(), 160) * 1.8) * env;
+      });
+    },
+  },
+  film_flash: {
+    // A distant detonation: a sub thump, a crackle, a rumble — and no click.
+    peak: -1,
+    render: (n) => {
+      const s = osc('sine');
+      const nz = noise(404);
+      const lp = svf();
+      const lp2 = svf();
+      return fill(n, (t) => {
+        const thump = s(sweep(t, 46, 26, 0.8)) * decay(t, 0.7) * 1.2;
+        const crack = lp(nz(), sweep(t, 2400, 300, 1.2), 0.8) * decay(t, 0.45) * 0.8;
+        const rumble = lp2(nz(), 90) * decay(t, 1.2) * 3;
+        return soft((thump + crack + rumble) * attack(t, 0.015), 1.4);
+      });
+    },
+  },
+  film_rumble: {
+    peak: -4,
+    render: (n) => {
+      const nz = noise(405);
+      const lp = svf();
+      const lp2 = svf();
+      const len = n / SR;
+      return fill(n, (t) => {
+        const env = adsr(t, len * 0.5, 0.4, 0.8, 0.7, len * 0.5);
+        return (lp(nz(), 110 + 40 * Math.sin(TAU * 0.7 * t), 0.8) * 3 + lp2(nz(), 400) * 0.3) * env;
+      });
+    },
+  },
+  film_wind: {
+    peak: -9,
+    render: (n) => {
+      const nz = noise(406);
+      const bp = svf('bp');
+      const len = n / SR;
+      return fill(n, (t) => {
+        const lfo = 0.5 + 0.5 * Math.sin(TAU * 0.45 * t + 0.7);
+        return bp(nz(), 380 + 900 * lfo, 1.3) * (0.45 + 0.55 * lfo) * adsr(t, len - 0.8, 0.8, 0.5, 0.85, 0.8);
+      });
+    },
+  },
+  film_powerdown: {
+    // A servo winding down to silence: the Machines' eyes going out.
+    peak: -7,
+    render: (n) => {
+      const a = osc('saw');
+      const b = osc('square', 0.3);
+      const lp = svf();
+      const len = n / SR;
+      return fill(n, (t) => {
+        const f = sweep(t, 420, 38, len * 0.9);
+        const env = attack(t, 0.01) * (1 - clamp(t / len, 0, 1)) ** 1.2;
+        return lp(a(f) * 0.6 + b(f * 0.5) * 0.3, 200 + 1800 * (1 - t / len), 1.2) * env;
+      });
+    },
+  },
+  film_lamp: {
+    peak: -12,
+    render: (n) => {
+      const a = osc('square');
+      const bp = svf('bp');
+      const r = rng(407);
+      const dips = Array.from({ length: 6 }, () => r() * 1.4);
+      const len = n / SR;
+      return fill(n, (t) => {
+        const flicker = dips.some((d) => t > d && t < d + 0.04) ? 0.25 : 1;
+        return bp(a(120), 360, 3) * flicker * adsr(t, len - 0.2, 0.05, 0.1, 0.9, 0.2);
+      });
+    },
+  },
+  film_stamp: {
+    peak: -3,
+    render: (n) => {
+      const s = osc('sine');
+      const nz = noise(408);
+      const lp = svf();
+      return fill(n, (t) => s(sweep(t, 140, 60, 0.05)) * decay(t, 0.06) * attack(t, 0.002) + lp(nz(), 1800) * decay(t, 0.02) * 0.6);
+    },
+  },
+  film_liftoff: {
+    peak: -2,
+    render: (n) => {
+      const nz = noise(409);
+      const lp = svf();
+      const lp2 = svf();
+      const len = n / SR;
+      return fill(n, (t) => {
+        const u = clamp(t / (len * 0.6), 0, 1);
+        const env = u * u * (1 - Math.max(0, (t - len + 0.6) / 0.6));
+        const roar = lp(nz(), 180 + 900 * u, 0.7) * 1.4 + lp2(nz(), 70) * 3;
+        const crackle = nz() > 0.985 ? 0.8 * u : 0;
+        return soft((roar + crackle) * env, 1.6);
+      });
+    },
+  },
+  film_clamp: {
+    peak: -4,
+    render: (n) => {
+      const nz = noise(410);
+      const hp = svf('hp');
+      return fill(n, (t) => {
+        let clank = 0;
+        for (const [at, f] of [[0, 310], [0.09, 460]]) {
+          const u = t - at;
+          if (u >= 0) clank += fm(u, f, 2.76, 3 * decay(u, 0.05)) * decay(u, 0.12) * attack(u, 0.001);
+        }
+        const hiss = t > 0.15 ? hp(nz(), 3000) * adsr(t - 0.15, 0.4, 0.02, 0.2, 0.5, 0.2) * 0.35 : 0;
+        return clank * 0.7 + hiss;
+      });
+    },
+  },
+  film_jump: {
+    peak: -3,
+    render: (n) => {
+      const nz = noise(411);
+      const bp = svf('bp');
+      const len = n / SR;
+      return fill(n, (t) => {
+        const u = clamp(t / len, 0, 1);
+        const env = u ** 1.5 * (1 - Math.max(0, (t - len + 0.25) / 0.25));
+        return (bp(nz(), sweep(t, 300, 5000, len), 1.4) + chirp(t, 300, 2400, len) * 0.35) * env;
+      });
+    },
+  },
+  film_relay: {
+    // A relay clack, then a generator spinning up: power coming back.
+    peak: -5,
+    render: (n) => {
+      const nz = noise(412);
+      const bp = svf('bp');
+      const a = osc('saw');
+      const lp = svf();
+      const len = n / SR;
+      return fill(n, (t) => {
+        const clack = bp(nz(), 2200, 5) * decay(t, 0.015) * 1.2;
+        const u = t - 0.12;
+        const spin = u > 0 ? lp(a(sweep(u, 25, 110, 1.2)), 600, 1) * Math.min(1, u / 0.6) * 0.6 * (1 - Math.max(0, (t - len + 0.2) / 0.2)) : 0;
+        return clack + spin;
+      });
+    },
+  },
+  film_static: {
+    peak: -8,
+    render: (n) => {
+      const r = rng(413);
+      const nz = noise(414);
+      const hp = svf('hp');
+      let held = 0;
+      return fill(n, (t, i) => {
+        if (i % (2 + Math.floor(r() * 6)) === 0) held = nz();
+        return hp(held, 1200) * (r() < 0.85 ? 1 : 0) * adsr(t, 0.45, 0.01, 0.1, 0.8, 0.12);
+      });
+    },
+  },
+  film_beam: {
+    peak: -6,
+    render: (n) => {
+      const len = n / SR;
+      return fill(n, (t) => {
+        const u = clamp(t / len, 0, 1);
+        const f = sweep(t, 180, 260, len);
+        let y = 0;
+        for (const [k, g] of [[1, 0.5], [2, 0.25], [3.01, 0.15], [5.02, 0.08]]) y += Math.sin(TAU * f * k * t) * g;
+        return y * adsr(t, len - 0.5, 0.6, 0.3, 0.85, 0.5) * (0.8 + 0.2 * Math.sin(TAU * 7 * t)) * (0.6 + 0.4 * u);
+      });
+    },
+  },
+  film_dissolve: {
+    // The world coming apart into bits: a falling tone, crushed and dropping out.
+    peak: -7,
+    render: (n) => {
+      const r = rng(415);
+      const len = n / SR;
+      let held = 0;
+      let phase = 0;
+      return fill(n, (t, i) => {
+        const u = clamp(t / len, 0, 1);
+        phase += sweep(t, 1800, 120, len) / SR;
+        if (i % (2 + Math.floor(u * 30)) === 0) held = Math.sign(Math.sin(TAU * phase)) * (r() < 0.9 - 0.6 * u ? 1 : 0);
+        const levels = 2 ** (4 - Math.floor(u * 3));
+        return (Math.round(held * levels) / levels) * adsr(t, len - 0.3, 0.05, 0.3, 0.7, 0.3) * 0.7;
       });
     },
   },

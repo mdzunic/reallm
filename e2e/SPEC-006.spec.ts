@@ -236,7 +236,7 @@ test.describe.configure({ mode: 'default' });
 
 // -------------------------------------------------------------- the manifest
 
-test('the manifest declares three sfx banks and seven music tracks (AC-3, AC-4, AC-5)', async ({ page }) => {
+test('the manifest declares four sfx banks and nine music tracks (AC-3, AC-4, AC-5)', async ({ page }) => {
   await page.goto(gameUrl('/'));
   await awaitGate(page);
   const manifest = await page.evaluate(async () => {
@@ -258,7 +258,8 @@ test('the manifest declares three sfx banks and seven music tracks (AC-3, AC-4, 
     };
   });
 
-  expect(manifest.sfxIds).toEqual(['ui', 'surface', 'flight']);
+  // PLAN R9 added the story films' bank and beds (SPEC-021 §6.3) — a deliberate pin change.
+  expect(manifest.sfxIds).toEqual(['ui', 'surface', 'flight', 'film']);
   expect(manifest.sfxBuses).toEqual(['sfx']);
   expect(manifest.sfxOrder).toBe(true);
   expect(manifest.musicIds).toEqual([
@@ -269,15 +270,18 @@ test('the manifest declares three sfx banks and seven music tracks (AC-3, AC-4, 
     'music_surface_combat',
     'music_boss',
     'music_ending',
+    'music_film_dark',
+    'music_film_hope',
   ]);
   expect(manifest.musicBuses).toEqual(['music']);
   expect(manifest.musicLoops).toBe(true);
   expect(manifest.musicOrder).toBe(true);
-  // AC-5: the 29 sprite keys `SoundId` is derived from. The other half of that
-  // criterion — an id outside the union is a compile error — is `npm run
-  // typecheck`, which the union's `SpriteKeysOf` derivation is written for.
-  expect(new Set(manifest.sprites).size).toBe(29);
-  expect(manifest.sprites).toHaveLength(29);
+  // AC-5: the 44 sprite keys `SoundId` is derived from (29 + the 15 film cues of
+  // PLAN R9). The other half of that criterion — an id outside the union is a
+  // compile error — is `npm run typecheck`, which the union's `SpriteKeysOf`
+  // derivation is written for.
+  expect(new Set(manifest.sprites).size).toBe(44);
+  expect(manifest.sprites).toHaveLength(44);
 });
 
 // ------------------------------------------------------------------- unlock

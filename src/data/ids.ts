@@ -64,6 +64,12 @@ export const STORY_FLAGS = [
   'ending_stay',
   'ending_escape',
   'campaign_done',
+  // PLAN R9: a chapter's interlude film has played (SPEC-021 §4.7, SPEC-023 §4.3).
+  'interlude1_seen',
+  'interlude2_seen',
+  'interlude3_seen',
+  'interlude4_seen',
+  'interlude5_seen',
 ] as const;
 export type FlagId = (typeof STORY_FLAGS)[number];
 
