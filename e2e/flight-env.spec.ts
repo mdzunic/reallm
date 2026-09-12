@@ -55,6 +55,33 @@ test('the medium flight frame stays inside the §4.7 budget with the field full 
   expect(stats.triangles).toBeLessThanOrEqual(80_000);
 });
 
+test('a trip whose art never loads keeps its primitives and flies anyway (AC-9, 20-h)', async ({ page }) => {
+  const errors: string[] = [];
+  page.on('pageerror', (error) => errors.push(String(error)));
+  // Only the trip's own files: the five boot-manifest entries still have to
+  // load, or the gate never opens and there is no scene to judge.
+  await page.route(/\/assets\/models\/(fighter|interceptor|cockpit|asteroid)\.glb$/, (route) => route.abort());
+  await page.route('**/assets/textures/flight/**', (route) => route.abort());
+  await page.route('**/assets/textures/sprites/**', (route) => route.abort());
+
+  await start(page, CINDER4);
+  await awaitFlightHook(page);
+  await page.evaluate(() => {
+    const hook = (window as unknown as { __reallmFlight: FlightHook }).__reallmFlight;
+    hook.blockArrival();
+    hook.fillAsteroids();
+  });
+
+  // The scene is still up and still drawing the field: SPEC-013's primitives
+  // stand in for every model and map that never arrived, and nothing threw.
+  const stats = await afterFrames(page, 30);
+  expect(Number(stats.sceneInfo?.['hazards'] ?? 0)).toBeGreaterThanOrEqual(60);
+  expect(stats.drawCalls).toBeGreaterThan(5);
+  expect(stats.triangles).toBeGreaterThan(1_000);
+  expect(errors).toEqual([]);
+  await expect(page.locator('[data-testid="scene-label"]')).toHaveText('flight');
+});
+
 test('the sky window shifts toward the planet accent during an ion storm (AC-14, 20-g)', async ({ page }) => {
   test.setTimeout(90_000);
   await start(page, FERRUM);

@@ -388,10 +388,12 @@ budget is 40 scene + 16 post = 56 draws and 80 000 triangles on `medium`.
 | medium | 32 | 38 524 | 32 | 63 | 61 | ✔ |
 | high | 31 | 38 523 | 32 | 63 | 61 | ✔ |
 
-`e2e/flight-env.spec.ts` asserts the same thing on `medium` on every run, and
-its second case warps Ferrum out to its first ion-storm window and watches the
-sky window's `skyTint` climb past half (AC-14, 20-g) — the criterion the last
-two QA rounds could not reach by hand.
+`e2e/flight-env.spec.ts` asserts the same thing on `medium` on every run. Its
+other two cases cover the criteria the last two QA rounds could not reach by
+hand: one aborts every flight model and map and watches the trip fly on its
+SPEC-013 primitives with a full field and no page error (AC-9, 20-h), and one
+warps Ferrum out to its first ion-storm window and watches the sky window's
+`skyTint` climb past half (AC-14, 20-g).
 
 ### AC-10 — the engine glow is visible, and it is the glow
 
