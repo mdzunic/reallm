@@ -22,6 +22,7 @@ import type { Look } from '@/core/Quality';
 import { NEUTRAL_SKY } from '@/views/Environment';
 import { addHubLights, hubSkyMesh, loadHubSky } from '@/views/HubBackdrop';
 import { UiScene, uiRootEl } from '@/scenes/base';
+import { director } from '@/scenes/Director';
 
 const STAR_COUNT = 420;
 
@@ -339,12 +340,24 @@ export class MenuScene extends UiScene<'menu'> {
     this.#sub.replaceChildren(h('div', { class: 'menu-list panel' }, h('p', { class: 'menu-list-title' }, 'New game — pick a slot'), ...rows));
   }
 
+  /**
+   * SPEC-022 §4.9: New Game plays the prologue after the slot is chosen (and
+   * after any overwrite confirm), then enters creation when it ends or is
+   * skipped. The sub-panel closes as the film starts, so a second click
+   * cannot start a second film; `?scene=creation` and the dev bridge enter
+   * creation directly and never come through here.
+   */
   #startCreation(slot: SlotId): void {
     if (this.#leaving) return;
     this.#leaving = true;
-    void this.services.go('creation', { slot }).then((went) => {
-      if (!went) this.#leaving = false;
-    });
+    this.#openSub = null;
+    this.#renderSub();
+    void director(this.services)
+      .playFilm('prologue', { musicAfter: 'menu' })
+      .then(() => this.services.go('creation', { slot }))
+      .then((went) => {
+        if (!went) this.#leaving = false;
+      });
   }
 
   // ------------------------------------------------------------------ load
@@ -527,7 +540,25 @@ export class MenuScene extends UiScene<'menu'> {
   #renderCredits(): void {
     if (this.#sub === null) return;
     const body = testId(el('pre', 'credits-text', 'Loading…'), 'credits-text');
-    this.#sub.replaceChildren(h('div', { class: 'menu-list panel credits' }, h('p', { class: 'menu-list-title' }, 'Credits'), body));
+    // SPEC-022 §4.10: the prologue replay, above the licence text. The film
+    // plays over the menu; the open panel and the focus are there afterwards.
+    const replay = testId(
+      h(
+        'button',
+        {
+          class: 'ui-btn',
+          type: 'button',
+          click: () => {
+            void director(this.services)
+              .playFilm('prologue', { musicAfter: 'menu' })
+              .then(() => replay.focus());
+          },
+        },
+        'Play prologue',
+      ),
+      'credits-prologue',
+    );
+    this.#sub.replaceChildren(h('div', { class: 'menu-list panel credits' }, h('p', { class: 'menu-list-title' }, 'Credits'), replay, body));
     void fetch('assets/LICENSES.md')
       .then((response) => (response.ok ? response.text() : Promise.reject(new Error(String(response.status)))))
       .then(

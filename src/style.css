@@ -2462,3 +2462,224 @@ button.hud-button {
   border-color: var(--warn);
   font-size: 14px;
 }
+
+/* ================================================================ SPEC-022 */
+/* SPEC-022 film player. The layer sits directly under #ui at z 65: above the
+   HUD, panels, dialogue, toasts, confirm sheets and the pause, rotate and
+   context-lost overlays, below the ending card (70) and the escape veil (80).
+   Being DOM, a lost WebGL context does not stop a film (22-a). */
+.film {
+  position: fixed;
+  inset: 0;
+  z-index: 65;
+  background: #000;
+  pointer-events: auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--ink);
+}
+
+.film.is-leaving {
+  opacity: 0;
+  transition: opacity 0.3s ease;
+}
+
+/* §4.8: a 16:9 box, centred and letterboxed on any screen (E34). */
+.film-picture {
+  position: relative;
+  width: min(100vw, 177.78dvh);
+  aspect-ratio: 16 / 9;
+}
+
+/* The clipped box the video and the panning posters live in; the pan scales
+   never spill into the letterbox. */
+.film-frame {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+}
+
+.film-video,
+.film-poster {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+
+/* §4.4: the text mode's static backdrop — a dark radial from the panel tone. */
+.film[data-mode='text'] .film-frame {
+  background: radial-gradient(ellipse at center, var(--panel) 0%, #000 80%);
+}
+
+/* Each shot's description, centred above the caption area, in italics. */
+.film-describe {
+  position: absolute;
+  left: 50%;
+  bottom: 32%;
+  transform: translateX(-50%);
+  width: min(44em, 92%);
+  margin: 0;
+  text-align: center;
+  font-style: italic;
+  color: var(--ink-dim);
+  transition: opacity 200ms linear;
+}
+
+.film-describe.is-fading {
+  opacity: 0;
+}
+
+/* §4.8: captions in the picture's lower 18 % (landscape), on the glass. */
+.film-caption {
+  position: absolute;
+  left: 50%;
+  bottom: 3%;
+  transform: translateX(-50%);
+  max-width: min(44em, 96%);
+  padding: 8px 14px;
+  background: var(--panel-glass);
+  border: 1px solid var(--panel-edge);
+  border-radius: 8px;
+  font-size: clamp(16px, 2.2vmin + 8px, 22px);
+  text-align: left;
+}
+
+.film-caption.is-hidden {
+  display: none;
+}
+
+/* E34: on a portrait phone the captions sit below the picture, in the
+   letterbox the 16:9 box leaves free. */
+@media (orientation: portrait) {
+  .film-caption {
+    top: calc(100% + 10px);
+    bottom: auto;
+  }
+}
+
+.film-caption-speaker {
+  display: block;
+  font-weight: 700;
+  margin-bottom: 2px;
+}
+
+.film-caption-text {
+  margin: 0;
+  min-height: 1.3em;
+}
+
+/* §4.3: the dialogue panel's speaker colours, name beside style, never hue
+   alone (SPEC-014 AC-70). */
+.film-caption[data-speaker='aria'] .film-caption-speaker { color: var(--shield); }
+.film-caption[data-speaker='command'] .film-caption-speaker { color: var(--warn); }
+.film-caption[data-speaker='scav'] .film-caption-speaker { color: var(--good); }
+.film-caption[data-speaker='player'] .film-caption-speaker { color: var(--ink); }
+.film-caption[data-speaker='log'] .film-caption-speaker { color: var(--good); }
+.film-caption[data-speaker='warden'] .film-caption-speaker { color: var(--hp); }
+
+/* `log` reads as a terminal, as in the dialogue panel. */
+.film-caption[data-speaker='log'] {
+  font-family: ui-monospace, 'Cascadia Mono', 'SF Mono', Menlo, Consolas, monospace;
+  background: #04140a;
+  border-color: var(--good);
+}
+
+.film-caption[data-speaker='log'] .film-caption-text {
+  color: var(--good);
+}
+
+/* `warden` glitches, on the dialogue's own keyframes (they jitter around the
+   same translateX(-50%) centring); static under reduce motion. */
+.film-caption[data-speaker='warden'] {
+  border-color: var(--hp);
+  animation: dialogue-glitch 240ms steps(2) infinite;
+}
+
+.film-caption[data-speaker='warden'] .film-caption-text {
+  color: var(--hp);
+  text-shadow: 1px 0 var(--shield), -1px 0 var(--warn);
+}
+
+html.reduce-motion .film-caption[data-speaker='warden'] {
+  animation: none;
+}
+
+html.reduce-motion .film-caption[data-speaker='warden'] .film-caption-text {
+  text-shadow: none;
+}
+
+/* §4.3: a `title` line is centred in the picture, no name and no panel. */
+.film-caption[data-speaker='title'] {
+  top: 50%;
+  bottom: auto;
+  transform: translate(-50%, -50%);
+  background: none;
+  border: none;
+  text-align: center;
+  letter-spacing: 0.12em;
+  font-size: clamp(20px, 3.2vmin + 8px, 34px);
+  text-shadow: var(--text-glow);
+}
+
+.film-caption[data-speaker='title'] .film-caption-speaker {
+  display: none;
+}
+
+/* §4.8: a 2 px, non-interactive progress line on the picture's bottom edge. */
+.film-progress {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 2px;
+  pointer-events: none;
+}
+
+.film-progress-bar {
+  height: 100%;
+  width: 0;
+  background: var(--accent);
+}
+
+/* §4.5: Skip sits bottom-right inside the safe area, at least 44 px. */
+.film-skip {
+  position: absolute;
+  right: max(14px, env(safe-area-inset-right));
+  bottom: max(14px, env(safe-area-inset-bottom));
+  min-width: 44px;
+  min-height: 44px;
+}
+
+/* §4.6: the Resume button, centred; it appears only after a hidden tab. */
+.film-resume {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  min-width: 44px;
+  min-height: 44px;
+}
+
+/* The screen reader's caption feed (§4.3); visually hidden, never display:
+   none, so aria-live keeps announcing. */
+.film-live {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+/* Reduce motion: the end fade is skipped in JS; the poster cross-fade (opacity
+   only) deliberately stays (§4.4). */
+html.reduce-motion .film.is-leaving {
+  transition: none;
+}
+
+html.reduce-motion .film-describe {
+  transition: none;
+}

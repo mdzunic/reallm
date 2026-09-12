@@ -275,8 +275,12 @@ export const E2E_PRESET = 'low';
 
 /** `url` with `quality=` filled in, unless it already names one. */
 export function gameUrl(url: string): string {
-  if (/[?&]quality=/.test(url)) return url;
-  return `${url}${url.includes('?') ? '&' : '?'}quality=${E2E_PRESET}`;
+  let out = url;
+  if (!/[?&]quality=/.test(out)) out = `${out}${out.includes('?') ? '&' : '?'}quality=${E2E_PRESET}`;
+  // SPEC-022 §4.11: films are off by default so the existing suites keep
+  // their timing; a film suite opts in by naming `films=` itself.
+  if (!/[?&]films=/.test(out)) out = `${out}&films=off`;
+  return out;
 }
 
 /**

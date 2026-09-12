@@ -34,7 +34,8 @@ export interface DialogueInput {
   setEnabled(enabled: boolean): void;
 }
 
-const SPEAKER_NAMES: Record<SpeakerId, string> = {
+/** Exported for the film player's captions (SPEC-022 §4.3). */
+export const SPEAKER_NAMES: Record<SpeakerId, string> = {
   aria: 'ARIA',
   command: 'Earth Command',
   scav: 'Scav',
