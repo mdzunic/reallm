@@ -57,10 +57,16 @@ function wav(seconds = 20, rate = 8000): Buffer {
 
 const STAND_IN = wav();
 
-async function serveAudio(page: Page): Promise<void> {
-  await page.route('**/assets/audio/**', (route) =>
-    route.fulfill({ status: 200, contentType: 'audio/wav', body: STAND_IN }),
-  );
+/**
+ * `delayMs` holds the body back, so a test can keep every bank in Howler's
+ * `loading` state for as long as it needs: that is the window in which a
+ * `volume()` is deferred rather than applied.
+ */
+async function serveAudio(page: Page, delayMs = 0): Promise<void> {
+  await page.route('**/assets/audio/**', async (route) => {
+    if (delayMs > 0) await new Promise((resolve) => setTimeout(resolve, delayMs));
+    await route.fulfill({ status: 200, contentType: 'audio/wav', body: STAND_IN });
+  });
 }
 
 /**
@@ -104,6 +110,8 @@ declare global {
         _src: string;
         _state: string;
         _html5: boolean;
+        /** What Howler defers while the bank is not `loaded`, replayed on load. */
+        _queue: Array<{ event: string }>;
         _sounds: Array<{ _id: number; _sprite: string; _paused: boolean; _ended: boolean; _rate: number; _node: { gain: { value: number } } }>;
         seek(id?: number): number;
       }>;
@@ -777,6 +785,46 @@ test('a track asked for before the gesture fades in from silence on the tap (AC-
   expect(gains.filter((value) => value < MUSIC_FULL - 0.02).length, story).toBeGreaterThan(8);
 });
 
+test('a bed still decoding while its fade runs arrives at full anyway (AC-19, AC-22)', async ({ page }) => {
+  await installProbe(page);
+  // The banks answer only long after the 1500 ms crossfade is over, so the menu
+  // ramp runs its whole length against a `Howl` that has not started its voice
+  // yet — the state a slow container reaches on its own, made deterministic.
+  await serveAudio(page, 10_000);
+  await page.goto(gameUrl('/?debug'));
+  await passGate(page);
+  await expect(page.locator('[data-testid="scene-label"]')).toBeVisible();
+
+  // Howler does not apply a `volume()` to a bank that is not `loaded`: it
+  // queues it, and replays the whole backlog when the bank arrives. Sixty ramp
+  // ticks make sixty stale entries, and the bed is left wherever that replay
+  // ends — so the layer must hand it none of them while it waits.
+  const deferred = new Set<string>();
+  await expect
+    .poll(
+      async () => {
+        const howl = await page.evaluate(() => {
+          const found = window.Howler._howls.find((h) => (h._src.split('/').pop() ?? '').startsWith('menu'));
+          return { state: found?._state ?? 'none', queued: (found?._queue ?? []).map((task) => task.event) };
+        });
+        for (const event of howl.queued) deferred.add(event);
+        return howl.state;
+      },
+      { timeout: 60_000, intervals: [200] },
+    )
+    .toBe('loaded');
+  // `play` is Howler's own deferral of the voice and is expected; its presence
+  // is also what proves the window above was really observed.
+  expect([...deferred]).toEqual(['play']);
+
+  // And the gain the ramp finished on is the one the voice comes up at.
+  await expect
+    .poll(async () => page.evaluate(() => window.__qaSnap().find((h) => h.src.startsWith('menu'))?.sounds[0]?.gain ?? null), {
+      timeout: 20_000,
+    })
+    .toBeCloseTo(MUSIC_FULL, 2);
+});
+
 // ---------------------------------------------------------------- sfx voices
 
 test('the 24-voice cap steals, refuses and frees its slots (AC-29, AC-30, AC-31, AC-32, AC-33)', async ({ page }) => {
@@ -1274,30 +1322,39 @@ test('the pause menu ducks the bed and lets go, even when the player quits (AC-5
   await page.goto(gameUrl('/?debug&scene=surface&planet=cinder4'));
   await passGate(page);
   await expect(page.locator('[data-testid="scene-label"]')).toHaveText('surface');
-  await expect
-    .poll(async () => page.evaluate(() => window.__qaSnap().find((h) => h.src.startsWith('surface_calm'))?.sounds[0]?.gain ?? null))
-    .toBeCloseTo(MUSIC_FULL, 2);
 
   const bed = (): Promise<number | null> =>
     page.evaluate(() => window.__qaSnap().find((h) => h.src.startsWith('surface_calm'))?.sounds[0]?.gain ?? null);
 
+  // The scene tag is mounted at the top of `enter()` and the bed is asked for
+  // one line below it, so the tag is not a settled bed: the landing's whole
+  // build still runs after both, and the 1500 ms crossfade only moves while the
+  // ramp ticker gets the main thread — which on a container running the rest of
+  // this suite beside it is not every 25 ms. Every value asserted here is
+  // exactly the one the spec pins; only the patience is the sibling test's,
+  // `e2e/SPEC-011.spec.ts`, which polls this same bed with 20 s and 10 s.
+  await expect.poll(bed, { timeout: 20_000 }).toBeCloseTo(MUSIC_FULL, 2);
+
   await page.keyboard.press('Escape');
   await expect(page.locator('[data-testid="pause-menu"]')).toBeVisible();
-  await expect.poll(bed).toBeCloseTo(MUSIC_DUCKED, 3);
+  await expect.poll(bed, { timeout: 10_000 }).toBeCloseTo(MUSIC_DUCKED, 3);
 
   await page.locator('[data-testid="pause-resume"]').click();
   await expect(page.locator('[data-testid="pause-menu"]')).not.toBeVisible();
-  await expect.poll(bed).toBeCloseTo(MUSIC_FULL, 2);
+  await expect.poll(bed, { timeout: 10_000 }).toBeCloseTo(MUSIC_FULL, 2);
 
   // Quitting out of the open menu never calls resume(), so the scene's own
   // disposer is what has to release the duck.
   await page.keyboard.press('Escape');
   await expect(page.locator('[data-testid="pause-menu"]')).toBeVisible();
-  await expect.poll(bed).toBeCloseTo(MUSIC_DUCKED, 3);
+  await expect.poll(bed, { timeout: 10_000 }).toBeCloseTo(MUSIC_DUCKED, 3);
   await page.evaluate(() => window.__reallm.go('station', {}, { force: true }));
   await expect(page.locator('[data-testid="scene-label"]')).toHaveText('station');
   await expect
-    .poll(async () => page.evaluate(() => window.__qaSnap().find((h) => h.src.startsWith('station'))?.sounds[0]?.gain ?? null))
+    .poll(
+      async () => page.evaluate(() => window.__qaSnap().find((h) => h.src.startsWith('station'))?.sounds[0]?.gain ?? null),
+      { timeout: 20_000 },
+    )
     .toBeCloseTo(MUSIC_FULL, 2);
 });
 
