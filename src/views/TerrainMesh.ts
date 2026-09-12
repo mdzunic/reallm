@@ -143,14 +143,19 @@ totalEmissiveRadiance += uCrackColor * crack * ( 0.8 + 0.2 * sin( uTime * 0.7 + 
 `;
 
 /**
- * `palette.ground` in linear space, scaled to luminance 1: multiplying the
- * mid-grey albedo layers by it pulls their hue toward the planet without
- * moving their overall brightness (*initial tuning*).
+ * `palette.ground` in linear space, scaled to luminance 1 then capped at
+ * channel ≤ 1: the hue pulls toward the planet without pushing a bright
+ * palette's albedo past 1, which blew Vetra's snow out to a white field
+ * (*initial tuning*).
  */
 function macroTint(ground: string): THREE.Color {
   const color = new THREE.Color(ground).convertSRGBToLinear();
   const luminance = 0.2126 * color.r + 0.7152 * color.g + 0.0722 * color.b;
-  return luminance > 0 ? color.multiplyScalar(1 / luminance) : color.setScalar(1);
+  if (luminance > 0) color.multiplyScalar(1 / luminance);
+  else color.setScalar(1);
+  const max = Math.max(color.r, color.g, color.b);
+  if (max > 1) color.multiplyScalar(1 / max);
+  return color;
 }
 
 export function createTerrainMaterial(
