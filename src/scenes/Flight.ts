@@ -206,6 +206,18 @@ export class FlightScene extends UiScene<'flight'> {
             flight.update(dt, idle);
           }
         },
+        // SPEC-020 AC-15: top the asteroid field up to the preset's cap
+        // without flying the minutes of Poisson spawning it would take, so the
+        // budget suite measures the worst case the criterion names.
+        fillAsteroids: () => {
+          const cap = this.services.renderer.quality.asteroidCap;
+          for (let live = 0; live < cap; live++) {
+            let rocks = 0;
+            for (let i = 0; i < flight.hazards.size; i++) if (flight.hazards.at(i).kind === 'asteroid') rocks++;
+            if (rocks >= cap) break;
+            flight.spawnAsteroid();
+          }
+        },
         // A wave enemy that never leaves and never fires: descends forever, so
         // the arrival check keeps failing and the holding pattern is reachable
         // on a planet whose real waves would ram an idle ship.
@@ -574,6 +586,9 @@ export class FlightScene extends UiScene<'flight'> {
       info['hazards'] = flight.hazards.size;
       info['shots'] = flight.shots.size;
       info['hostiles'] = flight.hostiles;
+      // SPEC-020 20-g: how far the sky window has shifted toward the accent,
+      // so the storm tint is readable from outside the renderer.
+      info['skyTint'] = Number((this.#view?.stormTint ?? 0).toFixed(2));
     }
     return info;
   }

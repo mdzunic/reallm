@@ -20,6 +20,7 @@ import { SavePanel } from '@/ui/SavePanel';
 import { SettingsPanel } from '@/ui/SettingsPanel';
 import type { Look } from '@/core/Quality';
 import { NEUTRAL_SKY } from '@/views/Environment';
+import { addHubLights, hubSkyMesh, loadHubSky } from '@/views/HubBackdrop';
 import { UiScene, uiRootEl } from '@/scenes/base';
 
 const STAR_COUNT = 420;
@@ -51,6 +52,8 @@ function colourMapSpace(root: THREE.Object3D): string {
 type SubPanel = 'new' | 'load' | 'credits' | null;
 
 export class MenuScene extends UiScene<'menu'> {
+  /** §4.4: every mesh this screen draws hangs off this one group. */
+  readonly #backdrop = new THREE.Group();
   #stars: THREE.Points | null = null;
   #mixer: THREE.AnimationMixer | null = null;
   #action: THREE.AnimationAction | null = null;
@@ -79,6 +82,7 @@ export class MenuScene extends UiScene<'menu'> {
     // SPEC-006 AC-28: warm both tracks the menu can crossfade into next.
     void this.services.audio.preloadMusic(['menu', 'station']);
     this.useEnvironment(NEUTRAL_SKY, HUB_ENVIRONMENT_INTENSITY);
+    this.#buildBackdrop();
     this.#buildStars();
     if (this.services.assets.loaded) {
       try {
@@ -110,6 +114,23 @@ export class MenuScene extends UiScene<'menu'> {
 
   // ------------------------------------------------------------------ Three
 
+  /**
+   * SPEC-020 §4.4: the menu's backdrop — the starfield and SPEC-002's spike —
+   * under one `Group`, lit by the shared key + rim pair, in front of the
+   * station's nebula window. `props` stays the 1 the stats overlay pins: the
+   * starfield is still the scene's own prop, and the window arrives lazily.
+   */
+  #buildBackdrop(): void {
+    const group = this.#backdrop;
+    addHubLights(group);
+    this.scene.add(group);
+    let alive = true;
+    this.disposer.add(() => {
+      alive = false;
+    });
+    loadHubSky(this.services.assets, () => alive, (sky) => group.add(hubSkyMesh(sky)));
+  }
+
   /** AC-1: the slow starfield. Deterministic scatter — no RNG, no asset. */
   #buildStars(): void {
     const positions = new Float32Array(STAR_COUNT * 3);
@@ -126,7 +147,7 @@ export class MenuScene extends UiScene<'menu'> {
     geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
     const material = new THREE.PointsMaterial({ color: 0xbfd4e6, size: 0.05, sizeAttenuation: true });
     this.#stars = new THREE.Points(geometry, material);
-    this.scene.add(this.#stars);
+    this.#backdrop.add(this.#stars);
     this.props = 1;
   }
 
@@ -135,7 +156,7 @@ export class MenuScene extends UiScene<'menu'> {
     const assets = this.services.assets;
     const character = assets.model('character');
     character.position.set(-1.7, -0.9, 0);
-    this.scene.add(character);
+    this.#backdrop.add(character);
     const clip = assets.animations('character')[0];
     if (clip) {
       const mixer = new THREE.AnimationMixer(character);
@@ -151,7 +172,7 @@ export class MenuScene extends UiScene<'menu'> {
     const ship = assets.model('ship');
     ship.position.set(1.7, 0, 0);
     ship.rotation.y = -0.6;
-    this.scene.add(ship);
+    this.#backdrop.add(ship);
     this.#shipMap = colourMapSpace(ship);
   }
 

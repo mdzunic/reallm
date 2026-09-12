@@ -18,9 +18,11 @@ import { ATTRIBUTE_MAX, CLASSES, CREATION_POINTS, type Attributes, type ClassId 
 import { computePlayerStats, passiveText } from '@/systems/UiHelpers';
 import { dialogueLayer } from '@/ui/DialogueUI';
 import { el, h, testId } from '@/ui/dom';
+import { portraitManifest, portraitSource } from '@/ui/portraits';
 import type { Look } from '@/core/Quality';
 import { tintSalvager } from '@/views/CharacterView';
 import { NEUTRAL_SKY } from '@/views/Environment';
+import { addHubLights, hubSkyMesh, loadHubSky } from '@/views/HubBackdrop';
 import { UiScene } from '@/scenes/base';
 
 const CLASS_IDS = Object.keys(CLASSES) as ClassId[];
@@ -36,7 +38,6 @@ const SHARED_PORTRAITS = [9, 10, 11] as const;
 /** SPEC-017 §4.1 (*initial tuning*): creation shares the station's grade. */
 const CREATION_LOOK: Partial<Look> = { vignette: 0.35, bloomStrength: 0.3, tint: [0.96, 1, 1.04] };
 const HUB_ENVIRONMENT_INTENSITY = 0.9;
-const PORTRAIT_GLYPHS = ['☉', '☍', '⚙', '✦', '◈', '⌬', '☄', '♆', '⚑', '◮', '⌘', '✧'] as const;
 
 /** AC-18: the one-line explanation beside the toggle. */
 const DIFFICULTY_LINES = {
@@ -54,12 +55,17 @@ export class CreationScene extends UiScene<'creation'> {
   #secondary: string = SECONDARY_SWATCHES[0];
   #alloc: Record<(typeof ATTRIBUTES)[number], number> = { might: 0, vigor: 0, agility: 0, tech: 0 };
   #difficulty: 'casual' | 'normal' = 'normal';
+  /** SPEC-020 §4.6: the portrait files that shipped; empty until the manifest lands. */
+  #portraits: ReadonlySet<number> = new Set();
   #leaving = false;
 
   #root: HTMLDivElement | null = null;
   #form: HTMLDivElement | null = null;
   #nameField: HTMLInputElement | null = null;
   #previewBox: HTMLDivElement | null = null;
+
+  /** §4.4: the backdrop's one group — the starfield, the lights, the window. */
+  readonly #backdrop = new THREE.Group();
 
   // The scissor pass (AC-19): its own little scene, lit for a portrait.
   readonly #previewScene = new THREE.Scene();
@@ -85,6 +91,17 @@ export class CreationScene extends UiScene<'creation'> {
     this.#buildBackdrop();
     this.#buildPreviewScene();
     this.#mountUi();
+    // §4.6: the busts are optional art — the form goes up with glyphs and
+    // re-renders once the manifest says which files shipped (20-d).
+    let alive = true;
+    this.disposer.add(() => {
+      alive = false;
+    });
+    void portraitManifest().then((available) => {
+      if (!alive || available.size === 0) return;
+      this.#portraits = available;
+      this.#renderForm();
+    });
     this.disposer.add(this.services.events.on('renderer:resized', () => this.#measure(), this));
   }
 
@@ -117,8 +134,20 @@ export class CreationScene extends UiScene<'creation'> {
 
   // ------------------------------------------------------------------ Three
 
-  /** A thin echo of the menu starfield, so the form floats over something. */
+  /**
+   * A thin echo of the menu starfield, so the form floats over something —
+   * SPEC-020 §4.4 puts it under one `Group` with the shared key + rim pair and
+   * the station window behind it. `props` stays the 1 SPEC-014 pins.
+   */
   #buildBackdrop(): void {
+    const group = this.#backdrop;
+    addHubLights(group);
+    this.scene.add(group);
+    let alive = true;
+    this.disposer.add(() => {
+      alive = false;
+    });
+    loadHubSky(this.services.assets, () => alive, (sky) => group.add(hubSkyMesh(sky)));
     const positions = new Float32Array(240 * 3);
     for (let i = 0; i < 240; i++) {
       const a = ((Math.sin(i * 12.9898) * 43758.5453) % 1 + 1) % 1;
@@ -131,7 +160,7 @@ export class CreationScene extends UiScene<'creation'> {
     const geometry = new THREE.BufferGeometry();
     geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
     const stars = new THREE.Points(geometry, new THREE.PointsMaterial({ color: 0x5a7089, size: 0.04 }));
-    this.scene.add(stars);
+    group.add(stars);
     this.props = 1;
   }
 
@@ -142,10 +171,19 @@ export class CreationScene extends UiScene<'creation'> {
     const key = new THREE.DirectionalLight(0xffffff, 2.53);
     key.position.set(1.5, 2.5, 2);
     this.#previewScene.add(key);
+    // SPEC-020 §4.4: the portrait gets the hub's rim light and the same neutral
+    // environment the scene behind it uses — one texture, owned by `base`'s
+    // `useEnvironment`, borrowed here and let go first.
+    const rim = new THREE.DirectionalLight(0x4c9aff, 0.6);
+    rim.position.set(-3, 1.5, -4);
+    this.#previewScene.add(rim);
+    this.#previewScene.environment = this.scene.environment;
+    this.#previewScene.environmentIntensity = this.scene.environmentIntensity;
     this.#previewCamera.position.set(0, 1.0, 2.6);
     this.#previewCamera.lookAt(0, 0.8, 0);
     this.disposer.add(() => {
       // Lights hold no GPU memory; the model's own clones are handled above.
+      this.#previewScene.environment = null;
       this.#previewScene.clear();
     });
     if (!this.services.assets.loaded) return;
@@ -303,8 +341,9 @@ export class CreationScene extends UiScene<'creation'> {
   }
 
   #portraitRow(): HTMLDivElement {
-    const tiles = this.#portraitChoices().map((index) =>
-      testId(
+    const tiles = this.#portraitChoices().map((index) => {
+      const source = portraitSource(index, this.#portraits);
+      return testId(
         h(
           'button',
           {
@@ -317,11 +356,13 @@ export class CreationScene extends UiScene<'creation'> {
               this.#renderForm();
             },
           },
-          PORTRAIT_GLYPHS[index % PORTRAIT_GLYPHS.length]!,
+          source.kind === 'image'
+            ? h('img', { class: 'portrait-img', src: source.url, alt: '', 'aria-hidden': 'true' })
+            : source.glyph,
         ),
         `portrait-${index}`,
-      ),
-    );
+      );
+    });
     return h('div', { class: 'creation-row' }, h('span', {}, 'Portrait'), h('div', { class: 'portrait-row' }, ...tiles)) as HTMLDivElement;
   }
 

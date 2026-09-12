@@ -187,6 +187,7 @@ class CanvasRenderer implements Renderer {
     // quad only (§4.2.4).
     this.gl.info.autoReset = false;
 
+    this.#markPreset();
     this.#watchSize();
     this.#armDprQuery();
     this.#teardown.push(() => {
@@ -238,7 +239,17 @@ class CanvasRenderer implements Renderer {
     if (preset === this.#preset) return;
     this.#preset = preset;
     this.gl.shadowMap.enabled = QUALITY[preset].shadowMapSize > 0;
+    this.#markPreset();
     this.#apply(true);
+  }
+
+  /**
+   * SPEC-020 20-a: the DOM half of the preset, the same contract `reduce-motion`
+   * uses — the theme's `backdrop-filter` is the one part of the UI that costs
+   * fill rate, so `low` drops it in CSS rather than in a second render path.
+   */
+  #markPreset(): void {
+    document.documentElement.classList.toggle('quality-low', this.#preset === 'low');
   }
 
   resize(): void {

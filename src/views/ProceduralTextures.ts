@@ -19,6 +19,7 @@ import type { Assets } from '@/core/Assets';
 import { latticeHash } from '@/core/Noise';
 import { hash32 } from '@/core/Rng';
 import type { GroundLayerId } from '@/data/ids';
+import type { PlanetDef } from '@/data/index';
 import type { TextureId } from '@/data/assets';
 
 export interface GroundLayer {
@@ -553,5 +554,63 @@ export function particleSprite(kind: SpriteKind): THREE.DataTexture {
   texture.userData['shared'] = true;
   texture.needsUpdate = true;
   spriteCache.set(kind, texture);
+  return texture;
+}
+
+// ------------------------------------------------------------- the star map
+
+/** SPEC-020 §4.4: the star-map globes are 256² (*initial tuning*). */
+const DISC_SIZE = 256;
+const discCache = new Map<string, THREE.DataTexture>();
+
+/**
+ * A planet's face for the star map (SPEC-020 §3): an equirectangular map of
+ * the world's own palette — deep water, continents lifted toward the accent,
+ * and ice caps at the poles — for `SphereGeometry` UVs. Deterministic from the
+ * planet id (never the save, like every other texture here) and cached for the
+ * session, so re-entering the map costs nothing.
+ */
+export function planetDisc(planet: PlanetDef, size: number = DISC_SIZE): THREE.DataTexture {
+  const key = `${planet.id}:${size}`;
+  const cached = discCache.get(key);
+  if (cached !== undefined) return cached;
+
+  const seed = hash32('tex', `disc_${planet.id}`);
+  const palette = planet.surface.palette;
+  const deep = hex(palette.fog).map((c) => c * 0.45) as [number, number, number];
+  const land = hex(palette.ground);
+  const high = hex(palette.accent);
+  const ice: [number, number, number] = [0.88, 0.93, 0.98];
+  const data = new Uint8Array(size * size * 4);
+  const texel: Texel = { r: 0, g: 0, b: 0, height: 0, rough: 0 };
+
+  for (let y = 0; y < size; y++) {
+    // Row 0 is a pole; `lat` is 0 at the equator and 1 at either cap.
+    const lat = Math.abs((y + 0.5) / size - 0.5) * 2;
+    const v = (y / size) * PERIOD;
+    for (let x = 0; x < size; x++) {
+      const u = (x / size) * PERIOD;
+      // Continents: fbm above the water line, ridges picking out the ranges.
+      const shelf = pFbm(seed, u, v, PERIOD, PERIOD, 5);
+      const relief = pRidged(seed + 3, u * 2, v * 2, PERIOD * 2, PERIOD * 2, 3);
+      const shore = smoothstep(-0.02, 0.12, shelf);
+      mix3(deep, land, shore, texel);
+      if (shore > 0) {
+        const peak = clamp01(relief * shore * 1.35 - 0.25);
+        mix3([texel.r, texel.g, texel.b], high, peak, texel);
+      }
+      // Caps: the poles freeze over, ragged where the coastline is.
+      const cap = smoothstep(0.62, 0.93, lat + shelf * 0.08);
+      mix3([texel.r, texel.g, texel.b], ice, cap, texel);
+      const at = (y * size + x) * 4;
+      data[at] = Math.round(clamp01(texel.r) * 255);
+      data[at + 1] = Math.round(clamp01(texel.g) * 255);
+      data[at + 2] = Math.round(clamp01(texel.b) * 255);
+      data[at + 3] = 255;
+    }
+  }
+
+  const texture = dataTexture(data, size, true);
+  discCache.set(key, texture);
   return texture;
 }

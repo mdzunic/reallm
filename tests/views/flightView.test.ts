@@ -20,12 +20,12 @@ import {
   type FrameShot,
 } from '@/views/FlightView';
 
-const QUALITY = { starfieldPoints: 40, asteroidCap: 12, maxParticles: 24 } as unknown as QualitySettings;
+const QUALITY = { starfieldPoints: 40, asteroidCap: 12, maxParticles: 24, post: 'lite' } as unknown as QualitySettings;
 
-function setup(): { scene: THREE.Scene; camera: THREE.PerspectiveCamera; view: FlightView } {
+function setup(quality: QualitySettings = QUALITY): { scene: THREE.Scene; camera: THREE.PerspectiveCamera; view: FlightView } {
   const scene = new THREE.Scene();
   const camera = new THREE.PerspectiveCamera(70, 16 / 9, 0.1, 600);
-  const view = new FlightView(scene, camera, { planet: PLANETS.cinder4, quality: QUALITY, reduceMotion: false, rng: new Rng(7) });
+  const view = new FlightView(scene, camera, { planet: PLANETS.cinder4, quality, reduceMotion: false, rng: new Rng(7) });
   return { scene, camera, view };
 }
 
@@ -33,7 +33,7 @@ function frame(): FlightFrame {
   return {
     ship: { x: 0, y: 0, vy: 0, bank: 0, alive: true },
     hazards: new Pool<FrameHazard>(() => ({ kind: 'asteroid', x: 0, y: 0, depth: 0, radius: 1 })),
-    shots: new Pool<FrameShot>(() => ({ x: 0, y: 0, depth: 0 })),
+    shots: new Pool<FrameShot>(() => ({ x: 0, y: 0, depth: 0, vDepth: 0 })),
     bursts: new Pool<FrameBurst>(() => ({ x: 0, y: 0, depth: 0, size: 1 })),
     progress: 0.5,
     stormActive: false,
@@ -44,6 +44,22 @@ function frame(): FlightFrame {
 
 function rock(f: FlightFrame, radius: number): void {
   Object.assign(f.hazards.alloc(), { kind: 'asteroid', x: 1, y: 2, depth: 60, radius });
+}
+
+function ship(f: FlightFrame, kind: 'fighter' | 'interceptor', depth: number): void {
+  Object.assign(f.hazards.alloc(), { kind, x: 0, y: 0, depth, radius: 1 });
+}
+
+/** Where instance `slot` of `mesh` was written, in world space. */
+function instanceAt(mesh: THREE.InstancedMesh, slot: number): THREE.Vector3 {
+  const matrix = new THREE.Matrix4();
+  mesh.getMatrixAt(slot, matrix);
+  return new THREE.Vector3().setFromMatrixPosition(matrix);
+}
+
+/** The per-instance colour gain written at `slot` (r = g = b by construction). */
+function gainAt(mesh: THREE.InstancedMesh, slot: number): number {
+  return (mesh.instanceColor as THREE.InstancedBufferAttribute).getX(slot);
 }
 
 function instanced(scene: THREE.Scene): THREE.InstancedMesh[] {
@@ -175,5 +191,159 @@ describe('FlightView art (PLAN R8)', () => {
     expect(camera.children).not.toContain(frameGroup);
     expect(scene.fog).toBeNull();
     expect(scene.background).toBeNull();
+  });
+});
+
+// SPEC-020 §4.3 / §4.1 — what this spec adds on top of the R8 dressing.
+describe('FlightView fx (SPEC-020 §4.3)', () => {
+  /** The engine-glow mesh: the only 0.6 m quad with depth testing switched off. */
+  function glows(scene: THREE.Scene): THREE.InstancedMesh {
+    return instanced(scene).find(
+      (mesh) =>
+        mesh.geometry instanceof THREE.PlaneGeometry &&
+        (mesh.material as THREE.MeshBasicMaterial).depthTest === false,
+    ) as THREE.InstancedMesh;
+  }
+
+  /** Ours are capsules, theirs are spheres; both carry the head and two ghosts. */
+  function shotMeshes(scene: THREE.Scene): { ours: THREE.InstancedMesh; theirs: THREE.InstancedMesh } {
+    const list = instanced(scene);
+    return {
+      ours: list.find((mesh) => mesh.geometry instanceof THREE.CapsuleGeometry) as THREE.InstancedMesh,
+      theirs: list.find((mesh) => mesh.geometry instanceof THREE.SphereGeometry) as THREE.InstancedMesh,
+    };
+  }
+
+  it('hangs an engine glow behind every fighter and interceptor nozzle (AC-10)', () => {
+    const { scene, view } = setup();
+    const f = frame();
+    ship(f, 'fighter', 40);
+    ship(f, 'interceptor', 40);
+    view.update(f, 1 / 60);
+
+    const mesh = glows(scene);
+    expect(mesh.count).toBe(2);
+    // The models' noses are +Z (§4.8), so the nozzle — and the glow behind it —
+    // is at −Z: further from the camera than the hull it belongs to.
+    expect(instanceAt(mesh, 0).z).toBeCloseTo(-40 - 1.3 * 1.2);
+    expect(instanceAt(mesh, 1).z).toBeCloseTo(-40 - 2.1 * 1.4);
+    const material = mesh.material as THREE.MeshBasicMaterial;
+    expect(material.blending).toBe(THREE.AdditiveBlending);
+    expect(material.color.getHex()).toBe(new THREE.Color(0x9fe3ff).getHex());
+    expect(material.depthWrite).toBe(false);
+    // Nose-on hazards put their own hull between the camera and the nozzle, so
+    // a depth-tested quad there is never rasterised (round-3 QA measured 0 px).
+    expect(material.depthTest).toBe(false);
+    expect((mesh.geometry as THREE.PlaneGeometry).parameters.width).toBe(0.6);
+    expect((mesh.geometry as THREE.PlaneGeometry).parameters.height).toBe(0.6);
+
+    // A frame with nothing on it puts the glows away again.
+    f.hazards.clear();
+    view.update(f, 1 / 60);
+    expect(glows(scene).count).toBe(0);
+  });
+
+  it('draws each shot as a bright head and two dim ghosts (AC-11)', () => {
+    const { scene, view } = setup();
+    const f = frame();
+    Object.assign(f.shots.alloc(), { x: 1, y: 2, depth: 30, vDepth: 100 });
+    Object.assign(f.hazards.alloc(), { kind: 'enemy_shot', x: 0, y: 0, depth: 20, vDepth: -60, radius: 0.4 });
+    view.update(f, 1 / 60);
+
+    const { ours, theirs } = shotMeshes(scene);
+    expect(ours.count).toBe(3);
+    expect(theirs.count).toBe(3);
+    // `p + v · lag` in depth, against the bolt's own signed velocity (§4.3).
+    expect(instanceAt(ours, 0).z).toBeCloseTo(-30);
+    expect(instanceAt(ours, 1).z).toBeCloseTo(-(30 + 100 * 0.02));
+    expect(instanceAt(ours, 2).z).toBeCloseTo(-(30 + 100 * 0.04));
+    expect(instanceAt(theirs, 1).z).toBeCloseTo(-(20 + -60 * 0.02));
+    // × 2.5 puts the head over SPEC-017's bloom threshold; the ghosts trail it.
+    [2.5, 1.2, 0.6].forEach((gain, tap) => expect(gainAt(ours, tap)).toBeCloseTo(gain));
+    expect(gainAt(theirs, 0)).toBeCloseTo(2.5);
+    for (const mesh of [ours, theirs]) {
+      expect((mesh.material as THREE.MeshBasicMaterial).blending).toBe(THREE.AdditiveBlending);
+      // Room for 64 bolts × 3 taps each.
+      expect(mesh.instanceMatrix.count).toBe(64 * 3);
+    }
+  });
+
+  it('explodes into a sprite pool of `maxParticles` plus a four-sprite flash (AC-12)', () => {
+    const { scene, view } = setup();
+    // No `Points` cloud is left for the explosions: only the starfield.
+    const points: THREE.Points[] = [];
+    scene.traverse((node) => {
+      if (node instanceof THREE.Points) points.push(node);
+    });
+    expect(points).toHaveLength(1);
+
+    const pool = instanced(scene).filter(
+      (mesh) => mesh.geometry instanceof THREE.PlaneGeometry && (mesh.material as THREE.MeshBasicMaterial).depthTest !== false,
+    );
+    expect(pool.map((mesh) => mesh.instanceMatrix.count)).toEqual([QUALITY.maxParticles, 16]);
+    for (const mesh of pool) expect((mesh.material as THREE.MeshBasicMaterial).blending).toBe(THREE.AdditiveBlending);
+
+    const f = frame();
+    Object.assign(f.bursts.alloc(), { x: 0, y: 0, depth: 20, size: 1 });
+    const dt = 1 / 60;
+    view.update(f, dt);
+    const [particles, flash] = pool as [THREE.InstancedMesh, THREE.InstancedMesh];
+    expect(particles.count).toBe(11); // round(6 + size · 5)
+    expect(flash.count).toBe(4);
+    // Both fade with their own life — 0.7 s for the pool, 0.12 s for the
+    // flash — and the flash burns at × 3 (SPEC-019 §4.4 `death`).
+    expect(gainAt(particles, 0)).toBeCloseTo((0.7 - dt) / 0.7);
+    expect(gainAt(flash, 0)).toBeCloseTo(3 * ((0.12 - dt) / 0.12));
+    // The bursts pool is drained by the view, and the sprites expire.
+    expect(f.bursts.size).toBe(0);
+    view.update(f, 1);
+    expect(particles.count).toBe(0);
+    expect(flash.count).toBe(0);
+  });
+
+  it('hangs a two-element lens flare on the sun, and only where post runs (AC-13, 20-a)', () => {
+    const lit = setup();
+    const sun = lit.scene.children.find(
+      (node) => node instanceof THREE.DirectionalLight && node.children.length > 0,
+    ) as THREE.DirectionalLight;
+    expect(sun).toBeDefined();
+    const flare = sun.children[0] as THREE.Object3D & { readonly isLensflare?: boolean };
+    expect(flare.type).toBe('Lensflare');
+    expect(sun.position.z).toBeLessThan(-320); // past the planet's far shoulder
+
+    const off = setup({ ...QUALITY, post: 'off' } as unknown as QualitySettings);
+    expect(off.scene.children.some((node) => node instanceof THREE.DirectionalLight && node.children.length > 0)).toBe(false);
+
+    // The flare's framebuffer textures and its elements' maps are outside the
+    // geometry/material walk `disposeObject3D` does, so the view frees them.
+    const releasable = flare as unknown as { dispose: () => void };
+    let released = false;
+    releasable.dispose = (): void => {
+      released = true;
+    };
+    lit.view.dispose();
+    expect(released).toBe(true);
+  });
+
+  it('shifts the sky window toward the planet accent during an ion storm (AC-14, 20-g)', () => {
+    const { scene, view } = setup();
+    view.useArt({ sky: new THREE.Texture() });
+    const dome = scene.children.find(
+      (node) => node instanceof THREE.Mesh && node.renderOrder === -10,
+    ) as THREE.Mesh<THREE.SphereGeometry, THREE.MeshBasicMaterial>;
+    expect(dome.material.color.getHex()).toBe(0xffffff);
+
+    const f = frame();
+    f.stormActive = true;
+    for (let i = 0; i < 60; i++) view.update(f, 1 / 60);
+    expect(view.stormTint).toBeCloseTo(1);
+    const accent = new THREE.Color(PLANETS.cinder4.surface.palette.accent);
+    expect(dome.material.color.getHex()).toBe(accent.getHex());
+
+    // It clears again when the storm passes.
+    f.stormActive = false;
+    for (let i = 0; i < 60; i++) view.update(f, 1 / 60);
+    expect(view.stormTint).toBe(0);
+    expect(dome.material.color.getHex()).toBe(0xffffff);
   });
 });

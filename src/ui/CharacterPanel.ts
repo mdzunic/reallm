@@ -8,6 +8,7 @@ import { INVENTORY_SLOTS, type Economy } from '@/systems/Economy';
 import { computePlayerStats, failText, gearCompareText, gearTooltip } from '@/systems/UiHelpers';
 import { confirmSheet } from '@/ui/ConfirmSheet';
 import { el, h, testId, type UiRoot } from '@/ui/dom';
+import { portraitManifest, portraitSource } from '@/ui/portraits';
 
 export interface CharacterDeps {
   ui: UiRoot;
@@ -21,11 +22,21 @@ export class CharacterPanel {
   readonly #deps: CharacterDeps;
   /** The tapped inventory slot whose action bar is open. */
   #selected: number | null = null;
+  /** SPEC-020 §4.6: the portrait files that shipped; empty means glyphs. */
+  #available: ReadonlySet<number> = new Set();
 
   constructor(container: HTMLElement, deps: CharacterDeps) {
     this.#container = container;
     this.#deps = deps;
     this.refresh();
+    // The manifest is a session-memoised fetch, so this is one request per
+    // run at most; a panel the player has already tabbed away from is gone
+    // from the document and is left alone.
+    void portraitManifest().then((available) => {
+      if (available.size === 0 || !this.#container.isConnected) return;
+      this.#available = available;
+      this.refresh();
+    });
   }
 
   refresh(): void {
@@ -42,10 +53,25 @@ export class CharacterPanel {
     const stats = computePlayerStats(player.classId, player.attributes, player.level, this.#deps.data.equipped.weapon);
     const armor = ITEMS[this.#deps.data.equipped.armor];
     const a = player.attributes;
+    // SPEC-020 §4.6: the chosen bust when it shipped, the creation screen's
+    // glyph when it did not.
+    const face = portraitSource(player.appearance.portrait, this.#available);
     return h(
       'section',
       { class: 'char-block' },
-      h('p', { class: 'char-title' }, `${player.name} — Lv ${player.level}`),
+      h(
+        'p',
+        { class: 'char-title' },
+        testId(
+          h(
+            'span',
+            { class: 'portrait char-portrait', 'aria-hidden': 'true' },
+            face.kind === 'image' ? h('img', { class: 'portrait-img', src: face.url, alt: '' }) : face.glyph,
+          ),
+          'character-portrait',
+        ),
+        `${player.name} — Lv ${player.level}`,
+      ),
       testId(
         h(
           'div',
