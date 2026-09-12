@@ -302,12 +302,31 @@ export const SURFACE_ASSETS = {
   }
 >;
 
+/**
+ * The lazily loaded shared surface set (SPEC-019 §4.8): models every planet's
+ * surface visit uses, fetched with the per-planet drop on scene enter — never
+ * at boot (PLAN R6-5: the boot manifest stays five files, and
+ * `e2e/boot-assets.spec.ts` measures exactly that traffic). The shared load
+ * promise dedupes by id, so each file is fetched once per session.
+ */
+export const SURFACE_SHARED_ASSETS = {
+  models: {
+    /** The escort probe (PLAN R8-1): a centred 1 m drone, lens toward +Z. */
+    probe: 'assets/models/probe.glb',
+  },
+  textures: {},
+} as const;
+
 /** Every prop model id across the biome tables — the `PROP_MODELS` universe. */
 export type SurfaceModelId = { [B in SurfaceBiome]: keyof (typeof SURFACE_ASSETS)[B]['models'] }[SurfaceBiome];
 /** Every lazily loaded ground texture id (`<layer>_albedo` / `<layer>_nr`). */
 export type SurfaceTextureId = { [B in SurfaceBiome]: keyof (typeof SURFACE_ASSETS)[B]['textures'] }[SurfaceBiome];
 
-export type ModelId = keyof typeof ASSETS.models | keyof typeof FLIGHT_ASSETS.models | SurfaceModelId;
+export type ModelId =
+  | keyof typeof ASSETS.models
+  | keyof typeof FLIGHT_ASSETS.models
+  | keyof typeof SURFACE_SHARED_ASSETS.models
+  | SurfaceModelId;
 export type TextureId = keyof typeof ASSETS.textures | keyof typeof FLIGHT_ASSETS.textures | SurfaceTextureId;
 
 /** Every key of `ASSETS.audio` — a sprite bank or a music track (§2.4). */

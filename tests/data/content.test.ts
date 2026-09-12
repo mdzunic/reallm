@@ -647,3 +647,26 @@ describe('unknown ids are compile errors (SPEC-009 §6, E26)', () => {
     expect([chapter9IsNotAFlag, chapter1IsAFlag]).toEqual([false, true]);
   });
 });
+
+// ------------------------------------------------------------- SPEC-019 §4.8
+
+import { ASSETS, FLIGHT_ASSETS, SURFACE_ASSETS, SURFACE_SHARED_ASSETS } from '@/data/index';
+
+describe('the boot manifest stays five files (SPEC-019 AC-34 … AC-36, PLAN R6-5)', () => {
+  it('no surface or flight model id leaks into ASSETS.models', () => {
+    const boot = new Set(Object.keys(ASSETS.models));
+    const lazy = [
+      ...Object.keys(FLIGHT_ASSETS.models),
+      ...Object.keys(SURFACE_SHARED_ASSETS.models),
+      ...Object.values(SURFACE_ASSETS).flatMap((drop) => Object.keys(drop.models)),
+    ];
+    expect(lazy.filter((id) => boot.has(id))).toEqual([]);
+    // The five files the boot e2e suite measures: three models, two textures.
+    expect(Object.keys(ASSETS.models).length + Object.keys(ASSETS.textures).length).toBe(5);
+  });
+
+  it('the probe rides the lazily loaded shared surface set, and the follower names it', () => {
+    expect(SURFACE_SHARED_ASSETS.models.probe).toBe('assets/models/probe.glb');
+    expect(FOLLOWERS.science_probe.model).toBe('probe');
+  });
+});
