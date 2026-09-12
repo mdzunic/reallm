@@ -110,6 +110,37 @@ export const MUSIC_IDS = [
 ] as const;
 export type MusicId = (typeof MUSIC_IDS)[number];
 
+/**
+ * The ground texture layers of SPEC-018 §4.5 — every planet blends two of
+ * them, and `views/ProceduralTextures.ts` can synthesise each one when the
+ * committed CC0 file is missing.
+ */
+export const GROUND_LAYER_IDS = [
+  'sand',
+  'cracked_earth',
+  'rock',
+  'snow',
+  'ice',
+  'moss',
+  'jungle_floor',
+  'basalt',
+  'lava_rock',
+  'chitin',
+  'flesh',
+  'grass',
+  'soil',
+] as const;
+export type GroundLayerId = (typeof GROUND_LAYER_IDS)[number];
+
+/** The instanced detail kinds of SPEC-018 §4.6. */
+export type ScatterKind = 'pebbles' | 'tufts' | 'bones' | 'crystals' | 'spores' | 'slag';
+
+/** The decal atlas tiles of SPEC-018 §4.5 (`slick` and `frost` share one). */
+export type DecalKind = 'crater' | 'scorch' | 'cracks' | 'slick' | 'frost';
+
+/** The silhouette-ring shapes of SPEC-018 §4.8. */
+export type BoundaryKind = 'dunes' | 'ice_wall' | 'jungle_bank' | 'lava_ridge' | 'chitin_wall' | 'hills';
+
 // `DamageSource` used to live here as a `string` placeholder. SPEC-011 owns
 // the combat model, and its union needs `EnemyId` — a table-derived id this
 // leaf file cannot name — so the real type is declared in `data/index.ts` and

@@ -19,7 +19,16 @@
 // (SPEC-001 §4, §8).
 import type { ModelId } from '@/data/assets';
 import type { EnemyId } from '@/data/enemies';
-import type { MusicId, PlanetId, ResourceId, WeatherId } from '@/data/ids';
+import type {
+  BoundaryKind,
+  DecalKind,
+  GroundLayerId,
+  MusicId,
+  PlanetId,
+  ResourceId,
+  ScatterKind,
+  WeatherId,
+} from '@/data/ids';
 import type { MissionId, Requirement } from '@/data/missions';
 import { POI_LABELS, type PoiId } from '@/data/pois';
 import type { WaveId } from '@/data/waves';
@@ -43,6 +52,29 @@ export interface PoiDef {
   readonly model: ModelId | 'procedural';
 }
 
+/**
+ * Everything the surface environment draws for one planet (SPEC-018 §4.1,
+ * *initial tuning*): the lighting rig, the two-layer ground, the visual-only
+ * relief, scatter, decals and the arena-edge boundary.
+ */
+export interface SurfaceLook {
+  readonly light: {
+    readonly sun: { readonly color: string; readonly intensity: number; readonly azimuth: number; readonly elevation: number };
+    readonly sky: string;
+    readonly ground: string;
+    readonly ambient: number;
+  };
+  readonly ground: {
+    readonly layers: readonly [GroundLayerId, GroundLayerId];
+    readonly tileMetres: readonly [number, number];
+    readonly cracks?: { readonly color: string; readonly intensity: number };
+  };
+  readonly relief: { readonly amplitude: number; readonly wavelength: number; readonly ridged: number; readonly bermHeight: number };
+  readonly scatter: { readonly kind: ScatterKind; readonly density: number; readonly second?: ScatterKind };
+  readonly decals: readonly DecalKind[];
+  readonly boundary: BoundaryKind;
+}
+
 export interface PlanetDef {
   readonly id: PlanetId;
   readonly name: string;
@@ -63,6 +95,7 @@ export interface PlanetDef {
     readonly halfSize: number;
     readonly palette: { readonly ground: string; readonly sky: string; readonly fog: string; readonly accent: string };
     readonly fogDensity: number;
+    readonly look: SurfaceLook;
     readonly weather: {
       readonly cycle: readonly WeatherId[];
       readonly calmSeconds: readonly [number, number];
@@ -100,7 +133,22 @@ export const PLANETS = {
     surface: {
       halfSize: 180,
       palette: { ground: '#c19a5b', sky: '#e8b56a', fog: '#d8a866', accent: '#7a4a22' },
-      fogDensity: 0.012,
+      // SPEC-018 §4.8 (*initial tuning*): thin enough that the berm, not the
+      // fog, is what hides the arena edge.
+      fogDensity: 0.014,
+      look: {
+        light: {
+          sun: { color: '#ffd9a8', intensity: 2.8, azimuth: 35, elevation: 52 },
+          sky: '#e8b56a',
+          ground: '#8a6a3a',
+          ambient: 0.55,
+        },
+        ground: { layers: ['sand', 'cracked_earth'], tileMetres: [4, 5.5] },
+        relief: { amplitude: 0.5, wavelength: 30, ridged: 0.6, bermHeight: 5 },
+        scatter: { kind: 'bones', density: 2.5, second: 'pebbles' },
+        decals: ['crater', 'scorch'],
+        boundary: 'dunes',
+      },
       weather: { cycle: ['sandstorm', 'heatwave'], calmSeconds: [90, 150], stormSeconds: [45, 75] },
       pois: [
         { id: 'landing_pad', kind: 'landing_pad', label: POI_LABELS.landing_pad, count: 1, band: [0, 0], radius: 6, model: 'procedural' },
@@ -140,6 +188,19 @@ export const PLANETS = {
       halfSize: 180,
       palette: { ground: '#dbe9f2', sky: '#a8c6dd', fog: '#c9dde9', accent: '#4a7a99' },
       fogDensity: 0.02,
+      look: {
+        light: {
+          sun: { color: '#eaf4ff', intensity: 2.4, azimuth: 60, elevation: 60 },
+          sky: '#a8c6dd',
+          ground: '#6f8ea6',
+          ambient: 0.6,
+        },
+        ground: { layers: ['snow', 'ice'], tileMetres: [4, 6] },
+        relief: { amplitude: 0.4, wavelength: 26, ridged: 0.3, bermHeight: 8 },
+        scatter: { kind: 'crystals', density: 2.0, second: 'pebbles' },
+        decals: ['frost', 'cracks'],
+        boundary: 'ice_wall',
+      },
       weather: { cycle: ['blizzard', 'avalanche'], calmSeconds: [90, 150], stormSeconds: [45, 90] },
       pois: [
         { id: 'landing_pad', kind: 'landing_pad', label: POI_LABELS.landing_pad, count: 1, band: [0, 0], radius: 6, model: 'procedural' },
@@ -179,7 +240,22 @@ export const PLANETS = {
     surface: {
       halfSize: 200,
       palette: { ground: '#4f6b39', sky: '#8fae72', fog: '#6f8a55', accent: '#c2d98a' },
-      fogDensity: 0.03,
+      // SPEC-018 §4.8 (*initial tuning*): the jungle reads dense from the
+      // canopy ring and decals now, so the fog itself thins.
+      fogDensity: 0.024,
+      look: {
+        light: {
+          sun: { color: '#fff1c8', intensity: 2.0, azimuth: 20, elevation: 48 },
+          sky: '#8fae72',
+          ground: '#2f4a24',
+          ambient: 0.5,
+        },
+        ground: { layers: ['moss', 'jungle_floor'], tileMetres: [3.5, 5] },
+        relief: { amplitude: 0.45, wavelength: 22, ridged: 0.4, bermHeight: 6 },
+        scatter: { kind: 'tufts', density: 4.0, second: 'spores' },
+        decals: ['slick', 'cracks'],
+        boundary: 'jungle_bank',
+      },
       weather: { cycle: ['spore_storm'], calmSeconds: [100, 160], stormSeconds: [60, 75] },
       pois: [
         { id: 'landing_pad', kind: 'landing_pad', label: POI_LABELS.landing_pad, count: 1, band: [0, 0], radius: 6, model: 'procedural' },
@@ -223,7 +299,21 @@ export const PLANETS = {
     surface: {
       halfSize: 200,
       palette: { ground: '#3a2f2a', sky: '#7a3320', fog: '#5a2f22', accent: '#ff6a2a' },
-      fogDensity: 0.035,
+      // SPEC-018 §4.8 (*initial tuning*): the crack glow carries the menace.
+      fogDensity: 0.026,
+      look: {
+        light: {
+          sun: { color: '#ff8a4a', intensity: 1.8, azimuth: 15, elevation: 25 },
+          sky: '#7a3320',
+          ground: '#2a1a14',
+          ambient: 0.45,
+        },
+        ground: { layers: ['basalt', 'lava_rock'], tileMetres: [4.5, 6], cracks: { color: '#ff6a2a', intensity: 3 } },
+        relief: { amplitude: 0.5, wavelength: 28, ridged: 0.8, bermHeight: 7 },
+        scatter: { kind: 'slag', density: 2.5 },
+        decals: ['scorch', 'cracks'],
+        boundary: 'lava_ridge',
+      },
       weather: { cycle: ['radiation_storm', 'heatwave'], calmSeconds: [90, 140], stormSeconds: [60, 90] },
       pois: [
         { id: 'landing_pad', kind: 'landing_pad', label: POI_LABELS.landing_pad, count: 1, band: [0, 0], radius: 6, model: 'procedural' },
@@ -262,7 +352,22 @@ export const PLANETS = {
     surface: {
       halfSize: 160,
       palette: { ground: '#3a2f4a', sky: '#241a33', fog: '#2f2440', accent: '#c04ad0' },
-      fogDensity: 0.05,
+      // SPEC-018 §4.8 (*initial tuning*): still the thickest, but no longer so
+      // dense the vein glow drowns.
+      fogDensity: 0.032,
+      look: {
+        light: {
+          sun: { color: '#b07ad8', intensity: 1.3, azimuth: 40, elevation: 40 },
+          sky: '#3a2a4a',
+          ground: '#1a1424',
+          ambient: 0.4,
+        },
+        ground: { layers: ['chitin', 'flesh'], tileMetres: [5, 6.5], cracks: { color: '#c04ad0', intensity: 1.5 } },
+        relief: { amplitude: 0.45, wavelength: 20, ridged: 0.5, bermHeight: 8 },
+        scatter: { kind: 'spores', density: 2.0, second: 'crystals' },
+        decals: ['slick'],
+        boundary: 'chitin_wall',
+      },
       weather: null,
       pois: [
         { id: 'landing_pad', kind: 'landing_pad', label: POI_LABELS.landing_pad, count: 1, band: [0, 0], radius: 6, model: 'procedural' },
@@ -297,7 +402,21 @@ export const PLANETS = {
     surface: {
       halfSize: 180,
       palette: { ground: '#6f9f5a', sky: '#bfe0f0', fog: '#a9d0b0', accent: '#f0e0a0' },
-      fogDensity: 0.008,
+      // SPEC-018 §4.8 (*initial tuning*): the clearest sky in the game.
+      fogDensity: 0.01,
+      look: {
+        light: {
+          sun: { color: '#fff6dc', intensity: 2.6, azimuth: 30, elevation: 55 },
+          sky: '#bfe0f0',
+          ground: '#4f7a3a',
+          ambient: 0.6,
+        },
+        ground: { layers: ['grass', 'soil'], tileMetres: [3.5, 5] },
+        relief: { amplitude: 0.4, wavelength: 32, ridged: 0.2, bermHeight: 5 },
+        scatter: { kind: 'tufts', density: 5.0, second: 'pebbles' },
+        decals: ['crater'],
+        boundary: 'hills',
+      },
       weather: null,
       pois: [
         { id: 'landing_pad', kind: 'landing_pad', label: POI_LABELS.landing_pad, count: 1, band: [0, 0], radius: 6, model: 'procedural' },

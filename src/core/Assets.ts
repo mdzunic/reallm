@@ -87,6 +87,7 @@ export class Assets {
   #gltfLoader: AssetLoaders['gltf'] | null = null;
   #textureLoader: AssetLoaders['texture'] | null = null;
   #inflight: Promise<void> | null = null;
+  #inflightManifest: AssetManifest | null = null;
   #loaded = false;
   #maxAnisotropy = 1;
 
@@ -105,9 +106,17 @@ export class Assets {
    * asks for what is missing (D-30); concurrent calls share one promise.
    */
   load(manifest: AssetManifest, onProgress?: (done: number, total: number) => void): Promise<void> {
-    if (this.#inflight) return this.#inflight;
+    if (this.#inflight) {
+      // Concurrent calls for the same manifest share the promise (D-30); a
+      // *different* manifest queues behind the current pass so its items are
+      // still fetched (SPEC-018 18-m: lazy per-planet loads after boot).
+      if (this.#inflightManifest === manifest) return this.#inflight;
+      return this.#inflight.catch(() => undefined).then(() => this.load(manifest, onProgress));
+    }
+    this.#inflightManifest = manifest;
     const run = this.#loadAll(manifest, onProgress).finally(() => {
       this.#inflight = null;
+      this.#inflightManifest = null;
     });
     this.#inflight = run;
     return run;
@@ -125,6 +134,14 @@ export class Assets {
   /** The model's clips, shared — do not mutate. `[]` for a model without any (D-32). */
   animations(id: ModelId): AnimationClip[] {
     return this.#requireModel(id).animations;
+  }
+
+  /**
+   * True once `load()` has cached this model — how the surface prop path asks
+   * "did the lazy per-planet drop land yet?" without throwing (SPEC-018 §4.10).
+   */
+  hasModel(id: string): boolean {
+    return this.#models.has(id);
   }
 
   /** The one shared instance, tagged `userData.shared === true` (D-33). */

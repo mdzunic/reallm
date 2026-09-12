@@ -10,9 +10,10 @@
 // pinned by tests/core/pressEdges.test.ts).
 import * as THREE from 'three';
 import type { EventBus, GameEvents } from '@/core/Events';
+import { log } from '@/core/Log';
 import { Pool } from '@/core/Pool';
 import { PressEdges } from '@/core/PressEdges';
-import type { Look } from '@/core/Quality';
+import { DEFAULT_LOOK, type Look } from '@/core/Quality';
 import { newSave, type CharacterCreation, type SaveV1 } from '@/core/Save';
 import type { GameServices } from '@/core/Services';
 import type { SceneParams } from '@/core/StateMachine';
@@ -24,6 +25,7 @@ import {
   ITEMS,
   MISSIONS,
   PLANETS,
+  SURFACE_ASSETS,
   TUNING,
   type Dialogue,
   type DialogueId,
@@ -50,6 +52,7 @@ import { SpawnDirector, type FrustumXZ } from '@/systems/Spawn';
 import { Weather, WEATHER_EFFECTS, type WeatherEffects } from '@/systems/Weather';
 import { hasNodeRadar } from '@/systems/UiHelpers';
 import { UiScene } from '@/scenes/base';
+import { layerFromAssets } from '@/views/ProceduralTextures';
 import { SurfaceView } from '@/views/SurfaceView';
 import { confirmSheet } from '@/ui/ConfirmSheet';
 import { DeathOverlay } from '@/ui/DeathOverlay';
@@ -360,10 +363,34 @@ export class SurfaceScene extends UiScene<'surface'> {
       follower: null,
     };
 
-    // §4.1 step 2: the world view.
-    const view = new SurfaceView(this.scene, layout, planet, services.renderer.quality);
+    // §4.1 step 2: the world view (SPEC-018: with the asset cache, so the
+    // sculpted props can take the per-planet GLBs once they land).
+    const view = new SurfaceView(this.scene, layout, planet, services.renderer.quality, services.assets);
+    view.reduceMotion = services.settings.get().reduceMotion;
     this.#view = view;
     this.disposer.add(() => view.dispose());
+
+    // SPEC-018 §4.10: the lazy per-planet drop. The shared promise dedupes by
+    // id; the `.then` checks disposal before touching the view (18-m).
+    const surfaceAssets = SURFACE_ASSETS[planet.biome];
+    if (Object.keys(surfaceAssets.models).length + Object.keys(surfaceAssets.textures).length > 0) {
+      let disposed = false;
+      this.disposer.add(() => {
+        disposed = true;
+      });
+      void services.assets
+        .load({ ...surfaceAssets, audio: {} })
+        .then(() => {
+          if (disposed) return;
+          const [layerA, layerB] = planet.surface.look.ground.layers;
+          const [metresA, metresB] = planet.surface.look.ground.tileMetres;
+          view.setGroundTextures(
+            layerFromAssets(services.assets, layerA, metresA),
+            layerFromAssets(services.assets, layerB, metresB),
+          );
+        })
+        .catch((cause) => log.warn('surface', 'planet assets unavailable; procedural layers stay', cause));
+    }
     // SPEC-017 §4.1: the planet's grade only exists once the view does, so the
     // base's `enter()` pass ran without it — rebuild it now, through the same
     // path, with `look()` below feeding it.
@@ -526,6 +553,7 @@ export class SurfaceScene extends UiScene<'surface'> {
         time: world.time,
       });
       this.#view?.setArena(world.arena);
+      this.#forwardGrade();
       if (this.#minimapIn <= 0) {
         this.#minimapIn = MINIMAP_INTERVAL;
         this.#drawMinimap(world);
@@ -609,6 +637,48 @@ export class SurfaceScene extends UiScene<'surface'> {
     }
     if (this.#layout !== null) info['layoutHash'] = this.#layout.hash;
     return info;
+  }
+
+  // ----------------------------------------------------------------- grade
+
+  // SPEC-018 §4.9: the last forwarded grade and one reused partial — the
+  // comparison and the call allocate nothing per frame (SPEC-001 §7).
+  readonly #lastGrade = { vignette: -1, desaturate: -1, tint: [-1, -1, -1] as [number, number, number] };
+  readonly #gradeLook: Partial<Look> = { vignette: 0, saturation: 1, tint: [1, 1, 1] };
+
+  /** Forward the storm grade through `renderer.setLook` when it changed. */
+  #forwardGrade(): void {
+    const view = this.#view;
+    if (view === null) return;
+    const grade = view.grade;
+    const last = this.#lastGrade;
+    if (
+      grade.vignette === last.vignette &&
+      grade.desaturate === last.desaturate &&
+      grade.tint[0] === last.tint[0] &&
+      grade.tint[1] === last.tint[1] &&
+      grade.tint[2] === last.tint[2]
+    ) {
+      return;
+    }
+    last.vignette = grade.vignette;
+    last.desaturate = grade.desaturate;
+    last.tint[0] = grade.tint[0];
+    last.tint[1] = grade.tint[1];
+    last.tint[2] = grade.tint[2];
+
+    // On top of the planet's own grade: the base vignette widens, saturation
+    // drains, and the storm tint multiplies the planet tint.
+    const base = view.look;
+    const look = this.#gradeLook;
+    look.vignette = DEFAULT_LOOK.vignette + grade.vignette;
+    look.saturation = (base.saturation ?? DEFAULT_LOOK.saturation) * (1 - grade.desaturate);
+    const baseTint = base.tint ?? DEFAULT_LOOK.tint;
+    const tint = look.tint as [number, number, number];
+    tint[0] = baseTint[0] * grade.tint[0];
+    tint[1] = baseTint[1] * grade.tint[1];
+    tint[2] = baseTint[2] * grade.tint[2];
+    this.services.renderer.setLook(look);
   }
 
   // ------------------------------------------------------- player & camera

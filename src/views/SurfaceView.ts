@@ -1,13 +1,21 @@
-// The surface world view (SPEC-012 §4.10) — entity → mesh, read-only over the
-// frame the scene hands in. Budget shape: ground 1, obstacles and props
-// instanced per kind, one small mesh per POI, nodes 2 instanced meshes,
-// pickups 3, projectiles 1, storm particles 1, player + follower, plus the
-// enemy recipe parts — ≤ 80 draw calls on medium (AC-54).
+// The surface world view (SPEC-012 §4.10, SPEC-018) — entity → mesh, read-only
+// over the frame the scene hands in. SPEC-018 gives it the environment: the
+// shared height field, textured splat terrain tiles, sculpted props and POIs,
+// deterministic scatter and decals, the berm-and-silhouette boundary, storm
+// sprites and the weather grade. Budget (§4.11, medium): ≤ 80 scene draws,
+// ≤ 120 k triangles.
+//
+// The simulation stays on y = 0 (SPEC-012 §2): every height here is visual,
+// sampled from `field.heightAt` — the one sampler the tiles, entities, scatter
+// and boundary all share, so nothing ever floats or clips a seam.
 import * as THREE from 'three';
-import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { disposeObject3D } from '@/core/Disposer';
+import type { Assets } from '@/core/Assets';
+import { buildHeightField, type HeightField } from '@/core/HeightField';
+import { hash01 } from '@/core/Noise';
+import { hash32 } from '@/core/Rng';
+import type { Look, QualityPreset, QualitySettings } from '@/core/Quality';
 import type { Pool } from '@/core/Pool';
-import type { Look, QualitySettings } from '@/core/Quality';
 import type { PlanetDef, ResourceId } from '@/data/index';
 import type { EnemyEntity } from '@/entities/Enemy';
 import type { FollowerEntity } from '@/entities/Follower';
@@ -15,20 +23,41 @@ import type { PlayerEntity } from '@/entities/Player';
 import type { ProjectileEntity } from '@/entities/Projectile';
 import { buildEnvironment, skyParamsFor } from '@/views/Environment';
 import { EnemyMeshes, INSTANCES_PER_PART } from '@/views/ProceduralMeshes';
+import { groundLayer, type GroundLayer } from '@/views/ProceduralTextures';
+import { buildScatter, buildDecals } from '@/views/Scatter';
+import {
+  boundaryGeometry,
+  obstacleGeometry,
+  poiGeometry,
+  type ObstacleKind,
+  type PoiKind,
+} from '@/views/SurfaceProps';
+import { StormParticles, STORM_LOOK, type ParticleKind } from '@/views/StormParticles';
+import { buildTerrainTiles, createTerrainMaterial, setTerrainLayers, terrainUniforms } from '@/views/TerrainMesh';
+
+export type { ObstacleKind, PoiKind } from '@/views/SurfaceProps';
+export type { ParticleKind } from '@/views/StormParticles';
 
 // Structural mirrors of the `systems/` shapes this view reads. Views must not
 // import `systems` (SPEC-001 §4), and the scene passes the real objects — the
 // compiler checks the fit at the call site.
-export type ObstacleKind = 'rock' | 'ruin' | 'spire' | 'vent' | 'tree';
-export type PoiKind = 'landing_pad' | 'scan' | 'reach' | 'deliver' | 'arena' | 'defend' | 'escort_start' | 'landmark';
-export type ParticleKind = 'sand' | 'snow' | 'spores' | 'ash' | 'heat' | 'none';
-
 export interface ViewWeather {
   fogMult: number;
   particles: ParticleKind;
+  /** 0..1; what drives the grade's vignette (SPEC-018 §4.9). */
+  visibility: number;
+}
+
+/** What `setWeather` writes and the scene forwards to `renderer.setLook`. */
+export interface ViewGrade {
+  vignette: number;
+  tint: [number, number, number];
+  desaturate: number;
 }
 
 export interface ViewLayout {
+  /** The pinned layout hash — the seed every decoration stream derives from. */
+  hash: number;
   halfSize: number;
   pois: readonly { kind: PoiKind; x: number; z: number; radius: number }[];
   obstacles: readonly { x: number; z: number; radius: number; kind: ObstacleKind }[];
@@ -72,24 +101,10 @@ const RESOURCE_COLORS: Record<ResourceId, string> = {
   lithium: '#c8b8ff',
 };
 
-const PARTICLE_COLORS: Record<ParticleKind, string> = {
-  sand: '#e0b070',
-  // 17-f: pure white snow sat above the 0.85 bloom threshold and smeared the
-  // whole storm into a glow. Held just under it, it reads as snow again.
-  snow: '#e6ecf2',
-  spores: '#b0e080',
-  ash: '#909090',
-  heat: '#ffd0a0',
-  none: '#ffffff',
-};
-
-const PARTICLE_COUNT = 150;
-const PARTICLE_BOX = 44;
-
 // -------------------------------------------------------- SPEC-017 §4.5–§4.7
 
-/** The shadow-casting key light's offset from the player, in metres. */
-const KEY_OFFSET = { x: 28, y: 46, z: 18 } as const;
+/** How far along the sun direction the key light sits, in metres (§4.1). */
+const KEY_DISTANCE = 60;
 /** Half-extent of the orthographic shadow camera — a little past the draw distance. */
 const SHADOW_EXTENT = 34;
 /** Blob-shadow opacity with no shadow map, and with one (§4.6). */
@@ -108,83 +123,25 @@ const PROJECTILE_GAIN = 2.5;
 /** Image-based lighting on the surface is a fill light, not the key (§4.4). */
 const ENVIRONMENT_INTENSITY = 0.6;
 
+// ------------------------------------------------------------ SPEC-018 §4.8
+
+/** The silhouette ring band past the arena edge, in metres. */
+const RING_INNER = 6;
+const RING_OUTER = 28;
+/** Ring instances spaced ≈ 12 m along the square boundary. */
+const RING_SPACING = 12;
+const RING_MIN = 80;
+const RING_MAX = 140;
+/** SPEC-012 §4.3 — the fixed camera the storm quads billboard toward. */
+const CAMERA_PITCH = (55 * Math.PI) / 180;
+const CAMERA_YAW = (45 * Math.PI) / 180;
+/** §4.9: lightning rolls once per 2.5 s window, flashes ×4 for two frames. */
+const LIGHTNING_WINDOW = 2.5;
+const LIGHTNING_FLASH_SECONDS = 0.05;
+
 const scratchMatrix = new THREE.Matrix4();
 const scratchColor = new THREE.Color();
-
-function obstacleGeometry(kind: ObstacleKind): THREE.BufferGeometry {
-  switch (kind) {
-    case 'rock':
-      return new THREE.DodecahedronGeometry(1);
-    case 'ruin':
-      return new THREE.BoxGeometry(1.6, 1.2, 1.2);
-    case 'spire':
-      return new THREE.ConeGeometry(0.8, 2.6, 6);
-    case 'vent': {
-      const g = new THREE.CylinderGeometry(0.7, 1.1, 1.2, 8);
-      g.translate(0, 0.6, 0);
-      return g;
-    }
-    case 'tree': {
-      const trunk = new THREE.CylinderGeometry(0.15, 0.22, 1.2, 6);
-      trunk.translate(0, 0.6, 0);
-      const crown = new THREE.ConeGeometry(0.9, 1.8, 7);
-      crown.translate(0, 2, 0);
-      return mergeGeometries([trunk, crown]);
-    }
-  }
-}
-
-function poiGeometry(kind: PoiKind): THREE.BufferGeometry {
-  switch (kind) {
-    case 'landing_pad': {
-      const g = new THREE.CylinderGeometry(5, 5.4, 0.4, 16);
-      g.translate(0, 0.2, 0);
-      return g;
-    }
-    case 'scan': {
-      const mast = new THREE.CylinderGeometry(0.12, 0.2, 3, 6);
-      mast.translate(0, 1.5, 0);
-      const dish = new THREE.SphereGeometry(0.5, 8, 6);
-      dish.translate(0, 3.1, 0);
-      return mergeGeometries([mast, dish]);
-    }
-    case 'reach': {
-      const g = new THREE.ConeGeometry(0.8, 2.4, 5);
-      g.translate(0, 1.2, 0);
-      return g;
-    }
-    case 'deliver': {
-      const g = new THREE.BoxGeometry(1.6, 1.6, 1.6);
-      g.translate(0, 0.8, 0);
-      return g;
-    }
-    case 'arena': {
-      const g = new THREE.TorusGeometry(1, 0.04, 6, 48); // scaled to the radius
-      g.rotateX(-Math.PI / 2);
-      g.translate(0, 0.1, 0);
-      return g;
-    }
-    case 'defend': {
-      const base = new THREE.CylinderGeometry(1.2, 1.5, 1, 8);
-      base.translate(0, 0.5, 0);
-      const mast = new THREE.CylinderGeometry(0.15, 0.15, 3, 6);
-      mast.translate(0, 2.5, 0);
-      return mergeGeometries([base, mast]);
-    }
-    case 'escort_start': {
-      const g = new THREE.CylinderGeometry(0.5, 0.7, 2.2, 6);
-      g.translate(0, 1.1, 0);
-      return g;
-    }
-    case 'landmark': {
-      const a = new THREE.BoxGeometry(1.4, 1.8, 0.5);
-      a.translate(-0.5, 0.9, 0);
-      const b = new THREE.BoxGeometry(0.5, 1.1, 1.2);
-      b.translate(0.7, 0.55, 0.3);
-      return mergeGeometries([a, b]);
-    }
-  }
-}
+const scratchVector = new THREE.Vector3();
 
 /**
  * AC-24: fill (0..1) → the node crystal's scale — height is the visible fill
@@ -244,20 +201,72 @@ function syncInstances(mesh: THREE.InstancedMesh, count: number, place: (index: 
   }
 }
 
+/** The §4.1 sun direction: degrees → a unit vector, y up. */
+function sunDirection(sun: { azimuth: number; elevation: number }): { x: number; y: number; z: number } {
+  const azimuth = (sun.azimuth * Math.PI) / 180;
+  const elevation = (sun.elevation * Math.PI) / 180;
+  return {
+    x: Math.cos(elevation) * Math.sin(azimuth),
+    y: Math.sin(elevation),
+    z: Math.cos(elevation) * Math.cos(azimuth),
+  };
+}
+
+/** The nearest preset for the SPEC-018 scatter cap, from the settings object. */
+function presetOf(quality: QualitySettings): QualityPreset {
+  return quality.maxParticles <= 60 ? 'low' : quality.maxParticles <= 150 ? 'medium' : 'high';
+}
+
+/** The fixed camera's orientation — the storm quads' billboard (§4.9). */
+function cameraBillboard(): THREE.Quaternion {
+  const eye = scratchVector.set(
+    Math.cos(CAMERA_PITCH) * Math.sin(CAMERA_YAW),
+    Math.sin(CAMERA_PITCH),
+    Math.cos(CAMERA_PITCH) * Math.cos(CAMERA_YAW),
+  );
+  scratchMatrix.lookAt(eye, new THREE.Vector3(0, 0, 0), new THREE.Vector3(0, 1, 0));
+  return new THREE.Quaternion().setFromRotationMatrix(scratchMatrix);
+}
+
+/** The §4.7 glow accents per obstacle kind (colour, emissive intensity). */
+function obstacleGlow(kind: ObstacleKind, biome: PlanetDef['biome'], accent: string): THREE.MeshStandardMaterial {
+  let color = accent;
+  let intensity = 1;
+  if (kind === 'vent') {
+    color = '#ff6a2a';
+    intensity = 3;
+  } else if (kind === 'spire') {
+    intensity = biome === 'hive' ? 1.5 : 0.4;
+  }
+  return new THREE.MeshStandardMaterial({
+    color: '#000000',
+    emissive: new THREE.Color(color),
+    emissiveIntensity: intensity,
+  });
+}
+
 export class SurfaceView {
   readonly #scene: THREE.Scene;
   readonly #root = new THREE.Group();
   readonly enemies: EnemyMeshes;
   /** The planet's base grade; `SurfaceScene` forwards it on enter (§4.1). */
   readonly look: Readonly<Partial<Look>>;
+  /** The shared height field every ground touch samples (SPEC-018 §4.2). */
+  readonly field: HeightField;
+  /** 18-j / AC: the scene mirrors `settings.reduceMotion` here — no lightning. */
+  reduceMotion = false;
 
   readonly #baseFog: number;
   #fog: THREE.FogExp2;
 
-  /** §4.5: hemisphere fill, warm key (the caster), cool rim, player torch. */
+  /** §4.5: hemisphere fill, the look's sun as key (the caster), cool rim, torch. */
   readonly #key: THREE.DirectionalLight;
   readonly #keyTarget = new THREE.Object3D();
+  readonly #hemi: THREE.HemisphereLight;
+  readonly #hemiBase: number;
+  readonly #sunDir: { x: number; y: number; z: number };
   readonly #palette: PlanetDef['surface']['palette'];
+  readonly #lightningSeed: number;
   #environment: THREE.DataTexture | null = null;
 
   readonly #blobs: THREE.InstancedMesh;
@@ -269,24 +278,35 @@ export class SurfaceView {
   readonly #telegraph: THREE.Mesh;
   readonly #arenaRing: THREE.Mesh;
 
+  readonly #groundMaterial: THREE.MeshStandardMaterial;
+  readonly #padGlowMaterial: THREE.MeshStandardMaterial;
+  readonly #pad: { x: number; z: number } | null;
+
   readonly #nodeCrystals: THREE.InstancedMesh;
   readonly #pickupMeshes: Record<'resource' | 'item' | 'gear', THREE.InstancedMesh>;
   readonly #projectileMesh: THREE.InstancedMesh;
-  readonly #particles: THREE.Points;
-  readonly #particleMaterial: THREE.PointsMaterial;
-  readonly #particlePositions: Float32Array;
+  #storm: StormParticles;
+  #stormCapacity: number;
+  readonly #billboard: THREE.Quaternion;
   #particleKind: ParticleKind = 'none';
   #particleIntensity = 0;
 
-  constructor(scene: THREE.Scene, layout: ViewLayout, planet: PlanetDef, quality: QualitySettings) {
+  readonly #grade: ViewGrade = { vignette: 0, tint: [1, 1, 1], desaturate: 0 };
+
+  /** The ground sampler handed to enemies and the storm — bound once (§4.3). */
+  readonly #ground = (x: number, z: number): number => this.field.heightAt(x, z);
+
+  constructor(scene: THREE.Scene, layout: ViewLayout, planet: PlanetDef, quality: QualitySettings, assets?: Assets) {
     this.#scene = scene;
     scene.add(this.#root);
     const palette = planet.surface.palette;
+    const look = planet.surface.look;
     this.#palette = palette;
     scene.background = new THREE.Color(palette.sky);
     this.#baseFog = planet.surface.fogDensity;
     this.#fog = new THREE.FogExp2(palette.fog, this.#baseFog);
     scene.fog = this.#fog;
+    this.#lightningSeed = hash32(layout.hash, 'lightning');
     // SPEC-017 §4.1: the planet's own grade — a touch hotter and crisper than
     // the hubs, pulled 8 % toward its fog colour so each world reads different.
     this.look = {
@@ -296,32 +316,40 @@ export class SurfaceView {
       tint: tintToward(new THREE.Color(palette.fog), TINT_TOWARD_FOG),
     };
 
-    // §4.5: a hemisphere for the bounce, a warm key that follows the player and
-    // carries the shadow map, a cool rim from behind, and a torch on the
-    // player. No ambient — `SurfaceScene` sets `ownsLighting`.
-    const hemi = new THREE.HemisphereLight(palette.sky, palette.ground, 0.55);
-    this.#key = new THREE.DirectionalLight(0xffe0b8, 2.6);
-    this.#key.position.set(KEY_OFFSET.x, KEY_OFFSET.y, KEY_OFFSET.z);
+    // SPEC-018 §4.2: the height field, once per visit, from the layout hash.
+    this.field = buildHeightField(
+      { halfSize: layout.halfSize, hash: layout.hash, pois: layout.pois },
+      look.relief,
+    );
+
+    // §4.5 / SPEC-018 §4.1: hemisphere and key from the planet's look; the cool
+    // rim stays fixed. No ambient — `SurfaceScene` sets `ownsLighting`.
+    this.#hemiBase = look.light.ambient;
+    this.#hemi = new THREE.HemisphereLight(look.light.sky, look.light.ground, look.light.ambient);
+    this.#key = new THREE.DirectionalLight(look.light.sun.color, look.light.sun.intensity);
+    this.#sunDir = sunDirection(look.light.sun);
+    this.#key.position.set(this.#sunDir.x * KEY_DISTANCE, this.#sunDir.y * KEY_DISTANCE, this.#sunDir.z * KEY_DISTANCE);
     this.#key.target = this.#keyTarget;
     const rim = new THREE.DirectionalLight(0x7fa6ff, 0.6);
     rim.position.set(-30, 20, -24);
-    this.#root.add(hemi, this.#key, this.#keyTarget, rim);
+    this.#root.add(this.#hemi, this.#key, this.#keyTarget, rim);
 
-    // Ground: one mesh (§4.10).
-    const ground = new THREE.Mesh(
-      new THREE.PlaneGeometry(layout.halfSize * 2, layout.halfSize * 2),
-      new THREE.MeshStandardMaterial({ color: palette.ground, roughness: 0.95, metalness: 0 }),
-    );
-    ground.rotation.x = -Math.PI / 2;
-    ground.receiveShadow = true;
-    this.#root.add(ground);
+    // SPEC-018 §4.3–§4.4: terrain tiles under one splat material. Procedural
+    // layers first; the lazy asset drop swaps them through `setGroundTextures`.
+    const [layerAId, layerBId] = look.ground.layers;
+    const a: GroundLayer = { ...groundLayer(layerAId), tileMetres: look.ground.tileMetres[0] };
+    const b: GroundLayer = { ...groundLayer(layerBId), tileMetres: look.ground.tileMetres[1] };
+    this.#groundMaterial = createTerrainMaterial(a, b, look, palette);
+    for (const tile of buildTerrainTiles(this.field, this.#groundMaterial)) this.#root.add(tile);
 
-    // Obstacles and props: instanced per kind (§4.10, ≤ 8 draw calls).
+    // Obstacles and props: instanced per kind (§4.10), sculpted per biome
+    // (SPEC-018 §4.7), glow parts as their own instanced meshes.
     const accent = new THREE.MeshStandardMaterial({
       color: palette.accent,
       flatShading: true,
       roughness: 0.85,
       metalness: 0.05,
+      vertexColors: true,
     });
     const byKind = new Map<string, { x: number; z: number; scale: number; rot: number }[]>();
     for (const o of layout.obstacles) {
@@ -336,31 +364,80 @@ export class SurfaceView {
       byKind.set(`${kind}#prop`, list);
     }
     for (const [key, list] of byKind) {
+      const small = key.endsWith('#prop');
       const kind = key.replace('#prop', '') as ObstacleKind;
-      const mesh = new THREE.InstancedMesh(obstacleGeometry(kind), accent, list.length);
+      const prop = obstacleGeometry(kind, planet.biome, hash32(layout.hash, 'prop', kind), assets, small);
+      const mesh = new THREE.InstancedMesh(prop.body, accent, list.length);
       list.forEach((entry, i) => {
+        const h = this.field.heightAt(entry.x, entry.z);
+        // 18-d: bases sit at h; procedural rocks embed half their radius. A GLB
+        // prop has its origin at the base centre, so it takes no lift (§4.10).
+        const lift = prop.fromModel !== true && kind === 'rock' ? entry.scale * 0.5 : 0;
         scratchMatrix.makeRotationY(entry.rot);
-        scratchMatrix.scale(new THREE.Vector3(entry.scale, entry.scale, entry.scale));
-        scratchMatrix.setPosition(entry.x, kind === 'rock' ? entry.scale * 0.5 : 0, entry.z);
+        scratchMatrix.scale(scratchVector.set(entry.scale, entry.scale, entry.scale));
+        scratchMatrix.setPosition(entry.x, h + lift, entry.z);
         mesh.setMatrixAt(i, scratchMatrix);
       });
       mesh.instanceMatrix.needsUpdate = true;
       mesh.castShadow = true;
       mesh.receiveShadow = true;
       this.#root.add(mesh);
+      if (prop.glow !== undefined) {
+        const glow = new THREE.InstancedMesh(prop.glow, obstacleGlow(kind, planet.biome, palette.accent), list.length);
+        glow.instanceMatrix.copy(mesh.instanceMatrix);
+        glow.instanceMatrix.needsUpdate = true;
+        glow.castShadow = false;
+        this.#root.add(glow);
+      }
     }
 
-    // POIs: one small mesh per instance, the arena ring scaled to its radius.
-    const poiMaterial = new THREE.MeshStandardMaterial({ color: palette.accent, roughness: 0.6, metalness: 0.3 });
-    const padMaterial = new THREE.MeshStandardMaterial({ color: '#7a8aa0', roughness: 0.5, metalness: 0.6 });
+    // POIs: one small sculpted mesh per instance (SPEC-018 §4.7); glow parts
+    // share one emissive material, the pad ring its own pulsing one.
+    const poiMaterial = new THREE.MeshStandardMaterial({
+      color: palette.accent,
+      roughness: 0.6,
+      metalness: 0.3,
+      vertexColors: true,
+    });
+    const poiGlowMaterial = new THREE.MeshStandardMaterial({
+      color: '#000000',
+      emissive: new THREE.Color(palette.accent),
+      emissiveIntensity: 2,
+    });
+    this.#padGlowMaterial = new THREE.MeshStandardMaterial({
+      color: '#000000',
+      emissive: new THREE.Color('#8ad7ff'),
+      emissiveIntensity: 1.2,
+    });
+    let pad: { x: number; z: number } | null = null;
     for (const poi of layout.pois) {
-      const mesh = new THREE.Mesh(poiGeometry(poi.kind), poi.kind === 'landing_pad' ? padMaterial : poiMaterial);
-      if (poi.kind === 'arena') mesh.scale.setScalar(poi.radius);
-      mesh.position.set(poi.x, 0, poi.z);
+      const prop = poiGeometry(poi.kind, planet.biome, assets);
+      const mesh = new THREE.Mesh(prop.body, poiMaterial);
+      mesh.name = `poi:${poi.kind}`;
+      const h = this.field.heightAt(poi.x, poi.z); // ≈ 0 on flattened ground
+      if (poi.kind === 'arena') mesh.scale.setScalar(poi.radius * 0.2);
+      mesh.position.set(poi.x, h, poi.z);
       // The pad is flat on the ground: its own shadow would only stripe it.
       mesh.castShadow = poi.kind !== 'landing_pad';
+      mesh.receiveShadow = true;
       this.#root.add(mesh);
+      if (prop.glow !== undefined) {
+        const glow = new THREE.Mesh(prop.glow, poi.kind === 'landing_pad' ? this.#padGlowMaterial : poiGlowMaterial);
+        glow.name = `poi-glow:${poi.kind}`;
+        glow.scale.copy(mesh.scale);
+        glow.position.copy(mesh.position);
+        this.#root.add(glow);
+      }
+      if (poi.kind === 'landing_pad') pad = { x: poi.x, z: poi.z };
     }
+    this.#pad = pad;
+
+    // SPEC-018 §4.6: scatter and decals, deterministic from the layout hash.
+    for (const mesh of buildScatter(layout, this.field, look, presetOf(quality), palette)) this.#root.add(mesh);
+    this.#root.add(buildDecals(layout, this.field, look));
+
+    // SPEC-018 §4.8: the silhouette ring past the berm hides the void.
+    this.#buildBoundaryRing(layout, planet);
 
     // The arena lock ring — visible only while a boss fight seals the arena.
     this.#arenaRing = new THREE.Mesh(
@@ -464,15 +541,10 @@ export class SurfaceView {
     this.#telegraph.visible = false;
     this.#root.add(this.#telegraph);
 
-    // Storm particles: one Points cloud around the player (§4.6).
-    this.#particlePositions = new Float32Array(PARTICLE_COUNT * 3);
-    const geometry = new THREE.BufferGeometry();
-    geometry.setAttribute('position', new THREE.BufferAttribute(this.#particlePositions, 3));
-    this.#particleMaterial = new THREE.PointsMaterial({ size: 0.35, transparent: true, opacity: 0.8 });
-    this.#particles = new THREE.Points(geometry, this.#particleMaterial);
-    this.#particles.visible = false;
-    this.#particles.frustumCulled = false;
-    this.#root.add(this.#particles);
+    // Storm sprites (SPEC-018 §4.9): instanced quads, camera-fixed billboard.
+    this.#billboard = cameraBillboard();
+    this.#stormCapacity = quality.maxParticles;
+    this.#storm = new StormParticles(this.#root, this.#billboard, quality.maxParticles);
 
     // §4.6: one instanced blob layer on every preset — the thing that actually
     // grounds a character, at one draw call and one 32² texture. The shadow map
@@ -496,6 +568,58 @@ export class SurfaceView {
 
     this.enemies = new EnemyMeshes(this.#root, { shadows: quality.shadowMapSize > 0 });
     this.applyQuality(quality);
+  }
+
+  /** The weather grade the scene forwards through `renderer.setLook` (§4.9). */
+  get grade(): Readonly<ViewGrade> {
+    return this.#grade;
+  }
+
+  /**
+   * §4.10: the lazy asset drop landed — swap the committed layers in without a
+   * recompile (same defines, same program).
+   */
+  setGroundTextures(a: GroundLayer, b: GroundLayer): void {
+    setTerrainLayers(this.#groundMaterial, a, b);
+  }
+
+  /** SPEC-018 §4.8: 80–140 instanced silhouettes on the apron, past the berm. */
+  #buildBoundaryRing(layout: ViewLayout, planet: PlanetDef): void {
+    const look = planet.surface.look;
+    const seed = hash32(layout.hash, 'boundary');
+    const perimeter = 8 * (layout.halfSize + (RING_INNER + RING_OUTER) / 2);
+    const count = Math.min(RING_MAX, Math.max(RING_MIN, Math.round(perimeter / RING_SPACING)));
+    const mesh = new THREE.InstancedMesh(
+      boundaryGeometry(look.boundary),
+      new THREE.MeshStandardMaterial({ flatShading: true, roughness: 0.9, metalness: 0, vertexColors: true }),
+      count,
+    );
+    for (let i = 0; i < count; i++) {
+      // Around the square boundary: an angle walk with jitter, pushed out to a
+      // jittered band between +6 and +28 m past halfSize.
+      const angle = ((i + hash01(seed, i, 0) * 0.8) / count) * Math.PI * 2;
+      const band = layout.halfSize + RING_INNER + hash01(seed, i, 1) * (RING_OUTER - RING_INNER);
+      // Project the direction onto the square: scale so max(|x|,|z|) = band.
+      const dx = Math.cos(angle);
+      const dz = Math.sin(angle);
+      const stretch = band / Math.max(Math.abs(dx), Math.abs(dz));
+      const x = dx * stretch;
+      const z = dz * stretch;
+      const scale = 2.5 + hash01(seed, i, 2) * 3.5;
+      scratchMatrix.makeRotationY(hash01(seed, i, 3) * Math.PI * 2);
+      scratchMatrix.scale(scratchVector.set(scale, scale, scale));
+      scratchMatrix.setPosition(x, this.field.heightAt(x, z), z);
+      mesh.setMatrixAt(i, scratchMatrix);
+      const shade = 0.8 + hash01(seed, i, 4) * 0.3;
+      mesh.setColorAt(i, scratchColor.setScalar(shade));
+    }
+    mesh.instanceMatrix.needsUpdate = true;
+    if (mesh.instanceColor !== null) mesh.instanceColor.needsUpdate = true;
+    mesh.castShadow = false;
+    mesh.receiveShadow = true;
+    mesh.name = 'boundary-ring';
+    mesh.computeBoundingSphere();
+    this.#root.add(mesh);
   }
 
   /**
@@ -528,6 +652,14 @@ export class SurfaceView {
     this.enemies.setShadows(size > 0);
     this.#blobMaterial.opacity = size > 0 ? BLOB_OPACITY_WITH_MAP : BLOB_OPACITY_ALONE;
 
+    // 18-p: the storm capacity is the preset's particle budget.
+    if (quality.maxParticles !== this.#stormCapacity) {
+      this.#storm.dispose();
+      this.#stormCapacity = quality.maxParticles;
+      this.#storm = new StormParticles(this.#root, this.#billboard, quality.maxParticles);
+      this.#storm.set(this.#particleKind, this.#particleIntensity);
+    }
+
     if (quality.ibl) {
       if (this.#environment === null) this.#environment = buildEnvironment(skyParamsFor(this.#palette));
       this.#scene.environment = this.#environment;
@@ -544,55 +676,79 @@ export class SurfaceView {
     this.#environment = null;
   }
 
-  /** Fog, overlay hue and particle look, lerped by the scene over 3 s (§4.6). */
+  /**
+   * Fog, storm sprites and the grade, lerped by the scene over 3 s (§4.6).
+   * §4.9: `visibility` drives the vignette; the kind picks the tint.
+   */
   setWeather(effects: ViewWeather, intensity: number): void {
     this.#fog.density = this.#baseFog * (1 + (effects.fogMult - 1) * intensity);
     this.#particleKind = effects.particles;
     this.#particleIntensity = intensity;
-    if (effects.particles !== 'none') {
-      this.#particleMaterial.color.set(PARTICLE_COLORS[effects.particles]);
-      this.#particleMaterial.opacity = 0.8 * intensity;
+    this.#storm.set(effects.particles, intensity);
+
+    this.#grade.vignette = 0.5 * (1 - effects.visibility) * intensity;
+    this.#grade.desaturate = 0.35 * intensity;
+    const tint = effects.particles === 'none' ? null : STORM_LOOK[effects.particles].tint;
+    for (let i = 0; i < 3; i++) {
+      this.#grade.tint[i] = tint === null ? 1 : 1 + ((tint[i] as number) - 1) * intensity;
     }
-    this.#particles.visible = effects.particles !== 'none' && intensity > 0.02;
   }
 
   /** The boss arena lock ring (SPEC-011 11-e). */
   setArena(arena: { x: number; z: number; radius: number } | null): void {
     this.#arenaRing.visible = arena !== null;
     if (arena !== null) {
-      this.#arenaRing.position.set(arena.x, 0.3, arena.z);
+      this.#arenaRing.position.set(arena.x, 0.3 + this.field.heightAt(arena.x, arena.z), arena.z);
       this.#arenaRing.scale.setScalar(arena.radius);
     }
   }
 
   sync(frame: SurfaceFrame): void {
     const p = frame.player;
+    const ground = this.#ground;
+    const playerGround = ground(p.x, p.z);
     this.#player.visible = p.alive;
-    this.#player.position.set(p.x, 0, p.z);
+    this.#player.position.set(p.x, playerGround, p.z);
     this.#player.rotation.y = -p.facing;
     const blinking = p.invulnUntil > frame.time && Math.sin(frame.time * 30) > 0;
     this.#playerMaterial.opacity = blinking ? 0.35 : 1;
 
-    // §4.5: the key and its target ride the player, so the 68 m shadow camera
-    // always covers what is on screen.
-    this.#key.position.set(p.x + KEY_OFFSET.x, KEY_OFFSET.y, p.z + KEY_OFFSET.z);
+    // §4.5: the key and its target ride the player along the look's sun
+    // direction, so the 68 m shadow camera always covers what is on screen.
+    this.#key.position.set(
+      p.x + this.#sunDir.x * KEY_DISTANCE,
+      this.#sunDir.y * KEY_DISTANCE,
+      p.z + this.#sunDir.z * KEY_DISTANCE,
+    );
     this.#keyTarget.position.set(p.x, 0, p.z);
 
     const follower = frame.follower;
     this.#follower.visible = follower !== null && follower.alive;
-    if (follower !== null) this.#follower.position.set(follower.x, 0.8 + Math.sin(frame.time * 2) * 0.1, follower.z);
+    if (follower !== null) {
+      this.#follower.position.set(
+        follower.x,
+        0.8 + Math.sin(frame.time * 2) * 0.1 + ground(follower.x, follower.z),
+        follower.z,
+      );
+    }
 
-    this.enemies.sync(frame.enemies, frame.time);
+    this.enemies.sync(frame.enemies, frame.time, ground);
 
     this.#telegraph.visible = frame.telegraph !== null;
-    if (frame.telegraph !== null) this.#telegraph.position.set(frame.telegraph.x, 0.05, frame.telegraph.z);
+    if (frame.telegraph !== null) {
+      this.#telegraph.position.set(
+        frame.telegraph.x,
+        0.05 + ground(frame.telegraph.x, frame.telegraph.z),
+        frame.telegraph.z,
+      );
+    }
 
     // Nodes: fill drives crystal height (AC-24); a harvested node glows white.
     frame.nodes.forEach((node, i) => {
       const fill = node.capacity <= 0 ? 0 : node.remaining / node.capacity;
       nodeCrystalScale(fill, scratchScale);
       scratchMatrix.makeScale(scratchScale.x, scratchScale.y, scratchScale.z);
-      scratchMatrix.setPosition(node.x, 0, node.z);
+      scratchMatrix.setPosition(node.x, ground(node.x, node.z), node.z);
       this.#nodeCrystals.setMatrixAt(i, scratchMatrix);
       scratchColor.set(RESOURCE_COLORS[node.resource]);
       if (node.harvesting) scratchColor.lerp(scratchColor.clone().set('#ffffff'), 0.4 + 0.2 * Math.sin(frame.time * 8));
@@ -601,10 +757,33 @@ export class SurfaceView {
     this.#nodeCrystals.instanceMatrix.needsUpdate = true;
     if (this.#nodeCrystals.instanceColor !== null) this.#nodeCrystals.instanceColor.needsUpdate = true;
 
+    // The splat shader's animated crack pulse (§4.4) and the pad ring pulse.
+    terrainUniforms(this.#groundMaterial).uTime.value = frame.time;
+    const pad = this.#pad;
+    const onPad = pad !== null && p.alive && Math.hypot(p.x - pad.x, p.z - pad.z) <= 6;
+    this.#padGlowMaterial.emissiveIntensity = onPad ? 1.6 + 0.8 * Math.sin(frame.time * 4) : 1.2;
+
+    this.#syncLightning(frame.time);
+    this.#storm.sync(p.x, p.z, frame.time, ground);
     this.#syncPickups(frame);
     this.#syncProjectiles(frame);
-    this.#syncParticles(frame);
     this.#syncBlobs(frame);
+  }
+
+  /**
+   * §4.9: for radiation and spore storms the hemisphere jumps ×4 for two
+   * frames when the 2.5 s window's roll passes; a no-op under reduce motion.
+   */
+  #syncLightning(time: number): void {
+    const kind = this.#particleKind;
+    let flash = false;
+    if (!this.reduceMotion && (kind === 'ash' || kind === 'spores') && this.#particleIntensity > 0.02) {
+      const tick = Math.floor(time / LIGHTNING_WINDOW);
+      flash =
+        hash01(this.#lightningSeed, tick) < 0.15 * this.#particleIntensity &&
+        time - tick * LIGHTNING_WINDOW < LIGHTNING_FLASH_SECONDS;
+    }
+    this.#hemi.intensity = this.#hemiBase * (flash ? 4 : 1);
   }
 
   /** §4.6: player, follower and every live enemy, in one instanced layer. */
@@ -614,7 +793,7 @@ export class SurfaceView {
     const write = (x: number, z: number, scale: number): void => {
       if (n >= BLOB_CAPACITY) return;
       scratchMatrix.makeScale(scale, 1, scale);
-      scratchMatrix.setPosition(x, 0, z);
+      scratchMatrix.setPosition(x, this.field.heightAt(x, z), z);
       mesh.setMatrixAt(n, scratchMatrix);
       n++;
     };
@@ -646,7 +825,7 @@ export class SurfaceView {
         if (pickup.kind !== kind || n >= mesh.instanceMatrix.count) continue;
         const bob = 0.4 + Math.sin(frame.time * 3 + pickup.seed) * 0.12;
         scratchMatrix.makeRotationY(frame.time + pickup.seed);
-        scratchMatrix.setPosition(pickup.x, bob, pickup.z);
+        scratchMatrix.setPosition(pickup.x, bob + this.field.heightAt(pickup.x, pickup.z), pickup.z);
         mesh.setMatrixAt(n, scratchMatrix);
         mesh.setColorAt(n, scratchColor.set(kind === 'resource' ? RESOURCE_COLORS[pickup.resource] : '#8ad7ff'));
         n++;
@@ -668,36 +847,14 @@ export class SurfaceView {
       const shot = pool.at(i);
       const scale = Math.max(0.12, shot.radius);
       scratchMatrix.makeScale(scale, scale, scale);
-      scratchMatrix.setPosition(shot.x, 0.9, shot.z);
+      scratchMatrix.setPosition(shot.x, 0.9 + this.field.heightAt(shot.x, shot.z), shot.z);
       mesh.setColorAt(i, scratchColor.set(shot.owner === 'enemy' ? '#7fff8a' : '#ffe9a0'));
     });
   }
 
-  /** Deterministic drift from index + time — no random per frame (SPEC-001 §7). */
-  #syncParticles(frame: SurfaceFrame): void {
-    if (!this.#particles.visible) return;
-    const p = frame.player;
-    const half = PARTICLE_BOX / 2;
-    const falling = this.#particleKind === 'snow' || this.#particleKind === 'ash' || this.#particleKind === 'spores';
-    for (let i = 0; i < PARTICLE_COUNT; i++) {
-      const seedA = i * 12.9898;
-      const seedB = i * 78.233;
-      const drift = falling ? 6 : 18;
-      const x = ((seedA * 37 + frame.time * drift) % PARTICLE_BOX) - half;
-      const z = ((seedB * 17 + frame.time * drift * 0.6) % PARTICLE_BOX) - half;
-      const y = falling
-        ? PARTICLE_BOX * 0.25 - ((seedA * 11 + frame.time * 4) % (PARTICLE_BOX * 0.25))
-        : 0.5 + (Math.sin(seedB + frame.time * 2) + 1) * 2;
-      this.#particlePositions[i * 3] = p.x + x;
-      this.#particlePositions[i * 3 + 1] = y;
-      this.#particlePositions[i * 3 + 2] = p.z + z;
-    }
-    (this.#particles.geometry.getAttribute('position') as THREE.BufferAttribute).needsUpdate = true;
-    void this.#particleIntensity;
-  }
-
   dispose(): void {
     this.enemies.dispose();
+    this.#storm.dispose();
     this.#scene.remove(this.#root);
     disposeObject3D(this.#root);
     this.#clearEnvironment();
