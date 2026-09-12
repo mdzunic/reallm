@@ -858,6 +858,25 @@ html.reduce-motion .hud.is-static .hud-static {
   opacity: 0.6;
 }
 
+/* SPEC-019 §4.6: floating damage numbers — 24 pooled spans, positioned in
+   screen pixels through transform/opacity writes from the scene's update();
+   no CSS animation, so reduce-motion needs no rule here (the JS drops the
+   rise and only fades). */
+.dmg {
+  position: absolute;
+  left: 0;
+  top: 0;
+  font: 700 14px/1 var(--font-mono, monospace);
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.8);
+  pointer-events: none;
+  will-change: transform, opacity;
+  opacity: 0;
+}
+
+.dmg--enemy { color: #ffffff; }
+.dmg--elite { color: #e0b34a; }
+.dmg--player { color: #ff5533; }
+
 /* --------------------------------------------------------------- dialogue */
 /* Bottom-center, above the objective line's slot (AC-69). */
 .dialogue {
