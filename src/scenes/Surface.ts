@@ -198,6 +198,9 @@ export class SurfaceScene extends UiScene<'surface'> {
   #defendDamageAccum = 0;
   #followerRespawnIn = 0;
 
+  /** The view time of the last rendered frame — what `SurfaceFrame.dt` spans. */
+  #lastViewTime = 0;
+
   #music: 'surface_calm' | 'surface_combat' | 'boss' = 'surface_calm';
   #musicHold = 0;
   #minimapIn = 0;
@@ -551,7 +554,9 @@ export class SurfaceScene extends UiScene<'surface'> {
         nodes: (this.#nodes as Nodes).states,
         telegraph: this.#bossTelegraph(world),
         time: world.time,
+        dt: Math.max(0, world.time - this.#lastViewTime),
       });
+      this.#lastViewTime = world.time;
       this.#view?.setArena(world.arena);
       this.#forwardGrade();
       if (this.#minimapIn <= 0) {

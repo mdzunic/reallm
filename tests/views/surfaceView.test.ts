@@ -53,6 +53,7 @@ function frame(enemies: Pool<EnemyEntity>, follower: SurfaceFrame['follower'] = 
     nodes: [{ resource: 'oil', x: 3, z: -3, capacity: 10, remaining: 5, harvesting: false }],
     telegraph: null,
     time: 1,
+    dt: 1 / 60,
   };
 }
 
@@ -126,9 +127,17 @@ function sunDir(planet: PlanetDef): { x: number; y: number; z: number } {
 }
 
 describe('the surface rig (SPEC-017 §4.5, SPEC-018 §4.1)', () => {
-  it('is a hemisphere, a warm key, a cool rim and a torch — and no ambient', () => {
+  it('is a hemisphere, a warm key, a cool rim, the torch and the muzzle light — and no ambient', () => {
     const { scene, view } = setup();
-    expect(lights(scene)).toEqual(['DirectionalLight', 'DirectionalLight', 'HemisphereLight', 'PointLight']);
+    // SPEC-019 §4.4 adds the pulsed muzzle PointLight, created once at
+    // construction (never re-parented) so no shader recompile lands mid-combat.
+    expect(lights(scene)).toEqual([
+      'DirectionalLight',
+      'DirectionalLight',
+      'HemisphereLight',
+      'PointLight',
+      'PointLight',
+    ]);
     view.dispose();
   });
 
@@ -456,5 +465,140 @@ describe('the environment (SPEC-018)', () => {
     expect(material.map).toBe(a.albedo);
     expect(material.version).toBe(version); // no needsUpdate, no recompile
     view.dispose();
+  });
+});
+
+// ------------------------------------------------------------- SPEC-019 §4.5
+
+import { makeFollower } from '@/entities/Follower';
+import { FOLLOWERS } from '@/data/index';
+import { advanceViewTime, shakeOffset, type ShakeState } from '@/views/SurfaceView';
+
+/** The projectile head mesh: the capsule-geometry instanced mesh. */
+function projectileMesh(scene: THREE.Scene): THREE.InstancedMesh[] {
+  const found: THREE.InstancedMesh[] = [];
+  scene.traverse((node) => {
+    const mesh = node as THREE.InstancedMesh;
+    if (mesh.isInstancedMesh !== true) return;
+    if ((mesh.geometry as THREE.BufferGeometry & { type?: string }).type === 'CapsuleGeometry') found.push(mesh);
+  });
+  return found;
+}
+
+describe('projectiles (SPEC-019 AC-59 … AC-63)', () => {
+  it('orients the capsule along vx/vz and pushes the owner colour × 2.5', () => {
+    const { scene, view } = setup();
+    const f = frame(new Pool<EnemyEntity>(() => makeEnemy()));
+    const shot = f.projectiles.alloc();
+    Object.assign(shot, { x: 2, z: 3, vx: 6, vz: 8, radius: 0.12, owner: 'player' });
+    view.sync(f);
+    const [heads, ghosts] = projectileMesh(scene) as [THREE.InstancedMesh, THREE.InstancedMesh];
+    expect(heads.count).toBe(1);
+    expect(ghosts.count).toBe(2); // two trailing ghosts per shot
+    const matrix = new THREE.Matrix4();
+    heads.getMatrixAt(0, matrix);
+    // The rotated X basis must point along the (normalised) velocity.
+    const basisX = new THREE.Vector3().setFromMatrixColumn(matrix, 0).normalize();
+    expect(basisX.x).toBeCloseTo(0.6, 5);
+    expect(basisX.z).toBeCloseTo(0.8, 5);
+    expect(basisX.y).toBeCloseTo(0, 5);
+    // Owner colour × 2.5 clears the bloom threshold; the material stays white.
+    const color = heads.instanceColor as THREE.InstancedBufferAttribute;
+    const base = new THREE.Color('#ffe9a0');
+    expect(color.getX(0)).toBeCloseTo(base.r * 2.5, 4);
+    expect(((heads.material as THREE.MeshBasicMaterial).color as THREE.Color).getHex()).toBe(0xffffff);
+
+    // Ghosts trail at p − v · 0.03 and p − v · 0.06, at × 1.2 and × 0.6.
+    ghosts.getMatrixAt(0, matrix);
+    expect(matrix.elements[12]).toBeCloseTo(2 - 6 * 0.03, 5);
+    expect(matrix.elements[14]).toBeCloseTo(3 - 8 * 0.03, 5);
+    ghosts.getMatrixAt(1, matrix);
+    expect(matrix.elements[12]).toBeCloseTo(2 - 6 * 0.06, 5);
+    const ghostColor = ghosts.instanceColor as THREE.InstancedBufferAttribute;
+    expect(ghostColor.getX(0)).toBeCloseTo(base.r * 1.2, 4);
+    expect(ghostColor.getX(1)).toBeCloseTo(base.r * 0.6, 4);
+    view.dispose();
+  });
+
+  it('a zero-velocity shot takes the owner facing and its ghosts collapse onto the head (19-j)', () => {
+    const { scene, view } = setup();
+    const f = frame(new Pool<EnemyEntity>(() => makeEnemy()));
+    f.player.facing = Math.PI / 2; // +Z
+    const shot = f.projectiles.alloc();
+    Object.assign(shot, { x: 4, z: -1, vx: 0, vz: 0, radius: 0.12, owner: 'player' });
+    view.sync(f);
+    const [heads, ghosts] = projectileMesh(scene) as [THREE.InstancedMesh, THREE.InstancedMesh];
+    const matrix = new THREE.Matrix4();
+    heads.getMatrixAt(0, matrix);
+    const basisX = new THREE.Vector3().setFromMatrixColumn(matrix, 0).normalize();
+    expect(basisX.z).toBeCloseTo(1, 5); // facing π/2 points +Z
+    ghosts.getMatrixAt(0, matrix);
+    expect(matrix.elements[12]).toBeCloseTo(4, 5);
+    expect(matrix.elements[14]).toBeCloseTo(-1, 5);
+    view.dispose();
+  });
+});
+
+describe('the follower view (SPEC-019 AC-30 … AC-33)', () => {
+  it('hovers the procedural probe at 0.8 + 0.1·sin(2t) above the field, with a blooming glow', () => {
+    const { scene, view } = setup();
+    const f = frame(new Pool<EnemyEntity>(() => makeEnemy()), makeFollower(FOLLOWERS.science_probe, 7, -5));
+    f.time = 0.6;
+    view.sync(f);
+    // No assets in this setup → the procedural probe (19-l): its glow material
+    // must clear SPEC-017's bloom threshold (0.85).
+    let glow: THREE.MeshStandardMaterial | undefined;
+    let probeY: number | null = null;
+    scene.traverse((node) => {
+      const mesh = node as THREE.Mesh;
+      const material = mesh.material as THREE.MeshStandardMaterial | undefined;
+      if (material?.name === 'Glow') {
+        glow = material;
+        probeY = mesh.parent?.position.y ?? null;
+      }
+    });
+    expect(glow).toBeDefined();
+    expect((glow as THREE.MeshStandardMaterial).emissiveIntensity).toBeGreaterThan(0.85);
+    const expected = 0.8 + 0.1 * Math.sin(1.2) + view.field.heightAt(7, -5);
+    expect(probeY).not.toBeNull();
+    expect(probeY as unknown as number).toBeCloseTo(expected, 5);
+    view.dispose();
+  });
+});
+
+describe('shake and hit-stop (SPEC-019 §4.7, AC-89 … AC-94)', () => {
+  it('shakeOffset decays to zero at until, deterministic from view time', () => {
+    const shake: ShakeState = { amplitude: 0.5, until: 2, duration: 0.5 };
+    const out = new THREE.Vector3();
+    shakeOffset(shake, 1.6, false, out);
+    const expectedDecay = (2 - 1.6) / 0.5;
+    expect(out.x).toBeCloseTo(0.5 * expectedDecay * Math.sin(37 * 1.6), 6);
+    expect(out.y).toBe(0);
+    expect(out.z).toBeCloseTo(0.5 * expectedDecay * Math.cos(29 * 1.6), 6);
+    // Deterministic: the same time gives the same offset.
+    const again = new THREE.Vector3();
+    shakeOffset(shake, 1.6, false, again);
+    expect(again.equals(out)).toBe(true);
+    // At and past `until` the offset is exactly zero.
+    shakeOffset(shake, 2, false, out);
+    expect(out.length()).toBe(0);
+  });
+
+  it('reduce motion forces the offset to zero (AC-90, 19-g)', () => {
+    const shake: ShakeState = { amplitude: 0.5, until: 2, duration: 0.5 };
+    const out = new THREE.Vector3(9, 9, 9);
+    shakeOffset(shake, 1.6, true, out);
+    expect(out.toArray()).toEqual([0, 0, 0]);
+  });
+
+  it('advanceViewTime freezes the view clock for exactly two frames (AC-93, AC-94)', () => {
+    const state = { frames: 0, time: 0 };
+    expect(advanceViewTime(state, 1.0)).toBe(1.0);
+    state.frames = 2; // an elite kill lands
+    expect(advanceViewTime(state, 1.016)).toBe(1.0); // frozen
+    expect(advanceViewTime(state, 1.033)).toBe(1.0); // frozen
+    expect(advanceViewTime(state, 1.05)).toBe(1.05); // released
+    expect(state.frames).toBe(0);
+    expect(advanceViewTime(state, 1.066)).toBe(1.066);
   });
 });

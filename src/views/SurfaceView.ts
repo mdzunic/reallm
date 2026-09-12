@@ -12,6 +12,7 @@ import * as THREE from 'three';
 import { disposeObject3D } from '@/core/Disposer';
 import type { Assets } from '@/core/Assets';
 import { buildHeightField, type HeightField } from '@/core/HeightField';
+import { log } from '@/core/Log';
 import { hash01 } from '@/core/Noise';
 import { hash32 } from '@/core/Rng';
 import type { Look, QualityPreset, QualitySettings } from '@/core/Quality';
@@ -21,7 +22,10 @@ import type { EnemyEntity } from '@/entities/Enemy';
 import type { FollowerEntity } from '@/entities/Follower';
 import type { PlayerEntity } from '@/entities/Player';
 import type { ProjectileEntity } from '@/entities/Projectile';
+import { CharacterView } from '@/views/CharacterView';
+import { CombatFx } from '@/views/CombatFx';
 import { buildEnvironment, skyParamsFor } from '@/views/Environment';
+import { FollowerView } from '@/views/FollowerView';
 import { EnemyMeshes, INSTANCES_PER_PART } from '@/views/ProceduralMeshes';
 import { groundLayer, type GroundLayer } from '@/views/ProceduralTextures';
 import { buildScatter, buildDecals } from '@/views/Scatter';
@@ -92,7 +96,59 @@ export interface SurfaceFrame {
   /** The wurm's resurface telegraph, or `null`. */
   telegraph: { x: number; z: number } | null;
   time: number;
+  /** The rendered-frame delta; 0 while hit-stop freezes the view (SPEC-019 §4.7). */
+  dt: number;
 }
+
+// ------------------------------------------------------------- SPEC-019 §4.7
+
+/** One camera shake: amplitude decays to zero at `until` over `duration`. */
+export interface ShakeState {
+  amplitude: number;
+  until: number;
+  duration: number;
+}
+
+/**
+ * §4.7, pure so `tests/views/` can pin it: the decaying offset, deterministic
+ * from view time; reduce motion forces it to zero (19-g).
+ */
+export function shakeOffset(shake: ShakeState, time: number, reduceMotion: boolean, out: THREE.Vector3): void {
+  if (reduceMotion || shake.duration <= 0 || time >= shake.until) {
+    out.set(0, 0, 0);
+    return;
+  }
+  const decay = Math.min(1, Math.max(0, (shake.until - time) / shake.duration));
+  out.set(Math.sin(37 * time), 0, Math.cos(29 * time)).multiplyScalar(shake.amplitude * decay);
+}
+
+/**
+ * §4.7, pure: while `frames > 0` the previous view time is returned (frozen)
+ * and a frame is consumed; otherwise the state tracks the world clock. The
+ * fixed-step simulation never sees this (SPEC-002).
+ */
+export function advanceViewTime(state: { frames: number; time: number }, worldTime: number): number {
+  if (state.frames > 0) {
+    state.frames--;
+    return state.time;
+  }
+  state.time = worldTime;
+  return worldTime;
+}
+
+/** 19-h: the swatches a bare `?scene=surface` jump runs on. */
+const DEFAULT_APPEARANCE = { primary: '#b7472a', secondary: '#2a3b4c' };
+/** §4.4 / 19-k: the VFX pool's share of the preset's particle budget. */
+const FX_CAPACITY_MAX = 512;
+const FX_CAPACITY_PER_PARTICLE = 4;
+/** §4.5: projectile head/ghost instancing caps. */
+const PROJECTILE_CAPACITY = 256;
+const GHOST_CAPACITY = 512;
+/** §4.5: the two trailing ghosts, seconds behind the head along −v. */
+const GHOST_LAG_A = 0.03;
+const GHOST_LAG_B = 0.06;
+const GHOST_GAIN_A = 1.2;
+const GHOST_GAIN_B = 0.6;
 
 const RESOURCE_COLORS: Record<ResourceId, string> = {
   oil: '#3a3a3a',
@@ -141,7 +197,17 @@ const LIGHTNING_FLASH_SECONDS = 0.05;
 
 const scratchMatrix = new THREE.Matrix4();
 const scratchColor = new THREE.Color();
+const scratchColor2 = new THREE.Color();
 const scratchVector = new THREE.Vector3();
+const scratchPosition2 = new THREE.Vector3();
+const scratchQuat = new THREE.Quaternion();
+const scratchScale2 = new THREE.Vector3();
+const Y_AXIS = new THREE.Vector3(0, 1, 0);
+/** §4.5: the two ghost taps — seconds behind the head, colour gain. */
+const GHOST_TRAIL: readonly (readonly [number, number])[] = [
+  [GHOST_LAG_A, GHOST_GAIN_A],
+  [GHOST_LAG_B, GHOST_GAIN_B],
+];
 
 /**
  * AC-24: fill (0..1) → the node crystal's scale — height is the visible fill
@@ -184,21 +250,6 @@ function radialAlpha(size = 32): THREE.DataTexture {
 /** `[1, 1, 1]` pulled `amount` of the way toward `colour`, in linear space. */
 function tintToward(colour: THREE.Color, amount: number): [number, number, number] {
   return [1 + (colour.r - 1) * amount, 1 + (colour.g - 1) * amount, 1 + (colour.b - 1) * amount];
-}
-
-/** Grow-and-hide instanced sync; `place` composes into `scratchMatrix`. */
-function syncInstances(mesh: THREE.InstancedMesh, count: number, place: (index: number) => void): void {
-  const n = Math.min(count, mesh.instanceMatrix.count);
-  for (let i = 0; i < n; i++) {
-    place(i);
-    mesh.setMatrixAt(i, scratchMatrix);
-  }
-  mesh.count = n;
-  mesh.visible = n > 0;
-  if (n > 0) {
-    mesh.instanceMatrix.needsUpdate = true;
-    if (mesh.instanceColor !== null) mesh.instanceColor.needsUpdate = true;
-  }
 }
 
 /** The §4.1 sun direction: degrees → a unit vector, y up. */
@@ -274,9 +325,15 @@ export class SurfaceView {
 
   readonly #player: THREE.Group;
   readonly #playerMaterial: THREE.MeshStandardMaterial;
-  readonly #follower: THREE.Mesh;
+  /** SPEC-019 §4.1: the animated salvager; `null` keeps the capsule fallback. */
+  #character: CharacterView | null = null;
+  readonly #assets: Assets | undefined;
+  /** SPEC-019 §4.8: built on the first frame that carries a follower. */
+  #followerView: FollowerView | null = null;
   readonly #telegraph: THREE.Mesh;
   readonly #arenaRing: THREE.Mesh;
+  #fx: CombatFx;
+  #fxCapacity: number;
 
   readonly #groundMaterial: THREE.MeshStandardMaterial;
   readonly #padGlowMaterial: THREE.MeshStandardMaterial;
@@ -285,6 +342,7 @@ export class SurfaceView {
   readonly #nodeCrystals: THREE.InstancedMesh;
   readonly #pickupMeshes: Record<'resource' | 'item' | 'gear', THREE.InstancedMesh>;
   readonly #projectileMesh: THREE.InstancedMesh;
+  readonly #ghostMesh: THREE.InstancedMesh;
   #storm: StormParticles;
   #stormCapacity: number;
   readonly #billboard: THREE.Quaternion;
@@ -296,8 +354,16 @@ export class SurfaceView {
   /** The ground sampler handed to enemies and the storm — bound once (§4.3). */
   readonly #ground = (x: number, z: number): number => this.field.heightAt(x, z);
 
-  constructor(scene: THREE.Scene, layout: ViewLayout, planet: PlanetDef, quality: QualitySettings, assets?: Assets) {
+  constructor(
+    scene: THREE.Scene,
+    layout: ViewLayout,
+    planet: PlanetDef,
+    quality: QualitySettings,
+    assets?: Assets,
+    appearance?: { primary: string; secondary: string },
+  ) {
     this.#scene = scene;
+    this.#assets = assets;
     scene.add(this.#root);
     const palette = planet.surface.palette;
     const look = planet.surface.look;
@@ -482,20 +548,34 @@ export class SurfaceView {
       this.#root.add(mesh);
     }
 
-    // Projectiles: one instanced mesh, owner colour per instance. §4.7: the
-    // base colour is pushed past 1 so `instanceColor` lands above the bloom
-    // threshold and the shots actually glow; on `low` there is no bloom and the
-    // clamp to white in the framebuffer is the whole effect.
-    this.#projectileMesh = new THREE.InstancedMesh(
-      new THREE.SphereGeometry(1, 6, 5),
-      new THREE.MeshBasicMaterial({ color: new THREE.Color().setScalar(PROJECTILE_GAIN) }),
-      256,
-    );
-    this.#projectileMesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
-    this.#projectileMesh.setColorAt(0, scratchColor.set('#ffffff'));
-    this.#projectileMesh.count = 0;
-    this.#projectileMesh.frustumCulled = false;
-    this.#root.add(this.#projectileMesh);
+    // Projectiles (SPEC-019 §4.5): emissive capsules oriented along their
+    // velocity, plus a second instanced mesh of trailing ghosts. The owner
+    // colour is pushed × 2.5 through `instanceColor` (the material stays
+    // white) so the product clears the bloom threshold; on `low` there is no
+    // bloom and the clamp to white in the framebuffer is the whole effect.
+    const capsule = new THREE.CapsuleGeometry(0.07, 1, 2, 6);
+    capsule.rotateZ(-Math.PI / 2); // axis +X, so the velocity yaw orients it
+    const shotMaterial = new THREE.MeshBasicMaterial({
+      transparent: true,
+      depthWrite: false,
+      blending: THREE.AdditiveBlending,
+    });
+    this.#projectileMesh = new THREE.InstancedMesh(capsule, shotMaterial, PROJECTILE_CAPACITY);
+    this.#ghostMesh = new THREE.InstancedMesh(capsule, shotMaterial, GHOST_CAPACITY);
+    for (const mesh of [this.#projectileMesh, this.#ghostMesh]) {
+      mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+      mesh.setColorAt(0, scratchColor.set('#ffffff'));
+      mesh.count = 0;
+      mesh.frustumCulled = false;
+      this.#root.add(mesh);
+    }
+
+    // SPEC-019 §4.4: the combat VFX pool, sized from the preset (19-k). Built
+    // before the player group so its point light precedes the torch in
+    // traversal order — instruments that walk the lights find the torch last.
+    this.#billboard = cameraBillboard();
+    this.#fxCapacity = Math.min(FX_CAPACITY_MAX, FX_CAPACITY_PER_PARTICLE * quality.maxParticles);
+    this.#fx = new CombatFx(this.#root, this.#billboard, this.#fxCapacity);
 
     // The player: capsule body + nose cone showing facing. `transparent` stays
     // on so the invulnerability blink can keep writing `opacity` (§4.7).
@@ -522,14 +602,27 @@ export class SurfaceView {
     this.#player.add(torch);
     this.#root.add(this.#player);
 
-    // The escort probe.
-    this.#follower = new THREE.Mesh(
-      new THREE.SphereGeometry(0.5, 10, 8),
-      new THREE.MeshStandardMaterial({ color: '#c0d8e8', roughness: 0.4, metalness: 0.6 }),
-    );
-    this.#follower.visible = false;
-    this.#follower.castShadow = true;
-    this.#root.add(this.#follower);
+    // SPEC-019 §4.1: the animated salvager replaces the capsule when the boot
+    // assets are in. The player group stays — it carries the torch and is
+    // positioned every frame — but the capsule and nose leave it; the
+    // character root joins the view root so nothing is transformed twice.
+    if (assets !== undefined && assets.loaded) {
+      try {
+        this.#character = new CharacterView(
+          this.#root,
+          assets,
+          'character',
+          appearance ?? DEFAULT_APPEARANCE,
+          quality.shadowMapSize > 0,
+        );
+        this.#player.remove(body, nose);
+        body.geometry.dispose();
+        nose.geometry.dispose();
+        this.#playerMaterial.dispose();
+      } catch (cause) {
+        log.warn('view', 'character model unavailable; the capsule stays', cause);
+      }
+    }
 
     // The wurm's resurface telegraph.
     this.#telegraph = new THREE.Mesh(
@@ -542,7 +635,6 @@ export class SurfaceView {
     this.#root.add(this.#telegraph);
 
     // Storm sprites (SPEC-018 §4.9): instanced quads, camera-fixed billboard.
-    this.#billboard = cameraBillboard();
     this.#stormCapacity = quality.maxParticles;
     this.#storm = new StormParticles(this.#root, this.#billboard, quality.maxParticles);
 
@@ -650,6 +742,7 @@ export class SurfaceView {
       this.#key.shadow.dispose();
     }
     this.enemies.setShadows(size > 0);
+    this.#character?.setShadows(size > 0);
     this.#blobMaterial.opacity = size > 0 ? BLOB_OPACITY_WITH_MAP : BLOB_OPACITY_ALONE;
 
     // 18-p: the storm capacity is the preset's particle budget.
@@ -658,6 +751,16 @@ export class SurfaceView {
       this.#stormCapacity = quality.maxParticles;
       this.#storm = new StormParticles(this.#root, this.#billboard, quality.maxParticles);
       this.#storm.set(this.#particleKind, this.#particleIntensity);
+    }
+
+    // SPEC-019 19-k: the VFX pool follows its own `min(512, 4 · maxParticles)`
+    // number and is rebuilt only when a preset change moves it; live particles
+    // are dropped (they live ≤ 0.8 s). The storm pool above keeps its own cap.
+    const fxCapacity = Math.min(FX_CAPACITY_MAX, FX_CAPACITY_PER_PARTICLE * quality.maxParticles);
+    if (fxCapacity !== this.#fxCapacity) {
+      this.#fx.dispose();
+      this.#fxCapacity = fxCapacity;
+      this.#fx = new CombatFx(this.#root, this.#billboard, fxCapacity);
     }
 
     if (quality.ibl) {
@@ -710,8 +813,14 @@ export class SurfaceView {
     this.#player.visible = p.alive;
     this.#player.position.set(p.x, playerGround, p.z);
     this.#player.rotation.y = -p.facing;
-    const blinking = p.invulnUntil > frame.time && Math.sin(frame.time * 30) > 0;
-    this.#playerMaterial.opacity = blinking ? 0.35 : 1;
+    if (this.#character === null) {
+      const blinking = p.invulnUntil > frame.time && Math.sin(frame.time * 30) > 0;
+      this.#playerMaterial.opacity = blinking ? 0.35 : 1;
+    } else {
+      // SPEC-019 §4.1: animation, facing and the blink live in the view;
+      // `dt` is 0 during hit-stop, so the mixer holds with the frame.
+      this.#character.sync(p, frame.time, frame.dt, playerGround);
+    }
 
     // §4.5: the key and its target ride the player along the look's sun
     // direction, so the 68 m shadow camera always covers what is on screen.
@@ -722,15 +831,13 @@ export class SurfaceView {
     );
     this.#keyTarget.position.set(p.x, 0, p.z);
 
+    // SPEC-019 §4.8: the follower view is built on first sight, from the
+    // definition's model id; the procedural probe is the fallback (19-l).
     const follower = frame.follower;
-    this.#follower.visible = follower !== null && follower.alive;
-    if (follower !== null) {
-      this.#follower.position.set(
-        follower.x,
-        0.8 + Math.sin(frame.time * 2) * 0.1 + ground(follower.x, follower.z),
-        follower.z,
-      );
+    if (follower !== null && this.#followerView === null) {
+      this.#followerView = new FollowerView(this.#root, this.#assets, follower.def?.model ?? 'procedural');
     }
+    this.#followerView?.sync(follower, frame.time, follower === null ? 0 : ground(follower.x, follower.z));
 
     this.enemies.sync(frame.enemies, frame.time, ground);
 
@@ -765,9 +872,15 @@ export class SurfaceView {
 
     this.#syncLightning(frame.time);
     this.#storm.sync(p.x, p.z, frame.time, ground);
+    this.#fx.sync(frame.time, ground);
     this.#syncPickups(frame);
     this.#syncProjectiles(frame);
     this.#syncBlobs(frame);
+  }
+
+  /** SPEC-019 §4.6: the scene raises bursts here; views never subscribe. */
+  get fx(): CombatFx {
+    return this.#fx;
   }
 
   /**
@@ -840,21 +953,62 @@ export class SurfaceView {
     }
   }
 
+  /**
+   * SPEC-019 §4.5: capsule heads oriented along velocity, two trailing ghosts
+   * each at `p − v · 0.03` / `p − v · 0.06`. A zero-velocity shot (spawned
+   * this frame) takes its yaw from the owner's facing and its ghosts collapse
+   * onto the head (19-j).
+   */
   #syncProjectiles(frame: SurfaceFrame): void {
     const pool = frame.projectiles;
-    const mesh = this.#projectileMesh;
-    syncInstances(mesh, pool.size, (i) => {
+    const heads = this.#projectileMesh;
+    const ghosts = this.#ghostMesh;
+    const headCount = Math.min(pool.size, heads.instanceMatrix.count);
+    let ghostCount = 0;
+    for (let i = 0; i < headCount; i++) {
       const shot = pool.at(i);
-      const scale = Math.max(0.12, shot.radius);
-      scratchMatrix.makeScale(scale, scale, scale);
-      scratchMatrix.setPosition(shot.x, 0.9 + this.field.heightAt(shot.x, shot.z), shot.z);
-      mesh.setColorAt(i, scratchColor.set(shot.owner === 'enemy' ? '#7fff8a' : '#ffe9a0'));
-    });
+      const speed = Math.hypot(shot.vx, shot.vz);
+      const yaw = speed > 0 ? -Math.atan2(shot.vz, shot.vx) : -(shot.owner === 'enemy' ? 0 : frame.player.facing);
+      const bulk = Math.max(0.12, shot.radius) / 0.12;
+      const y = 0.9 + this.field.heightAt(shot.x, shot.z);
+      scratchPosition2.set(shot.x, y, shot.z);
+      scratchQuat.setFromAxisAngle(Y_AXIS, yaw);
+      scratchScale2.set((0.6 + 0.02 * speed) * bulk, bulk, bulk);
+      scratchMatrix.compose(scratchPosition2, scratchQuat, scratchScale2);
+      heads.setMatrixAt(i, scratchMatrix);
+      scratchColor.set(shot.owner === 'enemy' ? '#7fff8a' : '#ffe9a0');
+      heads.setColorAt(i, scratchColor2.copy(scratchColor).multiplyScalar(PROJECTILE_GAIN));
+      for (const [lag, gain] of GHOST_TRAIL) {
+        if (ghostCount >= ghosts.instanceMatrix.count) break;
+        scratchPosition2.set(shot.x - shot.vx * lag, y, shot.z - shot.vz * lag);
+        scratchMatrix.compose(scratchPosition2, scratchQuat, scratchScale2);
+        ghosts.setMatrixAt(ghostCount, scratchMatrix);
+        ghosts.setColorAt(ghostCount, scratchColor2.copy(scratchColor).multiplyScalar(gain));
+        ghostCount++;
+      }
+    }
+    heads.count = headCount;
+    heads.visible = headCount > 0;
+    ghosts.count = ghostCount;
+    ghosts.visible = ghostCount > 0;
+    if (headCount > 0) {
+      heads.instanceMatrix.needsUpdate = true;
+      if (heads.instanceColor !== null) heads.instanceColor.needsUpdate = true;
+    }
+    if (ghostCount > 0) {
+      ghosts.instanceMatrix.needsUpdate = true;
+      if (ghosts.instanceColor !== null) ghosts.instanceColor.needsUpdate = true;
+    }
   }
 
   dispose(): void {
     this.enemies.dispose();
     this.#storm.dispose();
+    this.#fx.dispose();
+    this.#character?.dispose();
+    this.#character = null;
+    this.#followerView?.dispose();
+    this.#followerView = null;
     this.#scene.remove(this.#root);
     disposeObject3D(this.#root);
     this.#clearEnvironment();
