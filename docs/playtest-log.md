@@ -352,3 +352,100 @@ debug row at capture time — Eden's ambient population is 0 by design).
       `e2e/dev-skip-flight.spec.ts` green
 - [ ] distinct animations, VFX feel and reduce-motion verified **on hardware**
       (desktop GPU + reference phone) — needs the human pass
+
+## SPEC-020 — flight, station, menus and UI theme (M7a)
+
+- **Build:** `spec/SPEC-020` — untagged
+- **Devices:**
+  - desktop — headless Chromium (Playwright, Linux container, **software GL**;
+    every ms/fps number is a floor, not a device number)
+  - desktop hardware GPU and phone-over-LAN — _not run: no display, no GPU and
+    no handset in the build container; needs the human pass_
+
+### AC-31 — every scene at every preset
+
+Desktop 1280×720, captured after 40 rendered frames on the menu, creation
+screen, station and star map, and after 30 on a flight whose asteroid field was
+topped to the preset's cap (`window.__reallmFlight.fillAsteroids()`) with a
+parked fighter in frame.
+
+| Scene | low | medium | high |
+|---|---|---|---|
+| menu | [png](screenshots/spec-020/menu-low.png) | [png](screenshots/spec-020/menu-medium.png) | [png](screenshots/spec-020/menu-high.png) |
+| creation | [png](screenshots/spec-020/creation-low.png) | [png](screenshots/spec-020/creation-medium.png) | [png](screenshots/spec-020/creation-high.png) |
+| station | [png](screenshots/spec-020/station-low.png) | [png](screenshots/spec-020/station-medium.png) | [png](screenshots/spec-020/station-high.png) |
+| star map | [png](screenshots/spec-020/starmap-low.png) | [png](screenshots/spec-020/starmap-medium.png) | [png](screenshots/spec-020/starmap-high.png) |
+| flight | [png](screenshots/spec-020/flight-low.png) | [png](screenshots/spec-020/flight-medium.png) | [png](screenshots/spec-020/flight-high.png) |
+
+### AC-15 — the flight frame with the field full
+
+Whole-frame `draws` (scene + post) and `tris` at the moment of capture. The
+budget is 40 scene + 16 post = 56 draws and 80 000 triangles on `medium`.
+
+| Preset | draws (frame) | tris | geo | tex | hazards | budget ✔ |
+|---|---|---|---|---|---|---|
+| low | 11 | 32 098 | 22 | 43 | 41 | ✔ (post off; cap 40) |
+| medium | 32 | 38 524 | 32 | 63 | 61 | ✔ |
+| high | 31 | 38 523 | 32 | 63 | 61 | ✔ |
+
+`e2e/flight-env.spec.ts` asserts the same thing on `medium` on every run, and
+its second case warps Ferrum out to its first ion-storm window and watches the
+sky window's `skyTint` climb past half (AC-14, 20-g) — the criterion the last
+two QA rounds could not reach by hand.
+
+### AC-10 — the engine glow is visible, and it is the glow
+
+The round-3 defect was not the quad's position but that nobody could see it:
+hazards fly nose-on (SPEC-013 §4.3), so a ship's exhaust is always inside its
+own hull's depth shadow and a depth-tested 0.6 m quad at the nozzle plane
+rasterises nothing at any bearing the rail allows. The material now leaves
+`depthTest` off — it is additive and writes no depth, so it tints the hull it
+crosses rather than hiding it, and reads as exhaust spilling around a ship
+coming at you.
+
+Measured rather than eyeballed: with a fighter parked at ~15 m on `low` (no
+bloom, so nothing else is blue), 151 pixels of the frame are cyan-dominant
+(blue − red > 40, blue > 90), peaking at `rgb(70, 132, 218)` at the ship's
+centre — the `#9fe3ff` quad, and nothing else in the scene is that colour.
+[Screenshot](screenshots/spec-020/flight-engine-glow.png).
+
+### Observations
+
+- The hub backdrops are one `Group` each, lit by the key + rim pair over
+  SPEC-017's neutral environment. `props` reads 3 / 1 / 1 on station / menu /
+  creation exactly as `e2e/stats-overlay.spec.ts` pins it; the sky window and
+  the lights are the backdrop's furniture, not props.
+- `station_ring.glb` and `dock.glb` load **lazily** with the station rather
+  than at boot. SPEC-020 §4.8 would have put them in `ASSETS.models`, but PLAN
+  R6-5 keeps the boot manifest at five files and `tests/data/content.test.ts`
+  pins it — PLAN wins. The hubs show their procedural modules until the GLBs
+  land, and for good if they never do (20-e).
+- The ring's lit modules blow out under `medium`'s bloom (`STATION_LOOK`
+  `bloomStrength 0.3` plus the baked `Glow` at emission strength 2). It reads
+  correctly on `low`. Left as initial tuning: the bloom number is SPEC-017's
+  and the emission is the art's, and neither is this spec's to retune. Worth a
+  look on the hardware pass.
+- The star map's six orbits are staggered 2.0 … 4.0 world units instead of the
+  one shared 3.1 circle, so the per-planet orbit ring AC-20 asks for is
+  legible rather than six coincident circles. The outermost stays well inside
+  the overhead camera's 4.62-unit half-height and SPEC-014's node-placement
+  case is green.
+- Portraits: the twelve busts ship, so the creation screen and the character
+  panel show images; deleting `assets/portraits/manifest.json` (or any of the
+  files) puts the glyphs back, per portrait rather than per manifest.
+- The theme's `backdrop-filter` is dropped under `prefers-reduced-transparency`
+  and on `low`, through a `quality-low` class `core/Renderer` keeps on `<html>`
+  — the same DOM contract `reduce-motion` uses.
+- Software GL renders at 6–15 fps in this container, so the lens flare's
+  occlusion behaviour, the bloom on the shot ghosts and the glass panels on a
+  phone all still need the human pass.
+
+### Checklist
+
+- [x] `npm run check` green (typecheck, 892 unit tests, production build)
+- [x] `e2e/flight-env.spec.ts` (new), `e2e/SPEC-014.spec.ts`,
+      `e2e/stats-overlay.spec.ts`, `e2e/asset-spike.spec.ts`,
+      `e2e/boot-assets.spec.ts`, `e2e/scene-cycle.spec.ts`,
+      `e2e/post-chain.spec.ts`, `e2e/SPEC-013.spec.ts` green
+- [ ] the theme, the glass panels and the flight fx verified **on hardware**
+      (desktop GPU + reference phone) — needs the human pass

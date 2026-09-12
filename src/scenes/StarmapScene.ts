@@ -29,7 +29,7 @@ import { el, h, testId } from '@/ui/dom';
 import type { Look } from '@/core/Quality';
 import { NEUTRAL_SKY } from '@/views/Environment';
 import { addHubLights, hubSkyMesh, loadHubSky } from '@/views/HubBackdrop';
-import { planetDisc } from '@/views/ProceduralTextures';
+import { particleSprite, planetDisc } from '@/views/ProceduralTextures';
 import { UiScene } from '@/scenes/base';
 
 const MISSION_IDS = Object.keys(MISSIONS) as MissionId[];
@@ -132,7 +132,16 @@ export class StarmapScene extends UiScene<'starmap'> {
       const radius = ORBIT_RADII[index] as number;
       // §4.4: the halo around a world that is open, and its orbit.
       const glow = new THREE.Sprite(
-        new THREE.SpriteMaterial({ color: accent, blending: THREE.AdditiveBlending, transparent: true, depthWrite: false, opacity: 0.75 }),
+        new THREE.SpriteMaterial({
+          // The falloff is the sprite's; without a map the quad would read as
+          // a bright square around the node.
+          map: particleSprite('dot'),
+          color: accent,
+          blending: THREE.AdditiveBlending,
+          transparent: true,
+          depthWrite: false,
+          opacity: 0.75,
+        }),
       );
       glow.scale.setScalar(1.5);
       glow.position.copy(position);
