@@ -237,11 +237,13 @@ export class FilmPlayer {
     if (mode === 'text') {
       const describe = testId(el('p', 'film-describe'), 'film-describe');
       run.describe = describe;
-      picture.prepend(describe);
+      // After the frame in paint order — its text-mode backdrop is opaque.
+      frame.after(describe);
     } else if (mode === 'video' && entry !== undefined) {
       // §4.2: the first shot's poster stands in while the Blob arrives; the
       // stills mode gets the same poster through the first render below.
       this.#showPoster(run, 0);
+      run.shownShot = 0;
       this.#startVideo(run, entry);
     }
 
@@ -398,8 +400,12 @@ export class FilmPlayer {
         video.src = run.objectUrl;
         // A tab hidden mid-load stays paused; `#resume` starts the video (E28).
         if (run.state === 'paused') return;
-        video.play().catch(() => {
-          // 22-e: an autoplay-policy rejection is a video failure, so stills.
+        video.play().catch((error: unknown) => {
+          // The player's own pause() — a tab hidden while play() settles —
+          // rejects with AbortError; like an aborted fetch, that is not a
+          // failure (§4.1). A real autoplay-policy refusal is not an abort
+          // and still falls over to stills (22-e).
+          if (error instanceof DOMException && error.name === 'AbortError') return;
           if (this.#run === run) this.#videoFailed(run);
         });
       })
@@ -445,7 +451,7 @@ export class FilmPlayer {
     if (run.mode === 'text' && run.describe === null) {
       const describe = testId(el('p', 'film-describe'), 'film-describe');
       run.describe = describe;
-      run.picture.prepend(describe);
+      run.frame.after(describe);
     }
     this.#render(run);
   }
@@ -525,6 +531,18 @@ export class FilmPlayer {
         if (previous !== null) {
           setTimeout(() => previous.remove(), FILM_POSTER_FADE * 1000);
         }
+      },
+      { once: true },
+    );
+    img.addEventListener(
+      'error',
+      () => {
+        if (this.#run !== run || run.poster !== img) return;
+        // A broken poster must not leave the previous shot up: reveal the
+        // incoming element so at least its alt text tells the shot.
+        img.style.opacity = '1';
+        img.style.transform = 'none';
+        previous?.remove();
       },
       { once: true },
     );
@@ -622,7 +640,9 @@ export class FilmPlayer {
     run.lastAdvanceWall = run.lastFrameWall;
     if (run.mode === 'video' && !run.videoStarted) this.#armLoadTimer(run);
     if (run.video !== null && run.video.src !== '') {
-      run.video.play().catch(() => {
+      run.video.play().catch((error: unknown) => {
+        // A pause landing before this play() settles is not a failure (§4.1).
+        if (error instanceof DOMException && error.name === 'AbortError') return;
         if (this.#run === run) this.#videoFailed(run);
       });
     }

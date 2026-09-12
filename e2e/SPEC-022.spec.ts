@@ -120,7 +120,18 @@ test('3 — text mode: no films at all still tells the story in words; Escape sk
   await page.route('**/assets/films/**', (route) => route.abort());
   await newGame(page);
   await expect(page.locator(FILM)).toHaveAttribute('data-mode', 'text');
-  await expect(page.locator('[data-testid="film-describe"]')).toContainText('Earth at night from high orbit');
+  const describe = page.locator('[data-testid="film-describe"]');
+  await expect(describe).toContainText('Earth at night from high orbit');
+  // The description must PAINT above the text-mode backdrop, not merely exist:
+  // hit-testing its centre follows paint order, so a frame drawn over it fails.
+  const topmost = await page.evaluate(() => {
+    const el = document.querySelector('[data-testid="film-describe"]');
+    if (el === null) return 'missing';
+    const r = el.getBoundingClientRect();
+    const hit = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
+    return hit !== null && (hit === el || el.contains(hit)) ? 'describe' : (hit?.className ?? 'nothing');
+  });
+  expect(topmost).toBe('describe');
   await page.waitForTimeout(700);
   await page.keyboard.press('Escape');
   await expect(page.locator('[data-testid="creation-confirm"]')).toBeVisible();
