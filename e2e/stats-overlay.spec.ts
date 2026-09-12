@@ -178,54 +178,84 @@ test.describe('immediate refreshes', () => {
   });
 });
 
-/** `loop.stats.frame` and the current scene's own render count, read together. */
-async function frameAndRenders(page: Page): Promise<{ frame: number; renders: number }> {
+/**
+ * `MenuScene.onUpdate` turns the starfield by `this.elapsed * 0.008`, and
+ * `elapsed` is only ever advanced by `Scene.update(dt)` — one fixed step at a
+ * time. The `spin` pair the menu reports is therefore the simulated clock in
+ * radians, and dividing it by this rate reads it back in simulated seconds.
+ */
+const MENU_SPIN_RATE = 0.008;
+
+/**
+ * `loop.stats.frame`, the current scene's own render count, the simulated
+ * clock and the wall clock, all read in one evaluate so they belong to the
+ * same instant.
+ */
+async function frameAndRenders(
+  page: Page,
+): Promise<{ frame: number; renders: number; simulated: number; dropped: number; now: number }> {
   return page.evaluate(() => {
     const stats = window.__reallm.stats();
-    return { frame: stats.frame, renders: Number(stats.sceneInfo?.['renders'] ?? 0) };
+    return {
+      frame: stats.frame,
+      renders: Number(stats.sceneInfo?.['renders'] ?? 0),
+      simulated: Number(stats.sceneInfo?.['spin'] ?? 0),
+      dropped: stats.droppedTime,
+      now: performance.now(),
+    };
   });
 }
 
 /**
  * Wait until the loop has advanced past `frames` animation frames, and answer
- * the reading that spans them.
+ * the reading that spans them: how many frames and renders it took, how far
+ * the simulation advanced inside it, and how long it lasted on the wall clock.
  *
- * The sample used to be a flat second, which assumed a ~60 Hz frame. `high`
- * cannot hold one here: SPEC-017 put a post-processing chain behind
- * `Renderer.render()` and this container has no GPU, so its sixteen
- * full-screen passes at 720p cost the software rasteriser ~110 ms a frame and
- * a second buys nine frames, not sixty. The claim being tested is a *ratio* of
- * renders to frames, which the frame rate does not enter — so the window is
- * counted in frames and the assertions are untouched. `low` above takes the
- * direct path and still keeps its 60 Hz second.
+ * The sample used to be a flat second, which assumed a ~60 Hz frame. Neither
+ * preset can hold one here: SPEC-017 put a post-processing chain behind
+ * `Renderer.render()` and this container has no GPU, so `high`'s sixteen
+ * full-screen passes at 720p cost the software rasteriser ~110 ms a frame, and
+ * `low` — which takes the direct path — still drops to ~20 Hz whenever the
+ * suite runs several browsers at once. Neither claim below is about the frame
+ * *rate*: one is a ratio of renders to frames, the other a ratio of simulated
+ * to real time. So the window is counted in frames and both are measured over
+ * it, whatever rate the host manages.
  */
 async function overFrames(
   page: Page,
   frames: number,
-): Promise<{ frames: number; renders: number }> {
+): Promise<{ frames: number; renders: number; simulated: number; dropped: number; wall: number }> {
   const before = await frameAndRenders(page);
   await expect
     .poll(async () => (await frameAndRenders(page)).frame - before.frame, { timeout: 30_000 })
     .toBeGreaterThan(frames);
   const after = await frameAndRenders(page);
-  return { frames: after.frame - before.frame, renders: after.renders - before.renders };
+  return {
+    frames: after.frame - before.frame,
+    renders: after.renders - before.renders,
+    simulated: (after.simulated - before.simulated) / MENU_SPIN_RATE,
+    dropped: after.dropped - before.dropped,
+    wall: (after.now - before.now) / 1000,
+  };
 }
 
 test('quality.targetFps 30 skips every second render, updates untouched (AC-57)', async ({ page }) => {
   await start(page, '/?debug&quality=low');
   expect((await page.evaluate(() => window.__reallm.stats())).preset).toBe('low');
 
-  const before = await frameAndRenders(page);
-  await page.waitForTimeout(1000);
-  const after = await frameAndRenders(page);
+  const { frames, renders, simulated, dropped, wall } = await overFrames(page, 40);
 
-  const frames = after.frame - before.frame;
-  const renders = after.renders - before.renders;
   expect(frames).toBeGreaterThan(20); // the loop really ran
   expect(renders / frames).toBeGreaterThan(0.4);
   expect(renders / frames).toBeLessThan(0.6);
-  // The fixed updates kept their own rate: a second of frames at ~60 Hz.
-  expect((await page.evaluate(() => window.__reallm.stats())).fps).toBeGreaterThan(40);
+  // The fixed updates kept their own rate: the render skip halves the draws
+  // and leaves the simulation alone, so the seconds the starfield turned
+  // through are the seconds the window actually lasted — minus whatever the
+  // five-step cap explicitly threw away on a hitch (E23). Halving the updates
+  // along with the renders, which is the regression this guards, would leave
+  // `simulated` at half of `wall` and fail here at any frame rate.
+  expect(simulated + dropped).toBeGreaterThan(wall * 0.9);
+  expect(simulated).toBeLessThan(wall * 1.05);
 });
 
 test('the other presets render every frame (AC-57)', async ({ page }) => {
