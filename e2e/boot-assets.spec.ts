@@ -8,12 +8,17 @@ import { COLD_START, gameUrl, passGate } from './start';
 
 /**
  * A request the boot loader is answerable for. `ASSETS.models` and
- * `ASSETS.textures` are the whole manifest it fetches; `/assets/audio/` is
- * Howler's, loaded lazily on scene `enter()` well after the gate (SPEC-006
- * §4.3, D-27), so it is not traffic AC-48 is measuring.
+ * `ASSETS.textures` are the whole manifest it fetches — five files, pinned by
+ * `tests/data/content.test.ts` (PLAN R6-5). The two folders below are fetched
+ * by a scene's own `enter()`, well after the gate, so they are not traffic
+ * AC-48 is measuring: `/assets/audio/` is Howler's bed (SPEC-006 §4.3, D-27)
+ * and `/assets/textures/flight/` is the sky window the hub and flight scenes
+ * load lazily (SPEC-020 §4.4, §4.8).
  */
+const LAZY = ['/assets/audio/', '/assets/textures/flight/'];
+
 function isManifestAsset(path: string): boolean {
-  return path.includes('/assets/') && !path.includes('/assets/audio/');
+  return path.includes('/assets/') && !LAZY.some((folder) => path.includes(folder));
 }
 
 test('the boot overlay reports asset progress (AC-45)', async ({ page }) => {

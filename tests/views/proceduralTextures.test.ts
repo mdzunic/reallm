@@ -4,7 +4,8 @@
 import { describe, expect, it } from 'vitest';
 import * as THREE from 'three';
 import { GROUND_LAYER_IDS } from '@/data/ids';
-import { buildGroundLayer, decalAtlas, groundLayer, particleSprite, prewarm } from '@/views/ProceduralTextures';
+import { PLANET_IDS, PLANETS } from '@/data/index';
+import { buildGroundLayer, decalAtlas, groundLayer, particleSprite, planetDisc, prewarm } from '@/views/ProceduralTextures';
 
 const SIZE = 64; // small grids keep the suite fast; the shape rules are size-free
 
@@ -126,6 +127,46 @@ describe('decalAtlas and particleSprite (SPEC-018 §4.5)', () => {
       const centre = data[((h / 2) * w + w / 2) * 4 + 3] as number;
       expect(centre, kind).toBeGreaterThan(150);
       expect(data[3], kind).toBeLessThan(40); // the corner is transparent
+    }
+  });
+});
+
+// SPEC-020 §3 — the star map's globes.
+describe('planetDisc (SPEC-020 §4.4)', () => {
+  it('is a 256² sRGB map by default, opaque, tiling and session-cached', () => {
+    const disc = planetDisc(PLANETS.cinder4);
+    expect(disc.image.width).toBe(256);
+    expect(disc.image.height).toBe(256);
+    expect(disc.colorSpace).toBe(THREE.SRGBColorSpace);
+    expect(disc.wrapS).toBe(THREE.RepeatWrapping);
+    expect(disc.userData['shared']).toBe(true);
+    // Same planet, same texture — re-entering the map builds nothing.
+    expect(planetDisc(PLANETS.cinder4)).toBe(disc);
+    expect(planetDisc(PLANETS.cinder4, SIZE)).not.toBe(disc);
+    const data = bytes(disc);
+    for (let i = 0; i < 256 * 256; i += 997) expect(data[i * 4 + 3]).toBe(255);
+  });
+
+  it('wears each planet its own face, with ice at the poles and ground between', () => {
+    const discs = PLANET_IDS.map((id) => planetDisc(PLANETS[id], SIZE));
+    // No two worlds share a face: the seed is the planet id. Sampled at the
+    // equator — every pole row is ice, whatever the world underneath.
+    const equator = (SIZE / 2) * SIZE * 4;
+    const signatures = discs.map((disc) => bytes(disc).slice(equator, equator + SIZE * 4).join(','));
+    expect(new Set(signatures).size).toBe(PLANET_IDS.length);
+    for (const [i, disc] of discs.entries()) {
+      const data = bytes(disc);
+      const id = PLANET_IDS[i] as string;
+      // Row 0 is a pole: frozen, so bright and near-neutral.
+      let poleSum = 0;
+      let bandSum = 0;
+      for (let x = 0; x < SIZE; x++) {
+        poleSum += (data[x * 4] as number) + (data[x * 4 + 1] as number) + (data[x * 4 + 2] as number);
+        const at = ((SIZE / 2) * SIZE + x) * 4;
+        bandSum += (data[at] as number) + (data[at + 1] as number) + (data[at + 2] as number);
+      }
+      expect(poleSum / (SIZE * 3), `${id} pole`).toBeGreaterThan(180);
+      expect(bandSum, `${id} equator`).toBeLessThan(poleSum);
     }
   });
 });

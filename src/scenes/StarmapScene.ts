@@ -28,13 +28,22 @@ import { confirmSheet } from '@/ui/ConfirmSheet';
 import { el, h, testId } from '@/ui/dom';
 import type { Look } from '@/core/Quality';
 import { NEUTRAL_SKY } from '@/views/Environment';
+import { addHubLights, hubSkyMesh, loadHubSky } from '@/views/HubBackdrop';
+import { planetDisc } from '@/views/ProceduralTextures';
 import { UiScene } from '@/scenes/base';
 
 const MISSION_IDS = Object.keys(MISSIONS) as MissionId[];
 const ENGINE: ShipSystemDef = UPGRADES.engine;
 
-/** The circle the six planets sit on, in world units. */
-const ORBIT_RADIUS = 3.1;
+/**
+ * The orbit each world sits on, in world units, innermost first — `PLANET_IDS`
+ * is chapter order, so the map reads outward as the campaign does. SPEC-020
+ * §4.4 draws a ring on each of them, which is only legible if the six are not
+ * the one circle they used to share. The outermost stays well inside the
+ * overhead camera's 4.62-unit half-height, so every DOM hit area still lands
+ * in the viewport (SPEC-014 AC-52).
+ */
+const ORBIT_RADII: readonly number[] = [2.0, 2.4, 2.8, 3.2, 3.6, 4.0];
 
 /** SPEC-017 §4.1 (*initial tuning*): the map's nodes are meant to glow. */
 const STARMAP_LOOK: Partial<Look> = { bloomStrength: 0.6, bloomThreshold: 0.6, vignette: 0.4 };
@@ -49,6 +58,8 @@ export class StarmapScene extends UiScene<'starmap'> {
   #nodesBox: HTMLDivElement | null = null;
   #info: HTMLDivElement | null = null;
   #ring: THREE.Mesh | null = null;
+  /** §4.4: every mesh the map draws hangs off this one group. */
+  readonly #backdrop = new THREE.Group();
   readonly #nodeMeshes = new Map<PlanetId, THREE.Mesh>();
 
   constructor(services: GameServices) {
@@ -81,30 +92,58 @@ export class StarmapScene extends UiScene<'starmap'> {
 
   // ------------------------------------------------------------------ Three
 
-  /** AC-50/52: overhead camera, six spheres, the station point, the ring. */
+  /**
+   * AC-50/52 and SPEC-020 §4.4: overhead camera, six globes wearing their own
+   * `planetDisc`, the station point and the selection ring — all of it under
+   * one `Group`, lit by the hub's key + rim pair over the neutral environment.
+   * Unlocked worlds add an additive glow sprite in their accent and the thin
+   * ring of the orbit they sit on; locked ones stay dim.
+   */
   #buildMap(): void {
     this.camera.position.set(0, 8, 0.001);
     this.camera.lookAt(0, 0, 0);
+    const group = this.#backdrop;
+    addHubLights(group);
+    this.scene.add(group);
     const station = new THREE.Mesh(
       new THREE.SphereGeometry(0.16, 12, 10),
       new THREE.MeshStandardMaterial({ color: 0xdfe8f3, emissive: 0x8899aa, emissiveIntensity: 0.7 }),
     );
-    this.scene.add(station);
+    group.add(station);
     PLANET_IDS.forEach((planet, index) => {
       const position = this.#worldOf(index);
       const unlocked = this.#economy?.isUnlocked(planet) ?? false;
       const accent = new THREE.Color(PLANETS[planet].surface.palette.accent);
       const material = new THREE.MeshStandardMaterial({
+        map: planetDisc(PLANETS[planet]),
         color: accent,
         emissive: accent,
         // AC-50: lit against dim is a material state, not just DOM dressing.
         emissiveIntensity: unlocked ? 0.55 : 0.06,
       });
+      // The disc carries the colour; the accent is a tint over it, not a wash.
+      material.color.lerp(new THREE.Color(0xffffff), 0.65);
       if (!unlocked) material.color.multiplyScalar(0.45);
       const mesh = new THREE.Mesh(new THREE.SphereGeometry(0.32, 16, 12), material);
       mesh.position.copy(position);
       this.#nodeMeshes.set(planet, mesh);
-      this.scene.add(mesh);
+      group.add(mesh);
+      if (!unlocked) return;
+      const radius = ORBIT_RADII[index] as number;
+      // §4.4: the halo around a world that is open, and its orbit.
+      const glow = new THREE.Sprite(
+        new THREE.SpriteMaterial({ color: accent, blending: THREE.AdditiveBlending, transparent: true, depthWrite: false, opacity: 0.75 }),
+      );
+      glow.scale.setScalar(1.5);
+      glow.position.copy(position);
+      group.add(glow);
+      const orbit = new THREE.Mesh(
+        new THREE.RingGeometry(radius - 0.015, radius + 0.015, 96),
+        new THREE.MeshBasicMaterial({ color: accent, side: THREE.DoubleSide, transparent: true, opacity: 0.28 }),
+      );
+      orbit.rotation.x = -Math.PI / 2;
+      orbit.position.y = -0.02;
+      group.add(orbit);
     });
     // AC-51: the selection ring, flat on the plane under the chosen node.
     const ring = new THREE.Mesh(
@@ -112,19 +151,23 @@ export class StarmapScene extends UiScene<'starmap'> {
       new THREE.MeshBasicMaterial({ color: 0x4c9aff, side: THREE.DoubleSide, transparent: true, opacity: 0.9 }),
     );
     ring.rotation.x = -Math.PI / 2;
-    this.scene.add(ring);
+    group.add(ring);
     this.#ring = ring;
     this.props = PLANET_IDS.length + 2;
-    // +15 % over the pre-SPEC-017 value, to offset ACES mid-tone compression.
-    const key = new THREE.DirectionalLight(0xffffff, 1.61);
-    key.position.set(2, 6, 1);
-    this.scene.add(key);
     this.#moveRing();
+
+    // §4.4: the station window behind the map, when it lands.
+    let alive = true;
+    this.disposer.add(() => {
+      alive = false;
+    });
+    loadHubSky(this.services.assets, () => alive, (sky) => group.add(hubSkyMesh(sky)));
   }
 
   #worldOf(index: number): THREE.Vector3 {
     const angle = (index / PLANET_IDS.length) * Math.PI * 2 - Math.PI / 2;
-    return new THREE.Vector3(Math.cos(angle) * ORBIT_RADIUS, 0, Math.sin(angle) * ORBIT_RADIUS);
+    const radius = ORBIT_RADII[index] as number;
+    return new THREE.Vector3(Math.cos(angle) * radius, 0, Math.sin(angle) * radius);
   }
 
   #moveRing(): void {

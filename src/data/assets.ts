@@ -152,6 +152,30 @@ export const FLIGHT_ASSETS = {
   audio: {},
 } as const;
 
+/**
+ * The hub scenes' backdrop set (SPEC-020 §4.4, §4.8): the dock ring, the
+ * landing pad, and the nebula window the station, menu, creation screen and
+ * star map sit in front of. Fetched by those scenes on `enter()`, never at
+ * boot — PLAN R6-5 keeps the boot manifest at five files and
+ * `e2e/boot-assets.spec.ts` measures exactly that traffic, so the two models
+ * ride here rather than in `ASSETS.models`; where PLAN and a spec disagree,
+ * PLAN wins. Every hub keeps its procedural modules until these land, and for
+ * good if they never do (20-e).
+ */
+export const HUB_ASSETS = {
+  models: {
+    /** Flat, radius 2.2 m, origin at its centre; the scene tilts it. */
+    station_ring: 'assets/models/station_ring.glb',
+    /** The 1.1 m landing pad, centred. */
+    dock: 'assets/models/dock.glb',
+  },
+  textures: {
+    /** The station's forward window, on R8's `SKY_WINDOW` geometry. */
+    sky_station: { url: 'assets/textures/flight/sky_station.webp', kind: 'color' },
+  },
+  audio: {},
+} as const;
+
 /** One destination's flight maps (PLAN R8); `emissive` only where the world glows. */
 export interface PlanetArt {
   /** The forward sky window (`SKY_WINDOW` in views/FlightView). */
@@ -325,9 +349,14 @@ export type SurfaceTextureId = { [B in SurfaceBiome]: keyof (typeof SURFACE_ASSE
 export type ModelId =
   | keyof typeof ASSETS.models
   | keyof typeof FLIGHT_ASSETS.models
+  | keyof typeof HUB_ASSETS.models
   | keyof typeof SURFACE_SHARED_ASSETS.models
   | SurfaceModelId;
-export type TextureId = keyof typeof ASSETS.textures | keyof typeof FLIGHT_ASSETS.textures | SurfaceTextureId;
+export type TextureId =
+  | keyof typeof ASSETS.textures
+  | keyof typeof FLIGHT_ASSETS.textures
+  | keyof typeof HUB_ASSETS.textures
+  | SurfaceTextureId;
 
 /** Every key of `ASSETS.audio` — a sprite bank or a music track (§2.4). */
 export type AudioBankId = keyof typeof ASSETS.audio;

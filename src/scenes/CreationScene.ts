@@ -21,6 +21,7 @@ import { el, h, testId } from '@/ui/dom';
 import type { Look } from '@/core/Quality';
 import { tintSalvager } from '@/views/CharacterView';
 import { NEUTRAL_SKY } from '@/views/Environment';
+import { addHubLights, hubSkyMesh, loadHubSky } from '@/views/HubBackdrop';
 import { UiScene } from '@/scenes/base';
 
 const CLASS_IDS = Object.keys(CLASSES) as ClassId[];
@@ -60,6 +61,9 @@ export class CreationScene extends UiScene<'creation'> {
   #form: HTMLDivElement | null = null;
   #nameField: HTMLInputElement | null = null;
   #previewBox: HTMLDivElement | null = null;
+
+  /** §4.4: the backdrop's one group — the starfield, the lights, the window. */
+  readonly #backdrop = new THREE.Group();
 
   // The scissor pass (AC-19): its own little scene, lit for a portrait.
   readonly #previewScene = new THREE.Scene();
@@ -117,8 +121,20 @@ export class CreationScene extends UiScene<'creation'> {
 
   // ------------------------------------------------------------------ Three
 
-  /** A thin echo of the menu starfield, so the form floats over something. */
+  /**
+   * A thin echo of the menu starfield, so the form floats over something —
+   * SPEC-020 §4.4 puts it under one `Group` with the shared key + rim pair and
+   * the station window behind it. `props` stays the 1 SPEC-014 pins.
+   */
   #buildBackdrop(): void {
+    const group = this.#backdrop;
+    addHubLights(group);
+    this.scene.add(group);
+    let alive = true;
+    this.disposer.add(() => {
+      alive = false;
+    });
+    loadHubSky(this.services.assets, () => alive, (sky) => group.add(hubSkyMesh(sky)));
     const positions = new Float32Array(240 * 3);
     for (let i = 0; i < 240; i++) {
       const a = ((Math.sin(i * 12.9898) * 43758.5453) % 1 + 1) % 1;
@@ -131,7 +147,7 @@ export class CreationScene extends UiScene<'creation'> {
     const geometry = new THREE.BufferGeometry();
     geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
     const stars = new THREE.Points(geometry, new THREE.PointsMaterial({ color: 0x5a7089, size: 0.04 }));
-    this.scene.add(stars);
+    group.add(stars);
     this.props = 1;
   }
 
@@ -142,10 +158,19 @@ export class CreationScene extends UiScene<'creation'> {
     const key = new THREE.DirectionalLight(0xffffff, 2.53);
     key.position.set(1.5, 2.5, 2);
     this.#previewScene.add(key);
+    // SPEC-020 §4.4: the portrait gets the hub's rim light and the same neutral
+    // environment the scene behind it uses — one texture, owned by `base`'s
+    // `useEnvironment`, borrowed here and let go first.
+    const rim = new THREE.DirectionalLight(0x4c9aff, 0.6);
+    rim.position.set(-3, 1.5, -4);
+    this.#previewScene.add(rim);
+    this.#previewScene.environment = this.scene.environment;
+    this.#previewScene.environmentIntensity = this.scene.environmentIntensity;
     this.#previewCamera.position.set(0, 1.0, 2.6);
     this.#previewCamera.lookAt(0, 0.8, 0);
     this.disposer.add(() => {
       // Lights hold no GPU memory; the model's own clones are handled above.
+      this.#previewScene.environment = null;
       this.#previewScene.clear();
     });
     if (!this.services.assets.loaded) return;

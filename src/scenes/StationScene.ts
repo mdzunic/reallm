@@ -25,6 +25,7 @@ import { SettingsPanel } from '@/ui/SettingsPanel';
 import { ShopPanel } from '@/ui/ShopPanel';
 import type { Look } from '@/core/Quality';
 import { NEUTRAL_SKY } from '@/views/Environment';
+import { addHubLights, hubSkyMesh, loadHubArt, proceduralDock, proceduralRing, swapModule } from '@/views/HubBackdrop';
 import { UiScene } from '@/scenes/base';
 
 /** Missions already debriefed this session, per save object (§4.3). */
@@ -72,19 +73,20 @@ export class StationScene extends UiScene<'station'> {
 
   // ------------------------------------------------------------------ Three
 
-  /** AC-26: the docked ship under a slowly rotating ring. Three own meshes. */
+  /**
+   * AC-26 / SPEC-020 §4.4: the docked ship under a slowly rotating ring, on
+   * its landing pad, in front of the station's nebula window — all of it in
+   * one `Group`, lit by the shared key + rim pair over SPEC-017's neutral
+   * environment. `props` stays the three the stats overlay pins: the ring, the
+   * pad and the ship, whether they are the GLBs or the procedural modules.
+   */
   #buildBackdrop(): void {
     const group = new THREE.Group();
-    const ring = new THREE.Mesh(
-      new THREE.TorusGeometry(2.2, 0.16, 10, 48),
-      new THREE.MeshStandardMaterial({ color: 0x4a5a6c, roughness: 0.6, metalness: 0.5 }),
-    );
+    addHubLights(group);
+    const ring = proceduralRing();
     ring.rotation.x = Math.PI / 2.4;
     group.add(ring);
-    const pad = new THREE.Mesh(
-      new THREE.CylinderGeometry(0.9, 1.1, 0.18, 20),
-      new THREE.MeshStandardMaterial({ color: 0x2c3947, roughness: 0.9 }),
-    );
+    const pad = proceduralDock();
     pad.position.y = -1.05;
     group.add(pad);
     this.props = 2;
@@ -105,13 +107,23 @@ export class StationScene extends UiScene<'station'> {
     ship.rotation.y = 0.5;
     group.add(ship);
     this.props = 3;
-    // +15 % over the pre-SPEC-017 value, to offset ACES mid-tone compression.
-    const key = new THREE.DirectionalLight(0xdfe8ff, 1.84);
-    key.position.set(2, 3, 2);
-    this.scene.add(key, group);
+    this.scene.add(group);
     this.#ring = group;
     this.camera.position.set(0, 0.6, 4.4);
     this.camera.lookAt(0, -0.2, 0);
+
+    // §4.4: the modelled ring and pad, and the window behind them, arrive
+    // lazily; each one replaces its module in place, so the group keeps its
+    // shape and `props` its value.
+    let alive = true;
+    this.disposer.add(() => {
+      alive = false;
+    });
+    loadHubArt(this.services.assets, () => alive, (art) => {
+      if (art.sky !== null) group.add(hubSkyMesh(art.sky));
+      if (art.ring !== null) swapModule(group, ring, art.ring);
+      if (art.dock !== null) swapModule(group, pad, art.dock);
+    });
   }
 
   // ---------------------------------------------------------- enter effects
