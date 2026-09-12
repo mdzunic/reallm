@@ -18,6 +18,7 @@ import { ATTRIBUTE_MAX, CLASSES, CREATION_POINTS, type Attributes, type ClassId 
 import { computePlayerStats, passiveText } from '@/systems/UiHelpers';
 import { dialogueLayer } from '@/ui/DialogueUI';
 import { el, h, testId } from '@/ui/dom';
+import { portraitManifest, portraitSource } from '@/ui/portraits';
 import type { Look } from '@/core/Quality';
 import { tintSalvager } from '@/views/CharacterView';
 import { NEUTRAL_SKY } from '@/views/Environment';
@@ -37,7 +38,6 @@ const SHARED_PORTRAITS = [9, 10, 11] as const;
 /** SPEC-017 §4.1 (*initial tuning*): creation shares the station's grade. */
 const CREATION_LOOK: Partial<Look> = { vignette: 0.35, bloomStrength: 0.3, tint: [0.96, 1, 1.04] };
 const HUB_ENVIRONMENT_INTENSITY = 0.9;
-const PORTRAIT_GLYPHS = ['☉', '☍', '⚙', '✦', '◈', '⌬', '☄', '♆', '⚑', '◮', '⌘', '✧'] as const;
 
 /** AC-18: the one-line explanation beside the toggle. */
 const DIFFICULTY_LINES = {
@@ -55,6 +55,8 @@ export class CreationScene extends UiScene<'creation'> {
   #secondary: string = SECONDARY_SWATCHES[0];
   #alloc: Record<(typeof ATTRIBUTES)[number], number> = { might: 0, vigor: 0, agility: 0, tech: 0 };
   #difficulty: 'casual' | 'normal' = 'normal';
+  /** SPEC-020 §4.6: the portrait files that shipped; empty until the manifest lands. */
+  #portraits: ReadonlySet<number> = new Set();
   #leaving = false;
 
   #root: HTMLDivElement | null = null;
@@ -89,6 +91,17 @@ export class CreationScene extends UiScene<'creation'> {
     this.#buildBackdrop();
     this.#buildPreviewScene();
     this.#mountUi();
+    // §4.6: the busts are optional art — the form goes up with glyphs and
+    // re-renders once the manifest says which files shipped (20-d).
+    let alive = true;
+    this.disposer.add(() => {
+      alive = false;
+    });
+    void portraitManifest().then((available) => {
+      if (!alive || available.size === 0) return;
+      this.#portraits = available;
+      this.#renderForm();
+    });
     this.disposer.add(this.services.events.on('renderer:resized', () => this.#measure(), this));
   }
 
@@ -328,8 +341,9 @@ export class CreationScene extends UiScene<'creation'> {
   }
 
   #portraitRow(): HTMLDivElement {
-    const tiles = this.#portraitChoices().map((index) =>
-      testId(
+    const tiles = this.#portraitChoices().map((index) => {
+      const source = portraitSource(index, this.#portraits);
+      return testId(
         h(
           'button',
           {
@@ -342,11 +356,13 @@ export class CreationScene extends UiScene<'creation'> {
               this.#renderForm();
             },
           },
-          PORTRAIT_GLYPHS[index % PORTRAIT_GLYPHS.length]!,
+          source.kind === 'image'
+            ? h('img', { class: 'portrait-img', src: source.url, alt: '', 'aria-hidden': 'true' })
+            : source.glyph,
         ),
         `portrait-${index}`,
-      ),
-    );
+      );
+    });
     return h('div', { class: 'creation-row' }, h('span', {}, 'Portrait'), h('div', { class: 'portrait-row' }, ...tiles)) as HTMLDivElement;
   }
 

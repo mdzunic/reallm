@@ -1533,6 +1533,27 @@ html.reduce-motion .overlay-ending-escape .ending-prompt {
   cursor: pointer;
 }
 
+/* SPEC-020 §4.6: the rendered bust fills the tile the glyph used to sit in —
+   same 44 px box, same radius, so nothing about the row's size or spacing
+   moves when the art is there. */
+.portrait-img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  border-radius: 7px;
+  object-fit: cover;
+}
+
+/* The character panel wears the same tile beside the name line. */
+.char-portrait {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  vertical-align: middle;
+  margin-right: 8px;
+}
+
 .swatch {
   width: 44px;
   height: 44px;
