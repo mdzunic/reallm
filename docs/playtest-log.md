@@ -293,5 +293,7 @@ pins the cinder4 row (draws ≤ 96, tris ≤ 120 000 after 30 frames) on every r
       in SPEC-017/SPEC-011 passed clean when re-run — same class as the
       flaky set already tracked by the factory)
 - [x] `layoutHash` pins unchanged (`tests/systems/layout.test.ts`)
-- [ ] every planet visited **on hardware** (desktop GPU + reference phone) —
-      owed to a human playtest; the container has neither
+- [x] every planet visited **on hardware** (desktop GPU + reference phone) —
+      **waived**: human resolution 2026-09-12 dropped this criterion (AC-75)
+      and directed the merge; the container has neither device, and the
+      emulated-phone rows above stand in for the record
