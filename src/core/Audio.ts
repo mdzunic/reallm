@@ -459,14 +459,27 @@ class HowlerAudio implements Audio {
     return this.#settings.get()[bus] * this.#duckGain[bus];
   }
 
-  /** AC-19: `base × bus × master`, recomputed rather than remembered. */
+  /**
+   * AC-19: `base × bus × master`, recomputed rather than remembered.
+   *
+   * A `Howl` that has not started the voice yet — its bank is still
+   * decoding, or the context was not `running` when `play()` reached it — does
+   * not apply `volume()`, it *defers* it into its own queue and replays the
+   * whole backlog later. A 1500 ms crossfade is sixty ticks, so that backlog is
+   * sixty stale ramp values, and the one that lands last is not necessarily the
+   * one the ramp finished on: a bed can be left part-way up for good, because
+   * by then the ticker has stopped and nothing re-applies it. So a track that
+   * is not audible yet is skipped here and re-applied from `#startTrack`'s
+   * `play` hook, which is exactly the moment the deferral ends.
+   */
   #applyGains(): void {
     const master = this.#settings.get().master;
     const sfx = this.#busGain('sfx') * master;
     for (const voice of this.#voices.values()) voice.howl.volume(clamp01(voice.base * sfx), voice.howlId);
     const music = this.#busGain('music') * master;
     for (const track of [this.#current, this.#outgoing]) {
-      if (track !== null) track.howl.volume(clamp01(track.gain * music), track.howlId);
+      if (track === null || track.howl.state() !== 'loaded') continue;
+      track.howl.volume(clamp01(track.gain * music), track.howlId);
     }
   }
 
@@ -654,7 +667,14 @@ class HowlerAudio implements Audio {
   #startTrack(id: MusicId): MusicTrack | null {
     const howl = this.#musicHowl(id);
     if (howl === null) return null;
-    return { id, howl, howlId: howl.play(), gain: 0, ramp: null };
+    const howlId = howl.play();
+    // `play()` on a bank that is still decoding — or on a context that is
+    // not `running` yet — only queues the voice, and every `volume()` until it
+    // actually starts is queued behind it. `play` fires the moment that ends,
+    // whichever of the two it was, and this puts the gain the ramp is *now* on
+    // back where the deferred backlog may have left something older.
+    howl.once('play', () => this.#applyGains(), howlId);
+    return { id, howl, howlId, gain: 0, ramp: null };
   }
 
   #stopTrack(track: MusicTrack): void {
