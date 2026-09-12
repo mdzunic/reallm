@@ -302,6 +302,7 @@ export class FilmPlayer {
     const run = this.#run;
     if (run === null) return;
     this.#teardown(run);
+    window.removeEventListener('keydown', this.#onKey, true);
     run.layer.remove();
     this.#run = null;
     // Resolving twice is a no-op, so a dispose that lands during the end fade
@@ -427,12 +428,15 @@ export class FilmPlayer {
   #videoFailed(run: Run): void {
     if (run.settled || run.mode !== 'video') return;
     const t = run.videoStarted && run.video !== null ? run.video.currentTime : run.t;
+    // A decode error landing in a hidden tab must not un-pause the film (E28).
+    const wasPaused = run.state === 'paused';
     this.#dropVideo(run);
     run.opts.onVideoBroken();
     run.mode = run.posters.size > 0 ? 'stills' : 'text';
     run.layer.dataset['mode'] = run.mode;
-    run.state = 'playing';
-    run.layer.dataset['state'] = 'playing';
+    run.state = wasPaused ? 'paused' : 'playing';
+    run.resumeTo = 'playing';
+    run.layer.dataset['state'] = run.state;
     run.t = t;
     run.lastFrameWall = performance.now();
     run.shownShot = -1;
@@ -555,11 +559,13 @@ export class FilmPlayer {
 
   readonly #onKey = (event: KeyboardEvent): void => {
     const run = this.#run;
-    if (run === null || run.state === 'done') return;
+    if (run === null) return;
     // §4.5: while the layer is up no key reaches the game; Tab keeps moving
     // focus, everything the game or the browser would act on is swallowed.
+    // That holds through the end fade too — the layer still covers the scene.
     event.stopPropagation();
     if (PREVENTED_KEYS.includes(event.code)) event.preventDefault();
+    if (run.state === 'done') return;
     const elapsed = (performance.now() - run.startedWall) / 1000;
     if (run.state === 'paused') {
       // §4.6: a fresh Enter or Space resumes; Escape still skips.
@@ -635,6 +641,7 @@ export class FilmPlayer {
     // resolve — the director's music and input restore land on a clean screen.
     const fadeMs = run.opts.reduceMotion ? 0 : FILM_END_FADE * 1000;
     const done = (): void => {
+      window.removeEventListener('keydown', this.#onKey, true);
       run.layer.remove();
       this.#run = null;
       run.resolve(result);
@@ -647,13 +654,15 @@ export class FilmPlayer {
     run.fadeTimer = setTimeout(done, fadeMs);
   }
 
-  /** Stops the clock, the media and the listeners; the layer itself stays. */
+  /**
+   * Stops the clock and the media; the layer stays for the end fade, and the
+   * key capture stays with it — it is removed when the layer is (§4.5).
+   */
   #teardown(run: Run): void {
     cancelAnimationFrame(run.raf);
     if (run.fadeTimer !== null) clearTimeout(run.fadeTimer);
     run.fadeTimer = null;
     this.#dropVideo(run);
-    window.removeEventListener('keydown', this.#onKey, true);
     document.removeEventListener('visibilitychange', this.#onVisibility);
   }
 }
