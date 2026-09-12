@@ -38,7 +38,8 @@ const HUB_ENVIRONMENT_INTENSITY = 0.9;
 type StationTab = 'missions' | 'shop' | 'character';
 
 export class StationScene extends UiScene<'station'> {
-  #ring: THREE.Group | null = null;
+  /** The three props that turn together; the lights and the window do not. */
+  #spin: THREE.Group | null = null;
   #economy: Economy | null = null;
   #settings: SettingsPanel | null = null;
   #root: HTMLDivElement | null = null;
@@ -68,7 +69,7 @@ export class StationScene extends UiScene<'station'> {
   }
 
   protected override onUpdate(_dt: number): void {
-    if (this.#ring) this.#ring.rotation.y = this.elapsed * 0.12;
+    if (this.#spin) this.#spin.rotation.y = this.elapsed * 0.12;
   }
 
   // ------------------------------------------------------------------ Three
@@ -83,12 +84,17 @@ export class StationScene extends UiScene<'station'> {
   #buildBackdrop(): void {
     const group = new THREE.Group();
     addHubLights(group);
+    // The three props turn together (AC-26); the lights and the window behind
+    // them are the backdrop's furniture and stay put, so they hang off `group`
+    // and the turning ones off `spin` — still one backdrop `Group` (AC-16).
+    const spin = new THREE.Group();
+    group.add(spin);
     const ring = proceduralRing();
     ring.rotation.x = Math.PI / 2.4;
-    group.add(ring);
+    spin.add(ring);
     const pad = proceduralDock();
     pad.position.y = -1.05;
-    group.add(pad);
+    spin.add(pad);
     this.props = 2;
     // The docked ship (AC-26): the real model when the assets are up, a hull
     // of primitives when they are not — the count stays three either way.
@@ -105,10 +111,10 @@ export class StationScene extends UiScene<'station'> {
     }
     ship.position.set(0, -0.75, 0.2);
     ship.rotation.y = 0.5;
-    group.add(ship);
+    spin.add(ship);
     this.props = 3;
     this.scene.add(group);
-    this.#ring = group;
+    this.#spin = spin;
     this.camera.position.set(0, 0.6, 4.4);
     this.camera.lookAt(0, -0.2, 0);
 
@@ -121,8 +127,8 @@ export class StationScene extends UiScene<'station'> {
     });
     loadHubArt(this.services.assets, () => alive, (art) => {
       if (art.sky !== null) group.add(hubSkyMesh(art.sky));
-      if (art.ring !== null) swapModule(group, ring, art.ring);
-      if (art.dock !== null) swapModule(group, pad, art.dock);
+      if (art.ring !== null) swapModule(spin, ring, art.ring);
+      if (art.dock !== null) swapModule(spin, pad, art.dock);
     });
   }
 
