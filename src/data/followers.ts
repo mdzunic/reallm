@@ -3,8 +3,9 @@
 // has HP at all.
 //
 // One follower ships: `c3_m2` is the only escort in the campaign (PLAN §6).
-// `model` is `'procedural'` because the asset manifest (SPEC-003 §4.3) carries
-// no probe mesh; SPEC-012 swaps in a `ModelId` when one lands.
+// `model` names the probe of `SURFACE_SHARED_ASSETS` (SPEC-019 §4.8), loaded
+// lazily with the per-planet drop; the procedural probe stays the fallback
+// when the file is missing or fails to load (19-l).
 //
 // Data modules are plain objects: no imports but other data, no functions
 // (SPEC-001 §4, §8).
@@ -29,7 +30,7 @@ export const FOLLOWERS = {
     speed: 5.5,
     radius: 0.6,
     followDistance: 3,
-    model: 'procedural',
+    model: 'probe',
   },
 } as const satisfies Record<string, FollowerDef>;
 

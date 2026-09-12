@@ -19,6 +19,7 @@ import { computePlayerStats, passiveText } from '@/systems/UiHelpers';
 import { dialogueLayer } from '@/ui/DialogueUI';
 import { el, h, testId } from '@/ui/dom';
 import type { Look } from '@/core/Quality';
+import { tintSalvager } from '@/views/CharacterView';
 import { NEUTRAL_SKY } from '@/views/Environment';
 import { UiScene } from '@/scenes/base';
 
@@ -170,17 +171,13 @@ export class CreationScene extends UiScene<'creation'> {
   }
 
   /**
-   * AC-16: primary is the body colour, secondary an emissive cast. The Kenney
-   * character carries a single material, so any split by material slot would
-   * leave one picker dead — this way both swatch rows visibly tint the model
-   * whatever the asset exposes.
+   * AC-16, through SPEC-019 §4.1's shared `tintSalvager`: primary is the body
+   * colour, secondary the emissive cast rescaled to full brightness at
+   * intensity 2 — the same call the surface view makes, so the preview
+   * matches the planet exactly (SPEC-019 AC-24).
    */
   #applyTint(): void {
-    for (const material of this.#tintable) {
-      material.color.set(this.#primary);
-      material.emissive.set(this.#secondary);
-      material.emissiveIntensity = 0.3;
-    }
+    for (const material of this.#tintable) tintSalvager(material, this.#primary, this.#secondary);
   }
 
   /** The preview box in renderer coordinates; measured outside the loop. */

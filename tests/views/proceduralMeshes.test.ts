@@ -256,3 +256,80 @@ describe('enemy materials (SPEC-017 §4.7, AC-88 … AC-91)', () => {
     meshes.dispose();
   });
 });
+
+// --------------------------------------------------------------- SPEC-019 §4.3
+
+/** The first visible part's instanceEmissive triple for a pool slot. */
+function emissiveAt(parent: THREE.Object3D, slot: number): [number, number, number] {
+  const part = instancedMeshes(parent).find((m) => m.visible) as THREE.InstancedMesh;
+  const attribute = part.geometry.attributes.instanceEmissive as THREE.InstancedBufferAttribute;
+  return [attribute.getX(slot), attribute.getY(slot), attribute.getZ(slot)];
+}
+
+describe('per-instance emissive (SPEC-019 AC-45 … AC-50)', () => {
+  it('a glowing definition writes its look.emissive per instance', () => {
+    const parent = new THREE.Group();
+    const meshes = new EnemyMeshes(parent);
+    const pool = new Pool(makeEnemy);
+    spawn(pool, 'dune_wurm');
+    meshes.sync(pool, 0);
+    const expected = new THREE.Color(ENEMIES.dune_wurm.look.emissive);
+    const [r, g, b] = emissiveAt(parent, 0);
+    expect(r).toBeCloseTo(expected.r, 5);
+    expect(g).toBeCloseTo(expected.g, 5);
+    expect(b).toBeCloseTo(expected.b, 5);
+    meshes.dispose();
+  });
+
+  it('a plain definition rests at tint × 0.15, and the elite adds gold × 0.3', () => {
+    const parent = new THREE.Group();
+    const meshes = new EnemyMeshes(parent);
+    const pool = new Pool(makeEnemy);
+    spawn(pool, 'dust_skitter');
+    spawn(pool, 'dust_skitter', { x: 9, elite: true });
+    meshes.sync(pool, 0);
+    const tint = new THREE.Color(ENEMIES.dust_skitter.look.tint);
+    const plain = emissiveAt(parent, 0);
+    expect(plain[0]).toBeCloseTo(tint.r * 0.15, 5);
+    expect(plain[1]).toBeCloseTo(tint.g * 0.15, 5);
+    expect(plain[2]).toBeCloseTo(tint.b * 0.15, 5);
+    const elite = emissiveAt(parent, 1);
+    expect(elite[0]).toBeCloseTo(tint.r * 0.15 + 0.9 * 0.3, 5);
+    expect(elite[1]).toBeCloseTo(tint.g * 0.15 + 0.7 * 0.3, 5);
+    expect(elite[2]).toBeCloseTo(tint.b * 0.15 + 0.3 * 0.3, 5);
+    meshes.dispose();
+  });
+
+  it('the hit flash writes white × 2.5 and wins over elite gold (19-c)', () => {
+    const parent = new THREE.Group();
+    const meshes = new EnemyMeshes(parent);
+    const pool = new Pool(makeEnemy);
+    const elite = spawn(pool, 'dust_skitter', { elite: true });
+    elite.hitFlash = 0.1;
+    meshes.sync(pool, 0);
+    expect(emissiveAt(parent, 0)).toEqual([2.5, 2.5, 2.5]);
+    // The flash passes: gold returns.
+    elite.hitFlash = 0;
+    meshes.sync(pool, 0.2);
+    expect(emissiveAt(parent, 0)[0]).toBeLessThan(1);
+    meshes.dispose();
+  });
+
+  it('invulnerable halves the emissive, whatever produced it', () => {
+    const parent = new THREE.Group();
+    const meshes = new EnemyMeshes(parent);
+    const pool = new Pool(makeEnemy);
+    const e = spawn(pool, 'dune_wurm');
+    meshes.sync(pool, 0);
+    const [glowing] = emissiveAt(parent, 0);
+    e.invulnerable = true;
+    meshes.sync(pool, 0.1);
+    const [halved] = emissiveAt(parent, 0);
+    expect(halved).toBeCloseTo(glowing / 2, 5);
+    // The flash is halved too — the rule applies after every branch.
+    e.hitFlash = 0.1;
+    meshes.sync(pool, 0.2);
+    expect(emissiveAt(parent, 0)).toEqual([1.25, 1.25, 1.25]);
+    meshes.dispose();
+  });
+});

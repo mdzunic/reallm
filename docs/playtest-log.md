@@ -297,3 +297,58 @@ pins the cinder4 row (draws ≤ 96, tris ≤ 120 000 after 30 frames) on every r
       **waived**: human resolution 2026-09-12 dropped this criterion (AC-75)
       and directed the merge; the container has neither device, and the
       emulated-phone rows above stand in for the record
+
+## SPEC-019 — characters, enemies and combat VFX (M7a)
+
+- **Build:** `spec/SPEC-019` — untagged
+- **Devices:**
+  - desktop — headless Chromium (Playwright, Linux container, **software GL**;
+    every ms/fps number is a floor, not a device number)
+  - desktop hardware GPU and phone-over-LAN — _not run: no display, no GPU and
+    no handset in the build container; needs the human pass_
+
+### All six planets at `?quality=medium`, sampled after 120 rendered frames
+
+Same instrument as the SPEC-018 rows (desktop 1280×720, whole-frame `draws`
+including the 16 post calls). The rows now carry the animated salvager, the
+sculpted enemies with per-instance emissive, capsule projectiles with ghosts,
+and the CombatFx pool. Budget: `draws ≤ 96`, `tris ≤ 130 000` (AC-96); the
+capture waited for live enemies where the planet spawns any (`enemies` is the
+debug row at capture time — Eden's ambient population is 0 by design).
+
+| Planet | draws (frame) | tris | geo | tex | enemies | budget ✔ | screenshot |
+|---|---|---|---|---|---|---|---|
+| cinder4 | 42 | 82 872 | 37 | 38 | 9 | ✔ | [medium](screenshots/spec-019/cinder4-medium.png) |
+| vetra | 46 | 34 310 | 41 | 38 | 10 | ✔ | [medium](screenshots/spec-019/vetra-medium.png) |
+| thessaly | 46 | 79 416 | 41 | 39 | 11 | ✔ | [medium](screenshots/spec-019/thessaly-medium.png) |
+| ferrum | 44 | 44 298 | 39 | 38 | 11 | ✔ | [medium](screenshots/spec-019/ferrum-medium.png) |
+| hive | 50 | 72 806 | 45 | 38 | 14 | ✔ | [medium](screenshots/spec-019/hive-medium.png) |
+| eden | 35 | 38 402 | 29 | 37 | 0 | ✔ | [medium](screenshots/spec-019/eden-medium.png) |
+
+### Observations
+
+- The salvager model replaces the blue capsule on every planet; the secondary
+  swatch reads as the visor/lamp glow at `emissiveIntensity 2` (`tintSalvager`,
+  shared with the creation preview). The torch and blob shadow are unchanged.
+- Enemy counts sit at the SPEC-012 §4.5 population target
+  (`round(population · maxEnemies / 32)`) — 9 on Cinder-4 at medium, 14 on
+  Hive. The AC-96 e2e case polls to that ceiling; the 32-enemy worst case is
+  pinned in node against `RECIPE_TRIANGLE_CAP` (AC-98).
+- Cinder-4 gained ≈ 6 k triangles over the SPEC-018 row — the sculpted
+  recipes, the character and the projectile/VFX pools together — and stayed
+  ≈ 37 k under the ceiling on the heaviest planet.
+- Software GL renders at 4 fps in the container, so hit-stop, shake feel and
+  the muzzle pulse need the human pass on hardware, as does the
+  reduce-motion sweep of §7's manual list.
+
+### Checklist
+
+- [x] `npm run check` green (typecheck, 868 unit tests, production build)
+- [x] `e2e/surface-env.spec.ts` (both budget cases + the new spawn-heavy
+      case), `e2e/SPEC-012.spec.ts` (death sweep), `e2e/boot-assets.spec.ts`
+      (boot stays five files), `e2e/asset-spike.spec.ts`, `e2e/SPEC-014.spec.ts`,
+      `e2e/SPEC-011.spec.ts` (one parallel-load flake, clean on re-run — the
+      tracked class), `e2e/SPEC-018.spec.ts`, `e2e/scene-cycle.spec.ts`,
+      `e2e/dev-skip-flight.spec.ts` green
+- [ ] distinct animations, VFX feel and reduce-motion verified **on hardware**
+      (desktop GPU + reference phone) — needs the human pass
