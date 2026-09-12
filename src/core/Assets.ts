@@ -127,6 +127,14 @@ export class Assets {
     return this.#requireModel(id).animations;
   }
 
+  /**
+   * True once `load()` has cached this model — how the surface prop path asks
+   * "did the lazy per-planet drop land yet?" without throwing (SPEC-018 §4.10).
+   */
+  hasModel(id: string): boolean {
+    return this.#models.has(id);
+  }
+
   /** The one shared instance, tagged `userData.shared === true` (D-33). */
   texture(id: TextureId): Texture {
     if (!this.#loaded) throw new Error(`assets: texture("${id}") requested before load() finished`);
