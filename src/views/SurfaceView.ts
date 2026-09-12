@@ -29,6 +29,8 @@ export interface ViewWeather {
 }
 
 export interface ViewLayout {
+  /** The pinned layout hash — the seed every decoration stream derives from. */
+  hash: number;
   halfSize: number;
   pois: readonly { kind: PoiKind; x: number; z: number; radius: number }[];
   obstacles: readonly { x: number; z: number; radius: number; kind: ObstacleKind }[];
