@@ -19,6 +19,7 @@ export * from '@/data/characters';
 export * from '@/data/companions';
 export * from '@/data/dialogue';
 export * from '@/data/enemies';
+export * from '@/data/films';
 export * from '@/data/followers';
 export * from '@/data/ids';
 export * from '@/data/items';

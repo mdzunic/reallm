@@ -9,15 +9,16 @@ import { fileURLToPath } from 'node:url';
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..', 'public', 'assets');
 const MB = 1024 * 1024;
 
-/** Byte budgets per top-level folder (SPEC-001 §10; portraits from SPEC-020 §4.6). */
+/** Byte budgets per top-level folder (SPEC-001 §10; portraits from SPEC-020 §4.6; films from PLAN R9). */
 const BUDGETS = {
   models: 4 * MB,
   audio: 12 * MB,
   textures: 6 * MB,
   portraits: 0.5 * MB,
+  films: 12 * MB,
 };
 const TOTAL_BUDGET = 25 * MB;
-const ALLOWED = new Set(['.glb', '.webm', '.mp3', '.png', '.webp', '.json', '.md']);
+const ALLOWED = new Set(['.glb', '.webm', '.mp3', '.mp4', '.png', '.webp', '.json', '.md']);
 
 function walk(dir, out = []) {
   for (const entry of readdirSync(dir, { withFileTypes: true })) {

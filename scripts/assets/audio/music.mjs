@@ -679,6 +679,65 @@ const TRACK_DEFS = {
       ],
     };
   },
+
+  /** D minor, 60 BPM: the story films' dark bed (PLAN R9) — a drone, a slow pad, plucks that thin out, a sub pulse. */
+  film_dark() {
+    const plucks = ch('D4 F4 A4 C5 E5');
+    const pulse = Array.from({ length: 8 }, (_, k) => ({ beat: k * 8, len: 1, pitch: m('D1'), vel: 0.7 }));
+    return {
+      bpm: 60,
+      bars: 16,
+      rmsDb: -20,
+      room: { room: 0.93, damp: 0.4 },
+      echo: { beats: 1.5, feedback: 0.45, tone: 2200 },
+      parts: [
+        { bed: drone([m('D2'), m('A2')], { cutoff: [160, 520], cycles: 1 }), gain: 0.6, reverb: 0.3 },
+        { bed: wind({ band: [250, 1200], cycles: 2 }), gain: 0.1, reverb: 0.35 },
+        {
+          inst: 'pad',
+          opts: { attack: 3.5, release: 5, cutoff: 900 },
+          gain: 0.5,
+          reverb: 0.6,
+          notes: held([ch('D3 A3 F4'), ch('Bb2 F3 D4'), ch('G2 D3 Bb3'), ch('A2 E3 C#4')], 16, 0.8),
+        },
+        {
+          inst: 'pluck',
+          opts: { bright: 1400, tau: 0.5 },
+          gain: 0.22,
+          reverb: 0.5,
+          echo: 0.5,
+          notes: sprinkle(303, { beats: 64, step: 1, prob: 0.22, vel: [0.3, 0.7], len: 0.8, pool: (_, r) => pick(r, plucks) }),
+        },
+        { inst: 'tom', gain: 0.35, reverb: 0.4, notes: pulse },
+      ],
+    };
+  },
+
+  /** F major, 72 BPM: the interludes' warm bed — a pad and a slow arpeggio with an echo. */
+  film_hope() {
+    const chords = [ch('F3 A3 C4 E4'), ch('D3 F3 A3 C4'), ch('Bb2 D3 F3 A3'), ch('C3 E3 G3 D4')];
+    const arp = [];
+    chords.forEach((tones, k) => {
+      [0, 1, 2, 3, 2, 1, 2, 3].forEach((idx, s) => arp.push({ beat: k * 8 + s, len: 0.9, pitch: tones[idx] + 12, vel: s === 0 ? 0.7 : 0.45 }));
+    });
+    return {
+      bpm: 72,
+      bars: 8,
+      rmsDb: -19,
+      room: { room: 0.88, damp: 0.45 },
+      echo: { beats: 0.75, feedback: 0.4, tone: 3000 },
+      parts: [
+        { inst: 'pad', opts: { attack: 2, release: 3, cutoff: 1300 }, gain: 0.5, reverb: 0.55, notes: held(chords, 8, 0.8) },
+        { inst: 'keys', gain: 0.35, reverb: 0.45, echo: 0.3, pan: -0.1, notes: arp },
+        {
+          inst: 'bass',
+          opts: { cutoff: 240, sweep: 200 },
+          gain: 0.3,
+          notes: chords.map((tones, k) => ({ beat: k * 8, len: 7.8, pitch: tones[0] - 12, vel: 0.7 })),
+        },
+      ],
+    };
+  },
 };
 
 /** `MusicId` (`src/core/Audio.ts`) → a function returning the seamless stereo loop. */

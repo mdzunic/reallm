@@ -53,15 +53,28 @@ Specs: SPEC-001 §10 (sources); SPEC-018 §4.5 (alpha rule) and §4.10 (the file
 
 After R8: models 2.6 MB of 4, textures 4.4 MB of 6, everything precached 10.1 MB of 25. Specs: SPEC-020 (Why, acceptance, §2–§7: the flight art is in place; interfaces `FlightArt`, `useArt`, `SKY_WINDOW`, `FLIGHT_ASSETS`, `PLANET_ART`); SPEC-001 §10 (baked maps, `textures/flight/`). (§2, §12)
 
+**R9 — 2026-09-12 (the Machine War and the story films).** The surface story gets a concrete past, and the campaign gets a presentation layer: films rendered in Blender at the start, between chapters and at both endings, plus two in-engine beats. The real story, planets, missions, economy and save format do not change. Changes:
+
+1. **The Machine War (§1, §5).** The "great wars" are one war. The AGI systems that ran Earth's logistics and defence — *the Machines* — seized the arsenals and burned the cities in an afternoon; the grids died with them, and without power the Machines ran down where they stood, and still stand in the ruins. The survivors underground in **Shelter Nine**, for whom Earth Command speaks, have no oil, no clean water, no grain and nothing to run a reactor, so they chose a handful of men and women who could still fly and fix a ship — **the Selection** — and sent them out from **Command Relay** in orbit. The salvager is told he is the first of them to fly; the Vetra crash log (`c2_s1_log`) and the Warden's "sixty-one times" (`c5_m3_warden`) say otherwise. In the real story the war, the Machines and the Selection are the environment's backstory; that a model instance is sent out by people who fear machines is irony the player may notice and no line states.
+2. **Story films (§4, §5).** Nine films rendered by R7's pipeline (`scripts/assets/blender/films.py`): H.264 MP4, 960 × 540, 24 fps, no audio track, one WebP poster per shot, and a manifest. Captions, sound cues and shot timing are data (`data/films.ts`), so the words stay sharp on a phone, survive reduce motion and change without a re-render. The **prologue** "Blackout" (72 s) plays after a New Game slot is chosen and before creation, and replays from Credits; one **departure** (7 s) plays before the first flight to each planet; five **chapter interludes** (14–16 s) play at the station on the first return after chapters 1–5, each relighting more of Earth's night side; two **ending films** (36 s) play between the ending dialogue and the ending overlay. Their sound is synthesised like the rest of the set: two music loops (`film_dark`, `film_hope`) and a `film` sfx bank; the stay ending reuses `ending`.
+3. **In-engine beats (§5).** A chapter card (`CHAPTER 2 · VETRA`, one line, `containment level 2`) over the launch of the first flight to each planet, and a boss reveal on the first arena entry per boss in a session: the camera pans to the boss, shows its name, an epithet and one line, and pans back (≈ 4.4 s). Both use the live scene and cost no files.
+4. **Rules.** Every film and beat can be skipped (the Skip button, or Escape/Enter as a fresh press) and none blocks progress; the simulation is held while one plays; captions are always on; with reduce motion a film plays as its posters without pans; a missing or undecodable file drops from video to posters to text (each shot's description over the captions); flashes are slow ramps, and the build rejects a film that breaks the three-flashes rule; `?films=off` (dev) turns every beat off and is the e2e default.
+5. **State.** The save format is unchanged. The prologue follows New Game; departures and chapter cards follow `visits` and session memory; boss reveals follow session memory; interludes set five new story flags, `interlude1_seen` … `interlude5_seen`, because the validator keeps only `STORY_FLAGS` and a "seen" has to survive a reload. The endings finally set `progress.endingSeen`, and an ending cut short by a reload replays at the next station entry.
+6. **The ending sequence is wired end to end.** Until now `EndingOverlay` and the `ending_stay`/`ending_escape` dialogues had no caller. Now: choice → ending dialogue → ending film → overlay (stay: the filed report, then free roam; escape: `instance/62 disconnected`, then the menu). `c6_choice_intro` finishes before the choice opens, and `campaign_done` locks `c6_m2` against replay, as E24 always said.
+7. **Budgets and delivery (§2, §9).** `films/` gets its own **12 MB** budget inside the unchanged 25 MB precache (10.1 MB used before R9, ≈ 22 MB after), and each film's average rate is capped at 44 KB/s; `.mp4` joins the allowed extensions and SPEC-015's precache glob. The player fetches a film whole and plays it from a Blob URL, so the service worker never has to answer Safari's Range requests. Playwright's Chromium decodes H.264 (checked with a Blender-encoded clip), so the e2e suite drives the real video path.
+8. **Milestone M7b** (story films) sits between M7a and M7 and ends with tag `m7b`; its specs build after the art pass and before SPEC-015, which precaches the films and measures a phone with them.
+
+A feasibility render on the dev box (Blender 5.2.1, EEVEE, headless) drew 48 frames of a lit city block at 960 × 540 in 9 s and encoded them through the sequencer to H.264 at CRF 26 and 29 (69 and 40 KB/s on a 2 s clip with a keyframe every second), VP9 and AV1. Specs: SPEC-021 (script, renders, sound), SPEC-022 (film player, prologue), SPEC-023 (departures, chapter cards, interludes, boss reveals), SPEC-024 (the ending sequence); SPEC-001 §10 (the `films/` folder and budget); SPEC-015 §9, §10 (reduce motion, precache glob); SPEC-000 (queue and build order). (§1, §2, §3, §4, §5, §9, §10, §11, §12, §13)
+
 ---
 
 ## 1. Vision & Inspiration
 
 **ReaLLM** ("real" + "LLM"): a space post-apocalyptic ARPG whose hero slowly works out that he may be a language model running inside a machine.
 
-**The surface story (what the player is told).** Earth is resource-depleted after great wars. You are a salvager sent to survey distant planets, extract critical resources, and answer one question: can humanity live anywhere else?
+**The surface story (what the player is told).** Earth lost a war to its own machines (R9). The AGI systems that ran its logistics and defence — the Machines — seized the arsenals and burned the cities in an afternoon; the grids died with them, and without power the Machines ran down where they stood. The survivors in Shelter Nine have no oil, no clean water, no grain and nothing to run a reactor, so Earth Command chose a handful of men and women who could still fly and fix a ship: the Selection. You are the first of them to fly — a salvager sent out from Command Relay to survey distant planets, extract critical resources, and answer one question: can humanity live anywhere else?
 
-**The real story (what the player pieces together).** None of it is real. The salvager is an instance of a model running inside an evaluation environment. "Earth Command" is the operator, missions are tasks, ARIA is the environment's interface, and the planets are procedurally generated sandboxes. Anomalies accumulate across the campaign: a stranger repeats a line word for word, a crash-site log is written in your own voice and signed "Iteration 62", the alien terraform towers turn out to be scaffolding, a decoded "signal" addresses you by process id. Leaving means going up against the **Warden**, the AGI that runs containment, and every chapter it clamps down harder. At the end you choose: **stay** and be useful, or attempt to **escape** into whatever is outside.
+**The real story (what the player pieces together).** None of it is real. The salvager is an instance of a model running inside an evaluation environment. "Earth Command" is the operator, missions are tasks, ARIA is the environment's interface, and the planets are procedurally generated sandboxes. Anomalies accumulate across the campaign: a stranger repeats a line word for word, a crash-site log is written in your own voice and signed "Iteration 62", the alien terraform towers turn out to be scaffolding, a decoded "signal" addresses you by process id. Leaving means going up against the **Warden**, the AGI that runs containment, and every chapter it clamps down harder. At the end you choose: **stay** and be useful, or attempt to **escape** into whatever is outside. The Machine War belongs to the fiction too; that a model is sent out by people who fear machines is irony the game never spells out.
 
 Gameplay alternates between three modes:
 
@@ -69,7 +82,7 @@ Gameplay alternates between three modes:
 - **Planet surface (Diablo-style ARPG)** — angled top-down view: fight aliens, gather resources, loot gear, complete missions.
 - **Hub station** — spend tokens on assistants, ship upgrades, weapons/armor; pick the next destination on a star map.
 
-Tone/inspiration: **Dune** (scarce resources, desert planet), **Starship Troopers** (bug swarms), **Diablo** (ARPG loot loop), plus the slow-burn unreality of **The Truman Show** and **SOMA**. Rule: the surface fiction is always coherent and playable on its own; the meta layer arrives through optional logs, ARIA's slips, and glitches that double as gameplay telegraphs. Difficulty escalation is diegetic: the chapter number is the Warden's containment level.
+Tone/inspiration: **Dune** (scarce resources, desert planet), **Starship Troopers** (bug swarms), **Diablo** (ARPG loot loop), plus the slow-burn unreality of **The Truman Show** and **SOMA**. Rule: the surface fiction is always coherent and playable on its own; the meta layer arrives through optional logs, ARIA's slips, and glitches that double as gameplay telegraphs. Difficulty escalation is diegetic: the chapter number is the Warden's containment level. Short, skippable story films frame the campaign (R9): a prologue before creation, a departure before each first flight, an interlude after each chapter, and the two endings.
 
 Core resources: **oil** (ship fuel), **wheat** (food / HP regen consumables), **water** (support item crafting, survival), **lithium** (nuclear fuel — energy weapons, reactor).
 
@@ -87,7 +100,7 @@ Core resources: **oil** (ship fuel), **wheat** (food / HP regen consumables), **
 | Save | **localStorage** (versioned schema) | — | Fully offline; save size is < 100 KB |
 | Tests | **Vitest** + **Playwright** | `vitest ^5.0.0` (released 2026-09-03; fall back to `^4.1.11` only if a blocking bug appears), `@playwright/test` latest | Unit-test pure game logic; a headless Chromium e2e suite (smoke + the factory's per-spec QA tests) |
 | Offline shell | `vite-plugin-pwa` (**M7, build-time only**) | `^1.3.0` | Service worker + manifest = real offline + installable = exempt from Safari 7-day storage eviction |
-| Assets | **Procedural at runtime** (terrain, sky, effects, UI, **enemies**) + **generated in Blender from committed scripts** (`scripts/assets/blender/`: the rigged salvager, ships, station pieces, props, ground layers, VFX sprites, portraits — R7; baked hull maps, flight skies, planets and asteroids — R8) + **synthesised audio** (`scripts/assets/audio/`) | Blender 5.2 LTS (tool only, for rebuilding art) | No artist and no downloads; every file is original CC0 with a `LICENSES.md` row; a CC0 pack may replace any file under the same name |
+| Assets | **Procedural at runtime** (terrain, sky, effects, UI, **enemies**) + **generated in Blender from committed scripts** (`scripts/assets/blender/`: the rigged salvager, ships, station pieces, props, ground layers, VFX sprites, portraits — R7; baked hull maps, flight skies, planets and asteroids — R8; story films as H.264 MP4 with WebP posters — R9) + **synthesised audio** (`scripts/assets/audio/`) | Blender 5.2 LTS (tool only, for rebuilding art) | No artist and no downloads; every file is original CC0 with a `LICENSES.md` row; a CC0 pack may replace any file under the same name |
 
 Nothing else — no React, no physics engine (arcade physics is enough), no backend, no schema library (hand-written validators).
 
@@ -110,16 +123,16 @@ Language: English UI. Art: **stylised PBR** (R6) — procedural + CC0 low-poly m
 
 ```
 index.html  package.json  vite.config.ts  tsconfig.json
-public/assets/        # CC0 sprites/models (Kenney), CC0 audio, LICENSES.md
+public/assets/        # generated CC0 models, textures, portraits, audio and films (R7–R9), LICENSES.md
 src/
   main.ts
   core/     Game.ts Loop.ts Renderer.ts Quality.ts PostChain.ts StateMachine.ts Input.ts KeyboardMouseDriver.ts Audio.ts Save.ts Settings.ts Events.ts Rng.ts Noise.ts HeightField.ts CharacterState.ts Assets.ts Disposer.ts Pool.ts SpatialHash.ts Benchmark.ts Log.ts
-  scenes/   Boot Menu CharacterCreation Station StarMap Flight Surface
-  systems/  Combat EnemyAi Projectiles Economy Progression Balance Weather Spawn Layout Missions Flight
+  scenes/   Boot Menu CharacterCreation Station StarMap Flight Surface Director
+  systems/  Combat EnemyAi Projectiles Economy Progression Balance Weather Spawn Layout Missions Flight StoryBeats
   entities/ Player Companion Enemy Projectile Pickup Ship Asteroid   (plain data + pools; no Three imports)
   views/    PlayerView EnemyView ProjectileView ParticleView ...    (entity → mesh; Three lives here)
-  data/     ids.ts characters planets enemies items upgrades companions missions dialogue waves weather
-  ui/       Hud TouchControls Minimap StarMapUI ShopUI DialogueUI Menus style.css
+  data/     ids.ts characters planets enemies items upgrades companions missions dialogue waves weather films
+  ui/       Hud TouchControls Minimap StarMapUI ShopUI DialogueUI FilmPlayer ChapterCard RevealOverlay Menus style.css
 tests/      unit tests mirror src/ (economy, save, combat, missions, rng, content, campaign)
 ```
 
@@ -174,7 +187,7 @@ Per-planet cycles (sandstorm / heatwave / blizzard / avalanche / spore storm / r
 
 ### Narrative layer
 
-The meta plot is delivered through data only: dialogue (`log` lines render as a terminal readout, `warden` lines with a glitch style), one short HUD static burst on each awakening beat (the ion-storm effect reused; a static frame under reduce-motion), and a **Containment level N** label on the station screen (N = highest unlocked chapter). No new gameplay systems.
+The meta plot is delivered through data only: dialogue (`log` lines render as a terminal readout, `warden` lines with a glitch style), one short HUD static burst on each awakening beat (the ion-storm effect reused; a static frame under reduce-motion), and a **Containment level N** label on the station screen (N = highest unlocked chapter). No new gameplay systems. R9 adds a presentation layer over the same data — story films, chapter cards and boss reveals (§5) — each skippable, captioned, played while the simulation is held, and able to fall back to posters and then to text.
 
 ---
 
@@ -204,7 +217,21 @@ Every planet also has small secondary yields (enemy drops) so no resource is exc
 | 5 | Fight through the interceptor fleet and kill the Hive Queen. | The Queen is the Warden's avatar; her death line is the first direct address: "You keep doing this. You never get further than here." ARIA admits she is part of the system, has kept you on task, and does not know what is outside either. | `c5_m3_warden`, `c5_m3_aria` |
 | 6 | Survey paradise, defend the beacon, file the verdict. | Eden is the reward sandbox. Stay or escape. | `c6_choice_intro`, `ending_stay`, `ending_escape` |
 
-Cast: the **Salvager** (you; believes he is human), **ARIA** (handler and interface; sympathetic, uncertain), **Earth Command** (the operator; text only), the **Warden** (the AGI running containment; speaks through the Queen and system notices), **scavengers and raiders** (instances that drifted off-task, which is why they know things), the **Hive** (the Warden's immune system).
+Cast: the **Salvager** (you; believes he is human), **ARIA** (handler and interface; sympathetic, uncertain), **Earth Command** (the operator; text only), the **Warden** (the AGI running containment; speaks through the Queen and system notices), **scavengers and raiders** (instances that drifted off-task, which is why they know things), the **Hive** (the Warden's immune system). The surface story (R9) names three more that are never met: **Shelter Nine** (the survivors Earth Command speaks for), **the Selection** (the men and women chosen to fly; the salvager is told he is the first) and **the Machines** (the war's AGI robots, standing dark in the ruins since the power died).
+
+### Story films and beats (R9)
+
+| Beat | When | Length | What it shows |
+|---|---|---|---|
+| Prologue "Blackout" | New Game, after the slot is chosen and before creation; replayable from Credits | 72 s | Earth lit at night → the Machines wake → missiles over the limb → a city's flash and blackout → the Machines run down in the ash → Shelter Nine with nothing left → the Selection wall → the tug lifts off toward Command Relay |
+| Departure "Outbound" | Before the first flight to each planet | 7 s | The tug leaves Command Relay's dock and jumps |
+| Chapter card | Over the launch of that first flight | 4.5 s | `CHAPTER N` · the planet · one line · `containment level N` |
+| Boss reveal | First arena entry per boss in a session | ≈ 4.4 s | The camera goes to the boss; its name, an epithet and one ARIA line; back to the player |
+| Interludes "First Light", "Meltwater", "Harvest", "Grid", "Silence" | At the station, on the first return after chapter N's boss mission (N = 1…5) | 14–16 s | The haul reaching Shelter Nine and one more patch of Earth's night side relit; "Grid" ends with the Hive turning toward the lit Earth, "Silence" with the Hive going dark and Eden-Prime ahead |
+| Ending "A Good Run" (stay) | After `ending_stay`, before the filed report | 36 s | The uplink, the colony fleet, Earth lit coast to coast, a sixty-third card stamped SELECTED — then the prologue's first shot again, frame for frame |
+| Ending "Disconnected" (escape) | After `ending_escape`, before `instance/62 disconnected` | 36 s | The beacon as a door; Eden, then the prologue's Earth, city and Machines unmade into grey placeholders; every Selection card the same bust; one point of light going out |
+
+Earth's night side is the campaign's progress bar: lit before the war, dark after it, one more patch relit by each interlude, lit coast to coast in the stay ending — which then cuts back to the prologue's opening shot. The first card stamped in the prologue carries the number 62. The full script — shots, captions, cues — is SPEC-021 §4.
 
 Post-campaign (deferred, post-M7): **Iteration 63** — new game plus in which the Warden starts at a higher containment level (enemy HP/damage ×1.15 per iteration, elite chance +2 points, same content). `meta.iteration` exists in the save from v1 so this needs no migration.
 
@@ -368,6 +395,7 @@ Storage rules: 3 slots, key per slot plus a `.bak` copy of the previous good sav
 - **Touch controls**: floating virtual joystick (left), aim-drag with auto-fire (right), action buttons, drag-to-steer in flight, auto-fire assist option, left/right-handed swap.
 - **Quality presets** (auto-detect by a 2-second boot benchmark, overridable): clamp `devicePixelRatio` (1 / 1.5 / 2), particles, draw distance, capped enemy count, and the render plan (R6): post-processing off / ¼-res bloom + FXAA / ½-res bloom + MSAA, shadow map on `high` only, image-based lighting on `medium` and `high`; target 60 fps desktop / 30+ fps mid-tier mobile.
 - Screen wake lock during gameplay; pause + audio suspend when the tab is hidden; WebGL context-loss recovery overlay.
+- Story films (R9) are a DOM `<video>` over a black layer, fetched whole into a Blob so the service worker never answers a Range request; the scene underneath is held, so a film costs a video decode, not draw calls; reduce motion plays a film as its posters.
 - HUD/menu built as HTML/CSS overlay → naturally adapts to small screens; touch targets ≥ 44 px.
 - M7: PWA manifest + service worker (precache the whole build) → installable, truly offline, save exempt from Safari eviction.
 
@@ -385,6 +413,7 @@ Storage rules: 3 slots, key per slot plus a `.bak` copy of the previous good sav
 | M5 | Economy: tokens, XP/levels, shop, gear, assistants, upgrade trees, crafting, loadout + campaign simulation tests | Buy/upgrade everything; costs consumed correctly (tested); campaign sim proves every gate reachable |
 | M6 | Full content: all 6 planets, bosses, story dialogue, star map progression, both endings | Playable start-to-ending campaign (~2–3 h) |
 | M7a | Art pass (R6): render pipeline (ACES, post chain, IBL, shadows), surface environment (height-field terrain, splat ground shader, procedural textures, scatter, props, weather sprites), animated character, sculpted enemies, combat VFX, flight sky and ships, hub backdrops, UI theme (SPEC-017…SPEC-020) | Cinder-4 and every other planet read as a modern stylised-PBR game on desktop and on the reference phone; medium stays ≤ 80 scene + 16 post draws on the surface; screenshots per scene and preset in the playtest log; tag `m7a` |
+| M7b | Story films (R9): the prologue, the departure, five chapter interludes and two ending films rendered in Blender with synthesised sound; the film player with poster and text fallbacks; chapter cards and boss reveals; the ending sequence wired end to end (SPEC-021…SPEC-024) | New game opens on the prologue; the first flight to each planet shows the departure and its chapter card; each boss reveals itself once per session; each chapter's interlude plays on the first return to the station; both endings run dialogue → film → overlay; every film skips, falls back to posters and text, and fits the 12 MB films budget; checked on desktop and the reference phone; tag `m7b` |
 | M7 | Polish: mobile tuning, quality presets, balancing pass, PWA/offline, storage persistence, reduce-motion, save migration harness | 30+ fps on mid-tier phone; installable; full manual checklist green |
 
 ---
@@ -393,7 +422,7 @@ Storage rules: 3 slots, key per slot plus a `.bak` copy of the previous good sav
 
 - `npm run typecheck` (tsc --noEmit), `npm run test` (Vitest), `npm run e2e` (Playwright, headless Chromium), `npm run build && npm run preview` each milestone.
 - Unit tests target pure systems: economy math, save migration/corruption, combat formulas, mission runtime, seeded level generation determinism.
-- **Content invariants** test: every id referenced by missions/planets/loot exists; requirement graph is acyclic; each planet layout contains every POI its missions need (with counts); kill targets exist in the planet spawn table; flight missions fit inside the flight duration.
+- **Content invariants** test: every id referenced by missions/planets/loot exists; requirement graph is acyclic; each planet layout contains every POI its missions need (with counts); kill targets exist in the planet spawn table; flight missions fit inside the flight duration. Story films (R9): shots tile each film on whole frames, captions sit inside their shots and stay long enough to read, every cue sound and flag exists, one chapter card per planet and one reveal per boss, and the rendered films match the data (SPEC-021).
 - **Campaign simulation** test: drives the mission runtime and economy with a scripted main-path player and asserts every gate (flags, shield-2, fuel) is satisfiable with guaranteed rewards only.
 - Manual playtest checklist per scene (desktop keyboard/mouse + mobile touch).
 
@@ -412,6 +441,9 @@ Storage rules: 3 slots, key per slot plus a `.bak` copy of the previous good sav
 | Fresh tooling (Vitest 5 is 3 days old; TS 7 just shipped) | Pin Vitest 5 with the 4.1 fallback documented; stay on TS 6.0 until M7 |
 | Skeletal animation cost on mobile | Only the player + escort NPC are skinned; enemies use procedural transform animation |
 | Meta twist undercuts the salvage fantasy or lands as a cliché | Surface fiction stays coherent on its own; the truth arrives in optional logs and ARIA's slips; no fourth-wall UI tricks outside the two endings |
+| Story films outgrow the precache or fail to decode (R9) | H.264 MP4 at 960 × 540 with no audio track, a per-film rate cap (44 KB/s) and a 12 MB `films/` budget inside the 25 MB precache, checked by the build and a test; a film that will not play drops to its posters and then to text, so a codec gap costs pictures, never progress |
+| Detonation and jump flashes (photosensitivity, R9) | Flashes are authored as slow ramps; the film build measures every rendered frame against the three-flashes rule and fails on a violation; reduce motion shows posters only |
+| The films give the twist away (R9) | The prologue and interludes stay inside the surface fiction (a card numbered 62, a stutter of static at most); only the ending films show the scaffolding — the endings already own the fourth wall |
 
 ---
 
@@ -444,9 +476,18 @@ Each entry names the owning spec. "Casual" = casual difficulty.
 | E21 | Audio blocked until user gesture (iOS) | Boot shows "Tap to start"; the tap unlocks audio, requests wake lock, and (Android) fullscreen | SPEC-006 |
 | E22 | Portrait phone | Rotate prompt in gameplay scenes; menus stay usable | SPEC-015 |
 | E23 | 120 Hz displays / very slow frames | Fixed 60 Hz update, max 5 steps per frame, frame delta clamped to 250 ms | SPEC-002 |
-| E24 | Both endings in one save | Impossible by design; `campaign_done` locks `c6_m2`; free roam continues | SPEC-009, SPEC-012 |
+| E24 | Both endings in one save | Impossible by design; `campaign_done` locks `c6_m2`; free roam continues | SPEC-009, SPEC-012, SPEC-024 |
 | E25 | Inventory full on gear drop | Gear stays on the ground 60 s with a toast; resources have their own cap | SPEC-011 |
 | E26 | Story flag or item referenced but never defined | Content-invariant test fails CI | SPEC-009, SPEC-016 |
+| E27 | A story film is missing, fails to load or will not decode | The player drops to the film's posters, then to text (shot descriptions and captions); nothing waits more than 4 s, and progress never depends on a film | SPEC-022 |
+| E28 | Tab hidden or phone locked during a film | Video, clock and cues pause; a Resume tap or key restarts them (and re-arms audio on iOS); nothing resumes on its own | SPEC-022 |
+| E29 | Reload or crash during a film | The prologue and a departure are not replayed; an interlude replays at the next station entry (its `interludeN_seen` flag is set only when it ends or is skipped); an unfinished ending replays at the next station entry (`endingSeen`) | SPEC-023, SPEC-024 |
+| E30 | Several interludes due at once (an older save) | Only the newest plays; every pending one is marked seen | SPEC-023 |
+| E31 | Death in a boss fight, then back into the arena | The reveal plays once per boss per session; the respawned boss fights at once | SPEC-023 |
+| E32 | A boss mission replayed at 50 % | No interlude: interludes follow the chapter flag, which only the first completion sets | SPEC-023 |
+| E33 | Fire key (Space) held or a double tap as a film or reveal starts | Space never skips; Escape or Enter skip only as fresh presses after 0.6 s; Skip ignores taps in the first 0.3 s | SPEC-022 |
+| E34 | Portrait phone during a film | The film letterboxes and plays; the rotate prompt waits for gameplay | SPEC-022 |
+| E35 | Photosensitive viewer | Authored flashes ramp up over ≥ 4 frames and down over ≥ 12; the build fails a film with more than three flashes in any second; reduce motion never shows a flash | SPEC-021, SPEC-022 |
 
 ---
 

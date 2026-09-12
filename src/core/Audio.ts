@@ -49,10 +49,20 @@ export type Bus = 'master' | 'music' | 'sfx';
  * One looping track. The manifest bank for each is `music_<id>` (§2.3).
  *
  * Not to be confused with `data/ids.ts`'s `MusicId`, which is the per-biome cue
- * a `PlanetDef` picks (SPEC-009 §4.5); these are the seven mixes the audio
- * layer actually crossfades between.
+ * a `PlanetDef` picks (SPEC-009 §4.5); these are the nine mixes the audio
+ * layer actually crossfades between — the last two are the story films' beds
+ * (PLAN R9).
  */
-export type MusicId = 'menu' | 'station' | 'flight' | 'surface_calm' | 'surface_combat' | 'boss' | 'ending';
+export type MusicId =
+  | 'menu'
+  | 'station'
+  | 'flight'
+  | 'surface_calm'
+  | 'surface_combat'
+  | 'boss'
+  | 'ending'
+  | 'film_dark'
+  | 'film_hope';
 
 export interface PlayOptions {
   /** Multiplies the attenuation gain; the `base` of §4.2. Defaults to 1. */
