@@ -16,6 +16,7 @@
 // baked asteroid, fighter, interceptor and cockpit models, and sprite textures
 // for the stars and the explosions.
 import * as THREE from 'three';
+import { Lensflare, LensflareElement } from 'three/examples/jsm/objects/Lensflare.js';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { disposeObject3D } from '@/core/Disposer';
 import type { Pool } from '@/core/Pool';
@@ -23,6 +24,7 @@ import type { QualitySettings } from '@/core/Renderer';
 import type { Rng } from '@/core/Rng';
 import type { EnemyDef, PlanetDef } from '@/data/index';
 import { buildEnvironment, skyParamsFor } from '@/views/Environment';
+import { particleSprite } from '@/views/ProceduralTextures';
 
 // ------------------------------------------------------- the per-frame slice
 
@@ -41,6 +43,8 @@ export interface FrameHazard {
   y: number;
   depth: number;
   radius: number;
+  /** Depth per second — the ghost taps of §4.3 read it off enemy shots. */
+  vDepth?: number;
   def?: EnemyDef;
 }
 
@@ -48,6 +52,8 @@ export interface FrameShot {
   x: number;
   y: number;
   depth: number;
+  /** Depth per second — what the ghost taps of §4.3 are offset along. */
+  vDepth: number;
 }
 
 export interface FrameBurst {
@@ -128,6 +134,51 @@ const MAX_SHOTS = 64;
 const PARTICLE_LIFE = 0.7;
 /** Where the key light comes from (the atmosphere brightens on that side). */
 const KEY_DIRECTION = new THREE.Vector3(3, 5, 4).normalize();
+
+// ---------------------------------------------- SPEC-020 §4.3: the trip's fx
+
+/**
+ * How far behind each class's origin its exhaust sits, in model metres — the
+ * fighter's nozzle disc bakes at Blender (0, 1.28, 0) and the interceptor's
+ * tail lamp at (0, 2.08, 0.21) (`scripts/assets/blender/ships.py`), and the
+ * Blender → glTF map (x, y, z) → (x, z, −y) puts both on −Z, opposite the nose
+ * (+Z, §4.8). The glow rides one offset further out, times the instance scale.
+ */
+const GLOW_OFFSET: Readonly<Record<'fighter' | 'interceptor', number>> = { fighter: 1.3, interceptor: 2.1 };
+const GLOW_SIZE = 0.6;
+const GLOW_COLOR = 0x9fe3ff;
+
+/**
+ * §4.3: the shot head and its two ghosts — the depth lag each is drawn at and
+ * the colour gain it carries. The head's × 2.5 is what pushes the bolt past
+ * SPEC-017's bloom threshold; the ghosts trail it at × 1.2 and × 0.6.
+ *
+ * The offsets are the criterion's own arithmetic, `p + v · lag`, against the
+ * shot's signed `vDepth` — so the ghosts sit further along the bolt's own
+ * direction of travel than the head does.
+ */
+const SHOT_TAPS: ReadonlyArray<{ readonly lag: number; readonly gain: number }> = [
+  { lag: 0, gain: 2.5 },
+  { lag: 0.02, gain: 1.2 },
+  { lag: 0.04, gain: 0.6 },
+];
+
+/** §4.3: the explosion flash, SPEC-019 §4.4 `death`'s four sprites at × 3. */
+const FLASH_SPRITES = 4;
+const FLASH_GAIN = 3;
+const FLASH_LIFE = 0.12;
+/** Four concurrent explosions' worth of flash, the same headroom SPEC-019 keeps. */
+const FLASH_CAPACITY = FLASH_SPRITES * 4;
+const PARTICLE_SIZE = 0.9;
+const FLASH_SIZE = PARTICLE_SIZE * 1.4;
+
+/** §4.3: the sun sits past the planet's far shoulder, so the flare reads. */
+const SUN_POSITION = new THREE.Vector3(-70, 34, -440);
+/** 20-f: the flare fades away over the landing's last 30 %. */
+const FLARE_FADE_FROM = 0.7;
+
+/** 20-g: how fast the sky window reaches full storm tint (per second). */
+const STORM_TINT_PER_S = 2;
 
 /** Cloud tint, cover and drift per biome (initial tuning). */
 const CLOUDS: Readonly<Record<PlanetDef['biome'], { readonly tint: string; readonly opacity: number }>> = {
@@ -263,6 +314,43 @@ function atmosphereMaterial(color: THREE.Color, strength: number): THREE.ShaderM
   });
 }
 
+/**
+ * The lens flare's two elements (§4.3): a 64² four-armed star and a 32² ring.
+ * Built here rather than downloaded — the flare is the only thing that wants
+ * them, and a `DataTexture` costs no request and no decode.
+ */
+function flareTexture(size: number, kind: 'flare' | 'ring'): THREE.DataTexture {
+  const data = new Uint8Array(size * size * 4);
+  for (let y = 0; y < size; y++) {
+    for (let x = 0; x < size; x++) {
+      const dx = ((x + 0.5) / size) * 2 - 1;
+      const dy = ((y + 0.5) / size) * 2 - 1;
+      const r = Math.hypot(dx, dy);
+      let alpha: number;
+      if (kind === 'flare') {
+        // A hot core with four soft arms along the axes.
+        const core = Math.max(0, 1 - r * 2.6);
+        const arms = Math.max(0, 1 - Math.abs(dy) * 14) + Math.max(0, 1 - Math.abs(dx) * 14);
+        alpha = Math.min(1, core * core * 1.6 + arms * Math.max(0, 1 - r) * 0.35);
+      } else {
+        // A thin halo: bright on the circle at r = 0.72, nothing elsewhere.
+        alpha = Math.exp(-((r - 0.72) * (r - 0.72)) / 0.006) * (1 - Math.max(0, r - 1));
+      }
+      const at = (y * size + x) * 4;
+      data[at] = 255;
+      data[at + 1] = 255;
+      data[at + 2] = 255;
+      data[at + 3] = Math.round(Math.min(1, Math.max(0, alpha)) * 255);
+    }
+  }
+  const texture = new THREE.DataTexture(data, size, size, THREE.RGBAFormat);
+  texture.colorSpace = THREE.SRGBColorSpace;
+  texture.minFilter = THREE.LinearFilter;
+  texture.magFilter = THREE.LinearFilter;
+  texture.needsUpdate = true;
+  return texture;
+}
+
 export class FlightView {
   readonly #scene: THREE.Scene;
   readonly #camera: THREE.PerspectiveCamera;
@@ -277,18 +365,33 @@ export class FlightView {
   #rocksTextured = false;
   readonly #fighters: THREE.InstancedMesh;
   readonly #interceptors: THREE.InstancedMesh;
+  /** §4.3: one additive quad per ship, at its nozzle plane. */
+  readonly #glows: THREE.InstancedMesh;
   readonly #shots: THREE.InstancedMesh;
   readonly #enemyShots: THREE.InstancedMesh;
   readonly #planet: THREE.Mesh;
   #clouds: THREE.Mesh | null = null;
   #sky: THREE.Mesh | null = null;
+  #skyMaterial: THREE.MeshBasicMaterial | null = null;
   #dressed = false;
   readonly #cockpit: THREE.Group;
-  readonly #particles: THREE.Points;
+  /** §4.3: the explosion pool — instanced sprite quads, not points. */
+  readonly #particles: THREE.InstancedMesh;
   readonly #particleData: Float32Array; // vx, vy, vz, life per particle
-  readonly #particlePositions: THREE.BufferAttribute;
+  readonly #particlePositions: Float32Array;
   readonly #maxParticles: number;
   #nextParticle = 0;
+  readonly #flash: THREE.InstancedMesh;
+  readonly #flashData: Float32Array; // vx, vy, vz, life per sprite
+  readonly #flashPositions = new Float32Array(FLASH_CAPACITY * 3);
+  #nextFlash = 0;
+
+  /** 20-g: 0 → white sky window, 1 → fully tinted toward the planet's accent. */
+  #stormTint = 0;
+  readonly #accent: THREE.Color;
+  #flare: Lensflare | null = null;
+  readonly #flareElements: LensflareElement[] = [];
+  readonly #flareColors: THREE.Color[] = [];
 
   readonly #environment: THREE.DataTexture | null = null;
   readonly #fogDensity: number;
@@ -309,6 +412,7 @@ export class FlightView {
     const { planet, quality, rng } = options;
     this.#planetDef = planet;
     this.#rockTint = new THREE.Color(planet.surface.palette.ground);
+    this.#accent = new THREE.Color(planet.surface.palette.accent);
 
     // Space wears a near-black cast of the planet's sky; fog carries its tint
     // (§4.9) and the storm triples the density (§4.5).
@@ -335,6 +439,27 @@ export class FlightView {
     const rim = new THREE.DirectionalLight(0x7f9fff, 0.8);
     rim.position.set(-4, 2, -6);
     scene.add(rim);
+
+    // §4.3 / 20-a: the sun past the planet's far shoulder wears a two-element
+    // lens flare — but only where the post chain's bloom is there to make it
+    // read; on `low` it would be a hard disc pasted over the sky.
+    if (quality.post !== 'off') {
+      const sun = new THREE.DirectionalLight(0xfff4e2, 0.35);
+      sun.position.copy(SUN_POSITION);
+      const flare = new Lensflare();
+      const elements = [
+        new LensflareElement(flareTexture(64, 'flare'), 260, 0, new THREE.Color(0xfff0d8)),
+        new LensflareElement(flareTexture(32, 'ring'), 70, 0.62, new THREE.Color(0x7fb4ff)),
+      ];
+      for (const element of elements) {
+        flare.addElement(element);
+        this.#flareElements.push(element);
+        this.#flareColors.push(element.color.clone());
+      }
+      sun.add(flare);
+      this.#flare = flare;
+      scene.add(sun);
+    }
 
     // Starfield: `Points` with per-frame z streaming and wrap (§4.9).
     const starCount = quality.starfieldPoints;
@@ -369,25 +494,44 @@ export class FlightView {
     interceptorGeometry.scale(0.8, 0.8, 1.8);
     this.#interceptors = this.#shipMesh(interceptorGeometry, '#9a8ad0');
 
-    // Shots: instanced capsules for ours, instanced spheres for theirs (§4.9).
+    // §4.3: the engine glows — one instanced additive quad, an instance behind
+    // every fighter and interceptor on screen.
+    //
+    // `depthTest: false` is deliberate and is what makes the criterion's sprite
+    // something the player can actually see. Hazards fly *at* the camera
+    // (SPEC-013 §4.3: they are drawn at (x, y, −depth) and their noses face
+    // +Z), so a ship's exhaust is always on the far side of its own hull: a
+    // 0.6 m quad at the nozzle plane sits inside the silhouette of a 3.2 m
+    // fighter at every bearing the rail lets the player reach, and a
+    // depth-tested quad there is never rasterised at all. Drawn through the
+    // hull it reads as the exhaust glow spilling around it, which is the thing
+    // the criterion asks for. It is additive and does not write depth, so it
+    // tints what it crosses rather than hiding it.
+    this.#glows = new THREE.InstancedMesh(
+      new THREE.PlaneGeometry(GLOW_SIZE, GLOW_SIZE),
+      new THREE.MeshBasicMaterial({
+        color: GLOW_COLOR,
+        map: particleSprite('dot'),
+        transparent: true,
+        blending: THREE.AdditiveBlending,
+        depthWrite: false,
+        depthTest: false,
+        fog: false,
+      }),
+      MAX_SHIPS * 2,
+    );
+    this.#glows.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+    this.#glows.frustumCulled = false;
+    this.#glows.count = 0;
+    scene.add(this.#glows);
+
+    // Shots: instanced capsules for ours, instanced spheres for theirs (§4.9),
+    // each carrying §4.3's head and two ghosts — hence the × 3 capacity and the
+    // per-instance colour gain.
     const capsule = new THREE.CapsuleGeometry(0.07, 1.6, 3, 6);
     capsule.rotateX(Math.PI / 2); // along depth
-    this.#shots = new THREE.InstancedMesh(
-      capsule,
-      new THREE.MeshBasicMaterial({ color: 0x9fe3ff, fog: false }),
-      MAX_SHOTS,
-    );
-    this.#shots.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
-    this.#shots.frustumCulled = false;
-    scene.add(this.#shots);
-    this.#enemyShots = new THREE.InstancedMesh(
-      new THREE.SphereGeometry(0.4, 8, 6),
-      new THREE.MeshBasicMaterial({ color: 0xff7a5a, fog: false }),
-      MAX_SHOTS,
-    );
-    this.#enemyShots.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
-    this.#enemyShots.frustumCulled = false;
-    scene.add(this.#enemyShots);
+    this.#shots = this.#shotMesh(capsule, 0x9fe3ff);
+    this.#enemyShots = this.#shotMesh(new THREE.SphereGeometry(0.4, 8, 6), 0xff7a5a);
 
     // The destination: one sphere, procedural biome texture, scale by §4.1.
     this.#planet = new THREE.Mesh(
@@ -397,20 +541,15 @@ export class FlightView {
     this.#planet.position.set(0, 0, PLANET_Z);
     scene.add(this.#planet);
 
-    // Explosions: one pooled particle cloud; a burst wakes a slice of it (§4.9).
+    // Explosions (§4.3): a pooled instanced sprite quad — capacity
+    // `quality.maxParticles` — plus SPEC-019 §4.4 `death`'s four-sprite flash
+    // at × 3 brightness on its own mesh. A burst wakes a slice of both.
     this.#maxParticles = quality.maxParticles;
-    const particlePositions = new Float32Array(this.#maxParticles * 3);
-    particlePositions.fill(10_000); // parked far out of view
     this.#particleData = new Float32Array(this.#maxParticles * 4);
-    const particleGeometry = new THREE.BufferGeometry();
-    this.#particlePositions = new THREE.BufferAttribute(particlePositions, 3);
-    particleGeometry.setAttribute('position', this.#particlePositions);
-    this.#particles = new THREE.Points(
-      particleGeometry,
-      new THREE.PointsMaterial({ color: 0xffb066, size: 0.6, sizeAttenuation: true, transparent: true, opacity: 0.9, fog: false }),
-    );
-    this.#particles.frustumCulled = false;
-    scene.add(this.#particles);
+    this.#particlePositions = new Float32Array(this.#maxParticles * 3);
+    this.#particles = this.#spriteMesh(0xffb066, PARTICLE_SIZE, this.#maxParticles);
+    this.#flashData = new Float32Array(FLASH_CAPACITY * 4);
+    this.#flash = this.#spriteMesh(0xffffff, FLASH_SIZE, FLASH_CAPACITY);
 
     // Cockpit: a static procedural frame — struts and a canopy edge — that
     // rides the camera (§4.9). HUD elements stay DOM.
@@ -439,6 +578,45 @@ export class FlightView {
     mesh.count = 0;
     this.#scene.add(mesh);
     this.#asteroidCounts.push(0);
+    return mesh;
+  }
+
+  /** §4.3: a shot mesh sized for the head plus its two ghosts, colour per instance. */
+  #shotMesh(geometry: THREE.BufferGeometry, tint: number): THREE.InstancedMesh {
+    const mesh = new THREE.InstancedMesh(
+      geometry,
+      // Additive so the ghosts read as light, not as three solid copies.
+      new THREE.MeshBasicMaterial({ color: tint, fog: false, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false }),
+      MAX_SHOTS * SHOT_TAPS.length,
+    );
+    mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+    mesh.frustumCulled = false;
+    mesh.count = 0;
+    // Instance colours exist from the start, so the buffer never grows mid-trip.
+    mesh.setColorAt(0, this.#color.setScalar(1));
+    this.#scene.add(mesh);
+    return mesh;
+  }
+
+  /** §4.3: an additive sprite-quad pool — the explosion particles and the flash. */
+  #spriteMesh(tint: number, size: number, capacity: number): THREE.InstancedMesh {
+    const mesh = new THREE.InstancedMesh(
+      new THREE.PlaneGeometry(size, size),
+      new THREE.MeshBasicMaterial({
+        color: tint,
+        map: particleSprite('ember'),
+        transparent: true,
+        blending: THREE.AdditiveBlending,
+        depthWrite: false,
+        fog: false,
+      }),
+      capacity,
+    );
+    mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+    mesh.frustumCulled = false;
+    mesh.count = 0;
+    mesh.setColorAt(0, this.#color.setScalar(1));
+    this.#scene.add(mesh);
     return mesh;
   }
 
@@ -478,7 +656,13 @@ export class FlightView {
     if (art.fighter) this.#useShip(this.#fighters, art.fighter);
     if (art.interceptor) this.#useShip(this.#interceptors, art.interceptor);
     if (art.cockpit) this.#useCockpit(art.cockpit);
-    if (art.ember) glowPoints(this.#particles.material as THREE.PointsMaterial, art.ember, 1.6);
+    if (art.ember) {
+      // The baked ember replaces the procedural one on both explosion meshes.
+      for (const mesh of [this.#particles, this.#flash]) {
+        (mesh.material as THREE.MeshBasicMaterial).map = art.ember;
+        (mesh.material as THREE.MeshBasicMaterial).needsUpdate = true;
+      }
+    }
     if (art.flare) glowPoints(this.#stars.material as THREE.PointsMaterial, art.flare, 1.1);
   }
 
@@ -489,9 +673,14 @@ export class FlightView {
     this.#updateShots(frame);
     this.#updateParticles(frame, dt);
     this.#updatePlanet(frame);
-    this.#sky?.position.copy(this.#camera.position);
+    this.#updateSky(frame, dt);
     const fog = this.#scene.fog as THREE.FogExp2;
     fog.density = this.#fogDensity * (frame.stormActive ? 3 : 1); // §4.5
+  }
+
+  /** 20-g: how far the sky window has shifted toward the accent, 0…1. */
+  get stormTint(): number {
+    return this.#stormTint;
   }
 
   dispose(): void {
@@ -509,14 +698,23 @@ export class FlightView {
 
   #useSky(texture: THREE.Texture): void {
     const { phiStart, phiLength, thetaStart, thetaLength } = SKY_WINDOW;
+    const material = new THREE.MeshBasicMaterial({
+      map: texture,
+      side: THREE.BackSide,
+      fog: false,
+      depthWrite: false,
+      depthTest: false,
+    });
     const dome = new THREE.Mesh(
       new THREE.SphereGeometry(SKY_RADIUS, 48, 32, phiStart, phiLength, thetaStart, thetaLength),
-      new THREE.MeshBasicMaterial({ map: texture, side: THREE.BackSide, fog: false, depthWrite: false, depthTest: false }),
+      material,
     );
     dome.renderOrder = -10;
     dome.frustumCulled = false;
     dome.position.copy(this.#camera.position);
     this.#sky = dome;
+    this.#skyMaterial = material;
+    this.#applyStormTint();
     this.#scene.add(dome);
   }
 
@@ -639,6 +837,7 @@ export class FlightView {
     let fighters = 0;
     let interceptors = 0;
     let enemyShots = 0;
+    let glows = 0;
     const time = frame.time;
     for (let i = 0; i < frame.hazards.size; i++) {
       const hazard = frame.hazards.at(i);
@@ -668,28 +867,27 @@ export class FlightView {
           if (fighters >= MAX_SHIPS) break;
           this.#euler.set(0, 0, Math.sin(time * 2 + hazard.x) * 0.4, 'XYZ');
           this.#quaternion.setFromEuler(this.#euler);
-          this.#scale.setScalar(hazard.def?.look.scale ?? 1.2);
+          const scale = hazard.def?.look.scale ?? 1.2;
+          this.#scale.setScalar(scale);
           this.#matrix.compose(this.#position, this.#quaternion, this.#scale);
           this.#fighters.setMatrixAt(fighters, this.#matrix);
           fighters++;
+          glows = this.#writeGlow(glows, GLOW_OFFSET.fighter * scale);
           break;
         }
         case 'interceptor': {
           if (interceptors >= MAX_SHIPS) break;
           this.#quaternion.identity();
-          this.#scale.setScalar(hazard.def?.look.scale ?? 1.4);
+          const scale = hazard.def?.look.scale ?? 1.4;
+          this.#scale.setScalar(scale);
           this.#matrix.compose(this.#position, this.#quaternion, this.#scale);
           this.#interceptors.setMatrixAt(interceptors, this.#matrix);
           interceptors++;
+          glows = this.#writeGlow(glows, GLOW_OFFSET.interceptor * scale);
           break;
         }
         case 'enemy_shot': {
-          if (enemyShots >= MAX_SHOTS) break;
-          this.#quaternion.identity();
-          this.#scale.setScalar(1);
-          this.#matrix.compose(this.#position, this.#quaternion, this.#scale);
-          this.#enemyShots.setMatrixAt(enemyShots, this.#matrix);
-          enemyShots++;
+          enemyShots = this.#writeShot(this.#enemyShots, enemyShots, hazard.x, hazard.y, hazard.depth, hazard.vDepth ?? 0);
           break;
         }
       }
@@ -697,7 +895,24 @@ export class FlightView {
     for (let v = 0; v < rocks.length; v++) this.#writeCount(rocks[v] as THREE.InstancedMesh, counts[v] as number, true);
     this.#writeCount(this.#fighters, fighters, false);
     this.#writeCount(this.#interceptors, interceptors, false);
-    this.#writeCount(this.#enemyShots, enemyShots, false);
+    this.#writeCount(this.#glows, glows, false);
+    this.#writeCount(this.#enemyShots, enemyShots, true);
+  }
+
+  /**
+   * §4.3: one engine glow, `offset` metres behind the hazard `#position` holds
+   * — down −Z, the nozzle side, since the model's nose is +Z. Returns the next
+   * free slot; the scratch vector is put back the way it was found.
+   */
+  #writeGlow(slot: number, offset: number): number {
+    if (slot >= this.#glows.instanceMatrix.count) return slot;
+    this.#position.z -= offset;
+    this.#quaternion.identity();
+    this.#scale.setScalar(1); // §4.3 pins the quad at 0.6 m, whatever the ship's size
+    this.#matrix.compose(this.#position, this.#quaternion, this.#scale);
+    this.#glows.setMatrixAt(slot, this.#matrix);
+    this.#position.z += offset;
+    return slot + 1;
   }
 
   #writeCount(mesh: THREE.InstancedMesh, count: number, colored: boolean): void {
@@ -708,21 +923,36 @@ export class FlightView {
 
   #updateShots(frame: FlightFrame): void {
     let count = 0;
+    for (let i = 0; i < frame.shots.size; i++) {
+      const shot = frame.shots.at(i);
+      count = this.#writeShot(this.#shots, count, shot.x, shot.y, shot.depth, shot.vDepth);
+    }
+    this.#writeCount(this.#shots, count, true);
+  }
+
+  /**
+   * §4.3: one bolt as three instances — the bright head and the two ghosts at
+   * `p + v · lag` in depth, dimmer by their own gain. Returns the next free
+   * slot, or `slot` untouched when the mesh is full.
+   */
+  #writeShot(mesh: THREE.InstancedMesh, slot: number, x: number, y: number, depth: number, vDepth: number): number {
+    if (slot + SHOT_TAPS.length > mesh.instanceMatrix.count) return slot;
     this.#quaternion.identity();
     this.#scale.setScalar(1);
-    for (let i = 0; i < frame.shots.size && count < MAX_SHOTS; i++) {
-      const shot = frame.shots.at(i);
-      this.#position.set(shot.x, shot.y, -shot.depth);
+    let at = slot;
+    for (let t = 0; t < SHOT_TAPS.length; t++) {
+      const tap = SHOT_TAPS[t] as { lag: number; gain: number };
+      this.#position.set(x, y, -(depth + vDepth * tap.lag));
       this.#matrix.compose(this.#position, this.#quaternion, this.#scale);
-      this.#shots.setMatrixAt(count, this.#matrix);
-      count++;
+      mesh.setMatrixAt(at, this.#matrix);
+      mesh.setColorAt(at, this.#color.setScalar(tap.gain));
+      at++;
     }
-    this.#shots.count = count;
-    this.#shots.instanceMatrix.needsUpdate = true;
+    return at;
   }
 
   #updateParticles(frame: FlightFrame, dt: number): void {
-    // Wake a slice of the pool per burst, then integrate the live ones.
+    // Wake a slice of both pools per burst, then integrate the live ones.
     for (let b = 0; b < frame.bursts.size; b++) {
       const burst = frame.bursts.at(b);
       const spawn = Math.min(24, Math.round(6 + burst.size * 5));
@@ -730,33 +960,79 @@ export class FlightView {
         const index = this.#nextParticle;
         this.#nextParticle = (this.#nextParticle + 1) % this.#maxParticles;
         const angle = (n / spawn) * Math.PI * 2;
-        const lift = Math.sin(n * 2.7) * 4;
-        this.#particleData[index * 4] = Math.cos(angle) * (4 + burst.size);
-        this.#particleData[index * 4 + 1] = Math.sin(angle) * (4 + burst.size);
-        this.#particleData[index * 4 + 2] = lift;
-        this.#particleData[index * 4 + 3] = PARTICLE_LIFE;
-        const positions = this.#particlePositions.array as Float32Array;
-        positions[index * 3] = burst.x;
-        positions[index * 3 + 1] = burst.y;
-        positions[index * 3 + 2] = -burst.depth;
+        this.#wake(this.#particleData, this.#particlePositions, index, burst, Math.cos(angle) * (4 + burst.size), Math.sin(angle) * (4 + burst.size), Math.sin(n * 2.7) * 4, PARTICLE_LIFE);
+      }
+      // §4.3: the four-sprite flash, a shorter burst at × 3 brightness.
+      for (let n = 0; n < FLASH_SPRITES; n++) {
+        const index = this.#nextFlash;
+        this.#nextFlash = (this.#nextFlash + 1) % FLASH_CAPACITY;
+        const angle = (n / FLASH_SPRITES) * Math.PI * 2 + 0.4;
+        this.#wake(this.#flashData, this.#flashPositions, index, burst, Math.cos(angle) * 2, Math.sin(angle) * 2, 0, FLASH_LIFE);
       }
     }
     frame.bursts.clear();
-    const positions = this.#particlePositions.array as Float32Array;
-    for (let i = 0; i < this.#maxParticles; i++) {
-      const life = this.#particleData[i * 4 + 3] as number;
-      if (life <= 0) continue;
-      const left = life - dt;
-      this.#particleData[i * 4 + 3] = left;
-      if (left <= 0) {
-        positions[i * 3] = 10_000;
-        continue;
-      }
-      positions[i * 3] = (positions[i * 3] as number) + (this.#particleData[i * 4] as number) * dt;
-      positions[i * 3 + 1] = (positions[i * 3 + 1] as number) + (this.#particleData[i * 4 + 1] as number) * dt;
-      positions[i * 3 + 2] = (positions[i * 3 + 2] as number) + (this.#particleData[i * 4 + 2] as number) * dt;
+    this.#drawPool(this.#particles, this.#particleData, this.#particlePositions, this.#maxParticles, PARTICLE_LIFE, 1, dt);
+    this.#drawPool(this.#flash, this.#flashData, this.#flashPositions, FLASH_CAPACITY, FLASH_LIFE, FLASH_GAIN, dt);
+  }
+
+  /** One pool slot reset to a burst's origin and velocity (no allocation). */
+  #wake(data: Float32Array, positions: Float32Array, index: number, burst: FrameBurst, vx: number, vy: number, vz: number, life: number): void {
+    data[index * 4] = vx;
+    data[index * 4 + 1] = vy;
+    data[index * 4 + 2] = vz;
+    data[index * 4 + 3] = life;
+    positions[index * 3] = burst.x;
+    positions[index * 3 + 1] = burst.y;
+    positions[index * 3 + 2] = -burst.depth;
+  }
+
+  /**
+   * Integrate a sprite pool and write the live slots into the front of its
+   * instance buffer: the draw count is what is alive, and a slot that expired
+   * simply stops being written (§4.3's replacement for the parked points).
+   */
+  #drawPool(mesh: THREE.InstancedMesh, data: Float32Array, positions: Float32Array, capacity: number, life: number, gain: number, dt: number): void {
+    let drawn = 0;
+    this.#quaternion.identity();
+    for (let i = 0; i < capacity; i++) {
+      const left = data[i * 4 + 3] as number;
+      if (left <= 0) continue;
+      const next = left - dt;
+      data[i * 4 + 3] = next;
+      if (next <= 0) continue;
+      positions[i * 3] = (positions[i * 3] as number) + (data[i * 4] as number) * dt;
+      positions[i * 3 + 1] = (positions[i * 3 + 1] as number) + (data[i * 4 + 1] as number) * dt;
+      positions[i * 3 + 2] = (positions[i * 3 + 2] as number) + (data[i * 4 + 2] as number) * dt;
+      const fade = next / life;
+      this.#position.set(positions[i * 3] as number, positions[i * 3 + 1] as number, positions[i * 3 + 2] as number);
+      this.#scale.setScalar(0.4 + fade * 0.6);
+      this.#matrix.compose(this.#position, this.#quaternion, this.#scale);
+      mesh.setMatrixAt(drawn, this.#matrix);
+      mesh.setColorAt(drawn, this.#color.setScalar(fade * gain));
+      drawn++;
     }
-    this.#particlePositions.needsUpdate = true;
+    this.#writeCount(mesh, drawn, true);
+  }
+
+  /** 20-g: the sky window drifts toward the planet's accent while a storm blows. */
+  #updateSky(frame: FlightFrame, dt: number): void {
+    this.#sky?.position.copy(this.#camera.position);
+    const target = frame.stormActive ? 1 : 0;
+    const step = STORM_TINT_PER_S * dt;
+    this.#stormTint = this.#stormTint < target ? Math.min(target, this.#stormTint + step) : Math.max(target, this.#stormTint - step);
+    this.#applyStormTint();
+    // 20-f: the flare goes out with the sky as the landing dive begins.
+    if (this.#flare !== null) {
+      const fade = 1 - Math.min(1, Math.max(0, (this.#landing - FLARE_FADE_FROM) / (1 - FLARE_FADE_FROM)));
+      for (let i = 0; i < this.#flareElements.length; i++) {
+        const element = this.#flareElements[i] as LensflareElement;
+        element.color.copy(this.#flareColors[i] as THREE.Color).multiplyScalar(fade);
+      }
+    }
+  }
+
+  #applyStormTint(): void {
+    this.#skyMaterial?.color.set(0xffffff).lerp(this.#accent, this.#stormTint);
   }
 
   #updatePlanet(frame: FlightFrame): void {
