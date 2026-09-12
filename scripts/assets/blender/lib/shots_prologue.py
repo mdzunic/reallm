@@ -355,10 +355,13 @@ def shelter_room(ctx, lamp_steady_at=None, people_pose='lean'):
     g.link(bs.outputs[0], o.inputs['Surface'])
     F.plane('Map', 1.6, 1.0, paper, (0, 0, 0.925), (0, 0, 4))
     people = C.mat_vcol('People', rough=0.85)
-    seats = [(-1.7, 0.2, -90), (-1.6, -0.5, -70), (1.7, -0.1, 90), (1.6, 0.55, 110), (-0.5, -1.2, 5), (0.6, -1.25, -8),
-             (-0.3, 1.25, 180), (0.7, 1.2, 170)]
-    for i, (x, y, r) in enumerate(seats):
-        FG.person(f'P{i}', i, people, people_pose if i % 3 else 'lean', (x, y, 0), r)
+    # around the table, each turned to the map give or take a few degrees (fronts
+    # face −Y, so the turn toward a point is atan2(dx, −dy))
+    seats = [(-1.7, 0.2, -6), (-1.6, -0.5, 4), (1.7, -0.1, 5), (1.6, 0.55, -4), (-0.5, -1.2, 3), (0.6, -1.25, -5),
+             (-0.3, 1.25, 6), (0.7, 1.2, -3)]
+    for i, (x, y, jitter) in enumerate(seats):
+        rot = math.degrees(math.atan2(-x, y)) + jitter
+        FG.person(f'P{i}', i, people, people_pose if i % 3 else 'lean', (x, y, 0), rot)
     drum = F.mat('Drum', '#7a2e1e', 0.6, 0.3)
     for i in range(4):
         F.obj('Drum', C.cyl(0.3, 0.3, 0.9, n=16), drum, (-5.2 + i * 0.68, 4.3, 0.45))
@@ -458,22 +461,71 @@ def selection(ctx):
     F.keys(aim, 'location', [(0, Vector((-0.8, 0, 1.33))), (ctx.duration, Vector((-1.0, 0, 1.33)))])
 
 
-def spaceport(ctx, relit=False):
-    """The launch field (shared with the stay ending's `fleet`)."""
+def gantry(ctx, swing=None, at=(14.0, 2.0), height=34.0):
+    """The launch gantry beside the pad: a braced lattice tower on a concrete plinth,
+    a red top deck with floodlights and a slow red beacon, and a service arm that
+    reaches for the ship and swings back over `swing` = (t0, t1) s (back already if None)."""
+    x0, y0 = at
+    w, base = 1.7, 1.0
+    steel = F.mat('GantrySteel', '#62666c', 0.5, 0.75)
+    red = F.mat('GantryRed', '#8a3a28', 0.6, 0.3)
+    F.obj('Plinth', C.box(2 * w + 2.4, 2 * w + 2.4, base), concrete('Plinth', '#5a5854', 0.4), (x0, y0, base / 2))
+    corners = [(x0 - w, y0 - w), (x0 + w, y0 - w), (x0 + w, y0 + w), (x0 - w, y0 + w)]
+    b = C.Builder(vcol=False)
+    for cx, cy in corners:
+        b.add(C.place(C.box(0.34, 0.34, height), (cx, cy, base + height / 2)), smooth=None)
+    levels = 11
+    for i in range(levels + 1):
+        z = base + i * height / levels
+        z1 = base + (i + 1) * height / levels
+        for j in range(4):
+            (ax, ay), (bx, by) = corners[j], corners[(j + 1) % 4]
+            b.add(C.along(C.box(0.18, 0.18, C.length((ax, ay, z), (bx, by, z))), (ax, ay, z), (bx, by, z)), smooth=None)
+            if i < levels:   # X-bracing on every face of every level
+                for u, v in (((ax, ay, z), (bx, by, z1)), ((bx, by, z), (ax, ay, z1))):
+                    b.add(C.along(C.cyl(0.05, 0.05, C.length(u, v), n=6), u, v), smooth=None)
+    b.object('Gantry', [steel])
+    top = base + height
+    F.obj('Deck', C.box(2 * w + 1.0, 2 * w + 1.0, 0.3), red, (x0, y0, top + 0.15))
+    for dx, dy, sx, sy in ((0, -w - 0.5, 2 * w + 1.0, 0.06), (0, w + 0.5, 2 * w + 1.0, 0.06),
+                           (-w - 0.5, 0, 0.06, 2 * w + 1.0), (w + 0.5, 0, 0.06, 2 * w + 1.0)):
+        F.obj('Rail', C.box(sx, sy, 0.06), steel, (x0 + dx, y0 + dy, top + 1.1))
+    F.obj('Mast', C.cyl(0.09, 0.05, 7.0, n=8), steel, (x0 + 1.0, y0 + 1.0, top + 3.8))
+    beacon = F.emit('Beacon', '#ff3020', 0.0)
+    F.obj('Beacon', C.sphere(0.22, 10, 8), beacon, (x0 + 1.0, y0 + 1.0, top + 7.4))
+    for s in range(int(ctx.duration) + 1):   # one second on, one off
+        F.key(F.strength_socket(beacon), 'default_value', float(s), 8.0 if s % 2 == 0 else 0.4, interp='CONSTANT')
+    flood = F.emit('Flood', '#fff2d8', 8.0)
+    for dy in (-1.1, 1.1):
+        F.obj('Flood', C.box(0.3, 0.55, 0.4), flood, (x0 - w - 0.3, y0 + dy, top + 0.6))
+    # the service arm: a truss from the tower's pad side toward the ship, hinged at the tower
+    pivot = C.link(bpy.data.objects.new('ArmPivot', None))
+    pivot.location = (x0 - w, y0, 5.0)
+    arm, reach = C.Builder(vcol=False), 8.5
+    for dy in (-0.35, 0.35):
+        for dz in (-0.35, 0.35):
+            arm.add(C.place(C.box(reach, 0.12, 0.12), (-reach / 2, dy, dz)), smooth=None)
+    for i in range(10):
+        xx = -0.4 - i * (reach - 0.8) / 9
+        for u, v in (((xx, -0.35, -0.35), (xx, 0.35, 0.35)), ((xx, 0.35, -0.35), (xx, -0.35, 0.35))):
+            arm.add(C.along(C.cyl(0.04, 0.04, C.length(u, v), n=6), u, v), smooth=None)
+    arm.object('ServiceArm', [red]).parent = pivot
+    back = math.radians(-75)   # swung toward +Y, behind the tower and out of the ship's way
+    if swing is None:
+        pivot.rotation_euler = (0, 0, back)
+    else:
+        F.keys(pivot, 'rotation_euler', [(swing[0], Vector((0, 0, 0))), (swing[1], Vector((0, 0, back)))])
+
+
+def spaceport(ctx, relit=False, swing=None):
+    """The launch field (shared with `capsule` and the stay ending's `fleet`); `swing`
+    times the gantry's service arm (see `gantry`)."""
     stops = [(0.0, '#2a2420'), (0.5, '#ffb070'), (0.55, '#c07060'), (0.7, '#6a6a80'), (1.0, '#3a4458')]
     sky_gradient(stops, 1.0 if relit else 0.8)
     F.sun((-0.6, 1.0, -0.25), 2.2, '#ffc890')
     F.plane('Field', 600, 600, concrete('Pad', '#3c3a36', 0.05), (0, 100, 0))
     F.obj('PadRing', C.lathe([(9.0, 0.01), (10.0, 0.01)], n=48), F.mat('Hazard', '#c8a020', 0.6), (0, 0, 0))
-    steel = F.mat('Steel', '#4a4e54', 0.5, 0.7)
-    tower = []
-    for k in range(10):
-        z = k * 3.2
-        for dx, dy in ((-1.2, -1.2), (1.2, -1.2), (1.2, 1.2), (-1.2, 1.2)):
-            tower.append((0.2, 0.2, 3.2, (14 + dx, 2 + dy, z + 1.6), (0, 0, 0), (1, 1, 1, 1)))
-        tower.append((2.6, 0.15, 0.15, (14, 0.8, z + 3.1), (0, 0, 0), (1, 1, 1, 1)))
-        tower.append((0.15, 2.6, 0.15, (15.2, 2, z + 3.1), (0, 0, 0), (1, 1, 1, 1)))
-    boxes('Tower', tower, steel)
+    gantry(ctx, swing)
     ruins = []
     for i in range(70):
         x = ctx.rng.uniform(-400, 400)
@@ -495,7 +547,7 @@ def tug(ctx, loc, rot=(0, 0, 0), scale=2.5, engines=None):
 
 
 def liftoff(ctx):
-    spaceport(ctx)
+    spaceport(ctx, swing=(0.15, 0.9))   # the arm clears just as the engines light
     ship = tug(ctx, (0, 0, 2.5), (0, 0, 0), 6.0)
     F.keys(ship, 'location', [(0.8, Vector((0, 0, 2.5))), (ctx.duration, Vector((0, 8, 48)))])
     F.keys(ship, 'rotation_euler', [(0.8, Vector((0, 0, 0))), (ctx.duration, Vector((math.radians(14), 0, 0)))])

@@ -27,6 +27,7 @@ import shots_interludes as I  # noqa: E402
 import shots_prologue as P  # noqa: E402
 
 S = F.Shot
+GROVE = (X.eden_grove, X.broadleaf, X.conifer, X.bush, X.tufts, X._tone, X._leaves, P.sky_gradient, P.concrete)
 
 FILMS = [
     F.Film('prologue', [
@@ -37,7 +38,7 @@ FILMS = [
         S('stranded', 35, 45, 42, P.stranded, deps=(FG, P.concrete, P.boxes, P.eye_mat)),
         S('shelter', 45, 54, 50, P.shelter, samples=32, deps=(FG, P.shelter_room, P.concrete)),
         S('selection', 54, 62, 60, P.selection, deps=(P.selection_wall, P.stamp)),
-        S('liftoff', 62, 69, 66, P.liftoff, deps=(P.spaceport, P.tug, P.sky_gradient, P.concrete, P.boxes)),
+        S('liftoff', 62, 69, 66, P.liftoff, deps=(P.spaceport, P.gantry, P.tug, P.sky_gradient, P.concrete, P.boxes)),
         S('relay', 69, 72, 70, P.relay, deps=(E, P.tug)),
     ], flashes=(26.25,)),
     F.Film('departure', [
@@ -45,7 +46,7 @@ FILMS = [
         S('jump', 4, 7, 4.5, P.jump, deps=(P.tug,)),
     ], flashes=(6.25,)),
     F.Film('interlude_c1', [
-        S('capsule', 0, 5, 3, I.capsule, deps=(P.spaceport, P.sky_gradient, P.concrete, P.boxes)),
+        S('capsule', 0, 5, 3, I.capsule, deps=(P.spaceport, P.gantry, P.sky_gradient, P.concrete, P.boxes)),
         S('shelter_light', 5, 10, 8.5, I.shelter_light, samples=32, deps=(FG, P.shelter_room, P.concrete)),
         S('earth_c1', 10, 14, 12.5, I.earth_c1, deps=(E, I.earth_relit)),
     ]),
@@ -69,14 +70,14 @@ FILMS = [
         S('cockpit', 12, 16, 14.5, I.cockpit, deps=(E, I.static_band)),
     ]),
     F.Film('ending_stay', [
-        S('uplink', 0, 6, 3, X.uplink, deps=(X.eden_grove, P.sky_gradient, P.concrete)),
-        S('fleet', 6, 14, 11, X.fleet, deps=(FG, P.spaceport, P.tug, P.sky_gradient, P.concrete, P.boxes)),
+        S('uplink', 0, 6, 3, X.uplink, deps=GROVE),
+        S('fleet', 6, 14, 11, X.fleet, deps=(FG, P.spaceport, P.gantry, P.tug, P.sky_gradient, P.concrete, P.boxes)),
         S('earth_full', 14, 21, 18, X.earth_full, deps=(E,)),
         S('wall_63', 21, 30, 28, X.wall_63, deps=(P.selection_wall, P.stamp)),
         S('earth_again', 30, 36, 32, X.earth_again, deps=(E, P.earth_night, P.satellite)),
     ]),
     F.Film('ending_escape', [
-        S('exit', 0, 6, 3, X.exit_door, deps=(X.eden_grove, P.sky_gradient, P.concrete)),
+        S('exit', 0, 6, 3, X.exit_door, deps=GROVE),
         S('eden_unmade', 6, 14, 11, X.eden_unmade, deps=(E,)),
         S('earth_unmade', 14, 22, 18, X.earth_unmade, deps=(FG, X.clay)),
         S('wall_same', 22, 29, 26, X.wall_same, deps=(P.selection_wall,)),

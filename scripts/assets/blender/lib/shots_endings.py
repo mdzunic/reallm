@@ -3,9 +3,10 @@
 # prologue's first shot again; the escape film unmakes the world it shows into
 # clay, UV grids, wireframes and one bust on every card. Times are shot-local.
 import math
+import random
 
 import bpy
-from mathutils import Vector
+from mathutils import Vector, noise
 
 import common as C
 import earth as E
@@ -18,19 +19,101 @@ def clay(name='Clay', color='#9a9a96'):
     return F.mat(name, color, 0.85)
 
 
+def _tone(base, top, ground=0.7, height=1.0):
+    """A vertex-colour function: `base` on faces turned down, `top` on faces turned
+    up, darker toward the ground (the props' shading, SPEC-018 §4.7)."""
+    lb, lt = C.lin(base), C.lin(top)
+
+    def fn(co, n):
+        t = min(max(0.5 + 0.5 * n.z, 0.0), 1.0)
+        k = ground + (1 - ground) * min(max(co.z / height, 0.0), 1.0)
+        return tuple((a + (b - a) * t) * k for a, b in zip(lb[:3], lt[:3])) + (1.0,)
+    return fn
+
+
+def _leaves(rng):
+    return rng.choice((('#2f5a28', '#6f9a3e'), ('#3a6a2c', '#86b04a'), ('#2a4e2e', '#5f8f48'), ('#4a6a26', '#9ab04a')))
+
+
+def broadleaf(b, rng, x, y):
+    """A tree of five to seven displaced leaf clumps on a tapered, noisy trunk with a limb to each."""
+    h = rng.uniform(6.0, 10.0)
+    s = h / 8.0
+    bark = _tone('#3e2c1e', '#6a4c34', 0.6, h)
+    trunk = C.lathe([(0.36 * s, 0.0), (0.24 * s, 0.5 * s), (0.18 * s, 0.55 * h), (0.11 * s, 0.82 * h), (0.0, 0.86 * h)], n=9)
+    C.displace(trunk, lambda co: 0.04 * s * noise.noise(co * 1.7 + Vector((x, y, 0))))
+    b.add(C.place(trunk, (x, y, 0), (0, 0, rng.uniform(0, 360))), color=bark, smooth=60)
+    leaves = _tone(*_leaves(rng), 0.75, h)
+    for i in range(rng.randint(5, 7)):
+        a, d = rng.uniform(0, 2 * math.pi), (rng.uniform(0.08, 0.3) * h if i else 0.0)
+        c = Vector((x + d * math.cos(a), y + d * math.sin(a), rng.uniform(0.68, 0.9) * h))
+        r = rng.uniform(0.2, 0.3) * h
+        blob = C.ico(r, 2)
+        C.displace(blob, lambda co: 0.16 * r * noise.noise(co * (1.4 / s) + c))
+        b.add(C.place(blob, tuple(c), (0, 0, 0), (1, 1, 0.8)), color=leaves, smooth=None)
+        if i:
+            p, q = (x, y, 0.5 * h), (0.7 * c.x + 0.3 * x, 0.7 * c.y + 0.3 * y, c.z - 0.3 * r)
+            b.add(C.along(C.cyl(0.09 * s, 0.05 * s, C.length(p, q), n=6), p, q), color=bark, smooth=60)
+
+
+def conifer(b, rng, x, y):
+    """Four or five displaced cone tiers on a thin trunk."""
+    h = rng.uniform(8.0, 13.0)
+    s = h / 10.0
+    b.add(C.place(C.cyl(0.22 * s, 0.08 * s, 0.9 * h, n=8), (x, y, 0.45 * h)), color=_tone('#3a2a1e', '#5a402c', 0.6, h), smooth=60)
+    greens = _tone(*rng.choice((('#1f3f2a', '#3f6a3a'), ('#24442c', '#4a7040'))), 0.7, h)
+    tiers = rng.randint(4, 5)
+    for i in range(tiers):
+        r = (0.42 - 0.3 * i / tiers) * h * 0.5
+        cone = C.lathe([(r, 0.0), (0.45 * r, 0.35 * h / tiers + 0.25 * s), (0.0, 0.62 * h / tiers + 0.6 * s)], n=14, cap_bottom=True)
+        C.displace(cone, lambda co: 0.08 * r * noise.noise(co * 2.0 + Vector((x, y, i))))
+        b.add(C.place(cone, (x, y, h * (0.18 + 0.72 * i / tiers)), (0, 0, rng.uniform(0, 360))), color=greens, smooth=None)
+
+
+def bush(b, rng, x, y):
+    tone = _tone(*_leaves(rng), 0.6, 1.5)
+    for _ in range(rng.randint(2, 3)):
+        r = rng.uniform(0.45, 0.9)
+        c = Vector((x + rng.uniform(-0.6, 0.6), y + rng.uniform(-0.6, 0.6), 0.55 * r))
+        blob = C.ico(r, 2)
+        C.displace(blob, lambda co: 0.15 * r * noise.noise(co * 2.5 + c))
+        b.add(C.place(blob, tuple(c), (0, 0, 0), (1, 1, 0.7)), color=tone, smooth=None)
+
+
+def tufts(b, rng, n, area):
+    """Grass near the camera: clumps of five thin blades."""
+    (x0, x1), (y0, y1) = area
+    tone = _tone('#3a5a24', '#7a9a44', 0.5, 0.5)
+    for _ in range(n):
+        x, y = rng.uniform(x0, x1), rng.uniform(y0, y1)
+        for _ in range(5):
+            h = rng.uniform(0.18, 0.4)
+            blade = C.place(C.cyl(0.012, 0.0, h, n=3), (0, 0, h / 2))
+            C.place(blade, (0, 0, 0), (rng.uniform(-18, 18), rng.uniform(-18, 18), rng.uniform(0, 120)))
+            b.add(C.place(blade, (x + rng.uniform(-0.12, 0.12), y + rng.uniform(-0.12, 0.12), 0)), color=tone, smooth=None)
+
+
 def eden_grove(ctx, beam_color='#9fe3ff'):
-    """Eden at dusk: a meadow, a grove, the survey beacon and its beam."""
+    """Eden at dusk: a meadow, a mixed grove of broadleaf trees, conifers and bushes
+    (the same in both endings), grass near the camera, the survey beacon and its beam."""
     P.sky_gradient([(0.0, '#1a2418'), (0.5, '#e8b090'), (0.56, '#9a8ab0'), (0.72, '#3a4a78'), (1.0, '#101a34')], 0.9)
     F.sun((-0.7, 0.9, -0.2), 1.6, '#ffc8a0')
     F.plane('Meadow', 400, 400, P.concrete('Meadow', '#3a5a2a', 0.08, 0.95), (0, 100, 0))
-    trunk, leaf = F.mat('Trunk', '#4a3424', 0.9), F.mat('Leaf', '#3d6a35', 0.8)
-    for _ in range(70):
-        x, y = ctx.rng.uniform(-60, 60), ctx.rng.uniform(15, 160)
-        if abs(x) < 9 and y < 45:
-            continue
-        h = ctx.rng.uniform(4, 9)
-        F.obj('Trunk', C.cyl(0.18, 0.12, h * 0.5, n=6), trunk, (x, y, h * 0.25))
-        F.obj('Canopy', C.ico(h * 0.28, 1), leaf, (x, y, h * 0.62), scale=(1, 1, 1.25))
+    rng, b, placed = random.Random('eden-grove'), C.Builder(), []
+    for _ in range(3000):
+        if len(placed) == 75:
+            break
+        x, y = rng.uniform(-70, 70), rng.uniform(15, 170)
+        if (abs(x) < 10 and y < 48) or any(math.hypot(x - px, y - py) < 5.5 for px, py in placed):
+            continue   # the clearing round the beacon, and room between crowns
+        placed.append((x, y))
+        (conifer if rng.random() < 0.3 else broadleaf)(b, rng, x, y)
+    for _ in range(45):
+        x, y = rng.uniform(-40, 40), rng.uniform(10, 90)
+        if not (abs(x) < 7 and y < 40):
+            bush(b, rng, x, y)
+    tufts(b, rng, 260, ((-22, 12), (-4, 30)))
+    b.object('Grove', [C.mat_vcol('Grove', rough=0.85)])
     steel = F.mat('BeaconSteel', '#b8c0c8', 0.35, 0.8)
     F.obj('Mast', C.cyl(0.25, 0.15, 7.0, n=12), steel, (0, 30, 3.5))
     F.obj('Dish', C.lathe([(0.0, 0.0), (1.2, 0.35), (1.4, 0.55)], n=24), steel, (0, 30, 7.0))

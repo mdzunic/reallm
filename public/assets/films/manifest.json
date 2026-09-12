@@ -7,7 +7,7 @@
     "prologue": {
       "file": "films/prologue.mp4",
       "frames": 1728,
-      "bytes": 2658467,
+      "bytes": 2725287,
       "crf": 26,
       "shots": [
         {
@@ -50,7 +50,7 @@
           "start": 1080,
           "end": 1296,
           "poster": "films/posters/prologue_shelter.webp",
-          "posterBytes": 9410
+          "posterBytes": 10014
         },
         {
           "id": "selection",
@@ -64,7 +64,7 @@
           "start": 1488,
           "end": 1656,
           "poster": "films/posters/prologue_liftoff.webp",
-          "posterBytes": 7916
+          "posterBytes": 11070
         },
         {
           "id": "relay",
@@ -100,7 +100,7 @@
     "interlude_c1": {
       "file": "films/interlude_c1.mp4",
       "frames": 336,
-      "bytes": 324310,
+      "bytes": 326604,
       "crf": 26,
       "shots": [
         {
@@ -115,7 +115,7 @@
           "start": 120,
           "end": 240,
           "poster": "films/posters/interlude_c1_shelter_light.webp",
-          "posterBytes": 15348
+          "posterBytes": 15186
         },
         {
           "id": "earth_c1",
@@ -129,7 +129,7 @@
     "interlude_c2": {
       "file": "films/interlude_c2.mp4",
       "frames": 336,
-      "bytes": 329254,
+      "bytes": 352311,
       "crf": 26,
       "shots": [
         {
@@ -144,7 +144,7 @@
           "start": 120,
           "end": 240,
           "poster": "films/posters/interlude_c2_tap.webp",
-          "posterBytes": 12136
+          "posterBytes": 14438
         },
         {
           "id": "earth_c2",
@@ -238,7 +238,7 @@
     "ending_stay": {
       "file": "films/ending_stay.mp4",
       "frames": 864,
-      "bytes": 1221308,
+      "bytes": 1301957,
       "crf": 26,
       "shots": [
         {
@@ -246,14 +246,14 @@
           "start": 0,
           "end": 144,
           "poster": "films/posters/ending_stay_uplink.webp",
-          "posterBytes": 7868
+          "posterBytes": 12054
         },
         {
           "id": "fleet",
           "start": 144,
           "end": 336,
           "poster": "films/posters/ending_stay_fleet.webp",
-          "posterBytes": 10224
+          "posterBytes": 12114
         },
         {
           "id": "earth_full",
@@ -281,7 +281,7 @@
     "ending_escape": {
       "file": "films/ending_escape.mp4",
       "frames": 864,
-      "bytes": 1058224,
+      "bytes": 1087385,
       "crf": 26,
       "shots": [
         {
@@ -289,7 +289,7 @@
           "start": 0,
           "end": 144,
           "poster": "films/posters/ending_escape_exit.webp",
-          "posterBytes": 6994
+          "posterBytes": 10390
         },
         {
           "id": "eden_unmade",

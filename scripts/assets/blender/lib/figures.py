@@ -6,6 +6,7 @@
 import math
 import random
 
+import bmesh
 from mathutils import Vector
 
 import common as C
@@ -108,21 +109,37 @@ def person(name, variant, material, pose='stand', loc=(0, 0, 0), rot=0.0):
     b.add(C.place(C.box(2 * hp * k, 0.2 * k, 0.2 * k, 0.03), S((0, 0, 0.96))), color=coat)
     b.add(C.place(C.cyl(hp * k, sh * k, 0.5 * k, n=10), S((0, 0, 1.3)), scale=(1, 0.62, 1)), color=coat)
     b.add(C.place(C.cyl(0.05 * k, 0.05 * k, 0.1 * k, n=8), S((0, 0, 1.58))), color=skin)
-    tilt = 25 if pose == 'look_up' else (-12 if lean else 0)
+    # a positive turn about X tips the face (−Y) down: leaning looks down, look_up up
+    tilt = -25 if pose == 'look_up' else (12 if lean else 0)
     head_at = Vector(S((0, 0, 1.68)))
-    b.add(C.place(C.sphere(0.105 * k, 12, 8), head_at, (tilt, 0, 0), (0.92, 1.0, 1.1)), color=skin, smooth=70)
-    hr = 0.112 * k
+
+    def head(part, at=(0.0, 0.0, 0.0), rot=(0, 0, 0), scale=(1, 1, 1), color=skin, smooth=35.0):
+        """Add a part given in head space (front −Y, metres before `k`), tilted with the head."""
+        C.place(part, tuple(v * k for v in at), rot, scale)
+        b.add(C.place(part, head_at, (tilt, 0, 0)), color=color, smooth=smooth)
+
+    head(C.sphere(0.105 * k, 16, 12), scale=(0.92, 1.0, 1.1), smooth=70)
+    # a simple face in the low-poly style: eyes, brows, nose, mouth and ears
+    for s in (-1, 1):
+        head(C.sphere(0.013 * k, 8, 6), (0.034 * s, -0.093, 0.016), scale=(1.0, 0.55, 0.75), color=C.lin('#1b1512'), smooth=70)
+        head(C.box(0.034 * k, 0.012 * k, 0.009 * k), (0.036 * s, -0.088, 0.043), rot=(0, 8 * s, 0), color=hair)
+        head(C.sphere(0.024 * k, 8, 6), (0.094 * s, 0.006, 0.0), scale=(0.45, 0.8, 1.15), smooth=70)
+    head(C.box(0.02 * k, 0.024 * k, 0.036 * k), (0.0, -0.106, -0.004), rot=(-12, 0, 0),
+         color=tuple(c * 0.86 for c in skin[:3]) + (1,))
+    head(C.box(0.034 * k, 0.008 * k, 0.007 * k), (0.0, -0.094, -0.046), color=C.lin('#6a3028'))
+    # hair, or a cap, over the crown and the back: open over the face below the fringe
+    cover = C.lin('#4a4a3a') if style == 'cap' else hair
+    shell = C.sphere(0.112 * k, 16, 10)
+    C.place(shell, (0, 0.008 * k, 0.012 * k), (0, 0, 0), (1.0, 1.02, 0.8 if style == 'cap' else 0.92))
+    face = [f for f in shell.faces if f.calc_center_median().y < 0.035 * k and f.calc_center_median().z < 0.056 * k]
+    bmesh.ops.delete(shell, geom=face, context='FACES')
+    b.add(C.place(shell, head_at, (tilt, 0, 0)), color=cover, smooth=70)
     if style == 'cap':
-        b.add(C.place(C.sphere(hr, 12, 6), head_at + Vector((0, 0.01, 0.03 * k)), (tilt, 0, 0), (1, 1.05, 0.7)), color=C.lin('#4a4a3a'), smooth=70)
-        b.add(C.place(C.box(0.16 * k, 0.1 * k, 0.015 * k), head_at + Vector((0, -0.1 * k, 0.06 * k)), (tilt, 0, 0)), color=C.lin('#4a4a3a'))
-    else:
-        top = C.sphere(hr, 12, 8)
-        C.place(top, (0, 0.012 * k, 0.025 * k), (0, 0, 0), (1.0, 1.02, 0.85))
-        b.add(C.place(top, head_at, (tilt, 0, 0)), color=hair, smooth=70)
-        if style == 'long':
-            b.add(C.place(C.box(0.2 * k, 0.1 * k, 0.26 * k, 0.03), head_at + Vector((0, 0.06 * k, -0.1 * k))), color=hair)
-        elif style in ('tied', 'bun'):
-            b.add(C.place(C.sphere(0.05 * k, 8, 6), head_at + Vector((0, 0.11 * k, 0.03 * k if style == 'bun' else -0.06 * k))), color=hair)
+        head(C.box(0.16 * k, 0.1 * k, 0.015 * k), (0.0, -0.1, 0.058), color=cover)
+    elif style == 'long':
+        b.add(C.place(C.box(0.2 * k, 0.1 * k, 0.26 * k, 0.03), head_at + Vector((0, 0.06 * k, -0.1 * k))), color=hair)
+    elif style in ('tied', 'bun'):
+        b.add(C.place(C.sphere(0.05 * k, 8, 6), head_at + Vector((0, 0.11 * k, 0.03 * k if style == 'bun' else -0.06 * k))), color=hair)
     for s in (-1, 1):
         shoulder = Vector(S((sh * s, 0, 1.5)))
         if lean:

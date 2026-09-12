@@ -152,7 +152,7 @@ def tap(ctx):
     people = C.mat_vcol('People', rough=0.85)
     for k in range(5):
         x = -0.3 - 0.58 * k
-        FG.person(f'Q{k}', k + 3, people, 'hold', (x, -0.02, 0), -90)
+        FG.person(f'Q{k}', k + 3, people, 'hold', (x, -0.02, 0), 90)   # facing +X, the tap (fronts face −Y)
         F.obj('Cup', C.lathe(shape, n=16, cap_bottom=True), cup, (0.0, 0.0, 0.95) if k == 0 else (x + 0.38, -0.02, 1.0))
     cam, aim = F.camera((0.55, -1.5, 1.35), (-0.6, 0.0, 1.15), lens=30)
     F.keys(cam, 'location', [(0, Vector((0.55, -1.5, 1.35))), (ctx.duration, Vector((0.45, -1.3, 1.33)))])
