@@ -66,6 +66,26 @@ After R8: models 2.6 MB of 4, textures 4.4 MB of 6, everything precached 10.1 MB
 
 A feasibility render on the dev box (Blender 5.2.1, EEVEE, headless) drew 48 frames of a lit city block at 960 × 540 in 9 s and encoded them through the sequencer to H.264 at CRF 26 and 29 (69 and 40 KB/s on a 2 s clip with a keyframe every second), VP9 and AV1. Specs: SPEC-021 (script, renders, sound), SPEC-022 (film player, prologue), SPEC-023 (departures, chapter cards, interludes, boss reveals), SPEC-024 (the ending sequence); SPEC-001 §10 (the `films/` folder and budget); SPEC-015 §9, §10 (reduce motion, precache glob); SPEC-000 (queue and build order). (§1, §2, §3, §4, §5, §9, §10, §11, §12, §13)
 
+**R10 — 2026-09-12 (playability pass: map, loadout, guidance, shelters).** The first long playtest of the built game found four problems on the surface, and none of them is content:
+
+- *The map is barely usable.* Every point of interest — the landing pad included — is the same 4 px grey square on a 96 px canvas. The minimap is north-up in world axes while the camera looks down at a fixed 45° yaw (SPEC-012 §4.3), so walking up the screen moves the arrow diagonally. Nothing remembers where the player has been, and there is no larger view.
+- *The fight hides the inventory.* One box shows the first consumable in the pack; there is one weapon and nothing to switch to; explosives do not exist.
+- *Nothing says how an objective is finished.* The HUD prints one line with no distance or direction; a scan completes by standing 3 s in an unmarked ring; resource nodes are invisible without a radar; a player who wanders for minutes gets no help.
+- *The arena is a plain.* Scattered rocks, nowhere to hide from a storm or a swarm, and an edge that stops the player 6 m short of the berm, like an invisible wall.
+
+Missions, rewards, the token totals (670 / 104), the story, the films and the flight do not change. Decisions:
+
+1. **Map (SPEC-026).** Both maps are drawn in camera orientation: map-up is screen-up, and "north" means up the screen everywhere the game says it. Every kind of point has its own shape and colour — the pad, each POI kind, the four resource nodes, shelters, enemies, elites, bosses, objectives — listed in a legend. Explored ground is remembered per planet (4 m cells revealed within 24 m of the player, kept in the save) and drawn in terrain colours; unexplored ground is dark. The minimap is round and larger (≈ 24 vmin) and opens full-screen with `M` or a tap; the full map holds the simulation like the pause menu and lists the active missions. Cycling the tracked mission moves from the map key to `T` (and a tap on the tracker).
+2. **Guidance (SPEC-027).** An objective tracker lists every objective of the tracked stage with its progress and the distance to it; a waypoint marker sits over the current target and becomes an edge arrow off screen; a light pillar stands on target POIs; scans show their progress. First-time tips (moving, the map, scanning, harvesting, delivering, storms, bosses) show once per device. When the player makes neither progress nor headway outside combat, help escalates: at 45 s the marker pulses, at 90 s ARIA gives the direction and distance, at 150 s a route of ground markers leads the way. A guidance setting (full / minimal / off) turns it down. Briefs and lines that name a compass bearing for a procedurally placed POI are reworded. No rule is relaxed: a scan still takes 3 s, and nothing completes by itself.
+3. **Loadout (SPEC-025, SPEC-028).** Three weapon slots — sidearm, primary, heavy — and three consumable quick slots — heal (`Q`), explosive (`G`), utility (`C`) — sit on a quick bar at the bottom of the HUD that shows what each slot holds, how many, and every cooldown. `1` / `2` / `3`, `R` or the mouse wheel switch weapons (0.25 s); on touch the quick bar is tappable and a SWAP button cycles. An empty quick slot refills from the pack; a heal at full HP is refused without spending the item. Every class now lands with a Service Pistol beside its rifle. The save moves to **version 2** (SPEC-025): `equipped` becomes `{ armor, sidearm, primary, heavy }`, with `activeWeapon`, `quick` and `progress.explored`; v1 saves migrate, and the old weapon becomes the primary.
+4. **Arsenal (SPEC-029).** Weapons belong to lines: handguns (sidearm), rifles and machine guns (primary), launchers (heavy). Each line has a cooldown model — none (handguns, rifles), *heat* (a machine gun overheats and locks until it cools), *charges* (a launcher fires its one or three charges, then recharges) — and cooldowns run while a weapon is holstered, so fights are won by combining them: a rocket into the pack, the chaingun until it locks, the pistol while it cools. Auto-fire never fires the heavy slot, and on touch (setting `weaponAutoSwap`) a locked machine gun hands fire to the sidearm. Explosives are consumables in the explosive slot: frag grenades (thrown, ≤ 12 m), proximity mines (placed, at most six armed) and demolition charges (placed, 3 s fuse). They are crafted from oil plus water or lithium, and raiders and elites drop them now and then. Blasts hurt enemies only, never the player or the escort. New gear: Hand Cannon 50, Scrap Chaingun 50, Rotary Cannon 120 + 60 lithium, Rocket Launcher 60, Grenade Launcher 90; three new recipes (six in all).
+5. **Shelters and the arena wall (SPEC-030).** The layout places caves (one look per biome) and ship wrecks, each with walls and an entrance, debris cover around the wrecks, and rock outcrops — all outside the pad → POI corridors, with every shelter interior checked reachable. Inside a shelter the weather deals no damage and does not slow the player. Enemies outside lose track of a player hidden inside who stays out of their line of sight and holds fire (they acquire one only within 5 m); bosses and wave enemies ignore hiding. The arena edge becomes a continuous, collidable wall of the biome's rock and wrecked hulls, exactly where the player stops; shots and enemies stop there too. The layout hash pins change deliberately; the corridor (E17) and reachability guarantees extend to shelters.
+6. **Economy.** The recommended loadout of SPEC-010 §5 is unchanged, so every worst-case invariant holds as before. The new gear raises the token sink from 2,010 to **2,380** (gear 500 → 870); a completionist now affords ~52 % of everything (was ~62 %).
+7. **Input and settings.** New actions `weapon1`–`weapon3`, `weaponNext`, `weaponPrev`, `throwItem`, `useUtility` and `track`. `Digit1` leaves `useItem` (`Q` stays); `KeyT` tracks, `KeyR` cycles weapons, `KeyG` throws, `KeyC` uses the utility slot; the wheel cycles weapons on the surface and keeps the throttle in flight. New settings: `guidance`, `tipsSeen` (tips belong to the device, not the save) and `weaponAutoSwap`.
+8. **Milestone M7c** (playability) sits between M7b and M7 and ends with tag `m7c`. Its specs depend on nothing in SPEC-021…SPEC-024, so they may build before the film specs; SPEC-015 measures the budgets after them. The new HUD, shelters and wall stay inside the surface budget (≤ 80 scene + 16 post draws, ≤ 130 k triangles on medium).
+
+Specs: SPEC-025 (save v2), SPEC-026 (map), SPEC-027 (guidance), SPEC-028 (loadout and quick bar), SPEC-029 (arsenal), SPEC-030 (shelters and the arena wall); notes in SPEC-005 §3, SPEC-007 §3, SPEC-009 §4.2, SPEC-010 §5, SPEC-011 §4.3, SPEC-012 §4.12, SPEC-014 §4.5 and SPEC-018 §4.8 point to them; SPEC-000 (queue and build order). (§3, §4, §7, §8, §9, §10, §12, §13)
+
 ---
 
 ## 1. Vision & Inspiration
@@ -129,10 +149,12 @@ src/
   core/     Game.ts Loop.ts Renderer.ts Quality.ts PostChain.ts StateMachine.ts Input.ts KeyboardMouseDriver.ts Audio.ts Save.ts Settings.ts Events.ts Rng.ts Noise.ts HeightField.ts CharacterState.ts Assets.ts Disposer.ts Pool.ts SpatialHash.ts Benchmark.ts Log.ts
   scenes/   Boot Menu CharacterCreation Station StarMap Flight Surface Director
   systems/  Combat EnemyAi Projectiles Economy Progression Balance Weather Spawn Layout Missions Flight StoryBeats
-  entities/ Player Companion Enemy Projectile Pickup Ship Asteroid   (plain data + pools; no Three imports)
-  views/    PlayerView EnemyView ProjectileView ParticleView ...    (entity → mesh; Three lives here)
-  data/     ids.ts characters planets enemies items upgrades companions missions dialogue waves weather films
-  ui/       Hud TouchControls Minimap StarMapUI ShopUI DialogueUI FilmPlayer ChapterCard RevealOverlay Menus style.css
+            MapModel Exploration Guidance Loadout Shelter   (R10)
+  entities/ Player Companion Enemy Projectile Pickup Ship Asteroid Deployable   (plain data + pools; no Three imports)
+  views/    PlayerView EnemyView ProjectileView ParticleView ArenaWall ...    (entity → mesh; Three lives here)
+  data/     ids.ts characters planets enemies items upgrades companions missions dialogue waves weather films hints
+  ui/       Hud TouchControls Minimap MapScreen Tracker Waypoint AriaHint QuickBar QuickPicker StarMapUI ShopUI DialogueUI
+            FilmPlayer ChapterCard RevealOverlay Menus style.css
 tests/      unit tests mirror src/ (economy, save, combat, missions, rng, content, campaign)
 ```
 
@@ -156,7 +178,7 @@ tests/      unit tests mirror src/ (economy, save, combat, missions, rng, conten
   - lithium = energy weapons + reactor (tier-3 upgrades)
 - **Tokens** earned by leveling up (25 per level; XP from kills, missions) and by mission rewards. Tokens buy **assistants**, **upgrades**, and **gear**; **tier-3** upgrades also consume resources so resource sinks exist late-game.
 - **Cargo cap** per resource: 400 base, ship cargo tiers → 600 / 800 / 1200. Pickups stop at the cap with a HUD warning.
-- **Crafting** at the station (3 recipes): wheat ration (10 wheat), medkit (10 wheat + 10 water), coolant pack (15 water).
+- **Crafting** at the station (6 recipes): wheat ration (10 wheat), medkit (10 wheat + 10 water), coolant pack (15 water), and since R10 frag grenade (10 oil + 5 water), proximity mine (20 oil), demolition charge (15 oil + 10 lithium).
 
 ### Assistants (companions)
 
@@ -173,17 +195,24 @@ Purchasable, upgradable followers (levels 1–3) that persist across scenes; eac
 ### Upgrades
 
 - **Ship**: engine, hull, shield, cargo hold, lasers — tiers 0 → 3, used in the flight scene (cargo/engine also affect economy).
-- **Gear**: weapon tiers (kinetic → laser → plasma → lithium-edged) and armor tiers (scrap → composite → reactive → ablative). Tiers 1–2 cost tokens; tier 3 costs tokens + lithium.
+- **Gear**: weapon tiers (kinetic → laser → plasma → lithium-edged) and armor tiers (scrap → composite → reactive → ablative). Tiers 1–2 cost tokens; tier 3 costs tokens + lithium. Since R10 weapons come in lines that fill three slots: handguns (sidearm — the free Service Pistol every class carries, the Hand Cannon), rifles (primary — the ladder above), machine guns (primary — Scrap Chaingun, Rotary Cannon) and launchers (heavy — Rocket Launcher, Grenade Launcher).
 
 ### Combat
 
 - **Ground**: real-time ARPG — move/aim, attack, enemy AI (melee rushers, ranged spitters, swarm bugs, static targets), loot drops, elites (5 %, ×3 HP) + planet boss with phases.
 - **Space**: arcade first-person **rail** flight — constant forward motion, lateral steering, laser fire, asteroid dodging, enemy ship waves, shield/hull damage. Fuel is charged **per jump, up front**; the return trip is instant autopilot.
 - **Death**: surface → respawn at the landing pad, lose 10 % of carried resources (normal difficulty), timed stages restart, enemies near the pad despawn, boss resets. Flight → emergency recall to the station, fuel is lost, cargo is kept.
+- **Loadout (R10)**: three weapon slots — sidearm, primary, heavy — switched with 1 / 2 / 3, R or the wheel, or a tap on the quick bar (0.25 s to switch). Handguns and rifles fire freely; machine guns heat up and lock until they cool; launchers hold one or three charges and recharge. Cooldowns run while a weapon is holstered, so fights are won by combining them. Auto-fire never fires the heavy slot; on touch a locked machine gun hands fire to the sidearm. Three quick slots on the HUD — heal (Q), explosive (G), utility (C) — show what they hold and how many. Explosives are consumables: frag grenades (thrown), proximity mines and demolition charges (placed). Blasts never hurt the player.
 
 ### Weather system
 
-Per-planet cycles (sandstorm / heatwave / blizzard / avalanche / spore storm / radiation storm) affecting visibility, movement, and damage — telegraphed via HUD warnings (10 s). Missions can force a storm. Boss arenas suppress weather.
+Per-planet cycles (sandstorm / heatwave / blizzard / avalanche / spore storm / radiation storm) affecting visibility, movement, and damage — telegraphed via HUD warnings (10 s). Missions can force a storm. Boss arenas suppress weather. Since R10, caves and wrecks (shelters) keep the weather off a player inside: no damage, no slow-down.
+
+### Map, guidance and shelters (R10)
+
+- **Map**: a round minimap (≈ 24 vmin) and a full-screen map (`M` or a tap), both in camera orientation — up the screen is north — with one shape and colour per kind of point and a legend. Explored ground is remembered per planet and drawn in terrain colours, the rest dark. The full map holds the game and lists the active missions.
+- **Guidance**: an objective tracker (every objective of the tracked stage, its progress and distance), a waypoint marker and edge arrow, a light pillar on target POIs, scan progress, first-time tips, and hints that escalate when the player makes no progress (45 s, 90 s, 150 s). Setting: full / minimal / off.
+- **Shelters and the wall**: caves and wrecks with an entrance. Inside, the weather does nothing, and enemies outside lose a player who hides and holds fire (bosses and waves excepted). The arena edge is a wall of rock and wrecked hulls where the player stops.
 
 ### Narrative layer
 
@@ -357,7 +386,7 @@ Beats: **stay** — the report is filed, Earth is saved, the loop closes ("a goo
 | Level-ups (25 each) | ~400 main-path (≈ L17) · ~475 completionist (≈ L20) |
 | **Total** | **~1,070 main-path · ~1,250 completionist** |
 
-Total sink ≈ **2,010** tokens (ship 1,095 · gear 500 · companions 415), so a completionist affords ~62 % of everything and specialization is forced. XP curve: `xpToNext(L) = 100 + 50·L` (11,400 XP to reach L20), level cap 30.
+Total sink ≈ **2,380** tokens since R10 (ship 1,095 · gear 870 · companions 415; 2,010 before the new weapon lines), so a completionist affords ~52 % of everything and specialization is forced. XP curve: `xpToNext(L) = 100 + 50·L` (11,400 XP to reach L20), level cap 30.
 
 Balance invariants (unit-tested, see [SPEC-010](https://github.com/mdzunic/reallm-specs/blob/main/specs/010-economy-and-progression.md)):
 
@@ -367,22 +396,27 @@ Balance invariants (unit-tested, see [SPEC-010](https://github.com/mdzunic/reall
 
 ---
 
-## 8. Save Schema (versioned, migratable) — refined in R1
+## 8. Save Schema (versioned, migratable) — refined in R1 and R10
 
 ```ts
-interface SaveV1 {
-  version: 1;
+interface SaveV2 {   // version 1 until R10; v1 saves migrate (SPEC-025)
+  version: 2;
   meta: { slot: 0|1|2; seed: number; createdAt: number; updatedAt: number; playtimeSec: number; difficulty: "casual"|"normal"; iteration: number /* 1 in v1; NG+ later */ };
   player: { name; classId; appearance: { portrait; primary; secondary }; attributes: { might; vigor; agility; tech }; level; xp; tokens; hp };
   resources: Record<ResourceId, number>;
   inventory: { itemId: ItemId; qty: number }[];
-  equipped: { weapon: ItemId; armor: ItemId };
+  equipped: { armor: ItemId; sidearm: ItemId; primary: ItemId; heavy: ItemId | null };   // R10: weapon slots
+  activeWeapon: "sidearm" | "primary" | "heavy";
+  quick: { heal: ItemId | null; explosive: ItemId | null; utility: ItemId | null };      // R10: quick slots
   ship: { engine: 0|1|2|3; hull: 0|1|2|3; shield: 0|1|2|3; cargo: 0|1|2|3; weapon: 0|1|2|3 };
   companions: { id: CompanionId; level: 1|2|3; enabled: boolean }[];
   progress: { missionsDone: MissionId[]; missionsActive: { id: MissionId; stage: number; counters: Record<string, number> }[];
-              flags: string[]; currentPlanet: PlanetId | null; location: "station" | "surface"; poisDiscovered: string[] };
+              flags: string[]; currentPlanet: PlanetId | null; location: "station" | "surface"; poisDiscovered: string[];
+              visits: Partial<Record<PlanetId, number>>; endingSeen: boolean;
+              explored: Partial<Record<PlanetId, string>> };   // R10: 4 m cells, base64url bitset per planet
 }
-// Settings are global (not per slot): { master, music, sfx, quality, reduceMotion, autoFire, joystickSide, flightMouseSteer, showFps, fullscreen, benchmark, lastSlot, persistGranted, installHintShownAt }
+// Settings are global (not per slot): { master, music, sfx, quality, reduceMotion, autoFire, joystickSide, flightMouseSteer, showFps, fullscreen, benchmark, lastSlot, persistGranted, installHintShownAt,
+//                                       guidance, tipsSeen, weaponAutoSwap }   // the last three since R10
 ```
 
 Storage rules: 3 slots, key per slot plus a `.bak` copy of the previous good save; autosave at safe points only (station, landing, stage/mission completion, settings change, page hide); hand-written validator on load; export/import as a text code; `navigator.storage.persist()` requested on first save; Safari deletes script-writable storage after 7 days without use unless installed to the Home Screen (→ PWA in M7 + export prompt).
@@ -392,7 +426,7 @@ Storage rules: 3 slots, key per slot plus a `.bak` copy of the previous good sav
 ## 9. Mobile Strategy
 
 - Responsive canvas + UI breakpoints; one codebase, `pointer` events unify mouse/touch; `touch-action: none` on the canvas, safe-area insets, `100dvh`.
-- **Touch controls**: floating virtual joystick (left), aim-drag with auto-fire (right), action buttons, drag-to-steer in flight, auto-fire assist option, left/right-handed swap.
+- **Touch controls**: floating virtual joystick (left), aim-drag with auto-fire (right), action buttons, drag-to-steer in flight, auto-fire assist option, left/right-handed swap. Since R10 the quick bar doubles as touch buttons (tap a weapon to switch, a consumable to use it, long-press to choose what the slot holds), a SWAP button cycles weapons, and a tap on the minimap opens the full-screen map, which holds the game while it is open.
 - **Quality presets** (auto-detect by a 2-second boot benchmark, overridable): clamp `devicePixelRatio` (1 / 1.5 / 2), particles, draw distance, capped enemy count, and the render plan (R6): post-processing off / ¼-res bloom + FXAA / ½-res bloom + MSAA, shadow map on `high` only, image-based lighting on `medium` and `high`; target 60 fps desktop / 30+ fps mid-tier mobile.
 - Screen wake lock during gameplay; pause + audio suspend when the tab is hidden; WebGL context-loss recovery overlay.
 - Story films (R9) are a DOM `<video>` over a black layer, fetched whole into a Blob so the service worker never answers a Range request; the scene underneath is held, so a film costs a video decode, not draw calls; reduce motion plays a film as its posters.
@@ -414,6 +448,7 @@ Storage rules: 3 slots, key per slot plus a `.bak` copy of the previous good sav
 | M6 | Full content: all 6 planets, bosses, story dialogue, star map progression, both endings | Playable start-to-ending campaign (~2–3 h) |
 | M7a | Art pass (R6): render pipeline (ACES, post chain, IBL, shadows), surface environment (height-field terrain, splat ground shader, procedural textures, scatter, props, weather sprites), animated character, sculpted enemies, combat VFX, flight sky and ships, hub backdrops, UI theme (SPEC-017…SPEC-020) | Cinder-4 and every other planet read as a modern stylised-PBR game on desktop and on the reference phone; medium stays ≤ 80 scene + 16 post draws on the surface; screenshots per scene and preset in the playtest log; tag `m7a` |
 | M7b | Story films (R9): the prologue, the departure, five chapter interludes and two ending films rendered in Blender with synthesised sound; the film player with poster and text fallbacks; chapter cards and boss reveals; the ending sequence wired end to end (SPEC-021…SPEC-024) | New game opens on the prologue; the first flight to each planet shows the departure and its chapter card; each boss reveals itself once per session; each chapter's interlude plays on the first return to the station; both endings run dialogue → film → overlay; every film skips, falls back to posters and text, and fits the 12 MB films budget; checked on desktop and the reference phone; tag `m7b` |
+| M7c | Playability pass (R10): camera-aligned minimap with a legend and remembered ground, and a full-screen map; objective tracker, waypoints and escalating hints; three weapon slots and three quick slots on a quick bar; machine guns, launchers and explosives with heat and charge cooldowns; caves, wrecks and an arena wall; save v2 (SPEC-025…SPEC-030) | On Cinder-4: every kind of point is recognisable on the map, and the map turns with the camera; walked ground stays lit after a reload; a new player finishes `c1_m1`–`c1_m3` by following the tracker and the marker; medkit and grenade counts are visible mid-fight; a rocket, the chaingun and the pistol get used together; a heatwave is waited out in a cave; the arena edge is a wall; budgets unchanged; checked on desktop and the reference phone; tag `m7c` |
 | M7 | Polish: mobile tuning, quality presets, balancing pass, PWA/offline, storage persistence, reduce-motion, save migration harness | 30+ fps on mid-tier phone; installable; full manual checklist green |
 
 ---
@@ -444,6 +479,9 @@ Storage rules: 3 slots, key per slot plus a `.bak` copy of the previous good sav
 | Story films outgrow the precache or fail to decode (R9) | H.264 MP4 at 960 × 540 with no audio track, a per-film rate cap (44 KB/s) and a 12 MB `films/` budget inside the 25 MB precache, checked by the build and a test; a film that will not play drops to its posters and then to text, so a codec gap costs pictures, never progress |
 | Detonation and jump flashes (photosensitivity, R9) | Flashes are authored as slow ramps; the film build measures every rendered frame against the three-flashes rule and fails on a violation; reduce motion shows posters only |
 | The films give the twist away (R9) | The prologue and interludes stay inside the surface fiction (a card numbered 62, a stutter of static at most); only the ending films show the scaffolding — the endings already own the fourth wall |
+| HUD clutter on a phone (R10) | The quick bar, tracker and hints each own one fixed place (bottom centre, top left, bottom left), sized with `clamp()`; guidance can be turned down to minimal or off; the full map is modal |
+| Shelters and hiding trivialise storms and survive stages (R10) | Waves and bosses ignore hiding, firing gives the player away for 1.5 s, and survive stages still run their waves; storms stay lethal in the open, and a shelter is a detour |
+| Managing weapons on touch (R10) | Auto-fire keeps working; a locked machine gun hands fire to the sidearm on touch; the heavy slot fires only on an explicit trigger and hands back to the previous weapon when it is empty |
 
 ---
 
@@ -488,6 +526,16 @@ Each entry names the owning spec. "Casual" = casual difficulty.
 | E33 | Fire key (Space) held or a double tap as a film or reveal starts | Space never skips; Escape or Enter skip only as fresh presses after 0.6 s; Skip ignores taps in the first 0.3 s | SPEC-022 |
 | E34 | Portrait phone during a film | The film letterboxes and plays; the rotate prompt waits for gameplay | SPEC-022 |
 | E35 | Photosensitive viewer | Authored flashes ramp up over ≥ 4 frames and down over ≥ 12; the build fails a film with more than three flashes in any second; reduce motion never shows a flash | SPEC-021, SPEC-022 |
+| E36 | Full-screen map opened mid-fight | The map holds the simulation like the pause menu; nothing moves or hurts until it closes; Escape closes the map, never the game | SPEC-026 |
+| E37 | Explored ground saved for a planet whose arena size has since changed | The mask no longer fits; the validator drops it and the planet starts dark again | SPEC-025 |
+| E38 | A v1 save loaded after R10 | Migrates to v2: the old weapon becomes the primary, the Service Pistol fills the sidearm slot, the heal slot takes the first heal item in the pack, the heavy slot is empty | SPEC-025 |
+| E39 | Player stuck with no progress on an objective | Help escalates at 45 / 90 / 150 s of no progress and no headway outside combat (pulse, ARIA direction, a ground route); guidance full / minimal / off; nothing completes by itself | SPEC-027 |
+| E40 | A quick slot is empty, or a heal is used at full HP | Nothing is spent; a throttled toast says why; an empty slot refills from the pack when an eligible item is carried or picked up | SPEC-028 |
+| E41 | The weapon in hand is locked or recharging mid-fight | Cooldowns run while holstered; on touch a locked machine gun hands fire to the sidearm; the heavy slot never auto-fires and returns to the previous weapon when its charges are spent | SPEC-029 |
+| E42 | An explosive goes off next to the player or the escort | Blasts damage enemies only; the player and the follower take nothing | SPEC-029 |
+| E43 | Player hides in a shelter through a survive stage or a wave | Allowed: timers run; wave and boss enemies ignore hiding; firing reveals the player for 1.5 s | SPEC-030 |
+| E44 | A shelter would block a corridor or enclose a POI or node | Shelters keep out of every pad → POI corridor and away from POIs and nodes; their walls are never removed by repair, and every interior is validated reachable | SPEC-030 |
+| E45 | Shots, enemies or the player at the arena edge | All stop at the wall's line (`halfSize − 2`); a rocket that reaches it explodes there | SPEC-030 |
 
 ---
 
