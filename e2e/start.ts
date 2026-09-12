@@ -181,9 +181,61 @@ export const GATE_TIMEOUT_MS = 30_000;
  */
 export const COLD_START = { timeout: GATE_TIMEOUT_MS } as const;
 
-/** Waits for the manifest to finish loading, which is when the gate appears. */
+/**
+ * How long a bounded "did the page boot at all?" probe may take. It is asking
+ * the page a question it can answer instantly if it is alive, so a second is
+ * generous; a page whose main thread never ran cannot answer at all, and the
+ * probe is what stops that case from hanging until the test timeout.
+ */
+const BOOT_PROBE_MS = 1_000;
+
+/**
+ * True when `src/main.ts` has evaluated. The overlay is built synchronously by
+ * the composition root, so its presence separates the two ways the gate wait
+ * below can fail.
+ */
+async function booted(page: Page): Promise<boolean> {
+  try {
+    await expect(page.locator('[data-testid="boot-overlay"]')).toHaveCount(1, { timeout: BOOT_PROBE_MS });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Waits for the manifest to finish loading, which is when the gate appears.
+ *
+ * `main.ts` builds the entire boot overlay — progress line, error panel, gate —
+ * before it constructs `Game`, so the gate *element* is in the DOM from the
+ * moment the module graph has evaluated; it is hidden until the manifest is in.
+ * The two ways this can fail therefore mean different things:
+ *
+ * - the element is present but stays hidden. That is the game: assets are still
+ *   loading, or the error panel took the gate's place (D-30). The wait runs out
+ *   and the test fails, which is correct — `boot-assets.spec.ts` pins both.
+ * - the element is *absent*. Then the page never evaluated `main.ts`, and no
+ *   behaviour of the game can produce that. It is the run's first page meeting a
+ *   dev server that is still settling — a cold module graph, a dependency
+ *   re-optimisation that invalidates a load in flight, a watcher still draining
+ *   the checkout. `e2e/global-setup.ts` pays that cost once before any test
+ *   runs; this is the second net under it, because the warm-up browser is a
+ *   different process from the workers' and cannot warm what is per-process.
+ *
+ * Only the second case is retried, and only once, with one reload and the same
+ * assertion again. Nothing is relaxed: the gate still has to become visible
+ * within the cold-start budget, and every assertion after it is untouched.
+ */
 export async function awaitGate(page: Page): Promise<void> {
-  await expect(page.locator('[data-testid="boot-start"]')).toBeVisible(COLD_START);
+  const gate = page.locator('[data-testid="boot-start"]');
+  try {
+    await expect(gate).toBeVisible(COLD_START);
+    return;
+  } catch (error) {
+    if (await booted(page)) throw error;
+  }
+  await page.reload({ waitUntil: 'commit' });
+  await expect(gate).toBeVisible(COLD_START);
 }
 
 /** Waits for the gate, then passes it with a click on TAP TO START. */

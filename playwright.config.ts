@@ -16,11 +16,15 @@ export default defineConfig({
   fullyParallel: true,
   retries: 0,
   reporter: 'list',
+  // Opens the game once, before the first test, so the dev server's cold start
+  // is not charged to whichever test happened to be scheduled first.
+  globalSetup: './e2e/global-setup.ts',
   // Playwright's default is 30 s, which the cold-start budget of `awaitGate`
-  // (e2e/start.ts) could eat on its own on a slow container. The long suites
-  // already set their own — 90 s, 150 s, 540 s — so this floor hides no hang
-  // that the default was catching.
-  timeout: 60_000,
+  // (e2e/start.ts) could eat on its own on a slow container — twice over, now
+  // that a page which never evaluated `main.ts` is reloaded once and waited for
+  // again. The long suites already set their own — 90 s, 150 s, 540 s — so this
+  // floor hides no hang that the default was catching.
+  timeout: 120_000,
   use: {
     baseURL: `http://localhost:${port}`,
     trace: 'retain-on-failure',
