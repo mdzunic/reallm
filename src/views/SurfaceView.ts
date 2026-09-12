@@ -150,7 +150,8 @@ const GHOST_LAG_B = 0.06;
 const GHOST_GAIN_A = 1.2;
 const GHOST_GAIN_B = 0.6;
 
-const RESOURCE_COLORS: Record<ResourceId, string> = {
+/** Node/pickup colours per resource; the scene reuses them for pickup sparkles. */
+export const RESOURCE_COLORS: Record<ResourceId, string> = {
   oil: '#3a3a3a',
   wheat: '#e0c060',
   water: '#5ab8e8',

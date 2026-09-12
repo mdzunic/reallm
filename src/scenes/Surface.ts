@@ -26,6 +26,7 @@ import {
   MISSIONS,
   PLANETS,
   SURFACE_ASSETS,
+  SURFACE_SHARED_ASSETS,
   TUNING,
   type Dialogue,
   type DialogueId,
@@ -36,6 +37,7 @@ import {
   type PlanetDef,
   type PoiId,
   type ResourceId,
+  MESH_RECIPE_IDS,
 } from '@/data/index';
 import { makeEnemy, type EnemyEntity } from '@/entities/Enemy';
 import { makeFollower } from '@/entities/Follower';
@@ -52,9 +54,11 @@ import { SpawnDirector, type FrustumXZ } from '@/systems/Spawn';
 import { Weather, WEATHER_EFFECTS, type WeatherEffects } from '@/systems/Weather';
 import { hasNodeRadar } from '@/systems/UiHelpers';
 import { UiScene } from '@/scenes/base';
+import { INSTANCES_PER_PART } from '@/views/ProceduralMeshes';
 import { layerFromAssets } from '@/views/ProceduralTextures';
-import { SurfaceView } from '@/views/SurfaceView';
+import { advanceViewTime, RESOURCE_COLORS, shakeOffset, SurfaceView, type ShakeState } from '@/views/SurfaceView';
 import { confirmSheet } from '@/ui/ConfirmSheet';
+import { DamageNumbers } from '@/ui/DamageNumbers';
 import { DeathOverlay } from '@/ui/DeathOverlay';
 import { dialogueLayer, type DialogueUI } from '@/ui/DialogueUI';
 import { el, h, testId } from '@/ui/dom';
@@ -101,6 +105,27 @@ const MUSIC_HOLD_SECONDS = 2;
 const STATIC_BURST_MS = 600;
 /** The minimap repaints at 4 Hz — plenty for 1 px = 1 m. */
 const MINIMAP_INTERVAL = 0.25;
+
+// ------------------------------------------------------------- SPEC-019 §4.6
+
+/** Player-hit shake and the heavy boss-phase / wurm-resurface shake (§4.7). */
+const HIT_SHAKE_AMPLITUDE = 0.15;
+const HIT_SHAKE_SECONDS = 0.25;
+const HEAVY_SHAKE_AMPLITUDE = 0.5;
+const HEAVY_SHAKE_SECONDS = 0.5;
+/** The muzzle burst sits this far along `facing`, at the capsule's nose. */
+const MUZZLE_OFFSET = 0.6;
+/** Weather damage surfaces as one accumulated red number per second (19-m). */
+const WEATHER_NUMBER_SECONDS = 1;
+/** Burst colours: the player-hit red, the item-pickup and muzzle warm white. */
+const HIT_BURST_COLOR = 0xff5533;
+const ITEM_PICKUP_COLOR = 0xffe9a0;
+const MUZZLE_COLOR = 0xffe9a0;
+
+/** `'#rrggbb'` → the number `CombatFx.burst` takes; no allocation. */
+function hexColor(color: string): number {
+  return Number.parseInt(color.slice(1), 16);
+}
 
 /** The stand-in pilot for a bare `?scene=surface` jump with no loaded save. */
 const JUMP_CREATION: CharacterCreation = {
@@ -200,6 +225,30 @@ export class SurfaceScene extends UiScene<'surface'> {
 
   /** The view time of the last rendered frame — what `SurfaceFrame.dt` spans. */
   #lastViewTime = 0;
+
+  // SPEC-019 §4.6–§4.7 — hit feedback state, all scene-local (19-i).
+  #numbers: DamageNumbers | null = null;
+  readonly #shake: ShakeState = { amplitude: 0, until: 0, duration: 0 };
+  readonly #hitStop = { frames: 0, time: 0 };
+  /** Per-slot HP deltas for enemy damage numbers (§4.6, 19-f). */
+  readonly #enemyHp = new Float32Array(INSTANCES_PER_PART * MESH_RECIPE_IDS.length);
+  readonly #enemyHpId = new Int32Array(INSTANCES_PER_PART * MESH_RECIPE_IDS.length).fill(-1);
+  /** Weather damage accumulates into one red number per second (19-m). */
+  #weatherDamage = 0;
+  #weatherNumberIn = WEATHER_NUMBER_SECONDS;
+  /** ≥ 0: a pickup sparkle is pending for this frame, in this colour (§4.6). */
+  #pickupColor = -1;
+  /** The fire edge: `fireCooldown` rose since the last rendered frame. */
+  #lastFireCooldown = 0;
+  /** The wurm telegraph edge tracker (§4.6). */
+  #telegraphWas = false;
+  #telegraphX = 0;
+  #telegraphZ = 0;
+  /** The `palette.ground` burst colour, resolved once per planet. */
+  #groundColor = 0xffffff;
+  readonly #projectScratch = new THREE.Vector3();
+  readonly #shakeScratch = new THREE.Vector3();
+  readonly #screenPoint = { x: 0, y: 0 };
 
   #music: 'surface_calm' | 'surface_combat' | 'boss' = 'surface_calm';
   #musicHold = 0;
@@ -367,24 +416,39 @@ export class SurfaceScene extends UiScene<'surface'> {
     };
 
     // §4.1 step 2: the world view (SPEC-018: with the asset cache, so the
-    // sculpted props can take the per-planet GLBs once they land).
-    const view = new SurfaceView(this.scene, layout, planet, services.renderer.quality, services.assets);
+    // sculpted props can take the per-planet GLBs once they land; SPEC-019:
+    // with the save's appearance, so the salvager wears the creation tint).
+    const view = new SurfaceView(
+      this.scene,
+      layout,
+      planet,
+      services.renderer.quality,
+      services.assets,
+      { primary: save.player.appearance.primary, secondary: save.player.appearance.secondary },
+    );
     view.reduceMotion = services.settings.get().reduceMotion;
     this.#view = view;
     this.disposer.add(() => view.dispose());
+    this.#groundColor = hexColor(planet.surface.palette.ground);
 
-    // SPEC-018 §4.10: the lazy per-planet drop. The shared promise dedupes by
-    // id; the `.then` checks disposal before touching the view (18-m).
+    // SPEC-018 §4.10: the lazy per-planet drop, merged with the shared
+    // surface set (SPEC-019 §4.8: the probe rides along; boot stays five
+    // files). The shared promise dedupes by id; the `.then` checks disposal
+    // before touching the view (18-m).
     const surfaceAssets = SURFACE_ASSETS[planet.biome];
-    if (Object.keys(surfaceAssets.models).length + Object.keys(surfaceAssets.textures).length > 0) {
+    {
       let disposed = false;
       this.disposer.add(() => {
         disposed = true;
       });
       void services.assets
-        .load({ ...surfaceAssets, audio: {} })
+        .load({
+          models: { ...surfaceAssets.models, ...SURFACE_SHARED_ASSETS.models },
+          textures: { ...surfaceAssets.textures },
+          audio: {},
+        })
         .then(() => {
-          if (disposed) return;
+          if (disposed || Object.keys(surfaceAssets.textures).length === 0) return;
           const [layerA, layerB] = planet.surface.look.ground.layers;
           const [metresA, metresB] = planet.surface.look.ground.tileMetres;
           view.setGroundTextures(
@@ -427,6 +491,18 @@ export class SurfaceScene extends UiScene<'surface'> {
       minimap.canvas.addEventListener('click', cycle);
       this.disposer.add(() => minimap.canvas.removeEventListener('click', cycle));
     }
+    // SPEC-019 §4.6: the floating damage numbers, pooled in the HUD layer.
+    const dmgLayer = el('div', 'dmg-layer');
+    this.ui.mount(dmgLayer, 'hud');
+    const numbers = new DamageNumbers(dmgLayer, services.settings.get().reduceMotion);
+    this.#numbers = numbers;
+    this.disposer.add(() => {
+      numbers.dispose();
+      this.ui.unmount(dmgLayer);
+      this.#numbers = null;
+    });
+    this.#enemyHpId.fill(-1);
+
     const death = new DeathOverlay(services.uiRoot);
     this.#death = death;
     this.disposer.add(() => death.dispose());
@@ -540,12 +616,33 @@ export class SurfaceScene extends UiScene<'surface'> {
     this.#updateMusic(dt, world);
     this.#feedHud(world, dt);
     this.#minimapIn -= dt;
+
+    // SPEC-019 §4.6: age the damage numbers, and flush the weather
+    // accumulator into one red number per second (19-m).
+    this.#numbers?.update(dt);
+    this.#weatherNumberIn -= dt;
+    if (this.#weatherNumberIn <= 0) {
+      this.#weatherNumberIn = WEATHER_NUMBER_SECONDS;
+      const amount = Math.round(this.#weatherDamage);
+      this.#weatherDamage = 0;
+      if (amount > 0 && world.player.alive && this.#numbers !== null) {
+        this.#project(world.player.x, world.player.z, 1.6);
+        this.#numbers.show(this.#screenPoint.x, this.#screenPoint.y, amount, 'player');
+      }
+    }
   }
 
   override render(renderer: Renderer): void {
     const world = this.#world;
-    if (world !== null) {
-      this.#view?.sync({
+    const view = this.#view;
+    if (world !== null && view !== null) {
+      // SPEC-019 §4.7: hit-stop freezes the view clock for ≤ 2 rendered
+      // frames; the fixed-step simulation above never sees it (SPEC-002).
+      const time = advanceViewTime(this.#hitStop, world.time);
+      const dt = Math.max(0, time - this.#lastViewTime);
+      this.#lastViewTime = time;
+      this.#renderFeedback(world, view);
+      view.sync({
         player: world.player,
         follower: world.follower,
         enemies: world.enemies,
@@ -553,11 +650,10 @@ export class SurfaceScene extends UiScene<'surface'> {
         pickups: (this.#pickups as Pickups).pool,
         nodes: (this.#nodes as Nodes).states,
         telegraph: this.#bossTelegraph(world),
-        time: world.time,
-        dt: Math.max(0, world.time - this.#lastViewTime),
+        time,
+        dt,
       });
-      this.#lastViewTime = world.time;
-      this.#view?.setArena(world.arena);
+      view.setArena(world.arena);
       this.#forwardGrade();
       if (this.#minimapIn <= 0) {
         this.#minimapIn = MINIMAP_INTERVAL;
@@ -565,6 +661,114 @@ export class SurfaceScene extends UiScene<'surface'> {
       }
     }
     super.render(renderer);
+  }
+
+  // ------------------------------------------------- SPEC-019 hit feedback
+
+  /**
+   * §4.6 — the per-rendered-frame edges: the muzzle flash on the fire edge,
+   * the wurm telegraph's start/resurface rings, the coalesced pickup sparkle,
+   * and the enemy damage numbers off per-slot HP deltas. Runs before `sync`,
+   * allocates nothing, and never touches the simulation.
+   */
+  #renderFeedback(world: CombatWorld, view: SurfaceView): void {
+    const p = world.player;
+
+    // The fire edge: `fireCooldown` rose since the last rendered frame.
+    if (p.fireCooldown > this.#lastFireCooldown) {
+      view.fx.burst(
+        'muzzle',
+        p.x + Math.cos(p.facing) * MUZZLE_OFFSET,
+        p.z + Math.sin(p.facing) * MUZZLE_OFFSET,
+        MUZZLE_COLOR,
+      );
+    }
+    this.#lastFireCooldown = p.fireCooldown;
+
+    // The wurm telegraph: one ring when it opens, one plus the heavy shake on
+    // the resurface (§4.6). Positions are copied — `#bossTelegraph` returns a
+    // reused scratch.
+    const telegraph = this.#bossTelegraph(world);
+    if (telegraph !== null && !this.#telegraphWas) {
+      this.#telegraphWas = true;
+      this.#telegraphX = telegraph.x;
+      this.#telegraphZ = telegraph.z;
+      view.fx.burst('dust_ring', telegraph.x, telegraph.z, this.#groundColor);
+    } else if (telegraph !== null) {
+      this.#telegraphX = telegraph.x;
+      this.#telegraphZ = telegraph.z;
+    } else if (this.#telegraphWas) {
+      this.#telegraphWas = false;
+      view.fx.burst('dust_ring', this.#telegraphX, this.#telegraphZ, this.#groundColor);
+      this.#triggerShake(HEAVY_SHAKE_AMPLITUDE, HEAVY_SHAKE_SECONDS);
+    }
+
+    // At most one pickup sparkle per rendered frame (§4.6, Decisions #7).
+    if (this.#pickupColor >= 0) {
+      view.fx.burst('pickup', p.x, p.z, this.#pickupColor);
+      this.#pickupColor = -1;
+    }
+
+    this.#enemyDamageNumbers(world);
+  }
+
+  /**
+   * §4.6: enemy hit amounts from per-slot HP deltas — one walk over the pool,
+   * typed arrays only. An id mismatch (swap-remove reused the slot) resets
+   * silently (19-f); an index past the arrays is skipped, never a crash.
+   */
+  #enemyDamageNumbers(world: CombatWorld): void {
+    const numbers = this.#numbers;
+    if (numbers === null) return;
+    const hp = this.#enemyHp;
+    const ids = this.#enemyHpId;
+    const cap = hp.length;
+    const size = Math.min(world.enemies.size, cap);
+    for (let i = 0; i < size; i++) {
+      const e = world.enemies.at(i);
+      if (ids[i] === e.id && (hp[i] as number) > e.hp) {
+        const amount = Math.round((hp[i] as number) - e.hp);
+        if (amount > 0) {
+          this.#project(e.x, e.z, 1.2);
+          numbers.show(
+            this.#screenPoint.x,
+            this.#screenPoint.y,
+            amount,
+            e.elite || e.def.archetype === 'boss' ? 'elite' : 'enemy',
+          );
+        }
+      }
+      hp[i] = e.hp;
+      ids[i] = e.id;
+    }
+  }
+
+  /** World XZ (+ a lift in metres) → screen pixels, through the camera. */
+  #project(x: number, z: number, lift: number): void {
+    const v = this.#projectScratch.set(x, lift + (this.#view?.field.heightAt(x, z) ?? 0), z);
+    v.project(this.camera);
+    this.#screenPoint.x = (v.x * 0.5 + 0.5) * this.services.renderer.width;
+    this.#screenPoint.y = (-v.y * 0.5 + 0.5) * this.services.renderer.height;
+  }
+
+  /** §4.7: a new shake wins only if it is at least the amplitude still left. */
+  #triggerShake(amplitude: number, duration: number): void {
+    const time = this.#viewTimeNow();
+    const shake = this.#shake;
+    const remaining =
+      time < shake.until && shake.duration > 0
+        ? shake.amplitude * Math.min(1, Math.max(0, (shake.until - time) / shake.duration))
+        : 0;
+    if (amplitude < remaining) return;
+    shake.amplitude = amplitude;
+    shake.duration = duration;
+    shake.until = time + duration;
+  }
+
+  /** The view clock the shake and hit-stop share (§4.7). */
+  #viewTimeNow(): number {
+    if (this.#hitStop.frames > 0) return this.#hitStop.time;
+    return this.#world?.time ?? 0;
   }
 
   override debugInfo(): Record<string, number | string> {
@@ -762,6 +966,15 @@ export class SurfaceScene extends UiScene<'surface'> {
     this.camera.updateMatrixWorld();
     this.#frustumMatrix.multiplyMatrices(this.camera.projectionMatrix, this.camera.matrixWorldInverse);
     this.#frustum.setFromProjectionMatrix(this.#frustumMatrix);
+    // SPEC-019 §4.7: the shake lands after the frustum capture, so spawn
+    // culling is bit-identical to an unshaken frame (AC-92). Camera and
+    // look-at target move by the same vector, so only the position changes —
+    // the orientation, and with it the aim ray, is untouched.
+    shakeOffset(this.#shake, this.#viewTimeNow(), this.services.settings.get().reduceMotion, this.#shakeScratch);
+    if (this.#shakeScratch.lengthSq() > 0) {
+      this.camera.position.add(this.#shakeScratch);
+      this.camera.updateMatrixWorld();
+    }
   }
 
   // --------------------------------------------------------------- weather
@@ -1538,7 +1751,29 @@ export class SurfaceScene extends UiScene<'surface'> {
         },
         this,
       ),
-      bus.on('player:damaged', () => this.#hud?.damageFlash(), this),
+      bus.on(
+        'player:damaged',
+        ({ amount, source }) => {
+          this.#hud?.damageFlash();
+          // SPEC-019 §4.6: weather ticks every fixed step — no burst, no
+          // shake; the amounts pool into one red number per second (19-m).
+          if (source.kind === 'weather') {
+            this.#weatherDamage += amount;
+            return;
+          }
+          const world = this.#world;
+          if (world === null || this.#view === null) return;
+          const p = world.player;
+          this.#view.fx.burst('hit', p.x, p.z, HIT_BURST_COLOR);
+          this.#triggerShake(HIT_SHAKE_AMPLITUDE, HIT_SHAKE_SECONDS);
+          const shown = Math.round(amount);
+          if (shown > 0 && this.#numbers !== null) {
+            this.#project(p.x, p.z, 1.6);
+            this.#numbers.show(this.#screenPoint.x, this.#screenPoint.y, shown, 'player');
+          }
+        },
+        this,
+      ),
       bus.on(
         'boss:defeated',
         () => {
@@ -1622,10 +1857,57 @@ export class SurfaceScene extends UiScene<'surface'> {
         ({ elite }) => {
           this.#spawned++;
           if (elite) this.#elites++;
+          // SPEC-019 §4.6: the spawn puff, off the director's last-placed
+          // entity — summons and hatches included; skipped when null (19-n).
+          const spawned = this.#combat?.lastSpawned ?? null;
+          if (spawned !== null) this.#view?.fx.burst('spawn', spawned.x, spawned.z, this.#groundColor);
         },
         this,
       ),
-      bus.on('enemy:killed', () => this.#kills++, this),
+      bus.on(
+        'enemy:killed',
+        ({ enemyId, elite, x, z }) => {
+          this.#kills++;
+          // SPEC-019 §4.6: the death burst in the definition's tint, plus a
+          // scorch; an elite or boss kill freezes the view for two frames.
+          const def = ENEMIES[enemyId];
+          const view = this.#view;
+          if (view !== null) {
+            view.fx.burst('death', x, z, hexColor(def.look.tint));
+            view.fx.scorch(x, z);
+          }
+          if (elite || def.archetype === 'boss') this.#hitStop.frames = 2;
+        },
+        this,
+      ),
+      bus.on(
+        'boss:phase',
+        () => {
+          // SPEC-019 §4.6: the heavy shake always; the ring only when the
+          // boss entity is actually in the pool.
+          this.#triggerShake(HEAVY_SHAKE_AMPLITUDE, HEAVY_SHAKE_SECONDS);
+          const world = this.#world;
+          const boss = world === null ? null : this.#findBoss(world);
+          if (boss !== null) this.#view?.fx.burst('dust_ring', boss.x, boss.z, this.#groundColor);
+        },
+        this,
+      ),
+      bus.on(
+        'resource:collected',
+        ({ resource, blocked }) => {
+          // SPEC-019 §4.6: no sparkle on a blocked pickup (cargo full);
+          // otherwise flag one burst for this rendered frame at most.
+          if (blocked === undefined) this.#pickupColor = hexColor(RESOURCE_COLORS[resource]);
+        },
+        this,
+      ),
+      bus.on(
+        'inventory:changed',
+        () => {
+          this.#pickupColor = ITEM_PICKUP_COLOR;
+        },
+        this,
+      ),
     ];
     for (const release of releases) this.disposer.add(release);
   }

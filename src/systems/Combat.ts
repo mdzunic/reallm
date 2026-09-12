@@ -471,6 +471,17 @@ export class Combat {
    * planet's chance on its spawn stream). Elites: ×3 HP, ×1.3 scale (collision
    * radius included), ×1.1 speed; the damage ×1.5 lands at hit time (§4.2).
    */
+  /**
+   * SPEC-019 §4.6: the entity behind the last `enemy:spawned` emit — director
+   * spawns, summons and hatches alike, since `spawnEnemy` is the one emitter.
+   * Read-only; no rule or damage change rides on it.
+   */
+  get lastSpawned(): EnemyEntity | null {
+    return this.#lastSpawned;
+  }
+
+  #lastSpawned: EnemyEntity | null = null;
+
   spawnEnemy(id: EnemyId, x: number, z: number, elite: boolean): EnemyEntity {
     const def = ENEMIES[id];
     const isElite = elite && def.eliteAllowed;
@@ -507,6 +518,8 @@ export class Combat {
     e.outOfArenaTime = 0;
     e.acidCooldown = 0;
     e.wanderAt = 0;
+    // Set immediately before the emit, so a subscriber can read the position.
+    this.#lastSpawned = e;
     this.#events.emit('enemy:spawned', { enemyId: id, elite: isElite });
     return e;
   }
