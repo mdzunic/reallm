@@ -372,6 +372,9 @@ export class FilmPlayer {
       if (run.state === 'loading') {
         run.state = 'playing';
         run.layer.dataset['state'] = 'playing';
+      } else if (run.state === 'paused') {
+        // The tab went hidden while `play()` was settling: stay paused (E28).
+        video.pause();
       }
     });
     video.addEventListener('error', () => {
@@ -381,10 +384,7 @@ export class FilmPlayer {
       if (this.#run === run && !run.settled) this.#finish(run, 'ended');
     });
 
-    // §4.1: no `playing` within FILM_LOAD_TIMEOUT of the request is a failure.
-    run.loadTimer = setTimeout(() => {
-      if (this.#run === run && !run.videoStarted) this.#videoFailed(run);
-    }, FILM_LOAD_TIMEOUT * 1000);
+    this.#armLoadTimer(run);
 
     // AC-4: the whole file into a Blob, so playback never needs HTTP Range.
     const abort = new AbortController();
@@ -395,6 +395,8 @@ export class FilmPlayer {
         if (this.#run !== run || run.settled || run.mode !== 'video') return;
         run.objectUrl = URL.createObjectURL(blob);
         video.src = run.objectUrl;
+        // A tab hidden mid-load stays paused; `#resume` starts the video (E28).
+        if (run.state === 'paused') return;
         video.play().catch(() => {
           // 22-e: an autoplay-policy rejection is a video failure, so stills.
           if (this.#run === run) this.#videoFailed(run);
@@ -405,6 +407,20 @@ export class FilmPlayer {
         if (abort.signal.aborted) return;
         if (this.#run === run) this.#videoFailed(run);
       });
+  }
+
+  /**
+   * §4.1: no `playing` within FILM_LOAD_TIMEOUT of the request is a failure.
+   * The timer holds while the tab is hidden and re-arms whole on resume, so a
+   * backgrounded load cannot fail — and so switch modes — on its own (E28).
+   */
+  #armLoadTimer(run: Run): void {
+    if (run.loadTimer !== null) clearTimeout(run.loadTimer);
+    run.loadTimer = setTimeout(() => {
+      if (this.#run !== run || run.videoStarted || run.settled) return;
+      if (run.state === 'paused') return;
+      this.#videoFailed(run);
+    }, FILM_LOAD_TIMEOUT * 1000);
   }
 
   /** §4.1 mid-film fallback: stills (or text), carrying on at the film time. */
@@ -598,6 +614,7 @@ export class FilmPlayer {
     run.layer.dataset['state'] = run.state;
     run.lastFrameWall = performance.now();
     run.lastAdvanceWall = run.lastFrameWall;
+    if (run.mode === 'video' && !run.videoStarted) this.#armLoadTimer(run);
     if (run.video !== null && run.video.src !== '') {
       run.video.play().catch(() => {
         if (this.#run === run) this.#videoFailed(run);

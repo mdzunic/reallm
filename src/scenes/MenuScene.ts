@@ -80,6 +80,9 @@ export class MenuScene extends UiScene<'menu'> {
   }
 
   protected onEnter(_params: SceneParams['menu']): void {
+    // SPEC-022 §4.11: the first director() call installs the dev film bridge,
+    // and the menu is the boot scene on every path — including `?scene=`.
+    director(this.services);
     // SPEC-006 AC-28: warm both tracks the menu can crossfade into next.
     void this.services.audio.preloadMusic(['menu', 'station']);
     this.useEnvironment(NEUTRAL_SKY, HUB_ENVIRONMENT_INTENSITY);
