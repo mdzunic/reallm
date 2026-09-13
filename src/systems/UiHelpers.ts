@@ -455,49 +455,8 @@ export function pruneToasts(stack: readonly ToastEntry[], now: number): ToastEnt
 
 // ------------------------------------------------------------------- minimap
 
-/** SPEC-012 §4.12: the backing canvas is 160 px at 1 px = 1 m, north-up. */
-export const MINIMAP_SIZE = 160;
-/** Enemies register on the minimap inside this range (AC-59). */
+/** Enemies register on the minimap inside this range (SPEC-012 AC-59). */
 export const MINIMAP_ENEMY_RANGE = 25;
-/** Edge arrows for off-window objective POIs sit on this rim. */
-export const MINIMAP_RIM = MINIMAP_SIZE / 2 - 6;
-
-export interface MinimapPoint {
-  x: number;
-  y: number;
-  /** False when the mark was clamped to the rim (an edge arrow). */
-  inside: boolean;
-  /** World bearing of the mark from the player, for drawing the arrow. */
-  angle: number;
-}
-
-/**
- * World XZ → canvas px, window centred on the player. North-up: the canvas
- * y axis runs with world +z, so up is −z. Off-window points clamp to the rim
- * circle — §4.12 shows objective POIs as edge arrows however far they are.
- */
-export function minimapProject(
-  playerX: number,
-  playerZ: number,
-  x: number,
-  z: number,
-  out: MinimapPoint,
-): MinimapPoint {
-  const dx = x - playerX;
-  const dz = z - playerZ;
-  const half = MINIMAP_SIZE / 2;
-  out.angle = Math.atan2(dz, dx);
-  out.inside = Math.abs(dx) <= half && Math.abs(dz) <= half;
-  if (out.inside) {
-    out.x = half + dx;
-    out.y = half + dz;
-    return out;
-  }
-  const distance = Math.hypot(dx, dz);
-  out.x = half + (dx / distance) * MINIMAP_RIM;
-  out.y = half + (dz / distance) * MINIMAP_RIM;
-  return out;
-}
 
 /**
  * §4.12: nodes show for a scanner drone at level 2+ (its `nodeRadar` effect)

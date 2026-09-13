@@ -620,6 +620,7 @@ describe('KEY_BINDINGS (AC-4)', () => {
       Escape: 'pause',
       KeyP: 'pause',
       KeyM: 'map',
+      KeyT: 'track',
       ShiftLeft: 'throttleUp',
       ControlLeft: 'throttleDown',
       Backquote: 'debug',

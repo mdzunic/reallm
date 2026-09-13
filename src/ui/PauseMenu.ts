@@ -32,7 +32,9 @@ const CONTROL_SHEETS = {
     ['Interact', 'E or F'],
     ['Use item', 'Q or 1'],
     ['Throttle (flight)', 'Shift up · Ctrl down'],
+    // SPEC-026 §4.7: M opens the surface map; T cycles the tracked mission.
     ['Map', 'M'],
+    ['Track mission', 'T'],
     ['Pause', 'Esc or P'],
   ],
   touch: [

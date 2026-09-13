@@ -61,6 +61,7 @@ export function makeInput(): InputState {
       throttleUp: button(),
       throttleDown: button(),
       map: button(),
+      track: button(),
       debug: button(),
     },
     scheme: 'keyboard',
