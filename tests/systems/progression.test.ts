@@ -7,7 +7,7 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { GameEvents } from '@/core/Events';
 import { setLogSink, type LogSink } from '@/core/Log';
-import { maxHp, newSave, type CharacterCreation, type SaveV1 } from '@/core/Save';
+import { maxHp, newSave, type CharacterCreation, type Save } from '@/core/Save';
 import { TUNING } from '@/data/index';
 import {
   LEVEL_CAP,
@@ -52,7 +52,7 @@ const CREATION: CharacterCreation = {
   difficulty: 'normal',
 };
 
-function save(): SaveV1 {
+function save(): Save {
   return newSave(0, CREATION, 42, 1_700_000_000_000);
 }
 

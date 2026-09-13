@@ -22,7 +22,7 @@ import { log } from '@/core/Log';
 import type { GameServices } from '@/core/Services';
 import type { Renderer } from '@/core/Renderer';
 import { ALLOWED_TRANSITIONS, type Scene, type SceneFactory, type SceneId, type SceneParams } from '@/core/StateMachine';
-import { cargoCap, maxHp, type SaveV1 } from '@/core/Save';
+import { cargoCap, maxHp, type Save } from '@/core/Save';
 import { cumulativeXp, xpToNext } from '@/systems/Progression';
 import type { HudModel } from '@/systems/UiHelpers';
 import { DeathOverlay } from '@/ui/DeathOverlay';
@@ -205,7 +205,7 @@ export class PlaceholderScene<K extends SceneId> implements Scene<K> {
   }
 
   /** Where `feedHud` reads from; the combat demo substitutes its in-memory save. */
-  protected hudSave(): SaveV1 | null {
+  protected hudSave(): Save | null {
     return this.services.save.current;
   }
 

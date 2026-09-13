@@ -75,7 +75,12 @@ describe('the worst-case campaign run', () => {
     ]);
     // The Ferrum gate is the one the whole model exists for (E2).
     expect(run.save.ship.shield).toBe(2);
-    expect(run.save.equipped).toEqual({ weapon: 'weapon_plasma', armor: 'armor_reactive' });
+    expect(run.save.equipped).toEqual({
+      armor: 'armor_reactive',
+      sidearm: 'pistol_service',
+      primary: 'weapon_plasma',
+      heavy: null,
+    });
     expect(run.save.player.tokens).toBeGreaterThanOrEqual(0);
   });
 

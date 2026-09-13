@@ -7,7 +7,7 @@
 // Nothing here touches the DOM, `three`, or `Math.random`, and nothing mutates
 // its inputs except the two mission helpers, which edit the save the way every
 // `systems/` class does (SPEC-010's `Economy` is the model).
-import { maxHp, type SaveV1, type SlotSummary } from '@/core/Save';
+import { maxHp, type Save, type SlotSummary } from '@/core/Save';
 import {
   CLASSES,
   COMPANIONS,
@@ -222,7 +222,7 @@ export type MissionStatus = 'locked' | 'available' | 'active' | 'done' | 'replay
  * E24 / SPEC-024 §4.6: the mission that ended the campaign reads `done`
  * everywhere, station included, so no surface offers a second verdict.
  */
-export function missionStatus(save: SaveV1, def: MissionDef, scene: MissionScene): MissionStatus {
+export function missionStatus(save: Save, def: MissionDef, scene: MissionScene): MissionStatus {
   if (save.progress.missionsActive.some((entry) => entry.id === def.id)) return 'active';
   if ((save.progress.missionsDone as readonly string[]).includes(def.id)) {
     return scene === 'station' && !campaignLocked(save, def) ? 'replayable' : 'done';
@@ -237,14 +237,14 @@ export function missionStatus(save: SaveV1, def: MissionDef, scene: MissionScene
  * the mission is already running; a replay keeps its place in `missionsDone`,
  * so nothing it unlocked ever re-locks (SPEC-010 E2).
  */
-export function acceptMission(save: SaveV1, def: MissionDef): boolean {
+export function acceptMission(save: Save, def: MissionDef): boolean {
   if (save.progress.missionsActive.some((entry) => entry.id === def.id)) return false;
   save.progress.missionsActive.push({ id: def.id as MissionId, stage: 0, counters: {} });
   return true;
 }
 
 /** Drops the mission from the active list; false when it was not running. */
-export function abandonMission(save: SaveV1, id: MissionId): boolean {
+export function abandonMission(save: Save, id: MissionId): boolean {
   const at = save.progress.missionsActive.findIndex((entry) => entry.id === id);
   if (at < 0) return false;
   save.progress.missionsActive.splice(at, 1);
@@ -278,12 +278,14 @@ export function computePlayerStats(
 
 /**
  * AC-47: the compare line between the equipped piece and a candidate — tier
- * first, then every stat that moves, signed. Same-kind items only; crossing
- * kinds compares nothing and says so with an empty string.
+ * first, then every stat that moves, signed. Same-*line* items only (SPEC-025
+ * §4.8): tiers are only comparable inside one ladder, so a rifle against a
+ * handgun compares nothing, exactly as a weapon against armor does.
  */
 export function gearCompareText(equipped: ItemId, candidate: ItemId): string {
   const a = ITEM_TABLE[equipped];
   const b = ITEM_TABLE[candidate];
+  if (a.kind === 'consumable' || b.kind === 'consumable' || a.line !== b.line) return '';
   const parts: string[] = [];
   const delta = (label: string, from: number, to: number): void => {
     if (from !== to) parts.push(`${label} ${from} → ${to}`);
@@ -306,16 +308,18 @@ export function gearCompareText(equipped: ItemId, candidate: ItemId): string {
 
 /**
  * AC-47: the equipped card's tooltip — where this piece's ladder goes next, as
- * tier → stat deltas through `gearCompareText`. The top tier has nothing above
- * it, so it says so instead of comparing to nothing; a non-gear id compares
- * nothing and returns the same empty string `gearCompareText` would.
+ * tier → stat deltas through `gearCompareText`. The ladder is the item's own
+ * line (SPEC-025 §4.8), so the Service Pistol's next rung is a handgun and not
+ * the tier-1 rifle. The top of a line has nothing above it, so it says so
+ * instead of comparing to nothing; a non-gear id compares nothing and returns
+ * the same empty string `gearCompareText` would.
  */
 export function gearTooltip(id: ItemId): string {
   const item = ITEM_TABLE[id];
   if (item.kind !== 'weapon' && item.kind !== 'armor') return '';
   const next = (Object.keys(ITEM_TABLE) as ItemId[]).find((other) => {
     const candidate = ITEM_TABLE[other];
-    return candidate.kind === item.kind && candidate.tier === item.tier + 1;
+    return candidate.kind !== 'consumable' && candidate.line === item.line && candidate.tier === item.tier + 1;
   });
   if (next === undefined) return `T${item.tier} — top tier`;
   return gearCompareText(id, next);
@@ -499,7 +503,7 @@ export function minimapProject(
  * §4.12: nodes show for a scanner drone at level 2+ (its `nodeRadar` effect)
  * or the scout's class passive — whatever carries `nodeRadar`, in data terms.
  */
-export function hasNodeRadar(save: SaveV1): boolean {
+export function hasNodeRadar(save: Save): boolean {
   if (CLASS_TABLE[save.player.classId].passive.nodeRadar === true) return true;
   return save.companions.some((c) => {
     if (!c.enabled) return false;

@@ -25,9 +25,9 @@ export interface DevBridge {
 }
 
 /**
- * The part of `SaveStore` the suites drive (SPEC-007 §3). `SaveV1` itself stays
- * loose here: `e2e/` may not import `src/`, and the suites only ever read the
- * two or three fields they assert on.
+ * The part of `SaveStore` the suites drive (SPEC-007 §3). The save type itself
+ * stays loose here: `e2e/` may not import `src/`, and the suites only ever read
+ * the two or three fields they assert on.
  */
 export interface SaveBridge {
   readonly available: boolean;
@@ -76,7 +76,10 @@ export interface SaveSnapshot {
   };
   resources: Record<string, number>;
   inventory: Array<{ itemId: string; qty: number }>;
-  equipped: { weapon: string; armor: string };
+  /** SPEC-025 §3: three weapon slots; `heavy` is empty until a launcher. */
+  equipped: { armor: string; sidearm: string; primary: string; heavy: string | null };
+  activeWeapon: string;
+  quick: Record<string, string | null>;
   ship: Record<string, number>;
   companions: Array<{ id: string; level: number; enabled: boolean }>;
   progress: {
@@ -88,6 +91,8 @@ export interface SaveSnapshot {
     poisDiscovered: string[];
     visits: Record<string, number>;
     endingSeen: boolean;
+    /** SPEC-025 §4.5: one base64url bitset per planet with ground walked. */
+    explored: Record<string, string>;
   };
 }
 

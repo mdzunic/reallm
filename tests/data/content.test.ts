@@ -1,7 +1,8 @@
-// The content-invariant suite (SPEC-009 §7). Seventeen invariants, one `it`
-// each, numbered as the spec numbers them. Between them they cover everything
-// the compiler cannot: counts, reachability, requirement cycles, POI/objective
-// compatibility, balance pins and text limits (PLAN §11, E26).
+// The content-invariant suite (SPEC-009 §7, extended by SPEC-018 §7 and
+// SPEC-025 §4.7). Nineteen invariants, one `it` each, numbered as the specs
+// number them. Between them they cover everything the compiler cannot: counts,
+// reachability, requirement cycles, POI/objective compatibility, the slot/line
+// split, balance pins and text limits (PLAN §11, E26).
 //
 // The compiler covers the rest — a mission naming an enemy that does not exist
 // or a planet gating on a flag that does not exist is a `tsc` failure, which the
@@ -24,8 +25,12 @@ import {
   MISSIONS,
   PLANETS,
   PLANET_IDS,
+  QUICK_PREFERENCE,
+  QUICK_SLOTS,
+  QUICK_SLOT_OF_EFFECT,
   RESOURCE_IDS,
   SHIP_SYSTEMS,
+  SLOT_OF_LINE,
   STORY_FLAGS,
   TUNING,
   UPGRADES,
@@ -59,6 +64,7 @@ type Mission = MissionDef<MissionId>;
 const missions: readonly Mission[] = Object.values(MISSIONS);
 const enemies: readonly Enemy[] = Object.values(ENEMIES);
 const items: readonly Item[] = Object.values(ITEMS);
+const ITEM_TABLE: Readonly<Record<string, Item | undefined>> = ITEMS;
 const lootTables: Readonly<Record<LootTableId, readonly LootEntry[]>> = LOOT_TABLES;
 const waves: Readonly<Record<WaveId, WaveDef<WaveId>>> = WAVES;
 const planetsById: Readonly<Record<PlanetId, PlanetDef>> = PLANETS;
@@ -478,12 +484,14 @@ describe('content invariants (SPEC-009 §7)', () => {
     expect(problems).toEqual([]);
   });
 
-  it('12. gear tiers are unique per slot, consumables stack, and tier-3 gear costs lithium', () => {
+  it('12. gear tiers are unique per line, consumables stack, and tier-3 gear costs lithium', () => {
     const problems: string[] = [];
     const seen = new Set<string>();
     for (const item of items) {
       if (item.kind === 'weapon' || item.kind === 'armor') {
-        const key = `${item.kind}:${item.tier}`;
+        // SPEC-025 §4.7: uniqueness is per *line* — a handgun and a rifle may
+        // both be tier 0, which is exactly what the starter sidearm needs.
+        const key = `${item.line}:${item.tier}`;
         if (seen.has(key)) problems.push(`${item.id}: a second ${key}`);
         seen.add(key);
         // PLAN §4: tiers 1–2 cost tokens, tier 3 costs tokens plus lithium.
@@ -498,7 +506,9 @@ describe('content invariants (SPEC-009 §7)', () => {
         if ((amount ?? 0) <= 0) problems.push(`${item.id}: costs ${amount} ${resource}`);
       }
     }
-    expect(seen).toEqual(new Set(['weapon:0', 'weapon:1', 'weapon:2', 'weapon:3', 'armor:0', 'armor:1', 'armor:2', 'armor:3']));
+    expect(seen).toEqual(
+      new Set(['handgun:0', 'rifle:0', 'rifle:1', 'rifle:2', 'rifle:3', 'armor:0', 'armor:1', 'armor:2', 'armor:3']),
+    );
     expect(problems).toEqual([]);
   });
 
@@ -612,6 +622,59 @@ describe('content invariants (SPEC-009 §7)', () => {
       expect(look.relief.bermHeight, planet.id).toBeLessThanOrEqual(10);
       for (const layer of look.ground.layers) expect(layerIds.has(layer), `${planet.id} layer ${layer}`).toBe(true);
     }
+  });
+
+  // SPEC-025 §4.7. The slot/line split is only safe while the two agree: a
+  // weapon hangs where its line says it does, both class starters are free
+  // tier-0 pieces of the right slot, and every consumable has a quick slot to
+  // sit in, so nothing SPEC-028 reaches for can come back undefined.
+  it('19. weapon slots follow their line, the class starters are free, and every consumable has a quick slot', () => {
+    const problems: string[] = [];
+    for (const item of items) {
+      if (item.kind !== 'weapon') continue;
+      const expected: string = SLOT_OF_LINE[item.line];
+      if (item.slot !== expected) problems.push(`${item.id}: a ${item.line} in the ${item.slot} slot, not ${expected}`);
+    }
+
+    for (const cls of Object.values(CLASSES)) {
+      for (const [what, id, slot] of [
+        ['startingWeapon', cls.startingWeapon, 'primary'],
+        ['startingSidearm', cls.startingSidearm, 'sidearm'],
+      ] as const) {
+        const item: Item | undefined = ITEM_TABLE[id];
+        if (item === undefined || item.kind !== 'weapon') {
+          problems.push(`${cls.id}.${what}: ${id} is not a weapon`);
+          continue;
+        }
+        if (item.slot !== slot) problems.push(`${cls.id}.${what}: ${id} is a ${item.slot}, not a ${slot}`);
+        if (item.tier !== 0) problems.push(`${cls.id}.${what}: ${id} is tier ${item.tier}, not 0`);
+        if (item.price !== null) problems.push(`${cls.id}.${what}: ${id} is for sale`);
+      }
+    }
+
+    const effectKinds = new Set<string>();
+    for (const item of items) {
+      if (item.kind !== 'consumable') continue;
+      effectKinds.add(item.effect.kind);
+      if (QUICK_SLOT_OF_EFFECT[item.effect.kind] === undefined) {
+        problems.push(`${item.id}: the ${item.effect.kind} effect has no quick slot`);
+      }
+    }
+    expect(new Set(Object.keys(QUICK_SLOT_OF_EFFECT))).toEqual(effectKinds);
+
+    for (const slot of QUICK_SLOTS) {
+      for (const id of QUICK_PREFERENCE[slot]) {
+        const item: Item | undefined = ITEM_TABLE[id];
+        if (item === undefined || item.kind !== 'consumable') {
+          problems.push(`QUICK_PREFERENCE.${slot}: ${id} is not a consumable`);
+          continue;
+        }
+        const use: string = QUICK_SLOT_OF_EFFECT[item.effect.kind];
+        if (use !== slot) problems.push(`QUICK_PREFERENCE.${slot}: ${id} belongs in ${use}`);
+      }
+    }
+
+    expect(problems).toEqual([]);
   });
 });
 

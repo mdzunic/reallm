@@ -14,7 +14,7 @@
 export const RESOURCE_IDS = ['oil', 'wheat', 'water', 'lithium'] as const;
 /**
  * Already a union, unlike the placeholder aliases this file used to carry:
- * `SaveV1.resources` is a `Record<ResourceId, number>` and SPEC-007's validator
+ * `Save.resources` is a `Record<ResourceId, number>` and SPEC-007's validator
  * clamps it key by key, neither of which means anything against a bare `string`.
  */
 export type ResourceId = (typeof RESOURCE_IDS)[number];

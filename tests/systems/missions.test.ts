@@ -6,7 +6,7 @@
 // to one ending, and the dev control that finishes a stage through the runtime.
 import { describe, expect, it } from 'vitest';
 import { EventBus, type GameEvents } from '@/core/Events';
-import { newSave, type SaveV1 } from '@/core/Save';
+import { newSave, type Save } from '@/core/Save';
 import { MISSIONS, TUNING, type PlanetId } from '@/data/index';
 import { Economy } from '@/systems/Economy';
 import { Missions, type MissionContext } from '@/systems/Missions';
@@ -27,7 +27,7 @@ const POIS: LayoutPoi[] = [
 ];
 
 interface Harness {
-  save: SaveV1;
+  save: Save;
   events: EventBus<GameEvents>;
   economy: Economy;
   missions: Missions;
@@ -39,7 +39,7 @@ interface Harness {
 }
 
 function harness(
-  patch?: (save: SaveV1) => void,
+  patch?: (save: Save) => void,
   scene: 'surface' | 'flight' = 'surface',
   planet: PlanetId = 'cinder4',
 ): Harness {

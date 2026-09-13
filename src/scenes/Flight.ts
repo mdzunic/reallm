@@ -14,7 +14,7 @@ import * as THREE from 'three';
 import type { EventBus, GameEvents } from '@/core/Events';
 import type { InputState } from '@/core/Input';
 import { log } from '@/core/Log';
-import { newSave, type CharacterCreation, type SaveV1 } from '@/core/Save';
+import { newSave, type CharacterCreation, type Save } from '@/core/Save';
 import type { GameServices } from '@/core/Services';
 import type { SceneParams } from '@/core/StateMachine';
 import { cargoCap, maxHp } from '@/core/Save';
@@ -72,7 +72,7 @@ export class FlightScene extends UiScene<'flight'> {
   protected override readonly ownsLighting = true;
 
   #planet: PlanetDef = PLANETS.cinder4;
-  #save: SaveV1 | null = null;
+  #save: Save | null = null;
   #ephemeralSave = false;
   #flight: Flight | null = null;
   #missions: Missions | null = null;
@@ -260,7 +260,7 @@ export class FlightScene extends UiScene<'flight'> {
    * card and nothing about the flight's timeline changes — a trip that ends
    * early takes the card with it through the `Disposer`.
    */
-  #showChapterCard(save: SaveV1): void {
+  #showChapterCard(save: Save): void {
     const services = this.services;
     const planet = this.#planet.id;
     const beats = director(services);

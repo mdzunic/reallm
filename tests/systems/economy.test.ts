@@ -8,8 +8,8 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { GameEvents } from '@/core/Events';
 import { setLogSink, type LogSink } from '@/core/Log';
-import { newSave, type CharacterCreation, type SaveV1 } from '@/core/Save';
-import { COMPANIONS, ITEMS, PLANETS, RECIPES, TUNING, UPGRADES, type RecipeId } from '@/data/index';
+import { newSave, type CharacterCreation, type Save } from '@/core/Save';
+import { COMPANIONS, ITEMS, PLANETS, RECIPES, TUNING, UPGRADES, type ItemId, type RecipeId } from '@/data/index';
 import {
   Economy,
   INVENTORY_SLOTS,
@@ -58,14 +58,14 @@ const MARINE: CharacterCreation = {
 };
 
 interface World {
-  data: SaveV1;
+  data: Save;
   events: Recorder;
   progression: Progression;
   economy: Economy;
   requested: string[];
 }
 
-function world(creation: CharacterCreation = MARINE, patch?: (data: SaveV1) => void): World {
+function world(creation: CharacterCreation = MARINE, patch?: (data: Save) => void): World {
   const data = newSave(0, creation, 42, 1_700_000_000_000);
   patch?.(data);
   const events = recorder();
@@ -76,7 +76,7 @@ function world(creation: CharacterCreation = MARINE, patch?: (data: SaveV1) => v
 }
 
 /** Exactly `INVENTORY_SLOTS` slots of rations, so nothing else fits. */
-function fillInventory(data: SaveV1): void {
+function fillInventory(data: Save): void {
   data.inventory = [{ itemId: 'wheat_ration', qty: ITEMS.wheat_ration.stack * INVENTORY_SLOTS }];
 }
 
@@ -263,27 +263,135 @@ describe('gear purchases (§4.3)', () => {
     const { economy, data, progression, events } = world();
     progression.addTokens(1000, 'test');
     economy.buyGear('weapon_laser');
-    expect(data.equipped.weapon).toBe('weapon_kinetic');
+    expect(data.equipped.primary).toBe('weapon_kinetic');
 
     expect(economy.equip('weapon_laser')).toEqual({ ok: true });
-    expect(data.equipped.weapon).toBe('weapon_laser');
+    expect(data.equipped.primary).toBe('weapon_laser');
     expect(economy.count('weapon_kinetic')).toBe(1); // the starter came off into the hold
     expect(economy.count('weapon_laser')).toBe(0);
-    expect(events.of('gear:equipped')).toEqual([{ slot: 'weapon', itemId: 'weapon_laser' }]);
+    expect(events.of('gear:equipped')).toEqual([{ slot: 'primary', itemId: 'weapon_laser' }]);
 
     // The next tier up is owned *because it is worn*: the prerequisite reads
     // the body as well as the hold, and the new tier lands in the hold (10-g).
     expect(economy.buyGear('weapon_plasma')).toEqual({ ok: true });
-    expect(data.equipped.weapon).toBe('weapon_laser');
+    expect(data.equipped.primary).toBe('weapon_laser');
     expect(economy.count('weapon_plasma')).toBe(1);
 
     // And back again, which is the same swap in the other direction.
     expect(economy.equip('weapon_kinetic')).toEqual({ ok: true });
-    expect(data.equipped.weapon).toBe('weapon_kinetic');
+    expect(data.equipped.primary).toBe('weapon_kinetic');
     expect(economy.count('weapon_laser')).toBe(1);
     // Nothing that is not gear, and nothing the hold does not carry.
     expect(economy.equip('medkit')).toEqual({ ok: false, reason: 'not_found' });
     expect(economy.equip('armor_reactive')).toEqual({ ok: false, reason: 'not_found' });
+  });
+
+  // ------------------------------------------------------ SPEC-025 §4.6
+
+  it('asks for the rung below on the same line, and nothing at the bottom of one', () => {
+    const { economy, progression } = world();
+    progression.addTokens(1000, 'test');
+    // The launcher line ships no items until SPEC-029, so two stand-ins prove
+    // the rule its ladder will lean on. The lowest rung for sale has nothing
+    // below it and owes nothing — not even to a save wearing the tier-0 rifle,
+    // because a rifle is not on the launcher's line.
+    withStandIns([LAUNCHER_T1, LAUNCHER_T2], () => {
+      expect(economy.buyGear(LAUNCHER_T2_ID)).toEqual({ ok: false, reason: 'prerequisite' });
+      expect(economy.buyGear(LAUNCHER_T1_ID)).toEqual({ ok: true });
+      expect(economy.buyGear(LAUNCHER_T2_ID)).toEqual({ ok: true });
+      expect(economy.count(LAUNCHER_T2_ID)).toBe(1);
+    });
+  });
+
+  it('the class starters are the bottom rung of their own lines and are not for sale', () => {
+    const { economy, data, progression } = world();
+    progression.addTokens(1000, 'test');
+    expect(data.equipped.sidearm).toBe('pistol_service');
+    expect(economy.buyGear('pistol_service')).toEqual({ ok: false, reason: 'not_found' });
+    expect(economy.buyGear('weapon_kinetic')).toEqual({ ok: false, reason: 'not_found' });
+    // Which is what makes the first rung above them the first thing anyone buys.
+    expect(economy.buyGear('weapon_laser')).toEqual({ ok: true });
+    expect(economy.buyGear('weapon_lithium')).toEqual({ ok: false, reason: 'prerequisite' });
+  });
+});
+
+// SPEC-025 §4.6. The heavy slot is the only one a save can land with empty, and
+// no launcher ships until SPEC-029 — so the "no swap" branch is exercised
+// against a stand-in installed in the item table for the length of one test.
+const LAUNCHER_T1 = {
+  id: 'launcher_test_1',
+  name: 'Test Launcher',
+  kind: 'weapon',
+  slot: 'heavy',
+  line: 'launcher',
+  tier: 1,
+  damage: 40,
+  fireRate: 0.5,
+  projectileSpeed: 18,
+  range: 20,
+  pierce: 0,
+  energy: false,
+  price: { tokens: 40 },
+  model: 'procedural',
+  blurb: 'A stand-in for the launcher line SPEC-029 lands.',
+} as const;
+
+const LAUNCHER_T2 = {
+  ...LAUNCHER_T1,
+  id: 'launcher_test_2',
+  name: 'Test Launcher II',
+  tier: 2,
+  price: { tokens: 80 },
+} as const;
+
+/** The stand-in ids, widened into the shipped union for the call sites. */
+const LAUNCHER_T1_ID = LAUNCHER_T1.id as unknown as ItemId;
+const LAUNCHER_T2_ID = LAUNCHER_T2.id as unknown as ItemId;
+
+function withStandIns(items: readonly (typeof LAUNCHER_T1 | typeof LAUNCHER_T2)[], run: () => void): void {
+  const table = ITEMS as unknown as Record<string, unknown>;
+  for (const item of items) table[item.id] = item;
+  try {
+    run();
+  } finally {
+    for (const item of items) delete table[item.id];
+  }
+}
+
+describe('equipping into the three weapon slots (SPEC-025 §4.6)', () => {
+  it('sends a weapon to the slot it names, not to the one it replaces', () => {
+    const { economy, data, events } = world();
+    economy.addItem('weapon_laser', 1);
+    expect(economy.equip('weapon_laser')).toEqual({ ok: true });
+    expect(data.equipped.primary).toBe('weapon_laser');
+    // The sidearm is untouched: a rifle has nowhere else to go.
+    expect(data.equipped.sidearm).toBe('pistol_service');
+    expect(events.of('gear:equipped')).toEqual([{ slot: 'primary', itemId: 'weapon_laser' }]);
+  });
+
+  it('swaps the piece already in that slot back into the hold', () => {
+    const { economy, data } = world();
+    economy.addItem('armor_composite', 1);
+    expect(economy.equip('armor_composite')).toEqual({ ok: true });
+    expect(data.equipped.armor).toBe('armor_composite');
+    expect(economy.count('armor_scrap')).toBe(1);
+    expect(economy.count('armor_composite')).toBe(0);
+  });
+
+  it('takes an empty heavy slot with no swap at all', () => {
+    const { economy, data, events, requested } = world();
+    expect(data.equipped.heavy).toBeNull();
+    withStandIns([LAUNCHER_T1], () => {
+      economy.addItem(LAUNCHER_T1_ID, 1);
+      const before = data.inventory.length;
+      expect(economy.equip(LAUNCHER_T1_ID)).toEqual({ ok: true });
+      expect(data.equipped.heavy).toBe(LAUNCHER_T1.id);
+      // Nothing came off the body, so the hold is one entry lighter, not level.
+      expect(data.inventory).toHaveLength(before - 1);
+      expect(economy.count(LAUNCHER_T1_ID)).toBe(0);
+      expect(events.of('gear:equipped')).toEqual([{ slot: 'heavy', itemId: LAUNCHER_T1.id }]);
+      expect(requested).toContain('purchase');
+    });
   });
 });
 
@@ -755,7 +863,7 @@ describe('totals()', () => {
   it('reports what the save has bought', () => {
     const { economy } = world(MARINE, (save) => {
       save.ship = { engine: 1, hull: 2, shield: 2, cargo: 0, weapon: 1 };
-      save.equipped = { weapon: 'weapon_plasma', armor: 'armor_scrap' };
+      save.equipped = { armor: 'armor_scrap', sidearm: 'pistol_service', primary: 'weapon_plasma', heavy: null };
       save.companions.push({ id: 'scanner_drone', level: 2, enabled: true });
     });
     expect(economy.totals()).toEqual({

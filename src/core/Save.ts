@@ -31,21 +31,28 @@ import {
   COMPANION_IDS,
   ITEMS,
   MISSIONS,
+  PLANETS,
   PLANET_IDS,
+  QUICK_PREFERENCE,
+  QUICK_SLOTS,
+  QUICK_SLOT_OF_EFFECT,
   RESOURCE_IDS,
   SHIP_SYSTEMS,
   STORY_FLAGS,
   TUNING,
+  WEAPON_SLOTS,
   type ClassId,
   type CompanionId,
   type ItemId,
   type MissionId,
   type PlanetId,
+  type QuickSlot,
   type ResourceId,
   type ShipSystem,
+  type WeaponSlot,
 } from '@/data/index';
 
-export const SAVE_VERSION = 1 as const;
+export const SAVE_VERSION = 2 as const;
 
 /** `reallm:slot:{n}` and `reallm:slot:{n}:bak`; settings live in their own key. */
 export const SLOT_KEY_PREFIX = 'reallm:slot:';
@@ -99,6 +106,12 @@ const IMMEDIATE_REASONS: readonly SaveReason[] = ['pagehide', 'manual'];
 
 // ------------------------------------------------------------------- schema
 
+/**
+ * The shape the game shipped with, kept because the v1 → v2 step of §4.3 has to
+ * name what it is migrating *from* and because every field version 2 did not
+ * touch is declared here once. Nothing outside this module and its own suite
+ * names it: the game imports `Save`.
+ */
 export interface SaveV1 {
   version: 1;
   meta: {
@@ -143,6 +156,38 @@ export interface SaveV1 {
   };
 }
 
+/**
+ * SPEC-025 §3. Version 2 is the one PLAN R10 needs: three weapon slots, three
+ * consumable quick slots and a per-planet bitset of the ground that has been
+ * walked. Everything else is `SaveV1`'s, named through it rather than copied,
+ * so a later bump has one place to diverge from.
+ *
+ * `heavy` may be empty; `sidearm` and `primary` never are — firing always has
+ * something in hand (§2). A quick slot stores an id, not a stack: the inventory
+ * stays the one source of counts.
+ */
+export interface SaveV2 {
+  version: 2;
+  meta: SaveV1['meta'];
+  player: SaveV1['player'];
+  resources: Record<ResourceId, number>;
+  inventory: { itemId: ItemId; qty: number }[];
+  equipped: { armor: ItemId; sidearm: ItemId; primary: ItemId; heavy: ItemId | null };
+  activeWeapon: WeaponSlot;
+  quick: Record<QuickSlot, ItemId | null>;
+  ship: Record<ShipSystem, 0 | 1 | 2 | 3>;
+  companions: { id: CompanionId; level: 1 | 2 | 3; enabled: boolean }[];
+  /** `explored` is one base64url bitset per visited planet (§4.5). */
+  progress: SaveV1['progress'] & { explored: Partial<Record<PlanetId, string>> };
+}
+
+/**
+ * The version the game is written against (§2). A later bump moves this alias
+ * instead of thirty imports, which is why nothing outside this module and its
+ * own suite names a numbered save type.
+ */
+export type Save = SaveV2;
+
 export interface SlotSummary {
   slot: SlotId;
   empty: boolean;
@@ -170,8 +215,54 @@ export interface CharacterCreation {
 }
 
 export type LoadResult =
-  | { ok: true; data: SaveV1; migratedFrom?: number; source: 'main' | 'bak' }
+  | { ok: true; data: Save; migratedFrom?: number; source: 'main' | 'bak' }
   | { ok: false; reason: 'empty' | 'corrupt' | 'newer_version' | 'unavailable'; errors?: string[]; foundVersion?: number };
+
+// ------------------------------------------------------- explored ground
+
+/**
+ * SPEC-025 §4.5. A planet's explored ground is one bit per 4 m cell over
+ * `[−halfSize, halfSize)` on both axes, stored least-significant-bit first and
+ * written as unpadded base64url. Six planets cost about 9 KB of text — far
+ * inside the 100 KB a save is allowed. Revealing and drawing it is SPEC-026's.
+ */
+export const EXPLORE_CELL = 4;
+
+/** Cells per axis: `ceil(2 · halfSize / 4)` — 90 on a 180 m arena. */
+export function exploreGridSize(halfSize: number): number {
+  return Math.ceil((2 * halfSize) / EXPLORE_CELL);
+}
+
+/** Bytes in one planet's bitset: `ceil(n² / 8)` — 1013 at halfSize 180. */
+export function exploreBytes(halfSize: number): number {
+  const n = exploreGridSize(halfSize);
+  return Math.ceil((n * n) / 8);
+}
+
+/** The base64url alphabet, so `decodeBits` refuses `+` and `/` before `atob` sees them. */
+const BASE64URL = /^[A-Za-z0-9_-]*$/;
+
+/** §4.5: unpadded base64url, the same encoding the export codes use. */
+export function encodeBits(bytes: Uint8Array): string {
+  return toBase64Url(bytes);
+}
+
+/**
+ * §4.5: the bytes of `text`, or `null` when it is not base64url or does not
+ * decode to exactly `length` bytes — an arena whose size changed leaves a mask
+ * of the wrong length behind, and a wrong-length mask is a mask for nowhere
+ * (E37).
+ */
+export function decodeBits(text: string, length: number): Uint8Array | null {
+  if (typeof text !== 'string' || !BASE64URL.test(text)) return null;
+  let bytes: Uint8Array;
+  try {
+    bytes = fromBase64Url(text);
+  } catch {
+    return null;
+  }
+  return bytes.length === length ? bytes : null;
+}
 
 // ------------------------------------------------------------------ content
 
@@ -195,6 +286,16 @@ export interface SaveContent {
   /** SPEC-009 §4.2: the weapon a class starts with. */
   readonly starterWeapon: Readonly<Record<ClassId, ItemId>>;
   readonly starterArmor: ItemId;
+  /** SPEC-025 §4.2: the sidearm a class starts with — the Service Pistol. */
+  readonly starterSidearm: Readonly<Record<ClassId, ItemId>>;
+  /** The slot a weapon hangs in, `null` for everything that is not a weapon. */
+  readonly weaponSlot: Readonly<Record<ItemId, WeaponSlot | null>>;
+  /** The quick slot a consumable belongs in, `null` for everything else. */
+  readonly quickUse: Readonly<Record<ItemId, QuickSlot | null>>;
+  /** The refill order of each quick slot, best first (§4.3). */
+  readonly quickPreference: Readonly<Record<QuickSlot, readonly ItemId[]>>;
+  /** Arena half-extents, for the bitset length `explored` is checked against. */
+  readonly planetHalfSize: Readonly<Record<PlanetId, number>>;
 }
 
 const ITEM_IDS = Object.keys(ITEMS) as ItemId[];
@@ -234,6 +335,34 @@ const CLASS_STARTER_WEAPON: Record<ClassId, ItemId> = {
   scout: CLASSES.scout.startingWeapon,
 };
 
+/** SPEC-025 §4.2: the sidearm each class lands with. */
+const CLASS_STARTER_SIDEARM: Record<ClassId, ItemId> = {
+  marine: CLASSES.marine.startingSidearm,
+  engineer: CLASSES.engineer.startingSidearm,
+  scout: CLASSES.scout.startingSidearm,
+};
+
+/** SPEC-025 §4.4: the slot a weapon may be equipped into, else `null`. */
+const WEAPON_SLOT_OF_ITEM: Record<ItemId, WeaponSlot | null> = Object.fromEntries(
+  ITEM_IDS.map((id) => {
+    const item = ITEMS[id];
+    return [id, item.kind === 'weapon' ? item.slot : null];
+  }),
+) as Record<ItemId, WeaponSlot | null>;
+
+/** SPEC-025 §4.4: the quick slot a consumable may sit in, else `null`. */
+const QUICK_USE_OF_ITEM: Record<ItemId, QuickSlot | null> = Object.fromEntries(
+  ITEM_IDS.map((id) => {
+    const item = ITEMS[id];
+    return [id, item.kind === 'consumable' ? QUICK_SLOT_OF_EFFECT[item.effect.kind] : null];
+  }),
+) as Record<ItemId, QuickSlot | null>;
+
+/** SPEC-025 §4.5: the arena half-extent every planet's bitset is sized from. */
+const PLANET_HALF_SIZE: Record<PlanetId, number> = Object.fromEntries(
+  PLANET_IDS.map((id) => [id, PLANETS[id].surface.halfSize]),
+) as Record<PlanetId, number>;
+
 export const SAVE_CONTENT: SaveContent = {
   items: ITEM_IDS,
   weapons: WEAPON_IDS,
@@ -243,6 +372,11 @@ export const SAVE_CONTENT: SaveContent = {
   classBase: CLASS_BASE,
   starterWeapon: CLASS_STARTER_WEAPON,
   starterArmor: STARTER_ARMOR,
+  starterSidearm: CLASS_STARTER_SIDEARM,
+  weaponSlot: WEAPON_SLOT_OF_ITEM,
+  quickUse: QUICK_USE_OF_ITEM,
+  quickPreference: QUICK_PREFERENCE,
+  planetHalfSize: PLANET_HALF_SIZE,
 };
 
 /** PLAN §4: 5 points over the class base, allocated at creation only. */
@@ -254,7 +388,7 @@ export const CREATION_POINTS = 5;
  */
 const CARGO_BY_TIER: readonly number[] = [TUNING.CARGO_BASE, 600, 800, 1200];
 
-export function cargoCap(ship: Pick<SaveV1['ship'], 'cargo'>): number {
+export function cargoCap(ship: Pick<Save['ship'], 'cargo'>): number {
   return CARGO_BY_TIER[ship.cargo] ?? TUNING.CARGO_BASE;
 }
 
@@ -285,7 +419,7 @@ export const STARTING_RESOURCES: Readonly<Record<ResourceId, number>> = {
   lithium: 0,
 };
 
-export function newSave(slot: SlotId, creation: CharacterCreation, seed: number, now: number): SaveV1 {
+export function newSave(slot: SlotId, creation: CharacterCreation, seed: number, now: number): Save {
   const attributes = { ...creation.attributes };
   const level = 1;
   return {
@@ -312,7 +446,17 @@ export function newSave(slot: SlotId, creation: CharacterCreation, seed: number,
     },
     resources: { ...STARTING_RESOURCES },
     inventory: [{ itemId: WHEAT_RATION, qty: 3 }],
-    equipped: { weapon: SAVE_CONTENT.starterWeapon[creation.classId], armor: SAVE_CONTENT.starterArmor },
+    equipped: {
+      armor: SAVE_CONTENT.starterArmor,
+      sidearm: SAVE_CONTENT.starterSidearm[creation.classId],
+      primary: SAVE_CONTENT.starterWeapon[creation.classId],
+      // SPEC-025 §2: launchers are bought, so a fresh salvager carries none.
+      heavy: null,
+    },
+    activeWeapon: 'primary',
+    // The three rations the save lands with are the one quick slot that fills
+    // itself; SPEC-028 fills the rest as the items are picked up.
+    quick: { heal: WHEAT_RATION, explosive: null, utility: null },
     ship: { engine: 0, hull: 0, shield: 0, cargo: 0, weapon: 0 },
     companions: [{ id: 'aria', level: 1, enabled: true }],
     progress: {
@@ -324,6 +468,7 @@ export function newSave(slot: SlotId, creation: CharacterCreation, seed: number,
       poisDiscovered: [],
       visits: {},
       endingSeen: false,
+      explored: {},
     },
   };
 }
@@ -383,7 +528,7 @@ export function normalizeName(value: unknown): string {
 export function validateSave(
   raw: unknown,
   content: SaveContent = SAVE_CONTENT,
-): { ok: true; data: SaveV1; warnings: string[] } | { ok: false; errors: string[] } {
+): { ok: true; data: Save; warnings: string[] } | { ok: false; errors: string[] } {
   const errors: string[] = [];
   const warnings: string[] = [];
   try {
@@ -408,6 +553,8 @@ export function validateSave(
     const resources = validateResources(bagAt(raw, 'resources'), cap, warnings);
     const inventory = validateInventory(arrayAt(raw, 'inventory'), content, warnings);
     const equipped = validateEquipped(bagAt(raw, 'equipped'), classId, content, warnings);
+    const activeWeapon = validateActiveWeapon(raw['activeWeapon'], equipped, warnings);
+    const quick = validateQuick(bagAt(raw, 'quick'), content, warnings);
     const companions = validateCompanions(arrayAt(raw, 'companions'), warnings);
     const progress = validateProgress(bagAt(raw, 'progress'), content, warnings);
 
@@ -420,7 +567,19 @@ export function validateSave(
 
     return {
       ok: true,
-      data: { version: SAVE_VERSION, meta, player, resources, inventory, equipped, ship, companions, progress },
+      data: {
+        version: SAVE_VERSION,
+        meta,
+        player,
+        resources,
+        inventory,
+        equipped,
+        activeWeapon,
+        quick,
+        ship,
+        companions,
+        progress,
+      },
       warnings,
     };
   } catch (error) {
@@ -430,7 +589,7 @@ export function validateSave(
   }
 }
 
-function validateMeta(raw: Bag, warnings: string[]): SaveV1['meta'] {
+function validateMeta(raw: Bag, warnings: string[]): Save['meta'] {
   const slot = int(raw['slot'], 0, 0, 2) as SlotId;
   if (raw['slot'] !== slot) warnings.push(`meta.slot: ${JSON.stringify(raw['slot'])} clamped to ${slot}`);
   const iteration = int(raw['iteration'], 1, 1, 99);
@@ -452,7 +611,7 @@ function validateMeta(raw: Bag, warnings: string[]): SaveV1['meta'] {
   };
 }
 
-function validatePlayer(raw: Bag, classId: ClassId, content: SaveContent, warnings: string[]): SaveV1['player'] {
+function validatePlayer(raw: Bag, classId: ClassId, content: SaveContent, warnings: string[]): Save['player'] {
   const name = normalizeName(raw['name']);
   if (name !== raw['name']) warnings.push(`player.name: ${JSON.stringify(raw['name'])} normalised to "${name}"`);
   const level = int(raw['level'], 1, 1, TUNING.LEVEL_CAP);
@@ -502,8 +661,8 @@ function validateAttributes(raw: Bag, classId: ClassId, content: SaveContent, wa
   return out;
 }
 
-function validateShip(raw: Bag, warnings: string[]): SaveV1['ship'] {
-  const out = {} as SaveV1['ship'];
+function validateShip(raw: Bag, warnings: string[]): Save['ship'] {
+  const out = {} as Save['ship'];
   for (const system of SHIP_SYSTEMS) {
     const tier = int(raw[system], 0, 0, 3) as 0 | 1 | 2 | 3;
     if (raw[system] !== undefined && raw[system] !== tier) {
@@ -514,8 +673,8 @@ function validateShip(raw: Bag, warnings: string[]): SaveV1['ship'] {
   return out;
 }
 
-function validateResources(raw: Bag, cap: number, warnings: string[]): SaveV1['resources'] {
-  const out = {} as SaveV1['resources'];
+function validateResources(raw: Bag, cap: number, warnings: string[]): Save['resources'] {
+  const out = {} as Save['resources'];
   for (const resource of RESOURCE_IDS) {
     const held = clamp(Math.round(num(raw[resource], 0)), 0, cap);
     if (raw[resource] !== undefined && raw[resource] !== held) {
@@ -529,7 +688,7 @@ function validateResources(raw: Bag, cap: number, warnings: string[]): SaveV1['r
   return out;
 }
 
-function validateInventory(raw: unknown[], content: SaveContent, warnings: string[]): SaveV1['inventory'] {
+function validateInventory(raw: unknown[], content: SaveContent, warnings: string[]): Save['inventory'] {
   const byId = new Map<ItemId, number>();
   for (const entry of raw) {
     if (!isBag(entry)) continue;
@@ -551,22 +710,81 @@ function validateInventory(raw: unknown[], content: SaveContent, warnings: strin
   return [...byId].map(([itemId, qty]) => ({ itemId, qty }));
 }
 
-function validateEquipped(raw: Bag, classId: ClassId, content: SaveContent, warnings: string[]): SaveV1['equipped'] {
-  const weapon = raw['weapon'];
+/**
+ * SPEC-025 §4.4. Each of the three weapon slots takes a weapon whose own `slot`
+ * is that one, and nothing else: the rifle a hand-edited save put in `sidearm`
+ * fails the check and the class starter takes its place (25-e). `heavy` may be
+ * empty and falls back to empty — the item is *not* put back into the
+ * inventory, because only corrupt data reaches this rule and the validator
+ * never invents items.
+ */
+function validateEquipped(raw: Bag, classId: ClassId, content: SaveContent, warnings: string[]): Save['equipped'] {
+  const slotOf = (value: unknown): WeaponSlot | null => {
+    if (typeof value !== 'string' || !Object.hasOwn(content.weaponSlot, value)) return null;
+    return (content.weaponSlot as Readonly<Record<string, WeaponSlot | null>>)[value] ?? null;
+  };
+
   const armor = raw['armor'];
-  const okWeapon = typeof weapon === 'string' && (content.weapons as readonly string[]).includes(weapon);
   const okArmor = typeof armor === 'string' && (content.armors as readonly string[]).includes(armor);
-  if (!okWeapon) warnings.push(`equipped.weapon: unknown ${JSON.stringify(weapon)} fell back to the class starter`);
   if (!okArmor) warnings.push(`equipped.armor: unknown ${JSON.stringify(armor)} fell back to the class starter`);
+
+  const sidearm = raw['sidearm'];
+  const okSidearm = slotOf(sidearm) === 'sidearm';
+  if (!okSidearm) warnings.push(`equipped.sidearm: ${JSON.stringify(sidearm)} is not a sidearm; fell back to the class starter`);
+
+  const primary = raw['primary'];
+  const okPrimary = slotOf(primary) === 'primary';
+  if (!okPrimary) warnings.push(`equipped.primary: ${JSON.stringify(primary)} is not a primary; fell back to the class starter`);
+
+  const heavy = raw['heavy'];
+  const okHeavy = heavy === null || heavy === undefined ? null : slotOf(heavy) === 'heavy' ? (heavy as ItemId) : undefined;
+  if (okHeavy === undefined) warnings.push(`equipped.heavy: ${JSON.stringify(heavy)} is not a heavy weapon; the slot was emptied`);
+
   return {
-    weapon: okWeapon ? (weapon as ItemId) : content.starterWeapon[classId],
     armor: okArmor ? (armor as ItemId) : content.starterArmor,
+    sidearm: okSidearm ? (sidearm as ItemId) : content.starterSidearm[classId],
+    primary: okPrimary ? (primary as ItemId) : content.starterWeapon[classId],
+    heavy: okHeavy ?? null,
   };
 }
 
-function validateCompanions(raw: unknown[], warnings: string[]): SaveV1['companions'] {
+/** §4.4: one of `WEAPON_SLOTS` naming a filled slot, else `'primary'` (25-c). */
+function validateActiveWeapon(raw: unknown, equipped: Save['equipped'], warnings: string[]): WeaponSlot {
+  const slot = oneOf(raw, WEAPON_SLOTS, 'primary');
+  if (slot !== 'heavy' || equipped.heavy !== null) {
+    if (raw !== slot) warnings.push(`activeWeapon: ${JSON.stringify(raw)} fell back to the primary slot`);
+    return slot;
+  }
+  warnings.push('activeWeapon: the heavy slot is empty; fell back to the primary slot');
+  return 'primary';
+}
+
+/**
+ * §4.4: each quick slot holds `null` or a consumable whose effect belongs in
+ * that slot; anything else is emptied. A valid id the hold carries none of
+ * stays — SPEC-028 shows it as empty and refills it (25-d).
+ */
+function validateQuick(raw: Bag, content: SaveContent, warnings: string[]): Save['quick'] {
+  const out = {} as Save['quick'];
+  for (const slot of QUICK_SLOTS) {
+    const value = raw[slot];
+    const use =
+      typeof value === 'string' && Object.hasOwn(content.quickUse, value)
+        ? ((content.quickUse as Readonly<Record<string, QuickSlot | null>>)[value] ?? null)
+        : null;
+    if (use === slot) {
+      out[slot] = value as ItemId;
+      continue;
+    }
+    if (value !== null && value !== undefined) warnings.push(`quick.${slot}: ${JSON.stringify(value)} does not belong there; the slot was emptied`);
+    out[slot] = null;
+  }
+  return out;
+}
+
+function validateCompanions(raw: unknown[], warnings: string[]): Save['companions'] {
   const seen = new Set<CompanionId>();
-  const out: SaveV1['companions'] = [];
+  const out: Save['companions'] = [];
   for (const entry of raw) {
     if (!isBag(entry)) continue;
     const id = entry['id'];
@@ -602,7 +820,7 @@ function missionStages(content: SaveContent, id: unknown): number | undefined {
   return typeof stages === 'number' && Number.isFinite(stages) ? stages : undefined;
 }
 
-function validateProgress(raw: Bag, content: SaveContent, warnings: string[]): SaveV1['progress'] {
+function validateProgress(raw: Bag, content: SaveContent, warnings: string[]): Save['progress'] {
   const missionsDone = uniqueStrings(arrayAt(raw, 'missionsDone')).filter((id) => {
     if (missionStages(content, id) !== undefined) return true;
     warnings.push(`progress.missionsDone: unknown mission ${JSON.stringify(id)} dropped`);
@@ -610,7 +828,7 @@ function validateProgress(raw: Bag, content: SaveContent, warnings: string[]): S
   }) as MissionId[];
   const done = new Set<string>(missionsDone);
 
-  const missionsActive: SaveV1['progress']['missionsActive'] = [];
+  const missionsActive: Save['progress']['missionsActive'] = [];
   const activeSeen = new Set<string>();
   for (const entry of arrayAt(raw, 'missionsActive')) {
     if (!isBag(entry)) continue;
@@ -668,7 +886,32 @@ function validateProgress(raw: Bag, content: SaveContent, warnings: string[]): S
     poisDiscovered: uniqueStrings(arrayAt(raw, 'poisDiscovered')),
     visits,
     endingSeen: raw['endingSeen'] === true,
+    explored: validateExplored(bagAt(raw, 'explored'), content, warnings),
   };
+}
+
+/**
+ * SPEC-025 §4.4: an `explored` entry survives only for a planet we ship whose
+ * value decodes to exactly the bitset that planet's arena needs. An arena that
+ * was resized leaves a mask of the wrong length behind, and that planet simply
+ * starts dark again (E37).
+ */
+function validateExplored(raw: Bag, content: SaveContent, warnings: string[]): Partial<Record<PlanetId, string>> {
+  const out: Partial<Record<PlanetId, string>> = {};
+  for (const [key, value] of Object.entries(raw)) {
+    if (!(PLANET_IDS as readonly string[]).includes(key)) {
+      warnings.push(`progress.explored.${key}: unknown planet dropped`);
+      continue;
+    }
+    const planet = key as PlanetId;
+    const bytes = typeof value === 'string' ? decodeBits(value, exploreBytes(content.planetHalfSize[planet])) : null;
+    if (bytes === null) {
+      warnings.push(`progress.explored.${planet}: the explored mask is not the size of this arena and was dropped`);
+      continue;
+    }
+    out[planet] = value as string;
+  }
+  return out;
 }
 
 function validateCounters(raw: Bag): Record<string, number> {
@@ -729,11 +972,47 @@ const MIGRATIONS: Record<number, (raw: Bag) => Bag> = {
       progress: { ...bagAt(raw, 'progress'), visits: {}, endingSeen: false },
     };
   },
+  // SPEC-025 §4.3 (E38): the old weapon becomes the primary, the class starter
+  // fills the sidearm, and the heal and utility quick slots take the best thing
+  // the hold already carries. Only a reshape — `validateSave` hardens it, which
+  // is what sends an unknown weapon id back to the class starter (25-a).
+  1: (raw: Bag): Bag => {
+    const equipped = bagAt(raw, 'equipped');
+    const player = bagAt(raw, 'player');
+    const classId = player['classId'];
+    const starter =
+      typeof classId === 'string' && Object.hasOwn(SAVE_CONTENT.starterSidearm, classId)
+        ? SAVE_CONTENT.starterSidearm[classId as ClassId]
+        : 'pistol_service';
+    const carried = new Set<string>();
+    for (const entry of arrayAt(raw, 'inventory')) {
+      if (!isBag(entry)) continue;
+      const itemId = entry['itemId'];
+      if (typeof itemId === 'string' && num(entry['qty'], 0) > 0) carried.add(itemId);
+    }
+    const fromPack = (slot: QuickSlot): ItemId | null =>
+      SAVE_CONTENT.quickPreference[slot].find((itemId) => carried.has(itemId)) ?? null;
+    return {
+      ...raw,
+      version: 2,
+      equipped: {
+        armor: equipped['armor'],
+        sidearm: starter,
+        primary: equipped['weapon'],
+        heavy: null,
+      },
+      activeWeapon: 'primary',
+      // 25-b: a pack with no heal item leaves the slot empty; SPEC-028 fills it
+      // at the next pickup. Explosives have nothing to fill them with yet.
+      quick: { heal: fromPack('heal'), explosive: null, utility: fromPack('utility') },
+      progress: { ...bagAt(raw, 'progress'), explored: {} },
+    };
+  },
 };
 
 export function migrate(
   raw: { version: number } & Record<string, unknown>,
-): { ok: true; data: SaveV1; from: number } | { ok: false; reason: 'newer_version' | 'unknown_version' } {
+): { ok: true; data: Save; from: number } | { ok: false; reason: 'newer_version' | 'unknown_version' } {
   const from = raw.version;
   if (typeof from !== 'number' || !Number.isInteger(from) || from < 0) return { ok: false, reason: 'unknown_version' };
   if (from > SAVE_VERSION) return { ok: false, reason: 'newer_version' };
@@ -744,7 +1023,7 @@ export function migrate(
     current = step(current);
   }
   // The shape is only claimed here; `validateSave` is what hardens it (§4.3).
-  return { ok: true, data: current as unknown as SaveV1, from };
+  return { ok: true, data: current as unknown as Save, from };
 }
 
 // ------------------------------------------------------------ export codes
@@ -1019,7 +1298,7 @@ export class SaveStore {
   /** E8: false → memory-only. The probe of §3 is what decides it. */
   readonly available: boolean;
 
-  #current: SaveV1 | null = null;
+  #current: Save | null = null;
   #pending: SaveReason | null = null;
   /** The *first* request of a burst, so a stream of them still writes on time. */
   #pendingSince = 0;
@@ -1066,7 +1345,7 @@ export class SaveStore {
 
   // ------------------------------------------------------------------ slots
 
-  get current(): SaveV1 | null {
+  get current(): Save | null {
     return this.#current;
   }
 
@@ -1135,7 +1414,7 @@ export class SaveStore {
   #parse(
     raw: string,
   ):
-    | { ok: true; data: SaveV1; from: number }
+    | { ok: true; data: Save; from: number }
     | { ok: false; reason: 'corrupt' | 'newer_version'; errors: string[]; foundVersion?: number } {
     let parsed: unknown;
     try {
@@ -1161,7 +1440,7 @@ export class SaveStore {
   }
 
   /** Writes immediately, with reason `'new'` (§3). */
-  create(slot: SlotId, creation: CharacterCreation, seed?: number): SaveV1 {
+  create(slot: SlotId, creation: CharacterCreation, seed?: number): Save {
     const resolved = seed ?? seedFromLocation() ?? randomSeed();
     const data = newSave(slot, creation, resolved, this.#stamp());
     this.bind(data);
@@ -1170,7 +1449,7 @@ export class SaveStore {
   }
 
   /** The live save the game mutates; `request()`/`flush()` serialize it (§3). */
-  bind(data: SaveV1): void {
+  bind(data: Save): void {
     this.#current = data;
     this.#pending = null;
   }
@@ -1289,7 +1568,7 @@ export class SaveStore {
     return this.#fail(slot, first);
   }
 
-  #succeed(slot: SlotId, reason: SaveReason, data: SaveV1): boolean {
+  #succeed(slot: SlotId, reason: SaveReason, data: Save): boolean {
     this.#events.emit('save:written', { slot, reason });
     this.#afterWrite(data);
     return true;
@@ -1335,7 +1614,7 @@ export class SaveStore {
   // ------------------------------------------------------- persistence hints
 
   /** §4.7: persistence is asked for once a session, the hint once a fortnight. */
-  #afterWrite(data: SaveV1): void {
+  #afterWrite(data: Save): void {
     if (!this.#persistAsked) {
       this.#persistAsked = true;
       this.#requestPersistence();

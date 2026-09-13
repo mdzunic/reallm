@@ -2,7 +2,7 @@
 // `ui/Minimap.ts` only strokes what these functions decide; tests stay on the
 // pure side per SPEC-001 §4.
 import { describe, expect, it } from 'vitest';
-import { newSave, type CharacterCreation, type SaveV1 } from '@/core/Save';
+import { newSave, type CharacterCreation, type Save } from '@/core/Save';
 import {
   MINIMAP_ENEMY_RANGE,
   MINIMAP_RIM,
@@ -14,7 +14,7 @@ import {
 
 const point = (): MinimapPoint => ({ x: 0, y: 0, inside: true, angle: 0 });
 
-function save(classId: 'marine' | 'scout'): SaveV1 {
+function save(classId: 'marine' | 'scout'): Save {
   const creation: CharacterCreation = {
     name: 'T',
     classId,
@@ -70,9 +70,9 @@ describe('hasNodeRadar (AC-58)', () => {
     const s = save('marine');
     s.companions.push({ id: 'scanner_drone', level: 1, enabled: true });
     expect(hasNodeRadar(s)).toBe(false);
-    (s.companions[s.companions.length - 1] as SaveV1['companions'][number]).level = 2;
+    (s.companions[s.companions.length - 1] as Save['companions'][number]).level = 2;
     expect(hasNodeRadar(s)).toBe(true);
-    (s.companions[s.companions.length - 1] as SaveV1['companions'][number]).enabled = false;
+    (s.companions[s.companions.length - 1] as Save['companions'][number]).enabled = false;
     expect(hasNodeRadar(s)).toBe(false);
   });
 });

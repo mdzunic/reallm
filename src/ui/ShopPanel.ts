@@ -5,7 +5,7 @@
 // `failText` reason; and every purchase runs through a confirm sheet whose
 // confirm tap *re-validates* — a level-up toast changing the balance mid-sheet
 // ends in an error toast and an open sheet, never a silent charge (14-c).
-import type { SaveStore, SaveV1 } from '@/core/Save';
+import type { Save, SaveStore } from '@/core/Save';
 import {
   COMPANIONS,
   ITEMS,
@@ -17,7 +17,7 @@ import {
   type RecipeId,
   type ShipSystem,
 } from '@/data/index';
-import type { Item, ShipSystemDef } from '@/data/index';
+import type { GearLine, Item, ShipSystemDef } from '@/data/index';
 import type { Economy, Result } from '@/systems/Economy';
 import { companionEffectText, failText, priceText } from '@/systems/UiHelpers';
 import { confirmSheet } from '@/ui/ConfirmSheet';
@@ -34,10 +34,21 @@ function tierOf(item: Item): number {
   return item.kind === 'weapon' || item.kind === 'armor' ? item.tier : 0;
 }
 
+/**
+ * SPEC-025 §4.8: the shelf runs line by line, in the order a salvager climbs
+ * them — the sidearm ladder, then the rifles, then armor. A line with no items
+ * on the shelf yet simply contributes no rows.
+ */
+const LINE_ORDER: readonly GearLine[] = ['handgun', 'rifle', 'machine_gun', 'launcher', 'armor'];
+
+function lineOf(item: Item): GearLine | null {
+  return item.kind === 'consumable' ? null : item.line;
+}
+
 export interface ShopDeps {
   ui: UiRoot;
   save: SaveStore;
-  data: SaveV1;
+  data: Save;
   economy: Economy;
 }
 
@@ -143,18 +154,20 @@ export class ShopPanel {
 
   // ------------------------------------------------------------------- gear
 
-  /** AC-38: weapons then armor, tier order, with owned/equipped badges. */
+  /** AC-38: line by line, tier order inside a line, with owned/equipped badges. */
   #gearRows(): HTMLElement[] {
     const { data, economy } = this.#deps;
     const gear = ITEM_IDS.filter((id) => ITEMS[id].kind === 'weapon' || ITEMS[id].kind === 'armor').sort((a, b) => {
       const ia = ITEM_TABLE[a];
       const ib = ITEM_TABLE[b];
-      if (ia.kind !== ib.kind) return ia.kind === 'weapon' ? -1 : 1;
-      return tierOf(ia) - tierOf(ib);
+      const byLine = LINE_ORDER.indexOf(lineOf(ia) as GearLine) - LINE_ORDER.indexOf(lineOf(ib) as GearLine);
+      return byLine !== 0 ? byLine : tierOf(ia) - tierOf(ib);
     });
     return gear.map((id) => {
       const item = ITEM_TABLE[id];
-      const equipped = data.equipped.weapon === id || data.equipped.armor === id;
+      // SPEC-025 §4.8: all four worn pieces, not just the two v1 carried.
+      const { armor, sidearm, primary, heavy } = data.equipped;
+      const equipped = armor === id || sidearm === id || primary === id || heavy === id;
       const owned = equipped || economy.count(id) > 0;
       const row = testId(el('article', 'shop-row'), `shop-gear-${id}`);
       row.append(
@@ -322,18 +335,18 @@ export class ShopPanel {
     const price = economy.price(kind, id, tier);
     if (price === null) return failText('max_tier');
     if (kind === 'gear') {
-      const item = ITEMS[id as ItemId];
-      // The ladder runs in tier order: tier N wants tier N−1 owned (§4.3).
+      const item = ITEM_TABLE[id as ItemId];
+      // The ladder runs down the item's own line: this rung wants the one below
+      // it owned, carried or worn (SPEC-025 §4.6).
       if (item.kind === 'weapon' || item.kind === 'armor') {
-        if (item.tier > 1) {
-          const previous = ITEM_IDS.find((candidate) => {
-            const other = ITEMS[candidate];
-            return other.kind === item.kind && other.tier === item.tier - 1;
-          });
-          const equippedIds: string[] = [data.equipped.weapon, data.equipped.armor];
-          if (previous !== undefined && economy.count(previous) === 0 && !equippedIds.includes(previous)) {
-            return failText('prerequisite');
-          }
+        const previous = ITEM_IDS.filter((candidate) => {
+          const other = ITEM_TABLE[candidate];
+          return other.kind !== 'consumable' && other.line === item.line && other.tier < item.tier;
+        }).sort((a, b) => tierOf(ITEM_TABLE[b]) - tierOf(ITEM_TABLE[a]))[0];
+        const { armor, sidearm, primary, heavy } = data.equipped;
+        const equippedIds: (string | null)[] = [armor, sidearm, primary, heavy];
+        if (previous !== undefined && economy.count(previous) === 0 && !equippedIds.includes(previous)) {
+          return failText('prerequisite');
         }
       }
     }

@@ -1,6 +1,6 @@
 // Tokens, resources, purchases, fuel and mission rewards (SPEC-010 §4.2–§4.8).
 // Everything a player can spend or gain outside combat runs through this class,
-// which mutates the bound `SaveV1` and announces itself on the bus. It owns no
+// which mutates the bound `Save` and announces itself on the bus. It owns no
 // UI (SPEC-014), no combat math (SPEC-011) and no loot table (SPEC-009).
 //
 // The rules that are not obvious from the method list:
@@ -22,7 +22,7 @@
 // property at all (the pattern `tests/data/content.test.ts` uses).
 //
 // Pure: no `three`, no DOM, no `Math.random` (SPEC-001 §4, §7).
-import type { SaveReason, SaveV1 } from '@/core/Save';
+import type { Save, SaveReason } from '@/core/Save';
 import {
   CLASSES,
   COMPANIONS,
@@ -41,6 +41,7 @@ import {
   type CompanionId,
   type ConsumableEffect,
   type FlagId,
+  type GearLine,
   type Item,
   type ItemId,
   type MissionDef,
@@ -132,7 +133,7 @@ function fail(reason: FailReason): Fail {
  * (SPEC-014) read requirement state for saves the shop's `Economy` instance
  * does not wrap, and the check itself only ever reads the save.
  */
-export function missingRequirements(save: SaveV1, reqs: readonly Requirement[]): Requirement[] {
+export function missingRequirements(save: Save, reqs: readonly Requirement[]): Requirement[] {
   const progress = save.progress;
   return reqs.filter((requirement) => {
     switch (requirement.kind) {
@@ -159,7 +160,7 @@ export function discountTokens(tokens: number, discount: number): number {
 }
 
 export class Economy {
-  readonly #save: SaveV1;
+  readonly #save: Save;
   readonly #events: EventSink;
   readonly #progression: Progression;
   readonly #saves: SaveRequester | null;
@@ -169,7 +170,7 @@ export class Economy {
    * optional because the pure tests and the balance model have no store to
    * write to; the station passes `services.save`.
    */
-  constructor(save: SaveV1, events: EventSink, progression: Progression, saves?: SaveRequester) {
+  constructor(save: Save, events: EventSink, progression: Progression, saves?: SaveRequester) {
     this.#save = save;
     this.#events = events;
     this.#progression = progression;
@@ -313,10 +314,10 @@ export class Economy {
     const item = ITEM_TABLE[itemId];
     if (item.kind === 'consumable' || item.price === null) return fail('not_found');
     if (this.#owns(itemId)) return fail('max_tier');
-    if (item.tier > 0) {
-      const previous = this.#gearOfTier(item.kind, item.tier - 1);
-      if (previous === null || !this.#owns(previous)) return fail('prerequisite');
-    }
+    // SPEC-025 §4.6: the ladder runs down the item's own line, and the lowest
+    // rung of a line needs nothing.
+    const previous = this.#gearBelow(item.line, item.tier);
+    if (previous !== null && !this.#owns(previous)) return fail('prerequisite');
     const price = this.price('gear', itemId);
     if (price === null) return fail('not_found');
     const short = this.#afford(price);
@@ -444,20 +445,22 @@ export class Economy {
   }
 
   /**
-   * §4.4: the gear swaps with whatever is in that slot, and the piece coming
-   * off goes to the inventory — which always fits, because the slot the gear
-   * just left is free (10-g).
+   * §4.4, SPEC-025 §4.6: the gear swaps with whatever is in that slot, and the
+   * piece coming off goes to the inventory — which always fits, because the
+   * slot the gear just left is free (10-g). A weapon goes to the slot *it*
+   * names, so a rifle can never land in the sidearm hand; an empty `heavy` slot
+   * takes it with nothing to swap back.
    */
   equip(itemId: ItemId): Result {
     if (!Object.hasOwn(ITEMS, itemId)) return fail('not_found');
     const item = ITEM_TABLE[itemId];
     if (item.kind === 'consumable') return fail('not_found');
     if (this.count(itemId) < 1) return fail('not_found');
-    const slot = item.kind;
+    const slot = item.kind === 'weapon' ? item.slot : 'armor';
     const previous = this.#save.equipped[slot];
     this.removeItem(itemId, 1);
     this.#save.equipped[slot] = itemId;
-    if (previous !== itemId) this.addItem(previous, 1);
+    if (previous !== null && previous !== itemId) this.addItem(previous, 1);
     this.#events.emit('gear:equipped', { slot, itemId });
     // SPEC-014 AC-45: equips autosave the same way purchases do.
     this.#saves?.request('purchase');
@@ -490,15 +493,28 @@ export class Economy {
   /** Owned means carried or worn — a bought tier that is equipped still counts. */
   #owns(itemId: ItemId): boolean {
     if (this.count(itemId) > 0) return true;
-    return this.#save.equipped.weapon === itemId || this.#save.equipped.armor === itemId;
+    const { armor, sidearm, primary, heavy } = this.#save.equipped;
+    return armor === itemId || sidearm === itemId || primary === itemId || heavy === itemId;
   }
 
-  #gearOfTier(kind: 'weapon' | 'armor', tier: number): ItemId | null {
+  /**
+   * SPEC-025 §4.6: the highest item of `line` below `tier`, or `null` when this
+   * is the bottom of its ladder. Tiers are unique per line, so "highest below"
+   * is exactly the one step down — for rifles and armor that is the v1 rule of
+   * tier − 1, and for handguns anything above the Service Pistol wants the
+   * Service Pistol, which every save owns.
+   */
+  #gearBelow(line: GearLine, tier: number): ItemId | null {
+    let best: ItemId | null = null;
+    let bestTier = -1;
     for (const id of Object.keys(ITEMS) as ItemId[]) {
       const item = ITEM_TABLE[id];
-      if (item.kind === kind && item.tier === tier) return id;
+      if (item.kind === 'consumable' || item.line !== line) continue;
+      if (item.tier >= tier || item.tier <= bestTier) continue;
+      best = id;
+      bestTier = item.tier;
     }
-    return null;
+    return best;
   }
 
   // ---------------------------------------------------------- fuel & travel
@@ -650,7 +666,9 @@ export class Economy {
     return {
       shipTierSum,
       gearTiers: {
-        weapon: this.#tierOf(this.#save.equipped.weapon),
+        // SPEC-025 §4.6: the weapon tier the balance model reads is the
+        // primary's — the sidearm is free and the heavy is optional.
+        weapon: this.#tierOf(this.#save.equipped.primary),
         armor: this.#tierOf(this.#save.equipped.armor),
       },
       companionLevels,

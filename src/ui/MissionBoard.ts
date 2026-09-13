@@ -8,7 +8,7 @@
 // no pin field, so the pin lives beside the save object and SPEC-012's HUD
 // objective reads it through `pinnedMission()`. One pin at a time; pinning a
 // second mission unpins the first.
-import type { SaveStore, SaveV1 } from '@/core/Save';
+import type { Save, SaveStore } from '@/core/Save';
 import { MISSIONS, PLANET_IDS, PLANETS, type MissionDef, type MissionId } from '@/data/index';
 import type { Economy } from '@/systems/Economy';
 import type { EventSink } from '@/systems/Progression';
@@ -22,17 +22,17 @@ import {
 import { confirmSheet } from '@/ui/ConfirmSheet';
 import { el, h, testId, type UiRoot } from '@/ui/dom';
 
-const PINNED = new WeakMap<SaveV1, MissionId | null>();
+const PINNED = new WeakMap<Save, MissionId | null>();
 
 /** What SPEC-012's objective line will read; `null` until something is pinned. */
-export function pinnedMission(data: SaveV1): MissionId | null {
+export function pinnedMission(data: Save): MissionId | null {
   return PINNED.get(data) ?? null;
 }
 
 export interface BoardDeps {
   ui: UiRoot;
   save: SaveStore;
-  data: SaveV1;
+  data: Save;
   economy: Economy;
   events: EventSink;
 }

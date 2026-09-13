@@ -36,6 +36,8 @@ export interface ClassDef<Id extends string = string> {
   readonly baseAttributes: Attributes;
   readonly passive: ClassPassive;
   readonly startingWeapon: ItemId;
+  /** SPEC-025 §4.2: the free sidearm every class lands with. */
+  readonly startingSidearm: ItemId;
   readonly startingArmor: ItemId;
   /** Indices into the portrait sheet the creation screen offers (SPEC-014). */
   readonly portraits: readonly number[];
@@ -54,6 +56,7 @@ export const CLASSES = {
     baseAttributes: { might: 3, vigor: 3, agility: 1, tech: 1 },
     passive: { damageMult: 1.15, maxHpBonus: 20 },
     startingWeapon: 'weapon_kinetic',
+    startingSidearm: 'pistol_service',
     startingArmor: 'armor_scrap',
     portraits: [0, 1, 2],
   },
@@ -64,6 +67,7 @@ export const CLASSES = {
     baseAttributes: { might: 1, vigor: 2, agility: 2, tech: 3 },
     passive: { shipTokenDiscount: 0.15, companionEffectMult: 1.25 },
     startingWeapon: 'weapon_kinetic',
+    startingSidearm: 'pistol_service',
     startingArmor: 'armor_scrap',
     portraits: [3, 4, 5],
   },
@@ -74,6 +78,7 @@ export const CLASSES = {
     baseAttributes: { might: 2, vigor: 1, agility: 4, tech: 1 },
     passive: { moveSpeedMult: 1.15, pickupRadiusMult: 1.25, nodeRadar: true },
     startingWeapon: 'weapon_kinetic',
+    startingSidearm: 'pistol_service',
     startingArmor: 'armor_scrap',
     portraits: [6, 7, 8],
   },

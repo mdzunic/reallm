@@ -14,7 +14,7 @@ import { log } from '@/core/Log';
 import { Pool } from '@/core/Pool';
 import { PressEdges } from '@/core/PressEdges';
 import { DEFAULT_LOOK, type Look } from '@/core/Quality';
-import { newSave, type CharacterCreation, type SaveV1 } from '@/core/Save';
+import { newSave, type CharacterCreation, type Save } from '@/core/Save';
 import type { GameServices } from '@/core/Services';
 import type { SceneParams } from '@/core/StateMachine';
 import type { Renderer } from '@/core/Renderer';
@@ -155,7 +155,7 @@ const MISSION_TABLE: Readonly<Record<MissionId, MissionDef>> = MISSIONS;
  */
 const ACCEPT_SHOWN = new WeakMap<object, Set<MissionId>>();
 
-function acceptShown(save: SaveV1): Set<MissionId> {
+function acceptShown(save: Save): Set<MissionId> {
   let set = ACCEPT_SHOWN.get(save);
   if (set === undefined) {
     set = new Set();
@@ -208,7 +208,7 @@ export class SurfaceScene extends UiScene<'surface'> {
   readonly #edges = new PressEdges();
 
   #planet: PlanetDef = PLANETS.cinder4;
-  #save: SaveV1 | null = null;
+  #save: Save | null = null;
   #layout: Layout | null = null;
   #world: CombatWorld | null = null;
   #combat: Combat | null = null;
@@ -1139,7 +1139,7 @@ export class SurfaceScene extends UiScene<'surface'> {
 
   #updatePois(world: CombatWorld, dt: number): void {
     const events = this.services.events;
-    const save = this.#save as SaveV1;
+    const save = this.#save as Save;
     const player = world.player;
     const atPad = this.#atPad(world);
 
@@ -1554,7 +1554,7 @@ export class SurfaceScene extends UiScene<'surface'> {
   }
 
   #consumableSlot(): { itemId: ItemId; qty: number } | null {
-    const save = this.#save as SaveV1;
+    const save = this.#save as Save;
     for (const entry of save.inventory) {
       if (ITEM_TABLE[entry.itemId].kind === 'consumable' && entry.qty > 0) {
         // One lazily created scratch, reused per frame (SPEC-001 §7); the HUD
@@ -1615,7 +1615,7 @@ export class SurfaceScene extends UiScene<'surface'> {
     p.healOverTime = null;
     p.boosts.length = 0;
     p.hazardImmuneUntil = 0;
-    const save = this.#save as SaveV1;
+    const save = this.#save as Save;
     save.player.hp = p.hp;
     this.#camTarget.x = p.x;
     this.#camTarget.z = p.z;
@@ -1851,7 +1851,7 @@ export class SurfaceScene extends UiScene<'surface'> {
     }
     const depart = (): void => {
       this.#leaving = true;
-      const save = this.#save as SaveV1;
+      const save = this.#save as Save;
       save.progress.location = 'station';
       save.progress.currentPlanet = null;
       this.#closeTerminal();
@@ -1954,7 +1954,7 @@ export class SurfaceScene extends UiScene<'surface'> {
     if (!world.player.alive) return null;
     if (this.#terminalOpen) return null;
     const missions = this.#missions as Missions;
-    const save = this.#save as SaveV1;
+    const save = this.#save as Save;
     // E16: standing at a deliver POI without enough held resource.
     for (const state of missions.active) {
       for (const { objective, done } of missions.currentObjectives(state.id)) {

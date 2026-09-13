@@ -2,8 +2,8 @@
 // the gear on the body with its compare line, the twenty inventory slots with
 // their three actions, and the hold against the cargo cap. Everything derived
 // prints through the tested pure helpers; the mutations go through Economy.
-import { maxHp, type SaveStore, type SaveV1 } from '@/core/Save';
-import { ITEMS, RESOURCE_IDS, type ItemId } from '@/data/index';
+import { maxHp, type Save, type SaveStore } from '@/core/Save';
+import { ITEMS, RESOURCE_IDS, type ItemId, type WeaponSlot } from '@/data/index';
 import { INVENTORY_SLOTS, type Economy } from '@/systems/Economy';
 import { computePlayerStats, failText, gearCompareText, gearTooltip } from '@/systems/UiHelpers';
 import { confirmSheet } from '@/ui/ConfirmSheet';
@@ -13,7 +13,7 @@ import { portraitManifest, portraitSource } from '@/ui/portraits';
 export interface CharacterDeps {
   ui: UiRoot;
   save: SaveStore;
-  data: SaveV1;
+  data: Save;
   economy: Economy;
 }
 
@@ -50,7 +50,7 @@ export class CharacterPanel {
   /** AC-46: derived stats over the raw attributes. */
   #statsBlock(): HTMLElement {
     const { player } = this.#deps.data;
-    const stats = computePlayerStats(player.classId, player.attributes, player.level, this.#deps.data.equipped.weapon);
+    const stats = computePlayerStats(player.classId, player.attributes, player.level, this.#deps.data.equipped.primary);
     const armor = ITEMS[this.#deps.data.equipped.armor];
     const a = player.attributes;
     // SPEC-020 §4.6: the chosen bust when it shipped, the creation screen's
@@ -90,10 +90,27 @@ export class CharacterPanel {
 
   // ------------------------------------------------------------------- gear
 
-  /** AC-47: the two worn pieces; the tooltip compares this tier to the next. */
+  /**
+   * AC-47, SPEC-025 §4.8: the four worn pieces — the three weapon slots and the
+   * armor — with the tooltip comparing each one to the next rung of its own
+   * line. `heavy` is empty until a launcher is bought (SPEC-029), and an empty
+   * slot says so rather than disappearing.
+   */
   #gearBlock(): HTMLElement {
     const { equipped } = this.#deps.data;
-    const card = (slot: 'weapon' | 'armor', id: ItemId): HTMLElement => {
+    const card = (slot: WeaponSlot | 'armor', id: ItemId | null): HTMLElement => {
+      if (id === null) {
+        return testId(
+          h(
+            'div',
+            { class: 'gear-card' },
+            h('span', { class: 'settings-note' }, slot),
+            h('span', { class: 'gear-name' }, 'Empty'),
+            h('span', { class: 'gear-line' }, ''),
+          ),
+          `equipped-${slot}`,
+        );
+      }
       const item = ITEMS[id];
       const line =
         item.kind === 'weapon'
@@ -113,7 +130,14 @@ export class CharacterPanel {
         `equipped-${slot}`,
       );
     };
-    return h('section', { class: 'char-block char-gear' }, card('weapon', equipped.weapon), card('armor', equipped.armor));
+    return h(
+      'section',
+      { class: 'char-block char-gear' },
+      card('sidearm', equipped.sidearm),
+      card('primary', equipped.primary),
+      card('heavy', equipped.heavy),
+      card('armor', equipped.armor),
+    );
   }
 
   // -------------------------------------------------------------- inventory
@@ -156,9 +180,11 @@ export class CharacterPanel {
     const bar = testId(el('div', 'inv-actions'), 'inv-action-bar');
     bar.append(h('span', { class: 'inv-action-name' }, `${item.name} ×${entry.qty}`));
     if (item.kind === 'weapon' || item.kind === 'armor') {
-      // AC-47: what changes if this replaces the worn piece.
-      const worn = this.#deps.data.equipped[item.kind];
-      const compare = gearCompareText(worn, entry.itemId);
+      // AC-47: what changes if this replaces the worn piece — the one in the
+      // slot this item would go into (SPEC-025 §4.6). An empty heavy slot has
+      // nothing to compare against.
+      const worn = item.kind === 'weapon' ? this.#deps.data.equipped[item.slot] : this.#deps.data.equipped.armor;
+      const compare = worn === null ? '' : gearCompareText(worn, entry.itemId);
       if (compare !== '') bar.append(h('span', { class: 'inv-compare' }, compare));
       bar.append(
         testId(

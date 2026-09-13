@@ -510,3 +510,56 @@ Continue.
       beat hold and the mission runtime this spec reaches into
 - [ ] both endings verified **on hardware** (desktop GPU + reference phone),
       including the tab-close recovery on a real handset — needs the human pass
+
+## SPEC-025 — save v2: weapon slots, quick slots, explored ground (M7c)
+
+- **Build:** `spec/SPEC-025` — untagged
+- **Devices:**
+  - desktop — headless Chromium (Playwright, Linux container, **software GL**)
+  - desktop hardware GPU and phone-over-LAN — _not run: no display, no GPU and
+    no handset in the build container; needs the human pass_
+
+### What was walked, and how
+
+The spec's §7 manual pass is "load an existing v1 slot from before R10 and find
+the character, the missions and the resources intact". The half of it a
+container can do is `e2e/SPEC-025.spec.ts`, which writes the v1 fixture's own
+JSON into a real `localStorage` and loads slot 0 through the Load menu — not
+through the store's API — so the path under test is the one a returning player
+actually takes.
+
+| Case | What it walks |
+|---|---|
+| 1 | A fresh save at the station: the character panel's four gear cards read `Service Pistol`, `Kinetic Repeater`, `Empty`, `Scrap Plate`, and the shop badges all four worn pieces as `equipped` (§4.8) |
+| 2 | A v1 slot loaded through the menu: `version === 2`, the plasma lance in `primary`, the pistol in `sidearm`, `activeWeapon: 'primary'`, the heal and utility quick slots filled from the pack, `explored: {}` — and the name, missions and resources unchanged |
+
+### Observations
+
+- Nothing that plays moved. `tests/systems/balance.test.ts` and the worst-case
+  campaign simulation are untouched apart from the `equipped` object's shape:
+  the run still buys the same ladder for the same tokens and still lands on
+  level 13 with 5,480 XP.
+- The pistol is deliberately the weaker weapon in every dimension (27 dps to the
+  kinetic repeater's 36, 12 m to 14 m), so a save that lands with it in hand is
+  never better off than one that does not. Nothing equips it as the active
+  weapon: `activeWeapon` is `'primary'` on both a fresh save and a migrated one,
+  and switching is SPEC-028's.
+- The explored bitset costs 1,351 characters per 180 m planet and nothing at all
+  until SPEC-026 writes one: a fresh save and a migrated save both carry
+  `explored: {}`. Six full planets would be ≈ 9 KB of a 100 KB budget.
+- The launcher line has no items until SPEC-029, so the two rules that only a
+  heavy weapon can exercise — equipping into an empty slot with no swap, and a
+  line whose lowest rung is for sale owing nothing — are proved in
+  `tests/systems/economy.test.ts` against stand-in items installed in the item
+  table for the length of one test and removed in a `finally`.
+
+### Checklist
+
+- [x] `npm run check` green (typecheck, 981 unit tests, production build)
+- [x] `e2e/SPEC-025.spec.ts` (new) green
+- [x] `e2e/SPEC-007.spec.ts` and `e2e/SPEC-010.spec.ts` green — the save
+      pipeline and the economy, both re-pinned to the version-2 shape
+- [x] `e2e/SPEC-014.spec.ts` and `e2e/SPEC-020.spec.ts` green — the character
+      panel and shop this spec re-renders
+- [ ] a real pre-R10 v1 slot loaded **on hardware** (desktop GPU + reference
+      phone), with the surface played after it — needs the human pass

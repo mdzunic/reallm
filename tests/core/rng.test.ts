@@ -420,7 +420,7 @@ describe('RngRoot (§3, §4.2)', () => {
   it('holds no generator state: nothing to persist (AC-28)', () => {
     const root = new RngRoot(77);
     // Every accessor is a pure function of the seed and its labels, so a root
-    // rebuilt from `SaveV1.meta.seed` alone is indistinguishable from this one.
+    // rebuilt from `Save.meta.seed` alone is indistinguishable from this one.
     expect(Object.keys(root)).toEqual(['seed']);
     expect(JSON.parse(JSON.stringify(root))).toEqual({ seed: 77 });
   });
