@@ -23,7 +23,7 @@ interface EconomyDigest {
   ship: Record<string, number>;
   companions: Record<string, number>;
   owned: string[];
-  equipped: { weapon: string; armor: string };
+  equipped: { armor: string; sidearm: string; primary: string; heavy: string | null };
   slotsUsed: number;
   tokensSpent: number;
   curve: { xpToNext1: number; cumulative20: number; cumulative30: number; levelAt24650: number; levelAtAMillion: number };
@@ -89,7 +89,7 @@ async function readEconomy(page: Page, creation: typeof CREATION): Promise<Econo
       ship: Record<string, number>;
       companions: { id: string; level: number }[];
       inventory: { itemId: string; qty: number }[];
-      equipped: { weapon: string; armor: string };
+      equipped: { armor: string; sidearm: string; primary: string; heavy: string | null };
     }
 
     const events: string[] = [];
@@ -177,7 +177,12 @@ test.describe('SPEC-010 — the economy in a browser', () => {
     expect(digest.refusals).toEqual([]);
     expect(digest.ship).toEqual({ engine: 3, hull: 3, shield: 3, cargo: 3, weapon: 3 });
     expect(digest.companions).toEqual({ aria: 3, scanner_drone: 3, combat_drone: 3, field_medic: 3, quartermaster: 3 });
-    expect(digest.equipped).toEqual({ weapon: 'weapon_lithium', armor: 'armor_ablative' });
+    expect(digest.equipped).toEqual({
+      armor: 'armor_ablative',
+      sidearm: 'pistol_service',
+      primary: 'weapon_lithium',
+      heavy: null,
+    });
     // The two starters came off into the hold, and everything bought is in it.
     expect(digest.owned).toEqual([
       'armor_composite',

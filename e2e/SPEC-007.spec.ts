@@ -250,7 +250,7 @@ test('a fresh save is the character §3 describes, seeded from ?seed= (AC-1 … 
   await start(page, '/?seed=424242');
   const fresh = await page.evaluate((creation) => window.__reallm.save().create(0, creation), CREATION);
 
-  expect(fresh.version).toBe(1);
+  expect(fresh.version).toBe(2);
   expect(fresh.meta).toMatchObject({ slot: 0, seed: 424242, iteration: 1, difficulty: 'normal' });
   expect(fresh.player).toMatchObject({ name: 'Vance', classId: 'marine', level: 1, xp: 0, tokens: 0 });
   // hp is maxHp(class, attributes, level), not a constant: it moves with the
@@ -259,7 +259,15 @@ test('a fresh save is the character §3 describes, seeded from ?seed= (AC-1 … 
   expect(fresh.resources).toEqual({ oil: 60, wheat: 20, water: 20, lithium: 0 });
   expect(fresh.inventory).toEqual([{ itemId: 'wheat_ration', qty: 3 }]);
   expect(fresh.companions).toEqual([{ id: 'aria', level: 1, enabled: true }]);
-  expect(fresh.equipped).toEqual({ weapon: 'weapon_kinetic', armor: 'armor_scrap' });
+  // SPEC-025 §4.1: three weapon slots, the heavy one empty until a launcher.
+  expect(fresh.equipped).toEqual({
+    armor: 'armor_scrap',
+    sidearm: 'pistol_service',
+    primary: 'weapon_kinetic',
+    heavy: null,
+  });
+  expect(fresh.activeWeapon).toBe('primary');
+  expect(fresh.quick).toEqual({ heal: 'wheat_ration', explosive: null, utility: null });
   expect(fresh.ship).toEqual({ engine: 0, hull: 0, shield: 0, cargo: 0, weapon: 0 });
   expect(fresh.progress).toEqual({
     missionsDone: [],
@@ -270,6 +278,7 @@ test('a fresh save is the character §3 describes, seeded from ?seed= (AC-1 … 
     poisDiscovered: [],
     visits: {},
     endingSeen: false,
+    explored: {},
   });
 
   // §3: the slot keys, and a `:bak` of the previous good save under the second
@@ -392,11 +401,20 @@ test('a save written by an older build migrates up the chain on load (AC-34)', a
   }, v0);
 
   expect(loaded.ok).toBe(true);
-  expect(loaded.data?.version).toBe(1);
+  expect(loaded.data?.version).toBe(2);
   expect(loaded.data?.player).toMatchObject({ name: 'Kestrel', classId: 'scout', level: 4, tokens: 75 });
   expect(loaded.data?.meta).toMatchObject({ seed: 123456, playtimeSec: 612, difficulty: 'casual' });
   expect(loaded.data?.progress.currentPlanet).toBe('cinder4');
   expect(loaded.data?.progress.missionsActive).toEqual([{ id: 'c1_m2', stage: 0, counters: { '0:0': 40 } }]);
+  // SPEC-025 §4.3: the v0 rifle walks up the chain into the primary slot, and
+  // the pack's medkit fills the heal quick slot on the way.
+  expect(loaded.data?.equipped).toEqual({
+    armor: 'armor_scrap',
+    sidearm: 'pistol_service',
+    primary: 'weapon_laser',
+    heavy: null,
+  });
+  expect(loaded.data?.quick).toEqual({ heal: 'medkit', explosive: null, utility: null });
 });
 
 test('a write that does not read back is a failure, and a full quota drops the backup (AC-13, AC-15, AC-16)', async ({

@@ -393,6 +393,13 @@ describe('gearCompareText (AC-47)', () => {
     expect(gearCompareText('weapon_kinetic', 'armor_scrap')).toBe('');
     expect(gearCompareText('weapon_kinetic', 'medkit')).toBe('');
   });
+
+  // SPEC-025 §4.8: tiers only mean something inside one ladder, so a rifle
+  // against a handgun is as incomparable as a weapon against armor.
+  it('crossing lines compares nothing', () => {
+    expect(gearCompareText('pistol_service', 'weapon_kinetic')).toBe('');
+    expect(gearCompareText('weapon_laser', 'pistol_service')).toBe('');
+  });
 });
 
 describe('gearTooltip (AC-47)', () => {
@@ -407,6 +414,12 @@ describe('gearTooltip (AC-47)', () => {
   it('the top tier states it plainly instead of comparing to nothing', () => {
     expect(gearTooltip('weapon_lithium')).toBe('T3 — top tier');
     expect(gearTooltip('armor_ablative')).toBe('T3 — top tier');
+  });
+
+  // SPEC-025 §4.8: the pistol is the whole handgun line for now, so its ladder
+  // ends where it starts rather than stepping sideways into the rifles.
+  it('reads the item’s own line, not the next tier of any line', () => {
+    expect(gearTooltip('pistol_service')).toBe('T0 — top tier');
   });
 
   it('a non-gear id compares nothing', () => {
