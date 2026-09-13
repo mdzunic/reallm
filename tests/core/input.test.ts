@@ -615,8 +615,14 @@ describe('KEY_BINDINGS (AC-4)', () => {
       Space: 'fire',
       KeyE: 'interact',
       KeyF: 'interact',
+      // SPEC-028 §4.1: the digits switch weapons; Q alone keeps the heal.
       KeyQ: 'useItem',
-      Digit1: 'useItem',
+      Digit1: 'weapon1',
+      Digit2: 'weapon2',
+      Digit3: 'weapon3',
+      KeyR: 'weaponNext',
+      KeyG: 'throwItem',
+      KeyC: 'useUtility',
       Escape: 'pause',
       KeyP: 'pause',
       KeyM: 'map',
@@ -625,6 +631,115 @@ describe('KEY_BINDINGS (AC-4)', () => {
       ControlLeft: 'throttleDown',
       Backquote: 'debug',
     });
+  });
+});
+
+// ------------------------------------------------------------------ wheel
+
+describe('the mouse wheel (SPEC-028 §4.1)', () => {
+  function wheelHarness(): Harness & { at: (ms: number) => void } {
+    let clock = 0;
+    const win = fakeTarget();
+    const doc = fakeTarget();
+    const canvas = fakeTarget({
+      getBoundingClientRect: () => ({ left: 0, top: 0, width: 800, height: 600 }),
+    });
+    const input = new Input();
+    const driver = new KeyboardMouseDriver(input, {
+      win: win.target,
+      doc: doc.target,
+      canvas: canvas.target as unknown as HTMLCanvasElement,
+      now: () => clock,
+    });
+    return { input, driver, win, doc, canvas, at: (ms: number) => void (clock = ms) };
+  }
+
+  function wheelEvent(deltaY: number): { deltaY: number; prevented: boolean; preventDefault(): void } {
+    const event = {
+      deltaY,
+      prevented: false,
+      preventDefault(): void {
+        event.prevented = true;
+      },
+    };
+    return event;
+  }
+
+  it('a notch presses weaponNext (down) or weaponPrev (up) on the surface', () => {
+    const h = wheelHarness();
+    h.input.setMode('surface');
+    h.canvas.fire('wheel', wheelEvent(120));
+    h.input.beginFrame(DT);
+    expect(h.input.state.buttons.weaponNext.justPressed).toBe(true);
+    expect(h.input.state.buttons.weaponNext.justReleased).toBe(true);
+    h.input.endFrame();
+
+    h.at(200);
+    h.canvas.fire('wheel', wheelEvent(-120));
+    h.input.beginFrame(DT);
+    expect(h.input.state.buttons.weaponPrev.justPressed).toBe(true);
+    expect(h.input.state.buttons.weaponNext.justPressed).toBe(false);
+  });
+
+  it('drops notches closer than 120 ms apart', () => {
+    const h = wheelHarness();
+    h.input.setMode('surface');
+    h.canvas.fire('wheel', wheelEvent(120));
+    h.input.beginFrame(DT);
+    expect(h.input.state.buttons.weaponNext.justPressed).toBe(true);
+    h.input.endFrame();
+
+    h.at(119);
+    h.canvas.fire('wheel', wheelEvent(120));
+    h.input.beginFrame(DT);
+    expect(h.input.state.buttons.weaponNext.justPressed).toBe(false);
+    h.input.endFrame();
+
+    h.at(120);
+    h.canvas.fire('wheel', wheelEvent(120));
+    h.input.beginFrame(DT);
+    expect(h.input.state.buttons.weaponNext.justPressed).toBe(true);
+  });
+
+  it('drives the throttle in flight mode instead', () => {
+    const h = wheelHarness();
+    h.input.setMode('flight');
+    h.canvas.fire('wheel', wheelEvent(-120));
+    h.input.beginFrame(DT);
+    expect(h.input.state.buttons.throttleUp.justPressed).toBe(true);
+    expect(h.input.state.buttons.weaponPrev.justPressed).toBe(false);
+    h.input.endFrame();
+
+    h.at(500);
+    h.canvas.fire('wheel', wheelEvent(120));
+    h.input.beginFrame(DT);
+    expect(h.input.state.buttons.throttleDown.justPressed).toBe(true);
+    expect(h.input.state.buttons.weaponNext.justPressed).toBe(false);
+  });
+
+  it('prevents the page scroll only during gameplay, and never while suspended', () => {
+    const h = wheelHarness();
+    const inMenu = wheelEvent(120);
+    h.canvas.fire('wheel', inMenu);
+    expect(inMenu.prevented).toBe(false);
+
+    h.at(500);
+    h.input.setGameplayActive(true);
+    const inGame = wheelEvent(120);
+    h.canvas.fire('wheel', inGame);
+    expect(inGame.prevented).toBe(true);
+    h.input.beginFrame(DT);
+    expect(h.input.state.buttons.weaponNext.justPressed).toBe(true);
+    h.input.endFrame();
+
+    h.at(1000);
+    h.input.setEnabled(false);
+    const suspended = wheelEvent(120);
+    h.canvas.fire('wheel', suspended);
+    expect(suspended.prevented).toBe(false);
+    h.input.setEnabled(true);
+    h.input.beginFrame(DT);
+    expect(h.input.state.buttons.weaponNext.justPressed).toBe(false);
   });
 });
 

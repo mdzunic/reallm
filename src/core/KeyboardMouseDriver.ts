@@ -32,8 +32,14 @@ export const KEY_BINDINGS: Readonly<Record<string, Action | MoveAxis>> = {
   Space: 'fire',
   KeyE: 'interact',
   KeyF: 'interact',
+  // SPEC-028 §4.1: the digits are the weapon slots now; Q keeps the heal.
   KeyQ: 'useItem',
-  Digit1: 'useItem',
+  Digit1: 'weapon1',
+  Digit2: 'weapon2',
+  Digit3: 'weapon3',
+  KeyR: 'weaponNext',
+  KeyG: 'throwItem',
+  KeyC: 'useUtility',
   Escape: 'pause',
   KeyP: 'pause',
   KeyM: 'map',
@@ -42,6 +48,9 @@ export const KEY_BINDINGS: Readonly<Record<string, Action | MoveAxis>> = {
   ControlLeft: 'throttleDown',
   Backquote: 'debug',
 };
+
+/** SPEC-028 §4.1: wheel notches closer than this are one flick of the wheel. */
+export const WHEEL_INTERVAL_MS = 120;
 
 const MOVE_AXES: Readonly<Record<MoveAxis, { x: number; y: number }>> = {
   moveUp: { x: 0, y: 1 },
@@ -77,12 +86,14 @@ export interface PointerSurface extends EventTarget {
 }
 
 export interface DriverTargets {
-  /** The drawing surface: pointer buttons, aim and the context menu. */
+  /** The drawing surface: pointer buttons, aim, the wheel and the context menu. */
   canvas?: PointerSurface | null;
   /** Key events, focus loss and pointer moves; `globalThis` by default. */
   win?: EventTarget | null;
   /** `visibilitychange` and `gesturestart`; `document` by default. */
   doc?: EventTarget | null;
+  /** The wheel rate-limit clock, injectable for the tests; `performance.now` by default. */
+  now?: () => number;
 }
 
 interface Binding {
@@ -120,10 +131,14 @@ export class KeyboardMouseDriver implements InputDriver {
   /** The canvas box, re-measured on resize rather than on every pointer move. */
   #left = 0;
   #top = 0;
+  /** The wheel clock and the last accepted notch (SPEC-028 §4.1). */
+  readonly #now: () => number;
+  #wheelAt = -Infinity;
 
   constructor(input: Input, targets: DriverTargets = {}) {
     this.#input = input;
     this.#canvas = targets.canvas ?? null;
+    this.#now = targets.now ?? ((): number => performance.now());
     const win = targets.win === undefined ? defaultWin() : targets.win;
     const doc = targets.doc === undefined ? defaultDoc() : targets.doc;
 
@@ -146,6 +161,9 @@ export class KeyboardMouseDriver implements InputDriver {
     if (this.#canvas !== null) {
       this.#bind(this.#canvas, 'pointerdown', (event) => this.#onPointerDown(event as PointerEvent));
       this.#bind(this.#canvas, 'contextmenu', (event) => event.preventDefault());
+      // SPEC-028 §4.1: only the canvas — a wheel over a DOM panel never
+      // reaches it, so a scrolling terminal cannot switch weapons (28-h).
+      this.#bind(this.#canvas, 'wheel', (event) => this.#onWheel(event as WheelEvent));
     }
 
     // AC-32: `input.dispose()` has to reach these listeners, and `releaseAll()`
@@ -233,6 +251,33 @@ export class KeyboardMouseDriver implements InputDriver {
   #onPointerUp(event: PointerEvent): void {
     if (event.pointerType !== 'mouse') return;
     if (event.button === 0) this.#drop('fire', 'mouse:0');
+  }
+
+  /**
+   * SPEC-028 §4.1: a wheel notch is a press-and-release in the same frame —
+   * down cycles forward on the surface, up backward; in flight the wheel
+   * drives the throttle. Notches closer than 120 ms apart are dropped.
+   */
+  #onWheel(event: WheelEvent): void {
+    if (event.deltaY === 0) return;
+    this.#input.setScheme(SCHEME);
+    if (!this.#input.enabled) return;
+    if (this.#input.gameplayActive) event.preventDefault();
+    const now = this.#now();
+    if (now - this.#wheelAt < WHEEL_INTERVAL_MS) return;
+    this.#wheelAt = now;
+    const action: Action =
+      this.#input.mode === 'flight'
+        ? event.deltaY > 0
+          ? 'throttleDown'
+          : 'throttleUp'
+        : event.deltaY > 0
+          ? 'weaponNext'
+          : 'weaponPrev';
+    // Press and release together: the queued edges of `Input` publish both on
+    // the next frame (SPEC-005 AC-2), so a notch is exactly one press.
+    this.#input.pressAction(action, SCHEME);
+    this.#input.releaseAction(action, SCHEME);
   }
 
   #onPointerMove(event: PointerEvent): void {

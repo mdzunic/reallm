@@ -2,7 +2,7 @@
 // Builds a minimal CombatWorld over the real pools, a real EventBus with an
 // `onAny` recorder, and fixed-seed RNG streams — every test is deterministic.
 import { EventBus, type GameEvents } from '@/core/Events';
-import type { ButtonState, InputState } from '@/core/Input';
+import { ACTIONS, type Action, type ButtonState, type InputState } from '@/core/Input';
 import { Pool } from '@/core/Pool';
 import { Rng, hash32 } from '@/core/Rng';
 import { newSave, type CharacterCreation, type Save } from '@/core/Save';
@@ -41,6 +41,8 @@ function button(): ButtonState {
 }
 
 export function makeInput(): InputState {
+  const buttons = {} as Record<Action, ButtonState>;
+  for (const action of ACTIONS) buttons[action] = button();
   return {
     move: { x: 0, y: 0 },
     aim: {
@@ -53,17 +55,7 @@ export function makeInput(): InputState {
       dirX: 0,
       dirY: 0,
     },
-    buttons: {
-      fire: button(),
-      interact: button(),
-      useItem: button(),
-      pause: button(),
-      throttleUp: button(),
-      throttleDown: button(),
-      map: button(),
-      track: button(),
-      debug: button(),
-    },
+    buttons,
     scheme: 'keyboard',
     autoFire: false,
   };
