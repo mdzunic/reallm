@@ -67,12 +67,15 @@ const isDone = (page: Page, id: string): Promise<boolean> =>
 const counter = async (page: Page, id: string, key: string): Promise<number> =>
   (await missionState(page, id))?.counters[key] ?? 0;
 
-/** Cycle the pin (the minimap tap, E18) until the HUD line wears `title`. */
+/**
+ * Cycle the pin until the HUD line wears `title` (E18). The key is `T` since
+ * SPEC-026 §4.7 — a minimap tap opens the full map now, and `M` with it.
+ */
 async function pin(page: Page, title: string): Promise<void> {
   const line = page.locator('[data-testid="hud"] .hud-objective');
   for (let i = 0; i < 8; i++) {
     if (((await line.textContent()) ?? '').includes(title)) return;
-    await page.locator('[data-testid="minimap"]').click();
+    await page.keyboard.press('KeyT');
     await page.waitForTimeout(200);
   }
   expect((await line.textContent()) ?? '').toContain(title);

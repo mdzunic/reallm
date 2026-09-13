@@ -56,17 +56,28 @@ test('the HUD and minimap mount with the scene (AC-55, AC-60..AC-70)', async ({ 
   await land(page, { fresh: true });
 
   // The shared HUD's readouts (§4.12): HP at the landing heal, level, tokens,
-  // the four resource counters, and the minimap canvas at its §4.12 backing
-  // resolution — 160 px, 1 px = 1 m.
+  // the four resource counters, and the minimap canvas backed at the
+  // resolution SPEC-026 §4.3 sizes it to — `round(css × min(dpr, 2))`, since
+  // the box is sized in CSS now and the 160 px square is gone.
   await expect(page.locator('[data-testid="hud-hp"]')).toContainText('184/184');
   // The oil counter shows the save's real balance (a fresh save starts stocked).
   const oil = await page.evaluate(() => window.__reallm.save().current?.resources['oil'] ?? -1);
   await expect(page.locator('[data-testid="res-oil"]')).toHaveText(String(oil));
   const minimap = page.locator('[data-testid="minimap"]');
   await expect(minimap).toHaveCount(1);
-  expect(await minimap.evaluate((el) => [(el as HTMLCanvasElement).width, (el as HTMLCanvasElement).height])).toEqual([
-    160, 160,
-  ]);
+  const box = await minimap.evaluate((el) => {
+    const canvas = el as HTMLCanvasElement;
+    const css = canvas.getBoundingClientRect().width;
+    return {
+      css,
+      width: canvas.width,
+      height: canvas.height,
+      want: Math.round(css * Math.min(window.devicePixelRatio, 2)),
+    };
+  });
+  expect(box.css).toBeGreaterThanOrEqual(128); // the clamp floor of §4.3
+  expect(box.width).toBe(box.want);
+  expect(box.height).toBe(box.want);
 });
 
 test('the pad terminal toggles deterministically, accepts a mission, and the round trip keeps it (AC-50, AC-51)', async ({ page }) => {
