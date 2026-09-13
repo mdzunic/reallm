@@ -626,3 +626,90 @@ is `e2e/SPEC-026.spec.ts` plus the shots below.
       layer whose z-index moved
 - [ ] the arrow, the legend, the lit ground and the held map verified **on
       hardware** (desktop GPU + reference phone) — needs the human pass
+
+## SPEC-027 — mission guidance: tracker, waypoints and hints (M7c)
+
+- **Build:** `spec/SPEC-027` — untagged
+- **Devices:**
+  - desktop — headless Chromium (Playwright, Linux container, **software GL**)
+  - desktop hardware GPU and phone-over-LAN — _not run: no display, no GPU and
+    no handset in the build container; needs the human pass_
+
+### What was walked, and how
+
+The §7 pass is a person who has never seen the game playing `c1_m1` to `c1_m3`
+on the tracker, the marker and the hints alone, and writing down where they
+hesitated. That is a human activity (D-30) and no acceptance criterion depends
+on it. What a container can walk is `e2e/SPEC-027.spec.ts` plus the shots below.
+
+| Case | What it walks |
+|---|---|
+| 1 | Landing with nothing accepted reads `No active mission`; after `c1_m1` the panel names the mission, its stage and the metres, and the HUD holds exactly one `.hud-objective` |
+| 2 | On the pad, the row reads `Scan Dune Sea` and the waypoint is `data-state="edge"` — the site is 61 m away on seed 123 |
+| 3 | `surface-stuck` crosses 45 s and 90 s: the hint reads "Dune Sea is 61 m south-west…", the tracker carries `is-stuck`, and one more crossing reaches level 3, where the path search runs on the real layout |
+| 4 | `surface-goto-objective` puts the player in the ring: `scan-progress` fills and the header reaches `stage 3/3` |
+| 5 | `settings-guidance-off` hides the waypoint and keeps the tracker |
+| 6 | The `move` tip shows on the first landing, `reallm:settings.tipsSeen` holds `move`, and a real reload does not show it again |
+| — | A tap on the tracker cycles the tracked mission (two missions accepted at one terminal), and its hit box clears 44 px |
+
+### Shots
+
+| | |
+|---|---|
+| tracker, edge arrow and the first tip | [tracker-waypoint](screenshots/spec-027/tracker-waypoint.png) |
+| the level-3 hint, ground route and dashed map route | [stuck-route](screenshots/spec-027/stuck-route.png) |
+| the scan ring filling inside the light pillar | [scan-ring](screenshots/spec-027/scan-ring.png) |
+
+### Measurements
+
+Headless Chromium, `?debug&scene=surface&planet=cinder4&seed=123&quality=medium`,
+1280×720, dpr 1.00 — software rasterisation, so the frame cost is a floor and
+not a device number (fps 6.2 / 160 ms on this container at `medium`; the suites
+run at `low` for exactly that reason, e2e/start.ts).
+
+| Frame | draws | triangles |
+|---|---|---|
+| `guidance: off` (no pillar, no route) | 42 | 82 874 |
+| `guidance: full`, POI target (pillar up) | 43 | 84 068 |
+| level 3, route on the ground | 43 | 84 112 |
+
+The population is live between readings, so the triangle column moves with the
+enemies on screen; what the numbers pin is the ceiling — the guidance layer adds
+one draw call for the pillar and one for the 48-instance marker mesh, and the
+surface sits at 43 of the 96 (80 scene + 16 post) the budget allows.
+`e2e/surface-env.spec.ts` is unchanged and green.
+
+### Observations
+
+- The bearing words come out of the map's own north, so the hint on seed 123
+  reads "61 m south-west" for a dune sea that is south-west **on screen**. A
+  world-axis bearing would have said something else, and the two content strings
+  that used to name a fixed compass direction are gone (§4.10).
+- The waypoint's root was a zero-size anchor at first. Nothing rendered wrong,
+  but a 0×0 box is invisible to a browser's hit testing and to Playwright, so it
+  is a 22 px box centred by a negative margin now — `transform` still does all
+  the moving.
+- `guideTarget` in the `?debug` row writes the label's spaces as underscores:
+  that row is `key=value` pairs split on whitespace and `surface-env.spec.ts`
+  pins the shape.
+- The scan ring at 52 px with a 12 % track was there but invisible on bright
+  sand; 60 px with a lit track and a drop shadow reads as a ring.
+- The collect node marks now follow the **tracked** mission rather than any
+  active one (AC-38 ties them to the tracker). On Cinder-4 the two read the same
+  whenever one mission is running, which is every case the suites walk.
+
+### Checklist
+
+- [x] `npm run check` green (typecheck, 1046 unit tests, production build)
+- [x] `e2e/SPEC-027.spec.ts` (new) green — seven cases
+- [x] `e2e/SPEC-012.spec.ts`, `e2e/SPEC-012-missions.spec.ts` and
+      `e2e/SPEC-012-touch.spec.ts` green — the objective line the tracker took
+      over and the whole five-mission run
+- [x] `e2e/SPEC-026.spec.ts` green — the map marks, the pin and `KeyT`
+- [x] `e2e/surface-env.spec.ts` green — the draw budget and the `?debug` row
+- [x] `e2e/SPEC-011.spec.ts`, `e2e/SPEC-013.spec.ts`, `e2e/SPEC-014.spec.ts`,
+      `e2e/SPEC-019.spec.ts`, `e2e/SPEC-023.spec.ts`, `e2e/SPEC-024.spec.ts`,
+      `e2e/scene-cycle.spec.ts`, `e2e/pause.spec.ts`, `e2e/stats-overlay.spec.ts`,
+      `e2e/smoke.spec.ts`, `e2e/teardown.spec.ts` green
+- [ ] a first-time player walked `c1_m1`…`c1_m3` on the guidance alone, on
+      hardware (desktop GPU + reference phone) — needs the human pass (§7, D-30)
