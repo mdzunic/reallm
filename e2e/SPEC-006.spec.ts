@@ -1096,7 +1096,7 @@ test('the reactions table is what the game actually hears (AC-38 … AC-50, AC-5
       bus.emit('resource:collected', { resource: 'oil', amount: 1, total: 4 });
       bus.emit('resource:collected', { resource: 'water', amount: 1, total: 5 });
     });
-    // A sample of the 37 that are silent by design.
+    // A sample of the 39 that are silent by design.
     out['silent'] = await name(() => {
       bus.emit('app:paused');
       bus.emit('save:written', { slot: 0, reason: 'manual', bytes: 10 });
@@ -1155,10 +1155,10 @@ test('the reactions table is what the game actually hears (AC-38 … AC-50, AC-5
   expect(r['three hits']).toBe('hit_player'); // AC-48, 120 ms
   expect(r['two oils and a water']).toBe('pickup_oil,pickup_water'); // AC-44, 80 ms per id
   expect(r['silent']).toBe('(silence)'); // AC-39
-  // AC-39 / AC-40: 15 + 37 = 52, and no event is in both halves. That the two
+  // AC-39 / AC-40: 15 + 39 = 54, and no event is in both halves. That the two
   // halves cover `GameEvents` exactly is a compile-time assertion in the module.
   expect(reactions.counts.reacted).toBe(15);
-  expect(reactions.counts.silent).toBe(37);
+  expect(reactions.counts.silent).toBe(39);
   expect(reactions.counts.overlap).toEqual([]);
   // SPEC-012 §4.12 populated the set from the dialogue table's `glitch` marks
   // (it shipped empty under SPEC-006); the unit suite pins it to those marks.
