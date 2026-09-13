@@ -572,9 +572,11 @@ export class SurfaceScene extends UiScene<'surface'> {
     const reveal = new RevealOverlay(services.uiRoot);
     this.#revealOverlay = reveal;
     this.disposer.add(() => {
+      // A beat still running when the scene goes ends the way a skip does, so
+      // the input it took never leaves with it.
+      this.#endReveal();
       reveal.dispose();
       this.#revealOverlay = null;
-      this.#reveal = null;
       this.#revealPending = null;
       this.#holds = 0;
     });

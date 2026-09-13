@@ -72,7 +72,7 @@ test('1 — departure and card: the first trip to Cinder-4 plays the film, then 
   const film = page.locator(FILM);
   await expect(film).toHaveAttribute('data-film', 'departure');
   await expect(page.locator('[data-testid="scene-label"]')).toHaveText('starmap');
-  await page.waitForTimeout(400); // the 0.3 s pointer grace (SPEC-022 §4.5)
+  await page.waitForTimeout(500); // out past the 0.3 s pointer grace (SPEC-022 §4.5)
   await page.locator('[data-testid="film-skip"]').click();
   await expect(film).toHaveCount(0);
 
@@ -128,7 +128,7 @@ test('3 — interlude: the first return after chapter 1 plays it, marks it seen,
 
   const film = page.locator(FILM);
   await expect(film).toHaveAttribute('data-film', 'interlude_c1');
-  await page.waitForTimeout(400);
+  await page.waitForTimeout(500); // the pointer grace (SPEC-022 §4.5)
   await page.locator('[data-testid="film-skip"]').click();
   await expect(film).toHaveCount(0);
   // Skipping counts as seen, and the save is asked to write it (§4.3).
@@ -153,7 +153,7 @@ test('4 — catch-up: three pending chapters play the newest film and mark all t
 
   const film = page.locator(FILM);
   await expect(film).toHaveAttribute('data-film', 'interlude_c3');
-  await page.waitForTimeout(400);
+  await page.waitForTimeout(500); // the pointer grace (SPEC-022 §4.5)
   await page.locator('[data-testid="film-skip"]').click();
   await expect(film).toHaveCount(0);
   const seen = await flags(page);
@@ -232,7 +232,10 @@ test('7 — the reveal takes Escape as its skip, and the key never reaches the p
   const reveal = page.locator(REVEAL);
   await expect(reveal).toContainText('DUNE WURM', { timeout: 15_000 });
 
-  // Past SPEC-022's 0.6 s key grace by the time the hold's words are up.
+  // SPEC-022 §4.5's key grace is 0.6 s of *wall* time since the overlay went
+  // up, and the hold is 1 s of simulation — which, on a frame that runs five
+  // steps, is less than that. Wait the grace out rather than race it.
+  await page.waitForTimeout(700);
   await page.keyboard.press('Escape');
   await expect(reveal).toHaveCount(0);
   expect((await info(page))['held']).toBe(0);
