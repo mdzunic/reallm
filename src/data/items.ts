@@ -63,6 +63,8 @@ export type ItemDef<Id extends string = string> =
   | {
       readonly id: Id;
       readonly name: string;
+      /** 1–8 characters — the quick-bar label (SPEC-028 §3; content test). */
+      readonly short: string;
       readonly kind: 'weapon';
       readonly slot: WeaponSlot;
       readonly line: WeaponLine;
@@ -80,6 +82,8 @@ export type ItemDef<Id extends string = string> =
   | {
       readonly id: Id;
       readonly name: string;
+      /** 1–8 characters — the quick-bar label (SPEC-028 §3; content test). */
+      readonly short: string;
       readonly kind: 'armor';
       readonly line: 'armor';
       readonly tier: GearTier;
@@ -91,6 +95,8 @@ export type ItemDef<Id extends string = string> =
   | {
       readonly id: Id;
       readonly name: string;
+      /** 1–8 characters — the quick-bar label (SPEC-028 §3; content test). */
+      readonly short: string;
       readonly kind: 'consumable';
       readonly effect: ConsumableEffect;
       readonly stack: number;
@@ -108,6 +114,7 @@ export const ITEMS = {
   pistol_service: {
     id: 'pistol_service',
     name: 'Service Pistol',
+    short: 'Pistol',
     kind: 'weapon',
     slot: 'sidearm',
     line: 'handgun',
@@ -125,6 +132,7 @@ export const ITEMS = {
   weapon_kinetic: {
     id: 'weapon_kinetic',
     name: 'Kinetic Repeater',
+    short: 'Repeater',
     kind: 'weapon',
     slot: 'primary',
     line: 'rifle',
@@ -142,6 +150,7 @@ export const ITEMS = {
   weapon_laser: {
     id: 'weapon_laser',
     name: 'Laser Carbine',
+    short: 'Carbine',
     kind: 'weapon',
     slot: 'primary',
     line: 'rifle',
@@ -159,6 +168,7 @@ export const ITEMS = {
   weapon_plasma: {
     id: 'weapon_plasma',
     name: 'Plasma Lance',
+    short: 'Lance',
     kind: 'weapon',
     slot: 'primary',
     line: 'rifle',
@@ -176,6 +186,7 @@ export const ITEMS = {
   weapon_lithium: {
     id: 'weapon_lithium',
     name: 'Lithium Edge',
+    short: 'Edge',
     kind: 'weapon',
     slot: 'primary',
     line: 'rifle',
@@ -193,6 +204,7 @@ export const ITEMS = {
   armor_scrap: {
     id: 'armor_scrap',
     name: 'Scrap Plate',
+    short: 'Scrap',
     kind: 'armor',
     line: 'armor',
     tier: 0,
@@ -204,6 +216,7 @@ export const ITEMS = {
   armor_composite: {
     id: 'armor_composite',
     name: 'Composite Weave',
+    short: 'Weave',
     kind: 'armor',
     line: 'armor',
     tier: 1,
@@ -215,6 +228,7 @@ export const ITEMS = {
   armor_reactive: {
     id: 'armor_reactive',
     name: 'Reactive Harness',
+    short: 'Harness',
     kind: 'armor',
     line: 'armor',
     tier: 2,
@@ -226,6 +240,7 @@ export const ITEMS = {
   armor_ablative: {
     id: 'armor_ablative',
     name: 'Ablative Shell',
+    short: 'Shell',
     kind: 'armor',
     line: 'armor',
     tier: 3,
@@ -237,6 +252,7 @@ export const ITEMS = {
   wheat_ration: {
     id: 'wheat_ration',
     name: 'Wheat Ration',
+    short: 'Ration',
     kind: 'consumable',
     effect: { kind: 'heal', fraction: 0.3, overSeconds: 5 },
     stack: 10,
@@ -246,6 +262,7 @@ export const ITEMS = {
   medkit: {
     id: 'medkit',
     name: 'Medkit',
+    short: 'Medkit',
     kind: 'consumable',
     effect: { kind: 'heal', fraction: 0.5, overSeconds: 0 },
     stack: 5,
@@ -255,6 +272,7 @@ export const ITEMS = {
   coolant_pack: {
     id: 'coolant_pack',
     name: 'Coolant Pack',
+    short: 'Coolant',
     kind: 'consumable',
     effect: { kind: 'hazard_immunity', seconds: 30 },
     stack: 5,
@@ -264,6 +282,7 @@ export const ITEMS = {
   plasma_cell: {
     id: 'plasma_cell',
     name: 'Plasma Cell',
+    short: 'Cell',
     kind: 'consumable',
     effect: { kind: 'damage_boost', mult: 1.4, seconds: 20 },
     stack: 3,
