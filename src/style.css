@@ -201,7 +201,7 @@ button.boot-start.is-visible {
   flex-direction: column;
   gap: 8px;
   pointer-events: auto;
-  /* Above the touch layer (z-index 10), so the placeholder navigation is still
+  /* Above the touch layer and the HUD, so the placeholder navigation is still
      reachable on a phone (SPEC-005 §4.3). */
   z-index: 12;
 }
@@ -209,14 +209,18 @@ button.boot-start.is-visible {
 /* ------------------------------------------- touch controls (SPEC-005 §4.3) */
 
 /* The whole layer is mounted only while the touch scheme is active (AC-20) and
-   sits below the panels (z-index 20/30) so a pause menu still covers it. */
+   sits below the panels (z-index 20/30) so a pause menu still covers it.
+   SPEC-026 §4.3 puts it one step under the HUD layer as well: the aim surface
+   covers the whole screen, and the minimap — the one thing in the HUD that
+   takes pointer events — has to receive the tap that opens the map. Nothing
+   else in the HUD can swallow a button, because nothing else is interactive. */
 .touch-controls {
   --touch-scale: 1;
 
   position: absolute;
   inset: 0;
   pointer-events: none;
-  z-index: 10;
+  z-index: 9;
 }
 
 /* One surface for both zones: which one a pointer belongs to is decided in
