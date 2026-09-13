@@ -532,6 +532,25 @@ describe('combat drone (§4.3)', () => {
     h.run(1);
     expect(h.world.projectiles.size).toBe(0);
   });
+
+  // SPEC-028 §4.2: the drone is wired to the primary slot, not the hand.
+  it('keeps the primary\'s damage while the sidearm is in hand', () => {
+    const h = harness({
+      patch: (s) => {
+        s.companions.push({ id: 'combat_drone', level: 1, enabled: true });
+        s.activeWeapon = 'sidearm';
+      },
+    });
+    const egg = h.spawn('hive_egg', 6, 0);
+    egg.aggro = true;
+    h.step();
+    const p = h.world.projectiles.at(0);
+    expect(p.owner).toBe('drone');
+    const stats = h.world.stats;
+    // 12 is the Kinetic Repeater's damage — not the pistol's 9.
+    expect(p.damage).toBe(Math.max(1, Math.round(12 * stats.damageMult * 0.5 * stats.companionMult)));
+    expect(p.vx).toBeCloseTo(22, 5); // …and the repeater's projectile speed
+  });
 });
 
 // ------------------------------------------------------------ kills & loot

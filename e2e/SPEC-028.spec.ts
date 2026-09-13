@@ -82,6 +82,11 @@ test('the heal slot refuses at full HP, spends when hurt, and C toasts empty (§
   await page.keyboard.press('KeyQ');
   await expect.poll(async () => (await info(page))['qHeal']).toBe(2);
 
+  // A tap on the consumable slot uses it too (§4.5: acts on release).
+  await page.getByTestId('surface-hurt').click();
+  await page.getByTestId('qb-heal').click();
+  await expect.poll(async () => (await info(page))['qHeal']).toBe(1);
+
   // §6.2 case 4: the utility slot is empty until something eligible is carried.
   await page.keyboard.press('KeyC');
   await expect(page.getByTestId('toasts')).toContainText('No utility items');
@@ -148,9 +153,10 @@ test.describe('touch (§6.2 case 6)', () => {
     await expect(page.getByTestId('touch-weaponNext')).toBeVisible();
     await expect(page.getByTestId('touch-useItem')).toBeVisible();
 
-    // 56 px slots on the touch scheme.
+    // 56 px slots on the touch scheme, and the key hints are gone.
     const box = await page.getByTestId('qb-primary').boundingBox();
     expect(box?.width ?? 0).toBeGreaterThanOrEqual(56);
+    await expect(page.locator('[data-testid="qb-heal"] .qb-key')).toHaveClass(/is-hidden/);
 
     await page.getByTestId('qb-sidearm').tap();
     await expect(page.getByTestId('qb-sidearm')).toHaveClass(/is-active/);
