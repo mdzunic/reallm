@@ -230,7 +230,7 @@ export class Rng {
  * lets the save carry nothing but the seed and the visit counts (§2, AC-28).
  */
 export class RngRoot {
-  /** The save's own seed (`SaveV1.meta.seed`), as a uint32. */
+  /** The save's own seed (`Save.meta.seed`), as a uint32. */
   readonly seed: number;
 
   constructor(saveSeed: number) {

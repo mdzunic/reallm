@@ -21,7 +21,7 @@
 // Pure: no `three`, no DOM, no `Math.random` (SPEC-001 §4, §7).
 import type { EmitArgs, GameEvents } from '@/core/Events';
 import { log } from '@/core/Log';
-import { maxHp, type SaveV1 } from '@/core/Save';
+import { maxHp, type Save } from '@/core/Save';
 import { TUNING } from '@/data/index';
 
 /**
@@ -70,10 +70,10 @@ export function levelForXp(xp: number): number {
 }
 
 export class Progression {
-  readonly #save: SaveV1;
+  readonly #save: Save;
   readonly #events: EventSink;
 
-  constructor(save: SaveV1, events: EventSink) {
+  constructor(save: Save, events: EventSink) {
     this.#save = save;
     this.#events = events;
   }

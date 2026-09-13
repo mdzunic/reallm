@@ -33,6 +33,7 @@ import type {
   PoiId,
   ResourceId,
   WaveId,
+  WeaponSlot,
   WeatherId,
 } from '@/data/index';
 
@@ -80,7 +81,9 @@ export type GameEvents = {
   'resource:collected': { resource: ResourceId; amount: number; total: number; blocked?: 'cargo_full' };
   'resource:spent': { resource: ResourceId; amount: number; total: number; reason: string };
   'inventory:changed': { itemId: ItemId; qty: number };
-  'gear:equipped': { slot: 'weapon' | 'armor'; itemId: ItemId };
+  // SPEC-025 §3: the save carries three weapon slots, so the equip event names
+  // the one that moved rather than the kind of thing that moved into it.
+  'gear:equipped': { slot: WeaponSlot | 'armor'; itemId: ItemId };
   'shop:purchased': { kind: 'ship' | 'gear' | 'companion' | 'craft'; id: string; tier?: number };
   'enemy:spawned': { enemyId: EnemyId; elite: boolean };
   'enemy:killed': { enemyId: EnemyId; elite: boolean; x: number; z: number; xp: number };

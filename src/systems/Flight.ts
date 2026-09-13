@@ -22,7 +22,7 @@ import type { EmitArgs, GameEvents } from '@/core/Events';
 import { Pool } from '@/core/Pool';
 import type { QualitySettings } from '@/core/Renderer';
 import type { Rng } from '@/core/Rng';
-import type { SaveV1 } from '@/core/Save';
+import type { Save } from '@/core/Save';
 import {
   COMPANIONS,
   ENEMIES,
@@ -107,11 +107,11 @@ export interface Burst {
 
 export interface FlightConfig {
   planet: PlanetDef;
-  ship: SaveV1['ship'];
-  companions: SaveV1['companions'];
+  ship: Save['ship'];
+  companions: Save['companions'];
   quality: QualitySettings;
   /** Casual multiplies incoming damage by 0.7 (§4.6, 13-h). */
-  difficulty: SaveV1['meta']['difficulty'];
+  difficulty: Save['meta']['difficulty'];
 }
 
 export interface FlightInput {

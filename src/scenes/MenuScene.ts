@@ -11,7 +11,7 @@
 import * as THREE from 'three';
 import { log } from '@/core/Log';
 import type { GameServices } from '@/core/Services';
-import { SLOTS, type SaveV1, type SlotId } from '@/core/Save';
+import { SLOTS, type Save, type SlotId } from '@/core/Save';
 import type { SceneParams } from '@/core/StateMachine';
 import { slotLine } from '@/systems/UiHelpers';
 import { confirmSheet } from '@/ui/ConfirmSheet';
@@ -285,9 +285,9 @@ export class MenuScene extends UiScene<'menu'> {
    * writes, falling back to the freshest `updatedAt`. A memory-only session
    * (E8) has a bound save and no readable slots; it continues too.
    */
-  #continueTarget(): { slot: SlotId; data: SaveV1 } | 'bound' | null {
+  #continueTarget(): { slot: SlotId; data: Save } | 'bound' | null {
     if (this.services.save.current !== null) return 'bound';
-    const loadable: { slot: SlotId; data: SaveV1 }[] = [];
+    const loadable: { slot: SlotId; data: Save }[] = [];
     for (const slot of SLOTS) {
       const result = this.services.save.load(slot);
       if (result.ok) loadable.push({ slot, data: result.data });

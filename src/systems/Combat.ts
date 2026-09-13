@@ -16,7 +16,7 @@ import type { InputState } from '@/core/Input';
 import { log } from '@/core/Log';
 import type { Pool } from '@/core/Pool';
 import type { Rng } from '@/core/Rng';
-import type { SaveV1 } from '@/core/Save';
+import type { Save } from '@/core/Save';
 import { SpatialHash } from '@/core/SpatialHash';
 import {
   CLASSES,
@@ -32,6 +32,7 @@ import {
   type DamageSource,
   type Enemy,
   type EnemyId,
+  type GearLine,
   type GearTier,
   type Item,
   type ItemId,
@@ -90,7 +91,7 @@ export interface PlayerStats {
 }
 
 /** The enabled companion's absolute effect at its level, or `null` (§4.1, §4.8). */
-export function companionEffect(save: SaveV1, id: CompanionId): CompanionEffect | null {
+export function companionEffect(save: Save, id: CompanionId): CompanionEffect | null {
   const owned = save.companions.find((entry) => entry.id === id);
   if (owned === undefined || !owned.enabled) return null;
   return COMPANIONS[id].levels[(owned.level - 1) as 0 | 1 | 2];
@@ -102,7 +103,7 @@ export function companionEffect(save: SaveV1, id: CompanionId): CompanionEffect 
  * consumable boosts (11-i); `boosts.moveMult` is the weather multiplier
  * (SPEC-012 §4.6), 1 in calm weather.
  */
-export function computePlayerStats(save: SaveV1, boosts?: { damageMult?: number; moveMult?: number }): PlayerStats {
+export function computePlayerStats(save: Save, boosts?: { damageMult?: number; moveMult?: number }): PlayerStats {
   // Widened to the interface: the concrete class passives are disjoint literals.
   const passive: ClassPassive = CLASSES[save.player.classId].passive;
   const a = save.player.attributes;
@@ -157,12 +158,15 @@ export function rollElite(def: Enemy, eliteChance: number, rng: Rng): boolean {
   return def.eliteAllowed && rng.chance(eliteChance);
 }
 
-/** The unique gear item of a slot at a tier (§4.7: "the slot's item at that tier"). */
-export function gearAt(slot: 'weapon' | 'armor', tier: GearTier): ItemId {
+/**
+ * The unique gear item of a line at a tier (§4.7, SPEC-025 §4.2: tiers are
+ * unique per *line*, so a handgun and a rifle may both be tier 0).
+ */
+export function gearAt(line: GearLine, tier: GearTier): ItemId {
   for (const item of Object.values(ITEMS)) {
-    if (item.kind === slot && item.tier === tier) return item.id;
+    if (item.kind !== 'consumable' && item.line === line && item.tier === tier) return item.id;
   }
-  throw new Error(`no ${slot} at tier ${tier}`); // content invariant (SPEC-009 §7)
+  throw new Error(`no ${line} at tier ${tier}`); // content invariant (SPEC-009 §7)
 }
 
 // -------------------------------------------------------------------- world
@@ -187,7 +191,7 @@ export interface CombatWorld {
 export type LootDrop =
   | { kind: 'resource'; resource: ResourceId; amount: number; x: number; z: number }
   | { kind: 'item'; itemId: ItemId; qty: number; x: number; z: number }
-  | { kind: 'gear'; slot: 'weapon' | 'armor'; itemId: ItemId; x: number; z: number };
+  | { kind: 'gear'; line: GearLine; itemId: ItemId; x: number; z: number };
 
 /** The slice of SPEC-010's `Economy` combat hands to SPEC-012's pickup flow. */
 export interface EconomyPort {
@@ -207,7 +211,7 @@ export class Combat {
   readonly drops: LootDrop[] = [];
 
   readonly #world: CombatWorld;
-  readonly #save: SaveV1;
+  readonly #save: Save;
   readonly #progression: ProgressionPort;
   readonly #events: EventBus<GameEvents>;
   readonly #rng: { loot: Rng; ai: Rng; combat: Rng };
@@ -229,7 +233,7 @@ export class Combat {
 
   constructor(
     world: CombatWorld,
-    save: SaveV1,
+    save: Save,
     economy: EconomyPort,
     progression: ProgressionPort,
     events: EventBus<GameEvents>,
@@ -248,8 +252,10 @@ export class Combat {
     // §4.1: recomputed on level-up and equip; consumables and weather go
     // through `applyConsumable` / `setWeatherMoveMult` (AC-66).
     events.on('player:leveledUp', () => this.#recomputeStats(), this);
-    events.on('gear:equipped', () => {
-      this.#weapon = this.#equippedWeapon();
+    events.on('gear:equipped', (payload) => {
+      // SPEC-025 §4.8: the weapon in hand is the primary, so only that slot
+      // moving re-reads it; armor still moves the derived stats.
+      if (payload.slot === 'primary') this.#weapon = this.#equippedWeapon();
       this.#recomputeStats();
     }, this);
 
@@ -288,7 +294,7 @@ export class Combat {
   }
 
   #equippedWeapon(): WeaponDef {
-    const item = ITEMS[this.#save.equipped.weapon];
+    const item = ITEMS[this.#save.equipped.primary];
     if (item.kind !== 'weapon') throw new Error(`equipped weapon ${item.id} is not a weapon`);
     return item;
   }
@@ -572,7 +578,7 @@ export class Combat {
         const cap = Math.min(3, Math.ceil(def.chapter / 2));
         const tier = Math.min(entry.tier, cap) as GearTier;
         const at = loot.onRing(LOOT_SCATTER_MIN, LOOT_SCATTER_MAX);
-        this.drops.push({ kind: 'gear', slot: entry.slot, itemId: gearAt(entry.slot, tier), x: x + at.x, z: z + at.z });
+        this.drops.push({ kind: 'gear', line: entry.line, itemId: gearAt(entry.line, tier), x: x + at.x, z: z + at.z });
       }
     }
   }

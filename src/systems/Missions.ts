@@ -10,7 +10,7 @@
 // count, which is still a plain number and therefore round-trips the save
 // unchanged.
 import type { EventBus, GameEvents } from '@/core/Events';
-import type { SaveV1 } from '@/core/Save';
+import type { Save } from '@/core/Save';
 import {
   MISSIONS,
   TUNING,
@@ -94,7 +94,7 @@ function popcount(v: number): number {
 }
 
 export class Missions {
-  readonly #save: SaveV1;
+  readonly #save: Save;
   readonly #economy: MissionEconomy;
   readonly #events: EventBus<GameEvents>;
   readonly #scene: 'surface' | 'flight';
@@ -104,7 +104,7 @@ export class Missions {
   #pinned: MissionId | null = null;
 
   constructor(
-    save: SaveV1,
+    save: Save,
     economy: MissionEconomy,
     events: EventBus<GameEvents>,
     scene: 'surface' | 'flight',
@@ -686,7 +686,7 @@ export const REPLAY_REWARD_FRACTION = TUNING.REPLAY_REWARD_FRACTION;
  * Without it a replay could file the other verdict and leave one save holding
  * both `ending_stay` and `ending_escape`.
  */
-export function campaignLocked(save: SaveV1, def: MissionDef): boolean {
+export function campaignLocked(save: Save, def: MissionDef): boolean {
   if (def.rewards.flags?.includes('campaign_done') !== true) return false;
   return save.progress.flags.includes('campaign_done');
 }

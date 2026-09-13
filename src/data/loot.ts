@@ -5,8 +5,8 @@
 //     trace of a secondary (1–2 at 15 %), with lithium on every planet at ≥ 5 %
 //     so no resource is exclusive to one world (PLAN §5);
 //   - a ranged enemy adds a wheat ration at 8 %;
-//   - a boss drops guaranteed gear of tier `min(3, ceil(chapter / 2))` in both
-//     slots plus three to five consumables;
+//   - a boss drops guaranteed gear of tier `min(3, ceil(chapter / 2))` on both
+//     lines plus three to five consumables;
 //   - an elite rolls its own table and then `elite_bonus`.
 //
 // `elite_bonus` is chapter-independent, so it carries the *ceiling* tier; the
@@ -28,7 +28,9 @@ export type LootEntry =
       readonly chance: number;
     }
   | { readonly kind: 'item'; readonly itemId: ItemId; readonly qty: number; readonly chance: number }
-  | { readonly kind: 'gear'; readonly slot: 'weapon' | 'armor'; readonly tier: 1 | 2 | 3; readonly chance: number };
+  // SPEC-025 §4.2: a gear drop names the *line* it rolls on, not a slot — the
+  // slot is the weapon's own, and a line is what `gearAt` resolves a tier in.
+  | { readonly kind: 'gear'; readonly line: 'rifle' | 'armor'; readonly tier: 1 | 2 | 3; readonly chance: number };
 
 /** The three to five consumables every boss drops (§4.4). */
 const BOSS_CONSUMABLES = [
@@ -52,8 +54,8 @@ export const LOOT_TABLES = {
     { kind: 'item', itemId: 'wheat_ration', qty: 1, chance: 0.08 },
   ],
   cinder4_boss: [
-    { kind: 'gear', slot: 'weapon', tier: 1, chance: 1 },
-    { kind: 'gear', slot: 'armor', tier: 1, chance: 1 },
+    { kind: 'gear', line: 'rifle', tier: 1, chance: 1 },
+    { kind: 'gear', line: 'armor', tier: 1, chance: 1 },
     ...BOSS_CONSUMABLES,
   ],
 
@@ -70,8 +72,8 @@ export const LOOT_TABLES = {
     { kind: 'item', itemId: 'wheat_ration', qty: 1, chance: 0.08 },
   ],
   vetra_boss: [
-    { kind: 'gear', slot: 'weapon', tier: 1, chance: 1 },
-    { kind: 'gear', slot: 'armor', tier: 1, chance: 1 },
+    { kind: 'gear', line: 'rifle', tier: 1, chance: 1 },
+    { kind: 'gear', line: 'armor', tier: 1, chance: 1 },
     ...BOSS_CONSUMABLES,
   ],
 
@@ -88,8 +90,8 @@ export const LOOT_TABLES = {
     { kind: 'item', itemId: 'wheat_ration', qty: 1, chance: 0.08 },
   ],
   thessaly_boss: [
-    { kind: 'gear', slot: 'weapon', tier: 2, chance: 1 },
-    { kind: 'gear', slot: 'armor', tier: 2, chance: 1 },
+    { kind: 'gear', line: 'rifle', tier: 2, chance: 1 },
+    { kind: 'gear', line: 'armor', tier: 2, chance: 1 },
     ...BOSS_CONSUMABLES,
   ],
 
@@ -106,8 +108,8 @@ export const LOOT_TABLES = {
     { kind: 'item', itemId: 'wheat_ration', qty: 1, chance: 0.08 },
   ],
   ferrum_boss: [
-    { kind: 'gear', slot: 'weapon', tier: 2, chance: 1 },
-    { kind: 'gear', slot: 'armor', tier: 2, chance: 1 },
+    { kind: 'gear', line: 'rifle', tier: 2, chance: 1 },
+    { kind: 'gear', line: 'armor', tier: 2, chance: 1 },
     ...BOSS_CONSUMABLES,
   ],
 
@@ -122,8 +124,8 @@ export const LOOT_TABLES = {
     { kind: 'item', itemId: 'wheat_ration', qty: 1, chance: 0.08 },
   ],
   hive_boss: [
-    { kind: 'gear', slot: 'weapon', tier: 3, chance: 1 },
-    { kind: 'gear', slot: 'armor', tier: 3, chance: 1 },
+    { kind: 'gear', line: 'rifle', tier: 3, chance: 1 },
+    { kind: 'gear', line: 'armor', tier: 3, chance: 1 },
     ...BOSS_CONSUMABLES,
   ],
 
@@ -137,8 +139,8 @@ export const LOOT_TABLES = {
 
   /** Rolled on top of the enemy's own table when it spawned elite (§4.4). */
   elite_bonus: [
-    { kind: 'gear', slot: 'weapon', tier: 3, chance: 0.35 },
-    { kind: 'gear', slot: 'armor', tier: 3, chance: 0.35 },
+    { kind: 'gear', line: 'rifle', tier: 3, chance: 0.35 },
+    { kind: 'gear', line: 'armor', tier: 3, chance: 0.35 },
   ],
 } as const satisfies Record<string, readonly LootEntry[]>;
 

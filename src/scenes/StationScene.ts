@@ -11,7 +11,7 @@
 // a throwing `enter()` a fallback to the menu.
 import * as THREE from 'three';
 import { log } from '@/core/Log';
-import { maxHp, type SaveV1 } from '@/core/Save';
+import { maxHp, type Save } from '@/core/Save';
 import type { GameServices } from '@/core/Services';
 import type { SceneParams } from '@/core/StateMachine';
 import { DIALOGUE, MISSIONS, PLANET_IDS, PLANETS, type DialogueId, type MissionId } from '@/data/index';
@@ -32,7 +32,7 @@ import { addHubLights, hubSkyMesh, loadHubArt, proceduralDock, proceduralRing, s
 import { UiScene } from '@/scenes/base';
 
 /** Missions already debriefed this session, per save object (§4.3). */
-const DEBRIEFED = new WeakMap<SaveV1, Set<MissionId>>();
+const DEBRIEFED = new WeakMap<Save, Set<MissionId>>();
 
 /** SPEC-017 §4.1 (*initial tuning*): the station reads cool and clean. */
 const STATION_LOOK: Partial<Look> = { vignette: 0.35, bloomStrength: 0.3, tint: [0.96, 1, 1.04] };
@@ -154,7 +154,7 @@ export class StationScene extends UiScene<'station'> {
 
   // ---------------------------------------------------------- enter effects
 
-  #enterEffects(data: SaveV1): void {
+  #enterEffects(data: Save): void {
     const economy = this.#economy;
     if (economy === null) return;
     // AC-21 / E1: the subsidy, and ARIA's line only when it granted oil.
@@ -181,7 +181,7 @@ export class StationScene extends UiScene<'station'> {
    * (23-f). A catch-up marks every pending chapter, so an old save watches one
    * film rather than four (E30).
    */
-  async #storyOnEntry(data: SaveV1, params: SceneParams['station']): Promise<void> {
+  async #storyOnEntry(data: Save, params: SceneParams['station']): Promise<void> {
     // SPEC-024 §4.5: an ending the save still owes comes before everything
     // else — and after an escape there is no "else" at all.
     if (!(await this.#pendingEnding(data))) return;
@@ -214,7 +214,7 @@ export class StationScene extends UiScene<'station'> {
    * Returns false when the entry is over — an escape has already asked for the
    * menu, and neither an interlude nor a debrief belongs to it any more.
    */
-  async #pendingEnding(data: SaveV1): Promise<boolean> {
+  async #pendingEnding(data: Save): Promise<boolean> {
     const ending = endingPending(new Set(data.progress.flags), data.progress.endingSeen);
     if (ending === null) return true;
     await director(this.services).playFilm(`ending_${ending}`, { musicAfter: ending === 'stay' ? 'station' : null });
@@ -237,7 +237,7 @@ export class StationScene extends UiScene<'station'> {
   }
 
   /** Plays the `<mission>_done` dialogue of arrived-from missions not yet debriefed. */
-  #debrief(data: SaveV1, arrivedFrom: NonNullable<SceneParams['station']['arrivedFrom']>): void {
+  #debrief(data: Save, arrivedFrom: NonNullable<SceneParams['station']['arrivedFrom']>): void {
     let seen = DEBRIEFED.get(data);
     if (seen === undefined) {
       seen = new Set();
