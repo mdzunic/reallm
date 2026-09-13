@@ -65,7 +65,7 @@ import { advanceViewTime, RESOURCE_COLORS, shakeOffset, SurfaceView, type ShakeS
 import { confirmSheet } from '@/ui/ConfirmSheet';
 import { DamageNumbers } from '@/ui/DamageNumbers';
 import { DeathOverlay } from '@/ui/DeathOverlay';
-import { EndingOverlay } from '@/ui/EndingOverlay';
+import { clearEndingOverlays, EndingOverlay } from '@/ui/EndingOverlay';
 import { dialogueLayer, type DialogueUI } from '@/ui/DialogueUI';
 import { el, h, testId } from '@/ui/dom';
 import { Hud } from '@/ui/Hud';
@@ -1511,6 +1511,10 @@ export class SurfaceScene extends UiScene<'surface'> {
     await director(services).playFilm(`ending_${ending}`, { musicAfter: ending === 'stay' ? 'surface_calm' : null });
     if (!this.#alive) return;
     const overlay = new EndingOverlay(services.uiRoot);
+    // The overlay lives on the shared `#ui` root and takes itself down when it
+    // resolves; a quit from the pause menu while the card is up has to take it
+    // along too. `endingSeen` then stays false and the station replays it.
+    this.disposer.add(() => clearEndingOverlays(services.uiRoot));
     if (ending === 'stay') {
       await overlay.playStay(stayReport(save));
       if (!this.#alive) return;

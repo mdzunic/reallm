@@ -21,7 +21,7 @@ import { endingPending, interludeToPlay, stayReport } from '@/systems/StoryBeats
 import { director } from '@/scenes/Director';
 import { CharacterPanel } from '@/ui/CharacterPanel';
 import { dialogueLayer } from '@/ui/DialogueUI';
-import { EndingOverlay } from '@/ui/EndingOverlay';
+import { clearEndingOverlays, EndingOverlay } from '@/ui/EndingOverlay';
 import { el, h, testId } from '@/ui/dom';
 import { MissionBoard } from '@/ui/MissionBoard';
 import { SettingsPanel } from '@/ui/SettingsPanel';
@@ -220,6 +220,7 @@ export class StationScene extends UiScene<'station'> {
     await director(this.services).playFilm(`ending_${ending}`, { musicAfter: ending === 'stay' ? 'station' : null });
     if (!this.#alive) return false;
     const overlay = new EndingOverlay(this.services.uiRoot);
+    this.disposer.add(() => clearEndingOverlays(this.services.uiRoot));
     if (ending === 'stay') {
       await overlay.playStay(stayReport(data));
       if (!this.#alive) return false;
