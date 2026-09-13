@@ -87,10 +87,12 @@ export class QuickBar {
         write(nodes.name, item?.short ?? '—');
         write(nodes.key, keys ? KEY_HINTS[slot] : '');
         nodes.key.classList.toggle('is-hidden', !keys);
+        // SPEC-029 widens `SlotState` (heat, lock, recharge); the state text
+        // above already follows whatever the union holds, and the lock
+        // styling lands with that spec.
         if (nodes.state !== null) write(nodes.state, view.state.toUpperCase());
         nodes.root.classList.toggle('is-active', slot === loadout.active);
         nodes.root.classList.toggle('is-empty', item === null);
-        nodes.root.classList.toggle('is-locked', view.state === ('lock' as string));
         const cd = view.cd.toFixed(3);
         if (nodes.lastCd !== cd) {
           nodes.lastCd = cd;
@@ -138,8 +140,10 @@ export class QuickBar {
     root.append(key);
 
     if (weapon) {
-      // §4.5: weapons act on the press — switching wants no latency.
+      // §4.5: weapons act on the press — switching wants no latency. Only the
+      // primary button (touch and pen read as 0): a right-click is reserved.
       this.#listen(root, 'pointerdown', (event) => {
+        if (event.button !== 0) return;
         event.preventDefault();
         this.#handlers.slot(slot);
       });
@@ -147,8 +151,12 @@ export class QuickBar {
     } else {
       const quickSlot = slot as QuickSlot;
       // §4.5: a quick slot acts on release, so a long press can become the
-      // picker instead. A release after the timer fired spends nothing.
+      // picker instead. A release after the timer fired spends nothing. Only
+      // the primary button taps or long-presses — a right-click goes through
+      // `contextmenu` alone, which on Windows arrives *after* pointerup;
+      // without the button gate that release would also spend an item.
       this.#listen(root, 'pointerdown', (event) => {
+        if (event.button !== 0) return;
         event.preventDefault();
         this.#clearPress();
         this.#longFired = false;
@@ -159,6 +167,7 @@ export class QuickBar {
         }, LONG_PRESS_MS);
       });
       this.#listen(root, 'pointerup', (event) => {
+        if (event.button !== 0) return;
         event.preventDefault();
         const tapped = this.#pressTimer !== null && !this.#longFired;
         this.#clearPress();
@@ -181,7 +190,11 @@ export class QuickBar {
     this.#pressTimer = null;
   }
 
-  #listen(target: EventTarget, type: string, handler: (event: Event) => void): void {
+  #listen<K extends keyof HTMLElementEventMap>(
+    target: HTMLElement,
+    type: K,
+    handler: (event: HTMLElementEventMap[K]) => void,
+  ): void {
     target.addEventListener(type, handler);
     this.#teardown.push(() => target.removeEventListener(type, handler));
   }

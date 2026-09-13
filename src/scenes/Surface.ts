@@ -963,6 +963,16 @@ export class SurfaceScene extends UiScene<'surface'> {
       world.player.vx = 0;
       world.player.vz = 0;
     }
+
+    // §4.6 (28-d): a hold taken by this step's own presses — the picker or
+    // the map — stops the rest of this step too, not just the next one, so
+    // no combat, weather or spawning runs behind a freshly opened overlay.
+    if (this.#uiHolds > 0) {
+      world.player.vx = 0;
+      world.player.vz = 0;
+      return;
+    }
+
     combat.update(dt, input, modal ? null : this.#aimWorld(world));
 
     this.#updateWeather(world, dt);

@@ -133,6 +133,32 @@ test('a long press on the heal slot opens the picker and choosing closes it (§6
   await expect.poll(async () => (await info(page))['qHeal']).toBe(0);
 });
 
+test('a right-click on a quick slot opens the picker without spending, in the Windows event order', async ({ page }) => {
+  await start(page, URL);
+  await settle(page);
+
+  // Hurt first, so a stray tap on the heal slot would really spend a ration.
+  await page.getByTestId('surface-hurt').click();
+  expect((await info(page))['qHeal']).toBe(3);
+
+  // Windows Chromium/Firefox deliver `contextmenu` after `pointerup`, not at
+  // `pointerdown` time as on Linux/macOS — the release must not read as a tap.
+  await page.evaluate(() => {
+    const heal = document.querySelector('[data-testid="qb-heal"]');
+    if (heal === null) throw new Error('qb-heal missing');
+    heal.dispatchEvent(new PointerEvent('pointerdown', { button: 2, bubbles: true }));
+    heal.dispatchEvent(new PointerEvent('pointerup', { button: 2, bubbles: true }));
+    heal.dispatchEvent(new MouseEvent('contextmenu', { button: 2, bubbles: true }));
+  });
+
+  const picker = page.locator('[data-testid="quick-picker"]');
+  await expect(picker).toBeVisible();
+  expect((await info(page))['qHeal']).toBe(3);
+
+  await page.getByTestId('quick-pick-wheat_ration').click();
+  await expect(picker).toHaveCount(0);
+});
+
 // Pixel 5 emulation, minus `defaultBrowserType`, which a describe-level
 // `use()` may not carry. Landscape: the gameplay scenes mount RotateOverlay
 // over a portrait phone.
