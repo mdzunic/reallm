@@ -111,20 +111,39 @@ test('a long press on the heal slot opens the picker and choosing closes it (§6
 
   await page.getByTestId('quick-pick-wheat_ration').click();
   await expect(picker).toHaveCount(0);
-  const quick = await page.evaluate(() => window.__reallm.save().current?.quick ?? null);
-  expect(quick?.['heal']).toBe('wheat_ration');
+  await expect(page.getByTestId('qb-heal')).toContainText('Ration');
+
+  // A second visit proves the choice lands in the save: Empty clears the slot,
+  // and the bar and the qHeal counter follow it.
+  const box2 = await heal.boundingBox();
+  if (box2 === null) throw new Error('qb-heal has no box');
+  await page.mouse.move(box2.x + box2.width / 2, box2.y + box2.height / 2);
+  await page.mouse.down();
+  await page.waitForTimeout(600);
+  await page.mouse.up();
+  await expect(picker).toBeVisible();
+  await page.getByTestId('quick-pick-empty').click();
+  await expect(picker).toHaveCount(0);
+  await expect(page.getByTestId('qb-heal')).toHaveClass(/is-empty/);
+  await expect.poll(async () => (await info(page))['qHeal']).toBe(0);
 });
 
+// Pixel 5 emulation, minus `defaultBrowserType`, which a describe-level
+// `use()` may not carry. Landscape: the gameplay scenes mount RotateOverlay
+// over a portrait phone.
+const { defaultBrowserType: _ignored, ...PIXEL_5 } = devices['Pixel 5 landscape'];
+
 test.describe('touch (§6.2 case 6)', () => {
-  // Landscape: the gameplay scenes mount RotateOverlay over a portrait phone.
-  test.use({ ...devices['Pixel 5 landscape'] });
+  test.use(PIXEL_5);
 
   test('a tap selects a weapon slot; SWAP and ITEM are on screen', async ({ page }) => {
     await start(page, URL);
     await settle(page);
 
-    // The layer mounts with the first touch (SPEC-005 AC-20).
-    await page.touchscreen.tap(240, 300);
+    // The layer mounts with the first touch (SPEC-005 AC-20) — on the bare
+    // canvas, clear of the tracker, the minimap and the bar.
+    const size = page.viewportSize();
+    await page.touchscreen.tap(Math.round((size?.width ?? 800) / 2), Math.round((size?.height ?? 400) * 0.45));
     await expect(page.locator('[data-testid="touch-controls"]')).toBeVisible();
     await expect(page.getByTestId('touch-weaponNext')).toBeVisible();
     await expect(page.getByTestId('touch-useItem')).toBeVisible();
