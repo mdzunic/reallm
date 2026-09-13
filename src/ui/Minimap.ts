@@ -189,14 +189,15 @@ function drawShape(ctx: CanvasRenderingContext2D, shape: MapShape, s: number, sc
       ctx.arc(0, -h * 0.15, h * 0.75, 0, TAU);
       ctx.fill();
       ctx.fillRect(-h * 0.4, h * 0.35, s * 0.4, h * 0.5);
-      // Two eyes punched back out of the dome.
-      ctx.save();
-      ctx.globalCompositeOperation = 'destination-out';
+      // Two dark eyes. Painted over the dome rather than erased out of it: a
+      // composite hole would take the ground under the icon with it.
+      ctx.fillStyle = COLORS.outline;
       ctx.beginPath();
       ctx.arc(-h * 0.32, -h * 0.2, Math.max(0.8, h * 0.22), 0, TAU);
+      ctx.fill();
+      ctx.beginPath();
       ctx.arc(h * 0.32, -h * 0.2, Math.max(0.8, h * 0.22), 0, TAU);
       ctx.fill();
-      ctx.restore();
       return;
     }
     case 'shield': {
@@ -387,15 +388,13 @@ export class Minimap {
     });
 
     ctx.translate(half, half);
-    const project = (x: number, z: number): MapPoint =>
-      mapProject(x - frame.playerX, z - frame.playerZ, pxPerMetre, rimPx, this.#point);
 
     // 4. arena rings.
     ctx.strokeStyle = COLORS.arena;
     ctx.lineWidth = Math.max(1, scale);
     for (const mark of frame.marks) {
       if (mark.ring <= 0) continue;
-      const p = project(mark.x, mark.z);
+      const p = this.#at(frame, mark.x, mark.z, pxPerMetre, rimPx);
       if (!p.inside) continue;
       ctx.beginPath();
       ctx.arc(p.x, p.y, mark.ring * pxPerMetre, 0, TAU);
@@ -405,21 +404,21 @@ export class Minimap {
     // 5. nodes, 6. discovered POIs, 7. objective rings and rim arrows.
     for (const mark of frame.marks) {
       if (!isNodeIcon(mark.icon)) continue;
-      const p = project(mark.x, mark.z);
+      const p = this.#at(frame, mark.x, mark.z, pxPerMetre, rimPx);
       if (!p.inside) continue;
       drawMapIcon(ctx, mark.icon, p.x, p.y, scale);
       drawn.nodes++;
     }
     for (const mark of frame.marks) {
       if (mark.objective || isNodeIcon(mark.icon)) continue;
-      const p = project(mark.x, mark.z);
+      const p = this.#at(frame, mark.x, mark.z, pxPerMetre, rimPx);
       if (!p.inside) continue;
       drawMapIcon(ctx, mark.icon, p.x, p.y, scale);
       drawn.pois++;
     }
     for (const mark of frame.marks) {
       if (!mark.objective) continue;
-      const p = project(mark.x, mark.z);
+      const p = this.#at(frame, mark.x, mark.z, pxPerMetre, rimPx);
       if (p.inside) {
         drawMapIcon(ctx, mark.icon, p.x, p.y, scale);
         drawObjectiveRing(ctx, mark.icon, p.x, p.y, scale);
@@ -434,7 +433,7 @@ export class Minimap {
     for (const enemy of frame.enemies) {
       const distance = Math.hypot(enemy.x - frame.playerX, enemy.z - frame.playerZ);
       if (distance > MINIMAP_ENEMY_RANGE && enemy.kind !== 'boss') continue;
-      const p = project(enemy.x, enemy.z);
+      const p = this.#at(frame, enemy.x, enemy.z, pxPerMetre, rimPx);
       if (!p.inside) continue;
       drawMapIcon(ctx, enemy.kind, p.x, p.y, scale);
       if (enemy.kind === 'elite') drawEliteRing(ctx, p.x, p.y, scale);
@@ -442,7 +441,7 @@ export class Minimap {
     }
 
     // 9. the route and the target, when the frame carries them (SPEC-027).
-    this.#drawGuidance(ctx, frame, project, scale);
+    this.#drawGuidance(ctx, frame, pxPerMetre, rimPx, scale);
 
     // 10. the player, always at the centre.
     drawPlayerArrow(ctx, 0, 0, frame.facing, scale);
@@ -468,11 +467,17 @@ export class Minimap {
     ctx.restore();
   }
 
+  /** A mark's canvas point, measured from the player at the centre (§4.1). */
+  #at(frame: MinimapFrame, x: number, z: number, pxPerMetre: number, rimPx: number): MapPoint {
+    return mapProject(x - frame.playerX, z - frame.playerZ, pxPerMetre, rimPx, this.#point);
+  }
+
   /** SPEC-027's route and target; both are null until it lands (§4.3 step 9). */
   #drawGuidance(
     ctx: CanvasRenderingContext2D,
     frame: MinimapFrame,
-    project: (x: number, z: number) => MapPoint,
+    pxPerMetre: number,
+    rimPx: number,
     scale: number,
   ): void {
     const route = frame.route;
@@ -482,7 +487,7 @@ export class Minimap {
       ctx.lineWidth = Math.max(1, 2 * scale);
       ctx.beginPath();
       for (let i = 0; i < frame.routeLength; i++) {
-        const p = project(route[i * 2] as number, route[i * 2 + 1] as number);
+        const p = this.#at(frame, route[i * 2] as number, route[i * 2 + 1] as number, pxPerMetre, rimPx);
         if (i === 0) ctx.moveTo(p.x, p.y);
         else ctx.lineTo(p.x, p.y);
       }
@@ -491,7 +496,7 @@ export class Minimap {
     }
     const target = frame.target;
     if (target === null) return;
-    const p = project(target.x, target.z);
+    const p = this.#at(frame, target.x, target.z, pxPerMetre, rimPx);
     if (p.inside) drawMapIcon(ctx, 'target', p.x, p.y, scale);
     else drawRimArrow(ctx, p, MAP_ICONS.target.color, scale);
   }

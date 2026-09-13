@@ -382,6 +382,7 @@ export class SurfaceScene extends UiScene<'surface'> {
   // nothing (SPEC-001 §7).
   readonly #markPool: MapMark[] = [];
   readonly #marks: MapMark[] = [];
+  readonly #enemyPool: { x: number; z: number; kind: 'enemy' | 'elite' | 'boss' }[] = [];
   readonly #minimapEnemies: { x: number; z: number; kind: 'enemy' | 'elite' | 'boss' }[] = [];
   readonly #frame: MinimapFrame = {
     playerX: 0,
@@ -2170,11 +2171,10 @@ export class SurfaceScene extends UiScene<'surface'> {
     for (let i = 0; i < world.enemies.size; i++) {
       const e = world.enemies.at(i);
       if (e.state === 'dead') continue;
-      this.#minimapEnemies.push({
-        x: e.x,
-        z: e.z,
-        kind: e.def.archetype === 'boss' ? 'boss' : e.elite ? 'elite' : 'enemy',
-      });
+      const mark = this.#nextEnemy();
+      mark.x = e.x;
+      mark.z = e.z;
+      mark.kind = e.def.archetype === 'boss' ? 'boss' : e.elite ? 'elite' : 'enemy';
     }
     return frame;
   }
@@ -2188,6 +2188,18 @@ export class SurfaceScene extends UiScene<'surface'> {
       this.#markPool.push(mark);
     }
     this.#marks.push(mark);
+    return mark;
+  }
+
+  /** The same pooling for the enemy list, which turns over every repaint. */
+  #nextEnemy(): { x: number; z: number; kind: 'enemy' | 'elite' | 'boss' } {
+    const at = this.#minimapEnemies.length;
+    let mark = this.#enemyPool[at];
+    if (mark === undefined) {
+      mark = { x: 0, z: 0, kind: 'enemy' as const };
+      this.#enemyPool.push(mark);
+    }
+    this.#minimapEnemies.push(mark);
     return mark;
   }
 
@@ -2244,7 +2256,10 @@ export class SurfaceScene extends UiScene<'surface'> {
     const screen = this.#mapScreen;
     const world = this.#world;
     if (screen === null || world === null || screen.isOpen) return;
-    if (this.#modalOpen > 0 || this.#terminalOpen || this.#holds > 0) return;
+    // A modal dialogue, the pad terminal (26-c) and a held beat all own the
+    // screen already; so does the death overlay, whose respawn clock runs in
+    // the step the hold would stop (§4.8).
+    if (this.#modalOpen > 0 || this.#terminalOpen || this.#holds > 0 || this.#deathAt !== null) return;
     this.#uiHolds++;
     // The hold zeroes velocity every step; this is the step it starts on.
     world.player.vx = 0;
