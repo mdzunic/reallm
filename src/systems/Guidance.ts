@@ -647,7 +647,12 @@ export function findPath(
       g[neighbour] = cost;
       f[neighbour] = cost + octile(nx, nz, goalX, goalZ);
       came[neighbour] = current;
-      // Push.
+      // Push. This is lazy-deletion A*: an improved cell is pushed again rather
+      // than moved, so `cells + 1` bounds the distinct cells on the frontier but
+      // not the entries. A frontier that outgrows the heap would write past the
+      // array — silently, on a TypedArray — so it gives up instead and takes
+      // 27-a's straight line, which is what an unreachable target does anyway.
+      if (heap >= open.length) return 0;
       let at = heap++;
       open[at] = neighbour;
       while (at > 0) {
@@ -684,8 +689,9 @@ export function findPath(
   written++;
 
   // §4.7 smoothing: from where you stand, jump to the farthest point you can
-  // see, and repeat. The last point is always reached, so the route ends on the
-  // target however aggressively the middle is cut.
+  // see, and repeat. The walk normally lands on the target, since the target is
+  // the last point; a route that needs more than PATH_MAX_POINTS hops stops
+  // short of it, which is the cap AC-63 asks for.
   let at = 0;
   let pairs = 0;
   out[pairs * 2] = points[0] as number;

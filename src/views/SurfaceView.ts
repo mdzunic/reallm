@@ -1155,6 +1155,11 @@ export class SurfaceView {
     this.#followerView = null;
     this.#scene.remove(this.#root);
     disposeObject3D(this.#root);
+    // The guidance meshes are built on demand, so `disposeObject3D` only reaches
+    // their materials on a visit that had guidance up; disposing them here is
+    // idempotent and covers the visit that never resolved a target.
+    this.#pillarMaterial.dispose();
+    this.#routeMaterial.dispose();
     this.#clearEnvironment();
     this.#scene.fog = null;
     this.#scene.background = null;
