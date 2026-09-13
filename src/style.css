@@ -3090,47 +3090,42 @@ html.reduce-motion .tracker.is-stuck {
   display: none;
 }
 
-/* §4.3: the marker is a zero-size anchor at the projected point; its parts are
-   placed around it, so one `translate(…) rotate(…)` moves the whole thing. */
+/* §4.3: the marker is a 22 px box centred on the projected point (the negative
+   margin does the centring, so `transform` is free for the move and the turn),
+   and its parts are placed around that box — one `translate(…) rotate(…)`
+   moves and turns the whole thing. */
 .waypoint {
   position: absolute;
   left: 0;
   top: 0;
-  width: 0;
-  height: 0;
+  width: 22px;
+  height: 22px;
+  margin: -11px 0 0 -11px;
   color: var(--accent-2);
   will-change: transform;
 }
 
 .waypoint-mark {
   position: absolute;
-  left: -11px;
-  top: -11px;
-  width: 22px;
-  height: 22px;
+  inset: 0;
+  background: var(--accent-2);
 }
 
 /* On screen: a 22 px gold diamond with the distance under it. */
 .waypoint[data-state='on'] .waypoint-mark {
-  background: var(--accent-2);
   transform: rotate(45deg);
   box-shadow: 0 0 10px rgba(245, 166, 35, 0.55);
 }
 
 /* On the ellipse: a triangle pointing out along the ray, metres beside it. */
 .waypoint[data-state='edge'] .waypoint-mark {
-  background: none;
-  border-left: 11px solid transparent;
-  border-right: 11px solid transparent;
-  border-bottom: 18px solid var(--accent-2);
-  height: 0;
-  top: -9px;
+  clip-path: polygon(50% 0%, 100% 100%, 0% 100%);
 }
 
 .waypoint-dist {
   position: absolute;
-  left: -40px;
-  top: 14px;
+  left: -29px;
+  top: 24px;
   width: 80px;
   text-align: center;
   font-size: 14px;

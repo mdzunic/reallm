@@ -197,6 +197,36 @@ describe('diffHud (AC-115, AC-62)', () => {
     diffHud(a, b);
     expect([JSON.stringify(a), JSON.stringify(b)]).toEqual(before);
   });
+
+  // SPEC-027 §6.1: the tracker is one model key, rows and all, so the panel is
+  // rewritten exactly when something in it moved (AC-21).
+  it('sees the tracker appear, its rows move, and nothing when it is unchanged', () => {
+    const a = createHudModel();
+    expect(a.tracker).toBeNull();
+    const b = cloneHud(a);
+    b.tracker = {
+      title: 'Dry Land',
+      stage: 'stage 2/3',
+      rows: [{ text: 'Dry Land — Scan Dune Sea', done: false, focus: true }],
+      distance: 84,
+      bearing: 0,
+      pulse: false,
+    };
+    expect(diffHud(a, b)).toEqual(new Set(['tracker']));
+    expect(diffHud(b, cloneHud(b)).size).toBe(0);
+
+    const c = cloneHud(b);
+    (c.tracker as NonNullable<HudModel['tracker']>).distance = 83;
+    expect(diffHud(b, c)).toEqual(new Set(['tracker']));
+
+    const d = cloneHud(c);
+    (d.tracker as NonNullable<HudModel['tracker']>).rows[0]!.done = true;
+    expect(diffHud(c, d)).toEqual(new Set(['tracker']));
+
+    const e = cloneHud(d);
+    (e.tracker as NonNullable<HudModel['tracker']>).rows.push({ text: 'Survive 60 s', done: false, focus: false });
+    expect(diffHud(d, e)).toEqual(new Set(['tracker']));
+  });
 });
 
 describe('toast coalescing (AC-116, AC-78, AC-80)', () => {
