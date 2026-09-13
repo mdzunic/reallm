@@ -6,6 +6,7 @@
 //
 // Colorblind-safe pairs (AC-68): the HP bar is red *and* carries ♥, shield is
 // blue *and* ⛨, the warn banner is amber *and* ▲ — never hue alone.
+import type { Scheme } from '@/core/Input';
 import {
   cloneHud,
   createHudModel,
@@ -13,8 +14,9 @@ import {
   type HudKey,
   type HudModel,
 } from '@/systems/UiHelpers';
-import { ITEMS, RESOURCE_IDS, type ResourceId } from '@/data/index';
+import { RESOURCE_IDS, type ResourceId } from '@/data/index';
 import { el, testId, type UiRoot } from '@/ui/dom';
+import { QuickBar, type QuickBarHandlers } from '@/ui/QuickBar';
 import { Tracker } from '@/ui/Tracker';
 
 export type HudMode = 'surface' | 'flight';
@@ -57,11 +59,14 @@ export class Hud {
   readonly #resourceRows = {} as Record<ResourceId, HTMLSpanElement>;
   readonly #weather = el('div', 'hud-weather');
   readonly #boss = bar('boss', '', 'Boss');
-  readonly #consumable = el('div', 'hud-consumable panel');
   readonly #interact = el('div', 'hud-interact');
   readonly #objective = el('div', 'hud-objective');
   /** SPEC-027 §4.2: the surface's objective tracker; `null` in flight mode. */
   #tracker: Tracker | null = null;
+  /** SPEC-028 §4.5: the quick bar in the bottom centre; surface mode only. */
+  #quickBar: QuickBar | null = null;
+  /** The scheme the key hints and the touch sizing follow (SPEC-028 §4.5). */
+  #scheme: Scheme = 'keyboard';
   readonly #vignette = el('div', 'hud-vignette');
   readonly #static = el('div', 'hud-static');
   #minimap: HTMLCanvasElement | null = null;
@@ -82,7 +87,7 @@ export class Hud {
    * mission, the same thing `KeyT` does. Only surface mode builds a tracker, so
    * flight never passes one.
    */
-  constructor(root: UiRoot, mode: HudMode, onCycleMission?: () => void) {
+  constructor(root: UiRoot, mode: HudMode, onCycleMission?: () => void, quickHandlers?: QuickBarHandlers) {
     this.#ui = root;
     this.#mode = mode;
     this.model = createHudModel();
@@ -137,9 +142,9 @@ export class Hud {
       tc.append(this.#progress, this.#hostiles, this.#storm, this.#holding);
     }
 
+    // SPEC-028 AC: the old bottom-left consumable box is gone; the quick bar
+    // in the bottom centre carries the counts now.
     const bl = el('div', 'hud-bl');
-    bl.append(this.#consumable);
-    this.#consumable.classList.add('is-hidden');
 
     const br = el('div', 'hud-br');
     // AC-59: the minimap sits above the touch buttons, surface mode only.
@@ -162,6 +167,10 @@ export class Hud {
     if (mode === 'flight') {
       bc.append(this.#objective);
       this.#objective.classList.add('is-hidden');
+    }
+    // SPEC-028 §4.5: the quick bar takes the bottom centre SPEC-027 freed.
+    if (mode === 'surface') {
+      this.#quickBar = new QuickBar(bc, quickHandlers ?? { slot: () => undefined, pick: () => undefined });
     }
 
     this.#root.append(this.#vignette, this.#static, tl, tr, tc, bl, br, bc);
@@ -222,11 +231,24 @@ export class Hud {
     this.#last = cloneHud(this.model);
   }
 
+  /**
+   * SPEC-028 §4.5: the scene forwards `input:schemeChanged` here — the touch
+   * sizing is a root class CSS reads, and the key hints re-render.
+   */
+  setScheme(scheme: Scheme): void {
+    if (scheme === this.#scheme) return;
+    this.#scheme = scheme;
+    this.#root.classList.toggle('is-touch', scheme === 'touch');
+    this.#quickBar?.render(this.model.loadout, this.model.quick, scheme);
+  }
+
   dispose(): void {
     if (this.#flashTimer !== null) clearTimeout(this.#flashTimer);
     if (this.#staticTimer !== null) clearTimeout(this.#staticTimer);
     this.#tracker?.dispose();
     this.#tracker = null;
+    this.#quickBar?.dispose();
+    this.#quickBar = null;
     this.#unregister();
     this.#ui.unmount(this.#root);
   }
@@ -306,11 +328,11 @@ export class Hud {
         }
         return;
       }
-      case 'consumable': {
-        this.#consumable.classList.toggle('is-hidden', m.consumable === null);
-        if (m.consumable !== null) {
-          this.#consumable.textContent = `${ITEMS[m.consumable.itemId].name} ×${m.consumable.qty}`;
-        }
+      case 'loadout':
+      case 'quick': {
+        // SPEC-028 §4.5: one renderer for both halves of the bar; it touches
+        // only elements whose text, class or custom property changed.
+        this.#quickBar?.render(m.loadout, m.quick, this.#scheme);
         return;
       }
       case 'interact':

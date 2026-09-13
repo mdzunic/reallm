@@ -16,8 +16,21 @@
 // (SPEC-001 §4, §8).
 import type { MissionId, Objective } from '@/data/missions';
 
-/** §3 — the tip universe; SPEC-028 and SPEC-029 append their own ids. */
-export const TIP_IDS = ['move', 'map', 'track', 'pad', 'scan', 'harvest', 'deliver', 'storm', 'boss', 'death'] as const;
+/** §3 — the tip universe; SPEC-029 appends its own ids. */
+export const TIP_IDS = [
+  'move',
+  'map',
+  'track',
+  'pad',
+  'scan',
+  'harvest',
+  'deliver',
+  'storm',
+  'boss',
+  'death',
+  // SPEC-028 §4.8: the quick bar, ten seconds after the move tip.
+  'quickbar',
+] as const;
 
 export type TipId = (typeof TIP_IDS)[number];
 
@@ -72,6 +85,10 @@ export const TIPS: Readonly<Record<TipId, TipText>> = {
   death: {
     keyboard: 'You respawn at the pad. Timed objectives restart; your counts are kept.',
     touch: 'You respawn at the pad. Timed objectives restart; your counts are kept.',
+  },
+  quickbar: {
+    keyboard: '1, 2 and 3 switch weapons. Q heals, G throws, C uses gadgets — the bar shows what is left.',
+    touch: 'Tap a weapon on the bar to switch. Tap a pack to use it; hold it to choose what goes there.',
   },
 };
 

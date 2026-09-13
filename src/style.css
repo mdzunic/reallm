@@ -789,8 +789,112 @@ html.reduce-motion .sheet {
   white-space: nowrap;
 }
 
-.hud-consumable {
-  padding: 8px 12px;
+/* ---------------------------------------------------- SPEC-028: quick bar */
+/* Six slots at the bottom centre: weapons | quick, an 8 px gap between the
+   groups. Only the slots take pointer events — the HUD layer stays inert. */
+.quickbar {
+  display: flex;
+  gap: 8px;
+}
+
+.qb-group {
+  display: flex;
+  gap: 4px;
+}
+
+.qb-slot {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 1px;
+  width: 48px;
+  height: 48px;
+  padding: 2px;
+  border: 1px solid var(--panel-edge);
+  border-radius: 8px;
+  background:
+    /* §4.5: --cd drives a conic sweep, --heat a thin bar along the bottom. */
+    linear-gradient(to top, var(--warn) calc(var(--heat, 0) * 3px), transparent calc(var(--heat, 0) * 3px)),
+    conic-gradient(rgba(255, 255, 255, 0.18) calc(var(--cd, 0) * 360deg), rgba(0, 0, 0, 0.55) 0);
+  color: inherit;
+  font: inherit;
+  font-size: 10px;
+  line-height: 1.1;
+  pointer-events: auto;
+  cursor: pointer;
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
+}
+
+/* 56 px when the HUD root carries the touch scheme (§4.5). */
+.hud.is-touch .qb-slot {
+  width: 56px;
+  height: 56px;
+  font-size: 11px;
+}
+
+/* §4.5: the active slot has an accent border *and* a ▲ above it — never
+   colour alone (colourblind safety). */
+.qb-slot.is-active {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px var(--accent);
+}
+
+.qb-slot.is-active::after {
+  content: '▲';
+  position: absolute;
+  top: -14px;
+  left: 50%;
+  transform: translateX(-50%);
+  font-size: 9px;
+  color: var(--accent);
+}
+
+.qb-slot.is-empty {
+  opacity: 0.45;
+}
+
+.qb-name {
+  max-width: 100%;
+  overflow: hidden;
+  white-space: nowrap;
+}
+
+.qb-count,
+.qb-state,
+.qb-key {
+  font-size: 8px;
+  opacity: 0.85;
+}
+
+.qb-key {
+  position: absolute;
+  top: 1px;
+  right: 3px;
+}
+
+/* ------------------------------------------------- SPEC-028: quick picker */
+.quick-picker {
+  position: absolute;
+  bottom: 120px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px;
+  pointer-events: auto;
+}
+
+.quick-picker-title {
+  margin: 0;
+  font-size: 12px;
+  opacity: 0.8;
+  text-transform: capitalize;
 }
 
 .hud-interact {

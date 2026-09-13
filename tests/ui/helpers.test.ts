@@ -227,6 +227,56 @@ describe('diffHud (AC-115, AC-62)', () => {
     (e.tracker as NonNullable<HudModel['tracker']>).rows.push({ text: 'Survive 60 s', done: false, focus: false });
     expect(diffHud(d, e)).toEqual(new Set(['tracker']));
   });
+
+  // SPEC-028 §6.1: `loadout` and `quick` replaced `consumable`; each is one
+  // model key, so the bar is rewritten exactly when something in it moved,
+  // and an equal model still writes nothing to the DOM.
+  it('sees the loadout appear, its slots move, and nothing when it is unchanged', () => {
+    const slot = (itemId: 'pistol_service' | 'weapon_kinetic' | null): {
+      itemId: 'pistol_service' | 'weapon_kinetic' | null;
+      state: 'ready' | 'switch' | 'empty';
+      cd: number;
+      heat: number;
+      charges: number;
+      maxCharges: number;
+    } => ({ itemId, state: itemId === null ? 'empty' : 'ready', cd: 0, heat: 0, charges: 0, maxCharges: 0 });
+
+    const a = createHudModel();
+    expect(a.loadout).toBeNull();
+    expect(a.quick).toBeNull();
+    expect('consumable' in a).toBe(false);
+
+    const b = cloneHud(a);
+    b.loadout = {
+      active: 'primary',
+      slots: { sidearm: slot('pistol_service'), primary: slot('weapon_kinetic'), heavy: slot(null) },
+    };
+    expect(diffHud(a, b)).toEqual(new Set(['loadout']));
+    expect(diffHud(b, cloneHud(b)).size).toBe(0);
+
+    const c = cloneHud(b);
+    const loadout = c.loadout as NonNullable<HudModel['loadout']>;
+    loadout.active = 'sidearm';
+    loadout.slots.sidearm.state = 'switch';
+    loadout.slots.sidearm.cd = 0.8;
+    expect(diffHud(b, c)).toEqual(new Set(['loadout']));
+  });
+
+  it('sees a quick-slot count move and nothing when it is unchanged', () => {
+    const a = createHudModel();
+    const b = cloneHud(a);
+    b.quick = {
+      heal: { itemId: 'wheat_ration', qty: 3 },
+      explosive: { itemId: null, qty: 0 },
+      utility: { itemId: null, qty: 0 },
+    };
+    expect(diffHud(a, b)).toEqual(new Set(['quick']));
+    expect(diffHud(b, cloneHud(b)).size).toBe(0);
+
+    const c = cloneHud(b);
+    (c.quick as NonNullable<HudModel['quick']>).heal.qty = 2;
+    expect(diffHud(b, c)).toEqual(new Set(['quick']));
+  });
 });
 
 describe('toast coalescing (AC-116, AC-78, AC-80)', () => {
