@@ -11,7 +11,7 @@ import { describe, expect, it } from 'vitest';
 import { EventBus, type GameEvents } from '@/core/Events';
 import { QUALITY } from '@/core/Renderer';
 import { Rng } from '@/core/Rng';
-import { newSave, type CharacterCreation, type SaveV1 } from '@/core/Save';
+import { newSave, type CharacterCreation, type Save } from '@/core/Save';
 import { ENEMIES, MISSIONS, PLANETS, TUNING, UPGRADES, type MissionId, type PlanetDef } from '@/data/index';
 import { Economy } from '@/systems/Economy';
 import {
@@ -49,7 +49,7 @@ function wavesOnly(base: PlanetDef): PlanetDef {
 }
 
 interface World {
-  save: SaveV1;
+  save: Save;
   events: EventBus<GameEvents>;
   progression: Progression;
   economy: Economy;
@@ -60,7 +60,7 @@ interface World {
 
 interface WorldOptions {
   planet?: PlanetDef;
-  ship?: Partial<SaveV1['ship']>;
+  ship?: Partial<Save['ship']>;
   aria?: { level: 1 | 2 | 3; enabled: boolean } | null;
   difficulty?: 'casual' | 'normal';
   accept?: MissionId[];

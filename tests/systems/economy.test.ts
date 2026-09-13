@@ -8,7 +8,7 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { GameEvents } from '@/core/Events';
 import { setLogSink, type LogSink } from '@/core/Log';
-import { newSave, type CharacterCreation, type SaveV1 } from '@/core/Save';
+import { newSave, type CharacterCreation, type Save } from '@/core/Save';
 import { COMPANIONS, ITEMS, PLANETS, RECIPES, TUNING, UPGRADES, type RecipeId } from '@/data/index';
 import {
   Economy,
@@ -58,14 +58,14 @@ const MARINE: CharacterCreation = {
 };
 
 interface World {
-  data: SaveV1;
+  data: Save;
   events: Recorder;
   progression: Progression;
   economy: Economy;
   requested: string[];
 }
 
-function world(creation: CharacterCreation = MARINE, patch?: (data: SaveV1) => void): World {
+function world(creation: CharacterCreation = MARINE, patch?: (data: Save) => void): World {
   const data = newSave(0, creation, 42, 1_700_000_000_000);
   patch?.(data);
   const events = recorder();
@@ -76,7 +76,7 @@ function world(creation: CharacterCreation = MARINE, patch?: (data: SaveV1) => v
 }
 
 /** Exactly `INVENTORY_SLOTS` slots of rations, so nothing else fits. */
-function fillInventory(data: SaveV1): void {
+function fillInventory(data: Save): void {
   data.inventory = [{ itemId: 'wheat_ration', qty: ITEMS.wheat_ration.stack * INVENTORY_SLOTS }];
 }
 
@@ -263,23 +263,23 @@ describe('gear purchases (§4.3)', () => {
     const { economy, data, progression, events } = world();
     progression.addTokens(1000, 'test');
     economy.buyGear('weapon_laser');
-    expect(data.equipped.weapon).toBe('weapon_kinetic');
+    expect(data.equipped.primary).toBe('weapon_kinetic');
 
     expect(economy.equip('weapon_laser')).toEqual({ ok: true });
-    expect(data.equipped.weapon).toBe('weapon_laser');
+    expect(data.equipped.primary).toBe('weapon_laser');
     expect(economy.count('weapon_kinetic')).toBe(1); // the starter came off into the hold
     expect(economy.count('weapon_laser')).toBe(0);
-    expect(events.of('gear:equipped')).toEqual([{ slot: 'weapon', itemId: 'weapon_laser' }]);
+    expect(events.of('gear:equipped')).toEqual([{ slot: 'primary', itemId: 'weapon_laser' }]);
 
     // The next tier up is owned *because it is worn*: the prerequisite reads
     // the body as well as the hold, and the new tier lands in the hold (10-g).
     expect(economy.buyGear('weapon_plasma')).toEqual({ ok: true });
-    expect(data.equipped.weapon).toBe('weapon_laser');
+    expect(data.equipped.primary).toBe('weapon_laser');
     expect(economy.count('weapon_plasma')).toBe(1);
 
     // And back again, which is the same swap in the other direction.
     expect(economy.equip('weapon_kinetic')).toEqual({ ok: true });
-    expect(data.equipped.weapon).toBe('weapon_kinetic');
+    expect(data.equipped.primary).toBe('weapon_kinetic');
     expect(economy.count('weapon_laser')).toBe(1);
     // Nothing that is not gear, and nothing the hold does not carry.
     expect(economy.equip('medkit')).toEqual({ ok: false, reason: 'not_found' });
@@ -755,7 +755,7 @@ describe('totals()', () => {
   it('reports what the save has bought', () => {
     const { economy } = world(MARINE, (save) => {
       save.ship = { engine: 1, hull: 2, shield: 2, cargo: 0, weapon: 1 };
-      save.equipped = { weapon: 'weapon_plasma', armor: 'armor_scrap' };
+      save.equipped = { armor: 'armor_scrap', sidearm: 'pistol_service', primary: 'weapon_plasma', heavy: null };
       save.companions.push({ id: 'scanner_drone', level: 2, enabled: true });
     });
     expect(economy.totals()).toEqual({

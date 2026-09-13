@@ -5,7 +5,7 @@ import { EventBus, type GameEvents } from '@/core/Events';
 import type { ButtonState, InputState } from '@/core/Input';
 import { Pool } from '@/core/Pool';
 import { Rng, hash32 } from '@/core/Rng';
-import { newSave, type CharacterCreation, type SaveV1 } from '@/core/Save';
+import { newSave, type CharacterCreation, type Save } from '@/core/Save';
 import type { EnemyId } from '@/data/index';
 import { makeEnemy, type EnemyEntity } from '@/entities/Enemy';
 import { makeFollower } from '@/entities/Follower';
@@ -76,7 +76,7 @@ export interface Recorded {
 export interface Harness {
   world: CombatWorld;
   combat: Combat;
-  save: SaveV1;
+  save: Save;
   events: EventBus<GameEvents>;
   progression: Progression;
   rng: { loot: Rng; ai: Rng; combat: Rng };
@@ -94,7 +94,7 @@ export interface Harness {
 
 export interface HarnessOptions {
   creation?: CharacterCreation;
-  patch?: (save: SaveV1) => void;
+  patch?: (save: Save) => void;
   obstacles?: ObstacleGrid;
   arena?: ArenaState | null;
   follower?: boolean;

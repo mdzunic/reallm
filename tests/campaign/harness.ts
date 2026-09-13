@@ -18,7 +18,7 @@
 // When `Missions` lands it replaces the middle of `playMission` and the
 // assertions in `campaignSim.test.ts` stay as they are.
 import type { GameEvents } from '@/core/Events';
-import { newSave, type CharacterCreation, type SaveV1 } from '@/core/Save';
+import { newSave, type CharacterCreation, type Save } from '@/core/Save';
 import {
   MISSIONS,
   PLANETS,
@@ -60,7 +60,7 @@ export interface Jump {
 }
 
 export interface RunReport {
-  save: SaveV1;
+  save: Save;
   /** Everything that refused, in the order it refused. Empty is the pass. */
   problems: string[];
   /** Oil the E1 subsidy handed out across the run, and how often it was asked. */
@@ -183,7 +183,7 @@ function buy(economy: Economy, entry: LoadoutEntry): { ok: true } | { ok: false;
 
 function playMission(
   economy: Economy,
-  save: SaveV1,
+  save: Save,
   mission: MissionDef<MissionId>,
   options: RunOptions,
   report: RunReport,
@@ -204,7 +204,7 @@ function playMission(
 
 function satisfy(
   economy: Economy,
-  save: SaveV1,
+  save: Save,
   mission: MissionDef<MissionId>,
   objective: Objective,
   options: RunOptions,

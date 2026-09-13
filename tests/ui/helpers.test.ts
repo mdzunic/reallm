@@ -3,7 +3,7 @@
 // code), so everything a panel prints or diffs is proven here and `ui/` merely
 // renders the return values.
 import { describe, expect, it } from 'vitest';
-import { newSave, type CharacterCreation, type SaveV1 } from '@/core/Save';
+import { newSave, type CharacterCreation, type Save } from '@/core/Save';
 import { MISSIONS, TUNING, type MissionDef } from '@/data/index';
 import { discountTokens } from '@/systems/Economy';
 import {
@@ -41,7 +41,7 @@ const CREATION: CharacterCreation = {
   difficulty: 'normal',
 };
 
-function save(patch?: (data: SaveV1) => void): SaveV1 {
+function save(patch?: (data: Save) => void): Save {
   const data = newSave(0, CREATION, 42, 1_700_000_000_000);
   patch?.(data);
   return data;

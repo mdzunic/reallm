@@ -2,7 +2,7 @@
 // against the real Economy so the cargo cap is the shipped one.
 import { describe, expect, it } from 'vitest';
 import { EventBus, type GameEvents } from '@/core/Events';
-import { newSave, type SaveV1 } from '@/core/Save';
+import { newSave, type Save } from '@/core/Save';
 import { type ResourceId } from '@/data/index';
 import { Economy } from '@/systems/Economy';
 import {
@@ -24,7 +24,7 @@ const STEP = 1 / 60;
 const RADIUS = 1.5; // TUNING.PICKUP_RADIUS, unmodified
 
 interface Harness {
-  save: SaveV1;
+  save: Save;
   economy: Economy;
   pickups: Pickups;
   events: EventBus<GameEvents>;
@@ -33,7 +33,7 @@ interface Harness {
   run(seconds: number): void;
 }
 
-function harness(patch?: (save: SaveV1) => void): Harness {
+function harness(patch?: (save: Save) => void): Harness {
   const save = newSave(0, MARINE, 42, 1_700_000_000_000);
   patch?.(save);
   const events = new EventBus<GameEvents>({ dev: false });
@@ -128,7 +128,7 @@ describe('Pickups — items and gear (AC-20, E25)', () => {
       const stacks = ['medkit', 'wheat_ration', 'coolant_pack', 'plasma_cell'] as const;
       save.inventory = Array.from({ length: 20 }, (_, i) => ({ itemId: stacks[i % 4] as (typeof stacks)[number], qty: 1 }));
     });
-    h.pickups.spawn({ kind: 'gear', slot: 'weapon', itemId: 'weapon_laser', x: 0.2, z: 0 });
+    h.pickups.spawn({ kind: 'gear', line: 'rifle', itemId: 'weapon_laser', x: 0.2, z: 0 });
     h.run(2);
     expect(h.pickups.pool.size).toBe(1); // refused, still there
     expect(h.economy.count('weapon_laser')).toBe(0);
@@ -150,7 +150,7 @@ describe('Pickups — items and gear (AC-20, E25)', () => {
 
 // ---------------------------------------------------------------------- nodes
 
-function nodeEconomy(save: SaveV1, economy: Economy): NodeEconomy {
+function nodeEconomy(save: Save, economy: Economy): NodeEconomy {
   return {
     addResource: (r, n, s) => economy.addResource(r, n, s),
     room: (r: ResourceId) => economy.cargoCap() - save.resources[r],

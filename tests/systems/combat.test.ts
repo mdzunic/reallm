@@ -517,7 +517,7 @@ describe('kills, elites and loot (§4.6, §4.7)', () => {
   });
 
   it('elites roll elite_bonus on top, chapter-capped; owned gear still drops (11-h)', () => {
-    const h = harness({ patch: (s) => (s.equipped.weapon = 'weapon_laser') });
+    const h = harness({ patch: (s) => (s.equipped.primary = 'weapon_laser') });
     for (let i = 0; i < 300; i++) {
       h.combat.killEnemy(h.spawn('dust_skitter', 5, 5, true), 'player');
       h.step();
@@ -573,8 +573,12 @@ describe('kills, elites and loot (§4.6, §4.7)', () => {
     expect(h.world.arena?.locked).toBe(false);
   });
 
-  it('gearAt resolves the unique slot item per tier', () => {
-    expect(gearAt('weapon', 1)).toBe('weapon_laser');
+  // SPEC-025 §4.2: tiers are unique per line, so the lookup is by line — the
+  // rifle ladder and the handgun ladder both have a tier 0.
+  it('gearAt resolves the unique item of a line per tier', () => {
+    expect(gearAt('rifle', 0)).toBe('weapon_kinetic');
+    expect(gearAt('rifle', 1)).toBe('weapon_laser');
+    expect(gearAt('handgun', 0)).toBe('pistol_service');
     expect(gearAt('armor', 3)).toBe('armor_ablative');
   });
 });

@@ -5,6 +5,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { GameEvents } from '@/core/Events';
 import { setLogSink, type LogSink } from '@/core/Log';
+import { Rng } from '@/core/Rng';
 import {
   AUTOSAVE_DEBOUNCE_MS,
   BACKUP_RESTORED_TEXT,
@@ -18,7 +19,12 @@ import {
   crc32,
   crcText,
   createNullSave,
+  decodeBits,
+  encodeBits,
   epochClock,
+  EXPLORE_CELL,
+  exploreBytes,
+  exploreGridSize,
   fromBase64Url,
   toBase64Url,
   INSTALL_HINT_INTERVAL_MS,
@@ -36,8 +42,8 @@ import {
   TRANSITION_HOLD_MAX_MS,
   validateSave,
   type CharacterCreation,
+  type Save,
   type SaveEvents,
-  type SaveV1,
   type SlotId,
 } from '@/core/Save';
 
@@ -187,8 +193,19 @@ describe('newSave (§4.1)', () => {
     expect(fresh.player.hp).toBe(150);
   });
 
-  it('equips the class starter weapon and scrap armor (AC-8)', () => {
-    expect(fresh.equipped).toEqual({ weapon: SAVE_CONTENT.starterWeapon.marine, armor: 'armor_scrap' });
+  it('equips the class starter weapon, the service pistol and scrap armor (AC-8, SPEC-025)', () => {
+    expect(fresh.equipped).toEqual({
+      armor: 'armor_scrap',
+      sidearm: 'pistol_service',
+      primary: SAVE_CONTENT.starterWeapon.marine,
+      heavy: null,
+    });
+    expect(SAVE_CONTENT.starterSidearm.marine).toBe('pistol_service');
+  });
+
+  it('holds the primary and the three rations it lands with (SPEC-025 §4.1)', () => {
+    expect(fresh.activeWeapon).toBe('primary');
+    expect(fresh.quick).toEqual({ heal: 'wheat_ration', explosive: null, utility: null });
   });
 
   it('has every ship system at tier 0 (AC-9)', () => {
@@ -205,13 +222,27 @@ describe('newSave (§4.1)', () => {
       poisDiscovered: [],
       visits: {},
       endingSeen: false,
+      explored: {},
     });
   });
 
   it('matches the §3 shape, and validates without a single warning (AC-1)', () => {
     expect(fresh.version).toBe(SAVE_VERSION);
+    expect(SAVE_VERSION).toBe(2);
     expect(Object.keys(fresh).sort()).toEqual(
-      ['companions', 'equipped', 'inventory', 'meta', 'player', 'progress', 'resources', 'ship', 'version'].sort(),
+      [
+        'activeWeapon',
+        'companions',
+        'equipped',
+        'inventory',
+        'meta',
+        'player',
+        'progress',
+        'quick',
+        'resources',
+        'ship',
+        'version',
+      ].sort(),
     );
     expect(Object.keys(fresh.meta).sort()).toEqual(
       ['appVersion', 'createdAt', 'difficulty', 'iteration', 'playtimeSec', 'seed', 'slot', 'updatedAt'].sort(),
@@ -561,7 +592,7 @@ describe('validateSave (§4.4)', () => {
     return { ...(JSON.parse(JSON.stringify(newSave(0, CREATION, 1, 1000))) as object), ...patch };
   }
 
-  function expectOk(raw: unknown): { data: SaveV1; warnings: string[] } {
+  function expectOk(raw: unknown): { data: Save; warnings: string[] } {
     const result = validateSave(raw);
     if (!result.ok) throw new Error(`expected a valid save, got: ${result.errors.join('; ')}`);
     return result;
@@ -638,9 +669,15 @@ describe('validateSave (§4.4)', () => {
   });
 
   it('falls back unknown equipped ids to the class starter (AC-28)', () => {
-    const ok = expectOk(withPatch({ equipped: { weapon: 'excalibur', armor: 'wheat_ration' } }));
-    expect(ok.data.equipped).toEqual({ weapon: SAVE_CONTENT.starterWeapon.marine, armor: 'armor_scrap' });
-    expect(ok.warnings.join('\n')).toContain('equipped.weapon');
+    const ok = expectOk(withPatch({ equipped: { primary: 'excalibur', sidearm: 'excalibur', armor: 'wheat_ration', heavy: null } }));
+    expect(ok.data.equipped).toEqual({
+      armor: 'armor_scrap',
+      sidearm: 'pistol_service',
+      primary: SAVE_CONTENT.starterWeapon.marine,
+      heavy: null,
+    });
+    expect(ok.warnings.join('\n')).toContain('equipped.primary');
+    expect(ok.warnings.join('\n')).toContain('equipped.sidearm');
     expect(ok.warnings.join('\n')).toContain('equipped.armor');
   });
 
@@ -747,7 +784,7 @@ describe('validateSave (§4.4)', () => {
     const saves = store(fake, recorder());
     saves.create(0, CREATION);
     saves.flush();
-    const stale = JSON.parse(fake.data.get('reallm:slot:0') as string) as SaveV1;
+    const stale = JSON.parse(fake.data.get('reallm:slot:0') as string) as Save;
     stale.player.name = 'FromTheFuture';
     stale.meta.updatedAt = future;
     fake.data.set(`reallm:slot:0${BAK_SUFFIX}`, JSON.stringify(stale));
@@ -757,7 +794,109 @@ describe('validateSave (§4.4)', () => {
   });
 
   it('rejects a version that is not this one', () => {
-    expect(validateSave({ ...newSave(0, CREATION, 1, 0), version: 2 }).ok).toBe(false);
+    expect(validateSave({ ...newSave(0, CREATION, 1, 0), version: SAVE_VERSION + 1 }).ok).toBe(false);
+    expect(validateSave({ ...newSave(0, CREATION, 1, 0), version: SAVE_VERSION - 1 }).ok).toBe(false);
+  });
+
+  // ------------------------------------------------------ SPEC-025 §4.4
+
+  it('sends a weapon in the wrong slot back to the class starter (25-e)', () => {
+    const ok = expectOk(
+      withPatch({ equipped: { armor: 'armor_scrap', sidearm: 'weapon_plasma', primary: 'pistol_service', heavy: null } }),
+    );
+    expect(ok.data.equipped.sidearm).toBe('pistol_service');
+    expect(ok.data.equipped.primary).toBe(SAVE_CONTENT.starterWeapon.marine);
+    expect(ok.warnings.join('\n')).toContain('equipped.sidearm');
+    expect(ok.warnings.join('\n')).toContain('equipped.primary');
+  });
+
+  it('empties a heavy slot holding something that is not a heavy weapon, without refunding it', () => {
+    const ok = expectOk(
+      withPatch({ equipped: { armor: 'armor_scrap', sidearm: 'pistol_service', primary: 'weapon_kinetic', heavy: 'weapon_laser' } }),
+    );
+    expect(ok.data.equipped.heavy).toBeNull();
+    expect(ok.warnings.join('\n')).toContain('equipped.heavy');
+    // The validator never invents items: the rifle is not handed back.
+    expect(ok.data.inventory).toEqual([{ itemId: 'wheat_ration', qty: 3 }]);
+  });
+
+  it('keeps a filled slot as the active weapon and sends an empty one back to primary (25-c)', () => {
+    expect(expectOk(withPatch({ activeWeapon: 'sidearm' })).data.activeWeapon).toBe('sidearm');
+    const empty = expectOk(withPatch({ activeWeapon: 'heavy' }));
+    expect(empty.data.activeWeapon).toBe('primary');
+    expect(empty.warnings.join('\n')).toContain('activeWeapon');
+    const junk = expectOk(withPatch({ activeWeapon: 'trousers' }));
+    expect(junk.data.activeWeapon).toBe('primary');
+    expect(junk.warnings.join('\n')).toContain('activeWeapon');
+  });
+
+  it('empties a quick slot naming an unknown item or one of the wrong use', () => {
+    const ok = expectOk(withPatch({ quick: { heal: 'excalibur', explosive: 'medkit', utility: 'coolant_pack' } }));
+    expect(ok.data.quick).toEqual({ heal: null, explosive: null, utility: 'coolant_pack' });
+    expect(ok.warnings.join('\n')).toContain('quick.heal');
+    expect(ok.warnings.join('\n')).toContain('quick.explosive');
+  });
+
+  it('25-d: a quick slot naming an item the pack holds none of is kept', () => {
+    const ok = expectOk(withPatch({ inventory: [], quick: { heal: 'medkit', explosive: null, utility: null } }));
+    expect(ok.data.quick.heal).toBe('medkit');
+    expect(ok.warnings.join('\n')).not.toContain('quick.heal');
+  });
+
+  it('drops an explored entry for a planet it does not know', () => {
+    const mask = encodeBits(new Uint8Array(exploreBytes(180)));
+    const ok = expectOk(withPatch({ progress: { ...newSave(0, CREATION, 1, 0).progress, explored: { atlantis: mask } } }));
+    expect(ok.data.progress.explored).toEqual({});
+    expect(ok.warnings.join('\n')).toContain('atlantis');
+  });
+
+  it('E37: drops an explored mask whose length is not this arena’s, and keeps one that is', () => {
+    const progress = newSave(0, CREATION, 1, 0).progress;
+    // Cinder-4 is a 180 m arena: 90 × 90 cells, 1013 bytes.
+    const right = encodeBits(new Uint8Array(exploreBytes(180)));
+    const wrong = encodeBits(new Uint8Array(exploreBytes(160)));
+    const ok = expectOk(withPatch({ progress: { ...progress, explored: { cinder4: right, vetra: wrong } } }));
+    expect(ok.data.progress.explored).toEqual({ cinder4: right });
+    expect(ok.warnings.join('\n')).toContain('progress.explored.vetra');
+  });
+});
+
+// --------------------------------------------------- explored ground (§4.5)
+
+describe('explored-ground encoding (SPEC-025 §4.5)', () => {
+  it('is a 4 m grid whose size follows the arena', () => {
+    expect(EXPLORE_CELL).toBe(4);
+    expect(exploreGridSize(160)).toBe(80);
+    expect(exploreGridSize(180)).toBe(90);
+    expect(exploreGridSize(200)).toBe(100);
+    expect(exploreBytes(160)).toBe(800);
+    expect(exploreBytes(180)).toBe(1013);
+    expect(exploreBytes(200)).toBe(1250);
+    // §4.5: the text a 1013-byte mask costs, unpadded.
+    expect(encodeBits(new Uint8Array(exploreBytes(180)))).toHaveLength(1351);
+  });
+
+  it('round-trips seeded random bytes through unpadded base64url', () => {
+    const rng = new Rng(20250925);
+    for (let round = 0; round < 50; round++) {
+      const bytes = new Uint8Array(1013);
+      for (let i = 0; i < bytes.length; i++) bytes[i] = rng.int(0, 255);
+      const text = encodeBits(bytes);
+      expect(text).toMatch(/^[A-Za-z0-9_-]+$/);
+      expect(decodeBits(text, 1013)).toEqual(bytes);
+    }
+  });
+
+  it('refuses a wrong length and a character outside the alphabet', () => {
+    const bytes = new Uint8Array(16);
+    const text = encodeBits(bytes);
+    expect(decodeBits(text, 16)).toEqual(bytes);
+    expect(decodeBits(text, 17)).toBeNull();
+    expect(decodeBits(text, 15)).toBeNull();
+    // `+` and `/` are base64 but not base64url: they must not decode.
+    expect(decodeBits(`+${text.slice(1)}`, 16)).toBeNull();
+    expect(decodeBits(`/${text.slice(1)}`, 16)).toBeNull();
+    expect(decodeBits('not base64!', 16)).toBeNull();
   });
 });
 
@@ -807,6 +946,74 @@ describe('migrations (§4.3)', () => {
     // v0 knew neither of these; the migration supplies them (§4.3).
     expect(validated.data.progress.visits).toEqual({});
     expect(validated.data.progress.endingSeen).toBe(false);
+  });
+
+  // ------------------------------------------------------ SPEC-025 §4.3
+
+  it('E38: a v1 save keeps its weapon as the primary and gains the class sidearm', () => {
+    const migrated = migrate(FIXTURES['../fixtures/save-v1.json'] as { version: number } & Record<string, unknown>);
+    expect(migrated.ok).toBe(true);
+    if (!migrated.ok) return;
+    const validated = validateSave(migrated.data);
+    expect(validated.ok && validated.warnings).toEqual([]);
+    if (!validated.ok) return;
+    expect(validated.data.version).toBe(2);
+    expect(validated.data.equipped).toEqual({
+      // The fixture's own weapon and armor, untouched.
+      armor: 'armor_composite',
+      sidearm: 'pistol_service',
+      primary: 'weapon_plasma',
+      heavy: null,
+    });
+    expect(validated.data.activeWeapon).toBe('primary');
+    // The v1 pack holds wheat rations and a coolant pack, so the heal and
+    // utility slots fill themselves and the explosive slot stays empty (25-b).
+    expect(validated.data.quick).toEqual({ heal: 'wheat_ration', explosive: null, utility: 'coolant_pack' });
+    expect(validated.data.progress.explored).toEqual({});
+    // The rest of the character is carried across untouched.
+    expect(validated.data.player.name).toBe('Vance');
+    expect(validated.data.progress.missionsDone).toEqual(['c1_m1', 'c1_m2', 'c1_m3', 'c2_m1']);
+    expect(Object.keys(validated.data.equipped)).not.toContain('weapon');
+  });
+
+  it('prefers the medkit over the ration when the v1 pack carries both', () => {
+    const v1 = JSON.parse(JSON.stringify(FIXTURES['../fixtures/save-v1.json'])) as Record<string, unknown>;
+    v1['inventory'] = [
+      { itemId: 'wheat_ration', qty: 1 },
+      { itemId: 'medkit', qty: 2 },
+    ];
+    const migrated = migrate(v1 as { version: number } & Record<string, unknown>);
+    expect(migrated.ok && migrated.data.quick).toEqual({ heal: 'medkit', explosive: null, utility: null });
+  });
+
+  it('25-b: a v1 pack with no heal item migrates to an empty heal slot', () => {
+    const v1 = JSON.parse(JSON.stringify(FIXTURES['../fixtures/save-v1.json'])) as Record<string, unknown>;
+    v1['inventory'] = [{ itemId: 'plasma_cell', qty: 1 }];
+    const migrated = migrate(v1 as { version: number } & Record<string, unknown>);
+    expect(migrated.ok && migrated.data.quick).toEqual({ heal: null, explosive: null, utility: 'plasma_cell' });
+  });
+
+  it('25-a: a v1 save whose weapon id is unknown lands on the class starter', () => {
+    const v1 = JSON.parse(JSON.stringify(FIXTURES['../fixtures/save-v1.json'])) as Record<string, unknown>;
+    v1['equipped'] = { weapon: 'excalibur', armor: 'armor_composite' };
+    const migrated = migrate(v1 as { version: number } & Record<string, unknown>);
+    expect(migrated.ok).toBe(true);
+    if (!migrated.ok) return;
+    // The step only reshapes; the validator is what repairs it.
+    expect(migrated.data.equipped.primary).toBe('excalibur');
+    const validated = validateSave(migrated.data);
+    expect(validated.ok && validated.data.equipped.primary).toBe(SAVE_CONTENT.starterWeapon.marine);
+    expect(validated.ok && validated.warnings.join('\n')).toContain('equipped.primary');
+  });
+
+  it('the v2 fixture is the current shape and validates with no warnings', () => {
+    const raw = FIXTURES['../fixtures/save-v2.json'];
+    expect(raw).toBeDefined();
+    expect(raw?.['version']).toBe(SAVE_VERSION);
+    const validated = validateSave(raw);
+    expect(validated.ok && validated.warnings).toEqual([]);
+    if (!validated.ok) return;
+    expect(validated.data).toEqual(raw);
   });
 
   it('refuses a newer version and an unknown one, rather than guessing (E9)', () => {
