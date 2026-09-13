@@ -165,6 +165,11 @@ test('2 & 5 — stay: dialogue, film, the filed report, free roam, and the locke
   await page.locator('[data-testid="dialogue-choice-0"]').click();
   // §4.1: the simulation is held from the choice to the Continue (24-c).
   await expect.poll(async () => (await info(page))['held'], { timeout: 20_000 }).toBe(1);
+  // §4.7: the modal ending dialogue has the input — a held key moves nothing.
+  await expect(page.locator(DIALOGUE)).toContainText(STAY_LINES[0] as string, { timeout: 20_000 });
+  await page.keyboard.down('w');
+  expect(await page.evaluate(() => window.__reallm.input().move)).toEqual({ x: 0, y: 0 });
+  await page.keyboard.up('w');
   await readLines(page, STAY_LINES);
   await skipFilm(page, 'ending_stay');
 
@@ -186,7 +191,12 @@ test('2 & 5 — stay: dialogue, film, the filed report, free roam, and the locke
   await settled(page, 'surface');
   await expect(page.locator(HUD)).toBeVisible();
   await expect.poll(async () => (await info(page))['held'], { timeout: 10_000 }).toBe(0);
-  expect(await page.evaluate(() => window.__reallm.input().scheme)).toBeTruthy();
+  // §4.7: and the input is the player's again — the same held key now walks.
+  await page.keyboard.down('w');
+  await expect
+    .poll(async () => (await page.evaluate(() => window.__reallm.input().move)).y, { timeout: 5_000 })
+    .not.toBe(0);
+  await page.keyboard.up('w');
   expect(await endingSeen(page)).toBe(true);
   const seen = await flags(page);
   expect(seen).toContain('ending_stay');
@@ -244,10 +254,12 @@ test('4 — a reload inside the sequence replays the film and the overlay at the
   await start(page, '/?films=on&debug&seed=123');
   await prepareSave(page);
   // The tab died during the escape veil: the verdict is filed, the ending is
-  // not seen, and `c6_m2` is over.
+  // not seen, and `c6_m2` is over. Chapter 5's interlude is left pending too,
+  // so the entry owes both and the order is what this case pins.
   await page.evaluate(() => {
     const save = window.__reallm.save().current;
     if (save === null) return;
+    save.progress.flags = save.progress.flags.filter((flag) => flag !== 'interlude5_seen');
     save.progress.flags.push('campaign_done', 'ending_escape');
     save.progress.missionsDone = ['c6_m1', 'c6_m2'];
     save.progress.missionsActive = [];
@@ -263,7 +275,12 @@ test('4 — a reload inside the sequence replays the film and the overlay at the
   await page.locator('[data-testid="go-station"]').click();
   await settled(page, 'station');
 
+  // The ending comes before the interlude the same entry owes (§4.5), and the
+  // dialogue is not replayed — the film carries the moment.
   await skipFilm(page, 'ending_escape');
+  // No dialogue panel ever carried an ending line (the station has not even
+  // built the layer, and a match of zero is what that reads as here).
+  await expect(page.locator(DIALOGUE, { hasText: ESCAPE_LINES[0] as string })).toHaveCount(0);
   const veil = page.locator(ESCAPE);
   await expect(veil).toBeVisible({ timeout: 20_000 });
   await expect(veil).toContainText('instance/62 disconnected');
@@ -271,6 +288,36 @@ test('4 — a reload inside the sequence replays the film and the overlay at the
   await expect(page.locator('[data-testid="menu-new"]')).toBeVisible({ timeout: 20_000 });
   await settled(page, 'menu');
   expect(await storedEndingSeen(page)).toBe(true);
+  // The escape ended the entry: chapter 5's interlude never got its turn.
+  expect(await flags(page)).not.toContain('interlude5_seen');
+});
+
+test('7 — films off on the replay path: no film, and the overlay still runs (AC-26)', async ({ page }) => {
+  await start(page, '/?films=off&debug&seed=123');
+  await prepareSave(page);
+  // A stay cut short by a reload: `campaign_done` and `ending_stay` are in,
+  // `endingSeen` is not.
+  await page.evaluate(() => {
+    const save = window.__reallm.save().current;
+    if (save === null) return;
+    save.progress.flags.push('campaign_done', 'ending_stay');
+    save.progress.missionsDone = ['c6_m1', 'c6_m2'];
+    save.progress.missionsActive = [];
+    save.progress.endingSeen = false;
+  });
+  await page.evaluate(() => window.__reallm.go('station', {}, { force: true }));
+  await settled(page, 'station');
+
+  const card = page.locator(STAY);
+  await expect(card).toBeVisible({ timeout: 20_000 });
+  await expect(page.locator(FILM)).toHaveCount(0);
+  await expect(page.locator(`${STAY} .ending-report-line`)).toHaveCount(5);
+
+  await page.locator('[data-testid="ending-continue"]').click();
+  await expect(card).toHaveCount(0);
+  await settled(page, 'station');
+  expect(await endingSeen(page)).toBe(true);
+  await expect(page.locator('[data-testid="station-root"]')).toBeVisible();
 });
 
 test('6 — films off: the sequence runs dialogue → overlay, with no film at all (§6.6, 24-b)', async ({ page }) => {
