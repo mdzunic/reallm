@@ -313,6 +313,9 @@ describe('the settings object (SPEC-007 §3)', () => {
       installHintShownAt: null,
       fullscreen: null,
       benchmark: null,
+      // SPEC-027 §4.9: guidance starts at `full` and no tip has been seen yet.
+      guidance: 'full',
+      tipsSeen: [],
     });
   });
 
@@ -443,5 +446,58 @@ describe('the settings object (SPEC-007 §3)', () => {
     expect(settings.get().version).toBe(SETTINGS_VERSION);
     settings.set({ version: 99 as unknown as 1 });
     expect(settings.get().version).toBe(SETTINGS_VERSION);
+  });
+});
+
+// -------------------------------------------------------------- SPEC-027 §4.9
+
+describe('guidance and tipsSeen (SPEC-027 AC-72, AC-73, AC-74)', () => {
+  it('default to full guidance and no tips seen', () => {
+    const settings = createSettings(fakeStorage().storage).get();
+    expect(settings.guidance).toBe('full');
+    expect(settings.tipsSeen).toEqual([]);
+  });
+
+  it('takes the three guidance levels and reads anything else as full (D-15)', () => {
+    const fake = fakeStorage();
+    const settings = createSettings(fake.storage);
+    for (const level of ['minimal', 'off', 'full'] as const) {
+      settings.set({ guidance: level });
+      expect(settings.get().guidance).toBe(level);
+    }
+    settings.set({ guidance: 'minimal' });
+    settings.set({ guidance: 'loud' as unknown as Settings['guidance'] });
+    expect(settings.get().guidance).toBe('full');
+    // The same rule on the way in from storage, whatever is on disk.
+    expect(createSettings(fakeStorage('{"guidance":"minimal"}').storage).get().guidance).toBe('minimal');
+    expect(createSettings(fakeStorage('{"guidance":7}').storage).get().guidance).toBe('full');
+    expect(createSettings(fakeStorage('{"guidance":"quiet"}').storage).get().guidance).toBe('full');
+  });
+
+  it('cleans tipsSeen on set and on load, keeping order (D-14)', () => {
+    const settings = createSettings(fakeStorage().storage);
+    settings.set({ tipsSeen: ['map', 'move', 'map'] });
+    expect(settings.get().tipsSeen).toEqual(['map', 'move']);
+    settings.set({
+      tipsSeen: ['scan', 7, 'nonsense', 'scan', 'pad'] as unknown as Settings['tipsSeen'],
+    });
+    expect(settings.get().tipsSeen).toEqual(['scan', 'pad']);
+    settings.set({ tipsSeen: 'move' as unknown as Settings['tipsSeen'] });
+    expect(settings.get().tipsSeen).toEqual([]);
+
+    expect(createSettings(fakeStorage('{"tipsSeen":["move","map","move","nope"]}').storage).get().tipsSeen).toEqual([
+      'move',
+      'map',
+    ]);
+    expect(createSettings(fakeStorage('{"tipsSeen":"move"}').storage).get().tipsSeen).toEqual([]);
+    expect(createSettings(fakeStorage('{"tipsSeen":null}').storage).get().tipsSeen).toEqual([]);
+  });
+
+  it('persists both through the merge write', () => {
+    const fake = fakeStorage();
+    const settings = createSettings(fake.storage);
+    settings.set({ guidance: 'off', tipsSeen: ['move'] });
+    expect(stored(fake)).toMatchObject({ guidance: 'off', tipsSeen: ['move'] });
+    expect(createSettings(fake.storage).get()).toMatchObject({ guidance: 'off', tipsSeen: ['move'] });
   });
 });

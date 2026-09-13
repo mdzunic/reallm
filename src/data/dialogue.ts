@@ -71,7 +71,7 @@ export const DIALOGUE = {
   c1_m3_accept: {
     id: 'c1_m3_accept',
     lines: [
-      { speaker: 'aria', text: 'Something under the sand is big enough to show on the mass scan. The nest is east. Do not run.' },
+      { speaker: 'aria', text: 'Something under the sand is big enough to show on the mass scan. I have marked the nest. Do not run.' },
     ],
   },
   c1_m3_done: {

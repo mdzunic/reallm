@@ -16,6 +16,7 @@
 import type { QualityPreset } from '@/core/Renderer';
 import type { EmitArgs, GameEvents } from '@/core/Events';
 import { log } from '@/core/Log';
+import { TIP_IDS, type TipId } from '@/data/hints';
 
 export const SETTINGS_KEY = 'reallm:settings';
 export const SETTINGS_VERSION = 1 as const;
@@ -31,6 +32,12 @@ export type JoystickSide = 'left' | 'right';
 /** The touch buttons are never smaller than their 56 px base (SPEC-005 AC-16). */
 export const MIN_BUTTON_SCALE = 1;
 export const MAX_BUTTON_SCALE = 2;
+
+/**
+ * How much the surface leads the player (SPEC-027 §4.9): everything, the
+ * passive markers only, or the tracker and the scan ring alone.
+ */
+export type GuidanceLevel = 'full' | 'minimal' | 'off';
 
 /** SPEC-015 §4 stores what the boot benchmark measured, so it runs once. */
 export interface BenchmarkResult {
@@ -68,6 +75,10 @@ export type Settings = {
   /** `null` = ask once on boot (Android/desktop); SPEC-015 §7. */
   fullscreen: boolean | null;
   benchmark: BenchmarkResult | null;
+  /** SPEC-027 §4.9; an unusable value reads `'full'` (SPEC-027 D-15). */
+  guidance: GuidanceLevel;
+  /** SPEC-027 §4.5: the first-time tips this device has already seen (D-14). */
+  tipsSeen: TipId[];
 };
 
 export interface SettingsStore {
@@ -109,6 +120,7 @@ export interface SettingsEvents {
 const PRESETS: readonly string[] = ['low', 'medium', 'high'];
 const AUTO_FIRE_MODES: readonly AutoFireMode[] = ['touch', 'on', 'off'];
 const JOYSTICK_SIDES: readonly JoystickSide[] = ['left', 'right'];
+const GUIDANCE_LEVELS: readonly GuidanceLevel[] = ['full', 'minimal', 'off'];
 
 /** `prefers-reduced-motion: reduce` where the platform reports it. */
 function prefersReducedMotion(): boolean {
@@ -145,6 +157,8 @@ export function defaultSettings(): Settings {
     installHintShownAt: null,
     fullscreen: null,
     benchmark: null,
+    guidance: 'full',
+    tipsSeen: [],
   };
 }
 
@@ -248,6 +262,24 @@ function benchmarkOrNull(value: unknown, fallback: BenchmarkResult | null): Benc
   return { preset: preset as QualityPreset, msPerFrame, at };
 }
 
+/**
+ * SPEC-027 D-14: a list of tip ids, cleaned. A non-array reads as `[]`; entries
+ * that are not strings, name no tip, or repeat are dropped and the rest keep
+ * their order — the same rule on load and on `set`, because a value the store
+ * refuses to write is a value it refuses to read.
+ */
+function tipIds(value: unknown): TipId[] {
+  if (!Array.isArray(value)) return [];
+  const out: TipId[] = [];
+  for (const entry of value) {
+    if (typeof entry !== 'string') continue;
+    if (!(TIP_IDS as readonly string[]).includes(entry)) continue;
+    if (out.includes(entry as TipId)) continue;
+    out.push(entry as TipId);
+  }
+  return out;
+}
+
 /** Which side of the store a value arrived from; only the volumes read differently. */
 type Source = 'stored' | 'set';
 
@@ -297,6 +329,12 @@ function coerce<K extends keyof Settings>(key: K, value: unknown, current: Setti
         return boolOrNull(value, null);
       case 'benchmark':
         return benchmarkOrNull(value, null);
+      case 'guidance':
+        // D-15: unusable reads `'full'`, never "whatever is in memory" — the
+        // player who asked for less guidance asked for one of three words.
+        return oneOf(value, GUIDANCE_LEVELS, 'full');
+      case 'tipsSeen':
+        return tipIds(value);
       default:
         return current[key];
     }

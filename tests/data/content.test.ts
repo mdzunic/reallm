@@ -733,3 +733,77 @@ describe('the boot manifest stays five files (SPEC-019 AC-34 … AC-36, PLAN R6-
     expect(FOLLOWERS.science_probe.model).toBe('probe');
   });
 });
+
+// ------------------------------------------------------------- SPEC-027 §4.10
+
+import { HINTS, HINT_PLACEHOLDERS, MISSION_HINTS, TIPS, TIP_IDS } from '@/data/index';
+
+/** Every line the guidance layer can print, with the key that produced it. */
+function guidanceTemplates(): Array<[string, string]> {
+  const out: Array<[string, string]> = [];
+  for (const id of TIP_IDS) {
+    out.push([`TIPS.${id}.keyboard`, TIPS[id].keyboard], [`TIPS.${id}.touch`, TIPS[id].touch]);
+  }
+  for (const [kind, hint] of Object.entries(HINTS)) {
+    out.push([`HINTS.${kind}.nudge`, hint.nudge]);
+    if (hint.fallback !== undefined) out.push([`HINTS.${kind}.fallback`, hint.fallback]);
+  }
+  for (const [mission, stages] of Object.entries(MISSION_HINTS)) {
+    for (const [stage, text] of Object.entries(stages ?? {})) out.push([`MISSION_HINTS.${mission}.${stage}`, text]);
+  }
+  return out;
+}
+
+describe('tips and hints (SPEC-027 AC-81..AC-84)', () => {
+  it('every tip and hint is at most 160 characters', () => {
+    const problems = guidanceTemplates()
+      .filter(([, text]) => text.length > 160)
+      .map(([key, text]) => `${key}: ${text.length} characters`);
+    expect(problems).toEqual([]);
+  });
+
+  it('every {…} token is a member of HINT_PLACEHOLDERS', () => {
+    const allowed = new Set<string>(HINT_PLACEHOLDERS);
+    const problems: string[] = [];
+    for (const [key, text] of guidanceTemplates()) {
+      for (const match of text.matchAll(/\{[^}]*\}/g)) {
+        if (!allowed.has(match[0])) problems.push(`${key}: ${match[0]}`);
+      }
+    }
+    expect(problems).toEqual([]);
+  });
+
+  it('every MISSION_HINTS key names a real mission, and every stage is one of its stages (D-20)', () => {
+    const problems: string[] = [];
+    for (const [mission, stages] of Object.entries(MISSION_HINTS)) {
+      const def = (MISSIONS as Record<string, Mission | undefined>)[mission];
+      if (def === undefined) {
+        problems.push(`${mission}: no such mission`);
+        continue;
+      }
+      for (const stage of Object.keys(stages ?? {})) {
+        const index = Number(stage);
+        if (!Number.isInteger(index) || index < 0 || index >= def.stages.length) {
+          problems.push(`${mission}: stage ${stage} is outside 0..${def.stages.length - 1}`);
+        }
+      }
+    }
+    expect(problems).toEqual([]);
+  });
+
+  it('no brief and no dialogue line names a compass direction (§4.10)', () => {
+    // POIs are placed at random angles (SPEC-012 §4.2), so a written bearing is
+    // wrong on most seeds; the guidance layer computes `{dir}` per frame instead.
+    const compass = /\b(north|south|east|west)\b/i;
+    const problems: string[] = [];
+    for (const mission of Object.values(MISSIONS) as Mission[]) {
+      if (compass.test(mission.brief)) problems.push(`${mission.id}: brief`);
+    }
+    for (const dialogue of Object.values(DIALOGUE)) {
+      for (const [index, line] of dialogue.lines.entries()) {
+        if (compass.test(line.text)) problems.push(`${dialogue.id}: line ${index}`);
+      }
+    }
+    expect(problems).toEqual([]);
+  });
+});
