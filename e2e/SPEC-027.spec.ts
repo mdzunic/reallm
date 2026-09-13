@@ -97,6 +97,20 @@ test('3. the stuck escalation ends in a hint that names where to go', async ({ p
   await expect(hint(page)).toContainText('Dune Sea');
   // The tracker pulses from level 1 on (AC-28).
   await expect(tracker(page)).toHaveClass(/is-stuck/);
+
+  // …and one more crossing reaches level 3, where the route is searched for on
+  // the real layout and laid on the ground and both maps (AC-65).
+  await expect
+    .poll(
+      async () => {
+        await stuck.click();
+        await page.waitForTimeout(400);
+        return Number((await page.evaluate(() => window.__reallm.stats())).sceneInfo?.['stuckLevel'] ?? 0);
+      },
+      { timeout: 30_000 },
+    )
+    .toBe(3);
+  await expect(tracker(page)).toBeVisible();
 });
 
 test('4. standing in the scan ring fills it, and the stage advances behind it', async ({ page }) => {

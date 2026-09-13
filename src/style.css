@@ -3146,14 +3146,15 @@ html.reduce-motion .waypoint.is-stuck {
    one custom property, so a frame costs a variable write and nothing else. */
 .scan-ring {
   position: absolute;
-  left: -26px;
-  top: -26px;
-  width: 52px;
-  height: 52px;
+  left: -30px;
+  top: -30px;
+  width: 60px;
+  height: 60px;
   border-radius: 50%;
-  background: conic-gradient(var(--accent) calc(var(--scan, 0) * 360deg), rgba(255, 255, 255, 0.12) 0);
-  -webkit-mask: radial-gradient(circle, transparent 0 17px, #000 18px);
-  mask: radial-gradient(circle, transparent 0 17px, #000 18px);
+  background: conic-gradient(var(--accent) calc(var(--scan, 0) * 360deg), rgba(255, 255, 255, 0.25) 0);
+  -webkit-mask: radial-gradient(circle, transparent 0 21px, #000 22px);
+  mask: radial-gradient(circle, transparent 0 21px, #000 22px);
+  filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.85));
   will-change: transform;
 }
 
