@@ -651,6 +651,7 @@ on it. What a container can walk is `e2e/SPEC-027.spec.ts` plus the shots below.
 | 5 | `settings-guidance-off` hides the waypoint and keeps the tracker |
 | 6 | The `move` tip shows on the first landing, `reallm:settings.tipsSeen` holds `move`, and a real reload does not show it again |
 | — | A tap on the tracker cycles the tracked mission (two missions accepted at one terminal), and its hit box clears 44 px |
+| — | `c1_s2`'s kill stage puts a rim arrow on the minimap for its quarry (`mmArrows` ≥ 1), and `guidance: off` takes it away |
 
 ### Shots
 
@@ -697,11 +698,19 @@ surface sits at 43 of the 96 (80 scene + 16 post) the budget allows.
 - The collect node marks now follow the **tracked** mission rather than any
   active one (AC-38 ties them to the tracker). On Cinder-4 the two read the same
   whenever one mission is running, which is every case the suites walk.
+- A kill objective's quarry was first carried as an objective **mark**, on the
+  theory that the painter would turn it into an edge arrow when it fell outside
+  the window. It never can: AC-39's 60 m is inside the minimap's 70 m, so every
+  one of them drew as a ringed icon and `mmArrows` sat at 0 through a whole kill
+  stage. The quarry now rides its own list and is pinned to the rim at its
+  bearing whatever its distance — a direction to sweep rather than a pin on an
+  enemy that is moving anyway, and the enemy layer still draws it where it
+  stands once inside 25 m. The full map has no rim to point from and ignores it.
 
 ### Checklist
 
-- [x] `npm run check` green (typecheck, 1046 unit tests, production build)
-- [x] `e2e/SPEC-027.spec.ts` (new) green — seven cases
+- [x] `npm run check` green (typecheck, 1050 unit tests, production build)
+- [x] `e2e/SPEC-027.spec.ts` (new) green — eight cases
 - [x] `e2e/SPEC-012.spec.ts`, `e2e/SPEC-012-missions.spec.ts` and
       `e2e/SPEC-012-touch.spec.ts` green — the objective line the tracker took
       over and the whole five-mission run
