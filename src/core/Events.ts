@@ -31,6 +31,7 @@ import type {
   MissionId,
   PlanetId,
   PoiId,
+  QuickSlot,
   ResourceId,
   WaveId,
   WeaponSlot,
@@ -84,6 +85,10 @@ export type GameEvents = {
   // SPEC-025 §3: the save carries three weapon slots, so the equip event names
   // the one that moved rather than the kind of thing that moved into it.
   'gear:equipped': { slot: WeaponSlot | 'armor'; itemId: ItemId };
+  // SPEC-028 §3: the loadout runtime announces a completed slot switch and a
+  // spent quick-slot item, for the HUD, the audio layer and the tests.
+  'weapon:switched': { slot: WeaponSlot; itemId: ItemId };
+  'quick:used': { slot: QuickSlot; itemId: ItemId };
   'shop:purchased': { kind: 'ship' | 'gear' | 'companion' | 'craft'; id: string; tier?: number };
   'enemy:spawned': { enemyId: EnemyId; elite: boolean };
   'enemy:killed': { enemyId: EnemyId; elite: boolean; x: number; z: number; xp: number };

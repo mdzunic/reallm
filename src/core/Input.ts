@@ -33,7 +33,14 @@ export type Action =
   | 'throttleDown'
   | 'map'
   | 'track'
-  | 'debug';
+  | 'debug'
+  | 'weapon1'
+  | 'weapon2'
+  | 'weapon3'
+  | 'weaponNext'
+  | 'weaponPrev'
+  | 'throwItem'
+  | 'useUtility';
 export type Scheme = 'keyboard' | 'touch' | 'gamepad';
 /** The four movement half-axes a key can bind to; they are not actions (AC-4). */
 export type MoveAxis = 'moveUp' | 'moveDown' | 'moveLeft' | 'moveRight';
@@ -55,6 +62,15 @@ export const ACTIONS = [
   // moved to its own action, right behind it.
   'track',
   'debug',
+  // SPEC-028 §4.1: the loadout actions — three fixed weapon slots, the two
+  // cycle directions the wheel and SWAP drive, and the two extra quick slots.
+  'weapon1',
+  'weapon2',
+  'weapon3',
+  'weaponNext',
+  'weaponPrev',
+  'throwItem',
+  'useUtility',
 ] as const satisfies readonly Action[];
 
 // ------------------------------------------------------------------ tunables

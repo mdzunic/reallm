@@ -140,13 +140,13 @@ describe('what the theme must not move (SPEC-020 AC-24 … AC-26)', () => {
     expect(CSS).toContain('user-select: none');
     expect(CSS).toContain('env(safe-area-inset-bottom)');
     expect(CSS).toContain('html.reduce-motion');
-    // The app UI's floor is `#ui`'s own `clamp(14px, …)`; the thirteen smaller
-    // rules below it are SPEC-014's dev overlay, notes and hints, and this
-    // spec adds none — a theme that shrank type would show up here as a
-    // fourteenth.
+    // The app UI's floor is `#ui`'s own `clamp(14px, …)`; the eighteen smaller
+    // rules below it are SPEC-014's dev overlay, notes and hints (thirteen)
+    // plus SPEC-028's quick-bar labels (five — a 48 px slot cannot hold 14 px
+    // type). A theme that shrank body type would show up here as a nineteenth.
     const small = CSS.match(/font-size:\s*(\d+)px/g) ?? [];
     const belowFloor = small.filter((rule) => Number(/(\d+)/.exec(rule)?.[1] ?? 99) < 14);
-    expect(belowFloor.length, belowFloor.join(' ')).toBe(13);
+    expect(belowFloor.length, belowFloor.join(' ')).toBe(18);
   });
 
   it('loads no webfont (AC-26)', () => {

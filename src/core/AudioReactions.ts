@@ -125,6 +125,10 @@ const SILENT_EVENTS = [
   'resource:spent',
   'inventory:changed',
   'gear:equipped',
+  // SPEC-028: the switch and the quick-slot spend stay silent for now — the
+  // consumable's own effect (heal, boost) already carries the feedback.
+  'weapon:switched',
+  'quick:used',
   'enemy:spawned',
   'poi:discovered',
   'poi:reached',

@@ -676,6 +676,17 @@ describe('content invariants (SPEC-009 §7)', () => {
 
     expect(problems).toEqual([]);
   });
+
+  // SPEC-028 §3: `short` is the quick-bar label, so it has to fit a 48 px slot.
+  it('20. every item carries a short name of 1–8 characters', () => {
+    const problems: string[] = [];
+    for (const item of items) {
+      if (item.short.length < 1 || item.short.length > 8) {
+        problems.push(`${item.id}: short ${JSON.stringify(item.short)} is ${item.short.length} characters`);
+      }
+    }
+    expect(problems).toEqual([]);
+  });
 });
 
 // `@ts-expect-error` on its own only claims that *some* error occurred on the

@@ -28,8 +28,9 @@ import {
   type WeatherId,
 } from '@/data/index';
 import { discountTokens, missingRequirements, type DepartResult, type FailReason } from '@/systems/Economy';
+import type { SlotView } from '@/systems/Loadout';
 import { campaignLocked } from '@/systems/Missions';
-import type { Class, Item } from '@/data/index';
+import type { Class, Item, QuickSlot, WeaponSlot } from '@/data/index';
 
 // The schema-typed views of the content tables: on the `as const` literal types
 // an absent optional — a class with no `damageMult` — is not a property at all
@@ -368,7 +369,9 @@ export interface HudModel {
   tracker: HudTracker | null;
   weather: { warning: WeatherId | null; active: WeatherId | null; secondsLeft: number };
   boss: { name: string; hp: number; max: number } | null;
-  consumable: { itemId: ItemId; qty: number } | null;
+  /** SPEC-028 §3: the quick bar's two halves; both `null` off the surface. */
+  loadout: { active: WeaponSlot; slots: Record<WeaponSlot, SlotView> } | null;
+  quick: Record<QuickSlot, { itemId: ItemId | null; qty: number }> | null;
   interact: string | null;
   flight?: {
     shield: [number, number];
@@ -396,7 +399,8 @@ export function createHudModel(): HudModel {
     tracker: null,
     weather: { warning: null, active: null, secondsLeft: 0 },
     boss: null,
-    consumable: null,
+    loadout: null,
+    quick: null,
     interact: null,
   };
 }

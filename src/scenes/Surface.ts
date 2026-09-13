@@ -45,9 +45,13 @@ import {
   type MissionId,
   type PlanetDef,
   type PoiId,
+  type QuickSlot,
   type ResourceId,
   type TipId,
+  type WeaponSlot,
   MESH_RECIPE_IDS,
+  QUICK_SLOTS,
+  WEAPON_SLOTS,
 } from '@/data/index';
 import { makeEnemy, type EnemyEntity } from '@/entities/Enemy';
 import { makeFollower } from '@/entities/Follower';
@@ -73,6 +77,7 @@ import {
   type GuideTarget,
   type PathGrid,
 } from '@/systems/Guidance';
+import { fillQuickFromPickup, quickEligible, refillQuick, type SlotView } from '@/systems/Loadout';
 import { generateLayout, ObstacleGrid, type Layout, type LayoutPoi } from '@/systems/Layout';
 import { nodeIcon, poiIcon } from '@/systems/MapModel';
 import { Missions, type MissionContext, type ObjectiveProgress } from '@/systems/Missions';
@@ -99,6 +104,7 @@ import { MapLayers } from '@/ui/MapLayers';
 import { MapScreen, type MapMissionRow } from '@/ui/MapScreen';
 import { Minimap, type MapMark, type MinimapFrame } from '@/ui/Minimap';
 import { PauseMenu } from '@/ui/PauseMenu';
+import { openQuickPicker, type QuickChoice } from '@/ui/QuickPicker';
 import { RevealOverlay } from '@/ui/RevealOverlay';
 import { RotateOverlay } from '@/ui/RotateOverlay';
 import { ScanRing } from '@/ui/ScanRing';
@@ -135,6 +141,25 @@ const ARENA_DISENGAGE_DISTANCE = 45;
 const FOLLOWER_RESPAWN_SECONDS = 3;
 /** Defend POIs take contact damage from enemies inside `radius + this`. */
 const DEFEND_CONTACT_MARGIN = 2;
+
+// ------------------------------------------------------------- SPEC-028 §4.4
+// Quick slots: the empty texts, the per-text toast throttle, and the tip clock.
+
+const QUICK_EMPTY_TEXT: Readonly<Record<QuickSlot, string>> = {
+  heal: 'No healing items',
+  explosive: 'No explosives',
+  utility: 'No utility items',
+};
+/** §4.4: each refusal text toasts at most once per 3 s. */
+const QUICK_TOAST_SECONDS = 3;
+/** §4.8: the quick-bar tip, ten seconds after the move tip on first landing. */
+const QUICKBAR_TIP_SECONDS = 10;
+
+/** §4.3: one quick-bar tap, waiting in the fixed ring for the next step. */
+interface QuickBarCommand {
+  kind: 'slot' | 'pick';
+  slot: WeaponSlot | QuickSlot;
+}
 
 /** Music switching hysteresis, so a grazing shot cannot strobe the bed. */
 const MUSIC_HOLD_SECONDS = 2;
@@ -415,8 +440,34 @@ export class SurfaceScene extends UiScene<'surface'> {
   #ctx: MissionContext | null = null;
 
   // HUD model scratch (SPEC-001 §7): `Hud.flush` diffs against a clone, so the
-  // model may point at these reused objects.
-  #consumableScratch: { itemId: ItemId; qty: number } | null = null;
+  // model may point at these reused objects (SPEC-028 §4.5).
+  readonly #loadoutScratch: { active: WeaponSlot; slots: Record<WeaponSlot, SlotView> } = {
+    active: 'primary',
+    slots: {
+      sidearm: { itemId: null, state: 'empty', cd: 0, heat: 0, charges: 0, maxCharges: 0 },
+      primary: { itemId: null, state: 'empty', cd: 0, heat: 0, charges: 0, maxCharges: 0 },
+      heavy: { itemId: null, state: 'empty', cd: 0, heat: 0, charges: 0, maxCharges: 0 },
+    },
+  };
+  readonly #quickScratch: Record<QuickSlot, { itemId: ItemId | null; qty: number }> = {
+    heal: { itemId: null, qty: 0 },
+    explosive: { itemId: null, qty: 0 },
+    utility: { itemId: null, qty: 0 },
+  };
+
+  // SPEC-028 §4.3: quick-bar taps land in a fixed ring of 4 between steps and
+  // are drained at the start of the next one; a full ring drops the tap.
+  readonly #qbRing: QuickBarCommand[] = [
+    { kind: 'slot', slot: 'sidearm' },
+    { kind: 'slot', slot: 'sidearm' },
+    { kind: 'slot', slot: 'sidearm' },
+    { kind: 'slot', slot: 'sidearm' },
+  ];
+  #qbLength = 0;
+  /** §4.4: `world.time` of the last toast per text — one per 3 s each. */
+  readonly #quickToastAt = new Map<string, number>();
+  /** §4.6: the open picker's close function, or `null`. */
+  #pickerClose: (() => void) | null = null;
 
   // Defend/escort stages resync only when their identity changes — accepting
   // or completing an unrelated mission must not restart the wave or respawn
@@ -706,9 +757,19 @@ export class SurfaceScene extends UiScene<'surface'> {
     // The SPEC-014 UI layer (§4.12): shared HUD, overlays, touch, pause.
     // SPEC-027 AC-22: a tap on the tracker cycles the tracked mission, exactly
     // as `KeyT` does — the HUD owns the element, the runtime owns the pin.
-    const hud = new Hud(this.ui, 'surface', () => missions.cyclePinned());
+    // SPEC-028 §4.3/§4.5: the quick bar's taps arrive as commands through the
+    // fixed ring and are drained at the start of the next fixed step; the key
+    // hints and the 56 px touch sizing follow the live scheme.
+    const hud = new Hud(this.ui, 'surface', () => missions.cyclePinned(), {
+      slot: (slot) => this.#pushQuickBar('slot', slot),
+      pick: (slot) => this.#pushQuickBar('pick', slot),
+    });
     this.#hud = hud;
     this.disposer.add(() => hud.dispose());
+    hud.setScheme(services.input.state.scheme);
+    this.disposer.add(services.events.on('input:schemeChanged', ({ scheme }) => hud.setScheme(scheme), this));
+    // §4.6: a picker still open when the scene goes releases its hold with it.
+    this.disposer.add(() => this.#pickerClose?.());
 
     // SPEC-027 §4.11: the guidance layer over the canvas, the search grid the
     // route is found on, and the context the pure module reads. The context is
@@ -835,6 +896,8 @@ export class SurfaceScene extends UiScene<'surface'> {
   /** SPEC-026 §4.6: the map is not a second pause — it closes before this one. */
   pause(): void {
     this.#closeMap();
+    // SPEC-028 §4.6: the quick picker closes with the scene pausing too.
+    this.#pickerClose?.();
     this.#pauseMenu?.show();
     this.services.audio.duck(true);
   }
@@ -863,6 +926,7 @@ export class SurfaceScene extends UiScene<'surface'> {
     // unread, so a press made during the beat never fires after it. Playtime
     // still accrues; no `checkpoint` save is requested.
     if (this.#holds > 0) {
+      this.#qbLength = 0; // taps made during the beat are dropped like the edges
       this.#updateReveal(dt);
       return;
     }
@@ -872,6 +936,7 @@ export class SurfaceScene extends UiScene<'surface'> {
     // weather, spawning, pickups, nodes, exploration — waits, so `world.time`
     // stands still and a swarm cannot bite a player who is reading a map.
     if (this.#uiHolds > 0) {
+      this.#qbLength = 0; // the bar is inert while the simulation is held
       if (this.#edges.pressed('map')) this.#closeMap();
       world.player.vx = 0;
       world.player.vz = 0;
@@ -889,14 +954,25 @@ export class SurfaceScene extends UiScene<'surface'> {
     this.#deathTick(world, dt);
     if (!modal) {
       this.#movePlayer(world, dt);
-      this.#updateConsumable();
+      this.#updateLoadout(world, combat);
       // SPEC-026 §4.5/§4.7: `map` opens the map, `track` cycles the pin.
       if (this.#edges.pressed('map')) this.#openMap();
       if (this.#edges.pressed('track')) missions.cyclePinned();
     } else {
+      this.#qbLength = 0;
       world.player.vx = 0;
       world.player.vz = 0;
     }
+
+    // §4.6 (28-d): a hold taken by this step's own presses — the picker or
+    // the map — stops the rest of this step too, not just the next one, so
+    // no combat, weather or spawning runs behind a freshly opened overlay.
+    if (this.#uiHolds > 0) {
+      world.player.vx = 0;
+      world.player.vz = 0;
+      return;
+    }
+
     combat.update(dt, input, modal ? null : this.#aimWorld(world));
 
     this.#updateWeather(world, dt);
@@ -1104,6 +1180,18 @@ export class SurfaceScene extends UiScene<'surface'> {
     // while `world.time` stands still.
     info['held'] = this.#holds;
     info['viewTime'] = Math.round(this.#viewTime * 100) / 100;
+    // SPEC-028 §4.9: the weapon in hand and the quick-slot counts.
+    const combat = this.#combat;
+    const save = this.#save;
+    const economy = this.#economy;
+    if (combat !== null && save !== null && economy !== null) {
+      info['weapon'] = combat.loadout.activeWeapon().id;
+      info['weaponSlot'] = combat.loadout.active;
+      const countOf = (id: ItemId | null): number => (id === null ? 0 : economy.count(id));
+      info['qHeal'] = countOf(save.quick.heal);
+      info['qExplosive'] = countOf(save.quick.explosive);
+      info['qUtility'] = countOf(save.quick.utility);
+    }
     if (this.#world !== null) {
       const world = this.#world;
       info['enemies'] = world.enemies.size;
@@ -1779,37 +1867,140 @@ export class SurfaceScene extends UiScene<'surface'> {
     this.#holds = Math.max(0, this.#holds - 1);
   }
 
-  // ------------------------------------------------------------ consumable
+  // ---------------------------------------------------- SPEC-028: loadout
 
-  /** One press, one stimpack — the press comes through the sampler. */
-  #updateConsumable(): void {
-    if (!this.#edges.pressed('useItem')) return;
-    const world = this.#world as CombatWorld;
-    if (!world.player.alive) return;
-    const slot = this.#consumableSlot();
-    if (slot === null) return;
-    const result = (this.#economy as Economy).useConsumable(slot.itemId);
-    if (result.ok) this.#combat?.applyConsumable(result.effect);
-  }
+  /**
+   * §4.3: the loadout presses, on the step they land, plus the quick-bar ring
+   * drained at the start of the step. Skipped while held or modal (the caller
+   * gates); a dead player switches and spends nothing.
+   */
+  #updateLoadout(world: CombatWorld, combat: Combat): void {
+    if (!world.player.alive) {
+      this.#qbLength = 0;
+      return;
+    }
+    const loadout = combat.loadout;
+    const time = world.time;
 
-  #consumableSlot(): { itemId: ItemId; qty: number } | null {
-    const save = this.#save as Save;
-    for (const entry of save.inventory) {
-      if (ITEM_TABLE[entry.itemId].kind === 'consumable' && entry.qty > 0) {
-        // One lazily created scratch, reused per frame (SPEC-001 §7); the HUD
-        // diffs against a clone, so in-place writes still register.
-        let slot = this.#consumableScratch;
-        if (slot === null) {
-          slot = { itemId: entry.itemId, qty: entry.qty };
-          this.#consumableScratch = slot;
-        } else {
-          slot.itemId = entry.itemId;
-          slot.qty = entry.qty;
-        }
-        return slot;
+    // The ring first, so a tap made between steps lands before this step's keys.
+    const queued = this.#qbLength;
+    this.#qbLength = 0;
+    for (let i = 0; i < queued; i++) {
+      const command = this.#qbRing[i] as QuickBarCommand;
+      const slot = command.slot;
+      if (command.kind === 'pick') {
+        if (slot !== 'sidearm' && slot !== 'primary' && slot !== 'heavy') this.#openPicker(slot);
+      } else if (slot === 'sidearm' || slot === 'primary' || slot === 'heavy') {
+        loadout.select(slot, time);
+      } else {
+        this.#useQuick(slot);
       }
     }
-    return null;
+
+    if (this.#edges.pressed('weapon1')) loadout.select('sidearm', time);
+    if (this.#edges.pressed('weapon2')) loadout.select('primary', time);
+    if (this.#edges.pressed('weapon3')) loadout.select('heavy', time);
+    if (this.#edges.pressed('weaponNext')) loadout.cycle(1, time);
+    if (this.#edges.pressed('weaponPrev')) loadout.cycle(-1, time);
+    if (this.#edges.pressed('useItem')) this.#useQuick('heal');
+    if (this.#edges.pressed('throwItem')) this.#useQuick('explosive');
+    if (this.#edges.pressed('useUtility')) this.#useQuick('utility');
+  }
+
+  /** §4.3: a quick-bar tap between steps; a full ring drops it. */
+  #pushQuickBar(kind: 'slot' | 'pick', slot: WeaponSlot | QuickSlot): void {
+    if (this.#qbLength >= this.#qbRing.length) return;
+    const entry = this.#qbRing[this.#qbLength] as QuickBarCommand;
+    entry.kind = kind;
+    entry.slot = slot;
+    this.#qbLength++;
+  }
+
+  /**
+   * §4.4: spend one item from a quick slot — refill a run-out slot first,
+   * refuse an empty one or a heal at full HP with a throttled toast, and keep
+   * the id when the last one is spent so the bar reads `×0`.
+   */
+  #useQuick(slot: QuickSlot): void {
+    const world = this.#world;
+    const economy = this.#economy;
+    const combat = this.#combat;
+    const save = this.#save;
+    if (world === null || economy === null || combat === null || save === null) return;
+    if (!world.player.alive) return;
+
+    let id = save.quick[slot];
+    if (id === null || economy.count(id) === 0) {
+      const refill = refillQuick(save, slot);
+      if (refill !== null) {
+        save.quick[slot] = refill;
+        id = refill;
+      }
+    }
+    if (id === null || economy.count(id) === 0) {
+      this.#quickToast(QUICK_EMPTY_TEXT[slot]);
+      return;
+    }
+    // E40: the most common waste on a phone — a heal at full HP spends nothing.
+    if (slot === 'heal' && world.player.hp >= world.stats.maxHp) {
+      this.#quickToast('HP full');
+      return;
+    }
+    // SPEC-029 deploys the explosive; until then the slot only ever reads ×0.
+    if (slot === 'explosive') return;
+
+    const result = economy.useConsumable(id);
+    if (!result.ok) return;
+    combat.applyConsumable(result.effect);
+    this.services.events.emit('quick:used', { slot, itemId: id });
+    // §4.4: the id stays when nothing replaces it, so the bar reads `×0`.
+    if (economy.count(id) === 0) save.quick[slot] = refillQuick(save, slot) ?? id;
+  }
+
+  /** §4.4: one toast per text per 3 s, on the world clock. */
+  #quickToast(text: string): void {
+    const time = this.#world?.time ?? 0;
+    const last = this.#quickToastAt.get(text);
+    if (last !== undefined && time - last < QUICK_TOAST_SECONDS) return;
+    this.#quickToastAt.set(text, time);
+    this.services.events.emit('ui:toast', { text, kind: 'warn' });
+  }
+
+  /**
+   * §4.6: the picker over the bar. It takes a `#uiHolds` hold, so the
+   * simulation stands still while it is open (28-d, 28-e); Escape, a tap
+   * outside, the scene pausing and the scene going all close it.
+   */
+  #openPicker(slot: QuickSlot): void {
+    if (this.#pickerClose !== null) return;
+    const save = this.#save;
+    const economy = this.#economy;
+    const world = this.#world;
+    if (save === null || economy === null || world === null) return;
+    if (this.#modalOpen > 0 || this.#terminalOpen || this.#holds > 0 || this.#deathAt !== null) return;
+
+    const choices: QuickChoice[] = [];
+    for (const entry of save.inventory) {
+      if (entry.qty > 0 && quickEligible(entry.itemId, slot)) {
+        choices.push({ itemId: entry.itemId, label: ITEM_TABLE[entry.itemId].name, qty: entry.qty });
+      }
+    }
+    this.#uiHolds++;
+    world.player.vx = 0;
+    world.player.vz = 0;
+    this.#pickerClose = openQuickPicker(
+      this.ui,
+      slot,
+      choices,
+      (id) => {
+        save.quick[slot] = id;
+        this.services.save.request('purchase');
+      },
+      () => {
+        this.#pickerClose = null;
+        this.#uiHolds = Math.max(0, this.#uiHolds - 1);
+      },
+    );
   }
 
   // ----------------------------------------------------------------- death
@@ -2147,7 +2338,25 @@ export class SurfaceScene extends UiScene<'surface'> {
 
     const boss = this.#findBoss(world);
     m.boss = boss === null ? null : { name: boss.def.name, hp: Math.max(0, Math.round(boss.hp)), max: boss.maxHp };
-    m.consumable = this.#consumableSlot();
+
+    // SPEC-028 §4.5: the two halves of the quick bar, into reused scratch —
+    // the flush diffs against a clone, so in-place writes still register.
+    const combat = this.#combat;
+    const economy = this.#economy;
+    if (combat !== null && economy !== null) {
+      const loadout = this.#loadoutScratch;
+      loadout.active = combat.loadout.active;
+      for (const slot of WEAPON_SLOTS) combat.loadout.view(slot, world.time, loadout.slots[slot]);
+      m.loadout = loadout;
+      for (const slot of QUICK_SLOTS) {
+        const id = save.quick[slot];
+        const entry = this.#quickScratch[slot];
+        entry.itemId = id;
+        entry.qty = id === null ? 0 : economy.count(id);
+      }
+      m.quick = this.#quickScratch;
+    }
+
     m.interact = this.#interactHint(world);
     // Only on change: `setInteractHint` re-applies the touch layout, which
     // resets the floating stick — calling it per frame would kill the stick
@@ -2484,6 +2693,8 @@ export class SurfaceScene extends UiScene<'surface'> {
     if (guidance !== 'full') return;
     // The first fixed step of the first surface scene this device has seen.
     this.#requestTip('move');
+    // SPEC-028 §4.8: the quick bar, ten seconds behind the move tip.
+    if (this.#surfaceTime >= QUICKBAR_TIP_SECONDS) this.#requestTip('quickbar');
     if (this.#surfaceTime >= MAP_TIP_SECONDS) this.#requestTip('map');
     if (missions.active.length >= 2) this.#requestTip('track');
     if (this.#atPad(world) && !this.#terminalOpen) this.#requestTip('pad');
@@ -3052,6 +3263,16 @@ export class SurfaceScene extends UiScene<'surface'> {
       ),
       // SPEC-027 §4.5: the storm tip rides the ten-second warning itself.
       bus.on('weather:warning', () => this.#requestTip('storm'), this),
+      // SPEC-028 §4.4: a pickup of an eligible item fills an empty or run-out
+      // quick slot (28-f: a reward spilled on the ground fills it on pickup).
+      bus.on(
+        'inventory:changed',
+        ({ itemId, qty }) => {
+          const save = this.#save;
+          if (qty > 0 && save !== null) fillQuickFromPickup(save, itemId);
+        },
+        this,
+      ),
       // SPEC-027 §4.9: a guidance change takes effect on the next frame, and
       // nothing the new level forbids survives it (27-t).
       bus.on(

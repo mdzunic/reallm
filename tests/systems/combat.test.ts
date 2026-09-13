@@ -275,6 +275,34 @@ describe('firing and aiming (§4.3)', () => {
     expect(shotSpeed()).toBeCloseTo(22, 6);
   });
 
+  // SPEC-028 §6.1: the barrel is whatever slot the loadout holds active.
+  it('a save with the sidearm active fires the pistol\'s damage range and speed', () => {
+    const h = harness({ patch: (s) => (s.activeWeapon = 'sidearm') });
+    expect(h.combat.loadout.active).toBe('sidearm');
+    h.input.buttons.fire.down = true;
+    h.aim = { x: 10, z: 0 };
+    h.step();
+    const p = h.world.projectiles.at(0);
+    expect(p.vx).toBeCloseTo(26, 5); // the Service Pistol's projectile speed
+    // §4.2: ±10 % variance around damage 9 × the marine's damage multiplier.
+    const mult = h.world.stats.damageMult;
+    expect(p.damage).toBeGreaterThanOrEqual(Math.floor(9 * mult * 0.9));
+    expect(p.damage).toBeLessThanOrEqual(Math.ceil(9 * mult * 1.1 * 1.5));
+    expect(h.world.player.fireCooldown).toBeCloseTo(1 / 3, 6);
+  });
+
+  // SPEC-028 §4.2: a switch resets the per-shot cooldown; the 0.25 s switch
+  // window is the gate that stops that from being a free rate-of-fire exploit.
+  it('a switch resets fireCooldown', () => {
+    const h = harness();
+    h.input.buttons.fire.down = true;
+    h.aim = { x: 10, z: 0 };
+    h.step();
+    expect(h.world.player.fireCooldown).toBeGreaterThan(0);
+    h.combat.loadout.select('sidearm', h.world.time);
+    expect(h.world.player.fireCooldown).toBe(0);
+  });
+
   it('facing follows movement when not firing', () => {
     const h = harness();
     h.world.player.vx = 1;
@@ -503,6 +531,25 @@ describe('combat drone (§4.3)', () => {
     far.aggro = true;
     h.run(1);
     expect(h.world.projectiles.size).toBe(0);
+  });
+
+  // SPEC-028 §4.2: the drone is wired to the primary slot, not the hand.
+  it('keeps the primary\'s damage while the sidearm is in hand', () => {
+    const h = harness({
+      patch: (s) => {
+        s.companions.push({ id: 'combat_drone', level: 1, enabled: true });
+        s.activeWeapon = 'sidearm';
+      },
+    });
+    const egg = h.spawn('hive_egg', 6, 0);
+    egg.aggro = true;
+    h.step();
+    const p = h.world.projectiles.at(0);
+    expect(p.owner).toBe('drone');
+    const stats = h.world.stats;
+    // 12 is the Kinetic Repeater's damage — not the pistol's 9.
+    expect(p.damage).toBe(Math.max(1, Math.round(12 * stats.damageMult * 0.5 * stats.companionMult)));
+    expect(p.vx).toBeCloseTo(22, 5); // …and the repeater's projectile speed
   });
 });
 
