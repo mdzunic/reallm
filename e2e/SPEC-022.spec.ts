@@ -112,6 +112,10 @@ test('2 — stills mode: a dead MP4 falls back to posters, seek pans the reel, S
   await expect(poster).toHaveAttribute('src', /prologue_earth_night\.webp$/);
   await page.evaluate(() => window.__reallmFilm?.seek(55));
   await expect(poster).toHaveAttribute('src', /prologue_selection\.webp$/);
+  // §4.5: taps wait out the 0.3 s pointer grace, and `seek()` moves the film
+  // clock, not the wall clock the grace reads — on a fast machine the four
+  // steps above land well inside it and the tap is refused, as case 4 pins.
+  await page.waitForTimeout(400);
   await page.locator('[data-testid="film-skip"]').click();
   await expect(page.locator('[data-testid="creation-confirm"]')).toBeVisible();
 });
