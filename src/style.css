@@ -2683,3 +2683,172 @@ html.reduce-motion .film.is-leaving {
 html.reduce-motion .film-describe {
   transition: none;
 }
+
+/* ================================================================ SPEC-023 */
+/* The chapter card (§4.2): four lines centred in the upper third of the
+   flight, inside the overlay layer at z 54 — over the HUD and the panels,
+   below the toast rack (55) and the film layer (65). It is text over the
+   launch and never takes a pointer. The host box generates no box of its own,
+   so the card stacks against the rack as a sibling. */
+.chapter-card-host {
+  display: contents;
+}
+
+.chapter-card {
+  position: fixed;
+  left: 50%;
+  top: 18%;
+  transform: translateX(-50%);
+  z-index: 54;
+  width: min(40em, 92%);
+  text-align: center;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity var(--card-fade, 0.6s) ease;
+}
+
+.chapter-card.is-visible {
+  opacity: 1;
+}
+
+/* Under reduce motion the card cuts in and out (§4.2, Motion). */
+.chapter-card.is-static {
+  transition: none;
+  opacity: 1;
+}
+
+.chapter-card p {
+  margin: 0 0 0.35em;
+}
+
+.chapter-card-chapter {
+  font-variant-caps: all-small-caps;
+  letter-spacing: 0.32em;
+  color: var(--ink-dim);
+}
+
+.chapter-card-title {
+  font-size: clamp(28px, 6vmin, 56px);
+  letter-spacing: 0.08em;
+  text-shadow: var(--text-glow);
+}
+
+.chapter-card-line {
+  font-style: italic;
+}
+
+.chapter-card-containment {
+  font-family: ui-monospace, 'Cascadia Mono', 'SF Mono', Menlo, Consolas, monospace;
+  color: var(--hp);
+  animation: card-glitch 240ms steps(2) 1;
+}
+
+/* One 240 ms pass, not a loop: the containment level tears once and settles. */
+@keyframes card-glitch {
+  25% { transform: translateX(2px); text-shadow: -2px 0 var(--shield); }
+  75% { transform: translateX(-2px); text-shadow: 2px 0 var(--warn); }
+}
+
+html.reduce-motion .chapter-card-containment {
+  animation: none;
+}
+
+/* The boss reveal (§4.4): letterbox, title and one caption at z 64 — above
+   every panel and overlay, below the film layer (65). The bars and the words
+   are the whole layer; the camera move is the scene's. */
+.reveal {
+  position: fixed;
+  inset: 0;
+  z-index: 64;
+  pointer-events: none;
+}
+
+/* 9 % of the height at top and bottom, sliding in over 0.3 s. */
+.reveal-bar {
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 9%;
+  background: #000;
+  transition: transform 0.3s ease;
+}
+
+.reveal-bar-top {
+  top: 0;
+  transform: translateY(-100%);
+}
+
+.reveal-bar-bottom {
+  bottom: 0;
+  transform: translateY(100%);
+}
+
+.reveal.is-open .reveal-bar {
+  transform: translateY(0);
+}
+
+html.reduce-motion .reveal-bar {
+  transition: none;
+}
+
+/* The name and the epithet, centred in the upper third above the caption. */
+.reveal-title {
+  position: absolute;
+  left: 50%;
+  top: 16%;
+  transform: translateX(-50%);
+  width: min(40em, 92%);
+  text-align: center;
+}
+
+.reveal-title.is-hidden {
+  display: none;
+}
+
+.reveal-name {
+  margin: 0;
+  font-size: clamp(28px, 6vmin, 56px);
+  letter-spacing: 0.12em;
+  color: var(--hp);
+  text-shadow: var(--text-glow);
+}
+
+/* `glitch` bosses wear the dialogue panel's tear (the Hive Queen, §4.4). */
+.reveal-name.is-glitched {
+  animation: card-glitch 240ms steps(2) infinite;
+}
+
+html.reduce-motion .reveal-name.is-glitched {
+  animation: none;
+}
+
+.reveal-epithet {
+  margin: 0.3em 0 0;
+  font-style: italic;
+  color: var(--ink-dim);
+}
+
+/* SPEC-022's caption styles, positioned over the lower bar rather than in a
+   16:9 picture — the speaker colours and the `log`/`warden` rules come with
+   the shared `.film-caption` class. */
+.reveal-caption {
+  position: absolute;
+  left: 50%;
+  /* `top` is spelled out because the portrait rule for `.film-caption` sets
+     it: in a film the caption drops below the 16:9 picture, and there is no
+     picture here to drop below. */
+  top: auto;
+  bottom: 12%;
+  transform: translateX(-50%);
+}
+
+/* §4.4: Skip sits bottom-right inside the safe area, and is the one part of
+   the layer that takes a pointer. */
+.reveal-skip {
+  position: absolute;
+  right: max(14px, env(safe-area-inset-right));
+  bottom: max(14px, env(safe-area-inset-bottom));
+  min-width: 44px;
+  min-height: 44px;
+  pointer-events: auto;
+}

@@ -618,6 +618,37 @@ describe('anti-softlock (E1, E2)', () => {
   });
 });
 
+// ------------------------------------------------- setFlag (SPEC-023 §3, §6)
+
+describe('setFlag (SPEC-023 §3)', () => {
+  it('adds a flag once and emits once — a second call is a no-op', () => {
+    const { economy, data, events } = world();
+    economy.setFlag('interlude1_seen');
+    economy.setFlag('interlude1_seen');
+    expect(data.progress.flags).toEqual(['interlude1_seen']);
+    expect(events.of('flag:set')).toEqual([{ flag: 'interlude1_seen' }]);
+  });
+
+  it('an interlude flag pays no voucher', () => {
+    const { economy, data, events } = world();
+    data.resources.oil = 0;
+    for (const flag of ['interlude1_seen', 'interlude2_seen', 'interlude5_seen'] as const) economy.setFlag(flag);
+    expect(data.resources.oil).toBe(0);
+    expect(events.toasts()).toEqual([]);
+  });
+
+  it('a chapter flag still pays its voucher, exactly once', () => {
+    const { economy, data, events } = world();
+    data.resources.oil = 0;
+    economy.setFlag('chapter1_done');
+    expect(data.resources.oil).toBe(PLANETS.vetra.fuelCost);
+    economy.setFlag('chapter1_done');
+    expect(data.resources.oil).toBe(PLANETS.vetra.fuelCost);
+    expect(events.toasts()).toEqual([refuelVoucherText(PLANETS.vetra.fuelCost)]);
+    expect(events.of('flag:set')).toEqual([{ flag: 'chapter1_done' }]);
+  });
+});
+
 // ---------------------------------------------------------------- rewards
 
 describe('mission rewards (§4.7)', () => {

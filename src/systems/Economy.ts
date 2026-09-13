@@ -40,6 +40,7 @@ import {
   type Companion,
   type CompanionId,
   type ConsumableEffect,
+  type FlagId,
   type Item,
   type ItemId,
   type MissionDef,
@@ -585,12 +586,20 @@ export class Economy {
       // station the toast is all there is.
       if (blocked > 0) this.#events.emit('ui:toast', { kind: 'warn', text: noRoomText(ITEM_TABLE[itemId], blocked) });
     }
-    for (const flag of rewards.flags ?? []) this.#setFlag(flag);
+    for (const flag of rewards.flags ?? []) this.setFlag(flag);
     this.#saves?.request('mission');
   }
 
-  /** Sets a story flag once, and pays the refuel voucher a chapter flag carries. */
-  #setFlag(flag: string): void {
+  /**
+   * Sets a story flag once, and pays the refuel voucher a chapter flag carries.
+   *
+   * Public since SPEC-023 §3: the station marks a played interlude with
+   * `interludeN_seen` through the same door mission rewards use, so the flag
+   * is added once, announced once, and read by the same `flag:set` listeners.
+   * A second call is a no-op, which is what makes the catch-up rule safe to
+   * run over every pending chapter.
+   */
+  setFlag(flag: FlagId): void {
     if (this.#save.progress.flags.includes(flag)) return;
     this.#save.progress.flags.push(flag);
     this.#events.emit('flag:set', { flag });
