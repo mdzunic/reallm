@@ -2145,8 +2145,11 @@ export class SurfaceScene extends UiScene<'surface'> {
       mark.z = state.poi.z;
       mark.icon = poiIcon(state.poi.kind);
       mark.objective = objective;
-      // Landmarks are scenery, not destinations: no label on the full map.
-      mark.label = state.poi.kind === 'landmark' ? null : this.#poiLabel(state.poi.poi);
+      // §4.5: the full map labels discovered POIs. A landmark is scenery
+      // rather than a destination and carries none, and an objective POI the
+      // player has never reached shows its icon and ring without naming the
+      // place (26-b).
+      mark.label = state.discovered && state.poi.kind !== 'landmark' ? this.#poiLabel(state.poi.poi) : null;
       mark.ring = state.poi.kind === 'arena' ? state.poi.radius : 0;
     }
 
