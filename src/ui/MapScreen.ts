@@ -317,6 +317,9 @@ export class MapScreen {
       ctx.save();
       ctx.strokeStyle = COLORS.route;
       ctx.lineWidth = Math.max(1, 2 * scale);
+      // SPEC-027 AC-65: dashed, so a suggested way reads differently from the
+      // arena wall and the fog edge, which are the map's other strokes.
+      ctx.setLineDash([6 * scale, 5 * scale]);
       ctx.beginPath();
       for (let i = 0; i < frame.routeLength; i++) {
         const p = project(route[i * 2] as number, route[i * 2 + 1] as number);

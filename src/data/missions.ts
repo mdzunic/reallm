@@ -135,7 +135,8 @@ export const MISSIONS = {
   c1_m3: {
     id: 'c1_m3',
     title: 'Worm Sign',
-    brief: 'The mass scan says the nest is east and the nest says something enormous lives in it. Kill the dune wurm, then run 100 oil out to the beacon.',
+    brief:
+      'The mass scan has found a nest, and the nest says something enormous lives in it. Kill the dune wurm, then run 100 oil out to the beacon.',
     type: 'main',
     chapter: 1,
     planet: 'cinder4',

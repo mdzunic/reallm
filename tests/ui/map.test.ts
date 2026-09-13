@@ -12,6 +12,7 @@ import {
   isNodeIcon,
   mapAngle,
   mapProject,
+  mapRimPoint,
   nodeIcon,
   nodeInitial,
   poiIcon,
@@ -77,6 +78,48 @@ describe('mapProject (§4.1)', () => {
   it('pins the projection constants', () => {
     expect(MAP_YAW).toBeCloseTo(Math.PI / 4, 12);
     expect(MINIMAP_RANGE).toBe(70);
+  });
+});
+
+describe('mapRimPoint (SPEC-027 AC-39)', () => {
+  it('puts a mark on the rim however near it is, and never calls it inside', () => {
+    // 30 m of a 70 m window: `mapProject` would place this comfortably inside,
+    // which is exactly why the quarry needs its own projection.
+    const near = mapRimPoint(UP.x * 30, UP.z * 30, 60, point());
+    expect(near.inside).toBe(false);
+    expect(Math.hypot(near.x, near.y)).toBeCloseTo(60, 10);
+    expect(near.angle).toBeCloseTo(-Math.PI / 2, 10);
+  });
+
+  it('agrees with the clamped projection on bearing, near or far', () => {
+    for (const metres of [1, 25, 59, 400]) {
+      const rim = mapRimPoint(metres, 0, 60, point());
+      expect(rim.angle).toBeCloseTo(Math.PI / 4, 10);
+      expect(Math.hypot(rim.x, rim.y)).toBeCloseTo(60, 10);
+    }
+    // The same offset past the rim: the two agree where both apply.
+    const clamped = mapProject(400, 0, 1, 60, point());
+    const rim = mapRimPoint(400, 0, 60, point());
+    expect(rim.x).toBeCloseTo(clamped.x, 10);
+    expect(rim.y).toBeCloseTo(clamped.y, 10);
+  });
+
+  it('reads the four screen directions the way the map turns', () => {
+    const up = mapRimPoint(UP.x, UP.z, 10, point());
+    expect([Math.round(up.x * 1e6) / 1e6, Math.round(up.y * 1e6) / 1e6]).toEqual([0, -10]);
+    const right = mapRimPoint(RIGHT.x, RIGHT.z, 10, point());
+    expect([Math.round(right.x * 1e6) / 1e6, Math.round(right.y * 1e6) / 1e6]).toEqual([10, 0]);
+    const down = mapRimPoint(-UP.x, -UP.z, 10, point());
+    expect([Math.round(down.x * 1e6) / 1e6, Math.round(down.y * 1e6) / 1e6]).toEqual([0, 10]);
+    const left = mapRimPoint(-RIGHT.x, -RIGHT.z, 10, point());
+    expect([Math.round(left.x * 1e6) / 1e6, Math.round(left.y * 1e6) / 1e6]).toEqual([-10, 0]);
+  });
+
+  it('an enemy standing on the player has a bearing rather than a NaN', () => {
+    const zero = mapRimPoint(0, 0, 60, point());
+    expect(zero.angle).toBe(0);
+    expect([zero.x, zero.y]).toEqual([60, 0]);
+    expect(zero.inside).toBe(false);
   });
 });
 

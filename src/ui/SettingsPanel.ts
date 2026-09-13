@@ -7,7 +7,7 @@
 // SPEC-015 §4 replaces `detect` with the real benchmark; until then the
 // default is the boot rule of SPEC-002 D-G (the renderer's active preset).
 import type { QualityPreset } from '@/core/Renderer';
-import type { SettingsStore } from '@/core/Settings';
+import type { GuidanceLevel, SettingsStore } from '@/core/Settings';
 import type { SaveStore, SlotId } from '@/core/Save';
 import { SLOTS } from '@/core/Save';
 import { confirmSheet } from '@/ui/ConfirmSheet';
@@ -35,6 +35,12 @@ const AUTO_FIRE_CHOICES = [
   ['off', 'Off'],
   ['touch', 'Touch only'],
 ] as const;
+/** SPEC-027 D-16: the three guidance levels, in the order §4.9 tabulates them. */
+const GUIDANCE_CHOICES = [
+  ['full', 'Full'],
+  ['minimal', 'Minimal'],
+  ['off', 'Off'],
+] as const satisfies readonly (readonly [GuidanceLevel, string])[];
 
 export class SettingsPanel {
   readonly #ui: UiRoot;
@@ -86,6 +92,7 @@ export class SettingsPanel {
         this.#audioRows(),
         this.#qualityRow(),
         this.#toggleRow('settings-reduce-motion', 'Reduce motion', s.get().reduceMotion, (on) => s.set({ reduceMotion: on })),
+        this.#guidanceRow(),
         this.#choiceRow('Auto-fire', AUTO_FIRE_CHOICES, s.autoFire, (mode) => s.setAutoFire(mode)),
         this.#choiceRow(
           'Joystick side',
@@ -187,6 +194,62 @@ export class SettingsPanel {
       { class: 'settings-section' },
       h('div', { class: 'settings-row' }, h('span', {}, 'Quality'), h('div', { class: 'settings-seg' }, ...buttons)),
       h('div', { class: 'settings-row' }, h('span', { class: 'settings-note' }, `Benchmark: ${this.#detect()}`), redetect),
+    ) as HTMLDivElement;
+  }
+
+  // --------------------------------------------------------------- guidance
+
+  /**
+   * SPEC-027 §4.9 / D-16: how much the surface leads the player, and the button
+   * that lets the first-time tips play again. Clearing the tips destroys
+   * nothing a trigger cannot re-show, so it asks nothing before it does it.
+   */
+  #guidanceRow(): HTMLDivElement {
+    const s = this.#deps.settings;
+    const active = s.get().guidance;
+    const buttons = GUIDANCE_CHOICES.map(([value, text]) =>
+      testId(
+        h(
+          'button',
+          {
+            class: `ui-btn seg${value === active ? ' is-active' : ''}`,
+            type: 'button',
+            'aria-pressed': String(value === active),
+            click: () => {
+              s.set({ guidance: value });
+              this.#render();
+            },
+          },
+          text,
+        ),
+        `settings-guidance-${value}`,
+      ),
+    );
+    const resetTips = testId(
+      h(
+        'button',
+        {
+          class: 'ui-btn',
+          type: 'button',
+          click: () => {
+            s.set({ tipsSeen: [] });
+            this.#ui.toast('Tips reset', 'info');
+          },
+        },
+        'Reset tips',
+      ),
+      'settings-reset-tips',
+    );
+    return h(
+      'div',
+      { class: 'settings-section' },
+      h(
+        'div',
+        { class: 'settings-row' },
+        h('span', {}, 'Guidance'),
+        testId(h('div', { class: 'settings-seg' }, ...buttons), 'settings-guidance'),
+      ),
+      h('div', { class: 'settings-row' }, h('span', { class: 'settings-note' }, 'First-time tips'), resetTips),
     ) as HTMLDivElement;
   }
 

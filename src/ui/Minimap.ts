@@ -14,6 +14,7 @@ import {
   isNodeIcon,
   mapAngle,
   mapProject,
+  mapRimPoint,
   type MapIconKind,
   type MapPoint,
   type MapShape,
@@ -41,6 +42,13 @@ export interface MinimapFrame {
   /** POIs (discovered or objective), nodes, shelters — everything with an icon. */
   marks: readonly MapMark[];
   enemies: readonly { x: number; z: number; kind: 'enemy' | 'elite' | 'boss' }[];
+  /**
+   * SPEC-027 AC-39: a kill objective's quarry within 60 m, in world metres.
+   * These are the minimap's own — they are always painted as a rim arrow, never
+   * as an icon, so the player gets a direction to sweep rather than a pin on an
+   * enemy that is moving anyway. The full map ignores them.
+   */
+  arrows: readonly { x: number; z: number }[];
   /** SPEC-027's guidance marks; null until then. */
   target: { x: number; z: number } | null;
   route: Float32Array | null;
@@ -428,6 +436,14 @@ export class Minimap {
         drawn.arrows++;
       }
     }
+    // SPEC-027 AC-39: the kill objective's quarry, on the rim at its bearing
+    // however near it is. `mapRimPoint` rather than `#at`, because 60 m always
+    // falls inside the 70 m window and would otherwise draw as an icon.
+    for (const arrow of frame.arrows) {
+      const p = mapRimPoint(arrow.x - frame.playerX, arrow.z - frame.playerZ, rimPx, this.#point);
+      drawRimArrow(ctx, p, MAP_ICONS.objective.color, scale);
+      drawn.arrows++;
+    }
 
     // 8. enemies within 25 m; a boss shows anywhere inside the rim.
     for (const enemy of frame.enemies) {
@@ -485,6 +501,9 @@ export class Minimap {
       ctx.save();
       ctx.strokeStyle = COLORS.route;
       ctx.lineWidth = Math.max(1, 2 * scale);
+      // SPEC-027 AC-65: dashed, so the route reads as a suggestion rather than
+      // as another of the map's boundaries.
+      ctx.setLineDash([4 * scale, 3 * scale]);
       ctx.beginPath();
       for (let i = 0; i < frame.routeLength; i++) {
         const p = this.#at(frame, route[i * 2] as number, route[i * 2 + 1] as number, pxPerMetre, rimPx);
