@@ -1526,7 +1526,14 @@ export class SurfaceScene extends UiScene<'surface'> {
   #buildDebugStrip(): void {
     const strip = el('div', 'hud-debug');
     const button = (id: string, label: string, click: () => void): void => {
-      strip.append(testId(h('button', { class: 'hud-button', type: 'button', click }, label), id));
+      // SPEC-023 §4.4: a held beat freezes the world, and these shortcuts are
+      // shortcuts *through* it — a hurt or a smite during a reveal would touch
+      // what the hold exists to protect (AC: no damage during a held beat).
+      const guarded = (): void => {
+        if (this.#holds > 0) return;
+        click();
+      };
+      strip.append(testId(h('button', { class: 'hud-button', type: 'button', click: guarded }, label), id));
     };
     button('surface-hurt', 'Hurt me', () => this.#combat?.damagePlayer(60, { kind: 'fall' }));
     button('surface-goto-pad', 'To pad', () => {
