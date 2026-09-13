@@ -445,12 +445,15 @@ export class SurfaceScene extends UiScene<'surface'> {
   readonly #marks: MapMark[] = [];
   readonly #enemyPool: { x: number; z: number; kind: 'enemy' | 'elite' | 'boss' }[] = [];
   readonly #minimapEnemies: { x: number; z: number; kind: 'enemy' | 'elite' | 'boss' }[] = [];
+  readonly #arrowPool: { x: number; z: number }[] = [];
+  readonly #arrows: { x: number; z: number }[] = [];
   readonly #frame: MinimapFrame = {
     playerX: 0,
     playerZ: 0,
     facing: 0,
     marks: this.#marks,
     enemies: this.#minimapEnemies,
+    arrows: this.#arrows,
     target: null,
     route: null,
     routeLength: 0,
@@ -2798,6 +2801,7 @@ export class SurfaceScene extends UiScene<'surface'> {
     frame.facing = world.player.facing;
     this.#marks.length = 0;
     this.#minimapEnemies.length = 0;
+    this.#arrows.length = 0;
     if (missions === null || save === null) return frame;
 
     // Which POIs the current objectives point at (rings and edge arrows).
@@ -2855,8 +2859,13 @@ export class SurfaceScene extends UiScene<'surface'> {
       mark.kind = e.def.archetype === 'boss' ? 'boss' : e.elite ? 'elite' : 'enemy';
     }
 
-    // SPEC-027 AC-39: a kill objective's quarry inside 60 m rides the map as an
-    // objective mark — a ring on it where it fits, a rim arrow where it does not.
+    // SPEC-027 AC-39: a kill objective's quarry inside 60 m rides the minimap
+    // as a rim arrow at its bearing. An arrow rather than an objective mark
+    // because 60 m is inside the 70 m window, where a mark would always paint
+    // as a ringed icon and never as the arrow the spec asks for; the painter
+    // pins it to the rim itself (`mapRimPoint`). The quarry is a moving enemy,
+    // so a direction to sweep is the honest affordance anyway — the enemy layer
+    // still draws it exactly where it stands once inside 25 m.
     if (guided) {
       const wanted = missions.objectiveEnemies();
       if (wanted.length > 0) {
@@ -2864,13 +2873,9 @@ export class SurfaceScene extends UiScene<'surface'> {
           const e = world.enemies.at(i);
           if (e.state === 'dead' || !wanted.includes(e.def.id as EnemyId)) continue;
           if (Math.hypot(e.x - world.player.x, e.z - world.player.z) > OBJECTIVE_ENEMY_RANGE) continue;
-          const mark = this.#nextMark();
-          mark.x = e.x;
-          mark.z = e.z;
-          mark.icon = e.def.archetype === 'boss' ? 'boss' : e.elite ? 'elite' : 'enemy';
-          mark.objective = true;
-          mark.label = null;
-          mark.ring = 0;
+          const arrow = this.#nextArrow();
+          arrow.x = e.x;
+          arrow.z = e.z;
         }
       }
     }
@@ -2900,6 +2905,18 @@ export class SurfaceScene extends UiScene<'surface'> {
     }
     this.#marks.push(mark);
     return mark;
+  }
+
+  /** The same pooling for the minimap's rim arrows (SPEC-027 AC-39). */
+  #nextArrow(): { x: number; z: number } {
+    const at = this.#arrows.length;
+    let arrow = this.#arrowPool[at];
+    if (arrow === undefined) {
+      arrow = { x: 0, z: 0 };
+      this.#arrowPool.push(arrow);
+    }
+    this.#arrows.push(arrow);
+    return arrow;
   }
 
   /** The same pooling for the enemy list, which turns over every repaint. */

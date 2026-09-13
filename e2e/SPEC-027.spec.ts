@@ -32,6 +32,39 @@ async function dismiss(page: Page): Promise<void> {
   }
 }
 
+/** What the minimap's last repaint actually put on the canvas (SPEC-012 AC-55..AC-59). */
+async function drawn(page: Page, key: string): Promise<number> {
+  const stats = await page.evaluate(() => window.__reallm.stats());
+  return Number(stats.sceneInfo?.[key] ?? 0);
+}
+
+/**
+ * Land on Cinder-4 with `c1_m1` already done. The chapter's other missions all
+ * hang off it, so this is how one terminal visit reaches anything past the
+ * first mission (the trick SPEC-026 §6.2 uses).
+ */
+async function landWithChapterStarted(page: Page): Promise<void> {
+  await start(page, '/?debug&seed=123');
+  await page.evaluate(
+    (creation) => void window.__reallm.save().create(0, creation, 123),
+    {
+      name: 'Salvager',
+      classId: 'marine',
+      appearance: { portrait: 0, primary: '#b7472a', secondary: '#2a3b4c' },
+      attributes: { might: 3, vigor: 8, agility: 1, tech: 1 },
+      difficulty: 'normal',
+    },
+  );
+  await page.evaluate(() => {
+    const save = window.__reallm.save().current;
+    if (save === null) throw new Error('no save');
+    save.progress.missionsDone.push('c1_m1');
+  });
+  await page.evaluate(() => window.__reallm.go('surface', { planet: 'cinder4', firstLanding: true }, { force: true }));
+  await expect(page.locator('[data-testid="scene-label"]')).toHaveText('surface');
+  await dismiss(page);
+}
+
 /** Accept `c1_m1` at the pad terminal; stage 0 (reach the pad) ends where it starts. */
 async function acceptFirstMission(page: Page): Promise<void> {
   await page.locator('[data-testid="surface-goto-pad"]').click();
@@ -141,29 +174,40 @@ test('5. guidance off keeps the tracker and drops the waypoint', async ({ page }
   await expect(tracker(page)).toBeVisible();
 });
 
+test('a kill objective points at its quarry with a rim arrow, and guidance off drops it (AC-39, AC-40)', async ({
+  page,
+}) => {
+  test.setTimeout(150_000);
+  // `c1_s2` opens on a kill stage — eight dust skitters — which is the shortest
+  // road to an objective enemy.
+  await landWithChapterStarted(page);
+  await page.locator('[data-testid="surface-goto-pad"]').click();
+  await page.keyboard.press('KeyE');
+  await expect(page.locator('[data-testid="pad-terminal"]')).toBeVisible();
+  await page.locator('[data-testid="terminal-accept-c1_s2"]').click();
+  await dismiss(page);
+  await page.locator('[data-testid="terminal-close"]').click();
+  await dismiss(page);
+  await expect(tracker(page)).toContainText(/skitter/i);
+
+  // E14 forces an objective spawn every 20 s onto the 25–40 m ring — inside the
+  // 60 m the arrow covers, and inside the 70 m window, which is exactly why the
+  // quarry has to be painted on the rim rather than left to the mark branch.
+  await expect.poll(() => drawn(page, 'mmArrows'), { timeout: 60_000 }).toBeGreaterThanOrEqual(1);
+
+  // AC-40: the arrows are guidance, so `off` takes them with everything else.
+  await page.keyboard.press('Escape');
+  await page.locator('[data-testid="pause-settings"]').click();
+  await page.locator('[data-testid="settings-guidance-off"]').click();
+  await page.locator('[data-testid="settings-close"]').click();
+  await page.locator('[data-testid="pause-resume"]').click();
+  await expect.poll(() => drawn(page, 'mmArrows'), { timeout: 15_000 }).toBe(0);
+});
+
 test('a tap on the tracker cycles the tracked mission, and its hit box clears 44 px (AC-22)', async ({ page }) => {
   test.setTimeout(150_000);
-  // The chapter's other missions all hang off `c1_m1`, so marking it done is
-  // how one terminal visit gets two acceptances (the trick SPEC-026 §6.2 uses).
-  await start(page, '/?debug&seed=123');
-  await page.evaluate(
-    (creation) => void window.__reallm.save().create(0, creation, 123),
-    {
-      name: 'Salvager',
-      classId: 'marine',
-      appearance: { portrait: 0, primary: '#b7472a', secondary: '#2a3b4c' },
-      attributes: { might: 3, vigor: 8, agility: 1, tech: 1 },
-      difficulty: 'normal',
-    },
-  );
-  await page.evaluate(() => {
-    const save = window.__reallm.save().current;
-    if (save === null) throw new Error('no save');
-    save.progress.missionsDone.push('c1_m1');
-  });
-  await page.evaluate(() => window.__reallm.go('surface', { planet: 'cinder4', firstLanding: true }, { force: true }));
-  await expect(page.locator('[data-testid="scene-label"]')).toHaveText('surface');
-  await dismiss(page);
+  // Two acceptances in one terminal visit, for something to cycle between.
+  await landWithChapterStarted(page);
 
   await page.locator('[data-testid="surface-goto-pad"]').click();
   await page.keyboard.press('KeyE');

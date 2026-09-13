@@ -138,6 +138,26 @@ export function mapProject(dx: number, dz: number, pxPerMetre: number, rimPx: nu
   return out;
 }
 
+/**
+ * §4.1 with the clamp always on: the bearing of a world offset, put on the rim
+ * circle whatever its distance. `mapProject` only clamps what falls outside the
+ * window, so a mark that must read as an edge arrow even from inside it —
+ * SPEC-027's kill quarry, which is within 60 m of a 70 m rim by definition —
+ * needs its own projection rather than a painter that lies about `inside`.
+ *
+ * The zero offset has no bearing; it lands at angle 0 rather than NaN.
+ */
+export function mapRimPoint(dx: number, dz: number, rimPx: number, out: MapPoint): MapPoint {
+  const u = (dx - dz) * Math.SQRT1_2;
+  const v = (dx + dz) * Math.SQRT1_2;
+  const angle = Math.atan2(v, u);
+  out.angle = angle;
+  out.inside = false;
+  out.x = Math.cos(angle) * rimPx;
+  out.y = Math.sin(angle) * rimPx;
+  return out;
+}
+
 /** §4.1: a world facing `θ` points along `θ + π/4` on the canvas. */
 export function mapAngle(worldAngle: number): number {
   return worldAngle + MAP_YAW;
