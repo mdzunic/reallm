@@ -65,9 +65,9 @@ import { advanceViewTime, RESOURCE_COLORS, shakeOffset, SurfaceView, type ShakeS
 import { confirmSheet } from '@/ui/ConfirmSheet';
 import { DamageNumbers } from '@/ui/DamageNumbers';
 import { DeathOverlay } from '@/ui/DeathOverlay';
-import { clearEndingOverlays, EndingOverlay } from '@/ui/EndingOverlay';
 import { dialogueLayer, type DialogueUI } from '@/ui/DialogueUI';
 import { el, h, testId } from '@/ui/dom';
+import { clearEndingOverlays, EndingOverlay } from '@/ui/EndingOverlay';
 import { Hud } from '@/ui/Hud';
 import { Minimap, type MinimapPoi } from '@/ui/Minimap';
 import { PauseMenu } from '@/ui/PauseMenu';

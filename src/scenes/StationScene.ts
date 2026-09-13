@@ -21,8 +21,8 @@ import { endingPending, interludeToPlay, stayReport } from '@/systems/StoryBeats
 import { director } from '@/scenes/Director';
 import { CharacterPanel } from '@/ui/CharacterPanel';
 import { dialogueLayer } from '@/ui/DialogueUI';
-import { clearEndingOverlays, EndingOverlay } from '@/ui/EndingOverlay';
 import { el, h, testId } from '@/ui/dom';
+import { clearEndingOverlays, EndingOverlay } from '@/ui/EndingOverlay';
 import { MissionBoard } from '@/ui/MissionBoard';
 import { SettingsPanel } from '@/ui/SettingsPanel';
 import { ShopPanel } from '@/ui/ShopPanel';
