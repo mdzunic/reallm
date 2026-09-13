@@ -991,7 +991,7 @@ const MIGRATIONS: Record<number, (raw: Bag) => Bag> = {
       if (typeof itemId === 'string' && num(entry['qty'], 0) > 0) carried.add(itemId);
     }
     const fromPack = (slot: QuickSlot): ItemId | null =>
-      QUICK_PREFERENCE[slot].find((itemId) => carried.has(itemId)) ?? null;
+      SAVE_CONTENT.quickPreference[slot].find((itemId) => carried.has(itemId)) ?? null;
     return {
       ...raw,
       version: 2,

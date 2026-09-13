@@ -93,6 +93,15 @@ test('a fresh save shows four gear cards in the character panel (§6.2)', async 
   await expect(page.getByTestId('equipped-primary')).toContainText('Kinetic Repeater');
   await expect(page.getByTestId('equipped-heavy')).toContainText('Empty');
   await expect(page.getByTestId('equipped-armor')).toContainText('Scrap Plate');
+
+  // §4.8: the shop reads all four slots, so the pistol in the sidearm — a slot
+  // version 1 did not have — is badged `equipped` and not offered for sale.
+  await page.getByTestId('station-tab-shop').click();
+  await page.getByTestId('shop-tab-gear').click();
+  await expect(page.getByTestId('shop-gear-pistol_service')).toContainText('equipped');
+  await expect(page.getByTestId('shop-gear-weapon_kinetic')).toContainText('equipped');
+  await expect(page.getByTestId('shop-gear-armor_scrap')).toContainText('equipped');
+  await expect(page.getByTestId('shop-gear-weapon_laser')).not.toContainText('equipped');
 });
 
 test('a v1 save in storage loads as version 2 with its rifle in the primary slot (§6.2, E38)', async ({ page }) => {
