@@ -263,11 +263,13 @@ export class MapScreen {
     let centreX = 0;
     let centreZ = 0;
     if (this.#zoomed) {
-      // Half the canvas in metres reaches this far along a world axis once the
-      // view is turned 45°; keeping the centre inside it keeps the arena filled.
-      const reach = Math.max(0, half - ((size / 2) / pxPerMetre) * Math.SQRT2);
-      centreX = Math.max(-reach, Math.min(reach, frame.playerX));
-      centreZ = Math.max(-reach, Math.min(reach, frame.playerZ));
+      // Clamped to the arena: the centre never leaves the ground the layers
+      // cover, so the view cannot wander off into blank space. The player is
+      // inside the arena by construction (SPEC-012 clamps them to
+      // ±(halfSize − 2)), so 2× always keeps them in the middle of the canvas
+      // — which is the point of the zoom on a phone.
+      centreX = Math.max(-half, Math.min(half, frame.playerX));
+      centreZ = Math.max(-half, Math.min(half, frame.playerZ));
     }
 
     ctx.setTransform(1, 0, 0, 1, 0, 0);
