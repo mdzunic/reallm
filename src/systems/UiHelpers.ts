@@ -332,6 +332,31 @@ export function gearTooltip(id: ItemId): string {
  * `Hud.flush()` diffs against the last rendered copy and touches only what
  * moved. `flight` is present only in flight mode.
  */
+export interface HudTrackerRow {
+  /** The row's wording: SPEC-027 §4.2's table, or today's line on the focus row. */
+  text: string;
+  done: boolean;
+  focus: boolean;
+}
+
+/**
+ * SPEC-027 §4.2 — the surface objective tracker: the tracked mission's whole
+ * current stage, with the focus row's distance and map bearing beside it.
+ * `null` off the surface, where the flight HUD keeps its one `objective` line.
+ */
+export interface HudTracker {
+  title: string;
+  /** `stage 2/3`; empty with no mission, where the header is the title alone. */
+  stage: string;
+  rows: HudTrackerRow[];
+  /** Metres to the focus target; `null` when there is none. */
+  distance: number | null;
+  /** Radians clockwise from map-up — what the ▲ beside the row rotates by. */
+  bearing: number;
+  /** Stuck level ≥ 1: the tracker and the waypoint pulse (SPEC-027 AC-28). */
+  pulse: boolean;
+}
+
 export interface HudModel {
   hp: [number, number];
   xp: [number, number];
@@ -340,6 +365,7 @@ export interface HudModel {
   resources: Record<ResourceId, number>;
   cargoCap: number;
   objective: { title: string; line: string; value: number; target: number } | null;
+  tracker: HudTracker | null;
   weather: { warning: WeatherId | null; active: WeatherId | null; secondsLeft: number };
   boss: { name: string; hp: number; max: number } | null;
   consumable: { itemId: ItemId; qty: number } | null;
@@ -367,6 +393,7 @@ export function createHudModel(): HudModel {
     resources: { oil: 0, wheat: 0, water: 0, lithium: 0 },
     cargoCap: TUNING.CARGO_BASE,
     objective: null,
+    tracker: null,
     weather: { warning: null, active: null, secondsLeft: 0 },
     boss: null,
     consumable: null,

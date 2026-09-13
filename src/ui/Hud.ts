@@ -15,6 +15,7 @@ import {
 } from '@/systems/UiHelpers';
 import { ITEMS, RESOURCE_IDS, type ResourceId } from '@/data/index';
 import { el, testId, type UiRoot } from '@/ui/dom';
+import { Tracker } from '@/ui/Tracker';
 
 export type HudMode = 'surface' | 'flight';
 
@@ -59,6 +60,8 @@ export class Hud {
   readonly #consumable = el('div', 'hud-consumable panel');
   readonly #interact = el('div', 'hud-interact');
   readonly #objective = el('div', 'hud-objective');
+  /** SPEC-027 §4.2: the surface's objective tracker; `null` in flight mode. */
+  #tracker: Tracker | null = null;
   readonly #vignette = el('div', 'hud-vignette');
   readonly #static = el('div', 'hud-static');
   #minimap: HTMLCanvasElement | null = null;
@@ -74,7 +77,12 @@ export class Hud {
   readonly #storm = testId(el('div', 'hud-storm'), 'storm-warning');
   readonly #holding = testId(el('div', 'hud-holding'), 'holding-banner');
 
-  constructor(root: UiRoot, mode: HudMode) {
+  /**
+   * `onCycleMission` is SPEC-027 AC-22: a tap on the tracker cycles the tracked
+   * mission, the same thing `KeyT` does. Only surface mode builds a tracker, so
+   * flight never passes one.
+   */
+  constructor(root: UiRoot, mode: HudMode, onCycleMission?: () => void) {
     this.#ui = root;
     this.#mode = mode;
     this.model = createHudModel();
@@ -96,6 +104,8 @@ export class Hud {
     // `hud-hp` is the scene's one HP readout (AC-58); the SPEC-011 e2e reads it.
     tl.append(testId(this.#hp.root, 'hud-hp'), this.#xp.root, this.#level);
     if (mode === 'flight') tl.append(this.#shield.root, this.#hull.root, this.#throttle);
+    // SPEC-027 §4.2: the tracker sits under the level/XP row, in the same corner.
+    if (mode === 'surface') this.#tracker = new Tracker(tl, onCycleMission ?? ((): void => undefined));
 
     const tr = el('div', 'hud-tr');
     for (const resource of RESOURCE_IDS) {
@@ -144,9 +154,15 @@ export class Hud {
     br.append(this.#interact);
     this.#interact.classList.add('is-hidden');
 
+    // SPEC-027 AC-17 / D-4: on the surface the tracker's focus row *is* the
+    // objective line, so this corner builds no second `.hud-objective` — the
+    // strict e2e selectors still resolve to exactly one node. Flight keeps its
+    // line where SPEC-013 §4.8 put it.
     const bc = el('div', 'hud-bc');
-    bc.append(this.#objective);
-    this.#objective.classList.add('is-hidden');
+    if (mode === 'flight') {
+      bc.append(this.#objective);
+      this.#objective.classList.add('is-hidden');
+    }
 
     this.#root.append(this.#vignette, this.#static, tl, tr, tc, bl, br, bc);
     if (mode === 'flight') this.#root.append(this.#reticle);
@@ -209,6 +225,8 @@ export class Hud {
   dispose(): void {
     if (this.#flashTimer !== null) clearTimeout(this.#flashTimer);
     if (this.#staticTimer !== null) clearTimeout(this.#staticTimer);
+    this.#tracker?.dispose();
+    this.#tracker = null;
     this.#unregister();
     this.#ui.unmount(this.#root);
   }
@@ -254,7 +272,13 @@ export class Hud {
         this.#root.classList.toggle('is-cargo-full', anyAtCap);
         return;
       }
+      case 'tracker': {
+        // SPEC-027 §4.2: the whole panel, from the model the scene wrote.
+        if (m.tracker !== null) this.#tracker?.set(m.tracker);
+        return;
+      }
       case 'objective': {
+        if (this.#mode !== 'flight') return; // SPEC-027 AC-17: no line here
         this.#objective.classList.toggle('is-hidden', m.objective === null);
         if (m.objective !== null) {
           const { title, line, value, target } = m.objective;

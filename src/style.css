@@ -2983,3 +2983,197 @@ html.reduce-motion .reveal-name.is-glitched {
   min-height: 44px;
   pointer-events: auto;
 }
+
+/* ================================================================ SPEC-027 */
+/* Mission guidance: the objective tracker in the top-left corner, the waypoint
+   marker and its edge arrow, the scan ring, and the one-line hint strip.
+   Everything that moves does so with `transform` only (§4.3, AC-27), and every
+   animation has a static form under reduce motion (27-j). */
+
+/* §4.2: under the level/XP row, narrow enough to leave the view alone, and it
+   takes pointers because a tap on it cycles the tracked mission (AC-22). */
+.tracker {
+  max-width: clamp(220px, 30vw, 320px);
+  min-height: 44px;
+  padding: 6px 10px;
+  font-size: 14px;
+  pointer-events: auto;
+  cursor: pointer;
+  touch-action: manipulation;
+}
+
+/* D-2: the upper case is style. The DOM keeps the mission's own title, so a
+   screen reader says "Dry Land" instead of spelling it out. */
+.tracker-head {
+  margin: 0 0 4px;
+  font-size: 14px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--ink-dim);
+}
+
+.tracker-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.tracker-row {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  line-height: 1.35;
+}
+
+.tracker-row.is-done {
+  color: var(--ink-dim);
+}
+
+.tracker-check {
+  color: var(--good);
+  min-width: 0.9em;
+}
+
+.tracker-row.is-focus .tracker-text {
+  font-weight: 600;
+}
+
+/* The focus row keeps the old line's class (D-3) but not its bottom-centre
+   dressing: inside a 220–320 px panel it wraps instead of running off the end. */
+.tracker .hud-objective {
+  padding: 0;
+  border-radius: 0;
+  background: none;
+  white-space: normal;
+}
+
+/* The two live spans beside the focus row: metres, and a ▲ turned to the
+   target's map bearing. The arrow only ever gets a `transform`. */
+.tracker-dist {
+  margin-left: auto;
+  color: var(--accent-2);
+  white-space: nowrap;
+}
+
+.tracker-arrow {
+  color: var(--accent-2);
+  display: inline-block;
+}
+
+.tracker .is-hidden {
+  display: none;
+}
+
+/* AC-28: stuck level ≥ 1 pulses the panel at 1 Hz, on the HUD's own keyframes. */
+.tracker.is-stuck {
+  animation: hud-pulse 1s ease-in-out infinite;
+}
+
+html.reduce-motion .tracker.is-stuck {
+  animation: none;
+  outline: 1px solid var(--accent-2);
+}
+
+/* ------------------------------------------------- the guidance layer itself */
+/* A pass-through layer over the canvas: the waypoint, the scan ring and the
+   hint line live here rather than inside `.hud`, so the HUD's own corner boxes
+   never have to make room for something that follows the world. */
+.guide-layer {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.guide-layer .is-hidden {
+  display: none;
+}
+
+/* §4.3: the marker is a zero-size anchor at the projected point; its parts are
+   placed around it, so one `translate(…) rotate(…)` moves the whole thing. */
+.waypoint {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 0;
+  height: 0;
+  color: var(--accent-2);
+  will-change: transform;
+}
+
+.waypoint-mark {
+  position: absolute;
+  left: -11px;
+  top: -11px;
+  width: 22px;
+  height: 22px;
+}
+
+/* On screen: a 22 px gold diamond with the distance under it. */
+.waypoint[data-state='on'] .waypoint-mark {
+  background: var(--accent-2);
+  transform: rotate(45deg);
+  box-shadow: 0 0 10px rgba(245, 166, 35, 0.55);
+}
+
+/* On the ellipse: a triangle pointing out along the ray, metres beside it. */
+.waypoint[data-state='edge'] .waypoint-mark {
+  background: none;
+  border-left: 11px solid transparent;
+  border-right: 11px solid transparent;
+  border-bottom: 18px solid var(--accent-2);
+  height: 0;
+  top: -9px;
+}
+
+.waypoint-dist {
+  position: absolute;
+  left: -40px;
+  top: 14px;
+  width: 80px;
+  text-align: center;
+  font-size: 14px;
+  color: var(--accent-2);
+  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.9);
+  white-space: nowrap;
+}
+
+.waypoint.is-stuck {
+  animation: hud-pulse 1s ease-in-out infinite;
+}
+
+html.reduce-motion .waypoint.is-stuck {
+  animation: none;
+}
+
+/* §4.3: the 3 s scan, as a ring that fills. The conic gradient is driven by
+   one custom property, so a frame costs a variable write and nothing else. */
+.scan-ring {
+  position: absolute;
+  left: -26px;
+  top: -26px;
+  width: 52px;
+  height: 52px;
+  border-radius: 50%;
+  background: conic-gradient(var(--accent) calc(var(--scan, 0) * 360deg), rgba(255, 255, 255, 0.12) 0);
+  -webkit-mask: radial-gradient(circle, transparent 0 17px, #000 18px);
+  mask: radial-gradient(circle, transparent 0 17px, #000 18px);
+  will-change: transform;
+}
+
+/* §4.5 / §4.8: one line at a time, over the bottom of the view. */
+.aria-hint {
+  position: absolute;
+  left: 50%;
+  bottom: max(96px, calc(env(safe-area-inset-bottom) + 86px));
+  transform: translateX(-50%);
+  max-width: min(560px, 88vw);
+  padding: 8px 14px;
+  border-radius: 6px;
+  background: rgba(0, 0, 0, 0.7);
+  border: 1px solid var(--panel-edge);
+  color: var(--ink);
+  font-size: 14px;
+  text-align: center;
+}

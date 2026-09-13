@@ -15,6 +15,7 @@ import { Pool } from '@/core/Pool';
 import { PressEdges } from '@/core/PressEdges';
 import { DEFAULT_LOOK, type Look } from '@/core/Quality';
 import { EXPLORE_CELL, newSave, type CharacterCreation, type Save } from '@/core/Save';
+import type { GuidanceLevel } from '@/core/Settings';
 import type { GameServices } from '@/core/Services';
 import type { SceneParams } from '@/core/StateMachine';
 import type { Renderer } from '@/core/Renderer';
@@ -23,16 +24,21 @@ import {
   DIALOGUE,
   ENEMIES,
   FOLLOWERS,
+  HINTS,
+  HINT_PLACEHOLDERS,
   ITEMS,
   MISSIONS,
+  MISSION_HINTS,
   PLANETS,
   SURFACE_ASSETS,
   SURFACE_SHARED_ASSETS,
+  TIPS,
   TUNING,
   type BossRevealDef,
   type Dialogue,
   type DialogueId,
   type EnemyId,
+  type HintPlaceholder,
   type Item,
   type ItemId,
   type MissionDef,
@@ -40,6 +46,7 @@ import {
   type PlanetDef,
   type PoiId,
   type ResourceId,
+  type TipId,
   MESH_RECIPE_IDS,
 } from '@/data/index';
 import { makeEnemy, type EnemyEntity } from '@/entities/Enemy';
@@ -50,20 +57,37 @@ import type { ArenaState } from '@/entities/World';
 import { Combat, computePlayerStats, type CombatWorld } from '@/systems/Combat';
 import { Economy } from '@/systems/Economy';
 import { ExploreMask, REVEAL_CAPACITY } from '@/systems/Exploration';
+import {
+  bearingWord,
+  buildPathGrid,
+  distanceText,
+  fillHint,
+  findPath,
+  focusObjective,
+  objectiveTarget,
+  padTarget,
+  PATH_MAX_POINTS,
+  StuckTracker,
+  type GuideContext,
+  type GuidePoi,
+  type GuideTarget,
+  type PathGrid,
+} from '@/systems/Guidance';
 import { generateLayout, ObstacleGrid, type Layout, type LayoutPoi } from '@/systems/Layout';
 import { nodeIcon, poiIcon } from '@/systems/MapModel';
-import { Missions, type MissionContext } from '@/systems/Missions';
+import { Missions, type MissionContext, type ObjectiveProgress } from '@/systems/Missions';
 import { Nodes, Pickups } from '@/systems/Pickups';
 import { cumulativeXp, Progression, xpToNext } from '@/systems/Progression';
 import { SpawnDirector, type FrustumXZ } from '@/systems/Spawn';
 import { Weather, WEATHER_EFFECTS, type WeatherEffects } from '@/systems/Weather';
 import { revealCamera, revealDue, revealKey, stayReport, type Ending } from '@/systems/StoryBeats';
-import { hasNodeRadar } from '@/systems/UiHelpers';
+import { hasNodeRadar, type HudTracker, type HudTrackerRow } from '@/systems/UiHelpers';
 import { UiScene } from '@/scenes/base';
 import { director } from '@/scenes/Director';
 import { INSTANCES_PER_PART } from '@/views/ProceduralMeshes';
 import { layerFromAssets } from '@/views/ProceduralTextures';
 import { advanceViewTime, RESOURCE_COLORS, shakeOffset, SurfaceView, type ShakeState } from '@/views/SurfaceView';
+import { AriaHint } from '@/ui/AriaHint';
 import { confirmSheet } from '@/ui/ConfirmSheet';
 import { DamageNumbers } from '@/ui/DamageNumbers';
 import { DeathOverlay } from '@/ui/DeathOverlay';
@@ -77,7 +101,9 @@ import { Minimap, type MapMark, type MinimapFrame } from '@/ui/Minimap';
 import { PauseMenu } from '@/ui/PauseMenu';
 import { RevealOverlay } from '@/ui/RevealOverlay';
 import { RotateOverlay } from '@/ui/RotateOverlay';
+import { ScanRing } from '@/ui/ScanRing';
 import { TouchControls } from '@/ui/TouchControls';
+import { Waypoint } from '@/ui/Waypoint';
 
 /** §4.3 — the fixed camera. */
 const CAMERA_FOV = 40;
@@ -117,6 +143,31 @@ const STATIC_BURST_MS = 600;
 /** The minimap repaints at 4 Hz — plenty for 1 px = 1 m. */
 const MINIMAP_INTERVAL = 0.25;
 
+// ------------------------------------------------------------- SPEC-027 §4.3
+// Mission guidance: the waypoint's inset ellipse, the tip queue's clocks, the
+// route's recompute rules, and the ranges the map marks and the tips watch.
+
+/** §4.3: the ellipse's inset from the viewport edge, and its floor (27-k). */
+const WAYPOINT_INSET = 56;
+const WAYPOINT_MIN_AXIS = 40;
+/** The marker sits this far above the ground at the target (§4.3). */
+const WAYPOINT_LIFT = 1.6;
+/** §4.5: a tip holds the line for 8 s, a stuck hint for 7 s. */
+const TIP_MS = 8000;
+const HINT_MS = 7000;
+/** §4.5: one tip per 12 s, and at most three waiting behind it (D-27). */
+const TIP_INTERVAL = 12;
+const TIP_QUEUE_MAX = 3;
+/** §4.5 triggers: surface seconds before the map tip, and the node range. */
+const MAP_TIP_SECONDS = 20;
+const HARVEST_TIP_RANGE = 6;
+/** §4.7: at most one path search per 2 s, and what makes one worth running. */
+const ROUTE_INTERVAL = 2;
+const ROUTE_OFF_PATH_METRES = 8;
+const ROUTE_TARGET_MOVED_METRES = 6;
+/** §4.11: objective enemies inside this range ride the minimap (AC-39). */
+const OBJECTIVE_ENEMY_RANGE = 60;
+
 // ------------------------------------------------------------- SPEC-026 §4.4
 
 /** The ground under the player is revealed at 4 Hz, like the minimap repaint. */
@@ -143,6 +194,17 @@ const MUZZLE_COLOR = 0xffe9a0;
 /** `'#rrggbb'` → the number `CombatFx.burst` takes; no allocation. */
 function hexColor(color: string): number {
   return Number.parseInt(color.slice(1), 16);
+}
+
+/** SPEC-027: the rows of a scene with nothing tracked — shared, never written. */
+const NO_ROWS: readonly ObjectiveProgress[] = Object.freeze([]);
+
+/** SPEC-027 D-13: a filled hint still holding a `{token}` cannot be shown. */
+function hasPlaceholder(text: string): boolean {
+  for (const placeholder of HINT_PLACEHOLDERS) {
+    if (text.includes(placeholder)) return true;
+  }
+  return false;
 }
 
 /** The stand-in pilot for a bare `?scene=surface` jump with no loaded save. */
@@ -354,7 +416,6 @@ export class SurfaceScene extends UiScene<'surface'> {
 
   // HUD model scratch (SPEC-001 §7): `Hud.flush` diffs against a clone, so the
   // model may point at these reused objects.
-  readonly #objScratch = { title: '', line: '', value: 0, target: 1 };
   #consumableScratch: { itemId: ItemId; qty: number } | null = null;
 
   // Defend/escort stages resync only when their identity changes — accepting
@@ -397,6 +458,64 @@ export class SurfaceScene extends UiScene<'surface'> {
   readonly #revealOut = new Int32Array(REVEAL_CAPACITY);
   readonly #objectivePois = new Set<PoiId>();
   readonly #missionRows: MapMissionRow[] = [];
+
+  // ------------------------------------------------------------- SPEC-027
+  // Guidance. Everything here is scene-local and session-only (27-n): the
+  // focus target and its distance, the escalation clock, the route, the tip
+  // queue, and the three DOM pieces that sit over the canvas.
+  #waypoint: Waypoint | null = null;
+  #scanRing: ScanRing | null = null;
+  #aria: AriaHint | null = null;
+  readonly #stuck = new StuckTracker();
+  #pathGrid: PathGrid | null = null;
+  /** The context handed to the pure module, refreshed in place each step. */
+  #guide: GuideContext | null = null;
+  readonly #guidePlayer = { x: 0, z: 0 };
+  readonly #guidePois: GuidePoi[] = [];
+  readonly #enemyPoint = { x: 0, z: 0 };
+  /** The tracked stage this step, and which of its rows the marker follows. */
+  #guideRows: readonly ObjectiveProgress[] = [];
+  #focusIndex = -1;
+  #focusTarget: GuideTarget | null = null;
+  #focusDistance: number | null = null;
+  #focusBearing = 0;
+  /** The scan POI the ring is filling for, or `null` (§4.3, AC-35). */
+  #scanState: PoiRuntime | null = null;
+  #waypointState: 'on' | 'edge' | 'off' = 'off';
+  /** The route: the smoothed path, its length in points, and its clocks. */
+  readonly #route = new Float32Array(PATH_MAX_POINTS * 2);
+  #routeLength = 0;
+  #routeIn = 0;
+  #routeTargetX = 0;
+  #routeTargetZ = 0;
+  /** The line waiting for the screen (a hint outranks a tip, D-7). */
+  #pendingLine: { text: string; ms: number } | null = null;
+  readonly #tipQueue: TipId[] = [];
+  #tipCooldown = 0;
+  #surfaceTime = 0;
+  /** Deaths per `${missionId}:${stage}`, and the stages already told (AC-69). */
+  readonly #deathCounts = new Map<string, number>();
+  readonly #deathHinted = new Set<string>();
+  /** The HUD tracker model and its row pool, sized from the largest stage (D-28). */
+  readonly #trackerRows: HudTrackerRow[] = [];
+  readonly #tracker: HudTracker = {
+    title: 'No active mission',
+    stage: '',
+    rows: [],
+    distance: null,
+    bearing: 0,
+    pulse: false,
+  };
+  /** Reused points: the minimap's target, the view's pillar, hint values. */
+  readonly #targetPoint = { x: 0, z: 0 };
+  readonly #beaconPoint = { x: 0, z: 0 };
+  readonly #guideFrame: {
+    beacon: { x: number; z: number } | null;
+    route: Float32Array | null;
+    routeLength: number;
+    pulse: boolean;
+  } = { beacon: null, route: null, routeLength: 0, pulse: false };
+  readonly #hintValues: Partial<Record<HintPlaceholder, string>> = {};
 
   constructor(services: GameServices) {
     super(services, 'surface', 'surface_calm');
@@ -582,9 +701,16 @@ export class SurfaceScene extends UiScene<'surface'> {
     this.#placeCamera(0, 0);
 
     // The SPEC-014 UI layer (§4.12): shared HUD, overlays, touch, pause.
-    const hud = new Hud(this.ui, 'surface');
+    // SPEC-027 AC-22: a tap on the tracker cycles the tracked mission, exactly
+    // as `KeyT` does — the HUD owns the element, the runtime owns the pin.
+    const hud = new Hud(this.ui, 'surface', () => missions.cyclePinned());
     this.#hud = hud;
     this.disposer.add(() => hud.dispose());
+
+    // SPEC-027 §4.11: the guidance layer over the canvas, the search grid the
+    // route is found on, and the context the pure module reads. The context is
+    // built once and refreshed in place every step (SPEC-001 §7).
+    this.#buildGuidance(world, save, layout);
 
     // SPEC-026 §4.4: the explored mask comes off the save (SPEC-025 has
     // already dropped one of the wrong length, E37), the ground under the
@@ -786,6 +912,10 @@ export class SurfaceScene extends UiScene<'surface'> {
     pickups.update(dt, world.player, world.stats.pickupRadius);
     this.#nodes?.update(dt, world.player);
 
+    // SPEC-027 §4.11: guidance runs after the mission runtime, so the rows it
+    // reads — and the target it picks out of them — are this step's.
+    this.#updateGuidance(world, dt);
+
     this.#followCamera(world, dt);
     this.#updateMusic(dt, world);
     this.#feedHud(world, dt);
@@ -838,6 +968,8 @@ export class SurfaceScene extends UiScene<'surface'> {
         dt,
       });
       view.setArena(world.arena);
+      // SPEC-027 §4.11: the waypoint, the scan ring and the two view meshes.
+      this.#renderGuidance(world, view);
       this.#forwardGrade();
       if (this.#minimapIn <= 0) {
         this.#minimapIn = MINIMAP_INTERVAL;
@@ -1042,6 +1174,13 @@ export class SurfaceScene extends UiScene<'surface'> {
     if (this.#mask !== null) info['mmExplored'] = Math.round(this.#mask.fraction() * 1000) / 10;
     if (this.#layers !== null) info['mmTerrainBuilds'] = this.#layers.terrainBuilds;
     info['mapOpen'] = this.#mapScreen?.isOpen === true ? 1 : 0;
+    // SPEC-027 §4.11: what the guidance layer is pointing at, how far it is,
+    // how stuck the player looks, and which form the marker is in.
+    const target = this.#focusTarget;
+    info['guideTarget'] = target === null ? '-' : `${target.kind}:${target.label}`;
+    info['guideDist'] = this.#focusDistance === null ? -1 : Math.round(this.#focusDistance * 10) / 10;
+    info['stuckLevel'] = this.#stuck.level;
+    info['waypoint'] = this.#waypointState;
     if (this.#layout !== null) info['layoutHash'] = this.#layout.hash;
     return info;
   }
@@ -1761,6 +1900,9 @@ export class SurfaceScene extends UiScene<'surface'> {
     // jumps to the pinned objective — nothing else is short-circuited.
     button('surface-smite', 'Smite', () => this.#debugSmite());
     button('surface-goto-objective', 'To objective', () => this.#debugGotoObjective());
+    // SPEC-027 AC-86: a minute of idle guidance time per press, so the whole
+    // escalation is reachable in a QA session instead of in two and a half.
+    button('surface-stuck', 'Stuck +60s', () => this.#stuck.advance(60));
     // SPEC-024 §4.8: stage 0 of `c6_m2` is a 240 s defence, and an acceptance
     // run cannot pay that per attempt. Dev builds only — `import.meta.env.DEV`
     // strips the control (and its handler) out of a production bundle.
@@ -1799,44 +1941,27 @@ export class SurfaceScene extends UiScene<'surface'> {
     if (best !== null) combat.killEnemy(best, 'player');
   }
 
-  /** Teleport to the pinned mission's first undone objective's target. */
+  /**
+   * Teleport to the pinned mission's first undone objective's target.
+   *
+   * SPEC-027 D-25: the row is chosen exactly as it always was — the first
+   * undone one — but the destination now comes from `objectiveTarget`, so the
+   * debug jump and the gold marker can never disagree. The boss case keeps its
+   * `z + 6` offset, which is what lands the SPEC-011 and SPEC-012 suites
+   * outside the arena ring rather than on the nest.
+   */
   #debugGotoObjective(): void {
     const world = this.#world;
     const missions = this.#missions;
-    const layout = this.#layout;
-    if (world === null || missions === null || layout === null || !world.player.alive) return;
+    if (world === null || missions === null || this.#guide === null || !world.player.alive) return;
     const pinned = missions.pinned;
     if (pinned === null) return;
     const next = missions.currentObjectives(pinned).find((o) => !o.done);
     if (next === undefined) return;
-    const objective = next.objective;
-    let target: { x: number; z: number } | null = null;
-    if (objective.kind === 'collect') {
-      // The nearest node that still holds the resource.
-      let bestD = Infinity;
-      for (const node of (this.#nodes as Nodes).states) {
-        if (node.resource !== objective.resource || node.remaining < 1) continue;
-        const d = Math.hypot(node.x - world.player.x, node.z - world.player.z);
-        if (d < bestD) {
-          bestD = d;
-          target = node;
-        }
-      }
-    } else if (objective.kind === 'boss') {
-      const nest = this.#arenaPoi;
-      if (nest !== null) target = { x: nest.x, z: nest.z + 6 };
-    } else if (objective.kind === 'scan') {
-      // A not-yet-scanned instance, so repeat visits progress the count.
-      const state = this.#pois.find((p) => p.poi.poi === objective.poi && !p.scanned);
-      if (state !== undefined) target = state.poi;
-    } else if ('poi' in objective) {
-      target = layout.pois.find((p) => p.poi === objective.poi) ?? null;
-    } else if (objective.kind === 'escort') {
-      target = layout.pois.find((p) => p.poi === objective.to) ?? null;
-    }
+    const target = objectiveTarget(next.objective, next, this.#refreshGuide(world));
     if (target === null) return;
     world.player.x = target.x;
-    world.player.z = target.z;
+    world.player.z = target.z + (next.objective.kind === 'boss' ? 6 : 0);
   }
 
   /** The mission-less half of the SPEC-011 acceptance run: wake the nest boss. */
@@ -2003,28 +2128,13 @@ export class SurfaceScene extends UiScene<'surface'> {
     for (const key of Object.keys(m.resources) as ResourceId[]) m.resources[key] = save.resources[key] ?? 0;
     m.cargoCap = (this.#economy as Economy).cargoCap();
 
-    // E18: the pinned mission's first undone objective, with progress. The
-    // model reuses one scratch object — `Hud.flush` diffs against a clone, so
-    // in-place writes still register (SPEC-001 §7: no per-frame allocation).
-    const pinned = missions.pinned;
-    if (pinned === null) {
-      m.objective = null;
-    } else {
-      const def = MISSION_TABLE[pinned];
-      const obj = this.#objScratch;
-      const next = missions.currentObjectives(pinned).find((o) => !o.done);
-      obj.title = def.title;
-      if (next === undefined) {
-        obj.line = 'Stage complete';
-        obj.value = 1;
-        obj.target = 1;
-      } else {
-        obj.line = this.#objectiveLine(next.objective);
-        obj.value = Math.floor(next.value);
-        obj.target = next.target;
-      }
-      m.objective = obj;
-    }
+    // SPEC-027 AC-17/AC-18: on the surface the tracker replaces the
+    // bottom-centre line — its focus row carries the same wording E18 put
+    // there (D-3) — and `objective` stays flight's alone. The model reuses one
+    // object; `Hud.flush` diffs against a clone, so in-place writes register
+    // (SPEC-001 §7: no per-frame allocation).
+    m.objective = null;
+    m.tracker = this.#feedTracker(missions);
 
     m.weather.active = weather.current;
     m.weather.warning = weather.phase === 'warning' ? weather.pending : null;
@@ -2057,7 +2167,11 @@ export class SurfaceScene extends UiScene<'surface'> {
         const poi = this.#pois.find((p) => p.poi.poi === objective.poi && p.inside);
         if (poi === undefined) continue;
         const held = save.resources[objective.resource] ?? 0;
-        if (held < objective.amount) return `Need ${objective.amount - held} more ${objective.resource}`;
+        if (held < objective.amount) {
+          // SPEC-027 §4.5: the first shortfall is what teaches the rule.
+          this.#requestTip('deliver');
+          return `Need ${objective.amount - held} more ${objective.resource}`;
+        }
       }
     }
     if (this.#atPad(world)) return 'Open pad terminal';
@@ -2091,6 +2205,565 @@ export class SurfaceScene extends UiScene<'surface'> {
 
   #poiLabel(id: PoiId): string {
     return this.#planet.surface.pois.find((p) => p.id === id)?.label ?? id;
+  }
+
+  // ------------------------------------------------------------- SPEC-027
+  // Mission guidance. The pure half is `systems/Guidance.ts`; what lives here
+  // is the wiring: the context it reads, the clocks it drives, and the three
+  // DOM pieces plus the two view meshes it drives back.
+
+  /** §4.11: the guidance layer, the search grid, and the reusable context. */
+  #buildGuidance(world: CombatWorld, save: Save, layout: Layout): void {
+    const layer = el('div', 'guide-layer');
+    this.ui.mount(layer, 'hud');
+    const waypoint = new Waypoint(layer);
+    const scanRing = new ScanRing(layer);
+    const aria = new AriaHint(layer);
+    this.#waypoint = waypoint;
+    this.#scanRing = scanRing;
+    this.#aria = aria;
+    this.disposer.add(() => {
+      waypoint.dispose();
+      scanRing.dispose();
+      aria.dispose();
+      this.ui.unmount(layer);
+      this.#waypoint = null;
+      this.#scanRing = null;
+      this.#aria = null;
+    });
+
+    this.#pathGrid = buildPathGrid(layout);
+    this.#guide = {
+      player: this.#guidePlayer,
+      pois: this.#guidePois,
+      // `Nodes.states` is the live array; `remaining` moves in place (D-18).
+      nodes: (this.#nodes as Nodes).states,
+      nearestEnemy: (id, maxRange) => this.#nearestEnemy(world, id, maxRange),
+      follower: null,
+      held: (resource) => save.resources[resource] ?? 0,
+      arenaFor: (enemy) => this.#arenaFor(enemy),
+    };
+
+    // D-28: the row pool is the campaign's widest stage plus the row that says
+    // the stage is complete (27-p), so a step never allocates one.
+    let widest = 1;
+    for (const def of Object.values(MISSIONS)) {
+      for (const stage of def.stages) widest = Math.max(widest, stage.length);
+    }
+    for (let i = 0; i <= widest; i++) this.#trackerRows.push({ text: '', done: false, focus: false });
+  }
+
+  /** The nearest live enemy of one kind, as a reused point (§3, `GuideContext`). */
+  #nearestEnemy(world: CombatWorld, id: EnemyId, maxRange: number): { x: number; z: number } | null {
+    let bestD = maxRange;
+    let found = false;
+    for (let i = 0; i < world.enemies.size; i++) {
+      const e = world.enemies.at(i);
+      if (e.state === 'dead' || e.def.id !== id) continue;
+      const d = Math.hypot(e.x - world.player.x, e.z - world.player.z);
+      if (d >= bestD) continue;
+      bestD = d;
+      found = true;
+      this.#enemyPoint.x = e.x;
+      this.#enemyPoint.z = e.z;
+    }
+    return found ? this.#enemyPoint : null;
+  }
+
+  /** D-19: the arena POI whose `PoiDef.boss` is this enemy. */
+  #arenaFor(enemy: EnemyId): GuidePoi | null {
+    let arena: PoiId | null = null;
+    for (const def of this.#planet.surface.pois) {
+      if (def.boss === enemy) {
+        arena = def.id;
+        break;
+      }
+    }
+    if (arena === null) return null;
+    for (const poi of this.#guidePois) {
+      if (poi.poi === arena) return poi;
+    }
+    return null;
+  }
+
+  /** The context, refreshed in place: one object for the scene's lifetime. */
+  #refreshGuide(world: CombatWorld): GuideContext {
+    const guide = this.#guide as GuideContext;
+    this.#guidePlayer.x = world.player.x;
+    this.#guidePlayer.z = world.player.z;
+    const pois = this.#guidePois;
+    for (let i = 0; i < this.#pois.length; i++) {
+      const state = this.#pois[i] as PoiRuntime;
+      let entry = pois[i];
+      if (entry === undefined) {
+        entry = { poi: state.poi.poi, instance: 0, kind: state.poi.kind, x: 0, z: 0, radius: 0, label: '', scanned: false };
+        pois.push(entry);
+      }
+      entry.poi = state.poi.poi;
+      entry.instance = state.poi.instance;
+      entry.kind = state.poi.kind;
+      entry.x = state.poi.x;
+      entry.z = state.poi.z;
+      entry.radius = state.poi.radius;
+      entry.label = this.#poiLabel(state.poi.poi);
+      entry.scanned = state.scanned;
+    }
+    pois.length = this.#pois.length;
+    // `#ctxFollower` was refreshed for `missions.update` earlier this step.
+    guide.follower = world.follower === null ? null : this.#ctxFollower;
+    return guide;
+  }
+
+  /**
+   * §4.11, each fixed step: the focus target, the escalation clock and what it
+   * raises, the tip triggers and the route. Runs after `missions.update`, so
+   * every row it reads is this step's.
+   */
+  #updateGuidance(world: CombatWorld, dt: number): void {
+    const missions = this.#missions;
+    const combat = this.#combat;
+    if (missions === null || combat === null || this.#guide === null) return;
+    this.#surfaceTime += dt;
+    const guidance = this.services.settings.get().guidance;
+    const ctx = this.#refreshGuide(world);
+
+    // §4.1: the tracked stage decides; with nothing tracked the pad does.
+    const pinned = missions.pinned;
+    this.#guideRows = pinned === null ? NO_ROWS : missions.currentObjectives(pinned);
+    const focus = pinned === null ? null : focusObjective(this.#guideRows, ctx);
+    this.#focusIndex = focus === null ? -1 : focus.index;
+    const target = pinned === null ? padTarget(ctx) : focus === null ? null : focus.target;
+    this.#focusTarget = target;
+
+    const player = world.player;
+    if (target === null) {
+      this.#focusDistance = null;
+    } else {
+      const dx = target.x - player.x;
+      const dz = target.z - player.z;
+      this.#focusDistance = Math.hypot(dx, dz);
+      // The ▲ beside the focus row turns clockwise from map-up (SPEC-026 §4.1).
+      const u = (dx - dz) * Math.SQRT1_2;
+      const v = (dx + dz) * Math.SQRT1_2;
+      this.#focusBearing = Math.atan2(u, -v);
+    }
+
+    // §4.6: arrival inside the radius is progress — which is also what keeps
+    // the clock at zero while the player stands on the thing (27-l).
+    if (target !== null && (this.#focusDistance as number) <= target.radius) this.#stuck.progress();
+    this.#stuck.reset(target === null ? null : target.key, this.#focusDistance);
+    const busy =
+      combat.inCombat ||
+      this.#dialogue?.busy === true ||
+      this.#modalOpen > 0 ||
+      this.#uiHolds > 0 ||
+      this.#holds > 0 ||
+      !player.alive;
+    if (this.#stuck.update(dt, this.#focusDistance, busy) === 'nudge') this.#raiseNudge(missions, guidance);
+
+    this.#updateScanRing(world, missions);
+    this.#tipTriggers(world, missions, guidance);
+    this.#pumpLines(dt, guidance);
+    this.#updateRoute(world, dt, guidance);
+  }
+
+  /** §4.6: level 2 — one hint, unless the player asked for less guidance. */
+  #raiseNudge(missions: Missions, guidance: GuidanceLevel): void {
+    if (guidance !== 'full') return; // AC-60
+    const text = this.#hintText(missions);
+    if (text !== '') this.#queueLine(text, HINT_MS);
+  }
+
+  /**
+   * §4.8 — the line for the focus row: the mission's own stage hint where there
+   * is one, else the objective kind's. A template whose placeholders cannot all
+   * be filled falls back to the kind's `fallback`, then to the reach wording,
+   * and is dropped rather than printed with a `{token}` in it (D-13).
+   */
+  #hintText(missions: Missions): string {
+    const target = this.#focusTarget;
+    const pinned = missions.pinned;
+    // D-11: nothing tracked and nowhere to walk — the player is on the pad.
+    if (pinned === null && target === null) return '';
+    const row = this.#focusIndex >= 0 ? (this.#guideRows[this.#focusIndex] ?? null) : null;
+    const kind = row === null ? 'none' : row.objective.kind;
+    const values = this.#fillValues(row, target);
+    const hint = HINTS[kind];
+    const stageHint = pinned === null ? undefined : MISSION_HINTS[pinned]?.[this.#stageOf(missions, pinned)];
+    let text = fillHint(stageHint ?? hint.nudge, values);
+    if (hasPlaceholder(text)) text = fillHint(hint.fallback ?? '', values);
+    if (text === '' || hasPlaceholder(text)) text = fillHint(HINTS.reach.nudge, values);
+    if (hasPlaceholder(text)) {
+      log.warn('surface', `no guidance hint could be filled for ${kind}`);
+      return '';
+    }
+    return text;
+  }
+
+  /** §4.8: the placeholder values, in one reused bag. */
+  #fillValues(row: ObjectiveProgress | null, target: GuideTarget | null): Partial<Record<HintPlaceholder, string>> {
+    const values = this.#hintValues;
+    for (const placeholder of HINT_PLACEHOLDERS) values[placeholder] = undefined;
+    if (target !== null) {
+      values['{label}'] = target.label;
+      values['{dir}'] = bearingWord(target.x - this.#guidePlayer.x, target.z - this.#guidePlayer.z);
+      values['{dist}'] = distanceText(this.#focusDistance ?? 0);
+    }
+    if (row === null) return values;
+    const objective = row.objective;
+    if ('resource' in objective) values['{resource}'] = objective.resource;
+    if ('amount' in objective) values['{amount}'] = String(objective.amount);
+    if ('enemy' in objective) values['{enemy}'] = ENEMIES[objective.enemy].name;
+    if (objective.kind === 'deliver') {
+      const held = (this.#save as Save).resources[objective.resource] ?? 0;
+      values['{need}'] = String(Math.max(0, objective.amount - held));
+    } else if (objective.kind === 'survive' || objective.kind === 'defend') {
+      values['{need}'] = String(Math.max(0, Math.ceil(row.target - row.value)));
+    }
+    return values;
+  }
+
+  #stageOf(missions: Missions, id: MissionId): number {
+    for (const state of missions.active) {
+      if (state.id === id) return state.stage;
+    }
+    return 0;
+  }
+
+  /** §4.5, §4.8: a hint replaces whatever was waiting; the screen takes it next. */
+  #queueLine(text: string, ms: number): void {
+    this.#pendingLine = { text, ms };
+  }
+
+  /**
+   * §4.5 — one line at a time. A dialogue or a hold stops everything; a line
+   * already up is never cut short (D-7); a waiting hint goes before a tip; and
+   * a tip waits out the 12 s that follow the last one.
+   */
+  #pumpLines(dt: number, guidance: GuidanceLevel): void {
+    this.#tipCooldown -= dt;
+    const aria = this.#aria;
+    if (aria === null) return;
+    if (this.#dialogue?.busy === true || this.#modalOpen > 0 || this.#uiHolds > 0 || this.#holds > 0) return; // AC-70
+    if (aria.visible) return; // AC-71
+    const pending = this.#pendingLine;
+    if (pending !== null) {
+      this.#pendingLine = null;
+      aria.show(pending.text, pending.ms);
+      return;
+    }
+    if (this.#tipCooldown > 0 || guidance !== 'full') return;
+    const id = this.#tipQueue.shift();
+    if (id === undefined) return;
+    // §4.5: the wording follows the scheme in use at the moment it shows.
+    const text = this.services.input.state.scheme === 'touch' ? TIPS[id].touch : TIPS[id].keyboard;
+    aria.show(text, TIP_MS);
+    this.#tipCooldown = TIP_INTERVAL;
+    // D-27: the id is recorded now — a tip dropped from a full queue can fire
+    // again later, because it was never written down.
+    const settings = this.services.settings;
+    settings.set({ tipsSeen: [...settings.get().tipsSeen, id] });
+  }
+
+  /** §4.5: queue a first-time tip, unless it has been seen or the queue is full. */
+  #requestTip(id: TipId): void {
+    if (this.services.settings.get().guidance !== 'full') return; // AC-47
+    if (this.services.settings.get().tipsSeen.includes(id)) return; // AC-44
+    if (this.#tipQueue.includes(id)) return;
+    if (this.#tipQueue.length >= TIP_QUEUE_MAX) return; // 27-r
+    this.#tipQueue.push(id);
+  }
+
+  /** §4.5 — the triggers that are a matter of where the player is standing. */
+  #tipTriggers(world: CombatWorld, missions: Missions, guidance: GuidanceLevel): void {
+    if (guidance !== 'full') return;
+    // The first fixed step of the first surface scene this device has seen.
+    this.#requestTip('move');
+    if (this.#surfaceTime >= MAP_TIP_SECONDS) this.#requestTip('map');
+    if (missions.active.length >= 2) this.#requestTip('track');
+    if (this.#atPad(world) && !this.#terminalOpen) this.#requestTip('pad');
+    if (missions.bossStage() !== null) this.#requestTip('boss');
+    const nodes = this.#nodes;
+    if (nodes === null) return;
+    for (const node of nodes.states) {
+      if (Math.hypot(node.x - world.player.x, node.z - world.player.z) <= HARVEST_TIP_RANGE) {
+        this.#requestTip('harvest');
+        return;
+      }
+    }
+  }
+
+  /**
+   * §4.3 — the scan the ring is filling for: an unscanned `scan` POI the player
+   * is standing in that a current objective actually wants. Entering one is
+   * also the `scan` tip's trigger.
+   */
+  #updateScanRing(world: CombatWorld, missions: Missions): void {
+    let found: PoiRuntime | null = null;
+    if (world.player.alive) {
+      for (const state of this.#pois) {
+        if (state.poi.kind !== 'scan' || !state.inside || state.scanned) continue;
+        if (!this.#scanWanted(missions, state.poi.poi)) continue;
+        found = state;
+        break;
+      }
+    }
+    if (found !== null && this.#scanState === null) this.#requestTip('scan');
+    this.#scanState = found;
+  }
+
+  /** True while any active mission's current stage still wants this scan. */
+  #scanWanted(missions: Missions, poi: PoiId): boolean {
+    for (const state of missions.active) {
+      for (const { objective, done } of missions.currentObjectives(state.id)) {
+        if (objective.kind === 'scan' && !done && objective.poi === poi) return true;
+      }
+    }
+    return false;
+  }
+
+  /**
+   * §4.7 — the route lives exactly as long as stuck level 3 does, so every
+   * reset of the tracker (progress, arrival, a new focus key) clears it
+   * (AC-68). It is recomputed at most every 2 s, and only when the player has
+   * left it or the target has moved.
+   */
+  #updateRoute(world: CombatWorld, dt: number, guidance: GuidanceLevel): void {
+    const target = this.#focusTarget;
+    if (guidance !== 'full' || this.#stuck.level < 3 || target === null) {
+      this.#routeLength = 0;
+      this.#routeIn = 0;
+      return;
+    }
+    if (this.#routeLength >= 2) {
+      this.#routeIn -= dt;
+      if (this.#routeIn > 0) return;
+      if (!this.#routeStale(world, target)) return;
+    }
+    this.#routeIn = ROUTE_INTERVAL;
+    this.#routeTargetX = target.x;
+    this.#routeTargetZ = target.z;
+    const grid = this.#pathGrid;
+    const found = grid === null ? 0 : findPath(grid, world.player.x, world.player.z, target.x, target.z, this.#route);
+    if (found >= 2) {
+      this.#routeLength = found;
+      return;
+    }
+    // D-21 / 27-a: nothing was found — the straight segment still says which
+    // way to set off, and the ground markers lay themselves along it.
+    this.#route[0] = world.player.x;
+    this.#route[1] = world.player.z;
+    this.#route[2] = target.x;
+    this.#route[3] = target.z;
+    this.#routeLength = 2;
+  }
+
+  #routeStale(world: CombatWorld, target: GuideTarget): boolean {
+    if (Math.hypot(target.x - this.#routeTargetX, target.z - this.#routeTargetZ) > ROUTE_TARGET_MOVED_METRES) return true;
+    let nearest = Infinity;
+    for (let i = 0; i < this.#routeLength; i++) {
+      const dx = (this.#route[i * 2] as number) - world.player.x;
+      const dz = (this.#route[i * 2 + 1] as number) - world.player.z;
+      nearest = Math.min(nearest, Math.hypot(dx, dz));
+    }
+    return nearest > ROUTE_OFF_PATH_METRES;
+  }
+
+  /**
+   * §4.11, each rendered frame: the waypoint on its inset ellipse, the scan
+   * ring, and the view's pillar and route markers.
+   */
+  #renderGuidance(world: CombatWorld, view: SurfaceView): void {
+    const settings = this.services.settings.get();
+    const guidance = settings.guidance;
+    const target = this.#focusTarget;
+    const distance = this.#focusDistance;
+    // A held beat or the full map owns the screen; nothing guidance draws may
+    // sit over either (§4.3).
+    const held = this.#uiHolds > 0 || this.#holds > 0;
+    const pulse = this.#stuck.level >= 1;
+
+    const waypoint = this.#waypoint;
+    if (waypoint !== null) {
+      if (target === null || distance === null || guidance === 'off' || !world.player.alive || held || distance <= target.radius) {
+        waypoint.hide();
+        this.#waypointState = 'off';
+      } else {
+        const behind = this.#projectGuide(target.x, target.z, WAYPOINT_LIFT);
+        const cx = this.services.renderer.width / 2;
+        const cy = this.services.renderer.height / 2;
+        let sx = this.#screenPoint.x;
+        let sy = this.#screenPoint.y;
+        // A point behind the camera projects mirrored; put it back on the side
+        // the target actually lies, then treat it as off-screen (§4.3).
+        if (behind) {
+          sx = cx - (sx - cx);
+          sy = cy - (sy - cy);
+        }
+        const ax = Math.max(WAYPOINT_MIN_AXIS, cx - WAYPOINT_INSET);
+        const by = Math.max(WAYPOINT_MIN_AXIS, cy - WAYPOINT_INSET);
+        const dx = sx - cx;
+        const dy = sy - cy;
+        const norm = Math.hypot(dx / ax, dy / by);
+        const onScreen = !behind && norm <= 1;
+        if (!onScreen && norm > 0) {
+          sx = cx + dx / norm;
+          sy = cy + dy / norm;
+        }
+        waypoint.set(sx, sy, distance, onScreen, pulse);
+        this.#waypointState = onScreen ? 'on' : 'edge';
+      }
+    }
+
+    // D-5: the ring reports the player's own action, so it survives `off`.
+    const ring = this.#scanRing;
+    if (ring !== null) {
+      const scan = this.#scanState;
+      if (scan === null || !world.player.alive || held) ring.hide();
+      else {
+        this.#project(scan.poi.x, scan.poi.z, 1.2);
+        ring.set(this.#screenPoint.x, this.#screenPoint.y, scan.scanFor / SCAN_SECONDS);
+      }
+    }
+
+    // §4.4: the pillar stands on POIs and shelters only (AC-32).
+    const frame = this.#guideFrame;
+    const lit = target !== null && guidance !== 'off' && (target.kind === 'poi' || target.kind === 'shelter');
+    if (lit && target !== null) {
+      this.#beaconPoint.x = target.x;
+      this.#beaconPoint.z = target.z;
+    }
+    frame.beacon = lit ? this.#beaconPoint : null;
+    frame.route = this.#routeLength >= 2 ? this.#route : null;
+    frame.routeLength = this.#routeLength;
+    frame.pulse = !settings.reduceMotion;
+    view.setGuide(frame);
+  }
+
+  /** Like `#project`, but reporting a point behind the camera (§4.3). */
+  #projectGuide(x: number, z: number, lift: number): boolean {
+    const v = this.#projectScratch.set(x, lift + (this.#view?.field.heightAt(x, z) ?? 0), z);
+    v.applyMatrix4(this.camera.matrixWorldInverse);
+    const behind = v.z >= 0;
+    v.applyMatrix4(this.camera.projectionMatrix);
+    this.#screenPoint.x = (v.x * 0.5 + 0.5) * this.services.renderer.width;
+    this.#screenPoint.y = (-v.y * 0.5 + 0.5) * this.services.renderer.height;
+    return behind;
+  }
+
+  /**
+   * §4.2 — the tracker model: the tracked mission's stage, one row per
+   * objective in stage order, and the focus row carrying today's wording so the
+   * SPEC-012 selectors keep reading what they always read (D-3).
+   */
+  #feedTracker(missions: Missions): HudTracker {
+    const tracker = this.#tracker;
+    const rows = tracker.rows;
+    rows.length = 0;
+    tracker.distance = this.#focusDistance;
+    tracker.bearing = this.#focusBearing;
+    tracker.pulse = this.#stuck.level >= 1;
+    const pinned = missions.pinned;
+    if (pinned === null) {
+      tracker.title = 'No active mission';
+      tracker.stage = '';
+      return tracker;
+    }
+    const def = MISSION_TABLE[pinned];
+    const count = def.stages.length;
+    const stage = this.#stageOf(missions, pinned);
+    tracker.title = def.title;
+    tracker.stage = `stage ${Math.min(count, Math.max(1, stage + 1))}/${count}`;
+    for (let i = 0; i < this.#guideRows.length && i < this.#trackerRows.length; i++) {
+      const progress = this.#guideRows[i] as ObjectiveProgress;
+      const row = this.#trackerRows[i] as HudTrackerRow;
+      row.done = progress.done;
+      row.focus = i === this.#focusIndex;
+      row.text = row.focus ? this.#focusRowText(def.title, progress) : this.#rowText(progress);
+      rows.push(row);
+    }
+    // 27-p: between stages every row is done, and the focus row says so.
+    if (this.#focusIndex < 0 && rows.length < this.#trackerRows.length) {
+      const row = this.#trackerRows[rows.length] as HudTrackerRow;
+      row.done = false;
+      row.focus = true;
+      row.text = `${def.title} — Stage complete`;
+      rows.push(row);
+    }
+    return tracker;
+  }
+
+  /** D-3: the focus row keeps the wording the bottom-centre line used to have. */
+  #focusRowText(title: string, progress: ObjectiveProgress): string {
+    const line = this.#objectiveLine(progress.objective);
+    if (progress.target > 1) return `${title} — ${line} (${Math.floor(progress.value)}/${progress.target})`;
+    return `${title} — ${line}`;
+  }
+
+  /** §4.2's row table — the wording of every non-focus row. */
+  #rowText(progress: ObjectiveProgress): string {
+    const objective = progress.objective;
+    const value = Math.floor(progress.value);
+    switch (objective.kind) {
+      case 'reach':
+        return `Reach ${this.#poiLabel(objective.poi)}`;
+      case 'scan':
+        return objective.count > 1
+          ? `Scan ${this.#poiLabel(objective.poi)} ${value}/${objective.count}`
+          : `Scan ${this.#poiLabel(objective.poi)}`;
+      case 'collect':
+        return `Collect ${objective.resource} ${value}/${objective.amount}`;
+      case 'kill':
+        return `Hunt ${ENEMIES[objective.enemy].name} ${value}/${objective.amount}`;
+      case 'boss':
+        return `Defeat ${ENEMIES[objective.enemy].name}`;
+      case 'survive':
+        return `Survive ${Math.max(0, Math.ceil(objective.seconds - progress.value))} s`;
+      case 'defend':
+        return `Defend ${this.#poiLabel(objective.poi)} ${Math.max(0, Math.ceil(objective.seconds - progress.value))} s`;
+      case 'deliver': {
+        const held = (this.#save as Save).resources[objective.resource] ?? 0;
+        const line = `Deliver ${objective.amount} ${objective.resource} to ${this.#poiLabel(objective.poi)}`;
+        return held >= objective.amount ? line : `${line} — need ${objective.amount - held} more`;
+      }
+      case 'escort':
+        return `Escort the ${FOLLOWERS[objective.follower].name} to ${this.#poiLabel(objective.to)}`;
+      case 'choice':
+        return 'Decide';
+    }
+  }
+
+  /**
+   * §4.9: a guidance change takes effect on the next frame, and nothing the new
+   * level forbids is left on the screen behind it (27-t).
+   */
+  #onGuidanceChanged(): void {
+    this.#routeLength = 0;
+    this.#routeIn = 0;
+    this.#tipQueue.length = 0;
+    this.#pendingLine = null;
+    this.#waypoint?.hide();
+    this.#waypointState = 'off';
+    const frame = this.#guideFrame;
+    frame.beacon = null;
+    frame.route = null;
+    frame.routeLength = 0;
+    this.#view?.setGuide(frame);
+  }
+
+  /** §4.6: the second death on one stage says something once (AC-69). */
+  #onDeath(): void {
+    this.#requestTip('death');
+    const missions = this.#missions;
+    if (missions === null) return;
+    const pinned = missions.pinned;
+    const key = `${pinned ?? 'none'}:${pinned === null ? 0 : this.#stageOf(missions, pinned)}`;
+    const count = (this.#deathCounts.get(key) ?? 0) + 1;
+    this.#deathCounts.set(key, count);
+    if (count < 2 || this.#deathHinted.has(key)) return;
+    if (this.services.settings.get().guidance !== 'full') return;
+    this.#deathHinted.add(key);
+    this.#queueLine(HINTS.death.nudge, HINT_MS);
   }
 
   // ----------------------------------------------------------------- music
@@ -2154,11 +2827,14 @@ export class SurfaceScene extends UiScene<'surface'> {
       mark.ring = state.poi.kind === 'arena' ? state.poi.radius : 0;
     }
 
-    // §4.3 step 5: nodes with radar, and the resource a collect objective
-    // wants while it is running (SPEC-027 widens this).
+    // §4.3 step 5: nodes with radar, and — SPEC-027 AC-38 — every node of the
+    // resource the *tracked* mission is collecting, radar or not. The guidance
+    // half goes away at `guidance: 'off'` (D-6); the radar half is a companion
+    // the player paid for and stays whatever the guidance level says.
+    const guided = this.services.settings.get().guidance !== 'off';
     const radar = hasNodeRadar(save);
     for (const node of (this.#nodes as Nodes).states) {
-      if (!radar && !this.#collecting(missions, node.resource)) continue;
+      if (!radar && !(guided && this.#collecting(missions, node.resource))) continue;
       const mark = this.#nextMark();
       mark.x = node.x;
       mark.z = node.z;
@@ -2176,6 +2852,39 @@ export class SurfaceScene extends UiScene<'surface'> {
       mark.z = e.z;
       mark.kind = e.def.archetype === 'boss' ? 'boss' : e.elite ? 'elite' : 'enemy';
     }
+
+    // SPEC-027 AC-39: a kill objective's quarry inside 60 m rides the map as an
+    // objective mark — a ring on it where it fits, a rim arrow where it does not.
+    if (guided) {
+      const wanted = missions.objectiveEnemies();
+      if (wanted.length > 0) {
+        for (let i = 0; i < world.enemies.size; i++) {
+          const e = world.enemies.at(i);
+          if (e.state === 'dead' || !wanted.includes(e.def.id as EnemyId)) continue;
+          if (Math.hypot(e.x - world.player.x, e.z - world.player.z) > OBJECTIVE_ENEMY_RANGE) continue;
+          const mark = this.#nextMark();
+          mark.x = e.x;
+          mark.z = e.z;
+          mark.icon = e.def.archetype === 'boss' ? 'boss' : e.elite ? 'elite' : 'enemy';
+          mark.objective = true;
+          mark.label = null;
+          mark.ring = 0;
+        }
+      }
+    }
+
+    // SPEC-027 AC-41: the focus target and the route, for the painters SPEC-026
+    // already ships (D-29). Both are guidance, so both go at `off`.
+    const target = this.#focusTarget;
+    if (guided && target !== null) {
+      this.#targetPoint.x = target.x;
+      this.#targetPoint.z = target.z;
+      frame.target = this.#targetPoint;
+    } else {
+      frame.target = null;
+    }
+    frame.route = guided && this.#routeLength >= 2 ? this.#route : null;
+    frame.routeLength = frame.route === null ? 0 : this.#routeLength;
     return frame;
   }
 
@@ -2203,12 +2912,17 @@ export class SurfaceScene extends UiScene<'surface'> {
     return mark;
   }
 
-  /** True while an undone collect objective wants this resource (§4.3 step 5). */
+  /**
+   * True while the *tracked* mission's current stage is collecting this
+   * resource (§4.3 step 5, SPEC-027 AC-38). Tracked rather than any active
+   * mission, because SPEC-027 ties the guidance marks to the tracker: they go
+   * when the objective is done, and they go when the mission is untracked.
+   */
   #collecting(missions: Missions, resource: ResourceId): boolean {
-    for (const state of missions.active) {
-      for (const { objective, done } of missions.currentObjectives(state.id)) {
-        if (objective.kind === 'collect' && !done && objective.resource === resource) return true;
-      }
+    const pinned = missions.pinned;
+    if (pinned === null) return false;
+    for (const { objective, done } of missions.currentObjectives(pinned)) {
+      if (objective.kind === 'collect' && !done && objective.resource === resource) return true;
     }
     return false;
   }
@@ -2313,6 +3027,18 @@ export class SurfaceScene extends UiScene<'surface'> {
           this.#deathAt = 0;
           const lost = this.#economy?.applyDeathPenalty() ?? {};
           this.#death?.show(lost);
+          this.#onDeath(); // SPEC-027 §4.6: the first-death tip, the repeat hint
+        },
+        this,
+      ),
+      // SPEC-027 §4.5: the storm tip rides the ten-second warning itself.
+      bus.on('weather:warning', () => this.#requestTip('storm'), this),
+      // SPEC-027 §4.9: a guidance change takes effect on the next frame, and
+      // nothing the new level forbids survives it (27-t).
+      bus.on(
+        'settings:changed',
+        ({ patch }) => {
+          if (patch.guidance !== undefined) this.#onGuidanceChanged();
         },
         this,
       ),
@@ -2367,10 +3093,20 @@ export class SurfaceScene extends UiScene<'surface'> {
         this,
       ),
       bus.on('mission:accepted', () => this.#syncMissionStages(), this),
+      // SPEC-027 §4.6: progress on the tracked mission is progress, so the
+      // escalation clock and any route it drew start over (AC-52).
+      bus.on(
+        'mission:progress',
+        ({ id }) => {
+          if (id === this.#missions?.pinned) this.#stuck.progress();
+        },
+        this,
+      ),
       bus.on(
         'mission:stageStarted',
         ({ id, stage }) => {
           this.#syncMissionStages();
+          if (id === this.#missions?.pinned) this.#stuck.progress();
           // A reach objective for a POI the player is already standing in
           // completes now — entry is edge-triggered, and the edge is behind us
           // (accepting c1_m1 on the pad must not wait for a walk-out-and-back).

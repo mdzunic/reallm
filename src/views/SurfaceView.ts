@@ -169,6 +169,18 @@ const BLOB_OPACITY_ALONE = 0.35;
 const BLOB_OPACITY_WITH_MAP = 0.18;
 /** Player, follower and every live enemy: 2 + the per-part instance cap = 66. */
 const BLOB_CAPACITY = 2 + INSTANCES_PER_PART;
+
+/** SPEC-027 §4.4 — the light pillar and the ground route (*initial tuning*). */
+const PILLAR_HEIGHT = 14;
+const ROUTE_CAPACITY = 48;
+/** One marker every 2.5 m of the smoothed path, lifted clear of the ground. */
+const ROUTE_SPACING = 2.5;
+const ROUTE_LIFT = 0.05;
+/** The travelling wave: periods per second, and the phase one marker adds. */
+const ROUTE_WAVE_SPEED = 0.6;
+const ROUTE_WAVE_STEP = 1 / 6;
+/** How dark the trough of the wave gets; 1 is the marker's own brightness. */
+const ROUTE_DIM = 0.45;
 const BLOB_SCALE_PLAYER = 1.4;
 const BLOB_SCALE_FOLLOWER = 1;
 const BLOB_SCALE_ENEMY = 1.6;
@@ -351,6 +363,27 @@ export class SurfaceView {
   #particleIntensity = 0;
 
   readonly #grade: ViewGrade = { vignette: 0, tint: [1, 1, 1], desaturate: 0 };
+
+  // SPEC-027 §4.4 — the guidance layer. Both meshes are built the first time
+  // `setGuide` wants one and reused for the life of the view; the clock they
+  // animate on is the frame time `sync()` last saw.
+  #pillar: THREE.Mesh | null = null;
+  #routeMarkers: THREE.InstancedMesh | null = null;
+  #guideTime = 0;
+  readonly #pillarMaterial = new THREE.MeshBasicMaterial({
+    color: '#ffc857',
+    transparent: true,
+    depthWrite: false,
+    blending: THREE.AdditiveBlending,
+    vertexColors: true,
+  });
+  readonly #routeMaterial = new THREE.MeshBasicMaterial({
+    color: '#ffc857',
+    transparent: true,
+    opacity: 0.85,
+    depthWrite: false,
+    blending: THREE.AdditiveBlending,
+  });
 
   /** The ground sampler handed to enemies and the storm — bound once (§4.3). */
   readonly #ground = (x: number, z: number): number => this.field.heightAt(x, z);
@@ -798,6 +831,114 @@ export class SurfaceView {
     }
   }
 
+  /**
+   * SPEC-027 §4.4 — the two world-space halves of the guidance layer: a light
+   * pillar standing on the focus target, and the ground route the escalation's
+   * last step draws. Both objects are built on first use and reused; a `null`
+   * takes its half off the screen without disposing anything, so switching
+   * `guidance` mid-visit costs nothing (27-t).
+   *
+   * `pulse` asks for the animation (the scene passes the player's reduce-motion
+   * setting through it); a static pillar and a still wave are what 27-j wants.
+   * Budget: 2 draw calls (AC-34), and neither half allocates per frame.
+   */
+  setGuide(guide: { beacon: { x: number; z: number } | null; route: Float32Array | null; routeLength: number; pulse: boolean }): void {
+    const animate = guide.pulse && !this.reduceMotion;
+    const time = this.#guideTime;
+
+    const beacon = guide.beacon;
+    if (beacon === null) {
+      if (this.#pillar !== null) this.#pillar.visible = false;
+    } else {
+      const pillar = this.#buildPillar();
+      pillar.visible = true;
+      pillar.position.set(beacon.x, this.field.heightAt(beacon.x, beacon.z) + PILLAR_HEIGHT / 2, beacon.z);
+      // §4.4: `0.35 + 0.25·sin(2π·t)`, or a flat 0.5 when nothing may move.
+      this.#pillarMaterial.opacity = animate ? 0.35 + 0.25 * Math.sin(time * Math.PI * 2) : 0.5;
+    }
+
+    const route = guide.route;
+    const markers = this.#buildRoute();
+    if (route === null || guide.routeLength < 2) {
+      markers.count = 0;
+      markers.visible = false;
+      return;
+    }
+    // Walk the polyline and drop a disc every 2.5 m of it, up to the capacity;
+    // the instances past the end are simply not drawn (`count`), never rebuilt.
+    let placed = 0;
+    let walked = 0;
+    let nextAt = 0;
+    for (let i = 0; i < guide.routeLength - 1 && placed < ROUTE_CAPACITY; i++) {
+      const ax = route[i * 2] as number;
+      const az = route[i * 2 + 1] as number;
+      const bx = route[i * 2 + 2] as number;
+      const bz = route[i * 2 + 3] as number;
+      const length = Math.hypot(bx - ax, bz - az);
+      if (length <= 0) continue;
+      while (nextAt <= walked + length && placed < ROUTE_CAPACITY) {
+        const t = (nextAt - walked) / length;
+        const x = ax + (bx - ax) * t;
+        const z = az + (bz - az) * t;
+        scratchMatrix.makeTranslation(x, this.field.heightAt(x, z) + ROUTE_LIFT, z);
+        markers.setMatrixAt(placed, scratchMatrix);
+        // The travelling brightness wave: one period every six markers.
+        const wave = animate ? 0.5 + 0.5 * Math.sin((time * ROUTE_WAVE_SPEED - placed * ROUTE_WAVE_STEP) * Math.PI * 2) : 1;
+        markers.setColorAt(placed, scratchColor.setScalar(ROUTE_DIM + (1 - ROUTE_DIM) * wave));
+        placed++;
+        nextAt += ROUTE_SPACING;
+      }
+      walked += length;
+    }
+    markers.count = placed;
+    markers.visible = placed > 0;
+    markers.instanceMatrix.needsUpdate = true;
+    if (markers.instanceColor !== null) markers.instanceColor.needsUpdate = true;
+  }
+
+  /** The pillar, built once: 24 triangles, additive, alpha fading upward. */
+  #buildPillar(): THREE.Mesh {
+    const existing = this.#pillar;
+    if (existing !== null) return existing;
+    const geometry = new THREE.CylinderGeometry(0.35, 0.35, PILLAR_HEIGHT, 12, 1, true);
+    // The vertical fade is four-component vertex colour: opaque at the ground,
+    // gone at the top, which costs no texture and no second draw.
+    const position = geometry.getAttribute('position');
+    const colors = new Float32Array(position.count * 4);
+    for (let i = 0; i < position.count; i++) {
+      const y = position.getY(i) / PILLAR_HEIGHT + 0.5; // 0 at the base, 1 at the top
+      colors[i * 4] = 1;
+      colors[i * 4 + 1] = 1;
+      colors[i * 4 + 2] = 1;
+      colors[i * 4 + 3] = Math.max(0, 1 - y) ** 1.5;
+    }
+    geometry.setAttribute('color', new THREE.BufferAttribute(colors, 4));
+    const mesh = new THREE.Mesh(geometry, this.#pillarMaterial);
+    mesh.renderOrder = 2;
+    mesh.frustumCulled = false;
+    this.#root.add(mesh);
+    this.#pillar = mesh;
+    return mesh;
+  }
+
+  /** The route markers, built once: one instanced disc mesh, capacity 48. */
+  #buildRoute(): THREE.InstancedMesh {
+    const existing = this.#routeMarkers;
+    if (existing !== null) return existing;
+    const geometry = new THREE.CircleGeometry(0.28, 12);
+    geometry.rotateX(-Math.PI / 2);
+    const mesh = new THREE.InstancedMesh(geometry, this.#routeMaterial, ROUTE_CAPACITY);
+    mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+    mesh.renderOrder = 2;
+    mesh.frustumCulled = false;
+    mesh.count = 0;
+    // One `setColorAt` up front, so `instanceColor` exists before the wave runs.
+    mesh.setColorAt(0, scratchColor.setScalar(1));
+    this.#root.add(mesh);
+    this.#routeMarkers = mesh;
+    return mesh;
+  }
+
   /** The boss arena lock ring (SPEC-011 11-e). */
   setArena(arena: { x: number; z: number; radius: number } | null): void {
     this.#arenaRing.visible = arena !== null;
@@ -810,6 +951,8 @@ export class SurfaceView {
   sync(frame: SurfaceFrame): void {
     const p = frame.player;
     const ground = this.#ground;
+    // The clock `setGuide` animates the pillar and the route wave on (§4.4).
+    this.#guideTime = frame.time;
     const playerGround = ground(p.x, p.z);
     this.#player.visible = p.alive;
     this.#player.position.set(p.x, playerGround, p.z);
