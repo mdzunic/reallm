@@ -7,15 +7,30 @@
 # Without a workflow no check runs exist, and the factory refuses to spend
 # anything on a spec it could never revert — so this file is load-bearing, not
 # optional. Keep it fast: the watcher waits revertWatchMinutes (10) for a verdict.
+#
+# Only a check run that concluded `failure` is a verdict to the watcher. One
+# still running at minute 10 reads as healthy, and so does one that ended
+# `cancelled` — which is what a job that runs past its own `timeout-minutes`
+# ends as, not `timed_out`. That is how the single 15-minute job left main
+# unverified: its e2e step was still going when the job ran out, every time.
+# So:
+#
+# - `check` and every e2e part run side by side (no `needs:`), each its own
+#   check run from the start;
+# - every budget fails: Playwright's `--global-timeout` first, then the step's
+#   `timeout-minutes` (a step that times out is a failed step). A job-level
+#   `timeout-minutes` is only a backstop for setup that hangs.
 name: check
 on:
   push:
     branches: [main]
   pull_request:
+  # A manual run, for timing a branch or asking again about a commit.
+  workflow_dispatch:
 jobs:
   check:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -25,7 +40,59 @@ jobs:
       - run: npm ci
       # typecheck (src and tests), unit tests, production build
       - run: npm run check
-      # The smoke e2e (and, later, one Playwright test per scene). The browser
-      # revision follows the pinned @playwright/test.
+        timeout-minutes: 5
+
+  e2e:
+    name: e2e ${{ matrix.part }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    strategy:
+      # A cancelled part is no verdict, and every part's failures are worth
+      # having, so one red part does not stop the others.
+      fail-fast: false
+      matrix:
+        part: ['long 1/2', 'long 2/2', '1/6', '2/6', '3/6', '4/6', '5/6', '6/6']
+    env:
+      # Test groups too long to share a runner. SPEC-011 runs its six tests in
+      # one worker (`mode: 'default'`) and SPEC-012-missions is one test; each
+      # takes ~4 minutes, and since `--shard` splits by test count, never by
+      # time, they would land in the same shard (they sort side by side).
+      # `long 1/2` and `long 2/2` give them a runner each; every other test,
+      # every future e2e file included, goes to the numbered shards. `--grep`
+      # and `--grep-invert` on this one list keep the two sets complementary,
+      # so coverage never depends on the counts — a file added here only needs
+      # a `long` part of its own to keep its runner to itself.
+      LONG: 'SPEC-011\.spec\.ts|SPEC-012-missions\.spec\.ts'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      # The browser revision follows the pinned @playwright/test.
       - run: npx playwright install --with-deps chromium
-      - run: npm run e2e
+      # Two workers is Playwright's default on the 4-vCPU runner, pinned. The
+      # retry is CI's alone: playwright.config.ts keeps `retries: 0` for the
+      # factory's gate, which runs its own re-run protocol, and without one here
+      # a contention flake the gate forgave would revert a good merge. The
+      # global timeout fails a part that overruns with its unfinished tests
+      # named, early enough for the watcher to see it.
+      - name: playwright test ${{ matrix.part }}
+        timeout-minutes: 9
+        env:
+          PART: ${{ matrix.part }}
+        run: |
+          case "$PART" in
+            long\ *) select=(--grep "$LONG" --shard="${PART#long }") ;;
+            *) select=(--grep-invert "$LONG" --shard="$PART") ;;
+          esac
+          npx playwright test "${select[@]}" --workers=2 --retries=1 --global-timeout=450000 --add-reporter=github
+      # The traces of whatever failed (trace: 'retain-on-failure').
+      - if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-test-results-${{ strategy.job-index }}
+          path: test-results/
+          retention-days: 7
+          if-no-files-found: ignore
