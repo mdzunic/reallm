@@ -45,6 +45,7 @@ import type { PlayerEntity } from '@/entities/Player';
 import type { ProjectileEntity } from '@/entities/Projectile';
 import type { ArenaState, ObstacleGrid } from '@/entities/World';
 import { updateEnemy, type AiHooks } from '@/systems/EnemyAi';
+import { Loadout } from '@/systems/Loadout';
 import { updateProjectiles, type ProjectileHooks } from '@/systems/Projectiles';
 
 export type { DamageSource } from '@/data/index';
@@ -207,6 +208,8 @@ export interface ProgressionPort {
 export class Combat {
   /** Held for SPEC-012's pickup flow; combat itself never spends or collects. */
   readonly economy: EconomyPort;
+  /** SPEC-028 §4.2: the weapon in hand; the scene drives its selects. */
+  readonly loadout: Loadout;
   /** Rolled loot waiting for the scene; drained (and owned) by SPEC-012 §4.4. */
   readonly drops: LootDrop[] = [];
 
@@ -218,7 +221,6 @@ export class Combat {
   readonly #difficulty: 'casual' | 'normal';
   readonly #hash = new SpatialHash();
 
-  #weapon: WeaponDef;
   #weatherMoveMult = 1;
   #weatherAccum = 0;
   #lastCombatAt = -Infinity;
@@ -238,6 +240,7 @@ export class Combat {
     progression: ProgressionPort,
     events: EventBus<GameEvents>,
     rng: { loot: Rng; ai: Rng; combat: Rng },
+    loadout?: Loadout,
   ) {
     this.#world = world;
     this.#save = save;
@@ -246,17 +249,24 @@ export class Combat {
     this.#events = events;
     this.#rng = rng;
     this.#difficulty = save.meta.difficulty;
-    this.#weapon = this.#equippedWeapon();
+    // SPEC-028 §3: the scene may hand over the loadout it drives; the test
+    // harnesses that pass none get one built from the save.
+    this.loadout = loadout ?? new Loadout(save, events);
     this.#recomputeStats();
 
     // §4.1: recomputed on level-up and equip; consumables and weather go
     // through `applyConsumable` / `setWeatherMoveMult` (AC-66).
     events.on('player:leveledUp', () => this.#recomputeStats(), this);
-    events.on('gear:equipped', (payload) => {
-      // SPEC-025 §4.8: the weapon in hand is the primary, so only that slot
-      // moving re-reads it; armor still moves the derived stats.
-      if (payload.slot === 'primary') this.#weapon = this.#equippedWeapon();
+    events.on('gear:equipped', () => {
+      // SPEC-028 §4.2: the loadout re-reads the save, so the weapon in hand
+      // follows whichever slot moved; armor still moves the derived stats.
+      this.loadout.refresh();
       this.#recomputeStats();
+    }, this);
+    // SPEC-028 §4.2: a switch resets the per-shot cooldown — the 0.25 s
+    // switch window is the real gate, and the new weapon starts fresh.
+    events.on('weapon:switched', () => {
+      this.#world.player.fireCooldown = 0;
     }, this);
 
     this.#aiHooks = {
@@ -291,12 +301,6 @@ export class Combat {
   setWeatherMoveMult(mult: number): void {
     this.#weatherMoveMult = mult;
     this.#recomputeStats();
-  }
-
-  #equippedWeapon(): WeaponDef {
-    const item = ITEMS[this.#save.equipped.primary];
-    if (item.kind !== 'weapon') throw new Error(`equipped weapon ${item.id} is not a weapon`);
-    return item;
   }
 
   /** 11-i: the boost that applies is the max of the active ones, not a product. */
@@ -632,7 +636,7 @@ export class Combat {
    */
   #updateFiring(input: InputState, aimWorld: { x: number; z: number } | null): void {
     const p = this.#world.player;
-    const weapon = this.#weapon;
+    const weapon = this.loadout.activeWeapon();
     this.#aimedThisStep = false;
     let dirX = 0;
     let dirZ = 0;
@@ -665,10 +669,14 @@ export class Combat {
     // §4.3: facing turns instantly to the aim direction when firing.
     p.facing = Math.atan2(dirZ, dirX);
     this.#aimedThisStep = true;
+    // SPEC-028 §4.2: nothing fires during the 0.25 s switch. Fire held
+    // through it resumes the moment `canFire` holds, auto-fire too (28-c).
+    if (!this.loadout.canFire(this.#world.time)) return;
     if (p.fireCooldown > 0) return;
     p.fireCooldown = 1 / weapon.fireRate;
     const rolled = rollPlayerDamage(weapon, this.#world.stats, this.#rng.combat);
     this.#spawnPlayerProjectile('player', dirX, dirZ, rolled.amount, weapon);
+    this.loadout.fired(this.loadout.active, this.#world.time);
   }
 
   /** 11-j: nearest with a clear line wins; if every candidate is blocked, nearest overall. */
@@ -720,6 +728,9 @@ export class Combat {
   #updateDrone(dt: number): void {
     const drone = companionEffect(this.#save, 'combat_drone');
     if (drone === null) return;
+    // SPEC-028 §4.2: the drone keeps the primary's damage, whatever is in hand.
+    const weapon = this.loadout.weaponIn('primary');
+    if (weapon === null) return;
     this.#droneCooldown -= dt;
     if (this.#droneCooldown > 0) return;
     const p = this.#world.player;
@@ -739,12 +750,12 @@ export class Combat {
     this.#droneCooldown = 1 / (drone.droneFireRate ?? 1);
     const stats = this.#world.stats;
     // AC-5: every damage calculation floors at 1, this path included.
-    const damage = Math.max(1, Math.round(this.#weapon.damage * stats.damageMult * (drone.droneDamageFraction ?? 0) * stats.companionMult));
+    const damage = Math.max(1, Math.round(weapon.damage * stats.damageMult * (drone.droneDamageFraction ?? 0) * stats.companionMult));
     const dx = best.x - p.x;
     const dz = best.z - p.z;
     const len = Math.hypot(dx, dz);
     if (len < 1e-6) return;
-    this.#spawnPlayerProjectile('drone', dx / len, dz / len, damage, this.#weapon);
+    this.#spawnPlayerProjectile('drone', dx / len, dz / len, damage, weapon);
   }
 
   // ----------------------------------------------------------------- update

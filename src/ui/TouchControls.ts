@@ -45,7 +45,8 @@ interface ZonePointer {
 
 /** Which buttons each mode shows (AC-27). */
 const MODE_BUTTONS: Readonly<Record<InputMode, readonly Action[]>> = {
-  surface: ['interact', 'useItem', 'pause'],
+  // SPEC-028 §4.1: SWAP cycles the weapon; the quick bar carries the rest.
+  surface: ['interact', 'useItem', 'weaponNext', 'pause'],
   flight: ['throttleUp', 'throttleDown', 'pause'],
 };
 
@@ -59,6 +60,15 @@ const BUTTON_LABELS: Readonly<Record<Action, string>> = {
   map: 'MAP',
   track: 'TRACK',
   debug: '`',
+  // SPEC-028 §4.1: only SWAP is drawn; the rest are reachable through the
+  // quick bar, but the label table covers every action by type.
+  weapon1: '1',
+  weapon2: '2',
+  weapon3: '3',
+  weaponNext: 'SWAP',
+  weaponPrev: 'SWAP',
+  throwItem: 'THROW',
+  useUtility: 'GADGET',
 };
 
 export class TouchControls {
@@ -93,7 +103,7 @@ export class TouchControls {
     this.#stick.append(this.#knob);
     this.#reticle = testId(el('div', 'touch-reticle'), 'touch-reticle');
     const buttons = el('div', 'touch-buttons');
-    for (const action of ['interact', 'useItem', 'throttleUp', 'throttleDown', 'pause'] as const) {
+    for (const action of ['interact', 'useItem', 'weaponNext', 'throttleUp', 'throttleDown', 'pause'] as const) {
       const button = this.#makeButton(action);
       this.#buttons.set(action, button);
       buttons.append(button);

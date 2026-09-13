@@ -98,9 +98,9 @@ const SOUND_IDS = [
 export type SoundIdIsExactlyThoseIds = Assert<Equal<SoundId, (typeof SOUND_IDS)[number]>>;
 
 /**
- * The 52 event keys of §5.1, as an explicit literal. Adding an event to
- * `GameEvents` without giving it a sound or silencing it fails here as well as
- * at the type level (AC-40).
+ * The 54 event keys of §5.1 (plus SPEC-028's two), as an explicit literal.
+ * Adding an event to `GameEvents` without giving it a sound or silencing it
+ * fails here as well as at the type level (AC-40).
  */
 const EVENT_KEYS = [
   'app:paused',
@@ -126,6 +126,9 @@ const EVENT_KEYS = [
   'resource:spent',
   'inventory:changed',
   'gear:equipped',
+  // SPEC-028 §3: the loadout runtime's two events, both silent for now.
+  'weapon:switched',
+  'quick:used',
   'shop:purchased',
   'enemy:spawned',
   'enemy:killed',
@@ -443,12 +446,12 @@ describe('the reactions table is exhaustive over GameEvents (SPEC-006 §5)', () 
     );
   });
 
-  it('silences exactly the 37 events of §5.4 (AC-39)', () => {
-    expect(AUDIO_SILENT.size).toBe(37);
+  it('silences exactly the 39 events of §5.4 (AC-39)', () => {
+    expect(AUDIO_SILENT.size).toBe(39);
   });
 
-  it('gives every one of the 52 event keys exactly one home (AC-40)', () => {
-    expect(EVENT_KEYS).toHaveLength(52);
+  it('gives every one of the 54 event keys exactly one home (AC-40)', () => {
+    expect(EVENT_KEYS).toHaveLength(54);
     const reacted = new Set<string>(REACTED_EVENTS);
     for (const key of EVENT_KEYS) {
       const hasSound = reacted.has(key);
