@@ -57,6 +57,7 @@ const BUTTON_LABELS: Readonly<Record<Action, string>> = {
   throttleUp: '▲',
   throttleDown: '▼',
   map: 'MAP',
+  track: 'TRACK',
   debug: '`',
 };
 

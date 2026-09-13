@@ -201,7 +201,7 @@ button.boot-start.is-visible {
   flex-direction: column;
   gap: 8px;
   pointer-events: auto;
-  /* Above the touch layer (z-index 10), so the placeholder navigation is still
+  /* Above the touch layer and the HUD, so the placeholder navigation is still
      reachable on a phone (SPEC-005 §4.3). */
   z-index: 12;
 }
@@ -209,14 +209,18 @@ button.boot-start.is-visible {
 /* ------------------------------------------- touch controls (SPEC-005 §4.3) */
 
 /* The whole layer is mounted only while the touch scheme is active (AC-20) and
-   sits below the panels (z-index 20/30) so a pause menu still covers it. */
+   sits below the panels (z-index 20/30) so a pause menu still covers it.
+   SPEC-026 §4.3 puts it one step under the HUD layer as well: the aim surface
+   covers the whole screen, and the minimap — the one thing in the HUD that
+   takes pointer events — has to receive the tap that opens the map. Nothing
+   else in the HUD can swallow a button, because nothing else is interactive. */
 .touch-controls {
   --touch-scale: 1;
 
   position: absolute;
   inset: 0;
   pointer-events: none;
-  z-index: 10;
+  z-index: 9;
 }
 
 /* One surface for both zones: which one a pointer belongs to is decided in
@@ -799,14 +803,19 @@ html.reduce-motion .sheet {
   display: none;
 }
 
-/* AC-59: above the touch buttons, which sit in the same corner at 56 px. */
+/* SPEC-014 AC-59 / SPEC-026 §4.3: above the touch buttons, which sit in the
+   same corner at 56 px. Round and sized in CSS — the painter measures this box
+   and backs it at `round(css × min(dpr, 2))`, so it is crisp at any DPR — and
+   it takes pointer events, because a tap on it opens the full map. */
 .minimap {
-  width: 96px;
-  height: 96px;
+  width: clamp(128px, 24vmin, 184px);
+  height: clamp(128px, 24vmin, 184px);
   border: 1px solid var(--panel-edge);
-  border-radius: 6px;
+  border-radius: 50%;
   background: rgba(0, 0, 0, 0.45);
   margin-bottom: 132px;
+  pointer-events: auto;
+  cursor: pointer;
 }
 
 /* AC-63: the damage vignette; flashes for 150 ms when the class lands. */
@@ -880,6 +889,128 @@ html.reduce-motion .hud-vignette {
 .pad-terminal .terminal-active {
   margin: 4px 0;
   opacity: 0.8;
+}
+
+/* ================================================================ SPEC-026 */
+/* The full-screen map (§4.5): a two-column grid over the frozen frame — the
+   map on the left, the legend and the missions beside it. On portrait the
+   panel moves underneath (26-e), and the canvas letterboxes with it. */
+.map-screen {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  grid-template-columns: 1fr minmax(220px, 320px);
+  align-items: center;
+  justify-items: center;
+  gap: 16px;
+  padding: 16px;
+  background: rgba(4, 6, 10, 0.88);
+  pointer-events: auto;
+  overflow: auto;
+}
+
+.map-canvas-wrap {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  min-width: 0;
+}
+
+.map-canvas {
+  border: 1px solid var(--panel-edge);
+  border-radius: 8px;
+  background: #05070b;
+}
+
+.map-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  align-self: center;
+  padding: 12px;
+  max-height: calc(100dvh - 32px);
+  overflow-y: auto;
+  width: 100%;
+}
+
+.map-title {
+  margin: 0;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+}
+
+.map-explored {
+  margin: 0;
+  color: var(--ink-dim);
+}
+
+.map-legend {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.map-legend-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* The swatch is painted by the same icon painter the maps use, so a legend row
+   can never drift from what is drawn on the ground (§4.5). */
+.map-legend-icon {
+  width: 20px;
+  height: 20px;
+  flex: none;
+}
+
+.map-legend-label {
+  color: var(--ink-dim);
+}
+
+.map-missions {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.map-mission {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 6px 8px;
+  border: 1px solid var(--panel-edge);
+  border-radius: 6px;
+}
+
+.map-mission.is-tracked {
+  border-color: var(--accent-2);
+}
+
+.map-mission-title {
+  font-weight: 600;
+}
+
+.map-mission-line,
+.map-mission-empty {
+  color: var(--ink-dim);
+  margin: 0;
+}
+
+.map-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: auto;
+}
+
+/* 26-e: a portrait phone stacks the panel under the map. */
+@media (orientation: portrait) {
+  .map-screen {
+    grid-template-columns: 1fr;
+    grid-template-rows: auto auto;
+    align-content: start;
+  }
 }
 
 /* SPEC-012 §4.12: the storm overlay — the scene drives opacity from

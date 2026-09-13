@@ -24,7 +24,16 @@ import type { EventBus } from '@/core/Services';
 import type { AutoFireMode, SettingsStore } from '@/core/Settings';
 import type { SceneId } from '@/core/StateMachine';
 
-export type Action = 'fire' | 'interact' | 'useItem' | 'pause' | 'throttleUp' | 'throttleDown' | 'map' | 'debug';
+export type Action =
+  | 'fire'
+  | 'interact'
+  | 'useItem'
+  | 'pause'
+  | 'throttleUp'
+  | 'throttleDown'
+  | 'map'
+  | 'track'
+  | 'debug';
 export type Scheme = 'keyboard' | 'touch' | 'gamepad';
 /** The four movement half-axes a key can bind to; they are not actions (AC-4). */
 export type MoveAxis = 'moveUp' | 'moveDown' | 'moveLeft' | 'moveRight';
@@ -42,6 +51,9 @@ export const ACTIONS = [
   'throttleUp',
   'throttleDown',
   'map',
+  // SPEC-026 §4.7: `map` finally opens the map, so cycling the pinned mission
+  // moved to its own action, right behind it.
+  'track',
   'debug',
 ] as const satisfies readonly Action[];
 

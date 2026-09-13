@@ -37,6 +37,7 @@ export const KEY_BINDINGS: Readonly<Record<string, Action | MoveAxis>> = {
   Escape: 'pause',
   KeyP: 'pause',
   KeyM: 'map',
+  KeyT: 'track',
   ShiftLeft: 'throttleUp',
   ControlLeft: 'throttleDown',
   Backquote: 'debug',

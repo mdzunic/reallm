@@ -14,7 +14,7 @@ import { log } from '@/core/Log';
 import { Pool } from '@/core/Pool';
 import { PressEdges } from '@/core/PressEdges';
 import { DEFAULT_LOOK, type Look } from '@/core/Quality';
-import { newSave, type CharacterCreation, type Save } from '@/core/Save';
+import { EXPLORE_CELL, newSave, type CharacterCreation, type Save } from '@/core/Save';
 import type { GameServices } from '@/core/Services';
 import type { SceneParams } from '@/core/StateMachine';
 import type { Renderer } from '@/core/Renderer';
@@ -49,7 +49,9 @@ import { makeProjectile } from '@/entities/Projectile';
 import type { ArenaState } from '@/entities/World';
 import { Combat, computePlayerStats, type CombatWorld } from '@/systems/Combat';
 import { Economy } from '@/systems/Economy';
+import { ExploreMask, REVEAL_CAPACITY } from '@/systems/Exploration';
 import { generateLayout, ObstacleGrid, type Layout, type LayoutPoi } from '@/systems/Layout';
+import { nodeIcon, poiIcon } from '@/systems/MapModel';
 import { Missions, type MissionContext } from '@/systems/Missions';
 import { Nodes, Pickups } from '@/systems/Pickups';
 import { cumulativeXp, Progression, xpToNext } from '@/systems/Progression';
@@ -69,7 +71,9 @@ import { dialogueLayer, type DialogueUI } from '@/ui/DialogueUI';
 import { el, h, testId } from '@/ui/dom';
 import { clearEndingOverlays, EndingOverlay } from '@/ui/EndingOverlay';
 import { Hud } from '@/ui/Hud';
-import { Minimap, type MinimapPoi } from '@/ui/Minimap';
+import { MapLayers } from '@/ui/MapLayers';
+import { MapScreen, type MapMissionRow } from '@/ui/MapScreen';
+import { Minimap, type MapMark, type MinimapFrame } from '@/ui/Minimap';
 import { PauseMenu } from '@/ui/PauseMenu';
 import { RevealOverlay } from '@/ui/RevealOverlay';
 import { RotateOverlay } from '@/ui/RotateOverlay';
@@ -112,6 +116,13 @@ const MUSIC_HOLD_SECONDS = 2;
 const STATIC_BURST_MS = 600;
 /** The minimap repaints at 4 Hz — plenty for 1 px = 1 m. */
 const MINIMAP_INTERVAL = 0.25;
+
+// ------------------------------------------------------------- SPEC-026 §4.4
+
+/** The ground under the player is revealed at 4 Hz, like the minimap repaint. */
+const EXPLORE_INTERVAL = 0.25;
+/** …and the mask reaches the live save at most once a second, while it changes. */
+const EXPLORE_SAVE_INTERVAL = 1;
 
 // ------------------------------------------------------------- SPEC-019 §4.6
 
@@ -221,6 +232,11 @@ export class SurfaceScene extends UiScene<'surface'> {
   #view: SurfaceView | null = null;
   #hud: Hud | null = null;
   #minimap: Minimap | null = null;
+  // SPEC-026 — the two maps: the explored mask, the cached layers both draw
+  // from, and the full-screen map that holds the simulation while it is open.
+  #mask: ExploreMask | null = null;
+  #layers: MapLayers | null = null;
+  #mapScreen: MapScreen | null = null;
   #death: DeathOverlay | null = null;
   #dialogue: DialogueUI | null = null;
   #touch: TouchControls | null = null;
@@ -308,6 +324,13 @@ export class SurfaceScene extends UiScene<'surface'> {
   readonly #shakeScratch = new THREE.Vector3();
   readonly #screenPoint = { x: 0, y: 0 };
 
+  // SPEC-026 §4.6 — the UI hold. The full map takes one; while it is above
+  // zero the fixed step runs the map's own presses and nothing else, so
+  // `world.time` stands still and nothing can reach the player.
+  #uiHolds = 0;
+  #exploreIn = 0;
+  #exploreSaveIn = EXPLORE_SAVE_INTERVAL;
+
   #music: 'surface_calm' | 'surface_combat' | 'boss' = 'surface_calm';
   #musicHold = 0;
   #minimapIn = 0;
@@ -354,10 +377,26 @@ export class SurfaceScene extends UiScene<'surface'> {
       return this.#frustum.intersectsSphere(this.#frustumSphere);
     },
   };
-  readonly #minimapPois: MinimapPoi[] = [];
-  readonly #minimapNodes: { x: number; z: number }[] = [];
-  readonly #minimapEnemies: { x: number; z: number }[] = [];
+  // SPEC-026 §4.9: the frame both maps read is scene-owned and reused — the
+  // marks are pooled by index and written in place, so a repaint allocates
+  // nothing (SPEC-001 §7).
+  readonly #markPool: MapMark[] = [];
+  readonly #marks: MapMark[] = [];
+  readonly #enemyPool: { x: number; z: number; kind: 'enemy' | 'elite' | 'boss' }[] = [];
+  readonly #minimapEnemies: { x: number; z: number; kind: 'enemy' | 'elite' | 'boss' }[] = [];
+  readonly #frame: MinimapFrame = {
+    playerX: 0,
+    playerZ: 0,
+    facing: 0,
+    marks: this.#marks,
+    enemies: this.#minimapEnemies,
+    target: null,
+    route: null,
+    routeLength: 0,
+  };
+  readonly #revealOut = new Int32Array(REVEAL_CAPACITY);
   readonly #objectivePois = new Set<PoiId>();
+  readonly #missionRows: MapMissionRow[] = [];
 
   constructor(services: GameServices) {
     super(services, 'surface', 'surface_calm');
@@ -546,14 +585,45 @@ export class SurfaceScene extends UiScene<'surface'> {
     const hud = new Hud(this.ui, 'surface');
     this.#hud = hud;
     this.disposer.add(() => hud.dispose());
+
+    // SPEC-026 §4.4: the explored mask comes off the save (SPEC-025 has
+    // already dropped one of the wrong length, E37), the ground under the
+    // landing spot is lit, and the two cached layers are built from the layout.
+    const mask = new ExploreMask(layout.halfSize, save.progress.explored[planet.id]);
+    this.#mask = mask;
+    mask.reveal(world.player.x, world.player.z, this.#revealOut);
+    const layers = new MapLayers(layout, planet.surface.palette);
+    this.#layers = layers;
+    layers.syncFog(mask);
+
     if (hud.minimapCanvas !== null) {
-      const minimap = new Minimap(hud.minimapCanvas);
+      const minimap = new Minimap(hud.minimapCanvas, layers);
       this.#minimap = minimap;
-      // E18: a tap on the map cycles the pinned mission, like the map key.
-      const cycle = (): void => this.#missions?.cyclePinned();
-      minimap.canvas.addEventListener('click', cycle);
-      this.disposer.add(() => minimap.canvas.removeEventListener('click', cycle));
+      // §4.3: a tap on the minimap opens the full map (the pin moved to `T`).
+      const open = (): void => this.#openMap();
+      minimap.canvas.addEventListener('click', open);
+      this.disposer.add(() => minimap.canvas.removeEventListener('click', open));
+      // The box is sized in CSS, so a resize is what re-measures the backing.
+      this.disposer.add(services.events.on('renderer:resized', () => minimap.measure(), this));
     }
+
+    // §4.5: the full-screen map. It only draws and asks to be closed; the hold,
+    // the touch layer and the pin are the scene's.
+    const mapScreen = new MapScreen({
+      ui: this.ui,
+      layers,
+      layout,
+      planet,
+      missions: () => this.#mapMissions(),
+      track: (id) => this.#trackMission(id),
+      close: () => this.#closeMap(),
+    });
+    this.#mapScreen = mapScreen;
+    this.disposer.add(() => {
+      mapScreen.dispose();
+      this.#mapScreen = null;
+      this.#uiHolds = 0;
+    });
     // SPEC-019 §4.6: the floating damage numbers, pooled in the HUD layer.
     const dmgLayer = el('div', 'dmg-layer');
     this.ui.mount(dmgLayer, 'hud');
@@ -623,6 +693,9 @@ export class SurfaceScene extends UiScene<'surface'> {
   override exit(): void {
     const world = this.#world;
     const save = this.#save;
+    // SPEC-026 §4.4: the ground walked this visit reaches the live save before
+    // anything flushes it, so the next landing lights what this one lit.
+    this.#writeMask();
     if (world !== null && save !== null && this.services.save.current === save) {
       save.player.hp = Math.max(1, Math.round(world.player.hp));
       this.services.save.flush();
@@ -630,7 +703,9 @@ export class SurfaceScene extends UiScene<'surface'> {
     this.#touch?.hide();
   }
 
+  /** SPEC-026 §4.6: the map is not a second pause — it closes before this one. */
   pause(): void {
+    this.#closeMap();
     this.#pauseMenu?.show();
     this.services.audio.duck(true);
   }
@@ -663,6 +738,17 @@ export class SurfaceScene extends UiScene<'surface'> {
       return;
     }
 
+    // SPEC-026 §4.6: the full map's hold. Playtime still accrues (above) and
+    // the map's own press is read; everything else — combat, missions,
+    // weather, spawning, pickups, nodes, exploration — waits, so `world.time`
+    // stands still and a swarm cannot bite a player who is reading a map.
+    if (this.#uiHolds > 0) {
+      if (this.#edges.pressed('map')) this.#closeMap();
+      world.player.vx = 0;
+      world.player.vz = 0;
+      return;
+    }
+
     // The touch pause button; Escape/P live in main.ts (SPEC-014 AC-82).
     if (input.scheme === 'touch' && this.#edges.pressed('pause')) {
       void this.services.scenes.pause();
@@ -675,7 +761,9 @@ export class SurfaceScene extends UiScene<'surface'> {
     if (!modal) {
       this.#movePlayer(world, dt);
       this.#updateConsumable();
-      if (this.#edges.pressed('map')) missions.cyclePinned();
+      // SPEC-026 §4.5/§4.7: `map` opens the map, `track` cycles the pin.
+      if (this.#edges.pressed('map')) this.#openMap();
+      if (this.#edges.pressed('track')) missions.cyclePinned();
     } else {
       world.player.vx = 0;
       world.player.vz = 0;
@@ -701,6 +789,7 @@ export class SurfaceScene extends UiScene<'surface'> {
     this.#followCamera(world, dt);
     this.#updateMusic(dt, world);
     this.#feedHud(world, dt);
+    this.#explore(world, dt);
     this.#minimapIn -= dt;
 
     // SPEC-019 §4.6: age the damage numbers, and flush the weather
@@ -938,7 +1027,8 @@ export class SurfaceScene extends UiScene<'surface'> {
         }
       }
     }
-    // AC-55..AC-59: what the minimap painter drew on its last repaint.
+    // AC-55..AC-59: what the minimap painter drew on its last repaint. They
+    // keep reporting that paint while the full map is open (SPEC-026 §4.8).
     const drawn = this.#minimap?.lastDrawn;
     if (drawn !== undefined) {
       info['mmPois'] = drawn.pois;
@@ -947,6 +1037,11 @@ export class SurfaceScene extends UiScene<'surface'> {
       info['mmNodes'] = drawn.nodes;
       info['mmEnemies'] = drawn.enemies;
     }
+    // SPEC-026 §4.8: the explored share, the map's state, and the proof that
+    // the terrain layer is built once per visit.
+    if (this.#mask !== null) info['mmExplored'] = Math.round(this.#mask.fraction() * 1000) / 10;
+    if (this.#layers !== null) info['mmTerrainBuilds'] = this.#layers.terrainBuilds;
+    info['mapOpen'] = this.#mapScreen?.isOpen === true ? 1 : 0;
     if (this.#layout !== null) info['layoutHash'] = this.#layout.hash;
     return info;
   }
@@ -2013,15 +2108,24 @@ export class SurfaceScene extends UiScene<'surface'> {
     this.services.audio.music(wanted);
   }
 
-  // --------------------------------------------------------------- minimap
+  // ------------------------------------------------------------------ maps
 
-  #drawMinimap(world: CombatWorld): void {
-    const minimap = this.#minimap;
+  /**
+   * SPEC-026 §4.3/§4.5: the one frame both maps read. Marks are pooled by
+   * index and written in place, so a 4 Hz repaint allocates nothing.
+   */
+  #mapFrame(world: CombatWorld): MinimapFrame {
     const missions = this.#missions;
     const save = this.#save;
-    if (minimap === null || missions === null || save === null) return;
+    const frame = this.#frame;
+    frame.playerX = world.player.x;
+    frame.playerZ = world.player.z;
+    frame.facing = world.player.facing;
+    this.#marks.length = 0;
+    this.#minimapEnemies.length = 0;
+    if (missions === null || save === null) return frame;
 
-    // Which POIs the current objectives point at (edge arrows, §4.12).
+    // Which POIs the current objectives point at (rings and edge arrows).
     this.#objectivePois.clear();
     for (const state of missions.active) {
       for (const { objective, done } of missions.currentObjectives(state.id)) {
@@ -2032,37 +2136,171 @@ export class SurfaceScene extends UiScene<'surface'> {
       }
     }
 
-    this.#minimapPois.length = 0;
+    // 26-a: a discovered POI shows even under still-dark ground, and an
+    // objective POI shows whether or not it was ever discovered (26-b).
     for (const state of this.#pois) {
-      this.#minimapPois.push({
-        x: state.poi.x,
-        z: state.poi.z,
-        discovered: state.discovered,
-        objective: this.#objectivePois.has(state.poi.poi),
-        arenaRadius: state.poi.kind === 'arena' ? state.poi.radius : 0,
-      });
+      const objective = this.#objectivePois.has(state.poi.poi);
+      if (!state.discovered && !objective) continue;
+      const mark = this.#nextMark();
+      mark.x = state.poi.x;
+      mark.z = state.poi.z;
+      mark.icon = poiIcon(state.poi.kind);
+      mark.objective = objective;
+      // §4.5: the full map labels discovered POIs. A landmark is scenery
+      // rather than a destination and carries none, and an objective POI the
+      // player has never reached shows its icon and ring without naming the
+      // place (26-b).
+      mark.label = state.discovered && state.poi.kind !== 'landmark' ? this.#poiLabel(state.poi.poi) : null;
+      mark.ring = state.poi.kind === 'arena' ? state.poi.radius : 0;
     }
 
-    this.#minimapNodes.length = 0;
-    const nodesVisible = hasNodeRadar(save);
-    if (nodesVisible) {
-      for (const node of (this.#nodes as Nodes).states) this.#minimapNodes.push({ x: node.x, z: node.z });
+    // §4.3 step 5: nodes with radar, and the resource a collect objective
+    // wants while it is running (SPEC-027 widens this).
+    const radar = hasNodeRadar(save);
+    for (const node of (this.#nodes as Nodes).states) {
+      if (!radar && !this.#collecting(missions, node.resource)) continue;
+      const mark = this.#nextMark();
+      mark.x = node.x;
+      mark.z = node.z;
+      mark.icon = nodeIcon(node.resource);
+      mark.objective = false;
+      mark.label = null;
+      mark.ring = 0;
     }
 
-    this.#minimapEnemies.length = 0;
     for (let i = 0; i < world.enemies.size; i++) {
       const e = world.enemies.at(i);
-      if (e.state !== 'dead') this.#minimapEnemies.push({ x: e.x, z: e.z });
+      if (e.state === 'dead') continue;
+      const mark = this.#nextEnemy();
+      mark.x = e.x;
+      mark.z = e.z;
+      mark.kind = e.def.archetype === 'boss' ? 'boss' : e.elite ? 'elite' : 'enemy';
     }
+    return frame;
+  }
 
-    minimap.draw({
-      playerX: world.player.x,
-      playerZ: world.player.z,
-      facing: world.player.facing,
-      pois: this.#minimapPois,
-      nodes: nodesVisible ? this.#minimapNodes : null,
-      enemies: this.#minimapEnemies,
-    });
+  /** The next pooled mark; the pool only ever grows to the busiest frame. */
+  #nextMark(): MapMark {
+    const at = this.#marks.length;
+    let mark = this.#markPool[at];
+    if (mark === undefined) {
+      mark = { x: 0, z: 0, icon: 'landmark', objective: false, label: null, ring: 0 };
+      this.#markPool.push(mark);
+    }
+    this.#marks.push(mark);
+    return mark;
+  }
+
+  /** The same pooling for the enemy list, which turns over every repaint. */
+  #nextEnemy(): { x: number; z: number; kind: 'enemy' | 'elite' | 'boss' } {
+    const at = this.#minimapEnemies.length;
+    let mark = this.#enemyPool[at];
+    if (mark === undefined) {
+      mark = { x: 0, z: 0, kind: 'enemy' as const };
+      this.#enemyPool.push(mark);
+    }
+    this.#minimapEnemies.push(mark);
+    return mark;
+  }
+
+  /** True while an undone collect objective wants this resource (§4.3 step 5). */
+  #collecting(missions: Missions, resource: ResourceId): boolean {
+    for (const state of missions.active) {
+      for (const { objective, done } of missions.currentObjectives(state.id)) {
+        if (objective.kind === 'collect' && !done && objective.resource === resource) return true;
+      }
+    }
+    return false;
+  }
+
+  #drawMinimap(world: CombatWorld): void {
+    this.#minimap?.draw(this.#mapFrame(world));
+  }
+
+  /**
+   * §4.4: light the ground under the player at 4 Hz, repaint only the squares
+   * that changed, and hand the mask to the live save at most once a second.
+   * The autosaves the game already makes are what carry it to storage.
+   */
+  #explore(world: CombatWorld, dt: number): void {
+    const mask = this.#mask;
+    const layers = this.#layers;
+    if (mask === null || layers === null) return;
+    this.#exploreIn -= dt;
+    if (this.#exploreIn <= 0) {
+      this.#exploreIn = EXPLORE_INTERVAL;
+      if (world.player.alive) {
+        const count = mask.reveal(world.player.x, world.player.z, this.#revealOut);
+        if (count > 0) layers.reveal(this.#revealOut, count, EXPLORE_CELL);
+      }
+    }
+    this.#exploreSaveIn -= dt;
+    if (this.#exploreSaveIn <= 0) {
+      this.#exploreSaveIn = EXPLORE_SAVE_INTERVAL;
+      this.#writeMask();
+    }
+  }
+
+  /** The mask into the live save, when it holds ground the save has not seen. */
+  #writeMask(): void {
+    const mask = this.#mask;
+    const save = this.#save;
+    if (mask === null || save === null || !mask.dirty) return;
+    save.progress.explored[this.#planet.id] = mask.encode();
+  }
+
+  // ------------------------------------------------------------- full map
+
+  /** §4.5: open the map, unless a modal dialogue or the pad terminal owns the screen (26-c). */
+  #openMap(): void {
+    const screen = this.#mapScreen;
+    const world = this.#world;
+    if (screen === null || world === null || screen.isOpen) return;
+    // A modal dialogue, the pad terminal (26-c) and a held beat all own the
+    // screen already; so does the death overlay, whose respawn clock runs in
+    // the step the hold would stop (§4.8).
+    if (this.#modalOpen > 0 || this.#terminalOpen || this.#holds > 0 || this.#deathAt !== null) return;
+    this.#uiHolds++;
+    // The hold zeroes velocity every step; this is the step it starts on.
+    world.player.vx = 0;
+    world.player.vz = 0;
+    this.#touch?.hide();
+    screen.open(this.#mapFrame(world), this.#mask?.fraction() ?? 0);
+  }
+
+  #closeMap(): void {
+    const screen = this.#mapScreen;
+    if (screen === null || !screen.isOpen) return;
+    screen.close();
+    this.#uiHolds = Math.max(0, this.#uiHolds - 1);
+    this.#touch?.show('surface');
+  }
+
+  /** The side panel's rows: title, `Stage N/M`, the current objective line. */
+  #mapMissions(): readonly MapMissionRow[] {
+    const missions = this.#missions;
+    this.#missionRows.length = 0;
+    if (missions === null) return this.#missionRows;
+    for (const state of missions.active) {
+      const def = MISSION_TABLE[state.id];
+      const next = missions.currentObjectives(state.id).find((o) => !o.done);
+      this.#missionRows.push({
+        id: state.id,
+        title: def.title,
+        stage: `Stage ${state.stage + 1}/${def.stages.length}`,
+        line: next === undefined ? 'Stage complete' : this.#objectiveLine(next.objective),
+        tracked: state.id === missions.pinned,
+      });
+    }
+    return this.#missionRows;
+  }
+
+  /** A Track button pins its mission (E18) and the panel redraws around it. */
+  #trackMission(id: MissionId): void {
+    const world = this.#world;
+    this.#missions?.pin(id);
+    if (world === null) return;
+    this.#mapScreen?.redraw(this.#mapFrame(world), this.#mask?.fraction() ?? 0);
   }
 
   // ---------------------------------------------------------- subscriptions

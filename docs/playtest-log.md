@@ -563,3 +563,66 @@ actually takes.
       panel and shop this spec re-renders
 - [ ] a real pre-R10 v1 slot loaded **on hardware** (desktop GPU + reference
       phone), with the surface played after it — needs the human pass
+
+## SPEC-026 — surface map: legend, explored ground and the full-screen map (M7c)
+
+- **Build:** `spec/SPEC-026` — untagged
+- **Devices:**
+  - desktop — headless Chromium (Playwright, Linux container, **software GL**)
+  - desktop hardware GPU and phone-over-LAN — _not run: no display, no GPU and
+    no handset in the build container; needs the human pass_
+
+### What was walked, and how
+
+The §7 pass is "walk up the screen and the arrow goes straight up; tell the pad,
+the dune sea, the beacon, the nest and a landmark apart without the legend; walk
+ground and find it still lit after a round trip; open and close the map with the
+key and with taps while a swarm stands still". The half of it a container can do
+is `e2e/SPEC-026.spec.ts` plus the shots below.
+
+| Case | What it walks |
+|---|---|
+| 1 | Landing: the minimap's backing store is `round(css × min(dpr, 2))` of a round `clamp(128px, 24vmin, 184px)` box, `mmExplored > 0` and `mmTerrainBuilds === 1` |
+| 2 | `M` opens the map, `mapOpen` reads 1, a full second of `KeyD` moves `px`/`pz` by nothing, the legend names the landing pad, and `Escape` closes the map without opening the pause menu |
+| 3 | A minimap click opens it; `map-close`, `M` and a tap outside all close it; `map-zoom` and `Equal` toggle fit ↔ 2× |
+| 4 | Travel lights ground; a real page reload through the Load menu and a station round trip both land on the ground the last visit lit |
+| 5 | Two missions accepted at one terminal: `KeyT` cycles the HUD's title and `map-track-<id>` pins from the map |
+
+### Shots
+
+| | |
+|---|---|
+| minimap, 70 m, fog and rim arrow | [minimap](screenshots/spec-026/minimap.png) |
+| full map, fit | [map-fit](screenshots/spec-026/map-fit.png) |
+| full map, 2× around the player | [map-2x](screenshots/spec-026/map-2x.png) |
+
+### Observations
+
+- The arena draws as a diamond, which is what its walls look like on screen at
+  the fixed 45° yaw — the reason the whole change exists. Walking `W` moves the
+  arrow straight up both maps.
+- The two cached layers are 360 × 360 px on Cinder-4 (1.04 MB together), built
+  once per visit; a reveal repaints ≤ 113 four-pixel squares and a repaint is
+  two `drawImage` calls. `surface-env.spec.ts` is unchanged and still green —
+  no WebGL draw call was added.
+- A 24 m reveal lights ≈ 1.4 % of a 180 m arena, so `mmExplored` reads about 1.4
+  on landing and climbs a point or so per teleport.
+- The full map's 2× stays centred on the player: clamping the view hard enough
+  to hide the ground outside the arena pins it to the arena centre at every
+  canvas a phone can show, which would put the player off the canvas.
+- The touch layer dropped from z-index 10 to 9. It is a full-screen aim surface
+  that mounts after the HUD, so at equal z it swallowed the tap that is now
+  supposed to open the map; the minimap is the only interactive thing in the HUD
+  layer, so no touch button can be covered by the swap.
+
+### Checklist
+
+- [x] `npm run check` green (typecheck, 997 unit tests, production build)
+- [x] `e2e/SPEC-026.spec.ts` (new) green
+- [x] `e2e/SPEC-012.spec.ts` and `e2e/SPEC-012-missions.spec.ts` green — the
+      backing check and the pin helper this spec re-pins
+- [x] `e2e/surface-env.spec.ts` green, unchanged — ≤ 80 scene + 16 post draws
+- [x] `e2e/touch-controls.spec.ts` and `e2e/SPEC-012-touch.spec.ts` green — the
+      layer whose z-index moved
+- [ ] the arrow, the legend, the lit ground and the held map verified **on
+      hardware** (desktop GPU + reference phone) — needs the human pass
