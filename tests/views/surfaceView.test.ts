@@ -602,3 +602,129 @@ describe('shake and hit-stop (SPEC-019 §4.7, AC-89 … AC-94)', () => {
     expect(advanceViewTime(state, 1.066)).toBe(1.066);
   });
 });
+
+// ------------------------------------------------------------- SPEC-027 §4.4
+
+/** The pillar: the one additive cylinder the guidance layer stands up. */
+function pillar(scene: THREE.Scene): THREE.Mesh | null {
+  let found: THREE.Mesh | null = null;
+  scene.traverse((node) => {
+    const mesh = node as THREE.Mesh;
+    if (mesh.isMesh !== true || (mesh as THREE.InstancedMesh).isInstancedMesh === true) return;
+    if ((mesh.geometry as THREE.CylinderGeometry).type === 'CylinderGeometry') found = mesh;
+  });
+  return found;
+}
+
+/** The route markers: the instanced disc mesh, capacity 48. */
+function routeMarkers(scene: THREE.Scene): THREE.InstancedMesh | null {
+  let found: THREE.InstancedMesh | null = null;
+  scene.traverse((node) => {
+    const mesh = node as THREE.InstancedMesh;
+    if (mesh.isInstancedMesh !== true) return;
+    if (mesh.geometry.type === 'CircleGeometry') found = mesh;
+  });
+  return found;
+}
+
+/** A straight route of `metres`, as the scene's `(x, z)` pair buffer. */
+function straightRoute(metres: number): { route: Float32Array; routeLength: number } {
+  const route = new Float32Array(96);
+  route[0] = 0;
+  route[1] = 0;
+  route[2] = metres;
+  route[3] = 0;
+  return { route, routeLength: 2 };
+}
+
+describe('the guidance layer (SPEC-027 §4.4, AC-29..AC-34)', () => {
+  it('builds nothing until it is asked to, and nothing at all for a null guide', () => {
+    const { scene, view } = setup();
+    expect(pillar(scene)).toBeNull();
+    view.setGuide({ beacon: null, route: null, routeLength: 0, pulse: true });
+    expect(pillar(scene)).toBeNull();
+    expect(routeMarkers(scene)?.visible ?? false).toBe(false);
+  });
+
+  it('stands one additive pillar on the target, on the ground, and pulses its opacity', () => {
+    const { scene, view } = setup();
+    view.sync(frame(new Pool<EnemyEntity>(() => makeEnemy())));
+    view.setGuide({ beacon: { x: 12, z: -8 }, route: null, routeLength: 0, pulse: true });
+    const mesh = pillar(scene) as THREE.Mesh;
+    expect(mesh).not.toBeNull();
+    const geometry = mesh.geometry as THREE.CylinderGeometry;
+    expect(geometry.parameters.radiusTop).toBe(0.35);
+    expect(geometry.parameters.height).toBe(14);
+    expect(geometry.parameters.radialSegments).toBe(12);
+    expect(geometry.parameters.openEnded).toBe(true);
+    // The vertical fade is four-component vertex colour, opaque at the base.
+    const colors = geometry.getAttribute('color');
+    expect(colors.itemSize).toBe(4);
+    // A cylinder's origin is its middle, so it stands from `heightAt` upward.
+    expect(mesh.position.y).toBeCloseTo(view.field.heightAt(12, -8) + 7, 5);
+    expect(mesh.position.x).toBe(12);
+    expect(mesh.position.z).toBe(-8);
+    const material = mesh.material as THREE.MeshBasicMaterial;
+    expect(material.blending).toBe(THREE.AdditiveBlending);
+    expect(material.depthWrite).toBe(false);
+    // §4.4: `0.35 + 0.25·sin(2π·t)` on the view clock `sync` last saw (t = 1).
+    expect(material.opacity).toBeCloseTo(0.35 + 0.25 * Math.sin(Math.PI * 2), 5);
+
+    // …and a flat 0.5 when nothing may move (27-j).
+    view.reduceMotion = true;
+    view.setGuide({ beacon: { x: 12, z: -8 }, route: null, routeLength: 0, pulse: true });
+    expect(material.opacity).toBe(0.5);
+  });
+
+  it('lays route markers every 2.5 m, capped at 48, in one instanced draw', () => {
+    const { scene, view } = setup();
+    view.sync(frame(new Pool<EnemyEntity>(() => makeEnemy())));
+    const short = straightRoute(10);
+    view.setGuide({ beacon: null, ...short, pulse: true });
+    const markers = routeMarkers(scene) as THREE.InstancedMesh;
+    expect(markers).not.toBeNull();
+    expect(markers.instanceMatrix.count).toBe(48);
+    // 0, 2.5, 5, 7.5 and 10 m along a 10 m segment.
+    expect(markers.count).toBe(5);
+    expect(markers.visible).toBe(true);
+    const matrix = new THREE.Matrix4();
+    const position = new THREE.Vector3();
+    markers.getMatrixAt(1, matrix);
+    position.setFromMatrixPosition(matrix);
+    expect(position.x).toBeCloseTo(2.5, 5);
+    expect(position.y).toBeCloseTo(view.field.heightAt(2.5, 0) + 0.05, 5);
+
+    // A route far longer than the capacity stops at 48 rather than growing.
+    view.setGuide({ beacon: null, ...straightRoute(400), pulse: true });
+    expect(markers.count).toBe(48);
+
+    // Two draw calls at most, and the triangles they cost: 24 for the pillar
+    // (12 radial segments, open-ended) and 12 per disc (AC-34).
+    const discs = markers.geometry.getIndex()?.count ?? 0;
+    expect(discs / 3).toBe(12);
+    expect(48 * 12 + 24).toBeLessThan(1600);
+
+    // `route: null` takes the markers off the screen without disposing them.
+    view.setGuide({ beacon: null, route: null, routeLength: 0, pulse: true });
+    expect(markers.count).toBe(0);
+    expect(markers.visible).toBe(false);
+    expect(routeMarkers(scene)).toBe(markers);
+  });
+
+  it('travels a brightness wave along the markers, and holds it still under reduce motion', () => {
+    const { scene, view } = setup();
+    view.sync(frame(new Pool<EnemyEntity>(() => makeEnemy())));
+    view.setGuide({ beacon: null, ...straightRoute(40), pulse: true });
+    const markers = routeMarkers(scene) as THREE.InstancedMesh;
+    const colors = markers.instanceColor as THREE.InstancedBufferAttribute;
+    const wave = new Set<number>();
+    for (let i = 0; i < markers.count; i++) wave.add(Math.round(colors.getX(i) * 1000));
+    expect(wave.size).toBeGreaterThan(1);
+
+    view.reduceMotion = true;
+    view.setGuide({ beacon: null, ...straightRoute(40), pulse: true });
+    const still = new Set<number>();
+    for (let i = 0; i < markers.count; i++) still.add(Math.round(colors.getX(i) * 1000));
+    expect(still).toEqual(new Set([1000]));
+  });
+});

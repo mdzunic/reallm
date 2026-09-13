@@ -1175,9 +1175,11 @@ export class SurfaceScene extends UiScene<'surface'> {
     if (this.#layers !== null) info['mmTerrainBuilds'] = this.#layers.terrainBuilds;
     info['mapOpen'] = this.#mapScreen?.isOpen === true ? 1 : 0;
     // SPEC-027 §4.11: what the guidance layer is pointing at, how far it is,
-    // how stuck the player looks, and which form the marker is in.
+    // how stuck the player looks, and which form the marker is in. The label's
+    // spaces become underscores: the `?debug` row is `key=value` pairs split on
+    // whitespace, and `surface-env.spec.ts` pins that shape.
     const target = this.#focusTarget;
-    info['guideTarget'] = target === null ? '-' : `${target.kind}:${target.label}`;
+    info['guideTarget'] = target === null ? '-' : `${target.kind}:${target.label.replace(/\s+/g, '_')}`;
     info['guideDist'] = this.#focusDistance === null ? -1 : Math.round(this.#focusDistance * 10) / 10;
     info['stuckLevel'] = this.#stuck.level;
     info['waypoint'] = this.#waypointState;

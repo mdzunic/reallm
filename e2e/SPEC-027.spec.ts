@@ -127,6 +127,52 @@ test('5. guidance off keeps the tracker and drops the waypoint', async ({ page }
   await expect(tracker(page)).toBeVisible();
 });
 
+test('a tap on the tracker cycles the tracked mission, and its hit box clears 44 px (AC-22)', async ({ page }) => {
+  test.setTimeout(150_000);
+  // The chapter's other missions all hang off `c1_m1`, so marking it done is
+  // how one terminal visit gets two acceptances (the trick SPEC-026 §6.2 uses).
+  await start(page, '/?debug&seed=123');
+  await page.evaluate(
+    (creation) => void window.__reallm.save().create(0, creation, 123),
+    {
+      name: 'Salvager',
+      classId: 'marine',
+      appearance: { portrait: 0, primary: '#b7472a', secondary: '#2a3b4c' },
+      attributes: { might: 3, vigor: 8, agility: 1, tech: 1 },
+      difficulty: 'normal',
+    },
+  );
+  await page.evaluate(() => {
+    const save = window.__reallm.save().current;
+    if (save === null) throw new Error('no save');
+    save.progress.missionsDone.push('c1_m1');
+  });
+  await page.evaluate(() => window.__reallm.go('surface', { planet: 'cinder4', firstLanding: true }, { force: true }));
+  await expect(page.locator('[data-testid="scene-label"]')).toHaveText('surface');
+  await dismiss(page);
+
+  await page.locator('[data-testid="surface-goto-pad"]').click();
+  await page.keyboard.press('KeyE');
+  await expect(page.locator('[data-testid="pad-terminal"]')).toBeVisible();
+  await page.locator('[data-testid="terminal-accept-c1_m2"]').click();
+  await dismiss(page);
+  await page.locator('[data-testid="terminal-accept-c1_s1"]').click();
+  await dismiss(page);
+  await page.locator('[data-testid="terminal-close"]').click();
+  await dismiss(page);
+
+  const box = await tracker(page).boundingBox();
+  expect(box?.height ?? 0).toBeGreaterThanOrEqual(44);
+
+  const title = async (): Promise<string> => ((await tracker(page).textContent()) ?? '').split('·')[0] ?? '';
+  const first = (await title()).trim();
+  expect(first.length).toBeGreaterThan(0);
+  await tracker(page).click();
+  await expect.poll(async () => (await title()).trim(), { timeout: 10_000 }).not.toBe(first);
+  await tracker(page).click();
+  await expect.poll(async () => (await title()).trim(), { timeout: 10_000 }).toBe(first);
+});
+
 test('6. the move tip shows once per device and is remembered across a reload (D-24)', async ({ page }) => {
   test.setTimeout(90_000);
   await land(page);

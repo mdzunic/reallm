@@ -485,6 +485,9 @@ export class Minimap {
       ctx.save();
       ctx.strokeStyle = COLORS.route;
       ctx.lineWidth = Math.max(1, 2 * scale);
+      // SPEC-027 AC-65: dashed, so the route reads as a suggestion rather than
+      // as another of the map's boundaries.
+      ctx.setLineDash([4 * scale, 3 * scale]);
       ctx.beginPath();
       for (let i = 0; i < frame.routeLength; i++) {
         const p = this.#at(frame, route[i * 2] as number, route[i * 2 + 1] as number, pxPerMetre, rimPx);
