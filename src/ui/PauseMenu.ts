@@ -30,7 +30,11 @@ const CONTROL_SHEETS = {
     ['Aim', 'Mouse'],
     ['Fire', 'Space or Left mouse'],
     ['Interact', 'E or F'],
-    ['Use item', 'Q or 1'],
+    // SPEC-028 §4.8: the loadout keys — the digits switch, Q heals.
+    ['Switch weapon', '1 / 2 / 3, R or wheel'],
+    ['Heal', 'Q'],
+    ['Throw / plant', 'G'],
+    ['Gadget', 'C'],
     ['Throttle (flight)', 'Shift up · Ctrl down'],
     // SPEC-026 §4.7: M opens the surface map; T cycles the tracked mission.
     ['Map', 'M'],
@@ -41,6 +45,9 @@ const CONTROL_SHEETS = {
     ['Move / steer', 'Drag on the left side'],
     ['Aim & fire', 'Drag on the right side'],
     ['Throttle (flight)', 'Drag up / down on the right'],
+    // SPEC-028 §4.5: the bar doubles as the touch buttons.
+    ['Switch weapon', 'SWAP, or tap a weapon on the bar'],
+    ['Use a pack', 'Tap it on the bar; hold to choose'],
     ['Interact / Use item', 'On-screen buttons'],
     ['Pause', 'Pause button'],
   ],

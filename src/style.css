@@ -2277,6 +2277,34 @@ html.reduce-motion .overlay-ending-escape .ending-prompt {
   font-weight: 700;
 }
 
+/* SPEC-028 §4.7: a Loadout entry — the worn card, its Change list, and the
+   three quick rows with the picker's list inline. */
+.loadout-card {
+  flex: 1;
+  min-width: 180px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.loadout-card .gear-card {
+  min-width: 0;
+}
+
+.loadout-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.loadout-quick {
+  flex-basis: 100%;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
 .gear-line {
   color: var(--ink-dim);
   font-size: 14px;

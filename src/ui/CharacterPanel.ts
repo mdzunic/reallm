@@ -3,8 +3,9 @@
 // their three actions, and the hold against the cargo cap. Everything derived
 // prints through the tested pure helpers; the mutations go through Economy.
 import { maxHp, type Save, type SaveStore } from '@/core/Save';
-import { ITEMS, RESOURCE_IDS, type ItemId, type WeaponSlot } from '@/data/index';
+import { ITEMS, QUICK_SLOTS, RESOURCE_IDS, type ItemId, type QuickSlot, type WeaponSlot } from '@/data/index';
 import { INVENTORY_SLOTS, type Economy } from '@/systems/Economy';
+import { quickEligible } from '@/systems/Loadout';
 import { computePlayerStats, failText, gearCompareText, gearTooltip } from '@/systems/UiHelpers';
 import { confirmSheet } from '@/ui/ConfirmSheet';
 import { el, h, testId, type UiRoot } from '@/ui/dom';
@@ -22,6 +23,8 @@ export class CharacterPanel {
   readonly #deps: CharacterDeps;
   /** The tapped inventory slot whose action bar is open. */
   #selected: number | null = null;
+  /** SPEC-028 §4.7: the Loadout card whose Change list is open. */
+  #changing: WeaponSlot | 'armor' | null = null;
   /** SPEC-020 §4.6: the portrait files that shipped; empty means glyphs. */
   #available: ReadonlySet<number> = new Set();
 
@@ -91,53 +94,153 @@ export class CharacterPanel {
   // ------------------------------------------------------------------- gear
 
   /**
-   * AC-47, SPEC-025 §4.8: the four worn pieces — the three weapon slots and the
-   * armor — with the tooltip comparing each one to the next rung of its own
-   * line. `heavy` is empty until a launcher is bought (SPEC-029), and an empty
-   * slot says so rather than disappearing.
+   * SPEC-028 §4.7 — the Loadout block: SPEC-025's four gear cards (which keep
+   * their `equipped-<slot>` ids inside the new `loadout-<slot>` wrappers),
+   * each with a Change list of owned items for that slot through
+   * `economy.equip`, and the three quick rows with the picker's list inline.
    */
   #gearBlock(): HTMLElement {
     const { equipped } = this.#deps.data;
-    const card = (slot: WeaponSlot | 'armor', id: ItemId | null): HTMLElement => {
-      if (id === null) {
-        return testId(
-          h(
+    const block = h(
+      'section',
+      { class: 'char-block char-gear' },
+      h('p', { class: 'char-title' }, 'Loadout'),
+      this.#loadoutCard('sidearm', equipped.sidearm),
+      this.#loadoutCard('primary', equipped.primary),
+      this.#loadoutCard('heavy', equipped.heavy),
+      this.#loadoutCard('armor', equipped.armor),
+    );
+    for (const slot of QUICK_SLOTS) block.append(this.#quickRow(slot));
+    return block;
+  }
+
+  /** One gear slot: the worn card, and a Change list of owned candidates. */
+  #loadoutCard(slot: WeaponSlot | 'armor', id: ItemId | null): HTMLElement {
+    const card =
+      id === null
+        ? h(
             'div',
             { class: 'gear-card' },
             h('span', { class: 'settings-note' }, slot),
-            h('span', { class: 'gear-name' }, 'Empty'),
+            // §4.7: the heavy card says what fills it (SPEC-029's launchers).
+            h('span', { class: 'gear-name' }, slot === 'heavy' ? 'Empty — buy a launcher in the shop' : 'Empty'),
             h('span', { class: 'gear-line' }, ''),
+          )
+        : h(
+            'div',
+            { class: 'gear-card', title: gearTooltip(id) },
+            h('span', { class: 'settings-note' }, slot),
+            h('span', { class: 'gear-name' }, `${ITEMS[id].name} · T${this.#tierOf(id)}`),
+            h('span', { class: 'gear-line' }, this.#statLine(id)),
+          );
+    testId(card, `equipped-${slot}`);
+
+    const owned = this.#ownedFor(slot);
+    const wrap = testId(el('div', 'loadout-card'), `loadout-${slot}`);
+    wrap.append(card);
+    if (owned.length > 0) {
+      wrap.append(
+        testId(
+          h(
+            'button',
+            {
+              class: 'ui-btn loadout-change',
+              type: 'button',
+              click: () => {
+                this.#changing = this.#changing === slot ? null : slot;
+                this.refresh();
+              },
+            },
+            'Change',
           ),
-          `equipped-${slot}`,
+          `loadout-change-${slot}`,
+        ),
+      );
+    }
+    if (this.#changing === slot) {
+      const list = el('div', 'loadout-list');
+      for (const entry of owned) {
+        const item = ITEMS[entry.itemId];
+        list.append(
+          testId(
+            h(
+              'button',
+              { class: 'ui-btn', type: 'button', click: () => this.#equip(entry.itemId) },
+              `Equip ${item.name} · T${this.#tierOf(entry.itemId)}`,
+            ),
+            `equip-${entry.itemId}`,
+          ),
         );
       }
-      const item = ITEMS[id];
-      const line =
-        item.kind === 'weapon'
-          ? `damage ${item.damage} · fire rate ${item.fireRate} · range ${item.range}`
-          : item.kind === 'armor'
-            ? `armor ${item.armor} · hazard resist ${item.hazardResist}`
-            : '';
-      const tier = item.kind === 'weapon' || item.kind === 'armor' ? item.tier : 0;
-      return testId(
-        h(
-          'div',
-          { class: 'gear-card', title: gearTooltip(id) },
-          h('span', { class: 'settings-note' }, slot),
-          h('span', { class: 'gear-name' }, `${item.name} · T${tier}`),
-          h('span', { class: 'gear-line' }, line),
-        ),
-        `equipped-${slot}`,
-      );
-    };
-    return h(
-      'section',
-      { class: 'char-block char-gear' },
-      card('sidearm', equipped.sidearm),
-      card('primary', equipped.primary),
-      card('heavy', equipped.heavy),
-      card('armor', equipped.armor),
+      wrap.append(list);
+    }
+    return wrap;
+  }
+
+  /** §4.7: one quick slot — what it holds, and the picker's list inline. */
+  #quickRow(slot: QuickSlot): HTMLElement {
+    const save = this.#deps.data;
+    const id = save.quick[slot];
+    const count = id === null ? 0 : this.#deps.economy.count(id);
+    const row = testId(el('div', 'loadout-quick'), `loadout-quick-${slot}`);
+    row.append(
+      h('span', { class: 'settings-note' }, slot),
+      h('span', { class: 'gear-name' }, id === null ? 'Empty' : `${ITEMS[id].name} ×${count}`),
     );
+    const list = el('div', 'loadout-list');
+    for (const entry of save.inventory) {
+      if (entry.qty <= 0 || !quickEligible(entry.itemId, slot) || entry.itemId === id) continue;
+      const item = ITEMS[entry.itemId];
+      list.append(
+        testId(
+          h(
+            'button',
+            { class: 'ui-btn', type: 'button', click: () => this.#setQuick(slot, entry.itemId) },
+            `${item.name} ×${entry.qty}`,
+          ),
+          `quick-pick-${entry.itemId}`,
+        ),
+      );
+    }
+    if (id !== null) {
+      list.append(
+        testId(
+          h('button', { class: 'ui-btn', type: 'button', click: () => this.#setQuick(slot, null) }, 'Empty'),
+          `loadout-quick-${slot}-empty`,
+        ),
+      );
+    }
+    row.append(list);
+    return row;
+  }
+
+  /** §4.6: choosing writes the save's quick slot and rides a purchase save. */
+  #setQuick(slot: QuickSlot, id: ItemId | null): void {
+    this.#deps.data.quick[slot] = id;
+    this.#deps.save.request('purchase');
+    this.refresh();
+  }
+
+  /** The carried candidates for a gear slot — what `economy.equip` accepts. */
+  #ownedFor(slot: WeaponSlot | 'armor'): { itemId: ItemId; qty: number }[] {
+    return this.#deps.data.inventory.filter((entry) => {
+      if (entry.qty <= 0) return false;
+      const item = ITEMS[entry.itemId];
+      if (slot === 'armor') return item.kind === 'armor';
+      return item.kind === 'weapon' && item.slot === slot;
+    });
+  }
+
+  #tierOf(id: ItemId): number {
+    const item = ITEMS[id];
+    return item.kind === 'weapon' || item.kind === 'armor' ? item.tier : 0;
+  }
+
+  #statLine(id: ItemId): string {
+    const item = ITEMS[id];
+    if (item.kind === 'weapon') return `damage ${item.damage} · fire rate ${item.fireRate} · range ${item.range}`;
+    if (item.kind === 'armor') return `armor ${item.armor} · hazard resist ${item.hazardResist}`;
+    return '';
   }
 
   // -------------------------------------------------------------- inventory
