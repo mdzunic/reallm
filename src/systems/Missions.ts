@@ -164,6 +164,7 @@ export class Missions {
     for (const def of Object.values(MISSIONS)) {
       if (def.planet !== this.#planet || def.scene !== this.#scene) continue;
       if (this.#stateOf(def.id as MissionId) !== null) continue;
+      if (campaignLocked(this.#save, def)) continue; // E24
       if (this.#economy.missingRequirements(def.requires).length > 0) continue;
       out.push(def);
     }
@@ -179,6 +180,9 @@ export class Missions {
     const def = MISSIONS[id];
     if (def.planet !== this.#planet || def.scene !== this.#scene) return fail('not_found');
     if (this.#stateOf(id) !== null) return fail('prerequisite');
+    // E24: the campaign's last mission is over for good — the same refusal an
+    // unavailable mission gets, since `available()` no longer offers it.
+    if (campaignLocked(this.#save, def)) return fail('locked');
     if (this.#economy.missingRequirements(def.requires).length > 0) return fail('locked');
     const entry = { id, stage: 0, counters: {} as Record<string, number> };
     this.#save.progress.missionsActive.push(entry);
@@ -394,6 +398,33 @@ export class Missions {
       }
       this.#checkStage(state);
     }
+  }
+
+  /**
+   * SPEC-024 §4.8, dev builds only: finish the current stage the way the
+   * simulation would have. Stage 0 of `c6_m2` is a four-minute defence, and an
+   * acceptance run cannot spend four minutes on it per attempt.
+   *
+   * Every objective of the stage is marked done through `#markDone` and the
+   * normal `#checkStage` runs after, so the events, the stage advance, the
+   * completion and the rewards are the ones a played stage produces — nothing
+   * here is a shortcut *around* the runtime.
+   *
+   * A `choice` objective is the exception: its flags are its whole point, and
+   * marking it done would end the campaign with neither ending flag set (E24).
+   * The choice stays the player's, on the modal the scene opens for it.
+   */
+  debugFinishStage(id: MissionId): void {
+    if (!import.meta.env.DEV) return;
+    const state = this.#stateOf(id);
+    if (state === null || state.complete) return;
+    const stage = MISSIONS[id].stages[state.stage] ?? [];
+    for (let index = 0; index < stage.length; index++) {
+      const objective = stage[index] as Objective;
+      if (objective.kind === 'choice' || this.#done(state, objective, index)) continue;
+      this.#markDone(state, index);
+    }
+    this.#checkStage(state);
   }
 
   /** §4.7: a choice objective completes through this, setting its flags. */
@@ -644,6 +675,21 @@ export class Missions {
 
 /** §4.7: replay pays half; re-exported so the HUD can phrase it. */
 export const REPLAY_REWARD_FRACTION = TUNING.REPLAY_REWARD_FRACTION;
+
+/**
+ * E24 / SPEC-024 §4.6: the mission that ends the campaign is locked once the
+ * campaign is over. The rule is read off the rewards rather than off an id —
+ * the mission that grants `campaign_done` is the one that can never run again —
+ * so the board (`missionStatus`), the pad terminal (`available()`), the accept
+ * path and the tests all ask the same question in one place.
+ *
+ * Without it a replay could file the other verdict and leave one save holding
+ * both `ending_stay` and `ending_escape`.
+ */
+export function campaignLocked(save: SaveV1, def: MissionDef): boolean {
+  if (def.rewards.flags?.includes('campaign_done') !== true) return false;
+  return save.progress.flags.includes('campaign_done');
+}
 
 const NO_POIS: readonly LayoutPoi[] = Object.freeze([]);
 

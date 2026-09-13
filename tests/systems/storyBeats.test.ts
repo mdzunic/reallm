@@ -6,6 +6,9 @@
 // SPEC-023 §6 adds the chapter beats: the session memory behind departures,
 // cards and reveals, the catch-up rule that keeps an old save to one interlude,
 // and the reveal camera's endpoints, phases and reduce-motion cuts.
+//
+// SPEC-024 §6 adds the endings: which one a save still owes after a reload
+// inside the sequence, and the five lines of the filed report.
 import { describe, expect, it } from 'vitest';
 import { FILMS, type FilmDef } from '@/data/films';
 import {
@@ -14,6 +17,7 @@ import {
   chooseFilmMode,
   cuesBetween,
   departureDue,
+  endingPending,
   filmDuration,
   FILM_TYPE_CPS,
   interludeToPlay,
@@ -24,6 +28,7 @@ import {
   SKIP_KEY_GRACE,
   SKIP_POINTER_GRACE,
   skipAccepted,
+  stayReport,
   typedChars,
 } from '@/systems/StoryBeats';
 
@@ -295,5 +300,53 @@ describe('revealCamera (SPEC-023 §3)', () => {
     expect(revealCamera(0.01, true).phase).toBe('in');
     expect(revealCamera(3.6, true).phase).toBe('out');
     expect(revealCamera(4.4, true)).toEqual({ phase: 'done', k: 0 });
+  });
+});
+
+describe('endingPending (SPEC-024 §4.5, E29, 24-d)', () => {
+  const pending = (flags: string[], endingSeen = false): ReturnType<typeof endingPending> =>
+    endingPending(new Set(flags), endingSeen);
+
+  it('owes nothing before the campaign is over', () => {
+    expect(pending([])).toBeNull();
+    // The choice sets its flag before the mission's rewards set `campaign_done`;
+    // until that lands there is no ending to replay.
+    expect(pending(['ending_stay'])).toBeNull();
+    expect(pending(['ending_escape'])).toBeNull();
+  });
+
+  it('names the ending the flags recorded while it is unseen', () => {
+    expect(pending(['campaign_done', 'ending_stay'])).toBe('stay');
+    expect(pending(['campaign_done', 'ending_escape'])).toBe('escape');
+  });
+
+  it('owes nothing once the overlay has resolved', () => {
+    expect(pending(['campaign_done', 'ending_stay'], true)).toBeNull();
+    expect(pending(['campaign_done', 'ending_escape'], true)).toBeNull();
+  });
+
+  it('prefers escape when an old save holds both flags (24-d)', () => {
+    expect(pending(['campaign_done', 'ending_stay', 'ending_escape'])).toBe('escape');
+    expect(pending(['campaign_done', 'ending_escape', 'ending_stay'], true)).toBeNull();
+  });
+});
+
+describe('stayReport (SPEC-024 §4.3)', () => {
+  it('is five lines in order, with the salvager on the first', () => {
+    expect(stayReport({ player: { name: 'Vega' } })).toEqual([
+      'SALVAGER Vega',
+      'WORLDS SURVEYED 6 of 6',
+      'DELIVERED oil · water · grain · lithium',
+      'VERDICT Eden-Prime viable — colonise',
+      'RUN 62 logged · a good run',
+    ]);
+  });
+
+  it('carries the player name and nothing else from the save', () => {
+    const lines = stayReport({ player: { name: 'Ash' } });
+    expect(lines[0]).toBe('SALVAGER Ash');
+    // The run number is the loop's one glimpse of itself (PLAN §5).
+    expect(lines[lines.length - 1]).toContain('RUN 62');
+    expect(stayReport({ player: { name: 'Ash' } }).slice(1)).toEqual(stayReport({ player: { name: 'Nox' } }).slice(1));
   });
 });

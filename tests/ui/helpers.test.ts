@@ -82,6 +82,17 @@ describe('missionStatus (AC-111)', () => {
     missionStatus(data, GATED, 'station');
     expect(JSON.stringify(data)).toBe(before);
   });
+
+  // SPEC-024 §4.6 / E24: the board must not offer the verdict a second time.
+  it('the campaign mission reads done at the station once campaign_done is set', () => {
+    const data = save((d) => d.progress.missionsDone.push('c6_m2'));
+    expect(missionStatus(data, MISSIONS.c6_m2, 'station')).toBe('replayable');
+    data.progress.flags.push('campaign_done');
+    expect(missionStatus(data, MISSIONS.c6_m2, 'station')).toBe('done');
+    // Only that mission: everything else stays replayable.
+    data.progress.missionsDone.push('c1_m1');
+    expect(missionStatus(data, OPEN, 'station')).toBe('replayable');
+  });
 });
 
 describe('requirementText (AC-112)', () => {

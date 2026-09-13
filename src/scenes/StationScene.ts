@@ -17,10 +17,11 @@ import type { SceneParams } from '@/core/StateMachine';
 import { DIALOGUE, MISSIONS, PLANET_IDS, PLANETS, type DialogueId, type MissionId } from '@/data/index';
 import { Economy } from '@/systems/Economy';
 import { Progression } from '@/systems/Progression';
-import { interludeToPlay } from '@/systems/StoryBeats';
+import { endingPending, interludeToPlay, stayReport } from '@/systems/StoryBeats';
 import { director } from '@/scenes/Director';
 import { CharacterPanel } from '@/ui/CharacterPanel';
 import { dialogueLayer } from '@/ui/DialogueUI';
+import { EndingOverlay } from '@/ui/EndingOverlay';
 import { el, h, testId } from '@/ui/dom';
 import { MissionBoard } from '@/ui/MissionBoard';
 import { SettingsPanel } from '@/ui/SettingsPanel';
@@ -181,7 +182,9 @@ export class StationScene extends UiScene<'station'> {
    * film rather than four (E30).
    */
   async #storyOnEntry(data: SaveV1, params: SceneParams['station']): Promise<void> {
-    // SPEC-024 inserts the pending-ending check here, first.
+    // SPEC-024 §4.5: an ending the save still owes comes before everything
+    // else — and after an escape there is no "else" at all.
+    if (!(await this.#pendingEnding(data))) return;
     const economy = this.#economy;
     const beats = director(this.services);
     const interlude = interludeToPlay(new Set(data.progress.flags));
@@ -196,6 +199,40 @@ export class StationScene extends UiScene<'station'> {
     // the debrief that was owed belongs to the entry that is already over.
     if (!this.#alive) return;
     if (params.arrivedFrom !== undefined) this.#debrief(data, params.arrivedFrom);
+  }
+
+  /**
+   * SPEC-024 §4.5: the ending replay. A reload anywhere inside the sequence —
+   * the dialogue, the film, the overlay, the escape veil (24-a) — leaves
+   * `campaign_done` set and `endingSeen` false, and every load enters the
+   * station (SPEC-014 §4.1), so this is where the moment is given back.
+   *
+   * The dialogue is not replayed: the film carries it. Under `?films=off`
+   * `playFilm` resolves at once and the overlay still runs, so the ending is
+   * never silently skipped (24-b).
+   *
+   * Returns false when the entry is over — an escape has already asked for the
+   * menu, and neither an interlude nor a debrief belongs to it any more.
+   */
+  async #pendingEnding(data: SaveV1): Promise<boolean> {
+    const ending = endingPending(new Set(data.progress.flags), data.progress.endingSeen);
+    if (ending === null) return true;
+    await director(this.services).playFilm(`ending_${ending}`, { musicAfter: ending === 'stay' ? 'station' : null });
+    if (!this.#alive) return false;
+    const overlay = new EndingOverlay(this.services.uiRoot);
+    if (ending === 'stay') {
+      await overlay.playStay(stayReport(data));
+      if (!this.#alive) return false;
+      data.progress.endingSeen = true;
+      this.services.save.request('mission');
+      return true;
+    }
+    await overlay.playEscape();
+    if (!this.#alive) return false;
+    data.progress.endingSeen = true;
+    this.services.save.request('manual');
+    void this.services.go('menu', { reason: 'quit' });
+    return false;
   }
 
   /** Plays the `<mission>_done` dialogue of arrived-from missions not yet debriefed. */
