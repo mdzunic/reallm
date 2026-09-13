@@ -84,16 +84,15 @@ test('1 — departure and card: the first trip to Cinder-4 plays the film, then 
   await expect(card).toContainText('CINDER-4');
   await expect(card).toContainText('Oil and grain under the dunes.');
   await expect(card).toContainText('containment level 1');
-  // The card does not hold the flight (§4.2, Decisions): the trip is flying
-  // under it — the loop is stepping the scene, not paused behind a beat — and
-  // the launch timeline runs out on its own 3 s.
-  const running = await page.evaluate(() => {
-    const stats = window.__reallm.stats();
-    return { state: stats.state, scene: stats.scene, updates: stats.updates };
-  });
-  expect(running).toMatchObject({ state: 'running', scene: 'flight' });
-  expect(running.updates).toBeGreaterThan(0);
-  expect((await info(page))['phase']).toBe('launch');
+  // The card does not hold the flight (§4.2, Decisions): the trip is running
+  // under it — frames are ticking and the game is not paused behind a beat —
+  // and the launch timeline runs out on its own further down.
+  const frame = (await page.evaluate(() => window.__reallm.stats())).frame;
+  await page.waitForTimeout(300);
+  const stats = await page.evaluate(() => window.__reallm.stats());
+  expect(stats).toMatchObject({ state: 'running', scene: 'flight' });
+  expect(stats.frame).toBeGreaterThan(frame);
+  await expect(card).toBeVisible();
   // 4.5 s on screen plus a 0.6 s fade, after the 0.3 s delay.
   await expect(card).toHaveCount(0, { timeout: 10_000 });
   await expect(page.locator('[data-testid="scene-label"]')).toHaveText('flight');
