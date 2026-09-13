@@ -28,6 +28,7 @@ import {
   type WeatherId,
 } from '@/data/index';
 import { discountTokens, missingRequirements, type DepartResult, type FailReason } from '@/systems/Economy';
+import { campaignLocked } from '@/systems/Missions';
 import type { Class, Item } from '@/data/index';
 
 // The schema-typed views of the content tables: on the `as const` literal types
@@ -217,11 +218,14 @@ export type MissionStatus = 'locked' | 'available' | 'active' | 'done' | 'replay
  * finished one is never `locked`. A done mission reads `replayable` only at the
  * station — the board is where a replay is accepted (E2) — and plain `done`
  * from the field, where the row is a record, not an offer.
+ *
+ * E24 / SPEC-024 §4.6: the mission that ended the campaign reads `done`
+ * everywhere, station included, so no surface offers a second verdict.
  */
 export function missionStatus(save: SaveV1, def: MissionDef, scene: MissionScene): MissionStatus {
   if (save.progress.missionsActive.some((entry) => entry.id === def.id)) return 'active';
   if ((save.progress.missionsDone as readonly string[]).includes(def.id)) {
-    return scene === 'station' ? 'replayable' : 'done';
+    return scene === 'station' && !campaignLocked(save, def) ? 'replayable' : 'done';
   }
   if (missingRequirements(save, def.requires).length > 0) return 'locked';
   return 'available';

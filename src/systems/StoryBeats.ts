@@ -205,3 +205,40 @@ export function revealCamera(t: number, reduceMotion: boolean): RevealPose {
   if (phase === 'hold') return { phase, k: 1 };
   return { phase, k: 1 - smoothstep(0, 1, (t - REVEAL_HOLD_END) / REVEAL.panOut) };
 }
+
+// ------------------------------------------------------ SPEC-024: the endings
+
+export type Ending = 'stay' | 'escape';
+
+/**
+ * SPEC-024 §4.5: the ending a save still owes, from its flags alone.
+ *
+ * `campaign_done` says the verdict was filed; `endingSeen` says its film and
+ * overlay were watched to the end. Everything in between — the ending
+ * dialogue, the film, the overlay — is a reload away from being lost (E29), so
+ * the pair is the whole memory: pending until the overlay resolves, and then
+ * never again. 24-d: a save from before the E24 lock can hold both flags;
+ * escape wins, because it is the one that ends the session.
+ */
+export function endingPending(flags: ReadonlySet<string>, endingSeen: boolean): Ending | null {
+  if (!flags.has('campaign_done') || endingSeen) return null;
+  return flags.has('ending_escape') ? 'escape' : 'stay';
+}
+
+/**
+ * §4.3: the five lines of the filed report the stay ending puts on screen.
+ *
+ * Everything but the name is fixed: the report is what Earth Command files at
+ * the end of a run that reached Eden, not a tally of the session. The last
+ * line is the ending's one quiet glimpse of the loop, matching the Warden's
+ * "A good run. Logged." in `ending_stay`.
+ */
+export function stayReport(save: { player: { name: string } }): readonly string[] {
+  return [
+    `SALVAGER ${save.player.name}`,
+    'WORLDS SURVEYED 6 of 6',
+    'DELIVERED oil · water · grain · lithium',
+    'VERDICT Eden-Prime viable — colonise',
+    'RUN 62 logged · a good run',
+  ];
+}

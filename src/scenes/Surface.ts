@@ -55,7 +55,7 @@ import { Nodes, Pickups } from '@/systems/Pickups';
 import { cumulativeXp, Progression, xpToNext } from '@/systems/Progression';
 import { SpawnDirector, type FrustumXZ } from '@/systems/Spawn';
 import { Weather, WEATHER_EFFECTS, type WeatherEffects } from '@/systems/Weather';
-import { revealCamera, revealDue, revealKey } from '@/systems/StoryBeats';
+import { revealCamera, revealDue, revealKey, stayReport, type Ending } from '@/systems/StoryBeats';
 import { hasNodeRadar } from '@/systems/UiHelpers';
 import { UiScene } from '@/scenes/base';
 import { director } from '@/scenes/Director';
@@ -67,6 +67,7 @@ import { DamageNumbers } from '@/ui/DamageNumbers';
 import { DeathOverlay } from '@/ui/DeathOverlay';
 import { dialogueLayer, type DialogueUI } from '@/ui/DialogueUI';
 import { el, h, testId } from '@/ui/dom';
+import { clearEndingOverlays, EndingOverlay } from '@/ui/EndingOverlay';
 import { Hud } from '@/ui/Hud';
 import { Minimap, type MinimapPoi } from '@/ui/Minimap';
 import { PauseMenu } from '@/ui/PauseMenu';
@@ -254,6 +255,14 @@ export class SurfaceScene extends UiScene<'surface'> {
   #modalOpen = 0;
   #choiceFor: MissionId | null = null;
   #leaving = false;
+  /** False from `dispose()`; what an awaited beat comes back to (SPEC-024 §4.1). */
+  #alive = true;
+
+  // SPEC-024 §4.1 — the ending sequence. `#ending` is set before `choose()`, so
+  // the `mission:completed` that follows knows to hold `c6_m2_done` back; it
+  // goes back to null when the stay overlay hands the planet over to free roam.
+  #ending: Ending | null = null;
+  #endingFor: MissionId | null = null;
 
   #defendPoi: LayoutPoi | null = null;
   #defendHp = 0;
@@ -362,6 +371,11 @@ export class SurfaceScene extends UiScene<'surface'> {
     const services = this.services;
     const planet = PLANETS[params.planet];
     this.#planet = planet;
+    // SPEC-024 §4.1: the ending sequence awaits a dialogue, a film and an
+    // overlay in turn; each step comes back to this before it touches the scene.
+    this.disposer.add(() => {
+      this.#alive = false;
+    });
 
     // A bare `?scene=` jump has no loaded save; run on an in-memory one seeded
     // from the session root (never persisted — SPEC-007 owns the slots).
@@ -1310,7 +1324,12 @@ export class SurfaceScene extends UiScene<'surface'> {
     if (reveal === null) {
       // A hold with nothing to run (a disposed overlay, say) must not wedge
       // the scene: release it rather than freezing the planet.
-      this.#holds = Math.max(0, this.#holds - 1);
+      //
+      // SPEC-024 §4.7 holds the same counter for the ending sequence, which
+      // has no per-step beat behind it at all — it is a chain of awaits on a
+      // dialogue, a film and an overlay, and it releases its own hold at the
+      // Continue. Releasing it here would hand Eden's last wave the ending.
+      if (this.#ending === null) this.#holds = Math.max(0, this.#holds - 1);
       return;
     }
     reveal.t += dt;
@@ -1423,19 +1442,102 @@ export class SurfaceScene extends UiScene<'surface'> {
   /** §4.7: a choice objective opens the modal prompt, once. */
   #updateChoice(missions: Missions): void {
     if (this.#choiceFor !== null) return;
+    const dialogue = this.#dialogue;
+    if (dialogue === null) return;
     for (const state of missions.active) {
       const choice = missions.choiceStage(state.id);
       if (choice === null) continue;
+      // SPEC-024 §4.2: `playChoice` clears the queue, and the stage's own
+      // intro (`c6_choice_intro`) was queued by the `mission:stageStarted` that
+      // opened this stage — one step earlier, in this very update. Waiting for
+      // the layer to go idle is what lets the intro play to its last line.
+      if (dialogue.busy) return;
       this.#choiceFor = state.id;
       this.#modalOpen++;
-      void (this.#dialogue as DialogueUI).playChoice(choice.prompt, choice.options.map((o) => o.label)).then((index) => {
+      void dialogue.playChoice(choice.prompt, choice.options.map((o) => o.label)).then((index) => {
         this.#modalOpen = Math.max(0, this.#modalOpen - 1);
         const id = this.#choiceFor;
         this.#choiceFor = null;
-        if (id !== null) this.#missions?.choose(id, index);
+        if (id === null) return;
+        const flags: readonly string[] = choice.options[index]?.flags ?? [];
+        const ending: Ending | null = flags.includes('ending_escape')
+          ? 'escape'
+          : flags.includes('ending_stay')
+            ? 'stay'
+            : null;
+        if (ending === null) {
+          this.#missions?.choose(id, index);
+          return;
+        }
+        // §4.1: the ending is claimed *before* the choice completes the
+        // mission, so the `mission:completed` it raises holds `c6_m2_done`
+        // back, and the simulation is held for the whole sequence (24-c).
+        this.#ending = ending;
+        this.#endingFor = id;
+        this.#holds++;
+        this.#missions?.choose(id, index);
+        void this.#runEnding(ending);
       });
       return;
     }
+  }
+
+  // ---------------------------------------------------------------- ending
+
+  /**
+   * SPEC-024 §4.1: the ending, in order — the dialogue that says the decision,
+   * the film that shows what it cost, and the overlay that has the last word.
+   * The simulation is held throughout, so Eden's last wave cannot interrupt it.
+   *
+   * Stay hands the planet back: `endingSeen` is written, the save is asked for,
+   * the hold is released and free roam carries on. Escape ends the session:
+   * the veil strips the HUD, the save is written immediately, and the menu
+   * transition disposes this scene. Each await comes back to a scene that may
+   * have been disposed under it (a quit, a recall), which is what `#alive`
+   * answers.
+   */
+  async #runEnding(ending: Ending): Promise<void> {
+    const services = this.services;
+    const dialogue = this.#dialogue;
+    const save = this.#save;
+    if (dialogue === null || save === null) {
+      this.#endEnding();
+      return;
+    }
+    await dialogue.play(`ending_${ending}`, { modal: true });
+    if (!this.#alive) return;
+    // §4.11 of SPEC-022: with films off this resolves at once, so the endings
+    // stay testable without the 36 s film (24-b).
+    await director(services).playFilm(`ending_${ending}`, { musicAfter: ending === 'stay' ? 'surface_calm' : null });
+    if (!this.#alive) return;
+    const overlay = new EndingOverlay(services.uiRoot);
+    // The overlay lives on the shared `#ui` root and takes itself down when it
+    // resolves; a quit from the pause menu while the card is up has to take it
+    // along too. `endingSeen` then stays false and the station replays it.
+    this.disposer.add(() => clearEndingOverlays(services.uiRoot));
+    if (ending === 'stay') {
+      await overlay.playStay(stayReport(save));
+      if (!this.#alive) return;
+      save.progress.endingSeen = true;
+      services.save.request('mission');
+      this.#endEnding();
+      return;
+    }
+    await overlay.playEscape();
+    if (!this.#alive) return;
+    save.progress.endingSeen = true;
+    // The last write of the run, before the scene goes: `manual` skips the
+    // autosave debounce, so the slot holds the ending even if the tab dies on
+    // the way to the menu.
+    services.save.request('manual');
+    void services.go('menu', { reason: 'quit' });
+  }
+
+  /** Free roam again: the hold goes, and `c6_m2_done` is no longer held back. */
+  #endEnding(): void {
+    this.#ending = null;
+    this.#endingFor = null;
+    this.#holds = Math.max(0, this.#holds - 1);
   }
 
   // ------------------------------------------------------------ consumable
@@ -1564,8 +1666,22 @@ export class SurfaceScene extends UiScene<'surface'> {
     // jumps to the pinned objective — nothing else is short-circuited.
     button('surface-smite', 'Smite', () => this.#debugSmite());
     button('surface-goto-objective', 'To objective', () => this.#debugGotoObjective());
+    // SPEC-024 §4.8: stage 0 of `c6_m2` is a 240 s defence, and an acceptance
+    // run cannot pay that per attempt. Dev builds only — `import.meta.env.DEV`
+    // strips the control (and its handler) out of a production bundle.
+    if (import.meta.env.DEV) {
+      button('surface-finish-stage', 'Finish stage', () => this.#debugFinishStage());
+    }
     this.services.uiRoot.append(strip);
     this.disposer.add(() => strip.remove());
+  }
+
+  /** §4.8: complete the pinned mission's current stage through the runtime. */
+  #debugFinishStage(): void {
+    const missions = this.#missions;
+    const pinned = missions?.pinned ?? null;
+    if (missions === null || pinned === null) return;
+    missions.debugFinishStage(pinned);
   }
 
   /** Kill the nearest live enemy within 80 m through the real player-kill path. */
@@ -2040,7 +2156,12 @@ export class SurfaceScene extends UiScene<'surface'> {
         ({ id }) => {
           this.#syncMissionStages();
           const dialogueId = MISSION_TABLE[id].dialogue.onComplete;
-          if (dialogueId !== undefined) this.#playDialogue(dialogueId);
+          // SPEC-024 §4.1: inside the ending sequence the mission's own
+          // debrief is held back — "Verdict filed" contradicts the escape, and
+          // the ending dialogue replaces it for the stay. The station plays it
+          // on the next docking (SPEC-014's debrief), where it belongs.
+          const held = this.#ending !== null && id === this.#endingFor;
+          if (dialogueId !== undefined && !held) this.#playDialogue(dialogueId);
           if (this.#terminalOpen) this.#renderTerminal();
         },
         this,

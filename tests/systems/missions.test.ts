@@ -1,14 +1,18 @@
 // SPEC-012 §6 — the mission runtime (AC-28..AC-44). Runs over the real
 // Economy/Progression stack so rewards, replay fractions and cargo behaviour
 // are the shipped ones, with a synthetic layout context for POI queries.
+//
+// SPEC-024 §6 adds the campaign's last minute: the E24 lock that keeps one save
+// to one ending, and the dev control that finishes a stage through the runtime.
 import { describe, expect, it } from 'vitest';
 import { EventBus, type GameEvents } from '@/core/Events';
 import { newSave, type SaveV1 } from '@/core/Save';
-import { MISSIONS, TUNING } from '@/data/index';
+import { MISSIONS, TUNING, type PlanetId } from '@/data/index';
 import { Economy } from '@/systems/Economy';
 import { Missions, type MissionContext } from '@/systems/Missions';
 import type { LayoutPoi } from '@/systems/Layout';
 import { Progression } from '@/systems/Progression';
+import { missionStatus } from '@/systems/UiHelpers';
 import { MARINE } from './combatFixtures';
 
 const STEP = 1 / 60;
@@ -34,9 +38,13 @@ interface Harness {
   saveRequests: string[];
 }
 
-function harness(patch?: (save: SaveV1) => void, scene: 'surface' | 'flight' = 'surface'): Harness {
+function harness(
+  patch?: (save: SaveV1) => void,
+  scene: 'surface' | 'flight' = 'surface',
+  planet: PlanetId = 'cinder4',
+): Harness {
   const save = newSave(0, MARINE, 42, 1_700_000_000_000);
-  save.progress.currentPlanet = 'cinder4';
+  save.progress.currentPlanet = planet;
   patch?.(save);
   const events = new EventBus<GameEvents>({ dev: false });
   const recorded: { name: string; payload: unknown }[] = [];
@@ -45,7 +53,7 @@ function harness(patch?: (save: SaveV1) => void, scene: 'surface' | 'flight' = '
   const requester = { request: (reason: string) => void saveRequests.push(reason) };
   const progression = new Progression(save, events);
   const economy = new Economy(save, events, progression, requester);
-  const missions = new Missions(save, economy, events, scene, 'cinder4', requester);
+  const missions = new Missions(save, economy, events, scene, planet, requester);
   const ctx: Harness['ctx'] = {
     player: { x: 0, z: 0, alive: true },
     poiAt: (id) => POIS.filter((p) => p.poi === id),
@@ -449,5 +457,127 @@ describe('Missions — objectiveEnemies and bossStage', () => {
     expect(h.missions.bossStage()).toBe('dune_wurm');
     h.events.emit('boss:defeated', { boss: 'dune_wurm' });
     expect(h.missions.bossStage()).toBeNull();
+  });
+});
+
+// --------------------------------------------------------------- SPEC-024 §6
+
+/** Eden, chapter 6 open, `c6_m2` standing on its choice stage. */
+function atTheVerdict(): Harness {
+  return harness(
+    (save) => {
+      save.progress.missionsDone.push('c6_m1');
+      save.progress.missionsActive.push({ id: 'c6_m2', stage: 1, counters: {} });
+    },
+    'surface',
+    'eden',
+  );
+}
+
+describe('Missions — the E24 lock (SPEC-024 §4.6)', () => {
+  it('campaign_done takes c6_m2 off the board and refuses an accept', () => {
+    const h = atTheVerdict();
+    h.missions.choose('c6_m2', 0);
+    expect(h.save.progress.flags).toContain('campaign_done');
+    expect(h.save.progress.missionsDone).toContain('c6_m2');
+
+    // The pad terminal and the board both read `available()`; the mission that
+    // ended the campaign is not on it, and asking for it anyway is refused.
+    expect(h.missions.available().map((def) => def.id)).not.toContain('c6_m2');
+    expect(h.missions.accept('c6_m2')).toEqual({ ok: false, reason: 'locked' });
+    expect(h.missions.active).toHaveLength(0);
+    // The board row reads done rather than replayable, so it has no Replay.
+    expect(missionStatus(h.save, MISSIONS.c6_m2, 'station')).toBe('done');
+
+    // Only that mission: chapter 6's other work is still replayable.
+    expect(h.missions.available().map((def) => def.id)).toContain('c6_m1');
+    expect(missionStatus(h.save, MISSIONS.c6_m1, 'station')).toBe('replayable');
+  });
+
+  it('one save can never hold both ending flags (E24)', () => {
+    for (const [index, taken, other] of [
+      [0, 'ending_stay', 'ending_escape'],
+      [1, 'ending_escape', 'ending_stay'],
+    ] as const) {
+      const h = atTheVerdict();
+      h.missions.choose('c6_m2', index);
+      expect(h.save.progress.flags).toContain(taken);
+      expect(h.save.progress.flags).not.toContain(other);
+
+      // Every door back into the mission, walked in turn: the terminal's list,
+      // an accept by id, the board's row — and then the choice itself, which
+      // has no state left to answer.
+      expect(h.missions.available().map((def) => def.id)).not.toContain('c6_m2');
+      expect(h.missions.accept('c6_m2').ok).toBe(false);
+      expect(missionStatus(h.save, MISSIONS.c6_m2, 'station')).toBe('done');
+      expect(h.missions.choiceStage('c6_m2')).toBeNull();
+      h.missions.choose('c6_m2', index === 0 ? 1 : 0);
+
+      expect(h.save.progress.flags).toContain(taken);
+      expect(h.save.progress.flags).not.toContain(other);
+      expect(h.save.progress.flags.filter((flag) => flag.startsWith('ending_'))).toHaveLength(1);
+    }
+  });
+});
+
+describe('Missions — debugFinishStage (SPEC-024 §4.8)', () => {
+  /**
+   * Everything the *runtime* put on the bus, in order. The events that drove a
+   * played stage — a POI reached, a scan — are what the control replaces, so
+   * they are dropped; every consequence of them has to match exactly.
+   */
+  const DRIVERS = new Set(['poi:reached', 'poi:scanned', 'enemy:killed', 'resource:collected']);
+  const stream = (h: Harness): { name: string; payload: unknown }[] =>
+    h.recorded.filter((entry) => !DRIVERS.has(entry.name));
+
+  it('finishes a mission exactly as playing it does: same events, same rewards', () => {
+    const played = harness();
+    played.missions.accept('c1_m1');
+    played.events.emit('poi:reached', { poi: 'landing_pad', instance: 0 });
+    played.events.emit('poi:scanned', { poi: 'dune_sea', instance: 0 });
+    played.run(60.1);
+    expect(played.save.progress.missionsDone).toEqual(['c1_m1']);
+
+    const forced = harness();
+    forced.missions.accept('c1_m1');
+    forced.missions.debugFinishStage('c1_m1'); // reach
+    forced.missions.debugFinishStage('c1_m1'); // scan
+    forced.missions.debugFinishStage('c1_m1'); // survive 60 s
+
+    expect(stream(forced)).toEqual(stream(played));
+    expect(forced.saveRequests).toEqual(played.saveRequests);
+    expect(forced.save.player.xp).toBe(played.save.player.xp);
+    expect(forced.save.player.tokens).toBe(played.save.player.tokens);
+    expect(forced.save.resources).toEqual(played.save.resources);
+    expect(forced.save.progress.missionsDone).toEqual(['c1_m1']);
+    expect(forced.save.progress.missionsActive).toEqual([]);
+  });
+
+  it('advances the four-minute defence it exists for, and leaves the choice alone', () => {
+    const played = harness((save) => save.progress.missionsDone.push('c6_m1'), 'surface', 'eden');
+    played.missions.accept('c6_m2');
+    played.run(240.1);
+
+    const forced = harness((save) => save.progress.missionsDone.push('c6_m1'), 'surface', 'eden');
+    forced.missions.accept('c6_m2');
+    forced.missions.debugFinishStage('c6_m2');
+
+    expect(stream(forced)).toEqual(stream(played));
+    expect(forced.missions.active[0]?.stage).toBe(1);
+    expect(forced.missions.choiceStage('c6_m2')).not.toBeNull();
+
+    // §4.8: the verdict is the player's. A second press finds a choice stage
+    // and leaves it open rather than filing a report nobody chose (E24).
+    forced.missions.debugFinishStage('c6_m2');
+    expect(forced.missions.choiceStage('c6_m2')).not.toBeNull();
+    expect(forced.save.progress.flags).not.toContain('campaign_done');
+    expect(forced.save.progress.flags.filter((flag) => flag.startsWith('ending_'))).toHaveLength(0);
+  });
+
+  it('ignores a mission that is not running', () => {
+    const h = harness();
+    h.missions.debugFinishStage('c1_m1');
+    expect(h.recorded).toHaveLength(0);
+    expect(h.save.progress.missionsDone).toEqual([]);
   });
 });

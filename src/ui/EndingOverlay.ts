@@ -19,6 +19,18 @@ function reducedMotion(): boolean {
   return document.documentElement.classList.contains('reduce-motion');
 }
 
+/**
+ * Take down whatever this layer has on screen. Both cards mount onto the
+ * shared `#ui` root and remove themselves when they resolve; a scene disposed
+ * under one — a quit from the pause menu while the report card is up
+ * (SPEC-024 §4.1) — calls this, so an ending cannot outlive the scene that
+ * raised it. The pending `playStay`/`playEscape` promise is simply never
+ * resolved, which is what leaves `endingSeen` false and the ending owed.
+ */
+export function clearEndingOverlays(host: HTMLElement): void {
+  for (const node of host.querySelectorAll('.overlay-ending, .overlay-ending-escape')) node.remove();
+}
+
 export class EndingOverlay {
   readonly #host: HTMLElement;
 

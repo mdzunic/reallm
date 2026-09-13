@@ -457,3 +457,56 @@ centre — the `#9fe3ff` quad, and nothing else in the scene is that colour.
       `e2e/post-chain.spec.ts`, `e2e/SPEC-013.spec.ts` green
 - [ ] the theme, the glass panels and the flight fx verified **on hardware**
       (desktop GPU + reference phone) — needs the human pass
+
+## SPEC-024 — the ending sequence (M7b)
+
+- **Build:** `spec/SPEC-024` — untagged
+- **Devices:**
+  - desktop — headless Chromium (Playwright, Linux container, **software GL**)
+  - desktop hardware GPU and phone-over-LAN — _not run: no display, no GPU and
+    no handset in the build container; needs the human pass_
+
+### What was walked, and how
+
+The campaign was finished **both ways from one prepared save** — chapter 5
+done, `c6_m1` behind it, `c6_m2` standing on its defend stage on Eden — with
+the four-minute defence finished through the new dev control
+(`surface-finish-stage`, §4.8). `e2e/SPEC-024.spec.ts` is that run, written
+down: seven cases over the six of §6.
+
+| Case | What it walks |
+|---|---|
+| 1 | `c6_choice_intro` reads in full — all three lines, in order, before `dialogue-choice-0` exists |
+| 2 | Stay: the modal `ending_stay`, the `ending_stay` film, the five-line filed report, Continue → free roam on Eden with the HUD, the input and the hold released |
+| 5 | The board after a stay: `mission-c6_m2` reads `done` with no Replay; `c6_m1` still offers one (E24) |
+| 3 | Escape: the `ending_escape` film, the veil with `instance/62 disconnected`, the HUD stripped, the menu — and Continue back into the station |
+| 4 | Tab killed inside the sequence: `campaign_done` + `ending_escape` + `endingSeen: false` in the slot, then Continue → the film and the veil replay **before** the interlude the same entry owed, and the ending dialogue does not replay (E29, 24-a) |
+| 6 | `?films=off`: dialogue → overlay, no film node anywhere (24-b) |
+| 7 | `?films=off` on the replay path: no film, and the report card still runs and still writes `endingSeen` |
+
+Input was checked where §4.7 puts it: a key held during the modal ending
+dialogue moves nothing, and the same key walks the salvager again after
+Continue.
+
+### Observations
+
+- The ending's hold exposed a real defect in SPEC-023's beat hold: the "a hold
+  with nothing to run releases itself" valve in `#updateReveal` fired on the
+  ending's hold on the very next step, because the ending has no per-step beat
+  behind it — Eden's last wave went on moving under the ending dialogue. The
+  valve now only releases a hold with neither a reveal nor an ending behind it,
+  and case 2 pins `held` at 1 from the choice to the Continue.
+- `import.meta.env.DEV` does strip the control: `surface-finish-stage` does not
+  appear anywhere in `dist/assets/index-*.js` after `vite build`.
+- Both ending films run in stills mode here (the suite aborts the MP4s, as
+  SPEC-023's does) — the pictures are SPEC-021/022's business, and this suite
+  is about which beat runs, in what order, and what it leaves in the save.
+
+### Checklist
+
+- [x] `npm run check` green (typecheck, 956 unit tests, production build)
+- [x] `e2e/SPEC-024.spec.ts` (new) green
+- [x] `e2e/SPEC-023.spec.ts` and `e2e/SPEC-012-missions.spec.ts` green — the
+      beat hold and the mission runtime this spec reaches into
+- [ ] both endings verified **on hardware** (desktop GPU + reference phone),
+      including the tab-close recovery on a real handset — needs the human pass
