@@ -555,7 +555,7 @@ actually takes.
 
 ### Checklist
 
-- [x] `npm run check` green (typecheck, 980 unit tests, production build)
+- [x] `npm run check` green (typecheck, 981 unit tests, production build)
 - [x] `e2e/SPEC-025.spec.ts` (new) green
 - [x] `e2e/SPEC-007.spec.ts` and `e2e/SPEC-010.spec.ts` green — the save
       pipeline and the economy, both re-pinned to the version-2 shape

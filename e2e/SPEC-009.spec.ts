@@ -153,6 +153,13 @@ async function readContent(page: Page): Promise<ContentDigest> {
       classes: Object.keys(C.classes),
       items: Object.keys(C.items),
       itemStats: {
+        // SPEC-025 §4.2: the slot and the line a weapon carries are content now.
+        pistol_service: [
+          item('pistol_service')['slot'],
+          item('pistol_service')['line'],
+          item('pistol_service')['tier'],
+          item('pistol_service')['damage'],
+        ],
         weapon_kinetic: [item('weapon_kinetic')['kind'], item('weapon_kinetic')['tier'], item('weapon_kinetic')['damage']],
         weapon_laser: [item('weapon_laser')['tier'], item('weapon_laser')['damage'], item('weapon_laser')['price']],
         weapon_lithium: [item('weapon_lithium')['tier'], item('weapon_lithium')['damage'], item('weapon_lithium')['pierce']],
@@ -264,8 +271,11 @@ test.describe('SPEC-009 content data layer', () => {
 
     expect(c.classes).toEqual(['marine', 'engineer', 'scout']); // AC-4
 
-    // AC-5: the twelve items of §4.2, with the stats that table pins.
+    // AC-5: the items of §4.2, with the stats that table pins. SPEC-025 §4.2
+    // adds the Service Pistol, the free sidearm every class now lands with, so
+    // there are thirteen of them and the handgun line leads the shelf.
     expect(c.items).toEqual([
+      'pistol_service',
       'weapon_kinetic',
       'weapon_laser',
       'weapon_plasma',
@@ -280,6 +290,7 @@ test.describe('SPEC-009 content data layer', () => {
       'plasma_cell',
     ]);
     expect(c.itemStats).toEqual({
+      pistol_service: ['sidearm', 'handgun', 0, 9],
       weapon_kinetic: ['weapon', 0, 12],
       weapon_laser: [1, 18, { tokens: 40 }],
       weapon_lithium: [3, 36, 2],

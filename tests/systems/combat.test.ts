@@ -245,6 +245,36 @@ describe('firing and aiming (§4.3)', () => {
     expect(h.world.projectiles.size).toBe(2);
   });
 
+  // SPEC-025 §4.8: the weapon in hand is `equipped.primary`, and only that slot
+  // moving re-reads it — a pistol going into the sidearm changes nothing that
+  // fires until SPEC-028 lands switching.
+  it('fires the primary, and re-reads it only when the primary slot moves', () => {
+    const h = harness({ patch: (s) => (s.equipped.primary = 'weapon_laser') });
+    h.aim = { x: 10, z: 0 };
+    /** One shot, then long enough for the cooldown and the shot's ttl to run out. */
+    const shotSpeed = (): number => {
+      h.input.buttons.fire.down = true;
+      h.step();
+      const speed = h.world.projectiles.at(h.world.projectiles.size - 1).vx;
+      h.input.buttons.fire.down = false;
+      h.run(1);
+      expect(h.world.projectiles.size).toBe(0);
+      return speed;
+    };
+
+    expect(shotSpeed()).toBeCloseTo(40, 6); // the laser carbine's projectile
+
+    // A sidearm equip leaves the barrel alone.
+    h.save.equipped.sidearm = 'pistol_service';
+    h.events.emit('gear:equipped', { slot: 'sidearm', itemId: 'pistol_service' });
+    expect(shotSpeed()).toBeCloseTo(40, 6);
+
+    // Moving the primary does change it.
+    h.save.equipped.primary = 'weapon_kinetic';
+    h.events.emit('gear:equipped', { slot: 'primary', itemId: 'weapon_kinetic' });
+    expect(shotSpeed()).toBeCloseTo(22, 6);
+  });
+
   it('facing follows movement when not firing', () => {
     const h = harness();
     h.world.player.vx = 1;

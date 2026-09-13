@@ -1,7 +1,8 @@
-// The content-invariant suite (SPEC-009 §7). Seventeen invariants, one `it`
-// each, numbered as the spec numbers them. Between them they cover everything
-// the compiler cannot: counts, reachability, requirement cycles, POI/objective
-// compatibility, balance pins and text limits (PLAN §11, E26).
+// The content-invariant suite (SPEC-009 §7, extended by SPEC-018 §7 and
+// SPEC-025 §4.7). Nineteen invariants, one `it` each, numbered as the specs
+// number them. Between them they cover everything the compiler cannot: counts,
+// reachability, requirement cycles, POI/objective compatibility, the slot/line
+// split, balance pins and text limits (PLAN §11, E26).
 //
 // The compiler covers the rest — a mission naming an enemy that does not exist
 // or a planet gating on a flag that does not exist is a `tsc` failure, which the
