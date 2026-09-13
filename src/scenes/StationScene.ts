@@ -17,6 +17,8 @@ import type { SceneParams } from '@/core/StateMachine';
 import { DIALOGUE, MISSIONS, PLANET_IDS, PLANETS, type DialogueId, type MissionId } from '@/data/index';
 import { Economy } from '@/systems/Economy';
 import { Progression } from '@/systems/Progression';
+import { interludeToPlay } from '@/systems/StoryBeats';
+import { director } from '@/scenes/Director';
 import { CharacterPanel } from '@/ui/CharacterPanel';
 import { dialogueLayer } from '@/ui/DialogueUI';
 import { el, h, testId } from '@/ui/dom';
@@ -47,6 +49,8 @@ export class StationScene extends UiScene<'station'> {
   #rail: HTMLDivElement | null = null;
   #tab: StationTab = 'missions';
   #leaving = false;
+  /** False from `dispose()`; what an awaited film comes back to (SPEC-023 §4.3). */
+  #alive = true;
 
   constructor(services: GameServices) {
     super(services, 'station', 'station');
@@ -58,12 +62,27 @@ export class StationScene extends UiScene<'station'> {
 
   protected onEnter(params: SceneParams['station']): void {
     this.useEnvironment(NEUTRAL_SKY, HUB_ENVIRONMENT_INTENSITY);
+    this.disposer.add(() => {
+      this.#alive = false;
+    });
     this.#buildBackdrop();
     const data = this.services.save.current;
     if (data !== null) {
       const progression = new Progression(data, this.services.events);
       this.#economy = new Economy(data, this.services.events, progression, this.services.save);
-      this.#enterEffects(data, params);
+      this.#enterEffects(data);
+      // SPEC-023 §4.3: the story the entry owes — an interlude, then the
+      // debrief — runs off `scene:entered` rather than here, so a film never
+      // holds the transition open behind it.
+      this.disposer.add(
+        this.services.events.on(
+          'scene:entered',
+          (payload) => {
+            if (payload.id === 'station') void this.#storyOnEntry(data, params);
+          },
+          this,
+        ),
+      );
     }
     this.#mountUi(params);
   }
@@ -134,7 +153,7 @@ export class StationScene extends UiScene<'station'> {
 
   // ---------------------------------------------------------- enter effects
 
-  #enterEffects(data: SaveV1, params: SceneParams['station']): void {
+  #enterEffects(data: SaveV1): void {
     const economy = this.#economy;
     if (economy === null) return;
     // AC-21 / E1: the subsidy, and ARIA's line only when it granted oil.
@@ -148,7 +167,34 @@ export class StationScene extends UiScene<'station'> {
     data.progress.location = 'station';
     data.progress.currentPlanet = null;
     this.services.save.request('station_enter');
-    // AC-24: what finished out there gets its line here, once per session.
+  }
+
+  /**
+   * SPEC-023 §4.3: the entry's story, in order — the chapter interlude the
+   * flags still owe, then SPEC-014's debrief (AC-24: what finished out there
+   * gets its line here, once per session).
+   *
+   * The trigger is the flags, not `arrivedFrom`: a Continue or a Load into the
+   * station plays a pending interlude too (23-h). Skipping counts as seen, and
+   * with `?films=off` the flags are left alone and only the debrief runs
+   * (23-f). A catch-up marks every pending chapter, so an old save watches one
+   * film rather than four (E30).
+   */
+  async #storyOnEntry(data: SaveV1, params: SceneParams['station']): Promise<void> {
+    // SPEC-024 inserts the pending-ending check here, first.
+    const economy = this.#economy;
+    const beats = director(this.services);
+    const interlude = interludeToPlay(new Set(data.progress.flags));
+    if (interlude !== null && beats.enabled && economy !== null) {
+      await beats.playFilm(interlude.film, { musicAfter: 'station' });
+      // E29: the flags are written when the film settles — ended or skipped —
+      // so a reload during one replays it at the next entry.
+      for (const flag of interlude.markSeen) economy.setFlag(flag);
+      this.services.save.request('mission');
+    }
+    // A transition during the film skips it (22-c) and disposes this scene;
+    // the debrief that was owed belongs to the entry that is already over.
+    if (!this.#alive) return;
     if (params.arrivedFrom !== undefined) this.#debrief(data, params.arrivedFrom);
   }
 

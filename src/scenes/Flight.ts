@@ -19,8 +19,11 @@ import type { GameServices } from '@/core/Services';
 import type { SceneParams } from '@/core/StateMachine';
 import { cargoCap, maxHp } from '@/core/Save';
 import { FLIGHT_ASSETS, PLANET_ART } from '@/data/assets';
-import { ENEMIES, PLANETS, type PlanetDef } from '@/data/index';
+import { CHAPTER_CARDS, ENEMIES, PLANETS, type PlanetDef } from '@/data/index';
 import { Economy } from '@/systems/Economy';
+import { CARD, cardDue, cardKey } from '@/systems/StoryBeats';
+import { showChapterCard } from '@/ui/ChapterCard';
+import { director } from '@/scenes/Director';
 import {
   CONVERGE_DEPTH,
   EXPLOSION_SECONDS,
@@ -168,6 +171,7 @@ export class FlightScene extends UiScene<'flight'> {
     if (this.#firstLanding) {
       this.ui.toast(`ARIA: ${this.#planet.name} on approach. ${this.#planet.blurb}`, 'info', 6000);
     }
+    this.#showChapterCard(save);
 
     this.disposer.add(this.services.events.on('ship:damaged', () => {
       this.#hud?.damageFlash();
@@ -247,6 +251,30 @@ export class FlightScene extends UiScene<'flight'> {
         delete scope.__reallmFlight;
       });
     }
+  }
+
+  /**
+   * SPEC-023 §4.2: the chapter card over the launch, on the first trip to a
+   * world and once a page session (23-a). The launch phase has no hazards for
+   * its first 3 s and the card is text over it, so nothing here waits for the
+   * card and nothing about the flight's timeline changes — a trip that ends
+   * early takes the card with it through the `Disposer`.
+   */
+  #showChapterCard(save: SaveV1): void {
+    const services = this.services;
+    const planet = this.#planet.id;
+    const beats = director(services);
+    if (!beats.enabled || !cardDue(planet, save.progress.visits, beats.session)) return;
+    beats.session.add(cardKey(planet));
+    const reduceMotion = services.settings.get().reduceMotion;
+    let remove: (() => void) | null = null;
+    const timer = setTimeout(() => {
+      remove = showChapterCard(services.uiRoot, CHAPTER_CARDS[planet], reduceMotion);
+    }, CARD.delay * 1000);
+    this.disposer.add(() => {
+      clearTimeout(timer);
+      remove?.();
+    });
   }
 
   #mountUi(): void {

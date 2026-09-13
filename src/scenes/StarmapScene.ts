@@ -23,7 +23,9 @@ import {
 } from '@/data/index';
 import { Economy } from '@/systems/Economy';
 import { Progression } from '@/systems/Progression';
+import { departureDue, departureKey } from '@/systems/StoryBeats';
 import { departReason, formatTime, missionStatus, requirementText } from '@/systems/UiHelpers';
+import { director } from '@/scenes/Director';
 import { confirmSheet } from '@/ui/ConfirmSheet';
 import { el, h, testId } from '@/ui/dom';
 import type { Look } from '@/core/Quality';
@@ -368,10 +370,20 @@ export class StarmapScene extends UiScene<'starmap'> {
         }
         return true;
       },
-    ).then((paid) => {
+    ).then(async (paid) => {
       if (!paid) return;
       this.#leaving = true;
       this.#renderInfo(); // AC-56: Depart greys out for the ride
+      // SPEC-023 §4.1: the departure film plays here — after the fuel is paid,
+      // before the flight — on the first trip to a world. The star map has
+      // nothing to hold and no timeline of its own, and the Depart button is
+      // already disabled for the ride, so the film is simply awaited. The
+      // flight scene starts its own bed, so the film's music fades to nothing.
+      const beats = director(this.services);
+      if (beats.enabled && departureDue(planet, data.progress.visits, beats.session)) {
+        beats.session.add(departureKey(planet));
+        await beats.playFilm('departure', { musicAfter: null });
+      }
       void this.services.go('flight', { destination: planet }).then((went) => {
         if (!went) {
           this.#leaving = false;

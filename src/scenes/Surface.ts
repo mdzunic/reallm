@@ -19,6 +19,7 @@ import type { GameServices } from '@/core/Services';
 import type { SceneParams } from '@/core/StateMachine';
 import type { Renderer } from '@/core/Renderer';
 import {
+  BOSS_REVEALS,
   DIALOGUE,
   ENEMIES,
   FOLLOWERS,
@@ -28,8 +29,10 @@ import {
   SURFACE_ASSETS,
   SURFACE_SHARED_ASSETS,
   TUNING,
+  type BossRevealDef,
   type Dialogue,
   type DialogueId,
+  type EnemyId,
   type Item,
   type ItemId,
   type MissionDef,
@@ -52,8 +55,10 @@ import { Nodes, Pickups } from '@/systems/Pickups';
 import { cumulativeXp, Progression, xpToNext } from '@/systems/Progression';
 import { SpawnDirector, type FrustumXZ } from '@/systems/Spawn';
 import { Weather, WEATHER_EFFECTS, type WeatherEffects } from '@/systems/Weather';
+import { revealCamera, revealDue, revealKey } from '@/systems/StoryBeats';
 import { hasNodeRadar } from '@/systems/UiHelpers';
 import { UiScene } from '@/scenes/base';
+import { director } from '@/scenes/Director';
 import { INSTANCES_PER_PART } from '@/views/ProceduralMeshes';
 import { layerFromAssets } from '@/views/ProceduralTextures';
 import { advanceViewTime, RESOURCE_COLORS, shakeOffset, SurfaceView, type ShakeState } from '@/views/SurfaceView';
@@ -65,6 +70,7 @@ import { el, h, testId } from '@/ui/dom';
 import { Hud } from '@/ui/Hud';
 import { Minimap, type MinimapPoi } from '@/ui/Minimap';
 import { PauseMenu } from '@/ui/PauseMenu';
+import { RevealOverlay } from '@/ui/RevealOverlay';
 import { RotateOverlay } from '@/ui/RotateOverlay';
 import { TouchControls } from '@/ui/TouchControls';
 
@@ -166,6 +172,30 @@ interface PoiRuntime {
   scanned: boolean;
 }
 
+/** A boss reveal in flight (SPEC-023 §4.4): the clock and the camera's two ends. */
+interface RevealState {
+  /** Seconds since the beat started; `revealCamera` reads it. */
+  t: number;
+  fromX: number;
+  fromZ: number;
+  toX: number;
+  toZ: number;
+  /** The hold's roar and words fire once, on the step that reaches it. */
+  held: boolean;
+  /** What `input.enabled` was before the beat took it. */
+  inputWas: boolean;
+}
+
+/** §4.4: the longest frame the held view clock will believe (E23's cap, per beat). */
+const HELD_FRAME_CAP = 0.1;
+
+/**
+ * `BOSS_REVEALS` read through a schema type, keyed by any enemy: the arena
+ * hands over the stage's `EnemyId` and only the five bosses have a reveal
+ * (the pattern `systems/Economy.ts` uses on the content tables).
+ */
+const BOSS_REVEAL_TABLE: Partial<Record<EnemyId, BossRevealDef>> = BOSS_REVEALS;
+
 export class SurfaceScene extends UiScene<'surface'> {
   override readonly pausable = true;
   /**
@@ -201,6 +231,15 @@ export class SurfaceScene extends UiScene<'surface'> {
   #arena: ArenaState | null = null;
   #bossId: number | null = null;
 
+  // SPEC-023 §4.4 — the boss reveal. `#holds` is the beat-hold counter
+  // SPEC-024's ending shares: while it is above zero the fixed step advances
+  // the beat and nothing else, so nothing can touch the player (AC-40).
+  #holds = 0;
+  #reveal: RevealState | null = null;
+  /** 23-b: the arena woke behind a modal dialogue; the reveal waits for it. */
+  #revealPending: EnemyId | null = null;
+  #revealOverlay: RevealOverlay | null = null;
+
   // Weather response state (§4.6): targets move on `weather:changed`, the
   // scene lerps `#stormIntensity` toward them over 3 s.
   #stormEffects: WeatherEffects = WEATHER_EFFECTS.sandstorm;
@@ -223,8 +262,18 @@ export class SurfaceScene extends UiScene<'surface'> {
   #defendDamageAccum = 0;
   #followerRespawnIn = 0;
 
+  /** The view clock `SurfaceFrame.time` reads (SPEC-019 §4.7, SPEC-023 §4.4). */
+  #viewTime = 0;
   /** The view time of the last rendered frame — what `SurfaceFrame.dt` spans. */
   #lastViewTime = 0;
+  /**
+   * View seconds that accrued while the simulation was held (SPEC-023 §4.4).
+   * `world.time` stands still through a beat, so this is what keeps the boss
+   * breathing; it only ever grows, so the view clock stays monotonic.
+   */
+  #heldViewTime = 0;
+  /** `performance.now()` of the last rendered frame, in seconds; −1 before the first. */
+  #lastRenderWall = -1;
 
   // SPEC-019 §4.6–§4.7 — hit feedback state, all scene-local (19-i).
   #numbers: DamageNumbers | null = null;
@@ -518,6 +567,17 @@ export class SurfaceScene extends UiScene<'surface'> {
     this.disposer.add(() => services.audio.duck(false));
     const rotate = new RotateOverlay(services.uiRoot, services.events);
     this.disposer.add(() => rotate.dispose());
+    // SPEC-023 §4.4: the reveal's letterbox and words. Built with the scene so
+    // a beat interrupted by a quit takes its key capture down with it.
+    const reveal = new RevealOverlay(services.uiRoot);
+    this.#revealOverlay = reveal;
+    this.disposer.add(() => {
+      reveal.dispose();
+      this.#revealOverlay = null;
+      this.#reveal = null;
+      this.#revealPending = null;
+      this.#holds = 0;
+    });
     this.#dialogue = dialogueLayer(services.uiRoot, services.events, {
       input: services.input,
       saveKey: () => this.services.save.current,
@@ -577,6 +637,16 @@ export class SurfaceScene extends UiScene<'surface'> {
     this.#edges.beginStep(input.buttons, this.services.loop.stats.frame);
     this.services.save.addPlaytime(dt);
 
+    // SPEC-023 §4.4: a held beat advances its own clock and returns before any
+    // system update — no combat, projectiles, missions, arena, choice, spawn,
+    // pickups, nodes or weather. The edges were sampled above and are dropped
+    // unread, so a press made during the beat never fires after it. Playtime
+    // still accrues; no `checkpoint` save is requested.
+    if (this.#holds > 0) {
+      this.#updateReveal(dt);
+      return;
+    }
+
     // The touch pause button; Escape/P live in main.ts (SPEC-014 AC-82).
     if (input.scheme === 'touch' && this.#edges.pressed('pause')) {
       void this.services.scenes.pause();
@@ -635,10 +705,19 @@ export class SurfaceScene extends UiScene<'surface'> {
   override render(renderer: Renderer): void {
     const world = this.#world;
     const view = this.#view;
+    // SPEC-023 §4.4: a held beat freezes `world.time`, so the view clock runs
+    // on this frame delta instead — the boss keeps breathing while nothing in
+    // the simulation moves. Capped like the loop's own frame delta, so a
+    // hitch or a hidden tab cannot jump the animation.
+    const wall = performance.now() / 1000;
+    const frameDelta = this.#lastRenderWall < 0 ? 0 : Math.min(HELD_FRAME_CAP, Math.max(0, wall - this.#lastRenderWall));
+    this.#lastRenderWall = wall;
+    if (this.#holds > 0) this.#heldViewTime += frameDelta;
     if (world !== null && view !== null) {
       // SPEC-019 §4.7: hit-stop freezes the view clock for ≤ 2 rendered
       // frames; the fixed-step simulation above never sees it (SPEC-002).
-      const time = advanceViewTime(this.#hitStop, world.time);
+      const time = advanceViewTime(this.#hitStop, world.time) + this.#heldViewTime;
+      this.#viewTime = time;
       const dt = Math.max(0, time - this.#lastViewTime);
       this.#lastViewTime = time;
       this.#renderFeedback(world, view);
@@ -765,10 +844,14 @@ export class SurfaceScene extends UiScene<'surface'> {
     shake.until = time + duration;
   }
 
-  /** The view clock the shake and hit-stop share (§4.7). */
+  /**
+   * The view clock the shake and hit-stop share (§4.7) — the same one
+   * `render()` hands the view, including the seconds a held beat added, so a
+   * shake that outlives a beat decays on the clock it was started on.
+   */
   #viewTimeNow(): number {
-    if (this.#hitStop.frames > 0) return this.#hitStop.time;
-    return this.#world?.time ?? 0;
+    if (this.#hitStop.frames > 0) return this.#hitStop.time + this.#heldViewTime;
+    return (this.#world?.time ?? 0) + this.#heldViewTime;
   }
 
   override debugInfo(): Record<string, number | string> {
@@ -777,6 +860,10 @@ export class SurfaceScene extends UiScene<'surface'> {
     info['spawned'] = this.#spawned;
     info['elites'] = this.#elites;
     info['kills'] = this.#kills;
+    // SPEC-023 §4.4: the beat-hold counter and the view clock it keeps running
+    // while `world.time` stands still.
+    info['held'] = this.#holds;
+    info['viewTime'] = Math.round(this.#viewTime * 100) / 100;
     if (this.#world !== null) {
       const world = this.#world;
       info['enemies'] = world.enemies.size;
@@ -1115,7 +1202,20 @@ export class SurfaceScene extends UiScene<'surface'> {
         this.#bossId = boss.id;
         this.#arena = { x: nest.x, z: nest.z, radius: nest.radius, locked: true };
         this.#weather?.suppress(true); // E15
+        // SPEC-023 §4.4: the reveal rides the arena's own spawn, so it happens
+        // exactly where the fight starts and never on the debug shortcut.
+        this.#armReveal(wanted, boss);
       }
+    }
+
+    // 23-b: a reveal that waited for a modal dialogue starts on the first step
+    // with none open — the boss spawned as usual and simply stood there. The
+    // live boss is looked up again, because the wait may have outlived it.
+    const pending = this.#revealPending;
+    if (pending !== null && this.#modalOpen === 0) {
+      this.#revealPending = null;
+      const live = this.#findBoss(world);
+      if (live !== null) this.#startReveal(pending, live);
     }
 
     const boss = this.#findBoss(world);
@@ -1137,6 +1237,105 @@ export class SurfaceScene extends UiScene<'surface'> {
         world.arena = null;
       }
     }
+  }
+
+  // ----------------------------------------------------------- boss reveal
+
+  /**
+   * SPEC-023 §4.4: claim the beat, or park it behind an open dialogue (23-b).
+   * The session key is taken here rather than at the start, so a reveal that
+   * waits for a dialogue cannot be claimed twice by the steps in between.
+   */
+  #armReveal(boss: EnemyId, entity: EnemyEntity): void {
+    const beats = director(this.services);
+    if (!beats.enabled || !revealDue(boss, beats.session)) return;
+    beats.session.add(revealKey(boss));
+    if (this.#modalOpen > 0) {
+      this.#revealPending = boss;
+      return;
+    }
+    this.#startReveal(boss, entity);
+  }
+
+  /**
+   * §4.4: hold the simulation, take the input, swing the camera onto the boss
+   * and put the letterbox up. `music('boss')` lands here, at the start; the
+   * roar and the words wait for the hold phase.
+   */
+  #startReveal(boss: EnemyId, entity: EnemyEntity): void {
+    const world = this.#world;
+    const overlay = this.#revealOverlay;
+    const def = BOSS_REVEAL_TABLE[boss];
+    if (world === null || overlay === null || def === undefined) return;
+    this.#reveal = {
+      t: 0,
+      fromX: world.player.x,
+      fromZ: world.player.z,
+      toX: entity.x,
+      toZ: entity.z,
+      held: false,
+      inputWas: this.services.input.enabled,
+    };
+    this.#holds++;
+    this.services.input.setEnabled(false);
+    // §4.4, Camera: no shake during a reveal — whatever was still decaying
+    // ends here rather than jittering the pan.
+    this.#shake.amplitude = 0;
+    this.#shake.until = 0;
+    // The bed the fight runs on, from the first frame of the beat. `#music`
+    // and its hold move with it, so `#updateMusic` does not undo it after.
+    this.#music = 'boss';
+    this.#musicHold = MUSIC_HOLD_SECONDS;
+    this.services.audio.music('boss');
+    overlay.show(
+      {
+        name: ENEMIES[boss].name.toUpperCase(),
+        epithet: def.epithet,
+        speaker: def.speaker,
+        line: def.line,
+        glitch: def.glitch === true,
+      },
+      () => this.#endReveal(),
+    );
+  }
+
+  /**
+   * §4.4: one fixed step of a held beat. The camera rides `revealCamera`'s `k`
+   * from the player to the boss and back; under reduce motion those are cuts.
+   */
+  #updateReveal(dt: number): void {
+    const reveal = this.#reveal;
+    if (reveal === null) {
+      // A hold with nothing to run (a disposed overlay, say) must not wedge
+      // the scene: release it rather than freezing the planet.
+      this.#holds = Math.max(0, this.#holds - 1);
+      return;
+    }
+    reveal.t += dt;
+    const pose = revealCamera(reveal.t, this.services.settings.get().reduceMotion);
+    if (pose.phase === 'hold' && !reveal.held) {
+      reveal.held = true;
+      this.#revealOverlay?.hold();
+      this.services.audio.play('boss_roar', { priority: 2 });
+    }
+    this.#camTarget.x = reveal.fromX + (reveal.toX - reveal.fromX) * pose.k;
+    this.#camTarget.z = reveal.fromZ + (reveal.toZ - reveal.fromZ) * pose.k;
+    this.#placeCamera(0, 0);
+    if (pose.phase === 'done') this.#endReveal();
+  }
+
+  /**
+   * §4.4, End — on the last phase or on Skip: the overlay goes, the hold is
+   * released, input comes back, and the camera follows the player again from
+   * the next frame (`#followCamera` eases `#camTarget` home).
+   */
+  #endReveal(): void {
+    const reveal = this.#reveal;
+    if (reveal === null) return;
+    this.#reveal = null;
+    this.#revealOverlay?.hide();
+    this.#holds = Math.max(0, this.#holds - 1);
+    this.services.input.setEnabled(reveal.inputWas);
   }
 
   #findBoss(world: CombatWorld): EnemyEntity | null {
@@ -1290,6 +1489,9 @@ export class SurfaceScene extends UiScene<'surface'> {
     const boss = this.#findBoss(world);
     if (boss !== null) boss.state = 'dead'; // silent — no loot, no defeat event
     this.#bossId = null;
+    // E31: a reveal still waiting on a dialogue dies with the boss. Its session
+    // key stays taken, so walking back in spawns the boss and nothing else.
+    this.#revealPending = null;
     world.arena = null;
     this.#arena = null;
     this.#weather?.suppress(false);
