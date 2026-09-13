@@ -1324,7 +1324,12 @@ export class SurfaceScene extends UiScene<'surface'> {
     if (reveal === null) {
       // A hold with nothing to run (a disposed overlay, say) must not wedge
       // the scene: release it rather than freezing the planet.
-      this.#holds = Math.max(0, this.#holds - 1);
+      //
+      // SPEC-024 §4.7 holds the same counter for the ending sequence, which
+      // has no per-step beat behind it at all — it is a chain of awaits on a
+      // dialogue, a film and an overlay, and it releases its own hold at the
+      // Continue. Releasing it here would hand Eden's last wave the ending.
+      if (this.#ending === null) this.#holds = Math.max(0, this.#holds - 1);
       return;
     }
     reveal.t += dt;
