@@ -368,6 +368,8 @@ export interface HudModel {
   objective: { title: string; line: string; value: number; target: number } | null;
   tracker: HudTracker | null;
   weather: { warning: WeatherId | null; active: WeatherId | null; secondsLeft: number };
+  /** SPEC-030 §4.5: the chip under the weather banner (D-11). */
+  shelter: 'none' | 'sheltered' | 'hidden';
   boss: { name: string; hp: number; max: number } | null;
   /** SPEC-028 §3: the quick bar's two halves; both `null` off the surface. */
   loadout: { active: WeaponSlot; slots: Record<WeaponSlot, SlotView>; fallback: boolean } | null;
@@ -398,6 +400,7 @@ export function createHudModel(): HudModel {
     objective: null,
     tracker: null,
     weather: { warning: null, active: null, secondsLeft: 0 },
+    shelter: 'none',
     boss: null,
     loadout: null,
     quick: null,

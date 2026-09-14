@@ -782,6 +782,15 @@ html.reduce-motion .sheet {
   color: var(--warn);
 }
 
+/* SPEC-030 D-11: the shelter chip under the weather banner. */
+.hud-shelter {
+  padding: 2px 10px;
+  border-radius: 6px;
+  background: rgba(0, 0, 0, 0.55);
+  color: #8ad7ff;
+  letter-spacing: 0.08em;
+}
+
 .hud-objective {
   padding: 4px 12px;
   border-radius: 6px;

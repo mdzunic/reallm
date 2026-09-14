@@ -191,6 +191,10 @@ export class MapScreen {
     const present = new Set<MapIconKind>(['player', 'objective', 'enemy']);
     for (const poi of this.#deps.planet.surface.pois) present.add(poiIcon(poi.kind));
     for (const node of this.#deps.planet.surface.nodes) present.add(nodeIcon(node.resource));
+    // SPEC-030 §4.10: the shelter rows appear on planets that have shelters.
+    const features = this.#deps.planet.surface.features;
+    if (features.caves > 0) present.add('shelter_cave');
+    if (features.wrecks > 0) present.add('shelter_wreck');
     const legend = testId(el('div', 'map-legend'), 'map-legend');
     for (const kind of MAP_ICON_KINDS) {
       if (!present.has(kind)) continue;

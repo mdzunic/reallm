@@ -79,7 +79,8 @@ import {
   type PathGrid,
 } from '@/systems/Guidance';
 import { fillQuickFromPickup, quickEligible, refillQuick, type SlotView } from '@/systems/Loadout';
-import { generateLayout, ObstacleGrid, WALL_INSET, type Layout, type LayoutPoi } from '@/systems/Layout';
+import { generateLayout, ObstacleGrid, WALL_INSET, type Layout, type LayoutPoi, type LayoutShelter } from '@/systems/Layout';
+import { REVEAL_AFTER_SHOT, SHELTER_INSET, shelterAt, STORM_SHELTER_FACTOR } from '@/systems/Shelter';
 import { nodeIcon, poiIcon } from '@/systems/MapModel';
 import { Missions, type MissionContext, type ObjectiveProgress } from '@/systems/Missions';
 import { Nodes, Pickups } from '@/systems/Pickups';
@@ -363,6 +364,11 @@ export class SurfaceScene extends UiScene<'surface'> {
 
   #terminal: HTMLElement | null = null;
   #terminalOpen = false;
+
+  // SPEC-030 §4.5 — the shelter the player is inside, and the chip state.
+  #insideShelter: LayoutShelter | null = null;
+  #shelterState: 'none' | 'sheltered' | 'hidden' = 'none';
+  #shelterDiscovered: boolean[] = [];
 
   #deathAt: number | null = null;
   #modalOpen = 0;
@@ -693,6 +699,13 @@ export class SurfaceScene extends UiScene<'surface'> {
     this.#pad = layout.pois.find((p) => p.kind === 'landing_pad') ?? null;
     this.#arenaPoi = layout.pois.find((p) => p.kind === 'arena') ?? null;
 
+    // SPEC-030 §4.10: shelter discovery restores from the save like POIs.
+    this.#insideShelter = null;
+    this.#shelterState = 'none';
+    this.#shelterDiscovered = layout.shelters.map((s) =>
+      save.progress.poisDiscovered.includes(`${planet.id}:shelter:${s.index}`),
+    );
+
     // The mission context: one object for the scene's lifetime; `#missionCtx`
     // refreshes the player/follower snapshots in place each step.
     this.#ctx = {
@@ -1000,6 +1013,9 @@ export class SurfaceScene extends UiScene<'surface'> {
 
     combat.update(dt, input, modal ? null : this.#aimWorld(world));
 
+    // SPEC-030 §4.5: after combat (so a shot this step ends hiding at once),
+    // before weather (so the DPS skip sees this step's "inside").
+    this.#updateShelter(world);
     this.#updateWeather(world, dt);
     missions.update(dt, this.#missionContext(world));
     this.#updatePois(world, dt);
@@ -1318,6 +1334,11 @@ export class SurfaceScene extends UiScene<'surface'> {
     info['stuckLevel'] = this.#stuck.level;
     info['waypoint'] = this.#waypointState;
     if (this.#layout !== null) info['layoutHash'] = this.#layout.hash;
+    // SPEC-030 §4.12: the shelter state and the wall's visible chunk count.
+    info['sheltered'] = this.#insideShelter === null ? 0 : 1;
+    info['hidden'] = this.#shelterState === 'hidden' ? 1 : 0;
+    info['shelters'] = this.#layout?.shelters.length ?? 0;
+    info['wallVisible'] = this.#view?.wallVisible ?? 0;
     return info;
   }
 
@@ -1451,6 +1472,49 @@ export class SurfaceScene extends UiScene<'surface'> {
     }
   }
 
+  // --------------------------------------------------------------- shelter
+
+  /**
+   * SPEC-030 §4.5, each step: where the player stands, what that does to the
+   * weather multiplier and the HUD chip, the roof lift, discovery, and the
+   * first-entry tip. Death drops `inside` (the roof comes back, 30-e).
+   */
+  #updateShelter(world: CombatWorld): void {
+    const layout = this.#layout as Layout;
+    const combat = this.#combat as Combat;
+    const save = this.#save as Save;
+    const p = world.player;
+    const inside = p.alive ? shelterAt(layout.shelters, p.x, p.z) : null;
+    const was = this.#insideShelter;
+    this.#insideShelter = inside;
+
+    // D-6: entering pins the move multiplier at 1; leaving restores the storm
+    // active at that moment (1 when calm) — never a value captured on entry.
+    if (inside !== null && was === null) {
+      combat.setWeatherMoveMult(1);
+      this.#requestTip('shelter'); // §4.11: once, on the first entry
+    } else if (inside === null && was !== null) {
+      const current = this.#weather?.current ?? null;
+      combat.setWeatherMoveMult(current === null ? 1 : WEATHER_EFFECTS[current].moveMult);
+    }
+
+    // AC-25: hidden ⇔ inside ∧ no shot for REVEAL_AFTER_SHOT.
+    world.playerHidden = inside !== null && world.time - combat.lastShotAt >= REVEAL_AFTER_SHOT;
+    this.#shelterState = inside === null ? 'none' : world.playerHidden ? 'hidden' : 'sheltered';
+    this.#view?.setOccupiedShelter(inside?.index ?? null);
+
+    // §4.10 (D-23): discovery — the POI check's 40 m, per step, persisted in
+    // the same `poisDiscovered` array the autosaves already carry.
+    for (let i = 0; i < layout.shelters.length; i++) {
+      if (this.#shelterDiscovered[i] === true) continue;
+      const s = layout.shelters[i] as LayoutShelter;
+      if (Math.hypot(p.x - s.x, p.z - s.z) > DISCOVER_RANGE) continue;
+      this.#shelterDiscovered[i] = true;
+      const key = `${this.#planet.id}:shelter:${s.index}`;
+      if (!save.progress.poisDiscovered.includes(key)) save.progress.poisDiscovered.push(key);
+    }
+  }
+
   // --------------------------------------------------------------- weather
 
   #updateWeather(world: CombatWorld, dt: number): void {
@@ -1472,7 +1536,9 @@ export class SurfaceScene extends UiScene<'surface'> {
     weather.update(dt);
 
     const dps = weather.dps;
-    if (dps > 0 && world.player.alive && weather.current !== null) {
+    // SPEC-030 D-7: inside a shelter, weather damage is skipped entirely —
+    // cycled storm, forced storm and avalanche burst alike (AC-20).
+    if (dps > 0 && world.player.alive && weather.current !== null && this.#insideShelter === null) {
       // Combat applies hazardResist and the hazard-immunity window (§4.6).
       this.#combat?.damagePlayer(dps * dt, { kind: 'weather', weather: weather.current }, true);
     }
@@ -1481,9 +1547,12 @@ export class SurfaceScene extends UiScene<'surface'> {
     const step = dt / WEATHER_LERP_SECONDS;
     if (this.#stormIntensity < this.#stormTarget) this.#stormIntensity = Math.min(this.#stormTarget, this.#stormIntensity + step);
     else if (this.#stormIntensity > this.#stormTarget) this.#stormIntensity = Math.max(this.#stormTarget, this.#stormIntensity - step);
-    this.#view?.setWeather(this.#stormEffects, this.#stormIntensity);
+    // SPEC-030 D-5: inside, the overlay and the view intensity are dampened
+    // ×0.25 — cosmetic only; fog density and aggroMult keep their storm values.
+    const shelterFactor = this.#insideShelter === null ? 1 : STORM_SHELTER_FACTOR;
+    this.#view?.setWeather(this.#stormEffects, this.#stormIntensity * shelterFactor, this.#stormIntensity);
     if (this.#stormOverlay !== null) {
-      const opacity = (1 - this.#stormEffects.visibility) * this.#stormIntensity;
+      const opacity = (1 - this.#stormEffects.visibility) * this.#stormIntensity * shelterFactor;
       this.#stormOverlay.style.opacity = opacity < 0.02 ? '0' : String(Math.min(0.85, opacity));
     }
     // §4.6: visibility narrows enemy aggro.
@@ -2221,6 +2290,45 @@ export class SurfaceScene extends UiScene<'surface'> {
     // SPEC-027 AC-86: a minute of idle guidance time per press, so the whole
     // escalation is reachable in a QA session instead of in two and a half.
     button('surface-stuck', 'Stuck +60s', () => this.#stuck.advance(60));
+    // SPEC-030 §4.12 (D-14): the shelter, edge and storm shortcuts are plain
+    // `?debug` controls, so the packaged e2e run can press them.
+    button('surface-goto-shelter', 'To shelter', () => {
+      const world = this.#world;
+      const layout = this.#layout;
+      if (world === null || layout === null || !world.player.alive) return;
+      let best: LayoutShelter | null = null;
+      let bestD = Infinity;
+      for (const s of layout.shelters) {
+        const d = Math.hypot(s.x - world.player.x, s.z - world.player.z);
+        if (d < bestD) {
+          bestD = d;
+          best = s;
+        }
+      }
+      if (best === null) return;
+      world.player.x = best.x;
+      world.player.z = best.z;
+    });
+    button('surface-goto-edge', 'To edge', () => {
+      const world = this.#world;
+      if (world === null || !world.player.alive) return;
+      world.player.x = this.#planet.surface.halfSize - WALL_INSET;
+      world.player.z = 0;
+    });
+    // D-15: the planet cycle's highest-dps storm, ties toward the earlier
+    // entry; present and inert on a weatherless planet (30-g).
+    button('surface-storm', 'Storm', () => {
+      const cycle = this.#planet.surface.weather?.cycle ?? [];
+      let pick: (typeof cycle)[number] | null = null;
+      let pickDps = -Infinity;
+      for (const id of cycle) {
+        if (WEATHER_EFFECTS[id].dps > pickDps) {
+          pick = id;
+          pickDps = WEATHER_EFFECTS[id].dps;
+        }
+      }
+      if (pick !== null) this.#weather?.force(pick, 60);
+    });
     // SPEC-029 §4.13: the arsenal in one press, and a pack of skitters at the
     // aim point, so the acceptance run fits a QA session.
     if (import.meta.env.DEV) {
@@ -2498,6 +2606,8 @@ export class SurfaceScene extends UiScene<'surface'> {
     m.weather.active = weather.current;
     m.weather.warning = weather.phase === 'warning' ? weather.pending : null;
     m.weather.secondsLeft = weather.secondsLeft;
+    // SPEC-030 D-11: the chip under the banner.
+    m.shelter = this.#shelterState;
 
     const boss = this.#findBoss(world);
     m.boss = boss === null ? null : { name: boss.def.name, hp: Math.max(0, Math.round(boss.hp)), max: boss.maxHp };
@@ -2621,6 +2731,14 @@ export class SurfaceScene extends UiScene<'surface'> {
       follower: null,
       held: (resource) => save.resources[resource] ?? 0,
       arenaFor: (enemy) => this.#arenaFor(enemy),
+      // SPEC-030 §4.11: the placed shelters, index = shelter index (D-3).
+      shelters: layout.shelters.map((s) => ({
+        x: s.x,
+        z: s.z,
+        label: s.kind === 'cave' ? 'Cave' : 'Wreck',
+        radius: Math.min(s.rx, s.rz) - SHELTER_INSET,
+      })),
+      stormActive: false,
     };
 
     // D-28: the row pool is the campaign's widest stage plus the row that says
@@ -2690,6 +2808,8 @@ export class SurfaceScene extends UiScene<'surface'> {
     pois.length = this.#pois.length;
     // `#ctxFollower` was refreshed for `missions.update` earlier this step.
     guide.follower = world.follower === null ? null : this.#ctxFollower;
+    // SPEC-030 D-8: a cycled and a forced storm read the same.
+    guide.stormActive = this.#weather?.phase === 'active';
     return guide;
   }
 
@@ -3209,6 +3329,20 @@ export class SurfaceScene extends UiScene<'surface'> {
       mark.ring = state.poi.kind === 'arena' ? state.poi.radius : 0;
     }
 
+    // SPEC-030 §4.10: discovered shelters draw with the SPEC-026 icons.
+    const shelters = (this.#layout as Layout).shelters;
+    for (let i = 0; i < shelters.length; i++) {
+      if (this.#shelterDiscovered[i] !== true) continue;
+      const s = shelters[i] as LayoutShelter;
+      const mark = this.#nextMark();
+      mark.x = s.x;
+      mark.z = s.z;
+      mark.icon = s.kind === 'cave' ? 'shelter_cave' : 'shelter_wreck';
+      mark.objective = false;
+      mark.label = s.kind === 'cave' ? 'Cave' : 'Wreck';
+      mark.ring = 0;
+    }
+
     // §4.3 step 5: nodes with radar, and — SPEC-027 AC-38 — every node of the
     // resource the *tracked* mission is collecting, radar or not. The guidance
     // half goes away at `guidance: 'off'` (D-6); the radar half is a companion
@@ -3505,7 +3639,10 @@ export class SurfaceScene extends UiScene<'surface'> {
           const effects = weather === null ? null : WEATHER_EFFECTS[weather];
           if (effects !== null) this.#stormEffects = effects;
           this.#stormTarget = effects === null ? 0 : 1;
-          this.#combat?.setWeatherMoveMult(effects === null ? 1 : effects.moveMult);
+          // SPEC-030 30-m / D-6: a change while the player is inside keeps
+          // the multiplier at 1; leaving restores the storm live then.
+          const mult = effects === null || this.#insideShelter !== null ? 1 : effects.moveMult;
+          this.#combat?.setWeatherMoveMult(mult);
         },
         this,
       ),

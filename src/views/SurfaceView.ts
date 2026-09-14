@@ -986,9 +986,11 @@ export class SurfaceView {
   /**
    * Fog, storm sprites and the grade, lerped by the scene over 3 s (§4.6).
    * §4.9: `visibility` drives the vignette; the kind picks the tint.
+   * SPEC-030 D-5: inside a shelter the scene dampens `intensity` ×0.25 but
+   * passes the raw storm through `fogIntensity`, so the fog keeps raging.
    */
-  setWeather(effects: ViewWeather, intensity: number): void {
-    this.#fog.density = this.#baseFog * (1 + (effects.fogMult - 1) * intensity);
+  setWeather(effects: ViewWeather, intensity: number, fogIntensity = intensity): void {
+    this.#fog.density = this.#baseFog * (1 + (effects.fogMult - 1) * fogIntensity);
     this.#particleKind = effects.particles;
     this.#particleIntensity = intensity;
     this.#storm.set(effects.particles, intensity);

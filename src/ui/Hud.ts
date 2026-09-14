@@ -58,6 +58,8 @@ export class Hud {
   readonly #resources = {} as Record<ResourceId, HTMLSpanElement>;
   readonly #resourceRows = {} as Record<ResourceId, HTMLSpanElement>;
   readonly #weather = el('div', 'hud-weather');
+  /** SPEC-030 D-11: always in the DOM, hidden while `shelter === 'none'`. */
+  readonly #shelter = testId(el('div', 'hud-shelter is-hidden'), 'sheltered');
   readonly #boss = bar('boss', '', 'Boss');
   readonly #interact = el('div', 'hud-interact');
   readonly #objective = el('div', 'hud-objective');
@@ -126,7 +128,8 @@ export class Hud {
     tr.append(tokens);
 
     const tc = el('div', 'hud-tc');
-    tc.append(this.#weather, testId(this.#boss.root, 'hud-boss'));
+    // SPEC-030 D-11: the shelter chip sits directly under the weather banner.
+    tc.append(this.#weather, this.#shelter, testId(this.#boss.root, 'hud-boss'));
     this.#boss.root.classList.add('is-hidden');
     // SPEC-013 §4.10: trip progress with wave markers, the hostiles counter,
     // the storm warning + static, the holding banner, and the reticle.
@@ -318,6 +321,12 @@ export class Hud {
               : '';
         this.#weather.textContent = text;
         this.#weather.classList.toggle('is-hidden', text === '');
+        return;
+      }
+      case 'shelter': {
+        // SPEC-030 D-11: `⌂` is decorative; tests assert the word.
+        this.#shelter.textContent = m.shelter === 'hidden' ? '⌂ HIDDEN' : '⌂ SHELTERED';
+        this.#shelter.classList.toggle('is-hidden', m.shelter === 'none');
         return;
       }
       case 'boss': {

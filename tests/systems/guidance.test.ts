@@ -463,3 +463,41 @@ describe('findPath (SPEC-027 §4.7, AC-61..AC-64)', () => {
     expect(points).toBeGreaterThan(2);
   });
 });
+
+// ---------------------------------------------------------------- SPEC-030
+
+describe('SPEC-030 — survive points at the nearest shelter (AC-48)', () => {
+  const SHELTERS = [
+    { x: 40, z: 0, label: 'Cave', radius: 5.7 },
+    { x: 15, z: 0, label: 'Wreck', radius: 2.9 },
+  ];
+
+  it('resolves to the nearest shelter while stormActive is true and shelters exist', () => {
+    const ctx = makeCtx({ shelters: SHELTERS, stormActive: true });
+    // The player stands at (10, 0): the wreck at 15 is nearer than the cave.
+    const target = objectiveTarget({ kind: 'survive', seconds: 60 }, ROW, ctx);
+    expect(target).toEqual({
+      kind: 'shelter',
+      x: 15,
+      z: 0,
+      radius: 2.9,
+      label: 'Wreck',
+      key: 'shelter:1:0',
+    });
+  });
+
+  it('the key carries the shelter index, so the stuck clock survives a re-pick', () => {
+    const ctx = makeCtx({ shelters: SHELTERS, stormActive: true, player: { x: 39, z: 0 } });
+    const target = objectiveTarget({ kind: 'survive', seconds: 60 }, ROW, ctx);
+    expect(target?.key).toBe('shelter:0:0');
+    expect(target?.label).toBe('Cave');
+  });
+
+  it('returns null without a storm, without shelters, or with an empty list', () => {
+    expect(objectiveTarget({ kind: 'survive', seconds: 60 }, ROW, makeCtx({ shelters: SHELTERS }))).toBeNull();
+    expect(objectiveTarget({ kind: 'survive', seconds: 60 }, ROW, makeCtx({ stormActive: true }))).toBeNull();
+    expect(
+      objectiveTarget({ kind: 'survive', seconds: 60 }, ROW, makeCtx({ stormActive: true, shelters: [] })),
+    ).toBeNull();
+  });
+});

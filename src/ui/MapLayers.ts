@@ -25,6 +25,8 @@ const ARENA_PLATE = '#4a1f1f';
 /** §4.4: the arena wall, along `±(halfSize − 2)`. */
 const WALL_COLOR = '#11151a';
 const WALL_WIDTH = 3;
+/** SPEC-030 §4.10: shelter footprints ride lighter than the ground. */
+const SHELTER_RING_SHADE = 0.9;
 
 /** `'#rrggbb'` scaled toward black — the one colour operation the layers need. */
 export function shade(hex: string, factor: number): string {
@@ -138,7 +140,16 @@ export class MapLayers {
       ctx.fill();
     }
 
-    // The wall the player is clamped to, at ±(halfSize − 2).
+    // SPEC-030 §4.10: each shelter footprint as a lighter ring.
+    ctx.strokeStyle = shade(palette.ground, SHELTER_RING_SHADE);
+    ctx.lineWidth = 1.5;
+    for (const shelter of layout.shelters) {
+      ctx.beginPath();
+      ctx.ellipse(shelter.x + half, shelter.z + half, shelter.rx, shelter.rz, shelter.angle, 0, Math.PI * 2);
+      ctx.stroke();
+    }
+
+    // The wall line, along ±(halfSize − 2) — where SPEC-030's wall stands.
     ctx.strokeStyle = WALL_COLOR;
     ctx.lineWidth = WALL_WIDTH;
     ctx.strokeRect(2, 2, size - 4, size - 4);
