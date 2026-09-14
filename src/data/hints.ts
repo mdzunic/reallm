@@ -34,6 +34,8 @@ export const TIP_IDS = [
   'overheat',
   'heavy',
   'explosives',
+  // SPEC-030 §4.11: the first entry into any shelter.
+  'shelter',
 ] as const;
 
 export type TipId = (typeof TIP_IDS)[number];
@@ -78,9 +80,10 @@ export const TIPS: Readonly<Record<TipId, TipText>> = {
     keyboard: 'A delivery needs the full amount in your hold. Nodes refill slowly.',
     touch: 'A delivery needs the full amount in your hold. Nodes refill slowly.',
   },
+  // SPEC-030 §4.11 (D-10): shelters are the storm answer now.
   storm: {
-    keyboard: 'A storm is ten seconds out. It hurts and slows you — Q heals, a coolant pack blocks it.',
-    touch: 'A storm is ten seconds out. It hurts and slows you — ITEM heals, a coolant pack blocks it.',
+    keyboard: 'A storm is ten seconds out. Caves and wrecks keep it off you — or heal with Q and push through.',
+    touch: 'A storm is ten seconds out. Caves and wrecks keep it off you — or tap ITEM to heal and push through.',
   },
   boss: {
     keyboard: 'The boss arena is marked in red. Stock up on medkits before you step in.',
@@ -105,6 +108,11 @@ export const TIPS: Readonly<Record<TipId, TipText>> = {
   explosives: {
     keyboard: 'G throws grenades at the cursor and plants mines at your feet.',
     touch: 'Tap the explosive slot to throw at the nearest enemy or plant a mine.',
+  },
+  // SPEC-030 §4.11: shown once, on the first entry into any shelter.
+  shelter: {
+    keyboard: "Inside, the storm can't touch you, and anything outside loses your trail — until you fire.",
+    touch: "Inside, the storm can't touch you, and anything outside loses your trail — until you fire.",
   },
 };
 
@@ -132,8 +140,10 @@ export const HINTS: Readonly<Record<Objective['kind'] | 'death' | 'none', HintTe
     fallback: 'No {enemy} in sight. They roam — sweep away from the pad.',
   },
   boss: { nudge: 'The arena is {dist} {dir}. Step into the ring to wake it.' },
+  // SPEC-030 §4.11 (D-8, D-9): the nudge walks to cover; the fallback keeps
+  // its wording for a survive stage with no shelter in reach.
   survive: {
-    nudge: 'Stay alive {need} more seconds. Keep moving, and heal when you drop low.',
+    nudge: "Find cover — {label} is {dist} {dir}. Inside, the storm can't reach you.",
     fallback: 'Stay alive {need} more seconds. Keep moving, and heal when you drop low.',
   },
   defend: { nudge: 'Stay by {label} and kill whatever reaches it.' },

@@ -109,6 +109,8 @@ export interface PlanetDef {
       readonly regenPerSec: number;
     }[];
     readonly obstacles: { readonly density: number; readonly minRadius: number; readonly maxRadius: number };
+    /** SPEC-030 §4.1: shelter and outcrop counts — targets, not guarantees (D-25). */
+    readonly features: { readonly caves: number; readonly wrecks: number; readonly outcrops: number };
     readonly spawn: readonly { readonly enemy: EnemyId; readonly weight: number; readonly maxAlive: number }[];
     /** Ambient waves the planet runs on its own; Eden has none until `c6_m2`. */
     readonly ambientWaves?: WaveId;
@@ -163,6 +165,7 @@ export const PLANETS = {
         { resource: 'wheat', count: 4, capacity: 80, regenPerSec: 0.4 },
       ],
       obstacles: { density: 0.06, minRadius: 1.2, maxRadius: 3.5 },
+      features: { caves: 2, wrecks: 2, outcrops: 3 },
       spawn: [
         { enemy: 'dust_skitter', weight: 6, maxAlive: 10 },
         { enemy: 'wurmling', weight: 3, maxAlive: 5 },
@@ -216,6 +219,7 @@ export const PLANETS = {
         { resource: 'wheat', count: 2, capacity: 60, regenPerSec: 0.4 },
       ],
       obstacles: { density: 0.07, minRadius: 1.2, maxRadius: 4 },
+      features: { caves: 2, wrecks: 2, outcrops: 3 },
       spawn: [
         { enemy: 'frost_mite', weight: 6, maxAlive: 12 },
         { enemy: 'ice_crawler', weight: 3, maxAlive: 6 },
@@ -272,6 +276,7 @@ export const PLANETS = {
         { resource: 'water', count: 2, capacity: 60, regenPerSec: 0.4 },
       ],
       obstacles: { density: 0.1, minRadius: 1.5, maxRadius: 4.5 },
+      features: { caves: 2, wrecks: 1, outcrops: 3 },
       spawn: [
         { enemy: 'hive_drone', weight: 6, maxAlive: 14 },
         { enemy: 'spore_hound', weight: 3, maxAlive: 6 },
@@ -328,6 +333,7 @@ export const PLANETS = {
         { resource: 'oil', count: 2, capacity: 60, regenPerSec: 0.4 },
       ],
       obstacles: { density: 0.09, minRadius: 1.5, maxRadius: 5 },
+      features: { caves: 2, wrecks: 2, outcrops: 3 },
       spawn: [
         { enemy: 'ash_crawler', weight: 6, maxAlive: 14 },
         { enemy: 'magma_wraith', weight: 3, maxAlive: 6 },
@@ -377,6 +383,7 @@ export const PLANETS = {
       ],
       nodes: [{ resource: 'lithium', count: 2, capacity: 60, regenPerSec: 0.4 }],
       obstacles: { density: 0.12, minRadius: 1.5, maxRadius: 4 },
+      features: { caves: 2, wrecks: 1, outcrops: 2 },
       spawn: [
         { enemy: 'hive_drone', weight: 6, maxAlive: 16 },
         { enemy: 'hive_warrior', weight: 3, maxAlive: 6 },
@@ -431,6 +438,7 @@ export const PLANETS = {
         { resource: 'water', count: 3, capacity: 80, regenPerSec: 0.5 },
       ],
       obstacles: { density: 0.05, minRadius: 1.2, maxRadius: 3 },
+      features: { caves: 1, wrecks: 1, outcrops: 2 },
       // Eden is empty until the beacon calls them: everything that fights here
       // arrives with `eden_final` during `c6_m2` (§4.5).
       spawn: [],

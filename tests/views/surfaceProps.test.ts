@@ -6,10 +6,14 @@ import * as THREE from 'three';
 import type { Assets } from '@/core/Assets';
 import {
   PROP_MODELS,
+  SHELTER_MODELS,
   boundaryGeometry,
   geometryFromModel,
+  hullPieceGeometry,
   obstacleGeometry,
   poiGeometry,
+  shelterGeometry,
+  wallPieceGeometry,
   type Biome,
   type ObstacleKind,
 } from '@/views/SurfaceProps';
@@ -150,5 +154,127 @@ describe('poiGeometry and boundaryGeometry (SPEC-018 §4.7, §4.8)', () => {
       expect(tris(geometry), kind).toBeLessThanOrEqual(200);
       expect(geometry.getAttribute('color'), kind).toBeDefined();
     }
+  });
+});
+
+// ---------------------------------------------------------------- SPEC-030
+
+describe('SPEC-030 — shelterGeometry (AC-39, AC-42, AC-43)', () => {
+  const BIOMES: readonly Biome[] = ['desert', 'ice', 'jungle', 'volcanic', 'hive', 'temperate'];
+
+  it('returns body ≤ 1.6 k and roof ≤ 600 triangles for every biome and kind', () => {
+    for (const biome of BIOMES) {
+      for (const kind of ['cave', 'wreck'] as const) {
+        const parts = shelterGeometry(kind, biome, 11);
+        expect(tris(parts.body), `${biome}:${kind} body`).toBeLessThanOrEqual(1600);
+        expect(tris(parts.roof), `${biome}:${kind} roof`).toBeLessThanOrEqual(600);
+        expect(parts.body.getAttribute('color'), `${biome}:${kind} colours`).toBeDefined();
+        if (parts.glow !== undefined) expect(tris(parts.glow)).toBeLessThanOrEqual(300);
+      }
+    }
+  });
+
+  it('the wreck body stays low, so the lifted roof leaves the player visible (AC-41)', () => {
+    // Everything overhead — the dome, the ribs, the plates — must live in the
+    // roof part `setOccupiedShelter` lifts; the body may keep only the low
+    // far-side band (top edge ≈ 1.9 m plus ≤ 0.25 m of displacement), which
+    // never reaches the 55° sightline over a player at the centre.
+    for (const biome of BIOMES) {
+      for (const seed of [3, 11, 29]) {
+        const parts = shelterGeometry('wreck', biome, seed);
+        parts.body.computeBoundingBox();
+        parts.roof.computeBoundingBox();
+        const bodyBox = parts.body.boundingBox as THREE.Box3;
+        const roofBox = parts.roof.boundingBox as THREE.Box3;
+        expect(bodyBox.max.y, `${biome} seed ${seed} body top`).toBeLessThanOrEqual(2.2);
+        // …and it must actually stand above ground — a band buried in the
+        // terrain would satisfy the cap while the shelter vanished.
+        expect(bodyBox.max.y, `${biome} seed ${seed} body above ground`).toBeGreaterThan(1.5);
+        expect(roofBox.max.y, `${biome} seed ${seed} roof top`).toBeGreaterThan(3);
+      }
+    }
+  });
+
+  it("Ferrum's cave and the Hive's carry a glow part; the wreck carries its console", () => {
+    expect(shelterGeometry('cave', 'volcanic', 3).glow).toBeDefined();
+    expect(shelterGeometry('cave', 'hive', 3).glow).toBeDefined();
+    expect(shelterGeometry('cave', 'desert', 3).glow).toBeUndefined();
+    expect(shelterGeometry('wreck', 'desert', 3).glow).toBeDefined();
+  });
+
+  it('SHELTER_MODELS ships empty and wins through geometryFromModel when it names a model (D-24)', () => {
+    expect(SHELTER_MODELS).toEqual({});
+    // Name a model: the seam takes the GLB path, exactly like PROP_MODELS.
+    const cube = new THREE.Mesh(new THREE.BoxGeometry(2, 2, 2), new THREE.MeshStandardMaterial({ color: '#ff0000' }));
+    const root = new THREE.Group();
+    root.add(cube);
+    const assets = {
+      hasModel: (id: string) => id === 'crate',
+      model: () => root,
+    } as unknown as Assets;
+    SHELTER_MODELS['desert:cave'] = 'crate';
+    try {
+      const parts = shelterGeometry('cave', 'desert', 3, assets);
+      expect(tris(parts.body)).toBe(12); // the cube, through geometryFromModel
+    } finally {
+      delete SHELTER_MODELS['desert:cave'];
+    }
+  });
+
+  it('obstacleGeometry accepts the collision-only kinds and debris (D-19)', () => {
+    // cave_wall and wreck_hull keep the switch exhaustive and return rock.
+    expect(tris(obstacleGeometry('cave_wall', 'desert', 5).body)).toBeGreaterThan(0);
+    expect(tris(obstacleGeometry('wreck_hull', 'ice', 5).body)).toBeGreaterThan(0);
+    const debris = obstacleGeometry('debris', 'desert', 5);
+    expect(tris(debris.body)).toBeGreaterThan(0);
+    expect(tris(debris.body)).toBeLessThanOrEqual(200);
+    expect(debris.body.getAttribute('color')).toBeDefined();
+  });
+});
+
+describe('SPEC-030 — wall pieces (AC-35)', () => {
+  const BOUNDARIES = ['dunes', 'ice_wall', 'jungle_bank', 'lava_ridge', 'chitin_wall', 'hills'] as const;
+
+  it('rock pieces stay ≤ 140 triangles for every boundary kind and variant', () => {
+    for (const kind of BOUNDARIES) {
+      for (const variant of [0, 1, 2] as const) {
+        const piece = wallPieceGeometry(kind, variant);
+        expect(tris(piece), `${kind}:${variant}`).toBeLessThanOrEqual(140);
+        expect(piece.getAttribute('color')).toBeDefined();
+      }
+    }
+  });
+
+  it('the inner face (z = 0) stays flat through the displacement', () => {
+    const piece = wallPieceGeometry('dunes', 0);
+    const position = piece.getAttribute('position') as THREE.BufferAttribute;
+    let sawInner = false;
+    for (let i = 0; i < position.count; i++) {
+      const z = position.getZ(i);
+      if (z < 0.02) {
+        expect(z).toBeGreaterThanOrEqual(-1e-6);
+        sawInner = true;
+      }
+    }
+    expect(sawInner).toBe(true);
+  });
+
+  it('hull pieces stay ≤ 320 triangles', () => {
+    expect(tris(hullPieceGeometry())).toBeLessThanOrEqual(320);
+  });
+
+  it('hull pieces keep the wall-piece local frame: x ± 0.5, y and z in [0, 1]', () => {
+    // ArenaWall stands local z = 0 on the clamp line + 0.6 m; any vertex at
+    // z < 0 would protrude past where the player stops (AC-34), and y < 0
+    // would bury geometry below the terrain.
+    const hull = hullPieceGeometry();
+    hull.computeBoundingBox();
+    const box = hull.boundingBox as THREE.Box3;
+    expect(box.min.x).toBeGreaterThanOrEqual(-0.5 - 1e-6);
+    expect(box.max.x).toBeLessThanOrEqual(0.5 + 1e-6);
+    expect(box.min.y).toBeGreaterThanOrEqual(-1e-6);
+    expect(box.max.y).toBeLessThanOrEqual(1 + 1e-6);
+    expect(box.min.z).toBeGreaterThanOrEqual(-1e-6);
+    expect(box.max.z).toBeLessThanOrEqual(1 + 1e-6);
   });
 });

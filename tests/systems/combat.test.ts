@@ -965,3 +965,68 @@ describe('deployables (SPEC-029 §4.7)', () => {
     expect(egg.maxHp - egg.hp).toBe(Math.max(1, Math.round(MINE.damage * h.world.stats.damageMult)));
   });
 });
+
+// ---------------------------------------------- SPEC-030 §4.7: the bounds
+
+describe('SPEC-030 — world bounds (AC-30..AC-32)', () => {
+  it('enemy movement clamps x and z to ±bounds', () => {
+    const h = harness();
+    h.world.bounds = 10;
+    const e = h.spawn('dust_skitter', 9.5, 9.5);
+    e.aggro = true;
+    e.state = 'chase';
+    h.world.player.x = 30; // drags the chase toward the far corner…
+    h.world.player.z = 30;
+    h.run(2);
+    expect(e.x).toBeLessThanOrEqual(10 + 1e-9); // …and the wall stops it
+    expect(e.z).toBeLessThanOrEqual(10 + 1e-9);
+  });
+
+  it("the follower's step clamps to ±bounds like the player's", () => {
+    const h = harness({ follower: true });
+    h.world.bounds = 10;
+    h.world.player.x = 30; // teleported past the wall by the harness
+    h.run(5);
+    const f = h.world.follower;
+    expect(f).not.toBeNull();
+    expect(f?.x).toBeLessThanOrEqual(10 + 1e-9);
+  });
+
+  it('a projectile crossing |x| = bounds + 0.6 truncates there and despawns (AC-31)', () => {
+    const h = harness();
+    h.world.bounds = 10;
+    // A static target past the wall: the shot must die at the line, not reach it.
+    const egg = h.spawn('hive_egg', 14, 0);
+    const before = egg.hp;
+    h.shot({ x: 8, z: 0, vx: 60, vz: 0, ttl: 1, damage: 50 });
+    h.run(0.5);
+    expect(egg.hp).toBe(before);
+    expect(h.world.projectiles.size).toBe(0);
+  });
+
+  it('a blast projectile explodes at the wall line (AC-31, E45)', () => {
+    const h = harness();
+    h.world.bounds = 10;
+    h.shot({ x: 8, z: 0, vx: 60, vz: 0, ttl: 1, damage: 20, blastRadius: 3, blastFalloff: 0.5 });
+    h.run(0.2);
+    const blasts = h.of('combat:blast');
+    expect(blasts).toHaveLength(1);
+    expect(blasts[0]?.x).toBeCloseTo(10.6, 3);
+    expect(blasts[0]?.z).toBeCloseTo(0, 6);
+  });
+
+  it('with bounds absent nothing clamps and no projectile truncates (AC-32, D-13)', () => {
+    const h = harness();
+    expect(h.world.bounds).toBeUndefined();
+    const e = h.spawn('dust_skitter', 200, 0);
+    e.aggro = true;
+    e.state = 'chase';
+    h.world.player.x = 300;
+    h.run(1);
+    expect(e.x).toBeGreaterThan(100); // nothing pulled it to a wall
+    const shot = h.shot({ x: 195, z: 195, vx: 60, vz: 0, ttl: 0.5 });
+    h.step();
+    expect(shot.x).toBeCloseTo(196, 5); // flew on, no truncation at any edge
+    expect(h.world.projectiles.size).toBe(1);
+  });
+});

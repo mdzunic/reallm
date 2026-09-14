@@ -9,6 +9,7 @@ import { SCATTER_CAP, buildDecals, buildScatter } from '@/views/Scatter';
 import type { ViewLayout } from '@/views/SurfaceView';
 
 const LAYOUT: ViewLayout = {
+  shelters: [],
   hash: 0xfeed5018,
   halfSize: 200,
   pois: [

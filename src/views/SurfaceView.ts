@@ -30,10 +30,12 @@ import { FollowerView } from '@/views/FollowerView';
 import { EnemyMeshes, INSTANCES_PER_PART } from '@/views/ProceduralMeshes';
 import { groundLayer, type GroundLayer } from '@/views/ProceduralTextures';
 import { buildScatter, buildDecals } from '@/views/Scatter';
+import { buildArenaWall } from '@/views/ArenaWall';
 import {
   boundaryGeometry,
   obstacleGeometry,
   poiGeometry,
+  shelterGeometry,
   type ObstacleKind,
   type PoiKind,
 } from '@/views/SurfaceProps';
@@ -68,6 +70,16 @@ export interface ViewLayout {
   obstacles: readonly { x: number; z: number; radius: number; kind: ObstacleKind }[];
   nodes: readonly { resource: ResourceId; x: number; z: number }[];
   props: readonly { x: number; z: number; rot: number; scale: number; kind: string }[];
+  /** SPEC-030: the placed shelters, in `layout.shelters` order. */
+  shelters: readonly {
+    kind: 'cave' | 'wreck';
+    x: number;
+    z: number;
+    rx: number;
+    rz: number;
+    angle: number;
+    gapAngle: number;
+  }[];
 }
 
 export interface ViewNode {
@@ -374,6 +386,16 @@ export class SurfaceView {
 
   readonly #grade: ViewGrade = { vignette: 0, tint: [1, 1, 1], desaturate: 0 };
 
+  // SPEC-030 §4.8–§4.9 — the arena wall and the shelters.
+  #wall: THREE.Group | null = null;
+  #wallChunks: THREE.InstancedMesh[] = [];
+  #wallVisible = 0;
+  /** Per shelter index: the roof instance to lift when occupied (§4.9). */
+  readonly #roofSlots: { mesh: THREE.InstancedMesh; slot: number }[] = [];
+  readonly #roofMatrices: THREE.Matrix4[] = [];
+  #occupiedShelter: number | null = null;
+  #shelterMeshes: THREE.InstancedMesh[] = [];
+
   // SPEC-027 §4.4 — the guidance layer. Both meshes are built the first time
   // `setGuide` wants one and reused for the life of the view; the clock they
   // animate on is the frame time `sync()` last saw.
@@ -463,6 +485,9 @@ export class SurfaceView {
     });
     const byKind = new Map<string, { x: number; z: number; scale: number; rot: number }[]>();
     for (const o of layout.obstacles) {
+      // SPEC-030 D-19: shelter walls are collision-only — the shelter body is
+      // their visual; `debris` draws like any other kind.
+      if (o.kind === 'cave_wall' || o.kind === 'wreck_hull') continue;
       const list = byKind.get(o.kind) ?? [];
       list.push({ x: o.x, z: o.z, scale: o.radius, rot: (o.x * 7 + o.z * 3) % Math.PI });
       byKind.set(o.kind, list);
@@ -548,6 +573,13 @@ export class SurfaceView {
 
     // SPEC-018 §4.8: the silhouette ring past the berm hides the void.
     this.#buildBoundaryRing(layout, planet);
+
+    // SPEC-030 §4.8: the arena wall, chunked for culling; §4.9: the shelters.
+    const wall = buildArenaWall(layout, this.field, planet.surface.look);
+    this.#wall = wall.group;
+    this.#wallChunks = wall.chunks;
+    this.#root.add(wall.group);
+    this.#buildShelters(layout, planet, accent, assets);
 
     // The arena lock ring — visible only while a boss fight seals the arena.
     this.#arenaRing = new THREE.Mesh(
@@ -734,6 +766,117 @@ export class SurfaceView {
     setTerrainLayers(this.#groundMaterial, a, b);
   }
 
+  /**
+   * SPEC-030 §4.9: shelters render as one `InstancedMesh` per kind and part —
+   * cave body, cave roof, wreck body, wreck roof, and up to two glows — ≤ 6
+   * draw calls (AC-40). Instances rotate so the geometry's canonical entrance
+   * (local +x for a cave, local +z for a wreck's breach) lands on `gapAngle`.
+   */
+  #buildShelters(layout: ViewLayout, planet: PlanetDef, accent: THREE.Material, assets?: Assets): void {
+    const shelters = layout.shelters;
+    this.#roofSlots.length = 0;
+    this.#roofMatrices.length = 0;
+    this.#shelterMeshes.length = 0;
+    if (shelters.length === 0) return;
+    const roofMaterial = new THREE.MeshStandardMaterial({
+      flatShading: true,
+      roughness: 0.85,
+      metalness: 0.05,
+      vertexColors: true,
+    });
+    const glowMaterial = new THREE.MeshStandardMaterial({
+      color: '#000000',
+      emissive: new THREE.Color(planet.surface.palette.accent),
+      emissiveIntensity: 1.4,
+    });
+    const bySlot = new Map<number, { mesh: THREE.InstancedMesh; slot: number }>();
+    for (const kind of ['cave', 'wreck'] as const) {
+      const mine: number[] = [];
+      shelters.forEach((s, index) => {
+        if (s.kind === kind) mine.push(index);
+      });
+      if (mine.length === 0) continue;
+      const geometry = shelterGeometry(kind, planet.biome, hash32(layout.hash, 'shelter', kind), assets);
+      const body = new THREE.InstancedMesh(geometry.body, accent, mine.length);
+      const roof = new THREE.InstancedMesh(geometry.roof, roofMaterial, mine.length);
+      const glow = geometry.glow === undefined ? null : new THREE.InstancedMesh(geometry.glow, glowMaterial, mine.length);
+      mine.forEach((index, i) => {
+        const s = shelters[index] as ViewLayout['shelters'][number];
+        let rotation = kind === 'cave' ? -s.gapAngle : -s.angle;
+        if (kind === 'wreck') {
+          // The breach sits at local +z → world bearing angle + π/2 under
+          // this rotation; a gap nearer the other long side flips the hull π.
+          const toNear = Math.atan2(Math.sin(s.gapAngle - s.angle - Math.PI / 2), Math.cos(s.gapAngle - s.angle - Math.PI / 2));
+          if (Math.abs(toNear) > Math.PI / 2) rotation += Math.PI;
+        }
+        scratchMatrix.makeRotationY(rotation);
+        scratchMatrix.setPosition(s.x, this.field.heightAt(s.x, s.z), s.z);
+        body.setMatrixAt(i, scratchMatrix);
+        roof.setMatrixAt(i, scratchMatrix);
+        glow?.setMatrixAt(i, scratchMatrix);
+        bySlot.set(index, { mesh: roof, slot: i });
+        this.#roofMatrices[index] = scratchMatrix.clone();
+      });
+      for (const mesh of [body, roof, ...(glow === null ? [] : [glow])]) {
+        mesh.instanceMatrix.needsUpdate = true;
+        mesh.receiveShadow = true;
+        this.#root.add(mesh);
+        this.#shelterMeshes.push(mesh);
+      }
+    }
+    shelters.forEach((_s, index) => {
+      const entry = bySlot.get(index);
+      if (entry !== undefined) this.#roofSlots[index] = entry;
+    });
+  }
+
+  /**
+   * SPEC-030 §4.9: scale the occupied shelter's roof instance to zero and
+   * restore the previously occupied one, so the player stays visible under
+   * the 55° camera (AC-41; instant even under reduce motion, 30-j).
+   */
+  setOccupiedShelter(index: number | null): void {
+    if (index === this.#occupiedShelter) return;
+    const previous = this.#occupiedShelter;
+    this.#occupiedShelter = index;
+    if (previous !== null) {
+      const entry = this.#roofSlots[previous];
+      const matrix = this.#roofMatrices[previous];
+      if (entry !== undefined && matrix !== undefined) {
+        entry.mesh.setMatrixAt(entry.slot, matrix);
+        entry.mesh.instanceMatrix.needsUpdate = true;
+      }
+    }
+    if (index !== null) {
+      const entry = this.#roofSlots[index];
+      const matrix = this.#roofMatrices[index];
+      if (entry !== undefined && matrix !== undefined) {
+        scratchMatrix.copy(matrix);
+        scratchMatrix.scale(scratchVector.set(1e-6, 1e-6, 1e-6));
+        entry.mesh.setMatrixAt(entry.slot, scratchMatrix);
+        entry.mesh.instanceMatrix.needsUpdate = true;
+      }
+    }
+  }
+
+  /** SPEC-030 D-22: wall chunks inside the frustum on the last render. */
+  get wallVisible(): number {
+    return this.#wallVisible;
+  }
+
+  /** The scene calls this each render with its own frustum (D-22). */
+  updateWallVisibility(frustum: THREE.Frustum): void {
+    let count = 0;
+    const wall = this.#wall;
+    if (wall !== null) {
+      for (const chunk of wall.children) {
+        const sphere = chunk.userData['sphere'] as THREE.Sphere | undefined;
+        if (sphere !== undefined && frustum.intersectsSphere(sphere)) count++;
+      }
+    }
+    this.#wallVisible = count;
+  }
+
   /** SPEC-018 §4.8: 80–140 instanced silhouettes on the apron, past the berm. */
   #buildBoundaryRing(layout: ViewLayout, planet: PlanetDef): void {
     const look = planet.surface.look;
@@ -803,6 +946,9 @@ export class SurfaceView {
     this.enemies.setShadows(size > 0);
     this.#character?.setShadows(size > 0);
     this.#blobMaterial.opacity = size > 0 ? BLOB_OPACITY_WITH_MAP : BLOB_OPACITY_ALONE;
+    // SPEC-030 AC-38 / SPEC-017 §4.5: casters on high only; receivers always.
+    for (const mesh of this.#wallChunks) mesh.castShadow = size > 0;
+    for (const mesh of this.#shelterMeshes) mesh.castShadow = size > 0;
 
     // 18-p: the storm capacity is the preset's particle budget.
     if (quality.maxParticles !== this.#stormCapacity) {
@@ -841,9 +987,11 @@ export class SurfaceView {
   /**
    * Fog, storm sprites and the grade, lerped by the scene over 3 s (§4.6).
    * §4.9: `visibility` drives the vignette; the kind picks the tint.
+   * SPEC-030 D-5: inside a shelter the scene dampens `intensity` ×0.25 but
+   * passes the raw storm through `fogIntensity`, so the fog keeps raging.
    */
-  setWeather(effects: ViewWeather, intensity: number): void {
-    this.#fog.density = this.#baseFog * (1 + (effects.fogMult - 1) * intensity);
+  setWeather(effects: ViewWeather, intensity: number, fogIntensity = intensity): void {
+    this.#fog.density = this.#baseFog * (1 + (effects.fogMult - 1) * fogIntensity);
     this.#particleKind = effects.particles;
     this.#particleIntensity = intensity;
     this.#storm.set(effects.particles, intensity);

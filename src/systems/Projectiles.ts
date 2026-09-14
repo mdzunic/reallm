@@ -49,6 +49,28 @@ export function sweptCircleT(
   return t >= 0 && t <= 1 ? t : null;
 }
 
+/**
+ * SPEC-030 §4.7: the smallest t ∈ [0, 1] where the segment leaves the square
+ * `|x| ≤ limit, |z| ≤ limit`, or `null` when it stays inside. Exported for the
+ * combat suite's wall cases.
+ */
+export function wallCrossT(x0: number, z0: number, dx: number, dz: number, limit: number): number | null {
+  let best: number | null = null;
+  for (const [start, delta] of [
+    [x0, dx],
+    [z0, dz],
+  ] as const) {
+    if (delta > 0 && start + delta > limit) {
+      const t = (limit - start) / delta;
+      if (t >= 0 && t <= 1 && (best === null || t < best)) best = t;
+    } else if (delta < 0 && start + delta < -limit) {
+      const t = (-limit - start) / delta;
+      if (t >= 0 && t <= 1 && (best === null || t < best)) best = t;
+    }
+  }
+  return best;
+}
+
 // Scratch for the per-projectile hit list — module level, so the 60 Hz step
 // never allocates (SPEC-001 §7).
 const candidateIds: number[] = [];
@@ -86,7 +108,12 @@ export function updateProjectiles(world: CombatWorld, hash: SpatialHash, dt: num
 
     // 11-j: an obstacle truncates the flight; hits beyond it never land.
     const tObstacle = world.obstacles.lineHit(x0, z0, p.x, p.z);
-    const tEnd = tObstacle ?? 1;
+    // SPEC-030 §4.7: so does the arena wall line at ±(bounds + 0.6); with
+    // `bounds` absent nothing truncates at an edge (D-13).
+    const tWall = world.bounds === undefined ? null : wallCrossT(x0, z0, dx, dz, world.bounds + 0.6);
+    const tCut =
+      tObstacle === null ? tWall : tWall === null ? tObstacle : Math.min(tObstacle, tWall);
+    const tEnd = tCut ?? 1;
 
     if (p.owner === 'enemy') {
       if (enemyShotStep(world, p, x0, z0, dx, dz, tEnd, hooks)) despawn = true;
@@ -94,10 +121,11 @@ export function updateProjectiles(world: CombatWorld, hash: SpatialHash, dt: num
       despawn = true;
     }
 
-    if (tObstacle !== null) {
-      p.x = x0 + dx * tObstacle;
-      p.z = z0 + dz * tObstacle;
-      // SPEC-029 §4.6 / 29-a: a rocket detonates at the truncation point.
+    if (tCut !== null) {
+      p.x = x0 + dx * tCut;
+      p.z = z0 + dz * tCut;
+      // SPEC-029 §4.6 / 29-a: a rocket detonates at the truncation point —
+      // an obstacle and the wall line alike (SPEC-030 E45).
       if (p.blastRadius > 0) {
         hooks.explode(p, p.x, p.z);
         p.blastRadius = 0;

@@ -37,7 +37,13 @@ export interface GuideContext {
   held(resource: ResourceId): number;
   /** The arena POI that hosts a boss, from `PoiDef.boss` (D-19). */
   arenaFor(enemy: EnemyId): GuidePoi | null;
-  shelters?: readonly { x: number; z: number; label: string }[]; // SPEC-030
+  /**
+   * SPEC-030 §4.11: the placed shelters in `layout.shelters` order — the
+   * array index is the shelter index; `radius` is `min(rx, rz) − SHELTER_INSET`.
+   */
+  shelters?: readonly { x: number; z: number; label: string; radius: number }[];
+  /** SPEC-030 D-8: `weather.phase === 'active'` — cycled and forced alike. */
+  stormActive?: boolean;
 }
 
 export type GuideKind = 'poi' | 'node' | 'enemy' | 'follower' | 'shelter';
@@ -175,10 +181,32 @@ export function objectiveTarget(
       const arena = ctx.arenaFor(objective.enemy);
       return arena === null ? null : poiTarget(arena);
     }
-    case 'survive':
-      // SPEC-030 points this at the nearest shelter; until then there is
-      // nowhere to walk, and the hint says to keep moving instead.
-      return null;
+    case 'survive': {
+      // SPEC-030 §4.11 (D-8): while a storm is active and shelters exist,
+      // the nearest shelter is where a survive stage points; otherwise null,
+      // as before — the fallback hint says to keep moving.
+      const shelters = ctx.shelters;
+      if (ctx.stormActive !== true || shelters === undefined || shelters.length === 0) return null;
+      let best = -1;
+      let bestD = Infinity;
+      for (let index = 0; index < shelters.length; index++) {
+        const s = shelters[index] as (typeof shelters)[number];
+        const d = distanceTo(ctx, s.x, s.z);
+        if (d < bestD) {
+          bestD = d;
+          best = index;
+        }
+      }
+      const shelter = shelters[best] as (typeof shelters)[number];
+      return {
+        kind: 'shelter',
+        x: shelter.x,
+        z: shelter.z,
+        radius: shelter.radius,
+        label: shelter.label,
+        key: `shelter:${best}:0`,
+      };
+    }
     case 'defend': {
       const poi = nearestPoi(ctx, objective.poi);
       return poi === null ? null : poiTarget(poi);

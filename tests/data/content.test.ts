@@ -751,6 +751,26 @@ describe('content invariants (SPEC-009 §7)', () => {
     expect(problems).toEqual([]);
   });
 
+  // SPEC-030 §4.1 (AC-51; the spec numbers this invariant 22, but SPEC-028's
+  // short-name rule already holds that slot below): every planet's `features`
+  // counts stay within 0–4, and every planet with a weather cycle asks for at
+  // least one cave or wreck, so a storm always has a shelter to point at.
+  it('22 (SPEC-030). features counts stay in 0–4 and weather planets ask for a shelter', () => {
+    const problems: string[] = [];
+    for (const planet of planets) {
+      const features = planet.surface.features;
+      for (const [key, count] of Object.entries(features)) {
+        if (!Number.isInteger(count) || count < 0 || count > 4) {
+          problems.push(`${planet.id}: features.${key} = ${count}`);
+        }
+      }
+      if (planet.surface.weather !== null && features.caves + features.wrecks < 1) {
+        problems.push(`${planet.id}: a weather cycle with no cave or wreck`);
+      }
+    }
+    expect(problems).toEqual([]);
+  });
+
   // SPEC-028 §3: `short` is the quick-bar label, so it has to fit a 48 px slot.
   it('22. every item carries a short name of 1–8 characters', () => {
     const problems: string[] = [];

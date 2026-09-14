@@ -18,6 +18,7 @@ import { groundLayer } from '@/views/ProceduralTextures';
 import { SurfaceView, type SurfaceFrame, type ViewLayout, type ViewPickup } from '@/views/SurfaceView';
 
 const LAYOUT: ViewLayout = {
+  shelters: [],
   hash: 0x18a7c3d1,
   halfSize: 60,
   pois: [
@@ -774,5 +775,113 @@ describe('lobs and deployables (SPEC-029 §4.6, §4.12)', () => {
     mesh.getMatrixAt(1, matrix);
     expect(matrix.elements[0]).toBeCloseTo(0.3, 5); // the charge box
     view.dispose();
+  });
+});
+
+// ---------------------------------------------------------------- SPEC-030
+
+describe('SPEC-030 — shelter instancing and the occupied roof (AC-40, AC-41, AC-42)', () => {
+  const SHELTERED: ViewLayout = {
+    ...LAYOUT,
+    shelters: [
+      { kind: 'cave', x: 20, z: 20, rx: 6, rz: 6, angle: 0, gapAngle: Math.PI },
+      { kind: 'cave', x: -20, z: 20, rx: 6, rz: 6, angle: 0, gapAngle: 0 },
+      { kind: 'wreck', x: 0, z: -25, rx: 6.5, rz: 3.2, angle: 0.4, gapAngle: 0.4 + Math.PI / 2 },
+    ],
+    obstacles: [
+      ...LAYOUT.obstacles,
+      // Collision-only kinds and debris, as the generator now emits them.
+      { x: 26, z: 20, radius: 1.1, kind: 'cave_wall' },
+      { x: 5, z: -25, radius: 0.9, kind: 'wreck_hull' },
+      { x: 9, z: -25, radius: 1, kind: 'debris' },
+    ],
+  };
+
+  function instancedMeshes(scene: THREE.Scene): THREE.InstancedMesh[] {
+    const found: THREE.InstancedMesh[] = [];
+    scene.traverse((node) => {
+      if ((node as THREE.InstancedMesh).isInstancedMesh === true) found.push(node as THREE.InstancedMesh);
+    });
+    return found;
+  }
+
+  function setupSheltered(): { scene: THREE.Scene; view: SurfaceView } {
+    const scene = new THREE.Scene();
+    return { scene, view: new SurfaceView(scene, SHELTERED, PLANETS.cinder4, QUALITY.medium) };
+  }
+
+  it('draws shelters as one instanced mesh per kind and part — ≤ 6 draws', () => {
+    const bare = instancedMeshes(setup().scene).length;
+    const withShelters = instancedMeshes(setupSheltered().scene).length;
+    // Two caves and a wreck: cave body+roof, wreck body+roof+glow, plus the
+    // one debris instancer — and never more than 6 shelter parts.
+    expect(withShelters - bare).toBeGreaterThanOrEqual(4);
+    expect(withShelters - bare).toBeLessThanOrEqual(7); // ≤ 6 shelter parts + debris
+  });
+
+  it('collision-only wall kinds are not drawn by the obstacle instancer (AC-42)', () => {
+    // The wall circles appear in obstacles but no instanced mesh grows for
+    // them: rebuilding with the wall kinds stripped changes nothing.
+    const stripped: ViewLayout = {
+      ...SHELTERED,
+      obstacles: SHELTERED.obstacles.filter((o) => o.kind !== 'cave_wall' && o.kind !== 'wreck_hull'),
+    };
+    const sceneA = new THREE.Scene();
+    void new SurfaceView(sceneA, SHELTERED, PLANETS.cinder4, QUALITY.medium);
+    const sceneB = new THREE.Scene();
+    void new SurfaceView(sceneB, stripped, PLANETS.cinder4, QUALITY.medium);
+    expect(instancedMeshes(sceneA).length).toBe(instancedMeshes(sceneB).length);
+  });
+
+  it('setOccupiedShelter scales the occupied roof to zero and restores the previous one (AC-41)', () => {
+    const { view, scene } = setupSheltered();
+    const matrix = new THREE.Matrix4();
+    const scale = new THREE.Vector3();
+    const meshes = instancedMeshes(scene);
+    const roofScale = (index: number): number => {
+      // Find the roof mesh holding this shelter's instance by probing all
+      // instanced meshes for a near-zero scale after occupying.
+      let smallest = Infinity;
+      for (const mesh of meshes) {
+        for (let i = 0; i < mesh.count; i++) {
+          mesh.getMatrixAt(i, matrix);
+          scale.setFromMatrixScale(matrix);
+          smallest = Math.min(smallest, scale.x);
+        }
+      }
+      void index;
+      return smallest;
+    };
+    expect(roofScale(0)).toBeGreaterThan(0.01); // nothing hidden yet
+    view.setOccupiedShelter(0);
+    expect(roofScale(0)).toBeLessThan(0.01); // one roof gone
+    view.setOccupiedShelter(2); // the wreck: previous roof restored
+    expect(roofScale(2)).toBeLessThan(0.01);
+    view.setOccupiedShelter(null);
+    expect(roofScale(0)).toBeGreaterThan(0.01); // all roofs back
+  });
+
+  it('wallVisible counts the chunks inside a frustum (AC-37)', () => {
+    const { view } = setupSheltered();
+    const everything = new THREE.Frustum(
+      new THREE.Plane(new THREE.Vector3(0, 1, 0), 1e6),
+      new THREE.Plane(new THREE.Vector3(0, -1, 0), 1e6),
+      new THREE.Plane(new THREE.Vector3(1, 0, 0), 1e6),
+      new THREE.Plane(new THREE.Vector3(-1, 0, 0), 1e6),
+      new THREE.Plane(new THREE.Vector3(0, 0, 1), 1e6),
+      new THREE.Plane(new THREE.Vector3(0, 0, -1), 1e6),
+    );
+    view.updateWallVisibility(everything);
+    expect(view.wallVisible).toBe(8);
+    const nothing = new THREE.Frustum(
+      new THREE.Plane(new THREE.Vector3(0, 1, 0), -1e6),
+      new THREE.Plane(new THREE.Vector3(0, 1, 0), -1e6),
+      new THREE.Plane(new THREE.Vector3(0, 1, 0), -1e6),
+      new THREE.Plane(new THREE.Vector3(0, 1, 0), -1e6),
+      new THREE.Plane(new THREE.Vector3(0, 1, 0), -1e6),
+      new THREE.Plane(new THREE.Vector3(0, 1, 0), -1e6),
+    );
+    view.updateWallVisibility(nothing);
+    expect(view.wallVisible).toBe(0);
   });
 });

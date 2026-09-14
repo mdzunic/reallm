@@ -9,6 +9,7 @@ import type { Rng } from '@/core/Rng';
 import type { EnemyId } from '@/data/enemies';
 import type { EnemyEntity } from '@/entities/Enemy';
 import type { CombatWorld } from '@/systems/Combat';
+import { HIDDEN_DETECT_RADIUS, LOSE_TRACK_SECONDS } from '@/systems/Shelter';
 
 // ------------------------------------------------------- tuning & constants
 
@@ -203,6 +204,12 @@ function move(e: EnemyEntity, world: CombatWorld, dt: number, desiredX: number, 
   // enemy: no collision (§4.4) — separation is the only body force.
   if (!world.obstacles.hitsCircle(nx, e.z, e.radius)) e.x = nx;
   if (!world.obstacles.hitsCircle(e.x, nz, e.radius)) e.z = nz;
+  // SPEC-030 §4.7: the arena wall — the same clamp the player's movement runs.
+  const bounds = world.bounds;
+  if (bounds !== undefined) {
+    e.x = Math.max(-bounds, Math.min(bounds, e.x));
+    e.z = Math.max(-bounds, Math.min(bounds, e.z));
+  }
   if (Math.hypot(vx, vz) > 1e-3) e.facing = Math.atan2(vz, vx);
   return dt > 0 ? distance(beforeX, beforeZ, e.x, e.z) / dt : 0;
 }
@@ -222,6 +229,11 @@ function trackStuck(e: EnemyEntity, world: CombatWorld, dt: number, achieved: nu
 
 // -------------------------------------------------------------- archetypes
 
+/** SPEC-030 §4.6: who hiding affects — ambient, non-boss enemies (D-21). */
+function heedsHiding(e: EnemyEntity): boolean {
+  return !e.fromWave && e.def.archetype !== 'boss';
+}
+
 function updateWander(e: EnemyEntity, world: CombatWorld, dt: number, rng: Rng): void {
   // §4.5 de-aggro: a dead player ends combat outright — acquiring the live
   // follower here would undo the forced wander and flip states every step.
@@ -232,7 +244,20 @@ function updateWander(e: EnemyEntity, world: CombatWorld, dt: number, rng: Rng):
       const d = distance(e.x, e.z, target.x, target.z);
       // SPEC-012 §4.6: storm visibility narrows the aggro radius.
       const aggroRadius = e.def.aggroRadius * (world.aggroMult ?? 1);
-      if (e.aggro || (aggroRadius > 0 && d <= aggroRadius)) {
+      let acquires = aggroRadius > 0 && d <= aggroRadius;
+      // SPEC-030 §4.6: a hidden player is acquired only within 5 m with a
+      // clear line — hiding narrows the rule, it never widens it. It covers
+      // the player only (30-c), and waves and bosses ignore it (AC-28).
+      if (
+        acquires &&
+        world.playerHidden === true &&
+        e.target === 'player' &&
+        heedsHiding(e) &&
+        (d > HIDDEN_DETECT_RADIUS || !world.obstacles.lineClear(e.x, e.z, world.player.x, world.player.z))
+      ) {
+        acquires = false;
+      }
+      if (e.aggro || acquires) {
         e.aggro = true;
         enterState(e, 'chase');
         return;
@@ -505,6 +530,27 @@ export function updateEnemy(e: EnemyEntity, world: CombatWorld, dt: number, rng:
   }
 
   if (e.aggro) selectTarget(e, world);
+
+  // SPEC-030 §4.6: an aggroed enemy loses a hidden player it cannot see for
+  // 3 s — back to wander, drifting home through wander points, no leash heal.
+  // `lostTrack` resets on any step where the player is not hidden or the line
+  // is clear (D-20); aggro gain and damage reset it in Combat.
+  if (world.playerHidden === true && e.aggro && e.target === 'player' && heedsHiding(e) && e.state !== 'leash') {
+    if (world.obstacles.lineClear(e.x, e.z, world.player.x, world.player.z)) {
+      e.lostTrack = 0;
+    } else {
+      e.lostTrack += dt;
+      if (e.lostTrack >= LOSE_TRACK_SECONDS) {
+        e.lostTrack = 0;
+        e.aggro = false;
+        e.stuckTime = 0;
+        enterState(e, 'wander');
+        e.wanderAt = world.time;
+      }
+    }
+  } else {
+    e.lostTrack = 0;
+  }
 
   // De-aggro (§4.5): player dead → wander; target out of leashRadius → leash.
   if (e.aggro && !world.player.alive) {

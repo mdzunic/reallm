@@ -51,6 +51,20 @@ test('the spawn-heavy medium frame stays within 96 draws and 130 k triangles', a
   expect(maxTriangles).toBeLessThanOrEqual(130_000);
 });
 
+// SPEC-030 D-17 / AC-44: with the wall and the shelters in place, every
+// planet stays inside the medium budget after 30 frames (§6.2 case 5).
+const PLANET_IDS = ['cinder4', 'vetra', 'thessaly', 'ferrum', 'hive', 'eden'] as const;
+
+for (const planet of PLANET_IDS) {
+  test(`${planet} stays within 96 draws and 130 k triangles on medium (SPEC-030 AC-44)`, async ({ page }) => {
+    await start(page, `/?debug&scene=surface&planet=${planet}&quality=medium`);
+    const stats = await afterFrames(page, 30);
+    expect(stats.drawCalls).toBeGreaterThan(10);
+    expect(stats.drawCalls).toBeLessThanOrEqual(96); // 80 scene + 16 post
+    expect(stats.triangles).toBeLessThanOrEqual(130_000);
+  });
+}
+
 test('the debug-scene row still parses on the environment build', async ({ page }) => {
   await start(page, URL);
   await afterFrames(page, 30);
