@@ -723,7 +723,7 @@ describe('content invariants (SPEC-009 §7)', () => {
     // The three of §4.3 exist and sit on the explosive quick slot.
     for (const id of ['frag_grenade', 'landmine', 'demo_charge'] as const) {
       const item = ITEM_TABLE[id];
-      expect(item.kind === 'consumable' && item.effect.kind === 'explosive', id).toBe(true);
+      expect(item !== undefined && item.kind === 'consumable' && item.effect.kind === 'explosive', id).toBe(true);
     }
   });
 
