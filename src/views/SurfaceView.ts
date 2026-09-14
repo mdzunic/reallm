@@ -463,6 +463,9 @@ export class SurfaceView {
     });
     const byKind = new Map<string, { x: number; z: number; scale: number; rot: number }[]>();
     for (const o of layout.obstacles) {
+      // SPEC-030 D-19: shelter walls are collision-only — the shelter body is
+      // their visual; `debris` draws like any other kind.
+      if (o.kind === 'cave_wall' || o.kind === 'wreck_hull') continue;
       const list = byKind.get(o.kind) ?? [];
       list.push({ x: o.x, z: o.z, scale: o.radius, rot: (o.x * 7 + o.z * 3) % Math.PI });
       byKind.set(o.kind, list);

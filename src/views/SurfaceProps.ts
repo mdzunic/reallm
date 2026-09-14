@@ -16,7 +16,7 @@ import type { BoundaryKind } from '@/data/ids';
 import type { PlanetDef } from '@/data/planets';
 
 export type Biome = PlanetDef['biome'];
-export type ObstacleKind = 'rock' | 'ruin' | 'spire' | 'vent' | 'tree';
+export type ObstacleKind = 'rock' | 'ruin' | 'spire' | 'vent' | 'tree' | 'cave_wall' | 'wreck_hull' | 'debris';
 export type PoiKind = 'landing_pad' | 'scan' | 'reach' | 'deliver' | 'arena' | 'defend' | 'escort_start' | 'landmark';
 
 export interface PropGeometry {
@@ -288,7 +288,9 @@ function treeBody(seed: number, biome: Biome): THREE.BufferGeometry {
  * it names a model and the lazy assets have landed (§4.10, 18-o).
  */
 export function obstacleGeometry(kind: ObstacleKind, biome: Biome, seed: number, assets?: Assets, small = false): PropGeometry {
-  const modelId = PROP_MODELS[`${biome}:${kind}`];
+  // SPEC-030 D-19: the collision-only kinds are never looked up in PROP_MODELS.
+  const collisionOnly = kind === 'cave_wall' || kind === 'wreck_hull';
+  const modelId = collisionOnly ? undefined : PROP_MODELS[`${biome}:${kind}`];
   if (assets !== undefined && modelId !== undefined && assets.hasModel(modelId)) {
     return propFromModel(assets.model(modelId));
   }
@@ -303,7 +305,37 @@ export function obstacleGeometry(kind: ObstacleKind, biome: Biome, seed: number,
       return ventBody(seed);
     case 'tree':
       return { body: treeBody(seed, biome) };
+    // SPEC-030 D-19: collision-only kinds — the shelter body is their visual.
+    // The switch stays exhaustive; a caller that does draw one gets rock.
+    case 'cave_wall':
+    case 'wreck_hull':
+      return { body: rockBody(seed, small) };
+    case 'debris':
+      return { body: debrisBody(seed) };
   }
+}
+
+/** SPEC-030 §4.3: bent hull plates — the debris scattered around a wreck. */
+function debrisBody(seed: number): THREE.BufferGeometry {
+  const plates: THREE.BufferGeometry[] = [];
+  const count = 2 + Math.floor(hash01(seed, 30) * 2); // 2–3
+  for (let i = 0; i < count; i++) {
+    const width = 0.7 + hash01(seed, i, 31) * 0.7;
+    const plate = new THREE.BoxGeometry(width, 0.08, 0.5 + hash01(seed, i, 32) * 0.5, 2, 1, 1);
+    bake(plate, i === 0 ? '#7a828e' : '#5f6873');
+    // A bend along the plate's length.
+    const position = plate.getAttribute('position') as THREE.BufferAttribute;
+    for (let v = 0; v < position.count; v++) {
+      const x = position.getX(v);
+      position.setY(v, position.getY(v) + Math.abs(x) * 0.35);
+    }
+    plate.computeVertexNormals();
+    plate.rotateZ((hash01(seed, i, 33) - 0.5) * 0.9);
+    plate.rotateY(hash01(seed, i, 34) * Math.PI);
+    plate.translate((hash01(seed, i, 35) - 0.5) * 0.8, 0.12 + hash01(seed, i, 36) * 0.15, (hash01(seed, i, 37) - 0.5) * 0.8);
+    plates.push(plate);
+  }
+  return merge(plates);
 }
 
 // --------------------------------------------------------------------- POIs
