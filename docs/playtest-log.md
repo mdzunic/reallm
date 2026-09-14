@@ -752,14 +752,18 @@ assertions; `e2e/surface-env.spec.ts` holds the six-planet budget sweep.
 
 Budget: ≤ 96 draws (80 scene + 16 post) and ≤ 130 k triangles (AC-44).
 
+Re-measured after the review-round fix moved the chunk spheres onto
+`InstancedMesh.boundingSphere` — culling now tracks the real chunk positions,
+so the rows dropped across the board.
+
 | Planet | Draw calls | Triangles | Shelters placed |
 |---|---|---|---|
-| cinder4 | 61 | 113,906 | 4 |
-| vetra | 61 | 59,524 | 4 |
-| thessaly | 58 | 108,746 | 3 |
-| ferrum | 65 | 78,412 | 4 |
-| hive | 62 | 92,826 | 3 |
-| eden | 49 | 69,098 | 2 |
+| cinder4 | 49 | 88,868 | 4 |
+| vetra | 51 | 35,276 | 4 |
+| thessaly | 48 | 85,268 | 3 |
+| ferrum | 54 | 54,820 | 4 |
+| hive | 53 | 77,278 | 3 |
+| eden | 37 | 43,822 | 2 |
 
 ### Shots
 
