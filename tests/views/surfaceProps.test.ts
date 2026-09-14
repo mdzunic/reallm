@@ -241,4 +241,19 @@ describe('SPEC-030 — wall pieces (AC-35)', () => {
   it('hull pieces stay ≤ 320 triangles', () => {
     expect(tris(hullPieceGeometry())).toBeLessThanOrEqual(320);
   });
+
+  it('hull pieces keep the wall-piece local frame: x ± 0.5, y and z in [0, 1]', () => {
+    // ArenaWall stands local z = 0 on the clamp line + 0.6 m; any vertex at
+    // z < 0 would protrude past where the player stops (AC-34), and y < 0
+    // would bury geometry below the terrain.
+    const hull = hullPieceGeometry();
+    hull.computeBoundingBox();
+    const box = hull.boundingBox as THREE.Box3;
+    expect(box.min.x).toBeGreaterThanOrEqual(-0.5 - 1e-6);
+    expect(box.max.x).toBeLessThanOrEqual(0.5 + 1e-6);
+    expect(box.min.y).toBeGreaterThanOrEqual(-1e-6);
+    expect(box.max.y).toBeLessThanOrEqual(1 + 1e-6);
+    expect(box.min.z).toBeGreaterThanOrEqual(-1e-6);
+    expect(box.max.z).toBeLessThanOrEqual(1 + 1e-6);
+  });
 });

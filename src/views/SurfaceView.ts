@@ -776,6 +776,7 @@ export class SurfaceView {
     const shelters = layout.shelters;
     this.#roofSlots.length = 0;
     this.#roofMatrices.length = 0;
+    this.#shelterMeshes.length = 0;
     if (shelters.length === 0) return;
     const roofMaterial = new THREE.MeshStandardMaterial({
       flatShading: true,

@@ -130,12 +130,62 @@ describe('SPEC-030 — chunks and hulls (AC-35, AC-36)', () => {
       }
       expect(chunk.userData['sphere']).toBeInstanceOf(THREE.Sphere);
     }
-    // At most 3 chunk spheres fit any camera-sized frustum at a corner: the
-    // spheres of opposite edges never overlap a corner-sized region.
-    const spheres = result.group.children.map((c) => c.userData['sphere'] as THREE.Sphere);
-    const corner = new THREE.Vector3(LINE, 0, LINE);
-    const near = spheres.filter((s) => s.center.distanceTo(corner) <= s.radius + 40).length;
-    expect(near).toBeLessThanOrEqual(4);
+  });
+
+  it('culling spheres live on the meshes, contain their instances, and leave the geometry alone', () => {
+    for (const mesh of build().chunks) {
+      // Frustum.intersectsObject reads `mesh.boundingSphere` as-is; putting a
+      // world-space sphere on `geometry.boundingSphere` instead would make
+      // computeBoundingSphere re-apply every instance matrix to it.
+      const sphere = mesh.boundingSphere;
+      expect(sphere).toBeInstanceOf(THREE.Sphere);
+      const position = new THREE.Vector3();
+      // A piece reaches at most √(3.5² + 6² + 3.5²) m from its origin (half
+      // its length, its height, its depth); that much slack around every
+      // origin means the sphere bounds the whole piece.
+      const slack = Math.hypot(3.5, 6, 3.5) - 1e-6;
+      for (let i = 0; i < mesh.count; i++) {
+        mesh.getMatrixAt(i, matrix);
+        position.setFromMatrixPosition(matrix);
+        expect((sphere as THREE.Sphere).distanceToPoint(position)).toBeLessThanOrEqual(-slack);
+      }
+      // The geometry keeps its own local-space sphere (unit-frame sized).
+      mesh.geometry.computeBoundingSphere();
+      expect((mesh.geometry.boundingSphere as THREE.Sphere).radius).toBeLessThanOrEqual(1.5);
+    }
+  });
+
+  it('at most 3 chunks intersect the surface camera frustum at every corner (AC-36)', () => {
+    // The Surface rig: fov 40, far 200, pitch 55°, yaw 45°, distance 28.
+    const result = build();
+    const offset = 28 * Math.cos((55 * Math.PI) / 180);
+    for (const [sx, sz] of [
+      [1, 1],
+      [1, -1],
+      [-1, 1],
+      [-1, -1],
+    ] as const) {
+      const camera = new THREE.PerspectiveCamera(40, 16 / 9, 0.1, 200);
+      const target = new THREE.Vector3(sx * (HALF - 2), 0, sz * (HALF - 2));
+      camera.position.set(
+        target.x + offset * Math.sin(Math.PI / 4),
+        28 * Math.sin((55 * Math.PI) / 180),
+        target.z + offset * Math.cos(Math.PI / 4),
+      );
+      camera.lookAt(target);
+      camera.updateMatrixWorld();
+      const frustum = new THREE.Frustum().setFromProjectionMatrix(
+        new THREE.Matrix4().multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse),
+      );
+      const visible = result.group.children.filter((chunk) =>
+        chunk.children.some((child) => {
+          const sphere = (child as THREE.InstancedMesh).boundingSphere;
+          return sphere !== null && frustum.intersectsSphere(sphere);
+        }),
+      ).length;
+      expect(visible, `corner ${sx},${sz}`).toBeGreaterThanOrEqual(1);
+      expect(visible, `corner ${sx},${sz}`).toBeLessThanOrEqual(3);
+    }
   });
 
   it('every 6th–8th piece is a hull section', () => {

@@ -665,22 +665,24 @@ function hash32Like(kind: string, variant: number): number {
  */
 export function hullPieceGeometry(): THREE.BufferGeometry {
   const parts: THREE.BufferGeometry[] = [];
+  // A half-pipe vault along x: the cross-section circle is squeezed so the
+  // arch spans exactly z ∈ [0, 1] and rises from y = 0 — the inner edge sits
+  // on the wall line (AC-34) and nothing dips below the ground plane.
   const shell = new THREE.CylinderGeometry(0.55, 0.55, 1, 10, 2, true, 0, Math.PI);
   shell.rotateZ(Math.PI / 2);
-  shell.scale(1, 1.6, 1.4);
-  shell.translate(0, 0.35, 0.5);
+  shell.scale(1, 1.6, 0.5 / 0.55);
+  shell.translate(0, 0, 0.5);
   bake(shell, '#7a828e');
   parts.push(shell);
   for (let i = 0; i < 3; i++) {
     const rib = new THREE.TorusGeometry(0.56, 0.05, 4, 8, Math.PI);
-    rib.rotateZ(Math.PI); // arch over the shell
-    rib.rotateY(Math.PI / 2);
-    rib.scale(1, 1.6, 1.4);
-    rib.translate(-0.35 + i * 0.35, 0.35, 0.5);
+    rib.rotateY(Math.PI / 2); // arch over the shell, in the z-y plane
+    rib.scale(1, 1.5, 0.5 / 0.61);
+    rib.translate(-0.35 + i * 0.35, 0.075, 0.5);
     parts.push(bake(rib, '#5f6873'));
   }
   const fin = new THREE.BoxGeometry(0.08, 0.9, 0.35);
-  fin.translate(0.2, 0.85, 0.55);
+  fin.translate(0.2, 0.5, 0.5);
   parts.push(bake(fin, '#9aa2ae'));
   return merge(parts);
 }

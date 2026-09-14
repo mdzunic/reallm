@@ -85,8 +85,8 @@ const scratchEuler = new THREE.Euler();
 
 /**
  * §4.8: the wall along all four edges. `group` holds the 8 chunk groups;
- * `chunks` is the flat list of instanced meshes (≤ 2 per chunk). Each mesh's
- * geometry carries a bounding sphere over its own instances, so three.js
+ * `chunks` is the flat list of instanced meshes (≤ 2 per chunk). Each mesh
+ * carries its chunk's bounding sphere on `mesh.boundingSphere`, so three.js
  * culls per chunk; the caller reads the same spheres for `wallVisible`.
  */
 export function buildArenaWall(
@@ -177,11 +177,17 @@ export function buildArenaWall(
       }
       // One sphere per chunk, padded by the largest piece extent, shared by
       // every mesh in it — culling and `wallVisible` read the same answer.
+      // It must go on the InstancedMesh's own `boundingSphere` (used as-is by
+      // Frustum.intersectsObject, mesh matrixWorld is identity here), never on
+      // `geometry.boundingSphere`, which computeBoundingSphere would re-apply
+      // every instance matrix to.
       box.getBoundingSphere(sphere);
-      sphere.radius += LENGTH_MAX + HEIGHT_MAX;
+      // The box spans piece origins; a piece reaches at most half its length
+      // along the edge, its height up, its depth out from there.
+      sphere.radius += Math.hypot(LENGTH_MAX / 2, HEIGHT_MAX, DEPTH_MAX);
       for (const child of chunk.children) {
         const mesh = child as THREE.InstancedMesh;
-        mesh.geometry.boundingSphere = sphere.clone();
+        mesh.boundingSphere = sphere.clone();
         mesh.frustumCulled = true;
       }
       chunk.userData['sphere'] = sphere;
