@@ -1073,6 +1073,8 @@ export class SurfaceScene extends UiScene<'surface'> {
         dt,
       });
       view.setArena(world.arena);
+      // SPEC-030 D-22: the wall chunks against this frame's frustum.
+      view.updateWallVisibility(this.#frustum);
       // SPEC-027 §4.11: the waypoint, the scan ring and the two view meshes.
       this.#renderGuidance(world, view);
       this.#forwardGrade();

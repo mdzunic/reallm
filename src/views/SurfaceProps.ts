@@ -493,6 +493,198 @@ export function poiGeometry(kind: PoiKind, biome: Biome, assets?: Assets): PropG
   }
 }
 
+// ------------------------------------------------------- SPEC-030 shelters
+
+/**
+ * The GLB seam for shelters (SPEC-030 D-24): ships empty — every shelter in
+ * this spec is procedural — so a later asset drop needs no code change.
+ */
+export const SHELTER_MODELS: Partial<Record<`${Biome}:${'cave' | 'wreck'}`, ModelId>> = {};
+
+export interface ShelterGeometry {
+  body: THREE.BufferGeometry;
+  roof: THREE.BufferGeometry;
+  glow?: THREE.BufferGeometry;
+}
+
+/** The §4.9 cave palette per biome (§4.1's look table, *initial tuning*). */
+const CAVE_COLORS: Record<Biome, { body: string; glow?: string }> = {
+  desert: { body: '#b89468' },
+  ice: { body: '#c8dcec' },
+  jungle: { body: '#6a5a3c' },
+  volcanic: { body: '#4c4038', glow: '#ffffff' },
+  hive: { body: '#4c3a58', glow: '#ffffff' },
+  temperate: { body: '#7d8a6a' },
+};
+
+/**
+ * SPEC-030 §4.9: one shelter's parts, procedural per biome. Canonical frame:
+ * a cave's entrance cut faces local +x; a wreck's long axis runs along local
+ * +x with the breach on local +z. `SurfaceView` rotates instances so the cut
+ * lands on the placed `gapAngle`. Budget: body ≤ 1.6 k triangles, roof ≤ 600.
+ */
+export function shelterGeometry(kind: 'cave' | 'wreck', biome: Biome, seed: number, assets?: Assets): ShelterGeometry {
+  const modelId = SHELTER_MODELS[`${biome}:${kind}`];
+  if (assets !== undefined && modelId !== undefined && assets.hasModel(modelId)) {
+    // D-24: a dropped model wins through the same merge path as the props.
+    // It carries no separate roof, so a tiny cap stands in for the lift.
+    const body = geometryFromModel(assets.model(modelId));
+    const roof = new THREE.SphereGeometry(0.1, 4, 3);
+    return { body, roof: merge([bake(roof, '#ffffff')]) };
+  }
+  return kind === 'cave' ? caveGeometry(biome, seed) : wreckGeometry(biome, seed);
+}
+
+/** A displaced rock ring (inner r 6, outer ≈ 8.2, height 3.2) with the cut. */
+function caveGeometry(biome: Biome, seed: number): ShelterGeometry {
+  const colors = CAVE_COLORS[biome];
+  // The covered arc leaves a ~44° doorway; the torus arc starts at the cut's
+  // edge, so the opening is centred on local +x.
+  const doorway = 0.76;
+  const ring = new THREE.TorusGeometry(7.1, 1.1, 6, 26, Math.PI * 2 - doorway);
+  ring.rotateZ(doorway / 2);
+  ring.rotateX(-Math.PI / 2);
+  ring.scale(1, 1.45, 1);
+  ring.translate(0, 1.4, 0);
+  bake(ring, colors.body);
+  displace(ring, seed, 0.3, 0.18);
+  darkenLow(ring, 0.4);
+  const body = merge([toCreasedNormals(ring, Math.PI / 3)]);
+
+  const cap = new THREE.SphereGeometry(7.6, 14, 5, 0, Math.PI * 2, 0, Math.PI / 2);
+  cap.scale(1, 0.42, 1);
+  cap.translate(0, 2.4, 0);
+  bake(cap, colors.body, 0.9);
+  displace(cap, seed + 1, 0.25, 0);
+  const roof = merge([cap]);
+
+  const result: ShelterGeometry = { body, roof };
+  if (colors.glow !== undefined) {
+    // Ferrum's ember cracks / the Hive's veins: a dim ring inside the chamber.
+    const veins = new THREE.TorusGeometry(6.1, 0.08, 3, 20, Math.PI * 2 - doorway);
+    veins.rotateZ(doorway / 2);
+    veins.rotateX(-Math.PI / 2);
+    veins.translate(0, 0.5, 0);
+    result.glow = merge([bake(veins, colors.glow)]);
+  }
+  return result;
+}
+
+/** A broken hull shell along the ellipse with the breach cut, plus roof plates. */
+function wreckGeometry(biome: Biome, seed: number): ShelterGeometry {
+  void biome; // the hull reads as wreckage on every world; vertex greys only
+  const parts: THREE.BufferGeometry[] = [];
+  // The skin: a half-open cylinder along +x (the long axis), the breach on
+  // local +z — the open theta range faces +z after the rotations below.
+  const skin = new THREE.CylinderGeometry(3.4, 3.4, 12.4, 12, 3, true, Math.PI * 0.08, Math.PI * 1.3);
+  skin.rotateZ(Math.PI / 2);
+  bake(skin, '#8b93a0');
+  displace(skin, seed, 0.18, 0.1);
+  parts.push(skin);
+  // Ribs along the hull.
+  for (let i = 0; i < 4; i++) {
+    const rib = new THREE.TorusGeometry(3.35, 0.16, 4, 10, Math.PI * 1.2);
+    rib.rotateZ(Math.PI * 0.05);
+    rib.rotateY(Math.PI / 2);
+    rib.translate(-4.6 + i * 3, 0, 0);
+    parts.push(bake(rib, '#6a7280'));
+  }
+  const body = merge(parts);
+  body.scale(1, 1, 0.94); // squeeze toward the 3.2 m short radius
+  body.translate(0, 0.4, 0);
+
+  // Roof plates: the top band, split so `setOccupiedShelter` can lift them.
+  const plates: THREE.BufferGeometry[] = [];
+  for (let i = 0; i < 3; i++) {
+    const plate = new THREE.CylinderGeometry(3.5, 3.5, 3.6, 10, 1, true, Math.PI * 1.42, Math.PI * 0.52);
+    plate.rotateZ(Math.PI / 2);
+    plate.translate(-4 + i * 4, 0.4 + hash01(seed, i, 40) * 0.2, 0);
+    bake(plate, i === 1 ? '#9aa2ae' : '#848c98');
+    plates.push(plate);
+  }
+  const roof = merge(plates);
+  roof.scale(1, 1, 0.94);
+
+  // A dim console light inside.
+  const console = new THREE.BoxGeometry(0.5, 0.35, 0.3);
+  console.translate(-2.2, 0.5, -1.4);
+  const glow = merge([bake(console, '#ffffff')]);
+  return { body, roof, glow };
+}
+
+// ------------------------------------------------------ SPEC-030 wall pieces
+
+/** The §4.8 wall-piece palette per boundary kind. */
+const WALL_COLORS: Record<BoundaryKind, string> = {
+  dunes: '#c2a068',
+  ice_wall: '#cfe4f2',
+  jungle_bank: '#6a5a3c',
+  lava_ridge: '#463a32',
+  chitin_wall: '#5a4668',
+  hills: '#5c8440',
+};
+
+/**
+ * SPEC-030 §4.8: one wall piece — a displaced block per biome. Local frame:
+ * length along x ∈ [−0.5, 0.5], height y ∈ [0, 1], depth z ∈ [0, 1] with
+ * z = 0 the (flat) inner face; instances scale to metres. ≤ 140 triangles.
+ */
+export function wallPieceGeometry(kind: BoundaryKind, variant: 0 | 1 | 2): THREE.BufferGeometry {
+  const block = new THREE.BoxGeometry(1, 1, 1, 4, 3, 2);
+  block.translate(0, 0.5, 0.5);
+  bake(block, WALL_COLORS[kind] ?? '#8a8378');
+  // Displace everything but the inner face, which stays on z = 0 so the
+  // collision line and the visual agree (AC-34).
+  const position = block.getAttribute('position') as THREE.BufferAttribute;
+  const normal = block.getAttribute('normal') as THREE.BufferAttribute;
+  const seed = hash32Like(kind, variant);
+  for (let i = 0; i < position.count; i++) {
+    const z = position.getZ(i);
+    if (z < 0.05) continue;
+    const x = position.getX(i);
+    const y = position.getY(i);
+    const amount = 0.16 * fbm2(seed, x * 2.3 + y, z * 2.1 - y, 3) + 0.08 * (ridged2(seed + 1, x + y, z - y, 2) - 0.5);
+    position.setXYZ(i, x + normal.getX(i) * amount, y + normal.getY(i) * amount * 0.6, z + normal.getZ(i) * amount);
+  }
+  position.needsUpdate = true;
+  block.computeVertexNormals();
+  darkenLow(block, 0.2);
+  return merge([toCreasedNormals(block, Math.PI / 4)]);
+}
+
+/** A deterministic small seed from the boundary kind and variant. */
+function hash32Like(kind: string, variant: number): number {
+  let h = 2166136261 ^ variant;
+  for (let i = 0; i < kind.length; i++) h = Math.imul(h ^ kind.charCodeAt(i), 16777619);
+  return h >>> 0;
+}
+
+/**
+ * SPEC-030 §4.8: a wrecked hull section for every 6th–8th piece. Same local
+ * frame as `wallPieceGeometry`. ≤ 320 triangles.
+ */
+export function hullPieceGeometry(): THREE.BufferGeometry {
+  const parts: THREE.BufferGeometry[] = [];
+  const shell = new THREE.CylinderGeometry(0.55, 0.55, 1, 10, 2, true, 0, Math.PI);
+  shell.rotateZ(Math.PI / 2);
+  shell.scale(1, 1.6, 1.4);
+  shell.translate(0, 0.35, 0.5);
+  bake(shell, '#7a828e');
+  parts.push(shell);
+  for (let i = 0; i < 3; i++) {
+    const rib = new THREE.TorusGeometry(0.56, 0.05, 4, 8, Math.PI);
+    rib.rotateZ(Math.PI); // arch over the shell
+    rib.rotateY(Math.PI / 2);
+    rib.scale(1, 1.6, 1.4);
+    rib.translate(-0.35 + i * 0.35, 0.35, 0.5);
+    parts.push(bake(rib, '#5f6873'));
+  }
+  const fin = new THREE.BoxGeometry(0.08, 0.9, 0.35);
+  fin.translate(0.2, 0.85, 0.55);
+  parts.push(bake(fin, '#9aa2ae'));
+  return merge(parts);
+}
+
 // ----------------------------------------------------------------- boundary
 
 /**
