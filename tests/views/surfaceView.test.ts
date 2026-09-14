@@ -784,9 +784,9 @@ describe('SPEC-030 — shelter instancing and the occupied roof (AC-40, AC-41, A
   const SHELTERED: ViewLayout = {
     ...LAYOUT,
     shelters: [
-      { kind: 'cave', x: 20, z: 20, rx: 6, rz: 6, angle: 0, gapAngle: Math.PI, gapWidth: 4.5 },
-      { kind: 'cave', x: -20, z: 20, rx: 6, rz: 6, angle: 0, gapAngle: 0, gapWidth: 4.5 },
-      { kind: 'wreck', x: 0, z: -25, rx: 6.5, rz: 3.2, angle: 0.4, gapAngle: 0.4 + Math.PI / 2, gapWidth: 4 },
+      { kind: 'cave', x: 20, z: 20, rx: 6, rz: 6, angle: 0, gapAngle: Math.PI },
+      { kind: 'cave', x: -20, z: 20, rx: 6, rz: 6, angle: 0, gapAngle: 0 },
+      { kind: 'wreck', x: 0, z: -25, rx: 6.5, rz: 3.2, angle: 0.4, gapAngle: 0.4 + Math.PI / 2 },
     ],
     obstacles: [
       ...LAYOUT.obstacles,
