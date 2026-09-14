@@ -28,6 +28,16 @@ export interface ProjectileEntity {
   enemyId: EnemyId | null;
   /** Whether the enemy shooter was elite, for `enemyHitDamage` at hit time. */
   elite: boolean;
+  // SPEC-029 §3 — blasts and lobs (reset on every reuse).
+  /** Blast radius on detonation; 0 means a plain shot. */
+  blastRadius: number;
+  blastFalloff: number;
+  /** A lob ignores bodies and obstacles and explodes at its target (§4.6). */
+  lob: boolean;
+  targetX: number;
+  targetZ: number;
+  /** Total flight seconds of a lob; `ttl` counts it down (the view's arc). */
+  flight: number;
 }
 
 export function makeProjectile(): ProjectileEntity {
@@ -44,5 +54,11 @@ export function makeProjectile(): ProjectileEntity {
     hitIds: null,
     enemyId: null,
     elite: false,
+    blastRadius: 0,
+    blastFalloff: 0,
+    lob: false,
+    targetX: 0,
+    targetZ: 0,
+    flight: 0,
   };
 }

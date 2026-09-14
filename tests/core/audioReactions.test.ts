@@ -126,9 +126,12 @@ const EVENT_KEYS = [
   'resource:spent',
   'inventory:changed',
   'gear:equipped',
-  // SPEC-028 §3: the loadout runtime's two events, both silent for now.
+  // SPEC-028 §3 / SPEC-029 §3: the loadout, blast and mine events.
   'weapon:switched',
+  'weapon:locked',
   'quick:used',
+  'combat:blast',
+  'mine:armed',
   'shop:purchased',
   'enemy:spawned',
   'enemy:killed',

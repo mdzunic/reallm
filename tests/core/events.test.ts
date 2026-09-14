@@ -556,6 +556,10 @@ const NAMES: Record<keyof GameEvents, true> = {
   // SPEC-028 §3: the loadout runtime's switch and quick-slot spend.
   'weapon:switched': true,
   'quick:used': true,
+  // SPEC-029 §3: blasts, heat locks and armed mines.
+  'combat:blast': true,
+  'weapon:locked': true,
+  'mine:armed': true,
   'shop:purchased': true,
   'enemy:spawned': true,
   'enemy:killed': true,
