@@ -291,16 +291,14 @@ describe('gear purchases (§4.3)', () => {
   it('asks for the rung below on the same line, and nothing at the bottom of one', () => {
     const { economy, progression } = world();
     progression.addTokens(1000, 'test');
-    // The launcher line ships no items until SPEC-029, so two stand-ins prove
-    // the rule its ladder will lean on. The lowest rung for sale has nothing
-    // below it and owes nothing — not even to a save wearing the tier-0 rifle,
-    // because a rifle is not on the launcher's line.
-    withStandIns([LAUNCHER_T1, LAUNCHER_T2], () => {
-      expect(economy.buyGear(LAUNCHER_T2_ID)).toEqual({ ok: false, reason: 'prerequisite' });
-      expect(economy.buyGear(LAUNCHER_T1_ID)).toEqual({ ok: true });
-      expect(economy.buyGear(LAUNCHER_T2_ID)).toEqual({ ok: true });
-      expect(economy.count(LAUNCHER_T2_ID)).toBe(1);
-    });
+    // SPEC-029 §4.10 ships the launcher line the SPEC-025 stand-ins rehearsed.
+    // The lowest rung for sale has nothing below it and owes nothing — not
+    // even to a save wearing the tier-0 rifle, because a rifle is not on the
+    // launcher's line.
+    expect(economy.buyGear('launcher_grenade')).toEqual({ ok: false, reason: 'prerequisite' });
+    expect(economy.buyGear('launcher_rocket')).toEqual({ ok: true });
+    expect(economy.buyGear('launcher_grenade')).toEqual({ ok: true });
+    expect(economy.count('launcher_grenade')).toBe(1);
   });
 
   it('the class starters are the bottom rung of their own lines and are not for sale', () => {
@@ -315,48 +313,6 @@ describe('gear purchases (§4.3)', () => {
   });
 });
 
-// SPEC-025 §4.6. The heavy slot is the only one a save can land with empty, and
-// no launcher ships until SPEC-029 — so the "no swap" branch is exercised
-// against a stand-in installed in the item table for the length of one test.
-const LAUNCHER_T1 = {
-  id: 'launcher_test_1',
-  name: 'Test Launcher',
-  kind: 'weapon',
-  slot: 'heavy',
-  line: 'launcher',
-  tier: 1,
-  damage: 40,
-  fireRate: 0.5,
-  projectileSpeed: 18,
-  range: 20,
-  pierce: 0,
-  energy: false,
-  price: { tokens: 40 },
-  model: 'procedural',
-  blurb: 'A stand-in for the launcher line SPEC-029 lands.',
-} as const;
-
-const LAUNCHER_T2 = {
-  ...LAUNCHER_T1,
-  id: 'launcher_test_2',
-  name: 'Test Launcher II',
-  tier: 2,
-  price: { tokens: 80 },
-} as const;
-
-/** The stand-in ids, widened into the shipped union for the call sites. */
-const LAUNCHER_T1_ID = LAUNCHER_T1.id as unknown as ItemId;
-const LAUNCHER_T2_ID = LAUNCHER_T2.id as unknown as ItemId;
-
-function withStandIns(items: readonly (typeof LAUNCHER_T1 | typeof LAUNCHER_T2)[], run: () => void): void {
-  const table = ITEMS as unknown as Record<string, unknown>;
-  for (const item of items) table[item.id] = item;
-  try {
-    run();
-  } finally {
-    for (const item of items) delete table[item.id];
-  }
-}
 
 describe('equipping into the three weapon slots (SPEC-025 §4.6)', () => {
   it('sends a weapon to the slot it names, not to the one it replaces', () => {
@@ -381,17 +337,15 @@ describe('equipping into the three weapon slots (SPEC-025 §4.6)', () => {
   it('takes an empty heavy slot with no swap at all', () => {
     const { economy, data, events, requested } = world();
     expect(data.equipped.heavy).toBeNull();
-    withStandIns([LAUNCHER_T1], () => {
-      economy.addItem(LAUNCHER_T1_ID, 1);
-      const before = data.inventory.length;
-      expect(economy.equip(LAUNCHER_T1_ID)).toEqual({ ok: true });
-      expect(data.equipped.heavy).toBe(LAUNCHER_T1.id);
-      // Nothing came off the body, so the hold is one entry lighter, not level.
-      expect(data.inventory).toHaveLength(before - 1);
-      expect(economy.count(LAUNCHER_T1_ID)).toBe(0);
-      expect(events.of('gear:equipped')).toEqual([{ slot: 'heavy', itemId: LAUNCHER_T1.id }]);
-      expect(requested).toContain('purchase');
-    });
+    economy.addItem('launcher_rocket', 1);
+    const before = data.inventory.length;
+    expect(economy.equip('launcher_rocket')).toEqual({ ok: true });
+    expect(data.equipped.heavy).toBe('launcher_rocket');
+    // Nothing came off the body, so the hold is one entry lighter, not level.
+    expect(data.inventory).toHaveLength(before - 1);
+    expect(economy.count('launcher_rocket')).toBe(0);
+    expect(events.of('gear:equipped')).toEqual([{ slot: 'heavy', itemId: 'launcher_rocket' }]);
+    expect(requested).toContain('purchase');
   });
 });
 

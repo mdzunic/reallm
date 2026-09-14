@@ -596,7 +596,7 @@ const port: ServicesEventBus = new EventBus<GameEvents>();
 
 describe('GameEvents (§3.2)', () => {
   it('is exactly the canonical table', () => {
-    expect(Object.keys(NAMES)).toHaveLength(54);
+    expect(Object.keys(NAMES)).toHaveLength(57);
   });
 
   it('still carries the nine names SPEC-002 and SPEC-003 already emit', () => {

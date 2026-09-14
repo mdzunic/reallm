@@ -426,10 +426,14 @@ describe('the ramp curve (SPEC-006 §4.3, §4.5)', () => {
 // ------------------------------------------------------------ reactions table
 
 describe('the reactions table is exhaustive over GameEvents (SPEC-006 §5)', () => {
-  it('covers the 15 reacted events of §5.2 (AC-38)', () => {
-    expect(REACTED_EVENTS).toHaveLength(15);
+  it('covers the 19 reacted events of §5.2 (AC-38; SPEC-029 §4.12 adds four)', () => {
+    expect(REACTED_EVENTS).toHaveLength(19);
     expect(REACTED_EVENTS.slice().sort()).toEqual(
       [
+        'combat:blast',
+        'weapon:locked',
+        'weapon:switched',
+        'mine:armed',
         'ui:toast',
         'player:damaged',
         'player:died',
@@ -449,12 +453,12 @@ describe('the reactions table is exhaustive over GameEvents (SPEC-006 §5)', () 
     );
   });
 
-  it('silences exactly the 39 events of §5.4 (AC-39)', () => {
-    expect(AUDIO_SILENT.size).toBe(39);
+  it('silences exactly the 38 events of §5.4 (AC-39; SPEC-029 moved weapon:switched out)', () => {
+    expect(AUDIO_SILENT.size).toBe(38);
   });
 
-  it('gives every one of the 54 event keys exactly one home (AC-40)', () => {
-    expect(EVENT_KEYS).toHaveLength(54);
+  it('gives every one of the 57 event keys exactly one home (AC-40)', () => {
+    expect(EVENT_KEYS).toHaveLength(57);
     const reacted = new Set<string>(REACTED_EVENTS);
     for (const key of EVENT_KEYS) {
       const hasSound = reacted.has(key);

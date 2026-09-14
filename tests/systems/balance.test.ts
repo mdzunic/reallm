@@ -78,13 +78,14 @@ describe('the invariants (§7)', () => {
 
   it('4. the sink is half again the richest run, so specialization is forced', () => {
     const sink = totalTokenSink();
-    expect(sink).toEqual({ ship: 1095, gear: 500, companions: 415, total: 2010 });
+    // SPEC-029 §4.10: the five arsenal prices add 370 to gear — 500 → 870.
+    expect(sink).toEqual({ ship: 1095, gear: 870, companions: 415, total: 2380 });
     // Main 670 + side 104 + 25 × 19 levels (PLAN §7).
     expect(completionistTokens()).toBe(670 + 104 + 25 * (COMPLETIONIST_LEVEL - 1));
     expect(completionistTokens()).toBe(1249);
     expect(sink.total).toBeGreaterThanOrEqual(1.5 * completionistTokens());
-    // A completionist affords roughly 62 % of everything (PLAN §7).
-    expect(Math.round((completionistTokens() / sink.total) * 100)).toBe(62);
+    // SPEC-029 §4.10: a completionist now affords 52 % of everything.
+    expect(Math.round((completionistTokens() / sink.total) * 100)).toBe(52);
   });
 
   it('5. the mission payout totals are the ones PLAN §7 fixes', () => {

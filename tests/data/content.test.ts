@@ -507,7 +507,23 @@ describe('content invariants (SPEC-009 §7)', () => {
       }
     }
     expect(seen).toEqual(
-      new Set(['handgun:0', 'rifle:0', 'rifle:1', 'rifle:2', 'rifle:3', 'armor:0', 'armor:1', 'armor:2', 'armor:3']),
+      new Set([
+        'handgun:0',
+        'handgun:2',
+        'rifle:0',
+        'rifle:1',
+        'rifle:2',
+        'rifle:3',
+        // SPEC-029 §4.1: the machine-gun and launcher ladders.
+        'machine_gun:1',
+        'machine_gun:3',
+        'launcher:1',
+        'launcher:2',
+        'armor:0',
+        'armor:1',
+        'armor:2',
+        'armor:3',
+      ]),
     );
     expect(problems).toEqual([]);
   });

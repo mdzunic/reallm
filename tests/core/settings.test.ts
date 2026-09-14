@@ -302,6 +302,7 @@ describe('the settings object (SPEC-007 §3)', () => {
       quality: null,
       reduceMotion: false,
       autoFire: 'touch',
+      weaponAutoSwap: 'touch',
       joystickSide: 'left',
       // §3 annotates this one `default true`. SPEC-005 owns the aim-assist
       // itself and only requires that it apply while the setting is on.
