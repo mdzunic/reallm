@@ -370,7 +370,7 @@ export interface HudModel {
   weather: { warning: WeatherId | null; active: WeatherId | null; secondsLeft: number };
   boss: { name: string; hp: number; max: number } | null;
   /** SPEC-028 §3: the quick bar's two halves; both `null` off the surface. */
-  loadout: { active: WeaponSlot; slots: Record<WeaponSlot, SlotView> } | null;
+  loadout: { active: WeaponSlot; slots: Record<WeaponSlot, SlotView>; fallback: boolean } | null;
   quick: Record<QuickSlot, { itemId: ItemId | null; qty: number }> | null;
   interact: string | null;
   flight?: {

@@ -9,7 +9,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { GameEvents } from '@/core/Events';
 import { setLogSink, type LogSink } from '@/core/Log';
 import { newSave, type CharacterCreation, type Save } from '@/core/Save';
-import { COMPANIONS, ITEMS, PLANETS, RECIPES, TUNING, UPGRADES, type ItemId, type RecipeId } from '@/data/index';
+import { COMPANIONS, ITEMS, PLANETS, RECIPES, TUNING, UPGRADES, type RecipeId } from '@/data/index';
 import {
   Economy,
   INVENTORY_SLOTS,

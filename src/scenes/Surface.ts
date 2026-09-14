@@ -44,6 +44,7 @@ import {
   type MissionDef,
   type MissionId,
   type PlanetDef,
+  type ExplosiveEffect,
   type PoiId,
   type QuickSlot,
   type ResourceId,
@@ -152,6 +153,15 @@ const QUICK_EMPTY_TEXT: Readonly<Record<QuickSlot, string>> = {
 };
 /** §4.4: each refusal text toasts at most once per 3 s. */
 const QUICK_TOAST_SECONDS = 3;
+/** SPEC-029 §4.8: any explosive use waits this long after the last. */
+const EXPLOSIVE_USE_SECONDS = 0.5;
+/** SPEC-029 §4.12: the blast camera shake. */
+const BLAST_SHAKE_AMPLITUDE = 0.3;
+const BLAST_SHAKE_SECONDS = 0.3;
+/** SPEC-029 §4.12: the blast burst is authored at radius 3.5, the scorch at 1.6 m. */
+const BLAST_BURST_BASE_RADIUS = 3.5;
+const BLAST_SCORCH_BASE = 1.6;
+const BLAST_COLOR = 0xffa040;
 /** §4.8: the quick-bar tip, ten seconds after the move tip on first landing. */
 const QUICKBAR_TIP_SECONDS = 10;
 
@@ -441,8 +451,9 @@ export class SurfaceScene extends UiScene<'surface'> {
 
   // HUD model scratch (SPEC-001 §7): `Hud.flush` diffs against a clone, so the
   // model may point at these reused objects (SPEC-028 §4.5).
-  readonly #loadoutScratch: { active: WeaponSlot; slots: Record<WeaponSlot, SlotView> } = {
+  readonly #loadoutScratch: { active: WeaponSlot; slots: Record<WeaponSlot, SlotView>; fallback: boolean } = {
     active: 'primary',
+    fallback: false,
     slots: {
       sidearm: { itemId: null, state: 'empty', cd: 0, heat: 0, charges: 0, maxCharges: 0 },
       primary: { itemId: null, state: 'empty', cd: 0, heat: 0, charges: 0, maxCharges: 0 },
@@ -468,6 +479,10 @@ export class SurfaceScene extends UiScene<'surface'> {
   readonly #quickToastAt = new Map<string, number>();
   /** §4.6: the open picker's close function, or `null`. */
   #pickerClose: (() => void) | null = null;
+  /** SPEC-029 §4.8: world time the next explosive use is allowed. */
+  #throwReadyAt = 0;
+  /** SPEC-029 §4.13: scratch `SlotView` for the debug overlay reads. */
+  readonly #debugSlotView: SlotView = { itemId: null, state: 'empty', cd: 0, heat: 0, charges: 0, maxCharges: 0 };
 
   // Defend/escort stages resync only when their identity changes — accepting
   // or completing an unrelated mission must not restart the wave or respawn
@@ -635,6 +650,9 @@ export class SurfaceScene extends UiScene<'surface'> {
       ai: visit.fork('ai'),
       combat: visit.fork('combat'),
     });
+    // SPEC-029 §4.4: combat mirrors the auto-swap setting (kept live in
+    // #subscribe); the deployables pool dies with the combat instance (29-e).
+    combat.weaponAutoSwap = services.settings.get().weaponAutoSwap;
     this.#combat = combat;
     this.disposer.add(() => combat.dispose());
 
@@ -869,6 +887,11 @@ export class SurfaceScene extends UiScene<'surface'> {
     this.#syncMissionStages();
     if (new URLSearchParams(globalThis.location.search).has('debug')) this.#buildDebugStrip();
 
+    // SPEC-029 §4.9: the first landing with a heavy weapon, and the first
+    // with an explosive in the slot; `#requestTip` drops the ones seen.
+    if (save.equipped.heavy !== null) this.#requestTip('heavy');
+    if (save.quick.explosive !== null) this.#requestTip('explosives');
+
     // §4.1 step 5: the landing save, and held-back accept dialogue.
     services.save.request('landing');
     const shown = acceptShown(save);
@@ -1040,6 +1063,7 @@ export class SurfaceScene extends UiScene<'surface'> {
         follower: world.follower,
         enemies: world.enemies,
         projectiles: world.projectiles,
+        deployables: (this.#combat as Combat).deployables,
         pickups: (this.#pickups as Pickups).pool,
         nodes: (this.#nodes as Nodes).states,
         telegraph: this.#bossTelegraph(world),
@@ -1191,6 +1215,21 @@ export class SurfaceScene extends UiScene<'surface'> {
       info['qHeal'] = countOf(save.quick.heal);
       info['qExplosive'] = countOf(save.quick.explosive);
       info['qUtility'] = countOf(save.quick.utility);
+      // SPEC-029 §4.13: the cooldown states the e2e run reads.
+      const time = this.#world?.time ?? 0;
+      const view = this.#debugSlotView;
+      combat.loadout.view('primary', time, view);
+      info['weaponHeat'] = Math.round(view.heat * 100);
+      combat.loadout.view('heavy', time, view);
+      info['charges'] = view.itemId === null ? '-' : view.charges;
+      combat.loadout.view(combat.loadout.active, time, view);
+      info['weaponState'] = view.state;
+      let mines = 0;
+      for (let i = 0; i < combat.deployables.size; i++) {
+        const d = combat.deployables.at(i);
+        if (d.kind === 'mine' && d.armed) mines++;
+      }
+      info['mines'] = mines;
     }
     if (this.#world !== null) {
       const world = this.#world;
@@ -1946,8 +1985,13 @@ export class SurfaceScene extends UiScene<'surface'> {
       this.#quickToast('HP full');
       return;
     }
-    // SPEC-029 deploys the explosive; until then the slot only ever reads ×0.
-    if (slot === 'explosive') return;
+    // SPEC-029 §4.8: the explosive slot throws or plants instead of applying.
+    if (slot === 'explosive') {
+      const item = ITEM_TABLE[id];
+      if (item.kind !== 'consumable' || item.effect.kind !== 'explosive') return;
+      this.#useExplosive(id, item.effect);
+      return;
+    }
 
     const result = economy.useConsumable(id);
     if (!result.ok) return;
@@ -1955,6 +1999,79 @@ export class SurfaceScene extends UiScene<'surface'> {
     this.services.events.emit('quick:used', { slot, itemId: id });
     // §4.4: the id stays when nothing replaces it, so the bar reads `×0`.
     if (economy.count(id) === 0) save.quick[slot] = refillQuick(save, slot) ?? id;
+  }
+
+  /**
+   * SPEC-029 §4.8: throw toward the aim point (keyboard) or the nearest enemy
+   * with a clear line (touch), clamped to range; plant a mine or a charge at
+   * the player's feet. Any use waits 0.5 s after the last and spends exactly
+   * one item — a refused deploy spends nothing.
+   */
+  #useExplosive(id: ItemId, effect: ExplosiveEffect): void {
+    const world = this.#world;
+    const combat = this.#combat;
+    const economy = this.#economy;
+    const save = this.#save;
+    if (world === null || combat === null || economy === null || save === null) return;
+    if (world.time < this.#throwReadyAt) return;
+    const p = world.player;
+    if (effect.mode === 'throw') {
+      const range = effect.range ?? 12;
+      let tx: number;
+      let tz: number;
+      const scheme = this.services.input.state.scheme;
+      const aim = scheme === 'touch' ? null : this.#aimWorld(world);
+      if (aim !== null) {
+        tx = aim.x;
+        tz = aim.z;
+      } else {
+        const target = scheme === 'touch' ? this.#clearThrowTarget(world, range) : null;
+        if (target !== null) {
+          tx = target.x;
+          tz = target.z;
+        } else {
+          tx = p.x + Math.cos(p.facing) * 8;
+          tz = p.z + Math.sin(p.facing) * 8;
+        }
+      }
+      // 29-f: clamp to range along the aim direction.
+      const dx = tx - p.x;
+      const dz = tz - p.z;
+      const len = Math.hypot(dx, dz);
+      if (len > range) {
+        tx = p.x + (dx / len) * range;
+        tz = p.z + (dz / len) * range;
+      }
+      combat.throwExplosive(effect, tx, tz);
+    } else {
+      const result = combat.deploy(effect, p.x, p.z);
+      if (result !== 'ok') {
+        this.#quickToast(result === 'mine_limit' ? 'Mine limit reached' : 'Too many explosives placed');
+        return;
+      }
+    }
+    economy.useConsumable(id);
+    this.#throwReadyAt = world.time + EXPLOSIVE_USE_SECONDS;
+    this.services.events.emit('quick:used', { slot: 'explosive', itemId: id });
+    // §4.4: the id stays when nothing replaces it, so the bar reads `×0`.
+    if (economy.count(id) === 0) save.quick.explosive = refillQuick(save, 'explosive') ?? id;
+  }
+
+  /** §4.8 (touch): the nearest live enemy within `range` with a clear line. */
+  #clearThrowTarget(world: CombatWorld, range: number): EnemyEntity | null {
+    const p = world.player;
+    let best: EnemyEntity | null = null;
+    let bestD = Infinity;
+    for (let i = 0; i < world.enemies.size; i++) {
+      const e = world.enemies.at(i);
+      if (e.state === 'dead' || e.specialKind === 'burrow_dig') continue;
+      const d = Math.hypot(e.x - p.x, e.z - p.z);
+      if (d > range || d >= bestD) continue;
+      if (!world.obstacles.lineClear(p.x, p.z, e.x, e.z)) continue;
+      best = e;
+      bestD = d;
+    }
+    return best;
   }
 
   /** §4.4: one toast per text per 3 s, on the world clock. */
@@ -2099,6 +2216,12 @@ export class SurfaceScene extends UiScene<'surface'> {
     // SPEC-027 AC-86: a minute of idle guidance time per press, so the whole
     // escalation is reachable in a QA session instead of in two and a half.
     button('surface-stuck', 'Stuck +60s', () => this.#stuck.advance(60));
+    // SPEC-029 §4.13: the arsenal in one press, and a pack of skitters at the
+    // aim point, so the acceptance run fits a QA session.
+    if (import.meta.env.DEV) {
+      button('surface-arsenal', 'Arsenal', () => this.#debugArsenal());
+    }
+    button('surface-spawn-pack', 'Spawn pack', () => this.#debugSpawnPack());
     // SPEC-024 §4.8: stage 0 of `c6_m2` is a 240 s defence, and an acceptance
     // run cannot pay that per attempt. Dev builds only — `import.meta.env.DEV`
     // strips the control (and its handler) out of a production bundle.
@@ -2107,6 +2230,41 @@ export class SurfaceScene extends UiScene<'surface'> {
     }
     this.services.uiRoot.append(strip);
     this.disposer.add(() => strip.remove());
+  }
+
+  /**
+   * SPEC-029 §4.13: the chaingun and the rocket launcher into the inventory
+   * and onto the body, three grenades, seven mines and a charge into the
+   * hold, and the grenade into the explosive slot.
+   */
+  #debugArsenal(): void {
+    const economy = this.#economy;
+    const save = this.#save;
+    if (economy === null || save === null) return;
+    for (const id of ['mg_scrap', 'launcher_rocket'] as const) {
+      if (economy.count(id) === 0 && save.equipped.primary !== id && save.equipped.heavy !== id) {
+        economy.addItem(id, 1);
+      }
+      economy.equip(id);
+    }
+    economy.addItem('frag_grenade', 3);
+    economy.addItem('landmine', 7);
+    economy.addItem('demo_charge', 1);
+    save.quick.explosive = 'frag_grenade';
+  }
+
+  /** SPEC-029 §4.13: 5 skitters in a 1.5 m ring at the aim point or 7 m ahead. */
+  #debugSpawnPack(): void {
+    const world = this.#world;
+    const combat = this.#combat;
+    if (world === null || combat === null) return;
+    const p = world.player;
+    const cx = this.#aimDebug.has ? this.#aimDebug.x : p.x + Math.cos(p.facing) * 7;
+    const cz = this.#aimDebug.has ? this.#aimDebug.z : p.z + Math.sin(p.facing) * 7;
+    for (let k = 0; k < 5; k++) {
+      const angle = (k / 5) * Math.PI * 2;
+      combat.spawnEnemy('dust_skitter', cx + Math.cos(angle) * 1.5, cz + Math.sin(angle) * 1.5, false);
+    }
   }
 
   /** §4.8: complete the pinned mission's current stage through the runtime. */
@@ -2346,6 +2504,8 @@ export class SurfaceScene extends UiScene<'surface'> {
     if (combat !== null && economy !== null) {
       const loadout = this.#loadoutScratch;
       loadout.active = combat.loadout.active;
+      // SPEC-029 §4.11: the ↺ marker while the sidearm covers a locked primary.
+      loadout.fallback = combat.loadout.fallback;
       for (const slot of WEAPON_SLOTS) combat.loadout.view(slot, world.time, loadout.slots[slot]);
       m.loadout = loadout;
       for (const slot of QUICK_SLOTS) {
@@ -3263,6 +3423,21 @@ export class SurfaceScene extends UiScene<'surface'> {
       ),
       // SPEC-027 §4.5: the storm tip rides the ten-second warning itself.
       bus.on('weather:warning', () => this.#requestTip('storm'), this),
+      // SPEC-029 §4.12: a blast bursts, scorches to its radius and shakes the
+      // camera 0.3 — reduce motion already zeroes the shake in shakeOffset.
+      bus.on(
+        'combat:blast',
+        ({ x, z, radius }) => {
+          const view = this.#view;
+          if (view === null) return;
+          view.fx.burst('blast', x, z, BLAST_COLOR, radius / BLAST_BURST_BASE_RADIUS);
+          view.fx.scorch(x, z, radius / BLAST_SCORCH_BASE);
+          this.#triggerShake(BLAST_SHAKE_AMPLITUDE, BLAST_SHAKE_SECONDS);
+        },
+        this,
+      ),
+      // SPEC-029 §4.9: the first lock teaches the cover switch.
+      bus.on('weapon:locked', () => this.#requestTip('overheat'), this),
       // SPEC-028 §4.4: a pickup of an eligible item fills an empty or run-out
       // quick slot (28-f: a reward spilled on the ground fills it on pickup).
       bus.on(
@@ -3279,6 +3454,10 @@ export class SurfaceScene extends UiScene<'surface'> {
         'settings:changed',
         ({ patch }) => {
           if (patch.guidance !== undefined) this.#onGuidanceChanged();
+          // SPEC-029 §4.4: combat mirrors the auto-swap mode, live.
+          if (patch.weaponAutoSwap !== undefined && this.#combat !== null) {
+            this.#combat.weaponAutoSwap = patch.weaponAutoSwap;
+          }
         },
         this,
       ),

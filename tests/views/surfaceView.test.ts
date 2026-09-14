@@ -12,6 +12,7 @@ import { ENEMIES, PLANETS, type PlanetDef } from '@/data/index';
 import { makeEnemy, type EnemyEntity } from '@/entities/Enemy';
 import { makePlayer } from '@/entities/Player';
 import { makeProjectile, type ProjectileEntity } from '@/entities/Projectile';
+import { makeDeployable, type DeployableEntity } from '@/entities/Deployable';
 import { INSTANCES_PER_PART } from '@/views/ProceduralMeshes';
 import { groundLayer } from '@/views/ProceduralTextures';
 import { SurfaceView, type SurfaceFrame, type ViewLayout, type ViewPickup } from '@/views/SurfaceView';
@@ -49,6 +50,7 @@ function frame(enemies: Pool<EnemyEntity>, follower: SurfaceFrame['follower'] = 
     follower,
     enemies,
     projectiles: new Pool<ProjectileEntity>(() => makeProjectile()),
+    deployables: new Pool<DeployableEntity>(() => makeDeployable()),
     pickups: new Pool<ViewPickup>(() => ({ kind: 'resource', x: 0, z: 0, seed: 0, resource: 'oil' })),
     nodes: [{ resource: 'oil', x: 3, z: -3, capacity: 10, remaining: 5, harvesting: false }],
     telegraph: null,
