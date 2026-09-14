@@ -174,6 +174,24 @@ describe('SPEC-030 — shelterGeometry (AC-39, AC-42, AC-43)', () => {
     }
   });
 
+  it('the wreck body stays low, so the lifted roof leaves the player visible (AC-41)', () => {
+    // Everything overhead — the dome, the ribs, the plates — must live in the
+    // roof part `setOccupiedShelter` lifts; the body may keep only the low
+    // far-side band (top edge ≈ 1.9 m plus ≤ 0.25 m of displacement), which
+    // never reaches the 55° sightline over a player at the centre.
+    for (const biome of BIOMES) {
+      for (const seed of [3, 11, 29]) {
+        const parts = shelterGeometry('wreck', biome, seed);
+        parts.body.computeBoundingBox();
+        parts.roof.computeBoundingBox();
+        const bodyBox = parts.body.boundingBox as THREE.Box3;
+        const roofBox = parts.roof.boundingBox as THREE.Box3;
+        expect(bodyBox.max.y, `${biome} seed ${seed} body top`).toBeLessThanOrEqual(2.2);
+        expect(roofBox.max.y, `${biome} seed ${seed} roof top`).toBeGreaterThan(3);
+      }
+    }
+  });
+
   it("Ferrum's cave and the Hive's carry a glow part; the wreck carries its console", () => {
     expect(shelterGeometry('cave', 'volcanic', 3).glow).toBeDefined();
     expect(shelterGeometry('cave', 'hive', 3).glow).toBeDefined();

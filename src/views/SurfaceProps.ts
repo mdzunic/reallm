@@ -573,15 +573,28 @@ function caveGeometry(biome: Biome, seed: number): ShelterGeometry {
 /** A broken hull shell along the ellipse with the breach cut, plus roof plates. */
 function wreckGeometry(biome: Biome, seed: number): ShelterGeometry {
   void biome; // the hull reads as wreckage on every world; vertex greys only
+  // The body is only the skin's low far-side band (top edge ≈ 1.9 m, below
+  // the 55° sightline), so lifting the roof leaves nothing overhead of the
+  // player (AC-41): the dome, the ribs and the plates are all roof parts.
+  const wall = new THREE.CylinderGeometry(3.4, 3.4, 12.4, 8, 3, true, Math.PI * 0.85, Math.PI * 0.53);
+  wall.rotateZ(Math.PI / 2);
+  bake(wall, '#8b93a0');
+  displace(wall, seed, 0.18, 0.1);
+  const body = merge([wall]);
+  body.scale(1, 1, 0.94); // squeeze toward the 3.2 m short radius
+  body.translate(0, 0.4, 0);
+
   const parts: THREE.BufferGeometry[] = [];
-  // The skin: a half-open cylinder along +x (the long axis), the breach on
-  // local +z — the open theta range faces +z after the rotations below.
-  const skin = new THREE.CylinderGeometry(3.4, 3.4, 12.4, 12, 3, true, Math.PI * 0.08, Math.PI * 1.3);
-  skin.rotateZ(Math.PI / 2);
-  bake(skin, '#8b93a0');
-  displace(skin, seed, 0.18, 0.1);
-  parts.push(skin);
-  // Ribs along the hull.
+  // The dome: the rest of the half-open skin along +x (the long axis), the
+  // breach on local +z — the open theta range faces +z after the rotations
+  // below, and its edge ring at 0.85π meets the body band displacement-exact
+  // (same seed, same positions, radial normals).
+  const dome = new THREE.CylinderGeometry(3.4, 3.4, 12.4, 12, 3, true, Math.PI * 0.08, Math.PI * 0.77);
+  dome.rotateZ(Math.PI / 2);
+  bake(dome, '#8b93a0');
+  displace(dome, seed, 0.18, 0.1);
+  parts.push(dome);
+  // Ribs along the hull; they arc over the top, so they lift with the dome.
   for (let i = 0; i < 4; i++) {
     const rib = new THREE.TorusGeometry(3.35, 0.16, 4, 10, Math.PI * 1.2);
     rib.rotateZ(Math.PI * 0.05);
@@ -589,21 +602,17 @@ function wreckGeometry(biome: Biome, seed: number): ShelterGeometry {
     rib.translate(-4.6 + i * 3, 0, 0);
     parts.push(bake(rib, '#6a7280'));
   }
-  const body = merge(parts);
-  body.scale(1, 1, 0.94); // squeeze toward the 3.2 m short radius
-  body.translate(0, 0.4, 0);
-
-  // Roof plates: the top band, split so `setOccupiedShelter` can lift them.
-  const plates: THREE.BufferGeometry[] = [];
+  // Plate seams across the top band, for tonal variety on the dome.
   for (let i = 0; i < 3; i++) {
-    const plate = new THREE.CylinderGeometry(3.5, 3.5, 3.6, 10, 1, true, Math.PI * 1.42, Math.PI * 0.52);
+    const plate = new THREE.CylinderGeometry(3.5, 3.5, 3.6, 10, 1, true, Math.PI * 0.3, Math.PI * 0.4);
     plate.rotateZ(Math.PI / 2);
-    plate.translate(-4 + i * 4, 0.4 + hash01(seed, i, 40) * 0.2, 0);
+    plate.translate(-4 + i * 4, hash01(seed, i, 40) * 0.2, 0);
     bake(plate, i === 1 ? '#9aa2ae' : '#848c98');
-    plates.push(plate);
+    parts.push(plate);
   }
-  const roof = merge(plates);
+  const roof = merge(parts);
   roof.scale(1, 1, 0.94);
+  roof.translate(0, 0.4, 0);
 
   // A dim console light inside.
   const console = new THREE.BoxGeometry(0.5, 0.35, 0.3);
