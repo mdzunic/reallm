@@ -722,3 +722,57 @@ surface sits at 43 of the 96 (80 scene + 16 post) the budget allows.
       `e2e/smoke.spec.ts`, `e2e/teardown.spec.ts` green
 - [ ] a first-time player walked `c1_m1`…`c1_m3` on the guidance alone, on
       hardware (desktop GPU + reference phone) — needs the human pass (§7, D-30)
+
+## SPEC-030 — shelters and the arena wall (M7c)
+
+- **Build:** `spec/SPEC-030` — untagged
+- **Devices:**
+  - desktop — headless Chromium (Playwright, Linux container, **software GL**)
+  - desktop hardware GPU and phone-over-LAN — _not run: no display, no GPU and
+    no handset in the build container; needs the human pass_
+
+### What was walked, and how (D-1)
+
+The scripted headless sweep, per planet on
+`?debug&scene=surface&planet=<id>&seed=123&quality=medium`: 30 rendered frames
+for the budget row, `surface-goto-edge` to the wall, `surface-goto-shelter`
+into the nearest shelter, and on Cinder-4 `surface-smite` then `surface-storm`
+through a forced heatwave. `e2e/SPEC-030.spec.ts` re-walks the same cases as
+assertions; `e2e/surface-env.spec.ts` holds the six-planet budget sweep.
+
+| Case | What was seen |
+|---|---|
+| Six-planet edge walk | The player stops on the clamp line (`px` pins at `halfSize − 2`) with wall pieces and hull sections where they stop; `wallVisible` reads 1–3 chunks at the edge, never all 8 |
+| Cave entry (Cinder-4) | `sheltered` reads 1, the chip shows, the roof instance lifts so the salvager stays visible under the 55° camera |
+| Wreck entry (Vetra) | Same chip and roof lift inside the frozen hull |
+| Forced storm inside | `surface-storm` raises the heatwave; over a 3 s hold inside the cave HP does not move; walking back to the pad it falls within 4 s |
+| Hiding | Two seconds after the last shot the chip flips to `⌂ HIDDEN`; an aggroed pack with no line gives up within 3 s (pinned in `tests/systems/enemyAi.test.ts`) |
+
+### Measurements — medium, after 30 frames
+
+Budget: ≤ 96 draws (80 scene + 16 post) and ≤ 130 k triangles (AC-44).
+
+| Planet | Draw calls | Triangles | Shelters placed |
+|---|---|---|---|
+| cinder4 | 61 | 113,906 | 4 |
+| vetra | 61 | 59,524 | 4 |
+| thessaly | 58 | 108,746 | 3 |
+| ferrum | 65 | 78,412 | 4 |
+| hive | 62 | 92,826 | 3 |
+| eden | 49 | 69,098 | 2 |
+
+### Shots
+
+| | |
+|---|---|
+| the wall where the player stops | [edge-wall](screenshots/spec-030/edge-wall.png) |
+| a cave interior, roof lifted | [cave-interior](screenshots/spec-030/cave-interior.png) |
+| a wreck interior, roof lifted | [wreck-interior](screenshots/spec-030/wreck-interior.png) |
+| the forced storm held off, chip up | [storm-sheltered](screenshots/spec-030/storm-sheltered.png) |
+
+### Not run, and why
+
+- **Desktop hardware GPU:** _not run_ — the build container has no display and
+  no hardware GPU; the frame numbers above are software-rasterised floors.
+- **Physical phone:** _not run_ — no handset reaches the container; the
+  touch-scheme texts are pinned in `tests/data/content.test.ts` instead.
