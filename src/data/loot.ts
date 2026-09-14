@@ -52,10 +52,12 @@ export const LOOT_TABLES = {
     { kind: 'resource', resource: 'wheat', min: 1, max: 2, chance: 0.15 },
     { kind: 'resource', resource: 'lithium', min: 1, max: 2, chance: 0.05 },
     { kind: 'item', itemId: 'wheat_ration', qty: 1, chance: 0.08 },
+    { kind: 'item', itemId: 'frag_grenade', qty: 1, chance: 0.05 },
   ],
   cinder4_boss: [
     { kind: 'gear', line: 'rifle', tier: 1, chance: 1 },
     { kind: 'gear', line: 'armor', tier: 1, chance: 1 },
+    { kind: 'item', itemId: 'frag_grenade', qty: 2, chance: 1 },
     ...BOSS_CONSUMABLES,
   ],
 
@@ -70,10 +72,12 @@ export const LOOT_TABLES = {
     { kind: 'resource', resource: 'wheat', min: 1, max: 2, chance: 0.15 },
     { kind: 'resource', resource: 'lithium', min: 1, max: 2, chance: 0.05 },
     { kind: 'item', itemId: 'wheat_ration', qty: 1, chance: 0.08 },
+    { kind: 'item', itemId: 'frag_grenade', qty: 1, chance: 0.05 },
   ],
   vetra_boss: [
     { kind: 'gear', line: 'rifle', tier: 1, chance: 1 },
     { kind: 'gear', line: 'armor', tier: 1, chance: 1 },
+    { kind: 'item', itemId: 'frag_grenade', qty: 2, chance: 1 },
     ...BOSS_CONSUMABLES,
   ],
 
@@ -88,10 +92,12 @@ export const LOOT_TABLES = {
     { kind: 'resource', resource: 'water', min: 1, max: 2, chance: 0.15 },
     { kind: 'resource', resource: 'lithium', min: 1, max: 2, chance: 0.05 },
     { kind: 'item', itemId: 'wheat_ration', qty: 1, chance: 0.08 },
+    { kind: 'item', itemId: 'frag_grenade', qty: 1, chance: 0.05 },
   ],
   thessaly_boss: [
     { kind: 'gear', line: 'rifle', tier: 2, chance: 1 },
     { kind: 'gear', line: 'armor', tier: 2, chance: 1 },
+    { kind: 'item', itemId: 'frag_grenade', qty: 2, chance: 1 },
     ...BOSS_CONSUMABLES,
   ],
 
@@ -106,10 +112,12 @@ export const LOOT_TABLES = {
     { kind: 'resource', resource: 'lithium', min: 1, max: 3, chance: 0.6 },
     { kind: 'resource', resource: 'oil', min: 1, max: 2, chance: 0.15 },
     { kind: 'item', itemId: 'wheat_ration', qty: 1, chance: 0.08 },
+    { kind: 'item', itemId: 'frag_grenade', qty: 1, chance: 0.05 },
   ],
   ferrum_boss: [
     { kind: 'gear', line: 'rifle', tier: 2, chance: 1 },
     { kind: 'gear', line: 'armor', tier: 2, chance: 1 },
+    { kind: 'item', itemId: 'frag_grenade', qty: 2, chance: 1 },
     ...BOSS_CONSUMABLES,
   ],
 
@@ -122,10 +130,12 @@ export const LOOT_TABLES = {
     { kind: 'resource', resource: 'lithium', min: 1, max: 3, chance: 0.6 },
     { kind: 'resource', resource: 'oil', min: 1, max: 2, chance: 0.15 },
     { kind: 'item', itemId: 'wheat_ration', qty: 1, chance: 0.08 },
+    { kind: 'item', itemId: 'frag_grenade', qty: 1, chance: 0.05 },
   ],
   hive_boss: [
     { kind: 'gear', line: 'rifle', tier: 3, chance: 1 },
     { kind: 'gear', line: 'armor', tier: 3, chance: 1 },
+    { kind: 'item', itemId: 'frag_grenade', qty: 2, chance: 1 },
     ...BOSS_CONSUMABLES,
   ],
 
@@ -141,6 +151,7 @@ export const LOOT_TABLES = {
   elite_bonus: [
     { kind: 'gear', line: 'rifle', tier: 3, chance: 0.35 },
     { kind: 'gear', line: 'armor', tier: 3, chance: 0.35 },
+    { kind: 'item', itemId: 'landmine', qty: 1, chance: 0.1 },
   ],
 } as const satisfies Record<string, readonly LootEntry[]>;
 

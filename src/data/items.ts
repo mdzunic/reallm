@@ -27,7 +27,31 @@ export interface Price {
 export type ConsumableEffect =
   | { readonly kind: 'heal'; readonly fraction: number; readonly overSeconds: number }
   | { readonly kind: 'hazard_immunity'; readonly seconds: number }
-  | { readonly kind: 'damage_boost'; readonly mult: number; readonly seconds: number };
+  | { readonly kind: 'damage_boost'; readonly mult: number; readonly seconds: number }
+  // SPEC-029 §3: a thrown, planted or fused blast. `range` binds `throw`,
+  // `trigger` binds `mine`; both blasts land through `Combat.explode`.
+  | {
+      readonly kind: 'explosive';
+      readonly mode: 'throw' | 'mine' | 'charge';
+      readonly radius: number;
+      readonly damage: number;
+      readonly fuse: number;
+      readonly range?: number;
+      readonly trigger?: number;
+    };
+
+/** The explosive variant on its own — what `Combat.throwExplosive` takes (SPEC-029 §3). */
+export type ExplosiveEffect = Extract<ConsumableEffect, { kind: 'explosive' }>;
+
+/**
+ * SPEC-029 §3: one cooldown model per weapon line. Handguns and rifles carry
+ * `none`, machine guns heat up and lock, launchers spend charges and recharge —
+ * and every model ticks while the weapon is holstered (§4.2).
+ */
+export type WeaponCooldown =
+  | { readonly kind: 'none' }
+  | { readonly kind: 'heat'; readonly perShot: number; readonly coolPerSec: number; readonly resumeAt: number }
+  | { readonly kind: 'charges'; readonly charges: number; readonly rechargeSeconds: number; readonly burstInterval: number };
 
 export type GearTier = 0 | 1 | 2 | 3;
 
@@ -75,6 +99,14 @@ export type ItemDef<Id extends string = string> =
       readonly range: number;
       readonly pierce: number;
       readonly energy: boolean;
+      /** SPEC-029 §3: none | heat | charges — the model ticks holstered too. */
+      readonly cooldown: WeaponCooldown;
+      /** SPEC-029 §3: radians of ±dispersion per shot, on the combat stream. */
+      readonly spread?: number;
+      /** SPEC-029 §3: the shot explodes instead of piercing. */
+      readonly blast?: { readonly radius: number; readonly falloff: number };
+      /** SPEC-029 §3: the shot arcs over bodies and obstacles to its aim point. */
+      readonly lob?: boolean;
       readonly price: Price | null;
       readonly model: ModelId | 'procedural';
       readonly blurb: string;
@@ -125,6 +157,7 @@ export const ITEMS = {
     range: 12,
     pierce: 0,
     energy: false,
+    cooldown: { kind: 'none' },
     price: null,
     model: 'procedural',
     blurb: 'Earth Command issue. It will not win a fight, but it will never be the reason you lost one.',
@@ -143,6 +176,7 @@ export const ITEMS = {
     range: 14,
     pierce: 0,
     energy: false,
+    cooldown: { kind: 'none' },
     price: null,
     model: 'procedural',
     blurb: 'Salvage-yard slug thrower. Loud, slow, and it has never once failed to fire.',
@@ -161,6 +195,7 @@ export const ITEMS = {
     range: 18,
     pierce: 0,
     energy: true,
+    cooldown: { kind: 'none' },
     price: { tokens: 40 },
     model: 'procedural',
     blurb: 'Focused beam, no recoil, no ammunition. The cell hums when the sand gets in.',
@@ -179,6 +214,7 @@ export const ITEMS = {
     range: 16,
     pierce: 1,
     energy: true,
+    cooldown: { kind: 'none' },
     price: { tokens: 80 },
     model: 'procedural',
     blurb: 'A bolt heavy enough to punch through the first thing it meets and keep going.',
@@ -197,9 +233,122 @@ export const ITEMS = {
     range: 18,
     pierce: 2,
     energy: true,
+    cooldown: { kind: 'none' },
     price: { tokens: 130, resources: { lithium: 120 } },
     model: 'procedural',
     blurb: 'Reactor-grade lithium spun into a cutting field. Two bodies deep, on a good day.',
+  },
+  /**
+   * SPEC-029 §4.1 (*initial tuning*): the sidearm upgrade — 38 damage per
+   * second with pierce 1, so the pistol slot stays worth a ladder of its own.
+   */
+  pistol_magnum: {
+    id: 'pistol_magnum',
+    name: 'Hand Cannon',
+    short: 'Cannon',
+    kind: 'weapon',
+    slot: 'sidearm',
+    line: 'handgun',
+    tier: 2,
+    damage: 24,
+    fireRate: 1.6,
+    projectileSpeed: 34,
+    range: 15,
+    pierce: 1,
+    energy: false,
+    cooldown: { kind: 'none' },
+    price: { tokens: 50 },
+    model: 'procedural',
+    blurb: 'A revolver scaled for wurm hide. Slow, loud, and it goes through the first body.',
+  },
+  /**
+   * SPEC-029 §4.1: 100 damage per second while it fires; heat 0.04 a shot
+   * against 0.20/s of cooling locks it on the 49th and frees it 3.25 s later.
+   */
+  mg_scrap: {
+    id: 'mg_scrap',
+    name: 'Scrap Chaingun',
+    short: 'Chaingun',
+    kind: 'weapon',
+    slot: 'primary',
+    line: 'machine_gun',
+    tier: 1,
+    damage: 10,
+    fireRate: 10,
+    projectileSpeed: 30,
+    range: 13,
+    pierce: 0,
+    energy: false,
+    cooldown: { kind: 'heat', perShot: 0.04, coolPerSec: 0.2, resumeAt: 0.35 },
+    spread: 0.08,
+    price: { tokens: 50 },
+    model: 'procedural',
+    blurb: 'Six salvaged barrels on one bearing. Glorious for five seconds, then a kettle.',
+  },
+  mg_rotary: {
+    id: 'mg_rotary',
+    name: 'Rotary Cannon',
+    short: 'Rotary',
+    kind: 'weapon',
+    slot: 'primary',
+    line: 'machine_gun',
+    tier: 3,
+    damage: 15,
+    fireRate: 12,
+    projectileSpeed: 34,
+    range: 16,
+    pierce: 0,
+    energy: false,
+    cooldown: { kind: 'heat', perShot: 0.03, coolPerSec: 0.22, resumeAt: 0.35 },
+    spread: 0.06,
+    price: { tokens: 120, resources: { lithium: 60 } },
+    model: 'procedural',
+    blurb: 'Reactor-cooled and still too hot. Nothing on six planets outlasts the spin-up.',
+  },
+  /**
+   * SPEC-029 §4.1: the heavy slot. One charge, six seconds — 70 of area damage
+   * per press, and the hand goes back to work while it rebuilds.
+   */
+  launcher_rocket: {
+    id: 'launcher_rocket',
+    name: 'Rocket Launcher',
+    short: 'Rocket',
+    kind: 'weapon',
+    slot: 'heavy',
+    line: 'launcher',
+    tier: 1,
+    damage: 70,
+    fireRate: 1,
+    projectileSpeed: 20,
+    range: 22,
+    pierce: 0,
+    energy: false,
+    cooldown: { kind: 'charges', charges: 1, rechargeSeconds: 6, burstInterval: 0 },
+    blast: { radius: 3.5, falloff: 0.4 },
+    price: { tokens: 60 },
+    model: 'procedural',
+    blurb: 'One tube, one answer. Whatever the question was, it stops asking.',
+  },
+  launcher_grenade: {
+    id: 'launcher_grenade',
+    name: 'Grenade Launcher',
+    short: 'Grenade',
+    kind: 'weapon',
+    slot: 'heavy',
+    line: 'launcher',
+    tier: 2,
+    damage: 45,
+    fireRate: 2.5,
+    projectileSpeed: 16,
+    range: 16,
+    pierce: 0,
+    energy: false,
+    cooldown: { kind: 'charges', charges: 3, rechargeSeconds: 9, burstInterval: 0.4 },
+    blast: { radius: 3, falloff: 0.5 },
+    lob: true,
+    price: { tokens: 90 },
+    model: 'procedural',
+    blurb: 'Three shells on a rotary drum. They go over the rock; the raiders were behind it.',
   },
   armor_scrap: {
     id: 'armor_scrap',
@@ -289,6 +438,40 @@ export const ITEMS = {
     price: null,
     blurb: 'Overcharges the weapon coil. Reward only — nobody sells these.',
   },
+  /**
+   * SPEC-029 §4.3 (*initial tuning*): the three explosives. Craft or loot only
+   * (`price null`); their blasts land through `Combat.explode` at falloff 0.5.
+   */
+  frag_grenade: {
+    id: 'frag_grenade',
+    name: 'Frag Grenade',
+    short: 'Frag',
+    kind: 'consumable',
+    effect: { kind: 'explosive', mode: 'throw', radius: 3.5, damage: 55, fuse: 0, range: 12 },
+    stack: 5,
+    price: null,
+    blurb: 'Oil-cell casing packed with yard scrap. It goes where you look and nowhere else.',
+  },
+  landmine: {
+    id: 'landmine',
+    name: 'Proximity Mine',
+    short: 'Mine',
+    kind: 'consumable',
+    effect: { kind: 'explosive', mode: 'mine', radius: 4, damage: 80, fuse: 0, trigger: 1.6 },
+    stack: 5,
+    price: null,
+    blurb: 'Arms a second after it leaves your hand. It knows your stride; nothing else’s.',
+  },
+  demo_charge: {
+    id: 'demo_charge',
+    name: 'Demolition Charge',
+    short: 'Charge',
+    kind: 'consumable',
+    effect: { kind: 'explosive', mode: 'charge', radius: 5.5, damage: 160, fuse: 3 },
+    stack: 3,
+    price: null,
+    blurb: 'Three seconds of fuse and a crater where the nest was. Walk, do not run.',
+  },
 } as const satisfies Record<string, ItemDef>;
 
 export type ItemId = keyof typeof ITEMS;
@@ -303,16 +486,17 @@ export const QUICK_SLOT_OF_EFFECT = {
   heal: 'heal',
   hazard_immunity: 'utility',
   damage_boost: 'utility',
+  explosive: 'explosive',
 } as const satisfies Record<ConsumableEffect['kind'], QuickSlot>;
 
 /**
  * SPEC-025 §4.2: the refill order of a quick slot, best first — what the v1
- * migration reaches for (§4.3) and what SPEC-028 refills from. `explosive` is
- * empty until SPEC-029 lands the throwables.
+ * migration reaches for (§4.3) and what SPEC-028 refills from. SPEC-029 §4.3
+ * fills `explosive`: the grenade first, then the mine, then the charge.
  */
 export const QUICK_PREFERENCE = {
   heal: ['medkit', 'wheat_ration'],
-  explosive: [],
+  explosive: ['frag_grenade', 'landmine', 'demo_charge'],
   utility: ['coolant_pack', 'plasma_cell'],
 } as const satisfies Record<QuickSlot, readonly ItemId[]>;
 

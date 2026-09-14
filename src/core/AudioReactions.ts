@@ -83,8 +83,12 @@ export function pickupSound(resource: ResourceId): SoundId {
 
 // ------------------------------------------------------------- the two halves
 
-/** The 15 events of §5.2 that make a sound. */
+/** The 19 events of §5.2 (SPEC-029 §4.12 adds four) that make a sound. */
 export type ReactedEvent =
+  | 'combat:blast'
+  | 'weapon:locked'
+  | 'weapon:switched'
+  | 'mine:armed'
   | 'ui:toast'
   | 'player:damaged'
   | 'player:died'
@@ -102,7 +106,7 @@ export type ReactedEvent =
   | 'flight:arrived';
 
 /**
- * The 37 events of §5.4 that deliberately make none. `satisfies` is what makes
+ * The 38 events of §5.4 that deliberately make none. `satisfies` is what makes
  * a name outside `GameEvents` a compile error here (AC-40).
  */
 const SILENT_EVENTS = [
@@ -125,9 +129,9 @@ const SILENT_EVENTS = [
   'resource:spent',
   'inventory:changed',
   'gear:equipped',
-  // SPEC-028: the switch and the quick-slot spend stay silent for now — the
-  // consumable's own effect (heal, boost) already carries the feedback.
-  'weapon:switched',
+  // SPEC-028: the quick-slot spend stays silent — the consumable's own effect
+  // (heal, boost) already carries the feedback. SPEC-029 §4.12 gave the switch
+  // itself a blip, so `weapon:switched` moved to the reacted half.
   'quick:used',
   'enemy:spawned',
   'poi:discovered',
@@ -169,6 +173,12 @@ export type NoDoubleCoveredEvent = AssertNever<Extract<ReactedEvent, SilentEvent
  * `dispose()` (§3, AC-59).
  */
 export const AUDIO_REACTIONS: { [K in ReactedEvent]: Reaction<K> } = {
+  // SPEC-029 §4.12: the arsenal reuses existing sprites — no new audio file.
+  /** Positioned like a death; the elite sting is the biggest bang in the bank. */
+  'combat:blast': (p) => ({ id: 'elite_death', opts: { x: p.x, z: p.z, priority: 2 } }),
+  'weapon:locked': () => ({ id: 'ui_warn' }),
+  'weapon:switched': () => ({ id: 'ui_blip' }),
+  'mine:armed': (p) => ({ id: 'scan_done', opts: { x: p.x, z: p.z, priority: 0 } }),
   /** `warn` and `error` are the two kinds a player has to notice (AC-46). */
   'ui:toast': (p) => ({ id: p.kind === 'warn' || p.kind === 'error' ? 'ui_warn' : 'ui_blip' }),
   /** A hit every few frames would be a buzz, so it is held to ~8 Hz (AC-48). */

@@ -26,6 +26,12 @@ export const SETTINGS_VERSION = 1 as const;
  * `'on'` and `'off'` force it either way (SPEC-005 §4, AC-18).
  */
 export type AutoFireMode = 'touch' | 'on' | 'off';
+/**
+ * SPEC-029 §3: when a locked primary lets fire fall to the sidearm. `'touch'`
+ * (the default) covers only while the touch scheme is active; `'on'` and
+ * `'off'` force it either way.
+ */
+export type WeaponAutoSwapMode = 'touch' | 'on' | 'off';
 /** Which half of the screen the floating joystick lives in (SPEC-005 AC-11). */
 export type JoystickSide = 'left' | 'right';
 
@@ -61,6 +67,8 @@ export type Settings = {
   /** Defaults from `prefers-reduced-motion`. */
   reduceMotion: boolean;
   autoFire: AutoFireMode;
+  /** SPEC-029 §4.4: the locked-primary sidearm fallback; default `'touch'`. */
+  weaponAutoSwap: WeaponAutoSwapMode;
   joystickSide: JoystickSide;
   /** Flight only: blend keyboard steering toward the mouse reticle (SPEC-005 AC-29). */
   flightMouseSteer: boolean;
@@ -119,6 +127,7 @@ export interface SettingsEvents {
 
 const PRESETS: readonly string[] = ['low', 'medium', 'high'];
 const AUTO_FIRE_MODES: readonly AutoFireMode[] = ['touch', 'on', 'off'];
+const WEAPON_AUTO_SWAP_MODES: readonly WeaponAutoSwapMode[] = ['touch', 'on', 'off'];
 const JOYSTICK_SIDES: readonly JoystickSide[] = ['left', 'right'];
 const GUIDANCE_LEVELS: readonly GuidanceLevel[] = ['full', 'minimal', 'off'];
 
@@ -148,6 +157,7 @@ export function defaultSettings(): Settings {
     quality: null,
     reduceMotion: prefersReducedMotion(),
     autoFire: 'touch',
+    weaponAutoSwap: 'touch',
     joystickSide: 'left',
     flightMouseSteer: true,
     buttonScale: MIN_BUTTON_SCALE,
@@ -311,6 +321,8 @@ function coerce<K extends keyof Settings>(key: K, value: unknown, current: Setti
         return bool(value, current.reduceMotion);
       case 'autoFire':
         return oneOf(value, AUTO_FIRE_MODES, current.autoFire);
+      case 'weaponAutoSwap':
+        return oneOf(value, WEAPON_AUTO_SWAP_MODES, current.weaponAutoSwap);
       case 'joystickSide':
         return oneOf(value, JOYSTICK_SIDES, current.joystickSide);
       case 'flightMouseSteer':
