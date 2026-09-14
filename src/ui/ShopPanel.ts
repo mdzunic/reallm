@@ -41,6 +41,15 @@ function tierOf(item: Item): number {
  */
 const LINE_ORDER: readonly GearLine[] = ['handgun', 'rifle', 'machine_gun', 'launcher', 'armor'];
 
+/** SPEC-029 §4.10: the Gear tab's group headings, one per line. */
+const LINE_HEADINGS: Readonly<Record<GearLine, string>> = {
+  handgun: 'Handguns',
+  rifle: 'Rifles',
+  machine_gun: 'Machine guns',
+  launcher: 'Launchers',
+  armor: 'Armor',
+};
+
 function lineOf(item: Item): GearLine | null {
   return item.kind === 'consumable' ? null : item.line;
 }
@@ -154,7 +163,11 @@ export class ShopPanel {
 
   // ------------------------------------------------------------------- gear
 
-  /** AC-38: line by line, tier order inside a line, with owned/equipped badges. */
+  /**
+   * AC-38 / SPEC-029 §4.10: grouped under one heading per line — Handguns,
+   * Rifles, Machine guns, Launchers, Armor — in tier order inside a line,
+   * with owned/equipped badges and a `heavy` badge on heavy-slot rows.
+   */
   #gearRows(): HTMLElement[] {
     const { data, economy } = this.#deps;
     const gear = ITEM_IDS.filter((id) => ITEMS[id].kind === 'weapon' || ITEMS[id].kind === 'armor').sort((a, b) => {
@@ -163,8 +176,15 @@ export class ShopPanel {
       const byLine = LINE_ORDER.indexOf(lineOf(ia) as GearLine) - LINE_ORDER.indexOf(lineOf(ib) as GearLine);
       return byLine !== 0 ? byLine : tierOf(ia) - tierOf(ib);
     });
-    return gear.map((id) => {
+    const out: HTMLElement[] = [];
+    let heading: GearLine | null = null;
+    for (const id of gear) {
       const item = ITEM_TABLE[id];
+      const line = lineOf(item) as GearLine;
+      if (line !== heading) {
+        heading = line;
+        out.push(testId(h('h3', { class: 'shop-heading' }, LINE_HEADINGS[line]), `shop-heading-${line}`));
+      }
       // SPEC-025 §4.8: all four worn pieces, not just the two v1 carried.
       const { armor, sidearm, primary, heavy } = data.equipped;
       const equipped = armor === id || sidearm === id || primary === id || heavy === id;
@@ -176,6 +196,7 @@ export class ShopPanel {
           { class: 'shop-row-head' },
           h('span', { class: 'shop-name' }, item.name),
           h('span', { class: 'badge' }, `${item.kind} T${tierOf(item)}`),
+          item.kind === 'weapon' && item.slot === 'heavy' ? h('span', { class: 'badge badge-heavy' }, 'heavy') : null,
           owned ? h('span', { class: 'badge badge-owned' }, 'owned') : null,
           equipped ? h('span', { class: 'badge badge-equipped' }, 'equipped') : null,
         ),
@@ -198,8 +219,9 @@ export class ShopPanel {
           ),
         );
       }
-      return row;
-    });
+      out.push(row);
+    }
+    return out;
   }
 
   #equip(id: ItemId): void {
