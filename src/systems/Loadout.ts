@@ -181,10 +181,14 @@ export class Loadout {
     const model = weapon.cooldown;
     if (model.kind === 'heat') {
       cd.heat += model.perShot;
-      if (cd.heat >= 1 - HEAT_LOCK_EPSILON && !cd.locked) {
+      if (cd.heat >= 1 - HEAT_LOCK_EPSILON) {
+        // The epsilon keeps float drift from delaying the lock by one shot;
+        // heat is capped at 1 even for a shot forced through a lock.
         cd.heat = 1;
-        cd.locked = true;
-        this.#events.emit('weapon:locked', { slot, itemId: weapon.id });
+        if (!cd.locked) {
+          cd.locked = true;
+          this.#events.emit('weapon:locked', { slot, itemId: weapon.id });
+        }
       }
     } else if (model.kind === 'charges') {
       cd.charges -= 1;

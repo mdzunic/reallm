@@ -5,7 +5,7 @@ import { describe, expect, it } from 'vitest';
 import * as THREE from 'three';
 import { CombatFx, type FxKind } from '@/views/CombatFx';
 
-const KINDS: readonly FxKind[] = ['hit', 'death', 'spawn', 'pickup', 'dust_ring', 'muzzle'];
+const KINDS: readonly FxKind[] = ['hit', 'death', 'spawn', 'pickup', 'dust_ring', 'muzzle', 'blast'];
 
 function build(capacity?: number): { parent: THREE.Group; fx: CombatFx } {
   const parent = new THREE.Group();
@@ -130,5 +130,37 @@ describe('the muzzle light (AC-56)', () => {
     fx.sync(1.1, ground);
     expect(light.intensity).toBe(0);
     expect(light.parent).toBe(parentOf); // never re-parented
+  });
+});
+
+// ---------------------------------------------------------------- SPEC-029
+
+describe('the blast burst and the scaled scorch (SPEC-029 §4.12)', () => {
+  it('blast emits 30 particles plus the 4-sprite flash, alive for 0.5 s', () => {
+    const { parent, fx } = build(64);
+    fx.sync(0, ground);
+    fx.burst('blast', 3, -2, 0xffa040);
+    fx.sync(0.1, ground);
+    const mesh = instancedMeshes(parent)[0] as THREE.InstancedMesh;
+    expect(mesh.count).toBe(34); // 30 of the burst + the death-flash 4
+    // The flash lives 0.12 s; the burst itself 0.5 s.
+    fx.sync(0.3, ground);
+    expect(mesh.count).toBe(30);
+    fx.sync(0.51, ground);
+    expect(mesh.count).toBe(0);
+  });
+
+  it('scorch takes a scale that multiplies the 1.6 m base — radius/1.6 for a blast', () => {
+    const { parent, fx } = build(32);
+    fx.sync(0, ground);
+    fx.scorch(0, 0); // the default 1× — the SPEC-019 contract holds
+    fx.scorch(5, 5, 3.5 / 1.6); // a 3.5 m blast leaves a 3.5 m mark
+    fx.sync(0.1, ground);
+    const scorches = instancedMeshes(parent)[1] as THREE.InstancedMesh;
+    const matrix = new THREE.Matrix4();
+    scorches.getMatrixAt(0, matrix);
+    expect(matrix.elements[0]).toBeCloseTo(1.6, 5);
+    scorches.getMatrixAt(1, matrix);
+    expect(matrix.elements[0]).toBeCloseTo(3.5, 5);
   });
 });

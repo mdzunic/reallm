@@ -1,5 +1,5 @@
-// The content-invariant suite (SPEC-009 §7, extended by SPEC-018 §7 and
-// SPEC-025 §4.7). Nineteen invariants, one `it` each, numbered as the specs
+// The content-invariant suite (SPEC-009 §7, extended by SPEC-018 §7,
+// SPEC-025 §4.7 and SPEC-029 §4.10). One `it` per invariant, numbered as the specs
 // number them. Between them they cover everything the compiler cannot: counts,
 // reachability, requirement cycles, POI/objective compatibility, the slot/line
 // split, balance pins and text limits (PLAN §11, E26).
@@ -28,6 +28,7 @@ import {
   QUICK_PREFERENCE,
   QUICK_SLOTS,
   QUICK_SLOT_OF_EFFECT,
+  RECIPES,
   RESOURCE_IDS,
   SHIP_SYSTEMS,
   SLOT_OF_LINE,
@@ -693,8 +694,65 @@ describe('content invariants (SPEC-009 §7)', () => {
     expect(problems).toEqual([]);
   });
 
+  // SPEC-029 §4.10, invariant 20: the explosive effects hold their bounds,
+  // and every explosive item is reachable — a recipe output or a loot drop.
+  it('20. explosive effects stay in bounds and every explosive is craftable or lootable', () => {
+    const problems: string[] = [];
+    const reachable = new Set<string>();
+    for (const recipe of Object.values(RECIPES)) reachable.add(recipe.output);
+    for (const table of Object.values(lootTables)) {
+      for (const entry of table) {
+        if (entry.kind === 'item') reachable.add(entry.itemId);
+      }
+    }
+    for (const item of items) {
+      if (item.kind !== 'consumable' || item.effect.kind !== 'explosive') continue;
+      const effect = item.effect;
+      if (effect.radius < 1 || effect.radius > 6) problems.push(`${item.id}: radius ${effect.radius}`);
+      if (effect.damage <= 0) problems.push(`${item.id}: damage ${effect.damage}`);
+      if (effect.fuse < 0) problems.push(`${item.id}: fuse ${effect.fuse}`);
+      if (effect.mode === 'throw' && (effect.range === undefined || effect.range > 12)) {
+        problems.push(`${item.id}: throw range ${effect.range}`);
+      }
+      if (effect.mode === 'mine' && (effect.trigger === undefined || effect.trigger <= 0)) {
+        problems.push(`${item.id}: mine trigger ${effect.trigger}`);
+      }
+      if (!reachable.has(item.id)) problems.push(`${item.id}: neither crafted nor dropped`);
+    }
+    expect(problems).toEqual([]);
+    // The three of §4.3 exist and sit on the explosive quick slot.
+    for (const id of ['frag_grenade', 'landmine', 'demo_charge'] as const) {
+      const item = ITEM_TABLE[id];
+      expect(item.kind === 'consumable' && item.effect.kind === 'explosive', id).toBe(true);
+    }
+  });
+
+  // SPEC-029 §4.10, invariant 21: cooldown parameters hold, and each line
+  // carries the model its slot is designed around.
+  it('21. cooldown parameters hold and every line carries its model', () => {
+    const problems: string[] = [];
+    for (const item of items) {
+      if (item.kind !== 'weapon') continue;
+      const model = item.cooldown;
+      if (model.kind === 'heat') {
+        if (model.perShot <= 0) problems.push(`${item.id}: perShot ${model.perShot}`);
+        if (model.coolPerSec <= 0) problems.push(`${item.id}: coolPerSec ${model.coolPerSec}`);
+        if (model.resumeAt <= 0 || model.resumeAt >= 1) problems.push(`${item.id}: resumeAt ${model.resumeAt}`);
+      } else if (model.kind === 'charges') {
+        if (model.charges < 1) problems.push(`${item.id}: charges ${model.charges}`);
+        if (model.rechargeSeconds <= 0) problems.push(`${item.id}: rechargeSeconds ${model.rechargeSeconds}`);
+        if (model.burstInterval < 0) problems.push(`${item.id}: burstInterval ${model.burstInterval}`);
+      }
+      const expected: string =
+        item.line === 'machine_gun' ? 'heat' : item.line === 'launcher' ? 'charges' : 'none';
+      if (model.kind !== expected) problems.push(`${item.id}: a ${item.line} with cooldown ${model.kind}`);
+      if (item.line === 'launcher' && item.blast === undefined) problems.push(`${item.id}: a launcher without blast`);
+    }
+    expect(problems).toEqual([]);
+  });
+
   // SPEC-028 §3: `short` is the quick-bar label, so it has to fit a 48 px slot.
-  it('20. every item carries a short name of 1–8 characters', () => {
+  it('22. every item carries a short name of 1–8 characters', () => {
     const problems: string[] = [];
     for (const item of items) {
       if (item.short.length < 1 || item.short.length > 8) {

@@ -162,6 +162,12 @@ export function harness(options: HarnessOptions = {}): Harness {
         hitIds: null,
         enemyId: null,
         elite: false,
+        blastRadius: 0,
+        blastFalloff: 0,
+        lob: false,
+        targetX: 0,
+        targetZ: 0,
+        flight: 0,
       });
       p.hitIds?.clear();
       Object.assign(p, patch);
