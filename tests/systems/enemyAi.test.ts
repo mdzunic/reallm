@@ -409,3 +409,128 @@ describe('boss phases (dune_wurm, hive_queen)', () => {
     expect(boss.aggro).toBe(false);
   });
 });
+
+// ------------------------------------------------- SPEC-030 §4.6: hiding
+
+/** A sealed obstacle ring around the player at the origin — no line, no entry. */
+function playerRing(): { x: number; z: number; radius: number }[] {
+  const ring: { x: number; z: number; radius: number }[] = [];
+  for (let i = 0; i < 14; i++) {
+    const angle = (i / 14) * Math.PI * 2;
+    ring.push({ x: Math.cos(angle) * 4, z: Math.sin(angle) * 4, radius: 1.3 });
+  }
+  return ring;
+}
+
+describe('SPEC-030 — hiding from enemies (AC-26..AC-28)', () => {
+  it('a hidden player is not acquired at 10 m, and is acquired at 4 m with a clear line', () => {
+    const h = harness();
+    h.world.playerHidden = true;
+    const far = h.spawn('dust_skitter', 10, 0); // inside aggroRadius 18, outside 5 m
+    h.run(1);
+    expect(far.aggro).toBe(false);
+    const near = h.spawn('dust_skitter', 4, 0);
+    h.step();
+    expect(near.aggro).toBe(true);
+  });
+
+  it('a hidden player behind a wall is not acquired even inside 5 m (AC-26)', () => {
+    const h = harness({ obstacles: new CircleObstacles([{ x: 2, z: 0, radius: 1.5 }]) });
+    h.world.playerHidden = true;
+    const e = h.spawn('dust_skitter', 4, 0); // 4 m, but the line crosses the wall
+    h.run(0.2); // barely a wander step: the line stays blocked throughout
+    expect(e.aggro).toBe(false);
+  });
+
+  it('hiding never widens the rule: outside aggroRadius nothing acquires at 5 m either', () => {
+    const h = harness();
+    h.world.playerHidden = true;
+    h.world.aggroMult = 0.1; // 18 m → 1.8 m
+    const e = h.spawn('dust_skitter', 4, 0);
+    h.run(0.5);
+    expect(e.aggro).toBe(false);
+  });
+
+  it('an aggroed rusher with no line for 3 s drops aggro and heads back toward its spawn (AC-27)', () => {
+    // A sealed ring around the hidden player — the cave, as the brain sees it.
+    const h = harness({ obstacles: new CircleObstacles(playerRing()) });
+    const e = h.spawn('wurmling', 14, 0);
+    e.aggro = true;
+    e.state = 'chase';
+    h.world.playerHidden = true;
+    const steps = runUntil(h, 6, () => !e.aggro);
+    expect(steps).toBeGreaterThan(0);
+    // ≈ 3 s of blocked line (the drop waits out LOSE_TRACK_SECONDS).
+    expect(steps * STEP).toBeGreaterThanOrEqual(3 - 0.1);
+    expect(e.state).toBe('wander');
+    expect(e.lostTrack).toBe(0);
+    expect(e.invulnerable).toBe(false); // wander, not leash: no heal ride home
+    const before = Math.hypot(e.x - e.spawnX, e.z - e.spawnZ);
+    h.run(4);
+    expect(Math.hypot(e.x - e.spawnX, e.z - e.spawnZ)).toBeLessThanOrEqual(Math.max(before, 9.5));
+  });
+
+  it('a clear line keeps the track alive (30-b) and resets lostTrack', () => {
+    const h = harness();
+    const e = h.spawn('wurmling', 12, 0);
+    e.aggro = true;
+    e.state = 'chase';
+    h.world.playerHidden = true;
+    h.run(4); // twice LOSE_TRACK_SECONDS, line always clear
+    expect(e.aggro).toBe(true);
+    expect(e.lostTrack).toBe(0);
+  });
+
+  it('lostTrack resets on any step where the player is not hidden (D-20)', () => {
+    const h = harness({ obstacles: new CircleObstacles(playerRing()) });
+    const e = h.spawn('wurmling', 14, 0);
+    e.aggro = true;
+    e.state = 'chase';
+    h.world.playerHidden = true;
+    h.run(2);
+    expect(e.lostTrack).toBeGreaterThan(0);
+    h.world.playerHidden = false;
+    h.step();
+    expect(e.lostTrack).toBe(0);
+    expect(e.aggro).toBe(true);
+  });
+
+  it('a wave enemy ignores hiding entirely (AC-28)', () => {
+    const h = harness({ obstacles: new CircleObstacles(playerRing()) });
+    h.world.playerHidden = true;
+    // The 5 m acquire rule does not apply…
+    const fresh = h.spawn('dust_skitter', 14, 3);
+    fresh.fromWave = true;
+    h.step();
+    expect(fresh.aggro).toBe(true);
+    // …and neither does the 3 s drop rule.
+    const chaser = h.spawn('wurmling', 14, 0);
+    chaser.fromWave = true;
+    chaser.aggro = true;
+    chaser.state = 'chase';
+    h.run(4);
+    expect(chaser.aggro).toBe(true);
+  });
+
+  it('a boss ignores hiding entirely (AC-28)', () => {
+    const h = harness({ obstacles: new CircleObstacles(playerRing()) });
+    h.world.playerHidden = true;
+    const boss = h.spawn('dune_wurm', 14, 0);
+    boss.aggro = true;
+    boss.state = 'chase';
+    h.run(4);
+    expect(boss.aggro).toBe(true);
+  });
+
+  it('firing reveals: lastShotAt inside 1.5 s of world time means not hidden (AC-25)', () => {
+    const h = harness();
+    h.spawn('dust_skitter', 5, 0);
+    h.input.buttons.fire.down = true;
+    h.step();
+    h.input.buttons.fire.down = false;
+    // The scene's rule: hidden ⇔ inside ∧ time − lastShotAt ≥ REVEAL_AFTER_SHOT.
+    expect(h.world.time - h.combat.lastShotAt).toBeLessThan(1.5);
+    h.run(1.6);
+    expect(h.world.time - h.combat.lastShotAt).toBeGreaterThanOrEqual(1.5);
+  });
+});

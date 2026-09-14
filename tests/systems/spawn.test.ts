@@ -54,6 +54,7 @@ function harness(planet: keyof typeof PLANETS = 'cinder4', quality: keyof typeof
       e.state = ENEMIES[id].archetype === 'static' ? 'idle' : 'wander';
       e.aggro = false;
       e.hp = ENEMIES[id].hp;
+      e.fromWave = false; // mirrors Combat.spawnEnemy's pooled reset (SPEC-030)
       spawned.push({ id, x, z, elite });
       return e;
     },
@@ -310,5 +311,42 @@ describe('SpawnDirector — waves (AC-17)', () => {
     }
     h.run(2, PLAYER, NOWHERE, false);
     expect(h.director.alive).toBe(20);
+  });
+});
+
+
+// ------------------------------------------------------------- SPEC-030
+
+describe('SPEC-030 — waves flag their enemies and spawns avoid shelters (AC-29)', () => {
+  it('wave spawns carry fromWave = true; ambient ones false', () => {
+    const h = harness('cinder4', 'high');
+    h.run(5); // ambient fill
+    for (const e of h.living()) expect(e.fromWave).toBe(false);
+    const ambientCount = h.living().length;
+    h.director.startWave('thessaly_reaping', { x: 0, z: 0 });
+    h.run(6); // the wave's groups spawn on their schedule
+    const flagged = h.living().filter((e) => e.fromWave);
+    expect(flagged.length).toBeGreaterThan(0);
+    // Ambient enemies spawned before and after keep false.
+    expect(h.living().filter((e) => !e.fromWave).length).toBeGreaterThanOrEqual(ambientCount);
+  });
+
+  it('#place rejects candidates within max(rx, rz) + 4 of a shelter centre', () => {
+    const h = harness('cinder4', 'high');
+    const shelters = h.layout.shelters;
+    expect(shelters.length).toBeGreaterThan(0);
+    // Park the player beside a shelter so the 25–40 m ring sweeps across it.
+    const s = shelters[0] as (typeof shelters)[number];
+    const player = { x: s.x + 30, z: s.z };
+    h.run(60, player);
+    expect(h.spawned.length).toBeGreaterThan(10);
+    for (const spawn of h.spawned) {
+      for (const shelter of shelters) {
+        expect(
+          Math.hypot(spawn.x - shelter.x, spawn.z - shelter.z),
+          `spawn at ${spawn.x},${spawn.z}`,
+        ).toBeGreaterThanOrEqual(Math.max(shelter.rx, shelter.rz) + 4 - 1e-9);
+      }
+    }
   });
 });

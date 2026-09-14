@@ -79,7 +79,7 @@ import {
   type PathGrid,
 } from '@/systems/Guidance';
 import { fillQuickFromPickup, quickEligible, refillQuick, type SlotView } from '@/systems/Loadout';
-import { generateLayout, ObstacleGrid, type Layout, type LayoutPoi } from '@/systems/Layout';
+import { generateLayout, ObstacleGrid, WALL_INSET, type Layout, type LayoutPoi } from '@/systems/Layout';
 import { nodeIcon, poiIcon } from '@/systems/MapModel';
 import { Missions, type MissionContext, type ObjectiveProgress } from '@/systems/Missions';
 import { Nodes, Pickups } from '@/systems/Pickups';
@@ -637,6 +637,8 @@ export class SurfaceScene extends UiScene<'surface'> {
       obstacles: grid,
       arena: null,
       time: 0,
+      // SPEC-030 §4.7: enemies, the follower and shots stop at the wall line.
+      bounds: layout.halfSize - WALL_INSET,
     };
     world.player.facing = layout.playerSpawn.facing;
     this.#world = world;
@@ -1377,7 +1379,8 @@ export class SurfaceScene extends UiScene<'surface'> {
     const nz = p.z + p.vz * dt;
     if (!world.obstacles.hitsCircle(nx, p.z, p.radius)) p.x = nx;
     if (!world.obstacles.hitsCircle(p.x, nz, p.radius)) p.z = nz;
-    const edge = this.#planet.surface.halfSize - 2;
+    // SPEC-030 AC-30: the clamp margin is the shared WALL_INSET constant.
+    const edge = this.#planet.surface.halfSize - WALL_INSET;
     p.x = Math.max(-edge, Math.min(edge, p.x));
     p.z = Math.max(-edge, Math.min(edge, p.z));
   }

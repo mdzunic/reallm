@@ -48,7 +48,10 @@ export const DESPAWN_SECONDS = 10;
 /** §4.5 placement clearances. */
 const ARENA_CLEARANCE = 15;
 const PAD_CLEARANCE = 20;
+/** SPEC-030 D-12: the director keeps its own ring margin, stricter than WALL_INSET. */
 const WALL_MARGIN = 4;
+/** SPEC-030 AC-29: spawn candidates keep this past a shelter's largest radius. */
+const SHELTER_CLEARANCE = 4;
 /** 12-g: wave enemies bypass P but respect `quality.maxEnemies + 8` in total. */
 export const WAVE_CEILING_BONUS = 8;
 
@@ -295,6 +298,8 @@ export class SpawnDirector {
     const x = this.#clamp(center.x + Math.cos(angle) * d);
     const z = this.#clamp(center.z + Math.sin(angle) * d);
     const e = this.#spawn(id, x, z, elite);
+    // SPEC-030 §4.6: wave groups ignore hiding; `spawnEnemy` reset it false.
+    e.fromWave = true;
     run.aliveIds.add(e.id);
     this.#waveIds.add(e.id);
   }
@@ -362,6 +367,9 @@ export class SpawnDirector {
       z = this.#clamp(player.z + Math.sin(angle) * d);
       if (this.#obstacles !== null && this.#obstacles.circleHits(x, z, radius + 0.5)) continue;
       if (this.#nearArena(x, z) || Math.hypot(x - this.#layout.pad.x, z - this.#layout.pad.z) < PAD_CLEARANCE) continue;
+      // SPEC-030 §4.6: nothing spawns on top of a shelter (AC-29); when every
+      // try is rejected the last-candidate fallback below still stands (12-h).
+      if (this.#nearShelter(x, z)) continue;
       if (frustum !== null && frustum.contains(x, z)) continue;
       return { x, z };
     }
@@ -373,6 +381,14 @@ export class SpawnDirector {
   /** The scene hands its `ObstacleGrid` over once it exists. */
   setObstacles(obstacles: SpawnObstacles): void {
     this.#obstacles = obstacles;
+  }
+
+  /** SPEC-030 AC-29: within `max(rx, rz) + 4` of any shelter centre. */
+  #nearShelter(x: number, z: number): boolean {
+    for (const shelter of this.#layout.shelters) {
+      if (Math.hypot(x - shelter.x, z - shelter.z) < Math.max(shelter.rx, shelter.rz) + SHELTER_CLEARANCE) return true;
+    }
+    return false;
   }
 
   #nearArena(x: number, z: number): boolean {

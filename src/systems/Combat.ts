@@ -205,6 +205,16 @@ export interface CombatWorld {
    * `aggroRadius × visibility`). Absent or 1 in calm weather.
    */
   aggroMult?: number;
+  /**
+   * SPEC-030 §4.5: the scene sets this each step — inside a shelter and no
+   * shot for `REVEAL_AFTER_SHOT`. Absent means never hidden.
+   */
+  playerHidden?: boolean;
+  /**
+   * SPEC-030 §4.7: `halfSize − WALL_INSET`. Enemies, the follower and
+   * projectiles clamp to it; absent means unbounded (D-13, flight/fixtures).
+   */
+  bounds?: number;
 }
 
 /** What `killEnemy` rolled; SPEC-012 drains these into pickup entities (§4.7). */
@@ -435,6 +445,7 @@ export class Combat {
     if (e.state === 'dead' || e.invulnerable) return;
     e.hp -= amount;
     e.hitFlash = HIT_FLASH_SECONDS;
+    e.lostTrack = 0; // SPEC-030 D-20: damage resets the lose-track clock
     this.#aggroFromDamage(e);
     if (e.hp <= 0) this.killEnemy(e, cause);
   }
@@ -456,6 +467,7 @@ export class Combat {
     if (e.def.archetype === 'static' || e.state === 'dead' || e.state === 'leash') return;
     if (!e.aggro) {
       e.aggro = true;
+      e.lostTrack = 0; // SPEC-030 D-20: a fresh track starts clean
       if (e.state === 'idle' || e.state === 'wander') {
         e.state = 'chase';
         e.stateTime = 0;
@@ -572,6 +584,10 @@ export class Combat {
     e.outOfArenaTime = 0;
     e.acidCooldown = 0;
     e.wanderAt = 0;
+    // SPEC-030 §4.6: pooled reset; the spawn director flips `fromWave` on for
+    // the enemies it spawns into a wave run.
+    e.lostTrack = 0;
+    e.fromWave = false;
     // Set immediately before the emit, so a subscriber can read the position.
     this.#lastSpawned = e;
     this.#events.emit('enemy:spawned', { enemyId: id, elite: isElite });
@@ -1137,6 +1153,12 @@ export class Combat {
     const step = Math.min(f.def.speed * dt, d - f.def.followDistance);
     f.x += (dx / d) * step;
     f.z += (dz / d) * step;
+    // SPEC-030 §4.7: the follower stops at the wall like the player (AC-30).
+    const bounds = this.#world.bounds;
+    if (bounds !== undefined) {
+      f.x = Math.max(-bounds, Math.min(bounds, f.x));
+      f.z = Math.max(-bounds, Math.min(bounds, f.z));
+    }
     f.facing = Math.atan2(dz, dx);
   }
 }

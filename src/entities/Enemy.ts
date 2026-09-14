@@ -60,6 +60,10 @@ export interface EnemyEntity {
   acidCooldown: number;
   /** World-clock time to pick the next wander point (every 2–4 s, §4.5). */
   wanderAt: number;
+  /** SPEC-030 §4.6: seconds without a line to a hidden player. */
+  lostTrack: number;
+  /** SPEC-030 §4.6: set by the spawn director for wave groups; waves ignore hiding. */
+  fromWave: boolean;
 }
 
 export function makeEnemy(): EnemyEntity {
@@ -96,5 +100,7 @@ export function makeEnemy(): EnemyEntity {
     outOfArenaTime: 0,
     acidCooldown: 0,
     wanderAt: 0,
+    lostTrack: 0,
+    fromWave: false,
   };
 }
