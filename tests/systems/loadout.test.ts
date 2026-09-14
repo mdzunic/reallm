@@ -208,3 +208,182 @@ describe('view (§4.2)', () => {
     expect(out.state).toBe('ready');
   });
 });
+
+// ---------------------------------------------------------------- SPEC-029
+
+const STEP_S = 1 / 60;
+
+/** Advance the loadout clock by `seconds` in whole 60 Hz steps. */
+function tick(loadout: Loadout, from: number, seconds: number): number {
+  let time = from;
+  const steps = Math.round(seconds / STEP_S);
+  for (let i = 0; i < steps; i++) {
+    loadout.update(STEP_S, time);
+    time += STEP_S;
+  }
+  return time;
+}
+
+describe('heat weapons (SPEC-029 §4.2)', () => {
+  it('locks the chaingun on the 49th shot at 0.1 s cadence, and unlocks 3.25 s later', () => {
+    const { events, loadout } = make((s) => {
+      s.equipped.primary = 'mg_scrap';
+    });
+    const locked: GameEvents['weapon:locked'][] = [];
+    events.on('weapon:locked', (payload) => void locked.push(payload));
+
+    // 48 shots, each followed by 0.1 s of cooling: never locked.
+    let time = 0;
+    for (let shot = 1; shot <= 48; shot++) {
+      expect(loadout.ready('primary', time), `shot ${shot}`).toBe(true);
+      loadout.fired('primary', time);
+      time = tick(loadout, time, 0.1);
+    }
+    expect(locked).toEqual([]);
+
+    // The 49th is the one that locks (0.04/shot against 0.02 of cooling).
+    loadout.fired('primary', time);
+    expect(locked).toEqual([{ slot: 'primary', itemId: 'mg_scrap' }]);
+    expect(loadout.ready('primary', time)).toBe(false);
+
+    // Heat 1 falls at 0.2/s to the 0.35 resume line: 3.25 s, ± one step.
+    let elapsed = 0;
+    while (!loadout.ready('primary', time) && elapsed < 5) {
+      loadout.update(STEP_S, time);
+      time += STEP_S;
+      elapsed += STEP_S;
+    }
+    expect(Math.abs(elapsed - 3.25)).toBeLessThanOrEqual(STEP_S + 1e-9);
+  });
+
+  it('cools while holstered, and the view walks heat → lock → ready', () => {
+    const { loadout } = make((s) => {
+      s.equipped.primary = 'mg_scrap';
+    });
+    const out = view();
+    for (let i = 0; i < 10; i++) loadout.fired('primary', 0);
+    loadout.view('primary', 0, out);
+    expect(out.state).toBe('heat');
+    expect(out.heat).toBeCloseTo(0.4, 6);
+
+    // Holstered: the sidearm is in hand, the chaingun cools anyway.
+    loadout.select('sidearm', 0);
+    tick(loadout, 0, 1);
+    loadout.view('primary', 1, out);
+    expect(out.heat).toBeCloseTo(0.2, 6);
+
+    // Drive it to the lock and read the state.
+    for (let i = 0; i < 25; i++) loadout.fired('primary', 1);
+    loadout.view('primary', 1, out);
+    expect(out.state).toBe('lock');
+    expect(out.heat).toBe(1);
+  });
+});
+
+describe('charge weapons (SPEC-029 §4.2)', () => {
+  it('the rocket holds 1 charge and recharges in 6 s, holstered too', () => {
+    const { loadout } = make((s) => {
+      s.equipped.heavy = 'launcher_rocket';
+    });
+    loadout.select('heavy', 0);
+    const out = view();
+    loadout.view('heavy', 1, out);
+    expect(out.charges).toBe(1);
+    expect(out.maxCharges).toBe(1);
+
+    loadout.fired('heavy', 1);
+    loadout.view('heavy', 1, out);
+    expect(out.charges).toBe(0);
+    expect(out.state).toBe('recharge');
+    expect(out.cd).toBeCloseTo(1, 6);
+    expect(loadout.ready('heavy', 1)).toBe(false);
+
+    // The hand went back to the primary; the rocket recharges holstered.
+    expect(loadout.active).toBe('primary');
+    let time = tick(loadout, 1, 3);
+    loadout.view('heavy', time, out);
+    expect(out.state).toBe('recharge');
+    expect(out.cd).toBeCloseTo(0.5, 2);
+    time = tick(loadout, time, 3.05);
+    expect(loadout.ready('heavy', time)).toBe(true);
+    loadout.view('heavy', time, out);
+    expect(out.charges).toBe(1);
+    expect(out.state).toBe('ready');
+  });
+
+  it('the grenade launcher fires 3 shots 0.4 s apart, then recharges in 9 s', () => {
+    const { loadout } = make((s) => {
+      s.equipped.heavy = 'launcher_grenade';
+    });
+    loadout.select('heavy', 0);
+
+    loadout.fired('heavy', 1);
+    // §4.2: at most one shot per burstInterval.
+    expect(loadout.ready('heavy', 1.39)).toBe(false);
+    expect(loadout.ready('heavy', 1.4)).toBe(true);
+    loadout.fired('heavy', 1.4);
+    expect(loadout.ready('heavy', 1.79)).toBe(false);
+    loadout.fired('heavy', 1.8);
+
+    // Third charge spent: 9 s of recharge, then all three return.
+    expect(loadout.active).toBe('primary'); // the hand-back
+    expect(loadout.ready('heavy', 2)).toBe(false);
+    let time = tick(loadout, 1.8, 8.9);
+    expect(loadout.ready('heavy', time)).toBe(false);
+    time = tick(loadout, time, 0.2);
+    const out = view();
+    loadout.view('heavy', time, out);
+    expect(out.charges).toBe(3);
+    expect(loadout.ready('heavy', time)).toBe(true);
+  });
+
+  it('hands back to the previously active slot, with the usual switch delay', () => {
+    const { events, loadout } = make((s) => {
+      s.equipped.heavy = 'launcher_rocket';
+    });
+    loadout.select('sidearm', 0);
+    loadout.select('heavy', 1);
+    const switched: GameEvents['weapon:switched'][] = [];
+    events.on('weapon:switched', (payload) => void switched.push(payload));
+    loadout.fired('heavy', 2);
+    expect(loadout.active).toBe('sidearm');
+    expect(switched).toEqual([{ slot: 'sidearm', itemId: 'pistol_service' }]);
+    expect(loadout.canFire(2)).toBe(false); // the 0.25 s switch applies
+    expect(loadout.canFire(2 + SWITCH_SECONDS)).toBe(true);
+  });
+});
+
+describe('firingSlot (SPEC-029 §4.4)', () => {
+  it('never fires the heavy without an explicit trigger', () => {
+    const { loadout } = make((s) => {
+      s.equipped.heavy = 'launcher_rocket';
+    });
+    loadout.select('heavy', 0);
+    expect(loadout.firingSlot(1, false, true)).toBe(null);
+    expect(loadout.firingSlot(1, true, true)).toBe('heavy');
+  });
+
+  it('falls to the sidearm over a locked primary with auto-swap, with no switch', () => {
+    const { loadout } = make((s) => {
+      s.equipped.primary = 'mg_scrap';
+    });
+    for (let i = 0; i < 25; i++) loadout.fired('primary', 0); // 25 × 0.04 → lock
+    expect(loadout.firingSlot(1, true, true)).toBe('sidearm');
+    expect(loadout.fallback).toBe(true);
+    expect(loadout.active).toBe('primary'); // covered, never switched
+
+    // §4.4: the marker drops the moment the primary is usable again.
+    tick(loadout, 1, 3.3);
+    expect(loadout.fallback).toBe(false);
+    expect(loadout.firingSlot(5, true, true)).toBe('primary');
+  });
+
+  it('gives null over a locked primary without auto-swap (29-h)', () => {
+    const { loadout } = make((s) => {
+      s.equipped.primary = 'mg_scrap';
+    });
+    for (let i = 0; i < 25; i++) loadout.fired('primary', 0);
+    expect(loadout.firingSlot(1, true, false)).toBe(null);
+    expect(loadout.fallback).toBe(false);
+  });
+});

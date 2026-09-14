@@ -89,6 +89,11 @@ export type GameEvents = {
   // spent quick-slot item, for the HUD, the audio layer and the tests.
   'weapon:switched': { slot: WeaponSlot; itemId: ItemId };
   'quick:used': { slot: QuickSlot; itemId: ItemId };
+  // SPEC-029 §3: a blast landed, a heat weapon locked, a mine armed — for the
+  // VFX layer, the audio table and the quick-bar states.
+  'combat:blast': { x: number; z: number; radius: number };
+  'weapon:locked': { slot: WeaponSlot; itemId: ItemId };
+  'mine:armed': { x: number; z: number };
   'shop:purchased': { kind: 'ship' | 'gear' | 'companion' | 'craft'; id: string; tier?: number };
   'enemy:spawned': { enemyId: EnemyId; elite: boolean };
   'enemy:killed': { enemyId: EnemyId; elite: boolean; x: number; z: number; xp: number };

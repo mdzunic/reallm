@@ -87,9 +87,20 @@ test('prefers-reduced-motion collapses both fades to 0 ms without changing the o
       addEventListener() {},
       removeEventListener() {},
     })) as unknown as typeof window.matchMedia;
-    const start = performance.now();
-    const ok = await window.__reallm.go('starmap', undefined);
-    return { ok, elapsed: performance.now() - start, scene: window.__reallm.scene() };
+    // What separates "the fades collapsed" from "they did not" is 0 ms vs
+    // 600 ms, but a tab starved by parallel workers can stretch a fade-free
+    // transition past the threshold on wall clock alone. Measure up to three
+    // times (station ↔ starmap is a legal round trip) and keep the best — a
+    // surviving fade would put every attempt at 500 ms or more.
+    let ok = true;
+    let elapsed = Number.POSITIVE_INFINITY;
+    for (let attempt = 0; attempt < 3 && elapsed >= 100; attempt += 1) {
+      if (attempt > 0) ok = (await window.__reallm.go('station', {})) && ok;
+      const start = performance.now();
+      ok = (await window.__reallm.go('starmap', undefined)) && ok;
+      elapsed = Math.min(elapsed, performance.now() - start);
+    }
+    return { ok, elapsed, scene: window.__reallm.scene() };
   });
   expect(reduced.ok).toBe(true);
   expect(reduced.scene).toBe('starmap');

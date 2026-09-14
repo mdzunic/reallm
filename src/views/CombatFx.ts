@@ -11,7 +11,7 @@ import * as THREE from 'three';
 import { hash01 } from '@/core/Noise';
 import { decalAtlas, particleSprite } from '@/views/ProceduralTextures';
 
-export type FxKind = 'hit' | 'death' | 'spawn' | 'pickup' | 'dust_ring' | 'muzzle';
+export type FxKind = 'hit' | 'death' | 'spawn' | 'pickup' | 'dust_ring' | 'muzzle' | 'blast';
 
 /** §4.4 — the burst table (*initial tuning*). */
 interface BurstDef {
@@ -34,6 +34,8 @@ const BURSTS: Record<FxKind, BurstDef> = {
   pickup: { count: 5, life: 0.4, speedMin: 1.5, speedMax: 1.5, spread: 'up', gravity: -2, size: 0.1, origin: 0.5 },
   dust_ring: { count: 24, life: 0.8, speedMin: 6, speedMax: 6, spread: 'radial', gravity: -6, size: 0.35, origin: 0.25 },
   muzzle: { count: 3, life: 0.08, speedMin: 0, speedMax: 0, spread: 'still', gravity: 0, size: 0.4, origin: 0.9 },
+  // SPEC-029 §4.12: the blast; callers scale it by `radius / 3.5`.
+  blast: { count: 30, life: 0.5, speedMin: 5, speedMax: 9, spread: 'hemisphere', gravity: -4, size: 0.6, origin: 0.4 },
 };
 
 /** The §4.4 death flash: a second short burst at × 3 brightness. */
@@ -95,6 +97,7 @@ export class CombatFx {
   readonly #scorchX = new Float32Array(SCORCH_CAPACITY);
   readonly #scorchZ = new Float32Array(SCORCH_CAPACITY);
   readonly #scorchBorn = new Float32Array(SCORCH_CAPACITY);
+  readonly #scorchScale = new Float32Array(SCORCH_CAPACITY).fill(1);
   #scorchHead = 0;
   #scorchCount = 0;
 
@@ -167,7 +170,8 @@ export class CombatFx {
     const g = ((color >> 8) & 255) / 255;
     const b = (color & 255) / 255;
     this.#emit(def, x, z, r, g, b, scale, def.count, 1, def.life);
-    if (kind === 'death') {
+    // SPEC-029 §4.12: a blast carries the death flash too — 4 sprites at ×3.
+    if (kind === 'death' || kind === 'blast') {
       this.#emit(def, x, z, r, g, b, scale * 1.4, DEATH_FLASH_COUNT, DEATH_FLASH_GAIN, DEATH_FLASH_LIFE);
     }
     if (kind === 'muzzle') {
@@ -179,14 +183,19 @@ export class CombatFx {
     }
   }
 
-  /** A scorch decal at `(x, z)`, fading over 20 s; the ring wraps (§4.4). */
-  scorch(x: number, z: number): void {
+  /**
+   * A scorch decal at `(x, z)`, fading over 20 s; the ring wraps (§4.4).
+   * SPEC-029 §4.12: `scale` multiplies the 1.6 m base — `radius / 1.6` for a
+   * blast, so the mark is as wide as the blast was.
+   */
+  scorch(x: number, z: number, scale = 1): void {
     const slot = this.#scorchHead % SCORCH_CAPACITY;
     this.#scorchHead = (this.#scorchHead + 1) % SCORCH_CAPACITY;
     this.#scorchCount = Math.min(SCORCH_CAPACITY, this.#scorchCount + 1);
     this.#scorchX[slot] = x;
     this.#scorchZ[slot] = z;
     this.#scorchBorn[slot] = this.#time;
+    this.#scorchScale[slot] = scale;
   }
 
   #emit(
@@ -300,8 +309,9 @@ export class CombatFx {
       // §4.4: the fade is instanceColor darkening; an expired slot collapses
       // to nothing until the ring reuses it.
       const fade = alive ? 1 - age / SCORCH_LIFE : 0;
+      const size = SCORCH_SIZE * (this.#scorchScale[slot] as number);
       scratchPosition.set(x, ground(x, z) + SCORCH_LIFT, z);
-      scratchScale.set(alive ? SCORCH_SIZE : 0, 1, alive ? SCORCH_SIZE : 0);
+      scratchScale.set(alive ? size : 0, 1, alive ? size : 0);
       scratchMatrix.compose(scratchPosition, IDENTITY_QUAT, scratchScale);
       mesh.setMatrixAt(slot, scratchMatrix);
       mesh.setColorAt(slot, scratchColor.setScalar(fade));

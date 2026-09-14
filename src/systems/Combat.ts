@@ -14,7 +14,7 @@
 import type { EventBus, GameEvents } from '@/core/Events';
 import type { InputState } from '@/core/Input';
 import { log } from '@/core/Log';
-import type { Pool } from '@/core/Pool';
+import { Pool } from '@/core/Pool';
 import type { Rng } from '@/core/Rng';
 import type { Save } from '@/core/Save';
 import { SpatialHash } from '@/core/SpatialHash';
@@ -32,6 +32,7 @@ import {
   type DamageSource,
   type Enemy,
   type EnemyId,
+  type ExplosiveEffect,
   type GearLine,
   type GearTier,
   type Item,
@@ -39,6 +40,14 @@ import {
   type LootTableId,
   type ResourceId,
 } from '@/data/index';
+import type { WeaponAutoSwapMode } from '@/core/Settings';
+import {
+  DEPLOYABLE_CAPACITY,
+  makeDeployable,
+  MAX_ARMED_MINES,
+  MINE_ARM_SECONDS,
+  type DeployableEntity,
+} from '@/entities/Deployable';
 import type { EnemyEntity } from '@/entities/Enemy';
 import type { FollowerEntity } from '@/entities/Follower';
 import type { PlayerEntity } from '@/entities/Player';
@@ -59,6 +68,16 @@ export const PLAYER_KNOCKBACK = 0.5;
 export const KNOCKBACK_CLAMP_PER_STEP = 1;
 /** §4.2: knockback a projectile deals an enemy, along its velocity. */
 export const ENEMY_KNOCKBACK = 0.3;
+/** SPEC-029 §4.5: blasts push non-boss, non-static enemies this far outward. */
+export const BLAST_KNOCKBACK = 1.2;
+/** SPEC-029 §4.3: every explosive item's blast falls off at 0.5. */
+export const EXPLOSIVE_FALLOFF = 0.5;
+/** SPEC-029 §4.6: a thrown grenade flies at 14 m/s. */
+export const THROW_SPEED = 14;
+
+// Scratch for the blast and mine-trigger hash queries — module level, so the
+// 60 Hz step never allocates (SPEC-001 §7).
+const blastCandidates: number[] = [];
 /** §4.3: muzzle offset ahead of the player. */
 export const MUZZLE_OFFSET = 0.6;
 /** Initial tuning: player and drone projectile radius (weapons carry none). */
@@ -212,6 +231,13 @@ export class Combat {
   readonly loadout: Loadout;
   /** Rolled loot waiting for the scene; drained (and owned) by SPEC-012 §4.4. */
   readonly drops: LootDrop[] = [];
+  /** SPEC-029 §4.7: mines and charges, pooled at 8; cleared with the scene. */
+  readonly deployables: Pool<DeployableEntity> = new Pool(makeDeployable);
+  /**
+   * SPEC-029 §4.4: the scene mirrors `settings.weaponAutoSwap` here — Combat
+   * has no settings port, and the test harnesses set it directly.
+   */
+  weaponAutoSwap: WeaponAutoSwapMode = 'touch';
 
   readonly #world: CombatWorld;
   readonly #save: Save;
@@ -229,6 +255,12 @@ export class Combat {
   #droneCooldown = 0;
   #nextEnemyId = 1;
   #aimedThisStep = false;
+  #lastShotAt = -Infinity;
+
+  /** SPEC-029 §3: world time of the last player shot (SPEC-030 reads it). */
+  get lastShotAt(): number {
+    return this.#lastShotAt;
+  }
 
   readonly #aiHooks: AiHooks;
   readonly #projectileHooks: ProjectileHooks;
@@ -282,6 +314,8 @@ export class Combat {
       hitEnemy: (p, e) => this.#projectileHitEnemy(p, e),
       hitPlayer: (p) => this.#projectileHitPlayer(p),
       hitFollower: (p) => this.#projectileHitFollower(p),
+      // SPEC-029 §4.6: rockets and lobs detonate through the one blast path.
+      explode: (p, x, z) => void this.explode(x, z, p.blastRadius, p.damage, p.blastFalloff),
     };
   }
 
@@ -331,9 +365,11 @@ export class Combat {
       else p.healOverTime = { remaining: total, perSecond: total / effect.overSeconds };
     } else if (effect.kind === 'damage_boost') {
       p.boosts.push({ damageMult: effect.mult, until: time + effect.seconds });
-    } else {
+    } else if (effect.kind === 'hazard_immunity') {
       p.hazardImmuneUntil = Math.max(p.hazardImmuneUntil, time + effect.seconds);
     }
+    // SPEC-029 §4.8: explosives never come through here — the scene routes
+    // them to `throwExplosive`/`deploy` before spending the item.
     this.#recomputeStats();
   }
 
@@ -464,6 +500,14 @@ export class Combat {
     p.hitIds?.clear();
     p.enemyId = e.def.id;
     p.elite = e.elite;
+    // SPEC-029 §3: pooled objects reset every field — a reused rocket or lob
+    // slot must not leave an enemy bolt exploding or arcing.
+    p.blastRadius = 0;
+    p.blastFalloff = 0;
+    p.lob = false;
+    p.targetX = 0;
+    p.targetZ = 0;
+    p.flight = 0;
   }
 
   /** §4.5: phase summons appear in a ring at 6 m around the boss. Never elite. */
@@ -587,6 +631,148 @@ export class Combat {
     }
   }
 
+  // ----------------------------------------------- SPEC-029: blasts & mines
+
+  /**
+   * §4.5: area damage at `(x, z)`. Every live, non-invulnerable, unburrowed
+   * enemy whose circle reaches the blast takes
+   * `max(1, round(damage × damageMult × (1 − (1 − falloff) × d / radius)))` —
+   * no crit, no variance — with 1.2 m of outward knockback except for bosses
+   * and statics. The player and the follower are never tested (E42). Returns
+   * how many enemies were hit.
+   */
+  explode(x: number, z: number, radius: number, damage: number, falloff: number): number {
+    const w = this.#world;
+    let count = 0;
+    // The step's hash, like projectile hits (§4.5); +3 covers movement since
+    // the snapshot and the largest body radius.
+    this.#hash.query(x, z, radius + 3, blastCandidates);
+    for (let c = 0; c < blastCandidates.length; c++) {
+      const e = w.enemies.at(blastCandidates[c] as number);
+      if (e.state === 'dead' || e.invulnerable || e.specialKind === 'burrow_dig') continue;
+      const dx = e.x - x;
+      const dz = e.z - z;
+      const centre = Math.hypot(dx, dz);
+      const d = Math.max(0, centre - e.radius);
+      if (d > radius) continue;
+      const k = 1 - (1 - falloff) * (d / radius);
+      const amount = Math.max(1, Math.round(damage * w.stats.damageMult * k));
+      if (e.def.archetype !== 'boss' && e.def.archetype !== 'static' && centre > 1e-6) {
+        // §4.5: 1.2 m outward, axis by axis, unless an obstacle blocks it.
+        const pushX = (dx / centre) * BLAST_KNOCKBACK;
+        const pushZ = (dz / centre) * BLAST_KNOCKBACK;
+        if (!w.obstacles.hitsCircle(e.x + pushX, e.z, e.radius)) e.x += pushX;
+        if (!w.obstacles.hitsCircle(e.x, e.z + pushZ, e.radius)) e.z += pushZ;
+      }
+      this.#damageEnemy(e, amount, 'player');
+      count++;
+    }
+    this.#events.emit('combat:blast', { x, z, radius });
+    return count;
+  }
+
+  /** §4.8: a thrown explosive — a 14 m/s lob that detonates at its target. */
+  throwExplosive(effect: ExplosiveEffect, toX: number, toZ: number): void {
+    const player = this.#world.player;
+    const p = this.#world.projectiles.alloc();
+    const dx = toX - player.x;
+    const dz = toZ - player.z;
+    const len = Math.hypot(dx, dz);
+    const dirX = len > 1e-6 ? dx / len : Math.cos(player.facing);
+    const dirZ = len > 1e-6 ? dz / len : Math.sin(player.facing);
+    p.x = player.x;
+    p.z = player.z;
+    p.vx = dirX * THROW_SPEED;
+    p.vz = dirZ * THROW_SPEED;
+    p.radius = PLAYER_PROJECTILE_RADIUS;
+    p.damage = effect.damage;
+    p.pierceLeft = 0;
+    p.owner = 'player';
+    if (p.hitIds === null) p.hitIds = new Set();
+    else p.hitIds.clear();
+    p.enemyId = null;
+    p.elite = false;
+    p.blastRadius = effect.radius;
+    p.blastFalloff = EXPLOSIVE_FALLOFF;
+    p.lob = true;
+    p.targetX = toX;
+    p.targetZ = toZ;
+    p.flight = len / THROW_SPEED;
+    p.ttl = p.flight;
+  }
+
+  /**
+   * §4.7: plant a mine or a charge at `(x, z)`. Refuses a seventh mine
+   * (`'mine_limit'`) and a ninth deployable (`'full'`); the caller spends the
+   * item only on `'ok'`.
+   */
+  deploy(effect: ExplosiveEffect, x: number, z: number): 'ok' | 'mine_limit' | 'full' {
+    const pool = this.deployables;
+    if (effect.mode === 'mine') {
+      let mines = 0;
+      for (let i = 0; i < pool.size; i++) {
+        if (pool.at(i).kind === 'mine') mines++;
+      }
+      if (mines >= MAX_ARMED_MINES) return 'mine_limit';
+    }
+    if (pool.size >= DEPLOYABLE_CAPACITY) return 'full';
+    const time = this.#world.time;
+    const d = pool.alloc();
+    d.kind = effect.mode === 'mine' ? 'mine' : 'charge';
+    d.x = x;
+    d.z = z;
+    d.radius = effect.radius;
+    d.damage = effect.damage;
+    d.trigger = effect.trigger ?? 0;
+    if (d.kind === 'mine') {
+      d.armAt = time + MINE_ARM_SECONDS;
+      d.fuseAt = Infinity;
+      d.armed = false;
+    } else {
+      d.armAt = time;
+      d.fuseAt = time + effect.fuse;
+      d.armed = true;
+    }
+    return 'ok';
+  }
+
+  /**
+   * §4.7, after the projectile pass: mines arm and trigger, charges count
+   * their fuse down, and an exploded deployable is freed backwards. The pool
+   * survives a player death — only scene disposal drops it (29-j, AC-46/47).
+   */
+  #updateDeployables(): void {
+    const time = this.#world.time;
+    const pool = this.deployables;
+    for (let i = pool.size - 1; i >= 0; i--) {
+      const d = pool.at(i);
+      if (d.kind === 'mine') {
+        if (!d.armed) {
+          if (time < d.armAt) continue;
+          d.armed = true;
+          this.#events.emit('mine:armed', { x: d.x, z: d.z });
+        }
+        if (!this.#mineTriggered(d)) continue;
+      } else if (time < d.fuseAt) {
+        continue;
+      }
+      this.explode(d.x, d.z, d.radius, d.damage, EXPLOSIVE_FALLOFF);
+      pool.free(i);
+    }
+  }
+
+  /** §4.7 / 29-i: a live, non-static, unburrowed enemy within `trigger`. */
+  #mineTriggered(d: DeployableEntity): boolean {
+    const w = this.#world;
+    this.#hash.query(d.x, d.z, d.trigger + 3, blastCandidates);
+    for (let c = 0; c < blastCandidates.length; c++) {
+      const e = w.enemies.at(blastCandidates[c] as number);
+      if (e.state === 'dead' || e.def.archetype === 'static' || e.specialKind === 'burrow_dig') continue;
+      if (Math.hypot(e.x - d.x, e.z - d.z) - e.radius <= d.trigger) return true;
+    }
+    return false;
+  }
+
   // ------------------------------------------------------------ projectiles
 
   #projectileHitEnemy(p: ProjectileEntity, e: EnemyEntity): void {
@@ -636,13 +822,24 @@ export class Combat {
    */
   #updateFiring(input: InputState, aimWorld: { x: number; z: number } | null): void {
     const p = this.#world.player;
-    const weapon = this.loadout.activeWeapon();
     this.#aimedThisStep = false;
+    // SPEC-029 §4.4: an explicit trigger — held, pressed, or an aim-drag. The
+    // heavy slot fires only on one; auto-fire alone never reaches it.
+    const explicit = input.buttons.fire.down || input.buttons.fire.justPressed || input.aim.dragging;
+    const wantsFire = explicit || input.autoFire;
+    if (!wantsFire) return;
+    const autoSwap =
+      this.weaponAutoSwap === 'on' || (this.weaponAutoSwap === 'touch' && input.scheme === 'touch');
+    // SPEC-029 §4.4: the slot that fires this step — the active one when its
+    // cooldown says yes, the sidearm covering a locked primary, or none.
+    const slot = this.loadout.firingSlot(this.#world.time, explicit, autoSwap);
+    const weapon = (slot === null ? null : this.loadout.weaponIn(slot)) ?? this.loadout.activeWeapon();
     let dirX = 0;
     let dirZ = 0;
     let firing = false;
-    const wantsFire = input.buttons.fire.down || input.aim.dragging || input.autoFire;
-    if (!wantsFire) return;
+    // SPEC-029 §4.6: a lob explodes at its aim point, clamped to range.
+    let targetX = 0;
+    let targetZ = 0;
     if (aimWorld !== null && (input.buttons.fire.down || input.aim.dragging)) {
       const dx = aimWorld.x - p.x;
       const dz = aimWorld.z - p.z;
@@ -651,6 +848,9 @@ export class Combat {
         dirX = dx / len;
         dirZ = dz / len;
         firing = true;
+        const reach = Math.min(len, weapon.range);
+        targetX = p.x + dirX * reach;
+        targetZ = p.z + dirZ * reach;
       }
     } else {
       const target = this.#autoTarget(weapon.range);
@@ -662,21 +862,52 @@ export class Combat {
           dirX = dx / len;
           dirZ = dz / len;
           firing = true;
+          targetX = target.x;
+          targetZ = target.z;
         }
+      } else if (weapon.blast !== undefined && explicit) {
+        // SPEC-029 §4.6: a launcher with no pointer and no target still fires,
+        // 10 m along facing.
+        dirX = Math.cos(p.facing);
+        dirZ = Math.sin(p.facing);
+        targetX = p.x + dirX * 10;
+        targetZ = p.z + dirZ * 10;
+        firing = true;
       }
     }
     if (!firing) return;
     // §4.3: facing turns instantly to the aim direction when firing.
     p.facing = Math.atan2(dirZ, dirX);
     this.#aimedThisStep = true;
-    // SPEC-028 §4.2: nothing fires during the 0.25 s switch. Fire held
-    // through it resumes the moment `canFire` holds, auto-fire too (28-c).
-    if (!this.loadout.canFire(this.#world.time)) return;
+    // SPEC-028 §4.2 / SPEC-029 §4.2: no slot may fire — switching, locked
+    // without cover, recharging, or a heavy on auto-fire (28-c, 29-g).
+    if (slot === null) return;
     if (p.fireCooldown > 0) return;
     p.fireCooldown = 1 / weapon.fireRate;
-    const rolled = rollPlayerDamage(weapon, this.#world.stats, this.#rng.combat);
-    this.#spawnPlayerProjectile('player', dirX, dirZ, rolled.amount, weapon);
-    this.loadout.fired(this.loadout.active, this.#world.time);
+    // SPEC-029 §4.4: a blast weapon does not roll — its projectile carries the
+    // raw damage and `explode` applies the multiplier, so blasts never crit.
+    const damage =
+      weapon.blast !== undefined ? weapon.damage : rollPlayerDamage(weapon, this.#world.stats, this.#rng.combat).amount;
+    // SPEC-029 §4.4: a spread weapon turns the shot within ±spread, on the
+    // combat stream only — deterministic for a seed.
+    if (weapon.spread !== undefined) {
+      const turn = this.#rng.combat.float(-weapon.spread, weapon.spread);
+      const cos = Math.cos(turn);
+      const sin = Math.sin(turn);
+      const turnedX = dirX * cos - dirZ * sin;
+      dirZ = dirX * sin + dirZ * cos;
+      dirX = turnedX;
+    }
+    const shot = this.#spawnPlayerProjectile('player', dirX, dirZ, damage, weapon);
+    if (weapon.lob === true) {
+      shot.lob = true;
+      shot.targetX = targetX;
+      shot.targetZ = targetZ;
+      shot.flight = Math.hypot(targetX - shot.x, targetZ - shot.z) / weapon.projectileSpeed;
+      shot.ttl = shot.flight;
+    }
+    this.#lastShotAt = this.#world.time;
+    this.loadout.fired(slot, this.#world.time);
   }
 
   /** 11-j: nearest with a clear line wins; if every candidate is blocked, nearest overall. */
@@ -706,7 +937,13 @@ export class Combat {
     return bestClear ?? best;
   }
 
-  #spawnPlayerProjectile(owner: 'player' | 'drone', dirX: number, dirZ: number, damage: number, weapon: WeaponDef): void {
+  #spawnPlayerProjectile(
+    owner: 'player' | 'drone',
+    dirX: number,
+    dirZ: number,
+    damage: number,
+    weapon: WeaponDef,
+  ): ProjectileEntity {
     const player = this.#world.player;
     const p = this.#world.projectiles.alloc();
     p.x = player.x + dirX * MUZZLE_OFFSET;
@@ -722,6 +959,14 @@ export class Combat {
     else p.hitIds.clear();
     p.enemyId = null;
     p.elite = false;
+    // SPEC-029 §3: pooled objects reset every field on reuse.
+    p.blastRadius = weapon.blast?.radius ?? 0;
+    p.blastFalloff = weapon.blast?.falloff ?? 0;
+    p.lob = false;
+    p.targetX = 0;
+    p.targetZ = 0;
+    p.flight = 0;
+    return p;
   }
 
   /** §4.3: the combat drone, every `1/droneFireRate` s at the nearest aggroed enemy ≤ 12 m. */
@@ -774,6 +1019,10 @@ export class Combat {
       if (p.boosts.length !== before) this.#recomputeStats();
     }
 
+    // SPEC-029 §4.2: cooldowns tick every step, holstered slots included —
+    // and through a death, so a locked gun is cool by the respawn.
+    this.loadout.update(dt, w.time);
+
     if (p.alive) {
       this.#tickHealing(dt);
       p.fireCooldown -= dt;
@@ -800,6 +1049,8 @@ export class Combat {
     }
 
     updateProjectiles(w, this.#hash, dt, this.#projectileHooks);
+    // SPEC-029 §4.7: mines and charges, right after the projectile pass.
+    this.#updateDeployables();
 
     if (p.alive) this.#pushPlayerOut();
     this.#applyKnockback();

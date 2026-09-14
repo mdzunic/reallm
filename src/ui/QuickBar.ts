@@ -41,6 +41,8 @@ interface SlotNodes {
   readonly count: HTMLSpanElement | null;
   readonly key: HTMLSpanElement;
   readonly state: HTMLSpanElement | null;
+  /** SPEC-029 §4.11: the charge pips of a launcher slot. */
+  readonly pips: HTMLSpanElement | null;
   lastCd: string;
   lastHeat: string;
 }
@@ -87,12 +89,24 @@ export class QuickBar {
         write(nodes.name, item?.short ?? '—');
         write(nodes.key, keys ? KEY_HINTS[slot] : '');
         nodes.key.classList.toggle('is-hidden', !keys);
-        // SPEC-029 widens `SlotState` (heat, lock, recharge); the state text
-        // above already follows whatever the union holds, and the lock
-        // styling lands with that spec.
-        if (nodes.state !== null) write(nodes.state, view.state.toUpperCase());
+        // SPEC-029 §4.11: the cooldown states — `HEAT nn%` while warm,
+        // `LOCK` with `.is-locked` while locked, `RECHARGE` with the sweep.
+        if (nodes.state !== null) {
+          const text = view.state === 'heat' ? `HEAT ${Math.round(view.heat * 100)}%` : view.state.toUpperCase();
+          write(nodes.state, text);
+        }
         nodes.root.classList.toggle('is-active', slot === loadout.active);
         nodes.root.classList.toggle('is-empty', item === null);
+        nodes.root.classList.toggle('is-locked', view.state === 'lock');
+        nodes.root.classList.toggle('is-recharging', view.state === 'recharge');
+        // §4.11: the sidearm carries ↺ while it covers a locked primary.
+        nodes.root.classList.toggle('is-fallback', slot === 'sidearm' && loadout.fallback);
+        if (nodes.pips !== null) {
+          let pips = '';
+          for (let i = 0; i < view.maxCharges; i++) pips += i < view.charges ? '●' : '○';
+          write(nodes.pips, pips);
+          nodes.pips.classList.toggle('is-hidden', pips === '');
+        }
         const cd = view.cd.toFixed(3);
         if (nodes.lastCd !== cd) {
           nodes.lastCd = cd;
@@ -134,8 +148,10 @@ export class QuickBar {
     const count = weapon ? null : el('span', 'qb-count');
     const key = el('span', 'qb-key');
     const state = weapon ? el('span', 'qb-state') : null;
+    const pips = weapon ? el('span', 'qb-pips is-hidden') : null;
     root.append(name);
     if (count !== null) root.append(count);
+    if (pips !== null) root.append(pips);
     if (state !== null) root.append(state);
     root.append(key);
 
@@ -182,7 +198,7 @@ export class QuickBar {
       });
     }
 
-    return { root, name, count, key, state, lastCd: '', lastHeat: '' };
+    return { root, name, count, key, state, pips, lastCd: '', lastHeat: '' };
   }
 
   #clearPress(): void {

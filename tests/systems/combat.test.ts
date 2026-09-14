@@ -6,14 +6,17 @@ import { Rng, RngRoot } from '@/core/Rng';
 import { ITEMS, TUNING } from '@/data/index';
 import { CircleObstacles } from '@/entities/World';
 import {
+  BLAST_KNOCKBACK,
   damageReduction,
   enemyHitDamage,
+  EXPLOSIVE_FALLOFF,
   gearAt,
   rollElite,
   rollPlayerDamage,
   type PlayerStats,
   type WeaponDef,
 } from '@/systems/Combat';
+import { DEPLOYABLE_CAPACITY, MAX_ARMED_MINES } from '@/entities/Deployable';
 import { STEP, harness, MARINE, SCOUT } from './combatFixtures';
 
 const KINETIC = ITEMS.weapon_kinetic as WeaponDef;
@@ -700,5 +703,265 @@ describe('follower (§4.9)', () => {
     h.run(0.2);
     expect(f.alive).toBe(false);
     expect(h.of('follower:died')).toEqual([{ follower: 'science_probe' }]);
+  });
+});
+
+// ------------------------------------------------------ SPEC-029: blasts
+
+/** `explode` and mine triggers read the step's hash — build it, then repin. */
+function hashStep(h: ReturnType<typeof harness>, pin: Array<[{ x: number; z: number }, number, number]>): void {
+  h.step();
+  for (const [e, x, z] of pin) {
+    e.x = x;
+    e.z = z;
+  }
+}
+
+const FRAG = ITEMS.frag_grenade.effect as Extract<(typeof ITEMS.frag_grenade)['effect'], { kind: 'explosive' }>;
+const MINE = ITEMS.landmine.effect as Extract<(typeof ITEMS.landmine)['effect'], { kind: 'explosive' }>;
+const CHARGE = ITEMS.demo_charge.effect as Extract<(typeof ITEMS.demo_charge)['effect'], { kind: 'explosive' }>;
+
+describe('Combat.explode (SPEC-029 §4.5)', () => {
+  it('applies the falloff formula at the centre, halfway and the rim, counting the body radius', () => {
+    const h = harness();
+    const centre = h.spawn('dust_skitter', 0.1, 0);
+    const halfway = h.spawn('dust_skitter', 2.4, 0); // d = 2.4 − 0.4 = radius/2
+    const rim = h.spawn('dust_skitter', 4.4, 0); // d = 4.0 = radius exactly
+    const beyond = h.spawn('dust_skitter', 0, 4.5); // d = 4.1 > radius
+    hashStep(h, [[centre, 0.1, 0], [halfway, 2.4, 0], [rim, 4.4, 0], [beyond, 0, 4.5]]);
+    const mult = h.world.stats.damageMult;
+
+    const hit = h.combat.explode(0, 0, 4, 10, 0.4);
+    expect(hit).toBe(3);
+    // k = 1 − (1 − falloff) · d / radius; damage = max(1, round(10 · mult · k)).
+    expect(centre.maxHp - centre.hp).toBe(Math.max(1, Math.round(10 * mult * 1)));
+    expect(halfway.maxHp - halfway.hp).toBe(Math.max(1, Math.round(10 * mult * 0.7)));
+    expect(rim.maxHp - rim.hp).toBe(Math.max(1, Math.round(10 * mult * 0.4)));
+    expect(beyond.hp).toBe(beyond.maxHp);
+    expect(h.of('combat:blast')).toEqual([{ x: 0, z: 0, radius: 4 }]);
+  });
+
+  it('knocks enemies 1.2 m outward — but never bosses or statics — and spreads aggro', () => {
+    const h = harness();
+    const skitter = h.spawn('dust_skitter', 2, 0);
+    const packmate = h.spawn('dust_skitter', 2, 6); // unhit, same species within 8 m
+    const boss = h.spawn('dune_wurm', 0, 3);
+    const egg = h.spawn('hive_egg', -3, 0);
+    hashStep(h, [[skitter, 2, 0], [packmate, 2, 6], [boss, 0, 3], [egg, -3, 0]]);
+
+    h.combat.explode(0, 0, 5, 10, 0.5);
+    expect(skitter.x).toBeCloseTo(2 + BLAST_KNOCKBACK, 5);
+    expect(boss.x).toBeCloseTo(0, 5);
+    expect(boss.z).toBeCloseTo(3, 5);
+    expect(egg.x).toBeCloseTo(-3, 5);
+    // The egg takes blast damage all the same (29-i).
+    expect(egg.hp).toBeLessThan(egg.maxHp);
+    // §4.5: blast damage aggroes like any hit, same species within 8 m too.
+    expect(skitter.aggro).toBe(true);
+    expect(packmate.aggro).toBe(true);
+  });
+
+  it('kills through killEnemy, and never touches the player or the follower (E42)', () => {
+    const h = harness({ follower: true });
+    const f = h.world.follower;
+    if (f === null) return;
+    f.x = 1;
+    f.z = 0;
+    const skitter = h.spawn('dust_skitter', 0.5, 0.5);
+    hashStep(h, [[skitter, 0.5, 0.5]]);
+    const hpBefore = h.world.player.hp;
+
+    const hit = h.combat.explode(0, 0, 4, 200, 0.5);
+    expect(hit).toBe(1);
+    expect(skitter.state).toBe('dead');
+    expect(h.of('enemy:killed')).toHaveLength(1);
+    expect(h.world.player.hp).toBe(hpBefore);
+    expect(f.alive).toBe(true);
+    expect(f.hp).toBe(f.def.hp);
+  });
+
+  it('ignores the invulnerable and the burrowed (29-b, 29-c)', () => {
+    const h = harness();
+    const shielded = h.spawn('dust_skitter', 1, 0);
+    const burrowed = h.spawn('dust_skitter', -1, 0);
+    hashStep(h, [[shielded, 1, 0], [burrowed, -1, 0]]);
+    shielded.invulnerable = true;
+    burrowed.specialKind = 'burrow_dig';
+
+    expect(h.combat.explode(0, 0, 4, 100, 0.5)).toBe(0);
+    expect(shielded.hp).toBe(shielded.maxHp);
+    expect(burrowed.hp).toBe(burrowed.maxHp);
+  });
+});
+
+// ------------------------------------------------- SPEC-029: rockets & lobs
+
+describe('rockets and lobs (SPEC-029 §4.6)', () => {
+  it('a rocket explodes at the first enemy it touches, pierce ignored', () => {
+    const h = harness({ patch: (s) => void (s.equipped.heavy = 'launcher_rocket') });
+    h.combat.loadout.select('heavy', h.world.time);
+    h.run(0.3); // past the switch
+    const near = h.spawn('hive_egg', 5, 0); // static: it stays put
+    const far = h.spawn('hive_egg', 9.5, 0);
+    h.aim = { x: 10, z: 0 };
+    h.input.buttons.fire.down = true;
+    h.step();
+    h.input.buttons.fire.down = false;
+    h.run(1.5);
+    expect(h.of('combat:blast')).toHaveLength(1);
+    const blast = h.of('combat:blast')[0] as { x: number; radius: number };
+    expect(blast.radius).toBe(3.5);
+    expect(blast.x).toBeLessThan(5); // at the first body, not beyond it
+    expect(near.hp).toBeLessThan(near.maxHp); // pierce ignored: one blast, no punch-through
+    expect(far.hp).toBe(far.maxHp); // 9.5 − 0.8 sits outside the 3.5 m radius
+  });
+
+  it('a rocket explodes at an obstacle truncation (29-a) and at the end of its range', () => {
+    const wall = new CircleObstacles([{ x: 6, z: 0, radius: 1 }]);
+    const h = harness({ obstacles: wall, patch: (s) => void (s.equipped.heavy = 'launcher_rocket') });
+    h.combat.loadout.select('heavy', h.world.time);
+    h.run(0.3);
+    h.aim = { x: 20, z: 0 };
+    h.input.buttons.fire.down = true;
+    h.run(0.5);
+    const atWall = h.of('combat:blast')[0] as { x: number };
+    expect(atWall.x).toBeCloseTo(5, 0); // the wall's near edge
+    expect(h.world.player.hp).toBe(h.world.stats.maxHp); // 29-a: the player takes nothing
+
+    // Range end: open ground, 22 m of range at 20 m/s.
+    const open = harness({ patch: (s) => void (s.equipped.heavy = 'launcher_rocket') });
+    open.combat.loadout.select('heavy', open.world.time);
+    open.run(0.3);
+    open.aim = { x: 30, z: 0 };
+    open.input.buttons.fire.down = true;
+    open.run(1.5);
+    const atRange = open.of('combat:blast')[0] as { x: number };
+    expect(atRange.x).toBeCloseTo(0.6 + 22, 0); // muzzle + range
+  });
+
+  it('a grenade-launcher shell passes over bodies and explodes at the aim point', () => {
+    const h = harness({ patch: (s) => void (s.equipped.heavy = 'launcher_grenade') });
+    h.combat.loadout.select('heavy', h.world.time);
+    h.run(0.3);
+    const blocker = h.spawn('hive_egg', 3, 0); // static, directly under the arc
+    h.aim = { x: 10, z: 0 };
+    h.input.buttons.fire.down = true;
+    // One shot only, or the burst keeps firing.
+    h.step();
+    h.input.buttons.fire.down = false;
+    h.run(1.2);
+    const blasts = h.of('combat:blast');
+    expect(blasts).toHaveLength(1);
+    expect((blasts[0] as { x: number }).x).toBeCloseTo(10, 5);
+    expect((blasts[0] as { radius: number }).radius).toBe(3);
+    // The body under the arc was never hit in flight; only the blast reaches
+    // it — and at 7 m from the target it is out of the 3 m radius entirely.
+    expect(blocker.hp).toBe(blocker.maxHp);
+  });
+
+  it('a thrown grenade is a 14 m/s lob that explodes at its target', () => {
+    const h = harness();
+    const blocker = h.spawn('hive_egg', 4, 0); // static, directly on the path
+    h.combat.throwExplosive(FRAG, 6, 0);
+    expect(h.world.projectiles.size).toBe(1);
+    const p = h.world.projectiles.at(0);
+    expect(Math.hypot(p.vx, p.vz)).toBeCloseTo(14, 5);
+    expect(p.lob).toBe(true);
+    h.run(1);
+    const blasts = h.of('combat:blast');
+    expect(blasts).toHaveLength(1);
+    expect(blasts[0]).toEqual({ x: 6, z: 0, radius: FRAG.radius });
+    // Passed over in flight; only the blast reaches it — d = 2 − 0.8 = 1.2.
+    const expected = Math.max(1, Math.round(FRAG.damage * h.world.stats.damageMult * (1 - EXPLOSIVE_FALLOFF * (1.2 / FRAG.radius))));
+    expect(blocker.maxHp - blocker.hp).toBe(expected);
+  });
+
+  it('spread turns the shot within ±spread on the combat stream, deterministically', () => {
+    const fire = (seed: number): { vx: number; vz: number } => {
+      const h = harness({ seed, patch: (s) => void (s.equipped.primary = 'mg_scrap') });
+      h.aim = { x: 10, z: 0 };
+      h.input.buttons.fire.down = true;
+      h.step();
+      expect(h.world.projectiles.size).toBe(1);
+      const p = h.world.projectiles.at(0);
+      return { vx: p.vx, vz: p.vz };
+    };
+    const a = fire(77);
+    const b = fire(77);
+    expect(a).toEqual(b); // same seed, same turn
+    const speed = Math.hypot(a.vx, a.vz);
+    expect(speed).toBeCloseTo(30, 5);
+    const angle = Math.atan2(a.vz, a.vx);
+    expect(Math.abs(angle)).toBeLessThanOrEqual(0.08 + 1e-9);
+    expect(angle).not.toBe(0); // the turn actually happened for this seed
+    const c = fire(78);
+    expect(Math.atan2(c.vz, c.vx)).not.toBeCloseTo(angle, 10);
+  });
+});
+
+// ------------------------------------------------- SPEC-029: deployables
+
+describe('deployables (SPEC-029 §4.7)', () => {
+  it('a mine arms 1 s after placement, emitting mine:armed', () => {
+    const h = harness();
+    expect(h.combat.deploy(MINE, 2, 0)).toBe('ok');
+    const mine = h.combat.deployables.at(0);
+    h.run(0.9);
+    expect(mine.armed).toBe(false);
+    expect(h.of('mine:armed')).toHaveLength(0);
+    h.run(0.2);
+    expect(mine.armed).toBe(true);
+    expect(h.of('mine:armed')).toEqual([{ x: 2, z: 0 }]);
+  });
+
+  it('an armed mine explodes on a non-static enemy within its trigger; an egg never sets it off (29-i)', () => {
+    const h = harness();
+    expect(h.combat.deploy(MINE, 10, 0)).toBe('ok');
+    const egg = h.spawn('hive_egg', 10.5, 0);
+    h.run(2);
+    expect(h.of('combat:blast')).toHaveLength(0); // armed, but the static did not trip it
+    expect(egg.hp).toBe(egg.maxHp);
+
+    const skitter = h.spawn('dust_skitter', 11, 0.5);
+    h.run(1);
+    expect(h.of('combat:blast')).toHaveLength(1);
+    expect(h.combat.deployables.size).toBe(0); // freed after the burst
+    expect(skitter.state).toBe('dead');
+  });
+
+  it('a charge explodes when its fuse ends, player death or not (29-j)', () => {
+    const h = harness();
+    expect(h.combat.deploy(CHARGE, 1, 1)).toBe('ok');
+    h.combat.damagePlayer(10_000, { kind: 'fall' });
+    expect(h.world.player.alive).toBe(false);
+    expect(h.combat.deployables.size).toBe(1); // deployables outlive the player
+    h.run(3.1);
+    const blasts = h.of('combat:blast');
+    expect(blasts).toEqual([{ x: 1, z: 1, radius: CHARGE.radius }]);
+    expect(h.combat.deployables.size).toBe(0);
+  });
+
+  it('refuses a seventh mine with mine_limit and a ninth deployable with full', () => {
+    const h = harness();
+    for (let i = 0; i < MAX_ARMED_MINES; i++) {
+      expect(h.combat.deploy(MINE, i * 5, 40)).toBe('ok');
+    }
+    expect(h.combat.deploy(MINE, 40, 40)).toBe('mine_limit');
+    expect(h.combat.deployables.size).toBe(MAX_ARMED_MINES);
+    // Charges still fit — until the pool of 8 is full.
+    expect(h.combat.deploy(CHARGE, 50, 50)).toBe('ok');
+    expect(h.combat.deploy(CHARGE, 55, 55)).toBe('ok');
+    expect(h.combat.deployables.size).toBe(DEPLOYABLE_CAPACITY);
+    expect(h.combat.deploy(CHARGE, 60, 60)).toBe('full');
+  });
+
+  it('blasts land with EXPLOSIVE_FALLOFF and the effect values', () => {
+    const h = harness();
+    expect(EXPLOSIVE_FALLOFF).toBe(0.5);
+    const egg = h.spawn('hive_egg', 10.5, 0);
+    hashStep(h, [[egg, 10.5, 0]]);
+    // d = 0.5 − 0.8 → 0: the full max(1, round(80 · mult)) of the mine.
+    expect(h.combat.explode(10, 0, MINE.radius, MINE.damage, EXPLOSIVE_FALLOFF)).toBe(1);
+    expect(egg.maxHp - egg.hp).toBe(Math.max(1, Math.round(MINE.damage * h.world.stats.damageMult)));
   });
 });

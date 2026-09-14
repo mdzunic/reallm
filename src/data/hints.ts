@@ -30,6 +30,10 @@ export const TIP_IDS = [
   'death',
   // SPEC-028 §4.8: the quick bar, ten seconds after the move tip.
   'quickbar',
+  // SPEC-029 §4.9: the first lock, the first heavy weapon, the first explosive.
+  'overheat',
+  'heavy',
+  'explosives',
 ] as const;
 
 export type TipId = (typeof TIP_IDS)[number];
@@ -89,6 +93,18 @@ export const TIPS: Readonly<Record<TipId, TipText>> = {
   quickbar: {
     keyboard: '1, 2 and 3 switch weapons. Q heals, G throws, C uses gadgets — the bar shows what is left.',
     touch: 'Tap a weapon on the bar to switch. Tap a pack to use it; hold it to choose what goes there.',
+  },
+  overheat: {
+    keyboard: 'The chaingun overheated. Switch to the pistol with 1 while it cools.',
+    touch: 'The chaingun overheated — the pistol covers you while it cools.',
+  },
+  heavy: {
+    keyboard: 'Launchers recharge while holstered: 3 to fire, then back to work.',
+    touch: 'Tap the launcher to fire; it hands back and recharges by itself.',
+  },
+  explosives: {
+    keyboard: 'G throws grenades at the cursor and plants mines at your feet.',
+    touch: 'Tap the explosive slot to throw at the nearest enemy or plant a mine.',
   },
 };
 

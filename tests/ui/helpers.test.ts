@@ -249,6 +249,7 @@ describe('diffHud (AC-115, AC-62)', () => {
     const b = cloneHud(a);
     b.loadout = {
       active: 'primary',
+      fallback: false,
       slots: { sidearm: slot('pistol_service'), primary: slot('weapon_kinetic'), heavy: slot(null) },
     };
     expect(diffHud(a, b)).toEqual(new Set(['loadout']));

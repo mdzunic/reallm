@@ -556,6 +556,10 @@ const NAMES: Record<keyof GameEvents, true> = {
   // SPEC-028 §3: the loadout runtime's switch and quick-slot spend.
   'weapon:switched': true,
   'quick:used': true,
+  // SPEC-029 §3: blasts, heat locks and armed mines.
+  'combat:blast': true,
+  'weapon:locked': true,
+  'mine:armed': true,
   'shop:purchased': true,
   'enemy:spawned': true,
   'enemy:killed': true,
@@ -592,7 +596,7 @@ const port: ServicesEventBus = new EventBus<GameEvents>();
 
 describe('GameEvents (§3.2)', () => {
   it('is exactly the canonical table', () => {
-    expect(Object.keys(NAMES)).toHaveLength(54);
+    expect(Object.keys(NAMES)).toHaveLength(57);
   });
 
   it('still carries the nine names SPEC-002 and SPEC-003 already emit', () => {

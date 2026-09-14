@@ -18,6 +18,8 @@ export interface ProjectileHooks {
   /** §4.4: i-frames do not block the projectile — it is consumed either way. */
   hitPlayer(p: ProjectileEntity): void;
   hitFollower(p: ProjectileEntity): void;
+  /** SPEC-029 §4.6: a shot with `blastRadius > 0` detonates at `(x, z)`. */
+  explode(p: ProjectileEntity, x: number, z: number): void;
 }
 
 /**
@@ -67,6 +69,19 @@ export function updateProjectiles(world: CombatWorld, hash: SpatialHash, dt: num
     p.x += dx;
     p.z += dz;
     p.ttl -= dt;
+
+    // SPEC-029 §4.6: a lob passes over bodies and obstacles and explodes at
+    // its target — clamped there exactly — when its flight time ends.
+    if (p.lob) {
+      if (p.ttl <= 0) {
+        p.x = p.targetX;
+        p.z = p.targetZ;
+        hooks.explode(p, p.targetX, p.targetZ);
+        pool.free(i);
+      }
+      continue;
+    }
+
     let despawn = p.ttl <= 0;
 
     // 11-j: an obstacle truncates the flight; hits beyond it never land.
@@ -82,7 +97,16 @@ export function updateProjectiles(world: CombatWorld, hash: SpatialHash, dt: num
     if (tObstacle !== null) {
       p.x = x0 + dx * tObstacle;
       p.z = z0 + dz * tObstacle;
+      // SPEC-029 §4.6 / 29-a: a rocket detonates at the truncation point.
+      if (p.blastRadius > 0) {
+        hooks.explode(p, p.x, p.z);
+        p.blastRadius = 0;
+      }
       despawn = true;
+    } else if (despawn && p.blastRadius > 0) {
+      // SPEC-029 §4.6: the end of its range — detonate at the end point.
+      hooks.explode(p, p.x, p.z);
+      p.blastRadius = 0;
     }
     if (despawn) pool.free(i);
   }
@@ -120,6 +144,16 @@ function playerShotStep(
   for (let h = 0; h < hitIndices.length; h++) {
     const e = world.enemies.at(hitIndices[h] as number);
     if (e.state === 'dead') continue; // died to an earlier hit this step
+    // SPEC-029 §4.6: a rocket detonates on the first body it meets — pierce
+    // ignored, the blast is the hit. Zeroed so no later branch re-detonates.
+    if (p.blastRadius > 0) {
+      const t = hitTs[h] as number;
+      p.x = x0 + dx * t;
+      p.z = z0 + dz * t;
+      hooks.explode(p, p.x, p.z);
+      p.blastRadius = 0;
+      return true;
+    }
     if (p.hitIds === null) p.hitIds = new Set();
     p.hitIds.add(e.id);
     hooks.hitEnemy(p, e);

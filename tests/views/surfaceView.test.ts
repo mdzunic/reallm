@@ -12,6 +12,7 @@ import { ENEMIES, PLANETS, type PlanetDef } from '@/data/index';
 import { makeEnemy, type EnemyEntity } from '@/entities/Enemy';
 import { makePlayer } from '@/entities/Player';
 import { makeProjectile, type ProjectileEntity } from '@/entities/Projectile';
+import { makeDeployable, type DeployableEntity } from '@/entities/Deployable';
 import { INSTANCES_PER_PART } from '@/views/ProceduralMeshes';
 import { groundLayer } from '@/views/ProceduralTextures';
 import { SurfaceView, type SurfaceFrame, type ViewLayout, type ViewPickup } from '@/views/SurfaceView';
@@ -49,6 +50,7 @@ function frame(enemies: Pool<EnemyEntity>, follower: SurfaceFrame['follower'] = 
     follower,
     enemies,
     projectiles: new Pool<ProjectileEntity>(() => makeProjectile()),
+    deployables: new Pool<DeployableEntity>(() => makeDeployable()),
     pickups: new Pool<ViewPickup>(() => ({ kind: 'resource', x: 0, z: 0, seed: 0, resource: 'oil' })),
     nodes: [{ resource: 'oil', x: 3, z: -3, capacity: 10, remaining: 5, harvesting: false }],
     telegraph: null,
@@ -726,5 +728,51 @@ describe('the guidance layer (SPEC-027 §4.4, AC-29..AC-34)', () => {
     const still = new Set<number>();
     for (let i = 0; i < markers.count; i++) still.add(Math.round(colors.getX(i) * 1000));
     expect(still).toEqual(new Set([1000]));
+  });
+});
+
+// ---------------------------------------------------------------- SPEC-029
+
+describe('lobs and deployables (SPEC-029 §4.6, §4.12)', () => {
+  it('draws a lob at 0.9 + h + 4·H·t·(1−t), peaking at H = min(4, 0.25·distance)', () => {
+    const { scene, view } = setup();
+    const f = frame(new Pool<EnemyEntity>(() => makeEnemy()));
+    const shot = f.projectiles.alloc();
+    // 14 m/s over 1 s of flight → 14 m of distance → H = min(4, 3.5) = 3.5.
+    Object.assign(shot, { x: 0, z: 0, vx: 14, vz: 0, radius: 0.15, owner: 'player', lob: true, flight: 1, ttl: 0.5, targetX: 7, targetZ: 0 });
+    view.sync(f);
+    const heads = projectileMesh(scene)[0] as THREE.InstancedMesh;
+    const matrix = new THREE.Matrix4();
+    heads.getMatrixAt(0, matrix);
+    const h = view.field.heightAt(0, 0);
+    // t = 1 − ttl/flight = 0.5, so the arc term is 4 · 3.5 · 0.25 = 3.5.
+    expect(matrix.elements[13]).toBeCloseTo(0.9 + h + 3.5, 4);
+    view.dispose();
+  });
+
+  it('draws the deployables as one instanced mesh of pool size, capacity 8', () => {
+    const { scene, view } = setup();
+    const f = frame(new Pool<EnemyEntity>(() => makeEnemy()));
+    const mine = f.deployables.alloc();
+    Object.assign(mine, { kind: 'mine', x: 2, z: 2, armed: true, armAt: 0, fuseAt: Infinity });
+    const charge = f.deployables.alloc();
+    Object.assign(charge, { kind: 'charge', x: -2, z: 3, armed: true, armAt: 0, fuseAt: 3 });
+    view.sync(f);
+    const boxes: THREE.InstancedMesh[] = [];
+    scene.traverse((node) => {
+      const mesh = node as THREE.InstancedMesh;
+      if (mesh.isInstancedMesh === true && (mesh.geometry as { type?: string }).type === 'BoxGeometry' && mesh.instanceMatrix.count === 8) {
+        boxes.push(mesh);
+      }
+    });
+    expect(boxes).toHaveLength(1); // one mesh, one draw call
+    const mesh = boxes[0] as THREE.InstancedMesh;
+    expect(mesh.count).toBe(2);
+    const matrix = new THREE.Matrix4();
+    mesh.getMatrixAt(0, matrix);
+    expect(matrix.elements[0]).toBeCloseTo(0.35, 5); // the mine disc
+    mesh.getMatrixAt(1, matrix);
+    expect(matrix.elements[0]).toBeCloseTo(0.3, 5); // the charge box
+    view.dispose();
   });
 });

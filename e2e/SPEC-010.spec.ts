@@ -218,7 +218,8 @@ test.describe('SPEC-010 — the economy in a browser', () => {
     for (const [index, cost] of digest.balance.loadouts.entries()) {
       expect(cost).toBeLessThanOrEqual(digest.balance.budgets[index] ?? 0);
     }
-    expect(digest.balance.sink).toBe(2010);
+    // SPEC-029 §4.1 adds five weapons (50 + 50 + 120 + 60 + 90) to the gear sink.
+    expect(digest.balance.sink).toBe(2380);
     expect(digest.balance.sink).toBeGreaterThanOrEqual(1.5 * digest.balance.completionist);
   });
 });

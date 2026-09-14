@@ -272,14 +272,20 @@ test.describe('SPEC-009 content data layer', () => {
     expect(c.classes).toEqual(['marine', 'engineer', 'scout']); // AC-4
 
     // AC-5: the items of §4.2, with the stats that table pins. SPEC-025 §4.2
-    // adds the Service Pistol, the free sidearm every class now lands with, so
-    // there are thirteen of them and the handgun line leads the shelf.
+    // adds the Service Pistol, the free sidearm every class now lands with, and
+    // SPEC-029 §4.1/§4.3 add the magnum, the two machine guns, the two launchers
+    // and the three explosives — twenty-one of them, handgun line leading.
     expect(c.items).toEqual([
       'pistol_service',
       'weapon_kinetic',
       'weapon_laser',
       'weapon_plasma',
       'weapon_lithium',
+      'pistol_magnum',
+      'mg_scrap',
+      'mg_rotary',
+      'launcher_rocket',
+      'launcher_grenade',
       'armor_scrap',
       'armor_composite',
       'armor_reactive',
@@ -288,6 +294,9 @@ test.describe('SPEC-009 content data layer', () => {
       'medkit',
       'coolant_pack',
       'plasma_cell',
+      'frag_grenade',
+      'landmine',
+      'demo_charge',
     ]);
     expect(c.itemStats).toEqual({
       pistol_service: ['sidearm', 'handgun', 0, 9],
@@ -331,7 +340,8 @@ test.describe('SPEC-009 content data layer', () => {
     expect(c.followers).toContain('science_probe'); // AC-14
     expect(c.companions).toHaveLength(5); // AC-15
     expect(c.upgrades).toEqual(['engine', 'hull', 'shield', 'cargo', 'weapon']); // AC-16
-    expect(c.recipes).toEqual(['wheat_ration', 'medkit', 'coolant_pack']); // AC-17
+    // AC-17, plus the three explosive recipes SPEC-029 §4.8 adds to the bench.
+    expect(c.recipes).toEqual(['wheat_ration', 'medkit', 'coolant_pack', 'frag_grenade', 'landmine', 'demo_charge']);
     // AC-18: tuning is the one §4 table that is a typed object rather than a
     // keyed roster, so it is pinned by the constants the economy spec reads.
     for (const key of ['XP_BASE', 'XP_PER_LEVEL', 'LEVEL_CAP', 'CARGO_BASE', 'START_OIL'])

@@ -22,6 +22,7 @@ import type { EnemyEntity } from '@/entities/Enemy';
 import type { FollowerEntity } from '@/entities/Follower';
 import type { PlayerEntity } from '@/entities/Player';
 import type { ProjectileEntity } from '@/entities/Projectile';
+import { DEPLOYABLE_CAPACITY, type DeployableEntity } from '@/entities/Deployable';
 import { CharacterView } from '@/views/CharacterView';
 import { CombatFx } from '@/views/CombatFx';
 import { buildEnvironment, skyParamsFor } from '@/views/Environment';
@@ -91,6 +92,8 @@ export interface SurfaceFrame {
   follower: FollowerEntity | null;
   enemies: Pool<EnemyEntity>;
   projectiles: Pool<ProjectileEntity>;
+  /** SPEC-029 §4.12: mines and charges, drawn as one instanced mesh. */
+  deployables: Pool<DeployableEntity>;
   pickups: Pool<ViewPickup>;
   nodes: readonly ViewNode[];
   /** The wurm's resurface telegraph, or `null`. */
@@ -141,6 +144,12 @@ const DEFAULT_APPEARANCE = { primary: '#b7472a', secondary: '#2a3b4c' };
 /** §4.4 / 19-k: the VFX pool's share of the preset's particle budget. */
 const FX_CAPACITY_MAX = 512;
 const FX_CAPACITY_PER_PARTICLE = 4;
+/** SPEC-029 §4.6: the lob arc peaks at `min(4, 0.25 · distance)`. */
+export const LOB_ARC_MAX = 4;
+export const LOB_ARC_PER_METRE = 0.25;
+/** SPEC-029 §4.12: deployable blink periods — armed mine, and a charge's last second. */
+const MINE_BLINK_SECONDS = 0.5;
+const CHARGE_BLINK_SECONDS = 0.25;
 /** §4.5: projectile head/ghost instancing caps. */
 const PROJECTILE_CAPACITY = 256;
 const GHOST_CAPACITY = 512;
@@ -355,6 +364,7 @@ export class SurfaceView {
   readonly #nodeCrystals: THREE.InstancedMesh;
   readonly #pickupMeshes: Record<'resource' | 'item' | 'gear', THREE.InstancedMesh>;
   readonly #projectileMesh: THREE.InstancedMesh;
+  readonly #deployableMesh: THREE.InstancedMesh;
   readonly #ghostMesh: THREE.InstancedMesh;
   #storm: StormParticles;
   #stormCapacity: number;
@@ -603,6 +613,21 @@ export class SurfaceView {
       mesh.frustumCulled = false;
       this.#root.add(mesh);
     }
+
+    // SPEC-029 §4.12: mines and charges — one instanced mesh, capacity 8, one
+    // draw call. A mine is a 0.35 m disc-flat block, a charge a 0.3 m box;
+    // the emissive centre blinks through `instanceColor` in #syncDeployables.
+    this.#deployableMesh = new THREE.InstancedMesh(
+      new THREE.BoxGeometry(1, 1, 1),
+      new THREE.MeshStandardMaterial({ color: '#8a8378', emissive: new THREE.Color(0xff5533), emissiveIntensity: 0.35, roughness: 0.6, metalness: 0.3 }),
+      DEPLOYABLE_CAPACITY,
+    );
+    this.#deployableMesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+    this.#deployableMesh.setColorAt(0, scratchColor.set('#ffffff'));
+    this.#deployableMesh.count = 0;
+    this.#deployableMesh.frustumCulled = false;
+    this.#deployableMesh.receiveShadow = true;
+    this.#root.add(this.#deployableMesh);
 
     // SPEC-019 §4.4: the combat VFX pool, sized from the preset (19-k). Built
     // before the player group so its point light precedes the torch in
@@ -1019,6 +1044,7 @@ export class SurfaceView {
     this.#fx.sync(frame.time, ground);
     this.#syncPickups(frame);
     this.#syncProjectiles(frame);
+    this.#syncDeployables(frame);
     this.#syncBlobs(frame);
   }
 
@@ -1114,7 +1140,14 @@ export class SurfaceView {
       const speed = Math.hypot(shot.vx, shot.vz);
       const yaw = speed > 0 ? -Math.atan2(shot.vz, shot.vx) : -(shot.owner === 'enemy' ? 0 : frame.player.facing);
       const bulk = Math.max(0.12, shot.radius) / 0.12;
-      const y = 0.9 + this.field.heightAt(shot.x, shot.z);
+      let y = 0.9 + this.field.heightAt(shot.x, shot.z);
+      // SPEC-029 §4.6: a lob arcs — `0.9 + h + 4·H·t·(1−t)` with
+      // `H = min(4, 0.25 · distance)` and `t = 1 − ttl / flight`.
+      if (shot.lob && shot.flight > 0) {
+        const t = Math.min(1, Math.max(0, 1 - shot.ttl / shot.flight));
+        const arc = Math.min(LOB_ARC_MAX, LOB_ARC_PER_METRE * speed * shot.flight);
+        y += 4 * arc * t * (1 - t);
+      }
       scratchPosition2.set(shot.x, y, shot.z);
       scratchQuat.setFromAxisAngle(Y_AXIS, yaw);
       scratchScale2.set((0.6 + 0.02 * speed) * bulk, bulk, bulk);
@@ -1142,6 +1175,42 @@ export class SurfaceView {
     if (ghostCount > 0) {
       ghosts.instanceMatrix.needsUpdate = true;
       if (ghosts.instanceColor !== null) ghosts.instanceColor.needsUpdate = true;
+    }
+  }
+
+  /**
+   * SPEC-029 §4.12: the deployables — one instanced mesh. A mine is a 0.35 m
+   * disc whose light blinks every 0.5 s once armed; a charge is a 0.3 m box
+   * that blinks every 0.25 s through its last second.
+   */
+  #syncDeployables(frame: SurfaceFrame): void {
+    const mesh = this.#deployableMesh;
+    const pool = frame.deployables;
+    const count = Math.min(pool.size, mesh.instanceMatrix.count);
+    for (let i = 0; i < count; i++) {
+      const d = pool.at(i);
+      const mine = d.kind === 'mine';
+      const y = this.field.heightAt(d.x, d.z);
+      scratchPosition2.set(d.x, y + (mine ? 0.04 : 0.15), d.z);
+      scratchQuat.identity();
+      if (mine) scratchScale2.set(0.35, 0.08, 0.35);
+      else scratchScale2.set(0.3, 0.3, 0.3);
+      scratchMatrix.compose(scratchPosition2, scratchQuat, scratchScale2);
+      mesh.setMatrixAt(i, scratchMatrix);
+      let lit = false;
+      if (mine) {
+        lit = d.armed && Math.floor(frame.time / MINE_BLINK_SECONDS) % 2 === 0;
+      } else {
+        const left = d.fuseAt - frame.time;
+        lit = left <= 1 ? Math.floor(frame.time / CHARGE_BLINK_SECONDS) % 2 === 0 : true;
+      }
+      mesh.setColorAt(i, scratchColor2.setScalar(lit ? 2.2 : 0.55));
+    }
+    mesh.count = count;
+    mesh.visible = count > 0;
+    if (count > 0) {
+      mesh.instanceMatrix.needsUpdate = true;
+      if (mesh.instanceColor !== null) mesh.instanceColor.needsUpdate = true;
     }
   }
 
