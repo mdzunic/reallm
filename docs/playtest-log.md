@@ -744,7 +744,7 @@ assertions; `e2e/surface-env.spec.ts` holds the six-planet budget sweep.
 |---|---|
 | Six-planet edge walk | The player stops on the clamp line (`px` pins at `halfSize − 2`) with wall pieces and hull sections where they stop; `wallVisible` reads 1–3 chunks at the edge, never all 8 |
 | Cave entry (Cinder-4) | `sheltered` reads 1, the chip shows, the roof instance lifts so the salvager stays visible under the 55° camera |
-| Wreck entry (Vetra) | Same chip and roof lift inside the frozen hull |
+| Wreck entry (Cinder-4, seed 9; also walked on Vetra) | Same chip; the roof part now carries the whole dome, the ribs and the plates, so the lift leaves only the low far-side band (~1.9 m, with an inner liner) and the salvager stays visible from the fixed camera whatever way the breach faces — the QA round had caught the old split occluding him |
 | Forced storm inside | `surface-storm` raises the heatwave; over a 3 s hold inside the cave HP does not move; walking back to the pad it falls within 4 s |
 | Hiding | Two seconds after the last shot the chip flips to `⌂ HIDDEN`; an aggroed pack with no line gives up within 3 s (pinned in `tests/systems/enemyAi.test.ts`) |
 
@@ -752,17 +752,19 @@ assertions; `e2e/surface-env.spec.ts` holds the six-planet budget sweep.
 
 Budget: ≤ 96 draws (80 scene + 16 post) and ≤ 130 k triangles (AC-44).
 
-Re-measured after the review-round fix moved the chunk spheres onto
-`InstancedMesh.boundingSphere` — culling now tracks the real chunk positions,
-so the rows dropped across the board.
+Re-measured twice: after the review-round fix moved the chunk spheres onto
+`InstancedMesh.boundingSphere` (culling now tracks the real chunk positions),
+and again after the QA-round fix moved the wreck dome into the roof part
+(±≈100 triangles per planet with wrecks; the drift between runs is ambient
+enemies in frame).
 
 | Planet | Draw calls | Triangles | Shelters placed |
 |---|---|---|---|
-| cinder4 | 49 | 88,868 | 4 |
-| vetra | 51 | 35,276 | 4 |
-| thessaly | 48 | 85,268 | 3 |
-| ferrum | 54 | 54,820 | 4 |
-| hive | 53 | 77,278 | 3 |
+| cinder4 | 46 | 88,460 | 4 |
+| vetra | 51 | 34,496 | 4 |
+| thessaly | 48 | 84,456 | 3 |
+| ferrum | 55 | 54,818 | 4 |
+| hive | 54 | 76,872 | 3 |
 | eden | 37 | 43,822 | 2 |
 
 ### Shots

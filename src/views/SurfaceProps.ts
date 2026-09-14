@@ -580,7 +580,20 @@ function wreckGeometry(biome: Biome, seed: number): ShelterGeometry {
   wall.rotateZ(Math.PI / 2);
   bake(wall, '#8b93a0');
   displace(wall, seed, 0.18, 0.1);
-  const body = merge([wall]);
+  // The band is a single-sided skin whose faces point out of the hull, so on
+  // its own it is backface-culled from the breach side — the very view the
+  // occupied camera has. A flipped inner liner keeps the low wall readable.
+  const liner = new THREE.CylinderGeometry(3.3, 3.3, 12.4, 8, 3, true, Math.PI * 0.85, Math.PI * 0.53);
+  liner.rotateZ(Math.PI / 2);
+  const linerIndex = liner.getIndex() as THREE.BufferAttribute;
+  for (let i = 0; i < linerIndex.count; i += 3) {
+    const swap = linerIndex.getX(i + 1);
+    linerIndex.setX(i + 1, linerIndex.getX(i + 2));
+    linerIndex.setX(i + 2, swap);
+  }
+  liner.computeVertexNormals();
+  bake(liner, '#5d6570');
+  const body = merge([wall, liner]);
   body.scale(1, 1, 0.94); // squeeze toward the 3.2 m short radius
   body.translate(0, 0.4, 0);
 

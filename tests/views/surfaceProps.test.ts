@@ -187,6 +187,9 @@ describe('SPEC-030 — shelterGeometry (AC-39, AC-42, AC-43)', () => {
         const bodyBox = parts.body.boundingBox as THREE.Box3;
         const roofBox = parts.roof.boundingBox as THREE.Box3;
         expect(bodyBox.max.y, `${biome} seed ${seed} body top`).toBeLessThanOrEqual(2.2);
+        // …and it must actually stand above ground — a band buried in the
+        // terrain would satisfy the cap while the shelter vanished.
+        expect(bodyBox.max.y, `${biome} seed ${seed} body above ground`).toBeGreaterThan(1.5);
         expect(roofBox.max.y, `${biome} seed ${seed} roof top`).toBeGreaterThan(3);
       }
     }
