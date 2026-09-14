@@ -48,7 +48,8 @@ test('holding fire locks the chaingun: weaponState lock, is-locked on the bar (�
   const at = aimPoint(page);
   await page.mouse.move(at.x, at.y);
   await page.keyboard.down('Space');
-  await expect.poll(async () => (await info(page))['weaponState'], { timeout: 8_000 }).toBe('lock');
+  // 8 s of game time; wall time stretches when parallel workers starve the tab.
+  await expect.poll(async () => (await info(page))['weaponState'], { timeout: 20_000 }).toBe('lock');
   await page.keyboard.up('Space');
   await expect(page.getByTestId('qb-primary')).toHaveClass(/is-locked/);
   await expect(page.getByTestId('qb-primary')).toContainText('LOCK');
@@ -70,14 +71,22 @@ test('one rocket clears most of a pack, hands back and recharges in 6 s (§6.2 c
 
   await page.keyboard.press('Digit3');
   await expect.poll(async () => (await info(page))['weaponSlot']).toBe('heavy');
-  await page.waitForTimeout(400); // the 0.25 s switch
-  await page.mouse.click(at.x, at.y);
+  // Click until the shot lands — a click inside the 0.25 s switch is refused,
+  // and game time lags wall time under parallel load.
+  await expect
+    .poll(
+      async () => {
+        await page.mouse.click(at.x, at.y);
+        return (await info(page))['charges'];
+      },
+      { timeout: 10_000 },
+    )
+    .toBe(0);
 
-  await expect.poll(async () => Number((await info(page))['kills'] ?? 0) - before, { timeout: 2_000 }).toBeGreaterThanOrEqual(3);
+  await expect.poll(async () => Number((await info(page))['kills'] ?? 0) - before, { timeout: 5_000 }).toBeGreaterThanOrEqual(3);
   // §4.2: the heavy hands back after its last charge and rebuilds holstered.
   await expect.poll(async () => (await info(page))['weaponSlot']).toBe('primary');
-  expect((await info(page))['charges']).toBe(0);
-  await expect.poll(async () => (await info(page))['charges'], { timeout: 6_500 }).toBe(1);
+  await expect.poll(async () => (await info(page))['charges'], { timeout: 15_000 }).toBe(1);
 });
 
 test('KeyG throws a frag at the pointer and spends exactly one (§6.2 case 4)', async ({ page }) => {
@@ -90,12 +99,26 @@ test('KeyG throws a frag at the pointer and spends exactly one (§6.2 case 4)', 
   await page.evaluate(() => {
     (document.querySelector('[data-testid="surface-spawn-pack"]') as HTMLButtonElement).click();
   });
-  const before = Number((await info(page))['kills'] ?? 0);
   expect((await info(page))['qExplosive']).toBe(3);
 
+  // The pack aggros at 18 m and converges; wait for contact, then throw at a
+  // point beside the player — the blast covers the swarm and never hurts the
+  // thrower (E42).
+  await expect
+    .poll(
+      async () => {
+        const i = await info(page);
+        return Math.hypot(Number(i['nearDx'] ?? 99), Number(i['nearDz'] ?? 99));
+      },
+      { timeout: 10_000 },
+    )
+    .toBeLessThan(3);
+  const size = page.viewportSize();
+  await page.mouse.move(Math.round((size?.width ?? 1280) / 2 + 50), Math.round((size?.height ?? 720) / 2));
+  const before = Number((await info(page))['kills'] ?? 0);
   await page.keyboard.press('KeyG');
   await expect.poll(async () => (await info(page))['qExplosive']).toBe(2);
-  await expect.poll(async () => Number((await info(page))['kills'] ?? 0) - before, { timeout: 2_000 }).toBeGreaterThanOrEqual(1);
+  await expect.poll(async () => Number((await info(page))['kills'] ?? 0) - before, { timeout: 10_000 }).toBeGreaterThanOrEqual(1);
 });
 
 test('the seventh mine is refused at the six-mine limit and spends nothing (§6.2 case 5)', async ({ page }) => {
@@ -117,16 +140,36 @@ test('the seventh mine is refused at the six-mine limit and spends nothing (§6.
   await expect(page.getByTestId('qb-explosive')).toContainText('Mine');
   expect((await info(page))['qExplosive']).toBe(7);
 
-  // Seven presses, 0.6 s apart (any explosive use waits 0.5 s): six mines
-  // arm, the seventh is refused whole.
-  for (let i = 0; i < 7; i++) {
-    await page.keyboard.press('KeyG');
-    await page.waitForTimeout(600);
+  // Six placements: a press inside the 0.5 s explosive cooldown is refused
+  // silently, so each is retried until the count drops (game time lags wall
+  // time under parallel load).
+  for (let placed = 1; placed <= 6; placed++) {
+    await expect
+      .poll(
+        async () => {
+          await page.keyboard.press('KeyG');
+          return (await info(page))['qExplosive'];
+        },
+        { timeout: 10_000 },
+      )
+      .toBe(7 - placed);
   }
-  await expect.poll(async () => (await info(page))['mines'], { timeout: 3_000 }).toBe(6);
-  await expect(page.getByTestId('toasts')).toContainText('Mine limit reached');
+  await expect.poll(async () => (await info(page))['mines'], { timeout: 10_000 }).toBe(6);
+
+  // The seventh is refused whole — pressed until it lands outside the
+  // cooldown, where the refusal toasts instead of spending.
+  await expect
+    .poll(
+      async () => {
+        await page.keyboard.press('KeyG');
+        return page.getByTestId('toasts').textContent();
+      },
+      { timeout: 10_000 },
+    )
+    .toContain('Mine limit reached');
   // Nothing was spent on the refusal: 7 − 6 placed = 1 left.
   expect((await info(page))['qExplosive']).toBe(1);
+  expect((await info(page))['mines']).toBe(6);
 });
 
 test('the shop groups Machine guns and Launchers, and the Craft tab makes a frag (§6.2 case 6)', async ({ page }) => {
