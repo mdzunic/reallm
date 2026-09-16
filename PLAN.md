@@ -124,6 +124,31 @@ Specs: SPEC-021 (§4.3, §5.2, §5.3, §5.7, acceptance). (§5)
 
 ---
 
+**R14 — 2026-09-16 (polish pass: the first screen, the frame, the wallet, the pictures, the launch, and a service override).** The second playtest of the built game was about presentation, not rules. Seven notes:
+
+- *The loading screen looks unfinished.* `Loading 5/5` in a small box over black, and a tap anywhere starts the game — so the button that asks for the tap is decoration and the counter tells the player nothing.
+- *The menus look displaced.* The station header is padded 120 px off the centre its panel keeps and washes out over the rotating ring; the tab rail floats beside an empty rectangle; the save panel, the build label and the debug scene tag sit in corners nothing owns; a grey button column on black reads as a web form, not as a game.
+- *Tokens are invisible where they are spent.* The shop prints `50 → 49` with no unit, and no station screen shows the balance at all.
+- *Nobody can picture what they buy.* Guns, armor, bots and packs are names and a blurb; mid-fight the quick bar shows four-letter abbreviations.
+- *The launch cuts.* The outside of the ship shows for a moment and the cabin arrives on the next frame.
+- *Every run is flown again.* A trip is 60–90 s and the only skip is compiled out of the shipped build.
+- *Reaching the late game costs hours.* A tester on a phone with a production URL has no shortcut at all.
+
+Missions, rewards, prices, the token totals (670 main / 104 side / 2,380 sink), the story, the films, the save format and every invariant are unchanged; so is the campaign simulation. Decisions:
+
+1. **The first screen (SPEC-031 §4.1–§4.3).** The boot overlay becomes a full-screen cold start: the wordmark, the line `EARTH COMMAND · SALVAGE DIVISION`, a determinate bar with a **percentage** instead of item counts, a slow-load line after 8 s, and — only at 100 % — one **START THE GAME** control. The gate takes that control, `Enter` or `Space` as a fresh press, and nothing else; E21's gesture, and everything it unlocks, is unchanged.
+2. **One frame for every screen (SPEC-031 §4.4–§4.10).** Menu, creation, station, star map and pause mount one `Screen`: a header (title, a diegetic channel line, a status slot), a rail attached to the body, a body and a footer, in one grid, inside `min(1100px, 100vw)`, over a scrim that keeps text off the backdrop. The station's 120 px padding hack goes; the save panel and the build label move into the frame; the `scene-label` hook stays in the DOM at `opacity: 0` and comes back with `?debug`. The look is a token swap over SPEC-020's theme — corner cuts, a header rule, uppercase tracked labels, tabular numerals, console keys — and no webfont, no renamed hook and no behaviour change: the existing suites pass unmodified. Channel lines stay inside the surface fiction; the twist remains the two ending films' (§12).
+3. **The wallet (SPEC-031 §4.11–§4.12).** One strip — tokens and the four resources against the cargo cap — fills the header status slot of the station, the star map and the character panel, and updates off the economy's events. Every price carries its unit (`40 → 34 tokens`), every refusal carries the number (`Need 40 more tokens`), craft rows print cost against held, confirm sheets print the balance after, and the depart sheet names the tank beside the fuel.
+4. **Pictures of everything (SPEC-031 §4.13–§4.17).** `scripts/assets/blender/items.py` renders all 21 items and 5 companions at 384² on transparent, in the shared style — `public/assets/items/<id>.webp` plus a manifest — and a pure resolver with a glyph fallback puts them on the quick bar, the picker, shop rows, the character panel and a new **gear card** that shows the picture, the stat block, the comparison with what is worn and the Buy button. `items/` gets a 1.0 MB budget inside the unchanged 25 MB precache (≈ 20.8 MB used). The renders are not in the boot manifest and never block a screen; without them the game reads exactly as it does today.
+5. **The launch shot (SPEC-032 §4.1–§4.2).** The flight scene opens behind the tug — the `ship.glb` the player upgrades — holds 1.1 s, pushes into the cockpit over 1.5 s and settles over 0.4 s, all inside the existing 3 s launch phase, so no rule, timer or budget moves. A fresh key that is not `Space`, or a tap, ends it at once; reduce motion holds the exterior and cross-fades instead of moving. It plays on every trip: after the departure film's jump it reads as the next shot, not a repeat.
+6. **Skippable runs (SPEC-032 §4.3–§4.5).** A run to a planet already **landed on** (`visits ≥ 1`) may be skipped from the depart sheet or the flight pause menu. The skip is the dev fast-forward promoted to the shipped build: the same `update` steps, the same fuel charge, the same arrival, the same save write — nothing is granted that a flown trip would not have granted. A planet carrying an active flight-scene mission (`c4_s2`, `c5_m1`) refuses the skip by name, so nothing completes by itself (R10-2).
+7. **Service mode (SPEC-032 §4.6–§4.9).** Typing `asdf` on the main menu — or a 3 s press on the build label, for a phone — toggles an **Earth Command service override**: every planet reachable, the hold and the wallet topped up at the station (`SERVICE_TOKENS = 5,000`), and any run skippable, with a `SERVICE` badge visible in every scene and an off switch that appears in Settings only while it is on. It is a settings flag, not a save field, so there is no migration and no v3; it grants nothing else — no mission, no flag, no XP, no ending — and it never hints at the simulation. The campaign simulation asserts it is off.
+8. **Milestone M7d** (polish) sits between M7c and M7 and ends with tag `m7d`. Its two specs build after the film specs and before SPEC-015, which measures the budgets with the new frame and the item renders.
+
+Specs: SPEC-031 (the presentation pass — boot, the shell, the wallet, item pictures) and SPEC-032 (travel and service mode — the launch shot, skippable runs, the override); notes in SPEC-002 §4.5, SPEC-013 §4.1, SPEC-014 §4.3 and §4.10, SPEC-020 §4.5 and SPEC-028 §4.5 point to them; SPEC-000 (queue and build order). (§2, §4, §8, §9, §10, §13)
+
+---
+
 ## 1. Vision & Inspiration
 
 **ReaLLM** ("real" + "LLM"): a space post-apocalyptic ARPG whose hero slowly works out that he may be a language model running inside a machine.
@@ -156,7 +181,7 @@ Core resources: **oil** (ship fuel), **wheat** (food / HP regen consumables), **
 | Save | **localStorage** (versioned schema) | — | Fully offline; save size is < 100 KB |
 | Tests | **Vitest** + **Playwright** | `vitest ^5.0.0` (released 2026-09-03; fall back to `^4.1.11` only if a blocking bug appears), `@playwright/test` latest | Unit-test pure game logic; a headless Chromium e2e suite (smoke + the factory's per-spec QA tests) |
 | Offline shell | `vite-plugin-pwa` (**M7, build-time only**) | `^1.3.0` | Service worker + manifest = real offline + installable = exempt from Safari 7-day storage eviction |
-| Assets | **Procedural at runtime** (terrain, sky, effects, UI, **enemies**) + **generated in Blender from committed scripts** (`scripts/assets/blender/`: the rigged salvager, ships, station pieces, props, ground layers, VFX sprites, portraits — R7; baked hull maps, flight skies, planets and asteroids — R8; story films as H.264 MP4 with WebP posters — R9) + **synthesised audio** (`scripts/assets/audio/`) + **photographic plates** (`scripts/assets/blender/plates/`, generated with Google Gemini and rendered into six film shots and the Selection cards — R11, R12) | Blender 5.2 LTS (tool only, for rebuilding art) | No artist and no downloads except the committed plates, which are listed in `LICENSES.md` by hand; every other file is original CC0, generated or synthesised, with a `LICENSES.md` row; a CC0 pack may replace any file under the same name |
+| Assets | **Procedural at runtime** (terrain, sky, effects, UI, **enemies**) + **generated in Blender from committed scripts** (`scripts/assets/blender/`: the rigged salvager, ships, station pieces, props, ground layers, VFX sprites, portraits — R7; baked hull maps, flight skies, planets and asteroids — R8; story films as H.264 MP4 with WebP posters — R9; item and companion icons — R14) + **synthesised audio** (`scripts/assets/audio/`) + **photographic plates** (`scripts/assets/blender/plates/`, generated with Google Gemini and rendered into six film shots and the Selection cards — R11, R12) | Blender 5.2 LTS (tool only, for rebuilding art) | No artist and no downloads except the committed plates, which are listed in `LICENSES.md` by hand; every other file is original CC0, generated or synthesised, with a `LICENSES.md` row; a CC0 pack may replace any file under the same name |
 
 Nothing else — no React, no physics engine (arcade physics is enough), no backend, no schema library (hand-written validators).
 
@@ -249,6 +274,13 @@ Per-planet cycles (sandstorm / heatwave / blizzard / avalanche / spore storm / r
 - **Map**: a round minimap (≈ 24 vmin) and a full-screen map (`M` or a tap), both in camera orientation — up the screen is north — with one shape and colour per kind of point and a legend. Explored ground is remembered per planet and drawn in terrain colours, the rest dark. The full map holds the game and lists the active missions.
 - **Guidance**: an objective tracker (every objective of the tracked stage, its progress and distance), a waypoint marker and edge arrow, a light pillar on target POIs, scan progress, first-time tips, and hints that escalate when the player makes no progress (45 s, 90 s, 150 s). Setting: full / minimal / off.
 - **Shelters and the wall**: caves and wrecks with an entrance. Inside, the weather does nothing, and enemies outside lose a player who hides and holds fire (bosses and waves excepted). The arena edge is a wall of rock and wrecked hulls where the player stops.
+
+### Screens, wallet and service mode (R14)
+
+- **One frame.** Every DOM screen — menu, creation, station, star map, pause — is one console frame: a header with a title, a diegetic channel line and a status slot, a tab rail attached to its body, a body and a footer, over a scrim that keeps text off the 3D backdrop. Uppercase tracked labels, tabular numerals and console keys; no webfont.
+- **Wallet.** The header's status slot carries tokens and the four resources against the cargo cap wherever something is spent, and every price, refusal and confirm sheet names its unit, its shortfall and the balance after.
+- **Pictures.** Items and companions are rendered in Blender to `assets/items/<id>.webp` and shown on the quick bar, in shop rows, in the character panel and on a gear card that carries the stat block, the comparison with what is worn and the Buy button. A missing render falls back to a glyph.
+- **Service mode.** `asdf` on the main menu (or a 3 s press on the build label) toggles an Earth Command service override: every planet reachable, the hold and wallet topped up at the station, any run skippable, and a `SERVICE` badge in every scene. It is a device setting, grants nothing else, and never hints at the simulation.
 
 ### Narrative layer
 
@@ -452,7 +484,7 @@ interface SaveV2 {   // version 1 until R10; v1 saves migrate (SPEC-025)
               explored: Partial<Record<PlanetId, string>> };   // R10: 4 m cells, base64url bitset per planet
 }
 // Settings are global (not per slot): { master, music, sfx, quality, reduceMotion, autoFire, joystickSide, flightMouseSteer, showFps, fullscreen, benchmark, lastSlot, persistGranted, installHintShownAt,
-//                                       guidance, tipsSeen, weaponAutoSwap }   // the last three since R10
+//                                       guidance, tipsSeen, weaponAutoSwap, serviceMode }   // the first three since R10, serviceMode since R14
 ```
 
 Storage rules: 3 slots, key per slot plus a `.bak` copy of the previous good save; autosave at safe points only (station, landing, stage/mission completion, settings change, page hide); hand-written validator on load; export/import as a text code; `navigator.storage.persist()` requested on first save; Safari deletes script-writable storage after 7 days without use unless installed to the Home Screen (→ PWA in M7 + export prompt).
@@ -466,7 +498,7 @@ Storage rules: 3 slots, key per slot plus a `.bak` copy of the previous good sav
 - **Quality presets** (auto-detect by a 2-second boot benchmark, overridable): clamp `devicePixelRatio` (1 / 1.5 / 2), particles, draw distance, capped enemy count, and the render plan (R6): post-processing off / ¼-res bloom + FXAA / ½-res bloom + MSAA, shadow map on `high` only, image-based lighting on `medium` and `high`; target 60 fps desktop / 30+ fps mid-tier mobile.
 - Screen wake lock during gameplay; pause + audio suspend when the tab is hidden; WebGL context-loss recovery overlay.
 - Story films (R9) are a DOM `<video>` over a black layer, fetched whole into a Blob so the service worker never answers a Range request; the scene underneath is held, so a film costs a video decode, not draw calls; reduce motion plays a film as its posters.
-- HUD/menu built as HTML/CSS overlay → naturally adapts to small screens; touch targets ≥ 44 px.
+- HUD/menu built as HTML/CSS overlay → naturally adapts to small screens; touch targets ≥ 44 px. Since R14 every DOM screen is one frame that fills the safe area, scrolls only in its body, and turns its tab rail into a bottom bar below 700 px; portrait is a supported reading layout for menus.
 - M7: PWA manifest + service worker (precache the whole build) → installable, truly offline, save exempt from Safari eviction.
 
 ---
@@ -485,6 +517,7 @@ Storage rules: 3 slots, key per slot plus a `.bak` copy of the previous good sav
 | M7a | Art pass (R6): render pipeline (ACES, post chain, IBL, shadows), surface environment (height-field terrain, splat ground shader, procedural textures, scatter, props, weather sprites), animated character, sculpted enemies, combat VFX, flight sky and ships, hub backdrops, UI theme (SPEC-017…SPEC-020) | Cinder-4 and every other planet read as a modern stylised-PBR game on desktop and on the reference phone; medium stays ≤ 80 scene + 16 post draws on the surface; screenshots per scene and preset in the playtest log; tag `m7a` |
 | M7b | Story films (R9): the prologue, the departure, five chapter interludes and two ending films rendered in Blender with synthesised sound; the film player with poster and text fallbacks; chapter cards and boss reveals; the ending sequence wired end to end (SPEC-021…SPEC-024) | New game opens on the prologue; the first flight to each planet shows the departure and its chapter card; each boss reveals itself once per session; each chapter's interlude plays on the first return to the station; both endings run dialogue → film → overlay; every film skips, falls back to posters and text, and fits the 12 MB films budget; checked on desktop and the reference phone; tag `m7b` |
 | M7c | Playability pass (R10): camera-aligned minimap with a legend and remembered ground, and a full-screen map; objective tracker, waypoints and escalating hints; three weapon slots and three quick slots on a quick bar; machine guns, launchers and explosives with heat and charge cooldowns; caves, wrecks and an arena wall; save v2 (SPEC-025…SPEC-030) | On Cinder-4: every kind of point is recognisable on the map, and the map turns with the camera; walked ground stays lit after a reload; a new player finishes `c1_m1`–`c1_m3` by following the tracker and the marker; medkit and grenade counts are visible mid-fight; a rocket, the chaingun and the pistol get used together; a heatwave is waited out in a cave; the arena edge is a wall; budgets unchanged; checked on desktop and the reference phone; tag `m7c` |
+| M7d | Polish pass (R14): a loading bar and a start gate; one console frame for menu, creation, station, star map and pause; the wallet strip and priced units; rendered item and companion icons with a gear card; the third-person launch shot and skippable runs; service mode (SPEC-031, SPEC-032) | The first screen reads as a game and starts only on its button; no screen puts a control outside the viewport at 320 px, 800 px or 1920 px, and the header and body share a centre; the token balance is on screen wherever it is spent, and a refusal names the shortfall; the quick bar and the shop show pictures, and the gear card answers "what am I buying?"; the launch holds the tug and moves into the cockpit without a cut; a run already flown can be skipped and lands exactly where a flown run lands; `asdf` on the menu unlocks every world and fills the hold, with a badge that cannot be missed; budgets unchanged; checked on desktop and the reference phone; tag `m7d` |
 | M7 | Polish: mobile tuning, quality presets, balancing pass, PWA/offline, storage persistence, reduce-motion, save migration harness | 30+ fps on mid-tier phone; installable; full manual checklist green |
 
 ---
@@ -547,7 +580,7 @@ Each entry names the owning spec. "Casual" = casual difficulty.
 | E18 | Player accepts several missions on one planet | All accepted missions for the planet are active in parallel; HUD tracks one pinned mission; counters are per mission | SPEC-012 |
 | E19 | Reload mid-mission | Active missions persist with stage + counters; timed objectives restart from 0 | SPEC-007, SPEC-012 |
 | E20 | Level-up during combat | Tokens/HP apply immediately; toast only (no modal) | SPEC-010 |
-| E21 | Audio blocked until user gesture (iOS) | Boot shows "Tap to start"; the tap unlocks audio, requests wake lock, and (Android) fullscreen | SPEC-006 |
+| E21 | Audio blocked until user gesture (iOS) | Boot shows a loading bar and, at 100 %, one START THE GAME control; pressing it (or Enter/Space) unlocks audio, requests wake lock, and (Android) fullscreen | SPEC-006, SPEC-031 |
 | E22 | Portrait phone | Rotate prompt in gameplay scenes; menus stay usable | SPEC-015 |
 | E23 | 120 Hz displays / very slow frames | Fixed 60 Hz update, max 5 steps per frame, frame delta clamped to 250 ms | SPEC-002 |
 | E24 | Both endings in one save | Impossible by design; `campaign_done` locks `c6_m2`; free roam continues | SPEC-009, SPEC-012, SPEC-024 |
@@ -572,6 +605,14 @@ Each entry names the owning spec. "Casual" = casual difficulty.
 | E43 | Player hides in a shelter through a survive stage or a wave | Allowed: timers run; wave and boss enemies ignore hiding; firing reveals the player for 1.5 s | SPEC-030 |
 | E44 | A shelter would block a corridor or enclose a POI or node | Shelters keep out of every pad → POI corridor and away from POIs and nodes; their walls are never removed by repair, and every interior is validated reachable | SPEC-030 |
 | E45 | Shots, enemies or the player at the arena edge | All stop at the wall's line (`halfSize − 2`); a rocket that reaches it explodes there | SPEC-030 |
+| E46 | The player reaches for Start before the assets are in, or the load fails | The control exists only at 100 %; a failure shows the error and Retry in its place, and no gesture anywhere else starts the game | SPEC-031 |
+| E47 | A screen at 320 px, at 3840 px, or in portrait | One frame, one scroll axis (its body), every control inside the safe area; the frame stops growing at its max width and centres | SPEC-031 |
+| E48 | A price the player cannot afford | The disabled button names the exact shortfall, in tokens and in each short resource | SPEC-031 |
+| E49 | An item picture is missing or will not decode | The glyph and the short name draw in the same box; no layout shift, and the swap happens once | SPEC-031 |
+| E50 | The launch shot skipped, or the trip ended during it | The tug is dropped and the camera is in the cockpit at once; the simulation never knew about the shot | SPEC-032 |
+| E51 | A run skipped while a flight-scene mission is active | Refused by name; in service mode it is allowed and those objectives do not advance | SPEC-032 |
+| E52 | Service mode toggled with no save bound, or turned off later | Only the badge and the setting change; granted supplies stay, and every lock applies again at once | SPEC-032 |
+| E53 | The service code typed into a text field, or on a device with no keyboard | Ignored while a field has focus; a 3 s press on the build label is the touch route | SPEC-032 |
 
 ---
 
