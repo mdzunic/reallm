@@ -2596,8 +2596,18 @@ html.debug .scene-tag {
   right: 10px;
   width: min(320px, calc(100% - 20px));
   max-height: calc(100% - 20px);
-  overflow-y: auto;
+  overflow: hidden;
   padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+/* AC-24: only the reading matter scrolls — the depart line below it stays in
+   view, so Depart and Back never sit past the fold of a short phone panel. */
+.starmap-info-scroll {
+  overflow-y: auto;
+  min-height: 0;
   display: flex;
   flex-direction: column;
   gap: 6px;

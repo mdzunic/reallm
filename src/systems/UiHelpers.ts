@@ -153,7 +153,8 @@ export interface WalletModel {
 function walletCap(save: Save): number {
   let bonus = 0;
   for (const companion of save.companions) {
-    if (!companion.enabled) continue;
+    // Owned is enough: `Economy.cargoCap()` counts the quartermaster by level
+    // alone, so a disabled one still raises the cap the engine clamps by.
     const effect = COMPANIONS[companion.id].levels[companion.level - 1] as CompanionEffect | undefined;
     bonus += effect?.cargoBonus ?? 0;
   }

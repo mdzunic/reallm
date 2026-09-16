@@ -1,7 +1,7 @@
 // SPEC-031 §6.2 — the console shell, the wallet and the item pictures, in
 // four groups: the frame at every mandated size, the wallet's live numbers,
 // the pictures on every surface, and the glyph fallback with no files at all.
-import { expect, test, type Page } from '@playwright/test';
+import { devices, expect, test, type Locator, type Page } from '@playwright/test';
 import { gameUrl, passGate, start } from './start';
 
 const CREATION = {
@@ -12,14 +12,14 @@ const CREATION = {
   difficulty: 'normal',
 } as const;
 
-async function go(page: Page, id: string, params: unknown = {}): Promise<boolean> {
+async function go(page: Page, id: string, params: unknown = {}, force = false): Promise<boolean> {
   return page.evaluate(
-    async ({ id, params }) => {
-      const ok = await window.__reallm.go(id, params);
+    async ({ id, params, force }) => {
+      const ok = await window.__reallm.go(id, params, force ? { force: true } : undefined);
       await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
       return ok;
     },
-    { id, params },
+    { id, params, force },
   );
 }
 
@@ -39,7 +39,8 @@ async function withSave(page: Page): Promise<void> {
 async function checkFrame(page: Page, width: number, height: number, touch = false): Promise<void> {
   const measured = await page.evaluate(() => {
     const doc = document.documentElement;
-    const screens = document.querySelectorAll('[data-testid="screen"]:not(.overlay-pause)');
+    // A paused surface counts too: its overlay is the one visible frame there.
+    const screens = document.querySelectorAll('[data-testid="screen"]');
     const visible = [...screens].filter((node) => getComputedStyle(node).display !== 'none');
     const frame = visible[0]?.querySelector('.screen-frame');
     const head = frame?.querySelector('.screen-head');
@@ -90,6 +91,62 @@ async function checkFrame(page: Page, width: number, height: number, touch = fal
   for (const tab of measured.tabs) expect(tab, 'tab height').toBeGreaterThanOrEqual(touch ? 56 : 44);
 }
 
+/** AC-24's must-check: the whole Depart box actually receives the pointer. */
+async function checkDepartOperable(page: Page): Promise<void> {
+  const depart = await page.locator('[data-testid="starmap-depart"]').boundingBox();
+  if (!depart) throw new Error('no depart box');
+  const hits = await page.evaluate(
+    ({ x, y, w, h }) => {
+      const probes: string[] = [];
+      for (const fx of [0.1, 0.5, 0.9]) {
+        for (const fy of [0.2, 0.5, 0.8]) {
+          const el = document.elementFromPoint(x + w * fx, y + h * fy);
+          probes.push((el?.closest('[data-testid]') as HTMLElement | null)?.dataset['testid'] ?? 'none');
+        }
+      }
+      return probes;
+    },
+    { x: depart.x, y: depart.y, w: depart.width, h: depart.height },
+  );
+  for (const hit of hits) expect(hit, 'Depart is operable across its box').toBe('starmap-depart');
+}
+
+/**
+ * §6.2 group 1: menu, creation, station (each tab), the star map and a paused
+ * surface, each holding the frame's invariants. Under the touch profile every
+ * press is a real touch, so the input scheme stays `touch` for the 56 px tab
+ * floor (a mouse click or a key press would claim the scheme back).
+ */
+async function walkFrames(page: Page, width: number, height: number, touch = false): Promise<void> {
+  const press = (target: Locator): Promise<void> => (touch ? target.tap() : target.click());
+  await checkFrame(page, width, height, touch); // menu
+
+  expect(await go(page, 'creation', { slot: 1 })).toBe(true);
+  await checkFrame(page, width, height, touch);
+
+  await withSave(page);
+  expect(await go(page, 'station', {})).toBe(true);
+  await checkFrame(page, width, height, touch);
+  // The station header keeps its channel and containment line (AC-14).
+  await expect(page.locator('.screen-channel')).toContainText('COMMAND RELAY · CONTAINMENT LEVEL 1');
+  await expect(page.locator('[data-testid="containment-level"]')).toHaveText('Containment level 1');
+  for (const tab of ['shop', 'character', 'missions']) {
+    await press(page.locator(`[data-testid="station-tab-${tab}"]`));
+    await checkFrame(page, width, height, touch);
+  }
+
+  expect(await go(page, 'starmap', undefined)).toBe(true);
+  await checkFrame(page, width, height, touch);
+  await checkDepartOperable(page);
+
+  // A paused surface wears the frame too. (Escape hands the input scheme back
+  // to the keyboard, which is fine: the pause frame has no tab rail.)
+  expect(await go(page, 'surface', { planet: 'cinder4' }, true)).toBe(true);
+  await page.keyboard.press('Escape');
+  await expect(page.locator('[data-testid="pause-menu"]')).toBeVisible();
+  await checkFrame(page, width, height, touch);
+}
+
 const SIZES: readonly [number, number][] = [
   [1920, 1080],
   [800, 600],
@@ -97,43 +154,27 @@ const SIZES: readonly [number, number][] = [
 ];
 
 for (const [width, height] of SIZES) {
-  test(`frame: every screen holds its grid at ${width}×${height} (AC-12, AC-13, AC-24)`, async ({ page }) => {
+  test(`frame: every screen holds its grid at ${width}×${height} (AC-12, AC-13, AC-15, AC-24)`, async ({ page }) => {
     await page.setViewportSize({ width, height });
     await start(page);
-    await withSave(page);
-    await checkFrame(page, width, height); // menu
-
-    expect(await go(page, 'station', {})).toBe(true);
-    await checkFrame(page, width, height);
-    // The station header keeps its channel and containment line (AC-14).
-    await expect(page.locator('.screen-channel')).toContainText('COMMAND RELAY · CONTAINMENT LEVEL 1');
-    await expect(page.locator('[data-testid="containment-level"]')).toHaveText('Containment level 1');
-    for (const tab of ['shop', 'character', 'missions']) {
-      await page.locator(`[data-testid="station-tab-${tab}"]`).click();
-      await checkFrame(page, width, height);
-    }
-
-    expect(await go(page, 'starmap', undefined)).toBe(true);
-    await checkFrame(page, width, height);
-    // AC-24's must-check: the whole Depart box actually receives the pointer.
-    const depart = await page.locator('[data-testid="starmap-depart"]').boundingBox();
-    if (!depart) throw new Error('no depart box');
-    const hits = await page.evaluate(
-      ({ x, y, w, h }) => {
-        const probes: string[] = [];
-        for (const fx of [0.1, 0.5, 0.9]) {
-          for (const fy of [0.2, 0.5, 0.8]) {
-            const el = document.elementFromPoint(x + w * fx, y + h * fy);
-            probes.push((el?.closest('[data-testid]') as HTMLElement | null)?.dataset['testid'] ?? 'none');
-          }
-        }
-        return probes;
-      },
-      { x: depart.x, y: depart.y, w: depart.width, h: depart.height },
-    );
-    for (const hit of hits) expect(hit, 'Depart is operable across its box').toBe('starmap-depart');
+    await walkFrames(page, width, height);
   });
 }
+
+test.describe('frame on a phone profile in portrait', () => {
+  test.use({ ...devices['Pixel 5'] });
+
+  test('frame: every screen holds its grid, tabs at the 56 px touch floor (AC-13, AC-15, AC-24)', async ({ page }) => {
+    await start(page);
+    // A real touch press on the (inert) wordmark flips the input scheme.
+    const title = await page.locator('.screen-title').boundingBox();
+    if (!title) throw new Error('no title box');
+    await page.touchscreen.tap(title.x + title.width / 2, title.y + title.height / 2);
+    const viewport = page.viewportSize();
+    if (!viewport) throw new Error('no viewport');
+    await walkFrames(page, viewport.width, viewport.height, true);
+  });
+});
 
 test('frame: the menu, creation and a paused surface mount one screen each (AC-12, AC-16, AC-17, AC-18)', async ({
   page,

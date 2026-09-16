@@ -44,10 +44,18 @@ const ENGINE: ShipSystemDef = UPGRADES.engine;
  * is chapter order, so the map reads outward as the campaign does. SPEC-020
  * §4.4 draws a ring on each of them, which is only legible if the six are not
  * the one circle they used to share. The outermost stays well inside the
- * overhead camera's 4.62-unit half-height, so every DOM hit area still lands
- * in the viewport (SPEC-014 AC-52).
+ * reach `#frameCamera` frames — the camera pulls back until the widest orbit
+ * projects inside the viewport, so every DOM hit area still lands on screen
+ * at any aspect (SPEC-014 AC-52, SPEC-031 AC-24).
  */
 const ORBIT_RADII: readonly number[] = [2.0, 2.4, 2.8, 3.2, 3.6, 4.0];
+
+/**
+ * How much viewport a projected node needs around its centre, in px: half the
+ * 56 px hit box plus the name label riding under it, which can be wider than
+ * the box itself. `#frameCamera` keeps every orbit this far off both edges.
+ */
+const NODE_MARGIN_PX = 48;
 
 /** SPEC-017 §4.1 (*initial tuning*): the map's nodes are meant to glow. */
 const STARMAP_LOOK: Partial<Look> = { bloomStrength: 0.6, bloomThreshold: 0.6, vignette: 0.4 };
@@ -104,8 +112,7 @@ export class StarmapScene extends UiScene<'starmap'> {
    * ring of the orbit they sit on; locked ones stay dim.
    */
   #buildMap(): void {
-    this.camera.position.set(0, 8, 0.001);
-    this.camera.lookAt(0, 0, 0);
+    this.#frameCamera();
     const group = this.#backdrop;
     addHubLights(group);
     this.scene.add(group);
@@ -177,6 +184,37 @@ export class StarmapScene extends UiScene<'starmap'> {
     loadHubSky(this.services.assets, () => alive, (sky) => group.add(hubSkyMesh(sky)));
   }
 
+  /**
+   * AC-24: the overhead camera, pulled back far enough that every node — the
+   * outermost orbit plus `NODE_MARGIN_PX` of hit box and label — projects
+   * inside the viewport. At desktop aspects that is the classic y = 8; at a
+   * phone's narrow aspect the half-width (height · tan(fov/2) · aspect) is
+   * what binds, and a fixed height left two planets wholly off the left edge
+   * at 320 × 640. Runs on enter and on every resize, before any projection.
+   */
+  #frameCamera(): void {
+    const { width, height } = this.services.renderer;
+    const aspect = width / Math.max(1, height);
+    if (this.camera.aspect !== aspect) {
+      this.camera.aspect = aspect;
+      this.camera.updateProjectionMatrix();
+    }
+    const reach = ORBIT_RADII[ORBIT_RADII.length - 1] as number;
+    const tanHalf = Math.tan((this.camera.fov * Math.PI) / 360);
+    // Solve (reach / halfWidth) · (width / 2) ≤ width / 2 − margin for the
+    // world half-extent each axis must see, then take the taller camera.
+    const halfW = (reach * width) / Math.max(1, width - 2 * NODE_MARGIN_PX);
+    const halfH = (reach * height) / Math.max(1, height - 2 * NODE_MARGIN_PX);
+    const y = Math.max(8, halfW / (tanHalf * aspect), halfH / tanHalf);
+    this.camera.position.set(0, y, 0.001);
+    this.camera.lookAt(0, 0, 0);
+    // On enter this runs before the first render, and `lookAt()` refreshes
+    // `matrixWorldInverse` *before* it writes the new quaternion — so without
+    // this the projection still uses the orientation `base.enter()` left
+    // behind and every button lands off-screen.
+    this.camera.updateMatrixWorld(true);
+  }
+
   #worldOf(index: number): THREE.Vector3 {
     const angle = (index / PLANET_IDS.length) * Math.PI * 2 - Math.PI / 2;
     const radius = ORBIT_RADII[index] as number;
@@ -237,15 +275,7 @@ export class StarmapScene extends UiScene<'starmap'> {
     const box = this.#nodesBox;
     if (box === null) return;
     const { width, height } = this.services.renderer;
-    if (this.camera.aspect !== width / height) {
-      this.camera.aspect = width / height;
-      this.camera.updateProjectionMatrix();
-    }
-    // On enter this runs before the first render, and `lookAt()` refreshes
-    // `matrixWorldInverse` *before* it writes the new quaternion — so without
-    // this the projection still uses the orientation `base.enter()` left
-    // behind and every button lands off-screen.
-    this.camera.updateMatrixWorld(true);
+    this.#frameCamera();
     // SPEC-031: the nodes box lives inside the frame's body now, so the
     // viewport-space projection is shifted into its coordinate space.
     const origin = box.getBoundingClientRect();
@@ -307,8 +337,12 @@ export class StarmapScene extends UiScene<'starmap'> {
     const economy = this.#economy;
     if (data === null || economy === null) {
       info.replaceChildren(
-        testId(h('p', { class: 'starmap-name' }, planet.name), 'starmap-info-name'),
-        h('p', { class: 'settings-note' }, 'No save loaded.'),
+        h(
+          'div',
+          { class: 'starmap-info-scroll' },
+          testId(h('p', { class: 'starmap-name' }, planet.name), 'starmap-info-name'),
+          h('p', { class: 'settings-note' }, 'No save loaded.'),
+        ),
         h('div', { class: 'starmap-depart-line' }, this.#backButton()),
       );
       return;
@@ -348,20 +382,27 @@ export class StarmapScene extends UiScene<'starmap'> {
       'starmap-depart',
     );
     info.replaceChildren(
-      testId(h('p', { class: 'starmap-name' }, planet.name), 'starmap-info-name'),
-      h('p', { class: 'settings-note' }, `${planet.biome} · Chapter ${planet.chapter}`),
-      h('p', { class: 'starmap-line' }, `Resources: ${resources}`),
-      h('p', { class: 'starmap-line' }, `Threats: ${threats}`),
-      testId(h('p', { class: `starmap-line${oil < fuel ? ' is-short' : ''}` }, `Fuel: ${fuel} oil (have ${oil})`), 'starmap-fuel'),
-      h('p', { class: 'starmap-line' }, `Travel: ${travel}`),
-      h('ul', { class: 'starmap-reqs' }, ...requirements),
-      missions.length > 0
-        ? h(
-            'ul',
-            { class: 'starmap-missions' },
-            ...missions.map((entry) => h('li', {}, `${entry.status === 'active' ? '▶' : '○'} ${MISSIONS[entry.id].title}`)),
-          )
-        : h('p', { class: 'settings-note' }, 'No missions here right now.'),
+      // AC-24: the panel's reading matter scrolls on its own; the depart line
+      // stays in view below it, so Depart and Back can never sit past the fold
+      // of a short phone panel.
+      h(
+        'div',
+        { class: 'starmap-info-scroll' },
+        testId(h('p', { class: 'starmap-name' }, planet.name), 'starmap-info-name'),
+        h('p', { class: 'settings-note' }, `${planet.biome} · Chapter ${planet.chapter}`),
+        h('p', { class: 'starmap-line' }, `Resources: ${resources}`),
+        h('p', { class: 'starmap-line' }, `Threats: ${threats}`),
+        testId(h('p', { class: `starmap-line${oil < fuel ? ' is-short' : ''}` }, `Fuel: ${fuel} oil (have ${oil})`), 'starmap-fuel'),
+        h('p', { class: 'starmap-line' }, `Travel: ${travel}`),
+        h('ul', { class: 'starmap-reqs' }, ...requirements),
+        missions.length > 0
+          ? h(
+              'ul',
+              { class: 'starmap-missions' },
+              ...missions.map((entry) => h('li', {}, `${entry.status === 'active' ? '▶' : '○'} ${MISSIONS[entry.id].title}`)),
+            )
+          : h('p', { class: 'settings-note' }, 'No missions here right now.'),
+      ),
       h(
         'div',
         { class: 'starmap-depart-line' },

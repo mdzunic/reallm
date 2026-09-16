@@ -167,6 +167,18 @@ describe('walletModel (SPEC-031 §4.11)', () => {
     const bonus = COMPANIONS.quartermaster.levels[0]?.cargoBonus ?? 0;
     expect(walletModel(data).resources[0]?.cap).toBe((UPGRADES.cargo.metrics['cargoCap']?.[2] ?? 0) + bonus);
   });
+
+  it('counts a disabled quartermaster, exactly as Economy.cargoCap does', () => {
+    // `Economy.cargoCap()` resolves the quartermaster by owned level alone and
+    // never reads `enabled` — the strip must clamp by the same number, or a
+    // shop-disabled quartermaster shows a false CARGO FULL at the old cap.
+    const data = save((s) => {
+      s.companions.push({ id: 'quartermaster', level: 1, enabled: false });
+    });
+    const bonus = COMPANIONS.quartermaster.levels[0]?.cargoBonus ?? 0;
+    const base = UPGRADES.cargo.metrics['cargoCap']?.[data.ship.cargo] ?? 0;
+    expect(walletModel(data).resources[0]?.cap).toBe(base + bonus);
+  });
 });
 
 describe('shortfallText (SPEC-031 §4.12, E48)', () => {

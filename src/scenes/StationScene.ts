@@ -296,7 +296,10 @@ export class StationScene extends UiScene<'station'> {
       screen.setStatus(wallet.root);
     }
 
-    this.#panelBox = el('div', 'station-panel panel');
+    // `station-root` stays as a testid: SPEC-024's e2e waits on it to know the
+    // station is up. The old grid element is gone; the marker rides the panel
+    // box, which every tab renders into.
+    this.#panelBox = testId(el('div', 'station-panel panel'), 'station-root');
     screen.body.append(this.#panelBox);
     this.ui.mount(screen.root, 'panel');
     this.disposer.add(() => {
