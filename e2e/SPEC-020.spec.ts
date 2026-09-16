@@ -135,8 +135,9 @@ test('the panels and buttons wear the new tokens (AC-23)', async ({ page }) => {
       glass,
       panelShadow: panelStyle ? panelStyle.boxShadow : null,
       buttonText: buttonStyle ? buttonStyle.color : null,
-      buttonBorder: buttonStyle ? buttonStyle.borderTopColor : null,
+      buttonBorder: buttonStyle ? buttonStyle.borderTopColor.replace(/\s+/g, '') : null,
       accentRgb: hex(accent),
+      frameEdgeRgb: root.getPropertyValue('--frame-edge').trim().replace(/\s+/g, ''),
       edgeGlowRgb: root.getPropertyValue('--edge-glow').trim(),
       buttonMinHeight: buttonStyle ? buttonStyle.minHeight : null,
     };
@@ -145,8 +146,9 @@ test('the panels and buttons wear the new tokens (AC-23)', async ({ page }) => {
   expect(styled.panelBackground).toBe(styled.glass);
   // and it carries the edge glow the theme promised
   expect(styled.panelShadow).toContain(styled.edgeGlowRgb);
-  // the buttons are accent-tinted, and no smaller than they were
-  expect(styled.buttonBorder).toBe(styled.accentRgb);
+  // SPEC-031 AC-22: the button is a console key — a --frame-edge hairline,
+  // with the accent moved to the active underline — and no smaller.
+  expect(styled.buttonBorder).toBe(styled.frameEdgeRgb);
   expect(styled.buttonMinHeight).toBe('44px');
 
   // On `low` the same panel keeps the theme but drops the blur for the opaque
