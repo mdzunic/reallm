@@ -84,7 +84,8 @@ export function createScreen(options: ScreenOptions): Screen {
   rail.setAttribute('aria-label', 'Sections');
   const body = el('div', 'screen-body');
   const hint = el('span', 'screen-hint');
-  const footer = el('footer', 'screen-foot');
+  const footer = el('div', 'screen-foot');
+  footer.setAttribute('role', 'contentinfo');
   footer.append(hint);
 
   frame.append(head, rail, body, footer);

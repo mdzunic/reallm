@@ -32,7 +32,9 @@ import type { Look } from '@/core/Quality';
 import { NEUTRAL_SKY } from '@/views/Environment';
 import { addHubLights, hubSkyMesh, loadHubSky } from '@/views/HubBackdrop';
 import { particleSprite, planetDisc } from '@/views/ProceduralTextures';
-import { UiScene } from '@/scenes/base';
+import { UiScene, bindTouchScheme } from '@/scenes/base';
+import { createScreen } from '@/ui/Screen';
+import { Wallet } from '@/ui/Wallet';
 
 const MISSION_IDS = Object.keys(MISSIONS) as MissionId[];
 const ENGINE: ShipSystemDef = UPGRADES.engine;
@@ -189,17 +191,24 @@ export class StarmapScene extends UiScene<'starmap'> {
   // -------------------------------------------------------------------- DOM
 
   #mountUi(): void {
+    // SPEC-031 §4.4: the star map mounts a wide frame — no rail, the body
+    // see-through — and draws its own hit areas over the body.
+    const screen = createScreen({ id: 'starmap', wide: true });
+    bindTouchScheme(screen.root, this.services, this.disposer, this);
+    if (this.services.save.current !== null) {
+      const wallet = new Wallet({ save: this.services.save, events: this.services.events });
+      this.disposer.add(() => wallet.dispose());
+      screen.setStatus(wallet.root);
+    }
     this.#nodesBox = el('div', 'starmap-nodes');
     this.#info = el('div', 'starmap-info panel');
-    const back = testId(
-      h('button', { class: 'ui-btn starmap-back', type: 'button', click: () => this.#back() }, 'Back'),
-      'starmap-back',
-    );
     this.#root = testId(el('div', 'starmap-root'), 'starmap-root');
-    this.#root.append(this.#nodesBox, this.#info, back);
-    this.ui.mount(this.#root, 'panel');
+    this.#root.append(this.#nodesBox, this.#info);
+    screen.body.append(this.#root);
+    this.ui.mount(screen.root, 'panel');
     this.disposer.add(() => {
-      if (this.#root) this.ui.unmount(this.#root);
+      this.ui.unmount(screen.root);
+      screen.dispose();
       this.#root = null;
       this.#nodesBox = null;
       this.#info = null;
@@ -209,6 +218,15 @@ export class StarmapScene extends UiScene<'starmap'> {
     });
     this.#layoutNodes();
     this.#renderInfo();
+  }
+
+  /** SPEC-031 / AC-24: Back rides the info panel's action row — in flow, so it
+   *  can never overlap (and shadow) Depart on a narrow phone. */
+  #backButton(): HTMLButtonElement {
+    return testId(
+      h('button', { class: 'ui-btn starmap-back', type: 'button', click: () => this.#back() }, 'Back'),
+      'starmap-back',
+    );
   }
 
   /**
@@ -228,10 +246,13 @@ export class StarmapScene extends UiScene<'starmap'> {
     // this the projection still uses the orientation `base.enter()` left
     // behind and every button lands off-screen.
     this.camera.updateMatrixWorld(true);
+    // SPEC-031: the nodes box lives inside the frame's body now, so the
+    // viewport-space projection is shifted into its coordinate space.
+    const origin = box.getBoundingClientRect();
     const buttons = PLANET_IDS.map((planet, index) => {
       const projected = this.#worldOf(index).project(this.camera);
-      const x = (projected.x * 0.5 + 0.5) * width;
-      const y = (-projected.y * 0.5 + 0.5) * height;
+      const x = (projected.x * 0.5 + 0.5) * width - origin.left;
+      const y = (-projected.y * 0.5 + 0.5) * height - origin.top;
       const unlocked = this.#economy?.isUnlocked(planet) ?? false;
       return testId(
         h(
@@ -288,6 +309,7 @@ export class StarmapScene extends UiScene<'starmap'> {
       info.replaceChildren(
         testId(h('p', { class: 'starmap-name' }, planet.name), 'starmap-info-name'),
         h('p', { class: 'settings-note' }, 'No save loaded.'),
+        h('div', { class: 'starmap-depart-line' }, this.#backButton()),
       );
       return;
     }
@@ -340,7 +362,13 @@ export class StarmapScene extends UiScene<'starmap'> {
             ...missions.map((entry) => h('li', {}, `${entry.status === 'active' ? '▶' : '○'} ${MISSIONS[entry.id].title}`)),
           )
         : h('p', { class: 'settings-note' }, 'No missions here right now.'),
-      h('div', { class: 'starmap-depart-line' }, depart, reason === '' ? null : testId(h('span', { class: 'shop-reason' }, reason), 'depart-reason')),
+      h(
+        'div',
+        { class: 'starmap-depart-line' },
+        depart,
+        this.#backButton(),
+        reason === '' ? null : testId(h('span', { class: 'shop-reason' }, reason), 'depart-reason'),
+      ),
     );
   }
 
@@ -359,7 +387,8 @@ export class StarmapScene extends UiScene<'starmap'> {
       this.ui,
       {
         title: `Depart for ${PLANETS[planet].name}?`,
-        body: `Fuel: ${fuel} oil, charged now — the return trip is free.${active.length > 0 ? `\nActive: ${active.join(', ')}` : ''}`,
+        // SPEC-031 §4.12: the tank is named next to the charge (AC-31).
+        body: `Fuel: ${fuel} oil, charged now — you hold ${data.resources.oil}. The return trip is free.${active.length > 0 ? `\nActive: ${active.join(', ')}` : ''}`,
         confirmText: 'Depart',
       },
       // Re-validated on the tap: the charge itself is the check (AC-44's twin).

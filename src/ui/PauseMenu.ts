@@ -11,6 +11,7 @@
 import type { SaveStore } from '@/core/Save';
 import type { SettingsStore } from '@/core/Settings';
 import { el, h, testId, uiLayers } from '@/ui/dom';
+import { createScreen, type Screen } from '@/ui/Screen';
 import { SettingsPanel, type QualityTarget } from '@/ui/SettingsPanel';
 
 /** What the menu needs from the services container; structural on purpose. */
@@ -56,6 +57,7 @@ const CONTROL_SHEETS = {
 
 export class PauseMenu {
   readonly #deps: PauseDeps;
+  readonly #screen: Screen;
   readonly #root: HTMLDivElement;
   readonly #resume: HTMLButtonElement;
   readonly #controls: HTMLDivElement;
@@ -64,9 +66,16 @@ export class PauseMenu {
 
   constructor(deps: PauseDeps, onResume: () => void) {
     this.#deps = deps;
-    this.#root = testId(el('div', 'overlay-panel overlay-pause'), 'pause-menu');
+    // SPEC-031 §4.4: the pause menu wears the console frame too — SYSTEM HOLD
+    // on the channel — while staying a UI layer inside its scene, never a
+    // scene of its own (D-1). Hidden until `show()`.
+    this.#screen = createScreen({ id: 'pause' });
+    this.#root = this.#screen.root;
+    this.#root.classList.add('overlay-pause');
     this.#root.setAttribute('role', 'dialog');
     this.#root.setAttribute('aria-label', 'Paused');
+    const frame = this.#root.querySelector('.screen-frame');
+    if (frame instanceof HTMLElement) testId(frame, 'pause-menu');
 
     this.#settings = new SettingsPanel(uiLayers(deps.uiRoot), {
       settings: deps.settings,
@@ -84,8 +93,7 @@ export class PauseMenu {
 
     this.#controls = testId(el('div', 'pause-sheet is-hidden'), 'pause-sheet');
 
-    this.#root.append(
-      el('p', 'pause-title', 'Paused'),
+    this.#screen.body.append(
       h('div', { class: 'pause-actions' }, this.#resume, settings, controls, quit),
       this.#controls,
     );
@@ -109,7 +117,7 @@ export class PauseMenu {
 
   dispose(): void {
     this.#settings.dispose();
-    this.#root.remove();
+    this.#screen.dispose();
   }
 
   /** AC-84: rebuilt on each open, so it follows the scheme that is live now. */

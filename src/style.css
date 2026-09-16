@@ -3540,6 +3540,12 @@ html.quality-low .screen::before {
   background: none;
 }
 
+/* The creation preview is a scissor pass on the canvas underneath — nothing
+   solid may cover its box, so the creation frame is glass-free too. */
+.screen-creation .screen-frame {
+  background: none;
+}
+
 /* ------------------------------------------------------------- the header */
 .screen-head {
   grid-area: head;
@@ -3744,6 +3750,14 @@ html.reduce-motion .screen-body > * {
 
 .screen.overlay-pause.is-visible {
   display: grid;
+}
+
+.screen-pause .screen-body {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
 }
 
 /* ------------------------------------------------------- the wallet strip */

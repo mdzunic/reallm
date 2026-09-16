@@ -21,6 +21,19 @@ export function uiRootEl(): HTMLElement {
   return root;
 }
 
+/**
+ * SPEC-031 §4.6: the frame's touch sizing is a root class CSS reads — the
+ * same contract the HUD's `is-touch` uses. Applied on mount and on every
+ * scheme change, released with the scene.
+ */
+export function bindTouchScheme(root: HTMLElement, services: GameServices, disposer: Disposer, owner: object): void {
+  const apply = (): void => {
+    root.classList.toggle('is-touch', services.input.state.scheme === 'touch');
+  };
+  apply();
+  disposer.add(services.events.on('input:schemeChanged', apply, owner));
+}
+
 export abstract class UiScene<K extends SceneId> implements Scene<K> {
   readonly id: K;
   readonly pausable: boolean = false;

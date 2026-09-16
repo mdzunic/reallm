@@ -29,7 +29,9 @@ import { ShopPanel } from '@/ui/ShopPanel';
 import type { Look } from '@/core/Quality';
 import { NEUTRAL_SKY } from '@/views/Environment';
 import { addHubLights, hubSkyMesh, loadHubArt, proceduralDock, proceduralRing, swapModule } from '@/views/HubBackdrop';
-import { UiScene } from '@/scenes/base';
+import { UiScene, bindTouchScheme } from '@/scenes/base';
+import { channelText, createScreen, type Screen } from '@/ui/Screen';
+import { Wallet } from '@/ui/Wallet';
 
 /** Missions already debriefed this session, per save object (§4.3). */
 const DEBRIEFED = new WeakMap<Save, Set<MissionId>>();
@@ -45,9 +47,8 @@ export class StationScene extends UiScene<'station'> {
   #spin: THREE.Group | null = null;
   #economy: Economy | null = null;
   #settings: SettingsPanel | null = null;
-  #root: HTMLDivElement | null = null;
+  #screen: Screen | null = null;
   #panelBox: HTMLDivElement | null = null;
-  #rail: HTMLDivElement | null = null;
   #tab: StationTab = 'missions';
   #leaving = false;
   /** False from `dispose()`; what an awaited film comes back to (SPEC-023 §4.3). */
@@ -271,33 +272,37 @@ export class StationScene extends UiScene<'station'> {
 
     const data = this.services.save.current;
     // AC-27: the containment level is the highest unlocked chapter — the
-    // diegetic difficulty label of PLAN §5.
+    // diegetic difficulty label of PLAN §5, now the frame's channel line.
     let containment = 1;
     if (this.#economy !== null) {
       for (const planet of PLANET_IDS) {
         if (this.#economy.isUnlocked(planet)) containment = Math.max(containment, PLANETS[planet].chapter);
       }
     }
-    const head = h(
-      'div',
-      { class: 'station-head' },
-      h('p', { class: 'station-name' }, 'Command Relay'),
-      testId(h('p', { class: 'station-containment' }, `Containment level ${containment}`), 'containment-level'),
-    );
-
-    this.#rail = testId(el('div', 'station-rail'), 'station-rail');
-    this.#panelBox = el('div', 'station-panel panel');
-    this.#root = testId(el('div', 'station-root'), 'station-root');
-    this.#root.append(head, this.#rail, this.#panelBox);
-    // AC-25: a recall is said out loud, over everything else on the screen.
+    // SPEC-031 §4.4: the station's header, rail and panel are the frame's
+    // head, rail and body.
+    const screen = createScreen({ id: 'station', channel: channelText('station', { containment }) });
+    this.#screen = screen;
+    bindTouchScheme(screen.root, this.services, this.disposer, this);
+    const headText = screen.root.querySelector('.screen-head-text');
+    headText?.append(testId(h('p', { class: 'station-containment' }, `Containment level ${containment}`), 'containment-level'));
+    // AC-25 / SPEC-031 §4.5: a recall is named under the channel line.
     if (params.recalled === true) {
-      this.#root.append(testId(el('p', 'station-recall', 'Emergency recall'), 'recall-banner'));
+      headText?.append(testId(el('p', 'station-recall', 'Emergency recall'), 'recall-banner'));
     }
-    this.ui.mount(this.#root, 'panel');
+    if (data !== null) {
+      const wallet = new Wallet({ save: this.services.save, events: this.services.events });
+      this.disposer.add(() => wallet.dispose());
+      screen.setStatus(wallet.root);
+    }
+
+    this.#panelBox = el('div', 'station-panel panel');
+    screen.body.append(this.#panelBox);
+    this.ui.mount(screen.root, 'panel');
     this.disposer.add(() => {
-      if (this.#root) this.ui.unmount(this.#root);
-      this.#root = null;
-      this.#rail = null;
+      this.ui.unmount(screen.root);
+      screen.dispose();
+      this.#screen = null;
       this.#panelBox = null;
       this.#economy = null;
     });
@@ -310,26 +315,22 @@ export class StationScene extends UiScene<'station'> {
     this.#renderPanel();
   }
 
-  /** AC-28: the six tabs; a rail on the left, a bar at the bottom on phones. */
+  /** AC-28: the six tabs; the frame's rail — left on desktop, bottom on phones. */
   #renderRail(): void {
-    if (this.#rail === null) return;
-    const tab = (id: string, label: string, onTap: () => void, active = false): HTMLButtonElement =>
-      testId(
-        h(
-          'button',
-          { class: `ui-btn station-tab${active ? ' seg is-active' : ''}`, type: 'button', 'aria-pressed': String(active), click: onTap },
-          label,
-        ),
-        `station-tab-${id}`,
-      );
-    this.#rail.replaceChildren(
+    const tab = (id: string, label: string, onSelect: () => void, active = false): { id: string; label: string; active: boolean; onSelect(): void } => ({
+      id: `station-tab-${id}`,
+      label,
+      active,
+      onSelect,
+    });
+    this.#screen?.setTabs([
       tab('missions', 'Missions', () => this.#openTab('missions'), this.#tab === 'missions'),
       tab('shop', 'Shop', () => this.#openTab('shop'), this.#tab === 'shop'),
       tab('character', 'Character', () => this.#openTab('character'), this.#tab === 'character'),
       tab('starmap', 'Star Map', () => this.#starmap()),
       tab('settings', 'Settings', () => this.#settings?.show()),
       tab('quit', 'Quit', () => this.#quit(true)),
-    );
+    ]);
   }
 
   #openTab(tab: StationTab): void {
