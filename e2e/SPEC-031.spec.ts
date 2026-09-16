@@ -95,6 +95,11 @@ async function checkFrame(page: Page, width: number, height: number, touch = fal
 async function checkDepartOperable(page: Page): Promise<void> {
   const depart = await page.locator('[data-testid="starmap-depart"]').boundingBox();
   if (!depart) throw new Error('no depart box');
+  // The info panel itself stays on canvas — at 320 px it once slid off the
+  // left edge and opened its lines mid-word ('esert · Chapter 1').
+  const info = await page.locator('.starmap-info').boundingBox();
+  if (!info) throw new Error('no info box');
+  expect(info.x, 'info panel left edge on canvas').toBeGreaterThanOrEqual(-0.5);
   const hits = await page.evaluate(
     ({ x, y, w, h }) => {
       const probes: string[] = [];
@@ -150,6 +155,9 @@ async function walkFrames(page: Page, width: number, height: number, touch = fal
 const SIZES: readonly [number, number][] = [
   [1920, 1080],
   [800, 600],
+  // 360×740 is where QA measured the old absolutely-positioned Back fully
+  // shadowing Depart; it stays in the walk so the overlap cannot return.
+  [360, 740],
   [320, 640],
 ];
 
