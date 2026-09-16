@@ -1,12 +1,12 @@
-// The boot gate (SPEC-002 §4.5, §6.2). Nothing about the game starts before a
-// user gesture — that is what lets the browser start an AudioContext (E21) —
-// so this suite covers what the player sees before it and what happens after.
+// The boot gate (SPEC-002 §4.5, SPEC-031 §4.1–§4.3, §6.2). Nothing about the
+// game starts before a user gesture — that is what lets the browser start an
+// AudioContext (E21) — and since SPEC-031 the gesture is the START THE GAME
+// control alone (E46): a stray tap anywhere else must not start the game.
 import { expect, test } from '@playwright/test';
 import { awaitGate, COLD_START, frames, gameUrl, passGate, start } from './start';
 
 const overlay = '[data-testid="boot-overlay"]';
 const progress = '[data-testid="boot-progress"]';
-const bar = '[data-testid="boot-bar"]';
 const gate = '[data-testid="boot-start"]';
 const label = '[data-testid="scene-label"]';
 
@@ -18,7 +18,7 @@ async function sample(page: import('@playwright/test').Page): Promise<{ text: st
   }));
 }
 
-test('the overlay shows a progress bar whose width is done/total (AC-19)', async ({ page }) => {
+test('the overlay shows a percentage whose bar width agrees (SPEC-031 AC-3)', async ({ page }) => {
   // Slow the assets down so the counter is observable rather than a flash.
   await page.route('**/assets/**', async (route) => {
     await new Promise((resolve) => setTimeout(resolve, 150));
@@ -28,23 +28,50 @@ test('the overlay shows a progress bar whose width is done/total (AC-19)', async
   await page.goto(gameUrl('/'));
   // The overlay is built by `main.ts`, so these two waits span cold start.
   await expect(page.locator(overlay)).toBeVisible(COLD_START);
-  await expect(page.locator(progress)).toHaveText(/Loading \d+\/\d+/, COLD_START);
+  await expect(page.locator(progress)).toHaveText(/Loading \d+ %/, COLD_START);
 
   const during = await sample(page);
-  const counts = /Loading (\d+)\/(\d+)/.exec(during.text);
+  const counts = /Loading (\d+) %/.exec(during.text);
   expect(counts).not.toBeNull();
-  const done = Number(counts?.[1]);
-  const total = Number(counts?.[2]);
-  expect(total).toBeGreaterThan(0);
-  expect(during.width).toBe(`${Math.round((done / total) * 100)}%`);
+  const percent = Number(counts?.[1]);
+  expect(during.text).not.toMatch(/\d+\/\d+/); // never a raw count (AC-1)
+  expect(during.width).toBe(`${percent}%`);
 
   await awaitGate(page);
   const finished = await sample(page);
-  expect(finished.text).toBe(`Loading ${total}/${total}`);
+  expect(finished.text).toBe('Loading 100 %');
   expect(finished.width).toBe('100%');
 });
 
-test('TAP TO START appears only after the load, and a click passes the gate (AC-20, AC-21, AC-22)', async ({
+test('the overlay fills the viewport and stacks its column in order (AC-2)', async ({ page }) => {
+  await page.goto(gameUrl('/'));
+  await expect(page.locator(overlay)).toBeVisible(COLD_START);
+  const shape = await page.evaluate(() => {
+    const root = document.querySelector('[data-testid="boot-overlay"]') as HTMLElement;
+    const style = getComputedStyle(root);
+    return {
+      position: style.position,
+      inset: style.inset,
+      children: Array.from(root.children).map((child) => child.className.split(' ')[0]),
+    };
+  });
+  expect(shape.position).toBe('fixed');
+  expect(shape.inset).toBe('0px');
+  expect(shape.children).toEqual([
+    'boot-title',
+    'boot-tagline',
+    'boot-bar-track',
+    'boot-progress',
+    'boot-slow',
+    'boot-error',
+    'ui-btn',
+    'boot-foot',
+  ]);
+  await expect(page.locator('.boot-title')).toHaveText('ReaLLM');
+  await expect(page.locator('.boot-tagline')).toHaveText('EARTH COMMAND · SALVAGE DIVISION');
+});
+
+test('START THE GAME appears only after the load, and only the control passes the gate (AC-8, AC-9)', async ({
   page,
 }) => {
   await page.goto(gameUrl('/'));
@@ -52,32 +79,36 @@ test('TAP TO START appears only after the load, and a click passes the gate (AC-
   await expect(page.locator(overlay)).toBeVisible(COLD_START);
 
   await awaitGate(page);
-  await expect(page.locator(gate)).toHaveText('TAP TO START');
+  await expect(page.locator(gate)).toHaveText('START THE GAME');
   await expect(page.locator(label)).toHaveCount(0); // the loop has not started
+
+  // A pointer anywhere else does not pass the gate (E46) — the centre-bottom
+  // of the viewport is empty space well away from the control.
+  const viewport = page.viewportSize();
+  if (!viewport) throw new Error('viewport size unavailable');
+  const box = await page.locator(gate).boundingBox();
+  if (!box) throw new Error('the start control has no box');
+  const y = Math.min(viewport.height - 4, box.y + box.height + 40);
+  await page.mouse.click(viewport.width / 2, y);
+  // Nor does a key that is not Enter or Space.
+  await page.keyboard.press('KeyA');
+  await expect(page.locator(overlay)).toBeVisible();
+  await expect(page.locator(label)).toHaveCount(0);
 
   await page.locator(gate).click();
   await expect(page.locator(overlay)).toBeHidden();
   await expect(page.locator(label)).toHaveText('menu');
 });
 
-test('a key press anywhere passes the gate (AC-21)', async ({ page }) => {
+test('a fresh Enter passes the gate (AC-8)', async ({ page }) => {
   await page.goto(gameUrl('/'));
   await awaitGate(page);
-  await page.keyboard.press('Space');
+  await page.keyboard.press('Enter');
   await expect(page.locator(overlay)).toBeHidden();
   await expect(page.locator(label)).toHaveText('menu');
 });
 
-test('a pointerup anywhere in the document passes the gate (AC-21)', async ({ page }) => {
-  await page.goto(gameUrl('/'));
-  await awaitGate(page);
-  // Deliberately not on the control: the whole document is the gesture target.
-  await page.mouse.click(5, 5);
-  await expect(page.locator(overlay)).toBeHidden();
-  await expect(page.locator(label)).toHaveText('menu');
-});
-
-test('later gestures do nothing (02-i, AC-21)', async ({ page }) => {
+test('later gestures do nothing (02-i)', async ({ page }) => {
   await start(page);
   await page.keyboard.press('Space');
   await page.mouse.click(20, 200);
@@ -85,7 +116,7 @@ test('later gestures do nothing (02-i, AC-21)', async ({ page }) => {
   await expect(page.locator(label)).toHaveText('menu');
 });
 
-test('nothing past the gate runs until the gesture arrives (AC-22, AC-23)', async ({ page }) => {
+test('nothing past the gate runs until the gesture arrives (SPEC-002 AC-22, AC-23)', async ({ page }) => {
   await page.goto(gameUrl('/?debug'));
   await awaitGate(page);
 
@@ -104,7 +135,7 @@ test('nothing past the gate runs until the gesture arrives (AC-22, AC-23)', asyn
   expect(await page.evaluate(() => window.__reallm.stats().state)).toBe('running');
 });
 
-test('the loop starts and the menu prop turns (AC-22, AC-24)', async ({ page }) => {
+test('the loop starts and the menu prop turns (SPEC-002 AC-22, AC-24)', async ({ page }) => {
   await start(page, '/?debug');
   const first = await page.evaluate(() => window.__reallm.stats());
   expect(first.state).toBe('running');
@@ -147,7 +178,7 @@ async function stubPlatformRequests(page: import('@playwright/test').Page): Prom
 const asked = (page: import('@playwright/test').Page): Promise<string[]> =>
   page.evaluate(() => (window as unknown as { __asked: string[] }).__asked);
 
-test('the gate asks for the wake lock and shrugs off the refusal (AC-23, 02-f)', async ({ page }) => {
+test('the gate asks for the wake lock and shrugs off the refusal (SPEC-002 AC-23, 02-f)', async ({ page }) => {
   await stubPlatformRequests(page);
   await page.goto(gameUrl('/'));
   await awaitGate(page);
@@ -164,7 +195,7 @@ test.describe('on Android', () => {
       'Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36',
   });
 
-  test('the gate also asks for fullscreen (AC-23)', async ({ page }) => {
+  test('the gate also asks for fullscreen (SPEC-002 AC-23)', async ({ page }) => {
     await stubPlatformRequests(page);
     await page.goto(gameUrl('/'));
     await awaitGate(page);
@@ -174,7 +205,9 @@ test.describe('on Android', () => {
   });
 });
 
-test('a failed asset shows Retry and no gate until the load succeeds (AC-25)', async ({ page }) => {
+test('a failed asset shows Retry inside the same frame and no gate until the load succeeds (AC-10)', async ({
+  page,
+}) => {
   let offline = true;
   await page.route('**/assets/textures/noise.png', async (route) => {
     if (offline) await route.abort();
@@ -185,8 +218,9 @@ test('a failed asset shows Retry and no gate until the load succeeds (AC-25)', a
   // Visible, not merely present: the copy is in the markup from the start.
   // Cold-start budget: this is the first DOM wait after the navigation.
   await expect(page.locator('[data-testid="boot-error"]')).toBeVisible(COLD_START);
-  await expect(page.locator('[data-testid="boot-error"]')).toContainText('Could not load assets');
+  await expect(page.locator('[data-testid="boot-error"]')).toContainText('Could not load assets — check connection');
   await expect(page.locator(gate)).toBeHidden();
+  await expect(page.locator('[data-testid="boot-slow"]')).toBeHidden();
   await expect(page.locator(label)).toHaveCount(0);
 
   offline = false;
@@ -195,7 +229,22 @@ test('a failed asset shows Retry and no gate until the load succeeds (AC-25)', a
   await expect(page.locator(label)).toHaveText('menu');
 });
 
-test('the ?scene= flag is applied after the gate (AC-26)', async ({ page }) => {
+test.describe('at 320 × 640', () => {
+  test.use({ viewport: { width: 320, height: 640 } });
+
+  test('the start control sits inside the viewport (SPEC-031 §6.2)', async ({ page }) => {
+    await page.goto(gameUrl('/'));
+    await awaitGate(page);
+    const box = await page.locator(gate).boundingBox();
+    if (!box) throw new Error('the start control has no box');
+    expect(box.x).toBeGreaterThanOrEqual(0);
+    expect(box.y).toBeGreaterThanOrEqual(0);
+    expect(box.x + box.width).toBeLessThanOrEqual(320);
+    expect(box.y + box.height).toBeLessThanOrEqual(640);
+  });
+});
+
+test('the ?scene= flag is applied after the gate (SPEC-002 AC-26)', async ({ page }) => {
   await page.goto(gameUrl('/?scene=surface&planet=cinder4'));
   await awaitGate(page);
   // Still nothing: the jump target had to wait for the gesture too.

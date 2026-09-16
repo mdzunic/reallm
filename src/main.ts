@@ -47,6 +47,10 @@ const flags = parseFlags(globalThis.location.search);
 const settings = createSettings(undefined, events);
 const input = new Input(canvas, events, settings);
 
+// SPEC-031 §4.8: the scene tag is invisible without `?debug` — a CSS contract
+// on one class, so the e2e fleet keeps its steering hook either way.
+document.documentElement.classList.toggle('debug', flags.debug);
+
 /**
  * SPEC-014 AC-88/AC-110: reduced motion is one DOM contract — a `reduce-motion`
  * class on `<html>` that every static-version CSS rule gates on. The setting

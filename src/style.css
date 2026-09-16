@@ -101,8 +101,76 @@ body {
   z-index: 40;
 }
 
-.overlay-boot {
-  min-width: 200px;
+/* SPEC-031 §4.1: the title card. Full-bleed — never a centred box — with the
+   column stacked in reading order. It must draw before the first byte of
+   `public/assets/` arrives, so its background is its own wash, not a texture. */
+.overlay-panel.overlay-boot {
+  inset: 0;
+  left: 0;
+  top: 0;
+  transform: none;
+  width: auto;
+  border: none;
+  border-radius: 0;
+  background: radial-gradient(ellipse at 50% 42%, rgba(76, 154, 255, 0.12), rgba(0, 0, 0, 0) 55%), #000;
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+  box-shadow: none;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+  padding: max(16px, env(safe-area-inset-top)) max(16px, env(safe-area-inset-right)) max(16px, env(safe-area-inset-bottom)) max(16px, env(safe-area-inset-left));
+}
+
+.overlay-panel.overlay-boot.is-visible {
+  display: flex;
+}
+
+.boot-title {
+  margin: 0;
+  font-size: clamp(34px, 8vmin, 64px);
+  font-weight: 700;
+  letter-spacing: 0.18em;
+  color: var(--ink);
+  text-shadow: var(--text-glow);
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.boot-tagline {
+  margin: 0;
+  font-size: var(--type-xs);
+  letter-spacing: 0.24em;
+  color: var(--ink-dim);
+}
+
+@media (max-width: 380px) {
+  .boot-title {
+    font-size: clamp(28px, 11vmin, 40px);
+  }
+}
+
+.boot-slow {
+  display: none;
+  margin: 0;
+  font-size: var(--type-sm);
+  color: var(--ink-dim);
+}
+
+.boot-slow.is-visible {
+  display: block;
+}
+
+.boot-foot {
+  margin: 0;
+  font-size: var(--type-xs);
+  color: var(--ink-dim);
+}
+
+/* E46: while the error is up the foot's promise would be a lie. */
+.overlay-boot.has-error .boot-foot {
+  display: none;
 }
 
 .boot-error {
@@ -120,8 +188,6 @@ body {
   margin: 0 0 8px;
 }
 
-button.boot-retry,
-button.boot-start,
 button.pause-resume,
 button.scene-nav-button,
 button.slot-button,
@@ -135,8 +201,6 @@ button.context-lost-reload {
   cursor: pointer;
 }
 
-button.boot-retry:hover,
-button.boot-start:hover,
 button.pause-resume:hover,
 button.scene-nav-button:hover,
 button.slot-button:hover,
@@ -144,32 +208,65 @@ button.context-lost-reload:hover {
   background: #1d2a38;
 }
 
-/* ------------------------------------------------- boot gate (SPEC-002 §4.5) */
+/* --------------------------------------- boot gate (SPEC-002 §4.5, SPEC-031) */
 
-/* The progress bar: the track is the full width, the fill is done/total. */
+/* The progress bar: the track is the full width, the fill is the percentage. */
 .boot-bar-track {
-  height: 4px;
-  margin: 0 0 12px;
-  border-radius: 2px;
-  background: #1b2530;
+  width: min(420px, 72vw);
+  height: 6px;
+  border-radius: 3px;
+  background: var(--panel-edge);
+  box-shadow: inset 0 0 0 1px var(--edge-glow);
   overflow: hidden;
 }
 
 .boot-bar {
   height: 100%;
   width: 0;
-  background: #4c8fbd;
+  background: var(--accent);
+}
+
+/* §4.2: an unknown total sweeps; under reduce-motion it is a static 30% fill. */
+.boot-bar.is-indeterminate {
+  width: 30%;
+  animation: boot-sweep 1.2s linear infinite;
+}
+
+@keyframes boot-sweep {
+  0% {
+    transform: translateX(-110%);
+  }
+
+  100% {
+    transform: translateX(440%);
+  }
+}
+
+html.reduce-motion .boot-bar.is-indeterminate,
+html.quality-low .boot-bar.is-indeterminate {
+  animation: none;
+  transform: none;
+}
+
+.boot-progress {
+  font-variant-numeric: tabular-nums;
+  color: var(--ink-dim);
 }
 
 /* Hidden until the manifest has loaded: the gate never appears over a failure
-   (AC-25). */
+   (AC-25, E46). */
 button.boot-start {
   display: none;
-  letter-spacing: 0.12em;
+  letter-spacing: var(--track);
 }
 
 button.boot-start.is-visible {
   display: inline-block;
+}
+
+html.reduce-motion button.boot-start,
+html.quality-low button.boot-start {
+  transition: none;
 }
 
 /* ------------------------------------------ context loss (SPEC-002 §4.7, E7) */
@@ -468,6 +565,22 @@ button.slot-button {
   --bar-shield: linear-gradient(90deg, #7fc4ff, #4c9aff);
   --bar-xp: linear-gradient(90deg, #ffd06a, #f5a623);
   --text-glow: 0 0 12px rgba(76, 154, 255, 0.45);
+
+  /* SPEC-031 §4.7 — the console frame (*initial tuning*). The scrim floors the
+     text over the bright, moving backdrops; the frame tokens are the cut, the
+     edge and the rule every screen wears; the type scale replaces literal
+     font sizes in the shell; the key face is the flat button plate. */
+  --screen-scrim: radial-gradient(ellipse at 50% 40%, rgba(5, 8, 12, 0.55), rgba(5, 8, 12, 0.9) 78%);
+  --frame-edge: rgba(118, 158, 198, 0.5);
+  --frame-cut: 14px;
+  --rule: rgba(118, 158, 198, 0.28);
+  --type-xs: 12px;
+  --type-sm: 14px;
+  --type-md: 16px;
+  --type-lg: clamp(18px, 3vmin, 24px);
+  --type-xl: clamp(22px, 4.2vmin, 34px);
+  --track: 0.12em;
+  --key-face: rgba(18, 26, 36, 0.92);
 }
 
 /* Font floor 14 px (AC-107); larger sizes clamp with the viewport (AC-60). */
