@@ -2372,8 +2372,12 @@ export class SurfaceScene extends UiScene<'surface'> {
     const combat = this.#combat;
     if (world === null || combat === null) return;
     const p = world.player;
-    const cx = this.#aimDebug.has ? this.#aimDebug.x : p.x + Math.cos(p.facing) * 7;
-    const cz = this.#aimDebug.has ? this.#aimDebug.z : p.z + Math.sin(p.facing) * 7;
+    // Project the aim on demand: the click can land between a pointer move
+    // and the next update tick, when the cached `#aimDebug` is still stale —
+    // and a pack spawned at the fallback point is a pack at the player's feet.
+    const aimed = this.#aimWorld(world);
+    const cx = aimed?.x ?? (this.#aimDebug.has ? this.#aimDebug.x : p.x + Math.cos(p.facing) * 7);
+    const cz = aimed?.z ?? (this.#aimDebug.has ? this.#aimDebug.z : p.z + Math.sin(p.facing) * 7);
     for (let k = 0; k < 5; k++) {
       const angle = (k / 5) * Math.PI * 2;
       combat.spawnEnemy('dust_skitter', cx + Math.cos(angle) * 1.5, cz + Math.sin(angle) * 1.5, false);

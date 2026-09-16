@@ -16,6 +16,7 @@ import {
 } from '@/systems/UiHelpers';
 import { RESOURCE_IDS, type ResourceId } from '@/data/index';
 import { el, testId, type UiRoot } from '@/ui/dom';
+import { RESOURCE_GLYPHS, TOKEN_GLYPH } from '@/ui/glyphs';
 import { QuickBar, type QuickBarHandlers } from '@/ui/QuickBar';
 import { Tracker } from '@/ui/Tracker';
 
@@ -26,7 +27,6 @@ export const DAMAGE_FLASH_MS = 150;
 /** AC-64: the low-HP pulse threshold. */
 export const LOW_HP_FRACTION = 0.25;
 
-const RESOURCE_GLYPHS: Record<ResourceId, string> = { oil: '🛢', wheat: '🌾', water: '💧', lithium: '⚡' };
 
 function bar(kind: string, glyph: string, label: string): { root: HTMLDivElement; fill: HTMLDivElement; text: HTMLSpanElement } {
   const fill = el('div', `bar-fill bar-${kind}`);
@@ -124,7 +124,7 @@ export class Hud {
       tr.append(row);
     }
     const tokens = el('span', 'res res-tokens');
-    tokens.append(el('span', 'glyph', '◈'), this.#tokens);
+    tokens.append(el('span', 'glyph', TOKEN_GLYPH), this.#tokens);
     tr.append(tokens);
 
     const tc = el('div', 'hud-tc');

@@ -782,3 +782,44 @@ enemies in frame).
   no hardware GPU; the frame numbers above are software-rasterised floors.
 - **Physical phone:** _not run_ — no handset reaches the container; the
   touch-scheme texts are pinned in `tests/data/content.test.ts` instead.
+
+## SPEC-031 — the console shell: boot, screen frame, wallet and item pictures (M7d)
+
+- **Build:** `spec/SPEC-031` — untagged
+- **Devices:**
+  - desktop — headless Chromium 1280 × 800 (Playwright, Linux container, **software GL**)
+  - phone — headless Chromium 393 × 851, touch + mobile emulation (Pixel-5-shaped;
+    a physical handset needs the human pass)
+
+### What was walked, and how (AC-43)
+
+One scripted pass per device size: boot to the gate (START THE GAME up), the
+gate into the menu, creation on an empty slot, the station with the §6.2 wallet
+fixture (340 tokens, 180/60/45/12) on each of its three panel tabs, the star
+map, and a paused surface on Cinder-4. Every frame invariant behind these
+captures — one screen root, shared head/body centre, no horizontal scroll,
+every control in the viewport, the 44/56 px tab floors, the operable Depart box —
+is asserted per size (1920 × 1080, 800 × 600, 320 × 640 and a Pixel 5 touch
+profile) by `e2e/SPEC-031.spec.ts` §6.2 group 1.
+
+### Shots
+
+| | desktop | phone |
+|---|---|---|
+| boot, gate up | [desktop-boot](screenshots/spec-031/desktop-boot.png) | [phone-boot](screenshots/spec-031/phone-boot.png) |
+| menu | [desktop-menu](screenshots/spec-031/desktop-menu.png) | [phone-menu](screenshots/spec-031/phone-menu.png) |
+| creation | [desktop-creation](screenshots/spec-031/desktop-creation.png) | [phone-creation](screenshots/spec-031/phone-creation.png) |
+| station — missions | [desktop-station-missions](screenshots/spec-031/desktop-station-missions.png) | [phone-station-missions](screenshots/spec-031/phone-station-missions.png) |
+| station — shop | [desktop-station-shop](screenshots/spec-031/desktop-station-shop.png) | [phone-station-shop](screenshots/spec-031/phone-station-shop.png) |
+| station — character | [desktop-station-character](screenshots/spec-031/desktop-station-character.png) | [phone-station-character](screenshots/spec-031/phone-station-character.png) |
+| star map | [desktop-starmap](screenshots/spec-031/desktop-starmap.png) | [phone-starmap](screenshots/spec-031/phone-starmap.png) |
+| pause (surface) | [desktop-pause](screenshots/spec-031/desktop-pause.png) | [phone-pause](screenshots/spec-031/phone-pause.png) |
+
+### Not run, and why
+
+- **Physical phone over LAN:** _not run_ — no handset reaches the container;
+  the phone column above is Chromium's mobile emulation with real touch
+  pointers (which is also what flips the input scheme for the 56 px tabs).
+- **Blender item renders:** _not rendered_ — no Blender binary in the
+  container, so every icon surface above shows the committed glyph fallback
+  (AC-40's path), which is also what the fallback e2e pins.

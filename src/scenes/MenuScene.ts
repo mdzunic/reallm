@@ -21,8 +21,9 @@ import { SettingsPanel } from '@/ui/SettingsPanel';
 import type { Look } from '@/core/Quality';
 import { NEUTRAL_SKY } from '@/views/Environment';
 import { addHubLights, hubSkyMesh, loadHubSky } from '@/views/HubBackdrop';
-import { UiScene, uiRootEl } from '@/scenes/base';
+import { UiScene, bindTouchScheme } from '@/scenes/base';
 import { director } from '@/scenes/Director';
+import { createScreen } from '@/ui/Screen';
 
 const STAR_COUNT = 420;
 
@@ -183,14 +184,11 @@ export class MenuScene extends UiScene<'menu'> {
   // -------------------------------------------------------------------- DOM
 
   #mountUi(): void {
-    const root = uiRootEl();
-    // SPEC-007's panel: the storage banner (AC-10, E8) and the corrupt-slot
-    // rescue keep their own surface and testids.
-    this.#savePanel = new SavePanel(root, this.services.save);
-    this.disposer.add(() => {
-      this.#savePanel?.dispose();
-      this.#savePanel = null;
-    });
+    // SPEC-031 §4.4: the menu mounts one console frame; the wordmark is the
+    // frame's own title, wearing the `.menu-title` treatment.
+    const screen = createScreen({ id: 'menu' });
+    screen.root.querySelector('.screen-title')?.classList.add('menu-title');
+    bindTouchScheme(screen.root, this.services, this.disposer, this);
 
     this.#settings = new SettingsPanel(this.ui, {
       settings: this.services.settings,
@@ -206,15 +204,30 @@ export class MenuScene extends UiScene<'menu'> {
     this.#buttons = el('div', 'menu-buttons');
     this.#sub = el('div', 'menu-sub');
     this.#root = testId(el('div', 'menu-root'), 'menu-root');
-    this.#root.append(h('h1', { class: 'menu-title' }, 'ReaLLM'), this.#buttons, this.#sub);
+    this.#root.append(this.#buttons, this.#sub);
+
+    // SPEC-007's panel, as the body's Storage block (SPEC-031 §4.8): the
+    // corrupt-slot rescue keeps its surface and testids, and the E8 banner
+    // goes to the frame footer.
+    const storage = el('div', 'screen-block');
+    storage.append(el('p', 'screen-block-title', 'Storage'));
+    this.#savePanel = new SavePanel(storage, this.services.save, { bannerHost: screen.footer });
+    this.disposer.add(() => {
+      this.#savePanel?.dispose();
+      this.#savePanel = null;
+    });
+    this.#root.append(storage);
+
     if (this.services.settings.get().persistGranted === false && isIos()) {
       // AC-11: iOS never granted persistence — remind before the run matters.
       const hint = testId(el('p', 'menu-hint', 'Backup your save'), 'backup-hint');
       this.#root.append(hint);
     }
-    this.ui.mount(this.#root, 'panel');
+    screen.body.append(this.#root);
+    this.ui.mount(screen.root, 'panel');
     this.disposer.add(() => {
-      if (this.#root) this.ui.unmount(this.#root);
+      this.ui.unmount(screen.root);
+      screen.dispose();
       this.#root = null;
       this.#buttons = null;
       this.#sub = null;

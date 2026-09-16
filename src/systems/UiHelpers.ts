@@ -14,6 +14,7 @@ import {
   ITEMS,
   MISSIONS,
   PLANETS,
+  RESOURCE_IDS,
   TUNING,
   UPGRADES,
   type Attributes,
@@ -110,21 +111,156 @@ export function requirementText(req: Requirement): string {
 }
 
 /**
- * `"40 → 34"` (§4.3): the base token price and what this save actually pays,
- * via the same `discountTokens` the purchase runs (SPEC-010 §4.2), so the label
- * can never disagree with the charge. Undiscounted resource costs are appended
- * (`" + 60 lithium"`); a price of nothing at all is `"Free"`.
+ * `"40 → 34 tokens"` (SPEC-031 §4.12): the base token price and what this save
+ * actually pays, via the same `discountTokens` the purchase runs (SPEC-010
+ * §4.2), so the label can never disagree with the charge — and every amount
+ * carries its unit, because `50` means nothing with four currencies in play.
+ * Undiscounted resource costs are appended (`" + 60 lithium"`); a price of
+ * nothing at all is `"Free"`.
  */
 export function priceText(price: Price, discount: number): string {
   const parts: string[] = [];
   if (price.tokens > 0) {
     const paid = discountTokens(price.tokens, discount);
-    parts.push(paid < price.tokens ? `${price.tokens} → ${paid}` : `${price.tokens}`);
+    parts.push(paid < price.tokens ? `${price.tokens} → ${paid} tokens` : `${price.tokens} tokens`);
   }
   for (const [resource, amount] of Object.entries(price.resources ?? {})) {
     if ((amount ?? 0) > 0) parts.push(`${amount} ${resource}`);
   }
   return parts.length === 0 ? 'Free' : parts.join(' + ');
+}
+
+// ------------------------------------------------------- the wallet (SPEC-031)
+
+export interface WalletEntry {
+  readonly id: ResourceId;
+  readonly value: number;
+  readonly cap: number;
+  readonly atCap: boolean;
+}
+
+export interface WalletModel {
+  readonly tokens: number;
+  readonly resources: readonly WalletEntry[];
+}
+
+/**
+ * SPEC-031 §4.11: the cargo cap the wallet strip prints against — the cargo
+ * tier's capacity plus the quartermaster's bonus, the same sum
+ * `Economy.cargoCap()` charges by, computed purely over the save so the strip
+ * needs no `Economy` instance.
+ */
+function walletCap(save: Save): number {
+  let bonus = 0;
+  for (const companion of save.companions) {
+    // Owned is enough: `Economy.cargoCap()` counts the quartermaster by level
+    // alone, so a disabled one still raises the cap the engine clamps by.
+    const effect = COMPANIONS[companion.id].levels[companion.level - 1] as CompanionEffect | undefined;
+    bonus += effect?.cargoBonus ?? 0;
+  }
+  return (UPGRADES.cargo.metrics['cargoCap']?.[save.ship.cargo] ?? TUNING.CARGO_BASE) + bonus;
+}
+
+/** SPEC-031 §3: what the wallet strip renders — one read of the save, no totals of its own. */
+export function walletModel(save: Save): WalletModel {
+  const cap = walletCap(save);
+  return {
+    tokens: save.player.tokens,
+    resources: RESOURCE_IDS.map((id) => {
+      const value = save.resources[id];
+      return { id, value, cap, atCap: value >= cap };
+    }),
+  };
+}
+
+/**
+ * SPEC-031 §4.12 / E48: the exact shortfall an unaffordable price leaves —
+ * `Need 40 more tokens`, `Need 20 more lithium`, both joined when both are
+ * short — or `null` when the price is affordable. The discount is applied
+ * before the comparison, exactly as the charge applies it.
+ */
+export function shortfallText(price: Price, save: Save, discount: number): string | null {
+  const parts: string[] = [];
+  const paid = discountTokens(price.tokens, discount);
+  if (save.player.tokens < paid) parts.push(`Need ${paid - save.player.tokens} more tokens`);
+  for (const [resource, amount] of Object.entries(price.resources ?? {})) {
+    const held = save.resources[resource as ResourceId];
+    if ((amount ?? 0) > held) parts.push(`Need ${(amount ?? 0) - held} more ${resource}`);
+  }
+  return parts.length === 0 ? null : parts.join(' · ');
+}
+
+/**
+ * SPEC-031 §4.12: the balance line every confirm sheet carries — one line per
+ * currency the price touches, `Tokens 340 → 291`, `Wheat 60 → 30` — the last
+ * chance to notice a purchase empties the tank (E1). `''` for `Free`.
+ */
+export function balanceAfterText(price: Price, save: Save, discount: number): string {
+  const lines: string[] = [];
+  if (price.tokens > 0) {
+    const paid = discountTokens(price.tokens, discount);
+    lines.push(`Tokens ${save.player.tokens} → ${save.player.tokens - paid}`);
+  }
+  for (const [resource, amount] of Object.entries(price.resources ?? {})) {
+    if ((amount ?? 0) <= 0) continue;
+    const held = save.resources[resource as ResourceId];
+    const name = resource.charAt(0).toUpperCase() + resource.slice(1);
+    lines.push(`${name} ${held} → ${held - (amount ?? 0)}`);
+  }
+  return lines.join('\n');
+}
+
+/** SPEC-031 §4.16: the cooldown model of a weapon, in words a player reads. */
+function cooldownWords(cooldown: Extract<Item, { kind: 'weapon' }>['cooldown']): string {
+  switch (cooldown.kind) {
+    case 'none':
+      return 'No cooldown';
+    case 'heat':
+      return 'Overheats — locks until it cools';
+    case 'charges':
+      return `${cooldown.charges} ${cooldown.charges === 1 ? 'charge' : 'charges'}, recharges in ${cooldown.rechargeSeconds} s`;
+  }
+}
+
+/** SPEC-031 §4.16: a consumable's effect, in words. */
+function effectWords(effect: Extract<Item, { kind: 'consumable' }>['effect']): string {
+  switch (effect.kind) {
+    case 'heal':
+      return effect.overSeconds > 0
+        ? `Heals ${Math.round(effect.fraction * 100)}% over ${effect.overSeconds} s`
+        : `Heals ${Math.round(effect.fraction * 100)}% instantly`;
+    case 'hazard_immunity':
+      return `Hazard immunity for ${effect.seconds} s`;
+    case 'damage_boost':
+      return `+${Math.round((effect.mult - 1) * 100)}% damage for ${effect.seconds} s`;
+    case 'explosive':
+      return `Explosive — ${effect.damage} damage in a ${effect.radius} m blast`;
+  }
+}
+
+/**
+ * SPEC-031 §4.16: the gear card's stat block, one line per stat. Weapons carry
+ * damage, fire rate, the DPS the two multiply to, range, projectile speed,
+ * pierce and the cooldown model in words; armor its two numbers; consumables
+ * the effect and the stack.
+ */
+export function gearStatLines(id: ItemId): readonly string[] {
+  const item = ITEM_TABLE[id];
+  if (item.kind === 'weapon') {
+    return [
+      `Damage ${item.damage}`,
+      `Fire rate ${item.fireRate}/s`,
+      `DPS ${Math.round(item.damage * item.fireRate)}`,
+      `Range ${item.range} m`,
+      `Projectile speed ${item.projectileSpeed} m/s`,
+      `Pierce ${item.pierce}`,
+      cooldownWords(item.cooldown),
+    ];
+  }
+  if (item.kind === 'armor') {
+    return [`Armor ${item.armor}`, `Hazard resist ${Math.round(item.hazardResist * 100)}%`];
+  }
+  return [effectWords(item.effect), `Stack of ${item.stack}`];
 }
 
 /**

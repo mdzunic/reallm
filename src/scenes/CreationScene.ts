@@ -23,7 +23,8 @@ import type { Look } from '@/core/Quality';
 import { tintSalvager } from '@/views/CharacterView';
 import { NEUTRAL_SKY } from '@/views/Environment';
 import { addHubLights, hubSkyMesh, loadHubSky } from '@/views/HubBackdrop';
-import { UiScene } from '@/scenes/base';
+import { UiScene, bindTouchScheme } from '@/scenes/base';
+import { createScreen } from '@/ui/Screen';
 
 const CLASS_IDS = Object.keys(CLASSES) as ClassId[];
 const ATTRIBUTES = ['might', 'vigor', 'agility', 'tech'] as const;
@@ -250,9 +251,14 @@ export class CreationScene extends UiScene<'creation'> {
     side.append(this.#previewBox, el('p', 'creation-preview-label', 'Preview'));
     this.#root = testId(el('div', 'creation-root'), 'creation-root');
     this.#root.append(this.#form, side);
-    this.ui.mount(this.#root, 'panel');
+    // SPEC-031 §4.4: one console frame; the form and preview are its body.
+    const screen = createScreen({ id: 'creation' });
+    bindTouchScheme(screen.root, this.services, this.disposer, this);
+    screen.body.append(this.#root);
+    this.ui.mount(screen.root, 'panel');
     this.disposer.add(() => {
-      if (this.#root) this.ui.unmount(this.#root);
+      this.ui.unmount(screen.root);
+      screen.dispose();
       this.#root = null;
       this.#form = null;
       this.#nameField = null;

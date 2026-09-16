@@ -104,7 +104,10 @@ describe('the theme tokens (SPEC-020 §4.5, AC-22)', () => {
     expect(CSS).toMatch(/\.panel\s*\{[^}]*background:\s*var\(--panel-glass\)/);
     expect(CSS).toMatch(/\.panel\s*\{[^}]*var\(--edge-glow\)/);
     expect(CSS).toMatch(/\.toast\s*\{[^}]*background:\s*var\(--panel-glass\)/);
-    expect(CSS).toMatch(/\.ui-btn\s*\{[^}]*background:\s*linear-gradient\([^;]*var\(--edge-glow\)/);
+    // SPEC-031 AC-22: the button is a console key now — a flat --key-face with
+    // a --frame-edge hairline; the accent moved to the active underline.
+    expect(CSS).toMatch(/\.ui-btn\s*\{[^}]*background:\s*var\(--key-face\)/);
+    expect(CSS).toMatch(/\.ui-btn\s*\{[^}]*border:\s*1px solid var\(--frame-edge\)/);
     expect(CSS).toMatch(/\.ui-btn\.is-primary\s*\{[^}]*border-color:\s*var\(--accent\)/);
     expect(CSS).toContain('.bar-hp { background: var(--bar-hp); }');
     expect(CSS).toContain('.bar-shield { background: var(--bar-shield); }');
@@ -146,9 +149,11 @@ describe('what the theme must not move (SPEC-020 AC-24 … AC-26)', () => {
     // hold 14 px type), and SPEC-029's charge pips, fallback marker and shop
     // headings (three). A theme that shrank body type would show up here as a
     // twenty-second.
+    // SPEC-031 adds the twenty-second: the quick-bar short name under its new
+    // icon box (§4.15) — the same 48 px-slot exemption the other five carry.
     const small = CSS.match(/font-size:\s*(\d+)px/g) ?? [];
     const belowFloor = small.filter((rule) => Number(/(\d+)/.exec(rule)?.[1] ?? 99) < 14);
-    expect(belowFloor.length, belowFloor.join(' ')).toBe(21);
+    expect(belowFloor.length, belowFloor.join(' ')).toBe(22);
   });
 
   it('loads no webfont (AC-26)', () => {
@@ -158,5 +163,82 @@ describe('what the theme must not move (SPEC-020 AC-24 … AC-26)', () => {
     expect(HTML).not.toMatch(/<link[^>]+\.woff2?/);
     // The system stack SPEC-014 chose is still what the body resolves to.
     expect(CSS).toContain("system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif");
+  });
+});
+
+// ------------------------------------------------------------------ SPEC-031
+
+/** SPEC-031 §4.7: the frame tokens the console shell reads. */
+const SHELL_TOKENS = [
+  '--screen-scrim',
+  '--frame-edge',
+  '--frame-cut',
+  '--rule',
+  '--type-xs',
+  '--type-sm',
+  '--type-md',
+  '--type-lg',
+  '--type-xl',
+  '--track',
+  '--key-face',
+] as const;
+
+/** The marked shell block appended by SPEC-031. */
+function shellBlock(): string {
+  const start = CSS.indexOf('/* ================================================================ SPEC-031 */');
+  const end = CSS.indexOf('/* SPEC-031:end */');
+  expect(start, 'the SPEC-031 shell block').toBeGreaterThan(-1);
+  expect(end, 'the SPEC-031 end marker').toBeGreaterThan(start);
+  return CSS.slice(start, end);
+}
+
+describe('the console shell tokens (SPEC-031 AC-20)', () => {
+  it('declares each token exactly once in :root and reads each through var()', () => {
+    const root = rootBlock();
+    for (const token of SHELL_TOKENS) {
+      expect(declarations(token, root), `${token} in :root`).toBe(1);
+      expect(declarations(token), `${token} declarations`).toBe(1);
+      expect(references(token), `${token} references`).toBeGreaterThanOrEqual(1);
+    }
+  });
+
+  it('hard-codes no colour and no font size inside the shell block', () => {
+    const shell = shellBlock();
+    expect(shell).not.toMatch(/#[0-9a-f]{3,8}\b/i);
+    expect(shell).not.toMatch(/(?<![-\w])rgb\(/);
+    expect(shell).not.toMatch(/(?<![-\w])rgba\(/);
+    expect(shell).not.toMatch(/font-size:\s*\d/);
+  });
+
+  it('tracks headings and keys at the shared token', () => {
+    expect(tokenValue('--track')).toBe('0.12em');
+    expect(CSS).toMatch(/\.ui-btn\s*\{[^}]*letter-spacing:\s*var\(--track\)/);
+    expect(CSS).toMatch(/\.ui-btn\s*\{[^}]*text-transform:\s*uppercase/);
+  });
+});
+
+describe('the homeless elements (SPEC-031 §4.8)', () => {
+  it('drops the .station-root grid and its 120 px offset entirely', () => {
+    expect(CSS).not.toContain('.station-root');
+  });
+
+  it('lets the save panel be laid out by the menu, not by itself', () => {
+    const at = CSS.indexOf('.save-panel {');
+    expect(at).toBeGreaterThan(-1);
+    const block = CSS.slice(at, CSS.indexOf('}', at));
+    expect(block).not.toContain('position: absolute');
+    expect(block).not.toContain('z-index');
+  });
+
+  it('hides the scene tag without ?debug and shows it with it', () => {
+    const at = CSS.indexOf('.scene-tag {');
+    expect(at).toBeGreaterThan(-1);
+    const block = CSS.slice(at, CSS.indexOf('}', at));
+    expect(block).toContain('opacity: 0;');
+    expect(CSS).toMatch(/html\.debug \.scene-tag\s*\{[^}]*opacity:/);
+  });
+
+  it('puts the scrim between the backdrop and the frame', () => {
+    expect(CSS).toMatch(/\.screen::before\s*\{[^}]*background:\s*var\(--screen-scrim\)/);
   });
 });

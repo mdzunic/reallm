@@ -32,7 +32,7 @@ test('the boot overlay reports asset progress (AC-45)', async ({ page }) => {
   // The first DOM wait of the test: it spans cold start, so it takes the
   // cold-start budget rather than the 5 s default (this is the assertion that
   // timed out on the merge gate's container).
-  await expect(page.locator('[data-testid="boot-progress"]')).toHaveText(/Loading \d+\/\d+/, COLD_START);
+  await expect(page.locator('[data-testid="boot-progress"]')).toHaveText(/Loading \d+ %/, COLD_START);
   await passGate(page);
   await expect(page.locator('[data-testid="scene-label"]')).toHaveText('menu');
 });

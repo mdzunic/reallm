@@ -45,17 +45,22 @@ export class SavePanel {
   /** The one slot whose paste field is open, if any. */
   #importing: SlotId | null = null;
 
-  constructor(root: HTMLElement, save: SaveStore) {
+  /** The E8 banner, when there is one; removed with the panel. */
+  #banner: HTMLElement | null = null;
+
+  constructor(root: HTMLElement, save: SaveStore, opts?: { bannerHost?: HTMLElement }) {
     this.#save = save;
     this.#root = testId(el('section', 'save-panel'), 'save-panel');
     this.#root.setAttribute('aria-label', 'Saves');
     // E8/AC-17: the banner, and only when there is something to say. The store
     // has already logged and toasted; the banner is what is still on screen
-    // when the toast has gone.
+    // when the toast has gone. SPEC-031 §4.8: the menu sends it to the frame
+    // footer; without a host it stays inside the panel as before.
     if (!save.available) {
       const banner = testId(el('p', 'save-banner', STORAGE_UNAVAILABLE_TEXT), 'storage-banner');
       banner.setAttribute('role', 'status');
-      this.#root.append(banner);
+      this.#banner = banner;
+      (opts?.bannerHost ?? this.#root).append(banner);
     }
     this.#list = el('ul', 'slot-list');
     this.#root.append(this.#list);
@@ -70,6 +75,7 @@ export class SavePanel {
   }
 
   dispose(): void {
+    this.#banner?.remove();
     this.#root.remove();
   }
 

@@ -5,6 +5,7 @@
 // close function, which is idempotent.
 import type { ItemId, QuickSlot } from '@/data/index';
 import { el, h, testId, type UiRoot } from '@/ui/dom';
+import { itemIcon } from '@/ui/ItemIcon';
 
 export interface QuickChoice {
   itemId: ItemId | null;
@@ -64,6 +65,8 @@ export function openQuickPicker(
         h(
           'button',
           { class: 'ui-btn quick-pick', type: 'button', click: () => choose(choice.itemId) },
+          // SPEC-031 §4.15: the picture left of the label.
+          itemIcon(choice.itemId, 28),
           `${choice.label} ×${choice.qty}`,
         ),
         `quick-pick-${choice.itemId}`,

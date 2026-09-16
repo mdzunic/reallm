@@ -4,11 +4,15 @@
 // renders the return values.
 import { describe, expect, it } from 'vitest';
 import { newSave, type CharacterCreation, type Save } from '@/core/Save';
-import { MISSIONS, TUNING, type MissionDef } from '@/data/index';
+import { COMPANIONS, ITEMS, MISSIONS, TUNING, UPGRADES, type MissionDef } from '@/data/index';
 import { discountTokens } from '@/systems/Economy';
 import {
   abandonMission,
   acceptMission,
+  balanceAfterText,
+  gearStatLines,
+  shortfallText,
+  walletModel,
   cloneHud,
   computePlayerStats,
   createHudModel,
@@ -108,17 +112,17 @@ describe('requirementText (AC-112)', () => {
   });
 });
 
-describe('priceText (AC-113)', () => {
-  it('shows the discount as base → paid', () => {
-    expect(priceText({ tokens: 40 }, 0.15)).toBe('40 → 34');
+describe('priceText (AC-113, SPEC-031 §4.12)', () => {
+  it('shows the discount as base → paid, with the unit', () => {
+    expect(priceText({ tokens: 40 }, 0.15)).toBe('40 → 34 tokens');
   });
 
   it('shows the plain price when no discount applies', () => {
-    expect(priceText({ tokens: 40 }, 0)).toBe('40');
+    expect(priceText({ tokens: 40 }, 0)).toBe('40 tokens');
   });
 
   it('appends undiscounted resource costs', () => {
-    expect(priceText({ tokens: 140, resources: { lithium: 80 } }, 0.25)).toBe('140 → 105 + 80 lithium');
+    expect(priceText({ tokens: 140, resources: { lithium: 80 } }, 0.25)).toBe('140 → 105 tokens + 80 lithium');
     expect(priceText({ tokens: 0, resources: { wheat: 3, water: 1 } }, 0.4)).toBe('3 wheat + 1 water');
   });
 
@@ -128,6 +132,157 @@ describe('priceText (AC-113)', () => {
 
   it('a price of nothing is Free', () => {
     expect(priceText({ tokens: 0 }, 0.4)).toBe('Free');
+  });
+});
+
+describe('walletModel (SPEC-031 §4.11)', () => {
+  it('reads a fresh save: four entries in order, capped by the cargo tier', () => {
+    const data = save();
+    const model = walletModel(data);
+    expect(model.tokens).toBe(data.player.tokens);
+    expect(model.resources.map((entry) => entry.id)).toEqual(['oil', 'wheat', 'water', 'lithium']);
+    const cap = UPGRADES.cargo.metrics['cargoCap']?.[data.ship.cargo];
+    for (const entry of model.resources) {
+      expect(entry.cap).toBe(cap);
+      expect(entry.value).toBe(data.resources[entry.id]);
+      expect(entry.atCap).toBe(false);
+    }
+  });
+
+  it('marks atCap only at the cap', () => {
+    const data = save((s) => {
+      s.resources.oil = 400;
+      s.resources.wheat = 399;
+    });
+    const model = walletModel(data);
+    expect(model.resources.find((entry) => entry.id === 'oil')?.atCap).toBe(true);
+    expect(model.resources.find((entry) => entry.id === 'wheat')?.atCap).toBe(false);
+  });
+
+  it('follows the cargo tier and the quartermaster bonus', () => {
+    const data = save((s) => {
+      s.ship.cargo = 2;
+      s.companions.push({ id: 'quartermaster', level: 1, enabled: true });
+    });
+    const bonus = COMPANIONS.quartermaster.levels[0]?.cargoBonus ?? 0;
+    expect(walletModel(data).resources[0]?.cap).toBe((UPGRADES.cargo.metrics['cargoCap']?.[2] ?? 0) + bonus);
+  });
+
+  it('counts a disabled quartermaster, exactly as Economy.cargoCap does', () => {
+    // `Economy.cargoCap()` resolves the quartermaster by owned level alone and
+    // never reads `enabled` — the strip must clamp by the same number, or a
+    // shop-disabled quartermaster shows a false CARGO FULL at the old cap.
+    const data = save((s) => {
+      s.companions.push({ id: 'quartermaster', level: 1, enabled: false });
+    });
+    const bonus = COMPANIONS.quartermaster.levels[0]?.cargoBonus ?? 0;
+    const base = UPGRADES.cargo.metrics['cargoCap']?.[data.ship.cargo] ?? 0;
+    expect(walletModel(data).resources[0]?.cap).toBe(base + bonus);
+  });
+});
+
+describe('shortfallText (SPEC-031 §4.12, E48)', () => {
+  it('is null when affordable', () => {
+    const data = save((s) => {
+      s.player.tokens = 100;
+    });
+    expect(shortfallText({ tokens: 40 }, data, 0)).toBeNull();
+  });
+
+  it('names the token shortfall', () => {
+    const data = save((s) => {
+      s.player.tokens = 10;
+    });
+    expect(shortfallText({ tokens: 50 }, data, 0)).toBe('Need 40 more tokens');
+  });
+
+  it('names the resource shortfall', () => {
+    const data = save((s) => {
+      s.player.tokens = 999;
+      s.resources.lithium = 60;
+    });
+    expect(shortfallText({ tokens: 10, resources: { lithium: 80 } }, data, 0)).toBe('Need 20 more lithium');
+  });
+
+  it('joins both when both are short', () => {
+    const data = save((s) => {
+      s.player.tokens = 10;
+      s.resources.lithium = 12;
+    });
+    expect(shortfallText({ tokens: 130, resources: { lithium: 80 } }, data, 0)).toBe(
+      'Need 120 more tokens · Need 68 more lithium',
+    );
+  });
+
+  it('applies the discount before the comparison', () => {
+    const data = save((s) => {
+      s.player.tokens = 34;
+    });
+    expect(shortfallText({ tokens: 40 }, data, 0.15)).toBeNull();
+    expect(shortfallText({ tokens: 40 }, data, 0)).toBe('Need 6 more tokens');
+  });
+});
+
+describe('balanceAfterText (SPEC-031 §4.12)', () => {
+  it('prints the token balance line', () => {
+    const data = save((s) => {
+      s.player.tokens = 340;
+    });
+    expect(balanceAfterText({ tokens: 49 }, data, 0)).toBe('Tokens 340 → 291');
+  });
+
+  it('prints one line per resource', () => {
+    const data = save((s) => {
+      s.player.tokens = 340;
+      s.resources.wheat = 60;
+      s.resources.water = 45;
+    });
+    expect(balanceAfterText({ tokens: 0, resources: { wheat: 30, water: 30 } }, data, 0)).toBe(
+      'Wheat 60 → 30\nWater 45 → 15',
+    );
+  });
+
+  it('applies the discount to the token line', () => {
+    const data = save((s) => {
+      s.player.tokens = 100;
+    });
+    expect(balanceAfterText({ tokens: 40 }, data, 0.15)).toBe('Tokens 100 → 66');
+  });
+
+  it('is empty for Free', () => {
+    expect(balanceAfterText({ tokens: 0 }, save(), 0.4)).toBe('');
+  });
+});
+
+describe('gearStatLines (SPEC-031 §4.16)', () => {
+  it('pins a weapon: damage, fire rate, DPS, range, speed, pierce, cooldown', () => {
+    const item = ITEMS.pistol_magnum;
+    expect(gearStatLines('pistol_magnum')).toEqual([
+      `Damage ${item.damage}`,
+      `Fire rate ${item.fireRate}/s`,
+      `DPS ${Math.round(item.damage * item.fireRate)}`,
+      `Range ${item.range} m`,
+      `Projectile speed ${item.projectileSpeed} m/s`,
+      `Pierce ${item.pierce}`,
+      'No cooldown',
+    ]);
+  });
+
+  it('describes the heat and charge models in words', () => {
+    expect(gearStatLines('mg_scrap')).toContain('Overheats — locks until it cools');
+    expect(gearStatLines('launcher_grenade')).toContain('3 charges, recharges in 9 s');
+  });
+
+  it('pins an armor piece', () => {
+    const item = ITEMS.armor_ablative;
+    expect(gearStatLines('armor_ablative')).toEqual([
+      `Armor ${item.armor}`,
+      `Hazard resist ${Math.round(item.hazardResist * 100)}%`,
+    ]);
+  });
+
+  it('pins a consumable: the effect in words and the stack', () => {
+    expect(gearStatLines('medkit')).toEqual(['Heals 50% instantly', 'Stack of 5']);
   });
 });
 
