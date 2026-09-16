@@ -14,12 +14,13 @@ import {
   UPGRADES,
   type CompanionId,
   type ItemId,
+  type Price,
   type RecipeId,
   type ShipSystem,
 } from '@/data/index';
 import type { GearLine, Item, ShipSystemDef } from '@/data/index';
 import type { Economy, Result } from '@/systems/Economy';
-import { companionEffectText, failText, priceText } from '@/systems/UiHelpers';
+import { balanceAfterText, companionEffectText, failText, priceText, shortfallText } from '@/systems/UiHelpers';
 import { confirmSheet } from '@/ui/ConfirmSheet';
 import { el, h, testId, type UiRoot } from '@/ui/dom';
 
@@ -156,9 +157,19 @@ export class ShopPanel {
         `shop-ship-${system}-buy`,
         `Buy ${def.name} Tier ${next} for ${this.#paidText('ship', system, next)}?`,
         () => this.#deps.economy.buyShipTier(system),
+        'Buy',
+        () => this.#balanceFor('ship', system, next),
       ),
     );
     return row;
+  }
+
+  /** The confirm sheet's balance snapshot for a priced track (SPEC-031 §4.12). */
+  #balanceFor(kind: 'ship' | 'gear' | 'companion', id: string, tier?: number): string {
+    const price = this.#deps.economy.price(kind, id, tier);
+    if (price === null) return '';
+    // `price` is already discounted, so the balance compares at discount 0.
+    return balanceAfterText(price, this.#deps.data, 0);
   }
 
   // ------------------------------------------------------------------- gear
@@ -216,6 +227,8 @@ export class ShopPanel {
             `shop-gear-${id}-buy`,
             `Buy ${item.name} for ${this.#paidText('gear', id)}?`,
             () => economy.buyGear(id),
+            'Buy',
+            () => this.#balanceFor('gear', id),
           ),
         );
       }
@@ -276,6 +289,7 @@ export class ShopPanel {
             `${buying ? 'Buy' : 'Upgrade'} ${def.name} ${buying ? '' : `to L${level + 1} `}for ${this.#paidText('companion', id, level + 1)}?`,
             () => (buying ? this.#deps.economy.buyCompanion(id) : this.#deps.economy.upgradeCompanion(id)),
             buying ? 'Buy' : 'Upgrade',
+            () => this.#balanceFor('companion', id, level + 1),
           ),
         );
       }
@@ -290,8 +304,14 @@ export class ShopPanel {
     const def = RECIPES[id];
     const item = ITEMS[def.output];
     const qty = this.#qty.get(id) ?? 1;
-    const cost = Object.entries(def.cost)
-      .map(([resource, amount]) => `${(amount ?? 0) * qty} ${resource}`)
+    const scaled: Partial<Record<string, number>> = {};
+    for (const [resource, amount] of Object.entries(def.cost)) scaled[resource] = (amount ?? 0) * qty;
+    // SPEC-031 §4.12: each cost against what is held, following the stepper.
+    const cost = Object.entries(scaled)
+      .map(([resource, amount]) => `${amount} ${resource} (${this.#deps.data.resources[resource as keyof Save['resources']]} held)`)
+      .join(' + ');
+    const plain = Object.entries(scaled)
+      .map(([resource, amount]) => `${amount} ${resource}`)
       .join(' + ');
     const row = testId(el('article', 'shop-row'), `shop-craft-${id}`);
     const stepper = h(
@@ -318,9 +338,10 @@ export class ShopPanel {
         cost,
         this.#craftReason(id, qty),
         `shop-craft-${id}-buy`,
-        `Craft ${item.name}${qty > 1 ? ` ×${qty}` : ''} for ${cost}?`,
+        `Craft ${item.name}${qty > 1 ? ` ×${qty}` : ''} for ${plain}?`,
         () => this.#deps.economy.craft(id, qty),
         'Craft',
+        () => balanceAfterText({ tokens: 0, resources: scaled as Price['resources'] }, this.#deps.data, 0),
       ),
     );
     return row;
@@ -336,8 +357,10 @@ export class ShopPanel {
     const def = RECIPES[id];
     const scaled: Partial<Record<string, number>> = {};
     for (const [resource, amount] of Object.entries(def.cost)) scaled[resource] = (amount ?? 0) * qty;
-    if (!this.#deps.economy.hasResources(scaled as Parameters<Economy['hasResources']>[0])) return failText('insufficient_resources');
-    return null;
+    if (this.#deps.economy.hasResources(scaled as Parameters<Economy['hasResources']>[0])) return null;
+    // SPEC-031 §4.12: the refusal names the first short resource's shortfall.
+    const short = shortfallText({ tokens: 0, resources: scaled as Price['resources'] }, this.#deps.data, 0);
+    return short?.split(' · ')[0] ?? failText('insufficient_resources');
   }
 
   // ----------------------------------------------------------------- shared
@@ -372,9 +395,10 @@ export class ShopPanel {
         }
       }
     }
-    if (data.player.tokens < price.tokens) return failText('insufficient_tokens');
-    if (!economy.hasResources(price.resources ?? {})) return failText('insufficient_resources');
-    return null;
+    // SPEC-031 §4.12 / E48: an unaffordable row names the exact shortfall in
+    // place of the generic line; the price is already discounted, so the
+    // comparison runs at discount 0. Every other refusal keeps `failText`.
+    return shortfallText(price, data, 0);
   }
 
   /**
@@ -383,7 +407,15 @@ export class ShopPanel {
    * confirm re-runs the purchase and holds the sheet open on a refusal
    * (AC-44) — the Economy call *is* the re-validation.
    */
-  #buyLine(price: string, reason: string | null, testid: string, sheetTitle: string, run: () => Result<object>, verb = 'Buy'): HTMLElement {
+  #buyLine(
+    price: string,
+    reason: string | null,
+    testid: string,
+    sheetTitle: string,
+    run: () => Result<object>,
+    verb = 'Buy',
+    sheetBody?: () => string,
+  ): HTMLElement {
     const line = el('div', 'shop-buy-line');
     line.append(h('span', { class: 'shop-price' }, price));
     const button = testId(
@@ -394,9 +426,12 @@ export class ShopPanel {
           type: 'button',
           disabled: reason !== null,
           click: () => {
+            // SPEC-031 §4.12: the balance line — a snapshot at the moment
+            // the sheet opens; the confirm still re-validates (31-k, 14-c).
+            const body = sheetBody?.() ?? '';
             void confirmSheet(
               this.#deps.ui,
-              { title: sheetTitle, confirmText: verb },
+              { title: sheetTitle, body: body === '' ? undefined : body, confirmText: verb },
               () => {
                 const result = run();
                 if (!result.ok) {
