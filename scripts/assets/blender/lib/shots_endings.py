@@ -1,7 +1,7 @@
 # Shots of the two ending films (SPEC-021 §4.4, §5.3): "A Good Run" (stay) and
 # "Disconnected" (escape). The stay film closes the loop — a 63rd card, then the
 # prologue's first shot again; the escape film unmakes the world it shows into
-# clay, UV grids, wireframes and one bust on every card. Times are shot-local.
+# clay, UV grids, wireframes and one face on every card. Times are shot-local.
 import math
 import random
 
@@ -12,6 +12,7 @@ import common as C
 import earth as E
 import figures as FG
 import film as F
+import plate as PL
 import shots_prologue as P
 
 
@@ -177,7 +178,7 @@ def wall_63(ctx):
     P.selection_wall(ctx)
     x, z = 2.1, 1.08
     card = C.link(bpy.data.objects.new('Card63', None))
-    F.plane('Photo63', 0.3, 0.3, F.textured('Photo63', ctx.asset('portraits/04.webp'), rough=0.6), (0, 0, 0.04), (90, 0, 0)).parent = card
+    F.plane('Photo63', 0.3, 0.3, F.textured('Photo63', PL.face(1), rough=0.6), (0, 0, 0.04), (90, 0, 0)).parent = card
     F.plane('Bar63', 0.3, 0.1, F.mat('Bar63', '#e8e4da', 0.8), (0, 0, -0.17), (90, 0, 0)).parent = card
     F.text('No. 63', 0.05, F.mat('Ink63', '#1a1a1a', 0.8), (0, -0.003, -0.17), (90, 0, 0)).parent = card
     F.obj('Pin63', C.sphere(0.012, 8, 6), F.mat('Pin63', '#b02020', 0.4), (0, -0.015, 0.21)).parent = card
@@ -290,7 +291,7 @@ def earth_unmade(ctx):
 
 
 def wall_same(ctx):
-    P.selection_wall(ctx, same=ctx.asset('portraits/05.webp'), blank_62=4.0, desaturate=True)
+    P.selection_wall(ctx, same=PL.face(1), blank_62=4.0, desaturate=True)
     cam, aim = F.camera((-0.3, -1.9, 1.4), (-0.5, 0, 1.33), lens=36)
     F.keys(cam, 'location', [(0, Vector((-0.3, -1.9, 1.4))), (ctx.duration, Vector((-1.1, -1.85, 1.38)))])
     F.keys(aim, 'location', [(0, Vector((-0.5, 0, 1.33))), (ctx.duration, Vector((-1.2, 0, 1.33)))])

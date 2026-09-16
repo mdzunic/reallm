@@ -12,6 +12,7 @@ import earth as E
 import figures as FG
 import film as F
 import nodes as N
+import plate as PL
 
 EYE = '#ff3b30'
 CITY = '#ffcc88'
@@ -183,93 +184,6 @@ def launch(ctx):
     F.keys(aim, 'location', [(0, home * 0.92 + up * 0.62), (ctx.duration, home * 0.95 + up * 0.85)])
 
 
-def city_flash(ctx):
-    horizon = sky_gradient([(0.0, '#20161a'), (0.5, '#ff8a50'), (0.56, '#9a4a5a'), (0.7, '#2a2a48'), (1.0, '#0c1224')], 0.9)
-    dusk = F.sun((0.35, 1.0, -0.12), 1.2, '#ffb080')
-    F.key(dusk.data, 'energy', 1.3, 1.2)
-    F.key(dusk.data, 'energy', 4.0, 0.35)
-    flash_at = Vector((260.0, 9000.0, 900.0))   # an air burst: its glow clears the skyline
-    t_peak = 1.25
-    # the flash: sky, a sun from its direction and a hot sphere, 4 frames up, 24 down
-    F.keys(horizon, 'default_value', [(t_peak - 4 / 24, 0.9), (t_peak, 7.5), (t_peak + 1.0, 0.9), (4.0, 0.55)], interp='LINEAR')
-    flare = F.sun((-(flash_at - Vector((0, 1500, 0)))).normalized(), 0.0, '#fff4d6')
-    F.keys(flare.data, 'energy', [(t_peak - 4 / 24, 0.0), (t_peak, 18.0), (t_peak + 1.0, 0.0)], interp='LINEAR')
-    ball_m = F.emit('Fireball', '#fff0c8', 0.0)
-    F.obj('Fireball', C.sphere(1.0, 24, 16), ball_m, tuple(flash_at), scale=(260, 260, 200))
-    F.keys(F.strength_socket(ball_m), 'default_value',
-           [(t_peak - 4 / 24, 0.0), (t_peak, 60.0), (t_peak + 1.0, 8.0), (ctx.duration, 3.0)], interp='LINEAR')
-    # ridge
-    rb = bmesh.new()
-    bmesh.ops.create_grid(rb, x_segments=80, y_segments=12, size=1.0)
-    for v in rb.verts:
-        v.co = Vector((v.co.x * 600, 60 + v.co.y * 50, 14 + 6 * noise.noise(Vector((v.co.x * 9, v.co.y * 3, 1))) - (v.co.y + 1) * 4))
-    F.obj('Ridge', rb, F.mat('Ridge', '#141210', 0.95), smooth=True)
-    # the city: windows go out block by block from the flash outward
-    win = bpy.data.materials.new('City')
-    win.use_nodes = True
-    g = N.Graph(win)
-    p = g.coords('Object')
-    x, y, z = g.xyz(p)
-    u = g.math('DIVIDE', g.math('ADD', x, y), 7.0)
-    v = g.math('DIVIDE', z, 5.5)
-    fu, fv = g.math('FRACT', u), g.math('FRACT', v)
-    box_u = g.math('MULTIPLY', g.math('GREATER_THAN', fu, 0.22), g.math('LESS_THAN', fu, 0.78))
-    box_v = g.math('MULTIPLY', g.math('GREATER_THAN', fv, 0.3), g.math('LESS_THAN', fv, 0.75))
-    wn = g.node('ShaderNodeTexWhiteNoise', noise_dimensions='3D')
-    g.link(g.combine(g.math('FLOOR', u), g.math('FLOOR', v), 0.0), wn.inputs['Vector'])
-    lit = g.math('GREATER_THAN', wn.outputs['Value'], 0.45)
-    order = g.channel(g.attribute('Col'), 'Red')
-    gate = g.node('ShaderNodeMath', operation='GREATER_THAN')
-    g.link(order, gate.inputs[0])
-    F.keys(gate.inputs[1], 'default_value', [(0, -0.05), (1.4, -0.05), (6.0, 1.05)], interp='LINEAR')
-    mask = g.math('MULTIPLY', g.math('MULTIPLY', box_u, box_v), g.math('MULTIPLY', lit, gate.outputs[0]))
-    bsdf = g.node('ShaderNodeBsdfPrincipled')
-    bsdf.inputs['Base Color'].default_value = C.lin('#1a1a1e')
-    bsdf.inputs['Roughness'].default_value = 0.8
-    bsdf.inputs['Emission Color'].default_value = C.lin(CITY)
-    g.link(g.math('MULTIPLY', mask, 3.5), bsdf.inputs['Emission Strength'])
-    out = g.node('ShaderNodeOutputMaterial')
-    g.link(bsdf.outputs[0], out.inputs['Surface'])
-    b = C.Builder(vcol=True)
-    for i in range(620):
-        bx = ctx.rng.uniform(-900, 900)
-        by = ctx.rng.uniform(1100, 2600)
-        centre = math.exp(-(bx / 420) ** 2)
-        h = ctx.rng.uniform(12, 50) + 110 * centre * ctx.rng.random()
-        w, d = ctx.rng.uniform(18, 55), ctx.rng.uniform(18, 55)
-        dist = math.hypot(bx - flash_at.x, by - flash_at.y)
-        order = min(max((dist - 6300) / 1800, 0.0), 1.0)
-        b.add(C.place(C.box(w, d, h), (bx, by, h / 2)), color=(order, 0, 0, 1), smooth=None)
-    b.object('City', [win])
-    # the cloud rising and the dust wall rolling in
-    F.plane('Plain', 40000, 30000, F.mat('Plain', '#16110e', 0.95), (0, 14000, 0))
-    cloud_m = F.mat('Cloud', '#6a5a50', 1.0, 0.0, '#ff7a30', 0.0)
-    F.keys(F.strength_socket(cloud_m), 'default_value', [(t_peak, 0.0), (t_peak + 0.6, 0.9), (ctx.duration, 0.3)], interp='LINEAR')
-    stem = C.cyl(300, 520, 4000, n=20)
-    C.displace(stem, lambda co: 80 * noise.noise(co * 0.003))
-    cap = C.sphere(1500, 24, 14)
-    C.place(cap, (0, 0, 4300), scale=(1.0, 1.0, 0.55))
-    C.displace(cap, lambda co: 220 * noise.noise(co * 0.0018))
-    cb = C.Builder(vcol=False)
-    cb.add(C.place(stem, (0, 0, 2000)))
-    cb.add(cap)
-    cloud = cb.object('Cloud', [cloud_m])
-    cloud.location = (flash_at.x, flash_at.y, 0.0)
-    F.keys(cloud, 'scale', [(t_peak + 0.2, Vector((0.08, 0.08, 0.03))), (5.0, Vector((0.8, 0.8, 0.8))),
-                            (ctx.duration, Vector((1.0, 1.0, 1.0)))])
-    dome_m = F.glow('Shock', '#ffd8a8', 1.5)
-    dome = F.obj('Shock', C.sphere(1.0, 32, 16), dome_m, tuple(flash_at - Vector((0, 0, 320))))
-    F.keys(dome, 'scale', [(t_peak, Vector((1, 1, 1))), (4.0, Vector((5200, 5200, 2600)))], interp='LINEAR')
-    F.keys(F.strength_socket(dome_m), 'default_value', [(t_peak, 2.0), (4.0, 0.0)], interp='LINEAR')
-    wall_m = F.mat('Dust', '#3a2c22', 1.0)
-    ring = C.lathe([(1.0, 0.0), (1.0, 0.08), (0.96, 0.14)], n=96)
-    C.displace(ring, lambda co: 0.03 * noise.noise(co * 6))
-    wall = F.obj('DustWall', ring, wall_m, (flash_at.x, flash_at.y, 0.0))
-    F.keys(wall, 'scale', [(2.0, Vector((600, 600, 700))), (ctx.duration, Vector((6400, 6400, 1800)))], interp='LINEAR')
-    cam, aim = F.camera((0, 30, 24), (60, 1500, 70), lens=32, clip=(1.0, 30000.0))
-    F.keys(cam, 'location', [(0, Vector((0, 30, 24))), (ctx.duration, Vector((0, -10, 26)))])
-
-
 def stranded(ctx):
     F.world('#4a505a', 1.25)
     F.sun((0.3, 0.6, -1.0), 2.0, '#c8ccd4', angle=0.6)
@@ -320,88 +234,6 @@ def stranded(ctx):
     F.keys(aim, 'location', [(0, Vector((-5, 12, 1.7))), (ctx.duration, Vector((9, 12, 1.7)))], interp='LINEAR')
 
 
-def shelter_room(ctx, lamp_steady_at=None, people_pose='lean'):
-    """Shelter Nine (shared with interlude_c1's `shelter_light`). Returns the lamp light."""
-    F.world('#0b0a09', 0.25)
-    wall = concrete('Concrete', '#5a5650', 1.2)
-    for loc, rot, sx, sy in (((0, 0, 0), (0, 0, 0), 12, 10), ((0, 0, 3.2), (180, 0, 0), 12, 10), ((0, 5, 1.6), (90, 0, 0), 12, 3.2),
-                             ((-6, 0, 1.6), (90, 0, 90), 10, 3.2), ((6, 0, 1.6), (90, 0, -90), 10, 3.2)):
-        F.plane('Wall', sx, sy, wall, loc, rot)
-    wood = F.mat('Table', '#4a3524', 0.7)
-    F.obj('Table', C.box(2.6, 1.3, 0.08), wood, (0, 0, 0.88))
-    for x in (-1.15, 1.15):
-        for y in (-0.55, 0.55):
-            F.obj('Leg', C.box(0.08, 0.08, 0.86), wood, (x, y, 0.43))
-    paper = bpy.data.materials.new('Map')
-    paper.use_nodes = True
-    g = N.Graph(paper)
-    n = g.noise(g.coords('Object'), 2.2, 11, detail=6)
-    land = g.math('GREATER_THAN', n, 0.52)
-    x, y, _ = g.xyz(g.coords('Object'))
-    grid = g.math('MAXIMUM', g.math('LESS_THAN', g.math('FRACT', g.math('MULTIPLY', x, 6.0)), 0.04),
-                  g.math('LESS_THAN', g.math('FRACT', g.math('MULTIPLY', y, 6.0)), 0.04))
-    mix = g.node('ShaderNodeMix', data_type='RGBA')
-    g.link(land, mix.inputs['Factor'])
-    mix.inputs['A'].default_value = C.lin('#d8c9a0')
-    mix.inputs['B'].default_value = C.lin('#b09a6a')
-    ink = g.node('ShaderNodeMix', data_type='RGBA')
-    g.link(g.math('MULTIPLY', grid, 0.6), ink.inputs['Factor'])
-    g.link(mix.outputs['Result'], ink.inputs['A'])
-    ink.inputs['B'].default_value = C.lin('#6a5a44')
-    bs = g.node('ShaderNodeBsdfPrincipled')
-    g.link(ink.outputs['Result'], bs.inputs['Base Color'])
-    bs.inputs['Roughness'].default_value = 0.9
-    o = g.node('ShaderNodeOutputMaterial')
-    g.link(bs.outputs[0], o.inputs['Surface'])
-    F.plane('Map', 1.6, 1.0, paper, (0, 0, 0.925), (0, 0, 4))
-    people = C.mat_vcol('People', rough=0.85)
-    # around the table, each turned to the map give or take a few degrees (fronts
-    # face −Y, so the turn toward a point is atan2(dx, −dy))
-    seats = [(-1.7, 0.2, -6), (-1.6, -0.5, 4), (1.7, -0.1, 5), (1.6, 0.55, -4), (-0.5, -1.2, 3), (0.6, -1.25, -5),
-             (-0.3, 1.25, 6), (0.7, 1.2, -3)]
-    for i, (x, y, jitter) in enumerate(seats):
-        rot = math.degrees(math.atan2(-x, y)) + jitter
-        FG.person(f'P{i}', i, people, people_pose if i % 3 else 'lean', (x, y, 0), rot)
-    drum = F.mat('Drum', '#7a2e1e', 0.6, 0.3)
-    for i in range(4):
-        F.obj('Drum', C.cyl(0.3, 0.3, 0.9, n=16), drum, (-5.2 + i * 0.68, 4.3, 0.45))
-    F.obj('Tank', C.cyl(0.7, 0.7, 2.2, n=20), F.mat('Tank', '#6a7074', 0.4, 0.6), (4.6, 3.6, 1.1))
-    F.obj('Gauge', C.cyl(0.18, 0.18, 0.03, n=16), F.mat('Gauge', '#e8e4d8', 0.5), (4.6, 2.88, 1.5), (90, 0, 0))
-    F.obj('Needle', C.box(0.012, 0.012, 0.15), F.mat('Needle', '#aa2222', 0.5), (4.52, 2.85, 1.44), (0, 55, 0))
-    F.obj('Sack', C.sphere(0.4, 10, 8), F.mat('Sack', '#8a7450', 1.0), (-4.6, 3.2, 0.14), scale=(1.2, 0.9, 0.3))
-    F.obj('Reactor', C.box(1.6, 0.4, 1.8, 0.02), F.mat('Panel', '#2a2e30', 0.5, 0.5), (0.0, 4.75, 0.9))
-    F.obj('Screen', C.box(1.1, 0.02, 0.5), F.mat('Screen', '#050606', 0.2), (0.0, 4.54, 1.25))
-    F.text('OFFLINE', 0.09, F.emit('Offline', '#ff3a2a', 0.7), (0.0, 4.52, 1.25), (90, 0, 0))
-    F.obj('Cable', C.cyl(0.01, 0.01, 0.9, n=6), F.mat('Cable', '#101010', 0.8), (0, 0, 2.75))
-    F.obj('Shade', C.lathe([(0.04, 0.12), (0.28, -0.08), (0.3, -0.1)], n=20), F.mat('Shade', '#2a3a2a', 0.5, 0.5), (0, 0, 2.3))
-    bulb = F.emit('Bulb', '#ffd9a0', 12.0)
-    F.obj('Bulb', C.sphere(0.06, 10, 8), bulb, (0, 0, 2.24))
-    light = F.lamp((0, 0, 2.15), 140, '#ffd9a0', radius=0.08)
-    # flicker: ±12 % every few frames, never a flash
-    t, k = 0.0, 0
-    stop = lamp_steady_at if lamp_steady_at is not None else ctx.duration
-    while t < stop:
-        e = 140 * (1 - 0.12 * ((k * 7919) % 5) / 4)
-        F.key(light.data, 'energy', t, e, interp='LINEAR')
-        F.key(F.strength_socket(bulb), 'default_value', t, 12 * e / 140, interp='LINEAR')
-        t += (2 + (k * 31) % 3) / 24
-        k += 1
-    if lamp_steady_at is not None:
-        F.key(light.data, 'energy', lamp_steady_at + 0.1, 150)
-        F.key(F.strength_socket(bulb), 'default_value', lamp_steady_at + 0.1, 13.0)
-    return light
-
-
-def shelter(ctx):
-    shelter_room(ctx)
-    cam, aim = F.camera((3.4, -3.8, 2.3), (0, 0.3, 1.0), lens=28)
-    F.keys(cam, 'location', [(0, Vector((3.4, -3.8, 2.3))), (ctx.duration, Vector((2.8, -3.1, 2.05)))])
-
-
-CARD_NUMBERS = (62, 7, 13, 19, 24, 28, 33, 38, 41, 46, 50, 55)
-STAMP_ORDER = (0, 2, 7, 1)   # card indices stamped at 1.6, 3.2, 4.8, 6.4 s — number 62 first
-
-
 def selection_wall(ctx, same=None, blank_62=None, desaturate=False):
     """The Selection board (shared with the endings). `same` = one image path for
     every card; `blank_62` = when card 62 fades to white; `desaturate` greys the photos."""
@@ -418,7 +250,8 @@ def selection_wall(ctx, same=None, blank_62=None, desaturate=False):
     cards = []
     for i, (x, z) in enumerate(slots[:12]):
         number = CARD_NUMBERS[i]
-        path = same or ctx.asset(f'portraits/{(i % 12) + 1:02d}.webp')
+        # the second row shows the same six shifted by three, so no two cards pair up
+        path = same or PL.face((i + 3 * (i // 6)) % 6 + 1)
         photo = F.textured(f'Photo{i}', path, rough=0.6)
         if desaturate:
             nt = photo.node_tree

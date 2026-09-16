@@ -68,7 +68,7 @@ describe('story films (SPEC-021 §8)', () => {
   it('3. pins every film length', () => {
     const lengths = Object.fromEntries(films.map((film) => [film.id, duration(film)]));
     expect(lengths).toEqual({
-      prologue: 72, departure: 7, interlude_c1: 14, interlude_c2: 14, interlude_c3: 14, interlude_c4: 16, interlude_c5: 16,
+      prologue: 93, departure: 7, interlude_c1: 14, interlude_c2: 14, interlude_c3: 14, interlude_c4: 16, interlude_c5: 16,
       ending_stay: 36, ending_escape: 36,
     });
   });

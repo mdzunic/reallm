@@ -8,9 +8,10 @@
 #   node scripts/assets/blender/build.mjs films --stills --shots=launch --preview=DIR   # poster frames only
 #   node scripts/assets/blender/build.mjs films --stills --shots=launch --at=1,4 --preview=DIR   # chosen moments
 #
-# Frames are cached under --frames=DIR (default: the OS temp dir) keyed by a
-# hash of each shot's code, so a rebuild re-renders only what changed. The shot
-# table mirrors src/data/films.ts; tests/data/films.test.ts checks the two agree.
+# Frames are cached under --frames=DIR (default: the OS temp dir) keyed by a hash
+# of each shot's code and of any plate it shows, so a rebuild re-renders only what
+# changed. The shot table mirrors src/data/films.ts; tests/data/films.test.ts
+# checks the two agree.
 import os
 import sys
 
@@ -22,37 +23,56 @@ import common as C  # noqa: E402
 import earth as E  # noqa: E402
 import figures as FG  # noqa: E402
 import film as F  # noqa: E402
+import plate as PL  # noqa: E402
 import shots_endings as X  # noqa: E402
 import shots_interludes as I  # noqa: E402
 import shots_prologue as P  # noqa: E402
 
 S = F.Shot
+# Photographic plates (PLAN R11, R12): the shots that show people and the strike
+CURFEW_PLATE = PL.path('prologue_curfew')
+SABOTAGE_PLATE = PL.path('prologue_sabotage')
+REPRISAL_PLATE = PL.path('prologue_reprisal')
+CITY_PLATE = PL.path('prologue_city_flash')
+SHELTER_PLATE = PL.path('prologue_shelter')
+TAP_PLATE = PL.path('interlude_c2_tap')
 GROVE = (X.eden_grove, X.broadleaf, X.conifer, X.bush, X.tufts, X._tone, X._leaves, P.sky_gradient, P.concrete)
 
 FILMS = [
     F.Film('prologue', [
         S('earth_night', 0, 8, 5, P.earth_night, deps=(E, P.satellite)),
         S('machine_hall', 8, 16, 14, P.machine_hall, deps=(FG, P.concrete, P.boxes, P.eye_mat)),
-        S('launch', 16, 25, 22, P.launch, deps=(E,)),
-        S('city_flash', 25, 35, 29, P.city_flash, deps=(P.sky_gradient,), bloom=0.7),
-        S('stranded', 35, 45, 42, P.stranded, deps=(FG, P.concrete, P.boxes, P.eye_mat)),
-        S('shelter', 45, 54, 50, P.shelter, samples=32, deps=(FG, P.shelter_room, P.concrete)),
-        S('selection', 54, 62, 60, P.selection, deps=(P.selection_wall, P.stamp)),
-        S('liftoff', 62, 69, 66, P.liftoff, deps=(P.spaceport, P.gantry, P.tug, P.sky_gradient, P.concrete, P.boxes)),
-        S('relay', 69, 72, 70, P.relay, deps=(E, P.tug)),
-    ], flashes=(26.25,)),
+        S('curfew', 16, 23, 20, PL.shot(CURFEW_PLATE, push=0.02, drift=(0.12, 0.0), exposure=0.80, saturation=0.95),
+          samples=8, deps=(PL,), plates=(CURFEW_PLATE,)),
+        S('sabotage', 23, 30, 25, PL.shot(SABOTAGE_PLATE, push=0.08, drift=(0.0, -0.01), exposure=0.95, saturation=0.95, flash=(6.2, 3.0)),
+          samples=8, deps=(PL,), plates=(SABOTAGE_PLATE,)),
+        S('reprisal', 30, 37, 34, PL.shot(REPRISAL_PLATE, push=-0.07, drift=(0.02, 0.0), exposure=0.76, saturation=0.95),
+          samples=8, deps=(PL,), plates=(REPRISAL_PLATE,)),
+        S('launch', 37, 46, 43, P.launch, deps=(E,)),
+        S('city_flash', 46, 56, 50, PL.shot(CITY_PLATE, push=-0.05, exposure=0.92, saturation=0.95, flash=(1.25, 1.9)),
+          samples=8, deps=(PL,), plates=(CITY_PLATE,), bloom=0.7),
+        S('stranded', 56, 66, 63, P.stranded, deps=(FG, P.concrete, P.boxes, P.eye_mat)),
+        S('shelter', 66, 75, 71, PL.shot(SHELTER_PLATE, push=0.07, drift=(0.006, -0.008), exposure=0.75, saturation=0.92, flicker=0.06),
+          samples=8, deps=(PL,), plates=(SHELTER_PLATE,)),
+        S('selection', 75, 83, 81, P.selection, deps=(P.selection_wall, P.stamp), plates=PL.FACES),
+        S('liftoff', 83, 90, 87, P.liftoff, deps=(P.spaceport, P.gantry, P.tug, P.sky_gradient, P.concrete, P.boxes)),
+        S('relay', 90, 93, 91, P.relay, deps=(E, P.tug)),
+    ], flashes=(29.2, 47.25)),
     F.Film('departure', [
         S('undock', 0, 4, 2, P.undock, deps=(E, P.tug)),
         S('jump', 4, 7, 4.5, P.jump, deps=(P.tug,)),
     ], flashes=(6.25,)),
     F.Film('interlude_c1', [
         S('capsule', 0, 5, 3, I.capsule, deps=(P.spaceport, P.gantry, P.sky_gradient, P.concrete, P.boxes)),
-        S('shelter_light', 5, 10, 8.5, I.shelter_light, samples=32, deps=(FG, P.shelter_room, P.concrete)),
+        S('shelter_light', 5, 10, 8.5, PL.shot(SHELTER_PLATE, push=0.06, drift=(-0.006, 0.004), exposure=0.55,
+                                             saturation=0.92, flicker=0.05, lift=(2.0, 1.55, 0.5)),
+          samples=8, deps=(PL,), plates=(SHELTER_PLATE,)),
         S('earth_c1', 10, 14, 12.5, I.earth_c1, deps=(E, I.earth_relit)),
     ]),
     F.Film('interlude_c2', [
         S('tanks', 0, 5, 3.5, I.tanks, samples=32, deps=(P.concrete,)),
-        S('tap', 5, 10, 8, I.tap, samples=32, deps=(FG, P.concrete)),
+        S('tap', 5, 10, 8, PL.shot(TAP_PLATE, push=0.05, drift=(0.012, -0.004), exposure=0.95, saturation=0.95),
+          samples=8, deps=(PL,), plates=(TAP_PLATE,)),
         S('earth_c2', 10, 14, 12.5, I.earth_c2, deps=(E, I.earth_relit)),
     ]),
     F.Film('interlude_c3', [
@@ -73,14 +93,14 @@ FILMS = [
         S('uplink', 0, 6, 3, X.uplink, deps=GROVE),
         S('fleet', 6, 14, 11, X.fleet, deps=(FG, P.spaceport, P.gantry, P.tug, P.sky_gradient, P.concrete, P.boxes)),
         S('earth_full', 14, 21, 18, X.earth_full, deps=(E,)),
-        S('wall_63', 21, 30, 28, X.wall_63, deps=(P.selection_wall, P.stamp)),
+        S('wall_63', 21, 30, 28, X.wall_63, deps=(P.selection_wall, P.stamp), plates=PL.FACES),
         S('earth_again', 30, 36, 32, X.earth_again, deps=(E, P.earth_night, P.satellite)),
     ]),
     F.Film('ending_escape', [
         S('exit', 0, 6, 3, X.exit_door, deps=GROVE),
         S('eden_unmade', 6, 14, 11, X.eden_unmade, deps=(E,)),
         S('earth_unmade', 14, 22, 18, X.earth_unmade, deps=(FG, X.clay)),
-        S('wall_same', 22, 29, 26, X.wall_same, deps=(P.selection_wall,)),
+        S('wall_same', 22, 29, 26, X.wall_same, deps=(P.selection_wall,), plates=PL.FACES),
         S('point', 29, 36, 30, X.point, deps=(X.clay,)),
     ]),
 ]

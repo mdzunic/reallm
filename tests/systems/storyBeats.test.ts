@@ -168,8 +168,8 @@ describe('skipAccepted (SPEC-022 §4.5, E33)', () => {
 });
 
 describe('filmDuration', () => {
-  it('the prologue is 72 s', () => {
-    expect(filmDuration(FILMS.prologue)).toBe(72);
+  it('the prologue is 93 s', () => {
+    expect(filmDuration(FILMS.prologue)).toBe(93);
   });
 });
 

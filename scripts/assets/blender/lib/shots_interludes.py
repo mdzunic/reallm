@@ -9,7 +9,6 @@ from mathutils import Vector, noise
 
 import common as C
 import earth as E
-import figures as FG
 import film as F
 import nodes as N
 import shots_prologue as P
@@ -127,38 +126,6 @@ def tanks(ctx):
     cam, aim = F.camera((-2.8, -3.4, 2.5), (0, 0.4, 1.3), lens=30)
     F.keys(cam, 'location', [(0, Vector((-2.8, -3.4, 2.5))), (ctx.duration, Vector((-1.3, -3.6, 2.4)))])
     F.keys(aim, 'location', [(0, Vector((0, 0.4, 1.3))), (ctx.duration, Vector((0.9, 0.6, 1.3)))])
-
-
-def tap(ctx):
-    F.world('#0c0b0a', 0.3)
-    F.lamp((0.6, -0.8, 2.2), 260, '#ffe0b8', radius=0.2)
-    F.lamp((-1.5, -2.5, 2.0), 120, '#b8c8ff', radius=0.5)
-    F.plane('Wall', 8, 4, P.concrete('TapWall', '#5a5650', 1.2), (0, 0.35, 1.5), (90, 0, 0))
-    steel = F.mat('TapSteel', '#9aa0a6', 0.3, 0.9)
-    F.obj('Pipe', C.cyl(0.03, 0.03, 0.35, n=12), steel, (0, 0.18, 1.3), (90, 0, 0))
-    F.obj('Spout', C.cyl(0.028, 0.022, 0.12, n=12), steel, (0, 0.0, 1.25))
-    F.obj('Valve', C.torus(0.05, 0.012, n=16, m=6), F.mat('Valve', '#aa2222', 0.5), (0, 0.18, 1.37))
-    water, nt, wb = C._principled('Water')
-    water.surface_render_method = 'BLENDED'
-    wb.inputs['Base Color'].default_value = C.lin('#cfe8ff')
-    wb.inputs['Alpha'].default_value = 0.55
-    wb.inputs['Roughness'].default_value = 0.05
-    stream = F.obj('Stream', C.cyl(0.012, 0.016, 0.13, n=10), water, (0, 0.0, 1.125))
-    F.keys(stream, 'scale', [(k * 0.25, Vector((1 + 0.12 * math.sin(k * 1.7), 1 + 0.12 * math.cos(k * 2.3), 1))) for k in range(21)],
-           interp='LINEAR')
-    cup = F.mat('Cup', '#c8c2b4', 0.5)
-    shape = [(0.035, 0.0), (0.045, 0.02), (0.05, 0.11)]
-    # the queue along the wall, a cup each; the first holds hers under the tap
-    people = C.mat_vcol('People', rough=0.85)
-    for k in range(5):
-        x = -0.3 - 0.58 * k
-        FG.person(f'Q{k}', k + 3, people, 'hold', (x, -0.02, 0), 90)   # facing +X, the tap (fronts face −Y)
-        F.obj('Cup', C.lathe(shape, n=16, cap_bottom=True), cup, (0.0, 0.0, 0.95) if k == 0 else (x + 0.38, -0.02, 1.0))
-    cam, aim = F.camera((0.55, -1.5, 1.35), (-0.6, 0.0, 1.15), lens=30)
-    F.keys(cam, 'location', [(0, Vector((0.55, -1.5, 1.35))), (ctx.duration, Vector((0.45, -1.3, 1.33)))])
-    cam.data.dof.use_dof = True
-    cam.data.dof.focus_distance = 1.5
-    cam.data.dof.aperture_fstop = 4.0
 
 
 def earth_c2(ctx):

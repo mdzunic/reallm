@@ -89,7 +89,7 @@ test('1 — video mode: the MP4 plays, captions type, a seek to the end reaches 
     await newGame(page);
     await expect(film).toHaveAttribute('data-mode', 'stills');
     await expect(page.locator('[data-testid="film-poster"]')).toHaveAttribute('src', /prologue_earth_night\.webp$/);
-    await page.evaluate(() => window.__reallmFilm?.seek(71.9));
+    await page.evaluate(() => window.__reallmFilm?.seek(92.9));
     await expect(page.locator('[data-testid="creation-confirm"]')).toBeVisible({ timeout: 15_000 });
     return;
   }
@@ -100,7 +100,7 @@ test('1 — video mode: the MP4 plays, captions type, a seek to the end reaches 
   await expect(page.locator('[data-testid="film-caption"]')).toContainText('We built minds to run the world', {
     timeout: 10_000,
   });
-  await page.evaluate(() => window.__reallmFilm?.seek(71.9));
+  await page.evaluate(() => window.__reallmFilm?.seek(92.9));
   await expect(page.locator('[data-testid="creation-confirm"]')).toBeVisible({ timeout: 15_000 });
 });
 
@@ -110,7 +110,7 @@ test('2 — stills mode: a dead MP4 falls back to posters, seek pans the reel, S
   await expect(page.locator(FILM)).toHaveAttribute('data-mode', 'stills');
   const poster = page.locator('[data-testid="film-poster"]');
   await expect(poster).toHaveAttribute('src', /prologue_earth_night\.webp$/);
-  await page.evaluate(() => window.__reallmFilm?.seek(55));
+  await page.evaluate(() => window.__reallmFilm?.seek(76));
   await expect(poster).toHaveAttribute('src', /prologue_selection\.webp$/);
   // §4.5: taps wait out the 0.3 s pointer grace, and `seek()` moves the film
   // clock, not the wall clock the grace reads — on a fast machine the four

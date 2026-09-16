@@ -68,10 +68,10 @@ def options():
 
 
 class Shot:
-    def __init__(self, id, start, end, poster, build, samples=16, deps=(), bloom=0.5, vignette=0.14):
+    def __init__(self, id, start, end, poster, build, samples=16, deps=(), bloom=0.5, vignette=0.14, plates=()):
         self.id, self.start, self.end, self.poster = id, start, end, poster
         self.build, self.samples, self.deps = build, samples, tuple(deps)
-        self.bloom, self.vignette = bloom, vignette
+        self.bloom, self.vignette, self.plates = bloom, vignette, tuple(plates)
 
     @property
     def frames(self):
@@ -449,6 +449,9 @@ def shot_hash(shot, draft):
     h.update(inspect.getsource(shot.build).encode())
     for mod in shot.deps:
         h.update(inspect.getsource(mod).encode())
+    for plate in shot.plates:   # a plate is a picture, not code: hash the bytes, or a new image is ignored
+        with open(plate, 'rb') as fh:
+            h.update(fh.read())
     h.update(repr((shot.start, shot.end, shot.samples, shot.bloom, shot.vignette, WIDTH, HEIGHT, LOOK_VERSION, draft,
                    bpy.app.version_string)).encode())
     return h.hexdigest()

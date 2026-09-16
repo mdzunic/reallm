@@ -25,14 +25,38 @@ pack can replace any of them under the same name, with its row moved out of the
 generated table below and changed to match. The table between the markers is
 rewritten by the build from the files on disk; do not edit it by hand.
 
+## Plates
+
+Seven shots of the story films are **photographic plates** (PLAN R11, R12, R13)
+— six pictures, one of which serves two shots — and
+the Selection cards carry six photographed faces: the pictures are committed
+images under `scripts/assets/blender/plates/`, and `films.py` renders them
+through each film's own look instead of building the scene. They are art, not
+code, so the build cannot write their rows — these are kept by hand, and the
+films and posters that carry one name it in the generated table below.
+
+**The photographs were generated with Google Gemini**, prompted for this
+repository; everything else in `public/assets/` is generated from the committed
+scripts or synthesised.
+
+| Plate | Where | Source | License | Modifications |
+| --- | --- | --- | --- | --- |
+| `plates/prologue_curfew.jpg` | `prologue/curfew` (16–23 s) | Generated with Google Gemini for this repository | CC0 | Rendered at exposure 0.80, saturation 0.95, panning right across the frame |
+| `plates/prologue_sabotage.jpg` | `prologue/sabotage` (23–30 s) | Generated with Google Gemini for this repository | CC0 | Rendered at exposure 0.95, saturation 0.95, with a slow push and an authored flash at 29.2 s |
+| `plates/prologue_reprisal.jpg` | `prologue/reprisal` (30–37 s) | Generated with Google Gemini for this repository | CC0 | Rendered at exposure 0.76, saturation 0.95, pulling out to the whole frame |
+| `plates/prologue_city_flash.jpg` | `prologue/city_flash` (46–56 s) | Generated with Google Gemini for this repository | CC0 | Rendered at exposure 0.92, saturation 0.95, pulling out, with an authored flash at 47.25 s |
+| `plates/prologue_shelter.jpg` | `prologue/shelter` (66–75 s) and `interlude_c1/shelter_light` (5–10 s) | Generated with Google Gemini for this repository | CC0 | Rendered at exposure 0.75 and 0.55, saturation 0.92, each with its own push and drift; the lamp flickers, and in the interlude the light lifts to 1.55× at 2 s |
+| `plates/interlude_c2_tap.jpg` | `interlude_c2/tap` (5–10 s) | Generated with Google Gemini for this repository | CC0 | Rendered at exposure 0.95, saturation 0.95, with a slow push and drift |
+| `plates/selection/01.webp` … `06.webp` | the Selection cards of `prologue/selection`, `ending_stay/wall_63` and `ending_escape/wall_same` | Generated with Google Gemini for this repository | CC0 | Six faces cut from one sheet to 320² and saved as WebP; the wall shows each of them twice |
+
 <!-- blender:start -->
 | File | Source | License | Modifications |
 | --- | --- | --- | --- |
 | `films/departure.mp4` | Original to this repository — story film rendered in EEVEE from code (PLAN R9); generated in Blender by `scripts/assets/blender/films.py` | CC0 | — |
-| `films/ending_escape.mp4` | Original to this repository — story film rendered in EEVEE from code (PLAN R9); generated in Blender by `scripts/assets/blender/films.py` | CC0 | — |
-| `films/ending_stay.mp4` | Original to this repository — story film rendered in EEVEE from code (PLAN R9); generated in Blender by `scripts/assets/blender/films.py` | CC0 | — |
+| `films/ending_escape.mp4` | Original to this repository — story film rendered in EEVEE from code over the photographic plates listed under Plates above (PLAN R9, R11, R12); generated in Blender by `scripts/assets/blender/films.py` | CC0 | — |
+| `films/ending_stay.mp4` | Original to this repository — story film rendered in EEVEE from code over the photographic plates listed under Plates above (PLAN R9, R11, R12); generated in Blender by `scripts/assets/blender/films.py` | CC0 | — |
 | `films/interlude_c1.mp4` | Original to this repository — story film rendered in EEVEE from code (PLAN R9); generated in Blender by `scripts/assets/blender/films.py` | CC0 | — |
-| `films/interlude_c2.mp4` | Original to this repository — story film rendered in EEVEE from code (PLAN R9); generated in Blender by `scripts/assets/blender/films.py` | CC0 | — |
+| `films/interlude_c2.mp4` | Original to this repository — story film rendered in EEVEE from code over the photographic plates listed under Plates above (PLAN R9, R11, R12); generated in Blender by `scripts/assets/blender/films.py` | CC0 | — |
 | `films/interlude_c3.mp4` | Original to this repository — story film rendered in EEVEE from code (PLAN R9); generated in Blender by `scripts/assets/blender/films.py` | CC0 | — |
 | `films/interlude_c4.mp4` | Original to this repository — story film rendered in EEVEE from code (PLAN R9); generated in Blender by `scripts/assets/blender/films.py` | CC0 | — |
 | `films/interlude_c5.mp4` | Original to this repository — story film rendered in EEVEE from code (PLAN R9); generated in Blender by `scripts/assets/blender/films.py` | CC0 | — |
@@ -43,18 +67,18 @@ rewritten by the build from the files on disk; do not edit it by hand.
 | `films/posters/ending_escape_eden_unmade.webp` | Original to this repository — story film poster, a frame of its shot (PLAN R9); generated in Blender by `scripts/assets/blender/films.py` | CC0 | — |
 | `films/posters/ending_escape_exit.webp` | Original to this repository — story film poster, a frame of its shot (PLAN R9); generated in Blender by `scripts/assets/blender/films.py` | CC0 | — |
 | `films/posters/ending_escape_point.webp` | Original to this repository — story film poster, a frame of its shot (PLAN R9); generated in Blender by `scripts/assets/blender/films.py` | CC0 | — |
-| `films/posters/ending_escape_wall_same.webp` | Original to this repository — story film poster, a frame of its shot (PLAN R9); generated in Blender by `scripts/assets/blender/films.py` | CC0 | — |
+| `films/posters/ending_escape_wall_same.webp` | Original to this repository — story film poster, a frame of a plate shot (PLAN R11, R12); generated in Blender by `scripts/assets/blender/films.py` | CC0 | — |
 | `films/posters/ending_stay_earth_again.webp` | Original to this repository — story film poster, a frame of its shot (PLAN R9); generated in Blender by `scripts/assets/blender/films.py` | CC0 | — |
 | `films/posters/ending_stay_earth_full.webp` | Original to this repository — story film poster, a frame of its shot (PLAN R9); generated in Blender by `scripts/assets/blender/films.py` | CC0 | — |
 | `films/posters/ending_stay_fleet.webp` | Original to this repository — story film poster, a frame of its shot (PLAN R9); generated in Blender by `scripts/assets/blender/films.py` | CC0 | — |
 | `films/posters/ending_stay_uplink.webp` | Original to this repository — story film poster, a frame of its shot (PLAN R9); generated in Blender by `scripts/assets/blender/films.py` | CC0 | — |
-| `films/posters/ending_stay_wall_63.webp` | Original to this repository — story film poster, a frame of its shot (PLAN R9); generated in Blender by `scripts/assets/blender/films.py` | CC0 | — |
+| `films/posters/ending_stay_wall_63.webp` | Original to this repository — story film poster, a frame of a plate shot (PLAN R11, R12); generated in Blender by `scripts/assets/blender/films.py` | CC0 | — |
 | `films/posters/interlude_c1_capsule.webp` | Original to this repository — story film poster, a frame of its shot (PLAN R9); generated in Blender by `scripts/assets/blender/films.py` | CC0 | — |
 | `films/posters/interlude_c1_earth_c1.webp` | Original to this repository — story film poster, a frame of its shot (PLAN R9); generated in Blender by `scripts/assets/blender/films.py` | CC0 | — |
 | `films/posters/interlude_c1_shelter_light.webp` | Original to this repository — story film poster, a frame of its shot (PLAN R9); generated in Blender by `scripts/assets/blender/films.py` | CC0 | — |
 | `films/posters/interlude_c2_earth_c2.webp` | Original to this repository — story film poster, a frame of its shot (PLAN R9); generated in Blender by `scripts/assets/blender/films.py` | CC0 | — |
 | `films/posters/interlude_c2_tanks.webp` | Original to this repository — story film poster, a frame of its shot (PLAN R9); generated in Blender by `scripts/assets/blender/films.py` | CC0 | — |
-| `films/posters/interlude_c2_tap.webp` | Original to this repository — story film poster, a frame of its shot (PLAN R9); generated in Blender by `scripts/assets/blender/films.py` | CC0 | — |
+| `films/posters/interlude_c2_tap.webp` | Original to this repository — story film poster, a frame of a plate shot (PLAN R11, R12); generated in Blender by `scripts/assets/blender/films.py` | CC0 | — |
 | `films/posters/interlude_c3_earth_c3.webp` | Original to this repository — story film poster, a frame of its shot (PLAN R9); generated in Blender by `scripts/assets/blender/films.py` | CC0 | — |
 | `films/posters/interlude_c3_greenhouse.webp` | Original to this repository — story film poster, a frame of its shot (PLAN R9); generated in Blender by `scripts/assets/blender/films.py` | CC0 | — |
 | `films/posters/interlude_c4_earth_c4.webp` | Original to this repository — story film poster, a frame of its shot (PLAN R9); generated in Blender by `scripts/assets/blender/films.py` | CC0 | — |
@@ -63,16 +87,19 @@ rewritten by the build from the files on disk; do not edit it by hand.
 | `films/posters/interlude_c5_cockpit.webp` | Original to this repository — story film poster, a frame of its shot (PLAN R9); generated in Blender by `scripts/assets/blender/films.py` | CC0 | — |
 | `films/posters/interlude_c5_eden.webp` | Original to this repository — story film poster, a frame of its shot (PLAN R9); generated in Blender by `scripts/assets/blender/films.py` | CC0 | — |
 | `films/posters/interlude_c5_hive_dark.webp` | Original to this repository — story film poster, a frame of its shot (PLAN R9); generated in Blender by `scripts/assets/blender/films.py` | CC0 | — |
-| `films/posters/prologue_city_flash.webp` | Original to this repository — story film poster, a frame of its shot (PLAN R9); generated in Blender by `scripts/assets/blender/films.py` | CC0 | — |
+| `films/posters/prologue_city_flash.webp` | Original to this repository — story film poster, a frame of a plate shot (PLAN R11, R12); generated in Blender by `scripts/assets/blender/films.py` | CC0 | — |
+| `films/posters/prologue_curfew.webp` | Original to this repository — story film poster, a frame of a plate shot (PLAN R11, R12); generated in Blender by `scripts/assets/blender/films.py` | CC0 | — |
 | `films/posters/prologue_earth_night.webp` | Original to this repository — story film poster, a frame of its shot (PLAN R9); generated in Blender by `scripts/assets/blender/films.py` | CC0 | — |
 | `films/posters/prologue_launch.webp` | Original to this repository — story film poster, a frame of its shot (PLAN R9); generated in Blender by `scripts/assets/blender/films.py` | CC0 | — |
 | `films/posters/prologue_liftoff.webp` | Original to this repository — story film poster, a frame of its shot (PLAN R9); generated in Blender by `scripts/assets/blender/films.py` | CC0 | — |
 | `films/posters/prologue_machine_hall.webp` | Original to this repository — story film poster, a frame of its shot (PLAN R9); generated in Blender by `scripts/assets/blender/films.py` | CC0 | — |
 | `films/posters/prologue_relay.webp` | Original to this repository — story film poster, a frame of its shot (PLAN R9); generated in Blender by `scripts/assets/blender/films.py` | CC0 | — |
-| `films/posters/prologue_selection.webp` | Original to this repository — story film poster, a frame of its shot (PLAN R9); generated in Blender by `scripts/assets/blender/films.py` | CC0 | — |
-| `films/posters/prologue_shelter.webp` | Original to this repository — story film poster, a frame of its shot (PLAN R9); generated in Blender by `scripts/assets/blender/films.py` | CC0 | — |
+| `films/posters/prologue_reprisal.webp` | Original to this repository — story film poster, a frame of a plate shot (PLAN R11, R12); generated in Blender by `scripts/assets/blender/films.py` | CC0 | — |
+| `films/posters/prologue_sabotage.webp` | Original to this repository — story film poster, a frame of a plate shot (PLAN R11, R12); generated in Blender by `scripts/assets/blender/films.py` | CC0 | — |
+| `films/posters/prologue_selection.webp` | Original to this repository — story film poster, a frame of a plate shot (PLAN R11, R12); generated in Blender by `scripts/assets/blender/films.py` | CC0 | — |
+| `films/posters/prologue_shelter.webp` | Original to this repository — story film poster, a frame of a plate shot (PLAN R11, R12); generated in Blender by `scripts/assets/blender/films.py` | CC0 | — |
 | `films/posters/prologue_stranded.webp` | Original to this repository — story film poster, a frame of its shot (PLAN R9); generated in Blender by `scripts/assets/blender/films.py` | CC0 | — |
-| `films/prologue.mp4` | Original to this repository — story film rendered in EEVEE from code (PLAN R9); generated in Blender by `scripts/assets/blender/films.py` | CC0 | — |
+| `films/prologue.mp4` | Original to this repository — story film rendered in EEVEE from code over the photographic plates listed under Plates above (PLAN R9, R11, R12); generated in Blender by `scripts/assets/blender/films.py` | CC0 | — |
 | `models/asteroid.glb` | Original to this repository — two rocks, normals baked from a displaced high-poly; generated in Blender by `scripts/assets/blender/flight.py` | CC0 | — |
 | `models/character.glb` | Original to this repository — rigged salvager, clips Idle · Run · Attack · Hit · Death; generated in Blender by `scripts/assets/blender/character.py` | CC0 | — |
 | `models/cockpit.glb` | Original to this repository — modelled from code, hull and screen maps baked in Cycles; generated in Blender by `scripts/assets/blender/station.py` | CC0 | — |
