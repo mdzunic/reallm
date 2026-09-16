@@ -3659,8 +3659,9 @@ html.quality-low .screen::before {
 }
 
 /* §4.8: the build label docks as the footer's right-hand item; its absolute
-   corner styling applies only while it lives directly under `#ui`. */
-.screen-foot .boot-note {
+   corner styling applies only while it lives directly under `#ui` (the id
+   keeps this rule ahead of `#ui .boot-note`). */
+#ui .screen-foot .boot-note {
   position: static;
   margin-left: auto;
   padding: 0;
@@ -3705,17 +3706,22 @@ html.quality-low .screen::before {
   }
 
   .screen-rail {
-    flex-direction: row;
-    flex-wrap: wrap;
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 6px;
     border-right: none;
     border-top: 1px solid var(--rule);
     padding: 8px;
   }
 
   .screen-tab {
-    flex: 1 1 auto;
     width: auto;
     min-width: 0;
+    padding-left: 4px;
+    padding-right: 4px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
 }
 

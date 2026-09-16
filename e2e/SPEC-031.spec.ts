@@ -57,7 +57,9 @@ async function checkFrame(page: Page, width: number, height: number, touch = fal
       })
       .map((el) => {
         const r = el.getBoundingClientRect();
-        return { x: r.x, y: r.y, right: r.right, bottom: r.bottom, w: r.width, h: r.height, id: (el as HTMLElement).dataset['testid'] ?? el.className };
+        const host = el.closest('.screen-body');
+        const scrollable = host !== null && host.scrollHeight > host.clientHeight;
+        return { x: r.x, y: r.y, right: r.right, bottom: r.bottom, w: r.width, h: r.height, scrollable, id: (el as HTMLElement).dataset['testid'] ?? el.className };
       });
     const tabs = [...(visible[0]?.querySelectorAll('.screen-tab') ?? [])].map((el) => el.getBoundingClientRect().height);
     return {
@@ -77,9 +79,13 @@ async function checkFrame(page: Page, width: number, height: number, touch = fal
   expect(measured.titleClipped, 'the title is unclipped').toBe(false);
   for (const box of measured.boxes) {
     expect(box.x, `${box.id} left`).toBeGreaterThanOrEqual(-0.5);
-    expect(box.y, `${box.id} top`).toBeGreaterThanOrEqual(-0.5);
     expect(box.right, `${box.id} right`).toBeLessThanOrEqual(width + 0.5);
-    expect(box.bottom, `${box.id} bottom`).toBeLessThanOrEqual(height + 0.5);
+    // Content inside the body's own scroll is reachable by scrolling; only
+    // the frame's chrome must sit fully inside the viewport vertically.
+    if (!box.scrollable) {
+      expect(box.y, `${box.id} top`).toBeGreaterThanOrEqual(-0.5);
+      expect(box.bottom, `${box.id} bottom`).toBeLessThanOrEqual(height + 0.5);
+    }
   }
   for (const tab of measured.tabs) expect(tab, 'tab height').toBeGreaterThanOrEqual(touch ? 56 : 44);
 }
@@ -326,7 +332,8 @@ test('pictures: the quick bar, shop rows and gear card carry the icon (AC-38, AC
 test('fallback: with items/ aborted every surface draws its glyph and logs no error (AC-40)', async ({ page }) => {
   const errors: string[] = [];
   page.on('console', (message) => {
-    if (message.type() === 'error') errors.push(message.text());
+    // The net::ERR_FAILED lines are this test's own aborts, not the app's.
+    if (message.type() === 'error' && !message.text().includes('net::ERR_FAILED')) errors.push(message.text());
   });
   const itemRequests: string[] = [];
   await page.route('**/assets/items/**', async (route) => {
