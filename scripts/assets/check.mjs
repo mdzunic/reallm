@@ -15,6 +15,7 @@ const BUDGETS = {
   audio: 12 * MB,
   textures: 6 * MB,
   portraits: 0.5 * MB,
+  items: 1 * MB,
   films: 12 * MB,
 };
 const TOTAL_BUDGET = 25 * MB;
