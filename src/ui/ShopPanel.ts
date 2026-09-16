@@ -23,6 +23,8 @@ import type { Economy, Result } from '@/systems/Economy';
 import { balanceAfterText, companionEffectText, failText, priceText, shortfallText } from '@/systems/UiHelpers';
 import { confirmSheet } from '@/ui/ConfirmSheet';
 import { el, h, testId, type UiRoot } from '@/ui/dom';
+import { openGearCard } from '@/ui/GearCard';
+import { itemIcon } from '@/ui/ItemIcon';
 
 // Schema-typed views: on the `as const` literals a tuple index past the end is
 // a type error and `tier` only exists after narrowing; the schema types are
@@ -201,18 +203,33 @@ export class ShopPanel {
       const equipped = armor === id || sidearm === id || primary === id || heavy === id;
       const owned = equipped || economy.count(id) > 0;
       const row = testId(el('article', 'shop-row'), `shop-gear-${id}`);
-      row.append(
-        h(
-          'div',
-          { class: 'shop-row-head' },
-          h('span', { class: 'shop-name' }, item.name),
-          h('span', { class: 'badge' }, `${item.kind} T${tierOf(item)}`),
-          item.kind === 'weapon' && item.slot === 'heavy' ? h('span', { class: 'badge badge-heavy' }, 'heavy') : null,
-          owned ? h('span', { class: 'badge badge-owned' }, 'owned') : null,
-          equipped ? h('span', { class: 'badge badge-equipped' }, 'equipped') : null,
+      // SPEC-031 §4.16: the row head (or Details) opens the gear card.
+      const head = h(
+        'div',
+        { class: 'shop-row-head', click: () => this.#openCard(id) },
+        itemIcon(id, 40),
+        h('span', { class: 'shop-name' }, item.name),
+        h('span', { class: 'badge' }, `${item.kind} T${tierOf(item)}`),
+        item.kind === 'weapon' && item.slot === 'heavy' ? h('span', { class: 'badge badge-heavy' }, 'heavy') : null,
+        owned ? h('span', { class: 'badge badge-owned' }, 'owned') : null,
+        equipped ? h('span', { class: 'badge badge-equipped' }, 'equipped') : null,
+        testId(
+          h(
+            'button',
+            {
+              class: 'ui-btn shop-details',
+              type: 'button',
+              click: (event: Event) => {
+                event.stopPropagation();
+                this.#openCard(id);
+              },
+            },
+            'Details',
+          ),
+          `shop-gear-${id}-details`,
         ),
-        h('p', { class: 'shop-note' }, item.blurb),
       );
+      row.append(head, h('p', { class: 'shop-note' }, item.blurb));
       if (owned && !equipped) {
         row.append(
           h('div', { class: 'shop-buy-line' },
@@ -237,6 +254,16 @@ export class ShopPanel {
     return out;
   }
 
+  /** SPEC-031 §4.16: the card performs the same purchase the row does. */
+  #openCard(id: ItemId): void {
+    void openGearCard(id, {
+      ui: this.#deps.ui,
+      save: this.#deps.data,
+      economy: this.#deps.economy,
+      onChanged: () => this.refresh(),
+    });
+  }
+
   #equip(id: ItemId): void {
     const result = this.#deps.economy.equip(id);
     if (!result.ok) {
@@ -259,6 +286,7 @@ export class ShopPanel {
       h(
         'div',
         { class: 'shop-row-head' },
+        itemIcon(id, 40),
         h('span', { class: 'shop-name' }, def.name),
         h('span', { class: 'badge' }, level === 0 ? 'not owned' : `L${level}`),
         h('span', { class: 'badge' }, def.domain),
@@ -331,6 +359,7 @@ export class ShopPanel {
       h(
         'div',
         { class: 'shop-row-head' },
+        itemIcon(def.output, 40),
         h('span', { class: 'shop-name' }, `${item.name}${def.qty * qty > 1 ? ` ×${def.qty * qty}` : ''}`),
         stepper,
       ),

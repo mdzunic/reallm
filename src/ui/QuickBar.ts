@@ -13,6 +13,7 @@ import {
 } from '@/data/index';
 import type { HudModel } from '@/systems/UiHelpers';
 import { el, testId } from '@/ui/dom';
+import { setItemIcon, type IconSize } from '@/ui/ItemIcon';
 
 /** §4.5: a quick slot held this long opens the picker instead of spending. */
 export const LONG_PRESS_MS = 500;
@@ -37,6 +38,8 @@ export interface QuickBarHandlers {
 /** One slot's cached nodes and last-written values, so writes stay minimal. */
 interface SlotNodes {
   readonly root: HTMLButtonElement;
+  /** SPEC-031 §4.15: the icon box above the short name. */
+  readonly icon: HTMLElement;
   readonly name: HTMLSpanElement;
   readonly count: HTMLSpanElement | null;
   readonly key: HTMLSpanElement;
@@ -81,11 +84,15 @@ export class QuickBar {
   render(loadout: HudModel['loadout'], quick: HudModel['quick'], scheme: Scheme): void {
     this.#root.classList.toggle('is-hidden', loadout === null && quick === null);
     const keys = scheme === 'keyboard';
+    // SPEC-031 §4.15: 40 px icons, 48 on the touch scheme. `setItemIcon`
+    // writes only on a changed id or size, so this stays free per frame.
+    const iconSize: IconSize = scheme === 'touch' ? 48 : 40;
     if (loadout !== null) {
       for (const slot of WEAPON_SLOTS) {
         const nodes = this.#weapons[slot];
         const view = loadout.slots[slot];
         const item = view.itemId === null ? null : ITEMS[view.itemId];
+        setItemIcon(nodes.icon, view.itemId, iconSize);
         write(nodes.name, item?.short ?? '—');
         write(nodes.key, keys ? KEY_HINTS[slot] : '');
         nodes.key.classList.toggle('is-hidden', !keys);
@@ -124,6 +131,7 @@ export class QuickBar {
         const nodes = this.#quick[slot];
         const entry = quick[slot];
         const item = entry.itemId === null ? null : ITEMS[entry.itemId];
+        setItemIcon(nodes.icon, entry.itemId, iconSize);
         write(nodes.name, item?.short ?? '—');
         if (nodes.count !== null) write(nodes.count, item === null ? '' : `×${entry.qty}`);
         write(nodes.key, keys ? KEY_HINTS[slot] : '');
@@ -144,12 +152,13 @@ export class QuickBar {
     const root = testId(el('button', `qb-slot qb-${slot}`), `qb-${slot}`);
     root.type = 'button';
     root.setAttribute('aria-label', slot);
+    const icon = el('span', 'icon');
     const name = el('span', 'qb-name');
     const count = weapon ? null : el('span', 'qb-count');
     const key = el('span', 'qb-key');
     const state = weapon ? el('span', 'qb-state') : null;
     const pips = weapon ? el('span', 'qb-pips is-hidden') : null;
-    root.append(name);
+    root.append(icon, name);
     if (count !== null) root.append(count);
     if (pips !== null) root.append(pips);
     if (state !== null) root.append(state);
@@ -198,7 +207,7 @@ export class QuickBar {
       });
     }
 
-    return { root, name, count, key, state, pips, lastCd: '', lastHeat: '' };
+    return { root, icon, name, count, key, state, pips, lastCd: '', lastHeat: '' };
   }
 
   #clearPress(): void {

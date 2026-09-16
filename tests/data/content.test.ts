@@ -56,6 +56,7 @@ import {
   type WaveDef,
   type WaveId,
 } from '@/data/index';
+import { iconGlyph } from '@/ui/icons';
 
 type Mission = MissionDef<MissionId>;
 
@@ -780,6 +781,28 @@ describe('content invariants (SPEC-009 §7)', () => {
       }
     }
     expect(problems).toEqual([]);
+  });
+
+  it('23 (SPEC-031). every item and companion id has a glyph, and no two weapon lines share one', () => {
+    const ids = [...(Object.keys(ITEMS) as (keyof typeof ITEMS)[]), ...(Object.keys(COMPANIONS) as (keyof typeof COMPANIONS)[])];
+    for (const id of ids) {
+      expect(iconGlyph(id), id).not.toBe('');
+    }
+    // One glyph per weapon line (and one for armor): a bar of keys must read
+    // at a glance, so the lines may not collide.
+    const lines = new Set(items.filter((item) => item.kind !== 'consumable').map((item) => item.line));
+    const glyphs = new Set([...lines].map((line) => iconGlyph(items.find((item) => item.kind !== 'consumable' && item.line === line)!.id as Parameters<typeof iconGlyph>[0])));
+    expect(glyphs.size).toBe(lines.size);
+    // And one per consumable effect.
+    const effects = new Map<string, string>();
+    for (const item of items) {
+      if (item.kind !== 'consumable') continue;
+      const glyph = iconGlyph(item.id as Parameters<typeof iconGlyph>[0]);
+      const seen = effects.get(item.effect.kind);
+      if (seen !== undefined) expect(glyph, item.id).toBe(seen);
+      effects.set(item.effect.kind, glyph);
+    }
+    expect(new Set(effects.values()).size).toBe(effects.size);
   });
 });
 

@@ -9,6 +9,7 @@ import { quickEligible } from '@/systems/Loadout';
 import { computePlayerStats, failText, gearCompareText, gearTooltip } from '@/systems/UiHelpers';
 import { confirmSheet } from '@/ui/ConfirmSheet';
 import { el, h, testId, type UiRoot } from '@/ui/dom';
+import { itemIcon } from '@/ui/ItemIcon';
 import { portraitManifest, portraitSource } from '@/ui/portraits';
 import { Wallet } from '@/ui/Wallet';
 
@@ -137,6 +138,8 @@ export class CharacterPanel {
         : h(
             'div',
             { class: 'gear-card', title: gearTooltip(id) },
+            // SPEC-031 §4.15: the picture left of the slot's name and stats.
+            itemIcon(id, 64),
             h('span', { class: 'settings-note' }, slot),
             h('span', { class: 'gear-name' }, `${ITEMS[id].name} · T${this.#tierOf(id)}`),
             h('span', { class: 'gear-line' }, this.#statLine(id)),
@@ -274,6 +277,7 @@ export class CharacterPanel {
               this.refresh();
             },
           },
+          itemIcon(entry.itemId, 28),
           h('span', { class: 'inv-name' }, item.name),
           entry.qty > 1 ? h('span', { class: 'inv-qty' }, `×${entry.qty}`) : null,
         ),
