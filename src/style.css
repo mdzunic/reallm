@@ -436,7 +436,10 @@ button.touch-button {
      Only the two buttons need to be clickable, so the panel itself takes no
      pointer events and can never swallow a tap meant for what is under it. */
   pointer-events: none;
-  z-index: 25;
+  /* Above the DOM screens' panel layer (30), below the overlay layer (50):
+     the panel itself takes no pointer events, and its two buttons must stay
+     clickable over a menu or station frame (SPEC-002 §4.6). */
+  z-index: 40;
 }
 
 /* The event log is a block of lines inside one row, so it keeps its newlines. */
@@ -463,17 +466,12 @@ button.debug-button:hover {
 
 /* -------------------------------------------------- saves (SPEC-007 E8, §7) */
 
-/* The menu's save surface. Bottom-left, above the version label: the top-left
-   corner belongs to the scene label and the stats overlay, the top-right to the
-   navigation. Interactive, so it opts back into pointer events, and above the
-   touch layer (z-index 10) so its buttons stay reachable on a phone. */
+/* The menu's save surface. SPEC-031 §4.8: it no longer positions itself — the
+   menu mounts it inside the frame's body as a Storage block, and its E8
+   banner goes to the frame footer. */
 .save-panel {
-  position: absolute;
-  left: max(12px, env(safe-area-inset-left));
-  bottom: calc(max(12px, env(safe-area-inset-bottom)) + 30px);
-  width: min(360px, calc(100% - 24px));
+  width: 100%;
   pointer-events: auto;
-  z-index: 12;
 }
 
 /* E8: a memory-only session, said once and left on screen. */
@@ -583,9 +581,12 @@ button.slot-button {
   --key-face: rgba(18, 26, 36, 0.92);
 }
 
-/* Font floor 14 px (AC-107); larger sizes clamp with the viewport (AC-60). */
+/* Font floor 14 px (AC-107); larger sizes clamp with the viewport (AC-60).
+   SPEC-031 §4.7: every readout in the UI uses tabular numerals, so a ticking
+   counter never wobbles — inherited from the root, overridden nowhere. */
 #ui {
   font-size: clamp(14px, 1.6vmin + 8px, 18px);
+  font-variant-numeric: tabular-nums;
 }
 
 /* Visible focus for keyboard players (AC-12); never removed, only styled.
@@ -615,8 +616,19 @@ button.slot-button {
   background: var(--panel-glass);
   backdrop-filter: blur(6px);
   -webkit-backdrop-filter: blur(6px);
-  border: 1px solid var(--panel-edge);
-  border-radius: 8px;
+  border: 1px solid var(--frame-edge);
+  border-radius: 0;
+  /* SPEC-031 §4.7: panels wear the frame's corner cut and rule. */
+  clip-path: polygon(
+    var(--frame-cut) 0,
+    calc(100% - var(--frame-cut)) 0,
+    100% var(--frame-cut),
+    100% calc(100% - var(--frame-cut)),
+    calc(100% - var(--frame-cut)) 100%,
+    var(--frame-cut) 100%,
+    0 calc(100% - var(--frame-cut)),
+    0 var(--frame-cut)
+  );
   box-shadow:
     inset 0 0 0 1px var(--edge-glow),
     0 8px 24px rgba(0, 0, 0, 0.45);
@@ -646,18 +658,30 @@ html.quality-low .toast {
 }
 
 /* Buttons are real buttons with a 44 px floor (AC-108, 14-f).
-   §4.5: a lit sheen over the glass, and the accent for primary. */
+   SPEC-031 §4.7: a console key — flat face, hairline edge, and a 2 px accent
+   underline when hovered, focused or active. The accent moved from the border
+   to the underline; primary keeps the accent face and border. */
 .ui-btn {
   min-height: 44px;
   min-width: 44px;
   padding: 8px 16px;
-  border: 1px solid var(--panel-edge);
-  border-radius: 6px;
-  background: linear-gradient(180deg, var(--edge-glow), transparent), var(--panel-glass);
+  border: 1px solid var(--frame-edge);
+  border-radius: 3px;
+  background: var(--key-face);
   color: var(--ink);
   font: inherit;
+  font-size: var(--type-sm);
+  text-transform: uppercase;
+  letter-spacing: var(--track);
   cursor: pointer;
   touch-action: manipulation;
+}
+
+.ui-btn:hover,
+.ui-btn:focus-visible,
+.ui-btn.is-active,
+.ui-btn[aria-pressed='true'] {
+  box-shadow: inset 0 -2px 0 var(--accent);
 }
 
 .ui-btn:disabled {
@@ -666,12 +690,17 @@ html.quality-low .toast {
 }
 
 .ui-btn.is-primary {
-  background: linear-gradient(180deg, var(--edge-glow), var(--edge-glow)), var(--panel-glass);
+  background: color-mix(in srgb, var(--accent) 18%, var(--key-face));
   border-color: var(--accent);
 }
 
 .ui-btn.is-danger {
   border-color: var(--hp);
+}
+
+.ui-btn.is-danger:hover,
+.ui-btn.is-danger:focus-visible {
+  box-shadow: inset 0 -2px 0 var(--hp);
 }
 
 /* ------------------------------------------------------------------ toasts */
@@ -1733,6 +1762,8 @@ html.reduce-motion .overlay-ending-escape .ending-prompt {
 /* The `scene-label` hook the e2e fleet reads, worn as a quiet corner tag.
    Top-left like the placeholder banner it replaces: the ?debug overlay docks
    itself below whatever sits here (SPEC-002 AC-28). */
+/* SPEC-031 §4.8: invisible without `?debug` — but still in the DOM with its
+   box, because it is the e2e fleet's steering hook (SPEC-003 D-20). */
 .scene-tag {
   position: absolute;
   left: max(12px, env(safe-area-inset-left));
@@ -1741,29 +1772,33 @@ html.reduce-motion .overlay-ending-escape .ending-prompt {
   font-size: 14px;
   line-height: 1.2;
   color: var(--ink-dim);
-  opacity: 0.55;
+  opacity: 0;
   pointer-events: none;
 }
 
+html.debug .scene-tag {
+  opacity: 0.55;
+}
+
 /* ------------------------------------------------------------------- menu */
+/* SPEC-031: the menu is frame body content now; the frame owns the viewport. */
 .menu-root {
-  position: absolute;
-  inset: 0;
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
   gap: 18px;
-  padding: max(12px, env(safe-area-inset-top)) max(12px, env(safe-area-inset-right)) max(12px, env(safe-area-inset-bottom)) max(12px, env(safe-area-inset-left));
-  overflow-y: auto;
+  min-height: 100%;
 }
 
+/* The wordmark treatment, worn by the menu frame's own title (SPEC-031 §4.5).
+   §4.5: the title's halo is the theme's, not its own. */
 .menu-title {
   margin: 0;
-  font-size: clamp(34px, 8vmin, 64px);
+  font-size: clamp(28px, 6vmin, 48px);
   letter-spacing: 0.18em;
+  text-transform: none;
   color: var(--ink);
-  /* §4.5: the title's halo is the theme's, not its own. */
   text-shadow: var(--text-glow);
   user-select: none;
   -webkit-user-select: none;
@@ -1888,14 +1923,12 @@ html.reduce-motion .overlay-ending-escape .ending-prompt {
 }
 
 /* --------------------------------------------------------------- creation */
+/* SPEC-031: frame body content — the frame's body owns the one scroll axis. */
 .creation-root {
-  position: absolute;
-  inset: 0;
   display: flex;
   justify-content: center;
   gap: 16px;
-  padding: max(10px, env(safe-area-inset-top)) max(10px, env(safe-area-inset-right)) max(10px, env(safe-area-inset-bottom)) max(10px, env(safe-area-inset-left));
-  overflow-y: auto;
+  min-height: 100%;
 }
 
 .creation-form {
@@ -1905,8 +1938,6 @@ html.reduce-motion .overlay-ending-escape .ending-prompt {
   flex-direction: column;
   gap: 12px;
   padding: 16px;
-  max-height: 100%;
-  overflow-y: auto;
 }
 
 .creation-title {
@@ -2118,93 +2149,37 @@ html.reduce-motion .overlay-ending-escape .ending-prompt {
 }
 
 /* ---------------------------------------------------------------- station */
-.station-root {
-  position: absolute;
-  inset: 0;
-  display: grid;
-  grid-template-areas: 'head head' 'rail panel';
-  grid-template-columns: auto 1fr;
-  grid-template-rows: auto 1fr;
-  gap: 10px;
-  padding: max(10px, env(safe-area-inset-top)) max(10px, env(safe-area-inset-right)) max(10px, env(safe-area-inset-bottom)) calc(max(10px, env(safe-area-inset-left)) + 120px);
-  pointer-events: none;
-}
+/* SPEC-031 §4.4: the station's header, rail and panel are the frame's head,
+   rail and body now — the station has no full-screen grid of its own. */
 
-.station-head {
-  grid-area: head;
-  text-align: center;
-}
-
-.station-name {
-  margin: 0;
-  font-size: clamp(18px, 3vmin, 26px);
-  font-weight: 700;
-  letter-spacing: 0.12em;
-}
-
-/* AC-27: the diegetic difficulty label, right under the name. */
+/* AC-27: the diegetic difficulty label, kept in the frame's header. */
 .station-containment {
   margin: 0;
+  font-size: var(--type-xs);
   color: var(--warn);
 }
 
-.station-rail {
-  grid-area: rail;
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  align-self: start;
-  pointer-events: auto;
-}
-
 .station-panel {
-  grid-area: panel;
-  overflow-y: auto;
   padding: 12px;
   max-width: 720px;
   width: 100%;
-  justify-self: center;
+  margin: 0 auto;
 }
 
 .station-empty {
   margin: 0;
 }
 
-/* AC-25: the recall banner over everything else on the screen. */
+/* SPEC-031 §4.5: the recall banner sits under the channel line, in flow. */
 .station-recall {
-  position: absolute;
-  top: max(48px, calc(env(safe-area-inset-top) + 38px));
-  left: 50%;
-  transform: translateX(-50%);
-  margin: 0;
-  padding: 8px 16px;
-  border-radius: 6px;
+  margin: 6px 0 0;
+  padding: 4px 10px;
   border: 1px solid var(--hp);
   background: var(--panel);
   color: var(--hp);
   font-weight: 700;
-}
-
-/* AC-28: on phones the rail becomes a bottom bar. */
-@media (max-width: 700px) {
-  .station-root {
-    grid-template-areas: 'head' 'panel' 'rail';
-    grid-template-columns: 1fr;
-    grid-template-rows: auto 1fr auto;
-    padding: max(8px, env(safe-area-inset-top)) max(8px, env(safe-area-inset-right)) max(8px, env(safe-area-inset-bottom)) max(8px, env(safe-area-inset-left));
-  }
-
-  .station-rail {
-    flex-direction: row;
-    flex-wrap: wrap;
-    justify-content: center;
-    align-self: end;
-  }
-
-  .station-tab {
-    flex: 1;
-    min-width: 30%;
-  }
+  font-size: var(--type-sm);
+  width: fit-content;
 }
 
 /* ---------------------------------------------------------- mission board */
@@ -2563,6 +2538,9 @@ html.reduce-motion .overlay-ending-escape .ending-prompt {
 }
 
 /* --------------------------------------------------------------- star map */
+/* SPEC-031: mounted inside the frame's body (`position: relative`), so the
+   panel and the back control live in the frame's coordinate space. The node
+   hit areas are projected in viewport space and compensated in JS. */
 .starmap-root {
   position: absolute;
   inset: 0;
@@ -2614,10 +2592,10 @@ html.reduce-motion .overlay-ending-escape .ending-prompt {
 
 .starmap-info {
   position: absolute;
-  top: max(10px, env(safe-area-inset-top));
-  right: max(10px, env(safe-area-inset-right));
-  width: min(320px, calc(100vw - 20px));
-  max-height: calc(100dvh - 80px);
+  top: 10px;
+  right: 10px;
+  width: min(320px, calc(100% - 20px));
+  max-height: calc(100% - 20px);
   overflow-y: auto;
   padding: 12px;
   display: flex;
@@ -2663,19 +2641,21 @@ html.reduce-motion .overlay-ending-escape .ending-prompt {
   flex-wrap: wrap;
 }
 
+/* SPEC-031 / AC-24: Back rides the depart line inside the info panel — two
+   absolutely positioned bottom-anchored buttons overlapped on phones, and an
+   overlapped Depart could not be pressed at 320–393 px. In flow, they cannot. */
 .starmap-back {
-  position: absolute;
-  left: max(10px, env(safe-area-inset-left));
-  bottom: max(10px, env(safe-area-inset-bottom));
   pointer-events: auto;
 }
 
 @media (max-width: 700px) {
   .starmap-info {
     top: auto;
-    bottom: max(10px, env(safe-area-inset-bottom));
-    right: max(10px, env(safe-area-inset-right));
-    max-height: 44dvh;
+    bottom: 10px;
+    left: 10px;
+    right: 10px;
+    width: auto;
+    max-height: 60%;
   }
 }
 
@@ -3486,4 +3466,472 @@ html.reduce-motion .waypoint.is-stuck {
   color: var(--ink);
   font-size: 14px;
   text-align: center;
+}
+
+/* ================================================================ SPEC-031 */
+/* The console shell (SPEC-031 §4.4–§4.10). Every rule between this marker and
+   `SPEC-031:end` reads the frame tokens through var() — no literal colour and
+   no literal font size lives here (tests/ui/theme.test.ts). */
+
+/* One grid — head / rail / body / foot — centred, safe-area padded, with the
+   scrim between the 3D backdrop and the frame. The root takes no pointer
+   events; only the frame does, so the canvas keeps gameplay pointers. */
+.screen {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  padding: max(12px, env(safe-area-inset-top)) max(12px, env(safe-area-inset-right)) max(12px, env(safe-area-inset-bottom)) max(12px, env(safe-area-inset-left));
+  pointer-events: none;
+}
+
+/* §4.4: the scrim — a radial dark wash, opaque at the edges, behind the frame.
+   Text needs a floor over the bright, moving backdrops; a gradient costs no
+   draw call. Under `quality-low` it is a flat colour. */
+.screen::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: var(--screen-scrim);
+  pointer-events: none;
+}
+
+html.quality-low .screen::before {
+  background: var(--panel);
+}
+
+.screen-frame {
+  position: relative;
+  pointer-events: auto;
+  display: grid;
+  grid-template-areas:
+    'head head head'
+    'rail body pad'
+    'foot foot foot';
+  grid-template-columns: var(--rail-w, 0px) minmax(0, 1fr) var(--rail-w, 0px);
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  width: min(1100px, 100%);
+  height: 100%;
+  background: var(--panel-glass);
+  border: 1px solid var(--frame-edge);
+  clip-path: polygon(
+    var(--frame-cut) 0,
+    calc(100% - var(--frame-cut)) 0,
+    100% var(--frame-cut),
+    100% calc(100% - var(--frame-cut)),
+    calc(100% - var(--frame-cut)) 100%,
+    var(--frame-cut) 100%,
+    0 calc(100% - var(--frame-cut)),
+    0 var(--frame-cut)
+  );
+  box-shadow: inset 0 0 0 1px var(--edge-glow);
+}
+
+/* The rail column exists only when tabs do, and its width is mirrored by an
+   empty right column, so the body's centre is the frame's centre at every
+   width (§4.4: the header's and the body's centres agree). */
+.screen.has-rail .screen-frame {
+  --rail-w: 148px;
+}
+
+/* §4.4: the star map widens and lets the backdrop through the frame. */
+.screen.is-wide .screen-frame {
+  width: min(1400px, 100%);
+  background: none;
+}
+
+/* ------------------------------------------------------------- the header */
+.screen-head {
+  grid-area: head;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px 14px;
+  padding: 12px 18px;
+  border-bottom: 1px solid var(--rule);
+}
+
+/* `flex: 1 1 auto` with a floor: at 320 px the status slot wraps below the
+   title instead of starving it (SPEC-031 AC-24). */
+.screen-head-text {
+  flex: 1 1 auto;
+  min-width: min(100%, 220px);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-height: 0;
+}
+
+/* 31-e: one line, ellipsised; the full text stays in `title`/`aria-label`. */
+.screen-title {
+  margin: 0;
+  font-size: var(--type-xl);
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.14em;
+  line-height: 1.15;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--ink);
+}
+
+/* The wordmark is a name, not a heading: it keeps its own case and halo. */
+.screen-menu .screen-title {
+  text-transform: none;
+}
+
+.screen-channel {
+  margin: 0;
+  font-size: var(--type-xs);
+  letter-spacing: 0.24em;
+  text-transform: uppercase;
+  color: var(--ink-dim);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.screen-status {
+  margin-left: auto;
+  min-width: 0;
+}
+
+/* --------------------------------------------------------------- the rail */
+.screen-rail {
+  grid-area: rail;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px 8px;
+  border-right: 1px solid var(--rule);
+  min-height: 0;
+}
+
+.screen-rail:empty {
+  display: none;
+}
+
+.screen-tab {
+  width: 100%;
+  padding-left: 8px;
+  padding-right: 8px;
+}
+
+/* --------------------------------------------------------------- the body */
+.screen-body {
+  grid-area: body;
+  position: relative;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 14px 18px;
+}
+
+/* The star map projects its hit areas in viewport space; the body must not
+   clip a node that lands beside the frame's chrome. */
+.screen-starmap .screen-body {
+  overflow: visible;
+  padding: 0;
+}
+
+/* --------------------------------------------------------------- the foot */
+.screen-foot {
+  grid-area: foot;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px 12px;
+  padding: 8px 18px;
+  border-top: 1px solid var(--rule);
+  font-size: var(--type-xs);
+  color: var(--ink-dim);
+}
+
+.screen-hint {
+  flex: none;
+}
+
+/* §4.8: the build label docks as the footer's right-hand item; its absolute
+   corner styling applies only while it lives directly under `#ui`. */
+.screen-foot .boot-note {
+  position: static;
+  margin-left: auto;
+  padding: 0;
+}
+
+/* The E8 storage banner, when the menu sends it to the footer. */
+.screen-foot .save-banner {
+  margin: 0;
+  flex: 1 1 100%;
+}
+
+/* A block inside a body: the menu's Storage block wears this. */
+.screen-block {
+  width: min(560px, 100%);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  font-size: var(--type-md);
+}
+
+.screen-block-title {
+  margin: 0;
+  font-size: var(--type-xs);
+  letter-spacing: var(--track);
+  text-transform: uppercase;
+  color: var(--ink-dim);
+}
+
+/* ------------------------------------------------------------------ phones */
+/* §4.6/§4.10: one column — head, body, rail, foot — the rail a bottom tab bar
+   inside the frame, the body still the only scroll. */
+@media (max-width: 700px) {
+  .screen-frame,
+  .screen.has-rail .screen-frame {
+    grid-template-areas:
+      'head'
+      'body'
+      'rail'
+      'foot';
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: auto minmax(0, 1fr) auto auto;
+  }
+
+  .screen-rail {
+    flex-direction: row;
+    flex-wrap: wrap;
+    border-right: none;
+    border-top: 1px solid var(--rule);
+    padding: 8px;
+  }
+
+  .screen-tab {
+    flex: 1 1 auto;
+    width: auto;
+    min-width: 0;
+  }
+}
+
+/* §4.6: 56 px targets under the touch scheme. */
+.screen.is-touch .screen-tab {
+  min-height: 56px;
+}
+
+/* §4.9: screens and panel swaps fade over 120 ms — opacity only, nothing
+   moves — and reduce-motion stills it. */
+.screen-frame,
+.screen-body > * {
+  animation: screen-fade 0.12s ease-out;
+}
+
+@keyframes screen-fade {
+  0% {
+    opacity: 0;
+  }
+}
+
+html.reduce-motion .screen-frame,
+html.reduce-motion .screen-body > * {
+  animation: none;
+}
+
+/* ----------------------------------------------------- the pause frame */
+.screen.overlay-pause {
+  display: none;
+  z-index: 35;
+}
+
+.screen.overlay-pause.is-visible {
+  display: grid;
+}
+
+/* ------------------------------------------------------- the wallet strip */
+/* §4.11: one row — tokens, then the four resources as `glyph value/cap`. At
+   narrow widths the caps drop and one wrap is allowed, never a scroll. */
+.wallet {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 14px;
+  justify-content: flex-end;
+  font-size: var(--type-sm);
+}
+
+.wallet-cell {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 4px;
+  white-space: nowrap;
+}
+
+.wallet-cell .glyph {
+  font-size: var(--type-sm);
+}
+
+.wallet-tokens .glyph {
+  color: var(--accent-2);
+}
+
+.wallet-value {
+  color: var(--ink);
+}
+
+.wallet-cap {
+  color: var(--ink-dim);
+}
+
+/* E3: at the cap the cell says so three ways — weight, hue and the ▲ marker —
+   never colour alone. */
+.wallet-cell.at-cap .wallet-value {
+  color: var(--hp);
+  font-weight: 700;
+}
+
+.wallet-cell.at-cap::after {
+  content: '▲';
+  color: var(--hp);
+  font-weight: 700;
+  font-size: var(--type-xs);
+}
+
+@media (max-width: 420px) {
+  .wallet {
+    gap: 4px 10px;
+  }
+
+  .wallet-cap {
+    display: none;
+  }
+}
+
+/* ------------------------------------------------------------- item icons */
+/* §4.14: a fixed-size box holding the render or the glyph — the same space
+   either way, so a missing file never shifts a layout (E49). */
+.icon {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+}
+
+.icon-img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+
+.icon-glyph {
+  color: var(--ink-dim);
+  line-height: 1;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+/* §4.15: the quick bar's icon box sits above the short name. */
+.qb-slot .icon {
+  margin: 2px auto 0;
+}
+
+.shop-row-head .icon,
+.quick-pick .icon,
+.inv-cell .icon,
+.loadout-card .icon {
+  margin-right: 8px;
+}
+
+/* -------------------------------------------------------- the gear card */
+/* §4.16: the picture belongs where the decision is made. */
+.gear-card-backdrop {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--screen-scrim);
+  pointer-events: auto;
+  z-index: 5;
+}
+
+.gear-card-sheet {
+  width: min(420px, calc(100% - 24px));
+  max-height: calc(100% - 24px);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 16px;
+  overflow-y: auto;
+}
+
+.gear-card-picture {
+  align-self: center;
+}
+
+.gear-card-name {
+  margin: 0;
+  font-size: var(--type-lg);
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: var(--track);
+}
+
+.gear-card-badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.gear-card-stats {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  gap: 2px;
+  font-size: var(--type-sm);
+}
+
+.gear-card-compare {
+  margin: 0;
+  color: var(--good);
+  font-size: var(--type-sm);
+}
+
+.gear-card-blurb {
+  margin: 0;
+  color: var(--ink-dim);
+  font-size: var(--type-sm);
+}
+
+.gear-card-buy {
+  position: sticky;
+  bottom: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  padding-top: 8px;
+  border-top: 1px solid var(--rule);
+  background: var(--key-face);
+}
+
+@media (max-width: 380px) {
+  .gear-card-picture {
+    width: 180px;
+    height: 180px;
+  }
+}
+
+/* The row head doubles as the card's opener. */
+.shop-row-head {
+  cursor: pointer;
+}
+
+/* SPEC-031:end */
+
+/* SPEC-031 §4.15: with an icon above it, the slot's short name drops to the
+   quick bar's small-label size (a 48 px slot cannot hold 14 px type twice —
+   the same exemption SPEC-028's labels carry in tests/ui/theme.test.ts). */
+.qb-slot .qb-name {
+  font-size: 11px;
 }
