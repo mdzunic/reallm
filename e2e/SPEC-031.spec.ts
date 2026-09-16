@@ -161,17 +161,24 @@ for (const [width, height] of SIZES) {
   });
 }
 
+// `use()` inside a describe may not carry defaultBrowserType — the suite's one
+// chromium project is already the right browser, so it is simply dropped.
+const { defaultBrowserType: _pixelBrowser, ...PIXEL_5 } = devices['Pixel 5'];
+
 test.describe('frame on a phone profile in portrait', () => {
-  test.use({ ...devices['Pixel 5'] });
+  test.use(PIXEL_5);
 
   test('frame: every screen holds its grid, tabs at the 56 px touch floor (AC-13, AC-15, AC-24)', async ({ page }) => {
     await start(page);
-    // A real touch press on the (inert) wordmark flips the input scheme.
-    const title = await page.locator('.screen-title').boundingBox();
-    if (!title) throw new Error('no title box');
-    await page.touchscreen.tap(title.x + title.width / 2, title.y + title.height / 2);
     const viewport = page.viewportSize();
     if (!viewport) throw new Error('no viewport');
+    // A real touch press flips the input scheme. The pointer driver listens on
+    // the canvas, so the tap goes through the frame's pointer-transparent
+    // 12 px gutter, not onto the frame itself.
+    await page.touchscreen.tap(6, viewport.height / 2);
+    await expect
+      .poll(async () => page.evaluate(() => window.__reallm.input().scheme))
+      .toBe('touch');
     await walkFrames(page, viewport.width, viewport.height, true);
   });
 });

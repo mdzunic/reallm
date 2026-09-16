@@ -426,7 +426,6 @@ button.touch-button {
   max-width: min(60vw, 420px);
   padding: 6px 8px;
   border-radius: 6px;
-  background: rgb(11 15 20 / 65%);
   font-size: 12px;
   line-height: 1.35;
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
@@ -442,9 +441,16 @@ button.touch-button {
   z-index: 40;
 }
 
-/* The event log is a block of lines inside one row, so it keeps its newlines. */
+/* The event log is a block of lines inside one row, so it keeps its newlines.
+   Each row backs only itself: the panel sits over the DOM screens (z 40), and
+   one panel-wide wash — sized by the widest event-log line — would darken the
+   frame's text under it (SPEC-020's contrast floor is measured composited). */
 .debug-row {
   white-space: pre-wrap;
+  width: fit-content;
+  background: rgb(11 15 20 / 65%);
+  border-radius: 4px;
+  padding: 0 4px;
 }
 
 button.debug-button {
@@ -3491,6 +3497,13 @@ html.reduce-motion .waypoint.is-stuck {
   inset: 0;
   display: grid;
   place-items: center;
+  /* One definite track: without it the frame's `height: 100%` resolves
+     against an auto-sized row and quietly becomes `auto` — a tall form
+     (creation at 320 px) then grows the frame past the viewport instead of
+     scrolling the body, and its controls land where no pointer can reach
+     (AC-24). */
+  grid-template-columns: 100%;
+  grid-template-rows: 100%;
   padding: max(12px, env(safe-area-inset-top)) max(12px, env(safe-area-inset-right)) max(12px, env(safe-area-inset-bottom)) max(12px, env(safe-area-inset-left));
   pointer-events: none;
 }
