@@ -19,6 +19,7 @@ import { ContextLostOverlay } from '@/ui/ContextLostOverlay';
 import { uiLayers } from '@/ui/dom';
 import { StatsOverlay } from '@/ui/StatsOverlay';
 import { TransitionOverlay } from '@/ui/TransitionOverlay';
+import { InstallHintOverlay } from '@/ui/InstallHint';
 import { UpdateOverlay } from '@/ui/UpdateOverlay';
 
 const canvas = document.getElementById('game');
@@ -102,8 +103,16 @@ const audio = createAudio({
 // The overlay buttons need the game they drive, and the game needs the overlay:
 // the simulators reach it late, through a click, so a holder is enough.
 let running: Game | undefined;
-// SPEC-014 AC-103: dormant until M7's service worker gives it a signal.
-new UpdateOverlay(uiRoot);
+/**
+ * SPEC-014 AC-103 / SPEC-015 D-10: the banner listens to `app:update-ready`,
+ * which the service-worker registration emits. In `registerType: 'prompt'` a
+ * waiting worker never takes over by itself, so nothing reloads the page on its
+ * own and `serviceWorker.controllerchange` never fires — which is why the
+ * signal is a typed event and not that listener (15-c).
+ */
+new UpdateOverlay(uiRoot, events);
+/** SPEC-015 AC-55: the two taps iOS needs, raised by the hint of SPEC-007 §4.7. */
+new InstallHintOverlay(uiRoot, events);
 
 /**
  * The `ui:toast` bridge (SPEC-014 §4.6): systems that may not import `ui/` —

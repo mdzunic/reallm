@@ -1645,6 +1645,8 @@ export class SaveStore {
     if (shownAt !== null && now - shownAt < INSTALL_HINT_INTERVAL_MS) return;
     this.#settings.set({ installHintShownAt: now });
     this.#events.emit('ui:toast', { kind: 'info', text: INSTALL_HINT_TEXT, ms: 10000 });
+    // SPEC-015 AC-55: the toast says why; the explainer says how (`ui/InstallHint.ts`).
+    this.#events.emit('app:install-hint');
   }
 
   // ------------------------------------------------------------------- codes

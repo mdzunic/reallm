@@ -161,6 +161,10 @@ const EVENT_KEYS = [
   'flight:recalled',
   'ui:toast',
   'ui:orientation',
+  // SPEC-015 §10: the service-worker update signal (D-10) and the iOS install
+  // explainer — both added to `GameEvents` by that spec, both silent.
+  'app:update-ready',
+  'app:install-hint',
 ] as const satisfies readonly (keyof GameEvents)[];
 
 /** The compiler's own copy of the same list, so the literal above cannot drift. */
@@ -453,12 +457,12 @@ describe('the reactions table is exhaustive over GameEvents (SPEC-006 §5)', () 
     );
   });
 
-  it('silences exactly the 38 events of §5.4 (AC-39; SPEC-029 moved weapon:switched out)', () => {
-    expect(AUDIO_SILENT.size).toBe(38);
+  it('silences exactly the 40 events of §5.4 (AC-39; SPEC-015 added the two app: signals)', () => {
+    expect(AUDIO_SILENT.size).toBe(40);
   });
 
-  it('gives every one of the 57 event keys exactly one home (AC-40)', () => {
-    expect(EVENT_KEYS).toHaveLength(57);
+  it('gives every one of the 59 event keys exactly one home (AC-40)', () => {
+    expect(EVENT_KEYS).toHaveLength(59);
     const reacted = new Set<string>(REACTED_EVENTS);
     for (const key of EVENT_KEYS) {
       const hasSound = reacted.has(key);

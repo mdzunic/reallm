@@ -1704,6 +1704,39 @@ html.reduce-motion .dialogue-dim {
   display: block;
 }
 
+/* SPEC-015 AC-55: the iOS "Add to Home Screen" explainer. A dismissible sheet
+   rather than a modal — the player may ignore it and keep playing — anchored
+   to the bottom edge, so it clears the home indicator itself (AC-27). */
+.install-hint {
+  position: fixed;
+  left: 50%;
+  bottom: max(16px, calc(env(safe-area-inset-bottom) + 8px));
+  transform: translateX(-50%);
+  width: min(30em, calc(100% - 32px));
+  padding: 14px 16px;
+  pointer-events: auto;
+  z-index: 56;
+}
+
+.install-hint.is-hidden {
+  display: none;
+}
+
+.install-hint-title {
+  margin: 0 0 8px;
+  font-weight: 600;
+  color: var(--accent);
+}
+
+.install-hint-steps {
+  margin: 0 0 12px;
+  padding-left: 1.2em;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  color: var(--ink-dim);
+}
+
 /* ---------------------------------------------------------------- endings */
 .overlay-ending {
   z-index: 70;

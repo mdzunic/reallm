@@ -125,6 +125,19 @@ export type GameEvents = {
   'ui:toast': { text: string; kind?: 'info' | 'warn' | 'good' | 'error'; ms?: number };
   /** The rotate prompt itself is SPEC-015 §6; this is the signal it listens to. */
   'ui:orientation': { orientation: 'portrait' | 'landscape' };
+  /**
+   * SPEC-015 §10, D-10: a new build has downloaded and is waiting. In the
+   * plugin's `prompt` mode the waiting worker never takes over by itself, so
+   * `serviceWorker.controllerchange` never fires and cannot be the signal —
+   * `main.ts` emits this from `onNeedRefresh` instead. Payload-free: what to do
+   * about it is `core/Updates.ts`, and who may offer it is AC-52.
+   */
+  'app:update-ready': void;
+  /**
+   * SPEC-015 AC-55: iOS Safari has no install prompt of its own, so the hint of
+   * SPEC-007 §4.7 raises this and the explainer overlay spells out the two taps.
+   */
+  'app:install-hint': void;
 };
 
 /** `[]` for a `void` payload, `[payload]` otherwise — so `emit('app:paused')` reads right. */

@@ -13,6 +13,7 @@ import * as THREE from 'three';
 import { log } from '@/core/Log';
 import { maxHp, type Save } from '@/core/Save';
 import type { GameServices } from '@/core/Services';
+import { applyUpdate, updateReady } from '@/core/Updates';
 import type { SceneParams } from '@/core/StateMachine';
 import { DIALOGUE, MISSIONS, PLANET_IDS, PLANETS, type DialogueId, type MissionId } from '@/data/index';
 import { Economy } from '@/systems/Economy';
@@ -311,6 +312,9 @@ export class StationScene extends UiScene<'station'> {
       this.#panelBox = null;
       this.#economy = null;
     });
+    // SPEC-015 §10: a build that lands while the station is open grows its
+    // Update row without the screen having to poll for it (AC-52).
+    this.disposer.add(this.services.events.on('app:update-ready', () => this.#renderRail(), this));
     if (data === null) {
       this.#renderRail();
       this.#panelBox.replaceChildren(h('p', { class: 'settings-note station-empty' }, 'No save loaded.'));
@@ -335,6 +339,9 @@ export class StationScene extends UiScene<'station'> {
       tab('starmap', 'Star Map', () => this.#starmap()),
       tab('settings', 'Settings', () => this.#settings?.show()),
       tab('quit', 'Quit', () => this.#quit(true)),
+      // SPEC-015 AC-52: the station is the other safe moment to restart into a
+      // new build; the row only exists while one is waiting (15-c).
+      ...(updateReady() ? [tab('update', 'Update', () => applyUpdate())] : []),
     ]);
   }
 
