@@ -2,7 +2,8 @@
 // so it runs in node with no browser and no network.
 import { afterEach, describe, expect, it } from 'vitest';
 import * as THREE from 'three';
-import { Assets, type AssetLoaders, type AssetManifest } from '@/core/Assets';
+import { Assets, clampedTextureSize, type AssetLoaders, type AssetManifest } from '@/core/Assets';
+import { QUALITY } from '@/core/Quality';
 import { setLogSink } from '@/core/Log';
 import { ASSETS, type ModelId, type TextureId } from '@/data/assets';
 
@@ -30,6 +31,12 @@ interface Fakes extends AssetLoaders {
   fail: Set<string>;
   clips: THREE.AnimationClip[];
   model: () => THREE.Group;
+  /** The image every fake texture loads with; `null` for a texture with none. */
+  image: { width: number; height: number } | null;
+  /** SPEC-015 AC-8: every downscale `Assets` asked for, in order. */
+  resized: Array<{ width: number; height: number }>;
+  /** Make the resizer fail the way a browser with no 2D context would. */
+  cannotResize: boolean;
 }
 
 function fakeLoaders(): Fakes {
@@ -38,6 +45,9 @@ function fakeLoaders(): Fakes {
     fail: new Set<string>(),
     clips: [],
     model: boxModel,
+    image: null,
+    resized: [],
+    cannotResize: false,
     gltf: {
       loadAsync: async (url: string) => {
         fakes.requests.push(url);
@@ -49,8 +59,16 @@ function fakeLoaders(): Fakes {
       loadAsync: async (url: string) => {
         fakes.requests.push(url);
         if (fakes.fail.has(url)) throw new Error('network is down');
-        return new THREE.Texture();
+        const texture = new THREE.Texture();
+        if (fakes.image !== null) texture.image = { ...fakes.image };
+        return texture;
       },
+    },
+    // Node has no `<canvas>`, so the drawing half is the injected seam (D-29);
+    // what it returns stands in for the scaled-down image.
+    resize: (_image: unknown, width: number, height: number): unknown | null => {
+      fakes.resized.push({ width, height });
+      return fakes.cannotResize ? null : { width, height };
     },
   };
   return fakes;
@@ -240,5 +258,121 @@ describe('programming errors', () => {
     expect(() => assets.model(CRATE)).toThrow(/unknown model id "crate"/);
     expect(() => assets.animations(CRATE)).toThrow(/unknown model id "crate"/);
     expect(() => assets.texture(GRID)).toThrow(/unknown texture id "grid"/);
+  });
+});
+
+// ------------------------------------------- SPEC-015 §3/§8, AC-8: the cap
+//
+// `textureMaxSize` is 512/1024/2048 (SPEC-015 §3), and the criterion is not
+// that the numbers exist — it is that `Assets` clamps what it uploads to them.
+// Node has no `<canvas>`, so the drawing half arrives through the injected
+// `resize` seam, exactly the way the loaders do (SPEC-003 D-29).
+
+describe('clampedTextureSize (AC-8)', () => {
+  it('leaves an image that already fits exactly as it is', () => {
+    expect(clampedTextureSize(512, 512, 1024)).toEqual({ width: 512, height: 512 });
+    expect(clampedTextureSize(1024, 1024, 1024)).toEqual({ width: 1024, height: 1024 });
+    expect(clampedTextureSize(1024, 256, 1024)).toEqual({ width: 1024, height: 256 });
+  });
+
+  it('halves until both sides fit, so a power of two stays one', () => {
+    expect(clampedTextureSize(2048, 2048, 512)).toEqual({ width: 512, height: 512 });
+    expect(clampedTextureSize(4096, 4096, 1024)).toEqual({ width: 1024, height: 1024 });
+    // The aspect ratio is preserved: the short side halves with the long one.
+    expect(clampedTextureSize(2048, 512, 1024)).toEqual({ width: 1024, height: 256 });
+  });
+
+  it('treats a cap of 0, a negative cap or a missing size as uncapped', () => {
+    expect(clampedTextureSize(4096, 4096, 0)).toEqual({ width: 4096, height: 4096 });
+    expect(clampedTextureSize(4096, 4096, -1)).toEqual({ width: 4096, height: 4096 });
+    expect(clampedTextureSize(4096, 4096, Number.NaN)).toEqual({ width: 4096, height: 4096 });
+    expect(clampedTextureSize(0, 0, 512)).toEqual({ width: 0, height: 0 });
+  });
+});
+
+describe('the preset texture cap (AC-8)', () => {
+  it('carries §3 values that Assets can be driven with', () => {
+    expect(QUALITY.low.textureMaxSize).toBe(512);
+    expect(QUALITY.medium.textureMaxSize).toBe(1024);
+    expect(QUALITY.high.textureMaxSize).toBe(2048);
+  });
+
+  it('clamps an oversized texture on the way into the cache', async () => {
+    const fakes = fakeLoaders();
+    fakes.image = { width: 2048, height: 2048 };
+    const assets = new Assets(fakes);
+    assets.setMaxTextureSize(QUALITY.low.textureMaxSize);
+    await assets.load(MANIFEST);
+    // Both manifest textures were drawn down to 512, and the cached texture is
+    // the scaled image — not the 2048 one the loader returned.
+    expect(fakes.resized).toEqual([
+      { width: 512, height: 512 },
+      { width: 512, height: 512 },
+    ]);
+    expect(assets.texture(GRID).image).toEqual({ width: 512, height: 512 });
+    // `needsUpdate` is a write-only setter; the version it bumps is the read.
+    expect(assets.texture(GRID).version).toBeGreaterThan(0);
+  });
+
+  it('leaves a texture that already fits the cap untouched', async () => {
+    const fakes = fakeLoaders();
+    fakes.image = { width: 512, height: 512 };
+    const assets = new Assets(fakes);
+    assets.setMaxTextureSize(QUALITY.medium.textureMaxSize);
+    await assets.load(MANIFEST);
+    expect(fakes.resized).toEqual([]);
+    expect(assets.texture(GRID).image).toEqual({ width: 512, height: 512 });
+  });
+
+  it('uploads at full size while no preset has set a cap', async () => {
+    const fakes = fakeLoaders();
+    fakes.image = { width: 2048, height: 2048 };
+    const assets = new Assets(fakes);
+    await assets.load(MANIFEST);
+    expect(fakes.resized).toEqual([]);
+  });
+
+  it('re-clamps what is already cached when the cap drops (a preset change)', async () => {
+    const fakes = fakeLoaders();
+    fakes.image = { width: 2048, height: 2048 };
+    const assets = new Assets(fakes);
+    assets.setMaxTextureSize(QUALITY.high.textureMaxSize);
+    await assets.load(MANIFEST);
+    expect(fakes.resized).toEqual([]); // 2048 fits `high`
+
+    assets.setMaxTextureSize(QUALITY.low.textureMaxSize);
+    expect(fakes.resized).toEqual([
+      { width: 512, height: 512 },
+      { width: 512, height: 512 },
+    ]);
+    expect(assets.texture(GRID).image).toEqual({ width: 512, height: 512 });
+  });
+
+  it('is a no-op when the cap is set again to the value it already had', async () => {
+    const fakes = fakeLoaders();
+    fakes.image = { width: 2048, height: 2048 };
+    const assets = new Assets(fakes);
+    assets.setMaxTextureSize(1024);
+    await assets.load(MANIFEST);
+    fakes.resized.length = 0;
+    // `renderer:resized` fires on every plain resize too, not only on a preset
+    // change; setting the same cap again must not redraw anything.
+    assets.setMaxTextureSize(1024);
+    expect(fakes.resized).toEqual([]);
+  });
+
+  it('leaves the source alone, and warns, when there is nothing to draw on', async () => {
+    const warnings: string[] = [];
+    setLogSink({ ...silent, warn: (_scope: string, message: string) => warnings.push(message) });
+    const fakes = fakeLoaders();
+    fakes.image = { width: 2048, height: 2048 };
+    fakes.cannotResize = true;
+    const assets = new Assets(fakes);
+    assets.setMaxTextureSize(512);
+    await assets.load(MANIFEST);
+    // The cap is a budget, not a correctness rule: a texture that could not be
+    // scaled ships at its own size rather than being replaced with nothing.
+    expect(assets.texture(GRID).image).toEqual({ width: 2048, height: 2048 });
+    expect(warnings.some((line) => /could not be clamped to 512px/.test(line))).toBe(true);
   });
 });

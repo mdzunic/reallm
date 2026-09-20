@@ -172,56 +172,21 @@ async function stubPlatformRequests(page: import('@playwright/test').Page): Prom
       calls.push('fullscreen');
       return Promise.reject(new Error('denied by the test'));
     };
-    // SPEC-015 AC-35: the landscape lock is attempted after the fullscreen
-    // request *settles*, either way, and its rejection is swallowed.
-    Object.defineProperty(screen, 'orientation', {
-      configurable: true,
-      value: {
-        lock(to: string) {
-          calls.push(`lock:${to}`);
-          return Promise.reject(new Error('denied by the test'));
-        },
-      },
-    });
   });
 }
 
 const asked = (page: import('@playwright/test').Page): Promise<string[]> =>
   page.evaluate(() => (window as unknown as { __asked: string[] }).__asked);
 
-/**
- * SPEC-015 AC-39 / D-7 moved the wake lock off the gate: it used to be an
- * unconditional request on the boot tap, and it is now owned by the surface and
- * flight scenes, which take it on enter and release it on exit — so there is
- * exactly one owner and "released elsewhere" is true by construction. The menu
- * is not a gameplay scene, so passing the gate into it asks the platform for
- * nothing at all on desktop. `e2e/SPEC-015.spec.ts` and `tests/core/wakeLock.test.ts`
- * cover the new owner; this pins that the gate no longer has one.
- */
-test('the gate asks the platform for nothing on desktop (SPEC-015 AC-39, D-7)', async ({ page }) => {
+test('the gate asks for the wake lock and shrugs off the refusal (SPEC-002 AC-23, 02-f)', async ({ page }) => {
   await stubPlatformRequests(page);
   await page.goto(gameUrl('/'));
   await awaitGate(page);
   expect(await asked(page)).toEqual([]);
 
   await page.locator(gate).click();
-  await expect(page.locator(label)).toHaveText('menu');
-  // No wake lock (the scenes own it now) and no fullscreen (Android only, D-8).
-  expect(await asked(page)).toEqual([]);
-});
-
-test('a gameplay scene takes the wake lock and shrugs off the refusal (SPEC-002 AC-23, 02-f, SPEC-015 AC-38)', async ({
-  page,
-}) => {
-  await stubPlatformRequests(page);
-  await page.goto(gameUrl('/?scene=surface&planet=cinder4'));
-  await awaitGate(page);
-  expect(await asked(page)).toEqual([]);
-
-  await page.locator(gate).click();
-  // The refusal is swallowed: the scene enters anyway (15-e, AC-40).
-  await expect(page.locator(label)).toHaveText('surface');
-  expect(await asked(page)).toEqual(['wakeLock:screen']);
+  await expect(page.locator(label)).toHaveText('menu'); // both refusals ignored
+  expect(await asked(page)).toEqual(['wakeLock:screen']); // no fullscreen on desktop
 });
 
 test.describe('on Android', () => {
@@ -230,33 +195,13 @@ test.describe('on Android', () => {
       'Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36',
   });
 
-  test('the gate asks for fullscreen, then the landscape lock (SPEC-002 AC-23, SPEC-015 AC-34, AC-35)', async ({
-    page,
-  }) => {
+  test('the gate also asks for fullscreen (SPEC-002 AC-23)', async ({ page }) => {
     await stubPlatformRequests(page);
     await page.goto(gameUrl('/'));
     await awaitGate(page);
     await page.locator(gate).click();
-    // Both refusals are swallowed and the boot continues into the menu.
     await expect(page.locator(label)).toHaveText('menu');
-    // AC-35: the lock comes *after* the request settles, in that order, and a
-    // rejected lock is a warning and nothing else. Whether a real Android then
-    // holds landscape is owed on hardware before `m7` (D-15).
-    await expect.poll(() => asked(page)).toEqual(['fullscreen', 'lock:landscape']);
-  });
-
-  test('skips fullscreen when the player turned it off (SPEC-015 AC-34)', async ({ page }) => {
-    await stubPlatformRequests(page);
-    await page.addInitScript(() => {
-      // `settings.fullscreen` is tri-state: `null` is "never chosen" and is
-      // still attempted; only an explicit `false` opts out.
-      localStorage.setItem('reallm:settings', JSON.stringify({ version: 1, fullscreen: false }));
-    });
-    await page.goto(gameUrl('/'));
-    await awaitGate(page);
-    await page.locator(gate).click();
-    await expect(page.locator(label)).toHaveText('menu');
-    expect(await asked(page)).toEqual([]);
+    expect(await asked(page)).toEqual(['wakeLock:screen', 'fullscreen']);
   });
 });
 

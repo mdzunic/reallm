@@ -40,6 +40,53 @@ export interface AssetManifest {
 export interface AssetLoaders {
   gltf: { loadAsync(url: string): Promise<{ scene: Group; animations: AnimationClip[] }> };
   texture: { loadAsync(url: string): Promise<Texture> };
+  /**
+   * SPEC-015 AC-8: downscale one oversized image to `width × height`. Injected
+   * for the same reason the loaders are (D-29) — the default draws to a
+   * `<canvas>`, which node does not have. `null` means "could not", and the
+   * source image is then left exactly as it was.
+   */
+  resize: TextureResizer;
+}
+
+/** The seam `Assets` clamps through; `null` when there is nothing to draw on. */
+export type TextureResizer = (image: unknown, width: number, height: number) => unknown | null;
+
+/**
+ * SPEC-015 §3/§8, AC-8: the size an image may be uploaded at under a preset's
+ * `textureMaxSize`. Pure, and exported for its own unit test.
+ *
+ * The reduction halves, rather than fitting the cap exactly: every texture this
+ * game ships is a power of two, halving keeps it one, and a non-power-of-two
+ * upload would silently lose its mip chain — which is the memory this cap is
+ * here to save in the first place. A cap of `0` (or anything non-finite) means
+ * "uncapped" and returns the source size untouched.
+ */
+export function clampedTextureSize(
+  width: number,
+  height: number,
+  max: number,
+): { readonly width: number; readonly height: number } {
+  if (!Number.isFinite(max) || max <= 0 || !(width > 0) || !(height > 0)) return { width, height };
+  let scaledWidth = width;
+  let scaledHeight = height;
+  while ((scaledWidth > max || scaledHeight > max) && scaledWidth > 1 && scaledHeight > 1) {
+    scaledWidth = Math.max(1, Math.floor(scaledWidth / 2));
+    scaledHeight = Math.max(1, Math.floor(scaledHeight / 2));
+  }
+  return { width: scaledWidth, height: scaledHeight };
+}
+
+/** The browser default for `AssetLoaders.resize`: draw the image down a canvas. */
+export function canvasTextureResizer(image: unknown, width: number, height: number): unknown | null {
+  if (typeof document === 'undefined') return null;
+  const canvas = document.createElement('canvas');
+  canvas.width = width;
+  canvas.height = height;
+  const context = canvas.getContext('2d');
+  if (context === null) return null;
+  context.drawImage(image as CanvasImageSource, 0, 0, width, height);
+  return canvas;
 }
 
 interface ModelEntry {
@@ -90,6 +137,8 @@ export class Assets {
   #inflightManifest: AssetManifest | null = null;
   #loaded = false;
   #maxAnisotropy = 1;
+  /** `0` until a preset says otherwise, which means "no cap" (AC-8). */
+  #maxTextureSize = 0;
 
   constructor(loaders: Partial<AssetLoaders> = {}) {
     this.#injected = loaders;
@@ -152,6 +201,24 @@ export class Assets {
     return texture;
   }
 
+  /**
+   * SPEC-015 §3/§8, AC-8: the preset's `textureMaxSize`. `Game` sets it before
+   * the first upload and again whenever the preset changes, and every texture —
+   * boot manifest or a lazy per-planet drop afterwards — is clamped to it on
+   * the way into the cache.
+   *
+   * Lowering the cap re-clamps what is already cached. Raising it does not
+   * restore detail that was already thrown away: the full-size image is not
+   * kept alive for a resolution the session has decided it cannot afford, so a
+   * preset that goes up mid-session gets its larger textures on the next boot.
+   */
+  setMaxTextureSize(max: number): void {
+    const next = Number.isFinite(max) && max > 0 ? Math.floor(max) : 0;
+    if (next === this.#maxTextureSize) return;
+    this.#maxTextureSize = next;
+    for (const texture of this.#textures.values()) this.#clamp(texture);
+  }
+
   /** Called by `Game` once the renderer exists; defaults to 1 (SPEC-003 §4.3). */
   setMaxAnisotropy(max: number): void {
     this.#maxAnisotropy = Math.max(1, Math.floor(max));
@@ -198,8 +265,29 @@ export class Assets {
     texture.colorSpace = (entry.kind ?? 'color') === 'color' ? SRGBColorSpace : NoColorSpace;
     texture.generateMipmaps = true;
     texture.anisotropy = Math.min(4, this.#maxAnisotropy);
+    // AC-8: before the texture is ever handed out, so nothing over the preset's
+    // cap reaches the GPU — including the lazy per-planet drops of SPEC-018.
+    this.#clamp(texture, id);
     markShared(texture);
     return texture;
+  }
+
+  /** Draw an oversized image down to the cap; a no-op when it already fits. */
+  #clamp(texture: Texture, id?: string): void {
+    const image = texture.image as { width?: number; height?: number } | null | undefined;
+    const width = image?.width ?? 0;
+    const height = image?.height ?? 0;
+    const target = clampedTextureSize(width, height, this.#maxTextureSize);
+    if (target.width === width && target.height === height) return;
+    const scaled = this.#resize()(image, target.width, target.height);
+    if (scaled === null || scaled === undefined) {
+      // No canvas to draw on. The source is left alone rather than corrupted:
+      // the cap is a budget, not a correctness rule (SPEC-015 §8).
+      log.warn('assets', `texture "${id ?? '?'}" could not be clamped to ${this.#maxTextureSize}px`);
+      return;
+    }
+    texture.image = scaled;
+    texture.needsUpdate = true;
   }
 
   /** One failing item rejects the whole load, naming what could not be fetched (D-30). */
@@ -220,5 +308,9 @@ export class Assets {
   #texture(): AssetLoaders['texture'] {
     this.#textureLoader ??= this.#injected.texture ?? new TextureLoader(this.#manager);
     return this.#textureLoader;
+  }
+
+  #resize(): TextureResizer {
+    return this.#injected.resize ?? canvasTextureResizer;
   }
 }
