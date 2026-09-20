@@ -919,9 +919,9 @@ three.js offers:
 
   `node scripts/assets/check.mjs` prints the same set counted its own way —
   `dist 21.28 MB (177 precachable files)` — and fails over 25 MB, which is what
-  D-11 widened it to do. The five-entry difference is exactly the files
+  D-11 widened it to do. The four-entry difference is exactly the five files
   `includeAssets` adds where no glob extension matches (`manifest.webmanifest`,
-  `assets/LICENSES.md` and three `.gitkeep`s) less `sw.js`, which the checker
+  `assets/LICENSES.md` and three `.gitkeep`s), less `sw.js`, which the checker
   counts and the worker does not precache itself.
   The plugin is `vite-pwa.ts` in this repository rather than the
   `vite-plugin-pwa` package; `docs/BUGS.md` §6 has the difference and the swap.
@@ -1017,7 +1017,7 @@ buttons through the dev bridge.
 ### Checklist
 
 - [x] `npm run check` green — typecheck (`src` and `tests`), 76 vitest suites /
-      1 322 tests, production build
+      1 325 tests, production build
 - [x] `npx playwright test --project=pwa` green — 6 passed against a real build
       served by `vite preview`
 - [x] `node scripts/assets/check.mjs` green — every asset row in
