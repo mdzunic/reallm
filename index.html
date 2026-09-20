@@ -15,6 +15,11 @@
     <!-- The same mark, rasterized: iOS ignores the manifest icons and reads
          this one for the Home Screen (SPEC-015 §10.1, AC-28). -->
     <link rel="apple-touch-icon" sizes="180x180" href="icons/apple-touch-icon-180.png" />
+    <!-- SPEC-015 §10 (AC-49). The fields are §10's manifest block verbatim.
+         When `vite-plugin-pwa` is added it generates this file from the same
+         literal and injects its own link — at which point this static copy and
+         this line are deleted together, not kept alongside it. -->
+    <link rel="manifest" href="manifest.webmanifest" />
     <title>ReaLLM</title>
   </head>
   <body>
