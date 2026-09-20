@@ -537,6 +537,7 @@ export class CreationScene extends UiScene<'creation'> {
       void dialogueLayer(services.uiRoot, services.events, {
         input: services.input,
         saveKey: () => services.save.current,
+        reduceMotion: () => services.settings.get().reduceMotion,
       }).play('intro_command');
     });
   }

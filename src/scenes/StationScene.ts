@@ -248,6 +248,7 @@ export class StationScene extends UiScene<'station'> {
     const dialogue = dialogueLayer(this.services.uiRoot, this.services.events, {
       input: this.services.input,
       saveKey: () => this.services.save.current,
+      reduceMotion: () => this.services.settings.get().reduceMotion,
     });
     for (const id of data.progress.missionsDone) {
       if (seen.has(id) || MISSIONS[id]?.planet !== arrivedFrom) continue;

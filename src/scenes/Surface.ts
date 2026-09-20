@@ -909,6 +909,7 @@ export class SurfaceScene extends UiScene<'surface'> {
     this.#dialogue = dialogueLayer(services.uiRoot, services.events, {
       input: services.input,
       saveKey: () => this.services.save.current,
+      reduceMotion: () => this.services.settings.get().reduceMotion,
     });
 
     const overlay = el('div', 'hud-storm');

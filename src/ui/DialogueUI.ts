@@ -18,6 +18,17 @@ const DIALOGUE_TABLE: Readonly<Record<DialogueId, DialogueDef>> = DIALOGUE;
 
 /** §4.6: 40 chars/s. */
 export const TYPE_CHARS_PER_SEC = 40;
+
+/**
+ * SPEC-015 AC-44: how the next line is revealed. Reduce motion is a promise
+ * about animation, not about content, so the whole line lands on the first
+ * frame and no interval is started at all — `intervalMs: null` is the absence
+ * of a typewriter, not a fast one.
+ */
+export function lineReveal(text: string, reduceMotion: boolean): { chars: number; intervalMs: number | null } {
+  if (reduceMotion) return { chars: text.length, intervalMs: null };
+  return { chars: 0, intervalMs: 1000 / TYPE_CHARS_PER_SEC };
+}
 /** §4.6: a fully shown non-modal line advances itself after this long. */
 export const AUTO_ADVANCE_MS = 6000;
 /** §4.6: the queue cap, playing dialogue included. */
@@ -43,6 +54,19 @@ export const SPEAKER_NAMES: Record<SpeakerId, string> = {
   player: 'You',
   warden: '???',
 };
+
+/**
+ * `saveKey` and `reduceMotion` are read through, not captured: `dialogueLayer`
+ * hands back one page-lifetime instance and the first caller's options win, so
+ * a setting the player changes mid-session has to reach an instance that was
+ * built by an earlier scene.
+ */
+export interface DialogueOptions {
+  input?: DialogueInput;
+  saveKey?: () => object | null;
+  /** SPEC-015 AC-44: `settings.reduceMotion`, live. */
+  reduceMotion?: () => boolean;
+}
 
 interface Job {
   id: DialogueId;
@@ -71,7 +95,7 @@ const INSTANCES = new WeakMap<HTMLElement, DialogueUI>();
 export function dialogueLayer(
   root: HTMLElement,
   events: DialogueEvents,
-  options: { input?: DialogueInput; saveKey?: () => object | null } = {},
+  options: DialogueOptions = {},
 ): DialogueUI {
   let instance = INSTANCES.get(root);
   if (instance === undefined) {
@@ -86,6 +110,7 @@ export class DialogueUI {
   readonly #events: DialogueEvents;
   readonly #input: DialogueInput | null;
   readonly #saveKey: (() => object | null) | null;
+  readonly #reduceMotion: (() => boolean) | null;
   readonly #releases: Unsubscribe[] = [];
 
   readonly #root: HTMLDivElement;
@@ -102,15 +127,12 @@ export class DialogueUI {
   #typeTimer: ReturnType<typeof setInterval> | null = null;
   #advanceTimer: ReturnType<typeof setTimeout> | null = null;
 
-  constructor(
-    ui: UiRoot,
-    events: DialogueEvents,
-    options: { input?: DialogueInput; saveKey?: () => object | null } = {},
-  ) {
+  constructor(ui: UiRoot, events: DialogueEvents, options: DialogueOptions = {}) {
     this.#ui = ui;
     this.#events = events;
     this.#input = options.input ?? null;
     this.#saveKey = options.saveKey ?? null;
+    this.#reduceMotion = options.reduceMotion ?? null;
 
     this.#dim = el('div', 'dialogue-dim');
     this.#speaker = el('span', 'dialogue-speaker');
@@ -248,15 +270,22 @@ export class DialogueUI {
     }
     this.#setStyle(line.speaker);
     this.#speaker.textContent = SPEAKER_NAMES[line.speaker];
-    this.#shown = 0;
+    const reveal = lineReveal(line.text, this.#reduceMotion?.() === true);
+    this.#shown = reveal.chars;
     this.#lineDone = false;
-    this.#text.textContent = '';
-    // 40 chars/s (AC-72); one interval per line, cleared on skip and dispose.
-    this.#typeTimer = setInterval(() => {
-      this.#shown++;
-      this.#text.textContent = line.text.slice(0, this.#shown);
-      if (this.#shown >= line.text.length) this.#finishLine();
-    }, 1000 / TYPE_CHARS_PER_SEC);
+    this.#text.textContent = line.text.slice(0, reveal.chars);
+    if (reveal.intervalMs === null) {
+      // SPEC-015 AC-44: reduce motion — the line is already whole, so there is
+      // nothing to animate and no interval to clear.
+      this.#finishLine();
+    } else {
+      // 40 chars/s (AC-72); one interval per line, cleared on skip and dispose.
+      this.#typeTimer = setInterval(() => {
+        this.#shown++;
+        this.#text.textContent = line.text.slice(0, this.#shown);
+        if (this.#shown >= line.text.length) this.#finishLine();
+      }, reveal.intervalMs);
+    }
     // AC-73: a non-modal line moves on by itself; a modal one waits for the tap.
     if (!job.modal) {
       this.#advanceTimer = setTimeout(() => this.#advanceLine(), AUTO_ADVANCE_MS);

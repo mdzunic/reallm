@@ -135,7 +135,7 @@ const CLOUD_SCALE = 1.015;
 const CAMERA_LERP_PER_S = 10;
 const CAMERA_Z = 2.5;
 /** Reduce-motion caps the roll here (§4.9). */
-const REDUCED_ROLL_DEG = 8;
+export const REDUCED_ROLL_DEG = 8;
 const MAX_SHIPS = 40;
 const MAX_SHOTS = 64;
 const PARTICLE_LIFE = 0.7;
@@ -210,6 +210,18 @@ export function starStreakLength(throttle: number, reduceMotion: boolean): numbe
 }
 
 const DEG = Math.PI / 180;
+
+/**
+ * AC-42: the radians the horizon is rolled by this frame. A bank to the right
+ * rolls the horizon left, and reduce motion holds it inside ±8° either way —
+ * the ship still banks, the camera just stops following it that far.
+ */
+export function cameraRoll(bankDeg: number, reduceMotion: boolean): number {
+  const roll = -bankDeg * DEG;
+  if (!reduceMotion) return roll;
+  const limit = REDUCED_ROLL_DEG * DEG;
+  return Math.max(-limit, Math.min(limit, roll));
+}
 
 /** SPEC-017 §4.4: image-based lighting is a fill in space, not the key. */
 const FLIGHT_ENVIRONMENT_INTENSITY = 0.5;
@@ -849,8 +861,7 @@ export class FlightView {
     camera.position.x += (frame.ship.x - camera.position.x) * chase;
     camera.position.y += (frame.ship.y - camera.position.y) * chase;
     camera.position.z = CAMERA_Z;
-    let roll = -frame.ship.bank * DEG; // bank right → horizon rolls left
-    if (this.#reduceMotion) roll = Math.max(-REDUCED_ROLL_DEG * DEG, Math.min(REDUCED_ROLL_DEG * DEG, roll));
+    let roll = cameraRoll(frame.ship.bank, this.#reduceMotion); // bank right → horizon rolls left
     let pitch = (frame.ship.vy / 14) * 15 * DEG;
     pitch += this.#landing * -24 * DEG; // the cutscene noses down (§4.1)
     if (this.#shake > 0) {

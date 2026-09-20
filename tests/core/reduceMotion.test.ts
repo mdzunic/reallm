@@ -16,6 +16,7 @@ import { Flight, type FlightConfig, type FlightInput } from '@/systems/Flight';
 import { Missions } from '@/systems/Missions';
 import { Progression } from '@/systems/Progression';
 import { chooseFilmMode, revealCamera, typedChars } from '@/systems/StoryBeats';
+import { lineReveal, TYPE_CHARS_PER_SEC } from '@/ui/DialogueUI';
 import {
   CAMERA_BOB,
   cameraBob,
@@ -25,9 +26,30 @@ import {
   stormOverlayOpacity,
   type ShakeState,
 } from '@/views/SurfaceView';
-import { FlightView, REDUCED_STREAK_SCALE, STAR_STREAK_LENGTH, starStreakLength } from '@/views/FlightView';
+import {
+  cameraRoll,
+  FlightView,
+  REDUCED_ROLL_DEG,
+  REDUCED_STREAK_SCALE,
+  STAR_STREAK_LENGTH,
+  starStreakLength,
+} from '@/views/FlightView';
 import { harness, STEP } from '../systems/combatFixtures';
+import { stripComments } from '../architecture/source';
 import * as THREE from 'three';
+
+/**
+ * Two of the rules below are a line of wiring rather than a function — the
+ * scenes that hand the setting to the dialogue layer, and the frame flag the
+ * surface HUD writes. `environment: 'node'` has no DOM to mount them in, so
+ * they are pinned the way `tests/ui/updates.test.ts` pins its own wiring:
+ * against the source, with comments stripped so a rule cannot be satisfied by
+ * writing it down.
+ */
+const RAW = import.meta.glob<string>('../../src/**/*.ts', { query: '?raw', import: 'default', eager: true });
+const SOURCES: Record<string, string> = Object.fromEntries(
+  Object.entries(RAW).map(([file, source]) => [file, stripComments(source)]),
+);
 
 // ------------------------------------------------------------------ effects
 
@@ -65,17 +87,22 @@ describe('screen shake and camera bob (AC-41)', () => {
 });
 
 describe('flight camera bank (AC-42)', () => {
-  // The clamp itself lives in `views/FlightView.ts` and is applied to
-  // `-ship.bank × DEG`; what is checked here is the number it clamps to and
-  // that the clamp is symmetric.
-  const REDUCED_ROLL_DEG = 8;
-  const clamp = (bankDeg: number): number => Math.max(-REDUCED_ROLL_DEG, Math.min(REDUCED_ROLL_DEG, -bankDeg));
+  // `cameraRoll` is the function `FlightView.#updateCamera` calls, so this
+  // pins the shipped clamp rather than a copy of it.
+  const deg = (radians: number): number => radians / (Math.PI / 180);
 
   it('holds the roll inside 8° in either direction', () => {
-    expect(clamp(35)).toBe(-8);
-    expect(clamp(-35)).toBe(8);
-    expect(clamp(4)).toBe(-4);
-    expect(clamp(0)).toBe(-0);
+    expect(REDUCED_ROLL_DEG).toBe(8);
+    expect(deg(cameraRoll(35, true))).toBeCloseTo(-8, 10);
+    expect(deg(cameraRoll(-35, true))).toBeCloseTo(8, 10);
+    // A bank already inside the cap is untouched, and so is level flight.
+    expect(deg(cameraRoll(4, true))).toBeCloseTo(-4, 10);
+    expect(cameraRoll(0, true)).toBe(-0);
+  });
+
+  it('follows the full bank when the setting is off', () => {
+    expect(deg(cameraRoll(35, false))).toBeCloseTo(-35, 10);
+    expect(deg(cameraRoll(-35, false))).toBeCloseTo(35, 10);
   });
 });
 
@@ -107,19 +134,42 @@ describe('the storm overlay (AC-43)', () => {
 describe('the typewriter and the HUD pulse (AC-44)', () => {
   const LINE = 'The lattice is not a place. It is a rate.';
 
-  it('types the whole line on the first frame', () => {
+  it('types the whole film caption on the first frame', () => {
     expect(typedChars(LINE, 0, true)).toBe(LINE.length);
     expect(typedChars(LINE, 0.001, true)).toBe(LINE.length);
     // …where without it the first frame has barely started.
     expect(typedChars(LINE, 0, false)).toBeLessThan(LINE.length);
   });
 
+  it('types the whole dialogue line on the first frame, with no interval at all', () => {
+    // `DialogueUI.#advanceLine` calls this: a `null` interval is the absence
+    // of a typewriter, not a fast one, so no `setInterval` is ever started.
+    expect(lineReveal(LINE, true)).toEqual({ chars: LINE.length, intervalMs: null });
+    // The ordinary path is §4.6's 40 chars/s, starting from an empty box.
+    expect(lineReveal(LINE, false)).toEqual({ chars: 0, intervalMs: 1000 / TYPE_CHARS_PER_SEC });
+    expect(TYPE_CHARS_PER_SEC).toBe(40);
+    // An empty line is instantly whole either way — 0 chars, and `#finishLine`
+    // is what the reduce-motion branch reaches.
+    expect(lineReveal('', true).chars).toBe(0);
+  });
+
+  it('reads the setting live, in every scene that opens a dialogue', () => {
+    // The layer is a page-lifetime singleton whose first caller's options win
+    // (`dialogueLayer`), so the option has to be a getter or a scene that
+    // opened before the player changed the setting would keep typing.
+    const dialogue = SOURCES['../../src/ui/DialogueUI.ts'] as string;
+    expect(dialogue).toMatch(/reduceMotion\?\s*:\s*\(\)\s*=>\s*boolean/);
+    expect(dialogue).toContain('lineReveal(line.text, this.#reduceMotion?.() === true)');
+    for (const scene of ['Surface', 'StationScene', 'CreationScene']) {
+      const source = SOURCES[`../../src/scenes/${scene}.ts`] as string;
+      expect(source, scene).toMatch(/reduceMotion:\s*\(\)\s*=>\s*[\w.]*settings\.get\(\)\.reduceMotion/);
+    }
+  });
+
   it('turns the guide frame pulse into a static colour change', () => {
-    // `scenes/Surface.ts` writes `frame.pulse = !settings.reduceMotion`, so the
-    // view's pulsing beacon becomes a lit one. The rule, stated:
-    const pulseFor = (reduceMotion: boolean): boolean => !reduceMotion;
-    expect(pulseFor(true)).toBe(false);
-    expect(pulseFor(false)).toBe(true);
+    // `scenes/Surface.ts` is what writes the flag onto the frame the view
+    // reads; the view's pulsing beacon becomes a lit one.
+    expect(SOURCES['../../src/scenes/Surface.ts'] as string).toContain('frame.pulse = !settings.reduceMotion');
   });
 });
 
