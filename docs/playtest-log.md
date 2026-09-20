@@ -1233,8 +1233,11 @@ the wait is counting, and the budget runs out before the game gets there. The
 same starvation is why `e2e/start.ts` now takes the cold-start budget for the
 scene-label and fade waits.
 
-**None of the seven is in a file this branch changed**, and none asserts
-anything SPEC-015 touches: the two post-chain cases and the context-loss case
+**No spec file any of the seven lives in was changed by this branch**, and none
+asserts anything SPEC-015 touches. The one file of theirs this branch did touch
+is the shared `e2e/start.ts`, and its only change is the two widened waits
+described above — a longer budget can turn a failure into a pass, never the
+other way round. The two post-chain cases and the context-loss case
 are SPEC-017's composer, `lifecycle` is SPEC-002's visibility handling,
 `SPEC-011` and `SPEC-012-missions` are spawn and mission progression, and
 `surface-env` is SPEC-030's per-planet draw budget. The draw and triangle counts
