@@ -895,7 +895,7 @@ simulation:
 | GPU textures — flight | 56.7 MB | ≤ 30 MB | ❌ **P1 filed** (see below) |
 | Bundle, app (gz) | 187.56 kB (`index`) + 10.51 kB (css) | ≤ 350 kB | ✅ |
 | Bundle, three (gz) | 177.23 kB | ≤ 200 kB | ✅ |
-| Precache set | 21.27 MB over 176 precachable files in `dist/` | ≤ 25 MB | ✅ |
+| Precache set | **21.31 MB over 181 entries**, from the build's own summary | ≤ 25 MB | ✅ |
 | Cold first load, 4G | — | ≤ 8 s to "tap to start" | **owed on hardware** — the container has no throttled network path worth quoting |
 
 Two notes on how those were taken, because the spec's wording assumes more than
@@ -907,11 +907,24 @@ three.js offers:
   (`w · h · 4 · 4/3`). That is an **upper bound** — it counts each decoded image
   once whether or not it is resident — and it is the honest number to hold the
   budget against, so the flight row is filed rather than argued away.
-- **Precache summary (AC-54).** `vite build` prints the chunk table above;
-  `node scripts/assets/check.mjs` prints the precachable total and entry count
-  (`dist 21.27 MB (176 precachable files)`), which is what D-11 widened it to do.
-  The `vite-plugin-pwa` summary itself lands with the plugin (see
-  `/lane/needs-human.md` in the build lane and the implementation summary).
+- **Precache summary (AC-54).** `vite build` prints it, from the PWA plugin's
+  own `writeBundle`:
+
+  ```
+  PWA      generateSW (registerType: 'prompt', SPEC-015 §10)
+  precache 181 entries (21.31 MB)
+  files generated
+    dist/sw.js
+  ```
+
+  `node scripts/assets/check.mjs` prints the same set counted its own way —
+  `dist 21.28 MB (177 precachable files)` — and fails over 25 MB, which is what
+  D-11 widened it to do. The five-entry difference is exactly the files
+  `includeAssets` adds where no glob extension matches (`manifest.webmanifest`,
+  `assets/LICENSES.md` and three `.gitkeep`s) less `sw.js`, which the checker
+  counts and the worker does not precache itself.
+  The plugin is `vite-pwa.ts` in this repository rather than the
+  `vite-plugin-pwa` package; `docs/BUGS.md` §6 has the difference and the swap.
 
 **P1 — flight GPU textures 56.7 MB against a ≤ 30 MB budget.** The flight scene
 loads the 2048 × 1536 sky window plus the 2048 × 1024 planet equirect and its
@@ -933,9 +946,22 @@ Against a real `vite build` served by `vite preview` on 4173
 | `icons/icon-192.png` and `icons/icon-512.png` | ✅ 200, IHDR reads 192 × 192 and 512 × 512 |
 | `icons/apple-touch-icon-180.png` | ✅ 200, IHDR reads 180 × 180 |
 | `start_url` inside `scope`, maskable icon ≥ 192, secure context | ✅ |
-| Service worker reaches `activated` | ⏸ skipped, with a named reason: no worker is registered until `vite-plugin-pwa` is configured (AC-48). The case turns on with the plugin and needs no edit |
-| Offline reload and an offline save (AC-56, AC-57) | ⏸ same, same reason |
+| Service worker reaches `activated` | ✅ registered from `virtual:pwa-register` on `load`, installs 181 entries and activates in ≈ 0.6 s on the preview server |
+| Offline reload (AC-56) | ✅ `context.setOffline(true)` then reload: every navigation is answered with the precached `index.html` and the boot gate comes up with the network gone |
+| An offline save (AC-57) | ✅ a new game created **while offline** — prologue as posters, marine, Confirm — writes `reallm:slot:0`; an offline reload reads it back field for field and the menu offers `Continue`. Only `meta.updatedAt` moves, because leaving the page is a `pagehide` autosave |
 | Newer save refused by the version check (AC-59, E9) | ✅ a `version: 99` slot reads as unusable, the menu offers `New Game` and no `Continue`, and no `Update` button exists with nothing waiting |
+
+The whole `pwa` project: **6 passed**, ≈ 11 s, serially, against `npm run build`
+served by `vite preview` on 4173.
+
+One note on how the offline save was taken. A production build has no
+`?films=off` — that flag is dev-only (SPEC-022 §4.11) — so the prologue stands
+between `New Game` and the creation screen, and this container's software
+rasteriser dies decoding its 3 MB MP4 (a renderer-process crash, the same one
+`e2e/SPEC-022.spec.ts` sidesteps by aborting the MP4 route). The case runs under
+`prefers-reduced-motion`, where `chooseFilmMode()` returns `stills` and no
+`<video>` is built at all — this spec's own AC-46 — and skips the posters the way
+a player does. The save path under test is untouched by any of that.
 
 ### Owed on hardware before `m7`
 
@@ -952,10 +978,13 @@ the handset measurement it still needs. This list is the M7 checklist's input
       request settles and a rejection is swallowed and logged at warn, on the
       emulated Android client. Owed: that a **real Android in fullscreen
       actually holds the landscape lock** through a physical rotation.
-- [ ] **AC-58 — installability.** Closed in-container on the table above. Owed:
-      **one Android install** (prompt / "Add to Home screen", launches
-      standalone landscape) and **one iOS install** (Share → Add to Home Screen,
-      launches full-bleed with the apple-touch-icon).
+- [ ] **AC-58 — installability.** Closed in-container on the table above: the
+      served manifest, both icon URLs and the apple-touch-icon at their claimed
+      pixel sizes, `start_url` inside `scope`, a secure context, and a service
+      worker that reaches `activated`. Owed: **one Android install** (prompt /
+      "Add to Home screen", launches standalone landscape) and **one iOS
+      install** (Share → Add to Home Screen, launches full-bleed with the
+      apple-touch-icon).
 - [ ] **AC-60 — surface budgets.** Closed in-container for the counts: 32 scene
       draws of ≤ 80 and 90,216 triangles of ≤ 150 k on the emulated Pixel 5 at
       `medium`. Owed: **update ≤ 6 ms and render ≤ 8 ms on the reference phone**
@@ -966,9 +995,16 @@ the handset measurement it still needs. This list is the M7 checklist's input
       ≤ 3 + 6 ms, station/menu ≤ 4 ms render) and the **cold 4G first load**
       ≤ 8 s to "tap to start".
 
-Also still owed with `vite-plugin-pwa`: the plugin's own precache summary line
-(AC-54's exact wording), the service-worker cases skipped above, and the
-`registerType: 'prompt'` update flow end to end.
+Not on this list, because it is debt rather than a measurement: the PWA plugin
+is `vite-pwa.ts` in this repository rather than the `vite-plugin-pwa` package of
+§10 (AC-48), which could not be installed here. Everything §10's options
+describe is implemented and green above; `docs/BUGS.md` §6 has the difference
+and the swap. The one thing neither this container nor that swap can produce is
+the `prompt` update flow **end to end** — it needs two successive deploys of the
+same origin, so a waiting worker actually exists. The seam either side of it is
+covered: `tests/ui/updates.test.ts` pins `app:update-ready`, and
+`e2e/SPEC-015.spec.ts` pins the banner and the menu and station `Update`
+buttons through the dev bridge.
 
 ### Not run, and why
 
@@ -977,3 +1013,18 @@ Also still owed with `vite-plugin-pwa`: the plugin's own precache summary line
 - **Physical phone over LAN:** _not run_ — no handset reaches the container. The
   phone column is Chromium's `Pixel 5` emulation with real touch pointers, which
   is what the rotate overlay's `maxTouchPoints` heuristic actually reads.
+
+### Checklist
+
+- [x] `npm run check` green — typecheck (`src` and `tests`), 76 vitest suites /
+      1 320 tests, production build
+- [x] `npx playwright test --project=pwa` green — 6 passed against a real build
+      served by `vite preview`
+- [x] `node scripts/assets/check.mjs` green — every asset row in
+      `LICENSES.md`, every budget met, precache 21.28 MB of 25 MB
+- [x] the `chromium` project's dev-server flow unchanged: no worker is
+      registered in a dev server, and `virtual:pwa-register` is a stub there
+- [ ] the five hardware rows above — owed before the `m7` tag
+- [ ] `SPEC-015` `status: done` in its frontmatter and in the SPEC-000 table —
+      both live in the sibling repository `../reallm-specs`, which is not
+      checked out in this container; nothing in this repository tracks it

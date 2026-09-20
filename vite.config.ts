@@ -11,8 +11,8 @@ export default defineConfig({
    * SPEC-015 §10 — the offline app. The options are §10's, field for field;
    * `VitePWA` itself is this repository's implementation of them rather than
    * `vite-plugin-pwa`, because adding a dependency was not available to the
-   * build that wrote this (see `vite-pwa.ts` for the whole of the difference,
-   * and `docs/BUGS.md` for what swapping in the plugin costs).
+   * build that wrote this. `vite-pwa.ts` has the whole of the difference and
+   * `docs/BUGS.md` §6 has the swap, filed as debt for `m7`.
    *
    * §10's `manifest` block is not here: the manifest ships as
    * `public/manifest.webmanifest`, linked from `index.html` (AC-49), so it is

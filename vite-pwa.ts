@@ -34,6 +34,7 @@ import { createHash } from 'node:crypto';
 import { existsSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { join, relative, sep } from 'node:path';
 import type { Plugin, ResolvedConfig } from 'vite';
+import { globToRegExp, matchesAny } from './vite-pwa-glob.ts';
 
 export interface VitePwaOptions {
   /** `'prompt'`: a waiting build is offered, never applied on its own (15-c). */
@@ -55,40 +56,6 @@ const RESOLVED_ID = '\0virtual:pwa-register';
 const SW_FILE = 'sw.js';
 /** Every cache this app owns starts with it, so `activate` can drop the old ones. */
 const CACHE_PREFIX = 'reallm-precache-';
-
-/** `**`, `*`, `?` and `{a,b}` — the whole of what §10's patterns use. */
-function globToRegExp(pattern: string): RegExp {
-  const escape = (char: string): string => char.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-  let source = '';
-  for (let i = 0; i < pattern.length; i++) {
-    const char = pattern[i] as string;
-    if (char === '*') {
-      if (pattern[i + 1] === '*') {
-        // `**/` crosses directory boundaries and also matches zero of them.
-        if (pattern[i + 2] === '/') {
-          source += '(?:[^/]*/)*';
-          i += 2;
-        } else {
-          source += '.*';
-          i += 1;
-        }
-      } else source += '[^/]*';
-    } else if (char === '?') source += '[^/]';
-    else if (char === '{') {
-      const close = pattern.indexOf('}', i);
-      if (close === -1) source += '\\{';
-      else {
-        source += `(?:${pattern
-          .slice(i + 1, close)
-          .split(',')
-          .map(escape)
-          .join('|')})`;
-        i = close;
-      }
-    } else source += escape(char);
-  }
-  return new RegExp(`^${source}$`);
-}
 
 /** Every file under `dir`, absolute, depth-first. */
 function walk(dir: string): string[] {
@@ -327,7 +294,7 @@ export function VitePWA(options: VitePwaOptions): Plugin {
         if (fileName === SW_FILE) continue;
         const source = output.type === 'chunk' ? output.code : output.source;
         const data = typeof source === 'string' ? new TextEncoder().encode(source) : new Uint8Array(source);
-        consider(fileName, data, globs.some((glob) => glob.test(fileName)));
+        consider(fileName, data, matchesAny(globs, fileName));
       }
 
       // `public/`, read from the source tree rather than from `dist/`: it is
@@ -336,7 +303,7 @@ export function VitePWA(options: VitePwaOptions): Plugin {
       if (publicDir && config.build.copyPublicDir !== false && existsSync(publicDir)) {
         for (const file of walk(publicDir)) {
           const url = toPosix(relative(publicDir, file));
-          const wanted = globs.some((glob) => glob.test(url)) || includes.some((glob) => glob.test(url));
+          const wanted = matchesAny(globs, url) || matchesAny(includes, url);
           if (!wanted) continue;
           // Size first: a 3 MB film is read only if it is going to be cached.
           if (statSync(file).size > limit) {
