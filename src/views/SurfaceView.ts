@@ -297,8 +297,13 @@ function sunDirection(sun: { azimuth: number; elevation: number }): { x: number;
   };
 }
 
-/** The nearest preset for the SPEC-018 scatter cap, from the settings object. */
-function presetOf(quality: QualitySettings): QualityPreset {
+/**
+ * The nearest preset for the SPEC-018 scatter cap, from the settings object.
+ * Exported since SPEC-015 AC-5: the thresholds are read off `maxParticles`, so
+ * a retune of that row has to keep mapping each shipped preset to its own name
+ * — which is a test, not a comment (`tests/views/surfaceView.test.ts`).
+ */
+export function presetOf(quality: QualitySettings): QualityPreset {
   return quality.maxParticles <= 60 ? 'low' : quality.maxParticles <= 150 ? 'medium' : 'high';
 }
 
