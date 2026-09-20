@@ -652,3 +652,97 @@ test.describe('the iOS install hint (AC-61)', () => {
     await expect(sheet).toBeHidden();
   });
 });
+
+// ------------------------------------------------- shake, bob and bank (AC-39)
+//
+// The three numbers §9 zeroes or clamps live on the camera, which is a Three.js
+// quaternion no DOM assertion can reach — so the surface scene publishes the
+// shake and bob it applied and the flight view publishes the degrees it rolled
+// by, both through `debugInfo()`, the same way SPEC-020 20-g publishes
+// `skyTint`. The pure decisions are pinned in `tests/core/reduceMotion.test.ts`;
+// what is here is that the values the camera actually took obey them.
+
+const sceneInfo = async (page: Page): Promise<Record<string, number | string>> =>
+  (await page.evaluate(() => window.__reallm.stats())).sceneInfo ?? {};
+
+/** Walk for `n` samples, returning what the camera offset did on each. */
+async function walkSamples(page: Page, n: number): Promise<Array<{ shake: number; bob: number }>> {
+  const out: Array<{ shake: number; bob: number }> = [];
+  await page.keyboard.down('KeyW');
+  for (let i = 0; i < n; i++) {
+    await frames(page, 4);
+    const info = await sceneInfo(page);
+    out.push({ shake: Number(info['camShake'] ?? 0), bob: Number(info['camBob'] ?? 0) });
+  }
+  await page.keyboard.up('KeyW');
+  return out;
+}
+
+/**
+ * Bank hard one way, then the other, returning the roll the camera took.
+ *
+ * Through the *mouse*, not WASD: `settings.flightMouseSteer` is on by default,
+ * and while a pointer is present it overrides the keyboard axis with
+ * `clamp((reticle − ship) / 4)` (SPEC-020 §4.2). A headless page always has a
+ * pointer, so holding a key steers by nothing at all and the samples would be
+ * a flat zero — a test that passes a clamp assertion without ever approaching
+ * the clamp.
+ */
+async function bankSamples(page: Page, n: number): Promise<number[]> {
+  const out: number[] = [];
+  const size = page.viewportSize() ?? { width: 1280, height: 720 };
+  const midY = Math.round(size.height / 2);
+  for (const x of [size.width - 5, 5]) {
+    await page.mouse.move(x, midY);
+    for (let i = 0; i < n; i++) {
+      await frames(page, 6);
+      out.push(Number((await sceneInfo(page))['roll'] ?? 0));
+    }
+  }
+  return out;
+}
+
+test.describe('reduce motion holds the camera still (AC-39)', () => {
+  test.use({ reducedMotion: 'reduce' });
+
+  test('walking moves the camera by nothing at all', async ({ page }) => {
+    await start(page, '/?scene=surface&planet=cinder4');
+    const samples = await walkSamples(page, 8);
+    // Not "small" — zero. `cameraBobAmplitude` returns 0 outright and
+    // `shakeOffset` writes the zero vector, so the offset is never applied.
+    expect(samples.every((s) => s.shake === 0)).toBe(true);
+    expect(samples.every((s) => s.bob === 0)).toBe(true);
+  });
+
+  test('banking never rolls the horizon past 8°', async ({ page, isMobile }) => {
+    test.skip(isMobile === true, 'mouse steer needs a pointer; the touch stick is SPEC-005 territory');
+    await start(page, '/?scene=flight&planet=cinder4');
+    await expect(page.locator('[data-testid="scene-label"]')).toHaveText('flight');
+    const rolls = await bankSamples(page, 10);
+    // The ship still banks to ±35° — the camera just stops following it that
+    // far. A hair of tolerance for the hit shake, which rides on the clamp.
+    expect(rolls.length).toBeGreaterThan(0);
+    for (const roll of rolls) expect(Math.abs(roll)).toBeLessThanOrEqual(8.1);
+    // And the steering really did happen: with the setting off the same sweep
+    // passes 8° (the control below), so this is a clamp, not a still camera.
+    expect(rolls.some((roll) => Math.abs(roll) > 4)).toBe(true);
+  });
+});
+
+test.describe('the camera moves with the setting off — the control (AC-39)', () => {
+  test.use({ reducedMotion: 'no-preference' });
+
+  test('walking bobs the camera, and banking rolls past 8°', async ({ page, isMobile }) => {
+    test.skip(isMobile === true, 'mouse steer needs a pointer; the touch stick is SPEC-005 territory');
+    await start(page, '/?scene=surface&planet=cinder4');
+    const samples = await walkSamples(page, 12);
+    expect(samples.some((s) => s.bob !== 0)).toBe(true);
+
+    // A fresh page rather than `go('flight')`: the flight scene needs a trip on
+    // the save, and the `?scene=` flag is what builds one (SPEC-001 §9).
+    await start(page, '/?scene=flight&planet=cinder4');
+    await expect(page.locator('[data-testid="scene-label"]')).toHaveText('flight');
+    const rolls = await bankSamples(page, 12);
+    expect(Math.max(...rolls.map(Math.abs))).toBeGreaterThan(8);
+  });
+});

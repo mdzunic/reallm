@@ -1244,6 +1244,12 @@ export class SurfaceScene extends UiScene<'surface'> {
     // while `world.time` stands still.
     info['held'] = this.#holds;
     info['viewTime'] = Math.round(this.#viewTime * 100) / 100;
+    // SPEC-015 AC-39: how far the shake and the walk bob actually moved the
+    // camera on the last frame, for the same reason SPEC-020 20-g publishes
+    // `skyTint` — reduce motion zeroes both, and that is otherwise a claim
+    // about a Three.js vector nothing outside the renderer can read.
+    info['camShake'] = Math.round(this.#shakeScratch.length() * 1000) / 1000;
+    info['camBob'] = Math.round(this.#shakeScratch.y * 1000) / 1000;
     // SPEC-028 §4.9: the weapon in hand and the quick-slot counts.
     const combat = this.#combat;
     const save = this.#save;

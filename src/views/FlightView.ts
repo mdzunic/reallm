@@ -419,6 +419,8 @@ export class FlightView {
 
   /** 20-g: 0 → white sky window, 1 → fully tinted toward the planet's accent. */
   #stormTint = 0;
+  /** AC-39: the radians the last frame rolled the camera by, after the clamp. */
+  #cameraRoll = 0;
   readonly #accent: THREE.Color;
   #flare: Lensflare | null = null;
   readonly #flareElements: LensflareElement[] = [];
@@ -736,6 +738,17 @@ export class FlightView {
     return this.#stormTint;
   }
 
+  /**
+   * SPEC-015 AC-39: the degrees the horizon was actually rolled by on the last
+   * frame — the value after `cameraRoll`'s reduce-motion clamp and after the
+   * hit shake, not the ship's own bank. Published for the same reason
+   * `stormTint` is: it is otherwise a claim about a quaternion that nothing
+   * outside the renderer can read.
+   */
+  get cameraRollDeg(): number {
+    return this.#cameraRoll / DEG;
+  }
+
   dispose(): void {
     this.#camera.remove(this.#cockpit);
     disposeObject3D(this.#cockpit);
@@ -869,6 +882,7 @@ export class FlightView {
       pitch += Math.sin(frame.time * 43) * 0.012 * this.#shake;
       roll += Math.sin(frame.time * 61) * 0.012 * this.#shake;
     }
+    this.#cameraRoll = roll;
     this.#euler.set(pitch, 0, roll, 'ZYX');
     camera.quaternion.setFromEuler(this.#euler);
   }

@@ -638,6 +638,9 @@ export class FlightScene extends UiScene<'flight'> {
       // SPEC-020 20-g: how far the sky window has shifted toward the accent,
       // so the storm tint is readable from outside the renderer.
       info['skyTint'] = Number((this.#view?.stormTint ?? 0).toFixed(2));
+      // SPEC-015 AC-39: the degrees the horizon is rolled by, after the
+      // reduce-motion clamp — 8° is the ceiling the criterion names.
+      info['roll'] = Number((this.#view?.cameraRollDeg ?? 0).toFixed(2));
     }
     return info;
   }
