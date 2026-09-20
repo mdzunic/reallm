@@ -172,6 +172,17 @@ async function stubPlatformRequests(page: import('@playwright/test').Page): Prom
       calls.push('fullscreen');
       return Promise.reject(new Error('denied by the test'));
     };
+    // SPEC-015 AC-35: the landscape lock is attempted after the fullscreen
+    // request *settles*, either way, and its rejection is swallowed.
+    Object.defineProperty(screen, 'orientation', {
+      configurable: true,
+      value: {
+        lock(to: string) {
+          calls.push(`lock:${to}`);
+          return Promise.reject(new Error('denied by the test'));
+        },
+      },
+    });
   });
 }
 
@@ -219,13 +230,19 @@ test.describe('on Android', () => {
       'Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36',
   });
 
-  test('the gate asks for fullscreen, and only that (SPEC-002 AC-23, SPEC-015 AC-34)', async ({ page }) => {
+  test('the gate asks for fullscreen, then the landscape lock (SPEC-002 AC-23, SPEC-015 AC-34, AC-35)', async ({
+    page,
+  }) => {
     await stubPlatformRequests(page);
     await page.goto(gameUrl('/'));
     await awaitGate(page);
     await page.locator(gate).click();
+    // Both refusals are swallowed and the boot continues into the menu.
     await expect(page.locator(label)).toHaveText('menu');
-    expect(await asked(page)).toEqual(['fullscreen']);
+    // AC-35: the lock comes *after* the request settles, in that order, and a
+    // rejected lock is a warning and nothing else. Whether a real Android then
+    // holds landscape is owed on hardware before `m7` (D-15).
+    await expect.poll(() => asked(page)).toEqual(['fullscreen', 'lock:landscape']);
   });
 
   test('skips fullscreen when the player turned it off (SPEC-015 AC-34)', async ({ page }) => {
