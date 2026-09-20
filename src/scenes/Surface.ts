@@ -94,7 +94,15 @@ import { UiScene } from '@/scenes/base';
 import { director } from '@/scenes/Director';
 import { INSTANCES_PER_PART } from '@/views/ProceduralMeshes';
 import { layerFromAssets } from '@/views/ProceduralTextures';
-import { advanceViewTime, RESOURCE_COLORS, shakeOffset, SurfaceView, type ShakeState } from '@/views/SurfaceView';
+import {
+  advanceViewTime,
+  cameraBob,
+  RESOURCE_COLORS,
+  shakeOffset,
+  stormOverlayOpacity,
+  SurfaceView,
+  type ShakeState,
+} from '@/views/SurfaceView';
 import { AriaHint } from '@/ui/AriaHint';
 import { confirmSheet } from '@/ui/ConfirmSheet';
 import { DamageNumbers } from '@/ui/DamageNumbers';
@@ -427,6 +435,8 @@ export class SurfaceScene extends UiScene<'surface'> {
   #groundColor = 0xffffff;
   readonly #projectScratch = new THREE.Vector3();
   readonly #shakeScratch = new THREE.Vector3();
+  /** The player's ground speed last frame — what the walk bob rides (SPEC-015 §9). */
+  #camSpeed = 0;
   readonly #screenPoint = { x: 0, y: 0 };
 
   // SPEC-026 §4.6 — the UI hold. The full map takes one; while it is above
@@ -1455,6 +1465,8 @@ export class SurfaceScene extends UiScene<'surface'> {
     this.#camTarget.x += (p.x - this.#camTarget.x) * k;
     this.#camTarget.z += (p.z - this.#camTarget.z) * k;
     const speed = Math.hypot(p.vx, p.vz);
+    // SPEC-015 §9: the walk bob rides the same speed the look-ahead does.
+    this.#camSpeed = speed;
     const bx = speed > 0.01 ? (p.vx / speed) * LOOK_AHEAD : 0;
     const bz = speed > 0.01 ? (p.vz / speed) * LOOK_AHEAD : 0;
     this.#placeCamera(bx, bz);
@@ -1474,7 +1486,12 @@ export class SurfaceScene extends UiScene<'surface'> {
     // culling is bit-identical to an unshaken frame (AC-92). Camera and
     // look-at target move by the same vector, so only the position changes —
     // the orientation, and with it the aim ray, is untouched.
-    shakeOffset(this.#shake, this.#viewTimeNow(), this.services.settings.get().reduceMotion, this.#shakeScratch);
+    const time = this.#viewTimeNow();
+    const reduceMotion = this.services.settings.get().reduceMotion;
+    shakeOffset(this.#shake, time, reduceMotion, this.#shakeScratch);
+    // SPEC-015 AC-41: the walk bob joins the shake on the same side of the
+    // frustum capture, and reduce motion zeroes its amplitude outright.
+    this.#shakeScratch.y += cameraBob(this.#camSpeed, time, reduceMotion);
     if (this.#shakeScratch.lengthSq() > 0) {
       this.camera.position.add(this.#shakeScratch);
       this.camera.updateMatrixWorld();
@@ -1561,8 +1578,11 @@ export class SurfaceScene extends UiScene<'surface'> {
     const shelterFactor = this.#insideShelter === null ? 1 : STORM_SHELTER_FACTOR;
     this.#view?.setWeather(this.#stormEffects, this.#stormIntensity * shelterFactor, this.#stormIntensity);
     if (this.#stormOverlay !== null) {
-      const opacity = (1 - this.#stormEffects.visibility) * this.#stormIntensity * shelterFactor;
-      this.#stormOverlay.style.opacity = opacity < 0.02 ? '0' : String(Math.min(0.85, opacity));
+      const mean = (1 - this.#stormEffects.visibility) * this.#stormIntensity * shelterFactor;
+      // SPEC-015 AC-43: the sheet breathes around that mean, and reduce motion
+      // holds it exactly at the mean with the flicker term gone.
+      const opacity = stormOverlayOpacity(mean, this.#viewTimeNow(), this.services.settings.get().reduceMotion);
+      this.#stormOverlay.style.opacity = opacity < 0.02 ? '0' : String(opacity);
     }
     // §4.6: visibility narrows enemy aggro.
     world.aggroMult = 1 - (1 - this.#stormEffects.visibility) * this.#stormIntensity;

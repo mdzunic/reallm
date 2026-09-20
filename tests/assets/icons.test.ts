@@ -34,12 +34,35 @@ const MASKABLE_SAFE_FRACTION = icons.MASKABLE_SAFE_FRACTION as number;
 const SVG = readFileSync(new URL('../../public/favicon.svg', import.meta.url).pathname, 'utf8');
 const ICON_DIR = new URL('../../public/icons/', import.meta.url);
 
+/** The bytes of one committed icon. */
+function iconBytes(file: string): Uint8Array {
+  return readFileSync(new URL(file, ICON_DIR).pathname);
+}
+
+function hex(bytes: Uint8Array, from: number, to: number): string {
+  return [...bytes.slice(from, to)].map((b) => b.toString(16).padStart(2, '0')).join('');
+}
+
+function ascii(bytes: Uint8Array, from: number, to: number): string {
+  return String.fromCharCode(...bytes.slice(from, to));
+}
+
+function uint32(bytes: Uint8Array, at: number): number {
+  return new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength).getUint32(at, false);
+}
+
+function sameBytes(a: Uint8Array, b: Uint8Array): boolean {
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) return false;
+  return true;
+}
+
 /** Width and height straight out of a PNG's IHDR — no decoder needed. */
 function pngSize(file: string): { width: number; height: number } {
-  const bytes = readFileSync(new URL(file, ICON_DIR).pathname);
-  expect(bytes.subarray(0, 8).toString('hex'), `${file} is a PNG`).toBe('89504e470d0a1a0a');
-  expect(bytes.subarray(12, 16).toString('ascii'), `${file} starts with IHDR`).toBe('IHDR');
-  return { width: bytes.readUInt32BE(16), height: bytes.readUInt32BE(20) };
+  const bytes = iconBytes(file);
+  expect(hex(bytes, 0, 8), `${file} is a PNG`).toBe('89504e470d0a1a0a');
+  expect(ascii(bytes, 12, 16), `${file} starts with IHDR`).toBe('IHDR');
+  return { width: uint32(bytes, 16), height: uint32(bytes, 20) };
 }
 
 describe('the mark (SPEC-015 D-14)', () => {
@@ -126,13 +149,14 @@ describe('the rasterizer', () => {
   });
 
   it('is deterministic: two renders of the same icon are byte-identical (AC-62)', () => {
-    const icon = ICONS[2] as IconSpec;
-    expect(Buffer.from(icons.renderIcon(icon) as Uint8Array)).toEqual(Buffer.from(icons.renderIcon(icon) as Uint8Array));
-    const a = icons.encodePng(icon.size, icon.size, icons.renderIcon(icon)) as Buffer;
-    const b = icons.encodePng(icon.size, icon.size, icons.renderIcon(icon)) as Buffer;
-    expect(a.equals(b)).toBe(true);
-    // …and that is what is committed.
-    expect(a.equals(readFileSync(new URL(icon.file, ICON_DIR).pathname))).toBe(true);
+    for (const icon of ICONS) {
+      expect(sameBytes(icons.renderIcon(icon) as Uint8Array, icons.renderIcon(icon) as Uint8Array), icon.file).toBe(true);
+      const png = icons.encodePng(icon.size, icon.size, icons.renderIcon(icon)) as Uint8Array;
+      const again = icons.encodePng(icon.size, icon.size, icons.renderIcon(icon)) as Uint8Array;
+      expect(sameBytes(png, again), icon.file).toBe(true);
+      // …and that is exactly what is committed, so a rebuild is a no-op diff.
+      expect(sameBytes(png, iconBytes(icon.file)), `${icon.file} is up to date`).toBe(true);
+    }
   });
 });
 

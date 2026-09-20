@@ -137,6 +137,56 @@ export function shakeOffset(shake: ShakeState, time: number, reduceMotion: boole
   out.set(Math.sin(37 * time), 0, Math.cos(29 * time)).multiplyScalar(shake.amplitude * decay);
 }
 
+// ------------------------------------------------------------- SPEC-015 §9
+
+/**
+ * The walk bob (SPEC-015 §9): the camera rises and falls with the player's
+ * stride, up to `amplitude` metres at `speedFull` and nothing at a standstill.
+ * `frequency` is radians per second of view time, so it is two steps a second
+ * at a walk.
+ */
+export const CAMERA_BOB = { amplitude: 0.035, frequency: 7.5, speedFull: 4 } as const;
+
+/**
+ * AC-41: how far the bob may move the camera this frame. Reduce motion makes it
+ * exactly zero — not "small", zero — so the whole term drops out.
+ */
+export function cameraBobAmplitude(speed: number, reduceMotion: boolean): number {
+  if (reduceMotion) return 0;
+  const safe = Number.isFinite(speed) ? Math.max(0, speed) : 0;
+  return CAMERA_BOB.amplitude * Math.min(1, safe / CAMERA_BOB.speedFull);
+}
+
+/**
+ * The bob's Y offset at `time`. Applied to the camera position only, after the
+ * frustum is captured — the same discipline `shakeOffset` follows, so spawn
+ * culling and the aim ray are bit-identical whether it moves or not (§4.7).
+ */
+export function cameraBob(speed: number, time: number, reduceMotion: boolean): number {
+  const amplitude = cameraBobAmplitude(speed, reduceMotion);
+  return amplitude === 0 ? 0 : amplitude * Math.sin(time * CAMERA_BOB.frequency);
+}
+
+/** How far the storm sheet's opacity swings either side of its mean (SPEC-015 §9). */
+export const STORM_FLICKER = 0.12;
+/** The sheet never goes fully opaque: the player has to be able to see (SPEC-012 §4.12). */
+export const STORM_OPACITY_MAX = 0.85;
+
+/**
+ * AC-43: the storm overlay's opacity. `mean` is what the weather and the
+ * shelter factor say it should be; the flicker is a symmetric term around it,
+ * so the average over time *is* the mean — and under reduce motion the term is
+ * dropped and the mean is what is drawn, with nothing left moving.
+ */
+export function stormOverlayOpacity(mean: number, time: number, reduceMotion: boolean): number {
+  const base = Number.isFinite(mean) ? Math.min(STORM_OPACITY_MAX, Math.max(0, mean)) : 0;
+  if (reduceMotion || base === 0) return base;
+  // Two incommensurate sines, so the flicker never settles into a loop the eye
+  // can follow; their mean is zero, which is what keeps `base` the mean.
+  const flicker = (Math.sin(time * 5.3) + Math.sin(time * 8.7)) * 0.5;
+  return Math.min(STORM_OPACITY_MAX, Math.max(0, base * (1 + STORM_FLICKER * flicker)));
+}
+
 /**
  * §4.7, pure: while `frames > 0` the previous view time is returned (frozen)
  * and a frame is consumed; otherwise the state tracks the world clock. The
