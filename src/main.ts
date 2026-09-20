@@ -3,6 +3,7 @@
 // (SPEC-001 §4), so the overlays and the scene factory are built here and
 // injected into `Game`.
 import './style.css';
+import { registerSW } from 'virtual:pwa-register';
 import { createAudio } from '@/core/Audio';
 import { EventBus, type GameEvents } from '@/core/Events';
 import { DEFAULT_SEED, Game, parseFlags, SIMULATED_RESTORE_MS } from '@/core/Game';
@@ -120,22 +121,24 @@ new InstallHintOverlay(uiRoot, events);
  * downloading and is waiting. It is *offered*, never applied: the banner says
  * so, the menu and the station grow an `Update` button, and the page reloads
  * only when the player presses one (15-c, AC-52).
- *
- * The registration itself is the plugin's `virtual:pwa-register`, which only
- * resolves once `vite-plugin-pwa` is part of the build; with it in place this
- * is the whole of the wiring:
- *
- *     import { registerSW } from 'virtual:pwa-register';
- *     const updateSW = registerSW({ onNeedRefresh: () => offerAppUpdate(() => void updateSW(true)) });
- *
- * Until then nothing registers a worker, nothing calls this, and no Update
- * button is built anywhere — which is the correct answer to "no update exists".
  */
 export function offerAppUpdate(apply: () => void): void {
   offerUpdate(apply);
   events.emit('ui:toast', { text: UPDATE_BANNER_TEXT, kind: 'info', ms: 8000 });
   events.emit('app:update-ready');
 }
+
+/**
+ * The registration itself (AC-51). `virtual:pwa-register` is the PWA plugin's
+ * module: a stub in a dev server, where no worker is registered at all, and the
+ * real thing in a build. `registerType: 'prompt'` means `onNeedRefresh` is the
+ * only signal — a waiting build never takes over by itself, so
+ * `serviceWorker.controllerchange` never fires and the typed `app:update-ready`
+ * event is what the UI listens to instead (D-10).
+ */
+const updateSW = registerSW({
+  onNeedRefresh: () => offerAppUpdate(() => void updateSW(true)),
+});
 
 /**
  * The `ui:toast` bridge (SPEC-014 §4.6): systems that may not import `ui/` —
@@ -207,8 +210,8 @@ if (import.meta.env.DEV) {
     trace: () => game.trace(),
     /**
      * SPEC-015 AC-52: stands in for the service worker so the update flow is
-     * testable before `vite-plugin-pwa` is in the build — the banner, the menu
-     * and station buttons, and that pressing one calls back exactly once.
+     * testable in a dev server, which registers none — the banner, the menu and
+     * station buttons, and that pressing one calls back exactly once.
      */
     offerUpdate: (apply: () => void) => offerAppUpdate(apply),
     loseContext: (restoreAfterMs: number | null) => game.loseContext(restoreAfterMs),

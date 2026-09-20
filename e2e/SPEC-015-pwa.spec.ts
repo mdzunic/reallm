@@ -6,17 +6,19 @@
 // with (D-13). The default `chromium` project ignores this file and its
 // dev-server flow is unchanged.
 //
-// The manifest and icon cases below are the in-container half of AC-58 and run
-// today. The cases that need a registered service worker — the offline reload
-// of AC-56, the offline save of AC-57, and the `activated` state AC-58 also
-// asks for — skip with a named reason until `vite-plugin-pwa` is configured
-// (§10, AC-48); adding the plugin is what turns them on, with no edit here.
-// The physical Android and iOS installs stay owed before `m7` (D-15).
+// The manifest, icon and service-worker cases here are the in-container half of
+// AC-58; the physical Android and iOS installs stay owed before `m7` (D-15).
 import { expect, test, type Page } from '@playwright/test';
 import { awaitGate, passGate } from './start';
 
-/** How long a worker gets to reach `activated` on a cold preview server. */
-const SW_TIMEOUT_MS = 20_000;
+/**
+ * How long a worker gets to reach `activated` on a cold preview server. The
+ * install precaches the whole app — ≈ 21 MB over 181 entries — so this is a
+ * download budget, not a handshake.
+ */
+const SW_TIMEOUT_MS = 60_000;
+/** The two worker cases wait for that install on top of a normal boot. */
+const SW_TEST_TIMEOUT_MS = 240_000;
 
 interface ManifestJson {
   name?: string;
@@ -114,28 +116,19 @@ test.describe('installability, from the served build (AC-58)', () => {
   });
 
   test('registers a service worker that reaches activated', async ({ page }) => {
+    test.setTimeout(SW_TEST_TIMEOUT_MS);
     await page.goto('/');
     await awaitGate(page);
-    const state = await workerState(page);
-    test.skip(
-      state === null,
-      'no service worker is registered: `vite-plugin-pwa` is not configured yet (SPEC-015 AC-48). ' +
-        'Adding the plugin turns this case on with no edit here.',
-    );
-    expect(state).toBe('activated');
+    expect(await workerState(page)).toBe('activated');
   });
 });
 
 test.describe('offline (AC-56, AC-57)', () => {
   test('boots from the cache after going offline, and keeps a save written there', async ({ page, context }) => {
+    test.setTimeout(SW_TEST_TIMEOUT_MS);
     await page.goto('/');
     await awaitGate(page);
-    const state = await workerState(page);
-    test.skip(
-      state === null,
-      'no service worker is registered: `vite-plugin-pwa` is not configured yet (SPEC-015 AC-48). ' +
-        'Adding the plugin turns this case on with no edit here.',
-    );
+    expect(await workerState(page)).toBe('activated');
 
     // AC-56: everything the first visit needs is precached, so a reload with
     // the network gone still reaches the boot gate.

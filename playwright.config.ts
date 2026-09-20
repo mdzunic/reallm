@@ -44,6 +44,10 @@ export default defineConfig({
     {
       name: 'pwa',
       testMatch: PWA_SPEC,
+      // Serially: every case in the file registers the worker in its own fresh
+      // context, and each registration precaches the whole ≈ 21 MB app. Five of
+      // those installing at once starves the preview server for no gain.
+      fullyParallel: false,
       use: { ...devices['Desktop Chrome'], baseURL: `http://localhost:${previewPort}` },
     },
   ],

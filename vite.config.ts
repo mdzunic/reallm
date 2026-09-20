@@ -2,9 +2,37 @@
 // it re-exports Vite's own defineConfig.
 import { defineConfig } from 'vitest/config';
 import { fileURLToPath, URL } from 'node:url';
+// The extension is explicit: Vite's native config loader warns without it.
+import { VitePWA } from './vite-pwa.ts';
 
 export default defineConfig({
   base: './',
+  /**
+   * SPEC-015 §10 — the offline app. The options are §10's, field for field;
+   * `VitePWA` itself is this repository's implementation of them rather than
+   * `vite-plugin-pwa`, because adding a dependency was not available to the
+   * build that wrote this (see `vite-pwa.ts` for the whole of the difference,
+   * and `docs/BUGS.md` for what swapping in the plugin costs).
+   *
+   * §10's `manifest` block is not here: the manifest ships as
+   * `public/manifest.webmanifest`, linked from `index.html` (AC-49), so it is
+   * the same file in `npm run dev` and in a build, and `tests/ui/manifest.test.ts`
+   * reads it off disk. `includeAssets` precaches it along with the icons.
+   */
+  plugins: [
+    VitePWA({
+      registerType: 'prompt',
+      // §10's list, plus the manifest itself: the icons and the favicon are
+      // already `**/*.{png,svg}`, but no glob pattern ends in `.webmanifest`
+      // and an installed app that has never been online should still have one.
+      includeAssets: ['assets/**/*', 'manifest.webmanifest'],
+      workbox: {
+        globPatterns: ['**/*.{js,css,html,glb,webm,mp3,mp4,png,webp,svg,json}'],
+        maximumFileSizeToCacheInBytes: 8 * 1024 * 1024,
+        navigateFallback: 'index.html',
+      },
+    }),
+  ],
   resolve: { alias: { '@': fileURLToPath(new URL('./src', import.meta.url)) } },
   // Injected for save.meta.appVersion (SPEC-007); declared in src/vite-env.d.ts.
   define: { __APP_VERSION__: JSON.stringify(process.env.npm_package_version ?? '0.0.0') },
