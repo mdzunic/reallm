@@ -1,7 +1,9 @@
-// The dev stats overlay (SPEC-002 §4.6). Fourteen rows and two buttons — the
+// The dev stats overlay (SPEC-002 §4.6). Eighteen rows and two buttons — the
 // complete content of the panel, in this order, each row with a fixed
 // `data-testid` and a fixed text format so both the e2e suite and a developer
-// squinting at a phone read the same thing.
+// squinting at a phone read the same thing. (SPEC-002 shipped fourteen;
+// SPEC-008 added the seed and layout hash, and SPEC-015 D-13 added the update
+// and render medians its §5 budgets are stated in.)
 //
 // It supersedes SPEC-003's one-line `DebugOverlay`, and keeps that line's exact
 // text (`geo <n> tex <n>`) because `e2e/scene-cycle.spec.ts` measures GPU
@@ -24,6 +26,11 @@ const ROWS = [
   'debug-frame-ms',
   'debug-updates',
   'debug-dropped',
+  // SPEC-015 §5, D-13: the update and render budgets (≤ 6 ms and ≤ 8 ms on the
+  // surface at `medium`) are otherwise unreadable without a profiler attached,
+  // which is exactly what a phone playtest cannot do.
+  'debug-update-ms',
+  'debug-render-ms',
   'debug-draws',
   'debug-tris',
   'debug-memory',
@@ -105,6 +112,9 @@ export class StatsOverlay implements StatsUi {
     this.#set('debug-frame-ms', `ms ${snapshot.frameMs.toFixed(1)}`);
     this.#set('debug-updates', `upd ${snapshot.updates}`);
     this.#set('debug-dropped', `dropped ${snapshot.droppedTime.toFixed(2)}s`);
+    // SPEC-015 §5: 60-frame medians, so a single GC pause does not move them.
+    this.#set('debug-update-ms', `update ${snapshot.updateMs.toFixed(2)}ms`);
+    this.#set('debug-render-ms', `render ${snapshot.renderMs.toFixed(2)}ms`);
     this.#set('debug-draws', `draws ${snapshot.drawCalls}`);
     this.#set('debug-tris', `tris ${snapshot.triangles}`);
     this.#set('debug-memory', `geo ${snapshot.geometries} tex ${snapshot.textures}`);

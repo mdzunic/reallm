@@ -130,6 +130,9 @@ export interface StatsSnapshot {
   updates: number;
   droppedTime: number;
   frame: number;
+  /** SPEC-015 §5/D-13: 60-frame medians of the update and draw halves, in ms. */
+  updateMs: number;
+  renderMs: number;
   drawCalls: number;
   triangles: number;
   geometries: number;
