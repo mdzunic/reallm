@@ -25,6 +25,15 @@ import { frames, gameUrl, passGate, start } from './start';
 const PHONE = { width: 740, height: 360 };
 const PHONE_PORTRAIT = { width: 360, height: 740 };
 
+/** A character, for the cases that need a live save bound (SPEC-007 §3). */
+const CREATION = {
+  name: 'Salvager',
+  classId: 'marine',
+  appearance: { portrait: 0, primary: '#b7472a', secondary: '#2a3b4c' },
+  attributes: { might: 3, vigor: 8, agility: 1, tech: 1 },
+  difficulty: 'normal',
+} as const;
+
 /**
  * Playwright changes the viewport by resizing the *window*, and a window the
  * boot tap took fullscreen refuses that outright ("To resize
@@ -498,5 +507,148 @@ test.describe('the settings benchmark row (AC-20)', () => {
     });
     expect(stored ?? null).toBeNull();
     expect(await page.evaluate(() => window.__reallm.stats().preset)).toBe('low');
+  });
+});
+
+// ----------------------------------------------------- reduce motion (§9)
+//
+// The unit half is `tests/core/reduceMotion.test.ts`, which drives every pure
+// decision the setting feeds — shake, bob, flight bank, storm opacity, streak
+// length, film mode — and `tests/architecture/` proves no system or entity
+// module reads it (AC-42, D-14). What only a browser can answer is the DOM
+// contract itself: the `reduce-motion` class on `<html>`, the CSS rules that
+// gate on it, and the typewriter, which is a timer and not a number.
+
+test.describe('reduce motion, on (AC-38, AC-40, AC-41)', () => {
+  test.use({ reducedMotion: 'reduce' });
+
+  test('takes the class from the OS and turns the HUD pulse into a static outline', async ({ page }) => {
+    await start(page, '/?scene=surface&planet=cinder4');
+    // AC-38: the single DOM contract, defaulted from the media query. Nothing
+    // is written to `settings` until the panel toggle overrides it — the class
+    // is the contract, not a stored value.
+    await expect(page.locator('html')).toHaveClass(/\breduce-motion\b/);
+
+    // AC-40: the low-hull pulse. `is-low-hp` is the class the HUD itself sets
+    // below a quarter hull (ui/Hud.ts); setting it here is how the rule is read
+    // without spending a scene getting shot.
+    const pulse = await page.evaluate(() => {
+      const hud = document.querySelector('[data-testid="hud"]') as HTMLElement;
+      hud.classList.add('is-low-hp');
+      const fill = hud.querySelector('.bar-hp') as HTMLElement;
+      const style = getComputedStyle(fill);
+      return { animation: style.animationName, outline: style.outlineStyle, width: style.outlineWidth };
+    });
+    expect(pulse.animation).toBe('none');
+    // …and the state is still visible, as a colour change rather than a beat.
+    expect(pulse.outline).toBe('solid');
+    expect(pulse.width).not.toBe('0px');
+  });
+
+  test('plays a story film as its posters, and types its caption whole (AC-41)', async ({ page }) => {
+    await start(page, '/?films=on');
+    await page.locator('[data-testid="menu-new"]').click();
+    await page.locator('[data-testid="new-slot-0"]').click();
+    const film = page.locator('[data-testid="film"]');
+    await expect(film).toHaveAttribute('data-film', 'prologue', { timeout: 30_000 });
+    // SPEC-022 §4.4: `stills` is the reduce-motion mode, and it is the whole
+    // answer — no `<video>` is built, so there is nothing left to pan.
+    await expect(film).toHaveAttribute('data-mode', 'stills');
+    await expect(page.locator('[data-testid="film-poster"]')).toHaveCount(1);
+    await expect(page.locator('[data-testid="film-video"]')).toHaveCount(0);
+
+    // The typewriter: the caption is whole the moment it appears. Sampled on
+    // consecutive frames it never grows — the control case below is the same
+    // read with the setting off, where it does.
+    const caption = page.locator('[data-testid="film-caption"]');
+    await expect(caption).toContainText('We built minds to run the world', { timeout: 30_000 });
+    const first = (await caption.textContent()) ?? '';
+    expect(first.length).toBeGreaterThan(20);
+    await frames(page, 4);
+    expect((await caption.textContent()) ?? '').toBe(first);
+  });
+});
+
+test.describe('reduce motion, off — the control (AC-38, AC-40, AC-41)', () => {
+  test.use({ reducedMotion: 'no-preference' });
+
+  test('leaves the class off, the pulse animating and the typewriter typing', async ({ page }) => {
+    await start(page, '/?scene=surface&planet=cinder4');
+    await expect(page.locator('html')).not.toHaveClass(/\breduce-motion\b/);
+
+    const pulse = await page.evaluate(() => {
+      const hud = document.querySelector('[data-testid="hud"]') as HTMLElement;
+      hud.classList.add('is-low-hp');
+      return getComputedStyle(hud.querySelector('.bar-hp') as HTMLElement).animationName;
+    });
+    expect(pulse).toBe('hud-pulse');
+
+  });
+
+  test('types the film caption a character at a time (AC-41)', async ({ page }) => {
+    // Stills mode either way, so the two runs differ only in the setting under
+    // test. SPEC-022 §6 explains the abort: decoding H.264 into a positioned
+    // layer crashes this container's renderer process, and the caption timer is
+    // the same one in both modes.
+    await page.route('**/assets/films/*.mp4', (route) => route.abort());
+    await start(page, '/?films=on');
+    await page.locator('[data-testid="menu-new"]').click();
+    await page.locator('[data-testid="new-slot-0"]').click();
+    const caption = page.locator('[data-testid="film-caption"]');
+    // The same sampling as the reduce-motion case, and here it grows — which is
+    // what makes that assertion mean something. 40 cps, so a handful of frames
+    // is plenty to see the line lengthen.
+    await expect(caption).toContainText('Earth Command', { timeout: 30_000 });
+    const lengths: number[] = [];
+    for (let i = 0; i < 6; i++) {
+      lengths.push(((await caption.textContent()) ?? '').length);
+      await frames(page, 4);
+    }
+    expect(Math.max(...lengths)).toBeGreaterThan(Math.min(...lengths));
+  });
+});
+
+// ------------------------------------------- the iOS install explainer (AC-61)
+
+test.describe('the iOS install hint (AC-61)', () => {
+  // The cadence is SPEC-007 §4.7's: iOS Safari, not already standalone, on a
+  // save written at the station, at most once a fortnight. `isIosSafari()`
+  // reads the user agent and rules out the iOS Chrome/Firefox/Edge shells, so
+  // an iPhone Safari agent is the whole of what this needs.
+  test.use({
+    userAgent:
+      'Mozilla/5.0 (iPhone; CPU iPhone OS 17_4 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.4 Mobile/15E148 Safari/604.1',
+  });
+
+  test('explains Share → Add to Home Screen once, and stays dismissed', async ({ page }) => {
+    await start(page, '/?scene=station');
+    const sheet = page.locator('[data-testid="install-hint"]');
+    // Nothing has been saved yet, so nothing has been offered.
+    await expect(sheet).toBeHidden();
+
+    // A station save is the trigger SPEC-007 §4.7 defines; the toast says why
+    // and this sheet says how. `manual` skips the autosave debounce (§4.5).
+    await page.evaluate((creation) => void window.__reallm.save().create(0, creation, 123), CREATION);
+    await page.evaluate(() => {
+      window.__reallm.save().request('manual');
+      window.__reallm.save().flush();
+    });
+    await expect(sheet).toBeVisible({ timeout: 30_000 });
+    await expect(sheet).toContainText('Share');
+    await expect(sheet).toContainText('Add to Home Screen');
+    await expect(page.locator('[data-testid="toasts"]')).toContainText(/home screen/i);
+
+    // Dismissible, not modal: the game was never blocked and the sheet goes.
+    expect((await page.evaluate(() => window.__reallm.stats())).state).toBe('running');
+    await page.locator('[data-testid="install-hint-close"]').click();
+    await expect(sheet).toBeHidden();
+
+    // …and the cadence holds: a second save inside the fortnight offers nothing.
+    await page.evaluate(() => {
+      window.__reallm.save().request('manual');
+      window.__reallm.save().flush();
+    });
+    await frames(page, 10);
+    await expect(sheet).toBeHidden();
   });
 });
