@@ -8,8 +8,15 @@
 //
 // The manifest, icon and service-worker cases here are the in-container half of
 // AC-58; the physical Android and iOS installs stay owed before `m7` (D-15).
+//
+// Every navigation goes through `gameUrl()`, for the `?quality=low` the rest of
+// the suite uses (e2e/start.ts): this container has no GPU, and a preset that
+// runs the post chain costs 60–140 ms a frame on its software rasteriser.
+// Nothing here is about the renderer — a worker caches the same bytes and a save
+// is the same JSON at any preset. The `films=off` it also adds is a dev-only
+// flag (SPEC-022 §4.11) and does nothing against a build; see the offline case.
 import { expect, test, type Page } from '@playwright/test';
-import { awaitGate, passGate } from './start';
+import { awaitGate, COLD_START, gameUrl, passGate } from './start';
 
 /**
  * How long a worker gets to reach `activated` on a cold preview server. The
@@ -50,6 +57,22 @@ async function servedPngSize(page: Page, url: string): Promise<{ status: number;
   return { status: response.status(), width: view.getUint32(16, false), height: view.getUint32(20, false) };
 }
 
+/** The fields of slot 0 this file compares across a reload (SPEC-007 §3). */
+interface StoredSlot {
+  version: number;
+  meta: { slot: number; seed: number; createdAt: number; updatedAt: number };
+  player: unknown;
+  progress: unknown;
+  inventory: unknown;
+  equipped: unknown;
+}
+
+/** Slot 0 as the game left it in `localStorage`, or `null` when unwritten. */
+async function readSlot0(page: Page): Promise<StoredSlot | null> {
+  const raw = await page.evaluate(() => localStorage.getItem('reallm:slot:0'));
+  return raw === null ? null : (JSON.parse(raw) as StoredSlot);
+}
+
 /** Resolves to the worker's state, or `null` when none ever registers. */
 async function workerState(page: Page): Promise<string | null> {
   return page.evaluate(async (timeout) => {
@@ -69,7 +92,7 @@ async function workerState(page: Page): Promise<string | null> {
 
 test.describe('installability, from the served build (AC-58)', () => {
   test('serves a manifest carrying every AC-49 field', async ({ page }) => {
-    await page.goto('/');
+    await page.goto(gameUrl('/'));
     const { json } = await servedManifest(page);
     expect(json.name).toBe('ReaLLM');
     expect(json.short_name).toBe('ReaLLM');
@@ -83,7 +106,7 @@ test.describe('installability, from the served build (AC-58)', () => {
   });
 
   test('serves both manifest icons and the apple-touch-icon at their claimed sizes', async ({ page }) => {
-    await page.goto('/');
+    await page.goto(gameUrl('/'));
     const { url, json } = await servedManifest(page);
     for (const icon of json.icons ?? []) {
       const resolved = new URL(icon.src, url).toString();
@@ -101,7 +124,7 @@ test.describe('installability, from the served build (AC-58)', () => {
   });
 
   test('reports no installability blocker: scope, icons and secure context', async ({ page }) => {
-    await page.goto('/');
+    await page.goto(gameUrl('/'));
     const { url, json } = await servedManifest(page);
     // `start_url` has to be inside `scope`, or the browser refuses to install.
     const scope = new URL(json.scope as string, url).toString();
@@ -117,16 +140,29 @@ test.describe('installability, from the served build (AC-58)', () => {
 
   test('registers a service worker that reaches activated', async ({ page }) => {
     test.setTimeout(SW_TEST_TIMEOUT_MS);
-    await page.goto('/');
+    await page.goto(gameUrl('/'));
     await awaitGate(page);
     expect(await workerState(page)).toBe('activated');
   });
 });
 
 test.describe('offline (AC-56, AC-57)', () => {
+  /**
+   * Reduce motion, for AC-46's reason and for a container one. The prologue
+   * stands between `New Game` and the creation screen, and a production build
+   * has no `?films=off` (that flag is dev-only, SPEC-022 §4.11). Under
+   * `prefers-reduced-motion` a film plays as its posters — `chooseFilmMode()`
+   * returns `stills` and no `<video>` is ever built (AC-46) — which is both the
+   * behaviour this spec asks for and the only way through here: decoding the
+   * 3 MB MP4 on this container's software rasteriser kills the renderer
+   * process, which is why `e2e/SPEC-022.spec.ts` aborts the MP4 route for the
+   * same reason ("the failure here would take the tab with it").
+   */
+  test.use({ reducedMotion: 'reduce' });
+
   test('boots from the cache after going offline, and keeps a save written there', async ({ page, context }) => {
     test.setTimeout(SW_TEST_TIMEOUT_MS);
-    await page.goto('/');
+    await page.goto(gameUrl('/'));
     await awaitGate(page);
     expect(await workerState(page)).toBe('activated');
 
@@ -142,16 +178,34 @@ test.describe('offline (AC-56, AC-57)', () => {
     await passGate(page);
     await page.locator('[data-testid="menu-new"]').click();
     await page.locator('[data-testid="new-slot-0"]').click();
-    await expect(page.locator('[data-testid="creation-name"]')).toBeVisible();
+    // The prologue, as posters (see `test.use` above). Skipping it is a tap
+    // like any other and waits out the 0.3 s pointer grace (SPEC-022 §4.5).
+    await expect(page.locator('[data-testid="film"]')).toHaveAttribute('data-mode', 'stills', COLD_START);
+    await page.waitForTimeout(400);
+    await page.locator('[data-testid="film-skip"]').click();
+    await expect(page.locator('[data-testid="creation-name"]')).toBeVisible(COLD_START);
+    // AC-20 of SPEC-014: no class, no Confirm.
+    await page.locator('[data-testid="class-marine"]').click();
     await page.locator('[data-testid="creation-confirm"]').click();
-    await expect(page.locator('[data-testid="station-root"]')).toBeVisible({ timeout: 30_000 });
-    const written = await page.evaluate(() => localStorage.getItem('reallm:save:0'));
+    await expect(page.locator('[data-testid="station-root"]')).toBeVisible({ timeout: 60_000 });
+    const written = await readSlot0(page);
     expect(written, 'the offline run wrote slot 0').not.toBeNull();
 
     await page.reload();
-    await awaitGate(page);
-    const afterReload = await page.evaluate(() => localStorage.getItem('reallm:save:0'));
-    expect(afterReload).toBe(written);
+    await passGate(page);
+    const afterReload = await readSlot0(page);
+    // Everything the player made is byte-identical. `meta.updatedAt` and
+    // `meta.playtimeSec` are deliberately not compared: leaving the page is a
+    // `pagehide` autosave (SPEC-007 §4.5), so a save that survived a reload
+    // *should* carry a later stamp than the one written a moment earlier.
+    expect(afterReload?.version).toBe(written?.version);
+    expect(afterReload?.meta.slot).toBe(written?.meta.slot);
+    expect(afterReload?.meta.seed).toBe(written?.meta.seed);
+    expect(afterReload?.meta.createdAt).toBe(written?.meta.createdAt);
+    expect(afterReload?.player).toEqual(written?.player);
+    expect(afterReload?.progress).toEqual(written?.progress);
+    expect(afterReload?.inventory).toEqual(written?.inventory);
+    expect(afterReload?.equipped).toEqual(written?.equipped);
     // …and the menu offers to continue it, which is the save being *read* back.
     await expect(page.locator('[data-testid="go-station"]')).toBeVisible();
     await context.setOffline(false);
@@ -160,7 +214,7 @@ test.describe('offline (AC-56, AC-57)', () => {
 
 test.describe('an old cached build and a newer save (AC-59, 15-d)', () => {
   test('refuses a save from a newer format, and offers Update only when one waits', async ({ page }) => {
-    await page.goto('/');
+    await page.goto(gameUrl('/'));
     await awaitGate(page);
     // E9: a save stamped with a version this build does not know is refused
     // rather than half-read — which is exactly what an old cached build meets
@@ -168,10 +222,10 @@ test.describe('an old cached build and a newer save (AC-59, 15-d)', () => {
     // be old for that; the save being from the future is the whole of the check.
     await page.evaluate(() => {
       localStorage.setItem(
-        'reallm:save:0',
+        'reallm:slot:0',
         JSON.stringify({ version: 99, meta: { slot: 0, seed: 1, playtimeSec: 0, updatedAt: Date.now(), iteration: 1, difficulty: 'normal' } }),
       );
-      localStorage.removeItem('reallm:save:0:bak');
+      localStorage.removeItem('reallm:slot:0:bak');
     });
     await page.reload();
     await passGate(page);
