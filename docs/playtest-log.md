@@ -831,8 +831,10 @@ profile) by `e2e/SPEC-031.spec.ts` §6.2 group 1.
   - desktop — headless Chromium (Playwright, Linux container, **software GL**;
     SwiftShader, no hardware rasteriser)
   - phone, **emulated** — the same headless Chromium under Playwright's
-    `Pixel 5` descriptor at 740 × 360 landscape, `deviceScaleFactor` 2.75,
-    touch input. A device-shaped client, not a device.
+    `Pixel 5` descriptor: the `mobile` project of `playwright.config.ts`
+    (AC-64/D-8), a 393 × 851 screen at `deviceScaleFactor` 2.75 with real touch
+    points and the Android user agent, rotated to 740 × 360 landscape by the
+    cases that need it. A device-shaped client, not a device.
   - phone, **physical over LAN** — _not run: no handset and no LAN in the build
     container_
   - Android / iOS install — _not run: same reason_
@@ -846,18 +848,36 @@ at the end.
 
 ### What was walked, and how
 
-One scripted pass per scene on the emulated Pixel 5 at
-`?quality=medium&films=off&scene=<id>`, sampled after the scene settled (4 s on
-the hub screens, 8 s on surface and flight). `e2e/SPEC-015.spec.ts` re-walks the
-viewport shell, the keyboard reflow, the rotate overlay and its auto-pause, and
-the settings benchmark row as assertions; `e2e/SPEC-015-pwa.spec.ts` runs in the
-preview project against a real `vite build`.
+The budget numbers below are **not** from the assertion suite: they are one
+scripted Playwright pass per scene on the same `Pixel 5` descriptor at 740 × 360
+landscape, opened at `?quality=medium&films=off&scene=<id>` and sampled after the
+scene settled (4 s on the hub screens, 8 s on surface and flight). No CPU
+throttling was applied — on a software rasteriser the frame cost is already the
+floor D-15 says to read these as, and throttling it further would measure the
+throttle.
+
+`e2e/SPEC-015.spec.ts` re-walks the viewport shell, the keyboard reflow, the
+rotate overlay and its auto-pause, and the settings benchmark row as assertions,
+in **both** the `chromium` and the `mobile` project (§12);
+`e2e/SPEC-015-pwa.spec.ts` runs in the preview project against a real
+`vite build`.
+
+The two projects are not the same run, which is the point of having both. The
+desktop one reports `navigator.maxTouchPoints === 0` however narrow its window
+is, so it reaches D-5's heuristic only through an init script that rewrites that
+one property; the phone one reaches it with nothing faked, and is also the only
+run that meets AC-33's boot-tap fullscreen (Android user agent) and AC-2's dpr
+clamp (2.75 down to the preset's `maxDpr`). Three cases only make sense on one
+side and say so: the no-touch overlay case skips on the phone, and the
+real-touch overlay case and the dpr clamp case skip on the desktop.
 
 | Case | What was seen |
 |---|---|
 | `100dvh` canvas | The canvas box height equals `window.innerHeight` to the pixel, with `touch-action: none` on both `#game` and `#ui` and `overscroll-behavior: none` on the document |
 | Keyboard reflow (AC-29) | A CDP device-metrics override 140 px shorter shrinks the canvas by 140 px (±1); restoring the metrics puts it back to the original height and width within 1 px, with `scrollY` still 0 |
-| Rotate overlay (AC-30) | Down at 740 × 360 with touch points; up the moment the viewport turns to 360 × 740; still down at 360 × 740 on a client with `maxTouchPoints === 0` — a narrow desktop window is not a phone |
+| Rotate overlay (AC-30) | Down at 740 × 360 with touch points; up the moment the viewport turns to 360 × 740; still down at 360 × 740 on a client with `maxTouchPoints === 0` — a narrow desktop window is not a phone. On the `mobile` project the same overlay comes up on the descriptor's own 393 × 851 portrait with nothing monkeypatched, which is the first time both halves of D-5's pair are real inputs |
+| Fullscreen on Android (AC-33, AC-34) | The `mobile` project's boot tap enters fullscreen, which is what makes its window refuse a resize — the orientation cases leave it first. `settings.fullscreen` is still `null` afterwards: entering never writes it, and the settings toggle shows the live state until the player chooses |
+| dpr clamp (AC-2) | `deviceDpr` 2.75, `dpr` 1.00 on `low` — the renderer sizes its backing store at `min(devicePixelRatio, maxDpr)` rather than at 7.6× the pixels |
 | E22 auto-pause (AC-32, AC-33) | The rotation into portrait opens the pause menu once; returning to landscape hides the overlay and leaves the menu up, and `stats.frame` keeps climbing throughout |
 | Wake lock (AC-38, AC-40) | `NotAllowedError: Wake Lock permission request denied` on entering the surface, logged once by `[wakelock]` and swallowed; the scene enters and runs. The boot gate asks for nothing (AC-39) |
 | Boot benchmark (AC-17, AC-19) | With no `?quality=` the run starts after the asset load and resolves before the first scene. On this container every frame gap exceeds 100 ms, so it reports `hidden-abort` — correctly **not** persisted (15-a, D-4) — and the session stays on `medium`. With `?quality=low` in the URL it does not run at all and `settings.benchmark` stays `null` |
@@ -893,9 +913,9 @@ simulation:
 | JS heap (`performance.memory.usedJSHeapSize`) | 33.5 MB, identical in all four scenes | ≤ 120 / 100 / 80 MB | ✅ — Chromium quantises this figure for privacy, so read it as "well under", not as four separate measurements |
 | GPU textures — surface / station / menu | 16.0 MB | ≤ 40 / 20 / 20 MB | ✅ |
 | GPU textures — flight | 56.7 MB | ≤ 30 MB | ❌ **P1 filed** (see below) |
-| Bundle, app (gz) | 187.56 kB (`index`) + 10.51 kB (css) | ≤ 350 kB | ✅ |
+| Bundle, app (gz) | 188.74 kB (`index`) + 10.49 kB (css) + 2.20 kB (`workbox-window`) | ≤ 350 kB | ✅ |
 | Bundle, three (gz) | 177.23 kB | ≤ 200 kB | ✅ |
-| Precache set | **21.31 MB over 181 entries**, from the build's own summary | ≤ 25 MB | ✅ |
+| Precache set | **21.32 MB over 179 urls** — the build summary's own figure is 349 manifest *entries*, 21 788.33 KiB; the two count different things and the note below reconciles them | ≤ 25 MB | ✅ |
 | Cold first load, 4G | — | ≤ 8 s to "tap to start" | **owed on hardware** — the container has no throttled network path worth quoting |
 
 Two notes on how those were taken, because the spec's wording assumes more than
@@ -912,7 +932,7 @@ three.js offers:
   ```
   PWA v1.3.0
   mode      generateSW
-  precache  349 entries (21788.32 KiB)
+  precache  349 entries (21788.33 KiB)
   files generated
     dist/sw.js
     dist/workbox-2fbc6a65.js
@@ -1064,13 +1084,23 @@ normally rather than being labelled *blocked — vite-plugin-pwa*.
 - **Desktop hardware GPU:** _not run_ — no display and no GPU in the container;
   every frame-cost number above is a software-rasterised floor.
 - **Physical phone over LAN:** _not run_ — no handset reaches the container. The
-  phone column is Chromium's `Pixel 5` emulation with real touch pointers, which
-  is what the rotate overlay's `maxTouchPoints` heuristic actually reads.
+  phone column is Chromium's `Pixel 5` emulation under the `mobile` project,
+  whose touch pointers and 2.75 device ratio are the context's own rather than a
+  rewritten `navigator` property — which is what the rotate overlay's
+  `maxTouchPoints` heuristic actually reads. What it still cannot show is feel,
+  thermal behaviour and a real GPU's frame cost.
 
 ### Checklist
 
 - [x] `npm run check` green — typecheck (`src` and `tests`), 76 vitest suites /
-      1 328 tests, production build
+      1 330 tests, production build
+- [x] **both Playwright projects green** (AC-64) —
+      `npx playwright test e2e/SPEC-015.spec.ts --project=chromium --project=mobile`
+      run twice end to end: 23 passed, 3 skipped each time (the two phone-only
+      cases skip on `chromium`, the no-touch case skips on `mobile`, each
+      naming why). `boot-gate`, `smoke` and `SPEC-017` re-run green afterwards —
+      17 passed — because `start()` now takes the cold-start budget for its two
+      post-gate waits, which every suite shares
 - [x] `npx playwright test --project=pwa` green — 6 passed against a real build
       served by `vite preview`
 - [x] `node scripts/assets/check.mjs` green — every asset row in
