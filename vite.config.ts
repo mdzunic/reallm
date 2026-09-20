@@ -45,7 +45,8 @@ export const PWA_OPTIONS = {
      * on exactly that, and it throws while the worker is evaluating
      * `precacheAndRoute`: the build still succeeds, the worker still reaches
      * `activated`, and the app still works online — with an empty CacheStorage
-     * and no offline boot at all (measured, D-11 in docs/playtest-log.md).
+     * and no offline boot at all. Measured in Chromium; the numbers either side
+     * of the fix are in docs/playtest-log.md §SPEC-015.
      *
      * So the pattern is narrowed to what it is actually for: files whose *name*
      * already carries their version. That is Vite's hashed build output and

@@ -907,24 +907,28 @@ three.js offers:
   (`w · h · 4 · 4/3`). That is an **upper bound** — it counts each decoded image
   once whether or not it is resident — and it is the honest number to hold the
   budget against, so the flight row is filed rather than argued away.
-- **Precache summary (AC-54).** `vite build` prints it, from the PWA plugin's
-  own `writeBundle`:
+- **Precache summary (AC-57).** `vite build` prints it, from `vite-plugin-pwa`:
 
   ```
-  PWA      generateSW (registerType: 'prompt', SPEC-015 §10)
-  precache 181 entries (21.31 MB)
+  PWA v1.3.0
+  mode      generateSW
+  precache  349 entries (21788.32 KiB)
   files generated
     dist/sw.js
+    dist/workbox-2fbc6a65.js
   ```
 
   `node scripts/assets/check.mjs` prints the same set counted its own way —
-  `dist 21.28 MB (177 precachable files)` — and fails over 25 MB, which is what
-  D-11 widened it to do. The four-entry difference is exactly the five files
-  `includeAssets` adds where no glob extension matches (`manifest.webmanifest`,
-  `assets/LICENSES.md` and three `.gitkeep`s), less `sw.js`, which the checker
-  counts and the worker does not precache itself.
-  The plugin is `vite-pwa.ts` in this repository rather than the
-  `vite-plugin-pwa` package; `docs/BUGS.md` §6 has the difference and the swap.
+  `dist 21.32 MB (179 precachable files)` — and fails over 25 MB, which is what
+  D-11 widened it to do.
+
+  The two counts are both right and they are counting different things. The
+  plugin's `349` is manifest *entries*, and the ~170 files under `public/assets/`
+  are entered twice, because `includeAssets` and `workbox.globPatterns` both
+  match them. What the worker actually stores is the 179 distinct urls the
+  checker counts, confirmed in Chromium: one `workbox-precache-v2` cache
+  holding **179 entries**. The size the plugin prints is of the distinct set,
+  which is why it agrees with the checker and not with its own entry count.
 
 **P1 — flight GPU textures 56.7 MB against a ≤ 30 MB budget.** The flight scene
 loads the 2048 × 1536 sky window plus the 2048 × 1024 planet equirect and its
@@ -946,7 +950,8 @@ Against a real `vite build` served by `vite preview` on 4173
 | `icons/icon-192.png` and `icons/icon-512.png` | ✅ 200, IHDR reads 192 × 192 and 512 × 512 |
 | `icons/apple-touch-icon-180.png` | ✅ 200, IHDR reads 180 × 180 |
 | `start_url` inside `scope`, maskable icon ≥ 192, secure context | ✅ |
-| Service worker reaches `activated` | ✅ registered from `virtual:pwa-register` on `load`, installs 181 entries and activates in ≈ 0.6 s on the preview server |
+| Service worker reaches `activated` | ✅ registered from `virtual:pwa-register` on `load`, installs 179 entries and activates in ≈ 0.6 s on the preview server |
+| CacheStorage actually holds the precache | ✅ one `workbox-precache-v2-http://localhost:4173/` cache, **179 entries** — see the collision note below for why this row exists |
 | Offline reload (AC-56) | ✅ `context.setOffline(true)` then reload: every navigation is answered with the precached `index.html` and the boot gate comes up with the network gone |
 | An offline save (AC-57) | ✅ a new game created **while offline** — prologue as posters, marine, Confirm — writes `reallm:slot:0`; an offline reload reads it back field for field and the menu offers `Continue`. Only `meta.updatedAt` moves, because leaving the page is a `pagehide` autosave |
 | Newer save refused by the version check (AC-59, E9) | ✅ a `version: 99` slot reads as unusable, the menu offers `New Game` and no `Continue`, and no `Update` button exists with nothing waiting |
@@ -963,11 +968,54 @@ rasteriser dies decoding its 3 MB MP4 (a renderer-process crash, the same one
 `<video>` is built at all — this spec's own AC-46 — and skips the posters the way
 a player does. The save path under test is untouched by any of that.
 
+**The precache collision, and why a row above checks CacheStorage.** Installing
+`vite-plugin-pwa` and handing it §10's options exactly as written produced a
+worker that cached *nothing*, and every green signal stayed green while it did:
+`vite build` succeeded and printed its 349-entry summary, the worker reached
+`activated`, and the app ran normally online. Measured in Chromium against
+`vite preview`:
+
+```
+ONLINE:  { state: "activated", cacheNames: [], entries: 0 }
+OFFLINE RELOAD: RELOAD FAILED: net::ERR_INTERNET_DISCONNECTED
+```
+
+The cause is a collision between §10's options and this repository's layout.
+`includeAssets` globs `public/` and gives each file an md5 `revision`; the
+`globPatterns` pass globs `dist/` and sets `revision: null` for whatever
+`dontCacheBustURLsMatching` covers, which the plugin defaults to `/^assets\//`
+from Vite's `build.assetsDir`. ReaLLM keeps its game assets in `public/assets/`,
+so both passes claimed all ~170 of them and emitted each url twice under
+different cache keys — `url` and `url?__WB_REVISION__=…`. Workbox's
+`addToCacheList` throws `add-to-cache-list-conflicting-entries` on exactly that,
+and it throws while the worker evaluates `precacheAndRoute`, before any install
+handler is attached. Hence a worker that activates having cached nothing.
+
+The fix is in `vite.config.ts`: `dontCacheBustURLsMatching` is narrowed to the
+files whose *name* already carries their version — Vite's hashed build output,
+`/^assets\/[^/]+-[\w-]{8}\.(js|css)$/`, four files here — so the copied-through
+public assets take an md5 from both passes, the same md5 over the same bytes,
+and the pairs collapse to one entry instead of colliding. After it: 179 cached
+entries and an offline reload that boots the game. It is the one option in the
+`workbox` block that §10 does not list, and it is load-bearing.
+
+`tests/build/pwa.test.ts` fails if any url is ever emitted under two revisions
+again. The `registers a service worker that reaches activated` case could not
+catch this — it passed throughout — which is why the table above now also
+asserts on CacheStorage rather than on worker state alone.
+
 ### Owed on hardware before `m7`
 
 Nothing here is dropped; each row names its in-container substitute above and
-the handset measurement it still needs. This list is the M7 checklist's input
-(AC-66).
+the handset measurement it still needs. This list is the M7 checklist's input.
+
+The AC numbers in this section are the ones the spec carried when it was
+written. The work order renumbered them once, and the rows below map onto the
+current list as: **AC-29 → AC-28** (keyboard reflow), **AC-35 → AC-34**
+(orientation lock), **AC-58 → AC-62** (installability), **AC-60 → AC-43**
+(surface budgets) and **AC-61 → AC-44…AC-47** (flight, station/menu, memory and
+cold load). The PWA rows map **AC-54 → AC-57**, **AC-56 → AC-58**,
+**AC-57 → AC-59**, **AC-59 → AC-60** and **AC-49 → AC-50**.
 
 - [ ] **AC-29 — keyboard reflow.** Closed in-container on an emulated viewport
       shrink (canvas follows and restores within 1 px, no scroll offset). Owed:
@@ -995,16 +1043,21 @@ the handset measurement it still needs. This list is the M7 checklist's input
       ≤ 3 + 6 ms, station/menu ≤ 4 ms render) and the **cold 4G first load**
       ≤ 8 s to "tap to start".
 
-Not on this list, because it is debt rather than a measurement: the PWA plugin
-is `vite-pwa.ts` in this repository rather than the `vite-plugin-pwa` package of
-§10 (AC-48), which could not be installed here. Everything §10's options
-describe is implemented and green above; `docs/BUGS.md` §6 has the difference
-and the swap. The one thing neither this container nor that swap can produce is
-the `prompt` update flow **end to end** — it needs two successive deploys of the
-same origin, so a waiting worker actually exists. The seam either side of it is
-covered: `tests/ui/updates.test.ts` pins `app:update-ready`, and
-`e2e/SPEC-015.spec.ts` pins the banner and the menu and station `Update`
-buttons through the dev bridge.
+Not on this list, because it is not a measurement: the one thing this container
+cannot produce is the `prompt` update flow **end to end** — it needs two
+successive deploys of the same origin, so a waiting worker actually exists. The
+seam either side of it is covered: `tests/ui/updates.test.ts` pins
+`app:update-ready`, and `e2e/SPEC-015.spec.ts` pins the banner and the menu and
+station `Update` buttons through the dev bridge.
+
+`vite-plugin-pwa` is no longer owed either. The owner authorised the dependency
+after this section was first written, so the in-repo substitute is gone and
+AC-48 closes on the real package: `npm i -D vite-plugin-pwa@^1.3.0` added 370
+packages with 0 vulnerabilities, `package.json` carries `"vite-plugin-pwa":
+"^1.3.0"` and `package-lock.json` resolves it at 1.3.0, and it builds under this
+tree's Vite 8.2.2 / Rolldown. The blocked path of AC-66 therefore does not
+apply: nothing about the install or the build failed, so AC-48…AC-64 close
+normally rather than being labelled *blocked — vite-plugin-pwa*.
 
 ### Not run, and why
 
@@ -1017,14 +1070,19 @@ buttons through the dev bridge.
 ### Checklist
 
 - [x] `npm run check` green — typecheck (`src` and `tests`), 76 vitest suites /
-      1 325 tests, production build
+      1 328 tests, production build
 - [x] `npx playwright test --project=pwa` green — 6 passed against a real build
       served by `vite preview`
 - [x] `node scripts/assets/check.mjs` green — every asset row in
-      `LICENSES.md`, every budget met, precache 21.28 MB of 25 MB
+      `LICENSES.md`, every budget met, precache 21.32 MB of 25 MB
 - [x] the `chromium` project's dev-server flow unchanged: no worker is
       registered in a dev server, and `virtual:pwa-register` is a stub there
-- [ ] the five hardware rows above — owed before the `m7` tag
-- [ ] `SPEC-015` `status: done` in its frontmatter and in the SPEC-000 table —
-      both live in the sibling repository `../reallm-specs`, which is not
-      checked out in this container; nothing in this repository tracks it
+- [x] every criterion that is not hardware-deferred is closed, `vite-plugin-pwa`
+      included — the PWA rows on the real package, measured above
+- [ ] the five hardware rows above — owed before the `m7` tag, each with its
+      in-container substitute named
+
+Then, after this branch merges: `SPEC-015` `status: done` in its frontmatter and
+in the SPEC-000 table. Both live in the sibling repository `../reallm-specs`,
+which CLAUDE.md keeps separate from this one and which is not checked out in
+this container, so it is the owner's step rather than part of this diff.

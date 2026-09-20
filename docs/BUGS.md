@@ -155,39 +155,3 @@ and is forbidden from retuning it, D-1). Until then the flight scene is over its
 memory budget on a 2 GB phone, which SPEC-015 §8 flags as the iOS context-loss
 risk (E7): the symptom to watch for on hardware is a lost context on entering
 flight, not a visual fault.
-
-## 6. SPEC-015 — debt: the PWA plugin is this repository's, not `vite-plugin-pwa` (2026-09-20)
-
-**Severity:** debt for the `m7` milestone. Nothing is broken; a dependency the
-design names is not installed.
-
-SPEC-015 §10 configures [`vite-plugin-pwa`](https://vite-pwa-org.netlify.app/).
-Installing it means a line in `package.json`, which the build that implemented
-this spec was not permitted to edit, and the request to allow it was refused.
-The criteria that depend on a service worker — the offline reload, the offline
-save, an activated worker, the precache summary in the build output and the
-`virtual:pwa-register` registration — are met by `vite-pwa.ts`, a Vite plugin in
-this repository that takes **§10's option object field for field** and turns it
-into `dist/sw.js` plus the same virtual module.
-
-**What is the same.** The options (`registerType: 'prompt'`, `includeAssets`,
-`workbox.globPatterns`, `maximumFileSizeToCacheInBytes`, `navigateFallback`),
-the worker's URL and scope, the import in `main.ts`, and the behaviour every
-acceptance criterion names: precache the built output, answer every navigation
-with the precached `index.html`, never `skipWaiting()` on its own, and apply a
-waiting build only through `updateSW(true)` (15-c).
-
-**What is not.** Workbox itself: no per-entry revision records (the cache is
-versioned as a whole by the hash of its contents, so any change swaps the whole
-cache on `activate`), no runtime-caching routes and no precache cache-busting
-parameters. None of the three is configured by §10, and none is read by any
-criterion.
-
-**The swap, when the dependency is approved.** `npm i -D vite-plugin-pwa`;
-change the import in `vite.config.ts` to `from 'vite-plugin-pwa'`; move the
-`public/manifest.webmanifest` literal into the plugin's `manifest` option and
-delete the static file, its `<link rel="manifest">` line in `index.html` and the
-file half of `tests/ui/manifest.test.ts`; delete `vite-pwa.ts` and the
-`declare module 'virtual:pwa-register'` block in `src/vite-env.d.ts`, which the
-package ships as `client.d.ts`. `src/main.ts`, `src/core/Updates.ts`,
-`src/ui/UpdateOverlay.ts` and both e2e projects need no edit at all.

@@ -90,6 +90,25 @@ async function workerState(page: Page): Promise<string | null> {
   }, SW_TIMEOUT_MS);
 }
 
+/**
+ * What CacheStorage holds, as `{cacheName: entryCount}`.
+ *
+ * `activated` is not the same as "precached", and the gap between them is not
+ * theoretical: a precache manifest that lists one url under two revisions makes
+ * Workbox's `addToCacheList` throw inside `precacheAndRoute`, *before* the
+ * install handler is attached — so the worker activates having cached nothing,
+ * the app works perfectly online, and offline is silently dead. That shipped
+ * here once (docs/playtest-log.md §SPEC-015, the precache collision note), and
+ * the state assertion above went green through all of it.
+ */
+async function cacheEntryCounts(page: Page): Promise<Record<string, number>> {
+  return page.evaluate(async () => {
+    const counts: Record<string, number> = {};
+    for (const name of await caches.keys()) counts[name] = (await (await caches.open(name)).keys()).length;
+    return counts;
+  });
+}
+
 test.describe('installability, from the served build (AC-58)', () => {
   test('serves a manifest carrying every AC-49 field', async ({ page }) => {
     await page.goto(gameUrl('/'));
@@ -138,11 +157,18 @@ test.describe('installability, from the served build (AC-58)', () => {
     expect(await page.evaluate(() => window.isSecureContext)).toBe(true);
   });
 
-  test('registers a service worker that reaches activated', async ({ page }) => {
+  test('registers a service worker that reaches activated, and precaches', async ({ page }) => {
     test.setTimeout(SW_TEST_TIMEOUT_MS);
     await page.goto(gameUrl('/'));
     await awaitGate(page);
     expect(await workerState(page)).toBe('activated');
+    // …and it actually filled a cache while doing it (see `cacheEntryCounts`).
+    // The count is not pinned: it is the precache manifest's length, which
+    // every added asset moves. That it is *populated* is the whole assertion.
+    const counts = await cacheEntryCounts(page);
+    const precaches = Object.entries(counts).filter(([name]) => name.includes('precache'));
+    expect(precaches, `caches: ${JSON.stringify(counts)}`).toHaveLength(1);
+    expect(precaches[0]?.[1]).toBeGreaterThan(100);
   });
 });
 
