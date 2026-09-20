@@ -8,6 +8,7 @@
 // §4.7: Resume, Settings (the shared panel), Controls (a scheme-aware
 // cheat-sheet, SPEC-005), Save & Quit (flush the save, back to the menu).
 // The music duck while it is open stays the scene's (SPEC-006 AC-54, AC-83).
+import type { BenchmarkOutcome } from '@/core/Benchmark';
 import type { SaveStore } from '@/core/Save';
 import type { SettingsStore } from '@/core/Settings';
 import { el, h, testId, uiLayers } from '@/ui/dom';
@@ -21,6 +22,8 @@ export interface PauseDeps {
   save: SaveStore;
   input: { readonly state: { readonly scheme: 'keyboard' | 'touch' | 'gamepad' } };
   renderer?: QualityTarget;
+  /** SPEC-015 §4.7: the settings panel's `Re-detect`, where a `Game` supplies one. */
+  detectQuality?(): Promise<BenchmarkOutcome>;
   go(id: 'menu', params: { reason?: 'start' | 'quit' | 'error' }): Promise<boolean>;
 }
 
@@ -81,6 +84,9 @@ export class PauseMenu {
       settings: deps.settings,
       save: deps.save,
       renderer: deps.renderer ?? null,
+      // SPEC-015 15-j: `Re-detect` from the pause menu draws the stress scene
+      // for up to two seconds; the simulation stays paused behind it.
+      redetect: deps.detectQuality?.bind(deps),
     });
 
     this.#resume = testId(el('button', 'pause-resume ui-btn', 'Resume'), 'pause-resume');

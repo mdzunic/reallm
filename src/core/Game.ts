@@ -9,6 +9,7 @@
 // (SPEC-002 D-F).
 import { Assets, type AssetManifest } from '@/core/Assets';
 import { createNullAudio, type Audio } from '@/core/Audio';
+import { runBenchmark, type BenchmarkDeps, type BenchmarkOutcome } from '@/core/Benchmark';
 import { createNullInput, type Input } from '@/core/Input';
 import { PageLifecycle } from '@/core/Lifecycle';
 import { log } from '@/core/Log';
@@ -244,9 +245,12 @@ export class Game implements GameServices {
     this.#injectedRng = injected.rng ?? null;
     this.#rng = this.#injectedRng ?? new RngRoot(this.#seed());
 
-    // §4.5 step 1: `?quality=` wins but is never persisted, then the stored
-    // preset, then the default. SPEC-015's benchmark replaces this later (D-G).
-    const preset = this.#flags.quality ?? this.#settings.quality ?? DEFAULT_PRESET;
+    // §4.5 step 1 / SPEC-015 §4.6, AC-19: `?quality=` wins but is never
+    // persisted, then the stored preset, then whatever the benchmark measured
+    // on an earlier boot, then the default. The run itself happens in `boot()`
+    // and only when all three of those are absent (AC-17).
+    const preset =
+      this.#flags.quality ?? this.#settings.quality ?? this.#settings.get().benchmark?.preset ?? DEFAULT_PRESET;
     this.#renderer = createRenderer(options.canvas, {
       events: this.#events,
       preset,
@@ -407,6 +411,11 @@ export class Game implements GameServices {
     this.#assets.setMaxAnisotropy(this.#renderer.gl.capabilities.getMaxAnisotropy());
     this.#logEvent('boot:assets');
 
+    // SPEC-015 §4.1, AC-19: the run starts after the asset load and is awaited
+    // before the first scene is entered, so its ≤ 2 s sits inside the gate's
+    // wait for the tap rather than on top of it.
+    const benchmark = this.#shouldBenchmark() ? runBenchmark(this.#benchmarkDeps()) : null;
+
     await this.#bootUi.awaitStart();
     if (this.#stopped) return;
     // E21: the gesture is the only moment a browser lets an AudioContext start.
@@ -415,15 +424,89 @@ export class Game implements GameServices {
     } catch (error) {
       log.warn('boot', 'audio could not be unlocked', error);
     }
-    this.#requestWakeLock();
     this.#requestFullscreen();
     this.#bootUi.hide();
     this.#logEvent('boot:started');
 
+    if (benchmark !== null) {
+      this.#applyBenchmark(await benchmark);
+      if (this.#stopped) return;
+    }
     this.start();
     await this.#scenes.go(BOOT_SCENE, { reason: 'start' });
     // §4.5 step 5: the jump target still had to pass the gate (AC-26).
     this.#applySceneFlag();
+  }
+
+  // --------------------------------------------------------- SPEC-015 §4
+
+  /**
+   * AC-17: only when nothing has already answered the question. A `?quality=`
+   * flag, a preset the player chose, or a stored measurement all skip the run
+   * entirely — it never re-runs on a later boot unless `Re-detect` asks (AC-18).
+   */
+  #shouldBenchmark(): boolean {
+    return this.#flags.quality === null && this.#settings.quality === null && this.#settings.get().benchmark === null;
+  }
+
+  /**
+   * The injected bag of §4. `renderer` is the facade, never `gl.render`
+   * (SPEC-017 §6); a lost context means there is nothing to measure, which is
+   * the `unsupported` path of AC-15.
+   */
+  #benchmarkDeps(): BenchmarkDeps {
+    const renderer = this.#renderer;
+    const nav = navigator as Navigator & { deviceMemory?: number };
+    return {
+      renderer: renderer.contextLost
+        ? null
+        : {
+            render: (scene, camera) => renderer.render(scene, camera),
+            setPixelRatio: (dpr) => renderer.gl.setPixelRatio(dpr),
+            resize: () => renderer.resize(),
+          },
+      requestFrame: (cb) => globalThis.requestAnimationFrame(cb),
+      cancelFrame: (id) => globalThis.cancelAnimationFrame(id),
+      hidden: () => document.hidden,
+      onVisibilityChange: (handler) => {
+        document.addEventListener('visibilitychange', handler);
+        return () => document.removeEventListener('visibilitychange', handler);
+      },
+      deviceMemory: nav.deviceMemory,
+      cores: navigator.hardwareConcurrency,
+    };
+  }
+
+  /**
+   * §4.5/§4.6: a run that saw the device is remembered, a throttled or
+   * unsupported one is not (D-4), and the preset is applied only while the
+   * session is still on auto — a `?quality=` flag or a stored choice outranks
+   * a measurement.
+   */
+  #applyBenchmark(outcome: BenchmarkOutcome): void {
+    if (outcome.persist) {
+      this.#settings.set({ benchmark: { preset: outcome.preset, msPerFrame: outcome.msPerFrame, at: Date.now() } });
+    }
+    this.#logEvent(`benchmark:${outcome.reason}`);
+    if (this.#flags.quality !== null || this.#settings.quality !== null) return;
+    this.#renderer.setQuality(outcome.preset);
+  }
+
+  /**
+   * §4.7, behind the settings panel's `Re-detect`: measure again, persist under
+   * the same rules, go back to auto so the measurement actually takes effect,
+   * and apply it. DPR and `targetFps` move immediately; everything else is read
+   * by the next scene to enter (§3, AC-21).
+   */
+  async detectQuality(): Promise<BenchmarkOutcome> {
+    const outcome = await runBenchmark(this.#benchmarkDeps());
+    if (outcome.persist) {
+      this.#settings.set({ benchmark: { preset: outcome.preset, msPerFrame: outcome.msPerFrame, at: Date.now() } });
+    }
+    this.#settings.set({ quality: null });
+    this.#renderer.setQuality(outcome.preset);
+    this.#logEvent(`benchmark:${outcome.reason}`);
+    return outcome;
   }
 
   start(): void {
@@ -654,19 +737,47 @@ export class Game implements GameServices {
     }
   }
 
-  /** 02-f: a refusal is ignored and the game keeps running in the page. */
-  #requestWakeLock(): void {
-    const wakeLock = (navigator as Navigator & { wakeLock?: { request(type: 'screen'): Promise<unknown> } }).wakeLock;
-    if (!wakeLock) return;
-    wakeLock.request('screen').catch((error: unknown) => log.warn('boot', 'the screen wake lock was refused', error));
-  }
-
-  /** Android only: iOS Safari has no element fullscreen, and desktop does not need it (§4.5). */
+  /**
+   * Android only: iOS Safari has no element fullscreen, and desktop does not
+   * need it (§4.5, SPEC-015 D-8).
+   *
+   * SPEC-015 AC-34: `settings.fullscreen` is tri-state — `null` is "never
+   * chosen", so it is still attempted, and only an explicit `false` opts out.
+   * Entering fullscreen never writes the setting; the panel's toggle is the one
+   * writer (AC-37). The wake lock that used to sit beside this call is gone:
+   * the gameplay scenes own it now, so there is exactly one owner (AC-39, D-7).
+   */
   #requestFullscreen(): void {
     if (!/android/i.test(navigator.userAgent)) return;
+    if (this.#settings.get().fullscreen === false) return;
     const root = document.documentElement;
     if (typeof root.requestFullscreen !== 'function') return;
-    root.requestFullscreen().catch((error: unknown) => log.warn('boot', 'fullscreen was refused', error));
+    // AC-35: the lock is attempted once the request has *settled*, either way —
+    // a device that refused fullscreen may still hold an orientation.
+    root.requestFullscreen().then(
+      () => this.#lockLandscape(),
+      (error: unknown) => {
+        log.warn('boot', 'fullscreen was refused', error);
+        this.#lockLandscape();
+      },
+    );
+  }
+
+  /**
+   * AC-35: `screen.orientation.lock` is unimplemented on desktop, rejects
+   * outside fullscreen on Android and throws outright on some builds. All three
+   * are a warning and nothing else — the rotate overlay is the real answer.
+   */
+  #lockLandscape(): void {
+    const orientation = (screen as Screen & { orientation?: { lock?(to: string): Promise<void> } }).orientation;
+    if (typeof orientation?.lock !== 'function') return;
+    try {
+      void orientation
+        .lock('landscape')
+        .catch((error: unknown) => log.warn('boot', 'the landscape orientation lock was refused', error));
+    } catch (error) {
+      log.warn('boot', 'the landscape orientation lock threw', error);
+    }
   }
 
   /** `?scene=surface&planet=cinder4` (SPEC-001 §9) — the one use of `force` (SPEC-003 D-11). */

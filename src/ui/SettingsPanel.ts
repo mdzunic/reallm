@@ -3,11 +3,14 @@
 // (§2). Everything writes through `SettingsStore.set*` — the stores own
 // validation and persistence; this file owns only the controls.
 //
-// The quality row shows what the detector picked and re-runs it on demand.
-// SPEC-015 §4 replaces `detect` with the real benchmark; until then the
-// default is the boot rule of SPEC-002 D-G (the renderer's active preset).
+// The quality row shows what the benchmark measured and re-runs it on demand.
+// SPEC-015 §4.7 replaced the placeholder detector with the real run, which
+// lives in `core/Game.ts` because it needs the renderer: the panel calls
+// `redetect()`, reads `settings.benchmark` back and toasts (AC-20).
+import type { BenchmarkOutcome } from '@/core/Benchmark';
 import type { QualityPreset } from '@/core/Renderer';
 import type { GuidanceLevel, SettingsStore } from '@/core/Settings';
+import { log } from '@/core/Log';
 import type { SaveStore, SlotId } from '@/core/Save';
 import { SLOTS } from '@/core/Save';
 import { confirmSheet } from '@/ui/ConfirmSheet';
@@ -23,8 +26,12 @@ export interface SettingsDeps {
   settings: SettingsStore;
   save: SaveStore;
   renderer?: QualityTarget | null;
-  /** SPEC-015 §4 injects the real benchmark here (AC-87). */
-  detect?: () => QualityPreset;
+  /**
+   * SPEC-015 §4.7: the real benchmark, injected because it needs the renderer
+   * (SPEC-014 AC-87). It persists the outcome, puts the quality setting back to
+   * auto and applies the measured preset; the panel only shows the answer.
+   */
+  redetect?: () => Promise<BenchmarkOutcome>;
   /** After a completed reset (AC-95) — the menu refreshes, the station quits. */
   onReset?: () => void;
 }
@@ -141,8 +148,29 @@ export class SettingsPanel {
 
   // ---------------------------------------------------------------- quality
 
-  #detect(): QualityPreset {
-    return this.#deps.detect?.() ?? this.#deps.renderer?.preset ?? 'medium';
+  /** The preset auto resolves to today: the stored measurement, else the active one. */
+  #autoPreset(): QualityPreset {
+    return this.#deps.settings.get().benchmark?.preset ?? this.#deps.renderer?.preset ?? 'medium';
+  }
+
+  /**
+   * AC-20: the row reads the stored measurement — preset and ms/frame — and an
+   * em dash where nothing has been measured yet.
+   */
+  #benchmarkNote(): string {
+    const stored = this.#deps.settings.get().benchmark;
+    if (stored === null) return 'Benchmark: —';
+    return `Benchmark: ${stored.preset} · ${stored.msPerFrame.toFixed(1)} ms/frame`;
+  }
+
+  /**
+   * AC-21: DPR and `targetFps` move with the call below; everything a view read
+   * at `enter()` — particle pools, draw distance, shadow map — comes with the
+   * next screen, which is what the toast says.
+   */
+  #applyPreset(preset: QualityPreset, label: string): void {
+    this.#deps.renderer?.setQuality(preset);
+    this.#ui.toast(`Quality: ${label} — resolution now, the rest at the next screen`, 'info');
   }
 
   #qualityRow(): HTMLDivElement {
@@ -159,10 +187,10 @@ export class SettingsPanel {
             click: () => {
               if (choice === 'auto') {
                 s.set({ quality: null });
-                this.#deps.renderer?.setQuality(this.#detect());
+                this.#applyPreset(this.#autoPreset(), `auto (${this.#autoPreset()})`);
               } else {
                 s.setQuality(choice);
-                this.#deps.renderer?.setQuality(choice);
+                this.#applyPreset(choice, choice);
               }
               this.#render();
             },
@@ -178,12 +206,7 @@ export class SettingsPanel {
         {
           class: 'ui-btn',
           type: 'button',
-          click: () => {
-            const picked = this.#detect();
-            if (s.quality === null) this.#deps.renderer?.setQuality(picked);
-            this.#ui.toast(`Detected quality: ${picked}`, 'info');
-            this.#render();
-          },
+          click: () => this.#redetect(redetect),
         },
         'Re-detect',
       ),
@@ -193,8 +216,46 @@ export class SettingsPanel {
       'div',
       { class: 'settings-section' },
       h('div', { class: 'settings-row' }, h('span', {}, 'Quality'), h('div', { class: 'settings-seg' }, ...buttons)),
-      h('div', { class: 'settings-row' }, h('span', { class: 'settings-note' }, `Benchmark: ${this.#detect()}`), redetect),
+      h(
+        'div',
+        { class: 'settings-row' },
+        testId(h('span', { class: 'settings-note' }, this.#benchmarkNote()), 'settings-benchmark'),
+        redetect,
+      ),
     ) as HTMLDivElement;
+  }
+
+  /**
+   * §4.7 / 15-j: the run draws its own stress scene for up to two seconds. The
+   * button is disabled while it does, so a second press cannot start a second
+   * measurement over the first.
+   */
+  #redetect(button: HTMLButtonElement): void {
+    const run = this.#deps.redetect;
+    if (run === undefined) {
+      // No `Game` behind the panel (a unit harness): say so rather than lie.
+      this.#ui.toast(`Quality: ${this.#autoPreset()}`, 'info');
+      return;
+    }
+    button.disabled = true;
+    button.textContent = 'Measuring…';
+    void run().then(
+      (outcome) => {
+        const ms = outcome.msPerFrame > 0 ? ` · ${outcome.msPerFrame.toFixed(1)} ms/frame` : '';
+        this.#ui.toast(`Detected quality: ${outcome.preset}${ms}`, 'info');
+        if (this.#open) this.#render();
+        else {
+          button.disabled = false;
+          button.textContent = 'Re-detect';
+        }
+      },
+      (error: unknown) => {
+        log.warn('settings', 'the quality benchmark could not run', error);
+        this.#ui.toast('Could not measure this device', 'warn');
+        button.disabled = false;
+        button.textContent = 'Re-detect';
+      },
+    );
   }
 
   // --------------------------------------------------------------- guidance

@@ -13,6 +13,7 @@ import type { EventBus, GameEvents } from '@/core/Events';
 import { log } from '@/core/Log';
 import { Pool } from '@/core/Pool';
 import { PressEdges } from '@/core/PressEdges';
+import { holdWakeLock } from '@/core/WakeLock';
 import { DEFAULT_LOOK, type Look } from '@/core/Quality';
 import { EXPLORE_CELL, newSave, type CharacterCreation, type Save } from '@/core/Save';
 import type { GuidanceLevel } from '@/core/Settings';
@@ -109,6 +110,7 @@ import { PauseMenu } from '@/ui/PauseMenu';
 import { openQuickPicker, type QuickChoice } from '@/ui/QuickPicker';
 import { RevealOverlay } from '@/ui/RevealOverlay';
 import { RotateOverlay } from '@/ui/RotateOverlay';
+
 import { ScanRing } from '@/ui/ScanRing';
 import { TouchControls } from '@/ui/TouchControls';
 import { Waypoint } from '@/ui/Waypoint';
@@ -872,8 +874,15 @@ export class SurfaceScene extends UiScene<'surface'> {
     // Quitting out of an open pause menu never calls resume(); the disposer is
     // what releases the duck (SPEC-006 AC-54).
     this.disposer.add(() => services.audio.duck(false));
-    const rotate = new RotateOverlay(services.uiRoot, services.events);
+    // SPEC-015 §6 / E22: turning the phone to portrait mid-fight opens the
+    // pause menu through the same path the pause button uses, so the player is
+    // not killed while rotating. Returning to landscape leaves it open (AC-33).
+    const rotate = new RotateOverlay(services.uiRoot, services.events, {
+      onBlocked: () => void services.scenes.pause(),
+    });
     this.disposer.add(() => rotate.dispose());
+    // SPEC-015 §7, AC-38: the gameplay scenes are the one wake-lock owner.
+    this.disposer.add(holdWakeLock());
     // SPEC-023 §4.4: the reveal's letterbox and words. Built with the scene so
     // a beat interrupted by a quit takes its key capture down with it.
     const reveal = new RevealOverlay(services.uiRoot);

@@ -263,6 +263,8 @@ export class StationScene extends UiScene<'station'> {
       settings: this.services.settings,
       save: this.services.save,
       renderer: this.services.renderer,
+      // SPEC-015 AC-20: `Re-detect` runs the real boot benchmark.
+      redetect: this.services.detectQuality?.bind(this.services),
       onReset: () => this.#quit(false),
     });
     this.disposer.add(() => {

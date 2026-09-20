@@ -14,6 +14,7 @@ import * as THREE from 'three';
 import type { EventBus, GameEvents } from '@/core/Events';
 import type { InputState } from '@/core/Input';
 import { log } from '@/core/Log';
+import { holdWakeLock } from '@/core/WakeLock';
 import { newSave, type CharacterCreation, type Save } from '@/core/Save';
 import type { GameServices } from '@/core/Services';
 import type { SceneParams } from '@/core/StateMachine';
@@ -308,8 +309,14 @@ export class FlightScene extends UiScene<'flight'> {
     touch.show('flight');
     this.disposer.add(() => touch.dispose());
 
-    const rotate = new RotateOverlay(uiRootEl(), services.events);
+    // SPEC-015 §6 / E22: the same auto-pause the surface takes on a rotation
+    // into portrait, through the pause button's own path (AC-32).
+    const rotate = new RotateOverlay(uiRootEl(), services.events, {
+      onBlocked: () => void services.scenes.pause(),
+    });
     this.disposer.add(() => rotate.dispose());
+    // SPEC-015 §7, AC-38: held for the trip, released when the scene leaves.
+    this.disposer.add(holdWakeLock());
 
     // The recall flash and the landing skip hint are the scene's own layers —
     // flight shows no death panel and declines the shared overlay (SPEC-014).
