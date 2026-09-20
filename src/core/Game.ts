@@ -13,6 +13,7 @@ import { runBenchmark, type BenchmarkDeps, type BenchmarkOutcome } from '@/core/
 import { createNullInput, type Input } from '@/core/Input';
 import { PageLifecycle } from '@/core/Lifecycle';
 import { log } from '@/core/Log';
+import { runRenderPhase, type RenderPhasePorts } from '@/core/FrameSkip';
 import { DEFAULT_MAX_STEPS, Loop } from '@/core/Loop';
 import { createRenderer, type QualityPreset, type Renderer } from '@/core/Renderer';
 import { RngRoot } from '@/core/Rng';
@@ -165,9 +166,6 @@ export const DEFAULT_SEED = 1;
 
 const PHASE_INPUT_BEGIN = 'input:begin';
 const PHASE_UPDATE = 'update';
-const PHASE_RENDER = 'render';
-const PHASE_UI_FLUSH = 'ui:flush';
-const PHASE_INPUT_END = 'input:end';
 /** input:begin + up to maxSteps updates + render + ui:flush + input:end. */
 const PHASE_SLOTS = 1 + DEFAULT_MAX_STEPS + 3;
 /** One traced frame per second while the overlay is visible (§4.6.2). */
@@ -587,26 +585,30 @@ export class Game implements GameServices {
     this.#scenes.update(dt);
   }
 
-  /** Phases 3 to 5: render, then save/ui/stats, then the end of the input frame. */
+  /**
+   * Phases 3 to 5: render, then save/ui/stats, then the end of the input frame.
+   * The order — and which of those the `targetFps: 30` frame skip drops — is
+   * `core/FrameSkip.ts`, so AC-24 is a node test rather than a reading (AC-57).
+   */
   #render(_frameDt: number): void {
-    this.#phase(PHASE_RENDER);
-    this.#renderScene();
-    this.#phase(PHASE_UI_FLUSH);
-    this.#save.tick();
-    (this.#transitionUi as Flushable).flush?.();
-    this.#refreshStatsIfDue();
-    this.#phase(PHASE_INPUT_END);
-    // A frame with no update step never showed its edges to gameplay; they are
-    // carried to the next frame instead of being dropped (SPEC-005 §4.1).
-    this.#input.endFrame(this.#stepsThisFrame > 0);
+    runRenderPhase(this.#renderPorts, this.#renderer.quality.targetFps, this.#loop.stats.frame);
     this.#endTrace();
   }
 
+  /** Built once: the frame phase allocates nothing (SPEC-001 §7). */
+  readonly #renderPorts: RenderPhasePorts = {
+    phase: (name) => this.#phase(name),
+    draw: () => this.#renderScene(),
+    saveTick: () => this.#save.tick(),
+    uiFlush: () => (this.#transitionUi as Flushable).flush?.(),
+    refreshStats: () => this.#refreshStatsIfDue(),
+    // A frame with no update step never showed its edges to gameplay; they are
+    // carried to the next frame instead of being dropped (SPEC-005 §4.1).
+    endFrame: () => this.#input.endFrame(this.#stepsThisFrame > 0),
+  };
+
   #renderScene(): void {
     if (this.#renderer.contextLost) return;
-    // AC-57: at `targetFps: 30` every second frame skips the draw; the fixed
-    // updates, the save and the stats are untouched.
-    if (this.#renderer.quality.targetFps === 30 && this.#loop.stats.frame % 2 !== 0) return;
     try {
       this.#scenes.render(this.#renderer);
     } catch (error) {
