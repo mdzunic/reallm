@@ -2,18 +2,47 @@
 // canvas, the on-screen keyboard's reflow (AC-29), the rotate overlay and its
 // auto-pause (AC-30, AC-32, AC-33) and the settings benchmark row (AC-20).
 //
-// The phone cases run on a phone-shaped client — Playwright's `Pixel 5`
-// descriptor gives touch points and a narrow viewport, which is exactly what
-// the shipped heuristic reads (`navigator.maxTouchPoints > 0 && min(w, h) <
-// 620`, D-5). The keyboard is emulated the only way a headless run can do it:
-// a CDP device-metrics override that shrinks the visual viewport the way a
-// keyboard does, which is the in-container half of AC-29's evidence — the
+// This file is the one §12 runs in both Playwright projects (D-8), and the two
+// runs are not the same test:
+//
+//   - `chromium` is Desktop Chrome. It reports `navigator.maxTouchPoints === 0`
+//     however narrow its window is, so the cases that need the shipped phone
+//     heuristic (`maxTouchPoints > 0 && min(w, h) < 620`, D-5) rewrite that one
+//     property in an init script and resize the window to a phone's shape.
+//   - `mobile` is Playwright's `Pixel 5`: real touch points, a 393×851 screen
+//     and a 2.75 device pixel ratio, on the Android user agent. Nothing is
+//     faked there — which also means it is the run that meets AC-33's boot-tap
+//     fullscreen, and a fullscreen window cannot be resized (`leaveFullscreen`).
+//
+// A handful of cases only make sense on one side; each says which and why.
+// The keyboard is emulated the only way a headless run can do it: a CDP
+// device-metrics override that shrinks the visual viewport the way a keyboard
+// does, which is the in-container half of AC-29's evidence — the
 // physical-handset pass is owed before `m7` (D-15, docs/playtest-log.md).
 import { expect, test, type Page } from '@playwright/test';
 import { frames, gameUrl, passGate, start } from './start';
 
 const PHONE = { width: 740, height: 360 };
 const PHONE_PORTRAIT = { width: 360, height: 740 };
+
+/**
+ * Playwright changes the viewport by resizing the *window*, and a window the
+ * boot tap took fullscreen refuses that outright ("To resize
+ * minimized/maximized/fullscreen window, restore it to normal state first").
+ * On the `mobile` project the tap does exactly that — AC-33 requests fullscreen
+ * on Android when `settings.fullscreen !== false`, and `Pixel 5` is Android.
+ *
+ * Orientation is not about fullscreen: E22 is about the device being turned,
+ * and AC-33 says leaving fullscreen changes nothing else. So the cases that
+ * rotate the client step out of it first, which is also the state a player who
+ * dismissed it is in. A no-op on a client that never entered fullscreen.
+ */
+async function leaveFullscreen(page: Page): Promise<void> {
+  await page.evaluate(async () => {
+    if (document.fullscreenElement !== null) await document.exitFullscreen();
+  });
+  await frames(page, 3);
+}
 
 /** The canvas's CSS box, which is what `100dvh` decides. */
 async function canvasBox(page: Page): Promise<{ width: number; height: number; scrollY: number }> {
@@ -54,6 +83,19 @@ test.describe('the viewport shell (AC-25, AC-26)', () => {
     expect(shell.overscroll).toBe('none');
     // `100dvh` resolves to the viewport height, to the pixel.
     expect(Math.round(Number.parseFloat(shell.canvasHeight))).toBe(shell.viewportHeight);
+  });
+
+  test('clamps the backing store to the preset maxDpr on a high-density screen (AC-2)', async ({ page, isMobile }) => {
+    // Only a phone context has a device ratio above 1 to clamp — `Pixel 5`
+    // reports 2.75, where Desktop Chrome reports 1 and the clamp is invisible.
+    test.skip(isMobile !== true, 'a desktop client renders at dpr 1, so there is nothing to clamp');
+    await start(page);
+    // `start()` runs on `low`, whose maxDpr is 1 (§3), so the renderer draws a
+    // 2.75× screen into a 1× backing store rather than 7.5× the pixels.
+    const stats = await page.evaluate(() => window.__reallm.stats());
+    expect(stats.preset).toBe('low');
+    expect(stats.deviceDpr).toBeGreaterThan(1);
+    expect(stats.dpr).toBe(Math.min(stats.deviceDpr, 1));
   });
 });
 
@@ -112,6 +154,7 @@ test.describe('orientation (AC-30, AC-32, AC-33)', () => {
       Object.defineProperty(navigator, 'maxTouchPoints', { value: 5, configurable: true });
     });
     await start(page, '/?scene=surface&planet=cinder4');
+    await leaveFullscreen(page);
 
     const rotate = page.locator('[data-testid="rotate-overlay"]');
     const pause = page.locator('[data-testid="pause-menu"]');
@@ -142,6 +185,7 @@ test.describe('orientation (AC-30, AC-32, AC-33)', () => {
       Object.defineProperty(navigator, 'maxTouchPoints', { value: 5, configurable: true });
     });
     await start(page, '/?scene=surface&planet=cinder4');
+    await leaveFullscreen(page);
     const pause = page.locator('[data-testid="pause-menu"]');
     await expect(pause).toBeHidden();
 
@@ -165,11 +209,32 @@ test.describe('orientation (AC-30, AC-32, AC-33)', () => {
     await expect(pause).toBeHidden();
   });
 
-  test('leaves the overlay down on a desktop-shaped client, however narrow', async ({ page }) => {
+  test('leaves the overlay down on a desktop-shaped client, however narrow', async ({ page, isMobile }) => {
+    // Half of D-5's pair, and the half only a no-touch client can show: the
+    // `mobile` project reports real touch points, where the correct answer is
+    // the opposite one — asserted in the case below.
+    test.skip(isMobile === true, 'the phone project has touch points and is the other half of D-5');
     await page.setViewportSize(PHONE_PORTRAIT);
     await start(page, '/?scene=surface&planet=cinder4');
     // No touch points: a narrow desktop window is not a phone held sideways.
     await expect(page.locator('[data-testid="rotate-overlay"]')).not.toHaveClass(/is-visible/);
+  });
+
+  test('raises the overlay on a real phone, with nothing monkeypatched (AC-30)', async ({ page, isMobile }) => {
+    // The other half, and the reason the `mobile` project exists: every input
+    // to D-5's heuristic here is the context's own — `Pixel 5` reports its
+    // touch points and its 393-px-wide portrait screen, and no init script
+    // rewrites either. The desktop project cannot reach this state at all.
+    test.skip(isMobile !== true, 'a Desktop Chrome context reports no touch points (D-5)');
+    await start(page, '/?scene=surface&planet=cinder4');
+    const client = await page.evaluate(() => ({
+      touchPoints: navigator.maxTouchPoints,
+      width: window.innerWidth,
+      height: window.innerHeight,
+    }));
+    expect(client.touchPoints).toBeGreaterThan(0);
+    expect(client.width).toBeLessThan(client.height);
+    await expect(page.locator('[data-testid="rotate-overlay"]')).toHaveClass(/is-visible/);
   });
 
   test('mounts the overlay only in the gameplay scenes (AC-30)', async ({ page }) => {
@@ -197,12 +262,19 @@ test.describe('fullscreen (AC-36, AC-37)', () => {
         return raw === null ? undefined : (JSON.parse(raw) as { fullscreen?: boolean | null }).fullscreen;
       });
     // Never chosen: the setting is absent or null, and the boot tap did not
-    // write it (AC-34).
+    // write it (AC-34) — on the phone project it *did* enter fullscreen on that
+    // tap, which makes this the assertion that the two are separate.
     expect(await stored() ?? null).toBeNull();
-    await box.setChecked(true);
-    expect(await stored()).toBe(true);
-    await box.setChecked(false);
-    expect(await stored()).toBe(false);
+
+    // So the box shows the live state until something is chosen: unchecked on a
+    // desktop client, checked on the phone whose boot tap went fullscreen.
+    // Toggling it away from wherever it starts is what proves the toggle is the
+    // writer, and flipping back proves it writes the other value too (AC-37).
+    const initial = await box.isChecked();
+    await box.setChecked(!initial);
+    expect(await stored()).toBe(!initial);
+    await box.setChecked(initial);
+    expect(await stored()).toBe(initial);
   });
 
   test('leaving fullscreen does not pause, and the next resize re-evaluates (AC-36, 15-f)', async ({ page }) => {
@@ -213,6 +285,11 @@ test.describe('fullscreen (AC-36, AC-37)', () => {
     // A system gesture or Escape leaves fullscreen; the browser reports it as
     // `fullscreenchange` and nothing else. Nothing in the game listens for it,
     // which is the point: exiting fullscreen is not a pause.
+    //
+    // The phone project has a real fullscreen to leave — the boot tap took it
+    // (AC-33) — so it leaves it for real first; a desktop client never entered
+    // one, and the dispatched event is the whole of what it would have seen.
+    await leaveFullscreen(page);
     await page.evaluate(() => document.dispatchEvent(new Event('fullscreenchange')));
     await frames(page, 3);
     const after = await page.evaluate(() => window.__reallm.stats());
