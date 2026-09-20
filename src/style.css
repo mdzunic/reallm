@@ -7,6 +7,11 @@ body {
   margin: 0;
   height: 100%;
   overflow: hidden;
+  /* SPEC-015 AC-26: no rubber-band, no pull-to-refresh — a drag that starts on
+     a scrollable panel and runs past its end must not bounce the page under
+     the canvas. `touch-action: none` on `#game`/`#ui` stops the gesture from
+     starting; this stops the one that does start from chaining to the page. */
+  overscroll-behavior: none;
   background: #0b0f14;
   color: #e6edf3;
   font: 14px/1.4 system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
@@ -1083,7 +1088,8 @@ html.reduce-motion .qb-slot.is-locked {
 /* ------------------------------------------------- SPEC-028: quick picker */
 .quick-picker {
   position: absolute;
-  bottom: 120px;
+  /* SPEC-015 AC-27: the home indicator pushes the whole stack up with the bar. */
+  bottom: max(120px, calc(env(safe-area-inset-bottom) + 108px));
   left: 50%;
   transform: translateX(-50%);
   display: flex;
@@ -2866,7 +2872,7 @@ button.hud-button {
 .flight-skip-hint {
   position: absolute;
   left: 50%;
-  bottom: 12%;
+  bottom: max(12%, calc(env(safe-area-inset-bottom) + 12px));
   transform: translateX(-50%);
   font-size: 13px;
   color: var(--ink-dim);
@@ -2959,7 +2965,7 @@ button.hud-button {
 .film-describe {
   position: absolute;
   left: 50%;
-  bottom: 32%;
+  bottom: max(32%, calc(env(safe-area-inset-bottom) + 12px));
   transform: translateX(-50%);
   width: min(44em, 92%);
   margin: 0;
@@ -2977,7 +2983,8 @@ button.hud-button {
 .film-caption {
   position: absolute;
   left: 50%;
-  bottom: 3%;
+  /* AC-27: 3 % of a landscape phone is under the home indicator. */
+  bottom: max(3%, calc(env(safe-area-inset-bottom) + 10px));
   transform: translateX(-50%);
   max-width: min(44em, 96%);
   padding: 8px 14px;
@@ -3138,7 +3145,8 @@ html.reduce-motion .film-describe {
 .chapter-card {
   position: fixed;
   left: 50%;
-  top: 18%;
+  /* SPEC-015 AC-27: 18 % of a short landscape phone is inside the notch. */
+  top: max(18%, calc(env(safe-area-inset-top) + 12px));
   transform: translateX(-50%);
   z-index: 54;
   width: min(40em, 92%);
@@ -3236,7 +3244,7 @@ html.reduce-motion .reveal-bar {
 .reveal-title {
   position: absolute;
   left: 50%;
-  top: 16%;
+  top: max(16%, calc(env(safe-area-inset-top) + 12px));
   transform: translateX(-50%);
   width: min(40em, 92%);
   text-align: center;
@@ -3279,7 +3287,7 @@ html.reduce-motion .reveal-name.is-glitched {
      it: in a film the caption drops below the 16:9 picture, and there is no
      picture here to drop below. */
   top: auto;
-  bottom: 12%;
+  bottom: max(12%, calc(env(safe-area-inset-bottom) + 12px));
   transform: translateX(-50%);
 }
 
