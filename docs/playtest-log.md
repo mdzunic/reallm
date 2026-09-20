@@ -888,6 +888,7 @@ real-touch overlay case and the dpr clamp case skip on the desktop.
 | Texture cap (AC-8) | With `medium`'s `textureMaxSize` of 1024 in force, the flight scene's 2048 × 1536 sky and 2048 × 1024 planet/normal maps are drawn down to 1024 × 768 and 1024 × 512 before upload — observed in Chromium by recording every `drawImage` the resizer issues: `flight: 4 downscales`. The same cap is applied by `core/Assets.ts` on the way into the cache and by the flight scene's own loader (§8) |
 | Boot benchmark (AC-17, AC-19) | With no `?quality=` the run starts after the asset load and resolves before the first scene. On this container every frame gap exceeds 100 ms, so it reports `hidden-abort` — correctly **not** persisted (15-a, D-4) — and the session stays on `medium`. With `?quality=low` in the URL it does not run at all and `settings.benchmark` stays `null` |
 | Re-detect (AC-20) | The settings row reads `Benchmark: —` with nothing stored; pressing `Re-detect` runs the real benchmark, toasts `Detected quality: …` and leaves `settings.quality` at `null` |
+| Reduce motion — the camera (AC-39) | Walking the surface with the setting on moves the camera by **exactly zero** on both counts (`camShake` and `camBob`, published on `debugInfo()`); a full-lock bank sweep in flight never rolls the horizon past **8°** while reaching 4°, so it is a clamp and not a still camera. The same walk bobs and the same sweep passes 8° with the setting off |
 | Reduce motion (AC-38, AC-40, AC-41) | Under `prefers-reduced-motion: reduce` the `reduce-motion` class is on `<html>` with nothing written to `settings` (the class is the contract, the panel toggle is the only writer); the low-hull HUD bar computes `animation-name: none` with a solid outline instead of the `hud-pulse` beat; the prologue plays as `data-mode="stills"` with one poster, **zero** `<video>` elements, and a caption that is whole on the frame it appears. The control run with the setting off gets `hud-pulse`, no class, and a caption that grows frame by frame |
 | iOS install explainer (AC-61) | On an iPhone Safari agent, a station save raises the toast *and* the `Share → Add to Home Screen` sheet; the sheet is dismissible, the loop keeps running behind it, and a second save inside the fortnight raises nothing (SPEC-007 §4.7's cadence) |
 | Story films through the worker (AC-63) | Against the built app: `prologue.mp4` is in the worker's own precache by url; with the context **offline**, the same `fetch()` the film player makes returns **200** (not 206), with no `content-range` and the whole 3 MB, and the blob it yields becomes a `blob:` URL. No film request in the run carried a `Range` header — which is the point: a `<video src="…mp4">` is what would emit one, and the Blob path is what keeps the worker on plain 200s |
@@ -1090,6 +1091,23 @@ will find different numbers in it.
 | **AC-37** — the boot-tap wake lock stays | The request was deleted from `core/Game.ts` and `e2e/boot-gate.spec.ts` was rewritten from `toEqual(['wakeLock:screen'])` to `toEqual([])` — the opposite of "stays green unchanged" | The request is back on the tap, `e2e/boot-gate.spec.ts` is restored byte-for-byte from `main`, and §7's hand-over is explicit: the boot sentinel is released on the first `scene:entered`, from which point the scene-scoped hold is the only owner. SPEC-015's own additions to that tap (the landscape lock, the fullscreen opt-out) moved to `e2e/SPEC-015.spec.ts` |
 | **AC-43** — `StatsSnapshot` exposes `updateMs` and `renderMs` | Neither field existed anywhere in `src/`, and the overlay had no such rows, so §5's update and render budgets had nothing to be read from | `core/FrameTimers.ts` (a preallocated ring with a median), both fields on `StatsSnapshot`, and the `update` / `render` rows on the debug overlay. The two tables above are the first measurement of them |
 
+Five more were reported as *not reached* rather than as defects — the QA window
+ran out before it got to them — and each had node coverage but nothing a browser
+could observe. They now have both, in the walk table above: **AC-39** (the
+camera's own shake, bob and bank, published through `debugInfo()` the way
+SPEC-020 20-g publishes `skyTint`), **AC-40** (the HUD pulse as a computed
+style), **AC-41** (the prologue as posters, and the caption whole on its first
+frame), **AC-61** (the iOS explainer and its fortnight cadence) and **AC-63**
+(the whole-film fetch through the worker, offline, with no `Range` anywhere).
+
+Each of the five is paired with a **control run** that asserts the opposite with
+the setting off, because a reduce-motion assertion that would also pass on a
+still scene proves nothing. The first draft of AC-39's bank case was exactly
+that — it held a key while `settings.flightMouseSteer` quietly overrode the
+keyboard axis, so the roll never left zero and the ≤ 8° clamp passed without the
+camera ever banking. It steers with the mouse now and asserts the sweep reached
+4° before asserting it stopped at 8°.
+
 ### Owed on hardware before `m7`
 
 Nothing here is dropped; each row names its in-container substitute above and
@@ -1170,18 +1188,18 @@ normally rather than being labelled *blocked — vite-plugin-pwa*.
       / 1 350 tests**, production build
 - [x] **both Playwright projects green** (AC-64) —
       `npx playwright test e2e/SPEC-015.spec.ts --project=chromium --project=mobile`:
-      **28 passed, 4 skipped**. Each skip names itself: the dpr-clamp and
-      real-touch cases are phone-only and skip on `chromium`, the no-touch
-      overlay case and the off-Android boot-tap case are desktop-only and skip
-      on `mobile`
+      **42 passed, 6 skipped**. Each skip names itself: the dpr-clamp and
+      real-touch cases are phone-only and skip on `chromium`; the no-touch
+      overlay case, the off-Android boot-tap case and the two mouse-steer bank
+      cases are desktop-only and skip on `mobile`
 - [x] `e2e/boot-gate.spec.ts` green and **byte-for-byte identical to `main`**
       (AC-37) — 12 passed, including SPEC-002's own
       `expect(asked).toEqual(['wakeLock:screen'])` and
       `['wakeLock:screen', 'fullscreen']` on Android
 - [x] `e2e/stats-overlay.spec.ts` green with the overlay's closed row list grown
       to eighteen (AC-43, D-13) — 11 passed
-- [x] `npx playwright test --project=pwa` green — 6 passed against a real build
-      served by `vite preview`
+- [x] `npx playwright test --project=pwa` green — 7 passed against a real build
+      served by `vite preview`, including AC-63's whole-film fetch
 - [x] `node scripts/assets/check.mjs` green — every asset row in
       `LICENSES.md`, every budget met, precache 21.32 MB of 25 MB
 - [x] the `chromium` project's dev-server flow unchanged: no worker is
