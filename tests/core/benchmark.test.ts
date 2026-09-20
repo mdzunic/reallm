@@ -178,13 +178,38 @@ describe('runBenchmark (SPEC-015 §4.2, §4.5)', () => {
     expect(outcome.persist).toBe(true);
   });
 
-  it('slow-aborts when the first ten frames are all over 40 ms (AC-12)', async () => {
+  it('slow-aborts to low when the first ten frames are all over 40 ms (AC-18)', async () => {
     const h = harness();
     const outcome = await drive(h, runBenchmark(h.deps), 45);
     expect(outcome.reason).toBe('slow-abort');
-    expect(outcome.preset).toBe('medium');
+    // D-5: two aborts, two answers. This one *measured* — 45 ms a frame is a
+    // device that cannot run `medium` — so it resolves to `low`, not to the
+    // hidden-tab fallback, and it is the only preset a cached slow run may hold.
+    expect(outcome.preset).toBe('low');
+    expect(outcome.preset).not.toBe(FALLBACK_PRESET);
     expect(outcome.msPerFrame).toBe(45);
-    // D-4: the slow abort measured a real device, so it is remembered.
+    // D-5: the slow abort measured a real device, so it is remembered.
+    expect(outcome.persist).toBe(true);
+  });
+
+  it('slow-aborts to low when 2 s bought fewer than ten measured frames (AC-18)', async () => {
+    // The other slow path: the ten-frame early exit never trips (the first ten
+    // frames are fast), but the run is then too slow to get ten frames past the
+    // 30 warm-up ones inside the 2 s budget. Ten deltas of 5 ms, then 99 ms —
+    // just under the 100 ms gap that would make it a hidden-abort instead —
+    // expires the budget at delta 30, with nothing measured.
+    const h = harness();
+    let settled: BenchmarkOutcome | null = null;
+    const promise = runBenchmark(h.deps);
+    void promise.then((value) => (settled = value));
+    for (let i = 0; i < 400 && settled === null; i++) {
+      h.advance(i < 10 ? 5 : 99);
+      await Promise.resolve();
+      await Promise.resolve();
+    }
+    const outcome = await promise;
+    expect(outcome.reason).toBe('slow-abort');
+    expect(outcome.preset).toBe('low');
     expect(outcome.persist).toBe(true);
   });
 

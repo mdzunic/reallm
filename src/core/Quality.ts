@@ -115,6 +115,12 @@ export const LOW_MEMORY_GB = 2;
 export const LOW_CORES = 4;
 /** §4.6: what a run that measured nothing usable falls back to. */
 export const FALLBACK_PRESET: QualityPreset = 'medium';
+/**
+ * D-5: the other abort. A run that *did* measure and found every one of the
+ * first ten frames over 40 ms has an answer — the device is slow — so it stops
+ * early, resolves here rather than at `FALLBACK_PRESET`, and is cached (AC-18).
+ */
+export const SLOW_ABORT_PRESET: QualityPreset = 'low';
 
 /** A `navigator` hint is *known* only when it is a finite number above zero (15-g). */
 function known(value: number | undefined): value is number {

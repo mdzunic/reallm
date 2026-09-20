@@ -18,7 +18,7 @@
 // `medium` with a reason.
 import * as THREE from 'three';
 import { log } from '@/core/Log';
-import { FALLBACK_PRESET, presetFor, type QualityPreset } from '@/core/Quality';
+import { FALLBACK_PRESET, presetFor, SLOW_ABORT_PRESET, type QualityPreset } from '@/core/Quality';
 
 /**
  * §4.4's decision, re-exported at the module a caller reaches for when it wants
@@ -33,6 +33,7 @@ export {
   LOW_MEMORY_GB,
   MEDIUM_MAX_MS,
   presetFor,
+  SLOW_ABORT_PRESET,
 } from '@/core/Quality';
 
 /** Why the run ended (§4.5). Only `measured` actually measured the GPU. */
@@ -309,9 +310,10 @@ function attempt(deps: BenchmarkDeps): Promise<BenchmarkOutcome> {
         deltas.push(delta);
         if (deltas.length > WARMUP_FRAMES) measured.push(delta);
 
-        // AC-12: ten frames, every one of them over 40 ms — the device answered.
+        // AC-18: ten frames, every one of them over 40 ms — the device answered,
+        // and the answer is `low` (D-5), not the hidden-tab fallback.
         if (deltas.length === SLOW_FRAME_COUNT && deltas.every((d) => d > SLOW_FRAME_MS)) {
-          finish(outcome(FALLBACK_PRESET, median(deltas), 'slow-abort'));
+          finish(outcome(SLOW_ABORT_PRESET, median(deltas), 'slow-abort'));
           return;
         }
         if (measured.length >= MEASURED_FRAMES) {
@@ -326,7 +328,9 @@ function attempt(deps: BenchmarkDeps): Promise<BenchmarkOutcome> {
             const ms = median(measured);
             finish(outcome(presetFor(ms, deps.deviceMemory, deps.cores), ms, 'measured'));
           } else {
-            finish(outcome(FALLBACK_PRESET, median(deltas), 'slow-abort'));
+            // Too few measured frames to median honestly, but 2 s bought fewer
+            // than ten of them: that is the same "slow device" answer (AC-18).
+            finish(outcome(SLOW_ABORT_PRESET, median(deltas), 'slow-abort'));
           }
           return;
         }
