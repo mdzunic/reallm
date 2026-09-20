@@ -2,9 +2,11 @@
 // than sniffing it: `WEBGL_debug_renderer_info` is unreliable and UA strings
 // lie, so a ≤ 2 s stress render decides which preset the session runs at (§2).
 //
-// Two halves, deliberately split:
+// Two halves, deliberately split (D-4):
 //   - `presetFor` is pure arithmetic over a frame time and the two `navigator`
-//     hints. It imports nothing and is the whole of §4.4.
+//     hints. It imports nothing and is the whole of §4.4, so it lives in
+//     `core/Quality.ts` — off the `three` allow-list — and is re-exported from
+//     here, where the run that feeds it is.
 //   - `runBenchmark` draws the §4.2 stress scene through the renderer facade.
 //     Every moving part it needs — the frame source, the clock, the page's
 //     visibility, the renderer — arrives in `BenchmarkDeps`, so the algorithm
@@ -16,7 +18,22 @@
 // `medium` with a reason.
 import * as THREE from 'three';
 import { log } from '@/core/Log';
-import type { QualityPreset } from '@/core/Quality';
+import { FALLBACK_PRESET, presetFor, type QualityPreset } from '@/core/Quality';
+
+/**
+ * §4.4's decision, re-exported at the module a caller reaches for when it wants
+ * the benchmark (AC-12). The definition is in `core/Quality.ts`: the whole
+ * point of the split is that the rule reads — and unit-tests — without a GL
+ * context, and this module imports `three` on its first line.
+ */
+export {
+  FALLBACK_PRESET,
+  HIGH_MAX_MS,
+  LOW_CORES,
+  LOW_MEMORY_GB,
+  MEDIUM_MAX_MS,
+  presetFor,
+} from '@/core/Quality';
 
 /** Why the run ended (§4.5). Only `measured` actually measured the GPU. */
 export type AbortReason = 'measured' | 'slow-abort' | 'hidden-abort' | 'unsupported';
@@ -59,14 +76,8 @@ export interface BenchmarkDeps {
   cores?: number | undefined;
 }
 
-// --------------------------------------------------------------- §4.4 preset
+// ------------------------------------------------------------ §4.5 the bounds
 
-/** `m < 8 → high`, `m < 14 → medium`, else `low` (§4.4). */
-export const HIGH_MAX_MS = 8;
-export const MEDIUM_MAX_MS = 14;
-/** A device with this much memory, or this few cores, is capped at `medium`. */
-export const LOW_MEMORY_GB = 2;
-export const LOW_CORES = 4;
 /** §4.5: the two frame-delta thresholds and the wall-clock bound. */
 export const SLOW_FRAME_MS = 40;
 export const SLOW_FRAME_COUNT = 10;
@@ -76,32 +87,6 @@ export const RUN_BUDGET_MS = 2000;
 export const WARMUP_FRAMES = 30;
 export const MEASURED_FRAMES = 60;
 export const BENCHMARK_DPR = 1.5;
-/** §4.6: what a run that measured nothing usable falls back to. */
-export const FALLBACK_PRESET: QualityPreset = 'medium';
-
-/** A `navigator` hint is *known* only when it is a finite number above zero (15-g). */
-function known(value: number | undefined): value is number {
-  return typeof value === 'number' && Number.isFinite(value) && value > 0;
-}
-
-/** The caps only ever lower a result, so `low` stays `low` (AC-7). */
-function capAtMedium(preset: QualityPreset): QualityPreset {
-  return preset === 'high' ? 'medium' : preset;
-}
-
-/**
- * §4.4. `ms` is a median frame delta at dpr 1.5; the two caps are applied after
- * it and only downward. An unknown hint caps nothing — a Safari that reports no
- * `deviceMemory` is not a 2 GB phone, it is a browser that does not say
- * (15-g), and the measurement already knows what the device can do.
- */
-export function presetFor(ms: number, deviceMemory?: number, cores?: number): QualityPreset {
-  if (!Number.isFinite(ms) || ms <= 0) return FALLBACK_PRESET;
-  let preset: QualityPreset = ms < HIGH_MAX_MS ? 'high' : ms < MEDIUM_MAX_MS ? 'medium' : 'low';
-  if (known(deviceMemory) && deviceMemory <= LOW_MEMORY_GB) preset = capAtMedium(preset);
-  if (known(cores) && cores <= LOW_CORES) preset = capAtMedium(preset);
-  return preset;
-}
 
 /** §4.3. The upper middle element, so a single stall cannot drag the answer. */
 export function median(values: readonly number[]): number {

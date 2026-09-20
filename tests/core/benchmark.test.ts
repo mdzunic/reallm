@@ -6,13 +6,20 @@ import { describe, expect, it, vi } from 'vitest';
 import * as THREE from 'three';
 import {
   createStressScene,
+  FALLBACK_PRESET,
+  HIGH_MAX_MS,
+  LOW_CORES,
+  LOW_MEMORY_GB,
   MEASURED_FRAMES,
   median,
+  MEDIUM_MAX_MS,
+  presetFor,
   runBenchmark,
   WARMUP_FRAMES,
   type BenchmarkDeps,
   type BenchmarkOutcome,
 } from '@/core/Benchmark';
+import { FALLBACK_PRESET as PURE_FALLBACK_PRESET, presetFor as purePresetFor } from '@/core/Quality';
 
 /**
  * A frame source under the test's control. `advance(ms)` delivers one frame
@@ -95,6 +102,19 @@ async function drive(h: ReturnType<typeof harness>, promise: Promise<BenchmarkOu
   }
   return promise;
 }
+
+describe('the §4.4 preset decision (AC-12)', () => {
+  it('is re-exported from Benchmark, and is the one Quality defines', () => {
+    // The definition lives in `core/Quality.ts` so that a node test for it
+    // loads no GL module (D-4); this asserts the other half of the criterion —
+    // that reaching for it through the benchmark gets the same function, not a
+    // second copy that could drift from the one the run itself calls.
+    expect(presetFor).toBe(purePresetFor);
+    expect(presetFor(4)).toBe('high');
+    expect(FALLBACK_PRESET).toBe(PURE_FALLBACK_PRESET);
+    expect([HIGH_MAX_MS, MEDIUM_MAX_MS, LOW_MEMORY_GB, LOW_CORES]).toEqual([8, 14, 2, 4]);
+  });
+});
 
 describe('median (§4.3)', () => {
   it('takes the upper middle element', () => {

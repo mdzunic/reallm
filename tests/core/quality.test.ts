@@ -6,8 +6,12 @@
 // measurements all hang off them, so a retune has to be a deliberate edit here
 // and not a silent drift (AC-1, AC-2).
 import { describe, expect, it } from 'vitest';
-import { QUALITY, type QualityPreset, type QualitySettings } from '@/core/Quality';
-import { presetFor } from '@/core/Benchmark';
+// AC-12: `presetFor` is imported from `@/core/Quality`, not from
+// `@/core/Benchmark`, and deliberately — the module that measures the GPU
+// imports `three`, and pulling it in here would make the node test for a piece
+// of pure arithmetic load a renderer. The re-export the criterion also asks for
+// is asserted in `benchmark.test.ts`, which already needs `three` to run.
+import { presetFor, QUALITY, type QualityPreset, type QualitySettings } from '@/core/Quality';
 
 /** Reference §3, transcribed. Fifteen fields, three presets, no arithmetic. */
 const TABLE: Record<QualityPreset, QualitySettings> = {
@@ -134,6 +138,18 @@ describe('QUALITY (SPEC-015 §3)', () => {
 });
 
 describe('presetFor (SPEC-015 §4.4)', () => {
+  it('lives in a module that imports nothing at all (AC-12)', () => {
+    // The other half of "pure": `core/Quality.ts` has no imports, so nothing it
+    // decides can depend on a GL context, a DOM or a clock. Read as source
+    // rather than inferred, because a transitive import is invisible from
+    // inside the module object.
+    const sources = import.meta.glob<string>('../../src/core/Quality.ts', { query: '?raw', import: 'default', eager: true });
+    const source = Object.values(sources)[0] as string;
+    expect(source).toContain('export function presetFor');
+    expect(source.match(/^\s*(?:import|export)\s[^'"\n]*?\sfrom\s*['"]/gm) ?? []).toEqual([]);
+    expect(source.match(/^\s*import\s*['"]/gm) ?? []).toEqual([]);
+  });
+
   it('pins the six threshold cases (AC-6)', () => {
     expect(presetFor(0.1)).toBe('high');
     expect(presetFor(7.9)).toBe('high');
