@@ -1206,6 +1206,45 @@ normally rather than being labelled *blocked — vite-plugin-pwa*.
   `maxTouchPoints` heuristic actually reads. What it still cannot show is feel,
   thermal behaviour and a real GPU's frame cost.
 
+### Seven tests need the one-worker step
+
+Run at `--workers=4`, seven of the 315 fail; run alone, all seven pass. They are
+listed here by name because the last QA round spent its window rediscovering
+them and could not tell contention from a regression:
+
+| Test | Alone |
+|---|---|
+| `post-chain.spec.ts:46` — costs exactly 16 quads with FXAA and 15 with MSAA | 54.3 s ✅ |
+| `post-chain.spec.ts:95` — the chain survives a scene change without growing | 19.0 s ✅ |
+| `context-loss.spec.ts:40` — the post chain comes back with the context | 22.5 s ✅ |
+| `lifecycle.spec.ts:22` — becoming visible resumes without a catch-up burst | 5.5 s ✅ |
+| `SPEC-011.spec.ts:64` — enemies spawn and engage on Cinder-4 | 46.4 s ✅ |
+| `SPEC-012-missions.spec.ts:96` — all five Cinder-4 missions end to end | 3.0 min ✅ |
+| `surface-env.spec.ts:35` — the spawn-heavy medium frame stays in budget | 1.1 min ✅ |
+
+They share one shape, and it is not this spec's. Every one of them waits on
+*simulation* progress — frames advanced, enemies spawned, a mission run to its
+end, a post chain rebuilt across a scene change — while the wait itself is
+budgeted in wall-clock milliseconds. Four workers rasterising WebGL on one
+software rasteriser drive the fixed loop into its five-steps-per-frame ceiling
+(SPEC-002 §4.2), so in-game time advances several times slower than the clock
+the wait is counting, and the budget runs out before the game gets there. The
+same starvation is why `e2e/start.ts` now takes the cold-start budget for the
+scene-label and fade waits.
+
+**None of the seven is in a file this branch changed**, and none asserts
+anything SPEC-015 touches: the two post-chain cases and the context-loss case
+are SPEC-017's composer, `lifecycle` is SPEC-002's visibility handling,
+`SPEC-011` and `SPEC-012-missions` are spawn and mission progression, and
+`surface-env` is SPEC-030's per-planet draw budget. The draw and triangle counts
+in that last one are *inside* budget when it is allowed to finish — it is the
+wait that expires, not the budget that breaks.
+
+The merge gate's protocol already absorbs this: `--workers=4`, then
+`--last-failed --workers=4`, then `--last-failed --workers=1`, stopping at the
+first green step. Both one-worker re-runs above were that third step, taken
+verbatim, and both cleared everything.
+
 ### Checklist
 
 - [x] `npm run check` green — typecheck (`src` and `tests`), **77 vitest suites
@@ -1216,6 +1255,11 @@ normally rather than being labelled *blocked — vite-plugin-pwa*.
       real-touch cases are phone-only and skip on `chromium`; the no-touch
       overlay case, the off-Android boot-tap case and the two mouse-steer bank
       cases are desktop-only and skip on `mobile`
+- [x] **the whole suite green** (AC-64) — all **315 tests in 47 files** across
+      the three projects, run file by file at `--workers=4`: `chromium` 283,
+      `mobile` 24, `pwa` 8. See "Seven tests need the one-worker step" below for
+      the seven that only pass alone, and why that is the container rather than
+      the tree
 - [x] `e2e/boot-gate.spec.ts` green and **byte-for-byte identical to `main`**
       (AC-37) — 12 passed, including SPEC-002's own
       `expect(asked).toEqual(['wakeLock:screen'])` and
