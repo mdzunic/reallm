@@ -351,13 +351,26 @@ export class SettingsPanel {
     return h('div', { class: 'settings-row' }, h('span', {}, label), seg) as HTMLDivElement;
   }
 
-  /** AC-92: Android and desktop only — iOS reports `fullscreenEnabled` false. */
+  /**
+   * AC-92: Android and desktop only — iOS reports `fullscreenEnabled` false, and
+   * the row is not built at all there.
+   *
+   * SPEC-015 AC-37: this toggle is the **only** writer of `settings.fullscreen`.
+   * Entering fullscreen on the boot tap never writes it (AC-34), so the stored
+   * value stays what the player chose: `null` until they choose, then `true` or
+   * `false`. The box therefore shows the *setting*, falling back to whether the
+   * page happens to be fullscreen right now when nothing has been chosen —
+   * leaving fullscreen by a system gesture is not a preference (15-f, AC-36).
+   */
   #fullscreenRow(): HTMLLabelElement | null {
     if (!document.fullscreenEnabled) return null;
+    const s = this.#deps.settings;
     const box = testId(h('input', { type: 'checkbox', 'aria-label': 'Fullscreen' }), 'settings-fullscreen');
-    box.checked = document.fullscreenElement !== null;
+    box.checked = s.get().fullscreen ?? document.fullscreenElement !== null;
     box.addEventListener('change', () => {
-      if (box.checked) void document.documentElement.requestFullscreen().catch(() => (box.checked = false));
+      const wanted = box.checked;
+      s.set({ fullscreen: wanted });
+      if (wanted) void document.documentElement.requestFullscreen().catch(() => undefined);
       else void document.exitFullscreen().catch(() => undefined);
     });
     return h('label', { class: 'settings-row' }, h('span', {}, 'Fullscreen'), box);

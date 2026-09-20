@@ -136,6 +136,35 @@ test.describe('orientation (AC-30, AC-32, AC-33)', () => {
     expect(frameAfter).toBeGreaterThan(frameBefore);
   });
 
+  test('emits ui:orientation only when the orientation actually changed (AC-31, AC-32)', async ({ page }) => {
+    await page.setViewportSize(PHONE);
+    await page.addInitScript(() => {
+      Object.defineProperty(navigator, 'maxTouchPoints', { value: 5, configurable: true });
+    });
+    await start(page, '/?scene=surface&planet=cinder4');
+    const pause = page.locator('[data-testid="pause-menu"]');
+    await expect(pause).toBeHidden();
+
+    // A resize that stays landscape is not a rotation: nothing opens.
+    await page.setViewportSize({ width: 700, height: 340 });
+    await frames(page, 3);
+    await expect(pause).toBeHidden();
+    await page.setViewportSize({ width: 820, height: 380 });
+    await frames(page, 3);
+    await expect(pause).toBeHidden();
+
+    // The rotation opens it once, and a further portrait resize does not
+    // re-open it after the player dismisses it (AC-32: once per transition).
+    await page.setViewportSize(PHONE_PORTRAIT);
+    await frames(page, 3);
+    await expect(pause).toBeVisible();
+    await page.locator('[data-testid="pause-resume"]').click();
+    await expect(pause).toBeHidden();
+    await page.setViewportSize({ width: 340, height: 700 });
+    await frames(page, 3);
+    await expect(pause).toBeHidden();
+  });
+
   test('leaves the overlay down on a desktop-shaped client, however narrow', async ({ page }) => {
     await page.setViewportSize(PHONE_PORTRAIT);
     await start(page, '/?scene=surface&planet=cinder4');
@@ -148,6 +177,56 @@ test.describe('orientation (AC-30, AC-32, AC-33)', () => {
     await expect(page.locator('[data-testid="rotate-overlay"]')).toHaveCount(0);
     expect(await page.evaluate(() => window.__reallm.go('surface', { planet: 'cinder4', firstLanding: true }, { force: true }))).toBe(true);
     await expect(page.locator('[data-testid="rotate-overlay"]')).toHaveCount(1);
+  });
+});
+
+test.describe('fullscreen (AC-36, AC-37)', () => {
+  test('the toggle writes the setting, and the row is absent where the API is', async ({ page }) => {
+    await start(page);
+    await page.locator('[data-testid="menu-settings"]').click();
+    const box = page.locator('[data-testid="settings-fullscreen"]');
+    const enabled = await page.evaluate(() => document.fullscreenEnabled);
+    if (!enabled) {
+      // AC-37: iOS reports `fullscreenEnabled` false and the row is not built.
+      await expect(box).toHaveCount(0);
+      return;
+    }
+    const stored = async (): Promise<boolean | null | undefined> =>
+      page.evaluate(() => {
+        const raw = localStorage.getItem('reallm:settings');
+        return raw === null ? undefined : (JSON.parse(raw) as { fullscreen?: boolean | null }).fullscreen;
+      });
+    // Never chosen: the setting is absent or null, and the boot tap did not
+    // write it (AC-34).
+    expect(await stored() ?? null).toBeNull();
+    await box.setChecked(true);
+    expect(await stored()).toBe(true);
+    await box.setChecked(false);
+    expect(await stored()).toBe(false);
+  });
+
+  test('leaving fullscreen does not pause, and the next resize re-evaluates (AC-36, 15-f)', async ({ page }) => {
+    await start(page, '/?scene=surface&planet=cinder4');
+    const before = await page.evaluate(() => window.__reallm.stats());
+    expect(before.state).toBe('running');
+
+    // A system gesture or Escape leaves fullscreen; the browser reports it as
+    // `fullscreenchange` and nothing else. Nothing in the game listens for it,
+    // which is the point: exiting fullscreen is not a pause.
+    await page.evaluate(() => document.dispatchEvent(new Event('fullscreenchange')));
+    await frames(page, 3);
+    const after = await page.evaluate(() => window.__reallm.stats());
+    expect(after.state).toBe('running');
+    expect(after.frame).toBeGreaterThan(before.frame);
+    await expect(page.locator('[data-testid="pause-menu"]')).toBeHidden();
+
+    // …and the next resize re-measures, which is where the rotate and
+    // fullscreen state are re-evaluated.
+    await page.setViewportSize({ width: 900, height: 500 });
+    await frames(page, 3);
+    const resized = await page.evaluate(() => window.__reallm.stats());
+    expect(resized.width).toBe(900);
+    expect(resized.state).toBe('running');
   });
 });
 
