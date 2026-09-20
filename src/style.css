@@ -34,12 +34,24 @@ body {
 /* The DOM UI layer over the canvas. Gameplay pointers go to the canvas;
    interactive panels opt in with `pointer-events: auto` (SPEC-014).
    `touch-action: none` matches the canvas so a thumb dragged across a HUD
-   element never scrolls or double-tap-zooms the page (SPEC-005 AC-26). */
+   element never scrolls or double-tap-zooms the page (SPEC-005 AC-26).
+
+   SPEC-015 §6, AC-26: the layer is full-bleed — `inset: 0` puts it under the
+   notch and the home indicator — and the `env(safe-area-inset-*)` padding is
+   what keeps its contents out of both. It is the floor, not the only rule:
+   `#ui` is the containing block for the absolutely positioned layers inside
+   it, so the padding moves them off the cut-out, and each control anchored to
+   a viewport edge then clears that edge itself with `max(Npx, env(...))` so
+   it keeps a readable gutter on a device that reports no inset at all. Both
+   halves are required by AC-26 and both are asserted by
+   `tests/ui/viewport.test.ts`. */
 #ui {
   position: fixed;
   inset: 0;
   pointer-events: none;
   touch-action: none;
+  padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom)
+    env(safe-area-inset-left);
 }
 
 /* The version label. It opts into pointer events because five taps on it are

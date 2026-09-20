@@ -1,12 +1,14 @@
 // SPEC-015 §6 — the viewport contract, read off `src/style.css` and
 // `index.html` themselves.
 //
-// The safe-area rule (D-6) is the one worth a machine: `#ui` is a full-bleed
-// `inset: 0` layer, so a blanket `padding: env(...)` on it would move every
-// child twice. Instead each element anchored to a viewport edge clears that
-// edge itself, with `max(Npx, env(safe-area-inset-*))`. That is a property of
-// every rule in the sheet, and the only way to keep it true as rules are added
-// is to fail a build that adds one without it.
+// The safe area is two rules, and AC-26 requires both. `#ui` is a full-bleed
+// `inset: 0` layer that reaches under the notch, so it carries the blanket
+// `padding: env(safe-area-inset-*)` of §6 — the floor that catches anything
+// added to the layer later. On top of that, each element anchored to a viewport
+// edge clears that edge itself with `max(Npx, env(safe-area-inset-*))`, which is
+// what keeps a readable gutter on a device reporting no inset at all. The
+// per-element half is a property of every rule in the sheet, and the only way to
+// keep it true as rules are added is to fail a build that adds one without it.
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 
@@ -51,12 +53,25 @@ describe('the viewport shell (SPEC-015 §6)', () => {
     expect(game['touch-action']).toBe('none');
   });
 
-  it('keeps #ui a full-bleed, non-interactive, gesture-free layer (AC-25)', () => {
+  it('keeps #ui a full-bleed, non-interactive, gesture-free layer (AC-26)', () => {
     const ui = block('#ui');
     expect(ui['position']).toBe('fixed');
     expect(ui['inset']).toBe('0');
     expect(ui['pointer-events']).toBe('none');
     expect(ui['touch-action']).toBe('none');
+  });
+
+  it('pads #ui off the cut-out on all four sides, in CSS edge order (AC-26)', () => {
+    const padding = block('#ui')['padding'] ?? '';
+    // The four-value shorthand, in CSS's own top/right/bottom/left order — not
+    // a two-value form that would leave two edges reading another edge's inset.
+    expect(parts(padding)).toEqual([
+      'env(safe-area-inset-top)',
+      'env(safe-area-inset-right)',
+      'env(safe-area-inset-bottom)',
+      'env(safe-area-inset-left)',
+    ]);
+    for (const edge of EDGES) expect(padding).toContain(`env(safe-area-inset-${edge})`);
   });
 
   it('keeps html/body as shipped and adds overscroll containment (AC-26)', () => {
