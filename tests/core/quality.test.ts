@@ -146,8 +146,19 @@ describe('presetFor (SPEC-015 §4.4)', () => {
     const sources = import.meta.glob<string>('../../src/core/Quality.ts', { query: '?raw', import: 'default', eager: true });
     const source = Object.values(sources)[0] as string;
     expect(source).toContain('export function presetFor');
-    expect(source.match(/^\s*(?:import|export)\s[^'"\n]*?\sfrom\s*['"]/gm) ?? []).toEqual([]);
-    expect(source.match(/^\s*import\s*['"]/gm) ?? []).toEqual([]);
+    // Comments and strings out of the way first, so prose naming an import
+    // never matches — and so the scan below can be single-line without a
+    // multi-line `import {\n  A,\n} from 'x'` slipping past it.
+    const code = source
+      .replace(/\/\*[\s\S]*?\*\//g, '')
+      .replace(/^[ \t]*\/\/.*$/gm, '')
+      .replace(/\s+/g, ' ');
+    // Every form of a module specifier: `from '…'`, a bare `import '…'`, and
+    // the dynamic and CommonJS escapes a bundler would still honour.
+    expect(code.match(/\bfrom\s*['"]/g) ?? []).toEqual([]);
+    expect(code.match(/\bimport\s*['"]/g) ?? []).toEqual([]);
+    expect(code.match(/\bimport\s*\(/g) ?? []).toEqual([]);
+    expect(code.match(/\brequire\s*\(/g) ?? []).toEqual([]);
   });
 
   it('pins the six threshold cases (AC-6)', () => {
