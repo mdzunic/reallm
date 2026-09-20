@@ -264,3 +264,88 @@ test.describe('an old cached build and a newer save (AC-59, 15-d)', () => {
     expect(await page.locator('[data-testid="menu-update"]').count()).toBe(0);
   });
 });
+
+test.describe('story films through the worker (AC-63)', () => {
+  /**
+   * The claim has two halves and they are one design: a film is precached like
+   * any other asset, and the player fetches it *whole* and plays it from a Blob
+   * URL (SPEC-022 §4.2) rather than pointing a `<video>` at the url. A
+   * `<video src="…mp4">` is what emits `Range` requests, and a Workbox precache
+   * route answers those with the whole body or not at all — so the Blob path is
+   * not a style choice, it is what keeps the worker on plain 200s.
+   *
+   * Nothing here decodes a film: this container's software rasteriser dies on
+   * H.264 in a positioned layer (SPEC-022 §6). The fetch shape is the claim.
+   */
+  test('precaches a film and serves it whole, with no Range request anywhere', async ({ page, context }) => {
+    test.setTimeout(SW_TEST_TIMEOUT_MS);
+
+    // Every film request this page makes, with its method and Range header.
+    const filmRequests: Array<{ url: string; method: string; range: string | null }> = [];
+    page.on('request', (request) => {
+      if (!/\/films\/.+\.(mp4|webp)$/.test(request.url())) return;
+      filmRequests.push({
+        url: request.url(),
+        method: request.method(),
+        range: request.headers()['range'] ?? null,
+      });
+    });
+
+    await page.goto(gameUrl('/'));
+    await awaitGate(page);
+    expect(await workerState(page)).toBe('activated');
+
+    // Precached like any other asset: the film is in the worker's own cache,
+    // by url, before anything has asked to play it.
+    const cached = await page.evaluate(async () => {
+      const names = await caches.keys();
+      const urls: string[] = [];
+      for (const name of names) {
+        if (!name.includes('precache')) continue;
+        for (const request of await caches.open(name).then((c) => c.keys())) urls.push(request.url);
+      }
+      return urls.filter((url) => url.includes('/films/'));
+    });
+    expect(cached.some((url) => url.includes('prologue.mp4'))).toBe(true);
+
+    // `registerType: 'prompt'` means no `clientsClaim`, so the page that
+    // installed the worker is not controlled by it — the reload is what puts
+    // the worker in front of this document's fetches.
+    await page.reload();
+    await awaitGate(page);
+    expect(await page.evaluate(() => navigator.serviceWorker.controller !== null)).toBe(true);
+
+    // Offline, so the answer can only have come from the worker. This is the
+    // exact call `ui/FilmPlayer.ts` makes — `fetch(...)` then `.blob()` — and
+    // what it must get back is a plain, complete 200.
+    await context.setOffline(true);
+    const served = await page.evaluate(async () => {
+      const response = await fetch('assets/films/prologue.mp4');
+      const blob = await response.blob();
+      const objectUrl = URL.createObjectURL(blob);
+      const scheme = objectUrl.slice(0, 5);
+      URL.revokeObjectURL(objectUrl);
+      return {
+        status: response.status,
+        type: response.type,
+        partial: response.status === 206,
+        contentRange: response.headers.get('content-range'),
+        bytes: blob.size,
+        scheme,
+      };
+    });
+    expect(served.status).toBe(200);
+    expect(served.partial).toBe(false);
+    expect(served.contentRange).toBeNull();
+    // A whole film, not a first chunk of one.
+    expect(served.bytes).toBeGreaterThan(1_000_000);
+    // …and it becomes a Blob URL, which is what the `<video>` is ever given.
+    expect(served.scheme).toBe('blob:');
+    await context.setOffline(false);
+
+    // Nothing anywhere in the run asked for a byte range.
+    expect(filmRequests.length).toBeGreaterThan(0);
+    expect(filmRequests.filter((r) => r.range !== null)).toEqual([]);
+    expect(filmRequests.every((r) => r.method === 'GET')).toBe(true);
+  });
+});
