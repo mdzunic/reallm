@@ -349,3 +349,63 @@ test.describe('story films through the worker (AC-63)', () => {
     expect(filmRequests.every((r) => r.method === 'GET')).toBe(true);
   });
 });
+
+/**
+ * AC-47's first half — the cold first load — measured the way §5.1's other
+ * budget rows already are: CDP against the built app, with the one emulation
+ * knob the criterion names. The §5 rows above use
+ * `Emulation.setCPUThrottlingRate`; this one uses
+ * `Network.emulateNetworkConditions`, which is the only part of "on a 4G
+ * profile" a container can supply.
+ *
+ * Chrome DevTools' own **Fast 4G** preset, in the units CDP takes (bytes per
+ * second, milliseconds). Naming the preset rather than inventing a number is
+ * what makes the figure in docs/playtest-log.md §SPEC-015 reproducible.
+ */
+const FAST_4G = {
+  downloadThroughput: Math.floor((4 * 1024 * 1024) / 8), // 4 Mbit/s → 524 288 B/s
+  uploadThroughput: Math.floor((3 * 1024 * 1024) / 8), // 3 Mbit/s → 393 216 B/s
+  latency: 20,
+} as const;
+
+/** §5: "cold first load ≤ 8 s to tap-to-start". */
+const COLD_LOAD_BUDGET_MS = 8_000;
+
+test.describe('cold first load on a 4G profile (AC-47)', () => {
+  test('reaches TAP TO START inside the 8 s budget, with nothing cached', async ({ page }, testInfo) => {
+    // A *first* load: this context has never seen the app, so there is no
+    // worker, no precache and no HTTP cache — every byte below crosses the
+    // throttled link. (`page.goto` is the first navigation of a fresh context;
+    // the other cases in this file each get their own.)
+    expect(await page.evaluate(() => caches.keys().then((k) => k.length)).catch(() => 0)).toBe(0);
+
+    const client = await page.context().newCDPSession(page);
+    await client.send('Network.enable');
+    await client.send('Network.emulateNetworkConditions', { offline: false, ...FAST_4G });
+
+    await page.goto(gameUrl('/'));
+    // The gate is what "tap to start" means everywhere in this suite
+    // (e2e/start.ts): the element exists from the moment `main.ts` evaluates
+    // and becomes visible when the boot manifest is in.
+    await expect(page.locator('[data-testid="boot-start"]')).toBeVisible(COLD_START);
+
+    // Milliseconds since this document's navigation start — the load as the
+    // page itself timed it, without Playwright's goto round trip in it.
+    const { ms, bytes, requests } = await page.evaluate(() => {
+      const resources = performance.getEntriesByType('resource') as PerformanceResourceTiming[];
+      return {
+        ms: performance.now(),
+        bytes: resources.reduce((sum, entry) => sum + entry.transferSize, 0),
+        requests: resources.length,
+      };
+    });
+
+    const line = `cold 4G load: ${ms.toFixed(0)} ms to tap-to-start, ${(bytes / 1024).toFixed(1)} kB over ${requests} requests`;
+    testInfo.annotations.push({ type: 'measurement', description: line });
+    // Printed, not just annotated: this is the figure docs/playtest-log.md
+    // §SPEC-015 quotes, and the `list` reporter is where it is read from.
+    console.log(`[SPEC-015 AC-47] ${line}`);
+
+    expect(ms, line).toBeLessThanOrEqual(COLD_LOAD_BUDGET_MS);
+  });
+});

@@ -958,11 +958,30 @@ simulation:
 | Bundle, app (gz) | 189.55 kB (`index`) + 10.51 kB (css) + 2.20 kB (`workbox-window`) | ≤ 350 kB | ✅ |
 | Bundle, three (gz) | 177.23 kB | ≤ 200 kB | ✅ |
 | Precache set | **21.32 MB over 179 urls** — the build summary's own figure is 349 manifest *entries*, 21 788.33 KiB; the two count different things and the note below reconciles them | ≤ 25 MB | ✅ |
-| Cold first load, 4G | — | ≤ 8 s to "tap to start" | **owed on hardware** — the container has no throttled network path worth quoting |
+| Cold first load, 4G | **1.69 s** to "tap to start" (703.6 kB over 9 requests) | ≤ 8 s | ✅ — CDP `Network.emulateNetworkConditions` at Chrome's **Fast 4G** preset; the network half only, see the note below |
 
-Two notes on how those were taken, because the spec's wording assumes more than
-three.js offers:
+Three notes on how those were taken, because the spec's wording assumes more
+than three.js offers:
 
+- **Cold first load (AC-47).** `e2e/SPEC-015-pwa.spec.ts`, "cold first load on a
+  4G profile", is the measurement — committed rather than taken by hand, so the
+  figure is re-runnable: `npx playwright test --project=pwa -g "cold first load"`
+  prints it. A fresh context (no worker, no precache, no HTTP cache) loads the
+  **built** app from `vite preview` with CDP
+  `Network.emulateNetworkConditions` set to Chrome DevTools' **Fast 4G** preset
+  — 4 Mbit/s down, 3 Mbit/s up, 20 ms latency — and the number is
+  `performance.now()` read in the page when `[data-testid="boot-start"]` becomes
+  visible, which is what "tap to start" means everywhere in this suite
+  (`e2e/start.ts`). Three consecutive runs: **1 675 / 1 691 / 1 703 ms**, median
+  **1 691 ms** against a ≤ 8 s budget, moving 703.6 kB over 9 requests (the
+  preview server gzips, so that is the wire size, not the 1.3 MB on disk).
+
+  What this row is and is not: it holds the **network** half of AC-47 honestly —
+  the payload and the request count are the shipped build's, and the link is a
+  named public preset rather than an invented one. It does not model a phone's
+  **CPU**, so the parse-and-execute part of those 1.69 s is a container core's,
+  not a handset's. The margin is wide enough (4.7×) that this is recorded as met
+  in-container, and the handset row below still owes the real number.
 - **GPU texture bytes.** `gl.info.memory` reports texture *counts*, not bytes
   (26 / 26 / 39 / 56 above). The byte figures are therefore derived: every image
   resource the page downloaded, sized as RGBA8 with a full mip chain
@@ -1028,7 +1047,10 @@ Against a real `vite build` served by `vite preview` on 4173
 | An offline save (AC-57) | ✅ a new game created **while offline** — prologue as posters, marine, Confirm — writes `reallm:slot:0`; an offline reload reads it back field for field and the menu offers `Continue`. Only `meta.updatedAt` moves, because leaving the page is a `pagehide` autosave |
 | Newer save refused by the version check (AC-59, E9) | ✅ a `version: 99` slot reads as unusable, the menu offers `New Game` and no `Continue`, and no `Update` button exists with nothing waiting |
 
-The whole `pwa` project: **6 passed**, ≈ 11 s, serially, against `npm run build`
+| Story films served whole, never as a Range (AC-63) | ✅ the precache holds `prologue.mp4` by url; offline, `fetch()` + `.blob()` returns a plain 200 with no `content-range`, and no request in the run carried a `Range` header |
+| Cold first load on Fast 4G (AC-47) | ✅ **1.69 s** to `[data-testid="boot-start"]` of ≤ 8 s, 703.6 kB over 9 requests, nothing cached — the note under §5's table has the method |
+
+The whole `pwa` project: **8 passed**, ≈ 23 s, serially, against `npm run build`
 served by `vite preview` on 4173.
 
 One note on how the offline save was taken. A production build has no
@@ -1151,9 +1173,11 @@ cold load). The PWA rows map **AC-54 → AC-57**, **AC-56 → AC-58**,
       software-GL floor that will not.
 - [ ] **AC-61 → AC-44…AC-47 — the rest of §5.** Closed in-container: flight
       0.60 + 1.95 ms, station 1.35 ms and menu 1.50 ms render, all inside their
-      budgets, plus counts, texture bytes, heap and the gzipped bundle. Owed:
-      the same **per-scene ms rows on the handset**, and the **cold 4G first
-      load** ≤ 8 s to "tap to start".
+      budgets, plus counts, texture bytes, heap, the gzipped bundle and the
+      **cold 4G first load at 1.69 s of ≤ 8 s** (the Fast 4G note above). Owed:
+      the same **per-scene ms rows on the handset**, and the cold load **over a
+      real 4G radio on the reference phone**, where the parse-and-execute half
+      of that 1.69 s is a phone core's rather than a container core's.
 
 Not on this list, because it is not a measurement: the one thing this container
 cannot produce is the `prompt` update flow **end to end** — it needs two
@@ -1198,8 +1222,9 @@ normally rather than being labelled *blocked — vite-plugin-pwa*.
       `['wakeLock:screen', 'fullscreen']` on Android
 - [x] `e2e/stats-overlay.spec.ts` green with the overlay's closed row list grown
       to eighteen (AC-43, D-13) — 11 passed
-- [x] `npx playwright test --project=pwa` green — 7 passed against a real build
-      served by `vite preview`, including AC-63's whole-film fetch
+- [x] `npx playwright test --project=pwa` green — 8 passed against a real build
+      served by `vite preview`, including AC-63's whole-film fetch and AC-47's
+      throttled cold load
 - [x] `node scripts/assets/check.mjs` green — every asset row in
       `LICENSES.md`, every budget met, precache 21.32 MB of 25 MB
 - [x] the `chromium` project's dev-server flow unchanged: no worker is
@@ -1211,8 +1236,9 @@ normally rather than being labelled *blocked — vite-plugin-pwa*.
 - [x] **AC-43…AC-47 and AC-62's in-container half** closed on named evidence:
       the §5.1 proxy run (built app's counts, 4×-throttled Pixel 5 descriptor at
       `medium`, medians over 300 frames) for the budgets, the build report for
-      the bundle and precache rows, and the `pwa` project against
-      `vite preview` for the manifest, icons and service worker
+      the bundle and precache rows, `e2e/SPEC-015-pwa.spec.ts`'s Fast 4G cold
+      load (1.69 s of ≤ 8 s) for AC-47's first half, and the `pwa` project
+      against `vite preview` for the manifest, icons and service worker
 - [ ] the five hardware rows above — the physical iPhone 11 / Pixel 4a-class
       numbers and the two device installs — owed before the `m7` tag, each with
       its in-container substitute named
