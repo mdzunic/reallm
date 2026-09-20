@@ -10,6 +10,14 @@
 import { defineConfig, devices } from '@playwright/test';
 
 const port = Number(process.env.PORT ?? 5173);
+/**
+ * SPEC-015 D-13: the offline and installability cases need a *real build* — a
+ * dev server has no precache manifest and serves no service worker, so there is
+ * nothing to go offline with. They run in their own project against
+ * `vite preview` over `dist/`, on Vite's own preview port.
+ */
+const previewPort = Number(process.env.PREVIEW_PORT ?? 4173);
+const PWA_SPEC = /SPEC-015-pwa\.spec\.ts/;
 
 export default defineConfig({
   testDir: 'e2e',
@@ -29,11 +37,31 @@ export default defineConfig({
     baseURL: `http://localhost:${port}`,
     trace: 'retain-on-failure',
   },
-  projects: [{ name: 'chromium', use: { ...devices['Desktop Chrome'] } }],
-  webServer: {
-    command: 'npm run dev',
-    url: `http://localhost:${port}`,
-    reuseExistingServer: true,
-    timeout: 120_000,
-  },
+  projects: [
+    // The dev-server project, unchanged — it ignores the preview-only file.
+    { name: 'chromium', use: { ...devices['Desktop Chrome'] }, testIgnore: PWA_SPEC },
+    // SPEC-015 AC-56: the build-backed project, and only that one file.
+    {
+      name: 'pwa',
+      testMatch: PWA_SPEC,
+      use: { ...devices['Desktop Chrome'], baseURL: `http://localhost:${previewPort}` },
+    },
+  ],
+  webServer: [
+    {
+      command: 'npm run dev',
+      url: `http://localhost:${port}`,
+      reuseExistingServer: true,
+      timeout: 120_000,
+    },
+    {
+      // A real build, served the way a deploy would serve it. `--strictPort`
+      // so a preview already on 4173 is reused rather than silently answered
+      // from somewhere else.
+      command: `npm run build && npx vite preview --port ${previewPort} --strictPort`,
+      url: `http://localhost:${previewPort}`,
+      reuseExistingServer: true,
+      timeout: 300_000,
+    },
+  ],
 });
