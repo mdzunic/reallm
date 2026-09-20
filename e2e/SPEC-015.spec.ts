@@ -497,6 +497,61 @@ test.describe('the settings benchmark row (AC-20)', () => {
     expect(['low', 'medium', 'high']).toContain(await page.evaluate(() => window.__reallm.stats().preset));
   });
 
+  /**
+   * The other half of AC-15 — "reused on later boots" — which is the half a
+   * container *can* answer. The write half needs a run that measures, and this
+   * container never lands one: with no GPU, the stress scene's frame gaps read
+   * as a throttled tab (`hidden-abort`, 15-a) on every attempt, which is
+   * exactly the outcome the spec says must not be cached. So the write is
+   * pinned in node against a frame source that is a number
+   * (`tests/core/benchmark.test.ts`), and what is checked here is that a
+   * measurement already in `localStorage` is *believed*: no second run, and the
+   * session takes its preset from the stored record.
+   *
+   * `low` is the seeded preset because `DEFAULT_PRESET` is `medium`
+   * (src/core/Game.ts:160) — a session that fell back instead of reading the
+   * record would read `medium` here — and the seeded `12.3 ms/frame` is a
+   * number nothing else in the tree can produce.
+   */
+  test('reuses a stored measurement on a later boot instead of re-running (AC-15)', async ({ page }) => {
+    await page.addInitScript(() => {
+      localStorage.setItem(
+        'reallm:settings',
+        JSON.stringify({ quality: null, benchmark: { preset: 'low', msPerFrame: 12.3, at: 1_700_000_000_000 } }),
+      );
+    });
+
+    // No `?quality=`: the flag would win over both the stored preset and the
+    // benchmark, and prove nothing about either (src/core/Game.ts:274).
+    await page.goto('/?debug&films=off');
+    await passGate(page);
+    await expect(page.locator('[data-testid="scene-label"]')).toBeVisible();
+
+    // AC-15's gate: `settings.benchmark` is not null, so no run happens at all.
+    // The positive assertion first, so the negative one below cannot pass by
+    // reading an empty or absent log: `boot:started` and `scene:entered` both
+    // sit either side of where `benchmark:<reason>` is written
+    // (src/core/Game.ts:456, :517, :974), so a log holding those two and no
+    // benchmark line is a boot that skipped the run.
+    const events = page.locator('[data-testid="debug-events"]');
+    await expect(events).toContainText('boot:started');
+    await expect(events).toContainText('scene:entered');
+    await expect(events).not.toContainText(/benchmark:/);
+
+    // The stored preset is the one the session is running on…
+    expect(await page.evaluate(() => window.__reallm.stats().preset)).toBe('low');
+    // …the record survived the boot untouched, rather than being rewritten…
+    expect(
+      await page.evaluate(() => {
+        const raw = localStorage.getItem('reallm:settings');
+        return raw === null ? null : (JSON.parse(raw) as { benchmark: unknown }).benchmark;
+      }),
+    ).toEqual({ preset: 'low', msPerFrame: 12.3, at: 1_700_000_000_000 });
+    // …and the settings row reads it back, ms and all.
+    await page.locator('[data-testid="menu-settings"]').click();
+    await expect(page.locator('[data-testid="settings-benchmark"]')).toHaveText('Benchmark: low · 12.3 ms/frame');
+  });
+
   test('skips the benchmark entirely when ?quality= names a preset (AC-17)', async ({ page }) => {
     await page.goto(gameUrl('/'));
     await passGate(page);

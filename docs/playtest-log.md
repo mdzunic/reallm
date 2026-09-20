@@ -888,6 +888,7 @@ real-touch overlay case and the dpr clamp case skip on the desktop.
 | Texture cap (AC-8) | With `medium`'s `textureMaxSize` of 1024 in force, the flight scene's 2048 × 1536 sky and 2048 × 1024 planet/normal maps are drawn down to 1024 × 768 and 1024 × 512 before upload — observed in Chromium by recording every `drawImage` the resizer issues: `flight: 4 downscales`. The same cap is applied by `core/Assets.ts` on the way into the cache and by the flight scene's own loader (§8) |
 | Boot benchmark (AC-17, AC-19) | With no `?quality=` the run starts after the asset load and resolves before the first scene. On this container every frame gap exceeds 100 ms, so it reports `hidden-abort` — correctly **not** persisted (15-a, D-4) — and the session stays on `medium`. With `?quality=low` in the URL it does not run at all and `settings.benchmark` stays `null` |
 | Re-detect (AC-20) | The settings row reads `Benchmark: —` with nothing stored; pressing `Re-detect` runs the real benchmark, toasts `Detected quality: …` and leaves `settings.quality` at `null` |
+| A stored measurement is reused (AC-15) | With `{preset: 'low', msPerFrame: 12.3, at: …}` seeded into `reallm:settings` and no `?quality=`, the boot logs `boot:started` and `scene:entered` and **no `benchmark:` line at all** — the run is skipped, `stats().preset` is the stored `low` rather than `DEFAULT_PRESET`'s `medium`, the record comes through the boot byte for byte, and the settings row reads `Benchmark: low · 12.3 ms/frame`. This is the half of AC-15 a container can answer; the *write* half needs a run that measures, which this container never lands (the row above), so it is pinned in node against a frame source that is a number (`tests/core/benchmark.test.ts`) |
 | Reduce motion — the camera (AC-39) | Walking the surface with the setting on moves the camera by **exactly zero** on both counts (`camShake` and `camBob`, published on `debugInfo()`); a full-lock bank sweep in flight never rolls the horizon past **8°** while reaching 4°, so it is a clamp and not a still camera. The same walk bobs and the same sweep passes 8° with the setting off |
 | Reduce motion (AC-38, AC-40, AC-41) | Under `prefers-reduced-motion: reduce` the `reduce-motion` class is on `<html>` with nothing written to `settings` (the class is the contract, the panel toggle is the only writer); the low-hull HUD bar computes `animation-name: none` with a solid outline instead of the `hud-pulse` beat; the prologue plays as `data-mode="stills"` with one poster, **zero** `<video>` elements, and a caption that is whole on the frame it appears. The control run with the setting off gets `hud-pulse`, no class, and a caption that grows frame by frame |
 | iOS install explainer (AC-61) | On an iPhone Safari agent, a station save raises the toast *and* the `Share → Add to Home Screen` sheet; the sheet is dismissible, the loop keeps running behind it, and a second save inside the fortnight raises nothing (SPEC-007 §4.7's cadence) |
@@ -1251,13 +1252,13 @@ verbatim, and both cleared everything.
       / 1 350 tests**, production build
 - [x] **both Playwright projects green** (AC-64) —
       `npx playwright test e2e/SPEC-015.spec.ts --project=chromium --project=mobile`:
-      **42 passed, 6 skipped**. Each skip names itself: the dpr-clamp and
+      **44 passed, 6 skipped**. Each skip names itself: the dpr-clamp and
       real-touch cases are phone-only and skip on `chromium`; the no-touch
       overlay case, the off-Android boot-tap case and the two mouse-steer bank
       cases are desktop-only and skip on `mobile`
-- [x] **the whole suite green** (AC-64) — all **315 tests in 47 files** across
-      the three projects, run file by file at `--workers=4`: `chromium` 283,
-      `mobile` 24, `pwa` 8. See "Seven tests need the one-worker step" below for
+- [x] **the whole suite green** (AC-64) — all **317 tests in 47 files** across
+      the three projects, run file by file at `--workers=4`: `chromium` 284,
+      `mobile` 25, `pwa` 8. See "Seven tests need the one-worker step" below for
       the seven that only pass alone, and why that is the container rather than
       the tree
 - [x] `e2e/boot-gate.spec.ts` green and **byte-for-byte identical to `main`**
