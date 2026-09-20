@@ -1,8 +1,13 @@
-// The screen wake lock (SPEC-015 §7). One owner, scene-scoped: `surface` and
-// `flight` hold it while they are on screen and release it on the way out, so
-// a phone left on the station screen is free to sleep. The unconditional
-// boot-tap request that used to live in `core/Game.ts` is gone — "released
-// elsewhere" is now true by construction (D-7, AC-39).
+// The screen wake lock (SPEC-015 §7). Scene-scoped: `surface` and `flight`
+// hold it while they are on screen and release it on the way out, so a phone
+// left on the station screen is free to sleep (AC-35).
+//
+// It is the *second* acquisition, not the only one. SPEC-002 02-f's boot-tap
+// request stays exactly where it was (D-2): some browsers grant a screen lock
+// only from inside a user gesture, and the boot tap is the only gesture a
+// player makes before the first scene. `core/Game.ts` hands that first lock
+// back on `scene:entered`, so from the first scene onward this module is the
+// single owner and "released elsewhere" holds.
 //
 // A lock is lost whenever the page is hidden, so the hold re-requests on the
 // way back (AC-38). Everything the browser can say no to — a missing API, a

@@ -14,12 +14,14 @@ import { createNullInput, type Input } from '@/core/Input';
 import { PageLifecycle } from '@/core/Lifecycle';
 import { log } from '@/core/Log';
 import { runRenderPhase, type RenderPhasePorts } from '@/core/FrameSkip';
+import { RollingMedian } from '@/core/FrameTimers';
 import { DEFAULT_MAX_STEPS, Loop } from '@/core/Loop';
 import { createRenderer, type QualityPreset, type Renderer } from '@/core/Renderer';
 import { RngRoot } from '@/core/Rng';
 import { createNullSave, type SaveStore } from '@/core/Save';
 import type { EventBus, GameServices } from '@/core/Services';
 import { createSettings, type SettingsStore } from '@/core/Settings';
+import type { WakeLockApi, WakeLockSentinel } from '@/core/WakeLock';
 import {
   BOOT_SCENE,
   FATAL_TRANSITION_TEXT,
@@ -57,6 +59,14 @@ export interface StatsSnapshot {
   readonly droppedTime: number;
   /** `loop.stats.frame` — the e2e suites of §6.2 watch it grow, stop and freeze. */
   readonly frame: number;
+  /**
+   * SPEC-015 §5/D-13: the median time the last 60 frames spent in `update()`
+   * and in the scene draw, in milliseconds. §5 budgets both and neither was
+   * readable without a profiler; the debug overlay shows them, so the same
+   * rows can be read off a real phone with no tooling attached.
+   */
+  readonly updateMs: number;
+  readonly renderMs: number;
   readonly drawCalls: number;
   readonly triangles: number;
   readonly geometries: number;
@@ -212,6 +222,19 @@ export class Game implements GameServices {
   #stopped = false;
   #lastStatsMs = 0;
   #contextLostTimer: number | null = null;
+
+  /** SPEC-015 §5/D-13: 60-frame medians of the update and draw halves. */
+  readonly #updateMs = new RollingMedian();
+  readonly #renderMs = new RollingMedian();
+  /** Summed across every fixed step the frame in flight ran. */
+  #updateMsThisFrame = 0;
+
+  /**
+   * SPEC-002 02-f's boot-tap wake lock, held only until the first scene is on
+   * screen and the scene-scoped manager takes over (SPEC-015 §7, AC-37).
+   */
+  #bootWakeLock: WakeLockSentinel | null = null;
+  #bootWakeLockHandedOver = false;
 
   /** Preallocated: the traced frame writes into it and allocates nothing (§4.6.2). */
   readonly #phases: string[] = new Array<string>(PHASE_SLOTS).fill('');
@@ -376,6 +399,8 @@ export class Game implements GameServices {
       updates: loop.updatesLastFrame,
       droppedTime: loop.droppedTime,
       frame: loop.frame,
+      updateMs: this.#updateMs.value,
+      renderMs: this.#renderMs.value,
       drawCalls: info.render.calls,
       triangles: info.render.triangles,
       geometries: info.memory.geometries,
@@ -405,6 +430,9 @@ export class Game implements GameServices {
    * The gate is what unlocks audio, so nothing before it may start the loop.
    */
   async boot(): Promise<void> {
+    // SPEC-015 §3/§8, AC-8: the preset's texture cap is in force *before* the
+    // first upload, so nothing oversized ever reaches the GPU.
+    this.#assets.setMaxTextureSize(this.#renderer.quality.textureMaxSize);
     await this.#loadAssets();
     this.#assets.setMaxAnisotropy(this.#renderer.gl.capabilities.getMaxAnisotropy());
     this.#logEvent('boot:assets');
@@ -422,6 +450,7 @@ export class Game implements GameServices {
     } catch (error) {
       log.warn('boot', 'audio could not be unlocked', error);
     }
+    this.#requestWakeLock();
     this.#requestFullscreen();
     this.#bootUi.hide();
     this.#logEvent('boot:started');
@@ -517,6 +546,8 @@ export class Game implements GameServices {
     if (this.#stopped) return;
     this.#stopped = true;
     this.#loop.stop();
+    // A boot that never reached its first scene still owes the lock back.
+    this.#releaseBootWakeLock();
     for (const timer of this.#timers) clearTimeout(timer);
     this.#timers.clear();
     if (this.#tapTimer !== null) clearTimeout(this.#tapTimer);
@@ -574,15 +605,24 @@ export class Game implements GameServices {
   #frame(frameDt: number): void {
     this.#beginTrace();
     this.#stepsThisFrame = 0;
+    this.#updateMsThisFrame = 0;
     this.#phase(PHASE_INPUT_BEGIN);
     this.#input.beginFrame(frameDt);
   }
 
-  /** Phase 2, 0 to `maxSteps` times, always with `dt === step`. */
+  /**
+   * Phase 2, 0 to `maxSteps` times, always with `dt === step`.
+   *
+   * SPEC-015 §5: the time is summed across every step the frame ran, because
+   * the budget is "how much of this frame went to simulation" — a frame that
+   * catches up with three steps really did spend three steps' worth.
+   */
   #update(dt: number): void {
     this.#stepsThisFrame++;
     this.#phase(PHASE_UPDATE);
+    const startedAt = performance.now();
     this.#scenes.update(dt);
+    this.#updateMsThisFrame += performance.now() - startedAt;
   }
 
   /**
@@ -592,13 +632,17 @@ export class Game implements GameServices {
    */
   #render(_frameDt: number): void {
     runRenderPhase(this.#renderPorts, this.#renderer.quality.targetFps, this.#loop.stats.frame);
+    // §5/D-13: one sample a frame, after every step of it has run. A frame the
+    // skip dropped the draw from contributes no render sample — `renderMs` is
+    // the cost of drawing, not an average over frames that did not.
+    this.#updateMs.push(this.#updateMsThisFrame);
     this.#endTrace();
   }
 
   /** Built once: the frame phase allocates nothing (SPEC-001 §7). */
   readonly #renderPorts: RenderPhasePorts = {
     phase: (name) => this.#phase(name),
-    draw: () => this.#renderScene(),
+    draw: () => this.#drawTimed(),
     saveTick: () => this.#save.tick(),
     uiFlush: () => (this.#transitionUi as Flushable).flush?.(),
     refreshStats: () => this.#refreshStatsIfDue(),
@@ -606,6 +650,13 @@ export class Game implements GameServices {
     // carried to the next frame instead of being dropped (SPEC-005 §4.1).
     endFrame: () => this.#input.endFrame(this.#stepsThisFrame > 0),
   };
+
+  /** The draw, timed for §5's render budget (D-13). */
+  #drawTimed(): void {
+    const startedAt = performance.now();
+    this.#renderScene();
+    this.#renderMs.push(performance.now() - startedAt);
+  }
 
   #renderScene(): void {
     if (this.#renderer.contextLost) return;
@@ -737,6 +788,39 @@ export class Game implements GameServices {
         });
       }
     }
+  }
+
+  /**
+   * 02-f: a refusal is ignored and the game keeps running in the page.
+   *
+   * SPEC-015 §7 / D-2: this is the *gesture-bound* first acquisition and it
+   * stays — some browsers only grant a screen lock from inside a user gesture,
+   * and the boot tap is the only gesture a player makes before the first scene.
+   * The scene manager owns the lock from that first scene entry onward (AC-35),
+   * so the sentinel taken here is handed back as soon as a scene is on screen:
+   * `surface` and `flight` have already taken their own by then, and every
+   * other scene is meant to let the phone sleep.
+   */
+  #requestWakeLock(): void {
+    const wakeLock = (navigator as Navigator & { wakeLock?: WakeLockApi }).wakeLock;
+    if (!wakeLock) return;
+    wakeLock.request('screen').then(
+      (sentinel: WakeLockSentinel) => {
+        this.#bootWakeLock = sentinel;
+        // The first scene was entered while the request was in flight.
+        if (this.#bootWakeLockHandedOver) this.#releaseBootWakeLock();
+      },
+      (error: unknown) => log.warn('boot', 'the screen wake lock was refused', error),
+    );
+  }
+
+  /** Idempotent; safe before the request settles and safe when it never did. */
+  #releaseBootWakeLock(): void {
+    this.#bootWakeLockHandedOver = true;
+    const sentinel = this.#bootWakeLock;
+    if (sentinel === null) return;
+    this.#bootWakeLock = null;
+    void sentinel.release().catch((error: unknown) => log.warn('boot', 'the boot wake lock would not release', error));
   }
 
   /**
@@ -889,6 +973,10 @@ export class Game implements GameServices {
         () => {
           this.#logEvent('scene:entered');
           this.#renderErrorScene = null;
+          // SPEC-015 §7: the boot tap took the first, gesture-bound lock; from
+          // the first scene entry the scene manager owns the question, so the
+          // boot one is handed back (AC-35, AC-37, D-2).
+          this.#releaseBootWakeLock();
           this.#refreshStats(); // AC-33
         },
         this,
@@ -898,6 +986,9 @@ export class Game implements GameServices {
         'renderer:resized',
         () => {
           this.#logEvent('renderer:resized');
+          // SPEC-015 AC-8: a preset change moves the texture cap with it. A
+          // plain resize carries the same number, and setting it is a no-op.
+          this.#assets.setMaxTextureSize(this.#renderer.quality.textureMaxSize);
           this.#refreshStats();
         },
         this,

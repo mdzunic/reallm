@@ -314,6 +314,97 @@ test.describe('fullscreen (AC-36, AC-37)', () => {
   });
 });
 
+/**
+ * The boot tap's three platform requests, recorded and refused (AC-33, AC-34).
+ *
+ * `e2e/boot-gate.spec.ts` is SPEC-002's baseline and pins the two it already
+ * had — the wake lock on every client and fullscreen on Android — and AC-37
+ * requires it to stay green unchanged, so it stays exactly as SPEC-002 wrote
+ * it. What SPEC-015 *adds* to that tap is pinned here instead: the landscape
+ * lock that follows the fullscreen request, and the `settings.fullscreen:
+ * false` opt-out.
+ */
+async function stubPlatformRequests(page: Page): Promise<void> {
+  await page.addInitScript(() => {
+    const calls: string[] = [];
+    (window as unknown as { __asked: string[] }).__asked = calls;
+    Object.defineProperty(navigator, 'wakeLock', {
+      configurable: true,
+      value: {
+        request(type: string) {
+          calls.push(`wakeLock:${type}`);
+          return Promise.reject(new Error('denied by the test'));
+        },
+      },
+    });
+    // On the prototype: `document.documentElement` does not exist yet when an
+    // init script runs.
+    Element.prototype.requestFullscreen = function requestFullscreen(): Promise<void> {
+      calls.push('fullscreen');
+      return Promise.reject(new Error('denied by the test'));
+    };
+    Object.defineProperty(screen, 'orientation', {
+      configurable: true,
+      value: {
+        lock(to: string) {
+          calls.push(`lock:${to}`);
+          return Promise.reject(new Error('denied by the test'));
+        },
+      },
+    });
+  });
+}
+
+const asked = (page: Page): Promise<string[]> =>
+  page.evaluate(() => (window as unknown as { __asked: string[] }).__asked);
+
+test.describe('the boot tap on Android (AC-33, AC-34)', () => {
+  test.use({
+    userAgent:
+      'Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36',
+  });
+
+  test('asks for the lock, then fullscreen, then landscape — and swallows all three refusals', async ({ page }) => {
+    await stubPlatformRequests(page);
+    await page.goto(gameUrl('/'));
+    await passGate(page);
+    await expect(page.locator('[data-testid="scene-label"]')).toHaveText('menu');
+    // AC-34: the lock is attempted once the fullscreen request has *settled* —
+    // here by rejecting — and its own rejection is a warning and nothing else.
+    await expect.poll(() => asked(page)).toEqual(['wakeLock:screen', 'fullscreen', 'lock:landscape']);
+  });
+
+  test('skips fullscreen and the lock when the player turned fullscreen off', async ({ page }) => {
+    await stubPlatformRequests(page);
+    await page.addInitScript(() => {
+      // `settings.fullscreen` is tri-state: `null` is "never chosen" and is
+      // still attempted; only an explicit `false` opts out (AC-33).
+      localStorage.setItem('reallm:settings', JSON.stringify({ version: 1, fullscreen: false }));
+    });
+    await page.goto(gameUrl('/'));
+    await passGate(page);
+    await expect(page.locator('[data-testid="scene-label"]')).toHaveText('menu');
+    // The wake lock is not conditional on fullscreen — SPEC-002's boot-tap
+    // request stands on every client (AC-37) — but nothing else is asked for.
+    expect(await asked(page)).toEqual(['wakeLock:screen']);
+  });
+});
+
+test.describe('the boot tap on desktop (AC-34)', () => {
+  test('never attempts the landscape lock off Android', async ({ page, isMobile }) => {
+    // `mobile` is a Pixel 5 on the Android UA, where the lock is correct and the
+    // case above covers it.
+    test.skip(isMobile, 'the Android path is covered by the describe above');
+    await stubPlatformRequests(page);
+    await page.goto(gameUrl('/'));
+    await passGate(page);
+    await expect(page.locator('[data-testid="scene-label"]')).toHaveText('menu');
+    // Desktop gets neither fullscreen nor the orientation lock: both are the
+    // Android branch, and the rotate overlay is the answer everywhere else.
+    expect(await asked(page)).toEqual(['wakeLock:screen']);
+  });
+});
+
 test.describe('the update flow (AC-51, AC-52)', () => {
   test('banners the waiting build and offers Update on the menu and the station only', async ({ page }) => {
     await start(page);
