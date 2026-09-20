@@ -39,7 +39,14 @@ const PHONE_PORTRAIT = { width: 360, height: 740 };
  */
 async function leaveFullscreen(page: Page): Promise<void> {
   await page.evaluate(async () => {
-    if (document.fullscreenElement !== null) await document.exitFullscreen();
+    // A refusal is not a test failure: the only thing that matters downstream is
+    // that the window is resizable, and a client that was never fullscreen — or
+    // that left it between the read and the call — already is.
+    try {
+      if (document.fullscreenElement !== null) await document.exitFullscreen();
+    } catch {
+      /* not fullscreen after all */
+    }
   });
   await frames(page, 3);
 }
