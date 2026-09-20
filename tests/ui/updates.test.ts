@@ -4,6 +4,7 @@
 // nothing applies an update on its own (15-c).
 import { describe, expect, it, beforeEach } from 'vitest';
 import { applyUpdate, offerUpdate, resetUpdates, updateReady } from '@/core/Updates';
+import { INSTALL_STEPS } from '@/ui/InstallHint';
 import { stripComments } from '../architecture/source';
 
 describe('the update channel (SPEC-015 §10, D-10)', () => {
@@ -67,5 +68,30 @@ describe('who may offer an update (AC-52)', () => {
     expect(overlay).toContain("'app:update-ready'");
     // In `prompt` mode the waiting worker never takes over, so this never fires.
     expect(overlay).not.toContain('controllerchange');
+  });
+});
+
+describe('the iOS install explainer (AC-55)', () => {
+  it('names the two taps iOS needs, in order', () => {
+    // The toast of SPEC-007 §4.7 says *why* the game wants to be on the Home
+    // Screen; this says *how*, because no browser will do it on anyone's
+    // behalf and Safari offers no install prompt at all.
+    expect(INSTALL_STEPS).toHaveLength(3);
+    expect(INSTALL_STEPS[0]).toContain('Share');
+    expect(INSTALL_STEPS[1]).toContain('Add to Home Screen');
+  });
+
+  it('opens off the hint the save store raises, and nothing else', () => {
+    const RAW = import.meta.glob<string>('../../src/**/*.ts', { query: '?raw', import: 'default', eager: true });
+    const sources: Record<string, string> = Object.fromEntries(
+      Object.entries(RAW).map(([file, source]) => [file, stripComments(source)]),
+    );
+    const emitters = Object.entries(sources)
+      .filter(([, source]) => /emit\(\s*'app:install-hint'/.test(source))
+      .map(([file]) => file);
+    expect(emitters).toEqual(['../../src/core/Save.ts']);
+    // …and exactly one thing listens: the overlay the composition root mounts.
+    expect(sources['../../src/ui/InstallHint.ts']).toContain("'app:install-hint'");
+    expect(sources['../../src/main.ts']).toContain('new InstallHintOverlay(uiRoot, events)');
   });
 });

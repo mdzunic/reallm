@@ -1017,7 +1017,7 @@ buttons through the dev bridge.
 ### Checklist
 
 - [x] `npm run check` green — typecheck (`src` and `tests`), 76 vitest suites /
-      1 320 tests, production build
+      1 322 tests, production build
 - [x] `npx playwright test --project=pwa` green — 6 passed against a real build
       served by `vite preview`
 - [x] `node scripts/assets/check.mjs` green — every asset row in
