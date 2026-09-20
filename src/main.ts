@@ -11,6 +11,7 @@ import { log } from '@/core/Log';
 import { RngRoot } from '@/core/Rng';
 import { SaveStore } from '@/core/Save';
 import { createSettings } from '@/core/Settings';
+import { offerUpdate } from '@/core/Updates';
 import type { SceneId } from '@/core/StateMachine';
 import { ASSETS } from '@/data/assets';
 import { GAME_SCENES } from '@/scenes/index';
@@ -20,7 +21,7 @@ import { uiLayers } from '@/ui/dom';
 import { StatsOverlay } from '@/ui/StatsOverlay';
 import { TransitionOverlay } from '@/ui/TransitionOverlay';
 import { InstallHintOverlay } from '@/ui/InstallHint';
-import { UpdateOverlay } from '@/ui/UpdateOverlay';
+import { UPDATE_BANNER_TEXT, UpdateOverlay } from '@/ui/UpdateOverlay';
 
 const canvas = document.getElementById('game');
 if (!(canvas instanceof HTMLCanvasElement)) throw new Error('index.html must carry <canvas id="game">');
@@ -115,6 +116,28 @@ new UpdateOverlay(uiRoot, events);
 new InstallHintOverlay(uiRoot, events);
 
 /**
+ * SPEC-015 §10 / AC-51 — what happens when a new build has finished
+ * downloading and is waiting. It is *offered*, never applied: the banner says
+ * so, the menu and the station grow an `Update` button, and the page reloads
+ * only when the player presses one (15-c, AC-52).
+ *
+ * The registration itself is the plugin's `virtual:pwa-register`, which only
+ * resolves once `vite-plugin-pwa` is part of the build; with it in place this
+ * is the whole of the wiring:
+ *
+ *     import { registerSW } from 'virtual:pwa-register';
+ *     const updateSW = registerSW({ onNeedRefresh: () => offerAppUpdate(() => void updateSW(true)) });
+ *
+ * Until then nothing registers a worker, nothing calls this, and no Update
+ * button is built anywhere — which is the correct answer to "no update exists".
+ */
+export function offerAppUpdate(apply: () => void): void {
+  offerUpdate(apply);
+  events.emit('ui:toast', { text: UPDATE_BANNER_TEXT, kind: 'info', ms: 8000 });
+  events.emit('app:update-ready');
+}
+
+/**
  * The `ui:toast` bridge (SPEC-014 §4.6): systems that may not import `ui/` —
  * the save store's "Code is damaged", the economy's cargo warnings — emit the
  * event; the composition root is the one place that knows both halves. The
@@ -182,6 +205,12 @@ if (import.meta.env.DEV) {
     toast: (text: string, kind?: GameEvents['ui:toast']['kind'], ms?: number) =>
       events.emit('ui:toast', { text, kind, ms }),
     trace: () => game.trace(),
+    /**
+     * SPEC-015 AC-52: stands in for the service worker so the update flow is
+     * testable before `vite-plugin-pwa` is in the build — the banner, the menu
+     * and station buttons, and that pressing one calls back exactly once.
+     */
+    offerUpdate: (apply: () => void) => offerAppUpdate(apply),
     loseContext: (restoreAfterMs: number | null) => game.loseContext(restoreAfterMs),
     stop: () => game.stop(),
   };

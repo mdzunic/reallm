@@ -20,6 +20,8 @@ export interface DevBridge {
   /** SPEC-014 §4.6: raises a toast of any kind, for the toast-layer suite. */
   toast(text: string, kind?: string, ms?: number): void;
   trace(): string[];
+  /** SPEC-015 AC-52: stands in for a waiting service worker (dev builds only). */
+  offerUpdate(apply: () => void): void;
   loseContext(restoreAfterMs: number | null): void;
   stop(): void;
 }

@@ -230,6 +230,44 @@ test.describe('fullscreen (AC-36, AC-37)', () => {
   });
 });
 
+test.describe('the update flow (AC-51, AC-52)', () => {
+  test('banners the waiting build and offers Update on the menu and the station only', async ({ page }) => {
+    await start(page);
+    const banner = page.locator('[data-testid="update-overlay"]');
+    const menuUpdate = page.locator('[data-testid="menu-update"]');
+    // Nothing waiting: no banner, no button. That is the correct answer to
+    // "no update exists" (SPEC-014 AC-103).
+    await expect(banner).toBeHidden();
+    await expect(menuUpdate).toHaveCount(0);
+
+    // A build lands while the menu is open. Only `app:update-ready` says so —
+    // in `prompt` mode `controllerchange` never fires (D-10).
+    await page.evaluate(() => {
+      (window as unknown as { __applied: number }).__applied = 0;
+      window.__reallm.offerUpdate(() => {
+        (window as unknown as { __applied: number }).__applied++;
+      });
+    });
+    await expect(banner).toBeVisible();
+    await expect(banner).toHaveText('Update ready — restart at the station to update');
+    await expect(menuUpdate).toBeVisible();
+
+    // The station is the other screen that offers it (15-c).
+    expect(await page.evaluate(() => window.__reallm.go('station', {}, { force: true }))).toBe(true);
+    await expect(page.locator('[data-testid="station-tab-update"]')).toBeVisible();
+    // …and the gameplay scenes are not: a restart mid-run would lose progress.
+    expect(await page.evaluate(() => window.__reallm.go('surface', { planet: 'cinder4', firstLanding: true }, { force: true }))).toBe(true);
+    await expect(page.locator('[data-testid="station-tab-update"]')).toHaveCount(0);
+    await expect(page.locator('[data-testid="menu-update"]')).toHaveCount(0);
+
+    // Nothing reloaded on its own the whole time, and the button is what applies it.
+    expect(await page.evaluate(() => (window as unknown as { __applied: number }).__applied)).toBe(0);
+    expect(await page.evaluate(() => window.__reallm.go('menu', { reason: 'quit' }, { force: true }))).toBe(true);
+    await page.locator('[data-testid="menu-update"]').click();
+    expect(await page.evaluate(() => (window as unknown as { __applied: number }).__applied)).toBe(1);
+  });
+});
+
 test.describe('the settings benchmark row (AC-20)', () => {
   test('re-detects, applies the measured preset and shows the ms/frame', async ({ page }) => {
     // No `?quality=`, so the boot benchmark itself runs (AC-17, AC-19).
