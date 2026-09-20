@@ -823,3 +823,157 @@ profile) by `e2e/SPEC-031.spec.ts` §6.2 group 1.
 - **Blender item renders:** _not rendered_ — no Blender binary in the
   container, so every icon surface above shows the committed glyph fallback
   (AC-40's path), which is also what the fallback e2e pins.
+
+## SPEC-015 — mobile, performance, PWA (M7d)
+
+- **Build:** `spec/SPEC-015` — untagged
+- **Devices:**
+  - desktop — headless Chromium (Playwright, Linux container, **software GL**;
+    SwiftShader, no hardware rasteriser)
+  - phone, **emulated** — the same headless Chromium under Playwright's
+    `Pixel 5` descriptor at 740 × 360 landscape, `deviceScaleFactor` 2.75,
+    touch input. A device-shaped client, not a device.
+  - phone, **physical over LAN** — _not run: no handset and no LAN in the build
+    container_
+  - Android / iOS install — _not run: same reason_
+
+Every ms, fps and frame-cost number below is a **software-GL floor**, not a
+device number: this container rasterises the whole post chain on the CPU, which
+SPEC-017's entry already measures at 60–140 ms a frame on `medium`. Counts —
+draw calls, triangles, geometries, textures — are renderer-independent and are
+real numbers. The split is D-15's, and the rows a handset still owes are listed
+at the end.
+
+### What was walked, and how
+
+One scripted pass per scene on the emulated Pixel 5 at
+`?quality=medium&films=off&scene=<id>`, sampled after the scene settled (4 s on
+the hub screens, 8 s on surface and flight). `e2e/SPEC-015.spec.ts` re-walks the
+viewport shell, the keyboard reflow, the rotate overlay and its auto-pause, and
+the settings benchmark row as assertions; `e2e/SPEC-015-pwa.spec.ts` runs in the
+preview project against a real `vite build`.
+
+| Case | What was seen |
+|---|---|
+| `100dvh` canvas | The canvas box height equals `window.innerHeight` to the pixel, with `touch-action: none` on both `#game` and `#ui` and `overscroll-behavior: none` on the document |
+| Keyboard reflow (AC-29) | A CDP device-metrics override 140 px shorter shrinks the canvas by 140 px (±1); restoring the metrics puts it back to the original height and width within 1 px, with `scrollY` still 0 |
+| Rotate overlay (AC-30) | Down at 740 × 360 with touch points; up the moment the viewport turns to 360 × 740; still down at 360 × 740 on a client with `maxTouchPoints === 0` — a narrow desktop window is not a phone |
+| E22 auto-pause (AC-32, AC-33) | The rotation into portrait opens the pause menu once; returning to landscape hides the overlay and leaves the menu up, and `stats.frame` keeps climbing throughout |
+| Wake lock (AC-38, AC-40) | `NotAllowedError: Wake Lock permission request denied` on entering the surface, logged once by `[wakelock]` and swallowed; the scene enters and runs. The boot gate asks for nothing (AC-39) |
+| Boot benchmark (AC-17, AC-19) | With no `?quality=` the run starts after the asset load and resolves before the first scene. On this container every frame gap exceeds 100 ms, so it reports `hidden-abort` — correctly **not** persisted (15-a, D-4) — and the session stays on `medium`. With `?quality=low` in the URL it does not run at all and `settings.benchmark` stays `null` |
+| Re-detect (AC-20) | The settings row reads `Benchmark: —` with nothing stored; pressing `Re-detect` runs the real benchmark, toasts `Detected quality: …` and leaves `settings.quality` at `null` |
+
+### Measurements — emulated Pixel 5, `medium`, 740 × 360, dpr 1.50 of 2.75
+
+`medium` draws the post chain, so 16 of every draw-call figure is post
+(SPEC-017 §4.9); the scene share is the budget row.
+
+| Scene | Draws (total) | Scene share | Budget (scene) | Triangles | Budget | Geo | Tex |
+|---|---|---|---|---|---|---|---|
+| surface (cinder4) | 48 | 32 | ≤ 80 ✅ | 90,216 | ≤ 150 k ✅ | 42 | 35 |
+| flight (cinder4) | 28 | 12 | ≤ 40 ✅ | 18,210 | ≤ 80 k ✅ | 29 | 56 |
+| station | 23 | 7 | ≤ 30 ✅ | 8,208 | ≤ 60 k ✅ | 17 | 26 |
+| menu | 21 | 5 | ≤ 30 ✅ | 7,672 | ≤ 60 k ✅ | 14 | 26 |
+
+**Frame cost — software-GL floors, not device numbers.** The fixed loop is at
+its five-step ceiling in every row, which is the container rasterising, not the
+simulation:
+
+| Scene | fps | ms/frame | updates/frame | Budget (update + render, on the reference phone) |
+|---|---|---|---|---|
+| surface | 8.71 | 114.84 | 5 | ≤ 6 ms + ≤ 8 ms — **owed on hardware** |
+| flight | 10.69 | 93.53 | 5 | ≤ 3 ms + ≤ 6 ms — **owed on hardware** |
+| station | 11.71 | 85.41 | 5 | — + ≤ 4 ms — **owed on hardware** |
+| menu | 15.68 | 63.76 | 5 | — + ≤ 4 ms — **owed on hardware** |
+
+### The rest of the §5 table (AC-61)
+
+| Metric | Measured | Budget | Verdict |
+|---|---|---|---|
+| JS heap (`performance.memory.usedJSHeapSize`) | 33.5 MB, identical in all four scenes | ≤ 120 / 100 / 80 MB | ✅ — Chromium quantises this figure for privacy, so read it as "well under", not as four separate measurements |
+| GPU textures — surface / station / menu | 16.0 MB | ≤ 40 / 20 / 20 MB | ✅ |
+| GPU textures — flight | 56.7 MB | ≤ 30 MB | ❌ **P1 filed** (see below) |
+| Bundle, app (gz) | 187.56 kB (`index`) + 10.51 kB (css) | ≤ 350 kB | ✅ |
+| Bundle, three (gz) | 177.23 kB | ≤ 200 kB | ✅ |
+| Precache set | 21.27 MB over 176 precachable files in `dist/` | ≤ 25 MB | ✅ |
+| Cold first load, 4G | — | ≤ 8 s to "tap to start" | **owed on hardware** — the container has no throttled network path worth quoting |
+
+Two notes on how those were taken, because the spec's wording assumes more than
+three.js offers:
+
+- **GPU texture bytes.** `gl.info.memory` reports texture *counts*, not bytes
+  (26 / 26 / 35 / 56 above). The byte figures are therefore derived: every image
+  resource the page downloaded, sized as RGBA8 with a full mip chain
+  (`w · h · 4 · 4/3`). That is an **upper bound** — it counts each decoded image
+  once whether or not it is resident — and it is the honest number to hold the
+  budget against, so the flight row is filed rather than argued away.
+- **Precache summary (AC-54).** `vite build` prints the chunk table above;
+  `node scripts/assets/check.mjs` prints the precachable total and entry count
+  (`dist 21.27 MB (176 precachable files)`), which is what D-11 widened it to do.
+  The `vite-plugin-pwa` summary itself lands with the plugin (see
+  `/lane/needs-human.md` in the build lane and the implementation summary).
+
+**P1 — flight GPU textures 56.7 MB against a ≤ 30 MB budget.** The flight scene
+loads the 2048 × 1536 sky window plus the 2048 × 1024 planet equirect and its
+relief map (`scripts/assets/blender/flight.py`), and nothing downsamples them to
+the preset's `textureMaxSize` of 1024 before upload. The fix is a preset-aware
+downsample in `core/Assets.ts`, which is SPEC-018 §4.5's territory rather than
+this spec's — recorded here as the milestone P1 that SPEC-016 §6 asks for. It is
+a memory-budget row, not a correctness one: nothing in the container failed, and
+the surface, station and menu rows are comfortably inside their budgets.
+
+### PWA and installability (AC-58)
+
+Against a real `vite build` served by `vite preview` on 4173
+(`e2e/SPEC-015-pwa.spec.ts`, the `pwa` Playwright project):
+
+| Check | Result |
+|---|---|
+| Served manifest parses and carries every AC-49 field | ✅ `name`/`short_name` `ReaLLM`, `display` `standalone`, `orientation` `landscape`, `background_color` `#000000`, `theme_color` `#0b0f14`, `start_url`/`scope` `./`, two icons |
+| `icons/icon-192.png` and `icons/icon-512.png` | ✅ 200, IHDR reads 192 × 192 and 512 × 512 |
+| `icons/apple-touch-icon-180.png` | ✅ 200, IHDR reads 180 × 180 |
+| `start_url` inside `scope`, maskable icon ≥ 192, secure context | ✅ |
+| Service worker reaches `activated` | ⏸ skipped, with a named reason: no worker is registered until `vite-plugin-pwa` is configured (AC-48). The case turns on with the plugin and needs no edit |
+| Offline reload and an offline save (AC-56, AC-57) | ⏸ same, same reason |
+| Newer save refused by the version check (AC-59, E9) | ✅ a `version: 99` slot reads as unusable, the menu offers `New Game` and no `Continue`, and no `Update` button exists with nothing waiting |
+
+### Owed on hardware before `m7`
+
+Nothing here is dropped; each row names its in-container substitute above and
+the handset measurement it still needs. This list is the M7 checklist's input
+(AC-66).
+
+- [ ] **AC-29 — keyboard reflow.** Closed in-container on an emulated viewport
+      shrink (canvas follows and restores within 1 px, no scroll offset). Owed:
+      the same check with a **real iOS and a real Android on-screen keyboard**,
+      against the same ±1 px tolerance.
+- [ ] **AC-35 — orientation lock.** Closed in-container: the
+      `screen.orientation.lock('landscape')` call is made after the fullscreen
+      request settles and a rejection is swallowed and logged at warn, on the
+      emulated Android client. Owed: that a **real Android in fullscreen
+      actually holds the landscape lock** through a physical rotation.
+- [ ] **AC-58 — installability.** Closed in-container on the table above. Owed:
+      **one Android install** (prompt / "Add to Home screen", launches
+      standalone landscape) and **one iOS install** (Share → Add to Home Screen,
+      launches full-bleed with the apple-touch-icon).
+- [ ] **AC-60 — surface budgets.** Closed in-container for the counts: 32 scene
+      draws of ≤ 80 and 90,216 triangles of ≤ 150 k on the emulated Pixel 5 at
+      `medium`. Owed: **update ≤ 6 ms and render ≤ 8 ms on the reference phone**
+      (iPhone 11 / Pixel 4a class), against the 114.84 ms/frame software floor
+      recorded above.
+- [ ] **AC-61 — the rest of §5.** Closed in-container for counts, texture bytes,
+      heap and the gzipped bundle. Owed: the **per-scene ms rows** (flight
+      ≤ 3 + 6 ms, station/menu ≤ 4 ms render) and the **cold 4G first load**
+      ≤ 8 s to "tap to start".
+
+Also still owed with `vite-plugin-pwa`: the plugin's own precache summary line
+(AC-54's exact wording), the service-worker cases skipped above, and the
+`registerType: 'prompt'` update flow end to end.
+
+### Not run, and why
+
+- **Desktop hardware GPU:** _not run_ — no display and no GPU in the container;
+  every frame-cost number above is a software-rasterised floor.
+- **Physical phone over LAN:** _not run_ — no handset reaches the container. The
+  phone column is Chromium's `Pixel 5` emulation with real touch pointers, which
+  is what the rotate overlay's `maxTouchPoints` heuristic actually reads.
