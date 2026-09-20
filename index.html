@@ -15,11 +15,9 @@
     <!-- The same mark, rasterized: iOS ignores the manifest icons and reads
          this one for the Home Screen (SPEC-015 §10.1, AC-28). -->
     <link rel="apple-touch-icon" sizes="180x180" href="icons/apple-touch-icon-180.png" />
-    <!-- SPEC-015 §10 (AC-49). The fields are §10's manifest block verbatim.
-         It ships as a static file rather than as plugin output so `npm run dev`
-         serves the same one a build does, and `tests/ui/manifest.test.ts` can
-         read it off disk; the service worker precaches it (`includeAssets`). -->
-    <link rel="manifest" href="manifest.webmanifest" />
+    <!-- SPEC-015 §10 (AC-49): no `<link rel="manifest">` here. `vite-plugin-pwa`
+         owns the manifest — the `manifest` literal in `vite.config.ts` — and
+         injects the one link into the built `index.html` (D-10). -->
     <title>ReaLLM</title>
   </head>
   <body>
