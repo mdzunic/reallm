@@ -128,7 +128,18 @@ software rasteriser.
 Recorded here rather than silently decided, because the other reading is
 available in the text.
 
-## 5. SPEC-015 — P1: flight GPU textures over budget (2026-09-20)
+## 5. SPEC-015 — P1: flight GPU textures over budget (2026-09-20) — FIXED
+
+**Status:** **fixed on `spec/SPEC-015`, 2026-09-20**, in the same branch that
+filed it. AC-8's clamp is what closed it: `core/Assets.ts` downsamples on the
+way into the cache, re-clamps the cache when a preset change lowers the cap, and
+exports `clampTexture` for the flight scene's own loader, which deliberately
+does not go through the cache (SPEC-020 §4.8). At `medium` the three maps upload
+at 1024 × 768 and 1024 × 512 and the derived flight figure falls from **56.7 MB
+to 16.7 MB**, inside the ≤ 30 MB budget; `docs/playtest-log.md` §SPEC-015 has
+the measurement and the `drawImage` recording that shows the clamp really runs.
+The report below is left as it was filed, and everything it says in the present
+tense was true of the tree at that moment.
 
 **Severity:** P1 for the `m7` milestone (SPEC-016 §6), filed by SPEC-015 AC-61.
 
