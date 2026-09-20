@@ -89,6 +89,29 @@ export function canvasTextureResizer(image: unknown, width: number, height: numb
   return canvas;
 }
 
+/**
+ * Clamp one texture's image to `max`, in place. `true` when it was redrawn.
+ *
+ * Exported because not every upload goes through the cache: the flight scene
+ * owns its destination sky and planet maps and releases them on exit
+ * (SPEC-020 §4.8), so they never enter the registry — but SPEC-015 §8's texture
+ * budget is per *preset*, not per loader, and covers them all the same. A
+ * resize that cannot happen leaves the source alone and says so, because the
+ * cap is a budget, not a correctness rule.
+ */
+export function clampTexture(texture: Texture, max: number, resize: TextureResizer = canvasTextureResizer): boolean {
+  const image = texture.image as { width?: number; height?: number } | null | undefined;
+  const width = image?.width ?? 0;
+  const height = image?.height ?? 0;
+  const target = clampedTextureSize(width, height, max);
+  if (target.width === width && target.height === height) return false;
+  const scaled = resize(image, target.width, target.height);
+  if (scaled === null || scaled === undefined) return false;
+  texture.image = scaled;
+  texture.needsUpdate = true;
+  return true;
+}
+
 interface ModelEntry {
   readonly scene: Group;
   readonly animations: AnimationClip[];
@@ -275,19 +298,12 @@ export class Assets {
   /** Draw an oversized image down to the cap; a no-op when it already fits. */
   #clamp(texture: Texture, id?: string): void {
     const image = texture.image as { width?: number; height?: number } | null | undefined;
-    const width = image?.width ?? 0;
-    const height = image?.height ?? 0;
-    const target = clampedTextureSize(width, height, this.#maxTextureSize);
-    if (target.width === width && target.height === height) return;
-    const scaled = this.#resize()(image, target.width, target.height);
-    if (scaled === null || scaled === undefined) {
-      // No canvas to draw on. The source is left alone rather than corrupted:
-      // the cap is a budget, not a correctness rule (SPEC-015 §8).
-      log.warn('assets', `texture "${id ?? '?'}" could not be clamped to ${this.#maxTextureSize}px`);
-      return;
-    }
-    texture.image = scaled;
-    texture.needsUpdate = true;
+    const fits = clampedTextureSize(image?.width ?? 0, image?.height ?? 0, this.#maxTextureSize);
+    if (fits.width === (image?.width ?? 0) && fits.height === (image?.height ?? 0)) return;
+    if (clampTexture(texture, this.#maxTextureSize, this.#resize())) return;
+    // No canvas to draw on. The source is left alone rather than corrupted:
+    // the cap is a budget, not a correctness rule (SPEC-015 §8).
+    log.warn('assets', `texture "${id ?? '?'}" could not be clamped to ${this.#maxTextureSize}px`);
   }
 
   /** One failing item rejects the whole load, naming what could not be fetched (D-30). */

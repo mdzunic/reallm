@@ -11,6 +11,7 @@
 // persisted: every trip starts at `maxHull`, which is §4.6's "restored at the
 // station and on landing" with no bookkeeping to get wrong.
 import * as THREE from 'three';
+import { clampTexture } from '@/core/Assets';
 import type { EventBus, GameEvents } from '@/core/Events';
 import type { InputState } from '@/core/Input';
 import { log } from '@/core/Log';
@@ -377,6 +378,13 @@ export class FlightScene extends UiScene<'flight'> {
         const texture = await loader.loadAsync(url);
         texture.colorSpace = color ? THREE.SRGBColorSpace : THREE.NoColorSpace;
         texture.anisotropy = 4; // three clamps to what the GPU offers
+        // SPEC-015 §8, AC-8/AC-46: these maps never enter the asset cache — the
+        // scene owns and releases them — but the texture budget is per preset,
+        // not per loader. The destination sky is 2048 × 1536 and the planet
+        // equirect 2048 × 1024, which is the whole of the flight scene's GPU
+        // texture bill; uploading them at `medium`'s 1024 cap is what brings
+        // that row back inside its ≤ 30 MB budget.
+        clampTexture(texture, this.services.renderer.quality.textureMaxSize);
         if (!alive) {
           texture.dispose();
           return null;
