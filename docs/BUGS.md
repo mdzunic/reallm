@@ -127,3 +127,42 @@ software rasteriser.
 
 Recorded here rather than silently decided, because the other reading is
 available in the text.
+
+## 5. SPEC-015 — P1: flight GPU textures over budget (2026-09-20) — FIXED
+
+**Status:** **fixed on `spec/SPEC-015`, 2026-09-20**, in the same branch that
+filed it. AC-8's clamp is what closed it: `core/Assets.ts` downsamples on the
+way into the cache, re-clamps the cache when a preset change lowers the cap, and
+exports `clampTexture` for the flight scene's own loader, which deliberately
+does not go through the cache (SPEC-020 §4.8). At `medium` the three maps upload
+at 1024 × 768 and 1024 × 512 and the derived flight figure falls from **56.7 MB
+to 16.7 MB**, inside the ≤ 30 MB budget; `docs/playtest-log.md` §SPEC-015 has
+the measurement and the `drawImage` recording that shows the clamp really runs.
+The report below is left as it was filed, and everything it says in the present
+tense was true of the tree at that moment.
+
+**Severity:** P1 for the `m7` milestone (SPEC-016 §6), filed by SPEC-015 AC-61.
+
+**Measured:** on the emulated `Pixel 5` client at `medium`, the flight scene's
+decoded texture set is **56.7 MB** against the §5 budget of **≤ 30 MB**. The
+surface (16.0 MB of ≤ 40), station and menu (16.0 MB of ≤ 20) rows are inside
+theirs. Full numbers and how they were taken: `docs/playtest-log.md`, §SPEC-015.
+
+**Why.** Flight loads the 2048 × 1536 sky window plus the 2048 × 1024 planet
+equirect and its 1024 × 512 relief map (`scripts/assets/blender/flight.py`,
+`data/assets.ts` `PLANET_ART`), and nothing downsamples an uploaded texture to
+the preset's `textureMaxSize` — 1024 on `medium`, 512 on `low`. The row exists
+in `core/Quality.ts` and is read by nothing, which is the whole defect: SPEC-015
+§8 says "downsampled to the preset cap on `low`", and no code does it.
+
+**Note on the figure.** three's `gl.info.memory` reports texture *counts*, not
+bytes, so 56.7 MB is derived — every image the page downloaded, sized as RGBA8
+with a full mip chain. That is an upper bound. Even halved it clears the budget,
+which is why it is filed rather than argued away.
+
+**Fix, and whose.** A preset-aware downsample on upload in `core/Assets.ts`
+(SPEC-018 §4.5's territory, not SPEC-015's — this spec pins the `QUALITY` table
+and is forbidden from retuning it, D-1). Until then the flight scene is over its
+memory budget on a 2 GB phone, which SPEC-015 §8 flags as the iOS context-loss
+risk (E7): the symptom to watch for on hardware is a lost context on entering
+flight, not a visual fault.

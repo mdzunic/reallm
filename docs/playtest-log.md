@@ -823,3 +823,475 @@ profile) by `e2e/SPEC-031.spec.ts` §6.2 group 1.
 - **Blender item renders:** _not rendered_ — no Blender binary in the
   container, so every icon surface above shows the committed glyph fallback
   (AC-40's path), which is also what the fallback e2e pins.
+
+## SPEC-015 — mobile, performance, PWA (M7d)
+
+- **Build:** `spec/SPEC-015` — untagged
+- **Devices:**
+  - desktop — headless Chromium (Playwright, Linux container, **software GL**;
+    SwiftShader, no hardware rasteriser)
+  - phone, **emulated** — the same headless Chromium under Playwright's
+    `Pixel 5` descriptor: the `mobile` project of `playwright.config.ts`
+    (AC-64/D-8), a 393 × 851 screen at `deviceScaleFactor` 2.75 with real touch
+    points and the Android user agent, rotated to 740 × 360 landscape by the
+    cases that need it. A device-shaped client, not a device.
+  - phone, **physical over LAN** — _not run: no handset and no LAN in the build
+    container_
+  - Android / iOS install — _not run: same reason_
+
+Every ms, fps and frame-cost number below is a **software-GL floor**, not a
+device number: this container rasterises the whole post chain on the CPU, which
+SPEC-017's entry already measures at 60–140 ms a frame on `medium`. Counts —
+draw calls, triangles, geometries, textures — are renderer-independent and are
+real numbers. The split is D-15's, and the rows a handset still owes are listed
+at the end.
+
+### What was walked, and how
+
+The budget numbers below are **not** from the assertion suite: they are one
+scripted Playwright pass per scene on the same `Pixel 5` descriptor at 740 × 360
+landscape, opened at `?quality=medium&films=off&debug&scene=<id>`, sampled after
+the scene settled (4 s on the hub screens, 8–9 s on surface and flight), and
+reported as the median of 300 consecutive frames — §5.1's run, with its **4× CPU
+throttling** (CDP `Emulation.setCPUThrottlingRate`) applied.
+
+The pass reads `window.__reallm.stats()`, which is a dev-only bridge
+(`src/main.ts`, `import.meta.env.DEV`), so it runs against the dev server rather
+than against `vite preview`. The rows a *build* owns — the precache set, the
+gzipped bundle, the service worker, offline and installability — are all taken
+against `npm run build` served by `vite preview`, in the `pwa` project below.
+
+`e2e/SPEC-015.spec.ts` re-walks the viewport shell, the keyboard reflow, the
+rotate overlay and its auto-pause, and the settings benchmark row as assertions,
+in **both** the `chromium` and the `mobile` project (§12);
+`e2e/SPEC-015-pwa.spec.ts` runs in the preview project against a real
+`vite build`.
+
+The two projects are not the same run, which is the point of having both. The
+desktop one reports `navigator.maxTouchPoints === 0` however narrow its window
+is, so it reaches D-5's heuristic only through an init script that rewrites that
+one property; the phone one reaches it with nothing faked, and is also the only
+run that meets AC-33's boot-tap fullscreen (Android user agent) and AC-2's dpr
+clamp (2.75 down to the preset's `maxDpr`). Three cases only make sense on one
+side and say so: the no-touch overlay case skips on the phone, and the
+real-touch overlay case and the dpr clamp case skip on the desktop.
+
+| Case | What was seen |
+|---|---|
+| `100dvh` canvas | The canvas box height equals `window.innerHeight` to the pixel, with `touch-action: none` on both `#game` and `#ui` and `overscroll-behavior: none` on the document |
+| Keyboard reflow (AC-29) | A CDP device-metrics override 140 px shorter shrinks the canvas by 140 px (±1); restoring the metrics puts it back to the original height and width within 1 px, with `scrollY` still 0 |
+| Rotate overlay (AC-30) | Down at 740 × 360 with touch points; up the moment the viewport turns to 360 × 740; still down at 360 × 740 on a client with `maxTouchPoints === 0` — a narrow desktop window is not a phone. On the `mobile` project the same overlay comes up on the descriptor's own 393 × 851 portrait with nothing monkeypatched, which is the first time both halves of D-5's pair are real inputs |
+| Fullscreen on Android (AC-33, AC-34) | The `mobile` project's boot tap enters fullscreen, which is what makes its window refuse a resize — the orientation cases leave it first. `settings.fullscreen` is still `null` afterwards: entering never writes it, and the settings toggle shows the live state until the player chooses |
+| dpr clamp (AC-2) | `deviceDpr` 2.75, `dpr` 1.00 on `low` — the renderer sizes its backing store at `min(devicePixelRatio, maxDpr)` rather than at 7.6× the pixels |
+| E22 auto-pause (AC-32, AC-33) | The rotation into portrait opens the pause menu once; returning to landscape hides the overlay and leaves the menu up, and `stats.frame` keeps climbing throughout |
+| Wake lock (AC-35, AC-37) | `NotAllowedError: Wake Lock permission request denied` on entering the surface, logged once by `[wakelock]` and swallowed; the scene enters and runs. Two acquisitions, as D-2 requires: SPEC-002's gesture-bound request on the boot tap (`e2e/boot-gate.spec.ts`, unchanged from `main`, asserts `['wakeLock:screen']`), handed back on the first `scene:entered`, and the scene-scoped hold from then on |
+| Texture cap (AC-8) | With `medium`'s `textureMaxSize` of 1024 in force, the flight scene's 2048 × 1536 sky and 2048 × 1024 planet/normal maps are drawn down to 1024 × 768 and 1024 × 512 before upload — observed in Chromium by recording every `drawImage` the resizer issues: `flight: 4 downscales`. The same cap is applied by `core/Assets.ts` on the way into the cache and by the flight scene's own loader (§8) |
+| Boot benchmark (AC-17, AC-19) | With no `?quality=` the run starts after the asset load and resolves before the first scene. On this container every frame gap exceeds 100 ms, so it reports `hidden-abort` — correctly **not** persisted (15-a, D-4) — and the session stays on `medium`. With `?quality=low` in the URL it does not run at all and `settings.benchmark` stays `null` |
+| Re-detect (AC-20) | The settings row reads `Benchmark: —` with nothing stored; pressing `Re-detect` runs the real benchmark, toasts `Detected quality: …` and leaves `settings.quality` at `null` |
+| A stored measurement is reused (AC-15) | With `{preset: 'low', msPerFrame: 12.3, at: …}` seeded into `reallm:settings` and no `?quality=`, the boot logs `boot:started` and `scene:entered` and **no `benchmark:` line at all** — the run is skipped, `stats().preset` is the stored `low` rather than `DEFAULT_PRESET`'s `medium`, the record comes through the boot byte for byte, and the settings row reads `Benchmark: low · 12.3 ms/frame`. This is the half of AC-15 a container can answer; the *write* half needs a run that measures, which this container never lands (the row above), so it is pinned in node against a frame source that is a number (`tests/core/benchmark.test.ts`) |
+| Reduce motion — the camera (AC-39) | Walking the surface with the setting on moves the camera by **exactly zero** on both counts (`camShake` and `camBob`, published on `debugInfo()`); a full-lock bank sweep in flight never rolls the horizon past **8°** while reaching 4°, so it is a clamp and not a still camera. The same walk bobs and the same sweep passes 8° with the setting off |
+| Reduce motion (AC-38, AC-40, AC-41) | Under `prefers-reduced-motion: reduce` the `reduce-motion` class is on `<html>` with nothing written to `settings` (the class is the contract, the panel toggle is the only writer); the low-hull HUD bar computes `animation-name: none` with a solid outline instead of the `hud-pulse` beat; the prologue plays as `data-mode="stills"` with one poster, **zero** `<video>` elements, and a caption that is whole on the frame it appears. The control run with the setting off gets `hud-pulse`, no class, and a caption that grows frame by frame |
+| iOS install explainer (AC-61) | On an iPhone Safari agent, a station save raises the toast *and* the `Share → Add to Home Screen` sheet; the sheet is dismissible, the loop keeps running behind it, and a second save inside the fortnight raises nothing (SPEC-007 §4.7's cadence) |
+| Story films through the worker (AC-63) | Against the built app: `prologue.mp4` is in the worker's own precache by url; with the context **offline**, the same `fetch()` the film player makes returns **200** (not 206), with no `content-range` and the whole 3 MB, and the blob it yields becomes a `blob:` URL. No film request in the run carried a `Range` header — which is the point: a `<video src="…mp4">` is what would emit one, and the Blob path is what keeps the worker on plain 200s |
+
+### Measurements — emulated Pixel 5, `medium`, 740 × 360, dpr 1.50 of 2.75
+
+`medium` draws the post chain, so 16 of every draw-call figure is post
+(SPEC-017 §4.9); the scene share is the budget row.
+
+All four rows are one pass of §5.1 taken together: the same client, the same
+build, **4× CPU throttling** through CDP `Emulation.setCPUThrottlingRate` as
+§5.1 prescribes, medians over 300 frames of the stats bridge.
+
+| Scene | Draws (total) | Scene share | Budget (scene) | Triangles | Budget | Geo | Tex |
+|---|---|---|---|---|---|---|---|
+| surface (cinder4) | 50 | 34 | ≤ 80 ✅ | 92,212 | ≤ 150 k ✅ | 45 | 39 |
+| flight (cinder4) | 28 | 12 | ≤ 40 ✅ | 18,210 | ≤ 80 k ✅ | 29 | 56 |
+| station | 23 | 7 | ≤ 30 ✅ | 8,208 | ≤ 60 k ✅ | 17 | 26 |
+| menu | 21 | 5 | ≤ 30 ✅ | 7,672 | ≤ 60 k ✅ | 14 | 26 |
+
+**Update and render (AC-43, D-13).** `StatsSnapshot.updateMs` and `renderMs` are
+60-frame medians of the time the frame spent in `scenes.update()` and in
+`scenes.render()`, and the debug overlay shows them as its `update` and `render`
+rows — which is how these same numbers are read off a real handset later, with
+no profiler attached. Both are **CPU** times, which is exactly what §5's table
+budgets ("Update (sim)", "Render (CPU)"): a `render()` call returns as soon as
+the commands are submitted, so the software rasteriser's cost lands on the frame
+interval below and not on this row.
+
+| Scene | update (median) | Budget | render (median) | Budget |
+|---|---|---|---|---|
+| surface | **0.90 ms** | ≤ 6 ms ✅ | **3.40 ms** | ≤ 8 ms ✅ |
+| flight | **0.60 ms** | ≤ 3 ms ✅ | **1.95 ms** | ≤ 6 ms ✅ |
+| station | **0.00 ms** | — | **1.35 ms** | ≤ 4 ms ✅ |
+| menu | **0.00 ms** | — | **1.50 ms** | ≤ 4 ms ✅ |
+
+Read the two rows differently. **`updateMs` is renderer-independent** — the
+simulation is pure TypeScript over `src/systems/` and `src/entities/`, which
+import no `three` at all (SPEC-001 §4) — so a 4×-throttled container core is a
+defensible stand-in for a phone core and the `≤ 6 ms` / `≤ 3 ms` rows are close
+to a real answer. **`renderMs` is not**: it is the CPU half of a draw whose GPU
+half this container has no GPU for, so it is a floor. Both still owe the handset
+measurement below. Chromium clamps `performance.now()` to 100 µs in a
+non-isolated context, which is why the station and menu update rows read a flat
+`0.00` rather than a small number — five fixed steps over an idle hub scene cost
+less than one tick of the clock available to measure them.
+
+**Frame cost — software-GL floors, not device numbers.** The fixed loop is at
+its five-step ceiling in every row, which is the container rasterising, not the
+simulation:
+
+| Scene | fps | ms/frame | updates/frame |
+|---|---|---|---|
+| surface | 7.37 | 135.60 | 5 |
+| flight | 7.50 | 133.35 | 5 |
+| station | 11.26 | 88.81 | 5 |
+| menu | 14.17 | 70.57 | 4 |
+
+### The rest of the §5 table (AC-61)
+
+| Metric | Measured | Budget | Verdict |
+|---|---|---|---|
+| JS heap (`performance.memory.usedJSHeapSize`) | surface 51.0 MB, flight 42.6 MB, station 31.6 MB, menu 31.6 MB | ≤ 120 / 100 / 80 MB | ✅ — Chromium quantises this figure for privacy, so read each as "well under" rather than to the megabyte |
+| GPU textures — surface | 9.4 MB (21.4 MB unclamped) | ≤ 40 MB | ✅ |
+| GPU textures — flight | 16.7 MB (56.7 MB unclamped) | ≤ 30 MB | ✅ — was the P1 below; AC-8's clamp is what closes it |
+| GPU textures — station / menu | 4.0 MB (16.0 MB unclamped) | ≤ 20 MB | ✅ |
+| Bundle, app (gz) | 189.55 kB (`index`) + 10.51 kB (css) + 2.20 kB (`workbox-window`) | ≤ 350 kB | ✅ |
+| Bundle, three (gz) | 177.23 kB | ≤ 200 kB | ✅ |
+| Precache set | **21.32 MB over 179 urls** — the build summary's own figure is 349 manifest *entries*, 21 788.33 KiB; the two count different things and the note below reconciles them | ≤ 25 MB | ✅ |
+| Cold first load, 4G | **1.69 s** to "tap to start" (703.6 kB over 9 requests) | ≤ 8 s | ✅ — CDP `Network.emulateNetworkConditions` at Chrome's **Fast 4G** preset; the network half only, see the note below |
+
+Three notes on how those were taken, because the spec's wording assumes more
+than three.js offers:
+
+- **Cold first load (AC-47).** `e2e/SPEC-015-pwa.spec.ts`, "cold first load on a
+  4G profile", is the measurement — committed rather than taken by hand, so the
+  figure is re-runnable: `npx playwright test --project=pwa -g "cold first load"`
+  prints it. A fresh context (no worker, no precache, no HTTP cache) loads the
+  **built** app from `vite preview` with CDP
+  `Network.emulateNetworkConditions` set to Chrome DevTools' **Fast 4G** preset
+  — 4 Mbit/s down, 3 Mbit/s up, 20 ms latency — and the number is
+  `performance.now()` read in the page when `[data-testid="boot-start"]` becomes
+  visible, which is what "tap to start" means everywhere in this suite
+  (`e2e/start.ts`). Three consecutive runs: **1 675 / 1 691 / 1 703 ms**, median
+  **1 691 ms** against a ≤ 8 s budget, moving 703.6 kB over 9 requests (the
+  preview server gzips, so that is the wire size, not the 1.3 MB on disk).
+
+  What this row is and is not: it holds the **network** half of AC-47 honestly —
+  the payload and the request count are the shipped build's, and the link is a
+  named public preset rather than an invented one. It does not model a phone's
+  **CPU**, so the parse-and-execute part of those 1.69 s is a container core's,
+  not a handset's. The margin is wide enough (4.7×) that this is recorded as met
+  in-container, and the handset row below still owes the real number.
+- **GPU texture bytes.** `gl.info.memory` reports texture *counts*, not bytes
+  (26 / 26 / 39 / 56 above). The byte figures are therefore derived: every image
+  resource the page downloaded, sized as RGBA8 with a full mip chain
+  (`w · h · 4 · 4/3`). That is an **upper bound** — it counts each decoded image
+  once whether or not it is resident — and it is the honest number to hold the
+  budget against. The "unclamped" column is that sum at each image's *source*
+  size, which is what this row measured before AC-8 existed; the budget column
+  is the same sum at the size actually uploaded under `medium`'s
+  `textureMaxSize` of 1024, and the `drawImage` recording in the walk table
+  above is the evidence that the clamp really runs rather than being assumed.
+- **Precache summary (AC-57).** `vite build` prints it, from `vite-plugin-pwa`:
+
+  ```
+  PWA v1.3.0
+  mode      generateSW
+  precache  349 entries (21790.76 KiB)
+  files generated
+    dist/sw.js
+    dist/workbox-2fbc6a65.js
+  ```
+
+  `node scripts/assets/check.mjs` prints the same set counted its own way —
+  `dist 21.32 MB (179 precachable files)` — and fails over 25 MB, which is what
+  D-11 widened it to do.
+
+  The two counts are both right and they are counting different things. The
+  plugin's `349` is manifest *entries*, and the ~170 files under `public/assets/`
+  are entered twice, because `includeAssets` and `workbox.globPatterns` both
+  match them. What the worker actually stores is the 179 distinct urls the
+  checker counts, confirmed in Chromium: one `workbox-precache-v2` cache
+  holding **179 entries**. The size the plugin prints is of the distinct set,
+  which is why it agrees with the checker and not with its own entry count.
+
+**P1 — flight GPU textures 56.7 MB against a ≤ 30 MB budget — closed.** The
+flight scene loads the 2048 × 1536 sky window plus the 2048 × 1024 planet
+equirect and its relief map (`scripts/assets/blender/flight.py`), and nothing
+downsampled them to the preset's `textureMaxSize` before upload — because
+nothing in `src/` read `textureMaxSize` at all, which is the whole of what AC-8
+asks for and what this round added.
+
+`core/Assets.ts` now clamps on the way into the cache, and exports
+`clampTexture` for the one loader that deliberately does not go through the
+cache: the destination maps are owned and released by the flight scene
+(SPEC-020 §4.8), and §8's budget is per preset, not per loader. At `medium` the
+three maps upload at 1024 × 768 and 1024 × 512, and the derived flight figure
+falls from 56.7 MB to **16.7 MB**, inside the ≤ 30 MB budget. The art files are
+unchanged: a `high` device still gets them at 2048.
+
+### PWA and installability (AC-58)
+
+Against a real `vite build` served by `vite preview` on 4173
+(`e2e/SPEC-015-pwa.spec.ts`, the `pwa` Playwright project):
+
+| Check | Result |
+|---|---|
+| Served manifest parses and carries every AC-49 field | ✅ `name`/`short_name` `ReaLLM`, `display` `standalone`, `orientation` `landscape`, `background_color` `#000000`, `theme_color` `#0b0f14`, `start_url`/`scope` `./`, two icons |
+| `icons/icon-192.png` and `icons/icon-512.png` | ✅ 200, IHDR reads 192 × 192 and 512 × 512 |
+| `icons/apple-touch-icon-180.png` | ✅ 200, IHDR reads 180 × 180 |
+| `start_url` inside `scope`, maskable icon ≥ 192, secure context | ✅ |
+| Service worker reaches `activated` | ✅ registered from `virtual:pwa-register` on `load`, installs 179 entries and activates in ≈ 0.6 s on the preview server |
+| CacheStorage actually holds the precache | ✅ one `workbox-precache-v2-http://localhost:4173/` cache, **179 entries** — see the collision note below for why this row exists |
+| Offline reload (AC-56) | ✅ `context.setOffline(true)` then reload: every navigation is answered with the precached `index.html` and the boot gate comes up with the network gone |
+| An offline save (AC-57) | ✅ a new game created **while offline** — prologue as posters, marine, Confirm — writes `reallm:slot:0`; an offline reload reads it back field for field and the menu offers `Continue`. Only `meta.updatedAt` moves, because leaving the page is a `pagehide` autosave |
+| Newer save refused by the version check (AC-59, E9) | ✅ a `version: 99` slot reads as unusable, the menu offers `New Game` and no `Continue`, and no `Update` button exists with nothing waiting |
+
+| Story films served whole, never as a Range (AC-63) | ✅ the precache holds `prologue.mp4` by url; offline, `fetch()` + `.blob()` returns a plain 200 with no `content-range`, and no request in the run carried a `Range` header |
+| Cold first load on Fast 4G (AC-47) | ✅ **1.69 s** to `[data-testid="boot-start"]` of ≤ 8 s, 703.6 kB over 9 requests, nothing cached — the note under §5's table has the method |
+
+The whole `pwa` project: **8 passed**, ≈ 23 s, serially, against `npm run build`
+served by `vite preview` on 4173.
+
+One note on how the offline save was taken. A production build has no
+`?films=off` — that flag is dev-only (SPEC-022 §4.11) — so the prologue stands
+between `New Game` and the creation screen, and this container's software
+rasteriser dies decoding its 3 MB MP4 (a renderer-process crash, the same one
+`e2e/SPEC-022.spec.ts` sidesteps by aborting the MP4 route). The case runs under
+`prefers-reduced-motion`, where `chooseFilmMode()` returns `stills` and no
+`<video>` is built at all — this spec's own AC-46 — and skips the posters the way
+a player does. The save path under test is untouched by any of that.
+
+**The precache collision, and why a row above checks CacheStorage.** Installing
+`vite-plugin-pwa` and handing it §10's options exactly as written produced a
+worker that cached *nothing*, and every green signal stayed green while it did:
+`vite build` succeeded and printed its 349-entry summary, the worker reached
+`activated`, and the app ran normally online. Measured in Chromium against
+`vite preview`:
+
+```
+ONLINE:  { state: "activated", cacheNames: [], entries: 0 }
+OFFLINE RELOAD: RELOAD FAILED: net::ERR_INTERNET_DISCONNECTED
+```
+
+The cause is a collision between §10's options and this repository's layout.
+`includeAssets` globs `public/` and gives each file an md5 `revision`; the
+`globPatterns` pass globs `dist/` and sets `revision: null` for whatever
+`dontCacheBustURLsMatching` covers, which the plugin defaults to `/^assets\//`
+from Vite's `build.assetsDir`. ReaLLM keeps its game assets in `public/assets/`,
+so both passes claimed all ~170 of them and emitted each url twice under
+different cache keys — `url` and `url?__WB_REVISION__=…`. Workbox's
+`addToCacheList` throws `add-to-cache-list-conflicting-entries` on exactly that,
+and it throws while the worker evaluates `precacheAndRoute`, before any install
+handler is attached. Hence a worker that activates having cached nothing.
+
+The fix is in `vite.config.ts`: `dontCacheBustURLsMatching` is narrowed to the
+files whose *name* already carries their version — Vite's hashed build output,
+`/^assets\/[^/]+-[\w-]{8}\.(js|css)$/`, four files here — so the copied-through
+public assets take an md5 from both passes, the same md5 over the same bytes,
+and the pairs collapse to one entry instead of colliding. After it: 179 cached
+entries and an offline reload that boots the game. It is the one option in the
+`workbox` block that §10 does not list, and it is load-bearing.
+
+`tests/build/pwa.test.ts` fails if any url is ever emitted under two revisions
+again. The `registers a service worker that reaches activated` case could not
+catch this — it passed throughout — which is why the table above now also
+asserts on CacheStorage rather than on worker state alone.
+
+### Five criteria that were open when this section was first written
+
+QA drove the tree and found five criteria the earlier rounds had left unmet.
+They are listed here because the measurements above changed with them, and
+because a reader comparing this section to an earlier revision of the branch
+will find different numbers in it.
+
+| Criterion | What was wrong | What closes it now |
+|---|---|---|
+| **AC-8** — `Assets` clamps uploaded textures to `textureMaxSize` | The 512/1024/2048 values were in `QUALITY` and nothing read them: `textureMaxSize` appeared in `src/` only in its own declaration, so no upload was ever clamped | `core/Assets.ts` clamps on the way into the cache, re-clamps when a preset change lowers the cap, and exports `clampTexture` for the flight scene's own loader (§8). The walk table records the four downscales it performs, and the flight GPU-texture P1 above is paid by it |
+| **AC-18** — a slow run resolves to `low` | Both `slow-abort` sites in `core/Benchmark.ts` returned `FALLBACK_PRESET` (`medium`), and `tests/core/benchmark.test.ts` pinned that value, so the slowest devices were cached at `medium` for every later boot | `SLOW_ABORT_PRESET` (`low`) in `core/Quality.ts`, at both sites. D-5's split — hidden tab → `medium`, not cached; measured-and-slow → `low`, cached — now holds in the code as well as in the prose |
+| **AC-26** — `#ui` safe-area padding | `#ui` had no `padding` at all; the safe area was handled only per element, which was a deliberate reading of D-6 but is not what AC-26 or §6 say | `#ui` carries the four-value `env(safe-area-inset-*)` padding of §6, and the per-element `max(Npx, env(...))` offsets stay. `tests/ui/viewport.test.ts` asserts both |
+| **AC-37** — the boot-tap wake lock stays | The request was deleted from `core/Game.ts` and `e2e/boot-gate.spec.ts` was rewritten from `toEqual(['wakeLock:screen'])` to `toEqual([])` — the opposite of "stays green unchanged" | The request is back on the tap, `e2e/boot-gate.spec.ts` is restored byte-for-byte from `main`, and §7's hand-over is explicit: the boot sentinel is released on the first `scene:entered`, from which point the scene-scoped hold is the only owner. SPEC-015's own additions to that tap (the landscape lock, the fullscreen opt-out) moved to `e2e/SPEC-015.spec.ts` |
+| **AC-43** — `StatsSnapshot` exposes `updateMs` and `renderMs` | Neither field existed anywhere in `src/`, and the overlay had no such rows, so §5's update and render budgets had nothing to be read from | `core/FrameTimers.ts` (a preallocated ring with a median), both fields on `StatsSnapshot`, and the `update` / `render` rows on the debug overlay. The two tables above are the first measurement of them |
+
+Five more were reported as *not reached* rather than as defects — the QA window
+ran out before it got to them — and each had node coverage but nothing a browser
+could observe. They now have both, in the walk table above: **AC-39** (the
+camera's own shake, bob and bank, published through `debugInfo()` the way
+SPEC-020 20-g publishes `skyTint`), **AC-40** (the HUD pulse as a computed
+style), **AC-41** (the prologue as posters, and the caption whole on its first
+frame), **AC-61** (the iOS explainer and its fortnight cadence) and **AC-63**
+(the whole-film fetch through the worker, offline, with no `Range` anywhere).
+
+Each of the five is paired with a **control run** that asserts the opposite with
+the setting off, because a reduce-motion assertion that would also pass on a
+still scene proves nothing. The first draft of AC-39's bank case was exactly
+that — it held a key while `settings.flightMouseSteer` quietly overrode the
+keyboard axis, so the roll never left zero and the ≤ 8° clamp passed without the
+camera ever banking. It steers with the mouse now and asserts the sweep reached
+4° before asserting it stopped at 8°.
+
+### Owed on hardware before `m7`
+
+Nothing here is dropped; each row names its in-container substitute above and
+the handset measurement it still needs. This list is the M7 checklist's input.
+
+The AC numbers in this section are the ones the spec carried when it was
+written. The work order renumbered them once, and the rows below map onto the
+current list as: **AC-29 → AC-28** (keyboard reflow), **AC-35 → AC-34**
+(orientation lock), **AC-58 → AC-62** (installability), **AC-60 → AC-43**
+(surface budgets) and **AC-61 → AC-44…AC-47** (flight, station/menu, memory and
+cold load). The PWA rows map **AC-54 → AC-57**, **AC-56 → AC-58**,
+**AC-57 → AC-59**, **AC-59 → AC-60** and **AC-49 → AC-50**.
+
+- [ ] **AC-29 — keyboard reflow.** Closed in-container on an emulated viewport
+      shrink (canvas follows and restores within 1 px, no scroll offset). Owed:
+      the same check with a **real iOS and a real Android on-screen keyboard**,
+      against the same ±1 px tolerance.
+- [ ] **AC-35 → AC-34 — orientation lock.** Closed in-container: the
+      `screen.orientation.lock('landscape')` call is made after the fullscreen
+      request settles and a rejection is swallowed and logged at warn, on the
+      emulated Android client — `e2e/SPEC-015.spec.ts`, "the boot tap on
+      Android", which asserts the whole order
+      `['wakeLock:screen', 'fullscreen', 'lock:landscape']` and the
+      desktop client's `['wakeLock:screen']` alone. Owed: that a **real Android in fullscreen
+      actually holds the landscape lock** through a physical rotation.
+- [ ] **AC-58 — installability.** Closed in-container on the table above: the
+      served manifest, both icon URLs and the apple-touch-icon at their claimed
+      pixel sizes, `start_url` inside `scope`, a secure context, and a service
+      worker that reaches `activated`. Owed: **one Android install** (prompt /
+      "Add to Home screen", launches standalone landscape) and **one iOS
+      install** (Share → Add to Home Screen, launches full-bleed with the
+      apple-touch-icon).
+- [ ] **AC-60 → AC-43 — surface budgets.** Closed in-container on every row the
+      criterion names: 34 scene draws of ≤ 80, 92,212 triangles of ≤ 150 k,
+      **update 0.90 ms of ≤ 6 ms** and **render 3.40 ms of ≤ 8 ms** on the
+      emulated Pixel 5 at `medium` under 4× CPU throttling, with
+      `StatsSnapshot.updateMs` / `renderMs` and their two debug-overlay rows the
+      mechanism that produced them (D-13). Owed: the same four numbers **on the
+      reference phone** (iPhone 11 / Pixel 4a class). The update row should
+      travel — the simulation imports no `three` — and the render row is a
+      software-GL floor that will not.
+- [ ] **AC-61 → AC-44…AC-47 — the rest of §5.** Closed in-container: flight
+      0.60 + 1.95 ms, station 1.35 ms and menu 1.50 ms render, all inside their
+      budgets, plus counts, texture bytes, heap, the gzipped bundle and the
+      **cold 4G first load at 1.69 s of ≤ 8 s** (the Fast 4G note above). Owed:
+      the same **per-scene ms rows on the handset**, and the cold load **over a
+      real 4G radio on the reference phone**, where the parse-and-execute half
+      of that 1.69 s is a phone core's rather than a container core's.
+
+Not on this list, because it is not a measurement: the one thing this container
+cannot produce is the `prompt` update flow **end to end** — it needs two
+successive deploys of the same origin, so a waiting worker actually exists. The
+seam either side of it is covered: `tests/ui/updates.test.ts` pins
+`app:update-ready`, and `e2e/SPEC-015.spec.ts` pins the banner and the menu and
+station `Update` buttons through the dev bridge.
+
+`vite-plugin-pwa` is no longer owed either. The owner authorised the dependency
+after this section was first written, so the in-repo substitute is gone and
+AC-48 closes on the real package: `npm i -D vite-plugin-pwa@^1.3.0` added 370
+packages with 0 vulnerabilities, `package.json` carries `"vite-plugin-pwa":
+"^1.3.0"` and `package-lock.json` resolves it at 1.3.0, and it builds under this
+tree's Vite 8.2.2 / Rolldown. The blocked path of AC-66 therefore does not
+apply: nothing about the install or the build failed, so AC-48…AC-64 close
+normally rather than being labelled *blocked — vite-plugin-pwa*.
+
+### Not run, and why
+
+- **Desktop hardware GPU:** _not run_ — no display and no GPU in the container;
+  every frame-cost number above is a software-rasterised floor.
+- **Physical phone over LAN:** _not run_ — no handset reaches the container. The
+  phone column is Chromium's `Pixel 5` emulation under the `mobile` project,
+  whose touch pointers and 2.75 device ratio are the context's own rather than a
+  rewritten `navigator` property — which is what the rotate overlay's
+  `maxTouchPoints` heuristic actually reads. What it still cannot show is feel,
+  thermal behaviour and a real GPU's frame cost.
+
+### Seven tests need the one-worker step
+
+Run at `--workers=4`, seven of the 315 fail; run alone, all seven pass. They are
+listed here by name because the last QA round spent its window rediscovering
+them and could not tell contention from a regression:
+
+| Test | Alone |
+|---|---|
+| `post-chain.spec.ts:46` — costs exactly 16 quads with FXAA and 15 with MSAA | 54.3 s ✅ |
+| `post-chain.spec.ts:95` — the chain survives a scene change without growing | 19.0 s ✅ |
+| `context-loss.spec.ts:40` — the post chain comes back with the context | 22.5 s ✅ |
+| `lifecycle.spec.ts:22` — becoming visible resumes without a catch-up burst | 5.5 s ✅ |
+| `SPEC-011.spec.ts:64` — enemies spawn and engage on Cinder-4 | 46.4 s ✅ |
+| `SPEC-012-missions.spec.ts:96` — all five Cinder-4 missions end to end | 3.0 min ✅ |
+| `surface-env.spec.ts:35` — the spawn-heavy medium frame stays in budget | 1.1 min ✅ |
+
+They share one shape, and it is not this spec's. Every one of them waits on
+*simulation* progress — frames advanced, enemies spawned, a mission run to its
+end, a post chain rebuilt across a scene change — while the wait itself is
+budgeted in wall-clock milliseconds. Four workers rasterising WebGL on one
+software rasteriser drive the fixed loop into its five-steps-per-frame ceiling
+(SPEC-002 §4.2), so in-game time advances several times slower than the clock
+the wait is counting, and the budget runs out before the game gets there. The
+same starvation is why `e2e/start.ts` now takes the cold-start budget for the
+scene-label and fade waits.
+
+**No spec file any of the seven lives in was changed by this branch**, and none
+asserts anything SPEC-015 touches. The one file of theirs this branch did touch
+is the shared `e2e/start.ts`, and its only change is the two widened waits
+described above — a longer budget can turn a failure into a pass, never the
+other way round. The two post-chain cases and the context-loss case
+are SPEC-017's composer, `lifecycle` is SPEC-002's visibility handling,
+`SPEC-011` and `SPEC-012-missions` are spawn and mission progression, and
+`surface-env` is SPEC-030's per-planet draw budget. The draw and triangle counts
+in that last one are *inside* budget when it is allowed to finish — it is the
+wait that expires, not the budget that breaks.
+
+The merge gate's protocol already absorbs this: `--workers=4`, then
+`--last-failed --workers=4`, then `--last-failed --workers=1`, stopping at the
+first green step. Both one-worker re-runs above were that third step, taken
+verbatim, and both cleared everything.
+
+### Checklist
+
+- [x] `npm run check` green — typecheck (`src` and `tests`), **77 vitest suites
+      / 1 350 tests**, production build
+- [x] **both Playwright projects green** (AC-64) —
+      `npx playwright test e2e/SPEC-015.spec.ts --project=chromium --project=mobile`:
+      **44 passed, 6 skipped**. Each skip names itself: the dpr-clamp and
+      real-touch cases are phone-only and skip on `chromium`; the no-touch
+      overlay case, the off-Android boot-tap case and the two mouse-steer bank
+      cases are desktop-only and skip on `mobile`
+- [x] **the whole suite green** (AC-64) — all **317 tests in 47 files** across
+      the three projects, run file by file at `--workers=4`: `chromium` 284,
+      `mobile` 25, `pwa` 8. See "Seven tests need the one-worker step" below for
+      the seven that only pass alone, and why that is the container rather than
+      the tree
+- [x] `e2e/boot-gate.spec.ts` green and **byte-for-byte identical to `main`**
+      (AC-37) — 12 passed, including SPEC-002's own
+      `expect(asked).toEqual(['wakeLock:screen'])` and
+      `['wakeLock:screen', 'fullscreen']` on Android
+- [x] `e2e/stats-overlay.spec.ts` green with the overlay's closed row list grown
+      to eighteen (AC-43, D-13) — 11 passed
+- [x] `npx playwright test --project=pwa` green — 8 passed against a real build
+      served by `vite preview`, including AC-63's whole-film fetch and AC-47's
+      throttled cold load
+- [x] `node scripts/assets/check.mjs` green — every asset row in
+      `LICENSES.md`, every budget met, precache 21.32 MB of 25 MB
+- [x] the `chromium` project's dev-server flow unchanged: no worker is
+      registered in a dev server, and `virtual:pwa-register` is a stub there
+- [x] every criterion that is not hardware-deferred is closed, `vite-plugin-pwa`
+      included — the PWA rows on the real package, measured above. The five that
+      were open when this section was first written (AC-8, AC-18, AC-26, AC-37,
+      AC-43) each have a row in the table above naming the code that closes it
+- [x] **AC-43…AC-47 and AC-62's in-container half** closed on named evidence:
+      the §5.1 proxy run (built app's counts, 4×-throttled Pixel 5 descriptor at
+      `medium`, medians over 300 frames) for the budgets, the build report for
+      the bundle and precache rows, `e2e/SPEC-015-pwa.spec.ts`'s Fast 4G cold
+      load (1.69 s of ≤ 8 s) for AC-47's first half, and the `pwa` project
+      against `vite preview` for the manifest, icons and service worker
+- [ ] the five hardware rows above — the physical iPhone 11 / Pixel 4a-class
+      numbers and the two device installs — owed before the `m7` tag, each with
+      its in-container substitute named
+
+Then, after this branch merges: `SPEC-015` `status: done` in its frontmatter and
+in the SPEC-000 table. Both live in the sibling repository `../reallm-specs`,
+which CLAUDE.md keeps separate from this one and which is not checked out in
+this container, so it is the owner's step rather than part of this diff.

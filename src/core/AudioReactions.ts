@@ -151,6 +151,10 @@ const SILENT_EVENTS = [
   'dialogue:ended',
   'flight:recalled',
   'ui:orientation',
+  // SPEC-015 §10: the update banner and the iOS explainer are visual only; the
+  // toast that rides with each of them already plays the UI blip.
+  'app:update-ready',
+  'app:install-hint',
 ] as const satisfies readonly (keyof GameEvents)[];
 
 export type SilentEvent = (typeof SILENT_EVENTS)[number];

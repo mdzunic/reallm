@@ -119,6 +119,13 @@ export const SKY_WINDOW = {
 const STARFIELD_DEPTH = 400;
 const STAR_SPREAD_X = 70;
 const STAR_SPREAD_Y = 45;
+/**
+ * SPEC-015 §9: how long a star's motion streak is at full throttle, in world
+ * units of depth. Reduce motion halves it (AC-45) — the field still reads as
+ * moving, it just stops smearing.
+ */
+export const STAR_STREAK_LENGTH = 6;
+export const REDUCED_STREAK_SCALE = 0.5;
 /** Base planet radius; §4.1's 0.2 → 6 scale rides on top of it. */
 const PLANET_RADIUS = 30;
 const PLANET_Z = -320;
@@ -128,7 +135,7 @@ const CLOUD_SCALE = 1.015;
 const CAMERA_LERP_PER_S = 10;
 const CAMERA_Z = 2.5;
 /** Reduce-motion caps the roll here (§4.9). */
-const REDUCED_ROLL_DEG = 8;
+export const REDUCED_ROLL_DEG = 8;
 const MAX_SHIPS = 40;
 const MAX_SHOTS = 64;
 const PARTICLE_LIFE = 0.7;
@@ -193,7 +200,28 @@ const CLOUD_SPIN = 0.012;
 /** SPEC-020 20-b: reduce motion keeps the clouds nearly still. */
 const REDUCED_CLOUD_SPIN = 0.004;
 
+/**
+ * AC-45: the streak a star is drawn with this frame. Proportional to throttle,
+ * so a stopped ship has none, and exactly half as long under reduce motion.
+ */
+export function starStreakLength(throttle: number, reduceMotion: boolean): number {
+  const safe = Number.isFinite(throttle) ? Math.min(1, Math.max(0, throttle)) : 0;
+  return STAR_STREAK_LENGTH * safe * (reduceMotion ? REDUCED_STREAK_SCALE : 1);
+}
+
 const DEG = Math.PI / 180;
+
+/**
+ * AC-42: the radians the horizon is rolled by this frame. A bank to the right
+ * rolls the horizon left, and reduce motion holds it inside ±8° either way —
+ * the ship still banks, the camera just stops following it that far.
+ */
+export function cameraRoll(bankDeg: number, reduceMotion: boolean): number {
+  const roll = -bankDeg * DEG;
+  if (!reduceMotion) return roll;
+  const limit = REDUCED_ROLL_DEG * DEG;
+  return Math.max(-limit, Math.min(limit, roll));
+}
 
 /** SPEC-017 §4.4: image-based lighting is a fill in space, not the key. */
 const FLIGHT_ENVIRONMENT_INTENSITY = 0.5;
@@ -360,6 +388,9 @@ export class FlightView {
 
   readonly #stars: THREE.Points;
   readonly #starPositions: THREE.BufferAttribute;
+  /** SPEC-015 §9: the motion streaks behind the star heads, two vertices each. */
+  readonly #starStreaks: THREE.LineSegments;
+  readonly #streakPositions: THREE.BufferAttribute;
   #asteroids: THREE.InstancedMesh[];
   readonly #asteroidCounts: number[] = [];
   #rocksTextured = false;
@@ -388,6 +419,8 @@ export class FlightView {
 
   /** 20-g: 0 → white sky window, 1 → fully tinted toward the planet's accent. */
   #stormTint = 0;
+  /** AC-39: the radians the last frame rolled the camera by, after the clamp. */
+  #cameraRoll = 0;
   readonly #accent: THREE.Color;
   #flare: Lensflare | null = null;
   readonly #flareElements: LensflareElement[] = [];
@@ -478,6 +511,28 @@ export class FlightView {
     );
     this.#stars.frustumCulled = false;
     scene.add(this.#stars);
+
+    // SPEC-015 §9 / AC-45: one additive line per star, head to tail. A separate
+    // node because `PointsMaterial` cannot stretch, and one extra draw call is
+    // inside the §5 flight budget of 40 scene draws.
+    const streakData = new Float32Array(starCount * 6);
+    this.#streakPositions = new THREE.BufferAttribute(streakData, 3);
+    this.#streakPositions.setUsage(THREE.DynamicDrawUsage);
+    const streakGeometry = new THREE.BufferGeometry();
+    streakGeometry.setAttribute('position', this.#streakPositions);
+    this.#starStreaks = new THREE.LineSegments(
+      streakGeometry,
+      new THREE.LineBasicMaterial({
+        color: 0xdfe8f3,
+        transparent: true,
+        opacity: 0.45,
+        blending: THREE.AdditiveBlending,
+        depthWrite: false,
+        fog: false,
+      }),
+    );
+    this.#starStreaks.frustumCulled = false;
+    this.#stars.add(this.#starStreaks); // the parallax offset is the parent's
 
     // Asteroids: instanced, per-instance scale/rotation/tint (§4.9); one rock
     // shape until `useArt` brings the baked ones.
@@ -683,6 +738,17 @@ export class FlightView {
     return this.#stormTint;
   }
 
+  /**
+   * SPEC-015 AC-39: the degrees the horizon was actually rolled by on the last
+   * frame — the value after `cameraRoll`'s reduce-motion clamp and after the
+   * hit shake, not the ship's own bank. Published for the same reason
+   * `stormTint` is: it is otherwise a claim about a quaternion that nothing
+   * outside the renderer can read.
+   */
+  get cameraRollDeg(): number {
+    return this.#cameraRoll / DEG;
+  }
+
   dispose(): void {
     this.#camera.remove(this.#cockpit);
     disposeObject3D(this.#cockpit);
@@ -808,8 +874,7 @@ export class FlightView {
     camera.position.x += (frame.ship.x - camera.position.x) * chase;
     camera.position.y += (frame.ship.y - camera.position.y) * chase;
     camera.position.z = CAMERA_Z;
-    let roll = -frame.ship.bank * DEG; // bank right → horizon rolls left
-    if (this.#reduceMotion) roll = Math.max(-REDUCED_ROLL_DEG * DEG, Math.min(REDUCED_ROLL_DEG * DEG, roll));
+    let roll = cameraRoll(frame.ship.bank, this.#reduceMotion); // bank right → horizon rolls left
     let pitch = (frame.ship.vy / 14) * 15 * DEG;
     pitch += this.#landing * -24 * DEG; // the cutscene noses down (§4.1)
     if (this.#shake > 0) {
@@ -817,19 +882,33 @@ export class FlightView {
       pitch += Math.sin(frame.time * 43) * 0.012 * this.#shake;
       roll += Math.sin(frame.time * 61) * 0.012 * this.#shake;
     }
+    this.#cameraRoll = roll;
     this.#euler.set(pitch, 0, roll, 'ZYX');
     camera.quaternion.setFromEuler(this.#euler);
   }
 
   #updateStars(frame: FlightFrame, dt: number): void {
     const positions = this.#starPositions.array as Float32Array;
+    const streaks = this.#streakPositions.array as Float32Array;
     const advance = 60 * frame.throttleLive * dt;
-    for (let i = 0; i < positions.length; i += 3) {
+    // AC-45: the streak trails *behind* the head, which is toward −z, because
+    // the field streams toward the camera at +z.
+    const streak = starStreakLength(frame.throttleLive, this.#reduceMotion);
+    for (let i = 0, s = 0; i < positions.length; i += 3, s += 6) {
       let z = (positions[i + 2] as number) + advance;
       if (z > 5) z -= STARFIELD_DEPTH;
       positions[i + 2] = z;
+      const x = positions[i] as number;
+      const y = positions[i + 1] as number;
+      streaks[s] = x;
+      streaks[s + 1] = y;
+      streaks[s + 2] = z;
+      streaks[s + 3] = x;
+      streaks[s + 4] = y;
+      streaks[s + 5] = z - streak;
     }
     this.#starPositions.needsUpdate = true;
+    this.#streakPositions.needsUpdate = true;
     // Parallax by ship offset (§4.9): the field slides against the steer.
     this.#stars.position.x = -frame.ship.x * 0.35;
     this.#stars.position.y = -frame.ship.y * 0.35;

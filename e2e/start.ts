@@ -20,6 +20,8 @@ export interface DevBridge {
   /** SPEC-014 §4.6: raises a toast of any kind, for the toast-layer suite. */
   toast(text: string, kind?: string, ms?: number): void;
   trace(): string[];
+  /** SPEC-015 AC-52: stands in for a waiting service worker (dev builds only). */
+  offerUpdate(apply: () => void): void;
   loseContext(restoreAfterMs: number | null): void;
   stop(): void;
 }
@@ -128,6 +130,9 @@ export interface StatsSnapshot {
   updates: number;
   droppedTime: number;
   frame: number;
+  /** SPEC-015 §5/D-13: 60-frame medians of the update and draw halves, in ms. */
+  updateMs: number;
+  renderMs: number;
   drawCalls: number;
   triangles: number;
   geometries: number;
@@ -292,12 +297,27 @@ export function gameUrl(url: string): string {
  * Navigate, pass the gate, and wait until a scene is on screen and its
  * transition has settled — the fade still runs after the label appears
  * (SPEC-003 AC-14), and a `go()` issued during it would be refused (D-2).
+ *
+ * Both waits take the cold-start budget rather than Playwright's 5 s default,
+ * for the reason `E2E_PRESET` documents above: the entry fade is an *in-game*
+ * timer, so when the fixed-step loop hits its five-steps-per-frame ceiling
+ * (SPEC-002 §4.2) the simulation advances more slowly than the wall clock and
+ * the fade takes several times longer than its nominal duration. Measured on
+ * this container, `SPEC-015.spec.ts` failed here on one chromium run in three
+ * with five workers loading a scene at once — always on the heaviest page in
+ * the wave, and never when the same test runs alone. SPEC-015 AC-64 adds a
+ * second project over the same file, which doubles that wave.
+ *
+ * Nothing is relaxed: the scene must still appear and the fade must still reach
+ * `pointer-events: none`, and a run that was passing passes identically. Only a
+ * starved container gets longer to finish, and a fade that never settles still
+ * fails the test — 25 s later than it used to.
  */
 export async function start(page: Page, url = '/'): Promise<void> {
   await page.goto(gameUrl(url));
   await passGate(page);
-  await expect(page.locator('[data-testid="scene-label"]')).toBeVisible();
-  await expect(page.locator('[data-testid="transition-fade"]')).toHaveCSS('pointer-events', 'none');
+  await expect(page.locator('[data-testid="scene-label"]')).toBeVisible(COLD_START);
+  await expect(page.locator('[data-testid="transition-fade"]')).toHaveCSS('pointer-events', 'none', COLD_START);
 }
 
 /**

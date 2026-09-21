@@ -9,15 +9,19 @@
 // (SPEC-002 D-F).
 import { Assets, type AssetManifest } from '@/core/Assets';
 import { createNullAudio, type Audio } from '@/core/Audio';
+import { runBenchmark, type BenchmarkDeps, type BenchmarkOutcome } from '@/core/Benchmark';
 import { createNullInput, type Input } from '@/core/Input';
 import { PageLifecycle } from '@/core/Lifecycle';
 import { log } from '@/core/Log';
+import { runRenderPhase, type RenderPhasePorts } from '@/core/FrameSkip';
+import { RollingMedian } from '@/core/FrameTimers';
 import { DEFAULT_MAX_STEPS, Loop } from '@/core/Loop';
 import { createRenderer, type QualityPreset, type Renderer } from '@/core/Renderer';
 import { RngRoot } from '@/core/Rng';
 import { createNullSave, type SaveStore } from '@/core/Save';
 import type { EventBus, GameServices } from '@/core/Services';
 import { createSettings, type SettingsStore } from '@/core/Settings';
+import type { WakeLockApi, WakeLockSentinel } from '@/core/WakeLock';
 import {
   BOOT_SCENE,
   FATAL_TRANSITION_TEXT,
@@ -55,6 +59,14 @@ export interface StatsSnapshot {
   readonly droppedTime: number;
   /** `loop.stats.frame` — the e2e suites of §6.2 watch it grow, stop and freeze. */
   readonly frame: number;
+  /**
+   * SPEC-015 §5/D-13: the median time the last 60 frames spent in `update()`
+   * and in the scene draw, in milliseconds. §5 budgets both and neither was
+   * readable without a profiler; the debug overlay shows them, so the same
+   * rows can be read off a real phone with no tooling attached.
+   */
+  readonly updateMs: number;
+  readonly renderMs: number;
   readonly drawCalls: number;
   readonly triangles: number;
   readonly geometries: number;
@@ -164,9 +176,6 @@ export const DEFAULT_SEED = 1;
 
 const PHASE_INPUT_BEGIN = 'input:begin';
 const PHASE_UPDATE = 'update';
-const PHASE_RENDER = 'render';
-const PHASE_UI_FLUSH = 'ui:flush';
-const PHASE_INPUT_END = 'input:end';
 /** input:begin + up to maxSteps updates + render + ui:flush + input:end. */
 const PHASE_SLOTS = 1 + DEFAULT_MAX_STEPS + 3;
 /** One traced frame per second while the overlay is visible (§4.6.2). */
@@ -214,6 +223,19 @@ export class Game implements GameServices {
   #lastStatsMs = 0;
   #contextLostTimer: number | null = null;
 
+  /** SPEC-015 §5/D-13: 60-frame medians of the update and draw halves. */
+  readonly #updateMs = new RollingMedian();
+  readonly #renderMs = new RollingMedian();
+  /** Summed across every fixed step the frame in flight ran. */
+  #updateMsThisFrame = 0;
+
+  /**
+   * SPEC-002 02-f's boot-tap wake lock, held only until the first scene is on
+   * screen and the scene-scoped manager takes over (SPEC-015 §7, AC-37).
+   */
+  #bootWakeLock: WakeLockSentinel | null = null;
+  #bootWakeLockHandedOver = false;
+
   /** Preallocated: the traced frame writes into it and allocates nothing (§4.6.2). */
   readonly #phases: string[] = new Array<string>(PHASE_SLOTS).fill('');
   #phaseCount = 0;
@@ -244,9 +266,12 @@ export class Game implements GameServices {
     this.#injectedRng = injected.rng ?? null;
     this.#rng = this.#injectedRng ?? new RngRoot(this.#seed());
 
-    // §4.5 step 1: `?quality=` wins but is never persisted, then the stored
-    // preset, then the default. SPEC-015's benchmark replaces this later (D-G).
-    const preset = this.#flags.quality ?? this.#settings.quality ?? DEFAULT_PRESET;
+    // §4.5 step 1 / SPEC-015 §4.6, AC-19: `?quality=` wins but is never
+    // persisted, then the stored preset, then whatever the benchmark measured
+    // on an earlier boot, then the default. The run itself happens in `boot()`
+    // and only when all three of those are absent (AC-17).
+    const preset =
+      this.#flags.quality ?? this.#settings.quality ?? this.#settings.get().benchmark?.preset ?? DEFAULT_PRESET;
     this.#renderer = createRenderer(options.canvas, {
       events: this.#events,
       preset,
@@ -374,6 +399,8 @@ export class Game implements GameServices {
       updates: loop.updatesLastFrame,
       droppedTime: loop.droppedTime,
       frame: loop.frame,
+      updateMs: this.#updateMs.value,
+      renderMs: this.#renderMs.value,
       drawCalls: info.render.calls,
       triangles: info.render.triangles,
       geometries: info.memory.geometries,
@@ -403,9 +430,17 @@ export class Game implements GameServices {
    * The gate is what unlocks audio, so nothing before it may start the loop.
    */
   async boot(): Promise<void> {
+    // SPEC-015 §3/§8, AC-8: the preset's texture cap is in force *before* the
+    // first upload, so nothing oversized ever reaches the GPU.
+    this.#assets.setMaxTextureSize(this.#renderer.quality.textureMaxSize);
     await this.#loadAssets();
     this.#assets.setMaxAnisotropy(this.#renderer.gl.capabilities.getMaxAnisotropy());
     this.#logEvent('boot:assets');
+
+    // SPEC-015 §4.1, AC-19: the run starts after the asset load and is awaited
+    // before the first scene is entered, so its ≤ 2 s sits inside the gate's
+    // wait for the tap rather than on top of it.
+    const benchmark = this.#shouldBenchmark() ? runBenchmark(this.#benchmarkDeps()) : null;
 
     await this.#bootUi.awaitStart();
     if (this.#stopped) return;
@@ -420,10 +455,85 @@ export class Game implements GameServices {
     this.#bootUi.hide();
     this.#logEvent('boot:started');
 
+    if (benchmark !== null) {
+      this.#applyBenchmark(await benchmark);
+      if (this.#stopped) return;
+    }
     this.start();
     await this.#scenes.go(BOOT_SCENE, { reason: 'start' });
     // §4.5 step 5: the jump target still had to pass the gate (AC-26).
     this.#applySceneFlag();
+  }
+
+  // --------------------------------------------------------- SPEC-015 §4
+
+  /**
+   * AC-17: only when nothing has already answered the question. A `?quality=`
+   * flag, a preset the player chose, or a stored measurement all skip the run
+   * entirely — it never re-runs on a later boot unless `Re-detect` asks (AC-18).
+   */
+  #shouldBenchmark(): boolean {
+    return this.#flags.quality === null && this.#settings.quality === null && this.#settings.get().benchmark === null;
+  }
+
+  /**
+   * The injected bag of §4. `renderer` is the facade, never `gl.render`
+   * (SPEC-017 §6); a lost context means there is nothing to measure, which is
+   * the `unsupported` path of AC-15.
+   */
+  #benchmarkDeps(): BenchmarkDeps {
+    const renderer = this.#renderer;
+    const nav = navigator as Navigator & { deviceMemory?: number };
+    return {
+      renderer: renderer.contextLost
+        ? null
+        : {
+            render: (scene, camera) => renderer.render(scene, camera),
+            setPixelRatio: (dpr) => renderer.gl.setPixelRatio(dpr),
+            resize: () => renderer.resize(),
+          },
+      requestFrame: (cb) => globalThis.requestAnimationFrame(cb),
+      cancelFrame: (id) => globalThis.cancelAnimationFrame(id),
+      hidden: () => document.hidden,
+      onVisibilityChange: (handler) => {
+        document.addEventListener('visibilitychange', handler);
+        return () => document.removeEventListener('visibilitychange', handler);
+      },
+      deviceMemory: nav.deviceMemory,
+      cores: navigator.hardwareConcurrency,
+    };
+  }
+
+  /**
+   * §4.5/§4.6: a run that saw the device is remembered, a throttled or
+   * unsupported one is not (D-4), and the preset is applied only while the
+   * session is still on auto — a `?quality=` flag or a stored choice outranks
+   * a measurement.
+   */
+  #applyBenchmark(outcome: BenchmarkOutcome): void {
+    if (outcome.persist) {
+      this.#settings.set({ benchmark: { preset: outcome.preset, msPerFrame: outcome.msPerFrame, at: Date.now() } });
+    }
+    this.#logEvent(`benchmark:${outcome.reason}`);
+    if (this.#flags.quality !== null || this.#settings.quality !== null) return;
+    this.#renderer.setQuality(outcome.preset);
+  }
+
+  /**
+   * §4.7, behind the settings panel's `Re-detect`: measure again, persist under
+   * the same rules, go back to auto so the measurement actually takes effect,
+   * and apply it. DPR and `targetFps` move immediately; everything else is read
+   * by the next scene to enter (§3, AC-21).
+   */
+  async detectQuality(): Promise<BenchmarkOutcome> {
+    const outcome = await runBenchmark(this.#benchmarkDeps());
+    if (outcome.persist) {
+      this.#settings.set({ benchmark: { preset: outcome.preset, msPerFrame: outcome.msPerFrame, at: Date.now() } });
+    }
+    this.#settings.set({ quality: null });
+    this.#renderer.setQuality(outcome.preset);
+    this.#logEvent(`benchmark:${outcome.reason}`);
+    return outcome;
   }
 
   start(): void {
@@ -436,6 +546,8 @@ export class Game implements GameServices {
     if (this.#stopped) return;
     this.#stopped = true;
     this.#loop.stop();
+    // A boot that never reached its first scene still owes the lock back.
+    this.#releaseBootWakeLock();
     for (const timer of this.#timers) clearTimeout(timer);
     this.#timers.clear();
     if (this.#tapTimer !== null) clearTimeout(this.#tapTimer);
@@ -493,37 +605,61 @@ export class Game implements GameServices {
   #frame(frameDt: number): void {
     this.#beginTrace();
     this.#stepsThisFrame = 0;
+    this.#updateMsThisFrame = 0;
     this.#phase(PHASE_INPUT_BEGIN);
     this.#input.beginFrame(frameDt);
   }
 
-  /** Phase 2, 0 to `maxSteps` times, always with `dt === step`. */
+  /**
+   * Phase 2, 0 to `maxSteps` times, always with `dt === step`.
+   *
+   * SPEC-015 §5: the time is summed across every step the frame ran, because
+   * the budget is "how much of this frame went to simulation" — a frame that
+   * catches up with three steps really did spend three steps' worth.
+   */
   #update(dt: number): void {
     this.#stepsThisFrame++;
     this.#phase(PHASE_UPDATE);
+    const startedAt = performance.now();
     this.#scenes.update(dt);
+    this.#updateMsThisFrame += performance.now() - startedAt;
   }
 
-  /** Phases 3 to 5: render, then save/ui/stats, then the end of the input frame. */
+  /**
+   * Phases 3 to 5: render, then save/ui/stats, then the end of the input frame.
+   * The order — and which of those the `targetFps: 30` frame skip drops — is
+   * `core/FrameSkip.ts`, so AC-24 is a node test rather than a reading (AC-57).
+   */
   #render(_frameDt: number): void {
-    this.#phase(PHASE_RENDER);
-    this.#renderScene();
-    this.#phase(PHASE_UI_FLUSH);
-    this.#save.tick();
-    (this.#transitionUi as Flushable).flush?.();
-    this.#refreshStatsIfDue();
-    this.#phase(PHASE_INPUT_END);
+    runRenderPhase(this.#renderPorts, this.#renderer.quality.targetFps, this.#loop.stats.frame);
+    // §5/D-13: one sample a frame, after every step of it has run. A frame the
+    // skip dropped the draw from contributes no render sample — `renderMs` is
+    // the cost of drawing, not an average over frames that did not.
+    this.#updateMs.push(this.#updateMsThisFrame);
+    this.#endTrace();
+  }
+
+  /** Built once: the frame phase allocates nothing (SPEC-001 §7). */
+  readonly #renderPorts: RenderPhasePorts = {
+    phase: (name) => this.#phase(name),
+    draw: () => this.#drawTimed(),
+    saveTick: () => this.#save.tick(),
+    uiFlush: () => (this.#transitionUi as Flushable).flush?.(),
+    refreshStats: () => this.#refreshStatsIfDue(),
     // A frame with no update step never showed its edges to gameplay; they are
     // carried to the next frame instead of being dropped (SPEC-005 §4.1).
-    this.#input.endFrame(this.#stepsThisFrame > 0);
-    this.#endTrace();
+    endFrame: () => this.#input.endFrame(this.#stepsThisFrame > 0),
+  };
+
+  /** The draw, timed for §5's render budget (D-13). */
+  #drawTimed(): void {
+    const startedAt = performance.now();
+    this.#renderScene();
+    this.#renderMs.push(performance.now() - startedAt);
   }
 
   #renderScene(): void {
     if (this.#renderer.contextLost) return;
-    // AC-57: at `targetFps: 30` every second frame skips the draw; the fixed
-    // updates, the save and the stats are untouched.
-    if (this.#renderer.quality.targetFps === 30 && this.#loop.stats.frame % 2 !== 0) return;
     try {
       this.#scenes.render(this.#renderer);
     } catch (error) {
@@ -654,19 +790,80 @@ export class Game implements GameServices {
     }
   }
 
-  /** 02-f: a refusal is ignored and the game keeps running in the page. */
+  /**
+   * 02-f: a refusal is ignored and the game keeps running in the page.
+   *
+   * SPEC-015 §7 / D-2: this is the *gesture-bound* first acquisition and it
+   * stays — some browsers only grant a screen lock from inside a user gesture,
+   * and the boot tap is the only gesture a player makes before the first scene.
+   * The scene manager owns the lock from that first scene entry onward (AC-35),
+   * so the sentinel taken here is handed back as soon as a scene is on screen:
+   * `surface` and `flight` have already taken their own by then, and every
+   * other scene is meant to let the phone sleep.
+   */
   #requestWakeLock(): void {
-    const wakeLock = (navigator as Navigator & { wakeLock?: { request(type: 'screen'): Promise<unknown> } }).wakeLock;
+    const wakeLock = (navigator as Navigator & { wakeLock?: WakeLockApi }).wakeLock;
     if (!wakeLock) return;
-    wakeLock.request('screen').catch((error: unknown) => log.warn('boot', 'the screen wake lock was refused', error));
+    wakeLock.request('screen').then(
+      (sentinel: WakeLockSentinel) => {
+        this.#bootWakeLock = sentinel;
+        // The first scene was entered while the request was in flight.
+        if (this.#bootWakeLockHandedOver) this.#releaseBootWakeLock();
+      },
+      (error: unknown) => log.warn('boot', 'the screen wake lock was refused', error),
+    );
   }
 
-  /** Android only: iOS Safari has no element fullscreen, and desktop does not need it (§4.5). */
+  /** Idempotent; safe before the request settles and safe when it never did. */
+  #releaseBootWakeLock(): void {
+    this.#bootWakeLockHandedOver = true;
+    const sentinel = this.#bootWakeLock;
+    if (sentinel === null) return;
+    this.#bootWakeLock = null;
+    void sentinel.release().catch((error: unknown) => log.warn('boot', 'the boot wake lock would not release', error));
+  }
+
+  /**
+   * Android only: iOS Safari has no element fullscreen, and desktop does not
+   * need it (§4.5, SPEC-015 D-8).
+   *
+   * SPEC-015 AC-34: `settings.fullscreen` is tri-state — `null` is "never
+   * chosen", so it is still attempted, and only an explicit `false` opts out.
+   * Entering fullscreen never writes the setting; the panel's toggle is the one
+   * writer (AC-37). The wake lock that used to sit beside this call is gone:
+   * the gameplay scenes own it now, so there is exactly one owner (AC-39, D-7).
+   */
   #requestFullscreen(): void {
     if (!/android/i.test(navigator.userAgent)) return;
+    if (this.#settings.get().fullscreen === false) return;
     const root = document.documentElement;
     if (typeof root.requestFullscreen !== 'function') return;
-    root.requestFullscreen().catch((error: unknown) => log.warn('boot', 'fullscreen was refused', error));
+    // AC-35: the lock is attempted once the request has *settled*, either way —
+    // a device that refused fullscreen may still hold an orientation.
+    root.requestFullscreen().then(
+      () => this.#lockLandscape(),
+      (error: unknown) => {
+        log.warn('boot', 'fullscreen was refused', error);
+        this.#lockLandscape();
+      },
+    );
+  }
+
+  /**
+   * AC-35: `screen.orientation.lock` is unimplemented on desktop, rejects
+   * outside fullscreen on Android and throws outright on some builds. All three
+   * are a warning and nothing else — the rotate overlay is the real answer.
+   */
+  #lockLandscape(): void {
+    const orientation = (screen as Screen & { orientation?: { lock?(to: string): Promise<void> } }).orientation;
+    if (typeof orientation?.lock !== 'function') return;
+    try {
+      void orientation
+        .lock('landscape')
+        .catch((error: unknown) => log.warn('boot', 'the landscape orientation lock was refused', error));
+    } catch (error) {
+      log.warn('boot', 'the landscape orientation lock threw', error);
+    }
   }
 
   /** `?scene=surface&planet=cinder4` (SPEC-001 §9) — the one use of `force` (SPEC-003 D-11). */
@@ -776,6 +973,10 @@ export class Game implements GameServices {
         () => {
           this.#logEvent('scene:entered');
           this.#renderErrorScene = null;
+          // SPEC-015 §7: the boot tap took the first, gesture-bound lock; from
+          // the first scene entry the scene manager owns the question, so the
+          // boot one is handed back (AC-35, AC-37, D-2).
+          this.#releaseBootWakeLock();
           this.#refreshStats(); // AC-33
         },
         this,
@@ -785,6 +986,9 @@ export class Game implements GameServices {
         'renderer:resized',
         () => {
           this.#logEvent('renderer:resized');
+          // SPEC-015 AC-8: a preset change moves the texture cap with it. A
+          // plain resize carries the same number, and setting it is a no-op.
+          this.#assets.setMaxTextureSize(this.#renderer.quality.textureMaxSize);
           this.#refreshStats();
         },
         this,

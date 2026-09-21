@@ -15,8 +15,9 @@ node scripts/assets/check.mjs
 ```
 
 It fails when a category exceeds its byte budget (SPEC-001 §10), when a file
-under `public/assets/` has no row in `LICENSES.md`, or when a file has an
-extension the specs do not allow.
+under `public/assets/` or `public/icons/` has no row in `LICENSES.md`, when a
+file has an extension the specs do not allow, when an app icon is the wrong
+pixel size, or when the whole precachable set passes 25 MB (SPEC-015 D-11).
 
 ## 1. What the Blender build makes
 
@@ -117,7 +118,33 @@ renders for listening. A CC0 pack can replace any file later: cut the sfx to the
 sprite offsets in `src/data/assets.ts`, keep music loops seamless, encode
 `.webm` (Opus) + `.mp3`, and change the file's `LICENSES.md` row.
 
-## 5. Budgets (SPEC-001 §10, restated by the checker)
+## 5. App icons (SPEC-015 §10.1)
+
+The three PWA icons are **not** Blender's and not new art: they are the shipped
+`public/favicon.svg` mark — a `#0b0f14` field, a `#39c5cf` ring at r 18/64 with
+stroke 4/64, an `#e6edf3` core at r 6/64 and four cardinal ticks from r 18/64 to
+r 26/64 — rasterized at three sizes by pure Node.
+
+```bash
+node scripts/assets/icons.mjs
+```
+
+| Writes | Size | Purpose | Mark scale |
+| --- | --- | --- | --- |
+| `public/icons/icon-192.png` | 192² | manifest `any` | 1.0 — the favicon's own framing, `rx` 12/64 |
+| `public/icons/icon-512.png` | 512² | manifest `any maskable` | **0.70** on a square field, so every mask a launcher applies keeps the whole mark (15-k) |
+| `public/icons/apple-touch-icon-180.png` | 180² | `<link rel="apple-touch-icon">` | 1.0 |
+
+No Blender, no browser and no network: the shapes are analytic signed distance
+fields sampled 4× per axis and written with `node:zlib` at a fixed deflate
+level, so two runs on the same Node produce identical bytes and a rebuild on a
+clean tree leaves `git status` clean. The layout constants are exported and
+pinned by `tests/assets/icons.test.ts`; `scripts/assets/check.mjs` reads each
+PNG's IHDR to confirm the three sizes and requires a `LICENSES.md` row for each.
+Change the mark by editing `public/favicon.svg` **and** `MARK` in the generator
+— the test fails when the two disagree.
+
+## 6. Budgets (SPEC-001 §10, restated by the checker)
 
 | Category | Folder | Budget |
 | --- | --- | --- |
@@ -125,4 +152,8 @@ sprite offsets in `src/data/assets.ts`, keep music loops seamless, encode
 | Audio | `audio/` | 12 MB |
 | Textures | `textures/` | 6 MB |
 | Portraits | `portraits/` | 0.5 MB |
-| Everything precached | `public/assets/` | 25 MB |
+| Everything precached | `public/assets/` + `public/icons/` + `public/favicon.svg`, or `dist/` where it exists | 25 MB |
+
+The precache row is SPEC-015 D-11: it is what a first visit downloads, so the
+checker measures the built output when a `dist/` is present and the sources
+otherwise. It prints the measured total either way (AC-53).

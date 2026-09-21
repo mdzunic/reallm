@@ -11,6 +11,7 @@
 import * as THREE from 'three';
 import { log } from '@/core/Log';
 import type { GameServices } from '@/core/Services';
+import { applyUpdate, updateReady } from '@/core/Updates';
 import { SLOTS, type Save, type SlotId } from '@/core/Save';
 import type { SceneParams } from '@/core/StateMachine';
 import { slotLine } from '@/systems/UiHelpers';
@@ -194,6 +195,8 @@ export class MenuScene extends UiScene<'menu'> {
       settings: this.services.settings,
       save: this.services.save,
       renderer: this.services.renderer,
+      // SPEC-015 AC-20: `Re-detect` runs the real boot benchmark.
+      redetect: this.services.detectQuality?.bind(this.services),
       onReset: () => this.#refresh(),
     });
     this.disposer.add(() => {
@@ -243,6 +246,9 @@ export class MenuScene extends UiScene<'menu'> {
     // surface Continue without a reload (AC-2).
     this.disposer.add(this.services.events.on('save:written', () => this.#refresh(), this));
     this.disposer.add(this.services.events.on('save:failed', () => this.#refresh(), this));
+    // SPEC-015 §10: a build that lands while the menu is open adds its button
+    // without the screen having to poll for it.
+    this.disposer.add(this.services.events.on('app:update-ready', () => this.#refresh(), this));
 
     this.#refresh();
     this.#buttons.querySelector('button')?.focus();
@@ -261,6 +267,12 @@ export class MenuScene extends UiScene<'menu'> {
       testId(h('button', { class: 'ui-btn', type: 'button', click: () => this.#toggleSub('load') }, 'Load'), 'menu-load'),
       testId(h('button', { class: 'ui-btn', type: 'button', click: () => this.#settings?.show() }, 'Settings'), 'menu-settings'),
       testId(h('button', { class: 'ui-btn', type: 'button', click: () => this.#toggleSub('credits') }, 'Credits'), 'menu-credits'),
+      // SPEC-015 AC-52: offered here and at the station only, and only while a
+      // build is actually waiting. `applyUpdate` is `updateSW(true)` — nothing
+      // reloads the page on its own (15-c).
+      updateReady()
+        ? testId(h('button', { class: 'ui-btn is-primary', type: 'button', click: () => applyUpdate() }, 'Update'), 'menu-update')
+        : null,
     ];
     this.#buttons.replaceChildren(...buttons.filter((button): button is HTMLButtonElement => button !== null));
     this.#renderSub();

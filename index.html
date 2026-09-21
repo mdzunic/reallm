@@ -6,7 +6,18 @@
     <meta name="theme-color" content="#0b0f14" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="mobile-web-app-capable" content="yes" />
+    <!-- SPEC-015 §6: black-translucent puts the iOS status bar over the canvas,
+         which is what `viewport-fit=cover` and the per-element safe-area insets
+         above are for; anything else letterboxes the game (AC-28). -->
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="ReaLLM" />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <!-- The same mark, rasterized: iOS ignores the manifest icons and reads
+         this one for the Home Screen (SPEC-015 §10.1, AC-28). -->
+    <link rel="apple-touch-icon" sizes="180x180" href="icons/apple-touch-icon-180.png" />
+    <!-- SPEC-015 §10 (AC-49): no `<link rel="manifest">` here. `vite-plugin-pwa`
+         owns the manifest — the `manifest` literal in `vite.config.ts` — and
+         injects the one link into the built `index.html` (D-10). -->
     <title>ReaLLM</title>
   </head>
   <body>

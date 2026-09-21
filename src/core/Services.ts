@@ -13,6 +13,7 @@
 // with `#private` fields could ever be.
 import type { Assets } from '@/core/Assets';
 import type { Audio } from '@/core/Audio';
+import type { BenchmarkOutcome } from '@/core/Benchmark';
 import type { EmitArgs, GameEvents } from '@/core/Events';
 import type { Input } from '@/core/Input';
 import type { Loop } from '@/core/Loop';
@@ -68,4 +69,11 @@ export interface GameServices {
   go<K extends SceneId>(id: K, params: SceneParams[K]): Promise<boolean>;
   /** An explicit resume from a scene's pause menu — the only way back (D-38). */
   requestResume(): void;
+  /**
+   * SPEC-015 §4.7: re-run the boot benchmark, persist it under the §4.5 rules,
+   * go back to auto and apply the measured preset. Optional so the object
+   * literals that stand in for the bag in unit tests stay valid; the settings
+   * panel falls back to the renderer's active preset where it is absent.
+   */
+  detectQuality?(): Promise<BenchmarkOutcome>;
 }

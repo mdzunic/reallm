@@ -99,6 +99,53 @@ export const QUALITY = {
   },
 } as const satisfies Record<QualityPreset, QualitySettings>;
 
+// ------------------------------------------------- SPEC-015 §4.4: the preset
+//
+// The boot benchmark is two halves, deliberately split (SPEC-015 D-4): the GL
+// measurement is `core/Benchmark.ts`, and the decision it feeds — pure
+// arithmetic over a frame time and the two `navigator` hints — lives here,
+// where nothing imports `three`. `core/Benchmark.ts` re-exports it, so the run
+// and the rule still read as one thing from a caller's side.
+
+/** `m < 8 → high`, `m < 14 → medium`, else `low` (SPEC-015 §4.4). */
+export const HIGH_MAX_MS = 8;
+export const MEDIUM_MAX_MS = 14;
+/** A device with this much memory, or this few cores, is capped at `medium`. */
+export const LOW_MEMORY_GB = 2;
+export const LOW_CORES = 4;
+/** §4.6: what a run that measured nothing usable falls back to. */
+export const FALLBACK_PRESET: QualityPreset = 'medium';
+/**
+ * D-5: the other abort. A run that *did* measure and found every one of the
+ * first ten frames over 40 ms has an answer — the device is slow — so it stops
+ * early, resolves here rather than at `FALLBACK_PRESET`, and is cached (AC-18).
+ */
+export const SLOW_ABORT_PRESET: QualityPreset = 'low';
+
+/** A `navigator` hint is *known* only when it is a finite number above zero (15-g). */
+function known(value: number | undefined): value is number {
+  return typeof value === 'number' && Number.isFinite(value) && value > 0;
+}
+
+/** The caps only ever lower a result, so `low` stays `low` (AC-13). */
+function capAtMedium(preset: QualityPreset): QualityPreset {
+  return preset === 'high' ? 'medium' : preset;
+}
+
+/**
+ * §4.4. `ms` is a median frame delta at dpr 1.5; the two caps are applied after
+ * it and only downward. An unknown hint caps nothing — a Safari that reports no
+ * `deviceMemory` is not a 2 GB phone, it is a browser that does not say
+ * (15-g), and the measurement already knows what the device can do.
+ */
+export function presetFor(ms: number, deviceMemory?: number, cores?: number): QualityPreset {
+  if (!Number.isFinite(ms) || ms <= 0) return FALLBACK_PRESET;
+  let preset: QualityPreset = ms < HIGH_MAX_MS ? 'high' : ms < MEDIUM_MAX_MS ? 'medium' : 'low';
+  if (known(deviceMemory) && deviceMemory <= LOW_MEMORY_GB) preset = capAtMedium(preset);
+  if (known(cores) && cores <= LOW_CORES) preset = capAtMedium(preset);
+  return preset;
+}
+
 /** What the renderer builds for a preset at a device pixel ratio (§4.1). */
 export interface PostPlan {
   readonly composer: boolean;

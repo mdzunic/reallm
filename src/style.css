@@ -7,6 +7,11 @@ body {
   margin: 0;
   height: 100%;
   overflow: hidden;
+  /* SPEC-015 AC-26: no rubber-band, no pull-to-refresh — a drag that starts on
+     a scrollable panel and runs past its end must not bounce the page under
+     the canvas. `touch-action: none` on `#game`/`#ui` stops the gesture from
+     starting; this stops the one that does start from chaining to the page. */
+  overscroll-behavior: none;
   background: #0b0f14;
   color: #e6edf3;
   font: 14px/1.4 system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
@@ -29,12 +34,24 @@ body {
 /* The DOM UI layer over the canvas. Gameplay pointers go to the canvas;
    interactive panels opt in with `pointer-events: auto` (SPEC-014).
    `touch-action: none` matches the canvas so a thumb dragged across a HUD
-   element never scrolls or double-tap-zooms the page (SPEC-005 AC-26). */
+   element never scrolls or double-tap-zooms the page (SPEC-005 AC-26).
+
+   SPEC-015 §6, AC-26: the layer is full-bleed — `inset: 0` puts it under the
+   notch and the home indicator — and the `env(safe-area-inset-*)` padding is
+   what keeps its contents out of both. It is the floor, not the only rule:
+   `#ui` is the containing block for the absolutely positioned layers inside
+   it, so the padding moves them off the cut-out, and each control anchored to
+   a viewport edge then clears that edge itself with `max(Npx, env(...))` so
+   it keeps a readable gutter on a device that reports no inset at all. Both
+   halves are required by AC-26 and both are asserted by
+   `tests/ui/viewport.test.ts`. */
 #ui {
   position: fixed;
   inset: 0;
   pointer-events: none;
   touch-action: none;
+  padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom)
+    env(safe-area-inset-left);
 }
 
 /* The version label. It opts into pointer events because five taps on it are
@@ -647,6 +664,7 @@ button.slot-button {
    so nothing behind it ever shows through unblurred. */
 @media (prefers-reduced-transparency: reduce) {
   .panel,
+  .install-hint,
   .overlay-panel,
   .toast {
     background: var(--panel);
@@ -656,6 +674,7 @@ button.slot-button {
 }
 
 html.quality-low .panel,
+html.quality-low .install-hint,
 html.quality-low .overlay-panel,
 html.quality-low .toast {
   background: var(--panel);
@@ -1083,7 +1102,8 @@ html.reduce-motion .qb-slot.is-locked {
 /* ------------------------------------------------- SPEC-028: quick picker */
 .quick-picker {
   position: absolute;
-  bottom: 120px;
+  /* SPEC-015 AC-27: the home indicator pushes the whole stack up with the bar. */
+  bottom: max(120px, calc(env(safe-area-inset-bottom) + 108px));
   left: 50%;
   transform: translateX(-50%);
   display: flex;
@@ -1696,6 +1716,64 @@ html.reduce-motion .dialogue-dim {
 
 .update-banner.is-visible {
   display: block;
+}
+
+/* SPEC-015 AC-55: the iOS "Add to Home Screen" explainer. A dismissible sheet
+   rather than a modal — the player may ignore it and keep playing — anchored
+   to the bottom edge, so it clears the home indicator itself (AC-27).
+
+   It wears §4.5's glass without carrying the `.panel` class, the way
+   `.overlay-panel` above does and for the same reason: this sheet is mounted
+   for the page's lifetime, ahead of the layer divs the scenes render into, so
+   a `.panel` on it would answer `document.querySelector('.panel')` in every
+   scene. The declarations are `.panel`'s, through the same tokens. */
+.install-hint {
+  position: fixed;
+  left: 50%;
+  bottom: max(16px, calc(env(safe-area-inset-bottom) + 8px));
+  transform: translateX(-50%);
+  width: min(30em, calc(100% - 32px));
+  padding: 14px 16px;
+  pointer-events: auto;
+  z-index: 56;
+  background: var(--panel-glass);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+  border: 1px solid var(--frame-edge);
+  border-radius: 0;
+  clip-path: polygon(
+    var(--frame-cut) 0,
+    calc(100% - var(--frame-cut)) 0,
+    100% var(--frame-cut),
+    100% calc(100% - var(--frame-cut)),
+    calc(100% - var(--frame-cut)) 100%,
+    var(--frame-cut) 100%,
+    0 calc(100% - var(--frame-cut)),
+    0 var(--frame-cut)
+  );
+  box-shadow:
+    inset 0 0 0 1px var(--edge-glow),
+    0 8px 24px rgba(0, 0, 0, 0.45);
+  color: var(--ink);
+}
+
+.install-hint.is-hidden {
+  display: none;
+}
+
+.install-hint-title {
+  margin: 0 0 8px;
+  font-weight: 600;
+  color: var(--accent);
+}
+
+.install-hint-steps {
+  margin: 0 0 12px;
+  padding-left: 1.2em;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  color: var(--ink-dim);
 }
 
 /* ---------------------------------------------------------------- endings */
@@ -2866,7 +2944,7 @@ button.hud-button {
 .flight-skip-hint {
   position: absolute;
   left: 50%;
-  bottom: 12%;
+  bottom: max(12%, calc(env(safe-area-inset-bottom) + 12px));
   transform: translateX(-50%);
   font-size: 13px;
   color: var(--ink-dim);
@@ -2959,7 +3037,7 @@ button.hud-button {
 .film-describe {
   position: absolute;
   left: 50%;
-  bottom: 32%;
+  bottom: max(32%, calc(env(safe-area-inset-bottom) + 12px));
   transform: translateX(-50%);
   width: min(44em, 92%);
   margin: 0;
@@ -2977,7 +3055,8 @@ button.hud-button {
 .film-caption {
   position: absolute;
   left: 50%;
-  bottom: 3%;
+  /* AC-27: 3 % of a landscape phone is under the home indicator. */
+  bottom: max(3%, calc(env(safe-area-inset-bottom) + 10px));
   transform: translateX(-50%);
   max-width: min(44em, 96%);
   padding: 8px 14px;
@@ -3138,7 +3217,8 @@ html.reduce-motion .film-describe {
 .chapter-card {
   position: fixed;
   left: 50%;
-  top: 18%;
+  /* SPEC-015 AC-27: 18 % of a short landscape phone is inside the notch. */
+  top: max(18%, calc(env(safe-area-inset-top) + 12px));
   transform: translateX(-50%);
   z-index: 54;
   width: min(40em, 92%);
@@ -3236,7 +3316,7 @@ html.reduce-motion .reveal-bar {
 .reveal-title {
   position: absolute;
   left: 50%;
-  top: 16%;
+  top: max(16%, calc(env(safe-area-inset-top) + 12px));
   transform: translateX(-50%);
   width: min(40em, 92%);
   text-align: center;
@@ -3279,7 +3359,7 @@ html.reduce-motion .reveal-name.is-glitched {
      it: in a film the caption drops below the 16:9 picture, and there is no
      picture here to drop below. */
   top: auto;
-  bottom: 12%;
+  bottom: max(12%, calc(env(safe-area-inset-bottom) + 12px));
   transform: translateX(-50%);
 }
 

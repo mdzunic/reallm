@@ -15,7 +15,7 @@ import { makeProjectile, type ProjectileEntity } from '@/entities/Projectile';
 import { makeDeployable, type DeployableEntity } from '@/entities/Deployable';
 import { INSTANCES_PER_PART } from '@/views/ProceduralMeshes';
 import { groundLayer } from '@/views/ProceduralTextures';
-import { SurfaceView, type SurfaceFrame, type ViewLayout, type ViewPickup } from '@/views/SurfaceView';
+import { presetOf, SurfaceView, type SurfaceFrame, type ViewLayout, type ViewPickup } from '@/views/SurfaceView';
 
 const LAYOUT: ViewLayout = {
   shelters: [],
@@ -883,5 +883,15 @@ describe('SPEC-030 — shelter instancing and the occupied roof (AC-40, AC-41, A
     );
     view.updateWallVisibility(nothing);
     expect(view.wallVisible).toBe(0);
+  });
+});
+
+// SPEC-015 AC-5: the scatter cap's preset inference reads `maxParticles`
+// alone, so the three thresholds and the three shipped rows have to agree.
+describe('presetOf (SPEC-015 AC-5)', () => {
+  it('maps every shipped preset back to its own name', () => {
+    expect(presetOf(QUALITY.low)).toBe('low');
+    expect(presetOf(QUALITY.medium)).toBe('medium');
+    expect(presetOf(QUALITY.high)).toBe('high');
   });
 });

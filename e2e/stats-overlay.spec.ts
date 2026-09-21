@@ -1,9 +1,11 @@
 // The dev stats overlay (SPEC-002 §4.6, §6.2). Its content is a closed list —
-// sixteen rows and two buttons, nothing else — because every later performance
-// claim in this project is read off it. The fourteenth is SPEC-007's `persist`
-// row (§7, M7); the next two are SPEC-008's seed and layout hash (§7), which is
-// how "the same planet every landing" is checked. `e2e/SPEC-008.spec.ts` is
-// what asserts their content; here they only have to be present and formatted.
+// eighteen rows and two buttons, nothing else — because every later performance
+// claim in this project is read off it. SPEC-007's `persist` row is §7 (M7);
+// SPEC-008's seed and layout hash (§7) are how "the same planet every landing"
+// is checked, and `e2e/SPEC-008.spec.ts` asserts their content. The `update` and
+// `render` medians are SPEC-015 D-13: §5 budgets the simulation at ≤ 6 ms and
+// the draw at ≤ 8 ms on the surface, and a phone playtest has no profiler to
+// read them with. Here every row only has to be present and formatted.
 import { expect, test, type Page } from '@playwright/test';
 import { start } from './start';
 
@@ -13,6 +15,9 @@ const ROWS: ReadonlyArray<readonly [string, RegExp]> = [
   ['debug-frame-ms', /^ms \d+\.\d$/],
   ['debug-updates', /^upd [0-5]$/],
   ['debug-dropped', /^dropped \d+\.\d{2}s$/],
+  // SPEC-015 §5, D-13: the two rows §5's update/render budgets are stated in.
+  ['debug-update-ms', /^update \d+\.\d{2}ms$/],
+  ['debug-render-ms', /^render \d+\.\d{2}ms$/],
   ['debug-draws', /^draws \d+$/],
   ['debug-tris', /^tris \d+$/],
   ['debug-memory', /^geo \d+ tex \d+$/],
@@ -53,7 +58,7 @@ async function overlayChildren(page: Page): Promise<string[]> {
   );
 }
 
-test('holds exactly the sixteen rows and the two buttons, in order (AC-27 … AC-30)', async ({ page }) => {
+test('holds exactly the eighteen rows and the two buttons, in order (AC-27 … AC-30)', async ({ page }) => {
   await start(page, '/?debug');
 
   for (const [id, format] of ROWS) {

@@ -11,9 +11,11 @@
 // persisted: every trip starts at `maxHull`, which is §4.6's "restored at the
 // station and on landing" with no bookkeeping to get wrong.
 import * as THREE from 'three';
+import { clampTexture } from '@/core/Assets';
 import type { EventBus, GameEvents } from '@/core/Events';
 import type { InputState } from '@/core/Input';
 import { log } from '@/core/Log';
+import { holdWakeLock } from '@/core/WakeLock';
 import { newSave, type CharacterCreation, type Save } from '@/core/Save';
 import type { GameServices } from '@/core/Services';
 import type { SceneParams } from '@/core/StateMachine';
@@ -308,8 +310,14 @@ export class FlightScene extends UiScene<'flight'> {
     touch.show('flight');
     this.disposer.add(() => touch.dispose());
 
-    const rotate = new RotateOverlay(uiRootEl(), services.events);
+    // SPEC-015 §6 / E22: the same auto-pause the surface takes on a rotation
+    // into portrait, through the pause button's own path (AC-32).
+    const rotate = new RotateOverlay(uiRootEl(), services.events, {
+      onBlocked: () => void services.scenes.pause(),
+    });
     this.disposer.add(() => rotate.dispose());
+    // SPEC-015 §7, AC-38: held for the trip, released when the scene leaves.
+    this.disposer.add(holdWakeLock());
 
     // The recall flash and the landing skip hint are the scene's own layers —
     // flight shows no death panel and declines the shared overlay (SPEC-014).
@@ -370,6 +378,13 @@ export class FlightScene extends UiScene<'flight'> {
         const texture = await loader.loadAsync(url);
         texture.colorSpace = color ? THREE.SRGBColorSpace : THREE.NoColorSpace;
         texture.anisotropy = 4; // three clamps to what the GPU offers
+        // SPEC-015 §8, AC-8/AC-46: these maps never enter the asset cache — the
+        // scene owns and releases them — but the texture budget is per preset,
+        // not per loader. The destination sky is 2048 × 1536 and the planet
+        // equirect 2048 × 1024, which is the whole of the flight scene's GPU
+        // texture bill; uploading them at `medium`'s 1024 cap is what brings
+        // that row back inside its ≤ 30 MB budget.
+        clampTexture(texture, this.services.renderer.quality.textureMaxSize);
         if (!alive) {
           texture.dispose();
           return null;
@@ -623,6 +638,9 @@ export class FlightScene extends UiScene<'flight'> {
       // SPEC-020 20-g: how far the sky window has shifted toward the accent,
       // so the storm tint is readable from outside the renderer.
       info['skyTint'] = Number((this.#view?.stormTint ?? 0).toFixed(2));
+      // SPEC-015 AC-39: the degrees the horizon is rolled by, after the
+      // reduce-motion clamp — 8° is the ceiling the criterion names.
+      info['roll'] = Number((this.#view?.cameraRollDeg ?? 0).toFixed(2));
     }
     return info;
   }

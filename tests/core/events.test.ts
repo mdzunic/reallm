@@ -589,6 +589,9 @@ const NAMES: Record<keyof GameEvents, true> = {
   'flight:recalled': true,
   'ui:toast': true,
   'ui:orientation': true,
+  // SPEC-015 §10 / AC-51: the `prompt`-mode update signal, and AC-55's hint.
+  'app:update-ready': true,
+  'app:install-hint': true,
 };
 
 /** AC-25c: the concrete class satisfies the structural port `core/Services.ts` keeps. */
@@ -596,7 +599,8 @@ const port: ServicesEventBus = new EventBus<GameEvents>();
 
 describe('GameEvents (§3.2)', () => {
   it('is exactly the canonical table', () => {
-    expect(Object.keys(NAMES)).toHaveLength(57);
+    // 57 before SPEC-015, plus `app:update-ready` and `app:install-hint`.
+    expect(Object.keys(NAMES)).toHaveLength(59);
   });
 
   it('still carries the nine names SPEC-002 and SPEC-003 already emit', () => {

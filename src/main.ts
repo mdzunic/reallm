@@ -3,6 +3,7 @@
 // (SPEC-001 §4), so the overlays and the scene factory are built here and
 // injected into `Game`.
 import './style.css';
+import { registerSW } from 'virtual:pwa-register';
 import { createAudio } from '@/core/Audio';
 import { EventBus, type GameEvents } from '@/core/Events';
 import { DEFAULT_SEED, Game, parseFlags, SIMULATED_RESTORE_MS } from '@/core/Game';
@@ -11,6 +12,7 @@ import { log } from '@/core/Log';
 import { RngRoot } from '@/core/Rng';
 import { SaveStore } from '@/core/Save';
 import { createSettings } from '@/core/Settings';
+import { offerUpdate } from '@/core/Updates';
 import type { SceneId } from '@/core/StateMachine';
 import { ASSETS } from '@/data/assets';
 import { GAME_SCENES } from '@/scenes/index';
@@ -19,7 +21,8 @@ import { ContextLostOverlay } from '@/ui/ContextLostOverlay';
 import { uiLayers } from '@/ui/dom';
 import { StatsOverlay } from '@/ui/StatsOverlay';
 import { TransitionOverlay } from '@/ui/TransitionOverlay';
-import { UpdateOverlay } from '@/ui/UpdateOverlay';
+import { InstallHintOverlay } from '@/ui/InstallHint';
+import { UPDATE_BANNER_TEXT, UpdateOverlay } from '@/ui/UpdateOverlay';
 
 const canvas = document.getElementById('game');
 if (!(canvas instanceof HTMLCanvasElement)) throw new Error('index.html must carry <canvas id="game">');
@@ -102,8 +105,40 @@ const audio = createAudio({
 // The overlay buttons need the game they drive, and the game needs the overlay:
 // the simulators reach it late, through a click, so a holder is enough.
 let running: Game | undefined;
-// SPEC-014 AC-103: dormant until M7's service worker gives it a signal.
-new UpdateOverlay(uiRoot);
+/**
+ * SPEC-014 AC-103 / SPEC-015 D-10: the banner listens to `app:update-ready`,
+ * which the service-worker registration emits. In `registerType: 'prompt'` a
+ * waiting worker never takes over by itself, so nothing reloads the page on its
+ * own and `serviceWorker.controllerchange` never fires — which is why the
+ * signal is a typed event and not that listener (15-c).
+ */
+new UpdateOverlay(uiRoot, events);
+/** SPEC-015 AC-55: the two taps iOS needs, raised by the hint of SPEC-007 §4.7. */
+new InstallHintOverlay(uiRoot, events);
+
+/**
+ * SPEC-015 §10 / AC-51 — what happens when a new build has finished
+ * downloading and is waiting. It is *offered*, never applied: the banner says
+ * so, the menu and the station grow an `Update` button, and the page reloads
+ * only when the player presses one (15-c, AC-52).
+ */
+export function offerAppUpdate(apply: () => void): void {
+  offerUpdate(apply);
+  events.emit('ui:toast', { text: UPDATE_BANNER_TEXT, kind: 'info', ms: 8000 });
+  events.emit('app:update-ready');
+}
+
+/**
+ * The registration itself (AC-51). `virtual:pwa-register` is the PWA plugin's
+ * module: a stub in a dev server, where no worker is registered at all, and the
+ * real thing in a build. `registerType: 'prompt'` means `onNeedRefresh` is the
+ * only signal — a waiting build never takes over by itself, so
+ * `serviceWorker.controllerchange` never fires and the typed `app:update-ready`
+ * event is what the UI listens to instead (D-10).
+ */
+const updateSW = registerSW({
+  onNeedRefresh: () => offerAppUpdate(() => void updateSW(true)),
+});
 
 /**
  * The `ui:toast` bridge (SPEC-014 §4.6): systems that may not import `ui/` —
@@ -173,6 +208,12 @@ if (import.meta.env.DEV) {
     toast: (text: string, kind?: GameEvents['ui:toast']['kind'], ms?: number) =>
       events.emit('ui:toast', { text, kind, ms }),
     trace: () => game.trace(),
+    /**
+     * SPEC-015 AC-52: stands in for the service worker so the update flow is
+     * testable in a dev server, which registers none — the banner, the menu and
+     * station buttons, and that pressing one calls back exactly once.
+     */
+    offerUpdate: (apply: () => void) => offerAppUpdate(apply),
     loseContext: (restoreAfterMs: number | null) => game.loseContext(restoreAfterMs),
     stop: () => game.stop(),
   };
