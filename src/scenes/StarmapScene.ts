@@ -24,9 +24,10 @@ import {
 import { Economy } from '@/systems/Economy';
 import { Progression } from '@/systems/Progression';
 import { departureDue, departureKey } from '@/systems/StoryBeats';
-import { departReason, formatTime, missionStatus, requirementText } from '@/systems/UiHelpers';
+import { runSkip } from '@/systems/Flight';
+import { departReason, formatTime, missionStatus, requirementText, skipRefusalText } from '@/systems/UiHelpers';
 import { director } from '@/scenes/Director';
-import { confirmSheet } from '@/ui/ConfirmSheet';
+import { choiceSheet } from '@/ui/ConfirmSheet';
 import { el, h, testId } from '@/ui/dom';
 import type { Look } from '@/core/Quality';
 import { NEUTRAL_SKY } from '@/views/Environment';
@@ -89,9 +90,21 @@ export class StarmapScene extends UiScene<'starmap'> {
     if (data !== null) {
       const progression = new Progression(data, this.services.events);
       this.#economy = new Economy(data, this.services.events, progression, this.services.save);
+      // SPEC-032 §4.7: the service override waives the unlocks, kept in step.
+      this.#economy.serviceMode = this.services.settings.serviceMode;
     }
     this.#buildMap();
     this.#mountUi();
+    this.disposer.add(
+      this.services.events.on('settings:changed', ({ patch }) => {
+        if (patch.serviceMode === undefined || this.#economy === null) return;
+        // The map has no settings panel of its own, so the globes built on
+        // enter stay as they are; the DOM that decides a departure follows.
+        this.#economy.serviceMode = patch.serviceMode;
+        this.#layoutNodes();
+        this.#renderInfo();
+      }, this),
+    );
     this.disposer.add(this.services.events.on('renderer:resized', () => this.#layoutNodes(), this));
     const onKey = (event: KeyboardEvent): void => this.#onArrows(event);
     document.addEventListener('keydown', onKey);
@@ -413,7 +426,11 @@ export class StarmapScene extends UiScene<'starmap'> {
     );
   }
 
-  /** AC-55: fuel and the active missions on the sheet; pay, then fly. */
+  /**
+   * AC-55: fuel and the active missions on the sheet; pay, then fly. SPEC-032
+   * §4.4: the sheet also offers `Skip the run`, refused with its reason when
+   * `runSkip` says so; both choices pay through the same re-validation.
+   */
   #depart(): void {
     if (this.#leaving) return;
     const economy = this.#economy;
@@ -424,24 +441,42 @@ export class StarmapScene extends UiScene<'starmap'> {
     const active = data.progress.missionsActive
       .map((entry): string | undefined => MISSIONS[entry.id]?.title)
       .filter((title): title is string => title !== undefined);
-    void confirmSheet(
+    // §4.7.3: service mode lets any run skip; a flight mission it waives is
+    // named in the body, because its objectives will not advance.
+    const service = this.services.settings.serviceMode;
+    const skip = runSkip(data, planet, { service });
+    const rule = runSkip(data, planet);
+    const waived = service && !rule.ok && rule.reason === 'flight_mission';
+    const lines = [
+      // SPEC-031 §4.12: the tank is named next to the charge (AC-31).
+      `Fuel: ${fuel} oil, charged now — you hold ${data.resources.oil}. The return trip is free.`,
+      active.length > 0 ? `Active: ${active.join(', ')}` : null,
+      waived ? 'Objectives that need a flown run will not advance.' : null,
+    ].filter((line): line is string => line !== null);
+    // Re-validated on the tap: the charge itself is the check (AC-44's twin),
+    // and a skip is charged exactly like a flown run.
+    const pay = (): boolean => {
+      if (!economy.payFuel(planet)) {
+        this.ui.toast(departReason(economy.canDepart(planet)) || 'Cannot depart', 'error');
+        return false;
+      }
+      return true;
+    };
+    void choiceSheet(
       this.ui,
       {
         title: `Depart for ${PLANETS[planet].name}?`,
-        // SPEC-031 §4.12: the tank is named next to the charge (AC-31).
-        body: `Fuel: ${fuel} oil, charged now — you hold ${data.resources.oil}. The return trip is free.${active.length > 0 ? `\nActive: ${active.join(', ')}` : ''}`,
+        body: lines.join('\n'),
         confirmText: 'Depart',
+        secondary: {
+          text: 'Skip the run',
+          testid: 'depart-skip',
+          reason: skip.ok ? null : skipRefusalText(skip.reason, skip.mission),
+        },
       },
-      // Re-validated on the tap: the charge itself is the check (AC-44's twin).
-      () => {
-        if (!economy.payFuel(planet)) {
-          this.ui.toast(departReason(economy.canDepart(planet)) || 'Cannot depart', 'error');
-          return false;
-        }
-        return true;
-      },
-    ).then(async (paid) => {
-      if (!paid) return;
+      { onPrimary: pay, onSecondary: pay },
+    ).then(async (choice) => {
+      if (choice === null) return;
       this.#leaving = true;
       this.#renderInfo(); // AC-56: Depart greys out for the ride
       // SPEC-023 §4.1: the departure film plays here — after the fuel is paid,
@@ -454,7 +489,8 @@ export class StarmapScene extends UiScene<'starmap'> {
         beats.session.add(departureKey(planet));
         await beats.playFilm('departure', { musicAfter: null });
       }
-      void this.services.go('flight', { destination: planet }).then((went) => {
+      const params = choice === 'secondary' ? { destination: planet, skipRun: true } : { destination: planet };
+      void this.services.go('flight', params).then((went) => {
         if (!went) {
           this.#leaving = false;
           this.#renderInfo();
