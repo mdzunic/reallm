@@ -27,6 +27,42 @@ function aimPoint(page: Page): { x: number; y: number } {
   return { x: Math.round(w / 2 + 180), y: Math.round(h / 2 - 120) };
 }
 
+/**
+ * Plant one explosive with KeyG and wait for the held count to fall to
+ * `expected` — one press per attempt, and nothing is pressed while the drop is
+ * being waited for.
+ *
+ * The press is a DOM event the game consumes on its next frame, so a count read
+ * in the same step that pressed still reads the state from *before* it; and a
+ * press inside the 0.5 s explosive cooldown (§4.8) is refused silently. Pressing
+ * inside a poll predicate combines the two badly: once the poll's backoff grew
+ * past the cooldown, every retry spent another mine while the poll was still
+ * comparing a stale count, so six placements could spend all seven mines and the
+ * loop then waited out its timeout on a count that had already gone past it.
+ * That is what failed on a SwiftShader container at ~27 fps (expected 4, got 1);
+ * how fast frames come is not what this case is about.
+ *
+ * Here a spend can happen at most once per attempt, and a press lost to the
+ * cooldown is retried well outside it, so the assertion is the same on any host:
+ * each press spends exactly one mine.
+ */
+async function plant(page: Page, expected: number): Promise<void> {
+  for (let attempt = 0; attempt < 4; attempt++) {
+    if ((await info(page))['qExplosive'] === expected) return;
+    // Let the 0.5 s cooldown from the previous placement run out first.
+    await page.waitForTimeout(700);
+    await page.keyboard.press('KeyG');
+    try {
+      await expect.poll(async () => (await info(page))['qExplosive'], { timeout: 2_500 }).toBe(expected);
+      return;
+    } catch {
+      // Refused inside the cooldown — it spent nothing, so press again.
+    }
+  }
+  // Out of attempts: fail on the real count rather than on a timeout.
+  expect((await info(page))['qExplosive']).toBe(expected);
+}
+
 test('surface-arsenal equips the chaingun and the rocket and stocks the explosives (§6.2 case 1)', async ({ page }) => {
   await start(page, URL);
   await settle(page);
@@ -140,20 +176,8 @@ test('the seventh mine is refused at the six-mine limit and spends nothing (§6.
   await expect(page.getByTestId('qb-explosive')).toContainText('Mine');
   expect((await info(page))['qExplosive']).toBe(7);
 
-  // Six placements: a press inside the 0.5 s explosive cooldown is refused
-  // silently, so each is retried until the count drops (game time lags wall
-  // time under parallel load).
-  for (let placed = 1; placed <= 6; placed++) {
-    await expect
-      .poll(
-        async () => {
-          await page.keyboard.press('KeyG');
-          return (await info(page))['qExplosive'];
-        },
-        { timeout: 10_000 },
-      )
-      .toBe(7 - placed);
-  }
+  // Six placements, each spending exactly one mine.
+  for (let placed = 1; placed <= 6; placed++) await plant(page, 7 - placed);
   await expect.poll(async () => (await info(page))['mines'], { timeout: 10_000 }).toBe(6);
 
   // The seventh is refused whole — pressed until it lands outside the
