@@ -33,6 +33,12 @@ describe('the worst-case campaign run', () => {
     run = runCampaign({ ending: 'ending_stay' });
   });
 
+  it('runs with the service override off (SPEC-032)', () => {
+    // Service mode unlocks every world and waives the skip rules; a campaign
+    // proven with it on proves nothing about the shipped game.
+    expect(run.serviceModeSeen).toBe(false);
+  });
+
   it('finishes, with nothing refusing along the way', () => {
     expect(run.problems).toEqual([]);
     expect(run.missionsDone).toEqual(MAIN_MISSIONS);

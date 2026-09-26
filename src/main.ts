@@ -12,6 +12,7 @@ import { log } from '@/core/Log';
 import { RngRoot } from '@/core/Rng';
 import { SaveStore } from '@/core/Save';
 import { createSettings } from '@/core/Settings';
+import { SERVICE_OFF_TEXT, SERVICE_ON_TEXT } from '@/systems/Service';
 import { offerUpdate } from '@/core/Updates';
 import type { SceneId } from '@/core/StateMachine';
 import { ASSETS } from '@/data/assets';
@@ -148,6 +149,29 @@ const updateSW = registerSW({
  */
 const toastOwner = {};
 events.on('ui:toast', ({ text, kind, ms }) => uiLayers(uiRoot).toast(text, kind ?? 'info', ms), toastOwner);
+
+/**
+ * SPEC-032 §4.8: the service override's badge, mounted once here in the
+ * overlay layer so every scene shows it, and toggled from the setting. The
+ * toasts for either direction come from the same place, so the menu's two
+ * gestures and the settings panel's off switch all say the same thing.
+ */
+const serviceBadge = document.createElement('div');
+serviceBadge.className = 'service-badge';
+serviceBadge.dataset['testid'] = 'service-badge';
+serviceBadge.textContent = 'SERVICE';
+serviceBadge.setAttribute('aria-hidden', 'true');
+uiLayers(uiRoot).mount(serviceBadge, 'overlay');
+serviceBadge.classList.toggle('is-visible', settings.serviceMode);
+events.on(
+  'settings:changed',
+  ({ patch }) => {
+    if (patch.serviceMode === undefined) return;
+    serviceBadge.classList.toggle('is-visible', patch.serviceMode);
+    uiLayers(uiRoot).toast(patch.serviceMode ? SERVICE_ON_TEXT : SERVICE_OFF_TEXT, patch.serviceMode ? 'good' : 'info');
+  },
+  toastOwner,
+);
 const statsOverlay = new StatsOverlay(uiRoot, {
   onLoseContext: (restoreAfterMs) => running?.loseContext(restoreAfterMs),
   restoreAfterMs: SIMULATED_RESTORE_MS,

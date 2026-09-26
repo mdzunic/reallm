@@ -72,6 +72,11 @@ export interface RunReport {
   /** The least oil the hold held, sampled after every jump and every mission. */
   lowestOil: number;
   events: Array<{ name: keyof GameEvents; payload: unknown }>;
+  /**
+   * SPEC-032 AC: whether the simulation's `Economy` ever ran with the service
+   * override on. The guarantees above mean nothing if it did.
+   */
+  serviceModeSeen: boolean;
 }
 
 const missions: readonly MissionDef<MissionId>[] = Object.values(MISSIONS);
@@ -108,6 +113,7 @@ export function runCampaign(options: RunOptions): RunReport {
     purchases: [],
     lowestOil: save.resources.oil,
     events,
+    serviceModeSeen: economy.serviceMode,
   };
 
   for (const chapter of CHAPTERS) {
@@ -118,6 +124,7 @@ export function runCampaign(options: RunOptions): RunReport {
     report.subsidyOil += economy.applyStationSubsidy();
     buyLoadout(economy, chapter, report);
 
+    report.serviceModeSeen ||= economy.serviceMode;
     const depart = economy.canDepart(planet);
     if (!depart.ok) {
       report.problems.push(
@@ -147,6 +154,7 @@ export function runCampaign(options: RunOptions): RunReport {
     save.progress.location = 'station';
   }
 
+  report.serviceModeSeen ||= economy.serviceMode;
   return report;
 }
 

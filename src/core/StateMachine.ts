@@ -19,7 +19,8 @@ export interface SceneParams {
   /** The oil subsidy is computed in `Station.enter()` (SPEC-010 §4.6), never passed in. */
   station: { arrivedFrom?: PlanetId; recalled?: boolean };
   starmap: void;
-  flight: { destination: PlanetId };
+  /** `skipRun`: the depart sheet's `Skip the run` — autopilot to the landing (SPEC-032 §4.4). */
+  flight: { destination: PlanetId; skipRun?: boolean };
   surface: { planet: PlanetId; firstLanding: boolean };
 }
 

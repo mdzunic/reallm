@@ -664,6 +664,17 @@ export class SurfaceScene extends UiScene<'surface'> {
     const bus = services.events as EventBus<GameEvents>;
     const progression = new Progression(save, bus);
     const economy = new Economy(save, bus, progression, services.save);
+    // SPEC-032 §4.7: the service override, kept in step with the setting.
+    economy.serviceMode = services.settings.serviceMode;
+    this.disposer.add(
+      bus.on(
+        'settings:changed',
+        ({ patch }) => {
+          if (patch.serviceMode !== undefined) economy.serviceMode = patch.serviceMode;
+        },
+        this,
+      ),
+    );
     this.#economy = economy;
     const combat = new Combat(world, save, economy, progression, bus, {
       loot: visit.fork('loot'),

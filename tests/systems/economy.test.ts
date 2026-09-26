@@ -827,3 +827,49 @@ describe('totals()', () => {
     });
   });
 });
+
+describe('service mode (SPEC-032 §4.7)', () => {
+  it('starts off', () => {
+    expect(world().economy.serviceMode).toBe(false);
+  });
+
+  it('unlocks every planet and leaves only the fuel refusal', () => {
+    const { economy, data } = world();
+    economy.serviceMode = true;
+    expect(economy.isUnlocked('eden')).toBe(true);
+    data.resources.oil = 0;
+    expect(economy.canDepart('eden')).toEqual({ ok: false, reason: 'fuel', needOil: economy.fuelCost('eden') });
+    data.resources.oil = economy.fuelCost('eden');
+    expect(economy.canDepart('eden')).toEqual({ ok: true });
+    // The real requirements are still readable, for the info panel.
+    expect(economy.missingRequirements(PLANETS.eden.unlock)).toEqual([...PLANETS.eden.unlock]);
+    // The jump costs what it always costs.
+    expect(economy.payFuel('eden')).toBe(true);
+    expect(data.resources.oil).toBe(0);
+  });
+
+  it('behaves exactly as before with it off', () => {
+    const { economy } = world();
+    economy.serviceMode = true;
+    economy.serviceMode = false;
+    expect(economy.isUnlocked('eden')).toBe(false);
+    expect(economy.canDepart('eden')).toEqual({ ok: false, reason: 'locked', missing: [...PLANETS.eden.unlock] });
+  });
+
+  it('changes no price, discount, fuel cost or subsidy', () => {
+    const off = world();
+    const on = world();
+    on.economy.serviceMode = true;
+    for (const planet of Object.keys(PLANETS) as Array<keyof typeof PLANETS>) {
+      expect(on.economy.fuelCost(planet)).toBe(off.economy.fuelCost(planet));
+    }
+    for (const kind of ['ship', 'gear', 'companion', 'craft'] as const) {
+      expect(on.economy.discount(kind)).toBe(off.economy.discount(kind));
+    }
+    expect(on.economy.price('ship', 'shield', 2)).toEqual(off.economy.price('ship', 'shield', 2));
+    expect(on.economy.price('gear', 'weapon_laser')).toEqual(off.economy.price('gear', 'weapon_laser'));
+    off.data.resources.oil = 0;
+    on.data.resources.oil = 0;
+    expect(on.economy.applyStationSubsidy()).toBe(off.economy.applyStationSubsidy());
+  });
+});

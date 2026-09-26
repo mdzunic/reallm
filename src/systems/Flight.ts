@@ -34,7 +34,9 @@ import {
   type DamageSource,
   type EnemyDef,
   type EnemyId,
+  type MissionId,
   type PlanetDef,
+  type PlanetId,
 } from '@/data/index';
 import type { Economy } from '@/systems/Economy';
 import { FLIGHT_MISSION_CONTEXT, type Missions } from '@/systems/Missions';
@@ -140,6 +142,14 @@ export const RAIL = { baseSpeed: 60, lateralSpeed: 14, lateralAccel: 40, spawnDe
 
 /** The launch phase: cockpit shake, no hazards, HUD boot (§4.1). */
 export const LAUNCH_SECONDS = 3;
+/**
+ * SPEC-032 §4.1: the launch shot inside `LAUNCH_SECONDS` — the hold behind the
+ * tug, then the eased push into the cockpit; the remaining 0.4 s settles.
+ */
+export const LAUNCH_HOLD_SECONDS = 1.1;
+export const LAUNCH_PUSH_SECONDS = 1.5;
+/** SPEC-032 §4.5: how long the autopilot card covers a skipped run. */
+export const AUTOPILOT_SECONDS = 1.2;
 /** How long the recall explosion holds the screen before the station (§4.1). */
 export const EXPLOSION_SECONDS = 1.5;
 /** The skippable landing cutscene (§4.1). */
@@ -197,6 +207,43 @@ interface WaveGroup {
 }
 
 const clamp = (value: number, lo: number, hi: number): number => Math.min(hi, Math.max(lo, value));
+
+// ------------------------------------------------------ SPEC-032 §4.3: skips
+
+export type SkipRefusal = 'never_flown' | 'flight_mission';
+export interface SkipOptions {
+  /** Service mode ignores both refusals (SPEC-032 §4.7). */
+  readonly service?: boolean;
+}
+export type SkipResult =
+  | { readonly ok: true }
+  | { readonly ok: false; readonly reason: SkipRefusal; readonly mission?: MissionId };
+
+/**
+ * The active mission that runs in the flight scene on the way to `planet`, if
+ * any — `c4_s2` to Ferrum, `c5_m1` to the Hive (SPEC-009 §6).
+ */
+export function activeFlightMission(save: Save, planet: PlanetId): MissionId | null {
+  for (const entry of save.progress.missionsActive) {
+    const def = MISSIONS[entry.id] as (typeof MISSIONS)[MissionId] | undefined;
+    if (def !== undefined && def.planet === planet && def.scene === 'flight') return entry.id;
+  }
+  return null;
+}
+
+/**
+ * SPEC-032 §4.3: may the run to `planet` be skipped? Only a route the save has
+ * landed on (`visits ≥ 1`), and never one an active flight-scene mission for
+ * that planet *is* — `c4_s2` and `c5_m1` would otherwise complete by not
+ * being played (PLAN R10-2). Service mode waives both.
+ */
+export function runSkip(save: Save, planet: PlanetId, options?: SkipOptions): SkipResult {
+  if (options?.service === true) return { ok: true };
+  if ((save.progress.visits[planet] ?? 0) < 1) return { ok: false, reason: 'never_flown' };
+  const mission = activeFlightMission(save, planet);
+  if (mission !== null) return { ok: false, reason: 'flight_mission', mission };
+  return { ok: true };
+}
 
 export class Flight {
   readonly ship: ShipState;
@@ -394,6 +441,37 @@ export class Flight {
     this.#regenShield(dt);
     // §4.8: survive timers are real seconds while alive — cruise and holding.
     this.#missions.update(dt, FLIGHT_MISSION_CONTEXT);
+  }
+
+  /**
+   * SPEC-032 §4.5: fast-forward with idle input, the sky cleared and the
+   * shield topped before every step — so no rock, ship or ion storm can end
+   * the trip early — until it is over or `limitSeconds` of simulated time have
+   * passed. The same `update` steps a flown trip takes, so `flight:arrived`,
+   * the missions' timers and the arrival rule (E12) are the flown ones.
+   * Returns the seconds simulated; 0 for a trip that is already over.
+   */
+  fastForward(limitSeconds: number): number {
+    const idle: FlightInput = {
+      steerX: 0,
+      steerY: 0,
+      fire: false,
+      aimX: this.ship.x,
+      aimY: this.ship.y,
+      throttleUp: false,
+      throttleDown: false,
+      autoFire: false,
+      mouseSteer: false,
+    };
+    const dt = 1 / 60;
+    let simulated = 0;
+    while (simulated < limitSeconds && this.#phase !== 'arrived' && this.#phase !== 'recalled') {
+      this.hazards.clear();
+      this.ship.shield = this.ship.maxShield; // storms only bite through an empty shield (§4.5)
+      this.update(dt, idle);
+      simulated += dt;
+    }
+    return simulated;
   }
 
   // ----------------------------------------------------------------- steering

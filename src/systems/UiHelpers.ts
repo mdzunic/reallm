@@ -30,6 +30,7 @@ import {
   type WeatherId,
 } from '@/data/index';
 import { discountTokens, missingRequirements, type DepartResult, type FailReason } from '@/systems/Economy';
+import type { SkipRefusal } from '@/systems/Flight';
 import type { SlotView } from '@/systems/Loadout';
 import { campaignLocked } from '@/systems/Missions';
 import type { Class, Item, QuickSlot, WeaponSlot } from '@/data/index';
@@ -282,6 +283,16 @@ export function departReason(result: DepartResult): string {
     default:
       return requirementText(first);
   }
+}
+
+/**
+ * SPEC-032 §4.3: why `Skip the run` is refused, in the line printed under the
+ * disabled control. A flight mission is named by its title.
+ */
+export function skipRefusalText(refusal: SkipRefusal, mission?: MissionId): string {
+  if (refusal === 'never_flown') return 'Autopilot needs a route — fly this run once.';
+  const title = mission === undefined ? undefined : (MISSIONS[mission] as MissionDef | undefined)?.title;
+  return `${title ?? 'This mission'} needs a flown run.`;
 }
 
 /**
