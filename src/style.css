@@ -804,8 +804,15 @@ html.quality-low .toast {
 
 .sheet-actions {
   display: flex;
+  flex-wrap: wrap;
   gap: 10px;
   justify-content: flex-end;
+}
+
+/* SPEC-032 §4.4: why the sheet's second choice is refused, under the row. */
+.sheet-reason {
+  margin: 10px 0 0;
+  text-align: right;
 }
 
 @keyframes sheet-in {
