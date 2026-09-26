@@ -19,6 +19,13 @@ export const CODE_IDLE_MS = 2_000;
 /** The wallet floor the supplies top up to. */
 export const SERVICE_TOKENS = 5_000;
 
+/**
+ * The two toasts (§4.6). Diegetic on purpose: the endings own the fourth wall
+ * (PLAN §12), so nothing here names a simulation, an instance or a model.
+ */
+export const SERVICE_ON_TEXT = 'Service override accepted — requisition limits lifted.';
+export const SERVICE_OFF_TEXT = 'Service override released.';
+
 export interface CodeState {
   readonly typed: string;
   readonly at: number;

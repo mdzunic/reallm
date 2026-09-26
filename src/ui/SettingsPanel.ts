@@ -113,6 +113,7 @@ export class SettingsPanel {
         this.#toggleRow('settings-mouse-steer', 'Mouse steer (flight)', s.flightMouseSteer, (on) => s.setFlightMouseSteer(on)),
         this.#fullscreenRow(),
         this.#toggleRow('settings-show-fps', 'Show FPS', s.showFps, (on) => s.setShowFps(on)),
+        this.#serviceSection(),
         this.#backupSection(),
         this.#resetRow(),
         h(
@@ -311,6 +312,34 @@ export class SettingsPanel {
         testId(h('div', { class: 'settings-seg' }, ...buttons), 'settings-guidance'),
       ),
       h('div', { class: 'settings-row' }, h('span', { class: 'settings-note' }, 'First-time tips'), resetTips),
+    ) as HTMLDivElement;
+  }
+
+  // ---------------------------------------------------------------- service
+
+  /**
+   * SPEC-032 §4.8: the service override's section — only while it is on, so
+   * nothing here advertises it. The switch turns it off (the composition root
+   * toasts and hides the badge); nothing granted is taken back (E52).
+   */
+  #serviceSection(): HTMLDivElement | null {
+    const s = this.#deps.settings;
+    if (!s.serviceMode) return null;
+    return testId(
+      h(
+        'div',
+        { class: 'settings-section' },
+        this.#toggleRow('settings-service', 'Service', true, (on) => {
+          s.setServiceMode(on);
+          if (this.#open) this.#render();
+        }),
+        h(
+          'p',
+          { class: 'settings-note' },
+          'Earth Command service override: every world reachable, the hold kept full, and any run skippable.',
+        ),
+      ),
+      'settings-service-section',
     ) as HTMLDivElement;
   }
 
