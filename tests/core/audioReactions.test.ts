@@ -119,6 +119,9 @@ const EVENT_KEYS = [
   'player:healed',
   'player:died',
   'player:respawned',
+  // SPEC-034 §4.2, §4.6: both silent — the respawn and the burst say it.
+  'player:recalled',
+  'enemy:dismissed',
   'player:xp',
   'player:leveledUp',
   'tokens:changed',
@@ -457,12 +460,13 @@ describe('the reactions table is exhaustive over GameEvents (SPEC-006 §5)', () 
     );
   });
 
-  it('silences exactly the 40 events of §5.4 (AC-39; SPEC-015 added the two app: signals)', () => {
-    expect(AUDIO_SILENT.size).toBe(40);
+  it('silences exactly the 42 events of §5.4 (AC-39; SPEC-015 added the two app: signals)', () => {
+    // SPEC-034 §4.2, §4.6 added `player:recalled` and `enemy:dismissed`.
+    expect(AUDIO_SILENT.size).toBe(42);
   });
 
-  it('gives every one of the 59 event keys exactly one home (AC-40)', () => {
-    expect(EVENT_KEYS).toHaveLength(59);
+  it('gives every one of the 61 event keys exactly one home (AC-40)', () => {
+    expect(EVENT_KEYS).toHaveLength(61);
     const reacted = new Set<string>(REACTED_EVENTS);
     for (const key of EVENT_KEYS) {
       const hasSound = reacted.has(key);

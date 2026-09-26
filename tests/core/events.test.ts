@@ -546,6 +546,8 @@ const NAMES: Record<keyof GameEvents, true> = {
   'player:healed': true,
   'player:died': true,
   'player:respawned': true,
+  // SPEC-034 §4.2, §4.6.
+  'player:recalled': true,
   'player:xp': true,
   'player:leveledUp': true,
   'tokens:changed': true,
@@ -563,6 +565,7 @@ const NAMES: Record<keyof GameEvents, true> = {
   'shop:purchased': true,
   'enemy:spawned': true,
   'enemy:killed': true,
+  'enemy:dismissed': true,
   'boss:phase': true,
   'boss:defeated': true,
   'poi:discovered': true,
@@ -600,7 +603,8 @@ const port: ServicesEventBus = new EventBus<GameEvents>();
 describe('GameEvents (§3.2)', () => {
   it('is exactly the canonical table', () => {
     // 57 before SPEC-015, plus `app:update-ready` and `app:install-hint`.
-    expect(Object.keys(NAMES)).toHaveLength(59);
+    // SPEC-034 §4.2, §4.6 added `player:recalled` and `enemy:dismissed`.
+    expect(Object.keys(NAMES)).toHaveLength(61);
   });
 
   it('still carries the nine names SPEC-002 and SPEC-003 already emit', () => {

@@ -412,6 +412,35 @@ export function acceptMission(save: Save, def: MissionDef): boolean {
   return true;
 }
 
+/**
+ * SPEC-034 §4.15: pins `id` by moving its entry to the front of
+ * `progress.missionsActive` — the order the runtime already pins by, so the pin
+ * persists with no save field. False when the mission is not running.
+ */
+export function pinMission(save: Save, id: MissionId): boolean {
+  const list = save.progress.missionsActive;
+  const at = list.findIndex((entry) => entry.id === id);
+  if (at < 0) return false;
+  if (at > 0) {
+    const [entry] = list.splice(at, 1);
+    if (entry !== undefined) list.unshift(entry);
+  }
+  return true;
+}
+
+/**
+ * SPEC-034 §4.15: what is pinned — the front entry of `progress.missionsActive`,
+ * or, with a `planet`, the front entry among that planet's active missions,
+ * which is what its board rows badge.
+ */
+export function pinnedMission(save: Save, planet?: PlanetId): MissionId | null {
+  for (const entry of save.progress.missionsActive) {
+    if (planet !== undefined && MISSIONS[entry.id].planet !== planet) continue;
+    return entry.id;
+  }
+  return null;
+}
+
 /** Drops the mission from the active list; false when it was not running. */
 export function abandonMission(save: Save, id: MissionId): boolean {
   const at = save.progress.missionsActive.findIndex((entry) => entry.id === id);

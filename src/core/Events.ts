@@ -76,10 +76,16 @@ export type GameEvents = {
   'player:healed': { amount: number; hp: number };
   'player:died': { cause: DamageSource; scene: 'surface' | 'flight' };
   'player:respawned': void;
+  /** SPEC-034 §4.2: a confirmed `Recall to pad` — E4's respawn without the death. */
+  'player:recalled': Record<string, never>;
   'player:xp': { amount: number; total: number };
   'player:leveledUp': { level: number; tokens: number };
   'tokens:changed': { delta: number; total: number; reason: string };
-  'resource:collected': { resource: ResourceId; amount: number; total: number; blocked?: 'cargo_full' };
+  /**
+   * SPEC-034 §4.12: `amount` counts what the hold took *and* what was shipped
+   * home for an active collect objective; `shipped` is that second part.
+   */
+  'resource:collected': { resource: ResourceId; amount: number; total: number; blocked?: 'cargo_full'; shipped?: number };
   'resource:spent': { resource: ResourceId; amount: number; total: number; reason: string };
   'inventory:changed': { itemId: ItemId; qty: number };
   // SPEC-025 §3: the save carries three weapon slots, so the equip event names
@@ -97,6 +103,11 @@ export type GameEvents = {
   'shop:purchased': { kind: 'ship' | 'gear' | 'companion' | 'craft'; id: string; tier?: number };
   'enemy:spawned': { enemyId: EnemyId; elite: boolean };
   'enemy:killed': { enemyId: EnemyId; elite: boolean; x: number; z: number; xp: number };
+  /**
+   * SPEC-034 §4.6, E57: a boss's summon or a finished defence's wave survivor
+   * sent away — the death burst plays, but there is no kill: no XP, no loot.
+   */
+  'enemy:dismissed': { enemyId: EnemyId; x: number; z: number };
   'boss:phase': { boss: EnemyId; phase: number };
   'boss:defeated': { boss: EnemyId };
   'poi:discovered': { poi: PoiId; instance: number };
@@ -113,7 +124,7 @@ export type GameEvents = {
   'mission:accepted': { id: MissionId };
   'mission:stageStarted': { id: MissionId; stage: number };
   'mission:progress': { id: MissionId; stage: number; objective: number; value: number; target: number };
-  'mission:stageReset': { id: MissionId; stage: number; reason: 'death' | 'follower_died' | 'poi_destroyed' | 'reload' };
+  'mission:stageReset': { id: MissionId; stage: number; reason: 'death' | 'follower_died' | 'poi_destroyed' | 'recall' | 'reload' };
   'mission:completed': { id: MissionId; replay: boolean };
   'mission:abandoned': { id: MissionId };
   'flag:set': { flag: string };

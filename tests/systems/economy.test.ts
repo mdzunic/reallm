@@ -422,7 +422,7 @@ describe('the typed failure reasons (§3)', () => {
     // The last two are reported by the two calls that do not return a Result:
     // a pickup says why it stopped, and a departure says why it cannot leave.
     data.resources.wheat = economy.cargoCap();
-    expect(economy.addResource('wheat', 10, 'pickup')).toEqual({ added: 0, blocked: 10 });
+    expect(economy.addResource('wheat', 10, 'pickup')).toEqual({ added: 0, shipped: 0, blocked: 10 });
     const blocked = events.of('resource:collected').at(-1)?.blocked;
     if (blocked !== undefined) seen.add(blocked);
     const depart = economy.canDepart('vetra');
@@ -531,7 +531,7 @@ describe('cargo and resources (§4.5)', () => {
   it('pickups stop at the cap and report blocked (E3)', () => {
     const { economy, data, events } = world();
     data.resources.wheat = 380;
-    expect(economy.addResource('wheat', 50, 'pickup')).toEqual({ added: 20, blocked: 30 });
+    expect(economy.addResource('wheat', 50, 'pickup')).toEqual({ added: 20, shipped: 0, blocked: 30 });
     expect(data.resources.wheat).toBe(400);
     expect(events.of('resource:collected').at(-1)).toEqual({
       resource: 'wheat',
@@ -540,7 +540,7 @@ describe('cargo and resources (§4.5)', () => {
       blocked: 'cargo_full',
     });
     // Full: the pickup adds nothing and still says why.
-    expect(economy.addResource('wheat', 10, 'pickup')).toEqual({ added: 0, blocked: 10 });
+    expect(economy.addResource('wheat', 10, 'pickup')).toEqual({ added: 0, shipped: 0, blocked: 10 });
     expect(data.resources.wheat).toBe(400);
   });
 
@@ -548,7 +548,7 @@ describe('cargo and resources (§4.5)', () => {
     const { economy, data, events } = world();
     data.resources.oil = 400;
     for (const source of ['reward', 'voucher', 'subsidy'] as const) {
-      expect(economy.addResource('oil', 100, source)).toEqual({ added: 100, blocked: 0 });
+      expect(economy.addResource('oil', 100, source)).toEqual({ added: 100, shipped: 0, blocked: 0 });
     }
     expect(data.resources.oil).toBe(700);
     expect(events.of('resource:collected').every((entry) => entry.blocked === undefined)).toBe(true);

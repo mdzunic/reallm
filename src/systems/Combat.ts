@@ -539,7 +539,9 @@ export class Combat {
   #summonRing(e: EnemyEntity, enemy: EnemyId, count: number, radius: number): void {
     for (let k = 0; k < count; k++) {
       const angle = (k / count) * Math.PI * 2;
-      this.spawnEnemy(enemy, e.x + Math.cos(angle) * radius, e.z + Math.sin(angle) * radius, false);
+      const summon = this.spawnEnemy(enemy, e.x + Math.cos(angle) * radius, e.z + Math.sin(angle) * radius, false);
+      // SPEC-034 §4.6, E57: the summon belongs to this boss, and dies with it.
+      summon.summonedBy = e.id;
     }
   }
 
@@ -601,6 +603,8 @@ export class Combat {
     // the enemies it spawns into a wave run.
     e.lostTrack = 0;
     e.fromWave = false;
+    // SPEC-034 §4.6: `#summonRing` stamps its boss on the entities it makes.
+    e.summonedBy = 0;
     // Set immediately before the emit, so a subscriber can read the position.
     this.#lastSpawned = e;
     this.#events.emit('enemy:spawned', { enemyId: id, elite: isElite });

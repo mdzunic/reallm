@@ -218,12 +218,50 @@ export class SpawnDirector {
     return handle;
   }
 
-  stopWave(handle: WaveHandle): void {
+  /**
+   * SPEC-034 §4.6, E57: `dismiss` sends the wave's survivors away as well — a
+   * finished defence is over in the fiction, and the lines that follow it
+   * ("Rest") should not be interrupted by a straggler still biting the beacon.
+   * Each one plays its death burst and is recycled silently.
+   */
+  stopWave(handle: WaveHandle, options?: { dismiss?: boolean }): number {
     const at = this.#waves.findIndex((run) => run.handle === handle);
-    if (at < 0) return;
+    if (at < 0) return 0;
     const run = this.#waves[at] as WaveRun;
+    let dismissed = 0;
+    if (options?.dismiss === true) {
+      for (let i = 0; i < this.#enemies.size; i++) {
+        const e = this.#enemies.at(i);
+        if (e.state === 'dead' || !run.aliveIds.has(e.id)) continue;
+        this.#dismiss(e);
+        dismissed++;
+      }
+    }
     for (const id of run.aliveIds) this.#waveIds.delete(id);
     this.#waves.splice(at, 1);
+    return dismissed;
+  }
+
+  /**
+   * SPEC-034 §4.6, E57: every living summon of `bossEntityId` plays its death
+   * burst and goes back to the pool — no `enemy:killed`, no XP, no loot.
+   * Returns how many left. 34-d: a summon mid-attack lands no damage after this.
+   */
+  dismissSummons(bossEntityId: number): number {
+    let count = 0;
+    for (let i = 0; i < this.#enemies.size; i++) {
+      const e = this.#enemies.at(i);
+      if (e.state === 'dead' || e.summonedBy !== bossEntityId) continue;
+      this.#dismiss(e);
+      count++;
+    }
+    return count;
+  }
+
+  /** A silent recycle that still shows: the burst, without the kill (§4.6). */
+  #dismiss(e: EnemyEntity): void {
+    this.#events.emit('enemy:dismissed', { enemyId: e.def.id, x: e.x, z: e.z });
+    this.#recycle(e);
   }
 
   spawnBoss(boss: EnemyId, at: { x: number; z: number }): EnemyEntity {
@@ -300,6 +338,13 @@ export class SpawnDirector {
     const e = this.#spawn(id, x, z, elite);
     // SPEC-030 §4.6: wave groups ignore hiding; `spawnEnemy` reset it false.
     e.fromWave = true;
+    // SPEC-034 §4.8: a wave *is* the attack. It comes in aggroed, and its leash
+    // is anchored at the wave's centre — the POI it besieges, or where the
+    // player stood when it spawned — rather than at its own spawn ring, which
+    // left Eden's finale wandering 30–55 m out for four minutes.
+    e.aggro = true;
+    e.spawnX = center.x;
+    e.spawnZ = center.z;
     run.aliveIds.add(e.id);
     this.#waveIds.add(e.id);
   }
@@ -332,6 +377,9 @@ export class SpawnDirector {
     for (let i = 0; i < this.#enemies.size; i++) {
       const e = this.#enemies.at(i);
       if (e.state === 'dead' || e.def.archetype === 'boss' || e.def.archetype === 'static') continue;
+      // SPEC-034 §4.8: a wave enemy is never a straggler — its own wave owns it,
+      // and culling one out of a besieging wave thinned the attack.
+      if (e.fromWave) continue;
       const far = Math.hypot(e.x - player.x, e.z - player.z) > DESPAWN_DISTANCE;
       if (!far || e.aggro) {
         this.#farFor.delete(e.id);

@@ -33,6 +33,14 @@ export interface MissionEconomy {
   missingRequirements(reqs: MissionDef['requires']): unknown[];
   applyRewards(mission: MissionDef, replay: boolean): void;
   spendResources(cost: Partial<Record<ResourceId, number>>, reason: string): boolean;
+  /**
+   * SPEC-034 §4.12: the seam the hold reads to know whether a full pickup is
+   * still wanted. Optional so the pure tests and the balance model can pass a
+   * stub economy that has none.
+   */
+  setCollectDemand?(demand: ((resource: ResourceId) => number) | null): void;
+  /** The registration currently in force, so `dispose()` releases only its own. */
+  readonly collectDemandSource?: ((resource: ResourceId) => number) | null;
 }
 
 export interface MissionState {
@@ -83,6 +91,15 @@ function isTimed(objective: Objective): boolean {
   return objective.kind === 'survive' || objective.kind === 'defend';
 }
 
+/**
+ * SPEC-034 §4.9: a death (and a recall) sends the follower back to `from`, so an
+ * escort stage restarts with the timed ones — it was the one stage a death left
+ * half-finished with no way to finish it.
+ */
+function isRestartedByDeath(objective: Objective): boolean {
+  return isTimed(objective) || objective.kind === 'escort';
+}
+
 function popcount(v: number): number {
   let n = v >>> 0;
   let count = 0;
@@ -102,6 +119,8 @@ export class Missions {
   readonly #saves: SaveRequester | null;
   readonly #states: MissionState[] = [];
   #pinned: MissionId | null = null;
+  /** SPEC-034 §4.12: this instance's registration with the economy. */
+  #demand: ((resource: ResourceId) => number) | null = null;
 
   constructor(
     save: Save,
@@ -141,11 +160,41 @@ export class Missions {
       if (p.hp <= 0) this.#onPoiDestroyed(p.poi);
     }, this);
     events.on('player:died', () => this.#onPlayerDied(), this);
+    // SPEC-034 §4.2: a recall restarts every timed, escort and defend stage.
+    events.on('player:recalled', () => this.#onPlayerRecalled(), this);
+
+    // SPEC-034 §4.12: the hold ships a collect objective's surplus home, so the
+    // economy needs to know how much is still wanted.
+    this.#demand = (resource: ResourceId): number => this.collectDemand(resource);
+    economy.setCollectDemand?.(this.#demand);
   }
 
   /** Releases the bus subscriptions; the scene's `Disposer` calls it. */
   dispose(): void {
     this.#events.releaseOwner(this);
+    // SPEC-034 §4.12: only this instance's demand — a scene that built a second
+    // `Missions` over the same economy keeps whichever registered last.
+    if (this.#economyHoldsDemand()) this.#economy.setCollectDemand?.(null);
+  }
+
+  /**
+   * SPEC-034 §4.12: units the active collect objectives of the *current* stages
+   * still need for `resource`, finished ones excluded. The hold ships that much
+   * home when it is full, so a hoard can no longer stall an objective (E56).
+   */
+  collectDemand(resource: ResourceId): number {
+    let total = 0;
+    for (const state of this.#states) {
+      if (state.complete) continue;
+      const stage = MISSIONS[state.id].stages[state.stage] ?? [];
+      for (let index = 0; index < stage.length; index++) {
+        const objective = stage[index] as Objective;
+        if (objective.kind !== 'collect' || objective.resource !== resource) continue;
+        if (this.#done(state, objective, index)) continue;
+        total += objective.amount - (state.counters[`${state.stage}:${index}`] ?? 0);
+      }
+    }
+    return Math.max(0, total);
   }
 
   get active(): MissionState[] {
@@ -220,15 +269,36 @@ export class Missions {
     return true;
   }
 
+  /**
+   * SPEC-034 §4.15: the pin lives in `progress.missionsActive` order — the
+   * runtime already pins the first active mission it rebuilds, so moving the
+   * entry to the front is what makes a pin survive a reload, with no save field.
+   */
   pin(id: MissionId): void {
-    if (this.#stateOf(id) !== null) this.#pinned = id;
+    if (this.#stateOf(id) === null) return;
+    this.#pinned = id;
+    this.#frontSaveEntry(id);
+    this.#saves?.request('stage');
   }
 
   /** E18: the map key cycles which active mission the HUD pins. */
   cyclePinned(): void {
     if (this.#states.length === 0) return;
     const at = this.#states.findIndex((s) => s.id === this.#pinned);
-    this.#pinned = (this.#states[(at + 1) % this.#states.length] as MissionState).id;
+    this.pin((this.#states[(at + 1) % this.#states.length] as MissionState).id);
+  }
+
+  /** Moves `id`'s save entry to index 0, the order the pin is read from. */
+  #frontSaveEntry(id: MissionId): void {
+    const list = this.#save.progress.missionsActive;
+    const at = list.findIndex((entry) => entry.id === id);
+    if (at <= 0) return;
+    const [entry] = list.splice(at, 1);
+    if (entry !== undefined) list.unshift(entry);
+  }
+
+  #economyHoldsDemand(): boolean {
+    return this.#demand !== null && this.#economy.collectDemandSource === this.#demand;
   }
 
   // ---------------------------------------------------------------- queries
@@ -550,7 +620,19 @@ export class Missions {
     if (this.#scene !== 'surface') return;
     for (const state of this.#states) {
       const stage = MISSIONS[state.id].stages[state.stage] ?? [];
-      if (stage.some(isTimed)) this.#resetStage(state, 'death');
+      if (stage.some(isRestartedByDeath)) this.#resetStage(state, 'death');
+    }
+  }
+
+  /**
+   * SPEC-034 §4.2: a recall costs the same progress a death does — every timed,
+   * escort and defend stage restarts — and nothing else. It is the surface's.
+   */
+  #onPlayerRecalled(): void {
+    if (this.#scene !== 'surface') return;
+    for (const state of this.#states) {
+      const stage = MISSIONS[state.id].stages[state.stage] ?? [];
+      if (stage.some(isRestartedByDeath)) this.#resetStage(state, 'recall');
     }
   }
 

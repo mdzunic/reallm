@@ -124,6 +124,10 @@ const SILENT_EVENTS = [
   'settings:changed',
   'player:healed',
   'player:respawned',
+  // SPEC-034 §4.2: the recall's own `player:respawned` carries the sound.
+  'player:recalled',
+  // SPEC-034 §4.6: a dismissal is not a death — it has no sting of its own.
+  'enemy:dismissed',
   'player:xp',
   'tokens:changed',
   'resource:spent',
