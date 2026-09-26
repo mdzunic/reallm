@@ -2,7 +2,7 @@
 // four groups: the frame at every mandated size, the wallet's live numbers,
 // the pictures on every surface, and the glyph fallback with no files at all.
 import { devices, expect, test, type Locator, type Page } from '@playwright/test';
-import { gameUrl, passGate, start } from './start';
+import { start } from './start';
 
 const CREATION = {
   name: 'Vance',
@@ -396,8 +396,9 @@ test('fallback: with items/ aborted every surface draws its glyph and logs no er
     itemRequests.push(new URL(route.request().url()).pathname);
     await route.abort();
   });
-  await page.goto(gameUrl('/'));
-  await passGate(page);
+  // `start`, not a bare gate pass: SPEC-003 rejects a `go()` issued while the
+  // menu is still fading in, and a page drawn on a GPU gets there that early.
+  await start(page);
   await withSave(page);
   expect(await go(page, 'station', {})).toBe(true);
   await page.locator('[data-testid="station-tab-shop"]').click();

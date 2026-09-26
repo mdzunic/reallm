@@ -47,13 +47,25 @@ const autoFire = async (page: Page): Promise<void> => {
  * the distance and auto-fire does the rest. Movement is camera-relative
  * (§4.3): each of WASD covers exactly one world quadrant, so steering is a
  * sign check on the offset `debugInfo()` reports.
+ *
+ * A straight line can end against a rock with the target behind it: a probe
+ * logged 44 steps without a spawn while the nearest enemy was 33 m away. So a
+ * step that did not move the pilot a metre turns the next one a quadrant (W,
+ * D, S and A go round the compass), and the turn resets once they move.
  */
 async function hunt(page: Page, seconds: number, done: () => Promise<boolean>): Promise<void> {
+  const ROUND = ['KeyW', 'KeyD', 'KeyS', 'KeyA'] as const;
+  let turn = 0;
+  let at: { x: number; z: number } | null = null;
   for (let i = 0; i < seconds && !(await done()); i++) {
     const s = await info(page);
     const dx = Number(s['nearDx'] ?? 0);
     const dz = Number(s['nearDz'] ?? 0);
-    const key = dx >= 0 ? (dz >= 0 ? 'KeyS' : 'KeyD') : (dz >= 0 ? 'KeyA' : 'KeyW');
+    const here = { x: Number(s['px']), z: Number(s['pz']) };
+    turn = at !== null && Math.hypot(here.x - at.x, here.z - at.z) < 1 ? turn + 1 : 0;
+    at = here;
+    const toward = dx >= 0 ? (dz >= 0 ? 'KeyS' : 'KeyD') : (dz >= 0 ? 'KeyA' : 'KeyW');
+    const key = ROUND[(ROUND.indexOf(toward) + turn) % ROUND.length] as string;
     await page.keyboard.down(key);
     await page.waitForTimeout(700);
     await page.keyboard.up(key);
@@ -126,8 +138,11 @@ test('elites arrive at roughly the planet rate of 1 in 20 (AC-40)', async ({ pag
   await hunt(page, 300, async () => Number((await info(page))['elites'] ?? 0) >= 1);
   expect(Number((await info(page))['elites'] ?? 0)).toBeGreaterThanOrEqual(1);
 
-  // The other half of "about 1 in 20": common enemies stay common.
-  await hunt(page, 150, async () => Number((await info(page))['spawned'] ?? 0) >= 40);
+  // The other half of "about 1 in 20": common enemies stay common. The same
+  // budget as the first wait: a hunt churns about twenty spawns a minute on a
+  // quiet machine, and a CI runner whose combat frames drop game time has
+  // managed barely half that — the wait ends at 40 either way.
+  await hunt(page, 300, async () => Number((await info(page))['spawned'] ?? 0) >= 40);
   const seen = await info(page);
   expect(Number(seen['spawned'])).toBeGreaterThanOrEqual(40);
   expect(Number(seen['elites']) / Number(seen['spawned'])).toBeLessThan(0.25);
@@ -139,8 +154,11 @@ test('the player dies into SIGNAL LOST, respawns, and the brains re-acquire them
   await start(page, '/?debug&scene=surface&planet=cinder4');
   await expect(page.locator('[data-testid="hud-hp"]')).toContainText('184/184');
 
-  // 60 a click against 184 HP; clicks are spaced past the 0.3 s i-frames.
-  for (let i = 0; i < 4; i++) {
+  // 60 a click against 184 HP; clicks are spaced past the 0.3 s i-frames, but
+  // those are game time, and an enemy's hit opens them too — so click until
+  // the pilot is down rather than exactly four times.
+  const death = page.locator('[data-testid="death-overlay"]');
+  for (let i = 0; i < 10 && !(await death.isVisible()); i++) {
     await page.locator('[data-testid="surface-hurt"]').click();
     await page.waitForTimeout(400);
   }

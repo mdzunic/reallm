@@ -132,8 +132,17 @@ test.describe('arrival and landing', () => {
     await expect(page.locator('[data-testid="scene-label"]')).toHaveText('flight');
 
     // Warp through launch and the whole 90 s cruise; Cinder-4 has no arrival
-    // wave, so the trip ends in `arrived` and the cutscene begins.
-    await page.evaluate(() => window.__reallmFlight?.warp(95));
+    // wave, so the trip ends in `arrived` and the cutscene begins. The ship
+    // flies it idle, and whether the field lands enough rocks to recall it
+    // depends on how many real frames ran before the warp — so the sky is
+    // cleared every simulated second. This test is the landing; the recall
+    // has its own above.
+    await page.evaluate(() => {
+      for (let s = 0; s < 95 && window.__reallmFlight?.phase() !== 'arrived'; s++) {
+        window.__reallmFlight?.clearSky();
+        window.__reallmFlight?.warp(1);
+      }
+    });
     expect(await page.evaluate(() => window.__reallmFlight?.phase())).toBe('arrived');
     await expect(page.locator('[data-testid="skip-landing"]')).toBeVisible();
 
