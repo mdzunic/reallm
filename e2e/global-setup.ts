@@ -20,18 +20,52 @@
 // So the run opens the game once here instead. Nothing is asserted away: the
 // gate has to appear, and if it never does the whole run fails immediately with
 // a message that names the dev server rather than an innocent test.
-import { chromium } from '@playwright/test';
+//
+// It also names the WebGL renderer the run draws with, because that decides how
+// fast every frame-counting and in-game-timer suite can go (start.ts,
+// `E2E_PRESET`). CI sets `E2E_REQUIRE_GPU`: its e2e runners were picked for
+// their GPU (.github/workflows/check.yml), and a run that fell back to a CPU
+// rasteriser fails here in one line instead of as a wall of timeouts.
+import { chromium, type Browser } from '@playwright/test';
 import { E2E_PRESET, GATE_TIMEOUT_MS } from './start';
 
 /** How many navigations the warm-up gets before it declares the server broken. */
 const ATTEMPTS = 3;
 
+/** The renderer strings of the CPU rasterisers Chromium can end up on. */
+const SOFTWARE_GL = /SwiftShader|llvmpipe|lavapipe|softpipe/i;
+
+/** What `UNMASKED_RENDERER_WEBGL` reads in a fresh page of `browser`. */
+async function webglRenderer(browser: Browser): Promise<string> {
+  const page = await browser.newPage();
+  try {
+    return await page.evaluate(() => {
+      const gl = document.createElement('canvas').getContext('webgl2');
+      if (gl === null) return 'no WebGL 2 context';
+      const debug = gl.getExtension('WEBGL_debug_renderer_info');
+      return String(gl.getParameter(debug === null ? gl.RENDERER : debug.UNMASKED_RENDERER_WEBGL));
+    });
+  } finally {
+    await page.close();
+  }
+}
+
 export default async function globalSetup(): Promise<void> {
   const port = Number(process.env['PORT'] ?? 5173);
   const url = `http://localhost:${port}/?quality=${E2E_PRESET}`;
-  const browser = await chromium.launch();
+  // The same Chromium build the projects launch (`E2E_CHANNEL`, playwright.config.ts).
+  const browser = await chromium.launch({ channel: process.env['E2E_CHANNEL'] || undefined });
   const started = Date.now();
   try {
+    const renderer = await webglRenderer(browser);
+    console.log(`[e2e] WebGL renderer: ${renderer}`);
+    const onGpu = renderer.startsWith('ANGLE') && !SOFTWARE_GL.test(renderer);
+    if (process.env['E2E_REQUIRE_GPU'] && !onGpu) {
+      throw new Error(
+        `[e2e] E2E_REQUIRE_GPU is set, but WebGL is not on a GPU here (${renderer}). ` +
+          'The default headless shell never uses one: set E2E_CHANNEL=chromium, on a host that has a GPU.',
+      );
+    }
     for (let attempt = 1; attempt <= ATTEMPTS; attempt++) {
       const page = await browser.newPage();
       try {

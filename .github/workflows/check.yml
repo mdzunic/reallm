@@ -20,6 +20,18 @@
 # - every budget fails: Playwright's `--global-timeout` first, then the step's
 #   `timeout-minutes` (a step that times out is a failed step). A job-level
 #   `timeout-minutes` is only a backstop for setup that hangs.
+#
+# The e2e parts run on macOS because that is where a hosted runner has a GPU.
+# The Linux runners have none, and headless Chromium rasterised WebGL there
+# with SwiftShader on four shared vCPUs: the menu drew at about one frame a
+# second on `medium`, the fixed-step loop sat on its five-steps-a-frame ceiling
+# (SPEC-002 §4.2) so every in-game timer ran several times slower than the wall
+# clock, and each part failed on frame counts and timeouts — no e2e run was
+# green from SPEC-006 on. A macOS runner carries a paravirtualised Metal GPU,
+# which the full Chromium build uses (`E2E_CHANNEL`, playwright.config.ts); the
+# default headless shell never does, on any host. `E2E_REQUIRE_GPU` makes the
+# run fail in its first second if that ever stops being true
+# (e2e/global-setup.ts), rather than as a wall of timeouts.
 name: check
 on:
   push:
@@ -32,8 +44,8 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
         with:
           node-version: 24
           cache: npm
@@ -44,53 +56,59 @@ jobs:
 
   e2e:
     name: e2e ${{ matrix.part }}
-    runs-on: ubuntu-latest
-    timeout-minutes: 12
+    runs-on: macos-15
+    timeout-minutes: 14
     strategy:
       # A cancelled part is no verdict, and every part's failures are worth
       # having, so one red part does not stop the others.
       fail-fast: false
       matrix:
-        part: ['long 1/2', 'long 2/2', '1/6', '2/6', '3/6', '4/6', '5/6', '6/6']
+        # Five parts, because the Free plan runs at most five macOS jobs at
+        # once: a sixth would queue behind the others and double the wall time.
+        part: ['long', '1/4', '2/4', '3/4', '4/4']
     env:
-      # Test groups too long to share a runner. SPEC-011 runs its six tests in
-      # one worker (`mode: 'default'`) and SPEC-012-missions is one test; each
-      # takes ~4 minutes, and since `--shard` splits by test count, never by
-      # time, they would land in the same shard (they sort side by side).
-      # `long 1/2` and `long 2/2` give them a runner each; every other test,
-      # every future e2e file included, goes to the numbered shards. `--grep`
-      # and `--grep-invert` on this one list keep the two sets complementary,
-      # so coverage never depends on the counts — a file added here only needs
-      # a `long` part of its own to keep its runner to itself.
+      E2E_CHANNEL: chromium
+      E2E_REQUIRE_GPU: '1'
+      # Test groups that are long in *game* time, which no GPU shortens:
+      # SPEC-011 runs its six tests in one worker (`mode: 'default'`) and
+      # SPEC-012-missions is one test, about three minutes each. `--shard`
+      # splits by test count, never by time, and they sort side by side, so
+      # `long` runs the two of them together — one worker each — and every
+      # other test, every future e2e file included, goes to the numbered parts.
+      # `--grep` and `--grep-invert` on this one list keep the two sets
+      # complementary, so coverage never depends on the counts.
       LONG: 'SPEC-011\.spec\.ts|SPEC-012-missions\.spec\.ts'
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
         with:
           node-version: 24
           cache: npm
       - run: npm ci
+      # The full build only: `E2E_CHANNEL=chromium` never launches the shell.
       # The browser revision follows the pinned @playwright/test.
-      - run: npx playwright install --with-deps chromium
-      # Two workers is Playwright's default on the 4-vCPU runner, pinned. The
-      # retry is CI's alone: playwright.config.ts keeps `retries: 0` for the
-      # factory's gate, which runs its own re-run protocol, and without one here
-      # a contention flake the gate forgave would revert a good merge. The
+      - run: npx playwright install --no-shell chromium
+      # The retry is CI's alone: playwright.config.ts keeps `retries: 0` for
+      # the factory's gate, which runs its own re-run protocol, and without one
+      # here a contention flake the gate forgave would revert a good merge. The
       # global timeout fails a part that overruns with its unfinished tests
-      # named, early enough for the watcher to see it.
+      # named, early enough for the watcher to see it. The numbered parts run
+      # four to six minutes, seven with a retry; `long` about four, but
+      # SPEC-011's elite count is a hunt that can take minutes by itself, and
+      # one retry of it has to fit.
       - name: playwright test ${{ matrix.part }}
-        timeout-minutes: 9
+        timeout-minutes: 10
         env:
           PART: ${{ matrix.part }}
         run: |
           case "$PART" in
-            long\ *) select=(--grep "$LONG" --shard="${PART#long }") ;;
-            *) select=(--grep-invert "$LONG" --shard="$PART") ;;
+            long) select=(--grep "$LONG") budget=540000 ;;
+            *) select=(--grep-invert "$LONG" --shard="$PART") budget=480000 ;;
           esac
-          npx playwright test "${select[@]}" --workers=2 --retries=1 --global-timeout=450000 --add-reporter=github
+          npx playwright test "${select[@]}" --workers=2 --retries=1 --global-timeout="$budget" --add-reporter=github
       # The traces of whatever failed (trace: 'retain-on-failure').
       - if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: e2e-test-results-${{ strategy.job-index }}
           path: test-results/
