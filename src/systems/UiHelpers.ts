@@ -599,6 +599,12 @@ export interface HudTrackerRow {
   text: string;
   done: boolean;
   focus: boolean;
+  /**
+   * SPEC-034 §4.9: for a `defend` row, the POI's HP as a fraction of its max —
+   * the one number the player had no way to see while the thing they were
+   * defending was being eaten. `null` on every other row.
+   */
+  defendHp: number | null;
 }
 
 /**

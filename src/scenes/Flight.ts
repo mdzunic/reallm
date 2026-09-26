@@ -21,10 +21,11 @@ import type { GameServices } from '@/core/Services';
 import type { SceneParams } from '@/core/StateMachine';
 import { cargoCap, maxHp } from '@/core/Save';
 import { FLIGHT_ASSETS, PLANET_ART } from '@/data/assets';
-import { CHAPTER_CARDS, ENEMIES, PLANETS, type PlanetDef } from '@/data/index';
+import { CHAPTER_CARDS, ENEMIES, MISSIONS, PLANETS, type DialogueId, type PlanetDef } from '@/data/index';
 import { Economy } from '@/systems/Economy';
-import { CARD, cardDue, cardKey } from '@/systems/StoryBeats';
+import { CARD, cardDue, cardKey, LINE_LEDGER } from '@/systems/StoryBeats';
 import { showChapterCard } from '@/ui/ChapterCard';
+import { dialogueLayer } from '@/ui/DialogueUI';
 import { director } from '@/scenes/Director';
 import {
   AUTOPILOT_SECONDS,
@@ -226,6 +227,15 @@ export class FlightScene extends UiScene<'flight'> {
     this.disposer.add(this.services.events.on('ship:damaged', () => {
       this.#hud?.damageFlash();
       this.#view?.kick();
+    }, this));
+    // SPEC-034 §4.10 step 2: a flight mission that finishes in flight is
+    // debriefed in flight, and the ledger keeps the station from saying it again.
+    this.disposer.add(this.services.events.on('mission:completed', ({ id }) => {
+      const data = this.#save;
+      if (data === null) return;
+      LINE_LEDGER.noteCompleted(data, id);
+      const line = MISSIONS[id].dialogue.onComplete;
+      if (line !== undefined) this.#playLine(data, line);
     }, this));
     this.disposer.add(() => {
       this.#missions?.dispose();
@@ -723,6 +733,38 @@ export class FlightScene extends UiScene<'flight'> {
     this.#launchDone = true;
     this.#view?.skipLaunch();
     if (this.#landingT < 0) this.#skipHint?.classList.add('is-hidden');
+    this.#playAcceptLines();
+  }
+
+  /**
+   * SPEC-034 §4.10 step 2: the `onAccept` line of every active flight mission of
+   * this destination, once the launch shot is out of the way. A flight mission's
+   * brief was written to be heard on the way there, and nothing played it — the
+   * station board accepts it and the trip started in silence.
+   *
+   * Lines are non-modal here: the flight never holds for one, so the rail keeps
+   * moving underneath.
+   */
+  #playAcceptLines(): void {
+    const save = this.#save;
+    const missions = this.#missions;
+    if (save === null || missions === null) return;
+    for (const state of missions.active) {
+      const id = MISSIONS[state.id].dialogue.onAccept;
+      if (id === undefined) continue;
+      this.#playLine(save, id);
+    }
+  }
+
+  /** Plays a mission line once per save, through the shared ledger (§4.10). */
+  #playLine(save: Save, id: DialogueId): void {
+    if (LINE_LEDGER.played(save, id)) return;
+    LINE_LEDGER.markPlayed(save, id);
+    void dialogueLayer(this.services.uiRoot, this.services.events, {
+      input: this.services.input,
+      saveKey: () => this.services.save.current,
+      reduceMotion: () => this.services.settings.get().reduceMotion,
+    }).play(id, { modal: false });
   }
 
   #advanceRecall(dt: number): void {

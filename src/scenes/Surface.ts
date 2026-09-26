@@ -2876,7 +2876,7 @@ export class SurfaceScene extends UiScene<'surface'> {
     for (const def of Object.values(MISSIONS)) {
       for (const stage of def.stages) widest = Math.max(widest, stage.length);
     }
-    for (let i = 0; i <= widest; i++) this.#trackerRows.push({ text: '', done: false, focus: false });
+    for (let i = 0; i <= widest; i++) this.#trackerRows.push({ text: '', done: false, focus: false, defendHp: null });
   }
 
   /** The nearest live enemy of one kind, as a reused point (§3, `GuideContext`). */
@@ -3314,6 +3314,13 @@ export class SurfaceScene extends UiScene<'surface'> {
       row.done = progress.done;
       row.focus = i === this.#focusIndex;
       row.text = row.focus ? this.#focusRowText(def.title, progress) : this.#rowText(progress);
+      // SPEC-034 §4.9: a defend row carries the POI's health. `#defendHp` is
+      // what `poi:damaged` was raised from, and `#syncDefend` puts it back to
+      // full on a stage reset, so the bar follows both for free.
+      row.defendHp =
+        progress.objective.kind === 'defend' && this.#defendPoi?.poi === progress.objective.poi && this.#defendMax > 0
+          ? Math.max(0, Math.min(1, this.#defendHp / this.#defendMax))
+          : null;
       rows.push(row);
     }
     // 27-p: between stages every row is done, and the focus row says so.
@@ -3321,6 +3328,7 @@ export class SurfaceScene extends UiScene<'surface'> {
       const row = this.#trackerRows[rows.length] as HudTrackerRow;
       row.done = false;
       row.focus = true;
+      row.defendHp = null;
       row.text = `${def.title} — Stage complete`;
       rows.push(row);
     }
@@ -3868,6 +3876,9 @@ export class SurfaceScene extends UiScene<'surface'> {
           // leaves rather than being restarted.
           this.#dismissDefendWave = true;
           this.#syncMissionStages();
+          // SPEC-034 §4.10: the trip's list the station debriefs from.
+          const data = this.#save;
+          if (data !== null) LINE_LEDGER.noteCompleted(data, id);
           const dialogueId = MISSION_TABLE[id].dialogue.onComplete;
           // SPEC-024 §4.1: inside the ending sequence the mission's own
           // debrief is held back — "Verdict filed" contradicts the escape, and

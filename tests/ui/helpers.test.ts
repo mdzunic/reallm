@@ -410,7 +410,7 @@ describe('diffHud (AC-115, AC-62)', () => {
     b.tracker = {
       title: 'Dry Land',
       stage: 'stage 2/3',
-      rows: [{ text: 'Dry Land — Scan Dune Sea', done: false, focus: true }],
+      rows: [{ text: 'Dry Land — Scan Dune Sea', done: false, focus: true, defendHp: null }],
       distance: 84,
       bearing: 0,
       pulse: false,
@@ -427,7 +427,7 @@ describe('diffHud (AC-115, AC-62)', () => {
     expect(diffHud(c, d)).toEqual(new Set(['tracker']));
 
     const e = cloneHud(d);
-    (e.tracker as NonNullable<HudModel['tracker']>).rows.push({ text: 'Survive 60 s', done: false, focus: false });
+    (e.tracker as NonNullable<HudModel['tracker']>).rows.push({ text: 'Survive 60 s', done: false, focus: false, defendHp: null });
     expect(diffHud(d, e)).toEqual(new Set(['tracker']));
   });
 

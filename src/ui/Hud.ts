@@ -73,7 +73,10 @@ export class Hud {
   /** The scheme the key hints and the touch sizing follow (SPEC-028 §4.5). */
   #scheme: Scheme = 'keyboard';
   readonly #vignette = el('div', 'hud-vignette');
+  /** SPEC-034 §4.11: the awakening burst, shown by `.hud.is-static`. */
   readonly #static = el('div', 'hud-static');
+  /** SPEC-034 §4.11: the flight ion-storm scanline sheet — its own class now. */
+  readonly #ion = el('div', 'hud-ion');
   #minimap: HTMLCanvasElement | null = null;
   #staticTimer: ReturnType<typeof setTimeout> | null = null;
 
@@ -84,7 +87,8 @@ export class Hud {
   readonly #progressFill = el('div', 'hud-progress-fill');
   readonly #markers = el('div', 'hud-progress-markers');
   readonly #hostiles = testId(el('div', 'hud-hostiles'), 'hud-hostiles');
-  readonly #storm = testId(el('div', 'hud-storm'), 'storm-warning');
+  /** SPEC-034 §4.11: the warning *pill*, not the surface's storm vignette. */
+  readonly #storm = testId(el('div', 'hud-storm-warn'), 'storm-warning');
   readonly #holding = testId(el('div', 'hud-holding'), 'holding-banner');
 
   /**
@@ -143,7 +147,7 @@ export class Hud {
       this.#holding.textContent = HOLD_HOSTILES;
       this.#hostiles.classList.add('is-hidden');
       this.#storm.classList.add('is-hidden');
-      this.#static.classList.add('is-hidden');
+      this.#ion.classList.add('is-hidden');
       this.#holding.classList.add('is-hidden');
       tc.append(this.#progress, this.#hostiles, this.#storm, this.#holding);
     }
@@ -180,7 +184,7 @@ export class Hud {
     }
 
     this.#root.append(this.#vignette, this.#static, tl, tr, tc, bl, br, bc);
-    if (mode === 'flight') this.#root.append(this.#reticle);
+    if (mode === 'flight') this.#root.append(this.#ion, this.#reticle);
     root.mount(this.#root, 'hud');
     this.#unregister = root.register(this);
     this.#renderAll();
@@ -362,7 +366,7 @@ export class Hud {
         if (this.#hostiles.textContent !== hostiles) this.#hostiles.textContent = hostiles;
         this.#hostiles.classList.toggle('is-hidden', m.flight.hostiles === 0);
         this.#storm.classList.toggle('is-hidden', !m.flight.storm);
-        this.#static.classList.toggle('is-hidden', !m.flight.storm);
+        this.#ion.classList.toggle('is-hidden', !m.flight.storm);
         // SPEC-013 §4.1 (E12, PLAN R16): the hold has two reasons — hostiles on
         // the tail, or a main flight objective still open — and an empty sky
         // must not be captioned "clear the hostiles".
