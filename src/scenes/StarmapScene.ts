@@ -24,7 +24,7 @@ import {
 import { Economy } from '@/systems/Economy';
 import { Progression } from '@/systems/Progression';
 import { departureDue, departureKey } from '@/systems/StoryBeats';
-import { runSkip } from '@/systems/Flight';
+import { activeFlightMission, runSkip } from '@/systems/Flight';
 import { departReason, formatTime, missionStatus, requirementText, skipRefusalText } from '@/systems/UiHelpers';
 import { director } from '@/scenes/Director';
 import { choiceSheet } from '@/ui/ConfirmSheet';
@@ -445,8 +445,7 @@ export class StarmapScene extends UiScene<'starmap'> {
     // named in the body, because its objectives will not advance.
     const service = this.services.settings.serviceMode;
     const skip = runSkip(data, planet, { service });
-    const rule = runSkip(data, planet);
-    const waived = service && !rule.ok && rule.reason === 'flight_mission';
+    const waived = service && activeFlightMission(data, planet) !== null;
     const lines = [
       // SPEC-031 §4.12: the tank is named next to the charge (AC-31).
       `Fuel: ${fuel} oil, charged now — you hold ${data.resources.oil}. The return trip is free.`,

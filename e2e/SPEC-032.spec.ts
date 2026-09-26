@@ -163,6 +163,17 @@ test.describe('skippable runs', () => {
     await expect(page.locator('[data-testid="depart-skip-reason"]')).toHaveText('Gauntlet needs a flown run.');
   });
 
+  test('service mode allows that skip and says its objectives will not advance (E51)', async ({ page }) => {
+    await start(page);
+    await typeCode(page);
+    await expect(page.locator('[data-testid="service-badge"]')).toBeVisible();
+    await createPilot(page, { oil: 400, visits: { hive: 1 }, flags: ['chapter4_done'], active: ['c5_m1'] });
+    await openDepartSheet(page, 'hive');
+    await expect(page.locator('[data-testid="depart-skip"]')).toBeEnabled();
+    await expect(page.locator('[data-testid="depart-skip-reason"]')).toHaveCount(0);
+    await expect(page.locator('.sheet-body')).toContainText('Objectives that need a flown run will not advance.');
+  });
+
   test('the pause menu skips a run and lands on the surface (7)', async ({ page }) => {
     await start(page);
     await createPilot(page, { oil: 200, visits: { cinder4: 1 } });

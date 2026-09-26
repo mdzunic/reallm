@@ -220,6 +220,18 @@ export type SkipResult =
   | { readonly ok: false; readonly reason: SkipRefusal; readonly mission?: MissionId };
 
 /**
+ * The active mission that runs in the flight scene on the way to `planet`, if
+ * any — `c4_s2` to Ferrum, `c5_m1` to the Hive (SPEC-009 §6).
+ */
+export function activeFlightMission(save: Save, planet: PlanetId): MissionId | null {
+  for (const entry of save.progress.missionsActive) {
+    const def = MISSIONS[entry.id] as (typeof MISSIONS)[MissionId] | undefined;
+    if (def !== undefined && def.planet === planet && def.scene === 'flight') return entry.id;
+  }
+  return null;
+}
+
+/**
  * SPEC-032 §4.3: may the run to `planet` be skipped? Only a route the save has
  * landed on (`visits ≥ 1`), and never one an active flight-scene mission for
  * that planet *is* — `c4_s2` and `c5_m1` would otherwise complete by not
@@ -228,12 +240,8 @@ export type SkipResult =
 export function runSkip(save: Save, planet: PlanetId, options?: SkipOptions): SkipResult {
   if (options?.service === true) return { ok: true };
   if ((save.progress.visits[planet] ?? 0) < 1) return { ok: false, reason: 'never_flown' };
-  for (const entry of save.progress.missionsActive) {
-    const def = MISSIONS[entry.id] as (typeof MISSIONS)[MissionId] | undefined;
-    if (def !== undefined && def.planet === planet && def.scene === 'flight') {
-      return { ok: false, reason: 'flight_mission', mission: entry.id };
-    }
-  }
+  const mission = activeFlightMission(save, planet);
+  if (mission !== null) return { ok: false, reason: 'flight_mission', mission };
   return { ok: true };
 }
 
