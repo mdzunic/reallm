@@ -45,7 +45,9 @@ export const KEY_BINDINGS: Readonly<Record<string, Action | MoveAxis>> = {
   KeyM: 'map',
   KeyT: 'track',
   ShiftLeft: 'throttleUp',
-  ControlLeft: 'throttleDown',
+  // SPEC-034 §4.16: X, not Ctrl — Ctrl+W closes a Chrome or Edge tab, and Ctrl
+  // sits right next to the steering keys.
+  KeyX: 'throttleDown',
   Backquote: 'debug',
 };
 

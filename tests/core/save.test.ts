@@ -32,6 +32,7 @@ import {
   migrate,
   newSave,
   PROBE_KEY,
+  RESOURCE_CEILING,
   SAVE_CONTENT,
   SAVE_FAILED_TEXT,
   SAVE_VERSION,
@@ -189,8 +190,8 @@ describe('newSave (§4.1)', () => {
     expect(fresh.player.level).toBe(1);
     expect(fresh.player.xp).toBe(0);
     expect(fresh.player.tokens).toBe(0);
-    // maxHp(marine, vigor 5, level 1) = 100 + 5 x 10 + 0.
-    expect(fresh.player.hp).toBe(150);
+    // SPEC-034 §4.14: maxHp(marine, vigor 5, level 1) = 100 + 20 + 8 x 5 + 0.
+    expect(fresh.player.hp).toBe(160);
   });
 
   it('equips the class starter weapon, the service pistol and scrap armor (AC-8, SPEC-025)', () => {
@@ -611,24 +612,26 @@ describe('validateSave (§4.4)', () => {
     expect(expectOk(withPatch({ meta: { ...meta, iteration: 0 } })).data.meta.iteration).toBe(1);
   });
 
-  it('clamps resources to 0..cargoCap and drops resources it does not know (AC-24)', () => {
+  it('clamps resources to 0..RESOURCE_CEILING, never to the cargo cap (AC-24, SPEC-034 §4.13)', () => {
     const ok = expectOk(
-      withPatch({ resources: { oil: 99_999, wheat: -20, water: 20, lithium: 0, unobtainium: 5 } }),
+      withPatch({ resources: { oil: 120_000, wheat: -20, water: 20.7, lithium: 0, unobtainium: 5 } }),
     );
-    expect(ok.data.resources).toEqual({ oil: 400, wheat: 0, water: 20, lithium: 0 });
+    // SPEC-034 §4.13: the hold's cap belongs to the economy, on pickups only —
+    // a reward or a voucher may stand above it, and this used to delete it.
+    expect(ok.data.resources).toEqual({ oil: RESOURCE_CEILING, wheat: 0, water: 20, lithium: 0 });
     expect(ok.warnings.join('\n')).toContain('unobtainium');
 
-    // A bigger cargo hold raises the cap it clamps to.
+    // The base hold no longer clamps a hoard that a grant built.
     const roomy = expectOk(
-      withPatch({ resources: { oil: 99_999, wheat: 0, water: 0, lithium: 0 }, ship: { engine: 0, hull: 0, shield: 0, cargo: 3, weapon: 0 } }),
+      withPatch({ resources: { oil: 1500, wheat: 0, water: 0, lithium: 0 }, ship: { engine: 0, hull: 0, shield: 0, cargo: 0, weapon: 0 } }),
     );
-    expect(roomy.data.resources.oil).toBe(1200);
+    expect(roomy.data.resources.oil).toBe(1500);
   });
 
   it('clamps hp to 0..maxHp with a warning (AC-25)', () => {
     const player = newSave(0, CREATION, 1, 0).player;
     const ok = expectOk(withPatch({ player: { ...player, hp: 5000 } }));
-    expect(ok.data.player.hp).toBe(150);
+    expect(ok.data.player.hp).toBe(160); // SPEC-034 §4.14
     expect(ok.warnings.join('\n')).toContain('player.hp');
     expect(expectOk(withPatch({ player: { ...player, hp: -3 } })).data.player.hp).toBe(0);
   });
@@ -689,7 +692,7 @@ describe('validateSave (§4.4)', () => {
     expect(ok.warnings.join('\n')).toContain('atlantis');
   });
 
-  it('drops active missions that are done or unknown, and clamps the stage (AC-30)', () => {
+  it('a done mission may be replayed; unknown and duplicate entries drop (AC-30, SPEC-034 §4.13)', () => {
     const progress = newSave(0, CREATION, 1, 0).progress;
     const ok = expectOk(
       withPatch({
@@ -697,15 +700,21 @@ describe('validateSave (§4.4)', () => {
           ...progress,
           missionsDone: ['c1_m1'],
           missionsActive: [
-            { id: 'c1_m1', stage: 0, counters: {} }, // already done
+            { id: 'c1_m1', stage: 0, counters: { '0:0': 2 } }, // a replay — kept
             { id: 'c9_m9', stage: 0, counters: {} }, // unknown
             { id: 'c6_m1', stage: 17, counters: { '0:0': 4, bad: 'x' } }, // 3 stages
+            { id: 'c6_m1', stage: 0, counters: {} }, // duplicate
           ],
         },
       }),
     );
-    expect(ok.data.progress.missionsActive).toEqual([{ id: 'c6_m1', stage: 2, counters: { '0:0': 4 } }]);
-    expect(ok.warnings.join('\n')).toContain('c1_m1 is already done');
+    expect(ok.data.progress.missionsActive).toEqual([
+      { id: 'c1_m1', stage: 0, counters: { '0:0': 2 } },
+      { id: 'c6_m1', stage: 2, counters: { '0:0': 4 } },
+    ]);
+    expect(ok.warnings.join('\n')).toContain('unknown mission "c9_m9"');
+    expect(ok.warnings.join('\n')).toContain('duplicate c6_m1');
+    expect(ok.warnings.join('\n')).not.toContain('already done');
   });
 
   it('does not mistake an Object.prototype key for a mission (AC-27, AC-30)', () => {

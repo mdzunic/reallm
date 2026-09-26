@@ -283,6 +283,8 @@ export class StationScene extends UiScene<'station'> {
       // SPEC-015 AC-20: `Re-detect` runs the real boot benchmark.
       redetect: this.services.detectQuality?.bind(this.services),
       onReset: () => this.#quit(false),
+      // SPEC-034 §4.13: the run behind the panel is no longer the bound save.
+      onImported: () => this.#quit(false),
     });
     this.disposer.add(() => {
       this.#settings?.dispose();

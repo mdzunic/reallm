@@ -27,6 +27,7 @@ import { log } from '@/core/Log';
 // moved (§4.4).
 import {
   CLASSES,
+  type ClassPassive,
   CLASS_IDS,
   COMPANION_IDS,
   ITEMS,
@@ -215,7 +216,11 @@ export interface CharacterCreation {
 }
 
 export type LoadResult =
-  | { ok: true; data: Save; migratedFrom?: number; source: 'main' | 'bak' }
+  /**
+   * SPEC-034 §4.13: `rebound` is set when an `importCode` replaced the save the
+   * game is playing — the settings panel reads it and leaves to the menu.
+   */
+  | { ok: true; data: Save; migratedFrom?: number; source: 'main' | 'bak'; rebound?: true }
   | { ok: false; reason: 'empty' | 'corrupt' | 'newer_version' | 'unavailable'; errors?: string[]; foundVersion?: number };
 
 // ------------------------------------------------------- explored ground
@@ -388,17 +393,25 @@ export const CREATION_POINTS = 5;
  */
 const CARGO_BY_TIER: readonly number[] = [TUNING.CARGO_BASE, 600, 800, 1200];
 
+/** SPEC-034 §4.13: the validator's resource ceiling — a sanity bound, not a cap. */
+export const RESOURCE_CEILING = 99_999;
+
 export function cargoCap(ship: Pick<Save['ship'], 'cargo'>): number {
   return CARGO_BY_TIER[ship.cargo] ?? TUNING.CARGO_BASE;
 }
 
 /**
- * PLAN §4: base HP, `vigor` scales it, each level grants a flat +4. A
- * placeholder for SPEC-011's `computePlayerStats`, which owns the real formula
- * — SPEC-007 needs it only to seed `player.hp` (§4.1) and to clamp it (§4.4).
+ * SPEC-034 §4.14: **the** max-HP formula — `PLAYER_BASE_HP` + the class bonus
+ * + 8 · vigor + 4 · (level − 1). It used to be one of three, and a Marine read
+ * 170, 150 and 160 in three screens; creation, the character panel, the
+ * station, the flight HUD, the validator, `Progression` and `Combat` all call
+ * this now, so every screen shows the number the player fights with.
  */
-export function maxHp(_classId: ClassId, attributes: Attributes, level: number): number {
-  return TUNING.PLAYER_BASE_HP + attributes.vigor * 10 + (level - 1) * 4;
+export function maxHp(classId: ClassId, attributes: Attributes, level: number): number {
+  // Widened to the interface: the concrete class passives are disjoint literals.
+  const passive: ClassPassive = CLASSES[classId].passive;
+  const bonus = passive.maxHpBonus ?? 0;
+  return TUNING.PLAYER_BASE_HP + bonus + 8 * attributes.vigor + 4 * (level - 1);
 }
 
 // --------------------------------------------------------------- fresh save
@@ -549,8 +562,7 @@ export function validateSave(
     const meta = validateMeta(rawMeta, warnings);
     const player = validatePlayer(rawPlayer, classId, content, warnings);
     const ship = validateShip(bagAt(raw, 'ship'), warnings);
-    const cap = cargoCap(ship);
-    const resources = validateResources(bagAt(raw, 'resources'), cap, warnings);
+    const resources = validateResources(bagAt(raw, 'resources'), warnings);
     const inventory = validateInventory(arrayAt(raw, 'inventory'), content, warnings);
     const equipped = validateEquipped(bagAt(raw, 'equipped'), classId, content, warnings);
     const activeWeapon = validateActiveWeapon(raw['activeWeapon'], equipped, warnings);
@@ -673,10 +685,17 @@ function validateShip(raw: Bag, warnings: string[]): Save['ship'] {
   return out;
 }
 
-function validateResources(raw: Bag, cap: number, warnings: string[]): Save['resources'] {
+/**
+ * SPEC-034 §4.13: the cargo cap is the economy's to enforce, and only on a
+ * pickup — a reward, a voucher or the subsidy may exceed it on purpose, and
+ * this used to delete the surplus on every load. The validator only keeps the
+ * number a number, whole and inside `RESOURCE_CEILING`.
+ */
+function validateResources(raw: Bag, warnings: string[]): Save['resources'] {
   const out = {} as Save['resources'];
+  const cap = RESOURCE_CEILING;
   for (const resource of RESOURCE_IDS) {
-    const held = clamp(Math.round(num(raw[resource], 0)), 0, cap);
+    const held = clamp(Math.floor(num(raw[resource], 0)), 0, cap);
     if (raw[resource] !== undefined && raw[resource] !== held) {
       warnings.push(`resources.${resource}: ${JSON.stringify(raw[resource])} clamped to 0..${cap}`);
     }
@@ -826,8 +845,6 @@ function validateProgress(raw: Bag, content: SaveContent, warnings: string[]): S
     warnings.push(`progress.missionsDone: unknown mission ${JSON.stringify(id)} dropped`);
     return false;
   }) as MissionId[];
-  const done = new Set<string>(missionsDone);
-
   const missionsActive: Save['progress']['missionsActive'] = [];
   const activeSeen = new Set<string>();
   for (const entry of arrayAt(raw, 'missionsActive')) {
@@ -838,10 +855,9 @@ function validateProgress(raw: Bag, content: SaveContent, warnings: string[]): S
       warnings.push(`progress.missionsActive: unknown mission ${JSON.stringify(id)} dropped`);
       continue;
     }
-    if (done.has(id)) {
-      warnings.push(`progress.missionsActive: ${id} is already done and was dropped`);
-      continue;
-    }
+    // SPEC-034 §4.13: a mission in `missionsDone` *and* `missionsActive` is a
+    // replay (`Missions.isReplay`); it survives a reload with its stage and
+    // counters. Only an unknown or duplicate entry is dropped.
     if (activeSeen.has(id)) {
       warnings.push(`progress.missionsActive: duplicate ${id} dropped`);
       continue;
@@ -1693,12 +1709,23 @@ export class SaveStore {
     // one now.
     parsed.data.meta.slot = slot;
     if (!this.available) return { ok: false, reason: 'unavailable' };
+    // SPEC-034 §4.13: the in-memory run is what used to overwrite the import on
+    // the next autosave, so the import takes the binding *before* the write —
+    // nothing the running character does can reach the slot after this point.
+    const rebound = this.#current?.meta.slot === slot;
+    if (rebound) this.bind(parsed.data);
     const error = this.#writeWithBackup(slot, JSON.stringify(parsed.data));
     if (error !== null) {
       this.#fail(slot, error);
       return { ok: false, reason: 'corrupt', errors: [String(error)] };
     }
-    return { ok: true, data: parsed.data, source: 'main', ...(parsed.from < SAVE_VERSION ? { migratedFrom: parsed.from } : {}) };
+    return {
+      ok: true,
+      data: parsed.data,
+      source: 'main',
+      ...(rebound ? { rebound: true as const } : {}),
+      ...(parsed.from < SAVE_VERSION ? { migratedFrom: parsed.from } : {}),
+    };
   }
 
   #toastCodeError(reason: CodeErrorReason): void {

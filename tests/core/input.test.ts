@@ -628,9 +628,11 @@ describe('KEY_BINDINGS (AC-4)', () => {
       KeyM: 'map',
       KeyT: 'track',
       ShiftLeft: 'throttleUp',
-      ControlLeft: 'throttleDown',
+      // SPEC-034 §4.16: X took Ctrl's place; Ctrl+W closes a browser tab.
+      KeyX: 'throttleDown',
       Backquote: 'debug',
     });
+    expect(KEY_BINDINGS['ControlLeft']).toBeUndefined();
   });
 });
 

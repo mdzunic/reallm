@@ -285,6 +285,8 @@ export class MenuScene extends UiScene<'menu'> {
       // SPEC-015 AC-20: `Re-detect` runs the real boot benchmark.
       redetect: this.services.detectQuality?.bind(this.services),
       onReset: () => this.#refresh(),
+      // SPEC-034 §4.13: already at the menu — `Continue` re-reads the slot.
+      onImported: () => this.#refresh(),
     });
     this.disposer.add(() => {
       this.#settings?.dispose();

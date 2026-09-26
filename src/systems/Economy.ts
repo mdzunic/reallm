@@ -28,6 +28,7 @@ import {
   COMPANIONS,
   COMPANION_IDS,
   ITEMS,
+  MISSIONS,
   PLANETS,
   PLANET_IDS,
   RECIPES,
@@ -45,6 +46,7 @@ import {
   type Item,
   type ItemId,
   type MissionDef,
+  type MissionId,
   type PlanetDef,
   type PlanetId,
   type Price,
@@ -573,7 +575,16 @@ export class Economy {
       if (this.isUnlocked(planet)) cheapest = Math.min(cheapest, this.fuelCost(planet));
     }
     if (!Number.isFinite(cheapest)) return 0;
-    const grant = cheapest - this.#save.resources.oil;
+    // SPEC-034 §4.5, E58: a failed Gauntlet lands the player with the trip still
+    // open, so the floor also covers the fuel of every planet an accepted *main*
+    // flight mission still needs. A side flight mission never raises it.
+    let target = cheapest;
+    for (const entry of this.#save.progress.missionsActive) {
+      const mission = MISSIONS[entry.id as MissionId] as MissionDef | undefined;
+      if (mission === undefined || mission.scene !== 'flight' || mission.type !== 'main') continue;
+      target = Math.max(target, this.fuelCost(mission.planet));
+    }
+    const grant = target - this.#save.resources.oil;
     if (grant <= 0) return 0;
     this.addResource('oil', grant, 'subsidy');
     return grant;

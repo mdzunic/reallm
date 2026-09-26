@@ -34,6 +34,12 @@ export interface SettingsDeps {
   redetect?: () => Promise<BenchmarkOutcome>;
   /** After a completed reset (AC-95) — the menu refreshes, the station quits. */
   onReset?: () => void;
+  /**
+   * SPEC-034 §4.13: after an import that rebound the running slot. The panel
+   * has already closed and toasted; the host leaves to the main menu, where
+   * `Continue` offers the imported run.
+   */
+  onImported?: () => void;
 }
 
 const QUALITY_CHOICES = ['auto', 'low', 'medium', 'high'] as const;
@@ -48,6 +54,9 @@ const GUIDANCE_CHOICES = [
   ['minimal', 'Minimal'],
   ['off', 'Off'],
 ] as const satisfies readonly (readonly [GuidanceLevel, string])[];
+
+/** SPEC-034 §4.13: what an import into the slot in play says on its way out. */
+export const IMPORT_REBOUND_TEXT = 'Save imported — returning to the main menu.';
 
 export class SettingsPanel {
   readonly #ui: UiRoot;
@@ -484,11 +493,18 @@ export class SettingsPanel {
             }).then((yes) => {
               if (!yes) return;
               void save.importCode(code, slot).then((result) => {
-                if (result.ok) {
-                  paste.value = '';
-                  this.#ui.toast('Save imported', 'good');
+                if (!result.ok) return; // failures toast from `importCode` itself (SPEC-007 §4.6)
+                paste.value = '';
+                // SPEC-034 §4.13: an import into the slot in play has taken the
+                // binding, so the character behind this panel is gone — say so
+                // and leave, rather than let the menu's Continue lie.
+                if (result.rebound === true) {
+                  this.hide();
+                  this.#ui.toast(IMPORT_REBOUND_TEXT, 'good');
+                  this.#deps.onImported?.();
+                  return;
                 }
-                // Failures toast from `importCode` itself (SPEC-007 §4.6).
+                this.#ui.toast('Save imported', 'good');
               });
             });
           },

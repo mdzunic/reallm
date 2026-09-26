@@ -16,7 +16,7 @@ import type { InputState } from '@/core/Input';
 import { log } from '@/core/Log';
 import { Pool } from '@/core/Pool';
 import type { Rng } from '@/core/Rng';
-import type { Save } from '@/core/Save';
+import { maxHp, type Save } from '@/core/Save';
 import { SpatialHash } from '@/core/SpatialHash';
 import {
   CLASSES,
@@ -136,7 +136,8 @@ export function computePlayerStats(save: Save, boosts?: { damageMult?: number; m
   const hazardResist = armorItem.kind === 'armor' ? armorItem.hazardResist : 0;
   const scanner = companionEffect(save, 'scanner_drone');
   return {
-    maxHp: TUNING.PLAYER_BASE_HP + (passive.maxHpBonus ?? 0) + 8 * a.vigor + 4 * (level - 1),
+    // SPEC-034 §4.14: the one formula, now in `core/Save.ts`.
+    maxHp: maxHp(save.player.classId, a, level),
     damageMult:
       (passive.damageMult ?? 1) * (1 + 0.04 * a.might) * (1 + 0.02 * (level - 1)) * (boosts?.damageMult ?? 1),
     moveSpeed: TUNING.PLAYER_SPEED * (passive.moveSpeedMult ?? 1) * (1 + 0.02 * a.agility) * (boosts?.moveMult ?? 1),
@@ -301,7 +302,16 @@ export class Combat {
 
     // §4.1: recomputed on level-up and equip; consumables and weather go
     // through `applyConsumable` / `setWeatherMoveMult` (AC-66).
-    events.on('player:leveledUp', () => this.#recomputeStats(), this);
+    events.on('player:leveledUp', () => {
+      // SPEC-034 §4.14, E20: the live HP rises with the max, so a level-up on
+      // the surface is the grant the save already recorded.
+      const before = this.#world.stats.maxHp;
+      this.#recomputeStats();
+      const gain = this.#world.stats.maxHp - before;
+      if (gain > 0 && this.#world.player.alive) {
+        this.#world.player.hp = Math.min(this.#world.stats.maxHp, this.#world.player.hp + gain);
+      }
+    }, this);
     events.on('gear:equipped', () => {
       // SPEC-028 §4.2: the loadout re-reads the save, so the weapon in hand
       // follows whichever slot moved; armor still moves the derived stats.

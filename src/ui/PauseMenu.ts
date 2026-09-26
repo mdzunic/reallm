@@ -11,6 +11,7 @@
 import type { BenchmarkOutcome } from '@/core/Benchmark';
 import type { SaveStore } from '@/core/Save';
 import type { SettingsStore } from '@/core/Settings';
+import { confirmSheet } from '@/ui/ConfirmSheet';
 import { el, h, testId, uiLayers } from '@/ui/dom';
 import { createScreen, type Screen } from '@/ui/Screen';
 import { SettingsPanel, type QualityTarget } from '@/ui/SettingsPanel';
@@ -37,6 +38,20 @@ export interface PauseSkip {
   run(): void;
 }
 
+/**
+ * SPEC-034 §4.2: the surface scene's `Recall to pad` — the universal way out of
+ * a corner. `allowed()` is asked on every open, like `PauseSkip`'s; `run()` is
+ * called once the confirm sheet is answered.
+ */
+export interface PauseRecall {
+  allowed(): boolean;
+  run(): void;
+}
+
+/** SPEC-034 §4.2: the confirm sheet a `Recall to pad` press opens. */
+export const RECALL_TITLE = 'Recall to pad';
+export const RECALL_BODY = 'Return to the landing pad? Timed objectives restart.';
+
 /** AC-84: the cheat-sheet rows, per scheme (bindings are SPEC-005's). */
 const CONTROL_SHEETS = {
   keyboard: [
@@ -49,7 +64,8 @@ const CONTROL_SHEETS = {
     ['Heal', 'Q'],
     ['Throw / plant', 'G'],
     ['Gadget', 'C'],
-    ['Throttle (flight)', 'Shift up · Ctrl down'],
+    // SPEC-034 §4.16: X, not Ctrl — Ctrl+W closes the tab next to WASD.
+    ['Throttle (flight)', 'Shift up · X down'],
     // SPEC-026 §4.7: M opens the surface map; T cycles the tracked mission.
     ['Map', 'M'],
     ['Track mission', 'T'],
@@ -76,9 +92,10 @@ export class PauseMenu {
   readonly #controls: HTMLDivElement;
   readonly #settings: SettingsPanel;
   readonly #skip: { readonly button: HTMLButtonElement; readonly hooks: PauseSkip } | null;
+  readonly #recall: { readonly button: HTMLButtonElement; readonly hooks: PauseRecall } | null;
   #quitting = false;
 
-  constructor(deps: PauseDeps, onResume: () => void, skip?: PauseSkip) {
+  constructor(deps: PauseDeps, onResume: () => void, skip?: PauseSkip, recall?: PauseRecall) {
     this.#deps = deps;
     // SPEC-031 §4.4: the pause menu wears the console frame too — SYSTEM HOLD
     // on the channel — while staying a UI layer inside its scene, never a
@@ -98,6 +115,12 @@ export class PauseMenu {
       // SPEC-015 15-j: `Re-detect` from the pause menu draws the stress scene
       // for up to two seconds; the simulation stays paused behind it.
       redetect: deps.detectQuality?.bind(deps),
+      // SPEC-034 §4.13: an import into the slot in play rebinds the store, so
+      // the run behind this menu is no longer the save — leave to the menu.
+      onImported: () => {
+        this.hide();
+        void this.#deps.go('menu', { reason: 'quit' });
+      },
     });
 
     this.#resume = testId(el('button', 'pause-resume ui-btn', 'Resume'), 'pause-resume');
@@ -123,8 +146,29 @@ export class PauseMenu {
     }
     this.#skip = skipButton === null || skip === undefined ? null : { button: skipButton, hooks: skip };
 
+    // SPEC-034 §4.2: the surface's `Recall to pad`, above Save & Quit, shown
+    // while it is allowed. The flight menu never passes one.
+    let recallButton: HTMLButtonElement | null = null;
+    if (recall !== undefined) {
+      const button = testId(h('button', { class: 'ui-btn is-hidden', type: 'button' }, RECALL_TITLE), 'pause-recall');
+      button.addEventListener('click', () => {
+        if (button.disabled) return;
+        void confirmSheet(uiLayers(deps.uiRoot), {
+          title: RECALL_TITLE,
+          body: RECALL_BODY,
+          confirmText: 'Recall',
+          cancelText: 'Cancel',
+        }).then((yes) => {
+          if (!yes || !recall.allowed()) return;
+          recall.run();
+        });
+      });
+      recallButton = button;
+    }
+    this.#recall = recallButton === null || recall === undefined ? null : { button: recallButton, hooks: recall };
+
     this.#screen.body.append(
-      h('div', { class: 'pause-actions' }, this.#resume, settings, controls, skipButton, quit),
+      h('div', { class: 'pause-actions' }, this.#resume, settings, controls, skipButton, recallButton, quit),
       this.#controls,
     );
     deps.uiRoot.append(this.#root);
@@ -140,6 +184,13 @@ export class PauseMenu {
       const allowed = skip.hooks.allowed();
       skip.button.classList.toggle('is-hidden', !allowed);
       skip.button.disabled = !allowed;
+    }
+    // SPEC-034 §4.2: recall follows the same per-open predicate.
+    const recall = this.#recall;
+    if (recall !== null) {
+      const allowed = recall.hooks.allowed();
+      recall.button.classList.toggle('is-hidden', !allowed);
+      recall.button.disabled = !allowed;
     }
     this.#root.classList.add('is-visible');
     this.#resume.focus();

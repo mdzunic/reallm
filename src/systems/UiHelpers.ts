@@ -423,11 +423,11 @@ export function abandonMission(save: Save, id: MissionId): boolean {
 // -------------------------------------------------------------- player stats
 
 /**
- * The creation screen's live preview (§4.2). SPEC-011 owns the real combat
- * formula; until it lands this is the same kind of placeholder `maxHp` is
- * (SPEC-007 §4.1), built from the attribute effects `data/characters.ts`
- * documents: might +4 % damage per point, agility +2 % speed, vigor through
- * `maxHp`, plus the class passives.
+ * The creation screen's live preview (§4.2). Its HP is `maxHp` and nothing else
+ * — SPEC-034 §4.14 folded the class bonus into that formula, and this used to
+ * add it a second time. Damage and speed follow the attribute effects
+ * `data/characters.ts` documents: might +4 % damage per point, agility +2 %
+ * speed, plus the class passives.
  */
 export function computePlayerStats(
   classId: ClassId,
@@ -439,7 +439,7 @@ export function computePlayerStats(
   const armed = ITEM_TABLE[weapon ?? cls.startingWeapon];
   const base = armed.kind === 'weapon' ? armed.damage : 0;
   return {
-    hp: maxHp(classId, attributes, level) + (cls.passive.maxHpBonus ?? 0),
+    hp: maxHp(classId, attributes, level),
     damage: Math.round(base * (1 + 0.04 * attributes.might) * (cls.passive.damageMult ?? 1) * 10) / 10,
     speed: Math.round(TUNING.PLAYER_SPEED * (1 + 0.02 * attributes.agility) * (cls.passive.moveSpeedMult ?? 1) * 100) / 100,
   };
