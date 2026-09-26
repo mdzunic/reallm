@@ -66,6 +66,8 @@ export class StarmapScene extends UiScene<'starmap'> {
   #economy: Economy | null = null;
   #selected: PlanetId = PLANET_IDS[0]!;
   #leaving = false;
+  /** SPEC-034 §4.16: the black veil between the departure film and the flight. */
+  #veil: HTMLDivElement | null = null;
 
   #root: HTMLDivElement | null = null;
   #nodesBox: HTMLDivElement | null = null;
@@ -379,7 +381,10 @@ export class StarmapScene extends UiScene<'starmap'> {
       .map((id) => ({ id, status: missionStatus(data, MISSIONS[id], 'station') }))
       .filter((entry) => entry.status === 'active' || entry.status === 'available');
     const result = economy.canDepart(this.#selected);
-    const reason = departReason(result);
+    // SPEC-034 §4.16: the fuel is already spent while leaving, so `canDepart`
+    // reads it back as a shortfall. Saying `Need 108 oil` about oil the player
+    // has just paid is the bug, not the number.
+    const reason = this.#leaving ? '' : departReason(result);
     const depart = testId(
       h(
         'button',
@@ -390,7 +395,9 @@ export class StarmapScene extends UiScene<'starmap'> {
           disabled: !result.ok || this.#leaving,
           click: () => this.#depart(),
         },
-        'Depart',
+        // SPEC-034 §4.16: while leaving it says so, rather than offering a
+        // departure that has already been paid for.
+        this.#leaving ? 'Departing…' : 'Depart',
       ),
       'starmap-depart',
     );
@@ -405,7 +412,14 @@ export class StarmapScene extends UiScene<'starmap'> {
         h('p', { class: 'settings-note' }, `${planet.biome} · Chapter ${planet.chapter}`),
         h('p', { class: 'starmap-line' }, `Resources: ${resources}`),
         h('p', { class: 'starmap-line' }, `Threats: ${threats}`),
-        testId(h('p', { class: `starmap-line${oil < fuel ? ' is-short' : ''}` }, `Fuel: ${fuel} oil (have ${oil})`), 'starmap-fuel'),
+        testId(
+          h(
+            'p',
+            { class: `starmap-line${oil < fuel && !this.#leaving ? ' is-short' : ''}` },
+            `Fuel: ${fuel} oil (have ${oil})`,
+          ),
+          'starmap-fuel',
+        ),
         h('p', { class: 'starmap-line' }, `Travel: ${travel}`),
         h('ul', { class: 'starmap-reqs' }, ...requirements),
         missions.length > 0
@@ -488,14 +502,42 @@ export class StarmapScene extends UiScene<'starmap'> {
         beats.session.add(departureKey(planet));
         await beats.playFilm('departure', { musicAfter: null });
       }
+      // SPEC-034 §4.16: from the moment the film settles until the flight scene
+      // has entered, the star map is behind a black veil. It used to re-render
+      // for five seconds while the next scene loaded — and read the fuel it had
+      // just paid as a shortfall, so the map looked broken. With films off the
+      // veil is mounted at the same point.
+      this.#mountDepartVeil();
       const params = choice === 'secondary' ? { destination: planet, skipRun: true } : { destination: planet };
       void this.services.go('flight', params).then((went) => {
         if (!went) {
           this.#leaving = false;
+          this.#removeDepartVeil();
           this.#renderInfo();
         }
       });
     });
+  }
+
+  /**
+   * SPEC-034 §4.16: the full-screen black veil that covers the star map from the
+   * departure film's end to the flight scene's first frame. Taken down by the
+   * scene's disposer — a departure that is refused puts it away at once.
+   */
+  #mountDepartVeil(): void {
+    if (this.#veil !== null) return;
+    const veil = testId(el('div', 'depart-veil'), 'depart-veil');
+    this.#veil = veil;
+    this.services.uiRoot.append(veil);
+    this.disposer.add(() => {
+      veil.remove();
+      this.#veil = null;
+    });
+  }
+
+  #removeDepartVeil(): void {
+    this.#veil?.remove();
+    this.#veil = null;
   }
 
   /** AC-57. */

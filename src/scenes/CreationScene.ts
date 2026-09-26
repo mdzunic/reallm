@@ -219,6 +219,19 @@ export class CreationScene extends UiScene<'creation'> {
     for (const material of this.#tintable) tintSalvager(material, this.#primary, this.#secondary);
   }
 
+  /** SPEC-034 §4.16: the measured preview box, for the e2e scroll case. */
+  override debugInfo(): Record<string, number | string> {
+    const info = super.debugInfo();
+    const box = this.#viewport;
+    if (box !== null) {
+      info['previewX'] = box.x;
+      info['previewY'] = box.y;
+      info['previewW'] = box.w;
+      info['previewH'] = box.h;
+    }
+    return info;
+  }
+
   /** The preview box in renderer coordinates; measured outside the loop. */
   #measure(): void {
     const box = this.#previewBox;
@@ -255,6 +268,14 @@ export class CreationScene extends UiScene<'creation'> {
     const screen = createScreen({ id: 'creation' });
     bindTouchScheme(screen.root, this.services, this.disposer, this);
     screen.body.append(this.#root);
+    // SPEC-034 §4.16: the preview is drawn with a scissor pass over the canvas
+    // *underneath* the form, so it follows a DOM box that the form's scroll
+    // moves — and a scrolled form used to leave it behind, floating over the
+    // wrong part of the frame. Passive and capture, so a nested scroll counts
+    // too; no DOM read is added to `update()`, the measure stays here.
+    const onScroll = (): void => this.#measure();
+    screen.body.addEventListener('scroll', onScroll, { passive: true, capture: true });
+    this.disposer.add(() => screen.body.removeEventListener('scroll', onScroll, { capture: true }));
     this.ui.mount(screen.root, 'panel');
     this.disposer.add(() => {
       this.ui.unmount(screen.root);

@@ -4208,3 +4208,15 @@ html.reduce-motion .screen-body > * {
 .qb-slot .qb-name {
   font-size: 11px;
 }
+
+/* SPEC-034 §4.16: the departure veil — a full-screen black sheet over the star
+   map from the film's end until the flight scene has entered, so the map is
+   never seen re-rendering a paid fuel as a shortfall while the next scene
+   loads. Above every screen layer, and it takes no pointer events. */
+.depart-veil {
+  position: fixed;
+  inset: 0;
+  background: #000;
+  z-index: 90;
+  pointer-events: none;
+}

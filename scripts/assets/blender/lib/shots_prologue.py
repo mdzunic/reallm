@@ -16,6 +16,13 @@ import plate as PL
 
 EYE = '#ff3b30'
 CITY = '#ffcc88'
+# SPEC-034 §4.17: the Selection board's twelve card numbers, 62 first — deleted
+# in 5b7e57a, which left `selection_wall` raising NameError on the first card and
+# the prologue and endings films unbuildable.
+CARD_NUMBERS = (62, 7, 13, 19, 24, 28, 33, 38, 41, 46, 50, 55)
+# `selection` reads this one too, and 5b7e57a took both: card indices stamped at
+# 1.6, 3.2, 4.8 and 6.4 s — number 62 first.
+STAMP_ORDER = (0, 2, 7, 1)
 
 
 # ------------------------------------------------------------ small helpers
