@@ -23,6 +23,7 @@ import {
   type CompanionEffect,
   type MissionDef,
   type MissionId,
+  type PlanetId,
   type Price,
   type Requirement,
   type ResourceId,
@@ -366,6 +367,26 @@ export function missionStatus(save: Save, def: MissionDef, scene: MissionScene):
   }
   if (missingRequirements(save, def.requires).length > 0) return 'locked';
   return 'available';
+}
+
+/**
+ * SPEC-012 12-k: why the pad terminal has nothing to accept. The planet's own
+ * missions are read in table order, so the first locked one is the next one
+ * due and its first missing requirement is the sentence — "Complete 'Gauntlet'"
+ * on The Hive, whose work starts with a flight mission the pad cannot offer
+ * (12-j). With nothing locked either, the campaign is over (E24) or everything
+ * here is done and only the station board still sells replays.
+ */
+export function padEmptyText(save: Save, planet: PlanetId): string {
+  for (const def of Object.values(MISSIONS) as MissionDef[]) {
+    if (def.planet !== planet || def.scene !== 'surface') continue;
+    const missing = missingRequirements(save, def.requires)[0];
+    if (missing === undefined) continue;
+    const blocker = missing.kind === 'mission' ? MISSIONS[missing.id as MissionId] : undefined;
+    const where = blocker?.scene === 'flight' ? ' — a flight mission, taken at the station board' : '';
+    return `Nothing to accept yet. ${requirementText(missing)}${where}.`;
+  }
+  return "Nothing to accept here. The station board carries this planet's remaining work.";
 }
 
 /**

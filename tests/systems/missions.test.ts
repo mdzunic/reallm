@@ -438,6 +438,33 @@ describe('Missions — available() (AC-43, 12-j)', () => {
   });
 });
 
+// SPEC-001 §9 / PLAN R16: the dev skip stands in for a whole trip, so it has to
+// resolve the missions that trip was carrying — the Hive's surface is gated
+// behind `c5_m1`, which a skipped flight can never finish on its own.
+describe('Missions — forceComplete (dev skip)', () => {
+  it('finishes an active mission the way its last objective would', () => {
+    const h = harness((save) => save.progress.missionsActive.push({ id: 'c5_m1', stage: 0, counters: {} }), 'flight', 'hive');
+    const tokens = h.save.player.tokens;
+    expect(h.missions.forceComplete('c5_m1')).toBe(true);
+    expect(h.save.progress.missionsDone).toContain('c5_m1');
+    expect(h.save.progress.missionsActive.map((entry) => entry.id)).not.toContain('c5_m1');
+    expect(h.missions.active).toEqual([]);
+    expect(h.of('mission:completed')).toEqual([{ id: 'c5_m1', replay: false }]);
+    // The ordinary reward path: the mission's own tokens, and its 350 XP on
+    // top, which carries levels worth 25 tokens each (SPEC-010 §4.1).
+    expect(h.save.player.tokens).toBeGreaterThanOrEqual(tokens + MISSIONS.c5_m1.rewards.tokens);
+    expect(h.save.player.level).toBeGreaterThan(1);
+    expect(h.saveRequests).toContain('mission');
+  });
+
+  it('answers false for a mission that is not running here', () => {
+    const h = harness(undefined, 'flight', 'hive');
+    expect(h.missions.forceComplete('c5_m1')).toBe(false);
+    expect(h.save.progress.missionsDone).toEqual([]);
+    expect(h.of('mission:completed')).toEqual([]);
+  });
+});
+
 describe('Missions — objectiveEnemies and bossStage', () => {
   it('reports undone kill targets for the spawn director (E14)', () => {
     const h = harness((save) => save.progress.missionsDone.push('c1_m1'));

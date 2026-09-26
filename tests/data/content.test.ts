@@ -8,6 +8,7 @@
 // or a planet gating on a flag that does not exist is a `tsc` failure, which the
 // second describe block below demonstrates with `@ts-expect-error`.
 import { describe, expect, it, vi } from 'vitest';
+import { LAUNCH_SECONDS, THROTTLES } from '@/systems/Flight';
 import {
   ATTRIBUTE_MAX,
   CLASSES,
@@ -284,8 +285,18 @@ describe('content invariants (SPEC-009 §7)', () => {
       const planet = planetsById[mission.planet];
       const flightWaves = planet.flight.waves;
       for (const { objective, where } of objectivesOf(mission)) {
-        if (objective.kind === 'survive' && objective.seconds > planet.travelSeconds) {
-          problems.push(`${where}: survives ${objective.seconds}s of a ${planet.travelSeconds}s trip`);
+        if (objective.kind === 'survive') {
+          // PLAN R16 / SPEC-009 §7.6: the flight it has to fit is the *fastest*
+          // one the planet allows — top engine at throttle 1.2 — plus the
+          // launch the timer counts and the holding pattern that tops it up
+          // before the landing. `travelSeconds` alone only describes a tier-0
+          // engine at throttle 1, which is how `c5_m1` came to be unfinishable.
+          const speeds = UPGRADES.engine.metrics['speedMult'] ?? [1];
+          const fastest = planet.travelSeconds / Math.max(...speeds) / Math.max(...THROTTLES);
+          const budget = LAUNCH_SECONDS + fastest + TUNING.HOLD_PATTERN_MAX_SECONDS;
+          if (objective.seconds > budget) {
+            problems.push(`${where}: survives ${objective.seconds}s of a ${Math.round(budget)}s fastest flight`);
+          }
         }
         if (objective.kind === 'kill') {
           // E12: waves spawn at least twice the required kills.

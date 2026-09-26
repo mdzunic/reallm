@@ -26,6 +26,9 @@ export type HudMode = 'surface' | 'flight';
 export const DAMAGE_FLASH_MS = 150;
 /** AC-64: the low-HP pulse threshold. */
 export const LOW_HP_FRACTION = 0.25;
+/** SPEC-013 §4.1: the two things a holding pattern can be waiting on. */
+const HOLD_HOSTILES = 'Holding pattern — clear the hostiles';
+const HOLD_OBJECTIVE = 'Holding pattern — the objective is not done';
 
 
 function bar(kind: string, glyph: string, label: string): { root: HTMLDivElement; fill: HTMLDivElement; text: HTMLSpanElement } {
@@ -137,7 +140,7 @@ export class Hud {
       this.#progress.append(this.#progressFill, this.#markers);
       this.#progress.setAttribute('aria-label', 'Trip progress');
       this.#storm.textContent = '▲ Ion storm';
-      this.#holding.textContent = 'Holding pattern — clear the hostiles';
+      this.#holding.textContent = HOLD_HOSTILES;
       this.#hostiles.classList.add('is-hidden');
       this.#storm.classList.add('is-hidden');
       this.#static.classList.add('is-hidden');
@@ -360,6 +363,11 @@ export class Hud {
         this.#hostiles.classList.toggle('is-hidden', m.flight.hostiles === 0);
         this.#storm.classList.toggle('is-hidden', !m.flight.storm);
         this.#static.classList.toggle('is-hidden', !m.flight.storm);
+        // SPEC-013 §4.1 (E12, PLAN R16): the hold has two reasons — hostiles on
+        // the tail, or a main flight objective still open — and an empty sky
+        // must not be captioned "clear the hostiles".
+        const hold = m.flight.hostiles > 0 ? HOLD_HOSTILES : HOLD_OBJECTIVE;
+        if (this.#holding.textContent !== hold) this.#holding.textContent = hold;
         this.#holding.classList.toggle('is-hidden', !m.flight.holding);
         return;
       }

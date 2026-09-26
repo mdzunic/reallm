@@ -88,7 +88,7 @@ import { cumulativeXp, Progression, xpToNext } from '@/systems/Progression';
 import { SpawnDirector, type FrustumXZ } from '@/systems/Spawn';
 import { Weather, WEATHER_EFFECTS, type WeatherEffects } from '@/systems/Weather';
 import { revealCamera, revealDue, revealKey, stayReport, type Ending } from '@/systems/StoryBeats';
-import { hasNodeRadar, type HudTracker, type HudTrackerRow } from '@/systems/UiHelpers';
+import { hasNodeRadar, padEmptyText, type HudTracker, type HudTrackerRow } from '@/systems/UiHelpers';
 import { UiScene } from '@/scenes/base';
 import { director } from '@/scenes/Director';
 import { INSTANCES_PER_PART } from '@/views/ProceduralMeshes';
@@ -2503,6 +2503,10 @@ export class SurfaceScene extends UiScene<'surface'> {
       const pin = state.id === missions.pinned ? ' ◈' : '';
       rows.push(el('p', 'terminal-active', `${def.title} — stage ${state.stage + 1}/${def.stages.length}${pin}`));
     }
+    // 12-k: a terminal with nothing on it reads as a broken terminal. Say what
+    // is holding the planet's work back, and where that work is taken.
+    const save = this.#save;
+    if (rows.length === 1 && save !== null) rows.push(el('p', 'terminal-empty', padEmptyText(save, this.#planet.id)));
 
     rows.push(
       h(
@@ -2889,7 +2893,11 @@ export class SurfaceScene extends UiScene<'surface'> {
     // D-11: nothing tracked and nowhere to walk — the player is on the pad.
     if (pinned === null && target === null) return '';
     const row = this.#focusIndex >= 0 ? (this.#guideRows[this.#focusIndex] ?? null) : null;
-    const kind = row === null ? 'none' : row.objective.kind;
+    // PLAN R16 / 12-k: `none` promises the pad terminal has work. Where it has
+    // none — the planet's work starts with a flight mission, or the campaign
+    // is over — the line names the station board instead of walking the player
+    // to an empty terminal.
+    const kind = row !== null ? row.objective.kind : missions.available().length === 0 ? 'no_work' : 'none';
     const values = this.#fillValues(row, target);
     const hint = HINTS[kind];
     const stageHint = pinned === null ? undefined : MISSION_HINTS[pinned]?.[this.#stageOf(missions, pinned)];

@@ -445,6 +445,40 @@ describe('waves, arrival and holding', () => {
     expect(w.flight.hostiles).toBe(2);
   });
 
+  it('holds the landing while an accepted main flight mission is unfinished (E12, PLAN R16)', () => {
+    // A 20 s Hive run cannot fit the gauntlet's 180 s survive — which is what
+    // an upgraded engine does to the real 200 s trip (PLAN R16).
+    const w = world({ planet: quietPlanet(PLANETS.hive, 20), accept: ['c5_m1'] });
+    step(w.flight, LAUNCH_SECONDS + 22);
+    w.flight.hazards.clear(); // an empty sky: the mission is the only hold left
+    step(w.flight, 2 * DT);
+    expect(w.flight.phase).toBe('holding');
+    expect(w.of('flight:arrived')).toEqual([]);
+    // Drop the mission and the same frame's check lets the ship down.
+    w.missions.abandon('c5_m1');
+    step(w.flight, 2 * DT);
+    expect(w.flight.phase).toBe('arrived');
+  });
+
+  it('never holds a landing for a side flight mission (13-j)', () => {
+    const w = world({ planet: quietPlanet(PLANETS.ferrum, 20), accept: ['c4_s2'] });
+    step(w.flight, LAUNCH_SECONDS + 22);
+    w.flight.hazards.clear();
+    step(w.flight, 2 * DT);
+    expect(w.flight.phase).toBe('arrived');
+    // It stays accepted for the next trip out (13-g).
+    expect(w.save.progress.missionsActive.map((m) => m.id)).toContain('c4_s2');
+  });
+
+  it('lands anyway at the 90 s cap with the main mission still open (13-k)', () => {
+    const w = world({ planet: quietPlanet(PLANETS.hive, 20), accept: ['c5_m1'] });
+    step(w.flight, LAUNCH_SECONDS + 22);
+    w.flight.hazards.clear();
+    step(w.flight, TUNING.HOLD_PATTERN_MAX_SECONDS + 2);
+    expect(w.flight.phase).toBe('arrived');
+    expect(w.save.progress.missionsActive.map((m) => m.id)).toContain('c5_m1');
+  });
+
   it('caps the holding pattern at 90 s and lands anyway (AC-26)', () => {
     const w = world({ planet: quietPlanet(PLANETS.hive, 20) });
     step(w.flight, LAUNCH_SECONDS + DT);
@@ -659,6 +693,24 @@ describe('missions in flight', () => {
     for (let i = 0; i < 8; i++) w.events.emit('enemy:killed', { enemyId: 'scav_fighter', elite: false, x: 0, z: 0, xp: 12 });
     expect(w.of('mission:completed').at(-1)).toEqual({ id: 'c4_s2', replay: true });
     expect(w.save.player.tokens).toBeGreaterThanOrEqual(replayBefore + Math.floor(def.rewards.tokens * TUNING.REPLAY_REWARD_FRACTION));
+  });
+
+  it('finishes the gauntlet before the Hive at every engine tier (PLAN R16)', () => {
+    // The bug this pins: the trip is `travelSeconds / speedMult / throttle`, so
+    // an upgraded engine lands the ship long before `c5_m1`'s 180 s survive and
+    // every Hive surface mission stays locked behind a mission that can no
+    // longer be finished. No waves here — the hold under test is the mission's.
+    const hive: PlanetDef = { ...PLANETS.hive, flight: { asteroidDensity: 0, waves: [], ionStorm: false } };
+    for (const engine of [0, 1, 2, 3] as const) {
+      const w = world({ planet: hive, ship: { engine }, accept: ['c5_m1'] });
+      for (let i = 0; i < 10; i++) w.events.emit('enemy:killed', { enemyId: 'hive_interceptor', elite: false, x: 0, z: 0, xp: 0 });
+      step(w.flight, 179); // one second short of the survive, on every tier
+      expect(w.save.progress.missionsDone).not.toContain('c5_m1');
+      expect(w.flight.phase).not.toBe('arrived');
+      step(w.flight, 40); // past the slowest trip's remainder
+      expect(w.save.progress.missionsDone).toContain('c5_m1');
+      expect(w.flight.phase).toBe('arrived');
+    }
   });
 
   it('resets stages on recall and keeps the missions accepted (AC-86, AC-103)', () => {

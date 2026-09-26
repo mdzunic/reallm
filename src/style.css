@@ -1198,6 +1198,14 @@ html.reduce-motion .hud-vignette {
   opacity: 0.8;
 }
 
+/* 12-k: the line a terminal with nothing to offer prints instead of a bare
+   title — quieter than an offer, wide enough to wrap on a phone. */
+.pad-terminal .terminal-empty {
+  margin: 4px 0 8px;
+  max-width: 42ch;
+  opacity: 0.75;
+}
+
 /* ================================================================ SPEC-026 */
 /* The full-screen map (§4.5): a two-column grid over the frozen frame — the
    map on the left, the legend and the missions beside it. On portrait the
