@@ -27,6 +27,16 @@ export interface PauseDeps {
   go(id: 'menu', params: { reason?: 'start' | 'quit' | 'error' }): Promise<boolean>;
 }
 
+/**
+ * SPEC-032 §4.4: the flight scene's `Skip the run`. `allowed()` is asked on
+ * every open, so the entry follows `runSkip` as it is now; `run()` is called
+ * once per press, with the entry already disabled (32-d).
+ */
+export interface PauseSkip {
+  allowed(): boolean;
+  run(): void;
+}
+
 /** AC-84: the cheat-sheet rows, per scheme (bindings are SPEC-005's). */
 const CONTROL_SHEETS = {
   keyboard: [
@@ -65,9 +75,10 @@ export class PauseMenu {
   readonly #resume: HTMLButtonElement;
   readonly #controls: HTMLDivElement;
   readonly #settings: SettingsPanel;
+  readonly #skip: { readonly button: HTMLButtonElement; readonly hooks: PauseSkip } | null;
   #quitting = false;
 
-  constructor(deps: PauseDeps, onResume: () => void) {
+  constructor(deps: PauseDeps, onResume: () => void, skip?: PauseSkip) {
     this.#deps = deps;
     // SPEC-031 §4.4: the pause menu wears the console frame too — SYSTEM HOLD
     // on the channel — while staying a UI layer inside its scene, never a
@@ -99,8 +110,21 @@ export class PauseMenu {
 
     this.#controls = testId(el('div', 'pause-sheet is-hidden'), 'pause-sheet');
 
+    // SPEC-032 §4.4: flight only, above Save & Quit, shown while it is allowed.
+    let skipButton: HTMLButtonElement | null = null;
+    if (skip !== undefined) {
+      const button = testId(h('button', { class: 'ui-btn is-hidden', type: 'button' }, 'Skip the run'), 'pause-skip-run');
+      button.addEventListener('click', () => {
+        if (button.disabled) return;
+        button.disabled = true; // 32-d: one press, one skip
+        skip.run();
+      });
+      skipButton = button;
+    }
+    this.#skip = skipButton === null || skip === undefined ? null : { button: skipButton, hooks: skip };
+
     this.#screen.body.append(
-      h('div', { class: 'pause-actions' }, this.#resume, settings, controls, quit),
+      h('div', { class: 'pause-actions' }, this.#resume, settings, controls, skipButton, quit),
       this.#controls,
     );
     deps.uiRoot.append(this.#root);
@@ -111,6 +135,12 @@ export class PauseMenu {
   }
 
   show(): void {
+    const skip = this.#skip;
+    if (skip !== null) {
+      const allowed = skip.hooks.allowed();
+      skip.button.classList.toggle('is-hidden', !allowed);
+      skip.button.disabled = !allowed;
+    }
     this.#root.classList.add('is-visible');
     this.#resume.focus();
   }

@@ -27,10 +27,13 @@ import { CARD, cardDue, cardKey } from '@/systems/StoryBeats';
 import { showChapterCard } from '@/ui/ChapterCard';
 import { director } from '@/scenes/Director';
 import {
+  AUTOPILOT_SECONDS,
   CONVERGE_DEPTH,
   EXPLOSION_SECONDS,
   Flight,
   LANDING_SECONDS,
+  LAUNCH_SECONDS,
+  runSkip,
   type FlightInput,
 } from '@/systems/Flight';
 import { Missions } from '@/systems/Missions';
@@ -55,10 +58,26 @@ const DEMO_CREATION: CharacterCreation = {
 };
 
 /**
- * Dev builds only: the most a skip may simulate — past any trip's
- * `travelSeconds` at the slowest throttle notch, plus the 90 s holding cap.
+ * The most a skip may simulate — past any trip's `travelSeconds` at the
+ * slowest throttle notch, plus the 90 s holding cap. The dev button and the
+ * player's `Skip the run` (SPEC-032 §4.5) share it.
  */
 const DEV_SKIP_LIMIT_SECONDS = 1200;
+
+/**
+ * SPEC-032 §4.2: does this event end the launch shot? A tap, or a fresh key
+ * press that is not Space (E33: Space never skips). A tap on a control — the
+ * pause button, the dev skip — is that control's, and the pause keys belong to
+ * the pause toggle, so a pause mid-shot holds the shot (32-e).
+ */
+function skipsLaunch(event: Event): boolean {
+  if (event.type === 'pointerdown') {
+    const target = event.target;
+    return !(target instanceof Element && target.closest('button, a, input, select, textarea, [role="dialog"]') !== null);
+  }
+  if (!(event instanceof KeyboardEvent) || event.repeat) return false;
+  return event.code !== 'Space' && event.key !== ' ' && event.key !== 'Escape' && event.key.toLowerCase() !== 'p';
+}
 
 /** SPEC-017 §4.1 (*initial tuning*): engine glow and shots carry the trip. */
 const FLIGHT_LOOK: Partial<Look> = { bloomStrength: 0.55, bloomThreshold: 0.75, vignette: 0.3 };
@@ -89,6 +108,14 @@ export class FlightScene extends UiScene<'flight'> {
   #leaving = false;
   #explosionEl: HTMLDivElement | null = null;
   #skipHint: HTMLParagraphElement | null = null;
+
+  /** SPEC-032 §4.1: the launch shot has ended (run out, or skipped). */
+  #launchDone = false;
+  /** SPEC-032 §4.5: a skip asked for, run on the next update with the loop live. */
+  #skipPending = false;
+  /** Seconds the autopilot card has been up; −1 while there is none. */
+  #autopilotT = -1;
+  #autopilotEl: HTMLDivElement | null = null;
 
   readonly #frameInput: FlightInput = {
     steerX: 0,
@@ -129,6 +156,13 @@ export class FlightScene extends UiScene<'flight'> {
     const visitRng = services.rng.visit(this.#planet.id, visits);
     const progression = new Progression(save, services.events);
     const economy = new Economy(save, services.events, progression, bound === null ? undefined : services.save);
+    // SPEC-032 §4.7: the service override, kept in step with the setting.
+    economy.serviceMode = services.settings.serviceMode;
+    this.disposer.add(
+      services.events.on('settings:changed', ({ patch }) => {
+        if (patch.serviceMode !== undefined) economy.serviceMode = patch.serviceMode;
+      }, this),
+    );
     // The runtime subscribes with an owner and releases the whole owner on
     // dispose, which the narrow structural bus in `Services` cannot express —
     // the same cast the surface scene makes for the same reason.
@@ -155,12 +189,26 @@ export class FlightScene extends UiScene<'flight'> {
     this.camera.fov = 70;
     this.camera.far = 600;
     this.camera.updateProjectionMatrix();
+    // SPEC-032 §4.1: the tug the launch shot opens on — the hull the station
+    // docks. `ship.glb` is a boot-manifest model; a primitive stands in if not.
+    let tug: THREE.Object3D | null = null;
+    if (services.assets.loaded) {
+      try {
+        tug = services.assets.model('ship');
+      } catch (error) {
+        log.warn('scene', 'the launch shot could not load the ship model; the primitive hull flies it', error);
+      }
+    }
     this.#view = new FlightView(this.scene, this.camera, {
       planet: this.#planet,
       quality: services.renderer.quality,
       reduceMotion: services.settings.get().reduceMotion,
       rng: visitRng.fork('flight_view'),
+      tug,
     });
+    this.#view.setLaunch(0);
+    // SPEC-032 §4.4: a run skipped at the star map starts on the first update.
+    this.#skipPending = params.skipRun === true;
     this.disposer.add(() => {
       this.#view?.dispose();
       this.#view = null;
@@ -297,7 +345,15 @@ export class FlightScene extends UiScene<'flight'> {
       this.#hud = null;
     });
 
-    const menu = new PauseMenu(services, () => services.requestResume());
+    // SPEC-032 §4.4: `Skip the run` under `runSkip`'s rule; it resumes the
+    // scene and runs the skip on the next update, so the loop is live.
+    const menu = new PauseMenu(services, () => services.requestResume(), {
+      allowed: () => this.#canSkipRun(),
+      run: () => {
+        this.#skipPending = true;
+        services.requestResume();
+      },
+    });
     this.#pauseMenu = menu;
     this.disposer.add(() => {
       menu.dispose();
@@ -325,11 +381,27 @@ export class FlightScene extends UiScene<'flight'> {
     this.#skipHint = testId(el('p', 'flight-skip-hint is-hidden', 'Tap or press any key to skip'), 'skip-landing');
     this.ui.mount(this.#explosionEl, 'overlay');
     this.ui.mount(this.#skipHint, 'hud');
+    // SPEC-032 §4.2: the hint shows over the launch shot as over the landing.
+    this.#skipHint.classList.remove('is-hidden');
+    // SPEC-032 §4.5: the autopilot card, over the fast-forwarded frame.
+    this.#autopilotEl = testId(
+      h(
+        'div',
+        { class: 'autopilot-card', role: 'status', 'aria-live': 'polite' },
+        h('p', { class: 'autopilot-title' }, 'AUTOPILOT', h('span', { class: 'autopilot-sep' }, ' · ')),
+        h('p', { class: 'autopilot-line' }, `arriving at ${this.#planet.name}`),
+        h('div', { class: 'autopilot-bar' }, h('span', { class: 'autopilot-bar-fill' })),
+      ),
+      'autopilot-card',
+    );
+    this.ui.mount(this.#autopilotEl, 'overlay');
     this.disposer.add(() => {
       if (this.#explosionEl) this.ui.unmount(this.#explosionEl);
       if (this.#skipHint) this.ui.unmount(this.#skipHint);
+      if (this.#autopilotEl) this.ui.unmount(this.#autopilotEl);
       this.#explosionEl = null;
       this.#skipHint = null;
+      this.#autopilotEl = null;
     });
 
     // Dev builds only (SPEC-001 §9): a shortcut past the trip. Vite folds
@@ -345,8 +417,11 @@ export class FlightScene extends UiScene<'flight'> {
     }
 
     // 13-f: the cutscene skips on any key or tap; the fade still runs (AC-102).
-    const skip = (): void => {
+    // SPEC-032 §4.2: the same listener ends the launch shot — a tap, or a
+    // fresh key that is not Space — and leaves the simulation alone.
+    const skip = (event: Event): void => {
       if (this.#landingT >= 0) this.#landingSkipped = true;
+      else if (!this.#launchDone && this.#pauseMenu?.open !== true && skipsLaunch(event)) this.#endLaunch();
     };
     document.addEventListener('keydown', skip);
     document.addEventListener('pointerdown', skip);
@@ -445,12 +520,30 @@ export class FlightScene extends UiScene<'flight'> {
       this.services.scenes.pause();
     }
 
+    if (this.#skipPending) {
+      this.#skipPending = false;
+      this.#autopilot();
+    }
+
     if (flight.phase !== 'arrived' && flight.phase !== 'recalled') {
       flight.update(dt, this.#readInput(input));
     }
 
+    // SPEC-032 §4.1: the shot rides the launch phase's own clock (32-e) and
+    // ends once, when the phase does or on a skip.
+    if (!this.#launchDone) {
+      if (flight.phase === 'launch') this.#view?.setLaunch(flight.time / LAUNCH_SECONDS);
+      else this.#endLaunch();
+    }
+
     switch (flight.phase) {
       case 'arrived':
+        if (this.#autopilotT >= 0 && this.#autopilotT < AUTOPILOT_SECONDS) {
+          // §4.5: the card holds for its 1.2 s, then the normal landing exit.
+          this.#autopilotT += dt;
+          if (this.#autopilotT >= AUTOPILOT_SECONDS) this.#landingSkipped = true;
+          break;
+        }
         this.#advanceLanding(dt);
         break;
       case 'recalled':
@@ -548,7 +641,7 @@ export class FlightScene extends UiScene<'flight'> {
   #advanceLanding(dt: number): void {
     if (this.#landingT < 0) {
       this.#landingT = 0;
-      this.#skipHint?.classList.remove('is-hidden');
+      if (this.#autopilotT < 0) this.#skipHint?.classList.remove('is-hidden');
     }
     this.#landingT += dt;
     if (this.#landingSkipped) this.#landingT = LANDING_SECONDS; // 13-f: instant
@@ -571,12 +664,11 @@ export class FlightScene extends UiScene<'flight'> {
   }
 
   /**
-   * Dev builds only: fast-forward the trip — the sky cleared and the shield
-   * topped up before every step, so no rock, ship or ion storm can end it
-   * early — until the flight arrives, then land at once (13-f's instant skip).
-   * The real `update()` runs throughout, so `flight:arrived`, the missions'
-   * timers and the landing's save write are the ones a flown trip makes.
-   * During the landing cutscene it just skips the cutscene.
+   * Dev builds only: fast-forward the trip through `Flight.fastForward` — the
+   * one fast-forward path (SPEC-032 §4.5) — then land at once (13-f's instant
+   * skip). The real `update()` runs throughout, so `flight:arrived`, the
+   * missions' timers and the landing's save write are the ones a flown trip
+   * makes. During the landing cutscene it just skips the cutscene.
    */
   #skipToPlanet(): void {
     const flight = this.#flight;
@@ -589,24 +681,48 @@ export class FlightScene extends UiScene<'flight'> {
     if (missions !== null) {
       for (const id of missions.active.map((state) => state.id)) missions.forceComplete(id);
     }
-    const idle: FlightInput = {
-      steerX: 0,
-      steerY: 0,
-      fire: false,
-      aimX: flight.ship.x,
-      aimY: flight.ship.y,
-      throttleUp: false,
-      throttleDown: false,
-      autoFire: false,
-      mouseSteer: false,
-    };
-    const dt = 1 / 60;
-    for (let t = 0; t < DEV_SKIP_LIMIT_SECONDS && !tripOver(flight); t += dt) {
-      flight.hazards.clear();
-      flight.ship.shield = flight.ship.maxShield; // storms only bite through an empty shield (§4.5)
-      flight.update(dt, idle);
-    }
+    this.#endLaunch();
+    flight.fastForward(DEV_SKIP_LIMIT_SECONDS);
     this.#landingSkipped = true;
+  }
+
+  /**
+   * SPEC-032 §4.3: may this run be skipped from the pause menu? The rule of
+   * `runSkip` (service mode waives it), on a trip still under way and not
+   * already on autopilot.
+   */
+  #canSkipRun(): boolean {
+    const flight = this.#flight;
+    const save = this.#save;
+    if (flight === null || save === null || this.#ephemeralSave) return false;
+    if (tripOver(flight) || this.#autopilotT >= 0 || this.#leaving) return false;
+    return runSkip(save, this.#planet.id, { service: this.services.settings.serviceMode }).ok;
+  }
+
+  /**
+   * SPEC-032 §4.5: the player's skip. The trip runs through `fastForward` —
+   * the same `update` steps a flown trip takes, so nothing is credited that
+   * flying would not credit and no flight mission is completed — under the
+   * autopilot card, which holds for `AUTOPILOT_SECONDS` before the normal
+   * landing exit. A recall during it (32-b) takes the explosion exit instead.
+   */
+  #autopilot(): void {
+    const flight = this.#flight;
+    if (flight === null || tripOver(flight) || this.#autopilotT >= 0) return;
+    this.#endLaunch();
+    this.#skipHint?.classList.add('is-hidden');
+    flight.fastForward(DEV_SKIP_LIMIT_SECONDS);
+    if (flight.phase !== 'arrived') return; // 32-b: recalled — no card
+    this.#autopilotT = 0;
+    this.#autopilotEl?.classList.add('is-visible');
+  }
+
+  /** SPEC-032 §4.2: end the launch shot once — the tug dropped, the cockpit in. */
+  #endLaunch(): void {
+    if (this.#launchDone) return;
+    this.#launchDone = true;
+    this.#view?.skipLaunch();
+    if (this.#landingT < 0) this.#skipHint?.classList.add('is-hidden');
   }
 
   #advanceRecall(dt: number): void {
@@ -649,6 +765,9 @@ export class FlightScene extends UiScene<'flight'> {
       // SPEC-015 AC-39: the degrees the horizon is rolled by, after the
       // reduce-motion clamp — 8° is the ceiling the criterion names.
       info['roll'] = Number((this.#view?.cameraRollDeg ?? 0).toFixed(2));
+      // SPEC-032 AC: how far through the launch shot, 1 once it is over.
+      info['launch'] = this.#launchDone ? 1 : Number(Math.min(1, this.#view?.launch ?? 1).toFixed(3));
+      info['cameraZ'] = Number(this.camera.position.z.toFixed(3));
     }
     return info;
   }
