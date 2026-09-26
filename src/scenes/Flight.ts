@@ -532,7 +532,7 @@ export class FlightScene extends UiScene<'flight'> {
       const survive = missions?.longestSurvive() ?? 0;
       const line =
         survive > 0 && survive > flight.duration()
-          ? `Objective needs ${survive} s — throttle down or hold`
+          ? `Objective needs ${survive} s — throttle down, or the ship holds on arrival`
           : objective.line;
       model.objective = { title: objective.title, line, value: objective.value, target: objective.target };
     }
@@ -581,6 +581,14 @@ export class FlightScene extends UiScene<'flight'> {
   #skipToPlanet(): void {
     const flight = this.#flight;
     if (flight === null || flight.phase === 'recalled') return;
+    // The skip replaces the trip, so it resolves what the trip was carrying:
+    // an accepted flight mission is finished, not left open in the air (PLAN
+    // R16). Otherwise the Hive is landed on with `c5_m1` unflown and its whole
+    // surface locked — and the landing gate would hold the sky for 90 s first.
+    const missions = this.#missions;
+    if (missions !== null) {
+      for (const id of missions.active.map((state) => state.id)) missions.forceComplete(id);
+    }
     const idle: FlightInput = {
       steerX: 0,
       steerY: 0,

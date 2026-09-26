@@ -26,6 +26,7 @@ import type { Save } from '@/core/Save';
 import {
   COMPANIONS,
   ENEMIES,
+  MISSIONS,
   TUNING,
   UPGRADES,
   WAVES,
@@ -364,8 +365,9 @@ export class Flight {
         // A group placed at the trip's very end (frac 1) fires before the
         // arrival check, so it can never be skipped past.
         this.#spawnGroups();
-        // §4.1: every group spawned and no wave enemy alive → arrived, else hold.
-        if (this.#waveClear()) {
+        // §4.1: every group spawned, no wave enemy alive and no main flight
+        // mission still open → arrived, else hold.
+        if (this.#clearToLand()) {
           this.#arrive();
           return;
         }
@@ -374,7 +376,7 @@ export class Flight {
     } else {
       // holding: asteroids stop spawning; after the cap, land anyway (E12).
       this.#holdT += dt;
-      if (this.#waveClear() || this.#holdT >= TUNING.HOLD_PATTERN_MAX_SECONDS) {
+      if (this.#clearToLand() || this.#holdT >= TUNING.HOLD_PATTERN_MAX_SECONDS) {
         this.#arrive();
         return;
       }
@@ -861,6 +863,25 @@ export class Flight {
     for (let i = 0; i < this.hazards.size; i++) {
       const kind = this.hazards.at(i).kind;
       if (kind === 'fighter' || kind === 'interceptor') return false;
+    }
+    return true;
+  }
+
+  /**
+   * §4.1 / E12: the landing gate. The arrival wave has to be down *and* an
+   * accepted main flight mission has to be finished — the trip is that mission
+   * (PLAN R16), and on an upgraded engine the trip is far shorter than
+   * `c5_m1`'s 180 s survive, so without this the Hive is landed on with the
+   * gauntlet unfinished and every mission there still locked. A **side**
+   * mission never holds a landing: it stays accepted for the next trip. The
+   * 90 s holding cap above keeps the hold from becoming a softlock.
+   */
+  #clearToLand(): boolean {
+    if (!this.#waveClear()) return false;
+    const active = this.#missions.active; // the scene's own list — no copy, no iterator
+    for (let i = 0; i < active.length; i++) {
+      const state = active[i];
+      if (state !== undefined && MISSIONS[state.id].type === 'main') return false;
     }
     return true;
   }

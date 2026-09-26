@@ -122,6 +122,16 @@ Specs: SPEC-021 (§4.1, §5.3, §5.7, §5.9, §8), SPEC-022 §3. (§1, §5)
 
 Specs: SPEC-021 (§4.3, §5.2, §5.3, §5.7, acceptance). (§5)
 
+**R16 — 2026-09-20 (the Hive gauntlet has to be completable).** `c5_m1` asks for 180 s of flight, but the trip that carries it lasts `travelSeconds / engine speedMult / throttle`: with the engine at tier 1, 2 or 3 the 200 s Hive run takes 177, 157 or 141 s including launch, and even the slowest throttle notch at tier 3 is 175 s. The wave groups scale with the trip as well, so the arrival wave is usually dead before arrival and the holding pattern never opens. The salvager lands with Gauntlet accepted and unfinished — and because every Hive surface mission requires it, the pad terminal then offers nothing and explains nothing. Mission numbers, wave tables and the 90 s holding cap are unchanged. Changes:
+
+1. **Arrival waits for the main mission (§13 E12, SPEC-013 §4.1, §4.8).** The landing gate reads "every wave group spawned, no wave enemy alive, **and no accepted main flight mission still open**", bounded by the same 90 s holding pattern — which already counts toward `survive`. A side flight mission (`c4_s2`) never holds a landing: the trip is the player's to leave. E12 now covers every objective kind, not only kills.
+2. **The invariant catches the next one (SPEC-009 §7).** A flight `survive` objective must fit the *fastest* flight its planet can be flown: `launch + travelSeconds / max speedMult / max throttle + holding cap`. For `c5_m1` that is 3 + 115 + 90 = 208 s against its 180. The old bound, `seconds ≤ travelSeconds`, only described a tier-0 engine at throttle 1.
+3. **An empty pad says why (SPEC-012 §4.7).** With nothing to accept, the pad terminal names the first missing requirement of the planet's locked missions — "Complete 'Gauntlet'" — and, when that mission is a flight one, says it is taken at the station board.
+4. **The stuck nudge stops lying (SPEC-027 §4.8).** `HINTS.none` promises that "the pad terminal has work"; where there is none to take, the new `no_work` line sends the player back to the board instead.
+5. **The dev skip resolves the trip it stands in for (SPEC-001 §9, SPEC-012 §4.7).** "Skip to planet" replaces the whole flight, so it now finishes the flight missions that flight was carrying — rewards, `missionsDone` and all — instead of landing with them open, which is the state this bug was found in. Dev builds only: production carries neither the button nor the code.
+
+Specs: SPEC-001 (§9), SPEC-009 (§7), SPEC-012 (§4.7, edges), SPEC-013 (§4.1, §4.8, decisions, edges, tests), SPEC-027 (§4.8). (§7, §13)
+
 ---
 
 ## 1. Vision & Inspiration
@@ -392,7 +402,7 @@ Beat: ARIA decodes alien signal — the Hive knows Earth's location. The decoded
 | c5_m3 | "Her Majesty" (FINAL BOSS) | [boss `hive_queen` (2 phases)] | 600 XP, 100 tokens, flag `chapter5_done` (unlocks Eden-Prime) |
 | c5_s1 | "Egg Hunt" (side) | [kill 15 `hive_egg`] | 200 XP, 20 tokens |
 
-Landing at The Hive requires clearing the arrival wave, so `c5_m1` completes naturally on arrival (§13 E12).
+Landing at The Hive requires clearing the arrival wave and finishing `c5_m1`, so the gauntlet completes naturally on arrival however fast the ship is flown (§13 E12, R16).
 
 Beat: the Queen speaks with the Warden's voice (`c5_m3_warden`); after her death ARIA confesses she is part of the system (`c5_m3_aria`).
 
@@ -538,7 +548,7 @@ Each entry names the owning spec. "Casual" = casual difficulty.
 | E9 | Save from a newer app version | Refuse to load; show version + export option | SPEC-007 |
 | E10 | Stuck keys after alt-tab / focus loss | `blur` and `visibilitychange` release all actions; `pointercancel` releases touch | SPEC-005 |
 | E11 | Multi-touch: joystick + fire simultaneously | Per-pointer ownership by `pointerId`; left zone = move, right zone = aim/fire | SPEC-005 |
-| E12 | Flight kill objective not met at arrival | Landing blocked until the arrival wave is cleared ("can't land with hostiles on our tail"); waves spawn ≥ 2× required kills | SPEC-013 |
+| E12 | A flight mission's objectives not met at arrival | Landing blocked until the arrival wave is cleared ("can't land with hostiles on our tail") **and** no accepted main flight mission is still open; waves spawn ≥ 2× required kills; the holding pattern caps at 90 s and lands anyway (R16) | SPEC-013 |
 | E13 | Escort follower dies / defend POI destroyed | Stage restarts (follower respawns at `from`, POI HP refills) with a toast; no mission failure state | SPEC-012 |
 | E14 | Kill objective but the enemy type doesn't spawn nearby | Spawn director triples the weight of objective enemies and guarantees one spawn per 20 s | SPEC-012 |
 | E15 | Boss fight during a storm | Boss arena suppresses weather; forced mission weather ends when the boss stage starts | SPEC-012 |

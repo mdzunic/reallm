@@ -205,6 +205,21 @@ export class Missions {
     this.#events.emit('mission:abandoned', { id });
   }
 
+  /**
+   * Dev builds only (SPEC-001 §9): the flight HUD's "Skip to planet" stands in
+   * for the whole trip, so the missions that trip was carrying have to be
+   * resolved with it. Without this the skip lands on The Hive with `c5_m1`
+   * open and every mission there still gated behind it (PLAN R16). It runs the
+   * ordinary completion — rewards, `missionsDone`, `mission:completed`, the
+   * autosave — and answers false when the mission is not running here.
+   */
+  forceComplete(id: MissionId): boolean {
+    const state = this.#stateOf(id);
+    if (state === null) return false;
+    this.#completeMission(state, MISSIONS[id]);
+    return true;
+  }
+
   pin(id: MissionId): void {
     if (this.#stateOf(id) !== null) this.#pinned = id;
   }

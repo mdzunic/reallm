@@ -20,6 +20,7 @@ import {
   diffHud,
   formatTime,
   missionStatus,
+  padEmptyText,
   priceText,
   pruneToasts,
   pushToast,
@@ -54,6 +55,39 @@ function save(patch?: (data: Save) => void): Save {
 // `c1_m1` requires nothing; `c1_m2` requires `c1_m1` (SPEC-009 §4.7).
 const OPEN: MissionDef = MISSIONS.c1_m1;
 const GATED: MissionDef = MISSIONS.c1_m2;
+
+// SPEC-012 12-k / PLAN R16: the pad terminal is allowed to have nothing on it.
+// What it may not do is read empty, which is how a landing on The Hive with the
+// gauntlet unflown looks like a broken game.
+describe('padEmptyText (12-k)', () => {
+  it("names the flight mission the Hive's surface work waits on", () => {
+    expect(padEmptyText(save(), 'hive')).toBe(
+      "Nothing to accept yet. Complete 'Gauntlet' — a flight mission, taken at the station board.",
+    );
+  });
+
+  it('names a surface mission plainly, with no detour to the board', () => {
+    const data = save((d) => d.progress.missionsDone.push('c1_m1'));
+    // Cinder-4's own chain: `c1_m3` waits on `c1_m2`, a surface mission.
+    expect(padEmptyText(data, 'cinder4')).toBe(`Nothing to accept yet. Complete '${MISSIONS.c1_m2.title}'.`);
+  });
+
+  it('sends the player to the board when nothing here is locked', () => {
+    const data = save((d) => {
+      for (const id of ['c1_m1', 'c1_m2', 'c1_m3', 'c1_s1', 'c1_s2'] as const) d.progress.missionsDone.push(id);
+    });
+    expect(padEmptyText(data, 'cinder4')).toBe(
+      "Nothing to accept here. The station board carries this planet's remaining work.",
+    );
+  });
+
+  it('is pure: the save is not written', () => {
+    const data = save();
+    const before = JSON.stringify(data);
+    padEmptyText(data, 'hive');
+    expect(JSON.stringify(data)).toBe(before);
+  });
+});
 
 describe('missionStatus (AC-111)', () => {
   it('a mission whose requirements are unmet is locked', () => {

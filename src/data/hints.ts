@@ -125,10 +125,11 @@ export interface HintText {
 
 /**
  * §4.8 — the escalation line per objective kind (*initial tuning*), plus the
- * two the scene raises itself: `death` after a second death on one stage, and
- * `none` when no mission is running.
+ * three the scene raises itself: `death` after a second death on one stage,
+ * `none` when no mission is running, and `no_work` when none is running and
+ * the pad has nothing to give either (PLAN R16, SPEC-012 12-k).
  */
-export const HINTS: Readonly<Record<Objective['kind'] | 'death' | 'none', HintText>> = {
+export const HINTS: Readonly<Record<Objective['kind'] | 'death' | 'none' | 'no_work', HintText>> = {
   reach: { nudge: '{label} is {dist} {dir} of you. Follow the gold marker.' },
   scan: { nudge: '{label} is {dist} {dir}. Stand inside its ring for three seconds.' },
   collect: {
@@ -155,6 +156,10 @@ export const HINTS: Readonly<Record<Objective['kind'] | 'death' | 'none', HintTe
     nudge: 'No mission running. The pad terminal has work — {dist} {dir}.',
     fallback: 'No mission running. The pad terminal has work.',
   },
+  // The pad is empty: the planet's work starts with a flight mission (The
+  // Hive), or the campaign is over. Sending the player there again would be a
+  // lie, so the line names the board instead.
+  no_work: { nudge: "Nothing to accept at the pad. The station board carries this planet's remaining work." },
 };
 
 /**
