@@ -13,6 +13,9 @@ import { HIDDEN_DETECT_RADIUS, LOSE_TRACK_SECONDS } from '@/systems/Shelter';
 
 // ------------------------------------------------------- tuning & constants
 
+/** SPEC-034 §4.1: the scratch vector the obstacle resolve writes into. */
+const RESOLVED = { x: 0, z: 0 };
+
 /** §4.5 windup telegraphs, seconds by archetype. */
 export const WINDUP_SECONDS = { swarm: 0.25, rusher: 0.35, ranged: 0.5, boss: 0.6 } as const;
 /** §4.5: the rusher freezes this long after its hit lands; others barely pause. */
@@ -196,6 +199,12 @@ function move(e: EnemyEntity, world: CombatWorld, dt: number, desiredX: number, 
 
   e.vx = vx;
   e.vz = vz;
+  // SPEC-034 §4.1: resolve out of any obstacle *before* the slide, so a body
+  // knocked into a rock is never refused every direction.
+  if (world.obstacles.resolveCircle(e.x, e.z, e.radius, RESOLVED)) {
+    e.x = RESOLVED.x;
+    e.z = RESOLVED.z;
+  }
   const beforeX = e.x;
   const beforeZ = e.z;
   const nx = e.x + vx * dt;

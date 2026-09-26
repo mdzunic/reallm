@@ -54,7 +54,7 @@ export const WAVES = {
       { enemy: 'hive_spitter', count: 4, atSecond: 170 },
       { enemy: 'hive_drone', count: 12, atSecond: 200 },
     ],
-    spawnBand: [30, 55],
+    spawnBand: [25, 40],
   },
 
   /** Cinder-4 is the tutorial jump: asteroids only, nothing shooting back. */

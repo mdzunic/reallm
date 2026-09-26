@@ -633,11 +633,18 @@ export class Flight {
       for (let h = this.hazards.size - 1; h >= 0; h--) {
         const hazard = this.hazards.at(h);
         if (hazard.kind === 'enemy_shot') continue; // bullets do not duel
-        if (hazard.depth < from || hazard.depth > to) continue;
-        const at = (hazard.depth - from) / (to - from);
+        // SPEC-034 §4.3: the gap closes from both ends — the hazard moves along
+        // depth over the same step, so a closing target can no longer tunnel.
+        const r = hazard.depth - from;
+        const r1 = hazard.depth + hazard.vDepth * dt - to;
+        if (r < 0 || r1 > 0) continue;
+        const span = r - r1;
+        const at = span === 0 ? 0 : r / span;
         const sx = shot.x + shot.vx * dt * at;
         const sy = shot.y + shot.vy * dt * at;
-        if (Math.hypot(sx - hazard.x, sy - hazard.y) >= hazard.radius + 0.3) continue;
+        const hx = hazard.x + hazard.vx * dt * at;
+        const hy = hazard.y + hazard.vy * dt * at;
+        if (Math.hypot(sx - hx, sy - hy) >= hazard.radius + 0.3) continue;
         hit = true;
         this.#damageHazard(h, shot.damage);
         break;

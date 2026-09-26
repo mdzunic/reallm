@@ -70,6 +70,9 @@ export const KNOCKBACK_CLAMP_PER_STEP = 1;
 export const ENEMY_KNOCKBACK = 0.3;
 /** SPEC-029 §4.5: blasts push non-boss, non-static enemies this far outward. */
 export const BLAST_KNOCKBACK = 1.2;
+
+/** SPEC-034 §4.1: the scratch vector every `resolveCircle` call writes into. */
+const RESOLVED = { x: 0, z: 0 };
 /** SPEC-029 §4.3: every explosive item's blast falls off at 0.5. */
 export const EXPLOSIVE_FALLOFF = 0.5;
 /** SPEC-029 §4.6: a thrown grenade flies at 14 m/s. */
@@ -799,6 +802,11 @@ export class Combat {
       if (len > 1e-6) {
         e.x += (p.vx / len) * ENEMY_KNOCKBACK;
         e.z += (p.vz / len) * ENEMY_KNOCKBACK;
+        // SPEC-034 §4.1: an enemy shot into a rock is resolved back out of it.
+        if (this.#world.obstacles.resolveCircle(e.x, e.z, e.radius, RESOLVED)) {
+          e.x = RESOLVED.x;
+          e.z = RESOLVED.z;
+        }
       }
     }
     this.#damageEnemy(e, p.damage, p.owner === 'drone' ? 'drone' : 'player');
@@ -1127,6 +1135,11 @@ export class Combat {
       }
       p.x += (dx / d) * (reach - d);
       p.z += (dz / d) * (reach - d);
+      // SPEC-034 §4.1: a shove out of an enemy must not end inside a rock.
+      if (w.obstacles.resolveCircle(p.x, p.z, p.radius, RESOLVED)) {
+        p.x = RESOLVED.x;
+        p.z = RESOLVED.z;
+      }
     }
   }
 
@@ -1134,8 +1147,14 @@ export class Combat {
     const len = Math.hypot(this.#kbX, this.#kbZ);
     if (len > 1e-6) {
       const scale = Math.min(len, KNOCKBACK_CLAMP_PER_STEP) / len;
-      this.#world.player.x += this.#kbX * scale;
-      this.#world.player.z += this.#kbZ * scale;
+      const p = this.#world.player;
+      p.x += this.#kbX * scale;
+      p.z += this.#kbZ * scale;
+      // SPEC-034 §4.1: a hit never leaves the player inside an obstacle.
+      if (this.#world.obstacles.resolveCircle(p.x, p.z, p.radius, RESOLVED)) {
+        p.x = RESOLVED.x;
+        p.z = RESOLVED.z;
+      }
     }
     this.#kbX = 0;
     this.#kbZ = 0;

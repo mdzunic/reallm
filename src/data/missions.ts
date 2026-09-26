@@ -408,7 +408,7 @@ export const MISSIONS = {
   c5_m1: {
     id: 'c5_m1',
     title: 'Gauntlet',
-    brief: 'The Hive approach is three minutes of asteroid field with interceptors in it. Survive it and put ten of them down — the clamps will not take until the arrival wave is clear.',
+    brief: 'The Hive approach is three minutes of asteroid field with interceptors in it. Survive it and put six of them down — the clamps will not take until the arrival wave is clear.',
     type: 'main',
     chapter: 5,
     planet: 'hive',
@@ -417,7 +417,7 @@ export const MISSIONS = {
     stages: [
       [
         { kind: 'survive', seconds: 180 },
-        { kind: 'kill', enemy: 'hive_interceptor', amount: 10 },
+        { kind: 'kill', enemy: 'hive_interceptor', amount: 6 },
       ],
     ],
     rewards: { xp: 350, tokens: 30 },

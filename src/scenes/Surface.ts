@@ -511,6 +511,8 @@ export class SurfaceScene extends UiScene<'surface'> {
   // Scratch buffers — reused every frame (SPEC-001 §7).
   readonly #aimScratch = new THREE.Vector3();
   readonly #aimPoint = { x: 0, z: 0 };
+  /** SPEC-034 §4.1: the scratch the pre-step obstacle resolve writes into. */
+  readonly #resolved = { x: 0, z: 0 };
   readonly #camTarget = { x: 0, z: 0 };
   readonly #frustum = new THREE.Frustum();
   readonly #frustumMatrix = new THREE.Matrix4();
@@ -1435,6 +1437,12 @@ export class SurfaceScene extends UiScene<'surface'> {
     const inv = Math.SQRT1_2;
     p.vx = (move.x - move.y) * inv * world.stats.moveSpeed;
     p.vz = (-move.x - move.y) * inv * world.stats.moveSpeed;
+    // SPEC-034 §4.1: resolve out of any obstacle *before* the slide, so a
+    // player knocked into a rock can always walk away from it.
+    if (world.obstacles.resolveCircle(p.x, p.z, p.radius, this.#resolved)) {
+      p.x = this.#resolved.x;
+      p.z = this.#resolved.z;
+    }
     const nx = p.x + p.vx * dt;
     const nz = p.z + p.vz * dt;
     if (!world.obstacles.hitsCircle(nx, p.z, p.radius)) p.x = nx;

@@ -388,16 +388,25 @@ describe('content invariants (SPEC-009 §7)', () => {
       static: { hp: 60, damage: 0 },
       boss: { hp: 900, damage: 18 },
       fighter: { hp: 40, damage: 8 },
-      interceptor: { hp: 25, damage: 12 },
+      interceptor: { hp: 20, damage: 12 },
     };
     const problems: string[] = [];
     for (const enemy of enemies) {
       const base = archetypeBase[enemy.archetype];
       if (base === undefined) problems.push(`${enemy.id}: no base for archetype ${enemy.archetype}`);
       else {
-        const hp = Math.round(base.hp * 1.35 ** (enemy.chapter - 1));
+        // SPEC-034 §4.4: a flight enemy's HP is the archetype base with no
+        // chapter factor — a trip's kill count is authored against its dive
+        // time, not against a fifth-chapter HP pool. Damage still scales.
+        const hp = enemy.domain === 'flight' ? base.hp : Math.round(base.hp * 1.35 ** (enemy.chapter - 1));
         const damage = Math.round(base.damage * 1.3 ** (enemy.chapter - 1));
-        if (enemy.hp !== hp) problems.push(`${enemy.id}: hp ${enemy.hp}, but a chapter-${enemy.chapter} ${enemy.archetype} is ${hp}`);
+        if (enemy.hp !== hp) {
+          problems.push(
+            enemy.domain === 'flight'
+              ? `${enemy.id}: hp ${enemy.hp}, but an unscaled ${enemy.archetype} is ${hp}`
+              : `${enemy.id}: hp ${enemy.hp}, but a chapter-${enemy.chapter} ${enemy.archetype} is ${hp}`,
+          );
+        }
         if (enemy.damage !== damage) problems.push(`${enemy.id}: damage ${enemy.damage}, but a chapter-${enemy.chapter} ${enemy.archetype} is ${damage}`);
         // Boss xp is the one stat §4.3 scales explicitly.
         if (enemy.archetype === 'boss' && enemy.xp !== 100 + 100 * enemy.chapter) {
