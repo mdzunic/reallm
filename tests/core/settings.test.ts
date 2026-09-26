@@ -317,6 +317,8 @@ describe('the settings object (SPEC-007 §3)', () => {
       // SPEC-027 §4.9: guidance starts at `full` and no tip has been seen yet.
       guidance: 'full',
       tipsSeen: [],
+      // SPEC-032 §4.6: the service override is off on every new device.
+      serviceMode: false,
     });
   });
 
@@ -500,5 +502,41 @@ describe('guidance and tipsSeen (SPEC-027 AC-72, AC-73, AC-74)', () => {
     settings.set({ guidance: 'off', tipsSeen: ['move'] });
     expect(stored(fake)).toMatchObject({ guidance: 'off', tipsSeen: ['move'] });
     expect(createSettings(fake.storage).get()).toMatchObject({ guidance: 'off', tipsSeen: ['move'] });
+  });
+});
+
+describe('serviceMode (SPEC-032 §4.6)', () => {
+  it('defaults to false', () => {
+    expect(defaultSettings().serviceMode).toBe(false);
+    expect(createSettings(fakeStorage().storage).serviceMode).toBe(false);
+  });
+
+  it('round-trips through the store and the setter', () => {
+    const fake = fakeStorage();
+    const settings = createSettings(fake.storage);
+    settings.setServiceMode(true);
+    expect(settings.serviceMode).toBe(true);
+    expect(stored(fake)).toMatchObject({ serviceMode: true });
+    expect(createSettings(fake.storage).serviceMode).toBe(true);
+    settings.setServiceMode(false);
+    expect(createSettings(fake.storage).get().serviceMode).toBe(false);
+  });
+
+  it('reads a missing or non-boolean stored value as false', () => {
+    expect(createSettings(fakeStorage('{"serviceMode":"yes"}').storage).serviceMode).toBe(false);
+    expect(createSettings(fakeStorage('{"serviceMode":1}').storage).serviceMode).toBe(false);
+    expect(createSettings(fakeStorage('{"serviceMode":null}').storage).serviceMode).toBe(false);
+    expect(createSettings(fakeStorage('{}').storage).serviceMode).toBe(false);
+    const settings = createSettings(fakeStorage().storage);
+    settings.set({ serviceMode: 'yes' as unknown as boolean });
+    expect(settings.serviceMode).toBe(false);
+  });
+
+  it('emits a settings:changed patch on change', () => {
+    const events = eventRecorder();
+    const settings = createSettings(fakeStorage().storage, events);
+    settings.setServiceMode(true);
+    settings.setServiceMode(false);
+    expect(events.patches).toEqual([{ serviceMode: true }, { serviceMode: false }]);
   });
 });

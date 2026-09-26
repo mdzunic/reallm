@@ -87,6 +87,11 @@ export type Settings = {
   guidance: GuidanceLevel;
   /** SPEC-027 §4.5: the first-time tips this device has already seen (D-14). */
   tipsSeen: TipId[];
+  /**
+   * SPEC-032 §4.6: the Earth Command service override. A device-level flag,
+   * like `tipsSeen` — never a save field — so a tester keeps it across slots.
+   */
+  serviceMode: boolean;
 };
 
 export interface SettingsStore {
@@ -118,6 +123,9 @@ export interface SettingsStore {
   setFlightMouseSteer(value: boolean): void;
   readonly buttonScale: number;
   setButtonScale(value: number): void;
+  /** SPEC-032 §4.6: unlocks every world, keeps the hold full, lets any run skip. */
+  readonly serviceMode: boolean;
+  setServiceMode(value: boolean): void;
 }
 
 /** The slice of the bus this module uses; a structural port (SPEC-004 D-7). */
@@ -169,6 +177,7 @@ export function defaultSettings(): Settings {
     benchmark: null,
     guidance: 'full',
     tipsSeen: [],
+    serviceMode: false,
   };
 }
 
@@ -347,6 +356,8 @@ function coerce<K extends keyof Settings>(key: K, value: unknown, current: Setti
         return oneOf(value, GUIDANCE_LEVELS, 'full');
       case 'tipsSeen':
         return tipIds(value);
+      case 'serviceMode':
+        return value === true;
       default:
         return current[key];
     }
@@ -476,6 +487,12 @@ export function createSettings(storage?: Storage | null, events?: SettingsEvents
     },
     setButtonScale(value: number): void {
       set({ buttonScale: value });
+    },
+    get serviceMode(): boolean {
+      return values.serviceMode;
+    },
+    setServiceMode(value: boolean): void {
+      set({ serviceMode: value });
     },
   };
 }
