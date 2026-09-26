@@ -22,7 +22,7 @@
 // property at all (the pattern `tests/data/content.test.ts` uses).
 //
 // Pure: no `three`, no DOM, no `Math.random` (SPEC-001 §4, §7).
-import type { Save, SaveReason } from '@/core/Save';
+import { maxHp, type Save, type SaveReason } from '@/core/Save';
 import {
   CLASSES,
   COMPANIONS,
@@ -164,6 +164,12 @@ export class Economy {
   readonly #events: EventSink;
   readonly #progression: Progression;
   readonly #saves: SaveRequester | null;
+  /**
+   * SPEC-032 §4.7: requirements are ignored while this is true. The scenes set
+   * it from `settings.serviceMode` after construction and keep it in step
+   * through `settings:changed`; fuel and every price stay exactly as they are.
+   */
+  serviceMode = false;
 
   /**
    * `saves` is the autosave seam of §4.3 (`save.request('purchase')`). It is
@@ -525,6 +531,7 @@ export class Economy {
   }
 
   isUnlocked(planet: PlanetId): boolean {
+    if (this.serviceMode) return true;
     return this.missingRequirements(PLANET_TABLE[planet].unlock).length === 0;
   }
 
@@ -535,7 +542,7 @@ export class Economy {
 
   /** §4.6. `needOil` is the shortfall, which is exactly what a subsidy grants. */
   canDepart(planet: PlanetId): DepartResult {
-    const missing = this.missingRequirements(PLANET_TABLE[planet].unlock);
+    const missing: Requirement[] = this.serviceMode ? [] : this.missingRequirements(PLANET_TABLE[planet].unlock);
     if (missing.length > 0) return { ok: false, reason: 'locked', missing };
     const cost = this.fuelCost(planet);
     const oil = this.#save.resources.oil;
@@ -570,6 +577,28 @@ export class Economy {
     if (grant <= 0) return 0;
     this.addResource('oil', grant, 'subsidy');
     return grant;
+  }
+
+  /**
+   * SPEC-032 §4.7: a token grant through `Progression`, so `tokens:changed`
+   * fires and the wallet follows. Service supplies are the only caller.
+   */
+  grantTokens(amount: number, reason: string): void {
+    this.#progression.addTokens(amount, reason);
+  }
+
+  /**
+   * SPEC-032 §4.7: the hull back to `maxHp`, announced as a heal. Never
+   * lowers HP; returns what was restored.
+   */
+  restoreHp(): number {
+    const player = this.#save.player;
+    const ceiling = maxHp(player.classId, player.attributes, player.level);
+    const amount = Math.max(0, ceiling - player.hp);
+    if (amount <= 0) return 0;
+    player.hp = ceiling;
+    this.#events.emit('player:healed', { amount, hp: ceiling });
+    return amount;
   }
 
   // -------------------------------------------------------------- missions

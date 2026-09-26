@@ -12,6 +12,7 @@ import {
   balanceAfterText,
   gearStatLines,
   shortfallText,
+  skipRefusalText,
   walletModel,
   cloneHud,
   computePlayerStats,
@@ -339,6 +340,19 @@ describe('departReason (AC-114)', () => {
     expect(departReason({ ok: false, reason: 'locked', missing: [{ kind: 'level', level: 8 }] })).toBe(
       'Requires level 8',
     );
+  });
+});
+
+describe('skipRefusalText (SPEC-032 §4.3)', () => {
+  it('asks for one flown run on a route never landed on', () => {
+    expect(skipRefusalText('never_flown')).toBe('Autopilot needs a route — fly this run once.');
+    expect(skipRefusalText('never_flown', 'c4_s2')).toBe('Autopilot needs a route — fly this run once.');
+  });
+
+  it('names the flight mission that needs the run flown', () => {
+    expect(skipRefusalText('flight_mission', 'c4_s2')).toBe('Salvage Rights needs a flown run.');
+    expect(skipRefusalText('flight_mission', 'c5_m1')).toBe('Gauntlet needs a flown run.');
+    expect(skipRefusalText('flight_mission')).toBe('This mission needs a flown run.');
   });
 });
 

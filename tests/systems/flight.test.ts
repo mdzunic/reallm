@@ -27,6 +27,7 @@ import {
 } from '@/systems/Flight';
 import { Missions } from '@/systems/Missions';
 import { Progression } from '@/systems/Progression';
+import { runSkip } from '@/systems/Flight';
 
 const DT = 1 / 60;
 
@@ -768,5 +769,88 @@ describe('flight enemies', () => {
     for (let i = 0; i < w.flight.hazards.size; i++) {
       expect(w.flight.hazards.at(i).elite).not.toBe(true);
     }
+  });
+});
+
+// ------------------------------------------------------------------ SPEC-032
+
+describe('runSkip (SPEC-032 §4.3)', () => {
+  const fresh = (): Save => newSave(0, PILOT, 42, 1_700_000_000_000);
+
+  it('refuses a route that was never landed on', () => {
+    const save = fresh();
+    expect(runSkip(save, 'cinder4')).toEqual({ ok: false, reason: 'never_flown' });
+    save.progress.visits.cinder4 = 0;
+    expect(runSkip(save, 'cinder4')).toEqual({ ok: false, reason: 'never_flown' });
+  });
+
+  it('allows a route with a landing behind it', () => {
+    const save = fresh();
+    save.progress.visits.cinder4 = 2;
+    expect(runSkip(save, 'cinder4')).toEqual({ ok: true });
+  });
+
+  it('refuses the run a flight mission for that planet is, by name', () => {
+    const save = fresh();
+    save.progress.visits.ferrum = 1;
+    save.progress.visits.cinder4 = 1;
+    save.progress.missionsActive.push({ id: 'c4_s2', stage: 0, counters: {} });
+    expect(runSkip(save, 'ferrum')).toEqual({ ok: false, reason: 'flight_mission', mission: 'c4_s2' });
+    // The same mission rides a different trip only.
+    expect(runSkip(save, 'cinder4')).toEqual({ ok: true });
+  });
+
+  it('lets service mode override both refusals', () => {
+    const save = fresh();
+    expect(runSkip(save, 'eden', { service: true })).toEqual({ ok: true });
+    save.progress.visits.ferrum = 1;
+    save.progress.missionsActive.push({ id: 'c4_s2', stage: 0, counters: {} });
+    expect(runSkip(save, 'ferrum', { service: true })).toEqual({ ok: true });
+    expect(runSkip(save, 'ferrum', { service: false }).ok).toBe(false);
+  });
+});
+
+describe('Flight.fastForward (SPEC-032 §4.5)', () => {
+  it('reaches arrived inside the limit and emits flight:arrived exactly once', () => {
+    const w = world();
+    const limit = 1200;
+    const simulated = w.flight.fastForward(limit);
+    expect(w.flight.phase).toBe('arrived');
+    expect(simulated).toBeLessThan(limit);
+    expect(simulated).toBeGreaterThan(LAUNCH_SECONDS);
+    expect(w.of('flight:arrived')).toEqual([{ planet: 'cinder4' }]);
+    // Over: a second call simulates nothing and says nothing.
+    expect(w.flight.fastForward(limit)).toBe(0);
+    expect(w.of('flight:arrived')).toHaveLength(1);
+  });
+
+  it('counts survive timers through the same update steps a flown trip takes', () => {
+    const w = world({ planet: quietPlanet(PLANETS.hive, 20), accept: ['c5_m1'] });
+    const simulated = w.flight.fastForward(1200);
+    expect(simulated).toBeGreaterThanOrEqual(20);
+    const survive = w.missions.currentObjectives('c5_m1')[0]!;
+    expect(survive.objective.kind).toBe('survive');
+    expect(survive.value).toBeGreaterThanOrEqual(20);
+  });
+
+  it('stops at the limit when the trip is not over', () => {
+    const w = world({ planet: quietPlanet(PLANETS.cinder4, 300) });
+    const simulated = w.flight.fastForward(10);
+    expect(simulated).toBeCloseTo(10, 1);
+    expect(w.flight.phase).toBe('cruise');
+  });
+
+  it('does nothing to a recalled flight', () => {
+    const w = world();
+    step(w.flight, LAUNCH_SECONDS + 1);
+    w.flight.hit(10_000, 'asteroid', { kind: 'asteroid' });
+    expect(w.flight.phase).toBe('recalled');
+    const time = w.flight.time;
+    const progress = w.flight.progress;
+    expect(w.flight.fastForward(1200)).toBe(0);
+    expect(w.flight.phase).toBe('recalled');
+    expect(w.flight.time).toBe(time);
+    expect(w.flight.progress).toBe(progress);
+    expect(w.of('flight:arrived')).toHaveLength(0);
   });
 });
