@@ -210,6 +210,31 @@ test.describe('service mode', () => {
     await expect(page.locator('[data-testid="service-badge"]')).toBeVisible();
   });
 
+  test('a 3 s press on the build label toggles it, and is not a stats tap (§4.6)', async ({ page }) => {
+    await start(page);
+    await expect(page.locator('[data-testid="scene-label"]')).toHaveText('menu');
+    const label = page.locator('[data-testid="version-label"]');
+    const box = await label.boundingBox();
+    if (box === null) throw new Error('the build label has no box');
+    await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+    await page.mouse.down();
+    await page.waitForTimeout(3_300);
+    await page.mouse.up();
+    await expect(page.locator('[data-testid="service-badge"]')).toBeVisible();
+    await expect(page.locator('[data-testid="toasts"]')).toContainText(ON_TOAST);
+    // Four taps inside the five-tap window: had the press counted, this would
+    // be the fifth and the stats overlay would open.
+    for (let tap = 0; tap < 4; tap++) await label.click();
+    await frames(page, 2);
+    await expect(page.locator('.overlay-debug')).toHaveCount(0);
+    // A short press is only a tap.
+    await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+    await page.mouse.down();
+    await page.waitForTimeout(300);
+    await page.mouse.up();
+    await expect(page.locator('[data-testid="service-badge"]')).toBeVisible();
+  });
+
   test('typing the code into a text field does nothing (9)', async ({ page }) => {
     await start(page);
     expect(await go(page, 'creation', { slot: 0 })).toBe(true);
