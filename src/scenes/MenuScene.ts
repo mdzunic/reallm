@@ -14,6 +14,9 @@ import type { GameServices } from '@/core/Services';
 import { applyUpdate, updateReady } from '@/core/Updates';
 import { SLOTS, type Save, type SlotId } from '@/core/Save';
 import type { SceneParams } from '@/core/StateMachine';
+import { Economy } from '@/systems/Economy';
+import { Progression } from '@/systems/Progression';
+import { applySupplies, EMPTY_CODE, pushCode } from '@/systems/Service';
 import { slotLine } from '@/systems/UiHelpers';
 import { confirmSheet } from '@/ui/ConfirmSheet';
 import { el, h, testId } from '@/ui/dom';
@@ -27,6 +30,9 @@ import { director } from '@/scenes/Director';
 import { createScreen } from '@/ui/Screen';
 
 const STAR_COUNT = 420;
+
+/** SPEC-032 §4.6: how long the build label is held to toggle service mode. */
+const SERVICE_PRESS_MS = 3_000;
 
 /** SPEC-017 §4.1 (*initial tuning*): a deep, slightly cool title screen. */
 const MENU_LOOK: Partial<Look> = { vignette: 0.45, bloomStrength: 0.5, bloomThreshold: 0.7, saturation: 0.95 };
@@ -98,6 +104,87 @@ export class MenuScene extends UiScene<'menu'> {
       }
     }
     this.#mountUi();
+    this.#watchServiceGestures();
+  }
+
+  /**
+   * SPEC-032 §4.6: the two ways into (and out of) service mode, alive only
+   * while the menu is (32-g, 32-k). Typing `asdf` anywhere but a text field
+   * (E53), or holding the build label for 3 s — a press that is then kept
+   * from the stats overlay's five-tap counter.
+   */
+  #watchServiceGestures(): void {
+    let code = EMPTY_CODE;
+    const onKey = (event: KeyboardEvent): void => {
+      const target = event.target;
+      if (target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement) return;
+      if (event.ctrlKey || event.metaKey || event.altKey || event.repeat) return;
+      const out = pushCode(code, event.key.toLowerCase(), performance.now());
+      code = out.state;
+      if (out.matched) this.#toggleServiceMode();
+    };
+    document.addEventListener('keydown', onKey);
+    this.disposer.add(() => document.removeEventListener('keydown', onKey));
+
+    const label = document.querySelector('[data-testid="version-label"]');
+    if (!(label instanceof HTMLElement)) return;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    /** The long press fired: its pointerup is not a tap. */
+    let consumed = false;
+    const clear = (): void => {
+      if (timer !== null) clearTimeout(timer);
+      timer = null;
+    };
+    const down = (): void => {
+      clear();
+      consumed = false;
+      timer = setTimeout(() => {
+        timer = null;
+        consumed = true;
+        this.#toggleServiceMode();
+      }, SERVICE_PRESS_MS);
+    };
+    // Captured at the document, so the stats overlay's own `pointerup` on the
+    // label never sees the press that toggled the mode (SPEC-002 §4.6).
+    const up = (event: PointerEvent): void => {
+      clear();
+      if (!consumed) return;
+      consumed = false;
+      if (event.target instanceof Node && label.contains(event.target)) event.stopPropagation();
+    };
+    label.addEventListener('pointerdown', down);
+    label.addEventListener('pointercancel', clear);
+    label.addEventListener('pointerleave', clear);
+    document.addEventListener('pointerup', up, true);
+    // A long press on a phone would otherwise raise the text callout.
+    const menu = (event: Event): void => {
+      if (consumed || timer !== null) event.preventDefault();
+    };
+    label.addEventListener('contextmenu', menu);
+    this.disposer.add(() => {
+      clear();
+      label.removeEventListener('pointerdown', down);
+      label.removeEventListener('pointercancel', clear);
+      label.removeEventListener('pointerleave', clear);
+      label.removeEventListener('contextmenu', menu);
+      document.removeEventListener('pointerup', up, true);
+    });
+  }
+
+  /**
+   * Flip the setting — the composition root raises the toast and the badge —
+   * and, turning it on with a save bound, top the supplies up at once (§4.6).
+   */
+  #toggleServiceMode(): void {
+    const settings = this.services.settings;
+    const on = !settings.serviceMode;
+    settings.setServiceMode(on);
+    const data = this.services.save.current;
+    if (!on || data === null) return;
+    const economy = new Economy(data, this.services.events, new Progression(data, this.services.events), this.services.save);
+    economy.serviceMode = true;
+    applySupplies(data, economy);
+    this.services.save.request('station_enter');
   }
 
   protected override onUpdate(dt: number): void {

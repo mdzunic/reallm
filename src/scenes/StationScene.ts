@@ -17,6 +17,7 @@ import { applyUpdate, updateReady } from '@/core/Updates';
 import type { SceneParams } from '@/core/StateMachine';
 import { DIALOGUE, MISSIONS, PLANET_IDS, PLANETS, type DialogueId, type MissionId } from '@/data/index';
 import { Economy } from '@/systems/Economy';
+import { applySupplies } from '@/systems/Service';
 import { Progression } from '@/systems/Progression';
 import { endingPending, interludeToPlay, stayReport } from '@/systems/StoryBeats';
 import { director } from '@/scenes/Director';
@@ -73,6 +74,17 @@ export class StationScene extends UiScene<'station'> {
     if (data !== null) {
       const progression = new Progression(data, this.services.events);
       this.#economy = new Economy(data, this.services.events, progression, this.services.save);
+      // SPEC-032 §4.7: the service override, kept in step with the setting.
+      this.#economy.serviceMode = this.services.settings.serviceMode;
+      this.disposer.add(
+        this.services.events.on(
+          'settings:changed',
+          ({ patch }) => {
+            if (patch.serviceMode !== undefined && this.#economy !== null) this.#economy.serviceMode = patch.serviceMode;
+          },
+          this,
+        ),
+      );
       this.#enterEffects(data);
       // SPEC-023 §4.3: the story the entry owes — an interlude, then the
       // debrief — runs off `scene:entered` rather than here, so a film never
@@ -164,6 +176,9 @@ export class StationScene extends UiScene<'station'> {
     if (granted > 0) {
       this.ui.toast(`ARIA: Docking subsidy logged — +${granted} oil. Try to bring some back this time.`, 'info', 5000);
     }
+    // SPEC-032 §4.7: service supplies, right after the subsidy — the hold,
+    // the wallet and the hull topped up through the same grants.
+    if (economy.serviceMode) applySupplies(data, economy);
     // AC-22: the ship is docked; the hull comes back to full.
     data.player.hp = maxHp(data.player.classId, data.player.attributes, data.player.level);
     // AC-23: the save knows where it is, and writes at this safe point.
