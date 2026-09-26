@@ -243,7 +243,7 @@ test.describe('service mode', () => {
     expect(await go(page, 'station', {})).toBe(true);
     expect(await go(page, 'starmap', undefined)).toBe(true);
     await page.locator('[data-testid="map-node-eden"]').click();
-    await expect(page.locator('[data-testid="starmap-info-name"]')).toHaveText('Eden');
+    await expect(page.locator('[data-testid="starmap-info-name"]')).toHaveText('Eden-Prime');
     await expect(page.locator('[data-testid="starmap-depart"]')).toBeEnabled();
     await expect(page.locator('.starmap-reqs .req-unmet').first()).toBeVisible();
 
@@ -253,7 +253,10 @@ test.describe('service mode', () => {
     const toggle = page.locator('[data-testid="settings-service"]');
     await expect(toggle).toBeVisible();
     await expect(page.locator('[data-testid="settings-panel"]')).toContainText(SERVICE_LINE);
-    await toggle.uncheck();
+    await expect(toggle).toBeChecked();
+    // A click, not `uncheck()`: switching it off re-renders the panel without
+    // the section, so there is no checkbox left to read the new state from.
+    await toggle.click();
     await expect(page.locator('[data-testid="service-badge"]')).toBeHidden();
     await expect(page.locator('[data-testid="toasts"]')).toContainText(OFF_TOAST);
     await expect(page.locator('[data-testid="settings-service"]')).toHaveCount(0);
