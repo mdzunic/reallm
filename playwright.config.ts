@@ -30,6 +30,15 @@ const PWA_SPEC = /SPEC-015-pwa\.spec\.ts/;
  * so listing them would run the same emulation twice and change nothing.
  */
 const PHONE_SPECS = /SPEC-015\.spec\.ts/;
+/**
+ * Which Chromium build every project launches. Unset, Playwright's headless
+ * shell, which rasterises WebGL on the CPU (SwiftShader) even on a host with a
+ * GPU. `E2E_CHANNEL=chromium` launches the full build in headless mode instead,
+ * which draws on the host's GPU when there is one — how CI runs the suite
+ * (.github/workflows/check.yml). A GPU-less container is on SwiftShader either
+ * way, so the factory's gate leaves it unset.
+ */
+const channel = process.env.E2E_CHANNEL || undefined;
 
 export default defineConfig({
   testDir: 'e2e',
@@ -48,6 +57,7 @@ export default defineConfig({
   use: {
     baseURL: `http://localhost:${port}`,
     trace: 'retain-on-failure',
+    channel,
   },
   projects: [
     // The dev-server project, unchanged — it ignores the preview-only file.

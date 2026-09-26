@@ -21,6 +21,23 @@ const info = async (page: Page): Promise<Record<string, number | string>> =>
 
 const num = async (page: Page, key: string): Promise<number> => Number((await info(page))[key] ?? Number.NaN);
 
+/**
+ * `mmExplored` as the live save's copy of the mask would read back: SPEC-025
+ * §4.5's base64url bitset of `ceil(n² / 8)` bytes, popcounted over the n × n
+ * grid and rounded the way `debugInfo()` rounds the live mask.
+ */
+async function savedExplored(page: Page): Promise<number> {
+  return page.evaluate(() => {
+    const code = window.__reallm.save().current?.progress.explored['cinder4'];
+    if (code === undefined) return 0;
+    const bytes = Uint8Array.from(atob(code.replace(/-/g, '+').replace(/_/g, '/')), (c) => c.charCodeAt(0));
+    let lit = 0;
+    for (const byte of bytes) for (let bits = byte; bits !== 0; bits &= bits - 1) lit++;
+    const n = Math.floor(Math.sqrt(bytes.length * 8));
+    return Math.round((lit / (n * n)) * 1000) / 10;
+  });
+}
+
 /** Create the slot-0 save and land on Cinder-4 through the bridge. */
 async function land(page: Page): Promise<void> {
   await start(page, '/?debug&seed=123');
@@ -171,9 +188,10 @@ test('4. travel lights ground; a reload and a station round trip both land on it
   await expect.poll(async () => num(page, 'mmExplored'), { timeout: 15_000 }).toBeGreaterThan(landed);
 
   // §4.4: the mask reaches the live save at most once a second while it
-  // changes, so a save taken a beat later holds everything that is lit.
-  await page.waitForTimeout(1500);
+  // changes — a second of game time, which a slow host stretches past any
+  // fixed wall-clock wait — so the save is taken once it holds everything lit.
   const walked = await num(page, 'mmExplored');
+  await expect.poll(() => savedExplored(page), { timeout: 15_000 }).toBeGreaterThanOrEqual(walked);
   await page.evaluate(() => window.__reallm.save().request('manual'));
   expect(await page.evaluate(() => window.__reallm.save().flush())).toBe(true);
 

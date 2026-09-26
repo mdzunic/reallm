@@ -43,11 +43,16 @@ test('"Hurt me" places one red damage number that rises 40px over 0.8s while fad
 }) => {
   await start(page, URL);
 
+  // Twenty frames, and then on until the number has faded: the 0.8 s life is
+  // game time, and twenty frames only span it on a CPU rasteriser — at 60 fps
+  // they end a third of the way in. The 5 s cap keeps a number that never fades
+  // a failure rather than a hang.
   const samples = await page.evaluate(
     () =>
       new Promise<Array<{ opacity: string; y: number }>>((resolve) => {
         document.querySelector<HTMLButtonElement>('[data-testid="surface-hurt"]')!.click();
         const out: Array<{ opacity: string; y: number }> = [];
+        const t0 = performance.now();
         let n = 0;
         const tick = () => {
           const el = Array.from(document.querySelectorAll<HTMLElement>('.dmg')).find((e) => e.textContent);
@@ -55,7 +60,8 @@ test('"Hurt me" places one red damage number that rises 40px over 0.8s while fad
             const m = /translate3d\(([-\d.]+)px,\s*([-\d.]+)px/.exec(el.style.transform);
             out.push({ opacity: getComputedStyle(el).opacity, y: m ? Number(m[2]) : NaN });
           }
-          if (++n < 20) requestAnimationFrame(tick);
+          const faded = out.length > 0 && Number(out[out.length - 1]!.opacity) === 0;
+          if ((++n < 20 || !faded) && performance.now() - t0 < 5000) requestAnimationFrame(tick);
           else resolve(out);
         };
         tick();
@@ -80,11 +86,13 @@ test('reduceMotion drops the rise and only fades the number in place (AC-83)', a
   await page.addInitScript(() => localStorage.setItem('reallm:settings', JSON.stringify({ reduceMotion: true })));
   await start(page, URL);
 
+  // Sampled until faded, as above.
   const samples = await page.evaluate(
     () =>
       new Promise<Array<{ opacity: string; y: number }>>((resolve) => {
         document.querySelector<HTMLButtonElement>('[data-testid="surface-hurt"]')!.click();
         const out: Array<{ opacity: string; y: number }> = [];
+        const t0 = performance.now();
         let n = 0;
         const tick = () => {
           const el = Array.from(document.querySelectorAll<HTMLElement>('.dmg')).find((e) => e.textContent);
@@ -92,7 +100,8 @@ test('reduceMotion drops the rise and only fades the number in place (AC-83)', a
             const m = /translate3d\(([-\d.]+)px,\s*([-\d.]+)px/.exec(el.style.transform);
             out.push({ opacity: getComputedStyle(el).opacity, y: m ? Number(m[2]) : NaN });
           }
-          if (++n < 20) requestAnimationFrame(tick);
+          const faded = out.length > 0 && Number(out[out.length - 1]!.opacity) === 0;
+          if ((++n < 20 || !faded) && performance.now() - t0 < 5000) requestAnimationFrame(tick);
           else resolve(out);
         };
         tick();

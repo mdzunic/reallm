@@ -101,6 +101,20 @@ async function stationWithSave(page: Page, quality = 'medium'): Promise<void> {
   }
 }
 
+/**
+ * The other half of that pin: `prefers-reduced-transparency: reduce` takes the
+ * same 20-a fallback, and a host can report it without the player asking —
+ * GitHub's macOS runners do. Playwright pins reduced motion and the colour
+ * scheme for every page but has no option for this one, so it goes over CDP,
+ * before the first navigation.
+ */
+test.beforeEach(async ({ page }) => {
+  const cdp = await page.context().newCDPSession(page);
+  await cdp.send('Emulation.setEmulatedMedia', {
+    features: [{ name: 'prefers-reduced-transparency', value: 'no-preference' }],
+  });
+});
+
 test('the eight theme tokens are declared once on :root and each one is used (AC-22, AC-27)', async ({ page }) => {
   await start(page, '/?debug&scene=station');
   const css = await styleSheetText(page);

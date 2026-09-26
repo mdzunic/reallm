@@ -20,6 +20,21 @@ const CREATION = {
 const info = async (page: Page): Promise<Record<string, number | string>> =>
   (await page.evaluate(() => window.__reallm.stats())).sceneInfo ?? {};
 
+/**
+ * `surface-hurt` until the pilot is down. Four hits of 60 take 184 HP, but a
+ * hit inside the 0.3 s of game time after any other — an enemy's included —
+ * is ignored (SPEC-011 i-frames), and one lost hit leaves the pilot on 4 HP.
+ * So it clicks until the death overlay shows, as SPEC-023's suite does, rather
+ * than exactly four times.
+ */
+async function hurtUntilDead(page: Page): Promise<void> {
+  const death = page.locator('[data-testid="death-overlay"]');
+  for (let i = 0; i < 10 && !(await death.isVisible()); i++) {
+    await page.locator('[data-testid="surface-hurt"]').click();
+    await page.waitForTimeout(400);
+  }
+}
+
 /** Create (or reload) the slot-0 save and land on Cinder-4 through the bridge. */
 async function land(page: Page, opts: { fresh: boolean }): Promise<void> {
   await start(page, '/?debug&seed=123');
@@ -263,10 +278,7 @@ test('death sweeps the pad ring and resets a live boss (AC-48, AC-49)', async ({
   await expect.poll(async () => (await info(page))['boss']).not.toBe('-');
   await expect.poll(async () => Number((await info(page))['enemiesNearPad'] ?? 0), { timeout: 45_000 }).toBeGreaterThanOrEqual(1);
 
-  for (let i = 0; i < 4; i++) {
-    await page.locator('[data-testid="surface-hurt"]').click();
-    await page.waitForTimeout(400);
-  }
+  await hurtUntilDead(page);
   await expect(page.locator('[data-testid="death-overlay"]')).toBeVisible();
   await expect(page.locator('[data-testid="death-overlay"]')).toBeHidden({ timeout: 10_000 });
 
@@ -306,10 +318,7 @@ test('death restarts a timed survive stage (AC-49)', async ({ page }) => {
     return match === null ? -1 : Number(match[1]);
   };
   await expect.poll(survived, { timeout: 30_000 }).toBeGreaterThanOrEqual(8);
-  for (let i = 0; i < 4; i++) {
-    await page.locator('[data-testid="surface-hurt"]').click();
-    await page.waitForTimeout(400);
-  }
+  await hurtUntilDead(page);
   await expect(page.locator('[data-testid="death-overlay"]')).toBeVisible();
   await expect(page.locator('[data-testid="death-overlay"]')).toBeHidden({ timeout: 10_000 });
   const after = await survived();
@@ -334,10 +343,7 @@ test('death shows SIGNAL LOST with the loss, and respawns at the pad with full H
   await page.locator('[data-testid="surface-goto-pad"]').click();
   const before = await info(page);
 
-  for (let i = 0; i < 4; i++) {
-    await page.locator('[data-testid="surface-hurt"]').click();
-    await page.waitForTimeout(400);
-  }
+  await hurtUntilDead(page);
   await expect(page.locator('[data-testid="death-overlay"]')).toBeVisible();
   await expect(page.locator('[data-testid="death-overlay"]')).toContainText('SIGNAL LOST');
 

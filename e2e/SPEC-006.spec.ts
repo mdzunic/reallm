@@ -750,7 +750,13 @@ test('music(null) fades out, and a call mid-crossfade never layers a third copy 
     window.__reallm.audio().music(null, { fadeMs: 600 });
     return window.__qaSample(1000, 100);
   });
-  expect(gainOf(stopped[0]!, 'boss')!).toBeLessThan(MUSIC_FULL);
+  // A fade, not a cut: some sample hears the bed below full on its way out.
+  // Not necessarily the first — a busy runner's audio thread can render the
+  // ramp's opening quanta after the first 100 ms sample has read `full`.
+  expect(
+    stopped.some((sample) => (gainOf(sample, 'boss') ?? MUSIC_FULL) < MUSIC_FULL),
+    stopped.map(audible).join(' / '),
+  ).toBe(true);
   expect(stopped[stopped.length - 1]!.howls.flatMap((h) => h.sounds), audible(stopped[stopped.length - 1]!)).toEqual([]);
 });
 
