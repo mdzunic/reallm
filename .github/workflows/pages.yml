@@ -1,0 +1,60 @@
+# The production build on GitHub Pages: https://mdzunic.github.io/reallm/
+#
+# Pages has to take its site from this workflow — Settings → Pages → Build and
+# deployment → Source: "GitHub Actions". "Deploy from a branch" publishes the
+# repository as it stands, and the source `index.html` is a Vite dev entry: its
+# `<script src="/src/main.ts">` is answered by `npm run dev` and by nothing on
+# Pages, so the site 404s on it before a single asset loads.
+#
+# No Pages-specific configuration: `vite.config.ts` builds with `base: './'`,
+# so `dist/` resolves everything relative to wherever it is served — the
+# project path `/reallm/` included — and the service worker (vite-plugin-pwa,
+# SPEC-015 §10) registers with that path as its scope.
+#
+# The build job runs `npm run check` rather than `npm run build`: a commit that
+# fails its own unit tests is not deployed, even though `check.yml` is still
+# deciding about it. The e2e suite is not waited on — it takes minutes, and it
+# says nothing about whether a static build can be served.
+name: pages
+on:
+  push:
+    branches: [main]
+  # A manual redeploy of main.
+  workflow_dispatch:
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+# One deployment at a time; a push that lands mid-deploy queues behind it rather
+# than cancelling a deployment already in flight.
+concurrency:
+  group: pages
+  cancel-in-progress: false
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      # typecheck (src and tests), unit tests, production build into dist/
+      - run: npm run check
+        timeout-minutes: 5
+      - uses: actions/upload-pages-artifact@v5
+        with:
+          path: dist
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v5
