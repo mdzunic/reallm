@@ -132,6 +132,8 @@ const SILENT_EVENTS = [
   'tokens:changed',
   'resource:spent',
   'inventory:changed',
+  // SPEC-034 §4.15: the toast beside it is the sound.
+  'item:noRoom',
   'gear:equipped',
   // SPEC-028: the quick-slot spend stays silent — the consumable's own effect
   // (heal, boost) already carries the feedback. SPEC-029 §4.12 gave the switch

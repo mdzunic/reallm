@@ -584,6 +584,13 @@ describe('content invariants (SPEC-009 §7)', () => {
         for (const id of referenced) {
           if (id !== undefined && !Object.hasOwn(DIALOGUE, id)) problems.push(`${mission.id}: unknown dialogue ${id}`);
         }
+        // SPEC-034 §4.7: stage 0's moment is the accept, which `onAccept` owns.
+        // The board path never starts a stage on screen, so a stage-0 line plays
+        // at the pad terminal and nowhere else — which is how the Warden's first
+        // words ended up before the fight instead of at the Queen's death.
+        if ((mission.dialogue.onStage as Record<string, DialogueId> | undefined)?.['0'] !== undefined) {
+          problems.push(`${mission.id}: onStage[0] — stage 0's line is onAccept`);
+        }
         if (mission.dialogue.onAccept === undefined) {
           missingAccept.push(mission.id);
           console.warn(`SPEC-009 §7.14: ${mission.id} has no onAccept dialogue`);
@@ -597,6 +604,52 @@ describe('content invariants (SPEC-009 §7)', () => {
     } finally {
       warn.mockRestore();
     }
+  });
+
+  /**
+   * SPEC-034 §4.7: `DialogueDef.next` plays a second dialogue the moment the
+   * first ends. A missing id would silently swallow the rest of a beat, and a
+   * loop would never let the player go, so both are compile-adjacent errors.
+   */
+  it('14b. every dialogue `next` exists and the chain it starts terminates', () => {
+    const problems: string[] = [];
+    for (const dialogue of Object.values(DIALOGUE) as { id: string; next?: string }[]) {
+      if (dialogue.next === undefined) continue;
+      if (!Object.hasOwn(DIALOGUE, dialogue.next)) {
+        problems.push(`${dialogue.id}: next names unknown dialogue ${dialogue.next}`);
+        continue;
+      }
+      const seen = new Set<string>([dialogue.id]);
+      let at: string | undefined = dialogue.next;
+      let steps = 0;
+      while (at !== undefined) {
+        if (seen.has(at)) {
+          problems.push(`${dialogue.id}: next revisits ${at}`);
+          break;
+        }
+        seen.add(at);
+        if (++steps > 4) {
+          problems.push(`${dialogue.id}: next chain runs past 4 steps`);
+          break;
+        }
+        at = (DIALOGUE as Record<string, { next?: string }>)[at]?.next;
+      }
+    }
+    expect(problems).toEqual([]);
+  });
+
+  /**
+   * SPEC-034 §4.15, E25: an item reward drops as a pickup at the player's feet
+   * when the pack is full — which the flight scene has no ground for, so a
+   * flight mission may never pay in items.
+   */
+  it('14c. no flight mission pays in items', () => {
+    const problems: string[] = [];
+    for (const mission of missions) {
+      if (mission.scene !== 'flight') continue;
+      if ((mission.rewards.items ?? []).length > 0) problems.push(`${mission.id}: item rewards on a flight mission`);
+    }
+    expect(problems).toEqual([]);
   });
 
   it('15. mission titles, briefs and dialogue lines stay inside their budgets', () => {

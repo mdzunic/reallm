@@ -7,13 +7,16 @@
 // Nothing here touches the DOM, `three`, or `Math.random`, and nothing mutates
 // its inputs except the two mission helpers, which edit the save the way every
 // `systems/` class does (SPEC-010's `Economy` is the model).
+import type { GameEvents } from '@/core/Events';
 import { maxHp, type Save, type SlotSummary } from '@/core/Save';
 import {
   CLASSES,
   COMPANIONS,
+  FOLLOWERS,
   ITEMS,
   MISSIONS,
   PLANETS,
+  POI_LABELS,
   RESOURCE_IDS,
   TUNING,
   UPGRADES,
@@ -21,9 +24,11 @@ import {
   type ClassId,
   type ItemId,
   type CompanionEffect,
+  type FollowerId,
   type MissionDef,
   type MissionId,
   type PlanetId,
+  type PoiId,
   type Price,
   type Requirement,
   type ResourceId,
@@ -447,6 +452,65 @@ export function abandonMission(save: Save, id: MissionId): boolean {
   if (at < 0) return false;
   save.progress.missionsActive.splice(at, 1);
   return true;
+}
+
+/**
+ * SPEC-028 §4.4 / E40: what a heal at full HP says. Shared, because SPEC-034
+ * §4.15 makes the character panel refuse one the way the surface already did —
+ * a medkit used at the station was simply spent for nothing.
+ */
+export const HP_FULL_TEXT = 'HP full';
+
+// ---------------------------------------------- SPEC-034 §4.9: stage resets
+
+/**
+ * SPEC-034 §4.9: why a defend or escort stage went back to zero. A death, a
+ * recall and a reload already announce themselves — a beacon that fell or a
+ * probe that was lost do not, and the player was left watching a timer restart
+ * with no idea what had happened.
+ */
+export function stageResetText(
+  reason: GameEvents['mission:stageReset']['reason'],
+  poi: PoiId | null,
+  follower: FollowerId | null,
+): string | null {
+  if (reason === 'poi_destroyed' && poi !== null) {
+    return `The ${POI_LABELS[poi]} went down — the defence restarts.`;
+  }
+  if (reason === 'follower_died' && follower !== null) {
+    return `The ${FOLLOWERS[follower].name} was lost — the escort restarts.`;
+  }
+  return null;
+}
+
+// ------------------------------------------------------- the surface's holds
+
+/** SPEC-034 §4.6: the three counters the surface step reads before it runs. */
+export interface SurfaceHoldState {
+  /** SPEC-023 §4.4: a held story beat — a film, a reveal, the ending sequence. */
+  beats: number;
+  /** SPEC-026 §4.6 / SPEC-028 §4.6: the full-screen map, the quick picker. */
+  ui: number;
+  /** SPEC-034 §4.6: open modal dialogues and the verdict choice. */
+  modal: number;
+}
+
+export type SurfaceHold = 'beat' | 'ui' | 'modal' | null;
+
+/**
+ * SPEC-034 §4.6: why the surface step is holding, or `null` when it is not.
+ *
+ * A modal line takes the player's movement, aim, healing and fire away, so the
+ * enemies should not be able to act either: the world waits for a modal
+ * dialogue and the verdict choice exactly as it already waits for the map. The
+ * order is the order the step checks them in — a beat outranks the map, which
+ * outranks a line.
+ */
+export function surfaceHoldReason(state: SurfaceHoldState): SurfaceHold {
+  if (state.beats > 0) return 'beat';
+  if (state.ui > 0) return 'ui';
+  if (state.modal > 0) return 'modal';
+  return null;
 }
 
 // -------------------------------------------------------------- player stats

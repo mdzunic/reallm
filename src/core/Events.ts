@@ -87,6 +87,12 @@ export type GameEvents = {
    */
   'resource:collected': { resource: ResourceId; amount: number; total: number; blocked?: 'cargo_full'; shipped?: number };
   'resource:spent': { resource: ResourceId; amount: number; total: number; reason: string };
+  /**
+   * SPEC-034 §4.15, E25: a reward item the pack could not take. The surface
+   * spills it at the player's feet as a pickup; at the station the toast
+   * `applyRewards` raises is all there is.
+   */
+  'item:noRoom': { itemId: ItemId; qty: number };
   'inventory:changed': { itemId: ItemId; qty: number };
   // SPEC-025 §3: the save carries three weapon slots, so the equip event names
   // the one that moved rather than the kind of thing that moved into it.

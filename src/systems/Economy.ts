@@ -675,9 +675,13 @@ export class Economy {
     }
     for (const { itemId, qty } of rewards.items ?? []) {
       const { blocked } = this.addItem(itemId, qty);
-      // E25: the surface scene spills these at the player's feet; at the
-      // station the toast is all there is.
-      if (blocked > 0) this.#events.emit('ui:toast', { kind: 'warn', text: noRoomText(ITEM_TABLE[itemId], blocked) });
+      // E25: the surface scene spills these at the player's feet (SPEC-034
+      // §4.15 — `item:noRoom` is what it listens for); at the station the toast
+      // is all there is.
+      if (blocked > 0) {
+        this.#events.emit('item:noRoom', { itemId, qty: blocked });
+        this.#events.emit('ui:toast', { kind: 'warn', text: noRoomText(ITEM_TABLE[itemId], blocked) });
+      }
     }
     for (const flag of rewards.flags ?? []) this.setFlag(flag);
     this.#saves?.request('mission');

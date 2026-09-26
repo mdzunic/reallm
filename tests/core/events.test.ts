@@ -553,6 +553,7 @@ const NAMES: Record<keyof GameEvents, true> = {
   'tokens:changed': true,
   'resource:collected': true,
   'resource:spent': true,
+  'item:noRoom': true,
   'inventory:changed': true,
   'gear:equipped': true,
   // SPEC-028 §3: the loadout runtime's switch and quick-slot spend.
@@ -603,8 +604,8 @@ const port: ServicesEventBus = new EventBus<GameEvents>();
 describe('GameEvents (§3.2)', () => {
   it('is exactly the canonical table', () => {
     // 57 before SPEC-015, plus `app:update-ready` and `app:install-hint`.
-    // SPEC-034 §4.2, §4.6 added `player:recalled` and `enemy:dismissed`.
-    expect(Object.keys(NAMES)).toHaveLength(61);
+    // SPEC-034 added `player:recalled`, `enemy:dismissed` and `item:noRoom`.
+    expect(Object.keys(NAMES)).toHaveLength(62);
   });
 
   it('still carries the nine names SPEC-002 and SPEC-003 already emit', () => {

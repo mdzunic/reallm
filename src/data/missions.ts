@@ -237,7 +237,9 @@ export const MISSIONS = {
       [{ kind: 'deliver', poi: 'survivor_pod', resource: 'water', amount: 40 }],
     ],
     rewards: { xp: 100, tokens: 10, items: [{ itemId: 'medkit', qty: MEDKIT_BUNDLE_QTY }], flags: ['iteration_log'] },
-    dialogue: { onAccept: 'c2_s1_accept', onComplete: 'c2_s1_log' },
+    // SPEC-034 §4.10: the flight log belongs to the stage that finds it, not to
+    // the debrief two scenes later.
+    dialogue: { onAccept: 'c2_s1_accept', onStage: { 1: 'c2_s1_log' }, onComplete: 'c2_s1_done' },
   },
   c2_s2: {
     id: 'c2_s2',
@@ -452,7 +454,9 @@ export const MISSIONS = {
     requires: [{ kind: 'mission', id: 'c5_m2' }],
     stages: [[{ kind: 'boss', enemy: 'hive_queen' }]],
     rewards: { xp: 600, tokens: 100, flags: ['chapter5_done'] },
-    dialogue: { onAccept: 'c5_m3_accept', onStage: { 0: 'c5_m3_warden' }, onComplete: 'c5_m3_aria' },
+    // SPEC-034 §4.7: the Warden's first words are the Queen's death, not the
+    // accept — and ARIA answers them through `c5_m3_warden.next`.
+    dialogue: { onAccept: 'c5_m3_accept', onComplete: 'c5_m3_warden' },
   },
   c5_s1: {
     id: 'c5_s1',

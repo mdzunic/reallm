@@ -108,7 +108,7 @@ export function harness(options: HarnessOptions = {}): Harness {
   events.onAny((name, payload) => recorded.push({ name, payload }));
   const progression = new Progression(save, events);
   const economy: EconomyPort = {
-    addResource: () => ({ added: 0, blocked: 0 }),
+    addResource: () => ({ added: 0, shipped: 0, blocked: 0 }),
     addItem: () => ({ added: 0, blocked: 0 }),
   };
   const stats = computePlayerStats(save);

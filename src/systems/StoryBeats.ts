@@ -242,3 +242,70 @@ export function stayReport(save: { player: { name: string } }): readonly string[
     'RUN 62 logged · a good run',
   ];
 }
+
+// ------------------------------------------------- SPEC-034: the line ledger
+
+/**
+ * SPEC-034 §4.10: one memory of which mission lines have played and which
+ * missions finished on the current trip, shared by the surface, flight and
+ * station. Each of them used to keep its own partial record — the surface's
+ * `ACCEPT_SHOWN`, the station's `DEBRIEFED` — so the debrief replayed lines the
+ * surface had just played, and after a reload it replayed lines from hours ago.
+ *
+ * Page-session, keyed by the save *object*, like `DialogueUI`'s seen-set: the
+ * save schema carries no played-lines list, so a reload starts clean and
+ * replays a line at most once. A reload therefore also leaves nothing to
+ * debrief (34-g), which is the point.
+ */
+export interface LineLedger {
+  played(save: object, dialogue: string): boolean;
+  markPlayed(save: object, dialogue: string): void;
+  /** Missions completed since the last station entry, in completion order. */
+  completedThisTrip(save: object): readonly string[];
+  noteCompleted(save: object, id: string): void;
+  /** Called by the station after its debrief. */
+  closeTrip(save: object): void;
+}
+
+interface LedgerEntry {
+  played: Set<string>;
+  trip: string[];
+}
+
+class SessionLineLedger implements LineLedger {
+  readonly #bySave = new WeakMap<object, LedgerEntry>();
+
+  #entryOf(save: object): LedgerEntry {
+    let entry = this.#bySave.get(save);
+    if (entry === undefined) {
+      entry = { played: new Set<string>(), trip: [] };
+      this.#bySave.set(save, entry);
+    }
+    return entry;
+  }
+
+  played(save: object, dialogue: string): boolean {
+    return this.#bySave.get(save)?.played.has(dialogue) ?? false;
+  }
+
+  markPlayed(save: object, dialogue: string): void {
+    this.#entryOf(save).played.add(dialogue);
+  }
+
+  completedThisTrip(save: object): readonly string[] {
+    return this.#bySave.get(save)?.trip ?? [];
+  }
+
+  /** A mission completed twice on one trip is debriefed once. */
+  noteCompleted(save: object, id: string): void {
+    const trip = this.#entryOf(save).trip;
+    if (!trip.includes(id)) trip.push(id);
+  }
+
+  closeTrip(save: object): void {
+    this.#entryOf(save).trip.length = 0;
+  }
+}
+
+/** The one ledger the scenes share (§4.10). */
+export const LINE_LEDGER: LineLedger = new SessionLineLedger();

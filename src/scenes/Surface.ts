@@ -84,12 +84,21 @@ import { generateLayout, ObstacleGrid, WALL_INSET, type Layout, type LayoutPoi, 
 import { REVEAL_AFTER_SHOT, SHELTER_INSET, shelterAt, STORM_SHELTER_FACTOR } from '@/systems/Shelter';
 import { nodeIcon, poiIcon } from '@/systems/MapModel';
 import { Missions, type MissionContext, type ObjectiveProgress } from '@/systems/Missions';
-import { Nodes, Pickups } from '@/systems/Pickups';
+import { CARGO_TOAST_SECONDS, Nodes, Pickups, SHIPPED_TOAST_TEXT } from '@/systems/Pickups';
 import { cumulativeXp, Progression, xpToNext } from '@/systems/Progression';
-import { SpawnDirector, type FrustumXZ } from '@/systems/Spawn';
+import { SpawnDirector, type FrustumXZ, type WaveHandle } from '@/systems/Spawn';
 import { Weather, WEATHER_EFFECTS, type WeatherEffects } from '@/systems/Weather';
-import { revealCamera, revealDue, revealKey, stayReport, type Ending } from '@/systems/StoryBeats';
-import { hasNodeRadar, padEmptyText, type HudTracker, type HudTrackerRow } from '@/systems/UiHelpers';
+import { LINE_LEDGER, revealCamera, revealDue, revealKey, stayReport, type Ending } from '@/systems/StoryBeats';
+import {
+  hasNodeRadar,
+  HP_FULL_TEXT,
+  padEmptyText,
+  stageResetText,
+  surfaceHoldReason,
+  type HudTracker,
+  type HudTrackerRow,
+  type SurfaceHold,
+} from '@/systems/UiHelpers';
 import { UiScene } from '@/scenes/base';
 import { director } from '@/scenes/Director';
 import { INSTANCES_PER_PART } from '@/views/ProceduralMeshes';
@@ -265,23 +274,6 @@ const JUMP_CREATION: CharacterCreation = {
 const DIALOGUE_TABLE: Readonly<Record<DialogueId, Dialogue>> = DIALOGUE;
 const ITEM_TABLE: Readonly<Record<ItemId, Item>> = ITEMS;
 const MISSION_TABLE: Readonly<Record<MissionId, MissionDef>> = MISSIONS;
-
-/**
- * Accept dialogues already shown for a save, page-lifetime (§4.1 step 5: the
- * ARIA `onAccept` line plays on landing for a mission accepted at the station
- * "if not yet shown"). Keyed by the save object like `DialogueUI`'s seen-set —
- * the save schema carries no seen list, so a reload replays at most once.
- */
-const ACCEPT_SHOWN = new WeakMap<object, Set<MissionId>>();
-
-function acceptShown(save: Save): Set<MissionId> {
-  let set = ACCEPT_SHOWN.get(save);
-  if (set === undefined) {
-    set = new Set();
-    ACCEPT_SHOWN.set(save, set);
-  }
-  return set;
-}
 
 interface PoiRuntime {
   poi: LayoutPoi;
@@ -513,6 +505,15 @@ export class SurfaceScene extends UiScene<'surface'> {
   readonly #aimPoint = { x: 0, z: 0 };
   /** SPEC-034 §4.1: the scratch the pre-step obstacle resolve writes into. */
   readonly #resolved = { x: 0, z: 0 };
+  /** SPEC-034 §4.2: recalls taken this visit, and summons a boss death sent away. */
+  #recalls = 0;
+  #summonsDismissed = 0;
+  /** SPEC-034 §4.12: world-clock time the shipped-home toast last showed. */
+  #shippedToastAt = -CARGO_TOAST_SECONDS;
+  /** SPEC-034 §4.6: true while the next `#syncDefend` ends a *finished* defence. */
+  #dismissDefendWave = false;
+  /** SPEC-034 §4.8: the mission-level wave of each active mission that has one. */
+  readonly #missionWaves = new Map<MissionId, WaveHandle>();
   readonly #camTarget = { x: 0, z: 0 };
   readonly #frustum = new THREE.Frustum();
   readonly #frustumMatrix = new THREE.Matrix4();
@@ -891,7 +892,12 @@ export class SurfaceScene extends UiScene<'surface'> {
     touch.show('surface');
     this.#touch = touch;
     this.disposer.add(() => touch.dispose());
-    const pauseMenu = new PauseMenu(services, () => services.requestResume());
+    // SPEC-034 §4.2: the surface's way out of a corner. The flight menu never
+    // passes one — there, Save & Quit and E5's recall already cover it.
+    const pauseMenu = new PauseMenu(services, () => services.requestResume(), undefined, {
+      allowed: () => this.#recallAllowed(),
+      run: () => this.#recallToPad(),
+    });
     this.#pauseMenu = pauseMenu;
     this.disposer.add(() => pauseMenu.dispose());
     // Quitting out of an open pause menu never calls resume(); the disposer is
@@ -942,12 +948,15 @@ export class SurfaceScene extends UiScene<'surface'> {
 
     // §4.1 step 5: the landing save, and held-back accept dialogue.
     services.save.request('landing');
-    const shown = acceptShown(save);
+    // SPEC-034 §4.10: the ledger, not a set of its own, so the station's debrief
+    // knows what the surface has already said. A mission already past stage 0
+    // gets its *stage* line here — its accept was two scenes ago.
     for (const state of missions.active) {
-      if (shown.has(state.id)) continue;
-      shown.add(state.id);
-      const id = MISSION_TABLE[state.id].dialogue.onAccept;
-      if (id !== undefined) this.#playDialogue(id);
+      const def = MISSION_TABLE[state.id];
+      const stageLine = (def.dialogue.onStage as Record<number, DialogueId> | undefined)?.[state.stage];
+      const id = state.stage > 0 ? stageLine : def.dialogue.onAccept;
+      if (id === undefined || LINE_LEDGER.played(save, id)) continue;
+      this.#playDialogue(id);
     }
   }
 
@@ -962,6 +971,40 @@ export class SurfaceScene extends UiScene<'surface'> {
       this.services.save.flush();
     }
     this.#touch?.hide();
+  }
+
+  /** SPEC-034 §4.6: why the step is holding, or `null` when it runs. */
+  #holdReason(): SurfaceHold {
+    return surfaceHoldReason({ beats: this.#holds, ui: this.#uiHolds, modal: this.#modalOpen });
+  }
+
+  /**
+   * SPEC-034 §4.2: `Recall to pad` is offered while the player is alive and not
+   * already respawning, no film, reveal or ending is running, no modal line or
+   * choice is open, and the scene is not leaving.
+   */
+  #recallAllowed(): boolean {
+    const world = this.#world;
+    if (world === null || !world.player.alive) return false;
+    if (this.#deathAt !== null || this.#leaving) return false;
+    if (this.#holds > 0 || this.#modalOpen > 0) return false;
+    return this.#ending === null;
+  }
+
+  /**
+   * SPEC-034 §4.2, E55: E4's respawn without the death — the pad, full HP, the
+   * i-frames, the sweep, the boss reset and the arena clear — and without its
+   * price: no `player:died`, so nothing is taken and no death overlay shows.
+   * `player:recalled` is what restarts the timed, escort and defend stages
+   * (34-c: a survive stage at 170 of 180 s starts again, as a death would).
+   */
+  #recallToPad(): void {
+    const world = this.#world;
+    if (world === null || !this.#recallAllowed()) return;
+    this.#recalls++;
+    this.services.events.emit('player:recalled', {});
+    this.#respawn(world);
+    this.services.requestResume();
   }
 
   /** SPEC-026 §4.6: the map is not a second pause — it closes before this one. */
@@ -1020,20 +1063,28 @@ export class SurfaceScene extends UiScene<'surface'> {
       return;
     }
 
-    const modal = this.#modalOpen > 0;
-
-    this.#deathTick(world, dt);
-    if (!modal) {
-      this.#movePlayer(world, dt);
-      this.#updateLoadout(world, combat);
-      // SPEC-026 §4.5/§4.7: `map` opens the map, `track` cycles the pin.
-      if (this.#edges.pressed('map')) this.#openMap();
-      if (this.#edges.pressed('track')) missions.cyclePinned();
-    } else {
+    // SPEC-034 §4.6, E57: a modal dialogue — or the verdict choice — holds the
+    // world exactly as the full map does. The player cannot move, heal or fire
+    // while one is up; nothing else may either, so the step returns before
+    // `combat.update` and nothing after it runs: spawning, weather, mission
+    // timers, pickups, nodes, regeneration or the guidance timers. The camera,
+    // the HUD and the dialogue layer keep rendering. The death overlay's clock
+    // is above this too — a held line does not run it out.
+    if (this.#modalOpen > 0) {
       this.#qbLength = 0;
       world.player.vx = 0;
       world.player.vz = 0;
+      return;
     }
+
+    this.#deathTick(world, dt);
+    this.#movePlayer(world, dt);
+    this.#updateLoadout(world, combat);
+    // SPEC-026 §4.5/§4.7: `map` opens the map, `track` cycles the pin.
+    if (this.#edges.pressed('map')) this.#openMap();
+    // SPEC-034 §4.15: `cyclePinned` moves the entry to the front of
+    // `missionsActive`, which is what makes the pin survive a reload.
+    if (this.#edges.pressed('track')) missions.cyclePinned();
 
     // §4.6 (28-d): a hold taken by this step's own presses — the picker or
     // the map — stops the rest of this step too, not just the next one, so
@@ -1044,7 +1095,7 @@ export class SurfaceScene extends UiScene<'surface'> {
       return;
     }
 
-    combat.update(dt, input, modal ? null : this.#aimWorld(world));
+    combat.update(dt, input, this.#aimWorld(world));
 
     // SPEC-030 §4.5: after combat (so a shot this step ends hiding at once),
     // before weather (so the DPS skip sees this step's "inside").
@@ -1057,8 +1108,8 @@ export class SurfaceScene extends UiScene<'surface'> {
     this.#updateEscort(dt);
     this.#updateChoice(missions);
 
-    // §4.5: spawning pauses for modal dialogue and the ending choice.
-    spawn.update(dt, world.player, this.#frustumXZ, !modal);
+    // §4.5: spawning runs — a modal line or the ending choice returned above.
+    spawn.update(dt, world.player, this.#frustumXZ, true);
 
     for (const drop of combat.drops) pickups.spawn(drop);
     combat.drops.length = 0;
@@ -1253,9 +1304,12 @@ export class SurfaceScene extends UiScene<'surface'> {
     info['spawned'] = this.#spawned;
     info['elites'] = this.#elites;
     info['kills'] = this.#kills;
-    // SPEC-023 §4.4: the beat-hold counter and the view clock it keeps running
-    // while `world.time` stands still.
-    info['held'] = this.#holds;
+    // SPEC-023 §4.4 / SPEC-034 §4.6: 1 while the step is holding for anything —
+    // a story beat, the full map, a modal line or the verdict choice — and the
+    // view clock that keeps running while `world.time` stands still.
+    info['held'] = this.#holdReason() === null ? 0 : 1;
+    info['recalls'] = this.#recalls;
+    info['summonsDismissed'] = this.#summonsDismissed;
     info['viewTime'] = Math.round(this.#viewTime * 100) / 100;
     // SPEC-015 AC-39: how far the shake and the walk bob actually moved the
     // camera on the last frame, for the same reason SPEC-020 20-g publishes
@@ -1879,11 +1933,16 @@ export class SurfaceScene extends UiScene<'surface'> {
     const stage = missions.defendStage();
     const spawn = this.#spawn as SpawnDirector;
     if (stage === null) {
-      if (this.#defendWave !== null) spawn.stopWave(this.#defendWave);
+      // SPEC-034 §4.6, E57: a defence that is over sends its survivors away, so
+      // the line that follows it ("Rest") is not read over a straggler still
+      // chewing on the beacon. A restart (`#dismissDefendWave` false) keeps them.
+      if (this.#defendWave !== null) spawn.stopWave(this.#defendWave, { dismiss: this.#dismissDefendWave });
+      this.#dismissDefendWave = false;
       this.#defendWave = null;
       this.#defendPoi = null;
       return;
     }
+    this.#dismissDefendWave = false;
     const poi = (this.#layout as Layout).pois.find((p) => p.poi === stage.poi) ?? null;
     this.#defendPoi = poi;
     this.#defendMax = this.#planet.surface.pois.find((p) => p.id === stage.poi)?.hp ?? 100;
@@ -2111,7 +2170,7 @@ export class SurfaceScene extends UiScene<'surface'> {
     }
     // E40: the most common waste on a phone — a heal at full HP spends nothing.
     if (slot === 'heal' && world.player.hp >= world.stats.maxHp) {
-      this.#quickToast('HP full');
+      this.#quickToast(HP_FULL_TEXT);
       return;
     }
     // SPEC-029 §4.8: the explosive slot throws or plants instead of applying.
@@ -2276,6 +2335,8 @@ export class SurfaceScene extends UiScene<'surface'> {
     this.#arena = null;
     this.#weather?.suppress(false);
     if (this.#defendPoi !== null) this.#syncDefend(); // wave restarts, HP refills
+    // SPEC-034 §4.8: a mission-level wave restarts with its mission's stage.
+    this.#restartMissionWaves();
 
     // §4.8 step 3.
     const p = world.player;
@@ -2574,18 +2635,19 @@ export class SurfaceScene extends UiScene<'surface'> {
     terminal.replaceChildren(...rows);
   }
 
+  /**
+   * SPEC-034 §4.10 step 4: the `onAccept` line is queued *before* `accept()`, so
+   * it plays ahead of any stage line the accept itself triggers — `c1_m1` taken
+   * on the pad reads ARIA's landing line, then the scav.
+   */
   #acceptAtTerminal(id: MissionId): void {
     const missions = this.#missions;
     const save = this.#save;
     if (missions === null || save === null) return;
-    const result = missions.accept(id);
-    if (!result.ok) return;
-    const shown = acceptShown(save);
-    if (!shown.has(id)) {
-      shown.add(id);
-      const dialogueId = MISSION_TABLE[id].dialogue.onAccept;
-      if (dialogueId !== undefined) this.#playDialogue(dialogueId);
-    }
+    if (!missions.available().some((def) => def.id === id)) return;
+    const dialogueId = MISSION_TABLE[id].dialogue.onAccept;
+    if (dialogueId !== undefined && !LINE_LEDGER.played(save, dialogueId)) this.#playDialogue(dialogueId);
+    if (!missions.accept(id).ok) return;
     this.#renderTerminal();
   }
 
@@ -2631,6 +2693,10 @@ export class SurfaceScene extends UiScene<'surface'> {
   #playDialogue(id: DialogueId): void {
     const dialogue = this.#dialogue;
     if (dialogue === null) return;
+    // SPEC-034 §4.10: every mission line the surface plays goes into the ledger,
+    // so the station's debrief does not say it again a minute later.
+    const save = this.#save;
+    if (save !== null) LINE_LEDGER.markPlayed(save, id);
     const def = DIALOGUE_TABLE[id];
     const modal = def.modal === true;
     if (modal) this.#modalOpen++;
@@ -3693,6 +3759,12 @@ export class SurfaceScene extends UiScene<'surface'> {
       bus.on(
         'boss:defeated',
         () => {
+          // SPEC-034 §4.6, E57 / 34-d: the summons go with their boss — the
+          // fight is over in the fiction, and the modal lines that follow
+          // ("The Hive has gone quiet") disarm the player while a dozen drones
+          // would otherwise keep biting. Each plays its burst; none is a kill.
+          const bossEntity = this.#bossId;
+          if (bossEntity !== null) this.#summonsDismissed += this.#spawn?.dismissSummons(bossEntity) ?? 0;
           this.#bossId = null;
           if (this.#world !== null) this.#world.arena = null;
           this.#arena = null;
@@ -3720,6 +3792,40 @@ export class SurfaceScene extends UiScene<'surface'> {
         },
         this,
       ),
+      // SPEC-034 §4.15, E25: a reward item the pack could not take lands at the
+      // player's feet as an ordinary pickup, with the 60 s lifetime every drop
+      // has — it used to be lost outright.
+      bus.on(
+        'item:noRoom',
+        ({ itemId, qty }) => {
+          const world = this.#world;
+          const pickups = this.#pickups;
+          if (world === null || pickups === null || !world.player.alive) return;
+          pickups.spawn({ kind: 'item', itemId, qty, x: world.player.x, z: world.player.z });
+        },
+        this,
+      ),
+      // SPEC-034 §4.6: a dismissal shows like a death and counts like nothing.
+      bus.on(
+        'enemy:dismissed',
+        ({ enemyId, x, z }) => {
+          this.#view?.fx.burst('death', x, z, hexColor(ENEMIES[enemyId].look.tint));
+        },
+        this,
+      ),
+      // SPEC-034 §4.12: the hold is full and a collect objective still wants it,
+      // so it goes to Command Relay instead of bouncing. Throttled like CARGO FULL.
+      bus.on(
+        'resource:collected',
+        ({ shipped }) => {
+          if (shipped === undefined || shipped <= 0) return;
+          const now = this.#world?.time ?? 0;
+          if (now - this.#shippedToastAt < CARGO_TOAST_SECONDS) return;
+          this.#shippedToastAt = now;
+          this.services.events.emit('ui:toast', { kind: 'warn', text: SHIPPED_TOAST_TEXT });
+        },
+        this,
+      ),
       bus.on('mission:accepted', () => this.#syncMissionStages(), this),
       // SPEC-027 §4.6: progress on the tracked mission is progress, so the
       // escalation clock and any route it drew start over (AC-52).
@@ -3733,6 +3839,8 @@ export class SurfaceScene extends UiScene<'surface'> {
       bus.on(
         'mission:stageStarted',
         ({ id, stage }) => {
+          // SPEC-034 §4.6: the previous stage finished; its wave is dismissed.
+          if (stage > 0) this.#dismissDefendWave = true;
           this.#syncMissionStages();
           if (id === this.#missions?.pinned) this.#stuck.progress();
           // A reach objective for a POI the player is already standing in
@@ -3756,6 +3864,9 @@ export class SurfaceScene extends UiScene<'surface'> {
       bus.on(
         'mission:completed',
         ({ id }) => {
+          // SPEC-034 §4.6: this stage is done, so a defend wave it was running
+          // leaves rather than being restarted.
+          this.#dismissDefendWave = true;
           this.#syncMissionStages();
           const dialogueId = MISSION_TABLE[id].dialogue.onComplete;
           // SPEC-024 §4.1: inside the ending sequence the mission's own
@@ -3775,6 +3886,17 @@ export class SurfaceScene extends UiScene<'surface'> {
           // Death already rebuilt the defend stage in `#respawn`; the POI
           // destruction reset rebuilds it here (12-d).
           if (reason === 'poi_destroyed') this.#syncDefend();
+          // SPEC-034 §4.9: an escort stage restarts like a timed one (E4), which
+          // means putting the follower back at `from`.
+          if (reason === 'death' || reason === 'recall') this.#syncEscort();
+          // SPEC-034 §4.9: say why the stage went back to zero. A death, a
+          // recall and a reload already announce themselves.
+          const text = stageResetText(
+            reason,
+            this.#defendPoi?.poi ?? null,
+            (this.#missions as Missions).escortStage()?.follower ?? null,
+          );
+          if (text !== null) this.services.events.emit('ui:toast', { kind: 'warn', text });
         },
         this,
       ),
@@ -3869,5 +3991,41 @@ export class SurfaceScene extends UiScene<'surface'> {
       this.#escortKey = escortKey;
       this.#syncEscort();
     }
+    this.#syncMissionWaves(missions, spawn);
+  }
+
+  /**
+   * SPEC-034 §4.8: a mission whose definition carries `waves` (only `c3_s2`'s
+   * `thessaly_reaping` today) has that wave running, centred on the player,
+   * while it is active on this surface. PLAN §6 authored the field; nothing
+   * started it, so the reaping never came. The wave stops — undismissed — when
+   * the mission completes or is abandoned.
+   */
+  #syncMissionWaves(missions: Missions, spawn: SpawnDirector): void {
+    const wanted = new Set<MissionId>();
+    for (const state of missions.active) {
+      if (MISSION_TABLE[state.id].waves !== undefined) wanted.add(state.id);
+    }
+    for (const [id, handle] of this.#missionWaves) {
+      if (wanted.has(id)) continue;
+      spawn.stopWave(handle);
+      this.#missionWaves.delete(id);
+    }
+    for (const id of wanted) {
+      if (this.#missionWaves.has(id)) continue;
+      const wave = MISSION_TABLE[id].waves;
+      if (wave === undefined) continue;
+      this.#missionWaves.set(id, spawn.startWave(wave, 'player'));
+    }
+  }
+
+  /** SPEC-034 §4.8: a death or a recall restarts the mission-level waves. */
+  #restartMissionWaves(): void {
+    const missions = this.#missions;
+    const spawn = this.#spawn;
+    if (missions === null || spawn === null) return;
+    for (const handle of this.#missionWaves.values()) spawn.stopWave(handle);
+    this.#missionWaves.clear();
+    this.#syncMissionWaves(missions, spawn);
   }
 }

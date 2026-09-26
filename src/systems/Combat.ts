@@ -229,7 +229,11 @@ export type LootDrop =
 
 /** The slice of SPEC-010's `Economy` combat hands to SPEC-012's pickup flow. */
 export interface EconomyPort {
-  addResource(resource: ResourceId, amount: number, source: 'pickup' | 'reward' | 'voucher' | 'subsidy'): { added: number; blocked: number };
+  addResource(
+    resource: ResourceId,
+    amount: number,
+    source: 'pickup' | 'reward' | 'voucher' | 'subsidy',
+  ): { added: number; shipped: number; blocked: number };
   addItem(itemId: ItemId, qty: number): { added: number; blocked: number };
 }
 

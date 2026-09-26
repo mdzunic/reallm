@@ -128,6 +128,8 @@ const EVENT_KEYS = [
   'resource:collected',
   'resource:spent',
   'inventory:changed',
+  // SPEC-034 §4.15: the toast beside it is the sound.
+  'item:noRoom',
   'gear:equipped',
   // SPEC-028 §3 / SPEC-029 §3: the loadout, blast and mine events.
   'weapon:switched',
@@ -460,13 +462,13 @@ describe('the reactions table is exhaustive over GameEvents (SPEC-006 §5)', () 
     );
   });
 
-  it('silences exactly the 42 events of §5.4 (AC-39; SPEC-015 added the two app: signals)', () => {
-    // SPEC-034 §4.2, §4.6 added `player:recalled` and `enemy:dismissed`.
-    expect(AUDIO_SILENT.size).toBe(42);
+  it('silences exactly the 43 events of §5.4 (AC-39; SPEC-015 added the two app: signals)', () => {
+    // SPEC-034 added `player:recalled`, `enemy:dismissed` and `item:noRoom`.
+    expect(AUDIO_SILENT.size).toBe(43);
   });
 
-  it('gives every one of the 61 event keys exactly one home (AC-40)', () => {
-    expect(EVENT_KEYS).toHaveLength(61);
+  it('gives every one of the 62 event keys exactly one home (AC-40)', () => {
+    expect(EVENT_KEYS).toHaveLength(62);
     const reacted = new Set<string>(REACTED_EVENTS);
     for (const key of EVENT_KEYS) {
       const hasSound = reacted.has(key);
