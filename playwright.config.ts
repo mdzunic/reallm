@@ -31,6 +31,12 @@ const PWA_SPEC = /SPEC-015-pwa\.spec\.ts/;
  */
 const PHONE_SPECS = /SPEC-015\.spec\.ts/;
 /**
+ * SPEC-037 §4.11: the phone-matrix files. Each iterates `PHONE_VIEWPORTS`
+ * (`e2e/phone.ts`) itself, one describe and one viewport per size, so they run
+ * in their own phone project only — never in the desktop one.
+ */
+const PHONE_MATRIX_SPECS = /\.phone\.spec\.ts$/;
+/**
  * Which Chromium build every project launches. Unset, Playwright's headless
  * shell, which rasterises WebGL on the CPU (SwiftShader) even on a host with a
  * GPU. `E2E_CHANNEL=chromium` launches the full build in headless mode instead,
@@ -60,8 +66,9 @@ export default defineConfig({
     channel,
   },
   projects: [
-    // The dev-server project, unchanged — it ignores the preview-only file.
-    { name: 'chromium', use: { ...devices['Desktop Chrome'] }, testIgnore: PWA_SPEC },
+    // The dev-server project — it ignores the preview-only file and, since
+    // SPEC-037 §4.11, the phone-matrix files.
+    { name: 'chromium', use: { ...devices['Desktop Chrome'] }, testIgnore: [PWA_SPEC, PHONE_MATRIX_SPECS] },
     // SPEC-015 AC-64/D-8: the same dev server, seen from a phone. `Pixel 5`
     // brings the three things the desktop project cannot fake together — real
     // touch points, a 393×851 screen and a 2.75 device pixel ratio — so the
@@ -76,6 +83,16 @@ export default defineConfig({
       // about a minute and keeps the two projects out of each other's way.
       fullyParallel: false,
       use: { ...devices['Pixel 5'] },
+    },
+    // SPEC-037 §4.11: the landscape phone matrix. `Pixel 7 landscape` is a
+    // Chromium phone — real touch points, `isMobile`, a 2.625 device pixel
+    // ratio — and each file sets the viewport per size from `PHONE_VIEWPORTS`.
+    // Serially, like `mobile`: every case loads the surface.
+    {
+      name: 'phone-landscape',
+      testMatch: PHONE_MATRIX_SPECS,
+      fullyParallel: false,
+      use: { ...devices['Pixel 7 landscape'] },
     },
     // SPEC-015 AC-56: the build-backed project, and only that one file.
     {
