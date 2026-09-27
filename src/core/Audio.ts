@@ -207,6 +207,49 @@ function toSprite(sprite: NonNullable<AudioEntry['sprite']>): Record<string, [nu
   return out;
 }
 
+// ------------------------------------------------------------- the Opus probe
+
+/**
+ * SPEC-035 §4.11 — the MIME type the banks actually carry. Howler 2.2.4 tests
+ * WebM with `codecs="vorbis"`, which is the wrong question for these files: a
+ * browser that plays Opus in WebM but not Vorbis answers "no" and, with no
+ * `.mp3` shipped yet, hears the whole game in silence.
+ */
+export const OPUS_PROBE_TYPE = 'audio/webm; codecs="opus"';
+
+/** Howler's own `codecs`, captured before the first override wraps it. */
+let howlerOwnCodecs: ((ext: string) => boolean) | null = null;
+
+/** §4.11: one detached `<audio>`, asked once. Anything but `''` is a yes. */
+function probeOpus(): boolean {
+  try {
+    if (typeof document === 'undefined') return false;
+    return document.createElement('audio').canPlayType(OPUS_PROBE_TYPE) !== '';
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * SPEC-035 §4.11 — answer `webm` from the Opus probe and pass every other
+ * extension to Howler's own test.
+ *
+ * The *function* is replaced, not the `_codecs` table: Howler rebuilds that
+ * table when it sets its audio context up, inside the first `Howl`, so a written
+ * flag would be lost. Idempotent — `howlerOwnCodecs` is captured once, so a
+ * second call re-arms the probe rather than wrapping the wrapper.
+ */
+export function installOpusCodecProbe(): void {
+  howlerOwnCodecs ??= Howler.codecs.bind(Howler);
+  const own = howlerOwnCodecs;
+  let answer: boolean | null = null;
+  (Howler as { codecs: (ext: string) => boolean }).codecs = (ext: string): boolean => {
+    if (ext !== 'webm') return own(ext);
+    answer ??= probeOpus();
+    return answer;
+  };
+}
+
 /** `Howler.ctx` is typed non-null but is genuinely absent until Howler sets up. */
 function context(): AudioContext | null {
   return (Howler as { ctx?: AudioContext | null }).ctx ?? null;
@@ -291,6 +334,10 @@ class HowlerAudio implements Audio {
     // nobody replays a pitch — so it comes off `ephemeral`, the one labelled
     // stream SPEC-008 ties to the clock (SPEC-008 §3).
     this.#rng = deps.rng.ephemeral('audio');
+
+    // SPEC-035 §4.11: before any `Howl` exists, so the very first bank is
+    // fetched with the right answer about the format it is written in.
+    installOpusCodecProbe();
 
     // AC-2: `autoUnlock` stays at its default `true` — belt and braces with the
     // boot tap — and the 30 s idle suspend is turned off, so the first shot

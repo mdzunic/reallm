@@ -27,7 +27,7 @@ import {
 } from '@/systems/Flight';
 import { Missions } from '@/systems/Missions';
 import { Progression } from '@/systems/Progression';
-import { runSkip } from '@/systems/Flight';
+import { engineVolume, runSkip, THROTTLES } from '@/systems/Flight';
 
 const DT = 1 / 60;
 
@@ -900,5 +900,43 @@ describe('Flight.fastForward (SPEC-032 §4.5)', () => {
     expect(w.flight.time).toBe(time);
     expect(w.flight.progress).toBe(progress);
     expect(w.of('flight:arrived')).toHaveLength(0);
+  });
+});
+
+// ------------------------------------------------------ SPEC-035 §4.11: sound
+
+describe('engineVolume (SPEC-035 §4.11)', () => {
+  it('is 0.6 at the slowest notch, 0.8 at the middle and 1 at the fastest', () => {
+    const [slow, mid, fast] = THROTTLES;
+    expect(engineVolume(slow as number)).toBeCloseTo(0.6, 6);
+    expect(engineVolume(mid as number)).toBeCloseTo(0.8, 6);
+    expect(engineVolume(fast as number)).toBeCloseTo(1, 6);
+  });
+
+  it('clamps, so nothing outside the three notches pushes the voice past full', () => {
+    expect(engineVolume(0.2)).toBeCloseTo(0.6, 6);
+    expect(engineVolume(9)).toBeCloseTo(1, 6);
+  });
+});
+
+describe('weapon:fired on the rail (SPEC-035 §4.11)', () => {
+  it('emits one event per shot, with line "ship" and the gun it left', () => {
+    const w = world({ planet: quietPlanet(PLANETS.cinder4, 120) });
+    step(w.flight, LAUNCH_SECONDS + 0.1);
+    const before = w.of('weapon:fired').length;
+    const shotsBefore = w.flight.shots.size;
+    step(w.flight, 1, { fire: true });
+    const fired = w.of('weapon:fired');
+    expect(fired.length).toBeGreaterThan(before);
+    expect(w.flight.shots.size).toBeGreaterThan(shotsBefore);
+    for (const event of fired) expect(event.line).toBe('ship');
+    // Two guns alternate, so consecutive shots leave from either side of centre.
+    expect(new Set(fired.map((e) => e.x)).size).toBeGreaterThan(1);
+  });
+
+  it('emits nothing while the trigger is off', () => {
+    const w = world({ planet: quietPlanet(PLANETS.cinder4, 120) });
+    step(w.flight, LAUNCH_SECONDS + 2);
+    expect(w.of('weapon:fired')).toHaveLength(0);
   });
 });

@@ -21,7 +21,7 @@ import type { GameServices } from '@/core/Services';
 import type { SceneParams } from '@/core/StateMachine';
 import { cargoCap, maxHp } from '@/core/Save';
 import { FLIGHT_ASSETS, PLANET_ART } from '@/data/assets';
-import { CHAPTER_CARDS, ENEMIES, MISSIONS, PLANETS, type DialogueId, type PlanetDef } from '@/data/index';
+import { CHAPTER_CARDS, ENEMIES, MISSIONS, PLANETS, TIPS, type DialogueId, type PlanetDef, type TipId } from '@/data/index';
 import { Economy } from '@/systems/Economy';
 import { CARD, cardDue, cardKey, LINE_LEDGER } from '@/systems/StoryBeats';
 import { showChapterCard } from '@/ui/ChapterCard';
@@ -31,6 +31,7 @@ import {
   AUTOPILOT_SECONDS,
   CONVERGE_DEPTH,
   EXPLOSION_SECONDS,
+  engineVolume,
   Flight,
   LANDING_SECONDS,
   LAUNCH_SECONDS,
@@ -39,6 +40,7 @@ import {
 } from '@/systems/Flight';
 import { Missions } from '@/systems/Missions';
 import { cumulativeXp, Progression, xpToNext } from '@/systems/Progression';
+import { AriaHint } from '@/ui/AriaHint';
 import { el, h, testId } from '@/ui/dom';
 import { Hud } from '@/ui/Hud';
 import { PauseMenu } from '@/ui/PauseMenu';
@@ -47,7 +49,19 @@ import { TouchControls } from '@/ui/TouchControls';
 import { FlightView } from '@/views/FlightView';
 import { prewarm } from '@/views/ProceduralTextures';
 import type { Look } from '@/core/Quality';
+import type { Voice } from '@/core/Audio';
 import { UiScene, uiRootEl } from '@/scenes/base';
+
+// -------------------------------------------------------------- SPEC-035 §4.8
+
+/** §4.8: how long a tip stays up, and how long after `flight_steer` the second one comes. */
+const TIP_MS = 8000;
+const THROTTLE_TIP_DELAY = 12;
+
+// ------------------------------------------------------------- SPEC-035 §4.11
+
+/** §4.11: the hum's volume is re-read this often, not every frame. */
+const ENGINE_VOLUME_INTERVAL = 0.25;
 
 /** The stand-in pilot for a bare `?scene=flight` jump with no loaded save. */
 const DEMO_CREATION: CharacterCreation = {
@@ -112,6 +126,15 @@ export class FlightScene extends UiScene<'flight'> {
 
   /** SPEC-032 §4.1: the launch shot has ended (run out, or skipped). */
   #launchDone = false;
+  // SPEC-035 §4.8 — the two tips the first flight needs. The hint strip is the
+  // surface's `AriaHint`, mounted here the same way; `flight_throttle` follows
+  // `flight_steer` by 12 s on the same trip.
+  #aria: AriaHint | null = null;
+  #throttleTipIn = -1;
+  // SPEC-035 §4.11 — `engine_hum` is shipped and was never played. It runs from
+  // the end of the launch phase to the end of the scene, at priority 0.
+  #engineVoice: Voice | null = null;
+  #engineVolumeIn = 0;
   /** SPEC-032 §4.5: a skip asked for, run on the next update with the loop live. */
   #skipPending = false;
   /** Seconds the autopilot card has been up; −1 while there is none. */
@@ -391,6 +414,20 @@ export class FlightScene extends UiScene<'flight'> {
     this.#skipHint = testId(el('p', 'flight-skip-hint is-hidden', 'Tap or press any key to skip'), 'skip-landing');
     this.ui.mount(this.#explosionEl, 'overlay');
     this.ui.mount(this.#skipHint, 'hud');
+    // SPEC-035 §4.8: the same one-line hint strip the surface teaches with, in
+    // the same `guide-layer` — which is what takes no pointer events and what
+    // hides the strip between lines.
+    const guide = el('div', 'guide-layer');
+    this.ui.mount(guide, 'hud');
+    const aria = new AriaHint(guide);
+    this.#aria = aria;
+    this.disposer.add(() => {
+      aria.dispose();
+      this.ui.unmount(guide);
+      this.#aria = null;
+    });
+    // SPEC-035 §4.11: the hum runs until the scene does not.
+    this.disposer.add(() => this.#stopEngineHum());
     // SPEC-032 §4.2: the hint shows over the launch shot as over the landing.
     this.#skipHint.classList.remove('is-hidden');
     // SPEC-032 §4.5: the autopilot card, over the fast-forwarded frame.
@@ -563,6 +600,14 @@ export class FlightScene extends UiScene<'flight'> {
         break;
     }
 
+    // SPEC-035 §4.8: the throttle tip, 12 s after the steer tip, same trip.
+    if (this.#throttleTipIn > 0) {
+      this.#throttleTipIn -= dt;
+      if (this.#throttleTipIn <= 0) this.#showTip('flight_throttle');
+    }
+    // SPEC-035 §4.11: the hum rides the throttle.
+    this.#stepEngineHum(dt, flight.ship.throttle);
+
     this.#feedHud(flight);
     this.#view?.update(flight, dt);
   }
@@ -734,6 +779,61 @@ export class FlightScene extends UiScene<'flight'> {
     this.#view?.skipLaunch();
     if (this.#landingT < 0) this.#skipHint?.classList.add('is-hidden');
     this.#playAcceptLines();
+    // SPEC-035 §4.8: the rail explained nothing at all. The steer tip lands the
+    // moment the player has control, the throttle tip 12 s later.
+    this.#showTip('flight_steer');
+    // The throttle tip only ever follows the steer tip: a run with the tip
+    // layer off (a `?perf` pass, guidance turned down) arms no timer at all,
+    // so nothing can surface 12 s later without the steer tip having had its
+    // turn first. A returning player who saw only the steer tip still gets it.
+    if (this.#tipsOn()) this.#throttleTipIn = THROTTLE_TIP_DELAY;
+    // SPEC-035 §4.11: the engine comes up with the cockpit.
+    this.#startEngineHum();
+  }
+
+  /**
+   * SPEC-035 §4.8 — one tip, once per device (`settings.tipsSeen`), never in a
+   * `?perf` run and never when the player turned the guidance layer down. The
+   * wording follows the scheme in use at the moment it shows.
+   */
+  #showTip(id: TipId): void {
+    const aria = this.#aria;
+    if (aria === null || !this.#tipsOn()) return;
+    const settings = this.services.settings;
+    if (settings.get().tipsSeen.includes(id)) return;
+    aria.show(this.services.input.state.scheme === 'touch' ? TIPS[id].touch : TIPS[id].keyboard, TIP_MS);
+    settings.set({ tipsSeen: [...settings.get().tipsSeen, id] });
+  }
+
+  /** Whether this run shows tips at all (§4.8): never under `?perf`, never with guidance turned down. */
+  #tipsOn(): boolean {
+    return this.#aria !== null && this.services.perf !== true && this.services.settings.get().guidance === 'full';
+  }
+
+  /** SPEC-035 §4.11: the looping hum, at priority 0 so nothing else loses a voice. */
+  #startEngineHum(): void {
+    if (this.#engineVoice !== null) return;
+    this.#engineVoice = this.services.audio.play('engine_hum', {
+      loop: true,
+      priority: 0,
+      volume: engineVolume(this.#flight?.ship.throttle ?? 1),
+    });
+    this.#engineVolumeIn = ENGINE_VOLUME_INTERVAL;
+  }
+
+  /** §4.11: re-read the throttle four times a second, not every frame. */
+  #stepEngineHum(dt: number, throttle: number): void {
+    const voice = this.#engineVoice;
+    if (voice === null) return;
+    this.#engineVolumeIn -= dt;
+    if (this.#engineVolumeIn > 0) return;
+    this.#engineVolumeIn = ENGINE_VOLUME_INTERVAL;
+    voice.setVolume(engineVolume(throttle));
+  }
+
+  #stopEngineHum(): void {
+    this.#engineVoice?.stop();
+    this.#engineVoice = null;
   }
 
   /**

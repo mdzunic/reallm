@@ -182,3 +182,45 @@ describe('Weather — avalanche bursts (§4.6)', () => {
     expect(h.weather.dps).toBe(4);
   });
 });
+
+// --------------------------------------------- SPEC-035 §4.7: the first landing
+
+describe('holdCalm (SPEC-035 §4.7)', () => {
+  it('keeps the ambient cycle in calm for as long as it is held', () => {
+    const h = harness('cinder4');
+    h.weather.holdCalm(true);
+    h.run(600);
+    expect(h.weather.phase).toBe('calm');
+    expect(h.weather.current).toBeNull();
+    expect(h.recorded.filter((r) => r.name === 'weather:warning')).toEqual([]);
+    expect(h.recorded.filter((r) => r.name === 'weather:changed')).toEqual([]);
+  });
+
+  it("still runs a mission's forced storm, and holds calm again after it", () => {
+    const h = harness('cinder4');
+    h.weather.holdCalm(true);
+    h.run(120);
+    h.weather.force('sandstorm', 60);
+    expect(h.weather.phase).toBe('active');
+    expect(h.weather.current).toBe('sandstorm');
+    h.run(30);
+    expect(h.weather.current).toBe('sandstorm');
+    h.run(31);
+    expect(h.weather.phase).toBe('calm');
+    expect(h.weather.current).toBeNull();
+    // …and nothing follows it while the hold stands.
+    h.run(600);
+    expect(h.weather.phase).toBe('calm');
+  });
+
+  it('resumes the cycle when the hold is released', () => {
+    const h = harness('cinder4');
+    h.weather.holdCalm(true);
+    h.run(600);
+    expect(h.weather.phase).toBe('calm');
+    h.weather.holdCalm(false);
+    // Cinder-4's calm is 90–150 s, then a 10 s warning.
+    h.run(160 + TUNING.STORM_WARNING_SECONDS);
+    expect(h.recorded.filter((r) => r.name === 'weather:warning').length).toBeGreaterThan(0);
+  });
+});

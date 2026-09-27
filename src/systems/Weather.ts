@@ -57,6 +57,8 @@ export class Weather {
   /** Seconds the current storm has been active, for the burst pattern. */
   #activeFor = 0;
   #suppressed = false;
+  /** SPEC-035 §4.7: the first-landing ramp holds the ambient cycle in calm. */
+  #heldCalm = false;
 
   constructor(planet: PlanetDef, rng: Rng, events: EventBus<GameEvents>) {
     this.#cycle = planet.surface.weather;
@@ -101,6 +103,9 @@ export class Weather {
 
   update(dt: number): void {
     if (this.#suppressed) return; // E15: the cycle is paused, not running down
+    // SPEC-035 §4.7: held calm never leaves calm. A forced storm still runs its
+    // seconds down and still ends, which is what puts the cycle back here.
+    if (this.#heldCalm && this.#phase === 'calm') return;
     if (this.#phase === 'active') this.#activeFor += dt;
     this.#left -= dt;
     if (this.#left > 0) return;
@@ -131,6 +136,15 @@ export class Weather {
   force(weather: WeatherId, seconds: number): void {
     if (this.#suppressed) return; // a boss arena outranks a forced storm (E15)
     this.#begin(weather, seconds);
+  }
+
+  /**
+   * SPEC-035 §4.7 — hold the ambient cycle in calm for the first landing, and
+   * let it go again when the tutorial mission completes. A mission's own
+   * `force()` is unaffected: it starts, it runs, and it ends back into the hold.
+   */
+  holdCalm(on: boolean): void {
+    this.#heldCalm = on;
   }
 
   /** E15: `true` ends the storm now and pauses the cycle; `false` resumes it. */

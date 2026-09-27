@@ -39,6 +39,7 @@ import {
   type ItemId,
   type LootTableId,
   type ResourceId,
+  type WeaponLine,
 } from '@/data/index';
 import type { WeaponAutoSwapMode } from '@/core/Settings';
 import {
@@ -60,6 +61,24 @@ import { updateProjectiles, type ProjectileHooks } from '@/systems/Projectiles';
 export type { DamageSource } from '@/data/index';
 
 export type WeaponDef = Extract<Item, { kind: 'weapon' }>;
+
+/**
+ * SPEC-035 §4.11 — the weapon table's `line` as the audio layer names it. Only
+ * `machine_gun` differs: the sprite is `shot_mg`.
+ */
+const FIRED_LINE: Readonly<Record<WeaponLine, GameEvents['weapon:fired']['line']>> = {
+  handgun: 'handgun',
+  rifle: 'rifle',
+  machine_gun: 'mg',
+  launcher: 'launcher',
+};
+
+/**
+ * SPEC-035 §4.6 — how far back along a projectile's own velocity its origin is
+ * taken to be, so the hit marker points at the shooter rather than at the
+ * bullet: 0.1 s of flight.
+ */
+const SHOT_ORIGIN_SECONDS = 0.1;
 
 // ----------------------------------------------------------------- constants
 
@@ -419,7 +438,7 @@ export class Combat {
    * float and land as whole points (AC-67). Weather is skipped entirely under
    * hazard immunity (§4.8).
    */
-  damagePlayer(amount: number, source: DamageSource, ignoreInvuln = false): void {
+  damagePlayer(amount: number, source: DamageSource, ignoreInvuln = false, from?: { x: number; z: number }): void {
     const p = this.#world.player;
     const time = this.#world.time;
     if (!p.alive) return;
@@ -440,7 +459,9 @@ export class Combat {
     }
     p.hp -= applied;
     this.#save.player.hp = Math.max(0, p.hp);
-    this.#events.emit('player:damaged', { amount: applied, source, hp: p.hp });
+    // SPEC-035 §4.6: `from` is what the HUD's edge marker points at. Weather and
+    // falls pass none, so a storm never draws a wedge.
+    this.#events.emit('player:damaged', { amount: applied, source, hp: p.hp, ...(from === undefined ? {} : { from }) });
     if (p.hp <= 0) {
       // §4.2: combat stops processing the player until the scene resets the
       // entity (SPEC-012 §4.8) — there is no respawn method here.
@@ -463,6 +484,9 @@ export class Combat {
     e.hp -= amount;
     e.hitFlash = HIT_FLASH_SECONDS;
     e.lostTrack = 0; // SPEC-030 D-20: damage resets the lose-track clock
+    // SPEC-035 §4.11: every projectile and blast hit on a live enemy thuds. Both
+    // callers of this method are exactly those two paths.
+    this.#events.emit('enemy:hit', { enemyId: e.def.id, x: e.x, z: e.z });
     this.#aggroFromDamage(e);
     if (e.hp <= 0) this.killEnemy(e, cause);
   }
@@ -501,7 +525,10 @@ export class Combat {
     }
     const p = this.#world.player;
     this.#knockbackPlayer(p.x - e.x, p.z - e.z, PLAYER_KNOCKBACK);
-    this.damagePlayer(enemyHitDamage(e, this.#world.stats, this.#difficulty), { kind: 'enemy', enemyId: e.def.id });
+    this.damagePlayer(enemyHitDamage(e, this.#world.stats, this.#difficulty), { kind: 'enemy', enemyId: e.def.id }, false, {
+      x: e.x,
+      z: e.z,
+    });
   }
 
   /** The wurm's resurface hit (§4.5): melee damage to the player within `radius`. */
@@ -512,7 +539,10 @@ export class Combat {
     const dz = p.z - e.z;
     if (dx * dx + dz * dz > radius * radius) return;
     this.#knockbackPlayer(dx, dz, PLAYER_KNOCKBACK);
-    this.damagePlayer(enemyHitDamage(e, this.#world.stats, this.#difficulty), { kind: 'enemy', enemyId: e.def.id });
+    this.damagePlayer(enemyHitDamage(e, this.#world.stats, this.#difficulty), { kind: 'enemy', enemyId: e.def.id }, false, {
+      x: e.x,
+      z: e.z,
+    });
   }
 
   #spawnEnemyProjectile(e: EnemyEntity, dirX: number, dirZ: number, speed: number, radius: number, range: number): void {
@@ -836,7 +866,11 @@ export class Combat {
     const stats = this.#world.stats;
     const amount = hitDamage(p.damage, p.elite, stats, this.#difficulty);
     this.#knockbackPlayer(p.vx, p.vz, PLAYER_KNOCKBACK);
-    this.damagePlayer(amount, { kind: 'projectile', enemyId: p.enemyId });
+    // SPEC-035 §4.6: the shot's origin, not the bullet's current position.
+    this.damagePlayer(amount, { kind: 'projectile', enemyId: p.enemyId }, false, {
+      x: p.x - p.vx * SHOT_ORIGIN_SECONDS,
+      z: p.z - p.vz * SHOT_ORIGIN_SECONDS,
+    });
   }
 
   #projectileHitFollower(p: ProjectileEntity): void {
@@ -949,6 +983,8 @@ export class Combat {
       shot.ttl = shot.flight;
     }
     this.#lastShotAt = this.#world.time;
+    // SPEC-035 §4.11: one event per shot, at the muzzle, with the weapon's line.
+    this.#events.emit('weapon:fired', { line: FIRED_LINE[weapon.line], x: shot.x, z: shot.z });
     this.loadout.fired(slot, this.#world.time);
   }
 

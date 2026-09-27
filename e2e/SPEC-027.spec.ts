@@ -83,8 +83,10 @@ async function acceptFirstMission(page: Page): Promise<void> {
 test('1. the tracker names the tracked mission, its stage and the distance to the target', async ({ page }) => {
   await land(page);
   // Before anything is accepted the panel still says where it stands (AC-23).
+  // SPEC-035 §4.10 replaced the bare "No active mission" with the next mission
+  // and where it is taken, so that is what the head reads on a fresh landing.
   await expect(tracker(page)).toBeVisible();
-  await expect(tracker(page)).toContainText('No active mission');
+  await expect(tracker(page)).toContainText('Next: Dry Land — at the pad terminal');
 
   await acceptFirstMission(page);
   // D-2: the title is in the DOM as the data writes it; CSS does the shouting.

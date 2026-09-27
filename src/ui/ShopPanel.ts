@@ -20,7 +20,14 @@ import {
 } from '@/data/index';
 import type { GearLine, Item, ShipSystemDef } from '@/data/index';
 import type { Economy, Result } from '@/systems/Economy';
-import { balanceAfterText, companionEffectText, failText, priceText, shortfallText } from '@/systems/UiHelpers';
+import {
+  balanceAfterText,
+  companionEffectText,
+  failText,
+  priceText,
+  shortfallText,
+  upgradeDeltaText,
+} from '@/systems/UiHelpers';
 import { confirmSheet } from '@/ui/ConfirmSheet';
 import { el, h, testId, type UiRoot } from '@/ui/dom';
 import { openGearCard } from '@/ui/GearCard';
@@ -146,8 +153,10 @@ export class ShopPanel {
       return row;
     }
     const next = current + 1;
+    // SPEC-035 §4.12: the ship tab printed variable names (`speedMult 1 →
+    // 1.15`). `upgradeDeltaText` says what the tier actually does.
     const deltas = Object.entries(def.metrics)
-      .map(([metric, values]) => `${metric} ${values[current]} → ${values[next]}`)
+      .map(([metric, values]) => upgradeDeltaText(metric, values[current] as number, values[next] as number))
       .join(' · ');
     row.append(h('p', { class: 'shop-deltas' }, `Tier ${current} → ${next}: ${deltas}`));
     const base = def.tiers[current];

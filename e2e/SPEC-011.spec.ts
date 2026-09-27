@@ -73,8 +73,39 @@ async function hunt(page: Page, seconds: number, done: () => Promise<boolean>): 
   }
 }
 
+/**
+ * SPEC-035 §4.7: mark the tutorial mission done and re-enter, so the first-visit
+ * ramp is off. `sceneInfo.ramp` is what proves it.
+ */
+
+/** The pilot `endRamp` binds to a slot; the stats below are the §6 pin's. */
+const RAMP_PILOT = {
+  name: 'Vance',
+  classId: 'marine',
+  appearance: { portrait: 1, primary: '#b7472a', secondary: '#2a3b4c' },
+  attributes: { might: 3, vigor: 8, agility: 1, tech: 1 },
+  difficulty: 'normal',
+} as const;
+
+async function endRamp(page: Page): Promise<void> {
+  // A `?scene=` jump has no bound save (the scene builds a throwaway one), so
+  // the ramp is only reachable through a real slot.
+  await page.evaluate((creation) => void window.__reallm.save().create(0, creation), RAMP_PILOT);
+  await page.evaluate(() => {
+    const save = window.__reallm.save().current;
+    if (save !== null && !save.progress.missionsDone.includes('c1_m1')) save.progress.missionsDone.push('c1_m1');
+  });
+  await page.evaluate(() => window.__reallm.go('surface', { planet: 'cinder4' }, { force: true }));
+  await expect(page.locator('[data-testid="scene-label"]')).toHaveText('surface');
+  await expect
+    .poll(async () => Number((await page.evaluate(() => window.__reallm.stats().sceneInfo ?? {}))['ramp'] ?? 1), { timeout: 15_000 })
+    .toBe(0);
+}
+
 test('enemies spawn and engage on Cinder-4 (AC-36, AC-37, AC-38)', async ({ page }) => {
-  test.setTimeout(150_000);
+  // The extra landing `endRamp` costs is paid for here; the hunt itself is
+  // unchanged.
+  test.setTimeout(210_000);
   await autoFire(page);
   // Named on purpose: how many enemies the director may put on the field is a
   // `QUALITY` row (`maxEnemies`, 12 on `low` and 20 on `medium`), and the
@@ -82,6 +113,12 @@ test('enemies spawn and engage on Cinder-4 (AC-36, AC-37, AC-38)', async ({ page
   // Every other suite takes `e2e/start.ts`'s cheap default; this one cannot.
   await start(page, '/?debug&quality=medium&scene=surface&planet=cinder4');
   await expect(page.locator('[data-testid="scene-label"]')).toHaveText('surface');
+  // SPEC-035 §4.7 halves Cinder-4's ambient population and drops its rushers
+  // until `c1_m1` is done, so the director's real target is only reachable with
+  // the tutorial behind the player. That ramp has its own coverage in
+  // `e2e/SPEC-035.spec.ts` and `tests/systems/spawn.test.ts`; this test is about
+  // the director filling a field on `medium`.
+  await endRamp(page);
 
   // Landing HP: marine stand-in pilot at full (the §6 pin, 184). `hud-hp` is
   // the shared SPEC-014 HUD's ♥ bar, fed the world's live numbers.

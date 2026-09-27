@@ -82,7 +82,13 @@ describe('swarm archetype (dust_skitter)', () => {
     expect(windup).toBeGreaterThanOrEqual(WINDUP_SECONDS.swarm - 1e-6);
     expect(windup).toBeLessThan(WINDUP_SECONDS.swarm + 0.1);
     const hit = h.of('player:damaged')[0];
-    expect(hit).toEqual({ amount: 4, source: { kind: 'enemy', enemyId: 'dust_skitter' }, hp: 180 });
+    // SPEC-035 §4.6: a melee blow now carries the attacker's position as `from`.
+    expect(hit).toEqual({
+      amount: 4,
+      source: { kind: 'enemy', enemyId: 'dust_skitter' },
+      hp: 180,
+      from: { x: e.x, z: e.z },
+    });
     expect(h.world.player.invulnUntil).toBeCloseTo(h.world.time + 0.3 - STEP, 1);
     expect(h.world.player.x).toBeLessThan(-0.2); // knocked away from the attacker
     expect(e.state).toBe('attack');

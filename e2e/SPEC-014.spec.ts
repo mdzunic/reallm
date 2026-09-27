@@ -256,8 +256,10 @@ test.describe('the batched HUD', () => {
     await expect(page.locator('.hud-tl')).toBeVisible();
 
     // Bars are scaled, never re-laid-out: a width write would show up here as a
-    // changing computed width instead of a changing matrix (AC-61).
-    const bar = page.locator('.hud-tl .bar-hp');
+    // changing computed width instead of a changing matrix (AC-61). The hull bar
+    // is the one read here because SPEC-035 §4.9 hides the salvager's HP bar in
+    // flight — two identical hearts was the thing that fixed.
+    const bar = page.locator('.hud-tl .bar-hull');
     await expect(bar).toHaveCSS('transform', /^matrix\(/);
 
     const mutations = await page.evaluate(async () => {

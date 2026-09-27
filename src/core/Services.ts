@@ -62,6 +62,13 @@ export interface GameServices {
   readonly rng: RngRoot;
   /** SPEC-003's transition overlays — unchanged (SPEC-002 D-E). */
   readonly ui: TransitionUi;
+  /**
+   * SPEC-035 §4.8: true under `?perf` — the scripted stress run of SPEC-001 §9.
+   * The tip layer stays silent there, so a measured frame is never a frame with
+   * a teaching line fading over it. Optional so the object literals that stand
+   * in for the bag in unit tests stay valid.
+   */
+  readonly perf?: boolean;
   /** The DOM layer scenes mount into (`#ui`). */
   readonly uiRoot: HTMLElement;
   readonly scenes: SceneManager;

@@ -65,6 +65,31 @@ const SPRITE_KEYS: ReadonlySet<string> = new Set(
   Object.values(ASSETS.audio).flatMap((entry) => Object.keys((entry as { sprite?: object }).sprite ?? {})),
 );
 
+/**
+ * SPEC-035 §4.11 — the sprite per weapon line. `ship` is the flight bank's
+ * `ship_laser`; the four ground lines are surface sprites, so they position.
+ */
+export const SHOT_SOUNDS: Readonly<Record<GameEvents['weapon:fired']['line'], SoundId>> = {
+  handgun: 'shot_handgun',
+  rifle: 'shot_rifle',
+  mg: 'shot_mg',
+  launcher: 'shot_launcher',
+  ship: 'ship_laser',
+};
+
+/**
+ * SPEC-035 §4.11 — how close together two shots of one line may sound. A
+ * launcher fires slowly enough to need no floor at all; the machine gun needs
+ * the widest (35-g).
+ */
+export const SHOT_INTERVAL_MS: Readonly<Record<GameEvents['weapon:fired']['line'], number>> = {
+  handgun: 60,
+  rifle: 70,
+  mg: 90,
+  launcher: 0,
+  ship: 90,
+};
+
 /** `elite` wins over the archetype, whatever the id (§5.3, AC-41). */
 export function enemyDeathSound(enemyId: EnemyId, elite: boolean): SoundId {
   if (elite) return 'elite_death';
@@ -83,9 +108,12 @@ export function pickupSound(resource: ResourceId): SoundId {
 
 // ------------------------------------------------------------- the two halves
 
-/** The 19 events of §5.2 (SPEC-029 §4.12 adds four) that make a sound. */
+/** The 19 events of §5.2 (SPEC-029 §4.12 adds four, SPEC-035 §4.11 two more) that make a sound. */
 export type ReactedEvent =
   | 'combat:blast'
+  // SPEC-035 §4.11 adds the two that make the guns audible at all.
+  | 'weapon:fired'
+  | 'enemy:hit'
   | 'weapon:locked'
   | 'weapon:switched'
   | 'mine:armed'
@@ -183,9 +211,24 @@ export type NoDoubleCoveredEvent = AssertNever<Extract<ReactedEvent, SilentEvent
  * `dispose()` (§3, AC-59).
  */
 export const AUDIO_REACTIONS: { [K in ReactedEvent]: Reaction<K> } = {
-  // SPEC-029 §4.12: the arsenal reuses existing sprites — no new audio file.
-  /** Positioned like a death; the elite sting is the biggest bang in the bank. */
-  'combat:blast': (p) => ({ id: 'elite_death', opts: { x: p.x, z: p.z, priority: 2 } }),
+  /**
+   * SPEC-035 §4.11: its own boom at last — the elite death sting was standing in
+   * for every rocket and every mine. Positioned, and loud enough to hold a
+   * voice (priority 2).
+   */
+  'combat:blast': (p) => ({ id: 'explosion', opts: { x: p.x, z: p.z, priority: 2 } }),
+  /**
+   * SPEC-035 §4.11: one sound per shot, rate-limited per line, so a machine gun
+   * at 10 shots/s reads as a stream rather than a buzz (35-g). The ship's line
+   * lives in the flight bank; the four ground lines in the surface bank, where
+   * they are positioned.
+   */
+  'weapon:fired': (p) => ({
+    id: SHOT_SOUNDS[p.line],
+    opts: p.line === 'ship' ? { minIntervalMs: SHOT_INTERVAL_MS.ship } : { x: p.x, z: p.z, minIntervalMs: SHOT_INTERVAL_MS[p.line] },
+  }),
+  /** SPEC-035 §4.11: the dull thud that tells the player the shot connected. */
+  'enemy:hit': (p) => ({ id: 'impact', opts: { x: p.x, z: p.z, minIntervalMs: 50, volume: 0.6 } }),
   'weapon:locked': () => ({ id: 'ui_warn' }),
   'weapon:switched': () => ({ id: 'ui_blip' }),
   'mine:armed': (p) => ({ id: 'scan_done', opts: { x: p.x, z: p.z, priority: 0 } }),

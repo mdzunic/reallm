@@ -41,7 +41,8 @@ type Assert<T extends true> = T;
 type Equal<A, B> = (<T>() => T extends A ? 1 : 2) extends <T>() => T extends B ? 1 : 2 ? true : false;
 
 /**
- * The 44 sound ids — the 29 of §2.2 and the story films' 15 (SPEC-021 §6.3) —
+ * The 51 sound ids — the 29 of §2.2, the story films' 15 (SPEC-021 §6.3) and the
+ * seven weapon, impact and blast sprites of SPEC-035 §4.11 —
  * pinned as an explicit literal (SPEC-001: pinned constants in tests are
  * literals). `SoundId` is derived from the sprite keys, so this is what makes
  * AC-5 a compile error rather than a surprise: recutting a bank without
@@ -72,11 +73,20 @@ const SOUND_IDS = [
   'scan_done',
   'alarm_weather',
   'storm_loop',
+  // SPEC-035 §4.11: one crack per weapon line, the hit and the blast.
+  'shot_handgun',
+  'shot_rifle',
+  'shot_mg',
+  'shot_launcher',
+  'impact',
+  'explosion',
   'ship_hit_shield',
   'ship_hit_hull',
   'landing_thrusters',
   'engine_hum',
   'laser_charge',
+  /** SPEC-035 §4.11: the ship's nose guns. */
+  'ship_laser',
   'film_hum',
   'film_whoosh',
   'film_flash',
@@ -136,6 +146,10 @@ const EVENT_KEYS = [
   'weapon:locked',
   'quick:used',
   'combat:blast',
+  // SPEC-035 §4.11: one event per shot and per landed hit — the two that make
+  // the guns audible.
+  'weapon:fired',
+  'enemy:hit',
   'mine:armed',
   'shop:purchased',
   'enemy:spawned',
@@ -218,14 +232,14 @@ describe('the audio manifest (SPEC-006 §2)', () => {
     expect(Object.keys(ASSETS.audio).sort()).toEqual([...SFX_BANKS, ...MUSIC_BANKS].sort());
   });
 
-  it('the sprite keys across the banks are the 44 sound ids (AC-5)', () => {
+  it('the sprite keys across the banks are the 51 sound ids (AC-5; SPEC-035 §4.11 adds seven)', () => {
     const sprites = Object.values(ASSETS.audio).flatMap((entry) =>
       Object.keys((entry as { sprite?: object }).sprite ?? {}),
     );
     expect(sprites.slice().sort()).toEqual([...SOUND_IDS].sort());
-    expect(sprites).toHaveLength(44);
+    expect(sprites).toHaveLength(51);
     // No id appears in two banks: `SoundId` → bank has to be a function.
-    expect(new Set(sprites).size).toBe(44);
+    expect(new Set(sprites).size).toBe(51);
   });
 
   it('every sprite is a forward [offset, duration] span that does not overlap its neighbour', () => {
@@ -435,11 +449,13 @@ describe('the ramp curve (SPEC-006 §4.3, §4.5)', () => {
 // ------------------------------------------------------------ reactions table
 
 describe('the reactions table is exhaustive over GameEvents (SPEC-006 §5)', () => {
-  it('covers the 19 reacted events of §5.2 (AC-38; SPEC-029 §4.12 adds four)', () => {
-    expect(REACTED_EVENTS).toHaveLength(19);
+  it('covers the 21 reacted events of §5.2 (AC-38; SPEC-029 §4.12 adds four, SPEC-035 §4.11 two)', () => {
+    expect(REACTED_EVENTS).toHaveLength(21);
     expect(REACTED_EVENTS.slice().sort()).toEqual(
       [
         'combat:blast',
+        'weapon:fired',
+        'enemy:hit',
         'weapon:locked',
         'weapon:switched',
         'mine:armed',
@@ -467,8 +483,8 @@ describe('the reactions table is exhaustive over GameEvents (SPEC-006 §5)', () 
     expect(AUDIO_SILENT.size).toBe(43);
   });
 
-  it('gives every one of the 62 event keys exactly one home (AC-40)', () => {
-    expect(EVENT_KEYS).toHaveLength(62);
+  it('gives every one of the 64 event keys exactly one home (AC-40)', () => {
+    expect(EVENT_KEYS).toHaveLength(64);
     const reacted = new Set<string>(REACTED_EVENTS);
     for (const key of EVENT_KEYS) {
       const hasSound = reacted.has(key);
@@ -529,6 +545,37 @@ describe('reaction outcomes (SPEC-006 §5.2)', () => {
     expect(AUDIO_REACTIONS['boss:defeated']({ boss: 'hive_queen' })).toEqual({
       id: 'boss_death',
       opts: { priority: 2 },
+    });
+  });
+
+  it('weapon:fired names one sprite per line with its own floor (SPEC-035 §4.11)', () => {
+    const react = AUDIO_REACTIONS['weapon:fired'];
+    expect(react({ line: 'handgun', x: 1, z: 2 })).toEqual({
+      id: 'shot_handgun',
+      opts: { x: 1, z: 2, minIntervalMs: 60 },
+    });
+    expect(react({ line: 'rifle', x: 0, z: 0 })).toEqual({ id: 'shot_rifle', opts: { x: 0, z: 0, minIntervalMs: 70 } });
+    expect(react({ line: 'mg', x: 0, z: 0 })).toEqual({ id: 'shot_mg', opts: { x: 0, z: 0, minIntervalMs: 90 } });
+    // A launcher fires slowly enough to need no floor at all.
+    expect(react({ line: 'launcher', x: 0, z: 0 })).toEqual({
+      id: 'shot_launcher',
+      opts: { x: 0, z: 0, minIntervalMs: 0 },
+    });
+    // The rail has no XZ plane, so the ship's laser is not positioned.
+    expect(react({ line: 'ship', x: 4, z: 5 })).toEqual({ id: 'ship_laser', opts: { minIntervalMs: 90 } });
+  });
+
+  it('enemy:hit thuds at 50 ms, positioned and under the guns (SPEC-035 §4.11)', () => {
+    expect(AUDIO_REACTIONS['enemy:hit']({ enemyId: 'dust_skitter', x: -2, z: 7 })).toEqual({
+      id: 'impact',
+      opts: { x: -2, z: 7, minIntervalMs: 50, volume: 0.6 },
+    });
+  });
+
+  it('combat:blast has its own boom instead of the elite sting (SPEC-035 §4.11)', () => {
+    expect(AUDIO_REACTIONS['combat:blast']({ x: 8, z: -3, radius: 4 })).toEqual({
+      id: 'explosion',
+      opts: { x: 8, z: -3, priority: 2 },
     });
   });
 

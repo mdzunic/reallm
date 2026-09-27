@@ -994,8 +994,11 @@ html.reduce-motion .sheet {
   align-items: center;
   justify-content: center;
   gap: 1px;
+  /* SPEC-035 §4.13: 48 px square could not hold the icon box *and* a name, so
+     the name rendered at zero height. The slot is taller now; the width is the
+     one SPEC-028 set. */
   width: 48px;
-  height: 48px;
+  height: 64px;
   padding: 2px;
   border: 1px solid var(--panel-edge);
   border-radius: 8px;
@@ -1015,10 +1018,11 @@ html.reduce-motion .sheet {
   -webkit-touch-callout: none;
 }
 
-/* 56 px when the HUD root carries the touch scheme (§4.5). */
+/* 56 px wide when the HUD root carries the touch scheme (§4.5); SPEC-035 §4.13
+   gives it the same extra height as the desktop slot. */
 .hud.is-touch .qb-slot {
   width: 56px;
-  height: 56px;
+  height: 72px;
   font-size: 11px;
 }
 
@@ -1043,10 +1047,15 @@ html.reduce-motion .sheet {
   opacity: 0.45;
 }
 
+/* SPEC-035 §4.13: one line, ellipsised, and `flex: none` so the column cannot
+   shrink it away — that is what made it zero-height inside the old 48 px box. */
 .qb-name {
+  flex: none;
   max-width: 100%;
   overflow: hidden;
   white-space: nowrap;
+  text-overflow: ellipsis;
+  line-height: 1.2;
 }
 
 .qb-count,
@@ -1165,6 +1174,47 @@ html.reduce-motion .qb-slot.is-locked {
 
 .hud-vignette.is-flashing {
   opacity: 0.8;
+}
+
+/* SPEC-035 §4.6: the hit-direction wedges. Each marker is a full-bleed box
+   rotated by the hit's bearing clockwise from screen-up, with the wedge itself
+   pinned to the top edge — so one rotation puts it anywhere round the frame. */
+.hud-hit-dirs {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  overflow: hidden;
+}
+
+.hud-hit-dir {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  animation: hud-hit-dir 1s linear forwards;
+}
+
+.hud-hit-dir::before {
+  content: '';
+  position: absolute;
+  left: 50%;
+  top: 0;
+  width: 84px;
+  height: 26px;
+  transform: translateX(-50%);
+  background: linear-gradient(to bottom, var(--hp), transparent);
+  clip-path: polygon(50% 100%, 0 0, 100% 0);
+}
+
+@keyframes hud-hit-dir {
+  0% { opacity: 0.95; }
+  100% { opacity: 0; }
+}
+
+/* 35-j: reduce motion keeps the marker, and holds it still. */
+html.reduce-motion .hud-hit-dir,
+.hud-hit-dir.is-static {
+  animation: none;
+  opacity: 0.9;
 }
 
 /* AC-64 / AC-65: the two pulses ride the same keyframes. */
@@ -1889,6 +1939,7 @@ html.debug .scene-tag {
 /* ------------------------------------------------------------------- menu */
 /* SPEC-031: the menu is frame body content now; the frame owns the viewport. */
 .menu-root {
+  position: relative;
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -1923,6 +1974,25 @@ html.debug .scene-tag {
 
 .menu-sub {
   width: min(560px, 100vw - 20px);
+}
+
+/* SPEC-035 §4.13: the New Game slot picker is a sheet over the menu body, in
+   the confirm-sheet style — the button column keeps its place, and the storage
+   block keeps its space while going invisible. */
+/* The `.menu-sub` slot itself stays in flow at zero height — taking it out
+   would drop one 18 px column gap and shift every button by 9 px, which is the
+   very thing this is fixing. Its content is what floats. */
+.menu-sub.is-sheet > * {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: min(560px, 100vw - 20px);
+  transform: translate(-50%, -50%);
+  z-index: 3;
+}
+
+.menu-root.is-sheet-open .menu-storage {
+  visibility: hidden;
 }
 
 .menu-list {
@@ -2146,6 +2216,19 @@ html.debug .scene-tag {
   height: 100%;
   border-radius: 7px;
   object-fit: cover;
+}
+
+/* SPEC-035 §4.13: 44 px was a thumbnail, not a choice — a face at that size
+   reads as nothing on a monitor and is under the touch target on a phone. The
+   creation row's buttons only: the character panel's tile is a label. */
+.portrait-row .portrait {
+  min-width: 64px;
+  min-height: 64px;
+}
+
+.screen.is-touch .portrait-row .portrait {
+  min-width: 56px;
+  min-height: 56px;
 }
 
 /* The character panel wears the same tile beside the name line — a label, not
@@ -2376,6 +2459,12 @@ html.debug .scene-tag {
   display: flex;
   gap: 8px;
   flex-wrap: wrap;
+}
+
+/* SPEC-035 §4.12: `Abandon` sits at the far end of the action row, away from
+   where `Accept` was on the same row a moment earlier. */
+.board-abandon {
+  margin-left: auto;
 }
 
 /* ------------------------------------------------------------------- shop */
@@ -4133,9 +4222,15 @@ html.reduce-motion .screen-body > * {
 }
 
 .gear-card-sheet {
+  /* SPEC-035 §4.13: the 420 px is the card's rendered width, padding and border
+     included — nothing in this sheet sets `box-sizing` globally. */
+  box-sizing: border-box;
   width: min(420px, calc(100% - 24px));
   max-height: calc(100% - 24px);
   display: flex;
+  /* SPEC-035 §4.13: the sheet is a flex item of the backdrop, which stretched
+     it edge to edge on a desktop. `flex: none` holds it at the 420 px `width`. */
+  flex: none;
   flex-direction: column;
   gap: 8px;
   padding: 16px;

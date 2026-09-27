@@ -21,6 +21,7 @@ import {
   pinnedMission,
   requirementText,
   rewardsText,
+  type MissionStatus,
 } from '@/systems/UiHelpers';
 import { confirmSheet } from '@/ui/ConfirmSheet';
 import { el, h, testId, type UiRoot } from '@/ui/dom';
@@ -37,11 +38,29 @@ export interface BoardDeps {
 
 const MISSION_IDS = Object.keys(MISSIONS) as MissionId[];
 
+/**
+ * SPEC-035 §4.12 — the row order inside a planet. A replay sorting above new
+ * work was the review's complaint; `done` rides with `replayable` because the
+ * station is the only place a finished mission reads as either.
+ */
+const STATUS_ORDER: Readonly<Record<MissionStatus, number>> = {
+  active: 0,
+  available: 1,
+  locked: 2,
+  replayable: 3,
+  done: 3,
+};
+
 export class MissionBoard {
   readonly #container: HTMLElement;
   readonly #deps: BoardDeps;
-  /** Briefs the player has expanded; survives refreshes, not scenes (AC-31). */
-  readonly #openBriefs = new Set<MissionId>();
+  /**
+   * Rows whose fold state the player has flipped away from its default
+   * (AC-31); survives refreshes, not scenes. SPEC-035 §4.12 opens `available`
+   * and `active` briefs by default, so this is the *override* set rather than
+   * the open set — a tap still folds an open row and unfolds a closed one.
+   */
+  readonly #toggled = new Set<MissionId>();
 
   constructor(container: HTMLElement, deps: BoardDeps) {
     this.#container = container;
@@ -56,7 +75,12 @@ export class MissionBoard {
       if (!this.#deps.economy.isUnlocked(planet)) continue;
       const missions = MISSION_IDS.filter((id) => MISSIONS[id].planet === planet);
       if (missions.length === 0) continue;
-      const rows = missions.map((id) => this.#row(MISSIONS[id]));
+      // SPEC-035 §4.12: what there is to do first, what there is to do next,
+      // what is not open yet, and only then what has already been done.
+      const ordered = missions
+        .map((id, index) => ({ id, index, status: missionStatus(this.#deps.data, MISSIONS[id], 'station') }))
+        .sort((a, b) => STATUS_ORDER[a.status] - STATUS_ORDER[b.status] || a.index - b.index);
+      const rows = ordered.map((entry) => this.#row(MISSIONS[entry.id]));
       groups.push(h('section', { class: 'board-group' }, h('p', { class: 'board-planet' }, PLANETS[planet].name), ...rows));
     }
     const board = testId(el('div', 'board'), 'mission-board');
@@ -74,10 +98,11 @@ export class MissionBoard {
       {
         class: 'board-head',
         type: 'button',
-        'aria-expanded': String(this.#openBriefs.has(def.id as MissionId)),
-        // AC-31: the brief expands on tap.
+        'aria-expanded': String(this.#briefOpen(def, status)),
+        // AC-31: the brief folds on tap — SPEC-035 §4.12 only changed which way
+        // it starts.
         click: () => {
-          if (!this.#openBriefs.delete(def.id as MissionId)) this.#openBriefs.add(def.id as MissionId);
+          if (!this.#toggled.delete(def.id as MissionId)) this.#toggled.add(def.id as MissionId);
           this.refresh();
         },
       },
@@ -94,7 +119,7 @@ export class MissionBoard {
     const rewards = rewardsText(def.rewards, status === 'replayable');
     row.append(h('p', { class: 'board-rewards' }, rewards === '' ? '—' : rewards));
 
-    if (this.#openBriefs.has(def.id as MissionId)) {
+    if (this.#briefOpen(def, status)) {
       row.append(h('p', { class: 'board-brief' }, def.brief));
     }
 
@@ -111,9 +136,14 @@ export class MissionBoard {
         testId(h('button', { class: 'ui-btn is-primary', type: 'button', click: () => this.#accept(def, false) }, 'Accept'), `mission-${def.id}-accept`),
       );
     } else if (status === 'active') {
+      // SPEC-035 §4.12: `Abandon` sits at the far end of the row, away from
+      // where `Accept` was, so the two are never the same tap target.
       actions.append(
-        testId(h('button', { class: 'ui-btn', type: 'button', click: () => this.#abandon(def) }, 'Abandon'), `mission-${def.id}-abandon`),
         this.#pinButton(def),
+        testId(
+          h('button', { class: 'ui-btn board-abandon', type: 'button', click: () => this.#abandon(def) }, 'Abandon'),
+          `mission-${def.id}-abandon`,
+        ),
       );
     } else if (status === 'replayable') {
       // AC-34: the replay pays half, and says so on the button.
@@ -131,6 +161,16 @@ export class MissionBoard {
     }
     if (actions.childElementCount > 0) row.append(actions);
     return row;
+  }
+
+  /**
+   * SPEC-035 §4.12: an `available` or `active` row shows its brief without a
+   * tap — the board knew what the mission was and folded it shut. Any row the
+   * player has tapped keeps the opposite of its default.
+   */
+  #briefOpen(def: MissionDef, status: MissionStatus): boolean {
+    const open = status === 'available' || status === 'active';
+    return this.#toggled.has(def.id as MissionId) ? !open : open;
   }
 
   /**

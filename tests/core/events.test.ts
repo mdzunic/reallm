@@ -561,6 +561,9 @@ const NAMES: Record<keyof GameEvents, true> = {
   'quick:used': true,
   // SPEC-029 §3: blasts, heat locks and armed mines.
   'combat:blast': true,
+  // SPEC-035 §4.11: one event per shot and per landed hit.
+  'weapon:fired': true,
+  'enemy:hit': true,
   'weapon:locked': true,
   'mine:armed': true,
   'shop:purchased': true,
@@ -604,8 +607,9 @@ const port: ServicesEventBus = new EventBus<GameEvents>();
 describe('GameEvents (§3.2)', () => {
   it('is exactly the canonical table', () => {
     // 57 before SPEC-015, plus `app:update-ready` and `app:install-hint`.
-    // SPEC-034 added `player:recalled`, `enemy:dismissed` and `item:noRoom`.
-    expect(Object.keys(NAMES)).toHaveLength(62);
+    // SPEC-034 added `player:recalled`, `enemy:dismissed` and `item:noRoom`;
+    // SPEC-035 §4.11 added `weapon:fired` and `enemy:hit`.
+    expect(Object.keys(NAMES)).toHaveLength(64);
   });
 
   it('still carries the nine names SPEC-002 and SPEC-003 already emit', () => {

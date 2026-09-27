@@ -80,6 +80,15 @@ export const ASSETS = {
         alarm_weather: [11800, 1500],
         /** Started by the surface scene with `loop: true`, `priority: 0` (§4.2). */
         storm_loop: [13400, 4000],
+        // SPEC-035 §4.11: the guns, the hit and the blast. Every player weapon
+        // line has its own crack so a machine gun does not sound like a rifle,
+        // and the blast finally stops borrowing the elite death sting.
+        shot_handgun: [17600, 180],
+        shot_rifle: [17880, 200],
+        shot_mg: [18180, 120],
+        shot_launcher: [18400, 350],
+        impact: [18850, 120],
+        explosion: [19070, 1200],
       },
     },
     /** The rail scene: hits on the ship, and the two continuous channels. */
@@ -92,6 +101,8 @@ export const ASSETS = {
         landing_thrusters: [1050, 1600],
         engine_hum: [2750, 4000],
         laser_charge: [6850, 700],
+        /** SPEC-035 §4.11: the ship's nose guns, fired on the rail. */
+        ship_laser: [7650, 200],
       },
     },
     /** The story films' cues (PLAN R9, SPEC-021 §6.2), played on the film clock. */

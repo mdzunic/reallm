@@ -315,11 +315,13 @@ export class StationScene extends UiScene<'station'> {
     }
     // SPEC-031 §4.4: the station's header, rail and panel are the frame's
     // head, rail and body.
-    const screen = createScreen({ id: 'station', channel: channelText('station', { containment }) });
+    const screen = createScreen({ id: 'station', channel: channelText('station') });
     this.#screen = screen;
     bindTouchScheme(screen.root, this.services, this.disposer, this);
     const headText = screen.root.querySelector('.screen-head-text');
-    headText?.append(testId(h('p', { class: 'station-containment' }, `Containment level ${containment}`), 'containment-level'));
+    // §4.12: one containment line in the header, carrying the `containment-level`
+    // name as both a class and a test id (AC-37) — `station-containment` styles it.
+    headText?.append(testId(h('p', { class: 'station-containment containment-level' }, `Containment level ${containment}`), 'containment-level'));
     // AC-25 / SPEC-031 §4.5: a recall is named under the channel line.
     if (params.recalled === true) {
       headText?.append(testId(el('p', 'station-recall', 'Emergency recall'), 'recall-banner'));

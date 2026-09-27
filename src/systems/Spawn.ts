@@ -11,7 +11,7 @@ import type { EventBus, GameEvents } from '@/core/Events';
 import type { Pool } from '@/core/Pool';
 import type { QualitySettings } from '@/core/Renderer';
 import type { Rng, WeightedEntry } from '@/core/Rng';
-import { ENEMIES, WAVES, type EnemyId, type PlanetDef, type Wave, type WaveId } from '@/data/index';
+import { ENEMIES, WAVES, type Archetype, type EnemyId, type PlanetDef, type Wave, type WaveId } from '@/data/index';
 import type { EnemyEntity } from '@/entities/Enemy';
 import type { Layout } from '@/systems/Layout';
 import { rollElite } from '@/systems/Combat';
@@ -61,8 +61,19 @@ export function populationTarget(planet: PlanetDef, quality: QualitySettings): n
 }
 
 /**
+ * SPEC-035 §4.7 — the first-visit ramp. While one is set, the director keeps a
+ * fraction of the planet's population and never draws an excluded archetype
+ * ambiently; objective spawns (E14) and waves ignore it entirely.
+ */
+export interface SpawnRamp {
+  readonly populationScale: number;
+  readonly excludeArchetypes: readonly Archetype[];
+}
+
+/**
  * The weighted pick, pure so the ×3 objective weighting is testable on its own
- * (§6). Rows at their `maxAlive` drop out; `null` when nothing can spawn.
+ * (§6). Rows at their `maxAlive` drop out, as do the archetypes a SPEC-035 ramp
+ * excludes; `null` when nothing can spawn.
  */
 export function pickSpawn(
   table: PlanetDef['surface']['spawn'],
@@ -70,10 +81,12 @@ export function pickSpawn(
   objectiveIds: readonly EnemyId[],
   rng: Rng,
   scratch: WeightedEntry<EnemyId>[] = [],
+  excludeArchetypes: readonly Archetype[] = [],
 ): EnemyId | null {
   scratch.length = 0;
   for (const row of table) {
     if ((aliveById.get(row.enemy) ?? 0) >= row.maxAlive) continue;
+    if (excludeArchetypes.includes(ENEMIES[row.enemy].archetype)) continue;
     const weight = objectiveIds.includes(row.enemy) ? row.weight * 3 : row.weight;
     scratch.push({ item: row.enemy, weight });
   }
@@ -107,7 +120,10 @@ export class SpawnDirector {
   readonly #events: EventBus<GameEvents>;
   readonly #spawner: Spawner;
 
-  readonly #target: number;
+  /** The planet's own target, before any SPEC-035 ramp scales it. */
+  readonly #baseTarget: number;
+  /** SPEC-035 §4.7: the first-visit ramp, or `null` off. */
+  #ramp: SpawnRamp | null = null;
   #objectiveIds: readonly EnemyId[] = [];
   #time = 0;
   #spawnTimer = 0;
@@ -142,7 +158,7 @@ export class SpawnDirector {
     this.#rng = rng;
     this.#events = events;
     this.#spawner = spawner;
-    this.#target = populationTarget(planet, quality);
+    this.#baseTarget = populationTarget(planet, quality);
   }
 
   /** Live enemies, dead pool slots excluded. */
@@ -154,8 +170,15 @@ export class SpawnDirector {
     return count;
   }
 
+  /** The ambient target in force — the planet's, scaled by any ramp (SPEC-035 §4.7). */
   get populationTarget(): number {
-    return this.#target;
+    if (this.#ramp === null) return this.#baseTarget;
+    return Math.max(1, Math.round(this.#baseTarget * this.#ramp.populationScale));
+  }
+
+  /** SPEC-035 §4.7: hold the ambient field down, or (`null`) let it back up. */
+  setRamp(ramp: SpawnRamp | null): void {
+    this.#ramp = ramp;
   }
 
   /** E14: these ids spawn at ×3 weight and are force-spawned when starved. */
@@ -192,8 +215,15 @@ export class SpawnDirector {
       return;
     }
 
-    if (this.#ambientAlive >= this.#target) return;
-    const id = pickSpawn(this.#planet.surface.spawn, this.#aliveById, this.#objectiveIds, this.#rng, this.#weightScratch);
+    if (this.#ambientAlive >= this.populationTarget) return;
+    const id = pickSpawn(
+      this.#planet.surface.spawn,
+      this.#aliveById,
+      this.#objectiveIds,
+      this.#rng,
+      this.#weightScratch,
+      this.#ramp?.excludeArchetypes ?? [],
+    );
     if (id === null) return;
     const at = this.#place(player, ENEMIES[id].radius, cameraFrustum);
     this.#spawn(id, at.x, at.z, this.#rollEliteFor(id));

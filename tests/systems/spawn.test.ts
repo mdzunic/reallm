@@ -469,3 +469,55 @@ describe('waves attack (SPEC-034 §4.8)', () => {
     expect(h.living().some((e) => e.summonedBy === 99)).toBe(true);
   });
 });
+
+// --------------------------------------------- SPEC-035 §4.7: the first landing
+
+describe('SpawnDirector — the first-visit ramp (SPEC-035 §4.7)', () => {
+  it('halves the ambient target and lets it back up when the ramp clears', () => {
+    const h = harness('cinder4', 'high'); // P = 14
+    expect(h.director.populationTarget).toBe(14);
+    h.director.setRamp({ populationScale: 0.5, excludeArchetypes: ['rusher'] });
+    expect(h.director.populationTarget).toBe(7);
+    h.run(60);
+    expect(h.director.alive).toBe(7);
+    h.director.setRamp(null);
+    expect(h.director.populationTarget).toBe(14);
+    h.run(30);
+    expect(h.director.alive).toBe(14);
+  });
+
+  it('never rounds the target below one', () => {
+    const h = harness('cinder4', 'low');
+    h.director.setRamp({ populationScale: 0.01, excludeArchetypes: [] });
+    expect(h.director.populationTarget).toBe(1);
+  });
+
+  it('never draws an excluded archetype ambiently over 10 000 picks', () => {
+    const rng = new Rng(9);
+    const alive = new Map<EnemyId, number>();
+    const drawn = new Set<EnemyId | null>();
+    for (let i = 0; i < 10_000; i++) {
+      drawn.add(pickSpawn(PLANETS.cinder4.surface.spawn, alive, [], rng, [], ['rusher']));
+    }
+    // `wurmling` is Cinder-4's rusher; the other two rows still come up.
+    expect(drawn.has('wurmling')).toBe(false);
+    expect(drawn.has('dust_skitter')).toBe(true);
+    expect(drawn.has('scav_raider')).toBe(true);
+  });
+
+  it('spawns no excluded archetype through a whole ramped run', () => {
+    const h = harness('cinder4', 'high');
+    h.director.setRamp({ populationScale: 0.5, excludeArchetypes: ['rusher'] });
+    h.run(120);
+    expect(h.spawned.some((s) => s.id === 'wurmling')).toBe(false);
+    expect(h.spawned.length).toBeGreaterThan(0);
+  });
+
+  it('still force-spawns an excluded archetype the mission asked for (E14)', () => {
+    const h = harness('cinder4', 'high');
+    h.director.setRamp({ populationScale: 0.5, excludeArchetypes: ['rusher'] });
+    h.director.setObjectiveEnemies(['wurmling']);
+    h.run(FORCED_SPAWN_SECONDS + 1);
+    expect(h.spawned.some((s) => s.id === 'wurmling')).toBe(true);
+  });
+});

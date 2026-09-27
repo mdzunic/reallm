@@ -107,7 +107,7 @@ export interface DevFlags {
   /** `?seed=`: the RNG root before a save is loaded (SPEC-008 §3). */
   readonly seed: number | null;
   readonly quality: QualityPreset | null;
-  /** Parsed, unused here (SPEC-015). */
+  /** SPEC-015's scripted stress run; SPEC-035 §4.8 keeps the tips out of it. */
   readonly perf: boolean;
 }
 
@@ -327,6 +327,10 @@ export class Game implements GameServices {
   }
   get loop(): Loop {
     return this.#loop;
+  }
+  /** SPEC-035 §4.8: `?perf` — the scripted stress run keeps the tips out. */
+  get perf(): boolean {
+    return this.#flags.perf;
   }
   /**
    * SPEC-008 §3. The root follows the active save: a slot loaded after boot

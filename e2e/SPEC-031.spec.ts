@@ -132,8 +132,11 @@ async function walkFrames(page: Page, width: number, height: number, touch = fal
   await withSave(page);
   expect(await go(page, 'station', {})).toBe(true);
   await checkFrame(page, width, height, touch);
-  // The station header keeps its channel and containment line (AC-14).
-  await expect(page.locator('.screen-channel')).toContainText('COMMAND RELAY · CONTAINMENT LEVEL 1');
+  // The station header keeps its channel and containment line (AC-14). SPEC-035
+  // §4.12 rewrote the channel: the frame's own title already reads `Command
+  // Relay` and the line below it carries the one `Containment level`, so the
+  // channel said both of them twice. It names what the station is for instead.
+  await expect(page.locator('.screen-channel')).toContainText('SUPPLY · REFIT · DISPATCH');
   await expect(page.locator('[data-testid="containment-level"]')).toHaveText('Containment level 1');
   for (const tab of ['shop', 'character', 'missions']) {
     await press(page.locator(`[data-testid="station-tab-${tab}"]`));
@@ -346,9 +349,15 @@ test('pictures: the quick bar, shop rows and gear card carry the icon (AC-38, AC
   expect(await go(page, 'surface', { planet: 'cinder4' })).toBe(true);
 
   // The primary slot shows the icon box with the short name still under it.
+  // SPEC-035 §4.13: the name was in the DOM at zero height, so presence proved
+  // nothing — the slot is 48 × 64 now and the check is visibility plus a box.
   const primary = page.locator('[data-testid="qb-primary"]');
   await expect(primary.locator('[data-testid="icon-weapon_kinetic"]')).toBeVisible();
-  await expect(primary).toContainText('Repeater');
+  const primaryName = primary.locator('.qb-name');
+  await expect(primaryName).toBeVisible();
+  await expect(primaryName).toHaveText('Repeater');
+  const nameBox = await primaryName.boundingBox();
+  expect(nameBox?.height ?? 0).toBeGreaterThan(0);
 
   expect(await go(page, 'station', { arrivedFrom: 'cinder4' }, )).toBe(true);
   await page.locator('[data-testid="station-tab-shop"]').click();

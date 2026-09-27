@@ -72,7 +72,12 @@ export type GameEvents = {
   'save:written': { slot: number; reason: SaveReason };
   'save:failed': { slot: number; error: 'quota' | 'unavailable' | 'unknown' };
   'settings:changed': { patch: Partial<Settings> };
-  'player:damaged': { amount: number; source: DamageSource; hp: number };
+  /**
+   * SPEC-035 §4.6: `from` is where the hit came from — the enemy for a melee
+   * blow, the projectile's origin for a shot — so the HUD can point at it.
+   * Weather and falls carry none.
+   */
+  'player:damaged': { amount: number; source: DamageSource; hp: number; from?: { x: number; z: number } };
   'player:healed': { amount: number; hp: number };
   'player:died': { cause: DamageSource; scene: 'surface' | 'flight' };
   'player:respawned': void;
@@ -104,6 +109,10 @@ export type GameEvents = {
   // SPEC-029 §3: a blast landed, a heat weapon locked, a mine armed — for the
   // VFX layer, the audio table and the quick-bar states.
   'combat:blast': { x: number; z: number; radius: number };
+  // SPEC-035 §4.11: one event per shot and per landed hit, so the audio layer
+  // has something to play. `line` is the weapon family, not the item.
+  'weapon:fired': { line: 'handgun' | 'rifle' | 'mg' | 'launcher' | 'ship'; x: number; z: number };
+  'enemy:hit': { enemyId: EnemyId; x: number; z: number };
   'weapon:locked': { slot: WeaponSlot; itemId: ItemId };
   'mine:armed': { x: number; z: number };
   'shop:purchased': { kind: 'ship' | 'gear' | 'companion' | 'craft'; id: string; tier?: number };

@@ -202,11 +202,19 @@ test('a full hold bounces the pickup with one throttled CARGO FULL toast (AC-19,
   await land(page, { fresh: true });
 
   // Every resource at its per-resource cap: any resource orb now blocks.
+  // SPEC-035 §4.7 halves Cinder-4's ambient field and drops its rushers until
+  // `c1_m1` is done, which leaves this hunt too little to walk into; the cargo
+  // path is not what the ramp is about, so the tutorial goes behind the player
+  // first. The ramp has its own coverage in `e2e/SPEC-035.spec.ts`.
   await page.evaluate(() => {
     const save = window.__reallm.save().current;
     if (save === null) throw new Error('no save');
     for (const key of Object.keys(save.resources)) save.resources[key] = 9999;
+    if (!save.progress.missionsDone.includes('c1_m1')) save.progress.missionsDone.push('c1_m1');
   });
+  await page.evaluate(() => window.__reallm.go('surface', { planet: 'cinder4' }, { force: true }));
+  await expect(page.locator('[data-testid="scene-label"]')).toHaveText('surface');
+  await expect.poll(async () => Number((await info(page))['ramp'] ?? 1), { timeout: 15_000 }).toBe(0);
 
   // Walk onto a victim and smite it — loot scatters at the feet, magnetizes,
   // and the cap refuses it. The full path: Pickups → ui:toast → the shared rack.
