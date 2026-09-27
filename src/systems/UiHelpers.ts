@@ -8,6 +8,7 @@
 // its inputs except the two mission helpers, which edit the save the way every
 // `systems/` class does (SPEC-010's `Economy` is the model).
 import type { GameEvents } from '@/core/Events';
+import type { Scheme } from '@/core/Input';
 import { maxHp, type Save, type SlotSummary } from '@/core/Save';
 import {
   CLASSES,
@@ -770,4 +771,166 @@ export function hasNodeRadar(save: Save): boolean {
     const effect = COMPANIONS[c.id].levels[c.level - 1] as CompanionEffect;
     return effect.nodeRadar === true;
   });
+}
+
+// ------------------------------------------------- SPEC-035: the readable view
+
+/**
+ * SPEC-035 §4.2 — how far the surface camera sits from the salvager, by input
+ * scheme (*initial tuning*). A phone shows the same field of view in a quarter
+ * of the physical size, so touch comes closer; a gamepad is a desktop screen.
+ */
+export const CAMERA_DISTANCE: Readonly<Record<Scheme, number>> = { keyboard: 22, touch: 17, gamepad: 22 };
+
+/** §4.2: the distance `#placeCamera` eases toward. */
+export function cameraDistance(scheme: Scheme): number {
+  return CAMERA_DISTANCE[scheme];
+}
+
+/**
+ * §4.4: how far the linear fog spans past its near plane, per unit of exp²
+ * density. An exp² density ρ reaches about 99 % opacity at ρ·d ≈ 2.15, so this
+ * keeps each planet's distance mood while the play space stays clear.
+ */
+export const FOG_SPAN_K = 2.2;
+
+/**
+ * §4.4 — the surface's linear fog, from the player out: `near` is the camera's
+ * own distance to its target, so nothing between the camera and the salvager is
+ * ever hazed, and the span shortens as a storm thickens `fogMult`.
+ */
+export function surfaceFogRange(density: number, fogMult: number, camDistance: number): { near: number; far: number } {
+  const near = Math.max(0, camDistance);
+  const thickness = Math.max(1e-4, density * fogMult);
+  return { near, far: near + FOG_SPAN_K / thickness };
+}
+
+/** §4.5: what a prop between the camera and the player fades to. */
+export const OCCLUDER_OPACITY = 0.3;
+
+/**
+ * §4.5 — true when the segment from `camera` to the target's head (y 1.6)
+ * passes inside the prop's cylinder: radius × 0.9 (a rock's silhouette is
+ * narrower than its collision body), from the ground up to `height`.
+ *
+ * Pure, so `tests/ui/helpers.test.ts` can drive it without a scene: the scene
+ * only supplies the camera, the player and each prop's footprint.
+ */
+export function occludes(
+  camera: { x: number; y: number; z: number },
+  target: { x: number; z: number },
+  prop: { x: number; z: number; radius: number; height: number },
+): boolean {
+  const radius = prop.radius * 0.9;
+  if (!(radius > 0) || !(prop.height > 0)) return false;
+  const headY = 1.6;
+  const dx = target.x - camera.x;
+  const dz = target.z - camera.z;
+  const dy = headY - camera.y;
+  // The t-interval where the segment is inside the cylinder's circle.
+  const ox = camera.x - prop.x;
+  const oz = camera.z - prop.z;
+  const a = dx * dx + dz * dz;
+  const b = 2 * (ox * dx + oz * dz);
+  const c = ox * ox + oz * oz - radius * radius;
+  let lo: number;
+  let hi: number;
+  if (a <= 1e-9) {
+    if (c > 0) return false;
+    lo = 0;
+    hi = 1;
+  } else {
+    const disc = b * b - 4 * a * c;
+    if (disc <= 0) return false;
+    const root = Math.sqrt(disc);
+    lo = (-b - root) / (2 * a);
+    hi = (-b + root) / (2 * a);
+  }
+  lo = Math.max(lo, 0);
+  hi = Math.min(hi, 1);
+  if (lo >= hi) return false;
+  // …intersected with the t-interval where it is between the ground and the top.
+  if (Math.abs(dy) <= 1e-9) return camera.y >= 0 && camera.y <= prop.height;
+  const t0 = (0 - camera.y) / dy;
+  const t1 = (prop.height - camera.y) / dy;
+  const yLo = Math.max(lo, Math.min(t0, t1));
+  const yHi = Math.min(hi, Math.max(t0, t1));
+  return yLo < yHi;
+}
+
+// ------------------------------------------------------------ the shop's words
+
+/** `120` / `1.15` / `0.9` — an upgrade metric's own value, without stray zeros. */
+function metricValue(value: number): string {
+  return Number.isInteger(value) ? String(value) : String(Number(value.toFixed(3)));
+}
+
+/** `+15 %` / `−10 %`, relative to `from`, with a real minus sign. */
+function percentDelta(from: number, to: number): string {
+  if (!(from > 0)) return `${metricValue(from)} → ${metricValue(to)}`;
+  const percent = Math.round((to / from - 1) * 100);
+  return `${percent < 0 ? '−' : '+'}${Math.abs(percent)} %`;
+}
+
+/** `heatMax` → `Heat max` — a camelCase key in sentence case (§4.12's fallback). */
+function metricWords(metric: string): string {
+  const words = metric.replace(/([a-z0-9])([A-Z])/g, '$1 $2').toLowerCase();
+  return words.charAt(0).toUpperCase() + words.slice(1);
+}
+
+/**
+ * SPEC-035 §4.12 — an upgrade tier's effect in the player's words, so the shop
+ * never prints a variable name (`speedMult 1 → 1.15`). An unknown metric falls
+ * back to its key split into words, and `tests/ui/helpers.test.ts` fails if any
+ * `UPGRADES` metric reaches that branch.
+ */
+export function upgradeDeltaText(metric: string, from: number, to: number): string {
+  switch (metric) {
+    case 'speedMult':
+      return `Speed ${percentDelta(from, to)}`;
+    case 'fuelMult':
+      return `Fuel use ${percentDelta(from, to)}`;
+    case 'hullHp':
+      return `Hull ${metricValue(from)} → ${metricValue(to)}`;
+    case 'shieldHp':
+      return `Shield ${metricValue(from)} → ${metricValue(to)}`;
+    case 'cargoCap':
+      return `Cargo ${metricValue(from)} → ${metricValue(to)}`;
+    case 'damage':
+      return `Gun damage ${metricValue(from)} → ${metricValue(to)}`;
+    case 'fireRate':
+      return `Fire rate ${metricValue(from)} → ${metricValue(to)} /s`;
+    default:
+      return `${metricWords(metric)} ${metricValue(from)} → ${metricValue(to)}`;
+  }
+}
+
+/** The metric keys `upgradeDeltaText` names outright — the fallback test's list. */
+export const UPGRADE_METRIC_KEYS = ['speedMult', 'fuelMult', 'hullHp', 'shieldHp', 'cargoCap', 'damage', 'fireRate'] as const;
+
+// -------------------------------------------------------------- tint contrast
+
+/** `#rgb` / `#rrggbb` → 0–1 channels; anything else reads as black. */
+function channels(hex: string): [number, number, number] {
+  const raw = hex.trim().replace(/^#/, '');
+  const full = raw.length === 3 ? raw.replace(/./g, (ch) => ch + ch) : raw;
+  if (!/^[0-9a-fA-F]{6}$/.test(full)) return [0, 0, 0];
+  return [0, 2, 4].map((i) => parseInt(full.slice(i, i + 2), 16) / 255) as [number, number, number];
+}
+
+/** WCAG 2 relative luminance of a hex colour. */
+export function relativeLuminance(hex: string): number {
+  const [r, g, b] = channels(hex).map((c) => (c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4)) as [number, number, number];
+  return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+}
+
+/**
+ * SPEC-035 §4.1 — the WCAG contrast ratio between two hex colours, 1 (equal) to
+ * 21 (black on white). The enemy-tint invariant of `tests/data/content.test.ts`
+ * asks for at least 3 against the planet's ground.
+ */
+export function contrastRatio(a: string, b: string): number {
+  const la = relativeLuminance(a);
+  const lb = relativeLuminance(b);
+  return (Math.max(la, lb) + 0.05) / (Math.min(la, lb) + 0.05);
 }

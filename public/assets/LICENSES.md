@@ -219,8 +219,8 @@ match. The 12 MB audio budget above is what they share.
 | File | Source | License | Modifications |
 | --- | --- | --- | --- |
 | `audio/sfx/ui.webm` | Original to this repository — synthesised by `scripts/assets/audio/sfx.mjs` | CC0 | — |
-| `audio/sfx/surface.webm` | Original to this repository — synthesised by `scripts/assets/audio/sfx.mjs` | CC0 | — |
-| `audio/sfx/flight.webm` | Original to this repository — synthesised by `scripts/assets/audio/sfx.mjs` | CC0 | — |
+| `audio/sfx/surface.webm` | Original to this repository — synthesised by `scripts/assets/audio/sfx.mjs` | CC0 | SPEC-035 §4.11 recut it with `shot_handgun`, `shot_rifle`, `shot_mg`, `shot_launcher`, `impact` and `explosion` |
+| `audio/sfx/flight.webm` | Original to this repository — synthesised by `scripts/assets/audio/sfx.mjs` | CC0 | SPEC-035 §4.11 recut it with `ship_laser` |
 | `audio/music/menu.webm` | Original to this repository — synthesised by `scripts/assets/audio/music.mjs` | CC0 | — |
 | `audio/music/station.webm` | Original to this repository — synthesised by `scripts/assets/audio/music.mjs` | CC0 | — |
 | `audio/music/flight.webm` | Original to this repository — synthesised by `scripts/assets/audio/music.mjs` | CC0 | — |

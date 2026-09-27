@@ -436,6 +436,106 @@ const SOUNDS = {
     },
   },
 
+  // SPEC-035 §4.11: the guns, the hit and the blast. One crack per weapon line,
+  // so a machine gun stacking at 11 Hz and a rifle at 4 Hz are different sounds
+  // rather than the same one repeated.
+  shot_handgun: {
+    // A sharp crack: a filtered noise burst over a 900 Hz click, gone in 60 ms.
+    peak: -3,
+    render: (n) => {
+      const nz = noise(501);
+      const lp = svf();
+      const hp = svf('hp');
+      const click = osc('sine');
+      return fill(n, (t) => {
+        const burst = lp(nz(), sweep(t, 6000, 700, 0.05), 1.2) * decay(t, 0.02);
+        const tick = click(sweep(t, 900, 420, 0.02)) * decay(t, 0.012);
+        return soft(2.2 * burst + 1.1 * tick + 0.6 * hp(nz(), 4200) * decay(t, 0.008), 1.3) * attack(t, 0.0005);
+      });
+    },
+  },
+  shot_rifle: {
+    // The same crack with a 220 Hz body under it — heavier, and a touch longer.
+    peak: -2,
+    render: (n) => {
+      const nz = noise(502);
+      const lp = svf();
+      const hp = svf('hp');
+      const body = osc('sine');
+      return fill(n, (t) => {
+        const crack = lp(nz(), sweep(t, 7000, 500, 0.07), 1.4) * decay(t, 0.03);
+        const thump = body(sweep(t, 220, 90, 0.06)) * decay(t, 0.05);
+        return soft(2.4 * crack + 1.4 * thump + 0.7 * hp(nz(), 5000) * decay(t, 0.01), 1.4) * attack(t, 0.0005);
+      });
+    },
+  },
+  shot_mg: {
+    // Short and dry, meant to stack: nothing here outlives its own 90 ms slot.
+    peak: -5,
+    render: (n) => {
+      const nz = noise(503);
+      const bp = svf('bp');
+      const s = osc('sine');
+      return fill(
+        n,
+        (t) =>
+          (bp(nz(), sweep(t, 3200, 900, 0.03), 1.8) * 1.6 * decay(t, 0.014) + 0.8 * s(sweep(t, 620, 260, 0.015)) * decay(t, 0.01)) *
+          attack(t, 0.0004),
+      );
+    },
+  },
+  shot_launcher: {
+    // A thump and a hiss: the tube's low bang, then the rocket leaving it.
+    peak: -3,
+    render: (n) => {
+      const nz = noise(504);
+      const lp = svf();
+      const hiss = svf('bp');
+      const low = osc('sine');
+      return fill(n, (t) => {
+        const thump = low(sweep(t, 150, 45, 0.12)) * decay(t, 0.09);
+        const burst = lp(nz(), sweep(t, 2600, 300, 0.1), 1.2) * decay(t, 0.06);
+        const tail = hiss(nz(), sweep(t, 5200, 2000, 0.3), 2.5) * decay(t, 0.16) * attack(t, 0.02);
+        return soft(1.6 * thump + 1.2 * burst + 0.8 * tail, 1.3) * attack(t, 0.001);
+      });
+    },
+  },
+  impact: {
+    // A dull thud — the shot connected. Quiet on purpose: it plays at 20 Hz.
+    peak: -7,
+    render: (n) => {
+      const nz = noise(505);
+      const lp = svf();
+      const s = osc('sine');
+      return fill(
+        n,
+        (t) =>
+          (0.9 * s(sweep(t, 190, 70, 0.04)) * decay(t, 0.03) + 0.7 * lp(nz(), sweep(t, 1400, 300, 0.03), 1.1) * decay(t, 0.018)) *
+          attack(t, 0.001),
+      );
+    },
+  },
+  explosion: {
+    // A low boom with a rumble tail — the rocket, the mine and the demo charge.
+    peak: -1,
+    render: (n) => {
+      const boom = osc('sine');
+      const sub = osc('sine');
+      const nz = noise(506);
+      const lp = svf();
+      const rumble = svf();
+      const hp = svf('hp');
+      const r = rng(507);
+      return fill(n, (t) => {
+        const debris = r() < 0.03 * decay(t, 0.35) ? r() * 2 - 1 : 0;
+        const head = 1.3 * boom(sweep(t, 110, 32, 0.25)) * decay(t, 0.22);
+        const blast = 1.1 * lp(nz(), sweep(t, 6000, 220, 0.4), 1.2) * decay(t, 0.25);
+        const tail = 2.2 * rumble(nz(), 90) * decay(t, 0.5) + 0.6 * sub(sweep(t, 45, 22, 0.8)) * decay(t, 0.45);
+        return soft(head + blast + tail + 1.2 * hp(debris, 2200), 1.5) * attack(t, 0.001);
+      });
+    },
+  },
+
   // -------------------------------------------------------------- flight
   ship_hit_shield: {
     peak: -4,
@@ -518,6 +618,23 @@ const SOUNDS = {
       return fill(n, (t) => {
         const y = Math.sin(TAU * f * t + 0.8 * Math.sin(TAU * wob * t)) * 0.6 + 0.3 * Math.sin(TAU * g * t);
         return y * (0.6 + 0.4 * Math.sin(TAU * trem * t));
+      });
+    },
+  },
+
+  ship_laser: {
+    // SPEC-035 §4.11 — a pitched-down zap: a falling square through a closing
+    // filter, so the nose guns read as energy rather than as a second rifle.
+    peak: -6,
+    render: (n) => {
+      const a = osc('square');
+      const b = osc('saw');
+      const nz = noise(508);
+      const lp = svf();
+      return fill(n, (t) => {
+        const f = sweep(t, 2400, 260, 0.11);
+        const env = attack(t, 0.002) * decay(t, 0.045);
+        return soft(lp(a(f) * 0.6 + b(f * 0.5) * 0.4 + 0.15 * nz(), sweep(t, 6000, 800, 0.12), 1.3) * env, 1.2);
       });
     },
   },
