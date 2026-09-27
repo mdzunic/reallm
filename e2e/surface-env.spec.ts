@@ -32,9 +32,41 @@ test('the medium frame stays inside the §4.11 budget after 30 frames', async ({
 // node by tests/views/enemyRecipes.test.ts (AC-98).
 const CINDER4_MEDIUM_POPULATION = 9; // populationTarget(cinder4, medium), SPEC-012 §4.5
 
+/**
+ * SPEC-035 §4.7 halves Cinder-4's ambient population until `c1_m1` is done, so
+ * the spawn-heavy worst case this test exists to measure is only reachable with
+ * the tutorial behind the player. `sceneInfo.ramp` is what proves the ramp is
+ * off; the ramp itself is covered by `e2e/SPEC-035.spec.ts`.
+ */
+
+/** The pilot `endRamp` binds to a slot; the stats below are the §6 pin's. */
+const RAMP_PILOT = {
+  name: 'Vance',
+  classId: 'marine',
+  appearance: { portrait: 1, primary: '#b7472a', secondary: '#2a3b4c' },
+  attributes: { might: 3, vigor: 8, agility: 1, tech: 1 },
+  difficulty: 'normal',
+} as const;
+
+async function endRamp(page: Page): Promise<void> {
+  // A `?scene=` jump has no bound save (the scene builds a throwaway one), so
+  // the ramp is only reachable through a real slot.
+  await page.evaluate((creation) => void window.__reallm.save().create(0, creation), RAMP_PILOT);
+  await page.evaluate(() => {
+    const save = window.__reallm.save().current;
+    if (save !== null && !save.progress.missionsDone.includes('c1_m1')) save.progress.missionsDone.push('c1_m1');
+  });
+  await page.evaluate(() => window.__reallm.go('surface', { planet: 'cinder4' }, { force: true }));
+  await expect(page.locator('[data-testid="scene-label"]')).toHaveText('surface');
+  await expect
+    .poll(async () => Number((await page.evaluate(() => window.__reallm.stats().sceneInfo ?? {}))['ramp'] ?? 1), { timeout: 15_000 })
+    .toBe(0);
+}
+
 test('the spawn-heavy medium frame stays within 96 draws and 130 k triangles', async ({ page }) => {
-  test.setTimeout(120_000);
+  test.setTimeout(150_000);
   await start(page, URL);
+  await endRamp(page);
   await page.waitForFunction(
     (target) => Number(window.__reallm.stats().sceneInfo?.['enemies'] ?? 0) >= target,
     CINDER4_MEDIUM_POPULATION,
