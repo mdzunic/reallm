@@ -2074,6 +2074,8 @@ html.reduce-motion .hud.is-static .hud-static {
   bottom: max(var(--hud-bottom-stack), calc(env(safe-area-inset-bottom) + var(--hud-bottom-stack) - 10px));
   left: 50%;
   transform: translateX(-50%);
+  /* The whole box is this wide, the advance control's room included. */
+  box-sizing: border-box;
   width: min(560px, 100vw - 24px);
   padding: 12px 16px;
   z-index: 40;
