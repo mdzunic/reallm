@@ -553,7 +553,7 @@ for (const [width, height] of SHORT_LANDSCAPE) {
 
 // ------------------------------------------------------ 14: film wake lock
 
-test.describe('14. a film holds the screen on (§4.9)', () => {
+test.describe('14. a film holds the screen on, and Back leaves it alone (§4.9, §4.4)', () => {
   test.use({ viewport: { width: 1280, height: 720 }, reducedMotion: 'no-preference' });
 
   test('the prologue takes one lock, and a skip hands it back', async ({ page }) => {
@@ -588,6 +588,15 @@ test.describe('14. a film holds the screen on (§4.9)', () => {
     await page.locator('[data-testid="new-slot-0"]').click();
     await expect(page.locator('[data-testid="film"]')).toHaveAttribute('data-film', 'prologue');
     await expect.poll(async () => (await wake()).requests).toBe(before.requests + 1);
+    expect((await wake()).releases).toBe(before.releases);
+
+    // §4.4, 36-e: the film owns the screen — a system Back does nothing to it,
+    // and the page stays where it is.
+    const url = page.url();
+    await page.goBack();
+    await frames(page, 5);
+    await expect(page.locator('[data-testid="film"]')).toHaveAttribute('data-film', 'prologue');
+    expect(page.url()).toBe(url);
     expect((await wake()).releases).toBe(before.releases);
 
     // Past the skip grace (SPEC-022 §4.5), then skip.
