@@ -24,6 +24,8 @@ export interface DevBridge {
   trace(): string[];
   /** SPEC-015 AC-52: stands in for a waiting service worker (dev builds only). */
   offerUpdate(apply: () => void): void;
+  /** SPEC-036 §4.4: how many layers are open on the back-stack (dev builds only). */
+  backDepth(): number;
   loseContext(restoreAfterMs: number | null): void;
   stop(): void;
 }

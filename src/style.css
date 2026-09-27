@@ -715,6 +715,7 @@ button.slot-button {
 .ui-layer-panel { z-index: 30; }
 .ui-layer-overlay { z-index: 50; }
 
+/* UiRoot's own fade sits directly under #ui, like the toast rack it covers. */
 .ui-fade { z-index: 60; }
 
 /* Anything interactive opts back into pointer events (SPEC-014 §2).
@@ -814,6 +815,9 @@ html.quality-low .toast {
 }
 
 /* ------------------------------------------------------------------ toasts */
+/* The rack sits directly under #ui (see `UiRoot`): at 55 a toast lands over a
+   chapter card (54, SPEC-023 §4.2), and it stays under reveals (64) and films
+   (65). */
 .toast-rack {
   position: absolute;
   top: max(10px, env(safe-area-inset-top));
@@ -824,6 +828,13 @@ html.quality-low .toast {
   gap: 6px;
   align-items: center;
   z-index: 55;
+}
+
+/* SPEC-036 §4.3: while the rotate cover is up, the toasts go under it with
+   every other layer of UiRoot. Only the chapter card keeps its place above
+   the cover. */
+#ui:has(> .overlay-rotate.is-visible) > .toast-rack {
+  z-index: 50;
 }
 
 /* §4.5: toasts wear the same glass as the panels. */
@@ -1842,10 +1853,11 @@ html.reduce-motion .dialogue-dim {
 
 /* SPEC-036 §4.3, E65: the rotate block is a cover, not a centred box — the
    whole viewport in near-black at z 51: above the pause frame (35) and every
-   layer of UiRoot (the overlay layer is 50), so Resume cannot be pressed
-   upright. Reveals (64), films (65) and endings (70, 80) keep their places
-   above it, and films letterbox in portrait (E34). It wears no glass, so the
-   quality-low and reduced-transparency rules above leave it alone. */
+   layer of UiRoot (the overlay layer is 50, and the toasts drop to 50 while
+   it is up), so Resume cannot be pressed upright. Chapter cards (54), reveals
+   (64), films (65) and endings (70, 80) keep their places above it, and films
+   letterbox in portrait (E34). It wears no glass, so the quality-low and
+   reduced-transparency rules above leave it alone. */
 .overlay-rotate {
   inset: 0;
   transform: none;
@@ -3521,10 +3533,11 @@ html.reduce-motion .film-describe {
 
 /* ================================================================ SPEC-023 */
 /* The chapter card (§4.2): four lines centred in the upper third of the
-   flight, inside the overlay layer at z 54 — over the HUD and the panels,
-   below the toast rack (55) and the film layer (65). It is text over the
+   flight, at z 54 directly under #ui — over the HUD, the panels and the
+   overlay layer (50), below the toast rack (55) and the film layer (65).
+   SPEC-036 §4.3 keeps it above the rotate cover (51). It is text over the
    launch and never takes a pointer. The host box generates no box of its own,
-   so the card stacks against the rack as a sibling. */
+   so the card stacks against the rack and the cover as a sibling. */
 .chapter-card-host {
   display: contents;
 }

@@ -302,6 +302,8 @@ if (import.meta.env.DEV) {
      * station buttons, and that pressing one calls back exactly once.
      */
     offerUpdate: (apply: () => void) => offerAppUpdate(apply),
+    /** SPEC-036 §4.4: how many layers are open on the back-stack, for the e2e Back cases. */
+    backDepth: () => ui.backStack.depth,
     loseContext: (restoreAfterMs: number | null) => game.loseContext(restoreAfterMs),
     stop: () => game.stop(),
   };

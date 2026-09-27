@@ -111,6 +111,55 @@ async function topmostAt(page: Page, testid: string): Promise<string[]> {
   }, testid);
 }
 
+/**
+ * `topmostAt` for what takes no pointer: the chapter card and the toasts are
+ * `pointer-events: none`, so `elementFromPoint` would look straight through
+ * them. Each of `probe` (default: `testid` alone) takes a pointer for this one
+ * reading, then gives it back; the chain is read at the centre of `testid`.
+ */
+async function paintedAt(page: Page, testid: string, probe: readonly string[] = [testid]): Promise<string[]> {
+  return page.evaluate(
+    ({ id, ids }) => {
+      const target = document.querySelector(`[data-testid="${id}"]`);
+      if (target === null) return [];
+      const lifted = ids.flatMap((each) => [...document.querySelectorAll<HTMLElement>(`[data-testid="${each}"]`)]);
+      const was = lifted.map((node) => node.style.pointerEvents);
+      for (const node of lifted) node.style.pointerEvents = 'auto';
+      try {
+        const box = target.getBoundingClientRect();
+        const out: string[] = [];
+        for (let node = document.elementFromPoint(box.x + box.width / 2, box.y + box.height / 2); node !== null; node = node.parentElement) {
+          const tag = (node as HTMLElement).dataset?.['testid'];
+          if (tag !== undefined) out.push(tag);
+        }
+        return out;
+      } finally {
+        lifted.forEach((node, i) => {
+          node.style.pointerEvents = was[i] ?? '';
+        });
+      }
+    },
+    { id: testid, ids: probe },
+  );
+}
+
+/** The dev bridge's back-stack depth (§4.4): how many layers are open. */
+async function backDepth(page: Page): Promise<number> {
+  return page.evaluate(() => window.__reallm.backDepth());
+}
+
+/**
+ * Past the gate with a tap, and nothing more: the chapter card lives 5.4 s of
+ * wall clock from the flight's start, and the entry fade is an in-game timer
+ * that a loaded box can stretch past that, so these cases do not wait for it.
+ */
+async function tapIntoFlight(page: Page, url: string): Promise<void> {
+  await page.goto(gameUrl(url));
+  await awaitGate(page);
+  await page.locator('[data-testid="boot-start"]').tap();
+  await expect(page.locator('[data-testid="chapter-card"]')).toBeVisible(COLD_START);
+}
+
 /** Whether `testid` lies wholly inside the viewport. */
 async function inViewport(page: Page, testid: string): Promise<boolean> {
   return page.evaluate((id) => {
@@ -308,6 +357,52 @@ test.describe('5. turned upright mid-play, and back (§4.3, E65)', () => {
   });
 });
 
+test.describe('4, 5. the chapter card keeps its place above the cover (§4.3)', () => {
+  test.use(PIXEL_5);
+
+  test('a flight entered upright shows its card over the cover, and a toast raised then goes under it', async ({ page }) => {
+    // The first trip to Cinder-4 with films on: the card is due over the launch.
+    await tapIntoFlight(page, '/?films=on&scene=flight&planet=cinder4');
+    const rotate = page.locator('[data-testid="rotate-overlay"]');
+    await expect(rotate).toHaveClass(/is-visible/);
+    await page.evaluate(() => window.__reallm.toast('Held upright', 'info', 30_000));
+    await expect(page.locator('[data-testid="toasts"]')).toContainText('Held upright');
+
+    // Above the cover: the card (54). Under it: the toasts, with every other
+    // layer of UiRoot.
+    const card = await paintedAt(page, 'chapter-card');
+    expect(card[0], 'the chapter card paints over the cover').toBe('chapter-card');
+    expect(card).not.toContain('rotate-overlay');
+    const toast = await paintedAt(page, 'toasts');
+    expect(toast, 'a toast paints under the cover').toContain('rotate-overlay');
+    expect(toast).not.toContain('toasts');
+    expect(await page.locator('[data-testid="toasts"]').evaluate((el) => getComputedStyle(el).zIndex)).toBe('50');
+    expect(await page.locator('[data-testid="chapter-card"]').evaluate((el) => getComputedStyle(el).zIndex)).toBe('54');
+  });
+});
+
+test.describe('4, 5. with no cover, a toast still lands over the chapter card (§4.3, SPEC-023 §4.2)', () => {
+  test.use({ viewport: { width: 727, height: 393 }, hasTouch: true, isMobile: true });
+
+  test('the card and a toast made to overlap: the toast is on top', async ({ page }) => {
+    await tapIntoFlight(page, '/?films=on&scene=flight&planet=cinder4');
+    await expect(page.locator('[data-testid="rotate-overlay"]')).not.toHaveClass(/is-visible/);
+    await page.evaluate(() => window.__reallm.toast('Landscape', 'info', 30_000));
+    const rack = page.locator('[data-testid="toasts"]');
+    await expect(rack).toContainText('Landscape');
+    expect(await rack.evaluate((el) => getComputedStyle(el).zIndex)).toBe('55');
+    // Slide the card up under the rack, then read which of the two is painted.
+    await page.evaluate(() => {
+      const box = document.querySelector('[data-testid="toasts"]')?.getBoundingClientRect();
+      const card = document.querySelector<HTMLElement>('[data-testid="chapter-card"]');
+      if (box !== undefined && card !== null) card.style.top = `${box.top}px`;
+    });
+    const hit = await paintedAt(page, 'toasts', ['toasts', 'chapter-card']);
+    expect(hit, 'the toast paints over the card').toContain('toasts');
+    expect(hit).not.toContain('chapter-card');
+  });
+});
+
 // ------------------------------------------------------ 6, 7: Escape, Back
 
 test.describe('6. one Escape for every layer (§4.4)', () => {
@@ -349,6 +444,57 @@ test.describe('6. one Escape for every layer (§4.4)', () => {
     await page.keyboard.press('Escape');
     await expect(page.locator('[data-testid="credits-text"]')).toHaveCount(0);
     await expect(page.locator('[data-testid="scene-label"]')).toHaveText('menu');
+  });
+
+  test('at the station: a buy sheet over the gear card closes first, then the card, and Back closes a card too', async ({ page }) => {
+    await start(page);
+    await page.evaluate((creation) => {
+      const data = window.__reallm.save().create(0, creation);
+      data.player.tokens = 5000; // enough that the card's Buy is live
+    }, CREATION);
+    expect(await page.evaluate(() => window.__reallm.go('station', {}))).toBe(true);
+    await settle(page, 'station');
+    const tokens = (): Promise<number | undefined> => page.evaluate(() => window.__reallm.save().current?.player.tokens);
+    const before = await tokens();
+    expect(await backDepth(page)).toBe(0);
+
+    await page.locator('[data-testid="station-tab-shop"]').click();
+    await page.locator('[data-testid="shop-tab-gear"]').click();
+    await page.locator('[data-testid="shop-gear-pistol_magnum"] .shop-row-head').click();
+    const card = page.locator('[data-testid="gear-card"]');
+    const sheet = page.locator('[data-testid="confirm-sheet"]');
+    await expect(card).toBeVisible();
+    expect(await backDepth(page), 'the gear card is on the back-stack').toBe(1);
+
+    await page.locator('[data-testid="gear-card-buy"]').click();
+    await expect(sheet).toBeVisible();
+    expect(await backDepth(page), 'the buy sheet is on top of it').toBe(2);
+
+    // One layer per Escape: the sheet cancels, the card stays…
+    await page.keyboard.press('Escape');
+    await expect(sheet).toHaveCount(0);
+    await expect(card).toBeVisible();
+    expect(await backDepth(page)).toBe(1);
+    // …then the card closes, and the station has nothing of its own to do.
+    await page.keyboard.press('Escape');
+    await expect(card).toHaveCount(0);
+    expect(await backDepth(page)).toBe(0);
+    expect(await tokens()).toBe(before);
+    await page.keyboard.press('Escape');
+    await frames(page, 3);
+    expect(await page.evaluate(() => window.__reallm.scene())).toBe('station');
+
+    // The system Back takes the same route, and the page stays where it is.
+    const url = page.url();
+    await page.locator('[data-testid="shop-gear-pistol_magnum-details"]').click();
+    await expect(card).toBeVisible();
+    expect(await backDepth(page)).toBe(1);
+    await page.goBack();
+    await expect(card).toHaveCount(0);
+    expect(await backDepth(page)).toBe(0);
+    expect(page.url()).toBe(url);
+    expect(await page.evaluate(() => window.__reallm.scene())).toBe('station');
+    expect(await tokens()).toBe(before);
   });
 });
 

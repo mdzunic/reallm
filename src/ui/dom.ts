@@ -77,6 +77,12 @@ export type UiLayer = (typeof LAYERS)[number];
  * `overlay`), a flush list the frame loop drives, the shared black fade, and
  * the toast rack of §4.6. One instance per `#ui` element — `uiLayers()` below
  * is how scenes reach the shared one without `core/` having to know the type.
+ *
+ * The rack (55) and the fade (60) sit directly under `#ui`, next to the
+ * layers rather than inside the overlay layer: SPEC-036 §4.3 puts the rotate
+ * cover (51) over every layer and a chapter card (54) over the cover, and a
+ * toast must still land over the card (SPEC-023 §4.2). Inside the overlay
+ * layer the rack could never climb past its 50.
  */
 export class UiRoot {
   readonly root: HTMLElement;
@@ -108,7 +114,7 @@ export class UiRoot {
     this.#toastRack = testId(el('div', 'toast-rack'), 'toasts');
     this.#toastRack.setAttribute('role', 'status');
     this.#toastRack.setAttribute('aria-live', 'polite');
-    this.#layers.overlay.append(this.#toastRack, this.#fade);
+    root.append(this.#toastRack, this.#fade);
   }
 
   /** §4.4: registers an open layer; the returned release is idempotent. */
@@ -210,6 +216,7 @@ export class UiRoot {
   dispose(): void {
     if (this.#toastTimer !== null) clearTimeout(this.#toastTimer);
     for (const layer of LAYERS) this.#layers[layer].remove();
+    this.#toastRack.remove();
     this.#fade.remove();
   }
 }

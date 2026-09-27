@@ -353,11 +353,13 @@ export class FlightScene extends UiScene<'flight'> {
     if (!beats.enabled || !cardDue(planet, save.progress.visits, beats.session)) return;
     beats.session.add(cardKey(planet));
     const reduceMotion = services.settings.get().reduceMotion;
-    // §4.2, Mounting: inside the overlay layer, so the card's z 54 reads
-    // against the toast rack's 55 and a toast still lands over it. The host is
-    // a `display: contents` box, the pattern the damage-number layer uses.
+    // §4.2, Mounting: directly under `#ui`, next to the reveals, films and
+    // endings, so the card's z 54 reads against the rotate cover's 51 and
+    // stays above it (SPEC-036 §4.3). The toast rack's 55 is in the same
+    // stacking context, so a toast still lands over the card. The host is a
+    // `display: contents` box, the pattern the damage-number layer uses.
     const host = el('div', 'chapter-card-host');
-    this.ui.mount(host, 'overlay');
+    uiRootEl().append(host);
     let remove: (() => void) | null = null;
     const timer = setTimeout(() => {
       remove = showChapterCard(host, CHAPTER_CARDS[planet], reduceMotion);
@@ -365,7 +367,7 @@ export class FlightScene extends UiScene<'flight'> {
     this.disposer.add(() => {
       clearTimeout(timer);
       remove?.();
-      this.ui.unmount(host);
+      host.remove();
     });
   }
 
