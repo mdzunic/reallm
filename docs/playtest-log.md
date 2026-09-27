@@ -1330,6 +1330,14 @@ automated evidence stands in for it in the meantime.
       flight ion sheet. `tests/ui/css.test.ts` proves no rule overwrites another
       and the e2e reads the classes; neither looks at a pixel.
 
+**The literals this spec did move.** The three events it adds —
+`player:recalled`, `item:noRoom` and `enemy:dismissed` — are all silent, so
+`GameEvents` went 59 → 62 and `AUDIO_SILENT` 40 → 43. Three suites pin that pair
+and all three are repinned: `tests/core/events.test.ts`,
+`tests/core/audioReactions.test.ts` and `e2e/SPEC-006.spec.ts`. The last of them
+is the one the merge gate caught: the unit suite was green while the browser
+suite was not, because the same number is written down in both places.
+
 **Not in this branch, and why.** SPEC-016's "Completionist, base hold" run
 (AC-53) and its pinned literals (AC-73) belong to a harness that is not in this
 tree — `tests/campaign/harness.ts` here runs the worst-case main-mission player,
