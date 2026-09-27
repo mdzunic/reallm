@@ -207,3 +207,70 @@ here runs the worst-case main-mission player, which takes no side missions and s
 never met the finding. SPEC-034 is forbidden from building that harness (its
 out-of-scope list), so the fix is pinned by the two suites above instead, and
 SPEC-016's run should report `problems: []` and 26 missions when it lands.
+
+## 7. SPEC-036 §4.8 — short landscape phones lose the service long press (2026-09-27) — OPEN
+
+**Status:** open. Found on `main` at `8006f89` (SPEC-036, #52) in the in-app
+browser.
+
+**Severity:** P2 (SPEC-016 §6). Service mode is a playtesting tool. Nothing in
+the campaign needs it, and there is a workaround.
+
+**The finding.** SPEC-032 §4.6 gives service mode two ways in, and both work
+only while the main menu is up:
+- typing `asdf`;
+- holding the build label (`version-label`) for 3 s (`SERVICE_PRESS_MS` in
+  `src/scenes/MenuScene.ts`).
+
+A phone has no keyboard, so there the long press is the only way in. SPEC-036
+§4.8 then hides a footer that holds only the build label on short landscape
+screens (`src/style.css`):
+
+```css
+@media (orientation: landscape) and (max-height: 360px) {
+  .screen-foot:not(:has(.save-banner)) {
+    display: none;
+  }
+}
+```
+
+Every DOM screen except the pause frame adopts the label into its footer
+(`src/ui/Screen.ts`). On the menu, that footer holds only the label unless the E8
+storage banner is up. So in landscape at 360 px tall or less, the label is gone,
+and with it the only way to turn service mode on or off by touch.
+
+The code does what SPEC-036 asks: its acceptance line reads "a footer that holds
+only the build label is hidden". The defect is that the two specs collide.
+
+**Measured.**
+- At 800 × 360 the menu's `.screen-foot` computes to `display: none`, and the
+  label's box is 0 × 0.
+- At desktop size, `asdf` still toggles the mode, with the badge and the toast.
+- Of the phone sizes SPEC-036 walks, 800 × 360, 750 × 342 and 802 × 293 are
+  affected; 844 × 390 and 667 × 375 are not.
+
+**Workaround.** Hold the phone upright on the menu, then turn it back after the
+press. The rule applies only in landscape, and the menu mounts no rotate cover,
+so the label comes back. At 360 × 780 with touch emulation it sits at the bottom
+right with nothing over it, and a 3.3 s touch press on it turned the mode on,
+then off again. That run used synthetic pointer events, not a real phone.
+
+**Why no test caught it.**
+- `e2e/SPEC-032.spec.ts`'s "a 3 s press on the build label toggles it" runs only
+  at the default desktop size.
+- SPEC-036's walk of phone sizes (`e2e/SPEC-031.spec.ts`) checks that the frame's
+  controls can be reached, and the hidden label is no longer one of them.
+- SPEC-037 §4.9 does not close the gap. It keeps the long press working "where
+  the label shows", and hides the label only in play on touch.
+
+**Fix, and whose.** This is a design call, because it changes either SPEC-032
+§4.6's gesture or SPEC-036 §4.8's rule, so a PLAN refinement entry comes first.
+Candidates:
+- Exempt the menu's footer from the short-landscape rule, so the label stays on
+  the menu at every size. This is the smallest change; it gives back the footer
+  row SPEC-036 saved there.
+- Move the long press to something every size keeps, such as the menu's title.
+- Keep a menu-only copy of the label outside the footer.
+
+Whichever is chosen, a regression case belongs next to SPEC-032's long-press
+test: the same press on the menu at 800 × 360 with touch.
