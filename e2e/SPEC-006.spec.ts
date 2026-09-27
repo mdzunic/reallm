@@ -1102,8 +1102,9 @@ test('the reactions table is what the game actually hears (AC-38 … AC-50, AC-5
       bus.emit('resource:collected', { resource: 'oil', amount: 1, total: 4 });
       bus.emit('resource:collected', { resource: 'water', amount: 1, total: 5 });
     });
-    // A sample of the 40 that are silent by design (SPEC-029 moved
-    // weapon:switched out; SPEC-015 added the two `app:` signals).
+    // A sample of the 43 that are silent by design (SPEC-029 moved
+    // weapon:switched out; SPEC-015 added the two `app:` signals; SPEC-034
+    // added `player:recalled`, `item:noRoom` and `enemy:dismissed`).
     out['silent'] = await name(() => {
       bus.emit('app:paused');
       bus.emit('save:written', { slot: 0, reason: 'manual', bytes: 10 });
@@ -1162,14 +1163,16 @@ test('the reactions table is what the game actually hears (AC-38 … AC-50, AC-5
   expect(r['three hits']).toBe('hit_player'); // AC-48, 120 ms
   expect(r['two oils and a water']).toBe('pickup_oil,pickup_water'); // AC-44, 80 ms per id
   expect(r['silent']).toBe('(silence)'); // AC-39
-  // AC-39 / AC-40: 19 + 40 = 59, and no event is in both halves (SPEC-029
+  // AC-39 / AC-40: 19 + 43 = 62, and no event is in both halves (SPEC-029
   // §4.12 added four reacted events and moved weapon:switched across; SPEC-015
-  // §10 added `app:update-ready` and `app:install-hint`, both silent). That
+  // §10 added `app:update-ready` and `app:install-hint`, both silent; SPEC-034
+  // §4.2/§4.7/§4.13 added `player:recalled`, `item:noRoom` and
+  // `enemy:dismissed`, all three silent). That
   // the two halves cover `GameEvents` exactly is a compile-time assertion in
   // the module, and `tests/core/audioReactions.test.ts` pins the same pair of
   // counts in node.
   expect(reactions.counts.reacted).toBe(19);
-  expect(reactions.counts.silent).toBe(40);
+  expect(reactions.counts.silent).toBe(43);
   expect(reactions.counts.overlap).toEqual([]);
   // SPEC-012 §4.12 populated the set from the dialogue table's `glitch` marks
   // (it shipped empty under SPEC-006); the unit suite pins it to those marks.
