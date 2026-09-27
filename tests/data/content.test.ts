@@ -995,7 +995,7 @@ describe('tips and hints (SPEC-027 AC-81..AC-84)', () => {
   /**
    * SPEC-034 §6.1 pins these two numbers here, in the content suite, because
    * they are the two the spec moved and the two a retune would silently undo.
-   * `tests/balance/gauntlet.test.ts` and `tests/systems/spawn.test.ts` prove
+   * `tests/systems/gauntlet.test.ts` and `tests/systems/spawn.test.ts` prove
    * they *work*; this proves they are still what the spec wrote down.
    */
   it('the SPEC-034 content numbers are what §4.4 and §4.9 set', () => {
