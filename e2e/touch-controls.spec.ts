@@ -4,13 +4,40 @@
 // last-used device (AC-19) and the controls render only while that scheme is
 // touch (AC-20).
 //
-// The context is touch-capable, but the page still boots on the keyboard
-// scheme — a touch device with a keyboard is a real device, and nothing is
-// assumed until a finger actually lands.
+// The context is touch-capable. SPEC-036 §4.2 boots a device whose primary
+// pointer is coarse with no hover on the touch scheme, so the case that pins a
+// keyboard start makes that query answer no — a touchscreen laptop, a touch
+// device with a keyboard, where nothing is assumed until a finger lands — and
+// a phone-shaped context pins the other half: the layer is up before any touch.
 import { expect, test, type Page } from '@playwright/test';
-import { start, type InputSnapshot } from './start';
+import { awaitGate, COLD_START, gameUrl, start, type InputSnapshot } from './start';
 
 test.use({ hasTouch: true });
+
+/** SPEC-036 §4.2: the boot scheme's media query. */
+const COARSE_POINTER_QUERY = '(hover: none) and (pointer: coarse)';
+
+/**
+ * A touchscreen laptop: touch-capable, but its primary pointer is a mouse, so
+ * `matchMedia(COARSE_POINTER_QUERY)` does not match and the page boots on the
+ * keyboard (SPEC-036 §4.13).
+ */
+async function touchscreenLaptop(page: Page): Promise<void> {
+  await page.addInitScript((query) => {
+    const original = window.matchMedia.bind(window);
+    window.matchMedia = (asked: string): MediaQueryList => {
+      const list = original(asked);
+      if (asked !== query) return list;
+      return new Proxy(list, {
+        get: (target, key) => {
+          if (key === 'matches') return false;
+          const value: unknown = Reflect.get(target, key, target);
+          return typeof value === 'function' ? (value as (...args: unknown[]) => unknown).bind(target) : value;
+        },
+      });
+    };
+  }, COARSE_POINTER_QUERY);
+}
 
 /** Wait for a `?scene=` jump to have finished fading in (SPEC-003 AC-14). */
 async function settle(page: Page, scene: string): Promise<void> {
@@ -57,6 +84,7 @@ async function viewport(page: Page): Promise<{ width: number; height: number }> 
 }
 
 test('the surface layout appears with the first touch, and not before (AC-19, AC-20)', async ({ page }) => {
+  await touchscreenLaptop(page);
   await start(page, '/?scene=surface');
   await settle(page, 'surface');
 
@@ -178,4 +206,22 @@ test('the flight layout swaps the buttons for throttle and a reticle (AC-27, AC-
   await expect(page.locator('[data-testid="touch-reticle"]')).toBeVisible();
   await expect(page.locator('[data-testid="touch-useItem"]')).toBeHidden();
   await expect(page.locator('[data-testid="touch-interact"]')).toBeHidden();
+});
+
+test.describe('on a phone (SPEC-036 §4.2)', () => {
+  test.use({ viewport: { width: 844, height: 390 }, isMobile: true });
+
+  test('the layer is mounted before any touch lands', async ({ page }) => {
+    await page.goto(gameUrl('/?scene=surface'));
+    await awaitGate(page);
+    // Nothing has touched the page yet: the scheme is the device's own answer.
+    expect(await page.evaluate(() => window.__reallm.input().scheme)).toBe('touch');
+    // START is a tap, as on a phone — a mouse click would be a mouse's press.
+    await page.locator('[data-testid="boot-start"]').tap();
+    await expect(page.locator('[data-testid="scene-label"]')).toHaveText('surface', COLD_START);
+    await settle(page, 'surface');
+    await expect(page.locator('[data-testid="touch-controls"]')).toBeVisible();
+    await expect(page.locator('[data-testid="touch-pause"]')).toBeVisible();
+    expect(await page.evaluate(() => window.__reallm.input().scheme)).toBe('touch');
+  });
 });

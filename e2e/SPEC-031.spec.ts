@@ -63,6 +63,23 @@ async function checkFrame(page: Page, width: number, height: number, touch = fal
         return { x: r.x, y: r.y, right: r.right, bottom: r.bottom, w: r.width, h: r.height, scrollable, id: (el as HTMLElement).dataset['testid'] ?? el.className };
       });
     const tabs = [...(visible[0]?.querySelectorAll('.screen-tab') ?? [])].map((el) => el.getBoundingClientRect().height);
+    // SPEC-036 §4.13: the frame's own chrome — the controls in its head, tab
+    // rail and foot, outside the body's scroll — must be what a press at its
+    // centre actually reaches, not merely lie inside the viewport. The one
+    // cover allowed over it is the rotate block of a phone held upright
+    // (SPEC-036 §4.3), which is there precisely so nothing under it is pressed.
+    const rotateUp = document.querySelector('[data-testid="rotate-overlay"]')?.classList.contains('is-visible') === true;
+    const chrome = [...(visible[0]?.querySelectorAll('button, input, [role="button"]') ?? [])]
+      .filter((el) => el.closest('.screen-body') === null)
+      .filter((el) => {
+        const r = el.getBoundingClientRect();
+        return r.width > 0 && r.height > 0;
+      })
+      .map((el) => {
+        const r = el.getBoundingClientRect();
+        const hit = document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2);
+        return { id: (el as HTMLElement).dataset['testid'] ?? el.className, topmost: hit !== null && (hit === el || el.contains(hit)) };
+      });
     return {
       count: visible.length,
       scrollW: doc.scrollWidth,
@@ -72,6 +89,8 @@ async function checkFrame(page: Page, width: number, height: number, touch = fal
       titleClipped: title instanceof HTMLElement ? title.scrollWidth > title.clientWidth + 1 : false,
       boxes,
       tabs,
+      rotateUp,
+      chrome,
     };
   });
   expect(measured.count, 'exactly one screen root').toBe(1);
@@ -89,6 +108,9 @@ async function checkFrame(page: Page, width: number, height: number, touch = fal
     }
   }
   for (const tab of measured.tabs) expect(tab, 'tab height').toBeGreaterThanOrEqual(touch ? 56 : 44);
+  if (!measured.rotateUp) {
+    for (const control of measured.chrome) expect(control.topmost, `${control.id} is topmost at its centre`).toBe(true);
+  }
 }
 
 /** AC-24's must-check: the whole Depart box actually receives the pointer. */
@@ -171,6 +193,36 @@ for (const [width, height] of SIZES) {
     await walkFrames(page, width, height);
   });
 }
+
+/**
+ * SPEC-036 §4.8, §4.13: the short landscape phones — the sizes where the
+ * desktop rail used to run off the frame — walked with touch, so the tabs are
+ * at their 56 px touch floor in the bottom strip.
+ */
+const SHORT_LANDSCAPE: readonly [number, number][] = [
+  [844, 390],
+  [800, 360],
+  [750, 342],
+  [802, 293],
+  [667, 375],
+];
+
+test.describe('frame on short landscape phones, with touch', () => {
+  test.use({ hasTouch: true });
+
+  for (const [width, height] of SHORT_LANDSCAPE) {
+    test(`frame: every screen holds its grid at ${width}×${height} with touch (SPEC-036 §4.8)`, async ({ page }) => {
+      await page.setViewportSize({ width, height });
+      await start(page);
+      // The gate was passed with a click, which is a mouse's press; a real
+      // touch through the frame's pointer-transparent side gutter hands the
+      // scheme back to touch (SPEC-036 §4.2).
+      await page.touchscreen.tap(6, Math.round(height / 2));
+      await expect.poll(async () => page.evaluate(() => window.__reallm.input().scheme)).toBe('touch');
+      await walkFrames(page, width, height, true);
+    });
+  }
+});
 
 // `use()` inside a describe may not carry defaultBrowserType — the suite's one
 // chromium project is already the right browser, so it is simply dropped.

@@ -123,8 +123,14 @@ test('the pad terminal toggles deterministically, accepts a mission, and the rou
     )
     .toBe(1);
 
-  // The pinned objective line moved on to stage 1's scan (AC-65).
+  // The pinned objective line moved on to stage 1's scan (AC-65). SPEC-036
+  // §4.10: the open terminal holds the world — the HUD with it, as the map
+  // does — so the line is read with the terminal closed, and E reopens it.
+  await page.keyboard.press('KeyE');
+  await expect(terminal).toBeHidden();
   await expect(page.locator('[data-testid="hud"] .hud-objective')).toContainText('Scan');
+  await page.keyboard.press('KeyE');
+  await expect(terminal).toBeVisible();
 
   // §4.11: Return to ship saves and lands in the station.
   await page.locator('[data-testid="terminal-return"]').click();

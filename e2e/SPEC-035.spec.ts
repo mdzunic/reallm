@@ -81,6 +81,24 @@ test.describe('1. the touch scheme brings the camera in', () => {
   test.use({ hasTouch: true, viewport: { width: 800, height: 420 } });
 
   test('camDistance eases from 22 to 17 once a finger has touched the canvas', async ({ page }) => {
+    // SPEC-036 §4.13: a touchscreen laptop — touch-capable, but its primary
+    // pointer is a mouse, so the page boots on the keyboard (SPEC-036 §4.2)
+    // and the first finger is what flips it.
+    await page.addInitScript(() => {
+      const query = '(hover: none) and (pointer: coarse)';
+      const original = window.matchMedia.bind(window);
+      window.matchMedia = (asked: string): MediaQueryList => {
+        const list = original(asked);
+        if (asked !== query) return list;
+        return new Proxy(list, {
+          get: (target, key) => {
+          if (key === 'matches') return false;
+          const value: unknown = Reflect.get(target, key, target);
+          return typeof value === 'function' ? (value as (...args: unknown[]) => unknown).bind(target) : value;
+        },
+        });
+      };
+    });
     await landFresh(page);
     expect(Number((await sceneInfo(page))['camDistance'])).toBeCloseTo(22, 1);
     // A real touch point on the canvas is what flips the scheme; the touch
