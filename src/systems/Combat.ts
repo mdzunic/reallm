@@ -40,6 +40,7 @@ import {
   type LootTableId,
   type ResourceId,
   type WeaponLine,
+  type WeaponSlot,
 } from '@/data/index';
 import type { WeaponAutoSwapMode } from '@/core/Settings';
 import {
@@ -986,6 +987,57 @@ export class Combat {
     // SPEC-035 §4.11: one event per shot, at the muzzle, with the weapon's line.
     this.#events.emit('weapon:fired', { line: FIRED_LINE[weapon.line], x: shot.x, z: shot.z });
     this.loadout.fired(slot, this.#world.time);
+  }
+
+  /**
+   * SPEC-036 §4.6: one shot of `slot` without selecting it — the launcher tap
+   * on the touch scheme, where auto-fire never reaches the heavy and a slot
+   * that had to be selected and then triggered was a trap. It aims as the
+   * auto-fire branch of `#updateFiring` does: the auto-target in the weapon's
+   * range, else 10 m along facing (36-k). `'empty'` for a slot with no weapon,
+   * `'not-ready'` while the slot's cooldown says no — no charge left, or
+   * inside the burst interval (36-j). The active slot does not change.
+   */
+  fireSlotOnce(slot: WeaponSlot): 'fired' | 'not-ready' | 'empty' {
+    const weapon = this.loadout.weaponIn(slot);
+    if (weapon === null) return 'empty';
+    const time = this.#world.time;
+    if (!this.loadout.ready(slot, time)) return 'not-ready';
+    const p = this.#world.player;
+    let dirX = Math.cos(p.facing);
+    let dirZ = Math.sin(p.facing);
+    let targetX = p.x + dirX * 10;
+    let targetZ = p.z + dirZ * 10;
+    const target = this.#autoTarget(weapon.range);
+    if (target !== null) {
+      const dx = target.x - p.x;
+      const dz = target.z - p.z;
+      const len = Math.hypot(dx, dz);
+      if (len > 1e-6) {
+        dirX = dx / len;
+        dirZ = dz / len;
+        targetX = target.x;
+        targetZ = target.z;
+      }
+    }
+    // §4.3: facing turns to the shot, so the muzzle flash reads where it went.
+    p.facing = Math.atan2(dirZ, dirX);
+    // SPEC-029 §4.4: a blast weapon does not roll, so blasts never crit.
+    const damage =
+      weapon.blast !== undefined ? weapon.damage : rollPlayerDamage(weapon, this.#world.stats, this.#rng.combat).amount;
+    const shot = this.#spawnPlayerProjectile('player', dirX, dirZ, damage, weapon);
+    if (weapon.lob === true) {
+      shot.lob = true;
+      shot.targetX = targetX;
+      shot.targetZ = targetZ;
+      shot.flight = Math.hypot(targetX - shot.x, targetZ - shot.z) / weapon.projectileSpeed;
+      shot.ttl = shot.flight;
+    }
+    this.#lastShotAt = time;
+    this.#events.emit('weapon:fired', { line: FIRED_LINE[weapon.line], x: shot.x, z: shot.z });
+    this.loadout.fired(slot, time);
+    p.fireCooldown = 1 / weapon.fireRate;
+    return 'fired';
   }
 
   /** 11-j: nearest with a clear line wins; if every candidate is blocked, nearest overall. */

@@ -46,6 +46,8 @@ interface SpyOptions {
   construct?: () => void;
   enter?: () => Promise<void> | void;
   update?: (dt: number) => void;
+  /** SPEC-036 §4.4: gives the scene a Back of its own. */
+  back?: () => boolean;
 }
 
 class SpyScene implements Scene {
@@ -62,12 +64,23 @@ class SpyScene implements Scene {
   pauses = 0;
   resumes = 0;
   contextRestores = 0;
+  backs = 0;
+  /** Present only when the options give one, as on a real scene (SPEC-036 §4.4). */
+  back?: () => boolean;
 
   constructor(id: SceneId, trace: string[], options: SpyOptions) {
     this.id = id;
     this.trace = trace;
     this.options = options;
     this.pausable = options.pausable ?? false;
+    const own = options.back;
+    if (own !== undefined) {
+      this.back = (): boolean => {
+        this.backs++;
+        this.trace.push(`${this.id}:back`);
+        return own();
+      };
+    }
   }
 
   enter(params: SceneParams[SceneId]): Promise<void> | void {
@@ -767,6 +780,55 @@ describe('pause and resume', () => {
     h.manager.pause();
     await h.manager.go('station', {}, { force: true });
     expect(h.manager.paused).toBe(false);
+  });
+});
+
+// ------------------------------------------------------------ SPEC-036 back
+
+describe('back() (SPEC-036 §4.4)', () => {
+  it("runs the scene's own back() first, and stops there when it acted", async () => {
+    const h = harness({ starmap: { back: () => true } });
+    await atMenu(h);
+    await h.manager.go('starmap', undefined, { force: true });
+    expect(h.manager.back()).toBe(true);
+    expect(h.scene('starmap').backs).toBe(1);
+    expect(h.scene('starmap').pauses).toBe(0);
+    expect(h.manager.paused).toBe(false);
+  });
+
+  it('pauses a running pausable scene that has no back, or whose back declined', async () => {
+    const h = harness({ flight: { pausable: true }, surface: { pausable: true, back: () => false } });
+    await atMenu(h);
+    await h.manager.go('flight', { destination: 'cinder4' }, { force: true });
+    expect(h.manager.back()).toBe(true);
+    expect(h.scene('flight').pauses).toBe(1);
+    expect(h.manager.paused).toBe(true);
+
+    await h.manager.go('surface', { planet: 'cinder4', firstLanding: false });
+    expect(h.manager.back()).toBe(true);
+    expect(h.scene('surface').backs).toBe(1);
+    expect(h.scene('surface').pauses).toBe(1);
+    expect(h.trace.indexOf('surface:back')).toBeLessThan(h.trace.indexOf('surface:pause'));
+  });
+
+  it('returns false for a paused scene, a non-pausable one, and before any scene', async () => {
+    const h = harness({ flight: { pausable: true } });
+    expect(h.manager.back()).toBe(false); // nothing entered yet
+
+    await atMenu(h);
+    expect(h.manager.back()).toBe(false); // the menu: the page's own Back applies
+    await h.manager.go('station', {});
+    expect(h.manager.back()).toBe(false);
+    expect(h.scene('station').pauses).toBe(0);
+
+    await h.manager.go('starmap', undefined);
+    await h.manager.go('flight', { destination: 'cinder4' });
+    h.manager.pause();
+    expect(h.manager.paused).toBe(true);
+    // Paused already: the pause menu's own entry is what resumes, not this.
+    expect(h.manager.back()).toBe(false);
+    expect(h.scene('flight').pauses).toBe(1);
+    expect(h.scene('flight').resumes).toBe(0);
   });
 });
 

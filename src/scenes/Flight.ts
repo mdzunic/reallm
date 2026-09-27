@@ -23,6 +23,7 @@ import { cargoCap, maxHp } from '@/core/Save';
 import { FLIGHT_ASSETS, PLANET_ART } from '@/data/assets';
 import { CHAPTER_CARDS, ENEMIES, MISSIONS, PLANETS, TIPS, type DialogueId, type PlanetDef, type TipId } from '@/data/index';
 import { Economy } from '@/systems/Economy';
+import { tipDue, tipKey } from '@/systems/Guidance';
 import { CARD, cardDue, cardKey, LINE_LEDGER } from '@/systems/StoryBeats';
 import { showChapterCard } from '@/ui/ChapterCard';
 import { dialogueLayer } from '@/ui/DialogueUI';
@@ -115,6 +116,8 @@ export class FlightScene extends UiScene<'flight'> {
   #view: FlightView | null = null;
   #hud: Hud | null = null;
   #pauseMenu: PauseMenu | null = null;
+  /** SPEC-036 §4.3: the rotate block, read every step. */
+  #rotate: RotateOverlay | null = null;
   #firstLanding = false;
 
   #landingT = -1;
@@ -350,11 +353,13 @@ export class FlightScene extends UiScene<'flight'> {
     if (!beats.enabled || !cardDue(planet, save.progress.visits, beats.session)) return;
     beats.session.add(cardKey(planet));
     const reduceMotion = services.settings.get().reduceMotion;
-    // §4.2, Mounting: inside the overlay layer, so the card's z 54 reads
-    // against the toast rack's 55 and a toast still lands over it. The host is
-    // a `display: contents` box, the pattern the damage-number layer uses.
+    // §4.2, Mounting: directly under `#ui`, next to the reveals, films and
+    // endings, so the card's z 54 reads against the rotate cover's 51 and
+    // stays above it (SPEC-036 §4.3). The toast rack's 55 is in the same
+    // stacking context, so a toast still lands over the card. The host is a
+    // `display: contents` box, the pattern the damage-number layer uses.
     const host = el('div', 'chapter-card-host');
-    this.ui.mount(host, 'overlay');
+    uiRootEl().append(host);
     let remove: (() => void) | null = null;
     const timer = setTimeout(() => {
       remove = showChapterCard(host, CHAPTER_CARDS[planet], reduceMotion);
@@ -362,7 +367,7 @@ export class FlightScene extends UiScene<'flight'> {
     this.disposer.add(() => {
       clearTimeout(timer);
       remove?.();
-      this.ui.unmount(host);
+      host.remove();
     });
   }
 
@@ -401,10 +406,17 @@ export class FlightScene extends UiScene<'flight'> {
 
     // SPEC-015 §6 / E22: the same auto-pause the surface takes on a rotation
     // into portrait, through the pause button's own path (AC-32).
+    // SPEC-036 §4.3: the block also holds the trip — no `flight.update` while
+    // the phone is upright, so a flight entered upright holds its launch until
+    // the phone is turned.
     const rotate = new RotateOverlay(uiRootEl(), services.events, {
       onBlocked: () => void services.scenes.pause(),
     });
-    this.disposer.add(() => rotate.dispose());
+    this.#rotate = rotate;
+    this.disposer.add(() => {
+      rotate.dispose();
+      this.#rotate = null;
+    });
     // SPEC-015 §7, AC-38: held for the trip, released when the scene leaves.
     this.disposer.add(holdWakeLock());
 
@@ -467,6 +479,8 @@ export class FlightScene extends UiScene<'flight'> {
     // SPEC-032 §4.2: the same listener ends the launch shot — a tap, or a
     // fresh key that is not Space — and leaves the simulation alone.
     const skip = (event: Event): void => {
+      // SPEC-036 §4.3: a tap on the rotate overlay is not a skip.
+      if (this.#rotate?.blocked === true) return;
       if (this.#landingT >= 0) this.#landingSkipped = true;
       else if (!this.#launchDone && this.#pauseMenu?.open !== true && skipsLaunch(event)) this.#endLaunch();
     };
@@ -566,6 +580,9 @@ export class FlightScene extends UiScene<'flight'> {
     if (input.scheme === 'touch' && input.buttons.pause.justPressed) {
       this.services.scenes.pause();
     }
+    // SPEC-036 §4.3, E65: the rotate block holds the trip — no `flight.update`,
+    // and the launch shot and the view freeze with it.
+    if (this.#rotate?.blocked === true) return;
 
     if (this.#skipPending) {
       this.#skipPending = false;
@@ -623,7 +640,10 @@ export class FlightScene extends UiScene<'flight'> {
     frame.throttleUp = state.buttons.throttleUp.justPressed;
     frame.throttleDown = state.buttons.throttleDown.justPressed;
     frame.mouseSteer = this.services.settings.flightMouseSteer && state.scheme === 'keyboard' && state.aim.hasPointer;
-    if (state.aim.hasPointer) {
+    // SPEC-036 §4.1: only the keyboard scheme aims by the mouse. A finger has
+    // no hover, so on touch the guns look down the ship's own lane — the
+    // reticle, ARIA's assist cone and touch auto-fire all key off it.
+    if (state.scheme === 'keyboard' && state.aim.hasPointer) {
       // The pointer's ray, dropped onto the convergence plane (§4.7).
       const scratch = this.#aimScratch;
       scratch.set(state.aim.ndcX, state.aim.ndcY, 0.5).unproject(this.camera).sub(this.camera.position);
@@ -632,7 +652,7 @@ export class FlightScene extends UiScene<'flight'> {
       frame.aimX = this.camera.position.x + scratch.x * t;
       frame.aimY = this.camera.position.y + scratch.y * t;
     } else {
-      // Touch aims straight ahead; the assist and auto-fire do the rest (§4.7).
+      // Straight ahead; the assist and auto-fire do the rest (§4.7).
       frame.aimX = flight.ship.x;
       frame.aimY = flight.ship.y;
     }
@@ -800,9 +820,11 @@ export class FlightScene extends UiScene<'flight'> {
     const aria = this.#aria;
     if (aria === null || !this.#tipsOn()) return;
     const settings = this.services.settings;
-    if (settings.get().tipsSeen.includes(id)) return;
-    aria.show(this.services.input.state.scheme === 'touch' ? TIPS[id].touch : TIPS[id].keyboard, TIP_MS);
-    settings.set({ tipsSeen: [...settings.get().tipsSeen, id] });
+    // SPEC-036 §4.2: seen per wording — the live scheme's is the one asked.
+    const scheme = this.services.input.state.scheme;
+    if (!tipDue(settings.get().tipsSeen, id, scheme)) return;
+    aria.show(scheme === 'touch' ? TIPS[id].touch : TIPS[id].keyboard, TIP_MS);
+    settings.set({ tipsSeen: [...settings.get().tipsSeen, tipKey(id, scheme)] });
   }
 
   /** Whether this run shows tips at all (§4.8): never under `?perf`, never with guidance turned down. */
@@ -910,6 +932,12 @@ export class FlightScene extends UiScene<'flight'> {
       // SPEC-032 AC: how far through the launch shot, 1 once it is over.
       info['launch'] = this.#launchDone ? 1 : Number(Math.min(1, this.#view?.launch ?? 1).toFixed(3));
       info['cameraZ'] = Number(this.camera.position.z.toFixed(3));
+      // SPEC-036 §4.1: where the guns look and where the ship is, in metres —
+      // on touch the two agree, unless ARIA's cone captured a ship ahead.
+      info['reticleX'] = Number(flight.reticle.x.toFixed(2));
+      info['reticleY'] = Number(flight.reticle.y.toFixed(2));
+      info['shipX'] = Number(flight.ship.x.toFixed(2));
+      info['shipY'] = Number(flight.ship.y.toFixed(2));
     }
     return info;
   }

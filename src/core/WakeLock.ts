@@ -105,3 +105,18 @@ export function holdWakeLock(deps: WakeLockDeps = browserWakeLockDeps()): () => 
     void sentinel?.release().catch((error: unknown) => log.warn('wakelock', 'the wake lock would not release', error));
   };
 }
+
+/**
+ * SPEC-036 §4.9: hold the screen lock while `run` is pending — a film played
+ * by the story director, which runs outside the gameplay scenes' own holds (the
+ * prologue at New Game, a departure, the interludes and endings). Released on
+ * resolve and on reject alike; with no `wakeLock` at all nothing is requested.
+ */
+export async function whileHeld<T>(run: () => Promise<T>, deps?: WakeLockDeps): Promise<T> {
+  const release = holdWakeLock(deps ?? browserWakeLockDeps());
+  try {
+    return await run();
+  } finally {
+    release();
+  }
+}

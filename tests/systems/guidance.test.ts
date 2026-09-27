@@ -16,6 +16,8 @@ import {
   focusObjective,
   objectiveTarget,
   padTarget,
+  tipDue,
+  tipKey,
   HEADWAY_METRES,
   NUDGE_REPEAT_SECONDS,
   PATH_MAX_POINTS,
@@ -67,6 +69,7 @@ function progress(objective: Objective, done: boolean, value = 0, target = 1): O
 // ------------------------------------------------------------------- exports
 
 describe('the module surface (SPEC-027 AC-1)', () => {
+  // SPEC-036 §3 adds the two tip helpers, `tipKey` and `tipDue`.
   it('exports exactly the runtime names of §3', () => {
     expect(Object.keys(Guidance).sort()).toEqual(
       [
@@ -86,8 +89,35 @@ describe('the module surface (SPEC-027 AC-1)', () => {
         'focusObjective',
         'objectiveTarget',
         'padTarget',
+        'tipDue',
+        'tipKey',
       ].sort(),
     );
+  });
+});
+
+// ---------------------------------------------------------------------- tips
+
+describe('tips per scheme (SPEC-036 §4.2)', () => {
+  it('tipKey is the bare id for the keyboard wording and <id>@touch for the touch one', () => {
+    expect(tipKey('move', 'keyboard')).toBe('move');
+    expect(tipKey('move', 'touch')).toBe('move@touch');
+    // Every other scheme reads the keyboard wording.
+    expect(tipKey('flight_throttle', 'gamepad')).toBe('flight_throttle');
+  });
+
+  it('tipDue is true while the entry for the live scheme is missing', () => {
+    expect(tipDue([], 'move', 'keyboard')).toBe(true);
+    expect(tipDue([], 'move', 'touch')).toBe(true);
+    // A stored bare id is the keyboard wording: seen on the keyboard, still
+    // due on touch once (36-c).
+    expect(tipDue(['move'], 'move', 'keyboard')).toBe(false);
+    expect(tipDue(['move'], 'move', 'touch')).toBe(true);
+    expect(tipDue(['move', 'move@touch'], 'move', 'touch')).toBe(false);
+    // …and a touch-only record leaves the keyboard line due.
+    expect(tipDue(['move@touch'], 'move', 'keyboard')).toBe(true);
+    // Other tips' entries say nothing about this one.
+    expect(tipDue(['map', 'map@touch'], 'move', 'touch')).toBe(true);
   });
 });
 

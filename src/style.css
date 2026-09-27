@@ -432,6 +432,89 @@ button.touch-button {
   display: none;
 }
 
+/* SPEC-036 §4.12: the two "where to touch" ghosts of a first landing. They
+   take no pointer events, point at the zones they name, mirror with the stick,
+   pulse at 1 Hz — and hold still under reduce motion. */
+.touch-zone {
+  position: absolute;
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+  color: var(--ink);
+  opacity: 0.55;
+  text-shadow: 0 0 2px #000;
+  animation: touch-zone-pulse 1s ease-in-out infinite;
+}
+
+html.reduce-motion .touch-zone {
+  animation: none;
+}
+
+.touch-zone-move {
+  left: 20%;
+  top: 72%;
+  width: 112px;
+  height: 112px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-end;
+  border: 2px solid var(--ink);
+  border-radius: 50%;
+  box-shadow: 0 0 2px #000;
+}
+
+.touch-controls[data-side='right'] .touch-zone-move {
+  left: 80%;
+}
+
+.touch-zone-knob {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 48px;
+  height: 48px;
+  margin: -24px 0 0 -24px;
+  border-radius: 50%;
+  background: var(--ink);
+  box-shadow: 0 0 2px #000;
+}
+
+.touch-zone-label {
+  margin: 0;
+  font-size: var(--type-sm);
+  letter-spacing: 0.2em;
+  white-space: nowrap;
+}
+
+/* The label hangs under the ring, in flow: the ring's bottom edge, then down. */
+.touch-zone-move .touch-zone-label {
+  transform: translateY(calc(100% + 8px));
+}
+
+.touch-zone-aim {
+  left: 75%;
+  top: 60%;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.touch-controls[data-side='right'] .touch-zone-aim {
+  left: 25%;
+}
+
+.touch-zone-chevron {
+  margin: 0;
+  font-size: var(--type-xl);
+  line-height: 1;
+}
+
+@keyframes touch-zone-pulse {
+  50% {
+    opacity: 0.25;
+  }
+}
+
 /* --------------------------------------------- stats overlay (SPEC-002 §4.6) */
 
 /* Top-left, offset far enough below `.scene-tag` that both stay legible
@@ -632,6 +715,7 @@ button.slot-button {
 .ui-layer-panel { z-index: 30; }
 .ui-layer-overlay { z-index: 50; }
 
+/* UiRoot's own fade sits directly under #ui, like the toast rack it covers. */
 .ui-fade { z-index: 60; }
 
 /* Anything interactive opts back into pointer events (SPEC-014 §2).
@@ -667,7 +751,7 @@ button.slot-button {
 @media (prefers-reduced-transparency: reduce) {
   .panel,
   .install-hint,
-  .overlay-panel,
+  .overlay-panel:not(.overlay-rotate),
   .toast {
     background: var(--panel);
     backdrop-filter: none;
@@ -677,7 +761,7 @@ button.slot-button {
 
 html.quality-low .panel,
 html.quality-low .install-hint,
-html.quality-low .overlay-panel,
+html.quality-low .overlay-panel:not(.overlay-rotate),
 html.quality-low .toast {
   background: var(--panel);
   backdrop-filter: none;
@@ -731,6 +815,9 @@ html.quality-low .toast {
 }
 
 /* ------------------------------------------------------------------ toasts */
+/* The rack sits directly under #ui (see `UiRoot`): at 55 a toast lands over a
+   chapter card (54, SPEC-023 §4.2), and it stays under reveals (64) and films
+   (65). */
 .toast-rack {
   position: absolute;
   top: max(10px, env(safe-area-inset-top));
@@ -741,6 +828,13 @@ html.quality-low .toast {
   gap: 6px;
   align-items: center;
   z-index: 55;
+}
+
+/* SPEC-036 §4.3: while the rotate cover is up, the toasts go under it with
+   every other layer of UiRoot. Only the chapter card keeps its place above
+   the cover. */
+#ui:has(> .overlay-rotate.is-visible) > .toast-rack {
+  z-index: 50;
 }
 
 /* §4.5: toasts wear the same glass as the panels. */
@@ -1757,9 +1851,31 @@ html.reduce-motion .dialogue-dim {
   animation: hud-pulse 1.2s ease-in-out infinite;
 }
 
+/* SPEC-036 §4.3, E65: the rotate block is a cover, not a centred box — the
+   whole viewport in near-black at z 51: above the pause frame (35) and every
+   layer of UiRoot (the overlay layer is 50, and the toasts drop to 50 while
+   it is up), so Resume cannot be pressed upright. Chapter cards (54), reveals
+   (64), films (65) and endings (70, 80) keep their places above it, and films
+   letterbox in portrait (E34). It wears no glass, so the quality-low and
+   reduced-transparency rules above leave it alone. */
 .overlay-rotate {
+  inset: 0;
+  transform: none;
+  border: none;
+  border-radius: 0;
+  box-shadow: none;
+  background: rgb(0 0 0 / 92%);
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
   flex-direction: column;
+  align-items: center;
+  justify-content: center;
   gap: 6px;
+  z-index: 51;
+}
+
+.overlay-rotate.is-visible {
+  display: flex;
 }
 
 .rotate-glyph {
@@ -3417,10 +3533,11 @@ html.reduce-motion .film-describe {
 
 /* ================================================================ SPEC-023 */
 /* The chapter card (§4.2): four lines centred in the upper third of the
-   flight, inside the overlay layer at z 54 — over the HUD and the panels,
-   below the toast rack (55) and the film layer (65). It is text over the
+   flight, at z 54 directly under #ui — over the HUD, the panels and the
+   overlay layer (50), below the toast rack (55) and the film layer (65).
+   SPEC-036 §4.3 keeps it above the rotate cover (51). It is text over the
    launch and never takes a pointer. The host box generates no box of its own,
-   so the card stacks against the rack as a sibling. */
+   so the card stacks against the rack and the cover as a sibling. */
 .chapter-card-host {
   display: contents;
 }
@@ -4077,6 +4194,75 @@ html.quality-low .screen::before {
   min-height: 56px;
 }
 
+/* SPEC-036 §4.8: a short landscape screen — a phone on its side, 293–500 px
+   tall, where the desktop rail cannot fit. A screen with tabs lays out as
+   head, body, one horizontal tab strip, then foot: the empty mirror column
+   goes, the channel line hides, and the title shares its row with the
+   station's containment level, so the body keeps at least half the height.
+   After the width block, so a 667 × 375 phone gets the strip, not the grid. */
+@media (orientation: landscape) and (max-height: 500px) {
+  .screen {
+    padding-top: max(6px, env(safe-area-inset-top));
+    padding-bottom: max(6px, env(safe-area-inset-bottom));
+  }
+
+  .screen-frame,
+  .screen.has-rail .screen-frame {
+    grid-template-areas:
+      'head'
+      'body'
+      'rail'
+      'foot';
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: auto minmax(0, 1fr) auto auto;
+  }
+
+  .screen-rail {
+    display: flex;
+    flex-direction: row;
+    gap: 6px;
+    padding: 6px 8px;
+    border-right: none;
+    border-top: 1px solid var(--rule);
+  }
+
+  /* Heights stay the 44 px floor, 56 px under `.screen.is-touch`. */
+  .screen-tab {
+    flex: 1 1 0;
+    width: auto;
+    min-width: 0;
+    padding-left: 4px;
+    padding-right: 4px;
+    letter-spacing: 0.04em;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .screen-head {
+    padding: 6px 14px;
+  }
+
+  .screen-channel {
+    display: none;
+  }
+
+  .screen-head-text {
+    flex-direction: row;
+    flex-wrap: wrap;
+    align-items: baseline;
+    column-gap: 12px;
+  }
+}
+
+/* …and at 360 px and under, a footer that holds only the build label goes;
+   the menu's E8 storage banner keeps its footer. */
+@media (orientation: landscape) and (max-height: 360px) {
+  .screen-foot:not(:has(.save-banner)) {
+    display: none;
+  }
+}
+
 /* §4.9: screens and panel swaps fade over 120 ms — opacity only, nothing
    moves — and reduce-motion stills it. */
 .screen-frame,
@@ -4109,8 +4295,35 @@ html.reduce-motion .screen-body > * {
   display: flex;
   flex-direction: column;
   align-items: center;
-  justify-content: center;
+  /* SPEC-036 §4.8: content taller than the body starts at its top and
+     scrolls, rather than being centred out of reach above it. */
+  justify-content: safe center;
   gap: 14px;
+}
+
+/* SPEC-036 §4.8: on a short landscape screen the actions form two columns and
+   the Controls sheet opens beside them, so Resume stays in reach. */
+@media (orientation: landscape) and (max-height: 500px) {
+  .screen-pause .screen-body {
+    flex-direction: row;
+    align-items: flex-start;
+  }
+
+  .pause-actions {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(150px, 1fr));
+    gap: 8px 10px;
+    /* The column layout's 220 px floor would let the row squeeze the grid
+       below its two 150 px columns, and the second would run under the sheet
+       (the touch sheet at 667 px). Its floor here is what the columns need. */
+    min-width: min-content;
+  }
+
+  .pause-sheet {
+    margin-top: 0;
+    max-height: 100%;
+    overflow-y: auto;
+  }
 }
 
 /* ------------------------------------------------------- the wallet strip */

@@ -139,7 +139,7 @@ test.describe('keyboard/mouse driver against the real DOM', () => {
     expect(schemes).toEqual({ keyboard: 'keyboard', pen: 'touch', mouse: 'keyboard' });
   });
 
-  test('releaseAll on blur, a hidden tab, pointercancel and a scene transition (AC-10)', async ({ page }) => {
+  test('releaseAll on blur, a hidden tab and a scene transition; a mouse pointercancel drops its button (AC-10)', async ({ page }) => {
     await start(page, '/?scene=surface');
     await settle(page, 'surface');
 
@@ -170,16 +170,20 @@ test.describe('keyboard/mouse driver against the real DOM', () => {
     expect(hidden.before).toEqual({ x: 1, y: 0 });
     expect(hidden.after).toEqual({ x: 0, y: 0 });
 
+    // SPEC-036 §4.7: a cancelled pointer releases its own role and nothing
+    // else — for a mouse, the button it held; the keys stay held.
     const cancel = await page.evaluate(() => {
+      const canvas = document.getElementById('game') as HTMLCanvasElement;
       window.dispatchEvent(new KeyboardEvent('keydown', { code: 'KeyA', bubbles: true, cancelable: true }));
-      const before = { ...window.__reallm.input().move };
+      canvas.dispatchEvent(new PointerEvent('pointerdown', { pointerType: 'mouse', button: 0, clientX: 1, clientY: 1, bubbles: true, cancelable: true }));
+      const before = { move: { ...window.__reallm.input().move }, fire: window.__reallm.input().buttons['fire']?.down };
       window.dispatchEvent(new PointerEvent('pointercancel', { pointerType: 'mouse', bubbles: true, cancelable: true }));
-      const after = { ...window.__reallm.input().move };
+      const after = { move: { ...window.__reallm.input().move }, fire: window.__reallm.input().buttons['fire']?.down };
       window.dispatchEvent(new KeyboardEvent('keyup', { code: 'KeyA', bubbles: true, cancelable: true }));
       return { before, after };
     });
-    expect(cancel.before).toEqual({ x: -1, y: 0 });
-    expect(cancel.after).toEqual({ x: 0, y: 0 });
+    expect(cancel.before).toEqual({ move: { x: -1, y: 0 }, fire: true });
+    expect(cancel.after).toEqual({ move: { x: -1, y: 0 }, fire: false });
 
     const transition = await page.evaluate(async () => {
       window.dispatchEvent(new KeyboardEvent('keydown', { code: 'KeyS', bubbles: true, cancelable: true }));

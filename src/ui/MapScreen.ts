@@ -86,6 +86,8 @@ export class MapScreen {
   #zoomed = false;
   #open = false;
   #disposed = false;
+  /** SPEC-036 §4.4: the map's back-stack entry while it is open. */
+  #releaseBack: (() => void) | null = null;
 
   constructor(deps: MapScreenDeps) {
     this.#deps = deps;
@@ -124,17 +126,11 @@ export class MapScreen {
       this.#deps.close();
     });
 
-    // §4.5, Keys: Escape closes the map and stops there, so `main.ts` never
-    // opens the pause menu behind it; `+` and `−` toggle the zoom.
+    // §4.5, Keys: `+` and `−` toggle the zoom. Escape (and the system Back)
+    // close the map through its back-stack entry and stop there, so the pause
+    // menu never opens behind it (SPEC-036 §4.4).
     this.#onKey = (event: KeyboardEvent): void => {
       if (!this.#open) return;
-      if (event.key === 'Escape') {
-        event.preventDefault();
-        event.stopPropagation();
-        event.stopImmediatePropagation();
-        this.#deps.close();
-        return;
-      }
       if (event.code === 'Equal' || event.code === 'NumpadAdd' || event.code === 'Minus' || event.code === 'NumpadSubtract') {
         event.preventDefault();
         this.#toggleZoom();
@@ -154,6 +150,7 @@ export class MapScreen {
     this.#zoomed = false;
     this.#zoom.textContent = 'Zoom 2×';
     this.#deps.ui.mount(this.#root, 'panel');
+    this.#releaseBack = this.#deps.ui.pushBack(() => this.#deps.close());
     this.redraw(frame, explored);
   }
 
@@ -170,6 +167,8 @@ export class MapScreen {
   close(): void {
     if (!this.#open) return;
     this.#open = false;
+    this.#releaseBack?.();
+    this.#releaseBack = null;
     this.#deps.ui.unmount(this.#root);
   }
 

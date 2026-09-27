@@ -8,6 +8,7 @@ import { COMPANIONS, ITEMS, MISSIONS, TUNING, UPGRADES, type MissionDef } from '
 import { discountTokens } from '@/systems/Economy';
 import { CARGO_TOAST_SECONDS, SHIPPED_TOAST_TEXT } from '@/systems/Pickups';
 import {
+  surfaceHoldReason,
   abandonMission,
   acceptMission,
   CAMERA_DISTANCE,
@@ -72,6 +73,19 @@ const GATED: MissionDef = MISSIONS.c1_m2;
 // SPEC-012 12-k / PLAN R16: the pad terminal is allowed to have nothing on it.
 // What it may not do is read empty, which is how a landing on The Hive with the
 // gauntlet unflown looks like a broken game.
+describe('surfaceHoldReason (SPEC-036 §4.3)', () => {
+  it('orders beat, rotate, ui, modal', () => {
+    const none = { beats: 0, rotate: false, ui: 0, modal: 0 };
+    expect(surfaceHoldReason(none)).toBeNull();
+    expect(surfaceHoldReason({ beats: 1, rotate: true, ui: 1, modal: 1 })).toBe('beat');
+    expect(surfaceHoldReason({ beats: 0, rotate: true, ui: 1, modal: 1 })).toBe('rotate');
+    expect(surfaceHoldReason({ beats: 0, rotate: false, ui: 1, modal: 1 })).toBe('ui');
+    expect(surfaceHoldReason({ beats: 0, rotate: false, ui: 0, modal: 1 })).toBe('modal');
+    // The rotate block alone holds, as the map does.
+    expect(surfaceHoldReason({ ...none, rotate: true })).toBe('rotate');
+  });
+});
+
 describe('padEmptyText (12-k)', () => {
   it("names the flight mission the Hive's surface work waits on", () => {
     expect(padEmptyText(save(), 'hive')).toBe(

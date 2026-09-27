@@ -10,7 +10,9 @@
 // failure all survive scene swaps.
 import type { MusicId } from '@/core/Audio';
 import type { GameServices } from '@/core/Services';
+import { whileHeld } from '@/core/WakeLock';
 import { FILMS, type FilmId } from '@/data/films';
+import { uiLayers } from '@/ui/dom';
 import { FilmPlayer, type FilmManifest, type FilmResult, type FilmSnapshot } from '@/ui/FilmPlayer';
 
 /** §4.7: the film's music comes in and goes out on this crossfade. */
@@ -92,18 +94,28 @@ function createDirector(services: GameServices): StoryDirector {
       const wasEnabled = services.input.enabled;
       services.input.setEnabled(false);
       services.audio.music(def.music, { fadeMs: FILM_MUSIC_FADE_MS });
+      // SPEC-036 §4.4, 36-e: the film owns the screen. Its back-stack entry
+      // does nothing, so a system Back is swallowed rather than leaving the
+      // page; Escape keeps E33's rule inside the player's own key capture.
+      const releaseBack = uiLayers(services.uiRoot).pushBack(() => {});
       try {
-        return await player.play(def, {
-          manifest: await manifest(),
-          reduceMotion: services.settings.get().reduceMotion,
-          videoBroken,
-          // 22-h: a refused voice returns null and the film goes on.
-          onCue: (cue) => void services.audio.play(cue.sound, { volume: cue.volume ?? 1, priority: 2 }),
-          onVideoBroken: () => {
-            videoBroken = true;
-          },
-        });
+        // SPEC-036 §4.9: a 93 s prologue watched without a touch is longer
+        // than a phone's auto-lock — the screen stays on from the film's start
+        // to its end, skip or failure. A refusal is ignored (15-e).
+        return await whileHeld(async () =>
+          player.play(def, {
+            manifest: await manifest(),
+            reduceMotion: services.settings.get().reduceMotion,
+            videoBroken,
+            // 22-h: a refused voice returns null and the film goes on.
+            onCue: (cue) => void services.audio.play(cue.sound, { volume: cue.volume ?? 1, priority: 2 }),
+            onVideoBroken: () => {
+              videoBroken = true;
+            },
+          }),
+        );
       } finally {
+        releaseBack();
         session.add(id);
         services.audio.music(opts.musicAfter, { fadeMs: FILM_MUSIC_FADE_MS });
         services.input.setEnabled(wasEnabled);

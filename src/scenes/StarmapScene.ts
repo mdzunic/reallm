@@ -540,6 +540,15 @@ export class StarmapScene extends UiScene<'starmap'> {
     this.#veil = null;
   }
 
+  /**
+   * SPEC-036 §4.4: Escape and the system Back, once no layer is open, run the
+   * Back control — to the station.
+   */
+  back(): boolean {
+    this.#back();
+    return true;
+  }
+
   /** AC-57. */
   #back(): void {
     if (this.#leaving) return;

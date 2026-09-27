@@ -11,7 +11,7 @@
 import type { FilmSpeaker } from '@/data/films';
 import { skipAccepted } from '@/systems/StoryBeats';
 import { SPEAKER_NAMES } from '@/ui/DialogueUI';
-import { el, h, testId } from '@/ui/dom';
+import { el, h, testId, uiLayers } from '@/ui/dom';
 
 /** What the scene hands over when the arena wakes (§4.4, Overlay). */
 export interface RevealContent {
@@ -35,6 +35,12 @@ export class RevealOverlay {
   #onSkip: (() => void) | null = null;
   /** `performance.now()` at `show()` — the wall clock the skip grace reads. */
   #startedWall = 0;
+  /**
+   * SPEC-036 §4.4, 36-e: the reveal owns the screen, so it sits on top of the
+   * back-stack with an `onBack` that does nothing — a system Back is not a
+   * skip, and Escape keeps E33's rule through the key capture below.
+   */
+  #releaseBack: (() => void) | null = null;
 
   constructor(host: HTMLElement) {
     this.#host = host;
@@ -74,6 +80,7 @@ export class RevealOverlay {
     this.#layer = layer;
     this.#title = title;
     this.#caption = caption;
+    this.#releaseBack = uiLayers(this.#host).pushBack(() => {});
     window.addEventListener('keydown', this.#onKey, true);
   }
 
@@ -85,6 +92,8 @@ export class RevealOverlay {
 
   hide(): void {
     if (this.#layer === null) return;
+    this.#releaseBack?.();
+    this.#releaseBack = null;
     window.removeEventListener('keydown', this.#onKey, true);
     this.#layer.remove();
     this.#layer = null;

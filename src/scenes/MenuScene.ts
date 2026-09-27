@@ -75,6 +75,8 @@ export class MenuScene extends UiScene<'menu'> {
   #savePanel: SavePanel | null = null;
   #settings: SettingsPanel | null = null;
   #openSub: SubPanel = null;
+  /** SPEC-036 §4.4: the open sub-panel's back-stack entry. */
+  #releaseSub: (() => void) | null = null;
   /** Which slot has its import paste field open in the Load list. */
   #importing: SlotId | null = null;
   #leaving = false;
@@ -318,6 +320,8 @@ export class MenuScene extends UiScene<'menu'> {
     screen.body.append(this.#root);
     this.ui.mount(screen.root, 'panel');
     this.disposer.add(() => {
+      this.#releaseSub?.();
+      this.#releaseSub = null;
       this.ui.unmount(screen.root);
       screen.dispose();
       this.#root = null;
@@ -368,9 +372,21 @@ export class MenuScene extends UiScene<'menu'> {
     this.#savePanel?.refresh();
   }
 
-  #toggleSub(panel: Exclude<SubPanel, null>): void {
-    this.#openSub = this.#openSub === panel ? null : panel;
+  /**
+   * Opens `panel`, or closes it when it is the one open; `null` closes
+   * whichever is. SPEC-036 §4.4: an open sub-panel is a back-stack entry, so
+   * Escape and the system Back close it — and with none open, Back at the menu
+   * root leaves the page.
+   */
+  #toggleSub(panel: SubPanel): void {
+    this.#openSub = panel === null || this.#openSub === panel ? null : panel;
     this.#importing = null;
+    if (this.#openSub === null) {
+      this.#releaseSub?.();
+      this.#releaseSub = null;
+    } else {
+      this.#releaseSub ??= this.ui.pushBack(() => this.#toggleSub(null));
+    }
     this.#renderSub();
   }
 

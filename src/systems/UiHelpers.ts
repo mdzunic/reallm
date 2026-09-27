@@ -490,13 +490,18 @@ export function stageResetText(
 export interface SurfaceHoldState {
   /** SPEC-023 §4.4: a held story beat — a film, a reveal, the ending sequence. */
   beats: number;
-  /** SPEC-026 §4.6 / SPEC-028 §4.6: the full-screen map, the quick picker. */
+  /** SPEC-036 §4.3: the rotate block — a phone held upright, or entered upright. */
+  rotate: boolean;
+  /**
+   * SPEC-026 §4.6 / SPEC-028 §4.6: the full-screen map, the quick picker —
+   * and, since SPEC-036 §4.10, the pad terminal.
+   */
   ui: number;
   /** SPEC-034 §4.6: open modal dialogues and the verdict choice. */
   modal: number;
 }
 
-export type SurfaceHold = 'beat' | 'ui' | 'modal' | null;
+export type SurfaceHold = 'beat' | 'rotate' | 'ui' | 'modal' | null;
 
 /**
  * SPEC-034 §4.6: why the surface step is holding, or `null` when it is not.
@@ -504,11 +509,12 @@ export type SurfaceHold = 'beat' | 'ui' | 'modal' | null;
  * A modal line takes the player's movement, aim, healing and fire away, so the
  * enemies should not be able to act either: the world waits for a modal
  * dialogue and the verdict choice exactly as it already waits for the map. The
- * order is the order the step checks them in — a beat outranks the map, which
- * outranks a line.
+ * order is the order the step checks them in — a beat outranks the rotate
+ * block (SPEC-036 §4.3), which outranks the map, which outranks a line.
  */
 export function surfaceHoldReason(state: SurfaceHoldState): SurfaceHold {
   if (state.beats > 0) return 'beat';
+  if (state.rotate) return 'rotate';
   if (state.ui > 0) return 'ui';
   if (state.modal > 0) return 'modal';
   return null;

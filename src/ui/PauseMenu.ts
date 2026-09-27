@@ -1,9 +1,11 @@
 // The pause menu of a pausable scene (SPEC-003 §4.5, SPEC-014 §4.7). It is a
 // UI layer inside the scene, never a scene of its own (D-1), and the game
 // leaves it only on an explicit action: a tap on Resume, or Enter / Space
-// while it holds focus — which a focused button gives us for free. Escape and
-// P are handled by the composition root, which toggles pause and resume; the
-// touch pause button and the app-hidden path arrive through the scene (AC-82).
+// while it holds focus — which a focused button gives us for free. While it is
+// open it is an entry on the back-stack (SPEC-036 §4.4), so Escape and the
+// system Back resume through the same path Resume does, once every layer above
+// it has closed; P is the composition root's toggle, and the touch pause
+// button and the app-hidden path arrive through the scene (AC-82).
 //
 // §4.7: Resume, Settings (the shared panel), Controls (a scheme-aware
 // cheat-sheet, SPEC-005), Save & Quit (flush the save, back to the menu).
@@ -71,15 +73,21 @@ const CONTROL_SHEETS = {
     ['Track mission', 'T'],
     ['Pause', 'Esc or P'],
   ],
+  // SPEC-036 §4.11: the words match the controls — a drag on the right is
+  // the fire zone, never a throttle, and the launcher fires from its slot.
   touch: [
     ['Move / steer', 'Drag on the left side'],
-    ['Aim & fire', 'Drag on the right side'],
-    ['Throttle (flight)', 'Drag up / down on the right'],
+    ['Aim & fire', 'Drag on the right side — auto-fire shoots for you'],
+    ['Throttle (flight)', '▲ / ▼ buttons'],
     // SPEC-028 §4.5: the bar doubles as the touch buttons.
     ['Switch weapon', 'SWAP, or tap a weapon on the bar'],
+    ['Launcher', 'Tap its slot to fire it'],
+    ['Heal', 'ITEM, or tap the heal slot on the bar'],
     ['Use a pack', 'Tap it on the bar; hold to choose'],
-    ['Interact / Use item', 'On-screen buttons'],
-    ['Pause', 'Pause button'],
+    ['Interact', 'USE'],
+    ['Map', 'Tap the minimap'],
+    ['Track mission', 'Tap the tracker'],
+    ['Pause', 'Pause button, or the Back gesture'],
   ],
   gamepad: [['Controls', 'Gamepad bindings follow the keyboard sheet']],
 } as const;
@@ -93,10 +101,14 @@ export class PauseMenu {
   readonly #settings: SettingsPanel;
   readonly #skip: { readonly button: HTMLButtonElement; readonly hooks: PauseSkip } | null;
   readonly #recall: { readonly button: HTMLButtonElement; readonly hooks: PauseRecall } | null;
+  readonly #onResume: () => void;
+  /** SPEC-036 §4.4: this menu's back-stack entry while it is open. */
+  #releaseBack: (() => void) | null = null;
   #quitting = false;
 
   constructor(deps: PauseDeps, onResume: () => void, skip?: PauseSkip, recall?: PauseRecall) {
     this.#deps = deps;
+    this.#onResume = onResume;
     // SPEC-031 §4.4: the pause menu wears the console frame too — SYSTEM HOLD
     // on the channel — while staying a UI layer inside its scene, never a
     // scene of its own (D-1). Hidden until `show()`.
@@ -193,6 +205,8 @@ export class PauseMenu {
       recall.button.disabled = !allowed;
     }
     this.#root.classList.add('is-visible');
+    // SPEC-036 §4.4: Escape and the system Back resume, as Resume does.
+    this.#releaseBack ??= uiLayers(this.#deps.uiRoot).pushBack(() => this.#onResume());
     this.#resume.focus();
   }
 
@@ -200,9 +214,13 @@ export class PauseMenu {
     this.#root.classList.remove('is-visible');
     this.#controls.classList.add('is-hidden');
     this.#settings.hide();
+    this.#releaseBack?.();
+    this.#releaseBack = null;
   }
 
   dispose(): void {
+    this.#releaseBack?.();
+    this.#releaseBack = null;
     this.#settings.dispose();
     this.#screen.dispose();
   }

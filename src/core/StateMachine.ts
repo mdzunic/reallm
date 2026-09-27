@@ -40,6 +40,12 @@ export interface Scene<K extends SceneId = SceneId> {
   readonly pausable: boolean;
   pause?(): void;
   resume?(): void;
+  /**
+   * SPEC-036 §4.4: the scene's own Back, asked once no UI layer is open; true
+   * when it acted. The star map implements it (its Back control, to the
+   * station); creation's comes with SPEC-044.
+   */
+  back?(): boolean;
 }
 
 export type SceneFactory = { [K in SceneId]: (services: GameServices) => Scene<K> };
@@ -188,6 +194,23 @@ export class SceneManager {
     if (!this.#paused) return;
     this.#paused = false;
     this.#current?.resume?.();
+  }
+
+  /**
+   * SPEC-036 §4.4: what Escape and the system Back do once no UI layer is
+   * open. The scene's own `back()` first; else a running pausable scene pauses
+   * and this returns true; false everywhere else — a paused scene, the menu,
+   * the station, creation — so the page's own Back can apply (E66).
+   */
+  back(): boolean {
+    const scene = this.#current;
+    if (scene === null) return false;
+    if (scene.back?.() === true) return true;
+    if (scene.pausable && !this.#paused) {
+      this.pause();
+      return true;
+    }
+    return false;
   }
 
   onContextRestored(): void {

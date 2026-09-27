@@ -215,10 +215,13 @@ test.describe('orientation (AC-30, AC-32, AC-33)', () => {
 
     // The rotation opens it once, and a further portrait resize does not
     // re-open it after the player dismisses it (AC-32: once per transition).
+    // SPEC-036 §4.3: upright, the rotate cover sits over the pause frame so
+    // Resume cannot be tapped; the player dismisses it with Escape (or the
+    // system Back), which the back-stack routes to the pause menu's resume.
     await page.setViewportSize(PHONE_PORTRAIT);
     await frames(page, 3);
     await expect(pause).toBeVisible();
-    await page.locator('[data-testid="pause-resume"]').click();
+    await page.keyboard.press('Escape');
     await expect(pause).toBeHidden();
     await page.setViewportSize({ width: 340, height: 700 });
     await frames(page, 3);

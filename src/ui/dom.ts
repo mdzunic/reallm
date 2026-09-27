@@ -6,6 +6,7 @@
 // `#ui` itself is `pointer-events: none`; anything interactive opts back in
 // through the `.panel`/`pointer-events: auto` CSS, so the canvas keeps
 // receiving gameplay pointers while panels receive theirs.
+import { BackStack } from '@/core/BackGuard';
 import {
   pruneToasts,
   pushToast,
@@ -76,9 +77,21 @@ export type UiLayer = (typeof LAYERS)[number];
  * `overlay`), a flush list the frame loop drives, the shared black fade, and
  * the toast rack of §4.6. One instance per `#ui` element — `uiLayers()` below
  * is how scenes reach the shared one without `core/` having to know the type.
+ *
+ * The rack (55) and the fade (60) sit directly under `#ui`, next to the
+ * layers rather than inside the overlay layer: SPEC-036 §4.3 puts the rotate
+ * cover (51) over every layer and a chapter card (54) over the cover, and a
+ * toast must still land over the card (SPEC-023 §4.2). Inside the overlay
+ * layer the rack could never climb past its 50.
  */
 export class UiRoot {
   readonly root: HTMLElement;
+  /**
+   * SPEC-036 §4.4: the layers Escape and the system Back close, top first.
+   * Every panel, sheet and card that closes on "back" registers here while it
+   * is open, and keeps no Escape listener of its own.
+   */
+  readonly backStack = new BackStack();
   readonly #layers: Record<UiLayer, HTMLDivElement>;
   readonly #flushables = new Set<Flushable>();
   readonly #fade: HTMLDivElement;
@@ -101,7 +114,17 @@ export class UiRoot {
     this.#toastRack = testId(el('div', 'toast-rack'), 'toasts');
     this.#toastRack.setAttribute('role', 'status');
     this.#toastRack.setAttribute('aria-live', 'polite');
-    this.#layers.overlay.append(this.#toastRack, this.#fade);
+    root.append(this.#toastRack, this.#fade);
+  }
+
+  /** §4.4: registers an open layer; the returned release is idempotent. */
+  pushBack(onBack: () => void): () => void {
+    return this.backStack.push(onBack);
+  }
+
+  /** §4.4: the top layer's `onBack`; false when no layer is open. */
+  back(): boolean {
+    return this.backStack.back();
   }
 
   mount(node: HTMLElement, layer: UiLayer): void {
@@ -193,6 +216,7 @@ export class UiRoot {
   dispose(): void {
     if (this.#toastTimer !== null) clearTimeout(this.#toastTimer);
     for (const layer of LAYERS) this.#layers[layer].remove();
+    this.#toastRack.remove();
     this.#fade.remove();
   }
 }

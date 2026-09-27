@@ -2,8 +2,9 @@
 // flight to a world — the chapter number, the world's name, its one line, and
 // the containment level the station prints on its header (SPEC-014 AC-27).
 //
-// It is text over the scene and nothing else: the layer sits at z 54, below
-// the toasts, is `pointer-events: none`, and the flight never waits for it.
+// It is text over the scene and nothing else: the layer sits at z 54 directly
+// under `#ui` — above the rotate cover (SPEC-036 §4.3), below the toasts — is
+// `pointer-events: none`, and the flight never waits for it.
 // The card owns its own life — `CARD.show` on screen, then the `CARD.fade`
 // fade-out — and the returned `remove()` takes it away at once, which is what
 // the scene's `Disposer` calls when the trip ends first.

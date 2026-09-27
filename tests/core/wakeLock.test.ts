@@ -1,7 +1,7 @@
 // SPEC-015 §7 — the scene-scoped screen wake lock. Everything the browser can
 // say no to is a fake here: a missing API, a refusal, a rejected release.
 import { describe, expect, it, vi } from 'vitest';
-import { holdWakeLock, type WakeLockDeps, type WakeLockSentinel } from '@/core/WakeLock';
+import { holdWakeLock, whileHeld, type WakeLockDeps, type WakeLockSentinel } from '@/core/WakeLock';
 
 function harness(opts: { refuse?: boolean; hidden?: boolean } = {}): {
   deps: WakeLockDeps;
@@ -121,5 +121,68 @@ describe('holdWakeLock (SPEC-015 §7)', () => {
     h.setHidden(false);
     expect(h.requests()).toBe(1);
     release();
+  });
+});
+
+/** Settle every promise the hold and the run queued. */
+async function settle(): Promise<void> {
+  for (let i = 0; i < 6; i++) await Promise.resolve();
+}
+
+describe('whileHeld (SPEC-036 §4.9)', () => {
+  it('holds from the start of the run and releases once when it resolves', async () => {
+    const h = harness();
+    let finish: (value: string) => void = () => {};
+    const run = whileHeld(() => new Promise<string>((resolve) => (finish = resolve)), h.deps);
+    expect(h.requests()).toBe(1);
+    await settle();
+    expect(h.releases()).toBe(0); // the film is still playing
+    finish('ended');
+    await expect(run).resolves.toBe('ended');
+    await settle();
+    expect(h.releases()).toBe(1);
+    expect(h.requests()).toBe(1);
+  });
+
+  it('releases once when the run rejects, and passes the rejection on', async () => {
+    const h = harness();
+    let fail: (reason: unknown) => void = () => {};
+    const run = whileHeld(() => new Promise<never>((_, reject) => (fail = reject)), h.deps);
+    await settle();
+    fail(new Error('the film would not play'));
+    await expect(run).rejects.toThrow('the film would not play');
+    await settle();
+    expect(h.releases()).toBe(1);
+  });
+
+  it('requests nothing when the API is absent, and still runs', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    let listened = 0;
+    const result = await whileHeld(async () => 'skipped', {
+      wakeLock: undefined,
+      hidden: () => false,
+      onVisibilityChange: () => {
+        listened++;
+        return () => undefined;
+      },
+    });
+    expect(result).toBe('skipped');
+    expect(listened).toBe(0);
+    expect(warn).not.toHaveBeenCalled();
+    warn.mockRestore();
+  });
+
+  it('a refusal is ignored, and the run goes on (15-e)', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const h = harness({ refuse: true });
+    await expect(whileHeld(async () => 42, h.deps)).resolves.toBe(42);
+    await settle();
+    expect(h.requests()).toBe(1);
+    expect(h.releases()).toBe(0);
+    warn.mockRestore();
+  });
+
+  it('falls back to the browser seams, which in node have no wakeLock', async () => {
+    await expect(whileHeld(async () => 'ok')).resolves.toBe('ok');
   });
 });

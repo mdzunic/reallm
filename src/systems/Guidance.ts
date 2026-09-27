@@ -7,12 +7,34 @@
 // hands it a `GuideContext` of live snapshots; everything here reads and
 // returns, and the path search reuses preallocated typed arrays so a route
 // recompute allocates nothing beyond its output.
-import type { Objective, PoiId, ResourceId } from '@/data/index';
+import type { Scheme } from '@/core/Input';
+import type { TipSeen } from '@/core/Settings';
+import type { Objective, PoiId, ResourceId, TipId } from '@/data/index';
 import { ENEMIES, FOLLOWERS, HINT_PLACEHOLDERS, type EnemyId, type HintPlaceholder } from '@/data/index';
 import type { Layout } from '@/systems/Layout';
 import type { PoiKind } from '@/systems/MapModel';
 import type { ObjectiveProgress } from '@/systems/Missions';
 import { HARVEST_RADIUS } from '@/systems/Pickups';
+
+// ---------------------------------------------------------------------- tips
+
+/**
+ * SPEC-036 §4.2: the `tipsSeen` entry a tip records when it shows in the
+ * wording of `scheme` — `<id>@touch` for the touch wording, the bare `<id>` for
+ * every other scheme.
+ */
+export function tipKey(id: TipId, scheme: Scheme): TipSeen {
+  return scheme === 'touch' ? `${id}@touch` : id;
+}
+
+/**
+ * §4.2: a tip is due while the entry for the live scheme's wording is missing,
+ * so a device that saw only the keyboard line still gets the touch one once
+ * (36-c). A stored bare id counts as the keyboard wording.
+ */
+export function tipDue(seen: readonly TipSeen[], id: TipId, scheme: Scheme): boolean {
+  return !seen.includes(tipKey(id, scheme));
+}
 
 // ------------------------------------------------------------------- targets
 

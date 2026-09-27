@@ -45,6 +45,16 @@ export const MAX_BUTTON_SCALE = 2;
  */
 export type GuidanceLevel = 'full' | 'minimal' | 'off';
 
+/**
+ * SPEC-036 §4.2: one entry of `tipsSeen` — `<id>` for a tip shown in its
+ * keyboard wording, `<id>@touch` for its touch wording. A phone that once saw
+ * "WASD" still deserves the touch line, so each wording is remembered apart.
+ */
+export type TipSeen = TipId | `${TipId}@touch`;
+
+/** SPEC-036 §4.12: the zone ghosts show on the first two touch landings. */
+export const ZONES_SHOWN_MAX = 2;
+
 /** SPEC-015 §4 stores what the boot benchmark measured, so it runs once. */
 export interface BenchmarkResult {
   preset: QualityPreset;
@@ -85,13 +95,24 @@ export type Settings = {
   benchmark: BenchmarkResult | null;
   /** SPEC-027 §4.9; an unusable value reads `'full'` (SPEC-027 D-15). */
   guidance: GuidanceLevel;
-  /** SPEC-027 §4.5: the first-time tips this device has already seen (D-14). */
-  tipsSeen: TipId[];
+  /**
+   * SPEC-027 §4.5: the first-time tips this device has already seen (D-14),
+   * per wording since SPEC-036 §4.2 — a stored bare id is the keyboard one.
+   */
+  tipsSeen: TipSeen[];
   /**
    * SPEC-032 §4.6: the Earth Command service override. A device-level flag,
    * like `tipsSeen` — never a save field — so a tester keeps it across slots.
    */
   serviceMode: boolean;
+  /**
+   * SPEC-036 §4.5: a window blur while the surface or the flight is running
+   * pauses it. On by default on every scheme — a notification shade or a click
+   * on a second monitor should not cost a fight.
+   */
+  pauseOnBlur: boolean;
+  /** SPEC-036 §4.12: surface landings that showed the zone ghosts, 0…2; no control. */
+  zonesShown: number;
 };
 
 export interface SettingsStore {
@@ -178,6 +199,8 @@ export function defaultSettings(): Settings {
     guidance: 'full',
     tipsSeen: [],
     serviceMode: false,
+    pauseOnBlur: true,
+    zonesShown: 0,
   };
 }
 
@@ -281,22 +304,34 @@ function benchmarkOrNull(value: unknown, fallback: BenchmarkResult | null): Benc
   return { preset: preset as QualityPreset, msPerFrame, at };
 }
 
+/** SPEC-036 §4.2: a bare tip id, or one with the `@touch` wording suffix. */
+function isTipSeen(entry: string): entry is TipSeen {
+  const id = entry.endsWith('@touch') ? entry.slice(0, -'@touch'.length) : entry;
+  return (TIP_IDS as readonly string[]).includes(id);
+}
+
 /**
  * SPEC-027 D-14: a list of tip ids, cleaned. A non-array reads as `[]`; entries
  * that are not strings, name no tip, or repeat are dropped and the rest keep
  * their order — the same rule on load and on `set`, because a value the store
- * refuses to write is a value it refuses to read.
+ * refuses to write is a value it refuses to read. SPEC-036 §4.2 admits the
+ * `<id>@touch` form beside the bare id; an unknown id is dropped in either.
  */
-function tipIds(value: unknown): TipId[] {
+function tipIds(value: unknown): TipSeen[] {
   if (!Array.isArray(value)) return [];
-  const out: TipId[] = [];
+  const out: TipSeen[] = [];
   for (const entry of value) {
     if (typeof entry !== 'string') continue;
-    if (!(TIP_IDS as readonly string[]).includes(entry)) continue;
-    if (out.includes(entry as TipId)) continue;
-    out.push(entry as TipId);
+    if (!isTipSeen(entry)) continue;
+    if (out.includes(entry)) continue;
+    out.push(entry);
   }
   return out;
+}
+
+/** SPEC-036 §4.12: an integer 0…2; anything else reads as 0. */
+function zonesShown(value: unknown): number {
+  return typeof value === 'number' && Number.isInteger(value) && value >= 0 && value <= ZONES_SHOWN_MAX ? value : 0;
 }
 
 /** Which side of the store a value arrived from; only the volumes read differently. */
@@ -358,6 +393,11 @@ function coerce<K extends keyof Settings>(key: K, value: unknown, current: Setti
         return tipIds(value);
       case 'serviceMode':
         return value === true;
+      case 'pauseOnBlur':
+        // Default-on: an unusable value must not quietly turn it off.
+        return bool(value, current.pauseOnBlur);
+      case 'zonesShown':
+        return zonesShown(value);
       default:
         return current[key];
     }

@@ -42,6 +42,8 @@ export const TIP_IDS = [
   'combat',
   'flight_steer',
   'flight_throttle',
+  // SPEC-036 §4.12: shown with the zone ghosts of the first touch landings.
+  'zones',
 ] as const;
 
 export type TipId = (typeof TIP_IDS)[number];
@@ -107,9 +109,10 @@ export const TIPS: Readonly<Record<TipId, TipText>> = {
     keyboard: 'The chaingun overheated. Switch to the pistol with 1 while it cools.',
     touch: 'The chaingun overheated — the pistol covers you while it cools.',
   },
+  // SPEC-036 §4.6: on touch a tap on the launcher's slot fires one charge.
   heavy: {
     keyboard: 'Launchers recharge while holstered: 3 to fire, then back to work.',
-    touch: 'Tap the launcher to fire; it hands back and recharges by itself.',
+    touch: "Tap the launcher's slot to fire it at the nearest enemy — it recharges by itself.",
   },
   explosives: {
     keyboard: 'G throws grenades at the cursor and plants mines at your feet.',
@@ -131,10 +134,17 @@ export const TIPS: Readonly<Record<TipId, TipText>> = {
     keyboard: 'WASD or the mouse steers. Space or a click fires the nose guns.',
     touch: 'Drag to steer — the guns fire on their own.',
   },
-  // …and 12 s later, on the same trip.
+  // …and 12 s later, on the same trip. SPEC-036 §4.11: on touch the throttle
+  // is the ▲ ▼ pair — a drag on the right is the fire zone, not a throttle.
   flight_throttle: {
     keyboard: 'Shift speeds up and X slows down — the wheel does both.',
-    touch: 'Drag up or down on the right to change speed.',
+    touch: 'Tap ▲ or ▼ to change speed.',
+  },
+  // SPEC-036 §4.12: taught with the zone ghosts; only the touch wording ever
+  // shows, and showing it also records the touch `move` tip it replaces.
+  zones: {
+    keyboard: 'WASD moves and the mouse aims. Space or a click fires.',
+    touch: 'Left thumb moves, right thumb aims — auto-fire shoots for you.',
   },
 };
 
@@ -143,6 +153,8 @@ export interface HintText {
   readonly nudge: string;
   /** Used when `nudge`'s placeholders cannot all be filled (D-13). */
   readonly fallback?: string;
+  /** SPEC-036 §4.11: the wording on the touch scheme, where it differs. */
+  readonly touch?: string;
 }
 
 /**
@@ -173,7 +185,11 @@ export const HINTS: Readonly<Record<Objective['kind'] | 'death' | 'none' | 'no_w
   deliver: { nudge: '{label} is {dist} {dir}. You need {need} more {resource}.' },
   escort: { nudge: 'The probe follows you — lead it to {label}, {dist} {dir}.' },
   choice: { nudge: 'A call is waiting on you — open the prompt and choose.' },
-  death: { nudge: 'Dying twice here? Q heals, armor helps, and casual difficulty is in Settings.' },
+  // SPEC-036 §4.11: difficulty is not a setting, and Q means nothing on a phone.
+  death: {
+    nudge: 'Dying twice here? Q heals, and armor helps.',
+    touch: 'Dying twice here? Tap ITEM to heal, and armor helps.',
+  },
   none: {
     nudge: 'No mission running. The pad terminal has work — {dist} {dir}.',
     fallback: 'No mission running. The pad terminal has work.',

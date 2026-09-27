@@ -948,6 +948,7 @@ function guidanceTemplates(): Array<[string, string]> {
   for (const [kind, hint] of Object.entries(HINTS)) {
     out.push([`HINTS.${kind}.nudge`, hint.nudge]);
     if (hint.fallback !== undefined) out.push([`HINTS.${kind}.fallback`, hint.fallback]);
+    if (hint.touch !== undefined) out.push([`HINTS.${kind}.touch`, hint.touch]);
   }
   for (const [mission, stages] of Object.entries(MISSION_HINTS)) {
     for (const [stage, text] of Object.entries(stages ?? {})) out.push([`MISSION_HINTS.${mission}.${stage}`, text]);
@@ -1091,5 +1092,34 @@ describe('the three SPEC-035 tips (SPEC-035 §4.8)', () => {
   it('teaches hold-to-fire rather than an auto-fire default', () => {
     expect(TIPS.combat.keyboard).toMatch(/hold/i);
     expect(TIPS.combat.touch).toMatch(/auto-fire/i);
+  });
+});
+
+describe('words that match the touch controls (SPEC-036 §4.11, §4.12)', () => {
+  it('adds the zones tip with both wordings', () => {
+    expect(TIP_IDS).toContain('zones');
+    expect(TIPS.zones.keyboard.length).toBeGreaterThan(0);
+    expect(TIPS.zones.touch).toBe('Left thumb moves, right thumb aims — auto-fire shoots for you.');
+    expect(TIPS.zones.keyboard).not.toBe(TIPS.zones.touch);
+  });
+
+  it('no flight tip teaches a drag up or down, which is the fire zone on touch', () => {
+    for (const id of TIP_IDS.filter((tip) => tip.startsWith('flight_'))) {
+      expect(TIPS[id].touch, id).not.toMatch(/drag (up|down)/i);
+    }
+    expect(TIPS.flight_throttle.touch).toBe('Tap ▲ or ▼ to change speed.');
+  });
+
+  it('the launcher tip says a tap on its slot fires it', () => {
+    expect(TIPS.heavy.touch).toBe("Tap the launcher's slot to fire it at the nearest enemy — it recharges by itself.");
+  });
+
+  it('the death hint has a touch wording, and neither wording sends the player to Settings', () => {
+    expect(HINTS.death.nudge).toBe('Dying twice here? Q heals, and armor helps.');
+    expect(HINTS.death.touch).toBe('Dying twice here? Tap ITEM to heal, and armor helps.');
+    for (const text of [HINTS.death.nudge, HINTS.death.touch ?? '']) {
+      expect(text).not.toContain('Settings');
+      expect(text).not.toMatch(/difficulty/i);
+    }
   });
 });

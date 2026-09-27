@@ -127,11 +127,16 @@ export class Loadout {
     return true;
   }
 
-  /** §4.2: walks sidearm → primary → heavy (reversed for −1), wrapping past empties. */
-  cycle(dir: 1 | -1, time: number): boolean {
+  /**
+   * §4.2: walks sidearm → primary → heavy (reversed for −1), wrapping past
+   * empties. SPEC-036 §4.6: `skipHeavy` walks past the heavy as well — SWAP on
+   * the touch scheme, where a tap on the launcher's slot fires it instead.
+   */
+  cycle(dir: 1 | -1, time: number, skipHeavy = false): boolean {
     const at = WEAPON_SLOTS.indexOf(this.#active);
     for (let step = 1; step < WEAPON_SLOTS.length; step++) {
       const slot = WEAPON_SLOTS[(at + dir * step + WEAPON_SLOTS.length * step) % WEAPON_SLOTS.length] as WeaponSlot;
+      if (skipHeavy && slot === 'heavy') continue;
       if (this.weaponIn(slot) === null) continue;
       return this.select(slot, time);
     }
@@ -197,7 +202,10 @@ export class Loadout {
         cd.rechargeLeft = model.rechargeSeconds;
         // §4.2: the heavy hands back after its last charge, with the usual
         // switch delay — one deliberate shot, then back to work (E41).
-        if (slot === 'heavy') this.select(this.#previous, time);
+        // SPEC-036 §4.6: only while it is the weapon in hand. Fired from its
+        // slot on touch it never was, and handing back would switch the gun
+        // out from under the player.
+        if (slot === 'heavy' && this.#active === 'heavy') this.select(this.#previous, time);
       }
     }
   }

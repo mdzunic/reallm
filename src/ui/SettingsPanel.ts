@@ -63,6 +63,8 @@ export class SettingsPanel {
   readonly #deps: SettingsDeps;
   readonly #root: HTMLDivElement;
   #open = false;
+  /** SPEC-036 §4.4: this panel's back-stack entry while it is open. */
+  #releaseBack: (() => void) | null = null;
 
   constructor(ui: UiRoot, deps: SettingsDeps) {
     this.#ui = ui;
@@ -82,15 +84,21 @@ export class SettingsPanel {
     this.#open = true;
     this.#render();
     this.#root.classList.remove('is-hidden');
+    // SPEC-036 §4.4: Escape and the system Back close the panel, and only it.
+    this.#releaseBack ??= this.#ui.pushBack(() => this.hide());
     this.#root.querySelector<HTMLElement>('[data-testid="settings-close"]')?.focus();
   }
 
   hide(): void {
     this.#open = false;
     this.#root.classList.add('is-hidden');
+    this.#releaseBack?.();
+    this.#releaseBack = null;
   }
 
   dispose(): void {
+    this.#releaseBack?.();
+    this.#releaseBack = null;
     this.#ui.unmount(this.#root);
   }
 
@@ -118,6 +126,11 @@ export class SettingsPanel {
           ] as const,
           s.joystickSide,
           (side) => s.setJoystickSide(side),
+        ),
+        // SPEC-036 §4.5: on by default, every scheme; a player who reads a
+        // guide on the side turns it off here.
+        this.#toggleRow('settings-pause-on-blur', 'Pause when the game loses focus', s.get().pauseOnBlur, (on) =>
+          s.set({ pauseOnBlur: on }),
         ),
         this.#toggleRow('settings-mouse-steer', 'Mouse steer (flight)', s.flightMouseSteer, (on) => s.setFlightMouseSteer(on)),
         this.#fullscreenRow(),
