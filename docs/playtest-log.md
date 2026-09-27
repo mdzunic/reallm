@@ -1347,3 +1347,48 @@ list forbids building that harness, so §4.12's fix is pinned by
 `docs/BUGS.md` §6 records the same. Nothing in the worst-case runs moved, which
 §4.18 predicts: they emit no kill XP, so `c5_m1`'s four fewer kills change none of
 their numbers, and `tests/campaign/campaignSim.test.ts` passes unedited.
+
+## SPEC-035 — legibility: the first hour reads (M7e)
+
+- **Build:** `spec/SPEC-035` — untagged
+- **Devices:**
+  - desktop — headless Chromium 1280 × 800 (Playwright, Linux container, **software GL / SwiftShader**)
+  - phone — headless Chromium 393 × 851, touch + mobile emulation (Pixel-5-shaped;
+    a physical handset still owes the human pass)
+
+Recorded from the container the branch was built in, as SPEC-034's section was:
+`npm run check` (85 files, 1523 tests), `node scripts/assets/check.mjs` and the
+suites named below. The §7 list is a desktop-and-phone pass and is owed before
+the `m7` tag; each row names the automated evidence that stands in for it here.
+
+**Verified here, by name.**
+
+| §7 item | Evidence in this branch |
+|---|---|
+| Finish `c1_m1` without dying, following the tips | `e2e/SPEC-035.spec.ts` cases 6 and 7 — the first landing reports `sceneInfo.ramp` 1, the weather phase holds calm for 30 s of game time, no rusher spawns ambiently, `ramp` returns to 0 once `c1_m1` is done; the combat tip shows on the first hit and the two flight tips on the first launch, none of them twice |
+| Every Cinder-4 and Vetra enemy reads against the ground at a glance | `tests/data/content.test.ts` — the WCAG contrast invariant over every non-boss surface enemy against its chapter's `palette.ground` (all ≥ 3:1), plus `tests/ui/helpers.test.ts` for `contrastRatio` itself. A ratio is not a glance: the human pass still owes the look |
+| The salvager is visible on Vetra on every preset, and a rock between the camera and the salvager fades | `e2e/SPEC-035.spec.ts` case 4 (`sceneInfo.occluders` ≥ 1 behind an outcrop, back to 0 when clear) and cases 1–3 (`camDistance` 22/17, `fogNear` equal to the distance, bloom threshold 1.5 on `medium`), with `tests/ui/helpers.test.ts` for the pure `occludes` and `surfaceFogRange` |
+| A hit from behind points at its source | `e2e/SPEC-035.spec.ts` case 5 (one `hud-hit-dir` on a damage event, gone after 1.2 s) and `tests/systems/combat.test.ts` for the `from` field every enemy and projectile hit carries |
+| The first flight teaches its controls | `e2e/SPEC-035.spec.ts` cases 7 and 8 — `flight_steer` after the launch, `flight_throttle` 12 s later, and the hull bar reading `Hull` with no visible `hp` bar |
+
+**The item pictures (§4.15).** The 21 item and 5 companion renders were produced
+in this container rather than on a workstation: no Blender 5.2 exists for Linux
+arm64 (no upstream build, no `bpy` wheel), so the drop was rendered by the
+distribution's **Blender 4.0.2** headless on software GL, from the committed
+`scripts/assets/blender/items.py` unchanged. 26 WebPs at 384², 0.23 MB of the
+1.0 MB budget, every row written into `LICENSES.md` by the build. The framing is
+§4.15's: weapons side-on with the muzzle right, everything else front
+three-quarter. A rebuild on Blender 5.2 will not be byte-identical — the README's
+determinism claim is per tool version — and the contact sheet
+(`--preview=DIR`) is what a human should judge before the `m7` tag.
+
+**Owed on hardware, before the `m7` tag.**
+
+- [ ] the five rows above, played on desktop and on the reference phone — above
+      all the two that are a matter of feel: whether the closer touch camera
+      (17 m) still shows enough of the fight, and whether the hit markers read
+      as direction rather than as noise.
+- [ ] the contact sheet of the item renders seen at 28–40 px against the navy UI,
+      and the same renders re-run on Blender 5.2 if the art is judged short.
+- [ ] the seven new sounds heard rather than asserted: the four weapon lines, the
+      impact, the explosion and the ship laser, with `engine_hum` under them.
