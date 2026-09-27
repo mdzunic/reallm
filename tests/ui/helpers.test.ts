@@ -3,9 +3,10 @@
 // code), so everything a panel prints or diffs is proven here and `ui/` merely
 // renders the return values.
 import { describe, expect, it } from 'vitest';
-import { newSave, type CharacterCreation, type Save } from '@/core/Save';
+import { maxHp, newSave, type CharacterCreation, type Save } from '@/core/Save';
 import { COMPANIONS, ITEMS, MISSIONS, TUNING, UPGRADES, type MissionDef } from '@/data/index';
 import { discountTokens } from '@/systems/Economy';
+import { CARGO_TOAST_SECONDS, SHIPPED_TOAST_TEXT } from '@/systems/Pickups';
 import {
   abandonMission,
   acceptMission,
@@ -33,6 +34,7 @@ import {
   passiveText,
   rewardsText,
   slotLine,
+  stageResetText,
   TOAST_COALESCE_MS,
   TOAST_DEFAULT_MS,
   TOAST_MAX,
@@ -708,5 +710,62 @@ describe('gearTooltip (AC-47)', () => {
 
   it('a non-gear id compares nothing', () => {
     expect(gearTooltip('medkit')).toBe('');
+  });
+});
+
+// ---------------------------------------------------------------- SPEC-034
+
+/**
+ * SPEC-034 §4.9: a defend or escort stage that goes back to zero says why. A
+ * death, a recall and a reload announce themselves; a beacon that fell and a
+ * probe that was lost did not, and the player watched a four-minute timer
+ * restart with no idea what had happened.
+ */
+describe('stageResetText (SPEC-034 §4.9)', () => {
+  it('names the POI that went down and the follower that was lost', () => {
+    expect(stageResetText('poi_destroyed', 'survey_beacon', null)).toBe(
+      'The Survey Beacon went down — the defence restarts.',
+    );
+    expect(stageResetText('follower_died', null, 'science_probe')).toBe(
+      'The Science Probe was lost — the escort restarts.',
+    );
+  });
+
+  it('says nothing for the reasons that already speak for themselves', () => {
+    for (const reason of ['death', 'recall', 'reload'] as const) {
+      expect(stageResetText(reason, 'survey_beacon', 'science_probe'), reason).toBeNull();
+    }
+    // …and nothing it cannot name.
+    expect(stageResetText('poi_destroyed', null, null)).toBeNull();
+    expect(stageResetText('follower_died', null, null)).toBeNull();
+  });
+});
+
+/**
+ * SPEC-034 §4.14: one max-HP formula. A Marine read 170, 150 and 160 in three
+ * screens, because creation added the class bonus on top of a `maxHp` that had
+ * already been given a different vigor weight from combat's.
+ */
+describe('one max HP (SPEC-034 §4.14)', () => {
+  it('the creation preview shows the number the player fights with', () => {
+    const attributes = { might: 3, vigor: 8, agility: 1, tech: 1 };
+    // 100 base + 20 marine + 8 x 8 vigor + 0 = 184.
+    expect(maxHp('marine', attributes, 1)).toBe(184);
+    expect(computePlayerStats('marine', attributes, 1).hp).toBe(184);
+    // Every level is a flat +4, on every class.
+    expect(maxHp('marine', attributes, 5)).toBe(200);
+    expect(maxHp('scout', attributes, 1)).toBe(164); // no class bonus
+    expect(computePlayerStats('scout', attributes, 1).hp).toBe(164);
+  });
+});
+
+/**
+ * SPEC-034 §4.12: what a full hold says when a collect objective still wants the
+ * units it cannot carry.
+ */
+describe('the shipped-home toast (SPEC-034 §4.12)', () => {
+  it('reads as §4.12 gives it, and shares CARGO FULL’s throttle', () => {
+    expect(SHIPPED_TOAST_TEXT).toBe('Hold full — surplus shipped to Command Relay.');
+    expect(CARGO_TOAST_SECONDS).toBe(3);
   });
 });
