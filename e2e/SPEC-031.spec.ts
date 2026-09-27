@@ -132,8 +132,11 @@ async function walkFrames(page: Page, width: number, height: number, touch = fal
   await withSave(page);
   expect(await go(page, 'station', {})).toBe(true);
   await checkFrame(page, width, height, touch);
-  // The station header keeps its channel and containment line (AC-14).
-  await expect(page.locator('.screen-channel')).toContainText('COMMAND RELAY · CONTAINMENT LEVEL 1');
+  // The station header keeps its channel and containment line (AC-14). SPEC-035
+  // §4.12 rewrote the channel: the frame's own title already reads `Command
+  // Relay` and the line below it carries the one `Containment level`, so the
+  // channel said both of them twice. It names what the station is for instead.
+  await expect(page.locator('.screen-channel')).toContainText('SUPPLY · REFIT · DISPATCH');
   await expect(page.locator('[data-testid="containment-level"]')).toHaveText('Containment level 1');
   for (const tab of ['shop', 'character', 'missions']) {
     await press(page.locator(`[data-testid="station-tab-${tab}"]`));
