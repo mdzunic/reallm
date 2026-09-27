@@ -414,11 +414,16 @@ export class FlightScene extends UiScene<'flight'> {
     this.#skipHint = testId(el('p', 'flight-skip-hint is-hidden', 'Tap or press any key to skip'), 'skip-landing');
     this.ui.mount(this.#explosionEl, 'overlay');
     this.ui.mount(this.#skipHint, 'hud');
-    // SPEC-035 §4.8: the same one-line hint strip the surface teaches with.
-    const aria = new AriaHint(uiRootEl());
+    // SPEC-035 §4.8: the same one-line hint strip the surface teaches with, in
+    // the same `guide-layer` — which is what takes no pointer events and what
+    // hides the strip between lines.
+    const guide = el('div', 'guide-layer');
+    this.ui.mount(guide, 'hud');
+    const aria = new AriaHint(guide);
     this.#aria = aria;
     this.disposer.add(() => {
       aria.dispose();
+      this.ui.unmount(guide);
       this.#aria = null;
     });
     // SPEC-035 §4.11: the hum runs until the scene does not.

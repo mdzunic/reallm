@@ -3583,7 +3583,10 @@ export class SurfaceScene extends UiScene<'surface'> {
       // SPEC-035 §4.10: "No active mission" told the player nothing. Name the
       // next mission and where it is taken — the pad terminal's own list — and
       // fall back to R16's sentence when the pad has nothing to offer.
-      const next = missions.available()[0];
+      // The pad's own list, in its own order — but a replay is not what "next"
+      // means, so new work wins when the pad offers both (§4.10).
+      const offers = missions.available();
+      const next = offers.find((def) => !missions.isReplay(def.id as MissionId)) ?? offers[0];
       const save = this.#save;
       tracker.title =
         next !== undefined

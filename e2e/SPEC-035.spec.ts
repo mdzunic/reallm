@@ -79,15 +79,10 @@ test.describe('1. the touch scheme brings the camera in', () => {
   test('camDistance eases from 22 to 17 once a finger has touched the canvas', async ({ page }) => {
     await landFresh(page);
     expect(Number((await sceneInfo(page))['camDistance'])).toBeCloseTo(22, 1);
-    await page.evaluate(() => {
-      const surface = document.querySelector('[data-testid="touch-surface"]');
-      if (surface === null) throw new Error('the touch surface is not mounted');
-      for (const type of ['pointerdown', 'pointerup'] as const) {
-        surface.dispatchEvent(
-          new PointerEvent(type, { pointerId: 1, pointerType: 'touch', isPrimary: true, clientX: 120, clientY: 300, bubbles: true, cancelable: true }),
-        );
-      }
-    });
+    // A real touch point on the canvas is what flips the scheme; the touch
+    // controls are not mounted until it has (SPEC-005 §4.1).
+    await page.touchscreen.tap(160, 300);
+    await expect.poll(async () => page.evaluate(() => window.__reallm.input().scheme), { timeout: 15_000 }).toBe('touch');
     await expect
       .poll(async () => Number((await sceneInfo(page))['camDistance']), { timeout: 15_000 })
       .toBeCloseTo(17, 1);
@@ -187,13 +182,19 @@ test('7. the first flight teaches its controls, and a second session says nothin
   await expect(page.locator('[data-testid="scene-label"]')).toHaveText('flight');
   await page.locator('canvas#game').click({ position: { x: 400, y: 300 }, force: true });
   await page.waitForTimeout(3000);
-  await expect(hint).toBeHidden();
+  await expect(hint).toHaveText('');
+  await expect(hint).toHaveClass(/is-hidden/);
 });
 
 test('7. the first enemy hit on the surface teaches hold-to-fire', async ({ page }) => {
+  test.setTimeout(120_000);
   await landFresh(page);
   await press(page, 'surface-hurt-from');
-  await expect(page.locator('[data-testid="aria-hint"]')).toContainText(/hold Space|auto-fire shoots/i, { timeout: 20_000 });
+  // The `move` tip is already on the strip, and SPEC-027 §4.5 spaces tips 12 s
+  // apart; this waits for the queue rather than racing it.
+  await expect
+    .poll(async () => page.locator('[data-testid="aria-hint"]').innerText(), { timeout: 60_000 })
+    .toMatch(/hold Space|auto-fire shoots/i);
 });
 
 // ---------------------------------------------------------------- 8: flight HUD
@@ -384,7 +385,8 @@ test('17. the gear card is at most 420 px wide at 1280', async ({ page }) => {
   await page.locator('[data-testid="shop-gear-pistol_magnum"] .shop-row-head').click();
   const card = page.locator('[data-testid="gear-card"]');
   await expect(card).toBeVisible();
-  const box = await card.locator('.gear-card-sheet').boundingBox();
+  await expect(card).toHaveClass(/gear-card-sheet/);
+  const box = await card.boundingBox();
   expect(box?.width ?? 0).toBeLessThanOrEqual(420);
 });
 

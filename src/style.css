@@ -1979,10 +1979,14 @@ html.debug .scene-tag {
 /* SPEC-035 §4.13: the New Game slot picker is a sheet over the menu body, in
    the confirm-sheet style — the button column keeps its place, and the storage
    block keeps its space while going invisible. */
-.menu-sub.is-sheet {
+/* The `.menu-sub` slot itself stays in flow at zero height — taking it out
+   would drop one 18 px column gap and shift every button by 9 px, which is the
+   very thing this is fixing. Its content is what floats. */
+.menu-sub.is-sheet > * {
   position: absolute;
   left: 50%;
   top: 50%;
+  width: min(560px, 100vw - 20px);
   transform: translate(-50%, -50%);
   z-index: 3;
 }
@@ -4218,6 +4222,9 @@ html.reduce-motion .screen-body > * {
 }
 
 .gear-card-sheet {
+  /* SPEC-035 §4.13: the 420 px is the card's rendered width, padding and border
+     included — nothing in this sheet sets `box-sizing` globally. */
+  box-sizing: border-box;
   width: min(420px, calc(100% - 24px));
   max-height: calc(100% - 24px);
   display: flex;
