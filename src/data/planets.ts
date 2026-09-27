@@ -362,13 +362,16 @@ export const PLANETS = {
       // dense the vein glow drowns.
       fogDensity: 0.032,
       look: {
+        // SPEC-035 §4.3 (*initial tuning*): the surface look's bloom threshold
+        // rose to 1.5, so the one world lit entirely by its own glow needs more
+        // of it — sun 1.3 → 2.0, ambient 0.4 → 0.55, cracks 1.5 → 2.5.
         light: {
-          sun: { color: '#b07ad8', intensity: 1.3, azimuth: 40, elevation: 40 },
+          sun: { color: '#b07ad8', intensity: 2.0, azimuth: 40, elevation: 40 },
           sky: '#3a2a4a',
           ground: '#1a1424',
-          ambient: 0.4,
+          ambient: 0.55,
         },
-        ground: { layers: ['chitin', 'flesh'], tileMetres: [5, 6.5], cracks: { color: '#c04ad0', intensity: 1.5 } },
+        ground: { layers: ['chitin', 'flesh'], tileMetres: [5, 6.5], cracks: { color: '#c04ad0', intensity: 2.5 } },
         relief: { amplitude: 0.45, wavelength: 20, ridged: 0.5, bermHeight: 8 },
         scatter: { kind: 'spores', density: 2.0, second: 'crystals' },
         decals: ['slick'],

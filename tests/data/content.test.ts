@@ -1030,3 +1030,44 @@ describe('tips and hints (SPEC-027 AC-81..AC-84)', () => {
     expect(problems).toEqual([]);
   });
 });
+
+// ------------------------------------------------------------ SPEC-035 §4.1
+
+import { contrastRatio } from '@/systems/UiHelpers';
+
+describe('enemy tints read against their own ground (SPEC-035 §4.1)', () => {
+  /** The planet a chapter plays on — every chapter has exactly one. */
+  const groundOfChapter = new Map<number, { planet: string; ground: string }>();
+  for (const planet of Object.values(PLANETS) as PlanetDef[]) {
+    groundOfChapter.set(planet.chapter, { planet: planet.id, ground: planet.surface.palette.ground });
+  }
+
+  it('black on white is 21, and a colour against itself is 1', () => {
+    expect(contrastRatio('#000000', '#ffffff')).toBeCloseTo(21, 5);
+    expect(contrastRatio('#ffffff', '#000000')).toBeCloseTo(21, 5);
+    expect(contrastRatio('#c19a5b', '#c19a5b')).toBeCloseTo(1, 10);
+  });
+
+  /**
+   * §4.1: hue camouflage is a biome's identity, so the silhouette is carried by
+   * value instead. 3:1 is the floor — the WCAG ratio for large text, and about
+   * where a body stops disappearing into the ground at a glance. Bosses are
+   * exempt: scale, emissive and the reveal carry them.
+   */
+  it('every non-boss surface enemy clears 3:1 against its chapter’s ground', () => {
+    const problems: string[] = [];
+    for (const enemy of Object.values(ENEMIES) as Enemy[]) {
+      if (enemy.domain !== 'surface' || enemy.archetype === 'boss') continue;
+      const chapter = groundOfChapter.get(enemy.chapter);
+      if (chapter === undefined) {
+        problems.push(`${enemy.id}: chapter ${enemy.chapter} has no planet`);
+        continue;
+      }
+      const ratio = contrastRatio(enemy.look.tint, chapter.ground);
+      if (ratio < 3) {
+        problems.push(`${enemy.id}: ${enemy.look.tint} on ${chapter.planet} ${chapter.ground} is ${ratio.toFixed(2)}:1`);
+      }
+    }
+    expect(problems).toEqual([]);
+  });
+});

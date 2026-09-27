@@ -94,7 +94,7 @@ export const ENEMIES = {
     leashRadius: 40,
     xp: 4,
     loot: 'cinder4_common',
-    look: { recipe: 'bug', scale: 0.8, tint: '#c8a06a' },
+    look: { recipe: 'bug', scale: 0.8, tint: '#5a4426' },
     eliteAllowed: true,
   },
   wurmling: {
@@ -112,7 +112,7 @@ export const ENEMIES = {
     leashRadius: 45,
     xp: 8,
     loot: 'cinder4_common',
-    look: { recipe: 'wurmling', scale: 1, tint: '#b07a4a' },
+    look: { recipe: 'wurmling', scale: 1, tint: '#5e3d20' },
     eliteAllowed: true,
   },
   scav_raider: {
@@ -130,7 +130,7 @@ export const ENEMIES = {
     leashRadius: 45,
     xp: 10,
     loot: 'cinder4_ranged',
-    look: { recipe: 'spitter', scale: 1, tint: '#8a7f6a' },
+    look: { recipe: 'spitter', scale: 1, tint: '#4f4a3d' },
     eliteAllowed: true,
   },
   dune_wurm: {
@@ -172,7 +172,7 @@ export const ENEMIES = {
     leashRadius: 40,
     xp: 4,
     loot: 'vetra_common',
-    look: { recipe: 'bug', scale: 0.8, tint: '#9fd8f0' },
+    look: { recipe: 'bug', scale: 0.8, tint: '#2f6a80' },
     eliteAllowed: true,
   },
   ice_crawler: {
@@ -190,7 +190,7 @@ export const ENEMIES = {
     leashRadius: 45,
     xp: 8,
     loot: 'vetra_common',
-    look: { recipe: 'crawler', scale: 1, tint: '#7fc4e8' },
+    look: { recipe: 'crawler', scale: 1, tint: '#2d6b8c' },
     eliteAllowed: true,
   },
   ice_spitter: {
@@ -208,7 +208,7 @@ export const ENEMIES = {
     leashRadius: 45,
     xp: 10,
     loot: 'vetra_ranged',
-    look: { recipe: 'spitter', scale: 1, tint: '#bfe6f7' },
+    look: { recipe: 'spitter', scale: 1, tint: '#4a7d92' },
     eliteAllowed: true,
   },
   frost_matriarch: {
@@ -250,7 +250,7 @@ export const ENEMIES = {
     leashRadius: 40,
     xp: 4,
     loot: 'thessaly_common',
-    look: { recipe: 'bug', scale: 0.9, tint: '#8fbf6a' },
+    look: { recipe: 'bug', scale: 0.9, tint: '#c9e8a0' },
     eliteAllowed: true,
   },
   spore_hound: {
@@ -268,7 +268,7 @@ export const ENEMIES = {
     leashRadius: 45,
     xp: 8,
     loot: 'thessaly_common',
-    look: { recipe: 'hound', scale: 1.1, tint: '#6f9f4a' },
+    look: { recipe: 'hound', scale: 1.1, tint: '#bcdc95' },
     eliteAllowed: true,
   },
   spore_spitter: {
@@ -328,7 +328,7 @@ export const ENEMIES = {
     leashRadius: 40,
     xp: 4,
     loot: 'ferrum_common',
-    look: { recipe: 'crawler', scale: 0.9, tint: '#6b5a55' },
+    look: { recipe: 'crawler', scale: 0.9, tint: '#a99a94' },
     eliteAllowed: true,
   },
   magma_wraith: {
@@ -364,7 +364,7 @@ export const ENEMIES = {
     leashRadius: 45,
     xp: 10,
     loot: 'ferrum_ranged',
-    look: { recipe: 'spitter', scale: 1, tint: '#9a5a3a', emissive: '#ff8a3a' },
+    look: { recipe: 'spitter', scale: 1, tint: '#d98a62', emissive: '#ff8a3a' },
     eliteAllowed: true,
   },
   ash_titan: {
@@ -407,7 +407,7 @@ export const ENEMIES = {
     leashRadius: 45,
     xp: 8,
     loot: 'hive_common',
-    look: { recipe: 'hound', scale: 1.2, tint: '#7a6ab0' },
+    look: { recipe: 'hound', scale: 1.2, tint: '#a294d8' },
     eliteAllowed: true,
   },
   hive_spitter: {

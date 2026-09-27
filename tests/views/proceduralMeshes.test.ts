@@ -9,7 +9,14 @@ import * as THREE from 'three';
 import { Pool } from '@/core/Pool';
 import { ENEMIES, type EnemyDef } from '@/data/index';
 import { makeEnemy, type EnemyEntity } from '@/entities/Enemy';
-import { EnemyMeshes, INSTANCES_PER_PART } from '@/views/ProceduralMeshes';
+import {
+  EnemyMeshes,
+  FLASH_RIM_SCALE,
+  HOSTILE_RIM,
+  INSTANCES_PER_PART,
+  RIM_INTENSITY,
+  RIM_POWER,
+} from '@/views/ProceduralMeshes';
 import { nodeCrystalScale } from '@/views/SurfaceView';
 
 function spawn(pool: Pool<EnemyEntity>, id: keyof typeof ENEMIES, patch: Partial<EnemyEntity> = {}): EnemyEntity {
@@ -330,6 +337,79 @@ describe('per-instance emissive (SPEC-019 AC-45 … AC-50)', () => {
     e.hitFlash = 0.1;
     meshes.sync(pool, 0.2);
     expect(emissiveAt(parent, 0)).toEqual([1.25, 1.25, 1.25]);
+    meshes.dispose();
+  });
+});
+
+// --------------------------------------------------------------- SPEC-035 §4.1
+
+/** The first visible part's rim scale (`instanceEmissive.w`) for a pool slot. */
+function rimScaleAt(parent: THREE.Object3D, slot: number): number {
+  const part = instancedMeshes(parent).find((m) => m.visible) as THREE.InstancedMesh;
+  const attribute = part.geometry.attributes.instanceEmissive as THREE.InstancedBufferAttribute;
+  return attribute.getW(slot);
+}
+
+/** Runs a material's `onBeforeCompile` over the chunk names it patches. */
+function compiled(material: THREE.MeshStandardMaterial): { vertex: string; fragment: string } {
+  const shader = {
+    vertexShader: '#include <common>\n#include <begin_vertex>\n',
+    fragmentShader: '#include <common>\n#include <emissivemap_fragment>\n',
+    uniforms: {},
+  } as unknown as Parameters<NonNullable<THREE.MeshStandardMaterial['onBeforeCompile']>>[0];
+  material.onBeforeCompile(shader, null as never);
+  return { vertex: shader.vertexShader, fragment: shader.fragmentShader };
+}
+
+describe('the hostile rim (SPEC-035 §4.1)', () => {
+  it('pins the tuning the spec names', () => {
+    expect(HOSTILE_RIM).toBe('#ff5a3c');
+    expect(RIM_INTENSITY).toBe(0.9);
+    expect(RIM_POWER).toBe(3);
+    expect(FLASH_RIM_SCALE).toBe(0.4);
+  });
+
+  it('adds a fresnel rim after the per-instance emissive, on every enemy material', () => {
+    const parent = new THREE.Group();
+    const meshes = new EnemyMeshes(parent);
+    const pool = new Pool(makeEnemy);
+    // A plain recipe and a glowing one, whose parts build their own materials.
+    spawn(pool, 'dust_skitter');
+    spawn(pool, 'magma_wraith', { x: 20 });
+    meshes.sync(pool, 0);
+    const rim = new THREE.Color(HOSTILE_RIM);
+    const all = instancedMeshes(parent);
+    expect(all.length).toBeGreaterThan(1);
+    for (const mesh of all) {
+      const { vertex, fragment } = compiled(mesh.material as THREE.MeshStandardMaterial);
+      expect(vertex).toContain('attribute vec4 instanceEmissive;');
+      // The emissive lands first, then the rim — the order §4.1 gives.
+      const emissiveAtIndex = fragment.indexOf('totalEmissiveRadiance += vInstanceEmissive.rgb;');
+      const rimAtIndex = fragment.indexOf('hostileRim');
+      expect(emissiveAtIndex).toBeGreaterThan(0);
+      expect(rimAtIndex).toBeGreaterThan(emissiveAtIndex);
+      expect(fragment).toContain(`pow( 1.0 - saturate( dot( normal, normalize( vViewPosition ) ) ), ${RIM_POWER.toFixed(6)} )`);
+      expect(fragment).toContain(rim.r.toFixed(6));
+      expect(fragment).toContain(`${RIM_INTENSITY.toFixed(6)} * hostileRim * vInstanceEmissive.w`);
+    }
+    meshes.dispose();
+  });
+
+  it('dims the rim while an instance flashes, so the flash still wins', () => {
+    const parent = new THREE.Group();
+    const meshes = new EnemyMeshes(parent);
+    const pool = new Pool(makeEnemy);
+    const e = spawn(pool, 'dust_skitter');
+    meshes.sync(pool, 0);
+    expect(rimScaleAt(parent, 0)).toBe(1);
+    e.hitFlash = 0.1;
+    meshes.sync(pool, 0.1);
+    expect(rimScaleAt(parent, 0)).toBeCloseTo(FLASH_RIM_SCALE, 6);
+    // …and the elite keeps its gold with the rim at full strength on top.
+    e.hitFlash = 0;
+    e.elite = true;
+    meshes.sync(pool, 0.2);
+    expect(rimScaleAt(parent, 0)).toBe(1);
     meshes.dispose();
   });
 });

@@ -397,7 +397,15 @@ export class SurfaceView {
   reduceMotion = false;
 
   readonly #baseFog: number;
-  #fog: THREE.FogExp2;
+  /**
+   * SPEC-035 §4.4: linear, not exponential. Exponential fog has no near
+   * distance, so it hazed the one thing the player has to see. `SurfaceScene`
+   * owns the arithmetic (`surfaceFogRange`) and drives it through
+   * `setFogRange` — views take numbers, never `systems/` imports.
+   */
+  #fog: THREE.Fog;
+  /** The storm-lerped fog multiplier the scene feeds `surfaceFogRange`. */
+  #fogMult = 1;
 
   /** §4.5: hemisphere fill, the look's sun as key (the caster), cool rim, torch. */
   readonly #key: THREE.DirectionalLight;
@@ -491,7 +499,9 @@ export class SurfaceView {
     this.#palette = palette;
     scene.background = new THREE.Color(palette.sky);
     this.#baseFog = planet.surface.fogDensity;
-    this.#fog = new THREE.FogExp2(palette.fog, this.#baseFog);
+    // A placeholder span: `SurfaceScene` calls `setFogRange` before its first
+    // render, and again whenever the storm or the camera distance moves.
+    this.#fog = new THREE.Fog(palette.fog, 0, layout.halfSize * 2);
     scene.fog = this.#fog;
     this.#lightningSeed = hash32(layout.hash, 'lightning');
     // SPEC-017 §4.1: the planet's own grade — a touch hotter and crisper than
@@ -500,6 +510,9 @@ export class SurfaceView {
       exposure: 1.05,
       contrast: 1.04,
       saturation: 1.05,
+      // SPEC-035 §4.3: the shared 0.85 turned sunlit snow into a whiteout on
+      // medium and high. The hubs keep the default; only daylight moves.
+      bloomThreshold: 1.5,
       tint: tintToward(new THREE.Color(palette.fog), TINT_TOWARD_FOG),
     };
 
@@ -1046,7 +1059,9 @@ export class SurfaceView {
    * passes the raw storm through `fogIntensity`, so the fog keeps raging.
    */
   setWeather(effects: ViewWeather, intensity: number, fogIntensity = intensity): void {
-    this.#fog.density = this.#baseFog * (1 + (effects.fogMult - 1) * fogIntensity);
+    // SPEC-035 §4.4: the storm thickens the fog through this multiplier, which
+    // shortens the linear span; the scene reads it back for `surfaceFogRange`.
+    this.#fogMult = 1 + (effects.fogMult - 1) * fogIntensity;
     this.#particleKind = effects.particles;
     this.#particleIntensity = intensity;
     this.#storm.set(effects.particles, intensity);
@@ -1057,6 +1072,31 @@ export class SurfaceView {
     for (let i = 0; i < 3; i++) {
       this.#grade.tint[i] = tint === null ? 1 : 1 + ((tint[i] as number) - 1) * intensity;
     }
+  }
+
+  /** SPEC-035 §4.4: the planet's own fog density, unscaled — the span's input. */
+  get fogDensity(): number {
+    return this.#baseFog;
+  }
+
+  /** SPEC-035 §4.4: the storm-lerped multiplier `setWeather` last wrote. */
+  get fogMult(): number {
+    return this.#fogMult;
+  }
+
+  /** SPEC-035 §4.4: the near plane in force — what `sceneInfo.fogNear` reports. */
+  get fogNear(): number {
+    return this.#fog.near;
+  }
+
+  /**
+   * SPEC-035 §4.4 — the linear fog's span, from `surfaceFogRange`. The scene
+   * calls it on entry, on every storm step and whenever the camera distance
+   * eases, so nothing between the camera and the salvager is ever hazed.
+   */
+  setFogRange(near: number, far: number): void {
+    this.#fog.near = near;
+    this.#fog.far = Math.max(near + 1e-3, far);
   }
 
   /**

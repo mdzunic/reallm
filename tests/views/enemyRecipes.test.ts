@@ -74,17 +74,19 @@ describe('the shared chitin normal map (AC-41)', () => {
 });
 
 describe('the instanceEmissive attribute (AC-45, AC-46)', () => {
-  it('rides every part geometry: 3 floats × INSTANCES_PER_PART, dynamic', () => {
+  // SPEC-035 §4.1 widened it to a vec4: `rgb` is SPEC-019's emissive, `w` the
+  // per-instance scale of the hostile rim.
+  it('rides every part geometry: 4 floats × INSTANCES_PER_PART, dynamic', () => {
     for (const recipe of MESH_RECIPE_IDS) {
       const { parts, dispose } = partsOf(recipe);
       for (const part of parts) {
         const attribute = part.geometry.attributes.instanceEmissive as THREE.InstancedBufferAttribute;
         expect(attribute).toBeDefined();
-        expect(attribute.itemSize).toBe(3);
+        expect(attribute.itemSize).toBe(4);
         expect(attribute.count).toBe(INSTANCES_PER_PART);
         expect(attribute.usage).toBe(THREE.DynamicDrawUsage);
         const material = part.material as THREE.MeshStandardMaterial;
-        expect(material.customProgramCacheKey()).toBe('enemy/1');
+        expect(material.customProgramCacheKey()).toBe('enemy/2');
       }
       dispose();
     }

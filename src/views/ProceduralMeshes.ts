@@ -61,6 +61,24 @@ const TINT_EMISSIVE = 0.15;
 /** Elite gold, added on top of the tinted base (§4.3). */
 const ELITE_GOLD: readonly [number, number, number] = [0.9 * 0.3, 0.7 * 0.3, 0.3 * 0.3];
 
+// ----------------------------------------------- SPEC-035 §4.1 (the hostile rim)
+
+/**
+ * SPEC-035 §4.1 — the hostile accent every enemy wears. Hue camouflage is a
+ * biome's identity, so the silhouette is carried by a fresnel rim instead: one
+ * `pow` per fragment, on every preset, that reads against any ground.
+ */
+export const HOSTILE_RIM = '#ff5a3c';
+/** *Initial tuning*: bright enough to read in daylight, dim enough not to bloom. */
+export const RIM_INTENSITY = 0.9;
+/** The fresnel exponent — how tightly the rim hugs the edge. */
+export const RIM_POWER = 3;
+/**
+ * §4.1: the rim is dimmed to this while an instance flashes, so the white hit
+ * flash still reads as the brightest thing on the body.
+ */
+export const FLASH_RIM_SCALE = 0.4;
+
 // ------------------------------------------------ SPEC-019 §4.2 (sculpting)
 
 /**
@@ -462,21 +480,48 @@ function isMoving(e: EnemyEntity): boolean {
 }
 
 /**
+ * SPEC-035 §4.1 — the rim, in working (linear) space: `THREE.Color` converts the
+ * sRGB hex once, at module load, and the result is baked into the shader.
+ */
+const RIM_COLOR = new THREE.Color(HOSTILE_RIM);
+
+/** A GLSL float literal — `3` on its own is an int and will not compile. */
+function glsl(value: number): string {
+  return value.toFixed(6);
+}
+
+/**
+ * §4.1: the fresnel rim, added after the per-instance emissive.
+ * `vInstanceEmissive.w` is the per-instance rim scale — 1 normally,
+ * `FLASH_RIM_SCALE` while the instance flashes. `normal` and `vViewPosition`
+ * are both in scope by `<emissivemap_fragment>`, and `saturate` is three's own.
+ */
+const RIM_CHUNK = `
+  float hostileRim = pow( 1.0 - saturate( dot( normal, normalize( vViewPosition ) ) ), ${glsl(RIM_POWER)} );
+  totalEmissiveRadiance += vec3( ${glsl(RIM_COLOR.r)}, ${glsl(RIM_COLOR.g)}, ${glsl(RIM_COLOR.b)} ) * ${glsl(RIM_INTENSITY)} * hostileRim * vInstanceEmissive.w;`;
+
+/**
  * §4.3: the `instanceEmissive` attribute, injected around the standard chunks
  * so everything else about the material — lights, shadow, normal map — is
  * stock three. One cache key for every enemy material: same program, whatever
- * the variant.
+ * the variant, because SPEC-035's rim is on every preset and every recipe.
+ *
+ * The attribute is a `vec4`: `rgb` is the emissive of SPEC-019 §4.3, `w` the
+ * rim scale of SPEC-035 §4.1.
  */
 function injectInstanceEmissive(material: THREE.MeshStandardMaterial): void {
   material.onBeforeCompile = (shader) => {
     shader.vertexShader = shader.vertexShader
-      .replace('#include <common>', 'attribute vec3 instanceEmissive;\nvarying vec3 vInstanceEmissive;\n#include <common>')
+      .replace('#include <common>', 'attribute vec4 instanceEmissive;\nvarying vec4 vInstanceEmissive;\n#include <common>')
       .replace('#include <begin_vertex>', '#include <begin_vertex>\nvInstanceEmissive = instanceEmissive;');
     shader.fragmentShader = shader.fragmentShader
-      .replace('#include <common>', 'varying vec3 vInstanceEmissive;\n#include <common>')
-      .replace('#include <emissivemap_fragment>', '#include <emissivemap_fragment>\ntotalEmissiveRadiance += vInstanceEmissive;');
+      .replace('#include <common>', 'varying vec4 vInstanceEmissive;\n#include <common>')
+      .replace(
+        '#include <emissivemap_fragment>',
+        `#include <emissivemap_fragment>\ntotalEmissiveRadiance += vInstanceEmissive.rgb;${RIM_CHUNK}`,
+      );
   };
-  material.customProgramCacheKey = () => 'enemy/1';
+  material.customProgramCacheKey = () => 'enemy/2';
 }
 
 export class EnemyMeshes {
@@ -559,6 +604,9 @@ export class EnemyMeshes {
         scratchEmissive.set(e.def.look.tint).multiplyScalar(TINT_EMISSIVE);
       }
       if (e.invulnerable) scratchEmissive.multiplyScalar(0.5);
+      // SPEC-035 §4.1: the rim steps back while the flash is on, so the flash
+      // stays the brightest thing on the body.
+      const rimScale = e.hitFlash > 0 ? FLASH_RIM_SCALE : 1;
 
       for (const part of recipe.parts) {
         let y = 0;
@@ -599,7 +647,7 @@ export class EnemyMeshes {
         scratchMatrix.compose(scratchPos, scratchQuat, scratchScale);
         part.mesh.setMatrixAt(slot, scratchMatrix);
         part.mesh.setColorAt(slot, scratchColor);
-        part.emissive.setXYZ(slot, scratchEmissive.r, scratchEmissive.g, scratchEmissive.b);
+        part.emissive.setXYZW(slot, scratchEmissive.r, scratchEmissive.g, scratchEmissive.b, rimScale);
       }
     }
 
@@ -647,8 +695,9 @@ export class EnemyMeshes {
         });
         injectInstanceEmissive(material);
       }
-      // §4.3: three floats per instance, rewritten every sync.
-      const emissive = new THREE.InstancedBufferAttribute(new Float32Array(INSTANCES_PER_PART * 3), 3);
+      // §4.3 + SPEC-035 §4.1: four floats per instance — emissive rgb and the
+      // rim scale — rewritten every sync.
+      const emissive = new THREE.InstancedBufferAttribute(new Float32Array(INSTANCES_PER_PART * 4), 4);
       emissive.setUsage(THREE.DynamicDrawUsage);
       def.geometry.setAttribute('instanceEmissive', emissive);
       const mesh = new THREE.InstancedMesh(def.geometry, material, INSTANCES_PER_PART);
