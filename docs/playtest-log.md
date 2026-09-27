@@ -1295,3 +1295,47 @@ Then, after this branch merges: `SPEC-015` `status: done` in its frontmatter and
 in the SPEC-000 table. Both live in the sibling repository `../reallm-specs`,
 which CLAUDE.md keeps separate from this one and which is not checked out in
 this container, so it is the owner's step rather than part of this diff.
+
+## SPEC-034 — stabilisation: collision, the Gauntlet, the climax, state (M7e)
+
+Recorded from the container the branch was built in: headless Chromium over
+SwiftShader, `npm run check` and the suites named below. The manual list of §7 is
+a desktop-and-phone pass and is owed before the `m7` tag; every row says which
+automated evidence stands in for it in the meantime.
+
+**Verified here, by name.**
+
+| §7 item | Evidence in this branch |
+|---|---|
+| Fight with your back to an outcrop until you are knocked into it, and walk away | `tests/systems/combat.test.ts` — "a shot that shoves the player at a rock leaves them outside it, and they can walk away" (a metre of walking in one second), plus `tests/systems/enemyAi.test.ts` for the enemy half and `tests/systems/layout.test.ts` for `resolveCircle` itself |
+| Recall to the pad from the middle of a survive stage | `e2e/SPEC-034.spec.ts` case 1 (within 3 m of the spawn, resources unchanged, no death overlay) and `tests/systems/missions.test.ts` for the stage restart at reason `recall` |
+| Fly the Hive Gauntlet with the chapter-5 recommended ship, aiming by hand | `tests/balance/gauntlet.test.ts` — 16 of 16 seeds with the no-lead autopilot and 16 of 16 with the leading one, through the real `Flight`. On the numbers this spec replaced it is 0 of 16, which is the review's own figure |
+| Kill the Queen and hear the Warden, then ARIA, with the world still | `tests/ui/dialogue.test.ts` (the `onComplete` → `next` chain) and `e2e/SPEC-034.spec.ts` case 3 (`sceneInfo.held` 1, nothing moves for a second) |
+| Defend the Eden beacon and watch the wave reach it | `tests/systems/defend.test.ts` — 240 s of the real stack, at least 40 of 47 engaged, the beacon damaged. On the old wave rules it reports "0 of 47 engaged" |
+| Take `c3_s2` with a full hold of wheat | `tests/systems/economy.test.ts` — "c3_s2 completes with a hold already over the objective" |
+| Replay a mission and reload mid-way | `tests/core/save.test.ts` — "a replay with counters survives validateSave" |
+| Import a save into the slot in play | `tests/core/save.test.ts` — the import survives two autosaves in the slot and its `:bak` |
+| Throttle down with X | `e2e/SPEC-034.spec.ts` case 4, and `tests/core/input.test.ts` for the binding table |
+
+**Owed on hardware, before the `m7` tag.**
+
+- [ ] the nine rows above, played on desktop and on the reference phone — in
+      particular the two that are a matter of feel rather than of state: whether
+      being knocked into a rock now *reads* as a shove rather than a snag, and
+      whether the Gauntlet's six kills feel like a fight won rather than a fight
+      survived. The simulations above say it is winnable; they cannot say it is
+      good.
+- [ ] the four overlays of §4.11 seen rather than asserted: the awakening burst
+      at its own alphas, the storm vignette, the storm warning pill and the
+      flight ion sheet. `tests/ui/css.test.ts` proves no rule overwrites another
+      and the e2e reads the classes; neither looks at a pixel.
+
+**Not in this branch, and why.** SPEC-016's "Completionist, base hold" run
+(AC-53) and its pinned literals (AC-73) belong to a harness that is not in this
+tree — `tests/campaign/harness.ts` here runs the worst-case main-mission player,
+which takes no side missions and so never met the finding. SPEC-034's out-of-scope
+list forbids building that harness, so §4.12's fix is pinned by
+`tests/systems/economy.test.ts` and `tests/systems/pickups.test.ts` instead, and
+`docs/BUGS.md` §6 records the same. Nothing in the worst-case runs moved, which
+§4.18 predicts: they emit no kill XP, so `c5_m1`'s four fewer kills change none of
+their numbers, and `tests/campaign/campaignSim.test.ts` passes unedited.
