@@ -1167,6 +1167,47 @@ html.reduce-motion .qb-slot.is-locked {
   opacity: 0.8;
 }
 
+/* SPEC-035 §4.6: the hit-direction wedges. Each marker is a full-bleed box
+   rotated by the hit's bearing clockwise from screen-up, with the wedge itself
+   pinned to the top edge — so one rotation puts it anywhere round the frame. */
+.hud-hit-dirs {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  overflow: hidden;
+}
+
+.hud-hit-dir {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  animation: hud-hit-dir 1s linear forwards;
+}
+
+.hud-hit-dir::before {
+  content: '';
+  position: absolute;
+  left: 50%;
+  top: 0;
+  width: 84px;
+  height: 26px;
+  transform: translateX(-50%);
+  background: linear-gradient(to bottom, var(--hp), transparent);
+  clip-path: polygon(50% 100%, 0 0, 100% 0);
+}
+
+@keyframes hud-hit-dir {
+  0% { opacity: 0.95; }
+  100% { opacity: 0; }
+}
+
+/* 35-j: reduce motion keeps the marker, and holds it still. */
+html.reduce-motion .hud-hit-dir,
+.hud-hit-dir.is-static {
+  animation: none;
+  opacity: 0.9;
+}
+
 /* AC-64 / AC-65: the two pulses ride the same keyframes. */
 .hud.is-low-hp .bar-hp {
   animation: hud-pulse 1s ease-in-out infinite;

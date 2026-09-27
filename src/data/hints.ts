@@ -36,6 +36,12 @@ export const TIP_IDS = [
   'explosives',
   // SPEC-030 §4.11: the first entry into any shelter.
   'shelter',
+  // SPEC-035 §4.8: the first hit an enemy lands, and the two the first flight
+  // needs — the reviewer died twice in four minutes and the rail explained
+  // nothing at all.
+  'combat',
+  'flight_steer',
+  'flight_throttle',
 ] as const;
 
 export type TipId = (typeof TIP_IDS)[number];
@@ -113,6 +119,22 @@ export const TIPS: Readonly<Record<TipId, TipText>> = {
   shelter: {
     keyboard: "Inside, the storm can't touch you, and anything outside loses your trail — until you fire.",
     touch: "Inside, the storm can't touch you, and anything outside loses your trail — until you fire.",
+  },
+  // SPEC-035 §4.8: the first enemy hit teaches hold-to-fire rather than moving
+  // the auto-fire default, which is a PLAN decision the design review left open.
+  combat: {
+    keyboard: 'Enemies close in fast — hold Space or the left mouse button to fire. Auto-fire is in Settings.',
+    touch: 'Drag on the right to aim — auto-fire shoots for you.',
+  },
+  // SPEC-035 §4.8: shown when the first flight's launch shot ends…
+  flight_steer: {
+    keyboard: 'WASD or the mouse steers. Space or a click fires the nose guns.',
+    touch: 'Drag to steer — the guns fire on their own.',
+  },
+  // …and 12 s later, on the same trip.
+  flight_throttle: {
+    keyboard: 'Shift speeds up and X slows down — the wheel does both.',
+    touch: 'Drag up or down on the right to change speed.',
   },
 };
 

@@ -26,6 +26,10 @@ export type HudMode = 'surface' | 'flight';
 export const DAMAGE_FLASH_MS = 150;
 /** AC-64: the low-HP pulse threshold. */
 export const LOW_HP_FRACTION = 0.25;
+/** SPEC-035 §4.6: how long a hit-direction wedge stays up. */
+export const HIT_DIR_MS = 1000;
+/** §4.6: at most three at once — a fourth replaces the oldest (35-d). */
+export const HIT_DIR_MAX = 3;
 /** SPEC-013 §4.1: the two things a holding pattern can be waiting on. */
 const HOLD_HOSTILES = 'Holding pattern — clear the hostiles';
 const HOLD_OBJECTIVE = 'Holding pattern — the objective is not done';
@@ -55,7 +59,8 @@ export class Hud {
   readonly #hp = bar('hp', '♥', 'Hull points');
   readonly #xp = bar('xp', '', 'Experience');
   readonly #shield = bar('shield', '⛨', 'Shield');
-  readonly #hull = bar('hull', '♥', 'Hull');
+  /** SPEC-035 §4.9: the ship's hull has its own glyph — two hearts read as one bar. */
+  readonly #hull = bar('hull', '⛭', 'Hull');
   readonly #level = el('span', 'hud-level');
   readonly #tokens = el('span', 'hud-tokens');
   readonly #resources = {} as Record<ResourceId, HTMLSpanElement>;
@@ -73,6 +78,9 @@ export class Hud {
   /** The scheme the key hints and the touch sizing follow (SPEC-028 §4.5). */
   #scheme: Scheme = 'keyboard';
   readonly #vignette = el('div', 'hud-vignette');
+  /** SPEC-035 §4.6: the layer the red edge wedges live in, and the live ones. */
+  readonly #hitDirLayer = el('div', 'hud-hit-dirs');
+  readonly #hitDirs: { node: HTMLDivElement; timer: ReturnType<typeof setTimeout> }[] = [];
   /** SPEC-034 §4.11: the awakening burst, shown by `.hud.is-static`. */
   readonly #static = el('div', 'hud-static');
   /** SPEC-034 §4.11: the flight ion-storm scanline sheet — its own class now. */
@@ -117,7 +125,13 @@ export class Hud {
     const tl = el('div', 'hud-tl');
     // `hud-hp` is the scene's one HP readout (AC-58); the SPEC-011 e2e reads it.
     tl.append(testId(this.#hp.root, 'hud-hp'), this.#xp.root, this.#level);
-    if (mode === 'flight') tl.append(this.#shield.root, this.#hull.root, this.#throttle);
+    if (mode === 'flight') {
+      // SPEC-035 §4.9: in flight the salvager's own HP is not what is at stake —
+      // the hull is. The bar stays in the DOM (the SPEC-011 selector resolves)
+      // and is hidden, so the two identical hearts are gone.
+      this.#hp.root.classList.add('is-hidden');
+      tl.append(this.#shield.root, testId(this.#hull.root, 'hud-hull'), this.#throttle);
+    }
     // SPEC-027 §4.2: the tracker sits under the level/XP row, in the same corner.
     if (mode === 'surface') this.#tracker = new Tracker(tl, onCycleMission ?? ((): void => undefined));
 
@@ -183,7 +197,7 @@ export class Hud {
       this.#quickBar = new QuickBar(bc, quickHandlers ?? { slot: () => undefined, pick: () => undefined });
     }
 
-    this.#root.append(this.#vignette, this.#static, tl, tr, tc, bl, br, bc);
+    this.#root.append(this.#vignette, this.#static, this.#hitDirLayer, tl, tr, tc, bl, br, bc);
     if (mode === 'flight') this.#root.append(this.#ion, this.#reticle);
     root.mount(this.#root, 'hud');
     this.#unregister = root.register(this);
@@ -233,6 +247,35 @@ export class Hud {
     this.#flashTimer = setTimeout(() => this.#vignette.classList.remove('is-flashing'), DAMAGE_FLASH_MS);
   }
 
+  /**
+   * SPEC-035 §4.6 — a red wedge at the screen edge, pointing at where the hit
+   * came from. `angle` is clockwise from screen-up, which is what the scene's
+   * map transform produces; the wedge fades over `HIT_DIR_MS` and a fourth
+   * replaces the oldest (35-d). Under reduce motion it does not pulse (35-j).
+   */
+  showHitDirection(angle: number, reduceMotion = false): void {
+    while (this.#hitDirs.length >= HIT_DIR_MAX) this.#dropHitDirection(0);
+    const node = testId(el('div', 'hud-hit-dir'), 'hud-hit-dir');
+    if (reduceMotion) node.classList.add('is-static');
+    node.style.transform = `rotate(${((angle * 180) / Math.PI).toFixed(1)}deg)`;
+    this.#hitDirLayer.append(node);
+    const entry = { node, timer: setTimeout(() => this.#dropHitDirection(this.#hitDirs.indexOf(entry)), HIT_DIR_MS) };
+    this.#hitDirs.push(entry);
+  }
+
+  /** How many wedges are up — the count §4.6 caps at three. */
+  get hitDirections(): number {
+    return this.#hitDirs.length;
+  }
+
+  #dropHitDirection(index: number): void {
+    if (index < 0) return;
+    const [entry] = this.#hitDirs.splice(index, 1);
+    if (entry === undefined) return;
+    clearTimeout(entry.timer);
+    entry.node.remove();
+  }
+
   /** Diff against the last rendered model; write only what changed (AC-61). */
   flush(): void {
     const changed = diffHud(this.#last, this.model);
@@ -255,6 +298,7 @@ export class Hud {
   dispose(): void {
     if (this.#flashTimer !== null) clearTimeout(this.#flashTimer);
     if (this.#staticTimer !== null) clearTimeout(this.#staticTimer);
+    while (this.#hitDirs.length > 0) this.#dropHitDirection(0);
     this.#tracker?.dispose();
     this.#tracker = null;
     this.#quickBar?.dispose();

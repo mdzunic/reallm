@@ -20,6 +20,7 @@ import type { GuidanceLevel } from '@/core/Settings';
 import type { GameServices } from '@/core/Services';
 import type { SceneParams } from '@/core/StateMachine';
 import type { Renderer } from '@/core/Renderer';
+import type { Voice } from '@/core/Audio';
 import type { Scheme } from '@/core/Input';
 import {
   BOSS_REVEALS,
@@ -144,6 +145,16 @@ const CAMERA_PITCH = (55 * Math.PI) / 180;
 const CAMERA_YAW = (45 * Math.PI) / 180;
 /** SPEC-035 §4.2: how long the distance takes to ease after a scheme change. */
 const CAMERA_DISTANCE_EASE_SECONDS = 0.4;
+
+// --------------------------------------------------------- SPEC-035 §4.11
+
+/** §4.11: the storm loop fades in and out over half a second. */
+const STORM_LOOP_FADE_SECONDS = 0.5;
+
+// --------------------------------------------------------- SPEC-035 §4.6
+
+/** §4.6: a hit from on screen and inside this range draws no edge wedge. */
+const HIT_DIR_NEAR_RANGE = 8;
 
 // --------------------------------------------------------- SPEC-035 §4.7
 
@@ -542,6 +553,11 @@ export class SurfaceScene extends UiScene<'surface'> {
   // field of view are untouched.
   /** SPEC-035 §4.7: true while the first-landing ramp is in force. */
   #ramp = false;
+  // SPEC-035 §4.11 — the storm loop. It is shipped and was never played; the
+  // scene owns it, like the other continuous channels (SPEC-006 §4.2).
+  #stormVoice: Voice | null = null;
+  #stormLoopVolume = 0;
+  #stormLoopTarget = 0;
   #camDistance = 0;
   #camDistanceFrom = 0;
   #camDistanceTo = 0;
@@ -1031,6 +1047,10 @@ export class SurfaceScene extends UiScene<'surface'> {
       this.services.save.flush();
     }
     this.#touch?.hide();
+    // SPEC-035 §4.11: the storm does not follow the player off the planet.
+    this.#stormLoopTarget = 0;
+    this.#stormLoopVolume = 0;
+    this.#stopStormLoop();
   }
 
   /** SPEC-034 §4.6: why the step is holding, or `null` when it runs. */
@@ -1813,6 +1833,33 @@ export class SurfaceScene extends UiScene<'surface'> {
     }
     // §4.6: visibility narrows enemy aggro.
     world.aggroMult = 1 - (1 - this.#stormEffects.visibility) * this.#stormIntensity;
+    this.#stepStormLoop(dt);
+  }
+
+  /**
+   * SPEC-035 §4.11 — `storm_loop` runs while a storm is active, fading in and
+   * out over half a second. The voice is the scene's own continuous channel, so
+   * it is stopped once the fade reaches zero and on the way out of the scene.
+   */
+  #stepStormLoop(dt: number): void {
+    const target = this.#stormLoopTarget;
+    const step = dt / STORM_LOOP_FADE_SECONDS;
+    if (this.#stormLoopVolume < target) this.#stormLoopVolume = Math.min(target, this.#stormLoopVolume + step);
+    else if (this.#stormLoopVolume > target) this.#stormLoopVolume = Math.max(target, this.#stormLoopVolume - step);
+    if (this.#stormLoopVolume <= 0) {
+      this.#stopStormLoop();
+      return;
+    }
+    if (this.#stormVoice === null) {
+      this.#stormVoice = this.services.audio.play('storm_loop', { loop: true, priority: 0, volume: this.#stormLoopVolume });
+      return;
+    }
+    this.#stormVoice.setVolume(this.#stormLoopVolume);
+  }
+
+  #stopStormLoop(): void {
+    this.#stormVoice?.stop();
+    this.#stormVoice = null;
   }
 
   // ------------------------------------------------------------------ POIs
@@ -3244,8 +3291,30 @@ export class SurfaceScene extends UiScene<'surface'> {
     settings.set({ tipsSeen: [...settings.get().tipsSeen, id] });
   }
 
+  /**
+   * SPEC-035 §4.6 — the HUD's red edge wedge, at the bearing of `from` clockwise
+   * from screen-up. The map transform of SPEC-026 §4.1 is what puts a world
+   * offset into screen space, so the wedge lands where the eye expects it.
+   *
+   * A hit from on screen and inside 8 m draws none: the red vignette has already
+   * said it, and the source is in the frame anyway.
+   */
+  #showHitDirection(player: { x: number; z: number }, from: { x: number; z: number }): void {
+    const dx = from.x - player.x;
+    const dz = from.z - player.z;
+    const distance = Math.hypot(dx, dz);
+    if (distance <= HIT_DIR_NEAR_RANGE && this.#frustumXZ.contains(from.x, from.z, 0.5)) return;
+    if (distance < 1e-3) return;
+    const u = (dx - dz) * Math.SQRT1_2;
+    const v = (dx + dz) * Math.SQRT1_2;
+    this.#hud?.showHitDirection(Math.atan2(u, -v), this.services.settings.get().reduceMotion);
+  }
+
   /** §4.5: queue a first-time tip, unless it has been seen or the queue is full. */
   #requestTip(id: TipId): void {
+    // SPEC-035 §4.8: a `?perf` run measures frames; a tip fading over one is
+    // noise in the measurement and in the screenshot.
+    if (this.services.perf === true) return;
     if (this.services.settings.get().guidance !== 'full') return; // AC-47
     if (this.services.settings.get().tipsSeen.includes(id)) return; // AC-44
     if (this.#tipQueue.includes(id)) return;
@@ -3890,7 +3959,7 @@ export class SurfaceScene extends UiScene<'surface'> {
       ),
       bus.on(
         'player:damaged',
-        ({ amount, source }) => {
+        ({ amount, source, from }) => {
           this.#hud?.damageFlash();
           // SPEC-019 §4.6: weather ticks every fixed step — no burst, no
           // shake; the amounts pool into one red number per second (19-m).
@@ -3901,6 +3970,11 @@ export class SurfaceScene extends UiScene<'surface'> {
           const world = this.#world;
           if (world === null || this.#view === null) return;
           const p = world.player;
+          // SPEC-035 §4.8: the first hit an enemy lands teaches hold-to-fire.
+          if (source.kind === 'enemy' || source.kind === 'projectile') this.#requestTip('combat');
+          // SPEC-035 §4.6: point at where it came from, unless it came from
+          // somewhere the player can already see.
+          if (from !== undefined) this.#showHitDirection(p, from);
           this.#view.fx.burst('hit', p.x, p.z, HIT_BURST_COLOR);
           this.#triggerShake(HIT_SHAKE_AMPLITUDE, HIT_SHAKE_SECONDS);
           const shown = Math.round(amount);
@@ -3937,6 +4011,8 @@ export class SurfaceScene extends UiScene<'surface'> {
           // the multiplier at 1; leaving restores the storm live then.
           const mult = effects === null || this.#insideShelter !== null ? 1 : effects.moveMult;
           this.#combat?.setWeatherMoveMult(mult);
+          // SPEC-035 §4.11: the storm loop follows the storm, over a 0.5 s fade.
+          this.#stormLoopTarget = weather === null ? 0 : 1;
         },
         this,
       ),
