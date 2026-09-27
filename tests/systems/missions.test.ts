@@ -608,3 +608,184 @@ describe('Missions — debugFinishStage (SPEC-024 §4.8)', () => {
     expect(h.save.progress.missionsDone).toEqual([]);
   });
 });
+
+// ---------------------------------------------------------------- SPEC-034
+
+/**
+ * SPEC-034 §4.2, §4.9 — `player:recalled` and the escort restart.
+ *
+ * A recall costs exactly what a death costs in progress and nothing else, so it
+ * cannot be used to skip a timed stage or a boss for free (34-c). And an escort
+ * stage now restarts on a death the way a timed one always has (E4): it was the
+ * one stage a death left half-finished with the follower gone and no way to
+ * finish it.
+ */
+describe('Missions — recall and the escort restart (SPEC-034 §4.2, §4.9)', () => {
+  it('a recall restarts a timed stage with reason `recall`, and takes nothing else', () => {
+    const h = harness();
+    h.missions.accept('c1_m1');
+    h.events.emit('poi:reached', { poi: 'landing_pad', instance: 0 });
+    h.events.emit('poi:scanned', { poi: 'dune_sea', instance: 0 });
+    const timer = () => h.missions.currentObjectives('c1_m1').find((o) => o.objective.kind === 'survive')?.value ?? 0;
+    h.run(30);
+    expect(timer()).toBeGreaterThan(29);
+
+    h.events.emit('player:recalled', {});
+    expect(h.of('mission:stageReset').at(-1)).toEqual({ id: 'c1_m1', stage: 2, reason: 'recall' });
+    expect(timer()).toBe(0);
+    // The mission is still running, at the same stage, and nothing completed.
+    expect(h.missions.active[0]?.stage).toBe(2);
+    expect(h.of('mission:completed')).toEqual([]);
+    // …and it can still be finished from zero.
+    h.run(60.1);
+    expect(h.of('mission:completed')).toEqual([{ id: 'c1_m1', replay: false }]);
+  });
+
+  it('a recall restarts a defend stage with reason `recall`', () => {
+    const save = newSave(0, MARINE, 42, 1_700_000_000_000);
+    save.progress.flags.push('chapter5_done');
+    save.progress.missionsDone.push('c6_m1');
+    const events = new EventBus<GameEvents>({ dev: false });
+    const recorded: { name: string; payload: unknown }[] = [];
+    events.onAny((name, payload) => recorded.push({ name: name as string, payload }));
+    const progression = new Progression(save, events);
+    const economy = new Economy(save, events, progression);
+    const missions = new Missions(save, economy, events, 'surface', 'eden');
+    expect(missions.accept('c6_m2').ok).toBe(true);
+    expect(missions.defendStage()).not.toBeNull();
+    const ctx: MissionContext = {
+      player: { x: 0, z: 0, alive: true },
+      poiAt: () => [],
+      heldResource: () => 0,
+      nearPoi: () => null,
+    };
+    for (let i = 0; i < 60 * 20; i++) missions.update(STEP, ctx);
+    const timer = () => missions.currentObjectives('c6_m2').find((o) => o.objective.kind === 'defend')?.value ?? 0;
+    expect(timer()).toBeGreaterThan(19);
+    events.emit('player:recalled', {});
+    expect(timer()).toBe(0);
+    const resets = recorded.filter((r) => r.name === 'mission:stageReset').map((r) => r.payload);
+    expect(resets.at(-1)).toEqual({ id: 'c6_m2', stage: 0, reason: 'recall' });
+  });
+
+  it('a death and a recall both restart an escort stage (E4)', () => {
+    const save = newSave(0, MARINE, 42, 1_700_000_000_000);
+    save.progress.missionsDone.push('c3_m1');
+    const events = new EventBus<GameEvents>({ dev: false });
+    const recorded: { name: string; payload: unknown }[] = [];
+    events.onAny((name, payload) => recorded.push((({ name: name as string, payload }))));
+    const progression = new Progression(save, events);
+    const economy = new Economy(save, events, progression);
+    const missions = new Missions(save, economy, events, 'surface', 'thessaly');
+    missions.accept('c3_m2');
+    for (let i = 0; i < 20; i++) {
+      events.emit('enemy:killed', { enemyId: 'hive_drone', elite: false, x: 0, z: 0, xp: 5 });
+    }
+    expect(missions.escortStage()).not.toBeNull();
+    const stage = missions.active[0]?.stage ?? -1;
+
+    events.emit('player:died', { cause: { kind: 'fall' }, scene: 'surface' });
+    let resets = recorded.filter((r) => r.name === 'mission:stageReset').map((r) => r.payload);
+    expect(resets.at(-1)).toEqual({ id: 'c3_m2', stage, reason: 'death' });
+
+    events.emit('player:recalled', {});
+    resets = recorded.filter((r) => r.name === 'mission:stageReset').map((r) => r.payload);
+    expect(resets.at(-1)).toEqual({ id: 'c3_m2', stage, reason: 'recall' });
+    // The stage is still the escort's: a restart is not a rollback.
+    expect(missions.active[0]?.stage).toBe(stage);
+    expect(missions.escortStage()).not.toBeNull();
+  });
+
+  it('a recall in flight resets nothing — E5 already covers it', () => {
+    const h = harness((save) => save.progress.missionsActive.push({ id: 'c5_m1', stage: 0, counters: {} }), 'flight', 'hive');
+    h.events.emit('player:recalled', {});
+    expect(h.of('mission:stageReset').filter((r) => r.reason === 'recall')).toEqual([]);
+  });
+});
+
+/**
+ * SPEC-034 §4.12: what the active collect objectives still want, per resource —
+ * the number a full hold ships home instead of bouncing (E56).
+ */
+describe('Missions.collectDemand (SPEC-034 §4.12)', () => {
+  it('sums the current stages, drops what is already counted, and registers itself', () => {
+    const demands: (((r: 'oil' | 'wheat' | 'water' | 'lithium') => number) | null)[] = [];
+    const save = newSave(0, MARINE, 42, 1_700_000_000_000);
+    save.progress.missionsDone.push('c3_m1');
+    const events = new EventBus<GameEvents>({ dev: false });
+    const progression = new Progression(save, events);
+    const economy = new Economy(save, events, progression);
+    // The registration seam of §4.12, recorded *and* passed through, so the
+    // economy's own `collectDemand` answers from the real registration.
+    const register = economy.setCollectDemand.bind(economy);
+    economy.setCollectDemand = (demand): void => {
+      demands.push(demand);
+      register(demand);
+    };
+    const missions = new Missions(save, economy, events, 'surface', 'thessaly');
+    // Construction registers exactly one demand function.
+    expect(demands).toHaveLength(1);
+    expect(demands[0]).toBeTypeOf('function');
+
+    expect(missions.collectDemand('wheat')).toBe(0);
+    missions.accept('c3_s2'); // collect 300 wheat
+    expect(missions.collectDemand('wheat')).toBe(300);
+    expect(missions.collectDemand('oil')).toBe(0);
+
+    // Progress reduces what is still wanted, one for one — and the economy
+    // answers from the registration, not from a copy of it.
+    events.emit('resource:collected', { resource: 'wheat', amount: 120, total: 120 });
+    expect(missions.collectDemand('wheat')).toBe(180);
+    expect(economy.collectDemand('wheat')).toBe(180);
+
+    // A finished objective asks for nothing.
+    events.emit('resource:collected', { resource: 'wheat', amount: 180, total: 300 });
+    expect(missions.collectDemand('wheat')).toBe(0);
+
+    // A deliver objective is not a collect one: nothing is shipped for it.
+    expect(missions.collectDemand('oil')).toBe(0);
+
+    // `dispose()` releases it, and the economy stops answering.
+    missions.dispose();
+    expect(demands.at(-1)).toBeNull();
+    expect(economy.collectDemandSource).toBeNull();
+    expect(economy.collectDemand('wheat')).toBe(0);
+  });
+});
+
+/**
+ * SPEC-034 §4.15: the pin lives in `progress.missionsActive` order, which the
+ * runtime already reads on the next landing — so it survives a reload with no
+ * save field. The board's badge follows the front entry.
+ */
+describe('Missions.pin and cyclePinned reorder missionsActive (SPEC-034 §4.15)', () => {
+  it('moves the pinned mission to the front, and cycling moves the next one', () => {
+    const h = harness((save) => {
+      save.progress.missionsDone.push('c1_m1');
+    });
+    expect(h.missions.accept('c1_m2').ok).toBe(true);
+    expect(h.missions.accept('c1_s1').ok).toBe(true);
+    const order = (): string[] => h.save.progress.missionsActive.map((entry) => entry.id);
+    expect(order()).toEqual(['c1_m2', 'c1_s1']);
+    expect(h.missions.pinned).toBe('c1_m2');
+
+    h.missions.pin('c1_s1');
+    expect(h.missions.pinned).toBe('c1_s1');
+    expect(order()).toEqual(['c1_s1', 'c1_m2']);
+    expect(h.saveRequests).toContain('stage');
+
+    // Cycling pins the next active mission and fronts it the same way.
+    h.missions.cyclePinned();
+    expect(order()[0]).toBe(h.missions.pinned);
+
+    // A mission that is not running cannot be pinned.
+    h.missions.pin('c6_m2');
+    expect(order()[0]).toBe(h.missions.pinned);
+
+    // The pin survives the reload: a new runtime reads the front entry.
+    const pinned = h.missions.pinned;
+    const reborn = new Missions(h.save, h.economy, h.events, 'surface', 'cinder4');
+    expect(reborn.pinned).toBe(pinned);
+    reborn.dispose();
+  });
+});

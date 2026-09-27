@@ -55,6 +55,9 @@ function harness(planet: keyof typeof PLANETS = 'cinder4', quality: keyof typeof
       e.aggro = false;
       e.hp = ENEMIES[id].hp;
       e.fromWave = false; // mirrors Combat.spawnEnemy's pooled reset (SPEC-030)
+      e.summonedBy = 0; // …and SPEC-034 §4.6's
+      e.spawnX = x;
+      e.spawnZ = z;
       spawned.push({ id, x, z, elite });
       return e;
     },
@@ -348,5 +351,121 @@ describe('SPEC-030 — waves flag their enemies and spawns avoid shelters (AC-29
         ).toBeGreaterThanOrEqual(Math.max(shelter.rx, shelter.rz) + 4 - 1e-9);
       }
     }
+  });
+});
+
+// ---------------------------------------------------------------- SPEC-034
+
+/**
+ * SPEC-034 §4.8 — a wave *is* the attack.
+ *
+ * Eden's finale spawned un-aggroed on a 30–55 m ring and leashed to its own
+ * spawn point, so in simulation 0 of 47 enemies came in and the beacon took no
+ * damage in 240 s: the last fight of the campaign was a four-minute wait. A wave
+ * enemy now comes in aggroed, anchored at the wave's centre, and the far-straggler
+ * cull leaves it alone.
+ */
+describe('waves attack (SPEC-034 §4.8)', () => {
+  it('a wave enemy spawns aggroed and anchored at the wave centre', () => {
+    const h = harness('eden', 'high');
+    const centre = { x: 12, z: -8 };
+    h.director.startWave('eden_final', centre);
+    h.run(1, PLAYER, NOWHERE, false);
+    const wave = h.living().filter((e) => e.fromWave);
+    expect(wave.length).toBeGreaterThan(0);
+    for (const e of wave) {
+      expect(e.aggro).toBe(true);
+      expect(e.spawnX).toBe(centre.x);
+      expect(e.spawnZ).toBe(centre.z);
+    }
+  });
+
+  it("a 'player' wave anchors at where the player stood when it spawned", () => {
+    const h = harness('eden', 'high');
+    const player = { x: -30, z: 40 };
+    h.director.startWave('eden_final', 'player');
+    h.run(1, player, NOWHERE, false);
+    for (const e of h.living().filter((entity) => entity.fromWave)) {
+      expect(e.spawnX).toBe(player.x);
+      expect(e.spawnZ).toBe(player.z);
+    }
+  });
+
+  it("eden_final's band is 25–40 m, so the wave arrives inside aggro range", () => {
+    expect(WAVES.eden_final.spawnBand).toEqual([25, 40]);
+    const h = harness('eden', 'high');
+    h.director.startWave('eden_final', { x: 0, z: 0 });
+    h.run(1, PLAYER, NOWHERE, false);
+    for (const spawn of h.spawned) {
+      const d = Math.hypot(spawn.x, spawn.z);
+      expect(d).toBeGreaterThanOrEqual(25 - 1e-6);
+      expect(d).toBeLessThanOrEqual(40 + 1e-6);
+    }
+  });
+
+  it('#cullFar never recycles a wave enemy', () => {
+    const h = harness('eden', 'high');
+    h.director.startWave('eden_final', { x: 0, z: 0 });
+    h.run(1, PLAYER, NOWHERE, false);
+    const wave = h.living().filter((e) => e.fromWave);
+    expect(wave.length).toBeGreaterThan(0);
+    // Far *and* un-aggroed for well past `DESPAWN_SECONDS`: the two conditions
+    // the cull recycles on. An ambient enemy in the same state would be gone.
+    for (const e of wave) {
+      e.x = 400;
+      e.z = 0;
+      e.aggro = false;
+    }
+    h.run(DESPAWN_SECONDS + 2, PLAYER, NOWHERE, false);
+    expect(h.living().filter((e) => e.fromWave).length).toBe(wave.length);
+  });
+
+  it('stopWave with dismiss recycles the survivors silently, with their burst', () => {
+    const h = harness('eden', 'high');
+    const handle = h.director.startWave('eden_final', { x: 0, z: 0 });
+    h.run(1, PLAYER, NOWHERE, false);
+    const before = h.living().length;
+    expect(before).toBeGreaterThan(0);
+    const dismissed = h.director.stopWave(handle, { dismiss: true });
+    expect(dismissed).toBe(before);
+    expect(h.living()).toEqual([]);
+    // No kill, no XP, no loot — one burst each and nothing else.
+    expect(h.recorded.filter((r) => r.name === 'enemy:killed')).toEqual([]);
+    expect(h.recorded.filter((r) => r.name === 'enemy:dismissed')).toHaveLength(before);
+  });
+
+  it('stopWave without dismiss leaves the survivors alone', () => {
+    const h = harness('eden', 'high');
+    const handle = h.director.startWave('eden_final', { x: 0, z: 0 });
+    h.run(1, PLAYER, NOWHERE, false);
+    const before = h.living().length;
+    expect(h.director.stopWave(handle)).toBe(0);
+    expect(h.living()).toHaveLength(before);
+    expect(h.recorded.filter((r) => r.name === 'enemy:dismissed')).toEqual([]);
+  });
+
+  /**
+   * SPEC-034 §4.6, E57 / 34-d: the Queen's twelve drones kept attacking through
+   * the modal lines her death plays. They leave with her, before the Warden
+   * speaks, and no damage lands after the death.
+   */
+  it('dismissSummons takes a boss’s living summons and nothing else', () => {
+    // Cinder-4, whose population fills the field: Eden's is 0 by design.
+    const h = harness('cinder4', 'high');
+    h.run(6); // a few ambient enemies, which belong to no boss
+    const ambient = h.living().length;
+    expect(ambient).toBeGreaterThan(0);
+    // Two bosses' worth of summons, stamped the way `Combat.#summonRing` does.
+    const summons = h.living();
+    for (let i = 0; i < 3; i++) (summons[i] as EnemyEntity).summonedBy = 77;
+    (summons[3] as EnemyEntity).summonedBy = 99;
+
+    expect(h.director.dismissSummons(77)).toBe(3);
+    expect(h.living()).toHaveLength(ambient - 3);
+    expect(h.recorded.filter((r) => r.name === 'enemy:killed')).toEqual([]);
+    expect(h.recorded.filter((r) => r.name === 'enemy:dismissed')).toHaveLength(3);
+    // The other boss's summon is untouched, and a second call takes nothing.
+    expect(h.director.dismissSummons(77)).toBe(0);
+    expect(h.living().some((e) => e.summonedBy === 99)).toBe(true);
   });
 });
