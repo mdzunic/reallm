@@ -25,12 +25,16 @@ async function sceneInfo(page: Page): Promise<Record<string, number | string>> {
   return page.evaluate(() => window.__reallm.stats().sceneInfo ?? {});
 }
 
-/** Click through any open non-modal dialogue, as the other surface suites do. */
+/**
+ * Click through any open non-modal dialogue, as the other surface suites do.
+ * A beat can close itself between the visibility read and the click, which
+ * throws rather than failing the check — that is the loop ending, not an error.
+ */
 async function dismiss(page: Page): Promise<void> {
   const dialogue = page.locator('[data-testid="dialogue"]');
   for (let i = 0; i < 25; i++) {
     if (!(await dialogue.isVisible().catch(() => false))) return;
-    await dialogue.click({ force: true });
+    await dialogue.click({ force: true }).catch(() => undefined);
     await page.waitForTimeout(120);
   }
 }
