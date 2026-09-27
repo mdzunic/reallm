@@ -68,9 +68,13 @@ async function reload(page: Page): Promise<void> {
 /** Click through any open dialogue: the first tap fills the line, the next advances. */
 async function dismiss(page: Page): Promise<void> {
   const dialogue = page.locator('[data-testid="dialogue"]');
+  // SPEC-037 §4.3: a non-modal line lets taps through; its `›` advances it.
+  const advance = page.locator('[data-testid="dialogue-advance"]');
   for (let i = 0; i < 30; i++) {
     if (!(await dialogue.isVisible().catch(() => false))) return;
-    await dialogue.click({ force: true });
+    // The line can move on by itself between the look and the press.
+    if (await advance.isVisible().catch(() => false)) await advance.click({ force: true, timeout: 2_000 }).catch(() => undefined);
+    else await dialogue.click({ force: true });
     await page.waitForTimeout(120);
   }
 }
@@ -141,33 +145,52 @@ test('2. the full map holds the simulation, and Escape closes it without pausing
   expect(Number((await info(page))['px'])).not.toBe(Number(after['px']));
 });
 
-test('3. a minimap tap opens the map; the close button, M and a tap outside close it', async ({ page }) => {
-  await land(page);
-  await dismiss(page);
-  const map = page.locator('[data-testid="map-screen"]');
+/**
+ * One tap on open ground: the scheme is touch from here (SPEC-005 AC-19), which
+ * is where the minimap takes a tap (SPEC-037 §4.2).
+ */
+async function touchScheme(page: Page): Promise<void> {
+  const size = page.viewportSize();
+  await page.touchscreen.tap(Math.round((size?.width ?? 1280) / 2), Math.round((size?.height ?? 720) * 0.45));
+  await expect.poll(async () => page.evaluate(() => window.__reallm.input().scheme)).toBe('touch');
+}
 
-  await page.locator('[data-testid="minimap"]').click();
-  await expect(map).toBeVisible();
-  await page.locator('[data-testid="map-close"]').click();
-  await expect(map).toBeHidden();
+// SPEC-037 §4.12: on the keyboard the minimap is display-only — a click there
+// fires, and `M` is its key — so the tap cases run in a touch context and
+// switch the scheme with one tap first. The keyboard path is M, below.
+test.describe('3. on touch (SPEC-037 §4.12)', () => {
+  test.use({ hasTouch: true });
 
-  // §4.5: M toggles, and `+` / `map-zoom` swap fit for 2× while it is open.
-  await page.keyboard.press('KeyM');
-  await expect(map).toBeVisible();
-  const zoom = page.locator('[data-testid="map-zoom"]');
-  await expect(zoom).toHaveText('Zoom 2×');
-  await zoom.click();
-  await expect(zoom).toHaveText('Fit');
-  await page.keyboard.press('Equal');
-  await expect(zoom).toHaveText('Zoom 2×');
-  await page.keyboard.press('KeyM');
-  await expect(map).toBeHidden();
+  test('3. a minimap tap opens the map; the close button, M and a tap outside close it', async ({ page }) => {
+    await land(page);
+    await dismiss(page);
+    const map = page.locator('[data-testid="map-screen"]');
 
-  // §4.5, Touch: a tap that lands on neither the map nor the panel closes it.
-  await page.locator('[data-testid="minimap"]').click();
-  await expect(map).toBeVisible();
-  await map.click({ position: { x: 4, y: 4 } });
-  await expect(map).toBeHidden();
+    await touchScheme(page);
+    await page.locator('[data-testid="minimap"]').tap();
+    await expect(map).toBeVisible();
+    await page.locator('[data-testid="map-close"]').tap();
+    await expect(map).toBeHidden();
+
+    // §4.5: M toggles, and `+` / `map-zoom` swap fit for 2× while it is open.
+    await page.keyboard.press('KeyM');
+    await expect(map).toBeVisible();
+    const zoom = page.locator('[data-testid="map-zoom"]');
+    await expect(zoom).toHaveText('Zoom 2×');
+    await zoom.click();
+    await expect(zoom).toHaveText('Fit');
+    await page.keyboard.press('Equal');
+    await expect(zoom).toHaveText('Zoom 2×');
+    await page.keyboard.press('KeyM');
+    await expect(map).toBeHidden();
+
+    // §4.5, Touch: a tap that lands on neither the map nor the panel closes it.
+    await touchScheme(page);
+    await page.locator('[data-testid="minimap"]').tap();
+    await expect(map).toBeVisible();
+    await map.tap({ position: { x: 4, y: 4 } });
+    await expect(map).toBeHidden();
+  });
 });
 
 test('4. travel lights ground; a reload and a station round trip both land on it', async ({ page }) => {

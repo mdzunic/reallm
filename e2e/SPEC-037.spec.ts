@@ -66,7 +66,7 @@ async function dismissDialogue(page: Page): Promise<void> {
   const advance = page.getByTestId('dialogue-advance');
   for (let i = 0; i < 30; i++) {
     if (!(await dialogue.isVisible().catch(() => false))) return;
-    if (await advance.isVisible().catch(() => false)) await advance.click({ force: true });
+    if (await advance.isVisible().catch(() => false)) await advance.click({ force: true, timeout: 2_000 }).catch(() => undefined);
     else await dialogue.click({ force: true });
     await page.waitForTimeout(120);
   }

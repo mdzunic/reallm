@@ -32,9 +32,12 @@ async function sceneInfo(page: Page): Promise<Record<string, number | string>> {
  */
 async function dismiss(page: Page): Promise<void> {
   const dialogue = page.locator('[data-testid="dialogue"]');
+  // SPEC-037 §4.3: a non-modal line lets taps through; its `›` advances it.
+  const advance = page.locator('[data-testid="dialogue-advance"]');
   for (let i = 0; i < 25; i++) {
     if (!(await dialogue.isVisible().catch(() => false))) return;
-    await dialogue.click({ force: true }).catch(() => undefined);
+    if (await advance.isVisible().catch(() => false)) await advance.click({ force: true, timeout: 2_000 }).catch(() => undefined);
+    else await dialogue.click({ force: true }).catch(() => undefined);
     await page.waitForTimeout(120);
   }
 }
