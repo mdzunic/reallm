@@ -10,6 +10,16 @@ import { CARGO_TOAST_SECONDS, SHIPPED_TOAST_TEXT } from '@/systems/Pickups';
 import {
   abandonMission,
   acceptMission,
+  CAMERA_DISTANCE,
+  cameraDistance,
+  contrastRatio,
+  FOG_SPAN_K,
+  occludes,
+  OCCLUDER_OPACITY,
+  relativeLuminance,
+  surfaceFogRange,
+  upgradeDeltaText,
+  UPGRADE_METRIC_KEYS,
   balanceAfterText,
   gearStatLines,
   shortfallText,
@@ -767,5 +777,140 @@ describe('the shipped-home toast (SPEC-034 §4.12)', () => {
   it('reads as §4.12 gives it, and shares CARGO FULL’s throttle', () => {
     expect(SHIPPED_TOAST_TEXT).toBe('Hold full — surplus shipped to Command Relay.');
     expect(CARGO_TOAST_SECONDS).toBe(3);
+  });
+});
+
+// --------------------------------------------------- SPEC-035: the readable view
+
+describe('cameraDistance (SPEC-035 §4.2)', () => {
+  it('is 22 on the keyboard scheme and 17 on touch', () => {
+    expect(cameraDistance('keyboard')).toBe(22);
+    expect(cameraDistance('touch')).toBe(17);
+    // A gamepad is a desktop screen, so it keeps the keyboard distance.
+    expect(cameraDistance('gamepad')).toBe(22);
+    expect(CAMERA_DISTANCE).toEqual({ keyboard: 22, touch: 17, gamepad: 22 });
+  });
+});
+
+describe('surfaceFogRange (SPEC-035 §4.4)', () => {
+  it('starts the fog at the camera and spans FOG_SPAN_K / density past it', () => {
+    const range = surfaceFogRange(0.014, 1, 22);
+    expect(range.near).toBe(22);
+    expect(range.far).toBeCloseTo(22 + FOG_SPAN_K / 0.014, 6);
+    expect(FOG_SPAN_K).toBe(2.2);
+  });
+
+  it('shortens the span as a storm thickens fogMult, and keeps near at the camera', () => {
+    const calm = surfaceFogRange(0.014, 1, 22);
+    const storm = surfaceFogRange(0.014, 3, 22);
+    expect(storm.near).toBe(22);
+    expect(storm.far - storm.near).toBeLessThan(calm.far - calm.near);
+    expect(storm.far).toBeCloseTo(22 + FOG_SPAN_K / (0.014 * 3), 6);
+  });
+
+  it('follows the camera distance, and never goes behind it', () => {
+    expect(surfaceFogRange(0.02, 1, 17).near).toBe(17);
+    expect(surfaceFogRange(0.02, 1, -5).near).toBe(0);
+    // A zero density does not divide by zero.
+    expect(Number.isFinite(surfaceFogRange(0, 1, 22).far)).toBe(true);
+  });
+});
+
+describe('occludes (SPEC-035 §4.5)', () => {
+  // The camera sits up and to the +x/+z side, the way the 55°/45° rig does.
+  const camera = { x: 14, y: 18, z: 14 };
+  const player = { x: 0, z: 0 };
+
+  it('is true for a tall prop on the camera side of the player', () => {
+    expect(occludes(camera, player, { x: 5, z: 5, radius: 2, height: 8 })).toBe(true);
+  });
+
+  it('is false for a prop behind the player', () => {
+    expect(occludes(camera, player, { x: -5, z: -5, radius: 2, height: 8 })).toBe(false);
+  });
+
+  it('is false for a prop beside the sight line', () => {
+    expect(occludes(camera, player, { x: 5, z: -5, radius: 2, height: 8 })).toBe(false);
+  });
+
+  it('is false for a prop too short to reach the line', () => {
+    expect(occludes(camera, player, { x: 5, z: 5, radius: 2, height: 0.4 })).toBe(false);
+  });
+
+  it('uses radius × 0.9, so a prop just outside that circle does not occlude', () => {
+    // The sight line runs along x = z, so a body at (6.35, 3.65) sits 1.91 m
+    // to its side: inside 2.2 × 0.9 = 1.98, outside 2 × 0.9 = 1.8.
+    expect(occludes(camera, player, { x: 6.35, z: 3.65, radius: 2.2, height: 8 })).toBe(true);
+    expect(occludes(camera, player, { x: 6.35, z: 3.65, radius: 2, height: 8 })).toBe(false);
+  });
+
+  it('is false for a prop with no footprint or no height', () => {
+    expect(occludes(camera, player, { x: 5, z: 5, radius: 0, height: 8 })).toBe(false);
+    expect(occludes(camera, player, { x: 5, z: 5, radius: 2, height: 0 })).toBe(false);
+  });
+
+  it('pins the opacity a faded prop reaches', () => {
+    expect(OCCLUDER_OPACITY).toBe(0.3);
+  });
+});
+
+describe('upgradeDeltaText (SPEC-035 §4.12)', () => {
+  it('names every metric in the words §4.12 gives', () => {
+    expect(upgradeDeltaText('speedMult', 1, 1.15)).toBe('Speed +15 %');
+    expect(upgradeDeltaText('fuelMult', 1, 0.9)).toBe('Fuel use −10 %');
+    expect(upgradeDeltaText('hullHp', 100, 150)).toBe('Hull 100 → 150');
+    expect(upgradeDeltaText('shieldHp', 40, 80)).toBe('Shield 40 → 80');
+    expect(upgradeDeltaText('cargoCap', 400, 600)).toBe('Cargo 400 → 600');
+    expect(upgradeDeltaText('damage', 10, 13)).toBe('Gun damage 10 → 13');
+    expect(upgradeDeltaText('fireRate', 4, 5)).toBe('Fire rate 4 → 5 /s');
+  });
+
+  it('falls back to the key split into words for an unknown metric', () => {
+    expect(upgradeDeltaText('heatMax', 1, 2)).toBe('Heat max 1 → 2');
+  });
+
+  /**
+   * §4.12: the invariant that matters — no `UPGRADES` metric may reach the
+   * fallback, because that is what would print a variable name at the player.
+   */
+  it('covers every UPGRADES metric without falling back', () => {
+    const named = new Set<string>(UPGRADE_METRIC_KEYS);
+    const problems: string[] = [];
+    for (const upgrade of Object.values(UPGRADES)) {
+      for (const metric of Object.keys(upgrade.metrics)) {
+        if (!named.has(metric)) problems.push(metric);
+      }
+    }
+    expect(problems).toEqual([]);
+  });
+
+  it('never prints a metric key, for any tier of any upgrade', () => {
+    const keyish = /[a-z]+(Mult|Hp|Cap)\b/;
+    for (const upgrade of Object.values(UPGRADES)) {
+      for (const [metric, values] of Object.entries(upgrade.metrics)) {
+        for (let tier = 0; tier < 3; tier++) {
+          const text = upgradeDeltaText(metric, values[tier] as number, values[tier + 1] as number);
+          expect(text, `${metric} tier ${tier}`).not.toMatch(keyish);
+        }
+      }
+    }
+  });
+});
+
+describe('contrastRatio (SPEC-035 §4.1)', () => {
+  it('is 21 for black on white and 1 for a colour against itself', () => {
+    expect(contrastRatio('#000000', '#ffffff')).toBeCloseTo(21, 6);
+    expect(contrastRatio('#ffffff', '#000000')).toBeCloseTo(21, 6);
+    expect(contrastRatio('#3a7a5a', '#3a7a5a')).toBeCloseTo(1, 10);
+  });
+
+  it('accepts the short form and reads an unparseable colour as black', () => {
+    expect(contrastRatio('#fff', '#000')).toBeCloseTo(21, 6);
+    expect(contrastRatio('not a colour', '#ffffff')).toBeCloseTo(21, 6);
+  });
+
+  it('pins the WCAG luminance of white and black', () => {
+    expect(relativeLuminance('#ffffff')).toBeCloseTo(1, 10);
+    expect(relativeLuminance('#000000')).toBeCloseTo(0, 10);
   });
 });
