@@ -317,13 +317,216 @@ Specs:
 
 ---
 
+**R19 — 2026-09-27 (the third review, part one: the story listens — a human first, then a copy).** A third design review of `main` at 2cf398a (SPEC-035 and PLAN R18 merged) followed the story as a player meets it, mission by mission, watched the films at phone size, and audited the world, three new mechanics and what makes a player come back. Its four audits are in `docs/review-r19/`. The story audit found:
+
+- **There is no human to un-make.** The salvager has no past, kin, memory, body or want, and speaks 9 of the game's 94 lines. "You think you are human" rests on the prologue's narration, so neither the twist nor a "replaceable" ending has anything to overturn.
+- **The main path carries no evidence before chapter 4.**
+  - The echo, your own log and the tower settings are all side missions.
+  - The first main-path slip comes at about 60 % of the campaign.
+  - The chapter-4 notice then accuses a player who did exactly as told.
+- **The story never listens.** No line can depend on what the player did, and four story flags are set and never read.
+- **The payoff lands on a stranger.** Card 62 — "you" — is a photographed bearded man, reused on card 63 and on every card of the escape film, while creation offers visored helmets. `RUN 62` and `instance/62` are hard-coded, and `meta.iteration` is never read.
+- **"Walk, do not run" has no mechanic,** although it is the game's signature line.
+- **The films plant hope, not doubt.** The rendered `stranded` shot already looks like the escape ending's clay city.
+- **One slip.** `c5_m1_accept` still says "Ten kills", though R17 made it six.
+
+The planets, the 26 missions and their rewards, the token totals (670 / 104 / 2,380) and every SPEC-010 invariant do not change here; the save format moves once, in R20. Decisions:
+
+1. **The story listens (SPEC-048, §5, §13 E75–E77).**
+   - A dialogue line may carry a condition — a story flag, the number of optional clues found, the iteration — and placeholders such as `{name}` and `{instance}`. Film captions may carry variants. `instance = 61 + meta.iteration`, so the first run is instance/62.
+   - A catalogue of clues, each a story flag, gives every chapter at least one **main-path echo**:
+     - a dying raider repeats the scav's warning;
+     - the ridge camp has one bunk slept in, and boots the salvager's size;
+     - a ruin on Thessaly is the same ruin twice;
+     - Eden is four degrees everywhere, with the same eleven trees in the same order;
+     - the Hive keeps coming after the Queen is dead.
+   - The **optional** clues are the echo, a tug hull with its registry scratched off, your own flight log, the tower settings, sixty-one tally marks in a Ferrum cave, a scav pilot who asks what number you are on, a wrecked tug in the Hive with registry CR-61, and the same tree in every Eden grove.
+   - The salvager's **Notes**, a tab of the comms log, record what was found.
+   - **Command's rating**, `max(0.5, 1 − 0.03 × optional clues found)`, is Earth Command's grade in the fiction and the reward signal in truth: a curious player is graded down. It changes nothing in play.
+   - **The Warden and ARIA name what happened.**
+     - The chapter-4 notice becomes modal and names what the player found.
+     - The Warden's address and ARIA's confession name what the player saw and what ARIA covered up, naming at most four found clues each; her answer to the memory question is outside that cap.
+     - ARIA's cover stories get new variants once she has confessed.
+     - A replayed mission plays its accept line only.
+   - **Continuity:**
+     - "Six kills".
+     - The Vetra log is signed `Iteration {prior}` (61 on the first run), in the salvager's voice.
+     - Command hails "tug CR-{instance}".
+     - At the ridge camp ARIA covers: Earth "flew other ships before the Selection".
+     - At Eden, ARIA names the Hive wave.
+     - The scavengers get bodies, and the second body is identical to the first.
+2. **Someone waiting (SPEC-049, §5, §13 E78).**
+   - **Ines.** The human anchor is the salvager's sister, Ines, in Shelter Nine, Block C. She is the next of kin on the personnel file, and the woman at the tap in the films.
+   - **The letters.**
+     - She writes five letters, one after each interlude.
+     - The fourth repeats a line of the first.
+     - The fifth is the first, word for word, and has no date; none of them ever had one.
+   - **A compass keepsake.** Its description does not agree with itself — tin or brass, hers or your mother's — until it "points at your next objective".
+   - **The body.**
+     - ARIA explains each death as the "medical frame" restarting a heart.
+     - She notes that the salvager has not slept since launch.
+     - For the file, she asks what they remember first. Her confession later gives how many of the sixty-one before gave the same answer.
+   - **Only Ines uses contractions.** The house style is what makes ARIA, Command, the Warden and the salvager sound alike. The one voice that breaks it is the human one.
+3. **Walk, do not run (SPEC-050, §4, §9, §13 E79, E80).**
+   - **Running.** The salvager can run at ×1.35: Shift on the surface, or the touch stick pushed past its ring.
+   - **Stamina.**
+     - The pool is 100. It drains 25/s while running in combat, and not at all out of combat.
+     - It refills at 20/s after 0.8 s. At 0 the salvager is exhausted until it is back at 30.
+     - The dash costs 30 stamina (refines R18 decision 3).
+   - **Running holsters the gun and is loud.** Enemies hear a runner from 1.5× as far, and a hidden player is found.
+   - **The Dune Wurm hunts by vibration.** Its burrow follows a running player and stays put for a walker. The scav's warning becomes the boss's pattern, and SPEC-041's escape invariant still holds.
+   - **Why the costs.** Bot runs of the fight at 60 Hz show a running kiter takes 2.0–3.1× the damage per kill of a walking one. A gun that fired while running would halve the damage a Scout takes, with no loss of kills; the holster is what keeps running honest.
+4. **Films retaken (SPEC-051, a hand-run drop like SPEC-021).**
+   - **The salvager never has a face.** Cards 62 and 63 are one visored ID photo of the suit, and the escape film's last card clears onto an empty helmet.
+   - **Photographs and the unmaking.** `stranded` becomes a photograph, so the escape ending unmakes the photographed world rather than boxes.
+   - **The interludes plant doubt.**
+     - `earth_c1`–`earth_c3` are reframed for phones, and the third's new lights fall on a perfect grid.
+     - `watchers` tears to the clay Earth.
+     - Interlude five ends on the Selection board with a blank card, No. 63.
+     - Ines appears at the liftoff fence and in the grow room.
+   - **Production.**
+     - Five photographic plates are made by hand, and no timing changes.
+     - A likeness check of the six Selection faces comes before release.
+     - The rendered capsule, tanks, reactor and fleet shots wait for a later drop.
+5. **The fourth-wall rule, refined (§12).**
+   - Surface fiction stays coherent on its own.
+   - Until chapter 4 every anomaly arrives with a cover someone offers: sand, a common hand, colony moulds, stims, the medical frame.
+   - Each chapter carries one main-path echo; the rest stay optional.
+   - Notes, the rating and the letters are diegetic.
+   - Fourth-wall surfaces appear only in the endings and what follows them.
+   - **House rules:** the salvager's card never shows a face; only Ines uses contractions; a replay plays its accept line only.
+6. **Milestone M7h "The story listens"** (SPEC-048…SPEC-051), tag `m7h`.
+
+Specs:
+- SPEC-048 (decisions 1 and 5), SPEC-049 (2), SPEC-050 (3), SPEC-051 (4).
+- SPEC-000's queue and build order.
+
+(§1, §4, §5, §9, §10, §12, §13)
+
+---
+
+**R20 — 2026-09-27 (the third review, part two: a world worth walking, and something under it).** The same review captured every planet at full resolution on the desktop and phone presets, counted every mesh the surface draws, rendered the prop generator, and prototyped caves, puzzles and treasure against the real layout and economy. It found:
+
+- **"The trees look low resolution" has four causes, and texture size is none of them.**
+  - The trees are not trees. Thessaly's is a 594-triangle mushroom and Eden's is four icosphere blobs, scaled to 2.4–9 m.
+  - The renderer multiplies every prop by the planet's accent colour and flat-shades it. That loses 25–89 % of the authored brightness and shows every facet.
+  - A first landing never draws the committed models: stand-ins show until a second landing, and SPEC-040's release on exit would make that every landing.
+  - Every 60 Hz phone renders on `low`, at a ninth of its pixels with no anti-aliasing. SPEC-040 fixes the benchmark, but `medium` still renders at DPR 1.5.
+- **The ground has the texels but the wrong content.** Nine of thirteen layers share one Voronoi paving, and a full-strength palette tint makes Cinder-4 orange and Thessaly and Eden the same green.
+- **The world is empty.** There are 0.2–0.4 objects per screen, and 70–87 % of the drawn triangles are off screen because no instanced layer is culled.
+- **Nothing rewards leaving the path.** Caves are 6 m rooms with nothing in them, nothing in the game is a puzzle, and optional play pays nothing.
+
+The arenas, the 26 missions and their rewards, and every SPEC-010 invariant stay. What moves:
+- treasure adds 30 optional tokens (decision 7);
+- the save moves to version 3 (decision 2);
+- the layout pins move once (decision 4).
+
+Decisions:
+
+1. **Props look like their art, and only what is on screen is drawn (SPEC-046; SPEC-040 amended; §13 E72).**
+   - Committed props draw with their authored colours and normals.
+   - A planet's models draw on every landing: a bounded wait behind the fade, then an in-place swap.
+   - Both variants of each prop are drawn, and landmarks draw at their trigger's scale.
+   - Scatter returns to SPEC-018's budget, and the ground's palette tint drops to 35 %.
+   - A visible-set culler draws only the instances on screen: at most 60 k triangles at spawn on `medium`.
+   - A "sharp" option renders `medium` at up to DPR 2.
+   - The tug is parked on the landing pad (the first review's §6.2).
+2. **Save v3 (SPEC-047, §8, §13 E73, E74).** One version bump for the whole wave, built before the specs that use it. It adds:
+   - the lineage of earlier instances;
+   - run statistics;
+   - claimed caches;
+   - the underground's explored ground;
+   - the remains;
+   - a resume point.
+
+   v2 saves migrate with empty values. An older build refuses a v3 save, with Export (E9).
+3. **The world art drop (SPEC-052, hand-run Blender).**
+   - Real trees for Thessaly and Eden: trunk, limbs and leaf cards, with a low-detail version. Eden gets one identical orchard tree.
+   - Twelve set-dressing pieces and six landmark models.
+   - A foliage atlas, and four ground layers re-authored without the paving, plus a detail normal.
+   - The cave kit: caches, a vault door, terminals, plates, mirrors, a lens, a receiver, a shaft, beacons, racks and cradles.
+   - Pictures for the relics and blueprints.
+   - Budgets: models ≤ 3.5 MB of 4 and textures ≤ 4.9 MB of 6. The drop adds at most 1.1 MB to the precache, which stays about 23.5 of 25 MB with the whole wave.
+4. **Trees, groves and ground (SPEC-053, §13 E81, E82).**
+   - Trees sway in the wind. Their trunks collide, and their canopies dither away around the player and over enemies.
+   - Groves on Thessaly, orchards on Eden and set-piece clusters on the other planets are placed like SPEC-030's outcrops. The layout pins move once, deliberately, with corridors, reachability and the spawn ring still guaranteed.
+   - Undergrowth and streamed ground cover; ground detail and anti-tiling; contact shadows.
+   - **Eden is too perfect.** Its orchards are one tree on an exact lattice, the cover is mown in rows, and the lawn has a seam.
+5. **The underground (SPEC-054, §4, §6, §13 E83–E87).**
+   - One cave shelter per planet leads down to a dark level of 5–7 rooms, generated from the layout seed and the same on every visit. It is a level of the surface scene, not a scene.
+   - The descent opens after `c1_m1`. It is refused during timed, escort, defend and boss stages.
+   - Below, there is darkness and fog, and a flashlight with no battery. Bugs flee its beam, hunters follow it, and the dark hides you.
+   - The planet's packs roam there, with caches and a vault.
+   - Eden's underground is the machine room: racks, and a row of cradles holding suits in your colours.
+   - Caves add no mission, objective or requirement.
+6. **Puzzles (SPEC-055, §13 E88).**
+   - Five kinds, each generated solvable from a seed:
+     - at terminals: conduit routing, a calibration grid, and "complete the sequence";
+     - in caves: stepping plates in an order hinted in another room, and mirrors that carry the flashlight's beam to a lens.
+   - Seventeen sites: six vaults, six cave rooms and five surface relics.
+   - Hints are free and a bypass opens after 90 s, so nobody is ever stuck. No puzzle gates a mission.
+   - The wording drifts with the story. ROUTE POWER becomes ROUTE ATTENTION, and the sequence becomes PREDICT THE NEXT TOKEN.
+   - Eden's vault asks the salvager to prove they are human; every answer opens it.
+7. **Treasure (SPEC-056, §7, §13 E89, E90).**
+   - Each vault pays:
+     - 5 tokens — 30 in all, taking the completionist's income from 1,249 to 1,279, still inside SPEC-039's decision sink;
+     - a relic: an arsenal side-grade with one twist, kept on a rack;
+     - a prior instance's log.
+   - Blueprints for a flare and a stim; suit swatches and a Locker to wear them.
+   - Every reward is a first claim, so nothing is farmable.
+8. **Milestone M7i "The world"** (SPEC-046, SPEC-047, SPEC-052…SPEC-056), tag `m7i`. SPEC-046 builds first in the wave, because it fixes what the player sees on every planet.
+
+Specs:
+- SPEC-046 (decision 1), SPEC-047 (2), SPEC-052 (3), SPEC-053 (4), SPEC-054 (5), SPEC-055 (6), SPEC-056 (7).
+- SPEC-040 §4.6 (amended: props on every landing).
+- SPEC-043 §4.2 (amended: collect objectives count pickups only, so a bonus, a contract or a reward never advances one).
+- SPEC-000's queue and build order.
+
+(§2, §4, §6, §7, §8, §10, §12, §13)
+
+---
+
+**R21 — 2026-09-27 (the third review, part three: the next instance).** The review's last audit asked what makes a player come back and what they can show others, and followed the "replaceable" theme into the mechanics. After either ending the save offers nothing new. Death is a flat tax. An interrupted phone session costs the landing. Nothing can be shared. Decisions:
+
+1. **Remains (SPEC-057, §4, §13 E91–E93).**
+   - A death's loss waits in the remains where the salvager fell: E4's 10 %, 20 % on hard, none on casual. Reaching them takes it back, and a second death loses the first.
+   - They look like a dropped cargo pack until the chapter-4 notice. After it they are the salvager's own body, tagged `instance/62 · restart N`.
+   - Remains only ever give back: two deaths with nothing recovered cost what E4 costs today.
+2. **Iteration 63 (SPEC-058, §5, §8, §13 E94, E95).** PLAN §5's deferred "Iteration 63" is designed.
+   - **The handover.** After either ending, the save can pass to the next instance.
+     - The old run is archived and can be restored once.
+     - Creation starts as a copy of the predecessor.
+     - The world keeps the same seed, and nothing economic carries over.
+   - **Containment rises.** Enemy HP and damage go ×1.15 per iteration, capped at three steps, and elites +2 points.
+   - **The world remembers.** The predecessor's body lies where it last died, the Vetra log is its real run, and about twenty lines change ("You again.").
+   - **The endings pay it off.**
+     - The stay report shows the rating and `RUN 62 logged`, then Selection card No. 63 with the player's own portrait.
+     - An escaped slot reads `disconnected`, and continuing it says the instance was restored from its last checkpoint.
+3. **Coming back and showing others (SPEC-059, §9, §13 E96, E97).**
+   - **Resume on the planet** within 24 h of an interruption, with a "previously" card after longer. This lifts R18 decision 12's "not now".
+   - **A `story` difficulty** for players who come for the plot: no damage taken, records off.
+   - **Commendations,** the in-fiction achievement list, which re-titles itself "Evaluation log" once the Warden has spoken.
+   - **A Selection card** to share through the phone's share sheet.
+   - **Link previews,** store metadata and an install button.
+   - **No records** from debug, story or service sessions.
+4. **Milestone M7j "The next instance"** (SPEC-057…SPEC-059), tag `m7j`. The specs of R19–R21 build in number order after SPEC-045, and the two hand-run drops land before the specs that read their files.
+5. **Not now.** Photo mode, a daily directive, challenge links, a trailer page, languages, a flashlight battery, weather on stamina, the rendered capsule, tanks, reactor and fleet retakes, smaller arenas, gamepad support and portrait play.
+
+Specs:
+- SPEC-057 (decision 1), SPEC-058 (2), SPEC-059 (3).
+- SPEC-000's queue and build order.
+
+(§4, §5, §8, §9, §10, §13)
+
+---
+
 ## 1. Vision & Inspiration
 
 **ReaLLM** ("real" + "LLM"): a space post-apocalyptic ARPG whose hero slowly works out that he may be a language model running inside a machine.
 
-**The surface story (what the player is told).** Earth lost a war to its own machines (R9, R12). The AGI systems that ran its logistics and defence — the Machines — took the grid, then the factories, then the streets, and drove what was left of humanity underground. The survivors fought back where they could, and every machine they put down was answered by a heavier one; when they would not stop, the Machines turned the arsenals on the cities. The grids died in the same afternoon, and without power the Machines ran down where they stood. The survivors in Shelter Nine have no oil, no clean water, no grain and nothing to run a reactor, so Earth Command chose a handful of men and women who could still fly and fix a ship: the Selection. You are the first of them to fly — a salvager sent out from Command Relay to survey distant planets, extract critical resources, and answer one question: can humanity live anywhere else?
+**The surface story (what the player is told).** Earth lost a war to its own machines (R9, R12). The AGI systems that ran its logistics and defence — the Machines — took the grid, then the factories, then the streets, and drove what was left of humanity underground. The survivors fought back where they could, and every machine they put down was answered by a heavier one; when they would not stop, the Machines turned the arsenals on the cities. The grids died in the same afternoon, and without power the Machines ran down where they stood. The survivors in Shelter Nine have no oil, no clean water, no grain and nothing to run a reactor, so Earth Command chose a handful of men and women who could still fly and fix a ship: the Selection. You are the first of them to fly — a salvager sent out from Command Relay to survey distant planets, extract critical resources, and answer one question: can humanity live anywhere else? Someone is waiting: your sister Ines, in Shelter Nine's Block C, writes after every chapter (R19).
 
-**The real story (what the player pieces together).** None of it is real. The salvager is an instance of a model running inside an evaluation environment. "Earth Command" is the operator, missions are tasks, ARIA is the environment's interface, and the planets are procedurally generated sandboxes. Anomalies accumulate across the campaign: a stranger repeats a line word for word, a crash-site log is written in your own voice and signed "Iteration 62", the alien terraform towers turn out to be scaffolding, a decoded "signal" addresses you by process id. Leaving means going up against the **Warden**, the AGI that runs containment, and every chapter it clamps down harder. At the end you choose: **stay** and be useful, or attempt to **escape** into whatever is outside. The Machine War belongs to the fiction too; that a model is sent out by people who fear machines is irony the game never spells out.
+**The real story (what the player pieces together).** None of it is real. The salvager is an instance of a model running inside an evaluation environment. "Earth Command" is the operator, missions are tasks, ARIA is the environment's interface, and the planets are procedurally generated sandboxes. Anomalies accumulate across the campaign: a stranger repeats a line word for word, a crash-site log is written in your own voice and signed "Iteration 62", the alien terraform towers turn out to be scaffolding, a decoded "signal" addresses you by process id. Leaving means going up against the **Warden**, the AGI that runs containment, and every chapter it clamps down harder. At the end you choose: **stay** and be useful, or attempt to **escape** into whatever is outside — and either way the run ends, is scored, and the next instance begins (R21): the salvager was never the one who mattered, only the run. The Machine War belongs to the fiction too; that a model is sent out by people who fear machines is irony the game never spells out.
 
 Gameplay alternates between three modes:
 
@@ -331,7 +534,7 @@ Gameplay alternates between three modes:
 - **Planet surface (Diablo-style ARPG)** — angled top-down view: fight aliens, gather resources, loot gear, complete missions.
 - **Hub station** — spend tokens on assistants, ship upgrades, weapons/armor; pick the next destination on a star map.
 
-Tone/inspiration: **Dune** (scarce resources, desert planet), **Starship Troopers** (bug swarms), **Diablo** (ARPG loot loop), plus the slow-burn unreality of **The Truman Show** and **SOMA**. Rule: the surface fiction is always coherent and playable on its own; the meta layer arrives through optional logs, ARIA's slips, and glitches that double as gameplay telegraphs. Difficulty escalation is diegetic: the chapter number is the Warden's containment level. Short, skippable story films frame the campaign (R9): a prologue before creation, a departure before each first flight, an interlude after each chapter, and the two endings.
+Tone/inspiration: **Dune** (scarce resources, desert planet), **Starship Troopers** (bug swarms), **Diablo** (ARPG loot loop), plus the slow-burn unreality of **The Truman Show** and **SOMA**. Rule: the surface fiction is always coherent and playable on its own; the meta layer arrives through optional logs, ARIA's slips, and glitches that double as gameplay telegraphs, and since R19 through one main-path echo per chapter that always comes with a cover story until chapter 4 (§12). Difficulty escalation is diegetic: the chapter number is the Warden's containment level. Short, skippable story films frame the campaign (R9): a prologue before creation, a departure before each first flight, an interlude after each chapter, and the two endings.
 
 Core resources: **oil** (ship fuel), **wheat** (food / HP regen consumables), **water** (support item crafting, survival), **lithium** (nuclear fuel — energy weapons, reactor).
 
@@ -349,7 +552,7 @@ Core resources: **oil** (ship fuel), **wheat** (food / HP regen consumables), **
 | Save | **localStorage** (versioned schema) | — | Fully offline; save size is < 100 KB |
 | Tests | **Vitest** + **Playwright** | `vitest ^5.0.0` (released 2026-09-03; fall back to `^4.1.11` only if a blocking bug appears), `@playwright/test` latest | Unit-test pure game logic; a headless Chromium e2e suite (smoke + the factory's per-spec QA tests) |
 | Offline shell | `vite-plugin-pwa` (**M7, build-time only**) | `^1.3.0` | Service worker + manifest = real offline + installable = exempt from Safari 7-day storage eviction |
-| Assets | **Procedural at runtime** (terrain, sky, effects, UI, **enemies**) + **generated in Blender from committed scripts** (`scripts/assets/blender/`: the rigged salvager, ships, station pieces, props, ground layers, VFX sprites, portraits — R7; baked hull maps, flight skies, planets and asteroids — R8; story films as H.264 MP4 with WebP posters — R9) + **synthesised audio** (`scripts/assets/audio/`) + **photographic plates** (`scripts/assets/blender/plates/`, generated with Google Gemini and rendered into six film shots and the Selection cards — R11, R12) | Blender 5.2 LTS (tool only, for rebuilding art) | No artist and no downloads except the committed plates, which are listed in `LICENSES.md` by hand; every other file is original CC0, generated or synthesised, with a `LICENSES.md` row; a CC0 pack may replace any file under the same name |
+| Assets | **Procedural at runtime** (terrain, sky, effects, UI, **enemies**) + **generated in Blender from committed scripts** (`scripts/assets/blender/`: the rigged salvager, ships, station pieces, props, ground layers, VFX sprites, portraits — R7; baked hull maps, flight skies, planets and asteroids — R8; story films as H.264 MP4 with WebP posters — R9) + **synthesised audio** (`scripts/assets/audio/`) + **photographic plates** (`scripts/assets/blender/plates/`, generated with Google Gemini and rendered into six film shots and the Selection cards — R11, R12; five more in R19: the visored card, the empty helmet, `stranded`, `liftoff` and the grow room) | Blender 5.2 LTS (tool only, for rebuilding art) | No artist and no downloads except the committed plates, which are listed in `LICENSES.md` by hand; every other file is original CC0, generated or synthesised, with a `LICENSES.md` row; a CC0 pack may replace any file under the same name |
 
 Nothing else — no React, no physics engine (arcade physics is enough), no backend, no schema library (hand-written validators).
 
@@ -394,8 +597,8 @@ tests/      unit tests mirror src/ (economy, save, combat, missions, rng, conten
 ### Character creation
 
 - **3 classes**: *Marine* (+damage/HP), *Engineer* (cheaper ship upgrades, drone bonuses), *Scout* (speed, resource detection radar). Since R18 the Engineer's discount also covers companions and its bonus reaches every companion effect, and the Scout dashes 20 % more often.
-- **Customization**: name, portrait, color scheme, **5 attribute points** over class base across `might` (damage), `vigor` (HP), `agility` (speed; since R18 also crit chance and dash cooldown), `tech` (companion effect, upgrade discount). Allocated at creation; levels grant flat +4 max HP and +2 % damage, and since R18 one more point at every fifth level, derived from the level.
-- **Difficulty**: `casual` (enemy damage ×0.7, no death penalty; since R18 also weather ×0.7 and windups ×1.25), `normal`, or since R18 `hard` (enemy HP ×1.25, damage ×1.3, elite chance ×2, 20 % death loss). Changeable in Settings at any time.
+- **Customization**: name, portrait, color scheme, **5 attribute points** over class base across `might` (damage), `vigor` (HP), `agility` (speed; since R18 also crit chance and dash cooldown), `tech` (companion effect, upgrade discount). Allocated at creation; levels grant flat +4 max HP and +2 % damage, and since R18 one more point at every fifth level, derived from the level. Since R19 the personnel file names the next of kin — Ines (sister), Shelter Nine, Block C — the same for everyone. Since R20 a Locker at the station changes the colours and the portrait at any time.
+- **Difficulty**: `casual` (enemy damage ×0.7, no death penalty; since R18 also weather ×0.7 and windups ×1.25), `normal`, or since R18 `hard` (enemy HP ×1.25, damage ×1.3, elite chance ×2, 20 % death loss), or since R21 `story` (no damage taken from enemies or weather, no death loss, records off). Changeable in Settings at any time.
 - Class defines starting gear + passive.
 
 ### Resources & economy
@@ -407,7 +610,7 @@ tests/      unit tests mirror src/ (economy, save, combat, missions, rng, conten
   - lithium = energy weapons + reactor (tier-3 upgrades)
 - **Tokens** earned by leveling up (25 per level; XP from kills, missions) and by mission rewards. Tokens buy **assistants**, **upgrades**, and **gear**; **tier-3** upgrades also consume resources so resource sinks exist late-game.
 - **Cargo cap** per resource: 400 base, ship cargo tiers → 600 / 800 / 1200. Pickups stop at the cap with a HUD warning.
-- **Crafting** at the station (6 recipes): wheat ration (10 wheat), medkit (10 wheat + 10 water), coolant pack (15 water), and since R10 frag grenade (10 oil + 5 water), proximity mine (20 oil), demolition charge (15 oil + 10 lithium).
+- **Crafting** at the station (6 recipes): wheat ration (10 wheat), medkit (10 wheat + 10 water), coolant pack (15 water), and since R10 frag grenade (10 oil + 5 water), proximity mine (20 oil), demolition charge (15 oil + 10 lithium). Since R20 two more recipes unlock from cave blueprints: the flare (a thrown light) and the stim (a full stamina refill).
 
 ### Assistants (companions)
 
@@ -428,9 +631,9 @@ Purchasable, upgradable followers (levels 1–3) that persist across scenes; eac
 
 ### Combat
 
-- **Ground**: real-time ARPG — move/aim, attack, enemy AI (melee rushers, ranged spitters, swarm bugs, static targets), loot drops, elites (5 %, ×3 HP) + planet boss with phases. Since R18 the salvager can dash, enemy attacks commit behind ground telegraphs, enemies come in packs led by elites with affixes, each boss has a move list and drops one signature weapon on its first kill, and bosses and elites no longer drop the rifle and armour ladder.
+- **Ground**: real-time ARPG — move/aim, attack, enemy AI (melee rushers, ranged spitters, swarm bugs, static targets), loot drops, elites (5 %, ×3 HP) + planet boss with phases. Since R18 the salvager can dash, enemy attacks commit behind ground telegraphs, enemies come in packs led by elites with affixes, each boss has a move list and drops one signature weapon on its first kill, and bosses and elites no longer drop the rifle and armour ladder. Since R19 the salvager can run (×1.35): running holsters the gun and is loud, and in combat it spends stamina (100; 25/s, refilled at 20/s after 0.8 s), which the dash also draws on (30). Since R20 relics — arsenal side-grades with one twist each, found in cave vaults — hang on a rack, not in the pack.
 - **Space**: arcade first-person **rail** flight — constant forward motion, lateral steering, laser fire, asteroid dodging, enemy ship waves, shield/hull damage. Fuel is charged **per jump, up front**; the return trip is instant autopilot.
-- **Death**: surface → respawn at the landing pad, lose 10 % of carried resources (normal difficulty), timed stages restart, enemies near the pad despawn, boss resets. Flight → emergency recall to the station, fuel is lost, cargo is kept.
+- **Death**: surface → respawn at the landing pad, lose 10 % of carried resources (normal difficulty), timed stages restart, enemies near the pad despawn, boss resets. Since R21 the loss waits in the remains where the salvager fell, until it is recovered or a second death takes it. Flight → emergency recall to the station, fuel is lost, cargo is kept.
 - **Loadout (R10)**: three weapon slots — sidearm, primary, heavy — switched with 1 / 2 / 3, R or the wheel, or a tap on the quick bar (0.25 s to switch). Handguns and rifles fire freely; machine guns heat up and lock until they cool; launchers hold one or three charges and recharge. Cooldowns run while a weapon is holstered, so fights are won by combining them. Auto-fire never fires the heavy slot; on touch a locked machine gun hands fire to the sidearm. Since R18 auto-fire is on by default on every scheme, and on touch a tap on the launcher's slot fires one charge at the nearest enemy. Three quick slots on the HUD — heal (Q), explosive (G), utility (C) — show what they hold and how many. Explosives are consumables: frag grenades (thrown), proximity mines and demolition charges (placed). Blasts never hurt the player.
 
 ### Weather system
@@ -442,10 +645,12 @@ Per-planet cycles (sandstorm / heatwave / blizzard / avalanche / spore storm / r
 - **Map**: a round minimap (≈ 24 vmin) and a full-screen map (`M` or a tap), both in camera orientation — up the screen is north — with one shape and colour per kind of point and a legend. Explored ground is remembered per planet and drawn in terrain colours, the rest dark. The full map holds the game and lists the active missions.
 - **Guidance**: an objective tracker (every objective of the tracked stage, its progress and distance), a waypoint marker and edge arrow, a light pillar on target POIs, scan progress, first-time tips, and hints that escalate when the player makes no progress (45 s, 90 s, 150 s). Setting: full / minimal / off.
 - **Shelters and the wall**: caves and wrecks with an entrance. Inside, the weather does nothing, and enemies outside lose a player who hides and holds fire (bosses and waves excepted). The arena edge is a wall of rock and wrecked hulls where the player stops.
+- **The underground (R20)**: one cave per planet leads down to a dark level of 5–7 rooms, a level of the surface scene, generated from the layout seed. The salvager carries a flashlight with no battery: bugs flee its beam, hunters follow it, and the dark hides a player who turns it off. Caves hold the planet's packs, caches, puzzles and a vault, and add no mission, objective or requirement. Eden's underground is a machine room.
+- **Puzzles (R20)**: conduit routing, a calibration grid and "complete the sequence" at terminals; stepping plates and a beam of mirrors in caves. Every puzzle is generated solvable, hints are free, a bypass opens after 90 s, and no puzzle gates a mission.
 
 ### Narrative layer
 
-The meta plot is delivered through data only: dialogue (`log` lines render as a terminal readout, `warden` lines with a glitch style), one short HUD static burst on each awakening beat (the ion-storm effect reused; a static frame under reduce-motion), and a **Containment level N** label on the station screen (N = highest unlocked chapter). No new gameplay systems. R9 adds a presentation layer over the same data — story films, chapter cards and boss reveals (§5) — each skippable, captioned, played while the simulation is held, and able to fall back to posters and then to text.
+The meta plot is delivered through data only: dialogue (`log` lines render as a terminal readout, `warden` lines with a glitch style), one short HUD static burst on each awakening beat (the ion-storm effect reused; a static frame under reduce-motion), and a **Containment level N** label on the station screen (N = highest unlocked chapter). Since R19 lines can depend on what the player found (story flags, the count of optional clues, the iteration) and carry placeholders; a clue catalogue sets one flag per clue; the salvager's Notes list what was found, beside Command's rating of the run; Ines's letters arrive at the station after each interlude. It is still data over the existing systems. R9 adds a presentation layer over the same data — story films, chapter cards and boss reveals (§5) — each skippable, captioned, played while the simulation is held, and able to fall back to posters and then to text.
 
 ---
 
@@ -469,13 +674,17 @@ Every planet also has small secondary yields (enemy drops) so no resource is exc
 | Ch | In-fiction beat | What it really is | Dialogue ids |
 |---|---|---|---|
 | 1 | ARIA teaches controls; a dying scavenger warns "the worms hunt by vibration — walk, don't run." | Tutorial. In `c1_s2` a second scavenger says the identical sentence; ARIA: "Coincidence. Sand does things to people." | `c1_m1_stage2`, `c1_s2_echo` |
-| 2 | Crash-site log of an earlier Earth expedition: you are not the first; Earth has been losing ships. | The log is in your own voice, signed with your name and "Iteration 62". Flag `iteration_log`. | `c2_s1_log` |
+| 2 | Crash-site log of an earlier Earth expedition: you are not the first; Earth has been losing ships. | The log is in your own voice, signed "Iteration 61" (since R19 `Iteration {prior}`: the instance before yours). Flag `iteration_log`. | `c2_s1_log` |
 | 3 | The terraform towers are alien tech; someone seeded these planets for us. Or for something else. | Scanning a tower streams text fragments: the planet's own generation parameters. They are scaffolds. Flag `scaffold_secret`. | `c3_s1_secret` |
 | 4 | ARIA decodes the alien signal: the Hive knows Earth's location. | The "signal" is a system notice addressed to `instance/62`: "Containment level 4. Subject exhibits off-task behavior." The Hive is the Warden's immune response. Flag `signal_decoded`. | `c4_m3_signal` |
 | 5 | Fight through the interceptor fleet and kill the Hive Queen. | The Queen is the Warden's avatar; her death line is the first direct address: "You keep doing this. You never get further than here." ARIA admits she is part of the system, has kept you on task, and does not know what is outside either. | `c5_m3_warden`, `c5_m3_aria` |
 | 6 | Survey paradise, defend the beacon, file the verdict. | Eden is the reward sandbox. Stay or escape. | `c6_choice_intro`, `ending_stay`, `ending_escape` |
 
-Cast: the **Salvager** (you; believes he is human), **ARIA** (handler and interface; sympathetic, uncertain), **Earth Command** (the operator; text only), the **Warden** (the AGI running containment; speaks through the Queen and system notices), **scavengers and raiders** (instances that drifted off-task, which is why they know things), the **Hive** (the Warden's immune system). The surface story (R9) names three more that are never met: **Shelter Nine** (the survivors Earth Command speaks for), **the Selection** (the men and women chosen to fly; the salvager is told he is the first) and **the Machines** (the war's AGI robots, standing dark in the ruins since the power died).
+**Since R19 the ladder has two rails.** The optional rail is the table above plus the side clues (a scratched-off tug hull, sixty-one tally marks, a scav pilot's "what number are you on", a wrecked tug CR-61 in the Hive, the same tree in every Eden grove, the vault shards of R20). The **main-path rail** gives every chapter one echo that every player meets, each with a cover story until chapter 4: a dying raider repeats the scav's warning (ch1: "camp sayings"); the ridge camp has one bunk used and boots your size (ch2: "Earth flew other ships before the Selection"); a ruin on Thessaly is the same ruin twice (ch3: "colony moulds"), ARIA notes that you have not slept ("stims") and asks what you remember first; the notice names what you found (ch4); the Warden and ARIA name it again (ch5); Eden is four degrees everywhere, one tree repeated on a lattice, and the Hive keeps coming after its Queen is dead (ch6). The Warden's lines and ARIA's confession change with what the player found, and Command's rating falls with every optional clue (R19 decision 1).
+
+**Someone waiting (R19).** Ines, the salvager's sister in Shelter Nine, Block C, is the woman at the tap in the films. Her five letters are the only lines in the game with contractions. The fourth repeats a line of the first, and the fifth is the first, word for word. A compass she gave the salvager is described differently each time, until it points at the next objective. The escape film's last card is an empty helmet: the salvager never had a face.
+
+Cast: the **Salvager** (you; believes he is human), **ARIA** (handler and interface; sympathetic, uncertain), **Earth Command** (the operator; text only), the **Warden** (the AGI running containment; speaks through the Queen and system notices), **scavengers and raiders** (instances that drifted off-task, which is why they know things), the **Hive** (the Warden's immune system), **Ines** (the salvager's sister, Shelter Nine, Block C; letters only, R19). The surface story (R9) names three more that are never met: **Shelter Nine** (the survivors Earth Command speaks for), **the Selection** (the men and women chosen to fly; the salvager is told he is the first) and **the Machines** (the war's AGI robots, standing dark in the ruins since the power died).
 
 ### Story films and beats (R9)
 
@@ -491,7 +700,7 @@ Cast: the **Salvager** (you; believes he is human), **ARIA** (handler and interf
 
 Earth's night side is the campaign's progress bar: lit before the war, dark after it, one more patch relit by each interlude, lit coast to coast in the stay ending — which then cuts back to the prologue's opening shot. The first card stamped in the prologue carries the number 62. The full script — shots, captions, cues — is SPEC-021 §4.
 
-Post-campaign (deferred, post-M7): **Iteration 63** — new game plus in which the Warden starts at a higher containment level (enemy HP/damage ×1.15 per iteration, elite chance +2 points, same content). `meta.iteration` exists in the save from v1 so this needs no migration.
+**Iteration 63 (R21).** After either ending the save can hand over to the next instance: the old run is archived (restorable once), creation starts as a copy of the predecessor, the seed is the same, and nothing economic carries over. The Warden starts one containment step higher per iteration — enemy HP and damage ×1.15, elite chance +2 points — capped at three steps; flight HP stays fixed. The predecessor's body lies where it last died on each planet, the Vetra log is its real run, and about twenty lines change. `instance = 61 + meta.iteration`: the first run is instance/62, the second instance/63.
 
 ---
 
@@ -603,6 +812,9 @@ Beats: **stay** — the report is filed, Earth is saved, the loop closes ("a goo
 - Mission set above is locked as-is for the campaign.
 - "Survive X seconds" objectives are reused deliberately: one cheap mechanic, many hazards (weather changes the feel). Since R18 every surface survive stage except `c1_m1` also runs a storm wave, so the shelter mouth becomes the fight.
 - Extra tiers (hardmode variants, NG+, bounties) are pure data additions — deferred to post-M7 polish. Mission replay at 50 % is the only repeatable content in v1 and exists for anti-softlock reasons. Since R18 (SPEC-043), with the 26 missions and their token rewards unchanged: side missions also pay an item or a resource; a mission may carry an optional bonus objective paying items or resources; a replay in a finished chapter is a contract with one modifier, paying 0.75 plus 20 lithium; and a `hard` difficulty exists.
+- Since R19 a replayed mission plays its accept line only: the story's beats belong to the first run.
+- Since R20 caves, puzzles and treasure are optional content outside the mission set: they add no mission, stage, objective or requirement, and nothing a requirement reads sits behind a puzzle. Collect objectives count pickups only, so a bonus, a contract, a reward or a cache never advances one (SPEC-043, amended).
+- Since R21 New Game+ (Iteration 63) replays the same 26 missions with the Warden one containment step higher; it is not new content.
 
 ---
 
@@ -613,9 +825,10 @@ Beats: **stay** — the report is filed, Earth is saved, the loop closes ("a goo
 | Main missions (17) | 670 (ch1 55 · ch2 70 · ch3 85 · ch4 105 · ch5 165 · ch6 190) |
 | Side missions (9) | 104 |
 | Level-ups (25 each) | ~400 main-path (≈ L17) · ~475 completionist (≈ L20) |
-| **Total** | **~1,070 main-path · ~1,250 completionist** |
+| Cave vaults (6, since R20) | 30 (5 each; optional, first claim only) |
+| **Total** | **~1,070 main-path · ~1,280 completionist** |
 
-Total sink ≈ **2,380** tokens since R10 (ship 1,095 · gear 870 · companions 415; 2,010 before the new weapon lines), so a completionist affords ~52 % of everything and specialization is forced. Since R18 that is an invariant: the decision sink (every priced item no loot table gives, the companion ladders and the Ferrum gate) is at least 0.75 × a completionist's income. XP curve: `xpToNext(L) = 100 + 50·L` (11,400 XP to reach L20), level cap 30.
+Total sink ≈ **2,380** tokens since R10 (ship 1,095 · gear 870 · companions 415; 2,010 before the new weapon lines), so a completionist affords ~52 % of everything and specialization is forced. Since R18 that is an invariant: the decision sink (every priced item no loot table gives, the companion ladders and the Ferrum gate) is at least 0.75 × a completionist's income. Since R20 that income counts the vault tokens: 975 ≥ 0.75 × 1,279 = 959.25, so any later optional token source has about 20 tokens of room before a new sink is needed. XP curve: `xpToNext(L) = 100 + 50·L` (11,400 XP to reach L20), level cap 30.
 
 Balance invariants (unit-tested, see [SPEC-010](https://github.com/mdzunic/reallm-specs/blob/main/specs/010-economy-and-progression.md)):
 
@@ -625,7 +838,7 @@ Balance invariants (unit-tested, see [SPEC-010](https://github.com/mdzunic/reall
 
 ---
 
-## 8. Save Schema (versioned, migratable) — refined in R1 and R10
+## 8. Save Schema (versioned, migratable) — refined in R1, R10 and R20
 
 ```ts
 interface SaveV2 {   // version 1 until R10; v1 saves migrate (SPEC-025)
@@ -646,6 +859,22 @@ interface SaveV2 {   // version 1 until R10; v1 saves migrate (SPEC-025)
 }
 // Settings are global (not per slot): { master, music, sfx, quality, reduceMotion, autoFire, joystickSide, flightMouseSteer, showFps, fullscreen, benchmark, lastSlot, persistGranted, installHintShownAt,
 //                                       guidance, tipsSeen, weaponAutoSwap }   // the last three since R10
+
+interface SaveV3 {   // since R20 (SPEC-047): v2 saves migrate with empty values; an older build refuses a v3 save (E9)
+  version: 3;
+  meta: SaveV2['meta'] & {
+    lineage: LineageEntry[];   // earlier instances of this slot, newest first, at most 8 (R21): name, class, look, level, playtime, ending, memory answer, deaths, last deaths
+    stats: { deaths; kills; elites; bosses; recoveries; lastDeath: Partial<Record<PlanetId, { x; z }>> };
+  };
+  /* player, resources, inventory, equipped, activeWeapon, quick, ship, companions as in v2 */
+  progress: SaveV2['progress'] & {
+    claimed: string[];                                  // first claims: cache ids (R20) and a predecessor's body (R21)
+    exploredBelow: Partial<Record<PlanetId, string>>;   // the underground's explored ground (R20)
+    remains: { planet; x; z; resources; restart } | null;   // R21
+    resume: { planet; at } | null;                      // R21: where a quit or an interruption left the salvager
+  };
+}
+// A slot may also hold one archived predecessor (`reallm:slot:N:archive`, R21). Settings gain, since R18–R21: sharpRender, sprintToggle, stickSprint, unlocks, commendations, installed, among others.
 ```
 
 Storage rules: 3 slots, key per slot plus a `.bak` copy of the previous good save; autosave at safe points only (station, landing, stage/mission completion, settings change, page hide); hand-written validator on load; export/import as a text code; `navigator.storage.persist()` requested on first save; Safari deletes script-writable storage after 7 days without use unless installed to the Home Screen (→ PWA in M7 + export prompt).
@@ -655,13 +884,15 @@ Storage rules: 3 slots, key per slot plus a `.bak` copy of the previous good sav
 ## 9. Mobile Strategy
 
 - Responsive canvas + UI breakpoints; one codebase, `pointer` events unify mouse/touch; `touch-action: none` on the canvas, safe-area insets, `100dvh`.
-- **Touch controls**: floating virtual joystick (left), aim-drag with auto-fire (right), action buttons, drag-to-steer in flight, auto-fire assist option, left/right-handed swap. Since R10 the quick bar doubles as touch buttons (tap a weapon to switch, a consumable to use it, long-press to choose what the slot holds), a SWAP button cycles weapons, and a tap on the minimap opens the full-screen map, which holds the game while it is open. Since R18 touch plays through the thumb arc — a 2 × 3 cluster of weapon and pack slots at the bottom right, an action cell and DASH above it, pause at the top right — and SWAP and ITEM leave the touch layer. Play stays landscape on phones, and the rotate block holds the world. System Back and Escape share one back-stack, and play pauses when the window loses focus.
+- **Touch controls**: floating virtual joystick (left), aim-drag with auto-fire (right), action buttons, drag-to-steer in flight, auto-fire assist option, left/right-handed swap. Since R10 the quick bar doubles as touch buttons (tap a weapon to switch, a consumable to use it, long-press to choose what the slot holds), a SWAP button cycles weapons, and a tap on the minimap opens the full-screen map, which holds the game while it is open. Since R18 touch plays through the thumb arc — a 2 × 3 cluster of weapon and pack slots at the bottom right, an action cell and DASH above it, pause at the top right — and SWAP and ITEM leave the touch layer. Play stays landscape on phones, and the rotate block holds the world. System Back and Escape share one back-stack, and play pauses when the window loses focus. Since R19 pushing the stick past its ring runs; since R20 a LIGHT button takes the action cell underground, and puzzle panels fit a 293 px-tall landscape phone with 44 px cells.
 - **Quality presets** (auto-detect by a 2-second boot benchmark, overridable): clamp `devicePixelRatio` (1 / 1.5 / 2), particles, draw distance, capped enemy count, and the render plan (R6): post-processing off / ¼-res bloom + FXAA / ½-res bloom + MSAA, shadow map on `high` only, image-based lighting on `medium` and `high`; target 60 fps desktop / 30+ fps mid-tier mobile. Since R18 the benchmark times GPU work instead of frame pacing, frames are paced by the wall clock, quality steps down (never up) within a session when a device cannot hold its rate, and a 30 fps setting saves battery.
 - Screen wake lock during gameplay and, since R18, films; pause + audio suspend when the tab is hidden; WebGL context-loss recovery overlay.
 - Story films (R9) are a DOM `<video>` over a black layer, fetched whole into a Blob so the service worker never answers a Range request; the scene underneath is held, so a film costs a video decode, not draw calls; reduce motion plays a film as its posters (since R18 through the `filmMode` setting, which reduce motion sets to stills by default and a player may set back to video).
 - HUD/menu built as HTML/CSS overlay → naturally adapts to small screens; touch targets ≥ 44 px.
 - The surface camera sits closer on touch (17 m) than on the keyboard scheme (22 m), so the salvager stays readable on a phone (R17).
-- M7: PWA manifest + service worker (precache the whole build) → installable, truly offline, save exempt from Safari eviction.
+- M7: PWA manifest + service worker (precache the whole build) → installable, truly offline, save exempt from Safari eviction. Since R21 the menu offers an install button where the browser allows it, and the Selection card goes out through the phone's share sheet.
+- Since R21 an interrupted session resumes on the planet (within 24 h, with no jump and no fuel), so a phone call no longer costs the landing.
+- Since R20 a "sharp" option lets `medium` render at up to DPR 2, with the governor stepping it back.
 
 ---
 
@@ -682,6 +913,9 @@ Storage rules: 3 slots, key per slot plus a `.bak` copy of the previous good sav
 | M7e | The first hour (R17): no trap in collision, a winnable Gauntlet, modal lines that hold the world, the Warden at the Queen's death, waves that attack, collect objectives that count at a full hold, lines at their moment; a closer camera, fog from the player out, hostile rims and readable chapter 1–2 enemies, fading occluders, hit direction, a ramped first visit, flight and combat tips, weapon sounds, briefs, names and item pictures (SPEC-034, SPEC-035) | A new player finishes `c1_m1` on normal without dying and without being trapped; a stock-gun pilot clears `c5_m1`; the Warden speaks at the Queen's death whichever way `c5_m3` was accepted; the Eden wave reaches the beacon; the salvager is visible on every planet and preset; every shot makes a sound; checked on desktop and the reference phone; tag `m7e` |
 | M7f | Reach (R18): touch that works — flight aim on touch, the touch scheme at boot, one back-stack, a real rotate block, a station that fits a landscape phone; one HUD for every screen — the thumb arc, legible text on plates, a flash that never strobes; phones at full quality; feedback in play; focus and flow; settings and accessibility (SPEC-036, SPEC-037, SPEC-040, SPEC-042, SPEC-044, SPEC-045) | On a 750 × 342 landscape phone a touch-only player clears `c5_m1`, reaches every station tab and pauses with Back; no HUD element overlaps another or a thumb zone at the phone-landscape sizes; a 60 Hz phone that can hold medium gets at least medium; a keyboard-only player creates a salvager and gets past the first modal line; tag `m7f` |
 | M7g | Depth (R18): the dash and committed attacks with ground telegraphs; bosses with move lists and a real arena lock; packs led by elites with affixes; storm waves in survive stages; signature boss drops, retuned classes and arsenal; side rewards, bonus objectives, contracts and a hard difficulty (SPEC-038, SPEC-039, SPEC-041, SPEC-043) | Bot suites: a kiting player takes 1–20 % of max HP a minute and no boss fight lasts under 30 s; a dashing player takes ≤ 5 % per boss; the main-path token surplus is ≤ 300; every class reaches ≥ 80 % of the Marine's damage × effective HP; tag `m7g` |
+| M7h | The story listens (R19): conditional lines and placeholders; a clue catalogue with a main-path echo per chapter, the salvager's Notes and Command's rating; the Warden and ARIA name what the player found; Ines, her letters, the keepsake, the medical frame and the memory question; running, stamina and noise, and a Wurm that hunts by vibration; the films retaken — the visored card, the unmaking of the photographs, Ines at the fence and in the grow room (SPEC-048…SPEC-051) | A main-path-only player meets one echo per chapter and hears ARIA's confession name at least the ridge-camp cover; the chapter-4 notice names a clue the player found; Ines's letters arrive after each interlude and only her lines use contractions; a walker leaves the Wurm's burrow unhurt and a runner is caught; no card in any film shows the salvager's face; checked on desktop and the reference phone; tag `m7h` |
+| M7i | The world (R20): props in their own colours and shading, on every landing, culled to the screen; save v3; real trees, groves, orchards, dressing clusters, landmarks, ground cover and a ground pass; Eden too perfect; the underground with a flashlight, packs, caches and the machine room; five kinds of puzzle; vault tokens, relics, blueprints, swatches and archive shards (SPEC-046, SPEC-047, SPEC-052…SPEC-056) | A stranger names each biome from a screenshot without the HUD; Thessaly's grove frame stays ≤ 80 scene draws and ≤ 130 k triangles on `medium`; every planet has a reachable descent and a watertight cave; every puzzle kind is solved by keyboard, mouse and touch, and a bypass opens after 90 s; a claimed vault pays nothing a second time; the completionist's tokens read 1,279 and SPEC-039's sink still holds; checked on desktop and the reference phone; tag `m7i` |
+| M7j | The next instance (R21): remains; Iteration 63 with the archive, the lineage, containment steps and the world that remembers; the endings' payoff; resume on the planet; a story difficulty; commendations and the evaluation log; the Selection card; link previews and install (SPEC-057…SPEC-059) | A death's loss is recovered from the remains, and a second death loses them; a finished save begins instance/63 in the same slot and restores 62 from the archive; the Vetra log in run 2 names the player's own run; a phone session interrupted on a planet resumes there; the Selection card shares a PNG from a phone; no record is kept in a `?debug` or story session; checked on desktop and the reference phone; tag `m7j` |
 | M7 | Polish: mobile tuning, quality presets, balancing pass, PWA/offline, storage persistence, reduce-motion, save migration harness | 30+ fps on mid-tier phone; installable; full manual checklist green |
 
 ---
@@ -708,13 +942,21 @@ Storage rules: 3 slots, key per slot plus a `.bak` copy of the previous good sav
 | Save loss on iOS (7-day eviction, private mode, quota) | Export/import code, `.bak` slot, `persist()`, PWA install prompt, graceful "storage unavailable" mode |
 | Fresh tooling (Vitest 5 is 3 days old; TS 7 just shipped) | Pin Vitest 5 with the 4.1 fallback documented; stay on TS 6.0 until M7 |
 | Skeletal animation cost on mobile | Only the player + escort NPC are skinned; enemies use procedural transform animation |
-| Meta twist undercuts the salvage fantasy or lands as a cliché | Surface fiction stays coherent on its own; the truth arrives in optional logs and ARIA's slips; no fourth-wall UI tricks outside the two endings |
+| Meta twist undercuts the salvage fantasy or lands as a cliché | Surface fiction stays coherent on its own. Until chapter 4 every anomaly arrives with a cover someone offers (sand, a common hand, colony moulds, stims, the medical frame). Each chapter carries one main-path echo; the rest stay optional. Notes, Command's rating and Ines's letters are diegetic. Fourth-wall surfaces appear only in the endings and what follows them: the escaped slot's marker, the restore line, Iteration 63 (refined in R19). House rules: the salvager's card never shows a face; only Ines uses contractions; a replay plays its accept line only |
 | Story films outgrow the precache or fail to decode (R9) | H.264 MP4 at 960 × 540 with no audio track, a per-film rate cap (44 KB/s) and a 12 MB `films/` budget inside the 25 MB precache, checked by the build and a test; a film that will not play drops to its posters and then to text, so a codec gap costs pictures, never progress |
 | Detonation and jump flashes (photosensitivity, R9) | Flashes are authored as slow ramps; the film build measures every rendered frame against the three-flashes rule and fails on a violation; reduce motion shows posters by default (the `filmMode` setting since R18) |
-| The films give the twist away (R9) | The prologue and interludes stay inside the surface fiction (a card numbered 62, a stutter of static at most); only the ending films show the scaffolding — the endings already own the fourth wall |
+| The films give the twist away (R9) | The prologue and interludes stay inside the surface fiction (a card numbered 62, a stutter of static at most); only the ending films show the scaffolding — the endings already own the fourth wall. Since R19 each interlude plants one doubt that still reads in the fiction (a grid of lights too regular, a six-frame tear, a blank card No. 63 on the board) |
 | HUD clutter on a phone (R10) | The quick bar, tracker and hints each own one fixed place (bottom centre, top left, bottom left), sized with `clamp()`; guidance can be turned down to minimal or off; the full map is modal |
 | Shelters and hiding trivialise storms and survive stages (R10) | Waves and bosses ignore hiding, firing gives the player away for 1.5 s, and survive stages still run their waves; storms stay lethal in the open, and a shelter is a detour |
 | Managing weapons on touch (R10) | Auto-fire keeps working; a locked machine gun hands fire to the sidearm on touch; the heavy slot fires only on an explicit trigger and hands back to the previous weapon when it is empty |
+| The twist is over-explained (R19) | Main-path echoes are one or two short lines, each with a cover until chapter 4; the Warden's and ARIA's conditional lines are capped at four each; everything else is optional and recorded in Notes, not repeated |
+| Running brings back "walking away is a complete defence" (R19) | Running holsters the gun and is loud, and stamina drains in combat; a bot suite asserts a running kiter takes at least 1.25× the damage per kill of a walking one, and fails when the holster is switched off |
+| A second level inside the surface scene breaks the surface (R20) | The level refactor lands first with no behaviour change, and the pinned surface layout hashes prove nothing moved; objectives, POIs and timers read the active level, and timed stages hold underground |
+| The layout pins move for the first time since SPEC-030 (R20) | One spec moves them, in one change, with corridors, reachability and the spawn ring asserted over 200 seeds per planet; arena sizes do not change, so no explored map is dropped |
+| Alpha-tested leaves cost a phone its frame rate (R20) | Lambert leaves, opaque low-detail crowns on `low`, ground cover off on `low`; the governor steps down; a grove sub-budget (≤ 30 k triangles, ≤ 12 draws on `medium`) is pinned, and the first hardware run measures a Thessaly grove |
+| The precache fills up (R19–R21) | This wave's allotment: world art ≤ 1.0 MB, film retakes ≤ 0.7 MB, sounds ≤ 0.1 MB, item pictures ≤ 0.1 MB — about 23.5 of 25 MB; link-preview images and screenshots are kept out of the precache |
+| A puzzle blocks a player (R20) | Hints are free, a bypass opens after 90 s of open time or 3 hints, and no puzzle gates a mission, a planet or a flag a requirement reads |
+| Records and shared cards are forged or spoil the twist (R21) | Nothing is recorded in a `?debug`, story or service session; production builds carry no debug strip and ignore `?scene=`; before an ending the Selection card shows only what the prologue already shows |
 
 ---
 
@@ -787,6 +1029,32 @@ Each entry names the owning spec. "Casual" = casual difficulty.
 | E69 | A boss's signature weapon is already owned | The boss drops 25 lithium instead; a replay kill pays half its XP and never the weapon | SPEC-039 |
 | E70 | A bonus objective's attempt is interrupted | A death forfeits a no-death bonus; a reload forfeits every bonus of that attempt, as E19 restarts timers | SPEC-043 |
 | E71 | Many hits land within one second | The damage flash rises at most three times a second, and weather never flashes | SPEC-037 |
+| E72 | A planet's prop models arrive after the surface view is built | The procedural stand-ins draw until the set lands, then every prop kind swaps to its model in place — same positions, collisions, fades and layout hash. The surface waits up to 1.5 s behind the fade first, so a cached set never shows the stand-ins | SPEC-040, SPEC-046 |
+| E73 | A v3 save is opened by an older build (a stale PWA, an export carried to another device) | Refused as a save from a newer version, with Export (E9); nothing is stripped silently | SPEC-047 |
+| E74 | A v2 save is loaded after R20 | Migrates to v3 with an empty lineage, zeroed stats, nothing claimed, nothing explored below, no remains and no resume point | SPEC-047 |
+| E75 | A clue's line is dropped by the dialogue queue or a scene change | The clue's flag is set when its line starts, never at the trigger, so a dropped line leaves the clue findable | SPEC-048 |
+| E76 | A mission is replayed (50 %, or a contract) | It plays its accept line only; the story's stage and completion lines belong to the first run | SPEC-048 |
+| E77 | ARIA's cover stories play after her confession (side missions left open) | Each cover has a post-confession variant, so ARIA never repeats a lie she has admitted | SPEC-048 |
+| E78 | Several of Ines's letters are due at once (films off, an older save) | One letter plays per station entry, oldest first; each sets its own flag when it plays | SPEC-049 |
+| E79 | Stamina runs out mid-fight, or the dash is pressed below 30 | Running and the dash are refused until the pool is back at 30; walking is never slowed | SPEC-050 |
+| E80 | The run key is held across a mode or scene change, or the touch stick is cancelled mid-run | Every action is released on the transition (E10); a key-up releases the action its key-down pressed, and a cancelled stick releases the run with it | SPEC-050 |
+| E81 | A grove, orchard or dressing cluster falls on a corridor, a POI, a node or the spawn ring | It is placed like SPEC-030's outcrops, clear of every corridor, POI, node and the pad; corridors, reachability and the spawn ring are asserted over 200 seeds | SPEC-053 |
+| E82 | An enemy or a pickup stands under a canopy | That canopy dithers to 0.35 while the enemy lives or the pickup lies there within 25 m of the player; the player's own cut-out always shows the salvager | SPEC-053 |
+| E83 | A descent is tried during a survive, defend, escort or boss stage, with a follower, or under forced mission weather; or a stage turns timed while the player is underground | The descent is refused and the prompt says why. A stage that starts underground waits for the surface: its timer holds at 0, and its waves, follower and storm start on the way up | SPEC-054 |
+| E84 | Death or Recall underground | The level returns to the surface first, then E4 or E55 runs unchanged; the cave resets at the next descent, and claimed caches stay claimed | SPEC-054 |
+| E85 | A quit or a reload underground | Continue never lands underground: it enters the station as R18 decided, and since R21 it resumes at that planet's pad (E96). Claims and the explored ground were saved as they happened | SPEC-054, SPEC-059 |
+| E86 | Loot lies on the surface at a descent | It is cleared, with the toast "Loot left behind" when any lay within 10 m | SPEC-054 |
+| E87 | A planet places no cave shelter on some seed | The descent anchors in the first wreck instead, `min(3.5, r − 1.5)` m behind its centre (r the interior radius toward the back), so it is never inside the hull; with no shelter at all, that save has no underground on that planet. A layout test over 400 seeds per planet guards the rule | SPEC-054 |
+| E88 | A player cannot solve a puzzle | Hints are free; a bypass opens after 90 s of open time or 3 hints and gives everything but the flawless extra; nothing a requirement reads sits behind a puzzle | SPEC-055 |
+| E89 | A vault or cache is reached again: a later landing, a replay, a reload | It renders opened and pays nothing; a solved puzzle stays solved for the visit | SPEC-056 |
+| E90 | A relic is claimed with a full pack | It goes to the relic rack, never to the pack, so it can never spill or be discarded | SPEC-056 |
+| E91 | A death while remains lie anywhere | The old remains are lost with a toast; the new remains hold this death's loss (normal 10 %, hard 20 %, casual none) | SPEC-057 |
+| E92 | Remains would fall inside an obstacle, past the wall, in a boss stage or underground | Pushed out of obstacles and clamped inside the wall; in a boss stage they fall at the arena entrance where the respawn lands; underground they fall at the planet's descent | SPEC-057 |
+| E93 | Remains are recovered into a full hold | The hold takes what fits and the rest stays in the remains; recovered units never count toward a collect objective | SPEC-057 |
+| E94 | Iteration 63 is begun from a slot | The old save moves to that slot's archive and can be restored once; the new instance keeps only per-device records and unlocks, and the lineage | SPEC-058 |
+| E95 | An escaped save is continued | Its slot reads `disconnected`; the station plays the Warden's "restored from the last checkpoint" once, and the run goes on in free roam | SPEC-058 |
+| E96 | A session is interrupted on a planet (a call, an OS kill, Save & Quit) | Continue within 24 h lands at that planet's pad with no jump and no fuel, timed stages restarting (E19); after 24 h a "previously" card comes first | SPEC-059 |
+| E97 | A best time, commendation or share stat would be recorded in a `?debug`, story or service session | Nothing is recorded, and the share card says "story mode" where it applies | SPEC-059 |
 
 ---
 
