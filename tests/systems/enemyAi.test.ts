@@ -555,7 +555,8 @@ describe('an enemy shot into a rock walks out again (SPEC-034 §4.1)', () => {
     e.state = 'chase';
     expect(h.world.obstacles.hitsCircle(e.x, e.z, e.radius)).toBe(true);
     // Its melee reach, from the player at the origin.
-    const reach = e.def.attack.range + h.world.player.radius + e.radius;
+    const attack = e.def.attack;
+    const reach = (attack.kind === 'none' ? 0 : attack.range) + h.world.player.radius + e.radius;
     const steps = runUntil(h, 5, () => Math.hypot(e.x - h.world.player.x, e.z - h.world.player.z) <= reach);
     expect(steps, 'steps to reach its firing range').toBeGreaterThan(0);
     expect(h.world.obstacles.hitsCircle(e.x, e.z, e.radius)).toBe(false);

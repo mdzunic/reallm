@@ -87,9 +87,9 @@ export function unresolvedNames(source: string): string[] {
   return [...missing].sort();
 }
 
-const MODULES = readdirSync(LIB)
-  .filter((name) => name.endsWith('.py'))
-  .map((name) => ({ name, source: readFileSync(LIB + name, 'utf8') }));
+const MODULES = readdirSync(LIB, { withFileTypes: true })
+  .filter((entry) => entry.isFile() && entry.name.endsWith('.py'))
+  .map((entry) => ({ name: entry.name, source: readFileSync(LIB + entry.name, 'utf8') }));
 
 describe('the film shot scripts (SPEC-034 §4.17)', () => {
   it('reads the whole lib directory', () => {
