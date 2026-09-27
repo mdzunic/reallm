@@ -1,11 +1,23 @@
-# Item and companion pictures (SPEC-031 §4.13): items/<id>.webp — 384² renders
-# on transparent for every key of ITEMS and COMPANIONS — plus
+# Item and companion pictures (SPEC-031 §4.13, SPEC-035 §4.15): items/<id>.webp
+# — 384² renders for every key of ITEMS and COMPANIONS — plus
 # items/manifest.json listing the ids actually written, so a partial run
 # degrades to glyphs for the rest (31-r). Everything is built from primitives
 # by the SUBJECTS table below, through lib/common.py's bevel and the shared
-# palette, lit by the portrait rig; one orthographic camera, three-quarter
-# front-right, 12° down, each subject auto-fitted to 86% of the frame so a
-# pistol and a launcher carry the same visual weight in a row of keys.
+# palette, lit by the portrait rig, each subject auto-fitted to 86% of the frame
+# so a pistol and a launcher carry the same visual weight in a row of keys.
+#
+# SPEC-035 §4.15 fixed the camera, which framed every item from behind: a
+# weapon is recognised by its profile, so weapons are shot side-on with the
+# muzzle to the right of the frame (azimuth 90°, elevation 8°); a pack, an
+# armour or a drone is recognised by its face, so everything else is shot from
+# the front three-quarter on the side the builders face (+Y — azimuth 145°,
+# elevation 12°). The rim light is half again as strong and a faint radial
+# backdrop sits behind the subject, so gunmetal reads against the navy UI at
+# 28–40 px.
+#
+#   node scripts/assets/blender/build.mjs items
+#   node scripts/assets/blender/build.mjs items --preview=DIR   # + a contact sheet
+#
 # Deterministic: no randomness anywhere (PLAN R7).
 import json
 import math
@@ -19,10 +31,27 @@ import numpy as np  # noqa: E402
 from mathutils import Vector  # noqa: E402
 
 import common as C  # noqa: E402
+import tex as T  # noqa: E402
 
 SIZE = 384
 FILL = 0.86
 MAX_BYTES = 36 * 1024
+
+# SPEC-035 §4.15 — the camera per item kind: (azimuth°, elevation°). Azimuth 0
+# looks the subject in the face from -Y; 90° puts the camera on +X, where the
+# screen's right is world +Y and every builder's barrel points.
+FRAMING = {
+    # Handguns, rifles, machine guns and launchers: side-on, muzzle right.
+    'weapon': (90.0, 8.0),
+    # Armour, consumables, explosives, the coolant pack, the plasma cell and the
+    # companions: the front three-quarter from the side the builders face.
+    'other': (145.0, 12.0),
+}
+
+# §4.15: the faint halo behind the subject. Alpha 0.18 in the middle, nothing at
+# the edge, so the navy UI still shows through and no tile reads as a card.
+BACKDROP_COLOUR = '#9fb6d4'
+BACKDROP_ALPHA = 0.18
 
 # The shared palette: gunmetal bodies, worn steel, the accent cells.
 GUNMETAL = '#3a4450'
@@ -178,40 +207,42 @@ def drone(kind):
 # Every key of ITEMS and COMPANIONS (src/data/items.ts, companions.ts). The
 # content test guarantees a glyph for any id missing here; this table aims to
 # cover all of them so no surface ships a fallback.
+# SPEC-035 §4.15: the first element is the framing key of `FRAMING` — a weapon
+# is read from its profile, everything else from its face.
 SUBJECTS = {
     # Handguns
-    'pistol_service': lambda: weapon(body_len=0.5, barrel_len=0.24, body_h=0.13, magazine=False),
-    'pistol_magnum': lambda: weapon(body_len=0.58, barrel_len=0.34, barrel_r=0.045, body_h=0.15, magazine=False, sight=True),
+    'pistol_service': ('weapon', lambda: weapon(body_len=0.5, barrel_len=0.24, body_h=0.13, magazine=False)),
+    'pistol_magnum': ('weapon', lambda: weapon(body_len=0.58, barrel_len=0.34, barrel_r=0.045, body_h=0.15, magazine=False, sight=True)),
     # Rifles
-    'weapon_kinetic': lambda: weapon(stock=True),
-    'weapon_laser': lambda: weapon(stock=True, sight=True, cell=RED),
-    'weapon_plasma': lambda: weapon(stock=True, sight=True, cell=ACCENT, barrel_r=0.05),
-    'weapon_lithium': lambda: weapon(stock=True, sight=True, cell=AMBER, barrel_r=0.055, twin=True),
+    'weapon_kinetic': ('weapon', lambda: weapon(stock=True)),
+    'weapon_laser': ('weapon', lambda: weapon(stock=True, sight=True, cell=RED)),
+    'weapon_plasma': ('weapon', lambda: weapon(stock=True, sight=True, cell=ACCENT, barrel_r=0.05)),
+    'weapon_lithium': ('weapon', lambda: weapon(stock=True, sight=True, cell=AMBER, barrel_r=0.055, twin=True)),
     # Machine guns
-    'mg_scrap': lambda: weapon(body_len=1.0, barrel_len=0.55, drum=True, shroud=True, magazine=False),
-    'mg_rotary': lambda: weapon(body_len=1.0, barrel_len=0.6, drum=True, shroud=True, magazine=False, twin=True, stock=True),
+    'mg_scrap': ('weapon', lambda: weapon(body_len=1.0, barrel_len=0.55, drum=True, shroud=True, magazine=False)),
+    'mg_rotary': ('weapon', lambda: weapon(body_len=1.0, barrel_len=0.6, drum=True, shroud=True, magazine=False, twin=True, stock=True)),
     # Launchers
-    'launcher_rocket': lambda: weapon(body_len=0.8, barrel_len=0.0, tube=True, sight=True, magazine=False),
-    'launcher_grenade': lambda: weapon(body_len=0.7, barrel_len=0.0, tube=True, sight=True, drum=True, magazine=False),
+    'launcher_rocket': ('weapon', lambda: weapon(body_len=0.8, barrel_len=0.0, tube=True, sight=True, magazine=False)),
+    'launcher_grenade': ('weapon', lambda: weapon(body_len=0.7, barrel_len=0.0, tube=True, sight=True, drum=True, magazine=False)),
     # Armor
-    'armor_scrap': lambda: armor(plates=1),
-    'armor_composite': lambda: armor(plates=2),
-    'armor_reactive': lambda: armor(plates=2, accent=ACCENT),
-    'armor_ablative': lambda: armor(plates=3, accent=AMBER),
+    'armor_scrap': ('other', lambda: armor(plates=1)),
+    'armor_composite': ('other', lambda: armor(plates=2)),
+    'armor_reactive': ('other', lambda: armor(plates=2, accent=ACCENT)),
+    'armor_ablative': ('other', lambda: armor(plates=3, accent=AMBER)),
     # Consumables
-    'wheat_ration': lambda: pouch(AMBER),
-    'medkit': lambda: pouch(GREEN),
-    'coolant_pack': lambda: canister(ACCENT),
-    'plasma_cell': lambda: cellblock(ACCENT),
-    'frag_grenade': lambda: sphere_charge(RED),
-    'landmine': lambda: mine(RED),
-    'demo_charge': lambda: charge_block(RED),
+    'wheat_ration': ('other', lambda: pouch(AMBER)),
+    'medkit': ('other', lambda: pouch(GREEN)),
+    'coolant_pack': ('other', lambda: canister(ACCENT)),
+    'plasma_cell': ('other', lambda: cellblock(ACCENT)),
+    'frag_grenade': ('other', lambda: sphere_charge(RED)),
+    'landmine': ('other', lambda: mine(RED)),
+    'demo_charge': ('other', lambda: charge_block(RED)),
     # Companions
-    'scanner_drone': lambda: drone('scanner'),
-    'combat_drone': lambda: drone('combat'),
-    'field_medic': lambda: drone('medic'),
-    'quartermaster': lambda: drone('quartermaster'),
-    'aria': lambda: drone('aria'),
+    'scanner_drone': ('other', lambda: drone('scanner')),
+    'combat_drone': ('other', lambda: drone('combat')),
+    'field_medic': ('other', lambda: drone('medic')),
+    'quartermaster': ('other', lambda: drone('quartermaster')),
+    'aria': ('other', lambda: drone('aria')),
 }
 
 
@@ -234,7 +265,9 @@ def rig():
     scene.world = world
     for name, energy, colour, rot in (
         ('key', 3.2, '#fff0dc', (55, 0, -30)),
-        ('rim', 3.6, '#9cc4ff', (70, 0, 160)),
+        # SPEC-035 §4.15: the rim rises 50% — it is what separates a gunmetal
+        # silhouette from the navy panel behind it.
+        ('rim', 5.4, '#9cc4ff', (70, 0, 160)),
         ('fill', 0.9, '#ffffff', (80, 0, 70)),
     ):
         light = bpy.data.lights.new(name, 'SUN')
@@ -244,14 +277,18 @@ def rig():
         obj.rotation_euler = [math.radians(a) for a in rot]
 
 
-def fit_camera(objs):
-    """One orthographic camera, three-quarter front-right, 12° down, the
-    subject filling FILL of the frame."""
+def fit_camera(objs, kind):
+    """SPEC-035 §4.15 — one orthographic camera, framed by the item's kind:
+    a weapon side-on with its muzzle to the right of the frame (azimuth 90°,
+    elevation 8°), everything else from the front three-quarter on the side the
+    builders face (azimuth 145°, elevation 12°). The subject fills FILL of the
+    frame either way, so a pistol and a launcher carry the same weight."""
     scene = bpy.context.scene
     cam_data = bpy.data.cameras.new('item')
     cam_data.type = 'ORTHO'
     cam = C.link(bpy.data.objects.new('item', cam_data))
-    az, el = math.radians(-35), math.radians(12)
+    azimuth, elevation = FRAMING[kind]
+    az, el = math.radians(azimuth), math.radians(elevation)
     direction = Vector((math.sin(az) * math.cos(el), -math.cos(az) * math.cos(el), math.sin(el)))
     # The subject's world-space bounds.
     lo = Vector((1e9, 1e9, 1e9))
@@ -287,6 +324,21 @@ def render_png(path):
     return pixels
 
 
+def with_backdrop(rgba):
+    """SPEC-035 §4.15 — a faint radial halo behind the subject: `BACKDROP_ALPHA`
+    in the middle, nothing at the edge. The tile stays translucent, so the navy
+    panel still shows through and nothing reads as a card."""
+    r, _u, _v = T.radial(SIZE)
+    halo = ((1 - T.smoothstep(0.1, 1.0, r)) * BACKDROP_ALPHA).astype(np.float32)
+    back = np.array(C.hex_rgb(BACKDROP_COLOUR), np.float32)
+    fg_a = rgba[..., 3:4]
+    bg_a = halo[..., None]
+    out_a = fg_a + bg_a * (1 - fg_a)
+    safe = np.maximum(out_a, 1e-5)
+    rgb = (rgba[..., :3] * fg_a + back * bg_a * (1 - fg_a)) / safe
+    return np.clip(np.concatenate([rgb, out_a], axis=-1), 0, 1)
+
+
 def save_budgeted(path, rgba):
     """WebP under the 36 KB ceiling: step the quality down until it fits."""
     for quality in (82, 72, 60, 48, 36):
@@ -300,18 +352,20 @@ def main():
     opts = C.options()
     tmp = os.path.join(opts['preview'] or os.path.join(opts['out'], '..', '..', '.items-tmp'), 'item_renders')
     written = []
-    for item_id, build in SUBJECTS.items():
+    tiles = []
+    for item_id, (kind, build) in SUBJECTS.items():
         if not C.wanted(opts, item_id):
             continue
         C.reset()
         rig()
         objs = build()
-        fit_camera(objs)
+        fit_camera(objs, kind)
         raw = os.path.join(C.ensure_dir(os.path.join(tmp, f'{item_id}.png')))
-        rgba = render_png(raw)
+        rgba = with_backdrop(render_png(raw))
         size = save_budgeted(os.path.join(opts['out'], 'items', f'{item_id}.webp'), rgba)
         print(f'ASSET items/{item_id}.webp {size} bytes')
         written.append(item_id)
+        tiles.append(rgba)
     # §4.13: the manifest names the files actually rendered, so a partial run
     # degrades to glyphs for the rest.
     if written:
@@ -319,7 +373,22 @@ def main():
             json.dump({'items': written}, fh)
             fh.write('\n')
         print('ASSET items/manifest.json')
-    if not opts['preview']:
+    # SPEC-035 §4.15: `--preview=DIR` writes the contact sheet the review reads,
+    # on the navy the tiles are actually seen against.
+    if opts['preview'] and tiles:
+        cols = 6
+        rows = math.ceil(len(tiles) / cols)
+        grid = np.zeros((rows * SIZE, cols * SIZE, 3), np.float32)
+        grid[:] = np.array(C.hex_rgb('#101720'), np.float32)
+        for k, tile in enumerate(tiles):
+            rr, cc = divmod(k, cols)
+            a = tile[..., 3:4]
+            cell = grid[rr * SIZE:(rr + 1) * SIZE, cc * SIZE:(cc + 1) * SIZE]
+            grid[rr * SIZE:(rr + 1) * SIZE, cc * SIZE:(cc + 1) * SIZE] = tile[..., :3] * a + cell * (1 - a)
+        path = os.path.join(opts['preview'], 'sheet_items.png')
+        C.save_image(path, grid, 'PNG')
+        print(f'PREVIEW {path}')
+    elif not opts['preview']:
         import shutil
         shutil.rmtree(tmp, ignore_errors=True)
 
