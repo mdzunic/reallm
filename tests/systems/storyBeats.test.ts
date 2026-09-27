@@ -9,8 +9,15 @@
 //
 // SPEC-024 §6 adds the endings: which one a save still owes after a reload
 // inside the sequence, and the five lines of the filed report.
+//
+// SPEC-034 §4.10 adds the line ledger. The surface, the flight and the station
+// each kept a partial memory of which mission lines had played, so the station's
+// debrief repeated what the surface had said a minute earlier and, after a
+// reload, replayed lines from hours ago. One page-session registry keyed by the
+// save object replaces `ACCEPT_SHOWN` and `DEBRIEFED`.
 import { describe, expect, it } from 'vitest';
 import { FILMS, type FilmDef } from '@/data/films';
+import { DIALOGUE, MISSIONS, type DialogueId } from '@/data/index';
 import {
   captionAt,
   cardDue,
@@ -21,6 +28,7 @@ import {
   filmDuration,
   FILM_TYPE_CPS,
   interludeToPlay,
+  LINE_LEDGER,
   REVEAL,
   revealCamera,
   revealDue,
@@ -31,6 +39,13 @@ import {
   stayReport,
   typedChars,
 } from '@/systems/StoryBeats';
+import { stripComments } from '../architecture/source';
+
+const RAW = import.meta.glob<string>('../../src/**/*.ts', { query: '?raw', import: 'default', eager: true });
+/** Comment-stripped sources, for where the ledger is read (SPEC-034 §4.10). */
+const SOURCES: Record<string, string> = Object.fromEntries(
+  Object.entries(RAW).map(([file, source]) => [file, stripComments(source)]),
+);
 
 /** A two-shot film with a boundary at 4 and a cue at 0, for the edge lookups. */
 const SMALL: FilmDef = {
@@ -348,5 +363,71 @@ describe('stayReport (SPEC-024 §4.3)', () => {
     // The run number is the loop's one glimpse of itself (PLAN §5).
     expect(lines[lines.length - 1]).toContain('RUN 62');
     expect(stayReport({ player: { name: 'Ash' } }).slice(1)).toEqual(stayReport({ player: { name: 'Nox' } }).slice(1));
+  });
+});
+
+describe('LINE_LEDGER (SPEC-034 §4.10)', () => {
+  it('records played lines per save object', () => {
+    const a = {};
+    const b = {};
+    expect(LINE_LEDGER.played(a, 'c1_m1_accept')).toBe(false);
+    LINE_LEDGER.markPlayed(a, 'c1_m1_accept');
+    expect(LINE_LEDGER.played(a, 'c1_m1_accept')).toBe(true);
+    // Another line, and another save, are untouched — a New Game replays.
+    expect(LINE_LEDGER.played(a, 'c1_m1_done')).toBe(false);
+    expect(LINE_LEDGER.played(b, 'c1_m1_accept')).toBe(false);
+  });
+
+  it('keeps the trip in completion order, once each, until the station closes it', () => {
+    const save = {};
+    expect(LINE_LEDGER.completedThisTrip(save)).toEqual([]);
+    LINE_LEDGER.noteCompleted(save, 'c1_s1');
+    LINE_LEDGER.noteCompleted(save, 'c1_m1');
+    LINE_LEDGER.noteCompleted(save, 'c1_s1'); // a replay on the same trip
+    expect(LINE_LEDGER.completedThisTrip(save)).toEqual(['c1_s1', 'c1_m1']);
+    LINE_LEDGER.closeTrip(save);
+    expect(LINE_LEDGER.completedThisTrip(save)).toEqual([]);
+    // Closing twice is harmless; the played set is not a trip and survives.
+    LINE_LEDGER.markPlayed(save, 'c1_s1_done');
+    LINE_LEDGER.closeTrip(save);
+    expect(LINE_LEDGER.played(save, 'c1_s1_done')).toBe(true);
+  });
+
+  it('leaves a reload nothing to debrief (34-g)', () => {
+    const before = {};
+    LINE_LEDGER.noteCompleted(before, 'c1_m1');
+    expect(LINE_LEDGER.completedThisTrip(before)).toEqual(['c1_m1']);
+    // A reload builds a *new* save object: the ledger is page-session and keyed
+    // by the object, so the new run starts with an empty trip and an empty set.
+    const afterReload = {};
+    expect(LINE_LEDGER.completedThisTrip(afterReload)).toEqual([]);
+    expect(LINE_LEDGER.played(afterReload, 'c1_m1_done')).toBe(false);
+  });
+
+  it('is what the surface, the flight and the station read', () => {
+    for (const scene of ['Surface', 'Flight', 'StationScene']) {
+      const source = SOURCES[`../../src/scenes/${scene}.ts`] as string;
+      expect(source, scene).toContain('LINE_LEDGER');
+    }
+    // The two per-scene registries it replaced are gone.
+    expect(SOURCES['../../src/scenes/Surface.ts']).not.toContain('ACCEPT_SHOWN');
+    expect(SOURCES['../../src/scenes/StationScene.ts']).not.toContain('DEBRIEFED');
+    // §4.10 step 3: the debrief runs before the interlude, not after it.
+    const station = SOURCES['../../src/scenes/StationScene.ts'] as string;
+    const debrief = station.indexOf('this.#debrief(data, params)');
+    const interlude = station.indexOf('interludeToPlay(new Set(data.progress.flags))');
+    expect(debrief).toBeGreaterThan(-1);
+    expect(interlude).toBeGreaterThan(-1);
+    expect(debrief).toBeLessThan(interlude);
+  });
+
+  it('every mission line the ledger gates names a dialogue that exists', () => {
+    // The debrief's `<id>_done` convention: every one it would look up either
+    // exists or is skipped, never invented.
+    for (const id of Object.keys(MISSIONS)) {
+      const done = `${id}_done`;
+      if (!Object.hasOwn(DIALOGUE, done)) continue;
+      expect(DIALOGUE[done as DialogueId].lines.length).toBeGreaterThan(0);
+    }
   });
 });

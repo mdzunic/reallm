@@ -20,7 +20,7 @@ import { Economy } from '@/systems/Economy';
 import { Flight, type FlightConfig } from '@/systems/Flight';
 import { Missions } from '@/systems/Missions';
 import { Progression } from '@/systems/Progression';
-import { Pilot, type PilotAim } from './pilot';
+import { Pilot, type PilotAim } from './flightPilot';
 
 const DT = 1 / 60;
 /** Long enough for the 200 s trip plus R16's 90 s holding cap, and no longer. */
