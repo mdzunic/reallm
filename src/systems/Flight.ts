@@ -611,6 +611,9 @@ export class Flight {
     shot.vy = (this.reticle.y - gy) / flight;
     shot.damage = damage;
     ship.fireCooldown = 1 / fireRate;
+    // SPEC-035 §4.11: one event per shot. The rail has no XZ plane, so the
+    // position is the gun's own — `AudioReactions` does not position `ship`.
+    this.#events.emit('weapon:fired', { line: 'ship', x: gx, z: gy });
   }
 
   /** §4.7: touch auto-fire also covers an asteroid drifting within 3 m in XY. */

@@ -1145,3 +1145,94 @@ describe('a level-up raises the live HP by the max-HP delta (SPEC-034 §4.14)', 
     expect(h.world.player.hp).toBe(0);
   });
 });
+
+// ------------------------------------------------- SPEC-035: sound and origin
+
+describe('SPEC-035 §4.11 — one event per shot and per landed hit', () => {
+  it('names the fired weapon’s line and the muzzle it left from', () => {
+    const h = harness();
+    h.input.buttons.fire.down = true;
+    h.aim = { x: 10, z: 0 };
+    h.step();
+    const fired = h.of('weapon:fired');
+    expect(fired).toHaveLength(1);
+    // The marine starts on `weapon_kinetic`, a rifle.
+    expect(fired[0]?.line).toBe('rifle');
+    expect(fired[0]?.x).toBeCloseTo(0.6, 6);
+    expect(fired[0]?.z).toBeCloseTo(0, 6);
+  });
+
+  it('calls a machine gun `mg` and a pistol `handgun`', () => {
+    const mg = harness({ patch: (s) => (s.equipped.primary = 'mg_scrap') });
+    mg.input.buttons.fire.down = true;
+    mg.aim = { x: 10, z: 0 };
+    mg.step();
+    expect(mg.of('weapon:fired')[0]?.line).toBe('mg');
+
+    const pistol = harness({ patch: (s) => (s.activeWeapon = 'sidearm') });
+    pistol.input.buttons.fire.down = true;
+    pistol.aim = { x: 10, z: 0 };
+    pistol.step();
+    expect(pistol.of('weapon:fired')[0]?.line).toBe('handgun');
+  });
+
+  it('a projectile hit on a live enemy thuds at the enemy', () => {
+    const h = harness();
+    const e = h.spawn('dust_skitter', 4, 0);
+    h.shot({ x: 3.4, z: 0, vx: 22, damage: 1, owner: 'player' });
+    h.step();
+    const hits = h.of('enemy:hit');
+    expect(hits).toHaveLength(1);
+    expect(hits[0]?.enemyId).toBe('dust_skitter');
+    expect(hits[0]?.x).toBeCloseTo(e.x, 3);
+    expect(hits[0]?.z).toBeCloseTo(e.z, 3);
+  });
+
+  it('a blast hit on a live enemy thuds once per enemy', () => {
+    const h = harness();
+    const left = h.spawn('dust_skitter', 1, 0);
+    const right = h.spawn('dust_skitter', -1, 0);
+    hashStep(h, [
+      [left, 1, 0],
+      [right, -1, 0],
+    ]);
+    h.combat.explode(0, 0, 4, 1, 0.5);
+    expect(h.of('enemy:hit')).toHaveLength(2);
+    expect(h.of('combat:blast')).toHaveLength(1);
+  });
+});
+
+describe('SPEC-035 §4.6 — player:damaged carries where the hit came from', () => {
+  it('a melee blow points at the enemy that landed it', () => {
+    const h = harness();
+    const e = h.spawn('dust_skitter', 1, 0);
+    e.aggro = true;
+    // The skitter keeps moving after the blow, so its position is read inside
+    // the emit rather than after the run.
+    let at: { x: number; z: number } | null = null;
+    h.events.on('player:damaged', (p) => {
+      if (p.source.kind === 'enemy' && at === null) at = { x: e.x, z: e.z };
+    }, h);
+    h.run(4);
+    const hit = h.of('player:damaged').find((p) => p.source.kind === 'enemy');
+    expect(hit?.from).toBeDefined();
+    expect(at).not.toBeNull();
+    expect(hit?.from).toEqual(at);
+  });
+
+  it('a shot points 0.1 s back along its own flight, not at the bullet', () => {
+    const h = harness();
+    h.shot({ x: 0.3, z: 0, vx: -20, vz: 0, damage: 5, owner: 'enemy', enemyId: 'scav_raider' });
+    h.step();
+    const hit = h.of('player:damaged').find((p) => p.source.kind === 'projectile');
+    expect(hit?.from?.x).toBeGreaterThan(1.5);
+    expect(hit?.from?.z).toBeCloseTo(0, 6);
+  });
+
+  it('weather and falls carry none', () => {
+    const h = harness();
+    h.combat.damagePlayer(10, { kind: 'fall' });
+    h.combat.damagePlayer(4, { kind: 'weather', weather: 'sandstorm' }, true);
+    for (const hit of h.of('player:damaged')) expect(hit.from).toBeUndefined();
+  });
+});
