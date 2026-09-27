@@ -301,6 +301,8 @@ describe('the settings object (SPEC-007 §3)', () => {
       sfx: 1,
       quality: null,
       reduceMotion: false,
+      // SPEC-037 §4.6: the damage flash is full unless reduced motion is asked for.
+      damageFlash: 'full',
       autoFire: 'touch',
       weaponAutoSwap: 'touch',
       joystickSide: 'left',
@@ -548,6 +550,38 @@ describe('pauseOnBlur and zonesShown (SPEC-036 §4.5, §4.12)', () => {
     }
     expect(createSettings(fakeStorage('{"zonesShown":7}').storage).get().zonesShown).toBe(0);
     expect(createSettings(fakeStorage('{"zonesShown":"2"}').storage).get().zonesShown).toBe(0);
+  });
+});
+
+describe('damageFlash (SPEC-037 §4.6)', () => {
+  it('defaults to full, and to subtle where the platform asks for reduced motion', () => {
+    expect(defaultSettings().damageFlash).toBe('full');
+    expect(createSettings(fakeStorage().storage).get().damageFlash).toBe('full');
+    withReducedMotion(() => {
+      expect(defaultSettings().damageFlash).toBe('subtle');
+      expect(createSettings(fakeStorage().storage).get().damageFlash).toBe('subtle');
+    });
+  });
+
+  it('round-trips the three modes, and a stored value outside them reads the default', () => {
+    muteLog();
+    const fake = fakeStorage();
+    const settings = createSettings(fake.storage);
+    for (const mode of ['off', 'subtle', 'full'] as const) {
+      settings.set({ damageFlash: mode });
+      expect(stored(fake)).toMatchObject({ damageFlash: mode });
+      expect(createSettings(fake.storage).get().damageFlash).toBe(mode);
+    }
+    expect(createSettings(fakeStorage('{"damageFlash":"strobe"}').storage).get().damageFlash).toBe('full');
+    expect(createSettings(fakeStorage('{"damageFlash":0}').storage).get().damageFlash).toBe('full');
+    withReducedMotion(() => {
+      expect(createSettings(fakeStorage('{"damageFlash":"strobe"}').storage).get().damageFlash).toBe('subtle');
+      // A choice the player made is kept, reduced motion or not.
+      expect(createSettings(fakeStorage('{"damageFlash":"full"}').storage).get().damageFlash).toBe('full');
+    });
+    settings.set({ damageFlash: 'off' });
+    settings.set({ damageFlash: 'blinding' as unknown as 'full' });
+    expect(settings.get().damageFlash).toBe('off'); // unusable: what was there stays
   });
 });
 

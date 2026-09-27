@@ -9,7 +9,7 @@
 // `redetect()`, reads `settings.benchmark` back and toasts (AC-20).
 import type { BenchmarkOutcome } from '@/core/Benchmark';
 import type { QualityPreset } from '@/core/Renderer';
-import type { GuidanceLevel, SettingsStore } from '@/core/Settings';
+import type { DamageFlashMode, GuidanceLevel, SettingsStore } from '@/core/Settings';
 import { log } from '@/core/Log';
 import type { SaveStore, SlotId } from '@/core/Save';
 import { SLOTS } from '@/core/Save';
@@ -48,6 +48,12 @@ const AUTO_FIRE_CHOICES = [
   ['off', 'Off'],
   ['touch', 'Touch only'],
 ] as const;
+/** SPEC-037 §4.6: the damage vignette's three strengths. */
+const DAMAGE_FLASH_CHOICES = [
+  ['full', 'Full'],
+  ['subtle', 'Subtle'],
+  ['off', 'Off'],
+] as const satisfies readonly (readonly [DamageFlashMode, string])[];
 /** SPEC-027 D-16: the three guidance levels, in the order §4.9 tabulates them. */
 const GUIDANCE_CHOICES = [
   ['full', 'Full'],
@@ -116,6 +122,7 @@ export class SettingsPanel {
         this.#audioRows(),
         this.#qualityRow(),
         this.#toggleRow('settings-reduce-motion', 'Reduce motion', s.get().reduceMotion, (on) => s.set({ reduceMotion: on })),
+        this.#damageFlashRow(),
         this.#guidanceRow(),
         this.#choiceRow('Auto-fire', AUTO_FIRE_CHOICES, s.autoFire, (mode) => s.setAutoFire(mode)),
         this.#choiceRow(
@@ -279,6 +286,42 @@ export class SettingsPanel {
         button.textContent = 'Re-detect';
       },
     );
+  }
+
+  // ----------------------------------------------------------- damage flash
+
+  /**
+   * SPEC-037 §4.6: how hard the red edge flashes on a hit — `Full` (0.8),
+   * `Subtle` (0.35, the default under reduced motion) or `Off`. The hit wedges
+   * and the red numbers stay either way (37-h).
+   */
+  #damageFlashRow(): HTMLDivElement {
+    const s = this.#deps.settings;
+    const active = s.get().damageFlash;
+    const buttons = DAMAGE_FLASH_CHOICES.map(([value, text]) =>
+      testId(
+        h(
+          'button',
+          {
+            class: `ui-btn seg${value === active ? ' is-active' : ''}`,
+            type: 'button',
+            'aria-pressed': String(value === active),
+            click: () => {
+              s.set({ damageFlash: value });
+              this.#render();
+            },
+          },
+          text,
+        ),
+        `settings-damage-flash-${value}`,
+      ),
+    );
+    return h(
+      'div',
+      { class: 'settings-row' },
+      h('span', {}, 'Damage flash'),
+      testId(h('div', { class: 'settings-seg' }, ...buttons), 'settings-damage-flash'),
+    ) as HTMLDivElement;
   }
 
   // --------------------------------------------------------------- guidance

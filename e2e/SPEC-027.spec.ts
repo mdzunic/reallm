@@ -25,9 +25,13 @@ async function land(page: Page): Promise<void> {
 /** Click through any open dialogue — chapter-1 beats are all non-modal. */
 async function dismiss(page: Page): Promise<void> {
   const dialogue = page.locator('[data-testid="dialogue"]');
+  // SPEC-037 §4.3: a non-modal line lets taps through; its `›` advances it.
+  const advance = page.locator('[data-testid="dialogue-advance"]');
   for (let i = 0; i < 20; i++) {
     if (!(await dialogue.isVisible().catch(() => false))) return;
-    await dialogue.click({ force: true });
+    // The line can move on by itself between the look and the press.
+    if (await advance.isVisible().catch(() => false)) await advance.click({ force: true, timeout: 2_000 }).catch(() => undefined);
+    else await dialogue.click({ force: true });
     await page.waitForTimeout(120);
   }
 }
@@ -206,31 +210,42 @@ test('a kill objective points at its quarry with a rim arrow, and guidance off d
   await expect.poll(() => drawn(page, 'mmArrows'), { timeout: 15_000 }).toBe(0);
 });
 
-test('a tap on the tracker cycles the tracked mission, and its hit box clears 44 px (AC-22)', async ({ page }) => {
-  test.setTimeout(150_000);
-  // Two acceptances in one terminal visit, for something to cycle between.
-  await landWithChapterStarted(page);
+// SPEC-037 §4.12: on the keyboard the tracker is display-only — a click there
+// reaches the canvas and fires, and `T` is its key — so the tap case runs in a
+// touch context and switches the scheme with one tap on open ground first.
+test.describe('the tracker on touch (SPEC-037 §4.12)', () => {
+  test.use({ hasTouch: true });
 
-  await page.locator('[data-testid="surface-goto-pad"]').click();
-  await page.keyboard.press('KeyE');
-  await expect(page.locator('[data-testid="pad-terminal"]')).toBeVisible();
-  await page.locator('[data-testid="terminal-accept-c1_m2"]').click();
-  await dismiss(page);
-  await page.locator('[data-testid="terminal-accept-c1_s1"]').click();
-  await dismiss(page);
-  await page.locator('[data-testid="terminal-close"]').click();
-  await dismiss(page);
+  test('a tap on the tracker cycles the tracked mission, and its hit box clears 44 px (AC-22)', async ({ page }) => {
+    test.setTimeout(150_000);
+    // Two acceptances in one terminal visit, for something to cycle between.
+    await landWithChapterStarted(page);
 
-  const box = await tracker(page).boundingBox();
-  expect(box?.height ?? 0).toBeGreaterThanOrEqual(44);
+    await page.locator('[data-testid="surface-goto-pad"]').click();
+    await page.keyboard.press('KeyE');
+    await expect(page.locator('[data-testid="pad-terminal"]')).toBeVisible();
+    await page.locator('[data-testid="terminal-accept-c1_m2"]').click();
+    await dismiss(page);
+    await page.locator('[data-testid="terminal-accept-c1_s1"]').click();
+    await dismiss(page);
+    await page.locator('[data-testid="terminal-close"]').click();
+    await dismiss(page);
 
-  const title = async (): Promise<string> => ((await tracker(page).textContent()) ?? '').split('·')[0] ?? '';
-  const first = (await title()).trim();
-  expect(first.length).toBeGreaterThan(0);
-  await tracker(page).click();
-  await expect.poll(async () => (await title()).trim(), { timeout: 10_000 }).not.toBe(first);
-  await tracker(page).click();
-  await expect.poll(async () => (await title()).trim(), { timeout: 10_000 }).toBe(first);
+    const size = page.viewportSize();
+    await page.touchscreen.tap(Math.round((size?.width ?? 1280) / 2), Math.round((size?.height ?? 720) * 0.45));
+    await expect.poll(async () => page.evaluate(() => window.__reallm.input().scheme)).toBe('touch');
+
+    const box = await tracker(page).boundingBox();
+    expect(box?.height ?? 0).toBeGreaterThanOrEqual(44);
+
+    const title = async (): Promise<string> => ((await tracker(page).textContent()) ?? '').split('·')[0] ?? '';
+    const first = (await title()).trim();
+    expect(first.length).toBeGreaterThan(0);
+    await tracker(page).tap();
+    await expect.poll(async () => (await title()).trim(), { timeout: 10_000 }).not.toBe(first);
+    await tracker(page).tap();
+    await expect.poll(async () => (await title()).trim(), { timeout: 10_000 }).toBe(first);
+  });
 });
 
 test('6. the move tip shows once per device and is remembered across a reload (D-24)', async ({ page }) => {

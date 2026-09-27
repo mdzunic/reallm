@@ -91,7 +91,8 @@ export const TIPS: Readonly<Record<TipId, TipText>> = {
   // SPEC-030 §4.11 (D-10): shelters are the storm answer now.
   storm: {
     keyboard: 'A storm is ten seconds out. Caves and wrecks keep it off you — or heal with Q and push through.',
-    touch: 'A storm is ten seconds out. Caves and wrecks keep it off you — or tap ITEM to heal and push through.',
+    // SPEC-037 §4.10: the touch layout has no ITEM button; the heal is its slot.
+    touch: 'A storm is ten seconds out. Caves and wrecks keep it off you — or tap the heal slot on the bar and push through.',
   },
   boss: {
     keyboard: 'The boss arena is marked in red. Stock up on medkits before you step in.',
@@ -186,9 +187,10 @@ export const HINTS: Readonly<Record<Objective['kind'] | 'death' | 'none' | 'no_w
   escort: { nudge: 'The probe follows you — lead it to {label}, {dist} {dir}.' },
   choice: { nudge: 'A call is waiting on you — open the prompt and choose.' },
   // SPEC-036 §4.11: difficulty is not a setting, and Q means nothing on a phone.
+  // SPEC-037 §4.10: nor does ITEM, which the touch layout no longer draws.
   death: {
     nudge: 'Dying twice here? Q heals, and armor helps.',
-    touch: 'Dying twice here? Tap ITEM to heal, and armor helps.',
+    touch: 'Dying twice here? Tap the heal slot on the bar, and armor helps.',
   },
   none: {
     nudge: 'No mission running. The pad terminal has work — {dist} {dir}.',

@@ -11,7 +11,6 @@ import { confirmSheet } from '@/ui/ConfirmSheet';
 import { el, h, testId, type UiRoot } from '@/ui/dom';
 import { itemIcon } from '@/ui/ItemIcon';
 import { portraitManifest, portraitSource } from '@/ui/portraits';
-import { Wallet } from '@/ui/Wallet';
 
 export interface CharacterDeps {
   ui: UiRoot;
@@ -30,15 +29,9 @@ export class CharacterPanel {
   /** SPEC-020 §4.6: the portrait files that shipped; empty means glyphs. */
   #available: ReadonlySet<number> = new Set();
 
-  /** SPEC-031 §4.11: the panel's own wallet strip, above the stat block. It
-   *  reads the save on every panel refresh; the station header's instance is
-   *  the one that follows the events live. */
-  readonly #wallet: Wallet;
-
   constructor(container: HTMLElement, deps: CharacterDeps) {
     this.#container = container;
     this.#deps = deps;
-    this.#wallet = new Wallet({ save: deps.save });
     this.refresh();
     // The manifest is a session-memoised fetch, so this is one request per
     // run at most; a panel the player has already tabbed away from is gone
@@ -50,10 +43,13 @@ export class CharacterPanel {
     });
   }
 
+  /**
+   * SPEC-037 §4.2: the panel no longer carries a wallet of its own — the
+   * station header's is the one, and the Cargo block below keeps the hold.
+   */
   refresh(): void {
     const panel = testId(el('div', 'character'), 'character-panel');
-    this.#wallet.refresh();
-    panel.append(this.#wallet.root, this.#statsBlock(), this.#gearBlock(), this.#inventoryBlock(), this.#resourcesBlock());
+    panel.append(this.#statsBlock(), this.#gearBlock(), this.#inventoryBlock(), this.#resourcesBlock());
     this.#container.replaceChildren(panel);
   }
 

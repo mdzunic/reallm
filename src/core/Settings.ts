@@ -34,6 +34,13 @@ export type AutoFireMode = 'touch' | 'on' | 'off';
 export type WeaponAutoSwapMode = 'touch' | 'on' | 'off';
 /** Which half of the screen the floating joystick lives in (SPEC-005 AC-11). */
 export type JoystickSide = 'left' | 'right';
+/**
+ * SPEC-037 §4.6: how hard the damage vignette flashes — `'full'` peaks at 0.8,
+ * `'subtle'` at 0.35, and `'off'` draws none. Declared here rather than beside
+ * the flash gate in `systems/UiHelpers.ts` because `core/` may not import
+ * `systems/` (SPEC-001 §4); that module re-exports it.
+ */
+export type DamageFlashMode = 'full' | 'subtle' | 'off';
 
 /** The touch buttons are never smaller than their 56 px base (SPEC-005 AC-16). */
 export const MIN_BUTTON_SCALE = 1;
@@ -76,6 +83,12 @@ export type Settings = {
   quality: QualityPreset | null;
   /** Defaults from `prefers-reduced-motion`. */
   reduceMotion: boolean;
+  /**
+   * SPEC-037 §4.6: the damage vignette's strength; `'full'`, or `'subtle'` when
+   * `prefers-reduced-motion` matches. A stored value outside the three reads
+   * the default.
+   */
+  damageFlash: DamageFlashMode;
   autoFire: AutoFireMode;
   /** SPEC-029 §4.4: the locked-primary sidearm fallback; default `'touch'`. */
   weaponAutoSwap: WeaponAutoSwapMode;
@@ -159,6 +172,7 @@ const AUTO_FIRE_MODES: readonly AutoFireMode[] = ['touch', 'on', 'off'];
 const WEAPON_AUTO_SWAP_MODES: readonly WeaponAutoSwapMode[] = ['touch', 'on', 'off'];
 const JOYSTICK_SIDES: readonly JoystickSide[] = ['left', 'right'];
 const GUIDANCE_LEVELS: readonly GuidanceLevel[] = ['full', 'minimal', 'off'];
+const DAMAGE_FLASH_MODES: readonly DamageFlashMode[] = ['full', 'subtle', 'off'];
 
 /** `prefers-reduced-motion: reduce` where the platform reports it. */
 function prefersReducedMotion(): boolean {
@@ -185,6 +199,7 @@ export function defaultSettings(): Settings {
     sfx: 1,
     quality: null,
     reduceMotion: prefersReducedMotion(),
+    damageFlash: prefersReducedMotion() ? 'subtle' : 'full',
     autoFire: 'touch',
     weaponAutoSwap: 'touch',
     joystickSide: 'left',
@@ -363,6 +378,10 @@ function coerce<K extends keyof Settings>(key: K, value: unknown, current: Setti
         // The default is the platform's answer to `prefers-reduced-motion`, so
         // this is the other setting an unusable stored value must not turn off.
         return bool(value, current.reduceMotion);
+      case 'damageFlash':
+        // SPEC-037 §4.6: on load `current` is the defaults, so an unusable
+        // stored value reads the default — `'subtle'` under reduced motion.
+        return oneOf(value, DAMAGE_FLASH_MODES, current.damageFlash);
       case 'autoFire':
         return oneOf(value, AUTO_FIRE_MODES, current.autoFire);
       case 'weaponAutoSwap':

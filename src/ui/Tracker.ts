@@ -28,7 +28,8 @@ interface Row {
 
 export class Tracker {
   readonly #root: HTMLDivElement;
-  readonly #head: HTMLParagraphElement;
+  /** The head's words; the head itself also carries the `T` keycap (SPEC-037 §4.2). */
+  readonly #head: HTMLSpanElement;
   readonly #rows: Row[] = [];
   readonly #list: HTMLDivElement;
   /** Live only beside the focus row, and only while there is a target (AC-20). */
@@ -45,10 +46,16 @@ export class Tracker {
     this.#root = testId(el('div', 'tracker panel'), 'objective-tracker');
     this.#root.setAttribute('role', 'group');
     this.#root.setAttribute('aria-label', 'Objective tracker');
-    this.#head = el('p', 'tracker-head', 'No active mission');
+    this.#head = el('span', 'tracker-title', 'No active mission');
     this.#headText = 'No active mission';
+    // SPEC-037 §4.2: a `T` after the head says which key cycles the mission —
+    // on the keyboard scheme only; on touch the tap is the affordance.
+    const cap = el('kbd', 'keycap tracker-key', 'T');
+    cap.setAttribute('aria-hidden', 'true');
+    const head = el('p', 'tracker-head');
+    head.append(this.#head, cap);
     this.#list = el('div', 'tracker-rows');
-    this.#root.append(this.#head, this.#list);
+    this.#root.append(head, this.#list);
     // §4.2: a tap anywhere on the panel cycles the tracked mission, exactly as
     // `KeyT` does. `pointerdown` rather than `click`, so a thumb that slides
     // off still counts — and so it never waits on the 300 ms click resolution.
