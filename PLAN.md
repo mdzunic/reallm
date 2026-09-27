@@ -134,6 +134,71 @@ Specs: SPEC-001 (§9), SPEC-009 (§7), SPEC-012 (§4.7, edges), SPEC-013 (§4.1,
 
 ---
 
+**R17 — 2026-09-27 (the design review: two traps, a misplaced climax, and the first hour).** A design review of `main` at `ad41d30` (`docs/design-review-2026-09.md`) played a new game from boot on desktop and on a phone-sized screen, and audited the code, the balance, the story wiring and the art, backed by proof tests and 60 Hz simulations of the real systems. It found:
+
+- **Two ways the game stops a player.**
+  - A hit that knocks the salvager against a rock leaves them unable to move in any direction, with no way out but dying or quitting.
+  - The Hive Gauntlet cannot be won with any ship. Its interceptors carry chapter-5 HP (83), and a third of well-aimed shots pass through a target that is closing on the ship. Every Hive mission requires it.
+- **A misplaced climax.** The Warden's first words play when `c5_m3` is accepted at the pad, or never when it is taken at the board.
+- **A finale whose wave never attacks.**
+- **A dozen state and save bugs.**
+- **A first ten minutes that kill the player twice.** A new player died twice in four minutes of the tutorial, to enemies tinted the colour of the sand, after a first flight that explains nothing.
+
+The story, the planets, the missions' roster and rewards, the token totals (670 / 104 / 2,380) and the save format do not change; one mission number does (decision 2). Decisions:
+
+1. **Collision never traps (§13 E54, E55).**
+   - Knockback, enemy push-out and blasts move a body only as far as the obstacles allow.
+   - A body that finds itself inside an obstacle is pushed out the shortest way before it next moves.
+   - The surface pause menu gains **Recall to pad**: E4's respawn without the death — timed, escort and defend stages restart, the boss resets, nothing is lost.
+2. **The Gauntlet is winnable with the stock guns (§6, §13 E12, E58).**
+   - Flight shots sweep the target's motion as well as their own.
+   - Flight enemies keep chapter-scaled damage but not chapter-scaled HP: an interceptor has **20 HP** (two hits from the stock guns), a scav fighter **40**.
+   - `c5_m1` asks for **6** interceptor kills instead of 10; its 180 s survive, its rewards and R16's landing rule are unchanged.
+   - A simulated pilot who aims where a target is, not where it is going, now clears it with the chapter-5 ship in 15–16 of 16 seeded runs; as shipped, no run of any ship reached ten kills and the stock guns averaged one.
+   - E1 also covers the fuel of a planet whose accepted **main** flight mission is still open, so a failed Gauntlet can always be flown again.
+3. **The world waits for a modal line (§13 E57).**
+   - While a modal dialogue or the verdict choice is open, the surface holds its simulation, as the map does.
+   - A boss's death kills its living summons.
+   - A defend stage that ends sends its wave's survivors away.
+4. **The Warden speaks at the Queen's death (§5).**
+   - A dialogue may name the one that follows it (`next`).
+   - `c5_m3` completes on `c5_m3_warden`, which hands on to `c5_m3_aria`, whichever way the mission was accepted.
+   - A mission may no longer carry a stage-0 line, which the station board could never play.
+5. **Waves come to the player.**
+   - Wave enemies spawn aggroed, with their leash anchored at the wave's centre, and are never recycled as far-away stragglers.
+   - `eden_final` spawns 25–40 m out.
+   - A mission's own `waves` run while it is active; `thessaly_reaping` never started before.
+6. **A collect objective counts at a full hold (§13 E3, E56).**
+   - While an active collect objective still needs a resource, what the hold cannot take is shipped home: it counts toward the objective and does not enter the hold.
+   - E3's invariant (cap ≥ any single objective + 100) stays.
+   - This retires the hold finding pinned by SPEC-016 §4.6.
+7. **Every line at its moment.**
+   - Flight missions play their lines in flight.
+   - The station debriefs only the lines the surface did not play, and before an interlude, not after it.
+   - A terminal accept plays its line before the stage lines it triggers.
+   - `c2_s1_log` plays when the wreck has been scanned.
+   - The first scavenger no longer says "I have said that before", so the echo of `c1_s2` is chapter 1's first anomaly, as §5 intends.
+8. **Throttle down leaves Ctrl.** Chrome and Edge on Windows and Linux close the tab on Ctrl+W and a page cannot stop it. Throttle down moves to `X`; throttle up stays on Shift, and the wheel keeps both.
+9. **The first hour (SPEC-035).**
+   - **Camera.** It comes closer: 22 m on the keyboard scheme and 17 m on touch. This supersedes R6-4's "the camera keeps SPEC-012 §4.3's numbers" for the distance only; pitch, yaw and field of view stay.
+   - **Fog and bloom.** Surface fog starts at the player instead of at the camera, and the surface grade no longer blooms sunlit ground.
+   - **Enemies.** Every enemy wears a hostile rim, and chapter 1–2 tints reach 3:1 luminance contrast against their ground.
+   - **Visibility.** Props between the camera and the player fade, and a hit from off screen shows where it came from.
+   - **First visit to Cinder-4.** It ramps in: no ambient storm, half the ambient population and no rushers until `c1_m1` is done.
+   - **Tips** teach the first flight and the first fight.
+   - **Sound.** Guns, impacts and explosions make one.
+   - **Screens.** The board shows its briefs, the quick bar its names, and every item its picture.
+10. **Milestone M7e** (the first hour) follows M7d and ends with tag `m7e`.
+
+Specs:
+- SPEC-034 (stabilization — decisions 1–8).
+- SPEC-035 (the first hour — decision 9).
+- SPEC-016 §4.6 and §4.7's completionist pins move with decisions 2 and 6.
+
+(§5, §6, §10, §13)
+
+---
+
 ## 1. Vision & Inspiration
 
 **ReaLLM** ("real" + "LLM"): a space post-apocalyptic ARPG whose hero slowly works out that he may be a language model running inside a machine.
@@ -268,7 +333,7 @@ The meta plot is delivered through data only: dialogue (`log` lines render as a 
 
 ## 5. Planets & Story Arc (6 chapters)
 
-Earth Command sends you out with the ship AI **ARIA**. Each planet resolves a resource shortage (the task) and drops one piece of the truth (the awakening). The chapter number doubles as the Warden's **containment level**: enemies scale ×1.35 HP / ×1.3 damage per chapter and elite chance rises from 5 % to 10 % (existing tuning); dialogue frames the escalation as the system tightening its grip. Final choice at Eden-Prime: **stay** (file the report; Earth is saved inside the fiction; the loop closes as "a good run") or **escape** (refuse; the beacon becomes an exit; the screen degrades to a bare prompt: `instance/62 disconnected`). Flags: `ending_stay` / `ending_escape`.
+Earth Command sends you out with the ship AI **ARIA**. Each planet resolves a resource shortage (the task) and drops one piece of the truth (the awakening). The chapter number doubles as the Warden's **containment level**: enemies scale ×1.35 HP / ×1.3 damage per chapter (since R17 flight enemies scale damage only; their HP is fixed per trip) and elite chance rises from 5 % to 10 % (existing tuning); dialogue frames the escalation as the system tightening its grip. Final choice at Eden-Prime: **stay** (file the report; Earth is saved inside the fiction; the loop closes as "a good run") or **escape** (refuse; the beacon becomes an exit; the screen degrades to a bare prompt: `instance/62 disconnected`). Flags: `ending_stay` / `ending_escape`.
 
 | # | Planet (id) | Biome | Resources | Threats | Gate | Fuel (oil) | Travel |
 |---|---|---|---|---|---|---|---|
@@ -397,7 +462,7 @@ Beat: ARIA decodes alien signal — the Hive knows Earth's location. The decoded
 
 | ID | Title | Stages | Rewards |
 |---|---|---|---|
-| c5_m1 | "Gauntlet" (**flight**) | [survive 180 s asteroid field; kill 10 `hive_interceptor`] during the outbound flight | 350 XP, 30 tokens |
+| c5_m1 | "Gauntlet" (**flight**) | [survive 180 s asteroid field; kill 6 `hive_interceptor`] during the outbound flight (10 kills until R17) | 350 XP, 30 tokens |
 | c5_m2 | "Lair" | [reach `queen_chamber`; kill 25 `hive_drone`] | 400 XP, 35 tokens |
 | c5_m3 | "Her Majesty" (FINAL BOSS) | [boss `hive_queen` (2 phases)] | 600 XP, 100 tokens, flag `chapter5_done` (unlocks Eden-Prime) |
 | c5_s1 | "Egg Hunt" (side) | [kill 15 `hive_egg`] | 200 XP, 20 tokens |
@@ -477,6 +542,7 @@ Storage rules: 3 slots, key per slot plus a `.bak` copy of the previous good sav
 - Screen wake lock during gameplay; pause + audio suspend when the tab is hidden; WebGL context-loss recovery overlay.
 - Story films (R9) are a DOM `<video>` over a black layer, fetched whole into a Blob so the service worker never answers a Range request; the scene underneath is held, so a film costs a video decode, not draw calls; reduce motion plays a film as its posters.
 - HUD/menu built as HTML/CSS overlay → naturally adapts to small screens; touch targets ≥ 44 px.
+- The surface camera sits closer on touch (17 m) than on the keyboard scheme (22 m), so the salvager stays readable on a phone (R17).
 - M7: PWA manifest + service worker (precache the whole build) → installable, truly offline, save exempt from Safari eviction.
 
 ---
@@ -495,6 +561,7 @@ Storage rules: 3 slots, key per slot plus a `.bak` copy of the previous good sav
 | M7a | Art pass (R6): render pipeline (ACES, post chain, IBL, shadows), surface environment (height-field terrain, splat ground shader, procedural textures, scatter, props, weather sprites), animated character, sculpted enemies, combat VFX, flight sky and ships, hub backdrops, UI theme (SPEC-017…SPEC-020) | Cinder-4 and every other planet read as a modern stylised-PBR game on desktop and on the reference phone; medium stays ≤ 80 scene + 16 post draws on the surface; screenshots per scene and preset in the playtest log; tag `m7a` |
 | M7b | Story films (R9): the prologue, the departure, five chapter interludes and two ending films rendered in Blender with synthesised sound; the film player with poster and text fallbacks; chapter cards and boss reveals; the ending sequence wired end to end (SPEC-021…SPEC-024) | New game opens on the prologue; the first flight to each planet shows the departure and its chapter card; each boss reveals itself once per session; each chapter's interlude plays on the first return to the station; both endings run dialogue → film → overlay; every film skips, falls back to posters and text, and fits the 12 MB films budget; checked on desktop and the reference phone; tag `m7b` |
 | M7c | Playability pass (R10): camera-aligned minimap with a legend and remembered ground, and a full-screen map; objective tracker, waypoints and escalating hints; three weapon slots and three quick slots on a quick bar; machine guns, launchers and explosives with heat and charge cooldowns; caves, wrecks and an arena wall; save v2 (SPEC-025…SPEC-030) | On Cinder-4: every kind of point is recognisable on the map, and the map turns with the camera; walked ground stays lit after a reload; a new player finishes `c1_m1`–`c1_m3` by following the tracker and the marker; medkit and grenade counts are visible mid-fight; a rocket, the chaingun and the pistol get used together; a heatwave is waited out in a cave; the arena edge is a wall; budgets unchanged; checked on desktop and the reference phone; tag `m7c` |
+| M7e | The first hour (R17): no trap in collision, a winnable Gauntlet, modal lines that hold the world, the Warden at the Queen's death, waves that attack, collect objectives that count at a full hold, lines at their moment; a closer camera, fog from the player out, hostile rims and readable chapter 1–2 enemies, fading occluders, hit direction, a ramped first visit, flight and combat tips, weapon sounds, briefs, names and item pictures (SPEC-034, SPEC-035) | A new player finishes `c1_m1` on normal without dying and without being trapped; a stock-gun pilot clears `c5_m1`; the Warden speaks at the Queen's death whichever way `c5_m3` was accepted; the Eden wave reaches the beacon; the salvager is visible on every planet and preset; every shot makes a sound; checked on desktop and the reference phone; tag `m7e` |
 | M7 | Polish: mobile tuning, quality presets, balancing pass, PWA/offline, storage persistence, reduce-motion, save migration harness | 30+ fps on mid-tier phone; installable; full manual checklist green |
 
 ---
@@ -537,9 +604,9 @@ Each entry names the owning spec. "Casual" = casual difficulty.
 
 | # | Situation | Decision | Spec |
 |---|---|---|---|
-| E1 | Player can't afford fuel to any unlocked planet | On entering the station, `oil = max(oil, cheapest unlocked jump)`; ARIA line "Earth Command wired an emergency ration". Boss missions also grant a refuel voucher | SPEC-010 |
+| E1 | Player can't afford fuel to any unlocked planet | On entering the station, `oil = max(oil, cheapest unlocked jump)`; ARIA line "Earth Command wired an emergency ration". Boss missions also grant a refuel voucher. Since R17 the floor is the higher of that jump and the fuel of any planet whose accepted main flight mission is still open, so a failed Gauntlet can always be flown again | SPEC-010, SPEC-034 |
 | E2 | Player spent all tokens and can't meet the shield-2 gate | Completed missions replayable at 50 % rewards; invariant guarantees worst-case tokens ≥ loadout | SPEC-010 |
-| E3 | Cargo full during a collect objective | Base cap 400 ≥ any objective; pickups stop with a "CARGO FULL" toast; invariant tested | SPEC-010 |
+| E3 | Cargo full during a collect objective | Base cap 400 ≥ any objective; pickups stop with a "CARGO FULL" toast; invariant tested. Since R17, while an active collect objective still needs that resource, what the hold cannot take is shipped home: it counts toward the objective and does not enter the hold (E56) | SPEC-010, SPEC-034 |
 | E4 | Death on the surface | Respawn at pad, full HP, 2 s invulnerability, −10 % carried resources (0 % casual), timed/escort/defend stages restart, enemies within 40 m of pad despawn, boss resets | SPEC-012 |
 | E5 | Death in flight | Emergency recall to station; fuel lost; cargo kept; flight mission stage resets | SPEC-013 |
 | E6 | Tab hidden / phone locked mid-combat | Loop pauses, audio suspends, accumulator reset on resume (no catch-up), best-effort save on `pagehide` | SPEC-002, SPEC-007 |
@@ -582,6 +649,11 @@ Each entry names the owning spec. "Casual" = casual difficulty.
 | E43 | Player hides in a shelter through a survive stage or a wave | Allowed: timers run; wave and boss enemies ignore hiding; firing reveals the player for 1.5 s | SPEC-030 |
 | E44 | A shelter would block a corridor or enclose a POI or node | Shelters keep out of every pad → POI corridor and away from POIs and nodes; their walls are never removed by repair, and every interior is validated reachable | SPEC-030 |
 | E45 | Shots, enemies or the player at the arena edge | All stop at the wall's line (`halfSize − 2`); a rocket that reaches it explodes there | SPEC-030 |
+| E54 | A hit, a shove or a blast would put a body inside an obstacle | It moves only as far as the obstacle allows; a body found inside one is pushed out the shortest way before its next step, so nothing can be held inside a rock | SPEC-034 |
+| E55 | The player is stuck, lost or wants out of a fight | Recall to pad (surface pause menu): the respawn of E4 without the death — timed, escort and defend stages restart, the boss resets, no resources are lost | SPEC-034 |
+| E56 | A collect objective's resource while the hold is full | The surplus is shipped home: it counts toward the objective, never enters the hold, and a throttled toast says so | SPEC-034 |
+| E57 | A modal line or the verdict choice opens mid-fight | The surface holds its simulation until it closes; a boss's summons die with it, and a finished defend stage's wave leaves | SPEC-034 |
+| E58 | The ship lands with `c5_m1` still open (a failed Gauntlet) | E12's 90 s cap still lands it; the pad names the board, and E1 tops the hold up to the Hive's fuel at the next station entry | SPEC-034 |
 
 ---
 
