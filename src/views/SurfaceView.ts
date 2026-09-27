@@ -368,6 +368,46 @@ function cameraBillboard(): THREE.Quaternion {
   return new THREE.Quaternion().setFromRotationMatrix(scratchMatrix);
 }
 
+// ------------------------------------------------- SPEC-035 §4.5 (occluders)
+
+/** A prop that can hide the player, as the pure `occludes` test of §3 sees it. */
+export interface OccluderProp {
+  readonly x: number;
+  readonly z: number;
+  readonly radius: number;
+  readonly height: number;
+}
+
+/** §4.5: a fade takes this long, each way. */
+export const OCCLUDER_FADE_SECONDS = 0.2;
+
+/**
+ * SPEC-035 §4.5 — the per-instance opacity the prop material multiplies into
+ * its alpha, exactly the way `EnemyMeshes` carries its per-instance emissive.
+ *
+ * While nothing is faded the material stays opaque and the alpha is ignored, so
+ * a planet with no occluder pays nothing: the only cost of the fade is a
+ * `transparent` / `depthWrite` flip on one shared material (§4.14).
+ */
+function injectInstanceFade(material: THREE.MeshStandardMaterial): void {
+  material.onBeforeCompile = (shader) => {
+    shader.vertexShader = shader.vertexShader
+      .replace('#include <common>', 'attribute float instanceFade;\nvarying float vInstanceFade;\n#include <common>')
+      .replace('#include <begin_vertex>', '#include <begin_vertex>\nvInstanceFade = instanceFade;');
+    shader.fragmentShader = shader.fragmentShader
+      .replace('#include <common>', 'varying float vInstanceFade;\n#include <common>')
+      .replace('#include <color_fragment>', '#include <color_fragment>\ndiffuseColor.a *= vInstanceFade;');
+  };
+  material.customProgramCacheKey = () => 'prop-fade/1';
+}
+
+/** One instance's worth of `instanceFade`, filled opaque. */
+function fadeAttribute(count: number): THREE.InstancedBufferAttribute {
+  const attribute = new THREE.InstancedBufferAttribute(new Float32Array(count).fill(1), 1);
+  attribute.setUsage(THREE.DynamicDrawUsage);
+  return attribute;
+}
+
 /** The §4.7 glow accents per obstacle kind (colour, emissive intensity). */
 function obstacleGlow(kind: ObstacleKind, biome: PlanetDef['biome'], accent: string): THREE.MeshStandardMaterial {
   let color = accent;
@@ -448,6 +488,23 @@ export class SurfaceView {
   #particleIntensity = 0;
 
   readonly #grade: ViewGrade = { vignette: 0, tint: [1, 1, 1], desaturate: 0 };
+
+  // SPEC-035 §4.5 — occluder fading. `#occluders` is the candidate list the
+  // scene tests with the pure `occludes`; the parallel arrays hold what each
+  // candidate is (an instanced slot, or a whole landmark mesh), whether it is
+  // occluding right now, and how far its fade has travelled.
+  readonly #occluders: OccluderProp[] = [];
+  readonly #occluderTargets: Array<
+    | { readonly kind: 'instance'; readonly attribute: THREE.InstancedBufferAttribute; readonly slot: number }
+    | { readonly kind: 'mesh'; readonly mesh: THREE.Mesh; readonly base: THREE.Material; faded: THREE.MeshStandardMaterial | null }
+  > = [];
+  #occluding: Uint8Array<ArrayBufferLike> = new Uint8Array(0);
+  #occluderFade = new Float32Array(0);
+  #occluderOpacity = 1;
+  #fadedOccluders = 0;
+  /** The shared prop material, transparent only while something is faded. */
+  #propMaterial: THREE.MeshStandardMaterial | null = null;
+  #propsTransparent = false;
 
   // SPEC-030 §4.8–§4.9 — the arena wall and the shelters.
   #wall: THREE.Group | null = null;
@@ -566,11 +623,19 @@ export class SurfaceView {
       list.push({ x: prop.x, z: prop.z, scale: prop.scale * 0.5, rot: prop.rot });
       byKind.set(`${kind}#prop`, list);
     }
+    // SPEC-035 §4.5: one shared material for every prop body, with the
+    // per-instance opacity the fade writes into.
+    injectInstanceFade(accent);
+    this.#propMaterial = accent;
     for (const [key, list] of byKind) {
       const small = key.endsWith('#prop');
       const kind = key.replace('#prop', '') as ObstacleKind;
       const prop = obstacleGeometry(kind, planet.biome, hash32(layout.hash, 'prop', kind), assets, small);
       const mesh = new THREE.InstancedMesh(prop.body, accent, list.length);
+      const fade = fadeAttribute(list.length);
+      prop.body.setAttribute('instanceFade', fade);
+      prop.body.computeBoundingBox();
+      const topY = prop.body.boundingBox?.max.y ?? 1;
       list.forEach((entry, i) => {
         const h = this.field.heightAt(entry.x, entry.z);
         // 18-d: bases sit at h; procedural rocks embed half their radius. A GLB
@@ -580,6 +645,10 @@ export class SurfaceView {
         scratchMatrix.scale(scratchVector.set(entry.scale, entry.scale, entry.scale));
         scratchMatrix.setPosition(entry.x, h + lift, entry.z);
         mesh.setMatrixAt(i, scratchMatrix);
+        // SPEC-035 §4.5: the cylinder the pure test uses — the instance's own
+        // footprint, as tall as its geometry reaches above the ground.
+        this.#occluders.push({ x: entry.x, z: entry.z, radius: entry.scale, height: Math.max(0.5, topY * entry.scale + lift) });
+        this.#occluderTargets.push({ kind: 'instance', attribute: fade, slot: i });
       });
       mesh.instanceMatrix.needsUpdate = true;
       mesh.castShadow = true;
@@ -620,6 +689,18 @@ export class SurfaceView {
       const h = this.field.heightAt(poi.x, poi.z); // ≈ 0 on flattened ground
       if (poi.kind === 'arena') mesh.scale.setScalar(poi.radius * 0.2);
       mesh.position.set(poi.x, h, poi.z);
+      // SPEC-035 §4.5: only landmarks join the occluder list — every other POI
+      // is something the player is being sent to and must be able to see.
+      if (poi.kind === 'landmark') {
+        prop.body.computeBoundingBox();
+        this.#occluders.push({
+          x: poi.x,
+          z: poi.z,
+          radius: poi.radius * 0.5,
+          height: Math.max(0.5, prop.body.boundingBox?.max.y ?? 1),
+        });
+        this.#occluderTargets.push({ kind: 'mesh', mesh, base: poiMaterial, faded: null });
+      }
       // The pad is flat on the ground: its own shadow would only stripe it.
       mesh.castShadow = poi.kind !== 'landing_pad';
       mesh.receiveShadow = true;
@@ -866,6 +947,12 @@ export class SurfaceView {
       if (mine.length === 0) continue;
       const geometry = shelterGeometry(kind, planet.biome, hash32(layout.hash, 'shelter', kind), assets);
       const body = new THREE.InstancedMesh(geometry.body, accent, mine.length);
+      // SPEC-035 §4.5: the body fades like any other prop; the roof keeps its
+      // SPEC-030 lift and is never faded on top of it (35-c).
+      const bodyFade = fadeAttribute(mine.length);
+      geometry.body.setAttribute('instanceFade', bodyFade);
+      geometry.body.computeBoundingBox();
+      const bodyTop = geometry.body.boundingBox?.max.y ?? 1;
       const roof = new THREE.InstancedMesh(geometry.roof, roofMaterial, mine.length);
       const glow = geometry.glow === undefined ? null : new THREE.InstancedMesh(geometry.glow, glowMaterial, mine.length);
       mine.forEach((index, i) => {
@@ -883,6 +970,8 @@ export class SurfaceView {
         roof.setMatrixAt(i, scratchMatrix);
         glow?.setMatrixAt(i, scratchMatrix);
         bySlot.set(index, { mesh: roof, slot: i });
+        this.#occluders.push({ x: s.x, z: s.z, radius: Math.max(s.rx, s.rz), height: Math.max(0.5, bodyTop) });
+        this.#occluderTargets.push({ kind: 'instance', attribute: bodyFade, slot: i });
         this.#roofMatrices[index] = scratchMatrix.clone();
       });
       for (const mesh of [body, roof, ...(glow === null ? [] : [glow])]) {
@@ -1216,11 +1305,97 @@ export class SurfaceView {
     }
   }
 
+  // ------------------------------------------------------- SPEC-035 §4.5
+
+  /**
+   * SPEC-035 §4.5 — every prop that could hide the player, as the pure
+   * `occludes` of SPEC-035 §3 sees it: outcrops, scatter props, landmarks and
+   * the cave and wreck bodies. The array is built once and never replaced, so
+   * the scene can keep a parallel flag buffer of the same length.
+   */
+  get occluderProps(): readonly OccluderProp[] {
+    return this.#occluders;
+  }
+
+  /** §4.5: how many props are currently faded — what `sceneInfo.occluders` reports. */
+  get fadedOccluders(): number {
+    return this.#fadedOccluders;
+  }
+
+  /**
+   * §4.5 — which candidates are occluding right now (`1`), and what a faded one
+   * fades to. `SurfaceScene` recomputes the flags every 0.1 s with `occludes`;
+   * `sync` then walks the fades toward their targets over
+   * `OCCLUDER_FADE_SECONDS`, each way.
+   */
+  setOccluding(flags: Uint8Array, opacity: number): void {
+    this.#occluding = flags;
+    this.#occluderOpacity = opacity;
+  }
+
+  /** §4.5: one fade step, called from `sync`. Allocates nothing. */
+  #stepOccluders(dt: number): void {
+    const count = this.#occluders.length;
+    if (count === 0) return;
+    if (this.#occluderFade.length !== count) this.#occluderFade = new Float32Array(count).fill(1);
+    const step = dt <= 0 ? 0 : dt / OCCLUDER_FADE_SECONDS;
+    let faded = 0;
+    for (let i = 0; i < count; i++) {
+      const target = (this.#occluding[i] ?? 0) === 1 ? this.#occluderOpacity : 1;
+      const from = this.#occluderFade[i] as number;
+      let value = from;
+      if (from < target) value = Math.min(target, from + step);
+      else if (from > target) value = Math.max(target, from - step);
+      if (value !== from) {
+        this.#occluderFade[i] = value;
+        this.#writeFade(i, value);
+      }
+      if (value < 1) faded++;
+    }
+    this.#fadedOccluders = faded;
+    // §4.14: one flag flip on one shared material, however many props fade.
+    const wantTransparent = faded > 0;
+    if (wantTransparent !== this.#propsTransparent) {
+      this.#propsTransparent = wantTransparent;
+      const material = this.#propMaterial;
+      if (material !== null) {
+        material.transparent = wantTransparent;
+        material.depthWrite = !wantTransparent;
+      }
+    }
+  }
+
+  /** §4.5: an instanced slot's attribute, or a landmark's own material clone. */
+  #writeFade(index: number, value: number): void {
+    const target = this.#occluderTargets[index];
+    if (target === undefined) return;
+    if (target.kind === 'instance') {
+      target.attribute.setX(target.slot, value);
+      target.attribute.needsUpdate = true;
+      return;
+    }
+    if (value >= 1) {
+      target.mesh.material = target.base;
+      return;
+    }
+    if (target.faded === null) {
+      const clone = (target.base as THREE.MeshStandardMaterial).clone();
+      clone.transparent = true;
+      clone.depthWrite = false;
+      target.faded = clone;
+    }
+    target.faded.opacity = value;
+    target.mesh.material = target.faded;
+  }
+
   sync(frame: SurfaceFrame): void {
     const p = frame.player;
     const ground = this.#ground;
     // The clock `setGuide` animates the pillar and the route wave on (§4.4).
     this.#guideTime = frame.time;
+    // SPEC-035 §4.5: props between the camera and the salvager fade out of the
+    // way; the scene decided which ones, this walks the fades.
+    this.#stepOccluders(frame.dt);
     const playerGround = ground(p.x, p.z);
     this.#player.visible = p.alive;
     this.#player.position.set(p.x, playerGround, p.z);

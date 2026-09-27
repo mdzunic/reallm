@@ -20,6 +20,7 @@ import type { GuidanceLevel } from '@/core/Settings';
 import type { GameServices } from '@/core/Services';
 import type { SceneParams } from '@/core/StateMachine';
 import type { Renderer } from '@/core/Renderer';
+import type { Scheme } from '@/core/Input';
 import {
   BOSS_REVEALS,
   DIALOGUE,
@@ -45,6 +46,7 @@ import {
   type MissionDef,
   type MissionId,
   type PlanetDef,
+  type PlanetId,
   type ExplosiveEffect,
   type PoiId,
   type QuickSlot,
@@ -86,14 +88,18 @@ import { nodeIcon, poiIcon } from '@/systems/MapModel';
 import { Missions, type MissionContext, type ObjectiveProgress } from '@/systems/Missions';
 import { CARGO_TOAST_SECONDS, Nodes, Pickups, SHIPPED_TOAST_TEXT } from '@/systems/Pickups';
 import { cumulativeXp, Progression, xpToNext } from '@/systems/Progression';
-import { SpawnDirector, type FrustumXZ, type WaveHandle } from '@/systems/Spawn';
+import { SpawnDirector, type FrustumXZ, type SpawnRamp, type WaveHandle } from '@/systems/Spawn';
 import { Weather, WEATHER_EFFECTS, type WeatherEffects } from '@/systems/Weather';
 import { LINE_LEDGER, revealCamera, revealDue, revealKey, stayReport, type Ending } from '@/systems/StoryBeats';
 import {
+  cameraDistance,
   hasNodeRadar,
   HP_FULL_TEXT,
+  occludes,
+  OCCLUDER_OPACITY,
   padEmptyText,
   stageResetText,
+  surfaceFogRange,
   surfaceHoldReason,
   type HudTracker,
   type HudTrackerRow,
@@ -132,11 +138,27 @@ import { ScanRing } from '@/ui/ScanRing';
 import { TouchControls } from '@/ui/TouchControls';
 import { Waypoint } from '@/ui/Waypoint';
 
-/** §4.3 — the fixed camera. */
+/** §4.3 — the fixed camera. Its distance is SPEC-035 §4.2's, by input scheme. */
 const CAMERA_FOV = 40;
 const CAMERA_PITCH = (55 * Math.PI) / 180;
 const CAMERA_YAW = (45 * Math.PI) / 180;
-const CAMERA_DISTANCE = 28;
+/** SPEC-035 §4.2: how long the distance takes to ease after a scheme change. */
+const CAMERA_DISTANCE_EASE_SECONDS = 0.4;
+
+// --------------------------------------------------------- SPEC-035 §4.7
+
+/** §4.7: the ramp runs on the first world, until its tutorial mission is done. */
+const RAMP_PLANET: PlanetId = 'cinder4';
+const RAMP_MISSION: MissionId = 'c1_m1';
+/** §4.7: the ambient field the ramp keeps, and the archetype it drops. */
+const RAMP: SpawnRamp = { populationScale: 0.5, excludeArchetypes: ['rusher'] };
+
+// --------------------------------------------------------- SPEC-035 §4.5
+
+/** §4.5: only props this close to the player can be hiding it. */
+const OCCLUDER_RANGE = 30;
+/** §4.5: the occlusion test runs at 10 Hz, not every frame. */
+const OCCLUDER_TEST_SECONDS = 0.1;
 /** §4.3: look-at bias, metres ahead of the player in the movement direction. */
 const LOOK_AHEAD = 2;
 /** Touch aim-drags point the shot this far ahead (matches SPEC-011's demo). */
@@ -515,6 +537,24 @@ export class SurfaceScene extends UiScene<'surface'> {
   /** SPEC-034 §4.8: the mission-level wave of each active mission that has one. */
   readonly #missionWaves = new Map<MissionId, WaveHandle>();
   readonly #camTarget = { x: 0, z: 0 };
+  // SPEC-035 §4.2 — the camera's distance, by input scheme. It starts at the
+  // target on entry and eases over 0.4 s when the scheme changes; pitch, yaw and
+  // field of view are untouched.
+  /** SPEC-035 §4.7: true while the first-landing ramp is in force. */
+  #ramp = false;
+  #camDistance = 0;
+  #camDistanceFrom = 0;
+  #camDistanceTo = 0;
+  #camEase = 1;
+  // SPEC-035 §4.5 — the occluder flags, recomputed at 10 Hz over the view's own
+  // candidate list. One buffer for the visit; nothing here allocates per frame.
+  #occluderFlags = new Uint8Array(0);
+  #occluderIn = 0;
+  // SPEC-035 §4.4 — the last fog span pushed to the view, so the linear fog is
+  // rewritten only when the storm or the camera distance actually moved.
+  #fogMultApplied = -1;
+  #fogCamApplied = -1;
+  #fogNear = 0;
   readonly #frustum = new THREE.Frustum();
   readonly #frustumMatrix = new THREE.Matrix4();
   readonly #frustumSphere = new THREE.Sphere();
@@ -703,6 +743,12 @@ export class SurfaceScene extends UiScene<'surface'> {
     const weather = new Weather(planet, visit.fork('weather'), bus);
     this.#weather = weather;
 
+    // SPEC-035 §4.7: the first landing on Cinder-4 ramps in — half the ambient
+    // population, no rushers among them, and a weather cycle held in calm. It
+    // ends with `c1_m1`, so it is observable and saved (35-e, 35-f).
+    this.#ramp = planet.id === RAMP_PLANET && !(save.progress.missionsDone as readonly string[]).includes(RAMP_MISSION);
+    this.#applyRamp();
+
     const pickups = new Pickups(economy, bus);
     this.#pickups = pickups;
     const regenOf = (resource: ResourceId): number =>
@@ -811,7 +857,11 @@ export class SurfaceScene extends UiScene<'surface'> {
     this.camera.updateProjectionMatrix();
     this.#camTarget.x = world.player.x;
     this.#camTarget.z = world.player.z;
+    // SPEC-035 §4.2: the distance starts at the current scheme's, not eased in.
+    this.#setCameraScheme(services.input.state.scheme, true);
     this.#placeCamera(0, 0);
+    // SPEC-035 §4.4: the linear fog's first span, before the first render.
+    this.#applyFog();
 
     // The SPEC-014 UI layer (§4.12): shared HUD, overlays, touch, pause.
     // SPEC-027 AC-22: a tap on the tracker cycles the tracked mission, exactly
@@ -826,7 +876,17 @@ export class SurfaceScene extends UiScene<'surface'> {
     this.#hud = hud;
     this.disposer.add(() => hud.dispose());
     hud.setScheme(services.input.state.scheme);
-    this.disposer.add(services.events.on('input:schemeChanged', ({ scheme }) => hud.setScheme(scheme), this));
+    this.disposer.add(
+      services.events.on(
+        'input:schemeChanged',
+        ({ scheme }) => {
+          hud.setScheme(scheme);
+          // SPEC-035 §4.2: a touch laptop flipping mid-fight eases (35-a).
+          this.#setCameraScheme(scheme, false);
+        },
+        this,
+      ),
+    );
     // §4.6: a picker still open when the scene goes releases its hold with it.
     this.disposer.add(() => this.#pickerClose?.());
 
@@ -1317,6 +1377,13 @@ export class SurfaceScene extends UiScene<'surface'> {
     // about a Three.js vector nothing outside the renderer can read.
     info['camShake'] = Math.round(this.#shakeScratch.length() * 1000) / 1000;
     info['camBob'] = Math.round(this.#shakeScratch.y * 1000) / 1000;
+    // SPEC-035 §4.2, §4.4, §4.5, §4.7: the camera's distance, the linear fog's
+    // near plane, how many props are faded out of the way, and whether the
+    // first-landing ramp is running.
+    info['camDistance'] = Math.round(this.#camDistance * 100) / 100;
+    info['fogNear'] = Math.round(this.#fogNear * 100) / 100;
+    info['occluders'] = this.#view?.fadedOccluders ?? 0;
+    info['ramp'] = this.#ramp ? 1 : 0;
     // SPEC-028 §4.9: the weapon in hand and the quick-slot counts.
     const combat = this.#combat;
     const save = this.#save;
@@ -1549,11 +1616,91 @@ export class SurfaceScene extends UiScene<'surface'> {
     this.#camSpeed = speed;
     const bx = speed > 0.01 ? (p.vx / speed) * LOOK_AHEAD : 0;
     const bz = speed > 0.01 ? (p.vz / speed) * LOOK_AHEAD : 0;
+    // SPEC-035 §4.2, §4.4: the distance eases first, then the camera is placed
+    // at it, then the fog's near plane follows it.
+    this.#easeCameraDistance(dt);
     this.#placeCamera(bx, bz);
+    this.#applyFog();
+    // SPEC-035 §4.5: the occlusion test runs off the camera just placed.
+    this.#updateOccluders(dt, p);
+  }
+
+  /** SPEC-035 §4.7: push `#ramp` into the spawn director and the weather. */
+  #applyRamp(): void {
+    this.#spawn?.setRamp(this.#ramp ? RAMP : null);
+    this.#weather?.holdCalm(this.#ramp);
+  }
+
+  /**
+   * SPEC-035 §4.4 — the linear fog's span, from `surfaceFogRange`. Rewritten
+   * only when the storm's multiplier or the camera distance moved, so a steady
+   * frame allocates nothing (SPEC-001 §7).
+   */
+  #applyFog(): void {
+    const view = this.#view;
+    if (view === null) return;
+    const mult = view.fogMult;
+    if (mult === this.#fogMultApplied && this.#camDistance === this.#fogCamApplied) return;
+    this.#fogMultApplied = mult;
+    this.#fogCamApplied = this.#camDistance;
+    const range = surfaceFogRange(view.fogDensity, mult, this.#camDistance);
+    this.#fogNear = range.near;
+    view.setFogRange(range.near, range.far);
+  }
+
+  /**
+   * SPEC-035 §4.5 — every 0.1 s, test the props within 30 m of the player with
+   * the pure `occludes` and hand the flags to the view, which walks the fades.
+   */
+  #updateOccluders(dt: number, player: { x: number; z: number }): void {
+    const view = this.#view;
+    if (view === null) return;
+    const props = view.occluderProps;
+    if (props.length === 0) return;
+    if (this.#occluderFlags.length !== props.length) {
+      this.#occluderFlags = new Uint8Array(props.length);
+      view.setOccluding(this.#occluderFlags, OCCLUDER_OPACITY);
+    }
+    this.#occluderIn -= dt;
+    if (this.#occluderIn > 0) return;
+    this.#occluderIn = OCCLUDER_TEST_SECONDS;
+    const camera = this.camera.position;
+    for (let i = 0; i < props.length; i++) {
+      const prop = props[i] as (typeof props)[number];
+      const dx = prop.x - player.x;
+      const dz = prop.z - player.z;
+      const near = dx * dx + dz * dz <= OCCLUDER_RANGE * OCCLUDER_RANGE;
+      this.#occluderFlags[i] = near && occludes(camera, player, prop) ? 1 : 0;
+    }
+  }
+
+  /**
+   * SPEC-035 §4.2 — walk `#camDistance` toward the scheme's distance over
+   * `CAMERA_DISTANCE_EASE_SECONDS`. Reduce motion snaps (35-j).
+   */
+  #easeCameraDistance(dt: number): void {
+    if (this.#camEase >= 1) return;
+    this.#camEase = Math.min(1, this.#camEase + dt / CAMERA_DISTANCE_EASE_SECONDS);
+    this.#camDistance = this.#camDistanceFrom + (this.#camDistanceTo - this.#camDistanceFrom) * this.#camEase;
+  }
+
+  /** §4.2: a scheme change starts the ease; `snap` puts it there at once. */
+  #setCameraScheme(scheme: Scheme, snap: boolean): void {
+    const target = cameraDistance(scheme);
+    if (target === this.#camDistanceTo && this.#camEase >= 1) return;
+    this.#camDistanceTo = target;
+    if (snap || this.services.settings.get().reduceMotion) {
+      this.#camDistanceFrom = target;
+      this.#camDistance = target;
+      this.#camEase = 1;
+      return;
+    }
+    this.#camDistanceFrom = this.#camDistance;
+    this.#camEase = 0;
   }
 
   #placeCamera(biasX: number, biasZ: number): void {
-    const d = CAMERA_DISTANCE;
+    const d = this.#camDistance;
     const x = this.#camTarget.x + d * Math.cos(CAMERA_PITCH) * Math.sin(CAMERA_YAW);
     const y = d * Math.sin(CAMERA_PITCH);
     const z = this.#camTarget.z + d * Math.cos(CAMERA_PITCH) * Math.cos(CAMERA_YAW);
@@ -3881,6 +4028,12 @@ export class SurfaceScene extends UiScene<'surface'> {
       bus.on(
         'mission:completed',
         ({ id }) => {
+          // SPEC-035 §4.7: the tutorial is over, so the ramp is too. A replay
+          // does not bring it back — the mission is already in `missionsDone`.
+          if (id === RAMP_MISSION && this.#ramp) {
+            this.#ramp = false;
+            this.#applyRamp();
+          }
           // SPEC-034 §4.6: this stage is done, so a defend wave it was running
           // leaves rather than being restarted.
           this.#dismissDefendWave = true;
