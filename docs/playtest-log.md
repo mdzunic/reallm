@@ -1424,7 +1424,7 @@ automated evidence that stands in for it here.
 | The Back gesture on the surface, at the station and at the menu | cases 6 and 7 (Escape and `page.goBack()` pause and resume the surface, the star map goes to the station, a menu sub-panel closes, the menu root leaves the page; at the station a buy sheet over the gear card closes first, then the card, each taking its back-stack entry with it, and `page.goBack()` closes a card and stays on the page) and `tests/core/backGuard.test.ts` |
 | The notification shade mid-fight | case 8 (a `blur` pauses; with `pauseOnBlur` off it does not) |
 | Every station tab in reach at landscape | case 12 and the `SPEC-031.spec.ts` walk at the five short sizes (every `station-tab-*` inside the viewport and topmost; `.screen-body` 52–67 % of the height) |
-| The pause menu and Controls on the shortest phone | case 13 (`pause-resume` inside the viewport and topmost with the sheet open, at all five sizes) |
+| The pause menu and Controls on the shortest phone | case 13 (with the touch sheet open, at all five sizes: `pause-resume` inside the viewport and topmost, and every visible action ends before the sheet begins; at 667 × 375 the actions keep the 310 px their two columns need, where they had shrunk to 271 px and the second column ran under the sheet's rows) |
 | The prologue watched without touching | case 14 (one wake-lock request during the prologue, released by `film-skip`; a system Back leaves the film up) |
 | The pad terminal with enemies near | case 15 (`held` 1 while it is open; Escape, E and Close each close it) |
 | The zone ghosts on the first two landings | case 17 (shown on landings one and two, gone on a stick drag or 12 s later, absent on the third and in a `?perf` run) |
