@@ -198,6 +198,29 @@ async function inViewport(page: Page, testid: string): Promise<boolean> {
   }, testid);
 }
 
+/** A box's edges, as `getBoundingClientRect` reads them. */
+interface Edges {
+  left: number;
+  right: number;
+  top: number;
+  bottom: number;
+}
+
+/** The pause frame's visible actions, each by its `data-testid`, and the Controls sheet (§4.8). */
+async function pauseLayout(page: Page): Promise<{ actions: (Edges & { id: string })[]; sheet: Edges | null }> {
+  return page.evaluate(() => {
+    const edges = (node: Element): Edges => {
+      const box = node.getBoundingClientRect();
+      return { left: box.left, right: box.right, top: box.top, bottom: box.bottom };
+    };
+    const actions = [...document.querySelectorAll<HTMLElement>('.pause-actions > [data-testid]')]
+      .filter((node) => node.getClientRects().length > 0)
+      .map((node) => ({ id: node.dataset['testid'] ?? '', ...edges(node) }));
+    const sheet = document.querySelector('[data-testid="pause-sheet"]');
+    return { actions, sheet: sheet === null ? null : edges(sheet) };
+  });
+}
+
 /** The stored settings object, as the next boot reads it. */
 async function storedSettings(page: Page): Promise<Record<string, unknown>> {
   return page.evaluate(() => JSON.parse(localStorage.getItem('reallm:settings') ?? '{}') as Record<string, unknown>);
@@ -697,15 +720,25 @@ for (const [width, height] of SHORT_LANDSCAPE) {
       expect(share).toBeGreaterThanOrEqual(0.5);
     });
 
-    test('13. with Controls open, Resume is on screen and topmost', async ({ page }) => {
+    test('13. Controls opens beside the actions, and Resume stays on screen and topmost', async ({ page }) => {
       await startTouch(page, '/?scene=surface&planet=cinder4');
       await settle(page, 'surface');
       await page.locator('[data-testid="touch-pause"]').tap();
       await expect(page.locator('[data-testid="pause-menu"]')).toBeVisible();
       await page.locator('[data-testid="pause-controls"]').tap();
-      await expect(page.locator('[data-testid="pause-sheet"]')).toBeVisible();
+      // The touch sheet, the longer of the two: its rows are what crowd the actions.
+      await expect(page.locator('[data-testid="pause-sheet"]')).toContainText('Drag on the left side');
       expect(await inViewport(page, 'pause-resume')).toBe(true);
       expect((await topmostAt(page, 'pause-resume'))[0]).toBe('pause-resume');
+      // Beside them, not over them: at 667×375 the actions' second column once
+      // ran under the sheet's first rows while Resume, in the first, stayed clear.
+      const { actions, sheet } = await pauseLayout(page);
+      if (sheet === null) throw new Error('no controls sheet');
+      expect(actions.length).toBeGreaterThanOrEqual(4);
+      for (const action of actions) {
+        expect(action.right, `${action.id} ends before the sheet begins`).toBeLessThanOrEqual(sheet.left + 0.5);
+        expect(sheet.top, `the sheet stands beside ${action.id}, not below it`).toBeLessThan(action.bottom);
+      }
     });
   });
 }
