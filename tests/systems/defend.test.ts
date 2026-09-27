@@ -102,7 +102,7 @@ describe("Eden's last wave reaches the beacon (SPEC-034 §4.8)", () => {
     };
     const combat = new Combat(world, save, port, progression, events, rng);
     const spawn = new SpawnDirector(planet, layout, world.enemies, QUALITY.medium, new Rng(hash32(9, 'spawn')), events, combat);
-    const wave = spawn.startWave('eden_final', { x: poi.x, z: poi.z });
+    spawn.startWave('eden_final', { x: poi.x, z: poi.z });
 
     // The player stands at the beacon and cannot die — this is a test of whether
     // the wave *arrives*, not of whether it can be survived.

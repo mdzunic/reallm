@@ -154,6 +154,8 @@ function nodeEconomy(save: Save, economy: Economy): NodeEconomy {
   return {
     addResource: (r, n, s) => economy.addResource(r, n, s),
     room: (r: ResourceId) => economy.cargoCap() - save.resources[r],
+    // SPEC-034 §4.12: the scene passes the active `Missions`' demand through.
+    collectDemand: (r: ResourceId) => economy.collectDemand(r),
   };
 }
 
@@ -223,6 +225,74 @@ describe('Nodes — harvest (AC-21..AC-24, 12-f)', () => {
     for (let i = 0; i < Math.round(3 / STEP); i++) nodes.update(STEP, h.player);
     expect(node.remaining).toBe(100);
     expect(h.save.resources.oil).toBe(400);
+    expect(node.harvesting).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------- SPEC-034
+
+/**
+ * SPEC-034 §4.15, §6.1 — the review's `nodes.test.ts`.
+ *
+ * A harvest interrupted mid-unit left a fraction in `pending` for ever, and
+ * `pending > 0` was also the gate on regen — so a node the player walked away
+ * from never refilled again. A run past the first few minutes had a dead field.
+ */
+describe('Nodes — an interrupted harvest refills (SPEC-034 §4.15)', () => {
+  it('a fractional pending returns to the node when the player leaves', () => {
+    const h = harness();
+    const nodes = new Nodes([{ resource: 'oil', x: 0, z: 0, capacity: 100 }], () => 2, nodeEconomy(h.save, h.economy));
+    const node = nodes.states[0] as (typeof nodes.states)[number];
+
+    // 4.1 s of harvesting leaves whole units waiting for the next batch flush
+    // and a fraction of one that no flush will ever take (`Math.floor`).
+    h.player.x = 0;
+    for (let i = 0; i < Math.round(4.1 / STEP); i++) nodes.update(STEP, h.player);
+    expect(node.pending).toBeGreaterThan(0);
+    const remainingWhileHarvesting = node.remaining;
+
+    // Walk away: the last whole units flush, then the fraction goes back into
+    // the ground — `pending` reaches 0, which is the gate regen waits on.
+    h.player.x = 50;
+    for (let i = 0; i < Math.round(1 / STEP); i++) nodes.update(STEP, h.player);
+    expect(node.pending).toBe(0);
+    expect(node.remaining).toBeGreaterThan(remainingWhileHarvesting);
+
+    // …and it refills to capacity, which it never did before.
+    for (let i = 0; i < Math.round(60 / STEP); i++) nodes.update(STEP, h.player);
+    expect(node.remaining).toBe(100);
+  });
+
+  /**
+   * SPEC-034 §4.12: a node pumps at a full hold while a collect objective still
+   * wants its resource — the surplus is shipped home, so the objective advances
+   * instead of stalling (E56).
+   */
+  it('keeps pumping at a full hold while the demand lasts', () => {
+    const h = harness((save) => {
+      save.resources.oil = 400; // the base cap
+    });
+    let wanted = 30;
+    h.economy.setCollectDemand((r) => (r === 'oil' ? wanted : 0));
+    const nodes = new Nodes([{ resource: 'oil', x: 0, z: 0, capacity: 100 }], () => 0, nodeEconomy(h.save, h.economy));
+    const node = nodes.states[0] as (typeof nodes.states)[number];
+    const shipped: number[] = [];
+    h.events.on('resource:collected', (p) => {
+      if (p.shipped !== undefined) shipped.push(p.shipped);
+    });
+
+    for (let i = 0; i < Math.round(3 / STEP); i++) nodes.update(STEP, h.player);
+    expect(node.harvesting).toBe(true);
+    // The hold never moved; the units went to Command Relay instead.
+    expect(h.save.resources.oil).toBe(400);
+    expect(shipped.reduce((sum, n) => sum + n, 0)).toBeGreaterThan(0);
+    expect(node.remaining).toBeLessThan(100);
+
+    // With the demand gone, 12-f is back: the node keeps its resource.
+    wanted = 0;
+    const kept = node.remaining;
+    for (let i = 0; i < Math.round(2 / STEP); i++) nodes.update(STEP, h.player);
+    expect(node.remaining).toBeGreaterThanOrEqual(kept - 1e-9);
     expect(node.harvesting).toBe(false);
   });
 });
