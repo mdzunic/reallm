@@ -79,10 +79,11 @@ const CONTROL_SHEETS = {
     ['Move / steer', 'Drag on the left side'],
     ['Aim & fire', 'Drag on the right side — auto-fire shoots for you'],
     ['Throttle (flight)', '▲ / ▼ buttons'],
-    // SPEC-028 §4.5: the bar doubles as the touch buttons.
-    ['Switch weapon', 'SWAP, or tap a weapon on the bar'],
+    // SPEC-028 §4.5: the bar doubles as the touch buttons. SPEC-037 §4.10:
+    // it is the only way now — the weapon-cycle and item buttons are gone.
+    ['Switch weapon', 'Tap a weapon on the bar'],
     ['Launcher', 'Tap its slot to fire it'],
-    ['Heal', 'ITEM, or tap the heal slot on the bar'],
+    ['Heal', 'Tap the heal slot on the bar'],
     ['Use a pack', 'Tap it on the bar; hold to choose'],
     ['Interact', 'USE'],
     ['Map', 'Tap the minimap'],

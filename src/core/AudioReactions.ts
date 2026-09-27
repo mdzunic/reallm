@@ -234,8 +234,12 @@ export const AUDIO_REACTIONS: { [K in ReactedEvent]: Reaction<K> } = {
   'mine:armed': (p) => ({ id: 'scan_done', opts: { x: p.x, z: p.z, priority: 0 } }),
   /** `warn` and `error` are the two kinds a player has to notice (AC-46). */
   'ui:toast': (p) => ({ id: p.kind === 'warn' || p.kind === 'error' ? 'ui_warn' : 'ui_blip' }),
-  /** A hit every few frames would be a buzz, so it is held to ~8 Hz (AC-48). */
-  'player:damaged': () => ({ id: 'hit_player', opts: { minIntervalMs: 120 } }),
+  /**
+   * A hit every few frames would be a buzz, so it is held to ~8 Hz (AC-48).
+   * SPEC-037 §4.6: weather is silent — the storm vignette and the once-a-second
+   * red number already say it, and a tick per whole HP was a metronome.
+   */
+  'player:damaged': (p) => (p.source.kind === 'weather' ? null : { id: 'hit_player', opts: { minIntervalMs: 120 } }),
   /** `Audio` also applies the 2 s music duck of §4.5 to this event (AC-52). */
   'player:died': () => ({ id: 'player_death' }),
   'player:leveledUp': () => ({ id: 'level_up', opts: { priority: 2 } }),
