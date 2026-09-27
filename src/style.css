@@ -994,8 +994,11 @@ html.reduce-motion .sheet {
   align-items: center;
   justify-content: center;
   gap: 1px;
+  /* SPEC-035 §4.13: 48 px square could not hold the icon box *and* a name, so
+     the name rendered at zero height. The slot is taller now; the width is the
+     one SPEC-028 set. */
   width: 48px;
-  height: 48px;
+  height: 64px;
   padding: 2px;
   border: 1px solid var(--panel-edge);
   border-radius: 8px;
@@ -1015,10 +1018,11 @@ html.reduce-motion .sheet {
   -webkit-touch-callout: none;
 }
 
-/* 56 px when the HUD root carries the touch scheme (§4.5). */
+/* 56 px wide when the HUD root carries the touch scheme (§4.5); SPEC-035 §4.13
+   gives it the same extra height as the desktop slot. */
 .hud.is-touch .qb-slot {
   width: 56px;
-  height: 56px;
+  height: 72px;
   font-size: 11px;
 }
 
@@ -1043,10 +1047,15 @@ html.reduce-motion .sheet {
   opacity: 0.45;
 }
 
+/* SPEC-035 §4.13: one line, ellipsised, and `flex: none` so the column cannot
+   shrink it away — that is what made it zero-height inside the old 48 px box. */
 .qb-name {
+  flex: none;
   max-width: 100%;
   overflow: hidden;
   white-space: nowrap;
+  text-overflow: ellipsis;
+  line-height: 1.2;
 }
 
 .qb-count,
@@ -1930,6 +1939,7 @@ html.debug .scene-tag {
 /* ------------------------------------------------------------------- menu */
 /* SPEC-031: the menu is frame body content now; the frame owns the viewport. */
 .menu-root {
+  position: relative;
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -1964,6 +1974,21 @@ html.debug .scene-tag {
 
 .menu-sub {
   width: min(560px, 100vw - 20px);
+}
+
+/* SPEC-035 §4.13: the New Game slot picker is a sheet over the menu body, in
+   the confirm-sheet style — the button column keeps its place, and the storage
+   block keeps its space while going invisible. */
+.menu-sub.is-sheet {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  z-index: 3;
+}
+
+.menu-root.is-sheet-open .menu-storage {
+  visibility: hidden;
 }
 
 .menu-list {
@@ -2187,6 +2212,19 @@ html.debug .scene-tag {
   height: 100%;
   border-radius: 7px;
   object-fit: cover;
+}
+
+/* SPEC-035 §4.13: 44 px was a thumbnail, not a choice — a face at that size
+   reads as nothing on a monitor and is under the touch target on a phone. The
+   creation row's buttons only: the character panel's tile is a label. */
+.portrait-row .portrait {
+  min-width: 64px;
+  min-height: 64px;
+}
+
+.screen.is-touch .portrait-row .portrait {
+  min-width: 56px;
+  min-height: 56px;
 }
 
 /* The character panel wears the same tile beside the name line — a label, not
@@ -4183,6 +4221,9 @@ html.reduce-motion .screen-body > * {
   width: min(420px, calc(100% - 24px));
   max-height: calc(100% - 24px);
   display: flex;
+  /* SPEC-035 §4.13: the sheet is a flex item of the backdrop, which stretched
+     it edge to edge on a desktop. `flex: none` holds it at the 420 px `width`. */
+  flex: none;
   flex-direction: column;
   gap: 8px;
   padding: 16px;

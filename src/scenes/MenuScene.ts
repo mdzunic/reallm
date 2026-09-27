@@ -301,7 +301,7 @@ export class MenuScene extends UiScene<'menu'> {
     // SPEC-007's panel, as the body's Storage block (SPEC-031 §4.8): the
     // corrupt-slot rescue keeps its surface and testids, and the E8 banner
     // goes to the frame footer.
-    const storage = el('div', 'screen-block');
+    const storage = testId(el('div', 'screen-block menu-storage'), 'menu-storage');
     storage.append(el('p', 'screen-block-title', 'Storage'));
     this.#savePanel = new SavePanel(storage, this.services.save, { bannerHost: screen.footer });
     this.disposer.add(() => {
@@ -376,6 +376,13 @@ export class MenuScene extends UiScene<'menu'> {
 
   #renderSub(): void {
     if (this.#sub === null) return;
+    // SPEC-035 §4.13: New Game opens its slot list as a sheet over the menu
+    // body, so the button column does not move under the cursor. The storage
+    // block goes `visibility: hidden` rather than out of flow — removing it
+    // would re-centre the column, which is the very thing being fixed.
+    const sheet = this.#openSub === 'new';
+    this.#sub.classList.toggle('is-sheet', sheet);
+    this.#root?.classList.toggle('is-sheet-open', sheet);
     switch (this.#openSub) {
       case null:
         this.#sub.replaceChildren();

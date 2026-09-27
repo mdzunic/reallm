@@ -346,9 +346,15 @@ test('pictures: the quick bar, shop rows and gear card carry the icon (AC-38, AC
   expect(await go(page, 'surface', { planet: 'cinder4' })).toBe(true);
 
   // The primary slot shows the icon box with the short name still under it.
+  // SPEC-035 §4.13: the name was in the DOM at zero height, so presence proved
+  // nothing — the slot is 48 × 64 now and the check is visibility plus a box.
   const primary = page.locator('[data-testid="qb-primary"]');
   await expect(primary.locator('[data-testid="icon-weapon_kinetic"]')).toBeVisible();
-  await expect(primary).toContainText('Repeater');
+  const primaryName = primary.locator('.qb-name');
+  await expect(primaryName).toBeVisible();
+  await expect(primaryName).toHaveText('Repeater');
+  const nameBox = await primaryName.boundingBox();
+  expect(nameBox?.height ?? 0).toBeGreaterThan(0);
 
   expect(await go(page, 'station', { arrivedFrom: 'cinder4' }, )).toBe(true);
   await page.locator('[data-testid="station-tab-shop"]').click();
