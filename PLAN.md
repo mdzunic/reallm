@@ -199,6 +199,124 @@ Specs:
 
 ---
 
+**R18 — 2026-09-27 (the second review: phones first, a HUD that reads, attacks that commit, builds that matter).** A second design review of `main` with SPEC-035 applied played the game on desktop and at phone sizes in both orientations, and audited the mobile path, the interface, combat and progression. Bot simulations of the fight at 60 Hz and scratch runs of the real economy back the numbers. It found:
+
+- **No one has played it on a phone.**
+  - On touch, flight guns aim at whichever finger moved last, so `c5_m1` is probably unwinnable touch-only.
+  - On a landscape phone the station's tab rail runs off the screen, hiding Star Map, Settings and Quit; an installed Android app is locked to landscape.
+  - Phones start on the keyboard scheme; the system Back swipe leaves the game; the rotate prompt does not pause.
+  - The quality benchmark measures vsync, so every 60 Hz phone plays on `low`.
+- **The HUD does not read, and one effect is unsafe.**
+  - Storm damage re-fires the full-edge red flash two to four times a second, past the three-flash limit.
+  - Quick-bar counts are 8 px, and HUD text falls to 1.05–2.6 : 1 over Cinder-4, Vetra and Eden.
+  - Toasts cover the boss bar, and dialogue covers the quick bar since SPEC-035.
+- **Walking away is a complete defence.**
+  - Windups root the attacker, so no melee lands on a moving player, and no rusher catches one.
+  - The five bosses are one 4 m/s melee body that a kiter beats for 0–7 % of max HP.
+  - Survive stages are 585 s of standing in caves.
+  - Casual cannot be chosen after creation, although the game's own hint says it can.
+- **Tokens stop mattering by chapter 4.**
+  - Bosses and elites hand out the whole rifle and armour ladder.
+  - The Marine out-performs the other classes by 23–43 %, and agility and tech are trap attributes.
+  - One purchase, the Rotary Cannon, beats the rifle line, and nothing is worth replaying.
+- **Play hides its feedback.**
+  - A finished mission is a chime, and loot and buffs are silent.
+  - Modal dialogue can only be clicked past, and keyboard focus is lost on every re-render.
+
+The story, the planets, the 26 missions and their stages, the token totals (670 / 104 / 2,380), the save format and every SPEC-010 invariant do not change. Decisions:
+
+1. **Touch is correct first (SPEC-036, §13 E65–E67).**
+   - Touch never aims by hover; flight on touch aims ahead with the assist.
+   - Phones boot on the touch scheme, every press sets the scheme from its pointer type, and tips are remembered per scheme.
+   - Play stays landscape on phones. The rotate block holds the world, covers the screen and sits above the pause menu.
+   - Escape and the system Back share one back-stack. They close the top layer, or else pause play; the star map goes back to the station, and at the menu root Back leaves.
+   - On touch a tap on the launcher's slot fires one charge at the nearest enemy, and SWAP skips the launcher.
+   - Play pauses when the window loses focus (`pauseOnBlur`, on by default). Films and boss reveals hold the screen awake.
+   - On short landscape screens the station rail becomes a bottom strip, and the pause menu keeps Resume in reach.
+   - The touch stick reaches full speed at 60 % travel, the pad terminal holds the world, touch texts describe the real controls, and the first two touch landings show where to touch.
+2. **One HUD for every screen (SPEC-037, §13 E71).**
+   - On touch, the thumb arc replaces R10's bottom-centre quick bar: a 2 × 3 cluster of weapon and pack slots at the bottom right, an action cell above it, and pause at the top right. SWAP and ITEM leave the touch layer, and the arc mirrors with `joystickSide`. The keyboard scheme keeps the bottom-centre bar.
+   - HUD text is never under 11 px (quick-bar counts 12 px, 14 px on touch). It reads at ≥ 4.5 : 1 over every planet's ground through a plate and a halo.
+   - The damage flash never rises more than three times a second, and weather never flashes (setting `damageFlash`: full, subtle or off).
+   - In play, toasts dock under the top-right cluster; dialogue and tips clear the quick bar, and non-modal lines let touches through.
+   - On the keyboard scheme the minimap sits in the corner, and the minimap and tracker are display-only (M and T).
+   - Upright tablets get a Hor+ field of view, and the 17 m touch camera needs a short side under 500 px (refines R17 decision 9).
+   - Landscape phone sizes join the e2e matrix.
+3. **Attacks commit, and the salvager dashes (SPEC-038, §13 E59–E61).**
+   - A dash: 5 m in 0.2 s, with 0.3 s of invulnerability and a 1.4 s cooldown that agility shortens (−3 % per point), never below 0.8 s. The Scout's is ×0.8. Right mouse button or V, and DASH in the thumb arc.
+   - Every committed attack shows a ground telegraph in the hostile-rim colour, with a windup cue.
+   - Swarms keep closing through their windup. Rushers charge: a 6 m trigger, a 0.5 s windup, 20 m/s over 10 m, and a punish window after a whiff.
+   - Trash base HP is swarm 26, rusher 70 and ranged 45, keeping ×1.35 per chapter. Ranged enemies reach 13 m with 15 m/s shots (*initial tuning*).
+   - The ambient population is the design count on every quality preset, capped by the preset's enemy limit.
+   - Every surface survive stage except `c1_m1` runs a storm wave, so the shelter mouth becomes the fight. Forced storms ramp to full strength over 10 s, and Cinder-4's weather deals ×0.65.
+   - Difficulty can be changed in Settings at any time and takes effect at once; casual also scales weather ×0.7 and stretches windups ×1.25.
+   - Auto-fire is on by default on every scheme, a held mouse aim overrides it, and it leads strafing targets. This answers the first review's question 4 and supersedes R17 decision 9's hold-to-fire teaching.
+   - Critical hits show as their own damage numbers.
+4. **Builds that matter (SPEC-039, §13 E69).**
+   - Each boss drops one signature weapon on its first kill, else 25 lithium: Rocket Launcher (the Dune Wurm), Scrap Chaingun (the Frost Matriarch), Hand Cannon (the Hive Broodlord), Grenade Launcher (the Ash Titan), Rotary Cannon (the Hive Queen). Elites drop lithium and explosives; the rifle and armour ladder is bought.
+   - §7's "specialization is forced" becomes an invariant: the decision sink (companions, the arsenal and the Ferrum gate) is at least three quarters of what a completionist earns.
+   - The Marine deals ×1.10 (from ×1.15). Each tech point adds 10 % to every companion effect. The Engineer's discount covers companions, and agility adds 2 % crit per point.
+   - The fire-rate remainder carries between shots, and the arsenal is retuned (*initial tuning*).
+   - The Field Medic pauses while weather is hurting the player. The Quartermaster's discount covers ship, gear and companion prices, and ship guns tier 1 deals 14.
+   - Shop rows and the gear card show sustained DPS and compare any two items of a slot. The board shows boss drops, and the station a Refit line.
+   - One damage formula serves every panel, and the level-up toast names the HP and damage gained. One attribute point is added at every fifth level, derived from the level with no save field (lifts R1-9).
+   - A replay boss kill pays half its XP and never the signature weapon.
+5. **Phones at full quality (SPEC-040, §13 E68).**
+   - The benchmark times GPU work.
+   - Frames are paced by the wall clock, a frame that ran no step is not redrawn, and a paused or held scene draws at most 5 frames a second.
+   - Quality steps down, never up, within a session when a device cannot hold its rate (`adaptiveQuality`), and `frameRate` 30 saves battery.
+   - There is no backdrop blur during play, and a planet's assets are released on leaving it.
+   - The offline cache downloads after the first station entry, and a film falls back to its posters only after a 4 s stall.
+6. **Bosses with moves, packs with leaders, and flight that aims (SPEC-041, §13 E62–E64).**
+   - Each boss has its own HP (1,800 / 4,600 / 5,200 / 6,800 / 8,400, *initial tuning*), replacing ×1.35 for bosses, sized for the loadout the shop sells after decision 4.
+   - Each boss has a move list (charges, slams, lines, volleys, rings) on the ground telegraphs of decision 3, and a content invariant proves every move can be escaped on foot. The Queen's acid and the Wurm's burrow become moves, and the burrow lands where the player stands.
+   - The arena lock is real while the boss lives, and a death in a boss stage respawns the salvager at the arena entrance.
+   - Enemies come in packs (swarm 3–5, rushers 1–2, drones 4–6 at the Hive). A pack aggroes together, and its leader rolls elite.
+   - Elites carry affixes (swift, bulwark, volley, mender, volatile; one in chapters 1–3, two in 4–6) under a nameplate, and pay ×(3 + affixes) XP.
+   - Flight: a lead pip at every ARIA level, ARIA L2+ aims at it, fighters fire three-round leading bursts, and every flight hit gives feedback.
+7. **Feedback in play (SPEC-042).**
+   - A 4 s non-modal banner for a finished mission, with its rewards and the next mission. E20's "no modal" holds.
+   - Loot and blocked-pickup toasts, and a row of active effects.
+   - A low-HP edge, and a flight low-hull state.
+   - A death screen that names the cause and gives a tip.
+   - Tracker bumps, stage toasts and a wave banner, plus XP numbers.
+   - Shop result toasts and signed comparisons.
+   - A boss frame with phases, and a target frame for elites.
+   - Haptics on Android (`haptics`, on by default).
+8. **Missions worth replaying (SPEC-043, §13 E70).**
+   - Every side mission also pays an item or a resource; token totals are unchanged.
+   - A mission may carry an optional bonus objective — no death, a par time, no shelter, or elites — paying items or resources, judged within the session.
+   - A replay in a finished chapter becomes a contract: one deterministic modifier, and 0.75 of the reward plus 20 lithium.
+   - A `hard` difficulty: enemy HP ×1.25, damage ×1.3, elite chance ×2, death loss 20 %.
+   - Best times are kept per device.
+9. **Focus and flow (SPEC-044).**
+   - Modal lines advance on Enter, Space or E with a visible cue. Focus survives re-renders, and modals take, trap and return it.
+   - Creation has Back and explains the attributes.
+   - The controls sheet is complete and reachable from Settings.
+   - The station names the next step, and the star map preselects the destination. The pad terminal shows type, brief and rewards.
+   - Save & Quit states its cost.
+   - The credits are written for players, the storage block confirms deletes, the station rail is a tablist, and the board speaks plain words.
+10. **Settings and accessibility (SPEC-045).**
+    - Dialogue holds after the line has typed, with a `dialogueSpeed` setting and a comms log.
+    - Settings sit in titled sections with the missing controls.
+    - Reduce motion becomes a preset that seeds `cameraShake`, `damageFlash`, `filmMode` and `typewriter`, so R9-4's "reduce motion plays a film as its posters" is now one of its defaults.
+    - UI scale and text size settings, and a plain-text option.
+    - A colour-blind preset, with a glyph on every toast kind.
+    - One glossary and one number format across the game, and the legacy styles removed.
+11. **Milestones.**
+    - M7f "Reach": SPEC-036, SPEC-037, SPEC-040, SPEC-042, SPEC-044, SPEC-045.
+    - M7g "Depth": SPEC-038, SPEC-039, SPEC-041, SPEC-043.
+    - They follow M7e, with tags `m7f` and `m7g`, and the specs build in number order.
+12. **Not now.** Gamepad support (the `gamepad` scheme stays reserved for its own spec); resuming on the planet after a quit or an OS kill; portrait play on phones; kill-XP scaling by chapter; New Game+ (R21); the story and world passes (R19, R20).
+
+Specs:
+- SPEC-036 (decision 1), SPEC-037 (2), SPEC-038 (3), SPEC-039 (4), SPEC-040 (5), SPEC-041 (6), SPEC-042 (7), SPEC-043 (8), SPEC-044 (9), SPEC-045 (10).
+- SPEC-000's queue and build order.
+
+(§4, §6, §7, §9, §10, §13)
+
+---
+
 ## 1. Vision & Inspiration
 
 **ReaLLM** ("real" + "LLM"): a space post-apocalyptic ARPG whose hero slowly works out that he may be a language model running inside a machine.
@@ -275,9 +393,9 @@ tests/      unit tests mirror src/ (economy, save, combat, missions, rng, conten
 
 ### Character creation
 
-- **3 classes**: *Marine* (+damage/HP), *Engineer* (cheaper ship upgrades, drone bonuses), *Scout* (speed, resource detection radar).
-- **Customization**: name, portrait, color scheme, **5 attribute points** over class base across `might` (damage), `vigor` (HP), `agility` (speed), `tech` (drone damage, upgrade discount). Allocated at creation only; levels grant flat +4 max HP and +2 % damage. Per-level stat points: deferred.
-- **Difficulty**: `casual` (enemy damage ×0.7, no death penalty) or `normal`. Changeable in settings.
+- **3 classes**: *Marine* (+damage/HP), *Engineer* (cheaper ship upgrades, drone bonuses), *Scout* (speed, resource detection radar). Since R18 the Engineer's discount also covers companions and its bonus reaches every companion effect, and the Scout dashes 20 % more often.
+- **Customization**: name, portrait, color scheme, **5 attribute points** over class base across `might` (damage), `vigor` (HP), `agility` (speed; since R18 also crit chance and dash cooldown), `tech` (companion effect, upgrade discount). Allocated at creation; levels grant flat +4 max HP and +2 % damage, and since R18 one more point at every fifth level, derived from the level.
+- **Difficulty**: `casual` (enemy damage ×0.7, no death penalty; since R18 also weather ×0.7 and windups ×1.25), `normal`, or since R18 `hard` (enemy HP ×1.25, damage ×1.3, elite chance ×2, 20 % death loss). Changeable in Settings at any time.
 - Class defines starting gear + passive.
 
 ### Resources & economy
@@ -299,8 +417,8 @@ Purchasable, upgradable followers (levels 1–3) that persist across scenes; eac
 |---|---|---|
 | Scanner Drone | surface | Auto-collect radius + resource nodes on minimap |
 | Combat Drone | surface | Auto-fires at nearest enemy |
-| Field Medic | surface | HP regen over time out of combat, then in combat at L3 |
-| Quartermaster | station | +cargo capacity, shop discounts |
+| Field Medic | surface | HP regen over time out of combat, then in combat at L3; pauses while weather is hurting the player (R18) |
+| Quartermaster | station | +cargo capacity, discounts on ship, gear and companion prices (R18) |
 | Ship AI "ARIA" | flight | Free at start; upgrades add shield regen / auto-aim assist |
 
 ### Upgrades
@@ -310,10 +428,10 @@ Purchasable, upgradable followers (levels 1–3) that persist across scenes; eac
 
 ### Combat
 
-- **Ground**: real-time ARPG — move/aim, attack, enemy AI (melee rushers, ranged spitters, swarm bugs, static targets), loot drops, elites (5 %, ×3 HP) + planet boss with phases.
+- **Ground**: real-time ARPG — move/aim, attack, enemy AI (melee rushers, ranged spitters, swarm bugs, static targets), loot drops, elites (5 %, ×3 HP) + planet boss with phases. Since R18 the salvager can dash, enemy attacks commit behind ground telegraphs, enemies come in packs led by elites with affixes, each boss has a move list and drops one signature weapon on its first kill, and bosses and elites no longer drop the rifle and armour ladder.
 - **Space**: arcade first-person **rail** flight — constant forward motion, lateral steering, laser fire, asteroid dodging, enemy ship waves, shield/hull damage. Fuel is charged **per jump, up front**; the return trip is instant autopilot.
 - **Death**: surface → respawn at the landing pad, lose 10 % of carried resources (normal difficulty), timed stages restart, enemies near the pad despawn, boss resets. Flight → emergency recall to the station, fuel is lost, cargo is kept.
-- **Loadout (R10)**: three weapon slots — sidearm, primary, heavy — switched with 1 / 2 / 3, R or the wheel, or a tap on the quick bar (0.25 s to switch). Handguns and rifles fire freely; machine guns heat up and lock until they cool; launchers hold one or three charges and recharge. Cooldowns run while a weapon is holstered, so fights are won by combining them. Auto-fire never fires the heavy slot; on touch a locked machine gun hands fire to the sidearm. Three quick slots on the HUD — heal (Q), explosive (G), utility (C) — show what they hold and how many. Explosives are consumables: frag grenades (thrown), proximity mines and demolition charges (placed). Blasts never hurt the player.
+- **Loadout (R10)**: three weapon slots — sidearm, primary, heavy — switched with 1 / 2 / 3, R or the wheel, or a tap on the quick bar (0.25 s to switch). Handguns and rifles fire freely; machine guns heat up and lock until they cool; launchers hold one or three charges and recharge. Cooldowns run while a weapon is holstered, so fights are won by combining them. Auto-fire never fires the heavy slot; on touch a locked machine gun hands fire to the sidearm. Since R18 auto-fire is on by default on every scheme, and on touch a tap on the launcher's slot fires one charge at the nearest enemy. Three quick slots on the HUD — heal (Q), explosive (G), utility (C) — show what they hold and how many. Explosives are consumables: frag grenades (thrown), proximity mines and demolition charges (placed). Blasts never hurt the player.
 
 ### Weather system
 
@@ -483,8 +601,8 @@ Beats: **stay** — the report is filed, Earth is saved, the loop closes ("a goo
 ### Mission content policy (locked)
 
 - Mission set above is locked as-is for the campaign.
-- "Survive X seconds" objectives are reused deliberately: one cheap mechanic, many hazards (weather changes the feel).
-- Extra tiers (hardmode variants, NG+, bounties) are pure data additions — deferred to post-M7 polish. Mission replay at 50 % is the only repeatable content in v1 and exists for anti-softlock reasons.
+- "Survive X seconds" objectives are reused deliberately: one cheap mechanic, many hazards (weather changes the feel). Since R18 every surface survive stage except `c1_m1` also runs a storm wave, so the shelter mouth becomes the fight.
+- Extra tiers (hardmode variants, NG+, bounties) are pure data additions — deferred to post-M7 polish. Mission replay at 50 % is the only repeatable content in v1 and exists for anti-softlock reasons. Since R18 (SPEC-043), with the 26 missions and their token rewards unchanged: side missions also pay an item or a resource; a mission may carry an optional bonus objective paying items or resources; a replay in a finished chapter is a contract with one modifier, paying 0.75 plus 20 lithium; and a `hard` difficulty exists.
 
 ---
 
@@ -497,7 +615,7 @@ Beats: **stay** — the report is filed, Earth is saved, the loop closes ("a goo
 | Level-ups (25 each) | ~400 main-path (≈ L17) · ~475 completionist (≈ L20) |
 | **Total** | **~1,070 main-path · ~1,250 completionist** |
 
-Total sink ≈ **2,380** tokens since R10 (ship 1,095 · gear 870 · companions 415; 2,010 before the new weapon lines), so a completionist affords ~52 % of everything and specialization is forced. XP curve: `xpToNext(L) = 100 + 50·L` (11,400 XP to reach L20), level cap 30.
+Total sink ≈ **2,380** tokens since R10 (ship 1,095 · gear 870 · companions 415; 2,010 before the new weapon lines), so a completionist affords ~52 % of everything and specialization is forced. Since R18 that is an invariant: the decision sink (every priced item no loot table gives, the companion ladders and the Ferrum gate) is at least 0.75 × a completionist's income. XP curve: `xpToNext(L) = 100 + 50·L` (11,400 XP to reach L20), level cap 30.
 
 Balance invariants (unit-tested, see [SPEC-010](https://github.com/mdzunic/reallm-specs/blob/main/specs/010-economy-and-progression.md)):
 
@@ -537,10 +655,10 @@ Storage rules: 3 slots, key per slot plus a `.bak` copy of the previous good sav
 ## 9. Mobile Strategy
 
 - Responsive canvas + UI breakpoints; one codebase, `pointer` events unify mouse/touch; `touch-action: none` on the canvas, safe-area insets, `100dvh`.
-- **Touch controls**: floating virtual joystick (left), aim-drag with auto-fire (right), action buttons, drag-to-steer in flight, auto-fire assist option, left/right-handed swap. Since R10 the quick bar doubles as touch buttons (tap a weapon to switch, a consumable to use it, long-press to choose what the slot holds), a SWAP button cycles weapons, and a tap on the minimap opens the full-screen map, which holds the game while it is open.
-- **Quality presets** (auto-detect by a 2-second boot benchmark, overridable): clamp `devicePixelRatio` (1 / 1.5 / 2), particles, draw distance, capped enemy count, and the render plan (R6): post-processing off / ¼-res bloom + FXAA / ½-res bloom + MSAA, shadow map on `high` only, image-based lighting on `medium` and `high`; target 60 fps desktop / 30+ fps mid-tier mobile.
-- Screen wake lock during gameplay; pause + audio suspend when the tab is hidden; WebGL context-loss recovery overlay.
-- Story films (R9) are a DOM `<video>` over a black layer, fetched whole into a Blob so the service worker never answers a Range request; the scene underneath is held, so a film costs a video decode, not draw calls; reduce motion plays a film as its posters.
+- **Touch controls**: floating virtual joystick (left), aim-drag with auto-fire (right), action buttons, drag-to-steer in flight, auto-fire assist option, left/right-handed swap. Since R10 the quick bar doubles as touch buttons (tap a weapon to switch, a consumable to use it, long-press to choose what the slot holds), a SWAP button cycles weapons, and a tap on the minimap opens the full-screen map, which holds the game while it is open. Since R18 touch plays through the thumb arc — a 2 × 3 cluster of weapon and pack slots at the bottom right, an action cell and DASH above it, pause at the top right — and SWAP and ITEM leave the touch layer. Play stays landscape on phones, and the rotate block holds the world. System Back and Escape share one back-stack, and play pauses when the window loses focus.
+- **Quality presets** (auto-detect by a 2-second boot benchmark, overridable): clamp `devicePixelRatio` (1 / 1.5 / 2), particles, draw distance, capped enemy count, and the render plan (R6): post-processing off / ¼-res bloom + FXAA / ½-res bloom + MSAA, shadow map on `high` only, image-based lighting on `medium` and `high`; target 60 fps desktop / 30+ fps mid-tier mobile. Since R18 the benchmark times GPU work instead of frame pacing, frames are paced by the wall clock, quality steps down (never up) within a session when a device cannot hold its rate, and a 30 fps setting saves battery.
+- Screen wake lock during gameplay and, since R18, films; pause + audio suspend when the tab is hidden; WebGL context-loss recovery overlay.
+- Story films (R9) are a DOM `<video>` over a black layer, fetched whole into a Blob so the service worker never answers a Range request; the scene underneath is held, so a film costs a video decode, not draw calls; reduce motion plays a film as its posters (since R18 through the `filmMode` setting, which reduce motion sets to stills by default and a player may set back to video).
 - HUD/menu built as HTML/CSS overlay → naturally adapts to small screens; touch targets ≥ 44 px.
 - The surface camera sits closer on touch (17 m) than on the keyboard scheme (22 m), so the salvager stays readable on a phone (R17).
 - M7: PWA manifest + service worker (precache the whole build) → installable, truly offline, save exempt from Safari eviction.
@@ -562,6 +680,8 @@ Storage rules: 3 slots, key per slot plus a `.bak` copy of the previous good sav
 | M7b | Story films (R9): the prologue, the departure, five chapter interludes and two ending films rendered in Blender with synthesised sound; the film player with poster and text fallbacks; chapter cards and boss reveals; the ending sequence wired end to end (SPEC-021…SPEC-024) | New game opens on the prologue; the first flight to each planet shows the departure and its chapter card; each boss reveals itself once per session; each chapter's interlude plays on the first return to the station; both endings run dialogue → film → overlay; every film skips, falls back to posters and text, and fits the 12 MB films budget; checked on desktop and the reference phone; tag `m7b` |
 | M7c | Playability pass (R10): camera-aligned minimap with a legend and remembered ground, and a full-screen map; objective tracker, waypoints and escalating hints; three weapon slots and three quick slots on a quick bar; machine guns, launchers and explosives with heat and charge cooldowns; caves, wrecks and an arena wall; save v2 (SPEC-025…SPEC-030) | On Cinder-4: every kind of point is recognisable on the map, and the map turns with the camera; walked ground stays lit after a reload; a new player finishes `c1_m1`–`c1_m3` by following the tracker and the marker; medkit and grenade counts are visible mid-fight; a rocket, the chaingun and the pistol get used together; a heatwave is waited out in a cave; the arena edge is a wall; budgets unchanged; checked on desktop and the reference phone; tag `m7c` |
 | M7e | The first hour (R17): no trap in collision, a winnable Gauntlet, modal lines that hold the world, the Warden at the Queen's death, waves that attack, collect objectives that count at a full hold, lines at their moment; a closer camera, fog from the player out, hostile rims and readable chapter 1–2 enemies, fading occluders, hit direction, a ramped first visit, flight and combat tips, weapon sounds, briefs, names and item pictures (SPEC-034, SPEC-035) | A new player finishes `c1_m1` on normal without dying and without being trapped; a stock-gun pilot clears `c5_m1`; the Warden speaks at the Queen's death whichever way `c5_m3` was accepted; the Eden wave reaches the beacon; the salvager is visible on every planet and preset; every shot makes a sound; checked on desktop and the reference phone; tag `m7e` |
+| M7f | Reach (R18): touch that works — flight aim on touch, the touch scheme at boot, one back-stack, a real rotate block, a station that fits a landscape phone; one HUD for every screen — the thumb arc, legible text on plates, a flash that never strobes; phones at full quality; feedback in play; focus and flow; settings and accessibility (SPEC-036, SPEC-037, SPEC-040, SPEC-042, SPEC-044, SPEC-045) | On a 750 × 342 landscape phone a touch-only player clears `c5_m1`, reaches every station tab and pauses with Back; no HUD element overlaps another or a thumb zone at the phone-landscape sizes; a 60 Hz phone that can hold medium gets at least medium; a keyboard-only player creates a salvager and gets past the first modal line; tag `m7f` |
+| M7g | Depth (R18): the dash and committed attacks with ground telegraphs; bosses with move lists and a real arena lock; packs led by elites with affixes; storm waves in survive stages; signature boss drops, retuned classes and arsenal; side rewards, bonus objectives, contracts and a hard difficulty (SPEC-038, SPEC-039, SPEC-041, SPEC-043) | Bot suites: a kiting player takes 1–20 % of max HP a minute and no boss fight lasts under 30 s; a dashing player takes ≤ 5 % per boss; the main-path token surplus is ≤ 300; every class reaches ≥ 80 % of the Marine's damage × effective HP; tag `m7g` |
 | M7 | Polish: mobile tuning, quality presets, balancing pass, PWA/offline, storage persistence, reduce-motion, save migration harness | 30+ fps on mid-tier phone; installable; full manual checklist green |
 
 ---
@@ -590,7 +710,7 @@ Storage rules: 3 slots, key per slot plus a `.bak` copy of the previous good sav
 | Skeletal animation cost on mobile | Only the player + escort NPC are skinned; enemies use procedural transform animation |
 | Meta twist undercuts the salvage fantasy or lands as a cliché | Surface fiction stays coherent on its own; the truth arrives in optional logs and ARIA's slips; no fourth-wall UI tricks outside the two endings |
 | Story films outgrow the precache or fail to decode (R9) | H.264 MP4 at 960 × 540 with no audio track, a per-film rate cap (44 KB/s) and a 12 MB `films/` budget inside the 25 MB precache, checked by the build and a test; a film that will not play drops to its posters and then to text, so a codec gap costs pictures, never progress |
-| Detonation and jump flashes (photosensitivity, R9) | Flashes are authored as slow ramps; the film build measures every rendered frame against the three-flashes rule and fails on a violation; reduce motion shows posters only |
+| Detonation and jump flashes (photosensitivity, R9) | Flashes are authored as slow ramps; the film build measures every rendered frame against the three-flashes rule and fails on a violation; reduce motion shows posters by default (the `filmMode` setting since R18) |
 | The films give the twist away (R9) | The prologue and interludes stay inside the surface fiction (a card numbered 62, a stutter of static at most); only the ending films show the scaffolding — the endings already own the fourth wall |
 | HUD clutter on a phone (R10) | The quick bar, tracker and hints each own one fixed place (bottom centre, top left, bottom left), sized with `clamp()`; guidance can be turned down to minimal or off; the full map is modal |
 | Shelters and hiding trivialise storms and survive stages (R10) | Waves and bosses ignore hiding, firing gives the player away for 1.5 s, and survive stages still run their waves; storms stay lethal in the open, and a shelter is a detour |
@@ -638,7 +758,7 @@ Each entry names the owning spec. "Casual" = casual difficulty.
 | E32 | A boss mission replayed at 50 % | No interlude: interludes follow the chapter flag, which only the first completion sets | SPEC-023 |
 | E33 | Fire key (Space) held or a double tap as a film or reveal starts | Space never skips; Escape or Enter skip only as fresh presses after 0.6 s; Skip ignores taps in the first 0.3 s | SPEC-022 |
 | E34 | Portrait phone during a film | The film letterboxes and plays; the rotate prompt waits for gameplay | SPEC-022 |
-| E35 | Photosensitive viewer | Authored flashes ramp up over ≥ 4 frames and down over ≥ 12; the build fails a film with more than three flashes in any second; reduce motion never shows a flash | SPEC-021, SPEC-022 |
+| E35 | Photosensitive viewer | Authored flashes ramp up over ≥ 4 frames and down over ≥ 12; the build fails a film with more than three flashes in any second; reduce motion never shows a flash unless the player sets `filmMode` back to video (R18) | SPEC-021, SPEC-022 |
 | E36 | Full-screen map opened mid-fight | The map holds the simulation like the pause menu; nothing moves or hurts until it closes; Escape closes the map, never the game | SPEC-026 |
 | E37 | Explored ground saved for a planet whose arena size has since changed | The mask no longer fits; the validator drops it and the planet starts dark again | SPEC-025 |
 | E38 | A v1 save loaded after R10 | Migrates to v2: the old weapon becomes the primary, the Service Pistol fills the sidearm slot, the heal slot takes the first heal item in the pack, the heavy slot is empty | SPEC-025 |
@@ -654,6 +774,19 @@ Each entry names the owning spec. "Casual" = casual difficulty.
 | E56 | A collect objective's resource while the hold is full | The surplus is shipped home: it counts toward the objective, never enters the hold, and a throttled toast says so | SPEC-034 |
 | E57 | A modal line or the verdict choice opens mid-fight | The surface holds its simulation until it closes; a boss's summons die with it, and a finished defend stage's wave leaves | SPEC-034 |
 | E58 | The ship lands with `c5_m1` still open (a failed Gauntlet) | E12's 90 s cap still lands it; the pad names the board, and E1 tops the hold up to the Hive's fuel at the next station entry | SPEC-034 |
+| E59 | A dash runs into an obstacle or the arena wall | It stops at the contact and never ends inside the obstacle (E54's resolve); its 0.3 s of invulnerability still runs | SPEC-038 |
+| E60 | A ground telegraph covers the escort follower | Circles, lanes and rings hurt the player and the follower, never a defended structure, which keeps its contact rule | SPEC-038 |
+| E61 | A rusher's charge meets the follower or an obstacle | It can hit the follower; an obstacle or the wall ends it as a whiff; nothing pushes the player into an obstacle | SPEC-038 |
+| E62 | The player reaches a live boss's arena ring | Held inside the ring while the boss lives; the exits are death and Recall to pad, and both reset the boss | SPEC-041 |
+| E63 | Death during an active boss stage | Respawn at the arena entrance on the pad side, E4's 2 s invulnerability, the boss reset | SPEC-041 |
+| E64 | A pack member's spawn point is blocked | That member is dropped; a pack is never split across two points | SPEC-041 |
+| E65 | A phone is turned upright during play | The world holds under a full-screen rotate block above every layer; turning back shows the pause menu | SPEC-036 |
+| E66 | System Back or Escape | Closes the top layer (sheet, picker, map, settings), else toggles pause in play; the star map goes back to the station; at the menu root Back leaves the page | SPEC-036 |
+| E67 | The window loses focus during play | Play pauses (`pauseOnBlur`, on by default) and waits for the player to resume | SPEC-036 |
+| E68 | A device cannot hold its frame rate | Quality steps down one rung at most every 20 s, never back up within the session, and a toast says so | SPEC-040 |
+| E69 | A boss's signature weapon is already owned | The boss drops 25 lithium instead; a replay kill pays half its XP and never the weapon | SPEC-039 |
+| E70 | A bonus objective's attempt is interrupted | A death forfeits a no-death bonus; a reload forfeits every bonus of that attempt, as E19 restarts timers | SPEC-043 |
+| E71 | Many hits land within one second | The damage flash rises at most three times a second, and weather never flashes | SPEC-037 |
 
 ---
 
