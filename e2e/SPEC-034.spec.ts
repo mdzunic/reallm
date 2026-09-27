@@ -5,7 +5,7 @@
 // key, the departure veil, the creation preview following its scroll, the defend
 // tracker's HP row, and the pin that outlives a departure. The rules themselves
 // are pinned in node — `tests/systems/layout.test.ts`, `missions.test.ts`,
-// `defend.test.ts`, `tests/scenes/surfaceHold.test.ts`, `tests/balance/gauntlet.test.ts`.
+// `defend.test.ts`, `tests/ui/surfaceHold.test.ts`, `tests/systems/gauntlet.test.ts`.
 import { expect, test, type Page } from '@playwright/test';
 import { start } from './start';
 
