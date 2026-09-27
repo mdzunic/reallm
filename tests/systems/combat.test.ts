@@ -1030,3 +1030,74 @@ describe('SPEC-030 — world bounds (AC-30..AC-32)', () => {
     expect(h.world.projectiles.size).toBe(1);
   });
 });
+
+// ---------------------------------------------------------------- SPEC-034
+
+/**
+ * SPEC-034 §4.1, §6.1 — the review's `stuck.test.ts`, turned into a regression.
+ *
+ * A raider shot knocks a player standing 0.2 m from a rock into it. Before this
+ * spec they stayed in it: `#movePlayer` refuses every step that *ends* inside an
+ * obstacle, so with the body already overlapping, every direction was refused
+ * and the run was over. The knockback now runs through `resolveCircle`, and one
+ * second of input away from the rock moves them at least a metre.
+ */
+describe('a knockback never leaves a body inside an obstacle (SPEC-034 §4.1)', () => {
+  /** The surface's own axis slide (SPEC-012 §4.3), with §4.1's pre-step resolve. */
+  function slide(h: ReturnType<typeof harness>, dirX: number, dirZ: number, seconds: number): void {
+    const p = h.world.player;
+    const out = { x: 0, z: 0 };
+    const steps = Math.round(seconds / STEP);
+    for (let i = 0; i < steps; i++) {
+      if (h.world.obstacles.resolveCircle(p.x, p.z, p.radius, out)) {
+        p.x = out.x;
+        p.z = out.z;
+      }
+      const nx = p.x + dirX * h.world.stats.moveSpeed * STEP;
+      const nz = p.z + dirZ * h.world.stats.moveSpeed * STEP;
+      if (!h.world.obstacles.hitsCircle(nx, p.z, p.radius)) p.x = nx;
+      if (!h.world.obstacles.hitsCircle(p.x, nz, p.radius)) p.z = nz;
+    }
+  }
+
+  it('a shot that shoves the player at a rock leaves them outside it, and they can walk away', () => {
+    // A 1.5 m rock at x = 2; the player stands 0.2 m clear of its edge.
+    const h = harness({ obstacles: new CircleObstacles([{ x: 2, z: 0, radius: 1.5 }]) });
+    const p = h.world.player;
+    const raider = h.spawn('scav_raider', -4, 0);
+    p.x = 2 - 1.5 - p.radius - 0.2;
+    p.z = 0;
+    const startX = p.x;
+    // The raider's shot, travelling +x straight into the rock behind the player.
+    h.shot({ x: p.x - 0.2, z: 0, vx: 40, vz: 0, owner: 'enemy', enemyId: raider.def.id, damage: 5, ttl: 1 });
+    h.step();
+    expect(h.of('player:damaged')).toHaveLength(1);
+    // §4.1: knocked back, but not into the rock.
+    expect(p.x).toBeGreaterThan(startX);
+    expect(h.world.obstacles.hitsCircle(p.x, p.z, p.radius)).toBe(false);
+
+    // …and one second of walking away covers ground.
+    const shovedX = p.x;
+    slide(h, -1, 0, 1);
+    expect(shovedX - p.x).toBeGreaterThanOrEqual(1);
+  });
+
+  it('a player already inside a rock resolves out and moves on the next step', () => {
+    const h = harness({ obstacles: new CircleObstacles([{ x: 0, z: 0, radius: 2 }]) });
+    const p = h.world.player;
+    p.x = 1.2; // well inside
+    p.z = 0;
+    slide(h, 1, 0, 1);
+    expect(h.world.obstacles.hitsCircle(p.x, p.z, p.radius)).toBe(false);
+    expect(p.x).toBeGreaterThan(2 + p.radius);
+  });
+
+  it('a projectile knockback resolves the enemy out of a rock too', () => {
+    const h = harness({ obstacles: new CircleObstacles([{ x: 4, z: 0, radius: 2 }]) });
+    // Standing just clear of the rock's near edge, shot straight into it.
+    const e = h.spawn('dust_skitter', 4 - 2 - 0.4, 0);
+    h.shot({ x: e.x - 0.5, z: 0, vx: 50, vz: 0, damage: 1, ttl: 1 });
+    h.step();
+    expect(h.world.obstacles.hitsCircle(e.x, e.z, e.radius)).toBe(false);
+  });
+});

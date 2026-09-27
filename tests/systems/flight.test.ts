@@ -543,6 +543,54 @@ describe('shot sweep', () => {
     expect(w.save.player.xp).toBe(xpBefore + ENEMIES.scav_fighter.xp);
   });
 
+  /**
+   * SPEC-034 §4.3, §6.1 — the tunnelling case.
+   *
+   * The sweep tested the hazard's *current* depth against `[from, to]`, the
+   * segment the shot travelled. A hazard closing at its own `vDepth` can cross
+   * that segment from the other side within the same step and be tested at
+   * neither end of it, so a third of perfectly aimed shots at a diving
+   * interceptor passed straight through — which is why `c5_m1` cleared in 0 of 8
+   * simulated runs with any ship. The gap closes from both ends now.
+   */
+  function tunnelHits(kind: 'interceptor' | 'asteroid'): number {
+    let hits = 0;
+    for (let shot = 0; shot < 400; shot++) {
+      const w = world({ planet: quietPlanet(PLANETS.hive, 300), seed: 1000 + shot });
+      step(w.flight, LAUNCH_SECONDS + DT);
+      // A target diving from 150 m straight down the middle, out of reach of the
+      // ship itself for the whole flight of one shot. Its HP is raised so the
+      // count is of *hits*, not of kills.
+      const depth = 150 - (shot % 40) * 0.25; // a different phase every shot
+      const hazard =
+        kind === 'interceptor'
+          ? inject(w.flight, {
+              kind: 'interceptor',
+              depth,
+              def: ENEMIES.hive_interceptor,
+              radius: ENEMIES.hive_interceptor.radius,
+              hp: 10_000,
+              vDepth: -55,
+            })
+          : inject(w.flight, { kind: 'asteroid', depth, radius: 2, hp: 10_000, vDepth: -60 });
+      const hpBefore = hazard.hp;
+      // Perfect lead: where the target will be when the shot reaches it.
+      step(w.flight, DT, { fire: true, aimX: 0, aimY: 0 });
+      // Long enough for the shot and the target to meet, whatever the phase.
+      step(w.flight, 2, { aimX: 0, aimY: 0 });
+      if (hazard.hp < hpBefore) hits++;
+    }
+    return hits;
+  }
+
+  it('0 of 400 perfectly aimed shots pass through a closing interceptor (SPEC-034 §4.3)', () => {
+    expect(tunnelHits('interceptor')).toBe(400);
+  });
+
+  it('…and none through a closing asteroid either', () => {
+    expect(tunnelHits('asteroid')).toBe(400);
+  });
+
   it('alternates two guns at the weapon fire rate (AC-28)', () => {
     const w = world();
     step(w.flight, LAUNCH_SECONDS + DT);

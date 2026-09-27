@@ -11,6 +11,7 @@ import {
   CORRIDOR,
   MAX_REPAIRS,
   ObstacleGrid,
+  RESOLVE_PASSES,
   WALL_INSET,
   generateLayout,
   insideShelter,
@@ -215,6 +216,93 @@ describe('ObstacleGrid', () => {
     // Edge distance: 9 for the first, 1 for the second.
     expect(grid.nearest(0, 0)?.z).toBe(4);
     expect(new ObstacleGrid({ obstacles: [] }).nearest(0, 0)).toBeNull();
+  });
+});
+
+// ---------------------------------------------------------------- SPEC-034
+
+/**
+ * SPEC-034 §4.1, §6.1: `resolveCircle`. Nothing stays inside an obstacle — a hit
+ * that shoved the salvager against a rock used to leave them in it, and the
+ * movement code, which refuses every step that *ends* inside one, then refused
+ * every direction. The reviewer was trapped on Cinder-4 ten minutes into a new
+ * game with no way out of the pause menu.
+ */
+describe('ObstacleGrid.resolveCircle (SPEC-034 §4.1)', () => {
+  const out = { x: 0, z: 0 };
+
+  it('pushes a circle inside one rock out along the normal', () => {
+    const grid = new ObstacleGrid({ obstacles: [{ x: 0, z: 0, radius: 2, kind: 'rock' }] });
+    // 0.5 m into a 2 m rock on the +x side, with a 0.4 m body.
+    expect(grid.resolveCircle(1.9, 0, 0.4, out)).toBe(true);
+    expect(grid.circleHits(out.x, out.z, 0.4)).toBe(false);
+    // The shortest way out is straight along +x; z does not move.
+    expect(out.z).toBe(0);
+    expect(out.x).toBeGreaterThan(2.4);
+    expect(out.x).toBeLessThan(2.5);
+  });
+
+  it('frees a circle pinched between two rocks within RESOLVE_PASSES', () => {
+    const grid = new ObstacleGrid({
+      obstacles: [
+        { x: -1.6, z: 0, radius: 2, kind: 'rock' },
+        { x: 1.6, z: 0, radius: 2, kind: 'rock' },
+      ],
+    });
+    expect(RESOLVE_PASSES).toBe(4);
+    // Deep inside both, slightly off the axis between them — the relaxation
+    // walks out sideways rather than bouncing between the two normals.
+    expect(grid.resolveCircle(0, 0.3, 0.4, out)).toBe(true);
+    expect(grid.circleHits(out.x, out.z, 0.4)).toBe(false);
+  });
+
+  it('34-a: accepts the position it reached when the passes run out', () => {
+    // Exactly between two rocks whose centres share its axis, every push is
+    // ±x and no single one frees it. §4.1 takes the last position and reports
+    // `true`; the next step resolves again, and a body that can move away does.
+    const grid = new ObstacleGrid({
+      obstacles: [
+        { x: -1.6, z: 0, radius: 2, kind: 'rock' },
+        { x: 1.6, z: 0, radius: 2, kind: 'rock' },
+      ],
+    });
+    expect(grid.resolveCircle(0, 0, 0.4, out)).toBe(true);
+    expect(Number.isFinite(out.x) && Number.isFinite(out.z)).toBe(true);
+    expect(out.x).not.toBe(0); // it did move, so the step is not a no-op
+  });
+
+  it('leaves a free circle alone and reports false', () => {
+    const grid = new ObstacleGrid({ obstacles: [{ x: 0, z: 0, radius: 2, kind: 'rock' }] });
+    expect(grid.resolveCircle(20, -5, 0.4, out)).toBe(false);
+    expect(out).toEqual({ x: 20, z: -5 });
+  });
+
+  it('clamps the resolved position to the arena line', () => {
+    const half = 50;
+    const grid = new ObstacleGrid({
+      halfSize: half,
+      obstacles: [{ x: half, z: 0, radius: 6, kind: 'rock' }],
+    });
+    // Pushed toward +x, past the wall: the clamp brings it back inside.
+    expect(grid.resolveCircle(half + 1, 0, 0.4, out)).toBe(true);
+    expect(out.x).toBe(half - WALL_INSET);
+  });
+
+  it('agrees with the CircleObstacles port every real layout body uses', () => {
+    const layout = layoutFor('cinder4', PIN_SEED);
+    const grid = new ObstacleGrid(layout);
+    const brute = new CircleObstacles(layout.obstacles.map((o) => ({ x: o.x, z: o.z, radius: o.radius })));
+    const rng = new Rng(hash32('resolve-circle'));
+    const mine = { x: 0, z: 0 };
+    const theirs = { x: 0, z: 0 };
+    for (let i = 0; i < 400; i++) {
+      const x = rng.float(-layout.halfSize + 5, layout.halfSize - 5);
+      const z = rng.float(-layout.halfSize + 5, layout.halfSize - 5);
+      const r = rng.float(0.2, 1.2);
+      expect(grid.resolveCircle(x, z, r, mine)).toBe(brute.resolveCircle(x, z, r, theirs));
+      expect(mine.x).toBeCloseTo(theirs.x, 6);
+      expect(mine.z).toBeCloseTo(theirs.z, 6);
+    }
   });
 });
 
