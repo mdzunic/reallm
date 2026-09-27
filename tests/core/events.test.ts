@@ -561,6 +561,9 @@ const NAMES: Record<keyof GameEvents, true> = {
   'quick:used': true,
   // SPEC-029 §3: blasts, heat locks and armed mines.
   'combat:blast': true,
+  // SPEC-035 §4.11: one event per shot and per landed hit.
+  'weapon:fired': true,
+  'enemy:hit': true,
   'weapon:locked': true,
   'mine:armed': true,
   'shop:purchased': true,
