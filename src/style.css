@@ -549,13 +549,19 @@ html.reduce-motion .touch-zone {
 }
 
 /* SPEC-037 §4.1: at (60 %, 50 %) — (40 %, 50 %) mirrored — the ghost clears
-   the thumb arc and the toasts at every phone size. */
+   the thumb arc and the toasts at every phone size. Its label is tracked a
+   little tighter than MOVE's: at 802 × 293 the compact arc starts 59 px right
+   of the ghost's centre. */
 .touch-zone-aim {
   left: 60%;
   top: 50%;
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
+}
+
+.touch-zone-aim .touch-zone-label {
+  letter-spacing: 0.08em;
 }
 
 .touch-controls[data-side='right'] .touch-zone-aim {
@@ -4299,8 +4305,9 @@ html.reduce-motion .reveal-name.is-glitched {
 }
 
 /* SPEC-037 §4.2: inside the top-left plate the tracker is the column's width
-   and wears no panel of its own — the plate is its background. */
-.hud-tl .tracker {
+   and wears no panel of its own — the plate is its background. Specific
+   enough to beat the `quality-low` and reduced-transparency panel fills. */
+.hud .hud-tl .tracker {
   width: 100%;
   max-width: none;
   box-sizing: border-box;
