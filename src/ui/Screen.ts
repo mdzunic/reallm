@@ -51,15 +51,21 @@ export function screenTitle(id: ScreenId): string {
   }
 }
 
-/** §4.5: the channel line under the title. Pure, and never meta (PLAN §12). */
-export function channelText(id: ScreenId, context?: { containment?: number }): string {
+/**
+ * §4.5: the channel line under the title. Pure, and never meta (PLAN §12).
+ *
+ * SPEC-035 §4.12: the station's line stopped repeating the frame's own head —
+ * the title already says `Command Relay` and the header carries exactly one
+ * `Containment level N`. It names what the place is *for* instead.
+ */
+export function channelText(id: ScreenId): string {
   switch (id) {
     case 'menu':
       return 'EARTH COMMAND · SALVAGE DIVISION';
     case 'creation':
       return 'PERSONNEL FILE · NEW SALVAGER';
     case 'station':
-      return `COMMAND RELAY · CONTAINMENT LEVEL ${context?.containment ?? 1}`;
+      return 'SUPPLY · REFIT · DISPATCH';
     case 'starmap':
       return 'NAVIGATION · OUTBOUND';
     case 'pause':

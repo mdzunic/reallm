@@ -315,7 +315,7 @@ export class StationScene extends UiScene<'station'> {
     }
     // SPEC-031 §4.4: the station's header, rail and panel are the frame's
     // head, rail and body.
-    const screen = createScreen({ id: 'station', channel: channelText('station', { containment }) });
+    const screen = createScreen({ id: 'station', channel: channelText('station') });
     this.#screen = screen;
     bindTouchScheme(screen.root, this.services, this.disposer, this);
     const headText = screen.root.querySelector('.screen-head-text');

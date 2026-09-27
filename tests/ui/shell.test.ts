@@ -14,12 +14,16 @@ describe('screenTitle (SPEC-031 §4.5)', () => {
 });
 
 describe('channelText (SPEC-031 §4.5)', () => {
-  it('prints the containment level the station passes', () => {
-    expect(channelText('station', { containment: 3 })).toContain('CONTAINMENT LEVEL 3');
-  });
-
-  it('defaults the containment level to 1', () => {
-    expect(channelText('station')).toContain('CONTAINMENT LEVEL 1');
+  /**
+   * SPEC-035 §4.12 replaced `COMMAND RELAY · CONTAINMENT LEVEL N`: the frame's
+   * title already reads `Command Relay` and the header carries one
+   * `Containment level N`, so the channel line said both of them twice. The
+   * containment argument went with it — the line no longer depends on progress.
+   */
+  it('names what the station is for, without repeating the head', () => {
+    expect(channelText('station')).toBe('SUPPLY · REFIT · DISPATCH');
+    expect(channelText('station')).not.toContain('COMMAND RELAY');
+    expect(channelText('station').toUpperCase()).not.toContain('CONTAINMENT');
   });
 
   it('pins the other channels', () => {
@@ -31,12 +35,10 @@ describe('channelText (SPEC-031 §4.5)', () => {
 
   it('is diegetic, never meta (PLAN §12)', () => {
     for (const id of IDS) {
-      for (const containment of [1, 2, 3, 4]) {
-        const text = channelText(id, { containment }).toLowerCase();
-        expect(text).not.toContain('simulation');
-        expect(text).not.toContain('instance');
-        expect(text).not.toContain('model');
-      }
+      const text = channelText(id).toLowerCase();
+      expect(text).not.toContain('simulation');
+      expect(text).not.toContain('instance');
+      expect(text).not.toContain('model');
     }
   });
 });

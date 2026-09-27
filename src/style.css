@@ -2419,6 +2419,12 @@ html.debug .scene-tag {
   flex-wrap: wrap;
 }
 
+/* SPEC-035 §4.12: `Abandon` sits at the far end of the action row, away from
+   where `Accept` was on the same row a moment earlier. */
+.board-abandon {
+  margin-left: auto;
+}
+
 /* ------------------------------------------------------------------- shop */
 .shop {
   display: flex;

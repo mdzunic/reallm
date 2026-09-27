@@ -32,13 +32,15 @@ if (!(canvas instanceof HTMLCanvasElement)) throw new Error('index.html must car
 const uiRoot = document.getElementById('ui');
 if (!(uiRoot instanceof HTMLDivElement)) throw new Error('index.html must carry <div id="ui">');
 
-log.info('boot', `ReaLLM ${__APP_VERSION__} — M0 engine (SPEC-002)`);
+// SPEC-035 §4.12: the footer and the boot log stopped calling a finished
+// game `M0 engine`. SPEC-033's short sha, when it lands, is appended by that spec.
+log.info('boot', `ReaLLM ${__APP_VERSION__}`);
 
 /** The version label, which is also the stats overlay's five-tap toggle (§4.6). */
 const note = document.createElement('p');
 note.className = 'boot-note';
 note.dataset['testid'] = 'version-label';
-note.textContent = `ReaLLM ${__APP_VERSION__} · M0 engine`;
+note.textContent = `ReaLLM ${__APP_VERSION__}`;
 uiRoot.append(note);
 
 /** SPEC-004's bus: the one instance, injected into `Game` as `GameServices.events`. */

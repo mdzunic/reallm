@@ -3515,7 +3515,17 @@ export class SurfaceScene extends UiScene<'surface'> {
     tracker.pulse = this.#stuck.level >= 1;
     const pinned = missions.pinned;
     if (pinned === null) {
-      tracker.title = 'No active mission';
+      // SPEC-035 §4.10: "No active mission" told the player nothing. Name the
+      // next mission and where it is taken — the pad terminal's own list — and
+      // fall back to R16's sentence when the pad has nothing to offer.
+      const next = missions.available()[0];
+      const save = this.#save;
+      tracker.title =
+        next !== undefined
+          ? `Next: ${next.title} — at the pad terminal`
+          : save === null
+            ? 'No active mission'
+            : padEmptyText(save, this.#planet.id);
       tracker.stage = '';
       return tracker;
     }
