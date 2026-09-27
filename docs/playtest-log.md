@@ -1404,9 +1404,11 @@ determinism claim is per tool version — and the contact sheet
 
 Recorded from the container the branch was built in: `npm run check` (86 files,
 1570 tests) and the e2e files this spec wrote or moved — `SPEC-036.spec.ts`
-(30 cases, twice over with six workers), `SPEC-031.spec.ts`, `SPEC-015.spec.ts`
-in both projects, `SPEC-005.spec.ts`, `touch-controls.spec.ts`, and the
-terminal and camera cases of `SPEC-012.spec.ts` and `SPEC-035.spec.ts`. The §7
+(33 cases with four workers; the first 30 also twice over with six),
+`SPEC-031.spec.ts`, `SPEC-015.spec.ts` in both projects, `SPEC-005.spec.ts`,
+`touch-controls.spec.ts`, `SPEC-023.spec.ts` and `SPEC-014.spec.ts` for the
+chapter card and the toasts, and the terminal and camera cases of
+`SPEC-012.spec.ts` and `SPEC-035.spec.ts`. The §7
 list is a phone-and-desktop pass owed before the `m7` tag; each row names the
 automated evidence that stands in for it here.
 
