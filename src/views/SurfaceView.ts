@@ -1647,6 +1647,14 @@ export class SurfaceView {
     // idempotent and covers the visit that never resolved a target.
     this.#pillarMaterial.dispose();
     this.#routeMaterial.dispose();
+    // §4.5: a landmark's fade clone sits on its mesh only while the prop is
+    // faded, so the walk above misses the one that already faded back — one
+    // clone per landmark that ever occluded the salvager.
+    for (const target of this.#occluderTargets) {
+      if (target.kind !== 'mesh') continue;
+      target.faded?.dispose();
+      target.faded = null;
+    }
     this.#clearEnvironment();
     this.#scene.fog = null;
     this.#scene.background = null;

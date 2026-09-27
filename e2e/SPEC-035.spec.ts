@@ -313,6 +313,7 @@ test('13. the station header says each thing once, and the footer is not an engi
   await station(page);
   const head = page.locator('.screen-head');
   await expect(page.locator('[data-testid="containment-level"]')).toHaveCount(1);
+  await expect(head.locator('.containment-level')).toHaveCount(1);
   expect((await head.innerText()).match(/Containment level/gi) ?? []).toHaveLength(1);
   expect((await head.innerText()).match(/Command Relay/gi) ?? []).toHaveLength(1);
   await expect(page.locator('.screen-channel')).toHaveText('SUPPLY · REFIT · DISPATCH');

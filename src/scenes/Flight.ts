@@ -782,7 +782,11 @@ export class FlightScene extends UiScene<'flight'> {
     // SPEC-035 §4.8: the rail explained nothing at all. The steer tip lands the
     // moment the player has control, the throttle tip 12 s later.
     this.#showTip('flight_steer');
-    this.#throttleTipIn = THROTTLE_TIP_DELAY;
+    // The throttle tip only ever follows the steer tip: a run with the tip
+    // layer off (a `?perf` pass, guidance turned down) arms no timer at all,
+    // so nothing can surface 12 s later without the steer tip having had its
+    // turn first. A returning player who saw only the steer tip still gets it.
+    if (this.#tipsOn()) this.#throttleTipIn = THROTTLE_TIP_DELAY;
     // SPEC-035 §4.11: the engine comes up with the cockpit.
     this.#startEngineHum();
   }
@@ -794,13 +798,16 @@ export class FlightScene extends UiScene<'flight'> {
    */
   #showTip(id: TipId): void {
     const aria = this.#aria;
-    if (aria === null) return;
-    if (this.services.perf === true) return;
+    if (aria === null || !this.#tipsOn()) return;
     const settings = this.services.settings;
-    if (settings.get().guidance !== 'full') return;
     if (settings.get().tipsSeen.includes(id)) return;
     aria.show(this.services.input.state.scheme === 'touch' ? TIPS[id].touch : TIPS[id].keyboard, TIP_MS);
     settings.set({ tipsSeen: [...settings.get().tipsSeen, id] });
+  }
+
+  /** Whether this run shows tips at all (§4.8): never under `?perf`, never with guidance turned down. */
+  #tipsOn(): boolean {
+    return this.#aria !== null && this.services.perf !== true && this.services.settings.get().guidance === 'full';
   }
 
   /** SPEC-035 §4.11: the looping hum, at priority 0 so nothing else loses a voice. */
