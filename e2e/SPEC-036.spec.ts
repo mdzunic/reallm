@@ -744,6 +744,32 @@ for (const [width, height] of SHORT_LANDSCAPE) {
   });
 }
 
+// The flight's pause has its own set of actions (no Recall to pad); the touch
+// sheet must still open beside them at the narrowest of the five sizes.
+test.describe('13. the flight pause on a short landscape phone at 667×375 (§4.8)', () => {
+  test.use({ viewport: { width: 667, height: 375 }, hasTouch: true, isMobile: true });
+
+  test('Controls opens beside the flight actions, and Resume stays on screen and topmost', async ({ page }) => {
+    await startTouch(page, '/?scene=flight&planet=cinder4');
+    await settle(page, 'flight');
+    await page.locator('[data-testid="touch-pause"]').tap();
+    await expect(page.locator('[data-testid="pause-menu"]')).toBeVisible();
+    await page.locator('[data-testid="pause-controls"]').tap();
+    await expect(page.locator('[data-testid="pause-sheet"]')).toBeVisible();
+    await expect(page.locator('[data-testid="pause-sheet"]')).toContainText('Drag on the left side');
+    expect(await inViewport(page, 'pause-resume')).toBe(true);
+    expect((await topmostAt(page, 'pause-resume'))[0]).toBe('pause-resume');
+    const { actions, sheet } = await pauseLayout(page);
+    if (sheet === null) throw new Error('no controls sheet');
+    expect(actions.map((action) => action.id)).not.toContain('pause-recall');
+    expect(actions.length).toBeGreaterThanOrEqual(4);
+    for (const action of actions) {
+      expect(action.right, `${action.id} ends before the sheet begins`).toBeLessThanOrEqual(sheet.left + 0.5);
+      expect(sheet.top, `the sheet stands beside ${action.id}, not below it`).toBeLessThan(action.bottom);
+    }
+  });
+});
+
 // ------------------------------------------------------ 14: film wake lock
 
 test.describe('14. a film holds the screen on, and Back leaves it alone (§4.9, §4.4)', () => {
