@@ -15,11 +15,11 @@ import { maxHp, type Save } from '@/core/Save';
 import type { GameServices } from '@/core/Services';
 import { applyUpdate, updateReady } from '@/core/Updates';
 import type { SceneParams } from '@/core/StateMachine';
-import { DIALOGUE, MISSIONS, PLANET_IDS, PLANETS, type DialogueId, type MissionId } from '@/data/index';
+import { DIALOGUE, PLANET_IDS, PLANETS, type DialogueId } from '@/data/index';
 import { Economy } from '@/systems/Economy';
 import { applySupplies } from '@/systems/Service';
 import { Progression } from '@/systems/Progression';
-import { endingPending, interludeToPlay, stayReport } from '@/systems/StoryBeats';
+import { endingPending, interludeToPlay, LINE_LEDGER, stayReport } from '@/systems/StoryBeats';
 import { director } from '@/scenes/Director';
 import { CharacterPanel } from '@/ui/CharacterPanel';
 import { dialogueLayer } from '@/ui/DialogueUI';
@@ -34,9 +34,6 @@ import { addHubLights, hubSkyMesh, loadHubArt, proceduralDock, proceduralRing, s
 import { UiScene, bindTouchScheme } from '@/scenes/base';
 import { channelText, createScreen, type Screen } from '@/ui/Screen';
 import { Wallet } from '@/ui/Wallet';
-
-/** Missions already debriefed this session, per save object (§4.3). */
-const DEBRIEFED = new WeakMap<Save, Set<MissionId>>();
 
 /** SPEC-017 §4.1 (*initial tuning*): the station reads cool and clean. */
 const STATION_LOOK: Partial<Look> = { vignette: 0.35, bloomStrength: 0.3, tint: [0.96, 1, 1.04] };
@@ -202,6 +199,11 @@ export class StationScene extends UiScene<'station'> {
     // SPEC-024 §4.5: an ending the save still owes comes before everything
     // else — and after an escape there is no "else" at all.
     if (!(await this.#pendingEnding(data))) return;
+    // SPEC-034 §4.10 step 3: the debrief belongs to the trip that just ended, so
+    // it comes *before* the chapter interlude that closes the chapter — its
+    // lines are queued now, so the film that follows plays over a dialogue
+    // layer that already holds them rather than the other way round.
+    this.#debrief(data, params);
     const economy = this.#economy;
     const beats = director(this.services);
     const interlude = interludeToPlay(new Set(data.progress.flags));
@@ -212,10 +214,6 @@ export class StationScene extends UiScene<'station'> {
       for (const flag of interlude.markSeen) economy.setFlag(flag);
       this.services.save.request('mission');
     }
-    // A transition during the film skips it (22-c) and disposes this scene;
-    // the debrief that was owed belongs to the entry that is already over.
-    if (!this.#alive) return;
-    if (params.arrivedFrom !== undefined) this.#debrief(data, params.arrivedFrom);
   }
 
   /**
@@ -253,24 +251,39 @@ export class StationScene extends UiScene<'station'> {
     return false;
   }
 
-  /** Plays the `<mission>_done` dialogue of arrived-from missions not yet debriefed. */
-  #debrief(data: Save, arrivedFrom: NonNullable<SceneParams['station']['arrivedFrom']>): void {
-    let seen = DEBRIEFED.get(data);
-    if (seen === undefined) {
-      seen = new Set();
-      DEBRIEFED.set(data, seen);
+  /**
+   * SPEC-034 §4.10 step 3: the `<id>_done` line of each mission finished on the
+   * trip this entry ends, in completion order, skipping the ones the surface or
+   * the flight already played. The ledger is page-session, so a reload leaves
+   * nothing to debrief (34-g) — which is the point: it used to replay lines from
+   * hours ago, and to repeat what the surface had said a minute earlier.
+   *
+   * Without `arrivedFrom` — a Continue or a Load straight into the station — the
+   * trip is simply closed.
+   */
+  #debrief(data: Save, params: SceneParams['station']): void {
+    // The ending above is awaited, so this scene can already be disposed by the
+    // time control returns here. The trip still closes — AC-38 wants nothing
+    // pending after a reload — but the lines must not be queued into the
+    // page-lifetime dialogue layer, where they would read over whatever scene
+    // replaced this one.
+    if (params.arrivedFrom === undefined || !this.#alive) {
+      LINE_LEDGER.closeTrip(data);
+      return;
     }
     const dialogue = dialogueLayer(this.services.uiRoot, this.services.events, {
       input: this.services.input,
       saveKey: () => this.services.save.current,
       reduceMotion: () => this.services.settings.get().reduceMotion,
     });
-    for (const id of data.progress.missionsDone) {
-      if (seen.has(id) || MISSIONS[id]?.planet !== arrivedFrom) continue;
-      seen.add(id);
+    for (const id of LINE_LEDGER.completedThisTrip(data)) {
       const done = `${id}_done`;
-      if (Object.hasOwn(DIALOGUE, done)) void dialogue.play(done as DialogueId);
+      if (!Object.hasOwn(DIALOGUE, done)) continue;
+      if (LINE_LEDGER.played(data, done)) continue;
+      LINE_LEDGER.markPlayed(data, done);
+      void dialogue.play(done as DialogueId);
     }
+    LINE_LEDGER.closeTrip(data);
   }
 
   // -------------------------------------------------------------------- DOM
@@ -283,6 +296,8 @@ export class StationScene extends UiScene<'station'> {
       // SPEC-015 AC-20: `Re-detect` runs the real boot benchmark.
       redetect: this.services.detectQuality?.bind(this.services),
       onReset: () => this.#quit(false),
+      // SPEC-034 §4.13: the run behind the panel is no longer the bound save.
+      onImported: () => this.#quit(false),
     });
     this.disposer.add(() => {
       this.#settings?.dispose();

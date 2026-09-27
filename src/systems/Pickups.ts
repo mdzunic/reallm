@@ -15,7 +15,7 @@ import type { LayoutNode } from '@/systems/Layout';
 
 /** The slice of SPEC-010's Economy the pickup flow needs. */
 export interface PickupEconomy {
-  addResource(resource: ResourceId, amount: number, source: 'pickup'): { added: number; blocked: number };
+  addResource(resource: ResourceId, amount: number, source: 'pickup'): { added: number; shipped: number; blocked: number };
   addItem(itemId: ItemId, qty: number): { added: number; blocked: number };
 }
 
@@ -27,6 +27,12 @@ export const MAGNET_BONUS = 2;
 export const CONTACT_DISTANCE = 0.8;
 export const CARGO_TOAST_SECONDS = 3;
 export const CARGO_TOAST_TEXT = 'CARGO FULL';
+/**
+ * SPEC-034 §4.12: what a full hold says when a collect objective still wants
+ * the units it cannot carry — they count, and they go home instead. Throttled
+ * on the same 3 s as CARGO FULL, because a resource field would machine-gun it.
+ */
+export const SHIPPED_TOAST_TEXT = 'Hold full — surplus shipped to Command Relay.';
 /** A refused pickup retries this often, not every step. */
 const RETRY_SECONDS = 0.5;
 
@@ -116,6 +122,8 @@ export class Pickups {
   /** True when the pickup is finished; false leaves it on the ground. */
   #collect(p: PickupEntity): boolean {
     if (p.kind === 'resource') {
+      // SPEC-034 §4.12: an orb whose units were all added *or shipped home* is
+      // consumed; only what is blocked bounces.
       const { added, blocked } = this.#economy.addResource(p.resource, p.amount, 'pickup');
       if (blocked > 0) {
         // E3: what did not fit bounces back to the ground as the same orb.
@@ -123,7 +131,7 @@ export class Pickups {
         this.#toastCargoFull();
         return false;
       }
-      return added >= 0; // fully added (or a zero-amount orb) is done
+      return added >= 0; // fully added, shipped (or a zero-amount orb) is done
     }
     const { added, blocked } = this.#economy.addItem(p.itemId as ItemId, p.amount);
     if (blocked > 0) {
@@ -151,8 +159,10 @@ export const HARVEST_FLUSH_SECONDS = 0.5;
 
 /** The per-resource room the cap leaves; the scene derives it from the save. */
 export interface NodeEconomy {
-  addResource(resource: ResourceId, amount: number, source: 'pickup'): { added: number; blocked: number };
+  addResource(resource: ResourceId, amount: number, source: 'pickup'): { added: number; shipped: number; blocked: number };
   room(resource: ResourceId): number;
+  /** SPEC-034 §4.12: units the active collect objectives still want. */
+  collectDemand?(resource: ResourceId): number;
 }
 
 export interface NodeState {
@@ -199,17 +209,30 @@ export class Nodes {
       node.harvesting = false;
       if (player.alive && Math.hypot(player.x - node.x, player.z - node.z) <= HARVEST_RADIUS) {
         // §4.4: min(rate·dt, remaining, room). 12-f: at the cap nothing moves —
-        // the node keeps its resource.
+        // the node keeps its resource. SPEC-034 §4.12: unless a collect
+        // objective still wants it, in which case the surplus ships home and
+        // the node keeps pumping.
         const room = this.#economy.room(node.resource) - node.pending;
-        const take = Math.min(HARVEST_RATE * dt, node.remaining, Math.max(0, room));
+        const demand = (this.#economy.collectDemand?.(node.resource) ?? 0) - node.pending;
+        const headroom = Math.max(room, demand);
+        const take = Math.min(HARVEST_RATE * dt, node.remaining, Math.max(0, headroom));
         if (take > 0) {
           node.remaining -= take;
           node.pending += take;
           node.harvesting = true;
         }
-      } else if (node.remaining < node.capacity && node.pending === 0) {
-        // Regen only while left alone; empty nodes stay and refill (AC-23).
-        node.remaining = Math.min(node.capacity, node.remaining + node.regenPerSec * dt);
+      } else {
+        // SPEC-034 §4.15: a harvest the player walked away from left a fraction
+        // of a unit in `pending` for ever, and `pending > 0` froze the regen —
+        // the node never refilled. The fraction goes back into the ground.
+        if (node.pending > 0 && node.pending < 1) {
+          node.remaining = Math.min(node.capacity, node.remaining + node.pending);
+          node.pending = 0;
+        }
+        if (node.remaining < node.capacity && node.pending === 0) {
+          // Regen only while left alone; empty nodes stay and refill (AC-23).
+          node.remaining = Math.min(node.capacity, node.remaining + node.regenPerSec * dt);
+        }
       }
 
       node.flushIn -= dt;
@@ -217,10 +240,11 @@ export class Nodes {
       node.flushIn = HARVEST_FLUSH_SECONDS;
       const whole = Math.floor(node.pending);
       if (whole <= 0) continue;
-      const { added } = this.#economy.addResource(node.resource, whole, 'pickup');
+      const { added, shipped } = this.#economy.addResource(node.resource, whole, 'pickup');
       node.pending -= whole;
-      // Anything the cap refused after all goes back into the ground.
-      const refused = whole - added;
+      // Anything the cap refused after all — and did not ship — goes back into
+      // the ground (SPEC-034 §4.12).
+      const refused = whole - added - shipped;
       if (refused > 0) node.remaining = Math.min(node.capacity, node.remaining + refused);
     }
   }

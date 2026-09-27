@@ -308,7 +308,32 @@ export class DialogueUI {
     this.#events.emit('dialogue:ended', { id: job.id });
     job.resolve();
     this.#active = null;
+    // SPEC-034 §4.7: a dialogue's `next` goes ahead of anything queued (34-e).
+    // It is a job of its own, with its own `modal`, `once` and `glitch`, so the
+    // Warden's line and ARIA's answer stay two dialogues and the chain works
+    // wherever it is played from.
+    const next = DIALOGUE_TABLE[job.id].next as DialogueId | undefined;
+    if (next !== undefined) this.#playNext(next);
     this.#next();
+  }
+
+  /** Queues `id` at the front, honouring `once` and the queue cap (§4.7). */
+  #playNext(id: DialogueId): void {
+    const def = DIALOGUE_TABLE[id];
+    if (def.once === true) {
+      const key = this.#saveKey?.() ?? null;
+      if (key !== null) {
+        let set = SEEN.get(key);
+        if (set === undefined) {
+          set = new Set();
+          SEEN.set(key, set);
+        }
+        if (set.has(id)) return;
+        set.add(id);
+      }
+    }
+    if (this.#queue.length >= QUEUE_MAX) return; // AC-74: the overflow drops
+    this.#queue.unshift({ id, modal: def.modal === true, resolve: () => {} });
   }
 
   #choose(index: number): void {

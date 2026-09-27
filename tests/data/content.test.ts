@@ -388,16 +388,25 @@ describe('content invariants (SPEC-009 §7)', () => {
       static: { hp: 60, damage: 0 },
       boss: { hp: 900, damage: 18 },
       fighter: { hp: 40, damage: 8 },
-      interceptor: { hp: 25, damage: 12 },
+      interceptor: { hp: 20, damage: 12 },
     };
     const problems: string[] = [];
     for (const enemy of enemies) {
       const base = archetypeBase[enemy.archetype];
       if (base === undefined) problems.push(`${enemy.id}: no base for archetype ${enemy.archetype}`);
       else {
-        const hp = Math.round(base.hp * 1.35 ** (enemy.chapter - 1));
+        // SPEC-034 §4.4: a flight enemy's HP is the archetype base with no
+        // chapter factor — a trip's kill count is authored against its dive
+        // time, not against a fifth-chapter HP pool. Damage still scales.
+        const hp = enemy.domain === 'flight' ? base.hp : Math.round(base.hp * 1.35 ** (enemy.chapter - 1));
         const damage = Math.round(base.damage * 1.3 ** (enemy.chapter - 1));
-        if (enemy.hp !== hp) problems.push(`${enemy.id}: hp ${enemy.hp}, but a chapter-${enemy.chapter} ${enemy.archetype} is ${hp}`);
+        if (enemy.hp !== hp) {
+          problems.push(
+            enemy.domain === 'flight'
+              ? `${enemy.id}: hp ${enemy.hp}, but an unscaled ${enemy.archetype} is ${hp}`
+              : `${enemy.id}: hp ${enemy.hp}, but a chapter-${enemy.chapter} ${enemy.archetype} is ${hp}`,
+          );
+        }
         if (enemy.damage !== damage) problems.push(`${enemy.id}: damage ${enemy.damage}, but a chapter-${enemy.chapter} ${enemy.archetype} is ${damage}`);
         // Boss xp is the one stat §4.3 scales explicitly.
         if (enemy.archetype === 'boss' && enemy.xp !== 100 + 100 * enemy.chapter) {
@@ -575,6 +584,13 @@ describe('content invariants (SPEC-009 §7)', () => {
         for (const id of referenced) {
           if (id !== undefined && !Object.hasOwn(DIALOGUE, id)) problems.push(`${mission.id}: unknown dialogue ${id}`);
         }
+        // SPEC-034 §4.7: stage 0's moment is the accept, which `onAccept` owns.
+        // The board path never starts a stage on screen, so a stage-0 line plays
+        // at the pad terminal and nowhere else — which is how the Warden's first
+        // words ended up before the fight instead of at the Queen's death.
+        if ((mission.dialogue.onStage as Record<string, DialogueId> | undefined)?.['0'] !== undefined) {
+          problems.push(`${mission.id}: onStage[0] — stage 0's line is onAccept`);
+        }
         if (mission.dialogue.onAccept === undefined) {
           missingAccept.push(mission.id);
           console.warn(`SPEC-009 §7.14: ${mission.id} has no onAccept dialogue`);
@@ -588,6 +604,52 @@ describe('content invariants (SPEC-009 §7)', () => {
     } finally {
       warn.mockRestore();
     }
+  });
+
+  /**
+   * SPEC-034 §4.7: `DialogueDef.next` plays a second dialogue the moment the
+   * first ends. A missing id would silently swallow the rest of a beat, and a
+   * loop would never let the player go, so both are compile-adjacent errors.
+   */
+  it('14b. every dialogue `next` exists and the chain it starts terminates', () => {
+    const problems: string[] = [];
+    for (const dialogue of Object.values(DIALOGUE) as { id: string; next?: string }[]) {
+      if (dialogue.next === undefined) continue;
+      if (!Object.hasOwn(DIALOGUE, dialogue.next)) {
+        problems.push(`${dialogue.id}: next names unknown dialogue ${dialogue.next}`);
+        continue;
+      }
+      const seen = new Set<string>([dialogue.id]);
+      let at: string | undefined = dialogue.next;
+      let steps = 0;
+      while (at !== undefined) {
+        if (seen.has(at)) {
+          problems.push(`${dialogue.id}: next revisits ${at}`);
+          break;
+        }
+        seen.add(at);
+        if (++steps > 4) {
+          problems.push(`${dialogue.id}: next chain runs past 4 steps`);
+          break;
+        }
+        at = (DIALOGUE as Record<string, { next?: string }>)[at]?.next;
+      }
+    }
+    expect(problems).toEqual([]);
+  });
+
+  /**
+   * SPEC-034 §4.15, E25: an item reward drops as a pickup at the player's feet
+   * when the pack is full — which the flight scene has no ground for, so a
+   * flight mission may never pay in items.
+   */
+  it('14c. no flight mission pays in items', () => {
+    const problems: string[] = [];
+    for (const mission of missions) {
+      if (mission.scene !== 'flight') continue;
+      if ((mission.rewards.items ?? []).length > 0) problems.push(`${mission.id}: item rewards on a flight mission`);
+    }
+    expect(problems).toEqual([]);
   });
 
   it('15. mission titles, briefs and dialogue lines stay inside their budgets', () => {
@@ -928,6 +990,28 @@ describe('tips and hints (SPEC-027 AC-81..AC-84)', () => {
       }
     }
     expect(problems).toEqual([]);
+  });
+
+  /**
+   * SPEC-034 §6.1 pins these two numbers here, in the content suite, because
+   * they are the two the spec moved and the two a retune would silently undo.
+   * `tests/balance/gauntlet.test.ts` and `tests/systems/spawn.test.ts` prove
+   * they *work*; this proves they are still what the spec wrote down.
+   */
+  it('the SPEC-034 content numbers are what §4.4 and §4.9 set', () => {
+    // §4.4: the gauntlet asks for six interceptors over its 180 s, and the
+    // 180 s itself is unchanged (AC-14).
+    const gauntlet = MISSIONS['c5_m1'].stages[0];
+    expect(gauntlet).toContainEqual({ kind: 'survive', seconds: 180 });
+    expect(gauntlet).toContainEqual({ kind: 'kill', enemy: 'hive_interceptor', amount: 6 });
+
+    // §4.4: the two flight archetypes' own HP (AC-12).
+    expect(ENEMIES['hive_interceptor'].hp).toBe(20);
+    expect(ENEMIES['scav_fighter'].hp).toBe(40);
+
+    // §4.9: the final defence spawns inside 40 m, so its waves reach the
+    // beacon instead of milling at the ring's far edge (AC-28).
+    expect(WAVES['eden_final'].spawnBand).toEqual([25, 40]);
   });
 
   it('no brief and no dialogue line names a compass direction (§4.10)', () => {

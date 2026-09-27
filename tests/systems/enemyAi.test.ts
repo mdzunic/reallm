@@ -534,3 +534,40 @@ describe('SPEC-030 — hiding from enemies (AC-26..AC-28)', () => {
     expect(h.world.time - h.combat.lastShotAt).toBeGreaterThanOrEqual(1.5);
   });
 });
+
+// ---------------------------------------------------------------- SPEC-034
+
+/**
+ * SPEC-034 §4.1, §6.1 — the review's `stuck-enemy.test.ts`.
+ *
+ * The enemy step slides per axis against obstacles exactly as the player's
+ * does, so an enemy a projectile knocked into a rock was refused every
+ * direction and stood there for the rest of the visit. §4.1 resolves the body
+ * out *before* the slide, so it walks out and comes back into range.
+ */
+describe('an enemy shot into a rock walks out again (SPEC-034 §4.1)', () => {
+  it('a skitter knocked inside a rock reaches its firing range within 5 s', () => {
+    const h = harness({ obstacles: new CircleObstacles([{ x: 8, z: 0, radius: 3 }]) });
+    // Knocked 0.3 m past the rock's near edge (`ENEMY_KNOCKBACK`), the way a
+    // projectile from the player at the origin would put it.
+    const e = h.spawn('dust_skitter', 8 - 3 + 0.1, 0);
+    e.aggro = true;
+    e.state = 'chase';
+    expect(h.world.obstacles.hitsCircle(e.x, e.z, e.radius)).toBe(true);
+    // Its melee reach, from the player at the origin.
+    const attack = e.def.attack;
+    const reach = (attack.kind === 'none' ? 0 : attack.range) + h.world.player.radius + e.radius;
+    const steps = runUntil(h, 5, () => Math.hypot(e.x - h.world.player.x, e.z - h.world.player.z) <= reach);
+    expect(steps, 'steps to reach its firing range').toBeGreaterThan(0);
+    expect(h.world.obstacles.hitsCircle(e.x, e.z, e.radius)).toBe(false);
+  });
+
+  it('resolves out of a rock on the first step, before the slide', () => {
+    const h = harness({ obstacles: new CircleObstacles([{ x: 8, z: 0, radius: 3 }]) });
+    const e = h.spawn('wurmling', 8.5, 0.5);
+    e.aggro = true;
+    e.state = 'chase';
+    h.step();
+    expect(h.world.obstacles.hitsCircle(e.x, e.z, e.radius)).toBe(false);
+  });
+});

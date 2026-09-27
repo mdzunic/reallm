@@ -19,7 +19,18 @@ export interface ObstacleGrid {
   lineHit(x0: number, z0: number, x1: number, z1: number): number | null;
   /** `lineHit === null`: nothing between the two points. */
   lineClear(x0: number, z0: number, x1: number, z1: number): boolean;
+  /**
+   * SPEC-034 §4.1: writes into `out` the nearest position at which the circle
+   * overlaps no obstacle, reached along the shortest way out, and returns
+   * `true` when it moved the circle. Never allocates.
+   */
+  resolveCircle(x: number, z: number, radius: number, out: { x: number; z: number }): boolean;
 }
+
+/** SPEC-034 §4.1: relaxation passes `resolveCircle` takes before it gives up. */
+export const RESOLVE_PASSES = 4;
+/** SPEC-034 §4.1: the extra gap a push out of an obstacle leaves behind. */
+export const RESOLVE_SKIN = 0.01;
 
 /** The boss arena (§4.5, edge 11-e). `locked` drops on `boss:defeated` (§4.7). */
 export interface ArenaState {
@@ -80,6 +91,63 @@ export class CircleObstacles implements ObstacleGrid {
   lineClear(x0: number, z0: number, x1: number, z1: number): boolean {
     return this.lineHit(x0, z0, x1, z1) === null;
   }
+
+  resolveCircle(x: number, z: number, radius: number, out: { x: number; z: number }): boolean {
+    return resolveAgainstCircles(this.circles, x, z, radius, out);
+  }
+}
+
+/**
+ * SPEC-034 §4.1: pushes a circle out of every obstacle it overlaps, deepest
+ * first, by the penetration plus `RESOLVE_SKIN`, for up to `RESOLVE_PASSES`
+ * passes. Coincident centres push along +x. Shared by `CircleObstacles` and
+ * `systems/Layout`'s bucketed grid, so both resolve identically.
+ */
+export function resolveAgainstCircles(
+  circles: readonly ObstacleCircle[],
+  x: number,
+  z: number,
+  radius: number,
+  out: { x: number; z: number },
+): boolean {
+  let cx = x;
+  let cz = z;
+  let moved = false;
+  for (let pass = 0; pass < RESOLVE_PASSES; pass++) {
+    let deepest: ObstacleCircle | null = null;
+    let deepestPen = 0;
+    for (let i = 0; i < circles.length; i++) {
+      const c = circles[i] as ObstacleCircle;
+      const dx = cx - c.x;
+      const dz = cz - c.z;
+      const reach = c.radius + radius;
+      const dSq = dx * dx + dz * dz;
+      if (dSq > reach * reach) continue;
+      const pen = reach - Math.sqrt(dSq);
+      if (deepest === null || pen > deepestPen) {
+        deepest = c;
+        deepestPen = pen;
+      }
+    }
+    if (deepest === null) break;
+    let nx = cx - deepest.x;
+    let nz = cz - deepest.z;
+    const len = Math.sqrt(nx * nx + nz * nz);
+    if (len < 1e-6) {
+      nx = 1;
+      nz = 0;
+    } else {
+      nx /= len;
+      nz /= len;
+    }
+    const push = deepestPen + RESOLVE_SKIN;
+    cx += nx * push;
+    cz += nz * push;
+    moved = true;
+  }
+  out.x = cx;
+  out.z = cz;
+  return moved;
 }
 
 /** An empty grid, for open ground and tests. */

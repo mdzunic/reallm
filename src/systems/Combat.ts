@@ -16,7 +16,7 @@ import type { InputState } from '@/core/Input';
 import { log } from '@/core/Log';
 import { Pool } from '@/core/Pool';
 import type { Rng } from '@/core/Rng';
-import type { Save } from '@/core/Save';
+import { maxHp, type Save } from '@/core/Save';
 import { SpatialHash } from '@/core/SpatialHash';
 import {
   CLASSES,
@@ -70,6 +70,9 @@ export const KNOCKBACK_CLAMP_PER_STEP = 1;
 export const ENEMY_KNOCKBACK = 0.3;
 /** SPEC-029 §4.5: blasts push non-boss, non-static enemies this far outward. */
 export const BLAST_KNOCKBACK = 1.2;
+
+/** SPEC-034 §4.1: the scratch vector every `resolveCircle` call writes into. */
+const RESOLVED = { x: 0, z: 0 };
 /** SPEC-029 §4.3: every explosive item's blast falls off at 0.5. */
 export const EXPLOSIVE_FALLOFF = 0.5;
 /** SPEC-029 §4.6: a thrown grenade flies at 14 m/s. */
@@ -133,7 +136,8 @@ export function computePlayerStats(save: Save, boosts?: { damageMult?: number; m
   const hazardResist = armorItem.kind === 'armor' ? armorItem.hazardResist : 0;
   const scanner = companionEffect(save, 'scanner_drone');
   return {
-    maxHp: TUNING.PLAYER_BASE_HP + (passive.maxHpBonus ?? 0) + 8 * a.vigor + 4 * (level - 1),
+    // SPEC-034 §4.14: the one formula, now in `core/Save.ts`.
+    maxHp: maxHp(save.player.classId, a, level),
     damageMult:
       (passive.damageMult ?? 1) * (1 + 0.04 * a.might) * (1 + 0.02 * (level - 1)) * (boosts?.damageMult ?? 1),
     moveSpeed: TUNING.PLAYER_SPEED * (passive.moveSpeedMult ?? 1) * (1 + 0.02 * a.agility) * (boosts?.moveMult ?? 1),
@@ -225,7 +229,11 @@ export type LootDrop =
 
 /** The slice of SPEC-010's `Economy` combat hands to SPEC-012's pickup flow. */
 export interface EconomyPort {
-  addResource(resource: ResourceId, amount: number, source: 'pickup' | 'reward' | 'voucher' | 'subsidy'): { added: number; blocked: number };
+  addResource(
+    resource: ResourceId,
+    amount: number,
+    source: 'pickup' | 'reward' | 'voucher' | 'subsidy',
+  ): { added: number; shipped: number; blocked: number };
   addItem(itemId: ItemId, qty: number): { added: number; blocked: number };
 }
 
@@ -298,7 +306,16 @@ export class Combat {
 
     // §4.1: recomputed on level-up and equip; consumables and weather go
     // through `applyConsumable` / `setWeatherMoveMult` (AC-66).
-    events.on('player:leveledUp', () => this.#recomputeStats(), this);
+    events.on('player:leveledUp', () => {
+      // SPEC-034 §4.14, E20: the live HP rises with the max, so a level-up on
+      // the surface is the grant the save already recorded.
+      const before = this.#world.stats.maxHp;
+      this.#recomputeStats();
+      const gain = this.#world.stats.maxHp - before;
+      if (gain > 0 && this.#world.player.alive) {
+        this.#world.player.hp = Math.min(this.#world.stats.maxHp, this.#world.player.hp + gain);
+      }
+    }, this);
     events.on('gear:equipped', () => {
       // SPEC-028 §4.2: the loadout re-reads the save, so the weapon in hand
       // follows whichever slot moved; armor still moves the derived stats.
@@ -526,7 +543,9 @@ export class Combat {
   #summonRing(e: EnemyEntity, enemy: EnemyId, count: number, radius: number): void {
     for (let k = 0; k < count; k++) {
       const angle = (k / count) * Math.PI * 2;
-      this.spawnEnemy(enemy, e.x + Math.cos(angle) * radius, e.z + Math.sin(angle) * radius, false);
+      const summon = this.spawnEnemy(enemy, e.x + Math.cos(angle) * radius, e.z + Math.sin(angle) * radius, false);
+      // SPEC-034 §4.6, E57: the summon belongs to this boss, and dies with it.
+      summon.summonedBy = e.id;
     }
   }
 
@@ -588,6 +607,8 @@ export class Combat {
     // the enemies it spawns into a wave run.
     e.lostTrack = 0;
     e.fromWave = false;
+    // SPEC-034 §4.6: `#summonRing` stamps its boss on the entities it makes.
+    e.summonedBy = 0;
     // Set immediately before the emit, so a subscriber can read the position.
     this.#lastSpawned = e;
     this.#events.emit('enemy:spawned', { enemyId: id, elite: isElite });
@@ -799,6 +820,11 @@ export class Combat {
       if (len > 1e-6) {
         e.x += (p.vx / len) * ENEMY_KNOCKBACK;
         e.z += (p.vz / len) * ENEMY_KNOCKBACK;
+        // SPEC-034 §4.1: an enemy shot into a rock is resolved back out of it.
+        if (this.#world.obstacles.resolveCircle(e.x, e.z, e.radius, RESOLVED)) {
+          e.x = RESOLVED.x;
+          e.z = RESOLVED.z;
+        }
       }
     }
     this.#damageEnemy(e, p.damage, p.owner === 'drone' ? 'drone' : 'player');
@@ -1127,6 +1153,11 @@ export class Combat {
       }
       p.x += (dx / d) * (reach - d);
       p.z += (dz / d) * (reach - d);
+      // SPEC-034 §4.1: a shove out of an enemy must not end inside a rock.
+      if (w.obstacles.resolveCircle(p.x, p.z, p.radius, RESOLVED)) {
+        p.x = RESOLVED.x;
+        p.z = RESOLVED.z;
+      }
     }
   }
 
@@ -1134,8 +1165,14 @@ export class Combat {
     const len = Math.hypot(this.#kbX, this.#kbZ);
     if (len > 1e-6) {
       const scale = Math.min(len, KNOCKBACK_CLAMP_PER_STEP) / len;
-      this.#world.player.x += this.#kbX * scale;
-      this.#world.player.z += this.#kbZ * scale;
+      const p = this.#world.player;
+      p.x += this.#kbX * scale;
+      p.z += this.#kbZ * scale;
+      // SPEC-034 §4.1: a hit never leaves the player inside an obstacle.
+      if (this.#world.obstacles.resolveCircle(p.x, p.z, p.radius, RESOLVED)) {
+        p.x = RESOLVED.x;
+        p.z = RESOLVED.z;
+      }
     }
     this.#kbX = 0;
     this.#kbZ = 0;

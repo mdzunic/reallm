@@ -19,6 +19,11 @@ interface Row {
   root: HTMLDivElement;
   check: HTMLSpanElement;
   text: HTMLSpanElement;
+  /** SPEC-034 §4.9: the defended POI's health bar, built on first use. */
+  hp: HTMLDivElement | null;
+  hpFill: HTMLDivElement | null;
+  hpText: HTMLSpanElement | null;
+  hpShown: number;
 }
 
 export class Tracker {
@@ -72,12 +77,14 @@ export class Tracker {
       const check = data.done ? '✓' : '';
       if (row.check.textContent !== check) row.check.textContent = check;
       if (row.text.textContent !== data.text) row.text.textContent = data.text;
+      this.#setDefendHp(row, data.defendHp);
       if (data.focus) focus = row;
     }
     for (let i = model.rows.length; i < this.#rows.length; i++) {
       const row = this.#rows[i] as Row;
       row.root.classList.add('is-hidden');
       row.text.classList.remove('hud-objective');
+      this.#setDefendHp(row, null);
     }
 
     if (focus === null || model.distance === null) {
@@ -115,6 +122,40 @@ export class Tracker {
     this.#onCycle();
   };
 
+  /**
+   * SPEC-034 §4.9: the defended POI's health, as a percentage on the row and a
+   * thin bar under it — amber under half, red under a quarter. The bar is built
+   * on the first defend stage a session sees and stays with its pooled row.
+   */
+  #setDefendHp(row: Row, fraction: number | null): void {
+    if (fraction === null) {
+      row.hp?.classList.add('is-hidden');
+      row.hpShown = Number.NaN;
+      return;
+    }
+    if (row.hp === null) {
+      const label = el('span', 'tracker-defend-pct');
+      const fill = el('div', 'tracker-defend-fill');
+      const track = el('div', 'tracker-defend-track');
+      track.append(fill);
+      const bar = testId(el('div', 'tracker-defend-hp'), 'tracker-defend-hp');
+      bar.append(label, track);
+      row.hp = bar;
+      row.hpFill = fill;
+      row.hpText = label;
+      row.root.append(bar);
+    }
+    row.hp.classList.remove('is-hidden');
+    const percent = Math.round(fraction * 100);
+    if (percent === row.hpShown) return;
+    row.hpShown = percent;
+    (row.hpFill as HTMLDivElement).style.width = `${percent}%`;
+    (row.hpText as HTMLSpanElement).textContent = `${percent}%`;
+    row.hp.dataset['hp'] = String(percent);
+    row.hp.classList.toggle('is-warn', fraction < 0.5 && fraction >= 0.25);
+    row.hp.classList.toggle('is-danger', fraction < 0.25);
+  }
+
   /** The pooled row at `index`, built on first use and reused after (D-28). */
   #rowAt(index: number): Row {
     let row = this.#rows[index];
@@ -123,7 +164,7 @@ export class Tracker {
       const text = el('span', 'tracker-text');
       const root = el('div', 'tracker-row');
       root.append(check, text);
-      row = { root, check, text };
+      row = { root, check, text, hp: null, hpFill: null, hpText: null, hpShown: Number.NaN };
       this.#rows.push(row);
       this.#list.append(root);
     }

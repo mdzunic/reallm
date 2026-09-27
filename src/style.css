@@ -574,6 +574,8 @@ button.slot-button {
   --panel-edge: #22303c;
   --ink: #e6edf3;
   --ink-dim: #8a97a3;
+  /* SPEC-034 §4.9: the red a defended structure's health falls to. */
+  --danger: #e5484d;
 
   /* SPEC-020 §4.5 — the dark sci-fi theme (*initial tuning*). Every rule below
      is expressed through these, so a retheme is a token swap and never a
@@ -2423,6 +2425,10 @@ html.debug .scene-tag {
   align-items: center;
   gap: 8px;
   flex-wrap: wrap;
+  /* SPEC-031: the row head doubles as the card's opener. Folded in here by
+     SPEC-034 §4.11 — a second top-level `.shop-row-head` is exactly the shape
+     of the collision that hid the awakening burst. */
+  cursor: pointer;
 }
 
 .shop-name {
@@ -2929,8 +2935,10 @@ button.hud-button {
   color: var(--warn);
 }
 
-/* The storm warning wears the ▲ half of the colorblind pair in its text. */
-.hud-storm {
+/* The storm warning wears the ▲ half of the colorblind pair in its text.
+   SPEC-034 §4.11: its own class — as `.hud-storm` it restyled the surface's
+   storm vignette, which is a radial tint and not a pill. */
+.hud-storm-warn {
   font-size: 13px;
   color: var(--warn);
   background: rgba(0, 0, 0, 0.45);
@@ -2939,10 +2947,14 @@ button.hud-button {
 }
 
 /* The ion-storm static overlay: a repeating scanline sheet, no animation
-   needed to read as interference — safe under reduce-motion as-is. */
-.hud-static {
+   needed to read as interference — safe under reduce-motion as-is.
+   SPEC-034 §4.11: its own class — as `.hud-static` it overwrote the awakening
+   burst's alphas, so every glitch beat's static was invisible. */
+.hud-ion {
   position: absolute;
   inset: 0;
+  pointer-events: none;
+  opacity: 1;
   background: repeating-linear-gradient(
     0deg,
     rgba(160, 190, 220, 0.06) 0 1px,
@@ -3532,6 +3544,39 @@ html.reduce-motion .reveal-name.is-glitched {
 .tracker-check {
   color: var(--good);
   min-width: 0.9em;
+}
+
+/* SPEC-034 §4.9: the defended POI's health under its tracker row — the number
+   as text and a thin bar, amber under half and red under a quarter. */
+.tracker-defend-hp {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  font-size: 11px;
+  color: var(--ink-dim);
+}
+
+.tracker-defend-track {
+  flex: 1;
+  height: 3px;
+  background: rgba(255, 255, 255, 0.14);
+  border-radius: 2px;
+  overflow: hidden;
+}
+
+.tracker-defend-fill {
+  height: 100%;
+  width: 100%;
+  background: var(--good);
+}
+
+.tracker-defend-hp.is-warn .tracker-defend-fill {
+  background: var(--warn);
+}
+
+.tracker-defend-hp.is-danger .tracker-defend-fill {
+  background: var(--danger);
 }
 
 .tracker-row.is-focus .tracker-text {
@@ -4155,11 +4200,6 @@ html.reduce-motion .screen-body > * {
   }
 }
 
-/* The row head doubles as the card's opener. */
-.shop-row-head {
-  cursor: pointer;
-}
-
 /* SPEC-031:end */
 
 /* SPEC-031 §4.15: with an icon above it, the slot's short name drops to the
@@ -4167,4 +4207,16 @@ html.reduce-motion .screen-body > * {
    the same exemption SPEC-028's labels carry in tests/ui/theme.test.ts). */
 .qb-slot .qb-name {
   font-size: 11px;
+}
+
+/* SPEC-034 §4.16: the departure veil — a full-screen black sheet over the star
+   map from the film's end until the flight scene has entered, so the map is
+   never seen re-rendering a paid fuel as a shortfall while the next scene
+   loads. Above every screen layer, and it takes no pointer events. */
+.depart-veil {
+  position: fixed;
+  inset: 0;
+  background: #000;
+  z-index: 90;
+  pointer-events: none;
 }

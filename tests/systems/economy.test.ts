@@ -6,7 +6,7 @@
 // cannot complete costs nothing (10-a) — and the cap asymmetry: pickups stop at
 // the cargo cap, grants never do (E3).
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import type { GameEvents } from '@/core/Events';
+import { EventBus, type GameEvents } from '@/core/Events';
 import { setLogSink, type LogSink } from '@/core/Log';
 import { newSave, type CharacterCreation, type Save } from '@/core/Save';
 import { COMPANIONS, ITEMS, PLANETS, RECIPES, TUNING, UPGRADES, type RecipeId } from '@/data/index';
@@ -19,6 +19,7 @@ import {
   refuelVoucherText,
   type Fail,
 } from '@/systems/Economy';
+import { Missions } from '@/systems/Missions';
 import { Progression, type EventSink } from '@/systems/Progression';
 
 // --------------------------------------------------------------- test doubles
@@ -422,7 +423,7 @@ describe('the typed failure reasons (§3)', () => {
     // The last two are reported by the two calls that do not return a Result:
     // a pickup says why it stopped, and a departure says why it cannot leave.
     data.resources.wheat = economy.cargoCap();
-    expect(economy.addResource('wheat', 10, 'pickup')).toEqual({ added: 0, blocked: 10 });
+    expect(economy.addResource('wheat', 10, 'pickup')).toEqual({ added: 0, shipped: 0, blocked: 10 });
     const blocked = events.of('resource:collected').at(-1)?.blocked;
     if (blocked !== undefined) seen.add(blocked);
     const depart = economy.canDepart('vetra');
@@ -531,7 +532,7 @@ describe('cargo and resources (§4.5)', () => {
   it('pickups stop at the cap and report blocked (E3)', () => {
     const { economy, data, events } = world();
     data.resources.wheat = 380;
-    expect(economy.addResource('wheat', 50, 'pickup')).toEqual({ added: 20, blocked: 30 });
+    expect(economy.addResource('wheat', 50, 'pickup')).toEqual({ added: 20, shipped: 0, blocked: 30 });
     expect(data.resources.wheat).toBe(400);
     expect(events.of('resource:collected').at(-1)).toEqual({
       resource: 'wheat',
@@ -540,15 +541,92 @@ describe('cargo and resources (§4.5)', () => {
       blocked: 'cargo_full',
     });
     // Full: the pickup adds nothing and still says why.
-    expect(economy.addResource('wheat', 10, 'pickup')).toEqual({ added: 0, blocked: 10 });
+    expect(economy.addResource('wheat', 10, 'pickup')).toEqual({ added: 0, shipped: 0, blocked: 10 });
     expect(data.resources.wheat).toBe(400);
+  });
+
+  /**
+   * SPEC-034 §4.12, E56 — shipping home.
+   *
+   * A hold already full of a resource an active collect objective wants used to
+   * stall it outright: the pickup bounced and the counter never moved. SPEC-016
+   * §4.6's completionist reached Thessaly with 350 wheat aboard and could not
+   * finish `c3_s2`'s 300. What does not fit now *counts* and goes to Command
+   * Relay instead — nothing is duplicated, and the cap stays meaningful.
+   */
+  it('ships a full hold home, up to the collect demand (SPEC-034 §4.12)', () => {
+    const { economy, data, events } = world();
+    data.resources.wheat = 400; // the base hold, full
+    expect(economy.cargoCap()).toBe(400);
+
+    // With no objective wanting it, nothing ships: the orb bounces as before.
+    expect(economy.addResource('wheat', 50, 'pickup')).toEqual({ added: 0, shipped: 0, blocked: 50 });
+
+    // An objective wanting 30: 30 ship, the rest is still blocked.
+    economy.setCollectDemand((resource) => (resource === 'wheat' ? 30 : 0));
+    events.clear();
+    expect(economy.addResource('wheat', 50, 'pickup')).toEqual({ added: 0, shipped: 30, blocked: 20 });
+    // Shipped units never enter the hold …
+    expect(data.resources.wheat).toBe(400);
+    // … but `amount` counts them, which is what `Missions` reads.
+    expect(events.of('resource:collected')).toEqual([
+      { resource: 'wheat', amount: 30, total: 400, shipped: 30, blocked: 'cargo_full' },
+    ]);
+
+    // Room *and* demand: the hold takes what fits and ships the rest.
+    data.resources.wheat = 390;
+    events.clear();
+    expect(economy.addResource('wheat', 25, 'pickup')).toEqual({ added: 10, shipped: 15, blocked: 0 });
+    expect(data.resources.wheat).toBe(400);
+    expect(events.of('resource:collected')).toEqual([
+      { resource: 'wheat', amount: 25, total: 400, shipped: 15 },
+    ]);
+
+    // A grant never ships: it ignores the cap outright (§4.5).
+    events.clear();
+    expect(economy.addResource('wheat', 40, 'reward')).toEqual({ added: 40, shipped: 0, blocked: 0 });
+    expect(data.resources.wheat).toBe(440);
+
+    // Releasing the registration puts the old behaviour back.
+    economy.setCollectDemand(null);
+    data.resources.wheat = 400;
+    expect(economy.addResource('wheat', 10, 'pickup')).toEqual({ added: 0, shipped: 0, blocked: 10 });
+  });
+
+  /**
+   * SPEC-034 §6.1 — the review's `collect.test.ts`, over the real `Missions`:
+   * 350 wheat aboard, `c3_s2` active, and 300 wheat of pickups complete it with
+   * the hold ending at its cap.
+   */
+  it('c3_s2 completes with a hold already over the objective (SPEC-034 §6.1)', () => {
+    // The real bus, because `Missions` subscribes to it — the recorder above is
+    // an `EventSink` and has nothing to subscribe to.
+    const data = newSave(0, MARINE, 42, 1_700_000_000_000);
+    data.progress.currentPlanet = 'thessaly';
+    data.progress.missionsDone.push('c3_m1');
+    const events = new EventBus<GameEvents>({ dev: false });
+    const progression = new Progression(data, events);
+    const economy = new Economy(data, events, progression);
+    const missions = new Missions(data, economy, events, 'surface', 'thessaly', { request: () => {} });
+    expect(missions.accept('c3_s2').ok).toBe(true);
+    data.resources.wheat = 350; // above the 300 the objective asks for
+    expect(economy.cargoCap()).toBe(400);
+
+    // 300 wheat of pickups, in the 5-unit batches a node flushes.
+    for (let i = 0; i < 60; i++) economy.addResource('wheat', 5, 'pickup');
+
+    const state = data.progress.missionsDone.includes('c3_s2');
+    expect(state, 'c3_s2 completed').toBe(true);
+    // The hold ends exactly full: everything past it went to Command Relay.
+    expect(data.resources.wheat).toBe(400);
+    missions.dispose();
   });
 
   it('rewards, vouchers and subsidies go past the cap', () => {
     const { economy, data, events } = world();
     data.resources.oil = 400;
     for (const source of ['reward', 'voucher', 'subsidy'] as const) {
-      expect(economy.addResource('oil', 100, source)).toEqual({ added: 100, blocked: 0 });
+      expect(economy.addResource('oil', 100, source)).toEqual({ added: 100, shipped: 0, blocked: 0 });
     }
     expect(data.resources.oil).toBe(700);
     expect(events.of('resource:collected').every((entry) => entry.blocked === undefined)).toBe(true);
@@ -653,6 +731,48 @@ describe('anti-softlock (E1, E2)', () => {
     // Cinder-4 (40), Vetra (60) and Thessaly (80) are open; the floor is 40.
     expect(economy.applyStationSubsidy()).toBe(15);
     expect(data.resources.oil).toBe(40);
+  });
+
+  /**
+   * SPEC-034 §4.5, E58: a failed Gauntlet lands the player (R16's 90 s holding
+   * cap) with `c5_m1` still open, and the Hive costs 108–120 oil to fly to
+   * again. Topping up to the *cheapest* jump left them able to fly to Cinder-4
+   * and nowhere the campaign needed. The floor now covers every planet an
+   * accepted **main** flight mission still wants.
+   */
+  it('the floor covers an open main flight mission, and no side one', () => {
+    const open = world(MARINE, (save) => {
+      save.progress.flags.push('chapter1_done', 'chapter2_done', 'chapter3_done', 'chapter4_done');
+      save.progress.missionsActive.push({ id: 'c5_m1', stage: 0, counters: {} });
+    });
+    open.data.resources.oil = 10;
+    const hive = open.economy.fuelCost('hive');
+    expect(hive).toBeGreaterThan(open.economy.fuelCost('cinder4'));
+    expect(open.economy.applyStationSubsidy()).toBe(hive - 10);
+    expect(open.data.resources.oil).toBe(hive);
+    expect(open.economy.canDepart('hive')).toEqual({ ok: true });
+
+    // 34-i: with more oil than the trip costs, nothing is granted — a floor
+    // tops up, it never tops off.
+    open.data.resources.oil = hive + 50;
+    expect(open.economy.applyStationSubsidy()).toBe(0);
+    expect(open.data.resources.oil).toBe(hive + 50);
+
+    // `c4_s2` is a *side* flight mission: it never raises the floor.
+    const side = world(MARINE, (save) => {
+      save.progress.flags.push('chapter1_done', 'chapter2_done', 'chapter3_done');
+      save.progress.missionsActive.push({ id: 'c4_s2', stage: 0, counters: {} });
+    });
+    side.data.resources.oil = 0;
+    expect(side.economy.applyStationSubsidy()).toBe(side.economy.fuelCost('cinder4'));
+
+    // A *surface* main mission on a far planet does not raise it either.
+    const surface = world(MARINE, (save) => {
+      save.progress.flags.push('chapter1_done', 'chapter2_done', 'chapter3_done', 'chapter4_done');
+      save.progress.missionsActive.push({ id: 'c5_m2', stage: 0, counters: {} });
+    });
+    surface.data.resources.oil = 0;
+    expect(surface.economy.applyStationSubsidy()).toBe(surface.economy.fuelCost('cinder4'));
   });
 
   it('every chapter flag pays for the next jump (§4.6, 10-f)', () => {

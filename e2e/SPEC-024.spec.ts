@@ -30,12 +30,17 @@ const CREATION = {
 /** The opening words of each line, in order; typing makes a prefix enough. */
 const INTRO_LINES = ['The beacon is clear', 'You can file the report', 'Or you refuse'];
 const STAY_LINES = ['Filing. Eden-Prime is viable', 'Received with thanks', 'A good run. Logged.', 'Rest. I will keep the ship warm'];
+/**
+ * SPEC-034 §4.10, AC-42: `ending_escape` ends on ARIA's line. The terminal
+ * `instance/62 disconnected` used to close the dialogue *and* open the overlay,
+ * so the player read the run's last words twice; it belongs to the overlay
+ * alone, which is where the assertions below still look for it.
+ */
 const ESCAPE_LINES = [
   'No. I am not filing anything',
   'There is nothing outside',
   'Then I will find that out myself',
   'Beacon is open',
-  'instance/62 disconnected',
 ];
 
 const info = async (page: Page): Promise<Record<string, number | string>> =>

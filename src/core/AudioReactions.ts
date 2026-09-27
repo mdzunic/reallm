@@ -124,10 +124,16 @@ const SILENT_EVENTS = [
   'settings:changed',
   'player:healed',
   'player:respawned',
+  // SPEC-034 §4.2: the recall's own `player:respawned` carries the sound.
+  'player:recalled',
+  // SPEC-034 §4.6: a dismissal is not a death — it has no sting of its own.
+  'enemy:dismissed',
   'player:xp',
   'tokens:changed',
   'resource:spent',
   'inventory:changed',
+  // SPEC-034 §4.15: the toast beside it is the sound.
+  'item:noRoom',
   'gear:equipped',
   // SPEC-028: the quick-slot spend stays silent — the consumable's own effect
   // (heal, boost) already carries the feedback. SPEC-029 §4.12 gave the switch

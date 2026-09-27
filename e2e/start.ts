@@ -19,6 +19,8 @@ export interface DevBridge {
   audio(): AudioBridge;
   /** SPEC-014 §4.6: raises a toast of any kind, for the toast-layer suite. */
   toast(text: string, kind?: string, ms?: number): void;
+  /** SPEC-034 §3: plays a dialogue into the shared layer (dev builds only). */
+  playDialogue(id: string): void;
   trace(): string[];
   /** SPEC-015 AC-52: stands in for a waiting service worker (dev builds only). */
   offerUpdate(apply: () => void): void;

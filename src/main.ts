@@ -16,9 +16,11 @@ import { SERVICE_OFF_TEXT, SERVICE_ON_TEXT } from '@/systems/Service';
 import { offerUpdate } from '@/core/Updates';
 import type { SceneId } from '@/core/StateMachine';
 import { ASSETS } from '@/data/assets';
+import type { DialogueId } from '@/data/index';
 import { GAME_SCENES } from '@/scenes/index';
 import { BootOverlay } from '@/ui/BootOverlay';
 import { ContextLostOverlay } from '@/ui/ContextLostOverlay';
+import { dialogueLayer } from '@/ui/DialogueUI';
 import { uiLayers } from '@/ui/dom';
 import { StatsOverlay } from '@/ui/StatsOverlay';
 import { TransitionOverlay } from '@/ui/TransitionOverlay';
@@ -232,6 +234,19 @@ if (import.meta.env.DEV) {
     toast: (text: string, kind?: GameEvents['ui:toast']['kind'], ms?: number) =>
       events.emit('ui:toast', { text, kind, ms }),
     trace: () => game.trace(),
+    /**
+     * SPEC-034 §3: plays a dialogue into the live layer, for the e2e cases that
+     * need a modal line up (§6.2 cases 2 and 3). Dev builds only, and it goes
+     * through the same `dialogueLayer` the scenes share, so the surface's own
+     * `#modalOpen` sees it through `dialogue:started`.
+     */
+    playDialogue: (id: DialogueId) => {
+      void dialogueLayer(uiRoot, events, {
+        input,
+        saveKey: () => save.current,
+        reduceMotion: () => settings.get().reduceMotion,
+      }).play(id);
+    },
     /**
      * SPEC-015 AC-52: stands in for the service worker so the update flow is
      * testable in a dev server, which registers none — the banner, the menu and

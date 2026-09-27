@@ -32,6 +32,7 @@ import {
   migrate,
   newSave,
   PROBE_KEY,
+  RESOURCE_CEILING,
   SAVE_CONTENT,
   SAVE_FAILED_TEXT,
   SAVE_VERSION,
@@ -189,8 +190,8 @@ describe('newSave (§4.1)', () => {
     expect(fresh.player.level).toBe(1);
     expect(fresh.player.xp).toBe(0);
     expect(fresh.player.tokens).toBe(0);
-    // maxHp(marine, vigor 5, level 1) = 100 + 5 x 10 + 0.
-    expect(fresh.player.hp).toBe(150);
+    // SPEC-034 §4.14: maxHp(marine, vigor 5, level 1) = 100 + 20 + 8 x 5 + 0.
+    expect(fresh.player.hp).toBe(160);
   });
 
   it('equips the class starter weapon, the service pistol and scrap armor (AC-8, SPEC-025)', () => {
@@ -611,24 +612,26 @@ describe('validateSave (§4.4)', () => {
     expect(expectOk(withPatch({ meta: { ...meta, iteration: 0 } })).data.meta.iteration).toBe(1);
   });
 
-  it('clamps resources to 0..cargoCap and drops resources it does not know (AC-24)', () => {
+  it('clamps resources to 0..RESOURCE_CEILING, never to the cargo cap (AC-24, SPEC-034 §4.13)', () => {
     const ok = expectOk(
-      withPatch({ resources: { oil: 99_999, wheat: -20, water: 20, lithium: 0, unobtainium: 5 } }),
+      withPatch({ resources: { oil: 120_000, wheat: -20, water: 20.7, lithium: 0, unobtainium: 5 } }),
     );
-    expect(ok.data.resources).toEqual({ oil: 400, wheat: 0, water: 20, lithium: 0 });
+    // SPEC-034 §4.13: the hold's cap belongs to the economy, on pickups only —
+    // a reward or a voucher may stand above it, and this used to delete it.
+    expect(ok.data.resources).toEqual({ oil: RESOURCE_CEILING, wheat: 0, water: 20, lithium: 0 });
     expect(ok.warnings.join('\n')).toContain('unobtainium');
 
-    // A bigger cargo hold raises the cap it clamps to.
+    // The base hold no longer clamps a hoard that a grant built.
     const roomy = expectOk(
-      withPatch({ resources: { oil: 99_999, wheat: 0, water: 0, lithium: 0 }, ship: { engine: 0, hull: 0, shield: 0, cargo: 3, weapon: 0 } }),
+      withPatch({ resources: { oil: 1500, wheat: 0, water: 0, lithium: 0 }, ship: { engine: 0, hull: 0, shield: 0, cargo: 0, weapon: 0 } }),
     );
-    expect(roomy.data.resources.oil).toBe(1200);
+    expect(roomy.data.resources.oil).toBe(1500);
   });
 
   it('clamps hp to 0..maxHp with a warning (AC-25)', () => {
     const player = newSave(0, CREATION, 1, 0).player;
     const ok = expectOk(withPatch({ player: { ...player, hp: 5000 } }));
-    expect(ok.data.player.hp).toBe(150);
+    expect(ok.data.player.hp).toBe(160); // SPEC-034 §4.14
     expect(ok.warnings.join('\n')).toContain('player.hp');
     expect(expectOk(withPatch({ player: { ...player, hp: -3 } })).data.player.hp).toBe(0);
   });
@@ -689,7 +692,60 @@ describe('validateSave (§4.4)', () => {
     expect(ok.warnings.join('\n')).toContain('atlantis');
   });
 
-  it('drops active missions that are done or unknown, and clamps the stage (AC-30)', () => {
+  /**
+   * SPEC-034 §4.13, §6.1 — the review's `cargo.test.ts`.
+   *
+   * The validator clamped every resource to the cargo cap on load, so a hoard
+   * the game itself had granted — a reward, a refuel voucher, the quartermaster's
+   * own bonus tier — was deleted on the next reload. SPEC-010 §4.5 is explicit
+   * that a grant is never silently lost; the cap belongs to the economy, on
+   * pickups only.
+   */
+  it('a hold above the base cap reloads unchanged (SPEC-034 §6.1)', () => {
+    // 500 oil with a quartermaster aboard.
+    const quartermaster = expectOk(
+      withPatch({
+        resources: { oil: 500, wheat: 0, water: 0, lithium: 0 },
+        companions: [{ id: 'quartermaster', level: 1, enabled: true }],
+      }),
+    );
+    expect(quartermaster.data.resources.oil).toBe(500);
+    expect(quartermaster.warnings.join('\n')).not.toContain('resources.oil');
+
+    // 450 oil after a refuel voucher, on the base hold and no companion.
+    const voucher = expectOk(withPatch({ resources: { oil: 450, wheat: 0, water: 0, lithium: 0 } }));
+    expect(voucher.data.resources.oil).toBe(450);
+
+    // Reloading the *validated* save keeps it: the rule is idempotent.
+    expect(expectOk(voucher.data).data.resources.oil).toBe(450);
+  });
+
+  /**
+   * SPEC-034 §4.13, §6.1 — the review's `replay.test.ts`. An accepted replay is
+   * in `missionsDone` *and* `missionsActive`, and the validator dropped it as a
+   * duplicate of a finished mission: every replay vanished on reload, counters
+   * and all, with the tokens already spent on it.
+   */
+  it('a replay with counters survives validateSave (SPEC-034 §6.1)', () => {
+    const progress = newSave(0, CREATION, 1, 0).progress;
+    const ok = expectOk(
+      withPatch({
+        progress: {
+          ...progress,
+          missionsDone: ['c1_m1', 'c1_m2'],
+          // `c1_m1` has three stages; the replay is standing on the second.
+          missionsActive: [{ id: 'c1_m1', stage: 1, counters: { '1:0': 37 } }],
+        },
+      }),
+    );
+    expect(ok.data.progress.missionsActive).toEqual([{ id: 'c1_m1', stage: 1, counters: { '1:0': 37 } }]);
+    // It stays a replay: nothing it unlocked ever re-locks (SPEC-010 E2).
+    expect(ok.data.progress.missionsDone).toContain('c1_m1');
+    // And a second trip through changes nothing.
+    expect(expectOk(ok.data).data.progress.missionsActive).toEqual(ok.data.progress.missionsActive);
+  });
+
+  it('a done mission may be replayed; unknown and duplicate entries drop (AC-30, SPEC-034 §4.13)', () => {
     const progress = newSave(0, CREATION, 1, 0).progress;
     const ok = expectOk(
       withPatch({
@@ -697,15 +753,21 @@ describe('validateSave (§4.4)', () => {
           ...progress,
           missionsDone: ['c1_m1'],
           missionsActive: [
-            { id: 'c1_m1', stage: 0, counters: {} }, // already done
+            { id: 'c1_m1', stage: 0, counters: { '0:0': 2 } }, // a replay — kept
             { id: 'c9_m9', stage: 0, counters: {} }, // unknown
             { id: 'c6_m1', stage: 17, counters: { '0:0': 4, bad: 'x' } }, // 3 stages
+            { id: 'c6_m1', stage: 0, counters: {} }, // duplicate
           ],
         },
       }),
     );
-    expect(ok.data.progress.missionsActive).toEqual([{ id: 'c6_m1', stage: 2, counters: { '0:0': 4 } }]);
-    expect(ok.warnings.join('\n')).toContain('c1_m1 is already done');
+    expect(ok.data.progress.missionsActive).toEqual([
+      { id: 'c1_m1', stage: 0, counters: { '0:0': 2 } },
+      { id: 'c6_m1', stage: 2, counters: { '0:0': 4 } },
+    ]);
+    expect(ok.warnings.join('\n')).toContain('unknown mission "c9_m9"');
+    expect(ok.warnings.join('\n')).toContain('duplicate c6_m1');
+    expect(ok.warnings.join('\n')).not.toContain('already done');
   });
 
   it('does not mistake an Object.prototype key for a mission (AC-27, AC-30)', () => {
@@ -1073,6 +1135,101 @@ describe('export and import codes (§4.6)', () => {
 
     await saves.importCode(code, 0);
     expect(fake.data.get(`reallm:slot:0${BAK_SUFFIX}`)).toBe(previous);
+  });
+
+  /**
+   * SPEC-034 §4.13, §6.1 — the review's `import.test.ts`.
+   *
+   * Importing into the slot the game was playing wrote the code to storage and
+   * left the *running* character bound, so the next autosave put it straight
+   * back over the import and the player's save was silently gone. The import
+   * takes the binding first, and the caller is told to leave for the menu.
+   */
+  it('an import into the bound slot rebinds, and survives two autosaves (SPEC-034 §4.13)', async () => {
+    const fake = fakeStorage();
+    const events = recorder();
+    const saves = store(fake, events);
+
+    // The run being played, and a code from a different character.
+    const other = store(fakeStorage(), recorder());
+    const imported = other.create(0, CREATION);
+    imported.player.name = 'Imported';
+    imported.player.tokens = 777;
+    other.flush();
+    const code = await other.exportCode(0);
+
+    const running = saves.create(0, CREATION);
+    running.player.name = 'Running';
+    running.player.tokens = 1;
+    saves.flush();
+
+    const result = await saves.importCode(code, 0);
+    expect(result.ok).toBe(true);
+    expect(result.ok && result.rebound).toBe(true);
+    // The store is now holding the import, not the character that was in play.
+    expect(saves.current?.player.name).toBe('Imported');
+    expect(saves.current?.player.tokens).toBe(777);
+
+    // Two autosaves later — the window the old code lost the import in — the
+    // slot and its backup both still hold the import.
+    saves.request('manual');
+    saves.flush();
+    saves.request('manual');
+    saves.flush();
+    const main = JSON.parse(fake.data.get('reallm:slot:0') as string) as Save;
+    const bak = JSON.parse(fake.data.get(`reallm:slot:0${BAK_SUFFIX}`) as string) as Save;
+    expect(main.player.name).toBe('Imported');
+    expect(main.player.tokens).toBe(777);
+    expect(bak.player.name).toBe('Imported');
+    expect(main.meta.slot).toBe(0);
+  });
+
+  /**
+   * The other side of the rebind-first ordering above: if the write then fails,
+   * the slot still holds the running character, so the binding has to go back
+   * to it. Left on the import, every later autosave would write the import and
+   * the live run's progress would go nowhere — the same loss the ordering was
+   * introduced to prevent, just one branch over.
+   */
+  it('a failed import write puts the running character back on the binding', async () => {
+    const fake = fakeStorage();
+    const saves = store(fake, recorder());
+
+    const other = store(fakeStorage(), recorder());
+    const imported = other.create(0, CREATION);
+    imported.player.name = 'Imported';
+    other.flush();
+    const code = await other.exportCode(0);
+
+    const running = saves.create(0, CREATION);
+    running.player.name = 'Running';
+    saves.flush();
+
+    fake.failWrites();
+    const result = await saves.importCode(code, 0);
+    expect(result.ok).toBe(false);
+
+    // The binding is the run that is still in the slot, by identity.
+    expect(saves.current).toBe(running);
+    fake.allowWrites();
+    saves.request('manual');
+    saves.flush();
+    const main = JSON.parse(fake.data.get('reallm:slot:0') as string) as Save;
+    expect(main.player.name).toBe('Running');
+  });
+
+  it('an import into another slot leaves the running character bound', async () => {
+    const fake = fakeStorage();
+    const saves = store(fake, recorder());
+    const running = saves.create(0, CREATION);
+    running.player.name = 'Running';
+    saves.flush();
+    const code = await saves.exportCode(0);
+
+    const result = await saves.importCode(code, 2);
+    expect(result.ok).toBe(true);
+    expect(result.ok && result.rebound).toBeUndefined();
+    expect(saves.current).toBe(running);
   });
 
   it('checks the crc of the compressed bytes before decompressing (AC-37, AC-40)', async () => {

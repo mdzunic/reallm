@@ -7,13 +7,16 @@
 // Nothing here touches the DOM, `three`, or `Math.random`, and nothing mutates
 // its inputs except the two mission helpers, which edit the save the way every
 // `systems/` class does (SPEC-010's `Economy` is the model).
+import type { GameEvents } from '@/core/Events';
 import { maxHp, type Save, type SlotSummary } from '@/core/Save';
 import {
   CLASSES,
   COMPANIONS,
+  FOLLOWERS,
   ITEMS,
   MISSIONS,
   PLANETS,
+  POI_LABELS,
   RESOURCE_IDS,
   TUNING,
   UPGRADES,
@@ -21,9 +24,11 @@ import {
   type ClassId,
   type ItemId,
   type CompanionEffect,
+  type FollowerId,
   type MissionDef,
   type MissionId,
   type PlanetId,
+  type PoiId,
   type Price,
   type Requirement,
   type ResourceId,
@@ -412,6 +417,35 @@ export function acceptMission(save: Save, def: MissionDef): boolean {
   return true;
 }
 
+/**
+ * SPEC-034 §4.15: pins `id` by moving its entry to the front of
+ * `progress.missionsActive` — the order the runtime already pins by, so the pin
+ * persists with no save field. False when the mission is not running.
+ */
+export function pinMission(save: Save, id: MissionId): boolean {
+  const list = save.progress.missionsActive;
+  const at = list.findIndex((entry) => entry.id === id);
+  if (at < 0) return false;
+  if (at > 0) {
+    const [entry] = list.splice(at, 1);
+    if (entry !== undefined) list.unshift(entry);
+  }
+  return true;
+}
+
+/**
+ * SPEC-034 §4.15: what is pinned — the front entry of `progress.missionsActive`,
+ * or, with a `planet`, the front entry among that planet's active missions,
+ * which is what its board rows badge.
+ */
+export function pinnedMission(save: Save, planet?: PlanetId): MissionId | null {
+  for (const entry of save.progress.missionsActive) {
+    if (planet !== undefined && MISSIONS[entry.id].planet !== planet) continue;
+    return entry.id;
+  }
+  return null;
+}
+
 /** Drops the mission from the active list; false when it was not running. */
 export function abandonMission(save: Save, id: MissionId): boolean {
   const at = save.progress.missionsActive.findIndex((entry) => entry.id === id);
@@ -420,14 +454,73 @@ export function abandonMission(save: Save, id: MissionId): boolean {
   return true;
 }
 
+/**
+ * SPEC-028 §4.4 / E40: what a heal at full HP says. Shared, because SPEC-034
+ * §4.15 makes the character panel refuse one the way the surface already did —
+ * a medkit used at the station was simply spent for nothing.
+ */
+export const HP_FULL_TEXT = 'HP full';
+
+// ---------------------------------------------- SPEC-034 §4.9: stage resets
+
+/**
+ * SPEC-034 §4.9: why a defend or escort stage went back to zero. A death, a
+ * recall and a reload already announce themselves — a beacon that fell or a
+ * probe that was lost do not, and the player was left watching a timer restart
+ * with no idea what had happened.
+ */
+export function stageResetText(
+  reason: GameEvents['mission:stageReset']['reason'],
+  poi: PoiId | null,
+  follower: FollowerId | null,
+): string | null {
+  if (reason === 'poi_destroyed' && poi !== null) {
+    return `The ${POI_LABELS[poi]} went down — the defence restarts.`;
+  }
+  if (reason === 'follower_died' && follower !== null) {
+    return `The ${FOLLOWERS[follower].name} was lost — the escort restarts.`;
+  }
+  return null;
+}
+
+// ------------------------------------------------------- the surface's holds
+
+/** SPEC-034 §4.6: the three counters the surface step reads before it runs. */
+export interface SurfaceHoldState {
+  /** SPEC-023 §4.4: a held story beat — a film, a reveal, the ending sequence. */
+  beats: number;
+  /** SPEC-026 §4.6 / SPEC-028 §4.6: the full-screen map, the quick picker. */
+  ui: number;
+  /** SPEC-034 §4.6: open modal dialogues and the verdict choice. */
+  modal: number;
+}
+
+export type SurfaceHold = 'beat' | 'ui' | 'modal' | null;
+
+/**
+ * SPEC-034 §4.6: why the surface step is holding, or `null` when it is not.
+ *
+ * A modal line takes the player's movement, aim, healing and fire away, so the
+ * enemies should not be able to act either: the world waits for a modal
+ * dialogue and the verdict choice exactly as it already waits for the map. The
+ * order is the order the step checks them in — a beat outranks the map, which
+ * outranks a line.
+ */
+export function surfaceHoldReason(state: SurfaceHoldState): SurfaceHold {
+  if (state.beats > 0) return 'beat';
+  if (state.ui > 0) return 'ui';
+  if (state.modal > 0) return 'modal';
+  return null;
+}
+
 // -------------------------------------------------------------- player stats
 
 /**
- * The creation screen's live preview (§4.2). SPEC-011 owns the real combat
- * formula; until it lands this is the same kind of placeholder `maxHp` is
- * (SPEC-007 §4.1), built from the attribute effects `data/characters.ts`
- * documents: might +4 % damage per point, agility +2 % speed, vigor through
- * `maxHp`, plus the class passives.
+ * The creation screen's live preview (§4.2). Its HP is `maxHp` and nothing else
+ * — SPEC-034 §4.14 folded the class bonus into that formula, and this used to
+ * add it a second time. Damage and speed follow the attribute effects
+ * `data/characters.ts` documents: might +4 % damage per point, agility +2 %
+ * speed, plus the class passives.
  */
 export function computePlayerStats(
   classId: ClassId,
@@ -439,7 +532,7 @@ export function computePlayerStats(
   const armed = ITEM_TABLE[weapon ?? cls.startingWeapon];
   const base = armed.kind === 'weapon' ? armed.damage : 0;
   return {
-    hp: maxHp(classId, attributes, level) + (cls.passive.maxHpBonus ?? 0),
+    hp: maxHp(classId, attributes, level),
     damage: Math.round(base * (1 + 0.04 * attributes.might) * (cls.passive.damageMult ?? 1) * 10) / 10,
     speed: Math.round(TUNING.PLAYER_SPEED * (1 + 0.02 * attributes.agility) * (cls.passive.moveSpeedMult ?? 1) * 100) / 100,
   };
@@ -506,6 +599,12 @@ export interface HudTrackerRow {
   text: string;
   done: boolean;
   focus: boolean;
+  /**
+   * SPEC-034 §4.9: for a `defend` row, the POI's HP as a fraction of its max —
+   * the one number the player had no way to see while the thing they were
+   * defending was being eaten. `null` on every other row.
+   */
+  defendHp: number | null;
 }
 
 /**

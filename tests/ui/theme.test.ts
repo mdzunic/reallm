@@ -153,9 +153,11 @@ describe('what the theme must not move (SPEC-020 AC-24 … AC-26)', () => {
     // icon box (§4.15) — the same 48 px-slot exemption the other five carry.
     // SPEC-032 §4.8 adds the twenty-third: the service badge, which that spec
     // pins at 12 px — a corner tag, like the dev overlay's, not body type.
+    // SPEC-034 §4.9 adds the twenty-fourth: the defended POI's HP percentage
+    // under its tracker row, 11 px — a readout beside a 3 px bar, not body type.
     const small = CSS.match(/font-size:\s*(\d+)px/g) ?? [];
     const belowFloor = small.filter((rule) => Number(/(\d+)/.exec(rule)?.[1] ?? 99) < 14);
-    expect(belowFloor.length, belowFloor.join(' ')).toBe(23);
+    expect(belowFloor.length, belowFloor.join(' ')).toBe(24);
   });
 
   it('loads no webfont (AC-26)', () => {

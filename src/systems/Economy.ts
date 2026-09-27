@@ -28,6 +28,7 @@ import {
   COMPANIONS,
   COMPANION_IDS,
   ITEMS,
+  MISSIONS,
   PLANETS,
   PLANET_IDS,
   RECIPES,
@@ -45,6 +46,7 @@ import {
   type Item,
   type ItemId,
   type MissionDef,
+  type MissionId,
   type PlanetDef,
   type PlanetId,
   type Price,
@@ -84,6 +86,9 @@ export type PurchaseKind = 'ship' | 'gear' | 'companion' | 'craft';
 
 /** Where a resource came from; only `'pickup'` is charged against the cap (§4.5). */
 export type ResourceSource = 'pickup' | 'reward' | 'voucher' | 'subsidy';
+
+/** SPEC-034 §4.12: units the active collect objectives still want, per resource. */
+export type CollectDemand = (resource: ResourceId) => number;
 
 export type DepartResult =
   | { ok: true }
@@ -171,6 +176,9 @@ export class Economy {
    */
   serviceMode = false;
 
+  /** SPEC-034 §4.12: the active `Missions`' collect demand, or `null`. */
+  #collectDemand: CollectDemand | null = null;
+
   /**
    * `saves` is the autosave seam of §4.3 (`save.request('purchase')`). It is
    * optional because the pure tests and the balance model have no store to
@@ -191,27 +199,58 @@ export class Economy {
   }
 
   /**
+   * SPEC-034 §4.12: `Missions` registers how many more units its active collect
+   * objectives want, so a full hold can still ship a pickup home instead of
+   * bouncing it (E56). `null` releases it.
+   */
+  setCollectDemand(demand: CollectDemand | null): void {
+    this.#collectDemand = demand;
+  }
+
+  /** The registration in force; a `Missions` releases only its own (§4.12). */
+  get collectDemandSource(): CollectDemand | null {
+    return this.#collectDemand;
+  }
+
+  /** SPEC-034 §4.12: units an active collect objective still wants, 0 with none. */
+  collectDemand(resource: ResourceId): number {
+    return Math.max(0, Math.floor(this.#collectDemand?.(resource) ?? 0));
+  }
+
+  /**
    * §4.5. A pickup stops at the cap and reports what would not fit (E3); a
    * reward, a voucher and the subsidy ignore it, because a grant the game made
    * must never be silently lost.
+   *
+   * SPEC-034 §4.12: what a full hold cannot take is *shipped home* up to what
+   * the active collect objectives still want — it counts, but it never enters
+   * the hold, so nothing is duplicated and a hoard can no longer stall an
+   * objective. Only the rest is blocked.
    */
-  addResource(resource: ResourceId, amount: number, source: ResourceSource): { added: number; blocked: number } {
+  addResource(
+    resource: ResourceId,
+    amount: number,
+    source: ResourceSource,
+  ): { added: number; shipped: number; blocked: number } {
     const want = Math.floor(amount);
-    if (!Number.isFinite(want) || want <= 0) return { added: 0, blocked: 0 };
+    if (!Number.isFinite(want) || want <= 0) return { added: 0, shipped: 0, blocked: 0 };
     const have = this.#save.resources[resource];
     const added = source === 'pickup' ? Math.max(0, Math.min(want, this.cargoCap() - have)) : want;
-    const blocked = want - added;
+    const shipped = source === 'pickup' ? Math.min(want - added, this.collectDemand(resource)) : 0;
+    const blocked = want - added - shipped;
     this.#save.resources[resource] = have + added;
-    if (added > 0 || blocked > 0) {
+    if (added > 0 || shipped > 0 || blocked > 0) {
       this.#events.emit('resource:collected', {
         resource,
-        amount: added,
+        // §4.12: a collect objective counts what went home as collected.
+        amount: added + shipped,
         total: this.#save.resources[resource],
+        ...(shipped > 0 ? { shipped } : {}),
         // The HUD throttles the toast to once every three seconds (§4.5).
         ...(blocked > 0 ? { blocked: 'cargo_full' as const } : {}),
       });
     }
-    return { added, blocked };
+    return { added, shipped, blocked };
   }
 
   hasResources(cost: Partial<Record<ResourceId, number>>): boolean {
@@ -573,7 +612,16 @@ export class Economy {
       if (this.isUnlocked(planet)) cheapest = Math.min(cheapest, this.fuelCost(planet));
     }
     if (!Number.isFinite(cheapest)) return 0;
-    const grant = cheapest - this.#save.resources.oil;
+    // SPEC-034 §4.5, E58: a failed Gauntlet lands the player with the trip still
+    // open, so the floor also covers the fuel of every planet an accepted *main*
+    // flight mission still needs. A side flight mission never raises it.
+    let target = cheapest;
+    for (const entry of this.#save.progress.missionsActive) {
+      const mission = MISSIONS[entry.id as MissionId] as MissionDef | undefined;
+      if (mission === undefined || mission.scene !== 'flight' || mission.type !== 'main') continue;
+      target = Math.max(target, this.fuelCost(mission.planet));
+    }
+    const grant = target - this.#save.resources.oil;
     if (grant <= 0) return 0;
     this.addResource('oil', grant, 'subsidy');
     return grant;
@@ -627,9 +675,13 @@ export class Economy {
     }
     for (const { itemId, qty } of rewards.items ?? []) {
       const { blocked } = this.addItem(itemId, qty);
-      // E25: the surface scene spills these at the player's feet; at the
-      // station the toast is all there is.
-      if (blocked > 0) this.#events.emit('ui:toast', { kind: 'warn', text: noRoomText(ITEM_TABLE[itemId], blocked) });
+      // E25: the surface scene spills these at the player's feet (SPEC-034
+      // §4.15 — `item:noRoom` is what it listens for); at the station the toast
+      // is all there is.
+      if (blocked > 0) {
+        this.#events.emit('item:noRoom', { itemId, qty: blocked });
+        this.#events.emit('ui:toast', { kind: 'warn', text: noRoomText(ITEM_TABLE[itemId], blocked) });
+      }
     }
     for (const flag of rewards.flags ?? []) this.setFlag(flag);
     this.#saves?.request('mission');

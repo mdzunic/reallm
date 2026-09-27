@@ -9,7 +9,9 @@
 import { log } from '@/core/Log';
 import { hash32, type Rng } from '@/core/Rng';
 import type { PlanetDef, PlanetId, PoiDef, ResourceId } from '@/data/index';
-import type { ObstacleGrid as ObstacleQueries } from '@/entities/World';
+import { RESOLVE_PASSES, RESOLVE_SKIN, type ObstacleGrid as ObstacleQueries } from '@/entities/World';
+
+export { RESOLVE_PASSES } from '@/entities/World';
 
 export type ObstacleKind = 'rock' | 'ruin' | 'spire' | 'vent' | 'tree' | 'cave_wall' | 'wreck_hull' | 'debris';
 
@@ -223,10 +225,13 @@ export class ObstacleGrid implements ObstacleQueries {
   readonly obstacles: readonly LayoutObstacle[];
   readonly #cell: number;
   readonly #buckets = new Map<number, number[]>();
+  /** SPEC-034 §4.1: the arena line a resolved circle is clamped to, when known. */
+  readonly #halfSize: number;
 
-  constructor(layout: Pick<Layout, 'obstacles'>, cell: number = CELL) {
+  constructor(layout: Pick<Layout, 'obstacles'> & Partial<Pick<Layout, 'halfSize'>>, cell: number = CELL) {
     this.obstacles = layout.obstacles;
     this.#cell = cell;
+    this.#halfSize = layout.halfSize ?? Infinity;
     for (let i = 0; i < this.obstacles.length; i++) {
       const o = this.obstacles[i] as LayoutObstacle;
       const x0 = Math.floor((o.x - o.radius) / cell);
@@ -293,6 +298,79 @@ export class ObstacleGrid implements ObstacleQueries {
 
   hitsCircle(x: number, z: number, radius: number): boolean {
     return this.circleHits(x, z, radius);
+  }
+
+  /**
+   * SPEC-034 §4.1: the nearest free position for a circle, pushed out of the
+   * deepest overlap along the centre-to-centre normal for up to
+   * `RESOLVE_PASSES` passes, then clamped to the arena line. Never allocates.
+   */
+  resolveCircle(x: number, z: number, radius: number, out: { x: number; z: number }): boolean {
+    let cx = x;
+    let cz = z;
+    let moved = false;
+    for (let pass = 0; pass < RESOLVE_PASSES; pass++) {
+      const hit = this.#deepestOverlap(cx, cz, radius);
+      if (hit < 0) break;
+      const o = this.obstacles[hit] as LayoutObstacle;
+      let nx = cx - o.x;
+      let nz = cz - o.z;
+      const len = Math.sqrt(nx * nx + nz * nz);
+      if (len < 1e-6) {
+        nx = 1;
+        nz = 0;
+      } else {
+        nx /= len;
+        nz /= len;
+      }
+      const push = o.radius + radius - len + RESOLVE_SKIN;
+      cx += nx * push;
+      cz += nz * push;
+      moved = true;
+    }
+    if (this.#halfSize !== Infinity) {
+      const limit = this.#halfSize - WALL_INSET;
+      const clampedX = Math.min(limit, Math.max(-limit, cx));
+      const clampedZ = Math.min(limit, Math.max(-limit, cz));
+      if (clampedX !== cx || clampedZ !== cz) moved = true;
+      cx = clampedX;
+      cz = clampedZ;
+    }
+    out.x = cx;
+    out.z = cz;
+    return moved;
+  }
+
+  /** The index of the obstacle the circle sinks deepest into, or −1. */
+  #deepestOverlap(x: number, z: number, radius: number): number {
+    const cell = this.#cell;
+    const x0 = Math.floor((x - radius) / cell);
+    const x1 = Math.floor((x + radius) / cell);
+    const z0 = Math.floor((z - radius) / cell);
+    const z1 = Math.floor((z + radius) / cell);
+    let best = -1;
+    let bestPen = 0;
+    for (let cxi = x0; cxi <= x1; cxi++) {
+      for (let czi = z0; czi <= z1; czi++) {
+        const bucket = this.#buckets.get((cxi + 0x8000) * 0x10000 + (czi + 0x8000));
+        if (bucket === undefined) continue;
+        for (let i = 0; i < bucket.length; i++) {
+          const index = bucket[i] as number;
+          const o = this.obstacles[index] as LayoutObstacle;
+          const dx = x - o.x;
+          const dz = z - o.z;
+          const reach = o.radius + radius;
+          const dSq = dx * dx + dz * dz;
+          if (dSq > reach * reach) continue;
+          const pen = reach - Math.sqrt(dSq);
+          if (best < 0 || pen > bestPen) {
+            best = index;
+            bestPen = pen;
+          }
+        }
+      }
+    }
+    return best;
   }
 
   lineHit(x0: number, z0: number, x1: number, z1: number): number | null {

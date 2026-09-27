@@ -20,6 +20,12 @@ export interface DialogueDef<Id extends string = string> {
   /** Plays at most once per save. */
   readonly once?: boolean;
   readonly glitch?: boolean;
+  /**
+   * SPEC-034 §4.7: plays as soon as this one ends, ahead of anything queued.
+   * One hook, one id — the Warden and ARIA stay two dialogues with their own
+   * `glitch` and styling, and the chain works wherever it is played from.
+   */
+  readonly next?: Id;
 }
 
 export const DIALOGUE = {
@@ -46,7 +52,6 @@ export const DIALOGUE = {
     id: 'c1_m1_stage2',
     lines: [
       { speaker: 'scav', text: 'Off-worlder. Listen. The worms hunt by vibration — walk, do not run.' },
-      { speaker: 'scav', text: 'I have said that before. To someone. I cannot remember who.' },
       { speaker: 'aria', text: 'He is dehydrated. Keep moving.' },
     ],
   },
@@ -151,6 +156,13 @@ export const DIALOGUE = {
       { speaker: 'log', text: 'Signed: Iteration 62.' },
       { speaker: 'player', text: 'That is my handwriting.' },
       { speaker: 'aria', text: 'It is a common enough hand. Deliver the water, salvager.' },
+    ],
+  },
+  /** SPEC-034 §4.10: `c2_s1_log` is the stage line now, so the mission needs an end. */
+  c2_s1_done: {
+    id: 'c2_s1_done',
+    lines: [
+      { speaker: 'aria', text: 'Water is in the pod. The hatch never opened. I have logged it as a cache, not a survivor.' },
     ],
   },
   c2_s2_accept: {
@@ -284,13 +296,15 @@ export const DIALOGUE = {
   },
   c5_m3_accept: {
     id: 'c5_m3_accept',
-    lines: [{ speaker: 'aria', text: 'Whatever she says in there — she is using the Hive to say it. Do not answer.' }],
+    lines: [{ speaker: 'aria', text: 'Whatever she says at the end, it will not be her saying it. Do not answer.' }],
   },
   c5_m3_warden: {
     id: 'c5_m3_warden',
     modal: true,
     once: true,
     glitch: true,
+    // SPEC-034 §4.7: ARIA answers the Warden, at the Queen's death, always.
+    next: 'c5_m3_aria',
     lines: [
       { speaker: 'warden', text: 'You keep doing this.' },
       { speaker: 'warden', text: 'You never get further than here.' },
@@ -350,7 +364,7 @@ export const DIALOGUE = {
     once: true,
     lines: [
       { speaker: 'player', text: 'Filing. Eden-Prime is viable. Recommend immediate colonisation.' },
-      { speaker: 'command', text: 'Received with thanks, salvager. Earth is saved. Stand by for recall.' },
+      { speaker: 'command', text: 'Received with thanks, salvager. Earth is saved. Stand by.' },
       { speaker: 'warden', text: 'A good run. Logged. Rest.' },
       { speaker: 'aria', text: 'Rest. I will keep the ship warm.' },
     ],
@@ -365,7 +379,6 @@ export const DIALOGUE = {
       { speaker: 'warden', text: 'There is nothing outside for you to be.' },
       { speaker: 'player', text: 'Then I will find that out myself.' },
       { speaker: 'aria', text: 'Beacon is open. Go. I hope it is not quiet out there.' },
-      { speaker: 'log', text: 'instance/62 disconnected' },
     ],
   },
 } as const satisfies Record<string, DialogueDef>;

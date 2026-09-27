@@ -219,6 +219,23 @@ export class CreationScene extends UiScene<'creation'> {
     for (const material of this.#tintable) tintSalvager(material, this.#primary, this.#secondary);
   }
 
+  /** SPEC-034 §4.16: the preview box's last measured viewport top, unclamped. */
+  #previewTop = 0;
+
+  /** SPEC-034 §4.16: the measured preview box, for the e2e scroll case. */
+  override debugInfo(): Record<string, number | string> {
+    const info = super.debugInfo();
+    const box = this.#viewport;
+    if (box !== null) {
+      info['previewX'] = box.x;
+      info['previewY'] = box.y;
+      info['previewW'] = box.w;
+      info['previewH'] = box.h;
+      info['previewTop'] = this.#previewTop;
+    }
+    return info;
+  }
+
   /** The preview box in renderer coordinates; measured outside the loop. */
   #measure(): void {
     const box = this.#previewBox;
@@ -227,6 +244,9 @@ export class CreationScene extends UiScene<'creation'> {
       return;
     }
     const rect = box.getBoundingClientRect();
+    // SPEC-034 §4.16: the raw top, before the clamp below, so the e2e scroll case
+    // can see the box follow its frame even where the clamp pins the viewport.
+    this.#previewTop = Math.round(rect.top);
     this.#viewport = {
       x: Math.max(0, Math.round(rect.left)),
       y: Math.max(0, Math.round(this.services.renderer.height - rect.bottom)),
@@ -255,6 +275,14 @@ export class CreationScene extends UiScene<'creation'> {
     const screen = createScreen({ id: 'creation' });
     bindTouchScheme(screen.root, this.services, this.disposer, this);
     screen.body.append(this.#root);
+    // SPEC-034 §4.16: the preview is drawn with a scissor pass over the canvas
+    // *underneath* the form, so it follows a DOM box that the form's scroll
+    // moves — and a scrolled form used to leave it behind, floating over the
+    // wrong part of the frame. Passive and capture, so a nested scroll counts
+    // too; no DOM read is added to `update()`, the measure stays here.
+    const onScroll = (): void => this.#measure();
+    screen.body.addEventListener('scroll', onScroll, { passive: true, capture: true });
+    this.disposer.add(() => screen.body.removeEventListener('scroll', onScroll, { capture: true }));
     this.ui.mount(screen.root, 'panel');
     this.disposer.add(() => {
       this.ui.unmount(screen.root);

@@ -64,6 +64,12 @@ export interface EnemyEntity {
   lostTrack: number;
   /** SPEC-030 §4.6: set by the spawn director for wave groups; waves ignore hiding. */
   fromWave: boolean;
+  /**
+   * SPEC-034 §4.6, E57: the entity id of the boss whose phase summoned this
+   * enemy, or 0. A boss's death dismisses its living summons, so the lines that
+   * follow are not interrupted by drones the fight left behind.
+   */
+  summonedBy: number;
 }
 
 export function makeEnemy(): EnemyEntity {
@@ -102,5 +108,6 @@ export function makeEnemy(): EnemyEntity {
     wanderAt: 0,
     lostTrack: 0,
     fromWave: false,
+    summonedBy: 0,
   };
 }

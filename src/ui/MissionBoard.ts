@@ -4,10 +4,11 @@
 // board emitting the events and requesting the autosave, the way SPEC-010's
 // Economy does for purchases.
 //
-// Pinning (AC-33) is session state: the save schema is SPEC-007's and carries
-// no pin field, so the pin lives beside the save object and SPEC-012's HUD
-// objective reads it through `pinnedMission()`. One pin at a time; pinning a
-// second mission unpins the first.
+// Pinning (AC-33) moves the mission to the front of `progress.missionsActive`
+// (SPEC-034 §4.15) — the order the runtime already pins by — so the pin
+// persists across a reload with no save field, and the badge follows the front
+// entry among the planet's active missions rather than a WeakMap the board
+// alone could see.
 import type { Save, SaveStore } from '@/core/Save';
 import { MISSIONS, PLANET_IDS, PLANETS, type MissionDef, type MissionId } from '@/data/index';
 import type { Economy } from '@/systems/Economy';
@@ -16,18 +17,15 @@ import {
   abandonMission,
   acceptMission,
   missionStatus,
+  pinMission,
+  pinnedMission,
   requirementText,
   rewardsText,
 } from '@/systems/UiHelpers';
 import { confirmSheet } from '@/ui/ConfirmSheet';
 import { el, h, testId, type UiRoot } from '@/ui/dom';
 
-const PINNED = new WeakMap<Save, MissionId | null>();
-
-/** What SPEC-012's objective line will read; `null` until something is pinned. */
-export function pinnedMission(data: Save): MissionId | null {
-  return PINNED.get(data) ?? null;
-}
+export { pinnedMission } from '@/systems/UiHelpers';
 
 export interface BoardDeps {
   ui: UiRoot;
@@ -87,7 +85,7 @@ export class MissionBoard {
       h('span', { class: `badge badge-${def.type}` }, def.type),
       // AC-36: flight missions say where they happen.
       def.scene === 'flight' ? h('span', { class: 'badge badge-flight' }, `during flight to ${PLANETS[def.planet].name}`) : null,
-      pinnedMission(data) === def.id ? h('span', { class: 'badge badge-pin' }, '📌 pinned') : null,
+      pinnedMission(data, def.planet) === def.id ? h('span', { class: 'badge badge-pin' }, '📌 pinned') : null,
       h('span', { class: 'board-status' }, status),
     );
     row.append(head);
@@ -135,9 +133,14 @@ export class MissionBoard {
     return row;
   }
 
-  /** AC-33: one pin; a new pin displaces the old one. */
+  /**
+   * AC-33: one pin per planet; SPEC-034 §4.15 makes it the front entry of
+   * `progress.missionsActive`, which the runtime reads on the next landing.
+   * There is nothing to un-pin — something is always at the front — so a pinned
+   * row's button simply reads as pressed.
+   */
   #pinButton(def: MissionDef): HTMLButtonElement {
-    const pinned = pinnedMission(this.#deps.data) === def.id;
+    const pinned = pinnedMission(this.#deps.data, def.planet) === def.id;
     return testId(
       h(
         'button',
@@ -146,11 +149,12 @@ export class MissionBoard {
           type: 'button',
           'aria-pressed': String(pinned),
           click: () => {
-            PINNED.set(this.#deps.data, pinned ? null : (def.id as MissionId));
+            if (!pinMission(this.#deps.data, def.id as MissionId)) return;
+            this.#deps.save.request('mission');
             this.refresh();
           },
         },
-        pinned ? 'Unpin' : 'Pin',
+        'Pin',
       ),
       `mission-${def.id}-pin`,
     );
@@ -174,7 +178,6 @@ export class MissionBoard {
     }).then((yes) => {
       if (!yes) return;
       if (!abandonMission(this.#deps.data, def.id as MissionId)) return;
-      if (pinnedMission(this.#deps.data) === def.id) PINNED.set(this.#deps.data, null);
       this.#deps.events.emit('mission:abandoned', { id: def.id as MissionId });
       this.#deps.save.request('mission');
       this.refresh();

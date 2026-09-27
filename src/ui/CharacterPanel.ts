@@ -6,7 +6,7 @@ import { maxHp, type Save, type SaveStore } from '@/core/Save';
 import { ITEMS, QUICK_SLOTS, RESOURCE_IDS, type ItemId, type QuickSlot, type WeaponSlot } from '@/data/index';
 import { INVENTORY_SLOTS, type Economy } from '@/systems/Economy';
 import { quickEligible } from '@/systems/Loadout';
-import { computePlayerStats, failText, gearCompareText, gearTooltip } from '@/systems/UiHelpers';
+import { computePlayerStats, failText, gearCompareText, gearTooltip, HP_FULL_TEXT } from '@/systems/UiHelpers';
 import { confirmSheet } from '@/ui/ConfirmSheet';
 import { el, h, testId, type UiRoot } from '@/ui/dom';
 import { itemIcon } from '@/ui/ItemIcon';
@@ -341,6 +341,17 @@ export class CharacterPanel {
   }
 
   #use(id: ItemId): void {
+    // SPEC-034 §4.15, E40: a heal at full HP is the most common waste there is,
+    // and at the station it was spent with nothing to show. The surface's own
+    // refusal, and nothing is taken.
+    const item = ITEMS[id];
+    if (item.kind === 'consumable' && item.effect.kind === 'heal') {
+      const { player } = this.#deps.data;
+      if (player.hp >= maxHp(player.classId, player.attributes, player.level)) {
+        this.#deps.ui.toast(HP_FULL_TEXT, 'warn');
+        return;
+      }
+    }
     const result = this.#deps.economy.useConsumable(id);
     if (!result.ok) {
       this.#deps.ui.toast(failText(result.reason), 'error');
