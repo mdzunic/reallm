@@ -49,19 +49,20 @@ export function openGearCard(id: ItemId, deps: GearCardDeps): Promise<void> {
     card.setAttribute('aria-label', item.name);
 
     let open = true;
+    // SPEC-036 §4.4: Escape and the system Back close the card through the
+    // back-stack — and a buy sheet opened over it closes first.
+    let releaseBack: (() => void) | null = null;
     const close = (): void => {
       if (!open) return;
       open = false;
-      releaseBack();
+      releaseBack?.();
       backdrop.remove();
       resolve();
     };
     backdrop.addEventListener('click', (event) => {
       if (event.target === backdrop) close();
     });
-    // SPEC-036 §4.4: Escape and the system Back close the card through the
-    // back-stack — and a buy sheet opened over it closes first.
-    const releaseBack = deps.ui.pushBack(() => close());
+    releaseBack = deps.ui.pushBack(() => close());
 
     const picture = itemIcon(id, 256);
     picture.classList.add('gear-card-picture');

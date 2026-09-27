@@ -670,7 +670,7 @@ test.describe('16. the controls sheet matches the touch controls (§4.11)', () =
 test.describe('17. the zone ghosts show on the first two touch landings (§4.12)', () => {
   test.use(PHONE);
 
-  test('first and second landing show them, a stick move takes them down, the third shows none', async ({ page }) => {
+  test('first and second landing show them, a stick move or 12 s takes them down, the third shows none', async ({ page }) => {
     await startTouch(page, '/?scene=surface&planet=cinder4');
     await settle(page, 'surface');
     const move = page.locator('[data-testid="touch-zone-move"]');
@@ -704,6 +704,12 @@ test.describe('17. the zone ghosts show on the first two touch landings (§4.12)
     await expect(move).toBeVisible();
     await expect(aim).toBeVisible();
     expect((await storedSettings(page))['zonesShown']).toBe(2);
+    // Left alone, they stay a while and then go by themselves — 12 s after
+    // they showed, a clock that started with the scene, before its fade-in.
+    await page.waitForTimeout(4_000);
+    await expect(move).toBeVisible();
+    await expect(move).toBeHidden({ timeout: 12_000 });
+    await expect(aim).toBeHidden();
 
     await land();
     await expect(page.locator('[data-testid="touch-controls"]')).toBeVisible();
