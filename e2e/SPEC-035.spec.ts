@@ -393,11 +393,11 @@ test('17. the gear card is at most 420 px wide at 1280', async ({ page }) => {
 // ------------------------------------------------------------------- 18: items
 
 test('18. every item surface draws a picture, not a glyph', async ({ page }) => {
-  const manifest = await page.request.get('/assets/items/manifest.json').then((r) => (r.ok() ? r.json() : null)).catch(() => null);
-  test.skip(
-    manifest === null || !Array.isArray((manifest as { items?: unknown }).items),
-    'the SPEC-035 §4.15 item render drop is not in public/assets/items/ — the glyph fallback of SPEC-031 31-i still applies',
-  );
+  // §4.15: the render drop is committed, so the manifest is served and every
+  // id resolves — the glyph fallback of SPEC-031 31-i is no longer reached.
+  const response = await page.request.get('/assets/items/manifest.json');
+  expect(response.ok()).toBe(true);
+  expect(((await response.json()) as { items: string[] }).items).toHaveLength(26);
   await station(page);
   await page.locator('[data-testid="station-tab-shop"]').click();
   await page.locator('[data-testid="shop-tab-gear"]').click();
