@@ -166,3 +166,44 @@ and is forbidden from retuning it, D-1). Until then the flight scene is over its
 memory budget on a 2 GB phone, which SPEC-015 §8 flags as the iOS context-loss
 risk (E7): the symptom to watch for on hardware is a lost context on entering
 flight, not a visual fault.
+
+## 6. SPEC-016 §4.6 — a full hold stalls a collect objective (2026-09-27) — FIXED
+
+**Status:** **fixed on `spec/SPEC-034`**, by §4.12 of that spec.
+
+**The finding.** SPEC-016 §4.6's "Completionist, base hold" run pins the problem
+
+> `c3_s2: the hold took 50 of 300 wheat (350 aboard, cap 400)`
+
+A player who arrives on Thessaly with the base hold already full of wheat cannot
+finish `c3_s2`. `Economy.addResource(…, 'pickup')` stops at `cargoCap()` and
+reports the rest `blocked`, and `Missions` counts only what was `added` — so once
+the hold is full the counter stops moving, every orb bounces, and the objective is
+unreachable without selling or discarding. Nothing in the game tells the player
+that is what has happened, and `c3_s2`'s 300 wheat is three quarters of the base
+hold on its own.
+
+**Why it was not a cap bug.** Raising the cap would have been the wrong fix: the
+cap is what makes the hold a decision, and SPEC-010 §4.5's asymmetry — pickups
+stop at it, grants never do — is deliberate.
+
+**The fix (SPEC-034 §4.12, E56).** `Missions` registers what its active collect
+objectives still want through `Economy.setCollectDemand`, and a `pickup` that
+does not fit is **shipped home** up to that demand: it counts toward the
+objective and toward `resource:collected`'s `amount`, carries a `shipped` figure,
+and never enters the hold. Nothing is duplicated, the cap still bites for
+everything else, and a node keeps pumping while the demand lasts. The player is
+told once every three seconds: `Hold full — surplus shipped to Command Relay.`
+
+**Where it is pinned.** `tests/systems/economy.test.ts` — "ships a full hold home,
+up to the collect demand" and "c3_s2 completes with a hold already over the
+objective", which runs the review's own case: 350 wheat aboard, `c3_s2` active,
+300 wheat of pickups, and the objective completes with the hold ending at 400.
+`tests/systems/pickups.test.ts` covers the node side.
+
+**Note on SPEC-016's own run.** The "Completionist, base hold" run belongs to
+SPEC-016's harness, which is not in this tree yet — `tests/campaign/harness.ts`
+here runs the worst-case main-mission player, which takes no side missions and so
+never met the finding. SPEC-034 is forbidden from building that harness (its
+out-of-scope list), so the fix is pinned by the two suites above instead, and
+SPEC-016's run should report `problems: []` and 26 missions when it lands.

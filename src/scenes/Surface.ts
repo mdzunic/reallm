@@ -2690,6 +2690,11 @@ export class SurfaceScene extends UiScene<'surface'> {
 
   // -------------------------------------------------------------- dialogue
 
+  /**
+   * SPEC-034 §4.6: the hold is counted from `dialogue:started` / `dialogue:ended`
+   * rather than around this call, so a modal line from anywhere — a `next` chain
+   * link, another scene's queue, the dev bridge — holds the world too.
+   */
   #playDialogue(id: DialogueId): void {
     const dialogue = this.#dialogue;
     if (dialogue === null) return;
@@ -2697,12 +2702,7 @@ export class SurfaceScene extends UiScene<'surface'> {
     // so the station's debrief does not say it again a minute later.
     const save = this.#save;
     if (save !== null) LINE_LEDGER.markPlayed(save, id);
-    const def = DIALOGUE_TABLE[id];
-    const modal = def.modal === true;
-    if (modal) this.#modalOpen++;
-    void dialogue.play(id).finally(() => {
-      if (modal) this.#modalOpen = Math.max(0, this.#modalOpen - 1);
-    });
+    void dialogue.play(id);
   }
 
   // ------------------------------------------------------------------- HUD
@@ -3797,6 +3797,15 @@ export class SurfaceScene extends UiScene<'surface'> {
         'dialogue:started',
         ({ id }) => {
           if (DIALOGUE_TABLE[id].glitch === true) this.#hud?.staticBurst(STATIC_BURST_MS);
+          // SPEC-034 §4.6: a modal line holds the world for as long as it is up.
+          if (DIALOGUE_TABLE[id].modal === true) this.#modalOpen++;
+        },
+        this,
+      ),
+      bus.on(
+        'dialogue:ended',
+        ({ id }) => {
+          if (DIALOGUE_TABLE[id].modal === true) this.#modalOpen = Math.max(0, this.#modalOpen - 1);
         },
         this,
       ),

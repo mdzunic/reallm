@@ -219,6 +219,9 @@ export class CreationScene extends UiScene<'creation'> {
     for (const material of this.#tintable) tintSalvager(material, this.#primary, this.#secondary);
   }
 
+  /** SPEC-034 §4.16: the preview box's last measured viewport top, unclamped. */
+  #previewTop = 0;
+
   /** SPEC-034 §4.16: the measured preview box, for the e2e scroll case. */
   override debugInfo(): Record<string, number | string> {
     const info = super.debugInfo();
@@ -228,6 +231,7 @@ export class CreationScene extends UiScene<'creation'> {
       info['previewY'] = box.y;
       info['previewW'] = box.w;
       info['previewH'] = box.h;
+      info['previewTop'] = this.#previewTop;
     }
     return info;
   }
@@ -240,6 +244,9 @@ export class CreationScene extends UiScene<'creation'> {
       return;
     }
     const rect = box.getBoundingClientRect();
+    // SPEC-034 §4.16: the raw top, before the clamp below, so the e2e scroll case
+    // can see the box follow its frame even where the clamp pins the viewport.
+    this.#previewTop = Math.round(rect.top);
     this.#viewport = {
       x: Math.max(0, Math.round(rect.left)),
       y: Math.max(0, Math.round(this.services.renderer.height - rect.bottom)),
