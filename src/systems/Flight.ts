@@ -167,6 +167,24 @@ const THREAT_BOX_CHANCE = 0.7;
 /** ARIA L2+ aim assist: cone half-angle and reticle chase rate (§4.7). */
 export const ASSIST_CONE_DEG = 6;
 const ASSIST_LERP_PER_S = 20;
+// -------------------------------------------------------- SPEC-035 §4.11
+
+/** §4.11: the engine hum's volume floor, and the throttle span it rides. */
+export const ENGINE_VOLUME_BASE = 0.6;
+export const ENGINE_VOLUME_SPAN = 0.4;
+const ENGINE_THROTTLE_MIN = 0.8;
+const ENGINE_THROTTLE_SPAN = 0.4;
+
+/**
+ * SPEC-035 §4.11 — `0.6 + 0.4 × (throttle − 0.8) / 0.4`: the slowest notch hums
+ * at 0.6, the fastest at 1.0. Clamped, so a throttle outside the three notches
+ * cannot push the voice past full or below the floor.
+ */
+export function engineVolume(throttle: number): number {
+  const t = (throttle - ENGINE_THROTTLE_MIN) / ENGINE_THROTTLE_SPAN;
+  return ENGINE_VOLUME_BASE + ENGINE_VOLUME_SPAN * clamp(t, 0, 1);
+}
+
 /** Touch auto-fire also covers a near-miss asteroid inside this XY range (§4.7). */
 export const AUTO_FIRE_ASTEROID_M = 3;
 const GUN_OFFSET_X = 0.9;

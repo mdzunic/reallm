@@ -1071,3 +1071,25 @@ describe('enemy tints read against their own ground (SPEC-035 §4.1)', () => {
     expect(problems).toEqual([]);
   });
 });
+
+describe('the three SPEC-035 tips (SPEC-035 §4.8)', () => {
+  it('exist with both wordings', () => {
+    for (const id of ['combat', 'flight_steer', 'flight_throttle'] as const) {
+      expect(TIP_IDS).toContain(id);
+      expect(TIPS[id].keyboard.length).toBeGreaterThan(0);
+      expect(TIPS[id].touch.length).toBeGreaterThan(0);
+      expect(TIPS[id].keyboard).not.toBe(TIPS[id].touch);
+    }
+  });
+
+  /** SPEC-034 §4.3 moved throttle-down to `X`; the tip has to say so. */
+  it('names X for throttle down, not Ctrl', () => {
+    expect(TIPS.flight_throttle.keyboard).toContain('X');
+    expect(TIPS.flight_throttle.keyboard).not.toMatch(/Ctrl/i);
+  });
+
+  it('teaches hold-to-fire rather than an auto-fire default', () => {
+    expect(TIPS.combat.keyboard).toMatch(/hold/i);
+    expect(TIPS.combat.touch).toMatch(/auto-fire/i);
+  });
+});
