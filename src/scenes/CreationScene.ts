@@ -316,25 +316,7 @@ export class CreationScene extends UiScene<'creation'> {
     // The name field survives re-renders by value, not by node: keep the text.
     const nameValue = this.#nameField?.value ?? '';
     this.#nameField = testId(
-      h('input', {
-        class: 'creation-name',
-        type: 'text',
-        maxlength: 16,
-        placeholder: 'Salvager',
-        'aria-label': 'Name',
-        value: nameValue,
-        // SPEC-037 §4.9: a callsign, not prose — no autofill or autocorrect, a
-        // capital per word, no spellcheck underline, and a Done key; Enter
-        // closes the phone keyboard by blurring the field.
-        autocomplete: 'off',
-        autocorrect: 'off',
-        autocapitalize: 'words',
-        spellcheck: 'false',
-        enterkeyhint: 'done',
-        keydown: (event: Event) => {
-          if ((event as KeyboardEvent).key === 'Enter') (event.currentTarget as HTMLInputElement).blur();
-        },
-      }),
+      h('input', { class: 'creation-name', type: 'text', maxlength: 16, placeholder: 'Salvager', 'aria-label': 'Name', value: nameValue }),
       'creation-name',
     );
     this.#form.replaceChildren(

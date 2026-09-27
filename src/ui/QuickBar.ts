@@ -3,11 +3,6 @@
 // switching and spending. `render` is driven from `Hud.#write` only when the
 // `loadout`/`quick` keys diffed, and it still touches only the elements whose
 // text, class or custom property actually changed.
-//
-// SPEC-037 §4.1: on the touch scheme the same bar lives in the thumb arc as a
-// 3 × 2 grid, weapons over packs; `moveTo` re-parents it, so nothing about a
-// slot's state is rebuilt. §4.4 sets its badges: the count, the key cap, and a
-// state line that shows only while a weapon is not ready.
 import type { Scheme } from '@/core/Input';
 import {
   ITEMS,
@@ -16,14 +11,12 @@ import {
   type QuickSlot,
   type WeaponSlot,
 } from '@/data/index';
-import { slotStateText, type HudModel } from '@/systems/UiHelpers';
+import type { HudModel } from '@/systems/UiHelpers';
 import { el, testId } from '@/ui/dom';
 import { setItemIcon, type IconSize } from '@/ui/ItemIcon';
 
 /** §4.5: a quick slot held this long opens the picker instead of spending. */
 export const LONG_PRESS_MS = 500;
-/** SPEC-037 §4.4: the heat bar turns from `--warn` to `--hp` here. */
-export const HEAT_HOT = 0.85;
 
 /** §4.5: the key hints, shown only for the keyboard scheme. */
 const KEY_HINTS: Readonly<Record<WeaponSlot | QuickSlot, string>> = {
@@ -49,13 +42,12 @@ interface SlotNodes {
   readonly icon: HTMLElement;
   readonly name: HTMLSpanElement;
   readonly count: HTMLSpanElement | null;
-  readonly key: HTMLElement;
+  readonly key: HTMLSpanElement;
   readonly state: HTMLSpanElement | null;
   /** SPEC-029 §4.11: the charge pips of a launcher slot. */
   readonly pips: HTMLSpanElement | null;
   lastCd: string;
   lastHeat: string;
-  lastState: string;
 }
 
 function write(node: HTMLElement, text: string): void {
@@ -88,16 +80,6 @@ export class QuickBar {
     host.append(this.#root);
   }
 
-  /**
-   * SPEC-037 §4.1: re-parent the whole bar — into the arc's slot cell on the
-   * touch scheme (`.is-arc` makes it the 3 × 2 grid), back into the bottom
-   * centre on the keyboard. The nodes move; nothing is rebuilt.
-   */
-  moveTo(host: HTMLElement, arc: boolean): void {
-    this.#root.classList.toggle('is-arc', arc);
-    if (this.#root.parentElement !== host) host.append(this.#root);
-  }
-
   /** Called from `Hud.#write('loadout' | 'quick')`; both keys land here. */
   render(loadout: HudModel['loadout'], quick: HudModel['quick'], scheme: Scheme): void {
     this.#root.classList.toggle('is-hidden', loadout === null && quick === null);
@@ -114,16 +96,11 @@ export class QuickBar {
         write(nodes.name, item?.short ?? '—');
         write(nodes.key, keys ? KEY_HINTS[slot] : '');
         nodes.key.classList.toggle('is-hidden', !keys);
-        // SPEC-029 §4.11, SPEC-037 §4.4: the state line — `HEAT nn%` while
-        // warm, `LOCK` with `.is-locked`, the seconds left on a recharge or a
-        // switch — and nothing at all while the slot is ready. An empty text
-        // hides the band (CSS `:empty`), so no slot prints READY.
+        // SPEC-029 §4.11: the cooldown states — `HEAT nn%` while warm,
+        // `LOCK` with `.is-locked` while locked, `RECHARGE` with the sweep.
         if (nodes.state !== null) {
-          const text = slotStateText(view);
-          if (nodes.lastState !== text) {
-            nodes.lastState = text;
-            write(nodes.state, text);
-          }
+          const text = view.state === 'heat' ? `HEAT ${Math.round(view.heat * 100)}%` : view.state.toUpperCase();
+          write(nodes.state, text);
         }
         nodes.root.classList.toggle('is-active', slot === loadout.active);
         nodes.root.classList.toggle('is-empty', item === null);
@@ -147,8 +124,6 @@ export class QuickBar {
           nodes.lastHeat = heat;
           nodes.root.style.setProperty('--heat', heat);
         }
-        // SPEC-037 §4.4: the 4 px heat bar is `--hp` from 0.85 up.
-        nodes.root.classList.toggle('is-hot', view.heat >= HEAT_HOT);
       }
     }
     if (quick !== null) {
@@ -180,9 +155,7 @@ export class QuickBar {
     const icon = el('span', 'icon');
     const name = el('span', 'qb-name');
     const count = weapon ? null : el('span', 'qb-count');
-    // SPEC-037 §4.4: the key hint is a keycap at the top left (keyboard only).
-    const key = el('kbd', 'qb-key');
-    key.setAttribute('aria-hidden', 'true');
+    const key = el('span', 'qb-key');
     const state = weapon ? el('span', 'qb-state') : null;
     const pips = weapon ? el('span', 'qb-pips is-hidden') : null;
     root.append(icon, name);
@@ -190,16 +163,6 @@ export class QuickBar {
     if (pips !== null) root.append(pips);
     if (state !== null) root.append(state);
     root.append(key);
-
-    // SPEC-037 §4.9: the slot is drawn pressed from the press to the release,
-    // whichever way the release comes. Only the primary button presses a slot.
-    this.#listen(root, 'pointerdown', (event) => {
-      if (event.button === 0) root.classList.add('is-down');
-    });
-    const up = (): void => root.classList.remove('is-down');
-    this.#listen(root, 'pointerup', up);
-    this.#listen(root, 'pointercancel', up);
-    this.#listen(root, 'pointerleave', up);
 
     if (weapon) {
       // §4.5: weapons act on the press — switching wants no latency. Only the
@@ -244,7 +207,7 @@ export class QuickBar {
       });
     }
 
-    return { root, icon, name, count, key, state, pips, lastCd: '', lastHeat: '', lastState: '' };
+    return { root, icon, name, count, key, state, pips, lastCd: '', lastHeat: '' };
   }
 
   #clearPress(): void {

@@ -4,11 +4,6 @@
 // on Escape or the system Back (its back-stack entry, SPEC-036 §4.4), a tap
 // outside, or the scene pausing — all through the returned close function,
 // which is idempotent.
-//
-// SPEC-037 §4.1: on the touch scheme it opens above the thumb arc, aligned to
-// the arc's outer edge — which edge is the joystick side's mirror, so the
-// scene passes the side and CSS reads it off `data-side`.
-import type { JoystickSide } from '@/core/Settings';
 import type { ItemId, QuickSlot } from '@/data/index';
 import { el, h, testId, type UiRoot } from '@/ui/dom';
 import { itemIcon } from '@/ui/ItemIcon';
@@ -29,10 +24,8 @@ export function openQuickPicker(
   choices: readonly QuickChoice[],
   onChoose: (id: ItemId | null) => void,
   onClose: () => void,
-  side: JoystickSide = 'left',
 ): () => void {
   const root = testId(el('div', 'quick-picker panel'), 'quick-picker');
-  root.dataset['side'] = side;
   root.setAttribute('role', 'dialog');
   root.setAttribute('aria-label', `Choose the ${slot} slot`);
 

@@ -56,8 +56,6 @@ export interface SlotView {
   heat: number;
   charges: number;
   maxCharges: number;
-  /** SPEC-037 §4.4: seconds left on a switch or a recharge; 0 otherwise. */
-  cdSeconds: number;
 }
 
 /** How many of `itemId` the save carries, across the whole stack. */
@@ -259,9 +257,6 @@ export class Loadout {
       : recharging && weapon.cooldown.kind === 'charges'
         ? cd.rechargeLeft / weapon.cooldown.rechargeSeconds
         : 0;
-    // SPEC-037 §4.4: the same two clocks in seconds, for the state line — the
-    // switch's remaining time, else the recharge's, else nothing.
-    out.cdSeconds = switching ? this.#switchUntil - time : recharging ? cd.rechargeLeft : 0;
     out.heat = cd.heat;
     out.charges = cd.charges;
     out.maxCharges = weapon?.cooldown.kind === 'charges' ? weapon.cooldown.charges : 0;

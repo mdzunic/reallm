@@ -33,7 +33,6 @@ import {
   MISSIONS,
   MISSION_HINTS,
   PLANETS,
-  RESOURCE_IDS,
   SURFACE_ASSETS,
   SURFACE_SHARED_ASSETS,
   TIPS,
@@ -97,7 +96,6 @@ import { Weather, WEATHER_EFFECTS, type WeatherEffects } from '@/systems/Weather
 import { LINE_LEDGER, revealCamera, revealDue, revealKey, stayReport, type Ending } from '@/systems/StoryBeats';
 import {
   cameraDistance,
-  cameraFov,
   hasNodeRadar,
   HP_FULL_TEXT,
   occludes,
@@ -106,7 +104,6 @@ import {
   stageResetText,
   surfaceFogRange,
   surfaceHoldReason,
-  walletLit,
   type HudTracker,
   type HudTrackerRow,
   type SurfaceHold,
@@ -129,7 +126,7 @@ import { confirmSheet } from '@/ui/ConfirmSheet';
 import { DamageNumbers } from '@/ui/DamageNumbers';
 import { DeathOverlay } from '@/ui/DeathOverlay';
 import { dialogueLayer, type DialogueUI } from '@/ui/DialogueUI';
-import { el, h, shortScreen, testId } from '@/ui/dom';
+import { el, h, testId } from '@/ui/dom';
 import { clearEndingOverlays, EndingOverlay } from '@/ui/EndingOverlay';
 import { Hud } from '@/ui/Hud';
 import { MapLayers } from '@/ui/MapLayers';
@@ -144,11 +141,8 @@ import { ScanRing } from '@/ui/ScanRing';
 import { TouchControls } from '@/ui/TouchControls';
 import { Waypoint } from '@/ui/Waypoint';
 
-/**
- * §4.3 — the fixed camera. Its distance is SPEC-035 §4.2's, by input scheme and,
- * since SPEC-037 §4.7, by the screen's short side; its field of view is
- * SPEC-037's Hor+ `cameraFov`, so an upright tablet sees the sides of the fight.
- */
+/** §4.3 — the fixed camera. Its distance is SPEC-035 §4.2's, by input scheme. */
+const CAMERA_FOV = 40;
 const CAMERA_PITCH = (55 * Math.PI) / 180;
 const CAMERA_YAW = (45 * Math.PI) / 180;
 /** SPEC-035 §4.2: how long the distance takes to ease after a scheme change. */
@@ -489,11 +483,6 @@ export class SurfaceScene extends UiScene<'surface'> {
   #musicHold = 0;
   #minimapIn = 0;
   #touchHint: string | null = null;
-  /** SPEC-037 §4.3: the interact prompt's reused result. */
-  readonly #interactOut = { text: '', action: false };
-  /** SPEC-037 §4.2: world time the wallet's counts last moved, and whether the baseline is in. */
-  #walletChangedAt = -Infinity;
-  #walletPrimed = false;
 
   // Debug-overlay counters (`?debug`, §4.5 observability; e2e reads them).
   #spawned = 0;
@@ -517,9 +506,9 @@ export class SurfaceScene extends UiScene<'surface'> {
     active: 'primary',
     fallback: false,
     slots: {
-      sidearm: { itemId: null, state: 'empty', cd: 0, heat: 0, charges: 0, maxCharges: 0, cdSeconds: 0 },
-      primary: { itemId: null, state: 'empty', cd: 0, heat: 0, charges: 0, maxCharges: 0, cdSeconds: 0 },
-      heavy: { itemId: null, state: 'empty', cd: 0, heat: 0, charges: 0, maxCharges: 0, cdSeconds: 0 },
+      sidearm: { itemId: null, state: 'empty', cd: 0, heat: 0, charges: 0, maxCharges: 0 },
+      primary: { itemId: null, state: 'empty', cd: 0, heat: 0, charges: 0, maxCharges: 0 },
+      heavy: { itemId: null, state: 'empty', cd: 0, heat: 0, charges: 0, maxCharges: 0 },
     },
   };
   readonly #quickScratch: Record<QuickSlot, { itemId: ItemId | null; qty: number }> = {
@@ -544,7 +533,7 @@ export class SurfaceScene extends UiScene<'surface'> {
   /** SPEC-029 §4.8: world time the next explosive use is allowed. */
   #throwReadyAt = 0;
   /** SPEC-029 §4.13: scratch `SlotView` for the debug overlay reads. */
-  readonly #debugSlotView: SlotView = { itemId: null, state: 'empty', cd: 0, heat: 0, charges: 0, maxCharges: 0, cdSeconds: 0 };
+  readonly #debugSlotView: SlotView = { itemId: null, state: 'empty', cd: 0, heat: 0, charges: 0, maxCharges: 0 };
 
   // Defend/escort stages resync only when their identity changes — accepting
   // or completing an unrelated mission must not restart the wave or respawn
@@ -581,9 +570,6 @@ export class SurfaceScene extends UiScene<'surface'> {
   #camDistanceFrom = 0;
   #camDistanceTo = 0;
   #camEase = 1;
-  /** SPEC-037 §4.7: the canvas's CSS size, from `renderer:resized` — the camera's screen. */
-  #viewWidth = 1;
-  #viewHeight = 1;
   // SPEC-035 §4.5 — the occluder flags, recomputed at 10 Hz over the view's own
   // candidate list. One buffer for the visit; nothing here allocates per frame.
   #occluderFlags = new Uint8Array(0);
@@ -888,11 +874,8 @@ export class SurfaceScene extends UiScene<'surface'> {
     );
     this.props = this.scene.children.length;
 
-    // §4.3: the fixed perspective camera. SPEC-037 §4.7: its field of view and
-    // distance follow the screen — set now, and again on every resize.
-    this.#viewWidth = services.renderer.width;
-    this.#viewHeight = services.renderer.height;
-    this.camera.fov = cameraFov(this.#viewWidth / this.#viewHeight);
+    // §4.3: the fixed perspective camera.
+    this.camera.fov = CAMERA_FOV;
     this.camera.near = 1;
     this.camera.far = services.renderer.quality.drawDistance + 40;
     this.camera.updateProjectionMatrix();
@@ -900,24 +883,6 @@ export class SurfaceScene extends UiScene<'surface'> {
     this.#camTarget.z = world.player.z;
     // SPEC-035 §4.2: the distance starts at the current scheme's, not eased in.
     this.#setCameraScheme(services.input.state.scheme, true);
-    this.disposer.add(
-      services.events.on(
-        'renderer:resized',
-        ({ width, height }) => {
-          // SPEC-037 §4.7: the field of view snaps; the distance eases as a
-          // scheme change does (and snaps under reduce motion).
-          this.#viewWidth = width;
-          this.#viewHeight = height;
-          const fov = cameraFov(width / height);
-          if (fov !== this.camera.fov) {
-            this.camera.fov = fov;
-            this.camera.updateProjectionMatrix();
-          }
-          this.#setCameraScheme(this.services.input.state.scheme, false);
-        },
-        this,
-      ),
-    );
     this.#placeCamera(0, 0);
     // SPEC-035 §4.4: the linear fog's first span, before the first render.
     this.#applyFog();
@@ -935,43 +900,17 @@ export class SurfaceScene extends UiScene<'surface'> {
     this.#hud = hud;
     this.disposer.add(() => hud.dispose());
     hud.setScheme(services.input.state.scheme);
-    // SPEC-037 §4.1, §4.6: the arc's side and the flash's strength, from the
-    // settings on entry and live after (37-b).
-    hud.setSide(services.settings.joystickSide);
-    hud.setDamageFlash(services.settings.get().damageFlash);
     this.disposer.add(
       services.events.on(
         'input:schemeChanged',
         ({ scheme }) => {
           hud.setScheme(scheme);
-          // SPEC-037 §4.2: the minimap changed corners and sizes; its backing
-          // store is measured off its new box (37-a).
-          this.#minimap?.measure();
           // SPEC-035 §4.2: a touch laptop flipping mid-fight eases (35-a).
           this.#setCameraScheme(scheme, false);
         },
         this,
       ),
     );
-    this.disposer.add(
-      services.events.on(
-        'settings:changed',
-        ({ patch }) => {
-          if (patch.joystickSide !== undefined) hud.setSide(patch.joystickSide);
-          if (patch.damageFlash !== undefined) hud.setDamageFlash(patch.damageFlash);
-        },
-        this,
-      ),
-    );
-    // SPEC-037 §4.3: `<html data-play="surface">` is what the in-play layout —
-    // the toast dock, the short-screen dialogue, the hidden build label — and
-    // SPEC-040 read. The scene that sets it takes it away.
-    document.documentElement.dataset['play'] = 'surface';
-    this.disposer.add(() => {
-      delete document.documentElement.dataset['play'];
-    });
-    // SPEC-037 §4.3: a toast hold never outlives the scene that took it.
-    this.disposer.add(() => this.ui.holdToasts(false));
     // §4.6: a picker still open when the scene goes releases its hold with it.
     this.disposer.add(() => this.#pickerClose?.());
 
@@ -1035,8 +974,6 @@ export class SurfaceScene extends UiScene<'surface'> {
     this.disposer.add(() => death.dispose());
     const touch = new TouchControls(services.uiRoot, services.input, services.settings);
     touch.show('surface');
-    // SPEC-037 §4.1: USE lives in the thumb arc's action cell, under the layer's rules.
-    if (hud.arc !== null) touch.mountButton('interact', hud.arc.action);
     this.#touch = touch;
     this.disposer.add(() => touch.dispose());
     // SPEC-034 §4.2: the surface's way out of a corner. The flight menu never
@@ -1507,8 +1444,6 @@ export class SurfaceScene extends UiScene<'surface'> {
     // near plane, how many props are faded out of the way, and whether the
     // first-landing ramp is running.
     info['camDistance'] = Math.round(this.#camDistance * 100) / 100;
-    // SPEC-037 §4.7: the Hor+ field of view in force, to one decimal.
-    info['fov'] = Math.round(this.camera.fov * 10) / 10;
     info['fogNear'] = Math.round(this.#fogNear * 100) / 100;
     info['occluders'] = this.#view?.fadedOccluders ?? 0;
     // SPEC-035 §4.3: the surface's own bloom threshold, which the shared default
@@ -1828,13 +1763,9 @@ export class SurfaceScene extends UiScene<'surface'> {
     this.#camDistance = this.#camDistanceFrom + (this.#camDistanceTo - this.#camDistanceFrom) * this.#camEase;
   }
 
-  /**
-   * §4.2: a scheme change starts the ease; `snap` puts it there at once.
-   * SPEC-037 §4.7: the distance is the scheme's *and* the screen's — a touched
-   * tablet keeps the desktop's 22 m — so a resize runs through here too.
-   */
+  /** §4.2: a scheme change starts the ease; `snap` puts it there at once. */
   #setCameraScheme(scheme: Scheme, snap: boolean): void {
-    const target = cameraDistance(scheme, Math.min(this.#viewWidth, this.#viewHeight));
+    const target = cameraDistance(scheme);
     if (target === this.#camDistanceTo && this.#camEase >= 1) return;
     this.#camDistanceTo = target;
     if (snap || this.services.settings.get().reduceMotion) {
@@ -2643,8 +2574,6 @@ export class SurfaceScene extends UiScene<'surface'> {
         this.#pickerClose = null;
         this.#uiHolds = Math.max(0, this.#uiHolds - 1);
       },
-      // SPEC-037 §4.1: on touch it opens over the arc, on the arc's side.
-      this.services.settings.joystickSide,
     );
   }
 
@@ -3131,18 +3060,8 @@ export class SurfaceScene extends UiScene<'surface'> {
     m.xp[0] = save.player.xp - cumulativeXp(save.player.level);
     m.xp[1] = xpToNext(save.player.level);
     m.level = save.player.level;
-    // SPEC-037 §4.2: any count that moves lights the wallet strip for 5 s. The
-    // first feed of a visit only takes the baseline — a landing changes nothing.
-    let moved = m.tokens !== save.player.tokens;
     m.tokens = save.player.tokens;
-    for (const key of RESOURCE_IDS) {
-      const value = save.resources[key] ?? 0;
-      if (m.resources[key] !== value) moved = true;
-      m.resources[key] = value;
-    }
-    if (moved && this.#walletPrimed) this.#walletChangedAt = world.time;
-    this.#walletPrimed = true;
-    m.walletLit = walletLit(this.#walletChangedAt, world.time, this.#collectOrDeliverOpen(missions));
+    for (const key of Object.keys(m.resources) as ResourceId[]) m.resources[key] = save.resources[key] ?? 0;
     m.cargoCap = (this.#economy as Economy).cargoCap();
 
     // SPEC-027 AC-17/AC-18: on the surface the tracker replaces the
@@ -3182,37 +3101,19 @@ export class SurfaceScene extends UiScene<'surface'> {
       m.quick = this.#quickScratch;
     }
 
-    const interact = this.#interactHint(world);
-    m.interact = interact === null ? null : interact.text;
-    m.interactAction = interact !== null && interact.action;
+    m.interact = this.#interactHint(world);
     // Only on change: `setInteractHint` re-applies the touch layout, which
     // resets the floating stick — calling it per frame would kill the stick
-    // the moment a thumb raises it. SPEC-037 §4.3: USE shows only for a prompt
-    // it performs; a shortfall is words above the arc, not a button.
-    const hint = m.interactAction ? 'USE' : null;
+    // the moment a thumb raises it.
+    const hint = m.interact === null ? null : 'USE';
     if (hint !== this.#touchHint) {
       this.#touchHint = hint;
       this.#touch?.setInteractHint(hint);
     }
   }
 
-  /** SPEC-037 §4.2: a collect or deliver objective of the tracked stage is still open. */
-  #collectOrDeliverOpen(missions: Missions): boolean {
-    const pinned = missions.pinned;
-    if (pinned === null) return false;
-    for (const { objective, done } of missions.currentObjectives(pinned)) {
-      if (!done && (objective.kind === 'collect' || objective.kind === 'deliver')) return true;
-    }
-    return false;
-  }
-
-  /**
-   * The interact prompt (§4.12), including the deliver shortfall hint (E16).
-   * SPEC-037 §4.3: with whether E / USE performs it — the pad terminal does;
-   * `Need 20 more oil` is a statement, not an action. One reused object.
-   */
-  #interactHint(world: CombatWorld): { text: string; action: boolean } | null {
-    const out = this.#interactOut;
+  /** The interact prompt (§4.12), including the deliver shortfall hint (E16). */
+  #interactHint(world: CombatWorld): string | null {
     if (!world.player.alive) return null;
     if (this.#terminalOpen) return null;
     const missions = this.#missions as Missions;
@@ -3227,17 +3128,11 @@ export class SurfaceScene extends UiScene<'surface'> {
         if (held < objective.amount) {
           // SPEC-027 §4.5: the first shortfall is what teaches the rule.
           this.#requestTip('deliver');
-          out.text = `Need ${objective.amount - held} more ${objective.resource}`;
-          out.action = false;
-          return out;
+          return `Need ${objective.amount - held} more ${objective.resource}`;
         }
       }
     }
-    if (this.#atPad(world)) {
-      out.text = 'Open pad terminal';
-      out.action = true;
-      return out;
-    }
+    if (this.#atPad(world)) return 'Open pad terminal';
     return null;
   }
 
@@ -4243,15 +4138,13 @@ export class SurfaceScene extends UiScene<'surface'> {
       bus.on(
         'player:damaged',
         ({ amount, source, from }) => {
+          this.#hud?.damageFlash();
           // SPEC-019 §4.6: weather ticks every fixed step — no burst, no
           // shake; the amounts pool into one red number per second (19-m).
-          // SPEC-037 §4.6: and no flash — the storm vignette and the number say
-          // it, and a weather tick is where the strobe came from (37-g).
           if (source.kind === 'weather') {
             this.#weatherDamage += amount;
             return;
           }
-          this.#hud?.damageFlash();
           const world = this.#world;
           if (world === null || this.#view === null) return;
           const p = world.player;
@@ -4307,10 +4200,6 @@ export class SurfaceScene extends UiScene<'surface'> {
           if (DIALOGUE_TABLE[id].glitch === true) this.#hud?.staticBurst(STATIC_BURST_MS);
           // SPEC-034 §4.6: a modal line holds the world for as long as it is up.
           if (DIALOGUE_TABLE[id].modal === true) this.#modalOpen++;
-          // SPEC-037 §4.3: the tip strip holds for the line (37-f); on a short
-          // screen, where the line docks under the top centre, the toasts do too.
-          this.#aria?.hold(true);
-          if (shortScreen()) this.ui.holdToasts(true);
         },
         this,
       ),
@@ -4318,8 +4207,6 @@ export class SurfaceScene extends UiScene<'surface'> {
         'dialogue:ended',
         ({ id }) => {
           if (DIALOGUE_TABLE[id].modal === true) this.#modalOpen = Math.max(0, this.#modalOpen - 1);
-          this.#aria?.hold(false);
-          this.ui.holdToasts(false);
         },
         this,
       ),

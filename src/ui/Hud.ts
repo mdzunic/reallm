@@ -6,20 +6,11 @@
 //
 // Colorblind-safe pairs (AC-68): the HP bar is red *and* carries ♥, shield is
 // blue *and* ⛨, the warn banner is amber *and* ▲ — never hue alone.
-//
-// SPEC-037 lays the whole thing out once for both schemes: a top-left column
-// on the HUD plate, a top-centre stack headed by the wallet strip, the minimap
-// in the top-right cluster on touch and the bottom-right corner on keyboard,
-// and the quick bar in the bottom centre on keyboard or in the thumb arc on
-// touch — the same bar, moved, so no slot loses its state (37-a).
 import type { Scheme } from '@/core/Input';
-import type { JoystickSide } from '@/core/Settings';
 import {
   cloneHud,
   createHudModel,
   diffHud,
-  flashGate,
-  type DamageFlashMode,
   type HudKey,
   type HudModel,
 } from '@/systems/UiHelpers';
@@ -43,22 +34,6 @@ export const HIT_DIR_MAX = 3;
 const HOLD_HOSTILES = 'Holding pattern — clear the hostiles';
 const HOLD_OBJECTIVE = 'Holding pattern — the objective is not done';
 
-/** SPEC-037 §4.1: the thumb arc's three cells, as `hud.arc` exposes them. */
-export interface ThumbArc {
-  /** The corner cell — empty until SPEC-038's DASH, and taking no pointer events while it is. */
-  readonly primary: HTMLElement;
-  /** Where the touch layer mounts USE (`TouchControls.mountButton`). */
-  readonly action: HTMLElement;
-  /** Where the quick bar lays out on the touch scheme. */
-  readonly slots: HTMLElement;
-}
-
-/** SPEC-037 §4.2: a key's cap, drawn on the keyboard scheme only; screen readers skip it. */
-export function keycap(key: string): HTMLElement {
-  const cap = el('kbd', 'keycap', key);
-  cap.setAttribute('aria-hidden', 'true');
-  return cap;
-}
 
 function bar(kind: string, glyph: string, label: string): { root: HTMLDivElement; fill: HTMLDivElement; text: HTMLSpanElement } {
   const fill = el('div', `bar-fill bar-${kind}`);
@@ -79,9 +54,6 @@ export class Hud {
   #last: HudModel;
   #unregister: () => void;
   #flashTimer: ReturnType<typeof setTimeout> | null = null;
-  /** SPEC-037 §4.6: `performance.now()` seconds of the flash's last rising edge. */
-  #lastEdgeAt = -Infinity;
-  #flashMode: DamageFlashMode = 'full';
 
   // Cached nodes, written only when their key diffs.
   readonly #hp = bar('hp', '♥', 'Hull points');
@@ -93,27 +65,16 @@ export class Hud {
   readonly #tokens = el('span', 'hud-tokens');
   readonly #resources = {} as Record<ResourceId, HTMLSpanElement>;
   readonly #resourceRows = {} as Record<ResourceId, HTMLSpanElement>;
-  /** SPEC-037 §4.2: the wallet strip heading the top centre; `null` in flight mode. */
-  #wallet: HTMLDivElement | null = null;
-  readonly #weather = testId(el('div', 'hud-weather'), 'hud-weather');
+  readonly #weather = el('div', 'hud-weather');
   /** SPEC-030 D-11: always in the DOM, hidden while `shelter === 'none'`. */
   readonly #shelter = testId(el('div', 'hud-shelter is-hidden'), 'sheltered');
   readonly #boss = bar('boss', '', 'Boss');
-  /** SPEC-037 §4.3: on the HUD root, on the plate; the keyboard's E prompt, or a touch shortfall. */
-  readonly #interact = testId(el('div', 'hud-interact'), 'hud-interact');
+  readonly #interact = el('div', 'hud-interact');
   readonly #objective = el('div', 'hud-objective');
   /** SPEC-027 §4.2: the surface's objective tracker; `null` in flight mode. */
   #tracker: Tracker | null = null;
   /** SPEC-028 §4.5: the quick bar in the bottom centre; surface mode only. */
   #quickBar: QuickBar | null = null;
-  /** SPEC-037 §4.1: the thumb arc and its cells; `null` in flight mode. */
-  readonly arc: ThumbArc | null = null;
-  /** The two homes the scheme moves things between (SPEC-037 §4.1, §4.2). */
-  readonly #tr: HTMLDivElement;
-  readonly #br: HTMLDivElement;
-  readonly #bc: HTMLDivElement;
-  /** SPEC-037 §4.2: keeps `--hud-tc-h` on `#ui` for the short-screen dialogue dock. */
-  #tcObserver: ResizeObserver | null = null;
   /** The scheme the key hints and the touch sizing follow (SPEC-028 §4.5). */
   #scheme: Scheme = 'keyboard';
   readonly #vignette = el('div', 'hud-vignette');
@@ -161,8 +122,6 @@ export class Hud {
     this.#last = cloneHud(this.model);
 
     this.#root = testId(el('div', `hud hud-${mode}`), 'hud');
-    this.#root.dataset['side'] = 'left';
-    this.#root.dataset['flash'] = 'full';
     const tl = el('div', 'hud-tl');
     // `hud-hp` is the scene's one HP readout (AC-58); the SPEC-011 e2e reads it.
     tl.append(testId(this.#hp.root, 'hud-hp'), this.#xp.root, this.#level);
@@ -176,35 +135,21 @@ export class Hud {
     // SPEC-027 §4.2: the tracker sits under the level/XP row, in the same corner.
     if (mode === 'surface') this.#tracker = new Tracker(tl, onCycleMission ?? ((): void => undefined));
 
-    // SPEC-037 §4.2: the top-right resource column is gone. On touch in the
-    // surface this is the minimap's corner, left of the pause button; on the
-    // keyboard scheme, and in flight, it stays empty.
-    this.#tr = el('div', 'hud-tr');
+    const tr = el('div', 'hud-tr');
+    for (const resource of RESOURCE_IDS) {
+      const row = el('span', 'res');
+      const count = testId(el('span', 'res-count'), `res-${resource}`);
+      row.append(el('span', 'glyph', RESOURCE_GLYPHS[resource]), count);
+      this.#resources[resource] = count;
+      this.#resourceRows[resource] = row;
+      tr.append(row);
+    }
+    const tokens = el('span', 'res res-tokens');
+    tokens.append(el('span', 'glyph', TOKEN_GLYPH), this.#tokens);
+    tr.append(tokens);
 
     const tc = el('div', 'hud-tc');
-    if (mode === 'surface') {
-      // SPEC-037 §4.2: the wallet strip heads the top centre — tokens, then the
-      // four resources, each a glyph and its count, keeping the `res-<id>` ids.
-      const wallet = testId(el('div', 'hud-wallet'), 'hud-wallet');
-      wallet.setAttribute('aria-label', 'Wallet');
-      const tokens = el('span', 'res res-tokens');
-      tokens.append(el('span', 'glyph', TOKEN_GLYPH), this.#tokens);
-      wallet.append(tokens);
-      for (const resource of RESOURCE_IDS) {
-        const row = el('span', 'res');
-        const count = testId(el('span', 'res-count'), `res-${resource}`);
-        row.append(el('span', 'glyph', RESOURCE_GLYPHS[resource]), count);
-        this.#resources[resource] = count;
-        this.#resourceRows[resource] = row;
-        wallet.append(row);
-      }
-      this.#wallet = wallet;
-      tc.append(wallet);
-    }
     // SPEC-030 D-11: the shelter chip sits directly under the weather banner.
-    // SPEC-037 §4.2: the boss bar is an in-flow row after both, which is what
-    // lets `--hud-tc-h` count it (37-c).
-    this.#boss.root.classList.add('hud-boss-bar');
     tc.append(this.#weather, this.#shelter, testId(this.#boss.root, 'hud-boss'));
     this.#boss.root.classList.add('is-hidden');
     // SPEC-013 §4.10: trip progress with wave markers, the hostiles counter,
@@ -225,62 +170,37 @@ export class Hud {
     // in the bottom centre carries the counts now.
     const bl = el('div', 'hud-bl');
 
-    // SPEC-037 §4.2: the keyboard corner — the minimap sits here at the
-    // bottom right on the keyboard scheme, with its `M` on the rim.
-    this.#br = el('div', 'hud-br');
-    // AC-59: surface mode only. SPEC-012 draws into it; the box and its slot in
-    // the layout are the HUD's.
+    const br = el('div', 'hud-br');
+    // AC-59: the minimap sits above the touch buttons, surface mode only.
+    // SPEC-012 draws into it; the box and its slot in the layout are the HUD's.
     if (mode === 'surface') {
       const minimap = testId(el('canvas', 'minimap'), 'minimap');
       minimap.width = 96;
       minimap.height = 96;
-      this.#br.append(minimap, keycap('M'));
+      br.append(minimap);
       this.#minimap = minimap;
     }
+    br.append(this.#interact);
     this.#interact.classList.add('is-hidden');
 
     // SPEC-027 AC-17 / D-4: on the surface the tracker's focus row *is* the
     // objective line, so this corner builds no second `.hud-objective` — the
     // strict e2e selectors still resolve to exactly one node. Flight keeps its
     // line where SPEC-013 §4.8 put it.
-    this.#bc = el('div', 'hud-bc');
+    const bc = el('div', 'hud-bc');
     if (mode === 'flight') {
-      this.#bc.append(this.#objective);
+      bc.append(this.#objective);
       this.#objective.classList.add('is-hidden');
     }
     // SPEC-028 §4.5: the quick bar takes the bottom centre SPEC-027 freed.
     if (mode === 'surface') {
-      this.#quickBar = new QuickBar(this.#bc, quickHandlers ?? { slot: () => undefined, pick: () => undefined });
+      this.#quickBar = new QuickBar(bc, quickHandlers ?? { slot: () => undefined, pick: () => undefined });
     }
 
-    this.#root.append(this.#vignette, this.#static, this.#hitDirLayer, tl, this.#tr, tc, bl, this.#br, this.#bc, this.#interact);
-    if (mode === 'surface') {
-      // SPEC-037 §4.1: the thumb arc — built always, shown on the touch scheme
-      // only. `arc-primary` is SPEC-038's DASH cell and stays empty here.
-      const primary = testId(el('div', 'arc-primary'), 'arc-primary');
-      const action = testId(el('div', 'arc-action'), 'arc-action');
-      const slots = testId(el('div', 'arc-slots'), 'arc-slots');
-      const thumbArc = testId(el('div', 'thumb-arc'), 'thumb-arc');
-      thumbArc.append(slots, action, primary);
-      this.#root.append(thumbArc);
-      this.arc = { primary, action, slots };
-    }
+    this.#root.append(this.#vignette, this.#static, this.#hitDirLayer, tl, tr, tc, bl, br, bc);
     if (mode === 'flight') this.#root.append(this.#ion, this.#reticle);
     root.mount(this.#root, 'hud');
     this.#unregister = root.register(this);
-    // SPEC-037 §4.2: the top centre's height, for the dialogue and the tip strip
-    // that dock under it on a short screen. A ResizeObserver callback is an
-    // event, not the loop (SPEC-001 §7), so this is no DOM read in `update()`.
-    if (typeof ResizeObserver === 'function') {
-      const host = root.root;
-      this.#tcObserver = new ResizeObserver((entries) => {
-        const entry = entries[entries.length - 1];
-        if (entry === undefined) return;
-        const height = entry.borderBoxSize?.[0]?.blockSize ?? entry.contentRect.height;
-        host.style.setProperty('--hud-tc-h', `${Math.round(height)}px`);
-      });
-      this.#tcObserver.observe(tc);
-    }
     this.#renderAll();
   }
 
@@ -320,43 +240,11 @@ export class Hud {
     this.#reticle.style.top = `${(-ndcY * 0.5 + 0.5) * 100}%`;
   }
 
-  /**
-   * AC-63: the red edge vignette, 150 ms; a static frame under reduce-motion.
-   * SPEC-037 §4.6: gated so it never strobes (E71) — a hit inside
-   * `FLASH_MIN_GAP` of the last rising edge keeps a lit flash on for another
-   * 150 ms rather than restarting it, and adds no edge to one that has already
-   * gone out. A no-op under `'off'`.
-   */
+  /** AC-63: the red edge vignette, 150 ms; a static frame under reduce-motion. */
   damageFlash(): void {
-    if (this.#flashMode === 'off') return;
-    const now = performance.now() / 1000;
-    const lit = this.#vignette.classList.contains('is-flashing');
-    if (flashGate(this.#lastEdgeAt, now) === 'edge') {
-      this.#lastEdgeAt = now;
-      if (!lit) this.#vignette.classList.add('is-flashing');
-    } else if (!lit) {
-      return;
-    }
+    this.#vignette.classList.add('is-flashing');
     if (this.#flashTimer !== null) clearTimeout(this.#flashTimer);
-    this.#flashTimer = setTimeout(() => {
-      this.#flashTimer = null;
-      this.#vignette.classList.remove('is-flashing');
-    }, DAMAGE_FLASH_MS);
-  }
-
-  /** SPEC-037 §4.6: `data-flash` on the root; CSS owns the peak, and `'off'` never flashes. */
-  setDamageFlash(mode: DamageFlashMode): void {
-    this.#flashMode = mode;
-    this.#root.dataset['flash'] = mode;
-    if (mode !== 'off') return;
-    if (this.#flashTimer !== null) clearTimeout(this.#flashTimer);
-    this.#flashTimer = null;
-    this.#vignette.classList.remove('is-flashing');
-  }
-
-  /** SPEC-037 §4.1: `data-side` on the root mirrors the thumb arc at once (37-b). */
-  setSide(side: JoystickSide): void {
-    this.#root.dataset['side'] = side;
+    this.#flashTimer = setTimeout(() => this.#vignette.classList.remove('is-flashing'), DAMAGE_FLASH_MS);
   }
 
   /**
@@ -403,24 +291,11 @@ export class Hud {
   setScheme(scheme: Scheme): void {
     if (scheme === this.#scheme) return;
     this.#scheme = scheme;
-    const touch = scheme === 'touch';
-    this.#root.classList.toggle('is-touch', touch);
-    // SPEC-037 §4.1, §4.2 (37-a): the bar moves between the bottom centre and
-    // the arc, and the minimap between the keyboard corner and the top-right
-    // cluster. Both are moved, not rebuilt, so every slot keeps its state; the
-    // scene re-measures the minimap after the move.
-    if (this.arc !== null) this.#quickBar?.moveTo(touch ? this.arc.slots : this.#bc, touch);
-    if (this.#minimap !== null) {
-      if (touch) this.#tr.append(this.#minimap);
-      else this.#br.prepend(this.#minimap);
-    }
+    this.#root.classList.toggle('is-touch', scheme === 'touch');
     this.#quickBar?.render(this.model.loadout, this.model.quick, scheme);
   }
 
   dispose(): void {
-    this.#tcObserver?.disconnect();
-    this.#tcObserver = null;
-    this.#ui.root.style.removeProperty('--hud-tc-h');
     if (this.#flashTimer !== null) clearTimeout(this.#flashTimer);
     if (this.#staticTimer !== null) clearTimeout(this.#staticTimer);
     while (this.#hitDirs.length > 0) this.#dropHitDirection(0);
@@ -455,12 +330,10 @@ export class Hud {
         this.#level.textContent = `Lv ${m.level}`;
         return;
       case 'tokens':
-        if (this.#wallet !== null) this.#tokens.textContent = String(m.tokens);
+        this.#tokens.textContent = String(m.tokens);
         return;
       case 'resources':
       case 'cargoCap': {
-        // SPEC-037 §4.2: the flight builds no wallet, so there is nothing to count.
-        if (this.#wallet === null) return;
         let anyAtCap = false;
         for (const resource of RESOURCE_IDS) {
           const value = m.resources[resource];
@@ -475,10 +348,6 @@ export class Hud {
         this.#root.classList.toggle('is-cargo-full', anyAtCap);
         return;
       }
-      case 'walletLit':
-        // SPEC-037 §4.2: full opacity while lit, 0.6 otherwise (CSS).
-        this.#wallet?.classList.toggle('is-lit', m.walletLit);
-        return;
       case 'tracker': {
         // SPEC-027 §4.2: the whole panel, from the model the scene wrote.
         if (m.tracker !== null) this.#tracker?.set(m.tracker);
@@ -527,17 +396,9 @@ export class Hud {
         return;
       }
       case 'interact':
-      case 'interactAction': {
-        // SPEC-037 §4.3: an actionable prompt leads with its `E` keycap on the
-        // keyboard; on touch CSS hides it, because USE in the arc says it. A
-        // shortfall (`Need 20 more oil`) is words only, on both schemes.
         this.#interact.classList.toggle('is-hidden', m.interact === null);
-        this.#interact.classList.toggle('is-action', m.interactAction);
-        if (m.interact === null) return;
-        if (m.interactAction) this.#interact.replaceChildren(keycap('E'), ` ${m.interact}`);
-        else this.#interact.textContent = m.interact;
+        if (m.interact !== null) this.#interact.textContent = m.interact;
         return;
-      }
       case 'flight': {
         if (m.flight === undefined || this.#mode !== 'flight') return;
         this.#setBar(this.#shield, m.flight.shield);

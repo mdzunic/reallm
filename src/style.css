@@ -52,32 +52,6 @@ body {
   touch-action: none;
   padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom)
     env(safe-area-inset-left);
-  /* SPEC-037 §4.9: a held thumb selects nothing, raises no iOS callout and
-     flashes no tap highlight anywhere in the UI. */
-  -webkit-user-select: none;
-  user-select: none;
-  -webkit-touch-callout: none;
-  -webkit-tap-highlight-color: transparent;
-}
-
-/* …except the text a player may want to copy: the credits and the save codes
-   (§4.9). Every text field keeps its own selection too — iOS will not type
-   into a field whose ancestor refuses it. */
-#ui .credits-text,
-#ui .settings-code,
-#ui .menu-code,
-#ui .slot-code,
-#ui input,
-#ui textarea {
-  -webkit-user-select: text;
-  user-select: text;
-}
-
-/* SPEC-037 §4.9: a text field is at least 16 px, the size under which iOS
-   zooms the page when the field takes focus. */
-#ui input:not([type='range']):not([type='checkbox']),
-#ui textarea {
-  font-size: max(16px, 1em);
 }
 
 /* The version label. It opts into pointer events because five taps on it are
@@ -93,13 +67,6 @@ body {
   pointer-events: auto;
   touch-action: manipulation;
   user-select: none;
-}
-
-/* SPEC-037 §4.9: in play on touch the label sat in the stick's corner, so it
-   goes; Settings → Show FPS reaches the stats there, and the five taps and the
-   long press keep working where it shows — the menu and the station (37-m). */
-html[data-play].scheme-touch #ui > .boot-note {
-  display: none;
 }
 
 /* ------------------------------------------------- scene machine (SPEC-003) */
@@ -240,6 +207,7 @@ html[data-play].scheme-touch #ui > .boot-note {
 
 button.pause-resume,
 button.scene-nav-button,
+button.slot-button,
 button.context-lost-reload {
   font: inherit;
   color: inherit;
@@ -250,14 +218,11 @@ button.context-lost-reload {
   cursor: pointer;
 }
 
-/* SPEC-037 §4.9: a hover state only where there is a hover — a tapped button
-   on a phone kept it and looked selected. */
-@media (hover: hover) {
-  button.pause-resume:hover,
-  button.scene-nav-button:hover,
-  button.context-lost-reload:hover {
-    background: #1d2a38;
-  }
+button.pause-resume:hover,
+button.scene-nav-button:hover,
+button.slot-button:hover,
+button.context-lost-reload:hover {
+  background: #1d2a38;
 }
 
 /* --------------------------------------- boot gate (SPEC-002 §4.5, SPEC-031) */
@@ -410,6 +375,19 @@ html.quality-low button.boot-start {
   background: rgb(230 237 243 / 45%);
 }
 
+/* Flight aims itself inside the fire zone; the reticle is what says so (AC-28). */
+.touch-reticle {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 28px;
+  height: 28px;
+  margin: -14px 0 0 -14px;
+  border: 2px solid rgb(230 237 243 / 55%);
+  border-radius: 50%;
+  pointer-events: none;
+}
+
 .touch-buttons {
   position: absolute;
   right: max(16px, env(safe-area-inset-right));
@@ -421,8 +399,7 @@ html.quality-low button.boot-start {
 }
 
 /* Left-handed layout: the stick moves to the right half, so the buttons move
-   to the left one (AC-11). SPEC-037 §4.1: in flight that is the ▲ / ▼ pair;
-   on the surface USE lives in the HUD's thumb arc, which mirrors itself. */
+   to the left one (AC-11). */
 .touch-controls[data-side='right'] .touch-buttons {
   right: auto;
   left: max(16px, env(safe-area-inset-left));
@@ -451,42 +428,8 @@ button.touch-button {
   -webkit-touch-callout: none;
 }
 
-.touch-controls .is-hidden,
-button.touch-button.is-hidden {
+.touch-controls .is-hidden {
   display: none;
-}
-
-/* SPEC-037 §4.1: pause leaves the row for the top-right corner, in both
-   modes, at a deliberate 44 × 44 — next to SWAP and ITEM it was a mis-tap every
-   fight. It does not mirror with the stick. */
-button.touch-button.touch-pause {
-  position: absolute;
-  top: max(10px, env(safe-area-inset-top));
-  right: max(10px, env(safe-area-inset-right));
-  min-width: 44px;
-  min-height: 44px;
-  width: 44px;
-  height: 44px;
-  border-radius: 8px;
-}
-
-/* SPEC-037 §4.1: USE, mounted into the arc's 56 × 56 action cell, fills it. */
-.arc-action > button.touch-button {
-  width: 100%;
-  height: 100%;
-}
-
-/* SPEC-037 §4.9: a touch button and a quick-bar slot are drawn pressed from
-   the press to the release; under reduce motion only the brightness moves. */
-button.touch-button.is-down,
-.qb-slot.is-down {
-  transform: scale(0.94);
-  filter: brightness(1.3);
-}
-
-html.reduce-motion button.touch-button.is-down,
-html.reduce-motion .qb-slot.is-down {
-  transform: none;
 }
 
 /* SPEC-036 §4.12: the two "where to touch" ghosts of a first landing. They
@@ -548,24 +491,16 @@ html.reduce-motion .touch-zone {
   transform: translateY(calc(100% + 8px));
 }
 
-/* SPEC-037 §4.1: at (60 %, 50 %) — (40 %, 50 %) mirrored — the ghost clears
-   the thumb arc and the toasts at every phone size. Its label is tracked a
-   little tighter than MOVE's: at 802 × 293 the compact arc starts 59 px right
-   of the ghost's centre. */
 .touch-zone-aim {
-  left: 60%;
-  top: 50%;
+  left: 75%;
+  top: 60%;
   display: flex;
   align-items: center;
-  gap: 6px;
-}
-
-.touch-zone-aim .touch-zone-label {
-  letter-spacing: 0.08em;
+  gap: 8px;
 }
 
 .touch-controls[data-side='right'] .touch-zone-aim {
-  left: 40%;
+  left: 25%;
 }
 
 .touch-zone-chevron {
@@ -631,10 +566,8 @@ button.debug-button {
   cursor: pointer;
 }
 
-@media (hover: hover) {
-  button.debug-button:hover {
-    background: #1d2a38;
-  }
+button.debug-button:hover {
+  background: #1d2a38;
 }
 
 /* -------------------------------------------------- saves (SPEC-007 E8, §7) */
@@ -688,6 +621,11 @@ button.debug-button {
   gap: 6px;
 }
 
+button.slot-button {
+  padding: 3px 10px;
+  font-size: 12px;
+}
+
 /* The paste field of §4.6, on its own line under the row it belongs to. */
 .slot-import {
   display: flex;
@@ -703,6 +641,7 @@ button.debug-button {
   background: #0d141b;
   color: inherit;
   font: inherit;
+  font-size: 12px;
   resize: vertical;
 }
 
@@ -748,39 +687,6 @@ button.debug-button {
   --type-xl: clamp(22px, 4.2vmin, 34px);
   --track: 0.12em;
   --key-face: rgba(18, 26, 36, 0.92);
-
-  /* SPEC-037 §3 — one HUD for every screen (*initial tuning*). The plate backs
-     HUD text wherever it sits over the world, dark enough that --ink, --warn
-     and --good all read 4.5 : 1 over Vetra's snow; the halo is for text with no
-     plate under it. The rest is layout: the stack the dialogue and the tip
-     strip sit on, the fixed top-left column, the minimap, the width of the
-     top-right cluster, and the thumb arc's height. */
-  --hud-plate: rgba(4, 6, 10, 0.75);
-  --hud-halo: 0 0 2px #000, 1px 1px 0 #000, -1px -1px 0 #000, 1px -1px 0 #000, -1px 1px 0 #000;
-  --hud-bottom-stack: 166px;
-  --hud-tl-w: calc(clamp(200px, 30vw, 320px) + 16px);
-  --minimap-size: clamp(128px, 24vmin, 184px);
-  --hud-tr-w: 0px;
-  --arc-h: 150px;
-}
-
-/* SPEC-037 §3: the touch scheme's values. `--hud-tc-h` is not declared here —
-   a ResizeObserver on `.hud-tc` writes it on `#ui`. */
-html.scheme-touch {
-  --hud-bottom-stack: 138px;
-  --minimap-size: clamp(72px, 20vmin, 144px);
-  --hud-tr-w: 52px;
-}
-
-html.scheme-touch[data-play='surface'] {
-  --hud-tr-w: calc(52px + var(--minimap-size));
-}
-
-/* SPEC-037 §4.1: the compact arc — 56 px slots and cell — on a screen this short. */
-@media (max-height: 360px) {
-  :root {
-    --arc-h: 122px;
-  }
 }
 
 /* Font floor 14 px (AC-107); larger sizes clamp with the viewport (AC-60).
@@ -882,18 +788,11 @@ html.quality-low .toast {
   touch-action: manipulation;
 }
 
+.ui-btn:hover,
 .ui-btn:focus-visible,
 .ui-btn.is-active,
 .ui-btn[aria-pressed='true'] {
   box-shadow: inset 0 -2px 0 var(--accent);
-}
-
-/* SPEC-037 §4.9: the hover underline only where hover exists; focus, active
-   and pressed keep theirs above, outside the query. */
-@media (hover: hover) {
-  .ui-btn:hover {
-    box-shadow: inset 0 -2px 0 var(--accent);
-  }
 }
 
 .ui-btn:disabled {
@@ -910,14 +809,9 @@ html.quality-low .toast {
   border-color: var(--hp);
 }
 
+.ui-btn.is-danger:hover,
 .ui-btn.is-danger:focus-visible {
   box-shadow: inset 0 -2px 0 var(--hp);
-}
-
-@media (hover: hover) {
-  .ui-btn.is-danger:hover {
-    box-shadow: inset 0 -2px 0 var(--hp);
-  }
 }
 
 /* ------------------------------------------------------------------ toasts */
@@ -941,70 +835,6 @@ html.quality-low .toast {
    the cover. */
 #ui:has(> .overlay-rotate.is-visible) > .toast-rack {
   z-index: 50;
-}
-
-/* SPEC-037 §4.3: in play the rack docks right-aligned under the top-right
-   cluster, off the boss bar and the storm countdown — 8 px under the top inset
-   on the keyboard, under the pause button on touch, and under the minimap on
-   the touch surface. Menus keep the top-centre rack above. */
-html[data-play] .toast-rack {
-  position: absolute;
-  top: calc(max(10px, env(safe-area-inset-top)) + 8px);
-  left: auto;
-  right: max(10px, env(safe-area-inset-right));
-  transform: none;
-  align-items: flex-end;
-  max-width: min(300px, 38vw);
-}
-
-html.scheme-touch[data-play] .toast-rack {
-  top: calc(max(10px, env(safe-area-inset-top)) + 52px);
-}
-
-html.scheme-touch[data-play='surface'] .toast-rack {
-  top: calc(max(10px, env(safe-area-inset-top)) + max(var(--minimap-size), 44px) + 8px);
-}
-
-html[data-play] .toast {
-  max-width: 100%;
-  box-sizing: border-box;
-}
-
-/* SPEC-037 §4.3: held for a dialogue on a short screen — hidden, its clock
-   stopped (UiRoot), and every toast still queued behind it (37-e). */
-.toast-rack.is-held {
-  display: none;
-}
-
-/* SPEC-037 §4.3: caps by height on the touch surface, so the rack never
-   reaches the arc. The queue is unchanged and the full text stays in the DOM
-   for the live region; only what is drawn is capped (37-d). */
-@media (max-height: 500px) {
-  html.scheme-touch[data-play='surface'] .toast:nth-last-child(n + 3) {
-    display: none;
-  }
-
-  html.scheme-touch[data-play='surface'] .toast {
-    display: -webkit-box;
-    -webkit-box-orient: vertical;
-    -webkit-line-clamp: 2;
-    line-clamp: 2;
-    overflow: hidden;
-  }
-}
-
-@media (max-height: 420px) {
-  html.scheme-touch[data-play='surface'] .toast:nth-last-child(n + 2) {
-    display: none;
-  }
-}
-
-@media (max-height: 320px) {
-  html.scheme-touch[data-play='surface'] .toast {
-    -webkit-line-clamp: 1;
-    line-clamp: 1;
-    text-overflow: ellipsis;
-  }
 }
 
 /* §4.5: toasts wear the same glass as the panels. */
@@ -1096,12 +926,7 @@ html.reduce-motion .sheet {
 }
 
 /* -------------------------------------------------------------------- HUD */
-/* Safe-area padded corners (AC-60); the whole layer never selects (AC-67).
-   SPEC-037 lays it out once for both schemes: a fixed-width top-left column on
-   the HUD plate, a top-centre stack headed by the wallet strip, the minimap in
-   the top-right cluster on touch and in the bottom-right corner on keyboard,
-   and the quick bar in the bottom centre on keyboard or in the thumb arc on
-   touch. */
+/* Safe-area padded corners (AC-60); the whole layer never selects (AC-67). */
 .hud {
   position: absolute;
   inset: 0;
@@ -1121,23 +946,12 @@ html.reduce-motion .sheet {
   gap: 6px;
 }
 
-/* SPEC-037 §4.2: HP, XP, the level and the tracker, `--hud-tl-w` wide on the
-   plate — the same on both schemes and in both modes. A fixed width is a CSS
-   value the top centre and the short-screen dialogue can span from. */
 .hud-tl {
   top: max(10px, env(safe-area-inset-top));
   left: max(10px, env(safe-area-inset-left));
   flex-direction: column;
-  width: var(--hud-tl-w);
-  box-sizing: border-box;
-  padding: 6px 8px;
-  border-radius: 6px;
-  background: var(--hud-plate);
 }
 
-/* SPEC-037 §4.2: the top-right cluster. The resource column is gone: it is
-   empty on the keyboard and in flight, and the minimap's on the touch surface,
-   left of the pause button. */
 .hud-tr {
   top: max(10px, env(safe-area-inset-top));
   right: max(10px, env(safe-area-inset-right));
@@ -1145,14 +959,6 @@ html.reduce-motion .sheet {
   align-items: flex-end;
 }
 
-.hud.is-touch .hud-tr {
-  position: absolute;
-  top: max(10px, env(safe-area-inset-top));
-  right: calc(max(10px, env(safe-area-inset-right)) + 52px);
-}
-
-/* The top centre: the wallet strip, the weather banner, the shelter chip and
-   the boss bar, each a row, centred on the viewport on the keyboard. */
 .hud-tc {
   top: max(10px, env(safe-area-inset-top));
   left: 50%;
@@ -1161,23 +967,11 @@ html.reduce-motion .sheet {
   align-items: center;
 }
 
-/* SPEC-037 §4.2, §4.8: on touch it spans the gap between the corner columns
-   and centres its rows there — centred on the viewport it met the tracker at
-   667 px. The flight's cluster is the pause button alone (`--hud-tr-w`). */
-html.scheme-touch[data-play] .hud-tc {
-  position: absolute;
-  left: calc(max(10px, env(safe-area-inset-left)) + var(--hud-tl-w) + 8px);
-  right: calc(max(10px, env(safe-area-inset-right)) + var(--hud-tr-w) + 8px);
-  transform: none;
-}
-
 .hud-bl {
   bottom: max(10px, env(safe-area-inset-bottom));
   left: max(10px, env(safe-area-inset-left));
 }
 
-/* SPEC-037 §4.2: the keyboard corner — the minimap sits here, with no margin
-   under it; on touch it has moved to the top right and this box is empty. */
 .hud-br {
   bottom: max(10px, env(safe-area-inset-bottom));
   right: max(10px, env(safe-area-inset-right));
@@ -1238,70 +1032,23 @@ html.scheme-touch[data-play] .hud-tc {
   color: var(--accent-2);
 }
 
-/* SPEC-037 §4.5: the boss bar has no plate under it, so its name wears the
-   halo. It is an in-flow row of the top centre (§4.2), after the weather
-   banner and the shelter chip. */
-.hud-boss-bar .bar-text {
-  text-shadow: var(--hud-halo);
-}
-
-/* SPEC-037 §4.2: the wallet strip heads the top centre — tokens, then oil,
-   wheat, water and lithium, each a glyph and its count, one 13 px row on the
-   plate. Lit for 5 s after a count moves and while a collect or deliver
-   objective is open, at 0.6 otherwise; it never takes a pointer. */
-.hud-wallet {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 3px 8px;
-  border-radius: 6px;
-  background: var(--hud-plate);
-  font-size: 13px;
-  line-height: 16px;
-  white-space: nowrap;
-  opacity: 0.6;
-  transition: opacity 150ms linear;
-  pointer-events: none;
-}
-
-.hud-wallet.is-lit {
-  opacity: 1;
-}
-
-html.reduce-motion .hud-wallet {
-  transition: none;
-}
-
-.hud-wallet .hud-tokens {
-  font-size: inherit;
-  text-shadow: none;
-}
-
 .res {
   display: flex;
-  gap: 2px;
+  gap: 4px;
   align-items: center;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.8);
 }
 
-/* SPEC-037 §4.5: at cap the count stays ink and goes bold, with a red ▲ after
-   it — weight and marker, never hue alone, and no red text on the plate. */
+/* At cap the counter goes red — with the glyph beside it, never hue alone. */
 .res.at-cap .res-count {
-  color: var(--ink);
-  font-weight: 700;
-}
-
-.res.at-cap::after {
-  content: '▲';
   color: var(--hp);
   font-weight: 700;
 }
 
-/* SPEC-037 §4.5: the weather banner, the shelter chip and the flight's lines
-   sit on the plate, and their text is --ink, --warn or --good only. */
 .hud-weather {
   padding: 4px 12px;
   border-radius: 6px;
-  background: var(--hud-plate);
+  background: rgba(0, 0, 0, 0.55);
   color: var(--warn);
 }
 
@@ -1309,16 +1056,15 @@ html.reduce-motion .hud-wallet {
 .hud-shelter {
   padding: 2px 10px;
   border-radius: 6px;
-  background: var(--hud-plate);
-  color: var(--ink);
+  background: rgba(0, 0, 0, 0.55);
+  color: #8ad7ff;
   letter-spacing: 0.08em;
 }
 
 .hud-objective {
   padding: 4px 12px;
   border-radius: 6px;
-  background: var(--hud-plate);
-  color: var(--ink);
+  background: rgba(0, 0, 0, 0.55);
   white-space: nowrap;
 }
 
@@ -1333,19 +1079,6 @@ html.reduce-motion .hud-wallet {
 .qb-group {
   display: flex;
   gap: 4px;
-}
-
-/* SPEC-037 §4.1: in the thumb arc the bar is a grid of three 56 px columns
-   with 6 px gaps; the groups dissolve into it, so the weapons fill the first
-   row and the packs the second. */
-.quickbar.is-arc:not(.is-hidden) {
-  display: grid;
-  grid-template-columns: repeat(3, 56px);
-  gap: 6px;
-}
-
-.quickbar.is-arc .qb-group {
-  display: contents;
 }
 
 .qb-slot {
@@ -1364,14 +1097,12 @@ html.reduce-motion .hud-wallet {
   border: 1px solid var(--panel-edge);
   border-radius: 8px;
   background:
-    /* SPEC-037 §4.4: heat is a full-width 4 px bar at the slot's foot, --warn
-       below 0.85 and --hp from there (`--qb-heat`)… */
-    linear-gradient(var(--qb-heat, var(--warn)), var(--qb-heat, var(--warn))) left bottom / calc(var(--heat, 0) * 100%) 4px no-repeat,
-    /* …and --cd drives the conic sweep over the slot's dark base. */
+    /* §4.5: --cd drives a conic sweep, --heat a thin bar along the bottom. */
+    linear-gradient(to top, var(--warn) calc(var(--heat, 0) * 3px), transparent calc(var(--heat, 0) * 3px)),
     conic-gradient(rgba(255, 255, 255, 0.18) calc(var(--cd, 0) * 360deg), rgba(0, 0, 0, 0.55) 0);
   color: inherit;
   font: inherit;
-  font-size: 11px;
+  font-size: 10px;
   line-height: 1.1;
   pointer-events: auto;
   cursor: pointer;
@@ -1381,12 +1112,7 @@ html.reduce-motion .hud-wallet {
   -webkit-touch-callout: none;
 }
 
-.qb-slot.is-hot,
-.qb-slot.is-locked {
-  --qb-heat: var(--hp);
-}
-
-/* 56 × 72 when the HUD root carries the touch scheme (§4.5); SPEC-035 §4.13
+/* 56 px wide when the HUD root carries the touch scheme (§4.5); SPEC-035 §4.13
    gives it the same extra height as the desktop slot. */
 .hud.is-touch .qb-slot {
   width: 56px;
@@ -1395,7 +1121,7 @@ html.reduce-motion .hud-wallet {
 }
 
 /* §4.5: the active slot has an accent border *and* a ▲ above it — never
-   colour alone (colourblind safety). SPEC-037 §4.4: 12 px, 16 px above. */
+   colour alone (colourblind safety). */
 .qb-slot.is-active {
   border-color: var(--accent);
   box-shadow: 0 0 0 1px var(--accent);
@@ -1404,11 +1130,10 @@ html.reduce-motion .hud-wallet {
 .qb-slot.is-active::after {
   content: '▲';
   position: absolute;
-  top: -16px;
+  top: -14px;
   left: 50%;
   transform: translateX(-50%);
-  font-size: 12px;
-  line-height: 1;
+  font-size: 9px;
   color: var(--accent);
 }
 
@@ -1427,68 +1152,25 @@ html.reduce-motion .hud-wallet {
   line-height: 1.2;
 }
 
-/* SPEC-037 §4.4: the count — bold at the bottom right of the picture, 12 px
-   (14 px on touch), on the halo so it reads over any icon. */
-.qb-count {
-  position: absolute;
-  right: 3px;
-  bottom: 15px;
-  font-size: 12px;
-  font-weight: 700;
-  line-height: 1;
-  text-shadow: var(--hud-halo);
+.qb-count,
+.qb-state,
+.qb-key {
+  font-size: 8px;
+  opacity: 0.85;
 }
 
-.hud.is-touch .qb-count {
-  font-size: 14px;
-}
-
-/* SPEC-037 §4.4: the key hint — an 11 px keycap at the top left, drawn on the
-   keyboard scheme only (the bar hides it on touch). */
 .qb-key {
   position: absolute;
-  top: 2px;
-  left: 2px;
-  min-width: 13px;
-  padding: 0 2px;
-  box-sizing: border-box;
-  border: 1px solid var(--frame-edge);
-  border-radius: 3px;
-  background: var(--key-face);
-  color: var(--ink);
-  font: inherit;
-  font-size: 11px;
-  font-weight: 700;
-  line-height: 13px;
-  text-align: center;
+  top: 1px;
+  right: 3px;
 }
 
-/* SPEC-037 §4.4: the state line — only while the slot is not ready (HEAT nn%,
-   LOCK, or the seconds left), 11 px on a dark band just above the heat bar.
-   The band is as wide as its words and hidden when there are none. */
-.qb-state {
-  position: absolute;
-  left: 50%;
-  bottom: 4px;
-  z-index: 1;
-  transform: translateX(-50%);
-  padding: 1px 3px;
-  border-radius: 2px;
-  background: rgba(0, 0, 0, 0.8);
-  color: var(--ink);
-  font-size: 11px;
-  font-weight: 700;
-  line-height: 12px;
-  white-space: nowrap;
-}
-
-.qb-state:empty {
-  display: none;
-}
-
-/* SPEC-029 §4.11: the cooldown states. A locked slot pulses its border and
-   says LOCK in the HP red; reduce motion holds the border steady. */
+/* SPEC-029 §4.11: the cooldown states. A locked slot shows a red pulsing
+   heat bar and LOCK; reduce motion holds the bar steady. */
 .qb-slot.is-locked {
+  background:
+    linear-gradient(to top, var(--hp) 3px, transparent 3px),
+    conic-gradient(rgba(255, 255, 255, 0.18) calc(var(--cd, 0) * 360deg), rgba(0, 0, 0, 0.55) 0);
   animation: qb-lock-pulse 0.8s ease-in-out infinite;
 }
 
@@ -1511,119 +1193,29 @@ html.reduce-motion .qb-slot.is-locked {
   color: var(--warn);
 }
 
-/* SPEC-029 §4.11, SPEC-037 §4.4: a launcher's charge pips, 11 px, top right. */
 .qb-pips {
-  position: absolute;
-  top: 2px;
-  right: 3px;
-  font-size: 11px;
-  letter-spacing: 1px;
+  font-size: 8px;
+  letter-spacing: 2px;
   line-height: 1;
-  text-shadow: var(--hud-halo);
 }
 
 /* §4.11: the sidearm covering a locked primary carries ↺ — a marker, never
-   colour alone. SPEC-037 §4.4: 12 px, 16 px above the slot. */
+   colour alone. */
 .qb-slot.is-fallback::before {
   content: '↺';
   position: absolute;
-  top: -16px;
+  top: -14px;
   left: 50%;
   transform: translateX(-50%);
-  font-size: 12px;
-  line-height: 1;
+  font-size: 10px;
   color: var(--warn);
 }
 
-/* ------------------------------------------------- SPEC-037: the thumb arc */
-/* §4.1: the touch scheme's corner opposite the stick. Three cells 10 px apart —
-   the empty corner cell (SPEC-038's DASH), USE directly above it, and the
-   quick bar's 3 × 2 grid on the inner side: 262 × 150, and 246 × 122 on a
-   screen 360 px tall or less. Hidden on the keyboard scheme. */
-.thumb-arc {
-  position: absolute;
-  right: max(16px, env(safe-area-inset-right));
-  bottom: max(16px, env(safe-area-inset-bottom));
-  display: grid;
-  grid-template-areas:
-    'slots action'
-    'slots primary';
-  grid-template-columns: auto 72px;
-  grid-template-rows: 1fr auto;
-  gap: 10px;
-  place-items: end;
-}
-
-.hud:not(.is-touch) .thumb-arc {
-  display: none;
-}
-
-/* Mirrored with `joystickSide: 'right'`: the arc goes to the bottom left. */
-.hud[data-side='right'] .thumb-arc {
-  position: absolute;
-  right: auto;
-  left: max(16px, env(safe-area-inset-left));
-  grid-template-areas:
-    'action slots'
-    'primary slots';
-  grid-template-columns: 72px auto;
-  justify-items: start;
-}
-
-.arc-slots {
-  grid-area: slots;
-}
-
-.arc-action {
-  grid-area: action;
-  width: 56px;
-  height: 56px;
-}
-
-.arc-primary {
-  grid-area: primary;
-  width: 72px;
-  height: 72px;
-}
-
-.arc-primary:empty {
-  pointer-events: none;
-}
-
-/* §4.1: compact — 56 px slots with their names hidden, and a 56 px corner. */
-@media (max-height: 360px) {
-  .hud.is-touch .qb-slot {
-    height: 56px;
-  }
-
-  .hud.is-touch .qb-name {
-    display: none;
-  }
-
-  .hud.is-touch .qb-count {
-    bottom: 3px;
-  }
-
-  .thumb-arc {
-    grid-template-columns: auto 56px;
-  }
-
-  .hud[data-side='right'] .thumb-arc {
-    grid-template-columns: 56px auto;
-  }
-
-  .arc-primary {
-    width: 56px;
-    height: 56px;
-  }
-}
-
 /* ------------------------------------------------- SPEC-028: quick picker */
-/* SPEC-037 §4.3: on the keyboard it sits on the bottom stack, where the
-   dialogue and the tip strip sit — clear of the bar and its ▲. */
 .quick-picker {
   position: absolute;
-  bottom: max(var(--hud-bottom-stack), calc(env(safe-area-inset-bottom) + var(--hud-bottom-stack) - 10px));
+  /* SPEC-015 AC-27: the home indicator pushes the whole stack up with the bar. */
+  bottom: max(120px, calc(env(safe-area-inset-bottom) + 108px));
   left: 50%;
   transform: translateX(-50%);
   display: flex;
@@ -1633,24 +1225,6 @@ html.reduce-motion .qb-slot.is-locked {
   pointer-events: auto;
 }
 
-/* SPEC-037 §4.1: on touch it opens above the arc, clear of the active slot's
-   ▲, aligned to the arc's outer edge (37-l). */
-html.scheme-touch .quick-picker {
-  position: absolute;
-  left: auto;
-  right: max(16px, env(safe-area-inset-right));
-  bottom: calc(max(16px, env(safe-area-inset-bottom)) + var(--arc-h) + 24px);
-  transform: none;
-  max-height: calc(100dvh - max(16px, env(safe-area-inset-bottom)) - var(--arc-h) - 24px - max(10px, env(safe-area-inset-top)));
-  overflow-y: auto;
-}
-
-html.scheme-touch .quick-picker[data-side='right'] {
-  position: absolute;
-  right: auto;
-  left: max(16px, env(safe-area-inset-left));
-}
-
 .quick-picker-title {
   margin: 0;
   font-size: 12px;
@@ -1658,99 +1232,29 @@ html.scheme-touch .quick-picker[data-side='right'] {
   text-transform: capitalize;
 }
 
-/* SPEC-037 §4.3: the interact prompt, on the plate. On the keyboard it sits
-   centred directly above the quick bar, 130 px up at 1280 × 720, and an
-   actionable one is led by its `E` cap. */
 .hud-interact {
-  position: absolute;
-  left: 50%;
-  bottom: calc(max(48px, calc(env(safe-area-inset-bottom) + 38px)) + 82px);
-  transform: translateX(-50%);
   padding: 6px 12px;
   border-radius: 6px;
-  background: var(--hud-plate);
-  color: var(--ink);
-  white-space: nowrap;
-}
-
-/* On touch USE in the arc is the prompt, so an actionable one prints nothing;
-   a statement (`Need 20 more oil`) sits right-aligned above the arc. */
-.hud.is-touch .hud-interact {
-  position: absolute;
-  left: auto;
-  right: max(16px, env(safe-area-inset-right));
-  bottom: calc(max(16px, env(safe-area-inset-bottom)) + var(--arc-h) + 24px);
-  transform: none;
-}
-
-.hud.is-touch[data-side='right'] .hud-interact {
-  position: absolute;
-  right: auto;
-  left: max(16px, env(safe-area-inset-left));
-}
-
-.hud.is-touch .hud-interact.is-action {
-  display: none;
+  background: rgba(0, 0, 0, 0.55);
 }
 
 .hud .is-hidden {
   display: none;
 }
 
-/* SPEC-037 §4.2: a key's cap, drawn on the keyboard scheme only — the minimap's
-   `M`, the tracker's `T`, the interact prompt's `E`. */
-kbd.keycap {
-  display: inline-block;
-  min-width: 18px;
-  padding: 0 4px;
-  box-sizing: border-box;
-  border: 1px solid var(--frame-edge);
-  border-radius: 3px;
-  background: var(--key-face);
-  color: var(--ink);
-  font: inherit;
-  font-size: 12px;
-  font-weight: 700;
-  line-height: 16px;
-  text-align: center;
-  text-transform: none;
-}
-
-.hud.is-touch kbd.keycap {
-  display: none;
-}
-
-/* The `M` sits on the minimap's rim at 12 o'clock. */
-.hud-br > kbd.keycap {
-  position: absolute;
-  top: 0;
-  left: 50%;
-  transform: translate(-50%, -50%);
-}
-
-/* SPEC-014 AC-59 / SPEC-026 §4.3 / SPEC-037 §4.2: round and sized in CSS —
-   `--minimap-size`, smaller on touch, with no margin under it on either
-   scheme. The painter measures this box and backs it at
-   `round(css × min(dpr, 2))`, so it is crisp at any DPR. On touch a tap on it
-   opens the full map. */
+/* SPEC-014 AC-59 / SPEC-026 §4.3: above the touch buttons, which sit in the
+   same corner at 56 px. Round and sized in CSS — the painter measures this box
+   and backs it at `round(css × min(dpr, 2))`, so it is crisp at any DPR — and
+   it takes pointer events, because a tap on it opens the full map. */
 .minimap {
-  box-sizing: border-box;
-  width: var(--minimap-size);
-  height: var(--minimap-size);
+  width: clamp(128px, 24vmin, 184px);
+  height: clamp(128px, 24vmin, 184px);
   border: 1px solid var(--panel-edge);
   border-radius: 50%;
   background: rgba(0, 0, 0, 0.45);
-  margin-bottom: 0;
+  margin-bottom: 132px;
   pointer-events: auto;
   cursor: pointer;
-}
-
-/* SPEC-037 §4.2: on the keyboard the minimap and the tracker are display-only,
-   so a click on them reaches the canvas and fires — M and T are their keys. */
-.hud:not(.is-touch) .minimap,
-.hud:not(.is-touch) .tracker {
-  pointer-events: none;
-  cursor: default;
 }
 
 /* AC-63: the damage vignette; flashes for 150 ms when the class lands. */
@@ -1766,11 +1270,6 @@ kbd.keycap {
   opacity: 0.8;
 }
 
-/* SPEC-037 §4.6: the `subtle` setting peaks at 0.35; `off` never flashes. */
-.hud[data-flash='subtle'] .hud-vignette.is-flashing {
-  opacity: 0.35;
-}
-
 /* SPEC-035 §4.6: the hit-direction wedges. Each marker is a full-bleed box
    rotated by the hit's bearing clockwise from screen-up, with the wedge itself
    pinned to the top edge — so one rotation puts it anywhere round the frame. */
@@ -1781,15 +1280,11 @@ kbd.keycap {
   overflow: hidden;
 }
 
-/* SPEC-037 §4.5: the wedge's 2 px dark edge. The shadow is drawn on the
-   marker's box: the clip-path that cuts the ::before into a triangle is
-   applied after a filter on the ::before itself, and would clip its shadow. */
 .hud-hit-dir {
   position: absolute;
   inset: 0;
   pointer-events: none;
   animation: hud-hit-dir 1s linear forwards;
-  filter: drop-shadow(0 0 1px #0b0f14) drop-shadow(0 0 1px #0b0f14);
 }
 
 .hud-hit-dir::before {
@@ -2054,8 +1549,7 @@ html.reduce-motion .hud.is-static .hud-static {
   left: 0;
   top: 0;
   font: 700 14px/1 var(--font-mono, monospace);
-  /* SPEC-037 §4.5: no plate under a number over the world — the halo. */
-  text-shadow: var(--hud-halo);
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.8);
   pointer-events: none;
   will-change: transform, opacity;
   opacity: 0;
@@ -2066,51 +1560,15 @@ html.reduce-motion .hud.is-static .hud-static {
 .dmg--player { color: #ff5533; }
 
 /* --------------------------------------------------------------- dialogue */
-/* Bottom-center (AC-69). SPEC-037 §4.3: on the bottom stack — clear of the
-   quick bar, its ▲ and the interact prompt on the keyboard, and of the thumb
-   arc on touch. */
+/* Bottom-center, above the objective line's slot (AC-69). */
 .dialogue {
   position: absolute;
-  bottom: max(var(--hud-bottom-stack), calc(env(safe-area-inset-bottom) + var(--hud-bottom-stack) - 10px));
+  bottom: max(96px, calc(env(safe-area-inset-bottom) + 86px));
   left: 50%;
   transform: translateX(-50%);
-  /* The whole box is this wide, the advance control's room included. */
-  box-sizing: border-box;
   width: min(560px, 100vw - 24px);
   padding: 12px 16px;
   z-index: 40;
-}
-
-/* SPEC-037 §4.3: a non-modal line lets every pointer through to the play
-   surface — it sat over the salvager and across both thumbs — except its one
-   advance control, which the text leaves room for. A modal line keeps the dim
-   and the whole-box tap, and SPEC-044's cue speaks for it. */
-.dialogue:not(.is-modal) {
-  pointer-events: none;
-  padding-right: 52px;
-}
-
-.dialogue-advance {
-  position: absolute;
-  top: 50%;
-  right: 0;
-  transform: translateY(-50%);
-  width: 44px;
-  height: 44px;
-  padding: 0;
-  border: none;
-  background: transparent;
-  color: var(--ink);
-  font: inherit;
-  font-size: 30px;
-  line-height: 1;
-  pointer-events: auto;
-  cursor: pointer;
-  touch-action: manipulation;
-}
-
-.dialogue.is-modal .dialogue-advance {
-  display: none;
 }
 
 .dialogue.is-hidden {
@@ -2187,48 +1645,6 @@ html.reduce-motion .hud.is-static .hud-static {
 
 .dialogue-choices:empty {
   display: none;
-}
-
-/* SPEC-037 §4.3: on a short screen in play the line docks 8 px under the top
-   centre (`--hud-tc-h`, kept by the HUD's ResizeObserver), spans the gap
-   between the corner columns up to 560 px, and ends above half the height;
-   its text scrolls inside. The tip strip docks the same way. */
-@media (max-height: 500px) {
-  html[data-play] .dialogue,
-  html[data-play] .aria-hint {
-    position: absolute;
-    top: calc(max(10px, env(safe-area-inset-top)) + var(--hud-tc-h, 0px) + 8px);
-    bottom: auto;
-    left: calc(max(10px, env(safe-area-inset-left)) + var(--hud-tl-w) + 8px);
-    right: calc(max(10px, env(safe-area-inset-right)) + var(--hud-tr-w) + 8px);
-    width: auto;
-    max-width: 560px;
-    margin-inline: auto;
-    transform: none;
-    box-sizing: border-box;
-    max-height: calc(50dvh - 16px - max(10px, env(safe-area-inset-top)) - var(--hud-tc-h, 0px));
-    overflow-y: auto;
-  }
-
-  html[data-play] .dialogue:not(.is-hidden) {
-    display: flex;
-    flex-direction: column;
-  }
-
-  html[data-play] .dialogue-text {
-    min-height: 0;
-    overflow-y: auto;
-  }
-
-  /* The warden's jitter rides the box's own transform, which is none here. */
-  html[data-play] .dialogue-warden {
-    animation-name: dialogue-glitch-docked;
-  }
-}
-
-@keyframes dialogue-glitch-docked {
-  25% { transform: translateX(1px); }
-  75% { transform: translateX(-1px); }
 }
 
 /* AC-71: both speaker styles go static when the player asked for less motion. */
@@ -3569,8 +2985,6 @@ html.debug .scene-tag {
 }
 
 /* --------------------------- SPEC-011 surface combat demo HUD (SPEC-012 replaces it) */
-/* SPEC-037 §4.2: its `.hud-boss` bar rules went — they matched no element; the
-   real boss bar is an in-flow row of the HUD's top centre. */
 
 /* Read-only chrome never eats a tap; only the buttons opt back in. */
 .combat-hud {
@@ -3588,6 +3002,31 @@ html.debug .scene-tag {
   margin: 0;
   font-size: 12px;
   opacity: 0.85;
+}
+
+.hud-boss {
+  position: absolute;
+  left: 50%;
+  top: max(52px, calc(env(safe-area-inset-top) + 40px));
+  width: 280px;
+  height: 12px;
+  transform: translateX(-50%);
+  border: 1px solid #7a4a22;
+  border-radius: 6px;
+  background: #0d141bcc;
+  overflow: hidden;
+  display: none;
+}
+
+.hud-boss.is-visible {
+  display: block;
+}
+
+.hud-boss-fill {
+  height: 100%;
+  width: 100%;
+  background: #d05a3a;
+  transition: width 120ms linear;
 }
 
 .hud-toast {
@@ -3664,11 +3103,10 @@ button.hud-button {
   border-radius: 50%;
 }
 
-/* SPEC-037 §4.8: 14 px --ink on the top-left plate; its text is SPEC-045's. */
 .hud-throttle {
-  font-size: 14px;
+  font-size: 12px;
   letter-spacing: 0.08em;
-  color: var(--ink);
+  color: var(--ink-dim);
 }
 
 /* Trip progress with the wave markers riding on it (§4.10). */
@@ -3697,11 +3135,9 @@ button.hud-button {
   background: var(--warn);
 }
 
-/* SPEC-037 §4.5: no plate — the halo. */
 .hud-hostiles {
   font-size: 13px;
   color: var(--warn);
-  text-shadow: var(--hud-halo);
 }
 
 /* The storm warning wears the ▲ half of the colorblind pair in its text.
@@ -3710,7 +3146,7 @@ button.hud-button {
 .hud-storm-warn {
   font-size: 13px;
   color: var(--warn);
-  background: var(--hud-plate);
+  background: rgba(0, 0, 0, 0.45);
   padding: 2px 10px;
   border-radius: 4px;
 }
@@ -3735,32 +3171,10 @@ button.hud-button {
 .hud-holding {
   font-size: 14px;
   color: var(--ink);
-  background: var(--hud-plate);
+  background: rgba(0, 0, 0, 0.55);
   padding: 4px 14px;
   border-radius: 4px;
   border: 1px solid var(--warn);
-}
-
-/* SPEC-037 §4.8: the flight's objective line wraps — at most two lines within
-   60vw, centred at the bottom, which clears the ▲ / ▼ row at 100vw − 140px. */
-.hud-flight .hud-bc {
-  width: max-content;
-  max-width: 60vw;
-  justify-content: center;
-}
-
-.hud-flight .hud-objective {
-  white-space: normal;
-  max-width: 60vw;
-  text-align: center;
-  overflow: hidden;
-}
-
-.hud-flight .hud-objective:not(.is-hidden) {
-  display: -webkit-box;
-  -webkit-box-orient: vertical;
-  -webkit-line-clamp: 2;
-  line-clamp: 2;
 }
 
 /* The landing cutscene's skip hint and the recall flash live on the scene. */
@@ -4306,36 +3720,14 @@ html.reduce-motion .reveal-name.is-glitched {
   touch-action: manipulation;
 }
 
-/* SPEC-037 §4.2: inside the top-left plate the tracker is the column's width
-   and wears no panel of its own — the plate is its background. Specific
-   enough to beat the `quality-low` and reduced-transparency panel fills. */
-.hud .hud-tl .tracker {
-  width: 100%;
-  max-width: none;
-  box-sizing: border-box;
-  padding: 0;
-  border: none;
-  background: transparent;
-  box-shadow: none;
-  clip-path: none;
-  backdrop-filter: none;
-  -webkit-backdrop-filter: none;
-}
-
 /* D-2: the upper case is style. The DOM keeps the mission's own title, so a
-   screen reader says "Dry Land" instead of spelling it out. SPEC-037 §4.5:
-   on the plate it is --ink, as every plate text is; the `T` cap follows it. */
+   screen reader says "Dry Land" instead of spelling it out. */
 .tracker-head {
   margin: 0 0 4px;
   font-size: 14px;
   letter-spacing: 0.04em;
   text-transform: uppercase;
-  color: var(--ink);
-}
-
-.tracker-head kbd.keycap {
-  margin-left: 6px;
-  letter-spacing: 0;
+  color: var(--ink-dim);
 }
 
 .tracker-rows {
@@ -4351,16 +3743,8 @@ html.reduce-motion .reveal-name.is-glitched {
   line-height: 1.35;
 }
 
-/* SPEC-037 §4.5: a done row keeps --ink on the plate; the ✓ says it is done. */
 .tracker-row.is-done {
-  color: var(--ink);
-}
-
-/* SPEC-037 §4.2: on a short screen the tracker is its head and its focus row. */
-@media (max-height: 500px) {
-  .tracker-row:not(.is-focus) {
-    display: none;
-  }
+  color: var(--ink-dim);
 }
 
 .tracker-check {
@@ -4376,7 +3760,7 @@ html.reduce-motion .reveal-name.is-glitched {
   gap: 6px;
   width: 100%;
   font-size: 11px;
-  color: var(--ink);
+  color: var(--ink-dim);
 }
 
 .tracker-defend-track {
@@ -4472,22 +3856,16 @@ html.reduce-motion .tracker.is-stuck {
   will-change: transform;
 }
 
-/* SPEC-037 §4.5: a 2 px dark outline and a 1 px white inner rim, so the mark
-   reads over snow and over lava alike. */
 .waypoint-mark {
   position: absolute;
   inset: 0;
   background: var(--accent-2);
-  outline: 2px solid #0b0f14;
-  box-shadow: inset 0 0 0 1px #fff;
 }
 
 /* On screen: a 22 px gold diamond with the distance under it. */
 .waypoint[data-state='on'] .waypoint-mark {
   transform: rotate(45deg);
-  box-shadow:
-    inset 0 0 0 1px #fff,
-    0 0 10px rgba(245, 166, 35, 0.55);
+  box-shadow: 0 0 10px rgba(245, 166, 35, 0.55);
 }
 
 /* On the ellipse: a triangle pointing out along the ray, metres beside it. */
@@ -4503,8 +3881,7 @@ html.reduce-motion .tracker.is-stuck {
   text-align: center;
   font-size: 14px;
   color: var(--accent-2);
-  /* SPEC-037 §4.5: text with no plate wears the halo. */
-  text-shadow: var(--hud-halo);
+  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.9);
   white-space: nowrap;
 }
 
@@ -4532,26 +3909,20 @@ html.reduce-motion .waypoint.is-stuck {
   will-change: transform;
 }
 
-/* §4.5 / §4.8: one line at a time, over the bottom of the view. SPEC-037
-   §4.3: on the bottom stack with the dialogue, on the plate — and hidden with
-   its clock stopped while a dialogue holds it. */
+/* §4.5 / §4.8: one line at a time, over the bottom of the view. */
 .aria-hint {
   position: absolute;
   left: 50%;
-  bottom: max(var(--hud-bottom-stack), calc(env(safe-area-inset-bottom) + var(--hud-bottom-stack) - 10px));
+  bottom: max(96px, calc(env(safe-area-inset-bottom) + 86px));
   transform: translateX(-50%);
   max-width: min(560px, 88vw);
   padding: 8px 14px;
   border-radius: 6px;
-  background: var(--hud-plate);
+  background: rgba(0, 0, 0, 0.7);
   border: 1px solid var(--panel-edge);
   color: var(--ink);
   font-size: 14px;
   text-align: center;
-}
-
-.guide-layer .aria-hint.is-held {
-  display: none;
 }
 
 /* ================================================================ SPEC-031 */

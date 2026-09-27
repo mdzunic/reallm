@@ -94,24 +94,20 @@ test('the surface layout appears with the first touch, and not before (AC-19, AC
   await page.touchscreen.tap(240, 400);
   await expect(page.locator('[data-testid="touch-controls"]')).toBeVisible();
 
-  // The surface layout: pause, no throttle, and no interact button until a
-  // scene sets a hint (AC-17, AC-27). SPEC-037 §4.1: no ITEM (or SWAP) either —
-  // the thumb arc's slots are those — and no touch reticle in any mode.
-  await expect(page.locator('[data-testid="touch-useItem"]')).toHaveCount(0);
-  await expect(page.locator('[data-testid="touch-weaponNext"]')).toHaveCount(0);
+  // The surface layout: item and pause, no throttle, and no interact button
+  // until a scene sets a hint (AC-17, AC-27).
+  await expect(page.locator('[data-testid="touch-useItem"]')).toBeVisible();
   await expect(page.locator('[data-testid="touch-pause"]')).toBeVisible();
   await expect(page.locator('[data-testid="touch-interact"]')).toBeHidden();
   await expect(page.locator('[data-testid="touch-throttleUp"]')).toBeHidden();
-  await expect(page.locator('[data-testid="touch-reticle"]')).toHaveCount(0);
+  await expect(page.locator('[data-testid="touch-reticle"]')).toBeHidden();
 
-  // AC-16: the rules that stop a long press from selecting text or opening the
-  // iOS callout. SPEC-037 §4.1 moved pause to the top-right corner at a
-  // deliberate 44 × 44, away from the thumbs.
+  // AC-16: a thumb-sized hit box, and the rules that stop a long press from
+  // selecting text or opening the iOS callout.
   const pause = page.locator('[data-testid="touch-pause"]');
   const box = await pause.boundingBox();
-  expect(box?.width ?? 0).toBeCloseTo(44, 0);
-  expect(box?.height ?? 0).toBeCloseTo(44, 0);
-  expect(box?.y ?? 99).toBeLessThanOrEqual(12);
+  expect(box?.width ?? 0).toBeGreaterThanOrEqual(56);
+  expect(box?.height ?? 0).toBeGreaterThanOrEqual(56);
   await expect(pause).toHaveCSS('touch-action', 'none');
   await expect(pause).toHaveCSS('user-select', 'none');
 
@@ -198,7 +194,7 @@ test('a drag in the aim zone aims and holds fire, alongside the stick (AC-13, AC
   expect(released.move.x).toBeGreaterThan(0.4);
 });
 
-test('the flight layout swaps the buttons for throttle, and the HUD reticle aims (AC-27, AC-28)', async ({ page }) => {
+test('the flight layout swaps the buttons for throttle and a reticle (AC-27, AC-28)', async ({ page }) => {
   await start(page, '/?scene=flight');
   await settle(page, 'flight');
 
@@ -207,10 +203,8 @@ test('the flight layout swaps the buttons for throttle, and the HUD reticle aims
   await expect(page.locator('[data-testid="touch-throttleUp"]')).toBeVisible();
   await expect(page.locator('[data-testid="touch-throttleDown"]')).toBeVisible();
   await expect(page.locator('[data-testid="touch-pause"]')).toBeVisible();
-  // SPEC-037 §4.8: one reticle — the HUD's — and the touch layer draws none.
-  await expect(page.locator('[data-testid="reticle"]')).toBeVisible();
-  await expect(page.locator('[data-testid="touch-reticle"]')).toHaveCount(0);
-  await expect(page.locator('[data-testid="touch-useItem"]')).toHaveCount(0);
+  await expect(page.locator('[data-testid="touch-reticle"]')).toBeVisible();
+  await expect(page.locator('[data-testid="touch-useItem"]')).toBeHidden();
   await expect(page.locator('[data-testid="touch-interact"]')).toBeHidden();
 });
 

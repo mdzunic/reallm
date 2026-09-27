@@ -139,9 +139,8 @@ export class SavePanel {
     this.refresh();
   }
 
-  /** SPEC-037 §4.9: the console's own key, with its 44 px floor — not a 25 px chip. */
   #button(id: string, text: string, label: string, onClick: () => void): HTMLButtonElement {
-    const button = testId(el('button', 'ui-btn slot-button', text), id);
+    const button = testId(el('button', 'slot-button', text), id);
     button.type = 'button';
     button.setAttribute('aria-label', label);
     button.addEventListener('click', onClick);

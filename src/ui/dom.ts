@@ -10,7 +10,6 @@ import { BackStack } from '@/core/BackGuard';
 import {
   pruneToasts,
   pushToast,
-  shiftToasts,
   TOAST_DEFAULT_MS,
   type ToastEntry,
   type ToastKind,
@@ -99,8 +98,6 @@ export class UiRoot {
   readonly #toastRack: HTMLDivElement;
   #toasts: ToastEntry[] = [];
   #toastTimer: ReturnType<typeof setTimeout> | null = null;
-  /** SPEC-037 §4.3: when the rack was held for a dialogue, or `null` while it is not. */
-  #heldAt: number | null = null;
   readonly #now: () => number;
 
   constructor(root: HTMLElement, now: () => number = Date.now) {
@@ -181,44 +178,11 @@ export class UiRoot {
 
   // ------------------------------------------------------------------ toasts
 
-  /**
-   * §4.6: up to three, coalesced by text; the pure queue is unit-tested.
-   * SPEC-037 §4.3: while the rack is held the toast still queues and coalesces,
-   * on the clock as it stood when the hold began — so it expires nothing, and
-   * shows for its whole time once the hold ends (37-e).
-   */
+  /** §4.6: up to three, coalesced by text; the pure queue is unit-tested. */
   toast(text: string, kind: ToastKind = 'info', ms: number = TOAST_DEFAULT_MS): void {
-    this.#toasts = pushToast(this.#toasts, text, kind, this.#heldAt ?? this.#now(), ms);
-    this.#renderToasts();
-    if (this.#heldAt === null) this.#armToastTimer();
-  }
-
-  /**
-   * SPEC-037 §4.3: while held the rack is hidden, new toasts queue, and no
-   * toast expires. On release every entry's expiry moves on by the time held;
-   * then the rack renders and re-arms. The surface and the flight hold it for a
-   * dialogue on a short screen, where the line docks under the top centre.
-   */
-  holdToasts(on: boolean): void {
-    if (on === (this.#heldAt !== null)) return;
-    if (on) {
-      this.#heldAt = this.#now();
-      if (this.#toastTimer !== null) clearTimeout(this.#toastTimer);
-      this.#toastTimer = null;
-      this.#toastRack.classList.add('is-held');
-      return;
-    }
-    const heldMs = Math.max(0, this.#now() - (this.#heldAt as number));
-    this.#heldAt = null;
-    this.#toasts = shiftToasts(this.#toasts, heldMs);
-    this.#toastRack.classList.remove('is-held');
+    this.#toasts = pushToast(this.#toasts, text, kind, this.#now(), ms);
     this.#renderToasts();
     this.#armToastTimer();
-  }
-
-  /** SPEC-037 §4.3: true while `holdToasts(true)` has the rack. */
-  get toastsHeld(): boolean {
-    return this.#heldAt !== null;
   }
 
   #renderToasts(): void {
@@ -255,18 +219,6 @@ export class UiRoot {
     this.#toastRack.remove();
     this.#fade.remove();
   }
-}
-
-/**
- * SPEC-037 §4.3: the height at which a dialogue line docks under the top
- * centre — where it meets the right-hand toasts, so the rack holds while it
- * is up. The same `max-height` the stylesheet's short-screen rules use.
- */
-export const SHORT_SCREEN_QUERY = '(max-height: 500px)';
-
-/** True on a short screen (SPEC-037 §4.3); false where there is no `matchMedia`. */
-export function shortScreen(): boolean {
-  return typeof globalThis.matchMedia === 'function' && globalThis.matchMedia(SHORT_SCREEN_QUERY).matches;
 }
 
 const ROOTS = new WeakMap<HTMLElement, UiRoot>();

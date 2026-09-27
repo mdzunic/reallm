@@ -177,10 +177,8 @@ test.describe('flight on a phone', () => {
     for (const control of ['touch-throttleUp', 'touch-throttleDown', 'touch-pause']) {
       await expect(page.locator(`[data-testid="${control}"]`)).toBeVisible();
     }
-    // Flight aims itself. SPEC-037 §4.8: the HUD's reticle is the one that says
-    // so, in place of the touch layer's own; the surface stick is not up.
-    await expect(page.locator('[data-testid="reticle"]')).toBeVisible();
-    await expect(page.locator('[data-testid="touch-reticle"]')).toHaveCount(0);
+    // Flight aims itself: the touch reticle is up, the surface stick is not.
+    await expect(page.locator('[data-testid="touch-reticle"]')).toBeVisible();
 
     // The throttle buttons drive the model: one tap up reads 1.2× on the HUD.
     await page.locator('[data-testid="touch-throttleUp"]').tap();

@@ -520,16 +520,6 @@ describe('reaction outcomes (SPEC-006 §5.2)', () => {
     expect(sound).toEqual({ id: 'hit_player', opts: { minIntervalMs: 120 } });
   });
 
-  // SPEC-037 §4.6, §4.12: weather ticks once per whole HP; the storm vignette
-  // and the red number say it, so the hit sound is the enemies' alone.
-  it('player:damaged is silent for a weather source and plays hit_player for an enemy (SPEC-037 §4.6)', () => {
-    const react = AUDIO_REACTIONS['player:damaged'];
-    expect(react({ amount: 1, source: { kind: 'weather', weather: 'sandstorm' }, hp: 60 })).toBeNull();
-    expect(react({ amount: 1, source: { kind: 'weather', weather: 'heatwave' }, hp: 59 })).toBeNull();
-    expect(react({ amount: 4, source: { kind: 'enemy', enemyId: 'dust_skitter' }, hp: 55 })?.id).toBe('hit_player');
-    expect(react({ amount: 4, source: { kind: 'projectile', enemyId: 'scav_raider' }, hp: 51 })?.id).toBe('hit_player');
-  });
-
   it('player:died plays the death sound', () => {
     expect(
       AUDIO_REACTIONS['player:died']({

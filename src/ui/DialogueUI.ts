@@ -6,11 +6,6 @@
 // Queue rules (AC-73..76): up to QUEUE_MAX dialogues including the one playing,
 // a sixth is dropped silently, the whole queue clears on `scene:transition`,
 // and `dialogue:started`/`dialogue:ended` bracket each one that actually runs.
-//
-// SPEC-037 §4.3: a non-modal line is pass-through — over the salvager and
-// across both thumbs it was a tap target that skipped story lines — with one
-// 44 × 44 `›` (`dialogue-advance`) at its right edge that fills the line and
-// then advances it. A modal line keeps its dim and the whole-box tap.
 import type { EmitArgs, GameEvents } from '@/core/Events';
 import type { Unsubscribe } from '@/core/Events';
 import { DIALOGUE, type DialogueDef, type DialogueId, type SpeakerId } from '@/data/index';
@@ -123,8 +118,6 @@ export class DialogueUI {
   readonly #text: HTMLParagraphElement;
   readonly #choices: HTMLDivElement;
   readonly #dim: HTMLDivElement;
-  /** SPEC-037 §4.3: the one control a non-modal line takes a pointer on. */
-  readonly #advance: HTMLButtonElement;
 
   #queue: Job[] = [];
   #active: Job | null = null;
@@ -147,19 +140,8 @@ export class DialogueUI {
     this.#choices = el('div', 'dialogue-choices');
     this.#root = testId(el('div', 'dialogue panel'), 'dialogue');
     this.#root.setAttribute('role', 'log');
-    this.#advance = testId(el('button', 'dialogue-advance', '›'), 'dialogue-advance');
-    this.#advance.type = 'button';
-    this.#advance.setAttribute('aria-label', 'Next line');
-    // SPEC-037 §4.3: the first press fills the line, the second advances it —
-    // the same `skip()` the modal box's tap runs, and only once per press.
-    this.#advance.addEventListener('click', (event) => {
-      event.stopPropagation();
-      this.skip();
-    });
-    this.#root.append(this.#speaker, this.#text, this.#choices, this.#advance);
-    // A tap fills the line; a second tap advances (AC-72). SPEC-037 §4.3: only
-    // a modal line takes a pointer on the whole box — a non-modal one is
-    // `pointer-events: none` and answers `dialogue-advance` alone.
+    this.#root.append(this.#speaker, this.#text, this.#choices);
+    // A tap fills the line; a second tap advances (AC-72).
     this.#root.addEventListener('click', () => this.skip());
     this.#root.classList.add('is-hidden');
     ui.mount(this.#dim, 'panel');
@@ -220,7 +202,6 @@ export class DialogueUI {
       this.#speaker.textContent = '';
       this.#text.textContent = prompt;
       this.#root.classList.remove('is-hidden');
-      this.#root.classList.add('is-modal');
       this.#dim.classList.add('is-visible');
       this.#input?.setEnabled(false);
       this.#active = {
@@ -271,9 +252,6 @@ export class DialogueUI {
     }
     this.#events.emit('dialogue:started', { id: job.id });
     this.#root.classList.remove('is-hidden');
-    // SPEC-037 §4.3: the root says which kind of line this is; CSS gives a
-    // non-modal one no pointer events and a modal one no advance control.
-    this.#root.classList.toggle('is-modal', job.modal);
     this.#dim.classList.toggle('is-visible', job.modal);
     if (job.modal) this.#input?.setEnabled(false);
     this.#lineIndex = -1;

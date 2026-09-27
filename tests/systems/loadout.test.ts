@@ -22,7 +22,7 @@ function make(patch?: (save: Save) => void): { save: Save; events: EventBus<Game
 }
 
 function view(): SlotView {
-  return { itemId: null, state: 'ready', cd: 0, heat: 0, charges: 0, maxCharges: 0, cdSeconds: 0 };
+  return { itemId: null, state: 'ready', cd: 0, heat: 0, charges: 0, maxCharges: 0 };
 }
 
 describe('select and cycle (§4.2)', () => {
@@ -185,7 +185,7 @@ describe('view (§4.2)', () => {
     const { loadout } = make();
     const out = view();
     expect(loadout.view('primary', 0, out)).toBe(out);
-    expect(out).toEqual({ itemId: 'weapon_kinetic', state: 'ready', cd: 0, heat: 0, charges: 0, maxCharges: 0, cdSeconds: 0 });
+    expect(out).toEqual({ itemId: 'weapon_kinetic', state: 'ready', cd: 0, heat: 0, charges: 0, maxCharges: 0 });
 
     expect(loadout.view('heavy', 0, out)).toBe(out);
     expect(out.itemId).toBe(null);
@@ -426,52 +426,5 @@ describe('the launcher on touch (SPEC-036 §4.6)', () => {
     loadout.select('heavy', 0);
     loadout.fired('heavy', 1);
     expect(loadout.active).toBe('primary');
-  });
-});
-
-// ------------------------------------------------ SPEC-037 §4.4: cdSeconds
-
-describe('cdSeconds — the state line’s clock (SPEC-037 §4.4)', () => {
-  it('counts the rocket’s recharge down in seconds once its charge is spent', () => {
-    const { loadout } = make((s) => {
-      s.equipped.heavy = 'launcher_rocket';
-    });
-    loadout.select('heavy', 0);
-    const out = view();
-    loadout.view('heavy', 1, out);
-    expect(out.cdSeconds).toBe(0); // charged and ready
-
-    loadout.fired('heavy', 1);
-    loadout.view('heavy', 1, out);
-    expect(out.state).toBe('recharge');
-    expect(out.cdSeconds).toBeCloseTo(6, 6);
-
-    const time = tick(loadout, 1, 2.5);
-    loadout.view('heavy', time, out);
-    expect(out.state).toBe('recharge');
-    expect(out.cdSeconds).toBeCloseTo(3.5, 1);
-    // The fraction and the seconds are the same clock.
-    expect(out.cdSeconds).toBeCloseTo(out.cd * 6, 6);
-
-    const done = tick(loadout, time, 3.6);
-    loadout.view('heavy', done, out);
-    expect(out.state).toBe('ready');
-    expect(out.cdSeconds).toBe(0);
-  });
-
-  it('counts the switch down on the slot being switched to, and is 0 on the others', () => {
-    const { loadout } = make();
-    const out = view();
-    loadout.select('sidearm', 10);
-    loadout.view('sidearm', 10, out);
-    expect(out.state).toBe('switch');
-    expect(out.cdSeconds).toBeCloseTo(SWITCH_SECONDS, 6);
-    loadout.view('sidearm', 10.1, out);
-    expect(out.cdSeconds).toBeCloseTo(SWITCH_SECONDS - 0.1, 6);
-    loadout.view('primary', 10.1, out);
-    expect(out.cdSeconds).toBe(0);
-    loadout.view('sidearm', 10 + SWITCH_SECONDS, out);
-    expect(out.state).toBe('ready');
-    expect(out.cdSeconds).toBe(0);
   });
 });

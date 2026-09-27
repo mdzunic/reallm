@@ -11,12 +11,6 @@
 // drives aim, and each is captured so a thumb that leaves the element keeps
 // being tracked (AC-25). A second finger in a zone that is already owned is
 // ignored until the first lifts (AC-15).
-//
-// SPEC-037 §4.1: the surface keeps only USE and pause. USE is mounted into the
-// HUD's thumb arc (`mountButton`) and keeps this layer's visibility rules
-// there; pause sits alone at the top right in both modes; the flight's ▲ / ▼
-// keep the row at the bottom corner. The HUD's own reticle is the flight's one
-// aim mark, so this layer draws none.
 import {
   FLIGHT_STEER_FRACTION,
   FLOAT_DRIFT,
@@ -52,18 +46,12 @@ interface ZonePointer {
 /** SPEC-036 §4.12: the zone ghosts go on their own this long after they showed. */
 export const ZONES_SECONDS = 12;
 
-/**
- * Which buttons each mode shows (AC-27). SPEC-037 §4.1: SWAP and ITEM are gone
- * from the surface — the arc's weapon and heal slots are the same actions a
- * thumb's width away, and two copies cost the room the stick needs.
- */
-export const MODE_BUTTONS: Readonly<Record<InputMode, readonly Action[]>> = {
-  surface: ['interact', 'pause'],
+/** Which buttons each mode shows (AC-27). */
+const MODE_BUTTONS: Readonly<Record<InputMode, readonly Action[]>> = {
+  // SPEC-028 §4.1: SWAP cycles the weapon; the quick bar carries the rest.
+  surface: ['interact', 'useItem', 'weaponNext', 'pause'],
   flight: ['throttleUp', 'throttleDown', 'pause'],
 };
-
-/** Every button the layer builds: the union of `MODE_BUTTONS`, and nothing else. */
-const BUILT_BUTTONS = ['interact', 'throttleUp', 'throttleDown', 'pause'] as const;
 
 const BUTTON_LABELS: Readonly<Record<Action, string>> = {
   fire: 'FIRE',
@@ -92,10 +80,7 @@ export class TouchControls {
   readonly #surface: HTMLDivElement;
   readonly #stick: HTMLDivElement;
   readonly #knob: HTMLDivElement;
-  /** The bottom-corner row the buttons live in unless one is mounted elsewhere. */
-  readonly #row: HTMLDivElement;
-  /** SPEC-037 §4.1: buttons re-parented into a host outside this layer. */
-  readonly #mounted = new Set<Action>();
+  readonly #reticle: HTMLDivElement;
   /** SPEC-036 §4.12: the two "where to touch" ghosts, hidden by default. */
   readonly #zoneMove: HTMLDivElement;
   readonly #zoneAim: HTMLDivElement;
@@ -123,6 +108,7 @@ export class TouchControls {
     this.#stick = testId(el('div', 'touch-stick'), 'touch-stick');
     this.#knob = el('div', 'touch-stick-knob');
     this.#stick.append(this.#knob);
+    this.#reticle = testId(el('div', 'touch-reticle'), 'touch-reticle');
     // SPEC-036 §4.12: a ring with its knob where the left thumb goes, and the
     // aim line where the right one does. Neither takes a pointer event.
     this.#zoneMove = testId(el('div', 'touch-zone touch-zone-move is-hidden'), 'touch-zone-move');
@@ -131,14 +117,13 @@ export class TouchControls {
     this.#zoneAim = testId(el('div', 'touch-zone touch-zone-aim is-hidden'), 'touch-zone-aim');
     this.#zoneAim.setAttribute('aria-hidden', 'true');
     this.#zoneAim.append(el('p', 'touch-zone-label', 'DRAG TO AIM'), el('p', 'touch-zone-chevron', '›'));
-    this.#row = el('div', 'touch-buttons');
-    for (const action of BUILT_BUTTONS) {
+    const buttons = el('div', 'touch-buttons');
+    for (const action of ['interact', 'useItem', 'weaponNext', 'throttleUp', 'throttleDown', 'pause'] as const) {
       const button = this.#makeButton(action);
       this.#buttons.set(action, button);
-      // SPEC-037 §4.1: pause leaves the row for the layer's top-right corner.
-      if (action !== 'pause') this.#row.append(button);
+      buttons.append(button);
     }
-    this.#layer.append(this.#surface, this.#zoneMove, this.#zoneAim, this.#stick, this.#row, this.#buttons.get('pause') as HTMLButtonElement);
+    this.#layer.append(this.#surface, this.#zoneMove, this.#zoneAim, this.#stick, this.#reticle, buttons);
 
     this.#listen(this.#surface, 'pointerdown', (event) => this.#onDown(event as PointerEvent));
     this.#listen(this.#surface, 'pointermove', (event) => this.#onMove(event as PointerEvent));
@@ -182,28 +167,6 @@ export class TouchControls {
     this.#mode = null;
     this.#release();
     this.#layer.remove();
-    // A mounted button lives outside the layer; it goes with it all the same.
-    this.#applyMode();
-  }
-
-  /**
-   * SPEC-037 §4.1: move `action`'s button into `host` — USE into the HUD's
-   * `arc-action` — or back into this layer's row for `null`. A mounted button
-   * keeps the layer's rules: it shows only while the layer is mounted and the
-   * current mode lists it (37-j: a flip to the keyboard hides it with the layer).
-   */
-  mountButton(action: Action, host: HTMLElement | null): void {
-    const button = this.#buttons.get(action);
-    if (button === undefined || this.#disposed) return;
-    if (host === null) {
-      this.#mounted.delete(action);
-      if (action === 'pause') this.#layer.append(button);
-      else this.#row.append(button);
-    } else {
-      this.#mounted.add(action);
-      host.append(button);
-    }
-    this.#applyMode();
   }
 
   /** SPEC-036 §4.12: true while the zone ghosts are up (on the layer, if it is mounted). */
@@ -244,9 +207,6 @@ export class TouchControls {
     this.showZones(false);
     this.hide();
     for (const release of this.#teardown.splice(0).reverse()) release();
-    // A button mounted into another component's box leaves it with the layer.
-    for (const action of this.#mounted) this.#buttons.get(action)?.remove();
-    this.#mounted.clear();
     this.#buttons.clear();
   }
 
@@ -259,12 +219,10 @@ export class TouchControls {
     if (!wanted) {
       this.#release();
       this.#layer.remove();
-      // SPEC-037 §4.1: a mounted USE hides with the layer (37-j).
-      this.#applyMode();
       return;
     }
-    this.#root.append(this.#layer);
     this.#applyMode();
+    this.#root.append(this.#layer);
   }
 
   /** Which buttons this mode shows, plus the side and scale the player chose. */
@@ -275,18 +233,13 @@ export class TouchControls {
     this.#layer.dataset['side'] = layout.joystickSide;
     this.#layer.dataset['mode'] = mode ?? '';
     const shown = mode === null ? [] : MODE_BUTTONS[mode];
-    const mounted = this.#layer.isConnected;
     for (const [action, button] of this.#buttons) {
       // AC-17: the interact button stays out of the way until a scene sets a hint.
-      // SPEC-037 §4.1: one mounted outside the layer also needs the layer up.
-      const visible =
-        shown.includes(action) &&
-        (action !== 'interact' || this.#interactHint !== null) &&
-        (!this.#mounted.has(action) || mounted);
+      const visible = shown.includes(action) && (action !== 'interact' || this.#interactHint !== null);
       button.classList.toggle('is-hidden', !visible);
-      if (!visible) button.classList.remove('is-down');
     }
-    // AC-28: flight aims itself; SPEC-037 §4.8: the HUD's reticle says so.
+    // AC-28: flight aims itself, and says so with a reticle; the surface aims by drag.
+    this.#reticle.classList.toggle('is-hidden', mode !== 'flight');
     this.#stick.classList.add('is-hidden');
   }
 
@@ -438,17 +391,11 @@ export class TouchControls {
     button.type = 'button';
     button.textContent = BUTTON_LABELS[action];
     button.setAttribute('aria-label', action);
-    // SPEC-037 §4.9: drawn pressed from the press until the release, however
-    // the release comes.
     const press = (event: Event): void => {
       event.preventDefault();
-      button.classList.add('is-down');
       this.#input.pressAction(action, 'touch');
     };
-    const release = (): void => {
-      button.classList.remove('is-down');
-      this.#input.releaseAction(action, 'touch');
-    };
+    const release = (): void => this.#input.releaseAction(action, 'touch');
     this.#listen(button, 'pointerdown', press);
     this.#listen(button, 'pointerup', release);
     this.#listen(button, 'pointerleave', release);

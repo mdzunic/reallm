@@ -1250,7 +1250,6 @@ describe('fireSlotOnce — the launcher on touch (SPEC-036 §4.6)', () => {
       heat: 0,
       charges: 0,
       maxCharges: 0,
-      cdSeconds: 0,
     }).charges;
     expect(h.combat.fireSlotOnce('heavy')).toBe('fired');
     const after = h.combat.loadout.view('heavy', h.world.time, {
@@ -1260,7 +1259,6 @@ describe('fireSlotOnce — the launcher on touch (SPEC-036 §4.6)', () => {
       heat: 0,
       charges: 0,
       maxCharges: 0,
-      cdSeconds: 0,
     }).charges;
     expect(after).toBe(before - 1);
     const fired = h.of('weapon:fired');

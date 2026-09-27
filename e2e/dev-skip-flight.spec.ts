@@ -76,12 +76,8 @@ test('the dev skip finishes the flight mission it skipped, and the pad has work'
 
   // And the pad the player walks to now has the Hive's work on it (12-k).
   const dialogue = page.locator('[data-testid="dialogue"]');
-  // SPEC-037 §4.3: a non-modal line lets taps through; its `›` advances it.
-  const advance = page.locator('[data-testid="dialogue-advance"]');
   for (let i = 0; i < 30 && (await dialogue.isVisible().catch(() => false)); i++) {
-    // The line can move on by itself between the look and the press.
-    if (await advance.isVisible().catch(() => false)) await advance.click({ force: true, timeout: 2_000 }).catch(() => undefined);
-    else await dialogue.click({ force: true });
+    await dialogue.click({ force: true });
     await page.waitForTimeout(120);
   }
   const terminal = page.locator('[data-testid="pad-terminal"]');

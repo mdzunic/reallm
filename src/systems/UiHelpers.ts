@@ -10,7 +10,6 @@
 import type { GameEvents } from '@/core/Events';
 import type { Scheme } from '@/core/Input';
 import { maxHp, type Save, type SlotSummary } from '@/core/Save';
-import type { DamageFlashMode } from '@/core/Settings';
 import {
   CLASSES,
   COMPANIONS,
@@ -650,10 +649,6 @@ export interface HudModel {
   loadout: { active: WeaponSlot; slots: Record<WeaponSlot, SlotView>; fallback: boolean } | null;
   quick: Record<QuickSlot, { itemId: ItemId | null; qty: number }> | null;
   interact: string | null;
-  /** SPEC-037 §4.3: true when the interact prompt is an action that E / USE performs. */
-  interactAction: boolean;
-  /** SPEC-037 §4.2: the wallet strip at full opacity (`walletLit`), else 0.6. */
-  walletLit: boolean;
   flight?: {
     shield: [number, number];
     hull: [number, number];
@@ -684,8 +679,6 @@ export function createHudModel(): HudModel {
     loadout: null,
     quick: null,
     interact: null,
-    interactAction: false,
-    walletLit: false,
   };
 }
 
@@ -768,16 +761,6 @@ export function pruneToasts(stack: readonly ToastEntry[], now: number): ToastEnt
   return stack.filter((entry) => entry.expiresAt > now);
 }
 
-/**
- * SPEC-037 §4.3: every entry's expiry moved on by `ms` — the time the rack was
- * held for a dialogue on a short screen. Order, text, kind and counts are kept,
- * so a toast that queued behind the hold shows for its whole time afterwards.
- * A new array; the input is not written.
- */
-export function shiftToasts(entries: readonly ToastEntry[], ms: number): ToastEntry[] {
-  return entries.map((entry) => ({ ...entry, expiresAt: entry.expiresAt + ms }));
-}
-
 // ------------------------------------------------------------------- minimap
 
 /** Enemies register on the minimap inside this range (SPEC-012 AC-59). */
@@ -799,89 +782,15 @@ export function hasNodeRadar(save: Save): boolean {
 // ------------------------------------------------- SPEC-035: the readable view
 
 /**
- * SPEC-037 §4.7 — a touch screen whose short side is under this is a phone
- * (*initial tuning*). A tablet is a monitor-sized screen that happens to be
- * touched, so it keeps the desktop distance.
+ * SPEC-035 §4.2 — how far the surface camera sits from the salvager, by input
+ * scheme (*initial tuning*). A phone shows the same field of view in a quarter
+ * of the physical size, so touch comes closer; a gamepad is a desktop screen.
  */
-export const TOUCH_CAMERA_MAX_SHORT_SIDE = 500;
+export const CAMERA_DISTANCE: Readonly<Record<Scheme, number>> = { keyboard: 22, touch: 17, gamepad: 22 };
 
-/**
- * SPEC-035 §4.2, SPEC-037 §4.7 — the distance `#placeCamera` eases toward: 17 m
- * on a touched phone, which shows the same view in a quarter of the physical
- * size, and 22 m everywhere else, a gamepad and a tablet included.
- */
-export function cameraDistance(scheme: Scheme, shortSide: number): number {
-  return scheme === 'touch' && shortSide < TOUCH_CAMERA_MAX_SHORT_SIDE ? 17 : 22;
-}
-
-/** SPEC-037 §4.7: the surface camera's vertical field of view never leaves this range, in degrees. */
-export const FOV_MIN = 40;
-export const FOV_MAX = 66;
-/** Half the horizontal view the Hor+ rule keeps: `tan 24°`. */
-const HOR_PLUS_HALF_TAN = Math.tan((24 * Math.PI) / 180);
-
-/**
- * SPEC-037 §4.7 — Hor+: the vertical field of view, in degrees, that keeps the
- * horizontal one from dropping under 48° on a narrow screen —
- * `2·atan(tan 24° / aspect)`, clamped to [`FOV_MIN`, `FOV_MAX`]. Landscape
- * screens down to 1.22 : 1 keep the 40° they always had; an upright tablet
- * opens up to 61°, and 66° keeps the frame's top edge under the horizon at the
- * 55° pitch.
- */
-export function cameraFov(aspect: number): number {
-  if (!(aspect > 0)) return FOV_MAX;
-  const fov = (2 * Math.atan(HOR_PLUS_HALF_TAN / aspect) * 180) / Math.PI;
-  return Math.min(FOV_MAX, Math.max(FOV_MIN, fov));
-}
-
-// ------------------------------------------------- SPEC-037: the HUD for every screen
-
-/** SPEC-037 §4.6: the least time between two rising edges of the damage flash, s (*initial tuning*). */
-export const FLASH_MIN_GAP = 0.35;
-
-export type { DamageFlashMode };
-
-/**
- * SPEC-037 §4.6 — the photosensitivity gate (E71). A hit inside `minGap` of the
- * last rising edge extends the flash that is up rather than starting a new one,
- * so a flash rises at most once per 0.35 s — three times in any second, the
- * line the films already keep (E35). `'edge'` starts a new flash; `'extend'`
- * keeps the current one on.
- */
-export function flashGate(lastEdgeAt: number, now: number, minGap: number = FLASH_MIN_GAP): 'edge' | 'extend' {
-  return now - lastEdgeAt < minGap ? 'extend' : 'edge';
-}
-
-/**
- * SPEC-037 §4.4 — a weapon slot's state line: `HEAT 64%`, `LOCK`, or the
- * seconds left on a switch or a recharge (`2.4 s`). A slot that is ready — or
- * empty — prints nothing: `READY` was a word on every slot at rest.
- */
-export function slotStateText(view: SlotView): string {
-  switch (view.state) {
-    case 'heat':
-      return `HEAT ${Math.round(view.heat * 100)}%`;
-    case 'lock':
-      return 'LOCK';
-    case 'recharge':
-    case 'switch':
-      return `${Math.max(0, view.cdSeconds).toFixed(1)} s`;
-    case 'ready':
-    case 'empty':
-      return '';
-  }
-}
-
-/** SPEC-037 §4.2: how long the wallet strip stays lit after a count moves, s. */
-export const WALLET_LIT_SECONDS = 5;
-
-/**
- * SPEC-037 §4.2 — the wallet strip is lit for `WALLET_LIT_SECONDS` after any
- * count changes, and for as long as a collect or deliver objective of the
- * tracked stage is open; dimmed to 0.6 otherwise.
- */
-export function walletLit(lastChangeAt: number, now: number, collectOrDeliverOpen: boolean): boolean {
-  return collectOrDeliverOpen || now - lastChangeAt < WALLET_LIT_SECONDS;
+/** §4.2: the distance `#placeCamera` eases toward. */
+export function cameraDistance(scheme: Scheme): number {
+  return CAMERA_DISTANCE[scheme];
 }
 
 /**
@@ -1030,22 +939,4 @@ export function contrastRatio(a: string, b: string): number {
   const la = relativeLuminance(a);
   const lb = relativeLuminance(b);
   return (Math.max(la, lb) + 0.05) / (Math.min(la, lb) + 0.05);
-}
-
-/**
- * SPEC-037 §4.5 — an `rgba(r, g, b, a)` composited over an opaque `#rrggbb`,
- * as `#rrggbb`: what a translucent plate actually looks like over the ground,
- * which is what its text contrast has to be measured against. An `rgb()` or a
- * hex is opaque and comes back as itself; anything unreadable is black.
- */
-export function compositeOver(rgba: string, ground: string): string {
-  const under = channels(ground).map((c) => c * 255);
-  const match = /rgba?\(\s*([\d.]+)[\s,]+([\d.]+)[\s,]+([\d.]+)(?:[\s,/]+([\d.]+))?\s*\)/i.exec(rgba);
-  const over = match === null ? channels(rgba).map((c) => c * 255) : [Number(match[1]), Number(match[2]), Number(match[3])];
-  const alpha = match === null || match[4] === undefined ? 1 : Math.min(1, Math.max(0, Number(match[4])));
-  const hex = over.map((value, i) => {
-    const mixed = Math.round(value * alpha + (under[i] as number) * (1 - alpha));
-    return Math.min(255, Math.max(0, mixed)).toString(16).padStart(2, '0');
-  });
-  return `#${hex.join('')}`;
 }

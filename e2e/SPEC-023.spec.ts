@@ -267,13 +267,9 @@ test('8 — films off: no beat plays and no flag is written (23-f)', async ({ pa
 /** Click through the landing's accept dialogue; chapter-1 beats are non-modal. */
 async function dismissDialogue(page: Page): Promise<void> {
   const dialogue = page.locator('[data-testid="dialogue"]');
-  // SPEC-037 §4.3: a non-modal line lets taps through; its `›` advances it.
-  const advance = page.locator('[data-testid="dialogue-advance"]');
   for (let i = 0; i < 30; i++) {
     if (!(await dialogue.isVisible().catch(() => false))) return;
-    // The line can move on by itself between the look and the press.
-    if (await advance.isVisible().catch(() => false)) await advance.click({ force: true, timeout: 2_000 }).catch(() => undefined);
-    else await dialogue.click({ force: true });
+    await dialogue.click({ force: true });
     await page.waitForTimeout(120);
   }
 }

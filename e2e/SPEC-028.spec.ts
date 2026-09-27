@@ -30,13 +30,9 @@ test('the bar shows the six slots with names, counts and states (§6.2 case 1)',
   await expect(page.getByTestId('qb-heal')).toContainText('Ration');
   await expect(page.getByTestId('qb-heal')).toContainText('×3');
 
-  // The primary starts active: border class and its ▲. SPEC-037 §4.4: a
-  // state word shows only while a slot is not ready, so the empty heavy slot
-  // says so by its dash and its dimming (`is-empty`, above) — no EMPTY, no READY.
+  // The primary starts active: border class and the state text.
   await expect(page.getByTestId('qb-primary')).toHaveClass(/is-active/);
-  await expect(page.locator('[data-testid="qb-heavy"] .qb-name')).toHaveText('—');
-  await expect(page.locator('[data-testid="qb-heavy"] .qb-state')).toHaveText('');
-  await expect(page.getByTestId('quickbar')).not.toContainText(/EMPTY|READY/);
+  await expect(page.getByTestId('qb-heavy')).toContainText('EMPTY');
 
   // ≥ 48 px slots, and the old bottom-left consumable box is gone.
   const box = await page.getByTestId('qb-primary').boundingBox();
@@ -171,10 +167,7 @@ const { defaultBrowserType: _ignored, ...PIXEL_5 } = devices['Pixel 5 landscape'
 test.describe('touch (§6.2 case 6)', () => {
   test.use(PIXEL_5);
 
-  // SPEC-037 §4.12: "SWAP and ITEM are on screen" became three checks — the
-  // thumb arc is up, SWAP and ITEM are gone from the touch layout (§4.1), and
-  // the bar's slots live in the arc.
-  test('a tap selects a weapon slot; the bar is in the thumb arc, with no SWAP and no ITEM', async ({ page }) => {
+  test('a tap selects a weapon slot; SWAP and ITEM are on screen', async ({ page }) => {
     await start(page, URL);
     await settle(page);
 
@@ -183,10 +176,8 @@ test.describe('touch (§6.2 case 6)', () => {
     const size = page.viewportSize();
     await page.touchscreen.tap(Math.round((size?.width ?? 800) / 2), Math.round((size?.height ?? 400) * 0.45));
     await expect(page.locator('[data-testid="touch-controls"]')).toBeVisible();
-    await expect(page.getByTestId('thumb-arc')).toBeVisible();
-    await expect(page.getByTestId('touch-weaponNext')).toHaveCount(0);
-    await expect(page.getByTestId('touch-useItem')).toHaveCount(0);
-    await expect(page.locator('[data-testid="arc-slots"] [data-testid="qb-primary"]')).toHaveCount(1);
+    await expect(page.getByTestId('touch-weaponNext')).toBeVisible();
+    await expect(page.getByTestId('touch-useItem')).toBeVisible();
 
     // 56 px slots on the touch scheme, and the key hints are gone.
     const box = await page.getByTestId('qb-primary').boundingBox();

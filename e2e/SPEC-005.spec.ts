@@ -336,23 +336,17 @@ test.describe('touch layer: gaps the static review flagged', () => {
     await fingers([{ type: 'pointerup', x: originX + 260, y: originY }]);
   });
 
-  // SPEC-037 §4.1 took pause out of the thumbs' row: it sits alone at the top
-  // right at a deliberate 44 × 44, the floor every other button keeps too. The
-  // buttons a thumb works in the heat of play keep the 56 px of AC-16.
-  test('every thumb-row touch button meets the 56 px hit size, and pause the 44 px floor (AC-16)', async ({ page }) => {
+  test('every touch button meets the 56 px hit size, not just pause (AC-16)', async ({ page }) => {
     await start(page, '/?scene=flight');
     await settle(page, 'flight');
     await page.touchscreen.tap(240, 400);
     await expect(page.locator('[data-testid="touch-controls"]')).toBeVisible();
 
-    for (const testId of ['touch-throttleUp', 'touch-throttleDown']) {
+    for (const testId of ['touch-throttleUp', 'touch-throttleDown', 'touch-pause']) {
       const box = await page.locator(`[data-testid="${testId}"]`).boundingBox();
       expect(box?.width ?? 0, testId).toBeGreaterThanOrEqual(56);
       expect(box?.height ?? 0, testId).toBeGreaterThanOrEqual(56);
     }
-    const pause = await page.locator('[data-testid="touch-pause"]').boundingBox();
-    expect(pause?.width ?? 0).toBeGreaterThanOrEqual(44);
-    expect(pause?.height ?? 0).toBeGreaterThanOrEqual(44);
   });
 
   test('setPointerCapture is called for a zone pointer, and losing it does not freeze tracking (AC-25)', async ({ page }) => {

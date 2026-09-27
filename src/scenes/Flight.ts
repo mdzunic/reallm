@@ -42,7 +42,7 @@ import {
 import { Missions } from '@/systems/Missions';
 import { cumulativeXp, Progression, xpToNext } from '@/systems/Progression';
 import { AriaHint } from '@/ui/AriaHint';
-import { el, h, shortScreen, testId } from '@/ui/dom';
+import { el, h, testId } from '@/ui/dom';
 import { Hud } from '@/ui/Hud';
 import { PauseMenu } from '@/ui/PauseMenu';
 import { RotateOverlay } from '@/ui/RotateOverlay';
@@ -250,10 +250,8 @@ export class FlightScene extends UiScene<'flight'> {
     }
     this.#showChapterCard(save);
 
-    this.disposer.add(this.services.events.on('ship:damaged', ({ source }) => {
-      // SPEC-037 §4.6: an ion-storm tick never flashes — the storm pill and the
-      // static already say it — but the view still kicks.
-      if (source !== 'storm') this.#hud?.damageFlash();
+    this.disposer.add(this.services.events.on('ship:damaged', () => {
+      this.#hud?.damageFlash();
       this.#view?.kick();
     }, this));
     // SPEC-034 §4.10 step 2: a flight mission that finishes in flight is
@@ -384,48 +382,6 @@ export class FlightScene extends UiScene<'flight'> {
       this.#hud?.dispose();
       this.#hud = null;
     });
-    // SPEC-037 §4.2, §4.6: the HUD follows the scheme (the top centre spans the
-    // gap on touch) and the flash follows its setting, now and live.
-    hud.setScheme(services.input.state.scheme);
-    hud.setDamageFlash(services.settings.get().damageFlash);
-    this.disposer.add(services.events.on('input:schemeChanged', ({ scheme }) => hud.setScheme(scheme), this));
-    this.disposer.add(
-      services.events.on(
-        'settings:changed',
-        ({ patch }) => {
-          if (patch.damageFlash !== undefined) hud.setDamageFlash(patch.damageFlash);
-        },
-        this,
-      ),
-    );
-    // SPEC-037 §4.3: `<html data-play="flight">` while the trip is up.
-    document.documentElement.dataset['play'] = 'flight';
-    this.disposer.add(() => {
-      delete document.documentElement.dataset['play'];
-    });
-    // SPEC-037 §4.3: while a line is up the tip strip holds, and on a short
-    // screen the toasts do too; a hold never outlives the scene.
-    this.disposer.add(
-      services.events.on(
-        'dialogue:started',
-        () => {
-          this.#aria?.hold(true);
-          if (shortScreen()) this.ui.holdToasts(true);
-        },
-        this,
-      ),
-    );
-    this.disposer.add(
-      services.events.on(
-        'dialogue:ended',
-        () => {
-          this.#aria?.hold(false);
-          this.ui.holdToasts(false);
-        },
-        this,
-      ),
-    );
-    this.disposer.add(() => this.ui.holdToasts(false));
 
     // SPEC-032 §4.4: `Skip the run` under `runSkip`'s rule; it resumes the
     // scene and runs the skip on the next update, so the loop is live.

@@ -8,8 +8,6 @@
 // body ink against the glass it now sits on (AC-24).
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
-import { PLANETS } from '@/data/index';
-import { compositeOver, contrastRatio } from '@/systems/UiHelpers';
 
 const CSS = readFileSync(new URL('../../src/style.css', import.meta.url).pathname, 'utf8');
 const HTML = readFileSync(new URL('../../index.html', import.meta.url).pathname, 'utf8');
@@ -145,15 +143,21 @@ describe('what the theme must not move (SPEC-020 AC-24 … AC-26)', () => {
     expect(CSS).toContain('user-select: none');
     expect(CSS).toContain('env(safe-area-inset-bottom)');
     expect(CSS).toContain('html.reduce-motion');
-    // The app UI's floor is `#ui`'s own `clamp(14px, …)`. SPEC-037 §4.12
-    // replaced the count of literals under it (24, the dev overlay, notes,
-    // hints and the quick bar's 8 px badges among them) with a floor under the
-    // literals themselves: none is below 11 px (§4.4) — the SPEC-037 block
-    // below pins it.
-    const small = CSS.match(/font-size:\s*(\d+(?:\.\d+)?)px/g) ?? [];
-    expect(small.length).toBeGreaterThan(0);
-    const belowFloor = small.filter((rule) => Number(/([\d.]+)/.exec(rule)?.[1] ?? 99) < 11);
-    expect(belowFloor, belowFloor.join(' ')).toEqual([]);
+    // The app UI's floor is `#ui`'s own `clamp(14px, …)`; the twenty-one
+    // smaller rules below it are SPEC-014's dev overlay, notes and hints
+    // (thirteen), SPEC-028's quick-bar labels (five — a 48 px slot cannot
+    // hold 14 px type), and SPEC-029's charge pips, fallback marker and shop
+    // headings (three). A theme that shrank body type would show up here as a
+    // twenty-second.
+    // SPEC-031 adds the twenty-second: the quick-bar short name under its new
+    // icon box (§4.15) — the same 48 px-slot exemption the other five carry.
+    // SPEC-032 §4.8 adds the twenty-third: the service badge, which that spec
+    // pins at 12 px — a corner tag, like the dev overlay's, not body type.
+    // SPEC-034 §4.9 adds the twenty-fourth: the defended POI's HP percentage
+    // under its tracker row, 11 px — a readout beside a 3 px bar, not body type.
+    const small = CSS.match(/font-size:\s*(\d+)px/g) ?? [];
+    const belowFloor = small.filter((rule) => Number(/(\d+)/.exec(rule)?.[1] ?? 99) < 14);
+    expect(belowFloor.length, belowFloor.join(' ')).toBe(24);
   });
 
   it('loads no webfont (AC-26)', () => {
@@ -240,170 +244,5 @@ describe('the homeless elements (SPEC-031 §4.8)', () => {
 
   it('puts the scrim between the backdrop and the frame', () => {
     expect(CSS).toMatch(/\.screen::before\s*\{[^}]*background:\s*var\(--screen-scrim\)/);
-  });
-});
-
-// ------------------------------------------------------------------ SPEC-037
-
-/** One rule of the sheet: its selector (prelude), its body, and the at-rules it sits in. */
-interface Rule {
-  selector: string;
-  body: string;
-  within: string[];
-}
-
-/** Every rule, with the at-rule preludes around it — comments stripped first. */
-function allRules(): Rule[] {
-  const code = CSS.replace(/\/\*[\s\S]*?\*\//g, '');
-  const out: Rule[] = [];
-  const stack: string[] = [];
-  let prelude = '';
-  let body = '';
-  let inRule = false;
-  for (const char of code) {
-    if (char === '{') {
-      const text = prelude.trim().replace(/\s+/g, ' ');
-      if (text.startsWith('@')) {
-        stack.push(text);
-      } else {
-        inRule = true;
-        body = '';
-        stack.push(text);
-      }
-      prelude = '';
-      continue;
-    }
-    if (char === '}') {
-      const top = stack.pop() ?? '';
-      if (inRule) {
-        out.push({ selector: top, body, within: stack.filter((entry) => entry.startsWith('@')) });
-        inRule = false;
-      }
-      prelude = '';
-      continue;
-    }
-    if (inRule) body += char;
-    else prelude += char;
-  }
-  return out;
-}
-
-/** The rules whose selector list names `selector` exactly. */
-function rulesFor(selector: string): Rule[] {
-  return allRules().filter((rule) => rule.selector.split(',').map((part) => part.trim()).includes(selector));
-}
-
-/** A colour token's value as `#rrggbb`, for the WCAG helpers. */
-function hexToken(token: string): string {
-  const value = tokenValue(token);
-  expect(value, token).toMatch(/^#[0-9a-f]{6}$/i);
-  return value;
-}
-
-describe('the HUD plate reads over every ground (SPEC-037 §4.5, AC-23)', () => {
-  it('is rgba(4, 6, 10, 0.75), declared in :root with the halo', () => {
-    expect(tokenValue('--hud-plate')).toBe('rgba(4, 6, 10, 0.75)');
-    expect(tokenValue('--hud-halo')).toBe('0 0 2px #000, 1px 1px 0 #000, -1px -1px 0 #000, 1px -1px 0 #000, -1px 1px 0 #000');
-  });
-
-  it('keeps --ink, --warn and --good at 4.5 : 1 or better over every planet ground', () => {
-    const plate = tokenValue('--hud-plate');
-    const problems: string[] = [];
-    for (const planet of Object.values(PLANETS)) {
-      const ground = planet.surface.palette.ground;
-      const under = compositeOver(plate, ground);
-      for (const token of ['--ink', '--warn', '--good']) {
-        const ratio = contrastRatio(hexToken(token), under);
-        if (ratio < 4.5) problems.push(`${token} on ${planet.id} (${ground} → ${under}): ${ratio.toFixed(2)}`);
-      }
-    }
-    expect(problems).toEqual([]);
-  });
-
-  it('keeps the state line at 4.5 : 1 on its band, over the slot base, over every ground', () => {
-    const band = /background:\s*(rgba\([^)]*\))/.exec(rulesFor('.qb-state')[0]?.body ?? '')?.[1];
-    expect(band, 'the .qb-state band').toBe('rgba(0, 0, 0, 0.8)');
-    const slot = rulesFor('.qb-slot')[0]?.body ?? '';
-    const base = /conic-gradient\([^;]*?(rgba\([^)]*\))\s*0\)/.exec(slot)?.[1];
-    expect(base, 'the .qb-slot base').toBe('rgba(0, 0, 0, 0.55)');
-    const problems: string[] = [];
-    for (const planet of Object.values(PLANETS)) {
-      const under = compositeOver(band as string, compositeOver(base as string, planet.surface.palette.ground));
-      for (const token of ['--ink', '--warn', '--hp']) {
-        const ratio = contrastRatio(hexToken(token), under);
-        if (ratio < 4.5) problems.push(`${token} on ${planet.id}: ${ratio.toFixed(2)}`);
-      }
-    }
-    expect(problems).toEqual([]);
-  });
-
-  it('backs the top-left column, the wallet, the banners, the prompt, the tip strip and the flight lines', () => {
-    for (const selector of [
-      '.hud-tl',
-      '.hud-wallet',
-      '.hud-weather',
-      '.hud-shelter',
-      '.hud-interact',
-      '.aria-hint',
-      '.hud-objective',
-      '.hud-storm-warn',
-      '.hud-holding',
-    ]) {
-      const bodies = rulesFor(selector).map((rule) => rule.body);
-      expect(
-        bodies.some((body) => /background:\s*var\(--hud-plate\)/.test(body)),
-        `${selector} sits on --hud-plate`,
-      ).toBe(true);
-    }
-  });
-
-  it('dresses the text with no plate under it in the halo (§4.5)', () => {
-    for (const selector of ['.waypoint-dist', '.dmg', '.hud-hostiles', '.hud-boss-bar .bar-text', '.qb-count']) {
-      const bodies = rulesFor(selector).map((rule) => rule.body);
-      expect(
-        bodies.some((body) => /text-shadow:\s*var\(--hud-halo\)/.test(body)),
-        `${selector} wears --hud-halo`,
-      ).toBe(true);
-    }
-  });
-});
-
-describe('the text floor, the hover rule and the selection rules (SPEC-037 §4.4, §4.9)', () => {
-  it('has no font-size literal below 11 px (AC-21)', () => {
-    const literals = [...CSS.matchAll(/font-size:\s*(\d+(?:\.\d+)?)px/g)].map((m) => Number(m[1]));
-    expect(literals.length).toBeGreaterThan(20);
-    expect(literals.filter((px) => px < 11)).toEqual([]);
-  });
-
-  it('puts every :hover selector inside @media (hover: hover) (AC-33)', () => {
-    const hovers = allRules().filter((rule) => rule.selector.includes(':hover'));
-    expect(hovers.length).toBeGreaterThan(0);
-    const outside = hovers.filter((rule) => !rule.within.includes('@media (hover: hover)')).map((rule) => rule.selector);
-    expect(outside).toEqual([]);
-    // A mixed list was split, not moved whole: focus, active and pressed keep
-    // their underline outside the query.
-    expect(rulesFor('.ui-btn:focus-visible').some((rule) => rule.within.length === 0)).toBe(true);
-    expect(rulesFor(".ui-btn[aria-pressed='true']").some((rule) => rule.within.length === 0)).toBe(true);
-  });
-
-  it('declares the four selection rules on #ui, and lets the code fields select (AC-31)', () => {
-    const ui = rulesFor('#ui').map((rule) => rule.body).join(';');
-    expect(ui).toMatch(/(^|[;\s])user-select:\s*none/);
-    expect(ui).toMatch(/-webkit-user-select:\s*none/);
-    expect(ui).toMatch(/-webkit-touch-callout:\s*none/);
-    expect(ui).toMatch(/-webkit-tap-highlight-color:\s*transparent/);
-    for (const field of ['.credits-text', '.settings-code', '.menu-code', '.slot-code']) {
-      const selectable = allRules().some(
-        (rule) =>
-          rule.selector.split(',').some((part) => part.trim().endsWith(field)) && /(^|[;\s])user-select:\s*text/.test(rule.body),
-      );
-      expect(selectable, `${field} keeps user-select: text`).toBe(true);
-    }
-  });
-
-  it('holds every text field in #ui at 16 px or more (AC-34)', () => {
-    const rule = allRules().find((candidate) => candidate.selector.includes("#ui input:not([type='range'])"));
-    expect(rule?.body).toMatch(/font-size:\s*max\(16px,\s*1em\)/);
-    expect(rule?.selector).toContain('#ui textarea');
   });
 });
