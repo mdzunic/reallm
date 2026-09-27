@@ -484,3 +484,73 @@ test.describe('13. the touch controls sheet names no SWAP and no ITEM (§4.10)',
     await expect(sheet).not.toContainText('ITEM');
   });
 });
+
+// -------------------------------------------- 37-a, 37-j, 37-l: the scheme flip
+
+test.describe('37-a, 37-j, 37-l. a scheme flip moves the bar, the minimap and USE (§4.1, §4.2)', () => {
+  // A touch-capable window that boots on the keyboard: the flip is the player's.
+  test.use({ viewport: { width: 844, height: 390 }, hasTouch: true });
+
+  test('the bar keeps its state across a flip, USE hides with the layer, and the picker opens over the arc', async ({ page }) => {
+    test.setTimeout(120_000);
+    await start(page, URL);
+    await settle(page);
+    await dismissDialogue(page);
+    const scheme = (): Promise<string> => page.evaluate(() => window.__reallm.input().scheme);
+    expect(await scheme()).toBe('keyboard');
+
+    // The keyboard: the bar in the bottom centre, no arc, the minimap in its corner.
+    await expect(page.getByTestId('thumb-arc')).toBeHidden();
+    await expect(page.locator('.hud-bc [data-testid="quickbar"]')).toHaveCount(1);
+    await expect(page.locator('.hud-br [data-testid="minimap"]')).toHaveCount(1);
+    await page.keyboard.press('Digit1');
+    await expect(page.getByTestId('qb-sidearm')).toHaveClass(/is-active/);
+    await press(page, 'surface-goto-pad');
+    await expect(page.getByTestId('hud-interact')).toHaveText(/^E\s*Open pad terminal$/, { timeout: 10_000 });
+
+    // One tap on open ground: the bar moves into the arc with the sidearm still
+    // in hand, the minimap to the top-right cluster (re-measured), and USE
+    // shows in its cell while the prompt prints nothing.
+    await page.touchscreen.tap(422, 175);
+    await expect.poll(scheme).toBe('touch');
+    await expect(page.getByTestId('thumb-arc')).toBeVisible();
+    await expect(page.locator('[data-testid="arc-slots"] [data-testid="quickbar"]')).toHaveCount(1);
+    await expect(page.getByTestId('qb-sidearm')).toHaveClass(/is-active/);
+    await expect(page.locator('.hud-tr [data-testid="minimap"]')).toHaveCount(1);
+    await expect
+      .poll(async () =>
+        page.getByTestId('minimap').evaluate((node) => {
+          const canvas = node as HTMLCanvasElement;
+          return canvas.width === Math.round(canvas.getBoundingClientRect().width * Math.min(window.devicePixelRatio, 2));
+        }),
+      )
+      .toBe(true);
+    await expect(page.locator('[data-testid="arc-action"] [data-testid="touch-interact"]')).toBeVisible();
+    await expect(page.getByTestId('hud-interact')).toBeHidden();
+
+    // 37-l: a long press on the heal slot opens the picker above the arc, on its outer edge.
+    const heal = page.getByTestId('qb-heal');
+    await heal.dispatchEvent('pointerdown', { button: 0, pointerId: 9, pointerType: 'touch', bubbles: true });
+    await page.waitForTimeout(700);
+    await heal.dispatchEvent('pointerup', { button: 0, pointerId: 9, pointerType: 'touch', bubbles: true });
+    const picker = page.getByTestId('quick-picker');
+    await expect(picker).toBeVisible();
+    const pickerBox = await box(page, 'quick-picker');
+    const arc = await box(page, 'thumb-arc');
+    expect(Math.abs(pickerBox.x + pickerBox.width - (arc.x + arc.width))).toBeLessThanOrEqual(1);
+    expect(pickerBox.y + pickerBox.height).toBeLessThanOrEqual(arc.y - 16); // clear of the active slot's ▲
+
+    // A key: the picker closes, the scheme is the keyboard's again, the bar and
+    // the minimap go home with the sidearm still in hand, and USE hides with
+    // the layer while the prompt says E (37-j).
+    await page.keyboard.press('Escape');
+    await expect(picker).toHaveCount(0);
+    await expect.poll(scheme).toBe('keyboard');
+    await expect(page.getByTestId('thumb-arc')).toBeHidden();
+    await expect(page.locator('.hud-bc [data-testid="quickbar"]')).toHaveCount(1);
+    await expect(page.getByTestId('qb-sidearm')).toHaveClass(/is-active/);
+    await expect(page.locator('.hud-br [data-testid="minimap"]')).toHaveCount(1);
+    await expect(page.getByTestId('touch-interact')).toBeHidden();
+    await expect(page.getByTestId('hud-interact')).toHaveText(/^E\s*Open pad terminal$/);
+  });
+});
