@@ -1184,6 +1184,40 @@ describe('export and import codes (§4.6)', () => {
     expect(main.meta.slot).toBe(0);
   });
 
+  /**
+   * The other side of the rebind-first ordering above: if the write then fails,
+   * the slot still holds the running character, so the binding has to go back
+   * to it. Left on the import, every later autosave would write the import and
+   * the live run's progress would go nowhere — the same loss the ordering was
+   * introduced to prevent, just one branch over.
+   */
+  it('a failed import write puts the running character back on the binding', async () => {
+    const fake = fakeStorage();
+    const saves = store(fake, recorder());
+
+    const other = store(fakeStorage(), recorder());
+    const imported = other.create(0, CREATION);
+    imported.player.name = 'Imported';
+    other.flush();
+    const code = await other.exportCode(0);
+
+    const running = saves.create(0, CREATION);
+    running.player.name = 'Running';
+    saves.flush();
+
+    fake.failWrites();
+    const result = await saves.importCode(code, 0);
+    expect(result.ok).toBe(false);
+
+    // The binding is the run that is still in the slot, by identity.
+    expect(saves.current).toBe(running);
+    fake.allowWrites();
+    saves.request('manual');
+    saves.flush();
+    const main = JSON.parse(fake.data.get('reallm:slot:0') as string) as Save;
+    expect(main.player.name).toBe('Running');
+  });
+
   it('an import into another slot leaves the running character bound', async () => {
     const fake = fakeStorage();
     const saves = store(fake, recorder());

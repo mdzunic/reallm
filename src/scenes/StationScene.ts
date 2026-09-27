@@ -200,8 +200,9 @@ export class StationScene extends UiScene<'station'> {
     // else — and after an escape there is no "else" at all.
     if (!(await this.#pendingEnding(data))) return;
     // SPEC-034 §4.10 step 3: the debrief belongs to the trip that just ended, so
-    // it comes *before* the chapter interlude that closes the chapter — and it
-    // is awaited, so its lines are not read over the film.
+    // it comes *before* the chapter interlude that closes the chapter — its
+    // lines are queued now, so the film that follows plays over a dialogue
+    // layer that already holds them rather than the other way round.
     this.#debrief(data, params);
     const economy = this.#economy;
     const beats = director(this.services);
@@ -261,7 +262,12 @@ export class StationScene extends UiScene<'station'> {
    * trip is simply closed.
    */
   #debrief(data: Save, params: SceneParams['station']): void {
-    if (params.arrivedFrom === undefined) {
+    // The ending above is awaited, so this scene can already be disposed by the
+    // time control returns here. The trip still closes — AC-38 wants nothing
+    // pending after a reload — but the lines must not be queued into the
+    // page-lifetime dialogue layer, where they would read over whatever scene
+    // replaced this one.
+    if (params.arrivedFrom === undefined || !this.#alive) {
       LINE_LEDGER.closeTrip(data);
       return;
     }

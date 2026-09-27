@@ -992,6 +992,28 @@ describe('tips and hints (SPEC-027 AC-81..AC-84)', () => {
     expect(problems).toEqual([]);
   });
 
+  /**
+   * SPEC-034 §6.1 pins these two numbers here, in the content suite, because
+   * they are the two the spec moved and the two a retune would silently undo.
+   * `tests/balance/gauntlet.test.ts` and `tests/systems/spawn.test.ts` prove
+   * they *work*; this proves they are still what the spec wrote down.
+   */
+  it('the SPEC-034 content numbers are what §4.4 and §4.9 set', () => {
+    // §4.4: the gauntlet asks for six interceptors over its 180 s, and the
+    // 180 s itself is unchanged (AC-14).
+    const gauntlet = MISSIONS['c5_m1'].stages[0];
+    expect(gauntlet).toContainEqual({ kind: 'survive', seconds: 180 });
+    expect(gauntlet).toContainEqual({ kind: 'kill', enemy: 'hive_interceptor', amount: 6 });
+
+    // §4.4: the two flight archetypes' own HP (AC-12).
+    expect(ENEMIES['hive_interceptor'].hp).toBe(20);
+    expect(ENEMIES['scav_fighter'].hp).toBe(40);
+
+    // §4.9: the final defence spawns inside 40 m, so its waves reach the
+    // beacon instead of milling at the ring's far edge (AC-28).
+    expect(WAVES['eden_final'].spawnBand).toEqual([25, 40]);
+  });
+
   it('no brief and no dialogue line names a compass direction (§4.10)', () => {
     // POIs are placed at random angles (SPEC-012 §4.2), so a written bearing is
     // wrong on most seeds; the guidance layer computes `{dir}` per frame instead.

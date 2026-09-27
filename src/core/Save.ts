@@ -1713,9 +1713,14 @@ export class SaveStore {
     // the next autosave, so the import takes the binding *before* the write —
     // nothing the running character does can reach the slot after this point.
     const rebound = this.#current?.meta.slot === slot;
+    const previous = this.#current;
     if (rebound) this.bind(parsed.data);
     const error = this.#writeWithBackup(slot, JSON.stringify(parsed.data));
     if (error !== null) {
+      // The slot still holds the old run, so the binding has to go back to it:
+      // otherwise the caller stays on this screen while every later autosave
+      // writes the import and the live character's progress goes nowhere.
+      if (rebound && previous !== null) this.bind(previous);
       this.#fail(slot, error);
       return { ok: false, reason: 'corrupt', errors: [String(error)] };
     }
