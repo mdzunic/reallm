@@ -111,18 +111,47 @@ async function topmostAt(page: Page, testid: string): Promise<string[]> {
   }, testid);
 }
 
+/** The dev bridge's back-stack depth (§4.4): how many layers are open. */
+async function backDepth(page: Page): Promise<number> {
+  return page.evaluate(() => window.__reallm.backDepth());
+}
+
+/** How the chapter card, the toasts and the rotate cover stack (§4.3). */
+interface Stacking {
+  covered: boolean;
+  cardZ: string;
+  rackZ: string;
+  /** The `data-testid` chain painted at the card's centre. */
+  atCard: string[];
+  /** …at the toast rack's centre. */
+  atRack: string[];
+  /** …at the rack's centre, with the card slid up to the rack's top. */
+  atOverlap: string[];
+}
+
 /**
- * `topmostAt` for what takes no pointer: the chapter card and the toasts are
- * `pointer-events: none`, so `elementFromPoint` would look straight through
- * them. Each of `probe` (default: `testid` alone) takes a pointer for this one
- * reading, then gives it back; the chain is read at the centre of `testid`.
+ * The first trip to Cinder-4 with films on, past the gate with a tap, and a
+ * long toast raised on the way in. The chapter card lives 5.4 s of wall clock
+ * from the flight's start. The entry fade is an in-game timer that a loaded box
+ * can stretch past that, so this does not wait for it. It then takes every
+ * reading in one round trip.
+ *
+ * The card and the toasts take no pointer, so `elementFromPoint` would look
+ * straight through them. Each one probed takes a pointer for its one reading
+ * and gives it back.
  */
-async function paintedAt(page: Page, testid: string, probe: readonly string[] = [testid]): Promise<string[]> {
-  return page.evaluate(
-    ({ id, ids }) => {
-      const target = document.querySelector(`[data-testid="${id}"]`);
+async function stackingOverLaunch(page: Page, toast: string): Promise<Stacking> {
+  await page.goto(gameUrl('/?films=on&scene=flight&planet=cinder4'));
+  await awaitGate(page);
+  await page.locator('[data-testid="boot-start"]').tap();
+  await page.evaluate((text) => window.__reallm.toast(text, 'info', 60_000), toast);
+  await expect(page.locator('[data-testid="chapter-card"]')).toBeVisible(COLD_START);
+  return page.evaluate(() => {
+    const byId = (id: string): HTMLElement | null => document.querySelector<HTMLElement>(`[data-testid="${id}"]`);
+    const chainAt = (id: string, lift: readonly string[]): string[] => {
+      const target = byId(id);
       if (target === null) return [];
-      const lifted = ids.flatMap((each) => [...document.querySelectorAll<HTMLElement>(`[data-testid="${each}"]`)]);
+      const lifted = lift.map(byId).filter((node): node is HTMLElement => node !== null);
       const was = lifted.map((node) => node.style.pointerEvents);
       for (const node of lifted) node.style.pointerEvents = 'auto';
       try {
@@ -138,26 +167,25 @@ async function paintedAt(page: Page, testid: string, probe: readonly string[] = 
           node.style.pointerEvents = was[i] ?? '';
         });
       }
-    },
-    { id: testid, ids: probe },
-  );
-}
-
-/** The dev bridge's back-stack depth (§4.4): how many layers are open. */
-async function backDepth(page: Page): Promise<number> {
-  return page.evaluate(() => window.__reallm.backDepth());
-}
-
-/**
- * Past the gate with a tap, and nothing more: the chapter card lives 5.4 s of
- * wall clock from the flight's start, and the entry fade is an in-game timer
- * that a loaded box can stretch past that, so these cases do not wait for it.
- */
-async function tapIntoFlight(page: Page, url: string): Promise<void> {
-  await page.goto(gameUrl(url));
-  await awaitGate(page);
-  await page.locator('[data-testid="boot-start"]').tap();
-  await expect(page.locator('[data-testid="chapter-card"]')).toBeVisible(COLD_START);
+    };
+    const card = byId('chapter-card');
+    const rack = byId('toasts');
+    const reading: Stacking = {
+      covered: byId('rotate-overlay')?.classList.contains('is-visible') ?? false,
+      cardZ: card === null ? '' : getComputedStyle(card).zIndex,
+      rackZ: rack === null ? '' : getComputedStyle(rack).zIndex,
+      atCard: chainAt('chapter-card', ['chapter-card']),
+      atRack: chainAt('toasts', ['toasts']),
+      atOverlap: [],
+    };
+    if (card !== null && rack !== null) {
+      const top = card.style.top;
+      card.style.top = `${rack.getBoundingClientRect().top}px`;
+      reading.atOverlap = chainAt('toasts', ['toasts', 'chapter-card']);
+      card.style.top = top;
+    }
+    return reading;
+  });
 }
 
 /** Whether `testid` lies wholly inside the viewport. */
@@ -361,45 +389,30 @@ test.describe('4, 5. the chapter card keeps its place above the cover (§4.3)', 
   test.use(PIXEL_5);
 
   test('a flight entered upright shows its card over the cover, and a toast raised then goes under it', async ({ page }) => {
-    // The first trip to Cinder-4 with films on: the card is due over the launch.
-    await tapIntoFlight(page, '/?films=on&scene=flight&planet=cinder4');
-    const rotate = page.locator('[data-testid="rotate-overlay"]');
-    await expect(rotate).toHaveClass(/is-visible/);
-    await page.evaluate(() => window.__reallm.toast('Held upright', 'info', 30_000));
-    await expect(page.locator('[data-testid="toasts"]')).toContainText('Held upright');
-
+    const read = await stackingOverLaunch(page, 'Held upright');
+    expect(read.covered).toBe(true);
     // Above the cover: the card (54). Under it: the toasts, with every other
     // layer of UiRoot.
-    const card = await paintedAt(page, 'chapter-card');
-    expect(card[0], 'the chapter card paints over the cover').toBe('chapter-card');
-    expect(card).not.toContain('rotate-overlay');
-    const toast = await paintedAt(page, 'toasts');
-    expect(toast, 'a toast paints under the cover').toContain('rotate-overlay');
-    expect(toast).not.toContain('toasts');
-    expect(await page.locator('[data-testid="toasts"]').evaluate((el) => getComputedStyle(el).zIndex)).toBe('50');
-    expect(await page.locator('[data-testid="chapter-card"]').evaluate((el) => getComputedStyle(el).zIndex)).toBe('54');
+    expect(read.atCard[0], 'the chapter card paints over the cover').toBe('chapter-card');
+    expect(read.atCard).not.toContain('rotate-overlay');
+    expect(read.atRack, 'a toast paints under the cover').toContain('rotate-overlay');
+    expect(read.atRack).not.toContain('toasts');
+    expect(read.cardZ).toBe('54');
+    expect(read.rackZ).toBe('50');
+    await expect(page.locator('[data-testid="toasts"]')).toContainText('Held upright');
   });
 });
 
 test.describe('4, 5. with no cover, a toast still lands over the chapter card (§4.3, SPEC-023 §4.2)', () => {
   test.use({ viewport: { width: 727, height: 393 }, hasTouch: true, isMobile: true });
 
-  test('the card and a toast made to overlap: the toast is on top', async ({ page }) => {
-    await tapIntoFlight(page, '/?films=on&scene=flight&planet=cinder4');
-    await expect(page.locator('[data-testid="rotate-overlay"]')).not.toHaveClass(/is-visible/);
-    await page.evaluate(() => window.__reallm.toast('Landscape', 'info', 30_000));
-    const rack = page.locator('[data-testid="toasts"]');
-    await expect(rack).toContainText('Landscape');
-    expect(await rack.evaluate((el) => getComputedStyle(el).zIndex)).toBe('55');
-    // Slide the card up under the rack, then read which of the two is painted.
-    await page.evaluate(() => {
-      const box = document.querySelector('[data-testid="toasts"]')?.getBoundingClientRect();
-      const card = document.querySelector<HTMLElement>('[data-testid="chapter-card"]');
-      if (box !== undefined && card !== null) card.style.top = `${box.top}px`;
-    });
-    const hit = await paintedAt(page, 'toasts', ['toasts', 'chapter-card']);
-    expect(hit, 'the toast paints over the card').toContain('toasts');
-    expect(hit).not.toContain('chapter-card');
+  test('the card slid up to a toast: the toast is on top', async ({ page }) => {
+    const read = await stackingOverLaunch(page, 'Landscape');
+    expect(read.covered).toBe(false);
+    expect(read.rackZ).toBe('55');
+    expect(read.atOverlap, 'the toast paints over the card').toContain('toasts');
+    expect(read.atOverlap).not.toContain('chapter-card');
+    await expect(page.locator('[data-testid="toasts"]')).toContainText('Landscape');
   });
 });
 
