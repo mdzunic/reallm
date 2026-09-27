@@ -73,15 +73,21 @@ const CONTROL_SHEETS = {
     ['Track mission', 'T'],
     ['Pause', 'Esc or P'],
   ],
+  // SPEC-036 §4.11: the words match the controls — a drag on the right is
+  // the fire zone, never a throttle, and the launcher fires from its slot.
   touch: [
     ['Move / steer', 'Drag on the left side'],
-    ['Aim & fire', 'Drag on the right side'],
-    ['Throttle (flight)', 'Drag up / down on the right'],
+    ['Aim & fire', 'Drag on the right side — auto-fire shoots for you'],
+    ['Throttle (flight)', '▲ / ▼ buttons'],
     // SPEC-028 §4.5: the bar doubles as the touch buttons.
     ['Switch weapon', 'SWAP, or tap a weapon on the bar'],
+    ['Launcher', 'Tap its slot to fire it'],
+    ['Heal', 'ITEM, or tap the heal slot on the bar'],
     ['Use a pack', 'Tap it on the bar; hold to choose'],
-    ['Interact / Use item', 'On-screen buttons'],
-    ['Pause', 'Pause button'],
+    ['Interact', 'USE'],
+    ['Map', 'Tap the minimap'],
+    ['Track mission', 'Tap the tracker'],
+    ['Pause', 'Pause button, or the Back gesture'],
   ],
   gamepad: [['Controls', 'Gamepad bindings follow the keyboard sheet']],
 } as const;

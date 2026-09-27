@@ -16,7 +16,7 @@ import { PressEdges } from '@/core/PressEdges';
 import { holdWakeLock } from '@/core/WakeLock';
 import { DEFAULT_LOOK, type Look } from '@/core/Quality';
 import { EXPLORE_CELL, newSave, type CharacterCreation, type Save } from '@/core/Save';
-import type { GuidanceLevel } from '@/core/Settings';
+import { ZONES_SHOWN_MAX, type GuidanceLevel } from '@/core/Settings';
 import type { GameServices } from '@/core/Services';
 import type { SceneParams } from '@/core/StateMachine';
 import type { Renderer } from '@/core/Renderer';
@@ -77,6 +77,8 @@ import {
   padTarget,
   PATH_MAX_POINTS,
   StuckTracker,
+  tipDue,
+  tipKey,
   type GuideContext,
   type GuidePoi,
   type GuideTarget,
@@ -206,6 +208,8 @@ const QUICK_EMPTY_TEXT: Readonly<Record<QuickSlot, string>> = {
 };
 /** §4.4: each refusal text toasts at most once per 3 s. */
 const QUICK_TOAST_SECONDS = 3;
+/** SPEC-036 §4.6: a launcher tap with no charge left says so, through the same throttle. */
+const LAUNCHER_RECHARGING_TEXT = 'Launcher recharging';
 /** SPEC-029 §4.8: any explosive use waits this long after the last. */
 const EXPLOSIVE_USE_SECONDS = 0.5;
 /** SPEC-029 §4.12: the blast camera shake. */
@@ -399,6 +403,10 @@ export class SurfaceScene extends UiScene<'surface'> {
 
   #terminal: HTMLElement | null = null;
   #terminalOpen = false;
+  /** SPEC-036 §4.10: the open terminal's back-stack entry. */
+  #terminalBack: (() => void) | null = null;
+  /** SPEC-036 §4.3: the rotate block, read every step. */
+  #rotate: RotateOverlay | null = null;
 
   // SPEC-030 §4.5 — the shelter the player is inside, and the chip state.
   #insideShelter: LayoutShelter | null = null;
@@ -982,10 +990,17 @@ export class SurfaceScene extends UiScene<'surface'> {
     // SPEC-015 §6 / E22: turning the phone to portrait mid-fight opens the
     // pause menu through the same path the pause button uses, so the player is
     // not killed while rotating. Returning to landscape leaves it open (AC-33).
+    // SPEC-036 §4.3: the block also holds the world, read every step — a scene
+    // entered upright holds from its first step, with no pause menu, and plays
+    // the moment the phone is turned.
     const rotate = new RotateOverlay(services.uiRoot, services.events, {
       onBlocked: () => void services.scenes.pause(),
     });
-    this.disposer.add(() => rotate.dispose());
+    this.#rotate = rotate;
+    this.disposer.add(() => {
+      rotate.dispose();
+      this.#rotate = null;
+    });
     // SPEC-015 §7, AC-38: the gameplay scenes are the one wake-lock owner.
     this.disposer.add(holdWakeLock());
     // SPEC-023 §4.4: the reveal's letterbox and words. Built with the scene so
@@ -1016,6 +1031,15 @@ export class SurfaceScene extends UiScene<'surface'> {
     this.#subscribe(bus);
     this.#syncMissionStages();
     if (new URLSearchParams(globalThis.location.search).has('debug')) this.#buildDebugStrip();
+
+    // SPEC-036 §4.12: the first two touch landings show where the thumbs go —
+    // never in a `?perf` run — and teach it in words with the `zones` tip.
+    const zonesShown = services.settings.get().zonesShown;
+    if (services.input.state.scheme === 'touch' && zonesShown < ZONES_SHOWN_MAX && services.perf !== true) {
+      touch.showZones(true);
+      services.settings.set({ zonesShown: zonesShown + 1 });
+      this.#requestTip('zones');
+    }
 
     // SPEC-029 §4.9: the first landing with a heavy weapon, and the first
     // with an explosive in the slot; `#requestTip` drops the ones seen.
@@ -1055,7 +1079,12 @@ export class SurfaceScene extends UiScene<'surface'> {
 
   /** SPEC-034 §4.6: why the step is holding, or `null` when it runs. */
   #holdReason(): SurfaceHold {
-    return surfaceHoldReason({ beats: this.#holds, ui: this.#uiHolds, modal: this.#modalOpen });
+    return surfaceHoldReason({ beats: this.#holds, rotate: this.#rotateBlocked(), ui: this.#uiHolds, modal: this.#modalOpen });
+  }
+
+  /** SPEC-036 §4.3: the phone is upright, and the rotate overlay covers the screen. */
+  #rotateBlocked(): boolean {
+    return this.#rotate?.blocked === true;
   }
 
   /**
@@ -1125,13 +1154,27 @@ export class SurfaceScene extends UiScene<'surface'> {
       return;
     }
 
+    // SPEC-036 §4.3, E65: the rotate block holds the world exactly as the map
+    // does. A phone turned upright mid-fight also paused (E22); one entered
+    // upright holds from its first step with no pause menu, and plays the
+    // moment it is turned. Presses sampled above are dropped unread.
+    if (this.#rotateBlocked()) {
+      this.#qbLength = 0;
+      world.player.vx = 0;
+      world.player.vz = 0;
+      return;
+    }
+
     // SPEC-026 §4.6: the full map's hold. Playtime still accrues (above) and
     // the map's own press is read; everything else — combat, missions,
     // weather, spawning, pickups, nodes, exploration — waits, so `world.time`
     // stands still and a swarm cannot bite a player who is reading a map.
+    // SPEC-036 §4.10: the pad terminal takes the same hold, and E (or USE)
+    // closes it from here, since the pad step does not run while held.
     if (this.#uiHolds > 0) {
       this.#qbLength = 0; // the bar is inert while the simulation is held
       if (this.#edges.pressed('map')) this.#closeMap();
+      if (this.#edges.pressed('interact') && this.#terminalOpen) this.#closeTerminal();
       world.player.vx = 0;
       world.player.vz = 0;
       return;
@@ -2318,6 +2361,7 @@ export class SurfaceScene extends UiScene<'surface'> {
     }
     const loadout = combat.loadout;
     const time = world.time;
+    const touch = this.services.input.state.scheme === 'touch';
 
     // The ring first, so a tap made between steps lands before this step's keys.
     const queued = this.#qbLength;
@@ -2327,6 +2371,11 @@ export class SurfaceScene extends UiScene<'surface'> {
       const slot = command.slot;
       if (command.kind === 'pick') {
         if (slot !== 'sidearm' && slot !== 'primary' && slot !== 'heavy') this.#openPicker(slot);
+      } else if (slot === 'heavy' && touch) {
+        // SPEC-036 §4.6: on touch the launcher's slot fires it — one charge,
+        // the weapon in hand unchanged — instead of selecting a slot auto-fire
+        // never reaches.
+        this.#tapLauncher(combat);
       } else if (slot === 'sidearm' || slot === 'primary' || slot === 'heavy') {
         loadout.select(slot, time);
       } else {
@@ -2337,11 +2386,21 @@ export class SurfaceScene extends UiScene<'surface'> {
     if (this.#edges.pressed('weapon1')) loadout.select('sidearm', time);
     if (this.#edges.pressed('weapon2')) loadout.select('primary', time);
     if (this.#edges.pressed('weapon3')) loadout.select('heavy', time);
-    if (this.#edges.pressed('weaponNext')) loadout.cycle(1, time);
-    if (this.#edges.pressed('weaponPrev')) loadout.cycle(-1, time);
+    // SPEC-036 §4.6: SWAP on touch walks past the heavy, which its tap fires.
+    if (this.#edges.pressed('weaponNext')) loadout.cycle(1, time, touch);
+    if (this.#edges.pressed('weaponPrev')) loadout.cycle(-1, time, touch);
     if (this.#edges.pressed('useItem')) this.#useQuick('heal');
     if (this.#edges.pressed('throwItem')) this.#useQuick('explosive');
     if (this.#edges.pressed('useUtility')) this.#useQuick('utility');
+  }
+
+  /**
+   * SPEC-036 §4.6: the launcher tap on touch — one charge at the auto-target,
+   * or 10 m ahead with none (36-k). A launcher with no charge fires nothing and
+   * says so at most once per 3 s (36-j); no launcher at all is silence.
+   */
+  #tapLauncher(combat: Combat): void {
+    if (combat.fireSlotOnce('heavy') === 'not-ready') this.#quickToast(LAUNCHER_RECHARGING_TEXT);
   }
 
   /** §4.3: a quick-bar tap between steps; a full ring drops it. */
@@ -2831,19 +2890,41 @@ export class SurfaceScene extends UiScene<'surface'> {
     const terminal = testId(el('div', 'panel pad-terminal is-hidden'), 'pad-terminal');
     this.services.uiRoot.append(terminal);
     this.#terminal = terminal;
-    this.disposer.add(() => terminal.remove());
+    this.disposer.add(() => {
+      this.#terminalBack?.();
+      this.#terminalBack = null;
+      terminal.remove();
+    });
   }
 
+  /**
+   * SPEC-036 §4.10, 36-m: the terminal covers the centre of a phone, so it
+   * holds the world as the map and the picker do — a storm warning or a swarm
+   * waits for it. It is a back-stack entry too: E, Escape, the system Back and
+   * its Close button all close it, and walking away is not possible while held.
+   */
   #openTerminal(): void {
     const terminal = this.#terminal;
     if (terminal === null || this.#terminalOpen) return;
     this.#terminalOpen = true;
+    this.#uiHolds++;
+    this.#terminalBack = this.ui.pushBack(() => this.#closeTerminal());
+    const world = this.#world;
+    if (world !== null) {
+      world.player.vx = 0;
+      world.player.vz = 0;
+    }
     this.#renderTerminal();
     terminal.classList.remove('is-hidden');
   }
 
+  /** Idempotent: releases the hold and the back entry once, however it closes. */
   #closeTerminal(): void {
+    if (!this.#terminalOpen) return;
     this.#terminalOpen = false;
+    this.#uiHolds = Math.max(0, this.#uiHolds - 1);
+    this.#terminalBack?.();
+    this.#terminalBack = null;
     this.#terminal?.classList.add('is-hidden');
   }
 
@@ -3344,16 +3425,27 @@ export class SurfaceScene extends UiScene<'surface'> {
       return;
     }
     if (this.#tipCooldown > 0 || guidance !== 'full') return;
-    const id = this.#tipQueue.shift();
+    // §4.5: the wording follows the scheme in use at the moment it shows, and
+    // SPEC-036 §4.2 remembers that wording — so a tip queued on one scheme is
+    // asked again on the live one, and a wording already seen is skipped.
+    const settings = this.services.settings;
+    const scheme = this.services.input.state.scheme;
+    let id = this.#tipQueue.shift();
+    // §4.12: only the touch wording of `zones` is ever shown.
+    while (id !== undefined && (!tipDue(settings.get().tipsSeen, id, scheme) || (id === 'zones' && scheme !== 'touch'))) {
+      id = this.#tipQueue.shift();
+    }
     if (id === undefined) return;
-    // §4.5: the wording follows the scheme in use at the moment it shows.
-    const text = this.services.input.state.scheme === 'touch' ? TIPS[id].touch : TIPS[id].keyboard;
+    const text = scheme === 'touch' ? TIPS[id].touch : TIPS[id].keyboard;
     aria.show(text, TIP_MS);
     this.#tipCooldown = TIP_INTERVAL;
     // D-27: the id is recorded now — a tip dropped from a full queue can fire
-    // again later, because it was never written down.
-    const settings = this.services.settings;
-    settings.set({ tipsSeen: [...settings.get().tipsSeen, id] });
+    // again later, because it was never written down. SPEC-036 §4.2: under the
+    // wording that showed; the `zones` line teaches what the touch `move` tip
+    // does, so it records that one as well (§4.12).
+    const seen = [...settings.get().tipsSeen, tipKey(id, scheme)];
+    if (id === 'zones') seen.push(tipKey('move', 'touch'));
+    settings.set({ tipsSeen: seen });
   }
 
   /**
@@ -3375,13 +3467,18 @@ export class SurfaceScene extends UiScene<'surface'> {
     this.#hud?.showHitDirection(Math.atan2(u, -v), this.services.settings.get().reduceMotion);
   }
 
-  /** §4.5: queue a first-time tip, unless it has been seen or the queue is full. */
+  /**
+   * §4.5: queue a first-time tip, unless it has been seen or the queue is
+   * full. SPEC-036 §4.2: "seen" is per wording — the one the live scheme would
+   * show — so a phone that once saw the keyboard line still gets the touch one.
+   */
   #requestTip(id: TipId): void {
     // SPEC-035 §4.8: a `?perf` run measures frames; a tip fading over one is
     // noise in the measurement and in the screenshot.
     if (this.services.perf === true) return;
-    if (this.services.settings.get().guidance !== 'full') return; // AC-47
-    if (this.services.settings.get().tipsSeen.includes(id)) return; // AC-44
+    const settings = this.services.settings.get();
+    if (settings.guidance !== 'full') return; // AC-47
+    if (!tipDue(settings.tipsSeen, id, this.services.input.state.scheme)) return; // AC-44
     if (this.#tipQueue.includes(id)) return;
     if (this.#tipQueue.length >= TIP_QUEUE_MAX) return; // 27-r
     this.#tipQueue.push(id);
@@ -3699,7 +3796,10 @@ export class SurfaceScene extends UiScene<'surface'> {
     if (count < 2 || this.#deathHinted.has(key)) return;
     if (this.services.settings.get().guidance !== 'full') return;
     this.#deathHinted.add(key);
-    this.#queueLine(HINTS.death.nudge, HINT_MS);
+    // SPEC-036 §4.11: Q means nothing on a phone.
+    const hint = HINTS.death;
+    const text = this.services.input.state.scheme === 'touch' && hint.touch !== undefined ? hint.touch : hint.nudge;
+    this.#queueLine(text, HINT_MS);
   }
 
   // ----------------------------------------------------------------- music

@@ -387,3 +387,44 @@ describe('firingSlot (SPEC-029 §4.4)', () => {
     expect(loadout.fallback).toBe(false);
   });
 });
+
+describe('the launcher on touch (SPEC-036 §4.6)', () => {
+  it('cycle with skipHeavy walks past a filled heavy slot', () => {
+    const { loadout } = make((s) => {
+      s.equipped.heavy = 'launcher_rocket';
+    });
+    expect(loadout.cycle(1, 0, true)).toBe(true);
+    expect(loadout.active).toBe('sidearm'); // primary → (heavy skipped) → sidearm
+    expect(loadout.cycle(-1, 1, true)).toBe(true);
+    expect(loadout.active).toBe('primary'); // sidearm → (heavy skipped) → primary
+    // Without the flag the heavy is still on the walk (the keyboard).
+    expect(loadout.cycle(1, 2)).toBe(true);
+    expect(loadout.active).toBe('heavy');
+    // …and from the heavy, a skipping cycle leaves it.
+    expect(loadout.cycle(1, 3, true)).toBe(true);
+    expect(loadout.active).toBe('sidearm');
+  });
+
+  it("the heavy's last charge fired while primary is active leaves primary active", () => {
+    const { events, loadout } = make((s) => {
+      s.equipped.heavy = 'launcher_rocket';
+    });
+    loadout.select('sidearm', 0);
+    loadout.select('primary', 1); // #previous is now the sidearm
+    const switched: GameEvents['weapon:switched'][] = [];
+    events.on('weapon:switched', (payload) => void switched.push(payload));
+    loadout.fired('heavy', 2);
+    expect(loadout.active).toBe('primary');
+    expect(switched).toEqual([]);
+    expect(loadout.ready('heavy', 2)).toBe(false); // the charge was spent all the same
+  });
+
+  it('fired while the heavy is the active slot, it hands back', () => {
+    const { loadout } = make((s) => {
+      s.equipped.heavy = 'launcher_rocket';
+    });
+    loadout.select('heavy', 0);
+    loadout.fired('heavy', 1);
+    expect(loadout.active).toBe('primary');
+  });
+});

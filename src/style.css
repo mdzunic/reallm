@@ -454,6 +454,10 @@ html.reduce-motion .touch-zone {
   top: 72%;
   width: 112px;
   height: 112px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-end;
   border: 2px solid var(--ink);
   border-radius: 50%;
   box-shadow: 0 0 2px #000;
@@ -482,12 +486,9 @@ html.reduce-motion .touch-zone {
   white-space: nowrap;
 }
 
+/* The label hangs under the ring, in flow: the ring's bottom edge, then down. */
 .touch-zone-move .touch-zone-label {
-  position: absolute;
-  left: 50%;
-  top: 100%;
-  transform: translateX(-50%);
-  margin-top: 6px;
+  transform: translateY(calc(100% + 8px));
 }
 
 .touch-zone-aim {
@@ -749,7 +750,7 @@ button.slot-button {
 @media (prefers-reduced-transparency: reduce) {
   .panel,
   .install-hint,
-  .overlay-panel,
+  .overlay-panel:not(.overlay-rotate),
   .toast {
     background: var(--panel);
     backdrop-filter: none;
@@ -759,7 +760,7 @@ button.slot-button {
 
 html.quality-low .panel,
 html.quality-low .install-hint,
-html.quality-low .overlay-panel,
+html.quality-low .overlay-panel:not(.overlay-rotate),
 html.quality-low .toast {
   background: var(--panel);
   backdrop-filter: none;
@@ -1839,9 +1840,30 @@ html.reduce-motion .dialogue-dim {
   animation: hud-pulse 1.2s ease-in-out infinite;
 }
 
+/* SPEC-036 §4.3, E65: the rotate block is a cover, not a centred box — the
+   whole viewport in near-black at z 51: above the pause frame (35) and every
+   layer of UiRoot (the overlay layer is 50), so Resume cannot be pressed
+   upright. Reveals (64), films (65) and endings (70, 80) keep their places
+   above it, and films letterbox in portrait (E34). It wears no glass, so the
+   quality-low and reduced-transparency rules above leave it alone. */
 .overlay-rotate {
+  inset: 0;
+  transform: none;
+  border: none;
+  border-radius: 0;
+  box-shadow: none;
+  background: rgb(0 0 0 / 92%);
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
   flex-direction: column;
+  align-items: center;
+  justify-content: center;
   gap: 6px;
+  z-index: 51;
+}
+
+.overlay-rotate.is-visible {
+  display: flex;
 }
 
 .rotate-glyph {
@@ -4159,6 +4181,75 @@ html.quality-low .screen::before {
   min-height: 56px;
 }
 
+/* SPEC-036 §4.8: a short landscape screen — a phone on its side, 293–500 px
+   tall, where the desktop rail cannot fit. A screen with tabs lays out as
+   head, body, one horizontal tab strip, then foot: the empty mirror column
+   goes, the channel line hides, and the title shares its row with the
+   station's containment level, so the body keeps at least half the height.
+   After the width block, so a 667 × 375 phone gets the strip, not the grid. */
+@media (orientation: landscape) and (max-height: 500px) {
+  .screen {
+    padding-top: max(6px, env(safe-area-inset-top));
+    padding-bottom: max(6px, env(safe-area-inset-bottom));
+  }
+
+  .screen-frame,
+  .screen.has-rail .screen-frame {
+    grid-template-areas:
+      'head'
+      'body'
+      'rail'
+      'foot';
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: auto minmax(0, 1fr) auto auto;
+  }
+
+  .screen-rail {
+    display: flex;
+    flex-direction: row;
+    gap: 6px;
+    padding: 6px 8px;
+    border-right: none;
+    border-top: 1px solid var(--rule);
+  }
+
+  /* Heights stay the 44 px floor, 56 px under `.screen.is-touch`. */
+  .screen-tab {
+    flex: 1 1 0;
+    width: auto;
+    min-width: 0;
+    padding-left: 4px;
+    padding-right: 4px;
+    letter-spacing: 0.04em;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .screen-head {
+    padding: 6px 14px;
+  }
+
+  .screen-channel {
+    display: none;
+  }
+
+  .screen-head-text {
+    flex-direction: row;
+    flex-wrap: wrap;
+    align-items: baseline;
+    column-gap: 12px;
+  }
+}
+
+/* …and at 360 px and under, a footer that holds only the build label goes;
+   the menu's E8 storage banner keeps its footer. */
+@media (orientation: landscape) and (max-height: 360px) {
+  .screen-foot:not(:has(.save-banner)) {
+    display: none;
+  }
+}
+
 /* §4.9: screens and panel swaps fade over 120 ms — opacity only, nothing
    moves — and reduce-motion stills it. */
 .screen-frame,
@@ -4191,8 +4282,31 @@ html.reduce-motion .screen-body > * {
   display: flex;
   flex-direction: column;
   align-items: center;
-  justify-content: center;
+  /* SPEC-036 §4.8: content taller than the body starts at its top and
+     scrolls, rather than being centred out of reach above it. */
+  justify-content: safe center;
   gap: 14px;
+}
+
+/* SPEC-036 §4.8: on a short landscape screen the actions form two columns and
+   the Controls sheet opens beside them, so Resume stays in reach. */
+@media (orientation: landscape) and (max-height: 500px) {
+  .screen-pause .screen-body {
+    flex-direction: row;
+    align-items: flex-start;
+  }
+
+  .pause-actions {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(150px, 1fr));
+    gap: 8px 10px;
+  }
+
+  .pause-sheet {
+    margin-top: 0;
+    max-height: 100%;
+    overflow-y: auto;
+  }
 }
 
 /* ------------------------------------------------------- the wallet strip */

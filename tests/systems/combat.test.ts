@@ -1236,3 +1236,84 @@ describe('SPEC-035 §4.6 — player:damaged carries where the hit came from', ()
     for (const hit of h.of('player:damaged')) expect(hit.from).toBeUndefined();
   });
 });
+
+// ------------------------------------------------ SPEC-036: the launcher tap
+
+describe('fireSlotOnce — the launcher on touch (SPEC-036 §4.6)', () => {
+  it('fires one charge at a skitter 8 m out and leaves the weapon in hand alone', () => {
+    const h = harness({ patch: (s) => void (s.equipped.heavy = 'launcher_grenade') });
+    const skitter = h.spawn('dust_skitter', 8, 0);
+    const before = h.combat.loadout.view('heavy', h.world.time, {
+      itemId: null,
+      state: 'ready',
+      cd: 0,
+      heat: 0,
+      charges: 0,
+      maxCharges: 0,
+    }).charges;
+    expect(h.combat.fireSlotOnce('heavy')).toBe('fired');
+    const after = h.combat.loadout.view('heavy', h.world.time, {
+      itemId: null,
+      state: 'ready',
+      cd: 0,
+      heat: 0,
+      charges: 0,
+      maxCharges: 0,
+    }).charges;
+    expect(after).toBe(before - 1);
+    const fired = h.of('weapon:fired');
+    expect(fired).toHaveLength(1);
+    expect(fired[0]?.line).toBe('launcher');
+    expect(h.combat.loadout.active).toBe('primary');
+    expect(h.of('weapon:switched')).toHaveLength(0);
+    // Aimed at the skitter: the lob's target is where it stood.
+    expect(h.world.projectiles.size).toBe(1);
+    const shell = h.world.projectiles.at(0);
+    expect(shell.lob).toBe(true);
+    expect(shell.targetX).toBeCloseTo(skitter.x, 6);
+    expect(shell.targetZ).toBeCloseTo(skitter.z, 6);
+    // The burst interval applies to the next tap, as it does to a held trigger.
+    expect(h.world.player.fireCooldown).toBeCloseTo(1 / 2.5, 6);
+  });
+
+  it('with no enemy in range, the shot lands 10 m along facing (36-k)', () => {
+    const h = harness({ patch: (s) => void (s.equipped.heavy = 'launcher_grenade') });
+    h.world.player.facing = Math.PI / 2; // +z
+    expect(h.combat.fireSlotOnce('heavy')).toBe('fired');
+    const shell = h.world.projectiles.at(0);
+    expect(shell.targetX).toBeCloseTo(0, 6);
+    expect(shell.targetZ).toBeCloseTo(10, 6);
+
+    // A rocket, which does not lob, flies along facing the same way.
+    const rocket = harness({ patch: (s) => void (s.equipped.heavy = 'launcher_rocket') });
+    rocket.world.player.facing = Math.PI;
+    expect(rocket.combat.fireSlotOnce('heavy')).toBe('fired');
+    const shot = rocket.world.projectiles.at(0);
+    expect(shot.vx).toBeLessThan(0);
+    expect(shot.vz).toBeCloseTo(0, 6);
+    expect(shot.blastRadius).toBe(3.5);
+  });
+
+  it('returns not-ready with no charge left, and empty with no heavy equipped (36-j)', () => {
+    const h = harness({ patch: (s) => void (s.equipped.heavy = 'launcher_rocket') });
+    expect(h.combat.fireSlotOnce('heavy')).toBe('fired');
+    expect(h.combat.fireSlotOnce('heavy')).toBe('not-ready');
+    expect(h.of('weapon:fired')).toHaveLength(1);
+    expect(h.world.projectiles.size).toBe(1);
+    // It recharges holstered, as the loadout always did.
+    h.run(6.1);
+    expect(h.combat.fireSlotOnce('heavy')).toBe('fired');
+
+    const bare = harness();
+    expect(bare.combat.fireSlotOnce('heavy')).toBe('empty');
+    expect(bare.world.projectiles.size).toBe(0);
+  });
+
+  it('inside the burst interval it is not ready either', () => {
+    const h = harness({ patch: (s) => void (s.equipped.heavy = 'launcher_grenade') });
+    expect(h.combat.fireSlotOnce('heavy')).toBe('fired');
+    expect(h.combat.fireSlotOnce('heavy')).toBe('not-ready');
+    h.run(0.45);
+    expect(h.combat.fireSlotOnce('heavy')).toBe('fired');
+  });
+});

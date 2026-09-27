@@ -319,6 +319,10 @@ describe('the settings object (SPEC-007 §3)', () => {
       tipsSeen: [],
       // SPEC-032 §4.6: the service override is off on every new device.
       serviceMode: false,
+      // SPEC-036 §4.5: a blur pauses a running game, on every scheme.
+      pauseOnBlur: true,
+      // SPEC-036 §4.12: no landing has shown the zone ghosts yet.
+      zonesShown: 0,
     });
   });
 
@@ -492,6 +496,14 @@ describe('guidance and tipsSeen (SPEC-027 AC-72, AC-73, AC-74)', () => {
       'move',
       'map',
     ]);
+    // SPEC-036 §4.2: the touch wording is its own entry beside the bare id;
+    // an unknown id is dropped in either form, and repeats of either go.
+    expect(
+      createSettings(fakeStorage('{"tipsSeen":["move","move@touch","nope@touch","move@touch","@touch","map@keyboard"]}').storage).get()
+        .tipsSeen,
+    ).toEqual(['move', 'move@touch']);
+    settings.set({ tipsSeen: ['zones@touch', 'nope@touch', 'zones'] as unknown as Settings['tipsSeen'] });
+    expect(settings.get().tipsSeen).toEqual(['zones@touch', 'zones']);
     expect(createSettings(fakeStorage('{"tipsSeen":"move"}').storage).get().tipsSeen).toEqual([]);
     expect(createSettings(fakeStorage('{"tipsSeen":null}').storage).get().tipsSeen).toEqual([]);
   });
@@ -502,6 +514,40 @@ describe('guidance and tipsSeen (SPEC-027 AC-72, AC-73, AC-74)', () => {
     settings.set({ guidance: 'off', tipsSeen: ['move'] });
     expect(stored(fake)).toMatchObject({ guidance: 'off', tipsSeen: ['move'] });
     expect(createSettings(fake.storage).get()).toMatchObject({ guidance: 'off', tipsSeen: ['move'] });
+  });
+});
+
+describe('pauseOnBlur and zonesShown (SPEC-036 §4.5, §4.12)', () => {
+  it('pauseOnBlur defaults on, round-trips, and an unusable value keeps it on', () => {
+    muteLog();
+    expect(defaultSettings().pauseOnBlur).toBe(true);
+    const fake = fakeStorage();
+    const settings = createSettings(fake.storage);
+    settings.set({ pauseOnBlur: false });
+    expect(stored(fake)).toMatchObject({ pauseOnBlur: false });
+    expect(createSettings(fake.storage).get().pauseOnBlur).toBe(false);
+    // `false` is a choice; `"no"` is not a value, and must not turn it off.
+    expect(createSettings(fakeStorage('{"pauseOnBlur":"no"}').storage).get().pauseOnBlur).toBe(true);
+    expect(createSettings(fakeStorage('{"pauseOnBlur":0}').storage).get().pauseOnBlur).toBe(true);
+    settings.set({ pauseOnBlur: 'off' as unknown as boolean });
+    expect(settings.get().pauseOnBlur).toBe(false); // unusable: what was there stays
+  });
+
+  it('zonesShown takes the integers 0…2 and reads anything else as 0', () => {
+    expect(defaultSettings().zonesShown).toBe(0);
+    const settings = createSettings(fakeStorage().storage);
+    for (const value of [0, 1, 2]) {
+      settings.set({ zonesShown: value });
+      expect(settings.get().zonesShown).toBe(value);
+      expect(createSettings(fakeStorage(`{"zonesShown":${value}}`).storage).get().zonesShown).toBe(value);
+    }
+    for (const bad of [3, -1, 1.5, Number.NaN, '1', null, true]) {
+      settings.set({ zonesShown: 2 });
+      settings.set({ zonesShown: bad as unknown as number });
+      expect(settings.get().zonesShown, String(bad)).toBe(0);
+    }
+    expect(createSettings(fakeStorage('{"zonesShown":7}').storage).get().zonesShown).toBe(0);
+    expect(createSettings(fakeStorage('{"zonesShown":"2"}').storage).get().zonesShown).toBe(0);
   });
 });
 

@@ -731,6 +731,12 @@ export class Game implements GameServices {
   #onBlur(): void {
     // E10: a key held when focus leaves would otherwise stay held forever.
     this.#input.releaseAll();
+    // SPEC-036 §4.5, E67: a notification shade or a click on a second monitor
+    // should not cost a fight. The pause-button path pauses only a pausable
+    // scene that is running, is remembered through a transition (36-i), and
+    // is a no-op once paused — so a blur that the page hiding already paused
+    // (E6) never pauses twice. Nothing resumes on focus (D-38).
+    if (this.#settings.get().pauseOnBlur) this.#scenes.pause();
     this.#logEvent('app:blur');
   }
 

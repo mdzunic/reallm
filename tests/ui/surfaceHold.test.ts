@@ -15,7 +15,7 @@ const SOURCES: Record<string, string> = Object.fromEntries(
   Object.entries(RAW).map(([file, source]) => [file, stripComments(source)]),
 );
 
-const RUNNING: SurfaceHoldState = { beats: 0, ui: 0, modal: 0 };
+const RUNNING: SurfaceHoldState = { beats: 0, rotate: false, ui: 0, modal: 0 };
 
 describe('surfaceHoldReason (SPEC-034 §4.6)', () => {
   it('runs with nothing open', () => {
@@ -31,14 +31,20 @@ describe('surfaceHoldReason (SPEC-034 §4.6)', () => {
   it('keeps the two holds that came before it, in their order', () => {
     // SPEC-023 §4.4's story beat outranks the map, which outranks a line: a
     // film or a reveal owns the screen outright.
-    expect(surfaceHoldReason({ beats: 1, ui: 1, modal: 1 })).toBe('beat');
-    expect(surfaceHoldReason({ beats: 0, ui: 1, modal: 1 })).toBe('ui');
-    expect(surfaceHoldReason({ beats: 1, ui: 0, modal: 0 })).toBe('beat');
-    expect(surfaceHoldReason({ beats: 0, ui: 1, modal: 0 })).toBe('ui');
+    expect(surfaceHoldReason({ ...RUNNING, beats: 1, ui: 1, modal: 1 })).toBe('beat');
+    expect(surfaceHoldReason({ ...RUNNING, beats: 0, ui: 1, modal: 1 })).toBe('ui');
+    expect(surfaceHoldReason({ ...RUNNING, beats: 1, ui: 0, modal: 0 })).toBe('beat');
+    expect(surfaceHoldReason({ ...RUNNING, beats: 0, ui: 1, modal: 0 })).toBe('ui');
+  });
+
+  it('holds for the rotate block, between a beat and the map (SPEC-036 §4.3)', () => {
+    expect(surfaceHoldReason({ ...RUNNING, rotate: true })).toBe('rotate');
+    expect(surfaceHoldReason({ beats: 1, rotate: true, ui: 1, modal: 1 })).toBe('beat');
+    expect(surfaceHoldReason({ beats: 0, rotate: true, ui: 1, modal: 1 })).toBe('rotate');
   });
 
   it('resumes the moment the line closes', () => {
-    const state: SurfaceHoldState = { beats: 0, ui: 0, modal: 1 };
+    const state: SurfaceHoldState = { beats: 0, rotate: false, ui: 0, modal: 1 };
     expect(surfaceHoldReason(state)).toBe('modal');
     state.modal = 0;
     expect(surfaceHoldReason(state)).toBeNull();
@@ -81,6 +87,23 @@ describe("the surface step obeys it (SPEC-034 §4.6)", () => {
 
   it('publishes the hold as sceneInfo.held', () => {
     expect(surface()).toContain("info['held'] = this.#holdReason() === null ? 0 : 1;");
-    expect(surface()).toContain('surfaceHoldReason({ beats: this.#holds, ui: this.#uiHolds, modal: this.#modalOpen })');
+    // SPEC-036 §4.3: the rotate block is one of the reasons, in its place.
+    expect(surface()).toContain(
+      'surfaceHoldReason({ beats: this.#holds, rotate: this.#rotateBlocked(), ui: this.#uiHolds, modal: this.#modalOpen })',
+    );
+  });
+
+  it('returns before movement and combat while the rotate block is up (SPEC-036 §4.3)', () => {
+    const source = surface();
+    const hold = source.indexOf('if (this.#rotateBlocked()) {');
+    const move = source.indexOf('this.#movePlayer(world, dt)');
+    const combat = source.indexOf('combat.update(dt, input,');
+    expect(hold, 'the rotate hold in onUpdate').toBeGreaterThan(-1);
+    expect(hold).toBeLessThan(move);
+    expect(hold).toBeLessThan(combat);
+    // …after the beat's own branch, before the map's.
+    expect(source.indexOf('if (this.#holds > 0) {')).toBeLessThan(hold);
+    expect(hold).toBeLessThan(source.indexOf('if (this.#uiHolds > 0) {'));
+    expect(source.slice(hold, move)).toContain('return;');
   });
 });

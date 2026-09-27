@@ -127,6 +127,11 @@ export class SettingsPanel {
           s.joystickSide,
           (side) => s.setJoystickSide(side),
         ),
+        // SPEC-036 §4.5: on by default, every scheme; a player who reads a
+        // guide on the side turns it off here.
+        this.#toggleRow('settings-pause-on-blur', 'Pause when the game loses focus', s.get().pauseOnBlur, (on) =>
+          s.set({ pauseOnBlur: on }),
+        ),
         this.#toggleRow('settings-mouse-steer', 'Mouse steer (flight)', s.flightMouseSteer, (on) => s.setFlightMouseSteer(on)),
         this.#fullscreenRow(),
         this.#toggleRow('settings-show-fps', 'Show FPS', s.showFps, (on) => s.setShowFps(on)),
