@@ -1392,3 +1392,57 @@ determinism claim is per tool version — and the contact sheet
       and the same renders re-run on Blender 5.2 if the art is judged short.
 - [ ] the seven new sounds heard rather than asserted: the four weapon lines, the
       impact, the explosion and the ship laser, with `engine_hum` under them.
+
+## SPEC-036 — touch that works: aim, scheme, back, rotate and the short landscape screen (M7f)
+
+- **Build:** `spec/SPEC-036` — untagged
+- **Devices:**
+  - desktop — headless Chromium 1280 × 720 (Playwright, Linux container, **software GL / SwiftShader**)
+  - phone — headless Chromium with touch + mobile emulation: 844 × 390, 800 × 360,
+    750 × 342, 802 × 293, 667 × 375, 727 × 393 and the Pixel 5 (393 × 851); a
+    physical handset still owes the human pass
+
+Recorded from the container the branch was built in: `npm run check` (86 files,
+1570 tests) and the e2e files this spec wrote or moved — `SPEC-036.spec.ts`
+(30 cases, twice over with six workers), `SPEC-031.spec.ts`, `SPEC-015.spec.ts`
+in both projects, `SPEC-005.spec.ts`, `touch-controls.spec.ts`, and the
+terminal and camera cases of `SPEC-012.spec.ts` and `SPEC-035.spec.ts`. The §7
+list is a phone-and-desktop pass owed before the `m7` tag; each row names the
+automated evidence that stands in for it here.
+
+**Verified here, by name.**
+
+| §7 item | Evidence in this branch |
+|---|---|
+| The first flight by touch: the reticle stays ahead, the tips speak of thumbs | `SPEC-036.spec.ts` case 1 (`reticleX/Y` within 0.5 m of `shipX/Y` while a thumb steers; `aim.hasPointer` stays false) and case 2 (a coarse-pointer context boots on `touch` before any touch, and the first tip is the `zones` line) |
+| A half-stretched thumb kites at full speed | case 10 (34 px of travel reads ≥ 0.99, 8 px reads 0) and `tests/core/input.test.ts` for `shapeTouchStick` |
+| A third finger lifted drops nothing | case 11 (a cancelled aim finger leaves the stick; a cancelled stick finger leaves the fire hold) |
+| The launcher tapped with auto-fire running | case 9 (one `shot_launcher` voice, `weaponSlot` stays `primary`, `charges` 1 → 0, then `Launcher recharging`) and `tests/systems/combat.test.ts` for `fireSlotOnce` |
+| Upright mid-fight and back | cases 4 and 5 (held at 1 with `px`/`pz`/`viewTime` frozen, the cover topmost at z 51 in `rgba(0, 0, 0, 0.92)`, the pause menu under it and topmost again once turned back) |
+| The Back gesture on the surface, at the station and at the menu | cases 6 and 7 (Escape and `page.goBack()` pause and resume the surface, the star map goes to the station, a menu sub-panel closes, the menu root leaves the page) and `tests/core/backGuard.test.ts` |
+| The notification shade mid-fight | case 8 (a `blur` pauses; with `pauseOnBlur` off it does not) |
+| Every station tab in reach at landscape | case 12 and the `SPEC-031.spec.ts` walk at the five short sizes (every `station-tab-*` inside the viewport and topmost; `.screen-body` 52–67 % of the height) |
+| The pause menu and Controls on the shortest phone | case 13 (`pause-resume` inside the viewport and topmost with the sheet open, at all five sizes) |
+| The prologue watched without touching | case 14 (one wake-lock request during the prologue, released by `film-skip`; a system Back leaves the film up) |
+| The pad terminal with enemies near | case 15 (`held` 1 while it is open; Escape, E and Close each close it) |
+| The zone ghosts on the first two landings | case 17 (shown on landings one and two, gone on a stick drag or 12 s later, absent on the third and in a `?perf` run) |
+
+**One reading of the stacking the reviewer should know.** §4.3 puts the rotate
+cover at z 51 above every layer of `UiRoot` and below chapter cards. The chapter
+card is mounted *inside* the overlay layer (z 50) by SPEC-023's own rule, so a
+toast (55) still lands over it — which makes the cover, sitting above that whole
+layer, paint over a chapter card too. Reveals (64), films (65) and endings (70,
+80) are siblings of the cover and stay above it. The cover was kept above the
+overlay layer, because a confirm sheet (52 inside that layer) must not be
+pressable upright.
+
+**Owed on hardware, before the `m7` tag.**
+
+- [ ] the twelve rows above on the reference iPhone and a 360-dp Android, in the
+      browser and installed — above all the two that are a matter of feel: the
+      stick at 60 % travel, and whether the zone ghosts read as a hint rather
+      than as clutter.
+- [ ] the edge swipe on a real Android and on iOS, where the system Back is a
+      gesture rather than a button, and a reload mid-run followed by Back (36-g).
+- [ ] desktop: Escape through pause, settings and a confirm sheet one layer at a
+      time, and an alt-tab mid-fight.
