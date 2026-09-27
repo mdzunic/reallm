@@ -2,19 +2,23 @@
 // no DOM at all (AC-31), and the keyboard/mouse driver takes its targets by
 // injection, so the whole desktop scheme — bindings, `preventDefault` gating,
 // editable fields, mouse buttons, focus loss — is drivable with plain objects.
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   ACTIONS,
+  COARSE_POINTER_QUERY,
   createNullInput,
   DEAD_ZONE,
   FLIGHT_AIM_ASSIST,
   FLIGHT_STEER_FRACTION,
   FLOAT_DRIFT,
+  initialScheme,
   Input,
   JOYSTICK_RADIUS_PX,
   MOVE_ZONE_FRACTION,
+  shapeTouchStick,
   TAP_SLOP_PX,
   TOUCH_BUTTON_PX,
+  TOUCH_FULL_TRAVEL,
   zoneFor,
 } from '@/core/Input';
 import { KEY_BINDINGS, KeyboardMouseDriver } from '@/core/KeyboardMouseDriver';
@@ -386,9 +390,97 @@ describe('move shaping (AC-8, AC-9)', () => {
     const input = new Input();
     input.setMove(0.1, 0.05, 'touch');
     expect(input.state.move).toEqual({ x: 0, y: 0 });
-    input.setMove(0.6, 0, 'touch');
+    // SPEC-036 §4.7 moved full speed in to 0.6 of the radius, so a stick past
+    // the dead zone but short of it is the partial deflection this reads.
+    input.setMove(0.4, 0, 'touch');
     expect(input.state.move.x).toBeGreaterThan(0);
     expect(input.state.move.x).toBeLessThan(1);
+  });
+});
+
+describe('the touch stick response (SPEC-036 §4.7)', () => {
+  it('reads 0 inside the dead zone and 1 from 60 % of the radius', () => {
+    expect(TOUCH_FULL_TRAVEL).toBe(0.6);
+    const out = { x: 9, y: 9 };
+    // 8 px of a 56 px stick is 0.14 of it: inside the dead zone.
+    shapeTouchStick(8 / JOYSTICK_RADIUS_PX, 0, out);
+    expect(out).toEqual({ x: 0, y: 0 });
+    shapeTouchStick(0.14, 0, out);
+    expect(out).toEqual({ x: 0, y: 0 });
+    // 34 px is 0.61: full speed.
+    shapeTouchStick(34 / JOYSTICK_RADIUS_PX, 0, out);
+    expect(out.x).toBeCloseTo(1, 10);
+    shapeTouchStick(0, -0.61, out);
+    expect(out.y).toBeCloseTo(-1, 10);
+    expect(out.x).toBeCloseTo(0, 10);
+    // Linear in between: halfway from the dead zone to 0.6 reads a half.
+    shapeTouchStick(0.375, 0, out);
+    expect(out.x).toBeCloseTo(0.5, 10);
+    // Past full travel it stays a unit vector, along the thumb's direction.
+    shapeTouchStick(0.8, 0.8, out);
+    expect(Math.hypot(out.x, out.y)).toBeCloseTo(1, 10);
+    expect(out.x).toBeCloseTo(out.y, 10);
+  });
+
+  it('shapes only the touch source with it; the keyboard keeps its own curve', () => {
+    const input = new Input();
+    input.setMove(0.375, 0, 'touch');
+    expect(input.state.move.x).toBeCloseTo(0.5, 10);
+    input.setMove(0, 0, 'touch');
+    // The keyboard is unchanged: a digital axis is full deflection.
+    input.setMove(1, 0, 'keyboard');
+    expect(input.state.move.x).toBeCloseTo(1, 10);
+  });
+
+  it('sums a touch source and a keyboard source, each shaped, then clamps to 1', () => {
+    const input = new Input();
+    input.setMove(0, 0.375, 'touch'); // shaped to (0, 0.5)
+    input.setMove(1, 0, 'keyboard'); // shaped to (1, 0)
+    const move = input.state.move;
+    expect(Math.hypot(move.x, move.y)).toBeCloseTo(1, 10);
+    expect(move.y / move.x).toBeCloseTo(0.5, 10);
+    // Opposing halves cancel rather than fight.
+    input.setMove(-0.61, 0, 'touch');
+    expect(input.state.move.x).toBeCloseTo(0, 10);
+    expect(input.state.move.y).toBeCloseTo(0, 10);
+  });
+});
+
+describe('the boot scheme (SPEC-036 §4.2)', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it('initialScheme answers touch for a coarse pointer with no hover, keyboard otherwise', () => {
+    expect(COARSE_POINTER_QUERY).toBe('(hover: none) and (pointer: coarse)');
+    const asked: string[] = [];
+    expect(
+      initialScheme((query) => {
+        asked.push(query);
+        return true;
+      }),
+    ).toBe('touch');
+    expect(asked).toEqual([COARSE_POINTER_QUERY]);
+    expect(initialScheme(() => false)).toBe('keyboard');
+    // node has no matchMedia at all: the keyboard.
+    expect(initialScheme()).toBe('keyboard');
+    // A probe that throws is no answer either.
+    expect(
+      initialScheme(() => {
+        throw new Error('no media queries here');
+      }),
+    ).toBe('keyboard');
+  });
+
+  it('Input starts on its answer, and announces nothing for the initial value', () => {
+    expect(new Input().state.scheme).toBe('keyboard');
+    vi.stubGlobal('matchMedia', (query: string) => ({ matches: query === COARSE_POINTER_QUERY }));
+    const bus = fakeBus();
+    const input = new Input(null, bus.bus, null);
+    expect(input.state.scheme).toBe('touch');
+    expect(bus.emitted.filter((entry) => entry.name === 'input:schemeChanged')).toEqual([]);
+    // The auto-fire default follows it from the first frame (SPEC-005 AC-18).
+    expect(input.state.autoFire).toBe(true);
   });
 });
 
@@ -857,6 +949,77 @@ describe('KeyboardMouseDriver', () => {
     expect(input.state.aim).toMatchObject({ screenX: 800, screenY: 0, ndcX: 1, ndcY: 1, hasPointer: true });
   });
 
+  it('a touch or pen move sets the scheme and never the hover aim (SPEC-036 §4.1)', () => {
+    for (const pointerType of ['touch', 'pen'] as const) {
+      const { input, win } = harness();
+      win.fire('pointermove', pointerEvent({ pointerType, clientX: 400, clientY: 300 }));
+      expect(input.state.scheme, pointerType).toBe('touch');
+      expect(input.state.aim, pointerType).toMatchObject({ screenX: 0, screenY: 0, ndcX: 0, ndcY: 0, hasPointer: false });
+    }
+    // A mouse move sets both, as before.
+    const { input, win } = harness();
+    win.fire('pointermove', pointerEvent({ pointerType: 'touch', clientX: 400, clientY: 300 }));
+    win.fire('pointermove', pointerEvent({ pointerType: 'mouse', clientX: 800, clientY: 0 }));
+    expect(input.state.scheme).toBe('keyboard');
+    expect(input.state.aim).toMatchObject({ screenX: 800, screenY: 0, ndcX: 1, ndcY: 1, hasPointer: true });
+    // …and a later finger leaves the mouse's aim where the mouse put it.
+    win.fire('pointermove', pointerEvent({ pointerType: 'touch', clientX: 10, clientY: 10 }));
+    expect(input.state.aim).toMatchObject({ screenX: 800, screenY: 0, ndcX: 1, ndcY: 1, hasPointer: true });
+  });
+
+  it('every press sets the scheme from its pointerType, in the capture phase (SPEC-036 §4.2)', () => {
+    const win = fakeTarget();
+    const captured: string[] = [];
+    const recording = {
+      addEventListener(type: string, handler: (event: unknown) => void, capture?: boolean): void {
+        if (capture === true) captured.push(type);
+        win.target.addEventListener(type, handler as EventListener);
+      },
+      removeEventListener(type: string, handler: (event: unknown) => void): void {
+        win.target.removeEventListener(type, handler as EventListener);
+      },
+    };
+    const input = new Input();
+    new KeyboardMouseDriver(input, { win: recording as unknown as EventTarget, doc: null, canvas: null });
+    expect(captured).toEqual(['pointerdown']);
+    // A press anywhere — a DOM control, not the canvas — counts.
+    win.fire('pointerdown', pointerEvent({ pointerType: 'touch' }));
+    expect(input.state.scheme).toBe('touch');
+    win.fire('pointerdown', pointerEvent({ pointerType: 'mouse' }));
+    expect(input.state.scheme).toBe('keyboard');
+    win.fire('pointerdown', pointerEvent({ pointerType: 'pen' }));
+    expect(input.state.scheme).toBe('touch');
+    // It only reads the press: no action is held by it.
+    for (const action of ACTIONS) expect(input.state.buttons[action].down, action).toBe(false);
+  });
+
+  it('a cancelled mouse pointer drops mouse:0 alone; a cancelled finger is the touch layer\'s (SPEC-036 §4.7)', () => {
+    const { input, win, canvas } = harness();
+    win.fire('keydown', keyEvent('KeyW'));
+    win.fire('keydown', keyEvent('KeyE'));
+    canvas.fire('pointerdown', pointerEvent({ pointerType: 'mouse', button: 0 }));
+    expect(input.state.buttons.fire.down).toBe(true);
+
+    // A touch or pen cancel releases nothing here.
+    win.fire('pointercancel', pointerEvent({ pointerType: 'touch' }));
+    win.fire('pointercancel', pointerEvent({ pointerType: 'pen' }));
+    expect(input.state.buttons.fire.down).toBe(true);
+    expect(input.state.buttons.interact.down).toBe(true);
+    expect(input.state.move.y).toBeCloseTo(1, 10);
+
+    // The mouse cancel drops its own holder, and only that.
+    win.fire('pointercancel', pointerEvent({ pointerType: 'mouse' }));
+    expect(input.state.buttons.fire.down).toBe(false);
+    expect(input.state.buttons.interact.down).toBe(true);
+    expect(input.state.move.y).toBeCloseTo(1, 10);
+
+    // Space held alongside the mouse keeps fire held through a mouse cancel.
+    win.fire('keydown', keyEvent('Space'));
+    canvas.fire('pointerdown', pointerEvent({ pointerType: 'mouse', button: 0 }));
+    win.fire('pointercancel', pointerEvent({ pointerType: 'mouse' }));
+    expect(input.state.buttons.fire.down).toBe(true);
+  });
+
   it('switches the scheme to the last-used device (AC-19)', () => {
     const { input, win } = harness();
     win.fire('pointermove', pointerEvent({ pointerType: 'touch' }));
@@ -871,8 +1034,10 @@ describe('KeyboardMouseDriver', () => {
     expect(input.state.scheme).toBe('keyboard');
   });
 
-  it('releases everything on blur, on a hidden tab and on pointercancel (AC-10)', () => {
-    for (const drop of ['blur', 'visibilitychange', 'pointercancel'] as const) {
+  it('releases everything on blur and on a hidden tab (AC-10, E10)', () => {
+    // SPEC-036 §4.7: a `pointercancel` no longer drops everything — the case
+    // above pins what it releases now.
+    for (const drop of ['blur', 'visibilitychange'] as const) {
       const { input, win, doc } = harness();
       win.fire('keydown', keyEvent('KeyW'));
       win.fire('keydown', keyEvent('Space'));

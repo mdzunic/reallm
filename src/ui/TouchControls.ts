@@ -43,6 +43,9 @@ interface ZonePointer {
   dragging: boolean;
 }
 
+/** SPEC-036 §4.12: the zone ghosts go on their own this long after they showed. */
+export const ZONES_SECONDS = 12;
+
 /** Which buttons each mode shows (AC-27). */
 const MODE_BUTTONS: Readonly<Record<InputMode, readonly Action[]>> = {
   // SPEC-028 §4.1: SWAP cycles the weapon; the quick bar carries the rest.
@@ -78,6 +81,10 @@ export class TouchControls {
   readonly #stick: HTMLDivElement;
   readonly #knob: HTMLDivElement;
   readonly #reticle: HTMLDivElement;
+  /** SPEC-036 §4.12: the two "where to touch" ghosts, hidden by default. */
+  readonly #zoneMove: HTMLDivElement;
+  readonly #zoneAim: HTMLDivElement;
+  #zonesTimer: ReturnType<typeof setTimeout> | null = null;
   readonly #buttons = new Map<Action, HTMLButtonElement>();
   readonly #input: Input;
   readonly #settings: SettingsStore;
@@ -102,13 +109,21 @@ export class TouchControls {
     this.#knob = el('div', 'touch-stick-knob');
     this.#stick.append(this.#knob);
     this.#reticle = testId(el('div', 'touch-reticle'), 'touch-reticle');
+    // SPEC-036 §4.12: a ring with its knob where the left thumb goes, and the
+    // aim line where the right one does. Neither takes a pointer event.
+    this.#zoneMove = testId(el('div', 'touch-zone touch-zone-move is-hidden'), 'touch-zone-move');
+    this.#zoneMove.setAttribute('aria-hidden', 'true');
+    this.#zoneMove.append(el('div', 'touch-zone-knob'), el('p', 'touch-zone-label', 'MOVE'));
+    this.#zoneAim = testId(el('div', 'touch-zone touch-zone-aim is-hidden'), 'touch-zone-aim');
+    this.#zoneAim.setAttribute('aria-hidden', 'true');
+    this.#zoneAim.append(el('p', 'touch-zone-label', 'DRAG TO AIM'), el('p', 'touch-zone-chevron', '›'));
     const buttons = el('div', 'touch-buttons');
     for (const action of ['interact', 'useItem', 'weaponNext', 'throttleUp', 'throttleDown', 'pause'] as const) {
       const button = this.#makeButton(action);
       this.#buttons.set(action, button);
       buttons.append(button);
     }
-    this.#layer.append(this.#surface, this.#stick, this.#reticle, buttons);
+    this.#layer.append(this.#surface, this.#zoneMove, this.#zoneAim, this.#stick, this.#reticle, buttons);
 
     this.#listen(this.#surface, 'pointerdown', (event) => this.#onDown(event as PointerEvent));
     this.#listen(this.#surface, 'pointermove', (event) => this.#onMove(event as PointerEvent));
@@ -154,6 +169,29 @@ export class TouchControls {
     this.#layer.remove();
   }
 
+  /** SPEC-036 §4.12: true while the zone ghosts are up (on the layer, if it is mounted). */
+  get zonesShown(): boolean {
+    return !this.#zoneMove.classList.contains('is-hidden');
+  }
+
+  /**
+   * SPEC-036 §4.12: the two ghosts that say where the thumbs go. Showing them
+   * starts a 12 s wall clock; the first stick move, the first aim-drag or that
+   * clock takes them down. They live on the layer, so a map that hides the
+   * layer hides them too, and the clock keeps running (36-n).
+   */
+  showZones(on: boolean): void {
+    if (this.#zonesTimer !== null) clearTimeout(this.#zonesTimer);
+    this.#zonesTimer = null;
+    this.#zoneMove.classList.toggle('is-hidden', !on);
+    this.#zoneAim.classList.toggle('is-hidden', !on);
+    if (!on || this.#disposed) return;
+    this.#zonesTimer = setTimeout(() => {
+      this.#zonesTimer = null;
+      this.showZones(false);
+    }, ZONES_SECONDS * 1000);
+  }
+
   /** The interact button only exists while the scene offers something (AC-17). */
   setInteractHint(label: string | null): void {
     this.#interactHint = label;
@@ -166,6 +204,7 @@ export class TouchControls {
   dispose(): void {
     if (this.#disposed) return;
     this.#disposed = true;
+    this.showZones(false);
     this.hide();
     for (const release of this.#teardown.splice(0).reverse()) release();
     this.#buttons.clear();
@@ -263,6 +302,8 @@ export class TouchControls {
       aim.dragging = true;
       // AC-13: a drag holds fire, pressed exactly once for the whole drag.
       if (this.#mode !== 'flight') this.#input.pressAction('fire', 'touch');
+      // SPEC-036 §4.12: the first aim-drag has been learned; the ghosts go.
+      if (this.zonesShown) this.showZones(false);
     }
     // Screen y grows downward and aim is y-up, so the sign flips.
     this.#input.setAimDrag(dx, -dy, true);
@@ -288,8 +329,10 @@ export class TouchControls {
       }
       this.#input.setAimDrag(0, 0, false);
     }
-    // AC-10: a cancelled pointer (a system gesture, a call) drops everything.
-    if (cancelled) this.#input.releaseAll();
+    // SPEC-036 §4.7: a cancelled pointer (a system gesture, a third finger)
+    // released exactly the role it owned above, and nothing else — every other
+    // finger keeps its own. Blur, a hidden page and a scene change still
+    // release everything (E10).
   }
 
   /** The floating stick of AC-11: full deflection at the radius, origin follows the drift. */
@@ -308,6 +351,8 @@ export class TouchControls {
     }
     this.#input.setMove(dx / JOYSTICK_RADIUS_PX, -dy / JOYSTICK_RADIUS_PX, 'touch');
     if (this.#mode === 'surface') this.#showStick(pointer.originX, pointer.originY, dx, dy);
+    // SPEC-036 §4.12: the first stick move with any length takes the ghosts down.
+    if ((dx !== 0 || dy !== 0) && this.zonesShown) this.showZones(false);
   }
 
   #showStick(originX: number, originY: number, dx: number, dy: number): void {

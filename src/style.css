@@ -432,6 +432,88 @@ button.touch-button {
   display: none;
 }
 
+/* SPEC-036 §4.12: the two "where to touch" ghosts of a first landing. They
+   take no pointer events, point at the zones they name, mirror with the stick,
+   pulse at 1 Hz — and hold still under reduce motion. */
+.touch-zone {
+  position: absolute;
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+  color: var(--ink);
+  opacity: 0.55;
+  text-shadow: 0 0 2px #000;
+  animation: touch-zone-pulse 1s ease-in-out infinite;
+}
+
+html.reduce-motion .touch-zone {
+  animation: none;
+}
+
+.touch-zone-move {
+  left: 20%;
+  top: 72%;
+  width: 112px;
+  height: 112px;
+  border: 2px solid var(--ink);
+  border-radius: 50%;
+  box-shadow: 0 0 2px #000;
+}
+
+.touch-controls[data-side='right'] .touch-zone-move {
+  left: 80%;
+}
+
+.touch-zone-knob {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 48px;
+  height: 48px;
+  margin: -24px 0 0 -24px;
+  border-radius: 50%;
+  background: var(--ink);
+  box-shadow: 0 0 2px #000;
+}
+
+.touch-zone-label {
+  margin: 0;
+  font-size: var(--type-sm);
+  letter-spacing: 0.2em;
+  white-space: nowrap;
+}
+
+.touch-zone-move .touch-zone-label {
+  position: absolute;
+  left: 50%;
+  top: 100%;
+  transform: translateX(-50%);
+  margin-top: 6px;
+}
+
+.touch-zone-aim {
+  left: 75%;
+  top: 60%;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.touch-controls[data-side='right'] .touch-zone-aim {
+  left: 25%;
+}
+
+.touch-zone-chevron {
+  margin: 0;
+  font-size: var(--type-xl);
+  line-height: 1;
+}
+
+@keyframes touch-zone-pulse {
+  50% {
+    opacity: 0.25;
+  }
+}
+
 /* --------------------------------------------- stats overlay (SPEC-002 §4.6) */
 
 /* Top-left, offset far enough below `.scene-tag` that both stay legible

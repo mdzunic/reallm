@@ -91,6 +91,18 @@ export const FLOAT_DRIFT = 1.6;
 export const TOUCH_BUTTON_PX = 56;
 /** How far mouse aim pulls keyboard steering in flight (initial tuning, AC-29). */
 export const FLIGHT_AIM_ASSIST = 0.35;
+/**
+ * SPEC-036 §4.7: the touch stick reaches full speed at this share of
+ * `JOYSTICK_RADIUS_PX` (*initial tuning*). Thumbs rarely hold full deflection,
+ * and kiting needs full speed.
+ */
+export const TOUCH_FULL_TRAVEL = 0.6;
+/**
+ * SPEC-036 §4.2: a device with no hover and a finger for its pointer — a phone
+ * or a tablet. A touchscreen laptop with a mouse does not match, and boots on
+ * the keyboard until it is touched.
+ */
+export const COARSE_POINTER_QUERY = '(hover: none) and (pointer: coarse)';
 
 /** Only these two scenes are "gameplay" for the purposes of `preventDefault` (AC-6). */
 export const GAMEPLAY_SCENES: readonly SceneId[] = ['surface', 'flight'];
@@ -172,19 +184,56 @@ export function zoneFor(
 }
 
 /**
+ * SPEC-036 §4.2: the scheme `Input` boots on — `'touch'` when the device
+ * matches `COARSE_POINTER_QUERY`, so a phone never needs a lucky canvas touch
+ * to get its controls. `matches` defaults to `globalThis.matchMedia(q).matches`;
+ * with no `matchMedia` at all (node), the answer is `'keyboard'`.
+ */
+export function initialScheme(matches?: (query: string) => boolean): Scheme {
+  const probe = matches ?? browserMatches();
+  if (probe === null) return 'keyboard';
+  try {
+    return probe(COARSE_POINTER_QUERY) ? 'touch' : 'keyboard';
+  } catch {
+    return 'keyboard';
+  }
+}
+
+function browserMatches(): ((query: string) => boolean) | null {
+  const scope = globalThis as { matchMedia?: (query: string) => { matches: boolean } };
+  const matchMedia = scope.matchMedia;
+  if (typeof matchMedia !== 'function') return null;
+  return (query) => matchMedia.call(globalThis, query).matches;
+}
+
+/**
  * Radial dead zone and unit clamp, applied to whatever the drivers summed
  * (AC-8, AC-9). Inside the dead zone the vector is dropped entirely; outside it
  * the magnitude is rescaled from the edge of the zone, so a stick does not jump
  * to 0.15 the moment it leaves it. A digital (1, 1) still lands on length 1.
  */
 function shapeMove(x: number, y: number, out: { x: number; y: number }): void {
+  shapeRadial(x, y, 1, out);
+}
+
+/**
+ * SPEC-036 §4.7: the touch stick's response — the same `DEAD_ZONE`, then linear
+ * to full speed at `TOUCH_FULL_TRAVEL` of the radius rather than at the rim.
+ * 8 px of a 56 px stick (0.14) reads 0; 34 px (0.61) reads 1. Pure.
+ */
+export function shapeTouchStick(x: number, y: number, out: { x: number; y: number }): void {
+  shapeRadial(x, y, TOUCH_FULL_TRAVEL, out);
+}
+
+/** The dead zone, then linear from its edge to length 1 at `full`. */
+function shapeRadial(x: number, y: number, full: number, out: { x: number; y: number }): void {
   const magnitude = Math.hypot(x, y);
   if (magnitude <= DEAD_ZONE) {
     out.x = 0;
     out.y = 0;
     return;
   }
-  const scale = Math.min(1, (magnitude - DEAD_ZONE) / (1 - DEAD_ZONE)) / magnitude;
+  const scale = Math.min(1, (magnitude - DEAD_ZONE) / (full - DEAD_ZONE)) / magnitude;
   out.x = x * scale;
   out.y = y * scale;
 }
@@ -206,6 +255,8 @@ export class Input {
   readonly #schemeListeners = new Set<(scheme: Scheme) => void>();
   /** Raw, unshaped move per source; the state's `move` is the shaped sum. */
   readonly #rawMove = new Map<Scheme, { x: number; y: number }>();
+  /** Scratch for the touch source's shaped vector (SPEC-001 §7: no allocation). */
+  readonly #touchShaped = { x: 0, y: 0 };
 
   #enabled = true;
   #mode: InputMode = 'surface';
@@ -239,7 +290,10 @@ export class Input {
       move: { x: 0, y: 0 },
       aim: { screenX: 0, screenY: 0, ndcX: 0, ndcY: 0, hasPointer: false, dragging: false, dirX: 0, dirY: 0 },
       buttons,
-      scheme: 'keyboard',
+      // SPEC-036 §4.2: a phone boots on touch. The initial value is not a
+      // change, so no `input:schemeChanged` is emitted for it; scenes read the
+      // scheme on entry.
+      scheme: initialScheme(),
       get autoFire(): boolean {
         return self.#computeAutoFire();
       },
@@ -548,16 +602,31 @@ export class Input {
     );
   }
 
-  /** Sum the sources, shape the result, then blend in the flight aim-assist. */
+  /**
+   * Shape each source by its own response, sum, clamp to unit length, then
+   * blend in the flight aim-assist. The touch stick takes `shapeTouchStick`
+   * (SPEC-036 §4.7); every other source is summed first and keeps `shapeMove`.
+   */
   #applyMove(): void {
+    const touchRaw = this.#rawMove.get('touch');
     let x = 0;
     let y = 0;
     for (const raw of this.#rawMove.values()) {
+      if (raw === touchRaw) continue;
       x += raw.x;
       y += raw.y;
     }
     const move = this.#state.move;
     shapeMove(x, y, move);
+    const touch = this.#touchShaped;
+    shapeTouchStick(touchRaw?.x ?? 0, touchRaw?.y ?? 0, touch);
+    move.x += touch.x;
+    move.y += touch.y;
+    const length = Math.hypot(move.x, move.y);
+    if (length > 1) {
+      move.x /= length;
+      move.y /= length;
+    }
     if (!this.#assisting()) return;
     const aim = this.#state.aim;
     // The reticle's NDC is already in [-1, 1] with y up, which is exactly the

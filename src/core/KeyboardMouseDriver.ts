@@ -102,6 +102,7 @@ interface Binding {
   readonly target: EventTarget;
   readonly type: string;
   readonly handler: (event: Event) => void;
+  readonly capture: boolean;
 }
 
 /** Node has neither of these, so both default to nothing outside a browser. */
@@ -149,11 +150,16 @@ export class KeyboardMouseDriver implements InputDriver {
       this.#bind(win, 'keyup', (event) => this.#onKeyUp(event as KeyboardEvent));
       // E10: a key held when focus leaves would otherwise stay held forever.
       this.#bind(win, 'blur', () => this.#input.releaseAll());
-      // AC-24: *every* pointer move updates the aim, including the ones that
+      // SPEC-036 §4.2: every press sets the scheme from its `pointerType` —
+      // a tap on START, a menu button or a quick-bar slot counts, not only one
+      // that reaches the canvas. Capture phase, so a control that stops the
+      // event cannot hide the press from it.
+      this.#bind(win, 'pointerdown', (event) => this.#input.setScheme(schemeOf(event as PointerEvent)), true);
+      // AC-24: *every* mouse move updates the aim, including the ones that
       // pass over a HUD panel, so this sits above the canvas.
       this.#bind(win, 'pointermove', (event) => this.#onPointerMove(event as PointerEvent));
       this.#bind(win, 'pointerup', (event) => this.#onPointerUp(event as PointerEvent));
-      this.#bind(win, 'pointercancel', () => this.#input.releaseAll());
+      this.#bind(win, 'pointercancel', (event) => this.#onPointerCancel(event as PointerEvent));
     }
     if (doc !== null) {
       this.#bind(doc, 'visibilitychange', () => this.#onVisibility(doc));
@@ -191,7 +197,7 @@ export class KeyboardMouseDriver implements InputDriver {
 
   dispose(): void {
     for (const binding of this.#bindings.splice(0).reverse()) {
-      binding.target.removeEventListener(binding.type, binding.handler);
+      binding.target.removeEventListener(binding.type, binding.handler, binding.capture);
     }
     this.forget();
   }
@@ -282,10 +288,27 @@ export class KeyboardMouseDriver implements InputDriver {
     this.#input.releaseAction(action, SCHEME);
   }
 
+  /**
+   * SPEC-036 §4.1: a finger has no hover. A touch or pen move sets the scheme
+   * and nothing else — its position is a steering or firing gesture the touch
+   * layer owns, never a cursor — so only a mouse writes the hover aim.
+   */
   #onPointerMove(event: PointerEvent): void {
     const scheme = schemeOf(event);
     this.#input.setScheme(scheme); // AC-19, even while the input is suspended
+    if (event.pointerType !== 'mouse') return;
     this.#input.setAimPointer(event.clientX - this.#left, event.clientY - this.#top, scheme);
+  }
+
+  /**
+   * SPEC-036 §4.7: a cancelled mouse pointer drops its own holder and nothing
+   * else. A cancelled touch or pen pointer belongs to the touch layer, which
+   * releases exactly the role that finger had; blur, a hidden page and scene
+   * changes still release everything (E10).
+   */
+  #onPointerCancel(event: PointerEvent): void {
+    if (event.pointerType !== 'mouse') return;
+    this.#drop('fire', 'mouse:0');
   }
 
   #onVisibility(doc: EventTarget): void {
@@ -315,9 +338,9 @@ export class KeyboardMouseDriver implements InputDriver {
     this.#input.releaseAction(action, SCHEME);
   }
 
-  #bind(target: EventTarget, type: string, handler: (event: Event) => void): void {
-    target.addEventListener(type, handler);
-    this.#bindings.push({ target, type, handler });
+  #bind(target: EventTarget, type: string, handler: (event: Event) => void, capture = false): void {
+    target.addEventListener(type, handler, capture);
+    this.#bindings.push({ target, type, handler, capture });
   }
 }
 
