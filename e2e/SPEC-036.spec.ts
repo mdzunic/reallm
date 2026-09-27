@@ -726,6 +726,7 @@ for (const [width, height] of SHORT_LANDSCAPE) {
       await page.locator('[data-testid="touch-pause"]').tap();
       await expect(page.locator('[data-testid="pause-menu"]')).toBeVisible();
       await page.locator('[data-testid="pause-controls"]').tap();
+      await expect(page.locator('[data-testid="pause-sheet"]')).toBeVisible();
       // The touch sheet, the longer of the two: its rows are what crowd the actions.
       await expect(page.locator('[data-testid="pause-sheet"]')).toContainText('Drag on the left side');
       expect(await inViewport(page, 'pause-resume')).toBe(true);
