@@ -5,6 +5,7 @@
 import './style.css';
 import { registerSW } from 'virtual:pwa-register';
 import { createAudio } from '@/core/Audio';
+import { createBackGuard } from '@/core/BackGuard';
 import { EventBus, type GameEvents } from '@/core/Events';
 import { DEFAULT_SEED, Game, parseFlags, SIMULATED_RESTORE_MS } from '@/core/Game';
 import { Input } from '@/core/Input';
@@ -201,15 +202,61 @@ const game = new Game({
 });
 running = game;
 
-/** Escape and P toggle the pause menu of a pausable scene (SPEC-003 §4.5, D-38, SPEC-014 AC-82). */
-function onEscape(event: KeyboardEvent): void {
-  if (event.key !== 'Escape' && event.code !== 'KeyP') return;
-  // P while typing a name is a letter, not a pause (Escape stays a pause).
-  if (event.code === 'KeyP' && (event.target instanceof HTMLInputElement || event.target instanceof HTMLTextAreaElement)) return;
+/**
+ * SPEC-036 §4.4: the one back-stack every closable layer registers with, and
+ * the two ways into it. Escape asks the top layer first — a sheet, then the
+ * settings panel, then the pause menu, which resumes — and only with nothing
+ * open does the scene get the press (`SceneManager.back()`: the star map goes
+ * to the station, a running surface or flight pauses). A film or a reveal
+ * captures its keys before this listener and keeps E33's rule.
+ */
+const ui = uiLayers(uiRoot);
+
+/** Escape through the back-stack; P toggles pause (SPEC-003 §4.5, D-38, SPEC-014 AC-82). */
+function onKeyDown(event: KeyboardEvent): void {
+  if (event.key === 'Escape') {
+    if (ui.back() || game.scenes.back()) event.preventDefault();
+    return;
+  }
+  if (event.code !== 'KeyP') return;
+  // P while typing a name is a letter, not a pause (36-h).
+  if (event.target instanceof HTMLInputElement || event.target instanceof HTMLTextAreaElement) return;
+  if (game.scenes.current?.pausable !== true) return;
   if (game.scenes.paused) game.requestResume();
   else game.scenes.pause();
 }
-globalThis.addEventListener('keydown', onEscape);
+document.addEventListener('keydown', onKeyDown);
+
+/**
+ * §4.4: the history guard. While any scene but the menu is up — or the menu
+ * with a panel open — one history entry of the game's own sits in front of the
+ * page's, so a system Back (the edge swipe the left thumb rests on) routes
+ * exactly as Escape does instead of closing the game. At the menu root with
+ * nothing open it steps aside, and Back leaves the page.
+ *
+ * The scene it syncs with is the last one *entered*: a transition's tear-down
+ * releases layers with no scene current, and that is not "before the first
+ * scene", which is the only time the guard is never wanted.
+ */
+const backGuard = createBackGuard({
+  history: globalThis.history,
+  win: globalThis,
+  onBack: () => {
+    if (!ui.back()) game.scenes.back();
+  },
+});
+let guardScene: SceneId | null = null;
+const syncGuard = (): void => backGuard.sync(guardScene, ui.backStack.depth);
+const releaseGuardSync = ui.backStack.onChange(syncGuard);
+const guardOwner = {};
+events.on(
+  'scene:entered',
+  ({ id }) => {
+    guardScene = id;
+    syncGuard();
+  },
+  guardOwner,
+);
 
 if (import.meta.env.DEV) {
   /** `go()` with the params typed away, for the dev-only URL flag and test bridge. */
@@ -264,7 +311,10 @@ if (import.meta.env.DEV) {
   // …and, until that reload lands, a second loop rendering over the first
   // (02-d, AC-61).
   import.meta.hot?.dispose(() => {
-    globalThis.removeEventListener('keydown', onEscape);
+    document.removeEventListener('keydown', onKeyDown);
+    releaseGuardSync();
+    events.releaseOwner(guardOwner);
+    backGuard.dispose();
     game.stop();
   });
 }

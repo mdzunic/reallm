@@ -1,8 +1,9 @@
 // The quick-slot picker (SPEC-028 §4.6): a small panel above the bar listing
 // every carried item eligible for one quick slot, plus Empty. The scene holds
 // the simulation while it is open (a `#uiHolds` hold, SPEC-026) and closes it
-// on Escape, a tap outside, or the scene pausing — all through the returned
-// close function, which is idempotent.
+// on Escape or the system Back (its back-stack entry, SPEC-036 §4.4), a tap
+// outside, or the scene pausing — all through the returned close function,
+// which is idempotent.
 import type { ItemId, QuickSlot } from '@/data/index';
 import { el, h, testId, type UiRoot } from '@/ui/dom';
 import { itemIcon } from '@/ui/ItemIcon';
@@ -29,23 +30,16 @@ export function openQuickPicker(
   root.setAttribute('aria-label', `Choose the ${slot} slot`);
 
   let open = true;
+  let releaseBack: (() => void) | null = null;
   const close = (): void => {
     if (!open) return;
     open = false;
-    globalThis.removeEventListener('keydown', onKey, true);
+    releaseBack?.();
     globalThis.removeEventListener('pointerdown', onOutside, true);
     root.remove();
     onClose();
   };
 
-  // Escape closes and stops there, captured the way the map does it, so the
-  // pause handler in main.ts never sees the press (§4.6).
-  const onKey = (event: KeyboardEvent): void => {
-    if (event.key !== 'Escape') return;
-    event.preventDefault();
-    event.stopPropagation();
-    close();
-  };
   // A tap that lands outside the picker dismisses it.
   const onOutside = (event: Event): void => {
     if (event.target instanceof Node && root.contains(event.target)) return;
@@ -78,7 +72,9 @@ export function openQuickPicker(
   );
 
   ui.mount(root, 'panel');
-  globalThis.addEventListener('keydown', onKey, true);
+  // Escape closes the picker and stops there: it is the top of the
+  // back-stack, so the pause never sees the press (§4.6, SPEC-036 §4.4).
+  releaseBack = ui.pushBack(close);
   globalThis.addEventListener('pointerdown', onOutside, true);
   return close;
 }

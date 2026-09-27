@@ -44,6 +44,9 @@ export function choiceSheet(
     // a synthetic `.click()`) would re-run a handler, and for depart that
     // callback *is* the fuel charge. The flag settles first, the buttons grey.
     let settled = false;
+    // SPEC-036 §4.4: while it is up the sheet is the top of the back-stack, so
+    // Escape and the system Back cancel it — and only it.
+    let releaseBack: (() => void) | null = null;
     const close = (answer: 'primary' | 'secondary' | null): void => {
       if (settled) return;
       settled = true;
@@ -51,6 +54,7 @@ export function choiceSheet(
       cancel.disabled = true;
       if (second !== null) second.disabled = true;
       backdrop.remove();
+      releaseBack?.();
       previous?.focus();
       resolve(answer);
     };
@@ -93,9 +97,6 @@ export function choiceSheet(
         ? testId(h('p', { class: 'sheet-reason shop-reason' }, reason), `${secondary.testid}-reason`)
         : null,
     );
-    sheet.addEventListener('keydown', (event) => {
-      if ((event as KeyboardEvent).key === 'Escape') close(null);
-    });
     // A tap outside the sheet is a cancel; a tap inside must not bubble to it.
     backdrop.addEventListener('click', (event) => {
       if (event.target === backdrop) close(null);
@@ -103,6 +104,7 @@ export function choiceSheet(
 
     backdrop.append(sheet);
     ui.mount(backdrop, 'overlay');
+    releaseBack = ui.pushBack(() => close(null));
     confirm.focus();
   });
 }

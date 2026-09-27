@@ -6,6 +6,7 @@
 // `#ui` itself is `pointer-events: none`; anything interactive opts back in
 // through the `.panel`/`pointer-events: auto` CSS, so the canvas keeps
 // receiving gameplay pointers while panels receive theirs.
+import { BackStack } from '@/core/BackGuard';
 import {
   pruneToasts,
   pushToast,
@@ -79,6 +80,12 @@ export type UiLayer = (typeof LAYERS)[number];
  */
 export class UiRoot {
   readonly root: HTMLElement;
+  /**
+   * SPEC-036 §4.4: the layers Escape and the system Back close, top first.
+   * Every panel, sheet and card that closes on "back" registers here while it
+   * is open, and keeps no Escape listener of its own.
+   */
+  readonly backStack = new BackStack();
   readonly #layers: Record<UiLayer, HTMLDivElement>;
   readonly #flushables = new Set<Flushable>();
   readonly #fade: HTMLDivElement;
@@ -102,6 +109,16 @@ export class UiRoot {
     this.#toastRack.setAttribute('role', 'status');
     this.#toastRack.setAttribute('aria-live', 'polite');
     this.#layers.overlay.append(this.#toastRack, this.#fade);
+  }
+
+  /** §4.4: registers an open layer; the returned release is idempotent. */
+  pushBack(onBack: () => void): () => void {
+    return this.backStack.push(onBack);
+  }
+
+  /** §4.4: the top layer's `onBack`; false when no layer is open. */
+  back(): boolean {
+    return this.backStack.back();
   }
 
   mount(node: HTMLElement, layer: UiLayer): void {

@@ -36,8 +36,9 @@ function equippedIn(save: Save, item: Item): ItemId | null {
 
 /**
  * §4.16: mount the card in the overlay layer over a backdrop. Resolves when
- * it closes — Escape, the backdrop, Cancel, or a completed purchase (which
- * refreshes the shop through `onChanged`).
+ * it closes — Escape or the system Back (its back-stack entry, SPEC-036
+ * §4.4), the backdrop, Cancel, or a completed purchase (which refreshes the
+ * shop through `onChanged`).
  */
 export function openGearCard(id: ItemId, deps: GearCardDeps): Promise<void> {
   return new Promise((resolve) => {
@@ -51,20 +52,16 @@ export function openGearCard(id: ItemId, deps: GearCardDeps): Promise<void> {
     const close = (): void => {
       if (!open) return;
       open = false;
-      document.removeEventListener('keydown', onKey, true);
+      releaseBack();
       backdrop.remove();
       resolve();
-    };
-    const onKey = (event: KeyboardEvent): void => {
-      if (event.key !== 'Escape') return;
-      event.preventDefault();
-      event.stopPropagation();
-      close();
     };
     backdrop.addEventListener('click', (event) => {
       if (event.target === backdrop) close();
     });
-    document.addEventListener('keydown', onKey, true);
+    // SPEC-036 §4.4: Escape and the system Back close the card through the
+    // back-stack — and a buy sheet opened over it closes first.
+    const releaseBack = deps.ui.pushBack(() => close());
 
     const picture = itemIcon(id, 256);
     picture.classList.add('gear-card-picture');

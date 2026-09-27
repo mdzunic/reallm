@@ -1,9 +1,11 @@
 // The pause menu of a pausable scene (SPEC-003 §4.5, SPEC-014 §4.7). It is a
 // UI layer inside the scene, never a scene of its own (D-1), and the game
 // leaves it only on an explicit action: a tap on Resume, or Enter / Space
-// while it holds focus — which a focused button gives us for free. Escape and
-// P are handled by the composition root, which toggles pause and resume; the
-// touch pause button and the app-hidden path arrive through the scene (AC-82).
+// while it holds focus — which a focused button gives us for free. While it is
+// open it is an entry on the back-stack (SPEC-036 §4.4), so Escape and the
+// system Back resume through the same path Resume does, once every layer above
+// it has closed; P is the composition root's toggle, and the touch pause
+// button and the app-hidden path arrive through the scene (AC-82).
 //
 // §4.7: Resume, Settings (the shared panel), Controls (a scheme-aware
 // cheat-sheet, SPEC-005), Save & Quit (flush the save, back to the menu).
@@ -93,10 +95,14 @@ export class PauseMenu {
   readonly #settings: SettingsPanel;
   readonly #skip: { readonly button: HTMLButtonElement; readonly hooks: PauseSkip } | null;
   readonly #recall: { readonly button: HTMLButtonElement; readonly hooks: PauseRecall } | null;
+  readonly #onResume: () => void;
+  /** SPEC-036 §4.4: this menu's back-stack entry while it is open. */
+  #releaseBack: (() => void) | null = null;
   #quitting = false;
 
   constructor(deps: PauseDeps, onResume: () => void, skip?: PauseSkip, recall?: PauseRecall) {
     this.#deps = deps;
+    this.#onResume = onResume;
     // SPEC-031 §4.4: the pause menu wears the console frame too — SYSTEM HOLD
     // on the channel — while staying a UI layer inside its scene, never a
     // scene of its own (D-1). Hidden until `show()`.
@@ -193,6 +199,8 @@ export class PauseMenu {
       recall.button.disabled = !allowed;
     }
     this.#root.classList.add('is-visible');
+    // SPEC-036 §4.4: Escape and the system Back resume, as Resume does.
+    this.#releaseBack ??= uiLayers(this.#deps.uiRoot).pushBack(() => this.#onResume());
     this.#resume.focus();
   }
 
@@ -200,9 +208,13 @@ export class PauseMenu {
     this.#root.classList.remove('is-visible');
     this.#controls.classList.add('is-hidden');
     this.#settings.hide();
+    this.#releaseBack?.();
+    this.#releaseBack = null;
   }
 
   dispose(): void {
+    this.#releaseBack?.();
+    this.#releaseBack = null;
     this.#settings.dispose();
     this.#screen.dispose();
   }
