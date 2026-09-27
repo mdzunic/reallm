@@ -1403,7 +1403,23 @@ export class SurfaceScene extends UiScene<'surface'> {
     info['camDistance'] = Math.round(this.#camDistance * 100) / 100;
     info['fogNear'] = Math.round(this.#fogNear * 100) / 100;
     info['occluders'] = this.#view?.fadedOccluders ?? 0;
+    // SPEC-035 §4.3: the surface's own bloom threshold, which the shared default
+    // (0.85) is not — a whiteout is otherwise a claim about a post uniform
+    // nothing outside the chain can read.
+    info['bloomThreshold'] = this.#view?.look.bloomThreshold ?? DEFAULT_LOOK.bloomThreshold;
     info['ramp'] = this.#ramp ? 1 : 0;
+    // §4.7: what the ramp is supposed to be holding down — the ambient weather
+    // phase and how many rushers are alive. Without these the ramp is a claim
+    // about two runtimes nothing outside the scene can see.
+    info['weatherPhase'] = this.#weather?.phase ?? 'calm';
+    let rushers = 0;
+    if (this.#world !== null) {
+      for (let i = 0; i < this.#world.enemies.size; i++) {
+        const e = this.#world.enemies.at(i);
+        if (e.state !== 'dead' && e.def.archetype === 'rusher') rushers++;
+      }
+    }
+    info['rushers'] = rushers;
     // SPEC-028 §4.9: the weapon in hand and the quick-slot counts.
     const combat = this.#combat;
     const save = this.#save;
@@ -2571,6 +2587,21 @@ export class SurfaceScene extends UiScene<'surface'> {
       strip.append(testId(h('button', { class: 'hud-button', type: 'button', click: guarded }, label), id));
     };
     button('surface-hurt', 'Hurt me', () => this.#combat?.damagePlayer(60, { kind: 'fall' }));
+    // SPEC-035 §4.6: a hit from off screen, which is the only kind that draws an
+    // edge wedge — a skitter biting the player's ankle is inside the 8 m the
+    // marker deliberately skips.
+    button('surface-hurt-from', 'Hit from behind', () => {
+      const world = this.#world;
+      if (world === null || !world.player.alive) return;
+      const p = world.player;
+      const off = 28;
+      this.#combat?.damagePlayer(
+        12,
+        { kind: 'enemy', enemyId: 'dust_skitter' },
+        false,
+        { x: p.x - Math.sin(CAMERA_YAW) * off, z: p.z - Math.cos(CAMERA_YAW) * off },
+      );
+    });
     button('surface-goto-pad', 'To pad', () => {
       const world = this.#world;
       const pad = this.#pad;
@@ -2618,6 +2649,40 @@ export class SurfaceScene extends UiScene<'surface'> {
       if (best === null) return;
       world.player.x = best.x;
       world.player.z = best.z;
+    });
+    // SPEC-035 §4.5: the fade needs a prop between the camera and the salvager,
+    // which is a metre-precise placement at a fixed 55°/45° rig — not something
+    // a QA session can reach by walking. This walks the view's own candidate
+    // list and stops at the first spot the pure `occludes` says is behind one.
+    button('surface-goto-occluder', 'Behind prop', () => {
+      const world = this.#world;
+      const view = this.#view;
+      if (world === null || view === null || !world.player.alive) return;
+      const p = world.player;
+      const from = { x: p.x, z: p.z };
+      // The camera always sits this way from its target, so "behind" is the
+      // opposite bearing.
+      const ux = Math.sin(CAMERA_YAW);
+      const uz = Math.cos(CAMERA_YAW);
+      for (const prop of view.occluderProps) {
+        for (const gap of [0.5, 1, 2, 3, 5, 8]) {
+          const off = prop.radius + gap;
+          const x = prop.x - ux * off;
+          const z = prop.z - uz * off;
+          if (world.obstacles.hitsCircle(x, z, p.radius)) continue;
+          p.x = x;
+          p.z = z;
+          this.#camTarget.x = x;
+          this.#camTarget.z = z;
+          this.#placeCamera(0, 0);
+          if (occludes(this.camera.position, p, prop)) return;
+        }
+      }
+      p.x = from.x;
+      p.z = from.z;
+      this.#camTarget.x = from.x;
+      this.#camTarget.z = from.z;
+      this.#placeCamera(0, 0);
     });
     button('surface-goto-edge', 'To edge', () => {
       const world = this.#world;
