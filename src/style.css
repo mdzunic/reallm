@@ -4313,6 +4313,10 @@ html.reduce-motion .screen-body > * {
     display: grid;
     grid-template-columns: repeat(2, minmax(150px, 1fr));
     gap: 8px 10px;
+    /* The column layout's 220 px floor would let the row squeeze the grid
+       below its two 150 px columns, and the second would run under the sheet
+       (the touch sheet at 667 px). Its floor here is what the columns need. */
+    min-width: min-content;
   }
 
   .pause-sheet {
