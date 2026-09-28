@@ -45,7 +45,7 @@ const HOLD_OBJECTIVE = 'Holding pattern — the objective is not done';
 
 /** SPEC-037 §4.1: the thumb arc's three cells, as `hud.arc` exposes them. */
 export interface ThumbArc {
-  /** The corner cell — empty until SPEC-038's DASH, and taking no pointer events while it is. */
+  /** The corner cell — SPEC-038's DASH; it takes no pointer events while it is empty. */
   readonly primary: HTMLElement;
   /** Where the touch layer mounts USE (`TouchControls.mountButton`). */
   readonly action: HTMLElement;
@@ -256,7 +256,7 @@ export class Hud {
     this.#root.append(this.#vignette, this.#static, this.#hitDirLayer, tl, this.#tr, tc, bl, this.#br, this.#bc, this.#interact);
     if (mode === 'surface') {
       // SPEC-037 §4.1: the thumb arc — built always, shown on the touch scheme
-      // only. `arc-primary` is SPEC-038's DASH cell and stays empty here.
+      // only. `arc-primary` is SPEC-038's DASH cell; the touch layer mounts it.
       const primary = testId(el('div', 'arc-primary'), 'arc-primary');
       const action = testId(el('div', 'arc-action'), 'arc-action');
       const slots = testId(el('div', 'arc-slots'), 'arc-slots');
@@ -524,6 +524,17 @@ export class Hud {
         // SPEC-028 §4.5: one renderer for both halves of the bar; it touches
         // only elements whose text, class or custom property changed.
         this.#quickBar?.render(m.loadout, m.quick, this.#scheme);
+        return;
+      }
+      case 'dash': {
+        // SPEC-038 §4.1: one ring, drawn on both controls — the keyboard's
+        // `qb-dash` and the arc's corner cell, whose DASH button inherits it.
+        this.#quickBar?.setDash(m.dash);
+        const primary = this.arc?.primary;
+        if (primary !== undefined) {
+          primary.style.setProperty('--cd', Math.max(0, Math.min(1, m.dash)).toFixed(3));
+          primary.classList.toggle('is-cooling', m.dash > 0);
+        }
         return;
       }
       case 'interact':

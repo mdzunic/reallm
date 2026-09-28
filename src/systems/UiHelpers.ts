@@ -666,6 +666,8 @@ export interface HudModel {
   interactAction: boolean;
   /** SPEC-037 §4.2: the wallet strip at full opacity (`walletLit`), else 0.6. */
   walletLit: boolean;
+  /** SPEC-038 §4.1: the dash's cooldown ring — 1 at the press, 0 when ready. */
+  dash: number;
   flight?: {
     shield: [number, number];
     hull: [number, number];
@@ -698,6 +700,7 @@ export function createHudModel(): HudModel {
     interact: null,
     interactAction: false,
     walletLit: false,
+    dash: 0,
   };
 }
 
