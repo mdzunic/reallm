@@ -469,6 +469,70 @@ describe('Assets.release() (SPEC-040 §4.6, AC-23)', () => {
     expect(() => assets.texture(SAND)).toThrow(/unknown texture/);
   });
 
+  /** A texture loader that holds `url` until the returned `finish` is called. */
+  function holdTexture(fakes: Fakes, url: string): () => void {
+    let finish: () => void = () => {};
+    const gate = new Promise<void>((resolve) => (finish = resolve));
+    const texture = fakes.texture.loadAsync;
+    fakes.texture = {
+      loadAsync: async (requested: string) => {
+        if (requested === url) await gate;
+        return texture(requested);
+      },
+    };
+    return finish;
+  }
+
+  const PLANET_URLS = ['assets/models/props/desert_rock_a.glb', 'assets/textures/ground/sand_albedo.webp'];
+
+  it('fetches a set loaded again straight after its release, before the release has run (40-j)', async () => {
+    const fakes = fakeLoaders();
+    const assets = new Assets(fakes);
+    await assets.load(PLANET);
+    fakes.requests.length = 0;
+    const release = assets.release(PLANET);
+    const again = assets.load(PLANET);
+    await Promise.all([release, again]);
+    expect(fakes.requests).toEqual(PLANET_URLS);
+    expect(assets.hasModel(ROCK)).toBe(true);
+    expect(assets.texture(SAND)).toBeInstanceOf(THREE.Texture);
+  });
+
+  it('fetches a set loaded again straight after its release while another set is loading (40-j)', async () => {
+    const fakes = fakeLoaders();
+    const assets = new Assets(fakes);
+    await assets.load(PLANET);
+    fakes.requests.length = 0;
+    // The station's own set, say, still on its way when the planet is left
+    // and landed on again: the release and the new load both queue behind it.
+    const finish = holdTexture(fakes, 'assets/textures/grid.png');
+    const other = assets.load(MANIFEST);
+    const release = assets.release(PLANET);
+    const again = assets.load(PLANET);
+    finish();
+    await Promise.all([other, release, again]);
+    expect(fakes.requests.filter((url) => PLANET_URLS.includes(url))).toEqual(PLANET_URLS);
+    expect(assets.hasModel(ROCK)).toBe(true);
+    expect(assets.texture(SAND)).toBeInstanceOf(THREE.Texture);
+    expect(assets.hasModel(CRATE)).toBe(true);
+  });
+
+  it('fetches a set loaded again after a release that was waiting on that set’s own load (40-i, 40-j)', async () => {
+    const fakes = fakeLoaders();
+    const finish = holdTexture(fakes, 'assets/textures/ground/sand_albedo.webp');
+    const assets = new Assets(fakes);
+    const first = assets.load(PLANET);
+    const release = assets.release(PLANET);
+    const again = assets.load(PLANET);
+    finish();
+    await Promise.all([first, release, again]);
+    // The first load's set is freed by the release it was left with, and the
+    // load asked for after that release brings it back.
+    expect(fakes.requests.filter((url) => url === PLANET_URLS[0])).toHaveLength(2);
+    expect(assets.hasModel(ROCK)).toBe(true);
+    expect(assets.texture(SAND)).toBeInstanceOf(THREE.Texture);
+  });
+
   it('waits for a failed load too, and still releases what did arrive', async () => {
     setLogSink(silent);
     const fakes = fakeLoaders();

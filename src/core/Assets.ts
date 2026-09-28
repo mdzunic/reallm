@@ -180,6 +180,11 @@ export class Assets {
   #textureLoader: AssetLoaders['texture'] | null = null;
   #inflight: Promise<void> | null = null;
   #inflightManifest: AssetManifest | null = null;
+  /**
+   * SPEC-040 §4.6: settles once every release still waiting for a load has
+   * run, and never rejects; `null` when none is waiting.
+   */
+  #releasing: Promise<void> | null = null;
   #loaded = false;
   #maxAnisotropy = 1;
   /** `0` until a preset says otherwise, which means "no cap" (AC-8). */
@@ -200,6 +205,11 @@ export class Assets {
    * asks for what is missing (D-30); concurrent calls share one promise.
    */
   load(manifest: AssetManifest, onProgress?: (done: number, total: number) => void): Promise<void> {
+    // SPEC-040 40-j: a release still waiting for a load will free what that
+    // load brings. A load asked for after the release must end with its set in
+    // the cache, so it queues behind the release instead of sharing the pass
+    // the release is waiting for.
+    if (this.#releasing !== null) return this.#releasing.then(() => this.load(manifest, onProgress));
     if (this.#inflight) {
       // Concurrent calls for the same manifest share the promise (D-30); a
       // *different* manifest queues behind the current pass so its items are
@@ -223,12 +233,31 @@ export class Assets {
    * bounds GPU memory to the planet in play.
    *
    * A release issued while a load is in flight waits for that load to settle
-   * first, so it frees what the load brought rather than racing it (40-i). Ids
+   * first, so it frees what the load brought rather than racing it (40-i). A
+   * load asked for while it waits runs after it, and fetches again (40-j). Ids
    * the cache does not hold are skipped, and `loaded` stays as it was. The
    * caller must be done with every clone of a released model.
    */
   async release(manifest: Pick<AssetManifest, 'models' | 'textures'>): Promise<void> {
-    if (this.#inflight !== null) await this.#inflight.catch(() => undefined);
+    const inflight = this.#inflight;
+    if (inflight === null) {
+      this.#forget(manifest);
+      return;
+    }
+    const earlier = this.#releasing ?? Promise.resolve();
+    const done = Promise.all([earlier, inflight.catch(() => undefined)]).then(() => this.#forget(manifest));
+    const settled = done.catch(() => undefined);
+    this.#releasing = settled;
+    // Registered before any load can queue behind `settled`, so it clears the
+    // slot before those loads look at it again.
+    void settled.then(() => {
+      if (this.#releasing === settled) this.#releasing = null;
+    });
+    return done;
+  }
+
+  /** Disposes and forgets the listed ids the cache holds (§4.6). */
+  #forget(manifest: Pick<AssetManifest, 'models' | 'textures'>): void {
     for (const id of Object.keys(manifest.models)) {
       const entry = this.#models.get(id);
       if (entry === undefined) continue;
