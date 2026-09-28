@@ -3672,7 +3672,20 @@ html.debug .scene-tag {
   bottom: max(18px, env(safe-area-inset-bottom));
   display: flex;
   gap: 6px;
+  /* One row that fits the screen: a strip wider than it shrinks its buttons
+     and ellipsises their labels rather than wrapping them onto a second line —
+     which grew the row up under the bottom-centre bar — or running off the left
+     edge (SPEC-038 added two). */
+  max-width: calc(100% - 2 * max(12px, env(safe-area-inset-right)));
   pointer-events: auto;
+}
+
+.hud-debug > button.hud-button {
+  min-width: 0;
+  flex: 0 1 auto;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
 }
 
 button.hud-button {

@@ -83,7 +83,7 @@ test.describe('keyboard/mouse driver against the real DOM', () => {
     expect(inMenu).toBe(false);
   });
 
-  test('mouse fire, the reserved right button, and aim NDC (AC-23, AC-24, AC-26)', async ({ page }) => {
+  test('mouse fire, the right button’s dash, and aim NDC (AC-23, AC-24, AC-26; SPEC-038 §4.1)', async ({ page }) => {
     await start(page, '/?scene=surface');
     await settle(page, 'surface');
 
@@ -100,13 +100,17 @@ test.describe('keyboard/mouse driver against the real DOM', () => {
       window.dispatchEvent(new PointerEvent('pointerup', { pointerType: 'mouse', button: 0, clientX: 10, clientY: 10, bubbles: true, cancelable: true }));
       const upFire = window.__reallm.input().buttons['fire']?.down;
 
+      // SPEC-038 §4.1 ends AC-23's reservation: button 2 holds `dash`, and
+      // nothing else, while the context menu stays prevented.
       canvas.dispatchEvent(new PointerEvent('pointerdown', { pointerType: 'mouse', button: 2, clientX: 10, clientY: 10, bubbles: true, cancelable: true }));
-      const anyDownAfterButton2 = Object.values(window.__reallm.input().buttons).some((b) => b.down);
+      const buttons = window.__reallm.input().buttons;
+      const downAfterButton2 = Object.keys(buttons).filter((action) => buttons[action]?.down === true);
       const ctx = new MouseEvent('contextmenu', { bubbles: true, cancelable: true });
       canvas.dispatchEvent(ctx);
       window.dispatchEvent(new PointerEvent('pointerup', { pointerType: 'mouse', button: 2, clientX: 10, clientY: 10, bubbles: true, cancelable: true }));
+      const dashAfterRelease = window.__reallm.input().buttons['dash']?.down;
 
-      return { aim, downFire, upFire, anyDownAfterButton2, ctxPrevented: ctx.defaultPrevented };
+      return { aim, downFire, upFire, downAfterButton2, dashAfterRelease, ctxPrevented: ctx.defaultPrevented };
     });
 
     expect(result.aim.hasPointer).toBe(true);
@@ -114,7 +118,8 @@ test.describe('keyboard/mouse driver against the real DOM', () => {
     expect(result.aim.ndcY).toBeGreaterThan(0.9);
     expect(result.downFire).toBe(true);
     expect(result.upFire).toBe(false);
-    expect(result.anyDownAfterButton2).toBe(false);
+    expect(result.downAfterButton2).toEqual(['dash']);
+    expect(result.dashAfterRelease).toBe(false);
     expect(result.ctxPrevented).toBe(true);
   });
 
