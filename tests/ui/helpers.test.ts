@@ -1316,3 +1316,18 @@ describe('one damage formula (SPEC-039 §4.7)', () => {
     expect(computePlayerStats('marine', attributes, 1, 'weapon_lithium').damage).toBe(54.6);
   });
 });
+
+describe('the class card and the Quartermaster line (SPEC-039 §4.3, §4.5)', () => {
+  it("prints the classes' passives off the table: the Engineer's refit and the Marine's ×1.10", () => {
+    expect(passiveText(CLASSES.engineer.passive)).toBe('−15% ship and companion prices · +25% companion effect');
+    expect(passiveText(CLASSES.marine.passive)).toBe('+10% damage · +20 max HP');
+  });
+
+  it('the Quartermaster reads −5 / −10 / −15 % shop prices, and never craft', () => {
+    expect(COMPANIONS.quartermaster.levels.map((effect) => companionEffectText(effect))).toEqual([
+      '+100 cargo · −5% shop prices',
+      '+200 cargo · −10% shop prices',
+      '+300 cargo · −15% shop prices',
+    ]);
+  });
+});

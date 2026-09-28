@@ -328,7 +328,7 @@ export class Combat {
   #nextEnemyId = 1;
   #aimedThisStep = false;
   #lastShotAt = -Infinity;
-  /** SPEC-039 §4.5: world time of the last weather tick that landed. */
+  /** SPEC-039 §4.5: world time of the last weather damage past the immunity check. */
   #weatherHitAt = -Infinity;
   #signatureDrops = 0;
   #signatureFallbacks = 0;
