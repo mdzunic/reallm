@@ -30,6 +30,7 @@ import {
   type CompanionId,
   type ConsumableEffect,
   type DamageSource,
+  type Difficulty,
   type Enemy,
   type EnemyId,
   type ExplosiveEffect,
@@ -54,8 +55,19 @@ import type { EnemyEntity } from '@/entities/Enemy';
 import type { FollowerEntity } from '@/entities/Follower';
 import type { PlayerEntity } from '@/entities/Player';
 import type { ProjectileEntity } from '@/entities/Projectile';
+import {
+  HIT_FOLLOWER,
+  HIT_PLAYER,
+  makeTelegraph,
+  resetTelegraph,
+  ringRadius,
+  TELEGRAPH_CAPACITY,
+  telegraphCovers,
+  type TelegraphEntity,
+} from '@/entities/Telegraph';
 import type { ArenaState, ObstacleGrid } from '@/entities/World';
-import { updateEnemy, type AiHooks } from '@/systems/EnemyAi';
+import { isDashing } from '@/systems/Dash';
+import { updateEnemy, type AiHooks, type WindupKind } from '@/systems/EnemyAi';
 import { Loadout } from '@/systems/Loadout';
 import { updateProjectiles, type ProjectileHooks } from '@/systems/Projectiles';
 
@@ -119,6 +131,17 @@ export const LOOT_SCATTER_MAX = 1.5;
 export const ELITE_SCALE = 1.3;
 export const ELITE_SPEED_MULT = 1.1;
 export const ELITE_XP_MULT = 3;
+
+// ------------------------------------------------ SPEC-038 (initial tuning)
+
+/** §4.6: on casual every windup and every telegraph's lead time lasts ×1.25. */
+export const CASUAL_WINDUP_MULT = 1.25;
+/** §4.6: on casual weather damage is ×0.7, after `hazardResist`. */
+export const CASUAL_WEATHER_MULT = 0.7;
+/** §4.7: the most auto-fire leads a strafing target by, in metres. */
+export const AUTO_LEAD_MAX = 3;
+/** §4.2: a telegraph hit knocks the player this far — from a centre, or across a lane. */
+export const TELEGRAPH_KNOCKBACK = 1.0;
 
 // --------------------------------------------------------------- pure pieces
 
@@ -187,11 +210,11 @@ export function rollPlayerDamage(weapon: WeaponDef, stats: PlayerStats, rng: Rng
  * `EnemyEntity.damage` stays the def value (times boss phase multipliers) —
  * and casual difficulty softens incoming damage by ×0.7.
  */
-export function enemyHitDamage(enemy: EnemyEntity, stats: PlayerStats, difficulty: 'casual' | 'normal'): number {
+export function enemyHitDamage(enemy: EnemyEntity, stats: PlayerStats, difficulty: Difficulty): number {
   return hitDamage(enemy.damage, enemy.elite, stats, difficulty);
 }
 
-function hitDamage(base: number, elite: boolean, stats: PlayerStats, difficulty: 'casual' | 'normal'): number {
+function hitDamage(base: number, elite: boolean, stats: PlayerStats, difficulty: Difficulty): number {
   const raw =
     base * (elite ? TUNING.ELITE_DMG_MULT : 1) * (difficulty === 'casual' ? 0.7 : 1) * (1 - damageReduction(stats.armor));
   return Math.max(1, Math.round(raw));
@@ -239,6 +262,12 @@ export interface CombatWorld {
    * projectiles clamp to it; absent means unbounded (D-13, flight/fixtures).
    */
   bounds?: number;
+  /**
+   * SPEC-038 §4.6: every windup and telegraph lead time is multiplied by this.
+   * `Combat` sets it each step from the save's difficulty — 1.25 on casual,
+   * else 1; absent reads as 1.
+   */
+  windupMult?: number;
 }
 
 /** What `killEnemy` rolled; SPEC-012 drains these into pickup entities (§4.7). */
@@ -272,6 +301,11 @@ export class Combat {
   /** SPEC-029 §4.7: mines and charges, pooled at 8; cleared with the scene. */
   readonly deployables: Pool<DeployableEntity> = new Pool(makeDeployable);
   /**
+   * SPEC-038 §4.2: the ground telegraphs, at most `TELEGRAPH_CAPACITY` live;
+   * cleared with the scene, like the deployables.
+   */
+  readonly telegraphs: Pool<TelegraphEntity> = new Pool(makeTelegraph);
+  /**
    * SPEC-029 §4.4: the scene mirrors `settings.weaponAutoSwap` here — Combat
    * has no settings port, and the test harnesses set it directly.
    */
@@ -282,7 +316,6 @@ export class Combat {
   readonly #progression: ProgressionPort;
   readonly #events: EventBus<GameEvents>;
   readonly #rng: { loot: Rng; ai: Rng; combat: Rng };
-  readonly #difficulty: 'casual' | 'normal';
   readonly #hash = new SpatialHash();
 
   #weatherMoveMult = 1;
@@ -318,7 +351,8 @@ export class Combat {
     this.#progression = progression;
     this.#events = events;
     this.#rng = rng;
-    this.#difficulty = save.meta.difficulty;
+    // SPEC-038 §4.6: no cached difficulty — every hit, windup and storm tick
+    // reads `save.meta.difficulty`, so a switch in Settings lands on the next.
     // SPEC-028 §3: the scene may hand over the loadout it drives; the test
     // harnesses that pass none get one built from the save.
     this.loadout = loadout ?? new Loadout(save, events);
@@ -349,13 +383,20 @@ export class Combat {
     }, this);
 
     this.#aiHooks = {
-      meleeHit: (e) => this.#meleeHit(e),
+      meleeHit: (e, damageMult, knockback) => this.#meleeHit(e, damageMult, knockback),
       fireProjectile: (e, dirX, dirZ, speed, radius, range) =>
         this.#spawnEnemyProjectile(e, dirX, dirZ, speed, radius, range),
       summonRing: (e, enemy, count, radius) => this.#summonRing(e, enemy, count, radius),
       phaseStarted: (e, phase) => this.#events.emit('boss:phase', { boss: e.def.id, phase }),
       shockwave: (e, radius) => this.#shockwave(e, radius),
       toast: (text) => this.#events.emit('ui:toast', { text }),
+      windup: (e, kind) => this.#windup(e, kind),
+      telegraphLine: (e, length, width, windup, lockIn, damageMult, bodyResolved) =>
+        this.#telegraphLine(e, length, width, windup, lockIn, damageMult, bodyResolved),
+      telegraphCircle: (e, x, z, radius, windup, damageMult) => this.#telegraphCircle(e, x, z, radius, windup, damageMult),
+      telegraphRing: (e, x, z, ringMax, ringSpeed, band, windup, damageMult) =>
+        this.#telegraphRing(e, x, z, ringMax, ringSpeed, band, windup, damageMult),
+      cancelTelegraphs: (e) => this.#cancelTelegraphs(e),
     };
     this.#projectileHooks = {
       hitEnemy: (p, e) => this.#projectileHitEnemy(p, e),
@@ -446,8 +487,12 @@ export class Combat {
     if (source.kind === 'weather' && time < p.hazardImmuneUntil) return;
     // SPEC-012 §4.6: weather damage is reduced by hazardResist before the
     // fractional accumulator. The resist comes from a single armor slot capped
-    // at 0.75 (data/items.ts), so the product can never go negative.
-    const incoming = source.kind === 'weather' ? amount * (1 - this.#world.stats.hazardResist) : amount;
+    // at 0.75 (data/items.ts), so the product can never go negative. SPEC-038
+    // §4.6: casual takes ×0.7 of what is left, read live.
+    const incoming =
+      source.kind === 'weather'
+        ? amount * (1 - this.#world.stats.hazardResist) * (this.#save.meta.difficulty === 'casual' ? CASUAL_WEATHER_MULT : 1)
+        : amount;
     let applied = incoming;
     if (ignoreInvuln) {
       this.#weatherAccum += incoming;
@@ -479,15 +524,20 @@ export class Combat {
     this.#kbZ += (dirZ / len) * distance;
   }
 
-  /** Damage into an enemy. 11-f: ignored outright while invulnerable. */
-  #damageEnemy(e: EnemyEntity, amount: number, cause: 'player' | 'drone'): void {
+  /**
+   * Damage into an enemy. 11-f: ignored outright while invulnerable. SPEC-038
+   * §4.8: `crit` is the projectile's roll — blasts and drone shots never crit.
+   */
+  #damageEnemy(e: EnemyEntity, amount: number, cause: 'player' | 'drone', crit = false): void {
     if (e.state === 'dead' || e.invulnerable) return;
     e.hp -= amount;
     e.hitFlash = HIT_FLASH_SECONDS;
     e.lostTrack = 0; // SPEC-030 D-20: damage resets the lose-track clock
+    e.lastHitCrit = crit;
     // SPEC-035 §4.11: every projectile and blast hit on a live enemy thuds. Both
-    // callers of this method are exactly those two paths.
-    this.#events.emit('enemy:hit', { enemyId: e.def.id, x: e.x, z: e.z });
+    // callers of this method are exactly those two paths. SPEC-038 §4.8: a
+    // critical projectile hit says so, and only then carries the flag.
+    this.#events.emit('enemy:hit', crit ? { enemyId: e.def.id, x: e.x, z: e.z, crit: true } : { enemyId: e.def.id, x: e.x, z: e.z });
     this.#aggroFromDamage(e);
     if (e.hp <= 0) this.killEnemy(e, cause);
   }
@@ -519,17 +569,23 @@ export class Combat {
 
   // --------------------------------------------------------------- AI hooks
 
-  #meleeHit(e: EnemyEntity): void {
+  /**
+   * A melee blow on `e.target`. SPEC-038 §4.3: a charge passes its ×1.3 and its
+   * 1 m of knockback; a windup's blow takes the defaults.
+   */
+  #meleeHit(e: EnemyEntity, damageMult = 1, knockback = PLAYER_KNOCKBACK): void {
     if (e.target === 'follower') {
-      this.#damageFollower(Math.max(1, Math.round(e.damage * (e.elite ? TUNING.ELITE_DMG_MULT : 1))));
+      this.#damageFollower(Math.max(1, Math.round(e.damage * damageMult * (e.elite ? TUNING.ELITE_DMG_MULT : 1))));
       return;
     }
     const p = this.#world.player;
-    this.#knockbackPlayer(p.x - e.x, p.z - e.z, PLAYER_KNOCKBACK);
-    this.damagePlayer(enemyHitDamage(e, this.#world.stats, this.#difficulty), { kind: 'enemy', enemyId: e.def.id }, false, {
-      x: e.x,
-      z: e.z,
-    });
+    this.#knockbackPlayer(p.x - e.x, p.z - e.z, knockback);
+    this.damagePlayer(
+      hitDamage(e.damage * damageMult, e.elite, this.#world.stats, this.#save.meta.difficulty),
+      { kind: 'enemy', enemyId: e.def.id },
+      false,
+      { x: e.x, z: e.z },
+    );
   }
 
   /** The wurm's resurface hit (§4.5): melee damage to the player within `radius`. */
@@ -540,7 +596,7 @@ export class Combat {
     const dz = p.z - e.z;
     if (dx * dx + dz * dz > radius * radius) return;
     this.#knockbackPlayer(dx, dz, PLAYER_KNOCKBACK);
-    this.damagePlayer(enemyHitDamage(e, this.#world.stats, this.#difficulty), { kind: 'enemy', enemyId: e.def.id }, false, {
+    this.damagePlayer(enemyHitDamage(e, this.#world.stats, this.#save.meta.difficulty), { kind: 'enemy', enemyId: e.def.id }, false, {
       x: e.x,
       z: e.z,
     });
@@ -568,6 +624,7 @@ export class Combat {
     p.targetX = 0;
     p.targetZ = 0;
     p.flight = 0;
+    p.crit = false;
   }
 
   /** §4.5: phase summons appear in a ring at 6 m around the boss. Never elite. */
@@ -578,6 +635,197 @@ export class Combat {
       // SPEC-034 §4.6, E57: the summon belongs to this boss, and dies with it.
       summon.summonedBy = e.id;
     }
+  }
+
+  // ------------------------------------------------- SPEC-038: telegraphs
+
+  /** §4.2: every windup start — the cue the audio layer and the dash tip read. */
+  #windup(e: EnemyEntity, kind: WindupKind): void {
+    this.#events.emit('enemy:windup', { enemyId: e.def.id, kind, x: e.x, z: e.z });
+  }
+
+  /**
+   * §4.2: a slot filled from `e`, landing `windup` s (× the casual multiplier)
+   * from now — or `null` when the pool is full, which cancels the attack that
+   * asked (38-c).
+   */
+  #drawTelegraph(e: EnemyEntity, windup: number, damageMult: number): TelegraphEntity | null {
+    if (this.telegraphs.size >= TELEGRAPH_CAPACITY) {
+      if (import.meta.env.DEV) log.warn('combat', `telegraph pool full; ${e.def.id}'s attack is cancelled`);
+      return null;
+    }
+    const t = this.telegraphs.alloc();
+    resetTelegraph(t);
+    const time = this.#world.time;
+    t.startAt = time;
+    t.hitAt = time + windup * (this.#world.windupMult ?? 1);
+    t.lockAt = t.hitAt;
+    t.damage = e.damage * damageMult;
+    t.elite = e.elite;
+    t.source = e.def.id;
+    t.ownerId = e.id;
+    t.hitsFollower = true;
+    return t;
+  }
+
+  #telegraphLine(
+    e: EnemyEntity,
+    length: number,
+    width: number,
+    windup: number,
+    lockIn: number,
+    damageMult: number,
+    bodyResolved: boolean,
+  ): boolean {
+    const t = this.#drawTelegraph(e, windup, damageMult);
+    if (t === null) return false;
+    t.kind = 'line';
+    t.x = e.x;
+    t.z = e.z;
+    t.dirX = Math.cos(e.facing);
+    t.dirZ = Math.sin(e.facing);
+    t.length = length;
+    t.width = width;
+    // The lock offset does not scale with casual (§4.3).
+    t.lockAt = t.hitAt - lockIn;
+    t.bodyResolved = bodyResolved;
+    return true;
+  }
+
+  #telegraphCircle(e: EnemyEntity, x: number, z: number, radius: number, windup: number, damageMult: number): boolean {
+    const t = this.#drawTelegraph(e, windup, damageMult);
+    if (t === null) return false;
+    t.kind = 'circle';
+    t.x = x;
+    t.z = z;
+    t.radius = radius;
+    return true;
+  }
+
+  #telegraphRing(
+    e: EnemyEntity,
+    x: number,
+    z: number,
+    ringMax: number,
+    ringSpeed: number,
+    band: number,
+    windup: number,
+    damageMult: number,
+  ): boolean {
+    const t = this.#drawTelegraph(e, windup, damageMult);
+    if (t === null) return false;
+    t.kind = 'ring';
+    t.x = x;
+    t.z = z;
+    t.ringMax = ringMax;
+    t.ringSpeed = ringSpeed;
+    t.band = band;
+    return true;
+  }
+
+  /**
+   * §4.2: a telegraph that has not landed yet — a circle or line before it
+   * resolves, a ring before its band leaves the centre, a charge lane while it
+   * lives. A ring already travelling is in the air, like a shot.
+   */
+  #pending(t: TelegraphEntity): boolean {
+    return t.kind !== 'ring' || this.#world.time < t.hitAt;
+  }
+
+  /** §4.2: frees every pending telegraph `e` drew (death, leash, dismissal, despawn, a charge's end). */
+  #cancelTelegraphs(e: EnemyEntity): void {
+    const pool = this.telegraphs;
+    for (let i = pool.size - 1; i >= 0; i--) {
+      const t = pool.at(i);
+      if (t.ownerId === e.id && this.#pending(t)) pool.free(i);
+    }
+  }
+
+  /** The live enemy with this entity id, or `null` — the pool is small. */
+  #enemyById(id: number): EnemyEntity | null {
+    const enemies = this.#world.enemies;
+    for (let i = 0; i < enemies.size; i++) {
+      const e = enemies.at(i);
+      if (e.id === id) return e.state === 'dead' ? null : e;
+    }
+    return null;
+  }
+
+  /**
+   * §4.2 — resolution, right after the brains, backwards over the pool. A line
+   * follows its owner until `lockAt`; a circle or line lands once at `hitAt`; a
+   * ring's band grows from `hitAt` and hits each target once as it crosses; a
+   * charge lane never lands by itself and goes when its owner leaves the charge.
+   * An owner that died, leashed or was sent away takes its pending ones with it.
+   */
+  #updateTelegraphs(): void {
+    const w = this.#world;
+    const time = w.time;
+    const pool = this.telegraphs;
+    for (let i = pool.size - 1; i >= 0; i--) {
+      const t = pool.at(i);
+      const owner = t.ownerId === 0 ? null : this.#enemyById(t.ownerId);
+      if (t.ownerId !== 0 && this.#pending(t) && (owner === null || owner.state === 'leash')) {
+        pool.free(i);
+        continue;
+      }
+      if (t.kind === 'line' && owner !== null && time < t.lockAt) {
+        t.x = owner.x;
+        t.z = owner.z;
+        t.dirX = Math.cos(owner.facing);
+        t.dirZ = Math.sin(owner.facing);
+      }
+      if (t.bodyResolved) {
+        if (owner === null || (owner.state !== 'chargeWindup' && owner.state !== 'charge')) pool.free(i);
+        continue;
+      }
+      if (t.kind === 'ring') {
+        if (time < t.hitAt) continue;
+        this.#resolveTelegraph(t, time);
+        if (ringRadius(t, time) > t.ringMax + t.band / 2) pool.free(i);
+        continue;
+      }
+      if (time < t.hitAt) continue;
+      this.#resolveTelegraph(t, time);
+      pool.free(i);
+    }
+  }
+
+  /** One pass of hit tests: the player, then the follower (E60), each at most once. */
+  #resolveTelegraph(t: TelegraphEntity, time: number): void {
+    const w = this.#world;
+    const p = w.player;
+    if ((t.hitMask & HIT_PLAYER) === 0 && p.alive && telegraphCovers(t, p.x, p.z, p.radius, time)) {
+      // §4.2: a blocked hit still marks the player as passed.
+      t.hitMask |= HIT_PLAYER;
+      this.#telegraphHitPlayer(t);
+    }
+    const f = w.follower;
+    if (t.hitsFollower && (t.hitMask & HIT_FOLLOWER) === 0 && f !== null && f.alive && telegraphCovers(t, f.x, f.z, f.radius, time)) {
+      t.hitMask |= HIT_FOLLOWER;
+      // E60: as an enemy blow on the follower — no armour, no difficulty.
+      this.#damageFollower(Math.max(1, Math.round(t.damage * (t.elite ? TUNING.ELITE_DMG_MULT : 1))));
+    }
+  }
+
+  /**
+   * §4.2: exactly a melee blow's amount, through `damagePlayer` — so i-frames
+   * and a dash block it — with 1 m of knockback from the centre, or across a
+   * lane. A blocked hit moves nobody.
+   */
+  #telegraphHitPlayer(t: TelegraphEntity): void {
+    const w = this.#world;
+    const p = w.player;
+    if (w.time < p.invulnUntil) return;
+    if (t.kind === 'line') {
+      const across = (p.z - t.z) * t.dirX - (p.x - t.x) * t.dirZ;
+      const side = across >= 0 ? 1 : -1;
+      this.#knockbackPlayer(-t.dirZ * side, t.dirX * side, TELEGRAPH_KNOCKBACK);
+    } else {
+      this.#knockbackPlayer(p.x - t.x, p.z - t.z, TELEGRAPH_KNOCKBACK);
+    }
+    const amount = hitDamage(t.damage, t.elite, w.stats, this.#save.meta.difficulty);
+    this.damagePlayer(amount, { kind: 'enemy', enemyId: t.source }, false, { x: t.x, z: t.z });
   }
 
   // --------------------------------------------------------------- spawning
@@ -640,6 +888,15 @@ export class Combat {
     e.fromWave = false;
     // SPEC-034 §4.6: `#summonRing` stamps its boss on the entities it makes.
     e.summonedBy = 0;
+    // SPEC-038 §3: the charge scratch and the crit flag, reset like the rest.
+    e.chargeLeft = 0;
+    e.chargeSpeed = 0;
+    e.chargeReach = 0;
+    e.chargeDamageMult = 1;
+    e.chargeStops = true;
+    e.chargeHit = false;
+    e.recoverFor = 0;
+    e.lastHitCrit = false;
     // Set immediately before the emit, so a subscriber can read the position.
     this.#lastSpawned = e;
     this.#events.emit('enemy:spawned', { enemyId: id, elite: isElite });
@@ -657,6 +914,8 @@ export class Combat {
     if (e.state === 'dead') return;
     e.state = 'dead';
     e.hp = 0;
+    // SPEC-038 §4.2 (38-d): whatever it had drawn and not landed goes with it.
+    this.#cancelTelegraphs(e);
     const def = e.def;
     const xp = def.xp * (e.elite ? ELITE_XP_MULT : 1);
     this.#events.emit('enemy:killed', { enemyId: def.id, elite: e.elite, x: e.x, z: e.z, xp });
@@ -767,6 +1026,7 @@ export class Combat {
     p.targetZ = toZ;
     p.flight = len / THROW_SPEED;
     p.ttl = p.flight;
+    p.crit = false;
   }
 
   /**
@@ -858,14 +1118,14 @@ export class Combat {
         }
       }
     }
-    this.#damageEnemy(e, p.damage, p.owner === 'drone' ? 'drone' : 'player');
+    this.#damageEnemy(e, p.damage, p.owner === 'drone' ? 'drone' : 'player', p.crit);
   }
 
   /** §4.4: i-frames do not block the projectile, only the damage (AC-51). */
   #projectileHitPlayer(p: ProjectileEntity): void {
     if (p.enemyId === null) return; // every enemy shot carries its shooter (§3)
     const stats = this.#world.stats;
-    const amount = hitDamage(p.damage, p.elite, stats, this.#difficulty);
+    const amount = hitDamage(p.damage, p.elite, stats, this.#save.meta.difficulty);
     this.#knockbackPlayer(p.vx, p.vz, PLAYER_KNOCKBACK);
     // SPEC-035 §4.6: the shot's origin, not the bullet's current position.
     this.damagePlayer(amount, { kind: 'projectile', enemyId: p.enemyId }, false, {
@@ -932,15 +1192,31 @@ export class Combat {
     } else {
       const target = this.#autoTarget(weapon.range);
       if (target !== null) {
-        const dx = target.x - p.x;
-        const dz = target.z - p.z;
+        // SPEC-038 §4.7: a strafing target is led by its velocity × the shot's
+        // flight time, capped at 3 m; every other state is aimed at as it stands.
+        let aimX = target.x;
+        let aimZ = target.z;
+        if (target.state === 'strafe') {
+          const flight = Math.hypot(target.x - p.x, target.z - p.z) / weapon.projectileSpeed;
+          let leadX = target.vx * flight;
+          let leadZ = target.vz * flight;
+          const lead = Math.hypot(leadX, leadZ);
+          if (lead > AUTO_LEAD_MAX) {
+            leadX *= AUTO_LEAD_MAX / lead;
+            leadZ *= AUTO_LEAD_MAX / lead;
+          }
+          aimX += leadX;
+          aimZ += leadZ;
+        }
+        const dx = aimX - p.x;
+        const dz = aimZ - p.z;
         const len = Math.hypot(dx, dz);
         if (len > 1e-6) {
           dirX = dx / len;
           dirZ = dz / len;
           firing = true;
-          targetX = target.x;
-          targetZ = target.z;
+          targetX = aimX;
+          targetZ = aimZ;
         }
       } else if (weapon.blast !== undefined && explicit) {
         // SPEC-029 §4.6: a launcher with no pointer and no target still fires,
@@ -963,8 +1239,8 @@ export class Combat {
     p.fireCooldown = 1 / weapon.fireRate;
     // SPEC-029 §4.4: a blast weapon does not roll — its projectile carries the
     // raw damage and `explode` applies the multiplier, so blasts never crit.
-    const damage =
-      weapon.blast !== undefined ? weapon.damage : rollPlayerDamage(weapon, this.#world.stats, this.#rng.combat).amount;
+    const roll = weapon.blast !== undefined ? null : rollPlayerDamage(weapon, this.#world.stats, this.#rng.combat);
+    const damage = roll === null ? weapon.damage : roll.amount;
     // SPEC-029 §4.4: a spread weapon turns the shot within ±spread, on the
     // combat stream only — deterministic for a seed.
     if (weapon.spread !== undefined) {
@@ -976,6 +1252,8 @@ export class Combat {
       dirX = turnedX;
     }
     const shot = this.#spawnPlayerProjectile('player', dirX, dirZ, damage, weapon);
+    // SPEC-038 §4.8: the shot carries its roll's crit to the hit.
+    shot.crit = roll?.crit === true;
     if (weapon.lob === true) {
       shot.lob = true;
       shot.targetX = targetX;
@@ -1023,9 +1301,9 @@ export class Combat {
     // §4.3: facing turns to the shot, so the muzzle flash reads where it went.
     p.facing = Math.atan2(dirZ, dirX);
     // SPEC-029 §4.4: a blast weapon does not roll, so blasts never crit.
-    const damage =
-      weapon.blast !== undefined ? weapon.damage : rollPlayerDamage(weapon, this.#world.stats, this.#rng.combat).amount;
-    const shot = this.#spawnPlayerProjectile('player', dirX, dirZ, damage, weapon);
+    const roll = weapon.blast !== undefined ? null : rollPlayerDamage(weapon, this.#world.stats, this.#rng.combat);
+    const shot = this.#spawnPlayerProjectile('player', dirX, dirZ, roll === null ? weapon.damage : roll.amount, weapon);
+    shot.crit = roll?.crit === true;
     if (weapon.lob === true) {
       shot.lob = true;
       shot.targetX = targetX;
@@ -1096,6 +1374,8 @@ export class Combat {
     p.targetX = 0;
     p.targetZ = 0;
     p.flight = 0;
+    // SPEC-038 §4.8: the firing path sets it from its roll; a drone shot never crits.
+    p.crit = false;
     return p;
   }
 
@@ -1139,6 +1419,11 @@ export class Combat {
     const w = this.#world;
     w.time += dt;
     const p = w.player;
+    // SPEC-038 §4.6: the casual windup stretch, read live every step.
+    w.windupMult = this.#save.meta.difficulty === 'casual' ? CASUAL_WINDUP_MULT : 1;
+    // SPEC-038 §4.1: while the dash's movement runs nothing fires, nothing
+    // pushes the player out of a body and the step's knockback is dropped.
+    const dashing = isDashing(p, w.time);
 
     // Expired damage boosts drop and the cache recomputes (§4.8).
     if (p.boosts.length > 0) {
@@ -1156,7 +1441,8 @@ export class Combat {
     if (p.alive) {
       this.#tickHealing(dt);
       p.fireCooldown -= dt;
-      this.#updateFiring(input, aimWorld);
+      if (dashing) this.#aimedThisStep = false;
+      else this.#updateFiring(input, aimWorld);
       this.#updateDrone(dt);
       if (!this.#aimedThisStep && Math.hypot(p.vx, p.vz) > 1e-3) {
         // §4.3: when moving without firing, facing follows movement.
@@ -1177,12 +1463,19 @@ export class Combat {
     for (let i = 0; i < liveCount; i++) {
       updateEnemy(w.enemies.at(i), w, dt, this.#rng.ai, this.#aiHooks);
     }
+    // SPEC-038 §4.2: the ground telegraphs resolve right after the brains.
+    this.#updateTelegraphs();
 
     updateProjectiles(w, this.#hash, dt, this.#projectileHooks);
     // SPEC-029 §4.7: mines and charges, right after the projectile pass.
     this.#updateDeployables();
 
-    if (p.alive) this.#pushPlayerOut();
+    if (p.alive && !dashing) this.#pushPlayerOut();
+    if (dashing) {
+      // Dropped, not deferred: a dash passes through the blow (§4.1).
+      this.#kbX = 0;
+      this.#kbZ = 0;
+    }
     this.#applyKnockback();
     this.#updateFollower(dt);
 

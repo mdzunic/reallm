@@ -38,6 +38,8 @@ export interface ProjectileEntity {
   targetZ: number;
   /** Total flight seconds of a lob; `ttl` counts it down (the view's arc). */
   flight: number;
+  /** SPEC-038 §4.8: the shot's damage roll was a crit; false for enemy, drone and blast shots. */
+  crit: boolean;
 }
 
 export function makeProjectile(): ProjectileEntity {
@@ -60,5 +62,6 @@ export function makeProjectile(): ProjectileEntity {
     targetX: 0,
     targetZ: 0,
     flight: 0,
+    crit: false,
   };
 }

@@ -601,6 +601,15 @@ describe('Missions — debugFinishStage (SPEC-024 §4.8)', () => {
     expect(forced.save.progress.flags.filter((flag) => flag.startsWith('ending_'))).toHaveLength(0);
   });
 
+  it('finishes a count stage at its target — c1_s2’s eight skitters (SPEC-038 §6.2)', () => {
+    const h = harness((save) => save.progress.missionsDone.push('c1_m1'));
+    h.missions.accept('c1_s2');
+    h.missions.debugFinishStage('c1_s2');
+    expect(h.missions.active[0]?.stage).toBe(1);
+    expect(h.of('mission:progress').at(-1)).toEqual({ id: 'c1_s2', stage: 0, objective: 0, value: 8, target: 8 });
+    expect(h.missions.surviveWave()).toEqual({ mission: 'c1_s2', stage: 1, wave: 'cinder4_storm' });
+  });
+
   it('ignores a mission that is not running', () => {
     const h = harness();
     h.missions.debugFinishStage('c1_m1');
@@ -787,5 +796,38 @@ describe('Missions.pin and cyclePinned reorder missionsActive (SPEC-034 §4.15)'
     const reborn = new Missions(h.save, h.economy, h.events, 'surface', 'cinder4');
     expect(reborn.pinned).toBe(pinned);
     reborn.dispose();
+  });
+});
+
+// ------------------------------------------------------------- SPEC-038 §4.5
+
+describe('Missions — survive stages run their storm wave (SPEC-038 §4.5)', () => {
+  it('surviveWave() names the stage’s wave, and null once the stage is done', () => {
+    const h = harness((save) => save.progress.missionsDone.push('c1_m1'));
+    expect(h.missions.accept('c1_s2').ok).toBe(true);
+    // Stage 0 is the skitter cull: no survive objective yet.
+    expect(h.missions.surviveWave()).toBeNull();
+    for (let i = 0; i < 8; i++) h.events.emit('enemy:killed', { enemyId: 'dust_skitter', elite: false, x: 0, z: 0, xp: 4 });
+    expect(h.missions.active[0]?.stage).toBe(1);
+    expect(h.missions.surviveWave()).toEqual({ mission: 'c1_s2', stage: 1, wave: 'cinder4_storm' });
+    expect(h.missions.requiredWeather()).toEqual({ weather: 'heatwave', seconds: 90 });
+
+    // A death restarts the timer and keeps the wave the stage's.
+    h.run(30);
+    h.events.emit('player:died', { cause: { kind: 'fall' }, scene: 'surface' });
+    expect(h.missions.surviveWave()).toEqual({ mission: 'c1_s2', stage: 1, wave: 'cinder4_storm' });
+
+    h.run(90.1);
+    expect(h.of('mission:completed')).toEqual([{ id: 'c1_s2', replay: false }]);
+    expect(h.missions.surviveWave()).toBeNull();
+  });
+
+  it('the tutorial’s sandstorm names no wave (SPEC-035’s ramp is the first landing)', () => {
+    const h = harness();
+    h.missions.accept('c1_m1');
+    h.events.emit('poi:reached', { poi: 'landing_pad', instance: 0 });
+    h.events.emit('poi:scanned', { poi: 'dune_sea', instance: 0 });
+    expect(h.missions.requiredWeather()).toEqual({ weather: 'sandstorm', seconds: 60 });
+    expect(h.missions.surviveWave()).toBeNull();
   });
 });

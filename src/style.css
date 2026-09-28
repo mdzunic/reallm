@@ -1590,6 +1590,37 @@ html.reduce-motion .qb-slot.is-locked {
   pointer-events: none;
 }
 
+/* SPEC-038 §4.1: DASH fills the corner cell, which takes pointer events once it
+   holds the button, and wears the cooldown ring — the cell's `--cd`, from 1 at
+   the press to 0 when ready — as a conic sweep over its dark base. */
+.arc-primary:not(:empty) {
+  pointer-events: auto;
+}
+
+.arc-primary > button.touch-button {
+  width: 100%;
+  height: 100%;
+  font-weight: 700;
+  background: conic-gradient(rgba(255, 255, 255, 0.24) calc(var(--cd, 0) * 360deg), rgb(22 32 43 / 80%) 0);
+}
+
+.arc-primary.is-cooling > button.touch-button {
+  color: var(--ink-dim);
+}
+
+/* SPEC-038 §4.1: the keyboard bar's first cell — `V`, the dash glyph and the
+   same ring (the slot's own `--cd` sweep). It stands outside both groups. */
+.qb-dash .qb-dash-glyph {
+  font-size: 20px;
+  line-height: 1;
+  margin-top: 8px;
+}
+
+.qb-dash.is-cooling .qb-dash-glyph,
+.qb-dash.is-cooling .qb-name {
+  opacity: 0.55;
+}
+
 /* §4.1: compact — 56 px slots with their names hidden, and a 56 px corner. */
 @media (max-height: 360px) {
   .hud.is-touch .qb-slot {
@@ -2068,6 +2099,8 @@ html.reduce-motion .hud.is-static .hud-static {
 .dmg--enemy { color: #ffffff; }
 .dmg--elite { color: #e0b34a; }
 .dmg--player { color: #ff5533; }
+/* SPEC-038 §4.8: a crit reads on the number — gold, ×1.35, and a `!`. */
+.dmg--crit { color: #ffe45c; font-size: calc(14px * 1.35); }
 
 /* --------------------------------------------------------------- dialogue */
 /* Bottom-center (AC-69). SPEC-037 §4.3: on the bottom stack — clear of the
@@ -3639,7 +3672,20 @@ html.debug .scene-tag {
   bottom: max(18px, env(safe-area-inset-bottom));
   display: flex;
   gap: 6px;
+  /* One row that fits the screen: a strip wider than it shrinks its buttons
+     and ellipsises their labels rather than wrapping them onto a second line —
+     which grew the row up under the bottom-centre bar — or running off the left
+     edge (SPEC-038 added two). */
+  max-width: calc(100% - 2 * max(12px, env(safe-area-inset-right)));
   pointer-events: auto;
+}
+
+.hud-debug > button.hud-button {
+  min-width: 0;
+  flex: 0 1 auto;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
 }
 
 button.hud-button {

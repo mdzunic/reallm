@@ -5,7 +5,7 @@
 import { describe, expect, it } from 'vitest';
 import { Rng } from '@/core/Rng';
 import { maxHp, newSave, type CharacterCreation, type Save } from '@/core/Save';
-import { COMPANIONS, ITEMS, MISSIONS, TUNING, UPGRADES, type MissionDef } from '@/data/index';
+import { CLASSES, COMPANIONS, DIFFICULTIES, ITEMS, MISSIONS, TUNING, UPGRADES, type MissionDef } from '@/data/index';
 import type { SlotState, SlotView } from '@/systems/Loadout';
 import { discountTokens } from '@/systems/Economy';
 import { CARGO_TOAST_SECONDS, SHIPPED_TOAST_TEXT } from '@/systems/Pickups';
@@ -55,6 +55,7 @@ import {
   gearCompareText,
   gearTooltip,
   passiveText,
+  DIFFICULTY_LINES,
   rewardsText,
   slotLine,
   stageResetText,
@@ -653,6 +654,23 @@ describe('passiveText (AC-14)', () => {
 
   it('an empty passive is an empty line, not a crash', () => {
     expect(passiveText({})).toBe('');
+  });
+
+  it('prints the dash cooldown multiplier, and the Scout carries it (SPEC-038 §4.1)', () => {
+    expect(passiveText({ dashCooldownMult: 0.8 })).toBe('−20% dash cooldown');
+    expect(passiveText(CLASSES.scout.passive)).toBe(
+      '+15% move speed · +25% pickup radius · resource radar · −20% dash cooldown',
+    );
+  });
+});
+
+describe('DIFFICULTY_LINES (SPEC-038 §4.6)', () => {
+  it('has a line for every difficulty, and casual names the softer storms and wind-ups', () => {
+    expect(Object.keys(DIFFICULTY_LINES).sort()).toEqual([...DIFFICULTIES].sort());
+    expect(DIFFICULTY_LINES.casual).toBe(
+      'Casual — softer hits and storms, longer wind-ups, kinder deaths; the story is unchanged.',
+    );
+    expect(DIFFICULTY_LINES.normal).toBe('Normal — the pressure the game was tuned for.');
   });
 });
 

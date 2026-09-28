@@ -27,6 +27,8 @@ export interface ClassPassive {
   readonly moveSpeedMult?: number;
   readonly pickupRadiusMult?: number;
   readonly nodeRadar?: boolean;
+  /** SPEC-038 §4.1: scales the dash cooldown (the Scout's ×0.8). */
+  readonly dashCooldownMult?: number;
 }
 
 export interface ClassDef<Id extends string = string> {
@@ -76,7 +78,7 @@ export const CLASSES = {
     name: 'Scout',
     blurb: 'Survey specialist. Moves fast, picks up wide, and reads the ground for nodes.',
     baseAttributes: { might: 2, vigor: 1, agility: 4, tech: 1 },
-    passive: { moveSpeedMult: 1.15, pickupRadiusMult: 1.25, nodeRadar: true },
+    passive: { moveSpeedMult: 1.15, pickupRadiusMult: 1.25, nodeRadar: true, dashCooldownMult: 0.8 },
     startingWeapon: 'weapon_kinetic',
     startingSidearm: 'pistol_service',
     startingArmor: 'armor_scrap',

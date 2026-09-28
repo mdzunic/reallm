@@ -118,6 +118,47 @@ function countIn(waveIdList: readonly WaveId[], enemy: EnemyId): number {
   return total;
 }
 
+/**
+ * SPEC-038 §4.5 — the storm-wave invariant, as a function so its failure modes
+ * can be shown on doctored content: a surface survive with `weather` (other than
+ * `c1_m1`'s, the first landing's ramp) must name a wave; that wave may only
+ * spawn enemies from the planet's own `surface.spawn` table; and a flight
+ * mission's survive names none.
+ */
+function stormWaveProblems(
+  list: readonly Mission[],
+  table: Readonly<Record<WaveId, WaveDef<WaveId>>>,
+  worlds: Readonly<Record<PlanetId, PlanetDef>>,
+): string[] {
+  const problems: string[] = [];
+  for (const mission of list) {
+    mission.stages.forEach((stage, index) => {
+      for (const objective of stage) {
+        if (objective.kind !== 'survive') continue;
+        const where = `${mission.id} stage ${index}`;
+        if (mission.scene === 'flight') {
+          if (objective.waves !== undefined) problems.push(`${where}: a flight survive cannot name a wave`);
+          continue;
+        }
+        if (objective.waves === undefined) {
+          if (objective.weather !== undefined && mission.id !== 'c1_m1') {
+            problems.push(`${where}: a ${objective.weather} survive names no storm wave`);
+          }
+          continue;
+        }
+        const planet = worlds[mission.planet];
+        const roster = new Set<string>(planet.surface.spawn.map((row) => row.enemy));
+        for (const group of table[objective.waves].groups) {
+          if (!roster.has(group.enemy)) {
+            problems.push(`${where}: ${objective.waves} spawns ${group.enemy}, which is not in ${planet.id}’s spawn table`);
+          }
+        }
+      }
+    });
+  }
+  return [...new Set(problems)];
+}
+
 describe('content invariants (SPEC-009 §7)', () => {
   it('1. every requirement exists, and every mission is reachable without a cycle', () => {
     expect(Object.keys(UPGRADES)).toEqual([...SHIP_SYSTEMS]);
@@ -382,10 +423,12 @@ describe('content invariants (SPEC-009 §7)', () => {
     // base and the chapter formula instead of typed in. Retuning means moving a
     // base or the formula here, which is the point: one stat block per
     // archetype, scaled (09-a).
+    // SPEC-038 §4.4 moved the trash HP bases: swarm 18 → 26, rusher 45 → 70,
+    // ranged 35 → 45. Damage, speed, radius and xp are unchanged.
     const archetypeBase: Record<string, { hp: number; damage: number }> = {
-      swarm: { hp: 18, damage: 4 },
-      rusher: { hp: 45, damage: 9 },
-      ranged: { hp: 35, damage: 7 },
+      swarm: { hp: 26, damage: 4 },
+      rusher: { hp: 70, damage: 9 },
+      ranged: { hp: 45, damage: 7 },
       static: { hp: 60, damage: 0 },
       boss: { hp: 900, damage: 18 },
       fighter: { hp: 40, damage: 8 },
@@ -442,6 +485,16 @@ describe('content invariants (SPEC-009 §7)', () => {
       }
     }
     expect(problems).toEqual([]);
+  });
+
+  it('9b (SPEC-038). every ranged surface enemy fires at 13 m with 15 m/s shots', () => {
+    const ranged = enemies.filter((enemy) => enemy.domain === 'surface' && enemy.archetype === 'ranged');
+    expect(ranged.map((enemy) => enemy.id).sort()).toEqual(
+      ['hive_spitter', 'ice_spitter', 'scav_raider', 'slag_spitter', 'spore_spitter'].sort(),
+    );
+    for (const enemy of ranged) {
+      expect(enemy.attack, enemy.id).toMatchObject({ kind: 'ranged', range: 13, projectileSpeed: 15 });
+    }
   });
 
   it('10. planets have one pad, reachable bands, real gates and a spawn table they can support', () => {
@@ -505,6 +558,53 @@ describe('content invariants (SPEC-009 §7)', () => {
       if (wave.loopAfterSeconds !== undefined && wave.loopAfterSeconds <= 0) problems.push(`${id}: loops after ${wave.loopAfterSeconds}s`);
     }
     expect(problems).toEqual([]);
+  });
+
+  it('11b (SPEC-038). storm waves run in weather survive stages, from the planet’s own roster', () => {
+    expect(stormWaveProblems(missions, waves, planetsById)).toEqual([]);
+    // §4.5: each storm wave runs once, 18–30 m from the player.
+    for (const id of ['cinder4_storm', 'vetra_storm', 'thessaly_storm', 'ferrum_storm'] as const) {
+      const wave = waves[id];
+      expect(wave.domain, id).toBe('surface');
+      expect(wave.spawnBand, id).toEqual([18, 30]);
+      expect(wave.loopAfterSeconds, id).toBeUndefined();
+    }
+    // The six stages that name their planet's wave, and the tutorial that names none.
+    const stormOf = (id: MissionId): Array<WaveId | undefined> =>
+      MISSIONS[id].stages.flat().flatMap((objective: Objective) => (objective.kind === 'survive' ? [objective.waves] : []));
+    expect(stormOf('c1_s2')).toEqual(['cinder4_storm']);
+    expect(stormOf('c2_m1')).toEqual(['vetra_storm']);
+    expect(stormOf('c2_s2')).toEqual(['vetra_storm']);
+    expect(stormOf('c3_m1')).toEqual(['thessaly_storm']);
+    expect(stormOf('c4_m1')).toEqual(['ferrum_storm']);
+    expect(stormOf('c4_s1')).toEqual(['ferrum_storm']);
+    expect(stormOf('c1_m1')).toEqual([undefined]);
+  });
+
+  it('11c (SPEC-038). the storm-wave invariant fails on each of the three things it guards', () => {
+    const c1s2 = MISSIONS.c1_s2 as Mission;
+    const stripped: Mission = {
+      ...c1s2,
+      stages: [c1s2.stages[0] ?? [], [{ kind: 'survive', seconds: 90, weather: 'heatwave' }]],
+    };
+    expect(stormWaveProblems([stripped], waves, planetsById)).toEqual([
+      'c1_s2 stage 1: a heatwave survive names no storm wave',
+    ]);
+    const foreign: Mission = {
+      ...c1s2,
+      stages: [c1s2.stages[0] ?? [], [{ kind: 'survive', seconds: 90, weather: 'heatwave', waves: 'vetra_storm' }]],
+    };
+    expect(stormWaveProblems([foreign], waves, planetsById)).toEqual([
+      'c1_s2 stage 1: vetra_storm spawns frost_mite, which is not in cinder4’s spawn table',
+      'c1_s2 stage 1: vetra_storm spawns ice_crawler, which is not in cinder4’s spawn table',
+      'c1_s2 stage 1: vetra_storm spawns ice_spitter, which is not in cinder4’s spawn table',
+    ]);
+    const c5m1 = MISSIONS.c5_m1 as Mission;
+    const flight: Mission = {
+      ...c5m1,
+      stages: [[{ kind: 'survive', seconds: 180, waves: 'hive_flight' }, ...(c5m1.stages[0] ?? []).slice(1)]],
+    };
+    expect(stormWaveProblems([flight], waves, planetsById)).toEqual(['c5_m1 stage 0: a flight survive cannot name a wave']);
   });
 
   it('12. gear tiers are unique per line, consumables stack, and tier-3 gear costs lithium', () => {
@@ -1090,9 +1190,34 @@ describe('the three SPEC-035 tips (SPEC-035 §4.8)', () => {
     expect(TIPS.flight_throttle.keyboard).not.toMatch(/Ctrl/i);
   });
 
-  it('teaches hold-to-fire rather than an auto-fire default', () => {
-    expect(TIPS.combat.keyboard).toMatch(/hold/i);
-    expect(TIPS.combat.touch).toMatch(/auto-fire/i);
+  // SPEC-038 §4.9: auto-fire is on for every scheme, so the tip says so.
+  it('teaches that auto-fire is on', () => {
+    expect(TIPS.combat.keyboard).toMatch(/fires on its own/);
+    expect(TIPS.combat.touch).toMatch(/fires on its own/);
+    expect(TIPS.combat.keyboard).toBe(
+      'Your gun fires on its own at the nearest enemy. Hold the left mouse button to pick the target yourself.',
+    );
+    expect(TIPS.combat.touch).toBe(
+      'Your gun fires on its own at the nearest enemy. Drag on the right to pick the target yourself.',
+    );
+  });
+});
+
+describe('the dash in words (SPEC-038 §4.9)', () => {
+  it('adds the dash tip with both wordings', () => {
+    expect(TIP_IDS).toContain('dash');
+    expect(TIPS.dash.keyboard).toBe(
+      'A red lane or ring marks what is about to land. Right-click or V to dash through it — nothing touches you mid-dash.',
+    );
+    expect(TIPS.dash.touch).toBe(
+      'A red lane or ring marks what is about to land. Tap DASH to slip through it — nothing touches you mid-dash.',
+    );
+  });
+
+  it('the controls sheets gain a Dash row, and the keyboard Fire row says it is automatic', () => {
+    expect(sheetRows('keyboard')).toContainEqual(['Dash', 'Right mouse or V']);
+    expect(sheetRows('keyboard')).toContainEqual(['Fire', 'Automatic — hold Space or Left mouse to aim']);
+    expect(sheetRows('touch')).toContainEqual(['Dash', 'DASH button']);
   });
 });
 
@@ -1134,14 +1259,19 @@ describe('words that match the touch controls (SPEC-036 §4.11, §4.12)', () => 
  * (SPEC-001 §4). Comments are stripped before the rows are read.
  */
 function touchSheetRows(): Array<[string, string]> {
+  return sheetRows('touch');
+}
+
+/** One scheme's rows of the controls sheet, read the same way (SPEC-038 §4.9 adds the keyboard's). */
+function sheetRows(scheme: 'keyboard' | 'touch'): Array<[string, string]> {
   const source = readFileSync(new URL('../../src/ui/PauseMenu.ts', import.meta.url).pathname, 'utf8');
   const start = source.indexOf('const CONTROL_SHEETS');
   expect(start, 'CONTROL_SHEETS in PauseMenu.ts').toBeGreaterThan(-1);
-  const touch = source.indexOf('touch: [', start);
-  const end = source.indexOf('\n  ],', touch);
-  expect(touch).toBeGreaterThan(start);
-  expect(end).toBeGreaterThan(touch);
-  const block = source.slice(touch, end).replace(/\/\/[^\n]*/g, '');
+  const at = source.indexOf(`${scheme}: [`, start);
+  const end = source.indexOf('\n  ],', at);
+  expect(at).toBeGreaterThan(start);
+  expect(end).toBeGreaterThan(at);
+  const block = source.slice(at, end).replace(/\/\/[^\n]*/g, '');
   return [...block.matchAll(/\[\s*'([^']*)'\s*,\s*'([^']*)'\s*\]/g)].map((m) => [m[1] as string, m[2] as string]);
 }
 

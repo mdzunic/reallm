@@ -22,6 +22,7 @@ import type { EnemyEntity } from '@/entities/Enemy';
 import type { FollowerEntity } from '@/entities/Follower';
 import type { PlayerEntity } from '@/entities/Player';
 import type { ProjectileEntity } from '@/entities/Projectile';
+import type { TelegraphEntity } from '@/entities/Telegraph';
 import { DEPLOYABLE_CAPACITY, type DeployableEntity } from '@/entities/Deployable';
 import { CharacterView } from '@/views/CharacterView';
 import { CombatFx } from '@/views/CombatFx';
@@ -40,6 +41,7 @@ import {
   type PoiKind,
 } from '@/views/SurfaceProps';
 import { StormParticles, STORM_LOOK, type ParticleKind } from '@/views/StormParticles';
+import { TelegraphView } from '@/views/TelegraphView';
 import { buildTerrainTiles, createTerrainMaterial, setTerrainLayers, terrainUniforms } from '@/views/TerrainMesh';
 
 export type { ObstacleKind, PoiKind } from '@/views/SurfaceProps';
@@ -110,6 +112,11 @@ export interface SurfaceFrame {
   nodes: readonly ViewNode[];
   /** The wurm's resurface telegraph, or `null`. */
   telegraph: { x: number; z: number } | null;
+  /**
+   * SPEC-038 §4.2: the ground telegraphs and the world clock they were stamped
+   * on — not the view clock, which a held beat runs ahead of `world.time`.
+   */
+  telegraphs?: { pool: Pool<TelegraphEntity>; time: number };
   time: number;
   /** The rendered-frame delta; 0 while hit-stop freezes the view (SPEC-019 §4.7). */
   dt: number;
@@ -470,6 +477,8 @@ export class SurfaceView {
   readonly #telegraph: THREE.Mesh;
   readonly #arenaRing: THREE.Mesh;
   #fx: CombatFx;
+  /** SPEC-038 §4.2: the ground telegraphs — at most three draws, none while the pool is empty. */
+  readonly #telegraphs: TelegraphView;
   #fxCapacity: number;
 
   readonly #groundMaterial: THREE.MeshStandardMaterial;
@@ -816,6 +825,7 @@ export class SurfaceView {
     this.#billboard = cameraBillboard();
     this.#fxCapacity = Math.min(FX_CAPACITY_MAX, FX_CAPACITY_PER_PARTICLE * quality.maxParticles);
     this.#fx = new CombatFx(this.#root, this.#billboard, this.#fxCapacity);
+    this.#telegraphs = new TelegraphView(this.#root);
 
     // The player: capsule body + nose cone showing facing. `transparent` stays
     // on so the invulnerability blink can keep writing `opacity` (§4.7).
@@ -1460,6 +1470,9 @@ export class SurfaceView {
     this.#syncLightning(frame.time);
     this.#storm.sync(p.x, p.z, frame.time, ground);
     this.#fx.sync(frame.time, ground);
+    if (frame.telegraphs !== undefined) {
+      this.#telegraphs.sync(frame.telegraphs.pool, frame.telegraphs.time, ground, this.reduceMotion);
+    }
     this.#syncPickups(frame);
     this.#syncProjectiles(frame);
     this.#syncDeployables(frame);
@@ -1632,10 +1645,16 @@ export class SurfaceView {
     }
   }
 
+  /** SPEC-038 §4.11: the draws the telegraph layer added on the last frame (≤ 3). */
+  get telegraphDraws(): number {
+    return this.#telegraphs.drawCalls;
+  }
+
   dispose(): void {
     this.enemies.dispose();
     this.#storm.dispose();
     this.#fx.dispose();
+    this.#telegraphs.dispose();
     this.#character?.dispose();
     this.#character = null;
     this.#followerView?.dispose();
