@@ -1491,9 +1491,12 @@ batch (`SPEC-011`, `SPEC-012-missions`, `SPEC-013`, `SPEC-034`) failed
 `SPEC-012-missions.spec.ts:131` — the 60 s forced-storm survive stage against a
 110 s wall-clock deadline — and the same batch on untouched `main` (ad7e582)
 failed the same line, alongside `SPEC-034.spec.ts:191`. Run alone, the missions
-case passed twice. `SPEC-013.spec.ts:210` (`holding` read as `recalled`) is the
-idle 95 s warp of a pilot whose save has no fixed seed meeting an asteroid; SPEC-039
-changes nothing on that path except a 1.1× ARIA regeneration.
+case passed twice. `SPEC-013.spec.ts:210` (`holding` read as `recalled`, one run in
+seven here) is the idle 95 s warp of a pilot whose save has no fixed seed: the
+Cinder-4 waves shoot a ship that never moves or fires. Simulated over seeds
+1–400 through `systems/Flight` with the suite's pilot, that warp is recalled 27
+times with ARIA's regeneration at ×1 (`main`) and 23 times at SPEC-039's ×1.1,
+and no seed is recalled only at ×1.1 — the only SPEC-039 change on that path.
 
 **Owed on hardware, before the `m7` tag.**
 
