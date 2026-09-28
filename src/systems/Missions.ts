@@ -333,6 +333,22 @@ export class Missions {
     return null;
   }
 
+  /**
+   * SPEC-038 §4.5: the storm wave of the first unfinished current survive
+   * objective that names one — walked as `requiredWeather()` walks — or `null`.
+   * The surface keys it `${mission}:${stage}:${wave}` and runs it for the stage.
+   */
+  surviveWave(): { mission: MissionId; stage: number; wave: WaveId } | null {
+    for (const state of this.#states) {
+      for (const { objective, done } of this.currentObjectives(state.id)) {
+        if (objective.kind === 'survive' && objective.waves !== undefined && !done) {
+          return { mission: state.id, stage: state.stage, wave: objective.waves };
+        }
+      }
+    }
+    return null;
+  }
+
   /** The boss a current stage wants; the arena spawns it on entry (§4.7). */
   bossStage(): EnemyId | null {
     for (const state of this.#states) {

@@ -5,7 +5,9 @@
 // stormSeconds, `weather:changed`) → calm. `force()` skips the warning for a
 // survive stage; `suppress(true)` ends the storm now and pauses the cycle for
 // a boss arena (E15). The avalanche's DPS runs in bursts — 10 s on, 20 s off —
-// which lives here as `dps` so the effects table stays a constant.
+// which lives here as `dps` so the effects table stays a constant. SPEC-038
+// §4.5: a forced storm ramps in over 10 s — the warning an ambient one gives —
+// and `exposureDps` is what a player in the open actually takes.
 import type { EventBus, GameEvents } from '@/core/Events';
 import type { Rng } from '@/core/Rng';
 import { TUNING, type PlanetDef, type WeatherId } from '@/data/index';
@@ -42,11 +44,15 @@ export const CALM_EFFECTS: WeatherEffects = {
 /** §4.6: the avalanche's burst pattern — damage 10 s on, 20 s off, repeating. */
 export const BURST_ON_SECONDS = 10;
 export const BURST_OFF_SECONDS = 20;
+/** SPEC-038 §4.5: a forced storm's damage ramps from 0 to full over this long. */
+export const FORCED_RAMP_SECONDS = 10;
 
 export class Weather {
   readonly #cycle: PlanetDef['surface']['weather'];
   readonly #rng: Rng;
   readonly #events: EventBus<GameEvents>;
+  /** SPEC-038 §4.5: the planet's weather multiplier (Cinder-4's 0.65), 1 when absent. */
+  readonly #dpsMult: number;
 
   #phase: WeatherPhase = 'calm';
   #current: WeatherId | null = null;
@@ -59,9 +65,12 @@ export class Weather {
   #suppressed = false;
   /** SPEC-035 §4.7: the first-landing ramp holds the ambient cycle in calm. */
   #heldCalm = false;
+  /** SPEC-038 §4.5: the active storm came from `force()`, so it ramps in. */
+  #forced = false;
 
   constructor(planet: PlanetDef, rng: Rng, events: EventBus<GameEvents>) {
     this.#cycle = planet.surface.weather;
+    this.#dpsMult = planet.surface.weather?.dpsMult ?? 1;
     this.#rng = rng;
     this.#events = events;
     this.#left = this.#rollCalm();
@@ -101,6 +110,22 @@ export class Weather {
     return this.#activeFor % (BURST_ON_SECONDS + BURST_OFF_SECONDS) < BURST_ON_SECONDS ? effects.dps : 0;
   }
 
+  /** SPEC-038 §4.5: whether the active storm was forced by a mission (or the debug strip). */
+  get forced(): boolean {
+    return this.#forced;
+  }
+
+  /**
+   * SPEC-038 §4.5 — what a player in the open takes before armour:
+   * `dps × (forced ? min(1, activeFor / FORCED_RAMP_SECONDS) : 1) × dpsMult`.
+   * An ambient storm does not ramp; its warning was the ramp. `dps` keeps its
+   * SPEC-012 meaning, so the avalanche's bursts still gate this.
+   */
+  get exposureDps(): number {
+    const ramp = this.#forced ? Math.min(1, this.#activeFor / FORCED_RAMP_SECONDS) : 1;
+    return this.dps * ramp * this.#dpsMult;
+  }
+
   update(dt: number): void {
     if (this.#suppressed) return; // E15: the cycle is paused, not running down
     // SPEC-035 §4.7: held calm never leaves calm. A forced storm still runs its
@@ -122,7 +147,7 @@ export class Weather {
         return;
       }
       case 'warning': {
-        this.#begin(this.#pending as WeatherId, this.#rollStorm());
+        this.#begin(this.#pending as WeatherId, this.#rollStorm(), false);
         return;
       }
       case 'active': {
@@ -135,7 +160,7 @@ export class Weather {
   /** §4.6: a survive stage's storm — immediately active for `seconds`, no warning. */
   force(weather: WeatherId, seconds: number): void {
     if (this.#suppressed) return; // a boss arena outranks a forced storm (E15)
-    this.#begin(weather, seconds);
+    this.#begin(weather, seconds, true);
   }
 
   /**
@@ -157,12 +182,13 @@ export class Weather {
     // Resuming picks up the calm countdown where the suppression left it.
   }
 
-  #begin(weather: WeatherId, seconds: number): void {
+  #begin(weather: WeatherId, seconds: number, forced: boolean): void {
     this.#phase = 'active';
     this.#current = weather;
     this.#pending = null;
     this.#left = seconds;
     this.#activeFor = 0;
+    this.#forced = forced;
     this.#events.emit('weather:changed', { weather });
   }
 
@@ -172,6 +198,7 @@ export class Weather {
     this.#current = null;
     this.#pending = null;
     this.#activeFor = 0;
+    this.#forced = false;
     this.#left = this.#rollCalm();
     if (wasActive) this.#events.emit('weather:changed', { weather: null });
   }
