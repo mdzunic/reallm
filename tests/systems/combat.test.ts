@@ -16,6 +16,8 @@ import {
   rollPlayerDamage,
   type PlayerStats,
   type WeaponDef,
+  AUTO_LEAD_MAX,
+  CASUAL_WEATHER_MULT,
 } from '@/systems/Combat';
 import { DEPLOYABLE_CAPACITY, MAX_ARMED_MINES } from '@/entities/Deployable';
 import { cumulativeXp } from '@/systems/Progression';
@@ -1318,5 +1320,176 @@ describe('fireSlotOnce — the launcher on touch (SPEC-036 §4.6)', () => {
     expect(h.combat.fireSlotOnce('heavy')).toBe('not-ready');
     h.run(0.45);
     expect(h.combat.fireSlotOnce('heavy')).toBe('fired');
+  });
+});
+
+// ------------------------------------------------------------- SPEC-038
+
+describe('difficulty is read live (SPEC-038 §4.6)', () => {
+  it('a switch to casual mid-harness changes the next hit', () => {
+    const h = harness();
+    const e = h.spawn('wurmling', 1.8, 0);
+    e.aggro = true;
+    e.state = 'windup';
+    e.stateTime = 1;
+    h.step();
+    const normal = h.of('player:damaged')[0]?.amount ?? 0;
+    expect(normal).toBe(9);
+    h.save.meta.difficulty = 'casual';
+    h.world.player.invulnUntil = 0;
+    e.state = 'windup';
+    e.stateTime = 1;
+    e.x = h.world.player.x - 1.8;
+    e.z = h.world.player.z;
+    h.step();
+    expect(h.of('player:damaged')[1]?.amount).toBe(Math.round(9 * 0.7));
+    expect(h.world.windupMult).toBe(1.25);
+  });
+
+  it('casual weather is ×0.7 after hazardResist', () => {
+    const patch = (s: Parameters<NonNullable<Parameters<typeof harness>[0]>['patch'] & object>[0]): void => {
+      s.equipped.armor = 'armor_composite';
+    };
+    const normal = harness({ patch });
+    const casual = harness({ patch });
+    casual.save.meta.difficulty = 'casual';
+    const resist = normal.world.stats.hazardResist;
+    expect(resist).toBeGreaterThan(0);
+    const hp0 = normal.world.player.hp;
+    const hp1 = casual.world.player.hp;
+    normal.combat.damagePlayer(100, { kind: 'weather', weather: 'heatwave' }, true);
+    casual.combat.damagePlayer(100, { kind: 'weather', weather: 'heatwave' }, true);
+    expect(hp0 - normal.world.player.hp).toBe(Math.floor(100 * (1 - resist)));
+    expect(hp1 - casual.world.player.hp).toBe(Math.floor(100 * (1 - resist) * CASUAL_WEATHER_MULT));
+  });
+});
+
+describe('auto-fire leads a strafing target (SPEC-038 §4.7)', () => {
+  /** The direction of the first player shot after one step. */
+  function firstShot(h: ReturnType<typeof harness>): { x: number; z: number } {
+    h.step();
+    for (let i = 0; i < h.world.projectiles.size; i++) {
+      const p = h.world.projectiles.at(i);
+      if (p.owner === 'player') {
+        const len = Math.hypot(p.vx, p.vz);
+        return { x: p.vx / len, z: p.vz / len };
+      }
+    }
+    throw new Error('no shot');
+  }
+
+  it('by its velocity × the shot’s flight time, and only in strafe', () => {
+    const h = harness();
+    h.input.autoFire = true;
+    const e = h.spawn('scav_raider', 10, 0);
+    e.aggro = true;
+    e.state = 'strafe';
+    e.vx = 0;
+    e.vz = 3.5;
+    const speed = ITEMS.weapon_kinetic.kind === 'weapon' ? ITEMS.weapon_kinetic.projectileSpeed : 0;
+    const shot = firstShot(h);
+    const lead = 3.5 * (10 / speed);
+    expect(Math.atan2(shot.z, shot.x)).toBeCloseTo(Math.atan2(lead, 10), 2);
+
+    // Winding up, it stands: aimed at as it stands.
+    const g = harness();
+    g.input.autoFire = true;
+    const f = g.spawn('scav_raider', 10, 0);
+    f.aggro = true;
+    f.state = 'windup';
+    f.stateTime = 0;
+    f.vx = 0;
+    f.vz = 3.5;
+    expect(firstShot(g).z).toBeCloseTo(0, 5);
+  });
+
+  it('caps the lead at 3 m', () => {
+    expect(AUTO_LEAD_MAX).toBe(3);
+    const h = harness();
+    h.input.autoFire = true;
+    const e = h.spawn('scav_raider', 10, 0);
+    e.aggro = true;
+    e.state = 'strafe';
+    e.vx = 0;
+    e.vz = 50;
+    const shot = firstShot(h);
+    expect(Math.atan2(shot.z, shot.x)).toBeCloseTo(Math.atan2(3, 10), 2);
+  });
+
+  it('never leads a pointer’s aim', () => {
+    const h = harness();
+    const e = h.spawn('scav_raider', 10, 0);
+    e.aggro = true;
+    e.state = 'strafe';
+    e.vz = 3.5;
+    h.input.buttons.fire.down = true;
+    h.aim = { x: 10, z: 0 };
+    const shot = firstShot(h);
+    expect(shot.z).toBeCloseTo(0, 5);
+  });
+
+  it('a standing Kinetic Repeater lands at least 35 % of 30 s of auto-fire on a strafing raider 10 m out (seed 1)', () => {
+    const h = harness({ seed: 1 });
+    h.input.autoFire = true;
+    h.world.player.hp = 1e6; // the raider shoots back; this measures the gun
+    const e = h.spawn('scav_raider', 10, 0);
+    e.hp = e.maxHp = 1e9;
+    e.aggro = true;
+    e.state = 'strafe';
+    h.run(30);
+    const shots = h.of('weapon:fired').length;
+    const hits = h.of('enemy:hit').length;
+    expect(shots).toBeGreaterThan(60);
+    expect(hits / shots).toBeGreaterThanOrEqual(0.35);
+  });
+});
+
+describe('crits read on the hit (SPEC-038 §4.8)', () => {
+  it('a crit projectile sets lastHitCrit and emits enemy:hit with crit: true', () => {
+    const h = harness();
+    const e = h.spawn('wurmling', 3, 0);
+    h.shot({ x: 3, z: 0, vx: 40, damage: 5, crit: true });
+    h.step();
+    expect(e.lastHitCrit).toBe(true);
+    expect(h.of('enemy:hit')).toEqual([{ enemyId: 'wurmling', x: e.x, z: e.z, crit: true }]);
+    h.shot({ x: e.x, z: e.z, vx: 40, damage: 5, crit: false });
+    h.step();
+    expect(e.lastHitCrit).toBe(false);
+    expect(h.of('enemy:hit')[1]).toEqual({ enemyId: 'wurmling', x: e.x, z: e.z });
+  });
+
+  it('the firing roll marks the shot; blasts never crit (38-n)', () => {
+    const h = harness();
+    h.world.stats.critChance = 1;
+    h.input.autoFire = true;
+    const e = h.spawn('wurmling', 6, 0);
+    e.hp = e.maxHp = 1e6;
+    h.run(0.6);
+    expect(h.of('enemy:hit').length).toBeGreaterThan(0);
+    expect(h.of('enemy:hit').every((hit) => hit.crit === true)).toBe(true);
+    expect(e.lastHitCrit).toBe(true);
+    h.combat.explode(e.x, e.z, 3, 10, 0.5);
+    expect(e.lastHitCrit).toBe(false);
+    expect(h.of('enemy:hit').at(-1)?.crit).toBeUndefined();
+  });
+});
+
+describe('what the dash holds (SPEC-038 §4.1)', () => {
+  it('no shot, no push-out and no knockback while it runs; cooldowns still tick', () => {
+    const h = harness();
+    h.input.autoFire = true;
+    const p = h.world.player;
+    const e = h.spawn('dust_skitter', 0.3, 0); // overlapping the player
+    e.cooldown = 99;
+    p.dashUntil = h.world.time + 0.2;
+    p.fireCooldown = 0.1;
+    h.step();
+    expect(h.of('weapon:fired')).toHaveLength(0);
+    expect(p.x).toBe(0); // not pushed out of the body
+    expect(p.fireCooldown).toBeCloseTo(0.1 - STEP, 10);
+    // Once it ends, push-out and auto-fire resume.
+    h.run(0.25);
+    expect(Math.hypot(p.x - e.x, p.z - e.z)).toBeGreaterThanOrEqual(e.radius + p.radius - 1e-6);
+    expect(h.of('weapon:fired').length).toBeGreaterThan(0);
   });
 });

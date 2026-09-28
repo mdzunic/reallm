@@ -63,3 +63,48 @@ export function tryDash(p: PlayerEntity, dirX: number, dirZ: number, time: numbe
 export function isDashing(p: PlayerEntity, time: number): boolean {
   return time < p.dashUntil;
 }
+
+/** The collision a dash step runs — `ObstacleGrid` satisfies it. */
+export interface DashObstacles {
+  resolveCircle(x: number, z: number, r: number, out: { x: number; z: number }): boolean;
+  hitsCircle(x: number, z: number, r: number): boolean;
+}
+
+/**
+ * One fixed step of a running dash (§4.1): `DASH_DISTANCE / DASH_SECONDS`
+ * (25 m/s) along `dashX/dashZ`, never scaled by the storm, with walking's
+ * collision — resolve out of any obstacle first, then the axis slide, then the
+ * wall clamp at `±edge`. A step the slide blocks on both axes, or that the wall
+ * shortens, ends the movement where it stands (E59); the i-frames run on. The
+ * last step covers only what is left, so a dash is 5 m whatever the step phase.
+ * Writes `vx/vz` for the camera and the facing; `scratch` is the resolve's out.
+ */
+export function stepDash(
+  p: PlayerEntity,
+  obstacles: DashObstacles,
+  edge: number,
+  time: number,
+  dt: number,
+  scratch: { x: number; z: number },
+): void {
+  const speed = DASH_DISTANCE / DASH_SECONDS;
+  p.vx = p.dashX * speed;
+  p.vz = p.dashZ * speed;
+  if (obstacles.resolveCircle(p.x, p.z, p.radius, scratch)) {
+    p.x = scratch.x;
+    p.z = scratch.z;
+  }
+  const travel = Math.max(0, Math.min(dt, p.dashUntil - time)) * speed;
+  const nx = p.x + p.dashX * travel;
+  const nz = p.z + p.dashZ * travel;
+  const blockedX = obstacles.hitsCircle(nx, p.z, p.radius);
+  if (!blockedX) p.x = nx;
+  const blockedZ = obstacles.hitsCircle(p.x, nz, p.radius);
+  if (!blockedZ) p.z = nz;
+  const cx = Math.max(-edge, Math.min(edge, p.x));
+  const cz = Math.max(-edge, Math.min(edge, p.z));
+  const clamped = cx !== p.x || cz !== p.z;
+  p.x = cx;
+  p.z = cz;
+  if ((blockedX && blockedZ) || clamped) p.dashUntil = time;
+}

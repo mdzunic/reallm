@@ -67,7 +67,7 @@ import { makePlayer } from '@/entities/Player';
 import { makeProjectile } from '@/entities/Projectile';
 import type { ArenaState } from '@/entities/World';
 import { Combat, computePlayerStats, type CombatWorld } from '@/systems/Combat';
-import { DASH_DISTANCE, DASH_SECONDS, dashCooldown, isDashing, tryDash } from '@/systems/Dash';
+import { DASH_DISTANCE, dashCooldown, isDashing, stepDash, tryDash } from '@/systems/Dash';
 import { Economy } from '@/systems/Economy';
 import { ExploreMask, REVEAL_CAPACITY } from '@/systems/Exploration';
 import {
@@ -1756,7 +1756,8 @@ export class SurfaceScene extends UiScene<'surface'> {
     const moveZ = (-move.x - move.y) * inv;
     if (dashPressed) this.#tryDash(world, moveX, moveZ);
     if (isDashing(p, world.time)) {
-      this.#stepDash(world, dt);
+      // SPEC-038 §4.1: the dash moves the salvager instead of the stick (E59).
+      stepDash(p, world.obstacles, this.#planet.surface.halfSize - WALL_INSET, world.time, dt, this.#resolved);
       return;
     }
     p.vx = moveX * world.stats.moveSpeed;
@@ -1793,38 +1794,6 @@ export class SurfaceScene extends UiScene<'surface'> {
     this.#dashes++;
     this.#dashCooldown = cooldown;
     this.services.events.emit('player:dashed', { x: p.x, z: p.z, dirX: p.dashX, dirZ: p.dashZ });
-  }
-
-  /**
-   * SPEC-038 §4.1: one step of the dash — 25 m/s along `dashX/dashZ`, never
-   * scaled by the storm, with walking's collision: resolve out first, then the
-   * axis slide. A step the slide blocks on both axes, or that the wall clamp
-   * shortens, ends the movement where it stands (E59); the i-frames run on.
-   */
-  #stepDash(world: CombatWorld, dt: number): void {
-    const p = world.player;
-    const speed = DASH_DISTANCE / DASH_SECONDS;
-    p.vx = p.dashX * speed;
-    p.vz = p.dashZ * speed;
-    if (world.obstacles.resolveCircle(p.x, p.z, p.radius, this.#resolved)) {
-      p.x = this.#resolved.x;
-      p.z = this.#resolved.z;
-    }
-    // The last step covers only what is left, so a dash is 5 m on any step phase.
-    const travel = Math.max(0, Math.min(dt, p.dashUntil - world.time)) * speed;
-    const nx = p.x + p.dashX * travel;
-    const nz = p.z + p.dashZ * travel;
-    const blockedX = world.obstacles.hitsCircle(nx, p.z, p.radius);
-    if (!blockedX) p.x = nx;
-    const blockedZ = world.obstacles.hitsCircle(p.x, nz, p.radius);
-    if (!blockedZ) p.z = nz;
-    const edge = this.#planet.surface.halfSize - WALL_INSET;
-    const cx = Math.max(-edge, Math.min(edge, p.x));
-    const cz = Math.max(-edge, Math.min(edge, p.z));
-    const clamped = cx !== p.x || cz !== p.z;
-    p.x = cx;
-    p.z = cz;
-    if ((blockedX && blockedZ) || clamped) p.dashUntil = world.time;
   }
 
   /** §4.3: mouse unprojects onto y = 0; a touch drag rotates by the camera yaw. */
