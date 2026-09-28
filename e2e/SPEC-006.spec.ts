@@ -699,6 +699,11 @@ test('a scene change crossfades over 1500 ms and stops the outgoing track at 0 (
 test('music(null) fades out, and a call mid-crossfade never layers a third copy (AC-24, AC-25)', async ({ page }) => {
   await startWithAudio(page);
   await page.waitForTimeout(2000);
+  // Both beds this case moves between are warmed first, as AC-28 warms the
+  // scenes' own: a cold `boss` spends its first moments fetching and decoding,
+  // which a loaded GPU-less run (SPEC-040 §4.2) stretches past the 80 ms read
+  // below — and what is asserted there is the crossfade, not the decode.
+  await page.evaluate(() => window.__reallm.audio().preloadMusic(['flight', 'boss']));
 
   // AC-25, the general case: with menu → flight running, asking for boss stops
   // the instance already on its way out and fades the new one from where it is.
@@ -843,19 +848,20 @@ test('a bed still decoding while its fade runs arrives at full anyway (AC-19, AC
 
 test('the 24-voice cap steals, refuses and frees its slots (AC-29, AC-30, AC-31, AC-32, AC-33)', async ({ page }) => {
   await startWithAudio(page);
-  // The limiter admits a voice at once, but Howler starts it only once the bank
-  // has decoded; on a loaded GPU-less run (SPEC-040 §4.2 draws every frame it
-  // gets) that can still be under way here, and the count below is of voices
-  // actually playing. The cap is what this case is about, not the decode.
-  await expect
-    .poll(() => page.evaluate(() => window.__qaSnap().find((h) => h.src.startsWith('ui'))?.state ?? null), COLD_START)
-    .toBe('loaded');
 
   const limiter = await page.evaluate(async () => {
     const audio = window.__reallm.audio();
     const sprites = () => window.__qaSnap().find((h) => h.src.startsWith('ui'))?.sounds.map((s) => s.sprite) ?? [];
     const held = [];
     for (let i = 0; i < 24; i++) held.push(audio.play('ui_blip', { loop: true, minIntervalMs: 0 }));
+    // The limiter admits a voice at once, but the bank loads on its first play
+    // and Howler starts the queued voices only once it has decoded — which a
+    // loaded GPU-less run (SPEC-040 §4.2 draws every frame it gets) can take
+    // well past 300 ms to reach. The count below is of voices playing, so it
+    // waits for the decode first; the cap is what this case is about.
+    for (let waited = 0; waited < 20_000 && window.__qaSnap().find((h) => h.src.startsWith('ui'))?.state !== 'loaded'; waited += 50) {
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    }
     await new Promise((resolve) => setTimeout(resolve, 300));
     const admitted = held.filter((voice) => voice !== null).length;
     const concurrent = sprites().length;
