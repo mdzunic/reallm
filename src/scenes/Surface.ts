@@ -24,6 +24,7 @@ import type { Voice } from '@/core/Audio';
 import type { Scheme } from '@/core/Input';
 import {
   BOSS_REVEALS,
+  CLASSES,
   DIALOGUE,
   ENEMIES,
   FOLLOWERS,
@@ -54,6 +55,7 @@ import {
   type QuickSlot,
   type ResourceId,
   type TipId,
+  type WaveId,
   type WeaponSlot,
   MESH_RECIPE_IDS,
   QUICK_SLOTS,
@@ -63,8 +65,10 @@ import { makeEnemy, type EnemyEntity } from '@/entities/Enemy';
 import { makeFollower } from '@/entities/Follower';
 import { makePlayer } from '@/entities/Player';
 import { makeProjectile } from '@/entities/Projectile';
+import { resetTelegraph, TELEGRAPH_CAPACITY } from '@/entities/Telegraph';
 import type { ArenaState } from '@/entities/World';
 import { Combat, computePlayerStats, type CombatWorld } from '@/systems/Combat';
+import { DASH_DISTANCE, dashCooldown, isDashing, stepDash, tryDash } from '@/systems/Dash';
 import { Economy } from '@/systems/Economy';
 import { ExploreMask, REVEAL_CAPACITY } from '@/systems/Exploration';
 import {
@@ -216,6 +220,14 @@ const QUICK_EMPTY_TEXT: Readonly<Record<QuickSlot, string>> = {
 const QUICK_TOAST_SECONDS = 3;
 /** SPEC-036 §4.6: a launcher tap with no charge left says so, through the same throttle. */
 const LAUNCHER_RECHARGING_TEXT = 'Launcher recharging';
+/** SPEC-038 §4.9: the dash tip rides the first telegraph drawn this close to the player. */
+const DASH_TIP_RANGE = 25;
+/** SPEC-038 §4.9: the windup kinds that draw a ground telegraph (SPEC-041 adds the boss kinds). */
+const TELEGRAPH_WINDUPS: ReadonlySet<GameEvents['enemy:windup']['kind']> = new Set(['charge']);
+/** SPEC-038 §4.11: the debug charger stands this far along the player's facing. */
+const CHARGER_DISTANCE = 8;
+/** SPEC-038 §4.1: the dash streaks' colour — the salvager's cool white. */
+const DASH_STREAK_COLOR = 0xbfe6ff;
 /** SPEC-029 §4.8: any explosive use waits this long after the last. */
 const EXPLOSIVE_USE_SECONDS = 0.5;
 /** SPEC-029 §4.12: the blast camera shake. */
@@ -494,6 +506,18 @@ export class SurfaceScene extends UiScene<'surface'> {
   /** SPEC-037 §4.2: world time the wallet's counts last moved, and whether the baseline is in. */
   #walletChangedAt = -Infinity;
   #walletPrimed = false;
+
+  // SPEC-038 §4.1 — the dash: a `qb-dash` click waiting for the next step,
+  // how many dashes ran (sceneInfo), and the last one's cooldown (the ring).
+  #dashQueued = false;
+  #dashes = 0;
+  #dashCooldown = 1;
+  // SPEC-038 §4.5 — the storm wave of the current survive stage, keyed
+  // `${mission}:${stage}:${wave}`, and its running handle (null while a death
+  // has dismissed it and the respawn has not started it again).
+  #stormKey: string | null = null;
+  #storm: { mission: MissionId; stage: number; wave: WaveId } | null = null;
+  #stormHandle: WaveHandle | null = null;
 
   // Debug-overlay counters (`?debug`, §4.5 observability; e2e reads them).
   #spawned = 0;
@@ -931,6 +955,10 @@ export class SurfaceScene extends UiScene<'surface'> {
     const hud = new Hud(this.ui, 'surface', () => missions.cyclePinned(), {
       slot: (slot) => this.#pushQuickBar('slot', slot),
       pick: (slot) => this.#pushQuickBar('pick', slot),
+      // SPEC-038 §4.1: a click on `qb-dash` dashes on the next step, as V does.
+      dash: () => {
+        this.#dashQueued = true;
+      },
     });
     this.#hud = hud;
     this.disposer.add(() => hud.dispose());
@@ -1035,8 +1063,12 @@ export class SurfaceScene extends UiScene<'surface'> {
     this.disposer.add(() => death.dispose());
     const touch = new TouchControls(services.uiRoot, services.input, services.settings);
     touch.show('surface');
-    // SPEC-037 §4.1: USE lives in the thumb arc's action cell, under the layer's rules.
-    if (hud.arc !== null) touch.mountButton('interact', hud.arc.action);
+    // SPEC-037 §4.1: USE lives in the thumb arc's action cell, under the layer's
+    // rules; SPEC-038 §4.1 puts DASH in its corner cell the same way.
+    if (hud.arc !== null) {
+      touch.mountButton('interact', hud.arc.action);
+      touch.mountButton('dash', hud.arc.primary);
+    }
     this.#touch = touch;
     this.disposer.add(() => touch.dispose());
     // SPEC-034 §4.2: the surface's way out of a corner. The flight menu never
@@ -1213,6 +1245,7 @@ export class SurfaceScene extends UiScene<'surface'> {
     // still accrues; no `checkpoint` save is requested.
     if (this.#holds > 0) {
       this.#qbLength = 0; // taps made during the beat are dropped like the edges
+      this.#dashQueued = false;
       this.#updateReveal(dt);
       return;
     }
@@ -1223,6 +1256,7 @@ export class SurfaceScene extends UiScene<'surface'> {
     // moment it is turned. Presses sampled above are dropped unread.
     if (this.#rotateBlocked()) {
       this.#qbLength = 0;
+      this.#dashQueued = false;
       world.player.vx = 0;
       world.player.vz = 0;
       return;
@@ -1236,6 +1270,7 @@ export class SurfaceScene extends UiScene<'surface'> {
     // closes it from here, since the pad step does not run while held.
     if (this.#uiHolds > 0) {
       this.#qbLength = 0; // the bar is inert while the simulation is held
+      this.#dashQueued = false;
       if (this.#edges.pressed('map')) this.#closeMap();
       if (this.#edges.pressed('interact') && this.#terminalOpen) this.#closeTerminal();
       world.player.vx = 0;
@@ -1258,6 +1293,7 @@ export class SurfaceScene extends UiScene<'surface'> {
     // is above this too — a held line does not run it out.
     if (this.#modalOpen > 0) {
       this.#qbLength = 0;
+      this.#dashQueued = false; // 38-a: a dash pressed under a modal line is dropped
       world.player.vx = 0;
       world.player.vz = 0;
       return;
@@ -1355,6 +1391,8 @@ export class SurfaceScene extends UiScene<'surface'> {
         pickups: (this.#pickups as Pickups).pool,
         nodes: (this.#nodes as Nodes).states,
         telegraph: this.#bossTelegraph(world),
+        // SPEC-038 §4.2: stamped on the world clock, which a held beat stops.
+        telegraphs: { pool: (this.#combat as Combat).telegraphs, time: world.time },
         time,
         dt,
       });
@@ -1439,11 +1477,12 @@ export class SurfaceScene extends UiScene<'surface'> {
         const amount = Math.round((hp[i] as number) - e.hp);
         if (amount > 0) {
           this.#project(e.x, e.z, 1.2);
+          // SPEC-038 §4.8: a critical hit reads on the number.
           numbers.show(
             this.#screenPoint.x,
             this.#screenPoint.y,
             amount,
-            e.elite || e.def.archetype === 'boss' ? 'elite' : 'enemy',
+            e.lastHitCrit ? 'crit' : e.elite || e.def.archetype === 'boss' ? 'elite' : 'enemy',
           );
         }
       }
@@ -1647,6 +1686,16 @@ export class SurfaceScene extends UiScene<'surface'> {
     info['hidden'] = this.#shelterState === 'hidden' ? 1 : 0;
     info['shelters'] = this.#layout?.shelters.length ?? 0;
     info['wallVisible'] = this.#view?.wallVisible ?? 0;
+    // SPEC-038 §3: the dash count, the live telegraphs (and their draws), the
+    // storm wave running, what the weather deals in the open, the director's
+    // target and the difficulty in force.
+    info['dashes'] = this.#dashes;
+    info['telegraphs'] = this.#combat?.telegraphs.size ?? 0;
+    info['telegraphDraws'] = this.#view?.telegraphDraws ?? 0;
+    info['stormWave'] = this.#stormHandle === null || this.#storm === null ? '-' : this.#storm.wave;
+    info['weatherDps'] = Math.round((this.#weather?.exposureDps ?? 0) * 100) / 100;
+    info['population'] = this.#spawn?.populationTarget ?? 0;
+    info['difficulty'] = this.#save?.meta.difficulty ?? 'normal';
     return info;
   }
 
@@ -1697,6 +1746,10 @@ export class SurfaceScene extends UiScene<'surface'> {
   /** §4.3: movement is camera-relative — screen-up is world (−1,−1)/√2. */
   #movePlayer(world: CombatWorld, dt: number): void {
     const p = world.player;
+    // SPEC-038 §4.1: the dash reads its press edge here, like `map`; a click on
+    // `qb-dash` since the last step counts as one. A dead player's is dropped.
+    const dashPressed = this.#edges.pressed('dash') || this.#dashQueued;
+    this.#dashQueued = false;
     if (!p.alive) {
       p.vx = 0;
       p.vz = 0;
@@ -1704,8 +1757,16 @@ export class SurfaceScene extends UiScene<'surface'> {
     }
     const move = this.services.input.state.move;
     const inv = Math.SQRT1_2;
-    p.vx = (move.x - move.y) * inv * world.stats.moveSpeed;
-    p.vz = (-move.x - move.y) * inv * world.stats.moveSpeed;
+    const moveX = (move.x - move.y) * inv;
+    const moveZ = (-move.x - move.y) * inv;
+    if (dashPressed) this.#tryDash(world, moveX, moveZ);
+    if (isDashing(p, world.time)) {
+      // SPEC-038 §4.1: the dash moves the salvager instead of the stick (E59).
+      stepDash(p, world.obstacles, this.#planet.surface.halfSize - WALL_INSET, world.time, dt, this.#resolved);
+      return;
+    }
+    p.vx = moveX * world.stats.moveSpeed;
+    p.vz = moveZ * world.stats.moveSpeed;
     // SPEC-034 §4.1: resolve out of any obstacle *before* the slide, so a
     // player knocked into a rock can always walk away from it.
     if (world.obstacles.resolveCircle(p.x, p.z, p.radius, this.#resolved)) {
@@ -1720,6 +1781,24 @@ export class SurfaceScene extends UiScene<'surface'> {
     const edge = this.#planet.surface.halfSize - WALL_INSET;
     p.x = Math.max(-edge, Math.min(edge, p.x));
     p.z = Math.max(-edge, Math.min(edge, p.z));
+  }
+
+  /**
+   * SPEC-038 §4.1: start a dash along the camera-mapped move input — the same
+   * rotation walking uses — or the facing when the stick and keys are idle. A
+   * refused press (the cooldown) does nothing at all: no toast, no sound.
+   */
+  #tryDash(world: CombatWorld, moveX: number, moveZ: number): void {
+    const p = world.player;
+    const save = this.#save as Save;
+    const moving = Math.hypot(moveX, moveZ) > 1e-3;
+    const dirX = moving ? moveX : Math.cos(p.facing);
+    const dirZ = moving ? moveZ : Math.sin(p.facing);
+    const cooldown = dashCooldown(CLASSES[save.player.classId].passive, save.player.attributes.agility, save.meta.difficulty);
+    if (!tryDash(p, dirX, dirZ, world.time, cooldown)) return;
+    this.#dashes++;
+    this.#dashCooldown = cooldown;
+    this.services.events.emit('player:dashed', { x: p.x, z: p.z, dirX: p.dashX, dirZ: p.dashZ });
   }
 
   /** §4.3: mouse unprojects onto y = 0; a touch drag rotates by the camera yaw. */
@@ -1940,7 +2019,9 @@ export class SurfaceScene extends UiScene<'surface'> {
 
     weather.update(dt);
 
-    const dps = weather.dps;
+    // SPEC-038 §4.5: what the open deals — the forced storm's ramp and the
+    // planet's multiplier on top of `dps`, which keeps its SPEC-012 meaning.
+    const dps = weather.exposureDps;
     // SPEC-030 D-7: inside a shelter, weather damage is skipped entirely —
     // cycled storm, forced storm and avalanche burst alike (AC-20).
     if (dps > 0 && world.player.alive && weather.current !== null && this.#insideShelter === null) {
@@ -2685,6 +2766,8 @@ export class SurfaceScene extends UiScene<'surface'> {
     if (this.#defendPoi !== null) this.#syncDefend(); // wave restarts, HP refills
     // SPEC-034 §4.8: a mission-level wave restarts with its mission's stage.
     this.#restartMissionWaves();
+    // SPEC-038 §4.5 (38-i): the storm wave starts again with the stage.
+    this.#restartStormWave();
 
     // §4.8 step 3.
     const p = world.player;
@@ -2700,6 +2783,9 @@ export class SurfaceScene extends UiScene<'surface'> {
     p.healOverTime = null;
     p.boosts.length = 0;
     p.hazardImmuneUntil = 0;
+    // SPEC-038 §4.1: a respawn or a recall resets the dash.
+    p.dashReadyAt = 0;
+    p.dashUntil = -Infinity;
     const save = this.#save as Save;
     save.player.hp = p.hp;
     this.#camTarget.x = p.x;
@@ -2848,6 +2934,13 @@ export class SurfaceScene extends UiScene<'surface'> {
       button('surface-arsenal', 'Arsenal', () => this.#debugArsenal());
     }
     button('surface-spawn-pack', 'Spawn pack', () => this.#debugSpawnPack());
+    // SPEC-038 §4.11: a charge on demand — the planet's rusher, aggroed.
+    button('surface-spawn-charger', 'Spawn charger', () => this.#debugSpawnCharger());
+    // SPEC-038 §4.11: the budget case needs all three kinds live at once, and
+    // nothing in this spec draws a circle or a ring — so a long-fused pair.
+    if (import.meta.env.DEV) {
+      button('surface-telegraphs', 'Telegraphs', () => this.#debugTelegraphs());
+    }
     // SPEC-024 §4.8: stage 0 of `c6_m2` is a 240 s defence, and an acceptance
     // run cannot pay that per attempt. Dev builds only — `import.meta.env.DEV`
     // strips the control (and its handler) out of a production bundle.
@@ -2894,6 +2987,67 @@ export class SurfaceScene extends UiScene<'surface'> {
     for (let k = 0; k < 5; k++) {
       const angle = (k / 5) * Math.PI * 2;
       combat.spawnEnemy('dust_skitter', cx + Math.cos(angle) * 1.5, cz + Math.sin(angle) * 1.5, false);
+    }
+  }
+
+  /**
+   * SPEC-038 §4.11: the planet's rusher (`hive_warrior` on Eden and the Hive),
+   * aggroed, 8 m along the player's facing — or the nearest bearing to it that
+   * is clear of obstacles.
+   */
+  #debugSpawnCharger(): void {
+    const world = this.#world;
+    const combat = this.#combat;
+    if (world === null || combat === null || !world.player.alive) return;
+    const row = this.#planet.surface.spawn.find((entry) => ENEMIES[entry.enemy].archetype === 'rusher');
+    const id: EnemyId = this.#planet.id === 'eden' || this.#planet.id === 'hive' || row === undefined ? 'hive_warrior' : row.enemy;
+    const p = world.player;
+    const radius = ENEMIES[id].radius;
+    let x = p.x + Math.cos(p.facing) * CHARGER_DISTANCE;
+    let z = p.z + Math.sin(p.facing) * CHARGER_DISTANCE;
+    for (let k = 0; k < 16; k++) {
+      const turn = (k % 2 === 0 ? 1 : -1) * Math.ceil(k / 2) * (Math.PI / 8);
+      const cx = p.x + Math.cos(p.facing + turn) * CHARGER_DISTANCE;
+      const cz = p.z + Math.sin(p.facing + turn) * CHARGER_DISTANCE;
+      if (world.obstacles.hitsCircle(cx, cz, radius + 0.5)) continue;
+      x = cx;
+      z = cz;
+      break;
+    }
+    const e = combat.spawnEnemy(id, x, z, false);
+    e.aggro = true;
+    e.state = 'chase';
+    e.stateTime = 0;
+  }
+
+  /**
+   * SPEC-038 §4.11, dev builds only: a circle and a ring 10 m to either side of
+   * the player, landing in 20 s — with a charger's lane, every kind is live.
+   */
+  #debugTelegraphs(): void {
+    const world = this.#world;
+    const combat = this.#combat;
+    if (world === null || combat === null) return;
+    const p = world.player;
+    for (const [kind, side] of [
+      ['circle', 1],
+      ['ring', -1],
+    ] as const) {
+      if (combat.telegraphs.size >= TELEGRAPH_CAPACITY) return;
+      const t = combat.telegraphs.alloc();
+      resetTelegraph(t);
+      t.kind = kind;
+      t.x = p.x + Math.cos(p.facing + (side * Math.PI) / 2) * 10;
+      t.z = p.z + Math.sin(p.facing + (side * Math.PI) / 2) * 10;
+      t.radius = 2.5;
+      t.ringMax = 4;
+      t.ringSpeed = 6;
+      t.band = 1;
+      t.startAt = world.time;
+      t.hitAt = world.time + 20;
+      t.lockAt = t.hitAt;
+      t.damage = 1;
+      t.source = 'dust_skitter';
     }
   }
 
@@ -3189,6 +3343,10 @@ export class SurfaceScene extends UiScene<'surface'> {
       }
       m.quick = this.#quickScratch;
     }
+
+    // SPEC-038 §4.1: the ring runs from 1 at the press to 0 when ready.
+    const dashLeft = world.player.dashReadyAt - world.time;
+    m.dash = dashLeft > 0 ? Math.round(Math.min(1, dashLeft / Math.max(1e-6, this.#dashCooldown)) * 1000) / 1000 : 0;
 
     const interact = this.#interactHint(world);
     m.interact = interact === null ? null : interact.text;
@@ -4225,6 +4383,26 @@ export class SurfaceScene extends UiScene<'surface'> {
       ),
       // SPEC-029 §4.9: the first lock teaches the cover switch.
       bus.on('weapon:locked', () => this.#requestTip('overheat'), this),
+      // SPEC-038 §4.1: three afterimage streaks along the path, once per dash;
+      // under reduce motion there are none — the ring says it.
+      bus.on(
+        'player:dashed',
+        ({ x, z, dirX, dirZ }) => {
+          if (this.services.settings.get().reduceMotion) return;
+          this.#view?.fx.dash(x, z, dirX, dirZ, DASH_DISTANCE, DASH_STREAK_COLOR);
+        },
+        this,
+      ),
+      // SPEC-038 §4.9: the first telegraph drawn within 25 m teaches the dash.
+      bus.on(
+        'enemy:windup',
+        ({ kind, x, z }) => {
+          const world = this.#world;
+          if (world === null || !TELEGRAPH_WINDUPS.has(kind)) return;
+          if (Math.hypot(x - world.player.x, z - world.player.z) <= DASH_TIP_RANGE) this.#requestTip('dash');
+        },
+        this,
+      ),
       // SPEC-028 §4.4: a pickup of an eligible item fills an empty or run-out
       // quick slot (28-f: a reward spilled on the ground fills it on pickup).
       bus.on(
@@ -4430,7 +4608,13 @@ export class SurfaceScene extends UiScene<'surface'> {
       bus.on('mission:abandoned', () => this.#syncMissionStages(), this),
       bus.on(
         'mission:stageReset',
-        ({ reason }) => {
+        ({ id, stage, reason }) => {
+          // SPEC-038 §4.5 (38-i): a death or a recall on the storm's stage sends
+          // its wave away; the respawn starts it again with the stage.
+          const storm = this.#storm;
+          if ((reason === 'death' || reason === 'recall') && storm !== null && storm.mission === id && storm.stage === stage) {
+            this.#dismissStormWave();
+          }
           // Death already rebuilt the defend stage in `#respawn`; the POI
           // destruction reset rebuilds it here (12-d).
           if (reason === 'poi_destroyed') this.#syncDefend();
@@ -4540,6 +4724,38 @@ export class SurfaceScene extends UiScene<'surface'> {
       this.#syncEscort();
     }
     this.#syncMissionWaves(missions, spawn);
+    this.#syncStormWave(missions, spawn);
+  }
+
+  /**
+   * SPEC-038 §4.5: the current survive stage's storm wave, keyed
+   * `${mission}:${stage}:${wave}`. When the key changes the old one is sent
+   * away — dismissed with its burst and no XP (38-h) — and the new one starts
+   * centred on the player. It never loops and never outlives its stage.
+   */
+  #syncStormWave(missions: Missions, spawn: SpawnDirector): void {
+    const storm = missions.surviveWave();
+    const key = storm === null ? null : `${storm.mission}:${storm.stage}:${storm.wave}`;
+    if (key === this.#stormKey) return;
+    this.#dismissStormWave();
+    this.#stormKey = key;
+    this.#storm = storm;
+    if (storm !== null) this.#stormHandle = spawn.startWave(storm.wave, 'player');
+  }
+
+  /** SPEC-038 §4.5: the running storm wave's survivors leave; the key stays. */
+  #dismissStormWave(): void {
+    if (this.#stormHandle !== null) this.#spawn?.stopWave(this.#stormHandle, { dismiss: true });
+    this.#stormHandle = null;
+  }
+
+  /** SPEC-038 §4.5 (38-i): the stage restarts, so its storm wave does too. */
+  #restartStormWave(): void {
+    const spawn = this.#spawn;
+    const storm = this.#storm;
+    if (spawn === null || storm === null) return;
+    this.#dismissStormWave();
+    this.#stormHandle = spawn.startWave(storm.wave, 'player');
   }
 
   /**

@@ -1,5 +1,5 @@
 // The spawn director (SPEC-012 §4.5). Keeps the field at the planet's
-// population for the quality preset, spawns on a 25–40 m ring outside the
+// population, capped by the quality preset (SPEC-038 §4.4), spawns on a 25–40 m ring outside the
 // camera frustum when possible (12-h), triples objective-enemy weight and
 // force-spawns one after 20 s without (E14), silently recycles far un-aggroed
 // enemies, and runs the wave scripts with `wave:started` / `wave:cleared`.
@@ -55,9 +55,12 @@ const SHELTER_CLEARANCE = 4;
 /** 12-g: wave enemies bypass P but respect `quality.maxEnemies + 8` in total. */
 export const WAVE_CEILING_BONUS = 8;
 
-/** §4.5: `P = round(population × quality.maxEnemies / 32)` — medium-32 is ×1. */
+/**
+ * SPEC-038 §4.4: the planet's design count on every preset, capped by the
+ * preset's `maxEnemies` — difficulty does not depend on the device (B-16).
+ */
 export function populationTarget(planet: PlanetDef, quality: QualitySettings): number {
-  return Math.round((planet.surface.population * quality.maxEnemies) / 32);
+  return Math.min(planet.surface.population, quality.maxEnemies);
 }
 
 /**

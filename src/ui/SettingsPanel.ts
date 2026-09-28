@@ -13,6 +13,8 @@ import type { DamageFlashMode, GuidanceLevel, SettingsStore } from '@/core/Setti
 import { log } from '@/core/Log';
 import type { SaveStore, SlotId } from '@/core/Save';
 import { SLOTS } from '@/core/Save';
+import type { Difficulty } from '@/data/index';
+import { DIFFICULTY_LINES } from '@/systems/UiHelpers';
 import { confirmSheet } from '@/ui/ConfirmSheet';
 import { el, h, testId, type UiRoot } from '@/ui/dom';
 
@@ -60,6 +62,12 @@ const GUIDANCE_CHOICES = [
   ['minimal', 'Minimal'],
   ['off', 'Off'],
 ] as const satisfies readonly (readonly [GuidanceLevel, string])[];
+
+/** SPEC-038 §4.6: the difficulty row's segments, in the creation screen's order. */
+const DIFFICULTY_CHOICES = [
+  ['normal', 'Normal'],
+  ['casual', 'Casual'],
+] as const satisfies readonly (readonly [Difficulty, string])[];
 
 /** SPEC-034 §4.13: what an import into the slot in play says on its way out. */
 export const IMPORT_REBOUND_TEXT = 'Save imported — returning to the main menu.';
@@ -124,6 +132,7 @@ export class SettingsPanel {
         this.#toggleRow('settings-reduce-motion', 'Reduce motion', s.get().reduceMotion, (on) => s.set({ reduceMotion: on })),
         this.#damageFlashRow(),
         this.#guidanceRow(),
+        this.#difficultyRow(),
         this.#choiceRow('Auto-fire', AUTO_FIRE_CHOICES, s.autoFire, (mode) => s.setAutoFire(mode)),
         this.#choiceRow(
           'Joystick side',
@@ -377,6 +386,53 @@ export class SettingsPanel {
         testId(h('div', { class: 'settings-seg' }, ...buttons), 'settings-guidance'),
       ),
       h('div', { class: 'settings-row' }, h('span', { class: 'settings-note' }, 'First-time tips'), resetTips),
+    ) as HTMLDivElement;
+  }
+
+  // ------------------------------------------------------------- difficulty
+
+  /**
+   * SPEC-038 §4.6: the run's difficulty, changeable mid-game (PLAN §4) — only
+   * while a save is bound, so the main menu with no slot shows no row. A press
+   * writes `save.meta.difficulty` and saves at once; combat reads it on the
+   * next hit, the flight on its next resume, and the death penalty at death.
+   */
+  #difficultyRow(): HTMLDivElement | null {
+    const save = this.#deps.save;
+    const current = save.current;
+    if (current === null) return null;
+    const active = current.meta.difficulty;
+    const buttons = DIFFICULTY_CHOICES.map(([value, text]) =>
+      testId(
+        h(
+          'button',
+          {
+            class: `ui-btn seg${value === active ? ' is-active' : ''}`,
+            type: 'button',
+            'aria-pressed': String(value === active),
+            click: () => {
+              const bound = save.current;
+              if (bound === null) return;
+              bound.meta.difficulty = value;
+              save.request('manual');
+              this.#render();
+            },
+          },
+          text,
+        ),
+        `settings-difficulty-${value}`,
+      ),
+    );
+    return h(
+      'div',
+      { class: 'settings-section' },
+      h(
+        'div',
+        { class: 'settings-row' },
+        h('span', {}, 'Difficulty'),
+        testId(h('div', { class: 'settings-seg' }, ...buttons), 'settings-difficulty'),
+      ),
+      testId(h('p', { class: 'settings-note' }, DIFFICULTY_LINES[active]), 'settings-difficulty-line'),
     ) as HTMLDivElement;
   }
 

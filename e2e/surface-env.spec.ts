@@ -25,12 +25,12 @@ test('the medium frame stays inside the §4.11 budget after 30 frames', async ({
 // SPEC-019 AC-96: the spawn-heavy case — the sculpted enemies, the character,
 // projectiles and the VFX pool together stay inside the frame budget once the
 // director has a real field up. The AC's "enemies ≥ 12" assumed medium's
-// maxEnemies (20) was the ceiling, but SPEC-012 §4.5 scales the ambient
-// population by the planet: Cinder-4 is `round(14 · 20 / 32)` = 9 on medium,
-// so 12 is unreachable on the pinned URL and the poll waits for the
+// maxEnemies (20) was the ceiling, but the ambient population is the planet's:
+// SPEC-038 §4.4 made it the design count on every preset, capped by
+// `maxEnemies` — Cinder-4 is 10 on medium — so the poll waits for the
 // director's own ceiling instead. The true 32-enemy worst case is pinned in
 // node by tests/views/enemyRecipes.test.ts (AC-98).
-const CINDER4_MEDIUM_POPULATION = 9; // populationTarget(cinder4, medium), SPEC-012 §4.5
+const CINDER4_MEDIUM_POPULATION = 10; // populationTarget(cinder4, medium), SPEC-038 §4.4
 
 /**
  * SPEC-035 §4.7 halves Cinder-4's ambient population until `c1_m1` is done, so
@@ -65,6 +65,9 @@ async function endRamp(page: Page): Promise<void> {
 
 test('the spawn-heavy medium frame stays within 96 draws and 130 k triangles', async ({ page }) => {
   test.setTimeout(150_000);
+  // SPEC-038 §4.7 turned auto-fire on by default; the field this case measures
+  // is a full one, so the salvager holds its fire while the director fills it.
+  await page.addInitScript(() => localStorage.setItem('reallm:settings', JSON.stringify({ autoFire: 'off' })));
   await start(page, URL);
   await endRamp(page);
   await page.waitForFunction(

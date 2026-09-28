@@ -959,6 +959,10 @@ export class FlightScene extends UiScene<'flight'> {
   resume(): void {
     this.#pauseMenu?.hide();
     this.services.audio.duck(false);
+    // SPEC-038 §4.6: the pause menu is where Settings changes the difficulty,
+    // so the trip picks it up here — it is never cached for the whole run.
+    const save = this.#save;
+    if (save !== null) this.#flight?.setDifficulty(save.meta.difficulty);
   }
 
   override debugInfo(): Record<string, number | string> {

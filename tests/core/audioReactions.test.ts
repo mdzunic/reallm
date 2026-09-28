@@ -41,8 +41,9 @@ type Assert<T extends true> = T;
 type Equal<A, B> = (<T>() => T extends A ? 1 : 2) extends <T>() => T extends B ? 1 : 2 ? true : false;
 
 /**
- * The 51 sound ids — the 29 of §2.2, the story films' 15 (SPEC-021 §6.3) and the
- * seven weapon, impact and blast sprites of SPEC-035 §4.11 —
+ * The 55 sound ids — the 29 of §2.2, the story films' 15 (SPEC-021 §6.3), the
+ * seven weapon, impact and blast sprites of SPEC-035 §4.11 and the dash and
+ * three windup cues of SPEC-038 §4.10 —
  * pinned as an explicit literal (SPEC-001: pinned constants in tests are
  * literals). `SoundId` is derived from the sprite keys, so this is what makes
  * AC-5 a compile error rather than a surprise: recutting a bank without
@@ -80,6 +81,11 @@ const SOUND_IDS = [
   'shot_launcher',
   'impact',
   'explosion',
+  // SPEC-038 §4.10: the dash and the three windup cues.
+  'dash',
+  'windup_melee',
+  'windup_charge',
+  'windup_shot',
   'ship_hit_shield',
   'ship_hit_hull',
   'landing_thrusters',
@@ -132,6 +138,9 @@ const EVENT_KEYS = [
   // SPEC-034 §4.2, §4.6: both silent — the respawn and the burst say it.
   'player:recalled',
   'enemy:dismissed',
+  // SPEC-038 §4.10: both reacted — the dash's whoosh and the windup cue.
+  'player:dashed',
+  'enemy:windup',
   'player:xp',
   'player:leveledUp',
   'tokens:changed',
@@ -232,14 +241,24 @@ describe('the audio manifest (SPEC-006 §2)', () => {
     expect(Object.keys(ASSETS.audio).sort()).toEqual([...SFX_BANKS, ...MUSIC_BANKS].sort());
   });
 
-  it('the sprite keys across the banks are the 51 sound ids (AC-5; SPEC-035 §4.11 adds seven)', () => {
+  it('the sprite keys across the banks are the 55 sound ids (AC-5; SPEC-035 §4.11 adds seven, SPEC-038 §4.10 four)', () => {
     const sprites = Object.values(ASSETS.audio).flatMap((entry) =>
       Object.keys((entry as { sprite?: object }).sprite ?? {}),
     );
     expect(sprites.slice().sort()).toEqual([...SOUND_IDS].sort());
-    expect(sprites).toHaveLength(51);
+    expect(sprites).toHaveLength(55);
     // No id appears in two banks: `SoundId` → bank has to be a function.
-    expect(new Set(sprites).size).toBe(51);
+    expect(new Set(sprites).size).toBe(55);
+  });
+
+  it('the SPEC-038 cues sit in the surface bank inside §4.10’s lengths', () => {
+    const surface = ASSETS.audio.surface.sprite;
+    const limits = { dash: 250, windup_melee: 150, windup_charge: 450, windup_shot: 400 } as const;
+    for (const [id, most] of Object.entries(limits)) {
+      const span = surface[id as keyof typeof surface];
+      expect(span, id).toBeDefined();
+      expect(span[1], id).toBeLessThanOrEqual(most);
+    }
   });
 
   it('every sprite is a forward [offset, duration] span that does not overlap its neighbour', () => {
@@ -449,13 +468,15 @@ describe('the ramp curve (SPEC-006 §4.3, §4.5)', () => {
 // ------------------------------------------------------------ reactions table
 
 describe('the reactions table is exhaustive over GameEvents (SPEC-006 §5)', () => {
-  it('covers the 21 reacted events of §5.2 (AC-38; SPEC-029 §4.12 adds four, SPEC-035 §4.11 two)', () => {
-    expect(REACTED_EVENTS).toHaveLength(21);
+  it('covers the 23 reacted events of §5.2 (AC-38; SPEC-029 §4.12 adds four, SPEC-035 §4.11 two, SPEC-038 §4.10 two)', () => {
+    expect(REACTED_EVENTS).toHaveLength(23);
     expect(REACTED_EVENTS.slice().sort()).toEqual(
       [
         'combat:blast',
         'weapon:fired',
         'enemy:hit',
+        'player:dashed',
+        'enemy:windup',
         'weapon:locked',
         'weapon:switched',
         'mine:armed',
@@ -483,8 +504,8 @@ describe('the reactions table is exhaustive over GameEvents (SPEC-006 §5)', () 
     expect(AUDIO_SILENT.size).toBe(43);
   });
 
-  it('gives every one of the 64 event keys exactly one home (AC-40)', () => {
-    expect(EVENT_KEYS).toHaveLength(64);
+  it('gives every one of the 66 event keys exactly one home (AC-40)', () => {
+    expect(EVENT_KEYS).toHaveLength(66);
     const reacted = new Set<string>(REACTED_EVENTS);
     for (const key of EVENT_KEYS) {
       const hasSound = reacted.has(key);
@@ -579,6 +600,38 @@ describe('reaction outcomes (SPEC-006 §5.2)', () => {
     expect(AUDIO_REACTIONS['enemy:hit']({ enemyId: 'dust_skitter', x: -2, z: 7 })).toEqual({
       id: 'impact',
       opts: { x: -2, z: 7, minIntervalMs: 50, volume: 0.6 },
+    });
+  });
+
+  it('a crit lands the thud at full volume, and only a crit (SPEC-038 §4.8)', () => {
+    const react = AUDIO_REACTIONS['enemy:hit'];
+    expect(react({ enemyId: 'dust_skitter', x: 1, z: 2, crit: true })).toEqual({
+      id: 'impact',
+      opts: { x: 1, z: 2, minIntervalMs: 50, volume: 1 },
+    });
+    expect(react({ enemyId: 'dust_skitter', x: 1, z: 2, crit: false })?.opts?.volume).toBe(0.6);
+  });
+
+  it('player:dashed whooshes where the dash started, with no floor (SPEC-038 §4.10)', () => {
+    expect(AUDIO_REACTIONS['player:dashed']({ x: 3, z: -1, dirX: 1, dirZ: 0 })).toEqual({
+      id: 'dash',
+      opts: { x: 3, z: -1 },
+    });
+  });
+
+  it('enemy:windup cues its kind, positioned, with the §4.10 floors and volumes', () => {
+    const react = AUDIO_REACTIONS['enemy:windup'];
+    expect(react({ enemyId: 'dust_skitter', kind: 'melee', x: 1, z: 1 })).toEqual({
+      id: 'windup_melee',
+      opts: { x: 1, z: 1, minIntervalMs: 120, volume: 0.5 },
+    });
+    expect(react({ enemyId: 'wurmling', kind: 'charge', x: 2, z: 2 })).toEqual({
+      id: 'windup_charge',
+      opts: { x: 2, z: 2, minIntervalMs: 150, volume: 0.9 },
+    });
+    expect(react({ enemyId: 'scav_raider', kind: 'shot', x: 3, z: 3 })).toEqual({
+      id: 'windup_shot',
+      opts: { x: 3, z: 3, minIntervalMs: 150, volume: 0.7 },
     });
   });
 
