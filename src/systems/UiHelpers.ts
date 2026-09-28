@@ -12,14 +12,19 @@ import type { Scheme } from '@/core/Input';
 import { maxHp, type Save, type SlotSummary } from '@/core/Save';
 import type { DamageFlashMode } from '@/core/Settings';
 import {
+  ATTRIBUTE_EFFECTS,
   CLASSES,
   COMPANIONS,
+  ENEMIES,
   FOLLOWERS,
   ITEMS,
+  LOOT_TABLES,
   MISSIONS,
   PLANETS,
+  PLANET_IDS,
   POI_LABELS,
   RESOURCE_IDS,
+  SIGNATURE_FALLBACK_LITHIUM,
   TUNING,
   UPGRADES,
   type Attributes,
@@ -28,18 +33,31 @@ import {
   type ItemId,
   type CompanionEffect,
   type FollowerId,
+  type LootEntry,
+  type LootTableId,
   type MissionDef,
   type MissionId,
+  type PlanetDef,
   type PlanetId,
   type PoiId,
   type Price,
   type Requirement,
   type ResourceId,
+  type ShipSystem,
   type WeatherId,
 } from '@/data/index';
-import { discountTokens, missingRequirements, type DepartResult, type FailReason } from '@/systems/Economy';
+import { LOADOUT_CHAPTERS, RECOMMENDED_LOADOUT, type LoadoutEntry } from '@/systems/Balance';
+import { damageReduction, playerDamageMult } from '@/systems/Combat';
+import {
+  discountTokens,
+  missingRequirements,
+  ownsItem,
+  type DepartResult,
+  type Economy,
+  type FailReason,
+} from '@/systems/Economy';
 import type { SkipRefusal } from '@/systems/Flight';
-import type { SlotView } from '@/systems/Loadout';
+import { weaponDps, type SlotView } from '@/systems/Loadout';
 import { campaignLocked } from '@/systems/Missions';
 import type { Class, Item, QuickSlot, WeaponSlot } from '@/data/index';
 
@@ -48,6 +66,8 @@ import type { Class, Item, QuickSlot, WeaponSlot } from '@/data/index';
 // (the same pattern `systems/Economy.ts` uses).
 const CLASS_TABLE: Readonly<Record<ClassId, Class>> = CLASSES;
 const ITEM_TABLE: Readonly<Record<ItemId, Item>> = ITEMS;
+const LOOT_TABLE: Readonly<Record<LootTableId, readonly LootEntry[]>> = LOOT_TABLES;
+const PLANET_TABLE: Readonly<Record<PlanetId, PlanetDef>> = PLANETS;
 
 // ---------------------------------------------------------------- formatting
 
@@ -76,7 +96,8 @@ export function passiveText(passive: Class['passive']): string {
   const parts: string[] = [];
   if (passive.damageMult !== undefined) parts.push(`${pct(passive.damageMult)} damage`);
   if (passive.maxHpBonus !== undefined) parts.push(`+${passive.maxHpBonus} max HP`);
-  if (passive.shipTokenDiscount !== undefined) parts.push(`−${Math.round(passive.shipTokenDiscount * 100)}% ship prices`);
+  // SPEC-039 §4.3: the Engineer's refit discount covers companions too.
+  if (passive.refitDiscount !== undefined) parts.push(`−${Math.round(passive.refitDiscount * 100)}% ship and companion prices`);
   if (passive.companionEffectMult !== undefined) parts.push(`${pct(passive.companionEffectMult)} companion effect`);
   if (passive.moveSpeedMult !== undefined) parts.push(`${pct(passive.moveSpeedMult)} move speed`);
   if (passive.pickupRadiusMult !== undefined) parts.push(`${pct(passive.pickupRadiusMult)} pickup radius`);
@@ -260,10 +281,46 @@ function effectWords(effect: Extract<Item, { kind: 'consumable' }>['effect']): s
 }
 
 /**
+ * SPEC-039 §4.6: the DPS a weapon's stat line prints, rounded off `weaponDps` —
+ * `DPS <n>` with no cooldown, `DPS <firing> firing · <sustained> sustained`
+ * for a heat weapon, `DPS <sustained> sustained` for a launcher.
+ */
+export function dpsText(id: ItemId): string {
+  const item = ITEM_TABLE[id];
+  const dps = weaponDps(id);
+  if (item.kind !== 'weapon' || dps === null) return '';
+  const firing = Math.round(dps.firing);
+  const sustained = Math.round(dps.sustained);
+  switch (item.cooldown.kind) {
+    case 'none':
+      return `DPS ${firing}`;
+    case 'heat':
+      return `DPS ${firing} firing · ${sustained} sustained`;
+    case 'charges':
+      return `DPS ${sustained} sustained`;
+  }
+}
+
+/**
+ * SPEC-039 §4.6: the one stat line under a shop gear row's name — a weapon's
+ * DPS line and its range, or an armour piece's armor, the damage it takes off
+ * and its hazard resist. `''` for a consumable.
+ */
+export function shopStatText(id: ItemId): string {
+  const item = ITEM_TABLE[id];
+  if (item.kind === 'weapon') return `${dpsText(id)} · range ${item.range} m`;
+  if (item.kind === 'armor') {
+    const cut = Math.round(damageReduction(item.armor) * 100);
+    return `armor ${item.armor} · −${cut}% damage · hazard ${Math.round(item.hazardResist * 100)}%`;
+  }
+  return '';
+}
+
+/**
  * SPEC-031 §4.16: the gear card's stat block, one line per stat. Weapons carry
- * damage, fire rate, the DPS the two multiply to, range, projectile speed,
- * pierce and the cooldown model in words; armor its two numbers; consumables
- * the effect and the stack.
+ * damage, fire rate, the DPS (SPEC-039 §4.6: `dpsText`), range, projectile
+ * speed, pierce and the cooldown model in words; armor its two numbers;
+ * consumables the effect and the stack.
  */
 export function gearStatLines(id: ItemId): readonly string[] {
   const item = ITEM_TABLE[id];
@@ -271,7 +328,7 @@ export function gearStatLines(id: ItemId): readonly string[] {
     return [
       `Damage ${item.damage}`,
       `Fire rate ${item.fireRate}/s`,
-      `DPS ${Math.round(item.damage * item.fireRate)}`,
+      dpsText(id),
       `Range ${item.range} m`,
       `Projectile speed ${item.projectileSpeed} m/s`,
       `Pierce ${item.pierce}`,
@@ -349,7 +406,8 @@ export function companionEffectText(effect: CompanionEffect): string {
   if (effect.regenOutOfCombat !== undefined) parts.push(`${Math.round(effect.regenOutOfCombat * 100)}%/s regen out of combat`);
   if (effect.regenInCombat !== undefined) parts.push(`${Math.round(effect.regenInCombat * 100)}%/s regen in combat`);
   if (effect.cargoBonus !== undefined) parts.push(`+${effect.cargoBonus} cargo`);
-  if (effect.shopDiscount !== undefined) parts.push(`−${Math.round(effect.shopDiscount * 100)}% gear and craft prices`);
+  // SPEC-039 §4.5: ship, gear and companion prices — a recipe has no token price.
+  if (effect.shopDiscount !== undefined) parts.push(`−${Math.round(effect.shopDiscount * 100)}% shop prices`);
   if (effect.shieldRegen !== undefined) parts.push(`+${effect.shieldRegen}/s shield regen`);
   if (effect.autoAim === true) parts.push('auto-aim');
   if (effect.hullBonus !== undefined) parts.push(`+${effect.hullBonus} hull`);
@@ -536,11 +594,11 @@ export function surfaceHoldReason(state: SurfaceHoldState): SurfaceHold {
 // -------------------------------------------------------------- player stats
 
 /**
- * The creation screen's live preview (§4.2). Its HP is `maxHp` and nothing else
- * — SPEC-034 §4.14 folded the class bonus into that formula, and this used to
- * add it a second time. Damage and speed follow the attribute effects
- * `data/characters.ts` documents: might +4 % damage per point, agility +2 %
- * speed, plus the class passives.
+ * The creation screen's live preview (§4.2) and the character panel. Its HP is
+ * `maxHp` and nothing else — SPEC-034 §4.14 folded the class bonus into that
+ * formula, and this used to add it a second time. SPEC-039 §4.7: the damage is
+ * `playerDamageMult`, the one formula `Combat` fights with, level factor
+ * included; speed reads agility's `ATTRIBUTE_EFFECTS` share.
  */
 export function computePlayerStats(
   classId: ClassId,
@@ -553,39 +611,104 @@ export function computePlayerStats(
   const base = armed.kind === 'weapon' ? armed.damage : 0;
   return {
     hp: maxHp(classId, attributes, level),
-    damage: Math.round(base * (1 + 0.04 * attributes.might) * (cls.passive.damageMult ?? 1) * 10) / 10,
-    speed: Math.round(TUNING.PLAYER_SPEED * (1 + 0.02 * attributes.agility) * (cls.passive.moveSpeedMult ?? 1) * 100) / 100,
+    damage: Math.round(base * playerDamageMult(classId, attributes, level) * 10) / 10,
+    speed:
+      Math.round(
+        TUNING.PLAYER_SPEED * (1 + ATTRIBUTE_EFFECTS.agility.moveSpeed * attributes.agility) * (cls.passive.moveSpeedMult ?? 1) * 100,
+      ) / 100,
   };
 }
 
+/** SPEC-039 §3: the stats a `gearCompare` part can name. */
+export type StatKey =
+  | 'tier'
+  | 'dps'
+  | 'firing'
+  | 'damage'
+  | 'fireRate'
+  | 'range'
+  | 'pierce'
+  | 'heat'
+  | 'recharge'
+  | 'cooldown'
+  | 'armor'
+  | 'hazardResist';
+
+/** One part of a compare line. It carries no judgement (SPEC-042 decides which way a part points). */
+export interface StatDelta {
+  readonly stat: StatKey;
+  /** 'DPS', 'firing DPS', 'damage', 'heat per shot', … */
+  readonly label: string;
+  /** Numbers for every stat but `cooldown`, whose values are the model names. */
+  readonly from: number | string;
+  readonly to: number | string;
+}
+
+/** A weapon's slot, or `armor`; `null` for a consumable. */
+function slotOf(item: Item): WeaponSlot | 'armor' | null {
+  if (item.kind === 'weapon') return item.slot;
+  if (item.kind === 'armor') return 'armor';
+  return null;
+}
+
 /**
- * AC-47: the compare line between the equipped piece and a candidate — tier
- * first, then every stat that moves, signed. Same-*line* items only (SPEC-025
- * §4.8): tiers are only comparable inside one ladder, so a rifle against a
- * handgun compares nothing, exactly as a weapon against armor does.
+ * SPEC-039 §4.6: what changes when `candidate` replaces `worn` — any two items
+ * of one slot (two weapons with the same `slot`, or two armour pieces), `[]`
+ * across slots or for consumables. Parts in a fixed order, each only when the
+ * values differ: tier (the two share a line), sustained DPS, firing DPS (either
+ * has a heat model), damage, fire rate, range, pierce, heat per shot (both
+ * heat), recharge (both charges) and the cooldown model; armour compares tier,
+ * armor and hazard resist as it always did.
  */
-export function gearCompareText(equipped: ItemId, candidate: ItemId): string {
-  const a = ITEM_TABLE[equipped];
+export function gearCompare(worn: ItemId, candidate: ItemId): readonly StatDelta[] {
+  const a = ITEM_TABLE[worn];
   const b = ITEM_TABLE[candidate];
-  if (a.kind === 'consumable' || b.kind === 'consumable' || a.line !== b.line) return '';
-  const parts: string[] = [];
-  const delta = (label: string, from: number, to: number): void => {
-    if (from !== to) parts.push(`${label} ${from} → ${to}`);
+  const slot = slotOf(a);
+  if (slot === null || slot !== slotOf(b)) return [];
+  const parts: StatDelta[] = [];
+  const delta = (stat: StatKey, label: string, from: number | string, to: number | string): void => {
+    if (from !== to) parts.push({ stat, label, from, to });
   };
+  if (a.kind !== 'consumable' && b.kind !== 'consumable' && a.line === b.line) delta('tier', 'tier', a.tier, b.tier);
   if (a.kind === 'weapon' && b.kind === 'weapon') {
-    parts.push(`T${a.tier} → T${b.tier}`);
-    delta('damage', a.damage, b.damage);
-    delta('fire rate', a.fireRate, b.fireRate);
-    delta('range', a.range, b.range);
-    delta('pierce', a.pierce, b.pierce);
+    const da = weaponDps(a.id);
+    const db = weaponDps(b.id);
+    delta('dps', 'DPS', Math.round(da?.sustained ?? 0), Math.round(db?.sustained ?? 0));
+    if (a.cooldown.kind === 'heat' || b.cooldown.kind === 'heat') {
+      delta('firing', 'firing DPS', Math.round(da?.firing ?? 0), Math.round(db?.firing ?? 0));
+    }
+    delta('damage', 'damage', a.damage, b.damage);
+    delta('fireRate', 'fire rate', a.fireRate, b.fireRate);
+    delta('range', 'range', a.range, b.range);
+    delta('pierce', 'pierce', a.pierce, b.pierce);
+    if (a.cooldown.kind === 'heat' && b.cooldown.kind === 'heat') {
+      delta('heat', 'heat per shot', a.cooldown.perShot, b.cooldown.perShot);
+    }
+    if (a.cooldown.kind === 'charges' && b.cooldown.kind === 'charges') {
+      delta('recharge', 'recharge', a.cooldown.rechargeSeconds, b.cooldown.rechargeSeconds);
+    }
+    delta('cooldown', 'cooldown', a.cooldown.kind, b.cooldown.kind);
   } else if (a.kind === 'armor' && b.kind === 'armor') {
-    parts.push(`T${a.tier} → T${b.tier}`);
-    delta('armor', a.armor, b.armor);
-    delta('hazard resist', a.hazardResist, b.hazardResist);
-  } else {
-    return '';
+    delta('armor', 'armor', a.armor, b.armor);
+    delta('hazardResist', 'hazard resist', a.hazardResist, b.hazardResist);
   }
-  return parts.join(' · ');
+  return parts;
+}
+
+/**
+ * AC-47, SPEC-039 §4.6: the compare line between the worn piece and a
+ * candidate — `gearCompare` joined as `<label> <from> → <to>` with ` · `; the
+ * tier reads `T<a> → T<b>` and a recharge carries its seconds. Items of
+ * different slots compare as `''`.
+ */
+export function gearCompareText(worn: ItemId, candidate: ItemId): string {
+  return gearCompare(worn, candidate)
+    .map((part) => {
+      if (part.stat === 'tier') return `T${part.from} → T${part.to}`;
+      if (part.stat === 'recharge') return `recharge ${part.from} s → ${part.to} s`;
+      return `${part.label} ${part.from} → ${part.to}`;
+    })
+    .join(' · ');
 }
 
 /**
@@ -605,6 +728,135 @@ export function gearTooltip(id: ItemId): string {
   });
   if (next === undefined) return `T${item.tier} — top tier`;
   return gearCompareText(id, next);
+}
+
+// ------------------------------------ SPEC-039 §4.5, §4.6: the shop and board
+
+/**
+ * SPEC-039 §4.6: a board row's drop line — `null` unless a stage holds a
+ * `boss` objective whose table carries a signature row (D13). A mission in
+ * `missionsDone` is a replay, and a piece carried or worn is not dropped
+ * again, so both read as the fallback lithium (E69).
+ */
+export function bossDropText(save: Save, def: MissionDef): string | null {
+  for (const stage of def.stages) {
+    for (const objective of stage) {
+      if (objective.kind !== 'boss') continue;
+      const signature = LOOT_TABLE[ENEMIES[objective.enemy].loot].find((entry) => entry.kind === 'signature');
+      if (signature === undefined || signature.kind !== 'signature') return null;
+      const replay = (save.progress.missionsDone as readonly string[]).includes(def.id);
+      if (replay || ownsItem(save, signature.itemId)) return `Boss drop: ${SIGNATURE_FALLBACK_LITHIUM} lithium`;
+      return `Boss drop: ${ITEM_TABLE[signature.itemId].name}`;
+    }
+  }
+  return null;
+}
+
+/** One line of the Refit list (SPEC-039 §3). */
+export interface RefitEntry {
+  readonly label: string;
+  readonly tokens: number;
+  readonly required: boolean;
+}
+
+/** The loadout entry as the shop sells it: the step being priced, and whether the save has it. */
+function refitHas(save: Save, entry: LoadoutEntry): boolean {
+  if (entry.kind === 'gear') return ownsItem(save, entry.id);
+  if (entry.kind === 'ship') return save.ship[entry.id] >= entry.tier;
+  return save.companions.some((companion) => companion.id === entry.id);
+}
+
+function refitLabel(entry: LoadoutEntry): string {
+  if (entry.kind === 'gear') return ITEM_TABLE[entry.id].name;
+  if (entry.kind === 'ship') return `${UPGRADES[entry.id].name} tier ${entry.tier}`;
+  return COMPANIONS[entry.id].name;
+}
+
+/**
+ * SPEC-039 §4.6: what the next unvisited planet asks for. The target is the
+ * lowest chapter ≥ 2 whose planet has no landing; with every one landed on
+ * there is no line (39-k). The entries are every `RECOMMENDED_LOADOUT` entry
+ * of chapters 2…target the save does not own, in table order, at the price
+ * `economy` charges now — so tech, the refit discount and the Quartermaster
+ * all apply — and `required` when a planet of chapter ≤ target names it in its
+ * unlock (the Ferrum shield).
+ */
+export function refitLine(
+  save: Save,
+  economy: Pick<Economy, 'price'>,
+): { planet: PlanetId; entries: readonly RefitEntry[] } | null {
+  let target: PlanetDef | null = null;
+  for (const id of PLANET_IDS) {
+    const planet = PLANET_TABLE[id];
+    if (planet.chapter < 2 || (save.progress.visits[id] ?? 0) > 0) continue;
+    if (target === null || planet.chapter < target.chapter) target = planet;
+  }
+  if (target === null) return null;
+  const chapter = target.chapter;
+  const gates: Requirement[] = [];
+  for (const id of PLANET_IDS) {
+    if (PLANET_TABLE[id].chapter <= chapter) gates.push(...PLANET_TABLE[id].unlock);
+  }
+  const entries: RefitEntry[] = [];
+  for (const step of LOADOUT_CHAPTERS) {
+    if (step > chapter) continue;
+    for (const entry of RECOMMENDED_LOADOUT[step]) {
+      if (refitHas(save, entry)) continue;
+      const price =
+        entry.kind === 'ship'
+          ? economy.price('ship', entry.id, entry.tier)
+          : entry.kind === 'companion'
+            ? economy.price('companion', entry.id, 1)
+            : economy.price('gear', entry.id);
+      const required =
+        entry.kind === 'ship' &&
+        gates.some((gate) => gate.kind === 'ship' && gate.system === entry.id && gate.tier === entry.tier);
+      entries.push({ label: refitLabel(entry), tokens: price?.tokens ?? 0, required });
+    }
+  }
+  return { planet: target.id, entries };
+}
+
+/**
+ * SPEC-039 §4.6: `Refit for <planet>: <label> <tokens> · …`, with
+ * ` (required)` after a gate entry, or `Refit for <planet>: ready`; `null` when
+ * there is no line.
+ */
+export function refitText(save: Save, economy: Pick<Economy, 'price'>): string | null {
+  const line = refitLine(save, economy);
+  if (line === null) return null;
+  const name = PLANET_TABLE[line.planet].name;
+  if (line.entries.length === 0) return `Refit for ${name}: ready`;
+  const parts = line.entries.map((entry) => `${entry.label} ${entry.tokens}${entry.required ? ' (required)' : ''}`);
+  return `Refit for ${name}: ${parts.join(' · ')}`;
+}
+
+/** SPEC-039 §4.5: what each ship system acts on, under its name in the shop. */
+const SHIP_ROLES: Readonly<Record<ShipSystem, string>> = {
+  hull: 'Flight: hull points',
+  shield: 'Flight: shield points',
+  weapon: 'Flight: nose guns',
+  engine: 'Flight time and fuel per jump',
+  cargo: 'The hold, on every planet',
+};
+
+export function shipRoleText(system: ShipSystem): string {
+  return SHIP_ROLES[system];
+}
+
+/**
+ * SPEC-039 §4.5: `Required for <planet>` while a planet's unlock names a tier
+ * of `system` above the save's — the Ferrum shield today — else `null`.
+ */
+export function shipGateText(save: Save, system: ShipSystem): string | null {
+  for (const id of PLANET_IDS) {
+    const planet = PLANET_TABLE[id];
+    const gated = planet.unlock.some(
+      (requirement) => requirement.kind === 'ship' && requirement.system === system && requirement.tier > save.ship[system],
+    );
+    if (gated) return `Required for ${planet.name}`;
+  }
+  return null;
 }
 
 // ------------------------------------------------------------------ HUD diff

@@ -100,6 +100,12 @@ export interface EnemyEntity {
   recoverFor: number;
   /** The last player hit on it was a crit — the scene's damage number reads it. */
   lastHitCrit: boolean;
+  /**
+   * SPEC-039 §4.1: a boss spawned for the boss stage of a replayed mission —
+   * half the XP, and its signature row pays the fallback lithium. Reset to
+   * false in `spawnEnemy`; only the arena's own spawn sets it.
+   */
+  replay: boolean;
 }
 
 export function makeEnemy(): EnemyEntity {
@@ -147,5 +153,6 @@ export function makeEnemy(): EnemyEntity {
     chargeHit: false,
     recoverFor: 0,
     lastHitCrit: false,
+    replay: false,
   };
 }

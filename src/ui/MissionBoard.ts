@@ -16,6 +16,7 @@ import type { EventSink } from '@/systems/Progression';
 import {
   abandonMission,
   acceptMission,
+  bossDropText,
   missionStatus,
   pinMission,
   pinnedMission,
@@ -118,6 +119,10 @@ export class MissionBoard {
     // AC-31: rewards, always visible; halved and marked on a replay row.
     const rewards = rewardsText(def.rewards, status === 'replayable');
     row.append(h('p', { class: 'board-rewards' }, rewards === '' ? '—' : rewards));
+    // SPEC-039 §4.6: a boss mission says what its boss drops — the piece on a
+    // first kill the save does not own, else the lithium in its place.
+    const drop = bossDropText(data, def);
+    if (drop !== null) row.append(testId(h('p', { class: 'board-drop' }, drop), `mission-${def.id}-drop`));
 
     if (this.#briefOpen(def, status)) {
       row.append(h('p', { class: 'board-brief' }, def.brief));

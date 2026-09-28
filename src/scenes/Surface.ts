@@ -1571,6 +1571,10 @@ export class SurfaceScene extends UiScene<'surface'> {
     const combat = this.#combat;
     const save = this.#save;
     const economy = this.#economy;
+    // SPEC-039 §3: this visit's signature rows — dropped as the piece, and
+    // paid as the fallback lithium.
+    info['signatureDrops'] = combat?.signatureDrops ?? 0;
+    info['signatureFallbacks'] = combat?.signatureFallbacks ?? 0;
     if (combat !== null && save !== null && economy !== null) {
       info['weapon'] = combat.loadout.activeWeapon().id;
       info['weaponSlot'] = combat.loadout.active;
@@ -2167,6 +2171,10 @@ export class SurfaceScene extends UiScene<'surface'> {
     if (this.#bossId === null && d <= nest.radius && p.alive) {
       const boss = this.#combat?.spawnEnemy(wanted, nest.x, nest.z, false);
       if (boss !== undefined) {
+        // SPEC-039 §4.1: the boss of a replayed stage pays half its XP and the
+        // fallback lithium instead of its piece (D6: no mission, no replay).
+        const mission = missions.bossStageMission();
+        boss.replay = mission !== null && missions.isReplay(mission);
         this.#bossId = boss.id;
         this.#arena = { x: nest.x, z: nest.z, radius: nest.radius, locked: true };
         this.#weather?.suppress(true); // E15

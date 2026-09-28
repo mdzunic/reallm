@@ -16,6 +16,7 @@ import {
   TECH_DISCOUNT_PER_POINT,
   discountTokens,
   noRoomText,
+  ownsItem,
   refuelVoucherText,
   type Fail,
 } from '@/systems/Economy';
@@ -118,12 +119,14 @@ describe('discounts (§4.2)', () => {
     const engineer = world({ ...MARINE, classId: 'engineer', attributes: { might: 1, vigor: 2, agility: 2, tech: 8 } }, (data) => {
       data.companions.push({ id: 'quartermaster', level: 3, enabled: true });
     });
-    // 0.15 engineer (ship only) + 0.03 × 8 tech (everything) + 0.05 × 3
-    // quartermaster (gear and craft only).
-    expect(engineer.economy.discount('ship')).toBeCloseTo(0.39, 10);
+    // SPEC-039 §4.3: 0.15 refit (ship and companion) + 0.03 × 8 tech
+    // (everything) + 0.05 × 3 quartermaster (ship, gear and companion). 39-f:
+    // 0.54 on a ship tier or a companion, capped at 0.40; crafting has no
+    // token price, so it keeps the tech share alone.
+    expect(engineer.economy.discount('ship')).toBe(TUNING.DISCOUNT_CAP);
     expect(engineer.economy.discount('gear')).toBeCloseTo(0.39, 10);
-    expect(engineer.economy.discount('craft')).toBeCloseTo(0.39, 10);
-    expect(engineer.economy.discount('companion')).toBeCloseTo(0.24, 10);
+    expect(engineer.economy.discount('craft')).toBeCloseTo(0.24, 10);
+    expect(engineer.economy.discount('companion')).toBe(TUNING.DISCOUNT_CAP);
     expect(TECH_DISCOUNT_PER_POINT).toBe(0.03);
 
     // A marine with one point of tech gets that point and nothing else.
@@ -354,10 +357,13 @@ describe('companion purchases (§4.3)', () => {
   it('are bought once and upgraded twice', () => {
     const { economy, data, progression, events } = world();
     progression.addTokens(1000, 'test');
-    // The ladder is 25 · 20 · 35, each thinned by the tech this marine carries.
+    // The ladder is 25 · 20 · 35, each thinned by the tech this marine carries
+    // — and, SPEC-039 D2, once the quartermaster is owned, by its own discount:
+    // each step is priced just before it is bought.
     const ladder = [COMPANIONS.quartermaster.cost, ...COMPANIONS.quartermaster.upgradeCosts];
-    const [buy = 0, second = 0, third = 0] = [1, 2, 3].map((level) => economy.price('companion', 'quartermaster', level)?.tokens);
-    expect([buy, second, third]).toEqual(ladder.map((tokens) => discountTokens(tokens, economy.discount('companion'))));
+    const priceOf = (level: number): number => economy.price('companion', 'quartermaster', level)?.tokens ?? 0;
+    const buy = priceOf(1);
+    expect(buy).toBe(discountTokens(ladder[0] ?? 0, economy.discount('companion')));
 
     expect(economy.upgradeCompanion('quartermaster')).toEqual({ ok: false, reason: 'prerequisite' });
     const before = progression.tokens;
@@ -365,7 +371,11 @@ describe('companion purchases (§4.3)', () => {
     expect(progression.tokens).toBe(before - buy);
     expect(economy.buyCompanion('quartermaster')).toEqual({ ok: false, reason: 'max_tier' });
 
+    const second = priceOf(2);
+    expect(second).toBe(discountTokens(ladder[1] ?? 0, economy.discount('companion')));
     expect(economy.upgradeCompanion('quartermaster')).toEqual({ ok: true, level: 2 });
+    const third = priceOf(3);
+    expect(third).toBe(discountTokens(ladder[2] ?? 0, economy.discount('companion')));
     expect(economy.upgradeCompanion('quartermaster')).toEqual({ ok: true, level: 3 });
     expect(economy.upgradeCompanion('quartermaster')).toEqual({ ok: false, reason: 'max_tier' });
     expect(data.companions).toContainEqual({ id: 'quartermaster', level: 3, enabled: true });
@@ -991,5 +1001,61 @@ describe('service mode (SPEC-032 §4.7)', () => {
     off.data.resources.oil = 0;
     on.data.resources.oil = 0;
     expect(on.economy.applyStationSubsidy()).toBe(off.economy.applyStationSubsidy());
+  });
+});
+
+// ------------------------------------------------------------------ SPEC-039
+
+describe('ownership (SPEC-039 §3)', () => {
+  it('owns() is carried or worn, and matches the free ownsItem', () => {
+    const { economy, data } = world();
+    // Worn: the class starters in every slot the save fills.
+    for (const id of ['weapon_kinetic', 'pistol_service', 'armor_scrap'] as const) {
+      expect(economy.owns(id)).toBe(true);
+      expect(ownsItem(data, id)).toBe(true);
+    }
+    expect(economy.owns('launcher_rocket')).toBe(false);
+    data.inventory.push({ itemId: 'launcher_rocket', qty: 1 });
+    expect(economy.owns('launcher_rocket')).toBe(true); // carried
+    expect(economy.equip('launcher_rocket')).toEqual({ ok: true });
+    expect(economy.owns('launcher_rocket')).toBe(true); // worn
+    expect(economy.removeItem('wheat_ration', 3)).toBe(true);
+    expect(ownsItem(data, 'wheat_ration')).toBe(false);
+  });
+});
+
+describe('discount scope (SPEC-039 §4.3)', () => {
+  it("the engineer's refit discount covers ship and companion prices, not gear", () => {
+    const { economy } = world({ ...MARINE, classId: 'engineer', attributes: { might: 1, vigor: 2, agility: 2, tech: 3 } });
+    // 0.15 refit + 0.03 × 3 tech.
+    expect(economy.discount('ship')).toBeCloseTo(0.24, 10);
+    expect(economy.discount('companion')).toBeCloseTo(0.24, 10);
+    expect(economy.discount('gear')).toBeCloseTo(0.09, 10);
+    expect(economy.discount('craft')).toBeCloseTo(0.09, 10);
+    expect(economy.price('companion', 'combat_drone', 1)?.tokens).toBe(discountTokens(30, 0.24));
+  });
+
+  it('the quartermaster discounts ship, gear and companion prices, never crafting', () => {
+    for (const [index, effect] of COMPANIONS.quartermaster.levels.entries()) {
+      const level = (index + 1) as 1 | 2 | 3;
+      const { economy } = world(MARINE, (data) => data.companions.push({ id: 'quartermaster', level, enabled: true }));
+      const shop = 0.03 + effect.shopDiscount;
+      expect(economy.discount('ship')).toBeCloseTo(shop, 10);
+      expect(economy.discount('gear')).toBeCloseTo(shop, 10);
+      expect(economy.discount('companion')).toBeCloseTo(shop, 10);
+      expect(economy.discount('craft')).toBeCloseTo(0.03, 10);
+      // A recipe has no token price to discount, whatever the quartermaster.
+      expect(economy.price('craft', 'medkit')).toEqual({ tokens: 0, resources: RECIPES.medkit.cost });
+    }
+  });
+
+  it('39-f: an engineer at tech 8 with a level-3 quartermaster pays the 40 % cap on a ship tier', () => {
+    const { economy } = world({ ...MARINE, classId: 'engineer', attributes: { might: 1, vigor: 2, agility: 2, tech: 8 } }, (data) => {
+      data.companions.push({ id: 'quartermaster', level: 3, enabled: true });
+    });
+    // 0.15 + 0.24 + 0.15 = 0.54, capped.
+    expect(economy.discount('ship')).toBe(0.4);
+    expect(economy.price('ship', 'shield', 1)?.tokens).toBe(discountTokens(50, 0.4));
+    expect(economy.price('companion', 'field_medic', 1)?.tokens).toBe(discountTokens(30, 0.4));
   });
 });

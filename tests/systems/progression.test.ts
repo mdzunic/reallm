@@ -171,7 +171,14 @@ describe('Progression.addXp (§4.1)', () => {
 
     expect(seen).toEqual([{ tokens: 25, hp: hpBefore + 4, level: 2 }]);
     expect(events.of('ui:toast')).toEqual([{ kind: 'good', text: levelUpText(2, 25) }]);
-    expect(levelUpText(2, 25)).toBe('Level 2 — +25 tokens');
+    expect(levelUpText(2, 25)).toBe('Level 2 — +25 tokens · +4 HP · +2% damage');
+  });
+
+  it('SPEC-039 §4.7: the toast says what a level gives, and every fifth level the attribute point', () => {
+    expect(levelUpText(2, 25)).toBe('Level 2 — +25 tokens · +4 HP · +2% damage');
+    expect(levelUpText(5, 25)).toBe('Level 5 — +25 tokens · +4 HP · +2% damage · +1 attribute point');
+    expect(levelUpText(10, 25)).toMatch(/ · \+1 attribute point$/);
+    expect(levelUpText(11, 25)).not.toContain('attribute point');
   });
 
   it('10-d: XP past the cap accumulates and grants nothing', () => {

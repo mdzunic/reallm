@@ -6,7 +6,12 @@
 // A quick slot stores an id, not a stack (Decisions §2): counts come from the
 // inventory, so a slot whose item ran out keeps its id and the bar reads
 // `Medkit ×0` until something replaces it.
+//
+// SPEC-039 §4.4 adds the numbers a player reads off a weapon: `weaponDps`
+// steps the same cooldown model the loadout runs, with the same fire-rate
+// carry `Combat` applies, so the shop's DPS is the DPS the trigger delivers.
 import type { EventBus, GameEvents } from '@/core/Events';
+import { DEFAULT_STEP } from '@/core/Loop';
 import type { Save } from '@/core/Save';
 import {
   ITEMS,
@@ -15,6 +20,7 @@ import {
   WEAPON_SLOTS,
   type ItemId,
   type QuickSlot,
+  type WeaponCooldown,
   type WeaponSlot,
 } from '@/data/index';
 import type { WeaponDef } from '@/systems/Combat';
@@ -31,10 +37,18 @@ export const HEAT_SHOW_THRESHOLD = 0.05;
 const HEAT_LOCK_EPSILON = 1e-6;
 
 /**
+ * SPEC-039 §4.4: a held trigger carries each interval's remainder into the
+ * next, at most one fixed step of it — the stated fire rate becomes the
+ * delivered rate at 60 Hz, and a released trigger banks nothing more. `Combat`
+ * and the flight guns both apply it.
+ */
+export const FIRE_CARRY = DEFAULT_STEP;
+
+/**
  * SPEC-029 §4.2: one slot's cooldown state — in memory only, so a new scene
  * starts every weapon cold and charged.
  */
-interface SlotCooldown {
+export interface SlotCooldown {
   heat: number;
   locked: boolean;
   charges: number;
@@ -42,9 +56,58 @@ interface SlotCooldown {
   nextShotAt: number;
 }
 
-function coldSlot(weapon: WeaponDef | null): SlotCooldown {
+/** A weapon's cooldown state from cold: no heat, every charge loaded. */
+export function coldSlot(weapon: WeaponDef | null): SlotCooldown {
   const charges = weapon?.cooldown.kind === 'charges' ? weapon.cooldown.charges : 0;
   return { heat: 0, locked: false, charges, rechargeLeft: 0, nextShotAt: -Infinity };
+}
+
+/** SPEC-029 §4.2: one step of cooling (a lock clears at `resumeAt`) or recharging. */
+export function tickSlot(model: WeaponCooldown, cd: SlotCooldown, dt: number): void {
+  if (model.kind === 'heat') {
+    cd.heat = Math.max(0, cd.heat - model.coolPerSec * dt);
+    if (cd.locked && cd.heat <= model.resumeAt) cd.locked = false;
+  } else if (model.kind === 'charges' && cd.rechargeLeft > 0) {
+    cd.rechargeLeft -= dt;
+    if (cd.rechargeLeft <= 0) {
+      cd.rechargeLeft = 0;
+      cd.charges = model.charges;
+    }
+  }
+}
+
+/** SPEC-029 §4.2: not locked, a charge left (charge weapons), past the burst interval. */
+export function slotReady(model: WeaponCooldown, cd: SlotCooldown, time: number): boolean {
+  if (cd.locked) return false;
+  if (model.kind === 'charges' && cd.charges <= 0) return false;
+  return time >= cd.nextShotAt;
+}
+
+/**
+ * SPEC-029 §4.2: what one shot costs — heat (locking at 1), or a charge with
+ * the burst interval before the next. Says what the shot tipped over.
+ */
+export function spendShot(model: WeaponCooldown, cd: SlotCooldown, time: number): 'locked' | 'emptied' | null {
+  if (model.kind === 'heat') {
+    cd.heat += model.perShot;
+    if (cd.heat >= 1 - HEAT_LOCK_EPSILON) {
+      // The epsilon keeps float drift from delaying the lock by one shot;
+      // heat is capped at 1 even for a shot forced through a lock.
+      cd.heat = 1;
+      if (!cd.locked) {
+        cd.locked = true;
+        return 'locked';
+      }
+    }
+  } else if (model.kind === 'charges') {
+    cd.charges -= 1;
+    cd.nextShotAt = time + model.burstInterval;
+    if (cd.charges <= 0) {
+      cd.rechargeLeft = model.rechargeSeconds;
+      return 'emptied';
+    }
+  }
+  return null;
 }
 
 /** One weapon slot as the quick bar draws it; filled in place, no allocation. */
@@ -152,10 +215,7 @@ export class Loadout {
   ready(slot: WeaponSlot, time: number): boolean {
     const weapon = this.weaponIn(slot);
     if (weapon === null) return false;
-    const cd = this.#cooldowns[slot];
-    if (cd.locked) return false;
-    if (weapon.cooldown.kind === 'charges' && cd.charges <= 0) return false;
-    return time >= cd.nextShotAt;
+    return slotReady(weapon.cooldown, this.#cooldowns[slot], time);
   }
 
   /** §4.2: the switch is over *and* the active slot is ready (SPEC-029). */
@@ -184,31 +244,16 @@ export class Loadout {
   fired(slot: WeaponSlot, time: number): void {
     const weapon = this.weaponIn(slot);
     if (weapon === null) return;
-    const cd = this.#cooldowns[slot];
-    const model = weapon.cooldown;
-    if (model.kind === 'heat') {
-      cd.heat += model.perShot;
-      if (cd.heat >= 1 - HEAT_LOCK_EPSILON) {
-        // The epsilon keeps float drift from delaying the lock by one shot;
-        // heat is capped at 1 even for a shot forced through a lock.
-        cd.heat = 1;
-        if (!cd.locked) {
-          cd.locked = true;
-          this.#events.emit('weapon:locked', { slot, itemId: weapon.id });
-        }
-      }
-    } else if (model.kind === 'charges') {
-      cd.charges -= 1;
-      cd.nextShotAt = time + model.burstInterval;
-      if (cd.charges <= 0) {
-        cd.rechargeLeft = model.rechargeSeconds;
-        // §4.2: the heavy hands back after its last charge, with the usual
-        // switch delay — one deliberate shot, then back to work (E41).
-        // SPEC-036 §4.6: only while it is the weapon in hand. Fired from its
-        // slot on touch it never was, and handing back would switch the gun
-        // out from under the player.
-        if (slot === 'heavy' && this.#active === 'heavy') this.select(this.#previous, time);
-      }
+    const tipped = spendShot(weapon.cooldown, this.#cooldowns[slot], time);
+    if (tipped === 'locked') {
+      this.#events.emit('weapon:locked', { slot, itemId: weapon.id });
+    } else if (tipped === 'emptied') {
+      // §4.2: the heavy hands back after its last charge, with the usual
+      // switch delay — one deliberate shot, then back to work (E41).
+      // SPEC-036 §4.6: only while it is the weapon in hand. Fired from its
+      // slot on touch it never was, and handing back would switch the gun
+      // out from under the player.
+      if (slot === 'heavy' && this.#active === 'heavy') this.select(this.#previous, time);
     }
   }
 
@@ -217,18 +262,7 @@ export class Loadout {
     for (const slot of WEAPON_SLOTS) {
       const weapon = this.weaponIn(slot);
       if (weapon === null) continue;
-      const cd = this.#cooldowns[slot];
-      const model = weapon.cooldown;
-      if (model.kind === 'heat') {
-        cd.heat = Math.max(0, cd.heat - model.coolPerSec * dt);
-        if (cd.locked && cd.heat <= model.resumeAt) cd.locked = false;
-      } else if (model.kind === 'charges' && cd.rechargeLeft > 0) {
-        cd.rechargeLeft -= dt;
-        if (cd.rechargeLeft <= 0) {
-          cd.rechargeLeft = 0;
-          cd.charges = model.charges;
-        }
-      }
+      tickSlot(weapon.cooldown, this.#cooldowns[slot], dt);
     }
     // The ↺ marker drops the moment the primary is usable again (§4.4).
     if (this.#fallback && (!this.#cooldowns.primary.locked || this.#active !== 'primary')) this.#fallback = false;
@@ -292,6 +326,61 @@ export class Loadout {
     this.#active = 'primary';
     this.#save.activeWeapon = 'primary';
   }
+}
+
+// ------------------------------------------------ SPEC-039 §4.4: weaponDps
+
+/** What a weapon deals per second, at damage multiplier 1, no crit, no variance. */
+export interface WeaponDps {
+  /** damage × fireRate: while it fires, before any lock or empty charge. */
+  readonly firing: number;
+  /** Mean over a 300 s held-trigger run from cold (§4.4). */
+  readonly sustained: number;
+}
+
+/** §4.4: the length of the held-trigger run `sustained` averages over. */
+export const SUSTAIN_SECONDS = 300;
+
+/** Content is static, so each weapon's run is stepped once. */
+const DPS_CACHE = new Map<ItemId, WeaponDps | null>();
+
+/**
+ * §4.4: `null` for anything that is not a weapon. `sustained` steps the
+ * weapon's own cooldown model at 60 Hz for `SUSTAIN_SECONDS` with the trigger
+ * held from cold — 18,000 steps, the first at t = 0 — and divides the damage
+ * by the run. Each step: the model cools or recharges; the cooldown drops a
+ * step; the weapon fires when it is ready and the cooldown is ≤ 0, carrying at
+ * most one step of the remainder (`FIRE_CARRY`); the shot adds heat or spends
+ * a charge. Station UI and tests only — never on the 60 Hz path.
+ */
+export function weaponDps(id: ItemId): WeaponDps | null {
+  const cached = DPS_CACHE.get(id);
+  if (cached !== undefined) return cached;
+  const item = ITEMS[id];
+  let dps: WeaponDps | null = null;
+  if (item.kind === 'weapon') {
+    const weapon: WeaponDef = item;
+    const model = weapon.cooldown;
+    const cd = coldSlot(weapon);
+    const steps = Math.round(SUSTAIN_SECONDS / FIRE_CARRY);
+    let cooldown = 0;
+    let dealt = 0;
+    for (let step = 0; step < steps; step++) {
+      const time = step * FIRE_CARRY;
+      tickSlot(model, cd, FIRE_CARRY);
+      cooldown -= FIRE_CARRY;
+      if (slotReady(model, cd, time) && cooldown <= 0) {
+        cooldown = Math.max(cooldown, -FIRE_CARRY) + 1 / weapon.fireRate;
+        dealt += weapon.damage;
+        spendShot(model, cd, time);
+      } else if (cooldown < -FIRE_CARRY) {
+        cooldown = -FIRE_CARRY;
+      }
+    }
+    dps = { firing: weapon.damage * weapon.fireRate, sustained: dealt / SUSTAIN_SECONDS };
+  }
+  DPS_CACHE.set(id, dps);
+  return dps;
 }
 
 /** §4.4: a consumable whose effect maps to `slot` may sit in it. */

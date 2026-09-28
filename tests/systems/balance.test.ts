@@ -12,11 +12,13 @@ import {
   LOADOUT_CHAPTERS,
   RECOMMENDED_LOADOUT,
   completionistTokens,
+  decisionSink,
   entryCost,
   guaranteedMainTokensThrough,
   guaranteedMainXpThrough,
   largestCollectObjective,
   loadoutCost,
+  lootGivenItems,
   sideTokensThrough,
   totalTokenSink,
   worstCaseTokensBefore,
@@ -39,12 +41,24 @@ describe('the worst-case model (§5)', () => {
   });
 
   it('prices the recommended loadout the way the table does', () => {
-    // Per chapter: armor+drone · laser+hull+shield · shield 2+drone ·
-    // plasma+hull 2+engine · armor 2+ship guns+medic (§5).
+    // Per chapter: armor+drone+laser · hull+shield · shield 2+drone ·
+    // plasma+hull 2+engine · armor 2+ship guns+medic (§5, SPEC-039 §4.2).
     expect(LOADOUT_CHAPTERS.map((c) => RECOMMENDED_LOADOUT[c].reduce((sum, entry) => sum + entryCost(entry), 0))).toEqual([
-      60, 120, 120, 170, 150,
+      100, 80, 120, 170, 150,
     ]);
-    expect(LOADOUT_CHAPTERS.map(loadoutCost)).toEqual([60, 180, 300, 470, 620]);
+    expect(LOADOUT_CHAPTERS.map(loadoutCost)).toEqual([100, 180, 300, 470, 620]);
+  });
+
+  it('SPEC-039 §4.2: the laser closes chapter 2, after the scanner, and chapter 3 is the ship', () => {
+    expect(RECOMMENDED_LOADOUT[2]).toEqual([
+      { kind: 'gear', id: 'armor_composite' },
+      { kind: 'companion', id: 'scanner_drone' },
+      { kind: 'gear', id: 'weapon_laser' },
+    ]);
+    expect(RECOMMENDED_LOADOUT[3]).toEqual([
+      { kind: 'ship', id: 'hull', tier: 1 },
+      { kind: 'ship', id: 'shield', tier: 1 },
+    ]);
   });
 });
 
@@ -55,7 +69,7 @@ describe('the invariants (§7)', () => {
     );
     expect(over).toEqual([]);
     // The margins, pinned: the design is not meant to be knife-edge anywhere.
-    expect(LOADOUT_CHAPTERS.map((c) => worstCaseTokensBefore(c) - loadoutCost(c))).toEqual([45, 45, 60, 45, 110]);
+    expect(LOADOUT_CHAPTERS.map((c) => worstCaseTokensBefore(c) - loadoutCost(c))).toEqual([5, 45, 60, 45, 110]);
   });
 
   it('2. the Ferrum shield gate stays under 80 % of the chapter-4 budget (E2)', () => {
@@ -86,6 +100,39 @@ describe('the invariants (§7)', () => {
     expect(sink.total).toBeGreaterThanOrEqual(1.5 * completionistTokens());
     // SPEC-029 §4.10: a completionist now affords 52 % of everything.
     expect(Math.round((completionistTokens() / sink.total) * 100)).toBe(52);
+  });
+
+  // SPEC-039 §4.2, PLAN R18 decision 4b: the 2,380 counts ship tiers that act
+  // only in a handful of flights and, before SPEC-039, 500 tokens of gear the
+  // bosses dropped free. What a player has to *decide* about — every priced
+  // piece no loot table gives, the surface and station companions, the Ferrum
+  // gate — must itself stay three quarters of the richest run.
+  it('4b. the decision sink is at least 0.75 × a completionist\'s tokens', () => {
+    expect(decisionSink()).toEqual({ gear: 500, companions: 335, gate: 140, total: 975 });
+    expect(decisionSink().total).toBeGreaterThanOrEqual(0.75 * completionistTokens());
+    expect(0.75 * completionistTokens()).toBe(936.75);
+  });
+
+  it('4c. the recommended loadout buys nothing a loot table hands out', () => {
+    const given = lootGivenItems();
+    expect([...given].sort()).toEqual(
+      [
+        'coolant_pack',
+        'frag_grenade',
+        'landmine',
+        'launcher_grenade',
+        'launcher_rocket',
+        'medkit',
+        'mg_rotary',
+        'mg_scrap',
+        'pistol_magnum',
+        'plasma_cell',
+        'wheat_ration',
+      ].sort(),
+    );
+    const bought = LOADOUT_CHAPTERS.flatMap((chapter) => RECOMMENDED_LOADOUT[chapter]).filter((entry) => entry.kind === 'gear');
+    expect(bought.map((entry) => entry.id)).toEqual(['armor_composite', 'weapon_laser', 'weapon_plasma', 'armor_reactive']);
+    for (const entry of bought) expect(given.has(entry.id), entry.id).toBe(false);
   });
 
   it('5. the mission payout totals are the ones PLAN §7 fixes', () => {

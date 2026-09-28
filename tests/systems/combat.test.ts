@@ -3,15 +3,21 @@
 // consumables and the medic, kills, loot streams and the inCombat signal.
 import { describe, expect, it } from 'vitest';
 import { Rng, RngRoot } from '@/core/Rng';
-import { maxHp } from '@/core/Save';
-import { ITEMS, TUNING } from '@/data/index';
+import { maxHp, type Save } from '@/core/Save';
+import { ENEMIES, ITEMS, SIGNATURE_FALLBACK_LITHIUM, TUNING, type EnemyId, type ItemId } from '@/data/index';
 import { CircleObstacles } from '@/entities/World';
 import {
+  BASE_CRIT_CHANCE,
   BLAST_KNOCKBACK,
+  computePlayerStats,
+  DAMAGE_PER_LEVEL,
   damageReduction,
+  ELITE_XP_MULT,
   enemyHitDamage,
   EXPLOSIVE_FALLOFF,
   gearAt,
+  MEDIC_WEATHER_PAUSE,
+  playerDamageMult,
   rollElite,
   rollPlayerDamage,
   type PlayerStats,
@@ -52,9 +58,9 @@ describe('computePlayerStats', () => {
     expect(h.world.stats.moveSpeed).toBeCloseTo(6 * 1.15 * 1.08, 10);
   });
 
-  it('crit chance is 5 % + 1 % per agility point', () => {
-    expect(harness({ creation: MARINE }).world.stats.critChance).toBeCloseTo(0.06, 10);
-    expect(harness({ creation: SCOUT }).world.stats.critChance).toBeCloseTo(0.09, 10);
+  it('crit chance is 5 % + 2 % per agility point', () => {
+    expect(harness({ creation: MARINE }).world.stats.critChance).toBeCloseTo(0.07, 10);
+    expect(harness({ creation: SCOUT }).world.stats.critChance).toBeCloseTo(0.13, 10);
   });
 
   it('reads armor and hazard resist from the equipped armor', () => {
@@ -67,7 +73,9 @@ describe('computePlayerStats', () => {
     const h = harness({
       patch: (s) => s.companions.push({ id: 'scanner_drone', level: 2, enabled: true }),
     });
-    expect(h.world.stats.pickupRadius).toBeCloseTo(TUNING.PICKUP_RADIUS + 6, 10);
+    // SPEC-039 §4.3: the radius is a companion effect, scaled by the marine's
+    // companionMult of 1 × (1 + 0.10 × 1 tech) = 1.1.
+    expect(h.world.stats.pickupRadius).toBeCloseTo(TUNING.PICKUP_RADIUS + 6 * 1.1, 10);
   });
 
   it('recomputes on level-up, equip, consumable and weather change', () => {
@@ -244,7 +252,7 @@ describe('firing and aiming (§4.3)', () => {
     expect(p.pierceLeft).toBe(0);
     expect(p.ttl).toBeCloseTo(14 / 22 - STEP, 6);
     expect(h.world.player.facing).toBeCloseTo(0, 6); // instant to aim (AC)
-    expect(h.world.player.fireCooldown).toBeCloseTo(1 / 3, 6);
+    expect(h.world.player.fireCooldown).toBeCloseTo(1 / 3 - 1 / 60, 6);
     // Held fire refires only after 1/fireRate (one step of float slack).
     h.run(0.3);
     expect(h.world.projectiles.size).toBe(1);
@@ -295,7 +303,7 @@ describe('firing and aiming (§4.3)', () => {
     const mult = h.world.stats.damageMult;
     expect(p.damage).toBeGreaterThanOrEqual(Math.floor(9 * mult * 0.9));
     expect(p.damage).toBeLessThanOrEqual(Math.ceil(9 * mult * 1.1 * 1.5));
-    expect(h.world.player.fireCooldown).toBeCloseTo(1 / 3, 6);
+    expect(h.world.player.fireCooldown).toBeCloseTo(1 / 3 - 1 / 60, 6);
   });
 
   // SPEC-028 §4.2: a switch resets the per-shot cooldown; the 0.25 s switch
@@ -484,7 +492,8 @@ describe('consumables and healing (§4.8)', () => {
     const h = harness({ patch: (s) => s.companions.push({ id: 'field_medic', level: 1, enabled: true }) });
     h.combat.damagePlayer(100, { kind: 'fall' });
     h.run(2);
-    expect(h.world.player.hp).toBeCloseTo(84 + 0.01 * 184 * 2, 2);
+    // SPEC-039 §4.3: the rate is scaled by the marine's companionMult of 1.1.
+    expect(h.world.player.hp).toBeCloseTo(84 + 0.01 * 1.1 * 184 * 2, 2);
   });
 
   it('level 1 medic stops in combat; level 3 adds regenInCombat always', () => {
@@ -601,20 +610,33 @@ describe('kills, elites and loot (§4.6, §4.7)', () => {
     expect(elites).toBeLessThan(140);
   });
 
-  it('elites roll elite_bonus on top, chapter-capped; owned gear still drops (11-h)', () => {
-    const h = harness({ patch: (s) => (s.equipped.primary = 'weapon_laser') });
-    for (let i = 0; i < 300; i++) {
+  // SPEC-039 §4.1 replaced this case's rifle and armour rows (and their
+  // chapter cap) with lithium and explosives: an elite still rolls
+  // `elite_bonus` on top of its own table, and it never hands out a tier.
+  it('elites roll elite_bonus on top: 6–12 lithium over 200 seeded kills, never a rifle or armour', () => {
+    const h = harness({ seed: 39 });
+    const lithium: number[] = [];
+    for (let i = 0; i < 200; i++) {
+      h.combat.drops.length = 0;
       h.combat.killEnemy(h.spawn('dust_skitter', 5, 5, true), 'player');
       h.step();
+      let total = 0;
+      for (const drop of h.combat.drops) {
+        expect(drop.kind).not.toBe('gear');
+        // The skitter's own table carries no item row: every item is the bonus's.
+        if (drop.kind === 'item') expect(['frag_grenade', 'landmine', 'plasma_cell']).toContain(drop.itemId);
+        if (drop.kind === 'resource' && drop.resource === 'lithium') total += drop.amount;
+      }
+      lithium.push(total);
     }
-    const gear = h.combat.drops.filter((d) => d.kind === 'gear');
-    expect(gear.length).toBeGreaterThan(0);
-    for (const drop of gear) {
-      // Chapter 1 caps elite_bonus tier 3 at tier 1 (§4.4 cap min(3, ceil(ch/2))).
-      expect(['weapon_laser', 'armor_composite']).toContain(drop.itemId);
+    // The bonus row pays 6–12 every time; the skitter's own table can add a
+    // 1–2 trace on top at 5 % (SPEC-009 §4.4's lithium-everywhere rule).
+    for (const total of lithium) {
+      expect(total).toBeGreaterThanOrEqual(6);
+      expect(total).toBeLessThanOrEqual(12 + 2);
     }
-    // The equipped weapon_laser is among them: duplicates spawn anyway.
-    expect(gear.some((d) => d.itemId === 'weapon_laser')).toBe(true);
+    expect(Math.min(...lithium)).toBe(6);
+    expect(lithium.filter((total) => total <= 12).length).toBeGreaterThan(180);
   });
 
   it('scatters loot orbs 0.5–1.5 m from the kill in units of 1–3', () => {
@@ -1491,5 +1513,255 @@ describe('what the dash holds (SPEC-038 §4.1)', () => {
     h.run(0.25);
     expect(Math.hypot(p.x - e.x, p.z - e.z)).toBeGreaterThanOrEqual(e.radius + p.radius - 1e-6);
     expect(h.of('weapon:fired').length).toBeGreaterThan(0);
+  });
+});
+
+// ------------------------------------------------------------------ SPEC-039
+
+/** The five bosses and the piece each one drops (SPEC-039 §4.1). */
+const SIGNATURES: readonly [EnemyId, ItemId][] = [
+  ['dune_wurm', 'launcher_rocket'],
+  ['frost_matriarch', 'mg_scrap'],
+  ['hive_broodlord', 'pistol_magnum'],
+  ['ash_titan', 'launcher_grenade'],
+  ['hive_queen', 'mg_rotary'],
+];
+
+/** Lithium orbs in the drops, summed. */
+function lithiumIn(h: ReturnType<typeof harness>): number {
+  let total = 0;
+  for (const drop of h.combat.drops) if (drop.kind === 'resource' && drop.resource === 'lithium') total += drop.amount;
+  return total;
+}
+
+describe('signature drops and replay kills (SPEC-039 §4.1)', () => {
+  it('a first kill of each boss, its piece unowned, drops that piece as one gear drop', () => {
+    for (const [boss, piece] of SIGNATURES) {
+      const h = harness();
+      h.combat.killEnemy(h.spawn(boss, 10, 0), 'player');
+      const gear = h.combat.drops.filter((d) => d.kind === 'gear');
+      expect(gear, boss).toHaveLength(1);
+      expect(gear[0]?.itemId, boss).toBe(piece);
+      expect(gear[0]?.kind === 'gear' ? gear[0].line : null, boss).toBe((ITEMS[piece] as WeaponDef).line);
+      // Scattered 0.5–1.5 m from the kill like every other drop.
+      const d = Math.hypot((gear[0]?.x ?? 0) - 10, gear[0]?.z ?? 0);
+      expect(d).toBeGreaterThanOrEqual(0.5 - 1e-9);
+      expect(d).toBeLessThanOrEqual(1.5 + 1e-9);
+      // No signature fallback rode along, and the frag pair is still there.
+      expect(lithiumIn(h), boss).toBe(0);
+      expect(h.combat.drops.some((drop) => drop.kind === 'item' && drop.itemId === 'frag_grenade' && drop.qty === 2)).toBe(true);
+      expect([h.combat.signatureDrops, h.combat.signatureFallbacks]).toEqual([1, 0]);
+    }
+  });
+
+  it('a carried piece, a worn piece and a replay each pay 25 lithium in orbs and never the piece (E69)', () => {
+    for (const [boss, piece] of SIGNATURES) {
+      const carried = harness({ patch: (s) => void s.inventory.push({ itemId: piece, qty: 1 }) });
+      const worn = harness({
+        patch: (s) => {
+          const item = ITEMS[piece] as WeaponDef;
+          s.equipped[item.slot] = piece;
+        },
+      });
+      const replay = harness();
+      for (const h of [carried, worn, replay]) {
+        const e = h.spawn(boss, 10, 0);
+        if (h === replay) e.replay = true;
+        h.combat.killEnemy(e, 'player');
+        expect(h.combat.drops.filter((d) => d.kind === 'gear'), boss).toEqual([]);
+        expect(lithiumIn(h), boss).toBe(SIGNATURE_FALLBACK_LITHIUM);
+        // By the orb rule: 1–3 units an orb.
+        for (const drop of h.combat.drops) {
+          if (drop.kind === 'resource') expect(drop.amount).toBeLessThanOrEqual(3);
+        }
+        expect([h.combat.signatureDrops, h.combat.signatureFallbacks]).toEqual([0, 1]);
+      }
+    }
+    expect(SIGNATURE_FALLBACK_LITHIUM).toBe(25);
+  });
+
+  it('39-a: a piece bought and then discarded is not owned at the kill, so it drops', () => {
+    const h = harness({ patch: (s) => void s.inventory.push({ itemId: 'launcher_rocket', qty: 1 }) });
+    h.save.inventory = h.save.inventory.filter((entry) => entry.itemId !== 'launcher_rocket');
+    h.combat.killEnemy(h.spawn('dune_wurm', 10, 0), 'player');
+    expect(h.combat.drops.filter((d) => d.kind === 'gear').map((d) => d.itemId)).toEqual(['launcher_rocket']);
+  });
+
+  it('a replay kill emits enemy:killed.xp of floor(def.xp / 2), and adds that much', () => {
+    for (const [boss] of SIGNATURES) {
+      const h = harness();
+      const e = h.spawn(boss, 10, 0);
+      e.replay = true;
+      const before = h.save.player.xp;
+      h.combat.killEnemy(e, 'player');
+      const xp = Math.floor(ENEMIES[boss].xp * TUNING.REPLAY_REWARD_FRACTION);
+      expect(xp).toBe(Math.floor(ENEMIES[boss].xp / 2));
+      expect(h.of('enemy:killed').map((k) => k.xp)).toEqual([xp]);
+      expect(h.save.player.xp).toBe(before + xp);
+    }
+  });
+
+  it('every other kill pays the XP it always did: common, elite, first-kill boss', () => {
+    const h = harness();
+    h.combat.killEnemy(h.spawn('dust_skitter', 5, 0), 'player');
+    h.combat.killEnemy(h.spawn('dust_skitter', 5, 0, true), 'player');
+    h.combat.killEnemy(h.spawn('dune_wurm', 10, 0), 'player');
+    expect(h.of('enemy:killed').map((k) => k.xp)).toEqual([
+      ENEMIES.dust_skitter.xp,
+      ENEMIES.dust_skitter.xp * ELITE_XP_MULT,
+      ENEMIES.dune_wurm.xp,
+    ]);
+  });
+
+  it('spawnEnemy resets the replay flag of a reused pool slot (39-b: Wake boss is a first kill)', () => {
+    const h = harness();
+    const first = h.spawn('dune_wurm', 10, 0);
+    first.replay = true;
+    h.combat.killEnemy(first, 'player');
+    h.step(); // the sweep frees the slot
+    const again = h.spawn('dune_wurm', 10, 0);
+    expect(again.replay).toBe(false);
+  });
+});
+
+describe('classes and attributes (SPEC-039 §4.3)', () => {
+  it('reads every per-point effect off ATTRIBUTE_EFFECTS', () => {
+    expect(BASE_CRIT_CHANCE).toBe(0.05);
+    expect(DAMAGE_PER_LEVEL).toBe(0.02);
+    const h = harness({
+      creation: { ...SCOUT, classId: 'scout', attributes: { might: 2, vigor: 1, agility: 9, tech: 1 } },
+    });
+    // Scout 2/1/9/1: crit 0.05 + 0.02 × 9 = 0.23; speed 6 × 1.15 × (1 + 0.02 × 9).
+    expect(h.world.stats.critChance).toBeCloseTo(0.23, 10);
+    expect(h.world.stats.moveSpeed).toBeCloseTo(6 * 1.15 * 1.18, 10);
+    expect(h.world.stats.companionMult).toBeCloseTo(1.1, 10);
+  });
+
+  it('the engineer at tech 8 has a companionMult of 1.25 × 1.8 = 2.25', () => {
+    const h = harness({ creation: { ...MARINE, classId: 'engineer', attributes: { might: 1, vigor: 2, agility: 2, tech: 8 } } });
+    expect(h.world.stats.companionMult).toBeCloseTo(2.25, 10);
+    expect(h.world.stats.critChance).toBeCloseTo(0.09, 10);
+  });
+
+  it('the marine hits for ×1.10, and playerDamageMult is the damage the stats carry', () => {
+    const h = harness({ creation: { ...MARINE, attributes: { might: 6, vigor: 5, agility: 1, tech: 1 } } });
+    expect(h.world.stats.damageMult).toBeCloseTo(1.1 * (1 + 0.04 * 6), 10);
+    h.save.player.level = 17;
+    expect(computePlayerStats(h.save).damageMult).toBeCloseTo(playerDamageMult('marine', h.save.player.attributes, 17), 12);
+    expect(playerDamageMult('marine', h.save.player.attributes, 17)).toBeCloseTo(1.1 * 1.24 * 1.32, 12);
+  });
+
+  it('the scanner radius scales with companionMult', () => {
+    const engineer = harness({
+      creation: { ...MARINE, classId: 'engineer', attributes: { might: 1, vigor: 2, agility: 2, tech: 8 } },
+      patch: (s) => s.companions.push({ id: 'scanner_drone', level: 1, enabled: true }),
+    });
+    expect(engineer.world.stats.pickupRadius).toBeCloseTo(TUNING.PICKUP_RADIUS + 4 * 2.25, 10);
+    // 39-g: a disabled companion contributes nothing for the multiplier to scale.
+    const off = harness({ patch: (s) => s.companions.push({ id: 'scanner_drone', level: 3, enabled: false }) });
+    expect(off.world.stats.pickupRadius).toBeCloseTo(TUNING.PICKUP_RADIUS, 10);
+  });
+
+  it('the drone damage scales with companionMult, its fire rate does not', () => {
+    const h = harness({
+      creation: { ...MARINE, classId: 'engineer', attributes: { might: 1, vigor: 2, agility: 2, tech: 8 } },
+      patch: (s) => s.companions.push({ id: 'combat_drone', level: 1, enabled: true }),
+    });
+    const egg = h.spawn('hive_egg', 6, 0);
+    egg.aggro = true;
+    h.step();
+    const stats = h.world.stats;
+    expect(h.world.projectiles.at(0).damage).toBe(Math.max(1, Math.round(12 * stats.damageMult * 0.5 * 2.25)));
+    // One shot a second at L1, whatever the multiplier.
+    h.run(1.5);
+    expect(egg.maxHp - egg.hp).toBe(2 * h.world.projectiles.at(0).damage);
+  });
+});
+
+describe('the Field Medic under weather (SPEC-039 §4.5)', () => {
+  const MEDIC = (s: Save): void => void s.companions.push({ id: 'field_medic', level: 1, enabled: true });
+
+  /** A step of a storm too thin to land a whole point in the checked window. */
+  function drizzle(h: ReturnType<typeof harness>): void {
+    h.combat.damagePlayer(0.1 * STEP, { kind: 'weather', weather: 'sandstorm' }, true);
+    h.step();
+  }
+
+  it('regenerates nothing while weather is damaging the player', () => {
+    const h = harness({ patch: MEDIC });
+    h.combat.damagePlayer(100, { kind: 'fall' });
+    for (let i = 0; i < 120; i++) drizzle(h);
+    expect(h.world.player.hp).toBe(84);
+  });
+
+  it('waits MEDIC_WEATHER_PAUSE after the last tick, then resumes at its scaled rate', () => {
+    expect(MEDIC_WEATHER_PAUSE).toBe(1);
+    const h = harness({ patch: MEDIC });
+    h.combat.damagePlayer(100, { kind: 'fall' });
+    for (let i = 0; i < 60; i++) drizzle(h);
+    h.run(0.9);
+    expect(h.world.player.hp).toBe(84); // still inside the pause
+    h.run(1.1); // 2 s after the last tick: 1 s of regeneration
+    expect(h.world.player.hp).toBeCloseTo(84 + 0.01 * 1.1 * 184 * 1, 0);
+    expect(h.world.player.hp).toBeGreaterThan(84);
+  });
+
+  it('heal-over-time items still heal during weather', () => {
+    const h = harness({ patch: MEDIC });
+    h.combat.damagePlayer(100, { kind: 'fall' });
+    h.combat.applyConsumable({ kind: 'heal', fraction: 0.3, overSeconds: 5 });
+    for (let i = 0; i < 60; i++) drizzle(h);
+    // 1 s of a 5 s ration: 0.3 × 184 / 5 ≈ 11 HP, and nothing from the medic.
+    expect(h.world.player.hp).toBeCloseTo(84 + (0.3 * 184) / 5, 0);
+  });
+
+  it('39-h: under a coolant pack no tick lands, so the medic keeps healing', () => {
+    const h = harness({ patch: MEDIC });
+    h.combat.damagePlayer(100, { kind: 'fall' });
+    h.combat.applyConsumable({ kind: 'hazard_immunity', seconds: 30 });
+    for (let i = 0; i < 60; i++) drizzle(h);
+    expect(h.world.player.hp).toBeCloseTo(84 + 0.01 * 1.1 * 184, 0);
+  });
+});
+
+describe('the fire-rate carry (SPEC-039 §4.4)', () => {
+  it('600 held steps of the Laser Carbine fire exactly 40 shots', () => {
+    const h = harness({ patch: (s) => void (s.equipped.primary = 'weapon_laser') });
+    h.input.buttons.fire.down = true;
+    h.aim = { x: 10, z: 0 };
+    for (let i = 0; i < 600; i++) h.step();
+    expect(h.of('weapon:fired')).toHaveLength(40);
+  });
+
+  it('a held trigger carries at most one step of the remainder', () => {
+    const h = harness();
+    h.input.buttons.fire.down = true;
+    h.aim = { x: 10, z: 0 };
+    h.step();
+    // The first shot carried one whole step: the next is due 1/3 s after it.
+    expect(h.world.player.fireCooldown).toBeCloseTo(1 / 3 - 1 / 60, 6);
+  });
+
+  it('39-j: released for 10 s, fireCooldown rests at −1/60 s, and the next press fires at once', () => {
+    const h = harness();
+    h.aim = { x: 10, z: 0 };
+    h.input.buttons.fire.down = true;
+    h.step();
+    h.input.buttons.fire.down = false;
+    h.run(10);
+    expect(h.world.player.fireCooldown).toBeCloseTo(-1 / 60, 10);
+    h.input.buttons.fire.down = true;
+    h.step();
+    expect(h.of('weapon:fired')).toHaveLength(2);
+    expect(h.world.player.fireCooldown).toBeCloseTo(1 / 3 - 1 / 60, 6);
+  });
+
+  it('39-i: a switch zeroes the cooldown, so no remainder crosses it', () => {
+    const h = harness();
+    h.aim = { x: 10, z: 0 };
+    h.input.buttons.fire.down = true;
+    h.step();
+    h.combat.loadout.select('sidearm', h.world.time);
+    expect(h.world.player.fireCooldown).toBe(0);
   });
 });

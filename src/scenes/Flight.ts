@@ -22,6 +22,7 @@ import type { SceneParams } from '@/core/StateMachine';
 import { cargoCap, maxHp } from '@/core/Save';
 import { FLIGHT_ASSETS, PLANET_ART } from '@/data/assets';
 import { CHAPTER_CARDS, ENEMIES, MISSIONS, PLANETS, TIPS, type DialogueId, type PlanetDef, type TipId } from '@/data/index';
+import { computePlayerStats } from '@/systems/Combat';
 import { Economy } from '@/systems/Economy';
 import { tipDue, tipKey } from '@/systems/Guidance';
 import { CARD, cardDue, cardKey, LINE_LEDGER } from '@/systems/StoryBeats';
@@ -203,6 +204,8 @@ export class FlightScene extends UiScene<'flight'> {
         companions: save.companions,
         quality: services.renderer.quality,
         difficulty: save.meta.difficulty,
+        // SPEC-039 §4.3: ARIA's shield regeneration is a companion effect.
+        companionMult: computePlayerStats(save).companionMult,
       },
       economy,
       progression,

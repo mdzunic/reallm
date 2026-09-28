@@ -5,6 +5,11 @@
 // `failText` reason; and every purchase runs through a confirm sheet whose
 // confirm tap *re-validates* — a level-up toast changing the balance mid-sheet
 // ends in an error toast and an open sheet, never a silent charge (14-c).
+//
+// SPEC-039 §4.5, §4.6: above the tabs, the Refit line says what the next
+// planet asks for; each gear row prints its stat line and, against a
+// different piece worn in its slot, the compare line; each ship row says what
+// its system acts on, and the shield row which planet still gates on it.
 import type { Save, SaveStore } from '@/core/Save';
 import {
   COMPANIONS,
@@ -24,7 +29,12 @@ import {
   balanceAfterText,
   companionEffectText,
   failText,
+  gearCompareText,
   priceText,
+  refitText,
+  shipGateText,
+  shipRoleText,
+  shopStatText,
   shortfallText,
   upgradeDeltaText,
 } from '@/systems/UiHelpers';
@@ -135,6 +145,10 @@ export class ShopPanel {
         break;
     }
     const shop = testId(el('div', 'shop'), 'shop');
+    // SPEC-039 §4.6: the Refit line sits above the tabs and refreshes with
+    // them — after every purchase. With every planet landed on there is none.
+    const refit = refitText(this.#deps.data, this.#deps.economy);
+    if (refit !== null) shop.append(testId(h('p', { class: 'shop-refit' }, refit), 'shop-refit'));
     shop.append(tabs, body);
     this.#container.replaceChildren(shop);
   }
@@ -148,6 +162,10 @@ export class ShopPanel {
     const row = testId(el('article', 'shop-row'), `shop-ship-${system}`);
     const head = h('div', { class: 'shop-row-head' }, h('span', { class: 'shop-name' }, def.name), h('span', { class: 'badge' }, `Tier ${current}`));
     row.append(head);
+    // SPEC-039 §4.5: what the system acts on, and the planet still gating on it.
+    row.append(testId(h('p', { class: 'shop-role' }, shipRoleText(system)), `shop-ship-${system}-role`));
+    const gate = shipGateText(this.#deps.data, system);
+    if (gate !== null) row.append(testId(h('p', { class: 'shop-gate' }, gate), `shop-ship-${system}-gate`));
     if (current >= 3) {
       row.append(h('p', { class: 'shop-note' }, failText('max_tier')));
       return row;
@@ -238,7 +256,13 @@ export class ShopPanel {
           `shop-gear-${id}-details`,
         ),
       );
-      row.append(head, h('p', { class: 'shop-note' }, item.blurb));
+      row.append(head, testId(h('p', { class: 'shop-stats' }, shopStatText(id)), `shop-gear-${id}-stats`));
+      // SPEC-039 §4.6: against the piece worn in this item's own slot, when
+      // that is a different one — the same slot, not the same line.
+      const worn = item.kind === 'weapon' ? data.equipped[item.slot] : item.kind === 'armor' ? data.equipped.armor : null;
+      const compare = worn !== null && worn !== id ? gearCompareText(worn, id) : '';
+      if (compare !== '') row.append(testId(h('p', { class: 'shop-compare' }, compare), `shop-gear-${id}-compare`));
+      row.append(h('p', { class: 'shop-note' }, item.blurb));
       if (owned && !equipped) {
         row.append(
           h('div', { class: 'shop-buy-line' },

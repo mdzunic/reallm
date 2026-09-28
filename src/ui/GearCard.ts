@@ -84,6 +84,8 @@ export function openGearCard(id: ItemId, deps: GearCardDeps): Promise<void> {
     );
 
     const stats = h('ul', { class: 'gear-card-stats' }, ...gearStatLines(id).map((lineText) => h('li', {}, lineText)));
+    // SPEC-039 §4.6: against the piece worn in this item's own slot — a
+    // machine gun reads against the rifle it would replace.
     const compare = worn !== null && worn !== id ? gearCompareText(worn, id) : '';
 
     // The buy line: the priced path the row uses, or Equip when it is owned.

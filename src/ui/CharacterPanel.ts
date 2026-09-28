@@ -2,8 +2,21 @@
 // the gear on the body with its compare line, the twenty inventory slots with
 // their three actions, and the hold against the cargo cap. Everything derived
 // prints through the tested pure helpers; the mutations go through Economy.
-import { maxHp, type Save, type SaveStore } from '@/core/Save';
-import { ITEMS, QUICK_SLOTS, RESOURCE_IDS, type ItemId, type QuickSlot, type WeaponSlot } from '@/data/index';
+//
+// SPEC-039 §4.7: a point earned at every fifth level waits here — a `+` beside
+// each attribute while one is unspent, behind a confirm sheet, because a point
+// cannot be moved once it is spent.
+import { allocateAttribute, maxHp, unspentAttributePoints, type Save, type SaveStore } from '@/core/Save';
+import {
+  ATTRIBUTE_MAX,
+  ITEMS,
+  QUICK_SLOTS,
+  RESOURCE_IDS,
+  type Attributes,
+  type ItemId,
+  type QuickSlot,
+  type WeaponSlot,
+} from '@/data/index';
 import { INVENTORY_SLOTS, type Economy } from '@/systems/Economy';
 import { quickEligible } from '@/systems/Loadout';
 import { computePlayerStats, failText, gearCompareText, gearTooltip, HP_FULL_TEXT } from '@/systems/UiHelpers';
@@ -11,6 +24,14 @@ import { confirmSheet } from '@/ui/ConfirmSheet';
 import { el, h, testId, type UiRoot } from '@/ui/dom';
 import { itemIcon } from '@/ui/ItemIcon';
 import { portraitManifest, portraitSource } from '@/ui/portraits';
+
+/** SPEC-039 §4.7: the `char-attrs` line's order and names. */
+const ATTRIBUTE_NAMES: readonly [keyof Attributes, string][] = [
+  ['might', 'Might'],
+  ['vigor', 'Vigor'],
+  ['agility', 'Agility'],
+  ['tech', 'Tech'],
+];
 
 export interface CharacterDeps {
   ui: UiRoot;
@@ -92,8 +113,65 @@ export class CharacterPanel {
         ),
         'character-stats',
       ),
-      h('p', { class: 'char-attrs' }, `Might ${a.might} · Vigor ${a.vigor} · Agility ${a.agility} · Tech ${a.tech}`),
+      ...this.#attributeLines(),
     );
+  }
+
+  /**
+   * SPEC-039 §4.7, D9: `Might <n> · Vigor <n> · Agility <n> · Tech <n>`, and
+   * while a point is unspent, how many (`char-attr-points`) and a `+` after
+   * each value — disabled at `ATTRIBUTE_MAX` (39-n).
+   */
+  #attributeLines(): HTMLElement[] {
+    const { player } = this.#deps.data;
+    const unspent = unspentAttributePoints(player);
+    const line = h('p', { class: 'char-attrs' });
+    ATTRIBUTE_NAMES.forEach(([attribute, name], index) => {
+      if (index > 0) line.append(' · ');
+      line.append(`${name} ${player.attributes[attribute]}`);
+      if (unspent <= 0) return;
+      line.append(
+        testId(
+          h(
+            'button',
+            {
+              class: 'ui-btn attr-btn',
+              type: 'button',
+              'aria-label': `Spend a point on ${name}`,
+              disabled: player.attributes[attribute] >= ATTRIBUTE_MAX,
+              click: () => this.#spendPoint(attribute, name),
+            },
+            '+',
+          ),
+          `char-attr-${attribute}-plus`,
+        ),
+      );
+    });
+    if (unspent <= 0) return [line];
+    const points = testId(
+      h('p', { class: 'char-attr-points' }, `${unspent} attribute point${unspent === 1 ? '' : 's'} to spend`),
+      'char-attr-points',
+    );
+    return [line, points];
+  }
+
+  /** SPEC-039 §4.7: confirmed, one point is spent and saved; cancelled, nothing (39-p). */
+  #spendPoint(attribute: keyof Attributes, name: string): void {
+    void confirmSheet(
+      this.#deps.ui,
+      { title: `Spend a point on ${name}?`, body: 'Points cannot be moved later.', confirmText: 'Spend' },
+      () => {
+        if (!allocateAttribute(this.#deps.data, attribute)) {
+          this.#deps.ui.toast('No point to spend', 'error');
+          return false;
+        }
+        return true;
+      },
+    ).then((spent) => {
+      if (!spent) return;
+      this.#deps.save.request('purchase');
+      this.refresh();
+    });
   }
 
   // ------------------------------------------------------------------- gear

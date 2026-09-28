@@ -1502,3 +1502,49 @@ three, none with the pool empty (`tests/views/telegraphView.test.ts`).
       and whether the dash's 1.36 s cooldown feels like an answer or a tax.
 - [ ] the four new sounds heard rather than asserted: the dash's whoosh and the
       three windup cues under a real fight's guns.
+
+## SPEC-039 — builds that matter: signature drops, classes, the arsenal and honest numbers (M7g)
+
+- **Build:** `spec/SPEC-039` — untagged
+- **Devices:**
+  - desktop — headless Chromium 1280 × 720 (Playwright, Linux container, **software GL / SwiftShader**)
+  - phone — the `phone-landscape` project's matrix (`SPEC-037.phone.spec.ts`); a
+    physical handset still owes the human pass
+
+Recorded from the container the branch was built in: `npm run check` (88 files),
+`e2e/SPEC-039.spec.ts` (9 cases), and the suites the change could move —
+`SPEC-009`, `SPEC-010`, `SPEC-011`, `SPEC-012`, `SPEC-013`, `SPEC-014`,
+`SPEC-020`, `SPEC-025`, `SPEC-028`, `SPEC-029`, `SPEC-031`, `SPEC-032`,
+`SPEC-034`, `SPEC-035`, `SPEC-036`, `SPEC-037` and the phone matrix. The §7 list
+is a desktop-and-phone pass owed before the `m7` tag; each row names the
+automated evidence that stands in for it here.
+
+**Verified here, by name.**
+
+| §7 item | Evidence in this branch |
+|---|---|
+| Follow the Refit line into Vetra with the Laser, the Weave and the Scanner Drone | `SPEC-039.spec.ts` case 3 (a new save reads `Refit for Vetra: Composite Weave 39 · Scanner Drone 20 · Laser Carbine 39`; bought through the shop, it reads `Refit for Vetra: ready`; with every planet landed on there is no line) and `tests/ui/helpers.test.ts` for `refitText` (the Ferrum gate as `Shield tier 2 88 (required)`) |
+| Kill the Wurm and pick up the Rocket Launcher; replay `c1_m3` and see lithium | case 6 (`sceneInfo.signatureDrops` 1 on a first kill, `signatureFallbacks` 1 with the launcher owned) and `tests/systems/combat.test.ts` (each boss's piece, 25 lithium in orbs on a replay or an owned piece, half the XP on a replay). The replay itself was not flown here: the arena's `replay` flag is covered by `bossStageMission` and `isReplay` in `tests/systems/missions.test.ts` |
+| Read the Chaingun's card and row against the Laser, and fire both | cases 1 and 2 (`DPS 110 firing · 64 sustained`, `DPS 36 → 64` against the Kinetic Repeater a new save wears), `tests/ui/helpers.test.ts` for Laser → Chaingun, `tests/systems/arsenal.test.ts` for the delivered rates, and `SPEC-029.spec.ts` case 2 for the lock |
+| Reach level 5, spend the point, and read the toast | case 7 (`1 attribute point to spend`, a cancelled sheet spends nothing, a confirmed vigor point reads `184/184 HP`) and `tests/systems/progression.test.ts` for `Level 5 — … · +1 attribute point` |
+| Stand in a storm with a Field Medic and watch it wait | `tests/systems/combat.test.ts` — nothing regenerated under weather ticks, a 1 s wait after the last one, heal-over-time still healing, a coolant pack keeping the medic running |
+| With the Engineer at tech 8, check a companion's discounted price | `tests/systems/economy.test.ts` (0.15 + 0.24 on a companion; with a level-3 Quartermaster, 0.54 capped at 0.40) and case 9 (`−5% shop prices`, no `craft`) |
+
+**What the e2e runs showed besides.** With four workers, the heavy surface
+batch (`SPEC-011`, `SPEC-012-missions`, `SPEC-013`, `SPEC-034`) failed
+`SPEC-012-missions.spec.ts:131` — the 60 s forced-storm survive stage against a
+110 s wall-clock deadline — and the same batch on untouched `main` (ad7e582)
+failed the same line, alongside `SPEC-034.spec.ts:191`. Run alone, the missions
+case passed twice. `SPEC-013.spec.ts:210` (`holding` read as `recalled`, one run in
+seven here) is the idle 95 s warp of a pilot whose save has no fixed seed: the
+Cinder-4 waves shoot a ship that never moves or fires. Simulated over seeds
+1–400 through `systems/Flight` with the suite's pilot, that warp is recalled 27
+times with ARIA's regeneration at ×1 (`main`) and 23 times at SPEC-039's ×1.1,
+and no seed is recalled only at ×1.1 — the only SPEC-039 change on that path.
+
+**Owed on hardware, before the `m7` tag.**
+
+- [ ] the six rows above on desktop and on the reference phone — above all the
+      two that are a matter of feel: firing the Chaingun against the Laser, and
+      whether the Medic's pause makes a storm feel dangerous rather than unfair.
+- [ ] a real replay of `c1_m3` from the board, to see the lithium on the ground.

@@ -138,6 +138,9 @@ export interface FieldResult {
 const ECONOMY: EconomyPort = {
   addResource: () => ({ added: 0, shipped: 0, blocked: 0 }),
   addItem: () => ({ added: 0, blocked: 0 }),
+  // SPEC-039 §4.1: the bot's kit is no one's inventory, so a boss it fells
+  // drops its signature piece — which the bot, collecting nothing, leaves.
+  owns: () => false,
 };
 /** The kit's level is the kit's: kills in the field level nothing. */
 const PROGRESSION: ProgressionPort = { addXp: () => ({ levelsGained: 0 }) };

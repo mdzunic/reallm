@@ -66,6 +66,8 @@ interface WorldOptions {
   difficulty?: Difficulty;
   accept?: MissionId[];
   seed?: number;
+  /** SPEC-039 §4.3: the pilot's companionMult, as the flight scene passes it. */
+  companionMult?: number;
 }
 
 function world(options: WorldOptions = {}): World {
@@ -88,6 +90,7 @@ function world(options: WorldOptions = {}): World {
     companions: save.companions,
     quality: QUALITY.medium,
     difficulty: save.meta.difficulty,
+    ...(options.companionMult === undefined ? {} : { companionMult: options.companionMult }),
   };
   const flight = new Flight(cfg, economy, progression, missions, events, new Rng(options.seed ?? 7));
   return {
@@ -949,5 +952,89 @@ describe('weapon:fired on the rail (SPEC-035 §4.11)', () => {
     const w = world({ planet: quietPlanet(PLANETS.cinder4, 120) });
     step(w.flight, LAUNCH_SECONDS + 2);
     expect(w.of('weapon:fired')).toHaveLength(0);
+  });
+});
+
+// ------------------------------------------------------------------ SPEC-039
+
+describe('ship guns and ARIA (SPEC-039 §4.3, §4.4, §4.5)', () => {
+  /** Hits a guns tier needs on a real target, through the shot sweep. */
+  function hitsToKill(kind: 'fighter' | 'interceptor', tier: 0 | 1 | 2 | 3): number {
+    const w = world({ planet: quietPlanet(PLANETS.hive, 300), ship: { weapon: tier } });
+    step(w.flight, LAUNCH_SECONDS + DT);
+    const def = kind === 'fighter' ? ENEMIES.scav_fighter : ENEMIES.hive_interceptor;
+    const hazard =
+      kind === 'fighter'
+        ? // Straight down the middle, never holding: every aimed shot connects.
+          inject(w.flight, { kind, depth: 120, def, radius: def.radius, hp: def.hp, ttl: 60, holdDepth: -1_000_000 })
+        : // Parked at the guns' convergence depth.
+          inject(w.flight, { kind, depth: 80, def, radius: def.radius, hp: def.hp });
+    let hits = 0;
+    let hp = hazard.hp;
+    for (let i = 0; i < 600; i++) {
+      step(w.flight, DT, { fire: true, aimX: 0, aimY: 0 });
+      if (w.of('enemy:killed').length > 0) return hits + 1;
+      if (hazard.hp < hp) {
+        hits++;
+        hp = hazard.hp;
+      }
+    }
+    return Number.POSITIVE_INFINITY;
+  }
+
+  it('Ship Guns tier 1 deals 14', () => {
+    expect(UPGRADES.weapon.metrics['damage']).toEqual([10, 14, 17, 22]);
+  });
+
+  it('a scav fighter takes 4 hits at tier 0, 3 at tiers 1 and 2, and 2 at tier 3', () => {
+    expect(ENEMIES.scav_fighter.hp).toBe(40);
+    expect(([0, 1, 2, 3] as const).map((tier) => hitsToKill('fighter', tier))).toEqual([4, 3, 3, 2]);
+  });
+
+  it('an interceptor takes 2 hits until tier 3, which kills it in 1', () => {
+    expect(ENEMIES.hive_interceptor.hp).toBe(20);
+    expect(([0, 1, 2, 3] as const).map((tier) => hitsToKill('interceptor', tier))).toEqual([2, 2, 2, 1]);
+  });
+
+  it('the carry: 600 held steps fire exactly 40 shots at tier 0 and 50 at tier 2', () => {
+    for (const [tier, shots] of [
+      [0, 40],
+      [2, 50],
+    ] as const) {
+      const w = world({ planet: quietPlanet(PLANETS.cinder4, 300), ship: { weapon: tier } });
+      step(w.flight, LAUNCH_SECONDS + DT);
+      const before = w.of('weapon:fired').length;
+      for (let i = 0; i < 600; i++) w.flight.update(DT, { ...IDLE, fire: true });
+      expect(w.of('weapon:fired').length - before, `tier ${tier}`).toBe(shots);
+    }
+  });
+
+  it('a released trigger banks at most one step', () => {
+    const w = world({ planet: quietPlanet(PLANETS.cinder4, 300) });
+    step(w.flight, LAUNCH_SECONDS + DT);
+    step(w.flight, DT, { fire: true });
+    step(w.flight, 10);
+    expect(w.flight.ship.fireCooldown).toBeCloseTo(-1 / 60, 10);
+  });
+
+  it("ARIA's shield regeneration scales with companionMult", () => {
+    const w = world({ planet: quietPlanet(PLANETS.cinder4, 90), aria: { level: 1, enabled: true }, companionMult: 2.25 });
+    step(w.flight, LAUNCH_SECONDS + DT);
+    w.flight.hit(50, 'enemy', { kind: 'enemy', enemyId: 'scav_fighter' });
+    step(w.flight, TUNING.SHIELD_REGEN_DELAY + 2);
+    // 2 s of regeneration at level-1 ARIA's 2/s × 2.25.
+    expect(w.flight.ship.shield).toBeCloseTo(9, 0);
+    // Absent, it is 1: the §4.6 rate.
+    const plain = world({ planet: quietPlanet(PLANETS.cinder4, 90), aria: { level: 1, enabled: true } });
+    step(plain.flight, LAUNCH_SECONDS + DT);
+    plain.flight.hit(50, 'enemy', { kind: 'enemy', enemyId: 'scav_fighter' });
+    step(plain.flight, TUNING.SHIELD_REGEN_DELAY + 2);
+    expect(plain.flight.ship.shield).toBeCloseTo(4, 0);
+  });
+
+  it('companionMult never touches the hull bonus', () => {
+    const scaled = world({ ship: { hull: 1 }, aria: { level: 3, enabled: true }, companionMult: 2.25 });
+    const plain = world({ ship: { hull: 1 }, aria: { level: 3, enabled: true } });
+    expect(scaled.flight.ship.maxHull).toBe(plain.flight.ship.maxHull);
   });
 });
