@@ -318,6 +318,8 @@ if (import.meta.env.DEV) {
     /** SPEC-036 §4.4: how many layers are open on the back-stack, for the e2e Back cases. */
     backDepth: () => ui.backStack.depth,
     loseContext: (restoreAfterMs: number | null) => game.loseContext(restoreAfterMs),
+    /** SPEC-040 §3: busy-waits `ms` inside every draw, so the governor has a slow device to step down on. */
+    slowDraw: (ms: number) => game.slowDraw(ms),
     stop: () => game.stop(),
   };
 

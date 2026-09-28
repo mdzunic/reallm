@@ -46,6 +46,12 @@ export interface Scene<K extends SceneId = SceneId> {
    * station); creation's comes with SPEC-044.
    */
   back?(): boolean;
+  /**
+   * SPEC-040 §4.2: true while nothing on screen moves with the world — the
+   * frame pacer then draws at most five frames a second. A scene without it is
+   * never idle.
+   */
+  idle?(): boolean;
 }
 
 export type SceneFactory = { [K in SceneId]: (services: GameServices) => Scene<K> };
@@ -135,6 +141,15 @@ export class SceneManager {
 
   get paused(): boolean {
     return this.#paused;
+  }
+
+  /**
+   * SPEC-040 §4.2: paused, or the current scene says it is idle — what the
+   * frame pacer reads. D-39's frozen frame under the pause menu still draws,
+   * just not sixty times a second.
+   */
+  get idle(): boolean {
+    return this.#paused || this.#current?.idle?.() === true;
   }
 
   /**

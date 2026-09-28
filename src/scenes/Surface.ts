@@ -104,12 +104,14 @@ import {
   OCCLUDER_OPACITY,
   padEmptyText,
   stageResetText,
+  holdIsIdle,
   surfaceFogRange,
   surfaceHoldReason,
   walletLit,
   type HudTracker,
   type HudTrackerRow,
   type SurfaceHold,
+  type SurfaceHoldState,
 } from '@/systems/UiHelpers';
 import { UiScene } from '@/scenes/base';
 import { director } from '@/scenes/Director';
@@ -482,6 +484,8 @@ export class SurfaceScene extends UiScene<'surface'> {
   // zero the fixed step runs the map's own presses and nothing else, so
   // `world.time` stands still and nothing can reach the player.
   #uiHolds = 0;
+  /** SPEC-040 §4.2: `idle()`'s hold state, written in place — the pacer reads it every frame. */
+  readonly #holdState: SurfaceHoldState = { beats: 0, rotate: false, ui: 0, modal: 0 };
   #exploreIn = 0;
   #exploreSaveIn = EXPLORE_SAVE_INTERVAL;
 
@@ -1143,6 +1147,21 @@ export class SurfaceScene extends UiScene<'surface'> {
   /** SPEC-034 §4.6: why the step is holding, or `null` when it runs. */
   #holdReason(): SurfaceHold {
     return surfaceHoldReason({ beats: this.#holds, rotate: this.#rotateBlocked(), ui: this.#uiHolds, modal: this.#modalOpen });
+  }
+
+  /**
+   * SPEC-040 §4.2: idle while the step holds for the map, the picker, the
+   * terminal, a modal line or the rotate block — never for a beat, whose
+   * reveal moves the camera. The frame pacer asks every frame, so the same
+   * decision as `#holdReason()` is read off a state written in place.
+   */
+  idle(): boolean {
+    const state = this.#holdState;
+    state.beats = this.#holds;
+    state.rotate = this.#rotateBlocked();
+    state.ui = this.#uiHolds;
+    state.modal = this.#modalOpen;
+    return holdIsIdle(surfaceHoldReason(state));
   }
 
   /** SPEC-036 §4.3: the phone is upright, and the rotate overlay covers the screen. */

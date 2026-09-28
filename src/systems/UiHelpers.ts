@@ -579,6 +579,16 @@ export function surfaceHoldReason(state: SurfaceHoldState): SurfaceHold {
   return null;
 }
 
+/**
+ * SPEC-040 §4.2: whether a hold leaves nothing on screen moving with the world
+ * — the map, the quick picker, the pad terminal, a modal line and the rotate
+ * block all stand the world still, so the surface is idle and draws at most
+ * five frames a second. A beat never is: a film or a reveal moves the camera.
+ */
+export function holdIsIdle(hold: SurfaceHold): boolean {
+  return hold === 'ui' || hold === 'modal' || hold === 'rotate';
+}
+
 // -------------------------------------------------------------- player stats
 
 /**

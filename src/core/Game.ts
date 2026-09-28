@@ -13,9 +13,10 @@ import { runBenchmark, type BenchmarkDeps, type BenchmarkOutcome } from '@/core/
 import { createNullInput, type Input } from '@/core/Input';
 import { PageLifecycle } from '@/core/Lifecycle';
 import { log } from '@/core/Log';
-import { runRenderPhase, type RenderPhasePorts } from '@/core/FrameSkip';
+import { paceFrame, runRenderPhase, type PacerState, type RenderPhasePorts } from '@/core/FrameSkip';
 import { RollingMedian } from '@/core/FrameTimers';
 import { DEFAULT_MAX_STEPS, Loop } from '@/core/Loop';
+import { createGovernorState, GOVERNOR_WINDOW_S, governorStep, type GovernorInput, type GovernorState } from '@/core/Quality';
 import { createRenderer, type QualityPreset, type Renderer } from '@/core/Renderer';
 import { RngRoot } from '@/core/Rng';
 import { createNullSave, type SaveStore } from '@/core/Save';
@@ -87,6 +88,10 @@ export interface StatsSnapshot {
   readonly planet: PlanetId | null;
   /** `rng.layoutSeed(planet)` — identical on every landing (SPEC-008 §7). */
   readonly layoutSeed: number | null;
+  /** SPEC-040 §4.2: drawn frames since boot — the pacer's undrawn frames are not counted. */
+  readonly renders: number;
+  /** SPEC-040 §4.3: the adaptive governor's steps down this session. */
+  readonly adaptSteps: number;
 }
 
 export interface StatsUi {
@@ -181,6 +186,15 @@ const PHASE_SLOTS = 1 + DEFAULT_MAX_STEPS + 3;
 /** One traced frame per second while the overlay is visible (§4.6.2). */
 const TRACE_INTERVAL_MS = 1000;
 
+/** SPEC-040 §4.3: what each governor step says, as an `info` toast. */
+export const ADAPT_TOAST_TEXT = 'Graphics lowered to keep the game smooth.';
+/**
+ * SPEC-040 §4.3: the draw-interval ring. The pacer draws at most 60 frames a
+ * second, so five seconds of intervals fit in 300 slots.
+ */
+const INTERVAL_SLOTS = 300;
+const GOVERNOR_WINDOW_MS = GOVERNOR_WINDOW_S * 1000;
+
 /** A UI layer that batches its DOM writes exposes this; `TransitionUi` does not yet (§4.2). */
 type Flushable = { flush?: () => void };
 
@@ -222,6 +236,39 @@ export class Game implements GameServices {
   #stopped = false;
   #lastStatsMs = 0;
   #contextLostTimer: number | null = null;
+
+  /** SPEC-040 §4.2: the one pacer state, mutated in place by `paceFrame`. */
+  readonly #pacer: PacerState = { credit: 0, sinceDraw: 0 };
+  /** SPEC-040 §4.2: drawn frames since boot (`StatsSnapshot.renders`). */
+  #renders = 0;
+  /** SPEC-040 §4.3: the governor's clocks, and the frame time they run on (s). */
+  readonly #governor: GovernorState = createGovernorState();
+  #clock = 0;
+  #nextGovernorAt = 1;
+  /** Written in place once a second, so the governor's call allocates nothing. */
+  readonly #governorInput: GovernorInput = {
+    now: 0,
+    medianMs: 0,
+    targetFps: 60,
+    dpr: 1,
+    preset: 'medium',
+    active: false,
+  };
+  /** SPEC-040 §4.3: the last five seconds of draw intervals in play (ms), oldest at `#ringStart`. */
+  readonly #intervals = new Float64Array(INTERVAL_SLOTS);
+  /** Where the median is sorted, so the ring keeps its order. */
+  readonly #intervalScratch = new Float64Array(INTERVAL_SLOTS);
+  #ringStart = 0;
+  #ringCount = 0;
+  #ringTotal = 0;
+  /**
+   * True until the next draw in play: the first draw after an idle stretch, a
+   * scene entry or a frame out of play spans that gap, so it pushes nothing
+   * (40-e).
+   */
+  #freshInterval = true;
+  /** SPEC-040 dev bridge: `__reallm.slowDraw(ms)` busy-waits this long in every draw. */
+  #slowDrawMs = 0;
 
   /** SPEC-015 §5/D-13: 60-frame medians of the update and draw halves. */
   readonly #updateMs = new RollingMedian();
@@ -421,6 +468,8 @@ export class Game implements GameServices {
       seed: rng.seed,
       planet,
       layoutSeed: planet === null ? null : rng.layoutSeed(planet),
+      renders: this.#renders,
+      adaptSteps: this.#governor.steps,
     };
   }
 
@@ -534,6 +583,8 @@ export class Game implements GameServices {
   async detectQuality(): Promise<BenchmarkOutcome> {
     const outcome = await runBenchmark(this.#benchmarkDeps());
     if (outcome.persist) this.#persistBenchmark(outcome);
+    // SPEC-040 §4.3: a fresh measurement is a fresh start for the governor.
+    this.#resetGovernor();
     this.#settings.set({ quality: null });
     this.#renderer.setQuality(outcome.preset);
     this.#logEvent(`benchmark:${outcome.reason}`);
@@ -638,16 +689,137 @@ export class Game implements GameServices {
 
   /**
    * Phases 3 to 5: render, then save/ui/stats, then the end of the input frame.
-   * The order — and which of those the `targetFps: 30` frame skip drops — is
+   * The order — and which of those an undrawn frame drops — is
    * `core/FrameSkip.ts`, so AC-24 is a node test rather than a reading (AC-57).
+   * SPEC-040 §4.2: whether this frame draws at all is the pacer's call, on the
+   * clock and the steps this frame ran; §4.3's governor reads what it drew.
    */
-  #render(_frameDt: number): void {
-    runRenderPhase(this.#renderPorts, this.#renderer.quality.targetFps, this.#loop.stats.frame);
+  #render(frameDt: number): void {
+    const frameMs = frameDt * 1000;
+    this.#clock += frameDt;
+    const idle = this.#scenes.idle;
+    // The draw interval this frame closes if it draws — read before the pacer
+    // resets it.
+    const interval = this.#pacer.sinceDraw + frameMs;
+    const draw = paceFrame(this.#pacer, frameMs, this.#stepsThisFrame, this.#targetFps(), idle);
+    if (draw) this.#renders++;
+    runRenderPhase(this.#renderPorts, draw);
     // §5/D-13: one sample a frame, after every step of it has run. A frame the
-    // skip dropped the draw from contributes no render sample — `renderMs` is
-    // the cost of drawing, not an average over frames that did not.
+    // pacer did not draw contributes no render sample — `renderMs` is the cost
+    // of drawing, not an average over frames that did not.
     this.#updateMs.push(this.#updateMsThisFrame);
+    this.#sampleInterval(draw, idle, interval);
+    if (this.#clock >= this.#nextGovernorAt) this.#governorTick(idle);
     this.#endTrace();
+  }
+
+  /**
+   * SPEC-040 §4.2: the lower of the preset's `targetFps` and the player's
+   * `frameRate` (40-h).
+   */
+  #targetFps(): 30 | 60 {
+    return this.#settings.get().frameRate === 30 || this.#renderer.quality.targetFps === 30 ? 30 : 60;
+  }
+
+  /** The surface or the flight is up — the only scenes the governor watches. */
+  #inPlay(): boolean {
+    const id = this.#scenes.current?.id;
+    return id === 'surface' || id === 'flight';
+  }
+
+  /**
+   * SPEC-040 §4.3: every drawn frame in play pushes its draw interval, and the
+   * oldest drop while the ring holds more than the window. Allocates nothing.
+   */
+  #sampleInterval(draw: boolean, idle: boolean, interval: number): void {
+    if (idle || !this.#inPlay()) {
+      this.#freshInterval = true;
+      return;
+    }
+    if (!draw) return;
+    if (this.#freshInterval) {
+      this.#freshInterval = false;
+      return;
+    }
+    const ring = this.#intervals;
+    if (this.#ringCount === INTERVAL_SLOTS) this.#dropInterval();
+    ring[(this.#ringStart + this.#ringCount) % INTERVAL_SLOTS] = interval;
+    this.#ringCount++;
+    this.#ringTotal += interval;
+    while (this.#ringCount > 0 && this.#ringTotal > GOVERNOR_WINDOW_MS) this.#dropInterval();
+  }
+
+  #dropInterval(): void {
+    this.#ringTotal -= this.#intervals[this.#ringStart] as number;
+    this.#ringStart = (this.#ringStart + 1) % INTERVAL_SLOTS;
+    this.#ringCount--;
+    if (this.#ringCount === 0) this.#ringTotal = 0;
+  }
+
+  #clearIntervals(): void {
+    this.#ringStart = 0;
+    this.#ringCount = 0;
+    this.#ringTotal = 0;
+    this.#freshInterval = true;
+  }
+
+  /**
+   * The ring's median, sorted in the preallocated scratch — the unused tail is
+   * `Infinity`, so it sorts to the end and the typed-array sort needs no copy.
+   * The upper middle element, as the benchmark's `median` takes it.
+   */
+  #medianInterval(): number {
+    const count = this.#ringCount;
+    if (count === 0) return 0;
+    const scratch = this.#intervalScratch;
+    for (let i = 0; i < count; i++) scratch[i] = this.#intervals[(this.#ringStart + i) % INTERVAL_SLOTS] as number;
+    scratch.fill(Number.POSITIVE_INFINITY, count);
+    scratch.sort();
+    return scratch[count >> 1] as number;
+  }
+
+  /**
+   * SPEC-040 §4.3, once a second of summed frame time: the median of the ring
+   * goes to the pure `governorStep`, and a step it names is applied here — the
+   * dpr cap through `setDprCap`, a preset through `setQuality`. Neither touches
+   * `settings.quality`: nothing the governor does is persisted (E68, 40-g).
+   */
+  #governorTick(idle: boolean): void {
+    this.#nextGovernorAt = Math.floor(this.#clock) + 1;
+    const input = this.#governorInput;
+    input.now = this.#clock;
+    input.medianMs = this.#medianInterval();
+    input.targetFps = this.#targetFps();
+    input.dpr = this.#renderer.size.dpr;
+    input.preset = this.#renderer.preset;
+    input.active = this.#settings.get().adaptiveQuality && this.#inPlay() && !idle;
+    const step = governorStep(this.#governor, input);
+    if (step === null) return;
+    if (step.kind === 'dpr') this.#renderer.setDprCap(step.cap);
+    else this.#renderer.setQuality(step.preset);
+    log.info('game', `adaptive quality: ${step.kind === 'dpr' ? `dpr cap ${step.cap}` : `preset ${step.preset}`}`);
+    this.#events.emit('ui:toast', { text: ADAPT_TOAST_TEXT, kind: 'info' });
+  }
+
+  /**
+   * SPEC-040 §4.3: a preset the player chose, or `Re-detect`, is a fresh start
+   * — the dpr cap goes and the governor's clocks restart. Its steps this
+   * session stay counted.
+   */
+  #resetGovernor(): void {
+    this.#renderer.setDprCap(null);
+    this.#governor.overSince = null;
+    this.#governor.lastStepAt = Number.NEGATIVE_INFINITY;
+  }
+
+  /**
+   * SPEC-040's dev bridge: `__reallm.slowDraw(ms)` busy-waits `ms` inside every
+   * draw, so the e2e suite can make any machine too slow for its preset (E68).
+   * Development builds only; 0 turns it off.
+   */
+  slowDraw(ms: number): void {
+    if (!import.meta.env.DEV) return;
+    this.#slowDrawMs = Number.isFinite(ms) && ms > 0 ? ms : 0;
   }
 
   /** Built once: the frame phase allocates nothing (SPEC-001 §7). */
@@ -666,6 +838,12 @@ export class Game implements GameServices {
   #drawTimed(): void {
     const startedAt = performance.now();
     this.#renderScene();
+    if (this.#slowDrawMs > 0) {
+      const until = startedAt + this.#slowDrawMs;
+      while (performance.now() < until) {
+        // SPEC-040's `slowDraw`: a draw this device cannot afford, on demand.
+      }
+    }
     this.#renderMs.push(performance.now() - startedAt);
   }
 
@@ -990,11 +1168,25 @@ export class Game implements GameServices {
         () => {
           this.#logEvent('scene:entered');
           this.#renderErrorScene = null;
+          // SPEC-040 §4.3: a new scene restarts the grace and the window; the
+          // steps already taken stay (40-f).
+          this.#governor.enteredAt = this.#clock;
+          this.#clearIntervals();
           // SPEC-015 §7: the boot tap took the first, gesture-bound lock; from
           // the first scene entry the scene manager owns the question, so the
           // boot one is handed back (AC-35, AC-37, D-2).
           this.#releaseBootWakeLock();
           this.#refreshStats(); // AC-33
+        },
+        this,
+      ),
+      // SPEC-040 §4.3: a preset chosen in Settings — `auto` included — clears
+      // the governor's dpr cap and restarts its clocks. The panel writes the
+      // setting before it calls `setQuality`, and the governor never writes it.
+      events.on(
+        'settings:changed',
+        ({ patch }) => {
+          if ('quality' in patch) this.#resetGovernor();
         },
         this,
       ),

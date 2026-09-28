@@ -667,6 +667,36 @@ describe('prefers-reduced-motion', () => {
 
 // ------------------------------------------------------------------- pause
 
+describe('idle (SPEC-040 §4.2, AC-10)', () => {
+  it('is true while the machine is paused, whatever the scene says', async () => {
+    const h = harness({ flight: { pausable: true } });
+    await atMenu(h);
+    await h.manager.go('flight', { destination: 'cinder4' }, { force: true });
+    expect(h.manager.idle).toBe(false);
+    h.manager.pause();
+    expect(h.manager.idle).toBe(true);
+    h.manager.resume();
+    expect(h.manager.idle).toBe(false);
+  });
+
+  it("forwards the current scene's idle(), and a scene without one is never idle", async () => {
+    const h = harness();
+    await atMenu(h);
+    expect(h.manager.idle).toBe(false);
+    let idle = false;
+    (h.scene('menu') as SpyScene & { idle?: () => boolean }).idle = () => idle;
+    expect(h.manager.idle).toBe(false);
+    idle = true;
+    expect(h.manager.idle).toBe(true);
+  });
+
+  it('is false with no scene at all', () => {
+    const h = harness();
+    expect(h.manager.current).toBeNull();
+    expect(h.manager.idle).toBe(false);
+  });
+});
+
 describe('pause and resume', () => {
   async function atFlight(h: Harness): Promise<void> {
     await atMenu(h);

@@ -11,7 +11,23 @@ import { describe, expect, it } from 'vitest';
 // imports `three`, and pulling it in here would make the node test for a piece
 // of pure arithmetic load a renderer. The re-export the criterion also asks for
 // is asserted in `benchmark.test.ts`, which already needs `three` to run.
-import { presetFor, QUALITY, type QualityPreset, type QualitySettings } from '@/core/Quality';
+import {
+  createGovernorState,
+  GOVERNOR_COOLDOWN_S,
+  GOVERNOR_DPR_STEP,
+  GOVERNOR_GRACE_S,
+  GOVERNOR_OVER_RATIO,
+  GOVERNOR_SUSTAIN_S,
+  GOVERNOR_WINDOW_S,
+  governorStep,
+  presetFor,
+  QUALITY,
+  type GovernorInput,
+  type GovernorState,
+  type GovernorStep,
+  type QualityPreset,
+  type QualitySettings,
+} from '@/core/Quality';
 
 /** Reference §3, transcribed. Fifteen fields, three presets, no arithmetic. */
 const TABLE: Record<QualityPreset, QualitySettings> = {
@@ -201,5 +217,163 @@ describe('presetFor (SPEC-015 §4.4)', () => {
     expect(presetFor(Number.POSITIVE_INFINITY)).toBe('medium');
     expect(presetFor(0)).toBe('medium');
     expect(presetFor(-5)).toBe('medium');
+  });
+});
+
+// ------------------------------------------------ SPEC-040 §4.3: the governor
+
+describe('governorStep (SPEC-040 §4.3, E68)', () => {
+  /** A 60 Hz target's period is 16.7 ms; this median is well over 1.25 × it. */
+  const SLOW_MS = 40;
+
+  function input(patch: Partial<GovernorInput> = {}): GovernorInput {
+    return { now: 0, medianMs: SLOW_MS, targetFps: 60, dpr: 1, preset: 'high', active: true, ...patch };
+  }
+
+  /**
+   * Calls the governor once a second from `from` to `to` inclusive, the way
+   * `Game` does, and returns every step it named with the second it named it.
+   * `rest` is reapplied each call; `dpr` and `preset` follow the steps, as the
+   * renderer would after applying them.
+   */
+  function drive(
+    state: GovernorState,
+    from: number,
+    to: number,
+    rest: Partial<GovernorInput> = {},
+  ): { at: number; step: GovernorStep }[] {
+    const steps: { at: number; step: GovernorStep }[] = [];
+    let dpr = rest.dpr ?? 1;
+    let preset: QualityPreset = rest.preset ?? 'high';
+    for (let now = from; now <= to; now++) {
+      const step = governorStep(state, input({ ...rest, now, dpr, preset }));
+      if (step === null) continue;
+      steps.push({ at: now, step });
+      if (step.kind === 'dpr') dpr = step.cap;
+      else preset = step.preset;
+    }
+    return steps;
+  }
+
+  it('pins the initial tuning', () => {
+    expect([GOVERNOR_WINDOW_S, GOVERNOR_OVER_RATIO, GOVERNOR_SUSTAIN_S, GOVERNOR_COOLDOWN_S, GOVERNOR_GRACE_S, GOVERNOR_DPR_STEP]).toEqual([
+      5, 1.25, 10, 20, 5, 0.25,
+    ]);
+  });
+
+  it('takes no step inside the 5 s grace, and none before 10 s over (40-f)', () => {
+    const state = createGovernorState();
+    // Grace: 0 … 4 s after entry nothing counts, however slow the frames are.
+    for (let now = 0; now < GOVERNOR_GRACE_S; now++) {
+      expect(governorStep(state, input({ now }))).toBeNull();
+      expect(state.overSince).toBeNull();
+    }
+    // Over from 5 s on: the clock starts, and 9 s later there is still no step.
+    for (let now = GOVERNOR_GRACE_S; now < GOVERNOR_GRACE_S + GOVERNOR_SUSTAIN_S; now++) {
+      expect(governorStep(state, input({ now }))).toBeNull();
+    }
+    expect(state.overSince).toBe(GOVERNOR_GRACE_S);
+    expect(state.steps).toBe(0);
+  });
+
+  it('steps once the median has stayed over for 10 s, then not again for 20 s', () => {
+    const state = createGovernorState();
+    const steps = drive(state, 0, 60, { preset: 'high', dpr: 1 });
+    // 5 s grace + 10 s over; then 20 s of cooldown between the next two.
+    expect(steps.map((s) => s.at)).toEqual([15, 35]);
+    expect(steps.map((s) => s.step)).toEqual([
+      { kind: 'preset', preset: 'medium' },
+      { kind: 'preset', preset: 'low' },
+    ]);
+    expect(state.steps).toBe(2);
+    expect(state.lastStepAt).toBe(35);
+  });
+
+  it('lowers the dpr 0.25 at a time to 1.0 first, then the preset down to low, then names nothing', () => {
+    const state = createGovernorState();
+    const steps = drive(state, 0, 400, { preset: 'high', dpr: 2 });
+    expect(steps.map((s) => s.step)).toEqual([
+      { kind: 'dpr', cap: 1.75 },
+      { kind: 'dpr', cap: 1.5 },
+      { kind: 'dpr', cap: 1.25 },
+      { kind: 'dpr', cap: 1 },
+      { kind: 'preset', preset: 'medium' },
+      { kind: 'preset', preset: 'low' },
+    ]);
+    // One step per 20 s, never faster.
+    const at = steps.map((s) => s.at);
+    for (let i = 1; i < at.length; i++) expect((at[i] as number) - (at[i - 1] as number)).toBeGreaterThanOrEqual(GOVERNOR_COOLDOWN_S);
+    // At `low` and dpr 1 there is nothing left to give: no step, however long.
+    expect(governorStep(state, input({ now: 10_000, preset: 'low', dpr: 1 }))).toBeNull();
+    expect(state.steps).toBe(6);
+  });
+
+  it('never caps the dpr below 1 — a 1.1 ratio steps straight to 1.0', () => {
+    const state = createGovernorState();
+    expect(drive(state, 0, 20, { dpr: 1.1 }).map((s) => s.step)).toEqual([{ kind: 'dpr', cap: 1 }]);
+  });
+
+  it('never steps up: a fast median only resets the clock', () => {
+    const state = createGovernorState();
+    expect(drive(state, 0, 120, { preset: 'low', dpr: 1, medianMs: 5 })).toEqual([]);
+    expect(state.overSince).toBeNull();
+  });
+
+  it('takes no step at a median of exactly 1.25 × the period', () => {
+    for (const targetFps of [30, 60] as const) {
+      const state = createGovernorState();
+      const medianMs = (GOVERNOR_OVER_RATIO * 1000) / targetFps;
+      expect(drive(state, 0, 60, { medianMs, targetFps }), `target ${targetFps}`).toEqual([]);
+      expect(state.overSince).toBeNull();
+      // …and a hair over it counts.
+      expect(drive(createGovernorState(), 0, 60, { medianMs: medianMs + 0.01, targetFps }).length).toBeGreaterThan(0);
+    }
+  });
+
+  it('reads the period of a 30 target: 40 ms holds 30 (40-h), but not 60', () => {
+    expect(drive(createGovernorState(), 0, 60, { medianMs: 40, targetFps: 30 })).toEqual([]);
+    expect(drive(createGovernorState(), 0, 60, { medianMs: 40, targetFps: 60 }).length).toBeGreaterThan(0);
+  });
+
+  it('resets overSince when it is not active — idle, out of play or switched off', () => {
+    const state = createGovernorState();
+    drive(state, 0, 12);
+    expect(state.overSince).toBe(GOVERNOR_GRACE_S);
+    expect(governorStep(state, input({ now: 13, active: false }))).toBeNull();
+    expect(state.overSince).toBeNull();
+    // The 10 s run starts again from the next active second.
+    expect(drive(state, 14, 23)).toEqual([]);
+    expect(drive(state, 24, 24).map((s) => s.at)).toEqual([24]);
+  });
+
+  it('a hitch shorter than 10 s costs nothing', () => {
+    const state = createGovernorState();
+    for (let now = 0; now <= 60; now++) {
+      // Over for 8 s, fine for one, over again: the sustain never completes.
+      const medianMs = now % 9 === 0 ? 10 : SLOW_MS;
+      expect(governorStep(state, input({ now, medianMs }))).toBeNull();
+    }
+  });
+
+  it('restarts the grace on a new scene entry and keeps the steps already taken', () => {
+    const state = createGovernorState();
+    expect(drive(state, 0, 15).length).toBe(1);
+    // `scene:entered` at 30 s: the grace runs again from there…
+    state.enteredAt = 30;
+    for (let now = 30; now < 30 + GOVERNOR_GRACE_S; now++) expect(governorStep(state, input({ now, preset: 'medium' }))).toBeNull();
+    expect(state.steps).toBe(1);
+    // …and the next step needs its own 10 s over after the grace.
+    const next = drive(state, 30 + GOVERNOR_GRACE_S, 60, { preset: 'medium' });
+    expect(next.map((s) => s.at)).toEqual([30 + GOVERNOR_GRACE_S + GOVERNOR_SUSTAIN_S]);
+    expect(state.steps).toBe(2);
+  });
+
+  it('holds a cooldown across scenes: a step less than 20 s after the last one waits', () => {
+    const state = createGovernorState();
+    drive(state, 0, 15); // a step at 15
+    state.enteredAt = 16;
+    // Grace to 21, over to 31 — but the cooldown holds until 35.
+    const steps = drive(state, 16, 40, { preset: 'medium' });
+    expect(steps.map((s) => s.at)).toEqual([35]);
   });
 });
