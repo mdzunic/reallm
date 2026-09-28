@@ -3,17 +3,29 @@
 // code), so everything a panel prints or diffs is proven here and `ui/` merely
 // renders the return values.
 import { describe, expect, it } from 'vitest';
+import { Rng } from '@/core/Rng';
 import { maxHp, newSave, type CharacterCreation, type Save } from '@/core/Save';
 import { COMPANIONS, ITEMS, MISSIONS, TUNING, UPGRADES, type MissionDef } from '@/data/index';
+import type { SlotState, SlotView } from '@/systems/Loadout';
 import { discountTokens } from '@/systems/Economy';
 import { CARGO_TOAST_SECONDS, SHIPPED_TOAST_TEXT } from '@/systems/Pickups';
 import {
   surfaceHoldReason,
   abandonMission,
   acceptMission,
-  CAMERA_DISTANCE,
   cameraDistance,
+  cameraFov,
+  compositeOver,
   contrastRatio,
+  FLASH_MIN_GAP,
+  flashGate,
+  FOV_MAX,
+  FOV_MIN,
+  shiftToasts,
+  slotStateText,
+  TOUCH_CAMERA_MAX_SHORT_SIDE,
+  WALLET_LIT_SECONDS,
+  walletLit,
   FOG_SPAN_K,
   occludes,
   OCCLUDER_OPACITY,
@@ -468,7 +480,8 @@ describe('diffHud (AC-115, AC-62)', () => {
       heat: number;
       charges: number;
       maxCharges: number;
-    } => ({ itemId, state: itemId === null ? 'empty' : 'ready', cd: 0, heat: 0, charges: 0, maxCharges: 0 });
+      cdSeconds: number;
+    } => ({ itemId, state: itemId === null ? 'empty' : 'ready', cd: 0, heat: 0, charges: 0, maxCharges: 0, cdSeconds: 0 });
 
     const a = createHudModel();
     expect(a.loadout).toBeNull();
@@ -796,13 +809,192 @@ describe('the shipped-home toast (SPEC-034 §4.12)', () => {
 
 // --------------------------------------------------- SPEC-035: the readable view
 
-describe('cameraDistance (SPEC-035 §4.2)', () => {
-  it('is 22 on the keyboard scheme and 17 on touch', () => {
-    expect(cameraDistance('keyboard')).toBe(22);
-    expect(cameraDistance('touch')).toBe(17);
+// SPEC-037 §4.12: SPEC-035's scheme-only distance became §6.1's cases — the
+// camera goes by the screen's short side as well as by the scheme.
+describe('cameraDistance (SPEC-035 §4.2, SPEC-037 §4.7)', () => {
+  it('is 17 only on touch with a short side under 500 px, and 22 otherwise', () => {
+    expect(cameraDistance('touch', 390)).toBe(17);
+    // A tablet is a monitor-sized screen that happens to be touched.
+    expect(cameraDistance('touch', 820)).toBe(22);
+    expect(cameraDistance('keyboard', 390)).toBe(22);
     // A gamepad is a desktop screen, so it keeps the keyboard distance.
-    expect(cameraDistance('gamepad')).toBe(22);
-    expect(CAMERA_DISTANCE).toEqual({ keyboard: 22, touch: 17, gamepad: 22 });
+    expect(cameraDistance('gamepad', 390)).toBe(22);
+    expect(TOUCH_CAMERA_MAX_SHORT_SIDE).toBe(500);
+    expect(cameraDistance('touch', 499)).toBe(17);
+    expect(cameraDistance('touch', 500)).toBe(22);
+  });
+});
+
+describe('cameraFov (SPEC-037 §4.7)', () => {
+  it('is 2·atan(tan 24° / aspect), clamped to 40°–66°', () => {
+    const cases: ReadonlyArray<readonly [number, number]> = [
+      [1.78, 40],
+      [1.33, 40],
+      [1, 48.0],
+      [0.75, 61.4],
+      [0.46, 66],
+    ];
+    for (const [aspect, fov] of cases) expect(Math.abs(cameraFov(aspect) - fov), `aspect ${aspect}`).toBeLessThanOrEqual(0.1);
+    // §4.7's table carries one more row between the two clamps.
+    expect(Math.abs(cameraFov(0.695) - 65.3)).toBeLessThanOrEqual(0.1);
+    expect([FOV_MIN, FOV_MAX]).toEqual([40, 66]);
+  });
+
+  it('never leaves the range, however wide or narrow the screen', () => {
+    for (const aspect of [0.1, 0.3, 0.6, 0.9, 1.1, 1.22, 1.5, 2, 3.5, 10]) {
+      expect(cameraFov(aspect)).toBeGreaterThanOrEqual(FOV_MIN);
+      expect(cameraFov(aspect)).toBeLessThanOrEqual(FOV_MAX);
+    }
+  });
+});
+
+// ------------------------------------------------- SPEC-037: the HUD for every screen
+
+/** The rising edges `flashGate` lets through for a train of hit times. */
+function edgesOf(hits: readonly number[]): number[] {
+  const edges: number[] = [];
+  let lastEdgeAt = -Infinity;
+  for (const t of hits) {
+    if (flashGate(lastEdgeAt, t) === 'edge') {
+      edges.push(t);
+      lastEdgeAt = t;
+    }
+  }
+  return edges;
+}
+
+/** The most edges any one-second window holds (closed at both ends, the strict reading). */
+function mostInOneSecond(edges: readonly number[]): number {
+  let most = 0;
+  for (let i = 0; i < edges.length; i++) {
+    let n = 0;
+    for (let j = i; j < edges.length && (edges[j] as number) - (edges[i] as number) <= 1 + 1e-9; j++) n++;
+    most = Math.max(most, n);
+  }
+  return most;
+}
+
+describe('flashGate (SPEC-037 §4.6, E71)', () => {
+  it('extends inside FLASH_MIN_GAP of the last edge and starts a new one past it', () => {
+    expect(FLASH_MIN_GAP).toBe(0.35);
+    expect(flashGate(-Infinity, 0)).toBe('edge');
+    expect(flashGate(1, 1.2)).toBe('extend');
+    expect(flashGate(1, 1.349)).toBe('extend');
+    expect(flashGate(1, 1.35)).toBe('edge');
+    expect(flashGate(1, 2)).toBe('edge');
+    expect(flashGate(1, 1.3, 0.2)).toBe('edge');
+  });
+
+  it('holds any regular hit train to three rising edges in any second', () => {
+    for (const every of [0.05, 0.2, 0.4]) {
+      const hits: number[] = [];
+      for (let t = 0; t <= 3 + 1e-9; t += every) hits.push(Math.round(t * 1000) / 1000);
+      const edges = edgesOf(hits);
+      expect(edges.length, `every ${every} s`).toBeGreaterThan(0);
+      expect(mostInOneSecond(edges), `every ${every} s`).toBeLessThanOrEqual(3);
+    }
+  });
+
+  it('holds a seeded random train to three rising edges in any second', () => {
+    const rng = new Rng(37);
+    const hits: number[] = [];
+    let t = 0;
+    while (t < 30) {
+      t += rng.float(0.01, 0.5);
+      hits.push(t);
+    }
+    const edges = edgesOf(hits);
+    expect(edges.length).toBeGreaterThan(20);
+    expect(mostInOneSecond(edges)).toBeLessThanOrEqual(3);
+  });
+});
+
+describe('compositeOver (SPEC-037 §4.5)', () => {
+  it('puts the HUD plate over Vetra’s snow at about #3a3f44', () => {
+    const out = compositeOver('rgba(4, 6, 10, 0.75)', '#dbe9f2');
+    expect(out).toMatch(/^#[0-9a-f]{6}$/);
+    const want = [0x3a, 0x3f, 0x44];
+    for (let i = 0; i < 3; i++) {
+      expect(Math.abs(parseInt(out.slice(1 + i * 2, 3 + i * 2), 16) - (want[i] as number))).toBeLessThanOrEqual(1);
+    }
+  });
+
+  it('is the ground at alpha 0 and the colour at alpha 1', () => {
+    expect(compositeOver('rgba(255, 0, 0, 0)', '#123456')).toBe('#123456');
+    expect(compositeOver('rgba(255, 0, 0, 1)', '#123456')).toBe('#ff0000');
+    expect(compositeOver('#00ff00', '#123456')).toBe('#00ff00');
+  });
+});
+
+describe('slotStateText (SPEC-037 §4.4)', () => {
+  const view = (state: SlotState, patch: Partial<SlotView> = {}): SlotView => ({
+    itemId: 'weapon_kinetic',
+    state,
+    cd: 0,
+    heat: 0,
+    charges: 0,
+    maxCharges: 0,
+    cdSeconds: 0,
+    ...patch,
+  });
+
+  it('prints the state only while the slot is not ready, and never READY', () => {
+    expect(slotStateText(view('ready'))).toBe('');
+    expect(slotStateText(view('empty', { itemId: null }))).toBe('');
+    expect(slotStateText(view('heat', { heat: 0.64 }))).toBe('HEAT 64%');
+    expect(slotStateText(view('lock', { heat: 1 }))).toBe('LOCK');
+    expect(slotStateText(view('recharge', { cd: 0.4, cdSeconds: 2.43 }))).toBe('2.4 s');
+    expect(slotStateText(view('switch', { cd: 0.8, cdSeconds: 0.2 }))).toBe('0.2 s');
+  });
+
+  it('covers every SlotState, and none of them reads READY', () => {
+    const states: readonly SlotState[] = ['ready', 'switch', 'empty', 'heat', 'lock', 'recharge'];
+    for (const state of states) {
+      const text = slotStateText(view(state, { heat: 0.5, cdSeconds: 1.25 }));
+      expect(typeof text, state).toBe('string');
+      expect(text, state).not.toMatch(/READY/i);
+    }
+  });
+});
+
+describe('walletLit (SPEC-037 §4.2)', () => {
+  it('stays lit for WALLET_LIT_SECONDS after a change, then dims', () => {
+    expect(WALLET_LIT_SECONDS).toBe(5);
+    expect(walletLit(10, 14.9, false)).toBe(true);
+    expect(walletLit(10, 15.1, false)).toBe(false);
+    // Nothing has changed yet this visit.
+    expect(walletLit(-Infinity, 0, false)).toBe(false);
+  });
+
+  it('stays lit while a collect or deliver objective is open', () => {
+    expect(walletLit(10, 15.1, true)).toBe(true);
+    expect(walletLit(-Infinity, 1000, true)).toBe(true);
+  });
+});
+
+describe('shiftToasts (SPEC-037 §4.3)', () => {
+  it('moves every expiry by the given milliseconds and keeps order, text and counts', () => {
+    let stack = pushToast([], 'Saved', 'info', 1000);
+    stack = pushToast(stack, 'Cargo full', 'warn', 1200);
+    stack = pushToast(stack, 'Cargo full', 'warn', 1300);
+    const before = JSON.stringify(stack);
+    const shifted = shiftToasts(stack, 4000);
+    expect(JSON.stringify(stack)).toBe(before); // a new array; the input is not written
+    expect(shifted).not.toBe(stack);
+    expect(shifted.map((entry) => entry.text)).toEqual(['Saved', 'Cargo full']);
+    expect(shifted.map((entry) => entry.count)).toEqual([1, 2]);
+    expect(shifted.map((entry) => entry.kind)).toEqual(['info', 'warn']);
+    expect(shifted.map((entry) => entry.shownAt)).toEqual(stack.map((entry) => entry.shownAt));
+    expect(shifted.map((entry) => entry.expiresAt)).toEqual(stack.map((entry) => entry.expiresAt + 4000));
+  });
+
+  it('keeps a held toast alive for the time it had left', () => {
+    // Shown at 0 for 2.5 s, held from 1 s to 9 s: 1.5 s left when the hold ends.
+    const stack = pushToast([], 'Test toast', 'info', 0);
+    const released = shiftToasts(stack, 8000);
+    expect(pruneToasts(released, 9000)).toHaveLength(1);
+    expect(pruneToasts(released, 10_400)).toHaveLength(1);
+    expect(pruneToasts(released, 10_600)).toHaveLength(0);
   });
 });
 

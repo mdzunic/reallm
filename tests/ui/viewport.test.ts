@@ -95,6 +95,10 @@ const EDGES = ['top', 'right', 'bottom', 'left'] as const;
  */
 const NOT_VIEWPORT_ANCHORED: Readonly<Record<string, string>> = {
   '.qb-key': 'inside .qb-slot (position: relative)',
+  // SPEC-037 §4.4: the quick bar's badges sit in the slot's own corners.
+  '.qb-count': 'inside .qb-slot (position: relative)',
+  '.qb-state': 'inside .qb-slot (position: relative)',
+  '.qb-pips': 'inside .qb-slot (position: relative)',
   '.starmap-lock': 'inside the .starmap-node button (position: absolute)',
   '.starmap-info': 'inside .starmap-root, in the console frame body',
   '.hud-reticle::after': 'inside .hud-reticle (position: absolute)',
@@ -175,6 +179,32 @@ describe('safe areas are per element (SPEC-015 D-6, AC-27)', () => {
     const selectors = new Set(rules().map((rule) => rule.selector));
     for (const selector of Object.keys(NOT_VIEWPORT_ANCHORED)) {
       expect(selectors.has(selector), `${selector} is still in style.css`).toBe(true);
+    }
+  });
+
+  /**
+   * SPEC-037 §4.12: the scanner reaches the edge-anchored rules §4.1–§4.3 add,
+   * and each clears the insets of the edges it touches — the thumb arc (both
+   * sides), the touch pause button, the toast rack in play, and the touch
+   * top-right cluster.
+   */
+  it('covers the thumb arc, the touch pause button, the in-play toast rack and the touch top-right cluster', () => {
+    const anchored = edgeAnchored();
+    const expected: ReadonlyArray<readonly [string, (typeof EDGES)[number]]> = [
+      ['.thumb-arc', 'right'],
+      ['.thumb-arc', 'bottom'],
+      [".hud[data-side='right'] .thumb-arc", 'left'],
+      ['button.touch-button.touch-pause', 'top'],
+      ['button.touch-button.touch-pause', 'right'],
+      ['html[data-play] .toast-rack', 'top'],
+      ['html[data-play] .toast-rack', 'right'],
+      ['.hud.is-touch .hud-tr', 'top'],
+      ['.hud.is-touch .hud-tr', 'right'],
+    ];
+    for (const [selector, edge] of expected) {
+      const found = anchored.find((entry) => entry.selector === selector && entry.edge === edge);
+      expect(found, `${selector} { ${edge} } is scanned`).toBeDefined();
+      expect(found?.value, `${selector} { ${edge} } clears its inset`).toContain(`env(safe-area-inset-${edge})`);
     }
   });
 });

@@ -7,6 +7,7 @@
 // The compiler covers the rest — a mission naming an enemy that does not exist
 // or a planet gating on a flag that does not exist is a `tsc` failure, which the
 // second describe block below demonstrates with `@ts-expect-error`.
+import { readFileSync } from 'node:fs';
 import { describe, expect, it, vi } from 'vitest';
 import { LAUNCH_SECONDS, THROTTLES } from '@/systems/Flight';
 import {
@@ -1116,10 +1117,64 @@ describe('words that match the touch controls (SPEC-036 §4.11, §4.12)', () => 
 
   it('the death hint has a touch wording, and neither wording sends the player to Settings', () => {
     expect(HINTS.death.nudge).toBe('Dying twice here? Q heals, and armor helps.');
-    expect(HINTS.death.touch).toBe('Dying twice here? Tap ITEM to heal, and armor helps.');
+    // SPEC-037 §4.10 rewrote the touch wording: the ITEM button is gone.
+    expect(HINTS.death.touch).toBe('Dying twice here? Tap the heal slot on the bar, and armor helps.');
     for (const text of [HINTS.death.nudge, HINTS.death.touch ?? '']) {
       expect(text).not.toContain('Settings');
       expect(text).not.toMatch(/difficulty/i);
+    }
+  });
+});
+
+// ------------------------------------------------------------ SPEC-037 §4.10
+
+/**
+ * The touch rows of the pause menu's controls sheet, read from the source as
+ * text: the table is a `ui/` constant, which a node test may not import
+ * (SPEC-001 §4). Comments are stripped before the rows are read.
+ */
+function touchSheetRows(): Array<[string, string]> {
+  const source = readFileSync(new URL('../../src/ui/PauseMenu.ts', import.meta.url).pathname, 'utf8');
+  const start = source.indexOf('const CONTROL_SHEETS');
+  expect(start, 'CONTROL_SHEETS in PauseMenu.ts').toBeGreaterThan(-1);
+  const touch = source.indexOf('touch: [', start);
+  const end = source.indexOf('\n  ],', touch);
+  expect(touch).toBeGreaterThan(start);
+  expect(end).toBeGreaterThan(touch);
+  const block = source.slice(touch, end).replace(/\/\/[^\n]*/g, '');
+  return [...block.matchAll(/\[\s*'([^']*)'\s*,\s*'([^']*)'\s*\]/g)].map((m) => [m[1] as string, m[2] as string]);
+}
+
+describe('no SWAP or ITEM in the touch words (SPEC-037 §4.10)', () => {
+  const NAMES_A_GONE_BUTTON = /\b(SWAP|ITEM)\b/;
+
+  it('the storm tip and the death hint send a thumb to the heal slot on the bar', () => {
+    expect(TIPS.storm.touch).toBe(
+      'A storm is ten seconds out. Caves and wrecks keep it off you — or tap the heal slot on the bar and push through.',
+    );
+    expect(HINTS.death.touch).toBe('Dying twice here? Tap the heal slot on the bar, and armor helps.');
+  });
+
+  it('no touch wording in TIPS or HINTS names SWAP or ITEM', () => {
+    const problems: string[] = [];
+    for (const id of TIP_IDS) {
+      if (NAMES_A_GONE_BUTTON.test(TIPS[id].touch)) problems.push(`TIPS.${id}.touch`);
+    }
+    for (const [kind, hint] of Object.entries(HINTS)) {
+      // A hint without its own touch wording shows its nudge (and fallback) on touch too.
+      const touchLines = hint.touch !== undefined ? [hint.touch] : [hint.nudge, hint.fallback ?? ''];
+      for (const text of touchLines) if (NAMES_A_GONE_BUTTON.test(text)) problems.push(`HINTS.${kind}`);
+    }
+    expect(problems).toEqual([]);
+  });
+
+  it('no row of the touch controls sheet names SWAP or ITEM', () => {
+    const rows = touchSheetRows();
+    expect(rows.length).toBeGreaterThanOrEqual(8);
+    expect(rows).toContainEqual(['Switch weapon', 'Tap a weapon on the bar']);
+    expect(rows).toContainEqual(['Heal', 'Tap the heal slot on the bar']);
+    for (const [what, how] of rows) {
+      expect(`${what} ${how}`, what).not.toMatch(NAMES_A_GONE_BUTTON);
     }
   });
 });

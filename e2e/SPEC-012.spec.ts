@@ -343,9 +343,13 @@ test('death restarts a timed survive stage (AC-49)', async ({ page }) => {
 /** Click through any open dialogue: first tap fills the line, the next advances. */
 async function dismissDialogues(page: Page): Promise<void> {
   const dialogue = page.locator('[data-testid="dialogue"]');
+  // SPEC-037 §4.3: a non-modal line lets taps through; its `›` advances it.
+  const advance = page.locator('[data-testid="dialogue-advance"]');
   for (let i = 0; i < 40; i++) {
     if (!(await dialogue.isVisible().catch(() => false))) return;
-    await dialogue.click({ force: true });
+    // The line can move on by itself between the look and the press.
+    if (await advance.isVisible().catch(() => false)) await advance.click({ force: true, timeout: 2_000 }).catch(() => undefined);
+    else await dialogue.click({ force: true });
     await page.waitForTimeout(120);
   }
 }

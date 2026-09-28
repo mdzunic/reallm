@@ -56,6 +56,19 @@ const flags = parseFlags(globalThis.location.search);
 const settings = createSettings(undefined, events);
 const input = new Input(canvas, events, settings);
 
+/**
+ * SPEC-037 §4.3: `html.scheme-touch` while the scheme is touch — the one class
+ * every layer's touch layout reads (the toast dock, the top-centre gap, the
+ * bottom stack, the picker). Set on boot and on every change, and subscribed
+ * here, before any scene, so it has moved by the time a scene re-measures.
+ */
+const schemeOwner = {};
+const applyScheme = (): void => {
+  document.documentElement.classList.toggle('scheme-touch', input.state.scheme === 'touch');
+};
+applyScheme();
+events.on('input:schemeChanged', applyScheme, schemeOwner);
+
 // SPEC-031 §4.8: the scene tag is invisible without `?debug` — a CSS contract
 // on one class, so the e2e fleet keeps its steering hook either way.
 document.documentElement.classList.toggle('debug', flags.debug);
