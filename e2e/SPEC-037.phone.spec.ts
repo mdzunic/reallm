@@ -100,10 +100,15 @@ async function land(page: Page, side: Side = 'left'): Promise<void> {
   await page.locator('[data-testid="boot-start"]').tap();
   await expect(page.locator('[data-testid="boot-overlay"]')).toBeHidden();
   await expect(page.locator('[data-testid="scene-label"]')).toBeVisible(COLD_START);
-  await page.evaluate(async (creation) => {
+  // The menu's entry fade still runs after its label appears, and a `go()`
+  // issued during it is refused (SPEC-003 AC-14, D-2): wait it out, as
+  // `start()` does. Unwaited, this landing lost that race on CI's GPU runner.
+  await expect(page.locator('[data-testid="transition-fade"]')).toHaveCSS('pointer-events', 'none', COLD_START);
+  const landed = await page.evaluate(async (creation) => {
     window.__reallm.save().create(0, creation, 123);
-    await window.__reallm.go('surface', { planet: 'cinder4' }, { force: true });
+    return window.__reallm.go('surface', { planet: 'cinder4' }, { force: true });
   }, CREATION);
+  expect(landed, 'go("surface") was refused, or fell back to the menu').toBe(true);
   await expect(page.locator('[data-testid="scene-label"]')).toHaveText('surface', COLD_START);
   await expect(page.locator('[data-testid="transition-fade"]')).toHaveCSS('pointer-events', 'none', COLD_START);
   expect(await page.evaluate(() => window.__reallm.input().scheme)).toBe('touch');
