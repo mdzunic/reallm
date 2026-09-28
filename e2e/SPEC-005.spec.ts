@@ -217,7 +217,10 @@ test.describe('keyboard/mouse driver against the real DOM', () => {
 });
 
 test.describe('autoFire settings (AC-18)', () => {
-  test('touch (default) enables only on the touch scheme; on/off force it', async ({ page }) => {
+  test('touch (stored) enables only on the touch scheme; on/off force it', async ({ page }) => {
+    // SPEC-038 §4.7: the default is 'on' now, so the scheme rule is the stored
+    // 'touch' a player chose — which still wins (38-l).
+    await page.addInitScript(() => localStorage.setItem('reallm:settings', JSON.stringify({ autoFire: 'touch' })));
     await start(page, '/?scene=surface');
     await settle(page, 'surface');
 

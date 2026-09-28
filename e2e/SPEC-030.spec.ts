@@ -29,6 +29,9 @@ test('shelters are placed: the debug count reads ≥ 2 (§6.2 case 1)', async ({
 });
 
 test('goto-shelter shows the chip; holding fire turns it HIDDEN (§6.2 case 2)', async ({ page }) => {
+  // SPEC-038 §4.7 turned auto-fire on by default; HIDDEN is "inside and not
+  // firing", so this case holds its fire the way the old default did.
+  await page.addInitScript(() => localStorage.setItem('reallm:settings', JSON.stringify({ autoFire: 'off' })));
   await start(page, URL);
   await settle(page);
 

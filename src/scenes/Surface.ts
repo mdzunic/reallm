@@ -65,6 +65,7 @@ import { makeEnemy, type EnemyEntity } from '@/entities/Enemy';
 import { makeFollower } from '@/entities/Follower';
 import { makePlayer } from '@/entities/Player';
 import { makeProjectile } from '@/entities/Projectile';
+import { resetTelegraph, TELEGRAPH_CAPACITY } from '@/entities/Telegraph';
 import type { ArenaState } from '@/entities/World';
 import { Combat, computePlayerStats, type CombatWorld } from '@/systems/Combat';
 import { DASH_DISTANCE, dashCooldown, isDashing, stepDash, tryDash } from '@/systems/Dash';
@@ -2927,6 +2928,11 @@ export class SurfaceScene extends UiScene<'surface'> {
     button('surface-spawn-pack', 'Spawn pack', () => this.#debugSpawnPack());
     // SPEC-038 §4.11: a charge on demand — the planet's rusher, aggroed.
     button('surface-spawn-charger', 'Spawn charger', () => this.#debugSpawnCharger());
+    // SPEC-038 §4.11: the budget case needs all three kinds live at once, and
+    // nothing in this spec draws a circle or a ring — so a long-fused pair.
+    if (import.meta.env.DEV) {
+      button('surface-telegraphs', 'Telegraphs', () => this.#debugTelegraphs());
+    }
     // SPEC-024 §4.8: stage 0 of `c6_m2` is a 240 s defence, and an acceptance
     // run cannot pay that per attempt. Dev builds only — `import.meta.env.DEV`
     // strips the control (and its handler) out of a production bundle.
@@ -3004,6 +3010,37 @@ export class SurfaceScene extends UiScene<'surface'> {
     e.aggro = true;
     e.state = 'chase';
     e.stateTime = 0;
+  }
+
+  /**
+   * SPEC-038 §4.11, dev builds only: a circle and a ring 10 m to either side of
+   * the player, landing in 20 s — with a charger's lane, every kind is live.
+   */
+  #debugTelegraphs(): void {
+    const world = this.#world;
+    const combat = this.#combat;
+    if (world === null || combat === null) return;
+    const p = world.player;
+    for (const [kind, side] of [
+      ['circle', 1],
+      ['ring', -1],
+    ] as const) {
+      if (combat.telegraphs.size >= TELEGRAPH_CAPACITY) return;
+      const t = combat.telegraphs.alloc();
+      resetTelegraph(t);
+      t.kind = kind;
+      t.x = p.x + Math.cos(p.facing + (side * Math.PI) / 2) * 10;
+      t.z = p.z + Math.sin(p.facing + (side * Math.PI) / 2) * 10;
+      t.radius = 2.5;
+      t.ringMax = 4;
+      t.ringSpeed = 6;
+      t.band = 1;
+      t.startAt = world.time;
+      t.hitAt = world.time + 20;
+      t.lockAt = t.hitAt;
+      t.damage = 1;
+      t.source = 'dust_skitter';
+    }
   }
 
   /** §4.8: complete the pinned mission's current stage through the runtime. */
