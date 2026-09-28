@@ -773,35 +773,56 @@ test('music(null) fades out, and a call mid-crossfade never layers a third copy 
   expect(stopped[stopped.length - 1]!.howls.flatMap((h) => h.sounds), audible(stopped[stopped.length - 1]!)).toEqual([]);
 });
 
+/**
+ * The fade AC-26's case asks for with its pending track. The tap that starts
+ * the ramp also builds the first scene, and that scene's first drawn frame
+ * compiles every GPU program it needs. On a host with no GPU, the same frame
+ * also waits for SwiftShader to finish it: the compositor reads a
+ * software-composited WebGL canvas back during its commit. That is ≈ 0.5 s of
+ * blocked page when the file runs alone, and 1.2–2.1 s beside three other
+ * workers' surfaces. The music ramp is the layer's own wall-clock one (§4.5).
+ * Against the 1500 ms default, such a block swallows the whole climb, and the
+ * bed comes up in one step on either side of it. That happens on `main` as
+ * much as under SPEC-040's pacing. The fade's length belongs to the caller
+ * (`music(id, { fadeMs })`), and it is remembered with the pending track until
+ * the tap, so this case asks for a fade long enough that the block can only
+ * ever hide its opening. AC-22's crossfade case keeps the 1500 ms default
+ * under test.
+ */
+const PENDING_FADE_MS = 10_000;
+
 test('a track asked for before the gesture fades in from silence on the tap (AC-26)', async ({ page }) => {
   await installProbe(page);
   await serveAudio(page);
   await page.goto(gameUrl('/?debug'));
   await awaitGate(page);
   // `menu` is what the first scene asks for too, so the ramp that is heard can
-  // only be the pending one — the scene's own call is the 06-c no-op.
-  await page.evaluate(() => window.__reallm.audio().music('menu'));
+  // only be the pending one — the scene's own call is the 06-c no-op. The
+  // length tells the two apart as well: the scene's call would fade over 1500 ms.
+  await page.evaluate((fadeMs) => window.__reallm.audio().music('menu', { fadeMs }), PENDING_FADE_MS);
   expect(await page.evaluate(() => window.Howler?._howls.length ?? 0)).toBe(0);
 
   // The sampler is started before the tap so the first audible frame is caught,
-  // and it steps at 40 ms rather than 100: the tap is also what builds the first
-  // scene, whose first rendered frame compiles every GPU program it needs —
-  // with SPEC-017's image-based lighting that is ≈ 900 ms of blocked main
-  // thread on this container's software rasteriser, right inside the 1500 ms
-  // ramp. The finer step keeps more than eight observations of the climb on
-  // either side of it; every assertion below is unchanged.
-  const samples = page.evaluate(() => window.__qaSample(3400, 40));
+  // and it runs well past the fade's end, however long a loaded host takes to
+  // land the tap and fetch the bank.
+  const samples = page.evaluate((ms) => window.__qaSample(ms, 100), PENDING_FADE_MS + 4000);
   await page.locator('[data-testid="boot-start"]').click();
   const trace = await samples;
-  const gains = trace.map((s) => gainOf(s, 'menu')).filter((value): value is number => value !== null);
-  const story = trace.map(audible).join(' / ');
+  const heard = trace.filter((s) => gainOf(s, 'menu') !== null);
+  const gains = heard.map((s) => gainOf(s, 'menu')!);
+  const story = trace.map((s) => `${s.t}ms ${audible(s)}`).join(' / ');
   expect(gains.length, story).toBeGreaterThan(8);
   expect(gains[0]!, story).toBeLessThan(0.25); // from silence…
   expect(gains[gains.length - 1]!, story).toBeGreaterThan(MUSIC_FULL - 0.02); // …to full…
   // …and monotonically, over the fade rather than in one step.
-  for (let i = 1; i < gains.length; i++) expect(gains[i]!).toBeGreaterThanOrEqual(gains[i - 1]! - 0.01);
+  for (let i = 1; i < gains.length; i++) expect(gains[i]!, story).toBeGreaterThanOrEqual(gains[i - 1]! - 0.01);
   // It takes the fade to get there: ten 100 ms samples is already 1 s.
   expect(gains.filter((value) => value < MUSIC_FULL - 0.02).length, story).toBeGreaterThan(8);
+  // And the fade is the one the pending call asked for, not the scene's
+  // 1500 ms. Even when the bank is heard only after a block of seconds, the bed
+  // is still climbing more than half the fade later.
+  const full = heard.find((s) => gainOf(s, 'menu')! > MUSIC_FULL - 0.02)!;
+  expect(full.t - heard[0]!.t, story).toBeGreaterThan(PENDING_FADE_MS / 2);
 });
 
 test('a bed still decoding while its fade runs arrives at full anyway (AC-19, AC-22)', async ({ page }) => {
