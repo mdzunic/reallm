@@ -28,6 +28,13 @@ const CREATION = {
 const info = async (page: Page): Promise<Record<string, number | string>> =>
   (await page.evaluate(() => window.__reallm.stats())).sceneInfo ?? {};
 
+/** The scene's debug row and the HUD's HP readout, read in one round trip. */
+const heldState = (page: Page): Promise<{ info: Record<string, number | string>; hp: string | null }> =>
+  page.evaluate(() => ({
+    info: window.__reallm.stats().sceneInfo ?? {},
+    hp: document.querySelector('[data-testid="hud-hp"]')?.textContent ?? null,
+  }));
+
 /**
  * Waits until `scene` is on screen *and* its transition has settled — the fade
  * still runs after the label appears (SPEC-003 AC-14) and a `go()` issued
@@ -189,19 +196,25 @@ test('5 & 6 — the reveal holds the simulation once per boss per session', asyn
 
   // The simulation is held: over a second, the boss does not move, its HP does
   // not change, and the beat counter stays up — while the view clock runs on.
-  const hp = await page.locator('[data-testid="hud-hp"]').textContent();
-  const before = await info(page);
-  expect(before['held']).toBe(1);
+  //
+  // Everything between the reveal and the Skip below races the beat's own end:
+  // 4.4 s of fixed steps, after which the layer and its button are gone. Each
+  // read here is one round trip, and the debug hurt is pressed in the page,
+  // because on a loaded GPU-less run (SPEC-040 §4.2 draws every frame such a
+  // host gets) a round trip waits out a whole frame and a pointer click takes
+  // several of them — enough, spent twice, to lose Skip to the beat's end.
+  const before = await heldState(page);
+  expect(before.info['held']).toBe(1);
   await page.waitForTimeout(1000);
   // Nothing can touch the player during a held beat — the debug hurt included.
-  await page.locator('[data-testid="surface-hurt"]').click();
-  const after = await info(page);
-  expect(after['boss']).toBe(before['boss']);
-  expect(after['nearDx']).toBe(before['nearDx']);
-  expect(after['nearDz']).toBe(before['nearDz']);
-  expect(after['held']).toBe(1);
-  expect(Number(after['viewTime'])).toBeGreaterThan(Number(before['viewTime']));
-  expect(await page.locator('[data-testid="hud-hp"]').textContent()).toBe(hp);
+  await page.locator('[data-testid="surface-hurt"]').dispatchEvent('click');
+  const after = await heldState(page);
+  expect(after.info['boss']).toBe(before.info['boss']);
+  expect(after.info['nearDx']).toBe(before.info['nearDx']);
+  expect(after.info['nearDz']).toBe(before.info['nearDz']);
+  expect(after.info['held']).toBe(1);
+  expect(Number(after.info['viewTime'])).toBeGreaterThan(Number(before.info['viewTime']));
+  expect(after.hp).toBe(before.hp);
 
   // Skip restores the camera and the simulation at once.
   await page.locator('[data-testid="reveal-skip"]').click();
@@ -271,9 +284,10 @@ async function dismissDialogue(page: Page): Promise<void> {
   const advance = page.locator('[data-testid="dialogue-advance"]');
   for (let i = 0; i < 30; i++) {
     if (!(await dialogue.isVisible().catch(() => false))) return;
-    // The line can move on by itself between the look and the press.
+    // The line can move on by itself between the look and the press — on
+    // either branch; the next pass looks again.
     if (await advance.isVisible().catch(() => false)) await advance.click({ force: true, timeout: 2_000 }).catch(() => undefined);
-    else await dialogue.click({ force: true });
+    else await dialogue.click({ force: true, timeout: 2_000 }).catch(() => undefined);
     await page.waitForTimeout(120);
   }
 }

@@ -144,6 +144,13 @@ test('one rocket clears most of a pack, hands back and recharges in 6 s (§6.2 c
 });
 
 test('KeyG throws a frag at the pointer and spends exactly one (§6.2 case 4)', async ({ page }) => {
+  // Auto-fire off, so the frag is the only thing that can kill the pack. On
+  // (the default), the chaingun shoots the skitters while they converge, and
+  // how much of the pack is left when the throw lands depends on how much game
+  // time the waits below cost: since SPEC-040 §4.2 a loaded GPU-less run draws
+  // every frame it gets, and at ~4 fps the whole pack was dead before the frag
+  // landed (kills 5 of 5 at the throw), so the blast had nothing to kill.
+  await page.addInitScript(() => localStorage.setItem('reallm:settings', JSON.stringify({ autoFire: 'off' })));
   await start(page, URL);
   await settle(page);
   await page.getByTestId('surface-arsenal').click();
@@ -170,6 +177,7 @@ test('KeyG throws a frag at the pointer and spends exactly one (§6.2 case 4)', 
   const size = page.viewportSize();
   await page.mouse.move(Math.round((size?.width ?? 1280) / 2 + 50), Math.round((size?.height ?? 720) / 2));
   const before = Number((await info(page))['kills'] ?? 0);
+  expect(before).toBe(0);
   await page.keyboard.press('KeyG');
   await expect.poll(async () => (await info(page))['qExplosive']).toBe(2);
   await expect.poll(async () => Number((await info(page))['kills'] ?? 0) - before, { timeout: 10_000 }).toBeGreaterThanOrEqual(1);
