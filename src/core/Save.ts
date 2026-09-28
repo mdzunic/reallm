@@ -43,6 +43,7 @@ import {
   TUNING,
   WEAPON_SLOTS,
   type ClassId,
+  type Difficulty,
   type CompanionId,
   type ItemId,
   type MissionId,
@@ -121,7 +122,7 @@ export interface SaveV1 {
     createdAt: number;
     updatedAt: number;
     playtimeSec: number;
-    difficulty: 'casual' | 'normal';
+    difficulty: Difficulty;
     /** 1 in v1; the NG+ "Iteration 63" of PLAN §5 is deferred. */
     iteration: number;
     appVersion: string;
@@ -212,7 +213,7 @@ export interface CharacterCreation {
   classId: ClassId;
   appearance: { portrait: number; primary: string; secondary: string };
   attributes: { might: number; vigor: number; agility: number; tech: number };
-  difficulty: 'casual' | 'normal';
+  difficulty: Difficulty;
 }
 
 export type LoadResult =

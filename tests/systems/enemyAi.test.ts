@@ -200,7 +200,8 @@ describe('ranged archetype (scav_raider)', () => {
     for (let i = 0; i < steps; i++) {
       h.step();
       const d = Math.hypot(e.x - h.world.player.x, e.z - h.world.player.z);
-      if (d >= 6 && d <= 12) inBand++;
+      // SPEC-038 §4.4: the band follows the range, 13 m now.
+      if (d >= 6 && d <= 13) inBand++;
     }
     expect(inBand / steps).toBeGreaterThanOrEqual(0.9);
   });
@@ -218,7 +219,7 @@ describe('ranged archetype (scav_raider)', () => {
     // Aimed straight at the player's position at fire time (moving player is not led).
     const speed = Math.hypot(p.vx, p.vz);
     const toPlayerX = (h.world.player.x - e.x) / Math.hypot(h.world.player.x - e.x, h.world.player.z - e.z);
-    expect(speed).toBeCloseTo(14, 5);
+    expect(speed).toBeCloseTo(15, 5); // SPEC-038 §4.4: 15 m/s
     expect(p.vx / speed).toBeCloseTo(toPlayerX, 1);
   });
 

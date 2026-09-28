@@ -89,6 +89,12 @@ export const ASSETS = {
         shot_launcher: [18400, 350],
         impact: [18850, 120],
         explosion: [19070, 1200],
+        // SPEC-038 §4.10: the dash, and the three windup cues that say an
+        // attack is coming — a skitter's chitter, a rusher's growl, a shot's whine.
+        dash: [20370, 250],
+        windup_melee: [20720, 150],
+        windup_charge: [20970, 450],
+        windup_shot: [21520, 400],
       },
     },
     /** The rail scene: hits on the ship, and the two continuous channels. */

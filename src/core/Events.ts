@@ -83,6 +83,8 @@ export type GameEvents = {
   'player:respawned': void;
   /** SPEC-034 §4.2: a confirmed `Recall to pad` — E4's respawn without the death. */
   'player:recalled': Record<string, never>;
+  /** SPEC-038 §4.1: one per dash, where it started and which way it went. */
+  'player:dashed': { x: number; z: number; dirX: number; dirZ: number };
   'player:xp': { amount: number; total: number };
   'player:leveledUp': { level: number; tokens: number };
   'tokens:changed': { delta: number; total: number; reason: string };
@@ -112,7 +114,14 @@ export type GameEvents = {
   // SPEC-035 §4.11: one event per shot and per landed hit, so the audio layer
   // has something to play. `line` is the weapon family, not the item.
   'weapon:fired': { line: 'handgun' | 'rifle' | 'mg' | 'launcher' | 'ship'; x: number; z: number };
-  'enemy:hit': { enemyId: EnemyId; x: number; z: number };
+  /** SPEC-038 §4.8: `crit` is set, and true, only for a critical projectile hit. */
+  'enemy:hit': { enemyId: EnemyId; x: number; z: number; crit?: boolean };
+  /**
+   * SPEC-038 §4.2: every windup start — a melee blow, a rusher's charge or a
+   * shot — for the cue and the dash tip. `kind` is `systems/EnemyAi`'s
+   * `WindupKind`, spelled out because `core/` may not import `systems/`.
+   */
+  'enemy:windup': { enemyId: EnemyId; kind: 'melee' | 'charge' | 'shot'; x: number; z: number };
   'weapon:locked': { slot: WeaponSlot; itemId: ItemId };
   'mine:armed': { x: number; z: number };
   'shop:purchased': { kind: 'ship' | 'gear' | 'companion' | 'craft'; id: string; tier?: number };

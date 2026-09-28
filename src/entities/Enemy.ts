@@ -5,7 +5,20 @@
 // stays a field-by-field overwrite with no allocation.
 import type { Enemy as EnemyDef } from '@/data/enemies';
 
-export type BrainState = 'idle' | 'wander' | 'chase' | 'windup' | 'attack' | 'strafe' | 'leash' | 'special' | 'dead';
+export type BrainState =
+  | 'idle'
+  | 'wander'
+  | 'chase'
+  | 'windup'
+  | 'attack'
+  | 'strafe'
+  | 'leash'
+  | 'special'
+  | 'dead'
+  // SPEC-038 §4.3: the rusher's committed charge — the rooted, telegraphed
+  // windup, then the run down its locked lane.
+  | 'chargeWindup'
+  | 'charge';
 
 /** What a boss `special` is currently doing; `none` outside one. */
 export type SpecialKind = 'none' | 'phase' | 'burrow_dig' | 'burrow_telegraph';
@@ -70,6 +83,23 @@ export interface EnemyEntity {
    * follow are not interrupted by drones the fight left behind.
    */
   summonedBy: number;
+
+  // ------------------------------------------- SPEC-038 §3: charge and crits
+  /** Metres of the current charge still to run. */
+  chargeLeft: number;
+  /** Metres per second of the current charge. */
+  chargeSpeed: number;
+  /** The centre distance at which the charge touches its target. */
+  chargeReach: number;
+  chargeDamageMult: number;
+  /** Stops on its first contact (a rusher; SPEC-041's bosses do not). */
+  chargeStops: boolean;
+  /** The current charge has landed. */
+  chargeHit: boolean;
+  /** The current attack pause; 0 means `POST_ATTACK_PAUSE`. */
+  recoverFor: number;
+  /** The last player hit on it was a crit — the scene's damage number reads it. */
+  lastHitCrit: boolean;
 }
 
 export function makeEnemy(): EnemyEntity {
@@ -109,5 +139,13 @@ export function makeEnemy(): EnemyEntity {
     lostTrack: 0,
     fromWave: false,
     summonedBy: 0,
+    chargeLeft: 0,
+    chargeSpeed: 0,
+    chargeReach: 0,
+    chargeDamageMult: 1,
+    chargeStops: true,
+    chargeHit: false,
+    recoverFor: 0,
+    lastHitCrit: false,
   };
 }

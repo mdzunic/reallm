@@ -574,7 +574,8 @@ describe('kills, elites and loot (§4.6, §4.7)', () => {
   it('elites carry ×3 HP, ×1.3 scale, ×1.1 speed, ×3 XP and ×1.5 hit damage', () => {
     const h = harness();
     const elite = h.spawn('dust_skitter', 5, 0, true);
-    expect(elite.maxHp).toBe(18 * 3);
+    // SPEC-038 §4.4: the skitter's base HP is 26 now.
+    expect(elite.maxHp).toBe(26 * 3);
     expect(elite.radius).toBeCloseTo(0.4 * 1.3, 10);
     expect(elite.speed).toBeCloseTo(6.5 * 1.1, 10);
     expect(enemyHitDamage(elite, flatStats(), 'normal')).toBe(6);

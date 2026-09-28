@@ -24,6 +24,7 @@ import {
   UPGRADES,
   type Attributes,
   type ClassId,
+  type Difficulty,
   type ItemId,
   type CompanionEffect,
   type FollowerId,
@@ -80,8 +81,19 @@ export function passiveText(passive: Class['passive']): string {
   if (passive.moveSpeedMult !== undefined) parts.push(`${pct(passive.moveSpeedMult)} move speed`);
   if (passive.pickupRadiusMult !== undefined) parts.push(`${pct(passive.pickupRadiusMult)} pickup radius`);
   if (passive.nodeRadar === true) parts.push('resource radar');
+  if (passive.dashCooldownMult !== undefined) parts.push(`${pct(passive.dashCooldownMult)} dash cooldown`);
   return parts.join(' · ');
 }
+
+/**
+ * SPEC-014 AC-18, SPEC-038 §4.6: the one honest line under each difficulty —
+ * the creation toggle and the settings row print the same words, so it lives
+ * here rather than in either of them.
+ */
+export const DIFFICULTY_LINES: Readonly<Record<Difficulty, string>> = {
+  normal: 'Normal — the pressure the game was tuned for.',
+  casual: 'Casual — softer hits and storms, longer wind-ups, kinder deaths; the story is unchanged.',
+};
 
 /**
  * One line per occupied slot for the Load list (AC-4): name, class, level,
