@@ -19,7 +19,7 @@
 // §9's device acceptance (AC-10, and the audible half of AC-28) is what covers
 // "a blip is heard on a phone"; nothing headless can stand in for it.
 import { expect, test, type Page } from '@playwright/test';
-import { awaitGate, gameUrl, passGate, start } from './start';
+import { awaitGate, COLD_START, gameUrl, passGate, start } from './start';
 
 const SETTINGS_KEY = 'reallm:settings';
 /** `master 1.0, music 0.7, sfx 1.0` are the defaults of §4.4 (AC-17). */
@@ -119,6 +119,7 @@ declare global {
     __qa: { sources: number; randomCalls: number };
     __qaSnap(): QaHowl[];
     __qaSample(ms: number, step: number): Promise<QaSample[]>;
+    __qaSettled(bank: string, timeoutMs?: number): Promise<boolean>;
     __qaForceState: string | null;
     __qaResumes: number;
     __qaAudioSession: string[];
@@ -190,6 +191,26 @@ async function installProbe(page: Page): Promise<void> {
           }
         }, step);
       });
+    // A bank that loads on its first play defers every call made on it until it
+    // has decoded: the voice's `play`, then its `loop`, `rate` and `volume`.
+    // Howler replays that queue one event-loop turn per call, and until the
+    // replay reaches `volume` the voice plays at the Howl's default gain.
+    // This resolves once every Howl whose file is `bank` (`sfx/surface.`,
+    // say) has loaded and emptied that queue, so a read that follows reads
+    // what the layer set rather than how far the replay got. A page whose
+    // every frame waits on a software rasteriser (SPEC-040 §4.2) takes those
+    // turns hundreds of ms apart.
+    window.__qaSettled = (bank, timeoutMs = 20_000) =>
+      new Promise((resolve) => {
+        const started = performance.now();
+        const poll = (): void => {
+          const howls = window.Howler._howls.filter((howl) => howl._src.includes(bank));
+          const settled = howls.length > 0 && howls.every((howl) => howl._state === 'loaded' && howl._queue.length === 0);
+          if (settled || performance.now() - started >= timeoutMs) resolve(settled);
+          else setTimeout(poll, 25);
+        };
+        poll();
+      });
   });
 }
 
@@ -198,6 +219,17 @@ function gainOf(sample: QaSample, name: string): number | null {
   const howl = sample.howls.find((h) => h.src.startsWith(name));
   const sound = howl?.sounds[0];
   return sound ? sound.gain : null;
+}
+
+/**
+ * How far into its buffer one track is in a sample, in seconds on the audio
+ * clock, or `null` when it is not playing. That clock keeps running while the
+ * page's main thread is blocked.
+ */
+function seekOf(sample: QaSample, name: string): number | null {
+  const howl = sample.howls.find((h) => h.src.startsWith(name));
+  const sound = howl?.sounds[0];
+  return sound ? sound.seek : null;
 }
 
 /** Everything audible in a sample, as `track@gain`, for a readable failure. */
@@ -536,11 +568,13 @@ test('a bus reaches live voices without restarting them, at 0 and through a susp
     const audio = window.__reallm.audio();
     audio.setBus('sfx', 0);
     const voice = audio.play('engine_hum', { loop: true, priority: 0, minIntervalMs: 0 });
+    const settled = await window.__qaSettled('sfx/flight.');
     await new Promise((resolve) => setTimeout(resolve, 400));
     const snap = window.__qaSnap().find((h) => h.src.startsWith('flight'));
-    return { admitted: voice !== null, playing: voice?.playing ?? null, sound: snap?.sounds[0] ?? null };
+    return { admitted: voice !== null, playing: voice?.playing ?? null, settled, sound: snap?.sounds[0] ?? null };
   });
   expect(muted.admitted).toBe(true);
+  expect(muted.settled).toBe(true);
   expect(muted.playing).toBe(true);
   expect(muted.sound?.gain).toBe(0);
   // It is running, not merely tracked: the loop has advanced into the sprite.
@@ -569,14 +603,16 @@ test('a bus reaches live voices without restarting them, at 0 and through a susp
     audio.setBus('master', 0.5);
     audio.setBus('sfx', 0.5);
     audio.play('boss_roar', { loop: true, minIntervalMs: 0, volume: 0.5, x: 24, z: 0 });
+    const settled = await window.__qaSettled('sfx/surface.');
     await new Promise((resolve) => setTimeout(resolve, 200));
     const sound = window.__qaSnap().find((h) => h.src.startsWith('surface'))?.sounds[0] ?? null;
     audio.setBus('master', 1);
     audio.setBus('sfx', 1);
-    return sound;
+    return { settled, sound };
   });
-  expect(scaled?.sprite).toBe('boss_roar');
-  expect(scaled?.gain).toBeCloseTo(0.0625, 4);
+  expect(scaled.settled).toBe(true);
+  expect(scaled.sound?.sprite).toBe('boss_roar');
+  expect(scaled.sound?.gain).toBeCloseTo(0.0625, 4);
 
   // AC-11 / AC-21: a hidden tab suspends the context and leaves every voice
   // alone; a bus moved while it is suspended is audible on the way back.
@@ -659,25 +695,53 @@ test('a scene change crossfades over 1500 ms and stops the outgoing track at 0 (
     });
   });
   // The sampler is started but *not* awaited, so the click lands inside its window.
-  const samples = page.evaluate(() => window.__qaSample(2600, 100));
+  // The window is long enough to hold the whole fade even when a loaded host
+  // takes 1.5 s to land the click and change the scene before the fade starts.
+  const samples = page.evaluate(() => window.__qaSample(5000, 100));
   await page.locator('[data-testid="go-station"]').click();
   const trace = await samples;
   await expect(page.locator('[data-testid="scene-label"]')).toHaveText('station');
 
   const overlapping = trace.filter((s) => gainOf(s, 'menu') !== null && gainOf(s, 'station') !== null);
-  expect(overlapping.length, `no overlap in: ${trace.map(audible).join(' / ')}`).toBeGreaterThan(8);
+  const story = `no overlap in: ${trace
+    .map((s) => `${s.t}ms ${audible(s)}${seekOf(s, 'station') === null ? '' : ` (station at ${seekOf(s, 'station')}s)`}`)
+    .join(' / ')}`;
+  expect(overlapping.length, story).toBeGreaterThanOrEqual(3);
   // Both directions move, and the pair never leaves a hole in the middle.
   const first = overlapping[0]!;
   const last = overlapping[overlapping.length - 1]!;
+  // The two beds overlap for most of the 1500 ms: at least the 0.8 s that nine
+  // 100 ms samples span, measured on the audio clock. The incoming bed is a
+  // fresh voice that starts with the fade, so its position at the last sample
+  // where the outgoing bed is still audible is how long the two have sounded
+  // together. The sampler's timestamps cannot measure this on a host without a
+  // GPU. There, the station's first frame blocks the page just as the fade
+  // begins, because its programs compile and the frame waits on SwiftShader.
+  // Since SPEC-040 §4.2 such a host draws every frame it gets, so blocks come
+  // later in the fade too. The samples land either side of those blocks.
+  expect(seekOf(last, 'station')!, story).toBeGreaterThanOrEqual(0.8);
   expect(gainOf(first, 'menu')!).toBeGreaterThan(gainOf(last, 'menu')!);
   expect(gainOf(first, 'station')!).toBeLessThan(gainOf(last, 'station')!);
   for (const sample of overlapping) {
     expect(gainOf(sample, 'menu')! + gainOf(sample, 'station')!, audible(sample)).toBeGreaterThan(MUSIC_FULL * 0.85);
   }
-  // The outgoing instance is gone by the end of the fade, and the new one is up.
-  const settled = trace[trace.length - 1]!;
-  expect(gainOf(settled, 'menu')).toBeNull();
-  expect(gainOf(settled, 'station')).toBeCloseTo(MUSIC_FULL, 2);
+  // The outgoing instance is gone by the end of the fade: no sample hears the
+  // incoming bed at full beside it. The new one is up. On a loaded host, the
+  // click, the scene change and the fade's last tick can land past the
+  // sampler's window, so the settled pair is waited for rather than read off
+  // the window's last sample.
+  for (const sample of trace) {
+    if (gainOf(sample, 'station') === MUSIC_FULL) expect(gainOf(sample, 'menu'), audible(sample)).toBeNull();
+  }
+  await expect
+    .poll(() =>
+      page.evaluate(() => {
+        const snap = window.__qaSnap();
+        const gain = (name: string): number | null => snap.find((h) => h.src.startsWith(name))?.sounds[0]?.gain ?? null;
+        return { menu: gain('menu'), station: gain('station') };
+      }),
+    )
+    .toEqual({ menu: null, station: MUSIC_FULL });
 
   // AC-1: every Howl the layer builds is Web Audio, banks included.
   const html5 = await page.evaluate(async () => {
@@ -692,6 +756,11 @@ test('a scene change crossfades over 1500 ms and stops the outgoing track at 0 (
 test('music(null) fades out, and a call mid-crossfade never layers a third copy (AC-24, AC-25)', async ({ page }) => {
   await startWithAudio(page);
   await page.waitForTimeout(2000);
+  // Both beds this case moves between are warmed first, as AC-28 warms the
+  // scenes' own: a cold `boss` spends its first moments fetching and decoding,
+  // which a loaded GPU-less run (SPEC-040 §4.2) stretches past the 80 ms read
+  // below — and what is asserted there is the crossfade, not the decode.
+  await page.evaluate(() => window.__reallm.audio().preloadMusic(['flight', 'boss']));
 
   // AC-25, the general case: with menu → flight running, asking for boss stops
   // the instance already on its way out and fades the new one from where it is.
@@ -761,35 +830,56 @@ test('music(null) fades out, and a call mid-crossfade never layers a third copy 
   expect(stopped[stopped.length - 1]!.howls.flatMap((h) => h.sounds), audible(stopped[stopped.length - 1]!)).toEqual([]);
 });
 
+/**
+ * The fade AC-26's case asks for with its pending track. The tap that starts
+ * the ramp also builds the first scene, and that scene's first drawn frame
+ * compiles every GPU program it needs. On a host with no GPU, the same frame
+ * also waits for SwiftShader to finish it: the compositor reads a
+ * software-composited WebGL canvas back during its commit. That is ≈ 0.5 s of
+ * blocked page when the file runs alone, and 1.2–2.1 s beside three other
+ * workers' surfaces. The music ramp is the layer's own wall-clock one (§4.5).
+ * Against the 1500 ms default, such a block swallows the whole climb, and the
+ * bed comes up in one step on either side of it. That happens on `main` as
+ * much as under SPEC-040's pacing. The fade's length belongs to the caller
+ * (`music(id, { fadeMs })`), and it is remembered with the pending track until
+ * the tap, so this case asks for a fade long enough that the block can only
+ * ever hide its opening. AC-22's crossfade case keeps the 1500 ms default
+ * under test.
+ */
+const PENDING_FADE_MS = 10_000;
+
 test('a track asked for before the gesture fades in from silence on the tap (AC-26)', async ({ page }) => {
   await installProbe(page);
   await serveAudio(page);
   await page.goto(gameUrl('/?debug'));
   await awaitGate(page);
   // `menu` is what the first scene asks for too, so the ramp that is heard can
-  // only be the pending one — the scene's own call is the 06-c no-op.
-  await page.evaluate(() => window.__reallm.audio().music('menu'));
+  // only be the pending one — the scene's own call is the 06-c no-op. The
+  // length tells the two apart as well: the scene's call would fade over 1500 ms.
+  await page.evaluate((fadeMs) => window.__reallm.audio().music('menu', { fadeMs }), PENDING_FADE_MS);
   expect(await page.evaluate(() => window.Howler?._howls.length ?? 0)).toBe(0);
 
   // The sampler is started before the tap so the first audible frame is caught,
-  // and it steps at 40 ms rather than 100: the tap is also what builds the first
-  // scene, whose first rendered frame compiles every GPU program it needs —
-  // with SPEC-017's image-based lighting that is ≈ 900 ms of blocked main
-  // thread on this container's software rasteriser, right inside the 1500 ms
-  // ramp. The finer step keeps more than eight observations of the climb on
-  // either side of it; every assertion below is unchanged.
-  const samples = page.evaluate(() => window.__qaSample(3400, 40));
+  // and it runs well past the fade's end, however long a loaded host takes to
+  // land the tap and fetch the bank.
+  const samples = page.evaluate((ms) => window.__qaSample(ms, 100), PENDING_FADE_MS + 4000);
   await page.locator('[data-testid="boot-start"]').click();
   const trace = await samples;
-  const gains = trace.map((s) => gainOf(s, 'menu')).filter((value): value is number => value !== null);
-  const story = trace.map(audible).join(' / ');
+  const heard = trace.filter((s) => gainOf(s, 'menu') !== null);
+  const gains = heard.map((s) => gainOf(s, 'menu')!);
+  const story = trace.map((s) => `${s.t}ms ${audible(s)}`).join(' / ');
   expect(gains.length, story).toBeGreaterThan(8);
   expect(gains[0]!, story).toBeLessThan(0.25); // from silence…
   expect(gains[gains.length - 1]!, story).toBeGreaterThan(MUSIC_FULL - 0.02); // …to full…
   // …and monotonically, over the fade rather than in one step.
-  for (let i = 1; i < gains.length; i++) expect(gains[i]!).toBeGreaterThanOrEqual(gains[i - 1]! - 0.01);
+  for (let i = 1; i < gains.length; i++) expect(gains[i]!, story).toBeGreaterThanOrEqual(gains[i - 1]! - 0.01);
   // It takes the fade to get there: ten 100 ms samples is already 1 s.
   expect(gains.filter((value) => value < MUSIC_FULL - 0.02).length, story).toBeGreaterThan(8);
+  // And the fade is the one the pending call asked for, not the scene's
+  // 1500 ms. Even when the bank is heard only after a block of seconds, the bed
+  // is still climbing more than half the fade later.
+  const full = heard.find((s) => gainOf(s, 'menu')! > MUSIC_FULL - 0.02)!;
+  expect(full.t - heard[0]!.t, story).toBeGreaterThan(PENDING_FADE_MS / 2);
 });
 
 test('a bed still decoding while its fade runs arrives at full anyway (AC-19, AC-22)', async ({ page }) => {
@@ -842,6 +932,14 @@ test('the 24-voice cap steals, refuses and frees its slots (AC-29, AC-30, AC-31,
     const sprites = () => window.__qaSnap().find((h) => h.src.startsWith('ui'))?.sounds.map((s) => s.sprite) ?? [];
     const held = [];
     for (let i = 0; i < 24; i++) held.push(audio.play('ui_blip', { loop: true, minIntervalMs: 0 }));
+    // The limiter admits a voice at once, but the bank loads on its first play
+    // and Howler starts the queued voices only once it has decoded — which a
+    // loaded GPU-less run (SPEC-040 §4.2 draws every frame it gets) can take
+    // well past 300 ms to reach. The count below is of voices playing, so it
+    // waits for the decode first; the cap is what this case is about.
+    for (let waited = 0; waited < 20_000 && window.__qaSnap().find((h) => h.src.startsWith('ui'))?.state !== 'loaded'; waited += 50) {
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    }
     await new Promise((resolve) => setTimeout(resolve, 300));
     const admitted = held.filter((voice) => voice !== null).length;
     const concurrent = sprites().length;
@@ -955,6 +1053,7 @@ test('distance decides the gain, and 45 m decides whether there is one at all (A
     for (const [id, x] of plan) audio.play(id, { loop: true, minIntervalMs: 0, x, z: 0 });
     // AC-36: neither x nor z, so no attenuation at all.
     audio.play('scan_done', { loop: true, minIntervalMs: 0 });
+    const settled = await window.__qaSettled('sfx/surface.');
     await new Promise((resolve) => setTimeout(resolve, 250));
     const rows = window.__qaSnap().find((h) => h.src.startsWith('surface'))?.sounds ?? [];
     // AC-35: at the cut-off, past it on the diagonal, and just inside it.
@@ -963,9 +1062,10 @@ test('distance decides the gain, and 45 m decides whether there is one at all (A
       diagonal: audio.play('bug_pop', { minIntervalMs: 0, x: 32, z: 32 }),
       inside: audio.play('bug_pop', { minIntervalMs: 0, x: 44.9, z: 0 }) !== null,
     };
-    return { rows, cutoff };
+    return { settled, rows, cutoff };
   });
 
+  expect(positioned.settled).toBe(true);
   const gain = (sprite: string): number | undefined => positioned.rows.find((row) => row.sprite === sprite)?.gain;
   expect(gain('pickup_oil')).toBeCloseTo(1, 4); // d = 0
   expect(gain('pickup_wheat')).toBeCloseTo(1, 4); // d = 8, still inside the near radius
@@ -988,17 +1088,20 @@ test('distance decides the gain, and 45 m decides whether there is one at all (A
     for (let i = 0; i < 8; i++) audio.play('bug_pop', { loop: true, minIntervalMs: 0, x: 0, z: 0 });
     for (let i = 0; i < 3; i++) audio.play('ui_blip', { loop: true, minIntervalMs: 0 });
     audio.play('raider_death', { loop: true, minIntervalMs: 0, rate: 1.5 });
+    const settled = (await Promise.all([window.__qaSettled('sfx/surface.'), window.__qaSettled('sfx/ui.')])).every(Boolean);
     await new Promise((resolve) => setTimeout(resolve, 250));
     Math.random = original;
     const surface = window.__qaSnap().find((h) => h.src.startsWith('surface'))?.sounds ?? [];
     const ui = window.__qaSnap().find((h) => h.src.startsWith('ui'))?.sounds ?? [];
     return {
+      settled,
       pops: surface.filter((s) => s.sprite === 'bug_pop').map((s) => s.rate),
       explicit: surface.filter((s) => s.sprite === 'raider_death').map((s) => s.rate),
       flat: ui.filter((s) => s.sprite === 'ui_blip').map((s) => s.rate),
       fromAudio: stacks.filter((stack) => /Audio(Mix|Reactions)?\.ts/.test(stack)).length,
     };
   });
+  expect(pitch.settled).toBe(true);
   expect(pitch.pops.length).toBeGreaterThanOrEqual(8);
   for (const rate of pitch.pops) {
     expect(rate).toBeGreaterThanOrEqual(1 - 0.06);
@@ -1042,6 +1145,7 @@ test('the reactions table is what the game actually hears (AC-38 … AC-50, AC-5
     audio['play']('ui_blip');
     audio['play']('bug_pop', { x: 0, z: 0 });
     audio['play']('ship_hit_shield');
+    await Promise.all(['sfx/ui.', 'sfx/surface.', 'sfx/flight.'].map((bank) => window.__qaSettled(bank)));
     await new Promise((resolve) => setTimeout(resolve, 900));
 
     const mine = () => window.Howler._howls.filter((howl) => !known.has(howl));
@@ -1208,6 +1312,14 @@ test('the reactions table is what the game actually hears (AC-38 … AC-50, AC-5
     await new Promise((resolve) => setTimeout(resolve, 200));
     sweep();
     const probe = async (emit: () => void): Promise<{ full: boolean; played: string[] }> => {
+      // A one-shot an earlier probe heard gives its slot back when it ends,
+      // and a loaded host can take that long over one probe's wait. So the cap
+      // is topped back up with priority-1 loops first, and only then is it
+      // proved full.
+      for (let voice = audio['play']('ui_blip', { loop: true, minIntervalMs: 0 }); voice !== null; voice = audio['play']('ui_blip', { loop: true, minIntervalMs: 0 })) {
+        held.push(voice);
+      }
+      sweep();
       const full = audio['play']('ui_warn', { loop: true, minIntervalMs: 0 }) === null;
       emit();
       await new Promise((resolve) => setTimeout(resolve, 200));
@@ -1338,7 +1450,9 @@ test('the pause menu ducks the bed and lets go, even when the player quits (AC-5
   await serveAudio(page);
   await page.goto(gameUrl('/?debug&scene=surface&planet=cinder4'));
   await passGate(page);
-  await expect(page.locator('[data-testid="scene-label"]')).toHaveText('surface');
+  // A landing waits up to 1.5 s for its planet's props (SPEC-040 §4.6) and then
+  // builds behind the fade, so it gets the cold-start patience `start()` gives.
+  await expect(page.locator('[data-testid="scene-label"]')).toHaveText('surface', COLD_START);
 
   const bed = (): Promise<number | null> =>
     page.evaluate(() => window.__qaSnap().find((h) => h.src.startsWith('surface_calm'))?.sounds[0]?.gain ?? null);

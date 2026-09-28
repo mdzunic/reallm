@@ -122,10 +122,35 @@ test('one rocket clears most of a pack, hands back and recharges in 6 s (§6.2 c
   await expect.poll(async () => Number((await info(page))['kills'] ?? 0) - before, { timeout: 5_000 }).toBeGreaterThanOrEqual(3);
   // §4.2: the heavy hands back after its last charge and rebuilds holstered.
   await expect.poll(async () => (await info(page))['weaponSlot']).toBe('primary');
-  await expect.poll(async () => (await info(page))['charges'], { timeout: 15_000 }).toBe(1);
+  // …in 6 s of *game* time, read on the world clock (`viewTime`) in the frame
+  // the charge lands: since SPEC-040 §4.2 a loaded GPU-less run draws every
+  // frame it gets and holds the simulation well behind the wall clock, so the
+  // wall clock is only the patience. The half second covers hit-stop, which
+  // holds the view clock for at most two frames.
+  const emptiedAt = Number((await info(page))['viewTime'] ?? 0);
+  const rechargedAt = Number(
+    await (
+      await page.waitForFunction(
+        () => {
+          const info = window.__reallm.stats().sceneInfo ?? {};
+          return info['charges'] === 1 ? Number(info['viewTime'] ?? 0) || 1e-6 : false;
+        },
+        null,
+        { polling: 'raf', timeout: 60_000 },
+      )
+    ).jsonValue(),
+  );
+  expect(rechargedAt - emptiedAt).toBeLessThanOrEqual(6.5);
 });
 
 test('KeyG throws a frag at the pointer and spends exactly one (§6.2 case 4)', async ({ page }) => {
+  // Auto-fire off, so the frag is the only thing that can kill the pack. On
+  // (the default), the chaingun shoots the skitters while they converge, and
+  // how much of the pack is left when the throw lands depends on how much game
+  // time the waits below cost: since SPEC-040 §4.2 a loaded GPU-less run draws
+  // every frame it gets, and at ~4 fps the whole pack was dead before the frag
+  // landed (kills 5 of 5 at the throw), so the blast had nothing to kill.
+  await page.addInitScript(() => localStorage.setItem('reallm:settings', JSON.stringify({ autoFire: 'off' })));
   await start(page, URL);
   await settle(page);
   await page.getByTestId('surface-arsenal').click();
@@ -152,6 +177,7 @@ test('KeyG throws a frag at the pointer and spends exactly one (§6.2 case 4)', 
   const size = page.viewportSize();
   await page.mouse.move(Math.round((size?.width ?? 1280) / 2 + 50), Math.round((size?.height ?? 720) / 2));
   const before = Number((await info(page))['kills'] ?? 0);
+  expect(before).toBe(0);
   await page.keyboard.press('KeyG');
   await expect.poll(async () => (await info(page))['qExplosive']).toBe(2);
   await expect.poll(async () => Number((await info(page))['kills'] ?? 0) - before, { timeout: 10_000 }).toBeGreaterThanOrEqual(1);

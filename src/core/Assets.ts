@@ -2,6 +2,8 @@
 // texture in the manifest once; scenes then take clones (`model()`) or the
 // shared instance (`texture()`), and dispose their clones freely because
 // everything the cache owns is tagged `userData.shared = true` (D-33/D-34).
+// Since SPEC-040 §4.6 the cache also lets go: `release()` frees a lazily
+// loaded set — a planet's props and ground — when the scene that used it exits.
 //
 // The loaders are injected so the unit tests run in node with fakes and no
 // browser (D-29); they default to `GLTFLoader` / `TextureLoader` on one shared
@@ -141,6 +143,26 @@ function markModelShared(root: Object3D): void {
   });
 }
 
+/**
+ * SPEC-040 §4.6: frees everything a cached model owns — every geometry, every
+ * material and every texture a material holds. Only the cache may call this:
+ * the resources are tagged shared precisely so no clone's owner ever does.
+ */
+function disposeModel(root: Object3D): void {
+  root.traverse((node) => {
+    const holder = node as Object3D & { geometry?: BufferGeometry; material?: Material | Material[] };
+    holder.geometry?.dispose();
+    const material = holder.material;
+    if (!material) return;
+    for (const entry of Array.isArray(material) ? material : [material]) {
+      for (const value of Object.values(entry as unknown as Record<string, unknown>)) {
+        if (isTexture(value)) value.dispose();
+      }
+      entry.dispose();
+    }
+  });
+}
+
 function hasSkinnedMesh(root: Object3D): boolean {
   let skinned = false;
   root.traverse((node) => {
@@ -158,6 +180,11 @@ export class Assets {
   #textureLoader: AssetLoaders['texture'] | null = null;
   #inflight: Promise<void> | null = null;
   #inflightManifest: AssetManifest | null = null;
+  /**
+   * SPEC-040 §4.6: settles once every release still waiting for a load has
+   * run, and never rejects; `null` when none is waiting.
+   */
+  #releasing: Promise<void> | null = null;
   #loaded = false;
   #maxAnisotropy = 1;
   /** `0` until a preset says otherwise, which means "no cap" (AC-8). */
@@ -178,6 +205,11 @@ export class Assets {
    * asks for what is missing (D-30); concurrent calls share one promise.
    */
   load(manifest: AssetManifest, onProgress?: (done: number, total: number) => void): Promise<void> {
+    // SPEC-040 40-j: a release still waiting for a load will free what that
+    // load brings. A load asked for after the release must end with its set in
+    // the cache, so it queues behind the release instead of sharing the pass
+    // the release is waiting for.
+    if (this.#releasing !== null) return this.#releasing.then(() => this.load(manifest, onProgress));
     if (this.#inflight) {
       // Concurrent calls for the same manifest share the promise (D-30); a
       // *different* manifest queues behind the current pass so its items are
@@ -192,6 +224,52 @@ export class Assets {
     });
     this.#inflight = run;
     return run;
+  }
+
+  /**
+   * SPEC-040 §4.6: disposes and forgets every listed model — its geometries,
+   * its materials and their textures — and every listed texture, so a later
+   * `load` fetches them again. A planet's set leaves with the planet, which
+   * bounds GPU memory to the planet in play.
+   *
+   * A release issued while a load is in flight waits for that load to settle
+   * first, so it frees what the load brought rather than racing it (40-i). A
+   * load asked for while it waits runs after it, and fetches again (40-j). Ids
+   * the cache does not hold are skipped, and `loaded` stays as it was. The
+   * caller must be done with every clone of a released model.
+   */
+  async release(manifest: Pick<AssetManifest, 'models' | 'textures'>): Promise<void> {
+    const inflight = this.#inflight;
+    if (inflight === null) {
+      this.#forget(manifest);
+      return;
+    }
+    const earlier = this.#releasing ?? Promise.resolve();
+    const done = Promise.all([earlier, inflight.catch(() => undefined)]).then(() => this.#forget(manifest));
+    const settled = done.catch(() => undefined);
+    this.#releasing = settled;
+    // Registered before any load can queue behind `settled`, so it clears the
+    // slot before those loads look at it again.
+    void settled.then(() => {
+      if (this.#releasing === settled) this.#releasing = null;
+    });
+    return done;
+  }
+
+  /** Disposes and forgets the listed ids the cache holds (§4.6). */
+  #forget(manifest: Pick<AssetManifest, 'models' | 'textures'>): void {
+    for (const id of Object.keys(manifest.models)) {
+      const entry = this.#models.get(id);
+      if (entry === undefined) continue;
+      this.#models.delete(id);
+      disposeModel(entry.scene);
+    }
+    for (const id of Object.keys(manifest.textures)) {
+      const texture = this.#textures.get(id);
+      if (texture === undefined) continue;
+      this.#textures.delete(id);
+      texture.dispose();
+    }
   }
 
   /** A deep clone the caller owns; it shares the cached geometry/materials (D-33). */

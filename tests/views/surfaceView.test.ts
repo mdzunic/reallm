@@ -4,6 +4,7 @@
 // plain three.js objects, so what the GPU would be handed is readable here.
 import { describe, expect, it } from 'vitest';
 import * as THREE from 'three';
+import type { Assets } from '@/core/Assets';
 import { Pool } from '@/core/Pool';
 import { hash01 } from '@/core/Noise';
 import { hash32 } from '@/core/Rng';
@@ -390,6 +391,23 @@ describe('the environment (SPEC-018)', () => {
     expect(scene.children.length).toBe(0);
     expect(scene.fog).toBeNull();
     expect(scene.background).toBeNull();
+  });
+
+  it('dispose frees the shadow map of the key light, which the geometry walk cannot see (SPEC-040 AC-27)', () => {
+    const { scene, view } = setup(QUALITY.high);
+    const key = directionals(scene).find((light) => light.castShadow);
+    expect(key).toBeDefined();
+    // What the renderer allocates on the first shadow pass: a colour target
+    // and its depth texture, both freed when the target is.
+    const map = new THREE.WebGLRenderTarget(1024, 1024);
+    map.depthTexture = new THREE.DepthTexture(1024, 1024);
+    (key as THREE.DirectionalLight).shadow.map = map;
+    let freed = false;
+    map.addEventListener('dispose', () => {
+      freed = true;
+    });
+    view.dispose();
+    expect(freed).toBe(true);
   });
 
   it('sync puts the player on the height field (§4.3)', () => {
@@ -893,5 +911,125 @@ describe('presetOf (SPEC-015 AC-5)', () => {
     expect(presetOf(QUALITY.low)).toBe('low');
     expect(presetOf(QUALITY.medium)).toBe('medium');
     expect(presetOf(QUALITY.high)).toBe('high');
+  });
+});
+
+describe('setPropModels (SPEC-040 §4.6, E72)', () => {
+  /** A one-mesh unit prop, the way the Blender drop exports them. */
+  function rockModel(): THREE.Group {
+    const group = new THREE.Group();
+    group.add(new THREE.Mesh(new THREE.DodecahedronGeometry(1), new THREE.MeshStandardMaterial({ color: '#a89a88' })));
+    return group;
+  }
+
+  /** Cinder-4 is a desert: `rock` has a model (`desert_rock_a`), `spire` has none. */
+  function fakeAssets(): { assets: Assets; land(): void } {
+    let landed = false;
+    const assets = {
+      hasModel: (id: string) => landed && id === 'desert_rock_a',
+      model: () => rockModel(),
+    } as unknown as Assets;
+    return {
+      assets,
+      land: () => {
+        landed = true;
+      },
+    };
+  }
+
+  /** The instanced prop bodies — the meshes that carry the occluder fade — by their first instance. */
+  function props(scene: THREE.Scene): Map<string, THREE.InstancedMesh> {
+    const out = new Map<string, THREE.InstancedMesh>();
+    const at = new THREE.Vector3();
+    scene.traverse((node) => {
+      const mesh = node as THREE.InstancedMesh;
+      if (mesh.isInstancedMesh !== true || mesh.geometry.getAttribute('instanceFade') === undefined) return;
+      at.setFromMatrixPosition(new THREE.Matrix4().fromArray(mesh.instanceMatrix.array, 0));
+      out.set(`${Math.round(at.x)},${Math.round(at.z)}`, mesh);
+    });
+    return out;
+  }
+
+  const ROCK = '4,4';
+  const SMALL_ROCK = '8,8';
+  const SPIRE = '-6,9';
+
+  it('swaps the modelled kinds in place and disposes the procedural geometry; a kind with no model is left alone', () => {
+    const scene = new THREE.Scene();
+    const fake = fakeAssets();
+    const view = new SurfaceView(scene, LAYOUT, PLANETS.cinder4, QUALITY.medium, fake.assets);
+    expect(view.propSource).toBe('procedural');
+
+    const before = props(scene);
+    expect([...before.keys()].sort()).toEqual([SPIRE, ROCK, SMALL_ROCK].sort());
+    const snapshot = new Map(
+      [...before].map(([key, mesh]) => [
+        key,
+        { geometry: mesh.geometry, count: mesh.count, matrices: [...mesh.instanceMatrix.array], fade: mesh.geometry.getAttribute('instanceFade') },
+      ]),
+    );
+    const disposed = new Set<THREE.BufferGeometry>();
+    for (const { geometry } of snapshot.values()) geometry.addEventListener('dispose', () => disposed.add(geometry));
+    const triangles = (geometry: THREE.BufferGeometry): number => (geometry.getAttribute('position') as THREE.BufferAttribute).count / 3;
+
+    fake.land();
+    view.setPropModels(fake.assets);
+
+    const after = props(scene);
+    for (const key of [ROCK, SMALL_ROCK]) {
+      const mesh = after.get(key) as THREE.InstancedMesh;
+      const was = snapshot.get(key) as NonNullable<ReturnType<typeof snapshot.get>>;
+      expect(mesh, key).toBe(before.get(key));
+      expect(mesh.geometry, key).not.toBe(was.geometry);
+      expect(disposed.has(was.geometry), key).toBe(true);
+      // The model's geometry: a dodecahedron is 36 triangles, the procedural rock far more.
+      expect(triangles(mesh.geometry), key).toBe(36);
+      // Same count, same matrices, and the same fade attribute the occluder slots write into.
+      expect(mesh.count, key).toBe(was.count);
+      expect([...mesh.instanceMatrix.array], key).toEqual(was.matrices);
+      expect(mesh.geometry.getAttribute('instanceFade'), key).toBe(was.fade);
+    }
+    const spire = after.get(SPIRE) as THREE.InstancedMesh;
+    expect(spire.geometry).toBe(snapshot.get(SPIRE)?.geometry);
+    expect(disposed.has(spire.geometry)).toBe(false);
+    expect(view.propSource).toBe('glb');
+
+    // A second call has nothing left to swap.
+    const rockGeometry = (after.get(ROCK) as THREE.InstancedMesh).geometry;
+    view.setPropModels(fake.assets);
+    expect((props(scene).get(ROCK) as THREE.InstancedMesh).geometry).toBe(rockGeometry);
+  });
+
+  it('stands a swapped rock on the ground: its geometry gives back the procedural lift', () => {
+    const scene = new THREE.Scene();
+    const fake = fakeAssets();
+    const view = new SurfaceView(scene, LAYOUT, PLANETS.cinder4, QUALITY.medium, fake.assets);
+    fake.land();
+    view.setPropModels(fake.assets);
+    const rock = props(scene).get(ROCK) as THREE.InstancedMesh;
+    rock.geometry.computeBoundingBox();
+    const model = new THREE.DodecahedronGeometry(1);
+    model.computeBoundingBox();
+    // Half a unit comes off the model, as 18-d's lift put half a unit on.
+    expect(rock.geometry.boundingBox?.min.y).toBeCloseTo((model.boundingBox?.min.y ?? 0) - 0.5, 5);
+    expect(rock.geometry.boundingBox?.max.y).toBeCloseTo((model.boundingBox?.max.y ?? 0) - 0.5, 5);
+  });
+
+  it('draws from the models from the start when the set had landed, and then has nothing to do', () => {
+    const scene = new THREE.Scene();
+    const fake = fakeAssets();
+    fake.land();
+    const view = new SurfaceView(scene, LAYOUT, PLANETS.cinder4, QUALITY.medium, fake.assets);
+    expect(view.propSource).toBe('glb');
+    const geometry = (props(scene).get(ROCK) as THREE.InstancedMesh).geometry;
+    view.setPropModels(fake.assets);
+    expect((props(scene).get(ROCK) as THREE.InstancedMesh).geometry).toBe(geometry);
+  });
+
+  it('reads glb for a planet whose kinds have no models at all', () => {
+    const scene = new THREE.Scene();
+    const layout: ViewLayout = { ...LAYOUT, obstacles: [{ x: -6, z: 9, radius: 1, kind: 'spire' }], props: [] };
+    const view = new SurfaceView(scene, layout, PLANETS.cinder4, QUALITY.medium);
+    expect(view.propSource).toBe('glb');
   });
 });

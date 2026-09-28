@@ -291,6 +291,12 @@ test('death sweeps the pad ring and resets a live boss (AC-48, AC-49)', async ({
   await page.locator('[data-testid="surface-spawn-boss"]').click();
   await expect.poll(async () => (await info(page))['boss']).not.toBe('-');
   await expect.poll(async () => Number((await info(page))['enemiesNearPad'] ?? 0), { timeout: 45_000 }).toBeGreaterThanOrEqual(1);
+  // The ambient ones wander off while the pilot is being hurt, and how far
+  // they get depends on how fast the host delivers frames: since SPEC-040
+  // §4.2 draws every frame a slow host gets, a click's two-frame stability
+  // check takes longer there. A pack at the pilot's feet chases the pilot, so
+  // the ring still holds an enemy at the moment of death.
+  await page.locator('[data-testid="surface-spawn-pack"]').click();
 
   await hurtUntilDead(page);
   await expect(page.locator('[data-testid="death-overlay"]')).toBeVisible();

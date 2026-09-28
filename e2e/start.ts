@@ -27,6 +27,8 @@ export interface DevBridge {
   /** SPEC-036 §4.4: how many layers are open on the back-stack (dev builds only). */
   backDepth(): number;
   loseContext(restoreAfterMs: number | null): void;
+  /** SPEC-040 §3: busy-waits `ms` inside every draw (dev builds only). */
+  slowDraw(ms: number): void;
   stop(): void;
 }
 
@@ -156,6 +158,10 @@ export interface StatsSnapshot {
   planet: string | null;
   /** `hash32(seed, planet, 'layout')`; `null` when off-planet. */
   layoutSeed: number | null;
+  /** SPEC-040 §4.2: drawn frames since boot. */
+  renders: number;
+  /** SPEC-040 §4.3: the adaptive governor's steps this session. */
+  adaptSteps: number;
 }
 
 declare global {

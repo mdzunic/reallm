@@ -9,8 +9,9 @@
 // `redetect()`, reads `settings.benchmark` back and toasts (AC-20).
 import type { BenchmarkOutcome } from '@/core/Benchmark';
 import type { QualityPreset } from '@/core/Renderer';
-import type { DamageFlashMode, GuidanceLevel, SettingsStore } from '@/core/Settings';
+import type { DamageFlashMode, FrameRate, GuidanceLevel, SettingsStore } from '@/core/Settings';
 import { log } from '@/core/Log';
+import { offlineStatus, offlineText } from '@/core/Updates';
 import type { SaveStore, SlotId } from '@/core/Save';
 import { SLOTS } from '@/core/Save';
 import type { Difficulty } from '@/data/index';
@@ -45,6 +46,8 @@ export interface SettingsDeps {
 }
 
 const QUALITY_CHOICES = ['auto', 'low', 'medium', 'high'] as const;
+/** SPEC-040 §4.3: the two frame-rate ceilings, 60 first (the default). */
+const FRAME_RATE_CHOICES = [60, 30] as const satisfies readonly FrameRate[];
 const AUTO_FIRE_CHOICES = [
   ['on', 'On'],
   ['off', 'Off'],
@@ -261,7 +264,48 @@ export class SettingsPanel {
         testId(h('span', { class: 'settings-note' }, this.#benchmarkNote()), 'settings-benchmark'),
         redetect,
       ),
+      // SPEC-040 §4.7: whether this device can play offline yet, read on every
+      // render — the worker registers at the first station visit.
+      h(
+        'div',
+        { class: 'settings-row' },
+        testId(h('span', { class: 'settings-note' }, offlineText(offlineStatus())), 'settings-offline'),
+      ),
+      // SPEC-040 §4.3: beside Quality (SPEC-045 owns where rows finally sit).
+      this.#frameRateRow(),
+      this.#toggleRow('settings-adaptive-quality', 'Adaptive quality', s.get().adaptiveQuality, (on) =>
+        s.set({ adaptiveQuality: on }),
+      ),
     ) as HTMLDivElement;
+  }
+
+  /**
+   * SPEC-040 §4.3: the most frames a second the game draws — 60, or 30 for the
+   * battery on a device that could hold 60 (40-h). It applies from the next
+   * frame; the preset's own `targetFps` still wins when it is lower.
+   */
+  #frameRateRow(): HTMLDivElement {
+    const s = this.#deps.settings;
+    const active = s.get().frameRate;
+    const buttons = FRAME_RATE_CHOICES.map((rate) =>
+      testId(
+        h(
+          'button',
+          {
+            class: `ui-btn seg${rate === active ? ' is-active' : ''}`,
+            type: 'button',
+            'aria-pressed': String(rate === active),
+            click: () => {
+              s.set({ frameRate: rate });
+              this.#render();
+            },
+          },
+          String(rate),
+        ),
+        `settings-framerate-${rate}`,
+      ),
+    );
+    return h('div', { class: 'settings-row' }, h('span', {}, 'Frame rate'), h('div', { class: 'settings-seg' }, ...buttons)) as HTMLDivElement;
   }
 
   /**

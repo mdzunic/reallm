@@ -66,8 +66,10 @@ async function dismissDialogue(page: Page): Promise<void> {
   const advance = page.getByTestId('dialogue-advance');
   for (let i = 0; i < 30; i++) {
     if (!(await dialogue.isVisible().catch(() => false))) return;
+    // The line can move on by itself between the look and the press; the next
+    // pass looks again.
     if (await advance.isVisible().catch(() => false)) await advance.click({ force: true, timeout: 2_000 }).catch(() => undefined);
-    else await dialogue.click({ force: true });
+    else await dialogue.click({ force: true, timeout: 2_000 }).catch(() => undefined);
     await page.waitForTimeout(120);
   }
 }
@@ -75,21 +77,24 @@ async function dismissDialogue(page: Page): Promise<void> {
 /**
  * A MutationObserver on the vignette that counts rising edges of
  * `is-flashing` — one class write per edge (§4.6), read off the record's old
- * value and the value after it.
+ * value and the value after it — and notes when each one landed, on the
+ * `performance.now()` clock the gate itself reads. The observer runs in the
+ * microtask after the hit that lit the edge, so the time is the hit's.
  */
 async function watchFlash(page: Page): Promise<void> {
   await page.evaluate(() => {
     const vignette = document.querySelector('.hud-vignette');
     if (!(vignette instanceof HTMLElement)) throw new Error('no vignette');
-    const scope = window as unknown as { __flashEdges: number; __flashObserver?: MutationObserver };
+    const scope = window as unknown as { __flashEdges: number[]; __flashObserver?: MutationObserver };
     scope.__flashObserver?.disconnect();
-    scope.__flashEdges = 0;
+    scope.__flashEdges = [];
     let was = vignette.classList.contains('is-flashing');
     const observer = new MutationObserver((records) => {
+      const at = performance.now() / 1000;
       records.forEach((record, i) => {
         const after = i + 1 < records.length ? (records[i + 1]?.oldValue ?? '') : vignette.className;
         const now = after.split(/\s+/).includes('is-flashing');
-        if (!was && now) scope.__flashEdges++;
+        if (!was && now) scope.__flashEdges.push(at);
         was = now;
       });
     });
@@ -98,8 +103,14 @@ async function watchFlash(page: Page): Promise<void> {
   });
 }
 
-const flashEdges = (page: Page): Promise<number> =>
-  page.evaluate(() => (window as unknown as { __flashEdges: number }).__flashEdges);
+/** When each rising edge since `watchFlash` landed, in `performance.now()` seconds. */
+const flashEdgeTimes = (page: Page): Promise<number[]> =>
+  page.evaluate(() => (window as unknown as { __flashEdges: number[] }).__flashEdges.slice());
+
+const flashEdges = async (page: Page): Promise<number> => (await flashEdgeTimes(page)).length;
+
+/** SPEC-037 §4.6's `FLASH_MIN_GAP`: the least time between two rising edges, s. */
+const FLASH_MIN_GAP = 0.35;
 
 /** The HP readout's current value — `♥184/184` reads 184. */
 async function hp(page: Page): Promise<number> {
@@ -107,14 +118,24 @@ async function hp(page: Page): Promise<number> {
   return Number(/(\d+)\s*\/\s*\d+/.exec(text)?.[1] ?? Number.NaN);
 }
 
-/** Ten `surface-hurt-from` presses inside one second. */
-async function tenHits(page: Page): Promise<void> {
-  await page.evaluate(async () => {
+/**
+ * Ten `surface-hurt-from` presses, 90 ms apart — inside one second on an idle
+ * page. Resolves to the `performance.now()` seconds of the first and the last.
+ * The gaps are timers, so on a page whose frames take longer than 90 ms each
+ * press waits for the frame in its way, and the ten spread out.
+ */
+async function tenHits(page: Page): Promise<{ first: number; last: number }> {
+  return page.evaluate(async () => {
     const button = document.querySelector('[data-testid="surface-hurt-from"]') as HTMLButtonElement;
+    let first = 0;
+    let last = 0;
     for (let i = 0; i < 10; i++) {
+      last = performance.now() / 1000;
+      if (i === 0) first = last;
       button.click();
       await new Promise((resolve) => setTimeout(resolve, 90));
     }
+    return { first, last };
   });
 }
 
@@ -219,12 +240,28 @@ test('3. weather never flashes, a barrage rises at most three times, and Off sho
   expect(await flashEdges(page)).toBe(0);
 
   // Ten hits inside a second: the gate lets at most three edges through.
+  // What the gate promises is a rising edge at most once per `FLASH_MIN_GAP`,
+  // which is at most three in any one second, so that is what is asserted —
+  // edge by edge, on the times the edges landed. It is the same claim as
+  // "ten hits, three edges" whenever the ten land inside a second, which is
+  // every run on an idle page. On a loaded GPU-less run (SPEC-040 §4.2 draws
+  // every frame such a host gets) the 90 ms timers wait out ~250 ms frames,
+  // the ten spread over 1.5 s or more, and a fourth edge a whole gap after the
+  // third is the gate working, not failing.
   await watchFlash(page);
-  await tenHits(page);
+  const hits = await tenHits(page);
   await page.waitForTimeout(300);
-  const edges = await flashEdges(page);
-  expect(edges).toBeGreaterThanOrEqual(1);
-  expect(edges).toBeLessThanOrEqual(3);
+  const at = await flashEdgeTimes(page);
+  const report = `edges at ${at.map((t) => (t - hits.first).toFixed(3)).join(', ')} s; last hit at ${(hits.last - hits.first).toFixed(3)} s`;
+  expect(at.length, report).toBeGreaterThanOrEqual(1);
+  // 25 ms of slack: the observer notes the time once the whole hit has run —
+  // the burst, the shake and the number after the gate read the clock — and a
+  // gate that strobed would show the 90 ms of the hits, not 325.
+  for (let i = 1; i < at.length; i++) {
+    expect((at[i] as number) - (at[i - 1] as number), report).toBeGreaterThanOrEqual(FLASH_MIN_GAP - 0.025);
+  }
+  for (let i = 3; i < at.length; i++) expect((at[i] as number) - (at[i - 3] as number), report).toBeGreaterThan(1);
+  if (hits.last - hits.first < 1) expect(at.length, report).toBeLessThanOrEqual(3);
 
   // Settings → Damage flash → Off: the same ten hits light nothing.
   await page.keyboard.press('Escape');

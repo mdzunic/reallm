@@ -591,6 +591,16 @@ export function surfaceHoldReason(state: SurfaceHoldState): SurfaceHold {
   return null;
 }
 
+/**
+ * SPEC-040 §4.2: whether a hold leaves nothing on screen moving with the world
+ * — the map, the quick picker, the pad terminal, a modal line and the rotate
+ * block all stand the world still, so the surface is idle and draws at most
+ * five frames a second. A beat never is: a film or a reveal moves the camera.
+ */
+export function holdIsIdle(hold: SurfaceHold): boolean {
+  return hold === 'ui' || hold === 'modal' || hold === 'rotate';
+}
+
 // -------------------------------------------------------------- player stats
 
 /**
@@ -956,36 +966,117 @@ export function createHudModel(): HudModel {
   };
 }
 
-/** Structural equality over the plain values a `HudModel` holds. */
-function same(a: unknown, b: unknown): boolean {
+/**
+ * Every top-level key of a `HudModel`, as a record so the compiler checks the
+ * list is complete — a key added to the model and not here is a type error,
+ * never a field the diff silently skips.
+ */
+const HUD_KEY_TABLE = {
+  hp: true,
+  xp: true,
+  level: true,
+  tokens: true,
+  resources: true,
+  cargoCap: true,
+  objective: true,
+  tracker: true,
+  weather: true,
+  shelter: true,
+  boss: true,
+  loadout: true,
+  quick: true,
+  interact: true,
+  interactAction: true,
+  walletLit: true,
+  dash: true,
+  flight: true,
+} as const satisfies Record<HudKey, true>;
+
+/** SPEC-040 §4.4: the constant key list the diff walks — built once, never per frame. */
+export const HUD_KEYS: readonly HudKey[] = Object.freeze(Object.keys(HUD_KEY_TABLE) as HudKey[]);
+
+/**
+ * Structural equality over the plain values a `HudModel` holds, with no
+ * allocation (SPEC-040 §4.4): identity first, then arrays index by index, then
+ * plain objects key by key with `for…in` on both sides — no `Object.keys`
+ * arrays, no closures.
+ */
+function sameValue(a: unknown, b: unknown): boolean {
   if (a === b) return true;
   if (typeof a !== 'object' || typeof b !== 'object' || a === null || b === null) return false;
-  if (Array.isArray(a) || Array.isArray(b)) {
-    if (!Array.isArray(a) || !Array.isArray(b) || a.length !== b.length) return false;
-    return a.every((value, i) => same(value, b[i]));
+  const aArray = Array.isArray(a);
+  if (aArray !== Array.isArray(b)) return false;
+  if (aArray) {
+    const left = a as readonly unknown[];
+    const right = b as readonly unknown[];
+    if (left.length !== right.length) return false;
+    for (let i = 0; i < left.length; i++) if (!sameValue(left[i], right[i])) return false;
+    return true;
   }
-  const keysA = Object.keys(a);
-  const keysB = Object.keys(b);
-  if (keysA.length !== keysB.length) return false;
-  return keysA.every((key) => same((a as Record<string, unknown>)[key], (b as Record<string, unknown>)[key]));
+  const left = a as Record<string, unknown>;
+  const right = b as Record<string, unknown>;
+  for (const key in left) {
+    if (!(key in right) || !sameValue(left[key], right[key])) return false;
+  }
+  for (const key in right) {
+    if (!(key in left)) return false;
+  }
+  return true;
 }
 
 /**
- * The changed top-level keys between two models (§4.5, AC-62). Pure; an empty
- * set is the contract that `flush()` writes nothing to the DOM that frame.
+ * The changed top-level keys between two models (SPEC-014 §4.5, AC-62), into
+ * `out`: it is cleared, filled and returned, so `Hud.flush()` diffs a fight's
+ * every frame through one scratch set (SPEC-040 §4.4). An empty set is the
+ * contract that `flush()` writes nothing to the DOM that frame.
  */
-export function diffHud(prev: HudModel, next: HudModel): Set<HudKey> {
-  const changed = new Set<HudKey>();
-  const keys = new Set([...Object.keys(prev), ...Object.keys(next)] as HudKey[]);
-  for (const key of keys) {
-    if (!same(prev[key], next[key])) changed.add(key);
+export function diffHudInto(prev: HudModel, next: HudModel, out: Set<HudKey>): Set<HudKey> {
+  out.clear();
+  for (let i = 0; i < HUD_KEYS.length; i++) {
+    const key = HUD_KEYS[i] as HudKey;
+    if (!sameValue(prev[key], next[key])) out.add(key);
   }
-  return changed;
+  return out;
 }
 
-/** A deep copy, for the "last rendered" side of the diff. */
-export function cloneHud(model: HudModel): HudModel {
-  return structuredClone(model);
+/** `diffHudInto` into a fresh set — the pure form the SPEC-014 tests read. */
+export function diffHud(prev: HudModel, next: HudModel): Set<HudKey> {
+  return diffHudInto(prev, next, new Set<HudKey>());
+}
+
+/**
+ * `from` written into `into`, reusing `into`'s own arrays and objects: a
+ * primitive is assigned, an array is resized in place and filled element by
+ * element, an object is copied key by key and loses the keys `from` lacks.
+ * `into` never ends up holding a reference into `from`. It allocates only
+ * where `into` has no container of the right kind — null ↔ object — or an
+ * array has to grow.
+ */
+function copyValue(into: unknown, from: unknown): unknown {
+  if (typeof from !== 'object' || from === null) return from;
+  if (Array.isArray(from)) {
+    const out: unknown[] = Array.isArray(into) ? (into as unknown[]) : [];
+    if (out.length > from.length) out.length = from.length;
+    for (let i = 0; i < from.length; i++) out[i] = copyValue(out[i], from[i]);
+    return out;
+  }
+  const out = (typeof into === 'object' && into !== null && !Array.isArray(into) ? into : {}) as Record<string, unknown>;
+  const source = from as Record<string, unknown>;
+  for (const key in source) out[key] = copyValue(out[key], source[key]);
+  for (const key in out) {
+    if (!(key in source)) delete out[key];
+  }
+  return out;
+}
+
+/**
+ * SPEC-040 §4.4: `source` copied into `target` in place — the "last rendered"
+ * side of the diff, kept without a deep clone per changed frame. A
+ * second copy of an unchanged model creates no new object. Returns `target`.
+ */
+export function copyHudInto(target: HudModel, source: HudModel): HudModel {
+  copyValue(target, source);
+  return target;
 }
 
 // -------------------------------------------------------------------- toasts

@@ -168,6 +168,24 @@ describe('CharacterView materials (AC-21 … AC-25, AC-27)', () => {
     expect(templateDisposed).toBe(false);
     view.dispose(); // idempotent
   });
+
+  it('dispose frees the skeleton of the clone, and the bone texture three drew it with (SPEC-040 AC-27)', () => {
+    const { assets, mesh } = fake(['Idle']);
+    const bone = new THREE.Bone();
+    mesh.add(bone);
+    mesh.bind(new THREE.Skeleton([bone]));
+    const view = new CharacterView(new THREE.Group(), assets, 'character', APPEARANCE, false);
+    // What the renderer does on a skinned mesh's first draw.
+    const boneTexture = mesh.skeleton.computeBoneTexture().boneTexture as THREE.DataTexture;
+    let freed = false;
+    boneTexture.addEventListener('dispose', () => {
+      freed = true;
+    });
+    view.dispose();
+    expect(freed).toBe(true);
+    expect(mesh.skeleton.boneTexture).toBeNull();
+    view.dispose(); // idempotent
+  });
 });
 
 describe('tintSalvager (AC-21 … AC-23)', () => {

@@ -35,6 +35,7 @@ import { buildArenaWall } from '@/views/ArenaWall';
 import {
   boundaryGeometry,
   obstacleGeometry,
+  obstacleModelId,
   poiGeometry,
   shelterGeometry,
   type ObstacleKind,
@@ -408,6 +409,51 @@ function injectInstanceFade(material: THREE.MeshStandardMaterial): void {
   material.customProgramCacheKey = () => 'prop-fade/1';
 }
 
+/**
+ * 18-d: a procedural rock embeds half its radius, so its instance matrix is
+ * lifted by `scale × ROCK_LIFT`; a GLB prop has its origin at its base and
+ * takes no lift (§4.10).
+ */
+const ROCK_LIFT = 0.5;
+
+/**
+ * SPEC-040 §4.6: one instanced prop or obstacle kind, as built — what a late
+ * GLB set swaps into (`setPropModels`) and what `propSource` reads.
+ */
+interface PropKind {
+  readonly kind: ObstacleKind;
+  readonly small: boolean;
+  readonly seed: number;
+  readonly mesh: THREE.InstancedMesh;
+  /** The per-instance fade the occluder slots write into; it moves to the new geometry. */
+  readonly fade: THREE.InstancedBufferAttribute;
+  glow: THREE.InstancedMesh | null;
+  /** `PROP_MODELS` names a model for this kind in this biome. */
+  readonly modelled: boolean;
+  /** The body draws from that model now. */
+  fromModel: boolean;
+}
+
+/**
+ * Puts `body` on `mesh` in place of its geometry, which is disposed. The
+ * instance matrices, the count and the per-instance fade live on the mesh and
+ * on `fade`, so none of them move; the fade is taken off the old geometry
+ * first, so disposing it cannot free the buffer the new one draws with.
+ */
+function swapGeometry(mesh: THREE.InstancedMesh, body: THREE.BufferGeometry, fade: THREE.InstancedBufferAttribute | null): void {
+  const old = mesh.geometry;
+  if (fade !== null) {
+    body.setAttribute('instanceFade', fade);
+    old.deleteAttribute('instanceFade');
+  }
+  mesh.geometry = body;
+  old.dispose();
+  // The instanced bounds were computed from the old geometry; three rebuilds
+  // them from the new one on the next cull.
+  mesh.boundingBox = null;
+  mesh.boundingSphere = null;
+}
+
 /** One instance's worth of `instanceFade`, filled opaque. */
 function fadeAttribute(count: number): THREE.InstancedBufferAttribute {
   const attribute = new THREE.InstancedBufferAttribute(new Float32Array(count).fill(1), 1);
@@ -474,6 +520,9 @@ export class SurfaceView {
   readonly #assets: Assets | undefined;
   /** SPEC-019 §4.8: built on the first frame that carries a follower. */
   #followerView: FollowerView | null = null;
+  readonly #biome: PlanetDef['biome'];
+  /** SPEC-040 §4.6: every instanced prop and obstacle kind, in build order. */
+  readonly #propKinds: PropKind[] = [];
   readonly #telegraph: THREE.Mesh;
   readonly #arenaRing: THREE.Mesh;
   #fx: CombatFx;
@@ -559,6 +608,7 @@ export class SurfaceView {
   ) {
     this.#scene = scene;
     this.#assets = assets;
+    this.#biome = planet.biome;
     scene.add(this.#root);
     const palette = planet.surface.palette;
     const look = planet.surface.look;
@@ -639,7 +689,8 @@ export class SurfaceView {
     for (const [key, list] of byKind) {
       const small = key.endsWith('#prop');
       const kind = key.replace('#prop', '') as ObstacleKind;
-      const prop = obstacleGeometry(kind, planet.biome, hash32(layout.hash, 'prop', kind), assets, small);
+      const seed = hash32(layout.hash, 'prop', kind);
+      const prop = obstacleGeometry(kind, planet.biome, seed, assets, small);
       const mesh = new THREE.InstancedMesh(prop.body, accent, list.length);
       const fade = fadeAttribute(list.length);
       prop.body.setAttribute('instanceFade', fade);
@@ -649,7 +700,7 @@ export class SurfaceView {
         const h = this.field.heightAt(entry.x, entry.z);
         // 18-d: bases sit at h; procedural rocks embed half their radius. A GLB
         // prop has its origin at the base centre, so it takes no lift (§4.10).
-        const lift = prop.fromModel !== true && kind === 'rock' ? entry.scale * 0.5 : 0;
+        const lift = prop.fromModel !== true && kind === 'rock' ? entry.scale * ROCK_LIFT : 0;
         scratchMatrix.makeRotationY(entry.rot);
         scratchMatrix.scale(scratchVector.set(entry.scale, entry.scale, entry.scale));
         scratchMatrix.setPosition(entry.x, h + lift, entry.z);
@@ -663,13 +714,17 @@ export class SurfaceView {
       mesh.castShadow = true;
       mesh.receiveShadow = true;
       this.#root.add(mesh);
-      if (prop.glow !== undefined) {
-        const glow = new THREE.InstancedMesh(prop.glow, obstacleGlow(kind, planet.biome, palette.accent), list.length);
-        glow.instanceMatrix.copy(mesh.instanceMatrix);
-        glow.instanceMatrix.needsUpdate = true;
-        glow.castShadow = false;
-        this.#root.add(glow);
-      }
+      const glow = prop.glow === undefined ? null : this.#addPropGlow(kind, prop.glow, mesh);
+      this.#propKinds.push({
+        kind,
+        small,
+        seed,
+        mesh,
+        fade,
+        glow,
+        modelled: obstacleModelId(kind, planet.biome) !== undefined,
+        fromModel: prop.fromModel === true,
+      });
     }
 
     // POIs: one small sculpted mesh per instance (SPEC-018 §4.7); glow parts
@@ -1315,6 +1370,72 @@ export class SurfaceView {
     }
   }
 
+  // ------------------------------------------------------- SPEC-040 §4.6
+
+  /**
+   * SPEC-040 §4.6, E72: the planet's prop models, swapped in after the view was
+   * built — the set landed later than the surface would wait for it. Each prop
+   * and obstacle `InstancedMesh` whose kind has a model now in `assets` takes
+   * the GLB geometry in place: the same count, instance matrices, fades and
+   * occluder slots, so no position, collision, fade or layout hash moves. The
+   * procedural geometry is disposed. A kind with no model, or already drawn
+   * from its model, is left alone.
+   */
+  setPropModels(assets: Assets): void {
+    for (const prop of this.#propKinds) {
+      if (prop.fromModel || !prop.modelled) continue;
+      const id = obstacleModelId(prop.kind, this.#biome);
+      if (id === undefined || !assets.hasModel(id)) continue;
+      const next = obstacleGeometry(prop.kind, this.#biome, prop.seed, assets, prop.small);
+      if (next.fromModel !== true) {
+        next.body.dispose();
+        next.glow?.dispose();
+        continue;
+      }
+      if (prop.kind === 'rock') {
+        // The matrices still carry the procedural rock's lift; the model's own
+        // geometry gives it back, so the rock stands on the ground (18-d).
+        next.body.translate(0, -ROCK_LIFT, 0);
+        next.glow?.translate(0, -ROCK_LIFT, 0);
+      }
+      swapGeometry(prop.mesh, next.body, prop.fade);
+      if (prop.glow !== null && next.glow !== undefined) {
+        swapGeometry(prop.glow, next.glow, null);
+      } else if (prop.glow !== null) {
+        // The model has no glow part: the procedural one goes with its body.
+        this.#root.remove(prop.glow);
+        prop.glow.geometry.dispose();
+        (prop.glow.material as THREE.Material).dispose();
+        prop.glow.dispose();
+        prop.glow = null;
+      } else if (next.glow !== undefined) {
+        prop.glow = this.#addPropGlow(prop.kind, next.glow, prop.mesh);
+      }
+      prop.fromModel = true;
+    }
+  }
+
+  /**
+   * SPEC-040 §4.6: `'glb'` once every prop kind that has a model draws it,
+   * `'procedural'` while any of them still draws its stand-in.
+   */
+  get propSource(): 'glb' | 'procedural' {
+    for (const prop of this.#propKinds) {
+      if (prop.modelled && !prop.fromModel) return 'procedural';
+    }
+    return 'glb';
+  }
+
+  /** §4.7: a prop kind's emissive parts, instanced on the body's own matrices. */
+  #addPropGlow(kind: ObstacleKind, geometry: THREE.BufferGeometry, body: THREE.InstancedMesh): THREE.InstancedMesh {
+    const glow = new THREE.InstancedMesh(geometry, obstacleGlow(kind, this.#biome, this.#palette.accent), body.count);
+    glow.instanceMatrix.copy(body.instanceMatrix);
+    glow.instanceMatrix.needsUpdate = true;
+    glow.castShadow = false;
+    this.#root.add(glow);
+    return glow;
+  }
+
   // ------------------------------------------------------- SPEC-035 §4.5
 
   /**
@@ -1674,6 +1795,10 @@ export class SurfaceView {
       target.faded?.dispose();
       target.faded = null;
     }
+    // SPEC-040 AC-27: the key's shadow map is a render target three allocates
+    // on the first shadow pass — a colour and a depth texture, which the walk
+    // above cannot see. Left alone, every visit on `high` kept both on the GPU.
+    this.#key.dispose();
     this.#clearEnvironment();
     this.#scene.fog = null;
     this.#scene.background = null;

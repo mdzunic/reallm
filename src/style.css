@@ -862,6 +862,27 @@ html.quality-low .toast {
   -webkit-backdrop-filter: none;
 }
 
+/* SPEC-040 §4.5: in play the blur goes on every preset. A `backdrop-filter`
+   over the live canvas re-blurs it on every frame the canvas draws, which in
+   play is every frame — on a phone, the dearest thing on screen for nothing
+   the player reads. The id outranks every glass rule in the sheet. Menus,
+   creation and the station set no `data-play` and keep the glass. */
+html[data-play] #ui * {
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+}
+
+/* …and the glass the blur leaves behind would show the scene through the
+   text, so the dialogue, the toasts and the overlay panels take the opaque
+   fill, as `low` already gives them. HUD boxes keep SPEC-037's plate and the
+   pause frame its own scrim; the rotate block is a cover that wears no glass,
+   so, as above, it keeps its own. */
+html[data-play] .dialogue,
+html[data-play] .toast,
+html[data-play] .overlay-panel:not(.overlay-rotate) {
+  background: var(--panel);
+}
+
 /* Buttons are real buttons with a 44 px floor (AC-108, 14-f).
    SPEC-031 §4.7: a console key — flat face, hairline edge, and a 2 px accent
    underline when hovered, focused or active. The accent moved from the border

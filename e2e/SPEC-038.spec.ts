@@ -97,9 +97,21 @@ test('1, 2. V and the right mouse button dash 5 m, and qb-dash rings its cooldow
 
   await page.keyboard.press('KeyV');
   const pressedAt = await viewTimeWhen(page, 'dashes', 1);
-  // The ring shows: `--cd` starts near 1 and the cell reads as cooling.
-  await expect(cell).toHaveClass(/is-cooling/);
-  expect(Number(await cell.evaluate((node) => (node as HTMLElement).style.getPropertyValue('--cd')))).toBeGreaterThan(0);
+  // The ring shows: `--cd` starts near 1 and the cell reads as cooling — both
+  // read in the frame the cell is first seen cooling. The Marine's cooldown is
+  // 1.358 s of game time, which a loaded GPU-less run can spend between two
+  // round trips now that it draws every frame it gets (SPEC-040 §4.2).
+  const ring = (await (
+    await page.waitForFunction(
+      () => {
+        const node = document.querySelector<HTMLElement>('[data-testid="qb-dash"]');
+        return node !== null && node.classList.contains('is-cooling') ? { cd: Number(node.style.getPropertyValue('--cd')) } : false;
+      },
+      null,
+      { polling: 'raf', timeout: 15_000 },
+    )
+  ).jsonValue()) as { cd: number };
+  expect(ring.cd).toBeGreaterThan(0);
   // 0.2 s later the dash is done; the salvager went 5 m (± the 0.1 m rounding).
   await viewTimeWhen(page, 'viewTime', pressedAt + 0.3);
   const after = await sceneInfo(page);

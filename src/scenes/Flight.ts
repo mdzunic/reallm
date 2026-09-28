@@ -965,6 +965,15 @@ export class FlightScene extends UiScene<'flight'> {
     if (save !== null) this.#flight?.setDifficulty(save.meta.difficulty);
   }
 
+  /**
+   * SPEC-040 §4.2: idle while the rotate block holds the trip — `flight.update`
+   * is skipped then (E65), so nothing on screen moves and the pacer draws at
+   * most five frames a second.
+   */
+  idle(): boolean {
+    return this.#rotate?.blocked === true;
+  }
+
   override debugInfo(): Record<string, number | string> {
     const info = super.debugInfo();
     const flight = this.#flight;

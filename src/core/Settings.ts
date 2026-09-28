@@ -64,12 +64,21 @@ export type TipSeen = TipId | `${TipId}@touch`;
 /** SPEC-036 §4.12: the zone ghosts show on the first two touch landings. */
 export const ZONES_SHOWN_MAX = 2;
 
-/** SPEC-015 §4 stores what the boot benchmark measured, so it runs once. */
+/**
+ * SPEC-015 §4 stores what the boot benchmark measured, so it runs once.
+ * SPEC-040 §4.1: `method` says how — `'gpu'`, the timed read-back. A record
+ * without it measured frame gaps, which vsync floors, so it reads as `null`
+ * and the next boot measures once more.
+ */
 export interface BenchmarkResult {
   preset: QualityPreset;
   msPerFrame: number;
   at: number;
+  method: 'gpu';
 }
+
+/** SPEC-040 §4.3: the frame-rate ceiling a player may choose; 60 is the default. */
+export type FrameRate = 60 | 30;
 
 /**
  * The data-only shape of `SettingsStore` — what `settings:changed` carries a
@@ -108,6 +117,17 @@ export type Settings = {
   /** `null` = ask once on boot (Android/desktop); SPEC-015 §7. */
   fullscreen: boolean | null;
   benchmark: BenchmarkResult | null;
+  /**
+   * SPEC-040 §4.3: the most frames a second the game draws — the lower of this
+   * and the preset's `targetFps`. Anything stored other than 30 reads 60.
+   */
+  frameRate: FrameRate;
+  /**
+   * SPEC-040 §4.3: the governor may lower the resolution and then the preset
+   * for the session when the device cannot hold the frame rate. Default on; a
+   * non-boolean stored value reads `true`.
+   */
+  adaptiveQuality: boolean;
   /** SPEC-027 §4.9; an unusable value reads `'full'` (SPEC-027 D-15). */
   guidance: GuidanceLevel;
   /**
@@ -215,6 +235,8 @@ export function defaultSettings(): Settings {
     installHintShownAt: null,
     fullscreen: null,
     benchmark: null,
+    frameRate: 60,
+    adaptiveQuality: true,
     guidance: 'full',
     tipsSeen: [],
     serviceMode: false,
@@ -320,7 +342,10 @@ function benchmarkOrNull(value: unknown, fallback: BenchmarkResult | null): Benc
   if (typeof preset !== 'string' || !PRESETS.includes(preset)) return fallback;
   if (typeof msPerFrame !== 'number' || !Number.isFinite(msPerFrame)) return fallback;
   if (typeof at !== 'number' || !Number.isFinite(at)) return fallback;
-  return { preset: preset as QualityPreset, msPerFrame, at };
+  // SPEC-040 §4.1: a record without the method measured vsync, not the
+  // device; it reads as nothing stored, so the benchmark runs once more.
+  if (bag['method'] !== 'gpu') return null;
+  return { preset: preset as QualityPreset, msPerFrame, at, method: 'gpu' };
 }
 
 /** SPEC-036 §4.2: a bare tip id, or one with the `@touch` wording suffix. */
@@ -408,6 +433,12 @@ function coerce<K extends keyof Settings>(key: K, value: unknown, current: Setti
         return boolOrNull(value, null);
       case 'benchmark':
         return benchmarkOrNull(value, null);
+      case 'frameRate':
+        // SPEC-040 §4.3: 30 is the one other choice; anything else is 60.
+        return value === 30 ? 30 : 60;
+      case 'adaptiveQuality':
+        // Default-on: an unusable value must not quietly turn it off.
+        return bool(value, true);
       case 'guidance':
         // D-15: unusable reads `'full'`, never "whatever is in memory" — the
         // player who asked for less guidance asked for one of three words.

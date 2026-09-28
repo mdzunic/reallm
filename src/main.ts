@@ -14,7 +14,7 @@ import { RngRoot } from '@/core/Rng';
 import { SaveStore } from '@/core/Save';
 import { createSettings } from '@/core/Settings';
 import { SERVICE_OFF_TEXT, SERVICE_ON_TEXT } from '@/systems/Service';
-import { offerUpdate } from '@/core/Updates';
+import { hasOfflineWorker, offerUpdate, offlineStatus, registeredStatus, setOfflineStatus } from '@/core/Updates';
 import type { SceneId } from '@/core/StateMachine';
 import { ASSETS } from '@/data/assets';
 import type { DialogueId } from '@/data/index';
@@ -154,9 +154,46 @@ export function offerAppUpdate(apply: () => void): void {
  * only signal — a waiting build never takes over by itself, so
  * `serviceWorker.controllerchange` never fires and the typed `app:update-ready`
  * event is what the UI listens to instead (D-10).
+ *
+ * SPEC-040 §4.7: it runs at most once, and not on the first page load. A first
+ * visit spends its bandwidth on the boot and the prologue rather than a 21 MB
+ * precache, so the worker registers on the first `scene:entered` for the
+ * station; a returning player — a worker already controls the page, or a
+ * registration exists — registers at boot, so SPEC-015's update offer still
+ * reaches the menu (40-l). `immediate`, because by then the page has long
+ * loaded. A failed registration (offline at the station, 40-k) puts the status
+ * back to `waiting`, and the next station entry tries again.
  */
-const updateSW = registerSW({
-  onNeedRefresh: () => offerAppUpdate(() => void updateSW(true)),
+let workerRegistered = false;
+function registerOfflineWorker(): void {
+  if (workerRegistered) return;
+  workerRegistered = true;
+  const updateSW = registerSW({
+    immediate: true,
+    onNeedRefresh: () => offerAppUpdate(() => void updateSW(true)),
+    onRegisteredSW: (_url, registration) => {
+      // `onOfflineReady` may have answered first; a registration never takes
+      // `ready` back.
+      if (offlineStatus() !== 'ready') setOfflineStatus(registeredStatus(registration));
+    },
+    onOfflineReady: () => setOfflineStatus('ready'),
+    onRegisterError: (error: unknown) => {
+      log.warn('boot', 'the offline worker could not register; the next station entry tries again', error);
+      workerRegistered = false;
+      setOfflineStatus('waiting');
+    },
+  });
+}
+const workerOwner = {};
+events.on(
+  'scene:entered',
+  ({ id }) => {
+    if (id === 'station') registerOfflineWorker();
+  },
+  workerOwner,
+);
+void hasOfflineWorker().then((returning) => {
+  if (returning) registerOfflineWorker();
 });
 
 /**
@@ -318,6 +355,8 @@ if (import.meta.env.DEV) {
     /** SPEC-036 §4.4: how many layers are open on the back-stack, for the e2e Back cases. */
     backDepth: () => ui.backStack.depth,
     loseContext: (restoreAfterMs: number | null) => game.loseContext(restoreAfterMs),
+    /** SPEC-040 §3: busy-waits `ms` inside every draw, so the governor has a slow device to step down on. */
+    slowDraw: (ms: number) => game.slowDraw(ms),
     stop: () => game.stop(),
   };
 
@@ -329,6 +368,7 @@ if (import.meta.env.DEV) {
     document.removeEventListener('keydown', onKeyDown);
     releaseGuardSync();
     events.releaseOwner(guardOwner);
+    events.releaseOwner(workerOwner);
     backGuard.dispose();
     game.stop();
   });

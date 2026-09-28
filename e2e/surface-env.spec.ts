@@ -65,9 +65,15 @@ async function endRamp(page: Page): Promise<void> {
 
 test('the spawn-heavy medium frame stays within 96 draws and 130 k triangles', async ({ page }) => {
   test.setTimeout(150_000);
-  // SPEC-038 §4.7 turned auto-fire on by default; the field this case measures
-  // is a full one, so the salvager holds its fire while the director fills it.
-  await page.addInitScript(() => localStorage.setItem('reallm:settings', JSON.stringify({ autoFire: 'off' })));
+  // SPEC-040 §4.3: this container cannot hold 60 on `medium`, so after 15 s in
+  // play the adaptive governor would step the session down to `low` — and the
+  // budget below would be measured on the wrong preset. The budget is about
+  // `medium`, so the governor is off for it (E68, 40-g). SPEC-038 §4.7 turned
+  // auto-fire on by default; the field this case measures is a full one, so the
+  // salvager holds its fire while the director fills it.
+  await page.addInitScript(() =>
+    localStorage.setItem('reallm:settings', JSON.stringify({ adaptiveQuality: false, autoFire: 'off' })),
+  );
   await start(page, URL);
   await endRamp(page);
   await page.waitForFunction(
@@ -75,13 +81,31 @@ test('the spawn-heavy medium frame stays within 96 draws and 130 k triangles', a
     CINDER4_MEDIUM_POPULATION,
     { timeout: 90_000, polling: 250 },
   );
-  let maxDraws = 0;
-  let maxTriangles = 0;
-  for (let i = 0; i < 30; i++) {
-    const stats = await afterFrames(page, 1);
-    maxDraws = Math.max(maxDraws, stats.drawCalls);
-    maxTriangles = Math.max(maxTriangles, stats.triangles);
-  }
+  // The next 30 frames, each one read in the page as it lands. Since SPEC-040
+  // §4.2 a host without a GPU draws every frame it gets, and a round trip per
+  // frame (three of them, as `afterFrames` makes) waits out a draw each — on a
+  // loaded run, thirty of those outlast the test.
+  const { maxDraws, maxTriangles } = await page.evaluate(
+    (count) =>
+      new Promise<{ maxDraws: number; maxTriangles: number }>((resolve) => {
+        const from = window.__reallm.stats().frame;
+        let seen = from;
+        let maxDraws = 0;
+        let maxTriangles = 0;
+        const sample = (): void => {
+          const stats = window.__reallm.stats();
+          if (stats.frame !== seen) {
+            seen = stats.frame;
+            maxDraws = Math.max(maxDraws, stats.drawCalls);
+            maxTriangles = Math.max(maxTriangles, stats.triangles);
+          }
+          if (seen - from >= count) resolve({ maxDraws, maxTriangles });
+          else requestAnimationFrame(sample);
+        };
+        requestAnimationFrame(sample);
+      }),
+    30,
+  );
   expect(maxDraws).toBeLessThanOrEqual(96); // 80 scene + 16 post
   expect(maxTriangles).toBeLessThanOrEqual(130_000);
 });

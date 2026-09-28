@@ -520,7 +520,9 @@ test.describe('the settings benchmark row (AC-20)', () => {
     await page.addInitScript(() => {
       localStorage.setItem(
         'reallm:settings',
-        JSON.stringify({ quality: null, benchmark: { preset: 'low', msPerFrame: 12.3, at: 1_700_000_000_000 } }),
+        // SPEC-040 §4.1: a record without `method: 'gpu'` measured vsync and
+        // reads as nothing stored, so the seed carries the method.
+        JSON.stringify({ quality: null, benchmark: { preset: 'low', msPerFrame: 12.3, at: 1_700_000_000_000, method: 'gpu' } }),
       );
     });
 
@@ -549,7 +551,7 @@ test.describe('the settings benchmark row (AC-20)', () => {
         const raw = localStorage.getItem('reallm:settings');
         return raw === null ? null : (JSON.parse(raw) as { benchmark: unknown }).benchmark;
       }),
-    ).toEqual({ preset: 'low', msPerFrame: 12.3, at: 1_700_000_000_000 });
+    ).toEqual({ preset: 'low', msPerFrame: 12.3, at: 1_700_000_000_000, method: 'gpu' });
     // …and the settings row reads it back, ms and all.
     await page.locator('[data-testid="menu-settings"]').click();
     await expect(page.locator('[data-testid="settings-benchmark"]')).toHaveText('Benchmark: low · 12.3 ms/frame');

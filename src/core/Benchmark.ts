@@ -41,7 +41,11 @@ export type AbortReason = 'measured' | 'slow-abort' | 'hidden-abort' | 'unsuppor
 
 export interface BenchmarkOutcome {
   preset: QualityPreset;
-  /** Median frame delta in ms; 0 when nothing was measured. */
+  /**
+   * SPEC-040 §4.1: the median GPU cost of a measured frame in ms — the time
+   * `render()` plus `sync()` took — never a frame gap; 0 when nothing was
+   * measured.
+   */
   msPerFrame: number;
   reason: AbortReason;
   /** `settings.benchmark` is written only when this is true (§4.5). */
@@ -50,9 +54,10 @@ export interface BenchmarkOutcome {
 
 /**
  * The slice of `core/Renderer.ts` the run drives — a structural port
- * (SPEC-004 D-7), so a node test fakes it with three functions. `render` is the
+ * (SPEC-004 D-7), so a node test fakes it with four functions. `render` is the
  * facade call, never `gl.render`: SPEC-017 §6 makes the renderer the only
- * main-pass draw in the app.
+ * main-pass draw in the app, and `sync` is the facade's read-back for the same
+ * reason — nothing outside the renderer reads pixels (SPEC-040 §4.1).
  */
 export interface BenchmarkRenderer {
   render(scene: THREE.Object3D, camera: THREE.Camera): void;
@@ -60,6 +65,8 @@ export interface BenchmarkRenderer {
   setPixelRatio(dpr: number): void;
   /** Puts the renderer's own ratio and size back when the run is over. */
   resize(): void;
+  /** Blocks until the GPU has finished the last frame (a 1 × 1 read-back). */
+  sync(): void;
 }
 
 export interface BenchmarkDeps {
@@ -75,11 +82,18 @@ export interface BenchmarkDeps {
   deviceMemory?: number | undefined;
   /** `navigator.hardwareConcurrency`. */
   cores?: number | undefined;
+  /** `performance.now()` — the clock each draw's cost is read on (SPEC-040 §4.1). */
+  now(): number;
 }
 
 // ------------------------------------------------------------ §4.5 the bounds
 
-/** §4.5: the two frame-delta thresholds and the wall-clock bound. */
+/**
+ * §4.5: the two thresholds and the wall-clock bound. SPEC-040 §4.1 moved what
+ * they read: the slow rule reads each frame's GPU cost, and the hidden rule the
+ * frame gap *less* the previous frame's cost — a throttled tab has long gaps
+ * and cheap frames, a slow GPU long gaps because its frames are expensive.
+ */
 export const SLOW_FRAME_MS = 40;
 export const SLOW_FRAME_COUNT = 10;
 export const HIDDEN_FRAME_MS = 100;
@@ -233,6 +247,10 @@ function outcome(preset: QualityPreset, msPerFrame: number, reason: AbortReason)
  * One pass of §4.2/§4.5. Resolves; never rejects. The whole body is wrapped so
  * a throw anywhere — a scene that will not build, a renderer whose context went
  * away mid-run — lands on `unsupported` rather than out of `boot()` (15-i).
+ *
+ * SPEC-040 §4.1: every draw is timed, the seeding frame's included — `step`,
+ * `render`, then `sync`, the one-pixel read-back that returns only when the GPU
+ * is done — so the run measures the device and not the display's vsync.
  */
 function attempt(deps: BenchmarkDeps): Promise<BenchmarkOutcome> {
   return new Promise<BenchmarkOutcome>((resolve) => {
@@ -250,12 +268,14 @@ function attempt(deps: BenchmarkDeps): Promise<BenchmarkOutcome> {
     let frameId: number | null = null;
     let releaseVisibility: (() => void) | null = null;
     let settled = false;
-    /** Every delta seen, warm-up included — what the 10-frame slow rule reads. */
-    const deltas: number[] = [];
+    /** Every cost seen after the seed, warm-up included — what the 10-frame slow rule reads. */
+    const costs: number[] = [];
     /** The measured phase only — what the median of §4.3 is taken over. */
     const measured: number[] = [];
     let startedAt = 0;
     let last = 0;
+    /** The previous frame's cost, which the hidden rule takes off the next gap. */
+    let lastCost = 0;
     let frames = 0;
 
     const finish = (result: BenchmarkOutcome): void => {
@@ -282,6 +302,16 @@ function attempt(deps: BenchmarkDeps): Promise<BenchmarkOutcome> {
       finish(outcome(FALLBACK_PRESET, 0, 'unsupported'));
     };
 
+    /** One timed draw: `now()` around the step, the draw and the read-back. */
+    const draw = (frame: number): number => {
+      const scene = stress as StressScene;
+      const t0 = deps.now();
+      scene.step(frame);
+      renderer.render(scene.scene, scene.camera);
+      renderer.sync();
+      return deps.now() - t0;
+    };
+
     const tick = (nowMs: number): void => {
       if (settled) return;
       try {
@@ -291,38 +321,25 @@ function attempt(deps: BenchmarkDeps): Promise<BenchmarkOutcome> {
           return;
         }
         if (frames === 0) {
-          // The first frame only seeds the clock and starts the 2 s budget.
+          // The first frame only seeds the clock, the 2 s budget and `lastCost`.
           startedAt = nowMs;
           last = nowMs;
           frames = 1;
-          (stress as StressScene).step(0);
-          renderer.render((stress as StressScene).scene, (stress as StressScene).camera);
+          lastCost = draw(0);
           return;
         }
         const delta = nowMs - last;
         last = nowMs;
         frames++;
-        // 15-a: a gap this long is the browser throttling rAF, not a slow GPU.
-        if (delta > HIDDEN_FRAME_MS) {
+        // 15-a, SPEC-040 §4.1: the gap beyond what the last frame itself cost
+        // is the browser throttling rAF, not a slow GPU (40-a).
+        if (delta - lastCost > HIDDEN_FRAME_MS) {
           finish(outcome(FALLBACK_PRESET, 0, 'hidden-abort'));
           return;
         }
-        deltas.push(delta);
-        if (deltas.length > WARMUP_FRAMES) measured.push(delta);
-
-        // AC-18: ten frames, every one of them over 40 ms — the device answered,
-        // and the answer is `low` (D-5), not the hidden-tab fallback.
-        if (deltas.length === SLOW_FRAME_COUNT && deltas.every((d) => d > SLOW_FRAME_MS)) {
-          finish(outcome(SLOW_ABORT_PRESET, median(deltas), 'slow-abort'));
-          return;
-        }
-        if (measured.length >= MEASURED_FRAMES) {
-          const ms = median(measured);
-          finish(outcome(presetFor(ms, deps.deviceMemory, deps.cores), ms, 'measured'));
-          return;
-        }
-        // AC-11: the wall-clock bound. Ten measured frames are enough to answer
-        // with; fewer than that and the honest answer is "this took too long".
+        // AC-11: the wall-clock bound still reads the frame timestamps. Ten
+        // measured frames are enough to answer with; fewer than that and the
+        // honest answer is "this took too long".
         if (nowMs - startedAt >= RUN_BUDGET_MS) {
           if (measured.length >= SLOW_FRAME_COUNT) {
             const ms = median(measured);
@@ -330,12 +347,27 @@ function attempt(deps: BenchmarkDeps): Promise<BenchmarkOutcome> {
           } else {
             // Too few measured frames to median honestly, but 2 s bought fewer
             // than ten of them: that is the same "slow device" answer (AC-18).
-            finish(outcome(SLOW_ABORT_PRESET, median(deltas), 'slow-abort'));
+            finish(outcome(SLOW_ABORT_PRESET, median(costs), 'slow-abort'));
           }
           return;
         }
-        (stress as StressScene).step(frames);
-        renderer.render((stress as StressScene).scene, (stress as StressScene).camera);
+
+        const cost = draw(frames);
+        lastCost = cost;
+        costs.push(cost);
+        if (costs.length > WARMUP_FRAMES) measured.push(cost);
+
+        // AC-18, 40-b: ten frames, every one of them costing over 40 ms — the
+        // device answered, and the answer is `low` (D-5), not the hidden-tab
+        // fallback.
+        if (costs.length === SLOW_FRAME_COUNT && costs.every((c) => c > SLOW_FRAME_MS)) {
+          finish(outcome(SLOW_ABORT_PRESET, median(costs), 'slow-abort'));
+          return;
+        }
+        if (measured.length >= MEASURED_FRAMES) {
+          const ms = median(measured);
+          finish(outcome(presetFor(ms, deps.deviceMemory, deps.cores), ms, 'measured'));
+        }
       } catch (error) {
         fail(error);
       }

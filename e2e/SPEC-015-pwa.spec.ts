@@ -109,6 +109,43 @@ async function cacheEntryCounts(page: Page): Promise<Record<string, number>> {
   });
 }
 
+/**
+ * SPEC-040 §4.7: the worker registers at the first station entry, so a case
+ * that needs it gets there the way a player does — New Game into `slot`, the
+ * prologue, creation, the station. The prologue must play as posters, so the
+ * describes that call this run under `reducedMotion: 'reduce'` (see the
+ * offline case for why video is not an option on this container).
+ */
+async function newGameToStation(page: Page, slot: 0 | 1): Promise<void> {
+  await page.locator('[data-testid="menu-new"]').click();
+  await page.locator(`[data-testid="new-slot-${slot}"]`).click();
+  await expect(page.locator('[data-testid="film"]')).toHaveAttribute('data-mode', 'stills', COLD_START);
+  // Skipping is a tap like any other and waits out the 0.3 s pointer grace
+  // (SPEC-022 §4.5).
+  await page.waitForTimeout(400);
+  await page.locator('[data-testid="film-skip"]').click();
+  await expect(page.locator('[data-testid="creation-name"]')).toBeVisible(COLD_START);
+  // AC-20 of SPEC-014: no class, no Confirm.
+  await page.locator('[data-testid="class-marine"]').click();
+  await page.locator('[data-testid="creation-confirm"]').click();
+  await expect(page.locator('[data-testid="station-root"]')).toBeVisible({ timeout: 60_000 });
+}
+
+/**
+ * The station's arrival lines are modal: their dim takes every tap until they
+ * are read, and a tap on the line itself is what reads them (SPEC-014 AC-72 —
+ * the first fills it, the next advances; under reduced motion it lands full).
+ */
+async function dismissDialogue(page: Page): Promise<void> {
+  const dim = page.locator('.dialogue-dim.is-visible');
+  await expect(dim).toBeVisible(COLD_START);
+  for (let i = 0; i < 20 && (await dim.count()) > 0; i++) {
+    await page.locator('[data-testid="dialogue"]').click();
+    await page.waitForTimeout(150);
+  }
+  await expect(dim).toHaveCount(0);
+}
+
 test.describe('installability, from the served build (AC-58)', () => {
   test('serves a manifest carrying every AC-49 field', async ({ page }) => {
     await page.goto(gameUrl('/'));
@@ -157,18 +194,65 @@ test.describe('installability, from the served build (AC-58)', () => {
     expect(await page.evaluate(() => window.isSecureContext)).toBe(true);
   });
 
-  test('registers a service worker that reaches activated, and precaches', async ({ page }) => {
+  test.describe('the worker', () => {
+    // New Game's prologue as posters (see `newGameToStation`).
+    test.use({ reducedMotion: 'reduce' });
+
+    test('registers a service worker that reaches activated, and precaches', async ({ page }) => {
+      test.setTimeout(SW_TEST_TIMEOUT_MS);
+      await page.goto(gameUrl('/'));
+      await passGate(page);
+      // SPEC-040 §4.7: a first visit registers at the station, not at boot.
+      await newGameToStation(page, 0);
+      expect(await workerState(page)).toBe('activated');
+      // …and it actually filled a cache while doing it (see `cacheEntryCounts`).
+      // The count is not pinned: it is the precache manifest's length, which
+      // every added asset moves. That it is *populated* is the whole assertion.
+      const counts = await cacheEntryCounts(page);
+      const precaches = Object.entries(counts).filter(([name]) => name.includes('precache'));
+      expect(precaches, `caches: ${JSON.stringify(counts)}`).toHaveLength(1);
+      expect(precaches[0]?.[1]).toBeGreaterThan(100);
+    });
+  });
+});
+
+test.describe('the worker waits for the station (SPEC-040 §6.3, AC-28, AC-29, AC-31)', () => {
+  // New Game's prologue as posters (see `newGameToStation`).
+  test.use({ reducedMotion: 'reduce' });
+
+  test('a first visit registers nothing before the station; a returning one registers at boot', async ({ page }) => {
     test.setTimeout(SW_TEST_TIMEOUT_MS);
     await page.goto(gameUrl('/'));
-    await awaitGate(page);
+    await passGate(page);
+    await expect(page.locator('[data-testid="menu-new"]')).toBeVisible(COLD_START);
+
+    // The menu of a first visit: nothing is registered, and Settings says when
+    // it will be.
+    expect(await page.evaluate(async () => (await navigator.serviceWorker.getRegistration()) === undefined)).toBe(true);
+    await page.locator('[data-testid="menu-settings"]').click();
+    await expect(page.locator('[data-testid="settings-offline"]')).toHaveText(
+      'Offline play: starts after your first visit to the station',
+    );
+    await page.locator('[data-testid="settings-close"]').click();
+    // Still nothing, however long the menu stays up.
+    expect(await page.evaluate(async () => (await navigator.serviceWorker.getRegistration()) === undefined)).toBe(true);
+
+    // Through New Game to the station: the worker registers there and installs.
+    await newGameToStation(page, 0);
     expect(await workerState(page)).toBe('activated');
-    // …and it actually filled a cache while doing it (see `cacheEntryCounts`).
-    // The count is not pinned: it is the precache manifest's length, which
-    // every added asset moves. That it is *populated* is the whole assertion.
-    const counts = await cacheEntryCounts(page);
-    const precaches = Object.entries(counts).filter(([name]) => name.includes('precache'));
-    expect(precaches, `caches: ${JSON.stringify(counts)}`).toHaveLength(1);
-    expect(precaches[0]?.[1]).toBeGreaterThan(100);
+    await dismissDialogue(page);
+    await page.locator('[data-testid="station-tab-settings"]').click();
+    await expect(page.locator('[data-testid="settings-offline"]')).toHaveText('Offline play: ready');
+
+    // A returning visit: the worker controls the page, and the registration is
+    // there before the gate is passed — the boot registers it (40-l).
+    await page.reload();
+    await awaitGate(page);
+    const returning = await page.evaluate(async () => ({
+      controlled: navigator.serviceWorker.controller !== null,
+      registered: (await navigator.serviceWorker.getRegistration()) !== undefined,
+    }));
+    expect(returning).toEqual({ controlled: true, registered: true });
   });
 });
 
@@ -189,7 +273,11 @@ test.describe('offline (AC-56, AC-57)', () => {
   test('boots from the cache after going offline, and keeps a save written there', async ({ page, context }) => {
     test.setTimeout(SW_TEST_TIMEOUT_MS);
     await page.goto(gameUrl('/'));
-    await awaitGate(page);
+    await passGate(page);
+    // SPEC-040 §4.7: the online visit reaches the station, where the worker
+    // registers. It plays in slot 1, so the offline New Game below meets no
+    // overwrite prompt in slot 0.
+    await newGameToStation(page, 1);
     expect(await workerState(page)).toBe('activated');
 
     // AC-56: everything the first visit needs is precached, so a reload with
@@ -202,18 +290,8 @@ test.describe('offline (AC-56, AC-57)', () => {
     // production build, so there is no `__reallm` bridge (it is `DEV` only) —
     // the save is made the way a player makes one, through the menu.
     await passGate(page);
-    await page.locator('[data-testid="menu-new"]').click();
-    await page.locator('[data-testid="new-slot-0"]').click();
-    // The prologue, as posters (see `test.use` above). Skipping it is a tap
-    // like any other and waits out the 0.3 s pointer grace (SPEC-022 §4.5).
-    await expect(page.locator('[data-testid="film"]')).toHaveAttribute('data-mode', 'stills', COLD_START);
-    await page.waitForTimeout(400);
-    await page.locator('[data-testid="film-skip"]').click();
-    await expect(page.locator('[data-testid="creation-name"]')).toBeVisible(COLD_START);
-    // AC-20 of SPEC-014: no class, no Confirm.
-    await page.locator('[data-testid="class-marine"]').click();
-    await page.locator('[data-testid="creation-confirm"]').click();
-    await expect(page.locator('[data-testid="station-root"]')).toBeVisible({ timeout: 60_000 });
+    // The prologue, as posters (see `test.use` above).
+    await newGameToStation(page, 0);
     const written = await readSlot0(page);
     expect(written, 'the offline run wrote slot 0').not.toBeNull();
 
@@ -266,6 +344,10 @@ test.describe('an old cached build and a newer save (AC-59, 15-d)', () => {
 });
 
 test.describe('story films through the worker (AC-63)', () => {
+  // New Game's prologue as posters (see `newGameToStation`): nothing here
+  // decodes a film.
+  test.use({ reducedMotion: 'reduce' });
+
   /**
    * The claim has two halves and they are one design: a film is precached like
    * any other asset, and the player fetches it *whole* and plays it from a Blob
@@ -292,7 +374,9 @@ test.describe('story films through the worker (AC-63)', () => {
     });
 
     await page.goto(gameUrl('/'));
-    await awaitGate(page);
+    await passGate(page);
+    // SPEC-040 §4.7: the worker registers at the station.
+    await newGameToStation(page, 0);
     expect(await workerState(page)).toBe('activated');
 
     // Precached like any other asset: the film is in the worker's own cache,

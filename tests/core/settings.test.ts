@@ -322,6 +322,9 @@ describe('the settings object (SPEC-007 §3)', () => {
       installHintShownAt: null,
       fullscreen: null,
       benchmark: null,
+      // SPEC-040 §4.3: 60 frames a second, and the governor may step down.
+      frameRate: 60,
+      adaptiveQuality: true,
       // SPEC-027 §4.9: guidance starts at `full` and no tip has been seen yet.
       guidance: 'full',
       tipsSeen: [],
@@ -348,7 +351,9 @@ describe('the settings object (SPEC-007 §3)', () => {
       persistGranted: true,
       installHintShownAt: 1_700_000_000_000,
       fullscreen: false,
-      benchmark: { preset: 'high', msPerFrame: 8.5, at: 1_700_000_000_000 },
+      benchmark: { preset: 'high', msPerFrame: 8.5, at: 1_700_000_000_000, method: 'gpu' },
+      frameRate: 30,
+      adaptiveQuality: false,
     };
     settings.set(patch);
 
@@ -624,5 +629,55 @@ describe('serviceMode (SPEC-032 §4.6)', () => {
     settings.setServiceMode(true);
     settings.setServiceMode(false);
     expect(events.patches).toEqual([{ serviceMode: true }, { serviceMode: false }]);
+  });
+});
+
+describe('the benchmark record, frameRate and adaptiveQuality (SPEC-040 §4.1, §4.3)', () => {
+  it('reads a stored benchmark without method: gpu as null, so the boot measures again', () => {
+    const old = '{"benchmark":{"preset":"low","msPerFrame":16.7,"at":1700000000000}}';
+    expect(createSettings(fakeStorage(old).storage).get().benchmark).toBeNull();
+    const other = '{"benchmark":{"preset":"low","msPerFrame":16.7,"at":1700000000000,"method":"vsync"}}';
+    expect(createSettings(fakeStorage(other).storage).get().benchmark).toBeNull();
+    const gpu = '{"benchmark":{"preset":"high","msPerFrame":5.2,"at":1700000000000,"method":"gpu"}}';
+    expect(createSettings(fakeStorage(gpu).storage).get().benchmark).toEqual({
+      preset: 'high',
+      msPerFrame: 5.2,
+      at: 1_700_000_000_000,
+      method: 'gpu',
+    });
+  });
+
+  it('refuses to write a benchmark without method: gpu', () => {
+    const settings = createSettings(fakeStorage().storage);
+    settings.set({ benchmark: { preset: 'high', msPerFrame: 5, at: 1 } as unknown as Settings['benchmark'] });
+    expect(settings.get().benchmark).toBeNull();
+    settings.set({ benchmark: { preset: 'high', msPerFrame: 5, at: 1, method: 'gpu' } });
+    expect(settings.get().benchmark).toEqual({ preset: 'high', msPerFrame: 5, at: 1, method: 'gpu' });
+  });
+
+  it('frameRate is 60 or 30, and anything else reads 60', () => {
+    const fake = fakeStorage();
+    const settings = createSettings(fake.storage);
+    settings.set({ frameRate: 30 });
+    expect(settings.get().frameRate).toBe(30);
+    expect(stored(fake)).toMatchObject({ frameRate: 30 });
+    expect(createSettings(fake.storage).get().frameRate).toBe(30);
+    settings.set({ frameRate: 45 as unknown as Settings['frameRate'] });
+    expect(settings.get().frameRate).toBe(60);
+    for (const raw of ['"30"', '120', 'null', '"fast"']) {
+      expect(createSettings(fakeStorage(`{"frameRate":${raw}}`).storage).get().frameRate, raw).toBe(60);
+    }
+  });
+
+  it('adaptiveQuality round-trips, and a non-boolean reads true', () => {
+    const fake = fakeStorage();
+    const settings = createSettings(fake.storage);
+    settings.set({ adaptiveQuality: false });
+    expect(createSettings(fake.storage).get().adaptiveQuality).toBe(false);
+    settings.set({ adaptiveQuality: 'no' as unknown as boolean });
+    expect(settings.get().adaptiveQuality).toBe(true);
+    for (const raw of ['"false"', '0', 'null']) {
+      expect(createSettings(fakeStorage(`{"adaptiveQuality":${raw}}`).storage).get().adaptiveQuality, raw).toBe(true);
+    }
   });
 });

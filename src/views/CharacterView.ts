@@ -176,5 +176,11 @@ export class CharacterView {
     // Geometry and textures stay with the cache (D-33).
     for (const material of this.#materials) material.dispose();
     this.#materials.length = 0;
+    // SPEC-040 AC-27: `SkeletonUtils.clone` gave this view skeletons of its
+    // own, and three uploads their bone matrices as a texture on the first
+    // draw. Nothing else frees it: one texture per visit, on every preset.
+    for (const mesh of this.#meshes) {
+      if ((mesh as THREE.SkinnedMesh).isSkinnedMesh === true) (mesh as THREE.SkinnedMesh).skeleton?.dispose();
+    }
   }
 }

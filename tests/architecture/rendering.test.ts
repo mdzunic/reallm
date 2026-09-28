@@ -9,6 +9,9 @@
 //    every scene keeps using; the scissored portrait goes through
 //    `renderer.renderOverlay(...)`, which lives in `core/Renderer.ts` with the
 //    rest of the GL.
+//    SPEC-040 §4.1 adds reading pixels to the same seam: the boot benchmark
+//    times the GPU with a one-pixel read-back, and it gets it from the
+//    facade's `sync()` — no module outside the two owners calls `readPixels`.
 // 2. Nothing under `src/` builds a `MeshLambertMaterial` any more (§4.7):
 //    Lambert has no roughness, no metalness and no environment response, so one
 //    left behind would be a matte hole in an otherwise PBR scene.
@@ -25,6 +28,8 @@ const RENDER_OWNERS = /(?:^|\/)src\/core\/(?:Renderer|PostChain)\.ts$/;
 /** A draw on the raw context, or a second renderer — never a facade call. */
 const RAW_RENDER = [/\bgl\s*\.\s*render\s*\(/, /\.\s*gl\s*\.\s*render\s*\(/, /new\s+WebGLRenderer\b/];
 const LAMBERT = /\bMeshLambertMaterial\b/;
+/** A read-back from the GPU — raw, or through three's render-target helpers. */
+const PIXEL_READ = [/\breadPixels\s*\(/, /\breadRenderTargetPixels(?:Async)?\s*\(/];
 
 /** Files that draw on the raw context outside the two modules allowed to. */
 export function rawRenderOffenders(files: Record<string, string>): string[] {
@@ -33,6 +38,17 @@ export function rawRenderOffenders(files: Record<string, string>): string[] {
       if (RENDER_OWNERS.test(file)) return false;
       const code = stripComments(source);
       return RAW_RENDER.some((pattern) => pattern.test(code));
+    })
+    .map(([file]) => file);
+}
+
+/** Files that read pixels outside the two modules allowed to (SPEC-040 §4.1). */
+export function pixelReadOffenders(files: Record<string, string>): string[] {
+  return Object.entries(files)
+    .filter(([file, source]) => {
+      if (RENDER_OWNERS.test(file)) return false;
+      const code = stripComments(source);
+      return PIXEL_READ.some((pattern) => pattern.test(code));
     })
     .map(([file]) => file);
 }
@@ -86,6 +102,31 @@ describe('the render seam (SPEC-017 §4.2, AC-50)', () => {
         'src/scenes/base.ts': '// never gl.render(...) here — use the facade\nrenderer.render(s, c);',
       }),
     ).toEqual([]);
+  });
+});
+
+describe('pixel reads (SPEC-040 §4.1, AC-3)', () => {
+  it('only core/Renderer.ts and core/PostChain.ts read pixels', () => {
+    expect(pixelReadOffenders(SRC)).toEqual([]);
+    // …and the renderer really is where the benchmark's read-back lives.
+    const renderer = Object.entries(SRC).find(([file]) => file.endsWith('/src/core/Renderer.ts'))?.[1] ?? '';
+    expect(stripComments(renderer)).toMatch(/\breadPixels\s*\(/);
+  });
+
+  it('reports a read-back anywhere else, and allows the facade call', () => {
+    expect(
+      pixelReadOffenders({
+        'src/core/Benchmark.ts': 'const ctx = renderer.gl.getContext();\nctx.readPixels(0, 0, 1, 1, ctx.RGBA, ctx.UNSIGNED_BYTE, px);',
+        'src/views/SurfaceView.ts': 'gl.readRenderTargetPixels(target, 0, 0, 1, 1, px);',
+        'src/core/Game.ts': 'sync: () => renderer.sync(),',
+        'src/core/Renderer.ts': 'context.readPixels(0, 0, 1, 1, context.RGBA, context.UNSIGNED_BYTE, this.#pixel);',
+        'src/core/PostChain.ts': 'this.gl.readRenderTargetPixels(rt, 0, 0, 1, 1, out);',
+      }),
+    ).toEqual(['src/core/Benchmark.ts', 'src/views/SurfaceView.ts']);
+  });
+
+  it('a mention in a comment is not a use', () => {
+    expect(pixelReadOffenders({ 'src/core/Benchmark.ts': '// the facade does the readPixels(…)\nrenderer.sync();' })).toEqual([]);
   });
 });
 

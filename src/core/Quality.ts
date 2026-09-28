@@ -146,6 +146,104 @@ export function presetFor(ms: number, deviceMemory?: number, cores?: number): Qu
   return preset;
 }
 
+// ------------------------------------------ SPEC-040 §4.3: the governor
+//
+// When the device cannot hold the frame rate — a phone that heats up, iOS Low
+// Power Mode at a 60 target, a preset chosen by hand that is too much — the
+// session steps down: the resolution first, 0.25 of a pixel ratio at a time,
+// then the preset. It never steps up within a session and never writes a
+// setting (E68, 40-g): the player's choice and the benchmark stay the truth for
+// the next boot. The rule is pure arithmetic over a median draw interval and a
+// clock, so it lives here with the preset table and unit-tests in node.
+
+/** Seconds of draw intervals the median is taken over. *Initial tuning.* */
+export const GOVERNOR_WINDOW_S = 5;
+/** The median must stay above this multiple of the target period. *Initial tuning.* */
+export const GOVERNOR_OVER_RATIO = 1.25;
+/** …for this many seconds before a step (a hitch never costs quality). *Initial tuning.* */
+export const GOVERNOR_SUSTAIN_S = 10;
+/** At most one step per this many seconds. *Initial tuning.* */
+export const GOVERNOR_COOLDOWN_S = 20;
+/** Nothing counts for this long after a scene enters (40-f). *Initial tuning.* */
+export const GOVERNOR_GRACE_S = 5;
+/** How far one resolution step lowers the dpr cap. *Initial tuning.* */
+export const GOVERNOR_DPR_STEP = 0.25;
+
+/** The governor's clocks, in seconds of frame time; `governorStep` mutates it. */
+export interface GovernorState {
+  /** When the median first went over and has stayed over since; `null` when it is not. */
+  overSince: number | null;
+  lastStepAt: number;
+  enteredAt: number;
+  /** Steps taken this session — `StatsSnapshot.adaptSteps`. */
+  steps: number;
+}
+
+export interface GovernorInput {
+  /** Seconds: frame time summed since boot. */
+  now: number;
+  /** The median draw interval over the window, in ms. */
+  medianMs: number;
+  targetFps: 30 | 60;
+  /** The effective device pixel ratio, after every clamp. */
+  dpr: number;
+  preset: QualityPreset;
+  /** In play, not idle, and `settings.adaptiveQuality` on. */
+  active: boolean;
+}
+
+export type GovernorStep =
+  | { readonly kind: 'dpr'; readonly cap: number }
+  | { readonly kind: 'preset'; readonly preset: QualityPreset };
+
+/** A fresh session: nothing over, no step yet — the cooldown does not hold the first one. */
+export function createGovernorState(): GovernorState {
+  return { overSince: null, lastStepAt: -Infinity, enteredAt: 0, steps: 0 };
+}
+
+/**
+ * SPEC-040 §4.3: the preset steps, one rung down each. `low` has none; the
+ * objects are shared, so a preset step allocates nothing.
+ */
+const PRESET_STEPS: Readonly<Record<QualityPreset, GovernorStep | null>> = {
+  high: { kind: 'preset', preset: 'medium' },
+  medium: { kind: 'preset', preset: 'low' },
+  low: null,
+};
+
+/**
+ * SPEC-040 §4.3. Names one step down only when the scene is in play and not
+ * idle, more than `GOVERNOR_GRACE_S` have passed since it entered, and the
+ * median draw interval has stayed above `GOVERNOR_OVER_RATIO` × the target
+ * period for `GOVERNOR_SUSTAIN_S` — and not within `GOVERNOR_COOLDOWN_S` of the
+ * last step. The rungs, in order: the dpr cap drops by `GOVERNOR_DPR_STEP`
+ * while the effective dpr is above 1, then the preset drops one step to `low`.
+ * At `low` and dpr 1 it names nothing.
+ *
+ * Mutates `state` when it names a step or resets a clock; allocates only the
+ * rare dpr step it returns.
+ */
+export function governorStep(state: GovernorState, input: GovernorInput): GovernorStep | null {
+  if (!input.active || input.now - state.enteredAt < GOVERNOR_GRACE_S) {
+    state.overSince = null;
+    return null;
+  }
+  if (input.medianMs <= (GOVERNOR_OVER_RATIO * 1000) / input.targetFps) {
+    state.overSince = null;
+    return null;
+  }
+  state.overSince ??= input.now;
+  if (input.now - state.overSince < GOVERNOR_SUSTAIN_S) return null;
+  if (input.now - state.lastStepAt < GOVERNOR_COOLDOWN_S) return null;
+  const step: GovernorStep | null =
+    input.dpr > 1 ? { kind: 'dpr', cap: Math.max(1, input.dpr - GOVERNOR_DPR_STEP) } : PRESET_STEPS[input.preset];
+  if (step === null) return null;
+  state.lastStepAt = input.now;
+  state.overSince = null;
+  state.steps++;
+  return step;
+}
+
 /** What the renderer builds for a preset at a device pixel ratio (§4.1). */
 export interface PostPlan {
   readonly composer: boolean;

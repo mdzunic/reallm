@@ -91,3 +91,42 @@ describe('src/style.css top-level selectors (SPEC-034 §4.11)', () => {
     expect(CSS).toMatch(/\.hud-ion\s*\{[\s\S]*?rgba\(160, 190, 220, 0\.06\)/);
   });
 });
+
+describe('no blur in play (SPEC-040 §4.5, AC-22)', () => {
+  /** The declarations of the one top-level rule whose selector list is `selector`. */
+  function block(selector: string): string {
+    const text = CSS.replace(/\/\*[\s\S]*?\*\//g, '');
+    const heads = topLevelSelectors(CSS);
+    expect(heads.filter((head) => head === selector), selector).toHaveLength(1);
+    const escaped = selector.replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replace(/ /g, '\\s+');
+    const match = new RegExp(`(?:^|\\})\\s*${escaped}\\s*\\{([^}]*)\\}`).exec(text);
+    expect(match, selector).not.toBeNull();
+    return match?.[1] ?? '';
+  }
+
+  it('drops every backdrop-filter under #ui while <html> carries data-play', () => {
+    const body = block('html[data-play] #ui *');
+    expect(body).toMatch(/(?:^|;|\s)backdrop-filter:\s*none/);
+    expect(body).toMatch(/-webkit-backdrop-filter:\s*none/);
+  });
+
+  it('gives the dialogue, the toasts and the overlay panels the opaque --panel fill', () => {
+    const body = block('html[data-play] .dialogue, html[data-play] .toast, html[data-play] .overlay-panel:not(.overlay-rotate)');
+    expect(body).toMatch(/background:\s*var\(--panel\)/);
+  });
+
+  it('outranks every glass rule: no blur in the sheet carries an id or !important', () => {
+    const text = CSS.replace(/\/\*[\s\S]*?\*\//g, '');
+    const glass = [...text.matchAll(/([^{}]+)\{([^}]*backdrop-filter:\s*blur[^}]*)\}/g)];
+    expect(glass.length).toBeGreaterThan(0);
+    for (const [, selector, body] of glass) {
+      expect(selector, selector).not.toContain('#');
+      expect(body, selector).not.toContain('!important');
+    }
+  });
+
+  it('leaves the glass on the menus, creation and the station', () => {
+    // `.panel` keeps its blur outside play: only the data-play rule removes it.
+    expect(block('.panel')).toMatch(/backdrop-filter:\s*blur\(6px\)/);
+  });
+});

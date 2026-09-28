@@ -7,7 +7,7 @@
 // holds for a modal line and the verdict choice exactly as it already held for
 // the full-screen map, and `surfaceHoldReason` is the decision it reads.
 import { describe, expect, it } from 'vitest';
-import { surfaceHoldReason, type SurfaceHoldState } from '@/systems/UiHelpers';
+import { holdIsIdle, surfaceHoldReason, type SurfaceHoldState } from '@/systems/UiHelpers';
 import { stripComments } from '../architecture/source';
 
 const RAW = import.meta.glob<string>('../../src/**/*.ts', { query: '?raw', import: 'default', eager: true });
@@ -105,5 +105,31 @@ describe("the surface step obeys it (SPEC-034 §4.6)", () => {
     expect(source.indexOf('if (this.#holds > 0) {')).toBeLessThan(hold);
     expect(hold).toBeLessThan(source.indexOf('if (this.#uiHolds > 0) {'));
     expect(source.slice(hold, move)).toContain('return;');
+  });
+});
+
+describe('holdIsIdle (SPEC-040 §4.2, AC-10)', () => {
+  it("is idle for the map, a modal line and the rotate block — never for a beat or no hold", () => {
+    expect(holdIsIdle('ui')).toBe(true);
+    expect(holdIsIdle('modal')).toBe(true);
+    expect(holdIsIdle('rotate')).toBe(true);
+    // A film or a reveal moves the camera; the running step moves everything.
+    expect(holdIsIdle('beat')).toBe(false);
+    expect(holdIsIdle(null)).toBe(false);
+  });
+
+  it('follows the hold order: a beat over the rotate block is not idle', () => {
+    expect(holdIsIdle(surfaceHoldReason({ ...RUNNING, beats: 1, rotate: true, ui: 1, modal: 1 }))).toBe(false);
+    expect(holdIsIdle(surfaceHoldReason({ ...RUNNING, rotate: true }))).toBe(true);
+    expect(holdIsIdle(surfaceHoldReason({ ...RUNNING, ui: 1 }))).toBe(true);
+    expect(holdIsIdle(surfaceHoldReason({ ...RUNNING, modal: 1 }))).toBe(true);
+    expect(holdIsIdle(surfaceHoldReason(RUNNING))).toBe(false);
+  });
+
+  it('is what the surface and the flight answer idle() with', () => {
+    const surface = SOURCES['../../src/scenes/Surface.ts'] as string;
+    expect(surface).toMatch(/idle\(\): boolean \{[\s\S]*?return holdIsIdle\(surfaceHoldReason\(state\)\);/);
+    const flight = SOURCES['../../src/scenes/Flight.ts'] as string;
+    expect(flight).toMatch(/idle\(\): boolean \{\s*return this\.#rotate\?\.blocked === true;/);
   });
 });
