@@ -3,7 +3,7 @@
 // ×0.8 on casual, and never drops below 0.8 s. Pure: the surface step moves the
 // player along `dashX/dashZ` while `isDashing`, and `Combat` reads the same
 // clock to hold its fire, its push-out and its knockback.
-import type { ClassPassive, Difficulty } from '@/data/index';
+import { ATTRIBUTE_EFFECTS, type ClassPassive, type Difficulty } from '@/data/index';
 import type { PlayerEntity } from '@/entities/Player';
 
 // ------------------------------------------------------------ initial tuning
@@ -17,11 +17,11 @@ export const DASH_IFRAMES = 0.3;
 /** The base cooldown, in seconds. */
 export const DASH_COOLDOWN = 1.4;
 /**
- * Per agility point. SPEC-039 moves the value into
- * `ATTRIBUTE_EFFECTS.agility.dashCooldownCut` (data/characters.ts) and this
- * constant then reads it; the name and the value stay.
+ * Per agility point: `ATTRIBUTE_EFFECTS.agility.dashCooldownCut`
+ * (data/characters.ts), where SPEC-039 §4.3 keeps every per-point effect; the
+ * name and the value (0.03) stay.
  */
-export const DASH_AGILITY_CUT = 0.03;
+export const DASH_AGILITY_CUT = ATTRIBUTE_EFFECTS.agility.dashCooldownCut;
 /** The floor: invulnerable time stays at or below 37.5 % of the clock. */
 export const DASH_COOLDOWN_MIN = 0.8;
 /** Casual's dash cooldown multiplier (§4.6). */
