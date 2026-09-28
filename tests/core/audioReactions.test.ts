@@ -251,6 +251,16 @@ describe('the audio manifest (SPEC-006 §2)', () => {
     expect(new Set(sprites).size).toBe(55);
   });
 
+  it('the SPEC-038 cues sit in the surface bank inside §4.10’s lengths', () => {
+    const surface = ASSETS.audio.surface.sprite;
+    const limits = { dash: 250, windup_melee: 150, windup_charge: 450, windup_shot: 400 } as const;
+    for (const [id, most] of Object.entries(limits)) {
+      const span = surface[id as keyof typeof surface];
+      expect(span, id).toBeDefined();
+      expect(span[1], id).toBeLessThanOrEqual(most);
+    }
+  });
+
   it('every sprite is a forward [offset, duration] span that does not overlap its neighbour', () => {
     for (const entry of Object.values(ASSETS.audio)) {
       const spans = Object.values((entry as { sprite?: Record<string, readonly [number, number]> }).sprite ?? {});
