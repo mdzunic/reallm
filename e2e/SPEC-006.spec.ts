@@ -19,7 +19,7 @@
 // §9's device acceptance (AC-10, and the audible half of AC-28) is what covers
 // "a blip is heard on a phone"; nothing headless can stand in for it.
 import { expect, test, type Page } from '@playwright/test';
-import { awaitGate, gameUrl, passGate, start } from './start';
+import { awaitGate, COLD_START, gameUrl, passGate, start } from './start';
 
 const SETTINGS_KEY = 'reallm:settings';
 /** `master 1.0, music 0.7, sfx 1.0` are the defaults of §4.4 (AC-17). */
@@ -665,10 +665,17 @@ test('a scene change crossfades over 1500 ms and stops the outgoing track at 0 (
   await expect(page.locator('[data-testid="scene-label"]')).toHaveText('station');
 
   const overlapping = trace.filter((s) => gainOf(s, 'menu') !== null && gainOf(s, 'station') !== null);
-  expect(overlapping.length, `no overlap in: ${trace.map(audible).join(' / ')}`).toBeGreaterThan(8);
+  // The two beds overlap for most of the 1500 ms: at least the 0.8 s that nine
+  // 100 ms samples span, read off the samples' own timestamps. Since SPEC-040
+  // §4.2 a host without a GPU draws every frame it gets, and a loaded one holds
+  // the sampler's interval back behind those draws, so the count of samples
+  // is the host's; how long the overlap lasted is the crossfade's.
+  const story = `no overlap in: ${trace.map((s) => `${s.t}ms ${audible(s)}`).join(' / ')}`;
+  expect(overlapping.length, story).toBeGreaterThanOrEqual(3);
   // Both directions move, and the pair never leaves a hole in the middle.
   const first = overlapping[0]!;
   const last = overlapping[overlapping.length - 1]!;
+  expect(last.t - first.t, story).toBeGreaterThanOrEqual(800);
   expect(gainOf(first, 'menu')!).toBeGreaterThan(gainOf(last, 'menu')!);
   expect(gainOf(first, 'station')!).toBeLessThan(gainOf(last, 'station')!);
   for (const sample of overlapping) {
@@ -836,6 +843,13 @@ test('a bed still decoding while its fade runs arrives at full anyway (AC-19, AC
 
 test('the 24-voice cap steals, refuses and frees its slots (AC-29, AC-30, AC-31, AC-32, AC-33)', async ({ page }) => {
   await startWithAudio(page);
+  // The limiter admits a voice at once, but Howler starts it only once the bank
+  // has decoded; on a loaded GPU-less run (SPEC-040 §4.2 draws every frame it
+  // gets) that can still be under way here, and the count below is of voices
+  // actually playing. The cap is what this case is about, not the decode.
+  await expect
+    .poll(() => page.evaluate(() => window.__qaSnap().find((h) => h.src.startsWith('ui'))?.state ?? null), COLD_START)
+    .toBe('loaded');
 
   const limiter = await page.evaluate(async () => {
     const audio = window.__reallm.audio();
@@ -1338,7 +1352,9 @@ test('the pause menu ducks the bed and lets go, even when the player quits (AC-5
   await serveAudio(page);
   await page.goto(gameUrl('/?debug&scene=surface&planet=cinder4'));
   await passGate(page);
-  await expect(page.locator('[data-testid="scene-label"]')).toHaveText('surface');
+  // A landing waits up to 1.5 s for its planet's props (SPEC-040 §4.6) and then
+  // builds behind the fade, so it gets the cold-start patience `start()` gives.
+  await expect(page.locator('[data-testid="scene-label"]')).toHaveText('surface', COLD_START);
 
   const bed = (): Promise<number | null> =>
     page.evaluate(() => window.__qaSnap().find((h) => h.src.startsWith('surface_calm'))?.sounds[0]?.gain ?? null);
