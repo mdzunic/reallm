@@ -263,18 +263,35 @@ for (const size of PHONE_VIEWPORTS) {
 
     test('3. three toasts: one on a phone, three on the tablet, none on the arc', async ({ page }) => {
       await land(page);
-      await page.evaluate(() => {
+      await page.evaluate((newest) => {
         window.__reallm.toast('First toast', 'info', 60_000);
         window.__reallm.toast('Second toast', 'info', 60_000);
-        window.__reallm.toast('Third toast', 'info', 60_000);
-      });
+        window.__reallm.toast(newest, 'warn', 60_000);
+      }, SHIPPED);
       await expect(page.locator('[data-testid="toasts"] .toast')).toHaveCount(3);
-      const expected = size.height <= 500 ? 1 : 3;
+      const expected = size.height <= 420 ? 1 : size.height <= 500 ? 2 : 3;
+      expect(expected, 'every phone in the matrix shows one').toBe(size.width >= 1000 ? 3 : 1);
       await expect.poll(async () => (await shownToasts(page)).length).toBe(expected);
       const arc = await box(page, 'thumb-arc');
       for (const toast of await shownToasts(page)) expect(intersects(toast, arc)).toBe(false);
-      // The newest is the one a phone keeps.
-      if (expected === 1) await expect(page.locator('.toast', { hasText: 'Third toast' })).toBeVisible();
+      if (expected !== 1) return;
+      // The newest is the one a phone keeps: two lines of it, or at 320 px and
+      // under one, cut with an ellipsis. The whole text stays in the DOM.
+      const newest = page.locator('.toast', { hasText: SHIPPED });
+      await expect(newest).toBeVisible();
+      await expect(newest).toContainText(SHIPPED);
+      const clamp = await newest.evaluate((node) => {
+        const style = getComputedStyle(node);
+        return { lines: style.webkitLineClamp, clipped: node.scrollHeight > node.clientHeight + 1, height: node.getBoundingClientRect().height };
+      });
+      if (size.height <= 320) {
+        expect(clamp.lines).toBe('1');
+        expect(clamp.clipped, 'the one line is cut').toBe(true);
+        expect(clamp.height).toBeLessThan(45);
+      } else {
+        expect(clamp.lines).toBe('2');
+        expect(clamp.height).toBeLessThan(64);
+      }
     });
 
     test('4. mirrored: with the stick on the right the arc goes bottom-left, and case 1 holds', async ({ page }) => {

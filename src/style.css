@@ -1781,17 +1781,19 @@ kbd.keycap {
   overflow: hidden;
 }
 
-/* SPEC-037 §4.5: the wedge's 2 px dark edge. The shadow is drawn on the
-   marker's box: the clip-path that cuts the ::before into a triangle is
-   applied after a filter on the ::before itself, and would clip its shadow. */
 .hud-hit-dir {
   position: absolute;
   inset: 0;
   pointer-events: none;
   animation: hud-hit-dir 1s linear forwards;
-  filter: drop-shadow(0 0 1px #0b0f14) drop-shadow(0 0 1px #0b0f14);
 }
 
+/* The wedge: an 84 × 26 triangle pinned to the top edge, red fading toward its
+   tip. SPEC-037 §4.5: with a 2 px dark edge. The triangle is painted — a conic
+   sector from the tip to the two top corners (atan(42 / 26) = 58.24°) — rather
+   than cut out with a clip-path, because a clip-path is applied after a filter
+   and would clip the edge's shadow away; the fade is a mask, applied after the
+   filter, so the edge fades with the red. */
 .hud-hit-dir::before {
   content: '';
   position: absolute;
@@ -1800,8 +1802,10 @@ kbd.keycap {
   width: 84px;
   height: 26px;
   transform: translateX(-50%);
-  background: linear-gradient(to bottom, var(--hp), transparent);
-  clip-path: polygon(50% 100%, 0 0, 100% 0);
+  background: conic-gradient(from -58.24deg at 50% 100%, var(--hp) 116.48deg, transparent 0);
+  -webkit-mask-image: linear-gradient(to bottom, #000, transparent);
+  mask-image: linear-gradient(to bottom, #000, transparent);
+  filter: drop-shadow(0 0 1px #0b0f14) drop-shadow(0 0 1px #0b0f14);
 }
 
 @keyframes hud-hit-dir {
