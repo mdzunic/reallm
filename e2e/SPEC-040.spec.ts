@@ -257,24 +257,55 @@ test.describe('no blur in play (AC-22)', () => {
 
 // -------------------------------------------------------------- 6: assets
 
-test('6. the station holds its texture count across two planets (AC-27)', async ({ page }) => {
-  test.setTimeout(120_000);
-  await start(page, '/?scene=surface&planet=cinder4');
+/** The entry fade has run out: a `go()` issued during it is refused (SPEC-003 D-2). */
+async function fadeSettled(page: Page): Promise<void> {
+  await expect(page.locator('[data-testid="transition-fade"]')).toHaveCSS('pointer-events', 'none', COLD_START);
+}
+
+/** cinder4 (already landed) → station → vetra → station, and the station's count after each planet. */
+async function stationHoldsAcrossTwoPlanets(page: Page): Promise<void> {
   // The planet's set is in: props from their GLBs, the ground with them.
   await expect.poll(() => propSource(page), COLD_START).toBe('glb');
   await go(page, 'station', {});
   const afterCinder = await settledTextures(page);
 
+  await fadeSettled(page);
   await go(page, 'surface', { planet: 'vetra', firstLanding: true }, true);
   await expect.poll(() => propSource(page), COLD_START).toBe('glb');
   // Vetra's ground textures are on the GPU: the frames after the swap drew them.
   await page.waitForTimeout(1000);
   const onVetra = await settledTextures(page);
+  await fadeSettled(page);
   await go(page, 'station', {});
   const afterVetra = await settledTextures(page);
 
   expect(onVetra, 'vetra drew textures the station does not').toBeGreaterThan(afterVetra);
   expect(Math.abs(afterVetra - afterCinder), `station ${afterCinder} → ${afterVetra}`).toBeLessThanOrEqual(2);
+}
+
+test('6. the station holds its texture count across two planets (AC-27)', async ({ page }) => {
+  test.setTimeout(120_000);
+  await start(page, '/?scene=surface&planet=cinder4');
+  await stationHoldsAcrossTwoPlanets(page);
+});
+
+test.describe('the station on high (AC-27)', () => {
+  // `high` is the preset with a shadow map: a render target the key light
+  // allocates on each landing — a colour and a depth texture — beside the
+  // skeleton's bone texture every preset draws. It is also this container's
+  // slowest preset, so the canvas is small; the count does not depend on it.
+  test.use({ viewport: { width: 480, height: 270 } });
+
+  test('6. holds its texture count across two planets, shadow maps and all', async ({ page }) => {
+    test.setTimeout(150_000);
+    // No governor step between the readings: a preset change would move what
+    // the next landing allocates.
+    await page.addInitScript(() => localStorage.setItem('reallm:settings', JSON.stringify({ adaptiveQuality: false })));
+    await start(page, '/?quality=high&scene=surface&planet=cinder4');
+    expect(await page.evaluate(() => window.__reallm.stats().preset)).toBe('high');
+    await stationHoldsAcrossTwoPlanets(page);
+    expect(await page.evaluate(() => window.__reallm.stats().preset)).toBe('high');
+  });
 });
 
 // ------------------------------------------------------------ 7: film stall
