@@ -214,7 +214,8 @@ test.describe('SPEC-010 — the economy in a browser', () => {
       levelAtAMillion: 30,
     });
     expect(digest.balance.budgets).toEqual([105, 225, 360, 515, 730]);
-    expect(digest.balance.loadouts).toEqual([60, 180, 300, 470, 620]);
+    // SPEC-039 §4.2: the Laser Carbine moves into the chapter-2 loadout.
+    expect(digest.balance.loadouts).toEqual([100, 180, 300, 470, 620]);
     for (const [index, cost] of digest.balance.loadouts.entries()) {
       expect(cost).toBeLessThanOrEqual(digest.balance.budgets[index] ?? 0);
     }

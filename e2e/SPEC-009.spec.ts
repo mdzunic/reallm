@@ -302,7 +302,8 @@ test.describe('SPEC-009 content data layer', () => {
       pistol_service: ['sidearm', 'handgun', 0, 9],
       weapon_kinetic: ['weapon', 0, 12],
       weapon_laser: [1, 18, { tokens: 40 }],
-      weapon_lithium: [3, 36, 2],
+      // SPEC-039 §4.4 retunes the Lithium Edge to 40 a shot.
+      weapon_lithium: [3, 40, 2],
       armor_ablative: [45, 0.75],
       plasma_cell: [{ kind: 'damage_boost', mult: 1.4, seconds: 20 }, 3],
     });
