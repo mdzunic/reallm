@@ -988,6 +988,7 @@ const HUD_KEY_TABLE = {
   interact: true,
   interactAction: true,
   walletLit: true,
+  dash: true,
   flight: true,
 } as const satisfies Record<HudKey, true>;
 
