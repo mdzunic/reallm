@@ -347,6 +347,29 @@ interface RevealState {
 const HELD_FRAME_CAP = 0.1;
 
 /**
+ * SPEC-040 §4.6 (PLAN R20 decision 1): how long `enter()` waits, behind the
+ * transition's fade, for the planet's props and ground before it builds the
+ * view — so a first landing, and a landing after the set was released, draw
+ * the props from their GLBs. A set later than this swaps in through
+ * `SurfaceView.setPropModels` (E72). *Initial tuning.*
+ */
+export const PROP_DROP_WAIT_MS = 1500;
+
+/** Resolves when `promise` settles, or after `ms`, whichever is first; never rejects. */
+function settleWithin(promise: Promise<unknown>, ms: number): Promise<void> {
+  return new Promise<void>((resolve) => {
+    const timer = setTimeout(resolve, ms);
+    void promise.then(
+      () => undefined,
+      () => undefined,
+    ).then(() => {
+      clearTimeout(timer);
+      resolve();
+    });
+  });
+}
+
+/**
  * `BOSS_REVEALS` read through a schema type, keyed by any enemy: the arena
  * hands over the stage's `EnemyId` and only the five bosses have a reveal
  * (the pattern `systems/Economy.ts` uses on the content tables).
@@ -689,8 +712,44 @@ export class SurfaceScene extends UiScene<'surface'> {
   } = { beacon: null, route: null, routeLength: 0, pulse: false };
   readonly #hintValues: Partial<Record<HintPlaceholder, string>> = {};
 
+  /** SPEC-040 §4.6: the planet's set, loading since `enter()`; `null` before it. */
+  #planetAssets: Promise<void> | null = null;
+
   constructor(services: GameServices) {
     super(services, 'surface', 'surface_calm');
+  }
+
+  /**
+   * SPEC-040 §4.6: the planet's set starts loading before anything is built,
+   * and the view waits up to `PROP_DROP_WAIT_MS` for it. The state machine
+   * awaits `enter()` behind its fade, so the wait is hidden; a set from the
+   * worker's cache lands in well under a second.
+   */
+  override async enter(params: SceneParams['surface']): Promise<void> {
+    const load = this.#loadPlanetAssets(PLANETS[params.planet]);
+    await settleWithin(load, PROP_DROP_WAIT_MS);
+    super.enter(params);
+  }
+
+  /**
+   * SPEC-018 §4.10: the lazy per-planet drop, merged with the shared surface
+   * set (SPEC-019 §4.8: the probe rides along; boot stays five files). Started
+   * once per visit. SPEC-040 §4.6: the planet's own set leaves with the
+   * planet — the release is registered first, so the disposer's reverse order
+   * runs it last, after the view and every mesh are gone, and it waits out a
+   * load still in flight (40-i). `SURFACE_SHARED_ASSETS` is never released.
+   */
+  #loadPlanetAssets(planet: PlanetDef): Promise<void> {
+    if (this.#planetAssets !== null) return this.#planetAssets;
+    const assets = this.services.assets;
+    const surfaceAssets = SURFACE_ASSETS[planet.biome];
+    this.disposer.add(() => void assets.release(surfaceAssets));
+    this.#planetAssets = assets.load({
+      models: { ...surfaceAssets.models, ...SURFACE_SHARED_ASSETS.models },
+      textures: { ...surfaceAssets.textures },
+      audio: {},
+    });
+    return this.#planetAssets;
   }
 
   protected override look(): Partial<Look> {
@@ -853,24 +912,22 @@ export class SurfaceScene extends UiScene<'surface'> {
     this.disposer.add(() => view.dispose());
     this.#groundColor = hexColor(planet.surface.palette.ground);
 
-    // SPEC-018 §4.10: the lazy per-planet drop, merged with the shared
-    // surface set (SPEC-019 §4.8: the probe rides along; boot stays five
-    // files). The shared promise dedupes by id; the `.then` checks disposal
-    // before touching the view (18-m).
+    // SPEC-018 §4.10: the lazy per-planet drop `enter()` started and waited
+    // for. When it settles — at once if it already has — the ground takes its
+    // textures and, SPEC-040 §4.6 (E72), any prop kind still drawing its
+    // stand-in takes its GLB. The `.then` checks disposal before touching the
+    // view (18-m); a set that fails keeps the stand-ins, with the warning.
     const surfaceAssets = SURFACE_ASSETS[planet.biome];
     {
       let disposed = false;
       this.disposer.add(() => {
         disposed = true;
       });
-      void services.assets
-        .load({
-          models: { ...surfaceAssets.models, ...SURFACE_SHARED_ASSETS.models },
-          textures: { ...surfaceAssets.textures },
-          audio: {},
-        })
+      void this.#loadPlanetAssets(planet)
         .then(() => {
-          if (disposed || Object.keys(surfaceAssets.textures).length === 0) return;
+          if (disposed) return;
+          view.setPropModels(services.assets);
+          if (Object.keys(surfaceAssets.textures).length === 0) return;
           const [layerA, layerB] = planet.surface.look.ground.layers;
           const [metresA, metresB] = planet.surface.look.ground.tileMetres;
           view.setGroundTextures(
@@ -1530,6 +1587,8 @@ export class SurfaceScene extends UiScene<'surface'> {
     info['fov'] = Math.round(this.camera.fov * 10) / 10;
     info['fogNear'] = Math.round(this.#fogNear * 100) / 100;
     info['occluders'] = this.#view?.fadedOccluders ?? 0;
+    // SPEC-040 §4.6: whether every modelled prop kind draws its GLB yet.
+    info['propSource'] = this.#view?.propSource ?? 'procedural';
     // SPEC-035 §4.3: the surface's own bloom threshold, which the shared default
     // (0.85) is not — a whiteout is otherwise a claim about a post uniform
     // nothing outside the chain can read.

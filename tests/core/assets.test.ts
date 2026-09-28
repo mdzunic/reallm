@@ -376,3 +376,118 @@ describe('the preset texture cap (AC-8)', () => {
     expect(warnings.some((line) => /could not be clamped to 512px/.test(line))).toBe(true);
   });
 });
+
+describe('Assets.release() (SPEC-040 §4.6, AC-23)', () => {
+  const PLANET: AssetManifest = {
+    models: { desert_rock_a: 'assets/models/props/desert_rock_a.glb' },
+    textures: { sand_albedo: { url: 'assets/textures/ground/sand_albedo.webp' } },
+    audio: {},
+  };
+  const ROCK = 'desert_rock_a' as ModelId;
+  const SAND = 'sand_albedo' as TextureId;
+
+  /** Every geometry, material and material texture of a cached model, by dispose count. */
+  function watch(root: THREE.Object3D): { disposed: () => string[] } {
+    const disposed: string[] = [];
+    root.traverse((node) => {
+      const mesh = node as THREE.Mesh;
+      if (mesh.isMesh !== true) return;
+      mesh.geometry.addEventListener('dispose', () => disposed.push('geometry'));
+      const material = mesh.material as THREE.MeshBasicMaterial;
+      material.addEventListener('dispose', () => disposed.push('material'));
+      material.map?.addEventListener('dispose', () => disposed.push('texture'));
+    });
+    return { disposed: () => disposed };
+  }
+
+  it('disposes a model’s geometry, material and texture and a listed texture, and forgets them', async () => {
+    const fakes = fakeLoaders();
+    let built: THREE.Group | null = null;
+    fakes.model = () => (built = boxModel());
+    const assets = new Assets(fakes);
+    await assets.load(PLANET);
+    const model = watch(built as unknown as THREE.Group);
+    const sand = assets.texture(SAND);
+    let sandDisposed = 0;
+    sand.addEventListener('dispose', () => sandDisposed++);
+
+    await assets.release(PLANET);
+
+    expect(model.disposed().sort()).toEqual(['geometry', 'material', 'texture']);
+    expect(sandDisposed).toBe(1);
+    expect(assets.hasModel(ROCK)).toBe(false);
+    expect(() => assets.texture(SAND)).toThrow(/unknown texture/);
+    // `loaded` stays as it was: the cache is still usable for everything else.
+    expect(assets.loaded).toBe(true);
+  });
+
+  it('fetches a released set again on the next load', async () => {
+    const fakes = fakeLoaders();
+    const assets = new Assets(fakes);
+    await assets.load(PLANET);
+    await assets.release(PLANET);
+    fakes.requests.length = 0;
+    await assets.load(PLANET);
+    expect(fakes.requests).toEqual(['assets/models/props/desert_rock_a.glb', 'assets/textures/ground/sand_albedo.webp']);
+    expect(assets.hasModel(ROCK)).toBe(true);
+    expect(assets.texture(SAND)).toBeInstanceOf(THREE.Texture);
+  });
+
+  it('leaves what it was not asked to release', async () => {
+    const fakes = fakeLoaders();
+    const assets = new Assets(fakes);
+    await assets.load(MANIFEST);
+    await assets.load(PLANET);
+    await assets.release(PLANET);
+    expect(assets.hasModel(CRATE)).toBe(true);
+    expect(assets.texture(GRID)).toBeInstanceOf(THREE.Texture);
+  });
+
+  it('waits for a load in flight, then frees what it brought (40-i)', async () => {
+    const fakes = fakeLoaders();
+    let finish: () => void = () => {};
+    const gate = new Promise<void>((resolve) => (finish = resolve));
+    const texture = fakes.texture.loadAsync;
+    fakes.texture = {
+      loadAsync: async (url: string) => {
+        await gate;
+        return texture(url);
+      },
+    };
+    const assets = new Assets(fakes);
+    const load = assets.load(PLANET);
+    const order: string[] = [];
+    void load.then(() => order.push('load'));
+    const release = assets.release(PLANET).then(() => order.push('release'));
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(order).toEqual([]); // the release is holding for the load
+    finish();
+    await release;
+    expect(order).toEqual(['load', 'release']);
+    expect(assets.hasModel(ROCK)).toBe(false);
+    expect(() => assets.texture(SAND)).toThrow(/unknown texture/);
+  });
+
+  it('waits for a failed load too, and still releases what did arrive', async () => {
+    setLogSink(silent);
+    const fakes = fakeLoaders();
+    fakes.fail.add('assets/textures/ground/sand_albedo.webp');
+    const assets = new Assets(fakes);
+    const load = assets.load(PLANET).catch(() => 'failed');
+    await assets.release(PLANET);
+    expect(await load).toBe('failed');
+    expect(assets.hasModel(ROCK)).toBe(false);
+  });
+
+  it('skips unknown and never-loaded ids without throwing', async () => {
+    const fakes = fakeLoaders();
+    const assets = new Assets(fakes);
+    await expect(assets.release(PLANET)).resolves.toBeUndefined();
+    await assets.load(MANIFEST);
+    await expect(
+      assets.release({ models: { nope: 'x.glb', ...PLANET.models }, textures: { nada: { url: 'y.png' } } }),
+    ).resolves.toBeUndefined();
+    expect(assets.hasModel(CRATE)).toBe(true);
+  });
+});

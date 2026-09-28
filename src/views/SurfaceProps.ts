@@ -284,13 +284,22 @@ function treeBody(seed: number, biome: Biome): THREE.BufferGeometry {
 }
 
 /**
+ * The model that draws a biome's obstacle kind, or `undefined` when the kind is
+ * procedural only (§4.10). SPEC-030 D-19: the collision-only kinds are never
+ * looked up in `PROP_MODELS`. SPEC-040 §4.6 reads it to know which kinds a
+ * late set can still swap in.
+ */
+export function obstacleModelId(kind: ObstacleKind, biome: Biome): ModelId | undefined {
+  if (kind === 'cave_wall' || kind === 'wreck_hull') return undefined;
+  return PROP_MODELS[`${biome}:${kind}`];
+}
+
+/**
  * A biome's obstacle, procedural by default; the `PROP_MODELS` table wins when
  * it names a model and the lazy assets have landed (§4.10, 18-o).
  */
 export function obstacleGeometry(kind: ObstacleKind, biome: Biome, seed: number, assets?: Assets, small = false): PropGeometry {
-  // SPEC-030 D-19: the collision-only kinds are never looked up in PROP_MODELS.
-  const collisionOnly = kind === 'cave_wall' || kind === 'wreck_hull';
-  const modelId = collisionOnly ? undefined : PROP_MODELS[`${biome}:${kind}`];
+  const modelId = obstacleModelId(kind, biome);
   if (assets !== undefined && modelId !== undefined && assets.hasModel(modelId)) {
     return propFromModel(assets.model(modelId));
   }
