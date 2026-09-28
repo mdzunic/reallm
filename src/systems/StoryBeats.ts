@@ -98,8 +98,29 @@ export function skipAccepted(input: SkipInput, elapsed: number): boolean {
   return elapsed >= SKIP_KEY_GRACE && !input.repeat && SKIP_KEYS.includes(input.code);
 }
 
-/** §4.1: seconds from the video request to `playing`, and the longest stall after it. */
+/**
+ * §4.1: the longest stall, in seconds. Before `playing` it is how long the load
+ * may go without a byte arriving (SPEC-040 §4.8); after it, how long the video
+ * may go without advancing.
+ */
 export const FILM_LOAD_TIMEOUT = 4;
+/**
+ * SPEC-040 §4.8: the longest a load may run before `playing`, however steadily
+ * its bytes trickle in (40-n). *Initial tuning.*
+ */
+export const FILM_LOAD_CAP = 20;
+
+/**
+ * SPEC-040 §4.8: when a film load that has not reached `playing` falls back to
+ * stills — `FILM_LOAD_TIMEOUT` after the last byte arrived, and never later
+ * than `FILM_LOAD_CAP` after the request. Seconds, on whatever clock the two
+ * arguments share. A slow link that keeps delivering plays the film; a dead
+ * one still falls back. A response with no body stream never moves
+ * `lastByteAt` off the request, which is the 4 s rule as it was (40-m).
+ */
+export function filmLoadDeadline(requestedAt: number, lastByteAt: number): number {
+  return Math.min(lastByteAt + FILM_LOAD_TIMEOUT, requestedAt + FILM_LOAD_CAP);
+}
 /** §4.4: the stills cross-fade. */
 export const FILM_POSTER_FADE = 0.4;
 /** §4.2: the layer's fade-out on end or skip (0 under reduce motion). */

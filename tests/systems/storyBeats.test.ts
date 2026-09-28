@@ -26,6 +26,9 @@ import {
   departureDue,
   endingPending,
   filmDuration,
+  FILM_LOAD_CAP,
+  FILM_LOAD_TIMEOUT,
+  filmLoadDeadline,
   FILM_TYPE_CPS,
   interludeToPlay,
   LINE_LEDGER,
@@ -429,5 +432,36 @@ describe('LINE_LEDGER (SPEC-034 §4.10)', () => {
       if (!Object.hasOwn(DIALOGUE, done)) continue;
       expect(DIALOGUE[done as DialogueId].lines.length).toBeGreaterThan(0);
     }
+  });
+});
+
+describe('filmLoadDeadline (SPEC-040 §4.8, AC-33)', () => {
+  it('pins the stall timeout and the cap (initial tuning)', () => {
+    expect(FILM_LOAD_TIMEOUT).toBe(4);
+    expect(FILM_LOAD_CAP).toBe(20);
+  });
+
+  it('is 4 s after a fresh request — the old rule, and a response with no stream (40-m)', () => {
+    expect(filmLoadDeadline(100, 100)).toBe(104);
+    expect(filmLoadDeadline(0, 0)).toBe(4);
+  });
+
+  it('moves on 4 s past each byte: after bytes at 3 s and at 10 s', () => {
+    expect(filmLoadDeadline(0, 3)).toBe(7);
+    expect(filmLoadDeadline(0, 10)).toBe(14);
+    expect(filmLoadDeadline(50, 60)).toBe(64);
+  });
+
+  it('never runs past 20 s after the request, however steadily the bytes trickle (40-n)', () => {
+    expect(filmLoadDeadline(0, 16)).toBe(20);
+    expect(filmLoadDeadline(0, 19.5)).toBe(20);
+    expect(filmLoadDeadline(10, 40)).toBe(30);
+  });
+
+  it('keeps a prologue that trickles for 6 s in video at 5.5 s, and drops it to stills by 11 s (AC-34)', () => {
+    // A chunk each second, the last at 6 s: the deadline is 10 s.
+    const lastByte = 6;
+    expect(5.5 < filmLoadDeadline(0, 5)).toBe(true);
+    expect(filmLoadDeadline(0, lastByte)).toBeLessThanOrEqual(11);
   });
 });

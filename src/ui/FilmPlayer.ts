@@ -19,6 +19,7 @@ import {
   FILM_LOAD_TIMEOUT,
   FILM_POSTER_FADE,
   filmDuration,
+  filmLoadDeadline,
   PAN,
   shotAt,
   skipAccepted,
@@ -130,6 +131,15 @@ interface Run {
   videoStarted: boolean;
   lastVideoTime: number;
   lastAdvanceWall: number;
+  /**
+   * SPEC-040 §4.8: when the video was requested and when its last byte
+   * arrived, in seconds (`performance.now() / 1000`) — what the load deadline
+   * is read from.
+   */
+  requestedAt: number;
+  lastByteAt: number;
+  /** When the tab hid while the video was still loading; `null` otherwise (E28). */
+  hiddenAt: number | null;
   loadTimer: ReturnType<typeof setTimeout> | null;
   fadeTimer: ReturnType<typeof setTimeout> | null;
 }
@@ -226,6 +236,9 @@ export class FilmPlayer {
       videoStarted: false,
       lastVideoTime: 0,
       lastAdvanceWall: now,
+      requestedAt: now / 1000,
+      lastByteAt: now / 1000,
+      hiddenAt: null,
       loadTimer: null,
       fadeTimer: null,
     };
@@ -387,13 +400,18 @@ export class FilmPlayer {
       if (this.#run === run && !run.settled) this.#finish(run, 'ended');
     });
 
+    // SPEC-040 §4.8: the load's clock starts at the request, and every byte
+    // that arrives moves its stall deadline on.
+    run.requestedAt = performance.now() / 1000;
+    run.lastByteAt = run.requestedAt;
     this.#armLoadTimer(run);
 
-    // AC-4: the whole file into a Blob, so playback never needs HTTP Range.
+    // AC-4: the whole file into a Blob, so playback never needs HTTP Range —
+    // one plain GET, read as a stream (SPEC-040 §4.8).
     const abort = new AbortController();
     run.fetchAbort = abort;
     fetch(`assets/${entry.file}`, { signal: abort.signal })
-      .then((response) => (response.ok ? response.blob() : Promise.reject(new Error(String(response.status)))))
+      .then((response) => (response.ok ? this.#readBody(run, response) : Promise.reject(new Error(String(response.status)))))
       .then((blob) => {
         if (this.#run !== run || run.settled || run.mode !== 'video') return;
         run.objectUrl = URL.createObjectURL(blob);
@@ -417,17 +435,55 @@ export class FilmPlayer {
   }
 
   /**
-   * §4.1: no `playing` within FILM_LOAD_TIMEOUT of the request is a failure.
-   * The timer holds while the tab is hidden and re-arms whole on resume, so a
-   * backgrounded load cannot fail — and so switch modes — on its own (E28).
+   * SPEC-040 §4.8: the body as a stream, chunk by chunk, each one moving
+   * `lastByteAt` and re-arming the load timer; the Blob is built when the
+   * stream ends. A response with no stream is read whole, as before, and
+   * `lastByteAt` stays at the request (40-m). An abort (a skip, a failure)
+   * rejects the read, which the caller already treats as no failure.
+   */
+  async #readBody(run: Run, response: Response): Promise<Blob> {
+    const body = response.body;
+    if (body === null || typeof body.getReader !== 'function') return response.blob();
+    const reader = body.getReader();
+    const chunks: BlobPart[] = [];
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      chunks.push(value as Uint8Array<ArrayBuffer>);
+      if (this.#run !== run || run.settled || run.mode !== 'video') {
+        void reader.cancel().catch(() => undefined);
+        break;
+      }
+      run.lastByteAt = performance.now() / 1000;
+      if (!run.videoStarted) this.#armLoadTimer(run);
+    }
+    return new Blob(chunks, { type: response.headers.get('content-type') ?? 'video/mp4' });
+  }
+
+  /**
+   * §4.1, SPEC-040 §4.8: before `playing`, the load fails over to stills only
+   * once no byte has arrived for FILM_LOAD_TIMEOUT, or FILM_LOAD_CAP has passed
+   * since the request — one timer, armed for that deadline and re-armed on
+   * every chunk; when it fires early it re-arms. The timer holds while the tab
+   * is hidden and re-arms whole on resume, so a backgrounded load cannot fail
+   * — and so switch modes — on its own (E28). `playing` clears it.
    */
   #armLoadTimer(run: Run): void {
     if (run.loadTimer !== null) clearTimeout(run.loadTimer);
-    run.loadTimer = setTimeout(() => {
-      if (this.#run !== run || run.videoStarted || run.settled) return;
-      if (run.state === 'paused') return;
-      this.#videoFailed(run);
-    }, FILM_LOAD_TIMEOUT * 1000);
+    const wait = filmLoadDeadline(run.requestedAt, run.lastByteAt) - performance.now() / 1000;
+    run.loadTimer = setTimeout(
+      () => {
+        run.loadTimer = null;
+        if (this.#run !== run || run.videoStarted || run.settled) return;
+        if (run.state === 'paused') return;
+        if (performance.now() / 1000 < filmLoadDeadline(run.requestedAt, run.lastByteAt)) {
+          this.#armLoadTimer(run);
+          return;
+        }
+        this.#videoFailed(run);
+      },
+      Math.max(0, wait * 1000),
+    );
   }
 
   /** §4.1 mid-film fallback: stills (or text), carrying on at the film time. */
@@ -614,6 +670,7 @@ export class FilmPlayer {
     if (document.hidden) {
       if (run.state === 'paused') return;
       // E28: pause the video, the clock, typing and cues; never resume alone.
+      if (run.mode === 'video' && !run.videoStarted) run.hiddenAt = performance.now() / 1000;
       run.resumeTo = run.state === 'loading' ? 'loading' : 'playing';
       run.state = 'paused';
       run.layer.dataset['state'] = 'paused';
@@ -638,7 +695,15 @@ export class FilmPlayer {
     run.layer.dataset['state'] = run.state;
     run.lastFrameWall = performance.now();
     run.lastAdvanceWall = run.lastFrameWall;
-    if (run.mode === 'video' && !run.videoStarted) this.#armLoadTimer(run);
+    if (run.mode === 'video' && !run.videoStarted) {
+      // E28: the time hidden never counts against the load — the cap moves by
+      // it, and the stall window starts over from the resume.
+      const now = run.lastFrameWall / 1000;
+      if (run.hiddenAt !== null) run.requestedAt += now - run.hiddenAt;
+      run.hiddenAt = null;
+      run.lastByteAt = Math.max(run.lastByteAt, now);
+      this.#armLoadTimer(run);
+    }
     if (run.video !== null && run.video.src !== '') {
       run.video.play().catch((error: unknown) => {
         // A pause landing before this play() settles is not a failure (§4.1).
