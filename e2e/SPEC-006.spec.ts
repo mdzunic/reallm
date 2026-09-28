@@ -695,7 +695,9 @@ test('a scene change crossfades over 1500 ms and stops the outgoing track at 0 (
     });
   });
   // The sampler is started but *not* awaited, so the click lands inside its window.
-  const samples = page.evaluate(() => window.__qaSample(2600, 100));
+  // The window is long enough to hold the whole fade even when a loaded host
+  // takes 1.5 s to land the click and change the scene before the fade starts.
+  const samples = page.evaluate(() => window.__qaSample(5000, 100));
   await page.locator('[data-testid="go-station"]').click();
   const trace = await samples;
   await expect(page.locator('[data-testid="scene-label"]')).toHaveText('station');
