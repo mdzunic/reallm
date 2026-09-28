@@ -495,6 +495,9 @@ export class Game implements GameServices {
             render: (scene, camera) => renderer.render(scene, camera),
             setPixelRatio: (dpr) => renderer.gl.setPixelRatio(dpr),
             resize: () => renderer.resize(),
+            // SPEC-040 §4.1: the facade's one-pixel read-back — the benchmark
+            // reads no pixels itself (SPEC-017 §6).
+            sync: () => renderer.sync(),
           },
       requestFrame: (cb) => globalThis.requestAnimationFrame(cb),
       cancelFrame: (id) => globalThis.cancelAnimationFrame(id),
@@ -505,6 +508,7 @@ export class Game implements GameServices {
       },
       deviceMemory: nav.deviceMemory,
       cores: navigator.hardwareConcurrency,
+      now: () => performance.now(),
     };
   }
 
@@ -515,9 +519,7 @@ export class Game implements GameServices {
    * a measurement.
    */
   #applyBenchmark(outcome: BenchmarkOutcome): void {
-    if (outcome.persist) {
-      this.#settings.set({ benchmark: { preset: outcome.preset, msPerFrame: outcome.msPerFrame, at: Date.now() } });
-    }
+    if (outcome.persist) this.#persistBenchmark(outcome);
     this.#logEvent(`benchmark:${outcome.reason}`);
     if (this.#flags.quality !== null || this.#settings.quality !== null) return;
     this.#renderer.setQuality(outcome.preset);
@@ -531,13 +533,18 @@ export class Game implements GameServices {
    */
   async detectQuality(): Promise<BenchmarkOutcome> {
     const outcome = await runBenchmark(this.#benchmarkDeps());
-    if (outcome.persist) {
-      this.#settings.set({ benchmark: { preset: outcome.preset, msPerFrame: outcome.msPerFrame, at: Date.now() } });
-    }
+    if (outcome.persist) this.#persistBenchmark(outcome);
     this.#settings.set({ quality: null });
     this.#renderer.setQuality(outcome.preset);
     this.#logEvent(`benchmark:${outcome.reason}`);
     return outcome;
+  }
+
+  /** SPEC-040 §4.1: every record this build writes says it timed the GPU. */
+  #persistBenchmark(outcome: BenchmarkOutcome): void {
+    this.#settings.set({
+      benchmark: { preset: outcome.preset, msPerFrame: outcome.msPerFrame, at: Date.now(), method: 'gpu' },
+    });
   }
 
   start(): void {

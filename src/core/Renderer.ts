@@ -64,6 +64,18 @@ export interface Renderer {
    * its materials and gets no bloom and no grade.
    */
   renderOverlay(scene: Object3D, camera: Camera, box: { x: number; y: number; w: number; h: number }): void;
+  /**
+   * SPEC-040 §4.1: blocks until the GPU has finished the last frame — a 1 × 1
+   * read-back of the drawing buffer. The boot benchmark times its draws with
+   * it; a no-op while the context is lost.
+   */
+  sync(): void;
+  /**
+   * SPEC-040 §4.3: caps the effective dpr under the preset's `maxDpr` for the
+   * session — the adaptive governor's first rung. `null` removes the cap. It is
+   * never persisted, and re-applies at once.
+   */
+  setDprCap(cap: number | null): void;
   dispose(): void;
 }
 
@@ -145,6 +157,10 @@ class CanvasRenderer implements Renderer {
   readonly #look: Look = { ...DEFAULT_LOOK, tint: [...DEFAULT_LOOK.tint] };
   /** Set by every resize signal; consumed at the start of the next render step. */
   #pending = true;
+  /** SPEC-040 §4.3: the governor's session-only dpr cap; `null` when uncapped. */
+  #dprCap: number | null = null;
+  /** SPEC-040 §4.1: `sync()`'s read-back target, allocated once. */
+  readonly #pixel = new Uint8Array(4);
   #dprQuery: MediaQueryList | null = null;
   readonly #onDprChange = (): void => {
     this.#pending = true;
@@ -292,6 +308,23 @@ class CanvasRenderer implements Renderer {
     this.gl.setViewport(0, 0, this.#width, this.#height);
   }
 
+  sync(): void {
+    if (this.#disposed || this.#contextLost) return;
+    // `readPixels` returns only once every command before it has executed, so
+    // the call is the GPU's own "done" — what a frame gap never measured. The
+    // default framebuffer is where the frame went, on either path.
+    this.gl.setRenderTarget(null);
+    const context = this.gl.getContext();
+    context.readPixels(0, 0, 1, 1, context.RGBA, context.UNSIGNED_BYTE, this.#pixel);
+  }
+
+  setDprCap(cap: number | null): void {
+    const next = cap !== null && Number.isFinite(cap) && cap > 0 ? cap : null;
+    if (next === this.#dprCap) return;
+    this.#dprCap = next;
+    this.#apply(false);
+  }
+
   dispose(): void {
     if (this.#disposed) return;
     this.#disposed = true;
@@ -355,7 +388,8 @@ class CanvasRenderer implements Renderer {
     const measuredAtZero = rawWidth === 0 || rawHeight === 0;
     const width = Math.max(1, Math.round(rawWidth));
     const height = Math.max(1, Math.round(rawHeight));
-    const dpr = Math.min(deviceDpr(), this.quality.maxDpr);
+    // SPEC-040 §4.3: the governor's cap sits under the preset's own clamp.
+    const dpr = Math.min(deviceDpr(), this.quality.maxDpr, this.#dprCap ?? Infinity);
     this.#pending = measuredAtZero;
 
     const changed = width !== this.#width || height !== this.#height || dpr !== this.#dpr;
