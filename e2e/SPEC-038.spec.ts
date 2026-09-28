@@ -101,7 +101,7 @@ test('1, 2. V and the right mouse button dash 5 m, and qb-dash rings its cooldow
   // read in the frame the cell is first seen cooling. The Marine's cooldown is
   // 1.358 s of game time, which a loaded GPU-less run can spend between two
   // round trips now that it draws every frame it gets (SPEC-040 §4.2).
-  const ring = await (
+  const ring = (await (
     await page.waitForFunction(
       () => {
         const node = document.querySelector<HTMLElement>('[data-testid="qb-dash"]');
@@ -110,7 +110,7 @@ test('1, 2. V and the right mouse button dash 5 m, and qb-dash rings its cooldow
       null,
       { polling: 'raf', timeout: 15_000 },
     )
-  ).jsonValue();
+  ).jsonValue()) as { cd: number };
   expect(ring.cd).toBeGreaterThan(0);
   // 0.2 s later the dash is done; the salvager went 5 m (± the 0.1 m rounding).
   await viewTimeWhen(page, 'viewTime', pressedAt + 0.3);

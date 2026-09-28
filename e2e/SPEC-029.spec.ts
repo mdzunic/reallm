@@ -128,16 +128,18 @@ test('one rocket clears most of a pack, hands back and recharges in 6 s (§6.2 c
   // wall clock is only the patience. The half second covers hit-stop, which
   // holds the view clock for at most two frames.
   const emptiedAt = Number((await info(page))['viewTime'] ?? 0);
-  const rechargedAt = await (
-    await page.waitForFunction(
-      () => {
-        const info = window.__reallm.stats().sceneInfo ?? {};
-        return info['charges'] === 1 ? Number(info['viewTime'] ?? 0) || 1e-6 : false;
-      },
-      null,
-      { polling: 'raf', timeout: 60_000 },
-    )
-  ).jsonValue();
+  const rechargedAt = Number(
+    await (
+      await page.waitForFunction(
+        () => {
+          const info = window.__reallm.stats().sceneInfo ?? {};
+          return info['charges'] === 1 ? Number(info['viewTime'] ?? 0) || 1e-6 : false;
+        },
+        null,
+        { polling: 'raf', timeout: 60_000 },
+      )
+    ).jsonValue(),
+  );
   expect(rechargedAt - emptiedAt).toBeLessThanOrEqual(6.5);
 });
 
