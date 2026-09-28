@@ -1490,6 +1490,12 @@ before the `m7` tag; each row names the automated evidence that stands in for it
 spec the same bot took 0–12 %, all of it from projectiles. Auto-fire's lead
 lands 43 % of 30 s of Kinetic fire on a strafing raider at 10 m (seed 1).
 
+**Re-landed on SPEC-039** (after #57's revert). §6.1 now runs 16 seeds: Cinder-4
+11.2 %/min (27 % from blows and charges), Vetra 13.2 % (22 %), Thessaly 5.6 %
+(57 %), Ferrum 9.8 % (74 %), the Hive 23.9 % (60 %, three deaths in sixteen
+runs). On seeds 1–4 alone the Hive read 27.2 %, over the cap: seed 2 is a death
+spiral at 65 % a minute.
+
 **The budget (AC-39).** `e2e/SPEC-038.spec.ts`'s last case draws a circle and a
 ring (`surface-telegraphs`, dev only) beside a charger's lane on `medium` and
 reads ≤ 96 draws with all three telegraph kinds live; the view adds at most

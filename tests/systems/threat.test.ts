@@ -1,6 +1,6 @@
 // SPEC-038 §6.1 — the threat suite. A kite bot with auto-fire on, in its
 // chapter's reference kit, plays the real field of each combat planet for
-// 3 minutes × 4 seeds on `medium`. Before SPEC-038 it took 0–12 % of its max HP
+// 3 minutes × 16 seeds on `medium`. Before SPEC-038 it took 0–12 % of its max HP
 // a minute, all of it from projectiles: walking away erased every blow. Now the
 // field has to cost something — and never more than a quarter a minute — and
 // part of that cost has to come from blows and charges.
@@ -13,7 +13,11 @@ import { NO_OBSTACLES } from '@/entities/World';
 import type { CombatWorld, PlayerStats } from '@/systems/Combat';
 import { COMBAT_PLANETS, kite, REFERENCE_KIT, runField, summarize, type PlanetSummary } from './threatBots';
 
-const SEEDS = [1, 2, 3, 4] as const;
+/**
+ * §6.1: seeds 1–16. One planet's cost varies from 7 to 65 % a minute across
+ * seeds, so a single death spiral decided the four-seed mean this began with.
+ */
+const SEEDS = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16] as const;
 
 /** A bare world for the kite rule on its own. */
 function world(): CombatWorld {
