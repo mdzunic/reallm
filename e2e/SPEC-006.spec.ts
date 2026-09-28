@@ -723,10 +723,23 @@ test('a scene change crossfades over 1500 ms and stops the outgoing track at 0 (
   for (const sample of overlapping) {
     expect(gainOf(sample, 'menu')! + gainOf(sample, 'station')!, audible(sample)).toBeGreaterThan(MUSIC_FULL * 0.85);
   }
-  // The outgoing instance is gone by the end of the fade, and the new one is up.
-  const settled = trace[trace.length - 1]!;
-  expect(gainOf(settled, 'menu')).toBeNull();
-  expect(gainOf(settled, 'station')).toBeCloseTo(MUSIC_FULL, 2);
+  // The outgoing instance is gone by the end of the fade: no sample hears the
+  // incoming bed at full beside it. The new one is up. On a loaded host, the
+  // click, the scene change and the fade's last tick can land past the
+  // sampler's window, so the settled pair is waited for rather than read off
+  // the window's last sample.
+  for (const sample of trace) {
+    if (gainOf(sample, 'station') === MUSIC_FULL) expect(gainOf(sample, 'menu'), audible(sample)).toBeNull();
+  }
+  await expect
+    .poll(() =>
+      page.evaluate(() => {
+        const snap = window.__qaSnap();
+        const gain = (name: string): number | null => snap.find((h) => h.src.startsWith(name))?.sounds[0]?.gain ?? null;
+        return { menu: gain('menu'), station: gain('station') };
+      }),
+    )
+    .toEqual({ menu: null, station: MUSIC_FULL });
 
   // AC-1: every Howl the layer builds is Web Audio, banks included.
   const html5 = await page.evaluate(async () => {
@@ -1297,6 +1310,14 @@ test('the reactions table is what the game actually hears (AC-38 … AC-50, AC-5
     await new Promise((resolve) => setTimeout(resolve, 200));
     sweep();
     const probe = async (emit: () => void): Promise<{ full: boolean; played: string[] }> => {
+      // A one-shot an earlier probe heard gives its slot back when it ends,
+      // and a loaded host can take that long over one probe's wait. So the cap
+      // is topped back up with priority-1 loops first, and only then is it
+      // proved full.
+      for (let voice = audio['play']('ui_blip', { loop: true, minIntervalMs: 0 }); voice !== null; voice = audio['play']('ui_blip', { loop: true, minIntervalMs: 0 })) {
+        held.push(voice);
+      }
+      sweep();
       const full = audio['play']('ui_warn', { loop: true, minIntervalMs: 0 }) === null;
       emit();
       await new Promise((resolve) => setTimeout(resolve, 200));
