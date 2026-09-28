@@ -523,7 +523,11 @@ export class Missions {
     for (let index = 0; index < stage.length; index++) {
       const objective = stage[index] as Objective;
       if (objective.kind === 'choice' || this.#done(state, objective, index)) continue;
-      this.#markDone(state, index);
+      // SPEC-038 §6.2: a count objective — a kill, a collect, a scan — is done
+      // at its target, not at the 1 a flag objective records.
+      if (objective.kind === 'kill' || objective.kind === 'collect') this.#bump(state, index, objective.amount, objective.amount);
+      else if (objective.kind === 'scan') this.#bump(state, index, objective.count, objective.count);
+      else this.#markDone(state, index);
     }
     this.#checkStage(state);
   }

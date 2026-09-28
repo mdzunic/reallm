@@ -601,6 +601,15 @@ describe('Missions — debugFinishStage (SPEC-024 §4.8)', () => {
     expect(forced.save.progress.flags.filter((flag) => flag.startsWith('ending_'))).toHaveLength(0);
   });
 
+  it('finishes a count stage at its target — c1_s2’s eight skitters (SPEC-038 §6.2)', () => {
+    const h = harness((save) => save.progress.missionsDone.push('c1_m1'));
+    h.missions.accept('c1_s2');
+    h.missions.debugFinishStage('c1_s2');
+    expect(h.missions.active[0]?.stage).toBe(1);
+    expect(h.of('mission:progress').at(-1)).toEqual({ id: 'c1_s2', stage: 0, objective: 0, value: 8, target: 8 });
+    expect(h.missions.surviveWave()).toEqual({ mission: 'c1_s2', stage: 1, wave: 'cinder4_storm' });
+  });
+
   it('ignores a mission that is not running', () => {
     const h = harness();
     h.missions.debugFinishStage('c1_m1');
