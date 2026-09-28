@@ -145,11 +145,13 @@ test.describe('the governor (E68)', () => {
   // The governor's clock is frame time summed, and the loop caps a frame at
   // 250 ms (SPEC-002 E23), so a frame slower than that counts for less than
   // the wall clock the 30 s bound is read on. `high` plus the busy-wait costs
-  // this container's CPU rasteriser 150–230 ms a frame; a small canvas, and
-  // the two cases one after the other rather than loading each other, keep it
-  // under the cap. The preset, the post chain and the busy-wait are unchanged.
+  // this container's CPU rasteriser 95 ms a frame at 480 × 270 alone, and
+  // well past the cap when three other workers are rasterising too. A small
+  // canvas, and the two cases one after the other rather than loading each
+  // other, keep it under the cap. The preset, the post chain and the
+  // busy-wait are unchanged.
   test.describe.configure({ mode: 'default' });
-  test.use({ viewport: { width: 480, height: 270 } });
+  test.use({ viewport: { width: 320, height: 180 } });
 
   test('3. a device that cannot hold high steps down within 30 s, with a toast, and stores nothing (AC-19)', async ({ page }) => {
     test.setTimeout(120_000);

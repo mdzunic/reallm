@@ -236,12 +236,19 @@ test('the dune wurm burrows into phase 2 and is untouchable while under (AC-39)'
   await expect.poll(async () => String((await info(page))['boss'] ?? ''), { timeout: 15_000 }).toMatch(/^p2 /);
 
   // Under the sand it is invulnerable (§4.5, edge 11-f): the same shortcut that
-  // just took a quarter of its health off does nothing for the next ~3 s.
+  // just took a quarter of its health off does nothing for the next ~3 s. The
+  // four presses go in one task on the page's own clock: since SPEC-040 §4.2 a
+  // host without a GPU draws every frame it gets, and on a loaded run four
+  // actionable clicks' round trips alone can outlast the burrow.
   const buried = String((await info(page))['boss'] ?? '');
-  for (let i = 0; i < 4; i++) {
-    await page.locator('[data-testid="surface-wound-boss"]').click();
-    await page.waitForTimeout(300);
-  }
+  await page.evaluate(async () => {
+    const wound = document.querySelector<HTMLButtonElement>('[data-testid="surface-wound-boss"]');
+    if (wound === null) throw new Error('the debug strip has no surface-wound-boss button');
+    for (let i = 0; i < 4; i++) {
+      wound.click();
+      await new Promise((resolve) => setTimeout(resolve, 300));
+    }
+  });
   expect(String((await info(page))['boss'] ?? '')).toBe(buried);
 
   // And it resurfaces: once the burrow ends the wounds land again.

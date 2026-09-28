@@ -146,9 +146,27 @@ test('5. a hit from off screen shows one wedge, and it is gone after 1.2 s', asy
   await land(page);
   const wedge = page.locator('.hud-hit-dir');
   await expect(wedge).toHaveCount(0);
+  // The wedge is up for 1 s of wall clock. Since SPEC-040 §4.2 a host without
+  // a GPU draws every frame it gets, and a loaded one can spend that whole
+  // second between the click and the next round trip — so the page itself
+  // records the wedge the moment it arrives: how many there are, and whether
+  // it is visible as `toBeVisible` means it (a box, and not hidden).
+  await page.evaluate(() => {
+    const w = window as unknown as { __wedge: { count: number; visible: boolean } | null };
+    w.__wedge = null;
+    const observer = new MutationObserver(() => {
+      const nodes = document.querySelectorAll<HTMLElement>('.hud-hit-dir');
+      const first = nodes[0];
+      if (first === undefined) return;
+      const box = first.getBoundingClientRect();
+      w.__wedge = { count: nodes.length, visible: box.width > 0 && box.height > 0 && getComputedStyle(first).visibility !== 'hidden' };
+      observer.disconnect();
+    });
+    observer.observe(document.getElementById('ui') as HTMLElement, { childList: true, subtree: true });
+  });
   await press(page, 'surface-hurt-from');
-  await expect(wedge).toHaveCount(1);
-  await expect(wedge.first()).toBeVisible();
+  const seen = await page.waitForFunction(() => (window as unknown as { __wedge: unknown }).__wedge);
+  expect(await seen.jsonValue()).toEqual({ count: 1, visible: true });
   await page.waitForTimeout(1200);
   await expect(wedge).toHaveCount(0);
 });

@@ -81,13 +81,31 @@ test('the spawn-heavy medium frame stays within 96 draws and 130 k triangles', a
     CINDER4_MEDIUM_POPULATION,
     { timeout: 90_000, polling: 250 },
   );
-  let maxDraws = 0;
-  let maxTriangles = 0;
-  for (let i = 0; i < 30; i++) {
-    const stats = await afterFrames(page, 1);
-    maxDraws = Math.max(maxDraws, stats.drawCalls);
-    maxTriangles = Math.max(maxTriangles, stats.triangles);
-  }
+  // The next 30 frames, each one read in the page as it lands. Since SPEC-040
+  // §4.2 a host without a GPU draws every frame it gets, and a round trip per
+  // frame (three of them, as `afterFrames` makes) waits out a draw each — on a
+  // loaded run, thirty of those outlast the test.
+  const { maxDraws, maxTriangles } = await page.evaluate(
+    (count) =>
+      new Promise<{ maxDraws: number; maxTriangles: number }>((resolve) => {
+        const from = window.__reallm.stats().frame;
+        let seen = from;
+        let maxDraws = 0;
+        let maxTriangles = 0;
+        const sample = (): void => {
+          const stats = window.__reallm.stats();
+          if (stats.frame !== seen) {
+            seen = stats.frame;
+            maxDraws = Math.max(maxDraws, stats.drawCalls);
+            maxTriangles = Math.max(maxTriangles, stats.triangles);
+          }
+          if (seen - from >= count) resolve({ maxDraws, maxTriangles });
+          else requestAnimationFrame(sample);
+        };
+        requestAnimationFrame(sample);
+      }),
+    30,
+  );
   expect(maxDraws).toBeLessThanOrEqual(96); // 80 scene + 16 post
   expect(maxTriangles).toBeLessThanOrEqual(130_000);
 });

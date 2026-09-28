@@ -42,7 +42,7 @@ async function dismiss(page: Page): Promise<void> {
 
 async function openTerminal(page: Page): Promise<void> {
   await dismiss(page);
-  await page.locator('[data-testid="surface-goto-pad"]').click();
+  await tap(page, 'surface-goto-pad');
   const terminal = page.locator('[data-testid="pad-terminal"]');
   for (let i = 0; i < 5; i++) {
     if (await terminal.isVisible()) return;
@@ -72,6 +72,33 @@ const counter = async (page: Page, id: string, key: string): Promise<number> =>
   (await missionState(page, id))?.counters[key] ?? 0;
 
 /**
+ * The surface's world clock (`sceneInfo.viewTime`, s). Every stage below is
+ * budgeted on it, not on the wall clock: since SPEC-040 §4.2 a host without a
+ * GPU draws every frame it gets, so on a loaded run the fixed-step loop's
+ * five-step cap leaves the simulation well behind the wall clock, and a
+ * wall-clock budget for a 60 s survive measured the host, not the mission.
+ */
+const gameTime = async (page: Page): Promise<number> => Number((await info(page))['viewTime'] ?? 0);
+
+/** True until `seconds` of game time have passed since the call that made it. */
+async function gameBudget(page: Page, seconds: number): Promise<() => Promise<boolean>> {
+  const until = (await gameTime(page)) + seconds;
+  return async () => (await gameTime(page)) < until;
+}
+
+/**
+ * Presses a `?debug` strip shortcut in the page. The strip is this suite's time
+ * compressor, not what it tests, and an actionable click waits for stable
+ * frames, which a loaded GPU-less run hands out a few a second (SPEC-040 §4.2).
+ */
+const tap = (page: Page, id: string): Promise<void> =>
+  page.evaluate((testId) => {
+    const button = document.querySelector<HTMLButtonElement>(`[data-testid="${testId}"]`);
+    if (button === null) throw new Error(`the debug strip has no ${testId} button`);
+    button.click();
+  }, id);
+
+/**
  * Cycle the pin until the HUD line wears `title` (E18). The key is `T` since
  * SPEC-026 §4.7 — a minimap tap opens the full map now, and `M` with it.
  */
@@ -93,12 +120,14 @@ async function hp(page: Page): Promise<number> {
 /** One tick of pilot upkeep: clear dialogue, thin the field, eat if hurting. */
 async function upkeep(page: Page): Promise<void> {
   await dismiss(page);
-  await page.locator('[data-testid="surface-smite"]').click();
+  await tap(page, 'surface-smite');
   if ((await hp(page)) < 120) await page.keyboard.press('KeyQ');
 }
 
 test('all five Cinder-4 missions complete end to end, with the echo glitch burst (AC-72, AC-71)', async ({ page }) => {
-  test.setTimeout(540_000);
+  // The stages are budgeted in game time (see `gameTime`), so a loaded run takes
+  // longer on the wall clock; this bounds the whole sitting.
+  test.setTimeout(900_000);
   await land(page);
 
   // ------------------------------------------------ c1_m1 — Dry Land
@@ -111,10 +140,10 @@ test('all five Cinder-4 missions complete end to end, with the echo glitch burst
   // Stage 1: the hands-free scan — 3 s inside the dune sea.
   await pin(page, 'Dry Land');
   {
-    const deadline = Date.now() + 40_000;
-    while (Date.now() < deadline && ((await missionState(page, 'c1_m1'))?.stage ?? -1) !== 2) {
+    const running = await gameBudget(page, 40);
+    while ((await running()) && ((await missionState(page, 'c1_m1'))?.stage ?? -1) !== 2) {
       await dismiss(page);
-      await page.locator('[data-testid="surface-goto-objective"]').click();
+      await tap(page, 'surface-goto-objective');
       await page.waitForTimeout(1200);
     }
   }
@@ -122,8 +151,8 @@ test('all five Cinder-4 missions complete end to end, with the echo glitch burst
 
   // Stage 2: survive 60 s of the forced sandstorm.
   {
-    const deadline = Date.now() + 110_000;
-    while (Date.now() < deadline && !(await isDone(page, 'c1_m1'))) {
+    const running = await gameBudget(page, 110);
+    while ((await running()) && !(await isDone(page, 'c1_m1'))) {
       await upkeep(page);
       await page.waitForTimeout(1200);
     }
@@ -141,37 +170,44 @@ test('all five Cinder-4 missions complete end to end, with the echo glitch burst
   // director triples objective weight and force-spawns after 20 s, so the
   // smite loop converges. The 8th skitter starts s2's survive stage and plays
   // `c1_s2_echo` — glitch: true — whose 0.6 s static burst is AC-71.
-  let staticSeen = false;
+  // AC-71's burst is 600 ms of wall clock, shorter than a loaded run's round
+  // trip after the smite that fires it, so the page records it as it lands.
+  // `c1_s2_echo` is chapter 1's one glitch line — the only thing that sets it.
+  await page.evaluate(() => {
+    const w = window as unknown as { __staticSeen: boolean };
+    w.__staticSeen = false;
+    const hud = document.querySelector('[data-testid="hud"]') as HTMLElement;
+    const observer = new MutationObserver(() => {
+      const box = hud.getBoundingClientRect();
+      if (!hud.classList.contains('is-static') || box.width === 0 || box.height === 0) return;
+      w.__staticSeen = true;
+      observer.disconnect();
+    });
+    observer.observe(hud, { attributes: true, attributeFilter: ['class'] });
+  });
   {
-    const deadline = Date.now() + 240_000;
+    const running = await gameBudget(page, 240);
     for (;;) {
       const raiders = await counter(page, 'c1_m2', '0:1');
       const skitters = await counter(page, 'c1_s2', '0:0');
       const s2 = await missionState(page, 'c1_s2');
       if ((raiders >= 6 || (await isDone(page, 'c1_m2'))) && (skitters >= 8 || (s2?.stage ?? 1) >= 1)) break;
-      expect(Date.now()).toBeLessThan(deadline);
+      expect(await running()).toBe(true);
       await dismiss(page);
-      await page.locator('[data-testid="surface-smite"]').click();
-      if (!staticSeen && skitters === 7) {
-        // That smite may have been the echo beat — the burst lasts 600 ms.
-        staticSeen = await page
-          .locator('[data-testid="hud"].is-static')
-          .isVisible()
-          .catch(() => false);
-      }
+      await tap(page, 'surface-smite');
       if ((await hp(page)) < 120) await page.keyboard.press('KeyQ');
       await page.waitForTimeout(500);
     }
   }
-  expect(staticSeen).toBe(true);
+  expect(await page.evaluate(() => (window as unknown as { __staticSeen: boolean }).__staticSeen)).toBe(true);
 
   // Oil to 150 (m2's collect): teleport node to node, harvest at 5/s.
   await pin(page, 'Black Gold');
   {
-    const deadline = Date.now() + 160_000;
-    while (Date.now() < deadline && !(await isDone(page, 'c1_m2'))) {
+    const running = await gameBudget(page, 160);
+    while ((await running()) && !(await isDone(page, 'c1_m2'))) {
       await upkeep(page);
-      await page.locator('[data-testid="surface-goto-objective"]').click();
+      await tap(page, 'surface-goto-objective');
       await page.waitForTimeout(2500);
     }
   }
@@ -181,10 +217,10 @@ test('all five Cinder-4 missions complete end to end, with the echo glitch burst
   // undone objective, so the same loop walks both.
   await pin(page, 'Grain Silo');
   {
-    const deadline = Date.now() + 160_000;
-    while (Date.now() < deadline && !(await isDone(page, 'c1_s1'))) {
+    const running = await gameBudget(page, 160);
+    while ((await running()) && !(await isDone(page, 'c1_s1'))) {
       await upkeep(page);
-      await page.locator('[data-testid="surface-goto-objective"]').click();
+      await tap(page, 'surface-goto-objective');
       await page.waitForTimeout(2500);
     }
   }
@@ -193,8 +229,8 @@ test('all five Cinder-4 missions complete end to end, with the echo glitch burst
   // s2's survive 90 s (heatwave, 2 dps) has been running since the 8th
   // skitter; see it out on wheat rations.
   {
-    const deadline = Date.now() + 150_000;
-    while (Date.now() < deadline && !(await isDone(page, 'c1_s2'))) {
+    const running = await gameBudget(page, 150);
+    while ((await running()) && !(await isDone(page, 'c1_s2'))) {
       await upkeep(page);
       await page.waitForTimeout(1200);
     }
@@ -211,16 +247,16 @@ test('all five Cinder-4 missions complete end to end, with the echo glitch burst
   expect(await page.evaluate(() => window.__reallm.save().current?.resources['oil'] ?? 0)).toBeGreaterThanOrEqual(100);
 
   // Stage 0: walk into the nest — the arena spawns the wurm on entry.
-  await page.locator('[data-testid="surface-goto-objective"]').click();
+  await tap(page, 'surface-goto-objective');
   await expect.poll(async () => (await info(page))['boss'], { timeout: 15_000 }).not.toBe('-');
   {
-    const deadline = Date.now() + 150_000;
-    while (Date.now() < deadline && ((await missionState(page, 'c1_m3'))?.stage ?? -1) !== 1) {
+    const running = await gameBudget(page, 150);
+    while ((await running()) && ((await missionState(page, 'c1_m3'))?.stage ?? -1) !== 1) {
       await dismiss(page);
       // Wound respects 11-f (no damage mid-special); smite finishes the wurm
       // through the real kill path once it is the nearest vulnerable target.
-      await page.locator('[data-testid="surface-wound-boss"]').click();
-      await page.locator('[data-testid="surface-smite"]').click();
+      await tap(page, 'surface-wound-boss');
+      await tap(page, 'surface-smite');
       if ((await hp(page)) < 120) await page.keyboard.press('KeyQ');
       await page.waitForTimeout(700);
     }
@@ -229,10 +265,10 @@ test('all five Cinder-4 missions complete end to end, with the echo glitch burst
 
   // Stage 1: run the oil out to the beacon — atomic on arrival (E16).
   {
-    const deadline = Date.now() + 60_000;
-    while (Date.now() < deadline && !(await isDone(page, 'c1_m3'))) {
+    const running = await gameBudget(page, 60);
+    while ((await running()) && !(await isDone(page, 'c1_m3'))) {
       await dismiss(page);
-      await page.locator('[data-testid="surface-goto-objective"]').click();
+      await tap(page, 'surface-goto-objective');
       await page.waitForTimeout(1500);
     }
   }
