@@ -55,6 +55,13 @@ export interface Renderer {
   setQuality(preset: QualityPreset): void;
   /** Re-measure and apply now; called after every scene enters (SPEC-003 §4.1). */
   resize(): void;
+  /**
+   * SPEC-040 §4.2: applies a resize the observers flagged, without drawing — a
+   * frame the pacer does not draw calls it, so a new size (and its
+   * `renderer:resized` and `ui:orientation`) still lands on the next frame of
+   * an idle scene. A no-op when nothing is pending.
+   */
+  syncSize(): void;
   render(scene: Object3D, camera: Camera): void;
   /** Merged into the current look; exposure applies on both paths (SPEC-017 §4.2). */
   setLook(look: Partial<Look>): void;
@@ -269,6 +276,11 @@ class CanvasRenderer implements Renderer {
   }
 
   resize(): void {
+    this.#apply(false);
+  }
+
+  syncSize(): void {
+    if (this.#disposed || this.#contextLost || !this.#pending) return;
     this.#apply(false);
   }
 

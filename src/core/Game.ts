@@ -703,6 +703,9 @@ export class Game implements GameServices {
     const interval = this.#pacer.sinceDraw + frameMs;
     const draw = paceFrame(this.#pacer, frameMs, this.#stepsThisFrame, this.#targetFps(), idle);
     if (draw) this.#renders++;
+    // A resize is measured at the start of the render step; on a frame the
+    // pacer does not draw, it is applied here so it never waits for the draw.
+    else this.#renderer.syncSize();
     runRenderPhase(this.#renderPorts, draw);
     // §5/D-13: one sample a frame, after every step of it has run. A frame the
     // pacer did not draw contributes no render sample — `renderMs` is the cost
