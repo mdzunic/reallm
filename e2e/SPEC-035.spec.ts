@@ -127,7 +127,11 @@ test('3. the surface raises the bloom threshold to 1.5 on medium', async ({ page
 // ------------------------------------------------------------------- 4: occluder
 
 test('4. a prop between the camera and the salvager fades, and comes back', async ({ page }) => {
-  await land(page);
+  // SPEC-040 §4.6 (PLAN R20 decision 1): a first landing now draws its props
+  // from their GLBs, and Cinder-4's desert rock is a flat slab half a unit
+  // tall that no longer stands between the 55° camera and a salvager's head.
+  // Thessaly's trees stand 2.65 units, so the fade has something to hide.
+  await land(page, SURFACE.replace('planet=cinder4', 'planet=thessaly'));
   expect(Number((await sceneInfo(page))['occluders'])).toBe(0);
   await press(page, 'surface-goto-occluder');
   await expect.poll(async () => Number((await sceneInfo(page))['occluders']), { timeout: 15_000 }).toBeGreaterThanOrEqual(1);
