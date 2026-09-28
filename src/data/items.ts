@@ -208,7 +208,7 @@ export const ITEMS = {
     slot: 'primary',
     line: 'rifle',
     tier: 2,
-    damage: 26,
+    damage: 28,
     fireRate: 3,
     projectileSpeed: 28,
     range: 16,
@@ -227,7 +227,7 @@ export const ITEMS = {
     slot: 'primary',
     line: 'rifle',
     tier: 3,
-    damage: 36,
+    damage: 40,
     fireRate: 2.5,
     projectileSpeed: 32,
     range: 18,
@@ -239,8 +239,9 @@ export const ITEMS = {
     blurb: 'Reactor-grade lithium spun into a cutting field. Two bodies deep, on a good day.',
   },
   /**
-   * SPEC-029 §4.1 (*initial tuning*): the sidearm upgrade — 38 damage per
-   * second with pierce 1, so the pistol slot stays worth a ladder of its own.
+   * SPEC-029 §4.1 (*initial tuning*): the sidearm upgrade — 48 damage per
+   * second with pierce 1 since SPEC-039 §4.4, so the pistol slot stays worth a
+   * ladder of its own. The Hive Broodlord's signature drop (SPEC-039 §4.1).
    */
   pistol_magnum: {
     id: 'pistol_magnum',
@@ -250,7 +251,7 @@ export const ITEMS = {
     slot: 'sidearm',
     line: 'handgun',
     tier: 2,
-    damage: 24,
+    damage: 30,
     fireRate: 1.6,
     projectileSpeed: 34,
     range: 15,
@@ -262,8 +263,10 @@ export const ITEMS = {
     blurb: 'A revolver scaled for wurm hide. Slow, loud, and it goes through the first body.',
   },
   /**
-   * SPEC-029 §4.1: 100 damage per second while it fires; heat 0.04 a shot
-   * against 0.20/s of cooling locks it on the 49th and frees it 3.25 s later.
+   * SPEC-029 §4.1, retuned by SPEC-039 §4.4: 110 damage per second while it
+   * fires; heat 0.035 a shot against 0.20/s of cooling locks it on the 66th
+   * shot at 0.1 s cadence and frees it 3.25 s later — 64 sustained. The Frost
+   * Matriarch's signature drop (SPEC-039 §4.1).
    */
   mg_scrap: {
     id: 'mg_scrap',
@@ -273,18 +276,23 @@ export const ITEMS = {
     slot: 'primary',
     line: 'machine_gun',
     tier: 1,
-    damage: 10,
+    damage: 11,
     fireRate: 10,
     projectileSpeed: 30,
     range: 13,
     pierce: 0,
     energy: false,
-    cooldown: { kind: 'heat', perShot: 0.04, coolPerSec: 0.2, resumeAt: 0.35 },
+    cooldown: { kind: 'heat', perShot: 0.035, coolPerSec: 0.2, resumeAt: 0.35 },
     spread: 0.08,
     price: { tokens: 50 },
     model: 'procedural',
     blurb: 'Six salvaged barrels on one bearing. Glorious for five seconds, then a kettle.',
   },
+  /**
+   * SPEC-039 §4.4: 156 damage per second while it fires, 84 sustained — the
+   * Lithium Edge's tier with a sidearm covering its locks. The Hive Queen's
+   * signature drop (SPEC-039 §4.1).
+   */
   mg_rotary: {
     id: 'mg_rotary',
     name: 'Rotary Cannon',
@@ -293,21 +301,22 @@ export const ITEMS = {
     slot: 'primary',
     line: 'machine_gun',
     tier: 3,
-    damage: 15,
+    damage: 13,
     fireRate: 12,
     projectileSpeed: 34,
     range: 16,
     pierce: 0,
     energy: false,
-    cooldown: { kind: 'heat', perShot: 0.03, coolPerSec: 0.22, resumeAt: 0.35 },
+    cooldown: { kind: 'heat', perShot: 0.035, coolPerSec: 0.22, resumeAt: 0.35 },
     spread: 0.06,
     price: { tokens: 120, resources: { lithium: 60 } },
     model: 'procedural',
     blurb: 'Reactor-cooled and still too hot. Nothing on six planets outlasts the spin-up.',
   },
   /**
-   * SPEC-029 §4.1: the heavy slot. One charge, six seconds — 70 of area damage
-   * per press, and the hand goes back to work while it rebuilds.
+   * SPEC-029 §4.1: the heavy slot. One charge, six seconds — 90 of area damage
+   * per press since SPEC-039 §4.4, and the hand goes back to work while it
+   * rebuilds. The Dune Wurm's signature drop (SPEC-039 §4.1).
    */
   launcher_rocket: {
     id: 'launcher_rocket',
@@ -317,7 +326,7 @@ export const ITEMS = {
     slot: 'heavy',
     line: 'launcher',
     tier: 1,
-    damage: 70,
+    damage: 90,
     fireRate: 1,
     projectileSpeed: 20,
     range: 22,
@@ -329,6 +338,10 @@ export const ITEMS = {
     model: 'procedural',
     blurb: 'One tube, one answer. Whatever the question was, it stops asking.',
   },
+  /**
+   * SPEC-039 §4.4: three 60-damage shells a drum. The Ash Titan's signature
+   * drop (SPEC-039 §4.1).
+   */
   launcher_grenade: {
     id: 'launcher_grenade',
     name: 'Grenade Launcher',
@@ -337,7 +350,7 @@ export const ITEMS = {
     slot: 'heavy',
     line: 'launcher',
     tier: 2,
-    damage: 45,
+    damage: 60,
     fireRate: 2.5,
     projectileSpeed: 16,
     range: 16,

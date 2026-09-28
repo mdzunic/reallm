@@ -79,8 +79,8 @@ test('holding fire locks the chaingun: weaponState lock, is-locked on the bar (ย
   await settle(page);
   await page.getByTestId('surface-arsenal').click();
 
-  // Aim at an empty patch and hold Space: 10 shots/s at 0.04 heat against
-  // 0.2/s of cooling locks on the 49th shot, comfortably inside 8 s.
+  // Aim at an empty patch and hold Space: 10 shots/s at 0.035 heat against
+  // 0.2/s of cooling (SPEC-039 ยง4.4) locks in about 6.7 s, inside 8 s.
   const at = aimPoint(page);
   await page.mouse.move(at.x, at.y);
   await page.keyboard.down('Space');

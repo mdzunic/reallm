@@ -19,12 +19,16 @@ import type { Rng } from '@/core/Rng';
 import { maxHp, type Save } from '@/core/Save';
 import { SpatialHash } from '@/core/SpatialHash';
 import {
+  ATTRIBUTE_EFFECTS,
   CLASSES,
   COMPANIONS,
   ENEMIES,
   ITEMS,
   LOOT_TABLES,
+  SIGNATURE_FALLBACK_LITHIUM,
   TUNING,
+  type Attributes,
+  type ClassId,
   type ClassPassive,
   type CompanionEffect,
   type CompanionId,
@@ -56,7 +60,7 @@ import type { PlayerEntity } from '@/entities/Player';
 import type { ProjectileEntity } from '@/entities/Projectile';
 import type { ArenaState, ObstacleGrid } from '@/entities/World';
 import { updateEnemy, type AiHooks } from '@/systems/EnemyAi';
-import { Loadout } from '@/systems/Loadout';
+import { FIRE_CARRY, Loadout } from '@/systems/Loadout';
 import { updateProjectiles, type ProjectileHooks } from '@/systems/Projectiles';
 
 export type { DamageSource } from '@/data/index';
@@ -119,6 +123,12 @@ export const LOOT_SCATTER_MAX = 1.5;
 export const ELITE_SCALE = 1.3;
 export const ELITE_SPEED_MULT = 1.1;
 export const ELITE_XP_MULT = 3;
+/** SPEC-039 §4.3: the crit chance before agility's per-point share. */
+export const BASE_CRIT_CHANCE = 0.05;
+/** SPEC-039 §4.3: +2 % damage a level, the `(1 + 0.02 × (L − 1))` factor. */
+export const DAMAGE_PER_LEVEL = 0.02;
+/** Seconds the Field Medic waits after the last weather damage tick (SPEC-039 §4.5). */
+export const MEDIC_WEATHER_PAUSE = 1;
 
 // --------------------------------------------------------------- pure pieces
 
@@ -141,10 +151,28 @@ export function companionEffect(save: Save, id: CompanionId): CompanionEffect | 
 }
 
 /**
+ * SPEC-039 §4.7: **the** player damage multiplier, before consumable boosts —
+ * the class passive, might, and the level. `computePlayerStats` here and the
+ * UI's preview in `systems/UiHelpers.ts` both call it, so the character panel
+ * prints the damage the player fights with.
+ */
+export function playerDamageMult(classId: ClassId, attributes: Attributes, level: number): number {
+  // Widened to the interface: the concrete class passives are disjoint literals.
+  const passive: ClassPassive = CLASSES[classId].passive;
+  return (
+    (passive.damageMult ?? 1) *
+    (1 + ATTRIBUTE_EFFECTS.might.damage * attributes.might) *
+    (1 + DAMAGE_PER_LEVEL * (level - 1))
+  );
+}
+
+/**
  * §4.1, pinned by §6: marine L1 with +5 vigor → 100 + 20 + 8×8 = 184 max HP;
  * scout speed 6 × 1.15 × 1.08. `boosts.damageMult` is the *max* of the active
  * consumable boosts (11-i); `boosts.moveMult` is the weather multiplier
- * (SPEC-012 §4.6), 1 in calm weather.
+ * (SPEC-012 §4.6), 1 in calm weather. SPEC-039 §4.3: every per-point effect
+ * comes from `ATTRIBUTE_EFFECTS`, and `companionMult` scales the scanner's
+ * collect radius as well as the drone and the medic.
  */
 export function computePlayerStats(save: Save, boosts?: { damageMult?: number; moveMult?: number }): PlayerStats {
   // Widened to the interface: the concrete class passives are disjoint literals.
@@ -155,17 +183,21 @@ export function computePlayerStats(save: Save, boosts?: { damageMult?: number; m
   const armor = armorItem.kind === 'armor' ? armorItem.armor : 0;
   const hazardResist = armorItem.kind === 'armor' ? armorItem.hazardResist : 0;
   const scanner = companionEffect(save, 'scanner_drone');
+  const companionMult = (passive.companionEffectMult ?? 1) * (1 + ATTRIBUTE_EFFECTS.tech.companionEffect * a.tech);
   return {
     // SPEC-034 §4.14: the one formula, now in `core/Save.ts`.
     maxHp: maxHp(save.player.classId, a, level),
-    damageMult:
-      (passive.damageMult ?? 1) * (1 + 0.04 * a.might) * (1 + 0.02 * (level - 1)) * (boosts?.damageMult ?? 1),
-    moveSpeed: TUNING.PLAYER_SPEED * (passive.moveSpeedMult ?? 1) * (1 + 0.02 * a.agility) * (boosts?.moveMult ?? 1),
+    damageMult: playerDamageMult(save.player.classId, a, level) * (boosts?.damageMult ?? 1),
+    moveSpeed:
+      TUNING.PLAYER_SPEED *
+      (passive.moveSpeedMult ?? 1) *
+      (1 + ATTRIBUTE_EFFECTS.agility.moveSpeed * a.agility) *
+      (boosts?.moveMult ?? 1),
     armor,
     hazardResist,
-    critChance: 0.05 + 0.01 * a.agility,
-    pickupRadius: TUNING.PICKUP_RADIUS * (passive.pickupRadiusMult ?? 1) + (scanner?.autoCollectRadius ?? 0),
-    companionMult: (passive.companionEffectMult ?? 1) * (1 + 0.05 * a.tech),
+    critChance: BASE_CRIT_CHANCE + ATTRIBUTE_EFFECTS.agility.critChance * a.agility,
+    pickupRadius: TUNING.PICKUP_RADIUS * (passive.pickupRadiusMult ?? 1) + (scanner?.autoCollectRadius ?? 0) * companionMult,
+    companionMult,
   };
 }
 
@@ -255,6 +287,8 @@ export interface EconomyPort {
     source: 'pickup' | 'reward' | 'voucher' | 'subsidy',
   ): { added: number; shipped: number; blocked: number };
   addItem(itemId: ItemId, qty: number): { added: number; blocked: number };
+  /** Carried or worn — what decides a boss's signature drop (SPEC-039 §4.1). */
+  owns(itemId: ItemId): boolean;
 }
 
 /** The slice of `Progression` combat needs (§4.7). */
@@ -294,6 +328,20 @@ export class Combat {
   #nextEnemyId = 1;
   #aimedThisStep = false;
   #lastShotAt = -Infinity;
+  /** SPEC-039 §4.5: world time of the last weather damage past the immunity check. */
+  #weatherHitAt = -Infinity;
+  #signatureDrops = 0;
+  #signatureFallbacks = 0;
+
+  /** SPEC-039 §3: signature rows this visit dropped as the piece (`sceneInfo`). */
+  get signatureDrops(): number {
+    return this.#signatureDrops;
+  }
+
+  /** SPEC-039 §3: signature rows this visit paid as the fallback lithium. */
+  get signatureFallbacks(): number {
+    return this.#signatureFallbacks;
+  }
 
   /** SPEC-029 §3: world time of the last player shot (SPEC-030 reads it). */
   get lastShotAt(): number {
@@ -448,6 +496,9 @@ export class Combat {
     // fractional accumulator. The resist comes from a single armor slot capped
     // at 0.75 (data/items.ts), so the product can never go negative.
     const incoming = source.kind === 'weather' ? amount * (1 - this.#world.stats.hazardResist) : amount;
+    // SPEC-039 §4.5: weather that got past the immunity check pauses the
+    // Field Medic, whether or not this step's fraction lands as a whole point.
+    if (source.kind === 'weather' && incoming > 0) this.#weatherHitAt = time;
     let applied = incoming;
     if (ignoreInvuln) {
       this.#weatherAccum += incoming;
@@ -640,6 +691,8 @@ export class Combat {
     e.fromWave = false;
     // SPEC-034 §4.6: `#summonRing` stamps its boss on the entities it makes.
     e.summonedBy = 0;
+    // SPEC-039 §4.1: the surface marks the boss of a replayed stage after this.
+    e.replay = false;
     // Set immediately before the emit, so a subscriber can read the position.
     this.#lastSpawned = e;
     this.#events.emit('enemy:spawned', { enemyId: id, elite: isElite });
@@ -652,18 +705,22 @@ export class Combat {
    * §4.7: `enemy:killed`, XP through `progression.addXp`, loot from the `loot`
    * stream only (never layout — AC on stream independence pins it). The pool
    * slot is reclaimed by the end-of-step sweep, so callers may keep iterating.
+   * SPEC-039 §4.1: a boss of a replayed stage pays `REPLAY_REWARD_FRACTION` of
+   * its XP (39-e); every other kill pays what it always did.
    */
   killEnemy(e: EnemyEntity, cause: 'player' | 'drone' | 'script'): void {
     if (e.state === 'dead') return;
     e.state = 'dead';
     e.hp = 0;
     const def = e.def;
-    const xp = def.xp * (e.elite ? ELITE_XP_MULT : 1);
+    const xp = Math.floor(
+      def.xp * (e.elite ? ELITE_XP_MULT : 1) * (e.replay ? TUNING.REPLAY_REWARD_FRACTION : 1),
+    );
     this.#events.emit('enemy:killed', { enemyId: def.id, elite: e.elite, x: e.x, z: e.z, xp });
     this.#progression.addXp(xp, 'kill');
-    this.#rollLoot(def.loot, def, e.x, e.z);
+    this.#rollLoot(def.loot, e);
     // §4.4: an elite rolls its own table and then `elite_bonus`.
-    if (e.elite) this.#rollLoot('elite_bonus', def, e.x, e.z);
+    if (e.elite) this.#rollLoot('elite_bonus', e);
     if (def.archetype === 'boss') {
       this.#events.emit('boss:defeated', { boss: def.id });
       if (this.#world.arena !== null) this.#world.arena.locked = false;
@@ -671,31 +728,55 @@ export class Combat {
     log.debug('combat', `${def.id} killed by ${cause}`);
   }
 
-  #rollLoot(tableId: LootTableId, def: Enemy, x: number, z: number): void {
+  #rollLoot(tableId: LootTableId, e: EnemyEntity): void {
     const loot = this.#rng.loot;
+    const x = e.x;
+    const z = e.z;
     for (const entry of LOOT_TABLES[tableId]) {
+      if (entry.kind === 'signature') {
+        // SPEC-039 §4.1: always resolved, and it draws no chance — the piece
+        // on a first kill the save does not own, else the lithium (E69).
+        this.#rollSignature(entry.itemId, e);
+        continue;
+      }
       if (!loot.chance(entry.chance)) continue;
       if (entry.kind === 'resource') {
-        // §4.7: one orb per 1–3 units, scattered 0.5–1.5 m from the kill.
-        let qty = loot.int(entry.min, entry.max);
-        while (qty > 0) {
-          const units = Math.min(qty, loot.int(1, 3));
-          qty -= units;
-          const at = loot.onRing(LOOT_SCATTER_MIN, LOOT_SCATTER_MAX);
-          this.drops.push({ kind: 'resource', resource: entry.resource, amount: units, x: x + at.x, z: z + at.z });
-        }
-      } else if (entry.kind === 'item') {
+        this.#scatterResource(entry.resource, loot.int(entry.min, entry.max), x, z);
+      } else {
         const at = loot.onRing(LOOT_SCATTER_MIN, LOOT_SCATTER_MAX);
         this.drops.push({ kind: 'item', itemId: entry.itemId, qty: entry.qty, x: x + at.x, z: z + at.z });
-      } else {
-        // `elite_bonus` carries the ceiling tier; the roll applies the chapter
-        // cap `min(3, ceil(chapter / 2))` (SPEC-009 §4.4). Duplicates of gear
-        // the player owns spawn anyway (11-h).
-        const cap = Math.min(3, Math.ceil(def.chapter / 2));
-        const tier = Math.min(entry.tier, cap) as GearTier;
-        const at = loot.onRing(LOOT_SCATTER_MIN, LOOT_SCATTER_MAX);
-        this.drops.push({ kind: 'gear', line: entry.line, itemId: gearAt(entry.line, tier), x: x + at.x, z: z + at.z });
       }
+    }
+  }
+
+  /**
+   * SPEC-039 §4.1. The piece drops as one `gear` pickup when the boss is not a
+   * replay's and the save neither carries nor wears it (39-a: a piece bought
+   * and then discarded drops again); otherwise the row pays
+   * `SIGNATURE_FALLBACK_LITHIUM` lithium as ordinary orbs (E69). A full pack
+   * leaves the piece on the ground with E25's lifetime (39-c).
+   */
+  #rollSignature(itemId: ItemId, e: EnemyEntity): void {
+    const item = ITEMS[itemId];
+    if (!e.replay && item.kind !== 'consumable' && !this.economy.owns(itemId)) {
+      const at = this.#rng.loot.onRing(LOOT_SCATTER_MIN, LOOT_SCATTER_MAX);
+      this.drops.push({ kind: 'gear', line: item.line, itemId, x: e.x + at.x, z: e.z + at.z });
+      this.#signatureDrops++;
+      return;
+    }
+    this.#scatterResource('lithium', SIGNATURE_FALLBACK_LITHIUM, e.x, e.z);
+    this.#signatureFallbacks++;
+  }
+
+  /** §4.7: one orb per 1–3 units, scattered 0.5–1.5 m from the kill. */
+  #scatterResource(resource: ResourceId, amount: number, x: number, z: number): void {
+    const loot = this.#rng.loot;
+    let qty = amount;
+    while (qty > 0) {
+      const units = Math.min(qty, loot.int(1, 3));
+      qty -= units;
+      const at = loot.onRing(LOOT_SCATTER_MIN, LOOT_SCATTER_MAX);
+      this.drops.push({ kind: 'resource', resource, amount: units, x: x + at.x, z: z + at.z });
     }
   }
 
@@ -960,7 +1041,9 @@ export class Combat {
     // without cover, recharging, or a heavy on auto-fire (28-c, 29-g).
     if (slot === null) return;
     if (p.fireCooldown > 0) return;
-    p.fireCooldown = 1 / weapon.fireRate;
+    // SPEC-039 §4.4: the remainder of this interval carries into the next, at
+    // most one step of it, so the stated rate is the delivered rate at 60 Hz.
+    p.fireCooldown = Math.max(p.fireCooldown, -FIRE_CARRY) + 1 / weapon.fireRate;
     // SPEC-029 §4.4: a blast weapon does not roll — its projectile carries the
     // raw damage and `explode` applies the multiplier, so blasts never crit.
     const damage =
@@ -1157,6 +1240,9 @@ export class Combat {
       this.#tickHealing(dt);
       p.fireCooldown -= dt;
       this.#updateFiring(input, aimWorld);
+      // SPEC-039 §4.4, 39-j: a step that did not fire banks at most one step,
+      // so a released trigger rests at −1/60 s and carries nothing more.
+      if (p.fireCooldown < -FIRE_CARRY) p.fireCooldown = -FIRE_CARRY;
       this.#updateDrone(dt);
       if (!this.#aimedThisStep && Math.hypot(p.vx, p.vz) > 1e-3) {
         // §4.3: when moving without firing, facing follows movement.
@@ -1204,7 +1290,12 @@ export class Combat {
     }
   }
 
-  /** §4.8: heal-over-time and the field medic. No natural regen otherwise. */
+  /**
+   * §4.8: heal-over-time and the field medic. No natural regen otherwise.
+   * SPEC-039 §4.5: the medic's rates scale with `companionMult`, and it waits
+   * `MEDIC_WEATHER_PAUSE` after the last weather tick — heal-over-time items
+   * tick regardless, and a shelter or a coolant pack lands no tick (39-h).
+   */
   #tickHealing(dt: number): void {
     const p = this.#world.player;
     const hot = p.healOverTime;
@@ -1215,10 +1306,11 @@ export class Combat {
       if (hot.remaining <= 1e-6) p.healOverTime = null;
     }
     const medic = companionEffect(this.#save, 'field_medic');
-    if (medic !== null) {
+    if (medic !== null && this.#world.time - this.#weatherHitAt >= MEDIC_WEATHER_PAUSE) {
       let rate = medic.regenInCombat ?? 0; // L3 only, applies always
       if (!this.inCombat) rate += medic.regenOutOfCombat ?? 0;
-      if (rate > 0) this.#heal(rate * this.#world.stats.maxHp * dt, false);
+      const stats = this.#world.stats;
+      if (rate > 0) this.#heal(rate * stats.companionMult * stats.maxHp * dt, false);
     }
   }
 

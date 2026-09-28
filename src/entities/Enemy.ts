@@ -70,6 +70,12 @@ export interface EnemyEntity {
    * follow are not interrupted by drones the fight left behind.
    */
   summonedBy: number;
+  /**
+   * SPEC-039 §4.1: a boss spawned for the boss stage of a replayed mission —
+   * half the XP, and its signature row pays the fallback lithium. Reset to
+   * false in `spawnEnemy`; only the arena's own spawn sets it.
+   */
+  replay: boolean;
 }
 
 export function makeEnemy(): EnemyEntity {
@@ -109,5 +115,6 @@ export function makeEnemy(): EnemyEntity {
     lostTrack: 0,
     fromWave: false,
     summonedBy: 0,
+    replay: false,
   };
 }

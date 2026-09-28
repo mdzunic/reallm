@@ -3,9 +3,10 @@
 // name, portrait, colours, the five allocated points — is chosen at creation
 // (PLAN §4) and lives in the save, not here.
 //
-// Attribute effects are SPEC-011's: might +4 % damage per point, vigor +8 max
-// HP, agility +2 % move speed, tech +5 % companion damage and −3 % token cost
-// (SPEC-010 caps the total discount at 40 %).
+// Attribute effects are `ATTRIBUTE_EFFECTS` below (SPEC-039 §4.3): might +4 %
+// damage per point, vigor +8 max HP, agility +2 % move speed and +2 % crit,
+// tech +10 % companion effect and −3 % token cost (SPEC-010 caps the total
+// discount at 40 %). The stat formulas read that table and nothing else.
 //
 // Data modules are plain objects: no imports but other data, no functions
 // (SPEC-001 §4, §8).
@@ -22,7 +23,8 @@ export interface Attributes {
 export interface ClassPassive {
   readonly damageMult?: number;
   readonly maxHpBonus?: number;
-  readonly shipTokenDiscount?: number;
+  /** Was `shipTokenDiscount`: now ship and companion prices (SPEC-039 §4.3). */
+  readonly refitDiscount?: number;
   readonly companionEffectMult?: number;
   readonly moveSpeedMult?: number;
   readonly pickupRadiusMult?: number;
@@ -43,10 +45,25 @@ export interface ClassDef<Id extends string = string> {
   readonly portraits: readonly number[];
 }
 
-/** PLAN §4: five points over the class base, allocated at creation only. */
+/** PLAN §4: five points over the class base, allocated at creation. */
 export const CREATION_POINTS = 5;
 /** Per attribute after allocation — every base + 5 stays inside it (§7.17). */
 export const ATTRIBUTE_MAX = 10;
+
+/**
+ * Every attribute's per-point effects; the stat formulas read nothing else
+ * (SPEC-039 §4.3, *initial tuning*). `dashCooldownCut` is agility's share of
+ * the dash cooldown SPEC-038 owns.
+ */
+export const ATTRIBUTE_EFFECTS = {
+  might: { damage: 0.04 },
+  vigor: { maxHp: 8 },
+  agility: { moveSpeed: 0.02, critChance: 0.02, dashCooldownCut: 0.03 },
+  tech: { companionEffect: 0.1, priceCut: 0.03 },
+} as const;
+
+/** One attribute point at every fifth level (PLAN R18 decision 4g). */
+export const ATTRIBUTE_POINT_LEVELS = 5;
 
 export const CLASSES = {
   marine: {
@@ -54,7 +71,7 @@ export const CLASSES = {
     name: 'Marine',
     blurb: 'Line infantry, reassigned to salvage. Hits harder and takes more before it matters.',
     baseAttributes: { might: 3, vigor: 3, agility: 1, tech: 1 },
-    passive: { damageMult: 1.15, maxHpBonus: 20 },
+    passive: { damageMult: 1.1, maxHpBonus: 20 },
     startingWeapon: 'weapon_kinetic',
     startingSidearm: 'pistol_service',
     startingArmor: 'armor_scrap',
@@ -65,7 +82,7 @@ export const CLASSES = {
     name: 'Engineer',
     blurb: 'Ship-side technician. Refits cost less and the drones listen better.',
     baseAttributes: { might: 1, vigor: 2, agility: 2, tech: 3 },
-    passive: { shipTokenDiscount: 0.15, companionEffectMult: 1.25 },
+    passive: { refitDiscount: 0.15, companionEffectMult: 1.25 },
     startingWeapon: 'weapon_kinetic',
     startingSidearm: 'pistol_service',
     startingArmor: 'armor_scrap',

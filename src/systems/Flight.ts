@@ -39,6 +39,7 @@ import {
   type PlanetId,
 } from '@/data/index';
 import type { Economy } from '@/systems/Economy';
+import { FIRE_CARRY } from '@/systems/Loadout';
 import { FLIGHT_MISSION_CONTEXT, type Missions } from '@/systems/Missions';
 import type { Progression } from '@/systems/Progression';
 
@@ -115,6 +116,12 @@ export interface FlightConfig {
   quality: QualitySettings;
   /** Casual multiplies incoming damage by 0.7 (§4.6, 13-h). */
   difficulty: Save['meta']['difficulty'];
+  /**
+   * SPEC-039 §4.3: the pilot's `companionMult`, which scales ARIA's shield
+   * regeneration — the flight scene passes `computePlayerStats(save)`'s. 1
+   * when absent.
+   */
+  companionMult?: number;
 }
 
 export interface FlightInput {
@@ -318,7 +325,8 @@ export class Flight {
     // ARIA rows only carries a key on the levels that grant it.
     const effect: CompanionEffect | undefined = aria === undefined ? undefined : COMPANIONS.aria.levels[aria.level - 1];
     // §4.6: shield regen comes only from ARIA — disabled means none at all.
-    this.#ariaShieldRegen = effect?.shieldRegen ?? 0;
+    // SPEC-039 §4.3: the regeneration is a companion effect, so it scales.
+    this.#ariaShieldRegen = (effect?.shieldRegen ?? 0) * (cfg.companionMult ?? 1);
     this.#ariaAutoAim = effect?.autoAim ?? false;
     const hullBonus = effect?.hullBonus ?? 0;
     this.#damageMult = cfg.difficulty === 'casual' ? CASUAL_DAMAGE_MULT : 1;
@@ -608,10 +616,15 @@ export class Flight {
 
   #updateWeapons(dt: number, input: FlightInput, coneTarget: Hazard | null): void {
     const ship = this.ship;
-    ship.fireCooldown = Math.max(0, ship.fireCooldown - dt);
-    if (!ship.alive) return;
-    const wantsFire = input.fire || (input.autoFire === true && (coneTarget !== null || this.#asteroidNear()));
-    if (!wantsFire || ship.fireCooldown > 0) return;
+    ship.fireCooldown -= dt;
+    // SPEC-039 §4.4: a step that does not fire banks at most one step of
+    // remainder, so a released trigger carries nothing more.
+    const wantsFire =
+      ship.alive && (input.fire || (input.autoFire === true && (coneTarget !== null || this.#asteroidNear())));
+    if (!wantsFire || ship.fireCooldown > 0) {
+      if (ship.fireCooldown < -FIRE_CARRY) ship.fireCooldown = -FIRE_CARRY;
+      return;
+    }
     const fireRate = UPGRADES.weapon.metrics['fireRate']?.[this.#cfg.ship.weapon] ?? 4;
     const damage = UPGRADES.weapon.metrics['damage']?.[this.#cfg.ship.weapon] ?? 10;
     // §4.7: two guns alternate; each shot leaves its gun aimed at the reticle's
@@ -628,7 +641,9 @@ export class Flight {
     shot.vx = (this.reticle.x - gx) / flight;
     shot.vy = (this.reticle.y - gy) / flight;
     shot.damage = damage;
-    ship.fireCooldown = 1 / fireRate;
+    // SPEC-039 §4.4: the remainder of this interval carries into the next, at
+    // most one step of it, so the guns deliver their stated rate at 60 Hz.
+    ship.fireCooldown = Math.max(ship.fireCooldown, -FIRE_CARRY) + 1 / fireRate;
     // SPEC-035 §4.11: one event per shot. The rail has no XZ plane, so the
     // position is the gun's own — `AudioReactions` does not position `ship`.
     this.#events.emit('weapon:fired', { line: 'ship', x: gx, z: gy });

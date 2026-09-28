@@ -79,7 +79,8 @@ export const UPGRADES = {
       { tokens: 130, resources: { lithium: 80 }, blurb: 'Lithium feed. Double the damage you left port with.' },
     ],
     metrics: {
-      damage: [10, 13, 17, 22],
+      // SPEC-039 §4.5: tier 1 deals 14, so it takes a hit off a fighter.
+      damage: [10, 14, 17, 22],
       fireRate: [4, 4, 5, 5],
     },
   },

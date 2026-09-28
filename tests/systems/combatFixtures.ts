@@ -14,6 +14,7 @@ import { makeProjectile, type ProjectileEntity } from '@/entities/Projectile';
 import { FOLLOWERS } from '@/data/followers';
 import { NO_OBSTACLES, type ArenaState, type ObstacleGrid } from '@/entities/World';
 import { Combat, computePlayerStats, type CombatWorld, type EconomyPort } from '@/systems/Combat';
+import { ownsItem } from '@/systems/Economy';
 import { Progression } from '@/systems/Progression';
 
 export const STEP = 1 / 60;
@@ -110,6 +111,8 @@ export function harness(options: HarnessOptions = {}): Harness {
   const economy: EconomyPort = {
     addResource: () => ({ added: 0, shipped: 0, blocked: 0 }),
     addItem: () => ({ added: 0, blocked: 0 }),
+    // SPEC-039 §4.1: carried or worn, off the harness's own save.
+    owns: (itemId) => ownsItem(save, itemId),
   };
   const stats = computePlayerStats(save);
   const world: CombatWorld = {

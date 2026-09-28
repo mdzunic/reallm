@@ -8,7 +8,10 @@
 //     tier-3 buy that has the tokens but not the lithium costs nothing (10-a),
 //     and nothing here ever gives tokens back (§2, "no selling economy");
 //   - discounts touch tokens only, are capped at 40 % and never take a price
-//     below 1 token — a free upgrade would break the sink PLAN §7 sizes;
+//     below 1 token — a free upgrade would break the sink PLAN §7 sizes. Since
+//     SPEC-039 §4.3 the Engineer's refit discount covers ship and companion
+//     prices, and the Quartermaster's ship, gear and companion prices — a
+//     recipe has no token price, so crafting gets the tech share alone;
 //   - the cargo cap binds pickups and nothing else: a reward, a refuel voucher
 //     or the station subsidy must never be silently lost (E3, §2);
 //   - the two anti-softlock rules live here rather than in a scene, because
@@ -24,6 +27,7 @@
 // Pure: no `three`, no DOM, no `Math.random` (SPEC-001 §4, §7).
 import { maxHp, type Save, type SaveReason } from '@/core/Save';
 import {
+  ATTRIBUTE_EFFECTS,
   CLASSES,
   COMPANIONS,
   COMPANION_IDS,
@@ -103,8 +107,8 @@ export interface SaveRequester {
 
 /** §4.4: twenty slots, one per gear item or per consumable stack. */
 export const INVENTORY_SLOTS = 20;
-/** SPEC-009 §4.1: tech is worth −3 % on every token price. */
-export const TECH_DISCOUNT_PER_POINT = 0.03;
+/** SPEC-009 §4.1: tech is worth −3 % on every token price (`ATTRIBUTE_EFFECTS`, SPEC-039 §4.3). */
+export const TECH_DISCOUNT_PER_POINT = ATTRIBUTE_EFFECTS.tech.priceCut;
 
 /** §4.6: the boss-mission voucher that pays for the next chapter's jump. */
 export function refuelVoucherText(oil: number): string {
@@ -152,6 +156,18 @@ export function missingRequirements(save: Save, reqs: readonly Requirement[]): R
         return save.player.level < requirement.level;
     }
   });
+}
+
+/**
+ * Owned means carried or worn — a bought tier that is equipped still counts. A
+ * free function as well as a method, for the reason `missingRequirements` is
+ * one: the board's boss-drop line and the shop's Refit line (SPEC-039 §4.6)
+ * read ownership off saves no `Economy` wraps.
+ */
+export function ownsItem(save: Save, itemId: ItemId): boolean {
+  if (save.inventory.some((slot) => slot.itemId === itemId && slot.qty > 0)) return true;
+  const { armor, sidearm, primary, heavy } = save.equipped;
+  return armor === itemId || sidearm === itemId || primary === itemId || heavy === itemId;
 }
 
 /**
@@ -276,17 +292,21 @@ export class Economy {
   // --------------------------------------------------------------- pricing
 
   /**
-   * §4.2: engineer + tech + quartermaster, added up and capped at 40 %. The
-   * three terms are read from the content tables, so a retune of a class
-   * passive or a companion level moves prices with it (10-b: no refunds, prices
-   * recompute live).
+   * §4.2, as SPEC-039 §4.3 amends it: refit + tech + quartermaster, added up
+   * and capped at 40 %. The class's refit discount applies to ship and
+   * companion prices, tech to every kind, and the quartermaster to ship, gear
+   * and companion prices — its own upgrades included once it is owned. A
+   * recipe has no token price, so `craft` is the tech share alone. The terms
+   * are read from the content tables, so a retune of a class passive or a
+   * companion level moves prices with it (10-b: no refunds, prices recompute
+   * live).
    */
   discount(kind: PurchaseKind): number {
     const player = this.#save.player;
-    const engineerShip = kind === 'ship' ? (CLASS_TABLE[player.classId].passive.shipTokenDiscount ?? 0) : 0;
+    const refit = kind === 'ship' || kind === 'companion' ? (CLASS_TABLE[player.classId].passive.refitDiscount ?? 0) : 0;
     const tech = TECH_DISCOUNT_PER_POINT * player.attributes.tech;
-    const quartermaster = kind === 'gear' || kind === 'craft' ? (this.#quartermaster()?.shopDiscount ?? 0) : 0;
-    return Math.min(TUNING.DISCOUNT_CAP, engineerShip + tech + quartermaster);
+    const quartermaster = kind === 'craft' ? 0 : (this.#quartermaster()?.shopDiscount ?? 0);
+    return Math.min(TUNING.DISCOUNT_CAP, refit + tech + quartermaster);
   }
 
   /**
@@ -358,11 +378,11 @@ export class Economy {
     if (!Object.hasOwn(ITEMS, itemId)) return fail('not_found');
     const item = ITEM_TABLE[itemId];
     if (item.kind === 'consumable' || item.price === null) return fail('not_found');
-    if (this.#owns(itemId)) return fail('max_tier');
+    if (this.owns(itemId)) return fail('max_tier');
     // SPEC-025 §4.6: the ladder runs down the item's own line, and the lowest
     // rung of a line needs nothing.
     const previous = this.#gearBelow(item.line, item.tier);
-    if (previous !== null && !this.#owns(previous)) return fail('prerequisite');
+    if (previous !== null && !this.owns(previous)) return fail('prerequisite');
     const price = this.price('gear', itemId);
     if (price === null) return fail('not_found');
     const short = this.#afford(price);
@@ -535,11 +555,12 @@ export class Economy {
     return headroom + Math.max(0, INVENTORY_SLOTS - this.usedSlots()) * stack;
   }
 
-  /** Owned means carried or worn — a bought tier that is equipped still counts. */
-  #owns(itemId: ItemId): boolean {
-    if (this.count(itemId) > 0) return true;
-    const { armor, sidearm, primary, heavy } = this.#save.equipped;
-    return armor === itemId || sidearm === itemId || primary === itemId || heavy === itemId;
+  /**
+   * Owned means carried or worn — a bought tier that is equipped still counts.
+   * Public since SPEC-039 §4.1: a boss's signature drop asks it at the kill.
+   */
+  owns(itemId: ItemId): boolean {
+    return ownsItem(this.#save, itemId);
   }
 
   /**

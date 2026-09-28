@@ -21,8 +21,9 @@
 // Pure: no `three`, no DOM, no `Math.random` (SPEC-001 §4, §7).
 import type { EmitArgs, GameEvents } from '@/core/Events';
 import { log } from '@/core/Log';
-import { maxHp, type Save } from '@/core/Save';
-import { TUNING } from '@/data/index';
+import { HP_PER_LEVEL, maxHp, type Save } from '@/core/Save';
+import { ATTRIBUTE_POINT_LEVELS, TUNING } from '@/data/index';
+import { DAMAGE_PER_LEVEL } from '@/systems/Combat';
 
 /**
  * The slice of the bus SPEC-010 emits through. A structural port rather than
@@ -40,9 +41,15 @@ export const LEVEL_CAP = TUNING.LEVEL_CAP;
 /** PLAN §4: every level is worth this many tokens, whatever produced the XP. */
 export const TOKENS_PER_LEVEL = TUNING.TOKENS_PER_LEVEL;
 
-/** E20: the level-up is a toast, never a modal. The text is shared with the UI. */
+/**
+ * E20: the level-up is a toast, never a modal. The text is shared with the UI.
+ * SPEC-039 §4.7: it says what the level gave — the tokens, `HP_PER_LEVEL` max
+ * HP and `DAMAGE_PER_LEVEL` damage — and, at every fifth level, the attribute
+ * point waiting on the character panel.
+ */
 export function levelUpText(level: number, tokens: number): string {
-  return `Level ${level} — +${tokens} tokens`;
+  const text = `Level ${level} — +${tokens} tokens · +${HP_PER_LEVEL} HP · +${Math.round(DAMAGE_PER_LEVEL * 100)}% damage`;
+  return level % ATTRIBUTE_POINT_LEVELS === 0 ? `${text} · +1 attribute point` : text;
 }
 
 /** XP needed to go from `level` to `level + 1` (§4.1). */

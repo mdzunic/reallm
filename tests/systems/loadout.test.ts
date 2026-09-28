@@ -225,23 +225,23 @@ function tick(loadout: Loadout, from: number, seconds: number): number {
 }
 
 describe('heat weapons (SPEC-029 §4.2)', () => {
-  it('locks the chaingun on the 49th shot at 0.1 s cadence, and unlocks 3.25 s later', () => {
+  it('locks the chaingun on the 66th shot at 0.1 s cadence, and unlocks 3.25 s later', () => {
     const { events, loadout } = make((s) => {
       s.equipped.primary = 'mg_scrap';
     });
     const locked: GameEvents['weapon:locked'][] = [];
     events.on('weapon:locked', (payload) => void locked.push(payload));
 
-    // 48 shots, each followed by 0.1 s of cooling: never locked.
+    // 65 shots, each followed by 0.1 s of cooling: never locked.
     let time = 0;
-    for (let shot = 1; shot <= 48; shot++) {
+    for (let shot = 1; shot <= 65; shot++) {
       expect(loadout.ready('primary', time), `shot ${shot}`).toBe(true);
       loadout.fired('primary', time);
       time = tick(loadout, time, 0.1);
     }
     expect(locked).toEqual([]);
 
-    // The 49th is the one that locks (0.04/shot against 0.02 of cooling).
+    // The 66th is the one that locks (0.035/shot against 0.02 of cooling).
     loadout.fired('primary', time);
     expect(locked).toEqual([{ slot: 'primary', itemId: 'mg_scrap' }]);
     expect(loadout.ready('primary', time)).toBe(false);
@@ -264,13 +264,13 @@ describe('heat weapons (SPEC-029 §4.2)', () => {
     for (let i = 0; i < 10; i++) loadout.fired('primary', 0);
     loadout.view('primary', 0, out);
     expect(out.state).toBe('heat');
-    expect(out.heat).toBeCloseTo(0.4, 6);
+    expect(out.heat).toBeCloseTo(0.35, 6);
 
     // Holstered: the sidearm is in hand, the chaingun cools anyway.
     loadout.select('sidearm', 0);
     tick(loadout, 0, 1);
     loadout.view('primary', 1, out);
-    expect(out.heat).toBeCloseTo(0.2, 6);
+    expect(out.heat).toBeCloseTo(0.15, 6);
 
     // Drive it to the lock and read the state.
     for (let i = 0; i < 25; i++) loadout.fired('primary', 1);
@@ -367,7 +367,7 @@ describe('firingSlot (SPEC-029 §4.4)', () => {
     const { loadout } = make((s) => {
       s.equipped.primary = 'mg_scrap';
     });
-    for (let i = 0; i < 25; i++) loadout.fired('primary', 0); // 25 × 0.04 → lock
+    for (let i = 0; i < 29; i++) loadout.fired('primary', 0); // 29 × 0.035 → lock
     expect(loadout.firingSlot(1, true, true)).toBe('sidearm');
     expect(loadout.fallback).toBe(true);
     expect(loadout.active).toBe('primary'); // covered, never switched
@@ -382,7 +382,7 @@ describe('firingSlot (SPEC-029 §4.4)', () => {
     const { loadout } = make((s) => {
       s.equipped.primary = 'mg_scrap';
     });
-    for (let i = 0; i < 25; i++) loadout.fired('primary', 0);
+    for (let i = 0; i < 29; i++) loadout.fired('primary', 0);
     expect(loadout.firingSlot(1, true, false)).toBe(null);
     expect(loadout.fallback).toBe(false);
   });
