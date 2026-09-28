@@ -393,6 +393,23 @@ describe('the environment (SPEC-018)', () => {
     expect(scene.background).toBeNull();
   });
 
+  it('dispose frees the shadow map of the key light, which the geometry walk cannot see (SPEC-040 AC-27)', () => {
+    const { scene, view } = setup(QUALITY.high);
+    const key = directionals(scene).find((light) => light.castShadow);
+    expect(key).toBeDefined();
+    // What the renderer allocates on the first shadow pass: a colour target
+    // and its depth texture, both freed when the target is.
+    const map = new THREE.WebGLRenderTarget(1024, 1024);
+    map.depthTexture = new THREE.DepthTexture(1024, 1024);
+    (key as THREE.DirectionalLight).shadow.map = map;
+    let freed = false;
+    map.addEventListener('dispose', () => {
+      freed = true;
+    });
+    view.dispose();
+    expect(freed).toBe(true);
+  });
+
   it('sync puts the player on the height field (§4.3)', () => {
     const { scene, view } = setup();
     const f = frame(new Pool<EnemyEntity>(() => makeEnemy()));

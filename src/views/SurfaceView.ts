@@ -1795,6 +1795,10 @@ export class SurfaceView {
       target.faded?.dispose();
       target.faded = null;
     }
+    // SPEC-040 AC-27: the key's shadow map is a render target three allocates
+    // on the first shadow pass — a colour and a depth texture, which the walk
+    // above cannot see. Left alone, every visit on `high` kept both on the GPU.
+    this.#key.dispose();
     this.#clearEnvironment();
     this.#scene.fog = null;
     this.#scene.background = null;
