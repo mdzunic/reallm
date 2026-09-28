@@ -119,6 +119,7 @@ declare global {
     __qa: { sources: number; randomCalls: number };
     __qaSnap(): QaHowl[];
     __qaSample(ms: number, step: number): Promise<QaSample[]>;
+    __qaSettled(bank: string, timeoutMs?: number): Promise<boolean>;
     __qaForceState: string | null;
     __qaResumes: number;
     __qaAudioSession: string[];
@@ -190,6 +191,26 @@ async function installProbe(page: Page): Promise<void> {
           }
         }, step);
       });
+    // A bank that loads on its first play defers every call made on it until it
+    // has decoded: the voice's `play`, then its `loop`, `rate` and `volume`.
+    // Howler replays that queue one event-loop turn per call, and until the
+    // replay reaches `volume` the voice plays at the Howl's default gain.
+    // This resolves once every Howl whose file is `bank` (`sfx/surface.`,
+    // say) has loaded and emptied that queue, so a read that follows reads
+    // what the layer set rather than how far the replay got. A page whose
+    // every frame waits on a software rasteriser (SPEC-040 §4.2) takes those
+    // turns hundreds of ms apart.
+    window.__qaSettled = (bank, timeoutMs = 20_000) =>
+      new Promise((resolve) => {
+        const started = performance.now();
+        const poll = (): void => {
+          const howls = window.Howler._howls.filter((howl) => howl._src.includes(bank));
+          const settled = howls.length > 0 && howls.every((howl) => howl._state === 'loaded' && howl._queue.length === 0);
+          if (settled || performance.now() - started >= timeoutMs) resolve(settled);
+          else setTimeout(poll, 25);
+        };
+        poll();
+      });
   });
 }
 
@@ -198,6 +219,17 @@ function gainOf(sample: QaSample, name: string): number | null {
   const howl = sample.howls.find((h) => h.src.startsWith(name));
   const sound = howl?.sounds[0];
   return sound ? sound.gain : null;
+}
+
+/**
+ * How far into its buffer one track is in a sample, in seconds on the audio
+ * clock, or `null` when it is not playing. That clock keeps running while the
+ * page's main thread is blocked.
+ */
+function seekOf(sample: QaSample, name: string): number | null {
+  const howl = sample.howls.find((h) => h.src.startsWith(name));
+  const sound = howl?.sounds[0];
+  return sound ? sound.seek : null;
 }
 
 /** Everything audible in a sample, as `track@gain`, for a readable failure. */
@@ -536,11 +568,13 @@ test('a bus reaches live voices without restarting them, at 0 and through a susp
     const audio = window.__reallm.audio();
     audio.setBus('sfx', 0);
     const voice = audio.play('engine_hum', { loop: true, priority: 0, minIntervalMs: 0 });
+    const settled = await window.__qaSettled('sfx/flight.');
     await new Promise((resolve) => setTimeout(resolve, 400));
     const snap = window.__qaSnap().find((h) => h.src.startsWith('flight'));
-    return { admitted: voice !== null, playing: voice?.playing ?? null, sound: snap?.sounds[0] ?? null };
+    return { admitted: voice !== null, playing: voice?.playing ?? null, settled, sound: snap?.sounds[0] ?? null };
   });
   expect(muted.admitted).toBe(true);
+  expect(muted.settled).toBe(true);
   expect(muted.playing).toBe(true);
   expect(muted.sound?.gain).toBe(0);
   // It is running, not merely tracked: the loop has advanced into the sprite.
@@ -569,14 +603,16 @@ test('a bus reaches live voices without restarting them, at 0 and through a susp
     audio.setBus('master', 0.5);
     audio.setBus('sfx', 0.5);
     audio.play('boss_roar', { loop: true, minIntervalMs: 0, volume: 0.5, x: 24, z: 0 });
+    const settled = await window.__qaSettled('sfx/surface.');
     await new Promise((resolve) => setTimeout(resolve, 200));
     const sound = window.__qaSnap().find((h) => h.src.startsWith('surface'))?.sounds[0] ?? null;
     audio.setBus('master', 1);
     audio.setBus('sfx', 1);
-    return sound;
+    return { settled, sound };
   });
-  expect(scaled?.sprite).toBe('boss_roar');
-  expect(scaled?.gain).toBeCloseTo(0.0625, 4);
+  expect(scaled.settled).toBe(true);
+  expect(scaled.sound?.sprite).toBe('boss_roar');
+  expect(scaled.sound?.gain).toBeCloseTo(0.0625, 4);
 
   // AC-11 / AC-21: a hidden tab suspends the context and leaves every voice
   // alone; a bus moved while it is suspended is audible on the way back.
@@ -665,17 +701,23 @@ test('a scene change crossfades over 1500 ms and stops the outgoing track at 0 (
   await expect(page.locator('[data-testid="scene-label"]')).toHaveText('station');
 
   const overlapping = trace.filter((s) => gainOf(s, 'menu') !== null && gainOf(s, 'station') !== null);
-  // The two beds overlap for most of the 1500 ms: at least the 0.8 s that nine
-  // 100 ms samples span, read off the samples' own timestamps. Since SPEC-040
-  // §4.2 a host without a GPU draws every frame it gets, and a loaded one holds
-  // the sampler's interval back behind those draws, so the count of samples
-  // is the host's; how long the overlap lasted is the crossfade's.
-  const story = `no overlap in: ${trace.map((s) => `${s.t}ms ${audible(s)}`).join(' / ')}`;
+  const story = `no overlap in: ${trace
+    .map((s) => `${s.t}ms ${audible(s)}${seekOf(s, 'station') === null ? '' : ` (station at ${seekOf(s, 'station')}s)`}`)
+    .join(' / ')}`;
   expect(overlapping.length, story).toBeGreaterThanOrEqual(3);
   // Both directions move, and the pair never leaves a hole in the middle.
   const first = overlapping[0]!;
   const last = overlapping[overlapping.length - 1]!;
-  expect(last.t - first.t, story).toBeGreaterThanOrEqual(800);
+  // The two beds overlap for most of the 1500 ms: at least the 0.8 s that nine
+  // 100 ms samples span, measured on the audio clock. The incoming bed is a
+  // fresh voice that starts with the fade, so its position at the last sample
+  // where the outgoing bed is still audible is how long the two have sounded
+  // together. The sampler's timestamps cannot measure this on a host without a
+  // GPU. There, the station's first frame blocks the page just as the fade
+  // begins, because its programs compile and the frame waits on SwiftShader.
+  // Since SPEC-040 §4.2 such a host draws every frame it gets, so blocks come
+  // later in the fade too. The samples land either side of those blocks.
+  expect(seekOf(last, 'station')!, story).toBeGreaterThanOrEqual(0.8);
   expect(gainOf(first, 'menu')!).toBeGreaterThan(gainOf(last, 'menu')!);
   expect(gainOf(first, 'station')!).toBeLessThan(gainOf(last, 'station')!);
   for (const sample of overlapping) {
@@ -996,6 +1038,7 @@ test('distance decides the gain, and 45 m decides whether there is one at all (A
     for (const [id, x] of plan) audio.play(id, { loop: true, minIntervalMs: 0, x, z: 0 });
     // AC-36: neither x nor z, so no attenuation at all.
     audio.play('scan_done', { loop: true, minIntervalMs: 0 });
+    const settled = await window.__qaSettled('sfx/surface.');
     await new Promise((resolve) => setTimeout(resolve, 250));
     const rows = window.__qaSnap().find((h) => h.src.startsWith('surface'))?.sounds ?? [];
     // AC-35: at the cut-off, past it on the diagonal, and just inside it.
@@ -1004,9 +1047,10 @@ test('distance decides the gain, and 45 m decides whether there is one at all (A
       diagonal: audio.play('bug_pop', { minIntervalMs: 0, x: 32, z: 32 }),
       inside: audio.play('bug_pop', { minIntervalMs: 0, x: 44.9, z: 0 }) !== null,
     };
-    return { rows, cutoff };
+    return { settled, rows, cutoff };
   });
 
+  expect(positioned.settled).toBe(true);
   const gain = (sprite: string): number | undefined => positioned.rows.find((row) => row.sprite === sprite)?.gain;
   expect(gain('pickup_oil')).toBeCloseTo(1, 4); // d = 0
   expect(gain('pickup_wheat')).toBeCloseTo(1, 4); // d = 8, still inside the near radius
@@ -1029,17 +1073,20 @@ test('distance decides the gain, and 45 m decides whether there is one at all (A
     for (let i = 0; i < 8; i++) audio.play('bug_pop', { loop: true, minIntervalMs: 0, x: 0, z: 0 });
     for (let i = 0; i < 3; i++) audio.play('ui_blip', { loop: true, minIntervalMs: 0 });
     audio.play('raider_death', { loop: true, minIntervalMs: 0, rate: 1.5 });
+    const settled = (await Promise.all([window.__qaSettled('sfx/surface.'), window.__qaSettled('sfx/ui.')])).every(Boolean);
     await new Promise((resolve) => setTimeout(resolve, 250));
     Math.random = original;
     const surface = window.__qaSnap().find((h) => h.src.startsWith('surface'))?.sounds ?? [];
     const ui = window.__qaSnap().find((h) => h.src.startsWith('ui'))?.sounds ?? [];
     return {
+      settled,
       pops: surface.filter((s) => s.sprite === 'bug_pop').map((s) => s.rate),
       explicit: surface.filter((s) => s.sprite === 'raider_death').map((s) => s.rate),
       flat: ui.filter((s) => s.sprite === 'ui_blip').map((s) => s.rate),
       fromAudio: stacks.filter((stack) => /Audio(Mix|Reactions)?\.ts/.test(stack)).length,
     };
   });
+  expect(pitch.settled).toBe(true);
   expect(pitch.pops.length).toBeGreaterThanOrEqual(8);
   for (const rate of pitch.pops) {
     expect(rate).toBeGreaterThanOrEqual(1 - 0.06);
@@ -1083,6 +1130,7 @@ test('the reactions table is what the game actually hears (AC-38 … AC-50, AC-5
     audio['play']('ui_blip');
     audio['play']('bug_pop', { x: 0, z: 0 });
     audio['play']('ship_hit_shield');
+    await Promise.all(['sfx/ui.', 'sfx/surface.', 'sfx/flight.'].map((bank) => window.__qaSettled(bank)));
     await new Promise((resolve) => setTimeout(resolve, 900));
 
     const mine = () => window.Howler._howls.filter((howl) => !known.has(howl));
