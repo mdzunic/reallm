@@ -2,8 +2,19 @@
 // hang off it. All three are DOM-light enough to run in node with a stub
 // element tree; what matters is *who* gets an Update button (AC-52) and that
 // nothing applies an update on its own (15-c).
-import { describe, expect, it, beforeEach } from 'vitest';
-import { applyUpdate, offerUpdate, resetUpdates, updateReady } from '@/core/Updates';
+import { afterEach, describe, expect, it, beforeEach, vi } from 'vitest';
+import {
+  applyUpdate,
+  hasOfflineWorker,
+  offerUpdate,
+  offlineStatus,
+  offlineText,
+  registeredStatus,
+  resetUpdates,
+  setOfflineStatus,
+  updateReady,
+  type OfflineStatus,
+} from '@/core/Updates';
 import { INSTALL_STEPS } from '@/ui/InstallHint';
 import { stripComments } from '../architecture/source';
 
@@ -93,5 +104,95 @@ describe('the iOS install explainer (AC-55)', () => {
     // …and exactly one thing listens: the overlay the composition root mounts.
     expect(sources['../../src/ui/InstallHint.ts']).toContain("'app:install-hint'");
     expect(sources['../../src/main.ts']).toContain('new InstallHintOverlay(uiRoot, events)');
+  });
+});
+
+describe('offline play (SPEC-040 §4.7, AC-29)', () => {
+  beforeEach(() => resetUpdates());
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    resetUpdates();
+  });
+
+  it('names each status the way Settings shows it', () => {
+    const texts: Record<OfflineStatus, string> = {
+      ready: 'Offline play: ready',
+      downloading: 'Offline play: downloading…',
+      waiting: 'Offline play: starts after your first visit to the station',
+      unsupported: 'Offline play: not in this build',
+    };
+    for (const [status, text] of Object.entries(texts) as [OfflineStatus, string][]) {
+      expect(offlineText(status)).toBe(text);
+    }
+  });
+
+  it('round-trips through setOfflineStatus, and resetUpdates puts back the starting value', () => {
+    // A test run is a dev build with no service worker: `unsupported` (§4.7).
+    const start = offlineStatus();
+    expect(start).toBe('unsupported');
+    for (const status of ['waiting', 'downloading', 'ready', 'unsupported'] as const) {
+      setOfflineStatus(status);
+      expect(offlineStatus()).toBe(status);
+    }
+    setOfflineStatus('ready');
+    resetUpdates();
+    expect(offlineStatus()).toBe(start);
+  });
+
+  it('reads a registration as ready only when its worker is active and controls the page', () => {
+    vi.stubGlobal('navigator', { serviceWorker: { controller: {} } });
+    expect(registeredStatus({ active: {} })).toBe('ready');
+    expect(registeredStatus({ active: null })).toBe('downloading');
+    expect(registeredStatus(undefined)).toBe('downloading');
+    // A first visit: installed, but nothing controls this page yet.
+    vi.stubGlobal('navigator', { serviceWorker: { controller: null } });
+    expect(registeredStatus({ active: {} })).toBe('downloading');
+  });
+
+  it('knows a returning visit — a controller, or a registration — from a first one', async () => {
+    vi.stubGlobal('navigator', { serviceWorker: { controller: {}, getRegistration: async () => undefined } });
+    expect(await hasOfflineWorker()).toBe(true);
+    vi.stubGlobal('navigator', { serviceWorker: { controller: null, getRegistration: async () => ({}) } });
+    expect(await hasOfflineWorker()).toBe(true);
+    vi.stubGlobal('navigator', { serviceWorker: { controller: null, getRegistration: async () => undefined } });
+    expect(await hasOfflineWorker()).toBe(false);
+    vi.stubGlobal('navigator', {
+      serviceWorker: {
+        controller: null,
+        getRegistration: async () => {
+          throw new Error('SecurityError');
+        },
+      },
+    });
+    expect(await hasOfflineWorker()).toBe(false);
+    vi.stubGlobal('navigator', {});
+    expect(await hasOfflineWorker()).toBe(false);
+  });
+});
+
+describe('the worker waits for the station (SPEC-040 §4.7, AC-28, AC-30)', () => {
+  const RAW_MAIN = import.meta.glob<string>('../../src/main.ts', { query: '?raw', import: 'default', eager: true });
+  const MAIN = stripComments(Object.values(RAW_MAIN)[0] as string);
+
+  it('registers once, immediately, from inside registerOfflineWorker', () => {
+    expect(MAIN.match(/registerSW\(/g) ?? []).toHaveLength(1);
+    const body = MAIN.slice(MAIN.indexOf('function registerOfflineWorker'));
+    expect(body).toMatch(/^function registerOfflineWorker\(\): void \{\s*if \(workerRegistered\) return;\s*workerRegistered = true;/);
+    expect(body).toContain('immediate: true,');
+    // SPEC-015 §10's offer is unchanged (AC-30).
+    expect(body).toContain('onNeedRefresh: () => offerAppUpdate(() => void updateSW(true)),');
+    expect(body).toContain("onOfflineReady: () => setOfflineStatus('ready'),");
+  });
+
+  it('runs at the first station entry, and at boot only for a returning player', () => {
+    expect(MAIN).toMatch(/'scene:entered',\s*\(\{ id \}\) => \{\s*if \(id === 'station'\) registerOfflineWorker\(\);/);
+    expect(MAIN).toMatch(/hasOfflineWorker\(\)\.then\(\(returning\) => \{\s*if \(returning\) registerOfflineWorker\(\);/);
+    // Nothing registers at module load any more.
+    expect(MAIN).not.toMatch(/^const updateSW = registerSW/m);
+  });
+
+  it('tries again at the next station entry after a failed registration (40-k)', () => {
+    const onError = MAIN.slice(MAIN.indexOf('onRegisterError'));
+    expect(onError).toMatch(/workerRegistered = false;\s*setOfflineStatus\('waiting'\);/);
   });
 });

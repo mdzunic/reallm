@@ -11,6 +11,7 @@ import type { BenchmarkOutcome } from '@/core/Benchmark';
 import type { QualityPreset } from '@/core/Renderer';
 import type { DamageFlashMode, FrameRate, GuidanceLevel, SettingsStore } from '@/core/Settings';
 import { log } from '@/core/Log';
+import { offlineStatus, offlineText } from '@/core/Updates';
 import type { SaveStore, SlotId } from '@/core/Save';
 import { SLOTS } from '@/core/Save';
 import { confirmSheet } from '@/ui/ConfirmSheet';
@@ -253,6 +254,13 @@ export class SettingsPanel {
         { class: 'settings-row' },
         testId(h('span', { class: 'settings-note' }, this.#benchmarkNote()), 'settings-benchmark'),
         redetect,
+      ),
+      // SPEC-040 §4.7: whether this device can play offline yet, read on every
+      // render — the worker registers at the first station visit.
+      h(
+        'div',
+        { class: 'settings-row' },
+        testId(h('span', { class: 'settings-note' }, offlineText(offlineStatus())), 'settings-offline'),
       ),
       // SPEC-040 §4.3: beside Quality (SPEC-045 owns where rows finally sit).
       this.#frameRateRow(),
