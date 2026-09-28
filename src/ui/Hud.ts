@@ -15,9 +15,9 @@
 import type { Scheme } from '@/core/Input';
 import type { JoystickSide } from '@/core/Settings';
 import {
-  cloneHud,
+  copyHudInto,
   createHudModel,
-  diffHud,
+  diffHudInto,
   flashGate,
   type DamageFlashMode,
   type HudKey,
@@ -76,7 +76,13 @@ export class Hud {
   readonly #mode: HudMode;
   readonly #ui: UiRoot;
   readonly #root: HTMLDivElement;
-  #last: HudModel;
+  /**
+   * The last rendered model, built once and then copied into in place
+   * (SPEC-040 §4.4) — never a fresh deep clone on a frame that changed.
+   */
+  readonly #last: HudModel;
+  /** SPEC-040 §4.4: the one scratch set every `flush()` diffs into. */
+  readonly #changed = new Set<HudKey>();
   #unregister: () => void;
   #flashTimer: ReturnType<typeof setTimeout> | null = null;
   /** SPEC-037 §4.6: `performance.now()` seconds of the flash's last rising edge. */
@@ -158,7 +164,7 @@ export class Hud {
         holding: false,
       };
     }
-    this.#last = cloneHud(this.model);
+    this.#last = copyHudInto(createHudModel(), this.model);
 
     this.#root = testId(el('div', `hud hud-${mode}`), 'hud');
     this.#root.dataset['side'] = 'left';
@@ -388,12 +394,16 @@ export class Hud {
     entry.node.remove();
   }
 
-  /** Diff against the last rendered model; write only what changed (AC-61). */
+  /**
+   * Diff against the last rendered model; write only what changed (AC-61).
+   * SPEC-040 §4.4: through one scratch set and an in-place copy, so a fight's
+   * every frame allocates only when a nested value changes shape.
+   */
   flush(): void {
-    const changed = diffHud(this.#last, this.model);
+    const changed = diffHudInto(this.#last, this.model, this.#changed);
     if (changed.size === 0) return;
     for (const key of changed) this.#write(key);
-    this.#last = cloneHud(this.model);
+    copyHudInto(this.#last, this.model);
   }
 
   /**
@@ -435,7 +445,7 @@ export class Hud {
   #renderAll(): void {
     const keys = Object.keys(this.model) as HudKey[];
     for (const key of keys) this.#write(key);
-    this.#last = cloneHud(this.model);
+    copyHudInto(this.#last, this.model);
   }
 
   #write(key: HudKey): void {

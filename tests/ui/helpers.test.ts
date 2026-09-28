@@ -39,11 +39,13 @@ import {
   shortfallText,
   skipRefusalText,
   walletModel,
-  cloneHud,
+  copyHudInto,
   computePlayerStats,
   createHudModel,
   departReason,
   diffHud,
+  diffHudInto,
+  HUD_KEYS,
   formatTime,
   missionStatus,
   padEmptyText,
@@ -401,6 +403,14 @@ describe('skipRefusalText (SPEC-032 §4.3)', () => {
     expect(skipRefusalText('flight_mission')).toBe('This mission needs a flown run.');
   });
 });
+
+/**
+ * A deep copy the way `Hud` keeps its last rendered model since SPEC-040 §4.4:
+ * copied into a fresh zeroed model, not cloned.
+ */
+function cloneHud(model: HudModel): HudModel {
+  return copyHudInto(createHudModel(), model);
+}
 
 describe('diffHud (AC-115, AC-62)', () => {
   it('two equal models diff to the empty set — the no-DOM-write contract', () => {
@@ -1329,5 +1339,224 @@ describe('the class card and the Quartermaster line (SPEC-039 §4.3, §4.5)', ()
       '+200 cargo · −10% shop prices',
       '+300 cargo · −15% shop prices',
     ]);
+  });
+});
+
+// ------------------------------------------------ SPEC-040 §4.4: the HUD diff
+
+describe('diffHudInto and copyHudInto (SPEC-040 §4.4, AC-20)', () => {
+  const WEAPON_SLOTS = ['sidearm', 'primary', 'heavy'] as const;
+  const QUICK_SLOTS = ['heal', 'explosive', 'utility'] as const;
+  const SLOT_STATES: readonly SlotState[] = ['ready', 'switch', 'empty', 'heat', 'lock', 'recharge'];
+  const ITEM_IDS = Object.keys(ITEMS) as Array<keyof typeof ITEMS>;
+
+  function pick<T>(rng: Rng, values: readonly T[]): T {
+    return values[rng.int(0, values.length - 1)] as T;
+  }
+
+  /** Small domains, so two random models agree on many keys and differ on some. */
+  function small(rng: Rng): number {
+    return rng.int(0, 2);
+  }
+
+  function slotView(rng: Rng): SlotView {
+    return {
+      itemId: rng.chance(0.3) ? null : pick(rng, ITEM_IDS),
+      state: pick(rng, SLOT_STATES),
+      cd: small(rng) / 2,
+      heat: small(rng),
+      charges: small(rng),
+      maxCharges: 2,
+      cdSeconds: small(rng),
+    };
+  }
+
+  /** One field of a model, drawn at random — `null` ↔ object and array lengths included. */
+  function field(rng: Rng, key: (typeof HUD_KEYS)[number]): unknown {
+    switch (key) {
+      case 'hp':
+      case 'xp':
+        return [small(rng), 2];
+      case 'level':
+      case 'tokens':
+      case 'cargoCap':
+        return small(rng);
+      case 'resources':
+        return { oil: small(rng), wheat: small(rng), water: small(rng), lithium: small(rng) };
+      case 'objective':
+        return rng.chance(0.4) ? null : { title: pick(rng, ['A', 'B']), line: 'Reach the rig', value: small(rng), target: 2 };
+      case 'tracker':
+        if (rng.chance(0.3)) return null;
+        return {
+          title: pick(rng, ['Dry Land', 'Oil']),
+          stage: pick(rng, ['', 'stage 1/2']),
+          rows: Array.from({ length: rng.int(0, 3) }, () => ({
+            text: pick(rng, ['Reach', 'Collect']),
+            done: rng.chance(0.5),
+            focus: rng.chance(0.5),
+            defendHp: rng.chance(0.5) ? null : small(rng) / 2,
+          })),
+          distance: rng.chance(0.5) ? null : small(rng),
+          bearing: small(rng),
+          pulse: rng.chance(0.5),
+        };
+      case 'weather':
+        return { warning: rng.chance(0.5) ? null : 'dust_storm', active: null, secondsLeft: small(rng) };
+      case 'shelter':
+        return pick(rng, ['none', 'sheltered', 'hidden']);
+      case 'boss':
+        return rng.chance(0.5) ? null : { name: 'Wurm', hp: small(rng), max: 2 };
+      case 'loadout':
+        if (rng.chance(0.3)) return null;
+        return {
+          active: pick(rng, WEAPON_SLOTS),
+          slots: { sidearm: slotView(rng), primary: slotView(rng), heavy: slotView(rng) },
+          fallback: rng.chance(0.5),
+        };
+      case 'quick':
+        if (rng.chance(0.3)) return null;
+        return Object.fromEntries(QUICK_SLOTS.map((slot) => [slot, { itemId: rng.chance(0.5) ? null : pick(rng, ITEM_IDS), qty: small(rng) }]));
+      case 'interact':
+        return rng.chance(0.5) ? null : pick(rng, ['Press E', 'Need 20 more oil']);
+      case 'interactAction':
+      case 'walletLit':
+        return rng.chance(0.5);
+      case 'flight':
+        return rng.chance(0.5)
+          ? undefined
+          : { shield: [small(rng), 2], hull: [small(rng), 2], throttle: small(rng), progress: small(rng) / 2, hostiles: small(rng), storm: rng.chance(0.5), holding: false };
+    }
+  }
+
+  function randomModel(rng: Rng): HudModel {
+    const model = createHudModel() as unknown as Record<string, unknown>;
+    for (const key of HUD_KEYS) {
+      const value = field(rng, key);
+      if (value === undefined) delete model[key];
+      else model[key] = value;
+    }
+    return model as unknown as HudModel;
+  }
+
+  /** `a` with each top-level key re-drawn at random, 30 % of the time. */
+  function nearby(rng: Rng, a: HudModel): HudModel {
+    const b = JSON.parse(JSON.stringify(a)) as Record<string, unknown>;
+    for (const key of HUD_KEYS) {
+      if (!rng.chance(0.3)) continue;
+      const value = field(rng, key);
+      if (value === undefined) delete b[key];
+      else b[key] = value;
+    }
+    return b as unknown as HudModel;
+  }
+
+  /** The reference diff §6.1 names: every key whose JSON differs. */
+  function reference(a: HudModel, b: HudModel): string[] {
+    return HUD_KEYS.filter((key) => JSON.stringify(a[key]) !== JSON.stringify(b[key])).sort();
+  }
+
+  /** Every nested array and object under `root`, in walk order. */
+  function containers(root: unknown, out: object[] = []): object[] {
+    if (typeof root !== 'object' || root === null) return out;
+    out.push(root);
+    if (Array.isArray(root)) for (const value of root) containers(value, out);
+    else for (const value of Object.values(root)) containers(value, out);
+    return out;
+  }
+
+  it('walks every key of the model', () => {
+    expect([...HUD_KEYS].sort()).toEqual(
+      [...Object.keys(createHudModel()), 'flight'].sort(),
+    );
+  });
+
+  it('agrees with a JSON reference diff over 200 seeded random pairs, and returns out', () => {
+    const rng = new Rng(40);
+    const out = new Set<(typeof HUD_KEYS)[number]>();
+    let changedSome = 0;
+    let changedNone = 0;
+    for (let i = 0; i < 200; i++) {
+      const a = randomModel(rng);
+      const b = rng.chance(0.5) ? nearby(rng, a) : randomModel(rng);
+      // Stale content in the scratch set must not survive the call.
+      out.add('hp');
+      out.add('flight');
+      const result = diffHudInto(a, b, out);
+      expect(result).toBe(out);
+      expect([...result].sort(), `pair ${i}`).toEqual(reference(a, b));
+      expect([...diffHud(a, b)].sort(), `pair ${i}`).toEqual(reference(a, b));
+      if (result.size > 0) changedSome++;
+      else changedNone++;
+    }
+    // The pairs exercised both answers, not only "everything changed".
+    expect(changedSome).toBeGreaterThan(20);
+    expect(changedNone + changedSome).toBe(200);
+  });
+
+  it('diffs to nothing after copyHudInto, whatever changed shape in between', () => {
+    const rng = new Rng(41);
+    const target = createHudModel();
+    const out = new Set<(typeof HUD_KEYS)[number]>();
+    for (let i = 0; i < 200; i++) {
+      const source = randomModel(rng);
+      expect(copyHudInto(target, source)).toBe(target);
+      expect([...diffHudInto(target, source, out)], `model ${i}`).toEqual([]);
+      expect(JSON.stringify(target)).toBe(JSON.stringify(source));
+      // The copy is the target's own: nothing in it is shared with the source.
+      const sourceContainers = new Set(containers(source));
+      for (const node of containers(target)) expect(sourceContainers.has(node)).toBe(false);
+    }
+  });
+
+  it('creates no new nested object on a second copy of an unchanged model', () => {
+    const rng = new Rng(42);
+    for (let i = 0; i < 50; i++) {
+      const source = randomModel(rng);
+      const target = copyHudInto(createHudModel(), source);
+      const before = containers(target);
+      copyHudInto(target, source);
+      const after = containers(target);
+      expect(after.length).toBe(before.length);
+      after.forEach((node, index) => expect(node).toBe(before[index]));
+    }
+  });
+
+  it('reuses every nested object when only values move', () => {
+    const a = createHudModel();
+    a.tracker = { title: 'Dry Land', stage: 'stage 1/2', rows: [{ text: 'Reach', done: false, focus: true, defendHp: null }], distance: 12, bearing: 0, pulse: false };
+    a.boss = { name: 'Wurm', hp: 10, max: 20 };
+    const last = copyHudInto(createHudModel(), a);
+    const before = containers(last);
+    a.hp = [5, 10];
+    a.resources.oil = 7;
+    a.boss = { name: 'Wurm', hp: 9, max: 20 }; // a new object, the same shape
+    (a.tracker.rows[0] as { done: boolean }).done = true;
+    a.tracker.distance = 11;
+    copyHudInto(last, a);
+    const after = containers(last);
+    after.forEach((node, index) => expect(node).toBe(before[index]));
+    expect(last.boss?.hp).toBe(9);
+    expect(last.tracker?.rows[0]?.done).toBe(true);
+  });
+
+  it('shrinks an array in place and allocates only for a longer one or null → object', () => {
+    const a = createHudModel();
+    a.tracker = { title: 'T', stage: '', rows: [1, 2, 3].map((n) => ({ text: `r${n}`, done: false, focus: false, defendHp: null })), distance: null, bearing: 0, pulse: false };
+    const last = copyHudInto(createHudModel(), a);
+    const rows = last.tracker?.rows;
+    const first = rows?.[0];
+    a.tracker.rows.length = 1;
+    copyHudInto(last, a);
+    expect(last.tracker?.rows).toBe(rows);
+    expect(last.tracker?.rows).toHaveLength(1);
+    expect(last.tracker?.rows[0]).toBe(first);
+    // null ↔ object: the object goes, and a new one is built when it returns.
+    a.tracker = null;
+    copyHudInto(last, a);
+    expect(last.tracker).toBeNull();
+    a.tracker = { title: 'U', stage: '', rows: [], distance: null, bearing: 0, pulse: false };
+    copyHudInto(last, a);
+    expect(last.tracker).not.toBe(a.tracker);
+    expect(last.tracker).toEqual(a.tracker);
   });
 });
