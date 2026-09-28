@@ -26,6 +26,9 @@ import { log } from '@/core/Log';
 // while `data/` was empty. The seam — `SaveContent` as a parameter — has not
 // moved (§4.4).
 import {
+  ATTRIBUTE_EFFECTS,
+  ATTRIBUTE_MAX,
+  ATTRIBUTE_POINT_LEVELS,
   CLASSES,
   type ClassPassive,
   CLASS_IDS,
@@ -384,8 +387,14 @@ export const SAVE_CONTENT: SaveContent = {
   planetHalfSize: PLANET_HALF_SIZE,
 };
 
-/** PLAN §4: 5 points over the class base, allocated at creation only. */
+/**
+ * PLAN §4: 5 points over the class base, allocated at creation. Since SPEC-039
+ * §4.7 a level earns more on top (`attributePointsEarned`).
+ */
 export const CREATION_POINTS = 5;
+
+/** SPEC-039 §4.7: the 4 of `maxHp`'s 4 · (level − 1); the level-up toast reads it too. */
+export const HP_PER_LEVEL = 4;
 
 /**
  * PLAN §4: 400 base, ship cargo tiers 600 / 800 / 1200. The per-resource cap
@@ -405,13 +414,50 @@ export function cargoCap(ship: Pick<Save['ship'], 'cargo'>): number {
  * + 8 · vigor + 4 · (level − 1). It used to be one of three, and a Marine read
  * 170, 150 and 160 in three screens; creation, the character panel, the
  * station, the flight HUD, the validator, `Progression` and `Combat` all call
- * this now, so every screen shows the number the player fights with.
+ * this now, so every screen shows the number the player fights with. SPEC-039
+ * §4.3: the per-point 8 is `ATTRIBUTE_EFFECTS.vigor.maxHp`.
  */
 export function maxHp(classId: ClassId, attributes: Attributes, level: number): number {
   // Widened to the interface: the concrete class passives are disjoint literals.
   const passive: ClassPassive = CLASSES[classId].passive;
   const bonus = passive.maxHpBonus ?? 0;
-  return TUNING.PLAYER_BASE_HP + bonus + 8 * attributes.vigor + 4 * (level - 1);
+  return TUNING.PLAYER_BASE_HP + bonus + ATTRIBUTE_EFFECTS.vigor.maxHp * attributes.vigor + HP_PER_LEVEL * (level - 1);
+}
+
+// ------------------------------------------------ SPEC-039 §4.7: attribute points
+
+const ATTRIBUTE_KEYS = ['might', 'vigor', 'agility', 'tech'] as const;
+
+/** One point at every fifth level: `floor(level / ATTRIBUTE_POINT_LEVELS)`. */
+export function attributePointsEarned(level: number): number {
+  return Math.max(0, Math.floor(level / ATTRIBUTE_POINT_LEVELS));
+}
+
+/**
+ * Earned minus spent, where spent = Σ attributes − Σ class base −
+ * `CREATION_POINTS`. Never negative. Derived from the level, so no save field
+ * carries it (§2).
+ */
+export function unspentAttributePoints(player: Save['player']): number {
+  const base = CLASSES[player.classId].baseAttributes;
+  let spent = -CREATION_POINTS;
+  for (const key of ATTRIBUTE_KEYS) spent += player.attributes[key] - base[key];
+  return Math.max(0, attributePointsEarned(player.level) - spent);
+}
+
+/**
+ * Spends one point on `attribute`; false with none unspent or the attribute at
+ * `ATTRIBUTE_MAX`. A point of vigor raises the live HP by the same 8 it adds
+ * to the max, as E20 does for a level's HP (39-m).
+ */
+export function allocateAttribute(save: Save, attribute: keyof Attributes): boolean {
+  const player = save.player;
+  if (unspentAttributePoints(player) <= 0) return false;
+  if (player.attributes[attribute] >= ATTRIBUTE_MAX) return false;
+  const before = maxHp(player.classId, player.attributes, player.level);
+  player.attributes[attribute] += 1;
+  player.hp += maxHp(player.classId, player.attributes, player.level) - before;
+  return true;
 }
 
 // --------------------------------------------------------------- fresh save
@@ -629,7 +675,8 @@ function validatePlayer(raw: Bag, classId: ClassId, content: SaveContent, warnin
   const level = int(raw['level'], 1, 1, TUNING.LEVEL_CAP);
   if (raw['level'] !== level) warnings.push(`player.level: ${JSON.stringify(raw['level'])} clamped to ${level}`);
   const appearance = bagAt(raw, 'appearance');
-  const attributes = validateAttributes(bagAt(raw, 'attributes'), classId, content, warnings);
+  // SPEC-039 §4.7: the attribute budget follows the level validated above.
+  const attributes = validateAttributes(bagAt(raw, 'attributes'), classId, level, content, warnings);
   return {
     name,
     classId,
@@ -647,28 +694,29 @@ function validatePlayer(raw: Bag, classId: ClassId, content: SaveContent, warnin
 }
 
 /**
- * §4.4: the class base is a floor (the points are *added* at creation) and the
- * total may exceed it by at most `CREATION_POINTS`. The surplus is handed out
+ * §4.4: the class base is a floor (the points are *added*) and the total may
+ * exceed it by at most `CREATION_POINTS` plus what the level earned (SPEC-039
+ * §4.7), each attribute capped at `ATTRIBUTE_MAX`. The surplus is handed out
  * in field order, so a save that asked for too much keeps its first choices
- * instead of being rescaled into something the player never picked.
+ * instead of being rescaled into something the player never picked (39-l).
  */
-function validateAttributes(raw: Bag, classId: ClassId, content: SaveContent, warnings: string[]): Attributes {
+function validateAttributes(raw: Bag, classId: ClassId, level: number, content: SaveContent, warnings: string[]): Attributes {
   const base = content.classBase[classId];
-  const keys = ['might', 'vigor', 'agility', 'tech'] as const;
   const out: Attributes = { ...base };
-  let budget = CREATION_POINTS;
+  const allowed = CREATION_POINTS + attributePointsEarned(level);
+  let budget = allowed;
   let changed = false;
-  for (const key of keys) {
+  for (const key of ATTRIBUTE_KEYS) {
     const asked = int(raw[key], base[key], 0, 99);
-    const over = Math.max(0, asked - base[key]);
+    const over = Math.max(0, Math.min(asked, ATTRIBUTE_MAX) - base[key]);
     const give = Math.min(over, budget);
     budget -= give;
     out[key] = base[key] + give;
     if (out[key] !== asked) changed = true;
   }
   if (changed) {
-    const total = base.might + base.vigor + base.agility + base.tech + CREATION_POINTS;
-    warnings.push(`player.attributes: clamped to the class base plus ${CREATION_POINTS} (${total} total)`);
+    const total = base.might + base.vigor + base.agility + base.tech + allowed;
+    warnings.push(`player.attributes: clamped to the class base plus ${allowed} (${total} total)`);
   }
   return out;
 }

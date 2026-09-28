@@ -3147,6 +3147,13 @@ html.debug .scene-tag {
   font-size: 14px;
 }
 
+/* SPEC-039 §4.6: the boss's signature piece, or the lithium in its place. */
+.board-drop {
+  margin: 0;
+  color: var(--ink-dim);
+  font-size: 14px;
+}
+
 /* 14-e: long briefs scroll inside the panel, never the body. */
 .board-brief {
   margin: 0;
@@ -3229,10 +3236,36 @@ html.debug .scene-tag {
 }
 
 .shop-note,
-.shop-deltas {
+.shop-deltas,
+.shop-role,
+.shop-stats {
   margin: 0;
   color: var(--ink-dim);
   font-size: 14px;
+}
+
+/* SPEC-039 §4.6: what the next planet asks for, above the tabs. */
+.shop-refit {
+  margin: 0;
+  padding: 8px 10px;
+  border: 1px solid var(--panel-edge);
+  border-radius: 8px;
+  font-size: 14px;
+}
+
+/* SPEC-039 §4.6: the row against the piece worn in its slot. */
+.shop-compare {
+  margin: 0;
+  color: var(--shield);
+  font-size: 14px;
+}
+
+/* SPEC-039 §4.5: the planet that still gates on this system. */
+.shop-gate {
+  margin: 0;
+  color: var(--warn);
+  font-size: 14px;
+  font-weight: 700;
 }
 
 .shop-effect {
@@ -3314,6 +3347,17 @@ html.debug .scene-tag {
 .char-attrs {
   margin: 0;
   color: var(--ink-dim);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+/* SPEC-039 §4.7: the points a level earned, waiting to be spent. */
+.char-attr-points {
+  margin: 0;
+  color: var(--good);
+  font-weight: 700;
 }
 
 .char-gear {

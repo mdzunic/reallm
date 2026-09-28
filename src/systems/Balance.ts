@@ -18,14 +18,20 @@
 import {
   COMPANIONS,
   ITEMS,
+  LOOT_TABLES,
   MISSIONS,
+  PLANETS,
   UPGRADES,
   type Companion,
   type CompanionId,
   type Item,
   type ItemId,
+  type LootEntry,
+  type LootTableId,
   type MissionDef,
   type MissionId,
+  type PlanetDef,
+  type PlanetId,
   type ShipSystem,
   type Upgrade,
 } from '@/data/index';
@@ -35,6 +41,8 @@ const MISSION_TABLE: Readonly<Record<MissionId, MissionDef>> = MISSIONS;
 const ITEM_TABLE: Readonly<Record<ItemId, Item>> = ITEMS;
 const UPGRADE_TABLE: Readonly<Record<ShipSystem, Upgrade>> = UPGRADES;
 const COMPANION_TABLE: Readonly<Record<CompanionId, Companion>> = COMPANIONS;
+const LOOT_TABLE: Readonly<Record<LootTableId, readonly LootEntry[]>> = LOOT_TABLES;
+const PLANET_TABLE: Readonly<Record<PlanetId, PlanetDef>> = PLANETS;
 
 const missions: readonly MissionDef[] = Object.values(MISSION_TABLE);
 
@@ -60,14 +68,18 @@ export type LoadoutEntry =
  * §5: what a player should own *before* setting out for that chapter,
  * cumulative and undiscounted. Chapter 4's shield tier 2 is the one hard gate —
  * Ferrum refuses to unlock without it (PLAN §5).
+ *
+ * SPEC-039 §4.2: the Laser Carbine closes chapter 2 — no boss hands it out any
+ * more, and the threat past Cinder-4 is tuned for it. Appended after the
+ * scanner, so the order the loadout is bought in does not move.
  */
 export const RECOMMENDED_LOADOUT: Record<LoadoutChapter, readonly LoadoutEntry[]> = {
   2: [
     { kind: 'gear', id: 'armor_composite' },
     { kind: 'companion', id: 'scanner_drone' },
+    { kind: 'gear', id: 'weapon_laser' },
   ],
   3: [
-    { kind: 'gear', id: 'weapon_laser' },
     { kind: 'ship', id: 'hull', tier: 1 },
     { kind: 'ship', id: 'shield', tier: 1 },
   ],
@@ -166,6 +178,50 @@ export function totalTokenSink(): { ship: number; gear: number; companions: numb
     companions += companion.cost + companion.upgradeCosts[0] + companion.upgradeCosts[1];
   }
   return { ship, gear, companions, total: ship + gear + companions };
+}
+
+/** SPEC-039 §4.2: every `itemId` of a `signature` or `item` row in any loot table. */
+export function lootGivenItems(): ReadonlySet<ItemId> {
+  const given = new Set<ItemId>();
+  for (const table of Object.values(LOOT_TABLE)) {
+    for (const entry of table) {
+      if (entry.kind === 'signature' || entry.kind === 'item') given.add(entry.itemId);
+    }
+  }
+  return given;
+}
+
+/**
+ * SPEC-039 §4.2: the part of the sink a player has to *decide* about — every
+ * priced weapon and armour piece no loot table hands out (the rifle and armour
+ * ladders), the surface and station companions' full ladders, and the most
+ * expensive ship gate a planet unlock names (the Ferrum shield, tiers 1…2).
+ * The invariant holds it at ≥ 0.75 × `completionistTokens()` (PLAN R18
+ * decision 4b), which is what "specialization is forced" means once the free
+ * drops are taken out.
+ */
+export function decisionSink(): { gear: number; companions: number; gate: number; total: number } {
+  const given = lootGivenItems();
+  let gear = 0;
+  for (const item of Object.values(ITEM_TABLE)) {
+    if (item.kind === 'consumable' || item.price === null || given.has(item.id)) continue;
+    gear += item.price.tokens;
+  }
+  let companions = 0;
+  for (const companion of Object.values(COMPANION_TABLE)) {
+    if (companion.domain !== 'surface' && companion.domain !== 'station') continue;
+    companions += companion.cost + companion.upgradeCosts[0] + companion.upgradeCosts[1];
+  }
+  let gate = 0;
+  for (const planet of Object.values(PLANET_TABLE)) {
+    for (const requirement of planet.unlock) {
+      if (requirement.kind !== 'ship') continue;
+      let cost = 0;
+      for (const tier of UPGRADE_TABLE[requirement.system].tiers.slice(0, requirement.tier)) cost += tier.tokens;
+      gate = Math.max(gate, cost);
+    }
+  }
+  return { gear, companions, gate, total: gear + companions + gate };
 }
 
 /** The largest single `collect` objective in the campaign (E3, the cargo margin). */

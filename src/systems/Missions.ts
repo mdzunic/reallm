@@ -343,6 +343,20 @@ export class Missions {
     return null;
   }
 
+  /**
+   * SPEC-039 §3: the mission whose current stage wants a boss, or null — the
+   * same walk as `bossStage()`, so the two always name the same stage. The
+   * surface asks `isReplay` of it when the arena spawns the boss.
+   */
+  bossStageMission(): MissionId | null {
+    for (const state of this.#states) {
+      for (const { objective, done } of this.currentObjectives(state.id)) {
+        if (objective.kind === 'boss' && !done) return state.id;
+      }
+    }
+    return null;
+  }
+
   /** The defend wave of a current stage, for the scene to start (§4.7). */
   defendStage(): { poi: PoiId; wave: WaveId; seconds: number } | null {
     for (const state of this.#states) {

@@ -5,9 +5,10 @@
 import { describe, expect, it } from 'vitest';
 import { Rng } from '@/core/Rng';
 import { maxHp, newSave, type CharacterCreation, type Save } from '@/core/Save';
-import { COMPANIONS, ITEMS, MISSIONS, TUNING, UPGRADES, type MissionDef } from '@/data/index';
+import { CLASSES, COMPANIONS, ITEMS, MISSIONS, PLANET_IDS, TUNING, UPGRADES, type MissionDef } from '@/data/index';
 import type { SlotState, SlotView } from '@/systems/Loadout';
-import { discountTokens } from '@/systems/Economy';
+import { discountTokens, Economy } from '@/systems/Economy';
+import { Progression, type EventSink } from '@/systems/Progression';
 import { CARGO_TOAST_SECONDS, SHIPPED_TOAST_TEXT } from '@/systems/Pickups';
 import {
   surfaceHoldReason,
@@ -52,8 +53,15 @@ import {
   requirementText,
   companionEffectText,
   failText,
+  gearCompare,
   gearCompareText,
   gearTooltip,
+  bossDropText,
+  refitLine,
+  refitText,
+  shipGateText,
+  shipRoleText,
+  shopStatText,
   passiveText,
   rewardsText,
   slotLine,
@@ -645,7 +653,9 @@ describe('passiveText (AC-14)', () => {
   });
 
   it('covers discounts, multipliers and the radar flag', () => {
-    expect(passiveText({ shipTokenDiscount: 0.15, companionEffectMult: 1.25 })).toBe('−15% ship prices · +25% companion effect');
+    expect(passiveText({ refitDiscount: 0.15, companionEffectMult: 1.25 })).toBe(
+      '−15% ship and companion prices · +25% companion effect',
+    );
     expect(passiveText({ moveSpeedMult: 1.15, pickupRadiusMult: 1.25, nodeRadar: true })).toBe(
       '+15% move speed · +25% pickup radius · resource radar',
     );
@@ -696,7 +706,7 @@ describe('companionEffectText (AC-39)', () => {
   });
 
   it('covers station and flight domains', () => {
-    expect(companionEffectText({ cargoBonus: 100, shopDiscount: 0.1 })).toBe('+100 cargo · −10% gear and craft prices');
+    expect(companionEffectText({ cargoBonus: 100, shopDiscount: 0.1 })).toBe('+100 cargo · −10% shop prices');
     expect(companionEffectText({ shieldRegen: 2, autoAim: true, hullBonus: 20 })).toBe('+2/s shield regen · auto-aim · +20 hull');
   });
 });
@@ -727,7 +737,7 @@ describe('gearCompareText (AC-47)', () => {
 
 describe('gearTooltip (AC-47)', () => {
   it('compares an equipped weapon to the next tier in its ladder', () => {
-    expect(gearTooltip('weapon_kinetic')).toBe('T0 → T1 · damage 12 → 18 · fire rate 3 → 4 · range 14 → 18');
+    expect(gearTooltip('weapon_kinetic')).toBe('T0 → T1 · DPS 36 → 72 · damage 12 → 18 · fire rate 3 → 4 · range 14 → 18');
   });
 
   it('compares an equipped armor to the next tier in its ladder', () => {
@@ -1118,5 +1128,191 @@ describe('contrastRatio (SPEC-035 §4.1)', () => {
   it('pins the WCAG luminance of white and black', () => {
     expect(relativeLuminance('#ffffff')).toBeCloseTo(1, 10);
     expect(relativeLuminance('#000000')).toBeCloseTo(0, 10);
+  });
+});
+
+// ------------------------------------------------------------------ SPEC-039
+
+/** A real `Economy` over `data`, for the prices the Refit line charges. */
+function economyOf(data: Save): Economy {
+  const sink: EventSink = { emit: () => {} };
+  return new Economy(data, sink, new Progression(data, sink));
+}
+
+describe('gearStatLines and the shop stat line (SPEC-039 §4.6)', () => {
+  it('prints the DPS of each cooldown model, rounded off weaponDps', () => {
+    expect(gearStatLines('weapon_laser')).toContain('DPS 72');
+    expect(gearStatLines('mg_scrap')).toContain('DPS 110 firing · 64 sustained');
+    expect(gearStatLines('mg_rotary')).toContain('DPS 156 firing · 84 sustained');
+    expect(gearStatLines('launcher_rocket')).toContain('DPS 15 sustained');
+    expect(gearStatLines('launcher_grenade')).toContain('DPS 19 sustained');
+    // The other lines are unchanged.
+    expect(gearStatLines('mg_scrap')).toEqual([
+      'Damage 11',
+      'Fire rate 10/s',
+      'DPS 110 firing · 64 sustained',
+      'Range 13 m',
+      'Projectile speed 30 m/s',
+      'Pierce 0',
+      'Overheats — locks until it cools',
+    ]);
+  });
+
+  it('the shop row prints the DPS line and the range, or the armour numbers', () => {
+    expect(shopStatText('weapon_laser')).toBe('DPS 72 · range 18 m');
+    expect(shopStatText('mg_scrap')).toBe('DPS 110 firing · 64 sustained · range 13 m');
+    expect(shopStatText('launcher_rocket')).toBe('DPS 15 sustained · range 22 m');
+    // 15 / (15 + 100) of the damage, and a quarter of the weather.
+    expect(shopStatText('armor_composite')).toBe('armor 15 · −13% damage · hazard 25%');
+    expect(shopStatText('armor_ablative')).toBe('armor 45 · −31% damage · hazard 75%');
+    expect(shopStatText('medkit')).toBe('');
+  });
+});
+
+describe('gearCompare and gearCompareText (SPEC-039 §4.6)', () => {
+  it('compares two weapons of one slot across lines: DPS, firing, damage, rate, range, cooldown — no tier', () => {
+    expect(gearCompare('weapon_laser', 'mg_scrap')).toEqual([
+      { stat: 'dps', label: 'DPS', from: 72, to: 64 },
+      { stat: 'firing', label: 'firing DPS', from: 72, to: 110 },
+      { stat: 'damage', label: 'damage', from: 18, to: 11 },
+      { stat: 'fireRate', label: 'fire rate', from: 4, to: 10 },
+      { stat: 'range', label: 'range', from: 18, to: 13 },
+      { stat: 'cooldown', label: 'cooldown', from: 'none', to: 'heat' },
+    ]);
+    expect(gearCompareText('weapon_laser', 'mg_scrap')).toBe(
+      'DPS 72 → 64 · firing DPS 72 → 110 · damage 18 → 11 · fire rate 4 → 10 · range 18 → 13 · cooldown none → heat',
+    );
+    expect(gearCompareText('weapon_kinetic', 'mg_scrap')).toBe(
+      'DPS 36 → 64 · firing DPS 36 → 110 · damage 12 → 11 · fire rate 3 → 10 · range 14 → 13 · cooldown none → heat',
+    );
+  });
+
+  it('inside one line it leads with the tier, and compares heat or recharge where both carry it', () => {
+    expect(gearCompareText('mg_scrap', 'mg_rotary')).toBe(
+      'T1 → T3 · DPS 64 → 84 · firing DPS 110 → 156 · damage 11 → 13 · fire rate 10 → 12 · range 13 → 16',
+    );
+    expect(gearCompareText('launcher_rocket', 'launcher_grenade')).toBe(
+      'T1 → T2 · DPS 15 → 19 · damage 90 → 60 · fire rate 1 → 2.5 · range 22 → 16 · recharge 6 s → 9 s',
+    );
+    expect(gearCompareText('pistol_service', 'pistol_magnum')).toBe(
+      'T0 → T2 · DPS 27 → 48 · damage 9 → 30 · fire rate 3 → 1.6 · range 12 → 15 · pierce 0 → 1',
+    );
+  });
+
+  it('armour compares as it always did', () => {
+    expect(gearCompareText('armor_scrap', 'armor_composite')).toBe('T0 → T1 · armor 0 → 15 · hazard resist 0 → 0.25');
+    expect(gearCompare('armor_composite', 'armor_reactive').map((part) => part.stat)).toEqual(['tier', 'armor', 'hazardResist']);
+  });
+
+  it('items of different slots, and consumables, compare as nothing', () => {
+    expect(gearCompare('weapon_laser', 'pistol_magnum')).toEqual([]);
+    expect(gearCompare('weapon_laser', 'launcher_rocket')).toEqual([]);
+    expect(gearCompare('weapon_laser', 'armor_composite')).toEqual([]);
+    expect(gearCompare('medkit', 'wheat_ration')).toEqual([]);
+    expect(gearCompareText('weapon_laser', 'pistol_magnum')).toBe('');
+    expect(gearCompareText('launcher_rocket', 'mg_scrap')).toBe('');
+  });
+
+  it('the same piece compares as nothing', () => {
+    expect(gearCompare('mg_scrap', 'mg_scrap')).toEqual([]);
+  });
+});
+
+describe('bossDropText (SPEC-039 §4.6)', () => {
+  it('names the piece while the mission is new and the piece unowned', () => {
+    expect(bossDropText(save(), MISSIONS.c1_m3)).toBe('Boss drop: Rocket Launcher');
+    expect(bossDropText(save(), MISSIONS.c2_m3)).toBe('Boss drop: Scrap Chaingun');
+  });
+
+  it('reads 25 lithium on a replay, or with the piece carried or worn', () => {
+    expect(bossDropText(save((s) => void s.progress.missionsDone.push('c1_m3')), MISSIONS.c1_m3)).toBe('Boss drop: 25 lithium');
+    expect(bossDropText(save((s) => void s.inventory.push({ itemId: 'launcher_rocket', qty: 1 })), MISSIONS.c1_m3)).toBe(
+      'Boss drop: 25 lithium',
+    );
+    expect(bossDropText(save((s) => void (s.equipped.heavy = 'launcher_rocket')), MISSIONS.c1_m3)).toBe('Boss drop: 25 lithium');
+  });
+
+  it('is null for a mission with no boss objective', () => {
+    expect(bossDropText(save(), MISSIONS.c1_m1)).toBeNull();
+    expect(bossDropText(save(), MISSIONS.c1_m2)).toBeNull();
+  });
+});
+
+describe('the Refit line (SPEC-039 §4.6)', () => {
+  it('a new marine 6/5/1/1 reads Vetra and the chapter-2 loadout at its discounted prices', () => {
+    const data = save();
+    expect(refitText(data, economyOf(data))).toBe('Refit for Vetra: Composite Weave 39 · Scanner Drone 20 · Laser Carbine 39');
+    expect(refitLine(data, economyOf(data))?.planet).toBe('vetra');
+  });
+
+  it('drops what the save owns, and reads ready with nothing missing', () => {
+    const laser = save((s) => void s.inventory.push({ itemId: 'weapon_laser', qty: 1 }));
+    expect(refitText(laser, economyOf(laser))).toBe('Refit for Vetra: Composite Weave 39 · Scanner Drone 20');
+    const ready = save((s) => {
+      s.inventory.push({ itemId: 'weapon_laser', qty: 1 });
+      s.equipped.armor = 'armor_composite';
+      s.companions.push({ id: 'scanner_drone', level: 1, enabled: true });
+    });
+    expect(refitText(ready, economyOf(ready))).toBe('Refit for Vetra: ready');
+  });
+
+  it('before Ferrum with shield 1, the shield tier the gate names is marked required', () => {
+    const data = save((s) => {
+      s.progress.visits = { cinder4: 3, vetra: 1, thessaly: 1 };
+      s.inventory.push({ itemId: 'weapon_laser', qty: 1 });
+      s.equipped.armor = 'armor_composite';
+      s.companions.push({ id: 'scanner_drone', level: 1, enabled: true });
+      s.ship.hull = 1;
+      s.ship.shield = 1;
+    });
+    expect(refitText(data, economyOf(data))).toBe('Refit for Ferrum: Shield tier 2 88 (required) · Combat Drone 30');
+    const line = refitLine(data, economyOf(data));
+    expect(line?.entries.map((entry) => entry.required)).toEqual([true, false]);
+  });
+
+  it('prices every entry through the economy, discounts and all', () => {
+    const data = save((s) => {
+      s.player.classId = 'engineer';
+      s.player.attributes = { ...CLASSES.engineer.baseAttributes, tech: 8 };
+    });
+    // 0.15 refit on the companion, 0.24 of tech on everything.
+    expect(refitText(data, economyOf(data))).toBe(
+      `Refit for Vetra: Composite Weave ${discountTokens(40, 0.24)} · Scanner Drone ${discountTokens(20, 0.39)} · Laser Carbine ${discountTokens(40, 0.24)}`,
+    );
+  });
+
+  it('39-k: with every planet of chapter ≥ 2 landed on there is no line', () => {
+    const data = save((s) => {
+      for (const planet of PLANET_IDS) s.progress.visits[planet] = 1;
+    });
+    expect(refitLine(data, economyOf(data))).toBeNull();
+    expect(refitText(data, economyOf(data))).toBeNull();
+  });
+});
+
+describe('ship role and gate lines (SPEC-039 §4.5)', () => {
+  it('says what each system acts on', () => {
+    expect(shipRoleText('hull')).toBe('Flight: hull points');
+    expect(shipRoleText('shield')).toBe('Flight: shield points');
+    expect(shipRoleText('weapon')).toBe('Flight: nose guns');
+    expect(shipRoleText('engine')).toBe('Flight time and fuel per jump');
+    expect(shipRoleText('cargo')).toBe('The hold, on every planet');
+  });
+
+  it('marks the shield Required for Ferrum until the save meets the gate', () => {
+    expect(shipGateText(save(), 'shield')).toBe('Required for Ferrum');
+    expect(shipGateText(save((s) => void (s.ship.shield = 1)), 'shield')).toBe('Required for Ferrum');
+    expect(shipGateText(save((s) => void (s.ship.shield = 2)), 'shield')).toBeNull();
+    expect(shipGateText(save((s) => void (s.ship.shield = 3)), 'shield')).toBeNull();
+    for (const system of ['hull', 'weapon', 'engine', 'cargo'] as const) expect(shipGateText(save(), system)).toBeNull();
+  });
+});
+
+describe('one damage formula (SPEC-039 §4.7)', () => {
+  it('the preview carries the level factor: a marine 6/5/1/1 at level 17 with the Lithium Edge reads 72', () => {
+    const attributes = { might: 6, vigor: 5, agility: 1, tech: 1 };
+    expect(computePlayerStats('marine', attributes, 17, 'weapon_lithium').damage).toBe(72);
+    // Unchanged at level 1: 40 × 1.10 × 1.24.
+    expect(computePlayerStats('marine', attributes, 1, 'weapon_lithium').damage).toBe(54.6);
   });
 });

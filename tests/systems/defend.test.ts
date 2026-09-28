@@ -82,6 +82,7 @@ describe("Eden's last wave reaches the beacon (SPEC-034 §4.8)", () => {
     const port: EconomyPort = {
       addResource: () => ({ added: 0, shipped: 0, blocked: 0 }),
       addItem: () => ({ added: 0, blocked: 0 }),
+      owns: () => false,
     };
     const stats = computePlayerStats(save);
     const world: CombatWorld = {
