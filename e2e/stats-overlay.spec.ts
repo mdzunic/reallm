@@ -244,25 +244,33 @@ async function overFrames(
   };
 }
 
-test('quality.targetFps 30 skips every second render, updates untouched (AC-57)', async ({ page }) => {
+test('quality.targetFps 30 draws at most 30 frames a second, updates untouched (AC-57, SPEC-040 §4.2)', async ({ page }) => {
   await start(page, '/?debug&quality=low');
   expect((await page.evaluate(() => window.__reallm.stats())).preset).toBe('low');
 
   const { frames, renders, simulated, dropped, wall } = await overFrames(page, 40);
 
   expect(frames).toBeGreaterThan(20); // the loop really ran
-  expect(renders / frames).toBeGreaterThan(0.4);
-  expect(renders / frames).toBeLessThan(0.6);
-  // The fixed updates kept their own rate: the render skip halves the draws
-  // and leaves the simulation alone, so the seconds the starfield turned
-  // through are the seconds the window actually lasted — minus whatever the
-  // five-step cap explicitly threw away on a hitch (E23). Halving the updates
-  // along with the renders, which is the regression this guards, would leave
-  // `simulated` at half of `wall` and fail here at any frame rate.
+  // SPEC-040 §4.2 supersedes D-3's tick parity: 30 is paced by the clock. A
+  // 60 Hz display draws every second frame, as before; a host that cannot
+  // reach 60 — this container, with several browsers at once — draws every
+  // frame it gets, up to 30 a second, where parity would have halved it again
+  // (40-c). So the draws are min(frame rate, 30) a second, give or take one.
+  const expected = Math.min(frames, wall * 30);
+  expect(renders).toBeLessThanOrEqual(Math.ceil(wall * 30) + 1);
+  expect(renders).toBeGreaterThanOrEqual(Math.floor(expected * 0.8) - 1);
+  // The fixed updates kept their own rate: the pacer drops draws and leaves
+  // the simulation alone, so the seconds the starfield turned through are the
+  // seconds the window actually lasted — minus whatever the five-step cap
+  // explicitly threw away on a hitch (E23). Dropping updates along with the
+  // draws, which is the regression this guards, would leave `simulated` short
+  // of `wall` and fail here at any frame rate.
   expect(simulated + dropped).toBeGreaterThan(wall * 0.9);
   expect(simulated).toBeLessThan(wall * 1.05);
 });
 
+// SPEC-040 §4.2: at a 60 target every frame that ran a fixed step is drawn,
+// which on a display of 60 Hz or less is every frame.
 test('the other presets render every frame (AC-57)', async ({ page }) => {
   await start(page, '/?debug&quality=high');
   const { frames, renders } = await overFrames(page, 20);

@@ -65,6 +65,11 @@ async function endRamp(page: Page): Promise<void> {
 
 test('the spawn-heavy medium frame stays within 96 draws and 130 k triangles', async ({ page }) => {
   test.setTimeout(150_000);
+  // SPEC-040 §4.3: this container cannot hold 60 on `medium`, so after 15 s in
+  // play the adaptive governor would step the session down to `low` — and the
+  // budget below would be measured on the wrong preset. The budget is about
+  // `medium`, so the governor is off for it (E68, 40-g).
+  await page.addInitScript(() => localStorage.setItem('reallm:settings', JSON.stringify({ adaptiveQuality: false })));
   await start(page, URL);
   await endRamp(page);
   await page.waitForFunction(
