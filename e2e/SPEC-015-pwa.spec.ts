@@ -131,6 +131,21 @@ async function newGameToStation(page: Page, slot: 0 | 1): Promise<void> {
   await expect(page.locator('[data-testid="station-root"]')).toBeVisible({ timeout: 60_000 });
 }
 
+/**
+ * The station's arrival lines are modal: their dim takes every tap until they
+ * are read, and a tap on the line itself is what reads them (SPEC-014 AC-72 —
+ * the first fills it, the next advances; under reduced motion it lands full).
+ */
+async function dismissDialogue(page: Page): Promise<void> {
+  const dim = page.locator('.dialogue-dim.is-visible');
+  await expect(dim).toBeVisible(COLD_START);
+  for (let i = 0; i < 20 && (await dim.count()) > 0; i++) {
+    await page.locator('[data-testid="dialogue"]').click();
+    await page.waitForTimeout(150);
+  }
+  await expect(dim).toHaveCount(0);
+}
+
 test.describe('installability, from the served build (AC-58)', () => {
   test('serves a manifest carrying every AC-49 field', async ({ page }) => {
     await page.goto(gameUrl('/'));
@@ -225,6 +240,7 @@ test.describe('the worker waits for the station (SPEC-040 §6.3, AC-28, AC-29, A
     // Through New Game to the station: the worker registers there and installs.
     await newGameToStation(page, 0);
     expect(await workerState(page)).toBe('activated');
+    await dismissDialogue(page);
     await page.locator('[data-testid="station-tab-settings"]').click();
     await expect(page.locator('[data-testid="settings-offline"]')).toHaveText('Offline play: ready');
 
