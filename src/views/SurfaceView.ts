@@ -1370,14 +1370,8 @@ export class SurfaceView {
     }
   }
 
-  // ------------------------------------------------------- SPEC-035 §4.5
+  // ------------------------------------------------------- SPEC-040 §4.6
 
-  /**
-   * SPEC-035 §4.5 — every prop that could hide the player, as the pure
-   * `occludes` of SPEC-035 §3 sees it: outcrops, scatter props, landmarks and
-   * the cave and wreck bodies. The array is built once and never replaced, so
-   * the scene can keep a parallel flag buffer of the same length.
-   */
   /**
    * SPEC-040 §4.6, E72: the planet's prop models, swapped in after the view was
    * built — the set landed later than the surface would wait for it. Each prop
@@ -1442,6 +1436,14 @@ export class SurfaceView {
     return glow;
   }
 
+  // ------------------------------------------------------- SPEC-035 §4.5
+
+  /**
+   * SPEC-035 §4.5 — every prop that could hide the player, as the pure
+   * `occludes` of SPEC-035 §3 sees it: outcrops, scatter props, landmarks and
+   * the cave and wreck bodies. The array is built once and never replaced, so
+   * the scene can keep a parallel flag buffer of the same length.
+   */
   get occluderProps(): readonly OccluderProp[] {
     return this.#occluders;
   }
