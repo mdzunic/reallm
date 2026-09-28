@@ -90,20 +90,6 @@ export const SHOT_INTERVAL_MS: Readonly<Record<GameEvents['weapon:fired']['line'
   ship: 90,
 };
 
-/** SPEC-038 §4.10 — the cue per windup kind. */
-export const WINDUP_SOUNDS: Readonly<Record<GameEvents['enemy:windup']['kind'], SoundId>> = {
-  melee: 'windup_melee',
-  charge: 'windup_charge',
-  shot: 'windup_shot',
-};
-
-/** SPEC-038 §4.10 — a skitter pack chitters 120 ms apart at half volume; the charge is the loudest. */
-const WINDUP_OPTS: Readonly<Record<GameEvents['enemy:windup']['kind'], { minIntervalMs: number; volume: number }>> = {
-  melee: { minIntervalMs: 120, volume: 0.5 },
-  charge: { minIntervalMs: 150, volume: 0.9 },
-  shot: { minIntervalMs: 150, volume: 0.7 },
-};
-
 /** `elite` wins over the archetype, whatever the id (§5.3, AC-41). */
 export function enemyDeathSound(enemyId: EnemyId, elite: boolean): SoundId {
   if (elite) return 'elite_death';
@@ -122,18 +108,12 @@ export function pickupSound(resource: ResourceId): SoundId {
 
 // ------------------------------------------------------------- the two halves
 
-/**
- * The 19 events of §5.2 (SPEC-029 §4.12 adds four, SPEC-035 §4.11 two more,
- * SPEC-038 §4.10 the dash and the windup cue) that make a sound.
- */
+/** The 19 events of §5.2 (SPEC-029 §4.12 adds four, SPEC-035 §4.11 two more) that make a sound. */
 export type ReactedEvent =
   | 'combat:blast'
   // SPEC-035 §4.11 adds the two that make the guns audible at all.
   | 'weapon:fired'
   | 'enemy:hit'
-  // SPEC-038 §4.10: the dash's whoosh, and the cue that an attack is coming.
-  | 'player:dashed'
-  | 'enemy:windup'
   | 'weapon:locked'
   | 'weapon:switched'
   | 'mine:armed'
@@ -247,15 +227,8 @@ export const AUDIO_REACTIONS: { [K in ReactedEvent]: Reaction<K> } = {
     id: SHOT_SOUNDS[p.line],
     opts: p.line === 'ship' ? { minIntervalMs: SHOT_INTERVAL_MS.ship } : { x: p.x, z: p.z, minIntervalMs: SHOT_INTERVAL_MS[p.line] },
   }),
-  /**
-   * SPEC-035 §4.11: the dull thud that tells the player the shot connected.
-   * SPEC-038 §4.8: a crit lands it at full volume.
-   */
-  'enemy:hit': (p) => ({ id: 'impact', opts: { x: p.x, z: p.z, minIntervalMs: 50, volume: p.crit === true ? 1 : 0.6 } }),
-  /** SPEC-038 §4.10: positioned, with no floor — a dash has its own cooldown. */
-  'player:dashed': (p) => ({ id: 'dash', opts: { x: p.x, z: p.z } }),
-  /** SPEC-038 §4.10: one cue per kind, each with its own floor and level. */
-  'enemy:windup': (p) => ({ id: WINDUP_SOUNDS[p.kind], opts: { x: p.x, z: p.z, ...WINDUP_OPTS[p.kind] } }),
+  /** SPEC-035 §4.11: the dull thud that tells the player the shot connected. */
+  'enemy:hit': (p) => ({ id: 'impact', opts: { x: p.x, z: p.z, minIntervalMs: 50, volume: 0.6 } }),
   'weapon:locked': () => ({ id: 'ui_warn' }),
   'weapon:switched': () => ({ id: 'ui_blip' }),
   'mine:armed': (p) => ({ id: 'scan_done', opts: { x: p.x, z: p.z, priority: 0 } }),

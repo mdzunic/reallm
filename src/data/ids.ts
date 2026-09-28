@@ -42,14 +42,6 @@ export const WEATHER_IDS = [
 ] as const;
 export type WeatherId = (typeof WEATHER_IDS)[number];
 
-/**
- * SPEC-038 §3: the difficulty a run is played on — `save.meta.difficulty`, the
- * creation choice and the flight config. Changeable in Settings (PLAN §4);
- * SPEC-043 appends `hard`.
- */
-export const DIFFICULTIES = ['casual', 'normal'] as const;
-export type Difficulty = (typeof DIFFICULTIES)[number];
-
 /** The five assistants of PLAN §4; `aria` is free from the first save. */
 export const COMPANION_IDS = ['scanner_drone', 'combat_drone', 'field_medic', 'quartermaster', 'aria'] as const;
 export type CompanionId = (typeof COMPANION_IDS)[number];

@@ -24,7 +24,6 @@ import {
   UPGRADES,
   type Attributes,
   type ClassId,
-  type Difficulty,
   type ItemId,
   type CompanionEffect,
   type FollowerId,
@@ -81,19 +80,8 @@ export function passiveText(passive: Class['passive']): string {
   if (passive.moveSpeedMult !== undefined) parts.push(`${pct(passive.moveSpeedMult)} move speed`);
   if (passive.pickupRadiusMult !== undefined) parts.push(`${pct(passive.pickupRadiusMult)} pickup radius`);
   if (passive.nodeRadar === true) parts.push('resource radar');
-  if (passive.dashCooldownMult !== undefined) parts.push(`${pct(passive.dashCooldownMult)} dash cooldown`);
   return parts.join(' · ');
 }
-
-/**
- * SPEC-014 AC-18, SPEC-038 §4.6: the one honest line under each difficulty —
- * the creation toggle and the settings row print the same words, so it lives
- * here rather than in either of them.
- */
-export const DIFFICULTY_LINES: Readonly<Record<Difficulty, string>> = {
-  normal: 'Normal — the pressure the game was tuned for.',
-  casual: 'Casual — softer hits and storms, longer wind-ups, kinder deaths; the story is unchanged.',
-};
 
 /**
  * One line per occupied slot for the Load list (AC-4): name, class, level,
@@ -666,8 +654,6 @@ export interface HudModel {
   interactAction: boolean;
   /** SPEC-037 §4.2: the wallet strip at full opacity (`walletLit`), else 0.6. */
   walletLit: boolean;
-  /** SPEC-038 §4.1: the dash's cooldown ring — 1 at the press, 0 when ready. */
-  dash: number;
   flight?: {
     shield: [number, number];
     hull: [number, number];
@@ -700,7 +686,6 @@ export function createHudModel(): HudModel {
     interact: null,
     interactAction: false,
     walletLit: false,
-    dash: 0,
   };
 }
 

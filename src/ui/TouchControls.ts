@@ -15,8 +15,7 @@
 // SPEC-037 §4.1: the surface keeps only USE and pause. USE is mounted into the
 // HUD's thumb arc (`mountButton`) and keeps this layer's visibility rules
 // there; pause sits alone at the top right in both modes; the flight's ▲ / ▼
-// keep the row at the bottom corner. SPEC-038 §4.1 adds DASH, mounted into the
-// arc's corner cell the same way. The HUD's own reticle is the flight's one
+// keep the row at the bottom corner. The HUD's own reticle is the flight's one
 // aim mark, so this layer draws none.
 import {
   FLIGHT_STEER_FRACTION,
@@ -59,14 +58,12 @@ export const ZONES_SECONDS = 12;
  * thumb's width away, and two copies cost the room the stick needs.
  */
 export const MODE_BUTTONS: Readonly<Record<InputMode, readonly Action[]>> = {
-  // SPEC-038 §4.1: DASH, mounted into the thumb arc's `arc-primary` cell. The
-  // flight lists none, so the rail never sees the button (or the action).
-  surface: ['interact', 'dash', 'pause'],
+  surface: ['interact', 'pause'],
   flight: ['throttleUp', 'throttleDown', 'pause'],
 };
 
 /** Every button the layer builds: the union of `MODE_BUTTONS`, and nothing else. */
-const BUILT_BUTTONS = ['interact', 'dash', 'throttleUp', 'throttleDown', 'pause'] as const;
+const BUILT_BUTTONS = ['interact', 'throttleUp', 'throttleDown', 'pause'] as const;
 
 const BUTTON_LABELS: Readonly<Record<Action, string>> = {
   fire: 'FIRE',
@@ -87,7 +84,6 @@ const BUTTON_LABELS: Readonly<Record<Action, string>> = {
   weaponPrev: 'SWAP',
   throwItem: 'THROW',
   useUtility: 'GADGET',
-  dash: 'DASH',
 };
 
 export class TouchControls {

@@ -69,78 +69,18 @@ export const WANDER_SPEED_MULT = 0.4;
 /** Enemy projectile flight allowance past the firing range. Initial tuning. */
 export const ENEMY_PROJECTILE_RANGE_MULT = 1.5;
 
-/** SPEC-038 §3: what a windup is winding up — the `enemy:windup` cue's kind. SPEC-041 adds the boss kinds. */
-export type WindupKind = 'melee' | 'charge' | 'shot';
-/** SPEC-038 §4.3: a swarm keeps closing at this × its speed while it winds up. */
-export const SWARM_WINDUP_TRACK = 1;
-/**
- * SPEC-038 §4.3, *initial tuning*: the rusher's charge. It triggers within
- * `trigger` m on a clear line, winds up `windup` s rooted while its facing turns
- * at up to `turnRate` rad/s — locked `lock` s before the run — then runs at
- * `speed` m/s for up to `length` m. First contact deals `damageMult` × with
- * `knockback` m and recovers `recoverHit` s; a whiff recovers `recoverWhiff` s.
- * The next charge waits `cooldown` s. `pad` widens the lane and the reach.
- */
-export const CHARGE = {
-  trigger: 6,
-  windup: 0.5,
-  lock: 0.15,
-  turnRate: 8,
-  speed: 20,
-  length: 10,
-  pad: 0.3,
-  damageMult: 1.3,
-  knockback: 1.0,
-  recoverHit: 0.5,
-  recoverWhiff: 0.9,
-  cooldown: 2.5,
-} as const;
-
 const TAU = Math.PI * 2;
 
 /** Side effects the brain asks of combat (damage, projectiles, summons, UI). */
 export interface AiHooks {
-  /**
-   * The windup completed and the hit check passed against `e.target` — or a
-   * charge touched it (SPEC-038 §4.3), which passes its multiplier and its
-   * knockback.
-   */
-  meleeHit(e: EnemyEntity, damageMult?: number, knockback?: number): void;
+  /** The windup completed and the hit check passed against `e.target`. */
+  meleeHit(e: EnemyEntity): void;
   fireProjectile(e: EnemyEntity, dirX: number, dirZ: number, speed: number, radius: number, range: number): void;
   summonRing(e: EnemyEntity, enemy: EnemyId, count: number, radius: number): void;
   phaseStarted(e: EnemyEntity, phase: number): void;
   /** The wurm resurfaced: hit the player within `radius` (§4.5). */
   shockwave(e: EnemyEntity, radius: number): void;
   toast(text: string): void;
-  /** SPEC-038 §4.2: a windup started — `enemy:windup` and its cue. */
-  windup(e: EnemyEntity, kind: WindupKind): void;
-  /**
-   * SPEC-038 §4.2: a lane from `e` along its facing, landing `windup` s (× the
-   * casual multiplier) from now and following `e` until `lockIn` s before that.
-   * False when the pool is full — the attack is cancelled (38-c).
-   */
-  telegraphLine(
-    e: EnemyEntity,
-    length: number,
-    width: number,
-    windup: number,
-    lockIn: number,
-    damageMult: number,
-    bodyResolved: boolean,
-  ): boolean;
-  telegraphCircle(e: EnemyEntity, x: number, z: number, radius: number, windup: number, damageMult: number): boolean;
-  telegraphRing(
-    e: EnemyEntity,
-    x: number,
-    z: number,
-    ringMax: number,
-    ringSpeed: number,
-    band: number,
-    windup: number,
-    damageMult: number,
-  ): boolean;
-  /** Frees every pending telegraph `e` drew (a death, a leash, a dismissal, the end of a charge). */
-  cancelTelegraphs(e: EnemyEntity): void;
 }
 
 // ------------------------------------------------------------------ helpers
@@ -192,8 +132,6 @@ function enterLeash(e: EnemyEntity): void {
   e.invulnerable = true;
   e.stuckTime = 0;
   e.sideUntil = 0;
-  e.recoverFor = 0;
-  e.chargeLeft = 0;
 }
 
 function pickWanderPoint(e: EnemyEntity, world: CombatWorld, rng: Rng): void {
@@ -344,7 +282,7 @@ function updateWander(e: EnemyEntity, world: CombatWorld, dt: number, rng: Rng):
   move(e, world, dt, (dx / d) * speed, (dz / d) * speed);
 }
 
-function updateChase(e: EnemyEntity, world: CombatWorld, dt: number, hooks: AiHooks): void {
+function updateChase(e: EnemyEntity, world: CombatWorld, dt: number): void {
   const target = targetOf(e, world);
   const arch = e.def.archetype;
   const d = distance(e.x, e.z, target.x, target.z);
@@ -355,20 +293,8 @@ function updateChase(e: EnemyEntity, world: CombatWorld, dt: number, hooks: AiHo
       return;
     }
   } else if (d <= meleeReach(e, target) && e.cooldown <= 0) {
-    // SPEC-038 §4.3: inside melee reach the SPEC-011 melee wins; the charge is
-    // the opener.
     enterState(e, 'windup');
     e.facing = Math.atan2(target.z - e.z, target.x - e.x);
-    hooks.windup(e, 'melee');
-    return;
-  } else if (
-    arch === 'rusher' &&
-    target.alive &&
-    d <= CHARGE.trigger &&
-    e.cooldown <= 0 &&
-    world.obstacles.lineClear(e.x, e.z, target.x, target.z)
-  ) {
-    startChargeWindup(e, target, hooks);
     return;
   }
 
@@ -398,15 +324,10 @@ function updateChase(e: EnemyEntity, world: CombatWorld, dt: number, hooks: AiHo
   e.facing = Math.atan2(target.z - e.z, target.x - e.x);
 }
 
-/** SPEC-038 §4.6: a windup's length on the world's difficulty (1.25× on casual). */
-function windupFor(seconds: number, world: CombatWorld): number {
-  return seconds * (world.windupMult ?? 1);
-}
-
-function updateWindup(e: EnemyEntity, world: CombatWorld, dt: number, hooks: AiHooks): void {
+function updateWindup(e: EnemyEntity, world: CombatWorld, hooks: AiHooks): void {
   const arch = e.def.archetype;
   if (arch === 'ranged') {
-    if (e.stateTime < windupFor(WINDUP_SECONDS.ranged, world)) return;
+    if (e.stateTime < WINDUP_SECONDS.ranged) return;
     // §4.5: fire at the target's *current* position — no leading, by design.
     const target = targetOf(e, world);
     const d = Math.max(1e-6, distance(e.x, e.z, target.x, target.z));
@@ -425,200 +346,24 @@ function updateWindup(e: EnemyEntity, world: CombatWorld, dt: number, hooks: AiH
     enterState(e, 'strafe');
     return;
   }
-  const windup = windupFor(
-    arch === 'boss' ? WINDUP_SECONDS.boss : arch === 'rusher' ? WINDUP_SECONDS.rusher : WINDUP_SECONDS.swarm,
-    world,
-  );
-  const target = targetOf(e, world);
-  // SPEC-038 §4.3: a swarm keeps closing while it winds up — full speed until
-  // it is inside half its reach — so walking away no longer erases the bite.
-  if (arch === 'swarm') trackDuringWindup(e, world, dt, target);
+  const windup = arch === 'boss' ? WINDUP_SECONDS.boss : arch === 'rusher' ? WINDUP_SECONDS.rusher : WINDUP_SECONDS.swarm;
   if (e.stateTime < windup) return;
   // §4.5: the hit check happens now, at range + 0.2 — a dodge steps outside it.
+  const target = targetOf(e, world);
   const d = distance(e.x, e.z, target.x, target.z);
   if (target.alive && d <= meleeReach(e, target) + ATTACK_REACH_BONUS) hooks.meleeHit(e);
   if (e.def.attack.kind === 'melee') e.cooldown = e.def.attack.cooldown;
-  e.recoverFor = 0; // the archetype's own pause
   enterState(e, 'attack');
 }
 
-/** SPEC-038 §4.3: the swarm's mobile windup — separation and the arena push apply, as in chase. */
-function trackDuringWindup(e: EnemyEntity, world: CombatWorld, dt: number, target: TargetInfo): void {
-  const d = distance(e.x, e.z, target.x, target.z);
-  if (target.alive && d >= meleeReach(e, target) * 0.5 && d > 1e-6) {
-    const speed = e.speed * SWARM_WINDUP_TRACK;
-    move(e, world, dt, ((target.x - e.x) / d) * speed, ((target.z - e.z) / d) * speed);
-  }
-  e.facing = Math.atan2(target.z - e.z, target.x - e.x);
-}
-
-/**
- * The post-hit recover; the rusher's 0.4 s pause lives here (§4.5). SPEC-038
- * §4.3: a charge sets its own (`recoverFor`) — 0.5 s after a hit, 0.9 s after
- * a whiff.
- */
+/** The post-hit recover; the rusher's 0.4 s pause lives here (§4.5). */
 function updateAttack(e: EnemyEntity): void {
   const arch = e.def.archetype;
-  const pause =
-    e.recoverFor > 0
-      ? e.recoverFor
-      : arch === 'rusher'
-        ? POST_ATTACK_PAUSE.rusher
-        : arch === 'boss'
-          ? POST_ATTACK_PAUSE.boss
-          : POST_ATTACK_PAUSE.swarm;
-  if (e.stateTime < pause) return;
-  e.recoverFor = 0;
-  enterState(e, 'chase');
+  const pause = arch === 'rusher' ? POST_ATTACK_PAUSE.rusher : arch === 'boss' ? POST_ATTACK_PAUSE.boss : POST_ATTACK_PAUSE.swarm;
+  if (e.stateTime >= pause) enterState(e, 'chase');
 }
 
-// --------------------------------------------------------- SPEC-038: charge
-
-/**
- * §4.3 — the trigger fired: face the target, cue the charge and draw the lane.
- * A lane the pool refused cancels the attack back into chase with the charge's
- * cooldown (38-c).
- */
-function startChargeWindup(e: EnemyEntity, target: TargetInfo, hooks: AiHooks): void {
-  e.facing = Math.atan2(target.z - e.z, target.x - e.x);
-  const width = 2 * (e.radius + CHARGE.pad + 0.5);
-  if (!hooks.telegraphLine(e, CHARGE.length, width, CHARGE.windup, CHARGE.lock, CHARGE.damageMult, true)) {
-    e.cooldown = CHARGE.cooldown;
-    return;
-  }
-  enterState(e, 'chargeWindup');
-  e.recoverFor = 0;
-  hooks.windup(e, 'charge');
-}
-
-/** The shortest signed turn from `from` to `to`, in (−π, π]. */
-function angleDelta(from: number, to: number): number {
-  let delta = (to - from) % TAU;
-  if (delta > Math.PI) delta -= TAU;
-  else if (delta <= -Math.PI) delta += TAU;
-  return delta;
-}
-
-/**
- * §4.3: rooted for the windup (× the casual multiplier), turning toward the
- * target at up to `turnRate` until `lock` s before the run — then locked. The
- * lock offset does not scale.
- */
-function updateChargeWindup(e: EnemyEntity, world: CombatWorld, dt: number, hooks: AiHooks): void {
-  const windup = windupFor(CHARGE.windup, world);
-  const target = targetOf(e, world);
-  if (e.stateTime < windup - CHARGE.lock) {
-    const wanted = Math.atan2(target.z - e.z, target.x - e.x);
-    const delta = angleDelta(e.facing, wanted);
-    const most = CHARGE.turnRate * dt;
-    e.facing += Math.max(-most, Math.min(most, delta));
-  }
-  e.vx = 0;
-  e.vz = 0;
-  if (e.stateTime < windup) return;
-  enterState(e, 'charge');
-  e.chargeLeft = CHARGE.length;
-  e.chargeSpeed = CHARGE.speed;
-  e.chargeReach = e.radius + world.player.radius + CHARGE.pad;
-  e.chargeDamageMult = CHARGE.damageMult;
-  e.chargeStops = true;
-  e.chargeHit = false;
-  // The first step of the run happens now, so the windup's end is the run's start.
-  updateCharge(e, world, dt, hooks);
-}
-
-/**
- * The first touch along the step from `(ax, az)` in the unit direction `(ux,
- * uz)` for `length` m: the distance travelled before the centre `(cx, cz)` came
- * within `reach`, or −1 when it never does. Already within is 0.
- */
-function sweptContact(ax: number, az: number, ux: number, uz: number, length: number, cx: number, cz: number, reach: number): number {
-  const wx = ax - cx;
-  const wz = az - cz;
-  const c = wx * wx + wz * wz - reach * reach;
-  if (c <= 0) return 0;
-  const b = wx * ux + wz * uz;
-  const disc = b * b - c;
-  if (disc < 0) return -1;
-  const s = -b - Math.sqrt(disc);
-  return s >= 0 && s <= length ? s : -1;
-}
-
-/**
- * §4.3: the run — `min(chargeLeft, speed × dt)` along the locked facing each
- * step, with no separation and no enemy collision (38-e). The obstacle test is
- * the axis slide: a blocked axis ends it at its last clear position, and so
- * does the wall (E61). The first of the player and the follower it touches takes
- * `meleeHit` with the charge's multiplier and knockback.
- */
-function updateCharge(e: EnemyEntity, world: CombatWorld, dt: number, hooks: AiHooks): void {
-  const ux = Math.cos(e.facing);
-  const uz = Math.sin(e.facing);
-  let travel = Math.min(e.chargeLeft, e.chargeSpeed * dt);
-  let blocked = false;
-  const nx = e.x + ux * travel;
-  const nz = e.z + uz * travel;
-  if (world.obstacles.hitsCircle(nx, e.z, e.radius) || world.obstacles.hitsCircle(e.x, nz, e.radius)) {
-    blocked = true;
-    travel = 0;
-  }
-  const bounds = world.bounds;
-  if (bounds !== undefined && travel > 0) {
-    // SPEC-030 §4.7: the wall clamps it — and a clamp ends the run.
-    const cx = Math.max(-bounds, Math.min(bounds, nx));
-    const cz = Math.max(-bounds, Math.min(bounds, nz));
-    if (cx !== nx || cz !== nz) {
-      blocked = true;
-      travel = Math.max(0, Math.min(travel, Math.hypot(cx - e.x, cz - e.z)));
-    }
-  }
-
-  // E61: whichever of the player and the follower is met first along the run.
-  let hitAt = -1;
-  let hitTarget: EnemyEntity['target'] = 'player';
-  const p = world.player;
-  if (p.alive) hitAt = sweptContact(e.x, e.z, ux, uz, travel, p.x, p.z, e.chargeReach);
-  const f = world.follower;
-  if (f !== null && f.alive) {
-    const reach = e.radius + f.radius + CHARGE.pad;
-    const s = sweptContact(e.x, e.z, ux, uz, travel, f.x, f.z, reach);
-    if (s >= 0 && (hitAt < 0 || s < hitAt)) {
-      hitAt = s;
-      hitTarget = 'follower';
-    }
-  }
-
-  const moved = hitAt >= 0 ? hitAt : travel;
-  e.x += ux * moved;
-  e.z += uz * moved;
-  e.vx = ux * e.chargeSpeed;
-  e.vz = uz * e.chargeSpeed;
-  e.chargeLeft -= moved;
-
-  if (hitAt >= 0) {
-    e.target = hitTarget;
-    hooks.meleeHit(e, e.chargeDamageMult, CHARGE.knockback);
-    e.chargeHit = true;
-    if (e.chargeStops) {
-      endCharge(e, hooks);
-      return;
-    }
-  }
-  if (blocked || e.chargeLeft <= 1e-6) endCharge(e, hooks);
-}
-
-/** The run is over: the lane goes, the next charge waits, and the brain recovers. */
-function endCharge(e: EnemyEntity, hooks: AiHooks): void {
-  hooks.cancelTelegraphs(e);
-  e.recoverFor = e.chargeHit ? CHARGE.recoverHit : CHARGE.recoverWhiff;
-  e.cooldown = CHARGE.cooldown;
-  e.chargeLeft = 0;
-  e.vx = 0;
-  e.vz = 0;
-  enterState(e, 'attack');
-}
-
-function updateStrafe(e: EnemyEntity, world: CombatWorld, dt: number, hooks: AiHooks): void {
+function updateStrafe(e: EnemyEntity, world: CombatWorld, dt: number): void {
   if (e.def.attack.kind !== 'ranged') {
     enterState(e, 'chase');
     return;
@@ -631,7 +376,6 @@ function updateStrafe(e: EnemyEntity, world: CombatWorld, dt: number, hooks: AiH
   if (e.cooldown <= 0 && d <= attack.range && target.alive) {
     enterState(e, 'windup');
     e.facing = Math.atan2(target.z - e.z, target.x - e.x);
-    hooks.windup(e, 'shot');
     return;
   }
 
@@ -747,7 +491,6 @@ function bossArenaLeash(e: EnemyEntity, world: CombatWorld, dt: number, hooks: A
   e.invulnerable = false;
   e.specialKind = 'none';
   enterState(e, 'wander');
-  hooks.cancelTelegraphs(e);
   hooks.toast(ARENA_RESET_TOAST);
   return true;
 }
@@ -795,23 +538,13 @@ export function updateEnemy(e: EnemyEntity, world: CombatWorld, dt: number, rng:
     }
   }
 
-  // SPEC-038 §4.3 (38-f): a charge is committed from its windup to the end of
-  // its run — it keeps its target, and hiding and a death apply after it.
-  const committed = e.state === 'chargeWindup' || e.state === 'charge';
-  if (e.aggro && !committed) selectTarget(e, world);
+  if (e.aggro) selectTarget(e, world);
 
   // SPEC-030 §4.6: an aggroed enemy loses a hidden player it cannot see for
   // 3 s — back to wander, drifting home through wander points, no leash heal.
   // `lostTrack` resets on any step where the player is not hidden or the line
   // is clear (D-20); aggro gain and damage reset it in Combat.
-  if (
-    world.playerHidden === true &&
-    e.aggro &&
-    e.target === 'player' &&
-    heedsHiding(e) &&
-    e.state !== 'leash' &&
-    !committed
-  ) {
+  if (world.playerHidden === true && e.aggro && e.target === 'player' && heedsHiding(e) && e.state !== 'leash') {
     if (world.obstacles.lineClear(e.x, e.z, world.player.x, world.player.z)) {
       e.lostTrack = 0;
     } else {
@@ -829,7 +562,7 @@ export function updateEnemy(e: EnemyEntity, world: CombatWorld, dt: number, rng:
   }
 
   // De-aggro (§4.5): player dead → wander; target out of leashRadius → leash.
-  if (e.aggro && !world.player.alive && !committed) {
+  if (e.aggro && !world.player.alive) {
     e.aggro = false;
     e.stuckTime = 0;
     enterState(e, 'wander');
@@ -840,10 +573,7 @@ export function updateEnemy(e: EnemyEntity, world: CombatWorld, dt: number, rng:
     const outOfLeash =
       distance(e.spawnX, e.spawnZ, e.x, e.z) > e.def.leashRadius ||
       (e.aggro && distance(e.spawnX, e.spawnZ, target.x, target.z) > e.def.leashRadius);
-    if (outOfLeash) {
-      enterLeash(e);
-      hooks.cancelTelegraphs(e); // SPEC-038 §4.2: a leash takes its lane with it
-    }
+    if (outOfLeash) enterLeash(e);
   }
 
   switch (e.state) {
@@ -852,22 +582,16 @@ export function updateEnemy(e: EnemyEntity, world: CombatWorld, dt: number, rng:
       updateWander(e, world, dt, rng);
       break;
     case 'chase':
-      updateChase(e, world, dt, hooks);
+      updateChase(e, world, dt);
       break;
     case 'windup':
-      updateWindup(e, world, dt, hooks);
-      break;
-    case 'chargeWindup':
-      updateChargeWindup(e, world, dt, hooks);
-      break;
-    case 'charge':
-      updateCharge(e, world, dt, hooks);
+      updateWindup(e, world, hooks);
       break;
     case 'attack':
       updateAttack(e);
       break;
     case 'strafe':
-      updateStrafe(e, world, dt, hooks);
+      updateStrafe(e, world, dt);
       break;
     case 'leash':
       updateLeash(e, world, dt);

@@ -22,10 +22,8 @@ export const SETTINGS_KEY = 'reallm:settings';
 export const SETTINGS_VERSION = 1 as const;
 
 /**
- * `'touch'` auto-fires only while the touch scheme is active, `'on'` and
- * `'off'` force it either way (SPEC-005 §4, AC-18). SPEC-038 §4.7 moved the
- * default to `'on'`: under committed attacks the skill is movement and target
- * choice, not aim. A stored choice still wins.
+ * `'touch'` (the default) auto-fires only while the touch scheme is active,
+ * `'on'` and `'off'` force it either way (SPEC-005 §4, AC-18).
  */
 export type AutoFireMode = 'touch' | 'on' | 'off';
 /**
@@ -202,9 +200,7 @@ export function defaultSettings(): Settings {
     quality: null,
     reduceMotion: prefersReducedMotion(),
     damageFlash: prefersReducedMotion() ? 'subtle' : 'full',
-    // SPEC-038 §4.7: on for every scheme; only keys a player changed persist,
-    // so a stored `'touch'` or `'off'` keeps its choice (38-l).
-    autoFire: 'on',
+    autoFire: 'touch',
     weaponAutoSwap: 'touch',
     joystickSide: 'left',
     flightMouseSteer: true,

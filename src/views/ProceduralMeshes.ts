@@ -476,7 +476,7 @@ const scratchEmissive = new THREE.Color();
 
 /** True while the brain is going somewhere — what drives the leg swing. */
 function isMoving(e: EnemyEntity): boolean {
-  return e.state === 'chase' || e.state === 'wander' || e.state === 'strafe' || e.state === 'charge';
+  return e.state === 'chase' || e.state === 'wander' || e.state === 'strafe';
 }
 
 /**
@@ -579,9 +579,7 @@ export class EnemyMeshes {
       if (slot >= INSTANCES_PER_PART) continue; // clamped, never crashed
       recipe.count++;
 
-      // SPEC-038 §4.3: a charge's windup rears the body like a blow's does.
-      const winding = e.state === 'windup' || e.state === 'chargeWindup';
-      const scale = e.def.look.scale * (e.elite ? ELITE_SCALE : 1) * (winding ? WINDUP_SCALE : 1);
+      const scale = e.def.look.scale * (e.elite ? ELITE_SCALE : 1) * (e.state === 'windup' ? WINDUP_SCALE : 1);
       const phase = e.id * 1.7;
       const moving = isMoving(e);
 

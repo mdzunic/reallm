@@ -571,14 +571,10 @@ describe('setEnabled (AC-21)', () => {
 });
 
 describe('autoFire (AC-18)', () => {
-  it('follows the setting and, for touch, the scheme', () => {
+  it('follows the setting and, for the default, the scheme', () => {
     const settings = createSettings();
     const input = new Input(null, null, settings);
-    // SPEC-038 §4.7: the store now starts at 'on', so the scheme rule is the
-    // stored 'touch' a player chose.
-    expect(settings.autoFire).toBe('on');
-    expect(input.state.autoFire).toBe(true);
-    settings.setAutoFire('touch');
+    expect(settings.autoFire).toBe('touch');
     expect(input.state.autoFire).toBe(false);
 
     input.setScheme('touch');
@@ -719,8 +715,6 @@ describe('KEY_BINDINGS (AC-4)', () => {
       KeyR: 'weaponNext',
       KeyG: 'throwItem',
       KeyC: 'useUtility',
-      // SPEC-038 §4.1: V dashes (the right mouse button holds it too).
-      KeyV: 'dash',
       Escape: 'pause',
       KeyP: 'pause',
       KeyM: 'map',
@@ -923,31 +917,16 @@ describe('KeyboardMouseDriver', () => {
     expect(input.state.move).toEqual({ x: 0, y: 0 });
   });
 
-  it('maps mouse button 0 to fire and button 2 to dash (AC-23, SPEC-038 §4.1)', () => {
-    const { input, canvas, win } = harness();
+  it('maps mouse button 0 to fire and reserves button 2 (AC-23)', () => {
+    const { input, canvas } = harness();
     canvas.fire('pointerdown', pointerEvent({ button: 0 }));
     expect(input.state.buttons.fire.down).toBe(true);
 
-    // SPEC-038 ends AC-23's reservation: button 2 holds `dash`, and nothing else.
     canvas.fire('pointerdown', pointerEvent({ button: 2 }));
-    input.beginFrame(DT);
-    expect(input.state.buttons.dash.down).toBe(true);
-    expect(input.state.buttons.dash.justPressed).toBe(true);
     for (const action of ACTIONS) {
-      if (action === 'fire' || action === 'dash') continue;
+      if (action === 'fire') continue;
       expect(input.state.buttons[action].down, action).toBe(false);
     }
-    input.endFrame();
-    // V and the button share the one holder set: letting go of one keeps it held.
-    win.fire('keydown', keyEvent('KeyV'));
-    win.fire('pointerup', pointerEvent({ button: 2 }));
-    expect(input.state.buttons.dash.down).toBe(true);
-    win.fire('keyup', keyEvent('KeyV'));
-    expect(input.state.buttons.dash.down).toBe(false);
-    // A cancelled mouse pointer lets go of the dash as it does of fire.
-    canvas.fire('pointerdown', pointerEvent({ button: 2 }));
-    win.fire('pointercancel', pointerEvent({}));
-    expect(input.state.buttons.dash.down).toBe(false);
     const menu = keyEvent('');
     canvas.fire('contextmenu', menu);
     expect(menu.prevented).toBe(true);

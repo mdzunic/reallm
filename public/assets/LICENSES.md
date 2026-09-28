@@ -246,11 +246,7 @@ match. The 12 MB audio budget above is what they share.
 | File | Source | License | Modifications |
 | --- | --- | --- | --- |
 | `audio/sfx/ui.webm` | Original to this repository — synthesised by `scripts/assets/audio/sfx.mjs` | CC0 | — |
-| `audio/sfx/surface.webm` | Original to this repository — synthesised by `scripts/assets/audio/sfx.mjs` | CC0 | SPEC-035 §4.11 recut it with `shot_handgun`, `shot_rifle`, `shot_mg`, `shot_launcher`, `impact` and `explosion`; SPEC-038 §4.10 with the four sprites below |
-| `audio/sfx/surface.webm#dash` | Original to this repository — synthesised by `scripts/assets/audio/sfx.mjs`: a filtered-noise whoosh sweeping down, 250 ms | CC0 | SPEC-038 §4.10 |
-| `audio/sfx/surface.webm#windup_melee` | Original to this repository — synthesised by `scripts/assets/audio/sfx.mjs`: a dry chitter of two short clicks, 150 ms | CC0 | SPEC-038 §4.10 |
-| `audio/sfx/surface.webm#windup_charge` | Original to this repository — synthesised by `scripts/assets/audio/sfx.mjs`: a low growl rising in pitch, 450 ms | CC0 | SPEC-038 §4.10 |
-| `audio/sfx/surface.webm#windup_shot` | Original to this repository — synthesised by `scripts/assets/audio/sfx.mjs`: a rising whine, 400 ms | CC0 | SPEC-038 §4.10 |
+| `audio/sfx/surface.webm` | Original to this repository — synthesised by `scripts/assets/audio/sfx.mjs` | CC0 | SPEC-035 §4.11 recut it with `shot_handgun`, `shot_rifle`, `shot_mg`, `shot_launcher`, `impact` and `explosion` |
 | `audio/sfx/flight.webm` | Original to this repository — synthesised by `scripts/assets/audio/sfx.mjs` | CC0 | SPEC-035 §4.11 recut it with `ship_laser` |
 | `audio/music/menu.webm` | Original to this repository — synthesised by `scripts/assets/audio/music.mjs` | CC0 | — |
 | `audio/music/station.webm` | Original to this repository — synthesised by `scripts/assets/audio/music.mjs` | CC0 | — |

@@ -10,8 +10,7 @@ const POOL_SIZE = 24;
 const LIFE_SECONDS = 0.8;
 const RISE_PX = 40;
 
-/** SPEC-038 §4.8 adds `crit`: the enemy's number for a critical hit, `<amount>!`. */
-export type DamageKind = 'enemy' | 'elite' | 'player' | 'crit';
+export type DamageKind = 'enemy' | 'elite' | 'player';
 
 interface Slot {
   readonly node: HTMLSpanElement;
@@ -52,7 +51,7 @@ export class DamageNumbers {
     slot.y = y;
     slot.age = 0;
     slot.live = true;
-    slot.node.textContent = kind === 'crit' ? `${amount}!` : String(amount);
+    slot.node.textContent = String(amount);
     slot.node.className = `dmg dmg--${kind}`;
     this.#place(slot);
   }

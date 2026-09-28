@@ -44,8 +44,6 @@ export const TIP_IDS = [
   'flight_throttle',
   // SPEC-036 §4.12: shown with the zone ghosts of the first touch landings.
   'zones',
-  // SPEC-038 §4.9: the first telegraph drawn near the player teaches the dash.
-  'dash',
 ] as const;
 
 export type TipId = (typeof TIP_IDS)[number];
@@ -126,11 +124,11 @@ export const TIPS: Readonly<Record<TipId, TipText>> = {
     keyboard: "Inside, the storm can't touch you, and anything outside loses your trail — until you fire.",
     touch: "Inside, the storm can't touch you, and anything outside loses your trail — until you fire.",
   },
-  // SPEC-035 §4.8: shown at the first enemy hit. SPEC-038 §4.7 turned auto-fire
-  // on for every scheme, so it teaches what the gun does and how to overrule it.
+  // SPEC-035 §4.8: the first enemy hit teaches hold-to-fire rather than moving
+  // the auto-fire default, which is a PLAN decision the design review left open.
   combat: {
-    keyboard: 'Your gun fires on its own at the nearest enemy. Hold the left mouse button to pick the target yourself.',
-    touch: 'Your gun fires on its own at the nearest enemy. Drag on the right to pick the target yourself.',
+    keyboard: 'Enemies close in fast — hold Space or the left mouse button to fire. Auto-fire is in Settings.',
+    touch: 'Drag on the right to aim — auto-fire shoots for you.',
   },
   // SPEC-035 §4.8: shown when the first flight's launch shot ends…
   flight_steer: {
@@ -148,11 +146,6 @@ export const TIPS: Readonly<Record<TipId, TipText>> = {
   zones: {
     keyboard: 'WASD moves and the mouse aims. Space or a click fires.',
     touch: 'Left thumb moves, right thumb aims — auto-fire shoots for you.',
-  },
-  // SPEC-038 §4.9: the first `enemy:windup` that draws a telegraph within 25 m.
-  dash: {
-    keyboard: 'A red lane or ring marks what is about to land. Right-click or V to dash through it — nothing touches you mid-dash.',
-    touch: 'A red lane or ring marks what is about to land. Tap DASH to slip through it — nothing touches you mid-dash.',
   },
 };
 

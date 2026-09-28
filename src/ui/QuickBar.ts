@@ -8,11 +8,6 @@
 // 3 × 2 grid, weapons over packs; `moveTo` re-parents it, so nothing about a
 // slot's state is rebuilt. §4.4 sets its badges: the count, the key cap, and a
 // state line that shows only while a weapon is not ready.
-//
-// SPEC-038 §4.1: on the keyboard scheme the bar leads with the dash — `qb-dash`,
-// its `V` and a cooldown ring — ahead of the weapon group and outside both
-// groups. The arc has DASH in its own corner cell, so `moveTo` takes the cell
-// out of the bar there and puts it back on the keyboard.
 import type { Scheme } from '@/core/Input';
 import {
   ITEMS,
@@ -45,8 +40,6 @@ export interface QuickBarHandlers {
   slot(s: WeaponSlot | QuickSlot): void;
   /** A long press or right-click on a quick slot opens the picker. */
   pick(s: QuickSlot): void;
-  /** SPEC-038 §4.1: a click on `qb-dash` dashes, as V does. */
-  dash?(): void;
 }
 
 /** One slot's cached nodes and last-written values, so writes stay minimal. */
@@ -75,16 +68,12 @@ export class QuickBar {
   readonly #quick = {} as Record<QuickSlot, SlotNodes>;
   readonly #handlers: QuickBarHandlers;
   readonly #teardown: Array<() => void> = [];
-  /** SPEC-038 §4.1: the dash cell, and the ring value last written to it. */
-  readonly #dash: HTMLButtonElement;
-  #lastDash = '';
   #pressTimer: ReturnType<typeof setTimeout> | null = null;
   #longFired = false;
 
   constructor(host: HTMLElement, handlers: QuickBarHandlers) {
     this.#handlers = handlers;
     this.#root = testId(el('div', 'quickbar'), 'quickbar');
-    this.#dash = this.#makeDash();
     const weapons = el('div', 'qb-group');
     for (const slot of WEAPON_SLOTS) {
       this.#weapons[slot] = this.#makeSlot(slot, true);
@@ -95,20 +84,8 @@ export class QuickBar {
       this.#quick[slot] = this.#makeSlot(slot, false);
       quick.append(this.#quick[slot].root);
     }
-    this.#root.append(this.#dash, weapons, quick);
+    this.#root.append(weapons, quick);
     host.append(this.#root);
-  }
-
-  /**
-   * SPEC-038 §4.1: the ring — `--cd` from 1 at the press to 0 when the dash is
-   * ready — with `.is-cooling` while it runs. Writes only on a change.
-   */
-  setDash(cd: number): void {
-    const value = Math.max(0, Math.min(1, cd)).toFixed(3);
-    if (value === this.#lastDash) return;
-    this.#lastDash = value;
-    this.#dash.style.setProperty('--cd', value);
-    this.#dash.classList.toggle('is-cooling', cd > 0);
   }
 
   /**
@@ -119,9 +96,6 @@ export class QuickBar {
   moveTo(host: HTMLElement, arc: boolean): void {
     this.#root.classList.toggle('is-arc', arc);
     if (this.#root.parentElement !== host) host.append(this.#root);
-    // SPEC-038 §4.1: the arc keeps its 3 × 2 slots — its DASH is the corner cell.
-    if (arc) this.#dash.remove();
-    else if (this.#dash.parentElement !== this.#root) this.#root.prepend(this.#dash);
   }
 
   /** Called from `Hud.#write('loadout' | 'quick')`; both keys land here. */
@@ -197,28 +171,6 @@ export class QuickBar {
     this.#clearPress();
     for (const release of this.#teardown.splice(0).reverse()) release();
     this.#root.remove();
-  }
-
-  /** SPEC-038 §4.1: `qb-dash` — `V`, a name and the ring; a click dashes. */
-  #makeDash(): HTMLButtonElement {
-    const root = testId(el('button', 'qb-slot qb-dash'), 'qb-dash');
-    root.type = 'button';
-    root.setAttribute('aria-label', 'dash');
-    const key = el('kbd', 'qb-key', 'V');
-    key.setAttribute('aria-hidden', 'true');
-    root.append(el('span', 'qb-dash-glyph', '»'), el('span', 'qb-name', 'Dash'), key);
-    this.#listen(root, 'pointerdown', (event) => {
-      if (event.button !== 0) return;
-      event.preventDefault();
-      root.classList.add('is-down');
-      this.#handlers.dash?.();
-    });
-    const up = (): void => root.classList.remove('is-down');
-    this.#listen(root, 'pointerup', up);
-    this.#listen(root, 'pointercancel', up);
-    this.#listen(root, 'pointerleave', up);
-    this.#listen(root, 'contextmenu', (event) => event.preventDefault());
-    return root;
   }
 
   #makeSlot(slot: WeaponSlot | QuickSlot, weapon: boolean): SlotNodes {

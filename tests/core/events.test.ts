@@ -548,8 +548,6 @@ const NAMES: Record<keyof GameEvents, true> = {
   'player:respawned': true,
   // SPEC-034 §4.2, §4.6.
   'player:recalled': true,
-  // SPEC-038 §4.1: one per dash.
-  'player:dashed': true,
   'player:xp': true,
   'player:leveledUp': true,
   'tokens:changed': true,
@@ -566,8 +564,6 @@ const NAMES: Record<keyof GameEvents, true> = {
   // SPEC-035 §4.11: one event per shot and per landed hit.
   'weapon:fired': true,
   'enemy:hit': true,
-  // SPEC-038 §4.2: every windup start, with its kind.
-  'enemy:windup': true,
   'weapon:locked': true,
   'mine:armed': true,
   'shop:purchased': true,
@@ -612,9 +608,8 @@ describe('GameEvents (§3.2)', () => {
   it('is exactly the canonical table', () => {
     // 57 before SPEC-015, plus `app:update-ready` and `app:install-hint`.
     // SPEC-034 added `player:recalled`, `enemy:dismissed` and `item:noRoom`;
-    // SPEC-035 §4.11 added `weapon:fired` and `enemy:hit`; SPEC-038 §4.10
-    // `player:dashed` and `enemy:windup`.
-    expect(Object.keys(NAMES)).toHaveLength(66);
+    // SPEC-035 §4.11 added `weapon:fired` and `enemy:hit`.
+    expect(Object.keys(NAMES)).toHaveLength(64);
   });
 
   it('still carries the nine names SPEC-002 and SPEC-003 already emit', () => {

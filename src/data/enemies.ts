@@ -3,17 +3,15 @@
 // of which belong to the rail flight model (fighter, interceptor).
 //
 // Numbers are explicit, not computed at load time (§2, third decision). Each one
-// is the archetype base of §4.3 — SPEC-038 §4.4 moved the trash HP bases to
-// swarm 26, rusher 70 and ranged 45 — scaled to the enemy's chapter with the
-// *initial tuning* formula
+// is the archetype base of §4.3 scaled to the enemy's chapter with the *initial
+// tuning* formula
 //
 //     hp     = round(base.hp     × 1.35^(chapter − 1))
 //     damage = round(base.damage × 1.3^(chapter − 1))
 //
 // with speed, radius, cooldowns and xp left unscaled; boss xp is `100 + 100 ×
 // chapter`. Writing the results down rather than the formula means retuning one
-// enemy cannot silently shift every other one. SPEC-038 §4.4: every ranged row
-// fires at 13 m with 15 m/s shots — still 1 m inside the Kinetic Repeater's 14 m.
+// enemy cannot silently shift every other one.
 //
 // `hive_drone`, `hive_warrior` and `hive_spitter` are shared ids (09-a): one
 // stat block each, stored at the chapter it is introduced. Eden-Prime raises the
@@ -87,7 +85,7 @@ export const ENEMIES = {
     domain: 'surface',
     archetype: 'swarm',
     chapter: 1,
-    hp: 26,
+    hp: 18,
     damage: 4,
     speed: 6.5,
     radius: 0.4,
@@ -105,7 +103,7 @@ export const ENEMIES = {
     domain: 'surface',
     archetype: 'rusher',
     chapter: 1,
-    hp: 70,
+    hp: 45,
     damage: 9,
     speed: 5,
     radius: 0.6,
@@ -123,11 +121,11 @@ export const ENEMIES = {
     domain: 'surface',
     archetype: 'ranged',
     chapter: 1,
-    hp: 45,
+    hp: 35,
     damage: 7,
     speed: 3.5,
     radius: 0.5,
-    attack: { kind: 'ranged', range: 13, cooldown: 1.6, projectileSpeed: 15, projectileRadius: 0.25 },
+    attack: { kind: 'ranged', range: 12, cooldown: 1.6, projectileSpeed: 14, projectileRadius: 0.25 },
     aggroRadius: 22,
     leashRadius: 45,
     xp: 10,
@@ -165,7 +163,7 @@ export const ENEMIES = {
     domain: 'surface',
     archetype: 'swarm',
     chapter: 2,
-    hp: 35,
+    hp: 24,
     damage: 5,
     speed: 6.5,
     radius: 0.4,
@@ -183,7 +181,7 @@ export const ENEMIES = {
     domain: 'surface',
     archetype: 'rusher',
     chapter: 2,
-    hp: 95,
+    hp: 61,
     damage: 12,
     speed: 5,
     radius: 0.6,
@@ -201,11 +199,11 @@ export const ENEMIES = {
     domain: 'surface',
     archetype: 'ranged',
     chapter: 2,
-    hp: 61,
+    hp: 47,
     damage: 9,
     speed: 3.5,
     radius: 0.5,
-    attack: { kind: 'ranged', range: 13, cooldown: 1.6, projectileSpeed: 15, projectileRadius: 0.25 },
+    attack: { kind: 'ranged', range: 12, cooldown: 1.6, projectileSpeed: 14, projectileRadius: 0.25 },
     aggroRadius: 22,
     leashRadius: 45,
     xp: 10,
@@ -243,7 +241,7 @@ export const ENEMIES = {
     domain: 'surface',
     archetype: 'swarm',
     chapter: 3,
-    hp: 47,
+    hp: 33,
     damage: 7,
     speed: 6.5,
     radius: 0.4,
@@ -261,7 +259,7 @@ export const ENEMIES = {
     domain: 'surface',
     archetype: 'rusher',
     chapter: 3,
-    hp: 128,
+    hp: 82,
     damage: 15,
     speed: 5,
     radius: 0.6,
@@ -279,11 +277,11 @@ export const ENEMIES = {
     domain: 'surface',
     archetype: 'ranged',
     chapter: 3,
-    hp: 82,
+    hp: 64,
     damage: 12,
     speed: 3.5,
     radius: 0.5,
-    attack: { kind: 'ranged', range: 13, cooldown: 1.6, projectileSpeed: 15, projectileRadius: 0.25 },
+    attack: { kind: 'ranged', range: 12, cooldown: 1.6, projectileSpeed: 14, projectileRadius: 0.25 },
     aggroRadius: 22,
     leashRadius: 45,
     xp: 10,
@@ -321,7 +319,7 @@ export const ENEMIES = {
     domain: 'surface',
     archetype: 'swarm',
     chapter: 4,
-    hp: 64,
+    hp: 44,
     damage: 9,
     speed: 6.5,
     radius: 0.4,
@@ -339,7 +337,7 @@ export const ENEMIES = {
     domain: 'surface',
     archetype: 'rusher',
     chapter: 4,
-    hp: 172,
+    hp: 111,
     damage: 20,
     speed: 5,
     radius: 0.6,
@@ -357,11 +355,11 @@ export const ENEMIES = {
     domain: 'surface',
     archetype: 'ranged',
     chapter: 4,
-    hp: 111,
+    hp: 86,
     damage: 15,
     speed: 3.5,
     radius: 0.5,
-    attack: { kind: 'ranged', range: 13, cooldown: 1.6, projectileSpeed: 15, projectileRadius: 0.25 },
+    attack: { kind: 'ranged', range: 12, cooldown: 1.6, projectileSpeed: 14, projectileRadius: 0.25 },
     aggroRadius: 22,
     leashRadius: 45,
     xp: 10,
@@ -400,7 +398,7 @@ export const ENEMIES = {
     domain: 'surface',
     archetype: 'rusher',
     chapter: 5,
-    hp: 233,
+    hp: 149,
     damage: 26,
     speed: 5,
     radius: 0.6,
@@ -418,11 +416,11 @@ export const ENEMIES = {
     domain: 'surface',
     archetype: 'ranged',
     chapter: 5,
-    hp: 149,
+    hp: 116,
     damage: 20,
     speed: 3.5,
     radius: 0.5,
-    attack: { kind: 'ranged', range: 13, cooldown: 1.6, projectileSpeed: 15, projectileRadius: 0.25 },
+    attack: { kind: 'ranged', range: 12, cooldown: 1.6, projectileSpeed: 14, projectileRadius: 0.25 },
     aggroRadius: 22,
     leashRadius: 45,
     xp: 10,

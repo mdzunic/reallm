@@ -40,8 +40,6 @@ export const KEY_BINDINGS: Readonly<Record<string, Action | MoveAxis>> = {
   KeyR: 'weaponNext',
   KeyG: 'throwItem',
   KeyC: 'useUtility',
-  // SPEC-038 §4.1: the dash; the right mouse button holds it too.
-  KeyV: 'dash',
   Escape: 'pause',
   KeyP: 'pause',
   KeyM: 'map',
@@ -253,16 +251,14 @@ export class KeyboardMouseDriver implements InputDriver {
   #onPointerDown(event: PointerEvent): void {
     this.#input.setScheme(schemeOf(event));
     if (event.pointerType !== 'mouse') return; // the touch layer owns touch (AC-14)
-    // AC-23: button 0 fires. SPEC-038 §4.1 ends button 2's reservation: it
-    // holds `dash`, and the context menu it would open is already prevented above.
+    // AC-23: button 0 fires, button 2 is reserved — it raises no action at all,
+    // and the context menu it would open is already prevented above.
     if (event.button === 0) this.#hold('fire', 'mouse:0');
-    else if (event.button === 2) this.#hold('dash', 'mouse:2');
   }
 
   #onPointerUp(event: PointerEvent): void {
     if (event.pointerType !== 'mouse') return;
     if (event.button === 0) this.#drop('fire', 'mouse:0');
-    else if (event.button === 2) this.#drop('dash', 'mouse:2');
   }
 
   /**
@@ -313,7 +309,6 @@ export class KeyboardMouseDriver implements InputDriver {
   #onPointerCancel(event: PointerEvent): void {
     if (event.pointerType !== 'mouse') return;
     this.#drop('fire', 'mouse:0');
-    this.#drop('dash', 'mouse:2');
   }
 
   #onVisibility(doc: EventTarget): void {

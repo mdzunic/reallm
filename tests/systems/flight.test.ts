@@ -12,7 +12,7 @@ import { EventBus, type GameEvents } from '@/core/Events';
 import { QUALITY } from '@/core/Renderer';
 import { Rng } from '@/core/Rng';
 import { newSave, type CharacterCreation, type Save } from '@/core/Save';
-import { ENEMIES, MISSIONS, PLANETS, TUNING, UPGRADES, type Difficulty, type MissionId, type PlanetDef } from '@/data/index';
+import { ENEMIES, MISSIONS, PLANETS, TUNING, UPGRADES, type MissionId, type PlanetDef } from '@/data/index';
 import { Economy } from '@/systems/Economy';
 import {
   FIGHTER_LEAVE_SECONDS,
@@ -63,7 +63,7 @@ interface WorldOptions {
   planet?: PlanetDef;
   ship?: Partial<Save['ship']>;
   aria?: { level: 1 | 2 | 3; enabled: boolean } | null;
-  difficulty?: Difficulty;
+  difficulty?: 'casual' | 'normal';
   accept?: MissionId[];
   seed?: number;
 }
@@ -355,17 +355,6 @@ describe('damage, shield, hull', () => {
     step(w.flight, LAUNCH_SECONDS + DT);
     w.flight.hit(20, 'asteroid', { kind: 'asteroid' });
     expect(w.flight.ship.shield).toBe(w.flight.ship.maxShield - 14);
-  });
-
-  it('setDifficulty moves the next hit, both ways (SPEC-038 §4.6)', () => {
-    const w = world({ difficulty: 'normal' });
-    step(w.flight, LAUNCH_SECONDS + DT);
-    w.flight.setDifficulty('casual');
-    w.flight.hit(20, 'asteroid', { kind: 'asteroid' });
-    expect(w.flight.ship.shield).toBe(w.flight.ship.maxShield - 14);
-    w.flight.setDifficulty('normal');
-    w.flight.hit(10, 'asteroid', { kind: 'asteroid' });
-    expect(w.flight.ship.shield).toBe(w.flight.ship.maxShield - 24);
   });
 
   it('pins maxShield and maxHull to the upgrade tables with ARIA level 3 (AC-73, AC-74)', () => {

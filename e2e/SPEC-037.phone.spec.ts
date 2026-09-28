@@ -202,13 +202,10 @@ for (const size of PHONE_VIEWPORTS) {
 
       await checkLayout(page, size.width, size.height, 'left');
 
-      // §6.3 case 5, as SPEC-038 §4.1 fills it: the corner cell holds DASH and
-      // takes pointer events; USE is in its own cell.
+      // §6.3 case 5: the corner cell is empty and takes no pointer; USE is in its cell.
       const primary = page.getByTestId('arc-primary');
-      expect(await page.getByTestId('touch-dash').evaluate((node) => node.parentElement?.dataset['testid'])).toBe('arc-primary');
-      await expect(page.getByTestId('touch-dash')).toBeVisible();
-      expect(inside(await box(page, 'touch-dash'), await box(page, 'arc-primary'))).toBe(true);
-      await expect(primary).toHaveCSS('pointer-events', 'auto');
+      expect(await primary.evaluate((node) => node.childElementCount + (node.textContent ?? '').length)).toBe(0);
+      await expect(primary).toHaveCSS('pointer-events', 'none');
       expect(await page.getByTestId('touch-interact').evaluate((node) => node.parentElement?.dataset['testid'])).toBe('arc-action');
       expect(inside(await box(page, 'touch-interact'), await box(page, 'arc-action'))).toBe(true);
       await expect(page.getByTestId('touch-weaponNext')).toHaveCount(0);

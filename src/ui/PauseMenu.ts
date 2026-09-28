@@ -59,9 +59,7 @@ const CONTROL_SHEETS = {
   keyboard: [
     ['Move / steer', 'WASD or Arrow keys'],
     ['Aim', 'Mouse'],
-    // SPEC-038 §4.7, §4.9: the gun fires on its own; a held button aims it.
-    ['Fire', 'Automatic — hold Space or Left mouse to aim'],
-    ['Dash', 'Right mouse or V'],
+    ['Fire', 'Space or Left mouse'],
     ['Interact', 'E or F'],
     // SPEC-028 §4.8: the loadout keys — the digits switch, Q heals.
     ['Switch weapon', '1 / 2 / 3, R or wheel'],
@@ -80,8 +78,6 @@ const CONTROL_SHEETS = {
   touch: [
     ['Move / steer', 'Drag on the left side'],
     ['Aim & fire', 'Drag on the right side — auto-fire shoots for you'],
-    // SPEC-038 §4.9: the thumb arc's corner cell.
-    ['Dash', 'DASH button'],
     ['Throttle (flight)', '▲ / ▼ buttons'],
     // SPEC-028 §4.5: the bar doubles as the touch buttons. SPEC-037 §4.10:
     // it is the only way now — the weapon-cycle and item buttons are gone.

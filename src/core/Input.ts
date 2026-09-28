@@ -40,8 +40,7 @@ export type Action =
   | 'weaponNext'
   | 'weaponPrev'
   | 'throwItem'
-  | 'useUtility'
-  | 'dash';
+  | 'useUtility';
 export type Scheme = 'keyboard' | 'touch' | 'gamepad';
 /** The four movement half-axes a key can bind to; they are not actions (AC-4). */
 export type MoveAxis = 'moveUp' | 'moveDown' | 'moveLeft' | 'moveRight';
@@ -72,8 +71,6 @@ export const ACTIONS = [
   'weaponPrev',
   'throwItem',
   'useUtility',
-  // SPEC-038 §4.1: the surface's dodge — V, the right mouse button, DASH.
-  'dash',
 ] as const satisfies readonly Action[];
 
 // ------------------------------------------------------------------ tunables

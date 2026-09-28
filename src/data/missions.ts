@@ -47,11 +47,8 @@ export type Objective =
   | { readonly kind: 'collect'; readonly resource: ResourceId; readonly amount: number }
   | { readonly kind: 'kill'; readonly enemy: EnemyId; readonly amount: number }
   | { readonly kind: 'boss'; readonly enemy: EnemyId }
-  /**
-   * `weather` forces that storm for the duration (SPEC-012 §4.6); `waves` runs
-   * that surface wave from the stage's start to its end (SPEC-038 §4.5).
-   */
-  | { readonly kind: 'survive'; readonly seconds: number; readonly weather?: WeatherId; readonly waves?: WaveId }
+  /** `weather` forces that storm for the duration (SPEC-012 §4.6). */
+  | { readonly kind: 'survive'; readonly seconds: number; readonly weather?: WeatherId }
   /** The POI's HP comes from its `PoiDef`; 0 HP restarts the stage (E13). */
   | { readonly kind: 'defend'; readonly poi: PoiId; readonly seconds: number; readonly wave: WaveId }
   | {
@@ -176,10 +173,7 @@ export const MISSIONS = {
     planet: 'cinder4',
     scene: 'surface',
     requires: [{ kind: 'mission', id: 'c1_m1' }],
-    stages: [
-      [{ kind: 'kill', enemy: 'dust_skitter', amount: 8 }],
-      [{ kind: 'survive', seconds: 90, weather: 'heatwave', waves: 'cinder4_storm' }],
-    ],
+    stages: [[{ kind: 'kill', enemy: 'dust_skitter', amount: 8 }], [{ kind: 'survive', seconds: 90, weather: 'heatwave' }]],
     rewards: { xp: 70, tokens: 5 },
     dialogue: { onAccept: 'c1_s2_accept', onStage: { 1: 'c1_s2_echo' }, onComplete: 'c1_s2_done' },
   },
@@ -194,10 +188,7 @@ export const MISSIONS = {
     planet: 'vetra',
     scene: 'surface',
     requires: [],
-    stages: [
-      [{ kind: 'survive', seconds: 90, weather: 'blizzard', waves: 'vetra_storm' }],
-      [{ kind: 'reach', poi: 'ridge_camp' }],
-    ],
+    stages: [[{ kind: 'survive', seconds: 90, weather: 'blizzard' }], [{ kind: 'reach', poi: 'ridge_camp' }]],
     rewards: { xp: 150, tokens: 15 },
     dialogue: { onAccept: 'c2_m1_accept', onComplete: 'c2_m1_done' },
   },
@@ -259,10 +250,7 @@ export const MISSIONS = {
     planet: 'vetra',
     scene: 'surface',
     requires: [{ kind: 'mission', id: 'c2_m1' }],
-    stages: [
-      [{ kind: 'kill', enemy: 'ice_crawler', amount: 12 }],
-      [{ kind: 'survive', seconds: 60, weather: 'avalanche', waves: 'vetra_storm' }],
-    ],
+    stages: [[{ kind: 'kill', enemy: 'ice_crawler', amount: 12 }], [{ kind: 'survive', seconds: 60, weather: 'avalanche' }]],
     rewards: { xp: 90, tokens: 10 },
     dialogue: { onAccept: 'c2_s2_accept', onComplete: 'c2_s2_done' },
   },
@@ -277,10 +265,7 @@ export const MISSIONS = {
     planet: 'thessaly',
     scene: 'surface',
     requires: [],
-    stages: [
-      [{ kind: 'collect', resource: 'wheat', amount: 250 }],
-      [{ kind: 'survive', seconds: 75, weather: 'spore_storm', waves: 'thessaly_storm' }],
-    ],
+    stages: [[{ kind: 'collect', resource: 'wheat', amount: 250 }], [{ kind: 'survive', seconds: 75, weather: 'spore_storm' }]],
     rewards: { xp: 220, tokens: 20 },
     dialogue: { onAccept: 'c3_m1_accept', onComplete: 'c3_m1_done' },
   },
@@ -356,10 +341,7 @@ export const MISSIONS = {
     planet: 'ferrum',
     scene: 'surface',
     requires: [],
-    stages: [
-      [{ kind: 'survive', seconds: 90, weather: 'radiation_storm', waves: 'ferrum_storm' }],
-      [{ kind: 'reach', poi: 'lithium_flats' }],
-    ],
+    stages: [[{ kind: 'survive', seconds: 90, weather: 'radiation_storm' }], [{ kind: 'reach', poi: 'lithium_flats' }]],
     rewards: { xp: 250, tokens: 25 },
     dialogue: { onAccept: 'c4_m1_accept', onComplete: 'c4_m1_done' },
   },
@@ -406,10 +388,7 @@ export const MISSIONS = {
     planet: 'ferrum',
     scene: 'surface',
     requires: [{ kind: 'mission', id: 'c4_m1' }],
-    stages: [
-      [{ kind: 'scan', poi: 'core_drill', count: 2 }],
-      [{ kind: 'survive', seconds: 120, weather: 'heatwave', waves: 'ferrum_storm' }],
-    ],
+    stages: [[{ kind: 'scan', poi: 'core_drill', count: 2 }], [{ kind: 'survive', seconds: 120, weather: 'heatwave' }]],
     rewards: { xp: 150, tokens: 15, items: [{ itemId: 'plasma_cell', qty: 1 }] },
     dialogue: { onAccept: 'c4_s1_accept', onComplete: 'c4_s1_done' },
   },

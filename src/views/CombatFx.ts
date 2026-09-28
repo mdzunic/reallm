@@ -11,7 +11,7 @@ import * as THREE from 'three';
 import { hash01 } from '@/core/Noise';
 import { decalAtlas, particleSprite } from '@/views/ProceduralTextures';
 
-export type FxKind = 'hit' | 'death' | 'spawn' | 'pickup' | 'dust_ring' | 'muzzle' | 'blast' | 'dash';
+export type FxKind = 'hit' | 'death' | 'spawn' | 'pickup' | 'dust_ring' | 'muzzle' | 'blast';
 
 /** §4.4 — the burst table (*initial tuning*). */
 interface BurstDef {
@@ -36,16 +36,7 @@ const BURSTS: Record<FxKind, BurstDef> = {
   muzzle: { count: 3, life: 0.08, speedMin: 0, speedMax: 0, spread: 'still', gravity: 0, size: 0.4, origin: 0.9 },
   // SPEC-029 §4.12: the blast; callers scale it by `radius / 3.5`.
   blast: { count: 30, life: 0.5, speedMin: 5, speedMax: 9, spread: 'hemisphere', gravity: -4, size: 0.6, origin: 0.4 },
-  // SPEC-038 §4.1: the dash's afterimages, laid along the path by `dash()`.
-  dash: { count: 15, life: 0.3, speedMin: 0, speedMax: 0, spread: 'still', gravity: 0, size: 0.34, origin: 0.9 },
 };
-
-/** SPEC-038 §4.1: three streaks, this many sprites each, this far apart across the path. */
-const DASH_STREAKS = 3;
-const DASH_STREAK_SPRITES = 5;
-const DASH_STREAK_GAP = 0.32;
-/** The streaks drift back along the path while they fade. */
-const DASH_DRIFT = 1.5;
 
 /** The §4.4 death flash: a second short burst at × 3 brightness. */
 const DEATH_FLASH_COUNT = 4;
@@ -189,40 +180,6 @@ export class CombatFx {
       this.#lightFiredAt = this.#time;
       this.#lightX = x;
       this.#lightZ = z;
-    }
-  }
-
-  /**
-   * SPEC-038 §4.1: the dash — three afterimage streaks along the path from
-   * `(x, z)` for `distance` m in `(dirX, dirZ)`, drawn once per dash from the
-   * same pool (no draw call of its own). The scene skips it under reduce motion.
-   */
-  dash(x: number, z: number, dirX: number, dirZ: number, distance: number, color: number): void {
-    const def = BURSTS.dash;
-    const r = ((color >> 16) & 255) / 255;
-    const g = ((color >> 8) & 255) / 255;
-    const b = (color & 255) / 255;
-    for (let streak = 0; streak < DASH_STREAKS; streak++) {
-      const across = (streak - (DASH_STREAKS - 1) / 2) * DASH_STREAK_GAP;
-      for (let k = 0; k < DASH_STREAK_SPRITES; k++) {
-        const along = ((k + 0.5) / DASH_STREAK_SPRITES) * distance;
-        const slot = this.#head;
-        this.#head = (this.#head + 1) % this.#capacity;
-        this.#x[slot] = x + dirX * along - dirZ * across;
-        this.#z[slot] = z + dirZ * along + dirX * across;
-        this.#y0[slot] = def.origin - Math.abs(across) * 0.8;
-        this.#vx[slot] = -dirX * DASH_DRIFT;
-        this.#vy[slot] = 0;
-        this.#vz[slot] = -dirZ * DASH_DRIFT;
-        this.#gravity[slot] = 0;
-        this.#born[slot] = this.#time;
-        // The streak's tail fades first: later sprites along the path live longer.
-        this.#life[slot] = def.life * (0.55 + (0.45 * (k + 1)) / DASH_STREAK_SPRITES);
-        this.#size[slot] = def.size * (0.7 + (0.3 * (k + 1)) / DASH_STREAK_SPRITES);
-        this.#r[slot] = r;
-        this.#g[slot] = g;
-        this.#b[slot] = b;
-      }
     }
   }
 

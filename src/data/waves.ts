@@ -57,62 +57,6 @@ export const WAVES = {
     spawnBand: [25, 40],
   },
 
-  // SPEC-038 §4.5 (*initial tuning*): the storm waves of the weather survive
-  // stages. Each runs once, from the stage's start, around the player — waves
-  // ignore hiding, so the shelter's mouth is where the storm is fought. A stage
-  // shorter than a wave's last group never sees that group.
-  /** `c1_s2`'s 90 s heatwave. */
-  cinder4_storm: {
-    id: 'cinder4_storm',
-    domain: 'surface',
-    groups: [
-      { enemy: 'dust_skitter', count: 4, atSecond: 5 },
-      { enemy: 'wurmling', count: 1, atSecond: 30 },
-      { enemy: 'dust_skitter', count: 3, atSecond: 30 },
-      { enemy: 'scav_raider', count: 2, atSecond: 55 },
-      { enemy: 'dust_skitter', count: 5, atSecond: 75 },
-    ],
-    spawnBand: [18, 30],
-  },
-  /** `c2_m1`'s 90 s blizzard and `c2_s2`'s 60 s avalanche, which sees three groups. */
-  vetra_storm: {
-    id: 'vetra_storm',
-    domain: 'surface',
-    groups: [
-      { enemy: 'frost_mite', count: 5, atSecond: 5 },
-      { enemy: 'ice_crawler', count: 2, atSecond: 30 },
-      { enemy: 'frost_mite', count: 6, atSecond: 50 },
-      { enemy: 'ice_spitter', count: 2, atSecond: 70 },
-    ],
-    spawnBand: [18, 30],
-  },
-  /** `c3_m1`'s 75 s spore storm. */
-  thessaly_storm: {
-    id: 'thessaly_storm',
-    domain: 'surface',
-    groups: [
-      { enemy: 'hive_drone', count: 6, atSecond: 5 },
-      { enemy: 'spore_hound', count: 2, atSecond: 25 },
-      { enemy: 'hive_drone', count: 8, atSecond: 45 },
-      { enemy: 'spore_spitter', count: 2, atSecond: 60 },
-    ],
-    spawnBand: [18, 30],
-  },
-  /** `c4_m1`'s 90 s radiation storm and `c4_s1`'s 120 s heatwave. */
-  ferrum_storm: {
-    id: 'ferrum_storm',
-    domain: 'surface',
-    groups: [
-      { enemy: 'ash_crawler', count: 6, atSecond: 5 },
-      { enemy: 'magma_wraith', count: 2, atSecond: 25 },
-      { enemy: 'slag_spitter', count: 2, atSecond: 45 },
-      { enemy: 'ash_crawler', count: 8, atSecond: 65 },
-      { enemy: 'magma_wraith', count: 1, atSecond: 80, elite: true },
-      { enemy: 'magma_wraith', count: 1, atSecond: 80 },
-    ],
-    spawnBand: [18, 30],
-  },
-
   /** Cinder-4 is the tutorial jump: asteroids only, nothing shooting back. */
   cinder4_flight: {
     id: 'cinder4_flight',
