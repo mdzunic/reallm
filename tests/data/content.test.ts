@@ -11,7 +11,9 @@ import { readFileSync } from 'node:fs';
 import { describe, expect, it, vi } from 'vitest';
 import { LAUNCH_SECONDS, THROTTLES } from '@/systems/Flight';
 import {
+  ATTRIBUTE_EFFECTS,
   ATTRIBUTE_MAX,
+  ATTRIBUTE_POINT_LEVELS,
   CLASSES,
   CLASS_IDS,
   COMPANIONS,
@@ -33,6 +35,7 @@ import {
   RECIPES,
   RESOURCE_IDS,
   SHIP_SYSTEMS,
+  SIGNATURE_FALLBACK_LITHIUM,
   SLOT_OF_LINE,
   STORY_FLAGS,
   TUNING,
@@ -359,6 +362,8 @@ describe('content invariants (SPEC-009 §7)', () => {
     const problems: string[] = [];
     for (const [id, entries] of Object.entries(lootTables)) {
       for (const entry of entries) {
+        // SPEC-039 §4.1: a signature row carries no chance; the next case owns it.
+        if (entry.kind === 'signature') continue;
         if (entry.chance <= 0 || entry.chance > 1) problems.push(`${id}: chance ${entry.chance} is outside (0, 1]`);
         if (entry.kind === 'resource') {
           if (!resourceIds.has(entry.resource)) problems.push(`${id}: unknown resource ${entry.resource}`);
@@ -374,6 +379,76 @@ describe('content invariants (SPEC-009 §7)', () => {
       if (!Object.hasOwn(LOOT_TABLES, enemy.loot)) problems.push(`${enemy.id}: unknown loot table ${enemy.loot}`);
     }
     expect(problems).toEqual([]);
+  });
+
+  // SPEC-039 §4.1: invariant 8's signature rules. Each boss table carries
+  // exactly one signature row and no other table any; each names a priced
+  // weapon of the handgun, machine-gun or launcher line; the five pieces are
+  // distinct; and no row anywhere hands out a rifle or an armour piece — those
+  // two ladders are what the shop sells.
+  it('8 (SPEC-039). signature rows name one priced side-grade per boss, and no table gives a rifle or armour', () => {
+    const problems: string[] = [];
+    const bossTables = new Set<string>(enemies.filter((enemy) => enemy.archetype === 'boss').map((enemy) => enemy.loot));
+    const pieces: string[] = [];
+    for (const [id, entries] of Object.entries(lootTables)) {
+      const signatures = entries.filter((entry) => entry.kind === 'signature');
+      if (bossTables.has(id) && signatures.length !== 1) problems.push(`${id}: ${signatures.length} signature rows, not 1`);
+      if (!bossTables.has(id) && signatures.length > 0) problems.push(`${id}: a signature row outside a boss table`);
+      for (const entry of entries) {
+        if (entry.kind === 'resource') continue;
+        const item: Item | undefined = ITEM_TABLE[entry.itemId];
+        if (item === undefined) {
+          problems.push(`${id}: unknown item ${entry.itemId}`);
+          continue;
+        }
+        if (item.kind !== 'consumable' && (item.line === 'rifle' || item.line === 'armor')) {
+          problems.push(`${id}: hands out the ${item.line} ${item.id}`);
+        }
+        if (entry.kind !== 'signature') continue;
+        if ('chance' in entry) problems.push(`${id}: signature ${entry.itemId} carries a chance`);
+        pieces.push(entry.itemId);
+        if (item.kind !== 'weapon' || item.price === null || !['handgun', 'machine_gun', 'launcher'].includes(item.line)) {
+          problems.push(`${id}: signature ${entry.itemId} is not a priced handgun, machine gun or launcher`);
+        }
+      }
+    }
+    expect(problems).toEqual([]);
+    expect(new Set(pieces).size).toBe(pieces.length);
+    expect(pieces.length).toBe(5);
+
+    // The five bosses and their pieces (§4.1's table), frag pair and
+    // consumables kept.
+    const signatureOf = (table: LootTableId): string | undefined =>
+      lootTables[table].find((entry) => entry.kind === 'signature')?.itemId;
+    expect({
+      cinder4_boss: signatureOf('cinder4_boss'),
+      vetra_boss: signatureOf('vetra_boss'),
+      thessaly_boss: signatureOf('thessaly_boss'),
+      ferrum_boss: signatureOf('ferrum_boss'),
+      hive_boss: signatureOf('hive_boss'),
+    }).toEqual({
+      cinder4_boss: 'launcher_rocket',
+      vetra_boss: 'mg_scrap',
+      thessaly_boss: 'pistol_magnum',
+      ferrum_boss: 'launcher_grenade',
+      hive_boss: 'mg_rotary',
+    });
+    for (const table of ['cinder4_boss', 'vetra_boss', 'thessaly_boss', 'ferrum_boss', 'hive_boss'] as const) {
+      expect(lootTables[table].filter((entry) => entry.kind !== 'signature'), table).toEqual([
+        { kind: 'item', itemId: 'frag_grenade', qty: 2, chance: 1 },
+        { kind: 'item', itemId: 'medkit', qty: 2, chance: 1 },
+        { kind: 'item', itemId: 'coolant_pack', qty: 1, chance: 1 },
+        { kind: 'item', itemId: 'plasma_cell', qty: 1, chance: 0.5 },
+        { kind: 'item', itemId: 'wheat_ration', qty: 1, chance: 0.5 },
+      ]);
+    }
+    expect(lootTables.elite_bonus).toEqual([
+      { kind: 'resource', resource: 'lithium', min: 6, max: 12, chance: 1 },
+      { kind: 'item', itemId: 'frag_grenade', qty: 1, chance: 0.35 },
+      { kind: 'item', itemId: 'landmine', qty: 1, chance: 0.25 },
+      { kind: 'item', itemId: 'plasma_cell', qty: 1, chance: 0.1 },
+    ]);
+    expect(SIGNATURE_FALLBACK_LITHIUM).toBe(25);
   });
 
   it('9. enemy stats hold, static enemies stand still, and boss phases descend from full', () => {
@@ -689,6 +764,20 @@ describe('content invariants (SPEC-009 §7)', () => {
         .reduce((total, mission) => total + mission.rewards.tokens, 0),
     );
     expect(byChapter).toEqual([55, 70, 85, 105, 165, 190]);
+  });
+
+  // SPEC-039 §4.3: every attribute's per-point effects live in one table,
+  // and the class passives it amended.
+  it('17 (SPEC-039). ATTRIBUTE_EFFECTS holds every per-point effect', () => {
+    expect(ATTRIBUTE_EFFECTS).toEqual({
+      might: { damage: 0.04 },
+      vigor: { maxHp: 8 },
+      agility: { moveSpeed: 0.02, critChance: 0.02, dashCooldownCut: 0.03 },
+      tech: { companionEffect: 0.1, priceCut: 0.03 },
+    });
+    expect(ATTRIBUTE_POINT_LEVELS).toBe(5);
+    expect(CLASSES.marine.passive.damageMult).toBe(1.1);
+    expect(CLASSES.engineer.passive).toEqual({ refitDiscount: 0.15, companionEffectMult: 1.25 });
   });
 
   it('17. class attributes total 8, and no attribute can be pushed past the cap', () => {

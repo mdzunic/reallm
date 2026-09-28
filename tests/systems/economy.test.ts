@@ -1036,9 +1036,10 @@ describe('discount scope (SPEC-039 §4.3)', () => {
   });
 
   it('the quartermaster discounts ship, gear and companion prices, never crafting', () => {
-    for (const level of [1, 2, 3] as const) {
+    for (const [index, effect] of COMPANIONS.quartermaster.levels.entries()) {
+      const level = (index + 1) as 1 | 2 | 3;
       const { economy } = world(MARINE, (data) => data.companions.push({ id: 'quartermaster', level, enabled: true }));
-      const shop = 0.03 + COMPANIONS.quartermaster.levels[level - 1].shopDiscount;
+      const shop = 0.03 + effect.shopDiscount;
       expect(economy.discount('ship')).toBeCloseTo(shop, 10);
       expect(economy.discount('gear')).toBeCloseTo(shop, 10);
       expect(economy.discount('companion')).toBeCloseTo(shop, 10);

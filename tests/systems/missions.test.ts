@@ -485,6 +485,25 @@ describe('Missions — objectiveEnemies and bossStage', () => {
     h.events.emit('boss:defeated', { boss: 'dune_wurm' });
     expect(h.missions.bossStage()).toBeNull();
   });
+
+  // SPEC-039 §3: the surface asks `isReplay` of the mission behind the boss.
+  it('bossStageMission() names the boss mission while bossStage() does, and null with no boss stage', () => {
+    const h = harness((save) => save.progress.missionsDone.push('c1_m1', 'c1_m2'));
+    expect(h.missions.bossStageMission()).toBeNull();
+    h.missions.accept('c1_m3');
+    expect(h.missions.bossStageMission()).toBe('c1_m3');
+    expect(h.missions.isReplay('c1_m3')).toBe(false);
+    h.events.emit('boss:defeated', { boss: 'dune_wurm' });
+    expect(h.missions.bossStageMission()).toBeNull();
+  });
+
+  it('bossStageMission() on a replay names a mission isReplay() confirms', () => {
+    const h = harness((save) => save.progress.missionsDone.push('c1_m1', 'c1_m2', 'c1_m3'));
+    h.missions.accept('c1_m3');
+    const id = h.missions.bossStageMission();
+    expect(id).toBe('c1_m3');
+    expect(id !== null && h.missions.isReplay(id)).toBe(true);
+  });
 });
 
 // --------------------------------------------------------------- SPEC-024 §6

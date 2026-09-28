@@ -7,6 +7,8 @@ import type { GameEvents } from '@/core/Events';
 import { setLogSink, type LogSink } from '@/core/Log';
 import { Rng } from '@/core/Rng';
 import {
+  allocateAttribute,
+  attributePointsEarned,
   AUTOSAVE_DEBOUNCE_MS,
   BACKUP_RESTORED_TEXT,
   BAK_SUFFIX,
@@ -41,7 +43,10 @@ import {
   SLOTS,
   STORAGE_UNAVAILABLE_TEXT,
   TRANSITION_HOLD_MAX_MS,
+  unspentAttributePoints,
   validateSave,
+  HP_PER_LEVEL,
+  maxHp,
   type CharacterCreation,
   type Save,
   type SaveEvents,
@@ -648,6 +653,29 @@ describe('validateSave (§4.4)', () => {
     // Below the class base is raised back to it — the points are only ever added.
     const low = expectOk(withPatch({ player: { ...player, attributes: { might: 0, vigor: 0, agility: 0, tech: 0 } } }));
     expect(low.data.player.attributes).toEqual({ might: 3, vigor: 3, agility: 1, tech: 1 });
+  });
+
+  // SPEC-039 §4.7, D8: the budget follows the validated level — five creation
+  // points plus one every fifth level — handed out in field order, and no
+  // attribute past ATTRIBUTE_MAX (39-l).
+  it('lets a level-10 save carry the class base plus seven, each attribute capped at 10', () => {
+    const player = { ...newSave(0, CREATION, 1, 0).player, level: 10 };
+    const ok = expectOk(withPatch({ player: { ...player, attributes: { might: 99, vigor: 99, agility: 99, tech: 99 } } }));
+    // Marine base 3/3/1/1; seven points go to might first, which stops at 10.
+    expect(ok.data.player.attributes).toEqual({ might: 10, vigor: 3, agility: 1, tech: 1 });
+    expect(ok.warnings.join('\n')).toContain('clamped to the class base plus 7 (15 total)');
+
+    // Level 30 earns six: eleven over the base, might full and four to vigor.
+    const top = expectOk(withPatch({ player: { ...player, level: 30, attributes: { might: 99, vigor: 99, agility: 99, tech: 99 } } }));
+    expect(top.data.player.attributes).toEqual({ might: 10, vigor: 7, agility: 1, tech: 1 });
+
+    // A legal spread at level 10 survives untouched, with no warning.
+    const spent = expectOk(withPatch({ player: { ...player, attributes: { might: 6, vigor: 7, agility: 1, tech: 1 } } }));
+    expect(spent.data.player.attributes).toEqual({ might: 6, vigor: 7, agility: 1, tech: 1 });
+    expect(spent.warnings.join('\n')).not.toContain('player.attributes');
+    // …but the same spread at level 1 is two over the budget.
+    const early = expectOk(withPatch({ player: { ...player, level: 1, attributes: { might: 6, vigor: 7, agility: 1, tech: 1 } } }));
+    expect(early.data.player.attributes).toEqual({ might: 6, vigor: 5, agility: 1, tech: 1 });
   });
 
   it('drops unknown mission, flag and inventory ids with a warning (AC-27)', () => {
@@ -1645,4 +1673,62 @@ it('has three slots', () => {
   expect(SLOTS).toEqual([0, 1, 2]);
   const widened: SlotId[] = [...SLOTS];
   expect(widened).toHaveLength(3);
+});
+
+// ------------------------------------------------------------------ SPEC-039
+
+describe('attribute points (SPEC-039 §4.7)', () => {
+  it('earns one point every fifth level, derived from the level alone', () => {
+    expect([1, 4, 5, 9, 10, 13, 18, 30].map(attributePointsEarned)).toEqual([0, 0, 1, 1, 2, 2, 3, 6]);
+    expect(HP_PER_LEVEL).toBe(4);
+  });
+
+  it('unspent is earned minus spent, and never negative', () => {
+    const save = newSave(0, CREATION, 1, 0); // 6/5/1/1: the five creation points spent
+    expect(unspentAttributePoints(save.player)).toBe(0);
+    save.player.level = 5;
+    expect(unspentAttributePoints(save.player)).toBe(1);
+    save.player.level = 10;
+    expect(unspentAttributePoints(save.player)).toBe(2);
+    save.player.attributes.tech += 1;
+    expect(unspentAttributePoints(save.player)).toBe(1);
+    save.player.attributes.tech += 3; // past the budget (an edited save)
+    expect(unspentAttributePoints(save.player)).toBe(0);
+    // The formula counts creation points left unallocated as spendable.
+    const bare = newSave(0, { ...CREATION, attributes: { might: 3, vigor: 3, agility: 1, tech: 1 } }, 1, 0);
+    expect(unspentAttributePoints(bare.player)).toBe(5);
+  });
+
+  it('a point of vigor raises max HP and the live HP by 8 (39-m)', () => {
+    const save = newSave(0, CREATION, 1, 0);
+    save.player.level = 5;
+    save.player.hp = maxHp('marine', save.player.attributes, 5);
+    const before = save.player.hp;
+    expect(allocateAttribute(save, 'vigor')).toBe(true);
+    expect(save.player.attributes.vigor).toBe(6);
+    expect(maxHp('marine', save.player.attributes, 5)).toBe(before + 8);
+    expect(save.player.hp).toBe(before + 8);
+    // That was the level's only point.
+    expect(unspentAttributePoints(save.player)).toBe(0);
+    expect(allocateAttribute(save, 'might')).toBe(false);
+    expect(save.player.attributes.might).toBe(6);
+  });
+
+  it('refuses an attribute at ATTRIBUTE_MAX (39-n), and a point elsewhere leaves HP alone', () => {
+    const save = newSave(0, { ...CREATION, attributes: { might: 8, vigor: 3, agility: 1, tech: 1 } }, 1, 0);
+    save.player.level = 10;
+    save.player.attributes.might = 10; // both of level 10's points spent on might
+    expect(unspentAttributePoints(save.player)).toBe(0);
+    save.player.attributes.might = 9;
+    save.player.attributes.vigor = 3;
+    expect(unspentAttributePoints(save.player)).toBe(1);
+    const hp = save.player.hp;
+    expect(allocateAttribute(save, 'might')).toBe(true);
+    expect(save.player.attributes.might).toBe(10);
+    expect(save.player.hp).toBe(hp);
+    save.player.level = 15;
+    expect(allocateAttribute(save, 'might')).toBe(false);
+    expect(save.player.attributes.might).toBe(10);
+    expect(allocateAttribute(save, 'tech')).toBe(true);
+  });
 });
