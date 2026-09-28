@@ -91,18 +91,29 @@ function harness(planet: keyof typeof PLANETS = 'cinder4', quality: keyof typeof
 }
 
 describe('SpawnDirector — population (AC-12)', () => {
-  it('fills to the preset-scaled target and holds there', () => {
-    const h = harness('cinder4', 'high'); // maxEnemies 32 ⇒ ×1 ⇒ P = 14
-    expect(populationTarget(PLANETS.cinder4, QUALITY.high)).toBe(14);
+  it('fills to the planet target and holds there', () => {
+    const h = harness('cinder4', 'high'); // SPEC-038 §4.4: P = 10 on every preset
+    expect(populationTarget(PLANETS.cinder4, QUALITY.high)).toBe(10);
     h.run(30);
-    expect(h.director.alive).toBe(14);
+    expect(h.director.alive).toBe(10);
     h.run(10);
-    expect(h.director.alive).toBe(14);
+    expect(h.director.alive).toBe(10);
   });
 
-  it('scales with quality.maxEnemies', () => {
-    expect(populationTarget(PLANETS.cinder4, QUALITY.low)).toBe(Math.round((14 * 12) / 32));
-    expect(populationTarget(PLANETS.cinder4, QUALITY.medium)).toBe(Math.round((14 * 20) / 32));
+  it('is the design count on every preset, capped by quality.maxEnemies (SPEC-038 §4.4)', () => {
+    // Cinder-4 was 14 on high, 9 on medium and 5 on low; the device no longer
+    // decides how hard the planet is.
+    for (const preset of ['low', 'medium', 'high'] as const) {
+      expect(populationTarget(PLANETS.cinder4, QUALITY[preset]), preset).toBe(10);
+      for (const planet of Object.values(PLANETS)) {
+        expect(populationTarget(planet, QUALITY[preset]), `${planet.id} on ${preset}`).toBe(
+          Math.min(planet.surface.population, QUALITY[preset].maxEnemies),
+        );
+      }
+    }
+    // The Hive's 15 is the one design count a preset cuts: 12 on low.
+    expect(populationTarget(PLANETS.hive, QUALITY.low)).toBe(12);
+    expect(populationTarget(PLANETS.hive, QUALITY.medium)).toBe(15);
     const h = harness('cinder4', 'low');
     h.run(30);
     expect(h.director.alive).toBe(populationTarget(PLANETS.cinder4, QUALITY.low));
@@ -210,7 +221,7 @@ describe('SpawnDirector — despawn (AC-16)', () => {
   it('recycles far un-aggroed enemies after 10 s, and only those', () => {
     const h = harness('cinder4', 'high');
     h.run(30);
-    expect(h.director.alive).toBe(14);
+    expect(h.director.alive).toBe(10);
     // The player teleports far away: everything is now > 70 m and un-aggroed…
     const far = { x: -160, z: -160 };
     // …except one enemy that is aggroed and one that stays close.
@@ -342,7 +353,8 @@ describe('SPEC-030 — waves flag their enemies and spawns avoid shelters (AC-29
     const s = shelters[0] as (typeof shelters)[number];
     const player = { x: s.x + 30, z: s.z };
     h.run(60, player);
-    expect(h.spawned.length).toBeGreaterThan(10);
+    // SPEC-038 §4.4: Cinder-4 fields 10, so the sweep is its full field.
+    expect(h.spawned.length).toBeGreaterThanOrEqual(10);
     for (const spawn of h.spawned) {
       for (const shelter of shelters) {
         expect(
@@ -474,16 +486,17 @@ describe('waves attack (SPEC-034 §4.8)', () => {
 
 describe('SpawnDirector — the first-visit ramp (SPEC-035 §4.7)', () => {
   it('halves the ambient target and lets it back up when the ramp clears', () => {
-    const h = harness('cinder4', 'high'); // P = 14
-    expect(h.director.populationTarget).toBe(14);
+    const h = harness('cinder4', 'high'); // SPEC-038 §4.4: P = 10
+    expect(h.director.populationTarget).toBe(10);
     h.director.setRamp({ populationScale: 0.5, excludeArchetypes: ['rusher'] });
-    expect(h.director.populationTarget).toBe(7);
+    // The first visit keeps 5 (it was 14 → 7).
+    expect(h.director.populationTarget).toBe(5);
     h.run(60);
-    expect(h.director.alive).toBe(7);
+    expect(h.director.alive).toBe(5);
     h.director.setRamp(null);
-    expect(h.director.populationTarget).toBe(14);
+    expect(h.director.populationTarget).toBe(10);
     h.run(30);
-    expect(h.director.alive).toBe(14);
+    expect(h.director.alive).toBe(10);
   });
 
   it('never rounds the target below one', () => {

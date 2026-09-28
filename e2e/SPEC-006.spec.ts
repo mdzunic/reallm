@@ -284,13 +284,13 @@ test('the manifest declares four sfx banks and nine music tracks (AC-3, AC-4, AC
   expect(manifest.musicBuses).toEqual(['music']);
   expect(manifest.musicLoops).toBe(true);
   expect(manifest.musicOrder).toBe(true);
-  // AC-5: the 51 sprite keys `SoundId` is derived from (29 + the 15 film cues of
-  // PLAN R9 + the seven weapon, impact and blast sprites of SPEC-035 §4.11). The
-  // other half of that criterion — an id outside the union is a compile error —
-  // is `npm run typecheck`, which the union's `SpriteKeysOf` derivation is
-  // written for.
-  expect(new Set(manifest.sprites).size).toBe(51);
-  expect(manifest.sprites).toHaveLength(51);
+  // AC-5: the 55 sprite keys `SoundId` is derived from (29 + the 15 film cues of
+  // PLAN R9 + the seven weapon, impact and blast sprites of SPEC-035 §4.11 + the
+  // dash and three windup cues of SPEC-038 §4.10). The other half of that
+  // criterion — an id outside the union is a compile error — is `npm run
+  // typecheck`, which the union's `SpriteKeysOf` derivation is written for.
+  expect(new Set(manifest.sprites).size).toBe(55);
+  expect(manifest.sprites).toHaveLength(55);
 });
 
 // ------------------------------------------------------------------- unlock
@@ -1169,11 +1169,12 @@ test('the reactions table is what the game actually hears (AC-38 … AC-50, AC-5
   // §10 added `app:update-ready` and `app:install-hint`, both silent; SPEC-034
   // §4.2/§4.7/§4.13 added `player:recalled`, `item:noRoom` and
   // `enemy:dismissed`, all three silent; SPEC-035 §4.11 added `weapon:fired`
-  // and `enemy:hit`, both reacted). That
+  // and `enemy:hit`, both reacted; SPEC-038 §4.10 added `player:dashed` and
+  // `enemy:windup`, both reacted). That
   // the two halves cover `GameEvents` exactly is a compile-time assertion in
   // the module, and `tests/core/audioReactions.test.ts` pins the same pair of
   // counts in node.
-  expect(reactions.counts.reacted).toBe(21);
+  expect(reactions.counts.reacted).toBe(23);
   expect(reactions.counts.silent).toBe(43);
   expect(reactions.counts.overlap).toEqual([]);
   // SPEC-012 §4.12 populated the set from the dialogue table's `glitch` marks

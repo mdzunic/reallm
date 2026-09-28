@@ -4,11 +4,12 @@
 import { describe, expect, it } from 'vitest';
 import { EventBus, type GameEvents } from '@/core/Events';
 import { Rng } from '@/core/Rng';
-import { PLANETS, TUNING } from '@/data/index';
+import { PLANETS, TUNING, type PlanetDef } from '@/data/index';
 import {
   BURST_OFF_SECONDS,
   BURST_ON_SECONDS,
   CALM_EFFECTS,
+  FORCED_RAMP_SECONDS,
   WEATHER_EFFECTS,
   Weather,
 } from '@/systems/Weather';
@@ -222,5 +223,86 @@ describe('holdCalm (SPEC-035 §4.7)', () => {
     // Cinder-4's calm is 90–150 s, then a 10 s warning.
     h.run(160 + TUNING.STORM_WARNING_SECONDS);
     expect(h.recorded.filter((r) => r.name === 'weather:warning').length).toBeGreaterThan(0);
+  });
+});
+
+// ------------------------------------------------------------- SPEC-038 §4.5
+
+describe('Weather — the forced ramp and the planet multiplier (SPEC-038 §4.5)', () => {
+  it('ramps a forced storm from 0 to full over FORCED_RAMP_SECONDS', () => {
+    expect(FORCED_RAMP_SECONDS).toBe(10);
+    const h = harness('ferrum');
+    h.weather.force('radiation_storm', 60);
+    expect(h.weather.forced).toBe(true);
+    expect(h.weather.exposureDps).toBe(0);
+    h.run(2.5);
+    expect(h.weather.exposureDps).toBeCloseTo(4 * 0.25, 2);
+    h.run(2.5);
+    expect(h.weather.exposureDps).toBeCloseTo(4 * 0.5, 2);
+    h.run(6);
+    expect(h.weather.exposureDps).toBe(4);
+    // `dps` keeps its SPEC-012 meaning: the table rate, unramped.
+    expect(h.weather.dps).toBe(4);
+  });
+
+  it('does not ramp an ambient storm — its warning was the ramp', () => {
+    const h = harness('ferrum');
+    let waited = 0;
+    while (h.weather.phase !== 'active' && waited < 300) {
+      h.run(1);
+      waited += 1;
+    }
+    expect(h.weather.phase).toBe('active');
+    expect(h.weather.forced).toBe(false);
+    expect(h.weather.exposureDps).toBe(h.weather.dps);
+    expect(h.weather.exposureDps).toBeGreaterThan(0);
+  });
+
+  it('softens Cinder-4 to 0.65, and leaves every other planet at 1', () => {
+    expect(PLANETS.cinder4.surface.weather?.dpsMult).toBe(0.65);
+    // Read through the schema type: on the literal types an absent optional is not a property.
+    const planets: Readonly<Record<string, PlanetDef>> = PLANETS;
+    for (const id of ['vetra', 'thessaly', 'ferrum', 'hive', 'eden']) {
+      expect(planets[id]?.surface.weather?.dpsMult ?? 1, id).toBe(1);
+    }
+    const h = harness('cinder4');
+    h.weather.force('heatwave', 90);
+    h.run(FORCED_RAMP_SECONDS + 1);
+    // The heatwave's 2 dps, full, × 0.65 = 1.3.
+    expect(h.weather.exposureDps).toBeCloseTo(1.3, 10);
+    expect(h.weather.dps).toBe(2);
+  });
+
+  it('c1_s2’s 90 s heatwave in the open costs the chapter-1 reference player at most 70 % of max HP', () => {
+    // 168 HP, no armour: SPEC-016's WORST_CASE_CREATION at level 3.
+    const h = harness('cinder4');
+    h.weather.force('heatwave', 90);
+    let taken = 0;
+    for (let i = 0; i < Math.round(90 / STEP); i++) {
+      h.weather.update(STEP);
+      taken += h.weather.exposureDps * STEP;
+    }
+    expect(taken).toBeGreaterThan(100);
+    expect(taken / 168).toBeLessThanOrEqual(0.7);
+  });
+
+  it('the avalanche still reads dps in bursts, and the ramp rides on top of it', () => {
+    const h = harness('vetra');
+    h.weather.force('avalanche', 120);
+    h.run(5);
+    expect(h.weather.dps).toBe(4);
+    expect(h.weather.exposureDps).toBeCloseTo(2, 1);
+    h.run(BURST_ON_SECONDS - 5 + 1);
+    expect(h.weather.dps).toBe(0);
+    expect(h.weather.exposureDps).toBe(0);
+  });
+
+  it('a storm that ends forgets it was forced', () => {
+    const h = harness('ferrum');
+    h.weather.force('heatwave', 5);
+    h.run(6);
+    expect(h.weather.current).toBeNull();
+    expect(h.weather.forced).toBe(false);
+    expect(h.weather.exposureDps).toBe(0);
   });
 });

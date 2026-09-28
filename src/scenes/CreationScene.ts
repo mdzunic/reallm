@@ -14,8 +14,8 @@ import { normalizeName, type CharacterCreation, type SlotId } from '@/core/Save'
 import type { GameServices } from '@/core/Services';
 import type { Renderer } from '@/core/Renderer';
 import type { SceneParams } from '@/core/StateMachine';
-import { ATTRIBUTE_MAX, CLASSES, CREATION_POINTS, type Attributes, type ClassId } from '@/data/index';
-import { computePlayerStats, passiveText } from '@/systems/UiHelpers';
+import { ATTRIBUTE_MAX, CLASSES, CREATION_POINTS, type Attributes, type ClassId, type Difficulty } from '@/data/index';
+import { computePlayerStats, DIFFICULTY_LINES, passiveText } from '@/systems/UiHelpers';
 import { dialogueLayer } from '@/ui/DialogueUI';
 import { el, h, testId } from '@/ui/dom';
 import { portraitManifest, portraitSource } from '@/ui/portraits';
@@ -40,12 +40,6 @@ const SHARED_PORTRAITS = [9, 10, 11] as const;
 const CREATION_LOOK: Partial<Look> = { vignette: 0.35, bloomStrength: 0.3, tint: [0.96, 1, 1.04] };
 const HUB_ENVIRONMENT_INTENSITY = 0.9;
 
-/** AC-18: the one-line explanation beside the toggle. */
-const DIFFICULTY_LINES = {
-  normal: 'Normal — the pressure the game was tuned for.',
-  casual: 'Casual — softer hits and kinder deaths; the story is unchanged.',
-} as const;
-
 export class CreationScene extends UiScene<'creation'> {
   #slot: SlotId = 0;
 
@@ -55,7 +49,7 @@ export class CreationScene extends UiScene<'creation'> {
   #primary: string = PRIMARY_SWATCHES[0];
   #secondary: string = SECONDARY_SWATCHES[0];
   #alloc: Record<(typeof ATTRIBUTES)[number], number> = { might: 0, vigor: 0, agility: 0, tech: 0 };
-  #difficulty: 'casual' | 'normal' = 'normal';
+  #difficulty: Difficulty = 'normal';
   /** SPEC-020 §4.6: the portrait files that shipped; empty until the manifest lands. */
   #portraits: ReadonlySet<number> = new Set();
   #leaving = false;

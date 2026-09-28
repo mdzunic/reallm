@@ -32,6 +32,7 @@ import {
   WAVES,
   type CompanionEffect,
   type DamageSource,
+  type Difficulty,
   type EnemyDef,
   type EnemyId,
   type MissionId,
@@ -114,8 +115,8 @@ export interface FlightConfig {
   ship: Save['ship'];
   companions: Save['companions'];
   quality: QualitySettings;
-  /** Casual multiplies incoming damage by 0.7 (§4.6, 13-h). */
-  difficulty: Save['meta']['difficulty'];
+  /** Casual multiplies incoming damage by 0.7 (§4.6, 13-h); SPEC-038 §4.6 re-reads it on resume. */
+  difficulty: Difficulty;
   /**
    * SPEC-039 §4.3: the pilot's `companionMult`, which scales ARIA's shield
    * regeneration — the flight scene passes `computePlayerStats(save)`'s. 1
@@ -290,7 +291,8 @@ export class Flight {
   readonly #speedMult: number;
   readonly #ariaShieldRegen: number;
   readonly #ariaAutoAim: boolean;
-  readonly #damageMult: number;
+  /** SPEC-038 §4.6: never cached for the trip — `setDifficulty` moves it. */
+  #damageMult: number;
   readonly #asteroidCap: number;
   readonly #groups: WaveGroup[] = [];
 
@@ -912,6 +914,14 @@ export class Flight {
   }
 
   // ----------------------------------------------------------- damage & storm
+
+  /**
+   * SPEC-038 §4.6: a difficulty changed in Settings mid-trip reaches the next
+   * hit — the scene calls this when it resumes from its pause menu (38-g).
+   */
+  setDifficulty(difficulty: Difficulty): void {
+    this.#damageMult = difficulty === 'casual' ? CASUAL_DAMAGE_MULT : 1;
+  }
 
   /**
    * §4.6: shield first, remainder to hull; casual ×0.7; three seconds of no

@@ -215,15 +215,16 @@ test('7. the first flight teaches its controls, and a second session says nothin
   await expect(hint).toHaveClass(/is-hidden/);
 });
 
-test('7. the first enemy hit on the surface teaches hold-to-fire', async ({ page }) => {
+test('7. the first enemy hit on the surface teaches the combat tip', async ({ page }) => {
   test.setTimeout(120_000);
   await landFresh(page);
   await press(page, 'surface-hurt-from');
   // The `move` tip is already on the strip, and SPEC-027 §4.5 spaces tips 12 s
-  // apart; this waits for the queue rather than racing it.
+  // apart; this waits for the queue rather than racing it. SPEC-038 §4.9
+  // reworded the tip for auto-fire on: the gun fires on its own.
   await expect
     .poll(async () => page.locator('[data-testid="aria-hint"]').innerText(), { timeout: 60_000 })
-    .toMatch(/hold Space|auto-fire shoots/i);
+    .toMatch(/fires on its own/i);
 });
 
 // ---------------------------------------------------------------- 8: flight HUD

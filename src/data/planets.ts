@@ -100,6 +100,11 @@ export interface PlanetDef {
       readonly cycle: readonly WeatherId[];
       readonly calmSeconds: readonly [number, number];
       readonly stormSeconds: readonly [number, number];
+      /**
+       * SPEC-038 §4.5 (*initial tuning*): scales what a storm here deals a
+       * player in the open (`Weather.exposureDps`); 1 when absent.
+       */
+      readonly dpsMult?: number;
     } | null;
     readonly pois: readonly PoiDef[];
     readonly nodes: readonly {
@@ -114,7 +119,10 @@ export interface PlanetDef {
     readonly spawn: readonly { readonly enemy: EnemyId; readonly weight: number; readonly maxAlive: number }[];
     /** Ambient waves the planet runs on its own; Eden has none until `c6_m2`. */
     readonly ambientWaves?: WaveId;
-    /** Target simultaneous enemies at 'medium' quality. */
+    /**
+     * SPEC-038 §4.4: target simultaneous enemies on every preset, capped by
+     * `maxEnemies` (`populationTarget`).
+     */
     readonly population: number;
     readonly eliteChance: number;
   };
@@ -151,7 +159,9 @@ export const PLANETS = {
         decals: ['crater', 'scorch'],
         boundary: 'dunes',
       },
-      weather: { cycle: ['sandstorm', 'heatwave'], calmSeconds: [90, 150], stormSeconds: [45, 75] },
+      // SPEC-038 §4.5: Cinder-4's heat runs at 1.3 dps — the first chapter's
+      // storms bite without costing the whole bar.
+      weather: { cycle: ['sandstorm', 'heatwave'], calmSeconds: [90, 150], stormSeconds: [45, 75], dpsMult: 0.65 },
       pois: [
         { id: 'landing_pad', kind: 'landing_pad', label: POI_LABELS.landing_pad, count: 1, band: [0, 0], radius: 6, model: 'procedural' },
         { id: 'dune_sea', kind: 'scan', label: POI_LABELS.dune_sea, count: 1, band: [60, 90], radius: 8, model: 'procedural' },
@@ -171,7 +181,7 @@ export const PLANETS = {
         { enemy: 'wurmling', weight: 3, maxAlive: 5 },
         { enemy: 'scav_raider', weight: 2, maxAlive: 4 },
       ],
-      population: 14,
+      population: 10,
       eliteChance: 0.05,
     },
     music: { calm: 'calm_desert', combat: 'combat_light' },
@@ -225,7 +235,7 @@ export const PLANETS = {
         { enemy: 'ice_crawler', weight: 3, maxAlive: 6 },
         { enemy: 'ice_spitter', weight: 2, maxAlive: 4 },
       ],
-      population: 16,
+      population: 11,
       eliteChance: 0.05,
     },
     music: { calm: 'calm_ice', combat: 'combat_light' },
@@ -282,7 +292,7 @@ export const PLANETS = {
         { enemy: 'spore_hound', weight: 3, maxAlive: 6 },
         { enemy: 'spore_spitter', weight: 2, maxAlive: 4 },
       ],
-      population: 18,
+      population: 12,
       eliteChance: 0.06,
     },
     music: { calm: 'calm_jungle', combat: 'combat_heavy' },
@@ -339,7 +349,7 @@ export const PLANETS = {
         { enemy: 'magma_wraith', weight: 3, maxAlive: 6 },
         { enemy: 'slag_spitter', weight: 2, maxAlive: 4 },
       ],
-      population: 18,
+      population: 13,
       eliteChance: 0.07,
     },
     music: { calm: 'calm_volcanic', combat: 'combat_heavy' },
@@ -393,7 +403,7 @@ export const PLANETS = {
         { enemy: 'hive_spitter', weight: 2, maxAlive: 4 },
         { enemy: 'hive_egg', weight: 1, maxAlive: 18 },
       ],
-      population: 22,
+      population: 15,
       eliteChance: 0.08,
     },
     music: { calm: 'calm_hive', combat: 'combat_swarm' },

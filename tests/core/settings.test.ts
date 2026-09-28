@@ -157,9 +157,10 @@ describe('createSettings', () => {
     expect(warnings.join('\n')).toContain('could not persist');
   });
 
-  it('defaults the control options to touch auto-fire and a left stick (SPEC-005 AC-18, AC-11)', () => {
+  it('defaults the control options to auto-fire on and a left stick (SPEC-005 AC-18, AC-11; SPEC-038 §4.7)', () => {
     const settings = createSettings(fakeStorage().storage);
-    expect(settings.autoFire).toBe('touch');
+    // SPEC-038 §4.7 moved the default from 'touch' to 'on'.
+    expect(settings.autoFire).toBe('on');
     expect(settings.joystickSide).toBe('left');
     expect(settings.buttonScale).toBe(MIN_BUTTON_SCALE);
     // The default of the fourth option is SPEC-007 §3's, asserted with the rest
@@ -175,10 +176,14 @@ describe('createSettings', () => {
     expect(createSettings(fake.storage).flightMouseSteer).toBe(true);
     expect(createSettings(fake.storage).buttonScale).toBe(1.5);
 
-    // Content the store cannot use falls back, exactly as `quality` does.
+    // Content the store cannot use falls back, exactly as `quality` does — to
+    // the default, which SPEC-038 §4.7 made 'on'.
     const bad = fakeStorage('{"autoFire":"always","joystickSide":"middle","buttonScale":"big"}');
     const settings = createSettings(bad.storage);
-    expect(settings.autoFire).toBe('touch');
+    expect(settings.autoFire).toBe('on');
+    // 38-l: a player who chose 'touch' (or 'off') before SPEC-038 keeps it.
+    expect(createSettings(fakeStorage('{"autoFire":"touch"}').storage).autoFire).toBe('touch');
+    expect(createSettings(fakeStorage('{"autoFire":"off"}').storage).autoFire).toBe('off');
     expect(settings.joystickSide).toBe('left');
     expect(settings.buttonScale).toBe(MIN_BUTTON_SCALE);
 
@@ -303,7 +308,8 @@ describe('the settings object (SPEC-007 §3)', () => {
       reduceMotion: false,
       // SPEC-037 §4.6: the damage flash is full unless reduced motion is asked for.
       damageFlash: 'full',
-      autoFire: 'touch',
+      // SPEC-038 §4.7: auto-fire is on by default.
+      autoFire: 'on',
       weaponAutoSwap: 'touch',
       joystickSide: 'left',
       // §3 annotates this one `default true`. SPEC-005 owns the aim-assist
@@ -386,7 +392,7 @@ describe('the settings object (SPEC-007 §3)', () => {
     });
     expect(settings.get()).toMatchObject({
       quality: null,
-      autoFire: 'touch',
+      autoFire: 'on',
       lastSlot: null,
       installHintShownAt: null,
       benchmark: null,
