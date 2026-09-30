@@ -109,12 +109,13 @@ describe('the registration (AC-53)', () => {
   });
 });
 
-// The emitted output. `npm run check` builds *before* it tests (SPEC-016 §11),
-// so there these always read the build of the commit under test. A standalone
-// `npm run test` runs them only when `dist/` is at least as new as every build
-// input, and skips them — saying why in the title — on a tree never built or
-// edited since (16-l, 16-m). The same ground is covered end to end against
-// `vite preview` by the `pwa` Playwright project in `e2e/SPEC-015-pwa.spec.ts`.
+// The emitted output. These run only when `dist/` is at least as new as every
+// build input, and skip — saying why in the title — on a tree never built or
+// edited since (16-l, 16-m), so they never judge an older build; straight
+// after `vite build` (the order SPEC-016 §11 gives `npm run check`) they read
+// the build of the commit under test. The same ground is covered end to end
+// against `vite preview` by the `pwa` Playwright project in
+// `e2e/SPEC-015-pwa.spec.ts`.
 const fresh = distFreshness(root(''));
 const built = fresh.ok;
 

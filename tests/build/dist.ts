@@ -1,11 +1,11 @@
 // SPEC-016 §11 — is `dist/` the build of this tree?
 //
-// `npm run check` builds before it tests, so inside it the emitted-build tests
-// of `pwa.test.ts` always read this commit's output. A standalone `npm run
-// test` must not judge an older one: those tests skip unless `dist/index.html`
-// is newer than every build input, and say why when they do (16-l, 16-m).
-// `vite build` rewrites `dist/index.html` on every build, so a fresh build is
-// always newer than what it was built from.
+// The emitted-build tests of `pwa.test.ts` read `dist/`, and must never judge
+// a build older than the tree: they skip unless `dist/index.html` is newer than
+// every build input, and say why when they do (16-l, 16-m). `vite build`
+// rewrites `dist/index.html` on every build, so a fresh build is always newer
+// than what it was built from, and a test run straight after one reads this
+// commit's output — the order §11 gives `npm run check`.
 import { existsSync, readdirSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 
