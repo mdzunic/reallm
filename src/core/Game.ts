@@ -165,6 +165,11 @@ function heapMb(): number | null {
   return memory === undefined ? null : memory.usedJSHeapSize / 1_048_576;
 }
 
+/** A sample slot a run fills in place (§8.3). */
+function blankPerfSample(): PerfSample {
+  return { frameMs: 0, drawCalls: 0, triangles: 0, updateMs: 0, renderMs: 0, enemies: 0, heapMb: null };
+}
+
 /** The URL flags of SPEC-001 §9. Unknown values are ignored with a warning, never fatal. */
 export function parseFlags(search: string): DevFlags {
   const params = new URLSearchParams(search);
@@ -335,7 +340,13 @@ export class Game implements GameServices {
   /** A session measures once: the first entry of the target, never a later one. */
   #perfStarted = false;
   #perfStress: PerfStress | null = null;
+  /**
+   * The run's samples, allocated when it starts and filled in place, so a
+   * sampled frame allocates nothing (SPEC-001 §7); `#perfFrames` of them are
+   * this run's.
+   */
   #perfSamples: PerfSample[] = [];
+  #perfFrames = 0;
   #perfDroppedAt = 0;
   /** The last finished run, for `__reallm.perf()` (§8.4). */
   #perfResult: PerfResult | null = null;
@@ -1200,8 +1211,12 @@ export class Game implements GameServices {
 
   #startPerf(): void {
     this.#perfStarted = true;
-    this.#perfSamples = [];
-    this.#perfClock = new PerfClock(this.#flags.perf ?? PERF_DEFAULT_SECONDS, performance.now());
+    const seconds = this.#flags.perf ?? PERF_DEFAULT_SECONDS;
+    // The pacer draws at most 60 frames a second (SPEC-040 §4.3); a frame
+    // past that still gets a sample, allocated then.
+    this.#perfSamples = Array.from({ length: Math.ceil(seconds * 60) + 1 }, blankPerfSample);
+    this.#perfFrames = 0;
+    this.#perfClock = new PerfClock(seconds, performance.now());
   }
 
   /** After every frame's render phase (D-17): warm-up, the stress, then one sample per drawn frame. */
@@ -1217,10 +1232,10 @@ export class Game implements GameServices {
         this.#startStress(clock.seconds);
         return;
       case 'sample':
-        this.#perfSamples.push(this.#perfSample(clock.frameMs));
+        this.#perfSample(clock.frameMs);
         return;
       case 'end':
-        this.#perfSamples.push(this.#perfSample(clock.frameMs));
+        this.#perfSample(clock.frameMs);
         this.#finishPerf(false);
         return;
       case 'wait':
@@ -1240,17 +1255,21 @@ export class Game implements GameServices {
   }
 
   /** One drawn frame, read the way `stats` reads it — `gl.info` covers the whole frame. */
-  #perfSample(frameMs: number): PerfSample {
+  #perfSample(frameMs: number): void {
+    let sample = this.#perfSamples[this.#perfFrames];
+    if (sample === undefined) {
+      sample = blankPerfSample();
+      this.#perfSamples.push(sample);
+    }
+    this.#perfFrames++;
     const info = this.#renderer.gl.info.render;
-    return {
-      frameMs,
-      drawCalls: info.calls,
-      triangles: info.triangles,
-      updateMs: this.#updateMs.value,
-      renderMs: this.#renderMs.value,
-      enemies: this.#perfStress?.enemies() ?? 0,
-      heapMb: heapMb(),
-    };
+    sample.frameMs = frameMs;
+    sample.drawCalls = info.calls;
+    sample.triangles = info.triangles;
+    sample.updateMs = this.#updateMs.value;
+    sample.renderMs = this.#renderMs.value;
+    sample.enemies = this.#perfStress?.enemies() ?? 0;
+    sample.heapMb = heapMb();
   }
 
   #interruptPerf(): void {
@@ -1276,8 +1295,9 @@ export class Game implements GameServices {
         log.error('perf', 'the scene could not stop its stress', error);
       }
     }
-    const samples = interrupted ? [] : this.#perfSamples;
+    const samples = interrupted ? [] : this.#perfSamples.slice(0, this.#perfFrames);
     this.#perfSamples = [];
+    this.#perfFrames = 0;
     const size = this.#renderer.size;
     const target = this.#perfTarget as SceneId;
     const result = summarizePerf(samples, {
