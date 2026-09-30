@@ -16,6 +16,7 @@ import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { PWA_OPTIONS } from '../../vite.config.ts';
+import { distFreshness, skipNote } from './dist';
 
 const root = (path: string): string => new URL(`../../${path}`, import.meta.url).pathname;
 const read = (path: string): string => readFileSync(root(path), 'utf8');
@@ -108,14 +109,16 @@ describe('the registration (AC-53)', () => {
   });
 });
 
-// The emitted output. `npm run check` runs the tests *before* the build, so on
-// a tree that has never been built there is no `dist/` to read and these skip;
-// they run for anyone who has built (including straight after `npm run build`),
-// and the same ground is covered end to end against `vite preview` by the
-// `pwa` Playwright project in `e2e/SPEC-015-pwa.spec.ts`.
-const built = existsSync(DIST) && existsSync(join(DIST, 'index.html'));
+// The emitted output. `npm run check` builds *before* it tests (SPEC-016 §11),
+// so there these always read the build of the commit under test. A standalone
+// `npm run test` runs them only when `dist/` is at least as new as every build
+// input, and skips them — saying why in the title — on a tree never built or
+// edited since (16-l, 16-m). The same ground is covered end to end against
+// `vite preview` by the `pwa` Playwright project in `e2e/SPEC-015-pwa.spec.ts`.
+const fresh = distFreshness(root(''));
+const built = fresh.ok;
 
-describe.skipIf(!built)('the emitted build (AC-49, AC-56, AC-57)', () => {
+describe.skipIf(!built)(`the emitted build (AC-49, AC-56, AC-57)${skipNote(fresh)}`, () => {
   const html = built ? readFileSync(join(DIST, 'index.html'), 'utf8') : '';
   const sw = built && existsSync(join(DIST, 'sw.js')) ? readFileSync(join(DIST, 'sw.js'), 'utf8') : '';
   /** Workbox's precache manifest, as `{url, revision}` in emission order. */
