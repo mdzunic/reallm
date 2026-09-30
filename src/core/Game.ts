@@ -1032,6 +1032,9 @@ export class Game implements GameServices {
   #onContextLost(): void {
     this.#loop.pause();
     this.#pauseReason = 'context-lost';
+    // SPEC-016 D-18: the state has left `running`, and a paused loop draws no
+    // frame that could notice, so a perf run ends here.
+    this.#interruptPerf();
     this.#contextLostUi.show();
     this.#contextLostTimer = this.#after(() => {
       this.#contextLostTimer = null;

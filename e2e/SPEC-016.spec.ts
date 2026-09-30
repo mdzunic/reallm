@@ -218,6 +218,19 @@ test.describe('SPEC-016 §8 — the perf run', () => {
     }
   });
 
+  test('a lost context ends the run at once, as interrupted (D-18)', async ({ page }) => {
+    // The state leaves `running` and the paused loop draws nothing, so no frame
+    // is left to notice — the context-lost handler ends the run itself.
+    const lines = collectPerfLines(page);
+    await open(page, '/?perf=30&scene=station');
+    await expect.poll(() => scene(page), COLD_START).toBe('station');
+    await page.evaluate(() => window.__reallm.loseContext(600));
+    await expect(card(page)).toContainText('Interrupted — run again', { timeout: 5_000 });
+    expect((await perf(page))?.interrupted).toBe(true);
+    await expect.poll(() => lines.length).toBe(1);
+    expect(parseLine(lines[0] as string)).toMatchObject({ scene: 'station', interrupted: true, frames: 0 });
+  });
+
   test('on medium the budgeted lines carry their verdict (case 7)', async ({ page }) => {
     await open(page, '/?perf=5&scene=station&quality=medium');
     const gateAt = Date.now();
