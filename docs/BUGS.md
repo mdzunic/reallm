@@ -199,14 +199,14 @@ told once every three seconds: `Hold full — surplus shipped to Command Relay.`
 up to the collect demand" and "c3_s2 completes with a hold already over the
 objective", which runs the review's own case: 350 wheat aboard, `c3_s2` active,
 300 wheat of pickups, and the objective completes with the hold ending at 400.
-`tests/systems/pickups.test.ts` covers the node side.
+`tests/systems/pickups.test.ts` covers the node side. The test that pins the
+fix end to end is `tests/campaign/campaignSim.test.ts`, describe "Completionist,
+base hold": the played completionist without the two cargo tiers starts `c3_s2`'s
+collect at 350 + 300 wheat against a cap of 400, and finishes all 26 missions with
+`problems: []`.
 
-**Note on SPEC-016's own run.** The "Completionist, base hold" run belongs to
-SPEC-016's harness, which is not in this tree yet — `tests/campaign/harness.ts`
-here runs the worst-case main-mission player, which takes no side missions and so
-never met the finding. SPEC-034 is forbidden from building that harness (its
-out-of-scope list), so the fix is pinned by the two suites above instead, and
-SPEC-016's run should report `problems: []` and 26 missions when it lands.
+**Note on SPEC-016's own run.** SPEC-016's played campaign has landed, and its
+base-hold run reports `problems: []` and 26 missions, as predicted here.
 
 ## 7. SPEC-036 §4.8 — short landscape phones lose the service long press (2026-09-27) — OPEN
 

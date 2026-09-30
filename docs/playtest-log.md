@@ -1,10 +1,25 @@
 # Playtest log
 
-One section per milestone (SPEC-016 §3): the devices it was verified on, the
-build, measured fps and draw calls, the checklist results, and the bugs found.
-A milestone tag (`m0`…`m7`) requires `npm run check` green, the checklists
-ticked here for desktop and one phone, zero open P0, and spec statuses updated
-(SPEC-001 §11, SPEC-016 §6).
+Each milestone and each spec gets a section here (SPEC-016 §3): the devices it
+was verified on, the build, the `?perf` rows, the checklist results, and the
+bugs found. The device checklists to copy into a milestone's section and tick
+are [desktop](checklists/desktop.md), [iOS](checklists/ios.md) and
+[Android](checklists/android.md).
+
+A milestone tag `mN` needs all of the following, recorded in that milestone's
+section (SPEC-016 §6, SPEC-001 §11):
+
+- `npm run check` and `npm run e2e` green on the tagged commit;
+- the checklists copied and ticked for desktop and at least one phone;
+- that phone's `?perf` rows;
+- zero open P0 in [`docs/BUGS.md`](BUGS.md), and from M6 on zero open P1;
+- the milestone's specs set to `done` in their frontmatter and in SPEC-000.
+
+| Severity | Definition | Gate |
+|---|---|---|
+| P0 | Softlock, data loss, crash, save corruption, cannot progress | Blocks any milestone tag |
+| P1 | Progression blocker with a workaround, budget breach (SPEC-015 §5), test failure | Blocks M6 and M7 tags |
+| P2 | Polish, balance feel, visual glitch, a side-content detour | Logged, not blocking |
 
 ## M0 — bootstrap
 
