@@ -6,6 +6,7 @@
 // as the `TransitionUi` interface declared here and implemented in
 // `ui/TransitionOverlay.ts`; the `SceneFactory` is assembled in the composition
 // root for the same reason (D-17).
+import type { PerfStress } from '@/core/Perf';
 import type { Renderer } from '@/core/Renderer';
 import type { GameServices } from '@/core/Services';
 import type { PlanetId } from '@/data/ids';
@@ -36,6 +37,8 @@ export interface Scene<K extends SceneId = SceneId> {
   dispose(): void;
   onContextRestored?(): void;
   debugInfo?(): Record<string, number | string>;
+  /** SPEC-016 §8.2: start this scene's stress for a perf run; absent or null means none. */
+  perfStress?(seconds: number): PerfStress | null;
   /** True for flight/surface; only these get `pause()` / `resume()` (D-37). */
   readonly pausable: boolean;
   pause?(): void;
@@ -158,7 +161,8 @@ export class SceneManager {
    * fallback after a failed `enter()` all resolve `false` (D-6).
    *
    * `opts.force` skips the §4.2 table check in dev builds only (D-11), for the
-   * `?scene=` URL flag.
+   * `?scene=` URL flag — and, since SPEC-016 D-26, in every build of a `?perf`
+   * session, because the deployed build is the one a phone measures.
    */
   go<K extends SceneId>(id: K, params: SceneParams[K], opts?: { force?: boolean }): Promise<boolean> {
     if (this.#transitioning) {
@@ -167,7 +171,7 @@ export class SceneManager {
     }
     const from = this.#current?.id ?? null;
     let forced = opts?.force === true;
-    if (forced && !import.meta.env.DEV) {
+    if (forced && !import.meta.env.DEV && this.#services.perf !== true) {
       log.warn('scene', `go("${id}", { force: true }) ignored outside development; validating normally`);
       forced = false;
     }

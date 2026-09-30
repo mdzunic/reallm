@@ -21,7 +21,9 @@ import type { GameServices } from '@/core/Services';
 import type { SceneParams } from '@/core/StateMachine';
 import type { Renderer } from '@/core/Renderer';
 import type { Voice } from '@/core/Audio';
-import type { Scheme } from '@/core/Input';
+import type { InputState, Scheme } from '@/core/Input';
+import type { PerfStress } from '@/core/Perf';
+import type { Rng } from '@/core/Rng';
 import {
   BOSS_REVEALS,
   CLASSES,
@@ -96,7 +98,7 @@ import { nodeIcon, poiIcon } from '@/systems/MapModel';
 import { Missions, type MissionContext, type ObjectiveProgress } from '@/systems/Missions';
 import { CARGO_TOAST_SECONDS, Nodes, Pickups, SHIPPED_TOAST_TEXT } from '@/systems/Pickups';
 import { cumulativeXp, Progression, xpToNext } from '@/systems/Progression';
-import { SpawnDirector, type FrustumXZ, type SpawnRamp, type WaveHandle } from '@/systems/Spawn';
+import { SpawnDirector, WAVE_CEILING_BONUS, type FrustumXZ, type SpawnRamp, type WaveHandle } from '@/systems/Spawn';
 import { Weather, WEATHER_EFFECTS, type WeatherEffects } from '@/systems/Weather';
 import { LINE_LEDGER, revealCamera, revealDue, revealKey, stayReport, type Ending } from '@/systems/StoryBeats';
 import {
@@ -317,6 +319,47 @@ function hasPlaceholder(text: string): boolean {
     if (text.includes(placeholder)) return true;
   }
   return false;
+}
+
+/** SPEC-016 D-21: the ring around the player a perf run's enemies are placed in (m). */
+const PERF_SPAWN_MIN = 12;
+const PERF_SPAWN_MAX = 24;
+/** How far past the current step a perf run's immunity is kept, refreshed every step (s). */
+const PERF_IMMUNE_AHEAD = 1;
+
+/** SPEC-016 §8.2: a perf run's stress on this surface, while it runs. */
+interface SurfaceStress {
+  /** `quality.maxEnemies + WAVE_CEILING_BONUS`: the live enemies the run holds. */
+  readonly ceiling: number;
+  /** The visit stream's `fork('perf')`: where each enemy is placed. */
+  readonly rng: Rng;
+  /** The next row of `surface.spawn` to place, round-robin from row 0. */
+  row: number;
+  /** Combat's input for the run: the player's own, with auto-fire on. */
+  readonly input: InputState;
+}
+
+/**
+ * SPEC-016 §8.2: the player's own input, read live, with auto-fire on — built
+ * once per run, so the step allocates nothing, and `settings.autoFire` is
+ * never touched.
+ */
+function autoFireInput(real: InputState): InputState {
+  return {
+    get move() {
+      return real.move;
+    },
+    get aim() {
+      return real.aim;
+    },
+    get buttons() {
+      return real.buttons;
+    },
+    get scheme() {
+      return real.scheme;
+    },
+    autoFire: true,
+  };
 }
 
 /** The stand-in pilot for a bare `?scene=surface` jump with no loaded save. */
@@ -545,6 +588,11 @@ export class SurfaceScene extends UiScene<'surface'> {
   #stormKey: string | null = null;
   #storm: { mission: MissionId; stage: number; wave: WaveId } | null = null;
   #stormHandle: WaveHandle | null = null;
+
+  /** The visit's runtime stream; a perf run forks its placements off it (SPEC-016 D-21). */
+  #visitRng: Rng | null = null;
+  /** SPEC-016 §8.2: the perf run's stress while it runs, else `null`. */
+  #stress: SurfaceStress | null = null;
 
   // Debug-overlay counters (`?debug`, §4.5 observability; e2e reads them).
   #spawned = 0;
@@ -805,6 +853,11 @@ export class SurfaceScene extends UiScene<'surface'> {
     const visits = (save.progress.visits[planet.id] ?? 0) + 1;
     save.progress.visits[planet.id] = visits;
     const visit = services.rng.visit(planet.id, visits);
+    this.#visitRng = visit;
+    this.disposer.add(() => {
+      this.#stress = null;
+      this.#visitRng = null;
+    });
 
     save.progress.location = 'surface';
     save.progress.currentPlanet = planet.id;
@@ -1310,7 +1363,12 @@ export class SurfaceScene extends UiScene<'surface'> {
     const pickups = this.#pickups;
     if (world === null || combat === null || missions === null || weather === null || spawn === null || pickups === null) return;
 
-    const input = this.services.input.state;
+    // SPEC-016 D-21: a perf run tops the enemies up at the start of every step.
+    if (this.#stress !== null) this.#stressStep(this.#stress, world, combat);
+
+    // SPEC-016 §8.2: a perf run hands the step the player's own input with
+    // auto-fire on, so Combat fires at the nearest enemy as auto-fire does.
+    const input = this.#stress?.input ?? this.services.input.state;
     this.#edges.beginStep(input.buttons, this.services.loop.stats.frame);
     this.services.save.addPlaytime(dt);
 
@@ -1407,7 +1465,9 @@ export class SurfaceScene extends UiScene<'surface'> {
     this.#updateChoice(missions);
 
     // §4.5: spawning runs — a modal line or the ending choice returned above.
-    spawn.update(dt, world.player, this.#frustumXZ, true);
+    // SPEC-016 D-21: the ambient spawner adds nothing while a perf run holds
+    // the population itself.
+    spawn.update(dt, world.player, this.#frustumXZ, this.#stress === null);
 
     for (const drop of combat.drops) pickups.spawn(drop);
     combat.drops.length = 0;
@@ -1597,6 +1657,80 @@ export class SurfaceScene extends UiScene<'surface'> {
   #viewTimeNow(): number {
     if (this.#hitStop.frames > 0) return this.#hitStop.time + this.#heldViewTime;
     return (this.#world?.time ?? 0) + this.#heldViewTime;
+  }
+
+  /**
+   * SPEC-016 §8.2 (D-21): what a perf run measures on the surface — the first
+   * storm of the planet's cycle for the run (none on a weatherless planet),
+   * the live enemies topped up to the wave ceiling 12–24 m around the player,
+   * auto-fire through Combat's input, and a player neither the enemies nor
+   * the storm can hurt. It never moves the player, so the run stays on the
+   * landing ground. `stop()` ends the refill, the auto-fire and the immunity;
+   * the enemies already alive stay.
+   */
+  perfStress(seconds: number): PerfStress | null {
+    const world = this.#world;
+    const weather = this.#weather;
+    const visit = this.#visitRng;
+    if (world === null || weather === null || visit === null) return null;
+    const storm = this.#planet.surface.weather?.cycle[0] ?? null;
+    if (storm !== null) weather.force(storm, seconds);
+    const stress: SurfaceStress = {
+      ceiling: this.services.renderer.quality.maxEnemies + WAVE_CEILING_BONUS,
+      rng: visit.fork('perf'),
+      row: 0,
+      input: autoFireInput(this.services.input.state),
+    };
+    this.#stress = stress;
+    this.#keepImmune(world);
+    return {
+      storm,
+      enemyCeiling: stress.ceiling,
+      enemies: () => this.#liveEnemies(),
+      stop: () => {
+        if (this.#stress === stress) this.#endStress();
+      },
+    };
+  }
+
+  /** D-21: immunity past the end of the step, then every enemy the ceiling is short of. */
+  #stressStep(stress: SurfaceStress, world: CombatWorld, combat: Combat): void {
+    this.#keepImmune(world);
+    const rows = this.#planet.surface.spawn;
+    if (rows.length === 0) return;
+    const p = world.player;
+    for (let alive = this.#liveEnemies(); alive < stress.ceiling; alive++) {
+      const row = rows[stress.row % rows.length] as (typeof rows)[number];
+      stress.row++;
+      const angle = stress.rng.angle();
+      const distance = stress.rng.float(PERF_SPAWN_MIN, PERF_SPAWN_MAX);
+      combat.spawnEnemy(row.enemy, p.x + Math.cos(angle) * distance, p.z + Math.sin(angle) * distance, false);
+    }
+  }
+
+  /** §8.2: neither a blow nor the storm lands while a perf run holds the player. */
+  #keepImmune(world: CombatWorld): void {
+    const p = world.player;
+    p.invulnUntil = Math.max(p.invulnUntil, world.time + PERF_IMMUNE_AHEAD);
+    p.hazardImmuneUntil = Math.max(p.hazardImmuneUntil, world.time + PERF_IMMUNE_AHEAD);
+  }
+
+  /** The stress's `stop()`: no refill, no auto-fire, and the player can be hurt again from now. */
+  #endStress(): void {
+    this.#stress = null;
+    const world = this.#world;
+    if (world === null) return;
+    world.player.invulnUntil = Math.min(world.player.invulnUntil, world.time);
+    world.player.hazardImmuneUntil = Math.min(world.player.hazardImmuneUntil, world.time);
+  }
+
+  /** Every enemy still alive, the way the spawn census counts them. */
+  #liveEnemies(): number {
+    const enemies = this.#world?.enemies;
+    if (enemies === undefined) return 0;
+    let alive = 0;
+    for (let i = 0; i < enemies.size; i++) if (enemies.at(i).state !== 'dead') alive++;
+    return alive;
   }
 
   override debugInfo(): Record<string, number | string> {

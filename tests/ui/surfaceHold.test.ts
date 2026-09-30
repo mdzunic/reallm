@@ -68,7 +68,7 @@ describe("the surface step obeys it (SPEC-034 §4.6)", () => {
     for (const call of [
       'this.#updateWeather(world, dt)',
       'missions.update(dt, this.#missionContext(world))',
-      'spawn.update(dt, world.player, this.#frustumXZ, true)',
+      'spawn.update(dt, world.player, this.#frustumXZ, this.#stress === null)',
       'pickups.update(dt, world.player, world.stats.pickupRadius)',
       'this.#nodes?.update(dt, world.player)',
       'this.#updateGuidance(world, dt)',
