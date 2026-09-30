@@ -58,11 +58,30 @@ test.describe('SPEC-016 §8 — the perf run', () => {
 
     await test.step('case 2: never dead while the run holds the player, checked every 500 ms', async () => {
       const deadline = gateAt + CARD_MS;
-      while (!(await card(page).isVisible())) {
+      // §8.2: once the stress is firing (a desktop page has no auto-fire of its
+      // own, so the first kill is the stress's), the player stays where they
+      // stood until the run ends. Read in one task, so the card and the
+      // position cannot straddle the run's last frame.
+      let held: string | null = null;
+      for (;;) {
+        const now = await page.evaluate(() => {
+          const info = window.__reallm.stats().sceneInfo ?? {};
+          return {
+            card: document.querySelector('[data-testid="perf-result"]') !== null,
+            kills: Number(info['kills'] ?? 0),
+            at: `${String(info['px'])},${String(info['pz'])}`,
+          };
+        });
+        if (now.card) break;
+        if (now.kills > killsAtEntry) {
+          held ??= now.at;
+          expect(now.at, 'the stress never moves the player').toBe(held);
+        }
         expect(await page.locator('[data-testid="death-overlay"]').isVisible(), 'the death overlay').toBe(false);
         expect(Date.now(), 'the card within 40 s of the gate').toBeLessThan(deadline);
         await page.waitForTimeout(500);
       }
+      expect(held, 'the stress fired before the card').not.toBeNull();
       expect(await page.locator('[data-testid="death-overlay"]').isVisible(), 'the death overlay').toBe(false);
       const killsAtCard = await page.evaluate(() => Number(window.__reallm.stats().sceneInfo?.['kills'] ?? 0));
       expect(killsAtCard, 'auto-fire killed something').toBeGreaterThan(killsAtEntry);

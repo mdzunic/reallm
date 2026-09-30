@@ -1451,7 +1451,16 @@ export class SurfaceScene extends UiScene<'surface'> {
       return;
     }
 
+    // SPEC-016 §8.2: under a perf run the swarm's shoves and knockback leave
+    // the player where they stood — only their own input moves them — so the
+    // run stays on the landing ground and never drifts into an arena.
+    const heldX = world.player.x;
+    const heldZ = world.player.z;
     combat.update(dt, input, this.#aimWorld(world));
+    if (this.#stress !== null) {
+      world.player.x = heldX;
+      world.player.z = heldZ;
+    }
 
     // SPEC-030 §4.5: after combat (so a shot this step ends hiding at once),
     // before weather (so the DPS skip sees this step's "inside").
@@ -1664,9 +1673,9 @@ export class SurfaceScene extends UiScene<'surface'> {
    * storm of the planet's cycle for the run (none on a weatherless planet),
    * the live enemies topped up to the wave ceiling 12–24 m around the player,
    * auto-fire through Combat's input, and a player neither the enemies nor
-   * the storm can hurt. It never moves the player, so the run stays on the
-   * landing ground. `stop()` ends the refill, the auto-fire and the immunity;
-   * the enemies already alive stay.
+   * the storm can hurt. It never moves the player — nor lets the swarm shove
+   * them — so the run stays on the landing ground. `stop()` ends the refill,
+   * the auto-fire, the immunity and the hold; the enemies already alive stay.
    */
   perfStress(seconds: number): PerfStress | null {
     const world = this.#world;
