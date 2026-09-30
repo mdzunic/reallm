@@ -90,6 +90,8 @@ test.describe('SPEC-016 §8 — the perf run', () => {
       expect(result.enemies).toBeLessThanOrEqual(result.enemyCeiling);
       expect(await perf(page)).toEqual(result);
       await expect(row(page)).toContainText(result.fps.toFixed(1));
+      // D-19: the governor held, so the row measured the preset it names.
+      expect(await page.evaluate(() => window.__reallm.stats().adaptSteps)).toBe(0);
     });
 
     await test.step('case 7: on low, no line is judged against a budget', async () => {
@@ -179,7 +181,9 @@ test.describe('SPEC-016 §8 — the perf run', () => {
     await open(page, '/?perf=5&scene=station&quality=medium');
     await expect(card(page)).toBeVisible({ timeout: CARD_MS });
     const result = await perf(page);
+    // D-19: however slow this machine draws `medium`, the governor never stepped it down.
     expect(result?.preset).toBe('medium');
+    expect(await page.evaluate(() => window.__reallm.stats().adaptSteps)).toBe(0);
     for (const name of ['draws', 'triangles', 'render']) {
       const line = measure(page, name);
       await expect(line, name).toHaveAttribute('data-verdict', /^(pass|fail)$/);
