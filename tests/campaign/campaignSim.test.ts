@@ -8,8 +8,9 @@
 // because E24 makes them mutually exclusive inside a save: `campaign_done`
 // locks `c6_m2`, so a single run can only file one.
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import type { GameEvents } from '@/core/Events';
 import { setLogSink, type LogSink } from '@/core/Log';
-import { MISSIONS, PLANETS, TUNING, UPGRADES, type PlanetId } from '@/data/index';
+import { MISSIONS, PLANETS, TUNING, UPGRADES } from '@/data/index';
 import { COMPLETIONIST_LEVEL, completionistTokens, totalTokenSink, worstCaseTokensBefore } from '@/systems/Balance';
 import { LAUNCH_SECONDS } from '@/systems/Flight';
 import { runCampaign, type Jump, type RunOptions, type RunReport } from './harness';
@@ -54,9 +55,25 @@ function tripSeconds(jump: Jump, engine: number, throttle: number): number {
   return LAUNCH_SECONDS + PLANETS[jump.planet].travelSeconds / speedMult / throttle;
 }
 
-/** The engine tier each jump departed on: bought before the Hive, and never again (§4.6). */
-function engineAt(planet: PlanetId): number {
-  return planet === 'hive' || planet === 'eden' ? 1 : 0;
+/**
+ * D-2: `save.ship.engine` at each departure, in `jumps` order — read off the
+ * run's bus as the last engine bought before the trip's `flight:arrived`,
+ * since nothing is bought in flight. A new save's engine is 0 (SPEC-007).
+ */
+function enginesAtDeparture(run: RunReport): number[] {
+  const engines: number[] = [];
+  let engine = 0;
+  for (const event of run.events) {
+    if (event.name === 'shop:purchased') {
+      const bought = event.payload as GameEvents['shop:purchased'];
+      if (bought.kind === 'ship' && bought.id === 'engine') engine = bought.tier ?? engine;
+    } else if (event.name === 'flight:arrived') {
+      engines.push(engine);
+    }
+  }
+  expect(engines).toHaveLength(run.jumps.length);
+  expect(engine).toBe(run.save.ship.engine);
+  return engines;
 }
 
 function tokensOf(purchases: readonly string[]): number {
@@ -163,10 +180,10 @@ describe('Worst case', () => {
   });
 
   it('flies every trip for as long as the formula says, except the Hive (D-2)', () => {
-    for (const jump of run.jumps) {
-      if (jump.planet === 'hive') continue;
-      expectWithin(jump.seconds, tripSeconds(jump, engineAt(jump.planet), 1));
-    }
+    const engines = enginesAtDeparture(run);
+    run.jumps.forEach((jump, i) => {
+      if (jump.planet !== 'hive') expectWithin(jump.seconds, tripSeconds(jump, engines[i] ?? 0, 1));
+    });
   });
 
   it('holds over the Hive until the Gauntlet is survived (R16)', () => {
@@ -238,10 +255,10 @@ describe('Fastest', () => {
 
   it('flies every other trip at the 1.2 notch (D-2)', () => {
     expect(run.jumps.map((jump) => jump.planet)).toEqual(['cinder4', 'vetra', 'thessaly', 'ferrum', 'hive', 'eden']);
-    for (const jump of run.jumps) {
-      if (jump.planet === 'hive') continue;
-      expectWithin(jump.seconds, tripSeconds(jump, engineAt(jump.planet), 1.2));
-    }
+    const engines = enginesAtDeparture(run);
+    run.jumps.forEach((jump, i) => {
+      if (jump.planet !== 'hive') expectWithin(jump.seconds, tripSeconds(jump, engines[i] ?? 0, 1.2));
+    });
   });
 
   it('pays five vouchers, asks the subsidy once per trip and takes nothing from it', () => {
