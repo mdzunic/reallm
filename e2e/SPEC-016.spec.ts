@@ -13,6 +13,8 @@ import { COLD_START, gameUrl, passGate, setHidden, type PerfSnapshot } from './s
 
 /** D-31: the card shows within this long of the gate — 5 s of warm-up, the run, and the scene's own load. */
 const CARD_MS = 40_000;
+/** Case 2's run: long enough for auto-fire's first kill on a loaded container (see that test). */
+const CASE_2_SECONDS = 15;
 const PERF_PREFIX = '[perf] ';
 
 const card = (page: Page) => page.locator('[data-testid="perf-result"]');
@@ -36,55 +38,25 @@ function parseLine(line: string): PerfSnapshot {
 const perf = (page: Page): Promise<PerfSnapshot | null> => page.evaluate(() => window.__reallm.perf());
 const scene = (page: Page): Promise<string | null> => page.evaluate(() => window.__reallm.scene());
 
+/** What is left of the card's 40 s once the scene is up. */
+const cardTimeout = (gateAt: number): number => Math.max(1, gateAt + CARD_MS - Date.now());
+
 async function open(page: Page, url: string): Promise<void> {
   await page.goto(gameUrl(url));
   await passGate(page);
 }
 
 test.describe('SPEC-016 §8 — the perf run', () => {
-  test('the surface run: the line, the card, the row and the bridge, alive and unsaved (cases 1, 2, 4, 6)', async ({ page, context }) => {
+  test('the surface run: the line, the card, the row and the bridge (cases 1, 4, 6)', async ({ page, context }) => {
     await context.grantPermissions(['clipboard-read', 'clipboard-write']);
     const lines = collectPerfLines(page);
     await open(page, '/?perf=5&planet=cinder4');
-    const settingsAfterGate = await page.evaluate(() => localStorage.getItem('reallm:settings'));
     const gateAt = Date.now();
 
     await test.step('case 1: the target is the surface, and nothing has ended yet', async () => {
       await expect.poll(() => scene(page), COLD_START).toBe('surface');
       expect(await perf(page)).toBeNull();
-    });
-
-    const killsAtEntry = await page.evaluate(() => Number(window.__reallm.stats().sceneInfo?.['kills'] ?? 0));
-
-    await test.step('case 2: never dead while the run holds the player, checked every 500 ms', async () => {
-      const deadline = gateAt + CARD_MS;
-      // §8.2: once the stress is firing (a desktop page has no auto-fire of its
-      // own, so the first kill is the stress's), the player stays where they
-      // stood until the run ends. Read in one task, so the card and the
-      // position cannot straddle the run's last frame.
-      let held: string | null = null;
-      for (;;) {
-        const now = await page.evaluate(() => {
-          const info = window.__reallm.stats().sceneInfo ?? {};
-          return {
-            card: document.querySelector('[data-testid="perf-result"]') !== null,
-            kills: Number(info['kills'] ?? 0),
-            at: `${String(info['px'])},${String(info['pz'])}`,
-          };
-        });
-        if (now.card) break;
-        if (now.kills > killsAtEntry) {
-          held ??= now.at;
-          expect(now.at, 'the stress never moves the player').toBe(held);
-        }
-        expect(await page.locator('[data-testid="death-overlay"]').isVisible(), 'the death overlay').toBe(false);
-        expect(Date.now(), 'the card within 40 s of the gate').toBeLessThan(deadline);
-        await page.waitForTimeout(500);
-      }
-      expect(held, 'the stress fired before the card').not.toBeNull();
-      expect(await page.locator('[data-testid="death-overlay"]').isVisible(), 'the death overlay').toBe(false);
-      const killsAtCard = await page.evaluate(() => Number(window.__reallm.stats().sceneInfo?.['kills'] ?? 0));
-      expect(killsAtCard, 'auto-fire killed something').toBeGreaterThan(killsAtEntry);
+      await expect(card(page)).toBeVisible({ timeout: cardTimeout(gateAt) });
     });
 
     let result: PerfSnapshot;
@@ -118,20 +90,6 @@ test.describe('SPEC-016 §8 — the perf run', () => {
       await expect(page.locator('[data-testid="perf-result"] [data-verdict]')).toHaveCount(0);
     });
 
-    await test.step('case 2: no save slot, the settings as the gate left them, and no tip recorded', async () => {
-      const storage = await page.evaluate(() => {
-        const keys: string[] = [];
-        for (let i = 0; i < localStorage.length; i++) keys.push(localStorage.key(i) as string);
-        return { keys, settings: localStorage.getItem('reallm:settings') };
-      });
-      expect(storage.keys.filter((key) => key.startsWith('reallm:slot:'))).toEqual([]);
-      expect(storage.settings).toBe(settingsAfterGate);
-      if (storage.settings !== null) {
-        const stored = JSON.parse(storage.settings) as { tipsSeen?: unknown[] };
-        expect(stored.tipsSeen ?? []).toEqual([]);
-      }
-    });
-
     await test.step('case 4: the row, and its copy', async () => {
       const text = (await row(page).textContent()) ?? '';
       expect(text.startsWith('| ')).toBe(true);
@@ -162,10 +120,74 @@ test.describe('SPEC-016 §8 — the perf run', () => {
     });
   });
 
+  // D-31 lets case 2 share case 1's page; it loads its own, with a longer run.
+  // The run's seconds are wall-clock (D-17), and on a loaded software-GL
+  // container the fixed-step loop falls to a quarter of real time (E23), so
+  // case 1's 5 s can end before auto-fire has had the game time to finish its
+  // first kill. 15 s leaves it four seconds of game time even there.
+  test('alive, firing and unsaved while the stress runs (case 2)', async ({ page }) => {
+    await open(page, `/?perf=${CASE_2_SECONDS}&planet=cinder4`);
+    const settingsAfterGate = await page.evaluate(() => localStorage.getItem('reallm:settings'));
+    const deadline = Date.now() + CARD_MS;
+
+    let killsAtEntry: number | null = null;
+    await test.step('never dead, and never moved once the stress holds the player, checked every 500 ms', async () => {
+      // §8.2: once the stress has started — it forces the sandstorm, and the
+      // first landing holds the ambient cycle calm, so an active storm is the
+      // stress's — the player stays where they stood until the run ends. Read
+      // in one task, so the card and the position cannot straddle the run's
+      // last frame.
+      let held: string | null = null;
+      for (;;) {
+        const now = await page.evaluate(() => {
+          const info = window.__reallm.stats().sceneInfo ?? {};
+          return {
+            scene: window.__reallm.scene(),
+            card: document.querySelector('[data-testid="perf-result"]') !== null,
+            kills: Number(info['kills'] ?? 0),
+            stressed: info['weatherPhase'] === 'active',
+            at: `${String(info['px'])},${String(info['pz'])}`,
+          };
+        });
+        if (now.scene === 'surface') killsAtEntry ??= now.kills;
+        if (now.card) break;
+        if (now.scene === 'surface' && now.stressed) held ??= now.at;
+        if (held !== null) expect(now.at, 'the stress never moves the player').toBe(held);
+        expect(await page.locator('[data-testid="death-overlay"]').isVisible(), 'the death overlay').toBe(false);
+        expect(Date.now(), 'the card within 40 s of the gate').toBeLessThan(deadline);
+        await page.waitForTimeout(500);
+      }
+      expect(killsAtEntry, 'the surface was entered before the card').not.toBeNull();
+      expect(held, 'the stress started before the card').not.toBeNull();
+      expect(await page.locator('[data-testid="death-overlay"]').isVisible(), 'the death overlay').toBe(false);
+    });
+
+    await test.step('auto-fire killed something', async () => {
+      const killsAtCard = await page.evaluate(() => Number(window.__reallm.stats().sceneInfo?.['kills'] ?? 0));
+      expect(killsAtCard).toBeGreaterThan(killsAtEntry as number);
+    });
+
+    await test.step('no save slot, the settings as the gate left them, and no tip recorded', async () => {
+      const storage = await page.evaluate(() => {
+        const keys: string[] = [];
+        for (let i = 0; i < localStorage.length; i++) keys.push(localStorage.key(i) as string);
+        return { keys, settings: localStorage.getItem('reallm:settings') };
+      });
+      expect(storage.keys.filter((key) => key.startsWith('reallm:slot:'))).toEqual([]);
+      expect(storage.settings).toBe(settingsAfterGate);
+      if (storage.settings !== null) {
+        const stored = JSON.parse(storage.settings) as { tipsSeen?: unknown[] };
+        expect(stored.tipsSeen ?? []).toEqual([]);
+      }
+    });
+  });
+
   test('another scene is measured as it stands (case 3)', async ({ page }) => {
     const lines = collectPerfLines(page);
     await open(page, '/?perf=5&scene=station');
-    await expect(card(page)).toBeVisible({ timeout: CARD_MS });
+    const gateAt = Date.now();
+    await expect.poll(() => scene(page), COLD_START).toBe('station');
+    await expect(card(page)).toBeVisible({ timeout: cardTimeout(gateAt) });
     const result = await perf(page);
     expect(result).toMatchObject({ scene: 'station', planet: null, enemies: 0, enemyCeiling: 0, storm: null, interrupted: false });
     expect(lines).toHaveLength(1);
@@ -198,7 +220,9 @@ test.describe('SPEC-016 §8 — the perf run', () => {
 
   test('on medium the budgeted lines carry their verdict (case 7)', async ({ page }) => {
     await open(page, '/?perf=5&scene=station&quality=medium');
-    await expect(card(page)).toBeVisible({ timeout: CARD_MS });
+    const gateAt = Date.now();
+    await expect.poll(() => scene(page), COLD_START).toBe('station');
+    await expect(card(page)).toBeVisible({ timeout: cardTimeout(gateAt) });
     const result = await perf(page);
     // D-19: however slow this machine draws `medium`, the governor never stepped it down.
     expect(result?.preset).toBe('medium');
