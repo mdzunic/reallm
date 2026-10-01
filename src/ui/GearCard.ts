@@ -6,7 +6,7 @@
 import type { Save } from '@/core/Save';
 import { ITEMS, type GearLine, type Item, type ItemId, type Price } from '@/data/index';
 import type { Economy } from '@/systems/Economy';
-import { balanceAfterText, failText, gearStatLines, priceText, purchaseText, shortfallText } from '@/systems/UiHelpers';
+import { balanceAfterText, failText, gearStatLines, prerequisiteText, priceText, purchaseText, shortfallText } from '@/systems/UiHelpers';
 import { compareNodes } from '@/ui/Compare';
 import { confirmSheet } from '@/ui/ConfirmSheet';
 import { el, h, testId, type UiRoot } from '@/ui/dom';
@@ -136,7 +136,8 @@ export function openGearCard(id: ItemId, deps: GearCardDeps): Promise<void> {
                   () => {
                     const result = deps.economy.buyGear(id);
                     if (!result.ok) {
-                      deps.ui.toast(failText(result.reason), 'error');
+                      // SPEC-042 §4.8: a missing rung is named, here as in the row.
+                      deps.ui.toast(result.reason === 'prerequisite' ? prerequisiteText(id) : failText(result.reason), 'error');
                       return false; // 14-c: the sheet stays open
                     }
                     return true;

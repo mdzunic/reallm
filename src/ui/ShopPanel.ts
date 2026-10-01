@@ -511,9 +511,11 @@ export class ShopPanel {
               this.#deps.ui,
               { title: sheetTitle, body: body === '' ? undefined : body, confirmText: verb },
               () => {
-                const result = run();
-                if (!result.ok) {
-                  this.#deps.ui.toast(failText(result.reason), 'error');
+                const outcome = run();
+                if (!outcome.ok) {
+                  // SPEC-042 §4.8: a missing rung is named, as the row names it.
+                  const missing = outcome.reason === 'prerequisite' && result.kind === 'gear';
+                  this.#deps.ui.toast(missing ? prerequisiteText(result.id) : failText(outcome.reason), 'error');
                   return false; // AC-44: the sheet stays open
                 }
                 return true;
