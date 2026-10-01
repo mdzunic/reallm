@@ -155,6 +155,9 @@ const EVENT_KEYS = [
   'inventory:changed',
   // SPEC-034 §4.15: the toast beside it is the sound.
   'item:noRoom',
+  // SPEC-042 §4.2: a pickup into the pack chimes; a refused one is its toast.
+  'item:collected',
+  'item:blocked',
   'gear:equipped',
   // SPEC-028 §3 / SPEC-029 §3: the loadout, blast and mine events.
   'weapon:switched',
@@ -484,8 +487,8 @@ describe('the ramp curve (SPEC-006 §4.3, §4.5)', () => {
 // ------------------------------------------------------------ reactions table
 
 describe('the reactions table is exhaustive over GameEvents (SPEC-006 §5)', () => {
-  it('covers the 25 reacted events of §5.2 (AC-38; SPEC-029 §4.12 adds four, SPEC-035 §4.11 two, SPEC-038 §4.10 two, SPEC-041 §4.10 two)', () => {
-    expect(REACTED_EVENTS).toHaveLength(25);
+  it('covers the 26 reacted events of §5.2 (AC-38; SPEC-029 §4.12 adds four, SPEC-035 §4.11 two, SPEC-038 §4.10 two, SPEC-041 §4.10 two, SPEC-042 §4.2 one)', () => {
+    expect(REACTED_EVENTS).toHaveLength(26);
     expect(REACTED_EVENTS.slice().sort()).toEqual(
       [
         'combat:blast',
@@ -506,6 +509,7 @@ describe('the reactions table is exhaustive over GameEvents (SPEC-006 §5)', () 
         'flight:hazardHit',
         'boss:defeated',
         'resource:collected',
+        'item:collected',
         'poi:scanned',
         'mission:completed',
         'weather:warning',
@@ -517,13 +521,14 @@ describe('the reactions table is exhaustive over GameEvents (SPEC-006 §5)', () 
     );
   });
 
-  it('silences exactly the 43 events of §5.4 (AC-39; SPEC-015 added the two app: signals)', () => {
-    // SPEC-034 added `player:recalled`, `enemy:dismissed` and `item:noRoom`.
-    expect(AUDIO_SILENT.size).toBe(43);
+  it('silences exactly the 44 events of §5.4 (AC-39; SPEC-015 added the two app: signals)', () => {
+    // SPEC-034 added `player:recalled`, `enemy:dismissed` and `item:noRoom`;
+    // SPEC-042 §4.2 `item:blocked`, whose warn toast is its sound.
+    expect(AUDIO_SILENT.size).toBe(44);
   });
 
-  it('gives every one of the 68 event keys exactly one home (AC-40)', () => {
-    expect(EVENT_KEYS).toHaveLength(68);
+  it('gives every one of the 70 event keys exactly one home (AC-40)', () => {
+    expect(EVENT_KEYS).toHaveLength(70);
     const reacted = new Set<string>(REACTED_EVENTS);
     for (const key of EVENT_KEYS) {
       const hasSound = reacted.has(key);

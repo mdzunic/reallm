@@ -49,10 +49,15 @@ export interface PickupEntity {
   retryAt: number;
   /** Stable per-orb phase for the view's bob animation. */
   seed: number;
+  /**
+   * SPEC-042 §3: true once a full inventory has refused this pickup; cleared by
+   * `spawn`. One refusal is the message — the 0.5 s retries say nothing more.
+   */
+  refused: boolean;
 }
 
 function makePickup(): PickupEntity {
-  return { kind: 'resource', resource: 'oil', itemId: null, amount: 0, x: 0, z: 0, expiresAt: 0, retryAt: 0, seed: 0 };
+  return { kind: 'resource', resource: 'oil', itemId: null, amount: 0, x: 0, z: 0, expiresAt: 0, retryAt: 0, seed: 0, refused: false };
 }
 
 export class Pickups {
@@ -80,6 +85,7 @@ export class Pickups {
     p.z = drop.z;
     p.expiresAt = this.#time + PICKUP_TTL;
     p.retryAt = 0;
+    p.refused = false;
     p.seed = this.#nextSeed++;
     if (drop.kind === 'resource') {
       p.resource = drop.resource;
@@ -133,10 +139,18 @@ export class Pickups {
       }
       return added >= 0; // fully added, shipped (or a zero-amount orb) is done
     }
-    const { added, blocked } = this.#economy.addItem(p.itemId as ItemId, p.amount);
+    const itemId = p.itemId as ItemId;
+    const { added, blocked } = this.#economy.addItem(itemId, p.amount);
+    // SPEC-042 §4.2: what went into the pack says so — a partial fit too (42-f).
+    if (added > 0) this.#events.emit('item:collected', { itemId, qty: added });
     if (blocked > 0) {
       // E25: a full inventory (or a duplicate) leaves the drop where it lies.
       if (added > 0) p.amount = blocked;
+      // SPEC-042 §4.2: once per pickup; the retries every 0.5 s stay quiet (42-g).
+      if (!p.refused) {
+        p.refused = true;
+        this.#events.emit('item:blocked', { itemId });
+      }
       return false;
     }
     return true;

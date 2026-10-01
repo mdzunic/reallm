@@ -37,6 +37,8 @@ import { Wallet } from '@/ui/Wallet';
 
 /** SPEC-017 §4.1 (*initial tuning*): the station reads cool and clean. */
 const STATION_LOOK: Partial<Look> = { vignette: 0.35, bloomStrength: 0.3, tint: [0.96, 1, 1.04] };
+/** SPEC-042 §4.5: what a flight death cost — the jump's fuel — and what it kept (E5). */
+export const RECALL_DETAIL_TEXT = "Hull breached — ARIA flew you home. The jump's fuel is spent; your cargo is safe.";
 const HUB_ENVIRONMENT_INTENSITY = 0.9;
 
 type StationTab = 'missions' | 'shop' | 'character';
@@ -323,8 +325,13 @@ export class StationScene extends UiScene<'station'> {
     // name as both a class and a test id (AC-37) — `station-containment` styles it.
     headText?.append(testId(h('p', { class: 'station-containment containment-level' }, `Containment level ${containment}`), 'containment-level'));
     // AC-25 / SPEC-031 §4.5: a recall is named under the channel line.
+    // SPEC-042 §4.5: the banner keeps its words (SPEC-013's e2e pins them), and
+    // what the recall cost — and did not — goes on the line beside it.
     if (params.recalled === true) {
-      headText?.append(testId(el('p', 'station-recall', 'Emergency recall'), 'recall-banner'));
+      headText?.append(
+        testId(el('p', 'station-recall', 'Emergency recall'), 'recall-banner'),
+        testId(el('p', 'station-recall-detail', RECALL_DETAIL_TEXT), 'recall-detail'),
+      );
     }
     if (data !== null) {
       const wallet = new Wallet({ save: this.services.save, events: this.services.events });

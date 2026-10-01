@@ -334,6 +334,8 @@ describe('the settings object (SPEC-007 §3)', () => {
       pauseOnBlur: true,
       // SPEC-036 §4.12: no landing has shown the zone ghosts yet.
       zonesShown: 0,
+      // SPEC-042 §4.10: vibration on, where the touch scheme has a motor.
+      haptics: true,
     });
   });
 

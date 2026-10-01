@@ -15,6 +15,10 @@ import { el, testId } from '@/ui/dom';
 
 type TrackerModel = NonNullable<HudModel['tracker']>;
 
+/** SPEC-042 §4.6: how long a row wears `is-bumped`, and the least gap between two bumps of one row. */
+export const BUMP_MS = 400;
+export const BUMP_GAP_MS = 1000;
+
 interface Row {
   root: HTMLDivElement;
   check: HTMLSpanElement;
@@ -24,6 +28,11 @@ interface Row {
   hpFill: HTMLDivElement | null;
   hpText: HTMLSpanElement | null;
   hpShown: number;
+  /** SPEC-042 §4.6: the counted value last set, −1 for a row that counts nothing. */
+  count: number;
+  /** `performance.now()` of the last bump, and the timer that takes it off. */
+  bumpedAt: number;
+  bumpTimer: ReturnType<typeof setTimeout> | null;
 }
 
 export class Tracker {
@@ -40,6 +49,11 @@ export class Tracker {
   #distanceText = '';
   #bearing = Number.NaN;
   #pulse = false;
+  /**
+   * SPEC-042 §4.6: whose counts the rows remember — the head, which names the
+   * tracked mission and its stage. A new one resets the memory without a bump.
+   */
+  #countKey = '';
 
   constructor(root: HTMLElement, onCycle: () => void) {
     this.#onCycle = onCycle;
@@ -70,11 +84,17 @@ export class Tracker {
       this.#headText = head;
       this.#head.textContent = head;
     }
+    const sameKey = head === this.#countKey;
+    this.#countKey = head;
 
     let focus: Row | null = null;
     for (let i = 0; i < model.rows.length; i++) {
       const data = model.rows[i] as TrackerModel['rows'][number];
       const row = this.#rowAt(i);
+      // SPEC-042 §4.6: a counted row that rose, inside the same mission and
+      // stage, bumps; a timer row carries −1 and never does.
+      if (sameKey && data.count >= 0 && row.count >= 0 && data.count > row.count) this.#bump(row);
+      row.count = data.count;
       row.root.classList.remove('is-hidden');
       row.root.classList.toggle('is-done', data.done);
       row.root.classList.toggle('is-focus', data.focus);
@@ -91,6 +111,7 @@ export class Tracker {
       const row = this.#rows[i] as Row;
       row.root.classList.add('is-hidden');
       row.text.classList.remove('hud-objective');
+      row.count = -1;
       this.#setDefendHp(row, null);
     }
 
@@ -121,8 +142,29 @@ export class Tracker {
   }
 
   dispose(): void {
+    for (const row of this.#rows) {
+      if (row.bumpTimer !== null) clearTimeout(row.bumpTimer);
+      row.bumpTimer = null;
+    }
     this.#root.removeEventListener('pointerdown', this.#tap);
     this.#root.remove();
+  }
+
+  /**
+   * SPEC-042 §4.6: `is-bumped` for `BUMP_MS` — an accent fill, or an outline
+   * under reduce motion (CSS) — at most once a `BUMP_GAP_MS` per row, so a
+   * swarm dying in one second pulses the row once.
+   */
+  #bump(row: Row): void {
+    const now = performance.now();
+    if (now - row.bumpedAt < BUMP_GAP_MS) return;
+    row.bumpedAt = now;
+    row.root.classList.add('is-bumped');
+    if (row.bumpTimer !== null) clearTimeout(row.bumpTimer);
+    row.bumpTimer = setTimeout(() => {
+      row.bumpTimer = null;
+      row.root.classList.remove('is-bumped');
+    }, BUMP_MS);
   }
 
   readonly #tap = (): void => {
@@ -171,7 +213,18 @@ export class Tracker {
       const text = el('span', 'tracker-text');
       const root = el('div', 'tracker-row');
       root.append(check, text);
-      row = { root, check, text, hp: null, hpFill: null, hpText: null, hpShown: Number.NaN };
+      row = {
+        root,
+        check,
+        text,
+        hp: null,
+        hpFill: null,
+        hpText: null,
+        hpShown: Number.NaN,
+        count: -1,
+        bumpedAt: -Infinity,
+        bumpTimer: null,
+      };
       this.#rows.push(row);
       this.#list.append(root);
     }

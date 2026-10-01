@@ -3,7 +3,7 @@
 // a single fetch of `assets/items/manifest.json`, memoised for the session —
 // never rejects, never blocks a screen, and is never part of the boot
 // manifest (AC-41).
-import { COMPANIONS, ITEMS, type CompanionId, type ItemId } from '@/data/index';
+import { COMPANIONS, ITEMS, type CompanionId, type ConsumableEffect, type ItemId } from '@/data/index';
 
 export type IconSource =
   | { readonly kind: 'image'; readonly url: string }
@@ -22,12 +22,13 @@ const LINE_GLYPHS = {
   armor: '⛨',
 } as const;
 
-const EFFECT_GLYPHS = {
+/** SPEC-042 §3: exported — the HUD's effect chips wear the glyph of the effect's item. */
+export const EFFECT_GLYPHS: Readonly<Record<ConsumableEffect['kind'], string>> = {
   heal: '✚',
   hazard_immunity: '☂',
   damage_boost: '↯',
   explosive: '✸',
-} as const;
+};
 
 const COMPANION_GLYPH = '⌬';
 

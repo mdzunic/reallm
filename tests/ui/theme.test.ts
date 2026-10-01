@@ -358,7 +358,8 @@ describe('the HUD plate reads over every ground (SPEC-037 §4.5, AC-23)', () => 
   });
 
   it('dresses the text with no plate under it in the halo (§4.5)', () => {
-    for (const selector of ['.waypoint-dist', '.dmg', '.hud-hostiles', '.hud-boss-bar .bar-text', '.qb-count']) {
+    // SPEC-042 §4.9: the boss frame's name took the place of the boss row's.
+    for (const selector of ['.waypoint-dist', '.dmg', '.hud-hostiles', '.boss-frame-name', '.qb-count']) {
       const bodies = rulesFor(selector).map((rule) => rule.body);
       expect(
         bodies.some((body) => /text-shadow:\s*var\(--hud-halo\)/.test(body)),

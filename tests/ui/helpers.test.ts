@@ -467,7 +467,7 @@ describe('diffHud (AC-115, AC-62)', () => {
     b.tracker = {
       title: 'Dry Land',
       stage: 'stage 2/3',
-      rows: [{ text: 'Dry Land — Scan Dune Sea', done: false, focus: true, defendHp: null }],
+      rows: [{ text: 'Dry Land — Scan Dune Sea', done: false, focus: true, defendHp: null, count: 0 }],
       distance: 84,
       bearing: 0,
       pulse: false,
@@ -484,7 +484,7 @@ describe('diffHud (AC-115, AC-62)', () => {
     expect(diffHud(c, d)).toEqual(new Set(['tracker']));
 
     const e = cloneHud(d);
-    (e.tracker as NonNullable<HudModel['tracker']>).rows.push({ text: 'Survive 60 s', done: false, focus: false, defendHp: null });
+    (e.tracker as NonNullable<HudModel['tracker']>).rows.push({ text: 'Survive 60 s', done: false, focus: false, defendHp: null, count: -1 });
     expect(diffHud(d, e)).toEqual(new Set(['tracker']));
   });
 
@@ -1541,13 +1541,13 @@ describe('diffHudInto and copyHudInto (SPEC-040 §4.4, AC-20)', () => {
 
   it('reuses every nested object when only values move', () => {
     const a = createHudModel();
-    a.tracker = { title: 'Dry Land', stage: 'stage 1/2', rows: [{ text: 'Reach', done: false, focus: true, defendHp: null }], distance: 12, bearing: 0, pulse: false };
-    a.boss = { name: 'Wurm', hp: 10, max: 20 };
+    a.tracker = { title: 'Dry Land', stage: 'stage 1/2', rows: [{ text: 'Reach', done: false, focus: true, defendHp: null, count: -1 }], distance: 12, bearing: 0, pulse: false };
+    a.boss = { name: 'Wurm', hp: 10, max: 20, phase: 1, marks: [0.4] };
     const last = copyHudInto(createHudModel(), a);
     const before = containers(last);
     a.hp = [5, 10];
     a.resources.oil = 7;
-    a.boss = { name: 'Wurm', hp: 9, max: 20 }; // a new object, the same shape
+    a.boss = { name: 'Wurm', hp: 9, max: 20, phase: 1, marks: [0.4] }; // a new object, the same shape
     (a.tracker.rows[0] as { done: boolean }).done = true;
     a.tracker.distance = 11;
     copyHudInto(last, a);
@@ -1559,7 +1559,7 @@ describe('diffHudInto and copyHudInto (SPEC-040 §4.4, AC-20)', () => {
 
   it('shrinks an array in place and allocates only for a longer one or null → object', () => {
     const a = createHudModel();
-    a.tracker = { title: 'T', stage: '', rows: [1, 2, 3].map((n) => ({ text: `r${n}`, done: false, focus: false, defendHp: null })), distance: null, bearing: 0, pulse: false };
+    a.tracker = { title: 'T', stage: '', rows: [1, 2, 3].map((n) => ({ text: `r${n}`, done: false, focus: false, defendHp: null, count: -1 })), distance: null, bearing: 0, pulse: false };
     const last = copyHudInto(createHudModel(), a);
     const rows = last.tracker?.rows;
     const first = rows?.[0];

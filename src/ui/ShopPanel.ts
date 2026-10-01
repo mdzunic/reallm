@@ -10,6 +10,10 @@
 // planet asks for; each gear row prints its stat line and, against a
 // different piece worn in its slot, the compare line; each ship row says what
 // its system acts on, and the shield row which planet still gates on it.
+//
+// SPEC-042 §4.8: a purchase says what it bought (`purchaseText`) instead of
+// `Purchased`, the compare line points each part up or down, and a missing
+// rung names the piece it wants.
 import type { Save, SaveStore } from '@/core/Save';
 import {
   COMPANIONS,
@@ -29,15 +33,18 @@ import {
   balanceAfterText,
   companionEffectText,
   failText,
-  gearCompareText,
+  prerequisiteText,
   priceText,
+  purchaseText,
   refitText,
   shipGateText,
   shipRoleText,
   shopStatText,
   shortfallText,
   upgradeDeltaText,
+  type PurchaseResult,
 } from '@/systems/UiHelpers';
+import { compareNodes } from '@/ui/Compare';
 import { confirmSheet } from '@/ui/ConfirmSheet';
 import { el, h, testId, type UiRoot } from '@/ui/dom';
 import { openGearCard } from '@/ui/GearCard';
@@ -186,6 +193,7 @@ export class ShopPanel {
         `shop-ship-${system}-buy`,
         `Buy ${def.name} Tier ${next} for ${this.#paidText('ship', system, next)}?`,
         () => this.#deps.economy.buyShipTier(system),
+        { kind: 'ship', system, tier: next },
         'Buy',
         () => this.#balanceFor('ship', system, next),
       ),
@@ -260,8 +268,9 @@ export class ShopPanel {
       // SPEC-039 §4.6: against the piece worn in this item's own slot, when
       // that is a different one — the same slot, not the same line.
       const worn = item.kind === 'weapon' ? data.equipped[item.slot] : item.kind === 'armor' ? data.equipped.armor : null;
-      const compare = worn !== null && worn !== id ? gearCompareText(worn, id) : '';
-      if (compare !== '') row.append(testId(h('p', { class: 'shop-compare' }, compare), `shop-gear-${id}-compare`));
+      // SPEC-042 §4.8: each part with the way it points for the player.
+      const compare = worn !== null && worn !== id ? compareNodes(worn, id) : [];
+      if (compare.length > 0) row.append(testId(h('p', { class: 'shop-compare' }, ...compare), `shop-gear-${id}-compare`));
       row.append(h('p', { class: 'shop-note' }, item.blurb));
       if (owned && !equipped) {
         row.append(
@@ -277,6 +286,7 @@ export class ShopPanel {
             `shop-gear-${id}-buy`,
             `Buy ${item.name} for ${this.#paidText('gear', id)}?`,
             () => economy.buyGear(id),
+            { kind: 'gear', id },
             'Buy',
             () => this.#balanceFor('gear', id),
           ),
@@ -349,6 +359,7 @@ export class ShopPanel {
             `shop-companion-${id}-${buying ? 'buy' : 'upgrade'}`,
             `${buying ? 'Buy' : 'Upgrade'} ${def.name} ${buying ? '' : `to L${level + 1} `}for ${this.#paidText('companion', id, level + 1)}?`,
             () => (buying ? this.#deps.economy.buyCompanion(id) : this.#deps.economy.upgradeCompanion(id)),
+            { kind: 'companion', id, level: level + 1 },
             buying ? 'Buy' : 'Upgrade',
             () => this.#balanceFor('companion', id, level + 1),
           ),
@@ -402,6 +413,7 @@ export class ShopPanel {
         `shop-craft-${id}-buy`,
         `Craft ${item.name}${qty > 1 ? ` ×${qty}` : ''} for ${plain}?`,
         () => this.#deps.economy.craft(id, qty),
+        { kind: 'craft', recipe: id, qty },
         'Craft',
         () => balanceAfterText({ tokens: 0, resources: scaled as Price['resources'] }, this.#deps.data, 0),
       ),
@@ -453,7 +465,8 @@ export class ShopPanel {
         const { armor, sidearm, primary, heavy } = data.equipped;
         const equippedIds: (string | null)[] = [armor, sidearm, primary, heavy];
         if (previous !== undefined && economy.count(previous) === 0 && !equippedIds.includes(previous)) {
-          return failText('prerequisite');
+          // SPEC-042 §4.8: name the rung — `Requires Laser Carbine (T1)`.
+          return prerequisiteText(id as ItemId);
         }
       }
     }
@@ -467,7 +480,9 @@ export class ShopPanel {
    * The one buy line every track shares: price text, then either the reason
    * (disabled, AC-42) or the button into the confirm sheet (AC-43) whose
    * confirm re-runs the purchase and holds the sheet open on a refusal
-   * (AC-44) — the Economy call *is* the re-validation.
+   * (AC-44) — the Economy call *is* the re-validation. SPEC-042 §4.8: a
+   * completed sheet toasts `purchaseText(result)` — the call site knows the
+   * tier or level after the purchase, and the stepper's quantity.
    */
   #buyLine(
     price: string,
@@ -475,6 +490,7 @@ export class ShopPanel {
     testid: string,
     sheetTitle: string,
     run: () => Result<object>,
+    result: PurchaseResult,
     verb = 'Buy',
     sheetBody?: () => string,
   ): HTMLElement {
@@ -504,7 +520,7 @@ export class ShopPanel {
               },
             ).then((bought) => {
               if (bought) {
-                this.#deps.ui.toast('Purchased', 'good');
+                this.#deps.ui.toast(purchaseText(result), 'good');
                 this.refresh();
               }
             });

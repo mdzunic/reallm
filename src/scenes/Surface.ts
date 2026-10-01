@@ -25,8 +25,6 @@ import type { InputState, Scheme } from '@/core/Input';
 import type { PerfStress } from '@/core/Perf';
 import type { Rng } from '@/core/Rng';
 import {
-  AFFIX_IDS,
-  AFFIXES,
   BOSS_REVEALS,
   CLASSES,
   DIALOGUE,
@@ -43,6 +41,7 @@ import {
   SURFACE_SHARED_ASSETS,
   TIPS,
   TUNING,
+  WAVES,
   type BossRevealDef,
   type Dialogue,
   type DialogueId,
@@ -71,7 +70,7 @@ import { makePlayer } from '@/entities/Player';
 import { makeProjectile } from '@/entities/Projectile';
 import { resetTelegraph, TELEGRAPH_CAPACITY } from '@/entities/Telegraph';
 import { ARENA_RESPAWN_OUTSET, clampToSeal, type ArenaState } from '@/entities/World';
-import { Combat, computePlayerStats, ELITE_SCALE, type CombatWorld } from '@/systems/Combat';
+import { Combat, computePlayerStats, ELITE_SCALE, type CombatWorld, type HitMemory } from '@/systems/Combat';
 import { DASH_DISTANCE, dashCooldown, isDashing, stepDash, tryDash } from '@/systems/Dash';
 import { Economy } from '@/systems/Economy';
 import { ExploreMask, REVEAL_CAPACITY } from '@/systems/Exploration';
@@ -99,23 +98,34 @@ import { REVEAL_AFTER_SHOT, SHELTER_INSET, shelterAt, STORM_SHELTER_FACTOR } fro
 import { nodeIcon, poiIcon } from '@/systems/MapModel';
 import { Missions, type MissionContext, type ObjectiveProgress } from '@/systems/Missions';
 import { CARGO_TOAST_SECONDS, Nodes, Pickups, SHIPPED_TOAST_TEXT } from '@/systems/Pickups';
-import { cumulativeXp, Progression, xpToNext } from '@/systems/Progression';
+import { cumulativeXp, LEVEL_CAP, Progression, xpToNext } from '@/systems/Progression';
 import { SpawnDirector, WAVE_CEILING_BONUS, type FrustumXZ, type SpawnRamp, type WaveHandle } from '@/systems/Spawn';
 import { Weather, WEATHER_EFFECTS, type WeatherEffects } from '@/systems/Weather';
 import { LINE_LEDGER, revealCamera, revealDue, revealKey, stayReport, type Ending } from '@/systems/StoryBeats';
 import {
+  activeEffects,
+  affixLine,
+  blockedText,
+  bossPhaseMarks,
   cameraDistance,
   cameraFov,
+  completionLines,
+  deathCause,
+  deathTip,
   hasNodeRadar,
   HP_FULL_TEXT,
   occludes,
   OCCLUDER_OPACITY,
   padEmptyText,
+  pickupText,
   stageResetText,
   holdIsIdle,
   surfaceFogRange,
   surfaceHoldReason,
   walletLit,
+  type CompletionLines,
+  type HudEffect,
+  type HudModel,
   type HudTracker,
   type HudTrackerRow,
   type SurfaceHold,
@@ -144,6 +154,7 @@ import { el, h, shortScreen, testId } from '@/ui/dom';
 import { clearEndingOverlays, EndingOverlay } from '@/ui/EndingOverlay';
 import { Hud } from '@/ui/Hud';
 import { MapLayers } from '@/ui/MapLayers';
+import { MissionBanner } from '@/ui/MissionBanner';
 import { MapScreen, type MapMissionRow } from '@/ui/MapScreen';
 import { Minimap, type MapMark, type MinimapFrame } from '@/ui/Minimap';
 import { PauseMenu } from '@/ui/PauseMenu';
@@ -201,7 +212,20 @@ const SCAN_SECONDS = 3;
 
 /** §4.8 — the death round trip. */
 const DEATH_OVERLAY_SECONDS = 2.5;
+/**
+ * SPEC-042 §4.5: a fire or interact press respawns only once the overlay has
+ * been up this long — a held trigger used to skip the cause unread.
+ */
+const DEATH_SKIP_GUARD_SECONDS = 1.0;
 const DEATH_DESPAWN_RADIUS = 40;
+/** SPEC-042 §4.6: how long `▲ Wave incoming` stays up, in scene seconds. */
+const WAVE_LINE_SECONDS = 3;
+/** SPEC-042 §4.9: the target frame shows an enemy hit inside this many seconds. */
+const TARGET_WINDOW_SECONDS = 3;
+/** SPEC-042 §4.11 (dev): `surface-hp-low` leaves this share of max HP. */
+const HP_LOW_DEBUG_FRACTION = 0.15;
+/** SPEC-042 §4.11 (dev): `surface-hit-elite` puts its elite this far ahead. */
+const HIT_ELITE_DISTANCE = 8;
 
 /** 12-i: a storm forced by an active survive stage waits this long after enter. */
 const FORCED_WEATHER_GRACE = 3;
@@ -332,6 +356,25 @@ const WEATHER_NUMBER_SECONDS = 1;
 const HIT_BURST_COLOR = 0xff5533;
 const ITEM_PICKUP_COLOR = 0xffe9a0;
 const MUZZLE_COLOR = 0xffe9a0;
+
+/** SPEC-042 §4.1: a banner waiting on a modal `onComplete` chain, first line to last. */
+interface BannerChain {
+  first: DialogueId;
+  last: DialogueId;
+  lines: CompletionLines;
+  /** The first line started — so the banner waits for the last one's end. */
+  started: boolean;
+}
+
+/**
+ * SPEC-042 §4.9: the remembered enemy while the memory holds — hit inside
+ * `TARGET_WINDOW_SECONDS`, still under the same spawn id (42-l), and alive.
+ */
+function remembered(memory: HitMemory, time: number): EnemyEntity | null {
+  const e = memory.entity;
+  if (e === null || time - memory.at > TARGET_WINDOW_SECONDS || e.id !== memory.id || e.state === 'dead') return null;
+  return e;
+}
 
 /** `'#rrggbb'` → the number `CombatFx.burst` takes; no allocation. */
 function hexColor(color: string): number {
@@ -490,6 +533,31 @@ export class SurfaceScene extends UiScene<'surface'> {
   #mapScreen: MapScreen | null = null;
   #death: DeathOverlay | null = null;
   #dialogue: DialogueUI | null = null;
+  /** SPEC-042 §4.1: the mission banner, the top centre's last row. */
+  #banner: MissionBanner | null = null;
+  /**
+   * SPEC-042 §4.1: banners waiting on a modal `onComplete` chain (`c5_m3`: the
+   * Warden, then ARIA) — pushed at the chain's last `dialogue:ended`, or at
+   * once if its first line never played (a `once` line already heard).
+   */
+  readonly #chains: BannerChain[] = [];
+  /** SPEC-042 §4.6: scene seconds `▲ Wave incoming` has left. */
+  #waveLeft = 0;
+  /** SPEC-042 §4.3: the three effect rows `activeEffects` writes into, made once. */
+  readonly #effectPool: HudEffect[] = [
+    { kind: 'heal', seconds: 0 },
+    { kind: 'heal', seconds: 0 },
+    { kind: 'heal', seconds: 0 },
+  ];
+  /** SPEC-042 §4.9: the one boss and target objects the HUD model is fed, reused every step. */
+  readonly #bossScratch: NonNullable<HudModel['boss']> = { name: '', hp: 0, max: 1, phase: 1, marks: [] };
+  readonly #targetScratch: NonNullable<HudModel['target']> = { name: '', elite: false, affixes: '', hp: 0, max: 1 };
+  /** The spawn id the target scratch's name and affixes were written for. */
+  #targetId = -1;
+  /** SPEC-042 §4.5: a restarts line was set for this death — the pinned mission's wins. */
+  #restartsSet = false;
+  /** SPEC-042 §4.11 (dev): the elite `surface-hit-elite` hits on the next step, once the hash holds it. */
+  #pendingHit: { entity: EnemyEntity; id: number } | null = null;
   #touch: TouchControls | null = null;
   #pauseMenu: PauseMenu | null = null;
 
@@ -570,7 +638,6 @@ export class SurfaceScene extends UiScene<'surface'> {
   readonly #plateDist = new Float64Array(ELITE_PLATE_SLOTS);
   /** `Alpha <name>` per species and the affix line per (a, b) pair — built once, never per frame. */
   readonly #plateNames = new Map<EnemyId, string>();
-  readonly #affixLines: (string | undefined)[] = [];
   readonly #shake: ShakeState = { amplitude: 0, until: 0, duration: 0 };
   readonly #hitStop = { frames: 0, time: 0 };
   /** Per-slot HP deltas for enemy damage numbers (§4.6, 19-f). */
@@ -1113,6 +1180,8 @@ export class SurfaceScene extends UiScene<'surface'> {
     });
     this.#hud = hud;
     this.disposer.add(() => hud.dispose());
+    // SPEC-042 §4.7: the level before the first flush, so a landing never glows.
+    hud.model.level = save.player.level;
     hud.setScheme(services.input.state.scheme);
     // SPEC-037 §4.1, §4.6: the arc's side and the flash's strength, from the
     // settings on entry and live after (37-b).
@@ -1269,10 +1338,24 @@ export class SurfaceScene extends UiScene<'surface'> {
       this.#revealPending = null;
       this.#holds = 0;
     });
-    this.#dialogue = dialogueLayer(services.uiRoot, services.events, {
+    const dialogue = dialogueLayer(services.uiRoot, services.events, {
       input: services.input,
       saveKey: () => this.services.save.current,
       reduceMotion: () => this.services.settings.get().reduceMotion,
+    });
+    this.#dialogue = dialogue;
+    // SPEC-042 §4.1: the mission banner, after the HUD so it is the top
+    // centre's last row; it holds the shared dialogue queue while it is up.
+    const banner = new MissionBanner(this.ui, {
+      dialogue,
+      reduceMotion: () => this.services.settings.get().reduceMotion,
+      keepToasts: () => dialogue.busy,
+    });
+    this.#banner = banner;
+    this.disposer.add(() => {
+      banner.dispose();
+      this.#banner = null;
+      this.#chains.length = 0;
     });
 
     const overlay = el('div', 'hud-storm');
@@ -1407,6 +1490,10 @@ export class SurfaceScene extends UiScene<'surface'> {
     const pickups = this.#pickups;
     if (world === null || combat === null || missions === null || weather === null || spawn === null || pickups === null) return;
 
+    // SPEC-042 §4.1: the banner runs on the step clock, so a pause freezes it;
+    // a film, a reveal or the ending holds it through the beat counter.
+    this.#banner?.tick(dt, this.#holds > 0);
+
     // SPEC-016 D-21: a perf run tops the enemies up at the start of every step.
     if (this.#stress !== null) this.#stressStep(this.#stress, world, combat);
 
@@ -1504,6 +1591,13 @@ export class SurfaceScene extends UiScene<'surface'> {
     if (this.#stress !== null) {
       world.player.x = heldX;
       world.player.z = heldZ;
+    }
+    // SPEC-042 §4.11 (dev): `surface-hit-elite`'s one blast, now that this
+    // step's hash holds the elite it spawned between steps.
+    const hit = this.#pendingHit;
+    if (hit !== null) {
+      this.#pendingHit = null;
+      if (hit.entity.id === hit.id && hit.entity.state !== 'dead') combat.explode(hit.entity.x, hit.entity.z, 1, 1, 0);
     }
 
     // SPEC-030 §4.5: after combat (so a shot this step ends hiding at once),
@@ -1675,7 +1769,7 @@ export class SurfaceScene extends UiScene<'surface'> {
     for (let slot = 0; slot < count; slot++) {
       const e = world.enemies.at(index[slot] as number);
       this.#project(e.x, e.z, ELITE_PLATE_LIFT);
-      plates.show(slot, this.#screenPoint.x, this.#screenPoint.y, this.#plateName(e.def.id), this.#affixLine(e));
+      plates.show(slot, this.#screenPoint.x, this.#screenPoint.y, this.#plateName(e.def.id), affixLine(e));
     }
     plates.hideFrom(count);
   }
@@ -1687,22 +1781,6 @@ export class SurfaceScene extends UiScene<'surface'> {
       this.#plateNames.set(id, name);
     }
     return name;
-  }
-
-  /** The affix names joined by ` · `, cached per (a, b) pair. */
-  #affixLine(e: EnemyEntity): string {
-    const a = e.affixA === null ? AFFIX_IDS.length : AFFIX_IDS.indexOf(e.affixA);
-    const b = e.affixB === null ? AFFIX_IDS.length : AFFIX_IDS.indexOf(e.affixB);
-    const key = a * (AFFIX_IDS.length + 1) + b;
-    let line = this.#affixLines[key];
-    if (line === undefined) {
-      const names: string[] = [];
-      if (e.affixA !== null) names.push(AFFIXES[e.affixA].name);
-      if (e.affixB !== null) names.push(AFFIXES[e.affixB].name);
-      line = names.join(' · ');
-      this.#affixLines[key] = line;
-    }
-    return line;
   }
 
   /**
@@ -3080,7 +3158,11 @@ export class SurfaceScene extends UiScene<'surface'> {
   #deathTick(world: CombatWorld, dt: number): void {
     if (this.#deathAt === null) return;
     this.#deathAt += dt;
-    const tapped = this.#edges.pressed('interact') || this.#edges.pressed('fire');
+    // SPEC-042 §4.5: a press respawns only after the overlay has been up 1 s —
+    // a held trigger no longer skips the cause unread. A press before that is
+    // dropped with its step; the 2.5 s auto-respawn is unchanged.
+    const tapped =
+      this.#deathAt >= DEATH_SKIP_GUARD_SECONDS && (this.#edges.pressed('interact') || this.#edges.pressed('fire'));
     // SPEC-041 §4.4, E63: a death in an active boss stage comes back at the
     // arena's mouth instead of a 110–160 m walk from the pad.
     if (this.#deathAt >= DEATH_OVERLAY_SECONDS || tapped) {
@@ -3170,6 +3252,7 @@ export class SurfaceScene extends UiScene<'surface'> {
     this.#camTarget.z = p.z;
     this.#placeCamera(0, 0);
     this.#death?.hide();
+    this.#restartsSet = false;
     this.services.events.emit('player:respawned');
   }
 
@@ -3328,6 +3411,19 @@ export class SurfaceScene extends UiScene<'surface'> {
     if (import.meta.env.DEV) {
       button('surface-finish-stage', 'Finish stage', () => this.#debugFinishStage());
     }
+    // SPEC-042 §4.11: the feedback suite's shortcuts — low HP, a wave, an elite
+    // hit once and a coolant pack at the feet. Dev builds only, like the stage
+    // shortcut: production carries neither the buttons nor their handlers.
+    if (import.meta.env.DEV) {
+      button('surface-hp-low', 'HP low', () => this.#debugHpLow());
+      button('surface-start-wave', 'Start wave', () => this.#debugStartWave());
+      button('surface-hit-elite', 'Hit elite', () => this.#debugHitElite());
+      button('surface-drop-item', 'Drop item', () => {
+        const world = this.#world;
+        if (world === null || !world.player.alive) return;
+        this.#pickups?.spawn({ kind: 'item', itemId: 'coolant_pack', qty: 1, x: world.player.x, z: world.player.z });
+      });
+    }
     this.services.uiRoot.append(strip);
     this.disposer.add(() => strip.remove());
   }
@@ -3457,6 +3553,48 @@ export class SurfaceScene extends UiScene<'surface'> {
       t.damage = 1;
       t.source = 'dust_skitter';
     }
+  }
+
+  /** SPEC-042 §4.11: a fall that leaves 15 % of max HP — through the i-frames like `surface-hurt`. */
+  #debugHpLow(): void {
+    const world = this.#world;
+    if (world === null || !world.player.alive) return;
+    const amount = Math.round(world.player.hp - world.stats.maxHp * HP_LOW_DEBUG_FRACTION);
+    if (amount > 0) this.#combat?.damagePlayer(amount, { kind: 'fall' });
+  }
+
+  /** SPEC-042 §4.11: the planet's SPEC-038 storm wave, started at the player; inert where there is none. */
+  #debugStartWave(): void {
+    const id = `${this.#planet.id}_storm`;
+    if (!Object.hasOwn(WAVES, id)) return;
+    this.#spawn?.startWave(id as WaveId, 'player');
+  }
+
+  /**
+   * SPEC-042 §4.11: an elite dust skitter 8 m ahead — or along the nearest
+   * clear bearing — hit once by a 1-damage blast at its centre. The blast runs
+   * after the next step's `combat.update`, whose hash is the first to hold it.
+   */
+  #debugHitElite(): void {
+    const world = this.#world;
+    const spawn = this.#spawn;
+    if (world === null || spawn === null || !world.player.alive) return;
+    const p = world.player;
+    const radius = ENEMIES.dust_skitter.radius * ELITE_SCALE + 0.5;
+    let x = p.x + Math.cos(p.facing) * HIT_ELITE_DISTANCE;
+    let z = p.z + Math.sin(p.facing) * HIT_ELITE_DISTANCE;
+    for (let k = 0; k < 16; k++) {
+      const turn = (k % 2 === 0 ? 1 : -1) * Math.ceil(k / 2) * (Math.PI / 8);
+      const cx = p.x + Math.cos(p.facing + turn) * HIT_ELITE_DISTANCE;
+      const cz = p.z + Math.sin(p.facing + turn) * HIT_ELITE_DISTANCE;
+      if (world.obstacles.hitsCircle(cx, cz, radius)) continue;
+      x = cx;
+      z = cz;
+      break;
+    }
+    if (spawn.spawnElitePack('dust_skitter', x, z, 1) === 0) return;
+    const elite = this.#combat?.lastSpawned ?? null;
+    if (elite !== null) this.#pendingHit = { entity: elite, id: elite.id };
   }
 
   /** §4.8: complete the pinned mission's current stage through the runtime. */
@@ -3677,19 +3815,63 @@ export class SurfaceScene extends UiScene<'surface'> {
    * rather than around this call, so a modal line from anywhere — a `next` chain
    * link, another scene's queue, the dev bridge — holds the world too.
    */
-  #playDialogue(id: DialogueId): void {
+  #playDialogue(id: DialogueId): Promise<void> {
     const dialogue = this.#dialogue;
-    if (dialogue === null) return;
+    if (dialogue === null) return Promise.resolve();
     // SPEC-034 §4.10: every mission line the surface plays goes into the ledger,
     // so the station's debrief does not say it again a minute later.
     const save = this.#save;
     if (save !== null) LINE_LEDGER.markPlayed(save, id);
-    void dialogue.play(id);
+    return dialogue.play(id);
+  }
+
+  /**
+   * SPEC-042 §4.1 (42-d): a modal `onComplete` plays first — the chain through
+   * every `next` (the Warden, then ARIA) — and the banner is pushed at the
+   * last link's `dialogue:ended`. A first line that never starts (a `once`
+   * line already heard, a full queue) pushes it as soon as `play` resolves.
+   */
+  #playThenBanner(id: DialogueId, lines: CompletionLines): void {
+    let last = id;
+    // Bounded, so a `next` that loops back could never hang the step.
+    for (let hops = 0; hops < 8; hops++) {
+      const next = DIALOGUE_TABLE[last].next;
+      if (next === undefined || next === id) break;
+      last = next;
+    }
+    const chain: BannerChain = { first: id, last, lines, started: false };
+    this.#chains.push(chain);
+    void this.#playDialogue(id).then(() => {
+      if (chain.started || this.#banner === null) return;
+      const at = this.#chains.indexOf(chain);
+      if (at < 0) return;
+      this.#chains.splice(at, 1);
+      this.#banner.push(lines);
+    });
+  }
+
+  /**
+   * SPEC-042 §4.1: the banner's next line — the pad's first offer that is not
+   * a replay, the one the tracker names — once no mission is left active.
+   */
+  #nextOffer(): MissionDef | null {
+    const missions = this.#missions;
+    if (missions === null || missions.active.length > 0) return null;
+    return missions.available().find((def) => !missions.isReplay(def.id as MissionId)) ?? null;
+  }
+
+  /** SPEC-042 §4.5: heals in the pack — what Q, or the heal slot, could have reached. */
+  #healsCarried(): number {
+    const save = this.#save;
+    if (save === null) return 0;
+    let count = 0;
+    for (const entry of save.inventory) if (quickEligible(entry.itemId, 'heal')) count += entry.qty;
+    return count;
   }
 
   // ------------------------------------------------------------------- HUD
 
-  #feedHud(world: CombatWorld, _dt: number): void {
+  #feedHud(world: CombatWorld, dt: number): void {
     const hud = this.#hud;
     const save = this.#save;
     const missions = this.#missions;
@@ -3699,9 +3881,18 @@ export class SurfaceScene extends UiScene<'surface'> {
 
     m.hp[0] = Math.max(0, Math.round(world.player.hp));
     m.hp[1] = world.stats.maxHp;
-    m.xp[0] = save.player.xp - cumulativeXp(save.player.level);
+    // SPEC-042 42-p: at the cap the bar reads full.
     m.xp[1] = xpToNext(save.player.level);
+    m.xp[0] = save.player.level >= LEVEL_CAP ? m.xp[1] : save.player.xp - cumulativeXp(save.player.level);
     m.level = save.player.level;
+    // SPEC-042 §4.3: the running effects, into the pool made on construction —
+    // the model's array holds references to it, so the step allocates nothing.
+    const count = activeEffects(world.player, world.time, this.#effectPool);
+    m.effects.length = count;
+    for (let i = 0; i < count; i++) m.effects[i] = this.#effectPool[i] as HudEffect;
+    // SPEC-042 §4.6: `▲ Wave incoming` for 3 s of scene time after a wave starts.
+    if (this.#waveLeft > 0) this.#waveLeft = Math.max(0, this.#waveLeft - dt);
+    m.wave = this.#waveLeft > 0;
     // SPEC-037 §4.2: any count that moves lights the wallet strip for 5 s. The
     // first feed of a visit only takes the baseline — a landing changes nothing.
     let moved = m.tokens !== save.player.tokens;
@@ -3730,8 +3921,21 @@ export class SurfaceScene extends UiScene<'surface'> {
     // SPEC-030 D-11: the chip under the banner.
     m.shelter = this.#shelterState;
 
+    // SPEC-042 §4.9: the boss frame and the target frame, through one reused
+    // object each — a field read off the entities, no DOM, no allocation.
     const boss = this.#findBoss(world);
-    m.boss = boss === null ? null : { name: boss.def.name, hp: Math.max(0, Math.round(boss.hp)), max: boss.maxHp };
+    if (boss === null) {
+      m.boss = null;
+    } else {
+      const frame = this.#bossScratch;
+      frame.name = boss.def.name;
+      frame.hp = Math.max(0, Math.round(boss.hp));
+      frame.max = boss.maxHp;
+      frame.phase = boss.phase;
+      frame.marks = bossPhaseMarks(boss.def.id as EnemyId);
+      m.boss = frame;
+    }
+    this.#feedTarget(m, world);
 
     // SPEC-028 §4.5: the two halves of the quick bar, into reused scratch —
     // the flush diffs against a clone, so in-place writes still register.
@@ -3769,6 +3973,32 @@ export class SurfaceScene extends UiScene<'surface'> {
       this.#touchHint = hint;
       this.#touch?.setInteractHint(hint);
     }
+  }
+
+  /**
+   * SPEC-042 §4.9: the last non-boss enemy the player hit inside 3 s — an
+   * elite in the window wins — while it still carries the id it was hit
+   * with (a recycled slot does not, 42-l) and is alive. Its name and affixes
+   * are written only when the id changes; an elite reads as its nameplate does.
+   */
+  #feedTarget(m: HudModel, world: CombatWorld): void {
+    const combat = this.#combat;
+    const target =
+      combat === null ? null : (remembered(combat.lastEliteHit, world.time) ?? remembered(combat.lastHit, world.time));
+    if (target === null) {
+      m.target = null;
+      return;
+    }
+    const frame = this.#targetScratch;
+    if (target.id !== this.#targetId) {
+      this.#targetId = target.id;
+      frame.name = target.elite ? this.#plateName(target.def.id as EnemyId) : target.def.name;
+      frame.elite = target.elite;
+      frame.affixes = affixLine(target);
+    }
+    frame.hp = Math.max(0, Math.round(target.hp));
+    frame.max = target.maxHp;
+    m.target = frame;
   }
 
   /** SPEC-037 §4.2: a collect or deliver objective of the tracked stage is still open. */
@@ -3896,7 +4126,7 @@ export class SurfaceScene extends UiScene<'surface'> {
     for (const def of Object.values(MISSIONS)) {
       for (const stage of def.stages) widest = Math.max(widest, stage.length);
     }
-    for (let i = 0; i <= widest; i++) this.#trackerRows.push({ text: '', done: false, focus: false, defendHp: null });
+    for (let i = 0; i <= widest; i++) this.#trackerRows.push({ text: '', done: false, focus: false, defendHp: null, count: -1 });
   }
 
   /** The nearest live enemy of one kind, as a reused point (§3, `GuideContext`). */
@@ -4392,6 +4622,9 @@ export class SurfaceScene extends UiScene<'surface'> {
         progress.objective.kind === 'defend' && this.#defendPoi?.poi === progress.objective.poi && this.#defendMax > 0
           ? Math.max(0, Math.min(1, this.#defendHp / this.#defendMax))
           : null;
+      // SPEC-042 §4.6: what the row counts, for the bump — a timer counts nothing.
+      const kind = progress.objective.kind;
+      row.count = kind === 'kill' || kind === 'collect' || kind === 'scan' ? Math.floor(progress.value) : -1;
       rows.push(row);
     }
     // 27-p: between stages every row is done, and the focus row says so.
@@ -4400,6 +4633,7 @@ export class SurfaceScene extends UiScene<'surface'> {
       row.done = false;
       row.focus = true;
       row.defendHp = null;
+      row.count = -1;
       row.text = `${def.title} — Stage complete`;
       rows.push(row);
     }
@@ -4767,13 +5001,32 @@ export class SurfaceScene extends UiScene<'surface'> {
     const releases = [
       bus.on(
         'player:died',
-        () => {
+        ({ cause }) => {
           this.#deathAt = 0;
           // SPEC-041 §4.4: a death opens the seal at once; the respawn clears the arena.
           if (this.#arena !== null) this.#arena.sealed = false;
           const lost = this.#economy?.applyDeathPenalty() ?? {};
-          this.#death?.show(lost);
+          // SPEC-042 §4.5: what killed the player, and the one tip that applies.
+          // The cause names its species off the event, so an enemy that
+          // despawned in the same step still has its name (42-j).
+          const tip = deathTip(cause, {
+            scheme: this.services.input.state.scheme,
+            autoFire: this.services.settings.get().autoFire,
+            healsCarried: this.#healsCarried(),
+          });
+          this.#death?.show(lost, deathCause(cause), tip);
           this.#onDeath(); // SPEC-027 §4.6: the first-death tip, the repeat hint
+        },
+        this,
+      ),
+      // SPEC-042 §4.2: a pickup that went into the pack, and one a full pack refused.
+      bus.on('item:collected', ({ itemId, qty }) => bus.emit('ui:toast', { kind: 'good', text: pickupText(itemId, qty) }), this),
+      bus.on('item:blocked', ({ itemId }) => bus.emit('ui:toast', { kind: 'warn', text: blockedText(itemId) }), this),
+      // SPEC-042 §4.6: `▲ Wave incoming` for 3 s; a second wave restarts the clock.
+      bus.on(
+        'wave:started',
+        () => {
+          this.#waveLeft = WAVE_LINE_SECONDS;
         },
         this,
       ),
@@ -4921,6 +5174,8 @@ export class SurfaceScene extends UiScene<'surface'> {
           // screen, where the line docks under the top centre, the toasts do too.
           this.#aria?.hold(true);
           if (shortScreen()) this.ui.holdToasts(true);
+          // SPEC-042 §4.1: a modal `onComplete` chain has begun; its banner waits for its end.
+          for (const chain of this.#chains) if (chain.first === id) chain.started = true;
         },
         this,
       ),
@@ -4929,7 +5184,15 @@ export class SurfaceScene extends UiScene<'surface'> {
         ({ id }) => {
           if (DIALOGUE_TABLE[id].modal === true) this.#modalOpen = Math.max(0, this.#modalOpen - 1);
           this.#aria?.hold(false);
-          this.ui.holdToasts(false);
+          // SPEC-042 §4.1: a banner up on a short screen keeps the rack held.
+          if (this.#banner?.holdingToasts !== true) this.ui.holdToasts(false);
+          // SPEC-042 §4.1 (42-d): the Warden, then ARIA — then the banner.
+          for (let i = this.#chains.length - 1; i >= 0; i--) {
+            const chain = this.#chains[i] as BannerChain;
+            if (chain.last !== id) continue;
+            this.#chains.splice(i, 1);
+            this.#banner?.push(chain.lines);
+          }
         },
         this,
       ),
@@ -4992,6 +5255,15 @@ export class SurfaceScene extends UiScene<'surface'> {
           }
           const dialogueId = MISSION_TABLE[id].dialogue.onStage?.[stage];
           if (dialogueId !== undefined) this.#playDialogue(dialogueId);
+          // SPEC-042 §4.6: a new stage of the tracked mission says what it
+          // asks first — `Stage 2/3 — Scan Dune Sea`. Other missions say nothing.
+          if (stage > 0 && id === this.#missions?.pinned) {
+            const def = MISSION_TABLE[id];
+            const first = def.stages[stage]?.[0];
+            if (first !== undefined) {
+              bus.emit('ui:toast', { kind: 'good', text: `Stage ${stage + 1}/${def.stages.length} — ${this.#objectiveLine(first)}` });
+            }
+          }
           // §4.6: forced mission weather ends when a boss stage starts.
           const missions = this.#missions;
           const weather = this.#weather;
@@ -5004,7 +5276,7 @@ export class SurfaceScene extends UiScene<'surface'> {
       ),
       bus.on(
         'mission:completed',
-        ({ id }) => {
+        ({ id, replay }) => {
           // SPEC-035 §4.7: the tutorial is over, so the ramp is too. A replay
           // does not bring it back — the mission is already in `missionsDone`.
           if (id === RAMP_MISSION && this.#ramp) {
@@ -5024,7 +5296,20 @@ export class SurfaceScene extends UiScene<'surface'> {
           // the ending dialogue replaces it for the stay. The station plays it
           // on the next docking (SPEC-014's debrief), where it belongs.
           const held = this.#ending !== null && id === this.#endingFor;
-          if (dialogueId !== undefined && !held) this.#playDialogue(dialogueId);
+          // SPEC-042 §4.1: the banner, in completion order — none for the
+          // mission that starts the ending (42-e). A modal `onComplete` (the
+          // Warden at the Queen's death, 42-d) plays first and the banner
+          // follows its chain; otherwise the banner goes up first and the
+          // line waits behind its hold.
+          if (!held) {
+            const lines = completionLines(MISSION_TABLE[id], replay, this.#nextOffer());
+            if (dialogueId !== undefined && DIALOGUE_TABLE[dialogueId].modal === true) {
+              this.#playThenBanner(dialogueId, lines);
+            } else {
+              this.#banner?.push(lines);
+              if (dialogueId !== undefined) this.#playDialogue(dialogueId);
+            }
+          }
           if (this.#terminalOpen) this.#renderTerminal();
         },
         this,
@@ -5045,6 +5330,15 @@ export class SurfaceScene extends UiScene<'surface'> {
           // SPEC-034 §4.9: an escort stage restarts like a timed one (E4), which
           // means putting the follower back at `from`.
           if (reason === 'death' || reason === 'recall') this.#syncEscort();
+          // SPEC-042 §4.5: the death overlay says which stage the death
+          // restarted, by its first objective — the tracked mission's wins.
+          if (reason === 'death') {
+            const first = MISSION_TABLE[id].stages[stage]?.[0];
+            if (first !== undefined && (!this.#restartsSet || id === this.#missions?.pinned)) {
+              this.#restartsSet = true;
+              this.#death?.setRestarts(`Restarts: ${this.#objectiveLine(first)}`);
+            }
+          }
           // SPEC-034 §4.9: say why the stage went back to zero. A death, a
           // recall and a reload already announce themselves.
           const text = stageResetText(

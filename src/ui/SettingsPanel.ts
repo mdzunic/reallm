@@ -131,6 +131,7 @@ export class SettingsPanel {
         { class: 'settings-body' },
         h('div', { class: 'settings-head' }, h('p', { class: 'settings-title' }, 'Settings'), close),
         this.#audioRows(),
+        this.#hapticsRow(),
         this.#qualityRow(),
         this.#toggleRow('settings-reduce-motion', 'Reduce motion', s.get().reduceMotion, (on) => s.set({ reduceMotion: on })),
         this.#damageFlashRow(),
@@ -186,6 +187,19 @@ export class SettingsPanel {
       box.append(h('label', { class: 'settings-row' }, h('span', {}, label), slider));
     }
     return box;
+  }
+
+  /**
+   * SPEC-042 §4.10: `Vibration`, beside the audio rows (SPEC-045 places it in
+   * the Audio section) — only on the touch scheme, and only where the browser
+   * has `navigator.vibrate`; iOS and a keyboard never see a dead switch. The
+   * scheme is `<html>`'s `scheme-touch`, the class every touch layout reads.
+   */
+  #hapticsRow(): HTMLLabelElement | null {
+    const touch = document.documentElement.classList.contains('scheme-touch');
+    if (!touch || typeof navigator.vibrate !== 'function') return null;
+    const s = this.#deps.settings;
+    return this.#toggleRow('settings-haptics', 'Vibration', s.get().haptics, (on) => s.set({ haptics: on }));
   }
 
   // ---------------------------------------------------------------- quality

@@ -731,6 +731,8 @@ button.debug-button {
   --bar-hp: linear-gradient(90deg, #ff5a4a, #e5484d);
   --bar-shield: linear-gradient(90deg, #7fc4ff, #4c9aff);
   --bar-xp: linear-gradient(90deg, #ffd06a, #f5a623);
+  /* SPEC-042 §4.9: the boss frame's own fill — never the player's --bar-hp. */
+  --bar-boss: linear-gradient(90deg, #ff8a3d, #c2410c);
   --text-glow: 0 0 12px rgba(76, 154, 255, 0.45);
 
   /* SPEC-031 §4.7 — the console frame (*initial tuning*). The scrim floors the
@@ -1237,15 +1239,16 @@ html.scheme-touch[data-play] .hud-tc {
   transform: scaleX(0);
 }
 
-/* §4.5: the three gradient tokens; hull and boss keep their flat hues, which
-   are still the colourblind-safe pair the glyphs back up (AC-68). */
+/* §4.5: the three gradient tokens; the hull keeps its flat hue, which is
+   still the colourblind-safe pair its glyph backs up (AC-68). SPEC-042 §4.9:
+   the boss frame draws its own `--bar-boss`. */
 .bar-hp { background: var(--bar-hp); }
 .bar-xp { background: var(--bar-xp); height: 100%; }
 .bar-shield { background: var(--bar-shield); }
 .bar-hull { background: var(--warn); }
-.bar-boss { background: var(--bar-hp); }
 
-.bar-row:has(.bar-xp) .bar { height: 4px; }
+/* SPEC-042 §4.7: 6 px, with its numbers in `title` and `aria-label`. */
+.bar-row:has(.bar-xp) .bar { height: 6px; }
 
 .bar-text,
 .hud-level,
@@ -1257,13 +1260,6 @@ html.scheme-touch[data-play] .hud-tc {
 /* §4.5: the token count is the HUD's one warm accent. */
 .hud-tokens {
   color: var(--accent-2);
-}
-
-/* SPEC-037 §4.5: the boss bar has no plate under it, so its name wears the
-   halo. It is an in-flow row of the top centre (§4.2), after the weather
-   banner and the shelter chip. */
-.hud-boss-bar .bar-text {
-  text-shadow: var(--hud-halo);
 }
 
 /* SPEC-037 §4.2: the wallet strip heads the top centre — tokens, then oil,
@@ -2524,6 +2520,31 @@ html.reduce-motion .dialogue-dim {
   display: none;
 }
 
+/* SPEC-042 §4.5: what killed the player, one tip for next time, and the
+   stage the death restarted — each line only when it has something to say. */
+.death-cause {
+  margin: 0;
+  color: var(--ink);
+  font-size: var(--type-md);
+}
+
+.death-tip {
+  margin: 0;
+  max-width: min(520px, 90vw);
+  color: var(--ink-dim);
+  text-align: center;
+}
+
+.death-tip.is-hidden,
+.death-restarts:empty {
+  display: none;
+}
+
+.death-restarts {
+  margin: 0;
+  color: var(--warn);
+}
+
 .death-respawn {
   margin: 0;
   color: var(--ink-dim);
@@ -3154,6 +3175,14 @@ html.debug .scene-tag {
   margin: 0;
 }
 
+/* SPEC-042 §4.5: what the recall cost, and what it did not, under the banner. */
+.station-recall-detail {
+  margin: 4px 0 0;
+  max-width: 560px;
+  color: var(--ink);
+  font-size: var(--type-sm);
+}
+
 /* SPEC-031 §4.5: the recall banner sits under the channel line, in flow. */
 .station-recall {
   margin: 6px 0 0;
@@ -3344,10 +3373,11 @@ html.debug .scene-tag {
   font-size: 14px;
 }
 
-/* SPEC-039 §4.6: the row against the piece worn in its slot. */
+/* SPEC-039 §4.6: the row against the piece worn in its slot. SPEC-042 §4.8:
+   its parts carry their own colours; the separators stay quiet. */
 .shop-compare {
   margin: 0;
-  color: var(--shield);
+  color: var(--ink-dim);
   font-size: 14px;
 }
 
@@ -3376,9 +3406,10 @@ html.debug .scene-tag {
   flex-wrap: wrap;
 }
 
-/* AC-41: the discount reads base → paid, in the good colour. */
+/* AC-41: the discount reads base → paid. SPEC-042 §4.8: in --ink — the
+   green said "good" about a price the player may not be able to pay. */
 .shop-price {
-  color: var(--good);
+  color: var(--ink);
 }
 
 /* AC-42: the reason a button refuses, next to the button that refuses. */
@@ -3556,7 +3587,7 @@ html.debug .scene-tag {
 }
 
 .inv-compare {
-  color: var(--good);
+  color: var(--ink-dim);
   font-size: 14px;
 }
 
@@ -4539,6 +4570,8 @@ html.reduce-motion .reveal-name.is-glitched {
   align-items: baseline;
   gap: 6px;
   line-height: 1.35;
+  /* SPEC-042 §4.6: the bump's fill comes and goes, briefly. */
+  transition: background-color 120ms linear;
 }
 
 /* SPEC-037 §4.5: a done row keeps --ink on the plate; the ✓ says it is done. */
@@ -5298,7 +5331,7 @@ html.reduce-motion .screen-body > * {
 
 .gear-card-compare {
   margin: 0;
-  color: var(--good);
+  color: var(--ink-dim);
   font-size: var(--type-sm);
 }
 
@@ -5439,4 +5472,315 @@ html.reduce-motion .screen-body > * {
   display: flex;
   gap: 8px;
   justify-content: flex-end;
+}
+
+/* ------------------------------------------------ SPEC-042: feedback in play */
+
+/* §4.1: the mission banner — the top centre's last row, on the HUD plate, and
+   never a pointer target (the `.panel` it wears opts every other one back in).
+   It fades in and out over 150 ms; under reduce motion it simply appears and
+   goes. A beat that holds the screen hides it until the beat is over. */
+.mission-banner.panel {
+  width: min(420px, 100%);
+  box-sizing: border-box;
+  padding: 8px 16px;
+  background: var(--hud-plate);
+  text-align: center;
+  pointer-events: none;
+  animation: mission-banner-in 150ms linear both;
+}
+
+.mission-banner.is-fading {
+  opacity: 0;
+  transition: opacity 150ms linear;
+}
+
+.mission-banner.is-held {
+  visibility: hidden;
+}
+
+@keyframes mission-banner-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+html.reduce-motion .mission-banner {
+  animation: none;
+  transition: none;
+}
+
+/* The head is written in sentence case and uppercased here (SPEC-045's
+   plain-text option can show it as written). */
+.mission-banner-head {
+  margin: 0;
+  font-size: 12px;
+  letter-spacing: var(--track);
+  text-transform: uppercase;
+  color: var(--ink);
+}
+
+.mission-banner-title {
+  margin: 2px 0 0;
+  font-size: 20px;
+  color: var(--ink);
+}
+
+.mission-banner-rewards {
+  margin: 4px 0 0;
+  font-size: 14px;
+  color: var(--good);
+}
+
+.mission-banner-next {
+  margin: 4px 0 0;
+  font-size: 14px;
+  color: var(--ink-dim);
+}
+
+/* §4.3: the effect chips in the `Lv N` row, after the level. The row never
+   wraps, so the column is no taller with all three running. */
+.hud-level-row {
+  display: flex;
+  flex-wrap: nowrap;
+  align-items: baseline;
+  gap: 6px;
+  white-space: nowrap;
+}
+
+.hud-effects {
+  display: flex;
+  flex-wrap: nowrap;
+  gap: 4px;
+}
+
+.hud-effect {
+  max-width: 52px;
+  overflow: hidden;
+  font-size: 13px;
+  color: var(--ink);
+  white-space: nowrap;
+}
+
+/* §4.7: a level gained glows gold for 2 s — plain gold under reduce motion. */
+.hud-level.is-levelled {
+  color: var(--accent-2);
+  text-shadow: 0 0 8px var(--accent-2);
+}
+
+html.reduce-motion .hud-level.is-levelled {
+  text-shadow: none;
+}
+
+/* §4.4: below a quarter of HP (of hull, in flight) a static red edge — never
+   animated, on any setting; a full-screen layer that takes no touch. */
+.hud-lowhp {
+  position: absolute;
+  inset: 0;
+  display: none;
+  pointer-events: none;
+  background: radial-gradient(ellipse at center, transparent 55%, rgba(229, 72, 77, 0.28));
+}
+
+.hud.is-low-hp .hud-lowhp {
+  display: block;
+}
+
+/* §4.4: the heal slot asks to be used — a static 2 px --hp outline. */
+.qb-slot.is-urgent {
+  outline: 2px solid var(--hp);
+  outline-offset: 0;
+}
+
+/* §4.6: a counted row that rose — an accent fill, or an outline under
+   reduce motion, with no transition. */
+.tracker-row.is-bumped {
+  background: color-mix(in srgb, var(--accent-2) 25%, transparent);
+}
+
+html.reduce-motion .tracker-row.is-bumped {
+  background: none;
+  outline: 1px solid var(--accent-2);
+  transition: none;
+}
+
+/* §4.6: `▲ Wave incoming` on the weather banner's pill. */
+.hud-wave {
+  padding: 4px 12px;
+  border-radius: 6px;
+  background: var(--hud-plate);
+  color: var(--warn);
+  pointer-events: none;
+}
+
+/* §4.9: the boss frame — the name over its own bar, a tick at each later
+   phase's threshold, `Phase N` at a turn. No plate under it, so its text wears
+   the halo; it sits in the top-centre box SPEC-045's UI scale sizes. */
+.boss-frame {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  max-width: 100%;
+  pointer-events: none;
+}
+
+.boss-frame-name {
+  margin: 0;
+  font-size: 16px;
+  letter-spacing: var(--track);
+  text-transform: uppercase;
+  color: var(--ink);
+  text-shadow: var(--hud-halo);
+  white-space: nowrap;
+}
+
+.boss-frame-track {
+  position: relative;
+  width: clamp(280px, 40vw, 640px);
+  max-width: 100%;
+  height: 12px;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.12);
+  box-shadow: inset 0 0 0 1px var(--panel-edge);
+  overflow: hidden;
+}
+
+.boss-frame-fill {
+  width: 100%;
+  height: 100%;
+  background: var(--bar-boss);
+  transform-origin: left center;
+  transform: scaleX(0);
+}
+
+.boss-frame-tick {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  margin-left: -1px;
+  background: var(--ink);
+}
+
+.boss-frame-phase {
+  font-size: 14px;
+  letter-spacing: var(--track);
+  text-transform: uppercase;
+  color: var(--warn);
+  text-shadow: var(--hud-halo);
+}
+
+/* §4.9: the target frame — the last enemy hit, its name, an elite's tag and
+   affixes (as its nameplate names them), and a 160 × 6 px bar. */
+.target-frame {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  pointer-events: none;
+}
+
+.target-frame-head {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  margin: 0;
+  font-size: 14px;
+  color: var(--ink);
+  text-shadow: var(--hud-halo);
+  white-space: nowrap;
+}
+
+.target-frame-elite {
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: var(--track);
+  text-transform: uppercase;
+  color: var(--accent-2);
+}
+
+.target-frame-affixes {
+  margin: 0;
+  font-size: 12px;
+  color: var(--ink);
+  text-shadow: var(--hud-halo);
+  white-space: nowrap;
+}
+
+.target-frame-track {
+  width: 160px;
+  height: 6px;
+  border-radius: 3px;
+  background: rgba(255, 255, 255, 0.12);
+  box-shadow: inset 0 0 0 1px var(--panel-edge);
+  overflow: hidden;
+}
+
+.target-frame-fill {
+  width: 100%;
+  height: 100%;
+  background: var(--bar-hp);
+  transform-origin: left center;
+  transform: scaleX(0);
+}
+
+/* §4.8: each compare part points the way it goes for the player. */
+.compare-up {
+  color: var(--good);
+}
+
+.compare-down {
+  color: var(--hp);
+}
+
+.compare-plain {
+  color: var(--ink-dim);
+}
+
+/* §4.1, §4.9: on a short touch screen the top centre keeps to the upper half
+   — clipping what does not fit, in the rare stack of storm, shelter, boss and
+   banner — the boss frame is one row, the target frame goes (the elites'
+   plates name them), and the banner is one line with no next line (the
+   tracker already names the pad's offer). */
+@media (max-height: 500px) {
+  html.scheme-touch[data-play] .hud-tc {
+    max-height: calc(50dvh - 8px - max(10px, env(safe-area-inset-top)));
+    overflow: hidden;
+  }
+
+  html.scheme-touch .boss-frame {
+    flex-direction: row;
+    width: 100%;
+    gap: 8px;
+  }
+
+  html.scheme-touch .boss-frame-name {
+    flex: none;
+    font-size: 14px;
+  }
+
+  html.scheme-touch .boss-frame-track {
+    flex: 1;
+    width: auto;
+    min-width: 0;
+  }
+
+  html.scheme-touch .target-frame {
+    display: none;
+  }
+
+  html.scheme-touch .mission-banner-head,
+  html.scheme-touch .mission-banner-title {
+    display: inline;
+    margin: 0;
+    font-size: 14px;
+  }
+
+  html.scheme-touch .mission-banner-head::after {
+    content: ' · ';
+  }
+
+  html.scheme-touch .mission-banner-next {
+    display: none;
+  }
 }

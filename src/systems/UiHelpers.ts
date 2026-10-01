@@ -10,11 +10,14 @@
 import type { GameEvents } from '@/core/Events';
 import type { Scheme } from '@/core/Input';
 import { maxHp, type Save, type SlotSummary } from '@/core/Save';
-import type { DamageFlashMode } from '@/core/Settings';
+import type { AutoFireMode, DamageFlashMode } from '@/core/Settings';
 import {
+  AFFIX_IDS,
+  AFFIXES,
   ATTRIBUTE_EFFECTS,
   CLASSES,
   COMPANIONS,
+  DEATH_TIPS,
   ENEMIES,
   FOLLOWERS,
   ITEMS,
@@ -23,13 +26,18 @@ import {
   PLANETS,
   PLANET_IDS,
   POI_LABELS,
+  RECIPES,
   RESOURCE_IDS,
   SIGNATURE_FALLBACK_LITHIUM,
   TUNING,
   UPGRADES,
   type Attributes,
   type ClassId,
+  type CompanionId,
+  type DamageSource,
+  type DeathTipId,
   type Difficulty,
+  type EnemyId,
   type ItemId,
   type CompanionEffect,
   type FollowerId,
@@ -41,11 +49,14 @@ import {
   type PlanetId,
   type PoiId,
   type Price,
+  type RecipeId,
   type Requirement,
   type ResourceId,
   type ShipSystem,
   type WeatherId,
 } from '@/data/index';
+import type { EnemyEntity } from '@/entities/Enemy';
+import type { PlayerEntity } from '@/entities/Player';
 import { LOADOUT_CHAPTERS, RECOMMENDED_LOADOUT, type LoadoutEntry } from '@/systems/Balance';
 import { damageReduction, playerDamageMult } from '@/systems/Combat';
 import {
@@ -59,6 +70,7 @@ import {
 import type { SkipRefusal } from '@/systems/Flight';
 import { weaponDps, type SlotView } from '@/systems/Loadout';
 import { campaignLocked } from '@/systems/Missions';
+import { cumulativeXp, LEVEL_CAP, xpToNext } from '@/systems/Progression';
 import type { Class, Item, QuickSlot, WeaponSlot } from '@/data/index';
 
 // The schema-typed views of the content tables: on the `as const` literal types
@@ -712,13 +724,14 @@ export function gearCompare(worn: ItemId, candidate: ItemId): readonly StatDelta
  * different slots compare as `''`.
  */
 export function gearCompareText(worn: ItemId, candidate: ItemId): string {
-  return gearCompare(worn, candidate)
-    .map((part) => {
-      if (part.stat === 'tier') return `T${part.from} → T${part.to}`;
-      if (part.stat === 'recharge') return `recharge ${part.from} s → ${part.to} s`;
-      return `${part.label} ${part.from} → ${part.to}`;
-    })
-    .join(' · ');
+  return gearCompare(worn, candidate).map(compareText).join(' · ');
+}
+
+/** One compare part as the line prints it — shared with `compareDeltas` (SPEC-042 §4.8). */
+function compareText(part: StatDelta): string {
+  if (part.stat === 'tier') return `T${part.from} → T${part.to}`;
+  if (part.stat === 'recharge') return `recharge ${part.from} s → ${part.to} s`;
+  return `${part.label} ${part.from} → ${part.to}`;
 }
 
 /**
@@ -869,6 +882,296 @@ export function shipGateText(save: Save, system: ShipSystem): string | null {
   return null;
 }
 
+// --------------------------------------------- SPEC-042: feedback in play
+
+/** §4.1: the mission banner's three lines. SPEC-043 extends the function with an `extras` argument. */
+export interface CompletionLines {
+  title: string;
+  rewards: string;
+  next: string | null;
+}
+
+/**
+ * §4.1 — what the banner says when `def` completes: its title; the rewards,
+ * `+100 XP · +10 tokens · +20 oil`, then each item (`Medkit ×2`), with zero
+ * amounts left out; and where the next work is. A replay pays the halved XP
+ * and tokens — off the same fraction `applyRewards` charges — then `replay`,
+ * and nothing else, as `rewardsText` does. `next` is the pad's first offer
+ * that is not a replay, or `null`.
+ */
+export function completionLines(def: MissionDef, replay: boolean, next: MissionDef | null): CompletionLines {
+  const rewards = def.rewards;
+  const paid = (value: number): number => (replay ? Math.floor(value * TUNING.REPLAY_REWARD_FRACTION) : value);
+  const parts: string[] = [];
+  const xp = paid(rewards.xp);
+  if (xp > 0) parts.push(`+${xp} XP`);
+  const tokens = paid(rewards.tokens);
+  if (tokens > 0) parts.push(`+${tokens} tokens`);
+  if (replay) {
+    parts.push('replay');
+  } else {
+    for (const [resource, amount] of Object.entries(rewards.resources ?? {})) {
+      if ((amount ?? 0) > 0) parts.push(`+${amount} ${resource}`);
+    }
+    for (const item of rewards.items ?? []) {
+      if (item.qty > 0) parts.push(`${ITEM_TABLE[item.itemId].name} ×${item.qty}`);
+    }
+  }
+  return {
+    title: def.title,
+    rewards: parts.join(' · '),
+    next: next === null ? null : `Next: ${next.title} — at the pad terminal`,
+  };
+}
+
+/**
+ * §4.2 — what `item:collected` toasts: `Picked up Medkit ×2` for a consumable
+ * (no `×1`), `Picked up Composite Weave (T1) — equip it at the station` for a
+ * weapon or armour piece.
+ */
+export function pickupText(itemId: ItemId, qty: number): string {
+  const item = ITEM_TABLE[itemId];
+  if (item.kind === 'consumable') return `Picked up ${item.name}${qty > 1 ? ` ×${qty}` : ''}`;
+  return `Picked up ${item.name} (T${item.tier}) — equip it at the station`;
+}
+
+/** §4.2 — what `item:blocked` toasts, once per refused pickup. */
+export function blockedText(itemId: ItemId): string {
+  return `Inventory full — ${ITEM_TABLE[itemId].name} left on the ground`;
+}
+
+/**
+ * §4.7 — the character panel's `character-xp` line: the XP into this level,
+ * the level's span and what is left, `XP 340 / 450 — 110 to level 6`; at
+ * `LEVEL_CAP`, `Level 30 — the cap` (42-p).
+ */
+export function characterXpText(level: number, xp: number): string {
+  if (level >= LEVEL_CAP) return `Level ${LEVEL_CAP} — the cap`;
+  const into = xp - cumulativeXp(level);
+  const span = xpToNext(level);
+  return `XP ${into} / ${span} — ${span - into} to level ${level + 1}`;
+}
+
+/** §4.3: the three timed effects a consumable can leave running. */
+export type EffectKind = 'heal' | 'damage_boost' | 'hazard_immunity';
+
+export interface HudEffect {
+  kind: EffectKind;
+  /** Whole seconds left, rounded up. */
+  seconds: number;
+}
+
+/** `out[at]` written in place — built only the first time that slot is used. */
+function writeEffect(out: HudEffect[], at: number, kind: EffectKind, seconds: number): number {
+  const entry = out[at];
+  if (entry === undefined) {
+    out[at] = { kind, seconds };
+  } else {
+    entry.kind = kind;
+    entry.seconds = seconds;
+  }
+  return at + 1;
+}
+
+/**
+ * §4.3 — the player's running effects into `out`, in this order: the heal over
+ * time (`ceil(remaining / perSecond)`), the damage boost (the latest `until` of
+ * the live boosts — a second plasma cell keeps one row, 42-h) and the hazard
+ * immunity. Reuses `out`'s entries and returns how many it wrote; `out` keeps
+ * any entries past that count for the next call.
+ */
+export function activeEffects(
+  player: Pick<PlayerEntity, 'healOverTime' | 'boosts' | 'hazardImmuneUntil'>,
+  time: number,
+  out: HudEffect[],
+): number {
+  let count = 0;
+  const heal = player.healOverTime;
+  if (heal !== null && heal.remaining > 0 && heal.perSecond > 0) {
+    count = writeEffect(out, count, 'heal', Math.ceil(heal.remaining / heal.perSecond));
+  }
+  let until = -Infinity;
+  for (let i = 0; i < player.boosts.length; i++) {
+    const boost = player.boosts[i] as { until: number };
+    if (boost.until > until) until = boost.until;
+  }
+  if (until > time) count = writeEffect(out, count, 'damage_boost', Math.ceil(until - time));
+  if (player.hazardImmuneUntil > time) {
+    count = writeEffect(out, count, 'hazard_immunity', Math.ceil(player.hazardImmuneUntil - time));
+  }
+  return count;
+}
+
+/** `spore_storm` → `spore storm` — the weather as a death names it. */
+function weatherWords(id: WeatherId): string {
+  return id.replace(/_/g, ' ');
+}
+
+/** §4.5 — the death overlay's `death-cause` line: what killed the player. */
+export function deathCause(cause: DamageSource): string {
+  switch (cause.kind) {
+    case 'enemy':
+    case 'projectile':
+      return `Killed by ${ENEMIES[cause.enemyId].name}`;
+    case 'weather':
+      return `Killed by the ${weatherWords(cause.weather)}`;
+    case 'fall':
+      return 'Killed by a fall';
+    case 'asteroid':
+      return 'Killed by an asteroid';
+    case 'storm':
+      return 'Killed by the ion storm';
+  }
+}
+
+/** §4.5: what `deathTip` reads besides the cause. */
+export interface DeathContext {
+  scheme: Scheme;
+  autoFire: AutoFireMode;
+  /** Heal consumables in the pack — what Q, or the heal slot, could have used. */
+  healsCarried: number;
+}
+
+/**
+ * §4.5 — the one tip under the cause, in the scheme's wording, or `null` when
+ * no row applies (a fall, an asteroid, the ion storm). The first matching row
+ * wins: weather → shelter; an enemy with auto-fire off → auto-fire; an enemy
+ * with a heal carried → heal; an enemy with none → craft.
+ */
+export function deathTip(cause: DamageSource, context: DeathContext): string | null {
+  let id: DeathTipId | null = null;
+  if (cause.kind === 'weather') id = 'shelter';
+  else if (cause.kind === 'enemy' || cause.kind === 'projectile') {
+    id = context.autoFire === 'off' ? 'autofire' : context.healsCarried > 0 ? 'heal' : 'craft';
+  }
+  if (id === null) return null;
+  return context.scheme === 'touch' ? DEATH_TIPS[id].touch : DEATH_TIPS[id].keyboard;
+}
+
+/** §3: what a completed purchase was, as the call site knows it. */
+export type PurchaseResult =
+  | { kind: 'ship'; system: ShipSystem; tier: number }
+  | { kind: 'gear'; id: ItemId }
+  | { kind: 'companion'; id: CompanionId; level: number }
+  | { kind: 'craft'; recipe: RecipeId; qty: number };
+
+/**
+ * §4.8 — the toast a purchase raises instead of `Purchased`: what was bought
+ * and what it changed. A ship tier names its metrics' step from the tier below
+ * (`Shield upgraded to tier 2 — Shield 80 → 120`); gear says where to equip
+ * it; a companion its level; a craft its total, `Crafted Medkit ×5` (42-q).
+ */
+export function purchaseText(result: PurchaseResult): string {
+  switch (result.kind) {
+    case 'ship': {
+      const def = UPGRADES[result.system];
+      const deltas = Object.entries(def.metrics as Readonly<Record<string, readonly number[]>>)
+        .map(([metric, values]) => upgradeDeltaText(metric, values[result.tier - 1] ?? 0, values[result.tier] ?? 0))
+        .join(' · ');
+      const head = `${def.name} upgraded to tier ${result.tier}`;
+      return deltas === '' ? head : `${head} — ${deltas}`;
+    }
+    case 'gear': {
+      const item = ITEM_TABLE[result.id];
+      return item.kind === 'consumable' ? `${item.name} bought` : `${item.name} bought — equip it in Character`;
+    }
+    case 'companion': {
+      const name = COMPANIONS[result.id].name;
+      return result.level <= 1 ? `${name} bought` : `${name} upgraded to L${result.level}`;
+    }
+    case 'craft': {
+      const recipe = RECIPES[result.recipe];
+      const total = recipe.qty * result.qty;
+      return `Crafted ${ITEM_TABLE[recipe.output].name}${total > 1 ? ` ×${total}` : ''}`;
+    }
+  }
+}
+
+/**
+ * §4.8 — a missing rung, named: the highest item of the candidate's own line
+ * below its tier, `Requires Laser Carbine (T1)`. An item with nothing below it
+ * (or a consumable) falls back to `failText('prerequisite')`.
+ */
+export function prerequisiteText(id: ItemId): string {
+  const item = ITEM_TABLE[id];
+  if (item.kind === 'consumable') return failText('prerequisite');
+  let below: Extract<Item, { kind: 'weapon' | 'armor' }> | null = null;
+  for (const other of Object.values(ITEM_TABLE)) {
+    if (other.kind === 'consumable' || other.line !== item.line || other.tier >= item.tier) continue;
+    if (below === null || other.tier > below.tier) below = other;
+  }
+  return below === null ? failText('prerequisite') : `Requires ${below.name} (T${below.tier})`;
+}
+
+/** §3: one `gearCompare` part with the direction it points for the player. */
+export interface CompareDelta extends StatDelta {
+  /** +1 better, −1 worse, 0 neither (equal values, or the cooldown model). */
+  readonly better: -1 | 0 | 1;
+  /** The part's text exactly as `gearCompareText` prints it. */
+  readonly text: string;
+}
+
+/** §4.8: the stats where less is more — heat per shot and recharge seconds. */
+const LOWER_IS_BETTER: ReadonlySet<StatKey> = new Set<StatKey>(['heat', 'recharge']);
+
+/**
+ * §4.8 — SPEC-039's `gearCompare(worn, candidate)` part by part, each with its
+ * direction and its text. It computes no stat of its own, so the arrows can
+ * never disagree with the line. The arrow shows benefit, not the number's
+ * direction: a lower heat per shot is better. The cooldown model has none.
+ */
+export function compareDeltas(worn: ItemId, candidate: ItemId): readonly CompareDelta[] {
+  return gearCompare(worn, candidate).map((part) => {
+    let better: -1 | 0 | 1 = 0;
+    if (part.stat !== 'cooldown' && typeof part.from === 'number' && typeof part.to === 'number' && part.from !== part.to) {
+      const higher = part.to > part.from;
+      better = higher !== LOWER_IS_BETTER.has(part.stat) ? 1 : -1;
+    }
+    return { ...part, better, text: compareText(part) };
+  });
+}
+
+/** The affix lines already joined, per (affixA, affixB) pair — built once each. */
+const AFFIX_LINES: (string | undefined)[] = [];
+
+/**
+ * SPEC-041's affix display names joined by ` · ` — what an elite's nameplate
+ * and the target frame both read — or `''` for a non-elite. Cached per pair,
+ * so after the first call for a pair it allocates nothing.
+ */
+export function affixLine(e: Pick<EnemyEntity, 'elite' | 'affixA' | 'affixB'>): string {
+  if (!e.elite) return '';
+  const a = e.affixA === null ? AFFIX_IDS.length : AFFIX_IDS.indexOf(e.affixA);
+  const b = e.affixB === null ? AFFIX_IDS.length : AFFIX_IDS.indexOf(e.affixB);
+  const key = a * (AFFIX_IDS.length + 1) + b;
+  let line = AFFIX_LINES[key];
+  if (line === undefined) {
+    const names: string[] = [];
+    if (e.affixA !== null) names.push(AFFIXES[e.affixA].name);
+    if (e.affixB !== null) names.push(AFFIXES[e.affixB].name);
+    line = names.join(' · ');
+    AFFIX_LINES[key] = line;
+  }
+  return line;
+}
+
+const PHASE_MARKS = new Map<EnemyId, readonly number[]>();
+
+/**
+ * §4.9 — the boss bar's ticks: `phases[i].hpFraction` for every phase after
+ * the first, cached per boss id so the HUD diff sees one array. `[]` for an
+ * enemy with no phase table.
+ */
+export function bossPhaseMarks(id: EnemyId): readonly number[] {
+  let marks = PHASE_MARKS.get(id);
+  if (marks === undefined) {
+    const phases = (ENEMIES[id] as { phases?: readonly { hpFraction: number }[] }).phases ?? [];
+    marks = Object.freeze(phases.slice(1).map((phase) => phase.hpFraction));
+    PHASE_MARKS.set(id, marks);
+  }
+  return marks;
+}
+
 // ------------------------------------------------------------------ HUD diff
 
 /**
@@ -887,6 +1190,12 @@ export interface HudTrackerRow {
    * defending was being eaten. `null` on every other row.
    */
   defendHp: number | null;
+  /**
+   * SPEC-042 §4.6: the counted value of a kill, collect or scan row — what the
+   * tracker bumps on when it rises; −1 on every other row, so a survive
+   * timer, whose text changes every second, never bumps.
+   */
+  count: number;
 }
 
 /**
@@ -919,7 +1228,21 @@ export interface HudModel {
   weather: { warning: WeatherId | null; active: WeatherId | null; secondsLeft: number };
   /** SPEC-030 §4.5: the chip under the weather banner (D-11). */
   shelter: 'none' | 'sheltered' | 'hidden';
-  boss: { name: string; hp: number; max: number } | null;
+  /**
+   * SPEC-042 §4.9: the boss frame — its 1-based `phase`, and the `hpFraction`
+   * of each later phase as the bar's ticks (`bossPhaseMarks`, one cached array
+   * per boss). The scene writes one reused object, never a fresh one a step.
+   */
+  boss: { name: string; hp: number; max: number; phase: number; marks: readonly number[] } | null;
+  /**
+   * SPEC-042 §4.9: the target frame — the last non-boss enemy the player hit
+   * inside 3 s, an elite winning; `affixes` is `affixLine`'s. One reused object.
+   */
+  target: { name: string; elite: boolean; affixes: string; hp: number; max: number } | null;
+  /** SPEC-042 §4.3: the running timed effects, at most three, reused objects. */
+  effects: HudEffect[];
+  /** SPEC-042 §4.6: `▲ Wave incoming` is up. */
+  wave: boolean;
   /** SPEC-028 §3: the quick bar's two halves; both `null` off the surface. */
   loadout: { active: WeaponSlot; slots: Record<WeaponSlot, SlotView>; fallback: boolean } | null;
   quick: Record<QuickSlot, { itemId: ItemId | null; qty: number }> | null;
@@ -957,6 +1280,9 @@ export function createHudModel(): HudModel {
     weather: { warning: null, active: null, secondsLeft: 0 },
     shelter: 'none',
     boss: null,
+    target: null,
+    effects: [],
+    wave: false,
     loadout: null,
     quick: null,
     interact: null,
@@ -983,6 +1309,9 @@ const HUD_KEY_TABLE = {
   weather: true,
   shelter: true,
   boss: true,
+  target: true,
+  effects: true,
+  wave: true,
   loadout: true,
   quick: true,
   interact: true,

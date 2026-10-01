@@ -41,10 +41,12 @@ import {
   type FlightInput,
 } from '@/systems/Flight';
 import { Missions } from '@/systems/Missions';
-import { cumulativeXp, Progression, xpToNext } from '@/systems/Progression';
+import { cumulativeXp, LEVEL_CAP, Progression, xpToNext } from '@/systems/Progression';
+import { completionLines } from '@/systems/UiHelpers';
 import { AriaHint } from '@/ui/AriaHint';
 import { el, h, shortScreen, testId } from '@/ui/dom';
 import { Hud } from '@/ui/Hud';
+import { MissionBanner } from '@/ui/MissionBanner';
 import { PauseMenu } from '@/ui/PauseMenu';
 import { RotateOverlay } from '@/ui/RotateOverlay';
 import { TouchControls } from '@/ui/TouchControls';
@@ -123,6 +125,8 @@ export class FlightScene extends UiScene<'flight'> {
   #missions: Missions | null = null;
   #view: FlightView | null = null;
   #hud: Hud | null = null;
+  /** SPEC-042 §4.1: the mission banner for a flight mission finished in flight. */
+  #banner: MissionBanner | null = null;
   #pauseMenu: PauseMenu | null = null;
   /** SPEC-036 §4.3: the rotate block, read every step. */
   #rotate: RotateOverlay | null = null;
@@ -277,9 +281,12 @@ export class FlightScene extends UiScene<'flight'> {
     }, this));
     // SPEC-034 §4.10 step 2: a flight mission that finishes in flight is
     // debriefed in flight, and the ledger keeps the station from saying it again.
-    this.disposer.add(this.services.events.on('mission:completed', ({ id }) => {
+    // SPEC-042 §4.1: the banner goes up first, and the line waits behind its
+    // hold — flight lines are never modal. There is no pad here, so no next.
+    this.disposer.add(this.services.events.on('mission:completed', ({ id, replay }) => {
       const data = this.#save;
       if (data === null) return;
+      this.#banner?.push(completionLines(MISSIONS[id], replay, null));
       LINE_LEDGER.noteCompleted(data, id);
       const line = MISSIONS[id].dialogue.onComplete;
       if (line !== undefined) this.#playLine(data, line);
@@ -407,11 +414,31 @@ export class FlightScene extends UiScene<'flight'> {
     // SPEC-014 §4.5: the shared HUD in flight trim; SPEC-013 feeds it.
     const hud = new Hud(this.ui, 'flight');
     this.#hud = hud;
+    // SPEC-042 §4.7: the level before the first flush, so the trip's first
+    // frame does not read as a level gained.
+    hud.model.level = this.#save?.player.level ?? 1;
     if (flight !== null) hud.setWaveMarkers(flight.waveMarkers());
     this.disposer.add(() => {
       this.#hud?.dispose();
       this.#hud = null;
       this.#reticleEl = null;
+    });
+    // SPEC-042 §4.1: the mission banner, the top centre's last row, on the
+    // shared dialogue layer — whose queue it holds while it is up.
+    const dialogue = dialogueLayer(services.uiRoot, services.events, {
+      input: services.input,
+      saveKey: () => services.save.current,
+      reduceMotion: () => services.settings.get().reduceMotion,
+    });
+    const banner = new MissionBanner(this.ui, {
+      dialogue,
+      reduceMotion: () => services.settings.get().reduceMotion,
+      keepToasts: () => dialogue.busy,
+    });
+    this.#banner = banner;
+    this.disposer.add(() => {
+      banner.dispose();
+      this.#banner = null;
     });
     // SPEC-041 §4.9: every hit on a hazard marks the reticle — `is-hit`, or
     // `is-kill` for the kill. The node is looked up once, here, so the frame
@@ -454,7 +481,8 @@ export class FlightScene extends UiScene<'flight'> {
         'dialogue:ended',
         () => {
           this.#aria?.hold(false);
-          this.ui.holdToasts(false);
+          // SPEC-042 §4.1: a banner up on a short screen keeps the rack held.
+          if (this.#banner?.holdingToasts !== true) this.ui.holdToasts(false);
         },
         this,
       ),
@@ -661,6 +689,8 @@ export class FlightScene extends UiScene<'flight'> {
     // SPEC-036 §4.3, E65: the rotate block holds the trip — no `flight.update`,
     // and the launch shot and the view freeze with it.
     if (this.#rotate?.blocked === true) return;
+    // SPEC-042 §4.1: the banner runs on this step; no beat holds a flight.
+    this.#banner?.tick(dt, false);
 
     if (this.#skipPending) {
       this.#skipPending = false;
@@ -748,8 +778,9 @@ export class FlightScene extends UiScene<'flight'> {
     const { player } = save;
     model.hp[0] = player.hp;
     model.hp[1] = maxHp(player.classId, player.attributes, player.level);
-    model.xp[0] = player.xp - cumulativeXp(player.level);
+    // SPEC-042 42-p: at the cap the bar reads full.
     model.xp[1] = xpToNext(player.level);
+    model.xp[0] = player.level >= LEVEL_CAP ? model.xp[1] : player.xp - cumulativeXp(player.level);
     model.level = player.level;
     model.tokens = player.tokens;
     model.resources.oil = save.resources.oil;

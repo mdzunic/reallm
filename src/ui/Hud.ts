@@ -12,6 +12,12 @@
 // in the top-right cluster on touch and the bottom-right corner on keyboard,
 // and the quick bar in the bottom centre on keyboard or in the thumb arc on
 // touch — the same bar, moved, so no slot loses its state (37-a).
+//
+// SPEC-042 adds the moments the HUD used to let pass in silence: the running
+// effects as chips in the `Lv N` row, a static red edge below a quarter of HP
+// (or of hull, in flight), the level glow and the XP bar's numbers, the wave
+// line, and two frames in the top centre — the boss's own bar, which never
+// reads as the player's, and the last enemy the player hit.
 import type { Scheme } from '@/core/Input';
 import type { JoystickSide } from '@/core/Settings';
 import {
@@ -20,12 +26,14 @@ import {
   diffHudInto,
   flashGate,
   type DamageFlashMode,
+  type EffectKind,
   type HudKey,
   type HudModel,
 } from '@/systems/UiHelpers';
 import { RESOURCE_IDS, type ResourceId } from '@/data/index';
 import { el, testId, type UiRoot } from '@/ui/dom';
 import { RESOURCE_GLYPHS, TOKEN_GLYPH } from '@/ui/glyphs';
+import { EFFECT_GLYPHS } from '@/ui/icons';
 import { QuickBar, type QuickBarHandlers } from '@/ui/QuickBar';
 import { Tracker } from '@/ui/Tracker';
 
@@ -33,8 +41,22 @@ export type HudMode = 'surface' | 'flight';
 
 /** AC-63: how long the damage vignette stays up. */
 export const DAMAGE_FLASH_MS = 150;
-/** AC-64: the low-HP pulse threshold. */
+/**
+ * AC-64: the low-HP pulse threshold. SPEC-042 §4.4: also the red edge's, and
+ * in flight the hull's.
+ */
 export const LOW_HP_FRACTION = 0.25;
+/** SPEC-042 §4.7: how long the level label glows after a level-up. */
+export const LEVEL_GLOW_MS = 2000;
+/** SPEC-042 §4.9: how long `Phase N` stays up after a boss turns. */
+export const BOSS_PHASE_MS = 2000;
+/** SPEC-042 §4.3: the chips' order in the `Lv N` row, and their screen-reader words. */
+const EFFECT_KINDS: readonly EffectKind[] = ['heal', 'damage_boost', 'hazard_immunity'];
+const EFFECT_WORDS: Readonly<Record<EffectKind, string>> = {
+  heal: 'Healing',
+  damage_boost: 'Damage boost',
+  hazard_immunity: 'Hazard immunity',
+};
 /** SPEC-035 §4.6: how long a hit-direction wedge stays up. */
 export const HIT_DIR_MS = 1000;
 /** §4.6: at most three at once — a fourth replaces the oldest (35-d). */
@@ -104,7 +126,45 @@ export class Hud {
   readonly #weather = testId(el('div', 'hud-weather'), 'hud-weather');
   /** SPEC-030 D-11: always in the DOM, hidden while `shelter === 'none'`. */
   readonly #shelter = testId(el('div', 'hud-shelter is-hidden'), 'sheltered');
-  readonly #boss = bar('boss', '', 'Boss');
+  /** SPEC-042 §4.6: `▲ Wave incoming`, on the weather banner's pill, under the shelter chip. */
+  readonly #wave = testId(el('div', 'hud-wave is-hidden', '▲ Wave incoming'), 'hud-wave');
+  /**
+   * SPEC-042 §4.9: the boss frame — the name over its own `--bar-boss` bar,
+   * a tick at each later phase, and `Phase N` for 2 s at a turn. It took the
+   * place of SPEC-037's boss row, which was the player's red bar moved up.
+   */
+  readonly #boss = testId(el('div', 'boss-frame is-hidden'), 'hud-boss');
+  readonly #bossName = testId(el('p', 'boss-frame-name'), 'hud-boss-name');
+  readonly #bossTrack = el('div', 'boss-frame-track');
+  readonly #bossFill = el('div', 'boss-frame-fill');
+  readonly #bossPhase = testId(el('span', 'boss-frame-phase is-hidden'), 'hud-boss-phase');
+  /** The marks the ticks were last built from — one cached array per boss id. */
+  #bossMarks: readonly number[] | null = null;
+  readonly #bossTicks: HTMLSpanElement[] = [];
+  #bossNameShown = '';
+  /** The phase last seen, 0 with no boss; a rise shows `Phase N`. */
+  #bossPhaseSeen = 0;
+  #bossPhaseTimer: ReturnType<typeof setTimeout> | null = null;
+  /** SPEC-042 §4.9: the target frame — the last enemy the player hit inside 3 s. */
+  readonly #target = testId(el('div', 'target-frame is-hidden'), 'hud-target');
+  readonly #targetName = testId(el('span', 'target-frame-name'), 'hud-target-name');
+  readonly #targetElite = testId(el('span', 'target-frame-elite is-hidden', 'Elite'), 'hud-target-elite');
+  readonly #targetAffixes = testId(el('p', 'target-frame-affixes is-hidden'), 'hud-target-affixes');
+  readonly #targetFill = el('div', 'target-frame-fill');
+  #targetNameShown = '';
+  #targetAffixesShown = '';
+  /** SPEC-042 §4.3: one chip per effect kind in the `Lv N` row, reused; the whole second last written. */
+  readonly #effects = {} as Record<EffectKind, { node: HTMLSpanElement; seconds: number }>;
+  /** SPEC-042 §4.4: the static red edge below a quarter of HP — never animated. */
+  readonly #lowHp = testId(el('div', 'hud-lowhp'), 'hud-lowhp');
+  /**
+   * SPEC-042 §4.7: the level the label last showed, primed on the first flush
+   * so a landing never glows; a rise after that wears `is-levelled` for 2 s.
+   */
+  #levelSeen: number | null = null;
+  #levelTimer: ReturnType<typeof setTimeout> | null = null;
+  /** False through the constructor's first render of the zeroed model. */
+  #primed = false;
   /** SPEC-037 §4.3: on the HUD root, on the plate; the keyboard's E prompt, or a touch shortfall. */
   readonly #interact = testId(el('div', 'hud-interact'), 'hud-interact');
   readonly #objective = el('div', 'hud-objective');
@@ -173,8 +233,19 @@ export class Hud {
     this.#root.dataset['side'] = 'left';
     this.#root.dataset['flash'] = 'full';
     const tl = el('div', 'hud-tl');
+    // SPEC-042 §4.3: the running effects sit in the `Lv N` row after the
+    // level, one chip per kind — the row never wraps, so the column is no
+    // taller with every effect running and the tracker keeps its place.
+    const effects = el('span', 'hud-effects');
+    for (const kind of EFFECT_KINDS) {
+      const node = testId(el('span', 'hud-effect is-hidden'), `hud-effect-${kind}`);
+      effects.append(node);
+      this.#effects[kind] = { node, seconds: -1 };
+    }
+    const levelRow = el('div', 'hud-level-row');
+    levelRow.append(this.#level, effects);
     // `hud-hp` is the scene's one HP readout (AC-58); the SPEC-011 e2e reads it.
-    tl.append(testId(this.#hp.root, 'hud-hp'), this.#xp.root, this.#level);
+    tl.append(testId(this.#hp.root, 'hud-hp'), this.#xp.root, levelRow);
     if (mode === 'flight') {
       // SPEC-035 §4.9: in flight the salvager's own HP is not what is at stake —
       // the hull is. The bar stays in the DOM (the SPEC-011 selector resolves)
@@ -211,11 +282,18 @@ export class Hud {
       tc.append(wallet);
     }
     // SPEC-030 D-11: the shelter chip sits directly under the weather banner.
-    // SPEC-037 §4.2: the boss bar is an in-flow row after both, which is what
-    // lets `--hud-tc-h` count it (37-c).
-    this.#boss.root.classList.add('hud-boss-bar');
-    tc.append(this.#weather, this.#shelter, testId(this.#boss.root, 'hud-boss'));
-    this.#boss.root.classList.add('is-hidden');
+    // SPEC-037 §4.2: the boss row is an in-flow row after both, which is what
+    // lets `--hud-tc-h` count it (37-c). SPEC-042 §4.6, §4.9: the wave line
+    // under the chip, then the boss frame, then the target frame; the mission
+    // banner mounts itself after all of them, as the stack's last row.
+    this.#bossTrack.append(this.#bossFill);
+    this.#boss.append(this.#bossName, this.#bossTrack, this.#bossPhase);
+    const targetHead = el('p', 'target-frame-head');
+    targetHead.append(this.#targetName, this.#targetElite);
+    const targetTrack = el('div', 'target-frame-track');
+    targetTrack.append(this.#targetFill);
+    this.#target.append(targetHead, this.#targetAffixes, targetTrack);
+    tc.append(this.#weather, this.#shelter, this.#wave, this.#boss, this.#target);
     // SPEC-013 §4.10: trip progress with wave markers, the hostiles counter,
     // the storm warning + static, the holding banner, and the reticle.
     if (mode === 'flight') {
@@ -262,7 +340,10 @@ export class Hud {
       this.#quickBar = new QuickBar(this.#bc, quickHandlers ?? { slot: () => undefined, pick: () => undefined });
     }
 
-    this.#root.append(this.#vignette, this.#static, this.#hitDirLayer, tl, this.#tr, tc, bl, this.#br, this.#bc, this.#interact);
+    // SPEC-042 §4.4: the low-HP edge is a full-screen layer under the HUD's
+    // boxes, like the damage vignette — it takes no touch, so SPEC-037's box
+    // checks leave it out.
+    this.#root.append(this.#lowHp, this.#vignette, this.#static, this.#hitDirLayer, tl, this.#tr, tc, bl, this.#br, this.#bc, this.#interact);
     if (mode === 'surface') {
       // SPEC-037 §4.1: the thumb arc — built always, shown on the touch scheme
       // only. `arc-primary` is SPEC-038's DASH cell; the touch layer mounts it.
@@ -424,6 +505,12 @@ export class Hud {
    * every frame allocates only when a nested value changes shape.
    */
   flush(): void {
+    if (!this.#primed) {
+      // SPEC-042 §4.7: the first flush takes the level as it stands, so a
+      // landing never glows; the scenes write `model.level` before it.
+      this.#primed = true;
+      this.#levelSeen = this.model.level;
+    }
     const changed = diffHudInto(this.#last, this.model, this.#changed);
     if (changed.size === 0) return;
     for (const key of changed) this.#write(key);
@@ -457,6 +544,8 @@ export class Hud {
     this.#ui.root.style.removeProperty('--hud-tc-h');
     if (this.#flashTimer !== null) clearTimeout(this.#flashTimer);
     if (this.#staticTimer !== null) clearTimeout(this.#staticTimer);
+    if (this.#levelTimer !== null) clearTimeout(this.#levelTimer);
+    if (this.#bossPhaseTimer !== null) clearTimeout(this.#bossPhaseTimer);
     while (this.#hitDirs.length > 0) this.#dropHitDirection(0);
     this.#tracker?.dispose();
     this.#tracker = null;
@@ -477,16 +566,47 @@ export class Hud {
     switch (key) {
       case 'hp': {
         this.#setBar(this.#hp, m.hp);
+        // SPEC-042 §4.4: in flight the hull is what is at stake, so `is-low-hp`
+        // follows it there (the `flight` key), and the salvager's HP here.
+        if (this.#mode !== 'surface' || !this.#primed) return;
         // AC-64: the pulse is a class on the root, so CSS owns the animation
-        // and its reduce-motion static form.
-        this.#root.classList.toggle('is-low-hp', m.hp[0] / Math.max(1, m.hp[1]) < LOW_HP_FRACTION);
+        // and its reduce-motion static form. SPEC-042 §4.4: the same class
+        // shows the static red edge, and asks the heal slot to be used.
+        const low = m.hp[0] / Math.max(1, m.hp[1]) < LOW_HP_FRACTION;
+        this.#root.classList.toggle('is-low-hp', low);
+        this.#quickBar?.setUrgent(low);
         return;
       }
-      case 'xp':
+      case 'xp': {
         this.#setBar(this.#xp, m.xp, false);
+        // SPEC-042 §4.7: the numbers the 6 px bar has no room to print.
+        const text = `XP ${Math.round(m.xp[0])} / ${Math.round(m.xp[1])}`;
+        this.#xp.root.title = text;
+        this.#xp.root.setAttribute('aria-label', text);
         return;
-      case 'level':
+      }
+      case 'level': {
         this.#level.textContent = `Lv ${m.level}`;
+        // SPEC-042 §4.7: a level gained glows gold for 2 s; the first render never does.
+        const seen = this.#levelSeen;
+        if (this.#primed) this.#levelSeen = m.level;
+        if (seen === null || !this.#primed || m.level <= seen) return;
+        this.#level.classList.add('is-levelled');
+        if (this.#levelTimer !== null) clearTimeout(this.#levelTimer);
+        this.#levelTimer = setTimeout(() => {
+          this.#levelTimer = null;
+          this.#level.classList.remove('is-levelled');
+        }, LEVEL_GLOW_MS);
+        return;
+      }
+      case 'effects':
+        this.#writeEffects();
+        return;
+      case 'wave':
+        this.#wave.classList.toggle('is-hidden', !m.wave);
+        return;
+      case 'target':
+        this.#writeTarget();
         return;
       case 'tokens':
         if (this.#wallet !== null) this.#tokens.textContent = String(m.tokens);
@@ -545,14 +665,9 @@ export class Hud {
         this.#shelter.classList.toggle('is-hidden', m.shelter === 'none');
         return;
       }
-      case 'boss': {
-        this.#boss.root.classList.toggle('is-hidden', m.boss === null);
-        if (m.boss !== null) {
-          this.#setBar(this.#boss, [m.boss.hp, m.boss.max]);
-          this.#boss.text.textContent = m.boss.name;
-        }
+      case 'boss':
+        this.#writeBoss();
         return;
-      }
       case 'loadout':
       case 'quick': {
         // SPEC-028 §4.5: one renderer for both halves of the bar; it touches
@@ -601,9 +716,98 @@ export class Hud {
         const hold = m.flight.hostiles > 0 ? HOLD_HOSTILES : HOLD_OBJECTIVE;
         if (this.#holding.textContent !== hold) this.#holding.textContent = hold;
         this.#holding.classList.toggle('is-hidden', !m.flight.holding);
+        // SPEC-042 §4.4: one signal for "you are about to die", whatever you
+        // are flying — the red edge follows the hull in flight.
+        if (this.#primed) {
+          this.#root.classList.toggle('is-low-hp', m.flight.hull[0] / Math.max(1, m.flight.hull[1]) < LOW_HP_FRACTION);
+        }
         return;
       }
     }
+  }
+
+  /**
+   * SPEC-042 §4.3: each chip shows while its effect runs, with the effect's
+   * glyph and `<n> s`; its text and label are written only when the whole
+   * second changes. At most three entries, so the lookup is a short scan.
+   */
+  #writeEffects(): void {
+    const effects = this.model.effects;
+    for (const kind of EFFECT_KINDS) {
+      const chip = this.#effects[kind];
+      let seconds = -1;
+      for (let i = 0; i < effects.length; i++) {
+        const effect = effects[i];
+        if (effect !== undefined && effect.kind === kind) seconds = Math.max(0, effect.seconds);
+      }
+      if (seconds === chip.seconds) continue;
+      chip.node.classList.toggle('is-hidden', seconds < 0);
+      if (seconds >= 0) {
+        chip.node.textContent = `${EFFECT_GLYPHS[kind]} ${seconds} s`;
+        chip.node.setAttribute('aria-label', `${EFFECT_WORDS[kind]}, ${seconds} seconds`);
+      }
+      chip.seconds = seconds;
+    }
+  }
+
+  /**
+   * SPEC-042 §4.9: the boss frame from `m.boss` — the fill by `scaleX`, the
+   * `aria-label` with the bar, the ticks rebuilt only for a new boss's marks,
+   * and `Phase N` for 2 s when the phase rises (never for the first sight).
+   */
+  #writeBoss(): void {
+    const boss = this.model.boss;
+    this.#boss.classList.toggle('is-hidden', boss === null);
+    if (boss === null) {
+      this.#bossPhaseSeen = 0;
+      return;
+    }
+    const fraction = Math.max(0, Math.min(1, boss.hp / Math.max(1, boss.max)));
+    this.#bossFill.style.transform = `scaleX(${fraction})`;
+    this.#boss.setAttribute('aria-label', `${boss.name}, ${Math.round(boss.hp)} of ${Math.round(boss.max)} HP`);
+    if (this.#bossNameShown !== boss.name) {
+      this.#bossNameShown = boss.name;
+      this.#bossName.textContent = boss.name;
+    }
+    if (boss.marks !== this.#bossMarks) {
+      this.#bossMarks = boss.marks;
+      for (const tick of this.#bossTicks.splice(0)) tick.remove();
+      for (const mark of boss.marks) {
+        const tick = el('span', 'boss-frame-tick');
+        tick.style.left = `${Math.round(mark * 1000) / 10}%`;
+        this.#bossTrack.append(tick);
+        this.#bossTicks.push(tick);
+      }
+    }
+    const seen = this.#bossPhaseSeen;
+    this.#bossPhaseSeen = boss.phase;
+    if (seen === 0 || boss.phase <= seen) return;
+    this.#bossPhase.textContent = `Phase ${boss.phase}`;
+    this.#bossPhase.classList.remove('is-hidden');
+    if (this.#bossPhaseTimer !== null) clearTimeout(this.#bossPhaseTimer);
+    this.#bossPhaseTimer = setTimeout(() => {
+      this.#bossPhaseTimer = null;
+      this.#bossPhase.classList.add('is-hidden');
+    }, BOSS_PHASE_MS);
+  }
+
+  /** SPEC-042 §4.9: the target frame from `m.target` — written only where a field moved. */
+  #writeTarget(): void {
+    const target = this.model.target;
+    this.#target.classList.toggle('is-hidden', target === null);
+    if (target === null) return;
+    if (this.#targetNameShown !== target.name) {
+      this.#targetNameShown = target.name;
+      this.#targetName.textContent = target.name;
+    }
+    this.#targetElite.classList.toggle('is-hidden', !target.elite);
+    if (this.#targetAffixesShown !== target.affixes) {
+      this.#targetAffixesShown = target.affixes;
+      this.#targetAffixes.textContent = target.affixes;
+    }
+    this.#targetAffixes.classList.toggle('is-hidden', target.affixes === '');
+    const fraction = Math.max(0, Math.min(1, target.hp / Math.max(1, target.max)));
+    this.#targetFill.style.transform = `scaleX(${fraction})`;
   }
 
   /** Bars scale, never re-layout (AC-61); the text is `value/max` when shown. */

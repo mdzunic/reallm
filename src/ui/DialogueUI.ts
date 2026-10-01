@@ -128,6 +128,8 @@ export class DialogueUI {
 
   #queue: Job[] = [];
   #active: Job | null = null;
+  /** SPEC-042 §4.1: a mission banner is up — no queued job starts until it goes. */
+  #held = false;
   #lineIndex = 0;
   #shown = 0;
   #lineDone = false;
@@ -165,8 +167,19 @@ export class DialogueUI {
     ui.mount(this.#dim, 'panel');
     ui.mount(this.#root, 'panel');
 
-    // 14-d: whatever was queued dies with the scene that queued it.
-    this.#releases.push(events.on('scene:transition', () => this.#clear(), this));
+    // 14-d: whatever was queued dies with the scene that queued it — and so
+    // does a banner's hold (SPEC-042 §4.1), which the scene's banner releases
+    // on dispose anyway; this layer outlives every scene.
+    this.#releases.push(
+      events.on(
+        'scene:transition',
+        () => {
+          this.#held = false;
+          this.#clear();
+        },
+        this,
+      ),
+    );
     document.addEventListener('keydown', this.#onKey);
   }
 
@@ -241,6 +254,17 @@ export class DialogueUI {
     });
   }
 
+  /**
+   * SPEC-042 §4.1: while held, `#next()` starts no queued job — the one on
+   * screen plays on to its end, and what was queued behind it waits. Releasing
+   * the hold starts the next job at once, unless one is still on screen.
+   */
+  setHeld(held: boolean): void {
+    if (held === this.#held) return;
+    this.#held = held;
+    if (!held && this.#active === null) this.#next();
+  }
+
   /** First call fills the current line; the next advances (AC-72). */
   skip(): void {
     if (this.#active === null || this.#active.choices !== undefined) return;
@@ -262,7 +286,8 @@ export class DialogueUI {
   // ---------------------------------------------------------------- playback
 
   #next(): void {
-    const job = this.#queue.shift() ?? null;
+    // SPEC-042 §4.1: a banner holds the queue; `setHeld(false)` comes back here.
+    const job = this.#held ? null : (this.#queue.shift() ?? null);
     this.#active = job;
     if (job === null) {
       this.#root.classList.add('is-hidden');

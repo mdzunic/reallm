@@ -350,8 +350,8 @@ test('wallet: an unaffordable row prints the exact shortfall (AC-29)', async ({ 
   );
   await expect(page.locator('[data-testid="shop-gear-armor_ablative-buy"]')).toBeDisabled();
   await expect(page.locator('[data-testid="shop-gear-pistol_magnum"] .shop-reason')).toHaveText('Need 40 more tokens');
-  // Every other refusal keeps failText's generic line.
-  await expect(page.locator('[data-testid="shop-gear-weapon_plasma"] .shop-reason')).toHaveText('Requires the previous tier');
+  // SPEC-042 §4.8: a missing rung names the piece it wants.
+  await expect(page.locator('[data-testid="shop-gear-weapon_plasma"] .shop-reason')).toHaveText('Requires Laser Carbine (T1)');
 });
 
 test('wallet: a resource at cap carries the CARGO FULL treatment (AC-27)', async ({ page }) => {
