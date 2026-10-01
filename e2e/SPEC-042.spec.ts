@@ -133,7 +133,7 @@ test.describe('1. the mission banner', () => {
     // In the page, every frame and every mutation: when the banner rose and
     // fell, on both clocks, and when `c1_m1_done` first reached the screen.
     await page.evaluate((doneLine) => {
-      const rec: { up?: number; upView?: number; down?: number; downView?: number; done?: number } = {};
+      const rec: { up?: number; upView?: number; down?: number; downView?: number; done?: number; doneWhileUp?: boolean } = {};
       (window as unknown as { __spec042: typeof rec }).__spec042 = rec;
       const view = (): number => Number(window.__reallm.stats().sceneInfo?.['viewTime']);
       const check = (): void => {
@@ -152,6 +152,7 @@ test.describe('1. the mission banner', () => {
         const text = document.querySelector('.dialogue-text')?.textContent ?? '';
         if (rec.done === undefined && dialogue !== null && !dialogue.classList.contains('is-hidden') && text.startsWith(doneLine)) {
           rec.done = now;
+          rec.doneWhileUp = up;
         }
       };
       new MutationObserver(check).observe(document.body, { subtree: true, childList: true, attributes: true, characterData: true });
@@ -162,7 +163,14 @@ test.describe('1. the mission banner', () => {
       requestAnimationFrame(frame);
     }, DONE_LINE);
 
-    await finishDryLand(page);
+    // Stage by stage, with every line cleared in between, so nothing is on
+    // screen at the completion: without the hold, the done line would start
+    // the moment it was queued.
+    for (let stage = 0; stage < 3; stage++) {
+      await press(page, 'surface-finish-stage');
+      await page.waitForTimeout(250);
+      if (stage < 2) await dismiss(page);
+    }
     const banner = page.getByTestId('mission-complete');
     await expect(banner).toBeVisible();
     await expect(banner).toContainText('Mission complete');
@@ -176,15 +184,13 @@ test.describe('1. the mission banner', () => {
     await expect(banner).toHaveCSS('pointer-events', 'none');
     expect(await banner.evaluate((node) => node.parentElement?.classList.contains('hud-tc') === true && node.nextElementSibling === null)).toBe(true);
 
-    // While it is up, the queue is held: a line on screen may finish, but the
-    // done line never starts.
-    await dismiss(page);
-    await expect(banner).toBeVisible();
-    await expect(page.locator('.dialogue-text')).not.toContainText(DONE_LINE);
+    // While it is up the queue is held: the done line, queued behind it with
+    // nothing else on screen, does not start.
+    await expect(page.getByTestId('dialogue')).toBeHidden();
 
     await expect(banner).toBeHidden({ timeout: 20_000 });
-    const record = async (): Promise<{ up?: number; upView?: number; down?: number; downView?: number; done?: number }> =>
-      page.evaluate(() => (window as unknown as { __spec042: Record<string, number | undefined> }).__spec042);
+    type Record042 = { up?: number; upView?: number; down?: number; downView?: number; done?: number; doneWhileUp?: boolean };
+    const record = async (): Promise<Record042> => page.evaluate(() => (window as unknown as { __spec042: Record042 }).__spec042);
     const shown = await record();
     const sceneSeconds = (shown.downView ?? NaN) - (shown.upView ?? NaN);
     expect(sceneSeconds, 'the banner’s scene seconds').toBeGreaterThan(3.5);
@@ -196,8 +202,11 @@ test.describe('1. the mission banner', () => {
       await dismiss(page);
     }
     await expect.poll(async () => (await record()).done, { timeout: 20_000 }).toBeDefined();
+    // The release starts it at once — in the very tick the banner goes — and
+    // never while the banner is on screen.
     const after = await record();
-    expect(after.done as number).toBeGreaterThan(after.down as number);
+    expect(after.doneWhileUp).toBe(false);
+    expect(after.done as number).toBeGreaterThanOrEqual(after.down as number);
   });
 });
 
@@ -290,19 +299,6 @@ test('5. low HP: the red edge and an urgent heal slot; in flight the hull drives
 test('6. death: the cause and a tip, and no respawn on a press inside the first second', async ({ page }) => {
   test.setTimeout(120_000);
   await land(page);
-  // When the overlay rose, on the scene clock.
-  await page.evaluate(() => {
-    const rec: { deathView?: number } = {};
-    (window as unknown as { __spec042: typeof rec }).__spec042 = rec;
-    const frame = (): void => {
-      const overlay = document.querySelector('[data-testid="death-overlay"]');
-      if (rec.deathView === undefined && overlay?.classList.contains('is-visible') === true) {
-        rec.deathView = Number(window.__reallm.stats().sceneInfo?.['viewTime']);
-      }
-      requestAnimationFrame(frame);
-    };
-    requestAnimationFrame(frame);
-  });
   await press(page, 'surface-hp-low');
   const death = page.getByTestId('death-overlay');
   for (let i = 0; i < 12 && !(await death.isVisible()); i++) {
@@ -312,28 +308,74 @@ test('6. death: the cause and a tip, and no respawn on a press inside the first 
   await expect(death).toBeVisible();
   await expect(page.getByTestId('death-cause')).toHaveText('Killed by Dust Skitter');
   await expect(page.getByTestId('death-tip')).toBeVisible();
-  // A skitter is no timed stage: nothing restarts.
+  // A skitter's bite restarts no timed stage: no restarts line.
   await expect(page.getByTestId('death-restarts')).toHaveText('');
+  // The 2.5 s auto-respawn is unchanged.
+  await expect(death).toBeHidden({ timeout: 15_000 });
 
-  await expect.poll(() => page.evaluate(() => (window as unknown as { __spec042: { deathView?: number } }).__spec042.deathView)).toBeDefined();
-  const at = (await page.evaluate(() => (window as unknown as { __spec042: { deathView: number } }).__spec042.deathView)) as number;
-  // 0.5 s in: a fire press is ignored.
-  await untilView(page, at + 0.5);
-  await page.keyboard.press('Space');
-  await untilView(page, at + 0.8);
-  await expect(death).toBeVisible();
-  // 1.2 s in: the same press respawns — well before the 2.5 s auto-respawn.
-  await untilView(page, at + 1.2);
-  await page.keyboard.press('Space');
-  const gone = await page.waitForFunction(
+  // The guard, timed on the scene clock inside the page — a round trip per
+  // assertion would eat the second being measured. A second death, then Space
+  // at 0.5 s (ignored) and at 1.2 s (respawns, well before 2.5 s).
+  const run = await page.evaluate(
     () =>
-      document.querySelector('[data-testid="death-overlay"]')?.classList.contains('is-visible') === true
-        ? false
-        : Number(window.__reallm.stats().sceneInfo?.['viewTime']),
-    null,
-    { polling: 'raf', timeout: 10_000 },
+      new Promise<{ early?: number; upAfterEarly?: boolean; late?: number; gone?: number }>((resolve) => {
+        const out: { early?: number; upAfterEarly?: boolean; late?: number; gone?: number } = {};
+        const overlay = document.querySelector('[data-testid="death-overlay"]') as HTMLElement;
+        const view = (): number => Number(window.__reallm.stats().sceneInfo?.['viewTime']);
+        const click = (id: string): void => document.querySelector<HTMLButtonElement>(`[data-testid="${id}"]`)?.click();
+        const key = (type: 'keydown' | 'keyup'): boolean => window.dispatchEvent(new KeyboardEvent(type, { code: 'Space', key: ' ' }));
+        const hp = (): number => {
+          const [now, max] = (document.querySelector('[data-testid="hud-hp"] .bar-text')?.textContent ?? '1/1').split('/').map(Number);
+          return (now ?? 1) / Math.max(1, max ?? 1);
+        };
+        let at: number | null = null;
+        let step = 0;
+        let lastHurt = -Infinity;
+        const started = performance.now();
+        const frame = (): void => {
+          const v = view();
+          const up = overlay.classList.contains('is-visible');
+          if (at === null) {
+            if (up) at = v;
+            else if (performance.now() - lastHurt > 350) {
+              click(hp() > 0.3 ? 'surface-hp-low' : 'surface-hurt-from');
+              lastHurt = performance.now();
+            }
+          } else if (step === 0 && v >= at + 0.5) {
+            key('keydown');
+            out.early = v - at;
+            step = 1;
+          } else if (step === 1) {
+            key('keyup');
+            step = 2;
+          } else if (step === 2 && v >= at + 0.8) {
+            out.upAfterEarly = up;
+            step = 3;
+          } else if (step === 3 && v >= at + 1.2) {
+            key('keydown');
+            out.late = v - at;
+            step = 4;
+          } else if (step === 4) {
+            key('keyup');
+            step = 5;
+          } else if (step === 5 && !up) {
+            out.gone = v - at;
+            resolve(out);
+            return;
+          }
+          if (performance.now() - started > 60_000 || (at !== null && v > at + 6)) {
+            resolve(out);
+            return;
+          }
+          requestAnimationFrame(frame);
+        };
+        requestAnimationFrame(frame);
+      }),
   );
-  expect(Number(await gone.jsonValue())).toBeLessThan(at + 2.4);
+  expect(run.early ?? NaN, 'the first press, scene seconds into the death').toBeLessThan(0.9);
+  expect(run.upAfterEarly, 'still down after the press at 0.5 s').toBe(true);
+  expect(run.late ?? NaN).toBeGreaterThanOrEqual(1.2);
+  expect(run.gone ?? NaN, 'respawned by the press at 1.2 s, not the 2.5 s timer').toBeLessThan(2.2);
 });
 
 // ------------------------------------------------------ 7, 8: progress beats
