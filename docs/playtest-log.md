@@ -1660,8 +1660,9 @@ in 16 of 16 at level 1; the Hive's two existing cases stay 16 of 16.
   - phone — the `phone-landscape` project's Chromium phone (Pixel 7 landscape, touch, `isMobile`) at every
     `PHONE_VIEWPORTS` size; _no handset in the build container_ (§7's pass on the reference Android phone is owed, below)
 
-Recorded from the container the branch was built in: `npm run check` — 97
-files and 2,048 tests with none skipped — and, a few files per invocation,
+Recorded from the container the branch was built in: `npm run check` — 98
+files and 2,059 tests with none skipped, `tests/ui/missionBanner.test.ts`'s
+eleven among them — and, a few files per invocation,
 `e2e/SPEC-042.spec.ts` (§6.2's fourteen cases and five more — the Queen's
 modal chain twice, a banner behind the Wurm's reveal, a flight mission's
 banner and the restarts line — twenty tests, all green under five workers),
@@ -1685,7 +1686,7 @@ criterion is one:
 | --- | --- |
 | Banner (`c1_m1`) | `Mission complete` · `Dry Land` · `+100 XP · +10 tokens · +20 oil` · `Next: Black Gold — at the pad terminal`; up more than 3.5 and at most 5 scene seconds; `c1_m1_done` started in the tick it went, never while it was up; still up 1 s after a 3 s pause; then faded by `mission-banner-out`, 150 ms to opacity 0 — and no animation at all under reduce motion |
 | Banner after a modal `onComplete` (`c5_m3`) | the Warden's line, then ARIA's, both modal, with no banner; the banner (`Her Majesty`, `+600 XP`) once ARIA's had gone — and, with ARIA's `once` line already heard, once the Warden's had |
-| Banner behind a beat | a `c1_m1` banner up when the Dune Wurm's reveal started: hidden on every frame of the reveal, back after it, more than 3.5 and at most 5 scene seconds on screen in all |
+| Banner behind a beat | a `c1_m1` banner up when the Dune Wurm's reveal started: hidden on every frame of the reveal, back after it, more than 3.5 and at most 5 scene seconds on screen in all; `c1_m1_done`, queued behind it, started only once it had gone — never under the reveal's caption |
 | Banner in flight (`c4_s2`) | the eighth scav fighter shot down on the way to Ferrum: `Mission complete` · `Salvage Rights` · `+150 XP · +15 tokens`, no next line, the flight HUD's top centre's last row |
 | Loot | `Picked up Coolant Pack`; with twenty full slots one `Inventory full — Coolant Pack left on the ground`, never `×2` while the pickup retried |
 | Effects | `☂ 30 s` in the `Lv N` row from `C`, ≤ 28 s two scene seconds later; the row and the tracker kept their place at every phone size |
