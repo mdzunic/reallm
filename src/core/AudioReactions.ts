@@ -90,19 +90,50 @@ export const SHOT_INTERVAL_MS: Readonly<Record<GameEvents['weapon:fired']['line'
   ship: 90,
 };
 
-/** SPEC-038 §4.10 — the cue per windup kind. */
+/**
+ * SPEC-038 §4.10 — the cue per windup kind. SPEC-041 §4.10: a boss's ground
+ * moves rumble (`windup_boss`), and its volley draws breath like a spitter.
+ */
 export const WINDUP_SOUNDS: Readonly<Record<GameEvents['enemy:windup']['kind'], SoundId>> = {
   melee: 'windup_melee',
   charge: 'windup_charge',
   shot: 'windup_shot',
+  slam: 'windup_boss',
+  lines: 'windup_boss',
+  ring: 'windup_boss',
+  burrow: 'windup_boss',
+  volley: 'windup_shot',
 };
 
-/** SPEC-038 §4.10 — a skitter pack chitters 120 ms apart at half volume; the charge is the loudest. */
-const WINDUP_OPTS: Readonly<Record<GameEvents['enemy:windup']['kind'], { minIntervalMs: number; volume: number }>> = {
+/**
+ * SPEC-038 §4.10 — a skitter pack chitters 120 ms apart at half volume; the
+ * charge is the loudest. SPEC-041 §4.10: the boss rumble is held 200 ms apart
+ * and takes a voice at priority 2.
+ */
+const WINDUP_OPTS: Readonly<
+  Record<GameEvents['enemy:windup']['kind'], { minIntervalMs: number; volume: number; priority?: 2 }>
+> = {
   melee: { minIntervalMs: 120, volume: 0.5 },
   charge: { minIntervalMs: 150, volume: 0.9 },
   shot: { minIntervalMs: 150, volume: 0.7 },
+  slam: { minIntervalMs: 200, volume: 1, priority: 2 },
+  lines: { minIntervalMs: 200, volume: 1, priority: 2 },
+  ring: { minIntervalMs: 200, volume: 1, priority: 2 },
+  burrow: { minIntervalMs: 200, volume: 1, priority: 2 },
+  volley: { minIntervalMs: 150, volume: 0.7 },
 };
+
+/**
+ * SPEC-041 §4.10 — the boss moves that hit the ground: these slam when they
+ * land. A volley's shots and a charge's run carry their own sounds.
+ */
+export const SLAM_MOVE_KINDS: ReadonlySet<GameEvents['boss:move']['kind']> = new Set([
+  'slam_target',
+  'slam_self',
+  'lines',
+  'ring',
+  'burrow',
+]);
 
 /** `elite` wins over the archetype, whatever the id (§5.3, AC-41). */
 export function enemyDeathSound(enemyId: EnemyId, elite: boolean): SoundId {
@@ -124,7 +155,8 @@ export function pickupSound(resource: ResourceId): SoundId {
 
 /**
  * The 19 events of §5.2 (SPEC-029 §4.12 adds four, SPEC-035 §4.11 two more,
- * SPEC-038 §4.10 the dash and the windup cue) that make a sound.
+ * SPEC-038 §4.10 the dash and the windup cue, SPEC-041 §4.10 a boss move
+ * landing and a flight hit) that make a sound.
  */
 export type ReactedEvent =
   | 'combat:blast'
@@ -143,6 +175,9 @@ export type ReactedEvent =
   | 'player:leveledUp'
   | 'enemy:killed'
   | 'boss:phase'
+  // SPEC-041 §4.10: a boss move landing, and every player hit on a flight hazard.
+  | 'boss:move'
+  | 'flight:hazardHit'
   | 'boss:defeated'
   | 'resource:collected'
   | 'poi:scanned'
@@ -273,6 +308,11 @@ export const AUDIO_REACTIONS: { [K in ReactedEvent]: Reaction<K> } = {
   /** Positioned: the payload's `x`/`z` are metres on the surface plane (AC-43). */
   'enemy:killed': (p) => ({ id: enemyDeathSound(p.enemyId, p.elite), opts: { x: p.x, z: p.z } }),
   'boss:phase': () => ({ id: 'boss_roar', opts: { priority: 2 } }),
+  /** SPEC-041 §4.10: slams, lines, rings and the burrow land with a slam; volleys and charges are silent here. */
+  'boss:move': (p) =>
+    SLAM_MOVE_KINDS.has(p.kind) ? { id: 'boss_slam', opts: { x: p.x, z: p.z, minIntervalMs: 150, priority: 2 } } : null,
+  /** SPEC-041 §4.9: a tick per hit, 60 ms apart — a kill keeps its own sounds. */
+  'flight:hazardHit': () => ({ id: 'ship_hit_tick', opts: { minIntervalMs: 60 } }),
   'boss:defeated': () => ({ id: 'boss_death', opts: { priority: 2 } }),
   /**
    * A full hold warns instead of chiming (AC-45). Both branches keep the 80 ms

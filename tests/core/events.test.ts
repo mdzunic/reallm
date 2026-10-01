@@ -575,6 +575,8 @@ const NAMES: Record<keyof GameEvents, true> = {
   'enemy:killed': true,
   'enemy:dismissed': true,
   'boss:phase': true,
+  // SPEC-041 §4.1: a boss move landed.
+  'boss:move': true,
   'boss:defeated': true,
   'poi:discovered': true,
   'poi:reached': true,
@@ -598,6 +600,8 @@ const NAMES: Record<keyof GameEvents, true> = {
   'ship:damaged': true,
   'flight:arrived': true,
   'flight:recalled': true,
+  // SPEC-041 §4.9: every player hit on a flight hazard.
+  'flight:hazardHit': true,
   'ui:toast': true,
   'ui:orientation': true,
   // SPEC-015 §10 / AC-51: the `prompt`-mode update signal, and AC-55's hint.
@@ -613,8 +617,9 @@ describe('GameEvents (§3.2)', () => {
     // 57 before SPEC-015, plus `app:update-ready` and `app:install-hint`.
     // SPEC-034 added `player:recalled`, `enemy:dismissed` and `item:noRoom`;
     // SPEC-035 §4.11 added `weapon:fired` and `enemy:hit`; SPEC-038 §4.10
-    // `player:dashed` and `enemy:windup`.
-    expect(Object.keys(NAMES)).toHaveLength(66);
+    // `player:dashed` and `enemy:windup`; SPEC-041 §4.10 `boss:move` and
+    // `flight:hazardHit`.
+    expect(Object.keys(NAMES)).toHaveLength(68);
   });
 
   it('still carries the nine names SPEC-002 and SPEC-003 already emit', () => {

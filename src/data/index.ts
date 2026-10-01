@@ -14,6 +14,7 @@
 //
 // Data modules are plain objects: no imports but other data, no functions
 // (SPEC-001 §4, §8).
+export * from '@/data/affixes';
 export * from '@/data/assets';
 export * from '@/data/characters';
 export * from '@/data/companions';

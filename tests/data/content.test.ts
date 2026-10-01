@@ -509,6 +509,20 @@ describe('content invariants (SPEC-009 §7)', () => {
       fighter: { hp: 40, damage: 8 },
       interceptor: { hp: 20, damage: 12 },
     };
+    // SPEC-041 §4.2 (*initial tuning*): boss HP is its own table, sized for the
+    // post-SPEC-039 kit — the player's DPS jumps at chapters 2 and 5, so no
+    // single chapter factor holds a fight's length. Damage and xp keep the
+    // formulas below.
+    const bossHp: Record<string, number> = {
+      dune_wurm: 1800,
+      frost_matriarch: 4600,
+      hive_broodlord: 5200,
+      ash_titan: 6800,
+      hive_queen: 8400,
+    };
+    expect(enemies.filter((enemy) => enemy.archetype === 'boss').map((enemy) => enemy.id).sort()).toEqual(
+      Object.keys(bossHp).sort(),
+    );
     const problems: string[] = [];
     for (const enemy of enemies) {
       const base = archetypeBase[enemy.archetype];
@@ -517,13 +531,20 @@ describe('content invariants (SPEC-009 §7)', () => {
         // SPEC-034 §4.4: a flight enemy's HP is the archetype base with no
         // chapter factor — a trip's kill count is authored against its dive
         // time, not against a fifth-chapter HP pool. Damage still scales.
-        const hp = enemy.domain === 'flight' ? base.hp : Math.round(base.hp * 1.35 ** (enemy.chapter - 1));
+        const hp =
+          enemy.archetype === 'boss'
+            ? (bossHp[enemy.id] ?? -1)
+            : enemy.domain === 'flight'
+              ? base.hp
+              : Math.round(base.hp * 1.35 ** (enemy.chapter - 1));
         const damage = Math.round(base.damage * 1.3 ** (enemy.chapter - 1));
         if (enemy.hp !== hp) {
           problems.push(
-            enemy.domain === 'flight'
-              ? `${enemy.id}: hp ${enemy.hp}, but an unscaled ${enemy.archetype} is ${hp}`
-              : `${enemy.id}: hp ${enemy.hp}, but a chapter-${enemy.chapter} ${enemy.archetype} is ${hp}`,
+            enemy.archetype === 'boss'
+              ? `${enemy.id}: hp ${enemy.hp}, but SPEC-041 §4.2's table says ${hp}`
+              : enemy.domain === 'flight'
+                ? `${enemy.id}: hp ${enemy.hp}, but an unscaled ${enemy.archetype} is ${hp}`
+                : `${enemy.id}: hp ${enemy.hp}, but a chapter-${enemy.chapter} ${enemy.archetype} is ${hp}`,
           );
         }
         if (enemy.damage !== damage) problems.push(`${enemy.id}: damage ${enemy.damage}, but a chapter-${enemy.chapter} ${enemy.archetype} is ${damage}`);
