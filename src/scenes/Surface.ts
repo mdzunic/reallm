@@ -496,6 +496,8 @@ export class SurfaceScene extends UiScene<'surface'> {
   #pois: PoiRuntime[] = [];
   #pad: LayoutPoi | null = null;
   #arenaPoi: LayoutPoi | null = null;
+  /** SPEC-041 §4.4: the arena's radius — the ring, the seal and the entrance. */
+  #arenaRadius = 0;
   #arena: ArenaState | null = null;
   #bossId: number | null = null;
 
@@ -979,6 +981,10 @@ export class SurfaceScene extends UiScene<'surface'> {
     }));
     this.#pad = layout.pois.find((p) => p.kind === 'landing_pad') ?? null;
     this.#arenaPoi = layout.pois.find((p) => p.kind === 'arena') ?? null;
+    // SPEC-041 §4.4: the fight's ring is the planet's arena — its POI's own
+    // radius (Cinder-4's nest 20, the Queen's chamber 22) — not the layout's
+    // placement footprint, which is 22 for every arena.
+    this.#arenaRadius = planet.surface.pois.find((p) => p.kind === 'arena')?.radius ?? this.#arenaPoi?.radius ?? 0;
 
     // SPEC-030 §4.10: shelter discovery restores from the save like POIs.
     this.#insideShelter = null;
@@ -2019,6 +2025,12 @@ export class SurfaceScene extends UiScene<'surface'> {
     info['bossMove'] = this.#combat?.lastBossMove ?? '-';
     info['packs'] = this.#spawn?.packs ?? 0;
     info['elitePlates'] = this.#plates?.visible ?? 0;
+    // The player's distance from the nest's centre, so a run can check the
+    // seal's clamp and the arena respawn without knowing the layout.
+    const nest = this.#arenaPoi;
+    if (nest !== null && this.#world !== null) {
+      info['arenaDist'] = Math.round(Math.hypot(this.#world.player.x - nest.x, this.#world.player.z - nest.z) * 10) / 10;
+    }
     return info;
   }
 
@@ -2495,7 +2507,7 @@ export class SurfaceScene extends UiScene<'surface'> {
     const d = Math.hypot(p.x - nest.x, p.z - nest.z);
 
     // §4.7: the arena spawns the boss on entry.
-    if (this.#bossId === null && d <= nest.radius && p.alive) {
+    if (this.#bossId === null && d <= this.#arenaRadius && p.alive) {
       const boss = this.#combat?.spawnEnemy(wanted, nest.x, nest.z, false);
       if (boss !== undefined) {
         // SPEC-039 §4.1: the boss of a replayed stage pays half its XP and the
@@ -2503,7 +2515,7 @@ export class SurfaceScene extends UiScene<'surface'> {
         const mission = missions.bossStageMission();
         boss.replay = mission !== null && missions.isReplay(mission);
         this.#bossId = boss.id;
-        this.#arena = { x: nest.x, z: nest.z, radius: nest.radius, locked: true, sealed: false };
+        this.#arena = { x: nest.x, z: nest.z, radius: this.#arenaRadius, locked: true, sealed: false };
         this.#weather?.suppress(true); // E15
         // SPEC-023 §4.4: the reveal rides the arena's own spawn, so it happens
         // exactly where the fight starts and never on the debug shortcut.
@@ -3090,7 +3102,7 @@ export class SurfaceScene extends UiScene<'surface'> {
     const len = Math.hypot(dx, dz);
     const ux = len > 1e-6 ? dx / len : 1;
     const uz = len > 1e-6 ? dz / len : 0;
-    const reach = nest.radius + ARENA_RESPAWN_OUTSET;
+    const reach = this.#arenaRadius + ARENA_RESPAWN_OUTSET;
     out.x = nest.x + ux * reach;
     out.z = nest.z + uz * reach;
     out.facing = Math.atan2(-uz, -ux);
@@ -3507,7 +3519,7 @@ export class SurfaceScene extends UiScene<'surface'> {
     if (boss === undefined) return;
     this.#bossId = boss.id;
     // SPEC-041 41-a: armed, but unsealed until the player steps inside.
-    this.#arena = { x: nest.x, z: nest.z, radius: nest.radius, locked: true, sealed: false };
+    this.#arena = { x: nest.x, z: nest.z, radius: this.#arenaRadius, locked: true, sealed: false };
     world.arena = this.#arena;
     this.#weather?.suppress(true);
   }
