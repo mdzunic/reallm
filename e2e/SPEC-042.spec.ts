@@ -36,6 +36,8 @@ interface FlightHook {
 /** What `prepare` writes into the fresh slot-0 save before anything is entered. */
 interface Prep {
   active?: string[];
+  /** The stage every `active` mission stands on; 0 by default. */
+  stage?: number;
   done?: string[];
   inventory?: Array<{ itemId: string; qty: number }>;
   quick?: Record<string, string | null>;
@@ -86,7 +88,7 @@ async function prepare(page: Page, prep: Prep): Promise<void> {
       bridge.create(0, creation, 123);
       const save = bridge.current;
       if (save === null) throw new Error('no save bound');
-      if (prep.active !== undefined) save.progress.missionsActive = prep.active.map((id) => ({ id, stage: 0, counters: {} }));
+      if (prep.active !== undefined) save.progress.missionsActive = prep.active.map((id) => ({ id, stage: prep.stage ?? 0, counters: {} }));
       if (prep.done !== undefined) save.progress.missionsDone = prep.done;
       if (prep.inventory !== undefined) save.inventory = prep.inventory;
       if (prep.quick !== undefined) Object.assign(save.quick, prep.quick);
@@ -594,6 +596,25 @@ test('6. death: the cause and a tip, and no respawn on a press inside the first 
   expect(run.upAfterEarly, 'still down after the press at 0.5 s').toBe(true);
   expect(run.late ?? NaN).toBeGreaterThanOrEqual(1.2);
   expect(run.gone ?? NaN, 'respawned by the press at 1.2 s, not the 2.5 s timer').toBeLessThan(2.2);
+});
+
+test('6b. a death in a timed stage names the stage it restarts, and the respawn clears the line', async ({ page }) => {
+  test.setTimeout(120_000);
+  // `c1_m1` on its third stage: sit out the sandstorm — a timed stage, which a
+  // death restarts (SPEC-012 E4).
+  await land(page, { active: ['c1_m1'], stage: 2 });
+  await dismiss(page);
+  const death = page.getByTestId('death-overlay');
+  for (let i = 0; i < 12 && !(await death.isVisible()); i++) {
+    await press(page, 'surface-hurt');
+    await page.waitForTimeout(400);
+  }
+  await expect(death).toBeVisible();
+  await expect(page.getByTestId('death-cause')).toHaveText(/^Killed by /);
+  await expect(page.getByTestId('death-restarts')).toHaveText('Restarts: Survive');
+  // The 2.5 s auto-respawn takes the overlay, and the line with it.
+  await expect(death).toBeHidden({ timeout: 15_000 });
+  await expect(page.getByTestId('death-restarts')).toHaveText('');
 });
 
 // ------------------------------------------------------ 7, 8: progress beats
