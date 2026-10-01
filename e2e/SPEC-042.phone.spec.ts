@@ -192,7 +192,27 @@ for (const size of PHONE_VIEWPORTS) {
       }
       const banner = page.getByTestId('mission-complete');
       await expect(banner).toBeVisible();
-      if (short) await page.evaluate(() => window.__reallm.toast('Test toast', 'info', 60_000));
+      // The toast is raised and, two frames later, read against the banner in
+      // the page itself: a loaded host's round trips can outlast the banner's
+      // 4 s, so "held while the banner shows" is sampled in one go.
+      const held = short
+        ? await page.evaluate(
+            () =>
+              new Promise<{ bannerUp: boolean; toastShown: boolean }>((resolve) => {
+                window.__reallm.toast('Test toast', 'info', 60_000);
+                requestAnimationFrame(() =>
+                  requestAnimationFrame(() => {
+                    const node = document.querySelector('[data-testid="mission-complete"]');
+                    const toast = [...document.querySelectorAll<HTMLElement>('.toast')].find((t) => t.textContent?.includes('Test toast'));
+                    resolve({
+                      bannerUp: node !== null && !node.classList.contains('is-hidden'),
+                      toastShown: toast !== undefined && toast.getClientRects().length > 0 && getComputedStyle(toast).visibility !== 'hidden',
+                    });
+                  }),
+                );
+              }),
+          )
+        : null;
       const shown = await box(page, 'mission-complete');
       expect(shown.y + shown.height).toBeLessThanOrEqual((await halfLine(page)) + 0.5);
       expect(intersects(shown, await box(page, 'thumb-arc')), 'the banner is on the arc').toBe(false);
@@ -201,9 +221,7 @@ for (const size of PHONE_VIEWPORTS) {
       // One line, no next line: the tracker already names the pad's offer.
       await expect(page.getByTestId('mission-complete-next')).toBeHidden();
       const toast = page.locator('.toast', { hasText: 'Test toast' });
-      await expect(toast).toBeHidden();
-      await expect(banner).toBeVisible();
-      await expect(toast).toBeHidden();
+      expect(held, 'the banner and the toast, two frames after the toast').toEqual({ bannerUp: true, toastShown: false });
       await expect(banner).toBeHidden({ timeout: 20_000 });
       // Once it has gone — and the line it held back has had its turn — the toast shows.
       for (let i = 0; i < 8 && !(await toast.isVisible()); i++) {

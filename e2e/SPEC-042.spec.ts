@@ -934,3 +934,154 @@ test('14. a flight death recalls to the station with the banner and the detail l
   await expect(page.getByTestId('recall-banner')).toHaveText('Emergency recall');
   await expect(page.getByTestId('recall-detail')).toHaveText(RECALL_DETAIL);
 });
+
+// ------------------------------------------------ QA: the paths around them
+
+test('15. a replay’s banner pays half and says so', async ({ page }) => {
+  test.setTimeout(120_000);
+  await land(page, { done: ['c1_m1'], active: ['c1_m1'] });
+  await dismiss(page);
+  // `c1_m1` is already in `missionsDone`, so `finishDryLand` cannot tell when
+  // it ends: its three stages, pressed one by one.
+  for (let stage = 0; stage < 3; stage++) {
+    await press(page, 'surface-finish-stage');
+    await page.waitForTimeout(250);
+    if (stage < 2) await dismiss(page);
+  }
+  await expect(page.getByTestId('mission-complete')).toBeVisible();
+  await expect(page.getByTestId('mission-complete-title')).toHaveText('Dry Land');
+  await expect(page.getByTestId('mission-complete-rewards')).toHaveText('+50 XP · +5 tokens · replay');
+});
+
+test('16. two completions, two banners, one at a time in completion order; no next line while a mission stays active', async ({
+  page,
+}) => {
+  test.setTimeout(150_000);
+  // `c1_s1` (one stage) is tracked; `c1_s2` (two stages) is next in line.
+  await land(page, { done: ['c1_m1'], active: ['c1_s1', 'c1_s2'] });
+  await dismiss(page);
+  await page.evaluate(() => {
+    const seen: string[] = [];
+    (window as unknown as { __spec042: string[] }).__spec042 = seen;
+    const check = (): void => {
+      const all = document.querySelectorAll('[data-testid="mission-complete"]');
+      const node = all[0];
+      const up = node !== undefined && !node.classList.contains('is-hidden');
+      const key = up ? `${document.querySelector('[data-testid="mission-complete-title"]')?.textContent ?? ''}×${all.length}` : '-';
+      if (seen.at(-1) !== key) seen.push(key);
+    };
+    new MutationObserver(check).observe(document.body, { subtree: true, childList: true, attributes: true, characterData: true });
+  });
+  // `c1_s1` done, then both of `c1_s2`'s stages, inside the first banner's 4 s.
+  for (let i = 0; i < 3; i++) {
+    await press(page, 'surface-finish-stage');
+    await page.waitForTimeout(200);
+  }
+  await expect
+    .poll(() => page.evaluate(() => window.__reallm.save().current?.progress.missionsDone ?? []))
+    .toEqual(['c1_m1', 'c1_s1', 'c1_s2']);
+  await expect(page.getByTestId('mission-complete-title')).toHaveText('Grain Silo');
+  // `c1_s2` was still active when `c1_s1` finished: no next line.
+  await expect(page.getByTestId('mission-complete-next')).toBeHidden();
+  // The titles in completion order, each alone on screen. On a loaded host the
+  // second may land after the first has gone, so the gaps are not counted.
+  await expect
+    .poll(() => page.evaluate(() => (window as unknown as { __spec042: string[] }).__spec042.at(-1)), { timeout: 30_000 })
+    .toBe('-');
+  const shown = await page.evaluate(() => (window as unknown as { __spec042: string[] }).__spec042.filter((key) => key !== '-'));
+  expect(shown).toEqual(['Grain Silo×1', 'Waterless×1']);
+});
+
+test('17. a second plasma cell keeps one chip and shows the later end', async ({ page }) => {
+  test.setTimeout(120_000);
+  await land(page, { inventory: [{ itemId: 'plasma_cell', qty: 3 }], quick: { utility: 'plasma_cell' } });
+  const chip = page.getByTestId('hud-effect-damage_boost');
+  await page.keyboard.press('KeyC');
+  await expect(chip).toBeVisible({ timeout: 10_000 });
+  await expect(chip).toContainText('↯');
+  const seconds = async (): Promise<number> => Number(/(\d+) s/.exec((await chip.textContent()) ?? '')?.[1] ?? NaN);
+  await untilView(page, (await viewTime(page)) + 3);
+  const before = await seconds();
+  expect(before).toBeLessThanOrEqual(18);
+  await page.keyboard.press('KeyC');
+  await expect.poll(seconds).toBeGreaterThanOrEqual(19);
+  await expect(page.locator('[data-testid="hud-effect-damage_boost"]')).toHaveCount(1);
+});
+
+test('18. shop words: a bought weapon, an upgraded system, a named missing rung; the XP line at the cap', async ({ page }) => {
+  test.setTimeout(120_000);
+  await start(page);
+  await prepare(page, {});
+  await page.evaluate(() => {
+    const save = window.__reallm.save().current;
+    if (save === null) throw new Error('no save bound');
+    save.player.tokens = 3_000;
+    save.player.level = 30;
+  });
+  await page.evaluate(() => window.__reallm.go('station', {}, { force: true }));
+  await expect(page.getByTestId('scene-label')).toHaveText('station', COLD_START);
+  await page.getByTestId('station-tab-shop').click();
+  await page.getByTestId('shop-tab-gear').click();
+  await expect(page.locator('text=Requires the previous tier')).toHaveCount(0);
+  await expect(page.getByTestId('shop-gear-weapon_plasma')).toContainText('Requires Laser Carbine (T1)');
+  await page.getByTestId('shop-gear-launcher_rocket-buy').click();
+  await page.getByTestId('confirm-yes').click();
+  await expect(page.locator('.toast', { hasText: 'Rocket Launcher bought — equip it in Character' })).toBeVisible();
+  await page.getByTestId('shop-tab-ship').click();
+  await page.getByTestId('shop-ship-shield-buy').click();
+  await page.getByTestId('confirm-yes').click();
+  await expect(page.locator('.toast', { hasText: /^Shield upgraded to tier 1 — Shield \d+ → \d+$/ })).toBeVisible();
+  await page.getByTestId('station-tab-character').click();
+  await expect(page.getByTestId('character-xp')).toHaveText('Level 30 — the cap');
+});
+
+test('19. the verdict that starts the ending shows no banner', async ({ page }) => {
+  test.setTimeout(180_000);
+  await page.route('**/assets/films/*.mp4', (route) => route.abort());
+  await start(page, '/?films=on&debug&seed=123');
+  await prepare(page, { done: ['c6_m1'], active: ['c6_m2'] });
+  await page.evaluate(() => {
+    const save = window.__reallm.save().current;
+    if (save === null) throw new Error('no save bound');
+    for (let n = 1; n <= 5; n++) save.progress.flags.push(`chapter${n}_done`, `interlude${n}_seen`);
+  });
+  await page.evaluate(() => window.__reallm.go('surface', { planet: 'eden', firstLanding: false }, { force: true }));
+  await expect(page.getByTestId('scene-label')).toHaveText('surface', COLD_START);
+  await expect(page.getByTestId('transition-fade')).toHaveCSS('pointer-events', 'none', COLD_START);
+  await dismiss(page);
+  await page.evaluate(() => {
+    const rec = { up: false };
+    (window as unknown as { __spec042: typeof rec }).__spec042 = rec;
+    const frame = (): void => {
+      const node = document.querySelector('[data-testid="mission-complete"]');
+      if (node !== null && !node.classList.contains('is-hidden') && !node.classList.contains('is-held')) rec.up = true;
+      requestAnimationFrame(frame);
+    };
+    requestAnimationFrame(frame);
+  });
+  const dialogue = page.getByTestId('dialogue');
+  const choice = page.getByTestId('dialogue-choice-0');
+  await press(page, 'surface-finish-stage');
+  for (let i = 0; i < 40 && !(await choice.isVisible()); i++) {
+    await dialogue.click({ force: true, timeout: 2_000 }).catch(() => undefined);
+    await page.waitForTimeout(300);
+  }
+  await choice.click();
+  const next = page.getByTestId('ending-continue');
+  for (let i = 0; i < 80 && !(await next.isVisible()); i++) {
+    const skip = page.getByTestId('film-skip');
+    if (await skip.isVisible().catch(() => false)) {
+      await page.waitForTimeout(500);
+      await skip.click().catch(() => undefined);
+    } else if (await dialogue.isVisible()) {
+      await dialogue.click({ force: true, timeout: 2_000 }).catch(() => undefined);
+    }
+    await page.waitForTimeout(300);
+  }
+  await expect(next).toBeVisible();
+  await next.click();
+  await expect(next).toBeHidden();
+  await page.waitForTimeout(5_000);
+  expect(await page.evaluate(() => window.__reallm.save().current?.progress.missionsDone ?? [])).toContain('c6_m2');
+  expect(await page.evaluate(() => (window as unknown as { __spec042: { up: boolean } }).__spec042.up)).toBe(false);
+});
