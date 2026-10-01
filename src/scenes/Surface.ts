@@ -357,12 +357,12 @@ const HIT_BURST_COLOR = 0xff5533;
 const ITEM_PICKUP_COLOR = 0xffe9a0;
 const MUZZLE_COLOR = 0xffe9a0;
 
-/** SPEC-042 §4.1: a banner waiting on a modal `onComplete` chain, first line to last. */
+/** SPEC-042 §4.1: a banner waiting on a modal `onComplete` chain, followed link by link. */
 interface BannerChain {
-  first: DialogueId;
-  last: DialogueId;
+  /** The chain's line on screen, or the one due to start next. */
+  link: DialogueId;
   lines: CompletionLines;
-  /** The first line started — so the banner waits for the last one's end. */
+  /** `link` has started — so the banner waits for its end. */
   started: boolean;
 }
 
@@ -537,8 +537,8 @@ export class SurfaceScene extends UiScene<'surface'> {
   #banner: MissionBanner | null = null;
   /**
    * SPEC-042 §4.1: banners waiting on a modal `onComplete` chain (`c5_m3`: the
-   * Warden, then ARIA) — pushed at the chain's last `dialogue:ended`, or at
-   * once if its first line never played (a `once` line already heard).
+   * Warden, then ARIA) — pushed when the chain's last line ends, or as soon as
+   * one of its lines never starts (a `once` line already heard, a full queue).
    */
   readonly #chains: BannerChain[] = [];
   /** SPEC-042 §4.6: scene seconds `▲ Wave incoming` has left. */
@@ -2677,6 +2677,8 @@ export class SurfaceScene extends UiScene<'surface'> {
       inputWas: this.services.input.enabled,
     };
     this.#holds++;
+    // SPEC-042 §4.1: a banner already up hides from this frame, not the next step's.
+    this.#banner?.tick(0, true);
     this.services.input.setEnabled(false);
     // §4.4, Camera: no shake during a reveal — whatever was still decaying
     // ends here rather than jittering the pan.
@@ -2855,6 +2857,9 @@ export class SurfaceScene extends UiScene<'surface'> {
         this.#ending = ending;
         this.#endingFor = id;
         this.#holds++;
+        // SPEC-042 §4.1: a banner still up hides at once, and lets the
+        // dialogue go for the ending's own line.
+        this.#banner?.tick(0, true);
         this.#missions?.choose(id, index);
         void this.#runEnding(ending);
       });
@@ -3827,27 +3832,27 @@ export class SurfaceScene extends UiScene<'surface'> {
 
   /**
    * SPEC-042 §4.1 (42-d): a modal `onComplete` plays first — the chain through
-   * every `next` (the Warden, then ARIA) — and the banner is pushed at the
-   * last link's `dialogue:ended`. A first line that never starts (a `once`
-   * line already heard, a full queue) pushes it as soon as `play` resolves.
+   * every `next` (the Warden, then ARIA) — and the banner is pushed when the
+   * chain is over: at its last line's `dialogue:ended`, or as soon as one of
+   * its lines never starts (a `once` line already heard, a full queue).
    */
   #playThenBanner(id: DialogueId, lines: CompletionLines): void {
-    let last = id;
-    // Bounded, so a `next` that loops back could never hang the step.
-    for (let hops = 0; hops < 8; hops++) {
-      const next = DIALOGUE_TABLE[last].next;
-      if (next === undefined || next === id) break;
-      last = next;
-    }
-    const chain: BannerChain = { first: id, last, lines, started: false };
+    const chain: BannerChain = { link: id, lines, started: false };
     this.#chains.push(chain);
+    // `play` settles at the first line's end — after the layer has started
+    // its `next` — or at once when the line is dropped; a chain with no line
+    // running by then is over.
     void this.#playDialogue(id).then(() => {
-      if (chain.started || this.#banner === null) return;
-      const at = this.#chains.indexOf(chain);
-      if (at < 0) return;
-      this.#chains.splice(at, 1);
-      this.#banner.push(lines);
+      if (!chain.started) this.#endChain(chain);
     });
+  }
+
+  /** SPEC-042 §4.1: a modal `onComplete` chain is over — its banner goes up, once. */
+  #endChain(chain: BannerChain): void {
+    const at = this.#chains.indexOf(chain);
+    if (at < 0) return;
+    this.#chains.splice(at, 1);
+    this.#banner?.push(chain.lines);
   }
 
   /**
@@ -5174,8 +5179,8 @@ export class SurfaceScene extends UiScene<'surface'> {
           // screen, where the line docks under the top centre, the toasts do too.
           this.#aria?.hold(true);
           if (shortScreen()) this.ui.holdToasts(true);
-          // SPEC-042 §4.1: a modal `onComplete` chain has begun; its banner waits for its end.
-          for (const chain of this.#chains) if (chain.first === id) chain.started = true;
+          // SPEC-042 §4.1: a line of a modal `onComplete` chain is up; its banner waits for its end.
+          for (const chain of this.#chains) if (chain.link === id) chain.started = true;
         },
         this,
       ),
@@ -5186,12 +5191,23 @@ export class SurfaceScene extends UiScene<'surface'> {
           this.#aria?.hold(false);
           // SPEC-042 §4.1: a banner up on a short screen keeps the rack held.
           if (this.#banner?.holdingToasts !== true) this.ui.holdToasts(false);
-          // SPEC-042 §4.1 (42-d): the Warden, then ARIA — then the banner.
+          // SPEC-042 §4.1 (42-d): the Warden, then ARIA — then the banner. The
+          // layer starts a line's `next` in this same call, once this handler
+          // returns; a `next` it drops (`once`, a full queue) never starts, and
+          // the chain ends there instead of waiting for a line that never comes.
           for (let i = this.#chains.length - 1; i >= 0; i--) {
             const chain = this.#chains[i] as BannerChain;
-            if (chain.last !== id) continue;
-            this.#chains.splice(i, 1);
-            this.#banner?.push(chain.lines);
+            if (!chain.started || chain.link !== id) continue;
+            const next = DIALOGUE_TABLE[id].next;
+            if (next === undefined) {
+              this.#endChain(chain);
+              continue;
+            }
+            chain.link = next;
+            chain.started = false;
+            queueMicrotask(() => {
+              if (!chain.started) this.#endChain(chain);
+            });
           }
         },
         this,

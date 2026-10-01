@@ -33,6 +33,7 @@ interface FlightHook {
 /** What `prepare` writes into the fresh slot-0 save before anything is entered. */
 interface Prep {
   active?: string[];
+  done?: string[];
   inventory?: Array<{ itemId: string; qty: number }>;
   quick?: Record<string, string | null>;
   resources?: Record<string, number>;
@@ -83,6 +84,7 @@ async function prepare(page: Page, prep: Prep): Promise<void> {
       const save = bridge.current;
       if (save === null) throw new Error('no save bound');
       if (prep.active !== undefined) save.progress.missionsActive = prep.active.map((id) => ({ id, stage: 0, counters: {} }));
+      if (prep.done !== undefined) save.progress.missionsDone = prep.done;
       if (prep.inventory !== undefined) save.inventory = prep.inventory;
       if (prep.quick !== undefined) Object.assign(save.quick, prep.quick);
       if (prep.resources !== undefined) Object.assign(save.resources, prep.resources);
@@ -93,11 +95,11 @@ async function prepare(page: Page, prep: Prep): Promise<void> {
   );
 }
 
-/** A fresh save prepared by `prep`, landed on Cinder-4 with the debug strip up. */
-async function land(page: Page, prep: Prep = {}, url = URL): Promise<void> {
+/** A fresh save prepared by `prep`, landed on Cinder-4 (or `planet`) with the debug strip up. */
+async function land(page: Page, prep: Prep = {}, url = URL, planet: 'cinder4' | 'hive' = 'cinder4'): Promise<void> {
   await start(page, url);
   await prepare(page, prep);
-  await page.evaluate(() => window.__reallm.go('surface', { planet: 'cinder4', firstLanding: false }, { force: true }));
+  await page.evaluate((id) => window.__reallm.go('surface', { planet: id, firstLanding: false }, { force: true }), planet);
   await expect(page.getByTestId('scene-label')).toHaveText('surface', COLD_START);
   await expect(page.getByTestId('transition-fade')).toHaveCSS('pointer-events', 'none', COLD_START);
 }
@@ -251,6 +253,127 @@ test('2. a pause freezes the banner: still up 1 s after a 3 s pause', async ({ p
   );
   expect(fade).toEqual({ name: 'mission-banner-out', duration: 150, to: '0' });
   await expect(banner).toBeHidden();
+});
+
+// ------------------------------------------- the modal chain and the beat
+
+test.describe('1. the mission banner after a modal onComplete, and behind a beat', () => {
+  // Lines land whole, so each tap advances one.
+  test.use({ reducedMotion: 'reduce' });
+
+  /** Taps the modal line on screen until `done` reads true — at most 12 taps. */
+  async function tapUntil(page: Page, done: () => Promise<boolean>): Promise<void> {
+    const dialogue = page.getByTestId('dialogue');
+    for (let i = 0; i < 12 && !(await done()); i++) {
+      await dialogue.click({ force: true, timeout: 2_000 }).catch(() => undefined);
+      await page.waitForTimeout(150);
+    }
+  }
+  /** ARIA has the line: the Warden's dialogue (his lines, then the player's) has none of hers. */
+  const ariaSpeaks = (page: Page) => async (): Promise<boolean> =>
+    (await page.getByTestId('dialogue').getAttribute('data-speaker')) === 'aria';
+  const closed = (page: Page) => async (): Promise<boolean> => !(await page.getByTestId('dialogue').isVisible());
+
+  test('1c. the Queen: the Warden, then ARIA, both modal, and only then the banner (42-d)', async ({ page }) => {
+    test.setTimeout(150_000);
+    await land(page, { done: ['c5_m1', 'c5_m2'], active: ['c5_m3'] }, URL, 'hive');
+    await dismiss(page);
+    const dialogue = page.getByTestId('dialogue');
+    const banner = page.getByTestId('mission-complete');
+    await expect(dialogue).toBeHidden();
+
+    await press(page, 'surface-finish-stage');
+    await expect(dialogue).toBeVisible();
+    await expect(dialogue).toHaveAttribute('data-speaker', 'warden');
+    await expect(dialogue).toHaveClass(/is-modal/);
+    await expect(banner).toBeHidden();
+
+    await tapUntil(page, ariaSpeaks(page));
+    await expect(dialogue).toHaveAttribute('data-speaker', 'aria');
+    await expect(dialogue).toHaveClass(/is-modal/);
+    await expect(banner).toBeHidden();
+
+    await tapUntil(page, closed(page));
+    await expect(dialogue).toBeHidden();
+    await expect(banner).toBeVisible();
+    await expect(page.getByTestId('mission-complete-title')).toHaveText('Her Majesty');
+    await expect(page.getByTestId('mission-complete-rewards')).toContainText('+600 XP');
+  });
+
+  test('1d. the Queen, with ARIA’s answer already heard: the chain ends at the Warden, and the banner still shows', async ({ page }) => {
+    test.setTimeout(150_000);
+    await land(page, { done: ['c5_m1', 'c5_m2'], active: ['c5_m3'] }, URL, 'hive');
+    await dismiss(page);
+    const dialogue = page.getByTestId('dialogue');
+    const banner = page.getByTestId('mission-complete');
+    // `c5_m3_aria` is `once`: heard here, it is dropped from the chain later.
+    await page.evaluate(() => window.__reallm.playDialogue('c5_m3_aria'));
+    await expect(dialogue).toHaveAttribute('data-speaker', 'aria');
+    await tapUntil(page, closed(page));
+    await expect(dialogue).toBeHidden();
+
+    await press(page, 'surface-finish-stage');
+    await expect(dialogue).toHaveAttribute('data-speaker', 'warden');
+    await expect(banner).toBeHidden();
+    await tapUntil(page, closed(page));
+    await expect(dialogue).toBeHidden();
+    await expect(banner).toBeVisible();
+    await expect(page.getByTestId('mission-complete-title')).toHaveText('Her Majesty');
+  });
+
+  test('1e. a banner up when the boss reveal starts hides for the whole beat, and its clock waits (42-c)', async ({ page }) => {
+    test.setTimeout(150_000);
+    // Films on: the reveal is one of them (SPEC-023 §4.4). `c1_m1` is tracked,
+    // so the stage shortcut finishes it; `c1_m3` wants the wurm, so the arena
+    // spawns it — and its reveal — once the player stands at the nest. The
+    // shortcuts are refused while a beat holds (SPEC-023), so the banner goes
+    // up first and the beat starts under it.
+    await land(page, { active: ['c1_m1', 'c1_m3'] }, '/?films=on&debug&seed=123');
+    await dismiss(page);
+    // In the page, every frame: whether the banner showed before the reveal,
+    // with it, and after it, and for how many scene seconds in all.
+    await page.evaluate(() => {
+      const rec = { before: false, overlap: false, revealSeen: false, after: false, gone: false, shown: 0 };
+      (window as unknown as { __spec042: typeof rec }).__spec042 = rec;
+      const view = (): number => Number(window.__reallm.stats().sceneInfo?.['viewTime']);
+      let last = view();
+      let wasUp = false;
+      const frame = (): void => {
+        const now = view();
+        const reveal = document.querySelector('[data-testid="boss-reveal"]') !== null;
+        const node = document.querySelector('[data-testid="mission-complete"]');
+        const up = node !== null && !node.classList.contains('is-hidden') && !node.classList.contains('is-held');
+        if (wasUp) rec.shown += now - last;
+        if (reveal) {
+          rec.revealSeen = true;
+          if (up) rec.overlap = true;
+        } else if (up) {
+          if (rec.revealSeen) rec.after = true;
+          else rec.before = true;
+        } else if (rec.after) {
+          rec.gone = true;
+        }
+        wasUp = up;
+        last = now;
+        requestAnimationFrame(frame);
+      };
+      requestAnimationFrame(frame);
+    });
+    type Rec = { before: boolean; overlap: boolean; revealSeen: boolean; after: boolean; gone: boolean; shown: number };
+    const rec = (): Promise<Rec> => page.evaluate(() => (window as unknown as { __spec042: Rec }).__spec042);
+
+    await finishDryLand(page);
+    await expect.poll(async () => (await rec()).before, { timeout: 10_000 }).toBe(true);
+    await press(page, 'surface-goto-boss');
+    await expect.poll(async () => (await rec()).revealSeen, { timeout: 15_000 }).toBe(true);
+    await expect.poll(async () => (await rec()).gone, { timeout: 40_000 }).toBe(true);
+    const seen = await rec();
+    expect(seen.overlap, 'the banner on screen with the reveal').toBe(false);
+    expect(seen.after, 'the banner back once the reveal is over').toBe(true);
+    // Its 4 s count only while it shows — the reveal's own seconds do not.
+    expect(seen.shown, 'the banner’s scene seconds on screen').toBeGreaterThan(3.5);
+    expect(seen.shown, 'the banner’s scene seconds on screen').toBeLessThanOrEqual(5);
+  });
 });
 
 // --------------------------------------------------------------- 3, 4: loot
