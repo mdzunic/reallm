@@ -46,6 +46,8 @@ export interface FrameHazard {
   /** Depth per second — the ghost taps of §4.3 read it off enemy shots. */
   vDepth?: number;
   def?: EnemyDef;
+  /** SPEC-041 §4.9: seconds of hit flash left — while above 0 the hazard draws white. */
+  hitFlash?: number;
 }
 
 export interface FrameShot {
@@ -178,6 +180,15 @@ const FLASH_LIFE = 0.12;
 const FLASH_CAPACITY = FLASH_SPRITES * 4;
 const PARTICLE_SIZE = 0.9;
 const FLASH_SIZE = PARTICLE_SIZE * 1.4;
+
+/**
+ * SPEC-041 §4.9: a hazard in its hit flash is drawn in flat white — the same
+ * shape, through a white twin of its instanced mesh. The flash lasts 0.1 s, so
+ * a few per shape at once is plenty; a flash past the twin's capacity simply
+ * draws unflashed. A twin with nothing in it is hidden and costs no draw.
+ */
+const HIT_FLASH_CAPACITY = 8;
+export const HIT_FLASH_NAME = 'hit-flash';
 
 /** §4.3: the sun sits past the planet's far shoulder, so the flare reads. */
 const SUN_POSITION = new THREE.Vector3(-70, 34, -440);
@@ -468,6 +479,12 @@ export class FlightView {
   #rocksTextured = false;
   readonly #fighters: THREE.InstancedMesh;
   readonly #interceptors: THREE.InstancedMesh;
+  /** SPEC-041 §4.9: the white twins — one per rock shape, one per ship class. */
+  readonly #hitFlashMaterial = new THREE.MeshBasicMaterial({ color: 0xffffff, fog: false, toneMapped: false });
+  #hitFlashRocks: THREE.InstancedMesh[] = [];
+  readonly #hitFlashRockCounts: number[] = [];
+  readonly #hitFlashFighters: THREE.InstancedMesh;
+  readonly #hitFlashInterceptors: THREE.InstancedMesh;
   /** §4.3: one additive quad per ship, at its nozzle plane. */
   readonly #glows: THREE.InstancedMesh;
   readonly #shots: THREE.InstancedMesh;
@@ -636,6 +653,10 @@ export class FlightView {
     const interceptorGeometry = new THREE.OctahedronGeometry(1, 0);
     interceptorGeometry.scale(0.8, 0.8, 1.8);
     this.#interceptors = this.#shipMesh(interceptorGeometry, '#9a8ad0');
+    // SPEC-041 §4.9: the hit flash's white twins share each shape's geometry.
+    this.#buildHitFlashRocks();
+    this.#hitFlashFighters = this.#hitFlashMesh(fighterGeometry);
+    this.#hitFlashInterceptors = this.#hitFlashMesh(interceptorGeometry);
 
     // §4.3: the engine glows — one instanced additive quad, an instance behind
     // every fighter and interceptor on screen.
@@ -837,6 +858,32 @@ export class FlightView {
     return mesh;
   }
 
+  /**
+   * SPEC-041 §4.9: a white twin of a hazard mesh — its geometry, flat unlit
+   * white — that draws the hazards in their hit flash. Hidden while empty.
+   */
+  #hitFlashMesh(geometry: THREE.BufferGeometry): THREE.InstancedMesh {
+    const mesh = new THREE.InstancedMesh(geometry, this.#hitFlashMaterial, HIT_FLASH_CAPACITY);
+    mesh.name = HIT_FLASH_NAME;
+    mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+    mesh.frustumCulled = false;
+    mesh.count = 0;
+    mesh.visible = false;
+    this.#scene.add(mesh);
+    return mesh;
+  }
+
+  /** §4.9: one white twin per rock shape — rebuilt whenever the shapes are. */
+  #buildHitFlashRocks(): void {
+    for (const mesh of this.#hitFlashRocks) {
+      this.#scene.remove(mesh);
+      mesh.dispose(); // its instance buffers; the geometry was the rock's, freed with it
+    }
+    this.#hitFlashRocks = this.#asteroids.map((mesh) => this.#hitFlashMesh(mesh.geometry));
+    this.#hitFlashRockCounts.length = 0;
+    for (let v = 0; v < this.#hitFlashRocks.length; v++) this.#hitFlashRockCounts.push(0);
+  }
+
   /** A hit landed: kick the cockpit (reduce-motion: the HUD vignette is all). */
   kick(strength = 1): void {
     if (this.#reduceMotion) return;
@@ -901,8 +948,8 @@ export class FlightView {
     if (art.sky) this.#useSky(art.sky);
     if (art.planet) this.#usePlanet(art.planet, art.clouds ?? null);
     if (art.asteroid) this.#useRocks(art.asteroid);
-    if (art.fighter) this.#useShip(this.#fighters, art.fighter);
-    if (art.interceptor) this.#useShip(this.#interceptors, art.interceptor);
+    if (art.fighter) this.#useShip(this.#fighters, this.#hitFlashFighters, art.fighter);
+    if (art.interceptor) this.#useShip(this.#interceptors, this.#hitFlashInterceptors, art.interceptor);
     if (art.cockpit) this.#useCockpit(art.cockpit);
     if (art.ember) {
       // The baked ember replaces the procedural one on both explosion meshes.
@@ -1042,15 +1089,18 @@ export class FlightView {
     this.#asteroidCounts.length = 0;
     for (const part of parts) this.#asteroids.push(this.#rockMesh(part.geometry, part.material, capacity));
     this.#rocksTextured = true;
+    this.#buildHitFlashRocks();
   }
 
-  #useShip(mesh: THREE.InstancedMesh, model: THREE.Object3D): void {
+  #useShip(mesh: THREE.InstancedMesh, flash: THREE.InstancedMesh, model: THREE.Object3D): void {
     const merged = mergeModel(model);
     if (merged === null) return;
     mesh.geometry.dispose();
     (mesh.material as THREE.Material).dispose();
     mesh.geometry = merged.geometry;
     mesh.material = merged.materials;
+    // §4.9: the white twin wears the model's shape too — one draw, every part white.
+    flash.geometry = merged.geometry;
   }
 
   #useCockpit(model: THREE.Object3D): void {
@@ -1184,14 +1234,21 @@ export class FlightView {
     const rocks = this.#asteroids;
     const counts = this.#asteroidCounts;
     for (let v = 0; v < counts.length; v++) counts[v] = 0;
+    const flashRocks = this.#hitFlashRocks;
+    const flashCounts = this.#hitFlashRockCounts;
+    for (let v = 0; v < flashCounts.length; v++) flashCounts[v] = 0;
     let fighters = 0;
     let interceptors = 0;
+    let flashFighters = 0;
+    let flashInterceptors = 0;
     let enemyShots = 0;
     let glows = 0;
     const time = frame.time;
     for (let i = 0; i < frame.hazards.size; i++) {
       const hazard = frame.hazards.at(i);
       this.#position.set(hazard.x, hazard.y, -hazard.depth);
+      // SPEC-041 §4.9: a hazard a shot just hit without killing it draws white.
+      const flashing = (hazard.hitFlash ?? 0) > 0;
       switch (hazard.kind) {
         case 'asteroid': {
           // Each rock keeps its shape, stretch and tint: all keyed to its radius.
@@ -1205,6 +1262,12 @@ export class FlightView {
           this.#quaternion.setFromEuler(this.#euler);
           this.#scale.set(r * (0.85 + 0.3 * frac(r * 13.7)), r * (0.85 + 0.3 * frac(r * 5.3)), r);
           this.#matrix.compose(this.#position, this.#quaternion, this.#scale);
+          const flashSlot = flashCounts[variant] as number;
+          if (flashing && flashSlot < HIT_FLASH_CAPACITY) {
+            (flashRocks[variant] as THREE.InstancedMesh).setMatrixAt(flashSlot, this.#matrix);
+            flashCounts[variant] = flashSlot + 1;
+            break;
+          }
           mesh.setMatrixAt(slot, this.#matrix);
           // Tint varies with size so the field reads as rubble, not clones.
           if (this.#rocksTextured) this.#color.setHSL(0.08, 0.1, 0.72 + frac(r) * 0.2).lerp(this.#rockTint, 0.25);
@@ -1214,25 +1277,35 @@ export class FlightView {
           break;
         }
         case 'fighter': {
-          if (fighters >= MAX_SHIPS) break;
+          if (fighters + flashFighters >= MAX_SHIPS) break;
           this.#euler.set(0, 0, Math.sin(time * 2 + hazard.x) * 0.4, 'XYZ');
           this.#quaternion.setFromEuler(this.#euler);
           const scale = hazard.def?.look.scale ?? 1.2;
           this.#scale.setScalar(scale);
           this.#matrix.compose(this.#position, this.#quaternion, this.#scale);
-          this.#fighters.setMatrixAt(fighters, this.#matrix);
-          fighters++;
+          if (flashing && flashFighters < HIT_FLASH_CAPACITY) {
+            this.#hitFlashFighters.setMatrixAt(flashFighters, this.#matrix);
+            flashFighters++;
+          } else {
+            this.#fighters.setMatrixAt(fighters, this.#matrix);
+            fighters++;
+          }
           glows = this.#writeGlow(glows, GLOW_OFFSET.fighter * scale);
           break;
         }
         case 'interceptor': {
-          if (interceptors >= MAX_SHIPS) break;
+          if (interceptors + flashInterceptors >= MAX_SHIPS) break;
           this.#quaternion.identity();
           const scale = hazard.def?.look.scale ?? 1.4;
           this.#scale.setScalar(scale);
           this.#matrix.compose(this.#position, this.#quaternion, this.#scale);
-          this.#interceptors.setMatrixAt(interceptors, this.#matrix);
-          interceptors++;
+          if (flashing && flashInterceptors < HIT_FLASH_CAPACITY) {
+            this.#hitFlashInterceptors.setMatrixAt(flashInterceptors, this.#matrix);
+            flashInterceptors++;
+          } else {
+            this.#interceptors.setMatrixAt(interceptors, this.#matrix);
+            interceptors++;
+          }
           glows = this.#writeGlow(glows, GLOW_OFFSET.interceptor * scale);
           break;
         }
@@ -1243,10 +1316,20 @@ export class FlightView {
       }
     }
     for (let v = 0; v < rocks.length; v++) this.#writeCount(rocks[v] as THREE.InstancedMesh, counts[v] as number, true);
+    for (let v = 0; v < flashRocks.length; v++) this.#writeHitFlashCount(flashRocks[v] as THREE.InstancedMesh, flashCounts[v] as number);
     this.#writeCount(this.#fighters, fighters, false);
     this.#writeCount(this.#interceptors, interceptors, false);
+    this.#writeHitFlashCount(this.#hitFlashFighters, flashFighters);
+    this.#writeHitFlashCount(this.#hitFlashInterceptors, flashInterceptors);
     this.#writeCount(this.#glows, glows, false);
     this.#writeCount(this.#enemyShots, enemyShots, true);
+  }
+
+  /** §4.9: a white twin draws only while something flashes; empty, it is hidden — no draw. */
+  #writeHitFlashCount(mesh: THREE.InstancedMesh, count: number): void {
+    mesh.count = count;
+    mesh.visible = count > 0;
+    if (count > 0) mesh.instanceMatrix.needsUpdate = true;
   }
 
   /**

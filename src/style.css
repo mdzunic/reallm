@@ -3816,6 +3816,44 @@ button.hud-button {
   border-radius: 50%;
 }
 
+/* SPEC-041 §4.9: a hit marks the reticle for 0.1 s and a kill for 0.25 s. Both
+   are colour and scale only — no transition, no animation — so they stand as
+   they are under reduce motion. The scene never sets both at once. */
+.hud-reticle.is-hit {
+  border-color: var(--ink);
+  opacity: 1;
+  transform: scale(1.2);
+}
+
+.hud-reticle.is-hit::after {
+  background: var(--ink);
+}
+
+.hud-reticle.is-kill {
+  border-color: var(--warn);
+  opacity: 1;
+  transform: scale(1.45);
+}
+
+.hud-reticle.is-kill::after {
+  background: var(--warn);
+}
+
+/* SPEC-041 §4.7: the lead pip — a hollow 14 px diamond where a shot fired now
+   meets the ship in ARIA's cone, placed like the reticle. SPEC-037's halo
+   rings its outer edge and a dark inset its inner one, so the white edge reads
+   over any sky. */
+.hud-lead-pip {
+  position: absolute;
+  box-sizing: border-box;
+  width: 14px;
+  height: 14px;
+  margin: -7px 0 0 -7px;
+  border: 2px solid var(--ink);
+  box-shadow: var(--hud-halo), inset 0 0 0 1px #000;
+  transform: rotate(45deg);
+}
+
 /* SPEC-037 §4.8: 14 px --ink on the top-left plate; its text is SPEC-045's. */
 .hud-throttle {
   font-size: 14px;

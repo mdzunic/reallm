@@ -7,7 +7,7 @@
 // leads its target — the worst a paying player is expected to do — and
 // `aim: 'lead'` fires where the target will be.
 import type { Rng } from '@/core/Rng';
-import { CONVERGE_DEPTH, RAIL, SHIP_RADIUS, type Flight, type FlightInput, type Hazard } from '@/systems/Flight';
+import { CONVERGE_DEPTH, PLANE, RAIL, SHIP_RADIUS, type Flight, type FlightInput, type Hazard } from '@/systems/Flight';
 
 export type PilotAim = 'lead' | 'none';
 
@@ -19,6 +19,8 @@ const THREAT_MARGIN = 0.8;
 const AVOID_WEIGHT = 3;
 /** With nothing to dodge, the pilot drifts back toward the middle. */
 const CENTRE_PULL = 0.05;
+/** An escape is not steered into a plane edge closer than this (metres). */
+const WALL_MARGIN = 1.5;
 /** §4.4 step 2: a target below this depth is past saving; pick another. */
 const TARGET_MIN_DEPTH = 5;
 /** `none` scatters its aim by this much, uniformly, from the seeded stream. */
@@ -67,6 +69,13 @@ export class Pilot {
     if (threats === 0) {
       steerX = -CENTRE_PULL * ship.x;
       steerY = -CENTRE_PULL * ship.y;
+    } else {
+      // The plane's edge is a wall (`Flight` clamps the ship to it): an escape
+      // pressed into the wall the ship is against goes nowhere, and a ship
+      // held still in a corner is the one target every round of a burst hits
+      // (SPEC-041 §4.8). That part of the escape turns back toward the middle.
+      if (Math.abs(ship.x) >= PLANE.halfW - WALL_MARGIN && steerX * ship.x > 0) steerX = -steerX;
+      if (Math.abs(ship.y) >= PLANE.halfH - WALL_MARGIN && steerY * ship.y > 0) steerY = -steerY;
     }
 
     // 2. Aim: the deepest ship above `TARGET_MIN_DEPTH`, held until it is gone.

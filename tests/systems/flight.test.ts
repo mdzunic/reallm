@@ -15,11 +15,18 @@ import { newSave, type CharacterCreation, type Save } from '@/core/Save';
 import { ENEMIES, MISSIONS, PLANETS, TUNING, UPGRADES, type Difficulty, type MissionId, type PlanetDef } from '@/data/index';
 import { Economy } from '@/systems/Economy';
 import {
+  burstAim,
+  CONVERGE_DEPTH,
+  ENEMY_SHOT_RADIUS,
+  enemyShotEta,
+  FIGHTER_BURST,
   FIGHTER_LEAVE_SECONDS,
   Flight,
+  HAZARD_FLASH_SECONDS,
   LAUNCH_SECONDS,
   PLANE,
   RAIL,
+  SHIP_RADIUS,
   THREAT_BOX,
   type FlightConfig,
   type FlightInput,
@@ -137,6 +144,10 @@ function inject(flight: Flight, fields: Partial<Hazard> & Pick<Hazard, 'kind' | 
     fireCooldown: undefined,
     pattern: undefined,
     holdDepth: undefined,
+    hitFlash: 0,
+    burstLeft: undefined,
+    burstAt: undefined,
+    shotDamage: undefined,
   });
   return Object.assign(hazard, fields);
 }
@@ -1036,5 +1047,341 @@ describe('ship guns and ARIA (SPEC-039 §4.3, §4.4, §4.5)', () => {
     const scaled = world({ ship: { hull: 1 }, aria: { level: 3, enabled: true }, companionMult: 2.25 });
     const plain = world({ ship: { hull: 1 }, aria: { level: 3, enabled: true } });
     expect(scaled.flight.ship.maxHull).toBe(plain.flight.ship.maxHull);
+  });
+});
+
+// ------------------------------------------------------------------ SPEC-041
+
+/** The raw aim that puts `target` dead centre: its current projection to the convergence depth. */
+function onTarget(flight: Flight, target: Hazard): Pick<FlightInput, 'aimX' | 'aimY'> {
+  const ship = flight.ship;
+  const scale = CONVERGE_DEPTH / target.depth;
+  return { aimX: ship.x + (target.x - ship.x) * scale, aimY: ship.y + (target.y - ship.y) * scale };
+}
+
+/**
+ * A fighter crossing the view: 60 m out, closing at 25 m/s and sliding at
+ * (6, −1.5) m/s — it never reaches a hold depth, so nothing resets its slide.
+ * Its HP is raised so a case counts hits, not kills.
+ */
+function crossing(flight: Flight): Hazard {
+  return inject(flight, {
+    kind: 'fighter',
+    x: -3,
+    y: 1,
+    depth: 60,
+    vx: 6,
+    vy: -1.5,
+    vDepth: -25,
+    def: ENEMIES.scav_fighter,
+    radius: ENEMIES.scav_fighter.radius,
+    hp: 10_000,
+    ttl: 1_000,
+    holdDepth: -1_000_000,
+  });
+}
+
+/** A fighter holding still at `depth` (a speed-0 definition: no strafe); its cooldown runs out on the next step. */
+function holder(flight: Flight, depth = 60): Hazard {
+  return inject(flight, {
+    kind: 'fighter',
+    depth,
+    holdDepth: depth,
+    def: { ...ENEMIES.scav_fighter, speed: 0 },
+    radius: ENEMIES.scav_fighter.radius,
+    hp: ENEMIES.scav_fighter.hp,
+    ttl: 1_000,
+    pattern: 0,
+    fireCooldown: DT / 2,
+    burstLeft: 0,
+    burstAt: 0,
+  });
+}
+
+function enemyShots(flight: Flight): Hazard[] {
+  const out: Hazard[] = [];
+  for (let i = 0; i < flight.hazards.size; i++) {
+    const hazard = flight.hazards.at(i);
+    if (hazard.kind === 'enemy_shot') out.push(hazard);
+  }
+  return out;
+}
+
+describe('the lead point (SPEC-041 §4.7)', () => {
+  it('leads a crossing fighter to where a shot fired now meets it, projected to the convergence depth', () => {
+    const w = world({ planet: quietPlanet(PLANETS.cinder4, 300), aria: { level: 1, enabled: true } });
+    step(w.flight, LAUNCH_SECONDS + DT);
+    w.flight.update(DT, { ...IDLE });
+    expect(w.flight.lead.active).toBe(false); // nothing in the cone
+    const fighter = crossing(w.flight);
+    const { x, y, depth, vx, vy, vDepth } = fighter;
+    const ship = { x: w.flight.ship.x, y: w.flight.ship.y };
+    w.flight.update(DT, { ...IDLE, ...onTarget(w.flight, fighter) });
+    const t = depth / (RAIL.laserSpeed - vDepth);
+    const meet = RAIL.laserSpeed * t;
+    expect(w.flight.lead.active).toBe(true);
+    expect(w.flight.lead.x).toBeCloseTo(ship.x + ((x + vx * t - ship.x) * CONVERGE_DEPTH) / meet, 10);
+    expect(w.flight.lead.y).toBeCloseTo(ship.y + ((y + vy * t - ship.y) * CONVERGE_DEPTH) / meet, 10);
+    // Pinned: from the middle, 60 m out closing at 25, sliding (6, −1.5) → (−5/6, 11/18),
+    // where the current projection is (−4, 4/3).
+    expect(w.flight.lead.x).toBeCloseTo(-5 / 6, 10);
+    expect(w.flight.lead.y).toBeCloseTo(11 / 18, 10);
+  });
+
+  it('puts a shot fired through it on the crossing fighter, where the current projection misses', () => {
+    function oneShot(throughLead: boolean): number {
+      const w = world({ planet: quietPlanet(PLANETS.cinder4, 300), aria: { level: 1, enabled: true } });
+      step(w.flight, LAUNCH_SECONDS + DT);
+      const fighter = crossing(w.flight);
+      w.flight.update(DT, { ...IDLE, ...onTarget(w.flight, fighter) });
+      const aim = throughLead ? { aimX: w.flight.lead.x, aimY: w.flight.lead.y } : onTarget(w.flight, fighter);
+      w.flight.update(DT, { ...IDLE, ...aim, fire: true });
+      expect(w.flight.shots.size).toBe(1);
+      step(w.flight, 1, aim);
+      return w.of('flight:hazardHit').length;
+    }
+    expect(oneShot(true)).toBe(1);
+    expect(oneShot(false)).toBe(0);
+  });
+
+  it('drops the lead with its target, and when the trip ends', () => {
+    const w = world({ planet: quietPlanet(PLANETS.cinder4, 300), aria: { level: 1, enabled: true } });
+    step(w.flight, LAUNCH_SECONDS + DT);
+    const fighter = crossing(w.flight);
+    w.flight.update(DT, { ...IDLE, ...onTarget(w.flight, fighter) });
+    expect(w.flight.lead.active).toBe(true);
+    w.flight.update(DT, { ...IDLE, aimX: 10, aimY: -6 }); // out of the 6° cone
+    expect(w.flight.lead.active).toBe(false);
+    w.flight.update(DT, { ...IDLE, ...onTarget(w.flight, fighter) });
+    expect(w.flight.lead.active).toBe(true);
+    w.flight.hit(10_000, 'asteroid', { kind: 'asteroid' });
+    expect(w.flight.phase).toBe('recalled');
+    expect(w.flight.lead.active).toBe(false);
+  });
+});
+
+describe('the ARIA lead (SPEC-041 §4.7)', () => {
+  it('at level 2 chases the lead point at 20/s, not the current projection', () => {
+    const w = world({ planet: quietPlanet(PLANETS.cinder4, 300), aria: { level: 2, enabled: true } });
+    step(w.flight, LAUNCH_SECONDS + DT);
+    const fighter = crossing(w.flight);
+    const chase = Math.min(1, 20 * DT);
+    for (let i = 0; i < 20; i++) {
+      const before = { ...w.flight.reticle };
+      w.flight.update(DT, { ...IDLE, ...onTarget(w.flight, fighter) });
+      const { lead, reticle } = w.flight;
+      expect(lead.active).toBe(true);
+      expect(reticle.x).toBeCloseTo(before.x + (lead.x - before.x) * chase, 10);
+      expect(reticle.y).toBeCloseTo(before.y + (lead.y - before.y) * chase, 10);
+    }
+    // Metres from where the target is now: the snap of SPEC-013 is gone.
+    const now = onTarget(w.flight, fighter);
+    expect(Math.hypot(w.flight.reticle.x - now.aimX, w.flight.reticle.y - now.aimY)).toBeGreaterThan(2);
+  });
+
+  it('at level 1 leaves the reticle to the raw aim, the lead still worked out for the pip', () => {
+    const w = world({ planet: quietPlanet(PLANETS.cinder4, 300), aria: { level: 1, enabled: true } });
+    step(w.flight, LAUNCH_SECONDS + DT);
+    const fighter = crossing(w.flight);
+    for (let i = 0; i < 20; i++) {
+      const aim = onTarget(w.flight, fighter);
+      w.flight.update(DT, { ...IDLE, ...aim });
+      expect(w.flight.reticle).toEqual({ x: aim.aimX, y: aim.aimY });
+      expect(w.flight.lead.active).toBe(true);
+    }
+    expect(w.flight.ariaEnabled).toBe(true);
+  });
+
+  it('with ARIA disabled: no pip and no snap, while the cone still keys auto-fire (41-k)', () => {
+    const w = world({ planet: quietPlanet(PLANETS.cinder4, 300), aria: { level: 2, enabled: false } });
+    step(w.flight, LAUNCH_SECONDS + DT);
+    const fighter = crossing(w.flight);
+    const aim = onTarget(w.flight, fighter);
+    w.flight.update(DT, { ...IDLE, ...aim, autoFire: true });
+    expect(w.flight.ariaEnabled).toBe(false); // the scene shows the pip only while this is true
+    expect(w.flight.reticle).toEqual({ x: aim.aimX, y: aim.aimY });
+    expect(w.flight.shots.size).toBe(1);
+  });
+});
+
+describe('fighter bursts (SPEC-041 §4.8)', () => {
+  it('fires three rounds 0.12 s apart at leads 1, 0.5 and 0, each dealing 8', () => {
+    expect(FIGHTER_BURST).toEqual({ rounds: 3, interval: 0.12, leads: [1, 0.5, 0], damageMult: 0.45 });
+    expect(ENEMIES.scav_fighter.damage).toBe(18);
+    const w = world({ planet: quietPlanet(PLANETS.cinder4, 300), aria: null });
+    step(w.flight, LAUNCH_SECONDS + DT);
+    const fighter = holder(w.flight);
+    fighter.fireCooldown = 0.2; // the ship is under way by the time it opens up
+    const steer = { steerX: 1, steerY: -0.5 };
+    const rounds: Array<{ at: number; k: number; damage: number }> = [];
+    for (let i = 0; i < 40; i++) {
+      w.flight.update(DT, { ...IDLE, ...steer });
+      // A round fired this step has not moved yet, and nothing moves the ship
+      // after the fighters fire — so the ship here is the ship the round saw.
+      const ship = w.flight.ship;
+      for (const shot of enemyShots(w.flight)) {
+        if (shot.depth !== fighter.depth) continue;
+        const k = rounds.length;
+        const eta = enemyShotEta(shot.depth);
+        const lead = FIGHTER_BURST.leads[k] as number;
+        expect(Math.abs(ship.vx)).toBeGreaterThan(3);
+        expect(shot.x + shot.vx * eta).toBeCloseTo(ship.x + lead * ship.vx * eta, 9);
+        expect(shot.y + shot.vy * eta).toBeCloseTo(ship.y + lead * ship.vy * eta, 9);
+        expect(shot.vDepth).toBe(-45);
+        rounds.push({ at: w.flight.time, k, damage: shot.shotDamage ?? 0 });
+      }
+    }
+    expect(rounds.map((round) => round.k)).toEqual([0, 1, 2]);
+    expect(rounds.map((round) => round.damage)).toEqual([8, 8, 8]); // round(18 × 0.45)
+    const first = rounds[0]!.at;
+    for (const round of rounds) {
+      expect(round.at - first).toBeGreaterThanOrEqual(round.k * FIGHTER_BURST.interval - 1e-9);
+      expect(round.at - first).toBeLessThan(round.k * FIGHTER_BURST.interval + DT);
+    }
+  });
+
+  it('lands every round on a still ship for its 8, and casual takes ×0.7 off each (41-l)', () => {
+    for (const [difficulty, each] of [
+      ['normal', 8],
+      ['casual', 8 * 0.7],
+    ] as const) {
+      const w = world({ planet: quietPlanet(PLANETS.cinder4, 300), aria: null, difficulty });
+      step(w.flight, LAUNCH_SECONDS + DT);
+      holder(w.flight);
+      step(w.flight, 1.9); // the burst lands; the next opens 2 s after it
+      expect(w.of('ship:damaged'), difficulty).toHaveLength(3);
+      expect(w.flight.ship.shield).toBeCloseTo(w.flight.ship.maxShield - 3 * each, 9);
+    }
+  });
+
+  it('in the flight loop, a steady 10 m/s drift takes the lead-1 round and slips the other two', () => {
+    const w = world({ planet: quietPlanet(PLANETS.cinder4, 300), aria: null });
+    step(w.flight, LAUNCH_SECONDS + DT);
+    holder(w.flight);
+    const ship = w.flight.ship;
+    // x(t) = −8 + 10 t at 10 m/s: written so that the step's own damping and
+    // integration (no steer input) land the ship exactly on the line.
+    const damping = Math.exp(-6 * DT);
+    for (let i = 1; i <= 114; i++) {
+      ship.vx = 10 / damping;
+      ship.x = -8 + 10 * (i - 1) * DT;
+      w.flight.update(DT, IDLE);
+      expect(ship.x).toBeCloseTo(-8 + 10 * i * DT, 9);
+      expect(ship.vx).toBeCloseTo(10, 9);
+    }
+    expect(w.of('ship:damaged')).toHaveLength(1);
+  });
+
+  it('drops the unfired rounds of a fighter that dies mid-burst (41-j)', () => {
+    const w = world({ planet: quietPlanet(PLANETS.cinder4, 300), aria: null });
+    step(w.flight, LAUNCH_SECONDS + DT);
+    const fighter = holder(w.flight);
+    w.flight.update(DT, IDLE);
+    expect(enemyShots(w.flight)).toHaveLength(1); // round one is away
+    expect(fighter.burstLeft).toBe(2);
+    // A shot a metre short of it kills it on the next step, before round two is due.
+    Object.assign(w.flight.shots.alloc(), { x: 0, y: 0, depth: fighter.depth - 1, vDepth: RAIL.laserSpeed, damage: 1_000, vx: 0, vy: 0 });
+    w.flight.update(DT, IDLE);
+    expect(w.of('enemy:killed')).toHaveLength(1);
+    expect(w.flight.hostiles).toBe(0);
+    step(w.flight, 1.9);
+    // Round one flew on and landed; rounds two and three were never fired.
+    expect(w.of('ship:damaged')).toHaveLength(1);
+    expect(enemyShots(w.flight)).toHaveLength(0);
+  });
+
+  it('…and of one that leaves mid-burst (41-j)', () => {
+    const w = world({ planet: quietPlanet(PLANETS.cinder4, 300), aria: null });
+    step(w.flight, LAUNCH_SECONDS + DT);
+    const fighter = holder(w.flight);
+    fighter.ttl = 1.5 * DT; // it breaks off on the step after round one
+    step(w.flight, 2);
+    expect(w.flight.hostiles).toBe(0);
+    expect(w.of('enemy:killed')).toEqual([]);
+    expect(w.of('ship:damaged')).toHaveLength(1);
+  });
+});
+
+/**
+ * SPEC-041 §4.8's acceptance geometry, measured on `burstAim` — the rule the
+ * fighters fire by. A burst opens at every 10 ms phase across 2 s (the weave's
+ * period) from every hold depth; each round flies straight to its aim point
+ * and lands if the ship is within the two radii of it when it arrives. The
+ * ship's path is scripted, not flown: the weave peaks at 31 m/s, past what
+ * the rail lets a ship do, which is why this is geometry and not a trip.
+ */
+describe('burst geometry (SPEC-041 §4.8)', () => {
+  type Path = (t: number) => { x: number; vx: number };
+
+  function landing(path: Path): number {
+    const aim = { x: 0, y: 0 };
+    let rounds = 0;
+    let landed = 0;
+    for (let depth = 50; depth <= 70; depth += 2.5) {
+      for (let phase = 0; phase < 200; phase++) {
+        for (let k = 0; k < FIGHTER_BURST.rounds; k++) {
+          const fired = phase * 0.01 + k * FIGHTER_BURST.interval;
+          const now = path(fired);
+          burstAim(k, depth, { x: now.x, y: 0, vx: now.vx, vy: 0 }, aim);
+          const then = path(fired + enemyShotEta(depth));
+          rounds++;
+          if (Math.hypot(aim.x - then.x, aim.y) < ENEMY_SHOT_RADIUS + SHIP_RADIUS) landed++;
+        }
+      }
+    }
+    return landed / rounds;
+  }
+
+  it('hits a still ship with ≥ 95 % of rounds', () => {
+    expect(landing(() => ({ x: 0, vx: 0 }))).toBeGreaterThanOrEqual(0.95);
+  });
+
+  it('hits a steady 10 m/s drift with 10–35 % — the lead-1 round', () => {
+    const rate = landing((t) => ({ x: 10 * t, vx: 10 }));
+    expect(rate).toBeGreaterThanOrEqual(0.1);
+    expect(rate).toBeLessThanOrEqual(0.35);
+  });
+
+  it('hits a ±10 m / 0.5 Hz weave with ≤ 10 %', () => {
+    const omega = Math.PI; // 0.5 Hz
+    const rate = landing((t) => ({ x: 10 * Math.sin(omega * t), vx: 10 * omega * Math.cos(omega * t) }));
+    expect(rate).toBeLessThanOrEqual(0.1);
+  });
+});
+
+describe('flight hit feedback (SPEC-041 §4.9)', () => {
+  it('emits flight:hazardHit on every hit — lethal on the kill — and flashes the hazard on the others', () => {
+    const w = world({ planet: quietPlanet(PLANETS.cinder4, 300), aria: null });
+    step(w.flight, LAUNCH_SECONDS + DT);
+    const fighter = holder(w.flight);
+    fighter.fireCooldown = Number.POSITIVE_INFINITY; // a target, not a threat
+    const flashes: number[] = [];
+    for (let i = 0; i < 120 && w.of('enemy:killed').length === 0; i++) {
+      const before = w.of('flight:hazardHit').length;
+      w.flight.update(DT, { ...IDLE, fire: true });
+      const hits = w.of('flight:hazardHit');
+      if (hits.length > before && hits.at(-1)?.lethal === false) flashes.push(fighter.hitFlash ?? 0);
+    }
+    // 40 HP at 10 a shot: three hits that do not kill, then the kill.
+    expect(w.of('flight:hazardHit')).toEqual([
+      { kind: 'fighter', x: 0, y: 0, lethal: false },
+      { kind: 'fighter', x: 0, y: 0, lethal: false },
+      { kind: 'fighter', x: 0, y: 0, lethal: false },
+      { kind: 'fighter', x: 0, y: 0, lethal: true },
+    ]);
+    // Set to 0.1 s by the hit, then counted down by the same step's hazard pass.
+    expect(flashes).toHaveLength(3);
+    for (const flash of flashes) expect(flash).toBeCloseTo(HAZARD_FLASH_SECONDS - DT, 9);
+  });
+
+  it('runs a flash out in 0.1 s, and flashes a rock the same way', () => {
+    const w = world({ planet: quietPlanet(PLANETS.cinder4, 300), aria: null });
+    step(w.flight, LAUNCH_SECONDS + DT);
+    const rock = inject(w.flight, { kind: 'asteroid', depth: 60, x: 0, y: 0, radius: 3, hp: 45, vDepth: 0 });
+    for (let i = 0; i < 60 && w.of('flight:hazardHit').length === 0; i++) w.flight.update(DT, { ...IDLE, fire: true });
+    expect(w.of('flight:hazardHit')).toEqual([{ kind: 'asteroid', x: 0, y: 0, lethal: false }]);
+    expect(rock.hitFlash).toBeGreaterThan(0);
+    step(w.flight, HAZARD_FLASH_SECONDS);
+    expect(rock.hitFlash).toBe(0);
   });
 });
