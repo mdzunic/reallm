@@ -1350,6 +1350,8 @@ export class SurfaceScene extends UiScene<'surface'> {
       dialogue,
       reduceMotion: () => this.services.settings.get().reduceMotion,
       keepToasts: () => dialogue.busy,
+      // Of the beats, only the ending plays lines of its own (SPEC-024 §4.1).
+      beatSpeaks: () => this.#ending !== null,
     });
     this.#banner = banner;
     this.disposer.add(() => {

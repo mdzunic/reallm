@@ -12,9 +12,10 @@
 // starts nothing new (`DialogueUI.setHeld`): the line already on screen
 // finishes, and a mission's non-modal `onComplete` line plays once the banner
 // has gone. The hold is taken from the push, so a line queued right behind the
-// banner waits; a beat that holds the screen (a film, a reveal, the ending)
-// lets it go again, because those play dialogue of their own and the banner
-// shows only once the beat is over.
+// banner waits, and it lasts until the last queued banner has gone — through a
+// boss reveal too, whose caption is text enough. Only a beat that speaks, the
+// ending with its own lines, has the layer let go while it runs; the banner
+// shows once the beat is over either way.
 import type { CompletionLines } from '@/systems/UiHelpers';
 import type { DialogueUI } from '@/ui/DialogueUI';
 import { el, SHORT_SCREEN_QUERY, testId, type UiRoot } from '@/ui/dom';
@@ -33,6 +34,13 @@ export interface MissionBannerDeps {
    * own. The scene answers from the dialogue layer; absent, the rack is let go.
    */
   keepToasts?: () => boolean;
+  /**
+   * Whether the beat holding the screen plays dialogue of its own — the
+   * ending's lines — so the hold lets the layer go while it runs; a banner
+   * waiting under it would otherwise wait on lines that wait on it. A reveal
+   * speaks through its own caption. Absent, no beat speaks.
+   */
+  beatSpeaks?: () => boolean;
 }
 
 export class MissionBanner {
@@ -40,6 +48,7 @@ export class MissionBanner {
   readonly #dialogue: Pick<DialogueUI, 'setHeld'>;
   readonly #reduceMotion: () => boolean;
   readonly #keepToasts: () => boolean;
+  readonly #beatSpeaks: () => boolean;
   readonly #root: HTMLDivElement;
   readonly #title: HTMLParagraphElement;
   readonly #rewards: HTMLParagraphElement;
@@ -64,6 +73,7 @@ export class MissionBanner {
     this.#dialogue = deps.dialogue;
     this.#reduceMotion = deps.reduceMotion;
     this.#keepToasts = deps.keepToasts ?? ((): boolean => false);
+    this.#beatSpeaks = deps.beatSpeaks ?? ((): boolean => false);
     this.#title = testId(el('p', 'mission-banner-title'), 'mission-complete-title');
     this.#rewards = testId(el('p', 'mission-banner-rewards'), 'mission-complete-rewards');
     this.#next = testId(el('p', 'mission-banner-next'), 'mission-complete-next');
@@ -93,8 +103,9 @@ export class MissionBanner {
   /** §4.1: queue a banner. It shows from the next tick that no beat holds. */
   push(lines: CompletionLines): void {
     this.#queue.push(lines);
-    // From the push, so the `onComplete` line queued right behind waits (§4.1).
-    if (!this.#beat) this.#holdDialogue(true);
+    // From the push, so the `onComplete` line queued right behind waits (§4.1)
+    // — unless the beat on screen is one that speaks.
+    if (!this.#beat || !this.#beatSpeaks()) this.#holdDialogue(true);
   }
 
   /**
@@ -110,8 +121,9 @@ export class MissionBanner {
     }
     if (!this.busy) return;
     if (held) {
-      // The beat may need the dialogue layer itself (the ending's lines).
-      this.#holdDialogue(false);
+      // The ending needs the dialogue layer for lines of its own; under a
+      // reveal, what waits behind the banner keeps waiting.
+      this.#holdDialogue(!this.#beatSpeaks());
       return;
     }
     this.#holdDialogue(true);

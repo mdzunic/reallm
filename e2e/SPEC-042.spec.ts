@@ -326,7 +326,7 @@ test.describe('1. the mission banner after a modal onComplete, and behind a beat
     await expect(page.getByTestId('mission-complete-title')).toHaveText('Her Majesty');
   });
 
-  test('1e. a banner up when the boss reveal starts hides for the whole beat, and its clock waits (42-c)', async ({ page }) => {
+  test('1e. a banner up when the boss reveal starts hides for the whole beat, its clock waits, and so does its line (42-c)', async ({ page }) => {
     test.setTimeout(150_000);
     // Films on: the reveal is one of them (SPEC-023 §4.4). `c1_m1` is tracked,
     // so the stage shortcut finishes it; `c1_m3` wants the wurm, so the arena
@@ -335,20 +335,30 @@ test.describe('1. the mission banner after a modal onComplete, and behind a beat
     // up first and the beat starts under it.
     await land(page, { active: ['c1_m1', 'c1_m3'] }, '/?films=on&debug&seed=123');
     await dismiss(page);
-    // In the page, every frame: whether the banner showed before the reveal,
-    // with it, and after it, and for how many scene seconds in all.
-    await page.evaluate(() => {
-      const rec = { before: false, overlap: false, revealSeen: false, after: false, gone: false, shown: 0 };
+    // In the page, every frame and every mutation: whether the banner showed
+    // before the reveal, with it, and after it, for how many scene seconds in
+    // all — and where `c1_m1_done` first reached the screen.
+    await page.evaluate((doneLine) => {
+      const rec = {
+        before: false,
+        overlap: false,
+        revealSeen: false,
+        after: false,
+        gone: false,
+        shown: 0,
+        done: null as null | { reveal: boolean; up: boolean; gone: boolean },
+      };
       (window as unknown as { __spec042: typeof rec }).__spec042 = rec;
       const view = (): number => Number(window.__reallm.stats().sceneInfo?.['viewTime']);
-      let last = view();
-      let wasUp = false;
-      const frame = (): void => {
-        const now = view();
-        const reveal = document.querySelector('[data-testid="boss-reveal"]') !== null;
+      const state = (): { reveal: boolean; up: boolean } => {
         const node = document.querySelector('[data-testid="mission-complete"]');
-        const up = node !== null && !node.classList.contains('is-hidden') && !node.classList.contains('is-held');
-        if (wasUp) rec.shown += now - last;
+        return {
+          reveal: document.querySelector('[data-testid="boss-reveal"]') !== null,
+          up: node !== null && !node.classList.contains('is-hidden') && !node.classList.contains('is-held'),
+        };
+      };
+      const check = (): void => {
+        const { reveal, up } = state();
         if (reveal) {
           rec.revealSeen = true;
           if (up) rec.overlap = true;
@@ -358,16 +368,43 @@ test.describe('1. the mission banner after a modal onComplete, and behind a beat
         } else if (rec.after) {
           rec.gone = true;
         }
-        wasUp = up;
+        const dialogue = document.querySelector('[data-testid="dialogue"]');
+        const text = document.querySelector('.dialogue-text')?.textContent ?? '';
+        if (rec.done === null && dialogue !== null && !dialogue.classList.contains('is-hidden') && text.startsWith(doneLine)) {
+          rec.done = { reveal, up, gone: rec.gone };
+        }
+      };
+      new MutationObserver(check).observe(document.body, { subtree: true, childList: true, attributes: true, characterData: true });
+      let last = view();
+      let wasUp = false;
+      const frame = (): void => {
+        const now = view();
+        if (wasUp) rec.shown += now - last;
+        check();
+        wasUp = state().up;
         last = now;
         requestAnimationFrame(frame);
       };
       requestAnimationFrame(frame);
-    });
-    type Rec = { before: boolean; overlap: boolean; revealSeen: boolean; after: boolean; gone: boolean; shown: number };
+    }, DONE_LINE);
+    type Rec = {
+      before: boolean;
+      overlap: boolean;
+      revealSeen: boolean;
+      after: boolean;
+      gone: boolean;
+      shown: number;
+      done: null | { reveal: boolean; up: boolean; gone: boolean };
+    };
     const rec = (): Promise<Rec> => page.evaluate(() => (window as unknown as { __spec042: Rec }).__spec042);
 
-    await finishDryLand(page);
+    // Stage by stage, every line cleared in between (as in case 1), so nothing
+    // is on screen at the completion: the done line waits on the banner alone.
+    for (let stage = 0; stage < 3; stage++) {
+      await press(page, 'surface-finish-stage');
+      await page.waitForTimeout(250);
+      if (stage < 2) await dismiss(page);
+    }
     await expect.poll(async () => (await rec()).before, { timeout: 10_000 }).toBe(true);
     await press(page, 'surface-goto-boss');
     await expect.poll(async () => (await rec()).revealSeen, { timeout: 15_000 }).toBe(true);
@@ -378,6 +415,10 @@ test.describe('1. the mission banner after a modal onComplete, and behind a beat
     // Its 4 s count only while it shows — the reveal's own seconds do not.
     expect(seen.shown, 'the banner’s scene seconds on screen').toBeGreaterThan(3.5);
     expect(seen.shown, 'the banner’s scene seconds on screen').toBeLessThanOrEqual(5);
+    // The done line waited through the reveal and the rest of the banner — a
+    // reveal speaks through its own caption, and two texts at once halve both.
+    await expect.poll(async () => (await rec()).done, { timeout: 30_000 }).not.toBeNull();
+    expect((await rec()).done).toEqual({ reveal: false, up: false, gone: true });
   });
 });
 
