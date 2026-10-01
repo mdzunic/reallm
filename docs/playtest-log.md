@@ -1662,23 +1662,35 @@ in 16 of 16 at level 1; the Hive's two existing cases stay 16 of 16.
 
 Recorded from the container the branch was built in: `npm run check` — 97
 files and 2,048 tests with none skipped — and, a few files per invocation,
-`e2e/SPEC-042.spec.ts` (§6.2's fourteen cases, sixteen tests, all green),
+`e2e/SPEC-042.spec.ts` (§6.2's fourteen cases and five more — the Queen's
+modal chain twice, a banner behind the Wurm's reveal, a flight mission's
+banner and the restarts line — twenty tests, all green under five workers),
 `e2e/SPEC-042.phone.spec.ts` (§6.3's three cases at all six sizes, eighteen
 tests, all green), and the neighbours this spec touches: `SPEC-006`'s
-reactions case (the 26 / 44 pins), `SPEC-011`, `SPEC-012`, `SPEC-013`,
-`SPEC-024`, `SPEC-031` (the named rung), `SPEC-034`, `SPEC-037` with its whole
-phone matrix, `SPEC-038`, `SPEC-039` (the compare lines) and `SPEC-041`.
+reactions case (the 26 / 44 pins), `SPEC-011`, the three `SPEC-012` files,
+`SPEC-013`, `SPEC-014`, `SPEC-023`, `SPEC-024`, `SPEC-027`, `SPEC-028`,
+`SPEC-029`, `SPEC-031` (the named rung), `SPEC-034`, `SPEC-035`, `SPEC-037`
+with its whole phone matrix, `SPEC-038`, `SPEC-039` (the compare lines),
+`SPEC-041`, `pause`, `smoke`, `touch-controls`, and the `pwa` and `mobile`
+projects. Under four or five workers three cases outside this spec failed once
+each — `SPEC-006`'s crossfade timing, and `SPEC-012`'s survive-stage restart
+(its own dialogue helper's unguarded click) and CARGO FULL count — and each
+passed on a rerun: `SPEC-006` whole on two workers, the two `SPEC-012` cases
+on two workers and the CARGO FULL case four times over under four.
 
 What the container showed, on the scene clock (`sceneInfo.viewTime`) where the
 criterion is one:
 
 | Signal | Observed |
 | --- | --- |
-| Banner (`c1_m1`) | `Mission complete` · `Dry Land` · `+100 XP · +10 tokens · +20 oil` · `Next: Black Gold — at the pad terminal`; up more than 3.5 and at most 5 scene seconds; `c1_m1_done` started in the tick it went, never while it was up; still up 1 s after a 3 s pause |
+| Banner (`c1_m1`) | `Mission complete` · `Dry Land` · `+100 XP · +10 tokens · +20 oil` · `Next: Black Gold — at the pad terminal`; up more than 3.5 and at most 5 scene seconds; `c1_m1_done` started in the tick it went, never while it was up; still up 1 s after a 3 s pause; then faded by `mission-banner-out`, 150 ms to opacity 0 — and no animation at all under reduce motion |
+| Banner after a modal `onComplete` (`c5_m3`) | the Warden's line, then ARIA's, both modal, with no banner; the banner (`Her Majesty`, `+600 XP`) once ARIA's had gone — and, with ARIA's `once` line already heard, once the Warden's had |
+| Banner behind a beat | a `c1_m1` banner up when the Dune Wurm's reveal started: hidden on every frame of the reveal, back after it, more than 3.5 and at most 5 scene seconds on screen in all |
+| Banner in flight (`c4_s2`) | the eighth scav fighter shot down on the way to Ferrum: `Mission complete` · `Salvage Rights` · `+150 XP · +15 tokens`, no next line, the flight HUD's top centre's last row |
 | Loot | `Picked up Coolant Pack`; with twenty full slots one `Inventory full — Coolant Pack left on the ground`, never `×2` while the pickup retried |
 | Effects | `☂ 30 s` in the `Lv N` row from `C`, ≤ 28 s two scene seconds later; the row and the tracker kept their place at every phone size |
 | Danger | `hud-lowhp` (static, no pointer) and `qb-heal.is-urgent` at 15 % HP; in flight, at 20 % hull |
-| Death | `Killed by Dust Skitter` with a tip; Space at 0.5 s ignored, Space at 1.2 s respawned well before 2.5 s |
+| Death | `Killed by Dust Skitter` with a tip; Space at 0.5 s ignored, Space at 1.2 s respawned well before 2.5 s; on `c1_m1`'s survive stage, `Restarts: Survive`, cleared at the respawn |
 | Beats | `Stage 2/3 — Scan Dune Sea`; `▲ Wave incoming` under the shelter chip for between 2.5 and 3.5 scene seconds |
 | Levels | the level-up toast up between 3.6 and 4.8 s, `is-levelled` between 1.6 and 2.8 s (both wall clock, as their timers are); `XP 149 / 150` on the 6 px bar; `character-xp` at the station |
 | Shop | `Crafted Medkit ×2`; the Plasma Lance's card over a worn Laser Carbine: `↑ T1 → T2 …`, `↓ fire rate 4 → 3` |
