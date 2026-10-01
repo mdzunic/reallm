@@ -455,12 +455,14 @@ test('9. levels: the toast stays 4 s, the label glows, the XP bar and the panel 
   await press(page, 'surface-smite');
   await expect(page.locator('.toast', { hasText: /^Level 2 — / })).toBeVisible({ timeout: 10_000 });
   await expect(level).toHaveText('Lv 2');
-  await expect(level).toHaveClass(/is-levelled/);
+  // The glow is read off the page's own record: a loaded host's round trip
+  // can outlast its 2 s.
   type Rec = { toastUp?: number; toastDown?: number; glowUp?: number; glowDown?: number };
   const rec = (): Promise<Rec> => page.evaluate(() => (window as unknown as { __spec042: Rec }).__spec042);
   await expect.poll(async () => (await rec()).toastDown, { timeout: 10_000 }).toBeDefined();
   await expect.poll(async () => (await rec()).glowDown, { timeout: 10_000 }).toBeDefined();
   const seen = await rec();
+  expect(seen.glowUp, 'is-levelled on the level label').toBeDefined();
   const toastMs = (seen.toastDown as number) - (seen.toastUp as number);
   expect(toastMs, 'the level-up toast, ms').toBeGreaterThan(3_600);
   expect(toastMs, 'the level-up toast, ms').toBeLessThan(4_800);
