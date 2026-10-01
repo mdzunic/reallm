@@ -319,7 +319,7 @@ const EXPLORE_SAVE_INTERVAL = 1;
 
 // ------------------------------------------------------------- SPEC-019 §4.6
 
-/** Player-hit shake and the heavy boss-phase / wurm-resurface shake (§4.7). */
+/** Player-hit shake and the heavy boss-phase shake (§4.7). */
 const HIT_SHAKE_AMPLITUDE = 0.15;
 const HIT_SHAKE_SECONDS = 0.25;
 const HEAVY_SHAKE_AMPLITUDE = 0.5;
@@ -2163,7 +2163,7 @@ export class SurfaceScene extends UiScene<'surface'> {
     return this.#noteAim(this.#aimPoint);
   }
 
-  /** Mirrors the projection into a debug slot `#bossTelegraph` can't clobber. */
+  /** Mirrors the projection into a debug slot nothing else writes. */
   #noteAim(point: { x: number; z: number }): { x: number; z: number } {
     this.#aimDebug.x = point.x;
     this.#aimDebug.z = point.z;
