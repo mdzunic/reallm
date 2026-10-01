@@ -1796,6 +1796,10 @@ export class Combat {
     for (let i = 0; i < w.enemies.size; i++) {
       const e = w.enemies.at(i);
       if (e.state === 'dead' || isBuried(e)) continue;
+      // SPEC-041 §4.1: a boss's charge lands through its lane (`chargeReach`,
+      // narrower than its body) and runs on, so while it runs it shoves
+      // nobody — a player outside the lane is passed, not bulldozed.
+      if (e.state === 'charge' && !e.chargeStops) continue;
       let dx = p.x - e.x;
       let dz = p.z - e.z;
       let d = Math.hypot(dx, dz);

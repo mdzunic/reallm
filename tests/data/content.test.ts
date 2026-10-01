@@ -10,7 +10,10 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it, vi } from 'vitest';
 import { LAUNCH_SECONDS, THROTTLES } from '@/systems/Flight';
+import { DASH_IFRAMES } from '@/systems/Dash';
 import {
+  AFFIX_IDS,
+  AFFIXES,
   ATTRIBUTE_EFFECTS,
   ATTRIBUTE_MAX,
   ATTRIBUTE_POINT_LEVELS,
@@ -619,6 +622,13 @@ describe('content invariants (SPEC-009 §7)', () => {
       for (const entry of planet.surface.spawn) {
         if (entry.weight <= 0) problems.push(`${planet.id}: ${entry.enemy} spawns at weight ${entry.weight}`);
         if (entry.maxAlive < 1) problems.push(`${planet.id}: ${entry.enemy} maxAlive ${entry.maxAlive}`);
+        // SPEC-041 §6.1: a pack fits its row — 1 ≤ min ≤ max ≤ maxAlive.
+        if (entry.pack !== undefined) {
+          const [min, max] = entry.pack;
+          if (!(Number.isInteger(min) && Number.isInteger(max) && min >= 1 && min <= max && max <= entry.maxAlive)) {
+            problems.push(`${planet.id}: ${entry.enemy} pack [${min}, ${max}] does not fit maxAlive ${entry.maxAlive}`);
+          }
+        }
         const enemy = ENEMIES[entry.enemy];
         if (enemy.domain !== 'surface') problems.push(`${planet.id}: ${enemy.id} is a ${enemy.domain} enemy`);
         if (enemy.chapter > planet.chapter) problems.push(`${planet.id} (chapter ${planet.chapter}) spawns chapter-${enemy.chapter} ${enemy.id}`);
@@ -1096,6 +1106,139 @@ describe('content invariants (SPEC-009 §7)', () => {
 // two lines suppress nothing, so if an id union ever widened to `string` they
 // would fail on their own rather than quietly keeping the suppression happy.
 type IsAssignable<Candidate, Union> = Candidate extends Union ? true : false;
+
+describe('boss moves can be escaped on foot (SPEC-041 §4.3)', () => {
+  // `v = PLAYER_SPEED`, a 0.3 s reaction, the player's radius 0.5, and SPEC-038's
+  // dash i-frames. A telegraph that cannot be escaped is a coin toss, so a
+  // retune that makes one fails here, before a browser ever sees it.
+  const REACTION = 0.3;
+  const PLAYER_RADIUS = 0.5;
+  const v = TUNING.PLAYER_SPEED;
+  const bosses = (Object.values(ENEMIES) as Enemy[]).filter((enemy) => enemy.archetype === 'boss');
+
+  it('every boss carries a move list, and the table is SPEC-041 §4.2’s', () => {
+    expect(bosses.map((boss) => [boss.id, (boss.moves ?? []).map((move) => move.id)])).toEqual([
+      ['dune_wurm', ['sand_rush', 'tail_slam', 'burrow']],
+      ['frost_matriarch', ['shard_fan', 'frost_nova']],
+      ['hive_broodlord', ['brood_stomp', 'acid_spit', 'burrow_rush']],
+      ['ash_titan', ['tremor', 'fissure', 'eruption']],
+      ['hive_queen', ['acid_volley', 'royal_dive', 'brood_burst']],
+    ]);
+    for (const enemy of Object.values(ENEMIES) as Enemy[]) {
+      if (enemy.archetype !== 'boss') expect(enemy.moves, enemy.id).toBeUndefined();
+    }
+  });
+
+  it('every move is fair by §4.3’s formulas', () => {
+    const problems: string[] = [];
+    for (const boss of bosses) {
+      for (const move of boss.moves ?? []) {
+        const label = `${boss.id}.${move.id}`;
+        const t = move.windup - REACTION;
+        const need = (value: number | undefined, name: string): number => {
+          if (value === undefined || !(value > 0)) problems.push(`${label}: no ${name}`);
+          return value ?? 0;
+        };
+        if (move.phaseMin > (boss.phases ?? []).length) problems.push(`${label}: phase ${move.phaseMin} never comes`);
+        if (move.range[0] > move.range[1]) problems.push(`${label}: range ${move.range.join('–')}`);
+        if (move.weight < 0 || move.windup <= 0 || move.cooldown < 0 || move.recover < 0 || move.damageMult <= 0) {
+          problems.push(`${label}: a negative or empty number`);
+        }
+        switch (move.kind) {
+          case 'slam_target':
+          case 'slam_self':
+          case 'burrow': {
+            const radius = need(move.radius, 'radius');
+            if (radius + PLAYER_RADIUS > v * t + 1e-9) problems.push(`${label}: ${radius} + 0.5 > ${v} × ${t.toFixed(2)}`);
+            break;
+          }
+          case 'charge':
+          case 'lines': {
+            const width = need(move.width, 'width');
+            need(move.length, 'length');
+            if (move.kind === 'charge') need(move.speed, 'speed');
+            else need(move.count, 'count');
+            if (width / 2 + PLAYER_RADIUS > v * t + 1e-9) problems.push(`${label}: ${width} / 2 + 0.5 > ${v} × ${t.toFixed(2)}`);
+            break;
+          }
+          case 'ring': {
+            const ringSpeed = need(move.ringSpeed, 'ringSpeed');
+            const ringMax = need(move.ringMax, 'ringMax');
+            const band = need(move.band, 'band');
+            const outrun = boss.radius + PLAYER_RADIUS + v * (t + ringMax / ringSpeed);
+            if (outrun < ringMax + band / 2 + PLAYER_RADIUS - 1e-9) problems.push(`${label}: the ring cannot be outrun`);
+            if (DASH_IFRAMES * ringSpeed < band + 1.0 - 1e-9) problems.push(`${label}: a dash cannot cross the band`);
+            break;
+          }
+          case 'volley': {
+            const speed = need(move.projectileSpeed, 'projectileSpeed');
+            const radius = need(move.projectileRadius, 'projectileRadius');
+            const count = need(move.count, 'count');
+            const spread = need(move.spread, 'spread');
+            need(move.projectileRange, 'projectileRange');
+            if (speed > 16) problems.push(`${label}: ${speed} m/s is faster than 16`);
+            if (count > 1 && 8 * Math.tan(spread / (count - 1)) < 2 * (radius + PLAYER_RADIUS) - 1e-9) {
+              problems.push(`${label}: neighbouring shots leave no gap at 8 m`);
+            }
+            break;
+          }
+        }
+        if ((move.kind === 'charge' || move.kind === 'volley') && !(move.lock !== undefined && move.lock < move.windup)) {
+          problems.push(`${label}: a charge or a volley locks inside its windup`);
+        }
+        if (move.kind === 'burrow' && (move.weight !== 0 || !(move.dig ?? 0) || !(move.every ?? 0))) {
+          problems.push(`${label}: the burrow is timed — weight 0, a dig and an interval`);
+        }
+      }
+    }
+    expect(problems).toEqual([]);
+  });
+
+  it('the tightest rows are as tight as §4.3 says, and a fault is caught', () => {
+    const move = (boss: EnemyId, id: string) => (ENEMIES[boss] as Enemy).moves?.find((m) => m.id === id);
+    // brood_stomp and tail_slam: 3.5 + 0.5 = 4.0 against 6 × 0.7 = 4.2.
+    expect((move('hive_broodlord', 'brood_stomp')?.radius ?? 0) + PLAYER_RADIUS).toBeCloseTo(4, 10);
+    expect(v * ((move('dune_wurm', 'tail_slam')?.windup ?? 0) - REACTION)).toBeCloseTo(4.2, 10);
+    // eruption's dash check: 0.3 × 8 = 2.4 against 1.4 + 1.0 = 2.4.
+    const eruption = move('ash_titan', 'eruption');
+    expect(DASH_IFRAMES * (eruption?.ringSpeed ?? 0)).toBeCloseTo((eruption?.band ?? 0) + 1, 10);
+    // A slam 0.1 s faster than tail_slam is a coin toss.
+    expect(3.5 + PLAYER_RADIUS > v * (0.9 - REACTION)).toBe(true);
+  });
+});
+
+describe('elite affixes (SPEC-041 §4.6)', () => {
+  const archetypes = ['swarm', 'rusher', 'ranged'] as const;
+
+  it('defines the five, each with the archetypes §4.6’s pools give it', () => {
+    expect(AFFIX_IDS).toEqual(['swift', 'bulwark', 'volley', 'mender', 'volatile']);
+    expect(Object.keys(AFFIXES).sort()).toEqual([...AFFIX_IDS].sort());
+    expect(Object.fromEntries(AFFIX_IDS.map((id) => [id, [...AFFIXES[id].archetypes].sort()]))).toEqual({
+      swift: ['ranged', 'rusher', 'swarm'],
+      bulwark: ['rusher', 'swarm'],
+      volley: ['ranged'],
+      mender: ['ranged', 'rusher', 'swarm'],
+      volatile: ['rusher', 'swarm'],
+    });
+    for (const id of AFFIX_IDS) expect(AFFIXES[id].name).toBe(id[0]?.toUpperCase() + id.slice(1));
+  });
+
+  it('every pool holds at least two, and no affix serves an archetype it cannot', () => {
+    const elites = (Object.values(ENEMIES) as Enemy[]).filter((enemy) => enemy.domain === 'surface' && enemy.eliteAllowed);
+    for (const archetype of archetypes) {
+      const pool = AFFIX_IDS.filter((id) => (AFFIXES[id].archetypes as readonly string[]).includes(archetype));
+      expect(pool.length, archetype).toBeGreaterThanOrEqual(2);
+      // Every pool is for an archetype that actually rolls elites on the ground.
+      expect(elites.some((enemy) => enemy.archetype === archetype), archetype).toBe(true);
+    }
+    // A volley fans a shot: only archetypes whose every elite fires one.
+    for (const archetype of AFFIXES.volley.archetypes) {
+      for (const enemy of elites.filter((e) => e.archetype === archetype)) expect(enemy.attack.kind, enemy.id).toBe('ranged');
+    }
+    // Bulwark and volatile need a body that closes: never a gun that keeps its distance.
+    for (const id of ['bulwark', 'volatile'] as const) expect(AFFIXES[id].archetypes).not.toContain('ranged');
+  });
+});
 
 describe('unknown ids are compile errors (SPEC-009 §6, E26)', () => {
   it('a mission objective cannot name an enemy that does not exist', () => {

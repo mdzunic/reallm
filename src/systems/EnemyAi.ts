@@ -778,9 +778,10 @@ function timedMoveIndex(e: EnemyEntity): number {
 /**
  * §4.1: the moves `e` may use now — weight above 0, `phaseMin ≤ phase` and the
  * target's distance `d` inside `range` — picked by weight on the `ai` stream.
- * −1 when none qualifies, and then no draw is taken.
+ * −1 when none qualifies, and then no draw is taken. Exported for §6.1's
+ * selection case.
  */
-function pickBossMove(e: EnemyEntity, d: number, rng: Rng): number {
+export function pickBossMove(e: EnemyEntity, d: number, rng: Rng): number {
   const moves = e.def.moves;
   if (moves === undefined) return -1;
   moveScratch.length = 0;
