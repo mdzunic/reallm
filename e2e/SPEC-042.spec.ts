@@ -26,8 +26,11 @@ const DONE_LINE = 'Dune sea logged, storm survived.';
 const RECALL_DETAIL = "Hull breached — ARIA flew you home. The jump's fuel is spent; your cargo is safe.";
 
 interface FlightHook {
+  phase(): string;
   state(): { shield: number; hull: number };
   hit(amount: number): void;
+  blockArrival(): void;
+  clearSky(): void;
 }
 
 /** What `prepare` writes into the fresh slot-0 save before anything is entered. */
@@ -374,6 +377,70 @@ test.describe('1. the mission banner after a modal onComplete, and behind a beat
     expect(seen.shown, 'the banner’s scene seconds on screen').toBeGreaterThan(3.5);
     expect(seen.shown, 'the banner’s scene seconds on screen').toBeLessThanOrEqual(5);
   });
+});
+
+test('1f. flight: a flight mission finished in flight shows the same banner, with no next line', async ({ page }) => {
+  test.setTimeout(150_000);
+  // Auto-fire off and mouse steer off, as SPEC-041's case 6: the one fighter
+  // stands until the trigger is held, and the ship holds still while the
+  // pointer finds it.
+  await page.addInitScript(() =>
+    localStorage.setItem('reallm:settings', JSON.stringify({ version: 1, autoFire: 'off', flightMouseSteer: false })),
+  );
+  await start(page);
+  await prepare(page, { resources: { oil: 400 } });
+  // `c4_s2` one scav fighter short: the still fighter below is its eighth.
+  await page.evaluate(() => {
+    const save = window.__reallm.save().current;
+    if (save === null) throw new Error('no save bound');
+    save.progress.missionsActive = [{ id: 'c4_s2', stage: 0, counters: { '0:0': 7 } }];
+  });
+  await page.evaluate(() => window.__reallm.go('flight', { destination: 'ferrum' }, { force: true }));
+  await expect(page.getByTestId('scene-label')).toHaveText('flight', COLD_START);
+  await page.waitForFunction(() => (window as unknown as { __reallmFlight?: unknown }).__reallmFlight !== undefined);
+  // The guns wake after the launch, and the chase camera settles with them.
+  await page.waitForFunction(() => (window as unknown as { __reallmFlight: FlightHook }).__reallmFlight.phase() !== 'launch', null, {
+    timeout: 20_000,
+  });
+  // One still scav fighter dead ahead, and nothing else in the sky.
+  await page.evaluate(() => {
+    const hook = (window as unknown as { __reallmFlight: FlightHook }).__reallmFlight;
+    hook.clearSky();
+    hook.blockArrival();
+  });
+  // The pointer down the screen's middle a few pixels at a time — three frames
+  // each, so the step has read it — until ARIA's 6° cone takes the fighter;
+  // then on the lead pip, where a shot fired now meets it.
+  const viewport = page.viewportSize() ?? { width: 1280, height: 720 };
+  const frames = (): Promise<void> =>
+    page.evaluate(() => new Promise<void>((done) => requestAnimationFrame(() => requestAnimationFrame(() => requestAnimationFrame(() => done())))));
+  for (let k = 0; k <= 30 && Number((await sceneInfo(page))['lead']) !== 1; k++) {
+    await page.mouse.move(viewport.width / 2, viewport.height * (0.4 + 0.01 * k));
+    await frames();
+  }
+  const pip = page.getByTestId('lead-pip');
+  await expect(pip).toBeVisible({ timeout: 10_000 });
+  const at = await pip.boundingBox();
+  if (at === null) throw new Error('the lead pip has no box');
+  await page.mouse.move(at.x + at.width / 2, at.y + at.height / 2);
+
+  const banner = page.getByTestId('mission-complete');
+  await expect(banner).toBeHidden();
+  await page.keyboard.down('Space');
+  try {
+    await expect(banner).toBeVisible({ timeout: 30_000 });
+  } finally {
+    await page.keyboard.up('Space');
+  }
+  await expect(page.getByTestId('scene-label')).toHaveText('flight');
+  await expect(banner).toContainText('Mission complete');
+  await expect(page.getByTestId('mission-complete-title')).toHaveText('Salvage Rights');
+  await expect(page.getByTestId('mission-complete-rewards')).toHaveText('+150 XP · +15 tokens');
+  // There is no pad in the sky, so no next line.
+  await expect(page.getByTestId('mission-complete-next')).toBeHidden();
+  await expect(banner).toHaveCSS('pointer-events', 'none');
+  expect(await banner.evaluate((node) => node.parentElement?.classList.contains('hud-tc') === true && node.nextElementSibling === null)).toBe(true);
+  await expect(banner).toBeHidden({ timeout: 20_000 });
 });
 
 // --------------------------------------------------------------- 3, 4: loot
