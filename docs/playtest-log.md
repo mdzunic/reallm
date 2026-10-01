@@ -1651,3 +1651,54 @@ in 16 of 16 at level 1; the Hive's two existing cases stay 16 of 16.
 - [ ] a pack led by a mender and a bulwark elite, plates read;
 - [ ] Ferrum at ARIA level 1 then 2: the lead pip found, the reticle following
       it at level 2, the hit ticks heard.
+
+## SPEC-042 — feedback in play: the mission banner, loot, effects, danger and the boss frame (M7f)
+
+- **Build:** `spec/SPEC-042` — untagged
+- **Devices:**
+  - desktop — headless Chromium 1280 × 720 (Playwright, Linux container, **software GL / SwiftShader**)
+  - phone — the `phone-landscape` project's Chromium phone (Pixel 7 landscape, touch, `isMobile`) at every
+    `PHONE_VIEWPORTS` size; _no handset in the build container_ (§7's pass on the reference Android phone is owed, below)
+
+Recorded from the container the branch was built in: `npm run check` — 97
+files and 2,048 tests with none skipped — and, a few files per invocation,
+`e2e/SPEC-042.spec.ts` (§6.2's fourteen cases, sixteen tests, all green),
+`e2e/SPEC-042.phone.spec.ts` (§6.3's three cases at all six sizes, eighteen
+tests, all green), and the neighbours this spec touches: `SPEC-006`'s
+reactions case (the 26 / 44 pins), `SPEC-011`, `SPEC-012`, `SPEC-013`,
+`SPEC-024`, `SPEC-031` (the named rung), `SPEC-034`, `SPEC-037` with its whole
+phone matrix, `SPEC-038`, `SPEC-039` (the compare lines) and `SPEC-041`.
+
+What the container showed, on the scene clock (`sceneInfo.viewTime`) where the
+criterion is one:
+
+| Signal | Observed |
+| --- | --- |
+| Banner (`c1_m1`) | `Mission complete` · `Dry Land` · `+100 XP · +10 tokens · +20 oil` · `Next: Black Gold — at the pad terminal`; up 4.0–4.2 scene s; `c1_m1_done` started in the tick it went, never while it was up; still up 1 s after a 3 s pause |
+| Loot | `Picked up Coolant Pack`; with twenty full slots one `Inventory full — Coolant Pack left on the ground`, never `×2` while the pickup retried |
+| Effects | `☂ 30 s` in the `Lv N` row from `C`, ≤ 28 s two scene seconds later; the row and the tracker kept their place at every phone size |
+| Danger | `hud-lowhp` (static, no pointer) and `qb-heal.is-urgent` at 15 % HP; in flight, at 20 % hull |
+| Death | `Killed by Dust Skitter` with a tip; Space at 0.5 s ignored, Space at 1.2 s respawned well before 2.5 s |
+| Beats | `Stage 2/3 — Scan Dune Sea`; `▲ Wave incoming` under the shelter chip for 3.0 scene s |
+| Levels | the level-up toast up ~4.0 s, `is-levelled` ~2.0 s; `XP 149 / 150` on the 6 px bar; `character-xp` at the station |
+| Shop | `Crafted Medkit ×2`; the Plasma Lance's card over a worn Laser Carbine: `↑ T1 → T2 …`, `↓ fire rate 4 → 3` |
+| Frames | `hud-boss` 512 px wide at 1280 × 720 with one tick at 0.4, `Phase 2` at the burrow; `hud-target` reading `Alpha Dust Skitter` / `Elite` / its affix, gone within 3.5 scene s |
+| Haptics (emulated phone) | `surface-hurt-from` recorded `[15]`; with Vibration unchecked, nothing; a desktop context recorded nothing and shows no row |
+| Recall | `Emergency recall` and `Hull breached — ARIA flew you home. The jump's fuel is spent; your cargo is safe.` |
+
+**Owed on hardware (§7).** On desktop and the reference Android phone, from a
+fresh save:
+
+- [ ] finish `c1_m1` and read the banner, then ARIA's line after it;
+- [ ] pick up an elite's drop with room in the inventory, and with the inventory full;
+- [ ] use a coolant pack and watch its timer run down in the `Lv N` row;
+- [ ] fall below a quarter of HP (the edge, the heal slot's outline), then die
+      to a skitter and read the cause and the tip;
+- [ ] fight the Dune Wurm through its phase turn (the ticks, `Phase 2`), and hit
+      an elite to see the target frame;
+- [ ] craft medkits and buy a rung, reading each toast and the compare arrows.
+
+On the phone only:
+
+- [ ] feel the hits, a weapon lock, a death and a completion;
+- [ ] then turn Vibration off in Settings and feel nothing.
