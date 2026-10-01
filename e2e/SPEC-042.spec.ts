@@ -182,6 +182,8 @@ test.describe('1. the mission banner', () => {
     await expect(page.getByTestId('mission-complete-next')).toHaveText('Next: Black Gold — at the pad terminal');
     // Non-modal: it takes no pointer, and it is the top centre's last row.
     await expect(banner).toHaveCSS('pointer-events', 'none');
+    // Under reduce motion it neither fades in nor out (case 2 times the fade).
+    await expect(banner).toHaveCSS('animation-name', 'none');
     expect(await banner.evaluate((node) => node.parentElement?.classList.contains('hud-tc') === true && node.nextElementSibling === null)).toBe(true);
 
     // While it is up the queue is held: the done line, queued behind it with
@@ -223,6 +225,32 @@ test('2. a pause freezes the banner: still up 1 s after a 3 s pause', async ({ p
   await expect(page.getByTestId('pause-menu')).toBeHidden();
   await page.waitForTimeout(1_000);
   await expect(banner).toBeVisible();
+
+  // §4.1: then it fades out over 150 ms — an animation of its own, from
+  // opaque to clear, read off the element the moment `is-fading` lands.
+  const fade = await banner.evaluate(
+    (node) =>
+      new Promise<{ name: string; duration: unknown; to: unknown } | null>((resolve) => {
+        const seen = (): boolean => {
+          if (!node.classList.contains('is-fading')) return false;
+          const animation = node.getAnimations()[0] as CSSAnimation | undefined;
+          const keyframes = animation?.effect?.getKeyframes() ?? [];
+          resolve(
+            animation === undefined
+              ? null
+              : { name: animation.animationName, duration: animation.effect?.getTiming().duration, to: keyframes.at(-1)?.['opacity'] },
+          );
+          return true;
+        };
+        if (seen()) return;
+        const observer = new MutationObserver(() => {
+          if (seen()) observer.disconnect();
+        });
+        observer.observe(node, { attributes: true, attributeFilter: ['class'] });
+      }),
+  );
+  expect(fade).toEqual({ name: 'mission-banner-out', duration: 150, to: '0' });
+  await expect(banner).toBeHidden();
 });
 
 // --------------------------------------------------------------- 3, 4: loot
