@@ -40,6 +40,8 @@ export interface ProjectileEntity {
   flight: number;
   /** SPEC-038 §4.8: the shot's damage roll was a crit; false for enemy, drone and blast shots. */
   crit: boolean;
+  /** SPEC-041 §4.6: the weapon's `pierce ≥ 1` at spawn — a bulwark's guard does not turn it. */
+  armorPiercing: boolean;
 }
 
 export function makeProjectile(): ProjectileEntity {
@@ -63,5 +65,6 @@ export function makeProjectile(): ProjectileEntity {
     targetZ: 0,
     flight: 0,
     crit: false,
+    armorPiercing: false,
   };
 }

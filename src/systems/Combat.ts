@@ -19,15 +19,29 @@ import type { Rng } from '@/core/Rng';
 import { maxHp, type Save } from '@/core/Save';
 import { SpatialHash } from '@/core/SpatialHash';
 import {
+  AFFIX_IDS,
+  AFFIXES,
   ATTRIBUTE_EFFECTS,
+  BULWARK_ARC_COS,
+  BULWARK_DAMAGE_MULT,
   CLASSES,
   COMPANIONS,
   ENEMIES,
   ITEMS,
   LOOT_TABLES,
+  MENDER_HEAL_FRACTION,
+  MENDER_PULSE_SECONDS,
+  MENDER_RADIUS,
   SIGNATURE_FALLBACK_LITHIUM,
+  SWIFT_SPEED_MULT,
+  SWIFT_WINDUP_SCALE,
   TUNING,
+  VOLATILE_DAMAGE_MULT,
+  VOLATILE_FUSE,
+  VOLATILE_RADIUS,
+  type AffixId,
   type Attributes,
+  type BossMove,
   type ClassId,
   type ClassPassive,
   type CompanionEffect,
@@ -55,7 +69,7 @@ import {
   MINE_ARM_SECONDS,
   type DeployableEntity,
 } from '@/entities/Deployable';
-import type { EnemyEntity } from '@/entities/Enemy';
+import { affixCount, hasAffix, isBuried, type EnemyEntity } from '@/entities/Enemy';
 import type { FollowerEntity } from '@/entities/Follower';
 import type { PlayerEntity } from '@/entities/Player';
 import type { ProjectileEntity } from '@/entities/Projectile';
@@ -69,9 +83,9 @@ import {
   telegraphCovers,
   type TelegraphEntity,
 } from '@/entities/Telegraph';
-import type { ArenaState, ObstacleGrid } from '@/entities/World';
+import { clampToSeal, type ArenaState, type ObstacleGrid } from '@/entities/World';
 import { isDashing } from '@/systems/Dash';
-import { updateEnemy, type AiHooks, type WindupKind } from '@/systems/EnemyAi';
+import { BOSS_FIRST_MOVE_SECONDS, updateEnemy, type AiHooks, type WindupKind } from '@/systems/EnemyAi';
 import { FIRE_CARRY, Loadout } from '@/systems/Loadout';
 import { updateProjectiles, type ProjectileHooks } from '@/systems/Projectiles';
 
@@ -114,9 +128,11 @@ export const EXPLOSIVE_FALLOFF = 0.5;
 /** SPEC-029 §4.6: a thrown grenade flies at 14 m/s. */
 export const THROW_SPEED = 14;
 
-// Scratch for the blast and mine-trigger hash queries — module level, so the
-// 60 Hz step never allocates (SPEC-001 §7).
+// Scratch for the blast, mine-trigger and mender hash queries — module level,
+// so the 60 Hz step never allocates (SPEC-001 §7).
 const blastCandidates: number[] = [];
+/** SPEC-041 §4.6: mender pulses held for the scene between drains; more are dropped, never grown. */
+export const MENDER_PULSE_CAP = 16;
 /** §4.3: muzzle offset ahead of the player. */
 export const MUZZLE_OFFSET = 0.6;
 /** Initial tuning: player and drone projectile radius (weapons carry none). */
@@ -257,6 +273,44 @@ export function rollElite(def: Enemy, eliteChance: number, rng: Rng): boolean {
   return def.eliteAllowed && rng.chance(eliteChance);
 }
 
+/** SPEC-041 §4.6: whether `affix` may ride an enemy of `def`'s archetype. */
+function affixFits(affix: AffixId, def: Enemy): boolean {
+  return (AFFIXES[affix].archetypes as readonly string[]).includes(def.archetype);
+}
+
+/**
+ * SPEC-041 §4.6: an elite's affixes, drawn right after its elite roll on the
+ * same stream — one on the planets of chapters 1–3, two on 4–6, distinct and
+ * uniform over the affixes whose `archetypes` include `def`'s. An archetype no
+ * affix serves (a boss, a static egg) gets none and takes no draw. Writes into
+ * `out`; never allocates.
+ */
+export function rollAffixes(
+  def: Enemy,
+  planetChapter: number,
+  rng: Rng,
+  out: { a: AffixId | null; b: AffixId | null },
+): void {
+  out.a = null;
+  out.b = null;
+  let pool = 0;
+  for (const id of AFFIX_IDS) if (affixFits(id, def)) pool++;
+  if (pool === 0) return;
+  const wanted = Math.min(pool, planetChapter >= 4 ? 2 : 1);
+  for (let n = 0; n < wanted; n++) {
+    let pick = rng.int(0, pool - n - 1);
+    for (const id of AFFIX_IDS) {
+      if (!affixFits(id, def) || id === out.a) continue;
+      if (pick === 0) {
+        if (n === 0) out.a = id;
+        else out.b = id;
+        break;
+      }
+      pick--;
+    }
+  }
+}
+
 /**
  * The unique gear item of a line at a tier (§4.7, SPEC-025 §4.2: tiers are
  * unique per *line*, so a handgun and a rifle may both be tier 0).
@@ -365,6 +419,21 @@ export class Combat {
   #weatherHitAt = -Infinity;
   #signatureDrops = 0;
   #signatureFallbacks = 0;
+  /** SPEC-041 §3: the last boss move that landed, for `sceneInfo.bossMove`. */
+  #lastBossMove: BossMove['id'] | null = null;
+
+  /**
+   * SPEC-041 §4.6: the mender pulses since the scene last drained them — the
+   * scene bursts a green ring at each and sets the count back to 0. Capped at
+   * `MENDER_PULSE_CAP`, so a harness that never drains them never grows them.
+   */
+  readonly menderPulses: { x: number; z: number }[] = Array.from({ length: MENDER_PULSE_CAP }, () => ({ x: 0, z: 0 }));
+  menderPulseCount = 0;
+
+  /** SPEC-041 §3: the last boss move that landed, or `null` (`sceneInfo.bossMove`). */
+  get lastBossMove(): BossMove['id'] | null {
+    return this.#lastBossMove;
+  }
 
   /** SPEC-039 §3: signature rows this visit dropped as the piece (`sceneInfo`). */
   get signatureDrops(): number {
@@ -432,12 +501,13 @@ export class Combat {
 
     this.#aiHooks = {
       meleeHit: (e, damageMult, knockback) => this.#meleeHit(e, damageMult, knockback),
-      fireProjectile: (e, dirX, dirZ, speed, radius, range) =>
-        this.#spawnEnemyProjectile(e, dirX, dirZ, speed, radius, range),
+      fireProjectile: (e, dirX, dirZ, speed, radius, range, damageMult) =>
+        this.#spawnEnemyProjectile(e, dirX, dirZ, speed, radius, range, damageMult),
       summonRing: (e, enemy, count, radius) => this.#summonRing(e, enemy, count, radius),
       phaseStarted: (e, phase) => this.#events.emit('boss:phase', { boss: e.def.id, phase }),
-      shockwave: (e, radius) => this.#shockwave(e, radius),
       toast: (text) => this.#events.emit('ui:toast', { text }),
+      bossMove: (e, move, x, z) => this.#bossMove(e, move, x, z),
+      aggroPack: (packId) => this.#aggroPack(packId),
       windup: (e, kind) => this.#windup(e, kind),
       telegraphLine: (e, length, width, windup, lockIn, damageMult, bodyResolved) =>
         this.#telegraphLine(e, length, width, windup, lockIn, damageMult, bodyResolved),
@@ -579,12 +649,14 @@ export class Combat {
    * Damage into an enemy. 11-f: ignored outright while invulnerable. SPEC-038
    * §4.8: `crit` is the projectile's roll — blasts and drone shots never crit.
    */
-  #damageEnemy(e: EnemyEntity, amount: number, cause: 'player' | 'drone', crit = false): void {
+  #damageEnemy(e: EnemyEntity, amount: number, cause: 'player' | 'drone', crit = false, guarded = false): void {
     if (e.state === 'dead' || e.invulnerable) return;
     e.hp -= amount;
     e.hitFlash = HIT_FLASH_SECONDS;
     e.lostTrack = 0; // SPEC-030 D-20: damage resets the lose-track clock
     e.lastHitCrit = crit;
+    // SPEC-041 §4.6: the number of a hit a bulwark turned reads grey.
+    e.lastHitGuarded = guarded;
     // SPEC-035 §4.11: every projectile and blast hit on a live enemy thuds. Both
     // callers of this method are exactly those two paths. SPEC-038 §4.8: a
     // critical projectile hit says so, and only then carries the flag.
@@ -639,28 +711,39 @@ export class Combat {
     );
   }
 
-  /** The wurm's resurface hit (§4.5): melee damage to the player within `radius`. */
-  #shockwave(e: EnemyEntity, radius: number): void {
-    const p = this.#world.player;
-    if (!p.alive) return;
-    const dx = p.x - e.x;
-    const dz = p.z - e.z;
-    if (dx * dx + dz * dz > radius * radius) return;
-    this.#knockbackPlayer(dx, dz, PLAYER_KNOCKBACK);
-    this.damagePlayer(enemyHitDamage(e, this.#world.stats, this.#save.meta.difficulty), { kind: 'enemy', enemyId: e.def.id }, false, {
-      x: e.x,
-      z: e.z,
-    });
+  /** SPEC-041 §4.1: a boss move landed — `boss:move` at `(x, z)`, and `sceneInfo.bossMove`. */
+  #bossMove(e: EnemyEntity, move: BossMove, x: number, z: number): void {
+    this.#lastBossMove = move.id;
+    this.#events.emit('boss:move', { boss: e.def.id, move: move.id, kind: move.kind, x, z });
   }
 
-  #spawnEnemyProjectile(e: EnemyEntity, dirX: number, dirZ: number, speed: number, radius: number, range: number): void {
+  /** SPEC-041 §4.5: every live member of the pack aggroes, as damage would aggro it. */
+  #aggroPack(packId: number): void {
+    if (packId <= 0) return;
+    const enemies = this.#world.enemies;
+    for (let i = 0; i < enemies.size; i++) {
+      const e = enemies.at(i);
+      if (e.packId === packId && e.state !== 'dead') this.#aggroOne(e);
+    }
+  }
+
+  #spawnEnemyProjectile(
+    e: EnemyEntity,
+    dirX: number,
+    dirZ: number,
+    speed: number,
+    radius: number,
+    range: number,
+    damageMult = 1,
+  ): void {
     const p = this.#world.projectiles.alloc();
     p.x = e.x + dirX * e.radius;
     p.z = e.z + dirZ * e.radius;
     p.vx = dirX * speed;
     p.vz = dirZ * speed;
     p.radius = radius;
-    p.damage = e.damage;
+    // SPEC-041 §4.1: a boss volley's shots carry its move's multiplier.
+    p.damage = e.damage * damageMult;
     p.pierceLeft = 0;
     p.owner = 'enemy';
     p.ttl = range / speed;
@@ -676,6 +759,7 @@ export class Combat {
     p.targetZ = 0;
     p.flight = 0;
     p.crit = false;
+    p.armorPiercing = false;
   }
 
   /** §4.5: phase summons appear in a ring at 6 m around the boss. Never elite. */
@@ -827,7 +911,8 @@ export class Combat {
         t.dirZ = Math.sin(owner.facing);
       }
       if (t.bodyResolved) {
-        if (owner === null || (owner.state !== 'chargeWindup' && owner.state !== 'charge')) pool.free(i);
+        // SPEC-041 §4.1: a boss's charge lane lives through its cast as well.
+        if (owner === null || (owner.state !== 'chargeWindup' && owner.state !== 'charge' && owner.state !== 'cast')) pool.free(i);
         continue;
       }
       if (t.kind === 'ring') {
@@ -882,11 +967,6 @@ export class Combat {
   // --------------------------------------------------------------- spawning
 
   /**
-   * §4.6. The caller decides `elite` (SPEC-012 rolls `rollElite` with the
-   * planet's chance on its spawn stream). Elites: ×3 HP, ×1.3 scale (collision
-   * radius included), ×1.1 speed; the damage ×1.5 lands at hit time (§4.2).
-   */
-  /**
    * SPEC-019 §4.6: the entity behind the last `enemy:spawned` emit — director
    * spawns, summons and hatches alike, since `spawnEnemy` is the one emitter.
    * Read-only; no rule or damage change rides on it.
@@ -897,13 +977,24 @@ export class Combat {
 
   #lastSpawned: EnemyEntity | null = null;
 
-  spawnEnemy(id: EnemyId, x: number, z: number, elite: boolean): EnemyEntity {
+  /**
+   * §4.6. The caller decides `elite` (SPEC-012 rolls `rollElite` with the
+   * planet's chance on its spawn stream). Elites: ×3 HP, ×1.3 scale (collision
+   * radius included), ×1.1 speed; the damage ×1.5 lands at hit time (§4.2).
+   * SPEC-041 §4.6: an elite's affixes — rolled by the caller with
+   * `rollAffixes` — ride in `affixA`/`affixB`; `swift` applies here at once.
+   * A non-elite carries none, whatever is passed.
+   */
+  spawnEnemy(id: EnemyId, x: number, z: number, elite: boolean, affixA: AffixId | null = null, affixB: AffixId | null = null): EnemyEntity {
     const def = ENEMIES[id];
     const isElite = elite && def.eliteAllowed;
     const e = this.#world.enemies.alloc();
     e.id = this.#nextEnemyId++;
     e.def = def;
     e.elite = isElite;
+    e.affixA = isElite ? affixA : null;
+    e.affixB = isElite && affixB !== affixA ? affixB : null;
+    const swift = hasAffix(e, 'swift');
     e.x = x;
     e.z = z;
     e.facing = 0;
@@ -913,7 +1004,8 @@ export class Combat {
     e.maxHp = Math.round(def.hp * (isElite ? TUNING.ELITE_HP_MULT : 1));
     e.hp = e.maxHp;
     e.damage = def.damage;
-    e.speed = def.speed * (isElite ? ELITE_SPEED_MULT : 1);
+    e.speed = def.speed * (isElite ? ELITE_SPEED_MULT : 1) * (swift ? SWIFT_SPEED_MULT : 1);
+    e.windupScale = swift ? SWIFT_WINDUP_SCALE : 1;
     e.state = def.archetype === 'static' ? 'idle' : 'wander';
     e.stateTime = 0;
     e.cooldown = 0;
@@ -931,7 +1023,6 @@ export class Combat {
     e.stuckTime = 0;
     e.sideUntil = 0;
     e.outOfArenaTime = 0;
-    e.acidCooldown = 0;
     e.wanderAt = 0;
     // SPEC-030 §4.6: pooled reset; the spawn director flips `fromWave` on for
     // the enemies it spawns into a wave run.
@@ -950,6 +1041,16 @@ export class Combat {
     e.lastHitCrit = false;
     // SPEC-039 §4.1: the surface marks the boss of a replayed stage after this.
     e.replay = false;
+    // SPEC-041 §4.1: a boss's first move waits 2 s; no timed move until its
+    // phase opens one. §4.5: the director stamps a pack's id after this.
+    e.moveIndex = -1;
+    e.moveCd = def.archetype === 'boss' ? BOSS_FIRST_MOVE_SECONDS : 0;
+    e.timedMoveAt = Infinity;
+    e.castX = x;
+    e.castZ = z;
+    e.packId = 0;
+    e.menderAt = this.#world.time + MENDER_PULSE_SECONDS;
+    e.lastHitGuarded = false;
     // Set immediately before the emit, so a subscriber can read the position.
     this.#lastSpawned = e;
     this.#events.emit('enemy:spawned', { enemyId: id, elite: isElite });
@@ -963,18 +1064,22 @@ export class Combat {
    * stream only (never layout — AC on stream independence pins it). The pool
    * slot is reclaimed by the end-of-step sweep, so callers may keep iterating.
    * SPEC-039 §4.1: a boss of a replayed stage pays `REPLAY_REWARD_FRACTION` of
-   * its XP (39-e); every other kill pays what it always did.
+   * its XP (39-e); every other kill pays what it always did. SPEC-041 §4.6: an
+   * elite pays ×(3 + its affixes), and a volatile one leaves its circle.
    */
   killEnemy(e: EnemyEntity, cause: 'player' | 'drone' | 'script'): void {
     if (e.state === 'dead') return;
     e.state = 'dead';
     e.hp = 0;
-    // SPEC-038 §4.2 (38-d): whatever it had drawn and not landed goes with it.
+    // SPEC-038 §4.2 (38-d): whatever it had drawn and not landed goes with it,
+    // and SPEC-041 §4.1: so does the move it was casting.
     this.#cancelTelegraphs(e);
+    e.moveIndex = -1;
     const def = e.def;
     const xp = Math.floor(
-      def.xp * (e.elite ? ELITE_XP_MULT : 1) * (e.replay ? TUNING.REPLAY_REWARD_FRACTION : 1),
+      def.xp * (e.elite ? ELITE_XP_MULT + affixCount(e) : 1) * (e.replay ? TUNING.REPLAY_REWARD_FRACTION : 1),
     );
+    if (hasAffix(e, 'volatile')) this.#volatileBurst(e);
     this.#events.emit('enemy:killed', { enemyId: def.id, elite: e.elite, x: e.x, z: e.z, xp });
     this.#progression.addXp(xp, 'kill');
     this.#rollLoot(def.loot, e);
@@ -982,9 +1087,38 @@ export class Combat {
     if (e.elite) this.#rollLoot('elite_bonus', e);
     if (def.archetype === 'boss') {
       this.#events.emit('boss:defeated', { boss: def.id });
-      if (this.#world.arena !== null) this.#world.arena.locked = false;
+      // SPEC-041 §4.4: the boss's death opens the seal.
+      if (this.#world.arena !== null) {
+        this.#world.arena.locked = false;
+        this.#world.arena.sealed = false;
+      }
     }
     log.debug('combat', `${def.id} killed by ${cause}`);
+  }
+
+  /**
+   * SPEC-041 §4.6: a volatile elite's death — a radius-3 circle at the body,
+   * landing `VOLATILE_FUSE × windupMult` s later for ×1.5 its species'
+   * damage. Not elite, owned by nobody (so the death cannot cancel it), and it
+   * never hits the follower (41-f). A full pool drops it (38-c).
+   */
+  #volatileBurst(e: EnemyEntity): void {
+    if (this.telegraphs.size >= TELEGRAPH_CAPACITY) return;
+    const t = this.telegraphs.alloc();
+    resetTelegraph(t);
+    const time = this.#world.time;
+    t.kind = 'circle';
+    t.x = e.x;
+    t.z = e.z;
+    t.radius = VOLATILE_RADIUS;
+    t.startAt = time;
+    t.hitAt = time + VOLATILE_FUSE * (this.#world.windupMult ?? 1);
+    t.lockAt = t.hitAt;
+    t.damage = e.def.damage * VOLATILE_DAMAGE_MULT;
+    t.elite = false;
+    t.source = e.def.id;
+    t.ownerId = 0;
+    t.hitsFollower = false;
   }
 
   #rollLoot(tableId: LootTableId, e: EnemyEntity): void {
@@ -1057,7 +1191,7 @@ export class Combat {
     this.#hash.query(x, z, radius + 3, blastCandidates);
     for (let c = 0; c < blastCandidates.length; c++) {
       const e = w.enemies.at(blastCandidates[c] as number);
-      if (e.state === 'dead' || e.invulnerable || e.specialKind === 'burrow_dig') continue;
+      if (e.state === 'dead' || e.invulnerable || isBuried(e)) continue;
       const dx = e.x - x;
       const dz = e.z - z;
       const centre = Math.hypot(dx, dz);
@@ -1108,6 +1242,7 @@ export class Combat {
     p.flight = len / THROW_SPEED;
     p.ttl = p.flight;
     p.crit = false;
+    p.armorPiercing = false;
   }
 
   /**
@@ -1176,7 +1311,7 @@ export class Combat {
     this.#hash.query(d.x, d.z, d.trigger + 3, blastCandidates);
     for (let c = 0; c < blastCandidates.length; c++) {
       const e = w.enemies.at(blastCandidates[c] as number);
-      if (e.state === 'dead' || e.def.archetype === 'static' || e.specialKind === 'burrow_dig') continue;
+      if (e.state === 'dead' || e.def.archetype === 'static' || isBuried(e)) continue;
       if (Math.hypot(e.x - d.x, e.z - d.z) - e.radius <= d.trigger) return true;
     }
     return false;
@@ -1199,7 +1334,19 @@ export class Combat {
         }
       }
     }
-    this.#damageEnemy(e, p.damage, p.owner === 'drone' ? 'drone' : 'player', p.crit);
+    // SPEC-041 §4.6: a bulwark turns a shot arriving within ±60° of its
+    // facing — the shot's origin lies back along its velocity — to ×0.25. An
+    // armour-piercing shot is not turned; blasts never come through here.
+    let amount = p.damage;
+    let guarded = false;
+    if (!p.armorPiercing && hasAffix(e, 'bulwark')) {
+      const len = Math.hypot(p.vx, p.vz);
+      if (len > 1e-6 && (-p.vx * Math.cos(e.facing) - p.vz * Math.sin(e.facing)) / len >= BULWARK_ARC_COS) {
+        amount = Math.max(1, Math.round(p.damage * BULWARK_DAMAGE_MULT));
+        guarded = true;
+      }
+    }
+    this.#damageEnemy(e, amount, p.owner === 'drone' ? 'drone' : 'player', p.crit, guarded);
   }
 
   /** §4.4: i-frames do not block the projectile, only the damage (AC-51). */
@@ -1411,7 +1558,7 @@ export class Combat {
     let bestClearD = Infinity;
     for (let i = 0; i < enemies.size; i++) {
       const e = enemies.at(i);
-      if (e.state === 'dead' || e.specialKind === 'burrow_dig') continue;
+      if (e.state === 'dead' || isBuried(e)) continue;
       const dx = e.x - p.x;
       const dz = e.z - p.z;
       const d = Math.hypot(dx, dz);
@@ -1459,6 +1606,8 @@ export class Combat {
     p.flight = 0;
     // SPEC-038 §4.8: the firing path sets it from its roll; a drone shot never crits.
     p.crit = false;
+    // SPEC-041 §4.6: a piercing weapon's shot goes through a bulwark's guard.
+    p.armorPiercing = weapon.pierce >= 1;
     return p;
   }
 
@@ -1477,7 +1626,7 @@ export class Combat {
     let bestD = Infinity;
     for (let i = 0; i < enemies.size; i++) {
       const e = enemies.at(i);
-      if (e.state === 'dead' || !e.aggro || e.specialKind === 'burrow_dig') continue;
+      if (e.state === 'dead' || !e.aggro || isBuried(e)) continue;
       const d = Math.hypot(e.x - p.x, e.z - p.z);
       if (d <= DRONE_RANGE && d < bestD) {
         best = e;
@@ -1550,6 +1699,8 @@ export class Combat {
     for (let i = 0; i < liveCount; i++) {
       updateEnemy(w.enemies.at(i), w, dt, this.#rng.ai, this.#aiHooks);
     }
+    // SPEC-041 §4.6: the menders pulse on the same hash.
+    this.#updateMenders();
     // SPEC-038 §4.2: the ground telegraphs resolve right after the brains.
     this.#updateTelegraphs();
 
@@ -1608,13 +1759,43 @@ export class Combat {
     }
   }
 
+  /**
+   * SPEC-041 §4.6: every `MENDER_PULSE_SECONDS`, each live mender heals the
+   * other live non-boss enemies within `MENDER_RADIUS` by
+   * `MENDER_HEAL_FRACTION` of their own max HP, up to it — never itself, never
+   * a boss (41-g) — and leaves a pulse for the scene's green ring.
+   */
+  #updateMenders(): void {
+    const w = this.#world;
+    const time = w.time;
+    const enemies = w.enemies;
+    for (let i = 0; i < enemies.size; i++) {
+      const m = enemies.at(i);
+      if (m.state === 'dead' || !hasAffix(m, 'mender') || time < m.menderAt || isBuried(m)) continue;
+      m.menderAt = time + MENDER_PULSE_SECONDS;
+      this.#hash.query(m.x, m.z, MENDER_RADIUS + 3, blastCandidates);
+      for (let c = 0; c < blastCandidates.length; c++) {
+        const other = enemies.at(blastCandidates[c] as number);
+        if (other === m || other.state === 'dead' || other.def.archetype === 'boss' || other.hp >= other.maxHp) continue;
+        if (Math.hypot(other.x - m.x, other.z - m.z) > MENDER_RADIUS) continue;
+        other.hp = Math.min(other.maxHp, other.hp + MENDER_HEAL_FRACTION * other.maxHp);
+      }
+      if (this.menderPulseCount < MENDER_PULSE_CAP) {
+        const pulse = this.menderPulses[this.menderPulseCount] as { x: number; z: number };
+        pulse.x = m.x;
+        pulse.z = m.z;
+        this.menderPulseCount++;
+      }
+    }
+  }
+
   /** §4.4: enemies are solid; overlap resolves by pushing the *player* out. */
   #pushPlayerOut(): void {
     const w = this.#world;
     const p = w.player;
     for (let i = 0; i < w.enemies.size; i++) {
       const e = w.enemies.at(i);
-      if (e.state === 'dead' || e.specialKind === 'burrow_dig') continue;
+      if (e.state === 'dead' || isBuried(e)) continue;
       let dx = p.x - e.x;
       let dz = p.z - e.z;
       let d = Math.hypot(dx, dz);
@@ -1632,6 +1813,8 @@ export class Combat {
         p.x = RESOLVED.x;
         p.z = RESOLVED.z;
       }
+      // SPEC-041 §4.4, E62: nor outside a sealed ring.
+      clampToSeal(w.arena, p);
     }
   }
 
@@ -1647,6 +1830,8 @@ export class Combat {
         p.x = RESOLVED.x;
         p.z = RESOLVED.z;
       }
+      // SPEC-041 §4.4, E62: nor knocks them out through a sealed ring.
+      clampToSeal(this.#world.arena, p);
     }
     this.#kbX = 0;
     this.#kbZ = 0;

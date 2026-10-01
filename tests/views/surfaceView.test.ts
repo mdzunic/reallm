@@ -55,7 +55,6 @@ function frame(enemies: Pool<EnemyEntity>, follower: SurfaceFrame['follower'] = 
     deployables: new Pool<DeployableEntity>(() => makeDeployable()),
     pickups: new Pool<ViewPickup>(() => ({ kind: 'resource', x: 0, z: 0, seed: 0, resource: 'oil' })),
     nodes: [{ resource: 'oil', x: 3, z: -3, capacity: 10, remaining: 5, harvesting: false }],
-    telegraph: null,
     time: 1,
     dt: 1 / 60,
   };

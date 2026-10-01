@@ -673,7 +673,7 @@ describe('kills, elites and loot (§4.6, §4.7)', () => {
   });
 
   it('boss death emits boss:defeated and unlocks the arena', () => {
-    const h = harness({ arena: { x: 0, z: 0, radius: 24, locked: true } });
+    const h = harness({ arena: { x: 0, z: 0, radius: 24, locked: true, sealed: false } });
     const boss = h.spawn('dune_wurm', 10, 0);
     h.combat.killEnemy(boss, 'player');
     expect(h.of('boss:defeated')).toEqual([{ boss: 'dune_wurm' }]);

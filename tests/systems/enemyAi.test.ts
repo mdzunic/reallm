@@ -1,6 +1,7 @@
 // systems/EnemyAi (SPEC-011 §4.5, §5): the archetype state machines, leashing,
-// aggro spread, the stuck side-step, boss phases, the wurm burrow, the queen
-// acid volley and the arena leash — all simulated at the fixed 60 Hz step.
+// aggro spread, the stuck side-step, boss phases and the arena leash — all
+// simulated at the fixed 60 Hz step. SPEC-041 moved the wurm's burrow and the
+// queen's acid into boss moves; their cases live in `bossMoves.test.ts`.
 import { describe, expect, it } from 'vitest';
 import type { EnemyEntity } from '@/entities/Enemy';
 import { CircleObstacles } from '@/entities/World';
@@ -328,7 +329,7 @@ describe('stuck on an obstacle (11-d)', () => {
 
 // -------------------------------------------------------------------- boss
 
-describe('boss phases (dune_wurm, hive_queen)', () => {
+describe('boss phases (dune_wurm)', () => {
   it('triggers each phase once at its HP fraction and summons a 6 m ring', () => {
     const h = harness();
     const boss = h.spawn('dune_wurm', 8, 0);
@@ -347,66 +348,8 @@ describe('boss phases (dune_wurm, hive_queen)', () => {
     expect(h.of('boss:phase')).toHaveLength(1); // never re-triggers
   });
 
-  it('burrows on phase 2: invulnerable 4 s, resurfaces 5 m from the player, shockwave r 4', () => {
-    const h = harness();
-    const boss = h.spawn('dune_wurm', 8, 0);
-    boss.aggro = true;
-    boss.hp = boss.maxHp * 0.35;
-    h.step();
-    expect(boss.state).toBe('special');
-    expect(boss.specialKind).toBe('burrow_dig');
-    expect(boss.invulnerable).toBe(true);
-    // Clear the phase summons so nothing shoves the player during the dig.
-    for (let i = h.world.enemies.size - 1; i >= 0; i--) {
-      const e = h.world.enemies.at(i);
-      if (e.def.id === 'wurmling') h.combat.killEnemy(e, 'script');
-    }
-    // Kill during the special is impossible: damage is ignored (11-f).
-    const hpBefore = boss.hp;
-    hitAt(h, boss, 100_000);
-    h.run(0.2);
-    expect(boss.hp).toBe(hpBefore);
-    // Dig 3 s → telegraph 1 s at a point 5 m from the player.
-    h.run(3);
-    expect(boss.specialKind).toBe('burrow_telegraph');
-    expect(Math.hypot(boss.wanderX, boss.wanderZ)).toBeCloseTo(5, 6); // player at origin
-    // Step onto the telegraph: the resurface shockwave hits within 4 m.
-    h.world.player.x = boss.wanderX;
-    h.world.player.z = boss.wanderZ;
-    h.run(1.1);
-    expect(boss.specialKind).toBe('none');
-    expect(boss.invulnerable).toBe(false);
-    expect(boss.x).toBeCloseTo(boss.wanderX, 6);
-    expect(h.of('player:damaged').some((d) => d.source.kind === 'enemy' && d.source.enemyId === 'dune_wurm')).toBe(true);
-  });
-
-  it('hive queen phase 2 gains the acid volley: 3-spread every 2 s', () => {
-    const h = harness();
-    // West of the player, so the volley angles sit around 0 without wrapping.
-    const queen = h.spawn('hive_queen', -10, 0);
-    queen.aggro = true;
-    queen.state = 'chase';
-    queen.hp = queen.maxHp * 0.45;
-    h.step();
-    expect(h.of('boss:phase')).toEqual([{ boss: 'hive_queen', phase: 2 }]);
-    expect(queen.invulnerable).toBe(true); // the 1.5 s phase special
-    h.run(1.55);
-    expect(queen.invulnerable).toBe(false);
-    // First volley: exactly three enemy shots in flight, spread around the aim.
-    expect(runUntil(h, 1, () => h.world.projectiles.size > 0)).toBeGreaterThan(0);
-    expect(h.world.projectiles.size).toBe(3);
-    const angles = [];
-    for (let i = 0; i < 3; i++) {
-      const p = h.world.projectiles.at(i);
-      angles.push(Math.atan2(p.vz, p.vx));
-      expect(Math.hypot(p.vx, p.vz)).toBeCloseTo(12, 5);
-    }
-    expect(Math.max(...angles) - Math.min(...angles)).toBeCloseTo(0.6, 3);
-    expect(queen.acidCooldown).toBeCloseTo(2, 1);
-  });
-
   it('resets when pulled out of the arena for 8 s (11-e)', () => {
-    const h = harness({ arena: { x: 0, z: 0, radius: 20, locked: true } });
+    const h = harness({ arena: { x: 0, z: 0, radius: 20, locked: true, sealed: false } });
     const boss = h.spawn('dune_wurm', 10, 0);
     boss.aggro = true;
     boss.state = 'chase';

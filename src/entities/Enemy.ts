@@ -1,8 +1,10 @@
 // Pooled enemy state (SPEC-011 §3). The named fields up to `invulnerable` are
 // the canonical interface of the spec; the block after them is the per-entity
-// scratch the §5 edge cases need (stuck detection 11-d, arena leash 11-e, the
-// wurm's burrow and the queen's acid timer) — flat numbers, so a pooled reset
-// stays a field-by-field overwrite with no allocation.
+// scratch the §5 edge cases need (stuck detection 11-d, arena leash 11-e) and
+// what SPEC-038 and SPEC-041 add — the charge, boss moves, packs and affixes —
+// flat values, so a pooled reset stays a field-by-field overwrite with no
+// allocation.
+import type { AffixId } from '@/data/affixes';
 import type { Enemy as EnemyDef } from '@/data/enemies';
 
 export type BrainState =
@@ -18,7 +20,9 @@ export type BrainState =
   // SPEC-038 §4.3: the rusher's committed charge — the rooted, telegraphed
   // windup, then the run down its locked lane.
   | 'chargeWindup'
-  | 'charge';
+  | 'charge'
+  // SPEC-041 §4.1: a boss winding up one of its moves, rooted.
+  | 'cast';
 
 /** What a boss `special` is currently doing; `none` outside one. */
 export type SpecialKind = 'none' | 'phase' | 'burrow_dig' | 'burrow_telegraph';
@@ -69,8 +73,6 @@ export interface EnemyEntity {
   sideUntil: number;
   /** 11-e: seconds a boss has spent beyond `arena.radius + 4`. */
   outOfArenaTime: number;
-  /** Hive queen phase 2+: seconds until the next acid volley. */
-  acidCooldown: number;
   /** World-clock time to pick the next wander point (every 2–4 s, §4.5). */
   wanderAt: number;
   /** SPEC-030 §4.6: seconds without a line to a hidden player. */
@@ -106,6 +108,45 @@ export interface EnemyEntity {
    * false in `spawnEnemy`; only the arena's own spawn sets it.
    */
   replay: boolean;
+
+  // ------------------------------------------- SPEC-041 §3: moves, packs, affixes
+  /** Index into def.moves of the move being cast, −1 for none. */
+  moveIndex: number;
+  /** Seconds until the next weighted move may start. */
+  moveCd: number;
+  /** World time the timed move (the burrow) is next due; Infinity when none. */
+  timedMoveAt: number;
+  /** Where the current move lands — a slam's centre, the burrow's surfacing point. */
+  castX: number;
+  castZ: number;
+  /** SPEC-041 §4.5: shared by a pack's members, 0 for none. */
+  packId: number;
+  affixA: AffixId | null;
+  affixB: AffixId | null;
+  /** Multiplies this enemy's windups (swift 0.8). */
+  windupScale: number;
+  /** Mender pulse clock. */
+  menderAt: number;
+  /** The last player hit on it was turned by a bulwark — the damage number reads it. */
+  lastHitGuarded: boolean;
+}
+
+/**
+ * SPEC-041 §4.1: under the sand — the burrow's dig and its telegraph. Skipped by
+ * auto-fire, projectiles, push-out, blasts and the view until it surfaces.
+ */
+export function isBuried(e: EnemyEntity): boolean {
+  return e.specialKind === 'burrow_dig' || e.specialKind === 'burrow_telegraph';
+}
+
+/** SPEC-041 §4.6: how many affixes an elite carries (0, 1 or 2). */
+export function affixCount(e: EnemyEntity): number {
+  return (e.affixA === null ? 0 : 1) + (e.affixB === null ? 0 : 1);
+}
+
+/** SPEC-041 §4.6: whether `e` carries `affix`. */
+export function hasAffix(e: EnemyEntity, affix: AffixId): boolean {
+  return e.affixA === affix || e.affixB === affix;
 }
 
 export function makeEnemy(): EnemyEntity {
@@ -140,7 +181,6 @@ export function makeEnemy(): EnemyEntity {
     stuckTime: 0,
     sideUntil: 0,
     outOfArenaTime: 0,
-    acidCooldown: 0,
     wanderAt: 0,
     lostTrack: 0,
     fromWave: false,
@@ -154,5 +194,16 @@ export function makeEnemy(): EnemyEntity {
     recoverFor: 0,
     lastHitCrit: false,
     replay: false,
+    moveIndex: -1,
+    moveCd: 0,
+    timedMoveAt: Infinity,
+    castX: 0,
+    castZ: 0,
+    packId: 0,
+    affixA: null,
+    affixB: null,
+    windupScale: 1,
+    menderAt: 0,
+    lastHitGuarded: false,
   };
 }

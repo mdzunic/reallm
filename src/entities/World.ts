@@ -32,12 +32,41 @@ export const RESOLVE_PASSES = 4;
 /** SPEC-034 §4.1: the extra gap a push out of an obstacle leaves behind. */
 export const RESOLVE_SKIN = 0.01;
 
-/** The boss arena (§4.5, edge 11-e). `locked` drops on `boss:defeated` (§4.7). */
+/**
+ * The boss arena (§4.5, edge 11-e). `locked` drops on `boss:defeated` (§4.7).
+ * SPEC-041 §4.4: `sealed` is set the first step the player stands wholly
+ * inside the ring while its boss lives, and while it holds, every write to the
+ * player's position stays within `radius − ARENA_SEAL_INSET` (E62).
+ */
 export interface ArenaState {
   x: number;
   z: number;
   radius: number;
   locked: boolean;
+  sealed: boolean;
+}
+
+/** SPEC-041 §4.4: how far inside the ring a sealed arena keeps the player's centre. */
+export const ARENA_SEAL_INSET = 0.5;
+/** SPEC-041 §4.4, E63: a death in a boss stage respawns this far past the ring, toward the pad. */
+export const ARENA_RESPAWN_OUTSET = 6;
+
+/**
+ * SPEC-041 §4.4, E62: with a sealed arena, project `p` back along the radius
+ * to within `radius − ARENA_SEAL_INSET` of the centre. Returns whether it
+ * moved; an unsealed or absent arena moves nothing. Never allocates.
+ */
+export function clampToSeal(arena: ArenaState | null | undefined, p: { x: number; z: number }): boolean {
+  if (arena === null || arena === undefined || !arena.sealed) return false;
+  const limit = arena.radius - ARENA_SEAL_INSET;
+  const dx = p.x - arena.x;
+  const dz = p.z - arena.z;
+  const d = Math.hypot(dx, dz);
+  if (d <= limit) return false;
+  if (d < 1e-9) return false;
+  p.x = arena.x + (dx / d) * limit;
+  p.z = arena.z + (dz / d) * limit;
+  return true;
 }
 
 export interface ObstacleCircle {

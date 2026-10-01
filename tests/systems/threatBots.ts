@@ -8,7 +8,7 @@ import { QUALITY } from '@/core/Renderer';
 import { Rng, RngRoot, hash32 } from '@/core/Rng';
 import { newSave, type CharacterCreation } from '@/core/Save';
 import { PLANETS, type ItemId, type PlanetId } from '@/data/index';
-import { makeEnemy } from '@/entities/Enemy';
+import { isBuried, makeEnemy } from '@/entities/Enemy';
 import { makePlayer } from '@/entities/Player';
 import { makeProjectile } from '@/entities/Projectile';
 import { NO_OBSTACLES } from '@/entities/World';
@@ -84,7 +84,7 @@ export function kite(world: CombatWorld, weaponRange: number, out: { x: number; 
   let nearZ = 0;
   for (let i = 0; i < world.enemies.size; i++) {
     const e = world.enemies.at(i);
-    if (e.state === 'dead' || e.specialKind === 'burrow_dig') continue;
+    if (e.state === 'dead' || isBuried(e)) continue;
     const d = Math.hypot(e.x - p.x, e.z - p.z);
     if (d < nearest) {
       nearest = d;
