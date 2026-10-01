@@ -4,6 +4,12 @@
 // a minute, all of it from projectiles: walking away erased every blow. Now the
 // field has to cost something — and never more than a quarter a minute — and
 // part of that cost has to come from blows and charges.
+//
+// SPEC-041 §6.1 extends it: every suite runs on the post-SPEC-039 reference
+// kit (`referenceKit`, with the Rocket's rotation), the field's packs keep the
+// kiter engaged, and each boss is fought in its sealed arena by four bots — the
+// kiter must win, a bot that reads the telegraphs must barely be touched, and
+// one that stands still must not survive on luck.
 import { describe, expect, it } from 'vitest';
 import { makeEnemy } from '@/entities/Enemy';
 import { makePlayer } from '@/entities/Player';
@@ -11,7 +17,18 @@ import { Pool } from '@/core/Pool';
 import { ENEMIES, PLANETS } from '@/data/index';
 import { NO_OBSTACLES } from '@/entities/World';
 import type { CombatWorld, PlayerStats } from '@/systems/Combat';
-import { COMBAT_PLANETS, kite, REFERENCE_KIT, runField, summarize, type PlanetSummary } from './threatBots';
+import {
+  BOSSES,
+  COMBAT_PLANETS,
+  kite,
+  referenceKit,
+  runBoss,
+  runField,
+  summarize,
+  type BossBot,
+  type BossResult,
+  type PlanetSummary,
+} from './threatBots';
 
 /**
  * §6.1: seeds 1–16. One planet's cost varies from 7 to 65 % a minute across
@@ -74,19 +91,32 @@ describe('kite(world) (SPEC-038 §6.1)', () => {
   });
 });
 
-describe('the field suite (SPEC-038 §6.1, AC-22)', () => {
+describe('the reference kit (SPEC-041 §6.1)', () => {
+  it('is the post-SPEC-039 player of each chapter, derived from RECOMMENDED_LOADOUT', () => {
+    // Pinned, so a change to the recommendation — or to the Wurm's piece — is
+    // a deliberate change to every suite below.
+    expect(referenceKit(1)).toEqual({ level: 3, rifle: 'weapon_kinetic', armor: 'armor_scrap', drone: false, heavy: null });
+    expect(referenceKit(2)).toEqual({ level: 7, rifle: 'weapon_laser', armor: 'armor_composite', drone: false, heavy: 'launcher_rocket' });
+    expect(referenceKit(3)).toEqual({ level: 10, rifle: 'weapon_laser', armor: 'armor_composite', drone: false, heavy: 'launcher_rocket' });
+    expect(referenceKit(4)).toEqual({ level: 13, rifle: 'weapon_laser', armor: 'armor_composite', drone: true, heavy: 'launcher_rocket' });
+    expect(referenceKit(5)).toEqual({ level: 15, rifle: 'weapon_plasma', armor: 'armor_composite', drone: true, heavy: 'launcher_rocket' });
+    expect(referenceKit(6)).toEqual({ level: 17, rifle: 'weapon_plasma', armor: 'armor_reactive', drone: true, heavy: 'launcher_rocket' });
+  });
+});
+
+describe('the field suite (SPEC-038 §6.1, AC-22; SPEC-041 §6.1)', () => {
   const summaries: PlanetSummary[] = COMBAT_PLANETS.map((planet) =>
     summarize(
       planet,
       SEEDS.map((seed) => runField(planet, seed)),
     ),
   );
-  const table = summaries.map((s) => `${s.planet}: ${s.perMinute.toFixed(1)} %/min, ${(s.enemyShare * 100).toFixed(0)} % blows`);
+  const table = summaries.map(
+    (s) => `${s.planet}: ${s.perMinute.toFixed(1)} %/min, ${(s.enemyShare * 100).toFixed(0)} % blows, ${s.engaged.toFixed(2)} engaged`,
+  );
 
-  it('uses the chapter reference kit of each planet', () => {
-    for (const planet of COMBAT_PLANETS) expect(REFERENCE_KIT[PLANETS[planet].chapter]).toBeDefined();
-    expect(REFERENCE_KIT[1]).toEqual({ level: 3, rifle: 'weapon_kinetic', armor: 'armor_scrap', drone: false });
-    expect(REFERENCE_KIT[5]).toEqual({ level: 15, rifle: 'weapon_plasma', armor: 'armor_composite', drone: true });
+  it('plays every combat planet on its chapter’s reference kit', () => {
+    for (const planet of COMBAT_PLANETS) expect(referenceKit(PLANETS[planet].chapter).level).toBeGreaterThan(0);
   });
 
   it('costs 1–25 % of max HP a minute on at least four of the five, ≥ 5 % of it from blows and charges', () => {
@@ -97,4 +127,48 @@ describe('the field suite (SPEC-038 §6.1, AC-22)', () => {
   it('never costs more than 25 % a minute on any', () => {
     for (const s of summaries) expect(s.perMinute, table.join('\n')).toBeLessThanOrEqual(25);
   });
+
+  // SPEC-041 §4.5: packs make the field arrive together — a kiter averages
+  // ≥ 0.6 aggroed enemies within 12 m (0.29–0.64 without packs).
+  it('keeps the kiter engaged: ≥ 0.6 aggroed enemies within 12 m on average, on every planet', () => {
+    for (const s of summaries) expect(s.engaged, table.join('\n')).toBeGreaterThanOrEqual(0.6);
+  });
+});
+
+describe('the boss suite (SPEC-041 §6.1)', () => {
+  /** §6.1: seeds 1–6 per boss and bot. */
+  const BOSS_SEEDS = [1, 2, 3, 4, 5, 6] as const;
+  const BOTS: readonly BossBot[] = ['kite', 'stand', 'reader', 'dasher'];
+  const fights = new Map<string, BossResult[]>();
+  for (const boss of BOSSES) {
+    for (const bot of BOTS) fights.set(`${boss}/${bot}`, BOSS_SEEDS.map((seed) => runBoss(boss, bot, seed)));
+  }
+  const of = (boss: string, bot: BossBot): BossResult[] => fights.get(`${boss}/${bot}`) ?? [];
+  const row = (runs: readonly BossResult[]): string =>
+    runs.map((r) => `${r.seed}: ${r.won ? 'won' : r.died ? 'died' : 'timed out'} ${r.seconds.toFixed(0)} s, lost ${r.lost.toFixed(0)} %`).join('; ');
+
+  for (const boss of BOSSES) {
+    describe(ENEMIES[boss].name, () => {
+      it('the kite bot wins every fight, with no death, in 30–70 s', () => {
+        for (const run of of(boss, 'kite')) {
+          expect(run.won, row(of(boss, 'kite'))).toBe(true);
+          expect(run.died).toBe(false);
+          expect(run.seconds, row(of(boss, 'kite'))).toBeGreaterThanOrEqual(30);
+          expect(run.seconds, row(of(boss, 'kite'))).toBeLessThanOrEqual(70);
+        }
+      });
+
+      it('the reader loses ≤ 25 % of its max HP', () => {
+        for (const run of of(boss, 'reader')) expect(run.lost, row(of(boss, 'reader'))).toBeLessThanOrEqual(25);
+      });
+
+      it('the dasher loses ≤ 10 %', () => {
+        for (const run of of(boss, 'dasher')) expect(run.lost, row(of(boss, 'dasher'))).toBeLessThanOrEqual(10);
+      });
+
+      it('the stand bot loses ≥ 100 %', () => {
+        for (const run of of(boss, 'stand')) expect(run.lost, row(of(boss, 'stand'))).toBeGreaterThanOrEqual(100);
+      });
+    });
+  }
 });
