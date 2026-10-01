@@ -1578,14 +1578,13 @@ and no seed is recalled only at ×1.1 — the only SPEC-039 change on that path.
   - desktop, production build — the same browser against `vite preview` over `dist/`
   - phone — _not run: no handset in the build container_ (§13's pass is owed, below)
 
-Recorded from the container the branch was built in: `npm run typecheck`, then
-`vite build` and `npm run test` in the order §11 gives `npm run check` (95
-files, 1,915 tests, the emitted-build tests of `tests/build/pwa.test.ts` among
-them against that fresh `dist/`); `npx vitest run tests/campaign` in 0.56 s (30
-tests); and `e2e/SPEC-016.spec.ts` (cases 1–7 of §12.2 in five tests, 36 s with
-five workers). `package.json`'s `check` itself still tests before it builds:
-its reorder (D-27) is a change to a file this branch could not make, and is
-owed before the gate relies on it.
+Recorded from the container the branch was built in: `npm run check`, which
+now runs typecheck, then `vite build`, then `npm run test` (D-27) — 95 files and
+1,915 tests with none skipped, so the six emitted-build tests of
+`tests/build/pwa.test.ts` ran against the `dist/` that same command had just
+built; `npx vitest run tests/campaign` in 0.59 s (30 tests); and
+`e2e/SPEC-016.spec.ts` (cases 1–7 of §12.2 and D-18's lost context, in six
+tests, 39 s with five workers).
 
 **The played campaign.** Every number §4.7 pins came out of the harness as
 written: the worst case at 5,480 XP, level 13, 970 earned and 609 spent; the
