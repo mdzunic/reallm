@@ -421,6 +421,9 @@ test('8. a wave says so for 3 s under the weather banner', async ({ page }) => {
 
 test('9. levels: the toast stays 4 s, the label glows, the XP bar and the panel give the numbers', async ({ page }) => {
   test.setTimeout(150_000);
+  // Auto-fire off: the smite below is the one kill, and its drop lies 7 m
+  // out, past the magnet — no pickup toast pushes the level's out of the rack.
+  await autoFireOff(page);
   // One XP short of level 2 (150): the next kill crosses it through Progression.
   await land(page, { xp: 149 });
   const level = page.locator('[data-testid="hud"] .hud-level');
@@ -431,17 +434,39 @@ test('9. levels: the toast stays 4 s, the label glows, the XP bar and the panel 
   await expect(xpRow).toHaveAttribute('aria-label', 'XP 149 / 150');
   await expect(xpRow.locator('.bar')).toHaveCSS('height', '6px');
 
+  // When the level toast rose and fell, and the glow, in the page.
+  await page.evaluate(() => {
+    const rec: { toastUp?: number; toastDown?: number; glowUp?: number; glowDown?: number } = {};
+    (window as unknown as { __spec042: typeof rec }).__spec042 = rec;
+    const frame = (): void => {
+      const now = performance.now();
+      const toast = [...document.querySelectorAll('.toast')].some((node) => node.textContent?.startsWith('Level 2 — ') === true);
+      if (toast && rec.toastUp === undefined) rec.toastUp = now;
+      if (!toast && rec.toastUp !== undefined && rec.toastDown === undefined) rec.toastDown = now;
+      const glow = document.querySelector('[data-testid="hud"] .hud-level')?.classList.contains('is-levelled') === true;
+      if (glow && rec.glowUp === undefined) rec.glowUp = now;
+      if (!glow && rec.glowUp !== undefined && rec.glowDown === undefined) rec.glowDown = now;
+      requestAnimationFrame(frame);
+    };
+    requestAnimationFrame(frame);
+  });
   await press(page, 'surface-spawn-pack');
   await page.waitForTimeout(300);
   await press(page, 'surface-smite');
-  const toast = page.locator('.toast', { hasText: /^Level 2 — / });
-  await expect(toast).toBeVisible({ timeout: 10_000 });
+  await expect(page.locator('.toast', { hasText: /^Level 2 — / })).toBeVisible({ timeout: 10_000 });
   await expect(level).toHaveText('Lv 2');
   await expect(level).toHaveClass(/is-levelled/);
-  await page.waitForTimeout(3_200);
-  await expect(toast).toBeVisible();
-  await expect(toast).toBeHidden({ timeout: 3_000 });
-  await expect(level).not.toHaveClass(/is-levelled/);
+  type Rec = { toastUp?: number; toastDown?: number; glowUp?: number; glowDown?: number };
+  const rec = (): Promise<Rec> => page.evaluate(() => (window as unknown as { __spec042: Rec }).__spec042);
+  await expect.poll(async () => (await rec()).toastDown, { timeout: 10_000 }).toBeDefined();
+  await expect.poll(async () => (await rec()).glowDown, { timeout: 10_000 }).toBeDefined();
+  const seen = await rec();
+  const toastMs = (seen.toastDown as number) - (seen.toastUp as number);
+  expect(toastMs, 'the level-up toast, ms').toBeGreaterThan(3_600);
+  expect(toastMs, 'the level-up toast, ms').toBeLessThan(4_800);
+  const glowMs = (seen.glowDown as number) - (seen.glowUp as number);
+  expect(glowMs, 'the level glow, ms').toBeGreaterThan(1_600);
+  expect(glowMs, 'the level glow, ms').toBeLessThan(2_800);
 
   await page.evaluate(() => window.__reallm.go('station', {}, { force: true }));
   await expect(page.getByTestId('scene-label')).toHaveText('station', COLD_START);
