@@ -714,11 +714,13 @@ test('9. levels: the toast stays 4 s, the label glows, the XP bar and the panel 
   await expect(xpRow).toHaveAttribute('aria-label', 'XP 149 / 150');
   await expect(xpRow.locator('.bar')).toHaveCSS('height', '6px');
 
-  // When the level toast rose and fell, and the glow, in the page.
+  // When the level toast rose and fell, and the glow, in the page — read at
+  // the DOM change itself, so a loaded host's long frames (both are wall-clock
+  // timers) add no sampling error to the durations.
   await page.evaluate(() => {
     const rec: { toastUp?: number; toastDown?: number; glowUp?: number; glowDown?: number } = {};
     (window as unknown as { __spec042: typeof rec }).__spec042 = rec;
-    const frame = (): void => {
+    const check = (): void => {
       const now = performance.now();
       const toast = [...document.querySelectorAll('.toast')].some((node) => node.textContent?.startsWith('Level 2 — ') === true);
       if (toast && rec.toastUp === undefined) rec.toastUp = now;
@@ -726,9 +728,8 @@ test('9. levels: the toast stays 4 s, the label glows, the XP bar and the panel 
       const glow = document.querySelector('[data-testid="hud"] .hud-level')?.classList.contains('is-levelled') === true;
       if (glow && rec.glowUp === undefined) rec.glowUp = now;
       if (!glow && rec.glowUp !== undefined && rec.glowDown === undefined) rec.glowDown = now;
-      requestAnimationFrame(frame);
     };
-    requestAnimationFrame(frame);
+    new MutationObserver(check).observe(document.body, { subtree: true, childList: true, attributes: true, attributeFilter: ['class'] });
   });
   await press(page, 'surface-spawn-pack');
   await page.waitForTimeout(300);
