@@ -32,7 +32,7 @@ npm run test:watch
 npm run e2e          # Playwright smoke + per-scene tests (headless Chromium; run npx playwright install chromium once)
 npm run build        # typecheck + vite build
 npm run preview
-npm run check        # typecheck + test + build — must be green before any milestone tag
+npm run check        # typecheck + build + test (build first, so tests/build/ reads this commit's dist/) — must be green before any milestone tag
 ```
 
 Single test file / single case:
