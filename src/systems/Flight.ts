@@ -89,6 +89,14 @@ export interface Hazard {
   pattern?: number;
   /** Fighters: the depth they hold, drawn in [50, 70] (§4.4). */
   holdDepth?: number;
+  /** SPEC-041 §4.9: seconds of white hit flash left after a hit that did not kill. */
+  hitFlash?: number;
+  /** SPEC-041 §4.8, fighters: rounds of the current burst still to fire. */
+  burstLeft?: number;
+  /** …and the sim time the next of them is due. */
+  burstAt?: number;
+  /** Enemy shots: what the round deals on reaching the ship (§4.8). */
+  shotDamage?: number;
 }
 
 export interface Shot {
@@ -214,7 +222,17 @@ const REAIM_DEPTH = 60;
  */
 export const INTERCEPTOR_RAM_DAMAGE = 15;
 const ENEMY_SHOT_VDEPTH = -45;
-const ENEMY_SHOT_RADIUS = 0.4;
+export const ENEMY_SHOT_RADIUS = 0.4;
+/**
+ * SPEC-041 §4.8: a fighter's cooldown opens a three-round burst, 0.12 s apart.
+ * Round `k` aims at the ship plus `leads[k]` × its lateral velocity × the
+ * round's time to impact — a bracket that hits a steady drift and a ship that
+ * holds still, and misses a change of direction — and deals
+ * `round(damage × damageMult)` (8 for `scav_fighter`).
+ */
+export const FIGHTER_BURST = { rounds: 3, interval: 0.12, leads: [1, 0.5, 0], damageMult: 0.45 } as const;
+/** SPEC-041 §4.9: how long a hazard a shot hit without killing it flashes white. */
+export const HAZARD_FLASH_SECONDS = 0.1;
 /** Ion storms: window and gap bounds, and the hull tick while shields are down (§4.5). */
 const STORM_LENGTH: readonly [number, number] = [15, 25];
 const STORM_GAP: readonly [number, number] = [40, 70];
@@ -233,6 +251,30 @@ interface WaveGroup {
 }
 
 const clamp = (value: number, lo: number, hi: number): number => Math.min(hi, Math.max(lo, value));
+
+// ------------------------------------------------- SPEC-041 §4.8: burst aim
+
+/** Seconds an enemy round fired from `depth` takes to reach the ship's plane. */
+export function enemyShotEta(depth: number): number {
+  return (depth - RAIL.hitDepth) / -ENEMY_SHOT_VDEPTH;
+}
+
+/**
+ * Where round `k` of a burst fired from `depth` aims — the ship's position
+ * plus `FIGHTER_BURST.leads[k]` × its lateral velocity × the round's time to
+ * impact — written into `out`. Fighters fire through it; the burst-geometry
+ * test measures it.
+ */
+export function burstAim(
+  k: number,
+  depth: number,
+  ship: Readonly<Pick<ShipState, 'x' | 'y' | 'vx' | 'vy'>>,
+  out: { x: number; y: number },
+): void {
+  const lead = (FIGHTER_BURST.leads[k] ?? 0) * enemyShotEta(depth);
+  out.x = ship.x + lead * ship.vx;
+  out.y = ship.y + lead * ship.vy;
+}
 
 // ------------------------------------------------------ SPEC-032 §4.3: skips
 
@@ -279,6 +321,15 @@ export class Flight {
   readonly bursts = new Pool<Burst>(() => ({ x: 0, y: 0, depth: 0, size: 1 }));
   /** Where the shots actually go: the raw aim, or the assist's captured target (§4.7). */
   readonly reticle = { x: 0, y: 0 };
+  /**
+   * SPEC-041 §4.7: for the assist-cone target, where a shot fired now meets
+   * it, projected to the convergence depth — plane metres, like the reticle.
+   * `active` is false with no target in the cone. The scene draws the lead
+   * pip here while ARIA is enabled; ARIA level 2 chases it with the reticle.
+   */
+  readonly lead = { x: 0, y: 0, active: false };
+  /** Scratch for a burst round's aim point (no allocation per round). */
+  readonly #aim = { x: 0, y: 0 };
 
   readonly economy: Economy;
   readonly #progression: Progression;
@@ -291,6 +342,8 @@ export class Flight {
   readonly #speedMult: number;
   readonly #ariaShieldRegen: number;
   readonly #ariaAutoAim: boolean;
+  /** SPEC-041 §4.7, 41-k: ARIA aboard and enabled — the lead pip's gate. */
+  readonly #ariaEnabled: boolean;
   /** SPEC-038 §4.6: never cached for the trip — `setDifficulty` moves it. */
   #damageMult: number;
   readonly #asteroidCap: number;
@@ -330,6 +383,7 @@ export class Flight {
     // SPEC-039 §4.3: the regeneration is a companion effect, so it scales.
     this.#ariaShieldRegen = (effect?.shieldRegen ?? 0) * (cfg.companionMult ?? 1);
     this.#ariaAutoAim = effect?.autoAim ?? false;
+    this.#ariaEnabled = effect !== undefined;
     const hullBonus = effect?.hullBonus ?? 0;
     this.#damageMult = cfg.difficulty === 'casual' ? CASUAL_DAMAGE_MULT : 1;
     this.#asteroidCap = cfg.quality.asteroidCap;
@@ -394,6 +448,15 @@ export class Flight {
   /** Sim seconds since launch started; the regen delay runs on this clock. */
   get time(): number {
     return this.#time;
+  }
+
+  /**
+   * SPEC-041 §4.7, 41-k: whether ARIA is aboard and enabled. The lead pip is
+   * hers — disabled, there is no pip and no snap, while the cone still keys
+   * touch auto-fire.
+   */
+  get ariaEnabled(): boolean {
+    return this.#ariaEnabled;
   }
 
   /** Live enemy ships — the HUD's "hostiles: n" (§4.10). */
@@ -582,6 +645,11 @@ export class Flight {
    * §4.7: the raw aim owns the reticle until an enemy ship sits inside the 6°
    * cone; then ARIA L2+ chases it at 20/s. Returns the cone target (or null) —
    * auto-fire keys off it whether or not the assist is bought (AC-32).
+   *
+   * SPEC-041 §4.7: the cone target's lead — where a shot fired now meets it,
+   * projected to the convergence depth — is written to `lead` on every level,
+   * and it is the lead, not the target's current projection, that ARIA L2+
+   * chases. Level 1 never moves the reticle.
    */
   #updateReticle(dt: number, input: FlightInput): Hazard | null {
     const ship = this.ship;
@@ -601,14 +669,23 @@ export class Flight {
       if (cos < ASSIST_CONE_COS) continue;
       if (target === null || hazard.depth < target.depth) target = hazard;
     }
+    const lead = this.lead;
+    lead.active = target !== null;
+    if (target !== null) {
+      // The shot and the target close at `laserSpeed − vDepth`: they meet `t`
+      // from now, `meet` metres out, where the target has moved by its
+      // lateral velocity × t. Scaled from the ship to the convergence depth,
+      // which is the plane the reticle — and so every shot — aims through.
+      const t = target.depth / (RAIL.laserSpeed - target.vDepth);
+      const scale = CONVERGE_DEPTH / (RAIL.laserSpeed * t);
+      lead.x = ship.x + (target.x + target.vx * t - ship.x) * scale;
+      lead.y = ship.y + (target.y + target.vy * t - ship.y) * scale;
+    }
     if (target !== null && this.#ariaAutoAim) {
-      // Snap to the target's projection at the convergence depth.
-      const scale = CONVERGE_DEPTH / target.depth;
-      const tx = ship.x + (target.x - ship.x) * scale;
-      const ty = ship.y + (target.y - ship.y) * scale;
+      // ARIA L2+: chase the lead point.
       const chase = Math.min(1, ASSIST_LERP_PER_S * dt);
-      this.reticle.x += (tx - this.reticle.x) * chase;
-      this.reticle.y += (ty - this.reticle.y) * chase;
+      this.reticle.x += (lead.x - this.reticle.x) * chase;
+      this.reticle.y += (lead.y - this.reticle.y) * chase;
     } else {
       this.reticle.x = input.aimX;
       this.reticle.y = input.aimY;
@@ -700,7 +777,15 @@ export class Flight {
   #damageHazard(index: number, damage: number): void {
     const hazard = this.hazards.at(index);
     hazard.hp -= damage;
-    if (hazard.hp > 0) return;
+    const lethal = hazard.hp <= 0;
+    const kind = hazard.kind;
+    // SPEC-041 §4.9: every player-shot hit is heard and seen — the reticle
+    // marks it and `ship_hit_tick` plays. (Shots never hit an enemy shot.)
+    if (kind !== 'enemy_shot') this.#events.emit('flight:hazardHit', { kind, x: hazard.x, y: hazard.y, lethal });
+    if (!lethal) {
+      hazard.hitFlash = HAZARD_FLASH_SECONDS; // counted down in `#updateHazards`
+      return;
+    }
     this.#burst(hazard.x, hazard.y, hazard.depth, hazard.radius);
     const def = hazard.def;
     if ((hazard.kind === 'fighter' || hazard.kind === 'interceptor') && def !== undefined) {
@@ -761,6 +846,10 @@ export class Flight {
     hazard.fireCooldown = undefined;
     hazard.pattern = undefined;
     hazard.holdDepth = undefined;
+    hazard.hitFlash = 0;
+    hazard.burstLeft = undefined;
+    hazard.burstAt = undefined;
+    hazard.shotDamage = undefined;
     return hazard;
   }
 
@@ -779,6 +868,10 @@ export class Flight {
     hazard.fireCooldown = undefined;
     hazard.ttl = undefined;
     hazard.holdDepth = undefined;
+    hazard.hitFlash = 0;
+    hazard.burstLeft = undefined;
+    hazard.burstAt = undefined;
+    hazard.shotDamage = undefined;
     if (def.archetype === 'interceptor') {
       hazard.kind = 'interceptor';
       hazard.depth = INTERCEPTOR_ENTER_DEPTH;
@@ -793,6 +886,8 @@ export class Flight {
     hazard.ttl = FIGHTER_LEAVE_SECONDS;
     hazard.pattern = rng.angle();
     hazard.fireCooldown = def.attack.kind === 'ranged' ? def.attack.cooldown : 2;
+    hazard.burstLeft = 0;
+    hazard.burstAt = 0;
   }
 
   /** §4.4: straight at the ship's position, sampled now; `vDepth` stays the dive. */
@@ -810,11 +905,16 @@ export class Flight {
     const ship = this.ship;
     for (let i = this.hazards.size - 1; i >= 0; i--) {
       const hazard = this.hazards.at(i);
+      // SPEC-041 §4.9: a hit's white flash runs out on the sim clock.
+      const flash = hazard.hitFlash;
+      if (flash !== undefined && flash > 0) hazard.hitFlash = flash > dt ? flash - dt : 0;
       switch (hazard.kind) {
         case 'fighter': {
           hazard.ttl = (hazard.ttl ?? 0) - dt;
           if (hazard.ttl <= 0) {
-            this.hazards.free(i); // §4.4: leaves alive — not killed, no event
+            // §4.4: leaves alive — not killed, no event. SPEC-041 41-j: the
+            // rounds of a burst it had not fired yet leave with it.
+            this.hazards.free(i);
             continue;
           }
           const hold = hazard.holdDepth ?? FIGHTER_HOLD_MIN;
@@ -832,9 +932,13 @@ export class Flight {
             hazard.vy = width * 0.6 * 2.4 * Math.cos(2.4 * hazard.pattern);
             hazard.fireCooldown = (hazard.fireCooldown ?? 2) - dt;
             if (hazard.fireCooldown <= 0 && ship.alive) {
-              this.#fireEnemyShot(hazard);
+              // SPEC-041 §4.8: the cooldown opens a burst; its first round
+              // goes this step, the rest `interval` apart.
+              hazard.burstLeft = FIGHTER_BURST.rounds;
+              hazard.burstAt = this.#time;
               hazard.fireCooldown = def?.attack.kind === 'ranged' ? def.attack.cooldown : 2;
             }
+            this.#fireBurst(hazard);
           }
           hazard.x = clamp(hazard.x + hazard.vx * dt, -PLANE.halfW, PLANE.halfW);
           hazard.y = clamp(hazard.y + hazard.vy * dt, -PLANE.halfH, PLANE.halfH);
@@ -866,8 +970,11 @@ export class Flight {
           hazard.depth += hazard.vDepth * dt;
           if (hazard.depth <= RAIL.hitDepth && ship.alive && Math.hypot(hazard.x - ship.x, hazard.y - ship.y) < hazard.radius + SHIP_RADIUS) {
             const def = hazard.def;
+            // SPEC-041 §4.8: a burst round deals its own share; `hit()` still
+            // applies casual's ×0.7 on top (41-l).
+            const damage = hazard.shotDamage ?? def?.damage ?? 10;
             this.hazards.free(i);
-            this.hit(def?.damage ?? 10, 'enemy', def === undefined ? { kind: 'asteroid' } : { kind: 'projectile', enemyId: def.id as EnemyId });
+            this.hit(damage, 'enemy', def === undefined ? { kind: 'asteroid' } : { kind: 'projectile', enemyId: def.id as EnemyId });
             continue;
           }
           if (hazard.depth < -5) this.hazards.free(i);
@@ -892,7 +999,31 @@ export class Flight {
     }
   }
 
-  #fireEnemyShot(fighter: Hazard): void {
+  /**
+   * SPEC-041 §4.8: fire every round of `fighter`'s burst that is due — while
+   * `burstLeft > 0` and the clock has reached `burstAt` — round `k` with
+   * `FIGHTER_BURST.leads[k]`, each `interval` after the last.
+   */
+  #fireBurst(fighter: Hazard): void {
+    let left = fighter.burstLeft ?? 0;
+    let at = fighter.burstAt ?? 0;
+    while (left > 0 && this.#time >= at && this.ship.alive) {
+      this.#fireEnemyShot(fighter, FIGHTER_BURST.rounds - left);
+      left--;
+      at += FIGHTER_BURST.interval;
+    }
+    fighter.burstLeft = left;
+    fighter.burstAt = at;
+  }
+
+  /**
+   * Round `k` of a burst (§4.8): it flies at −45 m/s in depth toward
+   * `burstAim` — where the ship will be when it arrives if it keeps
+   * `leads[k]` of its lateral velocity, 1 being a perfect lead on a steady
+   * drift and 0 its current position — and deals
+   * `round(damage × FIGHTER_BURST.damageMult)`.
+   */
+  #fireEnemyShot(fighter: Hazard, k: number): void {
     const shot = this.hazards.alloc();
     shot.kind = 'enemy_shot';
     shot.def = fighter.def;
@@ -902,15 +1033,20 @@ export class Flight {
     shot.depth = fighter.depth;
     shot.radius = ENEMY_SHOT_RADIUS;
     shot.hp = 1;
-    // §4.4: aimed at the ship's *current* position — lead it and it misses.
-    const eta = (fighter.depth - RAIL.hitDepth) / -ENEMY_SHOT_VDEPTH;
+    const eta = enemyShotEta(fighter.depth);
+    const aim = this.#aim;
+    burstAim(k, fighter.depth, this.ship, aim);
     shot.vDepth = ENEMY_SHOT_VDEPTH;
-    shot.vx = (this.ship.x - fighter.x) / eta;
-    shot.vy = (this.ship.y - fighter.y) / eta;
+    shot.vx = (aim.x - fighter.x) / eta;
+    shot.vy = (aim.y - fighter.y) / eta;
+    shot.shotDamage = Math.round((fighter.def?.damage ?? 10) * FIGHTER_BURST.damageMult);
+    shot.hitFlash = 0;
     shot.ttl = undefined;
     shot.fireCooldown = undefined;
     shot.pattern = undefined;
     shot.holdDepth = undefined;
+    shot.burstLeft = undefined;
+    shot.burstAt = undefined;
   }
 
   // ----------------------------------------------------------- damage & storm
@@ -944,6 +1080,7 @@ export class Flight {
     // scene holds the explosion for 1.5 s before the station.
     ship.alive = false;
     this.#phase = 'recalled';
+    this.lead.active = false; // the trip is over: nothing left to lead
     this.#burst(ship.x, ship.y, 0, 4);
     this.#events.emit('player:died', { cause, scene: 'flight' });
     this.#events.emit('flight:recalled', { planet: this.#cfg.planet.id });
@@ -1019,6 +1156,7 @@ export class Flight {
 
   #arrive(): void {
     this.#phase = 'arrived';
+    this.lead.active = false;
     this.#events.emit('flight:arrived', { planet: this.#cfg.planet.id });
   }
 
