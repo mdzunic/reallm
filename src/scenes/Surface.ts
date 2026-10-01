@@ -3136,6 +3136,8 @@ export class SurfaceScene extends UiScene<'surface'> {
     // E31: a reveal still waiting on a dialogue dies with the boss. Its session
     // key stays taken, so walking back in spawns the boss and nothing else.
     this.#revealPending = null;
+    // SPEC-041 §4.4: a death or a recall opens the seal with the arena.
+    if (this.#arena !== null) this.#arena.sealed = false;
     world.arena = null;
     this.#arena = null;
     this.#weather?.suppress(false);
@@ -4767,6 +4769,8 @@ export class SurfaceScene extends UiScene<'surface'> {
         'player:died',
         () => {
           this.#deathAt = 0;
+          // SPEC-041 §4.4: a death opens the seal at once; the respawn clears the arena.
+          if (this.#arena !== null) this.#arena.sealed = false;
           const lost = this.#economy?.applyDeathPenalty() ?? {};
           this.#death?.show(lost);
           this.#onDeath(); // SPEC-027 §4.6: the first-death tip, the repeat hint
