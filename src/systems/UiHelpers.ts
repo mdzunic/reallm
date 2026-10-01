@@ -1121,14 +1121,17 @@ const LOWER_IS_BETTER: ReadonlySet<StatKey> = new Set<StatKey>(['heat', 'recharg
  * direction: a lower heat per shot is better. The cooldown model has none.
  */
 export function compareDeltas(worn: ItemId, candidate: ItemId): readonly CompareDelta[] {
-  return gearCompare(worn, candidate).map((part) => {
-    let better: -1 | 0 | 1 = 0;
-    if (part.stat !== 'cooldown' && typeof part.from === 'number' && typeof part.to === 'number' && part.from !== part.to) {
-      const higher = part.to > part.from;
-      better = higher !== LOWER_IS_BETTER.has(part.stat) ? 1 : -1;
-    }
-    return { ...part, better, text: compareText(part) };
-  });
+  return gearCompare(worn, candidate).map((part) => ({ ...part, better: compareDirection(part), text: compareText(part) }));
+}
+
+/**
+ * §4.8 — which way one part points for the player: +1 when the candidate's
+ * number is higher (lower, for heat per shot and recharge), −1 the other way,
+ * 0 for equal values and for the cooldown model, whose values are names.
+ */
+export function compareDirection(part: Pick<StatDelta, 'stat' | 'from' | 'to'>): -1 | 0 | 1 {
+  if (part.stat === 'cooldown' || typeof part.from !== 'number' || typeof part.to !== 'number' || part.from === part.to) return 0;
+  return part.to > part.from !== LOWER_IS_BETTER.has(part.stat) ? 1 : -1;
 }
 
 /** The affix lines already joined, per (affixA, affixB) pair — built once each. */

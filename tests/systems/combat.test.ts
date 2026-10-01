@@ -2037,3 +2037,59 @@ describe('the sealed arena (SPEC-041 §4.4, E62)', () => {
     expect(h.world.arena?.locked).toBe(false);
   });
 });
+
+// ------------------------------------------------- SPEC-042 §4.9: hit memory
+
+describe('the target frame’s hit memory (SPEC-042 §4.9)', () => {
+  it('a projectile hit writes lastHit; an elite hit writes lastEliteHit too', () => {
+    const h = harness();
+    expect(h.combat.lastHit.entity).toBeNull();
+    const egg = h.spawn('hive_egg', 2, 0);
+    h.shot({ x: 2, z: 0, vx: 40, damage: 5, ttl: 0.5 });
+    h.step();
+    expect(h.combat.lastHit).toEqual({ entity: egg, id: egg.id, at: h.world.time });
+    expect(h.combat.lastEliteHit.entity).toBeNull();
+
+    const elite = h.spawn('dust_skitter', 6, 6, true);
+    expect(elite.elite).toBe(true);
+    h.run(0.5);
+    h.shot({ x: elite.x, z: elite.z, vx: 40, damage: 5, ttl: 0.5 });
+    h.step();
+    expect(h.combat.lastHit.entity).toBe(elite);
+    expect(h.combat.lastEliteHit).toEqual({ entity: elite, id: elite.id, at: h.world.time });
+  });
+
+  it('a blast writes it as well — the player’s blasts are hits', () => {
+    const h = harness();
+    const egg = h.spawn('hive_egg', 4, 4);
+    h.step();
+    expect(h.combat.explode(4, 4, 1, 1, 0)).toBe(1);
+    expect(h.combat.lastHit.entity).toBe(egg);
+  });
+
+  it('a boss hit writes neither — the boss has its own frame', () => {
+    const h = harness();
+    const boss = h.spawn('dune_wurm', 10, 10);
+    h.step();
+    const before = boss.hp;
+    h.shot({ x: boss.x, z: boss.z, vx: 40, damage: 5, ttl: 0.5 });
+    h.step();
+    expect(boss.hp).toBeLessThan(before);
+    expect(h.combat.lastHit.entity).toBeNull();
+    expect(h.combat.lastEliteHit.entity).toBeNull();
+  });
+
+  it('drone damage writes neither', () => {
+    const h = harness();
+    const egg = h.spawn('hive_egg', 2, 0);
+    const elite = h.spawn('dust_skitter', 6, 6, true);
+    h.run(0.25);
+    h.shot({ x: 2, z: 0, vx: 40, damage: 5, ttl: 0.5, owner: 'drone' });
+    h.shot({ x: elite.x, z: elite.z, vx: 40, damage: 5, ttl: 0.5, owner: 'drone' });
+    h.step();
+    expect(egg.hp).toBeLessThan(egg.maxHp);
+    expect(elite.hp).toBeLessThan(elite.maxHp);
+    expect(h.combat.lastHit.entity).toBeNull();
+    expect(h.combat.lastEliteHit.entity).toBeNull();
+  });
+});

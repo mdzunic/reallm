@@ -1578,3 +1578,243 @@ describe('diffHudInto and copyHudInto (SPEC-040 §4.4, AC-20)', () => {
     expect(last.tracker).toEqual(a.tracker);
   });
 });
+
+// ------------------------------------------------------ SPEC-042 §6.1
+
+import { makePlayer } from '@/entities/Player';
+import { makeEnemy } from '@/entities/Enemy';
+import { cumulativeXp, LEVEL_CAP, xpToNext } from '@/systems/Progression';
+import {
+  activeEffects,
+  affixLine,
+  blockedText,
+  bossPhaseMarks,
+  characterXpText,
+  compareDeltas,
+  compareDirection,
+  completionLines,
+  deathCause,
+  deathTip,
+  pickupText,
+  prerequisiteText,
+  purchaseText,
+  type DeathContext,
+  type HudEffect,
+} from '@/systems/UiHelpers';
+
+describe('completionLines (SPEC-042 §4.1)', () => {
+  it('reads c1_m1’s XP, tokens and resources, and names the next offer', () => {
+    expect(completionLines(MISSIONS.c1_m1, false, null)).toEqual({
+      title: 'Dry Land',
+      rewards: '+100 XP · +10 tokens · +20 oil',
+      next: null,
+    });
+    expect(completionLines(MISSIONS.c1_m1, false, MISSIONS.c1_m2).next).toBe('Next: Black Gold — at the pad terminal');
+  });
+
+  it('a replay pays the halved XP and tokens and says so, with no resources or items', () => {
+    expect(completionLines(MISSIONS.c1_m1, true, null).rewards).toBe('+50 XP · +5 tokens · replay');
+    expect(completionLines(MISSIONS.c1_s1, true, null).rewards).toBe('+40 XP · +2 tokens · replay');
+  });
+
+  it('lists an item reward after the tokens, and leaves zero amounts out', () => {
+    expect(completionLines(MISSIONS.c1_s1, false, null).rewards).toBe('+80 XP · +5 tokens · Wheat Ration ×3');
+    const shell = { ...MISSIONS.c1_m1, rewards: { xp: 0, tokens: 12, resources: { oil: 0, water: 30 } } } as MissionDef;
+    expect(completionLines(shell, false, null).rewards).toBe('+12 tokens · +30 water');
+  });
+});
+
+describe('activeEffects (SPEC-042 §4.3)', () => {
+  it('writes heal, damage boost and hazard immunity, in that order, in whole seconds', () => {
+    const player = makePlayer(0, 0, 100);
+    const out: HudEffect[] = [];
+    expect(activeEffects(player, 0, out)).toBe(0);
+    player.healOverTime = { remaining: 31, perSecond: 6 };
+    player.boosts.push({ damageMult: 1.4, until: 22 });
+    player.hazardImmuneUntil = 28;
+    expect(activeEffects(player, 4, out)).toBe(3);
+    expect(out).toEqual([
+      { kind: 'heal', seconds: 6 },
+      { kind: 'damage_boost', seconds: 18 },
+      { kind: 'hazard_immunity', seconds: 24 },
+    ]);
+  });
+
+  it('keeps one row for two boosts, from the later end (42-h), and drops what has run out', () => {
+    const player = makePlayer(0, 0, 100);
+    player.boosts.push({ damageMult: 1.4, until: 12 }, { damageMult: 1.4, until: 25.5 });
+    const out: HudEffect[] = [];
+    expect(activeEffects(player, 5, out)).toBe(1);
+    expect(out[0]).toEqual({ kind: 'damage_boost', seconds: 21 });
+    expect(activeEffects(player, 25.5, out)).toBe(0);
+    player.hazardImmuneUntil = 30;
+    expect(activeEffects(player, 30, out)).toBe(0);
+  });
+
+  it('reuses out’s entries: no new objects after the first call', () => {
+    const player = makePlayer(0, 0, 100);
+    player.healOverTime = { remaining: 10, perSecond: 2 };
+    player.boosts.push({ damageMult: 1.4, until: 20 });
+    player.hazardImmuneUntil = 30;
+    const out: HudEffect[] = [];
+    activeEffects(player, 0, out);
+    const entries = [...out];
+    for (let t = 1; t < 5; t++) {
+      expect(activeEffects(player, t, out)).toBe(3);
+      out.forEach((entry, i) => expect(entry).toBe(entries[i]));
+    }
+    expect(out[2]?.seconds).toBe(26);
+  });
+});
+
+describe('deathCause and deathTip (SPEC-042 §4.5)', () => {
+  const keyboard: DeathContext = { scheme: 'keyboard', autoFire: 'on', healsCarried: 2 };
+  const touch: DeathContext = { scheme: 'touch', autoFire: 'on', healsCarried: 2 };
+
+  it('names every cause', () => {
+    expect(deathCause({ kind: 'enemy', enemyId: 'dust_skitter' })).toBe('Killed by Dust Skitter');
+    expect(deathCause({ kind: 'projectile', enemyId: 'scav_raider' })).toBe('Killed by Scav Raider');
+    expect(deathCause({ kind: 'weather', weather: 'heatwave' })).toBe('Killed by the heatwave');
+    expect(deathCause({ kind: 'weather', weather: 'radiation_storm' })).toBe('Killed by the radiation storm');
+    expect(deathCause({ kind: 'fall' })).toBe('Killed by a fall');
+    expect(deathCause({ kind: 'asteroid' })).toBe('Killed by an asteroid');
+    expect(deathCause({ kind: 'storm' })).toBe('Killed by the ion storm');
+  });
+
+  it('picks the first row that applies, in the scheme’s wording', () => {
+    const weather = { kind: 'weather', weather: 'sandstorm' } as const;
+    const enemy = { kind: 'enemy', enemyId: 'dust_skitter' } as const;
+    const shot = { kind: 'projectile', enemyId: 'scav_raider' } as const;
+    expect(deathTip(weather, keyboard)).toBe('Storms cannot reach you in caves and wrecks.');
+    expect(deathTip(weather, touch)).toBe('Storms cannot reach you in caves and wrecks.');
+    expect(deathTip(enemy, { ...keyboard, autoFire: 'off' })).toBe(
+      'Auto-fire is off — hold Space or the left button to fire, or turn it on in Settings.',
+    );
+    expect(deathTip(shot, { ...touch, autoFire: 'off' })).toBe('Auto-fire is off — turn it on in Settings.');
+    expect(deathTip(enemy, keyboard)).toBe('Heal with Q before the bar turns red.');
+    expect(deathTip(shot, touch)).toBe('Tap the heal slot before the bar turns red.');
+    expect(deathTip(enemy, { ...keyboard, healsCarried: 0 })).toBe('Craft medkits at the station: wheat and water.');
+    expect(deathTip(enemy, { ...touch, healsCarried: 0 })).toBe('Craft medkits at the station: wheat and water.');
+    // A gamepad reads the keyboard's words; `touch` auto-fire is not `off`.
+    expect(deathTip(enemy, { ...keyboard, scheme: 'gamepad', autoFire: 'touch' })).toBe('Heal with Q before the bar turns red.');
+  });
+
+  it('has no tip for a fall, an asteroid or the ion storm', () => {
+    for (const cause of [{ kind: 'fall' }, { kind: 'asteroid' }, { kind: 'storm' }] as const) {
+      expect(deathTip(cause, keyboard)).toBeNull();
+      expect(deathTip(cause, touch)).toBeNull();
+    }
+  });
+});
+
+describe('purchaseText and prerequisiteText (SPEC-042 §4.8)', () => {
+  it('says what each kind of purchase did', () => {
+    expect(UPGRADES.shield.metrics.shieldHp).toEqual([40, 80, 120, 160]);
+    expect(purchaseText({ kind: 'ship', system: 'shield', tier: 2 })).toBe('Shield upgraded to tier 2 — Shield 80 → 120');
+    expect(purchaseText({ kind: 'ship', system: 'engine', tier: 1 })).toMatch(/^Engine upgraded to tier 1 — Speed \+\d+ % · Fuel use −\d+ %$/);
+    expect(purchaseText({ kind: 'gear', id: 'launcher_rocket' })).toBe('Rocket Launcher bought — equip it in Character');
+    expect(purchaseText({ kind: 'gear', id: 'armor_composite' })).toBe('Composite Weave bought — equip it in Character');
+    expect(purchaseText({ kind: 'companion', id: 'field_medic', level: 1 })).toBe('Field Medic bought');
+    expect(purchaseText({ kind: 'companion', id: 'field_medic', level: 2 })).toBe('Field Medic upgraded to L2');
+    expect(purchaseText({ kind: 'craft', recipe: 'medkit', qty: 3 })).toBe('Crafted Medkit ×3');
+    expect(purchaseText({ kind: 'craft', recipe: 'medkit', qty: 1 })).toBe('Crafted Medkit');
+    // 42-q: five of a recipe that makes one.
+    expect(purchaseText({ kind: 'craft', recipe: 'medkit', qty: 5 })).toBe('Crafted Medkit ×5');
+  });
+
+  it('names the missing rung — the highest of the line below the candidate', () => {
+    expect(prerequisiteText('weapon_plasma')).toBe('Requires Laser Carbine (T1)');
+    expect(prerequisiteText('weapon_lithium')).toBe('Requires Plasma Lance (T2)');
+    expect(prerequisiteText('armor_ablative')).toBe('Requires Reactive Harness (T2)');
+    expect(prerequisiteText('mg_rotary')).toBe('Requires Scrap Chaingun (T1)');
+    // Nothing below the first rung: the generic line stays.
+    expect(prerequisiteText('weapon_kinetic')).toBe(failText('prerequisite'));
+  });
+});
+
+describe('compareDeltas (SPEC-042 §4.8)', () => {
+  it('points each part the way it goes for the player', () => {
+    const plasma = compareDeltas('weapon_laser', 'weapon_plasma');
+    expect(plasma.find((part) => part.stat === 'fireRate')?.better).toBe(-1); // 4 → 3
+    expect(plasma.find((part) => part.stat === 'damage')?.better).toBe(1);
+    expect(plasma.find((part) => part.stat === 'tier')?.better).toBe(1);
+    // The cooldown model is a name, with no direction.
+    expect(compareDeltas('weapon_laser', 'mg_scrap').find((part) => part.stat === 'cooldown')?.better).toBe(0);
+    // Lower is better for recharge seconds — and for heat per shot, which no
+    // two shipped heat weapons differ in, so the rule itself is pinned.
+    expect(compareDeltas('launcher_grenade', 'launcher_rocket').find((part) => part.stat === 'recharge')?.better).toBe(1);
+    expect(compareDeltas('launcher_rocket', 'launcher_grenade').find((part) => part.stat === 'recharge')?.better).toBe(-1);
+    expect(compareDirection({ stat: 'heat', from: 0.04, to: 0.03 })).toBe(1);
+    expect(compareDirection({ stat: 'heat', from: 0.03, to: 0.04 })).toBe(-1);
+    expect(compareDirection({ stat: 'cooldown', from: 'none', to: 'heat' })).toBe(0);
+    expect(compareDirection({ stat: 'armor', from: 4, to: 4 })).toBe(0);
+  });
+
+  it('is gearCompare part by part, each text exactly a part of gearCompareText', () => {
+    const pairs = [
+      ['weapon_laser', 'weapon_plasma'],
+      ['weapon_laser', 'mg_scrap'],
+      ['launcher_rocket', 'launcher_grenade'],
+      ['armor_scrap', 'armor_reactive'],
+      ['pistol_service', 'pistol_magnum'],
+    ] as const;
+    for (const [worn, candidate] of pairs) {
+      const deltas = compareDeltas(worn, candidate);
+      expect(deltas.map(({ stat, label, from, to }) => ({ stat, label, from, to }))).toEqual([...gearCompare(worn, candidate)]);
+      expect(deltas.map((part) => part.text).join(' · ')).toBe(gearCompareText(worn, candidate));
+    }
+    expect(compareDeltas('weapon_laser', 'armor_scrap')).toEqual([]);
+  });
+});
+
+describe('the boss frame, the target frame and the panel lines (SPEC-042 §4.7, §4.9)', () => {
+  it('bossPhaseMarks: each later phase’s hpFraction, one cached array per boss', () => {
+    expect(bossPhaseMarks('dune_wurm')).toEqual([0.4]);
+    expect(bossPhaseMarks('dune_wurm')).toBe(bossPhaseMarks('dune_wurm'));
+    expect(bossPhaseMarks('ash_titan')).toEqual([0.6, 0.3]);
+    expect(bossPhaseMarks('dust_skitter')).toEqual([]);
+  });
+
+  it('affixLine: \'\' for a non-elite, the names joined for an elite, cached per pair', () => {
+    const e = makeEnemy();
+    expect(affixLine(e)).toBe('');
+    e.affixA = 'swift';
+    expect(affixLine(e)).toBe(''); // not an elite, whatever it carries
+    e.elite = true;
+    expect(affixLine(e)).toBe('Swift');
+    e.affixB = 'mender';
+    expect(affixLine(e)).toBe('Swift · Mender');
+    expect(affixLine(e)).toBe(affixLine({ elite: true, affixA: 'swift', affixB: 'mender' }));
+  });
+
+  it('characterXpText: the XP into the level, its span and what is left; the cap says so (42-p)', () => {
+    expect(xpToNext(5)).toBe(350);
+    expect(characterXpText(5, cumulativeXp(5) + 340)).toBe('XP 340 / 350 — 10 to level 6');
+    expect(characterXpText(1, 0)).toBe('XP 0 / 150 — 150 to level 2');
+    expect(characterXpText(LEVEL_CAP, cumulativeXp(LEVEL_CAP) + 900)).toBe('Level 30 — the cap');
+  });
+
+  it('pickupText and blockedText: the loot toasts of §4.2', () => {
+    expect(pickupText('medkit', 2)).toBe('Picked up Medkit ×2');
+    expect(pickupText('coolant_pack', 1)).toBe('Picked up Coolant Pack');
+    expect(pickupText('armor_composite', 1)).toBe('Picked up Composite Weave (T1) — equip it at the station');
+    expect(pickupText('weapon_laser', 1)).toBe('Picked up Laser Carbine (T1) — equip it at the station');
+    expect(blockedText('coolant_pack')).toBe('Inventory full — Coolant Pack left on the ground');
+  });
+
+  it('the model carries the new keys, and the diff sees each of them', () => {
+    const a = createHudModel();
+    expect(a.boss).toBeNull();
+    expect(a.target).toBeNull();
+    expect(a.effects).toEqual([]);
+    expect(a.wave).toBe(false);
+    for (const key of ['target', 'effects', 'wave'] as const) expect(HUD_KEYS).toContain(key);
+    const b = copyHudInto(createHudModel(), a);
+    b.effects.push({ kind: 'hazard_immunity', seconds: 30 });
+    expect(diffHud(a, b)).toEqual(new Set(['effects']));
+    const c = copyHudInto(createHudModel(), b);
+    c.wave = true;
+    c.target = { name: 'Alpha Dust Skitter', elite: true, affixes: 'Swift', hp: 70, max: 78 };
+    expect(diffHud(b, c)).toEqual(new Set(['wave', 'target']));
+  });
+});
