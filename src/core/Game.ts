@@ -16,6 +16,18 @@ import { log } from '@/core/Log';
 import { paceFrame, runRenderPhase, type PacerState, type RenderPhasePorts } from '@/core/FrameSkip';
 import { RollingMedian } from '@/core/FrameTimers';
 import { DEFAULT_MAX_STEPS, Loop } from '@/core/Loop';
+import {
+  localDate,
+  parsePerfSeconds,
+  PERF_DEFAULT_SECONDS,
+  PerfClock,
+  perfRow,
+  perfSecondsIsNumber,
+  summarizePerf,
+  type PerfResult,
+  type PerfSample,
+  type PerfStress,
+} from '@/core/Perf';
 import { createGovernorState, GOVERNOR_WINDOW_S, governorStep, type GovernorInput, type GovernorState } from '@/core/Quality';
 import { createRenderer, type QualityPreset, type Renderer } from '@/core/Renderer';
 import { RngRoot } from '@/core/Rng';
@@ -94,6 +106,12 @@ export interface StatsSnapshot {
   readonly adaptSteps: number;
 }
 
+/** Implemented by `ui/PerfResult.ts` (`PerfResultCard`): the result of a `?perf` run, on screen (SPEC-016 §8.4). */
+export interface PerfUi {
+  show(result: PerfResult, row: string): void;
+  dispose(): void;
+}
+
 export interface StatsUi {
   readonly visible: boolean;
   setVisible(value: boolean): void;
@@ -112,11 +130,45 @@ export interface DevFlags {
   /** `?seed=`: the RNG root before a save is loaded (SPEC-008 §3). */
   readonly seed: number | null;
   readonly quality: QualityPreset | null;
-  /** SPEC-015's scripted stress run; SPEC-035 §4.8 keeps the tips out of it. */
-  readonly perf: boolean;
+  /**
+   * SPEC-016 §8: `?perf[=seconds]`, the measured run — its length in seconds,
+   * or `null` without the flag (D-14). SPEC-035 §4.8 keeps the tips out of it.
+   */
+  readonly perf: number | null;
 }
 
 const PRESETS: readonly string[] = ['low', 'medium', 'high'];
+
+/** The scenes `?scene=` opens with a forced transition; `menu` is where the boot already lands (D-16). */
+const FLAG_SCENES: readonly SceneId[] = ['creation', 'station', 'starmap', 'flight', 'surface'];
+
+/** `?planet=`, or Cinder-4 when it names no planet (SPEC-001 §9). */
+function flagPlanet(flags: DevFlags): PlanetId {
+  const requested = flags.planet ?? '';
+  return (PLANET_IDS as readonly string[]).includes(requested) ? (requested as PlanetId) : 'cinder4';
+}
+
+/**
+ * SPEC-016 D-16: the scene a `?perf` run measures — `?scene=`, or the surface
+ * without one. `null` for no flag, and for a scene the URL flag cannot open.
+ */
+function perfTargetOf(flags: DevFlags): SceneId | null {
+  if (flags.perf === null) return null;
+  const scene = flags.scene ?? 'surface';
+  if (scene === BOOT_SCENE) return BOOT_SCENE;
+  return (FLAG_SCENES as readonly string[]).includes(scene) ? (scene as SceneId) : null;
+}
+
+/** D-23: the JS heap in MB where the browser reports one (Chromium), else `null`. */
+function heapMb(): number | null {
+  const memory = (performance as Performance & { memory?: { usedJSHeapSize: number } }).memory;
+  return memory === undefined ? null : memory.usedJSHeapSize / 1_048_576;
+}
+
+/** A sample slot a run fills in place (§8.3). */
+function blankPerfSample(): PerfSample {
+  return { frameMs: 0, drawCalls: 0, triangles: 0, updateMs: 0, renderMs: 0, enemies: 0, heapMb: null };
+}
 
 /** The URL flags of SPEC-001 §9. Unknown values are ignored with a warning, never fatal. */
 export function parseFlags(search: string): DevFlags {
@@ -137,13 +189,19 @@ export function parseFlags(search: string): DevFlags {
     if (rawSeed.trim() !== '' && Number.isFinite(parsed)) seed = parsed;
     else log.warn('boot', `?seed=${rawSeed} is not a number; ignoring it`);
   }
+  // SPEC-016 D-14: a blank `?perf` is the default run, and one that is not a
+  // number runs the default too — said once, in the style of `?seed=`.
+  const rawPerf = params.get('perf');
+  if (rawPerf !== null && !perfSecondsIsNumber(rawPerf)) {
+    log.warn('boot', `?perf=${rawPerf} is not a number; using ${PERF_DEFAULT_SECONDS} seconds`);
+  }
   return {
     debug: params.has('debug'),
     scene: params.get('scene'),
     planet: params.get('planet'),
     seed,
     quality,
-    perf: params.has('perf'),
+    perf: parsePerfSeconds(rawPerf),
   };
 }
 
@@ -156,9 +214,12 @@ export interface GameOptions {
   factory: SceneFactory;
   events: EventBus;
   flags: DevFlags;
-  ui: { transition: TransitionUi; boot: BootGateUi; contextLost: ContextLostUi; stats: StatsUi };
+  /** SPEC-016 D-25: without `perf`, a `?perf` run logs and fills the bridge only. */
+  ui: { transition: TransitionUi; boot: BootGateUi; contextLost: ContextLostUi; stats: StatsUi; perf?: PerfUi };
   /** Anything omitted falls back to the null implementation of §3.4 to §3.8. */
   services?: Partial<Pick<GameServices, 'input' | 'audio' | 'save' | 'settings' | 'rng'>>;
+  /** SPEC-016 D-22: the footer's version label, which a perf row names its build by. */
+  buildLabel?: string;
 }
 
 /** The preset used when neither `?quality=` nor a stored setting says otherwise (D-G). */
@@ -207,6 +268,8 @@ export class Game implements GameServices {
   readonly #bootUi: BootGateUi;
   readonly #contextLostUi: ContextLostUi;
   readonly #statsUi: StatsUi;
+  readonly #perfUi: PerfUi | null;
+  readonly #buildLabel: string;
 
   readonly #input: Input;
   readonly #audio: Audio;
@@ -270,6 +333,24 @@ export class Game implements GameServices {
   /** SPEC-040 dev bridge: `__reallm.slowDraw(ms)` busy-waits this long in every draw. */
   #slowDrawMs = 0;
 
+  /** SPEC-016 §8: the scene a `?perf` run measures (D-16), or `null` for none. */
+  readonly #perfTarget: SceneId | null;
+  /** The run's clock from the target's entry to its end; `null` outside a run. */
+  #perfClock: PerfClock | null = null;
+  /** A session measures once: the first entry of the target, never a later one. */
+  #perfStarted = false;
+  #perfStress: PerfStress | null = null;
+  /**
+   * The run's samples, allocated when it starts and filled in place, so a
+   * sampled frame allocates nothing (SPEC-001 §7); `#perfFrames` of them are
+   * this run's.
+   */
+  #perfSamples: PerfSample[] = [];
+  #perfFrames = 0;
+  #perfDroppedAt = 0;
+  /** The last finished run, for `__reallm.perf()` (§8.4). */
+  #perfResult: PerfResult | null = null;
+
   /** SPEC-015 §5/D-13: 60-frame medians of the update and draw halves. */
   readonly #updateMs = new RollingMedian();
   readonly #renderMs = new RollingMedian();
@@ -304,6 +385,9 @@ export class Game implements GameServices {
     this.#bootUi = options.ui.boot;
     this.#contextLostUi = options.ui.contextLost;
     this.#statsUi = options.ui.stats;
+    this.#perfUi = options.ui.perf ?? null;
+    this.#buildLabel = options.buildLabel ?? '';
+    this.#perfTarget = perfTargetOf(options.flags);
 
     const injected = options.services ?? {};
     this.#input = injected.input ?? createNullInput();
@@ -344,6 +428,7 @@ export class Game implements GameServices {
     );
 
     this.#watchEvents();
+    if (this.#perfTarget !== null) this.#watchPerf(this.#perfTarget);
     this.#watchEventsForDebug();
     this.#watchStatsToggles();
     this.#setStatsVisible(this.#flags.debug || this.#settings.showFps);
@@ -375,9 +460,14 @@ export class Game implements GameServices {
   get loop(): Loop {
     return this.#loop;
   }
-  /** SPEC-035 §4.8: `?perf` — the scripted stress run keeps the tips out. */
+  /** SPEC-035 §4.8: `?perf` — the measured run keeps the tips out (SPEC-016 D-15). */
   get perf(): boolean {
-    return this.#flags.perf;
+    return this.#flags.perf !== null;
+  }
+
+  /** SPEC-016 §8.4: the last finished perf run, or `null` before one has ended. */
+  get perfResult(): PerfResult | null {
+    return this.#perfResult;
   }
   /**
    * SPEC-008 §3. The root follows the active save: a slot loaded after boot
@@ -625,6 +715,7 @@ export class Game implements GameServices {
     }
     this.#lifecycle.dispose();
     this.#statsUi.dispose();
+    this.#perfUi?.dispose();
     // The scene owns a DOM layer and Three resources, and nothing else will
     // release them: `stop()` is the `import.meta.hot.dispose` path (AC-61), so
     // without this the old scene outlives the module that built it. Same order
@@ -707,6 +798,7 @@ export class Game implements GameServices {
     // pacer does not draw, it is applied here so it never waits for the draw.
     else this.#renderer.syncSize();
     runRenderPhase(this.#renderPorts, draw);
+    if (this.#perfClock !== null) this.#perfFrame(draw);
     // §5/D-13: one sample a frame, after every step of it has run. A frame the
     // pacer did not draw contributes no render sample — `renderMs` is the cost
     // of drawing, not an average over frames that did not.
@@ -795,7 +887,9 @@ export class Game implements GameServices {
     input.targetFps = this.#targetFps();
     input.dpr = this.#renderer.size.dpr;
     input.preset = this.#renderer.preset;
-    input.active = this.#settings.get().adaptiveQuality && this.#inPlay() && !idle;
+    // SPEC-016 D-19: a `?perf` session measures the preset and dpr it started
+    // on, so the governor holds for the whole of it.
+    input.active = this.#flags.perf === null && this.#settings.get().adaptiveQuality && this.#inPlay() && !idle;
     const step = governorStep(this.#governor, input);
     if (step === null) return;
     if (step.kind === 'dpr') this.#renderer.setDprCap(step.cap);
@@ -938,6 +1032,9 @@ export class Game implements GameServices {
   #onContextLost(): void {
     this.#loop.pause();
     this.#pauseReason = 'context-lost';
+    // SPEC-016 D-18: the state has left `running`, and a paused loop draws no
+    // frame that could notice, so a perf run ends here.
+    this.#interruptPerf();
     this.#contextLostUi.show();
     this.#contextLostTimer = this.#after(() => {
       this.#contextLostTimer = null;
@@ -1064,14 +1161,21 @@ export class Game implements GameServices {
     }
   }
 
-  /** `?scene=surface&planet=cinder4` (SPEC-001 §9) — the one use of `force` (SPEC-003 D-11). */
+  /**
+   * `?scene=surface&planet=cinder4` (SPEC-001 §9) — the one use of `force`
+   * (SPEC-003 D-11). SPEC-016 D-16: `?perf` without `?scene=` opens the
+   * surface, and `?scene=menu` opens nothing, since the boot has landed there.
+   */
   #applySceneFlag(): void {
-    const target = this.#flags.scene;
+    const target = this.#flags.scene ?? (this.#flags.perf !== null ? 'surface' : null);
     if (target === null || target === BOOT_SCENE) return;
-    const requested = this.#flags.planet ?? '';
-    const planet: PlanetId = (PLANET_IDS as readonly string[]).includes(requested)
-      ? (requested as PlanetId)
-      : 'cinder4';
+    if (!(FLAG_SCENES as readonly string[]).includes(target)) {
+      log.warn('boot', `?scene=${target} is not a scene the URL flag can open`);
+      // 16-f: no run and no card, and the page says why.
+      if (this.#flags.perf !== null) log.warn('perf', `?scene=${target} cannot be measured; no perf run`);
+      return;
+    }
+    const planet = flagPlanet(this.#flags);
     const params: Partial<Record<SceneId, SceneParams[SceneId]>> = {
       creation: { slot: 0 },
       station: {},
@@ -1079,12 +1183,144 @@ export class Game implements GameServices {
       flight: { destination: planet },
       surface: { planet, firstLanding: true },
     };
-    if (!(target in params)) {
-      log.warn('boot', `?scene=${target} is not a scene the URL flag can open`);
-      return;
-    }
     const id = target as SceneId;
     void this.#scenes.go(id, params[id] as SceneParams[SceneId], { force: true });
+  }
+
+  // ---------------------------------------------------------------- perf run
+
+  /**
+   * SPEC-016 §8.3. The run starts at the target's first `scene:entered` — the
+   * menu the boot passes through is not it, unless it is the target — and ends
+   * at once, as interrupted, on a pause, a hidden page or any scene change,
+   * warm-up included (D-18). A hidden page draws no frames, so this is decided
+   * in the handlers rather than on the next frame.
+   */
+  #watchPerf(target: SceneId): void {
+    const events = this.#events;
+    this.#teardown.push(
+      events.on(
+        'scene:entered',
+        ({ id }) => {
+          if (!this.#perfStarted && id === target) this.#startPerf();
+          else this.#interruptPerf();
+        },
+        this,
+      ),
+      events.on('scene:transition', () => this.#interruptPerf(), this),
+      events.on('app:paused', () => this.#interruptPerf(), this),
+    );
+  }
+
+  #startPerf(): void {
+    this.#perfStarted = true;
+    const seconds = this.#flags.perf ?? PERF_DEFAULT_SECONDS;
+    // The pacer draws at most 60 frames a second (SPEC-040 §4.3); a frame
+    // past that still gets a sample, allocated then.
+    this.#perfSamples = Array.from({ length: Math.ceil(seconds * 60) + 1 }, blankPerfSample);
+    this.#perfFrames = 0;
+    this.#perfClock = new PerfClock(seconds, performance.now());
+  }
+
+  /** After every frame's render phase (D-17): warm-up, the stress, then one sample per drawn frame. */
+  #perfFrame(drawn: boolean): void {
+    const clock = this.#perfClock as PerfClock;
+    // D-18: a frame that is not running, or a scene paused under its menu.
+    if (this.#state() !== 'running' || this.#scenes.paused) {
+      this.#interruptPerf();
+      return;
+    }
+    switch (clock.tick(performance.now(), drawn)) {
+      case 'stress':
+        this.#startStress(clock.seconds);
+        return;
+      case 'sample':
+        this.#perfSample(clock.frameMs);
+        return;
+      case 'end':
+        this.#perfSample(clock.frameMs);
+        this.#finishPerf(false);
+        return;
+      case 'wait':
+        return;
+    }
+  }
+
+  /** §8.2: the scene's own stress, if it has one; every other scene is measured as it stands. */
+  #startStress(seconds: number): void {
+    this.#perfDroppedAt = this.#loop.stats.droppedTime;
+    try {
+      this.#perfStress = this.#scenes.current?.perfStress?.(seconds) ?? null;
+    } catch (error) {
+      log.error('perf', 'the scene could not start its stress; measuring it as it stands', error);
+      this.#perfStress = null;
+    }
+  }
+
+  /** One drawn frame, read the way `stats` reads it — `gl.info` covers the whole frame. */
+  #perfSample(frameMs: number): void {
+    let sample = this.#perfSamples[this.#perfFrames];
+    if (sample === undefined) {
+      sample = blankPerfSample();
+      this.#perfSamples.push(sample);
+    }
+    this.#perfFrames++;
+    const info = this.#renderer.gl.info.render;
+    sample.frameMs = frameMs;
+    sample.drawCalls = info.calls;
+    sample.triangles = info.triangles;
+    sample.updateMs = this.#updateMs.value;
+    sample.renderMs = this.#renderMs.value;
+    sample.enemies = this.#perfStress?.enemies() ?? 0;
+    sample.heapMb = heapMb();
+  }
+
+  #interruptPerf(): void {
+    if (this.#perfClock !== null) this.#finishPerf(true);
+  }
+
+  /**
+   * §8.4: the stress stops, then one `[perf]` console line and the card. An
+   * interrupted run is summarised from no samples at all, so it reports no
+   * medians (D-18).
+   */
+  #finishPerf(interrupted: boolean): void {
+    const clock = this.#perfClock;
+    if (clock === null) return;
+    this.#perfClock = null;
+    clock.stop();
+    const stress = this.#perfStress;
+    this.#perfStress = null;
+    if (stress !== null) {
+      try {
+        stress.stop();
+      } catch (error) {
+        log.error('perf', 'the scene could not stop its stress', error);
+      }
+    }
+    const samples = interrupted ? [] : this.#perfSamples.slice(0, this.#perfFrames);
+    this.#perfSamples = [];
+    this.#perfFrames = 0;
+    const size = this.#renderer.size;
+    const target = this.#perfTarget as SceneId;
+    const result = summarizePerf(samples, {
+      scene: target,
+      planet: target === 'surface' || target === 'flight' ? flagPlanet(this.#flags) : null,
+      preset: this.#renderer.preset,
+      dpr: size.dpr,
+      width: size.width,
+      height: size.height,
+      seconds: clock.seconds,
+      storm: stress?.storm ?? null,
+      enemyCeiling: stress?.enemyCeiling ?? 0,
+      build: this.#buildLabel,
+      date: localDate(new Date()),
+      interrupted,
+      droppedSeconds: interrupted ? 0 : Math.max(0, this.#loop.stats.droppedTime - this.#perfDroppedAt),
+    });
+    this.#perfResult = result;
+    log.info('perf', JSON.stringify(result));
+    this.#perfUi?.show(result, perfRow(result));
   }
 
   // ------------------------------------------------------------------- stats

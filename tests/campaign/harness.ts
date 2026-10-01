@@ -1,36 +1,104 @@
-// The campaign harness (SPEC-010 §7, SPEC-016 §4). A scripted player who does
-// the *worst case* the balance model of SPEC-010 §5 is written against: main
-// missions only, in order, no side missions, no kill XP, no salvaging beyond
-// what an objective asks for. If that player finishes the campaign without ever
-// needing the station subsidy, every real player can.
+// The campaign harness (SPEC-010 §7, SPEC-016 §4). A scripted player who walks
+// the whole campaign through the real runtime: `Missions` counts every
+// objective and pays every reward, `Flight` flies every trip, and `Economy` and
+// `Progression` keep the books. The harness stands in for the player and the
+// planet only — it reports what a scene would report (a kill, a scan, a
+// pickup), answers the verdict, and steps the timers — so what it proves is
+// what a player meets. R16 was a runtime problem no table-level model could see.
 //
-// The script drives the real `Economy` and `Progression` against the real
-// content tables. What it stands in for is `systems/Missions.ts` (SPEC-012),
-// which does not exist yet: accepting a mission, counting its objectives and
-// calling `applyRewards` are that module's job, so this file does the smallest
-// honest version of each —
-//   - an objective with an economy effect is played out through `Economy`
-//     (`collect` is a pickup, `deliver` is an atomic spend);
-//   - an objective without one (kill, boss, scan, reach, survive, escort,
-//     defend) is simply satisfied, which is what "no kill XP" means;
-//   - a `choice` sets the flags of the option the run picked, the way SPEC-012
-//     will when the player answers the prompt.
-// When `Missions` lands it replaces the middle of `playMission` and the
-// assertions in `campaignSim.test.ts` stay as they are.
-import type { GameEvents } from '@/core/Events';
+// The players it plays are §4.1's: the worst case (main missions, mission XP
+// only, the recommended loadout, the least-discounted character), the fastest
+// ship, and the completionist with and without a bigger hold. Everything that
+// refuses or stalls is one line in `problems` (§4.5); empty is the pass.
+//
+// Nothing here writes the save's progress itself. Completions, flags, vouchers
+// and rewards all come from the systems it drives; the board's `acceptMission`
+// and the landing's visit count are the only save writes, and both are what
+// the station and the flight scene do.
+import { EventBus, type GameEvents } from '@/core/Events';
+import { QUALITY } from '@/core/Quality';
+import { RngRoot } from '@/core/Rng';
 import { newSave, type CharacterCreation, type Save } from '@/core/Save';
 import {
+  ENEMIES,
   MISSIONS,
   PLANETS,
+  type EnemyId,
   type MissionDef,
   type MissionId,
   type Objective,
+  type PlanetDef,
   type PlanetId,
+  type PoiId,
   type ResourceId,
 } from '@/data/index';
 import { LOADOUT_CHAPTERS, RECOMMENDED_LOADOUT, type LoadoutChapter, type LoadoutEntry } from '@/systems/Balance';
-import { Economy } from '@/systems/Economy';
-import { Progression, type EventSink } from '@/systems/Progression';
+import { computePlayerStats } from '@/systems/Combat';
+import { Economy, refuelVoucherText } from '@/systems/Economy';
+import { Flight, type FlightInput } from '@/systems/Flight';
+import type { LayoutPoi } from '@/systems/Layout';
+import { Missions, type MissionContext, type ObjectiveProgress } from '@/systems/Missions';
+import { Progression } from '@/systems/Progression';
+import { acceptMission, missionStatus } from '@/systems/UiHelpers';
+
+export type Ending = 'ending_stay' | 'ending_escape';
+
+export interface RunOptions {
+  /** The verdict the run files (PLAN §5, E24). */
+  ending: Ending;
+  /** Side missions too, each on the first landing that offers it (default false). */
+  sides?: boolean;
+  /** Kill XP per §4.2 (default false: mission XP only — the worst case). */
+  killXp?: boolean;
+  /** The notch every trip is flown at (default 1). */
+  throttle?: 0.8 | 1 | 1.2;
+  /** Bought after RECOMMENDED_LOADOUT[chapter], before that chapter's first jump. */
+  extraPurchases?: Partial<Record<1 | 2 | 3 | 4 | 5 | 6, readonly LoadoutEntry[]>>;
+  /** The newSave seed, and so the flight streams (default 1234). */
+  seed?: number;
+}
+
+export interface Jump {
+  planet: PlanetId;
+  cost: number;
+  oilAfter: number;
+  /** Flight.time and Flight.holdSeconds at arrival: simulated seconds from launch, and the part spent holding. */
+  seconds: number;
+  holdSeconds: number;
+}
+
+export interface CollectStart {
+  mission: MissionId;
+  resource: ResourceId;
+  /** In the hold when the objective's first pickup was made. */
+  held: number;
+  amount: number;
+  cap: number;
+}
+
+export interface RunReport {
+  save: Save;
+  /** Every refusal and stall, in order (§4.5, D-1). Empty is the pass. */
+  problems: string[];
+  subsidyOil: number;
+  subsidyCalls: number;
+  jumps: Jump[];
+  /** From mission:completed, in order. */
+  missionsDone: MissionId[];
+  /** `${kind}:${id}[:tier]@${tokens}`, in purchase order. */
+  purchases: string[];
+  lowestOil: number;
+  collects: CollectStart[];
+  /** ui:toast events whose text is a refuelVoucherText (D-3). */
+  vouchers: number;
+  /** The sums of the positive and the negative tokens:changed deltas. */
+  tokensEarned: number;
+  tokensSpent: number;
+  /** Every event on the run's bus, in order (recorded with onAny, D-5). */
+  events: Array<{ name: keyof GameEvents; payload: unknown }>;
+  /** SPEC-032: whether Economy.serviceMode was ever on. */
+  serviceModeSeen: boolean;
+}
 
 const CHAPTERS = [1, 2, 3, 4, 5, 6] as const;
 type Chapter = (typeof CHAPTERS)[number];
@@ -47,39 +115,55 @@ const WORST_CASE_CREATION: CharacterCreation = {
   attributes: { might: 6, vigor: 5, agility: 1, tech: 1 },
   difficulty: 'normal',
 };
+const DEFAULT_SEED = 1234;
+const CREATED_AT = 1_700_000_000_000;
 
-export interface RunOptions {
-  /** Which side of the Eden verdict this run files (PLAN §5). */
-  ending: 'ending_stay' | 'ending_escape';
+/** One simulated step, the fixed update of SPEC-002. */
+const STEP = 1 / 60;
+/** §4.4 step 4: long enough for any trip plus the 90 s holding cap. */
+const TRIP_LIMIT_SECONDS = 900;
+/** §4.2: each required kill stands in for the fighting around it. */
+const KILL_XP_MULT = 3;
+/** The simulation's POIs are stubs at the origin (§2). */
+const STUB_RADIUS = 5;
+
+const IDLE_INPUT: FlightInput = Object.freeze({
+  steerX: 0,
+  steerY: 0,
+  fire: false,
+  aimX: 0,
+  aimY: 0,
+  throttleUp: false,
+  throttleDown: false,
+  autoFire: false,
+  mouseSteer: false,
+});
+
+/**
+ * D-3: a voucher toast is the text `refuelVoucherText` writes around a whole
+ * number. The copy is read off the function, never restated here.
+ */
+const VOUCHER_SENTINEL = 918_273_645;
+const VOUCHER_SAMPLE = refuelVoucherText(VOUCHER_SENTINEL);
+const VOUCHER_AT = VOUCHER_SAMPLE.indexOf(String(VOUCHER_SENTINEL));
+const VOUCHER_PREFIX = VOUCHER_SAMPLE.slice(0, VOUCHER_AT);
+const VOUCHER_SUFFIX = VOUCHER_SAMPLE.slice(VOUCHER_AT + String(VOUCHER_SENTINEL).length);
+
+function isVoucherText(text: string): boolean {
+  if (VOUCHER_AT < 0) return false;
+  if (!text.startsWith(VOUCHER_PREFIX) || !text.endsWith(VOUCHER_SUFFIX)) return false;
+  const middle = text.slice(VOUCHER_PREFIX.length, text.length - VOUCHER_SUFFIX.length);
+  return /^\d+$/.test(middle);
 }
 
-export interface Jump {
-  planet: PlanetId;
-  cost: number;
-  oilAfter: number;
-}
+const MISSION_LIST: readonly MissionDef<MissionId>[] = Object.values(MISSIONS);
+const PLANET_TABLE: Readonly<Record<PlanetId, PlanetDef>> = PLANETS;
 
-export interface RunReport {
-  save: Save;
-  /** Everything that refused, in the order it refused. Empty is the pass. */
-  problems: string[];
-  /** Oil the E1 subsidy handed out across the run, and how often it was asked. */
-  subsidyOil: number;
-  subsidyCalls: number;
-  jumps: Jump[];
-  missionsDone: MissionId[];
-  purchases: string[];
-  /** The least oil the hold held, sampled after every jump and every mission. */
-  lowestOil: number;
-  events: Array<{ name: keyof GameEvents; payload: unknown }>;
-  /**
-   * SPEC-032 AC: whether the simulation's `Economy` ever ran with the service
-   * override on. The guarantees above mean nothing if it did.
-   */
-  serviceModeSeen: boolean;
+/** The kind the planet's table gives a POI, for the stub the context hands back. */
+function poiKind(planet: PlanetId | null, poi: PoiId): LayoutPoi['kind'] {
+  if (planet === null) return 'landmark';
+  return PLANET_TABLE[planet].surface.pois.find((def) => def.id === poi)?.kind ?? 'landmark';
 }
-
-const missions: readonly MissionDef<MissionId>[] = Object.values(MISSIONS);
 
 function planetOfChapter(chapter: Chapter): PlanetId {
   const planet = Object.values(PLANETS).find((candidate) => candidate.chapter === chapter);
@@ -87,21 +171,24 @@ function planetOfChapter(chapter: Chapter): PlanetId {
   return planet.id;
 }
 
-/** The chapter's main missions, in table order — which is dependency order. */
-function mainMissionsOf(chapter: Chapter): readonly MissionDef<MissionId>[] {
-  return missions.filter((mission) => mission.type === 'main' && mission.chapter === chapter);
+/** Everything one run holds; built per call, so no run leaks into the next (16-e). */
+interface Run {
+  readonly options: RunOptions;
+  readonly sides: boolean;
+  readonly killXp: boolean;
+  readonly save: Save;
+  readonly bus: EventBus<GameEvents>;
+  readonly progression: Progression;
+  readonly economy: Economy;
+  readonly report: RunReport;
+  readonly ctx: MissionContext;
 }
 
 export function runCampaign(options: RunOptions): RunReport {
-  const save = newSave(0, WORST_CASE_CREATION, 1234, 1_700_000_000_000);
-  const events: RunReport['events'] = [];
-  const sink: EventSink = {
-    emit(name, ...args) {
-      events.push({ name, payload: (args as unknown[])[0] });
-    },
-  };
-  const progression = new Progression(save, sink);
-  const economy = new Economy(save, sink, progression);
+  const save = newSave(0, WORST_CASE_CREATION, options.seed ?? DEFAULT_SEED, CREATED_AT);
+  const bus = new EventBus<GameEvents>();
+  const progression = new Progression(save, bus);
+  const economy = new Economy(save, bus, progression);
 
   const report: RunReport = {
     save,
@@ -112,60 +199,125 @@ export function runCampaign(options: RunOptions): RunReport {
     missionsDone: [],
     purchases: [],
     lowestOil: save.resources.oil,
-    events,
+    collects: [],
+    vouchers: 0,
+    tokensEarned: 0,
+    tokensSpent: 0,
+    events: [],
     serviceModeSeen: economy.serviceMode,
   };
 
-  for (const chapter of CHAPTERS) {
-    const planet = planetOfChapter(chapter);
+  const stopRecording = bus.onAny((name, payload) => {
+    report.events.push({ name, payload });
+    if (name === 'mission:completed') {
+      report.missionsDone.push((payload as GameEvents['mission:completed']).id);
+    } else if (name === 'tokens:changed') {
+      const { delta } = payload as GameEvents['tokens:changed'];
+      if (delta > 0) report.tokensEarned += delta;
+      else report.tokensSpent -= delta;
+    } else if (name === 'ui:toast') {
+      if (isVoucherText((payload as GameEvents['ui:toast']).text)) report.vouchers += 1;
+    }
+  });
 
-    // ---- at the station: the fuel floor, then the shop, then the jump.
+  const stub = (poi: PoiId): LayoutPoi => ({ poi, instance: 0, x: 0, z: 0, radius: STUB_RADIUS, kind: poiKind(save.progress.currentPlanet, poi) });
+  const ctx: MissionContext = {
+    player: { x: 0, z: 0, alive: true },
+    poiAt: (poi) => [stub(poi)],
+    heldResource: (resource) => save.resources[resource],
+    nearPoi: (poi) => stub(poi),
+    follower: { x: 0, z: 0, alive: true },
+  };
+
+  const run: Run = {
+    options,
+    sides: options.sides ?? false,
+    killXp: options.killXp ?? false,
+    save,
+    bus,
+    progression,
+    economy,
+    report,
+    ctx,
+  };
+
+  for (const chapter of CHAPTERS) {
+    if (!playChapter(run, chapter)) break;
+  }
+
+  report.serviceModeSeen ||= economy.serviceMode;
+  stopRecording();
+  return report;
+}
+
+/** §4.4, steps 1–6 for one chapter. False when the run has to stop. */
+function playChapter(run: Run, chapter: Chapter): boolean {
+  const { save, economy, report } = run;
+  const planet = planetOfChapter(chapter);
+  /** Flight missions of this planet already taken this chapter, so a failed one is not flown forever. */
+  const boarded = new Set<MissionId>();
+
+  for (let trip = 0; ; trip++) {
+    // 1. Station: the fuel floor, then — on the chapter's first trip — the shop.
     report.subsidyCalls += 1;
     report.subsidyOil += economy.applyStationSubsidy();
-    buyLoadout(economy, chapter, report);
+    if (trip === 0) {
+      if ((LOADOUT_CHAPTERS as readonly number[]).includes(chapter)) {
+        buyAll(run, chapter, RECOMMENDED_LOADOUT[chapter as LoadoutChapter]);
+      }
+      buyAll(run, chapter, run.options.extraPurchases?.[chapter] ?? []);
+    }
 
+    // 2. Board: the destination's flight missions can only be taken here.
+    for (const def of boardable(run, planet)) {
+      boarded.add(def.id);
+      acceptMission(save, def);
+      run.bus.emit('mission:accepted', { id: def.id });
+    }
+
+    // 3. Depart.
     report.serviceModeSeen ||= economy.serviceMode;
     const depart = economy.canDepart(planet);
     if (!depart.ok) {
       report.problems.push(
         depart.reason === 'locked'
-          ? `chapter ${chapter}: ${planet} is locked on ${(depart.missing ?? []).map(describe).join(', ')}`
+          ? `chapter ${chapter}: ${planet} is locked on ${(depart.missing ?? []).map((requirement) => JSON.stringify(requirement)).join(', ')}`
           : `chapter ${chapter}: ${depart.needOil ?? 0} oil short of ${planet}`,
       );
-      break;
+      return false;
     }
     const cost = economy.fuelCost(planet);
     if (!economy.payFuel(planet)) {
       report.problems.push(`chapter ${chapter}: payFuel(${planet}) refused`);
-      break;
-    }
-    save.progress.currentPlanet = planet;
-    save.progress.location = 'surface';
-    report.jumps.push({ planet, cost, oilAfter: save.resources.oil });
-    report.lowestOil = Math.min(report.lowestOil, save.resources.oil);
-
-    // ---- on the planet: this chapter's main missions, in order.
-    for (const mission of mainMissionsOf(chapter)) {
-      playMission(economy, save, mission, options, report);
-      report.lowestOil = Math.min(report.lowestOil, save.resources.oil);
+      return false;
     }
 
-    // The return trip is free (PLAN §4).
-    save.progress.location = 'station';
+    // 4. Fly.
+    if (!fly(run, planet, cost)) return false;
+
+    // 5. Land.
+    land(run, planet);
+
+    // 6. Again? A flight mission this landing unlocked (`c4_s2`) is flown next.
+    if (!run.sides || !boardable(run, planet).some((def) => !boarded.has(def.id))) return true;
   }
-
-  report.serviceModeSeen ||= economy.serviceMode;
-  return report;
 }
 
-function describe(requirement: { kind: string }): string {
-  return JSON.stringify(requirement);
+/** §4.4 step 2: the destination's flight missions the board offers right now. */
+function boardable(run: Run, planet: PlanetId): MissionDef<MissionId>[] {
+  return MISSION_LIST.filter(
+    (def) =>
+      def.planet === planet &&
+      def.scene === 'flight' &&
+      (run.sides || def.type === 'main') &&
+      missionStatus(run.save, def, 'station') === 'available',
+  );
 }
 
-/** Buys everything §5 recommends before this chapter, in table order. */
-function buyLoadout(economy: Economy, chapter: number, report: RunReport): void {
-  if (!(LOADOUT_CHAPTERS as readonly number[]).includes(chapter)) return;
-  for (const entry of RECOMMENDED_LOADOUT[chapter as LoadoutChapter]) {
+/** Buys `entries` in order; a refusal is a problem and the rest is still bought. */
+function buyAll(run: Run, chapter: Chapter, entries: readonly LoadoutEntry[]): void {
+  const { economy, report } = run;
+  for (const entry of entries) {
     const price = economy.price(entry.kind, entry.id, entry.kind === 'ship' ? entry.tier : undefined);
     const result = buy(economy, entry);
     if (!result.ok) {
@@ -189,79 +341,216 @@ function buy(economy: Economy, entry: LoadoutEntry): { ok: true } | { ok: false;
   return economy.equip(entry.id);
 }
 
-function playMission(
-  economy: Economy,
-  save: Save,
-  mission: MissionDef<MissionId>,
-  options: RunOptions,
-  report: RunReport,
-): void {
-  const missing = economy.missingRequirements(mission.requires);
-  if (missing.length > 0) {
-    report.problems.push(`${mission.id}: accepted with ${missing.map(describe).join(', ')} unmet`);
-    return;
+/**
+ * §4.4 step 4: the trip, flown by the real `Flight` the way the scene builds it
+ * (D-5). False when it did not arrive, which stops the run (16-d).
+ */
+function fly(run: Run, planet: PlanetId, cost: number): boolean {
+  const { save, economy, report, bus } = run;
+  const oilAfter = save.resources.oil;
+  const visits = save.progress.visits[planet] ?? 0;
+  const missions = new Missions(save, economy, bus, 'flight', planet);
+  const flight = new Flight(
+    {
+      planet: PLANETS[planet],
+      ship: save.ship,
+      companions: save.companions,
+      quality: QUALITY.medium,
+      difficulty: save.meta.difficulty,
+      companionMult: computePlayerStats(save).companionMult,
+    },
+    economy,
+    run.progression,
+    missions,
+    bus,
+    new RngRoot(save.meta.seed).visit(planet, visits).fork('flight'),
+  );
+
+  // One throttle edge per notch away from 1.
+  const throttle = run.options.throttle ?? 1;
+  if (throttle !== 1) {
+    flight.update(STEP, { ...IDLE_INPUT, throttleUp: throttle > 1, throttleDown: throttle < 1 });
   }
-  const replay = report.missionsDone.includes(mission.id);
-  for (const stage of mission.stages) {
-    for (const objective of stage) satisfy(economy, save, mission, objective, options, report);
+
+  // The kills a flight mission asks for; `fastForward` credits none.
+  for (const state of missions.active.slice()) {
+    for (const progress of missions.currentObjectives(state.id)) {
+      if (progress.objective.kind !== 'kill' || progress.done) continue;
+      killMany(run, progress.objective.enemy, progress.target - progress.value);
+    }
   }
-  economy.applyRewards(mission, replay);
-  save.progress.missionsDone.push(mission.id);
-  report.missionsDone.push(mission.id);
+
+  flight.fastForward(TRIP_LIMIT_SECONDS);
+  if (flight.phase !== 'arrived') {
+    report.problems.push(`${planet}: the trip ended ${flight.phase}`);
+    missions.dispose();
+    return false;
+  }
+  report.jumps.push({ planet, cost, oilAfter, seconds: flight.time, holdSeconds: flight.holdSeconds });
+
+  // 16-c: a flight mission still open on arrival is the R16 class of problem.
+  for (const entry of save.progress.missionsActive.slice()) {
+    const def = MISSIONS[entry.id];
+    if (def.planet !== planet || def.scene !== 'flight') continue;
+    report.problems.push(`${planet}: landed with ${entry.id} open`);
+    missions.abandon(entry.id);
+  }
+  missions.dispose();
+  report.lowestOil = Math.min(report.lowestOil, save.resources.oil);
+  return true;
 }
 
-function satisfy(
-  economy: Economy,
-  save: Save,
-  mission: MissionDef<MissionId>,
-  objective: Objective,
-  options: RunOptions,
-  report: RunReport,
-): void {
-  switch (objective.kind) {
-    case 'collect': {
-      // Harvested from the planet's nodes, which invariant §7.7 keeps stocked.
-      const { blocked } = economy.addResource(objective.resource, objective.amount, 'pickup');
-      if (blocked > 0) {
-        report.problems.push(`${mission.id}: the hold filled with ${blocked} ${objective.resource} still to collect`);
-      }
-      break;
+/** §4.4 step 5: every mission the pad offers, one at a time, until none is left. */
+function land(run: Run, planet: PlanetId): void {
+  const { save, economy, report, bus } = run;
+  save.progress.visits[planet] = (save.progress.visits[planet] ?? 0) + 1;
+  save.progress.currentPlanet = planet;
+  save.progress.location = 'surface';
+  const missions = new Missions(save, economy, bus, 'surface', planet);
+  // An abandoned mission is offered again, so each is tried once per landing.
+  const tried = new Set<MissionId>();
+  for (;;) {
+    const next = missions
+      .available()
+      .find(
+        (def) =>
+          !tried.has(def.id as MissionId) &&
+          !(save.progress.missionsDone as readonly string[]).includes(def.id) &&
+          (run.sides || def.type === 'main'),
+      );
+    if (next === undefined) break;
+    const id = next.id as MissionId;
+    tried.add(id);
+    const accepted = missions.accept(id);
+    if (!accepted.ok) {
+      report.problems.push(`${id}: accept refused with ${accepted.reason}`);
+      continue;
     }
+    play(run, missions, id);
+    report.lowestOil = Math.min(report.lowestOil, save.resources.oil);
+  }
+  missions.dispose();
+  save.progress.location = 'station';
+}
+
+/** The mission's stage as the save stores it, or null once it has left `missionsActive`. */
+function stageOf(save: Save, id: MissionId): number | null {
+  return save.progress.missionsActive.find((entry) => entry.id === id)?.stage ?? null;
+}
+
+/** §4.3 and D-4: one mission, stage by stage, until it completes or is abandoned. */
+function play(run: Run, missions: Missions, id: MissionId): void {
+  const { save, report } = run;
+  const def = MISSIONS[id];
+  for (;;) {
+    const stage = stageOf(save, id);
+    if (stage === null) return; // completed
+    const objectives = def.stages[stage] ?? [];
+
+    for (let index = 0; index < objectives.length; index++) {
+      if (stageOf(save, id) !== stage) break;
+      const progress = missions.currentObjectives(id)[index];
+      if (progress === undefined || progress.done) continue;
+      if (!satisfy(run, missions, id, progress)) {
+        missions.abandon(id);
+        return;
+      }
+    }
+
+    const budget = stepBudget(objectives) * 60 + 60;
+    for (let step = 0; step < budget && stageOf(save, id) === stage; step++) missions.update(STEP, run.ctx);
+    if (stageOf(save, id) === stage) {
+      report.problems.push(`${id}: stage ${stage} did not finish`);
+      missions.abandon(id);
+      return;
+    }
+  }
+}
+
+/**
+ * D-4's `S`: the longest `survive` or `defend` timer of the stage; 1 for a
+ * `deliver` or an `escort` with no longer timer; 0 otherwise.
+ */
+function stepBudget(objectives: readonly Objective[]): number {
+  let seconds = 0;
+  for (const objective of objectives) {
+    if (objective.kind === 'survive' || objective.kind === 'defend') seconds = Math.max(seconds, objective.seconds);
+    else if (objective.kind === 'deliver' || objective.kind === 'escort') seconds = Math.max(seconds, 1);
+  }
+  return seconds;
+}
+
+/**
+ * §4.3: report one unfinished objective the way the scene would. False when the
+ * mission cannot finish and has to be abandoned (§4.5).
+ */
+function satisfy(run: Run, missions: Missions, id: MissionId, progress: ObjectiveProgress): boolean {
+  const { bus, report } = run;
+  const objective = progress.objective;
+  switch (objective.kind) {
+    case 'reach':
+      bus.emit('poi:reached', { poi: objective.poi, instance: 0 });
+      return true;
+    case 'scan':
+      for (let instance = 0; instance < objective.count; instance++) bus.emit('poi:scanned', { poi: objective.poi, instance });
+      return true;
+    case 'collect': {
+      const amount = progress.target - progress.value;
+      report.collects.push({
+        mission: id,
+        resource: objective.resource,
+        held: run.save.resources[objective.resource],
+        amount,
+        cap: run.economy.cargoCap(),
+      });
+      return pickUp(run, id, objective.resource, amount);
+    }
+    case 'kill':
+      killMany(run, objective.enemy, progress.target - progress.value);
+      return true;
+    case 'boss':
+      kill(run, objective.enemy, 1);
+      bus.emit('boss:defeated', { boss: objective.enemy });
+      return true;
     case 'deliver': {
       // E16: the player tops up at a node and hands over the whole amount.
-      const short = objective.amount - save.resources[objective.resource];
-      if (short > 0) topUp(economy, mission, objective.resource, short, report);
-      if (!economy.spendResources(costOf(objective.resource, objective.amount), `deliver:${objective.poi}`)) {
-        report.problems.push(`${mission.id}: could not deliver ${objective.amount} ${objective.resource}`);
-      }
-      break;
+      const short = objective.amount - run.save.resources[objective.resource];
+      return short <= 0 || pickUp(run, id, objective.resource, short);
     }
     case 'choice': {
-      // SPEC-012 sets these when the player answers; the run picks its side.
-      const option = objective.options.find((candidate) => candidate.flags.includes(options.ending));
-      if (option === undefined) {
-        report.problems.push(`${mission.id}: no option files ${options.ending}`);
-        break;
+      const option = objective.options.findIndex((candidate) => (candidate.flags as readonly string[]).includes(run.options.ending));
+      if (option < 0) {
+        report.problems.push(`${id}: no option files ${run.options.ending}`);
+        return false;
       }
-      for (const flag of option.flags) {
-        if (!save.progress.flags.includes(flag)) save.progress.flags.push(flag);
-      }
-      break;
+      missions.choose(id, option);
+      return true;
     }
-    default:
-      // reach, scan, kill, boss, survive, defend, escort: no economy effect,
-      // and the worst case takes no XP from the kills along the way.
-      break;
+    case 'survive':
+    case 'defend':
+    case 'escort':
+      // Stepped by `play`.
+      return true;
   }
 }
 
-function costOf(resource: ResourceId, amount: number): Partial<Record<ResourceId, number>> {
-  const cost: Partial<Record<ResourceId, number>> = {};
-  cost[resource] = amount;
-  return cost;
+/** One harvest from the planet's nodes. False — with its problem — when the hold blocked any of it. */
+function pickUp(run: Run, id: MissionId, resource: ResourceId, need: number): boolean {
+  const held = run.save.resources[resource];
+  const cap = run.economy.cargoCap();
+  const { added, shipped, blocked } = run.economy.addResource(resource, need, 'pickup');
+  if (blocked <= 0) return true;
+  run.report.problems.push(`${id}: the hold took ${added + shipped} of ${need} ${resource} (${held} aboard, cap ${cap})`);
+  return false;
 }
 
-function topUp(economy: Economy, mission: MissionDef<MissionId>, resource: ResourceId, amount: number, report: RunReport): void {
-  const { blocked } = economy.addResource(resource, amount, 'pickup');
-  if (blocked > 0) report.problems.push(`${mission.id}: the hold filled ${blocked} short of a delivery`);
+function killMany(run: Run, enemy: EnemyId, count: number): void {
+  for (let n = 0; n < count; n++) kill(run, enemy, KILL_XP_MULT);
+}
+
+/** `Combat.killEnemy`'s order: the kill, then its XP (§4.2 — only with `killXp`). */
+function kill(run: Run, enemy: EnemyId, xpMult: number): void {
+  const xp = ENEMIES[enemy].xp;
+  run.bus.emit('enemy:killed', { enemyId: enemy, elite: false, x: 0, z: 0, xp });
+  if (run.killXp) run.progression.addXp(xpMult * xp, 'kill');
 }

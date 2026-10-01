@@ -1,10 +1,25 @@
 # Playtest log
 
-One section per milestone (SPEC-016 §3): the devices it was verified on, the
-build, measured fps and draw calls, the checklist results, and the bugs found.
-A milestone tag (`m0`…`m7`) requires `npm run check` green, the checklists
-ticked here for desktop and one phone, zero open P0, and spec statuses updated
-(SPEC-001 §11, SPEC-016 §6).
+Each milestone and each spec gets a section here (SPEC-016 §3): the devices it
+was verified on, the build, the `?perf` rows, the checklist results, and the
+bugs found. The device checklists to copy into a milestone's section and tick
+are [desktop](checklists/desktop.md), [iOS](checklists/ios.md) and
+[Android](checklists/android.md).
+
+A milestone tag `mN` needs all of the following, recorded in that milestone's
+section (SPEC-016 §6, SPEC-001 §11):
+
+- `npm run check` and `npm run e2e` green on the tagged commit;
+- the checklists copied and ticked for desktop and at least one phone;
+- that phone's `?perf` rows;
+- zero open P0 in [`docs/BUGS.md`](BUGS.md), and from M6 on zero open P1;
+- the milestone's specs set to `done` in their frontmatter and in SPEC-000.
+
+| Severity | Definition | Gate |
+|---|---|---|
+| P0 | Softlock, data loss, crash, save corruption, cannot progress | Blocks any milestone tag |
+| P1 | Progression blocker with a workaround, budget breach (SPEC-015 §5), test failure | Blocks M6 and M7 tags |
+| P2 | Polish, balance feel, visual glitch, a side-content detour | Logged, not blocking |
 
 ## M0 — bootstrap
 
@@ -1554,3 +1569,44 @@ and no seed is recalled only at ×1.1 — the only SPEC-039 change on that path.
       two that are a matter of feel: firing the Chaingun against the Laser, and
       whether the Medic's pause makes a storm feel dangerous rather than unfair.
 - [ ] a real replay of `c1_m3` from the board, to see the lithium on the ground.
+
+## SPEC-016 — the played campaign, device checklists and the perf run (M5/M7)
+
+- **Build:** `spec/SPEC-016` — untagged
+- **Devices:**
+  - desktop — headless Chromium 1280 × 720 (Playwright, Linux container, **software GL / SwiftShader**)
+  - desktop, production build — the same browser against `vite preview` over `dist/`
+  - phone — _not run: no handset in the build container_ (§13's pass is owed, below)
+
+Recorded from the container the branch was built in: `npm run check`, which
+now runs typecheck, then `vite build`, then `npm run test` (D-27) — 95 files and
+1,915 tests with none skipped, so the six emitted-build tests of
+`tests/build/pwa.test.ts` ran against the `dist/` that same command had just
+built; `npx vitest run tests/campaign` in 0.59 s (30 tests); and
+`e2e/SPEC-016.spec.ts` (cases 1–7 of §12.2 and D-18's lost context, in six
+tests, 39 s with five workers).
+
+**The played campaign.** Every number §4.7 pins came out of the harness as
+written: the worst case at 5,480 XP, level 13, 970 earned and 609 spent; the
+Hive held to 180.0 s with 3.1 s of holding (32.1 s at the 1.2 notch); the
+completionist at 11,135 XP, level 19, 1,224 earned and 683 spent over seven
+jumps; and the base-hold run's `c3_s2` collect starting at 350 + 300 against a
+cap of 400 and shipping the surplus home, 26 missions and `problems: []`.
+
+**The perf run, in-container.** `?perf=5&quality=low&films=off` on the
+production build: the surface opened without the dev bridge (which is absent
+there), the run held 20 live enemies in the sandstorm, and the card showed one
+row — a software-GL floor, not a device number:
+
+| Date | Build | Scene | Preset | dpr | Size | fps | p95 ms | Draws | Triangles | Update ms | Render ms | Heap MB | Enemies | Storm |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| 2026-09-30 | ReaLLM 0.0.0 | surface/cinder4 | low | 1.00 | 1280×720 | 11.8 | 144.50 | 38 | 102164 | 0.30 | 0.50 | 31.6 | 20 | sandstorm |
+
+**Owed on hardware, before the `m7` tag (§13).**
+
+- [ ] `?perf&quality=medium` on the deployed build, on the reference phone and on
+      desktop: the card after about 65 s, its lines read at arm's length, Copy
+      puts the row on the clipboard or selects it, and the pasted row renders
+      under the header above.
+- [ ] the first group of each checklist walked on the phone, to confirm it reads
+      as a list a person can follow.

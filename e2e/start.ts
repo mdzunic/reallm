@@ -29,7 +29,39 @@ export interface DevBridge {
   loseContext(restoreAfterMs: number | null): void;
   /** SPEC-040 §3: busy-waits `ms` inside every draw (dev builds only). */
   slowDraw(ms: number): void;
+  /** SPEC-016 §8.4: the last finished `?perf` run, or `null` before one has ended (dev builds only). */
+  perf(): PerfSnapshot | null;
   stop(): void;
+}
+
+/**
+ * SPEC-016 §3's `PerfResult`, as the suites read it: the run's meta, then the
+ * medians. Kept loose like `SaveSnapshot` — `e2e/` may not import `src/`.
+ */
+export interface PerfSnapshot {
+  scene: string;
+  planet: string | null;
+  preset: string;
+  dpr: number;
+  width: number;
+  height: number;
+  seconds: number;
+  storm: string | null;
+  enemyCeiling: number;
+  build: string;
+  date: string;
+  interrupted: boolean;
+  droppedSeconds: number;
+  frames: number;
+  fps: number;
+  frameMsP50: number;
+  frameMsP95: number;
+  drawCalls: number;
+  triangles: number;
+  updateMs: number;
+  renderMs: number;
+  enemies: number;
+  heapMb: number | null;
 }
 
 /**

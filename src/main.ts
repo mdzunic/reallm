@@ -26,6 +26,7 @@ import { uiLayers } from '@/ui/dom';
 import { StatsOverlay } from '@/ui/StatsOverlay';
 import { TransitionOverlay } from '@/ui/TransitionOverlay';
 import { InstallHintOverlay } from '@/ui/InstallHint';
+import { PerfResultCard } from '@/ui/PerfResult';
 import { UPDATE_BANNER_TEXT, UpdateOverlay } from '@/ui/UpdateOverlay';
 
 const canvas = document.getElementById('game');
@@ -35,13 +36,15 @@ if (!(uiRoot instanceof HTMLDivElement)) throw new Error('index.html must carry 
 
 // SPEC-035 §4.12: the footer and the boot log stopped calling a finished
 // game `M0 engine`. SPEC-033's short sha, when it lands, is appended by that spec.
-log.info('boot', `ReaLLM ${__APP_VERSION__}`);
+/** The version label; a perf row names its build by it too (SPEC-016 D-22). */
+const BUILD_LABEL = `ReaLLM ${__APP_VERSION__}`;
+log.info('boot', BUILD_LABEL);
 
 /** The version label, which is also the stats overlay's five-tap toggle (§4.6). */
 const note = document.createElement('p');
 note.className = 'boot-note';
 note.dataset['testid'] = 'version-label';
-note.textContent = `ReaLLM ${__APP_VERSION__}`;
+note.textContent = BUILD_LABEL;
 uiRoot.append(note);
 
 /** SPEC-004's bus: the one instance, injected into `Game` as `GameServices.events`. */
@@ -247,8 +250,11 @@ const game = new Game({
     boot: new BootOverlay(uiRoot),
     contextLost: new ContextLostOverlay(uiRoot),
     stats: statsOverlay,
+    // SPEC-016 §8.4: a `?perf` run's result, on screen in every build (D-26).
+    perf: new PerfResultCard(uiRoot, events),
   },
   services: { input, settings, save, audio },
+  buildLabel: BUILD_LABEL,
 });
 running = game;
 
@@ -357,6 +363,8 @@ if (import.meta.env.DEV) {
     loseContext: (restoreAfterMs: number | null) => game.loseContext(restoreAfterMs),
     /** SPEC-040 §3: busy-waits `ms` inside every draw, so the governor has a slow device to step down on. */
     slowDraw: (ms: number) => game.slowDraw(ms),
+    /** SPEC-016 §8.4: the last finished `?perf` run's result, or `null` before one has ended. */
+    perf: () => game.perfResult,
     stop: () => game.stop(),
   };
 
