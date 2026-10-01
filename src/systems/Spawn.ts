@@ -3,6 +3,8 @@
 // camera frustum when possible (12-h), triples objective-enemy weight and
 // force-spawns one after 20 s without (E14), silently recycles far un-aggroed
 // enemies, and runs the wave scripts with `wave:started` / `wave:cleared`.
+// SPEC-041 §4.5: a row with `pack` arrives as a pack around one ring point —
+// one elite roll for its leader, its affixes right after on the same stream.
 //
 // Actual entity initialisation belongs to `Combat.spawnEnemy` (SPEC-011 §4.6),
 // so the director drives a small `Spawner` port rather than the pool directly;
@@ -11,10 +13,19 @@ import type { EventBus, GameEvents } from '@/core/Events';
 import type { Pool } from '@/core/Pool';
 import type { QualitySettings } from '@/core/Renderer';
 import type { Rng, WeightedEntry } from '@/core/Rng';
-import { ENEMIES, WAVES, type Archetype, type EnemyId, type PlanetDef, type Wave, type WaveId } from '@/data/index';
+import {
+  ENEMIES,
+  WAVES,
+  type AffixId,
+  type Archetype,
+  type EnemyId,
+  type PlanetDef,
+  type Wave,
+  type WaveId,
+} from '@/data/index';
 import type { EnemyEntity } from '@/entities/Enemy';
 import type { Layout } from '@/systems/Layout';
-import { rollElite } from '@/systems/Combat';
+import { rollAffixes, rollElite } from '@/systems/Combat';
 
 /** The camera frustum projected to the ground plane; the scene builds it. */
 export type FrustumXZ = { contains(x: number, z: number, margin?: number): boolean };
@@ -25,8 +36,11 @@ export interface WaveHandle {
 
 /** What the director needs to put an enemy in the world — `Combat` satisfies it. */
 export interface Spawner {
-  spawnEnemy(id: EnemyId, x: number, z: number, elite: boolean): EnemyEntity;
+  spawnEnemy(id: EnemyId, x: number, z: number, elite: boolean, affixA?: AffixId | null, affixB?: AffixId | null): EnemyEntity;
 }
+
+/** One row of a planet's spawn table. */
+type SpawnRow = PlanetDef['surface']['spawn'][number];
 
 /** Obstacle overlap for spawn placement; `ObstacleGrid` satisfies it. */
 interface SpawnObstacles {
@@ -54,6 +68,10 @@ const WALL_MARGIN = 4;
 const SHELTER_CLEARANCE = 4;
 /** 12-g: wave enemies bypass P but respect `quality.maxEnemies + 8` in total. */
 export const WAVE_CEILING_BONUS = 8;
+/** SPEC-041 §4.5: a pack's members stand within this of its leader's ring point. */
+export const PACK_RADIUS = 2.5;
+/** SPEC-041 §4.5: how far past the population target a pack may carry the field. */
+export const PACK_OVERSHOOT = 4;
 
 /**
  * SPEC-038 §4.4: the planet's design count on every preset, capped by the
@@ -138,6 +156,11 @@ export class SpawnDirector {
   readonly #waveIds = new Set<number>();
   readonly #waves: WaveRun[] = [];
   #nextHandle = 1;
+  /** SPEC-041 §4.5: the positive counter a pack's members share. */
+  #nextPackId = 1;
+  /** SPEC-041 §4.6: `rollAffixes`'s out, reused. */
+  readonly #affixes: { a: AffixId | null; b: AffixId | null } = { a: null, b: null };
+  readonly #packScratch = new Set<number>();
 
   // Reused per update; the census walks the pool once (SPEC-001 §7).
   readonly #aliveById = new Map<EnemyId, number>();
@@ -171,6 +194,17 @@ export class SpawnDirector {
       if (this.#enemies.at(i).state !== 'dead') count++;
     }
     return count;
+  }
+
+  /** SPEC-041 §4.5: the distinct live packs (`sceneInfo.packs`). */
+  get packs(): number {
+    const seen = this.#packScratch;
+    seen.clear();
+    for (let i = 0; i < this.#enemies.size; i++) {
+      const e = this.#enemies.at(i);
+      if (e.state !== 'dead' && e.packId > 0) seen.add(e.packId);
+    }
+    return seen.size;
   }
 
   /** The ambient target in force — the planet's, scaled by any ramp (SPEC-035 §4.7). */
@@ -214,7 +248,8 @@ export class SpawnDirector {
         continue;
       }
       const at = this.#place(player, def.radius, null);
-      this.#spawn(id, at.x, at.z, this.#rollEliteFor(id));
+      // SPEC-041 §4.5: E14's forced spawn stays single.
+      this.#spawnRolled(id, at.x, at.z, 0);
       return;
     }
 
@@ -228,8 +263,66 @@ export class SpawnDirector {
       this.#ramp?.excludeArchetypes ?? [],
     );
     if (id === null) return;
+    // SPEC-041 §4.5: a pack row comes as a pack — but never under a ramp.
+    const row = this.#rowOf(id);
+    if (row?.pack !== undefined && this.#ramp === null) {
+      this.#spawnPack(id, row, row.pack, player, cameraFrustum);
+      return;
+    }
     const at = this.#place(player, ENEMIES[id].radius, cameraFrustum);
-    this.#spawn(id, at.x, at.z, this.#rollEliteFor(id));
+    this.#spawnRolled(id, at.x, at.z, 0);
+  }
+
+  /**
+   * SPEC-041 §4.5: `size = rng.int(min, max)`, capped by the row's `maxAlive`
+   * room and by `populationTarget + PACK_OVERSHOOT` (at least 1). The leader
+   * stands at the ring point `#place` cleared and takes the pack's one elite
+   * roll; each member draws a point within `PACK_RADIUS` of it and is dropped
+   * when its circle hits an obstacle, a shelter's clearance or the wall
+   * margin (E64). Every member shares the pack's id.
+   */
+  #spawnPack(id: EnemyId, row: SpawnRow, pack: readonly [number, number], player: { x: number; z: number }, frustum: FrustumXZ): void {
+    const def = ENEMIES[id];
+    let size = this.#rng.int(pack[0], pack[1]);
+    size = Math.min(size, row.maxAlive - (this.#aliveById.get(id) ?? 0));
+    size = Math.max(1, Math.min(size, this.populationTarget + PACK_OVERSHOOT - this.#ambientAlive));
+    const at = this.#place(player, def.radius, frustum);
+    this.#spawnPackAt(id, at.x, at.z, size, false);
+  }
+
+  /** The pack itself: the leader at `(x, z)`, then the members around it. */
+  #spawnPackAt(id: EnemyId, x: number, z: number, size: number, forceElite: boolean): number {
+    const def = ENEMIES[id];
+    const packId = this.#nextPackId++;
+    this.#spawnRolled(id, x, z, packId, forceElite);
+    let members = 1;
+    for (let k = 1; k < size; k++) {
+      const off = this.#rng.inDisc(PACK_RADIUS);
+      const mx = x + off.x;
+      const mz = z + off.z;
+      if (this.#memberBlocked(mx, mz, def.radius)) continue; // E64
+      const e = this.#spawn(id, mx, mz, false, null, null);
+      e.packId = packId;
+      members++;
+    }
+    return members;
+  }
+
+  /** E64: a member's circle in a rock, a shelter's clearance or past the wall margin. */
+  #memberBlocked(x: number, z: number, radius: number): boolean {
+    const edge = this.#layout.halfSize - WALL_MARGIN;
+    if (Math.abs(x) > edge || Math.abs(z) > edge) return true;
+    if (this.#obstacles !== null && this.#obstacles.circleHits(x, z, radius)) return true;
+    return this.#nearShelter(x, z);
+  }
+
+  /**
+   * SPEC-041 §4.10 (debug `Spawn elite`): a pack of `size` of `id` around
+   * `(x, z)` whose leader is an elite with the planet's affix count, rolled on
+   * this director's stream like any other. Returns how many stood up.
+   */
+  spawnElitePack(id: EnemyId, x: number, z: number, size: number): number {
+    return this.#spawnPackAt(id, x, z, size, true);
   }
 
   // ------------------------------------------------------------------ waves
@@ -298,7 +391,9 @@ export class SpawnDirector {
   }
 
   spawnBoss(boss: EnemyId, at: { x: number; z: number }): EnemyEntity {
-    return this.#spawner.spawnEnemy(boss, at.x, at.z, false);
+    const e = this.#spawner.spawnEnemy(boss, at.x, at.z, false);
+    e.packId = 0;
+    return e;
   }
 
   /** §4.8: the silent respawn sweep. Bosses are the scene's own business. */
@@ -368,7 +463,10 @@ export class SpawnDirector {
     const d = this.#rng.float(def.spawnBand[0], def.spawnBand[1]);
     const x = this.#clamp(center.x + Math.cos(angle) * d);
     const z = this.#clamp(center.z + Math.sin(angle) * d);
-    const e = this.#spawn(id, x, z, elite);
+    // SPEC-041 §4.6: a wave group's elite rolls its affixes too.
+    const rolled = elite && ENEMIES[id].eliteAllowed;
+    if (rolled) rollAffixes(ENEMIES[id], this.#planet.chapter, this.#rng, this.#affixes);
+    const e = this.#spawn(id, x, z, elite, rolled ? this.#affixes.a : null, rolled ? this.#affixes.b : null);
     // SPEC-030 §4.6: wave groups ignore hiding; `spawnEnemy` reset it false.
     e.fromWave = true;
     // SPEC-034 §4.8: a wave *is* the attack. It comes in aggroed, and its leash
@@ -486,19 +584,36 @@ export class SpawnDirector {
   }
 
   #maxAliveOf(id: EnemyId): number {
+    return this.#rowOf(id)?.maxAlive ?? Infinity; // an objective id outside the ambient table has no cap
+  }
+
+  #rowOf(id: EnemyId): SpawnRow | null {
     for (const row of this.#planet.surface.spawn) {
-      if (row.enemy === id) return row.maxAlive;
+      if (row.enemy === id) return row;
     }
-    return Infinity; // an objective id outside the ambient table has no cap
+    return null;
   }
 
-  #rollEliteFor(id: EnemyId): boolean {
-    return rollElite(ENEMIES[id], this.#planet.surface.eliteChance, this.#rng);
+  /**
+   * §4.5 / SPEC-041 §4.6: a single or a pack's leader — the one `rollElite` on
+   * the planet's chance (or a forced elite for the debug pack), its affixes
+   * right after on the same stream, and the pack's id (0 for none).
+   */
+  #spawnRolled(id: EnemyId, x: number, z: number, packId: number, forceElite = false): EnemyEntity {
+    const def = ENEMIES[id];
+    const elite = forceElite ? def.eliteAllowed : rollElite(def, this.#planet.surface.eliteChance, this.#rng);
+    if (elite) rollAffixes(def, this.#planet.chapter, this.#rng, this.#affixes);
+    const e = this.#spawn(id, x, z, elite, elite ? this.#affixes.a : null, elite ? this.#affixes.b : null);
+    e.packId = packId;
+    return e;
   }
 
-  #spawn(id: EnemyId, x: number, z: number, elite: boolean): EnemyEntity {
+  #spawn(id: EnemyId, x: number, z: number, elite: boolean, affixA: AffixId | null, affixB: AffixId | null): EnemyEntity {
     this.#lastSpawnAt.set(id, this.#time);
-    const e = this.#spawner.spawnEnemy(id, x, z, elite);
+    const e = this.#spawner.spawnEnemy(id, x, z, elite, affixA, affixB);
+    // Stamped by the callers that make packs; a single, a summon and a wave
+    // enemy carry none, whatever a recycled slot held (core/Pool.ts).
+    e.packId = 0;
     this.#totalAlive++;
     this.#liveIds.add(e.id);
     this.#aliveById.set(id, (this.#aliveById.get(id) ?? 0) + 1);

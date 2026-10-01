@@ -95,6 +95,9 @@ export const ASSETS = {
         windup_melee: [20720, 150],
         windup_charge: [20970, 450],
         windup_shot: [21520, 400],
+        // SPEC-041 §4.10: a boss winding up a ground move, and the move landing.
+        windup_boss: [22070, 700],
+        boss_slam: [22920, 800],
       },
     },
     /** The rail scene: hits on the ship, and the two continuous channels. */
@@ -109,6 +112,8 @@ export const ASSETS = {
         laser_charge: [6850, 700],
         /** SPEC-035 §4.11: the ship's nose guns, fired on the rail. */
         ship_laser: [7650, 200],
+        /** SPEC-041 §4.9: a hit on a hazard that did not kill it. */
+        ship_hit_tick: [8000, 80],
       },
     },
     /** The story films' cues (PLAN R9, SPEC-021 §6.2), played on the film clock. */

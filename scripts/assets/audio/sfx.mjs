@@ -605,6 +605,50 @@ const SOUNDS = {
     },
   },
 
+  // SPEC-041 §4.10: a boss winding up a ground move, and the move landing.
+  // Both sit under the windup cues — a body three metres across, not a bug.
+  windup_boss: {
+    // A deep rising rumble: two detuned saws climbing under a slowly opening
+    // low-pass, with the ground's noise swelling beneath them.
+    peak: -3,
+    render: (n) => {
+      const a = osc('saw');
+      const b = osc('saw');
+      const sub = osc('sine');
+      const nz = noise(611);
+      const lp = svf();
+      const rumble = svf();
+      const len = n / SR;
+      return fill(n, (t) => {
+        const f = sweep(t, 38, 92, len * 0.9);
+        const body = lp(a(f) * 0.6 + b(f * 1.013) * 0.5, sweep(t, 180, 900, len), 1.2);
+        const ground = rumble(nz(), sweep(t, 70, 160, len)) * 2.4;
+        const env = adsr(t, len - 0.08, 0.12, 0.1, 0.9, 0.06) * (0.45 + 0.55 * clamp(t / len, 0, 1));
+        return soft((body + ground + sub(f * 0.5) * 0.4) * env, 1.4);
+      });
+    },
+  },
+  boss_slam: {
+    // A low impact with a gravel tail: a falling sine thump, a noise crack, and
+    // a scatter of small debris ticks that thin out as it settles.
+    peak: -1,
+    render: (n) => {
+      const thump = osc('sine');
+      const nz = noise(612);
+      const lp = svf();
+      const tail = svf('bp');
+      const hp = svf('hp');
+      const r = rng(613);
+      return fill(n, (t) => {
+        const head = 1.4 * thump(sweep(t, 95, 30, 0.2)) * decay(t, 0.16);
+        const crack = 0.9 * lp(nz(), sweep(t, 4200, 260, 0.25), 1.1) * decay(t, 0.09);
+        const gravel = r() < 0.06 * decay(t, 0.28) ? r() * 2 - 1 : 0;
+        const settle = 1.6 * tail(nz(), sweep(t, 900, 240, 0.6), 1.5) * decay(t, 0.3);
+        return soft(head + crack + settle + 1.1 * hp(gravel, 1800), 1.5) * attack(t, 0.001);
+      });
+    },
+  },
+
   // -------------------------------------------------------------- flight
   ship_hit_shield: {
     peak: -4,
@@ -704,6 +748,22 @@ const SOUNDS = {
         const f = sweep(t, 2400, 260, 0.11);
         const env = attack(t, 0.002) * decay(t, 0.045);
         return soft(lp(a(f) * 0.6 + b(f * 0.5) * 0.4 + 0.15 * nz(), sweep(t, 6000, 800, 0.12), 1.3) * env, 1.2);
+      });
+    },
+  },
+
+  ship_hit_tick: {
+    // SPEC-041 §4.9 — a bright metallic tick for a hit that does not kill:
+    // two inharmonic partials and a click, gone inside 60 ms so a stream of
+    // hits reads as a rattle rather than a tone.
+    peak: -8,
+    render: (n) => {
+      const bp = svf('bp');
+      const nz = noise(614);
+      return fill(n, (t) => {
+        const ring = Math.sin(TAU * 3100 * t) * 0.6 + Math.sin(TAU * 4870 * t) * 0.35;
+        const click = bp(nz(), 6000, 2.5) * decay(t, 0.004);
+        return (ring * decay(t, 0.012) + click) * attack(t, 0.0005);
       });
     },
   },

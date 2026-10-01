@@ -23,6 +23,8 @@ import type { SceneId } from '@/core/StateMachine';
 // the single import site (SPEC-009 §5); no event name and no payload field
 // moved when they narrowed (SPEC-004 D-3).
 import type {
+  BossMoveId,
+  BossMoveKind,
   DamageSource,
   DialogueId,
   EnemyId,
@@ -120,8 +122,14 @@ export type GameEvents = {
    * SPEC-038 §4.2: every windup start — a melee blow, a rusher's charge or a
    * shot — for the cue and the dash tip. `kind` is `systems/EnemyAi`'s
    * `WindupKind`, spelled out because `core/` may not import `systems/`.
+   * SPEC-041 §4.1 adds the boss kinds: slams, lines, rings, volleys and the burrow.
    */
-  'enemy:windup': { enemyId: EnemyId; kind: 'melee' | 'charge' | 'shot'; x: number; z: number };
+  'enemy:windup': {
+    enemyId: EnemyId;
+    kind: 'melee' | 'charge' | 'shot' | 'slam' | 'lines' | 'ring' | 'volley' | 'burrow';
+    x: number;
+    z: number;
+  };
   'weapon:locked': { slot: WeaponSlot; itemId: ItemId };
   'mine:armed': { x: number; z: number };
   'shop:purchased': { kind: 'ship' | 'gear' | 'companion' | 'craft'; id: string; tier?: number };
@@ -133,6 +141,13 @@ export type GameEvents = {
    */
   'enemy:dismissed': { enemyId: EnemyId; x: number; z: number };
   'boss:phase': { boss: EnemyId; phase: number };
+  /**
+   * SPEC-041 §4.1: a boss move landed — its telegraph resolved, its volley
+   * fired, its charge ended, or the burrow surfaced — at `(x, z)` on the
+   * surface plane. The scene bursts and shakes for the ground kinds; the audio
+   * layer slams.
+   */
+  'boss:move': { boss: EnemyId; move: BossMoveId; kind: BossMoveKind; x: number; z: number };
   'boss:defeated': { boss: EnemyId };
   'poi:discovered': { poi: PoiId; instance: number };
   'poi:reached': { poi: PoiId; instance: number };
@@ -157,6 +172,12 @@ export type GameEvents = {
   'ship:damaged': { shield: number; hull: number; source: 'asteroid' | 'enemy' | 'storm' };
   'flight:arrived': { planet: PlanetId };
   'flight:recalled': { planet: PlanetId };
+  /**
+   * SPEC-041 §4.9: every player shot that hits a hazard, on the steering plane
+   * — `lethal` when it was the kill. The reticle flashes and `ship_hit_tick`
+   * plays, so a hit that does not kill is no longer silent.
+   */
+  'flight:hazardHit': { kind: 'asteroid' | 'fighter' | 'interceptor'; x: number; y: number; lethal: boolean };
   'ui:toast': { text: string; kind?: 'info' | 'warn' | 'good' | 'error'; ms?: number };
   /** The rotate prompt itself is SPEC-015 §6; this is the signal it listens to. */
   'ui:orientation': { orientation: 'portrait' | 'landscape' };

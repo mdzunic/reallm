@@ -135,6 +135,9 @@ export class Hud {
 
   // Flight instruments (SPEC-013 §4.10); built only in flight mode.
   readonly #reticle = testId(el('div', 'hud-reticle'), 'reticle');
+  /** SPEC-041 §4.7: where a shot fired now meets the cone target — hidden until shown. */
+  readonly #leadPip = testId(el('div', 'hud-lead-pip is-hidden'), 'lead-pip');
+  #leadPipShown = false;
   readonly #throttle = testId(el('span', 'hud-throttle'), 'hud-throttle');
   readonly #progress = testId(el('div', 'hud-progress'), 'hud-progress');
   readonly #progressFill = el('div', 'hud-progress-fill');
@@ -271,7 +274,7 @@ export class Hud {
       this.#root.append(thumbArc);
       this.arc = { primary, action, slots };
     }
-    if (mode === 'flight') this.#root.append(this.#ion, this.#reticle);
+    if (mode === 'flight') this.#root.append(this.#ion, this.#leadPip, this.#reticle);
     root.mount(this.#root, 'hud');
     this.#unregister = root.register(this);
     // SPEC-037 §4.2: the top centre's height, for the dialogue and the tip strip
@@ -324,6 +327,27 @@ export class Hud {
   setReticle(ndcX: number, ndcY: number): void {
     this.#reticle.style.left = `${(ndcX * 0.5 + 0.5) * 100}%`;
     this.#reticle.style.top = `${(-ndcY * 0.5 + 0.5) * 100}%`;
+  }
+
+  /**
+   * SPEC-041 §4.7: show the lead pip — a hollow diamond — at NDC (y up),
+   * placed like the reticle. The scene calls it every frame ARIA is enabled
+   * and a ship sits in the assist cone, on every input scheme.
+   */
+  setLeadPip(ndcX: number, ndcY: number): void {
+    const pip = this.#leadPip;
+    pip.style.left = `${(ndcX * 0.5 + 0.5) * 100}%`;
+    pip.style.top = `${(-ndcY * 0.5 + 0.5) * 100}%`;
+    if (this.#leadPipShown) return;
+    this.#leadPipShown = true;
+    pip.classList.remove('is-hidden');
+  }
+
+  /** SPEC-041 §4.7, 41-k: no cone target, or ARIA disabled — no pip. Writes nothing once hidden. */
+  hideLeadPip(): void {
+    if (!this.#leadPipShown) return;
+    this.#leadPipShown = false;
+    this.#leadPip.classList.add('is-hidden');
   }
 
   /**

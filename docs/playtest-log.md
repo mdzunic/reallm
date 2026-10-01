@@ -1610,3 +1610,44 @@ row — a software-GL floor, not a device number:
       under the header above.
 - [ ] the first group of each checklist walked on the phone, to confirm it reads
       as a list a person can follow.
+
+## SPEC-041 — Threat II: bosses with moves, packs with leaders, flight that aims (M7g)
+
+- **Build:** `spec/SPEC-041` — untagged
+- **Devices:**
+  - desktop — headless Chromium 1280 × 720 (Playwright, Linux container, **software GL / SwiftShader**)
+  - phone — _not run: no handset in the build container_ (§7's pass is owed, below)
+
+Recorded from the container the branch was built in: `npm run check` — 96
+files and 2,007 tests with none skipped — and, one file per invocation or a
+few together, `e2e/SPEC-041.spec.ts` (§6.2's seven cases and the AC-37 budget,
+all green), `e2e/SPEC-006.spec.ts`, `SPEC-011`, `SPEC-012`, `SPEC-013`,
+`SPEC-023`, `SPEC-038`, `SPEC-039` and `flight-env`.
+
+**The bot suites** (`tests/systems/threat.test.ts`, seeds 1–6 per boss, the
+post-SPEC-039 reference kit with its Rocket rotation, three medkits):
+
+| Boss | Kite: time to win | Kite: max HP lost | Reader | Dasher | Stand |
+| --- | --- | --- | --- | --- | --- |
+| Dune Wurm | 50–53 s | 58–89 % | 0–7 % | 0 % | ≥ 253 %, dies |
+| Frost Matriarch | 39–40 s | 37–52 % | 0 % | 0 % | ≥ 199 % |
+| Hive Broodlord | 43–44 s | 36–76 % | 0 % | 0 % | ≥ 251 %, dies |
+| Ash Titan | 45 s | 97–107 % | 0 % | 0 % | ≥ 253 %, dies |
+| Hive Queen | 45–51 s | 49–84 % | 0 % | 0 % | ≥ 252 %, dies |
+
+The field suite on the same kit, 16 seeds × 3 minutes: 3.3–17.3 % of max HP a
+minute (Vetra lowest, the Hive highest), 42–86 % of it from blows and charges,
+and 0.77–0.90 aggroed enemies within 12 m on every planet. The gauntlet's
+Ferrum run: `c4_s2` completed in 16 of 16 seeds at ARIA level 2, and no recall
+in 16 of 16 at level 1; the Hive's two existing cases stay 16 of 16.
+
+**Owed on hardware (§7).**
+
+- [ ] each boss fought once with the recommended loadout on desktop and the
+      reference phone: its moves read from their decals, the Matriarch's nova
+      dashed through, the Titan's fissures and the Queen's dive sidestepped,
+      the ring tried and recalled from;
+- [ ] a death to the Wurm, coming back at the arena's mouth;
+- [ ] a pack led by a mender and a bulwark elite, plates read;
+- [ ] Ferrum at ARIA level 1 then 2: the lead pip found, the reticle following
+      it at level 2, the hit ticks heard.

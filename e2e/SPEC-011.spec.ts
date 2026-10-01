@@ -4,8 +4,8 @@
 // archetype mechanics, the damage formulas, the loot streams and the spatial
 // hash stay pinned in node (`tests/systems/`); what this suite proves is the
 // wiring only a browser shows — enemies actually spawn and engage on a real
-// planet, elites arrive at the planet's rate, the wurm's burrow really makes
-// it untouchable, the die → respawn round trip closes *and* the brains
+// planet, the wurm's burrow really makes it untouchable, the die → respawn
+// round trip closes *and* the brains
 // re-acquire the player afterwards, and the surface scene still starts (and
 // ducks) its own music bed. The QA shortcuts moved to the real scene's
 // `?debug` strip (`surface-hurt`, `surface-spawn-boss`, …); the spawn/elite/
@@ -162,28 +162,10 @@ test('the surface scene wears one HUD: a single HP readout, resources uncovered'
   ).toBeNull();
 });
 
-test('elites arrive at roughly the planet rate of 1 in 20 (AC-40)', async ({ page }) => {
-  test.setTimeout(480_000);
-  await autoFire(page);
-  await start(page, '/?debug&scene=surface&planet=cinder4');
-
-  // The director only spawns below the population target, so an idle field
-  // stalls at ~9 spawns — the pilot hunts to churn it. The first wait is a
-  // positive signal: it ends as soon as the first elite rolls, and the budget
-  // covers well over a hundred spawns at cinder4's eliteChance of 0.05. The
-  // scene respawns a dead pilot by itself after 2.5 s, so no revive clicks.
-  await hunt(page, 300, async () => Number((await info(page))['elites'] ?? 0) >= 1);
-  expect(Number((await info(page))['elites'] ?? 0)).toBeGreaterThanOrEqual(1);
-
-  // The other half of "about 1 in 20": common enemies stay common. The same
-  // budget as the first wait: a hunt churns about twenty spawns a minute on a
-  // quiet machine, and a CI runner whose combat frames drop game time has
-  // managed barely half that — the wait ends at 40 either way.
-  await hunt(page, 300, async () => Number((await info(page))['spawned'] ?? 0) >= 40);
-  const seen = await info(page);
-  expect(Number(seen['spawned'])).toBeGreaterThanOrEqual(40);
-  expect(Number(seen['elites']) / Number(seen['spawned'])).toBeLessThan(0.25);
-});
+// AC-40 ("about 1 in 20") is measured per roll since SPEC-041 §4.5: a pack is
+// one roll, so counting elites per enemy here would fail on a slow runner about
+// one run in four. `tests/systems/spawn.test.ts` measures the rate over ≥ 2,000
+// Cinder-4 rolls, and `e2e/SPEC-041.spec.ts`'s plate case shows an elite.
 
 test('the player dies into SIGNAL LOST, respawns, and the brains re-acquire them (AC-41, SPEC-012 §4.8)', async ({ page }) => {
   test.setTimeout(90_000);

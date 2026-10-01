@@ -18,7 +18,7 @@ import { hash32 } from '@/core/Rng';
 import type { Look, QualityPreset, QualitySettings } from '@/core/Quality';
 import type { Pool } from '@/core/Pool';
 import type { PlanetDef, ResourceId } from '@/data/index';
-import type { EnemyEntity } from '@/entities/Enemy';
+import { isBuried, type EnemyEntity } from '@/entities/Enemy';
 import type { FollowerEntity } from '@/entities/Follower';
 import type { PlayerEntity } from '@/entities/Player';
 import type { ProjectileEntity } from '@/entities/Projectile';
@@ -111,8 +111,6 @@ export interface SurfaceFrame {
   deployables: Pool<DeployableEntity>;
   pickups: Pool<ViewPickup>;
   nodes: readonly ViewNode[];
-  /** The wurm's resurface telegraph, or `null`. */
-  telegraph: { x: number; z: number } | null;
   /**
    * SPEC-038 §4.2: the ground telegraphs and the world clock they were stamped
    * on — not the view clock, which a held beat runs ahead of `world.time`.
@@ -523,7 +521,6 @@ export class SurfaceView {
   readonly #biome: PlanetDef['biome'];
   /** SPEC-040 §4.6: every instanced prop and obstacle kind, in build order. */
   readonly #propKinds: PropKind[] = [];
-  readonly #telegraph: THREE.Mesh;
   readonly #arenaRing: THREE.Mesh;
   #fx: CombatFx;
   /** SPEC-038 §4.2: the ground telegraphs — at most three draws, none while the pool is empty. */
@@ -928,16 +925,6 @@ export class SurfaceView {
         log.warn('view', 'character model unavailable; the capsule stays', cause);
       }
     }
-
-    // The wurm's resurface telegraph.
-    this.#telegraph = new THREE.Mesh(
-      new THREE.RingGeometry(3.4, 4, 32),
-      new THREE.MeshBasicMaterial({ color: '#ff5533', side: THREE.DoubleSide }),
-    );
-    this.#telegraph.rotation.x = -Math.PI / 2;
-    this.#telegraph.position.y = 0.05;
-    this.#telegraph.visible = false;
-    this.#root.add(this.#telegraph);
 
     // Storm sprites (SPEC-018 §4.9): instanced quads, camera-fixed billboard.
     this.#stormCapacity = quality.maxParticles;
@@ -1559,15 +1546,6 @@ export class SurfaceView {
 
     this.enemies.sync(frame.enemies, frame.time, ground);
 
-    this.#telegraph.visible = frame.telegraph !== null;
-    if (frame.telegraph !== null) {
-      this.#telegraph.position.set(
-        frame.telegraph.x,
-        0.05 + ground(frame.telegraph.x, frame.telegraph.z),
-        frame.telegraph.z,
-      );
-    }
-
     // Nodes: fill drives crystal height (AC-24); a harvested node glows white.
     frame.nodes.forEach((node, i) => {
       const fill = node.capacity <= 0 ? 0 : node.remaining / node.capacity;
@@ -1640,7 +1618,7 @@ export class SurfaceView {
       const e = frame.enemies.at(i);
       // Exactly the enemies `EnemyMeshes` draws: a corpse and a burrowed wurm
       // have nothing on the ground to cast from.
-      if (e.state === 'dead' || e.specialKind === 'burrow_dig') continue;
+      if (e.state === 'dead' || isBuried(e)) continue;
       write(e.x, e.z, e.def.look.scale * BLOB_SCALE_ENEMY * (e.elite ? BLOB_SCALE_ELITE : 1));
     }
     mesh.count = n;

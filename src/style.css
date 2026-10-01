@@ -2122,6 +2122,43 @@ html.reduce-motion .hud.is-static .hud-static {
 .dmg--player { color: #ff5533; }
 /* SPEC-038 §4.8: a crit reads on the number — gold, ×1.35, and a `!`. */
 .dmg--crit { color: #ffe45c; font-size: calc(14px * 1.35); }
+/* SPEC-041 §4.6: a hit a bulwark turned reads grey. */
+.dmg--guarded { color: #9aa3ad; }
+
+/* SPEC-041 §4.6: the elite nameplates — six pooled plates over the nearest
+   live elites, placed through transform writes from the scene's render; they
+   never animate, so reduce motion needs no rule. SPEC-037's plate and halo. */
+.elite-plate {
+  position: absolute;
+  left: 0;
+  top: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1px;
+  padding: 2px 6px;
+  border-radius: 4px;
+  background: var(--hud-plate);
+  pointer-events: none;
+  white-space: nowrap;
+  will-change: transform;
+}
+
+.elite-plate.is-hidden {
+  display: none;
+}
+
+.elite-plate__name {
+  font: 700 12px/1.2 var(--font-mono, monospace);
+  color: #e0b34a;
+  text-shadow: var(--hud-halo);
+}
+
+.elite-plate__affixes {
+  font: 600 11px/1.2 var(--font-mono, monospace);
+  color: #f2e6c4;
+  text-shadow: var(--hud-halo);
+}
 
 /* --------------------------------------------------------------- dialogue */
 /* Bottom-center (AC-69). SPEC-037 §4.3: on the bottom stack — clear of the
@@ -3777,6 +3814,44 @@ button.hud-button {
   inset: 11px;
   background: var(--shield);
   border-radius: 50%;
+}
+
+/* SPEC-041 §4.9: a hit marks the reticle for 0.1 s and a kill for 0.25 s. Both
+   are colour and scale only — no transition, no animation — so they stand as
+   they are under reduce motion. The scene never sets both at once. */
+.hud-reticle.is-hit {
+  border-color: var(--ink);
+  opacity: 1;
+  transform: scale(1.2);
+}
+
+.hud-reticle.is-hit::after {
+  background: var(--ink);
+}
+
+.hud-reticle.is-kill {
+  border-color: var(--warn);
+  opacity: 1;
+  transform: scale(1.45);
+}
+
+.hud-reticle.is-kill::after {
+  background: var(--warn);
+}
+
+/* SPEC-041 §4.7: the lead pip — a hollow 14 px diamond where a shot fired now
+   meets the ship in ARIA's cone, placed like the reticle. SPEC-037's halo
+   rings its outer edge and a dark inset its inner one, so the white edge reads
+   over any sky. */
+.hud-lead-pip {
+  position: absolute;
+  box-sizing: border-box;
+  width: 14px;
+  height: 14px;
+  margin: -7px 0 0 -7px;
+  border: 2px solid var(--ink);
+  box-shadow: var(--hud-halo), inset 0 0 0 1px #000;
+  transform: rotate(45deg);
 }
 
 /* SPEC-037 §4.8: 14 px --ink on the top-left plate; its text is SPEC-045's. */

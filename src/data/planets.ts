@@ -116,7 +116,18 @@ export interface PlanetDef {
     readonly obstacles: { readonly density: number; readonly minRadius: number; readonly maxRadius: number };
     /** SPEC-030 §4.1: shelter and outcrop counts — targets, not guarantees (D-25). */
     readonly features: { readonly caves: number; readonly wrecks: number; readonly outcrops: number };
-    readonly spawn: readonly { readonly enemy: EnemyId; readonly weight: number; readonly maxAlive: number }[];
+    /**
+     * SPEC-041 §4.5 (*initial tuning*): a row with `pack` spawns `[min, max]`
+     * together around one ring point, its leader rolling the elite for all of
+     * them. Swarm rows run [3, 5] (the Hive's drones [4, 6]), rushers [1, 2];
+     * ranged rows come alone.
+     */
+    readonly spawn: readonly {
+      readonly enemy: EnemyId;
+      readonly weight: number;
+      readonly maxAlive: number;
+      readonly pack?: readonly [number, number];
+    }[];
     /** Ambient waves the planet runs on its own; Eden has none until `c6_m2`. */
     readonly ambientWaves?: WaveId;
     /**
@@ -177,8 +188,8 @@ export const PLANETS = {
       obstacles: { density: 0.06, minRadius: 1.2, maxRadius: 3.5 },
       features: { caves: 2, wrecks: 2, outcrops: 3 },
       spawn: [
-        { enemy: 'dust_skitter', weight: 6, maxAlive: 10 },
-        { enemy: 'wurmling', weight: 3, maxAlive: 5 },
+        { enemy: 'dust_skitter', weight: 6, maxAlive: 10, pack: [3, 5] },
+        { enemy: 'wurmling', weight: 3, maxAlive: 5, pack: [1, 2] },
         { enemy: 'scav_raider', weight: 2, maxAlive: 4 },
       ],
       population: 10,
@@ -231,8 +242,8 @@ export const PLANETS = {
       obstacles: { density: 0.07, minRadius: 1.2, maxRadius: 4 },
       features: { caves: 2, wrecks: 2, outcrops: 3 },
       spawn: [
-        { enemy: 'frost_mite', weight: 6, maxAlive: 12 },
-        { enemy: 'ice_crawler', weight: 3, maxAlive: 6 },
+        { enemy: 'frost_mite', weight: 6, maxAlive: 12, pack: [3, 5] },
+        { enemy: 'ice_crawler', weight: 3, maxAlive: 6, pack: [1, 2] },
         { enemy: 'ice_spitter', weight: 2, maxAlive: 4 },
       ],
       population: 11,
@@ -288,8 +299,8 @@ export const PLANETS = {
       obstacles: { density: 0.1, minRadius: 1.5, maxRadius: 4.5 },
       features: { caves: 2, wrecks: 1, outcrops: 3 },
       spawn: [
-        { enemy: 'hive_drone', weight: 6, maxAlive: 14 },
-        { enemy: 'spore_hound', weight: 3, maxAlive: 6 },
+        { enemy: 'hive_drone', weight: 6, maxAlive: 14, pack: [3, 5] },
+        { enemy: 'spore_hound', weight: 3, maxAlive: 6, pack: [1, 2] },
         { enemy: 'spore_spitter', weight: 2, maxAlive: 4 },
       ],
       population: 12,
@@ -345,8 +356,8 @@ export const PLANETS = {
       obstacles: { density: 0.09, minRadius: 1.5, maxRadius: 5 },
       features: { caves: 2, wrecks: 2, outcrops: 3 },
       spawn: [
-        { enemy: 'ash_crawler', weight: 6, maxAlive: 14 },
-        { enemy: 'magma_wraith', weight: 3, maxAlive: 6 },
+        { enemy: 'ash_crawler', weight: 6, maxAlive: 14, pack: [3, 5] },
+        { enemy: 'magma_wraith', weight: 3, maxAlive: 6, pack: [1, 2] },
         { enemy: 'slag_spitter', weight: 2, maxAlive: 4 },
       ],
       population: 13,
@@ -398,8 +409,8 @@ export const PLANETS = {
       obstacles: { density: 0.12, minRadius: 1.5, maxRadius: 4 },
       features: { caves: 2, wrecks: 1, outcrops: 2 },
       spawn: [
-        { enemy: 'hive_drone', weight: 6, maxAlive: 16 },
-        { enemy: 'hive_warrior', weight: 3, maxAlive: 6 },
+        { enemy: 'hive_drone', weight: 6, maxAlive: 16, pack: [4, 6] },
+        { enemy: 'hive_warrior', weight: 3, maxAlive: 6, pack: [1, 2] },
         { enemy: 'hive_spitter', weight: 2, maxAlive: 4 },
         { enemy: 'hive_egg', weight: 1, maxAlive: 18 },
       ],

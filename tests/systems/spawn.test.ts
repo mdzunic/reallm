@@ -1,17 +1,22 @@
 // SPEC-012 §6 — the spawn director, driven with a fake spawner and frustum
 // (AC-12..AC-17): population scaling and maxAlive, the ×3 objective weighting,
 // the 20 s forced spawn, far-unaggroed despawn, and the wave schedule.
+// SPEC-041 §6.1 adds packs: their sizes and caps, E64's dropped member, one
+// elite roll per pack and its rate per roll, no packs under a ramp, E14 single,
+// and pack aggro.
 import { describe, expect, it } from 'vitest';
 import { EventBus, type GameEvents } from '@/core/Events';
 import { Pool } from '@/core/Pool';
 import { QUALITY } from '@/core/Renderer';
 import { Rng, RngRoot } from '@/core/Rng';
-import { ENEMIES, PLANETS, WAVES, type EnemyId } from '@/data/index';
+import { AFFIXES, ENEMIES, PLANETS, WAVES, type AffixId, type EnemyId } from '@/data/index';
 import { makeEnemy, type EnemyEntity } from '@/entities/Enemy';
 import { generateLayout, type Layout } from '@/systems/Layout';
 import {
   DESPAWN_SECONDS,
   FORCED_SPAWN_SECONDS,
+  PACK_OVERSHOOT,
+  PACK_RADIUS,
   RING_MAX,
   RING_MIN,
   SpawnDirector,
@@ -19,6 +24,7 @@ import {
   pickSpawn,
   type FrustumXZ,
 } from '@/systems/Spawn';
+import { harness as combatHarness } from './combatFixtures';
 
 const STEP = 1 / 60;
 const NOWHERE: FrustumXZ = { contains: () => false };
@@ -30,21 +36,40 @@ interface Harness {
   layout: Layout;
   events: EventBus<GameEvents>;
   recorded: { name: string; payload: unknown }[];
-  spawned: { id: EnemyId; x: number; z: number; elite: boolean }[];
+  /**
+   * Every spawn in order. The director stamps `packId` on the entity after
+   * `spawnEnemy` returns, and a freed slot is reused, so `step()` copies it
+   * here at the end of the update that made it (-1 until then).
+   */
+  spawned: {
+    id: EnemyId;
+    x: number;
+    z: number;
+    elite: boolean;
+    affixA: AffixId | null;
+    affixB: AffixId | null;
+    entity: EnemyEntity;
+    packId: number;
+  }[];
+  /** One director update, then the packIds of what it spawned. */
+  step(player?: { x: number; z: number }, frustum?: FrustumXZ, wantSpawns?: boolean): void;
   run(seconds: number, player?: { x: number; z: number }, frustum?: FrustumXZ, wantSpawns?: boolean): void;
   living(): EnemyEntity[];
 }
 
-function harness(planet: keyof typeof PLANETS = 'cinder4', quality: keyof typeof QUALITY = 'high', seed = 5): Harness {
+function harness(planet: keyof typeof PLANETS = 'cinder4', quality: keyof typeof QUALITY = 'high', seed = 5, shelters = true): Harness {
   const pool = new Pool(makeEnemy);
-  const layout = generateLayout(PLANETS[planet], new RngRoot(seed).layout(planet));
+  const generated = generateLayout(PLANETS[planet], new RngRoot(seed).layout(planet));
+  // SPEC-041 §6.1: the pack-size cases stand on open ground, where E64 has
+  // nothing to drop a member for.
+  const layout: Layout = shelters ? generated : { ...generated, shelters: [] };
   const events = new EventBus<GameEvents>({ dev: false });
   const recorded: { name: string; payload: unknown }[] = [];
   events.onAny((name, payload) => recorded.push({ name: name as string, payload }));
   const spawned: Harness['spawned'] = [];
   let nextId = 1;
   const spawner = {
-    spawnEnemy(id: EnemyId, x: number, z: number, elite: boolean): EnemyEntity {
+    spawnEnemy(id: EnemyId, x: number, z: number, elite: boolean, affixA: AffixId | null = null, affixB: AffixId | null = null): EnemyEntity {
       const e = pool.alloc();
       e.id = nextId++;
       e.def = ENEMIES[id];
@@ -58,11 +83,21 @@ function harness(planet: keyof typeof PLANETS = 'cinder4', quality: keyof typeof
       e.summonedBy = 0; // …and SPEC-034 §4.6's
       e.spawnX = x;
       e.spawnZ = z;
-      spawned.push({ id, x, z, elite });
+      e.affixA = affixA;
+      e.affixB = affixB;
+      spawned.push({ id, x, z, elite, affixA, affixB, entity: e, packId: -1 });
       return e;
     },
   };
   const director = new SpawnDirector(PLANETS[planet], layout, pool, QUALITY[quality], new Rng(seed), events, spawner);
+  let stamped = 0;
+  const step = (player = PLAYER, frustum = NOWHERE, wantSpawns = true): void => {
+    director.update(STEP, player, frustum, wantSpawns);
+    for (; stamped < spawned.length; stamped++) {
+      const record = spawned[stamped] as Harness['spawned'][number];
+      record.packId = record.entity.packId;
+    }
+  };
   return {
     director,
     pool,
@@ -70,10 +105,11 @@ function harness(planet: keyof typeof PLANETS = 'cinder4', quality: keyof typeof
     events,
     recorded,
     spawned,
+    step,
     run(seconds, player = PLAYER, frustum = NOWHERE, wantSpawns = true): void {
       const steps = Math.round(seconds / STEP);
       for (let i = 0; i < steps; i++) {
-        director.update(STEP, player, frustum, wantSpawns);
+        step(player, frustum, wantSpawns);
         // The pool sweep Combat runs each step: reclaim the dead.
         for (let j = pool.size - 1; j >= 0; j--) {
           if (pool.at(j).state === 'dead') pool.free(j);
@@ -91,13 +127,17 @@ function harness(planet: keyof typeof PLANETS = 'cinder4', quality: keyof typeof
 }
 
 describe('SpawnDirector — population (AC-12)', () => {
-  it('fills to the planet target and holds there', () => {
+  // SPEC-041 §4.5: a pack may carry the field past the target, by at most
+  // `PACK_OVERSHOOT` — the target is a floor the director refills, not a cap.
+  it('fills to the planet target and holds there, a pack carrying it at most 4 past', () => {
     const h = harness('cinder4', 'high'); // SPEC-038 §4.4: P = 10 on every preset
     expect(populationTarget(PLANETS.cinder4, QUALITY.high)).toBe(10);
     h.run(30);
-    expect(h.director.alive).toBe(10);
+    expect(h.director.alive).toBeGreaterThanOrEqual(10);
+    expect(h.director.alive).toBeLessThanOrEqual(10 + PACK_OVERSHOOT);
+    const held = h.director.alive;
     h.run(10);
-    expect(h.director.alive).toBe(10);
+    expect(h.director.alive).toBe(held);
   });
 
   it('is the design count on every preset, capped by quality.maxEnemies (SPEC-038 §4.4)', () => {
@@ -116,7 +156,8 @@ describe('SpawnDirector — population (AC-12)', () => {
     expect(populationTarget(PLANETS.hive, QUALITY.medium)).toBe(15);
     const h = harness('cinder4', 'low');
     h.run(30);
-    expect(h.director.alive).toBe(populationTarget(PLANETS.cinder4, QUALITY.low));
+    expect(h.director.alive).toBeGreaterThanOrEqual(populationTarget(PLANETS.cinder4, QUALITY.low));
+    expect(h.director.alive).toBeLessThanOrEqual(populationTarget(PLANETS.cinder4, QUALITY.low) + PACK_OVERSHOOT);
   });
 
   it('respects each row maxAlive', () => {
@@ -147,7 +188,17 @@ describe('SpawnDirector — placement (AC-13)', () => {
     const player = { x: 100, z: 40 }; // away from the pad's 20 m clearance
     h.run(30, player, { contains: (x) => x > player.x });
     expect(h.spawned.length).toBeGreaterThan(5);
+    // SPEC-041 §4.5: a single or a pack's leader stands on the ring point
+    // `#place` cleared; the members within `PACK_RADIUS` of it.
+    const leaders = new Map<number, { x: number; z: number }>();
     for (const s of h.spawned) {
+      const pack = s.packId;
+      const leader = pack === 0 ? undefined : leaders.get(pack);
+      if (leader !== undefined) {
+        expect(Math.hypot(s.x - leader.x, s.z - leader.z)).toBeLessThanOrEqual(PACK_RADIUS + 1e-9);
+        continue;
+      }
+      if (pack !== 0) leaders.set(pack, { x: s.x, z: s.z });
       const d = Math.hypot(s.x - player.x, s.z - player.z);
       expect(d).toBeGreaterThanOrEqual(RING_MIN - 1e-9);
       expect(d).toBeLessThanOrEqual(RING_MAX + 1e-9);
@@ -221,7 +272,7 @@ describe('SpawnDirector — despawn (AC-16)', () => {
   it('recycles far un-aggroed enemies after 10 s, and only those', () => {
     const h = harness('cinder4', 'high');
     h.run(30);
-    expect(h.director.alive).toBe(10);
+    expect(h.director.alive).toBeGreaterThanOrEqual(10);
     // The player teleports far away: everything is now > 70 m and un-aggroed…
     const far = { x: -160, z: -160 };
     // …except one enemy that is aggroed and one that stays close.
@@ -496,7 +547,9 @@ describe('SpawnDirector — the first-visit ramp (SPEC-035 §4.7)', () => {
     h.director.setRamp(null);
     expect(h.director.populationTarget).toBe(10);
     h.run(30);
-    expect(h.director.alive).toBe(10);
+    // SPEC-041 §4.5: with the ramp gone, packs return — and may overshoot.
+    expect(h.director.alive).toBeGreaterThanOrEqual(10);
+    expect(h.director.alive).toBeLessThanOrEqual(10 + PACK_OVERSHOOT);
   });
 
   it('never rounds the target below one', () => {
@@ -532,5 +585,241 @@ describe('SpawnDirector — the first-visit ramp (SPEC-035 §4.7)', () => {
     h.director.setObjectiveEnemies(['wurmling']);
     h.run(FORCED_SPAWN_SECONDS + 1);
     expect(h.spawned.some((s) => s.id === 'wurmling')).toBe(true);
+  });
+});
+
+// ------------------------------------------------------------- SPEC-041 §4.5
+
+/** The spawns grouped into rolls: a pack is one roll, a single is one. */
+function rollsOf(spawned: Harness['spawned']): Harness['spawned'][number][][] {
+  const rolls: Harness['spawned'][number][][] = [];
+  const byPack = new Map<number, Harness['spawned'][number][]>();
+  for (const s of spawned) {
+    const pack = s.packId;
+    const open = pack === 0 ? undefined : byPack.get(pack);
+    if (open !== undefined) {
+      open.push(s);
+      continue;
+    }
+    const roll = [s];
+    rolls.push(roll);
+    if (pack !== 0) byPack.set(pack, roll);
+  }
+  return rolls;
+}
+
+/** Run the director with the field killed off every step, so it spawns a roll every 0.5 s. */
+function churn(h: Harness, seconds: number, player = { x: 100, z: 40 }): void {
+  const steps = Math.round(seconds / STEP);
+  for (let i = 0; i < steps; i++) {
+    h.step(player, NOWHERE, true);
+    for (let j = h.pool.size - 1; j >= 0; j--) h.pool.free(j);
+  }
+}
+
+describe('SpawnDirector — packs (SPEC-041 §4.5)', () => {
+  it('a pack row spawns between its min and max around one point, sharing one packId', () => {
+    const h = harness('cinder4', 'high', 5, false);
+    churn(h, 120);
+    const rolls = rollsOf(h.spawned);
+    const sizes = new Map<EnemyId, Set<number>>();
+    for (const roll of rolls) {
+      const lead = roll[0] as Harness['spawned'][number];
+      const row = PLANETS.cinder4.surface.spawn.find((r) => r.enemy === lead.id);
+      const pack = (row as { pack?: readonly [number, number] } | undefined)?.pack;
+      for (const member of roll) expect(member.id).toBe(lead.id);
+      if (pack === undefined) {
+        // Ranged rows come alone.
+        expect(roll).toHaveLength(1);
+        expect(lead.packId).toBe(0);
+        continue;
+      }
+      // An empty field caps nothing: every pack is its rolled size.
+      expect(roll.length).toBeGreaterThanOrEqual(pack[0]);
+      expect(roll.length).toBeLessThanOrEqual(pack[1]);
+      expect(lead.packId).toBeGreaterThan(0);
+      const seen = sizes.get(lead.id) ?? new Set<number>();
+      seen.add(roll.length);
+      sizes.set(lead.id, seen);
+    }
+    expect([...(sizes.get('dust_skitter') ?? [])].sort()).toEqual([3, 4, 5]);
+    expect([...(sizes.get('wurmling') ?? [])].sort()).toEqual([1, 2]);
+  });
+
+  it('the Hive’s drones come in fours to sixes', () => {
+    const h = harness('hive', 'high', 5, false);
+    churn(h, 120);
+    const drones = rollsOf(h.spawned).filter((roll) => roll[0]?.id === 'hive_drone');
+    expect(drones.length).toBeGreaterThan(10);
+    for (const roll of drones) {
+      expect(roll.length).toBeGreaterThanOrEqual(4);
+      expect(roll.length).toBeLessThanOrEqual(6);
+    }
+  });
+
+  it('caps a pack by the row’s maxAlive room and by P + 4', () => {
+    // maxAlive: 8 skitters alive leave room for 2 of Cinder-4's 10.
+    const h = harness('cinder4', 'high');
+    for (let i = 0; i < 8; i++) {
+      const e = h.pool.alloc();
+      Object.assign(e, makeEnemy(), { id: 10_000 + i, def: ENEMIES.dust_skitter, state: 'wander', x: 300, z: 300 });
+    }
+    // A table where only the skitter row can come up.
+    const only = { ...PLANETS.cinder4, surface: { ...PLANETS.cinder4.surface, spawn: [PLANETS.cinder4.surface.spawn[0]] } };
+    const capped = new SpawnDirector(only as never, h.layout, h.pool, QUALITY.high, new Rng(11), h.events, {
+      spawnEnemy: (id: EnemyId, x: number, z: number) => {
+        const e = h.pool.alloc();
+        Object.assign(e, makeEnemy(), { id: h.pool.size + 20_000, def: ENEMIES[id], state: 'wander', x, z });
+        return e;
+      },
+    });
+    capped.update(STEP, { x: 100, z: 40 }, NOWHERE, true);
+    let skitters = 0;
+    for (let i = 0; i < h.pool.size; i++) if (h.pool.at(i).def.id === 'dust_skitter') skitters++;
+    expect(skitters).toBe(10);
+
+    // P + 4: with the field at 9 of 10, a pack brings it to 14 at most.
+    const p = harness('cinder4', 'high');
+    for (let i = 0; i < 9; i++) {
+      const e = p.pool.alloc();
+      Object.assign(e, makeEnemy(), { id: 30_000 + i, def: ENEMIES.scav_raider, state: 'wander', x: 300, z: 300 });
+    }
+    const field = new SpawnDirector(only as never, p.layout, p.pool, QUALITY.high, new Rng(12), p.events, {
+      spawnEnemy: (id: EnemyId, x: number, z: number) => {
+        const e = p.pool.alloc();
+        Object.assign(e, makeEnemy(), { id: p.pool.size + 40_000, def: ENEMIES[id], state: 'wander', x, z });
+        return e;
+      },
+    });
+    for (let i = 0; i < 200; i++) field.update(STEP, { x: 100, z: 40 }, NOWHERE, true);
+    expect(field.alive).toBeGreaterThan(9);
+    expect(field.alive).toBeLessThanOrEqual(10 + PACK_OVERSHOOT);
+  });
+
+  it('drops a member whose point is blocked, and keeps the leader on its cleared point (E64)', () => {
+    const h = harness('cinder4', 'high');
+    // Rocks everywhere a skitter's own circle could stand, but none in the
+    // leader's wider placement check: every member is blocked.
+    h.director.setObstacles({ circleHits: (_x, _z, r) => r < ENEMIES.dust_skitter.radius + 0.25 });
+    churn(h, 60);
+    const skitters = rollsOf(h.spawned).filter((roll) => roll[0]?.id === 'dust_skitter');
+    expect(skitters.length).toBeGreaterThan(3);
+    for (const roll of skitters) expect(roll).toHaveLength(1);
+  });
+
+  it('rolls the elite once per pack, for its leader alone, with its affixes', () => {
+    const h = harness('ferrum', 'high', 21);
+    churn(h, 900);
+    let elites = 0;
+    for (const roll of rollsOf(h.spawned)) {
+      roll.forEach((member, k) => {
+        if (k > 0) {
+          expect(member.elite).toBe(false);
+          expect(member.affixA).toBeNull();
+        }
+      });
+      const lead = roll[0] as Harness['spawned'][number];
+      if (!lead.elite) {
+        expect(lead.affixA).toBeNull();
+        continue;
+      }
+      elites++;
+      // Ferrum is chapter 4: two distinct affixes from the archetype's pool.
+      expect(lead.affixA).not.toBeNull();
+      expect(lead.affixB).not.toBeNull();
+      expect(lead.affixA).not.toBe(lead.affixB);
+      for (const affix of [lead.affixA, lead.affixB] as AffixId[]) {
+        expect(AFFIXES[affix].archetypes as readonly string[]).toContain(ENEMIES[lead.id].archetype);
+      }
+    }
+    expect(elites).toBeGreaterThan(10);
+  });
+
+  it('finds elites on 5 % ± 1.5 % of ≥ 2,000 Cinder-4 rolls (SPEC-011 AC-40, per roll)', () => {
+    const h = harness('cinder4', 'high', 8);
+    churn(h, 1100);
+    const rolls = rollsOf(h.spawned);
+    expect(rolls.length).toBeGreaterThanOrEqual(2000);
+    const elites = rolls.filter((roll) => roll[0]?.elite === true).length;
+    const rate = elites / rolls.length;
+    expect(rate, `${elites} of ${rolls.length}`).toBeGreaterThanOrEqual(0.035);
+    expect(rate, `${elites} of ${rolls.length}`).toBeLessThanOrEqual(0.065);
+    // Chapter 1: one affix each.
+    for (const roll of rolls) {
+      const lead = roll[0] as Harness['spawned'][number];
+      if (lead.elite) {
+        expect(lead.affixA).not.toBeNull();
+        expect(lead.affixB).toBeNull();
+      }
+    }
+  });
+
+  it('spawns no packs while a SPEC-035 ramp is set', () => {
+    const h = harness('cinder4', 'high');
+    h.director.setRamp({ populationScale: 1, excludeArchetypes: [] });
+    churn(h, 60);
+    expect(h.spawned.length).toBeGreaterThan(50);
+    for (const s of h.spawned) expect(s.packId).toBe(0);
+    expect(rollsOf(h.spawned).every((roll) => roll.length === 1)).toBe(true);
+  });
+
+  it('keeps E14’s forced objective spawn single', () => {
+    const h = harness('cinder4', 'low');
+    // The field already holds its target in raiders, so nothing ambient
+    // comes: only E14 can bring the starved skitter.
+    for (let i = 0; i < 12; i++) {
+      const e = h.pool.alloc();
+      // Close enough to the player that the far-cull never takes them.
+      Object.assign(e, makeEnemy(), { id: 50_000 + i, def: ENEMIES.scav_raider, state: 'wander', x: 110, z: 40 });
+    }
+    h.director.setObjectiveEnemies(['dust_skitter']);
+    h.run(FORCED_SPAWN_SECONDS + 1, { x: 100, z: 40 });
+    const skitters = h.spawned.filter((s) => s.id === 'dust_skitter');
+    expect(skitters).toHaveLength(1);
+    for (const s of skitters) expect(s.packId).toBe(0);
+  });
+
+  it('wave groups keep their counts and their elite flags, and their elites roll affixes', () => {
+    const h = harness('eden', 'high');
+    h.director.startWave('eden_final', { x: 0, z: 0 });
+    h.run(1, PLAYER, NOWHERE, false);
+    expect(h.spawned).toHaveLength(8);
+    for (const s of h.spawned) expect(s.packId).toBe(0);
+    const elites = h.spawned.filter((s) => s.elite);
+    for (const s of elites) {
+      expect(s.affixA).not.toBeNull();
+      expect(s.affixB).not.toBeNull(); // Eden is chapter 6
+    }
+  });
+
+  it('counts the distinct live packs', () => {
+    const h = harness('cinder4', 'high');
+    h.run(30);
+    const packs = new Set<number>();
+    for (const e of h.living()) if (e.packId > 0) packs.add(e.packId);
+    expect(h.director.packs).toBe(packs.size);
+    expect(h.director.packs).toBeGreaterThan(0);
+  });
+});
+
+describe('pack aggro (SPEC-041 §4.5)', () => {
+  it('a member that acquires the player by proximity aggroes the whole pack', () => {
+    const h = combatHarness();
+    const pack = [h.spawn('dust_skitter', 19, 0), h.spawn('dust_skitter', 21, 0), h.spawn('dust_skitter', 22, 1)];
+    for (const e of pack) {
+      e.packId = 7;
+      e.wanderX = e.x;
+      e.wanderZ = e.z;
+      e.wanderAt = Infinity;
+    }
+    const stranger = h.spawn('dust_skitter', 22, -1); // no pack
+    stranger.wanderAt = Infinity;
+    // Only the first is inside the skitter's 18 m aggro radius… after it walks in.
+    h.world.player.x = 1;
+    h.step();
+    expect(pack[0]?.aggro).toBe(true);
+    expect(pack[1]?.aggro).toBe(true);
+    expect(pack[2]?.aggro).toBe(true);
+    expect(stranger.aggro).toBe(false);
   });
 });

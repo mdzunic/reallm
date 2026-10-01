@@ -41,9 +41,10 @@ type Assert<T extends true> = T;
 type Equal<A, B> = (<T>() => T extends A ? 1 : 2) extends <T>() => T extends B ? 1 : 2 ? true : false;
 
 /**
- * The 55 sound ids — the 29 of §2.2, the story films' 15 (SPEC-021 §6.3), the
- * seven weapon, impact and blast sprites of SPEC-035 §4.11 and the dash and
- * three windup cues of SPEC-038 §4.10 —
+ * The 58 sound ids — the 29 of §2.2, the story films' 15 (SPEC-021 §6.3), the
+ * seven weapon, impact and blast sprites of SPEC-035 §4.11, the dash and
+ * three windup cues of SPEC-038 §4.10, and SPEC-041 §4.10's boss windup, boss
+ * slam and flight hit tick —
  * pinned as an explicit literal (SPEC-001: pinned constants in tests are
  * literals). `SoundId` is derived from the sprite keys, so this is what makes
  * AC-5 a compile error rather than a surprise: recutting a bank without
@@ -86,6 +87,9 @@ const SOUND_IDS = [
   'windup_melee',
   'windup_charge',
   'windup_shot',
+  // SPEC-041 §4.10: the boss windup and the slam that lands it.
+  'windup_boss',
+  'boss_slam',
   'ship_hit_shield',
   'ship_hit_hull',
   'landing_thrusters',
@@ -93,6 +97,8 @@ const SOUND_IDS = [
   'laser_charge',
   /** SPEC-035 §4.11: the ship's nose guns. */
   'ship_laser',
+  /** SPEC-041 §4.9: a hit on a flight hazard. */
+  'ship_hit_tick',
   'film_hum',
   'film_whoosh',
   'film_flash',
@@ -164,6 +170,8 @@ const EVENT_KEYS = [
   'enemy:spawned',
   'enemy:killed',
   'boss:phase',
+  // SPEC-041 §4.10: both reacted — the slam of a landed move, the flight hit tick.
+  'boss:move',
   'boss:defeated',
   'poi:discovered',
   'poi:reached',
@@ -187,6 +195,7 @@ const EVENT_KEYS = [
   'ship:damaged',
   'flight:arrived',
   'flight:recalled',
+  'flight:hazardHit',
   'ui:toast',
   'ui:orientation',
   // SPEC-015 §10: the service-worker update signal (D-10) and the iOS install
@@ -241,14 +250,14 @@ describe('the audio manifest (SPEC-006 §2)', () => {
     expect(Object.keys(ASSETS.audio).sort()).toEqual([...SFX_BANKS, ...MUSIC_BANKS].sort());
   });
 
-  it('the sprite keys across the banks are the 55 sound ids (AC-5; SPEC-035 §4.11 adds seven, SPEC-038 §4.10 four)', () => {
+  it('the sprite keys across the banks are the 58 sound ids (AC-5; SPEC-035 §4.11 adds seven, SPEC-038 §4.10 four, SPEC-041 §4.10 three)', () => {
     const sprites = Object.values(ASSETS.audio).flatMap((entry) =>
       Object.keys((entry as { sprite?: object }).sprite ?? {}),
     );
     expect(sprites.slice().sort()).toEqual([...SOUND_IDS].sort());
-    expect(sprites).toHaveLength(55);
+    expect(sprites).toHaveLength(58);
     // No id appears in two banks: `SoundId` → bank has to be a function.
-    expect(new Set(sprites).size).toBe(55);
+    expect(new Set(sprites).size).toBe(58);
   });
 
   it('the SPEC-038 cues sit in the surface bank inside §4.10’s lengths', () => {
@@ -259,6 +268,13 @@ describe('the audio manifest (SPEC-006 §2)', () => {
       expect(span, id).toBeDefined();
       expect(span[1], id).toBeLessThanOrEqual(most);
     }
+  });
+
+  it('the SPEC-041 sprites sit in their banks inside §4.10’s lengths', () => {
+    const surface = ASSETS.audio.surface.sprite;
+    expect(surface.windup_boss[1]).toBeLessThanOrEqual(700);
+    expect(surface.boss_slam[1]).toBeLessThanOrEqual(800);
+    expect(ASSETS.audio.flight.sprite.ship_hit_tick[1]).toBeLessThanOrEqual(80);
   });
 
   it('every sprite is a forward [offset, duration] span that does not overlap its neighbour', () => {
@@ -468,8 +484,8 @@ describe('the ramp curve (SPEC-006 §4.3, §4.5)', () => {
 // ------------------------------------------------------------ reactions table
 
 describe('the reactions table is exhaustive over GameEvents (SPEC-006 §5)', () => {
-  it('covers the 23 reacted events of §5.2 (AC-38; SPEC-029 §4.12 adds four, SPEC-035 §4.11 two, SPEC-038 §4.10 two)', () => {
-    expect(REACTED_EVENTS).toHaveLength(23);
+  it('covers the 25 reacted events of §5.2 (AC-38; SPEC-029 §4.12 adds four, SPEC-035 §4.11 two, SPEC-038 §4.10 two, SPEC-041 §4.10 two)', () => {
+    expect(REACTED_EVENTS).toHaveLength(25);
     expect(REACTED_EVENTS.slice().sort()).toEqual(
       [
         'combat:blast',
@@ -486,6 +502,8 @@ describe('the reactions table is exhaustive over GameEvents (SPEC-006 §5)', () 
         'player:leveledUp',
         'enemy:killed',
         'boss:phase',
+        'boss:move',
+        'flight:hazardHit',
         'boss:defeated',
         'resource:collected',
         'poi:scanned',
@@ -504,8 +522,8 @@ describe('the reactions table is exhaustive over GameEvents (SPEC-006 §5)', () 
     expect(AUDIO_SILENT.size).toBe(43);
   });
 
-  it('gives every one of the 66 event keys exactly one home (AC-40)', () => {
-    expect(EVENT_KEYS).toHaveLength(66);
+  it('gives every one of the 68 event keys exactly one home (AC-40)', () => {
+    expect(EVENT_KEYS).toHaveLength(68);
     const reacted = new Set<string>(REACTED_EVENTS);
     for (const key of EVENT_KEYS) {
       const hasSound = reacted.has(key);
@@ -633,6 +651,45 @@ describe('reaction outcomes (SPEC-006 §5.2)', () => {
       id: 'windup_shot',
       opts: { x: 3, z: 3, minIntervalMs: 150, volume: 0.7 },
     });
+  });
+
+  it('a boss windup rumbles for the ground kinds and draws breath for a volley (SPEC-041 §4.10)', () => {
+    const react = AUDIO_REACTIONS['enemy:windup'];
+    for (const kind of ['slam', 'lines', 'ring', 'burrow'] as const) {
+      expect(react({ enemyId: 'ash_titan', kind, x: 4, z: 5 }), kind).toEqual({
+        id: 'windup_boss',
+        opts: { x: 4, z: 5, minIntervalMs: 200, volume: 1, priority: 2 },
+      });
+    }
+    expect(react({ enemyId: 'hive_queen', kind: 'volley', x: 6, z: 7 })).toEqual({
+      id: 'windup_shot',
+      opts: { x: 6, z: 7, minIntervalMs: 150, volume: 0.7 },
+    });
+  });
+
+  it('boss:move slams where a ground move lands, and is silent for volleys and charges (SPEC-041 §4.10)', () => {
+    const react = AUDIO_REACTIONS['boss:move'];
+    for (const [move, kind] of [
+      ['brood_stomp', 'slam_target'],
+      ['tail_slam', 'slam_self'],
+      ['fissure', 'lines'],
+      ['frost_nova', 'ring'],
+      ['burrow', 'burrow'],
+    ] as const) {
+      expect(react({ boss: 'dune_wurm', move, kind, x: 1, z: 2 }), kind).toEqual({
+        id: 'boss_slam',
+        opts: { x: 1, z: 2, minIntervalMs: 150, priority: 2 },
+      });
+    }
+    expect(react({ boss: 'hive_queen', move: 'acid_volley', kind: 'volley', x: 0, z: 0 })).toBeNull();
+    expect(react({ boss: 'dune_wurm', move: 'sand_rush', kind: 'charge', x: 0, z: 0 })).toBeNull();
+  });
+
+  it('flight:hazardHit ticks 60 ms apart on every hit, lethal or not (SPEC-041 §4.9)', () => {
+    const react = AUDIO_REACTIONS['flight:hazardHit'];
+    const tick = { id: 'ship_hit_tick', opts: { minIntervalMs: 60 } };
+    expect(react({ kind: 'fighter', x: 1, y: 2, lethal: false })).toEqual(tick);
+    expect(react({ kind: 'asteroid', x: 0, y: 0, lethal: true })).toEqual(tick);
   });
 
   it('combat:blast has its own boom instead of the elite sting (SPEC-035 §4.11)', () => {

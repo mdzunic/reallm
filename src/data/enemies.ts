@@ -14,6 +14,9 @@
 // chapter`. Writing the results down rather than the formula means retuning one
 // enemy cannot silently shift every other one. SPEC-038 §4.4: every ranged row
 // fires at 13 m with 15 m/s shots — still 1 m inside the Kinetic Repeater's 14 m.
+// SPEC-041 §4.2: boss HP is a table of its own (1,800 / 4,600 / 5,200 / 6,800 /
+// 8,400, *initial tuning*), sized for the post-SPEC-039 kit rather than the
+// ×1.35 chapter factor, and each boss carries a move list.
 //
 // `hive_drone`, `hive_warrior` and `hive_spitter` are shared ids (09-a): one
 // stat block each, stored at the chapter it is introduced. Eden-Prime raises the
@@ -36,6 +39,65 @@ export type EnemyAttack =
       readonly projectileRadius: number;
     }
   | { readonly kind: 'none' };
+
+/** SPEC-041 §3: what a boss move does when its windup ends. */
+export type BossMoveKind = 'slam_target' | 'slam_self' | 'lines' | 'ring' | 'volley' | 'charge' | 'burrow';
+export type BossMoveId =
+  | 'sand_rush'
+  | 'tail_slam'
+  | 'burrow'
+  | 'shard_fan'
+  | 'frost_nova'
+  | 'brood_stomp'
+  | 'acid_spit'
+  | 'burrow_rush'
+  | 'tremor'
+  | 'fissure'
+  | 'eruption'
+  | 'acid_volley'
+  | 'royal_dive'
+  | 'brood_burst';
+
+/**
+ * SPEC-041 §3, §4.2: one row of a boss's move list, on SPEC-038's telegraphs.
+ * `tests/data/content.test.ts` fails a row that cannot be escaped on foot
+ * (§4.3), so a retune can never ship an unfair move.
+ */
+export interface BossMove {
+  readonly id: BossMoveId;
+  readonly kind: BossMoveKind;
+  readonly phaseMin: 1 | 2 | 3;
+  /** Target distance band, metres. */
+  readonly range: readonly [number, number];
+  /** 0 for a timed move that is never picked by weight (the burrow). */
+  readonly weight: number;
+  readonly windup: number;
+  readonly cooldown: number;
+  readonly recover: number;
+  readonly damageMult: number;
+  /** Charge and volley: the facing stops turning this long before the end. */
+  readonly lock?: number;
+  /** slam_target, burrow: radius; slam_self: metres beyond the body. */
+  readonly radius?: number;
+  /** charge, lines: lane length and full width; charge: speed m/s. */
+  readonly length?: number;
+  readonly width?: number;
+  readonly speed?: number;
+  /** lines: count and radians between neighbours; volley: count and total fan. */
+  readonly count?: number;
+  readonly spread?: number;
+  /** volley: projectile speed, radius and range. */
+  readonly projectileSpeed?: number;
+  readonly projectileRadius?: number;
+  readonly projectileRange?: number;
+  /** ring: growth m/s, last radius, band width. */
+  readonly ringSpeed?: number;
+  readonly ringMax?: number;
+  readonly band?: number;
+  /** burrow: dig seconds, and seconds from one burrow's end to the next. */
+  readonly dig?: number;
+  readonly every?: number;
+}
 
 /**
  * `Id` is generic with a `string` default so `ENEMIES` can be the source of
@@ -67,8 +129,8 @@ export interface EnemyDef<Id extends string = string> {
   };
   /**
    * Boss phases, highest `hpFraction` first and starting at 1. Multipliers are
-   * cumulative against the base stats; what a phase *does* beyond that (the
-   * wurm's burrow, the queen switching to acid) is SPEC-012's business.
+   * cumulative against the base stats; what a phase *does* beyond that is the
+   * move list's `phaseMin` (SPEC-041 §4.1).
    */
   readonly phases?: readonly {
     readonly hpFraction: number;
@@ -77,6 +139,8 @@ export interface EnemyDef<Id extends string = string> {
     readonly summon?: { readonly enemy: Id; readonly count: number };
   }[];
   readonly eliteAllowed: boolean;
+  /** SPEC-041 §4.2: a boss's move list; absent for everything else. */
+  readonly moves?: readonly BossMove[];
 }
 
 export const ENEMIES = {
@@ -141,7 +205,7 @@ export const ENEMIES = {
     domain: 'surface',
     archetype: 'boss',
     chapter: 1,
-    hp: 900,
+    hp: 1800,
     damage: 18,
     speed: 4,
     radius: 2.5,
@@ -156,6 +220,13 @@ export const ENEMIES = {
       { hpFraction: 0.4, damageMult: 1.2, speedMult: 1.2, summon: { enemy: 'wurmling', count: 6 } },
     ],
     eliteAllowed: false,
+    moves: [
+      { id: 'sand_rush', kind: 'charge', phaseMin: 1, range: [5, 22], weight: 3, windup: 0.9, lock: 0.25, length: 14, width: 3.2, speed: 18, damageMult: 1.2, cooldown: 5, recover: 1 },
+      { id: 'tail_slam', kind: 'slam_self', phaseMin: 1, range: [0, 9], weight: 2, windup: 1, radius: 3.5, damageMult: 1, cooldown: 4, recover: 0.8 },
+      // Timed, never weighted: it starts at phase-2 entry and comes back
+      // `every` s after each one ends (§4.1).
+      { id: 'burrow', kind: 'burrow', phaseMin: 2, range: [0, Infinity], weight: 0, windup: 1.2, dig: 2.5, every: 9, radius: 3.5, damageMult: 1.5, cooldown: 0, recover: 0 },
+    ],
   },
 
   // --------------------------------------------------------- Vetra (chapter 2)
@@ -219,7 +290,7 @@ export const ENEMIES = {
     domain: 'surface',
     archetype: 'boss',
     chapter: 2,
-    hp: 1215,
+    hp: 4600,
     damage: 23,
     speed: 4,
     radius: 2.5,
@@ -234,6 +305,10 @@ export const ENEMIES = {
       { hpFraction: 0.5, damageMult: 1, speedMult: 1.3, summon: { enemy: 'frost_mite', count: 8 } },
     ],
     eliteAllowed: false,
+    moves: [
+      { id: 'shard_fan', kind: 'volley', phaseMin: 1, range: [4, 20], weight: 3, windup: 0.6, lock: 0.1, count: 5, spread: 0.9, projectileSpeed: 15, projectileRadius: 0.35, projectileRange: 20, damageMult: 0.5, cooldown: 3.2, recover: 0.4 },
+      { id: 'frost_nova', kind: 'ring', phaseMin: 2, range: [0, 14], weight: 2, windup: 1, ringSpeed: 9, ringMax: 11, band: 1.5, damageMult: 0.9, cooldown: 7, recover: 0.8 },
+    ],
   },
 
   // ------------------------------------------------------ Thessaly (chapter 3)
@@ -297,7 +372,7 @@ export const ENEMIES = {
     domain: 'surface',
     archetype: 'boss',
     chapter: 3,
-    hp: 1640,
+    hp: 5200,
     damage: 30,
     speed: 4,
     radius: 2.5,
@@ -312,6 +387,11 @@ export const ENEMIES = {
       { hpFraction: 0.5, damageMult: 1.2, speedMult: 1, summon: { enemy: 'hive_drone', count: 10 } },
     ],
     eliteAllowed: false,
+    moves: [
+      { id: 'brood_stomp', kind: 'slam_target', phaseMin: 1, range: [0, 16], weight: 3, windup: 1, radius: 3.5, damageMult: 1, cooldown: 4, recover: 0.8 },
+      { id: 'acid_spit', kind: 'volley', phaseMin: 1, range: [5, 18], weight: 2, windup: 0.5, lock: 0.1, count: 3, spread: 0.5, projectileSpeed: 13, projectileRadius: 0.4, projectileRange: 18, damageMult: 0.6, cooldown: 3, recover: 0.3 },
+      { id: 'burrow_rush', kind: 'charge', phaseMin: 2, range: [6, 22], weight: 2, windup: 0.9, lock: 0.25, length: 14, width: 3.2, speed: 18, damageMult: 1.2, cooldown: 6, recover: 1 },
+    ],
   },
 
   // -------------------------------------------------------- Ferrum (chapter 4)
@@ -375,7 +455,7 @@ export const ENEMIES = {
     domain: 'surface',
     archetype: 'boss',
     chapter: 4,
-    hp: 2214,
+    hp: 6800,
     damage: 40,
     speed: 4,
     radius: 2.5,
@@ -391,6 +471,11 @@ export const ENEMIES = {
       { hpFraction: 0.3, damageMult: 1.44, speedMult: 1 },
     ],
     eliteAllowed: false,
+    moves: [
+      { id: 'tremor', kind: 'slam_self', phaseMin: 1, range: [0, 8], weight: 3, windup: 1.1, radius: 4, damageMult: 1.2, cooldown: 4.5, recover: 1 },
+      { id: 'fissure', kind: 'lines', phaseMin: 1, range: [6, 24], weight: 3, windup: 1, count: 3, spread: 0.35, length: 16, width: 2, damageMult: 0.8, cooldown: 5, recover: 0.6 },
+      { id: 'eruption', kind: 'ring', phaseMin: 3, range: [0, 16], weight: 2, windup: 1, ringSpeed: 8, ringMax: 13, band: 1.4, damageMult: 1, cooldown: 8, recover: 0.8 },
+    ],
   },
 
   // ----------------------------------------------------- The Hive (chapter 5)
@@ -454,7 +539,7 @@ export const ENEMIES = {
     domain: 'surface',
     archetype: 'boss',
     chapter: 5,
-    hp: 2989,
+    hp: 8400,
     damage: 51,
     speed: 4,
     radius: 2.5,
@@ -469,6 +554,12 @@ export const ENEMIES = {
       { hpFraction: 0.5, damageMult: 1.2, speedMult: 1, summon: { enemy: 'hive_drone', count: 12 } },
     ],
     eliteAllowed: false,
+    moves: [
+      // The acid, from phase 1 now (§4.1): `queenAcid` and its timer are gone.
+      { id: 'acid_volley', kind: 'volley', phaseMin: 1, range: [4, 18], weight: 3, windup: 0.5, lock: 0.1, count: 3, spread: 0.6, projectileSpeed: 13, projectileRadius: 0.35, projectileRange: 18, damageMult: 0.45, cooldown: 2.4, recover: 0.2 },
+      { id: 'royal_dive', kind: 'charge', phaseMin: 1, range: [6, 24], weight: 2, windup: 1, lock: 0.25, length: 16, width: 3.6, speed: 20, damageMult: 1.2, cooldown: 6, recover: 1.2 },
+      { id: 'brood_burst', kind: 'slam_target', phaseMin: 2, range: [0, 18], weight: 2, windup: 1.1, radius: 4, damageMult: 1, cooldown: 5, recover: 0.8 },
+    ],
   },
 
   // ------------------------------------------------------------------- flight

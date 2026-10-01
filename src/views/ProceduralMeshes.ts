@@ -29,7 +29,7 @@ import { fbm2, voronoi2 } from '@/core/Noise';
 import type { Pool } from '@/core/Pool';
 import { hash32 } from '@/core/Rng';
 import type { ProceduralRecipeId } from '@/data/ids';
-import type { EnemyEntity } from '@/entities/Enemy';
+import { isBuried, type EnemyEntity } from '@/entities/Enemy';
 
 /**
  * Per-part instance capacity. Sized for the worst legal field: the population
@@ -573,14 +573,15 @@ export class EnemyMeshes {
 
     for (let i = 0; i < enemies.size; i++) {
       const e = enemies.at(i);
-      if (e.state === 'dead' || e.specialKind === 'burrow_dig') continue;
+      if (e.state === 'dead' || isBuried(e)) continue;
       const recipe = this.#recipeFor(e.def.look);
       const slot = recipe.count;
       if (slot >= INSTANCES_PER_PART) continue; // clamped, never crashed
       recipe.count++;
 
-      // SPEC-038 §4.3: a charge's windup rears the body like a blow's does.
-      const winding = e.state === 'windup' || e.state === 'chargeWindup';
+      // SPEC-038 §4.3: a charge's windup rears the body like a blow's does,
+      // and SPEC-041 §4.1: so does a boss's cast.
+      const winding = e.state === 'windup' || e.state === 'chargeWindup' || e.state === 'cast';
       const scale = e.def.look.scale * (e.elite ? ELITE_SCALE : 1) * (winding ? WINDUP_SCALE : 1);
       const phase = e.id * 1.7;
       const moving = isMoving(e);

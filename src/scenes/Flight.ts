@@ -21,7 +21,7 @@ import type { GameServices } from '@/core/Services';
 import type { SceneParams } from '@/core/StateMachine';
 import { cargoCap, maxHp } from '@/core/Save';
 import { FLIGHT_ASSETS, PLANET_ART } from '@/data/assets';
-import { CHAPTER_CARDS, ENEMIES, MISSIONS, PLANETS, TIPS, type DialogueId, type PlanetDef, type TipId } from '@/data/index';
+import { CHAPTER_CARDS, ENEMIES, MISSIONS, PLANETS, TIPS, type DialogueId, type EnemyDef, type PlanetDef, type TipId } from '@/data/index';
 import { computePlayerStats } from '@/systems/Combat';
 import { Economy } from '@/systems/Economy';
 import { tipDue, tipKey } from '@/systems/Guidance';
@@ -64,6 +64,13 @@ const THROTTLE_TIP_DELAY = 12;
 
 /** §4.11: the hum's volume is re-read this often, not every frame. */
 const ENGINE_VOLUME_INTERVAL = 0.25;
+
+// ------------------------------------------------------------- SPEC-041 §4.9
+
+/** How long the reticle wears `is-hit` after a hit, and `is-kill` after a kill (sim seconds). */
+const RETICLE_HIT_SECONDS = 0.1;
+const RETICLE_KILL_SECONDS = 0.25;
+type ReticleMark = '' | 'is-hit' | 'is-kill';
 
 /** The stand-in pilot for a bare `?scene=flight` jump with no loaded save. */
 const DEMO_CREATION: CharacterCreation = {
@@ -144,6 +151,15 @@ export class FlightScene extends UiScene<'flight'> {
   /** Seconds the autopilot card has been up; −1 while there is none. */
   #autopilotT = -1;
   #autopilotEl: HTMLDivElement | null = null;
+  /**
+   * SPEC-041 §4.9: the HUD's reticle node, found once when the HUD mounts,
+   * the mark it wears (`''` for none) and the sim seconds the mark has left.
+   */
+  #reticleEl: HTMLElement | null = null;
+  #reticleMark: ReticleMark = '';
+  #reticleMarkT = 0;
+  /** SPEC-041 §4.7: the lead pip is up — `sceneInfo.lead`. */
+  #leadShown = false;
 
   readonly #frameInput: FlightInput = {
     steerX: 0,
@@ -313,10 +329,15 @@ export class FlightScene extends UiScene<'flight'> {
             flight.spawnAsteroid();
           }
         },
-        // A wave enemy that never leaves and never fires: descends forever, so
-        // the arrival check keeps failing and the holding pattern is reachable
-        // on a planet whose real waves would ram an idle ship.
+        // A wave enemy that never leaves, so the arrival check keeps failing
+        // and the holding pattern is reachable on a planet whose real waves
+        // would ram an idle ship. SPEC-041 §6.2: it is a *still* fighter 60 m
+        // dead ahead — it holds that depth, has no strafe (a speed-0 copy of
+        // its definition flies the figure-8 with no amplitude), and its fire
+        // cooldown never runs out — so it keeps a ship in frame, and a test
+        // can see the lead pip on it with the pointer centred and shoot it down.
         blockArrival: () => {
+          const def: EnemyDef = { ...ENEMIES.scav_fighter, speed: 0 };
           const hazard = flight.hazards.alloc();
           Object.assign(hazard, {
             kind: 'fighter',
@@ -326,14 +347,18 @@ export class FlightScene extends UiScene<'flight'> {
             vx: 0,
             vy: 0,
             vDepth: 0,
-            radius: ENEMIES.scav_fighter.radius,
-            hp: ENEMIES.scav_fighter.hp,
-            def: ENEMIES.scav_fighter,
+            radius: def.radius,
+            hp: def.hp,
+            def,
             elite: false,
-            ttl: 1_000_000,
-            fireCooldown: undefined,
+            ttl: Number.POSITIVE_INFINITY,
+            fireCooldown: Number.POSITIVE_INFINITY,
             pattern: 0,
-            holdDepth: -1_000_000,
+            holdDepth: 60,
+            hitFlash: 0,
+            burstLeft: 0,
+            burstAt: 0,
+            shotDamage: undefined,
           });
         },
         clearSky: () => flight.hazards.clear(),
@@ -386,7 +411,13 @@ export class FlightScene extends UiScene<'flight'> {
     this.disposer.add(() => {
       this.#hud?.dispose();
       this.#hud = null;
+      this.#reticleEl = null;
     });
+    // SPEC-041 §4.9: every hit on a hazard marks the reticle — `is-hit`, or
+    // `is-kill` for the kill. The node is looked up once, here, so the frame
+    // that clears the mark reads nothing from the DOM.
+    this.#reticleEl = services.uiRoot.querySelector<HTMLElement>('[data-testid="reticle"]');
+    this.disposer.add(services.events.on('flight:hazardHit', ({ lethal }) => this.#markReticle(lethal), this));
     // SPEC-037 §4.2, §4.6: the HUD follows the scheme (the top centre spans the
     // gap on touch) and the flash follows its setting, now and live.
     hud.setScheme(services.input.state.scheme);
@@ -636,6 +667,9 @@ export class FlightScene extends UiScene<'flight'> {
       this.#autopilot();
     }
 
+    // SPEC-041 §4.9: the reticle's mark runs down before the step, so a mark
+    // that step sets keeps its whole 0.1 s / 0.25 s.
+    this.#stepReticleMark(dt);
     if (flight.phase !== 'arrived' && flight.phase !== 'recalled') {
       flight.update(dt, this.#readInput(input));
     }
@@ -756,6 +790,44 @@ export class FlightScene extends UiScene<'flight'> {
     const scratch = this.#aimScratch;
     scratch.set(flight.reticle.x, flight.reticle.y, -CONVERGE_DEPTH).project(this.camera);
     hud.setReticle(scratch.x, scratch.y);
+
+    // SPEC-041 §4.7: the lead pip, projected exactly like the reticle, while
+    // ARIA is enabled and a ship sits in the cone — on every scheme. ARIA
+    // disabled shows none (41-k).
+    const lead = flight.lead;
+    this.#leadShown = lead.active && flight.ariaEnabled;
+    if (this.#leadShown) {
+      scratch.set(lead.x, lead.y, -CONVERGE_DEPTH).project(this.camera);
+      hud.setLeadPip(scratch.x, scratch.y);
+    } else {
+      hud.hideLeadPip();
+    }
+  }
+
+  /**
+   * SPEC-041 §4.9: a hit marks the reticle `is-hit` for 0.1 s, a kill `is-kill`
+   * for 0.25 s — colour and scale only, so the marks stand under reduce motion.
+   * A kill's mark is not cut short by a hit landing during it.
+   */
+  #markReticle(lethal: boolean): void {
+    if (!lethal && this.#reticleMark === 'is-kill') return;
+    const mark: ReticleMark = lethal ? 'is-kill' : 'is-hit';
+    const node = this.#reticleEl;
+    if (node !== null && this.#reticleMark !== mark) {
+      if (this.#reticleMark !== '') node.classList.remove(this.#reticleMark);
+      node.classList.add(mark);
+    }
+    this.#reticleMark = mark;
+    this.#reticleMarkT = lethal ? RETICLE_KILL_SECONDS : RETICLE_HIT_SECONDS;
+  }
+
+  /** §4.9: run the reticle's mark down on the scene's clock; no DOM read, no allocation. */
+  #stepReticleMark(dt: number): void {
+    if (this.#reticleMark === '') return;
+    this.#reticleMarkT -= dt;
+    if (this.#reticleMarkT > 0) return;
+    this.#reticleEl?.classList.remove(this.#reticleMark);
+    this.#reticleMark = '';
   }
 
   // -------------------------------------------------------------------- exits
@@ -998,6 +1070,8 @@ export class FlightScene extends UiScene<'flight'> {
       info['reticleY'] = Number(flight.reticle.y.toFixed(2));
       info['shipX'] = Number(flight.ship.x.toFixed(2));
       info['shipY'] = Number(flight.ship.y.toFixed(2));
+      // SPEC-041 §4.7: 1 while the lead pip is up.
+      info['lead'] = this.#leadShown ? 1 : 0;
     }
     return info;
   }

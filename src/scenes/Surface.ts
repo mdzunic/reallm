@@ -25,6 +25,8 @@ import type { InputState, Scheme } from '@/core/Input';
 import type { PerfStress } from '@/core/Perf';
 import type { Rng } from '@/core/Rng';
 import {
+  AFFIX_IDS,
+  AFFIXES,
   BOSS_REVEALS,
   CLASSES,
   DIALOGUE,
@@ -63,13 +65,13 @@ import {
   QUICK_SLOTS,
   WEAPON_SLOTS,
 } from '@/data/index';
-import { makeEnemy, type EnemyEntity } from '@/entities/Enemy';
+import { isBuried, makeEnemy, type EnemyEntity } from '@/entities/Enemy';
 import { makeFollower } from '@/entities/Follower';
 import { makePlayer } from '@/entities/Player';
 import { makeProjectile } from '@/entities/Projectile';
 import { resetTelegraph, TELEGRAPH_CAPACITY } from '@/entities/Telegraph';
-import type { ArenaState } from '@/entities/World';
-import { Combat, computePlayerStats, type CombatWorld } from '@/systems/Combat';
+import { ARENA_RESPAWN_OUTSET, clampToSeal, type ArenaState } from '@/entities/World';
+import { Combat, computePlayerStats, ELITE_SCALE, type CombatWorld } from '@/systems/Combat';
 import { DASH_DISTANCE, dashCooldown, isDashing, stepDash, tryDash } from '@/systems/Dash';
 import { Economy } from '@/systems/Economy';
 import { ExploreMask, REVEAL_CAPACITY } from '@/systems/Exploration';
@@ -135,6 +137,7 @@ import {
 import { AriaHint } from '@/ui/AriaHint';
 import { confirmSheet } from '@/ui/ConfirmSheet';
 import { DamageNumbers } from '@/ui/DamageNumbers';
+import { ELITE_PLATE_SLOTS, ElitePlates } from '@/ui/ElitePlates';
 import { DeathOverlay } from '@/ui/DeathOverlay';
 import { dialogueLayer, type DialogueUI } from '@/ui/DialogueUI';
 import { el, h, shortScreen, testId } from '@/ui/dom';
@@ -227,7 +230,32 @@ const LAUNCHER_RECHARGING_TEXT = 'Launcher recharging';
 /** SPEC-038 §4.9: the dash tip rides the first telegraph drawn this close to the player. */
 const DASH_TIP_RANGE = 25;
 /** SPEC-038 §4.9: the windup kinds that draw a ground telegraph (SPEC-041 adds the boss kinds). */
-const TELEGRAPH_WINDUPS: ReadonlySet<GameEvents['enemy:windup']['kind']> = new Set(['charge']);
+const TELEGRAPH_WINDUPS: ReadonlySet<GameEvents['enemy:windup']['kind']> = new Set([
+  'charge',
+  'slam',
+  'lines',
+  'ring',
+  'burrow',
+]);
+/** SPEC-041 §4.1: the boss moves that hit the ground — a dust ring and a shake where they land. */
+const GROUND_MOVE_KINDS: ReadonlySet<GameEvents['boss:move']['kind']> = new Set([
+  'slam_target',
+  'slam_self',
+  'lines',
+  'ring',
+  'burrow',
+]);
+/** SPEC-041 §4.1: the ground move's shake — 0.3 for 0.3 s; reduce motion zeroes it. */
+const BOSS_MOVE_SHAKE_AMPLITUDE = 0.3;
+const BOSS_MOVE_SHAKE_SECONDS = 0.3;
+/** SPEC-041 §4.6: the mender's pulse ring. */
+const MENDER_RING_COLOR = 0x6fdc8c;
+/** SPEC-041 §4.6: plates show over live elites this close, lifted this far over the ground. */
+const ELITE_PLATE_RANGE = 25;
+const ELITE_PLATE_LIFT = 2.2;
+/** SPEC-041 §4.10: the debug elite pack — four of the swarm species, 10 m ahead. */
+const ELITE_PACK_SIZE = 4;
+const ELITE_PACK_DISTANCE = 10;
 /** SPEC-038 §4.11: the debug charger stands this far along the player's facing. */
 const CHARGER_DISTANCE = 8;
 /** SPEC-038 §4.1: the dash streaks' colour — the salvager's cool white. */
@@ -291,7 +319,7 @@ const EXPLORE_SAVE_INTERVAL = 1;
 
 // ------------------------------------------------------------- SPEC-019 §4.6
 
-/** Player-hit shake and the heavy boss-phase / wurm-resurface shake (§4.7). */
+/** Player-hit shake and the heavy boss-phase shake (§4.7). */
 const HIT_SHAKE_AMPLITUDE = 0.15;
 const HIT_SHAKE_SECONDS = 0.25;
 const HEAVY_SHAKE_AMPLITUDE = 0.5;
@@ -468,6 +496,8 @@ export class SurfaceScene extends UiScene<'surface'> {
   #pois: PoiRuntime[] = [];
   #pad: LayoutPoi | null = null;
   #arenaPoi: LayoutPoi | null = null;
+  /** SPEC-041 §4.4: the arena's radius — the ring, the seal and the entrance. */
+  #arenaRadius = 0;
   #arena: ArenaState | null = null;
   #bossId: number | null = null;
 
@@ -534,6 +564,13 @@ export class SurfaceScene extends UiScene<'surface'> {
 
   // SPEC-019 §4.6–§4.7 — hit feedback state, all scene-local (19-i).
   #numbers: DamageNumbers | null = null;
+  /** SPEC-041 §4.6: the elite nameplates, and the nearest-first scratch that fills them. */
+  #plates: ElitePlates | null = null;
+  readonly #plateIndex = new Int32Array(ELITE_PLATE_SLOTS);
+  readonly #plateDist = new Float64Array(ELITE_PLATE_SLOTS);
+  /** `Alpha <name>` per species and the affix line per (a, b) pair — built once, never per frame. */
+  readonly #plateNames = new Map<EnemyId, string>();
+  readonly #affixLines: (string | undefined)[] = [];
   readonly #shake: ShakeState = { amplitude: 0, until: 0, duration: 0 };
   readonly #hitStop = { frames: 0, time: 0 };
   /** Per-slot HP deltas for enemy damage numbers (§4.6, 19-f). */
@@ -546,10 +583,6 @@ export class SurfaceScene extends UiScene<'surface'> {
   #pickupColor = -1;
   /** The fire edge: `fireCooldown` rose since the last rendered frame. */
   #lastFireCooldown = 0;
-  /** The wurm telegraph edge tracker (§4.6). */
-  #telegraphWas = false;
-  #telegraphX = 0;
-  #telegraphZ = 0;
   /** The `palette.ground` burst colour, resolved once per planet. */
   #groundColor = 0xffffff;
   readonly #projectScratch = new THREE.Vector3();
@@ -948,6 +981,10 @@ export class SurfaceScene extends UiScene<'surface'> {
     }));
     this.#pad = layout.pois.find((p) => p.kind === 'landing_pad') ?? null;
     this.#arenaPoi = layout.pois.find((p) => p.kind === 'arena') ?? null;
+    // SPEC-041 §4.4: the fight's ring is the planet's arena — its POI's own
+    // radius (Cinder-4's nest 20, the Queen's chamber 22) — not the layout's
+    // placement footprint, which is 22 for every arena.
+    this.#arenaRadius = planet.surface.pois.find((p) => p.kind === 'arena')?.radius ?? this.#arenaPoi?.radius ?? 0;
 
     // SPEC-030 §4.10: shelter discovery restores from the save like POIs.
     this.#insideShelter = null;
@@ -1171,6 +1208,13 @@ export class SurfaceScene extends UiScene<'surface'> {
       this.#numbers = null;
     });
     this.#enemyHpId.fill(-1);
+    // SPEC-041 §4.6: the elite nameplates, pooled in the same HUD layer.
+    const plates = new ElitePlates(dmgLayer);
+    this.#plates = plates;
+    this.disposer.add(() => {
+      plates.dispose();
+      this.#plates = null;
+    });
 
     const death = new DeathOverlay(services.uiRoot);
     this.#death = death;
@@ -1336,7 +1380,7 @@ export class SurfaceScene extends UiScene<'surface'> {
     if (world === null || !this.#recallAllowed()) return;
     this.#recalls++;
     this.services.events.emit('player:recalled', {});
-    this.#respawn(world);
+    this.#respawn(world, 'pad');
     this.services.requestResume();
   }
 
@@ -1535,17 +1579,19 @@ export class SurfaceScene extends UiScene<'surface'> {
         deployables: (this.#combat as Combat).deployables,
         pickups: (this.#pickups as Pickups).pool,
         nodes: (this.#nodes as Nodes).states,
-        telegraph: this.#bossTelegraph(world),
         // SPEC-038 §4.2: stamped on the world clock, which a held beat stops.
         telegraphs: { pool: (this.#combat as Combat).telegraphs, time: world.time },
         time,
         dt,
       });
-      view.setArena(world.arena);
+      // SPEC-041 §4.4: the ring shows while the arena is armed — and so while sealed.
+      view.setArena(world.arena ?? (this.#arena?.sealed === true ? this.#arena : null));
       // SPEC-030 D-22: the wall chunks against this frame's frustum.
       view.updateWallVisibility(this.#frustum);
       // SPEC-027 §4.11: the waypoint, the scan ring and the two view meshes.
       this.#renderGuidance(world, view);
+      // SPEC-041 §4.6: the nameplates follow this frame's camera.
+      this.#renderElitePlates(world);
       this.#forwardGrade();
       if (this.#minimapIn <= 0) {
         this.#minimapIn = MINIMAP_INTERVAL;
@@ -1559,8 +1605,8 @@ export class SurfaceScene extends UiScene<'surface'> {
 
   /**
    * §4.6 — the per-rendered-frame edges: the muzzle flash on the fire edge,
-   * the wurm telegraph's start/resurface rings, the coalesced pickup sparkle,
-   * and the enemy damage numbers off per-slot HP deltas. Runs before `sync`,
+   * the coalesced pickup sparkle, the menders' green rings (SPEC-041 §4.6) and
+   * the enemy damage numbers off per-slot HP deltas. Runs before `sync`,
    * allocates nothing, and never touches the simulation.
    */
   #renderFeedback(world: CombatWorld, view: SurfaceView): void {
@@ -1577,22 +1623,14 @@ export class SurfaceScene extends UiScene<'surface'> {
     }
     this.#lastFireCooldown = p.fireCooldown;
 
-    // The wurm telegraph: one ring when it opens, one plus the heavy shake on
-    // the resurface (§4.6). Positions are copied — `#bossTelegraph` returns a
-    // reused scratch.
-    const telegraph = this.#bossTelegraph(world);
-    if (telegraph !== null && !this.#telegraphWas) {
-      this.#telegraphWas = true;
-      this.#telegraphX = telegraph.x;
-      this.#telegraphZ = telegraph.z;
-      view.fx.burst('dust_ring', telegraph.x, telegraph.z, this.#groundColor);
-    } else if (telegraph !== null) {
-      this.#telegraphX = telegraph.x;
-      this.#telegraphZ = telegraph.z;
-    } else if (this.#telegraphWas) {
-      this.#telegraphWas = false;
-      view.fx.burst('dust_ring', this.#telegraphX, this.#telegraphZ, this.#groundColor);
-      this.#triggerShake(HEAVY_SHAKE_AMPLITUDE, HEAVY_SHAKE_SECONDS);
+    // SPEC-041 §4.6: a green ring at every mender pulse since the last frame.
+    const combat = this.#combat;
+    if (combat !== null && combat.menderPulseCount > 0) {
+      for (let i = 0; i < combat.menderPulseCount; i++) {
+        const pulse = combat.menderPulses[i] as { x: number; z: number };
+        view.fx.burst('dust_ring', pulse.x, pulse.z, MENDER_RING_COLOR);
+      }
+      combat.menderPulseCount = 0;
     }
 
     // At most one pickup sparkle per rendered frame (§4.6, Decisions #7).
@@ -1602,6 +1640,69 @@ export class SurfaceScene extends UiScene<'surface'> {
     }
 
     this.#enemyDamageNumbers(world);
+  }
+
+  /**
+   * SPEC-041 §4.6: up to six plates over the nearest live elites within 25 m —
+   * a nearest-first insertion over typed scratch, the text from caches built
+   * once per species and affix pair, so a frame allocates nothing.
+   */
+  #renderElitePlates(world: CombatWorld): void {
+    const plates = this.#plates;
+    if (plates === null) return;
+    const p = world.player;
+    const index = this.#plateIndex;
+    const dist = this.#plateDist;
+    let count = 0;
+    for (let i = 0; i < world.enemies.size; i++) {
+      const e = world.enemies.at(i);
+      if (!e.elite || e.state === 'dead' || isBuried(e)) continue;
+      const d = Math.hypot(e.x - p.x, e.z - p.z);
+      if (d > ELITE_PLATE_RANGE) continue;
+      let at = count < ELITE_PLATE_SLOTS ? count : ELITE_PLATE_SLOTS;
+      while (at > 0 && (dist[at - 1] as number) > d) {
+        if (at < ELITE_PLATE_SLOTS) {
+          dist[at] = dist[at - 1] as number;
+          index[at] = index[at - 1] as number;
+        }
+        at--;
+      }
+      if (at >= ELITE_PLATE_SLOTS) continue;
+      dist[at] = d;
+      index[at] = i;
+      if (count < ELITE_PLATE_SLOTS) count++;
+    }
+    for (let slot = 0; slot < count; slot++) {
+      const e = world.enemies.at(index[slot] as number);
+      this.#project(e.x, e.z, ELITE_PLATE_LIFT);
+      plates.show(slot, this.#screenPoint.x, this.#screenPoint.y, this.#plateName(e.def.id), this.#affixLine(e));
+    }
+    plates.hideFrom(count);
+  }
+
+  #plateName(id: EnemyId): string {
+    let name = this.#plateNames.get(id);
+    if (name === undefined) {
+      name = `Alpha ${ENEMIES[id].name}`;
+      this.#plateNames.set(id, name);
+    }
+    return name;
+  }
+
+  /** The affix names joined by ` · `, cached per (a, b) pair. */
+  #affixLine(e: EnemyEntity): string {
+    const a = e.affixA === null ? AFFIX_IDS.length : AFFIX_IDS.indexOf(e.affixA);
+    const b = e.affixB === null ? AFFIX_IDS.length : AFFIX_IDS.indexOf(e.affixB);
+    const key = a * (AFFIX_IDS.length + 1) + b;
+    let line = this.#affixLines[key];
+    if (line === undefined) {
+      const names: string[] = [];
+      if (e.affixA !== null) names.push(AFFIXES[e.affixA].name);
+      if (e.affixB !== null) names.push(AFFIXES[e.affixB].name);
+      line = names.join(' · ');
+      this.#affixLines[key] = line;
+    }
+    return line;
   }
 
   /**
@@ -1622,12 +1723,13 @@ export class SurfaceScene extends UiScene<'surface'> {
         const amount = Math.round((hp[i] as number) - e.hp);
         if (amount > 0) {
           this.#project(e.x, e.z, 1.2);
-          // SPEC-038 §4.8: a critical hit reads on the number.
+          // SPEC-038 §4.8: a critical hit reads on the number. SPEC-041 §4.6:
+          // a hit a bulwark turned reads grey, whatever else it was.
           numbers.show(
             this.#screenPoint.x,
             this.#screenPoint.y,
             amount,
-            e.lastHitCrit ? 'crit' : e.elite || e.def.archetype === 'boss' ? 'elite' : 'enemy',
+            e.lastHitGuarded ? 'guarded' : e.lastHitCrit ? 'crit' : e.elite || e.def.archetype === 'boss' ? 'elite' : 'enemy',
           );
         }
       }
@@ -1917,6 +2019,18 @@ export class SurfaceScene extends UiScene<'surface'> {
     info['weatherDps'] = Math.round((this.#weather?.exposureDps ?? 0) * 100) / 100;
     info['population'] = this.#spawn?.populationTarget ?? 0;
     info['difficulty'] = this.#save?.meta.difficulty ?? 'normal';
+    // SPEC-041 §3: the seal, the last boss move that landed, the live packs and
+    // the elite plates on screen.
+    info['sealed'] = this.#arena?.sealed === true ? 1 : 0;
+    info['bossMove'] = this.#combat?.lastBossMove ?? '-';
+    info['packs'] = this.#spawn?.packs ?? 0;
+    info['elitePlates'] = this.#plates?.visible ?? 0;
+    // The player's distance from the nest's centre, so a run can check the
+    // seal's clamp and the arena respawn without knowing the layout.
+    const nest = this.#arenaPoi;
+    if (nest !== null && this.#world !== null) {
+      info['arenaDist'] = Math.round(Math.hypot(this.#world.player.x - nest.x, this.#world.player.z - nest.z) * 10) / 10;
+    }
     return info;
   }
 
@@ -1984,6 +2098,8 @@ export class SurfaceScene extends UiScene<'surface'> {
     if (isDashing(p, world.time)) {
       // SPEC-038 §4.1: the dash moves the salvager instead of the stick (E59).
       stepDash(p, world.obstacles, this.#planet.surface.halfSize - WALL_INSET, world.time, dt, this.#resolved);
+      // SPEC-041 §4.4, E62: a sealed ring stops the dash like the wall does.
+      if (clampToSeal(world.arena, p)) p.dashUntil = world.time;
       return;
     }
     p.vx = moveX * world.stats.moveSpeed;
@@ -2002,6 +2118,8 @@ export class SurfaceScene extends UiScene<'surface'> {
     const edge = this.#planet.surface.halfSize - WALL_INSET;
     p.x = Math.max(-edge, Math.min(edge, p.x));
     p.z = Math.max(-edge, Math.min(edge, p.z));
+    // SPEC-041 §4.4, E62: while the boss lives, the sealed ring holds them in.
+    clampToSeal(world.arena, p);
   }
 
   /**
@@ -2045,7 +2163,7 @@ export class SurfaceScene extends UiScene<'surface'> {
     return this.#noteAim(this.#aimPoint);
   }
 
-  /** Mirrors the projection into a debug slot `#bossTelegraph` can't clobber. */
+  /** Mirrors the projection into a debug slot nothing else writes. */
   #noteAim(point: { x: number; z: number }): { x: number; z: number } {
     this.#aimDebug.x = point.x;
     this.#aimDebug.z = point.z;
@@ -2389,7 +2507,7 @@ export class SurfaceScene extends UiScene<'surface'> {
     const d = Math.hypot(p.x - nest.x, p.z - nest.z);
 
     // §4.7: the arena spawns the boss on entry.
-    if (this.#bossId === null && d <= nest.radius && p.alive) {
+    if (this.#bossId === null && d <= this.#arenaRadius && p.alive) {
       const boss = this.#combat?.spawnEnemy(wanted, nest.x, nest.z, false);
       if (boss !== undefined) {
         // SPEC-039 §4.1: the boss of a replayed stage pays half its XP and the
@@ -2397,7 +2515,7 @@ export class SurfaceScene extends UiScene<'surface'> {
         const mission = missions.bossStageMission();
         boss.replay = mission !== null && missions.isReplay(mission);
         this.#bossId = boss.id;
-        this.#arena = { x: nest.x, z: nest.z, radius: nest.radius, locked: true };
+        this.#arena = { x: nest.x, z: nest.z, radius: this.#arenaRadius, locked: true, sealed: false };
         this.#weather?.suppress(true); // E15
         // SPEC-023 §4.4: the reveal rides the arena's own spawn, so it happens
         // exactly where the fight starts and never on the debug shortcut.
@@ -2430,8 +2548,15 @@ export class SurfaceScene extends UiScene<'surface'> {
     if (this.#arena !== null && boss !== null) {
       if (world.arena === null) {
         if (d <= this.#arena.radius) world.arena = this.#arena;
-      } else if (d > ARENA_DISENGAGE_DISTANCE && !boss.aggro) {
+      } else if (d > ARENA_DISENGAGE_DISTANCE && !boss.aggro && !this.#arena.sealed) {
         world.arena = null;
+      }
+      // SPEC-041 §4.4: the first step the player's whole circle is inside the
+      // ring while the boss lives, the ring seals — until the boss dies, the
+      // player dies, or Recall takes them to the pad.
+      if (!this.#arena.sealed && p.alive && d + p.radius <= this.#arena.radius) {
+        this.#arena.sealed = true;
+        world.arena = this.#arena;
       }
     }
   }
@@ -2546,15 +2671,6 @@ export class SurfaceScene extends UiScene<'surface'> {
       if (e.def.archetype === 'boss' && e.state !== 'dead') return e;
     }
     return null;
-  }
-
-  /** The wurm's resurface ring while it digs (SPEC-011 §4.6). */
-  #bossTelegraph(world: CombatWorld): { x: number; z: number } | null {
-    const boss = this.#findBoss(world);
-    if (boss === null || boss.specialKind !== 'burrow_telegraph') return null;
-    this.#aimPoint.x = boss.x;
-    this.#aimPoint.z = boss.z;
-    return this.#aimPoint;
   }
 
   // ---------------------------------------------------------------- defend
@@ -2900,7 +3016,7 @@ export class SurfaceScene extends UiScene<'surface'> {
     let bestD = Infinity;
     for (let i = 0; i < world.enemies.size; i++) {
       const e = world.enemies.at(i);
-      if (e.state === 'dead' || e.specialKind === 'burrow_dig') continue;
+      if (e.state === 'dead' || isBuried(e)) continue;
       const d = Math.hypot(e.x - p.x, e.z - p.z);
       if (d > range || d >= bestD) continue;
       if (!world.obstacles.lineClear(p.x, p.z, e.x, e.z)) continue;
@@ -2965,22 +3081,63 @@ export class SurfaceScene extends UiScene<'surface'> {
     if (this.#deathAt === null) return;
     this.#deathAt += dt;
     const tapped = this.#edges.pressed('interact') || this.#edges.pressed('fire');
-    if (this.#deathAt >= DEATH_OVERLAY_SECONDS || tapped) this.#respawn(world);
+    // SPEC-041 §4.4, E63: a death in an active boss stage comes back at the
+    // arena's mouth instead of a 110–160 m walk from the pad.
+    if (this.#deathAt >= DEATH_OVERLAY_SECONDS || tapped) {
+      this.#respawn(world, (this.#missions?.bossStage() ?? null) !== null && this.#arenaPoi !== null ? 'arena' : 'pad');
+    }
   }
 
-  #respawn(world: CombatWorld): void {
+  /**
+   * SPEC-041 §4.4, E63: the arena entrance — on the line from the nest to the
+   * pad, `radius + ARENA_RESPAWN_OUTSET` m out, on the corridor the layout
+   * keeps clear (E17) — written into `out`, with the facing toward the nest.
+   */
+  #arenaEntrance(out: { x: number; z: number; facing: number }): boolean {
+    const nest = this.#arenaPoi;
+    const pad = this.#pad;
+    if (nest === null || pad === null) return false;
+    const dx = pad.x - nest.x;
+    const dz = pad.z - nest.z;
+    const len = Math.hypot(dx, dz);
+    const ux = len > 1e-6 ? dx / len : 1;
+    const uz = len > 1e-6 ? dz / len : 0;
+    const reach = this.#arenaRadius + ARENA_RESPAWN_OUTSET;
+    out.x = nest.x + ux * reach;
+    out.z = nest.z + uz * reach;
+    out.facing = Math.atan2(-uz, -ux);
+    return true;
+  }
+
+  readonly #respawnAt = { x: 0, z: 0, facing: 0 };
+
+  /**
+   * §4.8: E4's respawn — the sweep, the boss reset and the arena clear, full
+   * HP and 2 s of i-frames. SPEC-041 §4.4: `at` picks the pad, or the arena
+   * entrance for a death in a boss stage (E63); a recall always takes the pad.
+   * The sweep runs around wherever the player comes back.
+   */
+  #respawn(world: CombatWorld, at: 'pad' | 'arena'): void {
     const layout = this.#layout as Layout;
     this.#deathAt = null;
     if (this.#terminalOpen) this.#closeTerminal();
+    const spot = this.#respawnAt;
+    if (at !== 'arena' || !this.#arenaEntrance(spot)) {
+      spot.x = layout.playerSpawn.x;
+      spot.z = layout.playerSpawn.z;
+      spot.facing = layout.playerSpawn.facing;
+    }
 
     // §4.8 step 2: the sweep, the boss reset, the timed stages (via the event).
-    this.#despawnedAtDeath = this.#spawn?.despawnNear(layout.pad.x, layout.pad.z, DEATH_DESPAWN_RADIUS) ?? 0;
+    this.#despawnedAtDeath = this.#spawn?.despawnNear(spot.x, spot.z, DEATH_DESPAWN_RADIUS) ?? 0;
     const boss = this.#findBoss(world);
     if (boss !== null) boss.state = 'dead'; // silent — no loot, no defeat event
     this.#bossId = null;
     // E31: a reveal still waiting on a dialogue dies with the boss. Its session
     // key stays taken, so walking back in spawns the boss and nothing else.
     this.#revealPending = null;
+    // SPEC-041 §4.4: a death or a recall opens the seal with the arena.
+    if (this.#arena !== null) this.#arena.sealed = false;
     world.arena = null;
     this.#arena = null;
     this.#weather?.suppress(false);
@@ -2992,11 +3149,11 @@ export class SurfaceScene extends UiScene<'surface'> {
 
     // §4.8 step 3.
     const p = world.player;
-    p.x = layout.playerSpawn.x;
-    p.z = layout.playerSpawn.z;
+    p.x = spot.x;
+    p.z = spot.z;
     p.vx = 0;
     p.vz = 0;
-    p.facing = layout.playerSpawn.facing;
+    p.facing = spot.facing;
     p.hp = world.stats.maxHp;
     p.alive = true;
     p.invulnUntil = world.time + TUNING.INVULN_AFTER_RESPAWN;
@@ -3155,6 +3312,9 @@ export class SurfaceScene extends UiScene<'surface'> {
       button('surface-arsenal', 'Arsenal', () => this.#debugArsenal());
     }
     button('surface-spawn-pack', 'Spawn pack', () => this.#debugSpawnPack());
+    // SPEC-041 §4.10: a pack of the planet's swarm species led by an elite
+    // with the planet's affix count, so a plate is one press away.
+    button('surface-spawn-elite', 'Spawn elite', () => this.#debugSpawnElite());
     // SPEC-038 §4.11: a charge on demand — the planet's rusher, aggroed.
     button('surface-spawn-charger', 'Spawn charger', () => this.#debugSpawnCharger());
     // SPEC-038 §4.11: the budget case needs all three kinds live at once, and
@@ -3209,6 +3369,33 @@ export class SurfaceScene extends UiScene<'surface'> {
       const angle = (k / 5) * Math.PI * 2;
       combat.spawnEnemy('dust_skitter', cx + Math.cos(angle) * 1.5, cz + Math.sin(angle) * 1.5, false);
     }
+  }
+
+  /**
+   * SPEC-041 §4.10: four of the planet's swarm species (`hive_drone` on Eden)
+   * 10 m along the facing — or the nearest clear bearing to it — whose leader
+   * is an elite rolled on the director's stream with the planet's affix count.
+   */
+  #debugSpawnElite(): void {
+    const world = this.#world;
+    const spawn = this.#spawn;
+    if (world === null || spawn === null || !world.player.alive) return;
+    const row = this.#planet.surface.spawn.find((entry) => ENEMIES[entry.enemy].archetype === 'swarm');
+    const id: EnemyId = row === undefined ? 'hive_drone' : row.enemy;
+    const p = world.player;
+    const radius = ENEMIES[id].radius;
+    let x = p.x + Math.cos(p.facing) * ELITE_PACK_DISTANCE;
+    let z = p.z + Math.sin(p.facing) * ELITE_PACK_DISTANCE;
+    for (let k = 0; k < 16; k++) {
+      const turn = (k % 2 === 0 ? 1 : -1) * Math.ceil(k / 2) * (Math.PI / 8);
+      const cx = p.x + Math.cos(p.facing + turn) * ELITE_PACK_DISTANCE;
+      const cz = p.z + Math.sin(p.facing + turn) * ELITE_PACK_DISTANCE;
+      if (world.obstacles.hitsCircle(cx, cz, radius * ELITE_SCALE + 0.5)) continue;
+      x = cx;
+      z = cz;
+      break;
+    }
+    spawn.spawnElitePack(id, x, z, ELITE_PACK_SIZE);
   }
 
   /**
@@ -3333,7 +3520,8 @@ export class SurfaceScene extends UiScene<'surface'> {
     const boss = this.#combat?.spawnEnemy(def.boss, nest.x, nest.z, false);
     if (boss === undefined) return;
     this.#bossId = boss.id;
-    this.#arena = { x: nest.x, z: nest.z, radius: nest.radius, locked: true };
+    // SPEC-041 41-a: armed, but unsealed until the player steps inside.
+    this.#arena = { x: nest.x, z: nest.z, radius: this.#arenaRadius, locked: true, sealed: false };
     world.arena = this.#arena;
     this.#weather?.suppress(true);
   }
@@ -4581,6 +4769,8 @@ export class SurfaceScene extends UiScene<'surface'> {
         'player:died',
         () => {
           this.#deathAt = 0;
+          // SPEC-041 §4.4: a death opens the seal at once; the respawn clears the arena.
+          if (this.#arena !== null) this.#arena.sealed = false;
           const lost = this.#economy?.applyDeathPenalty() ?? {};
           this.#death?.show(lost);
           this.#onDeath(); // SPEC-027 §4.6: the first-death tip, the repeat hint
@@ -4620,7 +4810,20 @@ export class SurfaceScene extends UiScene<'surface'> {
         ({ kind, x, z }) => {
           const world = this.#world;
           if (world === null || !TELEGRAPH_WINDUPS.has(kind)) return;
+          // SPEC-041 §4.1: the wurm going under kicks up a ring of sand.
+          if (kind === 'burrow') this.#view?.fx.burst('dust_ring', x, z, this.#groundColor);
           if (Math.hypot(x - world.player.x, z - world.player.z) <= DASH_TIP_RANGE) this.#requestTip('dash');
+        },
+        this,
+      ),
+      // SPEC-041 §4.1: a ground move lands with a dust ring and a 0.3 s shake —
+      // reduce motion already zeroes the shake in shakeOffset.
+      bus.on(
+        'boss:move',
+        ({ kind, x, z }) => {
+          if (!GROUND_MOVE_KINDS.has(kind)) return;
+          this.#view?.fx.burst('dust_ring', x, z, this.#groundColor);
+          this.#triggerShake(BOSS_MOVE_SHAKE_AMPLITUDE, BOSS_MOVE_SHAKE_SECONDS);
         },
         this,
       ),
