@@ -4,8 +4,25 @@
 import { describe, expect, it } from 'vitest';
 import { Rng, RngRoot } from '@/core/Rng';
 import { maxHp, type Save } from '@/core/Save';
-import { ENEMIES, ITEMS, SIGNATURE_FALLBACK_LITHIUM, TUNING, type EnemyId, type ItemId } from '@/data/index';
-import { CircleObstacles } from '@/entities/World';
+import {
+  AFFIX_IDS,
+  AFFIXES,
+  BULWARK_DAMAGE_MULT,
+  ENEMIES,
+  ITEMS,
+  MENDER_HEAL_FRACTION,
+  MENDER_PULSE_SECONDS,
+  SIGNATURE_FALLBACK_LITHIUM,
+  SWIFT_SPEED_MULT,
+  SWIFT_WINDUP_SCALE,
+  TUNING,
+  VOLATILE_DAMAGE_MULT,
+  VOLLEY_SPEED_MULT,
+  type AffixId,
+  type EnemyId,
+  type ItemId,
+} from '@/data/index';
+import { ARENA_SEAL_INSET, CircleObstacles, type ArenaState } from '@/entities/World';
 import {
   BASE_CRIT_CHANCE,
   BLAST_KNOCKBACK,
@@ -18,8 +35,10 @@ import {
   gearAt,
   MEDIC_WEATHER_PAUSE,
   playerDamageMult,
+  rollAffixes,
   rollElite,
   rollPlayerDamage,
+  ELITE_SPEED_MULT,
   type PlayerStats,
   type WeaponDef,
   AUTO_LEAD_MAX,
@@ -1763,5 +1782,258 @@ describe('the fire-rate carry (SPEC-039 §4.4)', () => {
     h.step();
     h.combat.loadout.select('sidearm', h.world.time);
     expect(h.world.player.fireCooldown).toBe(0);
+  });
+});
+
+// ------------------------------------------------------- SPEC-041 §4.6
+
+describe('elite affixes (SPEC-041 §4.6)', () => {
+  const out: { a: AffixId | null; b: AffixId | null } = { a: null, b: null };
+
+  it('rollAffixes draws one on chapters 1–3, two distinct on 4–6, from the archetype’s pool', () => {
+    const rng = new Rng(17);
+    for (const [id, archetype] of [
+      ['dust_skitter', 'swarm'],
+      ['wurmling', 'rusher'],
+      ['scav_raider', 'ranged'],
+    ] as const) {
+      const pool = AFFIX_IDS.filter((affix) => (AFFIXES[affix].archetypes as readonly string[]).includes(archetype));
+      const seen = new Set<AffixId>();
+      for (let i = 0; i < 400; i++) {
+        rollAffixes(ENEMIES[id], 1, rng, out);
+        expect(out.a).not.toBeNull();
+        expect(out.b).toBeNull();
+        expect(pool).toContain(out.a);
+        seen.add(out.a as AffixId);
+        rollAffixes(ENEMIES[id], 5, rng, out);
+        expect(out.a).not.toBeNull();
+        expect(out.b).not.toBeNull();
+        expect(out.a).not.toBe(out.b);
+        expect(pool).toContain(out.a);
+        expect(pool).toContain(out.b);
+      }
+      // Uniform over the pool: every entry comes up.
+      expect([...seen].sort()).toEqual([...pool].sort());
+    }
+    // No pool serves a boss or a static egg, and that takes no draw.
+    const before = new Rng(3);
+    const after = new Rng(3);
+    rollAffixes(ENEMIES.dune_wurm, 5, after, out);
+    expect(out).toEqual({ a: null, b: null });
+    rollAffixes(ENEMIES.hive_egg, 5, after, out);
+    expect(out).toEqual({ a: null, b: null });
+    expect(after.next()).toBe(before.next());
+  });
+
+  it('a non-elite carries no affix, whatever it is handed; the summons never roll', () => {
+    const h = harness();
+    const plain = h.combat.spawnEnemy('dust_skitter', 5, 0, false, 'swift', 'mender');
+    expect(plain.affixA).toBeNull();
+    expect(plain.affixB).toBeNull();
+    const boss = h.spawn('dune_wurm', 10, 0);
+    boss.aggro = true;
+    boss.hp = boss.maxHp * 0.35;
+    h.step();
+    for (let i = 0; i < h.world.enemies.size; i++) {
+      const e = h.world.enemies.at(i);
+      expect(e.affixA).toBeNull();
+      expect(e.elite).toBe(false);
+    }
+  });
+
+  it('swift: speed ×1.35 on top of the elite ×1.1, and every windup ×0.8', () => {
+    const h = harness();
+    const swift = h.combat.spawnEnemy('dust_skitter', 1.5, 0, true, 'swift');
+    expect(swift.speed).toBeCloseTo(ENEMIES.dust_skitter.speed * ELITE_SPEED_MULT * SWIFT_SPEED_MULT, 10);
+    expect(swift.windupScale).toBe(SWIFT_WINDUP_SCALE);
+    const steady = h.combat.spawnEnemy('dust_skitter', 30, 30, true, 'mender');
+    expect(steady.windupScale).toBe(1);
+    // The skitter's 0.25 s bite winds up in 0.2 s.
+    let started = -1;
+    for (let i = 0; i < 120 && h.of('player:damaged').length === 0; i++) {
+      h.step();
+      if (started < 0 && swift.state === 'windup') started = h.world.time;
+    }
+    expect(h.world.time - started).toBeCloseTo(0.25 * SWIFT_WINDUP_SCALE, 1);
+  });
+
+  it('bulwark: a shot from the front deals ×0.25 and shows guarded; from behind, piercing or a blast, full', () => {
+    const h = harness();
+    const guard = h.combat.spawnEnemy('wurmling', 10, 0, true, 'bulwark');
+    guard.facing = Math.PI; // looking west, at the origin
+    const front = () => h.shot({ x: guard.x - 1, z: 0, vx: 40, damage: 40, ttl: 0.2 });
+    hashStep(h, [[guard, 10, 0]]);
+    guard.facing = Math.PI;
+    guard.state = 'idle';
+    front();
+    h.step();
+    expect(guard.maxHp - guard.hp).toBe(Math.max(1, Math.round(40 * BULWARK_DAMAGE_MULT)));
+    expect(guard.lastHitGuarded).toBe(true);
+
+    // From behind: the shot comes from the east, travelling west.
+    let hp = guard.hp;
+    guard.facing = Math.PI;
+    h.shot({ x: guard.x + 1, z: 0, vx: -40, damage: 40, ttl: 0.2 });
+    h.step();
+    expect(hp - guard.hp).toBe(40);
+    expect(guard.lastHitGuarded).toBe(false);
+
+    // Armour-piercing from the front: full.
+    hp = guard.hp;
+    guard.facing = Math.PI;
+    const piercing = front();
+    piercing.armorPiercing = true;
+    h.step();
+    expect(hp - guard.hp).toBe(40);
+
+    // A blast: full, with no guard at all.
+    hp = guard.hp;
+    guard.facing = Math.PI;
+    hashStep(h, [[guard, 10, 0]]);
+    h.combat.explode(guard.x - 1, 0, 3, 20, 1);
+    expect(hp - guard.hp).toBe(Math.max(1, Math.round(20 * h.world.stats.damageMult)));
+    expect(guard.lastHitGuarded).toBe(false);
+  });
+
+  it('a weapon with pierce ≥ 1 spawns armour-piercing shots; one with none does not', () => {
+    const piercing = (Object.values(ITEMS) as { kind: string; pierce?: number; id: ItemId }[]).find(
+      (item) => item.kind === 'weapon' && (item.pierce ?? 0) >= 1,
+    );
+    expect(piercing).toBeDefined();
+    for (const [weapon, expected] of [
+      [piercing?.id as ItemId, true],
+      ['weapon_kinetic', false],
+    ] as const) {
+      const h = harness({ patch: (save) => void (save.equipped.primary = weapon) });
+      h.spawn('dust_skitter', 6, 0);
+      h.input.autoFire = true;
+      h.step();
+      expect(h.world.projectiles.size).toBeGreaterThan(0);
+      expect(h.world.projectiles.at(0).armorPiercing, weapon).toBe(expected);
+    }
+  });
+
+  it('volley: a ranged elite fires three shots at 0 and ±0.25 rad, ×1.2 faster, each at full damage', () => {
+    const h = harness();
+    const gun = h.combat.spawnEnemy('scav_raider', -8, 0, true, 'volley');
+    gun.aggro = true;
+    gun.state = 'strafe';
+    gun.cooldown = 0;
+    for (let i = 0; i < 120 && h.world.projectiles.size === 0; i++) h.step();
+    expect(h.world.projectiles.size).toBe(3);
+    const angles: number[] = [];
+    for (let i = 0; i < 3; i++) {
+      const p = h.world.projectiles.at(i);
+      expect(Math.hypot(p.vx, p.vz)).toBeCloseTo(15 * VOLLEY_SPEED_MULT, 6);
+      expect(p.damage).toBe(ENEMIES.scav_raider.damage);
+      angles.push(Math.atan2(p.vz, p.vx));
+    }
+    angles.sort((a, b) => a - b);
+    expect((angles[1] ?? 0) - (angles[0] ?? 0)).toBeCloseTo(0.25, 6);
+    expect((angles[2] ?? 0) - (angles[1] ?? 0)).toBeCloseTo(0.25, 6);
+  });
+
+  it('mender: every 0.5 s, others within 8 m regain 1.5 % of their max — never itself, never a boss', () => {
+    const h = harness();
+    h.world.player.x = 200; // nothing aggroes
+    const mender = h.combat.spawnEnemy('wurmling', 0, 0, true, 'mender');
+    const near = h.spawn('dust_skitter', 5, 0);
+    const far = h.spawn('dust_skitter', 9, 0);
+    const boss = h.spawn('frost_matriarch', -6, 0);
+    for (const e of [mender, near, far, boss]) {
+      e.wanderAt = Infinity;
+      e.wanderX = e.x;
+      e.wanderZ = e.z;
+    }
+    mender.hp = mender.maxHp - 20;
+    near.hp = 1;
+    far.hp = 1;
+    boss.hp = boss.maxHp - 100;
+    h.run(MENDER_PULSE_SECONDS + STEP);
+    expect(near.hp).toBeCloseTo(1 + MENDER_HEAL_FRACTION * near.maxHp, 6);
+    expect(far.hp).toBe(1);
+    expect(boss.hp).toBe(boss.maxHp - 100);
+    expect(mender.hp).toBe(mender.maxHp - 20);
+    expect(h.combat.menderPulseCount).toBe(1);
+    expect(h.combat.menderPulses[0]).toEqual({ x: mender.x, z: mender.z });
+    // Healing stops at the max.
+    near.hp = near.maxHp - 0.1;
+    h.run(MENDER_PULSE_SECONDS);
+    expect(near.hp).toBe(near.maxHp);
+  });
+
+  it('volatile: its death leaves a 3 m circle landing 1 s later for ×1.5, on the player only (41-f)', () => {
+    const h = harness({ follower: true });
+    const f = h.world.follower;
+    if (f === null) throw new Error('follower missing');
+    const bomb = h.combat.spawnEnemy('dust_skitter', 1, 0, true, 'volatile');
+    f.x = 1;
+    f.z = 1;
+    h.combat.killEnemy(bomb, 'player');
+    expect(h.combat.telegraphs.size).toBe(1);
+    const t = h.combat.telegraphs.at(0);
+    expect(t).toMatchObject({ kind: 'circle', x: 1, z: 0, radius: 3, elite: false, ownerId: 0, hitsFollower: false });
+    expect(t.damage).toBeCloseTo(ENEMIES.dust_skitter.damage * VOLATILE_DAMAGE_MULT, 10);
+    expect(t.hitAt - t.startAt).toBeCloseTo(1, 10);
+    const followerHp = f.hp;
+    h.run(1.1);
+    expect(h.of('player:damaged').some((d) => d.source.kind === 'enemy' && d.source.enemyId === 'dust_skitter')).toBe(true);
+    expect(f.hp).toBe(followerHp);
+  });
+
+  it('an elite’s kill pays floor(xp × (3 + affixes)), and a replay halves it', () => {
+    const h = harness();
+    h.combat.killEnemy(h.combat.spawnEnemy('dust_skitter', 5, 0, true, 'swift'), 'player');
+    h.combat.killEnemy(h.combat.spawnEnemy('wurmling', 5, 0, true, 'swift', 'mender'), 'player');
+    const replayed = h.combat.spawnEnemy('scav_raider', 5, 0, true, 'volley', 'mender');
+    replayed.replay = true;
+    h.combat.killEnemy(replayed, 'player');
+    expect(ELITE_XP_MULT).toBe(3);
+    expect(h.of('enemy:killed').map((k) => k.xp)).toEqual([
+      ENEMIES.dust_skitter.xp * 4,
+      ENEMIES.wurmling.xp * 5,
+      Math.floor(ENEMIES.scav_raider.xp * 5 * TUNING.REPLAY_REWARD_FRACTION),
+    ]);
+  });
+});
+
+describe('the sealed arena (SPEC-041 §4.4, E62)', () => {
+  const sealed = (): ArenaState => ({ x: 0, z: 0, radius: 10, locked: true, sealed: true });
+
+  it('clamps knockback inside radius − 0.5', () => {
+    const h = harness({ arena: sealed() });
+    h.world.player.x = 9.3;
+    const e = h.spawn('dust_skitter', 8.2, 0);
+    e.aggro = true;
+    e.state = 'chase';
+    for (let i = 0; i < 120 && h.of('player:damaged').length === 0; i++) h.step();
+    expect(h.of('player:damaged').length).toBeGreaterThan(0);
+    expect(Math.hypot(h.world.player.x, h.world.player.z)).toBeLessThanOrEqual(10 - ARENA_SEAL_INSET + 1e-9);
+  });
+
+  it('clamps push-out inside radius − 0.5', () => {
+    const h = harness({ arena: sealed() });
+    h.world.player.x = 9.4;
+    const e = h.spawn('wurmling', 9, 0); // overlapping, pushing the player out
+    e.wanderAt = Infinity;
+    e.state = 'idle';
+    h.step();
+    expect(Math.hypot(h.world.player.x, h.world.player.z)).toBeLessThanOrEqual(10 - ARENA_SEAL_INSET + 1e-9);
+  });
+
+  it('an unsealed arena clamps nothing, and the boss’s death opens the seal', () => {
+    const open = harness({ arena: { x: 0, z: 0, radius: 10, locked: true, sealed: false } });
+    open.world.player.x = 9.4;
+    const e = open.spawn('wurmling', 9, 0);
+    e.state = 'idle';
+    e.wanderAt = Infinity;
+    open.step();
+    expect(open.world.player.x).toBeGreaterThan(10 - ARENA_SEAL_INSET);
+
+    const h = harness({ arena: sealed() });
+    const boss = h.spawn('dune_wurm', 0, 0);
+    h.combat.killEnemy(boss, 'player');
+    expect(h.world.arena?.sealed).toBe(false);
+    expect(h.world.arena?.locked).toBe(false);
   });
 });

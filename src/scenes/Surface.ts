@@ -25,6 +25,8 @@ import type { InputState, Scheme } from '@/core/Input';
 import type { PerfStress } from '@/core/Perf';
 import type { Rng } from '@/core/Rng';
 import {
+  AFFIX_IDS,
+  AFFIXES,
   BOSS_REVEALS,
   CLASSES,
   DIALOGUE,
@@ -69,7 +71,7 @@ import { makePlayer } from '@/entities/Player';
 import { makeProjectile } from '@/entities/Projectile';
 import { resetTelegraph, TELEGRAPH_CAPACITY } from '@/entities/Telegraph';
 import { ARENA_RESPAWN_OUTSET, clampToSeal, type ArenaState } from '@/entities/World';
-import { Combat, computePlayerStats, type CombatWorld } from '@/systems/Combat';
+import { Combat, computePlayerStats, ELITE_SCALE, type CombatWorld } from '@/systems/Combat';
 import { DASH_DISTANCE, dashCooldown, isDashing, stepDash, tryDash } from '@/systems/Dash';
 import { Economy } from '@/systems/Economy';
 import { ExploreMask, REVEAL_CAPACITY } from '@/systems/Exploration';
@@ -135,6 +137,7 @@ import {
 import { AriaHint } from '@/ui/AriaHint';
 import { confirmSheet } from '@/ui/ConfirmSheet';
 import { DamageNumbers } from '@/ui/DamageNumbers';
+import { ELITE_PLATE_SLOTS, ElitePlates } from '@/ui/ElitePlates';
 import { DeathOverlay } from '@/ui/DeathOverlay';
 import { dialogueLayer, type DialogueUI } from '@/ui/DialogueUI';
 import { el, h, shortScreen, testId } from '@/ui/dom';
@@ -247,6 +250,12 @@ const BOSS_MOVE_SHAKE_AMPLITUDE = 0.3;
 const BOSS_MOVE_SHAKE_SECONDS = 0.3;
 /** SPEC-041 §4.6: the mender's pulse ring. */
 const MENDER_RING_COLOR = 0x6fdc8c;
+/** SPEC-041 §4.6: plates show over live elites this close, lifted this far over the ground. */
+const ELITE_PLATE_RANGE = 25;
+const ELITE_PLATE_LIFT = 2.2;
+/** SPEC-041 §4.10: the debug elite pack — four of the swarm species, 10 m ahead. */
+const ELITE_PACK_SIZE = 4;
+const ELITE_PACK_DISTANCE = 10;
 /** SPEC-038 §4.11: the debug charger stands this far along the player's facing. */
 const CHARGER_DISTANCE = 8;
 /** SPEC-038 §4.1: the dash streaks' colour — the salvager's cool white. */
@@ -553,6 +562,13 @@ export class SurfaceScene extends UiScene<'surface'> {
 
   // SPEC-019 §4.6–§4.7 — hit feedback state, all scene-local (19-i).
   #numbers: DamageNumbers | null = null;
+  /** SPEC-041 §4.6: the elite nameplates, and the nearest-first scratch that fills them. */
+  #plates: ElitePlates | null = null;
+  readonly #plateIndex = new Int32Array(ELITE_PLATE_SLOTS);
+  readonly #plateDist = new Float64Array(ELITE_PLATE_SLOTS);
+  /** `Alpha <name>` per species and the affix line per (a, b) pair — built once, never per frame. */
+  readonly #plateNames = new Map<EnemyId, string>();
+  readonly #affixLines: (string | undefined)[] = [];
   readonly #shake: ShakeState = { amplitude: 0, until: 0, duration: 0 };
   readonly #hitStop = { frames: 0, time: 0 };
   /** Per-slot HP deltas for enemy damage numbers (§4.6, 19-f). */
@@ -1186,6 +1202,13 @@ export class SurfaceScene extends UiScene<'surface'> {
       this.#numbers = null;
     });
     this.#enemyHpId.fill(-1);
+    // SPEC-041 §4.6: the elite nameplates, pooled in the same HUD layer.
+    const plates = new ElitePlates(dmgLayer);
+    this.#plates = plates;
+    this.disposer.add(() => {
+      plates.dispose();
+      this.#plates = null;
+    });
 
     const death = new DeathOverlay(services.uiRoot);
     this.#death = death;
@@ -1561,6 +1584,8 @@ export class SurfaceScene extends UiScene<'surface'> {
       view.updateWallVisibility(this.#frustum);
       // SPEC-027 §4.11: the waypoint, the scan ring and the two view meshes.
       this.#renderGuidance(world, view);
+      // SPEC-041 §4.6: the nameplates follow this frame's camera.
+      this.#renderElitePlates(world);
       this.#forwardGrade();
       if (this.#minimapIn <= 0) {
         this.#minimapIn = MINIMAP_INTERVAL;
@@ -1612,6 +1637,69 @@ export class SurfaceScene extends UiScene<'surface'> {
   }
 
   /**
+   * SPEC-041 §4.6: up to six plates over the nearest live elites within 25 m —
+   * a nearest-first insertion over typed scratch, the text from caches built
+   * once per species and affix pair, so a frame allocates nothing.
+   */
+  #renderElitePlates(world: CombatWorld): void {
+    const plates = this.#plates;
+    if (plates === null) return;
+    const p = world.player;
+    const index = this.#plateIndex;
+    const dist = this.#plateDist;
+    let count = 0;
+    for (let i = 0; i < world.enemies.size; i++) {
+      const e = world.enemies.at(i);
+      if (!e.elite || e.state === 'dead' || isBuried(e)) continue;
+      const d = Math.hypot(e.x - p.x, e.z - p.z);
+      if (d > ELITE_PLATE_RANGE) continue;
+      let at = count < ELITE_PLATE_SLOTS ? count : ELITE_PLATE_SLOTS;
+      while (at > 0 && (dist[at - 1] as number) > d) {
+        if (at < ELITE_PLATE_SLOTS) {
+          dist[at] = dist[at - 1] as number;
+          index[at] = index[at - 1] as number;
+        }
+        at--;
+      }
+      if (at >= ELITE_PLATE_SLOTS) continue;
+      dist[at] = d;
+      index[at] = i;
+      if (count < ELITE_PLATE_SLOTS) count++;
+    }
+    for (let slot = 0; slot < count; slot++) {
+      const e = world.enemies.at(index[slot] as number);
+      this.#project(e.x, e.z, ELITE_PLATE_LIFT);
+      plates.show(slot, this.#screenPoint.x, this.#screenPoint.y, this.#plateName(e.def.id), this.#affixLine(e));
+    }
+    plates.hideFrom(count);
+  }
+
+  #plateName(id: EnemyId): string {
+    let name = this.#plateNames.get(id);
+    if (name === undefined) {
+      name = `Alpha ${ENEMIES[id].name}`;
+      this.#plateNames.set(id, name);
+    }
+    return name;
+  }
+
+  /** The affix names joined by ` · `, cached per (a, b) pair. */
+  #affixLine(e: EnemyEntity): string {
+    const a = e.affixA === null ? AFFIX_IDS.length : AFFIX_IDS.indexOf(e.affixA);
+    const b = e.affixB === null ? AFFIX_IDS.length : AFFIX_IDS.indexOf(e.affixB);
+    const key = a * (AFFIX_IDS.length + 1) + b;
+    let line = this.#affixLines[key];
+    if (line === undefined) {
+      const names: string[] = [];
+      if (e.affixA !== null) names.push(AFFIXES[e.affixA].name);
+      if (e.affixB !== null) names.push(AFFIXES[e.affixB].name);
+      line = names.join(' · ');
+      this.#affixLines[key] = line;
+    }
+    return line;
+  }
+
+  /**
    * §4.6: enemy hit amounts from per-slot HP deltas — one walk over the pool,
    * typed arrays only. An id mismatch (swap-remove reused the slot) resets
    * silently (19-f); an index past the arrays is skipped, never a crash.
@@ -1629,12 +1717,13 @@ export class SurfaceScene extends UiScene<'surface'> {
         const amount = Math.round((hp[i] as number) - e.hp);
         if (amount > 0) {
           this.#project(e.x, e.z, 1.2);
-          // SPEC-038 §4.8: a critical hit reads on the number.
+          // SPEC-038 §4.8: a critical hit reads on the number. SPEC-041 §4.6:
+          // a hit a bulwark turned reads grey, whatever else it was.
           numbers.show(
             this.#screenPoint.x,
             this.#screenPoint.y,
             amount,
-            e.lastHitCrit ? 'crit' : e.elite || e.def.archetype === 'boss' ? 'elite' : 'enemy',
+            e.lastHitGuarded ? 'guarded' : e.lastHitCrit ? 'crit' : e.elite || e.def.archetype === 'boss' ? 'elite' : 'enemy',
           );
         }
       }
@@ -1928,6 +2017,8 @@ export class SurfaceScene extends UiScene<'surface'> {
     // the elite plates on screen.
     info['sealed'] = this.#arena?.sealed === true ? 1 : 0;
     info['bossMove'] = this.#combat?.lastBossMove ?? '-';
+    info['packs'] = this.#spawn?.packs ?? 0;
+    info['elitePlates'] = this.#plates?.visible ?? 0;
     return info;
   }
 
@@ -3207,6 +3298,9 @@ export class SurfaceScene extends UiScene<'surface'> {
       button('surface-arsenal', 'Arsenal', () => this.#debugArsenal());
     }
     button('surface-spawn-pack', 'Spawn pack', () => this.#debugSpawnPack());
+    // SPEC-041 §4.10: a pack of the planet's swarm species led by an elite
+    // with the planet's affix count, so a plate is one press away.
+    button('surface-spawn-elite', 'Spawn elite', () => this.#debugSpawnElite());
     // SPEC-038 §4.11: a charge on demand — the planet's rusher, aggroed.
     button('surface-spawn-charger', 'Spawn charger', () => this.#debugSpawnCharger());
     // SPEC-038 §4.11: the budget case needs all three kinds live at once, and
@@ -3261,6 +3355,33 @@ export class SurfaceScene extends UiScene<'surface'> {
       const angle = (k / 5) * Math.PI * 2;
       combat.spawnEnemy('dust_skitter', cx + Math.cos(angle) * 1.5, cz + Math.sin(angle) * 1.5, false);
     }
+  }
+
+  /**
+   * SPEC-041 §4.10: four of the planet's swarm species (`hive_drone` on Eden)
+   * 10 m along the facing — or the nearest clear bearing to it — whose leader
+   * is an elite rolled on the director's stream with the planet's affix count.
+   */
+  #debugSpawnElite(): void {
+    const world = this.#world;
+    const spawn = this.#spawn;
+    if (world === null || spawn === null || !world.player.alive) return;
+    const row = this.#planet.surface.spawn.find((entry) => ENEMIES[entry.enemy].archetype === 'swarm');
+    const id: EnemyId = row === undefined ? 'hive_drone' : row.enemy;
+    const p = world.player;
+    const radius = ENEMIES[id].radius;
+    let x = p.x + Math.cos(p.facing) * ELITE_PACK_DISTANCE;
+    let z = p.z + Math.sin(p.facing) * ELITE_PACK_DISTANCE;
+    for (let k = 0; k < 16; k++) {
+      const turn = (k % 2 === 0 ? 1 : -1) * Math.ceil(k / 2) * (Math.PI / 8);
+      const cx = p.x + Math.cos(p.facing + turn) * ELITE_PACK_DISTANCE;
+      const cz = p.z + Math.sin(p.facing + turn) * ELITE_PACK_DISTANCE;
+      if (world.obstacles.hitsCircle(cx, cz, radius * ELITE_SCALE + 0.5)) continue;
+      x = cx;
+      z = cz;
+      break;
+    }
+    spawn.spawnElitePack(id, x, z, ELITE_PACK_SIZE);
   }
 
   /**

@@ -10,8 +10,11 @@ const POOL_SIZE = 24;
 const LIFE_SECONDS = 0.8;
 const RISE_PX = 40;
 
-/** SPEC-038 §4.8 adds `crit`: the enemy's number for a critical hit, `<amount>!`. */
-export type DamageKind = 'enemy' | 'elite' | 'player' | 'crit';
+/**
+ * SPEC-038 §4.8 adds `crit`: the enemy's number for a critical hit, `<amount>!`.
+ * SPEC-041 §4.6 adds `guarded`: a hit a bulwark turned, in grey.
+ */
+export type DamageKind = 'enemy' | 'elite' | 'player' | 'crit' | 'guarded';
 
 interface Slot {
   readonly node: HTMLSpanElement;
