@@ -13,6 +13,7 @@ import { PLANETS } from '@/data/index';
 import { LAUNCH_HOLD_SECONDS, LAUNCH_PUSH_SECONDS, LAUNCH_SECONDS } from '@/systems/Flight';
 import {
   FlightView,
+  HIT_FLASH_NAME,
   LAUNCH_SHOT,
   launchPose,
   mergeModel,
@@ -348,6 +349,79 @@ describe('FlightView fx (SPEC-020 §4.3)', () => {
     for (let i = 0; i < 60; i++) view.update(f, 1 / 60);
     expect(view.stormTint).toBe(0);
     expect(dome.material.color.getHex()).toBe(0xffffff);
+  });
+});
+
+// SPEC-041 §4.9 — a hazard a shot hit without killing it flashes white.
+describe('FlightView hit flash (SPEC-041 §4.9)', () => {
+  /** The white twins: one per rock shape and one per ship class, named for the flash. */
+  function twins(scene: THREE.Scene): THREE.InstancedMesh[] {
+    return instanced(scene).filter((mesh) => mesh.name === HIT_FLASH_NAME);
+  }
+
+  function hazard(f: FlightFrame, fields: FrameHazard): void {
+    Object.assign(f.hazards.alloc(), fields);
+  }
+
+  it('draws a hazard with hitFlash white, and the rest in their own colours', () => {
+    const { scene, view } = setup();
+    const f = frame();
+    hazard(f, { kind: 'fighter', x: 1, y: 2, depth: 40, radius: 1.2, hitFlash: 0.05 });
+    hazard(f, { kind: 'fighter', x: -3, y: 0, depth: 50, radius: 1.2, hitFlash: 0 });
+    hazard(f, { kind: 'interceptor', x: 0, y: -1, depth: 30, radius: 1, hitFlash: 0.1 });
+    hazard(f, { kind: 'asteroid', x: 4, y: 1, depth: 70, radius: 2, hitFlash: 0.02 });
+    view.update(f, 1 / 60);
+
+    const lit = twins(scene).filter((mesh) => mesh.visible);
+    expect(lit).toHaveLength(3); // the rock's, the fighter's and the interceptor's
+    for (const mesh of lit) {
+      expect(mesh.count).toBe(1);
+      // Flat white: unlit, untinted, untouched by tone mapping.
+      const material = mesh.material as THREE.MeshBasicMaterial;
+      expect(material).toBeInstanceOf(THREE.MeshBasicMaterial);
+      expect(material.color.getHex()).toBe(0xffffff);
+      expect(material.map).toBeNull();
+      expect(material.toneMapped).toBe(false);
+    }
+
+    // The flashing fighter is drawn by the twin, the other one by its own mesh.
+    const twin = lit.find((mesh) => mesh.geometry instanceof THREE.ConeGeometry) as THREE.InstancedMesh;
+    const fighters = instanced(scene).find((mesh) => mesh !== twin && mesh.geometry === twin.geometry) as THREE.InstancedMesh;
+    expect(instanceAt(twin, 0).toArray()).toEqual([1, 2, -40]);
+    expect(fighters.count).toBe(1);
+    expect(instanceAt(fighters, 0).toArray()).toEqual([-3, 0, -50]);
+    // The rock's twin carries the rock where it is.
+    const rock = lit.find((mesh) => mesh.geometry instanceof THREE.IcosahedronGeometry) as THREE.InstancedMesh;
+    expect(instanceAt(rock, 0).toArray()).toEqual([4, 1, -70]);
+    expect(rocks(scene).reduce((n, mesh) => n + mesh.count, 0)).toBe(0);
+
+    // Once the flash runs out every twin goes dark — hidden, so no draw at all.
+    for (let i = 0; i < f.hazards.size; i++) f.hazards.at(i).hitFlash = 0;
+    view.update(f, 1 / 60);
+    expect(twins(scene).every((mesh) => !mesh.visible && mesh.count === 0)).toBe(true);
+    expect(fighters.count).toBe(2);
+    expect(rocks(scene).reduce((n, mesh) => n + mesh.count, 0)).toBe(1);
+  });
+
+  it('keeps a twin per rock shape and the ship models’ shapes once the art arrives', () => {
+    const { scene, view } = setup();
+    const ship = model([[new THREE.BoxGeometry(1, 1, 2), 'Hull'], [new THREE.SphereGeometry(0.2, 8, 6), 'Glow']]);
+    view.useArt({ asteroid: model([[new THREE.SphereGeometry(1, 8, 6), 'RockA'], [new THREE.SphereGeometry(1, 6, 4), 'RockB']]), fighter: ship });
+    const shapes = rocks(scene).map((mesh) => mesh.geometry);
+    const fighters = instanced(scene).find((mesh) => Array.isArray(mesh.material)) as THREE.InstancedMesh;
+    const geometries = twins(scene).map((mesh) => mesh.geometry);
+    expect(geometries).toEqual(expect.arrayContaining([...shapes, fighters.geometry]));
+    expect(twins(scene)).toHaveLength(shapes.length + 2); // + the fighter's and the interceptor's
+
+    // A flashing fighter draws its whole merged model white, in one draw.
+    const f = frame();
+    hazard(f, { kind: 'fighter', x: 0, y: 0, depth: 40, radius: 1.2, hitFlash: 0.05 });
+    view.update(f, 1 / 60);
+    const lit = twins(scene).filter((mesh) => mesh.visible);
+    expect(lit).toHaveLength(1);
+    expect(lit[0]?.geometry).toBe(fighters.geometry);
+    expect(Array.isArray(lit[0]?.material)).toBe(false);
+    expect(fighters.count).toBe(0);
   });
 });
 
