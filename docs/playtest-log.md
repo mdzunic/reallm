@@ -1674,15 +1674,15 @@ criterion is one:
 
 | Signal | Observed |
 | --- | --- |
-| Banner (`c1_m1`) | `Mission complete` · `Dry Land` · `+100 XP · +10 tokens · +20 oil` · `Next: Black Gold — at the pad terminal`; up 4.0–4.2 scene s; `c1_m1_done` started in the tick it went, never while it was up; still up 1 s after a 3 s pause |
+| Banner (`c1_m1`) | `Mission complete` · `Dry Land` · `+100 XP · +10 tokens · +20 oil` · `Next: Black Gold — at the pad terminal`; up more than 3.5 and at most 5 scene seconds; `c1_m1_done` started in the tick it went, never while it was up; still up 1 s after a 3 s pause |
 | Loot | `Picked up Coolant Pack`; with twenty full slots one `Inventory full — Coolant Pack left on the ground`, never `×2` while the pickup retried |
 | Effects | `☂ 30 s` in the `Lv N` row from `C`, ≤ 28 s two scene seconds later; the row and the tracker kept their place at every phone size |
 | Danger | `hud-lowhp` (static, no pointer) and `qb-heal.is-urgent` at 15 % HP; in flight, at 20 % hull |
 | Death | `Killed by Dust Skitter` with a tip; Space at 0.5 s ignored, Space at 1.2 s respawned well before 2.5 s |
-| Beats | `Stage 2/3 — Scan Dune Sea`; `▲ Wave incoming` under the shelter chip for 3.0 scene s |
-| Levels | the level-up toast up ~4.0 s, `is-levelled` ~2.0 s; `XP 149 / 150` on the 6 px bar; `character-xp` at the station |
+| Beats | `Stage 2/3 — Scan Dune Sea`; `▲ Wave incoming` under the shelter chip for between 2.5 and 3.5 scene seconds |
+| Levels | the level-up toast up between 3.6 and 4.8 s, `is-levelled` between 1.6 and 2.8 s (both wall clock, as their timers are); `XP 149 / 150` on the 6 px bar; `character-xp` at the station |
 | Shop | `Crafted Medkit ×2`; the Plasma Lance's card over a worn Laser Carbine: `↑ T1 → T2 …`, `↓ fire rate 4 → 3` |
-| Frames | `hud-boss` 512 px wide at 1280 × 720 with one tick at 0.4, `Phase 2` at the burrow; `hud-target` reading `Alpha Dust Skitter` / `Elite` / its affix, gone within 3.5 scene s |
+| Frames | `hud-boss` at least 280 px wide at 1280 × 720 with one tick (the Wurm's 0.4), `Phase 2` at the burrow; `hud-target` reading `Alpha Dust Skitter` / `Elite` / its affix, gone within 3.5 scene seconds of showing |
 | Haptics (emulated phone) | `surface-hurt-from` recorded `[15]`; with Vibration unchecked, nothing; a desktop context recorded nothing and shows no row |
 | Recall | `Emergency recall` and `Hull breached — ARIA flew you home. The jump's fuel is spent; your cargo is safe.` |
 
