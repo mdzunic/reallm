@@ -110,8 +110,8 @@ export class MissionBoard {
       const ordered = missions
         .map((id, index) => ({ id, index, status: missionStatus(this.#deps.data, MISSIONS[id], 'station') }))
         .sort((a, b) => STATUS_ORDER[a.status] - STATUS_ORDER[b.status] || a.index - b.index);
-      // SPEC-044 §4.11: done rows and plain replays go, in that order, into the
-      // planet's `Completed` fold; a contract replay is an offer and stays in
+      // SPEC-044 §4.11: done rows and plain replays go, in their sorted order, into
+      // the planet's `Completed` fold; a contract replay is an offer and stays in
       // the list, where the sort puts it — after the locked rows (44-k).
       const rows: HTMLElement[] = [];
       const done: HTMLElement[] = [];

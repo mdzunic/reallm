@@ -1,10 +1,11 @@
 // SPEC-044 §6.2 — focus and flow, in the browser: a modal line read by
 // keyboard, Enter on a non-modal one, creation by keyboard and its Back, the
 // station's tablist, the next step to the star map, the pad terminal as a
-// modal, a danger sheet's focus, the one controls sheet, Save & Quit's cost,
-// the player-facing credits, the storage block, and the board's words. Every
-// case that is about keys drives the keys; the words and the rules are pinned
-// in node (`tests/ui/helpers.test.ts`, `tests/ui/dialogue.test.ts`,
+// modal, a danger sheet's focus, the gear card's and the stay card's focus,
+// the one controls sheet, Save & Quit's cost, the player-facing credits, the
+// storage block, and the board's words. Every case that is about keys drives
+// the keys; the words and the rules are pinned in node
+// (`tests/ui/helpers.test.ts`, `tests/ui/dialogue.test.ts`,
 // `tests/ui/controls.test.ts`), and this proves the wiring.
 import { expect, test, type Page } from '@playwright/test';
 import { COLD_START, start } from './start';
