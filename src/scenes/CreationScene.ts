@@ -507,7 +507,8 @@ export class CreationScene extends UiScene<'creation'> {
         h(
           'div',
           { class: 'attr-row' },
-          h('span', { class: 'attr-name' }, attribute),
+          // SPEC-045 §4.5: capitalised in the source, so plain text keeps the capital.
+          h('span', { class: 'attr-name' }, attribute.charAt(0).toUpperCase() + attribute.slice(1)),
           minus,
           testId(h('span', { class: 'attr-value' }, String(total)), `attr-${attribute}`),
           plus,

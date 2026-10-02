@@ -484,7 +484,8 @@ export class CharacterPanel {
       return h(
         'div',
         { class: `res-row${value >= cap ? ' at-cap' : ''}` },
-        h('span', { class: 'res-name' }, resource),
+        // SPEC-045 §4.5: capitalised in the source, so plain text keeps the capital.
+        h('span', { class: 'res-name' }, resource.charAt(0).toUpperCase() + resource.slice(1)),
         testId(h('span', { class: 'res-count' }, `${value} / ${cap}`), `char-res-${resource}`),
       );
     });
