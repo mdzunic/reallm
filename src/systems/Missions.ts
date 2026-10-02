@@ -951,17 +951,8 @@ export function contractFor(save: Save, def: MissionDef, landing: number): Contr
   if (!save.progress.flags.includes(`chapter${def.chapter}_done`)) return null;
   const planet = PLANET_TABLE[def.planet];
   if (planet.surface.population <= 0) return null;
-  const weather = planet.surface.weather !== null;
-  let allowed = 0;
-  for (const id of CONTRACT_IDS) if (weather || !CONTRACTS[id].needsWeather) allowed++;
-  if (allowed === 0) return null;
-  let pick = hash32(save.meta.seed, 'contract', def.id, landing) % allowed;
-  for (const id of CONTRACT_IDS) {
-    if (!weather && CONTRACTS[id].needsWeather) continue;
-    if (pick === 0) return id;
-    pick--;
-  }
-  return null;
+  const allowed = CONTRACT_IDS.filter((id) => planet.surface.weather !== null || !CONTRACTS[id].needsWeather);
+  return allowed[hash32(save.meta.seed, 'contract', def.id, landing) % allowed.length] ?? null;
 }
 
 /**
