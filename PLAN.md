@@ -520,6 +520,44 @@ Specs:
 
 ---
 
+**R22 — 2026-10-01 (the Android app).** ReaLLM reaches an Android phone only through Chrome, and the browser is a poor home for it:
+- offline play starts only after the service worker's 21 MB precache, which SPEC-040 defers to the first station visit;
+- fullscreen and the landscape lock are requests Chrome may refuse;
+- Back at the menu root leaves the page;
+- the save lives in site data that "Clear browsing data" wipes.
+
+The same build now also ships as an Android app. Decisions:
+
+1. **A Capacitor 8 shell, not a Trusted Web Activity (SPEC-060, §2).** The APK carries the web build and runs it in the system WebView from `https://localhost`, which is pinned because the save is keyed by origin. It is offline from the first launch and needs no host. This is the second exception to §2's "nothing else", after R1-6's `vite-plugin-pwa`:
+   - `@capacitor/core` and four official plugins at runtime, in the Android build only: `app`, `share`, `filesystem` and `clipboard`;
+   - `@capacitor/cli` and `@capacitor/android` as build tools;
+   - a JDK 21 and Android SDK 36 toolchain, needed only to build an APK. `npm run check` still needs neither.
+2. **One codebase behind a port (§3).** Everything Android-specific sits behind `core/Platform.ts` and one adapter folder, `src/platform/`, imported only by the composition root behind a build-time constant.
+   - The web bundle carries no Capacitor code.
+   - The web build, its PWA, its e2e suite and its deploy are unchanged.
+   - Share, clipboard and keep-awake go through the port on both platforms.
+3. **What the app does differently (§9, §13 E98–E104).**
+   - **Display.** It is locked to landscape by the OS (either side), immersive, and never draws under a display cutout.
+   - **Wake.** The screen stays on through the OS while a gameplay scene or a film holds it.
+   - **Back.** System Back routes exactly as Escape, and at the menu root it minimizes the app instead of leaving.
+   - **Background.** Leaving the foreground pauses and writes the save at once.
+   - **Bundled.** No service worker, no update offer, no install prompt and no storage-persistence request.
+   - **Permissions.** The release APK asks for no network permission and holds only `VIBRATE`, so R18's Android haptics work in the WebView unchanged.
+   - **Old WebViews.** A WebView older than Chrome 111 gets a page that says what to update instead of a black screen.
+4. **Sideloaded, not published.** The deliverable is a release-signed APK built by `npm run android:apk` and by a CI workflow. Its key lives outside the repository and in CI secrets, so every build updates the last in place. `versionCode` is the commit count. Google Play is out of scope: no AAB, listing or store review. Auto Backup is off, and save codes stay the one way to move or keep a save (E9).
+5. **Milestone M7k "Android"** (SPEC-060), tag `m7k`. It consumes nothing from M7h–M7j and can build any time after SPEC-040.
+6. **Not now.** Google Play, iOS as a native app, native rendering or audio, cloud saves, gamepads, over-the-air bundle updates and a custom splash screen.
+
+Specs:
+- SPEC-060 (decisions 1–5).
+- SPEC-059 §4.5.4's share and clipboard calls go through the platform port.
+- SPEC-001's script list gains `android:web`, `android:sync`, `android:apk` and `android:dev`. `npm run check` also builds `dist-android/`.
+- SPEC-000's queue and build order.
+
+(§2, §3, §9, §10, §12, §13)
+
+---
+
 ## 1. Vision & Inspiration
 
 **ReaLLM** ("real" + "LLM"): a space post-apocalyptic ARPG whose hero slowly works out that he may be a language model running inside a machine.
@@ -555,6 +593,8 @@ Core resources: **oil** (ship fuel), **wheat** (food / HP regen consumables), **
 | Assets | **Procedural at runtime** (terrain, sky, effects, UI, **enemies**) + **generated in Blender from committed scripts** (`scripts/assets/blender/`: the rigged salvager, ships, station pieces, props, ground layers, VFX sprites, portraits — R7; baked hull maps, flight skies, planets and asteroids — R8; story films as H.264 MP4 with WebP posters — R9) + **synthesised audio** (`scripts/assets/audio/`) + **photographic plates** (`scripts/assets/blender/plates/`, generated with Google Gemini and rendered into six film shots and the Selection cards — R11, R12; five more in R19: the visored card, the empty helmet, `stranded`, `liftoff` and the grow room) | Blender 5.2 LTS (tool only, for rebuilding art) | No artist and no downloads except the committed plates, which are listed in `LICENSES.md` by hand; every other file is original CC0, generated or synthesised, with a `LICENSES.md` row; a CC0 pack may replace any file under the same name |
 
 Nothing else — no React, no physics engine (arcade physics is enough), no backend, no schema library (hand-written validators).
+
+Since R22 the same build also ships as a sideloaded **Android app**: a Capacitor 8 shell (`@capacitor/core` `^8.5.2` with the `app`, `share`, `filesystem` and `clipboard` plugins, in the Android build only) runs `dist-android/` in the system WebView, offline from the first launch. Building an APK needs JDK 21 and Android SDK 36; nothing else in the toolchain does.
 
 Supported platforms (floor): Safari/iOS 16.4+, Chrome/Edge 111+, Firefox 114+ (Vite 8 default build targets). Landscape orientation is recommended on phones; portrait shows a rotate prompt but stays playable in menus.
 
@@ -893,6 +933,12 @@ Storage rules: 3 slots, key per slot plus a `.bak` copy of the previous good sav
 - M7: PWA manifest + service worker (precache the whole build) → installable, truly offline, save exempt from Safari eviction. Since R21 the menu offers an install button where the browser allows it, and the Selection card goes out through the phone's share sheet.
 - Since R21 an interrupted session resumes on the planet (within 24 h, with no jump and no fuel), so a phone call no longer costs the landing.
 - Since R20 a "sharp" option lets `medium` render at up to DPR 2, with the governor stepping it back.
+- Since R22 an **Android app** (SPEC-060) carries the game in its APK.
+  - It runs locked to landscape by the OS, immersive, and with the screen kept on.
+  - Back is native and minimizes at the menu root.
+  - Leaving the foreground pauses and saves.
+  - It needs no service worker and no network permission.
+  - It is sideloaded as a signed APK. Save codes move a save between the browser and the app.
 
 ---
 
@@ -916,6 +962,7 @@ Storage rules: 3 slots, key per slot plus a `.bak` copy of the previous good sav
 | M7h | The story listens (R19): conditional lines and placeholders; a clue catalogue with a main-path echo per chapter, the salvager's Notes and Command's rating; the Warden and ARIA name what the player found; Ines, her letters, the keepsake, the medical frame and the memory question; running, stamina and noise, and a Wurm that hunts by vibration; the films retaken — the visored card, the unmaking of the photographs, Ines at the fence and in the grow room (SPEC-048…SPEC-051) | A main-path-only player meets one echo per chapter and hears ARIA's confession name at least the ridge-camp cover; the chapter-4 notice names a clue the player found; Ines's letters arrive after each interlude and only her lines use contractions; a walker leaves the Wurm's burrow unhurt and a runner is caught; no card in any film shows the salvager's face; checked on desktop and the reference phone; tag `m7h` |
 | M7i | The world (R20): props in their own colours and shading, on every landing, culled to the screen; save v3; real trees, groves, orchards, dressing clusters, landmarks, ground cover and a ground pass; Eden too perfect; the underground with a flashlight, packs, caches and the machine room; five kinds of puzzle; vault tokens, relics, blueprints, swatches and archive shards (SPEC-046, SPEC-047, SPEC-052…SPEC-056) | A stranger names each biome from a screenshot without the HUD; Thessaly's grove frame stays ≤ 80 scene draws and ≤ 130 k triangles on `medium`; every planet has a reachable descent and a watertight cave; every puzzle kind is solved by keyboard, mouse and touch, and a bypass opens after 90 s; a claimed vault pays nothing a second time; the completionist's tokens read 1,279 and SPEC-039's sink still holds; checked on desktop and the reference phone; tag `m7i` |
 | M7j | The next instance (R21): remains; Iteration 63 with the archive, the lineage, containment steps and the world that remembers; the endings' payoff; resume on the planet; a story difficulty; commendations and the evaluation log; the Selection card; link previews and install (SPEC-057…SPEC-059) | A death's loss is recovered from the remains, and a second death loses them; a finished save begins instance/63 in the same slot and restores 62 from the archive; the Vetra log in run 2 names the player's own run; a phone session interrupted on a planet resumes there; the Selection card shares a PNG from a phone; no record is kept in a `?debug` or story session; checked on desktop and the reference phone; tag `m7j` |
+| M7k | The Android app (R22): the game bundled in a Capacitor shell, a platform port with a web and an Android adapter, native Back, keep-awake, immersive landscape, no worker and no network permission, a signed sideload APK built locally and in CI (SPEC-060) | A release APK installs on a 360-dp Android phone in airplane mode and plays `c1_m1` from first launch; Back minimizes at the menu root; Home mid-fight pauses and saves; a later APK with the same key updates in place with the saves intact; the web build is unchanged and carries no Capacitor code; tag `m7k` |
 | M7 | Polish: mobile tuning, quality presets, balancing pass, PWA/offline, storage persistence, reduce-motion, save migration harness | 30+ fps on mid-tier phone; installable; full manual checklist green |
 
 ---
@@ -957,6 +1004,8 @@ Storage rules: 3 slots, key per slot plus a `.bak` copy of the previous good sav
 | The precache fills up (R19–R21) | This wave's allotment: world art ≤ 1.0 MB, film retakes ≤ 0.7 MB, sounds ≤ 0.1 MB, item pictures ≤ 0.1 MB — about 23.5 of 25 MB; link-preview images and screenshots are kept out of the precache |
 | A puzzle blocks a player (R20) | Hints are free, a bypass opens after 90 s of open time or 3 hints, and no puzzle gates a mission, a planet or a flag a requirement reads |
 | Records and shared cards are forged or spoil the twist (R21) | Nothing is recorded in a `?debug`, story or service session; production builds carry no debug strip and ignore `?scene=`; before an ending the Selection card shows only what the prologue already shows |
+| The Android WebView behaves differently from Chrome (R22) | One renderer and one codebase: the app runs the same build in the same Chromium engine. A port isolates the five browser APIs the WebView lacks or restricts, and an architecture test keeps them there. An emulator smoke and a phone checklist gate the milestone, and a WebView below Chrome 111 gets a notice instead of a black screen |
+| A sideloaded app loses its saves (R22) | The origin is pinned to `https://localhost`. One release key updates every build in place. Settings warns that uninstalling deletes saves, and save codes move them |
 
 ---
 
@@ -1055,6 +1104,13 @@ Each entry names the owning spec. "Casual" = casual difficulty.
 | E95 | An escaped save is continued | Its slot reads `disconnected`; the station plays the Warden's "restored from the last checkpoint" once, and the run goes on in free roam | SPEC-058 |
 | E96 | A session is interrupted on a planet (a call, an OS kill, Save & Quit) | Continue within 24 h lands at that planet's pad with no jump and no fuel, timed stages restarting (E19); after 24 h a "previously" card comes first | SPEC-059 |
 | E97 | A best time, commendation or share stat would be recorded in a `?debug`, story or service session | Nothing is recorded, and the share card says "story mode" where it applies | SPEC-059 |
+| E98 | System Back at the menu root in the Android app, or before the first scene | The app minimizes and keeps its state; elsewhere Back routes exactly as Escape (E66) | SPEC-060 |
+| E99 | The Android app leaves the foreground mid-play | Play pauses, audio suspends and the save is written at once; the pause menu is up on return | SPEC-060 |
+| E100 | The phone's WebView is older than Chrome 111 | A static notice names the version found and the update to make; the game never starts half-loaded | SPEC-060 |
+| E101 | An APK signed with another key is installed over the app | Android refuses; the docs say to copy save codes, uninstall, reinstall and import | SPEC-060 |
+| E102 | A save moves between the browser and the app | Different origins never share storage; an export code carries it either way (E9), and E73 still refuses a newer save | SPEC-060 |
+| E103 | The Android app is uninstalled | Its saves go with it (Auto Backup off); Settings says so beside Copy code | SPEC-060 |
+| E104 | An older APK is installed over a newer one | Android refuses the downgrade (`versionCode` is the commit count) | SPEC-060 |
 
 ---
 
