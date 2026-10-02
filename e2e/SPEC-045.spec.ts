@@ -215,7 +215,8 @@ test('1. a whole line holds by its length, counted from when it is whole (§4.1)
 
 test('2. under Manual a non-modal line waits, says so, and Enter moves it on (§4.1)', async ({ page }) => {
   test.setTimeout(150_000);
-  await prime(page, { dialogueSpeed: 'manual' });
+  // The line lands whole at once: this case is about the wait, not the typing.
+  await prime(page, { dialogueSpeed: 'manual', typewriter: false });
   await start(page, URL);
   await bind(page);
   await station(page);
