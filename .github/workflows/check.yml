@@ -65,19 +65,10 @@ jobs:
       matrix:
         # Five parts, because the Free plan runs at most five macOS jobs at
         # once: a sixth would queue behind the others and double the wall time.
-        part: ['long', '1/4', '2/4', '3/4', '4/4']
+        part: ['1/5', '2/5', '3/5', '4/5', '5/5']
     env:
       E2E_CHANNEL: chromium
       E2E_REQUIRE_GPU: '1'
-      # Test groups that are long in *game* time, which no GPU shortens:
-      # SPEC-011 runs its six tests in one worker (`mode: 'default'`) and
-      # SPEC-012-missions is one test, about three minutes each. `--shard`
-      # splits by test count, never by time, and they sort side by side, so
-      # `long` runs the two of them together — one worker each — and every
-      # other test, every future e2e file included, goes to the numbered parts.
-      # `--grep` and `--grep-invert` on this one list keep the two sets
-      # complementary, so coverage never depends on the counts.
-      LONG: 'SPEC-011\.spec\.ts|SPEC-012-missions\.spec\.ts'
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-node@v7
@@ -88,31 +79,35 @@ jobs:
       # The full build only: `E2E_CHANNEL=chromium` never launches the shell.
       # The browser revision follows the pinned @playwright/test.
       - run: npx playwright install --no-shell chromium
+      # The parts are planned by time, not count (scripts/e2e/shard.mjs).
+      # `--shard` split by count, and the budget had to grow every few specs
+      # with no test failing: 8 → 10 minutes (#57, #60), 10 → 13 (#66, #67),
+      # each time because one part had drawn the slow scene tests while another
+      # sat idle — the part that ran only SPEC-011 and SPEC-012-missions used
+      # four of its nine minutes. Every part now plans the whole suite from
+      # `scripts/e2e/timings.json` and the same commit, so the five agree
+      # without a planning job (no `needs:`, see above), and runs its own share
+      # with `--test-list`. The plan is printed at the top of the step, and a
+      # warning is raised when the longest part plans past three quarters of
+      # the budget or a fifth of the tests have no timing yet.
+      #
       # The retry is CI's alone: playwright.config.ts keeps `retries: 0` for
       # the factory's gate, which runs its own re-run protocol, and without one
       # here a contention flake the gate forgave would revert a good merge. The
       # global timeout fails a part that overruns with its unfinished tests
-      # named, early enough for the watcher to see it. `--shard` balances the
-      # parts by count, not time: by SPEC-038 the numbered parts ran six to
-      # eight minutes against an eight-minute budget, and a spec that added
-      # eleven tests moved enough scene tests into one part to overrun it with
-      # none failing (#57, reverted). Ten minutes held until SPEC-043 (#66),
-      # whose parts ran 8.2–10 minutes and overran 3/4 with 128 passed and
-      # none failing. So a numbered part has thirteen minutes, a retry
-      # included; `long` about five, but SPEC-011's elite count is a hunt that
-      # can take minutes by itself, and one retry of it has to fit. A longer
-      # budget needs a longer watcher window (revertWatchMinutes, above):
-      # queueing, setup and this step's fifteen minutes must end inside it.
+      # named, early enough for the watcher to see it. Thirteen minutes leaves
+      # a part planned at seven room for its retries, SPEC-012-missions' three
+      # and a half included. A longer budget needs a longer watcher window
+      # (revertWatchMinutes, above): queueing, setup and this step's fifteen
+      # minutes must end inside it.
       - name: playwright test ${{ matrix.part }}
         timeout-minutes: 15
         env:
           PART: ${{ matrix.part }}
+          PLAYWRIGHT_JSON_OUTPUT_FILE: e2e-report.json
         run: |
-          case "$PART" in
-            long) select=(--grep "$LONG") budget=540000 ;;
-            *) select=(--grep-invert "$LONG" --shard="$PART") budget=780000 ;;
-          esac
-          npx playwright test "${select[@]}" --workers=2 --retries=1 --global-timeout="$budget" --add-reporter=github
+          node scripts/e2e/shard.mjs --part "$PART" --out "$RUNNER_TEMP/e2e-part.txt" --budget-ms 780000
+          npx playwright test --test-list "$RUNNER_TEMP/e2e-part.txt" --workers=2 --retries=1 --global-timeout=780000 --add-reporter=github,json
       # The traces of whatever failed (trace: 'retain-on-failure').
       - if: failure()
         uses: actions/upload-artifact@v7
@@ -120,4 +115,13 @@ jobs:
           name: e2e-test-results-${{ strategy.job-index }}
           path: test-results/
           retention-days: 7
+          if-no-files-found: ignore
+      # Every test's time, green or red, for refreshing the timings the parts
+      # are planned with (scripts/e2e/timings.mjs).
+      - if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: e2e-report-${{ strategy.job-index }}
+          path: e2e-report.json
+          retention-days: 30
           if-no-files-found: ignore
