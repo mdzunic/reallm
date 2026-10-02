@@ -25,12 +25,33 @@
 // is planned at the median of its file's known tests, else of the whole suite,
 // so a stale file degrades the balance slowly and never drops a test.
 import { spawnSync } from 'node:child_process';
-import { readFileSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
 export const REPO = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
 export const TIMINGS = join(REPO, 'scripts', 'e2e', 'timings.json');
+
+/**
+ * The suite as `playwright test --list --reporter=json` reports it. The JSON
+ * goes to a file of its own: CI sets PLAYWRIGHT_JSON_OUTPUT_FILE for the run's
+ * report, and with it set the reporter writes there and stdout is the plain
+ * listing — which this used to parse, and failed on, in every part.
+ */
+export function listSuite() {
+  const dir = mkdtempSync(join(tmpdir(), 'e2e-list-'));
+  try {
+    const file = join(dir, 'list.json');
+    const env = { ...process.env, PLAYWRIGHT_JSON_OUTPUT_FILE: file };
+    delete env.PLAYWRIGHT_JSON_OUTPUT_NAME;
+    const listed = spawnSync('npx', ['playwright', 'test', '--list', '--reporter=json'], { cwd: REPO, env, encoding: 'utf8' });
+    if (listed.status !== 0) throw new Error(`playwright test --list failed:\n${listed.stderr}`);
+    return JSON.parse(readFileSync(file, 'utf8'));
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+}
 
 /** `[project] › file › title › …` — the line `--test-list` matches, and the timings key. */
 export function testKey(project, file, titles) {
@@ -249,13 +270,7 @@ function parseArgs(argv) {
 
 async function main() {
   const args = parseArgs(process.argv.slice(2));
-  const listed = spawnSync('npx', ['playwright', 'test', '--list', '--reporter=json'], {
-    cwd: REPO,
-    encoding: 'utf8',
-    maxBuffer: 64 * 1024 * 1024,
-  });
-  if (listed.status !== 0) throw new Error(`playwright test --list failed:\n${listed.stderr}`);
-  const report = JSON.parse(listed.stdout);
+  const report = listSuite();
   const tests = reportTests(report);
 
   const config = (await import(pathToFileURL(join(REPO, 'playwright.config.ts')).href)).default;
