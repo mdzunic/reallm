@@ -727,7 +727,8 @@ test('9. levels: the toast stays 4 s, the label glows, the XP bar and the panel 
     (window as unknown as { __spec042: typeof rec }).__spec042 = rec;
     const check = (): void => {
       const now = performance.now();
-      const toast = [...document.querySelectorAll('.toast')].some((node) => node.textContent?.startsWith('Level 2 — ') === true);
+      // SPEC-045 §4.5: a good toast's text starts with its ✓.
+      const toast = [...document.querySelectorAll('.toast')].some((node) => node.textContent?.startsWith('✓Level 2 — ') === true);
       if (toast && rec.toastUp === undefined) rec.toastUp = now;
       if (!toast && rec.toastUp !== undefined && rec.toastDown === undefined) rec.toastDown = now;
       const glow = document.querySelector('[data-testid="hud"] .hud-level')?.classList.contains('is-levelled') === true;
