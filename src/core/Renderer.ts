@@ -17,6 +17,7 @@ import { PostChain } from '@/core/PostChain';
 import {
   applyLook,
   DEFAULT_LOOK,
+  effectiveExposure,
   postPlanFor,
   QUALITY,
   resolvePostPlan,
@@ -65,6 +66,12 @@ export interface Renderer {
   render(scene: Object3D, camera: Camera): void;
   /** Merged into the current look; exposure applies on both paths (SPEC-017 §4.2). */
   setLook(look: Partial<Look>): void;
+  /**
+   * SPEC-045 §4.9: the player's brightness, −0.3…0.3. From now on the look's
+   * exposure is applied × (1 + brightness) (`effectiveExposure`), on both
+   * paths and the overlay pass, and a later `setLook` keeps it.
+   */
+  setBrightness(brightness: number): void;
   /**
    * A second, scissored pass straight to the canvas after `render()` — the
    * creation portrait (17-e). `box` is in CSS px; the overlay is tone-mapped by
@@ -162,6 +169,8 @@ class CanvasRenderer implements Renderer {
   /** Rendered frames; the grade's only time source, and reset on a loss (17-c). */
   #frame = 0;
   readonly #look: Look = { ...DEFAULT_LOOK, tint: [...DEFAULT_LOOK.tint] };
+  /** SPEC-045 §4.9: the player's brightness, kept across looks; `effectiveExposure` clamps it. */
+  #brightness = 0;
   /** Set by every resize signal; consumed at the start of the next render step. */
   #pending = true;
   /** SPEC-040 §4.3: the governor's session-only dpr cap; `null` when uncapped. */
@@ -300,10 +309,24 @@ class CanvasRenderer implements Renderer {
 
   setLook(look: Partial<Look>): void {
     applyLook(this.#look, look);
-    // Exposure is the one grade field three itself owns, so it applies on the
-    // direct path as well as through the chain.
-    this.gl.toneMappingExposure = this.#look.exposure;
+    this.#applyExposure();
     this.#chain?.setLook(this.#look);
+  }
+
+  setBrightness(brightness: number): void {
+    this.#brightness = brightness;
+    this.#applyExposure();
+  }
+
+  /**
+   * Exposure is the one grade field three itself owns, so it applies on the
+   * direct path as well as through the chain, whose `OutputPass` reads it every
+   * frame — and on the overlay pass, whose materials tone-map with it too, so
+   * the creation portrait brightens with the scene (45-p). SPEC-045 §4.9 scales
+   * the look's value by the player's brightness.
+   */
+  #applyExposure(): void {
+    this.gl.toneMappingExposure = effectiveExposure(this.#look.exposure, this.#brightness);
   }
 
   renderOverlay(scene: Object3D, camera: Camera, box: { x: number; y: number; w: number; h: number }): void {

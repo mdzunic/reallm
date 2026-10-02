@@ -13,6 +13,7 @@ import { describe, expect, it } from 'vitest';
 // is asserted in `benchmark.test.ts`, which already needs `three` to run.
 import {
   createGovernorState,
+  effectiveExposure,
   GOVERNOR_COOLDOWN_S,
   GOVERNOR_DPR_STEP,
   GOVERNOR_GRACE_S,
@@ -28,6 +29,7 @@ import {
   type QualityPreset,
   type QualitySettings,
 } from '@/core/Quality';
+import { BRIGHTNESS_LIMIT } from '@/core/Settings';
 
 /** Reference §3, transcribed. Fifteen fields, three presets, no arithmetic. */
 const TABLE: Record<QualityPreset, QualitySettings> = {
@@ -375,5 +377,37 @@ describe('governorStep (SPEC-040 §4.3, E68)', () => {
     // Grace to 21, over to 31 — but the cooldown holds until 35.
     const steps = drive(state, 16, 40, { preset: 'medium' });
     expect(steps.map((s) => s.at)).toEqual([35]);
+  });
+});
+
+describe('effectiveExposure (SPEC-045 §4.9, AC-37)', () => {
+  it('multiplies the look by 1 + brightness', () => {
+    expect(effectiveExposure(1.05, 0.3)).toBeCloseTo(1.365, 10);
+    expect(effectiveExposure(1, -0.3)).toBeCloseTo(0.7, 10);
+    expect(effectiveExposure(1, 0)).toBe(1);
+    expect(effectiveExposure(1.05, 0)).toBe(1.05);
+    // 45-w: −30 % is 0.7 × whatever the scene's own look asks for.
+    for (const exposure of [0.6, 0.85, 1, 1.05, 1.4]) {
+      expect(effectiveExposure(exposure, -0.3)).toBeCloseTo(exposure * 0.7, 10);
+    }
+  });
+
+  it('clamps the brightness to the store\'s ±BRIGHTNESS_LIMIT', () => {
+    expect(effectiveExposure(1, 0.9)).toBeCloseTo(1.3, 10);
+    expect(effectiveExposure(1, -0.9)).toBeCloseTo(0.7, 10);
+    expect(effectiveExposure(1, Infinity)).toBeCloseTo(1.3, 10);
+    expect(effectiveExposure(1, -Infinity)).toBeCloseTo(0.7, 10);
+    // The module imports nothing, so its limit is written out; this holds it
+    // to the one `core/Settings.ts` clamps a stored brightness to.
+    expect(effectiveExposure(1, BRIGHTNESS_LIMIT + 0.5)).toBeCloseTo(1 + BRIGHTNESS_LIMIT, 10);
+    expect(effectiveExposure(1, -BRIGHTNESS_LIMIT - 0.5)).toBeCloseTo(1 - BRIGHTNESS_LIMIT, 10);
+  });
+
+  it('reads a NaN brightness as 0, and never goes below 0', () => {
+    expect(effectiveExposure(1, Number.NaN)).toBe(1);
+    expect(effectiveExposure(1.05, Number.NaN)).toBe(1.05);
+    expect(effectiveExposure(0, 0.3)).toBe(0);
+    expect(effectiveExposure(-1, 0.3)).toBe(0);
+    expect(effectiveExposure(Number.NaN, 0)).toBe(0);
   });
 });

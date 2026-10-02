@@ -379,3 +379,24 @@ export function applyLook(target: Look, partial: Partial<Look>): void {
     target.tint[2] = atLeastZero(tint[2]);
   }
 }
+
+// ---------------------------------------------- SPEC-045 §4.9: brightness
+
+/**
+ * How far the player's brightness moves the exposure either way: the ±0.3 of
+ * `core/Settings.ts`'s `BRIGHTNESS_LIMIT`, written out again because this
+ * module imports nothing (SPEC-015 AC-12). `tests/core/quality.test.ts` holds
+ * the two to the same number.
+ */
+const BRIGHTNESS_MAX = 0.3;
+
+/**
+ * SPEC-045 §4.9: the exposure three applies — a scene's own `exposure` times
+ * `1 + brightness`, with the brightness clamped to ±0.3, a `NaN` read as 0, and
+ * the result never below 0. A multiplier keeps every scene's grade relative to
+ * itself: −30 % in Ferrum's dark look is 0.7 × Ferrum's exposure (45-w).
+ */
+export function effectiveExposure(exposure: number, brightness: number): number {
+  const b = Number.isNaN(brightness) ? 0 : Math.min(BRIGHTNESS_MAX, Math.max(-BRIGHTNESS_MAX, brightness));
+  return atLeastZero(exposure * (1 + b));
+}
