@@ -157,6 +157,19 @@ const MODALS: { readonly root: HTMLElement }[] = [];
 const MODAL_ATTRIBUTES = ['role', 'aria-modal', 'aria-label', 'tabindex'] as const;
 
 /**
+ * SPEC-044 §4.3: the root of the top open modal, or `null` with none open —
+ * the layer a key belongs to. A root taken out of the page without its close
+ * (a scene torn down under an ending card) is dropped first: it holds nothing
+ * any more.
+ */
+export function topModal(): HTMLElement | null {
+  for (let at = MODALS.length - 1; at >= 0; at--) {
+    if (!(MODALS[at] as { readonly root: HTMLElement }).root.isConnected) MODALS.splice(at, 1);
+  }
+  return MODALS[MODALS.length - 1]?.root ?? null;
+}
+
+/**
  * SPEC-044 §4.3, §2: a Tab trap rather than `inert` — the toast rack's live
  * region sits beside the overlays, and `inert` on their layer would mute it
  * and disable a nested sheet. Tab and Shift+Tab cycle the top modal's shown
@@ -164,14 +177,9 @@ const MODAL_ATTRIBUTES = ['role', 'aria-modal', 'aria-label', 'tabindex'] as con
  */
 function trapTab(event: KeyboardEvent): void {
   if (event.key !== 'Tab' || event.altKey || event.ctrlKey || event.metaKey) return;
-  // A root taken out of the page without its close (a scene torn down under an
-  // ending card) traps nothing any more.
-  for (let at = MODALS.length - 1; at >= 0; at--) {
-    if (!(MODALS[at] as { readonly root: HTMLElement }).root.isConnected) MODALS.splice(at, 1);
-  }
+  const root = topModal();
   if (MODALS.length === 0) document.removeEventListener('keydown', trapTab, true);
-  const root = MODALS[MODALS.length - 1]?.root;
-  if (root === undefined) return;
+  if (root === null) return;
   event.preventDefault();
   const list = shownFocusablesIn(root);
   const active = document.activeElement;

@@ -20,7 +20,7 @@ import { Progression } from '@/systems/Progression';
 import { applySupplies, EMPTY_CODE, pushCode } from '@/systems/Service';
 import { NEWER_SAVE_TEXT, slotLine } from '@/systems/UiHelpers';
 import { confirmSheet } from '@/ui/ConfirmSheet';
-import { el, h, keepFocus, testId } from '@/ui/dom';
+import { el, h, keepFocus, testId, topModal } from '@/ui/dom';
 import { SavePanel } from '@/ui/SavePanel';
 import { SettingsPanel } from '@/ui/SettingsPanel';
 import type { Look } from '@/core/Quality';
@@ -748,9 +748,12 @@ export class MenuScene extends UiScene<'menu'> {
   #onArrows(event: KeyboardEvent): void {
     if (event.key !== 'ArrowDown' && event.key !== 'ArrowUp') return;
     // The import-code textarea keeps its caret keys, and a confirm sheet
-    // keeps its focus: neither may lose arrows to the button walk.
+    // keeps its focus: neither may lose arrows to the button walk. Nor may any
+    // open modal — the settings panel over the menu takes focus now, and an
+    // arrow must not walk it out to the buttons behind (SPEC-044 §4.3).
     const target = event.target;
     if (target instanceof Element && target.closest('textarea, input, select, .sheet-backdrop') !== null) return;
+    if (topModal() !== null) return;
     const root = this.#root;
     if (root === null) return;
     const buttons = [...root.querySelectorAll<HTMLButtonElement>('button:not(:disabled)')];

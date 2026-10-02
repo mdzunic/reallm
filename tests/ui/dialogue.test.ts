@@ -123,6 +123,12 @@ describe('the dialogue keys in the layer (SPEC-044 §4.1)', () => {
     );
   });
 
+  it('a modal above the line keeps the keys: the press is judged only while no other modal is on top', () => {
+    expect(source).toMatch(
+      /if \(ownedElsewhere\(event\.target, this\.#root\)\) return;[\s\S]*?const top = topModal\(\);\s*if \(top !== null && top !== this\.#root\) return;\s*[\s\S]*?event\.preventDefault\(\);/,
+    );
+  });
+
   it('a choice keeps its digits and ignores the advance keys', () => {
     expect(source).toMatch(/if \(job\.choices !== undefined\) \{[\s\S]*?this\.#choose\(index\);\s*return;\s*\}/);
   });

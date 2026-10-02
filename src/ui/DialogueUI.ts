@@ -21,7 +21,7 @@ import type { EmitArgs, GameEvents } from '@/core/Events';
 import type { Unsubscribe } from '@/core/Events';
 import type { Scheme } from '@/core/Input';
 import { DIALOGUE, type DialogueDef, type DialogueId, type SpeakerId } from '@/data/index';
-import { el, h, openModal, testId, uiLayers, type UiRoot } from '@/ui/dom';
+import { el, h, openModal, testId, topModal, uiLayers, type UiRoot } from '@/ui/dom';
 
 // The schema-typed view of the table: on the `as const` literal types an absent
 // optional — a dialogue with no `modal` — is not a property at all (the same
@@ -504,6 +504,10 @@ export class DialogueUI {
     const since = (performance.now() - this.#lineShownAt) / 1000;
     if (!advanceAccepted(event.code, event.repeat, job.modal, since)) return;
     if (ownedElsewhere(event.target, this.#root)) return;
+    // §4.3: a modal above the line — the pause menu over a transmission, the
+    // pad terminal over a scav's remark — has the keys, wherever its focus sits.
+    const top = topModal();
+    if (top !== null && top !== this.#root) return;
     event.preventDefault();
     // The press is the line's: it must not also reach the gameplay keys behind
     // it once a last modal line hands the input back (E at the pad would open

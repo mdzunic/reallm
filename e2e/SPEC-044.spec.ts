@@ -312,6 +312,38 @@ test('1b. Space, E and F advance a modal line too; a held key (a repeat) and a p
   for (const press of fresh) expect(press.played, `${press.code} stays the line's`).toBe(false);
 });
 
+test('1c. a modal above a line has the keys: Enter and E in the pause menu leave the transmission alone', async ({ page }) => {
+  await start(page, DEBUG_URL);
+  await prepare(page, {});
+  await land(page);
+  const opened = await playWatched(page, 'intro_command');
+  expect(opened.modal).toBe('true');
+  expect(opened.focused).toBe('dialogue');
+  await page.waitForTimeout(350);
+  // A story line is no back-stack entry, so Escape pauses over it.
+  await page.keyboard.press('Escape');
+  await expect(page.getByTestId('pause-menu')).toBeVisible();
+  expect(await focused(page)).toBe('pause-resume');
+  // Focus on the pause menu itself, off its buttons, as a click on its empty
+  // space leaves it: the keys still belong to the pause menu, not the line.
+  await page.evaluate(() => document.querySelector('[data-testid="pause-menu"]')?.closest<HTMLElement>('[aria-modal="true"]')?.focus());
+  await page.keyboard.press('Enter');
+  await page.keyboard.press('KeyE');
+  await expect(page.getByTestId('pause-menu')).toBeVisible();
+  const paused = (await linePresses(page)).filter((press) => press.code === 'Enter' || press.code === 'KeyE');
+  expect(paused.map((press) => press.code)).toEqual(['Enter', 'KeyE']);
+  for (const press of paused) expect(press.after, `${press.code} under the pause menu`).toEqual(press.before);
+
+  // Resumed, focus is back on the line, and Enter reads it again.
+  await page.keyboard.press('Escape');
+  await expect(page.getByTestId('pause-menu')).toBeHidden();
+  expect(await focused(page)).toBe('dialogue');
+  await page.keyboard.press('Enter');
+  const resumed = (await linePresses(page)).filter((press) => press.code === 'Enter').slice(1);
+  expect(resumed).toHaveLength(1);
+  expectSkips(resumed, INTRO_LINES, 0);
+});
+
 // -------------------------------------------------------- 2: non-modal line
 
 test('2. a non-modal line on the surface: Space keeps its gameplay meaning, Enter advances', async ({ page }) => {
@@ -686,6 +718,28 @@ test('9. Settings opens the controls sheet; the pause menu’s Controls shows th
   await page.keyboard.press('Enter');
   await expect(page.getByTestId('pause-sheet')).toBeVisible();
   expect(await rows('[data-testid="pause-sheet"]')).toEqual(fromSettings);
+});
+
+test('9b. on the menu the settings panel keeps the arrow keys; closed, focus is back on Settings', async ({ page }) => {
+  await start(page);
+  await settle(page, 'menu');
+  await page.getByTestId('menu-settings').focus();
+  await page.keyboard.press('Enter');
+  const panel = page.getByTestId('settings-panel');
+  await expect(panel).toBeVisible();
+  expect(await focused(page)).toBe('settings-close');
+  await expect(panel).toHaveAttribute('aria-modal', 'true');
+  // The menu walks its buttons on the arrows; the modal above it is not walked out of.
+  for (const key of ['ArrowDown', 'ArrowDown', 'ArrowUp']) {
+    await page.keyboard.press(key);
+    expect(await page.evaluate(() => document.querySelector('[data-testid="settings-panel"]')?.contains(document.activeElement) === true), `${key} stays inside Settings`).toBe(true);
+  }
+  await page.keyboard.press('Escape');
+  await expect(panel).toBeHidden();
+  expect(await focused(page)).toBe('menu-settings');
+  // With the panel closed, the arrows walk the menu again.
+  await page.keyboard.press('ArrowDown');
+  expect(await focused(page)).not.toBe('menu-settings');
 });
 
 // --------------------------------------------------------- 10: Save & Quit
