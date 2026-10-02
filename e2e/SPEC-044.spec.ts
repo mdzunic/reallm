@@ -20,6 +20,13 @@ const CREATION = {
 const URL = '/?seed=123';
 const DEBUG_URL = '/?debug&seed=123';
 
+/** `intro_command` as the panel shows it (`data/dialogue.ts`): a modal transmission of three lines. */
+const INTRO_LINES = [
+  { speaker: 'Earth Command', text: 'Earth Command to salvager. You are cleared for the Cinder-4 approach.' },
+  { speaker: 'Earth Command', text: 'Survey, extract, report. Answer one question: can we live out there.' },
+  { speaker: 'ARIA', text: 'I am ARIA. I fly the ship and I keep you honest. Try not to make that hard.' },
+];
+
 /** What `prepare` writes into the fresh slot-0 save before anything is entered. */
 interface Prep {
   active?: string[];
@@ -101,6 +108,137 @@ async function slotKeys(page: Page): Promise<string[]> {
   return page.evaluate(() => Object.keys(localStorage).filter((key) => key.startsWith('reallm:slot:')).sort());
 }
 
+/** The dialogue panel as the page shows it: who speaks, and how much of the line is out. */
+interface LineState {
+  readonly shown: boolean;
+  readonly speaker: string;
+  readonly text: string;
+}
+
+/**
+ * One keydown: the line as the press found it, and as DialogueUI's own
+ * listener left it; `played` when the press went on to the game's keyboard
+ * driver (on `window`, after the line's listener) and was swallowed there as a
+ * bound key — the game took it as play.
+ */
+interface LinePress {
+  readonly code: string;
+  readonly repeat: boolean;
+  readonly before: LineState;
+  readonly after: LineState;
+  readonly played: boolean;
+}
+
+/** What `playWatched` saw in the task that opened the dialogue. */
+interface Opened {
+  readonly role: string | null;
+  readonly modal: string | null;
+  readonly focused: string | null;
+  readonly cue: boolean;
+  readonly line: LineState;
+}
+
+/**
+ * Plays `id` and, in the same task, starts logging every keydown with the line
+ * as the press found it (a capture listener on `window`, before anything else)
+ * and as DialogueUI left it (a `document` listener added after DialogueUI's
+ * own, so it runs straight after it in the same dispatch — even for a press
+ * the line stopped). The judgement is read in the page, at the press: a round
+ * trip on a loaded container can take half a second, and a line types for
+ * about 1.7 s while a non-modal one moves on by itself 6 s after it opens
+ * (`AUTO_ADVANCE_MS`), so what the test reads afterwards could be the line's
+ * own doing rather than the key's.
+ */
+async function playWatched(page: Page, id: string, options: { graceKey?: string } = {}): Promise<Opened> {
+  return page.evaluate(
+    ({ dialogue, graceKey }) => {
+      window.__reallm.playDialogue(dialogue);
+      const panel = document.querySelector<HTMLElement>('[data-testid="dialogue"]');
+      if (panel === null) throw new Error('no dialogue panel');
+      type State = { shown: boolean; speaker: string; text: string };
+      const read = (): State => ({
+        shown: !panel.classList.contains('is-hidden'),
+        speaker: panel.querySelector('.dialogue-speaker')?.textContent ?? '',
+        text: panel.querySelector('.dialogue-text')?.textContent ?? '',
+      });
+      const log: { code: string; repeat: boolean; before: State; after: State; played: boolean }[] = [];
+      window.addEventListener(
+        'keydown',
+        (event) => {
+          const now = read();
+          log.push({ code: event.code, repeat: event.repeat, before: now, after: now, played: false });
+        },
+        true,
+      );
+      document.addEventListener('keydown', () => {
+        const last = log[log.length - 1];
+        if (last !== undefined) last.after = read();
+      });
+      // Bubble on `window`, added long after the keyboard driver's own listener
+      // there; a press the line took (and stopped) never gets this far.
+      window.addEventListener('keydown', (event) => {
+        const last = log[log.length - 1];
+        if (last !== undefined) last.played = event.defaultPrevented;
+      });
+      (window as unknown as { __linePresses: typeof log }).__linePresses = log;
+      const opened = {
+        role: panel.getAttribute('role'),
+        modal: panel.getAttribute('aria-modal'),
+        focused: (document.activeElement as HTMLElement | null)?.dataset['testid'] ?? null,
+        cue: panel.querySelector<HTMLElement>('[data-testid="dialogue-next"]')?.hidden === false,
+        line: read(),
+      };
+      // A press in the line's first moment — dispatched in the task that opened
+      // it, so it is surely inside the 0.3 s grace (44-a).
+      if (graceKey !== undefined) {
+        const key = graceKey === 'Space' ? ' ' : graceKey;
+        (document.activeElement ?? document.body).dispatchEvent(new KeyboardEvent('keydown', { key, code: graceKey, bubbles: true, cancelable: true }));
+      }
+      return opened;
+    },
+    { dialogue: id, graceKey: options.graceKey },
+  );
+}
+
+/** Every keydown `playWatched` has logged so far. */
+async function linePresses(page: Page): Promise<LinePress[]> {
+  return page.evaluate(() => (window as unknown as { __linePresses: LinePress[] }).__linePresses);
+}
+
+/**
+ * Judges presses against a dialogue's lines, from `start`: each must do what
+ * one `skip()` does to the line it found (§4.1, SPEC-014 AC-72) — fill a line
+ * still typing, or move a complete one on to the next (the panel hiding after
+ * the last). Returns the index of the line the presses left up.
+ */
+function expectSkips(presses: readonly LinePress[], lines: readonly { speaker: string; text: string }[], start: number): number {
+  let at = start;
+  for (const [n, press] of presses.entries()) {
+    const line = lines[at];
+    if (line === undefined) {
+      // The dialogue has ended; a press after it has no line to act on.
+      expect(press.before.shown, `press ${n + 1} (${press.code}) came after the end`).toBe(false);
+      continue;
+    }
+    expect(press.before.speaker, `press ${n + 1} (${press.code}) found line ${at + 1}`).toBe(line.speaker);
+    if (press.before.text !== line.text) {
+      expect(line.text.startsWith(press.before.text), `press ${n + 1} found line ${at + 1} typing`).toBe(true);
+      expect(press.after, `press ${n + 1} (${press.code}) filled line ${at + 1}`).toEqual({ shown: true, speaker: line.speaker, text: line.text });
+      continue;
+    }
+    at++;
+    const next = lines[at];
+    if (next === undefined) {
+      expect(press.after.shown, `press ${n + 1} (${press.code}) ended the dialogue`).toBe(false);
+    } else {
+      expect(press.after.speaker, `press ${n + 1} (${press.code}) moved on to line ${at + 1}`).toBe(next.speaker);
+      expect(press.after.text, `line ${at + 1} starts typing`).not.toBe(line.text);
+      expect(next.text.startsWith(press.after.text), `line ${at + 1} starts typing`).toBe(true);
+    }
+  }
+  return at;
+}
+
 // ------------------------------------------------------------ 1: modal line
 
 test('1. a modal line is read by keyboard: ▸ Enter once complete, Enter advances, focus comes back', async ({ page }) => {
@@ -146,39 +284,32 @@ test('1b. Space, E and F advance a modal line too; a held key (a repeat) and a p
   await start(page, URL);
   await prepare(page, {});
   await station(page);
-  const dialogue = page.getByTestId('dialogue');
-  const text = dialogue.locator('.dialogue-text');
-  const first = 'Earth Command to salvager. You are cleared for the Cinder-4 approach.';
-
-  // Inside the grace: a press in the line's first moment — dispatched in the
-  // same task that opens it, so it is surely under 0.3 s — does nothing, not
-  // even a fill (44-a).
-  await page.evaluate(() => {
-    window.__reallm.playDialogue('intro_command');
-    document.activeElement?.dispatchEvent(new KeyboardEvent('keydown', { key: ' ', code: 'Space', bubbles: true, cancelable: true }));
-  });
-  await expect(dialogue).toBeVisible();
-  expect(((await text.textContent()) ?? '').length).toBeLessThan(first.length);
-  // A repeat is not a fresh press.
+  // Inside the grace: a Space in the line's first moment does nothing (44-a).
+  const opened = await playWatched(page, 'intro_command', { graceKey: 'Space' });
+  expect(opened.modal).toBe('true');
+  expect(opened.line).toEqual({ shown: true, speaker: 'Earth Command', text: '' });
+  // A repeat is not a fresh press, however late it comes (44-a).
   await page.waitForTimeout(400);
   await page.evaluate(() =>
-    document.activeElement?.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', code: 'Enter', repeat: true, bubbles: true })),
+    document.activeElement?.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', code: 'Enter', repeat: true, bubbles: true, cancelable: true })),
   );
-  await page.waitForTimeout(50);
-  expect(((await text.textContent()) ?? '').length).toBeLessThan(first.length);
+  // Fresh presses, each past the grace of the line it finds.
+  for (const key of ['Space', 'KeyE', 'KeyF', 'Space']) {
+    await page.keyboard.press(key);
+    await page.waitForTimeout(350);
+  }
 
-  // Space fills the line, E advances it, F fills the next, Space advances again.
-  await page.keyboard.press('Space');
-  await expect(text).toHaveText(first);
-  await page.waitForTimeout(350);
-  await page.keyboard.press('KeyE');
-  await expect(text).not.toHaveText(first);
-  await page.waitForTimeout(350);
-  await page.keyboard.press('KeyF');
-  await expect(text).toHaveText('Survey, extract, report. Answer one question: can we live out there.');
-  await page.waitForTimeout(350);
-  await page.keyboard.press('Space');
-  await expect(text).not.toHaveText('Survey, extract, report. Answer one question: can we live out there.');
+  const presses = await linePresses(page);
+  expect(presses.map((press) => press.code)).toEqual(['Space', 'Enter', 'Space', 'KeyE', 'KeyF', 'Space']);
+  const [early, held, ...fresh] = presses as [LinePress, LinePress, ...LinePress[]];
+  expect(early.after, 'a press inside the grace leaves the line alone').toEqual(early.before);
+  expect(held.repeat).toBe(true);
+  expect(held.after, 'a repeat leaves the line alone').toEqual(held.before);
+  // Space, E, F and Space each do what one tap does — fill, then advance — and
+  // none of them reaches the game behind the transmission.
+  const end = expectSkips(fresh, INTRO_LINES, 0);
+  expect(end).toBeGreaterThanOrEqual(1);
+  for (const press of fresh) expect(press.played, `${press.code} stays the line's`).toBe(false);
 });
 
 // -------------------------------------------------------- 2: non-modal line
@@ -187,30 +318,36 @@ test('2. a non-modal line on the surface: Space keeps its gameplay meaning, Ente
   await start(page, DEBUG_URL);
   await prepare(page, {});
   await land(page);
-  const dialogue = page.getByTestId('dialogue');
-  const text = dialogue.locator('.dialogue-text');
-  const speaker = dialogue.locator('.dialogue-speaker');
-  const first = 'Off-worlder. Listen. The worms hunt by vibration — walk, do not run.';
-  await page.evaluate(() => window.__reallm.playDialogue('c1_m1_stage2'));
-  await expect(dialogue).toBeVisible();
+  const lines = [
+    { speaker: 'Scav', text: 'Off-worlder. Listen. The worms hunt by vibration — walk, do not run.' },
+    { speaker: 'ARIA', text: 'He is dehydrated. Keep moving.' },
+  ];
+  const opened = await playWatched(page, 'c1_m1_stage2');
+  expect(opened.line.speaker).toBe('Scav');
   // A non-modal line takes no focus, stays a log, and shows no cue.
-  await expect(dialogue).toHaveAttribute('role', 'log');
-  expect(await focused(page)).not.toBe('dialogue');
-  await expect(page.getByTestId('dialogue-next')).toBeHidden();
-  await expect(speaker).toHaveText('Scav');
-  // Past the 0.3 s grace, and well inside the 1.7 s the line takes to type:
-  // Space fires, and the line neither fills nor moves on.
-  await page.waitForTimeout(400);
+  expect(opened.role).toBe('log');
+  expect(opened.modal).toBeNull();
+  expect(opened.focused).not.toBe('dialogue');
+  expect(opened.cue).toBe(false);
+  // Past the 0.3 s grace, Space and then Enter twice — a few round trips, well
+  // inside the 6 s a non-modal line waits before it moves on by itself.
+  await page.waitForTimeout(350);
   await page.keyboard.press('Space');
-  await page.waitForTimeout(250);
-  await expect(speaker).toHaveText('Scav');
-  expect((await text.textContent()) ?? '').not.toBe(first);
-  // Enter fills it, and Enter again advances it.
   await page.keyboard.press('Enter');
-  await expect(text).toHaveText(first);
   await page.keyboard.press('Enter');
-  await expect(speaker).toHaveText('ARIA');
-  await expect(text).not.toHaveText(first);
+
+  const [space, ...enters] = (await linePresses(page)) as [LinePress, ...LinePress[]];
+  expect(space.code).toBe('Space');
+  // Space is the player's: the line neither fills nor moves on, and the game
+  // takes the press as play.
+  expect(space.before.speaker).toBe('Scav');
+  expect(space.after).toEqual(space.before);
+  expect(space.played).toBe(true);
+  // Enter fills the Scav's line and then moves it on to ARIA — or, if the line
+  // had finished typing first, moves it on at once — and the game never sees it.
+  expect(enters.map((press) => press.code)).toEqual(['Enter', 'Enter']);
+  expect(expectSkips(enters, lines, 0)).toBeGreaterThanOrEqual(1);
+  for (const press of enters) expect(press.played).toBe(false);
 });
 
 // ------------------------------------------------------ 3: creation by keys
