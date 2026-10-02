@@ -26,6 +26,7 @@ import {
   BULWARK_DAMAGE_MULT,
   CLASSES,
   COMPANIONS,
+  DIFFICULTY_RULES,
   ENEMIES,
   ITEMS,
   LOOT_TABLES,
@@ -256,7 +257,8 @@ export function rollPlayerDamage(weapon: WeaponDef, stats: PlayerStats, rng: Rng
 /**
  * §4.2: what one enemy hit takes off the player. The elite ×1.5 lands here —
  * `EnemyEntity.damage` stays the def value (times boss phase multipliers) —
- * and casual difficulty softens incoming damage by ×0.7.
+ * and the difficulty's `enemyDamageMult` scales it (SPEC-043 §4.4): ×0.7 on
+ * casual, ×1.3 on hard.
  */
 export function enemyHitDamage(enemy: EnemyEntity, stats: PlayerStats, difficulty: Difficulty): number {
   return hitDamage(enemy.damage, enemy.elite, stats, difficulty);
@@ -264,7 +266,10 @@ export function enemyHitDamage(enemy: EnemyEntity, stats: PlayerStats, difficult
 
 function hitDamage(base: number, elite: boolean, stats: PlayerStats, difficulty: Difficulty): number {
   const raw =
-    base * (elite ? TUNING.ELITE_DMG_MULT : 1) * (difficulty === 'casual' ? 0.7 : 1) * (1 - damageReduction(stats.armor));
+    base *
+    (elite ? TUNING.ELITE_DMG_MULT : 1) *
+    DIFFICULTY_RULES[difficulty].enemyDamageMult *
+    (1 - damageReduction(stats.armor));
   return Math.max(1, Math.round(raw));
 }
 
@@ -1016,6 +1021,11 @@ export class Combat {
    * SPEC-041 §4.6: an elite's affixes — rolled by the caller with
    * `rollAffixes` — ride in `affixA`/`affixB`; `swift` applies here at once.
    * A non-elite carries none, whatever is passed.
+   *
+   * SPEC-043 §4.4: a surface enemy's HP takes the difficulty's `enemyHpMult`,
+   * read at the spawn — waves, packs, summons and bosses all come through
+   * here, and an enemy already alive keeps what it spawned with (43-h).
+   * Flight-domain enemies never do: SPEC-034 authored the Gauntlet against them.
    */
   spawnEnemy(id: EnemyId, x: number, z: number, elite: boolean, affixA: AffixId | null = null, affixB: AffixId | null = null): EnemyEntity {
     const def = ENEMIES[id];
@@ -1033,7 +1043,8 @@ export class Combat {
     e.vx = 0;
     e.vz = 0;
     e.radius = def.radius * (isElite ? ELITE_SCALE : 1);
-    e.maxHp = Math.round(def.hp * (isElite ? TUNING.ELITE_HP_MULT : 1));
+    const hpMult = def.domain === 'surface' ? DIFFICULTY_RULES[this.#save.meta.difficulty].enemyHpMult : 1;
+    e.maxHp = Math.round(def.hp * (isElite ? TUNING.ELITE_HP_MULT : 1) * hpMult);
     e.hp = e.maxHp;
     e.damage = def.damage;
     e.speed = def.speed * (isElite ? ELITE_SPEED_MULT : 1) * (swift ? SWIFT_SPEED_MULT : 1);

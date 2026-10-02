@@ -1604,10 +1604,14 @@ import {
 
 describe('completionLines (SPEC-042 §4.1)', () => {
   it('reads c1_m1’s XP, tokens and resources, and names the next offer', () => {
+    // SPEC-043 §4.6: with no extras, the three optional rows are all null.
     expect(completionLines(MISSIONS.c1_m1, false, null)).toEqual({
       title: 'Dry Land',
       rewards: '+100 XP · +10 tokens · +20 oil',
       next: null,
+      bonus: null,
+      contract: null,
+      time: null,
     });
     expect(completionLines(MISSIONS.c1_m1, false, MISSIONS.c1_m2).next).toBe('Next: Black Gold — at the pad terminal');
   });

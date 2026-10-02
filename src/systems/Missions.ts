@@ -9,16 +9,31 @@
 // `scan` keeps a distinct-instance bitmask under `${key}:mask` alongside the
 // count, which is still a plain number and therefore round-trips the save
 // unchanged.
+//
+// SPEC-043 §4.2: while a mission is active its state also keeps a clock (the
+// seconds this scene has stepped it), its deaths, whether the player sheltered
+// and its elite kills — none of them saved. A mission with a `bonus` is judged
+// on them at completion, and only when it is `clean`: accepted by this scene,
+// or rebuilt at stage 0 with no counters, so a reload after progress forfeits
+// it (E70). §4.3: a replay of a finished chapter's surface mission runs as a
+// contract, rolled per landing from the seed (`contractFor`).
 import type { EventBus, GameEvents } from '@/core/Events';
+import { hash32 } from '@/core/Rng';
 import type { Save } from '@/core/Save';
 import {
+  CONTRACT_IDS,
+  CONTRACTS,
   MISSIONS,
+  PLANETS,
   TUNING,
+  type ContractId,
   type EnemyId,
   type FollowerId,
+  type MissionBonus,
   type MissionDef,
   type MissionId,
   type Objective,
+  type PlanetDef,
   type PlanetId,
   type PoiId,
   type ResourceId,
@@ -31,7 +46,13 @@ import type { LayoutPoi } from '@/systems/Layout';
 /** The slice of SPEC-010's `Economy` the runtime needs. */
 export interface MissionEconomy {
   missingRequirements(reqs: MissionDef['requires']): unknown[];
-  applyRewards(mission: MissionDef, replay: boolean): void;
+  /** SPEC-043 §4.3: `contract` pays a replay at 75 % plus 20 lithium. */
+  applyRewards(mission: MissionDef, replay: boolean, contract?: boolean): void;
+  /**
+   * SPEC-043 §4.2: an earned bonus. Optional so the pure tests and the balance
+   * model can pass a stub economy that has none.
+   */
+  applyBonus?(mission: MissionDef): void;
   spendResources(cost: Partial<Record<ResourceId, number>>, reason: string): boolean;
   /**
    * SPEC-034 §4.12: the seam the hold reads to know whether a full pickup is
@@ -49,6 +70,16 @@ export interface MissionState {
   counters: Record<string, number>;
   timers: Record<string, number>;
   complete: boolean;
+  /** SPEC-043 §4.2: seconds this scene has stepped the mission. */
+  clock: number;
+  /** `player:died` on the surface while the mission was active. */
+  deaths: number;
+  /** Whether any step it was active in had the player inside a shelter. */
+  sheltered: boolean;
+  /** `enemy:killed` with `elite: true` while it was active — any enemy, any cause. */
+  elites: number;
+  /** Accepted by this scene, or rebuilt at stage 0 with no counters. */
+  clean: boolean;
 }
 
 /**
@@ -62,6 +93,11 @@ export interface MissionContext {
   heldResource(r: ResourceId): number;
   nearPoi(id: PoiId, radius?: number): LayoutPoi | null;
   follower?: { x: number; z: number; alive: boolean } | null;
+  /**
+   * SPEC-043 §4.2: true while the player is inside a cave or a wreck on the
+   * surface; flight never sets it. A step with it true forfeits `no_shelter`.
+   */
+  sheltered?: boolean;
 }
 
 export interface ObjectiveProgress {
@@ -98,6 +134,29 @@ function isTimed(objective: Objective): boolean {
  */
 function isRestartedByDeath(objective: Objective): boolean {
   return isTimed(objective) || objective.kind === 'escort';
+}
+
+/**
+ * SPEC-043 §4.2: whether a clean mission's state met its bonus — `no_death`
+ * with no death, `par` inside its seconds, `no_shelter` never sheltered,
+ * `elites` with enough elite kills.
+ */
+function bonusHeld(bonus: MissionBonus, state: MissionState): boolean {
+  switch (bonus.kind) {
+    case 'no_death':
+      return state.deaths === 0;
+    case 'par':
+      return state.clock <= bonus.seconds;
+    case 'no_shelter':
+      return !state.sheltered;
+    case 'elites':
+      return state.elites >= bonus.count;
+  }
+}
+
+/** A fresh state's SPEC-043 bookkeeping: no time, no deaths, no shelter, no elites. */
+function newState(id: MissionId, stage: number, counters: Record<string, number>, clean: boolean): MissionState {
+  return { id, stage, counters, timers: {}, complete: false, clock: 0, deaths: 0, sheltered: false, elites: 0, clean };
 }
 
 function popcount(v: number): number {
@@ -139,10 +198,14 @@ export class Missions {
 
     // E19: rebuild from the save — counters kept, timers zeroed. A timed stage
     // in flight restarts from its beginning, announced as a reload reset.
+    // SPEC-043 §4.2 (E70, 43-b): a rebuild with progress is not clean, so a
+    // reload or a second landing forfeits the bonus; one still at stage 0 with
+    // nothing counted is clean again, and its clock starts here.
     for (const entry of save.progress.missionsActive) {
       const def = MISSIONS[entry.id];
       if (def.planet !== planet || def.scene !== scene) continue;
-      const state: MissionState = { id: entry.id, stage: entry.stage, counters: entry.counters, timers: {}, complete: false };
+      const clean = entry.stage === 0 && Object.keys(entry.counters).length === 0;
+      const state = newState(entry.id, entry.stage, entry.counters, clean);
       this.#states.push(state);
       if (this.#pinned === null) this.#pinned = entry.id;
       if ((def.stages[state.stage] ?? []).some(isTimed)) {
@@ -150,8 +213,13 @@ export class Missions {
       }
     }
 
-    events.on('enemy:killed', (p) => this.#onKill(p.enemyId), this);
-    events.on('resource:collected', (p) => this.#onCollect(p.resource, p.amount), this);
+    events.on('enemy:killed', (p) => this.#onKill(p.enemyId, p.elite), this);
+    // SPEC-043 §4.2 (43-h): only a pickup — the shipped-home surplus included —
+    // counts toward a collect objective; a reward, a bonus, a contract's
+    // lithium, a voucher or the subsidy never does.
+    events.on('resource:collected', (p) => {
+      if (p.source === 'pickup') this.#onCollect(p.resource, p.amount);
+    }, this);
     events.on('poi:reached', (p) => this.#onReach(p.poi), this);
     events.on('poi:scanned', (p) => this.#onScan(p.poi, p.instance), this);
     events.on('boss:defeated', (p) => this.#onBoss(p.boss), this);
@@ -225,6 +293,29 @@ export class Missions {
     return this.#save.progress.missionsDone.includes(id);
   }
 
+  /**
+   * SPEC-043 §4.3: the contract of each active replay here, read with this
+   * landing's number — `visits[planet]`, which the surface counts up on entry
+   * before it builds this runtime. In acceptance order, duplicates kept — the
+   * scene applies each modifier once (43-c). Always `[]` in flight.
+   */
+  activeContracts(): readonly ContractId[] {
+    if (this.#scene !== 'surface') return NO_CONTRACTS;
+    const out: ContractId[] = [];
+    const landing = this.#landing();
+    for (const state of this.#states) {
+      if (state.complete) continue;
+      const contract = contractFor(this.#save, MISSIONS[state.id], landing);
+      if (contract !== null) out.push(contract);
+    }
+    return out;
+  }
+
+  /** §4.3: the landing a contract here is rolled for — the one the scene counted on entry. */
+  #landing(): number {
+    return this.#save.progress.visits[this.#planet] ?? 0;
+  }
+
   accept(id: MissionId): Result {
     const def = MISSIONS[id];
     if (def.planet !== this.#planet || def.scene !== this.#scene) return fail('not_found');
@@ -235,7 +326,8 @@ export class Missions {
     if (this.#economy.missingRequirements(def.requires).length > 0) return fail('locked');
     const entry = { id, stage: 0, counters: {} as Record<string, number> };
     this.#save.progress.missionsActive.push(entry);
-    const state: MissionState = { id, stage: 0, counters: entry.counters, timers: {}, complete: false };
+    // SPEC-043 §4.2: accepted here, so clean — its clock starts now.
+    const state = newState(id, 0, entry.counters, true);
     this.#states.push(state);
     if (this.#pinned === null) this.#pinned = id;
     this.#events.emit('mission:accepted', { id });
@@ -466,6 +558,11 @@ export class Missions {
 
   update(dt: number, ctx: MissionContext): void {
     for (const state of this.#states.slice()) {
+      // SPEC-043 §4.2: the scene steps only while it plays — not under the map,
+      // a modal or the pause — so those seconds never reach the clock. Counted
+      // before the objectives, so the step that completes a stage is in it.
+      state.clock += dt;
+      if (ctx.sheltered === true) state.sheltered = true;
       const stage = MISSIONS[state.id].stages[state.stage] ?? [];
       for (let index = 0; index < stage.length; index++) {
         const objective = stage[index] as Objective;
@@ -570,7 +667,15 @@ export class Missions {
 
   // -------------------------------------------------------- event reactions
 
-  #onKill(enemyId: EnemyId): void {
+  #onKill(enemyId: EnemyId, elite: boolean): void {
+    // SPEC-043 §4.2: every elite kill counts toward `elites`, whatever the
+    // enemy and whatever killed it — before the objectives, so the kill that
+    // completes a mission is in its count.
+    if (elite) {
+      for (const state of this.#states) {
+        if (!state.complete) state.elites += 1;
+      }
+    }
     this.#forEachObjective((state, objective, index) => {
       if (objective.kind !== 'kill' || objective.enemy !== enemyId) return;
       if (this.#done(state, objective, index)) return;
@@ -653,6 +758,9 @@ export class Missions {
   #onPlayerDied(): void {
     if (this.#scene !== 'surface') return;
     for (const state of this.#states) {
+      // SPEC-043 §4.2 (E70): a death forfeits `no_death` and nothing else; the
+      // clock keeps running.
+      state.deaths += 1;
       const stage = MISSIONS[state.id].stages[state.stage] ?? [];
       if (stage.some(isRestartedByDeath)) this.#resetStage(state, 'death');
     }
@@ -781,15 +889,32 @@ export class Missions {
   #completeMission(state: MissionState, def: MissionDef): void {
     state.complete = true;
     const replay = this.isReplay(state.id);
+    // SPEC-043 §4.3 (43-d): the contract is read now, with this landing's
+    // number — a chapter flag set while the replay ran still makes it one.
+    const contract = replay && this.#scene === 'surface' ? contractFor(this.#save, def, this.#landing()) : null;
     const at = this.#states.indexOf(state);
     if (at >= 0) this.#states.splice(at, 1);
     this.#dropSaveEntry(state.id);
     if (!replay) this.#save.progress.missionsDone.push(state.id);
+    // SPEC-043 §4.2: the bonus is judged before anything is paid, on first
+    // runs, replays and contracts alike.
+    const bonus = def.bonus;
+    const earned = bonus !== undefined && state.clean && bonusHeld(bonus, state);
+    if (bonus !== undefined) this.#events.emit('mission:bonus', { id: state.id, bonus: bonus.kind, earned });
     // Rewards fire after the books close, so a rewarded resource can never
     // count toward the collect objective that just finished (§4.7).
-    this.#economy.applyRewards(def, replay);
+    this.#economy.applyRewards(def, replay, contract !== null);
+    if (earned) this.#economy.applyBonus?.(def);
     if (this.#pinned === state.id) this.#pinned = this.#states[0]?.id ?? null;
-    this.#events.emit('mission:completed', { id: state.id, replay });
+    // SPEC-043 §4.5: a clean surface run carries its time in whole seconds,
+    // never 0; flight missions and rebuilt ones carry none.
+    const seconds = state.clean && this.#scene === 'surface' ? Math.max(1, Math.round(state.clock)) : null;
+    this.#events.emit('mission:completed', {
+      id: state.id,
+      replay,
+      ...(contract !== null ? { contract } : {}),
+      ...(seconds !== null ? { seconds } : {}),
+    });
     this.#saves?.request('mission');
   }
 
@@ -806,6 +931,38 @@ export class Missions {
 
 /** §4.7: replay pays half; re-exported so the HUD can phrase it. */
 export const REPLAY_REWARD_FRACTION = TUNING.REPLAY_REWARD_FRACTION;
+
+const NO_CONTRACTS: readonly ContractId[] = Object.freeze([]);
+const PLANET_TABLE: Readonly<Record<PlanetId, PlanetDef>> = PLANETS;
+
+/**
+ * SPEC-043 §4.3: the contract a replay of `def` runs as on its `landing`-th
+ * landing on the planet, or `null`. Only a replay (`missionsDone` holds it) of
+ * a surface mission whose chapter is finished (`chapter<N>_done`, so never
+ * Eden's) on a planet where enemies live. The pick is
+ * `hash32(seed, 'contract', id, landing)` over `CONTRACT_IDS` in table order,
+ * less the weather modifiers on a planet with no weather — deterministic, so
+ * the board shows the next landing's before departure (`landing = visits + 1`)
+ * and the surface reads this one's (`visits`). A new landing is a new contract.
+ */
+export function contractFor(save: Save, def: MissionDef, landing: number): ContractId | null {
+  if (!(save.progress.missionsDone as readonly string[]).includes(def.id)) return null;
+  if (def.scene !== 'surface' || def.chapter > 5) return null;
+  if (!save.progress.flags.includes(`chapter${def.chapter}_done`)) return null;
+  const planet = PLANET_TABLE[def.planet];
+  if (planet.surface.population <= 0) return null;
+  const weather = planet.surface.weather !== null;
+  let allowed = 0;
+  for (const id of CONTRACT_IDS) if (weather || !CONTRACTS[id].needsWeather) allowed++;
+  if (allowed === 0) return null;
+  let pick = hash32(save.meta.seed, 'contract', def.id, landing) % allowed;
+  for (const id of CONTRACT_IDS) {
+    if (!weather && CONTRACTS[id].needsWeather) continue;
+    if (pick === 0) return id;
+    pick--;
+  }
+  return null;
+}
 
 /**
  * E24 / SPEC-024 §4.6: the mission that ends the campaign is locked once the

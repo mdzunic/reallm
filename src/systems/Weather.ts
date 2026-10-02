@@ -7,7 +7,9 @@
 // a boss arena (E15). The avalanche's DPS runs in bursts — 10 s on, 20 s off —
 // which lives here as `dps` so the effects table stays a constant. SPEC-038
 // §4.5: a forced storm ramps in over 10 s — the warning an ambient one gives —
-// and `exposureDps` is what a player in the open actually takes.
+// and `exposureDps` is what a player in the open actually takes. SPEC-043 §4.3:
+// `storm_front` multiplies every calm window rolled while it is in force; one
+// already rolled runs out unchanged (43-e).
 import type { EventBus, GameEvents } from '@/core/Events';
 import type { Rng } from '@/core/Rng';
 import { TUNING, type PlanetDef, type WeatherId } from '@/data/index';
@@ -67,12 +69,20 @@ export class Weather {
   #heldCalm = false;
   /** SPEC-038 §4.5: the active storm came from `force()`, so it ramps in. */
   #forced = false;
+  /** SPEC-043 §4.3: multiplies each calm window as it is rolled; 1 is the planet's cycle. */
+  #calmScale = 1;
 
-  constructor(planet: PlanetDef, rng: Rng, events: EventBus<GameEvents>) {
+  /**
+   * `calmScale` is the `storm_front` contract a landing starts under (SPEC-043
+   * §4.3), so its first calm is already a short one; later changes go through
+   * `setCalmScale`.
+   */
+  constructor(planet: PlanetDef, rng: Rng, events: EventBus<GameEvents>, calmScale = 1) {
     this.#cycle = planet.surface.weather;
     this.#dpsMult = planet.surface.weather?.dpsMult ?? 1;
     this.#rng = rng;
     this.#events = events;
+    this.#calmScale = calmScale;
     this.#left = this.#rollCalm();
   }
 
@@ -172,6 +182,14 @@ export class Weather {
     this.#heldCalm = on;
   }
 
+  /**
+   * SPEC-043 §4.3: multiplies every calm window rolled from now on; 1 restores
+   * the planet's cycle. A calm already rolled runs out unchanged (43-e).
+   */
+  setCalmScale(scale: number): void {
+    this.#calmScale = Number.isFinite(scale) && scale > 0 ? scale : 1;
+  }
+
   /** E15: `true` ends the storm now and pauses the cycle; `false` resumes it. */
   suppress(on: boolean): void {
     if (on === this.#suppressed) return;
@@ -205,7 +223,7 @@ export class Weather {
 
   #rollCalm(): number {
     if (this.#cycle === null) return Infinity;
-    return this.#rng.float(this.#cycle.calmSeconds[0], this.#cycle.calmSeconds[1]);
+    return this.#rng.float(this.#cycle.calmSeconds[0], this.#cycle.calmSeconds[1]) * this.#calmScale;
   }
 
   #rollStorm(): number {

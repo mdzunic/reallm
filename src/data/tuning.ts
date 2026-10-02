@@ -32,6 +32,19 @@ export interface Tuning {
   readonly HOLD_PATTERN_MAX_SECONDS: number;
 }
 
+/**
+ * SPEC-043 §4.4: what a difficulty multiplies. Each is one number, read live
+ * from `save.meta.difficulty` where it applies: enemy HP at a surface spawn,
+ * every enemy hit (surface and flight), the ambient elite roll, and the share
+ * of each resource a surface death takes.
+ */
+export interface DifficultyRules {
+  readonly enemyHpMult: number;
+  readonly enemyDamageMult: number;
+  readonly eliteChanceMult: number;
+  readonly deathLoss: number;
+}
+
 export const TUNING = {
   XP_BASE: 100,
   XP_PER_LEVEL: 50,
@@ -54,3 +67,22 @@ export const TUNING = {
   SHIELD_REGEN_DELAY: 3,
   HOLD_PATTERN_MAX_SECONDS: 90,
 } as const satisfies Tuning;
+
+/**
+ * SPEC-043 §4.4 (*initial tuning*). Casual and normal keep the numbers SPEC-038
+ * and SPEC-010 gave them — casual's ×0.7 hit and no death loss, normal's tenth
+ * of the hold. Hard multiplies what already exists and nothing else: SPEC-038's
+ * weather, windup and dash multipliers stay at 1 on it.
+ *
+ * Keyed by the three names; `tests/data/tuning.test.ts` pins the keys to
+ * `DIFFICULTIES`, which keeps this file free of imports.
+ */
+export const DIFFICULTY_RULES = {
+  casual: { enemyHpMult: 1, enemyDamageMult: 0.7, eliteChanceMult: 1, deathLoss: 0 },
+  normal: { enemyHpMult: 1, enemyDamageMult: 1, eliteChanceMult: 1, deathLoss: TUNING.DEATH_RESOURCE_LOSS },
+  hard: { enemyHpMult: 1.25, enemyDamageMult: 1.3, eliteChanceMult: 2, deathLoss: 0.2 },
+} as const satisfies {
+  readonly casual: DifficultyRules;
+  readonly normal: DifficultyRules;
+  readonly hard: DifficultyRules;
+};

@@ -549,6 +549,7 @@ describe('cargo and resources (§4.5)', () => {
       amount: 20,
       total: 400,
       blocked: 'cargo_full',
+      source: 'pickup',
     });
     // Full: the pickup adds nothing and still says why.
     expect(economy.addResource('wheat', 10, 'pickup')).toEqual({ added: 0, shipped: 0, blocked: 10 });
@@ -580,7 +581,7 @@ describe('cargo and resources (§4.5)', () => {
     expect(data.resources.wheat).toBe(400);
     // … but `amount` counts them, which is what `Missions` reads.
     expect(events.of('resource:collected')).toEqual([
-      { resource: 'wheat', amount: 30, total: 400, shipped: 30, blocked: 'cargo_full' },
+      { resource: 'wheat', amount: 30, total: 400, shipped: 30, blocked: 'cargo_full', source: 'pickup' },
     ]);
 
     // Room *and* demand: the hold takes what fits and ships the rest.
@@ -589,7 +590,7 @@ describe('cargo and resources (§4.5)', () => {
     expect(economy.addResource('wheat', 25, 'pickup')).toEqual({ added: 10, shipped: 15, blocked: 0 });
     expect(data.resources.wheat).toBe(400);
     expect(events.of('resource:collected')).toEqual([
-      { resource: 'wheat', amount: 25, total: 400, shipped: 15 },
+      { resource: 'wheat', amount: 25, total: 400, shipped: 15, source: 'pickup' },
     ]);
 
     // A grant never ships: it ignores the cap outright (§4.5).
@@ -721,7 +722,7 @@ describe('anti-softlock (E1, E2)', () => {
     expect(economy.canDepart('cinder4')).toEqual({ ok: true });
     // The grant is a resource event and a return value; the station is what
     // turns it into ARIA's line (§4.6), so nothing is said here.
-    expect(events.of('resource:collected')).toEqual([{ resource: 'oil', amount: 40, total: 40 }]);
+    expect(events.of('resource:collected')).toEqual([{ resource: 'oil', amount: 40, total: 40, source: 'subsidy' }]);
     expect(events.toasts()).toEqual([]);
 
     // Already able to go somewhere: the station does nothing at all.

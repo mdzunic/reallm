@@ -117,7 +117,8 @@ describe('Missions — accept and stages (AC-38)', () => {
     expect(h.missions.active).toHaveLength(1);
     h.economy.addResource('oil', 150, 'pickup');
     expect(h.missions.active).toHaveLength(0); // both done → mission complete
-    expect(h.of('mission:completed')).toEqual([{ id: 'c1_m2', replay: false }]);
+    // SPEC-043 §4.5: a clean surface run carries its clock — never under 1 s.
+    expect(h.of('mission:completed')).toEqual([{ id: 'c1_m2', replay: false, seconds: 1 }]);
   });
 
   it('accept refuses a wrong scene, unmet requirements, and doubles (12-j)', () => {
@@ -187,7 +188,8 @@ describe('Missions — survive (AC-33, AC-40, AC-44)', () => {
     h.ctx.player.alive = true;
     h.run(60.1);
     expect(h.missions.active).toHaveLength(0);
-    expect(h.of('mission:completed')).toEqual([{ id: 'c1_m1', replay: false }]);
+    // SPEC-043 §4.5: the clock ran through the death and the dead seconds: 30 + 10 + 60.
+    expect(h.of('mission:completed')).toEqual([{ id: 'c1_m1', replay: false, seconds: 100 }]);
     expect(h.missions.requiredWeather()).toBeNull();
   });
 });
@@ -267,7 +269,7 @@ describe('Missions — deliver (AC-35)', () => {
     expect(spent).toEqual({ resource: 'oil', amount: 100, total: 20, reason: 'deliver:c1_m3' });
     expect(h.save.resources.oil).toBe(80);
     expect(h.of('poi:delivered')).toEqual([{ poi: 'beacon', resource: 'oil', amount: 100 }]);
-    expect(h.of('mission:completed')).toEqual([{ id: 'c1_m3', replay: false }]);
+    expect(h.of('mission:completed')).toEqual([{ id: 'c1_m3', replay: false, seconds: 2 }]);
   });
 });
 
@@ -349,7 +351,8 @@ describe('Missions — rewards and replay (AC-43)', () => {
     h.events.emit('poi:reached', { poi: 'landing_pad', instance: 0 });
     h.events.emit('poi:scanned', { poi: 'dune_sea', instance: 0 });
     h.run(60.1);
-    expect(h.of('mission:completed').at(-1)).toEqual({ id: 'c1_m1', replay: true });
+    // Accepted again here, so clean: the replay carries its own 60 s.
+    expect(h.of('mission:completed').at(-1)).toEqual({ id: 'c1_m1', replay: true, seconds: 60 });
     expect(h.save.player.xp).toBe(def.rewards.xp + Math.floor(def.rewards.xp * TUNING.REPLAY_REWARD_FRACTION));
     expect(h.save.progress.missionsDone).toEqual(['c1_m1']); // not listed twice
   });
@@ -573,8 +576,19 @@ describe('Missions — debugFinishStage (SPEC-024 §4.8)', () => {
    * they are dropped; every consequence of them has to match exactly.
    */
   const DRIVERS = new Set(['poi:reached', 'poi:scanned', 'enemy:killed', 'resource:collected']);
+  /**
+   * SPEC-043 §4.5: `mission:completed` carries the mission clock, which is the
+   * one thing a forced stage cannot reproduce — the played run spent 60 s in
+   * the storm and the forced one none — so `seconds` is compared on its own.
+   */
   const stream = (h: Harness): { name: string; payload: unknown }[] =>
-    h.recorded.filter((entry) => !DRIVERS.has(entry.name));
+    h.recorded
+      .filter((entry) => !DRIVERS.has(entry.name))
+      .map((entry) => {
+        if (entry.name !== 'mission:completed') return entry;
+        const { seconds: _seconds, ...payload } = entry.payload as GameEvents['mission:completed'];
+        return { name: entry.name, payload };
+      });
 
   it('finishes a mission exactly as playing it does: same events, same rewards', () => {
     const played = harness();
@@ -591,6 +605,8 @@ describe('Missions — debugFinishStage (SPEC-024 §4.8)', () => {
     forced.missions.debugFinishStage('c1_m1'); // survive 60 s
 
     expect(stream(forced)).toEqual(stream(played));
+    expect(played.of('mission:completed')[0]?.seconds).toBe(60);
+    expect(forced.of('mission:completed')[0]?.seconds).toBe(1);
     expect(forced.saveRequests).toEqual(played.saveRequests);
     expect(forced.save.player.xp).toBe(played.save.player.xp);
     expect(forced.save.player.tokens).toBe(played.save.player.tokens);
@@ -664,9 +680,10 @@ describe('Missions — recall and the escort restart (SPEC-034 §4.2, §4.9)', (
     // The mission is still running, at the same stage, and nothing completed.
     expect(h.missions.active[0]?.stage).toBe(2);
     expect(h.of('mission:completed')).toEqual([]);
-    // …and it can still be finished from zero.
+    // …and it can still be finished from zero. SPEC-043 43-a: the recall
+    // forfeits nothing, and the clock kept running through it: 30 + 60.
     h.run(60.1);
-    expect(h.of('mission:completed')).toEqual([{ id: 'c1_m1', replay: false }]);
+    expect(h.of('mission:completed')).toEqual([{ id: 'c1_m1', replay: false, seconds: 90 }]);
   });
 
   it('a recall restarts a defend stage with reason `recall`', () => {
@@ -762,12 +779,12 @@ describe('Missions.collectDemand (SPEC-034 §4.12)', () => {
 
     // Progress reduces what is still wanted, one for one — and the economy
     // answers from the registration, not from a copy of it.
-    events.emit('resource:collected', { resource: 'wheat', amount: 120, total: 120 });
+    events.emit('resource:collected', { resource: 'wheat', amount: 120, total: 120, source: 'pickup' });
     expect(missions.collectDemand('wheat')).toBe(180);
     expect(economy.collectDemand('wheat')).toBe(180);
 
     // A finished objective asks for nothing.
-    events.emit('resource:collected', { resource: 'wheat', amount: 180, total: 300 });
+    events.emit('resource:collected', { resource: 'wheat', amount: 180, total: 300, source: 'pickup' });
     expect(missions.collectDemand('wheat')).toBe(0);
 
     // A deliver objective is not a collect one: nothing is shipped for it.
@@ -837,7 +854,7 @@ describe('Missions — survive stages run their storm wave (SPEC-038 §4.5)', ()
     expect(h.missions.surviveWave()).toEqual({ mission: 'c1_s2', stage: 1, wave: 'cinder4_storm' });
 
     h.run(90.1);
-    expect(h.of('mission:completed')).toEqual([{ id: 'c1_s2', replay: false }]);
+    expect(h.of('mission:completed')).toEqual([{ id: 'c1_s2', replay: false, seconds: 120 }]);
     expect(h.missions.surviveWave()).toBeNull();
   });
 

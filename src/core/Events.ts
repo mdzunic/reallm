@@ -25,16 +25,19 @@ import type { SceneId } from '@/core/StateMachine';
 import type {
   BossMoveId,
   BossMoveKind,
+  ContractId,
   DamageSource,
   DialogueId,
   EnemyId,
   FollowerId,
   ItemId,
+  MissionBonusKind,
   MissionId,
   PlanetId,
   PoiId,
   QuickSlot,
   ResourceId,
+  ResourceSource,
   WaveId,
   WeaponSlot,
   WeatherId,
@@ -93,8 +96,17 @@ export type GameEvents = {
   /**
    * SPEC-034 §4.12: `amount` counts what the hold took *and* what was shipped
    * home for an active collect objective; `shipped` is that second part.
+   * SPEC-043 §4.2: `source` says what produced it — only a `pickup` counts
+   * toward a collect objective (43-h).
    */
-  'resource:collected': { resource: ResourceId; amount: number; total: number; blocked?: 'cargo_full'; shipped?: number };
+  'resource:collected': {
+    resource: ResourceId;
+    amount: number;
+    total: number;
+    blocked?: 'cargo_full';
+    shipped?: number;
+    source: ResourceSource;
+  };
   'resource:spent': { resource: ResourceId; amount: number; total: number; reason: string };
   /**
    * SPEC-034 §4.15, E25: a reward item the pack could not take. The surface
@@ -172,7 +184,13 @@ export type GameEvents = {
   'mission:stageStarted': { id: MissionId; stage: number };
   'mission:progress': { id: MissionId; stage: number; objective: number; value: number; target: number };
   'mission:stageReset': { id: MissionId; stage: number; reason: 'death' | 'follower_died' | 'poi_destroyed' | 'recall' | 'reload' };
-  'mission:completed': { id: MissionId; replay: boolean };
+  /**
+   * SPEC-043 §4.3, §4.5: `contract` when the replay ran as one; `seconds` —
+   * the mission clock in whole seconds — when a clean surface mission ended.
+   */
+  'mission:completed': { id: MissionId; replay: boolean; contract?: ContractId; seconds?: number };
+  /** SPEC-043 §4.2: a mission with a bonus is judged just before its `mission:completed`. */
+  'mission:bonus': { id: MissionId; bonus: MissionBonusKind; earned: boolean };
   'mission:abandoned': { id: MissionId };
   'flag:set': { flag: string };
   'dialogue:started': { id: DialogueId };
