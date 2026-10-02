@@ -1773,14 +1773,16 @@ twice over), the three pins §4.10 and §4.11 move (`SPEC-007`, `SPEC-024`,
 `SPEC-034` to `SPEC-036`, `SPEC-037` with its whole phone matrix, `SPEC-038`,
 `SPEC-039`, `SPEC-040`, `SPEC-041`, `SPEC-042` with its phone matrix,
 `boot-gate`, `dev-skip-flight`, `lifecycle`, `pause`, `scene-cycle`, `smoke`,
-`stats-overlay`, `surface-env` and `touch-controls`. Under four workers six
+`stats-overlay`, `surface-env` and `touch-controls`. Under four workers seven
 cases outside this spec failed once each and passed on a rerun: `SPEC-026`
 cases 4 (a 1.5 s walk that lit nothing new on a crawling frame clock) and 5,
 and `SPEC-034` case 7 (both in their own `dismiss` helper's unguarded click on
 a line that had moved on by itself — case 7 is on the known-flaky list from
 `main`), `SPEC-012`'s CARGO FULL count (the toast gone between its two reads),
-`SPEC-019`'s reduce-motion fade (not faded inside its 5 s sampling window) and
-`SPEC-011`'s surface bed (the `?scene=` jump not landed inside 5 s).
+`SPEC-019`'s reduce-motion fade (not faded inside its 5 s sampling window),
+`SPEC-011`'s surface bed (the `?scene=` jump not landed inside 5 s) and
+`SPEC-036` case 17's zone ghosts (their 12 s clock ran out during a slow
+landing; green in the same file's earlier run on this branch).
 
 What the container showed:
 
