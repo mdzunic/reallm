@@ -478,7 +478,12 @@ test('1f. flight: a flight mission finished in flight shows the same banner, wit
   await expect(page.getByTestId('scene-label')).toHaveText('flight');
   await expect(banner).toContainText('Mission complete');
   await expect(page.getByTestId('mission-complete-title')).toHaveText('Salvage Rights');
-  await expect(page.getByTestId('mission-complete-rewards')).toHaveText('+150 XP · +15 tokens');
+  // SPEC-043 §4.1: Salvage Rights now pays 60 oil on top of its XP and tokens.
+  await expect(page.getByTestId('mission-complete-rewards')).toHaveText('+150 XP · +15 tokens · +60 oil');
+  // A flight mission carries no bonus, no contract and no time (SPEC-043 §4.6).
+  for (const row of ['mission-complete-bonus', 'mission-complete-contract', 'mission-complete-time']) {
+    await expect(page.getByTestId(row)).toBeHidden();
+  }
   // There is no pad in the sky, so no next line.
   await expect(page.getByTestId('mission-complete-next')).toBeHidden();
   await expect(banner).toHaveCSS('pointer-events', 'none');
