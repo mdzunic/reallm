@@ -213,9 +213,14 @@ test('2 & 5 — stay: dialogue, film, the filed report, free roam, and the locke
   // §6.5: the board shows the mission done, with no Replay (E24).
   await page.evaluate(() => window.__reallm.go('station', {}, { force: true }));
   await settled(page, 'station');
+  // SPEC-044 §4.11: finished work sits in the planet's Completed fold, closed
+  // by default, and the status reads in words.
+  const fold = page.locator('[data-testid="board-done-eden"]');
+  await expect(fold).toBeVisible({ timeout: 20_000 });
+  await fold.locator('summary').click();
   const row = page.locator('[data-testid="mission-c6_m2"]');
   await expect(row).toBeVisible({ timeout: 20_000 });
-  await expect(row.locator('.board-status')).toHaveText('done');
+  await expect(row.locator('.board-status')).toHaveText('Done');
   await expect(page.locator('[data-testid="mission-c6_m2-replay"]')).toHaveCount(0);
   // A finished mission that did not end the campaign still offers its replay.
   await expect(page.locator('[data-testid="mission-c6_m1-replay"]')).toBeVisible();

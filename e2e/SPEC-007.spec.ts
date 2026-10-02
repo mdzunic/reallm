@@ -213,6 +213,8 @@ test('a corrupt slot can be deleted from the menu, backup and all (AC-20, AC-58)
   const row = page.locator('[data-testid="slot-2"]');
   await expect(row).toContainText('Corrupt');
   await page.locator('[data-testid="slot-2-delete"]').click();
+  // SPEC-044 §4.10: the delete takes the backup with it, so it asks first.
+  await page.locator('[data-testid="confirm-yes"]').click();
   await expect(row).toContainText('Empty');
   expect(await slotKeys(page)).toEqual([]);
 });
