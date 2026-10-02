@@ -269,14 +269,43 @@ test('quality.targetFps 30 draws at most 30 frames a second, updates untouched (
   expect(simulated).toBeLessThan(wall * 1.05);
 });
 
-// SPEC-040 §4.2: at a 60 target every frame that ran a fixed step is drawn,
-// which on a display of 60 Hz or less is every frame.
+// SPEC-040 §4.2: at a 60 target every frame that ran a fixed step is drawn.
+// A frame that ran none is not (40-d), and on a 60 Hz display that is no rare
+// case: the frame and the fixed step share one period, so the accumulator sits
+// on the step boundary and frames run 0, 1 or 2 steps in turn. Counted against
+// all frames, a correct pacer drew 0.6–0.95 of them (0.81 and 0.87 on the
+// macOS CI runner), so the claim is read frame by frame, off the steps each
+// frame ran. The game's loop callback is registered before the sampler's, so
+// each sample reads the frame the loop has just finished.
 test('the other presets render every frame (AC-57)', async ({ page }) => {
   await start(page, '/?debug&quality=high');
-  const { frames, renders } = await overFrames(page, 20);
+  const { stepped, drawn } = await page.evaluate(
+    (frames) =>
+      new Promise<{ stepped: number; drawn: number }>((resolve) => {
+        let previous = window.__reallm.stats();
+        let stepped = 0;
+        let drawn = 0;
+        let seen = 0;
+        const sample = (): void => {
+          const now = window.__reallm.stats();
+          if (now.frame === previous.frame + 1 && now.updates > 0) {
+            stepped++;
+            if (now.renders > previous.renders) drawn++;
+          }
+          previous = now;
+          if (++seen < frames) requestAnimationFrame(sample);
+          else resolve({ stepped, drawn });
+        };
+        requestAnimationFrame(sample);
+      }),
+    60,
+  );
 
-  expect(frames).toBeGreaterThan(20);
-  expect(renders / frames).toBeGreaterThan(0.9);
+  expect(stepped).toBeGreaterThan(20); // the loop really ran, and was sampled
+  // The pacer's 2 ms of slack forgives a frame a little early, not one that a
+  // busy host delivers 3 ms early, so a few stepped frames may go undrawn.
+  // Pacing `high` at 30, the regression this guards, leaves about half.
+  expect(drawn / stepped).toBeGreaterThan(0.9);
 });
 
 test('the backtick key toggles it on desktop (AC-34)', async ({ page }) => {
