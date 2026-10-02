@@ -14,9 +14,14 @@
 // SPEC-044: the menu opens as a modal on Resume (§4.3); Controls docks the one
 // controls sheet, `controls-sheet`, built from `CONTROL_ROWS` (§4.5); and with
 // a quit hook, Save & Quit first says what the quit costs (§4.8).
+//
+// SPEC-045 §4.1: with a comms log — the surface's and the flight's dialogue
+// layer's — `Comms log` follows Controls, so a line missed in a fight can be
+// read again. §4.8: Resume is a plain `ui-btn`, styled like its neighbours.
 import type { BenchmarkOutcome } from '@/core/Benchmark';
 import type { SaveStore } from '@/core/Save';
 import type { SettingsStore } from '@/core/Settings';
+import { openCommsLog, type CommsLog } from '@/ui/CommsLog';
 import { confirmSheet } from '@/ui/ConfirmSheet';
 import { dockedControlsSheet } from '@/ui/ControlsSheet';
 import { el, h, openModal, testId, uiLayers } from '@/ui/dom';
@@ -33,6 +38,8 @@ export interface PauseDeps {
   /** SPEC-015 §4.7: the settings panel's `Re-detect`, where a `Game` supplies one. */
   detectQuality?(): Promise<BenchmarkOutcome>;
   go(id: 'menu', params: { reason?: 'start' | 'quit' | 'error' }): Promise<boolean>;
+  /** SPEC-045 §4.1: the dialogue layer's log; the surface and the flight pass it, and `Comms log` shows. */
+  comms?: CommsLog;
 }
 
 /**
@@ -86,6 +93,8 @@ export class PauseMenu {
   #releaseBack: (() => void) | null = null;
   /** SPEC-044 §4.3: the open modal's close, which gives focus back. */
   #closeModal: (() => void) | null = null;
+  /** SPEC-045 §4.1: the open comms log's close, or `null`. */
+  #closeComms: (() => void) | null = null;
   #quitting = false;
 
   constructor(deps: PauseDeps, onResume: () => void, skip?: PauseSkip, recall?: PauseRecall, quit?: PauseQuit) {
@@ -107,6 +116,8 @@ export class PauseMenu {
       settings: deps.settings,
       save: deps.save,
       renderer: deps.renderer ?? null,
+      // SPEC-045 §4.2: the rows follow the hands the player is using.
+      scheme: () => deps.input.state.scheme,
       // SPEC-015 15-j: `Re-detect` from the pause menu draws the stress scene
       // for up to two seconds; the simulation stays paused behind it.
       redetect: deps.detectQuality?.bind(deps),
@@ -118,12 +129,18 @@ export class PauseMenu {
       },
     });
 
-    this.#resume = testId(el('button', 'pause-resume ui-btn', 'Resume'), 'pause-resume');
+    // SPEC-045 §4.8: a plain `ui-btn`, so it is styled like Settings beside it.
+    this.#resume = testId(el('button', 'ui-btn', 'Resume'), 'pause-resume');
     this.#resume.type = 'button';
     this.#resume.addEventListener('click', onResume);
 
     const settings = testId(h('button', { class: 'ui-btn', type: 'button', click: () => this.#openSettings() }, 'Settings'), 'pause-settings');
     const controls = testId(h('button', { class: 'ui-btn', type: 'button', click: () => this.#toggleControls() }, 'Controls'), 'pause-controls');
+    const log = deps.comms;
+    const comms =
+      log === undefined
+        ? null
+        : testId(h('button', { class: 'ui-btn', type: 'button', click: () => this.#openComms(log) }, 'Comms log'), 'pause-comms');
     const quitButton = testId(h('button', { class: 'ui-btn', type: 'button', click: () => this.#quitPressed() }, 'Save & Quit'), 'pause-quit');
 
     this.#controls = testId(el('div', 'pause-sheet is-hidden'), 'pause-sheet');
@@ -163,7 +180,7 @@ export class PauseMenu {
     this.#recall = recallButton === null || recall === undefined ? null : { button: recallButton, hooks: recall };
 
     this.#screen.body.append(
-      h('div', { class: 'pause-actions' }, this.#resume, settings, controls, skipButton, recallButton, quitButton),
+      h('div', { class: 'pause-actions' }, this.#resume, settings, controls, comms, skipButton, recallButton, quitButton),
       this.#controls,
     );
     deps.uiRoot.append(this.#root);
@@ -197,6 +214,7 @@ export class PauseMenu {
   hide(): void {
     this.#root.classList.remove('is-visible');
     this.#closeControls();
+    this.#closeCommsLog();
     this.#settings.hide();
     this.#releaseBack?.();
     this.#releaseBack = null;
@@ -204,6 +222,7 @@ export class PauseMenu {
   }
 
   dispose(): void {
+    this.#closeCommsLog();
     this.#releaseBack?.();
     this.#releaseBack = null;
     this.#releaseModal();
@@ -231,6 +250,24 @@ export class PauseMenu {
   #closeControls(): void {
     this.#controls.classList.add('is-hidden');
     this.#controls.replaceChildren();
+  }
+
+  /**
+   * SPEC-045 §4.1: the comms log over the menu (45-f: a line's hold keeps
+   * running behind the pause, and this is the recovery). Escape closes the
+   * log first and focus comes back to `pause-comms`.
+   */
+  #openComms(log: CommsLog): void {
+    this.#closeCommsLog();
+    const close = openCommsLog(uiLayers(this.#deps.uiRoot), log);
+    this.#closeComms = (): void => {
+      this.#closeComms = null;
+      close();
+    };
+  }
+
+  #closeCommsLog(): void {
+    this.#closeComms?.();
   }
 
   /**

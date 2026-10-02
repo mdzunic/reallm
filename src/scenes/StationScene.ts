@@ -22,6 +22,7 @@ import { Progression } from '@/systems/Progression';
 import { endingPending, interludeToPlay, LINE_LEDGER, stayReport } from '@/systems/StoryBeats';
 import { director } from '@/scenes/Director';
 import { CharacterPanel } from '@/ui/CharacterPanel';
+import { openCommsLog } from '@/ui/CommsLog';
 import { dialogueLayer } from '@/ui/DialogueUI';
 import { el, h, testId } from '@/ui/dom';
 import { clearEndingOverlays, EndingOverlay } from '@/ui/EndingOverlay';
@@ -296,6 +297,8 @@ export class StationScene extends UiScene<'station'> {
       settings: this.services.settings,
       save: this.services.save,
       renderer: this.services.renderer,
+      // SPEC-045 §4.2: the rows follow the hands the player is using.
+      scheme: () => this.services.input.state.scheme,
       // SPEC-015 AC-20: `Re-detect` runs the real boot benchmark.
       redetect: this.services.detectQuality?.bind(this.services),
       onReset: () => this.#quit(false),
@@ -396,12 +399,29 @@ export class StationScene extends UiScene<'station'> {
       section('character', 'Character'),
       action('starmap', 'Star Map ›', () => this.#starmap(), active),
       action('settings', 'Settings', () => this.#settings?.show()),
+      // SPEC-045 §4.1: the lines the dialogue layer showed this run.
+      action('comms', 'Comms log', () => this.#openComms()),
       action('quit', 'Quit to menu', () => this.#quit(true)),
       // SPEC-015 AC-52: the station is the other safe moment to restart into a
       // new build; the row only exists while one is waiting (15-c).
       ...(updateReady() ? [action('update', 'Update', () => applyUpdate())] : []),
     ]);
     this.#panelBox?.setAttribute('aria-labelledby', `station-tab-${this.#tab}`);
+  }
+
+  /**
+   * SPEC-045 §4.1: the comms log over the station — the page-lifetime dialogue
+   * layer's, so the debrief lines played on this entry are in it. Closed with
+   * the scene; Escape and `comms-log-close` give focus back to the rail.
+   */
+  #openComms(): void {
+    const dialogue = dialogueLayer(this.services.uiRoot, this.services.events, {
+      input: this.services.input,
+      saveKey: () => this.services.save.current,
+      typewriter: () => this.services.settings.get().typewriter,
+      speed: () => this.services.settings.get().dialogueSpeed,
+    });
+    this.disposer.add(openCommsLog(this.ui, dialogue.log));
   }
 
   #openTab(tab: StationTab): void {

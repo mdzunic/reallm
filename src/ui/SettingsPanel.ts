@@ -7,18 +7,27 @@
 // SPEC-015 §4.7 replaced the placeholder detector with the real run, which
 // lives in `core/Game.ts` because it needs the renderer: the panel calls
 // `redetect()`, reads `settings.benchmark` back and toasts (AC-20).
+//
+// SPEC-045 §4.2: the panel is six titled sections, rendered from the row
+// table in `ui/settingsRows.ts` — which rows, in which order, under which
+// testid. This file renders each row by its control; the few that do more
+// than write one key (quality, difficulty, fullscreen, service, backup and
+// reset) keep a renderer of their own.
 import type { BenchmarkOutcome } from '@/core/Benchmark';
+import type { Scheme } from '@/core/Input';
 import type { QualityPreset } from '@/core/Renderer';
-import type { DamageFlashMode, FrameRate, GuidanceLevel, SettingsStore } from '@/core/Settings';
+import { BRIGHTNESS_LIMIT, reduceMotionPreset, type Settings, type SettingsStore } from '@/core/Settings';
 import { log } from '@/core/Log';
 import { offlineStatus, offlineText } from '@/core/Updates';
 import type { SaveStore, SlotId } from '@/core/Save';
 import { SLOTS } from '@/core/Save';
 import type { Difficulty } from '@/data/index';
+import { multPercent } from '@/systems/Format';
 import { DIFFICULTY_LINES } from '@/systems/UiHelpers';
 import { confirmSheet } from '@/ui/ConfirmSheet';
 import { openControlsSheet } from '@/ui/ControlsSheet';
 import { el, h, keepFocus, openModal, testId, type UiRoot } from '@/ui/dom';
+import { rowNote, SETTINGS_SECTIONS, visibleRows, type RowEnv, type SettingsChoice, type SettingsRowDef } from '@/ui/settingsRows';
 
 /** The slice of the renderer the quality row drives; structural, optional. */
 export interface QualityTarget {
@@ -44,38 +53,15 @@ export interface SettingsDeps {
    * `Continue` offers the imported run.
    */
   onImported?: () => void;
+  /**
+   * SPEC-045 §4.2: the scheme the rows are chosen for, read on every render;
+   * `'keyboard'` when absent.
+   */
+  scheme?: () => Scheme;
 }
 
-const QUALITY_CHOICES = ['auto', 'low', 'medium', 'high'] as const;
-/** SPEC-040 §4.3: the two frame-rate ceilings, 60 first (the default). */
-const FRAME_RATE_CHOICES = [60, 30] as const satisfies readonly FrameRate[];
-const AUTO_FIRE_CHOICES = [
-  ['on', 'On'],
-  ['off', 'Off'],
-  ['touch', 'Touch only'],
-] as const;
-/** SPEC-037 §4.6: the damage vignette's three strengths. */
-const DAMAGE_FLASH_CHOICES = [
-  ['full', 'Full'],
-  ['subtle', 'Subtle'],
-  ['off', 'Off'],
-] as const satisfies readonly (readonly [DamageFlashMode, string])[];
-/** SPEC-027 D-16: the three guidance levels, in the order §4.9 tabulates them. */
-const GUIDANCE_CHOICES = [
-  ['full', 'Full'],
-  ['minimal', 'Minimal'],
-  ['off', 'Off'],
-] as const satisfies readonly (readonly [GuidanceLevel, string])[];
-
-/**
- * SPEC-038 §4.6: the difficulty row's segments, in the creation screen's order;
- * SPEC-043 §4.4 adds the third, `Hard`.
- */
-const DIFFICULTY_CHOICES = [
-  ['normal', 'Normal'],
-  ['casual', 'Casual'],
-  ['hard', 'Hard'],
-] as const satisfies readonly (readonly [Difficulty, string])[];
+/** A settings key a row writes on its own: everything but the save's difficulty. */
+type RowKey = Exclude<SettingsRowDef['key'], 'difficulty' | null>;
 
 /** SPEC-034 §4.13: what an import into the slot in play says on its way out. */
 export const IMPORT_REBOUND_TEXT = 'Save imported — returning to the main menu.';
@@ -147,108 +133,233 @@ export class SettingsPanel {
     keepFocus(this.#root, () => this.#build());
   }
 
+  /** SPEC-045 §4.2: what decides the visible rows, read on every render. */
+  #env(): RowEnv {
+    return {
+      scheme: this.#deps.scheme?.() ?? 'keyboard',
+      vibrate: typeof navigator.vibrate === 'function',
+      fullscreen: document.fullscreenEnabled === true,
+      saveBound: this.#deps.save.current !== null,
+      serviceMode: this.#deps.settings.serviceMode,
+    };
+  }
+
+  /**
+   * SPEC-045 §4.2: the six sections in order, each a titled `section` holding
+   * its visible rows in table order; a section with none is left out. The
+   * version line and its Licenses link close the Data section.
+   */
   #build(): void {
-    const s = this.#deps.settings;
+    const env = this.#env();
+    const rows = visibleRows(env);
     const close = testId(h('button', { class: 'ui-btn settings-close', type: 'button', click: () => this.hide() }, 'Close'), 'settings-close');
-    // SPEC-044 §4.5: the controls sheet, reachable outside the pause menu too.
-    // The scheme is `<html>`'s `scheme-touch` — the class every touch layout
-    // reads — so the sheet speaks to the hands the player is using now.
-    const controls = testId(
+    const sections: HTMLElement[] = [];
+    for (const section of SETTINGS_SECTIONS) {
+      const mine = rows.filter((row) => row.section === section.id);
+      if (mine.length === 0) continue;
+      const titleId = `settings-section-title-${section.id}`;
+      const box = testId(
+        h(
+          'section',
+          { class: 'settings-section', 'aria-labelledby': titleId },
+          h('h3', { class: 'settings-section-title', id: titleId }, section.title),
+        ),
+        `settings-section-${section.id}`,
+      );
+      for (const row of mine) {
+        const node = this.#row(row, env);
+        if (node === null) continue;
+        box.append(node);
+        const note = rowNote(row, env.scheme);
+        if (note !== null) box.append(h('p', { class: 'settings-note' }, note));
+      }
+      if (section.id === 'data') {
+        box.append(
+          h(
+            'p',
+            { class: 'settings-version' },
+            `ReaLLM ${__APP_VERSION__} · `,
+            h('a', { href: 'assets/LICENSES.md', target: '_blank', rel: 'noreferrer' }, 'Licenses'),
+          ),
+        );
+      }
+      sections.push(box);
+    }
+    this.#root.replaceChildren(
+      h(
+        'div',
+        { class: 'settings-body' },
+        h('div', { class: 'settings-head' }, h('p', { class: 'settings-title' }, 'Settings'), h('div', { class: 'settings-head-actions' }, close)),
+        ...sections,
+      ),
+    );
+  }
+
+  /** One row by its control; the rows that do more than write a key have their own renderer. */
+  #row(row: SettingsRowDef, env: RowEnv): Node | null {
+    const s = this.#deps.settings;
+    switch (row.id) {
+      case 'settings-quality':
+        return this.#qualityRow(row);
+      case 'settings-brightness':
+        return this.#brightnessRow(row);
+      case 'settings-fullscreen':
+        return this.#fullscreenRow(row);
+      case 'settings-controls':
+        return this.#controlsButton(row, env.scheme);
+      case 'settings-reset-tips':
+        return this.#resetTipsRow(row);
+      case 'settings-offline':
+        // SPEC-040 §4.7: whether this device can play offline yet, read on
+        // every render — the worker registers at the first station visit.
+        return h('div', { class: 'settings-row' }, testId(h('span', { class: 'settings-note' }, offlineText(offlineStatus())), row.id));
+      case 'settings-backup':
+        return this.#backupSection();
+      case 'settings-reset':
+        return this.#resetRow();
+      case 'settings-service':
+        return this.#serviceSection(row);
+      case 'settings-difficulty':
+        return this.#difficultyRow(row);
+      case 'settings-reduce-motion':
+        // SPEC-045 §4.3: the preset — reduce motion and the four settings it
+        // seeds, in one `set()`; the rebuild shows the four rows' new state.
+        return this.#toggleRow(row, s.get().reduceMotion, (on) => {
+          s.set(reduceMotionPreset(on));
+          if (this.#open) this.#render();
+        });
+      default:
+        break;
+    }
+    const key = row.key;
+    if (key === null || key === 'difficulty') return null;
+    switch (row.control) {
+      case 'slider':
+        return this.#volumeRow(row, key);
+      case 'toggle':
+        return this.#toggleRow(row, s.get()[key] === true, (on) => s.set({ [key]: on }));
+      case 'choice':
+        return this.#choiceRow(row, (choice) => s.get()[key] === choice.value, (choice) => s.set({ [key]: choice.value } as Partial<Settings>));
+      default:
+        return null;
+    }
+  }
+
+  // ----------------------------------------------------------------- shared
+
+  #toggleRow(row: SettingsRowDef, value: boolean, write: (on: boolean) => void): HTMLLabelElement {
+    const box = testId(h('input', { type: 'checkbox', 'aria-label': row.label }), row.id);
+    box.checked = value;
+    box.addEventListener('change', () => write(box.checked));
+    return h('label', { class: 'settings-row' }, h('span', {}, row.label), box);
+  }
+
+  /**
+   * SPEC-045 §4.2: a segmented choice — the group `row.id` holding one button
+   * per choice, `<row.id>-<suffix>`. A press writes, then the panel rebuilds
+   * through `keepFocus`. A stored value no choice holds (a `buttonScale` of 2,
+   * 45-l) leaves every segment unpressed.
+   */
+  #choiceRow(row: SettingsRowDef, active: (choice: SettingsChoice) => boolean, write: (choice: SettingsChoice) => void): HTMLDivElement {
+    const buttons = (row.choices ?? []).map((choice) => {
+      const on = active(choice);
+      return testId(
+        h(
+          'button',
+          {
+            class: `ui-btn seg${on ? ' is-active' : ''}`,
+            type: 'button',
+            'aria-pressed': String(on),
+            click: () => {
+              write(choice);
+              this.#render();
+            },
+          },
+          choice.label,
+        ),
+        `${row.id}-${choice.suffix}`,
+      );
+    });
+    return h(
+      'div',
+      { class: 'settings-row' },
+      h('span', {}, row.label),
+      testId(h('div', { class: 'settings-seg', role: 'group', 'aria-label': row.label }, ...buttons), row.id),
+    ) as HTMLDivElement;
+  }
+
+  // ------------------------------------------------------------------ audio
+
+  /** The volume buses, 0…100 % on the slider and 0…1 in the store; written on `input`. */
+  #volumeRow(row: SettingsRowDef, key: RowKey): HTMLLabelElement {
+    const s = this.#deps.settings;
+    const value = s.get()[key];
+    const slider = testId(
+      h('input', {
+        type: 'range',
+        min: 0,
+        max: 100,
+        step: 1,
+        value: Math.round((typeof value === 'number' ? value : 0) * 100),
+        'aria-label': `${row.label} volume`,
+      }),
+      row.id,
+    );
+    slider.addEventListener('input', () => s.set({ [key]: Number(slider.value) / 100 }));
+    return h('label', { class: 'settings-row' }, h('span', {}, row.label), slider);
+  }
+
+  // ------------------------------------------------------------- brightness
+
+  /**
+   * SPEC-045 §4.9: −30 … +30 % in steps of 5, written on `input`; the value
+   * reads beside it as `+10 %`.
+   */
+  #brightnessRow(row: SettingsRowDef): HTMLLabelElement {
+    const s = this.#deps.settings;
+    const limit = Math.round(BRIGHTNESS_LIMIT * 100);
+    const readout = h('span', { class: 'settings-value' }, multPercent(1 + s.get().brightness));
+    const slider = testId(
+      h('input', {
+        type: 'range',
+        min: -limit,
+        max: limit,
+        step: 5,
+        value: Math.round(s.get().brightness * 100),
+        'aria-label': row.label,
+      }),
+      row.id,
+    );
+    slider.addEventListener('input', () => {
+      s.set({ brightness: Number(slider.value) / 100 });
+      readout.textContent = multPercent(1 + s.get().brightness);
+    });
+    return h('label', { class: 'settings-row' }, h('span', {}, row.label), slider, readout);
+  }
+
+  // --------------------------------------------------------------- controls
+
+  /**
+   * SPEC-044 §4.5: the controls sheet, reachable outside the pause menu too,
+   * spoken to the hands the player is using now; it opens the Controls
+   * section (SPEC-045 §4.2). The gamepad reads the keyboard's rows.
+   */
+  #controlsButton(row: SettingsRowDef, scheme: Scheme): HTMLDivElement {
+    const open = testId(
       h(
         'button',
         {
           class: 'ui-btn settings-controls',
           type: 'button',
           click: () => {
-            openControlsSheet(this.#ui, document.documentElement.classList.contains('scheme-touch') ? 'touch' : 'keyboard');
+            openControlsSheet(this.#ui, scheme === 'touch' ? 'touch' : 'keyboard');
           },
         },
-        'Controls',
+        'Show controls',
       ),
-      'settings-controls',
+      row.id,
     );
-    this.#root.replaceChildren(
-      // `h` skips null children, which is what lets the fullscreen row vanish
-      // on iOS without a special case here (AC-92).
-      h(
-        'div',
-        { class: 'settings-body' },
-        h(
-          'div',
-          { class: 'settings-head' },
-          h('p', { class: 'settings-title' }, 'Settings'),
-          h('div', { class: 'settings-head-actions' }, controls, close),
-        ),
-        this.#audioRows(),
-        this.#hapticsRow(),
-        this.#qualityRow(),
-        this.#toggleRow('settings-reduce-motion', 'Reduce motion', s.get().reduceMotion, (on) => s.set({ reduceMotion: on })),
-        this.#damageFlashRow(),
-        this.#guidanceRow(),
-        this.#difficultyRow(),
-        this.#choiceRow('Auto-fire', AUTO_FIRE_CHOICES, s.autoFire, (mode) => s.setAutoFire(mode)),
-        this.#choiceRow(
-          'Joystick side',
-          [
-            ['left', 'Left'],
-            ['right', 'Right'],
-          ] as const,
-          s.joystickSide,
-          (side) => s.setJoystickSide(side),
-        ),
-        // SPEC-036 §4.5: on by default, every scheme; a player who reads a
-        // guide on the side turns it off here.
-        this.#toggleRow('settings-pause-on-blur', 'Pause when the game loses focus', s.get().pauseOnBlur, (on) =>
-          s.set({ pauseOnBlur: on }),
-        ),
-        this.#toggleRow('settings-mouse-steer', 'Mouse steer (flight)', s.flightMouseSteer, (on) => s.setFlightMouseSteer(on)),
-        this.#fullscreenRow(),
-        this.#toggleRow('settings-show-fps', 'Show FPS', s.showFps, (on) => s.setShowFps(on)),
-        this.#serviceSection(),
-        this.#backupSection(),
-        this.#resetRow(),
-        h(
-          'p',
-          { class: 'settings-version' },
-          `ReaLLM ${__APP_VERSION__} · `,
-          h('a', { href: 'assets/LICENSES.md', target: '_blank', rel: 'noreferrer' }, 'Licenses'),
-        ),
-      ),
-    );
-  }
-
-  // ------------------------------------------------------------------ audio
-
-  #audioRows(): HTMLDivElement {
-    const s = this.#deps.settings;
-    const rows: readonly [string, string, number, (v: number) => void][] = [
-      ['settings-master', 'Master', s.master, (v) => s.setMaster(v)],
-      ['settings-music', 'Music', s.music, (v) => s.setMusic(v)],
-      ['settings-sfx', 'Effects', s.sfx, (v) => s.setSfx(v)],
-    ];
-    const box = el('div', 'settings-section');
-    for (const [id, label, value, write] of rows) {
-      const slider = testId(
-        h('input', { type: 'range', min: 0, max: 100, step: 1, value: Math.round(value * 100), 'aria-label': `${label} volume` }),
-        id,
-      );
-      slider.addEventListener('input', () => write(Number(slider.value) / 100));
-      box.append(h('label', { class: 'settings-row' }, h('span', {}, label), slider));
-    }
-    return box;
-  }
-
-  /**
-   * SPEC-042 §4.10: `Vibration`, beside the audio rows (SPEC-045 places it in
-   * the Audio section) — only on the touch scheme, and only where the browser
-   * has `navigator.vibrate`; iOS and a keyboard never see a dead switch. The
-   * scheme is `<html>`'s `scheme-touch`, the class every touch layout reads.
-   */
-  #hapticsRow(): HTMLLabelElement | null {
-    const touch = document.documentElement.classList.contains('scheme-touch');
-    if (!touch || typeof navigator.vibrate !== 'function') return null;
-    const s = this.#deps.settings;
-    return this.#toggleRow('settings-haptics', 'Vibration', s.get().haptics, (on) => s.set({ haptics: on }));
+    return h('div', { class: 'settings-row' }, h('span', {}, row.label), open) as HTMLDivElement;
   }
 
   // ---------------------------------------------------------------- quality
@@ -278,32 +389,26 @@ export class SettingsPanel {
     this.#ui.toast(`Quality: ${label} — resolution now, the rest at the next screen`, 'info');
   }
 
-  #qualityRow(): HTMLDivElement {
+  /**
+   * The quality choice — `Auto` stores `null` and applies what the benchmark
+   * measured — with the benchmark's line and `Re-detect` under it.
+   */
+  #qualityRow(row: SettingsRowDef): DocumentFragment {
     const s = this.#deps.settings;
     const active = s.quality ?? 'auto';
-    const buttons = QUALITY_CHOICES.map((choice) =>
-      testId(
-        h(
-          'button',
-          {
-            class: `ui-btn seg${choice === active ? ' is-active' : ''}`,
-            type: 'button',
-            'aria-pressed': String(choice === active),
-            click: () => {
-              if (choice === 'auto') {
-                s.set({ quality: null });
-                this.#applyPreset(this.#autoPreset(), `auto (${this.#autoPreset()})`);
-              } else {
-                s.setQuality(choice);
-                this.#applyPreset(choice, choice);
-              }
-              this.#render();
-            },
-          },
-          choice.charAt(0).toUpperCase() + choice.slice(1),
-        ),
-        `settings-quality-${choice}`,
-      ),
+    const choice = this.#choiceRow(
+      row,
+      (option) => option.value === active,
+      (option) => {
+        if (option.value === 'auto') {
+          s.set({ quality: null });
+          this.#applyPreset(this.#autoPreset(), `auto (${this.#autoPreset()})`);
+        } else {
+          const preset = option.value as QualityPreset;
+          s.setQuality(preset);
+          this.#applyPreset(preset, preset);
+        }
+      },
     );
     const redetect = testId(
       h(
@@ -317,58 +422,17 @@ export class SettingsPanel {
       ),
       'settings-redetect',
     );
-    return h(
-      'div',
-      { class: 'settings-section' },
-      h('div', { class: 'settings-row' }, h('span', {}, 'Quality'), h('div', { class: 'settings-seg' }, ...buttons)),
+    const rows = document.createDocumentFragment();
+    rows.append(
+      choice,
       h(
         'div',
         { class: 'settings-row' },
         testId(h('span', { class: 'settings-note' }, this.#benchmarkNote()), 'settings-benchmark'),
         redetect,
       ),
-      // SPEC-040 §4.7: whether this device can play offline yet, read on every
-      // render — the worker registers at the first station visit.
-      h(
-        'div',
-        { class: 'settings-row' },
-        testId(h('span', { class: 'settings-note' }, offlineText(offlineStatus())), 'settings-offline'),
-      ),
-      // SPEC-040 §4.3: beside Quality (SPEC-045 owns where rows finally sit).
-      this.#frameRateRow(),
-      this.#toggleRow('settings-adaptive-quality', 'Adaptive quality', s.get().adaptiveQuality, (on) =>
-        s.set({ adaptiveQuality: on }),
-      ),
-    ) as HTMLDivElement;
-  }
-
-  /**
-   * SPEC-040 §4.3: the most frames a second the game draws — 60, or 30 for the
-   * battery on a device that could hold 60 (40-h). It applies from the next
-   * frame; the preset's own `targetFps` still wins when it is lower.
-   */
-  #frameRateRow(): HTMLDivElement {
-    const s = this.#deps.settings;
-    const active = s.get().frameRate;
-    const buttons = FRAME_RATE_CHOICES.map((rate) =>
-      testId(
-        h(
-          'button',
-          {
-            class: `ui-btn seg${rate === active ? ' is-active' : ''}`,
-            type: 'button',
-            'aria-pressed': String(rate === active),
-            click: () => {
-              s.set({ frameRate: rate });
-              this.#render();
-            },
-          },
-          String(rate),
-        ),
-        `settings-framerate-${rate}`,
-      ),
     );
-    return h('div', { class: 'settings-row' }, h('span', {}, 'Frame rate'), h('div', { class: 'settings-seg' }, ...buttons)) as HTMLDivElement;
+    return rows;
   }
 
   /**
@@ -404,71 +468,16 @@ export class SettingsPanel {
     );
   }
 
-  // ----------------------------------------------------------- damage flash
+  // --------------------------------------------------------------- gameplay
 
   /**
-   * SPEC-037 §4.6: how hard the red edge flashes on a hit — `Full` (0.8),
-   * `Subtle` (0.35, the default under reduced motion) or `Off`. The hit wedges
-   * and the red numbers stay either way (37-h).
+   * SPEC-027 D-16: the button that lets the first-time tips play again.
+   * Clearing them destroys nothing a trigger cannot re-show, so it asks
+   * nothing before it does it.
    */
-  #damageFlashRow(): HTMLDivElement {
+  #resetTipsRow(row: SettingsRowDef): HTMLDivElement {
     const s = this.#deps.settings;
-    const active = s.get().damageFlash;
-    const buttons = DAMAGE_FLASH_CHOICES.map(([value, text]) =>
-      testId(
-        h(
-          'button',
-          {
-            class: `ui-btn seg${value === active ? ' is-active' : ''}`,
-            type: 'button',
-            'aria-pressed': String(value === active),
-            click: () => {
-              s.set({ damageFlash: value });
-              this.#render();
-            },
-          },
-          text,
-        ),
-        `settings-damage-flash-${value}`,
-      ),
-    );
-    return h(
-      'div',
-      { class: 'settings-row' },
-      h('span', {}, 'Damage flash'),
-      testId(h('div', { class: 'settings-seg' }, ...buttons), 'settings-damage-flash'),
-    ) as HTMLDivElement;
-  }
-
-  // --------------------------------------------------------------- guidance
-
-  /**
-   * SPEC-027 §4.9 / D-16: how much the surface leads the player, and the button
-   * that lets the first-time tips play again. Clearing the tips destroys
-   * nothing a trigger cannot re-show, so it asks nothing before it does it.
-   */
-  #guidanceRow(): HTMLDivElement {
-    const s = this.#deps.settings;
-    const active = s.get().guidance;
-    const buttons = GUIDANCE_CHOICES.map(([value, text]) =>
-      testId(
-        h(
-          'button',
-          {
-            class: `ui-btn seg${value === active ? ' is-active' : ''}`,
-            type: 'button',
-            'aria-pressed': String(value === active),
-            click: () => {
-              s.set({ guidance: value });
-              this.#render();
-            },
-          },
-          text,
-        ),
-        `settings-guidance-${value}`,
-      ),
-    );
-    const resetTips = testId(
+    const reset = testId(
       h(
         'button',
         {
@@ -481,83 +490,54 @@ export class SettingsPanel {
         },
         'Reset tips',
       ),
-      'settings-reset-tips',
+      row.id,
     );
-    return h(
-      'div',
-      { class: 'settings-section' },
-      h(
-        'div',
-        { class: 'settings-row' },
-        h('span', {}, 'Guidance'),
-        testId(h('div', { class: 'settings-seg' }, ...buttons), 'settings-guidance'),
-      ),
-      h('div', { class: 'settings-row' }, h('span', { class: 'settings-note' }, 'First-time tips'), resetTips),
-    ) as HTMLDivElement;
+    return h('div', { class: 'settings-row' }, h('span', {}, row.label), reset) as HTMLDivElement;
   }
-
-  // ------------------------------------------------------------- difficulty
 
   /**
    * SPEC-038 §4.6: the run's difficulty, changeable mid-game (PLAN §4) — only
    * while a save is bound, so the main menu with no slot shows no row. A press
    * writes `save.meta.difficulty` and saves at once; combat reads it on the
    * next hit, the flight on its next resume, and the death penalty at death.
+   * SPEC-045 §4.2: it opens the Gameplay section.
    */
-  #difficultyRow(): HTMLDivElement | null {
+  #difficultyRow(row: SettingsRowDef): DocumentFragment | null {
     const save = this.#deps.save;
     const current = save.current;
     if (current === null) return null;
     const active = current.meta.difficulty;
-    const buttons = DIFFICULTY_CHOICES.map(([value, text]) =>
-      testId(
-        h(
-          'button',
-          {
-            class: `ui-btn seg${value === active ? ' is-active' : ''}`,
-            type: 'button',
-            'aria-pressed': String(value === active),
-            click: () => {
-              const bound = save.current;
-              if (bound === null) return;
-              bound.meta.difficulty = value;
-              save.request('manual');
-              this.#render();
-            },
-          },
-          text,
-        ),
-        `settings-difficulty-${value}`,
-      ),
-    );
-    return h(
-      'div',
-      { class: 'settings-section' },
-      h(
-        'div',
-        { class: 'settings-row' },
-        h('span', {}, 'Difficulty'),
-        testId(h('div', { class: 'settings-seg' }, ...buttons), 'settings-difficulty'),
+    const rows = document.createDocumentFragment();
+    rows.append(
+      this.#choiceRow(
+        row,
+        (option) => option.value === active,
+        (option) => {
+          const bound = save.current;
+          if (bound === null) return;
+          bound.meta.difficulty = option.value as Difficulty;
+          save.request('manual');
+        },
       ),
       testId(h('p', { class: 'settings-note' }, DIFFICULTY_LINES[active]), 'settings-difficulty-line'),
-    ) as HTMLDivElement;
+    );
+    return rows;
   }
 
   // ---------------------------------------------------------------- service
 
   /**
-   * SPEC-032 §4.8: the service override's section — only while it is on, so
-   * nothing here advertises it. The switch turns it off (the composition root
-   * toasts and hides the badge); nothing granted is taken back (E52).
+   * SPEC-032 §4.8: the service override's switch — only while it is on, so
+   * nothing here advertises it. It turns it off (the composition root toasts
+   * and hides the badge); nothing granted is taken back (E52).
    */
-  #serviceSection(): HTMLDivElement | null {
+  #serviceSection(row: SettingsRowDef): HTMLDivElement {
     const s = this.#deps.settings;
-    if (!s.serviceMode) return null;
     return testId(
       h(
         'div',
-        { class: 'settings-section' },
-        this.#toggleRow('settings-service', 'Service', true, (on) => {
+        { class: 'settings-block' },
+        this.#toggleRow(row, true, (on) => {
           s.setServiceMode(on);
           if (this.#open) this.#render();
         }),
@@ -571,46 +551,11 @@ export class SettingsPanel {
     ) as HTMLDivElement;
   }
 
-  // ----------------------------------------------------------------- shared
-
-  #toggleRow(id: string, label: string, value: boolean, write: (on: boolean) => void): HTMLLabelElement {
-    const box = testId(h('input', { type: 'checkbox', 'aria-label': label }), id);
-    box.checked = value;
-    box.addEventListener('change', () => write(box.checked));
-    return h('label', { class: 'settings-row' }, h('span', {}, label), box);
-  }
-
-  #choiceRow<T extends string>(
-    label: string,
-    choices: readonly (readonly [T, string])[],
-    active: T,
-    write: (choice: T) => void,
-  ): HTMLDivElement {
-    const seg = h(
-      'div',
-      { class: 'settings-seg' },
-      ...choices.map(([value, text]) =>
-        h(
-          'button',
-          {
-            class: `ui-btn seg${value === active ? ' is-active' : ''}`,
-            type: 'button',
-            'aria-pressed': String(value === active),
-            click: () => {
-              write(value);
-              this.#render();
-            },
-          },
-          text,
-        ),
-      ),
-    );
-    return h('div', { class: 'settings-row' }, h('span', {}, label), seg) as HTMLDivElement;
-  }
+  // ------------------------------------------------------------- fullscreen
 
   /**
    * AC-92: Android and desktop only — iOS reports `fullscreenEnabled` false, and
-   * the row is not built at all there.
+   * the row is not built at all there (its `shown` rule).
    *
    * SPEC-015 AC-37: this toggle is the **only** writer of `settings.fullscreen`.
    * Entering fullscreen on the boot tap never writes it (AC-34), so the stored
@@ -619,18 +564,13 @@ export class SettingsPanel {
    * page happens to be fullscreen right now when nothing has been chosen —
    * leaving fullscreen by a system gesture is not a preference (15-f, AC-36).
    */
-  #fullscreenRow(): HTMLLabelElement | null {
-    if (!document.fullscreenEnabled) return null;
+  #fullscreenRow(row: SettingsRowDef): HTMLLabelElement {
     const s = this.#deps.settings;
-    const box = testId(h('input', { type: 'checkbox', 'aria-label': 'Fullscreen' }), 'settings-fullscreen');
-    box.checked = s.get().fullscreen ?? document.fullscreenElement !== null;
-    box.addEventListener('change', () => {
-      const wanted = box.checked;
+    return this.#toggleRow(row, s.get().fullscreen ?? document.fullscreenElement !== null, (wanted) => {
       s.set({ fullscreen: wanted });
       if (wanted) void document.documentElement.requestFullscreen().catch(() => undefined);
       else void document.exitFullscreen().catch(() => undefined);
     });
-    return h('label', { class: 'settings-row' }, h('span', {}, 'Fullscreen'), box);
   }
 
   // ----------------------------------------------------------------- backup
@@ -645,7 +585,7 @@ export class SettingsPanel {
 
   #backupSection(): HTMLDivElement {
     const save = this.#deps.save;
-    const box = el('div', 'settings-section');
+    const box = el('div', 'settings-block');
     box.append(h('p', { class: 'settings-subtitle' }, 'Backup'));
     if (!save.codesSupported) {
       // 07-f: no CompressionStream, no codes — say so instead of failing on tap.

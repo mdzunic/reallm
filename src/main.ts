@@ -13,7 +13,7 @@ import { Input } from '@/core/Input';
 import { log } from '@/core/Log';
 import { RngRoot } from '@/core/Rng';
 import { SaveStore } from '@/core/Save';
-import { createSettings } from '@/core/Settings';
+import { createSettings, reduceMotionPreset } from '@/core/Settings';
 import { SERVICE_OFF_TEXT, SERVICE_ON_TEXT } from '@/systems/Service';
 import { hasOfflineWorker, offerUpdate, offlineStatus, registeredStatus, setOfflineStatus } from '@/core/Updates';
 import type { SceneId } from '@/core/StateMachine';
@@ -86,6 +86,41 @@ const applyScheme = (): void => {
 applyScheme();
 events.on('input:schemeChanged', applyScheme, schemeOwner);
 
+/**
+ * SPEC-045 §4.4: the two scales are root custom properties, written here and
+ * never in the frame loop. `--ui-scale` is the setting on the keyboard (and
+ * gamepad) scheme and 1 on touch, whose layout is sized to its screen (45-i);
+ * `--text-scale` is the setting everywhere. Both follow a change of either
+ * setting and of the scheme.
+ */
+const applyScales = (): void => {
+  const { uiScale, textScale } = settings.get();
+  const root = document.documentElement.style;
+  root.setProperty('--ui-scale', String(input.state.scheme === 'touch' ? 1 : uiScale));
+  root.setProperty('--text-scale', String(textScale));
+};
+applyScales();
+events.on('input:schemeChanged', applyScales, schemeOwner);
+
+/**
+ * SPEC-045 §4.5: plain text and the colour-blind preset are root classes,
+ * like `reduce-motion` — every rule they change reads them.
+ */
+const applyLookClasses = (): void => {
+  const { plainText, colourPreset } = settings.get();
+  document.documentElement.classList.toggle('plain-text', plainText);
+  document.documentElement.classList.toggle('colour-blind', colourPreset === 'colour-blind');
+};
+applyLookClasses();
+events.on(
+  'settings:changed',
+  ({ patch }) => {
+    if (patch.uiScale !== undefined || patch.textScale !== undefined) applyScales();
+    if (patch.plainText !== undefined || patch.colourPreset !== undefined) applyLookClasses();
+  },
+  schemeOwner,
+);
+
 // SPEC-031 §4.8: the scene tag is invisible without `?debug` — a CSS contract
 // on one class, so the e2e fleet keeps its steering hook either way.
 document.documentElement.classList.toggle('debug', flags.debug);
@@ -95,7 +130,8 @@ document.documentElement.classList.toggle('debug', flags.debug);
  * class on `<html>` that every static-version CSS rule gates on. The setting
  * *defaults* from `prefers-reduced-motion` (core/Settings.ts), the panel's
  * toggle overrides it, and a live OS flip below folds back into the same
- * setting — so the CSS and the JS halves can never disagree.
+ * setting — so the CSS and the JS halves can never disagree. SPEC-045 §4.3:
+ * the flip applies the whole preset, as the toggle does (45-c).
  */
 const motionOwner = {};
 const applyReduceMotion = (): void => {
@@ -111,7 +147,7 @@ events.on(
 );
 if (typeof globalThis.matchMedia === 'function') {
   globalThis.matchMedia('(prefers-reduced-motion: reduce)').addEventListener('change', (event) => {
-    settings.set({ reduceMotion: event.matches });
+    settings.set(reduceMotionPreset(event.matches));
   });
 }
 
@@ -273,6 +309,20 @@ const game = new Game({
 running = game;
 
 /**
+ * SPEC-045 §4.9: brightness scales every scene's exposure on both render
+ * paths — set at boot and on every change, never in the frame loop.
+ */
+const brightnessOwner = {};
+game.renderer.setBrightness(settings.get().brightness);
+events.on(
+  'settings:changed',
+  ({ patch }) => {
+    if (patch.brightness !== undefined) game.renderer.setBrightness(patch.brightness);
+  },
+  brightnessOwner,
+);
+
+/**
  * SPEC-036 §4.4: the one back-stack every closable layer registers with, and
  * the two ways into it. Escape asks the top layer first — a sheet, then the
  * settings panel, then the pause menu, which resumes — and only with nothing
@@ -380,6 +430,8 @@ if (import.meta.env.DEV) {
     slowDraw: (ms: number) => game.slowDraw(ms),
     /** SPEC-016 §8.4: the last finished `?perf` run's result, or `null` before one has ended. */
     perf: () => game.perfResult,
+    /** SPEC-045 §4.9: the tone-mapping exposure both render paths read, brightness applied. */
+    exposure: () => game.renderer.gl.toneMappingExposure,
     stop: () => game.stop(),
   };
 

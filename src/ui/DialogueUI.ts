@@ -22,6 +22,7 @@ import type { Unsubscribe } from '@/core/Events';
 import type { Scheme } from '@/core/Input';
 import type { DialogueSpeed } from '@/core/Settings';
 import { DIALOGUE, type DialogueDef, type DialogueId, type SpeakerId } from '@/data/index';
+import { CommsLog } from '@/ui/CommsLog';
 import { el, h, openModal, testId, topModal, uiLayers, type UiRoot } from '@/ui/dom';
 
 // The schema-typed view of the table: on the `as const` literal types an absent
@@ -188,6 +189,11 @@ export function dialogueLayer(
 }
 
 export class DialogueUI {
+  /**
+   * SPEC-045 §4.1: every line this layer has shown since the main menu was
+   * last entered — the pause menu's and the station's `Comms log` read it.
+   */
+  readonly log = new CommsLog();
   readonly #ui: UiRoot;
   readonly #events: DialogueEvents;
   readonly #input: DialogueInput | null;
@@ -265,6 +271,15 @@ export class DialogueUI {
         () => {
           this.#held = false;
           this.#clear();
+        },
+        this,
+      ),
+      // SPEC-045 §4.1: the main menu ends the run the log belongs to, so a
+      // Load or a New Game never reads the last run's lines (45-g).
+      events.on(
+        'scene:transition',
+        ({ to }) => {
+          if (to === 'menu') this.log.clear();
         },
         this,
       ),
@@ -431,6 +446,9 @@ export class DialogueUI {
     }
     this.#setStyle(line.speaker);
     this.#speaker.textContent = SPEAKER_NAMES[line.speaker];
+    // SPEC-045 §4.1: logged as it is shown, whole, before any typing — a line
+    // a scene change clears mid-type is still in the log (45-e).
+    this.log.push(line.speaker, line.text);
     const reveal = lineReveal(line.text, this.#typewriter?.() === false);
     this.#shown = reveal.chars;
     this.#lineDone = false;
@@ -469,9 +487,13 @@ export class DialogueUI {
     if (this.#advanceTimer !== null) clearTimeout(this.#advanceTimer);
     this.#advanceTimer = hold === null ? null : setTimeout(() => this.#advanceLine(), hold);
     // SPEC-044 §4.1: a complete modal line says what it waits for, in the
-    // words of the scheme the player is on now — and so, under Manual, does a
-    // whole non-modal one (SPEC-045 §4.1), which waits just the same.
-    if (job.modal || (line !== undefined && hold === null)) {
+    // words of the scheme the player is on now.
+    if (job.modal) {
+      this.#cue.textContent = cueText(this.#input?.state.scheme ?? 'keyboard');
+      this.#cue.hidden = false;
+    } else if (hold === null && line !== undefined) {
+      // SPEC-045 §4.1: so does a whole non-modal line under Manual, which
+      // waits for Enter or `›` just the same.
       this.#cue.textContent = cueText(this.#input?.state.scheme ?? 'keyboard');
       this.#cue.hidden = false;
     }
