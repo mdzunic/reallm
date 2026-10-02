@@ -144,7 +144,7 @@ function refocusTarget(container: HTMLElement, id: string | null, index: number)
 export interface ModalOptions {
   /** The dialog's accessible name (`aria-label`). */
   label: string;
-  /** What takes focus on open; the first control inside the root, else the root, when absent. */
+  /** What takes focus on open; the first control inside the root, else the root, when absent or unable to (disabled). */
   initialFocus?: HTMLElement | null;
   /** Put on SPEC-036's back-stack while open; omitted for layers SPEC-036 already registers. */
   onBack?: () => void;
@@ -235,7 +235,15 @@ export function openModal(root: HTMLElement, options: ModalOptions): () => void 
   if (MODALS.length === 1) document.addEventListener('keydown', trapTab, true);
   const onBack = options.onBack;
   const releaseBack = onBack === undefined ? null : (uiRootOf(root)?.pushBack(onBack) ?? null);
-  (options.initialFocus ?? shownFocusablesIn(root)[0] ?? root).focus({ preventScroll: true });
+  // The initial control, else the first control inside, else the root: the
+  // first of them that takes focus. A disabled control (a Buy the wallet
+  // cannot meet) or one that is not laid out ignores `focus()`, and focus
+  // would stay outside the dialog.
+  for (const target of [options.initialFocus, shownFocusablesIn(root)[0], root]) {
+    if (target === null || target === undefined) continue;
+    target.focus({ preventScroll: true });
+    if (document.activeElement === target) break;
+  }
 
   let open = true;
   return (): void => {

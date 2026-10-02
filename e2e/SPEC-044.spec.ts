@@ -678,6 +678,89 @@ test('8. the board’s Abandon opens its sheet on Cancel, so Enter keeps the mis
   expect(await focused(page)).toBe('mission-c1_m1-abandon');
 });
 
+// ------------------------------------------- 8b, 8c: the gear card and the stay card
+
+/** True while focus is inside the element with testid `id`. */
+async function focusInside(page: Page, id: string): Promise<boolean> {
+  return page.evaluate((testid) => document.querySelector(`[data-testid="${testid}"]`)?.contains(document.activeElement) ?? false, id);
+}
+
+test('8b. the gear card opens on its first button that takes focus: Close while Buy is out of reach, Buy once it is not', async ({ page }) => {
+  await start(page, URL);
+  await prepare(page, {});
+  await station(page);
+  await page.getByTestId('station-tab-shop').focus();
+  await page.keyboard.press('Enter');
+  await page.getByTestId('shop-tab-gear').focus();
+  await page.keyboard.press('Enter');
+  const details = page.getByTestId('shop-gear-pistol_magnum-details');
+  await details.focus();
+  await page.keyboard.press('Enter');
+  const card = page.getByTestId('gear-card');
+  await expect(card).toBeVisible();
+  await expect(card).toHaveAttribute('aria-modal', 'true');
+  // A fresh save holds no tokens: the Hand Cannon's 50 are out of reach, so
+  // its Buy is disabled and cannot take focus — Close does (§4.3).
+  await expect(page.getByTestId('gear-card-buy')).toBeDisabled();
+  expect(await focused(page)).toBe('gear-card-close');
+  for (let i = 0; i < 4; i++) {
+    await page.keyboard.press('Tab');
+    expect(await focusInside(page, 'gear-card'), `Tab ${i + 1} stays in the card`).toBe(true);
+  }
+  await page.keyboard.press('Escape');
+  await expect(card).toHaveCount(0);
+  expect(await focused(page)).toBe('shop-gear-pistol_magnum-details');
+
+  // With the tokens in hand, Buy is the first button and takes focus.
+  await page.evaluate(() => {
+    const save = window.__reallm.save().current;
+    if (save === null) throw new Error('no save bound');
+    save.player.tokens = 500;
+  });
+  await page.keyboard.press('Enter');
+  await expect(card).toBeVisible();
+  await expect(page.getByTestId('gear-card-buy')).toBeEnabled();
+  expect(await focused(page)).toBe('gear-card-buy');
+  await page.keyboard.press('Escape');
+  await expect(card).toHaveCount(0);
+  expect(await focused(page)).toBe('shop-gear-pistol_magnum-details');
+});
+
+test('8c. the stay-ending card is a modal on Continue, and Enter continues', async ({ page }) => {
+  // SPEC-024 case 7's replay path: the stay chosen and filed, the report not
+  // yet seen, films off — the station plays the card on entry.
+  await start(page, '/?films=off&debug&seed=123');
+  await prepare(page, {
+    done: ['c6_m1', 'c6_m2'],
+    flags: [
+      'chapter1_done',
+      'chapter2_done',
+      'chapter3_done',
+      'chapter4_done',
+      'chapter5_done',
+      'interlude1_seen',
+      'interlude2_seen',
+      'interlude3_seen',
+      'interlude4_seen',
+      'interlude5_seen',
+      'campaign_done',
+      'ending_stay',
+    ],
+  });
+  await page.evaluate(() => window.__reallm.go('station', {}, { force: true }));
+  await settle(page, 'station');
+  const card = page.getByTestId('ending-stay');
+  await expect(card).toBeVisible({ timeout: 20_000 });
+  await expect(card).toHaveAttribute('role', 'dialog');
+  await expect(card).toHaveAttribute('aria-modal', 'true');
+  await expect.poll(() => focused(page)).toBe('ending-continue');
+  await page.keyboard.press('Tab');
+  expect(await focusInside(page, 'ending-stay')).toBe(true);
+  await page.keyboard.press('Enter');
+  await expect(card).toHaveCount(0);
+  expect(await page.evaluate(() => window.__reallm.save().current?.progress.endingSeen)).toBe(true);
+});
+
 // ------------------------------------------------------------ 9: controls
 
 test('9. Settings opens the controls sheet; the pause menu’s Controls shows the same rows', async ({ page }) => {

@@ -174,7 +174,8 @@ export function openGearCard(id: ItemId, deps: GearCardDeps): Promise<void> {
     card.append(...children.filter((child): child is HTMLElement => child !== null));
     backdrop.append(card);
     deps.ui.mount(backdrop, 'overlay');
-    // SPEC-044 §4.3: focus on its first button, Tab kept inside.
-    closeModal = openModal(card, { label: item.name, initialFocus: card.querySelector('button') });
+    // SPEC-044 §4.3: focus on its first button that can take it — a Buy the
+    // wallet cannot meet is disabled, and Close follows it — Tab kept inside.
+    closeModal = openModal(card, { label: item.name, initialFocus: card.querySelector<HTMLElement>('button:not(:disabled)') });
   });
 }
