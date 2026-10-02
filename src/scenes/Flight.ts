@@ -432,7 +432,8 @@ export class FlightScene extends UiScene<'flight'> {
     const dialogue = dialogueLayer(services.uiRoot, services.events, {
       input: services.input,
       saveKey: () => services.save.current,
-      reduceMotion: () => services.settings.get().reduceMotion,
+      typewriter: () => services.settings.get().typewriter,
+      speed: () => services.settings.get().dialogueSpeed,
     });
     const banner = new MissionBanner(this.ui, {
       dialogue,
@@ -1047,7 +1048,8 @@ export class FlightScene extends UiScene<'flight'> {
     void dialogueLayer(this.services.uiRoot, this.services.events, {
       input: this.services.input,
       saveKey: () => this.services.save.current,
-      reduceMotion: () => this.services.settings.get().reduceMotion,
+      typewriter: () => this.services.settings.get().typewriter,
+      speed: () => this.services.settings.get().dialogueSpeed,
     }).play(id, { modal: false });
   }
 

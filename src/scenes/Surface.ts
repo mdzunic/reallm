@@ -1385,7 +1385,8 @@ export class SurfaceScene extends UiScene<'surface'> {
     const dialogue = dialogueLayer(services.uiRoot, services.events, {
       input: services.input,
       saveKey: () => this.services.save.current,
-      reduceMotion: () => this.services.settings.get().reduceMotion,
+      typewriter: () => this.services.settings.get().typewriter,
+      speed: () => this.services.settings.get().dialogueSpeed,
     });
     this.#dialogue = dialogue;
     // SPEC-042 §4.1: the mission banner, after the HUD so it is the top

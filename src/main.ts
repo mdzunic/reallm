@@ -363,7 +363,8 @@ if (import.meta.env.DEV) {
       void dialogueLayer(uiRoot, events, {
         input,
         saveKey: () => save.current,
-        reduceMotion: () => settings.get().reduceMotion,
+        typewriter: () => settings.get().typewriter,
+        speed: () => settings.get().dialogueSpeed,
       }).play(id);
     },
     /**

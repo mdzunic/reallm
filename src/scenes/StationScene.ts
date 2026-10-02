@@ -276,7 +276,8 @@ export class StationScene extends UiScene<'station'> {
     const dialogue = dialogueLayer(this.services.uiRoot, this.services.events, {
       input: this.services.input,
       saveKey: () => this.services.save.current,
-      reduceMotion: () => this.services.settings.get().reduceMotion,
+      typewriter: () => this.services.settings.get().typewriter,
+      speed: () => this.services.settings.get().dialogueSpeed,
     });
     for (const id of LINE_LEDGER.completedThisTrip(data)) {
       const done = `${id}_done`;
