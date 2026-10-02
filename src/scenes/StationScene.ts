@@ -399,7 +399,8 @@ export class StationScene extends UiScene<'station'> {
     const shared = { ui: this.ui, save: this.services.save, data, economy };
     switch (this.#tab) {
       case 'missions':
-        new MissionBoard(box, { ...shared, events: this.services.events });
+        // SPEC-043 §4.5: the best times are this device's, so they come from settings.
+        new MissionBoard(box, { ...shared, events: this.services.events, bestTimes: () => this.services.settings.get().bestTimes });
         return;
       case 'shop':
         new ShopPanel(box, shared);

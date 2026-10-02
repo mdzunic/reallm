@@ -17,6 +17,7 @@ import type { QualityPreset } from '@/core/Renderer';
 import type { EmitArgs, GameEvents } from '@/core/Events';
 import { log } from '@/core/Log';
 import { TIP_IDS, type TipId } from '@/data/hints';
+import { MISSIONS, type MissionId } from '@/data/missions';
 
 export const SETTINGS_KEY = 'reallm:settings';
 export const SETTINGS_VERSION = 1 as const;
@@ -63,6 +64,12 @@ export type TipSeen = TipId | `${TipId}@touch`;
 
 /** SPEC-036 §4.12: the zone ghosts show on the first two touch landings. */
 export const ZONES_SHOWN_MAX = 2;
+
+/** SPEC-043 §4.5: the longest best time the store keeps — a day, in whole seconds. */
+export const BEST_TIME_MAX_SECONDS = 86_400;
+
+/** SPEC-043 §4.5: a mission's fastest clean run on this device, in whole seconds. */
+export type BestTimes = Partial<Record<MissionId, number>>;
 
 /**
  * SPEC-015 §4 stores what the boot benchmark measured, so it runs once.
@@ -154,6 +161,13 @@ export type Settings = {
    * stored non-boolean reads the default.
    */
   haptics: boolean;
+  /**
+   * SPEC-043 §4.5: the fastest clean run of each surface mission, in whole
+   * seconds. A record is the player's, not the save's — per device, like
+   * `tipsSeen`, with no migration. Only mission ids with integers in
+   * 1…86 400 are kept.
+   */
+  bestTimes: BestTimes;
 };
 
 export interface SettingsStore {
@@ -249,6 +263,7 @@ export function defaultSettings(): Settings {
     pauseOnBlur: true,
     zonesShown: 0,
     haptics: true,
+    bestTimes: {},
   };
 }
 
@@ -380,6 +395,24 @@ function tipIds(value: unknown): TipSeen[] {
   return out;
 }
 
+/**
+ * SPEC-043 §4.5 (43-l): an object of mission id → whole seconds in 1…86 400,
+ * cleaned like `tipsSeen` — a non-object reads as `{}`, and an unknown id or a
+ * value that is not such an integer is dropped. The same rule on load and on
+ * `set`.
+ */
+function bestTimes(value: unknown): BestTimes {
+  const out: BestTimes = {};
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return out;
+  for (const [id, seconds] of Object.entries(value as Record<string, unknown>)) {
+    if (!Object.hasOwn(MISSIONS, id)) continue;
+    if (typeof seconds !== 'number' || !Number.isInteger(seconds)) continue;
+    if (seconds < 1 || seconds > BEST_TIME_MAX_SECONDS) continue;
+    out[id as MissionId] = seconds;
+  }
+  return out;
+}
+
 /** SPEC-036 §4.12: an integer 0…2; anything else reads as 0. */
 function zonesShown(value: unknown): number {
   return typeof value === 'number' && Number.isInteger(value) && value >= 0 && value <= ZONES_SHOWN_MAX ? value : 0;
@@ -462,6 +495,8 @@ function coerce<K extends keyof Settings>(key: K, value: unknown, current: Setti
       case 'haptics':
         // SPEC-042 §3: default-on, so an unusable value must not turn it off.
         return bool(value, true);
+      case 'bestTimes':
+        return bestTimes(value);
       default:
         return current[key];
     }

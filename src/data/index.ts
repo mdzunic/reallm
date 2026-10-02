@@ -18,6 +18,7 @@ export * from '@/data/affixes';
 export * from '@/data/assets';
 export * from '@/data/characters';
 export * from '@/data/companions';
+export * from '@/data/contracts';
 export * from '@/data/dialogue';
 export * from '@/data/enemies';
 export * from '@/data/films';

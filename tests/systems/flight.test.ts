@@ -382,6 +382,34 @@ describe('damage, shield, hull', () => {
     expect(w.flight.ship.shield).toBe(w.flight.ship.maxShield - 24);
   });
 
+  it('hard multiplies incoming damage by 1.3, from the config and from setDifficulty (SPEC-043 §4.4)', () => {
+    const w = world({ difficulty: 'hard' });
+    step(w.flight, LAUNCH_SECONDS + DT);
+    w.flight.hit(20, 'enemy', { kind: 'enemy', enemyId: 'scav_fighter' });
+    expect(w.flight.ship.shield).toBeCloseTo(w.flight.ship.maxShield - 26, 9);
+    const v = world({ difficulty: 'normal' });
+    step(v.flight, LAUNCH_SECONDS + DT);
+    v.flight.setDifficulty('hard');
+    v.flight.hit(10, 'asteroid', { kind: 'asteroid' });
+    expect(v.flight.ship.shield).toBeCloseTo(v.flight.ship.maxShield - 13, 9);
+  });
+
+  it('flight enemies keep their table HP on hard — only their hits change (SPEC-043 §2)', () => {
+    // No ARIA and no trigger: nothing the ship does takes HP off a hazard.
+    const w = world({ planet: PLANETS.hive, difficulty: 'hard', aria: null });
+    const ships = (): { hp: number; table: number }[] => {
+      const out: { hp: number; table: number }[] = [];
+      for (let i = 0; i < w.flight.hazards.size; i++) {
+        const hazard = w.flight.hazards.at(i);
+        if (hazard.def !== undefined) out.push({ hp: hazard.hp, table: hazard.def.hp });
+      }
+      return out;
+    };
+    for (let t = 0; t < 180 && ships().length === 0; t++) step(w.flight, 1);
+    expect(ships().length).toBeGreaterThan(0);
+    for (const ship of ships()) expect(ship.hp).toBe(ship.table);
+  });
+
   it('pins maxShield and maxHull to the upgrade tables with ARIA level 3 (AC-73, AC-74)', () => {
     const w = world({ ship: { shield: 2, hull: 3 }, aria: { level: 3, enabled: true } });
     expect(w.flight.ship.maxShield).toBe(UPGRADES.shield.metrics['shieldHp']![2]);

@@ -17,6 +17,9 @@ import {
   ATTRIBUTE_EFFECTS,
   CLASSES,
   COMPANIONS,
+  CONTRACT_LITHIUM,
+  CONTRACT_REWARD_FRACTION,
+  CONTRACTS,
   DEATH_TIPS,
   ENEMIES,
   FOLLOWERS,
@@ -32,8 +35,10 @@ import {
   TUNING,
   UPGRADES,
   type Attributes,
+  type BonusReward,
   type ClassId,
   type CompanionId,
+  type ContractId,
   type DamageSource,
   type DeathTipId,
   type Difficulty,
@@ -43,6 +48,7 @@ import {
   type FollowerId,
   type LootEntry,
   type LootTableId,
+  type MissionBonus,
   type MissionDef,
   type MissionId,
   type PlanetDef,
@@ -69,7 +75,7 @@ import {
 } from '@/systems/Economy';
 import type { SkipRefusal } from '@/systems/Flight';
 import { weaponDps, type SlotView } from '@/systems/Loadout';
-import { campaignLocked } from '@/systems/Missions';
+import { campaignLocked, contractFor } from '@/systems/Missions';
 import { cumulativeXp, LEVEL_CAP, xpToNext } from '@/systems/Progression';
 import type { Class, Item, QuickSlot, WeaponSlot } from '@/data/index';
 
@@ -126,6 +132,8 @@ export function passiveText(passive: Class['passive']): string {
 export const DIFFICULTY_LINES: Readonly<Record<Difficulty, string>> = {
   normal: 'Normal — the pressure the game was tuned for.',
   casual: 'Casual — softer hits and storms, longer wind-ups, kinder deaths; the story is unchanged.',
+  // SPEC-043 §4.4.
+  hard: 'Hard — tougher, deadlier hostiles and twice the elites; a death costs a fifth of the hold.',
 };
 
 /**
@@ -426,8 +434,13 @@ export function companionEffectText(effect: CompanionEffect): string {
   return parts.join(' · ');
 }
 
-/** The rewards line of a mission row (§4.3): XP, tokens, resources, items. */
-export function rewardsText(rewards: MissionDef['rewards'], replay = false): string {
+/**
+ * The rewards line of a mission row (§4.3): XP, tokens, resources, items. A
+ * replay halves the XP and tokens and drops the rest (E2); SPEC-043 §4.3: a
+ * contract replay reads its own payout — 75 % of each, then the lithium.
+ */
+export function rewardsText(rewards: MissionDef['rewards'], replay = false, contract = false): string {
+  if (replay && contract) return contractPayout(rewards, '◈');
   const half = (value: number): number => (replay ? Math.floor(value / 2) : value);
   const parts: string[] = [];
   if (rewards.xp > 0) parts.push(`+${half(rewards.xp)} XP`);
@@ -441,6 +454,73 @@ export function rewardsText(rewards: MissionDef['rewards'], replay = false): str
     }
   }
   return parts.join(' · ');
+}
+
+/**
+ * SPEC-043 §4.3: `+<xp> XP · +<tokens> <unit> · +20 lithium` — the floored 75 %
+ * of the mission's XP and tokens, and the contract's lithium. The board prints
+ * tokens as `◈`, the banner as `tokens`.
+ */
+function contractPayout(rewards: MissionDef['rewards'], unit: string): string {
+  const parts: string[] = [];
+  const xp = Math.floor(rewards.xp * CONTRACT_REWARD_FRACTION);
+  const tokens = Math.floor(rewards.tokens * CONTRACT_REWARD_FRACTION);
+  if (xp > 0) parts.push(`+${xp} XP`);
+  if (tokens > 0) parts.push(`+${tokens} ${unit}`);
+  parts.push(`+${CONTRACT_LITHIUM} lithium`);
+  return parts.join(' · ');
+}
+
+// ------------------------------------------- SPEC-043: bonuses, contracts, times
+
+/** SPEC-043 §4.5: whole seconds as `m:ss` — `161` → `2:41`. */
+export function timeText(seconds: number): string {
+  const total = Number.isFinite(seconds) ? Math.max(0, Math.floor(seconds)) : 0;
+  return `${Math.floor(total / 60)}:${String(total % 60).padStart(2, '0')}`;
+}
+
+/** SPEC-043 §4.2: `No deaths` · `Under 4:00` · `No shelter` · `Kill 2 elites`. */
+export function bonusText(bonus: MissionBonus): string {
+  switch (bonus.kind) {
+    case 'no_death':
+      return 'No deaths';
+    case 'par':
+      return `Under ${timeText(bonus.seconds)}`;
+    case 'no_shelter':
+      return 'No shelter';
+    case 'elites':
+      return `Kill ${bonus.count} elite${bonus.count === 1 ? '' : 's'}`;
+  }
+}
+
+/** SPEC-043 §4.2: `+2 Frag Grenade` · `+40 lithium` — items, then resources. */
+export function bonusRewardText(reward: BonusReward): string {
+  const parts: string[] = [];
+  for (const item of reward.items ?? []) {
+    if (item.qty > 0) parts.push(`+${item.qty} ${ITEM_TABLE[item.itemId].name}`);
+  }
+  for (const resource of RESOURCE_IDS) {
+    const amount = reward.resources?.[resource] ?? 0;
+    if (amount > 0) parts.push(`+${amount} ${resource}`);
+  }
+  return parts.join(' · ');
+}
+
+/** SPEC-043 §4.2: the board's bonus row — `Bonus: Under 4:00 → +2 Frag Grenade`. */
+export function bonusLine(bonus: MissionBonus): string {
+  return `Bonus: ${bonusText(bonus)} → ${bonusRewardText(bonus.reward)}`;
+}
+
+/**
+ * SPEC-043 §4.3: `Contract · <name> · 75 % + 20 lithium` when `def` runs as a
+ * contract on that landing, else `null`. The board asks for the next landing
+ * (`visits + 1`), the pad terminal for this one (`visits`).
+ */
+export function contractLabel(save: Save, def: MissionDef, landing: number): string | null {
+  const contract = contractFor(save, def, landing);
+  if (contract === null) return null;
+  const share = Math.round(CONTRACT_REWARD_FRACTION * 100);
+  return `Contract · ${CONTRACTS[contract].name} · ${share} % + ${CONTRACT_LITHIUM} lithium`;
 }
 
 // ------------------------------------------------------------------ missions
@@ -884,11 +964,30 @@ export function shipGateText(save: Save, system: ShipSystem): string | null {
 
 // --------------------------------------------- SPEC-042: feedback in play
 
-/** §4.1: the mission banner's three lines. SPEC-043 extends the function with an `extras` argument. */
+/**
+ * §4.1: the mission banner's three lines, and SPEC-043 §4.6's three optional
+ * rows under the rewards — each `null` when the banner has no such row.
+ */
 export interface CompletionLines {
   title: string;
   rewards: string;
   next: string | null;
+  /** `Bonus: <bonus> — <reward>`, or `Bonus missed: <bonus>`. */
+  bonus?: string | null;
+  /** `Contract · <name>`. */
+  contract?: string | null;
+  /** `Time <m:ss>`. */
+  time?: string | null;
+}
+
+/**
+ * SPEC-043 §4.6: what the scene knows besides the mission — the payload's
+ * `contract` and `seconds`, and the `mission:bonus` that preceded it.
+ */
+export interface CompletionExtras {
+  contract?: ContractId | null;
+  bonus?: { bonus: MissionBonus; earned: boolean } | null;
+  seconds?: number | null;
 }
 
 /**
@@ -898,8 +997,37 @@ export interface CompletionLines {
  * and tokens — off the same fraction `applyRewards` charges — then `replay`,
  * and nothing else, as `rewardsText` does. `next` is the pad's first offer
  * that is not a replay, or `null`.
+ *
+ * SPEC-043 §4.6: with `extras.contract` the rewards are the contract's payout,
+ * `+<xp> XP · +<tokens> tokens · +20 lithium · contract`; the bonus, contract
+ * and time rows come from the extras, each `null` when its extra is absent.
  */
-export function completionLines(def: MissionDef, replay: boolean, next: MissionDef | null): CompletionLines {
+export function completionLines(
+  def: MissionDef,
+  replay: boolean,
+  next: MissionDef | null,
+  extras?: CompletionExtras,
+): CompletionLines {
+  const contract = extras?.contract ?? null;
+  const judged = extras?.bonus ?? null;
+  const seconds = extras?.seconds ?? null;
+  return {
+    title: def.title,
+    rewards: contract !== null ? `${contractPayout(def.rewards, 'tokens')} · contract` : bannerRewards(def, replay),
+    next: next === null ? null : `Next: ${next.title} — at the pad terminal`,
+    bonus:
+      judged === null
+        ? null
+        : judged.earned
+          ? `Bonus: ${bonusText(judged.bonus)} — ${bonusRewardText(judged.bonus.reward)}`
+          : `Bonus missed: ${bonusText(judged.bonus)}`,
+    contract: contract === null ? null : `Contract · ${CONTRACTS[contract].name}`,
+    time: seconds === null ? null : `Time ${timeText(seconds)}`,
+  };
+}
+
+/** SPEC-042 §4.1: a first run's or a plain replay's rewards line. */
+function bannerRewards(def: MissionDef, replay: boolean): string {
   const rewards = def.rewards;
   const paid = (value: number): number => (replay ? Math.floor(value * TUNING.REPLAY_REWARD_FRACTION) : value);
   const parts: string[] = [];
@@ -917,11 +1045,7 @@ export function completionLines(def: MissionDef, replay: boolean, next: MissionD
       if (item.qty > 0) parts.push(`${ITEM_TABLE[item.itemId].name} ×${item.qty}`);
     }
   }
-  return {
-    title: def.title,
-    rewards: parts.join(' · '),
-    next: next === null ? null : `Next: ${next.title} — at the pad terminal`,
-  };
+  return parts.join(' · ');
 }
 
 /**

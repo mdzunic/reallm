@@ -33,6 +33,7 @@ import {
   type ClassPassive,
   CLASS_IDS,
   COMPANION_IDS,
+  DIFFICULTIES,
   ITEMS,
   MISSIONS,
   PLANETS,
@@ -56,6 +57,13 @@ import {
   type ShipSystem,
   type WeaponSlot,
 } from '@/data/index';
+
+/**
+ * SPEC-038's alias, widened by SPEC-043 §4.4 to `'casual' | 'normal' | 'hard'`.
+ * The union lives in `data/ids.ts` so the content tables can name it; the save
+ * is where a run's difficulty is kept, so it is re-exported from here too.
+ */
+export { DIFFICULTIES, type Difficulty } from '@/data/index';
 
 export const SAVE_VERSION = 2 as const;
 
@@ -664,7 +672,9 @@ function validateMeta(raw: Bag, warnings: string[]): Save['meta'] {
     // change which save loads or whether one is written.
     updatedAt: Math.max(0, num(raw['updatedAt'], 0)),
     playtimeSec: Math.max(0, num(raw['playtimeSec'], 0)),
-    difficulty: oneOf(raw['difficulty'], ['casual', 'normal'] as const, 'normal'),
+    // SPEC-043 §4.4: an unknown difficulty reads normal; the version does not
+    // move, so an older build reading `'hard'` falls back to normal the same way.
+    difficulty: oneOf(raw['difficulty'], DIFFICULTIES, 'normal'),
     iteration,
     appVersion: typeof raw['appVersion'] === 'string' ? raw['appVersion'] : APP_VERSION,
   };

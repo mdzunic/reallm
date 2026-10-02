@@ -350,3 +350,34 @@ describe('Determinism (16-e)', () => {
     expect(runCampaign(COMPLETIONIST).events).toEqual(runCampaign(COMPLETIONIST).events);
   });
 });
+
+describe('Bonuses and side rewards in the harness (SPEC-043 §4.7)', () => {
+  let worst: RunReport;
+  let completionist: RunReport;
+
+  beforeAll(() => {
+    worst = runCampaign(WORST_CASE);
+    completionist = runCampaign(COMPLETIONIST);
+  });
+
+  const judged = (run: RunReport): GameEvents['mission:bonus'][] =>
+    run.events.filter((event) => event.name === 'mission:bonus').map((event) => event.payload as GameEvents['mission:bonus']);
+
+  it('the worst case earns every main bonus but the elite one — it never dies, shelters or kills an elite', () => {
+    // The 17 main missions less the tutorial, the Gauntlet and the finale.
+    expect(judged(worst)).toHaveLength(14);
+    expect(judged(worst).filter((bonus) => !bonus.earned)).toEqual([{ id: 'c4_m2', bonus: 'elites', earned: false }]);
+    // Main bonuses pay items only, so the pinned collects above start where they did.
+    expect(worst.events.some((event) => event.name === 'item:noRoom')).toBe(false);
+  });
+
+  it('the completionist judges all 22, and its side resources land without a refusal', () => {
+    expect(judged(completionist)).toHaveLength(22);
+    expect(judged(completionist).filter((bonus) => !bonus.earned).map((bonus) => bonus.id)).toEqual(['c3_s1', 'c4_m2']);
+    expect(completionist.problems).toEqual([]);
+    expect(completionist.events.some((event) => event.name === 'item:noRoom')).toBe(false);
+    // The harness never replays, so nothing ran as a contract.
+    const completed = completionist.events.filter((event) => event.name === 'mission:completed');
+    expect(completed.every((event) => (event.payload as GameEvents['mission:completed']).contract === undefined)).toBe(true);
+  });
+});

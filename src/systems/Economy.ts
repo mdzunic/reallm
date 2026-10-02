@@ -31,6 +31,9 @@ import {
   CLASSES,
   COMPANIONS,
   COMPANION_IDS,
+  CONTRACT_LITHIUM,
+  CONTRACT_REWARD_FRACTION,
+  DIFFICULTY_RULES,
   ITEMS,
   MISSIONS,
   PLANETS,
@@ -40,6 +43,7 @@ import {
   SHIP_SYSTEMS,
   TUNING,
   UPGRADES,
+  type BonusReward,
   type Class,
   type ClassId,
   type Companion,
@@ -58,6 +62,7 @@ import {
   type RecipeId,
   type Requirement,
   type ResourceId,
+  type ResourceSource,
   type ShipSystem,
   type Upgrade,
 } from '@/data/index';
@@ -88,8 +93,12 @@ export type Result<T = {}> = ({ ok: true } & T) | Fail;
  */
 export type PurchaseKind = 'ship' | 'gear' | 'companion' | 'craft';
 
-/** Where a resource came from; only `'pickup'` is charged against the cap (§4.5). */
-export type ResourceSource = 'pickup' | 'reward' | 'voucher' | 'subsidy';
+/**
+ * Where a resource came from; only `'pickup'` is charged against the cap
+ * (§4.5). SPEC-043 §3 moved the union to `data/ids.ts`, so `core/Events.ts`
+ * can carry it on `resource:collected`; it is re-exported here.
+ */
+export type { ResourceSource };
 
 /** SPEC-034 §4.12: units the active collect objectives still want, per resource. */
 export type CollectDemand = (resource: ResourceId) => number;
@@ -268,6 +277,8 @@ export class Economy {
         ...(shipped > 0 ? { shipped } : {}),
         // The HUD throttles the toast to once every three seconds (§4.5).
         ...(blocked > 0 ? { blocked: 'cargo_full' as const } : {}),
+        // SPEC-043 §4.2: only a pickup advances a collect objective (43-h).
+        source,
       });
     }
     return { added, shipped, blocked };
@@ -681,10 +692,21 @@ export class Economy {
    * resources past the cap, items, flags — and a replay pays half the XP and
    * half the tokens, floored, and nothing else: no flags, no items, no
    * resources (E2's grinding path must not re-hand out the story).
+   *
+   * SPEC-043 §4.3: a replay run as a contract pays 75 % of the XP and the
+   * tokens, floored, and 20 lithium as a reward (past the cap) — and still
+   * none of the mission's items, resources or flags.
    */
-  applyRewards(mission: MissionDef, replay: boolean): void {
+  applyRewards(mission: MissionDef, replay: boolean, contract = false): void {
     const rewards = mission.rewards;
     const reason = `mission:${mission.id}`;
+    if (replay && contract) {
+      this.#progression.addXp(Math.floor(rewards.xp * CONTRACT_REWARD_FRACTION), reason);
+      this.#progression.addTokens(Math.floor(rewards.tokens * CONTRACT_REWARD_FRACTION), reason);
+      this.addResource('lithium', CONTRACT_LITHIUM, 'reward');
+      this.#saves?.request('mission');
+      return;
+    }
     if (replay) {
       const fraction = TUNING.REPLAY_REWARD_FRACTION;
       this.#progression.addXp(Math.floor(rewards.xp * fraction), reason);
@@ -694,11 +716,32 @@ export class Economy {
     }
     this.#progression.addXp(rewards.xp, reason);
     this.#progression.addTokens(rewards.tokens, reason);
+    this.#grant(rewards);
+    for (const flag of rewards.flags ?? []) this.setFlag(flag);
+    this.#saves?.request('mission');
+  }
+
+  /**
+   * SPEC-043 §4.2: an earned bonus — on a first run, a replay and a contract
+   * alike. Its resources arrive as a `reward` (past the cap, never shipped) and
+   * its items through `addItem`, with E25's `item:noRoom` and toast for what
+   * does not fit, which the surface spills at the player's feet. A mission
+   * with no bonus pays nothing here.
+   */
+  applyBonus(mission: MissionDef): void {
+    const bonus = mission.bonus;
+    if (bonus === undefined) return;
+    this.#grant(bonus.reward);
+    this.#saves?.request('mission');
+  }
+
+  /** A grant's resources as `reward` and its items into the pack, overflow announced (E25). */
+  #grant(reward: BonusReward): void {
     for (const resource of RESOURCE_IDS) {
-      const amount = rewards.resources?.[resource] ?? 0;
+      const amount = reward.resources?.[resource] ?? 0;
       if (amount > 0) this.addResource(resource, amount, 'reward');
     }
-    for (const { itemId, qty } of rewards.items ?? []) {
+    for (const { itemId, qty } of reward.items ?? []) {
       const { blocked } = this.addItem(itemId, qty);
       // E25: the surface scene spills these at the player's feet (SPEC-034
       // §4.15 — `item:noRoom` is what it listens for); at the station the toast
@@ -708,8 +751,6 @@ export class Economy {
         this.#events.emit('ui:toast', { kind: 'warn', text: noRoomText(ITEM_TABLE[itemId], blocked) });
       }
     }
-    for (const flag of rewards.flags ?? []) this.setFlag(flag);
-    this.#saves?.request('mission');
   }
 
   /**
@@ -738,16 +779,18 @@ export class Economy {
   }
 
   /**
-   * E4: a tenth of every resource on normal, nothing on casual — and the
-   * difficulty is read at death, so a mid-game switch only affects the deaths
-   * after it (10-c). Returns what was lost, for the death screen.
+   * E4: a tenth of every resource on normal, nothing on casual, a fifth on hard
+   * (SPEC-043 §4.4, `DIFFICULTY_RULES[d].deathLoss`) — and the difficulty is
+   * read at death, so a mid-game switch only affects the deaths after it
+   * (10-c). Returns what was lost, for the death screen.
    */
   applyDeathPenalty(): Partial<Record<ResourceId, number>> {
     const lost: Partial<Record<ResourceId, number>> = {};
-    if (this.#save.meta.difficulty === 'casual') return lost;
+    const share = DIFFICULTY_RULES[this.#save.meta.difficulty].deathLoss;
+    if (share <= 0) return lost;
     for (const resource of RESOURCE_IDS) {
       const have = this.#save.resources[resource];
-      const loss = Math.floor(have * TUNING.DEATH_RESOURCE_LOSS);
+      const loss = Math.floor(have * share);
       if (loss <= 0) continue;
       const total = have - loss;
       this.#save.resources[resource] = total;

@@ -241,6 +241,9 @@ const SILENT_EVENTS = [
   'mission:progress',
   'mission:stageReset',
   'mission:abandoned',
+  // SPEC-043 §4.2: the judgement rides just ahead of `mission:completed`, whose
+  // sting is the sound; the banner's bonus row is what says how it went.
+  'mission:bonus',
   'flag:set',
   'dialogue:ended',
   'flight:recalled',

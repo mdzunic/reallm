@@ -286,3 +286,54 @@ describe('the mission banner (SPEC-042 §4.1)', () => {
     expect(r.stack.children).not.toContain(root);
   });
 });
+
+describe('the banner’s optional rows (SPEC-043 §4.6)', () => {
+  it('shows the bonus, contract and time rows under the rewards when the lines carry them', () => {
+    const r = rig();
+    const ids = (node: FakeElement): string[] => node.children.map((child) => child.dataset['testid'] ?? child.tag);
+    // Under the rewards line, in one body with it, ahead of the next line.
+    expect(ids(r.root())).toEqual(['p', 'mission-complete-title', 'div', 'mission-complete-next']);
+    const body = r.root().children[2] as FakeElement;
+    expect(body.classList.contains('mission-banner-body')).toBe(true);
+    expect(ids(body)).toEqual([
+      'mission-complete-rewards',
+      'mission-complete-bonus',
+      'mission-complete-contract',
+      'mission-complete-time',
+    ]);
+    r.banner.push({
+      ...SECOND,
+      rewards: '+90 XP · +9 tokens · +20 lithium · contract',
+      bonus: 'Bonus: Under 4:00 — +2 Frag Grenade',
+      contract: 'Contract · Swarm',
+      time: 'Time 2:41',
+    });
+    r.run(STEP);
+    expect(shown(r)).toBe(true);
+    for (const [id, text] of [
+      ['mission-complete-bonus', 'Bonus: Under 4:00 — +2 Frag Grenade'],
+      ['mission-complete-contract', 'Contract · Swarm'],
+      ['mission-complete-time', 'Time 2:41'],
+    ] as const) {
+      expect(row(r.stack, id).textContent, id).toBe(text);
+      expect(row(r.stack, id).classList.contains('is-hidden'), id).toBe(false);
+    }
+  });
+
+  it('hides each row the lines leave null or out, banner by banner', () => {
+    const r = rig({ reduceMotion: () => true });
+    r.banner.push({ ...LINES, bonus: 'Bonus missed: No deaths', contract: null, time: 'Time 0:42' });
+    r.banner.push(SECOND);
+    r.banner.tick(STEP, false);
+    expect(row(r.stack, 'mission-complete-bonus').textContent).toBe('Bonus missed: No deaths');
+    expect(row(r.stack, 'mission-complete-contract').classList.contains('is-hidden')).toBe(true);
+    expect(row(r.stack, 'mission-complete-time').textContent).toBe('Time 0:42');
+    // The first goes; the second, which carries none of the three, hides them all.
+    r.run(BANNER_SECONDS + STEP);
+    r.banner.tick(STEP, false);
+    expect(row(r.stack, 'mission-complete-title').textContent).toBe('Black Gold');
+    for (const id of ['mission-complete-bonus', 'mission-complete-contract', 'mission-complete-time']) {
+      expect(row(r.stack, id).classList.contains('is-hidden'), id).toBe(true);
+    }
+  });
+});

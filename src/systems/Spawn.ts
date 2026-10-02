@@ -5,6 +5,9 @@
 // enemies, and runs the wave scripts with `wave:started` / `wave:cleared`.
 // SPEC-041 §4.5: a row with `pack` arrives as a pack around one ring point —
 // one elite roll for its leader, its affixes right after on the same stream.
+// SPEC-043 §4.4: every ambient elite roll — a single's, a pack leader's — is on
+// the planet's `eliteChance × eliteMult`, capped at 0.5; wave groups keep the
+// `elite` flags their scripts carry.
 //
 // Actual entity initialisation belongs to `Combat.spawnEnemy` (SPEC-011 §4.6),
 // so the director drives a small `Spawner` port rather than the pool directly;
@@ -72,6 +75,8 @@ export const WAVE_CEILING_BONUS = 8;
 export const PACK_RADIUS = 2.5;
 /** SPEC-041 §4.5: how far past the population target a pack may carry the field. */
 export const PACK_OVERSHOOT = 4;
+/** SPEC-043 §4.4 (43-g): the most an ambient elite roll may be, whatever multiplies it. */
+export const ELITE_CHANCE_CAP = 0.5;
 
 /**
  * SPEC-038 §4.4: the planet's design count on every preset, capped by the
@@ -85,6 +90,10 @@ export function populationTarget(planet: PlanetDef, quality: QualitySettings): n
  * SPEC-035 §4.7 — the first-visit ramp. While one is set, the director keeps a
  * fraction of the planet's population and never draws an excluded archetype
  * ambiently; objective spawns (E14) and waves ignore it entirely.
+ *
+ * SPEC-043 §4.3: the `swarm` contract is a ramp too, the one with a scale
+ * above 1 — the field grows, still capped by the preset's `maxEnemies`, and
+ * its pack rows still come as packs.
  */
 export interface SpawnRamp {
   readonly populationScale: number;
@@ -145,6 +154,13 @@ export class SpawnDirector {
   readonly #baseTarget: number;
   /** SPEC-035 §4.7: the first-visit ramp, or `null` off. */
   #ramp: SpawnRamp | null = null;
+  /**
+   * SPEC-043 §4.4: multiplies the planet's `eliteChance` in every ambient elite
+   * roll, pack leaders included — the difficulty's `eliteChanceMult` times 4
+   * while `elite_surge` is in force; the surface sets it each step. The chance
+   * is capped at `ELITE_CHANCE_CAP`.
+   */
+  eliteMult = 1;
   #objectiveIds: readonly EnemyId[] = [];
   #time = 0;
   #spawnTimer = 0;
@@ -207,10 +223,19 @@ export class SpawnDirector {
     return seen.size;
   }
 
-  /** The ambient target in force — the planet's, scaled by any ramp (SPEC-035 §4.7). */
+  /**
+   * The ambient target in force — the planet's, scaled by any ramp (SPEC-035
+   * §4.7), and never past the preset's `maxEnemies` (SPEC-043 §4.3's swarm).
+   */
   get populationTarget(): number {
     if (this.#ramp === null) return this.#baseTarget;
-    return Math.max(1, Math.round(this.#baseTarget * this.#ramp.populationScale));
+    const scaled = Math.max(1, Math.round(this.#baseTarget * this.#ramp.populationScale));
+    return Math.min(scaled, this.#quality.maxEnemies);
+  }
+
+  /** SPEC-043 §4.4: the chance an ambient roll uses — `eliteChance × eliteMult`, capped at 0.5. */
+  get eliteChance(): number {
+    return Math.min(ELITE_CHANCE_CAP, this.#planet.surface.eliteChance * this.eliteMult);
   }
 
   /** SPEC-035 §4.7: hold the ambient field down, or (`null`) let it back up. */
@@ -263,9 +288,12 @@ export class SpawnDirector {
       this.#ramp?.excludeArchetypes ?? [],
     );
     if (id === null) return;
-    // SPEC-041 §4.5: a pack row comes as a pack — but never under a ramp.
+    // SPEC-041 §4.5: a pack row comes as a pack — but never under SPEC-035's
+    // ramp. SPEC-043 §4.3: the swarm's ramp is the one that grows the field
+    // (a scale above 1), and a contract changes only how often a pack's leader
+    // is elite, so its packs still come.
     const row = this.#rowOf(id);
-    if (row?.pack !== undefined && this.#ramp === null) {
+    if (row?.pack !== undefined && (this.#ramp === null || this.#ramp.populationScale > 1)) {
       this.#spawnPack(id, row, row.pack, player, cameraFrustum);
       return;
     }
@@ -597,11 +625,12 @@ export class SpawnDirector {
   /**
    * §4.5 / SPEC-041 §4.6: a single or a pack's leader — the one `rollElite` on
    * the planet's chance (or a forced elite for the debug pack), its affixes
-   * right after on the same stream, and the pack's id (0 for none).
+   * right after on the same stream, and the pack's id (0 for none). SPEC-043
+   * §4.4: the chance is `eliteChance`'s — the planet's times `eliteMult`.
    */
   #spawnRolled(id: EnemyId, x: number, z: number, packId: number, forceElite = false): EnemyEntity {
     const def = ENEMIES[id];
-    const elite = forceElite ? def.eliteAllowed : rollElite(def, this.#planet.surface.eliteChance, this.#rng);
+    const elite = forceElite ? def.eliteAllowed : rollElite(def, this.eliteChance, this.#rng);
     if (elite) rollAffixes(def, this.#planet.chapter, this.#rng, this.#affixes);
     const e = this.#spawn(id, x, z, elite, elite ? this.#affixes.a : null, elite ? this.#affixes.b : null);
     e.packId = packId;

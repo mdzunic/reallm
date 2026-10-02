@@ -1715,3 +1715,40 @@ On the phone only:
 
 - [ ] feel the hits, a weapon lock, a death and a completion;
 - [ ] then turn Vibration off in Settings and feel nothing.
+
+## SPEC-043 — missions worth replaying: side rewards, bonus objectives, contracts and hard (M7g)
+
+- **Build:** `spec/SPEC-043` — untagged
+- **Devices:**
+  - desktop — headless Chromium 1280 × 720 (Playwright, Linux container, **software GL / SwiftShader**)
+  - phone — the `phone-landscape` project's Chromium phone at every `PHONE_VIEWPORTS` size, for the
+    banner's layout only; _no handset in the build container_ (§7's pass on the reference phone is owed, below)
+
+Recorded from the container the branch was built in: `npm run check` — 98
+files and 2,131 tests, none skipped — and, a few files per invocation,
+`e2e/SPEC-043.spec.ts` (§6.2's seven cases in nine tests, all green under two
+workers), `SPEC-006`'s reactions case (the 26 / 45 pins), `SPEC-042` whole
+(25 tests; case 1f now reads Salvage Rights' new 60 oil), `SPEC-042.phone`'s
+banner case at all six sizes, and the neighbours this spec touches:
+`SPEC-012-missions`, `SPEC-013`, `SPEC-014`, `SPEC-024`, `SPEC-030`,
+`SPEC-034`, `SPEC-035`, `SPEC-038`'s Settings cases, `SPEC-039` and `SPEC-041`.
+
+What the container showed:
+
+| Signal | Observed |
+| --- | --- |
+| Board, new save | `mission-c1_m2-bonus` reads `Bonus: Under 4:00 → +2 Frag Grenade`, `c1_m3`'s `Bonus: No deaths → +1 Demolition Charge`; no bonus row on `c1_m1` |
+| Board, chapter 1 done | `c1_m2`'s replay button reads `Contract · No cover · 75 % + 20 lithium` (seed 123, first landing), its badge `No cover` with the blurb as its title, its rewards `+112 XP · +11 ◈ · +20 lithium`; without `chapter1_done` it reads `Replay 50% rewards` and has no badge |
+| Contract in play | accepted at the board, landed: `sceneInfo.contract` = `no_cover`; finished: `mission-complete-contract` `Contract · No cover`, rewards `+112 XP · +11 tokens · +20 lithium · contract`, lithium +20 exactly; `sceneInfo.contract` back to `-` |
+| Bonus | `c1_m3` finished with no death: `Bonus: No deaths — +1 Demolition Charge`, a time row, and one charge in the pack; after a death: `Bonus missed: No deaths`, and no charge |
+| Hard | Settings' `Hard` pressed, its line under the row, `save.meta.difficulty` and `sceneInfo.difficulty` `hard`; the Dune Wurm then woke at 2250 HP (1800 × 1.25) and the elite chance read 0.1; creation's `difficulty-hard` made a hard save |
+| Best time | `c1_m2` accepted on the pad terminal and finished: a `Time m:ss` row, `bestTimes.c1_m2` in `reallm:settings`, and `mission-c1_m2-best` reading `Best m:ss` on the board |
+| Phone banner | on the 802 × 293 phone the rewards and the new rows run together as one line, and the banner keeps to the upper half |
+
+**Owed on hardware (§7).** On desktop and the reference phone:
+
+- [ ] finish `c1_s2` holding the heatwave in the open, and read the banner's bonus row;
+- [ ] die once during `c1_m3` and see the bonus missed;
+- [ ] after chapter 1, replay `c1_m2` as a contract and play its modifier;
+- [ ] switch to hard mid-chapter and feel the difference;
+- [ ] read your best times on the board.

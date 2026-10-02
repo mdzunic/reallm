@@ -25,6 +25,7 @@ import type { Rng } from '@/core/Rng';
 import type { Save } from '@/core/Save';
 import {
   COMPANIONS,
+  DIFFICULTY_RULES,
   ENEMIES,
   MISSIONS,
   TUNING,
@@ -237,7 +238,6 @@ export const HAZARD_FLASH_SECONDS = 0.1;
 const STORM_LENGTH: readonly [number, number] = [15, 25];
 const STORM_GAP: readonly [number, number] = [40, 70];
 const STORM_TICK_SECONDS = 5;
-const CASUAL_DAMAGE_MULT = 0.7;
 
 const DEG_TO_RAD = Math.PI / 180;
 const ASSIST_CONE_COS = Math.cos(ASSIST_CONE_DEG * DEG_TO_RAD);
@@ -385,7 +385,7 @@ export class Flight {
     this.#ariaAutoAim = effect?.autoAim ?? false;
     this.#ariaEnabled = effect !== undefined;
     const hullBonus = effect?.hullBonus ?? 0;
-    this.#damageMult = cfg.difficulty === 'casual' ? CASUAL_DAMAGE_MULT : 1;
+    this.#damageMult = DIFFICULTY_RULES[cfg.difficulty].enemyDamageMult;
     this.#asteroidCap = cfg.quality.asteroidCap;
 
     const maxShield = UPGRADES.shield.metrics['shieldHp']?.[cfg.ship.shield] ?? 40;
@@ -1054,14 +1054,17 @@ export class Flight {
   /**
    * SPEC-038 §4.6: a difficulty changed in Settings mid-trip reaches the next
    * hit — the scene calls this when it resumes from its pause menu (38-g).
+   * SPEC-043 §4.4: the multiplier is the difficulty's `enemyDamageMult` — 0.7,
+   * 1 or 1.3; flight enemies keep their HP on every difficulty.
    */
   setDifficulty(difficulty: Difficulty): void {
-    this.#damageMult = difficulty === 'casual' ? CASUAL_DAMAGE_MULT : 1;
+    this.#damageMult = DIFFICULTY_RULES[difficulty].enemyDamageMult;
   }
 
   /**
-   * §4.6: shield first, remainder to hull; casual ×0.7; three seconds of no
-   * regen. Public — the storm tick and the tests route through the same door.
+   * §4.6: shield first, remainder to hull; ×0.7 on casual and ×1.3 on hard
+   * (SPEC-043 §4.4); three seconds of no regen. Public — the storm tick and
+   * the tests route through the same door.
    */
   hit(amount: number, source: 'asteroid' | 'enemy' | 'storm', cause: DamageSource): void {
     const ship = this.ship;

@@ -1,7 +1,8 @@
 // data/tuning (SPEC-009 §4.13). Pinned as explicit literals, not snapshots: a
 // change to a tunable must be deliberate and visible in the diff (SPEC-016 §2).
 import { describe, expect, it } from 'vitest';
-import { TUNING } from '@/data/tuning';
+import { DIFFICULTIES } from '@/data/ids';
+import { DIFFICULTY_RULES, TUNING } from '@/data/tuning';
 
 describe('TUNING', () => {
   it('carries the SPEC-009 §4.13 values', () => {
@@ -36,5 +37,23 @@ describe('TUNING', () => {
     }
     expect(TUNING.ELITE_HP_MULT).toBeGreaterThan(1);
     expect(TUNING.ELITE_DMG_MULT).toBeGreaterThan(1);
+  });
+});
+
+describe('DIFFICULTY_RULES (SPEC-043 §4.4)', () => {
+  it('is keyed by exactly the difficulties the save knows', () => {
+    // `data/` cannot import `core/`, so the table spells the keys out and this
+    // pins them to `DIFFICULTIES`.
+    expect(Object.keys(DIFFICULTY_RULES).sort()).toEqual([...DIFFICULTIES].sort());
+    expect(DIFFICULTIES).toEqual(['casual', 'normal', 'hard']);
+  });
+
+  it('casual and normal keep their numbers, and hard multiplies what exists', () => {
+    expect(DIFFICULTY_RULES).toEqual({
+      casual: { enemyHpMult: 1, enemyDamageMult: 0.7, eliteChanceMult: 1, deathLoss: 0 },
+      normal: { enemyHpMult: 1, enemyDamageMult: 1, eliteChanceMult: 1, deathLoss: 0.1 },
+      hard: { enemyHpMult: 1.25, enemyDamageMult: 1.3, eliteChanceMult: 2, deathLoss: 0.2 },
+    });
+    expect(DIFFICULTY_RULES.normal.deathLoss).toBe(TUNING.DEATH_RESOURCE_LOSS);
   });
 });

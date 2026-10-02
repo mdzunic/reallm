@@ -9,19 +9,28 @@
 // persists across a reload with no save field, and the badge follows the front
 // entry among the planet's active missions rather than a WeakMap the board
 // alone could see.
+//
+// SPEC-043: a row with a bonus says what it asks and pays; a replay that the
+// next landing would run as a contract says so on its button and in a badge;
+// and a mission with a best time on this device shows it beside its status.
 import type { Save, SaveStore } from '@/core/Save';
-import { MISSIONS, PLANET_IDS, PLANETS, type MissionDef, type MissionId } from '@/data/index';
+import type { BestTimes } from '@/core/Settings';
+import { CONTRACTS, MISSIONS, PLANET_IDS, PLANETS, type ContractId, type MissionDef, type MissionId } from '@/data/index';
 import type { Economy } from '@/systems/Economy';
+import { contractFor } from '@/systems/Missions';
 import type { EventSink } from '@/systems/Progression';
 import {
   abandonMission,
   acceptMission,
+  bonusLine,
   bossDropText,
+  contractLabel,
   missionStatus,
   pinMission,
   pinnedMission,
   requirementText,
   rewardsText,
+  timeText,
   type MissionStatus,
 } from '@/systems/UiHelpers';
 import { confirmSheet } from '@/ui/ConfirmSheet';
@@ -35,6 +44,8 @@ export interface BoardDeps {
   data: Save;
   economy: Economy;
   events: EventSink;
+  /** SPEC-043 §4.5: this device's best times (`settings.bestTimes`); absent reads none. */
+  bestTimes?: () => Readonly<BestTimes>;
 }
 
 const MISSION_IDS = Object.keys(MISSIONS) as MissionId[];
@@ -93,6 +104,10 @@ export class MissionBoard {
     const { data } = this.#deps;
     const status = missionStatus(data, def, 'station');
     const row = testId(el('article', `board-row is-${status}`), `mission-${def.id}`);
+    // SPEC-043 §4.3: what the next landing would run this replay as — the
+    // board reads `visits + 1`, the landing the surface will count on entry.
+    const contract = status === 'replayable' ? contractFor(data, def, this.#nextLanding(def)) : null;
+    const best = this.#deps.bestTimes?.()[def.id as MissionId];
 
     const head = h(
       'button',
@@ -111,14 +126,28 @@ export class MissionBoard {
       h('span', { class: `badge badge-${def.type}` }, def.type),
       // AC-36: flight missions say where they happen.
       def.scene === 'flight' ? h('span', { class: 'badge badge-flight' }, `during flight to ${PLANETS[def.planet].name}`) : null,
+      // SPEC-043 §4.3: the contract's name, its blurb on hover.
+      contract === null
+        ? null
+        : testId(
+            h('span', { class: 'badge badge-contract', title: CONTRACTS[contract].blurb }, CONTRACTS[contract].name),
+            `mission-${def.id}-contract`,
+          ),
       pinnedMission(data, def.planet) === def.id ? h('span', { class: 'badge badge-pin' }, '📌 pinned') : null,
+      // SPEC-043 §4.5: this device's record, beside the status.
+      best === undefined ? null : testId(h('span', { class: 'board-best' }, `Best ${timeText(best)}`), `mission-${def.id}-best`),
       h('span', { class: 'board-status' }, status),
     );
     row.append(head);
 
-    // AC-31: rewards, always visible; halved and marked on a replay row.
-    const rewards = rewardsText(def.rewards, status === 'replayable');
+    // AC-31: rewards, always visible; halved and marked on a replay row, and
+    // a contract's own payout on a contract (SPEC-043 §4.3).
+    const rewards = rewardsText(def.rewards, status === 'replayable', contract !== null);
     row.append(h('p', { class: 'board-rewards' }, rewards === '' ? '—' : rewards));
+    // SPEC-043 §4.2: the bonus — what it asks and what it pays — on every row that has one.
+    if (def.bonus !== undefined) {
+      row.append(testId(h('p', { class: 'board-bonus' }, bonusLine(def.bonus)), `mission-${def.id}-bonus`));
+    }
     // SPEC-039 §4.6: a boss mission says what its boss drops — the piece on a
     // first kill the save does not own, else the lithium in its place.
     const drop = bossDropText(data, def);
@@ -151,15 +180,19 @@ export class MissionBoard {
         ),
       );
     } else if (status === 'replayable') {
-      // AC-34: the replay pays half, and says so on the button.
+      // AC-34: the replay pays half, and says so on the button. SPEC-043 §4.3:
+      // a contract's button carries its label instead.
+      const label = contract === null ? null : contractLabel(data, def, this.#nextLanding(def));
       actions.append(
         testId(
-          h(
-            'button',
-            { class: 'ui-btn', type: 'button', click: () => this.#accept(def, true) },
-            'Replay ',
-            h('span', { class: 'badge badge-replay' }, '50% rewards'),
-          ),
+          label === null
+            ? h(
+                'button',
+                { class: 'ui-btn', type: 'button', click: () => this.#accept(def, true) },
+                'Replay ',
+                h('span', { class: 'badge badge-replay' }, '50% rewards'),
+              )
+            : h('button', { class: 'ui-btn board-contract', type: 'button', click: () => this.#accept(def, true, contract) }, label),
           `mission-${def.id}-replay`,
         ),
       );
@@ -205,11 +238,22 @@ export class MissionBoard {
     );
   }
 
-  #accept(def: MissionDef, replay: boolean): void {
+  /** SPEC-043 §4.3: the landing a departure now would make on `def`'s planet. */
+  #nextLanding(def: MissionDef): number {
+    return (this.#deps.data.progress.visits[def.planet] ?? 0) + 1;
+  }
+
+  #accept(def: MissionDef, replay: boolean, contract: ContractId | null = null): void {
     if (!acceptMission(this.#deps.data, def)) return;
     this.#deps.events.emit('mission:accepted', { id: def.id as MissionId });
     this.#deps.save.request('mission');
-    this.#deps.ui.toast(replay ? `Replaying '${def.title}' — 50% rewards` : `Accepted '${def.title}'`, 'good');
+    const text =
+      contract !== null
+        ? `Replaying '${def.title}' — ${CONTRACTS[contract].name} contract`
+        : replay
+          ? `Replaying '${def.title}' — 50% rewards`
+          : `Accepted '${def.title}'`;
+    this.#deps.ui.toast(text, 'good');
     this.refresh();
   }
 

@@ -12,6 +12,12 @@
 // (PLAN §7, invariant §7.16). Chapter subtotals are 55 · 70 · 85 · 105 · 165 ·
 // 190. Changing a reward means changing the pin, deliberately.
 //
+// SPEC-043 (PLAN R18 decision 8) adds an item or a resource to every side
+// mission that lacked one (§4.1) and an optional `bonus` to 22 missions
+// (§4.2) — items and resources only, so no token total moves. A main mission's
+// bonus pays items only: a resource before a pinned collect would move
+// SPEC-016's worst case.
+//
 // The campaign is 17 main and 9 side missions — 26, the roster PLAN §6 lists and
 // locks, reproduced below verbatim. §7's header used to read "Main missions (18)"
 // and the chapter tables it summarises never bore that out; the per-chapter
@@ -67,6 +73,28 @@ export type Objective =
       readonly options: readonly { readonly label: string; readonly flags: readonly FlagId[] }[];
     };
 
+/**
+ * SPEC-043 §3: what an earned bonus pays — items and resources only, never
+ * tokens (the 670 / 104 pins and every SPEC-016 literal hold). A main
+ * mission's bonus pays items only (§2).
+ */
+export interface BonusReward {
+  readonly resources?: Partial<Record<ResourceId, number>>;
+  readonly items?: readonly { readonly itemId: ItemId; readonly qty: number }[];
+}
+
+/**
+ * SPEC-043 §4.2: an optional objective judged at completion, inside the scene
+ * that ran the mission, with no save field — a reload with progress forfeits
+ * it (E70). `par` is in seconds of the mission's clock.
+ */
+export type MissionBonus =
+  | { readonly kind: 'no_death'; readonly reward: BonusReward }
+  | { readonly kind: 'par'; readonly seconds: number; readonly reward: BonusReward }
+  | { readonly kind: 'no_shelter'; readonly reward: BonusReward }
+  | { readonly kind: 'elites'; readonly count: number; readonly reward: BonusReward };
+export type MissionBonusKind = MissionBonus['kind'];
+
 export interface MissionDef<Id extends string = string> {
   readonly id: Id;
   /** ≤ 32 characters, ≤ 400 for `brief` (invariant §7.15). */
@@ -90,6 +118,8 @@ export interface MissionDef<Id extends string = string> {
   readonly weather?: WeatherId;
   /** Ambient attack waves while the mission is active (PLAN §6). */
   readonly waves?: WaveId;
+  /** SPEC-043 §4.2: the optional objective, and what it pays on top of `rewards`. */
+  readonly bonus?: MissionBonus;
   readonly dialogue: {
     readonly onAccept?: DialogueId;
     readonly onStage?: Partial<Record<number, DialogueId>>;
@@ -133,6 +163,7 @@ export const MISSIONS = {
       ],
     ],
     rewards: { xp: 150, tokens: 15, flags: ['c1_oil'] },
+    bonus: { kind: 'par', seconds: 240, reward: { items: [{ itemId: 'frag_grenade', qty: 2 }] } },
     dialogue: { onAccept: 'c1_m2_accept', onComplete: 'c1_m2_done' },
   },
   c1_m3: {
@@ -147,6 +178,7 @@ export const MISSIONS = {
     requires: [{ kind: 'mission', id: 'c1_m2' }],
     stages: [[{ kind: 'boss', enemy: 'dune_wurm' }], [{ kind: 'deliver', poi: 'beacon', resource: 'oil', amount: 100 }]],
     rewards: { xp: 250, tokens: 30, flags: ['chapter1_done'] },
+    bonus: { kind: 'no_death', reward: { items: [{ itemId: 'demo_charge', qty: 1 }] } },
     dialogue: { onAccept: 'c1_m3_accept', onComplete: 'c1_m3_done' },
   },
   c1_s1: {
@@ -165,6 +197,7 @@ export const MISSIONS = {
       ],
     ],
     rewards: { xp: 80, tokens: 5, items: [{ itemId: 'wheat_ration', qty: 3 }] },
+    bonus: { kind: 'par', seconds: 210, reward: { items: [{ itemId: 'coolant_pack', qty: 1 }] } },
     dialogue: { onAccept: 'c1_s1_accept', onComplete: 'c1_s1_done' },
   },
   c1_s2: {
@@ -180,7 +213,8 @@ export const MISSIONS = {
       [{ kind: 'kill', enemy: 'dust_skitter', amount: 8 }],
       [{ kind: 'survive', seconds: 90, weather: 'heatwave', waves: 'cinder4_storm' }],
     ],
-    rewards: { xp: 70, tokens: 5 },
+    rewards: { xp: 70, tokens: 5, items: [{ itemId: 'landmine', qty: 2 }] },
+    bonus: { kind: 'no_shelter', reward: { items: [{ itemId: 'frag_grenade', qty: 2 }] } },
     dialogue: { onAccept: 'c1_s2_accept', onStage: { 1: 'c1_s2_echo' }, onComplete: 'c1_s2_done' },
   },
 
@@ -199,6 +233,7 @@ export const MISSIONS = {
       [{ kind: 'reach', poi: 'ridge_camp' }],
     ],
     rewards: { xp: 150, tokens: 15 },
+    bonus: { kind: 'no_shelter', reward: { items: [{ itemId: 'coolant_pack', qty: 2 }] } },
     dialogue: { onAccept: 'c2_m1_accept', onComplete: 'c2_m1_done' },
   },
   c2_m2: {
@@ -217,6 +252,7 @@ export const MISSIONS = {
       ],
     ],
     rewards: { xp: 200, tokens: 20 },
+    bonus: { kind: 'par', seconds: 240, reward: { items: [{ itemId: 'frag_grenade', qty: 2 }] } },
     dialogue: { onAccept: 'c2_m2_accept', onComplete: 'c2_m2_done' },
   },
   c2_m3: {
@@ -230,6 +266,7 @@ export const MISSIONS = {
     requires: [{ kind: 'mission', id: 'c2_m2' }],
     stages: [[{ kind: 'boss', enemy: 'frost_matriarch' }], [{ kind: 'scan', poi: 'thermal_vent', count: 1 }]],
     rewards: { xp: 300, tokens: 35, flags: ['chapter2_done'] },
+    bonus: { kind: 'no_death', reward: { items: [{ itemId: 'plasma_cell', qty: 1 }] } },
     dialogue: { onAccept: 'c2_m3_accept', onComplete: 'c2_m3_done' },
   },
   c2_s1: {
@@ -246,6 +283,7 @@ export const MISSIONS = {
       [{ kind: 'deliver', poi: 'survivor_pod', resource: 'water', amount: 40 }],
     ],
     rewards: { xp: 100, tokens: 10, items: [{ itemId: 'medkit', qty: MEDKIT_BUNDLE_QTY }], flags: ['iteration_log'] },
+    bonus: { kind: 'par', seconds: 180, reward: { items: [{ itemId: 'medkit', qty: 2 }] } },
     // SPEC-034 §4.10: the flight log belongs to the stage that finds it, not to
     // the debrief two scenes later.
     dialogue: { onAccept: 'c2_s1_accept', onStage: { 1: 'c2_s1_log' }, onComplete: 'c2_s1_done' },
@@ -263,7 +301,8 @@ export const MISSIONS = {
       [{ kind: 'kill', enemy: 'ice_crawler', amount: 12 }],
       [{ kind: 'survive', seconds: 60, weather: 'avalanche', waves: 'vetra_storm' }],
     ],
-    rewards: { xp: 90, tokens: 10 },
+    rewards: { xp: 90, tokens: 10, items: [{ itemId: 'coolant_pack', qty: 2 }] },
+    bonus: { kind: 'no_shelter', reward: { items: [{ itemId: 'landmine', qty: 2 }] } },
     dialogue: { onAccept: 'c2_s2_accept', onComplete: 'c2_s2_done' },
   },
 
@@ -282,6 +321,7 @@ export const MISSIONS = {
       [{ kind: 'survive', seconds: 75, weather: 'spore_storm', waves: 'thessaly_storm' }],
     ],
     rewards: { xp: 220, tokens: 20 },
+    bonus: { kind: 'no_shelter', reward: { items: [{ itemId: 'medkit', qty: 2 }] } },
     dialogue: { onAccept: 'c3_m1_accept', onComplete: 'c3_m1_done' },
   },
   c3_m2: {
@@ -298,6 +338,7 @@ export const MISSIONS = {
       [{ kind: 'escort', from: 'probe_site', to: 'hive_mouth', follower: 'science_probe' }],
     ],
     rewards: { xp: 260, tokens: 25 },
+    bonus: { kind: 'no_death', reward: { items: [{ itemId: 'landmine', qty: 3 }] } },
     dialogue: { onAccept: 'c3_m2_accept', onComplete: 'c3_m2_done' },
   },
   c3_m3: {
@@ -311,6 +352,7 @@ export const MISSIONS = {
     requires: [{ kind: 'mission', id: 'c3_m2' }],
     stages: [[{ kind: 'boss', enemy: 'hive_broodlord' }]],
     rewards: { xp: 350, tokens: 40, flags: ['chapter3_done'] },
+    bonus: { kind: 'no_death', reward: { items: [{ itemId: 'demo_charge', qty: 2 }] } },
     dialogue: { onAccept: 'c3_m3_accept', onComplete: 'c3_m3_done' },
   },
   c3_s1: {
@@ -328,7 +370,8 @@ export const MISSIONS = {
         { kind: 'kill', enemy: 'spore_hound', amount: 8 },
       ],
     ],
-    rewards: { xp: 120, tokens: 12, flags: ['scaffold_secret'] },
+    rewards: { xp: 120, tokens: 12, resources: { lithium: 30 }, flags: ['scaffold_secret'] },
+    bonus: { kind: 'elites', count: 1, reward: { resources: { lithium: 20 } } },
     dialogue: { onAccept: 'c3_s1_accept', onComplete: 'c3_s1_secret' },
   },
   c3_s2: {
@@ -341,8 +384,9 @@ export const MISSIONS = {
     scene: 'surface',
     requires: [{ kind: 'mission', id: 'c3_m1' }],
     stages: [[{ kind: 'collect', resource: 'wheat', amount: 300 }]],
-    rewards: { xp: 130, tokens: 12 },
+    rewards: { xp: 130, tokens: 12, items: [{ itemId: 'demo_charge', qty: 2 }] },
     waves: 'thessaly_reaping',
+    bonus: { kind: 'no_death', reward: { items: [{ itemId: 'frag_grenade', qty: 3 }] } },
     dialogue: { onAccept: 'c3_s2_accept', onComplete: 'c3_s2_done' },
   },
 
@@ -361,6 +405,7 @@ export const MISSIONS = {
       [{ kind: 'reach', poi: 'lithium_flats' }],
     ],
     rewards: { xp: 250, tokens: 25 },
+    bonus: { kind: 'no_shelter', reward: { items: [{ itemId: 'coolant_pack', qty: 2 }] } },
     dialogue: { onAccept: 'c4_m1_accept', onComplete: 'c4_m1_done' },
   },
   c4_m2: {
@@ -379,6 +424,10 @@ export const MISSIONS = {
       ],
     ],
     rewards: { xp: 300, tokens: 30 },
+    // SPEC-043 §4.2's table reads lithium 40 here, against its own rule that a
+    // main mission's bonus pays items only (§2, the invariant); the reward is
+    // *initial tuning*, so it pays the elite-killing charge instead.
+    bonus: { kind: 'elites', count: 2, reward: { items: [{ itemId: 'demo_charge', qty: 2 }] } },
     dialogue: { onAccept: 'c4_m2_accept', onComplete: 'c4_m2_done' },
   },
   c4_m3: {
@@ -395,6 +444,7 @@ export const MISSIONS = {
       [{ kind: 'deliver', poi: 'reactor_core', resource: 'lithium', amount: 100 }],
     ],
     rewards: { xp: 400, tokens: 50, flags: ['chapter4_done', 'signal_decoded'] },
+    bonus: { kind: 'no_death', reward: { items: [{ itemId: 'plasma_cell', qty: 2 }] } },
     dialogue: { onAccept: 'c4_m3_accept', onComplete: 'c4_m3_signal' },
   },
   c4_s1: {
@@ -411,6 +461,7 @@ export const MISSIONS = {
       [{ kind: 'survive', seconds: 120, weather: 'heatwave', waves: 'ferrum_storm' }],
     ],
     rewards: { xp: 150, tokens: 15, items: [{ itemId: 'plasma_cell', qty: 1 }] },
+    bonus: { kind: 'no_shelter', reward: { resources: { lithium: 30 } } },
     dialogue: { onAccept: 'c4_s1_accept', onComplete: 'c4_s1_done' },
   },
   c4_s2: {
@@ -423,7 +474,7 @@ export const MISSIONS = {
     scene: 'flight',
     requires: [{ kind: 'mission', id: 'c4_m1' }],
     stages: [[{ kind: 'kill', enemy: 'scav_fighter', amount: 8 }]],
-    rewards: { xp: 150, tokens: 15 },
+    rewards: { xp: 150, tokens: 15, resources: { oil: 60 } },
     dialogue: { onAccept: 'c4_s2_accept', onComplete: 'c4_s2_done' },
   },
 
@@ -462,6 +513,7 @@ export const MISSIONS = {
       ],
     ],
     rewards: { xp: 400, tokens: 35 },
+    bonus: { kind: 'par', seconds: 300, reward: { items: [{ itemId: 'demo_charge', qty: 2 }] } },
     dialogue: { onAccept: 'c5_m2_accept', onComplete: 'c5_m2_done' },
   },
   c5_m3: {
@@ -475,6 +527,7 @@ export const MISSIONS = {
     requires: [{ kind: 'mission', id: 'c5_m2' }],
     stages: [[{ kind: 'boss', enemy: 'hive_queen' }]],
     rewards: { xp: 600, tokens: 100, flags: ['chapter5_done'] },
+    bonus: { kind: 'no_death', reward: { items: [{ itemId: 'plasma_cell', qty: 3 }] } },
     // SPEC-034 §4.7: the Warden's first words are the Queen's death, not the
     // accept — and ARIA answers them through `c5_m3_warden.next`.
     dialogue: { onAccept: 'c5_m3_accept', onComplete: 'c5_m3_warden' },
@@ -489,7 +542,8 @@ export const MISSIONS = {
     scene: 'surface',
     requires: [{ kind: 'mission', id: 'c5_m1' }],
     stages: [[{ kind: 'kill', enemy: 'hive_egg', amount: 15 }]],
-    rewards: { xp: 200, tokens: 20 },
+    rewards: { xp: 200, tokens: 20, items: [{ itemId: 'plasma_cell', qty: 2 }] },
+    bonus: { kind: 'par', seconds: 360, reward: { resources: { lithium: 40 } } },
     dialogue: { onAccept: 'c5_s1_accept', onComplete: 'c5_s1_done' },
   },
 
@@ -509,6 +563,7 @@ export const MISSIONS = {
       [{ kind: 'scan', poi: 'eden_ridge', count: 1 }],
     ],
     rewards: { xp: 400, tokens: 40 },
+    bonus: { kind: 'par', seconds: 270, reward: { items: [{ itemId: 'medkit', qty: 3 }] } },
     dialogue: { onAccept: 'c6_m1_accept', onComplete: 'c6_m1_done' },
   },
   c6_m2: {

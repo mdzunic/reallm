@@ -191,6 +191,8 @@ const EVENT_KEYS = [
   'mission:progress',
   'mission:stageReset',
   'mission:completed',
+  // SPEC-043 §4.2: silent — the completion's sting rides right behind it.
+  'mission:bonus',
   'mission:abandoned',
   'flag:set',
   'dialogue:started',
@@ -521,14 +523,16 @@ describe('the reactions table is exhaustive over GameEvents (SPEC-006 §5)', () 
     );
   });
 
-  it('silences exactly the 44 events of §5.4 (AC-39; SPEC-015 added the two app: signals)', () => {
+  it('silences exactly the 45 events of §5.4 (AC-39; SPEC-015 added the two app: signals)', () => {
     // SPEC-034 added `player:recalled`, `enemy:dismissed` and `item:noRoom`;
-    // SPEC-042 §4.2 `item:blocked`, whose warn toast is its sound.
-    expect(AUDIO_SILENT.size).toBe(44);
+    // SPEC-042 §4.2 `item:blocked`, whose warn toast is its sound; SPEC-043
+    // §4.7 `mission:bonus`.
+    expect(AUDIO_SILENT.size).toBe(45);
+    expect(AUDIO_SILENT.has('mission:bonus')).toBe(true);
   });
 
-  it('gives every one of the 70 event keys exactly one home (AC-40)', () => {
-    expect(EVENT_KEYS).toHaveLength(70);
+  it('gives every one of the 71 event keys exactly one home (AC-40)', () => {
+    expect(EVENT_KEYS).toHaveLength(71);
     const reacted = new Set<string>(REACTED_EVENTS);
     for (const key of EVENT_KEYS) {
       const hasSound = reacted.has(key);
@@ -742,7 +746,7 @@ describe('reaction outcomes (SPEC-006 §5.2)', () => {
   it('resource:collected picks the resource pickup and rate-limits it (AC-44)', () => {
     const react = AUDIO_REACTIONS['resource:collected'];
     for (const resource of ['oil', 'wheat', 'water', 'lithium'] as const) {
-      expect(react({ resource, amount: 1, total: 5 })).toEqual({
+      expect(react({ resource, amount: 1, total: 5, source: 'pickup' })).toEqual({
         id: `pickup_${resource}`,
         opts: { minIntervalMs: 80 },
       });
@@ -758,7 +762,7 @@ describe('reaction outcomes (SPEC-006 §5.2)', () => {
 
   it('resource:collected warns when the hold is full (AC-45)', () => {
     expect(
-      AUDIO_REACTIONS['resource:collected']({ resource: 'oil', amount: 1, total: 5, blocked: 'cargo_full' }),
+      AUDIO_REACTIONS['resource:collected']({ resource: 'oil', amount: 1, total: 5, blocked: 'cargo_full', source: 'pickup' }),
     ).toEqual({ id: 'ui_warn', opts: { minIntervalMs: 80 } });
   });
 

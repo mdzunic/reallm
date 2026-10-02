@@ -44,11 +44,20 @@ export type WeatherId = (typeof WEATHER_IDS)[number];
 
 /**
  * SPEC-038 §3: the difficulty a run is played on — `save.meta.difficulty`, the
- * creation choice and the flight config. Changeable in Settings (PLAN §4);
- * SPEC-043 appends `hard`.
+ * creation choice and the flight config. Changeable in Settings (PLAN §4).
+ * SPEC-043 §4.4 appends `hard`; `core/Save.ts` re-exports both names.
  */
-export const DIFFICULTIES = ['casual', 'normal'] as const;
+export const DIFFICULTIES = ['casual', 'normal', 'hard'] as const;
 export type Difficulty = (typeof DIFFICULTIES)[number];
+
+/**
+ * SPEC-043 §3: where a resource came from. Only `'pickup'` is charged against
+ * the cap (SPEC-010 §4.5), and only a pickup counts toward a collect objective
+ * (43-h). Declared here so `core/Events.ts` can name it on `resource:collected`;
+ * `systems/Economy.ts` re-exports it.
+ */
+export const RESOURCE_SOURCES = ['pickup', 'reward', 'voucher', 'subsidy'] as const;
+export type ResourceSource = (typeof RESOURCE_SOURCES)[number];
 
 /** The five assistants of PLAN §4; `aria` is free from the first save. */
 export const COMPANION_IDS = ['scanner_drone', 'combat_drone', 'field_medic', 'quartermaster', 'aria'] as const;

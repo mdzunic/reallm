@@ -3258,6 +3258,8 @@ html.debug .scene-tag {
 .badge-flight { border-color: var(--shield); color: var(--shield); }
 .badge-replay { border-color: var(--good); color: var(--good); }
 .badge-pin { border-color: var(--good); color: var(--good); }
+/* SPEC-043 §4.3: a replay the next landing runs as a contract. */
+.badge-contract { border-color: var(--warn); color: var(--warn); }
 .badge-owned { color: var(--good); border-color: var(--good); }
 .badge-equipped { color: var(--shield); border-color: var(--shield); }
 
@@ -3271,6 +3273,19 @@ html.debug .scene-tag {
 .board-drop {
   margin: 0;
   color: var(--ink-dim);
+  font-size: 14px;
+}
+
+/* SPEC-043 §4.2: the optional objective and what it pays. */
+.board-bonus {
+  margin: 0;
+  color: var(--ink-dim);
+  font-size: 14px;
+}
+
+/* SPEC-043 §4.5: this device's record, beside the status. */
+.board-best {
+  color: var(--good);
   font-size: 14px;
 }
 
@@ -5542,6 +5557,13 @@ html.reduce-motion .mission-banner {
   color: var(--ink-dim);
 }
 
+/* SPEC-043 §4.6: the bonus, contract and time rows under the rewards. */
+.mission-banner-extra {
+  margin: 2px 0 0;
+  font-size: 14px;
+  color: var(--ink);
+}
+
 /* §4.3: the effect chips in the `Lv N` row, after the level. The row never
    wraps, so the column is no taller with all three running. */
 .hud-level-row {
@@ -5787,5 +5809,22 @@ html.reduce-motion .tracker-row.is-bumped {
 
   html.scheme-touch .mission-banner-next {
     display: none;
+  }
+
+  /* SPEC-043 §4.6: on a short touch screen the rewards and the optional rows
+     run together, so a time costs the banner no line of its own. */
+  html.scheme-touch .mission-banner-body {
+    margin: 4px 0 0;
+    font-size: 14px;
+  }
+
+  html.scheme-touch .mission-banner-body > p:not(.is-hidden) {
+    display: inline;
+    margin: 0;
+  }
+
+  html.scheme-touch .mission-banner-body > p:not(.is-hidden) ~ p:not(.is-hidden)::before {
+    content: ' · ';
+    color: var(--ink-dim);
   }
 }

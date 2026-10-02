@@ -507,9 +507,9 @@ export class CreationScene extends UiScene<'creation'> {
     ) as HTMLDivElement;
   }
 
-  /** AC-18: two positions and one honest line. */
+  /** AC-18: three positions since SPEC-043 §4.4 added `hard`, and one honest line. */
   #difficultyRow(): HTMLDivElement {
-    const seg = (['normal', 'casual'] as const).map((choice) =>
+    const seg = (['normal', 'casual', 'hard'] as const satisfies readonly Difficulty[]).map((choice) =>
       testId(
         h(
           'button',
