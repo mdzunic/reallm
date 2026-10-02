@@ -290,16 +290,16 @@ describe('the mission banner (SPEC-042 §4.1)', () => {
 describe('the banner’s optional rows (SPEC-043 §4.6)', () => {
   it('shows the bonus, contract and time rows under the rewards when the lines carry them', () => {
     const r = rig();
-    const ids = r.root().children.map((child) => child.dataset['testid'] ?? '');
-    // Under the rewards line, ahead of the next line.
-    expect(ids).toEqual([
-      '',
-      'mission-complete-title',
+    const ids = (node: FakeElement): string[] => node.children.map((child) => child.dataset['testid'] ?? child.tag);
+    // Under the rewards line, in one body with it, ahead of the next line.
+    expect(ids(r.root())).toEqual(['p', 'mission-complete-title', 'div', 'mission-complete-next']);
+    const body = r.root().children[2] as FakeElement;
+    expect(body.classList.contains('mission-banner-body')).toBe(true);
+    expect(ids(body)).toEqual([
       'mission-complete-rewards',
       'mission-complete-bonus',
       'mission-complete-contract',
       'mission-complete-time',
-      'mission-complete-next',
     ]);
     r.banner.push({
       ...SECOND,

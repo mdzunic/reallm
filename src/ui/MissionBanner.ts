@@ -19,7 +19,8 @@
 //
 // SPEC-043 §4.6: up to three optional rows sit under the rewards line — the
 // bonus (earned or missed), the contract, and the run's time — each hidden
-// when `completionLines` left it null.
+// when `completionLines` left it null. The rewards and the three share a body,
+// which a short touch screen runs together as one line.
 import type { CompletionLines } from '@/systems/UiHelpers';
 import type { DialogueUI } from '@/ui/DialogueUI';
 import { el, SHORT_SCREEN_QUERY, testId, type UiRoot } from '@/ui/dom';
@@ -90,15 +91,9 @@ export class MissionBanner {
     this.#next = testId(el('p', 'mission-banner-next'), 'mission-complete-next');
     this.#root = testId(el('div', 'mission-banner panel is-hidden'), 'mission-complete');
     this.#root.setAttribute('role', 'status');
-    this.#root.append(
-      el('p', 'mission-banner-head', 'Mission complete'),
-      this.#title,
-      this.#rewards,
-      this.#bonus,
-      this.#contract,
-      this.#time,
-      this.#next,
-    );
+    const body = el('div', 'mission-banner-body');
+    body.append(this.#rewards, this.#bonus, this.#contract, this.#time);
+    this.#root.append(el('p', 'mission-banner-head', 'Mission complete'), this.#title, body, this.#next);
     // §4.1: the last row of the top-centre stack, so `--hud-tc-h` counts it and
     // the short-screen dialogue docks under it. Looked up once, here.
     const stack = ui.root.querySelector<HTMLElement>('.hud .hud-tc');
