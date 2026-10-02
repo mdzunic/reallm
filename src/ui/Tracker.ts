@@ -9,6 +9,11 @@
 // The HUD diff decides when `set()` runs, so this file only has to be cheap
 // *within* a write: rows are pooled elements, text is compared before it is
 // written, and nothing here ever reads layout.
+//
+// SPEC-045 §4.6: the bearing is a drawn arrow, not `▲`, which means a warning —
+// an empty span that CSS cuts into an arrowhead and `transform` turns.
+import { GLYPHS } from '@/data/glossary';
+import { percent } from '@/systems/Format';
 import { distanceText } from '@/systems/Guidance';
 import type { HudModel } from '@/systems/UiHelpers';
 import { el, testId } from '@/ui/dom';
@@ -43,7 +48,8 @@ export class Tracker {
   readonly #list: HTMLDivElement;
   /** Live only beside the focus row, and only while there is a target (AC-20). */
   readonly #distance = el('span', 'tracker-dist');
-  readonly #arrow = el('span', 'tracker-arrow', '▲');
+  /** SPEC-045 §4.6: empty and hidden from screen readers; the distance says the rest. */
+  readonly #arrow = el('span', 'tracker-arrow');
   readonly #onCycle: () => void;
   #headText = '';
   #distanceText = '';
@@ -58,6 +64,7 @@ export class Tracker {
   constructor(root: HTMLElement, onCycle: () => void) {
     this.#onCycle = onCycle;
     this.#root = testId(el('div', 'tracker panel'), 'objective-tracker');
+    this.#arrow.setAttribute('aria-hidden', 'true');
     this.#root.setAttribute('role', 'group');
     this.#root.setAttribute('aria-label', 'Objective tracker');
     this.#head = el('span', 'tracker-title', 'No active mission');
@@ -101,7 +108,7 @@ export class Tracker {
       // AC-19: the focus row is the one that carries `.hud-objective`, so the
       // HUD holds exactly one of them at any moment (AC-17).
       row.text.classList.toggle('hud-objective', data.focus);
-      const check = data.done ? '✓' : '';
+      const check = data.done ? GLYPHS.good : '';
       if (row.check.textContent !== check) row.check.textContent = check;
       if (row.text.textContent !== data.text) row.text.textContent = data.text;
       this.#setDefendHp(row, data.defendHp);
@@ -128,7 +135,7 @@ export class Tracker {
       }
       if (model.bearing !== this.#bearing) {
         this.#bearing = model.bearing;
-        // ▲ points up the map; the bearing turns it toward the target.
+        // The arrow points up the map; the bearing turns it toward the target.
         this.#arrow.style.transform = `rotate(${model.bearing}rad)`;
       }
       if (this.#distance.parentElement !== focus.root) focus.root.append(this.#distance, this.#arrow);
@@ -175,6 +182,7 @@ export class Tracker {
    * SPEC-034 §4.9: the defended POI's health, as a percentage on the row and a
    * thin bar under it — amber under half, red under a quarter. The bar is built
    * on the first defend stage a session sees and stays with its pooled row.
+   * SPEC-045 §4.7: the readout is `percent`'s, `100 %`.
    */
   #setDefendHp(row: Row, fraction: number | null): void {
     if (fraction === null) {
@@ -195,12 +203,12 @@ export class Tracker {
       row.root.append(bar);
     }
     row.hp.classList.remove('is-hidden');
-    const percent = Math.round(fraction * 100);
-    if (percent === row.hpShown) return;
-    row.hpShown = percent;
-    (row.hpFill as HTMLDivElement).style.width = `${percent}%`;
-    (row.hpText as HTMLSpanElement).textContent = `${percent}%`;
-    row.hp.dataset['hp'] = String(percent);
+    const whole = Math.round(fraction * 100);
+    if (whole === row.hpShown) return;
+    row.hpShown = whole;
+    (row.hpFill as HTMLDivElement).style.width = `${whole}%`;
+    (row.hpText as HTMLSpanElement).textContent = percent(fraction);
+    row.hp.dataset['hp'] = String(whole);
     row.hp.classList.toggle('is-warn', fraction < 0.5 && fraction >= 0.25);
     row.hp.classList.toggle('is-danger', fraction < 0.25);
   }

@@ -58,7 +58,6 @@ import {
   diffHud,
   diffHudInto,
   HUD_KEYS,
-  formatTime,
   missionStatus,
   padEmptyText,
   priceText,
@@ -384,12 +383,12 @@ describe('gearStatLines (SPEC-031 §4.16)', () => {
     const item = ITEMS.armor_ablative;
     expect(gearStatLines('armor_ablative')).toEqual([
       `Armor ${item.armor}`,
-      `Hazard resist ${Math.round(item.hazardResist * 100)}%`,
+      `Hazard resist ${Math.round(item.hazardResist * 100)} %`,
     ]);
   });
 
   it('pins a consumable: the effect in words and the stack', () => {
-    expect(gearStatLines('medkit')).toEqual(['Heals 50% instantly', 'Stack of 5']);
+    expect(gearStatLines('medkit')).toEqual(['Heals 50 % instantly', 'Stack of 5']);
   });
 });
 
@@ -611,15 +610,6 @@ describe('toast coalescing (AC-116, AC-78, AC-80)', () => {
   });
 });
 
-describe('formatTime', () => {
-  it('formats seconds, minutes and hours the way the slot rows do', () => {
-    expect(formatTime(42)).toBe('42s');
-    expect(formatTime(12 * 60)).toBe('12m');
-    expect(formatTime(3600 + 4 * 60)).toBe('1h 04m');
-    expect(formatTime(Number.NaN)).toBe('0s');
-  });
-});
-
 describe('computePlayerStats (creation preview, AC-17)', () => {
   it('moves with the attributes it previews', () => {
     const base = computePlayerStats('marine', { might: 3, vigor: 3, agility: 1, tech: 1 }, 1);
@@ -666,12 +656,12 @@ describe('slotLine (AC-4)', () => {
   it('prints name, class, level, planet and playtime in reading order', () => {
     expect(
       slotLine({ slot: 0, empty: false, name: 'Vance', classId: 'marine', level: 7, planet: 'cinder4', playtimeSec: 3840 }),
-    ).toBe('Vance · Marine · Lv 7 · Cinder-4 · 1h 04m');
+    ).toBe('Vance · Marine · Lv 7 · Cinder-4 · 1 h 04 min');
   });
 
   it('a run parked at the station has no planet and reads Station', () => {
     expect(slotLine({ slot: 1, empty: false, name: 'V', classId: 'scout', level: 1, planet: null, playtimeSec: 60 })).toBe(
-      'V · Scout · Lv 1 · Station · 1m',
+      'V · Scout · Lv 1 · Station · 1 min',
     );
   });
 
@@ -683,15 +673,15 @@ describe('slotLine (AC-4)', () => {
 
 describe('passiveText (AC-14)', () => {
   it('prints every effect the marine passive carries', () => {
-    expect(passiveText({ damageMult: 1.15, maxHpBonus: 20 })).toBe('+15% damage · +20 max HP');
+    expect(passiveText({ damageMult: 1.15, maxHpBonus: 20 })).toBe('+15 % damage · +20 max HP');
   });
 
   it('covers discounts, multipliers and the radar flag', () => {
     expect(passiveText({ refitDiscount: 0.15, companionEffectMult: 1.25 })).toBe(
-      '−15% ship and companion prices · +25% companion effect',
+      '−15 % ship and companion prices · +25 % companion effect',
     );
     expect(passiveText({ moveSpeedMult: 1.15, pickupRadiusMult: 1.25, nodeRadar: true })).toBe(
-      '+15% move speed · +25% pickup radius · resource radar',
+      '+15 % move speed · +25 % pickup radius · resource radar',
     );
   });
 
@@ -700,9 +690,9 @@ describe('passiveText (AC-14)', () => {
   });
 
   it('prints the dash cooldown multiplier, and the Scout carries it (SPEC-038 §4.1)', () => {
-    expect(passiveText({ dashCooldownMult: 0.8 })).toBe('−20% dash cooldown');
+    expect(passiveText({ dashCooldownMult: 0.8 })).toBe('−20 % dash cooldown');
     expect(passiveText(CLASSES.scout.passive)).toBe(
-      '+15% move speed · +25% pickup radius · resource radar · −20% dash cooldown',
+      '+15 % move speed · +25 % pickup radius · resource radar · −20 % dash cooldown',
     );
   });
 });
@@ -718,7 +708,7 @@ describe('DIFFICULTY_LINES (SPEC-038 §4.6)', () => {
 
   it('SPEC-043 §4.4: hard has its own line', () => {
     expect(DIFFICULTY_LINES.hard).toBe(
-      'Hard — tougher, deadlier hostiles and twice the elites; a death costs a fifth of the hold.',
+      'Hard — tougher, deadlier hostiles and twice the elites; a death costs a fifth of your cargo.',
     );
   });
 });
@@ -763,7 +753,7 @@ describe('companionEffectText (AC-39)', () => {
   });
 
   it('covers station and flight domains', () => {
-    expect(companionEffectText({ cargoBonus: 100, shopDiscount: 0.1 })).toBe('+100 cargo · −10% shop prices');
+    expect(companionEffectText({ cargoBonus: 100, shopDiscount: 0.1 })).toBe('+100 cargo · −10 % shop prices');
     expect(companionEffectText({ shieldRegen: 2, autoAim: true, hullBonus: 20 })).toBe('+2/s shield regen · auto-aim · +20 hull');
   });
 });
@@ -798,7 +788,7 @@ describe('gearTooltip (AC-47)', () => {
   });
 
   it('compares an equipped armor to the next tier in its ladder', () => {
-    expect(gearTooltip('armor_scrap')).toBe('T0 → T1 · armor 0 → 15 · hazard resist 0 → 0.25');
+    expect(gearTooltip('armor_scrap')).toBe('T0 → T1 · armor 0 → 15 · hazard resist 0 % → 25 %');
   });
 
   it('the top tier states it plainly instead of comparing to nothing', () => {
@@ -869,7 +859,7 @@ describe('one max HP (SPEC-034 §4.14)', () => {
  */
 describe('the shipped-home toast (SPEC-034 §4.12)', () => {
   it('reads as §4.12 gives it, and shares CARGO FULL’s throttle', () => {
-    expect(SHIPPED_TOAST_TEXT).toBe('Hold full — surplus shipped to Command Relay.');
+    expect(SHIPPED_TOAST_TEXT).toBe('Cargo full — surplus shipped to Command Relay.');
     expect(CARGO_TOAST_SECONDS).toBe(3);
   });
 });
@@ -1008,7 +998,7 @@ describe('slotStateText (SPEC-037 §4.4)', () => {
   it('prints the state only while the slot is not ready, and never READY', () => {
     expect(slotStateText(view('ready'))).toBe('');
     expect(slotStateText(view('empty', { itemId: null }))).toBe('');
-    expect(slotStateText(view('heat', { heat: 0.64 }))).toBe('HEAT 64%');
+    expect(slotStateText(view('heat', { heat: 0.64 }))).toBe('HEAT 64 %');
     expect(slotStateText(view('lock', { heat: 1 }))).toBe('LOCK');
     expect(slotStateText(view('recharge', { cd: 0.4, cdSeconds: 2.43 }))).toBe('2.4 s');
     expect(slotStateText(view('switch', { cd: 0.8, cdSeconds: 0.2 }))).toBe('0.2 s');
@@ -1135,7 +1125,7 @@ describe('upgradeDeltaText (SPEC-035 §4.12)', () => {
     expect(upgradeDeltaText('shieldHp', 40, 80)).toBe('Shield 40 → 80');
     expect(upgradeDeltaText('cargoCap', 400, 600)).toBe('Cargo 400 → 600');
     expect(upgradeDeltaText('damage', 10, 13)).toBe('Gun damage 10 → 13');
-    expect(upgradeDeltaText('fireRate', 4, 5)).toBe('Fire rate 4 → 5 /s');
+    expect(upgradeDeltaText('fireRate', 4, 5)).toBe('Fire rate 4 → 5/s');
   });
 
   it('falls back to the key split into words for an unknown metric', () => {
@@ -1220,8 +1210,8 @@ describe('gearStatLines and the shop stat line (SPEC-039 §4.6)', () => {
     expect(shopStatText('mg_scrap')).toBe('DPS 110 firing · 64 sustained · range 13 m');
     expect(shopStatText('launcher_rocket')).toBe('DPS 15 sustained · range 22 m');
     // 15 / (15 + 100) of the damage, and a quarter of the weather.
-    expect(shopStatText('armor_composite')).toBe('armor 15 · −13% damage · hazard 25%');
-    expect(shopStatText('armor_ablative')).toBe('armor 45 · −31% damage · hazard 75%');
+    expect(shopStatText('armor_composite')).toBe('armor 15 · −13 % damage · hazard 25 %');
+    expect(shopStatText('armor_ablative')).toBe('armor 45 · −31 % damage · hazard 75 %');
     expect(shopStatText('medkit')).toBe('');
   });
 });
@@ -1257,7 +1247,7 @@ describe('gearCompare and gearCompareText (SPEC-039 §4.6)', () => {
   });
 
   it('armour compares as it always did', () => {
-    expect(gearCompareText('armor_scrap', 'armor_composite')).toBe('T0 → T1 · armor 0 → 15 · hazard resist 0 → 0.25');
+    expect(gearCompareText('armor_scrap', 'armor_composite')).toBe('T0 → T1 · armor 0 → 15 · hazard resist 0 % → 25 %');
     expect(gearCompare('armor_composite', 'armor_reactive').map((part) => part.stat)).toEqual(['tier', 'armor', 'hazardResist']);
   });
 
@@ -1376,15 +1366,15 @@ describe('one damage formula (SPEC-039 §4.7)', () => {
 
 describe('the class card and the Quartermaster line (SPEC-039 §4.3, §4.5)', () => {
   it("prints the classes' passives off the table: the Engineer's refit and the Marine's ×1.10", () => {
-    expect(passiveText(CLASSES.engineer.passive)).toBe('−15% ship and companion prices · +25% companion effect');
-    expect(passiveText(CLASSES.marine.passive)).toBe('+10% damage · +20 max HP');
+    expect(passiveText(CLASSES.engineer.passive)).toBe('−15 % ship and companion prices · +25 % companion effect');
+    expect(passiveText(CLASSES.marine.passive)).toBe('+10 % damage · +20 max HP');
   });
 
   it('the Quartermaster reads −5 / −10 / −15 % shop prices, and never craft', () => {
     expect(COMPANIONS.quartermaster.levels.map((effect) => companionEffectText(effect))).toEqual([
-      '+100 cargo · −5% shop prices',
-      '+200 cargo · −10% shop prices',
-      '+300 cargo · −15% shop prices',
+      '+100 cargo · −5 % shop prices',
+      '+200 cargo · −10 % shop prices',
+      '+300 cargo · −15 % shop prices',
     ]);
   });
 });
@@ -1873,7 +1863,7 @@ describe('bonus, contract and time texts (SPEC-043 §4.2, §4.3, §4.5)', () => 
     expect(timeText(240)).toBe('4:00');
     expect(timeText(1)).toBe('0:01');
     expect(timeText(59)).toBe('0:59');
-    expect(timeText(3_725)).toBe('62:05');
+    expect(timeText(3_725)).toBe('1:02:05');
     expect(timeText(-3)).toBe('0:00');
     expect(timeText(Number.NaN)).toBe('0:00');
   });

@@ -14,6 +14,7 @@
 // groups. The arc has DASH in its own corner cell, so `moveTo` takes the cell
 // out of the bar there and puts it back on the keyboard.
 import type { Scheme } from '@/core/Input';
+import { QUICK_SLOT_NAMES } from '@/data/glossary';
 import {
   ITEMS,
   QUICK_SLOTS,
@@ -243,7 +244,8 @@ export class QuickBar {
   #makeSlot(slot: WeaponSlot | QuickSlot, weapon: boolean): SlotNodes {
     const root = testId(el('button', `qb-slot qb-${slot}`), `qb-${slot}`);
     root.type = 'button';
-    root.setAttribute('aria-label', slot);
+    // SPEC-045 §4.6: a quick slot is announced by its name — the third is a gadget.
+    root.setAttribute('aria-label', weapon ? slot : QUICK_SLOT_NAMES[slot as QuickSlot]);
     const icon = el('span', 'icon');
     const name = el('span', 'qb-name');
     const count = weapon ? null : el('span', 'qb-count');

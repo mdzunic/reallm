@@ -25,11 +25,13 @@ import {
   type PlanetId,
   type ShipSystemDef,
 } from '@/data/index';
+import { GLYPHS } from '@/data/glossary';
 import { Economy } from '@/systems/Economy';
 import { Progression } from '@/systems/Progression';
 import { departureDue, departureKey } from '@/systems/StoryBeats';
 import { activeFlightMission, runSkip } from '@/systems/Flight';
-import { departReason, formatTime, missionStatus, requirementText, skipRefusalText, starmapPreselect } from '@/systems/UiHelpers';
+import { duration } from '@/systems/Format';
+import { departReason, missionStatus, requirementText, skipRefusalText, starmapPreselect } from '@/systems/UiHelpers';
 import { director } from '@/scenes/Director';
 import { choiceSheet } from '@/ui/ConfirmSheet';
 import { el, h, keepFocus, testId } from '@/ui/dom';
@@ -403,17 +405,22 @@ export class StarmapScene extends UiScene<'starmap'> {
     const fuel = economy.fuelCost(this.#selected);
     const oil = data.resources.oil;
     // Travel shortens as the engine speeds up: seconds / speedMult[tier].
+    // SPEC-045 §4.7: a `duration`, so a 90 s trip reads `1 min 30 s`.
     const speed = ENGINE.metrics['speedMult']?.[data.ship.engine] ?? 1;
-    const travel = formatTime(Math.round(planet.travelSeconds / speed));
+    const travel = duration(Math.round(planet.travelSeconds / speed));
     const resources = [...new Set(planet.surface.nodes.map((node) => node.resource))].join(' · ') || '—';
     const threats = [...new Set(planet.surface.spawn.map((entry) => ENEMIES[entry.enemy].name))].join(' · ') || '—';
     const missing = economy.missingRequirements(planet.unlock);
     const requirements =
       planet.unlock.length === 0
-        ? [h('li', { class: 'req-met' }, '✓ Open approach')]
+        ? [h('li', { class: 'req-met' }, `${GLYPHS.good} Open approach`)]
         : planet.unlock.map((requirement) => {
             const met = !missing.includes(requirement);
-            return h('li', { class: met ? 'req-met' : 'req-unmet' }, `${met ? '✓' : '✗'} ${requirementText(requirement)}`);
+            return h(
+              'li',
+              { class: met ? 'req-met' : 'req-unmet' },
+              `${met ? GLYPHS.good : GLYPHS.error} ${requirementText(requirement)}`,
+            );
           });
     const missions = MISSION_IDS.filter((id) => MISSIONS[id].planet === this.#selected)
       .map((id) => ({ id, status: missionStatus(data, MISSIONS[id], 'station') }))

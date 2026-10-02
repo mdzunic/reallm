@@ -31,8 +31,9 @@ export const CARGO_TOAST_TEXT = 'CARGO FULL';
  * SPEC-034 §4.12: what a full hold says when a collect objective still wants
  * the units it cannot carry — they count, and they go home instead. Throttled
  * on the same 3 s as CARGO FULL, because a resource field would machine-gun it.
+ * SPEC-045 §4.6: resources carried are cargo, so it says so.
  */
-export const SHIPPED_TOAST_TEXT = 'Hold full — surplus shipped to Command Relay.';
+export const SHIPPED_TOAST_TEXT = 'Cargo full — surplus shipped to Command Relay.';
 /** A refused pickup retries this often, not every step. */
 const RETRY_SECONDS = 0.5;
 

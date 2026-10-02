@@ -138,10 +138,11 @@ export const TIPS: Readonly<Record<TipId, TipText>> = {
     touch: 'Drag to steer — the guns fire on their own.',
   },
   // …and 12 s later, on the same trip. SPEC-036 §4.11: on touch the throttle
-  // is the ▲ ▼ pair — a drag on the right is the fire zone, not a throttle.
+  // is the + − pair — a drag on the right is the fire zone, not a throttle.
+  // SPEC-045 §4.6: the buttons read + and − (U+2212), since ▲ means a warning.
   flight_throttle: {
     keyboard: 'Shift speeds up and X slows down — the wheel does both.',
-    touch: 'Tap ▲ or ▼ to change speed.',
+    touch: 'Tap + or − to change speed.',
   },
   // SPEC-036 §4.12: taught with the zone ghosts; only the touch wording ever
   // shows, and showing it also records the touch `move` tip it replaces.

@@ -5,10 +5,11 @@
 import type { Save } from '@/core/Save';
 import type { EventBus } from '@/core/Events';
 import type { GameEvents } from '@/core/Events';
+import { GLYPHS } from '@/data/glossary';
 import { RESOURCE_IDS, type ResourceId } from '@/data/index';
 import { walletModel } from '@/systems/UiHelpers';
 import { el, testId } from '@/ui/dom';
-import { RESOURCE_GLYPHS, TOKEN_GLYPH } from '@/ui/glyphs';
+import { RESOURCE_GLYPHS } from '@/ui/glyphs';
 
 interface WalletCell {
   readonly root: HTMLSpanElement;
@@ -29,7 +30,7 @@ export class Wallet {
     this.root = testId(el('div', 'wallet'), 'wallet');
     this.root.setAttribute('role', 'status');
 
-    const tokens = this.#cell('tokens', TOKEN_GLYPH, false);
+    const tokens = this.#cell('tokens', GLYPHS.tokens, false);
     tokens.root.classList.add('wallet-tokens');
     for (const resource of RESOURCE_IDS) this.#cell(resource, RESOURCE_GLYPHS[resource], true);
 

@@ -17,7 +17,9 @@ import {
   type QuickSlot,
   type WeaponSlot,
 } from '@/data/index';
+import { GLYPHS, QUICK_SLOT_NAMES } from '@/data/glossary';
 import { INVENTORY_SLOTS, type Economy } from '@/systems/Economy';
+import { percent } from '@/systems/Format';
 import { quickEligible } from '@/systems/Loadout';
 import { characterXpText, computePlayerStats, failText, gearTooltip, HP_FULL_TEXT } from '@/systems/UiHelpers';
 import { compareNodes } from '@/ui/Compare';
@@ -80,7 +82,7 @@ export class CharacterPanel {
 
   // ------------------------------------------------------------------ stats
 
-  /** AC-46: derived stats over the raw attributes. */
+  /** AC-46: derived stats over the raw attributes. SPEC-045 §4.6: armour is `▣`, never the ship's shield. */
   #statsBlock(): HTMLElement {
     const { player } = this.#deps.data;
     const stats = computePlayerStats(player.classId, player.attributes, player.level, this.#deps.data.equipped.primary);
@@ -111,11 +113,11 @@ export class CharacterPanel {
         h(
           'div',
           { class: 'char-stats' },
-          h('span', {}, `♥ ${player.hp}/${maxHp(player.classId, a, player.level)} HP`),
+          h('span', {}, `${GLYPHS.health} ${player.hp}/${maxHp(player.classId, a, player.level)} HP`),
           h('span', {}, `⚔ ${stats.damage} damage`),
           h('span', {}, `➤ ${stats.speed} m/s`),
-          h('span', {}, `⛨ ${armor.kind === 'armor' ? armor.armor : 0} armor`),
-          h('span', {}, `◈ ${player.tokens} tokens`),
+          h('span', {}, `${GLYPHS.armor} ${armor.kind === 'armor' ? armor.armor : 0} armor`),
+          h('span', {}, `${GLYPHS.tokens} ${player.tokens} tokens`),
         ),
         'character-stats',
       ),
@@ -268,14 +270,17 @@ export class CharacterPanel {
     return wrap;
   }
 
-  /** §4.7: one quick slot — what it holds, and the picker's list inline. */
+  /**
+   * §4.7: one quick slot — what it holds, and the picker's list inline.
+   * SPEC-045 §4.6: named as a player reads it, so the third is `Gadget`.
+   */
   #quickRow(slot: QuickSlot): HTMLElement {
     const save = this.#deps.data;
     const id = save.quick[slot];
     const count = id === null ? 0 : this.#deps.economy.count(id);
     const row = testId(el('div', 'loadout-quick'), `loadout-quick-${slot}`);
     row.append(
-      h('span', { class: 'settings-note' }, slot),
+      h('span', { class: 'settings-note' }, QUICK_SLOT_NAMES[slot]),
       h('span', { class: 'gear-name' }, id === null ? 'Empty' : `${ITEMS[id].name} ×${count}`),
     );
     const list = el('div', 'loadout-list');
@@ -327,10 +332,11 @@ export class CharacterPanel {
     return item.kind === 'weapon' || item.kind === 'armor' ? item.tier : 0;
   }
 
+  /** SPEC-045 §4.7: hazard resist is a percentage, `25 %` — never `0.25`. */
   #statLine(id: ItemId): string {
     const item = ITEMS[id];
     if (item.kind === 'weapon') return `damage ${item.damage} · fire rate ${item.fireRate} · range ${item.range}`;
-    if (item.kind === 'armor') return `armor ${item.armor} · hazard resist ${item.hazardResist}`;
+    if (item.kind === 'armor') return `armor ${item.armor} · hazard resist ${percent(item.hazardResist)}`;
     return '';
   }
 

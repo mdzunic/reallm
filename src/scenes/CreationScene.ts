@@ -20,6 +20,7 @@ import { normalizeName, type CharacterCreation, type SlotId } from '@/core/Save'
 import type { GameServices } from '@/core/Services';
 import type { Renderer } from '@/core/Renderer';
 import type { SceneParams } from '@/core/StateMachine';
+import { GLYPHS } from '@/data/glossary';
 import { ATTRIBUTE_MAX, CLASSES, CREATION_POINTS, type Attributes, type ClassId, type Difficulty } from '@/data/index';
 import { attributeEffectText, attributeLine, computePlayerStats, DIFFICULTY_LINES, passiveText } from '@/systems/UiHelpers';
 import { confirmSheet } from '@/ui/ConfirmSheet';
@@ -533,7 +534,7 @@ export class CreationScene extends UiScene<'creation'> {
       h(
         'div',
         { class: 'creation-stats' },
-        h('span', {}, `♥ ${stats.hp} HP`),
+        h('span', {}, `${GLYPHS.health} ${stats.hp} HP`),
         h('span', {}, `⚔ ${stats.damage} damage`),
         h('span', {}, `➤ ${stats.speed} m/s`),
       ),

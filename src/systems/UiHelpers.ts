@@ -61,6 +61,7 @@ import {
   type ShipSystem,
   type WeatherId,
 } from '@/data/index';
+import { GLYPHS } from '@/data/glossary';
 import type { EnemyEntity } from '@/entities/Enemy';
 import type { PlayerEntity } from '@/entities/Player';
 import { LOADOUT_CHAPTERS, RECOMMENDED_LOADOUT, type LoadoutEntry } from '@/systems/Balance';
@@ -74,6 +75,7 @@ import {
   type FailReason,
 } from '@/systems/Economy';
 import type { SkipRefusal } from '@/systems/Flight';
+import { clock, duration, MINUS, multPercent, percent, percentChange, rate } from '@/systems/Format';
 import { weaponDps, type SlotView } from '@/systems/Loadout';
 import { campaignLocked, contractFor } from '@/systems/Missions';
 import { cumulativeXp, LEVEL_CAP, xpToNext } from '@/systems/Progression';
@@ -88,39 +90,25 @@ const LOOT_TABLE: Readonly<Record<LootTableId, readonly LootEntry[]>> = LOOT_TAB
 const PLANET_TABLE: Readonly<Record<PlanetId, PlanetDef>> = PLANETS;
 
 // ---------------------------------------------------------------- formatting
-
-/** `1h 04m` / `12m` — playtime rows, travel times, nothing load-bearing. */
-export function formatTime(seconds: number): string {
-  const total = Number.isFinite(seconds) ? Math.max(0, Math.floor(seconds)) : 0;
-  const hours = Math.floor(total / 3600);
-  const minutes = Math.floor((total % 3600) / 60);
-  if (hours > 0) return `${hours}h ${String(minutes).padStart(2, '0')}m`;
-  if (minutes > 0) return `${minutes}m`;
-  return `${total}s`;
-}
-
-/** `1.15` → `+15%`, `0.85` → `−15%` — passives and effect lines share it. */
-function pct(mult: number): string {
-  const delta = Math.round((mult - 1) * 100);
-  return `${delta >= 0 ? '+' : '−'}${Math.abs(delta)}%`;
-}
+// SPEC-045 §4.7: every number below prints through `systems/Format.ts`.
 
 /**
  * The one line a class card prints under its blurb (AC-14): every effect the
  * passive carries, joined. The numbers come straight off the table, so a
- * retune never leaves the card lying.
+ * retune never leaves the card lying. SPEC-045 §4.7: the multipliers print
+ * through `multPercent` — `+15 % damage`.
  */
 export function passiveText(passive: Class['passive']): string {
   const parts: string[] = [];
-  if (passive.damageMult !== undefined) parts.push(`${pct(passive.damageMult)} damage`);
+  if (passive.damageMult !== undefined) parts.push(`${multPercent(passive.damageMult)} damage`);
   if (passive.maxHpBonus !== undefined) parts.push(`+${passive.maxHpBonus} max HP`);
   // SPEC-039 §4.3: the Engineer's refit discount covers companions too.
-  if (passive.refitDiscount !== undefined) parts.push(`−${Math.round(passive.refitDiscount * 100)}% ship and companion prices`);
-  if (passive.companionEffectMult !== undefined) parts.push(`${pct(passive.companionEffectMult)} companion effect`);
-  if (passive.moveSpeedMult !== undefined) parts.push(`${pct(passive.moveSpeedMult)} move speed`);
-  if (passive.pickupRadiusMult !== undefined) parts.push(`${pct(passive.pickupRadiusMult)} pickup radius`);
+  if (passive.refitDiscount !== undefined) parts.push(`${MINUS}${percent(passive.refitDiscount)} ship and companion prices`);
+  if (passive.companionEffectMult !== undefined) parts.push(`${multPercent(passive.companionEffectMult)} companion effect`);
+  if (passive.moveSpeedMult !== undefined) parts.push(`${multPercent(passive.moveSpeedMult)} move speed`);
+  if (passive.pickupRadiusMult !== undefined) parts.push(`${multPercent(passive.pickupRadiusMult)} pickup radius`);
   if (passive.nodeRadar === true) parts.push('resource radar');
-  if (passive.dashCooldownMult !== undefined) parts.push(`${pct(passive.dashCooldownMult)} dash cooldown`);
+  if (passive.dashCooldownMult !== undefined) parts.push(`${multPercent(passive.dashCooldownMult)} dash cooldown`);
   return parts.join(' · ');
 }
 
@@ -144,24 +132,20 @@ export type AttributeEffectKey = {
   [A in keyof typeof ATTRIBUTE_EFFECTS]: keyof (typeof ATTRIBUTE_EFFECTS)[A];
 }[keyof typeof ATTRIBUTE_EFFECTS];
 
-/** A per-point share as the form prints it: `0.04` → `4`. */
-function points(perPoint: number): number {
-  return Math.round(perPoint * 100);
-}
-
 /**
  * SPEC-044 §4.4: the words for each `ATTRIBUTE_EFFECTS` key. Keyed by the
  * table's own union, so a new effect without words is a compile error — and
- * `tests/ui/helpers.test.ts` walks the table at runtime as well.
+ * `tests/ui/helpers.test.ts` walks the table at runtime as well. A per-point
+ * share prints as its percentage: `0.04` → `+4 % damage`.
  */
 export const ATTRIBUTE_EFFECT_WORDS: Readonly<Record<AttributeEffectKey, (perPoint: number) => string>> = {
-  damage: (p) => `+${points(p)} % damage`,
+  damage: (p) => `+${percent(p)} damage`,
   maxHp: (n) => `+${n} max HP`,
-  moveSpeed: (p) => `+${points(p)} % speed`,
-  critChance: (p) => `+${points(p)} % crit chance`,
-  dashCooldownCut: (p) => `−${points(p)} % dash cooldown`,
-  companionEffect: (p) => `+${points(p)} % companion effect`,
-  priceCut: (p) => `−${points(p)} % prices`,
+  moveSpeed: (p) => `+${percent(p)} speed`,
+  critChance: (p) => `+${percent(p)} crit chance`,
+  dashCooldownCut: (p) => `${MINUS}${percent(p)} dash cooldown`,
+  companionEffect: (p) => `+${percent(p)} companion effect`,
+  priceCut: (p) => `${MINUS}${percent(p)} prices`,
 };
 
 /**
@@ -186,8 +170,8 @@ export function attributeEffectText(attribute: keyof Attributes): string {
 export const DIFFICULTY_LINES: Readonly<Record<Difficulty, string>> = {
   normal: 'Normal — the pressure the game was tuned for.',
   casual: 'Casual — softer hits and storms, longer wind-ups, kinder deaths; the story is unchanged.',
-  // SPEC-043 §4.4.
-  hard: 'Hard — tougher, deadlier hostiles and twice the elites; a death costs a fifth of the hold.',
+  // SPEC-043 §4.4. SPEC-045 §4.6: resources carried are cargo.
+  hard: 'Hard — tougher, deadlier hostiles and twice the elites; a death costs a fifth of your cargo.',
 };
 
 /** E9 / SPEC-044 §4.10: a slot this build cannot read because a newer one wrote it. */
@@ -195,9 +179,9 @@ export const NEWER_SAVE_TEXT = 'Save from a newer version';
 
 /**
  * One line per occupied slot for the Load list (AC-4): name, class, level,
- * planet, playtime — in the order a player reads them. `Corrupt` and `Empty`
- * match SPEC-007's SavePanel wording; a run parked at the station has no
- * `currentPlanet` and reads as `Station`.
+ * planet, playtime (SPEC-045 §4.7: a `duration`, `1 h 04 min`) — in the order a
+ * player reads them. `Corrupt` and `Empty` match SPEC-007's SavePanel wording;
+ * a run parked at the station has no `currentPlanet` and reads as `Station`.
  *
  * SPEC-044 §4.10: a save from a newer version is readable, just not by this
  * build (E9) — it says so before the `Corrupt` rule, which it also carries.
@@ -208,7 +192,7 @@ export function slotLine(summary: SlotSummary): string {
   if (summary.empty) return 'Empty';
   const cls = summary.classId !== undefined ? CLASS_TABLE[summary.classId].name : '';
   const planet = summary.planet != null ? PLANETS[summary.planet].name : 'Station';
-  return `${summary.name ?? ''} · ${cls} · Lv ${summary.level ?? 1} · ${planet} · ${formatTime(summary.playtimeSec ?? 0)}`;
+  return `${summary.name ?? ''} · ${cls} · Lv ${summary.level ?? 1} · ${planet} · ${duration(summary.playtimeSec ?? 0)}`;
 }
 
 /**
@@ -373,17 +357,17 @@ function cooldownWords(cooldown: Extract<Item, { kind: 'weapon' }>['cooldown']):
   }
 }
 
-/** SPEC-031 §4.16: a consumable's effect, in words. */
+/** SPEC-031 §4.16: a consumable's effect, in words — `Heals 50 % instantly`. */
 function effectWords(effect: Extract<Item, { kind: 'consumable' }>['effect']): string {
   switch (effect.kind) {
     case 'heal':
       return effect.overSeconds > 0
-        ? `Heals ${Math.round(effect.fraction * 100)}% over ${effect.overSeconds} s`
-        : `Heals ${Math.round(effect.fraction * 100)}% instantly`;
+        ? `Heals ${percent(effect.fraction)} over ${effect.overSeconds} s`
+        : `Heals ${percent(effect.fraction)} instantly`;
     case 'hazard_immunity':
       return `Hazard immunity for ${effect.seconds} s`;
     case 'damage_boost':
-      return `+${Math.round((effect.mult - 1) * 100)}% damage for ${effect.seconds} s`;
+      return `${multPercent(effect.mult)} damage for ${effect.seconds} s`;
     case 'explosive':
       return `Explosive — ${effect.damage} damage in a ${effect.radius} m blast`;
   }
@@ -413,14 +397,14 @@ export function dpsText(id: ItemId): string {
 /**
  * SPEC-039 §4.6: the one stat line under a shop gear row's name — a weapon's
  * DPS line and its range, or an armour piece's armor, the damage it takes off
- * and its hazard resist. `''` for a consumable.
+ * and its hazard resist (`armor 15 · −13 % damage · hazard 25 %`). `''` for a
+ * consumable.
  */
 export function shopStatText(id: ItemId): string {
   const item = ITEM_TABLE[id];
   if (item.kind === 'weapon') return `${dpsText(id)} · range ${item.range} m`;
   if (item.kind === 'armor') {
-    const cut = Math.round(damageReduction(item.armor) * 100);
-    return `armor ${item.armor} · −${cut}% damage · hazard ${Math.round(item.hazardResist * 100)}%`;
+    return `armor ${item.armor} · ${MINUS}${percent(damageReduction(item.armor))} damage · hazard ${percent(item.hazardResist)}`;
   }
   return '';
 }
@@ -436,7 +420,7 @@ export function gearStatLines(id: ItemId): readonly string[] {
   if (item.kind === 'weapon') {
     return [
       `Damage ${item.damage}`,
-      `Fire rate ${item.fireRate}/s`,
+      `Fire rate ${rate(item.fireRate)}`,
       dpsText(id),
       `Range ${item.range} m`,
       `Projectile speed ${item.projectileSpeed} m/s`,
@@ -445,7 +429,7 @@ export function gearStatLines(id: ItemId): readonly string[] {
     ];
   }
   if (item.kind === 'armor') {
-    return [`Armor ${item.armor}`, `Hazard resist ${Math.round(item.hazardResist * 100)}%`];
+    return [`Armor ${item.armor}`, `Hazard resist ${percent(item.hazardResist)}`];
   }
   return [effectWords(item.effect), `Stack of ${item.stack}`];
 }
@@ -505,19 +489,23 @@ export function failText(reason: FailReason): string {
   }
 }
 
-/** AC-39: one line per companion level, straight off the effect table. */
+/**
+ * AC-39: one line per companion level, straight off the effect table.
+ * SPEC-045 §4.7: shares and rates print through the formatter —
+ * `−10 % shop prices`, `1 %/s regen in combat`, `+2/s shield regen`.
+ */
 export function companionEffectText(effect: CompanionEffect): string {
   const parts: string[] = [];
   if (effect.autoCollectRadius !== undefined) parts.push(`collects within ${effect.autoCollectRadius} m`);
   if (effect.nodeRadar === true) parts.push('node radar');
-  if (effect.droneDamageFraction !== undefined) parts.push(`drone at ${Math.round(effect.droneDamageFraction * 100)}% of your damage`);
-  if (effect.droneFireRate !== undefined) parts.push(`${effect.droneFireRate}/s drone fire`);
-  if (effect.regenOutOfCombat !== undefined) parts.push(`${Math.round(effect.regenOutOfCombat * 100)}%/s regen out of combat`);
-  if (effect.regenInCombat !== undefined) parts.push(`${Math.round(effect.regenInCombat * 100)}%/s regen in combat`);
+  if (effect.droneDamageFraction !== undefined) parts.push(`drone at ${percent(effect.droneDamageFraction)} of your damage`);
+  if (effect.droneFireRate !== undefined) parts.push(`${rate(effect.droneFireRate)} drone fire`);
+  if (effect.regenOutOfCombat !== undefined) parts.push(`${percent(effect.regenOutOfCombat)}/s regen out of combat`);
+  if (effect.regenInCombat !== undefined) parts.push(`${percent(effect.regenInCombat)}/s regen in combat`);
   if (effect.cargoBonus !== undefined) parts.push(`+${effect.cargoBonus} cargo`);
   // SPEC-039 §4.5: ship, gear and companion prices — a recipe has no token price.
-  if (effect.shopDiscount !== undefined) parts.push(`−${Math.round(effect.shopDiscount * 100)}% shop prices`);
-  if (effect.shieldRegen !== undefined) parts.push(`+${effect.shieldRegen}/s shield regen`);
+  if (effect.shopDiscount !== undefined) parts.push(`${MINUS}${percent(effect.shopDiscount)} shop prices`);
+  if (effect.shieldRegen !== undefined) parts.push(`+${rate(effect.shieldRegen)} shield regen`);
   if (effect.autoAim === true) parts.push('auto-aim');
   if (effect.hullBonus !== undefined) parts.push(`+${effect.hullBonus} hull`);
   return parts.join(' · ');
@@ -529,11 +517,11 @@ export function companionEffectText(effect: CompanionEffect): string {
  * contract replay reads its own payout — 75 % of each, then the lithium.
  */
 export function rewardsText(rewards: MissionDef['rewards'], replay = false, contract = false): string {
-  if (replay && contract) return contractPayout(rewards, '◈');
+  if (replay && contract) return contractPayout(rewards, GLYPHS.tokens);
   const half = (value: number): number => (replay ? Math.floor(value / 2) : value);
   const parts: string[] = [];
   if (rewards.xp > 0) parts.push(`+${half(rewards.xp)} XP`);
-  if (rewards.tokens > 0) parts.push(`+${half(rewards.tokens)} ◈`);
+  if (rewards.tokens > 0) parts.push(`+${half(rewards.tokens)} ${GLYPHS.tokens}`);
   if (!replay) {
     for (const [resource, amount] of Object.entries(rewards.resources ?? {})) {
       if ((amount ?? 0) > 0) parts.push(`+${amount} ${resource}`);
@@ -562,10 +550,9 @@ function contractPayout(rewards: MissionDef['rewards'], unit: string): string {
 
 // ------------------------------------------- SPEC-043: bonuses, contracts, times
 
-/** SPEC-043 §4.5: whole seconds as `m:ss` — `161` → `2:41`. */
+/** SPEC-043 §4.5: whole seconds as `m:ss` — `161` → `2:41`. SPEC-045 §4.7: the formatter's `clock`. */
 export function timeText(seconds: number): string {
-  const total = Number.isFinite(seconds) ? Math.max(0, Math.floor(seconds)) : 0;
-  return `${Math.floor(total / 60)}:${String(total % 60).padStart(2, '0')}`;
+  return clock(seconds);
 }
 
 /** SPEC-043 §4.2: `No deaths` · `Under 4:00` · `No shelter` · `Kill 2 elites`. */
@@ -608,8 +595,7 @@ export function bonusLine(bonus: MissionBonus): string {
 export function contractLabel(save: Save, def: MissionDef, landing: number): string | null {
   const contract = contractFor(save, def, landing);
   if (contract === null) return null;
-  const share = Math.round(CONTRACT_REWARD_FRACTION * 100);
-  return `Contract · ${CONTRACTS[contract].name} · ${share} % + ${CONTRACT_LITHIUM} lithium`;
+  return `Contract · ${CONTRACTS[contract].name} · ${percent(CONTRACT_REWARD_FRACTION)} + ${CONTRACT_LITHIUM} lithium`;
 }
 
 // ------------------------------------------------------------------ missions
@@ -968,10 +954,16 @@ export function gearCompareText(worn: ItemId, candidate: ItemId): string {
   return gearCompare(worn, candidate).map(compareText).join(' · ');
 }
 
-/** One compare part as the line prints it — shared with `compareDeltas` (SPEC-042 §4.8). */
+/**
+ * One compare part as the line prints it — shared with `compareDeltas` (SPEC-042
+ * §4.8). SPEC-045 §4.7: hazard resist is a percentage, `0 % → 25 %`, never `0.25`.
+ */
 function compareText(part: StatDelta): string {
   if (part.stat === 'tier') return `T${part.from} → T${part.to}`;
   if (part.stat === 'recharge') return `recharge ${part.from} s → ${part.to} s`;
+  if (part.stat === 'hazardResist' && typeof part.from === 'number' && typeof part.to === 'number') {
+    return `${part.label} ${percent(part.from)} → ${percent(part.to)}`;
+  }
   return `${part.label} ${part.from} → ${part.to}`;
 }
 
@@ -1493,12 +1485,12 @@ export interface HudTrackerRow {
  */
 export interface HudTracker {
   title: string;
-  /** `stage 2/3`; empty with no mission, where the header is the title alone. */
+  /** `Stage 2/3` (SPEC-045 §4.7: `stage()`); empty with no mission, where the header is the title alone. */
   stage: string;
   rows: HudTrackerRow[];
   /** Metres to the focus target; `null` when there is none. */
   distance: number | null;
-  /** Radians clockwise from map-up — what the ▲ beside the row rotates by. */
+  /** Radians clockwise from map-up — what the arrow beside the row turns by. */
   bearing: number;
   /** Stuck level ≥ 1: the tracker and the waypoint pulse (SPEC-027 AC-28). */
   pulse: boolean;
@@ -1828,14 +1820,14 @@ export function flashGate(lastEdgeAt: number, now: number, minGap: number = FLAS
 }
 
 /**
- * SPEC-037 §4.4 — a weapon slot's state line: `HEAT 64%`, `LOCK`, or the
+ * SPEC-037 §4.4 — a weapon slot's state line: `HEAT 64 %`, `LOCK`, or the
  * seconds left on a switch or a recharge (`2.4 s`). A slot that is ready — or
  * empty — prints nothing: `READY` was a word on every slot at rest.
  */
 export function slotStateText(view: SlotView): string {
   switch (view.state) {
     case 'heat':
-      return `HEAT ${Math.round(view.heat * 100)}%`;
+      return `HEAT ${percent(view.heat)}`;
     case 'lock':
       return 'LOCK';
     case 'recharge':
@@ -1937,13 +1929,6 @@ function metricValue(value: number): string {
   return Number.isInteger(value) ? String(value) : String(Number(value.toFixed(3)));
 }
 
-/** `+15 %` / `−10 %`, relative to `from`, with a real minus sign. */
-function percentDelta(from: number, to: number): string {
-  if (!(from > 0)) return `${metricValue(from)} → ${metricValue(to)}`;
-  const percent = Math.round((to / from - 1) * 100);
-  return `${percent < 0 ? '−' : '+'}${Math.abs(percent)} %`;
-}
-
 /** `heatMax` → `Heat max` — a camelCase key in sentence case (§4.12's fallback). */
 function metricWords(metric: string): string {
   const words = metric.replace(/([a-z0-9])([A-Z])/g, '$1 $2').toLowerCase();
@@ -1954,14 +1939,15 @@ function metricWords(metric: string): string {
  * SPEC-035 §4.12 — an upgrade tier's effect in the player's words, so the shop
  * never prints a variable name (`speedMult 1 → 1.15`). An unknown metric falls
  * back to its key split into words, and `tests/ui/helpers.test.ts` fails if any
- * `UPGRADES` metric reaches that branch.
+ * `UPGRADES` metric reaches that branch. SPEC-045 §4.7: a multiplier reads as
+ * its `percentChange` (`Speed +15 %`), and a rate carries `/s` attached.
  */
 export function upgradeDeltaText(metric: string, from: number, to: number): string {
   switch (metric) {
     case 'speedMult':
-      return `Speed ${percentDelta(from, to)}`;
+      return `Speed ${percentChange(from, to)}`;
     case 'fuelMult':
-      return `Fuel use ${percentDelta(from, to)}`;
+      return `Fuel use ${percentChange(from, to)}`;
     case 'hullHp':
       return `Hull ${metricValue(from)} → ${metricValue(to)}`;
     case 'shieldHp':
@@ -1971,7 +1957,7 @@ export function upgradeDeltaText(metric: string, from: number, to: number): stri
     case 'damage':
       return `Gun damage ${metricValue(from)} → ${metricValue(to)}`;
     case 'fireRate':
-      return `Fire rate ${metricValue(from)} → ${metricValue(to)} /s`;
+      return `Fire rate ${metricValue(from)} → ${rate(to)}`;
     default:
       return `${metricWords(metric)} ${metricValue(from)} → ${metricValue(to)}`;
   }
