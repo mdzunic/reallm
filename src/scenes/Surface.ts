@@ -78,6 +78,7 @@ import { ARENA_RESPAWN_OUTSET, clampToSeal, type ArenaState } from '@/entities/W
 import { Combat, computePlayerStats, ELITE_SCALE, type CombatWorld, type HitMemory } from '@/systems/Combat';
 import { DASH_DISTANCE, dashCooldown, isDashing, stepDash, tryDash } from '@/systems/Dash';
 import { Economy } from '@/systems/Economy';
+import { seconds, stage as stageText } from '@/systems/Format';
 import { ExploreMask, REVEAL_CAPACITY } from '@/systems/Exploration';
 import {
   bearingWord,
@@ -3452,7 +3453,7 @@ export class SurfaceScene extends UiScene<'surface'> {
     button('surface-goto-objective', 'To objective', () => this.#debugGotoObjective());
     // SPEC-027 AC-86: a minute of idle guidance time per press, so the whole
     // escalation is reachable in a QA session instead of in two and a half.
-    button('surface-stuck', 'Stuck +60s', () => this.#stuck.advance(60));
+    button('surface-stuck', 'Stuck +60 s', () => this.#stuck.advance(60));
     // SPEC-030 §4.12 (D-14): the shelter, edge and storm shortcuts are plain
     // `?debug` controls, so the packaged e2e run can press them.
     button('surface-goto-shelter', 'To shelter', () => {
@@ -3931,7 +3932,7 @@ export class SurfaceScene extends UiScene<'surface'> {
         h(
           'p',
           { class: 'terminal-active' },
-          `${def.title} — Stage ${state.stage + 1}/${def.stages.length}`,
+          `${def.title} — ${stageText(state.stage + 1, def.stages.length)}`,
           state.id === missions.pinned ? h('span', { class: 'badge badge-pin' }, 'Tracked') : null,
         ),
       );
@@ -4423,7 +4424,7 @@ export class SurfaceScene extends UiScene<'surface'> {
       const dx = target.x - player.x;
       const dz = target.z - player.z;
       this.#focusDistance = Math.hypot(dx, dz);
-      // The ▲ beside the focus row turns clockwise from map-up (SPEC-026 §4.1).
+      // The arrow beside the focus row turns clockwise from map-up (SPEC-026 §4.1).
       const u = (dx - dz) * Math.SQRT1_2;
       const v = (dx + dz) * Math.SQRT1_2;
       this.#focusBearing = Math.atan2(u, -v);
@@ -4811,7 +4812,8 @@ export class SurfaceScene extends UiScene<'surface'> {
     const count = def.stages.length;
     const stage = this.#stageOf(missions, pinned);
     tracker.title = def.title;
-    tracker.stage = `stage ${Math.min(count, Math.max(1, stage + 1))}/${count}`;
+    // SPEC-045 §4.7: `Stage 2/3`, through the formatter.
+    tracker.stage = stageText(Math.min(count, Math.max(1, stage + 1)), count);
     for (let i = 0; i < this.#guideRows.length && i < this.#trackerRows.length; i++) {
       const progress = this.#guideRows[i] as ObjectiveProgress;
       const row = this.#trackerRows[i] as HudTrackerRow;
@@ -4843,9 +4845,15 @@ export class SurfaceScene extends UiScene<'surface'> {
     return tracker;
   }
 
-  /** D-3: the focus row keeps the wording the bottom-centre line used to have. */
+  /**
+   * D-3: the focus row keeps the wording the bottom-centre line used to have.
+   * SPEC-045 §4.7: a survive or defend row counts down — `(48 s)`, never
+   * `(12/60)` — as every other timer does (45-s: 0.3 s left reads `1 s`).
+   */
   #focusRowText(title: string, progress: ObjectiveProgress): string {
     const line = this.#objectiveLine(progress.objective);
+    const kind = progress.objective.kind;
+    if (kind === 'survive' || kind === 'defend') return `${title} — ${line} (${seconds(progress.target - progress.value)})`;
     if (progress.target > 1) return `${title} — ${line} (${Math.floor(progress.value)}/${progress.target})`;
     return `${title} — ${line}`;
   }
@@ -4868,9 +4876,9 @@ export class SurfaceScene extends UiScene<'surface'> {
       case 'boss':
         return `Defeat ${ENEMIES[objective.enemy].name}`;
       case 'survive':
-        return `Survive ${Math.max(0, Math.ceil(objective.seconds - progress.value))} s`;
+        return `Survive ${seconds(objective.seconds - progress.value)}`;
       case 'defend':
-        return `Defend ${this.#poiLabel(objective.poi)} ${Math.max(0, Math.ceil(objective.seconds - progress.value))} s`;
+        return `Defend ${this.#poiLabel(objective.poi)} ${seconds(objective.seconds - progress.value)}`;
       case 'deliver': {
         const held = (this.#save as Save).resources[objective.resource] ?? 0;
         const line = `Deliver ${objective.amount} ${objective.resource} to ${this.#poiLabel(objective.poi)}`;
@@ -5182,7 +5190,7 @@ export class SurfaceScene extends UiScene<'surface'> {
       this.#missionRows.push({
         id: state.id,
         title: def.title,
-        stage: `Stage ${state.stage + 1}/${def.stages.length}`,
+        stage: stageText(state.stage + 1, def.stages.length),
         line: next === undefined ? 'Stage complete' : this.#objectiveLine(next.objective),
         tracked: state.id === missions.pinned,
       });
@@ -5492,7 +5500,7 @@ export class SurfaceScene extends UiScene<'surface'> {
             const def = MISSION_TABLE[id];
             const first = def.stages[stage]?.[0];
             if (first !== undefined) {
-              bus.emit('ui:toast', { kind: 'good', text: `Stage ${stage + 1}/${def.stages.length} — ${this.#objectiveLine(first)}` });
+              bus.emit('ui:toast', { kind: 'good', text: `${stageText(stage + 1, def.stages.length)} — ${this.#objectiveLine(first)}` });
             }
           }
           // §4.6: forced mission weather ends when a boss stage starts.
