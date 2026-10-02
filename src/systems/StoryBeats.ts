@@ -16,7 +16,11 @@ export interface ModeInput {
   manifestFilm: boolean;
   /** The manifest entry carries a poster per shot (it always does when present). */
   posters: boolean;
-  reduceMotion: boolean;
+  /**
+   * SPEC-045 §4.3: the player asked for the posters — Films set to stills,
+   * which reduce motion sets (PLAN R18 decision 10).
+   */
+  preferStills: boolean;
   /** A video failure was remembered earlier in this session (§4.1, E27). */
   videoBroken: boolean;
 }
@@ -24,7 +28,7 @@ export interface ModeInput {
 /** The mode table of §4.1: video where possible, stills next, words always. */
 export function chooseFilmMode(input: ModeInput): FilmMode {
   if (!input.manifestFilm) return 'text';
-  if (input.reduceMotion || input.videoBroken) return input.posters ? 'stills' : 'text';
+  if (input.preferStills || input.videoBroken) return input.posters ? 'stills' : 'text';
   return 'video';
 }
 
@@ -73,9 +77,13 @@ export function cuesBetween(def: FilmDef, t0: number, t1: number): readonly CueD
 /** §4.3: captions type at the dialogue panel's pace. */
 export const FILM_TYPE_CPS = 40;
 
-/** How many characters of `text` are visible `sinceAt` seconds after its `at`. */
-export function typedChars(text: string, sinceAt: number, reduceMotion: boolean): number {
-  if (reduceMotion) return text.length;
+/**
+ * How many characters of `text` are visible `sinceAt` seconds after its `at`.
+ * `instant` shows the whole caption at once (SPEC-045 §4.3: the player turned
+ * typed text off, which reduce motion does).
+ */
+export function typedChars(text: string, sinceAt: number, instant: boolean): number {
+  if (instant) return text.length;
   return Math.min(text.length, Math.max(0, Math.floor(sinceAt * FILM_TYPE_CPS)));
 }
 

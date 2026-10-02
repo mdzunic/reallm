@@ -281,7 +281,9 @@ export class FlightScene extends UiScene<'flight'> {
       // SPEC-037 §4.6: an ion-storm tick never flashes — the storm pill and the
       // static already say it — but the view still kicks.
       if (source !== 'storm') this.#hud?.damageFlash();
-      this.#view?.kick();
+      // SPEC-045 §4.3: the kick follows Camera shake — half at 0.5, and at 0
+      // (which reduce motion sets) nothing moves.
+      this.#view?.kick(this.services.settings.get().cameraShake);
     }, this));
     // SPEC-034 §4.10 step 2: a flight mission that finishes in flight is
     // debriefed in flight, and the ledger keeps the station from saying it again.

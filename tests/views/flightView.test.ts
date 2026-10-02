@@ -565,3 +565,39 @@ describe('FlightView launch shot (SPEC-032)', () => {
     }
   });
 });
+
+// SPEC-045 §4.3 — the cockpit kick takes Camera shake's scale, with no
+// reduce-motion guard of its own: the scene passes `settings.cameraShake`,
+// which reduce motion sets to 0.
+describe('FlightView cockpit kick (SPEC-045 §4.3)', () => {
+  /** The degrees the horizon rolled on the frame after `kicks` kicks at `strength`. */
+  function rollAfter(strength: number, kicks = 1): number {
+    const { view } = setup();
+    for (let i = 0; i < kicks; i++) view.kick(strength);
+    view.update(frame(), 1 / 60);
+    const roll = view.cameraRollDeg;
+    view.dispose();
+    return roll;
+  }
+
+  it('changes nothing at 0, and kicks less at half than at full', () => {
+    const still = rollAfter(1, 0);
+    expect(rollAfter(0)).toBe(still);
+    expect(rollAfter(0, 20)).toBe(still);
+    const full = Math.abs(rollAfter(1) - still);
+    const half = Math.abs(rollAfter(0.5) - still);
+    expect(full).toBeGreaterThan(0);
+    expect(half).toBeGreaterThan(0);
+    expect(half).toBeLessThan(full);
+  });
+
+  it('at half, never shakes more than half as hard as full, however many hits land', () => {
+    // The ceiling scales with the kick, so a storm of hits at 0.5 tops out at
+    // half of full's, less the frame's decay.
+    const still = rollAfter(1, 0);
+    const full = Math.abs(rollAfter(1, 20) - still);
+    const half = Math.abs(rollAfter(0.5, 20) - still);
+    expect(half).toBeGreaterThan(0);
+    expect(half).toBeLessThanOrEqual(full / 2);
+  });
+});

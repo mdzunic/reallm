@@ -281,7 +281,7 @@ const GROUND_MOVE_KINDS: ReadonlySet<GameEvents['boss:move']['kind']> = new Set(
   'ring',
   'burrow',
 ]);
-/** SPEC-041 §4.1: the ground move's shake — 0.3 for 0.3 s; reduce motion zeroes it. */
+/** SPEC-041 §4.1: the ground move's shake — 0.3 for 0.3 s; Camera shake scales it (SPEC-045 §4.3). */
 const BOSS_MOVE_SHAKE_AMPLITUDE = 0.3;
 const BOSS_MOVE_SHAKE_SECONDS = 0.3;
 /** SPEC-041 §4.6: the mender's pulse ring. */
@@ -1988,8 +1988,9 @@ export class SurfaceScene extends UiScene<'surface'> {
     info['viewTime'] = Math.round(this.#viewTime * 100) / 100;
     // SPEC-015 AC-39: how far the shake and the walk bob actually moved the
     // camera on the last frame, for the same reason SPEC-020 20-g publishes
-    // `skyTint` — reduce motion zeroes both, and that is otherwise a claim
-    // about a Three.js vector nothing outside the renderer can read.
+    // `skyTint` — Camera shake Off zeroes both (SPEC-045 §4.3), and that is
+    // otherwise a claim about a Three.js vector nothing outside the renderer
+    // can read.
     info['camShake'] = Math.round(this.#shakeScratch.length() * 1000) / 1000;
     info['camBob'] = Math.round(this.#shakeScratch.y * 1000) / 1000;
     // SPEC-035 §4.2, §4.4, §4.5, §4.7: the camera's distance, the linear fog's
@@ -2462,11 +2463,13 @@ export class SurfaceScene extends UiScene<'surface'> {
     // look-at target move by the same vector, so only the position changes —
     // the orientation, and with it the aim ray, is untouched.
     const time = this.#viewTimeNow();
-    const reduceMotion = this.services.settings.get().reduceMotion;
-    shakeOffset(this.#shake, time, reduceMotion, this.#shakeScratch);
+    // SPEC-045 §4.3: both scale by Camera shake, and at 0 (which reduce motion
+    // sets) both are exactly zero.
+    const cameraShake = this.services.settings.get().cameraShake;
+    shakeOffset(this.#shake, time, cameraShake, this.#shakeScratch);
     // SPEC-015 AC-41: the walk bob joins the shake on the same side of the
-    // frustum capture, and reduce motion zeroes its amplitude outright.
-    this.#shakeScratch.y += cameraBob(this.#camSpeed, time, reduceMotion);
+    // frustum capture.
+    this.#shakeScratch.y += cameraBob(this.#camSpeed, time, cameraShake);
     if (this.#shakeScratch.lengthSq() > 0) {
       this.camera.position.add(this.#shakeScratch);
       this.camera.updateMatrixWorld();
@@ -5207,7 +5210,7 @@ export class SurfaceScene extends UiScene<'surface'> {
       // SPEC-027 §4.5: the storm tip rides the ten-second warning itself.
       bus.on('weather:warning', () => this.#requestTip('storm'), this),
       // SPEC-029 §4.12: a blast bursts, scorches to its radius and shakes the
-      // camera 0.3 — reduce motion already zeroes the shake in shakeOffset.
+      // camera 0.3 — shakeOffset scales the shake by Camera shake (SPEC-045).
       bus.on(
         'combat:blast',
         ({ x, z, radius }) => {
@@ -5244,7 +5247,7 @@ export class SurfaceScene extends UiScene<'surface'> {
         this,
       ),
       // SPEC-041 §4.1: a ground move lands with a dust ring and a 0.3 s shake —
-      // reduce motion already zeroes the shake in shakeOffset.
+      // shakeOffset scales the shake by Camera shake (SPEC-045).
       bus.on(
         'boss:move',
         ({ kind, x, z }) => {

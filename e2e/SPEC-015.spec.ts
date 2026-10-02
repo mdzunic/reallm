@@ -611,15 +611,17 @@ test.describe('reduce motion, on (AC-38, AC-40, AC-41)', () => {
     await page.locator('[data-testid="new-slot-0"]').click();
     const film = page.locator('[data-testid="film"]');
     await expect(film).toHaveAttribute('data-film', 'prologue', { timeout: 30_000 });
-    // SPEC-022 §4.4: `stills` is the reduce-motion mode, and it is the whole
-    // answer — no `<video>` is built, so there is nothing left to pan.
+    // SPEC-022 §4.4: `stills` is the mode Films takes when reduce motion
+    // seeds it (SPEC-045 §4.3), and it is the whole answer — no `<video>` is
+    // built, so there is nothing left to pan.
     await expect(film).toHaveAttribute('data-mode', 'stills');
     await expect(page.locator('[data-testid="film-poster"]')).toHaveCount(1);
     await expect(page.locator('[data-testid="film-video"]')).toHaveCount(0);
 
-    // The typewriter: the caption is whole the moment it appears. Sampled on
-    // consecutive frames it never grows — the control case below is the same
-    // read with the setting off, where it does.
+    // The typewriter, which reduce motion turns off (SPEC-045 §4.3): the
+    // caption is whole the moment it appears. Sampled on consecutive frames it
+    // never grows — the control case below is the same read with the setting
+    // off, where it does.
     const caption = page.locator('[data-testid="film-caption"]');
     await expect(caption).toContainText('We built minds to run the world', { timeout: 30_000 });
     const first = (await caption.textContent()) ?? '';
@@ -768,7 +770,8 @@ test.describe('reduce motion holds the camera still (AC-39)', () => {
   test('walking moves the camera by nothing at all', async ({ page }) => {
     await start(page, '/?scene=surface&planet=cinder4');
     const samples = await walkSamples(page, 8);
-    // Not "small" — zero. `cameraBobAmplitude` returns 0 outright and
+    // Not "small" — zero. Reduce motion sets Camera shake to 0 (SPEC-045
+    // §4.3), at which `cameraBobAmplitude` returns 0 outright and
     // `shakeOffset` writes the zero vector, so the offset is never applied.
     expect(samples.every((s) => s.shake === 0)).toBe(true);
     expect(samples.every((s) => s.bob === 0)).toBe(true);
