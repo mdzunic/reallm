@@ -2477,6 +2477,22 @@ html.reduce-motion .dialogue-dim {
   padding-top: 10px;
 }
 
+/* SPEC-045 §4.2: a row's block inside its section — Backup's fields, the
+   service switch and its note — spaced like the section, without its rule. */
+.settings-block {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+/* SPEC-045 §4.9: the brightness slider's `+10 %` beside it. */
+.settings-value {
+  min-width: 4.5em;
+  text-align: right;
+  color: var(--ink-dim);
+  font-variant-numeric: tabular-nums;
+}
+
 .settings-row {
   display: flex;
   justify-content: space-between;
