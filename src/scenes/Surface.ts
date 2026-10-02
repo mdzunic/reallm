@@ -143,7 +143,7 @@ import {
 } from '@/systems/UiHelpers';
 import { UiScene } from '@/scenes/base';
 import { director } from '@/scenes/Director';
-import { INSTANCES_PER_PART } from '@/views/ProceduralMeshes';
+import { INSTANCES_PER_PART, setHostileRim } from '@/views/ProceduralMeshes';
 import { layerFromAssets } from '@/views/ProceduralTextures';
 import {
   advanceViewTime,
@@ -1124,6 +1124,19 @@ export class SurfaceScene extends UiScene<'surface'> {
     view.reduceMotion = services.settings.get().reduceMotion;
     this.#view = view;
     this.disposer.add(() => view.dispose());
+    // SPEC-045 §4.5: every hostile rim and non-elite telegraph reads one shared
+    // uniform, set from the Colours preset now and on each change of it — the
+    // next frame shows it, and no shader compiles (45-n).
+    setHostileRim(services.settings.get().colourPreset);
+    this.disposer.add(
+      services.events.on(
+        'settings:changed',
+        ({ patch }) => {
+          if (patch.colourPreset !== undefined) setHostileRim(patch.colourPreset);
+        },
+        this,
+      ),
+    );
     this.#groundColor = hexColor(planet.surface.palette.ground);
 
     // SPEC-018 §4.10: the lazy per-planet drop `enter()` started and waited
@@ -1240,6 +1253,10 @@ export class SurfaceScene extends UiScene<'surface'> {
         ({ patch }) => {
           if (patch.joystickSide !== undefined) hud.setSide(patch.joystickSide);
           if (patch.damageFlash !== undefined) hud.setDamageFlash(patch.damageFlash);
+          // SPEC-045 §4.4: a new UI scale redraws the minimap's corner at a new
+          // size (`main.ts`, subscribed at boot, has already written
+          // `--ui-scale`), so its backing store is measured off the new box.
+          if (patch.uiScale !== undefined) this.#minimap?.measure();
         },
         this,
       ),
