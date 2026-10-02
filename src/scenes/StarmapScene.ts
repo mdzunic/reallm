@@ -287,10 +287,14 @@ export class StarmapScene extends UiScene<'starmap'> {
     (depart !== null && !depart.disabled ? depart : back)?.focus({ preventScroll: true });
   }
 
-  /** SPEC-044 §4.6: whether `planet` has a mission reading `active` or `available`. */
+  /**
+   * SPEC-044 §4.6: whether `planet` has a mission reading `active` or
+   * `available`. Only an open world counts: a locked one's missions are on no
+   * board yet — `c2_m1` needs nothing, but Vetra does — so they wait for no one.
+   */
   #hasMissions(planet: PlanetId): boolean {
     const data = this.services.save.current;
-    if (data === null) return false;
+    if (data === null || this.#economy?.isUnlocked(planet) !== true) return false;
     return MISSION_IDS.some((id) => {
       const def = MISSIONS[id];
       if (def.planet !== planet) return false;

@@ -3843,7 +3843,11 @@ export class SurfaceScene extends UiScene<'surface'> {
     // SPEC-043 §4.3: a replay this landing runs as a contract says so — read
     // with `visits[planet]`, the landing the scene counted on entry.
     const landing = save?.progress.visits[this.#planet.id] ?? 0;
-    for (const def of missions.available()) {
+    // SPEC-044 §4.7: new work first, then replays — the board's order
+    // (SPEC-035 §4.12) — so the first Accept, which takes focus, is new work.
+    const offers = missions.available();
+    const fresh = offers.filter((def) => !missions.isReplay(def.id as MissionId));
+    for (const def of [...fresh, ...offers.filter((offer) => !fresh.includes(offer))]) {
       const id = def.id as MissionId;
       const replay = missions.isReplay(id);
       const contract = replay && save !== null ? contractLabel(save, def, landing) : null;
