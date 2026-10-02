@@ -65,6 +65,186 @@ export function h<K extends keyof HTMLElementTagNameMap>(
   return node;
 }
 
+// ------------------------------------------------------- focus (SPEC-044)
+
+/**
+ * SPEC-044 §3: what keyboard focus can land on — the set `keepFocus` and
+ * `openModal` count with. A roving tab (`tabindex="-1"`) is not in it.
+ */
+export const FOCUSABLE =
+  'button:not(:disabled):not([tabindex="-1"]), input:not(:disabled), select:not(:disabled), textarea:not(:disabled), a[href], [tabindex="0"]';
+
+/** Every `FOCUSABLE` match inside `root`, in document order. */
+function focusablesIn(root: ParentNode): HTMLElement[] {
+  return [...root.querySelectorAll<HTMLElement>(FOCUSABLE)];
+}
+
+/** …of which the ones that are laid out — a `display: none` control cannot take focus. */
+function shownFocusablesIn(root: ParentNode): HTMLElement[] {
+  return focusablesIn(root).filter((node) => node.getClientRects().length > 0);
+}
+
+/** The element under `root` whose `data-testid` is exactly `id`, compared as text (no selector escaping). */
+function byTestId(root: HTMLElement, id: string): HTMLElement | null {
+  for (const node of root.querySelectorAll<HTMLElement>('[data-testid]')) {
+    if (node.dataset['testid'] === id) return node;
+  }
+  return null;
+}
+
+/**
+ * A control focus may go back to: a `FOCUSABLE` match, or a tab of a roving
+ * tablist — which is `tabindex="-1"` while another tab is selected, and is
+ * still where the arrow keys left the player.
+ */
+function refocusable(node: HTMLElement): boolean {
+  return node.matches(FOCUSABLE) || node.matches('[role="tab"]:not(:disabled)');
+}
+
+/**
+ * Runs `render`; if focus was inside `container`, re-focuses by testid, then by
+ * the row's testid, then by index (SPEC-044 §4.2):
+ *   1. the element with the recorded `data-testid`, if it is a control;
+ *   2. the first control inside the element named by the testid with its
+ *      trailing `-<segment>`s dropped one at a time (`mission-c2_m1-accept`
+ *      → `mission-c2_m1`) — Accept became Star Map, Pin and Abandon (44-d);
+ *   3. the control at the recorded index, clamped to the last one — the
+ *      neighbour of a control that is now disabled (44-c).
+ * With nothing to land on, focus is left alone (44-f). Every call site is an
+ * event handler or a scene's enter; nothing here runs per frame.
+ */
+export function keepFocus(container: HTMLElement, render: () => void): void {
+  const active = document.activeElement;
+  const inside = active instanceof HTMLElement && active !== container && container.contains(active);
+  const id = inside ? (active.dataset['testid'] ?? null) : null;
+  const index = inside ? focusablesIn(container).indexOf(active) : -1;
+  render();
+  if (!inside) return;
+  refocusTarget(container, id, index)?.focus({ preventScroll: true });
+}
+
+function refocusTarget(container: HTMLElement, id: string | null, index: number): HTMLElement | null {
+  if (id !== null) {
+    const same = byTestId(container, id);
+    if (same !== null && refocusable(same)) return same;
+    let row = id;
+    for (let cut = row.lastIndexOf('-'); cut > 0; cut = row.lastIndexOf('-')) {
+      row = row.slice(0, cut);
+      const host = byTestId(container, row);
+      if (host === null) continue;
+      const first = focusablesIn(host)[0];
+      if (first !== undefined) return first;
+    }
+  }
+  if (index < 0) return null;
+  const list = focusablesIn(container);
+  return list[Math.min(index, list.length - 1)] ?? null;
+}
+
+export interface ModalOptions {
+  /** The dialog's accessible name (`aria-label`). */
+  label: string;
+  /** What takes focus on open; the first control inside the root, else the root, when absent. */
+  initialFocus?: HTMLElement | null;
+  /** Put on SPEC-036's back-stack while open; omitted for layers SPEC-036 already registers. */
+  onBack?: () => void;
+}
+
+/** The open modals, the top one last; only the top one traps Tab. */
+const MODALS: { readonly root: HTMLElement }[] = [];
+
+/** The attributes `openModal` writes, so its close can put each back as it found it. */
+const MODAL_ATTRIBUTES = ['role', 'aria-modal', 'aria-label', 'tabindex'] as const;
+
+/**
+ * SPEC-044 §4.3, §2: a Tab trap rather than `inert` — the toast rack's live
+ * region sits beside the overlays, and `inert` on their layer would mute it
+ * and disable a nested sheet. Tab and Shift+Tab cycle the top modal's shown
+ * controls; focus found outside it goes to its first control.
+ */
+function trapTab(event: KeyboardEvent): void {
+  if (event.key !== 'Tab' || event.altKey || event.ctrlKey || event.metaKey) return;
+  // A root taken out of the page without its close (a scene torn down under an
+  // ending card) traps nothing any more.
+  for (let at = MODALS.length - 1; at >= 0; at--) {
+    if (!(MODALS[at] as { readonly root: HTMLElement }).root.isConnected) MODALS.splice(at, 1);
+  }
+  if (MODALS.length === 0) document.removeEventListener('keydown', trapTab, true);
+  const root = MODALS[MODALS.length - 1]?.root;
+  if (root === undefined) return;
+  event.preventDefault();
+  const list = shownFocusablesIn(root);
+  const active = document.activeElement;
+  const first = list[0];
+  const last = list[list.length - 1];
+  if (first === undefined || last === undefined) {
+    root.focus({ preventScroll: true });
+    return;
+  }
+  let next: HTMLElement;
+  const at = active instanceof HTMLElement ? list.indexOf(active) : -1;
+  if (at >= 0) {
+    next = list[(at + (event.shiftKey ? list.length - 1 : 1)) % list.length] as HTMLElement;
+  } else if (!(active instanceof Node) || !root.contains(active)) {
+    next = first;
+  } else if (event.shiftKey) {
+    // On the root itself, or on a control outside the tab order: the
+    // neighbour in document order, wrapping at the ends.
+    next = [...list].reverse().find((node) => (active.compareDocumentPosition(node) & Node.DOCUMENT_POSITION_PRECEDING) !== 0) ?? last;
+  } else {
+    next = list.find((node) => (active.compareDocumentPosition(node) & Node.DOCUMENT_POSITION_FOLLOWING) !== 0) ?? first;
+  }
+  next.focus({ preventScroll: true });
+}
+
+/** The `UiRoot` whose back-stack a modal under `node` belongs to. */
+function uiRootOf(node: HTMLElement): UiRoot | null {
+  for (let at: HTMLElement | null = node; at !== null; at = at.parentElement) {
+    const found = ROOTS.get(at);
+    if (found !== undefined) return found;
+  }
+  const host = document.getElementById('ui');
+  return host === null ? null : uiLayers(host);
+}
+
+/**
+ * SPEC-044 §4.3: `root` takes focus as a dialog, keeps Tab inside while it is
+ * the top modal, and gives focus back when it closes. Call it once `root` is
+ * mounted and shown. Returns the close function — idempotent — which pops the
+ * modal (the previous top's trap resumes), removes its back-stack entry, puts
+ * back the attributes this call wrote, and restores the remembered focus while
+ * that element is still in the page and not disabled.
+ */
+export function openModal(root: HTMLElement, options: ModalOptions): () => void {
+  const saved = MODAL_ATTRIBUTES.map((name) => [name, root.getAttribute(name)] as const);
+  root.setAttribute('role', 'dialog');
+  root.setAttribute('aria-modal', 'true');
+  root.setAttribute('aria-label', options.label);
+  if (!root.hasAttribute('tabindex')) root.setAttribute('tabindex', '-1');
+  const previous = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+  const entry = { root };
+  MODALS.push(entry);
+  if (MODALS.length === 1) document.addEventListener('keydown', trapTab, true);
+  const onBack = options.onBack;
+  const releaseBack = onBack === undefined ? null : (uiRootOf(root)?.pushBack(onBack) ?? null);
+  (options.initialFocus ?? shownFocusablesIn(root)[0] ?? root).focus({ preventScroll: true });
+
+  let open = true;
+  return (): void => {
+    if (!open) return;
+    open = false;
+    const at = MODALS.indexOf(entry);
+    if (at >= 0) MODALS.splice(at, 1);
+    if (MODALS.length === 0) document.removeEventListener('keydown', trapTab, true);
+    releaseBack?.();
+    for (const [name, value] of saved) {
+      if (value === null) root.removeAttribute(name);
+      else root.setAttribute(name, value);
+    }
+    if (previous !== null && previous.isConnected && !previous.matches(':disabled')) previous.focus({ preventScroll: true });
+  };
+}
+
 /** What `UiRoot.flush()` drives once per frame; the HUD registers one. */
 export interface Flushable {
   flush(): void;

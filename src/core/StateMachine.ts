@@ -19,7 +19,8 @@ export interface SceneParams {
   creation: { slot: 0 | 1 | 2 };
   /** The oil subsidy is computed in `Station.enter()` (SPEC-010 §4.6), never passed in. */
   station: { arrivedFrom?: PlanetId; recalled?: boolean };
-  starmap: void;
+  /** SPEC-044 §4.6: `planet` is preselected when it is unlocked; `undefined` lets the map choose. */
+  starmap: { planet?: PlanetId } | undefined;
   /** `skipRun`: the depart sheet's `Skip the run` — autopilot to the landing (SPEC-032 §4.4). */
   flight: { destination: PlanetId; skipRun?: boolean };
   surface: { planet: PlanetId; firstLanding: boolean };
@@ -46,7 +47,8 @@ export interface Scene<K extends SceneId = SceneId> {
   /**
    * SPEC-036 §4.4: the scene's own Back, asked once no UI layer is open; true
    * when it acted. The star map implements it (its Back control, to the
-   * station); creation's comes with SPEC-044.
+   * station); creation puts its Back on the back-stack instead, as that
+   * stack's root entry (SPEC-044 §4.4).
    */
   back?(): boolean;
   /**
@@ -80,11 +82,12 @@ export const FATAL_TRANSITION_TEXT = 'Something went wrong — reload the page.'
  * are rejected (D-9); a planet change goes through the station. `flight` and
  * `surface` are the pausable scenes, which is where "quit to menu" comes from
  * (D-10) — the other scenes get their route back when the spec that adds the UI
- * for it adds the row. SPEC-014's Quit tab (AC-29) added `station → menu`.
+ * for it adds the row. SPEC-014's Quit tab (AC-29) added `station → menu`, and
+ * SPEC-044's `creation-back` (§4.4) added `creation → menu`.
  */
 export const ALLOWED_TRANSITIONS = {
   menu: ['creation', 'station'],
-  creation: ['station'],
+  creation: ['station', 'menu'],
   station: ['starmap', 'menu'],
   starmap: ['station', 'flight'],
   flight: ['surface', 'station', 'menu'],

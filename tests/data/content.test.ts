@@ -7,7 +7,6 @@
 // The compiler covers the rest — a mission naming an enemy that does not exist
 // or a planet gating on a flag that does not exist is a `tsc` failure, which the
 // second describe block below demonstrates with `@ts-expect-error`.
-import { readFileSync } from 'node:fs';
 import { describe, expect, it, vi } from 'vitest';
 import { LAUNCH_SECONDS, THROTTLES } from '@/systems/Flight';
 import { DASH_IFRAMES } from '@/systems/Dash';
@@ -69,6 +68,7 @@ import {
   type WaveDef,
   type WaveId,
 } from '@/data/index';
+import { CONTROL_ROWS } from '@/ui/ControlsSheet';
 import { iconGlyph } from '@/ui/icons';
 
 type Mission = MissionDef<MissionId>;
@@ -1527,26 +1527,19 @@ describe('words that match the touch controls (SPEC-036 §4.11, §4.12)', () => 
 
 // ------------------------------------------------------------ SPEC-037 §4.10
 
-/**
- * The touch rows of the pause menu's controls sheet, read from the source as
- * text: the table is a `ui/` constant, which a node test may not import
- * (SPEC-001 §4). Comments are stripped before the rows are read.
- */
+/** The touch rows of the controls sheet. */
 function touchSheetRows(): Array<[string, string]> {
   return sheetRows('touch');
 }
 
-/** One scheme's rows of the controls sheet, read the same way (SPEC-038 §4.9 adds the keyboard's). */
+/**
+ * One scheme's rows of the controls sheet as `[what, how]` (SPEC-038 §4.9 adds
+ * the keyboard's). SPEC-044 §4.5 moved them out of `PauseMenu.ts`'s
+ * `CONTROL_SHEETS` into the one `CONTROL_ROWS` table both sheets render, a
+ * module that touches no DOM until it is called — so it is read as data now.
+ */
 function sheetRows(scheme: 'keyboard' | 'touch'): Array<[string, string]> {
-  const source = readFileSync(new URL('../../src/ui/PauseMenu.ts', import.meta.url).pathname, 'utf8');
-  const start = source.indexOf('const CONTROL_SHEETS');
-  expect(start, 'CONTROL_SHEETS in PauseMenu.ts').toBeGreaterThan(-1);
-  const at = source.indexOf(`${scheme}: [`, start);
-  const end = source.indexOf('\n  ],', at);
-  expect(at).toBeGreaterThan(start);
-  expect(end).toBeGreaterThan(at);
-  const block = source.slice(at, end).replace(/\/\/[^\n]*/g, '');
-  return [...block.matchAll(/\[\s*'([^']*)'\s*,\s*'([^']*)'\s*\]/g)].map((m) => [m[1] as string, m[2] as string]);
+  return CONTROL_ROWS[scheme].map((row): [string, string] => [row.what, row.how]);
 }
 
 describe('no SWAP or ITEM in the touch words (SPEC-037 §4.10)', () => {

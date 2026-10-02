@@ -14,12 +14,13 @@ import type { GameServices } from '@/core/Services';
 import { applyUpdate, updateReady } from '@/core/Updates';
 import { SLOTS, type Save, type SlotId } from '@/core/Save';
 import type { SceneParams } from '@/core/StateMachine';
+import { CREDITS, CREDITS_VERSION_LINE } from '@/data/index';
 import { Economy } from '@/systems/Economy';
 import { Progression } from '@/systems/Progression';
 import { applySupplies, EMPTY_CODE, pushCode } from '@/systems/Service';
-import { slotLine } from '@/systems/UiHelpers';
+import { NEWER_SAVE_TEXT, slotLine } from '@/systems/UiHelpers';
 import { confirmSheet } from '@/ui/ConfirmSheet';
-import { el, h, testId } from '@/ui/dom';
+import { el, h, keepFocus, testId } from '@/ui/dom';
 import { SavePanel } from '@/ui/SavePanel';
 import { SettingsPanel } from '@/ui/SettingsPanel';
 import type { Look } from '@/core/Quality';
@@ -305,7 +306,7 @@ export class MenuScene extends UiScene<'menu'> {
     // goes to the frame footer.
     const storage = testId(el('div', 'screen-block menu-storage'), 'menu-storage');
     storage.append(el('p', 'screen-block-title', 'Storage'));
-    this.#savePanel = new SavePanel(storage, this.services.save, { bannerHost: screen.footer });
+    this.#savePanel = new SavePanel(storage, this.services.save, { bannerHost: screen.footer, ui: this.ui });
     this.disposer.add(() => {
       this.#savePanel?.dispose();
       this.#savePanel = null;
@@ -347,8 +348,18 @@ export class MenuScene extends UiScene<'menu'> {
     this.#buttons.querySelector('button')?.focus();
   }
 
-  /** Rebuilds the button column and the open sub-panel from the slots. */
+  /**
+   * Rebuilds the button column and the open sub-panel from the slots —
+   * SPEC-044 §4.2: through `keepFocus` on the menu root, so a save landing
+   * while a button holds focus does not throw it back to the page.
+   */
   #refresh(): void {
+    const root = this.#root;
+    if (root === null) return;
+    keepFocus(root, () => this.#rebuild());
+  }
+
+  #rebuild(): void {
     if (this.#buttons === null) return;
     const continueTarget = this.#continueTarget();
     const buttons = [
@@ -390,7 +401,14 @@ export class MenuScene extends UiScene<'menu'> {
     this.#renderSub();
   }
 
+  /** SPEC-044 §4.2: the open sub-panel, rebuilt through `keepFocus` on the menu root. */
   #renderSub(): void {
+    const root = this.#root;
+    if (root === null) return;
+    keepFocus(root, () => this.#buildSub());
+  }
+
+  #buildSub(): void {
     if (this.#sub === null) return;
     // SPEC-035 §4.13: New Game opens its slot list as a sheet over the menu
     // body, so the button column does not move under the cursor. The storage
@@ -546,7 +564,7 @@ export class MenuScene extends UiScene<'menu'> {
         );
       } else if (result.reason === 'newer_version') {
         // AC-7 / E9: named, and offered nothing but the way out.
-        line.textContent = 'Save from a newer version';
+        line.textContent = NEWER_SAVE_TEXT;
         actions.append(this.#exportButton(slot));
       } else if (result.reason === 'corrupt') {
         line.textContent = 'Corrupt';
@@ -676,10 +694,21 @@ export class MenuScene extends UiScene<'menu'> {
 
   // --------------------------------------------------------------- credits
 
-  /** AC-9: `LICENSES.md` as plain text; a missing file is named, not thrown. */
+  /**
+   * AC-9, SPEC-044 §4.9: the credits a player reads, from `data/credits.ts` —
+   * the game and its licence, the tools, how the pictures, the photographs
+   * (Google Gemini, R12-6) and the sound were made. The licence file is for
+   * maintainers and names the films' shots, so it sits behind a link.
+   */
   #renderCredits(): void {
     if (this.#sub === null) return;
-    const body = testId(el('pre', 'credits-text', 'Loading…'), 'credits-text');
+    const body = testId(el('div', 'credits-text'), 'credits-text');
+    for (const section of CREDITS) {
+      body.append(h('h3', { class: 'credits-heading' }, section.title));
+      for (const line of section.lines) {
+        body.append(h('p', { class: 'credits-line' }, line === CREDITS_VERSION_LINE ? `Version ${__APP_VERSION__}` : line));
+      }
+    }
     // SPEC-022 §4.10: the prologue replay, above the licence text. The film
     // plays over the menu; the open panel and the focus are there afterwards.
     const replay = testId(
@@ -698,17 +727,20 @@ export class MenuScene extends UiScene<'menu'> {
       ),
       'credits-prologue',
     );
-    this.#sub.replaceChildren(h('div', { class: 'menu-list panel credits' }, h('p', { class: 'menu-list-title' }, 'Credits'), replay, body));
-    void fetch('assets/LICENSES.md')
-      .then((response) => (response.ok ? response.text() : Promise.reject(new Error(String(response.status)))))
-      .then(
-        (text) => {
-          body.textContent = text;
-        },
-        () => {
-          body.textContent = 'Licenses file not found.';
-        },
-      );
+    // SPEC-044 §4.9: the maintainers' file, one tap away in a tab of its own.
+    const licences = testId(
+      h('a', { class: 'ui-btn credits-licences', href: 'assets/LICENSES.md', target: '_blank', rel: 'noreferrer' }, 'Asset licences'),
+      'credits-licences',
+    );
+    this.#sub.replaceChildren(
+      h(
+        'div',
+        { class: 'menu-list panel credits' },
+        h('p', { class: 'menu-list-title' }, 'Credits'),
+        h('div', { class: 'credits-actions' }, replay, licences),
+        body,
+      ),
+    );
   }
 
   // -------------------------------------------------------------- keyboard

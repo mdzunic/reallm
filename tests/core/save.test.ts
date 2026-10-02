@@ -52,7 +52,9 @@ import {
   type Save,
   type SaveEvents,
   type SlotId,
+  type SlotSummary,
 } from '@/core/Save';
+import { slotLine } from '@/systems/UiHelpers';
 
 // --------------------------------------------------------------- test doubles
 
@@ -580,7 +582,21 @@ describe('storage that will not cooperate (E8, E9)', () => {
     const result = saves.load(0);
     expect(result).toEqual({ ok: false, reason: 'newer_version', foundVersion: SAVE_VERSION + 1 });
     // E9: the slot is not empty, so the menu offers Export rather than New Game.
-    expect(saves.list()[0]).toEqual({ slot: 0, empty: false, corrupt: true });
+    // SPEC-044 §4.10: it says it is newer; `corrupt` stays for older readers.
+    expect(saves.list()[0]).toEqual({ slot: 0, empty: false, corrupt: true, newer: true });
+  });
+
+  it('lists a version-99 slot as newer, and its line says so (SPEC-044 §4.10, §6.1)', () => {
+    const fake = fakeStorage({
+      'reallm:slot:0': JSON.stringify({ version: 99, player: {} }),
+      'reallm:slot:1': 'not json at all',
+    });
+    const list = store(fake, recorder()).list();
+    expect(list[0]).toMatchObject({ slot: 0, empty: false, corrupt: true, newer: true });
+    expect(slotLine(list[0] as SlotSummary)).toBe('Save from a newer version');
+    // 44-j: a corrupt slot beside it stays plain `Corrupt`, with no `newer`.
+    expect(list[1]).toEqual({ slot: 1, empty: false, corrupt: true });
+    expect(slotLine(list[1] as SlotSummary)).toBe('Corrupt');
   });
 
   it('reports an empty slot as empty, and every slot as empty with no storage', () => {

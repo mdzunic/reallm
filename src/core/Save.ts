@@ -212,6 +212,8 @@ export interface SlotSummary {
   /** 07-b: displayed as stored, even when it is in the future. Never logic. */
   updatedAt?: number;
   corrupt?: boolean;
+  /** A save written by a newer version (E9); `corrupt` stays true beside it for older readers. */
+  newer?: boolean;
 }
 
 /**
@@ -1456,8 +1458,10 @@ export class SaveStore {
         };
       }
       // E8/E9: "Corrupt" and "newer version" are both slots with something in
-      // them — the menu offers Import and Delete, never a silent overwrite.
+      // them — never a silent overwrite. SPEC-044 §4.10: a newer save says so,
+      // and the storage block offers it Export rather than Delete.
       if (result.reason === 'empty' || result.reason === 'unavailable') return { slot, empty: true };
+      if (result.reason === 'newer_version') return { slot, empty: false, corrupt: true, newer: true };
       return { slot, empty: false, corrupt: true };
     });
   }

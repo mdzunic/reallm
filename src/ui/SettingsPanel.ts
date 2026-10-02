@@ -17,7 +17,8 @@ import { SLOTS } from '@/core/Save';
 import type { Difficulty } from '@/data/index';
 import { DIFFICULTY_LINES } from '@/systems/UiHelpers';
 import { confirmSheet } from '@/ui/ConfirmSheet';
-import { el, h, testId, type UiRoot } from '@/ui/dom';
+import { openControlsSheet } from '@/ui/ControlsSheet';
+import { el, h, keepFocus, openModal, testId, type UiRoot } from '@/ui/dom';
 
 /** The slice of the renderer the quality row drives; structural, optional. */
 export interface QualityTarget {
@@ -86,6 +87,8 @@ export class SettingsPanel {
   #open = false;
   /** SPEC-036 §4.4: this panel's back-stack entry while it is open. */
   #releaseBack: (() => void) | null = null;
+  /** SPEC-044 §4.3: the open modal's close, which gives focus back. */
+  #closeModal: (() => void) | null = null;
 
   constructor(ui: UiRoot, deps: SettingsDeps) {
     this.#ui = ui;
@@ -107,7 +110,11 @@ export class SettingsPanel {
     this.#root.classList.remove('is-hidden');
     // SPEC-036 §4.4: Escape and the system Back close the panel, and only it.
     this.#releaseBack ??= this.#ui.pushBack(() => this.hide());
-    this.#root.querySelector<HTMLElement>('[data-testid="settings-close"]')?.focus();
+    // SPEC-044 §4.3: a modal on Close; closing gives focus back to what opened it.
+    this.#closeModal ??= openModal(this.#root, {
+      label: 'Settings',
+      initialFocus: this.#root.querySelector<HTMLElement>('[data-testid="settings-close"]'),
+    });
   }
 
   hide(): void {
@@ -115,25 +122,63 @@ export class SettingsPanel {
     this.#root.classList.add('is-hidden');
     this.#releaseBack?.();
     this.#releaseBack = null;
+    this.#releaseModal();
   }
 
   dispose(): void {
     this.#releaseBack?.();
     this.#releaseBack = null;
+    this.#releaseModal();
     this.#ui.unmount(this.#root);
   }
 
-  /** Rebuilt on every `show()`: settings change rarely and never in a frame. */
+  #releaseModal(): void {
+    const close = this.#closeModal;
+    this.#closeModal = null;
+    close?.();
+  }
+
+  /**
+   * Rebuilt on every `show()`: settings change rarely and never in a frame.
+   * SPEC-044 §4.2: through `keepFocus`, so a toggle pressed by keyboard keeps
+   * its focus across the rebuild it causes.
+   */
   #render(): void {
+    keepFocus(this.#root, () => this.#build());
+  }
+
+  #build(): void {
     const s = this.#deps.settings;
     const close = testId(h('button', { class: 'ui-btn settings-close', type: 'button', click: () => this.hide() }, 'Close'), 'settings-close');
+    // SPEC-044 §4.5: the controls sheet, reachable outside the pause menu too.
+    // The scheme is `<html>`'s `scheme-touch` — the class every touch layout
+    // reads — so the sheet speaks to the hands the player is using now.
+    const controls = testId(
+      h(
+        'button',
+        {
+          class: 'ui-btn settings-controls',
+          type: 'button',
+          click: () => {
+            openControlsSheet(this.#ui, document.documentElement.classList.contains('scheme-touch') ? 'touch' : 'keyboard');
+          },
+        },
+        'Controls',
+      ),
+      'settings-controls',
+    );
     this.#root.replaceChildren(
       // `h` skips null children, which is what lets the fullscreen row vanish
       // on iOS without a special case here (AC-92).
       h(
         'div',
         { class: 'settings-body' },
-        h('div', { class: 'settings-head' }, h('p', { class: 'settings-title' }, 'Settings'), close),
+        h(
+          'div',
+          { class: 'settings-head' },
+          h('p', { class: 'settings-title' }, 'Settings'),
+          h('div', { class: 'settings-head-actions' }, controls, close),
+        ),
         this.#audioRows(),
         this.#hapticsRow(),
         this.#qualityRow(),

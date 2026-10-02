@@ -10,7 +10,7 @@
 // scene passes the side and CSS reads it off `data-side`.
 import type { JoystickSide } from '@/core/Settings';
 import type { ItemId, QuickSlot } from '@/data/index';
-import { el, h, testId, type UiRoot } from '@/ui/dom';
+import { el, h, openModal, testId, type UiRoot } from '@/ui/dom';
 import { itemIcon } from '@/ui/ItemIcon';
 
 export interface QuickChoice {
@@ -38,12 +38,15 @@ export function openQuickPicker(
 
   let open = true;
   let releaseBack: (() => void) | null = null;
+  // SPEC-044 §4.3: a modal while open; its close gives focus back.
+  let closeModal: (() => void) | null = null;
   const close = (): void => {
     if (!open) return;
     open = false;
     releaseBack?.();
     globalThis.removeEventListener('pointerdown', onOutside, true);
     root.remove();
+    closeModal?.();
     onClose();
   };
 
@@ -83,5 +86,7 @@ export function openQuickPicker(
   // back-stack, so the pause never sees the press (§4.6, SPEC-036 §4.4).
   releaseBack = ui.pushBack(close);
   globalThis.addEventListener('pointerdown', onOutside, true);
+  // SPEC-044 §4.3: focus on its first `quick-pick-*`, Tab kept inside.
+  closeModal = openModal(root, { label: `Choose the ${slot} slot`, initialFocus: root.querySelector<HTMLElement>('.quick-pick') });
   return close;
 }

@@ -3,7 +3,11 @@
 // foot — is why the header and the body can be proven to share a centre, and
 // the channel line is where the fiction lives (diegetic, never meta: a header
 // may say COMMAND RELAY, never anything about a simulation).
-import { el, h, testId } from '@/ui/dom';
+//
+// SPEC-044 §4.11: the rail's sections are a real tablist — arrow keys between
+// them, the panel their tabpanel — and its actions (Star Map, Settings, Quit)
+// follow a rule as plain buttons: a tab that navigates away is not a tab.
+import { el, h, keepFocus, testId } from '@/ui/dom';
 
 export type ScreenId = 'menu' | 'creation' | 'station' | 'starmap' | 'pause';
 
@@ -12,6 +16,10 @@ export interface ScreenTab {
   readonly id: string;
   readonly label: string;
   readonly active?: boolean;
+  /** SPEC-044 §4.11: 'section' swaps the body; 'action' acts. Default 'section'. */
+  readonly kind?: 'section' | 'action';
+  /** SPEC-044 §4.6: an action styled as the screen's next step. */
+  readonly primary?: boolean;
   onSelect(): void;
 }
 
@@ -73,6 +81,87 @@ export function channelText(id: ScreenId): string {
   }
 }
 
+/** SPEC-044 §4.11: the panel a screen's tablist controls — `station-panel`. */
+export function tabPanelId(id: ScreenId): string {
+  return `${id}-panel`;
+}
+
+/**
+ * SPEC-044 §4.11: the rail — the `section` tabs as a `role="tablist"` (roving
+ * focus: `tabindex` 0 on the selected tab, −1 on the rest; arrows, Home and End
+ * move focus, Enter or Space selects), then a rule, then the `action` entries
+ * as plain buttons with no pressed state.
+ */
+function railChildren(id: ScreenId, tabs: readonly ScreenTab[]): HTMLElement[] {
+  const sections = tabs.filter((tab) => (tab.kind ?? 'section') === 'section');
+  const actions = tabs.filter((tab) => tab.kind === 'action');
+  const out: HTMLElement[] = [];
+  if (sections.length > 0) {
+    const selected = sections.find((tab) => tab.active === true) ?? sections[0];
+    const buttons = sections.map((tab) =>
+      testId(
+        h(
+          'button',
+          {
+            class: `ui-btn seg screen-tab${tab === selected ? ' is-active' : ''}`,
+            type: 'button',
+            role: 'tab',
+            id: tab.id,
+            'aria-selected': String(tab === selected),
+            'aria-controls': tabPanelId(id),
+            tabindex: tab === selected ? 0 : -1,
+            click: () => tab.onSelect(),
+          },
+          tab.label,
+        ),
+        tab.id,
+      ),
+    );
+    const list = h('div', { class: 'screen-tabs', role: 'tablist', 'aria-label': id.charAt(0).toUpperCase() + id.slice(1) }, ...buttons);
+    list.addEventListener('keydown', (event) => {
+      const at = buttons.indexOf(document.activeElement as HTMLButtonElement);
+      if (at < 0) return;
+      const last = buttons.length - 1;
+      let next: number;
+      switch (event.key) {
+        case 'ArrowUp':
+        case 'ArrowLeft':
+          next = at === 0 ? last : at - 1;
+          break;
+        case 'ArrowDown':
+        case 'ArrowRight':
+          next = at === last ? 0 : at + 1;
+          break;
+        case 'Home':
+          next = 0;
+          break;
+        case 'End':
+          next = last;
+          break;
+        default:
+          return;
+      }
+      event.preventDefault();
+      buttons[next]?.focus();
+    });
+    out.push(list);
+  }
+  if (sections.length > 0 && actions.length > 0) out.push(el('hr', 'screen-rail-rule'));
+  for (const tab of actions) {
+    out.push(
+      testId(
+        h(
+          'button',
+          { class: `ui-btn screen-action${tab.primary === true ? ' is-primary' : ''}`, type: 'button', click: () => tab.onSelect() },
+          tab.label,
+        ),
+        tab.id,
+      ),
+    );
+  }
+  return out;
+}
+
 /** §4.4: one `div.screen[data-testid="screen"]` — grid, scrim, head, rail, body, foot. */
 export function createScreen(options: ScreenOptions): Screen {
   const root = testId(el('div', `screen screen-${options.id}${options.wide === true ? ' is-wide' : ''}`), 'screen');
@@ -123,23 +212,8 @@ export function createScreen(options: ScreenOptions): Screen {
     },
     setTabs(tabs: readonly ScreenTab[]): void {
       root.classList.toggle('has-rail', tabs.length > 0);
-      rail.replaceChildren(
-        ...tabs.map((tab) =>
-          testId(
-            h(
-              'button',
-              {
-                class: `ui-btn seg screen-tab${tab.active === true ? ' is-active' : ''}`,
-                type: 'button',
-                'aria-pressed': String(tab.active === true),
-                click: () => tab.onSelect(),
-              },
-              tab.label,
-            ),
-            tab.id,
-          ),
-        ),
-      );
+      // SPEC-044 §4.2: a keyboard selection keeps its focus across the rebuild.
+      keepFocus(rail, () => rail.replaceChildren(...railChildren(options.id, tabs)));
     },
     dispose(): void {
       // Give the build label back to the page — unless a newer screen has

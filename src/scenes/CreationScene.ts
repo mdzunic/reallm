@@ -8,6 +8,12 @@
 // (`save.create`), enters the station and queues the `intro_command`
 // dialogue once the transition has landed — the queue clears on
 // `scene:transition` (14-d), so queueing earlier would erase it.
+//
+// SPEC-044 §4.4: Back leaves for the menu — asking first once anything was
+// changed, and saving nothing either way — and is the back-stack's root entry
+// here, so Escape and the system Back do the same. Each attribute says what a
+// point buys, the class cards spell their base attributes, and a disabled
+// Confirm says why. The form re-renders through `keepFocus` (§4.2).
 import * as THREE from 'three';
 import { log } from '@/core/Log';
 import { normalizeName, type CharacterCreation, type SlotId } from '@/core/Save';
@@ -15,9 +21,10 @@ import type { GameServices } from '@/core/Services';
 import type { Renderer } from '@/core/Renderer';
 import type { SceneParams } from '@/core/StateMachine';
 import { ATTRIBUTE_MAX, CLASSES, CREATION_POINTS, type Attributes, type ClassId, type Difficulty } from '@/data/index';
-import { computePlayerStats, DIFFICULTY_LINES, passiveText } from '@/systems/UiHelpers';
+import { attributeEffectText, attributeLine, computePlayerStats, DIFFICULTY_LINES, passiveText } from '@/systems/UiHelpers';
+import { confirmSheet } from '@/ui/ConfirmSheet';
 import { dialogueLayer } from '@/ui/DialogueUI';
-import { el, h, testId } from '@/ui/dom';
+import { el, h, keepFocus, testId } from '@/ui/dom';
 import { portraitManifest, portraitSource } from '@/ui/portraits';
 import type { Look } from '@/core/Quality';
 import { tintSalvager } from '@/views/CharacterView';
@@ -36,6 +43,15 @@ export const SECONDARY_SWATCHES = ['#2a3b4c', '#4c2a3b', '#3b4c2a', '#24243a', '
 /** AC-15: six faces — the class's own three, then three every class shares. */
 const SHARED_PORTRAITS = [9, 10, 11] as const;
 
+/** SPEC-044 §4.4: the sheet Back opens over a form that was changed. */
+export const LEAVE_TITLE = 'Leave without creating a salvager?';
+/** SPEC-044 §4.4: what a disabled Confirm says beside itself. */
+export const CONFIRM_REASON_TEXT = 'Choose a class to continue';
+
+/** The form as the scene opens it — what Back compares against (§4.4). */
+const START_PORTRAIT = 0;
+const START_DIFFICULTY: Difficulty = 'normal';
+
 /** SPEC-017 §4.1 (*initial tuning*): creation shares the station's grade. */
 const CREATION_LOOK: Partial<Look> = { vignette: 0.35, bloomStrength: 0.3, tint: [0.96, 1, 1.04] };
 const HUB_ENVIRONMENT_INTENSITY = 0.9;
@@ -45,11 +61,13 @@ export class CreationScene extends UiScene<'creation'> {
 
   // Form state; the DOM is re-rendered from it on every change.
   #classId: ClassId | null = null;
-  #portrait = 0;
+  #portrait = START_PORTRAIT;
   #primary: string = PRIMARY_SWATCHES[0];
   #secondary: string = SECONDARY_SWATCHES[0];
   #alloc: Record<(typeof ATTRIBUTES)[number], number> = { might: 0, vigor: 0, agility: 0, tech: 0 };
-  #difficulty: Difficulty = 'normal';
+  #difficulty: Difficulty = START_DIFFICULTY;
+  /** SPEC-044 §4.4: the leave sheet is up; a second Back waits for its answer. */
+  #asking = false;
   /** SPEC-020 §4.6: the portrait files that shipped; empty until the manifest lands. */
   #portraits: ReadonlySet<number> = new Set();
   #leaving = false;
@@ -98,6 +116,9 @@ export class CreationScene extends UiScene<'creation'> {
       this.#renderForm();
     });
     this.disposer.add(this.services.events.on('renderer:resized', () => this.#measure(), this));
+    // SPEC-044 §4.4: Back is this scene's root back-stack entry — Escape and
+    // the system Back run it once nothing above it is open.
+    this.disposer.add(this.ui.pushBack(() => this.#back()));
   }
 
   protected override onUpdate(_dt: number): void {
@@ -305,8 +326,15 @@ export class CreationScene extends UiScene<'creation'> {
     };
   }
 
+  /** SPEC-044 §4.2: every change re-renders the form; focus stays on the control pressed. */
   #renderForm(): void {
-    if (this.#form === null) return;
+    const form = this.#form;
+    if (form === null) return;
+    keepFocus(form, () => this.#buildForm(form));
+    this.#measure();
+  }
+
+  #buildForm(form: HTMLDivElement): void {
     // The name field survives re-renders by value, not by node: keep the text.
     const nameValue = this.#nameField?.value ?? '';
     this.#nameField = testId(
@@ -331,7 +359,7 @@ export class CreationScene extends UiScene<'creation'> {
       }),
       'creation-name',
     );
-    this.#form.replaceChildren(
+    form.replaceChildren(
       h('p', { class: 'creation-title' }, 'New salvager'),
       h('label', { class: 'creation-row' }, h('span', {}, 'Name'), this.#nameField),
       this.#classCards(),
@@ -347,7 +375,6 @@ export class CreationScene extends UiScene<'creation'> {
       this.#difficultyRow(),
       this.#previewAndConfirm(),
     );
-    this.#measure();
   }
 
   /** AC-14: three cards — name, blurb, passive, base attributes; tap selects. */
@@ -372,7 +399,8 @@ export class CreationScene extends UiScene<'creation'> {
           h('span', { class: 'class-name' }, cls.name),
           h('span', { class: 'class-blurb' }, cls.blurb),
           h('span', { class: 'class-passive' }, passiveText(cls.passive)),
-          h('span', { class: 'class-base' }, `MGT ${base.might} · VGR ${base.vigor} · AGI ${base.agility} · TEC ${base.tech}`),
+          // SPEC-044 §4.4: the names spelled out — `Might 3 · Vigor 3 · Agility 1 · Tech 1`.
+          h('span', { class: 'class-base' }, attributeLine(base)),
         ),
         `class-${id}`,
       );
@@ -474,11 +502,17 @@ export class CreationScene extends UiScene<'creation'> {
       );
       return h(
         'div',
-        { class: 'attr-row' },
-        h('span', { class: 'attr-name' }, attribute),
-        minus,
-        testId(h('span', { class: 'attr-value' }, String(total)), `attr-${attribute}`),
-        plus,
+        { class: 'attr-item' },
+        h(
+          'div',
+          { class: 'attr-row' },
+          h('span', { class: 'attr-name' }, attribute),
+          minus,
+          testId(h('span', { class: 'attr-value' }, String(total)), `attr-${attribute}`),
+          plus,
+        ),
+        // SPEC-044 §4.4: what a point buys, off the table the formulas read.
+        testId(h('p', { class: 'attr-desc' }, attributeEffectText(attribute)), `attr-${attribute}-desc`),
       );
     });
     return h(
@@ -550,7 +584,64 @@ export class CreationScene extends UiScene<'creation'> {
       ),
       'creation-confirm',
     );
-    return h('div', { class: 'creation-foot' }, confirm) as HTMLDivElement;
+    // SPEC-044 §4.4: the way back, left of Confirm — and, while no class is
+    // chosen, the one reason the disabled Confirm would otherwise leave a puzzle.
+    const back = testId(
+      h('button', { class: 'ui-btn creation-back', type: 'button', disabled: this.#leaving, click: () => this.#back() }, 'Back'),
+      'creation-back',
+    );
+    const reason =
+      this.#classId === null ? testId(h('span', { class: 'creation-confirm-reason' }, CONFIRM_REASON_TEXT), 'creation-confirm-reason') : null;
+    return h('div', { class: 'creation-foot' }, back, reason, confirm) as HTMLDivElement;
+  }
+
+  /**
+   * SPEC-044 §4.4: whether anything differs from the form the scene opened
+   * with — a name typed (and still there), a class, a face, either colour, a
+   * point spent, the difficulty.
+   */
+  #changed(): boolean {
+    return (
+      (this.#nameField?.value ?? '').trim() !== '' ||
+      this.#classId !== null ||
+      this.#portrait !== START_PORTRAIT ||
+      this.#primary !== PRIMARY_SWATCHES[0] ||
+      this.#secondary !== SECONDARY_SWATCHES[0] ||
+      this.#spent() > 0 ||
+      this.#difficulty !== START_DIFFICULTY
+    );
+  }
+
+  /**
+   * SPEC-044 §4.4: `creation-back`, Escape and the system Back. A changed form
+   * asks first, with Stay focused; an untouched one leaves at once (44-g).
+   * Nothing is saved either way — the slot is only written by Confirm.
+   */
+  #back(): void {
+    if (this.#leaving || this.#asking) return;
+    if (!this.#changed()) {
+      this.#leave();
+      return;
+    }
+    this.#asking = true;
+    void confirmSheet(this.ui, {
+      title: LEAVE_TITLE,
+      body: 'Nothing is saved.',
+      confirmText: 'Leave',
+      cancelText: 'Stay',
+      focus: 'cancel',
+    }).then((yes) => {
+      this.#asking = false;
+      if (yes) this.#leave();
+    });
+  }
+
+  #leave(): void {
+    if (this.#leaving) return;
+    this.#leaving = true;
+    void this.services.go('menu', { reason: 'quit' }).then((went) => {
+      if (!went) this.#leaving = false;
+    });
   }
 
   /** AC-20: write the save, enter the station, then the intro speaks. */

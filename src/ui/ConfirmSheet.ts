@@ -1,7 +1,11 @@
 // The confirm sheet every purchase and destructive action goes through
 // (SPEC-014 §2): on a phone a mis-tap would otherwise cost 130 tokens with no
 // refund. One component, promise-shaped, so call sites read as a question.
-import { h, testId, type UiRoot } from '@/ui/dom';
+//
+// SPEC-044 §4.3: a sheet opens as a modal — it takes focus, traps Tab, and
+// gives focus back when it is answered. A `danger` sheet focuses Cancel, so
+// Enter on a fresh `Delete forever` cannot delete.
+import { h, openModal, testId, type UiRoot } from '@/ui/dom';
 
 export interface ConfirmOptions {
   title: string;
@@ -11,6 +15,8 @@ export interface ConfirmOptions {
   cancelText?: string;
   /** Styles the confirm button as destructive (delete, overwrite, reset). */
   danger?: boolean;
+  /** SPEC-044 §4.3: which button takes focus; defaults to 'cancel' when `danger`, else 'confirm'. */
+  focus?: 'confirm' | 'cancel';
 }
 
 /**
@@ -36,7 +42,6 @@ export function choiceSheet(
   handlers?: { onPrimary?(): boolean; onSecondary?(): boolean },
 ): Promise<'primary' | 'secondary' | null> {
   return new Promise((resolve) => {
-    const previous = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     const backdrop = testId(h('div', { class: 'sheet-backdrop' }), 'confirm-sheet');
 
     // AC-56: an answered sheet takes no second answer. Removing the backdrop
@@ -47,6 +52,8 @@ export function choiceSheet(
     // SPEC-036 §4.4: while it is up the sheet is the top of the back-stack, so
     // Escape and the system Back cancel it — and only it.
     let releaseBack: (() => void) | null = null;
+    // SPEC-044 §4.3: the modal's close gives focus back to what opened it.
+    let closeModal: (() => void) | null = null;
     const close = (answer: 'primary' | 'secondary' | null): void => {
       if (settled) return;
       settled = true;
@@ -55,7 +62,7 @@ export function choiceSheet(
       if (second !== null) second.disabled = true;
       backdrop.remove();
       releaseBack?.();
-      previous?.focus();
+      closeModal?.();
       resolve(answer);
     };
 
@@ -89,7 +96,7 @@ export function choiceSheet(
 
     const sheet = h(
       'div',
-      { class: 'sheet panel', role: 'dialog', 'aria-label': options.title },
+      { class: 'sheet panel' },
       h('p', { class: 'sheet-title' }, options.title),
       options.body !== undefined ? h('p', { class: 'sheet-body' }, options.body) : null,
       h('div', { class: 'sheet-actions' }, cancel, second, confirm),
@@ -105,7 +112,8 @@ export function choiceSheet(
     backdrop.append(sheet);
     ui.mount(backdrop, 'overlay');
     releaseBack = ui.pushBack(() => close(null));
-    confirm.focus();
+    const focus = options.focus ?? (options.danger === true ? 'cancel' : 'confirm');
+    closeModal = openModal(sheet, { label: options.title, initialFocus: focus === 'cancel' ? cancel : confirm });
   });
 }
 

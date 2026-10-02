@@ -15,7 +15,7 @@ import { maxHp, type Save } from '@/core/Save';
 import type { GameServices } from '@/core/Services';
 import { applyUpdate, updateReady } from '@/core/Updates';
 import type { SceneParams } from '@/core/StateMachine';
-import { DIALOGUE, PLANET_IDS, PLANETS, type DialogueId } from '@/data/index';
+import { DIALOGUE, PLANET_IDS, PLANETS, type DialogueId, type PlanetId } from '@/data/index';
 import { Economy } from '@/systems/Economy';
 import { applySupplies } from '@/systems/Service';
 import { Progression } from '@/systems/Progression';
@@ -32,7 +32,7 @@ import type { Look } from '@/core/Quality';
 import { NEUTRAL_SKY } from '@/views/Environment';
 import { addHubLights, hubSkyMesh, loadHubArt, proceduralDock, proceduralRing, swapModule } from '@/views/HubBackdrop';
 import { UiScene, bindTouchScheme } from '@/scenes/base';
-import { channelText, createScreen, type Screen } from '@/ui/Screen';
+import { channelText, createScreen, tabPanelId, type Screen, type ScreenTab } from '@/ui/Screen';
 import { Wallet } from '@/ui/Wallet';
 
 /** SPEC-017 §4.1 (*initial tuning*): the station reads cool and clean. */
@@ -341,8 +341,11 @@ export class StationScene extends UiScene<'station'> {
 
     // `station-root` stays as a testid: SPEC-024's e2e waits on it to know the
     // station is up. The old grid element is gone; the marker rides the panel
-    // box, which every tab renders into.
+    // box, which every tab renders into. SPEC-044 §4.11: it is the rail's
+    // tabpanel, labelled by the selected tab.
     this.#panelBox = testId(el('div', 'station-panel panel'), 'station-root');
+    this.#panelBox.id = tabPanelId('station');
+    this.#panelBox.setAttribute('role', 'tabpanel');
     screen.body.append(this.#panelBox);
     this.ui.mount(screen.root, 'panel');
     this.disposer.add(() => {
@@ -364,25 +367,40 @@ export class StationScene extends UiScene<'station'> {
     this.#renderPanel();
   }
 
-  /** AC-28: the six tabs; the frame's rail — left on desktop, bottom on phones. */
+  /**
+   * AC-28: the frame's rail — left on desktop, bottom on phones. SPEC-044
+   * §4.11: the three sections are its tablist; Star Map, Settings and Quit
+   * (and Update) act, after a rule. §4.6: while any mission is active the Star
+   * Map action is the primary — it is where an accepted mission goes next.
+   */
   #renderRail(): void {
-    const tab = (id: string, label: string, onSelect: () => void, active = false): { id: string; label: string; active: boolean; onSelect(): void } => ({
+    const section = (id: StationTab, label: string): ScreenTab => ({
       id: `station-tab-${id}`,
       label,
-      active,
+      kind: 'section',
+      active: this.#tab === id,
+      onSelect: () => this.#openTab(id),
+    });
+    const action = (id: string, label: string, onSelect: () => void, primary = false): ScreenTab => ({
+      id: `station-tab-${id}`,
+      label,
+      kind: 'action',
+      primary,
       onSelect,
     });
+    const active = (this.services.save.current?.progress.missionsActive.length ?? 0) > 0;
     this.#screen?.setTabs([
-      tab('missions', 'Missions', () => this.#openTab('missions'), this.#tab === 'missions'),
-      tab('shop', 'Shop', () => this.#openTab('shop'), this.#tab === 'shop'),
-      tab('character', 'Character', () => this.#openTab('character'), this.#tab === 'character'),
-      tab('starmap', 'Star Map', () => this.#starmap()),
-      tab('settings', 'Settings', () => this.#settings?.show()),
-      tab('quit', 'Quit', () => this.#quit(true)),
+      section('missions', 'Missions'),
+      section('shop', 'Shop'),
+      section('character', 'Character'),
+      action('starmap', 'Star Map ›', () => this.#starmap(), active),
+      action('settings', 'Settings', () => this.#settings?.show()),
+      action('quit', 'Quit to menu', () => this.#quit(true)),
       // SPEC-015 AC-52: the station is the other safe moment to restart into a
       // new build; the row only exists while one is waiting (15-c).
-      ...(updateReady() ? [tab('update', 'Update', () => applyUpdate())] : []),
+      ...(updateReady() ? [action('update', 'Update', () => applyUpdate())] : []),
     ]);
+    this.#panelBox?.setAttribute('aria-labelledby', `station-tab-${this.#tab}`);
   }
 
   #openTab(tab: StationTab): void {
@@ -400,7 +418,15 @@ export class StationScene extends UiScene<'station'> {
     switch (this.#tab) {
       case 'missions':
         // SPEC-043 §4.5: the best times are this device's, so they come from settings.
-        new MissionBoard(box, { ...shared, events: this.services.events, bestTimes: () => this.services.settings.get().bestTimes });
+        // SPEC-044 §4.6: an active row's Star Map goes there with its planet,
+        // and an accept, abandon or pin re-renders the rail's primary.
+        new MissionBoard(box, {
+          ...shared,
+          events: this.services.events,
+          bestTimes: () => this.services.settings.get().bestTimes,
+          goStarMap: (planet) => this.#starmap(planet),
+          onChanged: () => this.#renderRail(),
+        });
         return;
       case 'shop':
         new ShopPanel(box, shared);
@@ -411,10 +437,11 @@ export class StationScene extends UiScene<'station'> {
     }
   }
 
-  #starmap(): void {
+  /** SPEC-044 §4.6: `planet`, when given, is the one the map opens on. */
+  #starmap(planet?: PlanetId): void {
     if (this.#leaving) return;
     this.#leaving = true;
-    void this.services.go('starmap', undefined).then((went) => {
+    void this.services.go('starmap', planet === undefined ? undefined : { planet }).then((went) => {
       if (!went) this.#leaving = false;
     });
   }
