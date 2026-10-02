@@ -5,7 +5,19 @@
 import { describe, expect, it } from 'vitest';
 import { Rng } from '@/core/Rng';
 import { maxHp, newSave, type CharacterCreation, type Save } from '@/core/Save';
-import { CLASSES, COMPANIONS, DIFFICULTIES, ITEMS, MISSIONS, PLANET_IDS, TUNING, UPGRADES, type MissionDef } from '@/data/index';
+import {
+  ATTRIBUTE_EFFECTS,
+  CLASSES,
+  COMPANIONS,
+  DIFFICULTIES,
+  ITEMS,
+  MISSIONS,
+  PLANET_IDS,
+  PLANETS,
+  TUNING,
+  UPGRADES,
+  type MissionDef,
+} from '@/data/index';
 import type { SlotState, SlotView } from '@/systems/Loadout';
 import { discountTokens, Economy } from '@/systems/Economy';
 import { Progression, type EventSink } from '@/systems/Progression';
@@ -72,7 +84,18 @@ import {
   TOAST_COALESCE_MS,
   TOAST_DEFAULT_MS,
   TOAST_MAX,
+  acceptedText,
+  ATTRIBUTE_EFFECT_WORDS,
+  attributeEffectText,
+  attributeLine,
+  firstSentence,
+  needsLine,
+  quitNote,
+  requirementItem,
+  starmapPreselect,
+  STATUS_LABELS,
   type HudModel,
+  type MissionStatus,
 } from '@/systems/UiHelpers';
 
 const CREATION: CharacterCreation = {
@@ -1950,5 +1973,169 @@ describe('completionLines’ extras (SPEC-043 §4.6)', () => {
       time: null,
     });
     expect(completionLines(MISSIONS.c1_s2, false, null, {}).rewards).toBe('+70 XP · +5 tokens · Proximity Mine ×2');
+  });
+});
+
+// ------------------------------------------------------------------ SPEC-044
+
+describe('quitNote (SPEC-044 §4.8)', () => {
+  it('on the surface: the jump back costs the planet\'s fuel, and timed objectives restart', () => {
+    expect(quitNote('surface', 'Ferrum', 100)).toBe(
+      'You will resume at Command Relay. Flying back to Ferrum costs 100 oil, and timed objectives restart.',
+    );
+  });
+
+  it('in flight: this jump\'s fuel is already spent (44-i)', () => {
+    expect(quitNote('flight', 'Ferrum', 100)).toBe('You will resume at Command Relay. The fuel for this jump (100 oil) is already spent.');
+  });
+
+  it('the oil is Economy.fuelCost — the engine-discounted jump', () => {
+    const data = save();
+    expect(economyOf(data).fuelCost('ferrum')).toBe(100);
+    expect(quitNote('surface', PLANETS.ferrum.name, economyOf(data).fuelCost('ferrum'))).toContain('Flying back to Ferrum costs 100 oil');
+    data.ship.engine = 1;
+    expect(quitNote('flight', PLANETS.ferrum.name, economyOf(data).fuelCost('ferrum'))).toContain('(90 oil)');
+  });
+});
+
+describe('attributeEffectText and attributeLine (SPEC-044 §4.4)', () => {
+  it('reads all four attributes at SPEC-039\'s numbers', () => {
+    expect(attributeEffectText('might')).toBe('Might — +4 % damage per point');
+    expect(attributeEffectText('vigor')).toBe('Vigor — +8 max HP per point');
+    expect(attributeEffectText('agility')).toBe('Agility — +2 % speed · +2 % crit chance · −3 % dash cooldown per point');
+    expect(attributeEffectText('tech')).toBe('Tech — +10 % companion effect · −3 % prices per point');
+  });
+
+  it('has words for every effect key ATTRIBUTE_EFFECTS holds, and for nothing else', () => {
+    const keys = new Set<string>();
+    for (const effects of Object.values(ATTRIBUTE_EFFECTS)) for (const key of Object.keys(effects)) keys.add(key);
+    const missing = [...keys].filter((key) => !Object.hasOwn(ATTRIBUTE_EFFECT_WORDS, key));
+    expect(missing, 'effect keys with no words').toEqual([]);
+    expect(Object.keys(ATTRIBUTE_EFFECT_WORDS).sort()).toEqual([...keys].sort());
+  });
+
+  it('reads the table the formulas read: each word carries the per-point value', () => {
+    expect(ATTRIBUTE_EFFECT_WORDS.damage(0.05)).toBe('+5 % damage');
+    expect(ATTRIBUTE_EFFECT_WORDS.maxHp(10)).toBe('+10 max HP');
+    expect(ATTRIBUTE_EFFECT_WORDS.priceCut(0.025)).toBe('−3 % prices');
+  });
+
+  it('spells a class card\'s base attributes', () => {
+    expect(attributeLine(CLASSES.marine.baseAttributes)).toBe('Might 3 · Vigor 3 · Agility 1 · Tech 1');
+    expect(attributeLine(CLASSES.scout.baseAttributes)).toBe('Might 2 · Vigor 1 · Agility 4 · Tech 1');
+  });
+});
+
+describe('requirementItem and needsLine (SPEC-044 §4.11)', () => {
+  it('words each requirement kind as an item', () => {
+    expect(requirementItem({ kind: 'level', level: 3 })).toBe('Level 3');
+    expect(requirementItem({ kind: 'ship', system: 'shield', tier: 2 })).toBe('Ship shield tier 2');
+    expect(requirementItem({ kind: 'mission', id: 'c1_m2' })).toBe("Complete 'Black Gold'");
+    expect(requirementItem({ kind: 'flag', flag: 'chapter2_done' })).toBe('Complete Chapter 2');
+    expect(requirementItem({ kind: 'flag', flag: 'signal_decoded' })).toBe('Signal decoded');
+  });
+
+  it('joins them in one grammar', () => {
+    expect(needsLine([{ kind: 'mission', id: 'c1_m2' }, { kind: 'level', level: 3 }])).toBe("Needs: Complete 'Black Gold' · Level 3");
+    expect(needsLine([{ kind: 'ship', system: 'shield', tier: 2 }])).toBe('Needs: Ship shield tier 2');
+    expect(needsLine([{ kind: 'flag', flag: 'chapter2_done' }, { kind: 'flag', flag: 'signal_decoded' }])).toBe(
+      'Needs: Complete Chapter 2 · Signal decoded',
+    );
+  });
+});
+
+describe('STATUS_LABELS (SPEC-044 §4.11)', () => {
+  it('covers every MissionStatus with words, never the id', () => {
+    const statuses: readonly MissionStatus[] = ['active', 'available', 'locked', 'replayable', 'done'];
+    expect(Object.keys(STATUS_LABELS).sort()).toEqual([...statuses].sort());
+    expect(STATUS_LABELS).toEqual({
+      active: 'In progress',
+      available: 'New',
+      locked: 'Locked',
+      replayable: 'Done · replay for 50 %',
+      done: 'Done',
+    });
+    for (const status of statuses) expect(STATUS_LABELS[status]).not.toBe(status);
+  });
+});
+
+describe('firstSentence (SPEC-044 §4.7)', () => {
+  it('keeps the first sentence of a two-sentence brief', () => {
+    expect(firstSentence(MISSIONS.c2_m1.brief)).toBe('Vetra greets every landing with a blizzard.');
+    expect(firstSentence('Hold the line! Then fall back.')).toBe('Hold the line!');
+    expect(firstSentence('Who is out there? Find out.')).toBe('Who is out there?');
+  });
+
+  it('a brief with no full stop is whole', () => {
+    expect(firstSentence('Walk it off')).toBe('Walk it off');
+    expect(firstSentence('One sentence.')).toBe('One sentence.');
+    // A stop inside a number is not a sentence end.
+    expect(firstSentence('Pull 1.5 tonnes out')).toBe('Pull 1.5 tonnes out');
+  });
+});
+
+describe('acceptedText (SPEC-044 §4.7)', () => {
+  it('reads the same at the board and the pad terminal', () => {
+    expect(acceptedText('Black Gold', false)).toBe("Accepted 'Black Gold'");
+    expect(acceptedText('Black Gold', true)).toBe("Replaying 'Black Gold' — 50 % rewards");
+    expect(acceptedText('Black Gold', true, 'Swarm')).toBe("Replaying 'Black Gold' — Swarm contract");
+  });
+});
+
+describe('starmapPreselect (SPEC-044 §4.6)', () => {
+  /** Chapter 1 done: Vetra open, `c2_m1` a main mission available there. */
+  const chapterOne = (patch?: (data: Save) => void): Save =>
+    save((d) => {
+      d.progress.missionsDone.push('c1_m1', 'c1_m2', 'c1_m3');
+      d.progress.flags.push('chapter1_done');
+      patch?.(d);
+    });
+  const unlockedIn = (data: Save) => (planet: (typeof PLANET_IDS)[number]) => economyOf(data).isUnlocked(planet);
+
+  it('the planet it was given wins when it is unlocked', () => {
+    const data = chapterOne((d) => d.progress.missionsActive.push({ id: 'c1_s1', stage: 0, counters: {} }));
+    expect(starmapPreselect(data, unlockedIn(data), 'vetra')).toBe('vetra');
+    expect(starmapPreselect(data, unlockedIn(data), 'cinder4')).toBe('cinder4');
+  });
+
+  it('a locked planet given falls through to the tracked mission (44-h)', () => {
+    const data = chapterOne((d) => d.progress.missionsActive.push({ id: 'c1_s1', stage: 0, counters: {} }));
+    expect(unlockedIn(data)('ferrum')).toBe(false);
+    expect(starmapPreselect(data, unlockedIn(data), 'ferrum')).toBe('cinder4');
+  });
+
+  it('the tracked mission\'s planet — the front of missionsActive — before the newest work', () => {
+    const data = chapterOne((d) => {
+      d.progress.missionsActive.push({ id: 'c1_s1', stage: 0, counters: {} }, { id: 'c2_m1', stage: 0, counters: {} });
+    });
+    expect(starmapPreselect(data, unlockedIn(data))).toBe('cinder4');
+    const flipped = chapterOne((d) => {
+      d.progress.missionsActive.push({ id: 'c2_m1', stage: 0, counters: {} }, { id: 'c1_s1', stage: 0, counters: {} });
+    });
+    expect(starmapPreselect(flipped, unlockedIn(flipped))).toBe('vetra');
+  });
+
+  it('with nothing tracked, the unlocked planet of the highest chapter with an available main mission', () => {
+    const data = chapterOne();
+    expect(starmapPreselect(data, unlockedIn(data))).toBe('vetra');
+    // A fresh save: only Cinder-4 is open, and `c1_m1` is its available main mission.
+    const fresh = save();
+    expect(starmapPreselect(fresh, unlockedIn(fresh))).toBe('cinder4');
+  });
+
+  it('Cinder-4 last', () => {
+    // Cinder-4's main missions done but its chapter not closed: nothing main is available anywhere open.
+    const data = save((d) => d.progress.missionsDone.push('c1_m1', 'c1_m2', 'c1_m3'));
+    expect(starmapPreselect(data, unlockedIn(data))).toBe('cinder4');
+    // Nothing unlocked at all, and a locked planet asked for.
+    expect(starmapPreselect(save(), () => false, 'eden')).toBe(PLANET_IDS[0]);
+    expect(PLANET_IDS[0]).toBe('cinder4');
+  });
+
+  it('is pure: the save is not written', () => {
+    const data = chapterOne();
+    const before = JSON.stringify(data);
+    starmapPreselect(data, unlockedIn(data), 'vetra');
+    expect(JSON.stringify(data)).toBe(before);
   });
 });

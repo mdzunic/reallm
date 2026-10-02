@@ -24,6 +24,8 @@ import {
   CONTRACT_LITHIUM,
   CONTRACT_REWARD_FRACTION,
   CONTRACTS,
+  CREDITS,
+  CREDITS_VERSION_LINE,
   CREATION_POINTS,
   DIALOGUE,
   EFFECT_KEYS_BY_DOMAIN,
@@ -1775,5 +1777,25 @@ describe('contracts (SPEC-043 §4.3)', () => {
       expect(contract.blurb.length, id).toBeLessThanOrEqual(80);
       expect(contract.blurb.trim(), id).not.toBe('');
     }
+  });
+});
+
+// ------------------------------------------------------------------ SPEC-044
+
+describe('the credits a player reads (SPEC-044 §4.9, PLAN R12-6)', () => {
+  const lines = CREDITS.flatMap((section) => [section.title, ...section.lines]);
+
+  it('has the five sections, in order', () => {
+    expect(CREDITS.map((section) => section.title)).toEqual(['ReaLLM', 'Built with', 'Pictures and films', 'Photographs', 'Sound']);
+    expect(CREDITS[0]?.lines).toEqual([CREDITS_VERSION_LINE, 'The source code is released under the Apache License 2.0.']);
+  });
+
+  it('credits Google Gemini for the photographs (R12-6)', () => {
+    expect(lines.some((line) => line.includes('Google Gemini'))).toBe(true);
+  });
+
+  it('names no film file, no spec or plan reference, and no markdown table', () => {
+    for (const line of lines) expect(line, line).not.toMatch(/SPEC-\d|PLAN R\d|ending_|\|\s*---/);
+    for (const line of lines) expect(line.trim(), 'no empty line').not.toBe('');
   });
 });
