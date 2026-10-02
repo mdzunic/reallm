@@ -43,6 +43,25 @@ export interface PauseDeps {
 }
 
 /**
+ * SPEC-045 §4.1: `deps` with the dialogue layer's log beside it, for the
+ * surface and the flight. Their deps are the services bag — the `Game`, whose
+ * methods read private fields — so it is wrapped by delegation, not spread.
+ */
+export function withComms(deps: PauseDeps, comms: CommsLog): PauseDeps {
+  const detect = deps.detectQuality;
+  return {
+    uiRoot: deps.uiRoot,
+    settings: deps.settings,
+    save: deps.save,
+    input: deps.input,
+    renderer: deps.renderer,
+    detectQuality: detect === undefined ? undefined : () => detect.call(deps),
+    go: (id, params) => deps.go(id, params),
+    comms,
+  };
+}
+
+/**
  * SPEC-032 §4.4: the flight scene's `Skip the run`. `allowed()` is asked on
  * every open, so the entry follows `runSkip` as it is now; `run()` is called
  * once per press, with the entry already disabled (32-d).

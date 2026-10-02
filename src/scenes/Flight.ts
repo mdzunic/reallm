@@ -47,7 +47,7 @@ import { AriaHint } from '@/ui/AriaHint';
 import { el, h, shortScreen, testId } from '@/ui/dom';
 import { Hud } from '@/ui/Hud';
 import { MissionBanner } from '@/ui/MissionBanner';
-import { PauseMenu } from '@/ui/PauseMenu';
+import { PauseMenu, withComms } from '@/ui/PauseMenu';
 import { RotateOverlay } from '@/ui/RotateOverlay';
 import { TouchControls } from '@/ui/TouchControls';
 import { FlightView } from '@/views/FlightView';
@@ -501,7 +501,16 @@ export class FlightScene extends UiScene<'flight'> {
     // SPEC-044 §4.8: Save & Quit says what it costs — this jump's fuel is
     // spent, and Continue lands at the station (44-i: the landing too).
     const menu = new PauseMenu(
-      services,
+      // SPEC-045 §4.1: `Comms log` reads the shared dialogue layer's log.
+      withComms(
+        services,
+        dialogueLayer(services.uiRoot, services.events, {
+          input: services.input,
+          saveKey: () => services.save.current,
+          typewriter: () => services.settings.get().typewriter,
+          speed: () => services.settings.get().dialogueSpeed,
+        }).log,
+      ),
       () => services.requestResume(),
       {
         allowed: () => this.#canSkipRun(),

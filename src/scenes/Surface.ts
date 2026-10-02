@@ -167,7 +167,7 @@ import { MapLayers } from '@/ui/MapLayers';
 import { MissionBanner } from '@/ui/MissionBanner';
 import { MapScreen, type MapMissionRow } from '@/ui/MapScreen';
 import { Minimap, type MapMark, type MinimapFrame } from '@/ui/Minimap';
-import { PauseMenu } from '@/ui/PauseMenu';
+import { PauseMenu, withComms } from '@/ui/PauseMenu';
 import { openQuickPicker, type QuickChoice } from '@/ui/QuickPicker';
 import { RevealOverlay } from '@/ui/RevealOverlay';
 import { RotateOverlay } from '@/ui/RotateOverlay';
@@ -1353,7 +1353,16 @@ export class SurfaceScene extends UiScene<'surface'> {
     // SPEC-044 §4.8: Save & Quit says what it costs — Continue lands at the
     // station, so the way back here is the jump's fuel.
     const pauseMenu = new PauseMenu(
-      services,
+      // SPEC-045 §4.1: `Comms log` reads the shared dialogue layer's log.
+      withComms(
+        services,
+        dialogueLayer(services.uiRoot, services.events, {
+          input: services.input,
+          saveKey: () => services.save.current,
+          typewriter: () => services.settings.get().typewriter,
+          speed: () => services.settings.get().dialogueSpeed,
+        }).log,
+      ),
       () => services.requestResume(),
       undefined,
       {
