@@ -760,7 +760,9 @@ export class FlightScene extends UiScene<'flight'> {
     const flight = this.#flight as Flight;
     const frame = this.#frameInput;
     frame.steerX = state.move.x;
-    frame.steerY = state.move.y;
+    // SPEC-045 §4.9: Invert flight up / down flips the keys' and the stick's
+    // axis. Mouse steer chases the reticle instead and is unaffected (45-t).
+    frame.steerY = this.services.settings.get().invertFlightY ? -state.move.y : state.move.y;
     frame.fire = state.buttons.fire.down;
     frame.autoFire = state.autoFire;
     frame.throttleUp = state.buttons.throttleUp.justPressed;
