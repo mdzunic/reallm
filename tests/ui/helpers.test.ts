@@ -692,6 +692,12 @@ describe('DIFFICULTY_LINES (SPEC-038 §4.6)', () => {
     );
     expect(DIFFICULTY_LINES.normal).toBe('Normal — the pressure the game was tuned for.');
   });
+
+  it('SPEC-043 §4.4: hard has its own line', () => {
+    expect(DIFFICULTY_LINES.hard).toBe(
+      'Hard — tougher, deadlier hostiles and twice the elites; a death costs a fifth of the hold.',
+    );
+  });
 });
 
 describe('failText (AC-42)', () => {
@@ -1820,5 +1826,129 @@ describe('the boss frame, the target frame and the panel lines (SPEC-042 §4.7, 
     c.wave = true;
     c.target = { name: 'Alpha Dust Skitter', elite: true, affixes: 'Swift', hp: 70, max: 78 };
     expect(diffHud(b, c)).toEqual(new Set(['wave', 'target']));
+  });
+});
+
+// ------------------------------------------------------------- SPEC-043 §6.1
+
+import { hash32 } from '@/core/Rng';
+import { CONTRACT_IDS, CONTRACTS, type MissionBonus } from '@/data/index';
+import { contractFor } from '@/systems/Missions';
+import { bonusLine, bonusRewardText, bonusText, contractLabel, timeText } from '@/systems/UiHelpers';
+
+/** A save with chapter 1 finished and `c1_m2` among the done. */
+function chapterOneDone(): Save {
+  const save = newSave(0, CREATION, 42, 0);
+  save.progress.missionsDone.push('c1_m1', 'c1_m2');
+  save.progress.flags.push('chapter1_done');
+  return save;
+}
+
+describe('bonus, contract and time texts (SPEC-043 §4.2, §4.3, §4.5)', () => {
+  it('timeText is m:ss', () => {
+    expect(timeText(161)).toBe('2:41');
+    expect(timeText(240)).toBe('4:00');
+    expect(timeText(1)).toBe('0:01');
+    expect(timeText(59)).toBe('0:59');
+    expect(timeText(3_725)).toBe('62:05');
+    expect(timeText(-3)).toBe('0:00');
+    expect(timeText(Number.NaN)).toBe('0:00');
+  });
+
+  it('bonusText names each kind', () => {
+    const reward = { items: [{ itemId: 'medkit' as const, qty: 1 }] };
+    expect(bonusText({ kind: 'no_death', reward })).toBe('No deaths');
+    expect(bonusText({ kind: 'par', seconds: 240, reward })).toBe('Under 4:00');
+    expect(bonusText({ kind: 'no_shelter', reward })).toBe('No shelter');
+    expect(bonusText({ kind: 'elites', count: 2, reward })).toBe('Kill 2 elites');
+    expect(bonusText({ kind: 'elites', count: 1, reward })).toBe('Kill 1 elite');
+  });
+
+  it('bonusRewardText reads +qty and the item name, then +n and the resource', () => {
+    expect(bonusRewardText({ items: [{ itemId: 'frag_grenade', qty: 2 }] })).toBe('+2 Frag Grenade');
+    expect(bonusRewardText({ resources: { lithium: 40 } })).toBe('+40 lithium');
+    expect(bonusRewardText({ items: [{ itemId: 'demo_charge', qty: 1 }], resources: { oil: 0, lithium: 20 } })).toBe(
+      '+1 Demolition Charge · +20 lithium',
+    );
+  });
+
+  it('the board’s bonus row reads the table: c1_m2 is Under 4:00 → +2 Frag Grenade', () => {
+    expect(bonusLine(MISSIONS.c1_m2.bonus as MissionBonus)).toBe('Bonus: Under 4:00 → +2 Frag Grenade');
+    expect(bonusLine(MISSIONS.c1_m3.bonus as MissionBonus)).toBe('Bonus: No deaths → +1 Demolition Charge');
+    expect(bonusLine(MISSIONS.c3_s1.bonus as MissionBonus)).toBe('Bonus: Kill 1 elite → +20 lithium');
+  });
+
+  it('contractLabel reads Contract · <name> · 75 % + 20 lithium on a contract, and null otherwise', () => {
+    const save = chapterOneDone();
+    for (let landing = 1; landing <= 8; landing++) {
+      const id = CONTRACT_IDS[hash32(save.meta.seed, 'contract', 'c1_m2', landing) % CONTRACT_IDS.length];
+      expect(id).toBe(contractFor(save, MISSIONS.c1_m2, landing));
+      expect(contractLabel(save, MISSIONS.c1_m2, landing)).toBe(`Contract · ${CONTRACTS[id as keyof typeof CONTRACTS].name} · 75 % + 20 lithium`);
+    }
+    // A first run, an unfinished chapter, a flight mission: no label.
+    expect(contractLabel(save, MISSIONS.c1_s2, 1)).toBeNull();
+    const unfinished = newSave(0, CREATION, 42, 0);
+    unfinished.progress.missionsDone.push('c1_m1', 'c1_m2');
+    expect(contractLabel(unfinished, MISSIONS.c1_m2, 1)).toBeNull();
+    const flight = newSave(0, CREATION, 42, 0);
+    flight.progress.missionsDone.push('c5_m1');
+    flight.progress.flags.push('chapter5_done');
+    expect(contractLabel(flight, MISSIONS.c5_m1, 1)).toBeNull();
+  });
+
+  it('rewardsText prints a contract’s payout: 75 % of each, then +20 lithium', () => {
+    expect(rewardsText(MISSIONS.c1_m2.rewards, true, true)).toBe('+112 XP · +11 ◈ · +20 lithium');
+    // A plain replay and a first run keep their wording.
+    expect(rewardsText(MISSIONS.c1_m2.rewards, true)).toBe('+75 XP · +7 ◈');
+    expect(rewardsText(MISSIONS.c1_m2.rewards, true, false)).toBe('+75 XP · +7 ◈');
+    expect(rewardsText(MISSIONS.c1_s2.rewards)).toBe('+70 XP · +5 ◈ · Proximity Mine ×2');
+  });
+});
+
+describe('completionLines’ extras (SPEC-043 §4.6)', () => {
+  const bonus = MISSIONS.c1_m3.bonus as MissionBonus;
+
+  it('a contract reads its payout, then contract, and names the modifier', () => {
+    const lines = completionLines(MISSIONS.c1_m2, true, null, { contract: 'swarm' });
+    expect(lines.rewards).toBe('+112 XP · +11 tokens · +20 lithium · contract');
+    expect(lines.contract).toBe('Contract · Swarm');
+    expect(lines.bonus).toBeNull();
+    expect(lines.time).toBeNull();
+  });
+
+  it('an earned bonus reads its reward, a missed one says so', () => {
+    expect(completionLines(MISSIONS.c1_m3, false, null, { bonus: { bonus, earned: true } }).bonus).toBe(
+      'Bonus: No deaths — +1 Demolition Charge',
+    );
+    expect(completionLines(MISSIONS.c1_m3, false, null, { bonus: { bonus, earned: false } }).bonus).toBe('Bonus missed: No deaths');
+  });
+
+  it('seconds read as the time row', () => {
+    expect(completionLines(MISSIONS.c1_m2, false, null, { seconds: 161 }).time).toBe('Time 2:41');
+  });
+
+  it('all three at once, and first runs and plain replays keep SPEC-042’s rewards line', () => {
+    const all = completionLines(MISSIONS.c1_m2, true, MISSIONS.c1_m3, {
+      contract: 'no_cover',
+      bonus: { bonus: MISSIONS.c1_m2.bonus as MissionBonus, earned: true },
+      seconds: 95,
+    });
+    expect(all).toEqual({
+      title: 'Black Gold',
+      rewards: '+112 XP · +11 tokens · +20 lithium · contract',
+      next: 'Next: Worm Sign — at the pad terminal',
+      bonus: 'Bonus: Under 4:00 — +2 Frag Grenade',
+      contract: 'Contract · No cover',
+      time: 'Time 1:35',
+    });
+    expect(completionLines(MISSIONS.c1_m2, true, null, { contract: null, bonus: null, seconds: null })).toEqual({
+      title: 'Black Gold',
+      rewards: '+75 XP · +7 tokens · replay',
+      next: null,
+      bonus: null,
+      contract: null,
+      time: null,
+    });
+    expect(completionLines(MISSIONS.c1_s2, false, null, {}).rewards).toBe('+70 XP · +5 tokens · Proximity Mine ×2');
   });
 });

@@ -424,7 +424,10 @@ export const MISSIONS = {
       ],
     ],
     rewards: { xp: 300, tokens: 30 },
-    bonus: { kind: 'elites', count: 2, reward: { resources: { lithium: 40 } } },
+    // SPEC-043 §4.2's table reads lithium 40 here, against its own rule that a
+    // main mission's bonus pays items only (§2, the invariant); the reward is
+    // *initial tuning*, so it pays the elite-killing charge instead.
+    bonus: { kind: 'elites', count: 2, reward: { items: [{ itemId: 'demo_charge', qty: 2 }] } },
     dialogue: { onAccept: 'c4_m2_accept', onComplete: 'c4_m2_done' },
   },
   c4_m3: {

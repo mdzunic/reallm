@@ -6,10 +6,11 @@
 // to one ending, and the dev control that finishes a stage through the runtime.
 import { describe, expect, it } from 'vitest';
 import { EventBus, type GameEvents } from '@/core/Events';
+import { hash32 } from '@/core/Rng';
 import { newSave, type Save } from '@/core/Save';
-import { MISSIONS, TUNING, type PlanetId } from '@/data/index';
+import { CONTRACT_IDS, CONTRACT_LITHIUM, MISSIONS, TUNING, type ContractId, type MissionId, type PlanetId } from '@/data/index';
 import { Economy } from '@/systems/Economy';
-import { Missions, type MissionContext } from '@/systems/Missions';
+import { contractFor, Missions, type MissionContext } from '@/systems/Missions';
 import type { LayoutPoi } from '@/systems/Layout';
 import { Progression } from '@/systems/Progression';
 import { missionStatus } from '@/systems/UiHelpers';
@@ -865,5 +866,382 @@ describe('Missions — survive stages run their storm wave (SPEC-038 §4.5)', ()
     h.events.emit('poi:scanned', { poi: 'dune_sea', instance: 0 });
     expect(h.missions.requiredWeather()).toEqual({ weather: 'sandstorm', seconds: 60 });
     expect(h.missions.surviveWave()).toBeNull();
+  });
+});
+
+// ------------------------------------------------------------- SPEC-043 §6.1
+
+/** `c1_m3` from its boss stage on: the wurm dies, and 100 oil reaches the beacon. */
+function finishWormSign(h: Harness): void {
+  h.events.emit('boss:defeated', { boss: 'dune_wurm' });
+  h.save.resources.oil = Math.max(h.save.resources.oil, 100);
+  h.ctx.player.x = 50;
+  h.ctx.player.z = 20;
+  h.run(0.1);
+}
+
+/** `c1_s2`: the eight skitters, then the 90 s heatwave survived. */
+function finishWaterless(h: Harness, shelterAt: number | null = null): void {
+  for (let i = 0; i < 8; i++) h.events.emit('enemy:killed', { enemyId: 'dust_skitter', elite: false, x: 0, z: 0, xp: 4 });
+  const steps = Math.round(90.1 / STEP);
+  for (let i = 0; i < steps; i++) {
+    h.ctx.sheltered = shelterAt !== null && i === shelterAt;
+    h.missions.update(STEP, h.ctx);
+  }
+  h.ctx.sheltered = false;
+}
+
+/** `c3_s1` on Thessaly: three towers scanned, eight hounds down — `elites` of them elite. */
+function finishOldTerraform(h: Harness, elites: number): void {
+  for (let i = 0; i < 3; i++) h.events.emit('poi:scanned', { poi: 'terraform_tower', instance: i });
+  for (let i = 0; i < 8; i++) h.events.emit('enemy:killed', { enemyId: 'spore_hound', elite: i < elites, x: 0, z: 0, xp: 6 });
+}
+
+/** The names of the recorded events, in order, from the first `mission:bonus` on. */
+function namesFrom(h: Harness, first: string): string[] {
+  const names = h.recorded.map((entry) => entry.name);
+  return names.slice(names.indexOf(first));
+}
+
+describe('Missions — the mission clock and its counters (SPEC-043 §4.2)', () => {
+  it('clock sums the seconds update stepped each active mission, from its accept', () => {
+    const h = harness((save) => save.progress.missionsDone.push('c1_m1'));
+    h.missions.accept('c1_m2');
+    h.run(2.5);
+    expect(h.missions.active[0]?.clock).toBeCloseTo(2.5, 6);
+    h.missions.accept('c1_s1');
+    h.run(1);
+    expect(h.missions.active.map((state) => [state.id, Math.round(state.clock * 1000) / 1000])).toEqual([
+      ['c1_m2', 3.5],
+      ['c1_s1', 1],
+    ]);
+  });
+
+  it('a fresh accept is clean with nothing counted; deaths, shelter and elites accrue while active', () => {
+    const h = harness((save) => save.progress.missionsDone.push('c1_m1'));
+    h.missions.accept('c1_m2');
+    const state = h.missions.active[0];
+    expect(state).toMatchObject({ clock: 0, deaths: 0, sheltered: false, elites: 0, clean: true });
+    h.events.emit('player:died', { cause: { kind: 'fall' }, scene: 'surface' });
+    h.events.emit('enemy:killed', { enemyId: 'dust_skitter', elite: true, x: 0, z: 0, xp: 4 });
+    h.events.emit('enemy:killed', { enemyId: 'dust_skitter', elite: false, x: 0, z: 0, xp: 4 });
+    h.ctx.sheltered = true;
+    h.run(STEP);
+    expect(state).toMatchObject({ deaths: 1, sheltered: true, elites: 1, clean: true });
+  });
+
+  it('a mission rebuilt at stage 1 is not clean; one at stage 0 with no counters is (E70, 43-b)', () => {
+    const stage1 = harness((save) => {
+      save.progress.missionsDone.push('c1_m1', 'c1_m2');
+      save.progress.missionsActive.push({ id: 'c1_m3', stage: 1, counters: { '0:0': 1 } });
+    });
+    expect(stage1.missions.active[0]?.clean).toBe(false);
+    const counted = harness((save) => {
+      save.progress.missionsDone.push('c1_m1');
+      save.progress.missionsActive.push({ id: 'c1_m2', stage: 0, counters: { '0:0': 40 } });
+    });
+    expect(counted.missions.active[0]?.clean).toBe(false);
+    const untouched = harness((save) => {
+      save.progress.missionsDone.push('c1_m1', 'c1_m2');
+      save.progress.missionsActive.push({ id: 'c1_m3', stage: 0, counters: {} });
+    });
+    expect(untouched.missions.active[0]).toMatchObject({ clean: true, clock: 0 });
+  });
+});
+
+describe('Missions — judging a bonus (SPEC-043 §4.2)', () => {
+  it('mission:bonus precedes the rewards and mission:completed, and an earned one pays through applyBonus', () => {
+    const h = harness((save) => save.progress.missionsDone.push('c1_m1', 'c1_m2'));
+    h.missions.accept('c1_m3');
+    finishWormSign(h);
+    expect(h.of('mission:bonus')).toEqual([{ id: 'c1_m3', bonus: 'no_death', earned: true }]);
+    const after = namesFrom(h, 'mission:bonus');
+    expect(after.indexOf('mission:bonus')).toBeLessThan(after.indexOf('tokens:changed'));
+    expect(after.indexOf('mission:bonus')).toBeLessThan(after.indexOf('mission:completed'));
+    // The demolition charge lands before mission:completed, from the bonus.
+    expect(after.indexOf('inventory:changed')).toBeLessThan(after.indexOf('mission:completed'));
+    expect(h.economy.count('demo_charge')).toBe(1);
+    expect(after.at(-1)).toBe('mission:completed');
+  });
+
+  it('a death forfeits no_death, and the clock runs on through it (E70)', () => {
+    const h = harness((save) => save.progress.missionsDone.push('c1_m1', 'c1_m2'));
+    h.missions.accept('c1_m3');
+    h.run(1);
+    h.events.emit('player:died', { cause: { kind: 'fall' }, scene: 'surface' });
+    finishWormSign(h);
+    expect(h.of('mission:bonus')).toEqual([{ id: 'c1_m3', bonus: 'no_death', earned: false }]);
+    expect(h.economy.count('demo_charge')).toBe(0);
+    // A death is not a reload: the run is still clean, and its time still counts.
+    expect(h.of('mission:completed')).toEqual([{ id: 'c1_m3', replay: false, seconds: 1 }]);
+  });
+
+  it('a recall to the pad forfeits nothing (43-a)', () => {
+    const h = harness((save) => save.progress.missionsDone.push('c1_m1', 'c1_m2'));
+    h.missions.accept('c1_m3');
+    h.events.emit('player:recalled', {});
+    finishWormSign(h);
+    expect(h.of('mission:bonus')).toEqual([{ id: 'c1_m3', bonus: 'no_death', earned: true }]);
+    expect(h.economy.count('demo_charge')).toBe(1);
+  });
+
+  it('ctx.sheltered on any step forfeits no_shelter', () => {
+    const sheltered = harness((save) => save.progress.missionsDone.push('c1_m1'));
+    sheltered.missions.accept('c1_s2');
+    finishWaterless(sheltered, 1200);
+    expect(sheltered.of('mission:bonus')).toEqual([{ id: 'c1_s2', bonus: 'no_shelter', earned: false }]);
+    expect(sheltered.economy.count('frag_grenade')).toBe(0);
+    // §4.1: its own reward still pays.
+    expect(sheltered.economy.count('landmine')).toBe(2);
+
+    const open = harness((save) => save.progress.missionsDone.push('c1_m1'));
+    open.missions.accept('c1_s2');
+    finishWaterless(open);
+    expect(open.of('mission:bonus')).toEqual([{ id: 'c1_s2', bonus: 'no_shelter', earned: true }]);
+    expect(open.economy.count('frag_grenade')).toBe(2);
+  });
+
+  it('elite kills of any enemy count toward elites', () => {
+    const none = harness((save) => save.progress.missionsDone.push('c3_m1'), 'surface', 'thessaly');
+    none.missions.accept('c3_s1');
+    finishOldTerraform(none, 0);
+    expect(none.of('mission:bonus')).toEqual([{ id: 'c3_s1', bonus: 'elites', earned: false }]);
+    // §4.1: c3_s1's own 30 lithium, and no bonus lithium.
+    expect(none.save.resources.lithium).toBe(30);
+
+    const one = harness((save) => save.progress.missionsDone.push('c3_m1'), 'surface', 'thessaly');
+    one.missions.accept('c3_s1');
+    // An elite that is no objective of the mission counts all the same.
+    one.events.emit('enemy:killed', { enemyId: 'hive_drone', elite: true, x: 0, z: 0, xp: 5 });
+    expect(one.missions.active[0]?.elites).toBe(1);
+    finishOldTerraform(one, 0);
+    expect(one.of('mission:bonus')).toEqual([{ id: 'c3_s1', bonus: 'elites', earned: true }]);
+    expect(one.save.resources.lithium).toBe(30 + 20);
+  });
+
+  it('par is earned inside its seconds and missed past them', () => {
+    const outcome = (seconds: number): boolean | undefined => {
+      const h = harness((save) => save.progress.missionsDone.push('c1_m1'));
+      h.missions.accept('c1_m2');
+      h.run(seconds);
+      for (let i = 0; i < 6; i++) h.events.emit('enemy:killed', { enemyId: 'scav_raider', elite: false, x: 0, z: 0, xp: 10 });
+      h.economy.addResource('oil', 150, 'pickup');
+      expect(h.of('mission:completed').at(-1)?.id).toBe('c1_m2');
+      return h.of('mission:bonus').at(-1)?.earned;
+    };
+    expect(outcome(10)).toBe(true);
+    expect(outcome(239)).toBe(true);
+    expect(outcome(241)).toBe(false);
+  });
+
+  it('a mission rebuilt with progress misses its bonus and carries no time (E70)', () => {
+    const h = harness((save) => {
+      save.progress.missionsDone.push('c1_m1', 'c1_m2');
+      save.progress.missionsActive.push({ id: 'c1_m3', stage: 1, counters: { '0:0': 1 } });
+    });
+    h.save.resources.oil = 100;
+    h.ctx.player.x = 50;
+    h.ctx.player.z = 20;
+    h.run(0.1);
+    expect(h.of('mission:bonus')).toEqual([{ id: 'c1_m3', bonus: 'no_death', earned: false }]);
+    expect(h.of('mission:completed')).toEqual([{ id: 'c1_m3', replay: false }]);
+    expect(h.economy.count('demo_charge')).toBe(0);
+  });
+
+  it('a mission with no bonus emits no mission:bonus', () => {
+    const h = harness();
+    h.missions.accept('c1_m1');
+    h.events.emit('poi:reached', { poi: 'landing_pad', instance: 0 });
+    h.events.emit('poi:scanned', { poi: 'dune_sea', instance: 0 });
+    h.run(60.1);
+    expect(h.of('mission:completed')).toHaveLength(1);
+    expect(h.of('mission:bonus')).toEqual([]);
+  });
+
+  it('a bonus pays on a replay too', () => {
+    const h = harness((save) => save.progress.missionsDone.push('c1_m1', 'c1_m2', 'c1_m3'));
+    h.missions.accept('c1_m3');
+    finishWormSign(h);
+    expect(h.of('mission:completed')).toEqual([{ id: 'c1_m3', replay: true, seconds: 1 }]);
+    expect(h.of('mission:bonus')).toEqual([{ id: 'c1_m3', bonus: 'no_death', earned: true }]);
+    expect(h.economy.count('demo_charge')).toBe(1);
+  });
+});
+
+describe('contractFor (SPEC-043 §4.3)', () => {
+  const finished = (patch?: (save: Save) => void): Save => {
+    const save = newSave(0, MARINE, 42, 1_700_000_000_000);
+    patch?.(save);
+    return save;
+  };
+
+  it('is null for a first run, an unfinished chapter, a flight mission and Eden', () => {
+    // A first run: the chapter is finished, but c1_m2 was never done.
+    expect(contractFor(finished((s) => s.progress.flags.push('chapter1_done')), MISSIONS.c1_m2, 1)).toBeNull();
+    // A replay of a chapter not yet finished.
+    expect(contractFor(finished((s) => s.progress.missionsDone.push('c1_m1', 'c1_m2')), MISSIONS.c1_m2, 1)).toBeNull();
+    // Flight replays: c4_s2 and c5_m1, their chapters finished (43-k).
+    const flight = finished((s) => {
+      s.progress.missionsDone.push('c4_s2', 'c5_m1');
+      s.progress.flags.push('chapter4_done', 'chapter5_done');
+    });
+    expect(contractFor(flight, MISSIONS.c4_s2, 1)).toBeNull();
+    expect(contractFor(flight, MISSIONS.c5_m1, 1)).toBeNull();
+    // Eden: chapter 6 has no `chapter6_done`, and no enemies live there.
+    const eden = finished((s) => {
+      s.progress.missionsDone.push('c6_m1');
+      s.progress.flags.push('chapter5_done', 'campaign_done');
+    });
+    expect(contractFor(eden, MISSIONS.c6_m1, 1)).toBeNull();
+  });
+
+  it('is deterministic per landing — hash32(seed, contract, id, landing) over the four on Cinder-4', () => {
+    const save = finished((s) => {
+      s.progress.missionsDone.push('c1_m1', 'c1_m2');
+      s.progress.flags.push('chapter1_done');
+    });
+    const seen = new Set<ContractId>();
+    for (let landing = 1; landing <= 40; landing++) {
+      const contract = contractFor(save, MISSIONS.c1_m2, landing);
+      expect(contract).toBe(CONTRACT_IDS[hash32(save.meta.seed, 'contract', 'c1_m2', landing) % CONTRACT_IDS.length]);
+      expect(contractFor(save, MISSIONS.c1_m2, landing)).toBe(contract);
+      if (contract !== null) seen.add(contract);
+    }
+    // A new landing is a new contract: forty landings meet all four.
+    expect([...seen].sort()).toEqual([...CONTRACT_IDS].sort());
+  });
+
+  it('offers only the weather-free modifiers on the Hive', () => {
+    const save = finished((s) => {
+      s.progress.missionsDone.push('c5_m1', 'c5_m2');
+      s.progress.flags.push('chapter5_done');
+    });
+    const seen = new Set<ContractId | null>();
+    for (let landing = 1; landing <= 40; landing++) {
+      const contract = contractFor(save, MISSIONS.c5_m2, landing);
+      expect(contract).toBe((['elite_surge', 'swarm'] as const)[hash32(save.meta.seed, 'contract', 'c5_m2', landing) % 2]);
+      seen.add(contract);
+    }
+    expect([...seen].sort()).toEqual(['elite_surge', 'swarm']);
+  });
+});
+
+describe('Missions — contracts on the surface (SPEC-043 §4.3)', () => {
+  /** Cinder-4 with chapter 1 finished, landed on for the `landing`-th time. */
+  const chapterOne = (landing: number, active: MissionId[] = []) =>
+    harness((save) => {
+      save.progress.missionsDone.push('c1_m1', 'c1_m2', 'c1_m3', 'c1_s1');
+      save.progress.flags.push('chapter1_done');
+      save.progress.visits.cinder4 = landing;
+      for (const id of active) save.progress.missionsActive.push({ id, stage: 0, counters: {} });
+    });
+
+  it('activeContracts names each active replay’s contract, read with this landing’s number', () => {
+    const h = chapterOne(3, ['c1_m2', 'c1_s1']);
+    expect(h.missions.activeContracts()).toEqual([
+      contractFor(h.save, MISSIONS.c1_m2, 3),
+      contractFor(h.save, MISSIONS.c1_s1, 3),
+    ]);
+    // A first run carries none: c1_s2 was never done.
+    h.missions.accept('c1_s2');
+    expect(h.missions.activeContracts()).toHaveLength(2);
+    // Gone when the mission is.
+    h.missions.abandon('c1_m2');
+    expect(h.missions.activeContracts()).toEqual([contractFor(h.save, MISSIONS.c1_s1, 3)]);
+  });
+
+  it('activeContracts is always [] in flight', () => {
+    const h = harness(
+      (save) => {
+        save.progress.missionsDone.push('c4_m1', 'c4_s2');
+        save.progress.flags.push('chapter4_done');
+        save.progress.missionsActive.push({ id: 'c4_s2', stage: 0, counters: {} });
+      },
+      'flight',
+      'ferrum',
+    );
+    expect(h.missions.active).toHaveLength(1);
+    expect(h.missions.activeContracts()).toEqual([]);
+  });
+
+  it('a contract completion pays 75 % and 20 lithium, and mission:completed carries contract and seconds', () => {
+    const h = chapterOne(2);
+    expect(h.missions.accept('c1_m2').ok).toBe(true);
+    const contract = contractFor(h.save, MISSIONS.c1_m2, 2);
+    expect(contract).not.toBeNull();
+    const { xp, tokens } = h.save.player;
+    const lithium = h.save.resources.lithium;
+    h.run(5);
+    for (let i = 0; i < 6; i++) h.events.emit('enemy:killed', { enemyId: 'scav_raider', elite: false, x: 0, z: 0, xp: 10 });
+    h.economy.addResource('oil', 150, 'pickup');
+    expect(h.of('mission:completed')).toEqual([{ id: 'c1_m2', replay: true, contract, seconds: 5 }]);
+    expect(h.save.player.xp - xp).toBe(Math.floor(MISSIONS.c1_m2.rewards.xp * 0.75));
+    expect(h.save.player.tokens - tokens).toBe(Math.floor(MISSIONS.c1_m2.rewards.tokens * 0.75));
+    expect(h.save.resources.lithium - lithium).toBe(CONTRACT_LITHIUM);
+    // §4.3: a contract earns its bonus like any run — c1_m2's par.
+    expect(h.of('mission:bonus')).toEqual([{ id: 'c1_m2', bonus: 'par', earned: true }]);
+  });
+
+  it('a plain replay before the chapter is finished carries no contract (43-k)', () => {
+    const h = harness((save) => save.progress.missionsDone.push('c1_m1'));
+    h.missions.accept('c1_m1');
+    h.events.emit('poi:reached', { poi: 'landing_pad', instance: 0 });
+    h.events.emit('poi:scanned', { poi: 'dune_sea', instance: 0 });
+    h.run(60.1);
+    expect(h.of('mission:completed')).toEqual([{ id: 'c1_m1', replay: true, seconds: 60 }]);
+  });
+
+  it('a chapter flag set while a replay runs makes it a contract at completion (43-d)', () => {
+    const h = harness((save) => {
+      save.progress.missionsDone.push('c1_m1', 'c1_m2');
+      save.progress.visits.cinder4 = 4;
+    });
+    h.missions.accept('c1_m2');
+    expect(h.missions.activeContracts()).toEqual([]);
+    h.save.progress.flags.push('chapter1_done');
+    for (let i = 0; i < 6; i++) h.events.emit('enemy:killed', { enemyId: 'scav_raider', elite: false, x: 0, z: 0, xp: 10 });
+    h.economy.addResource('oil', 150, 'pickup');
+    expect(h.of('mission:completed').at(-1)?.contract).toBe(contractFor(h.save, MISSIONS.c1_m2, 4));
+  });
+
+  it('a flight mission carries no seconds, even clean', () => {
+    const h = harness(
+      (save) => {
+        save.progress.missionsDone.push('c4_m1');
+        save.progress.missionsActive.push({ id: 'c4_s2', stage: 0, counters: {} });
+      },
+      'flight',
+      'ferrum',
+    );
+    h.run(3);
+    for (let i = 0; i < 8; i++) h.events.emit('enemy:killed', { enemyId: 'scav_fighter', elite: false, x: 0, z: 0, xp: 8 });
+    expect(h.of('mission:completed')).toEqual([{ id: 'c4_s2', replay: false }]);
+    // §4.1: c4_s2's 60 oil arrives as a reward.
+    expect(h.of('resource:collected').at(-1)).toMatchObject({ resource: 'oil', amount: 60, source: 'reward' });
+  });
+});
+
+describe('Missions — only pickups advance a collect objective (SPEC-043 43-h)', () => {
+  it('a reward, a bonus, a contract’s lithium, a voucher and the subsidy leave the counter; a pickup and a shipped-home pickup move it', () => {
+    const h = harness((save) => save.progress.missionsDone.push('c4_m1'), 'surface', 'ferrum');
+    h.missions.accept('c4_m2'); // collect 200 lithium
+    const counter = () => h.missions.currentObjectives('c4_m2').find((o) => o.objective.kind === 'collect')?.value;
+    expect(counter()).toBe(0);
+
+    h.economy.addResource('lithium', 30, 'reward');
+    h.economy.addResource('lithium', 25, 'voucher');
+    h.economy.addResource('lithium', 15, 'subsidy');
+    h.economy.applyBonus(MISSIONS.c4_s1); // c4_s1's bonus: lithium 30, as a reward
+    h.events.emit('resource:collected', { resource: 'lithium', amount: CONTRACT_LITHIUM, total: 120, source: 'reward' });
+    expect(h.save.resources.lithium).toBe(100);
+    expect(counter()).toBe(0);
+
+    h.economy.addResource('lithium', 10, 'pickup');
+    expect(counter()).toBe(10);
+
+    // A full hold ships the wanted surplus home, and that counts (SPEC-034 §4.12).
+    h.save.resources.lithium = h.economy.cargoCap();
+    expect(h.economy.addResource('lithium', 15, 'pickup')).toEqual({ added: 0, shipped: 15, blocked: 0 });
+    expect(counter()).toBe(25);
   });
 });

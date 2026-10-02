@@ -306,3 +306,51 @@ describe('Weather — the forced ramp and the planet multiplier (SPEC-038 §4.5)
     expect(h.weather.exposureDps).toBe(0);
   });
 });
+
+// ------------------------------------------------------------- SPEC-043 §4.3
+
+describe('Weather — storm_front’s calm scale (SPEC-043 §4.3)', () => {
+  /** A forced 5 s storm, stepped until it ends: the next calm window, fresh off its roll. */
+  function nextCalm(h: ReturnType<typeof harness>): number {
+    h.weather.force('heatwave', 5);
+    while (h.weather.phase !== 'calm') h.weather.update(STEP);
+    return h.weather.secondsLeft;
+  }
+
+  it('setCalmScale(0.25) quarters the next calm window', () => {
+    const plain = harness('cinder4', 7);
+    const front = harness('cinder4', 7);
+    front.weather.setCalmScale(0.25);
+    const full = nextCalm(plain);
+    expect(full).toBeGreaterThanOrEqual(PLANETS.cinder4.surface.weather?.calmSeconds[0] ?? Infinity);
+    expect(nextCalm(front)).toBeCloseTo(full * 0.25, 9);
+  });
+
+  it('a calm already rolled runs out unchanged, and 1 restores the cycle (43-e)', () => {
+    const plain = harness('cinder4', 7);
+    const front = harness('cinder4', 7);
+    front.weather.setCalmScale(0.25);
+    // The landing's first calm was rolled before the contract came into force.
+    expect(front.weather.secondsLeft).toBe(plain.weather.secondsLeft);
+    nextCalm(plain);
+    nextCalm(front);
+    // The contract leaves mid-calm: that calm runs out, the next is full length.
+    front.weather.setCalmScale(1);
+    expect(nextCalm(front)).toBe(nextCalm(plain));
+  });
+
+  it('a landing that starts under storm_front starts on a short calm', () => {
+    const events = new EventBus<GameEvents>({ dev: false });
+    const plain = new Weather(PLANETS.cinder4, new Rng(7), events);
+    const front = new Weather(PLANETS.cinder4, new Rng(7), events, 0.25);
+    expect(front.secondsLeft).toBeCloseTo(plain.secondsLeft * 0.25, 9);
+  });
+
+  it('a weatherless planet stays calm whatever the scale', () => {
+    const hive = harness('hive', 7);
+    hive.weather.setCalmScale(0.25);
+    hive.run(600);
+    expect(hive.weather.phase).toBe('calm');
+    expect(hive.recorded.filter((r) => r.name === 'weather:warning')).toHaveLength(0);
+  });
+});

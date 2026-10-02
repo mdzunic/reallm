@@ -21,6 +21,10 @@ import {
   CLASS_IDS,
   COMPANIONS,
   COMPANION_IDS,
+  CONTRACT_IDS,
+  CONTRACT_LITHIUM,
+  CONTRACT_REWARD_FRACTION,
+  CONTRACTS,
   CREATION_POINTS,
   DIALOGUE,
   EFFECT_KEYS_BY_DOMAIN,
@@ -52,6 +56,7 @@ import {
   type Item,
   type LootEntry,
   type LootTableId,
+  type MissionBonus,
   type MissionDef,
   type MissionId,
   type Objective,
@@ -1574,6 +1579,208 @@ describe('no SWAP or ITEM in the touch words (SPEC-037 §4.10)', () => {
     expect(rows).toContainEqual(['Heal', 'Tap the heal slot on the bar']);
     for (const [what, how] of rows) {
       expect(`${what} ${how}`, what).not.toMatch(NAMES_A_GONE_BUTTON);
+    }
+  });
+});
+
+// ------------------------------------------------------------------ SPEC-043
+
+/**
+ * SPEC-043 §4.1, AC-2 — every side mission pays an item or a resource on top of
+ * its tokens and XP, and (14c) a flight mission never pays in items: the
+ * flight scene has no ground to spill a full pack's overflow on.
+ */
+function sideRewardProblems(list: readonly Mission[]): string[] {
+  const problems: string[] = [];
+  for (const mission of list) {
+    const items = (mission.rewards.items ?? []).filter((item) => item.qty > 0);
+    const resources = Object.values(mission.rewards.resources ?? {}).filter((amount) => (amount ?? 0) > 0);
+    if (mission.type === 'side' && items.length === 0 && resources.length === 0) {
+      problems.push(`${mission.id}: a side mission that pays neither an item nor a resource`);
+    }
+    if (mission.scene === 'flight' && items.length > 0) problems.push(`${mission.id}: item rewards on a flight mission`);
+  }
+  return problems;
+}
+
+/** SPEC-043 §4.2: the seconds a mission's timed stages take at the least — its survives and defends. */
+function timedSeconds(mission: Mission): number {
+  let seconds = 0;
+  for (const { objective } of objectivesOf(mission)) {
+    if (objective.kind === 'survive' || objective.kind === 'defend') seconds += objective.seconds;
+  }
+  return seconds;
+}
+
+/**
+ * SPEC-043 §4.2's bonus invariants, as a function so each failure mode can be
+ * shown on doctored content: none in flight, on the tutorial or on the finale;
+ * a par at least the timed stages plus 60 s; `no_shelter` only where a survive
+ * forces weather; `elites` only where elites spawn, and at least one; a
+ * non-empty reward of known items and positive amounts; and a main mission's
+ * bonus pays no resources (§2: SPEC-016's worst-case collects stay put).
+ */
+function bonusProblems(list: readonly Mission[], worlds: Readonly<Record<PlanetId, PlanetDef>>): string[] {
+  const problems: string[] = [];
+  for (const mission of list) {
+    const bonus: MissionBonus | undefined = mission.bonus;
+    if (bonus === undefined) continue;
+    const where = `${mission.id} (${bonus.kind})`;
+    if (mission.scene === 'flight') problems.push(`${where}: a bonus on a flight mission`);
+    if (mission.id === 'c1_m1' || mission.id === 'c6_m2') problems.push(`${where}: no bonus on the tutorial or the finale`);
+    if (bonus.kind === 'par' && bonus.seconds < timedSeconds(mission) + 60) {
+      problems.push(`${where}: par ${bonus.seconds} s is under the timed stages' ${timedSeconds(mission)} s + 60`);
+    }
+    if (bonus.kind === 'no_shelter') {
+      const forced = objectivesOf(mission).some(({ objective }) => objective.kind === 'survive' && objective.weather !== undefined);
+      if (!forced) problems.push(`${where}: no survive stage forces weather`);
+    }
+    if (bonus.kind === 'elites') {
+      const planet = worlds[mission.planet];
+      if (!(planet.surface.eliteChance > 0) || planet.surface.spawn.length === 0) {
+        problems.push(`${where}: ${planet.id} spawns no elites`);
+      }
+      if (!(bonus.count >= 1)) problems.push(`${where}: asks for ${bonus.count} elites`);
+    }
+    const items = bonus.reward.items ?? [];
+    const resources = Object.entries(bonus.reward.resources ?? {});
+    if (items.length + resources.length === 0) problems.push(`${where}: an empty reward`);
+    for (const item of items) {
+      if (!itemIds.has(item.itemId)) problems.push(`${where}: unknown item ${item.itemId}`);
+      if (!(item.qty > 0)) problems.push(`${where}: ${item.itemId} ×${item.qty}`);
+    }
+    for (const [resource, amount] of resources) {
+      if (!resourceIds.has(resource)) problems.push(`${where}: unknown resource ${resource}`);
+      if (!((amount ?? 0) > 0)) problems.push(`${where}: ${resource} ${amount}`);
+    }
+    if (mission.type === 'main' && resources.length > 0) problems.push(`${where}: a main mission's bonus pays resources`);
+  }
+  return problems;
+}
+
+describe('side rewards and bonuses (SPEC-043 §4.1, §4.2)', () => {
+  it('§4.1: the six side missions that lacked one gain an item or a resource, and tokens and XP do not move', () => {
+    const added = (id: MissionId) => {
+      const rewards: Mission['rewards'] = MISSIONS[id].rewards;
+      return { xp: rewards.xp, tokens: rewards.tokens, items: rewards.items ?? [], resources: rewards.resources ?? {} };
+    };
+    expect(added('c1_s2')).toEqual({ xp: 70, tokens: 5, items: [{ itemId: 'landmine', qty: 2 }], resources: {} });
+    expect(added('c2_s2')).toEqual({ xp: 90, tokens: 10, items: [{ itemId: 'coolant_pack', qty: 2 }], resources: {} });
+    expect(added('c3_s1')).toEqual({ xp: 120, tokens: 12, items: [], resources: { lithium: 30 } });
+    expect(MISSIONS.c3_s1.rewards.flags).toEqual(['scaffold_secret']); // its flag stays
+    expect(added('c3_s2')).toEqual({ xp: 130, tokens: 12, items: [{ itemId: 'demo_charge', qty: 2 }], resources: {} });
+    expect(added('c4_s2')).toEqual({ xp: 150, tokens: 15, items: [], resources: { oil: 60 } });
+    expect(added('c5_s1')).toEqual({ xp: 200, tokens: 20, items: [{ itemId: 'plasma_cell', qty: 2 }], resources: {} });
+  });
+
+  it('AC-2: every side mission pays an item or a resource, and no flight mission pays in items', () => {
+    expect(sideRewardProblems(missions)).toEqual([]);
+  });
+
+  it('AC-2: a side mission paying neither, and a flight mission paying an item, both fail', () => {
+    const bare = { ...MISSIONS.c1_s2, rewards: { xp: 70, tokens: 5 } } as Mission;
+    const tokensOnly = { ...MISSIONS.c3_s1, rewards: { xp: 120, tokens: 12, resources: { lithium: 0 }, flags: ['scaffold_secret'] } } as Mission;
+    const itemInFlight = { ...MISSIONS.c4_s2, rewards: { xp: 150, tokens: 15, items: [{ itemId: 'medkit', qty: 1 }] } } as Mission;
+    expect(sideRewardProblems([bare, tokensOnly, itemInFlight])).toEqual([
+      'c1_s2: a side mission that pays neither an item nor a resource',
+      'c3_s1: a side mission that pays neither an item nor a resource',
+      'c4_s2: item rewards on a flight mission',
+    ]);
+  });
+
+  it('§4.2: the 22 missions of the table carry the bonus it gives, and no other mission has one', () => {
+    const items = (itemId: string, qty: number) => ({ items: [{ itemId, qty }] });
+    const lithium = (amount: number) => ({ resources: { lithium: amount } });
+    const table: Partial<Record<MissionId, MissionBonus>> = {
+      c1_m2: { kind: 'par', seconds: 240, reward: items('frag_grenade', 2) },
+      c1_m3: { kind: 'no_death', reward: items('demo_charge', 1) },
+      c1_s1: { kind: 'par', seconds: 210, reward: items('coolant_pack', 1) },
+      c1_s2: { kind: 'no_shelter', reward: items('frag_grenade', 2) },
+      c2_m1: { kind: 'no_shelter', reward: items('coolant_pack', 2) },
+      c2_m2: { kind: 'par', seconds: 240, reward: items('frag_grenade', 2) },
+      c2_m3: { kind: 'no_death', reward: items('plasma_cell', 1) },
+      c2_s1: { kind: 'par', seconds: 180, reward: items('medkit', 2) },
+      c2_s2: { kind: 'no_shelter', reward: items('landmine', 2) },
+      c3_m1: { kind: 'no_shelter', reward: items('medkit', 2) },
+      c3_m2: { kind: 'no_death', reward: items('landmine', 3) },
+      c3_m3: { kind: 'no_death', reward: items('demo_charge', 2) },
+      c3_s1: { kind: 'elites', count: 1, reward: lithium(20) },
+      c3_s2: { kind: 'no_death', reward: items('frag_grenade', 3) },
+      c4_m1: { kind: 'no_shelter', reward: items('coolant_pack', 2) },
+      // §4.2's table says lithium 40, which its own main-mission rule forbids;
+      // the reward is initial tuning, so it pays items (see data/missions.ts).
+      c4_m2: { kind: 'elites', count: 2, reward: items('demo_charge', 2) },
+      c4_m3: { kind: 'no_death', reward: items('plasma_cell', 2) },
+      c4_s1: { kind: 'no_shelter', reward: lithium(30) },
+      c5_m2: { kind: 'par', seconds: 300, reward: items('demo_charge', 2) },
+      c5_m3: { kind: 'no_death', reward: items('plasma_cell', 3) },
+      c5_s1: { kind: 'par', seconds: 360, reward: lithium(40) },
+      c6_m1: { kind: 'par', seconds: 270, reward: items('medkit', 3) },
+    } as Partial<Record<MissionId, MissionBonus>>;
+    expect(Object.keys(table)).toHaveLength(22);
+    for (const mission of missions) {
+      expect(mission.bonus, mission.id).toEqual(table[mission.id]);
+    }
+    // §4.2: the tutorial, the two flight missions and the finale carry none.
+    for (const id of ['c1_m1', 'c4_s2', 'c5_m1', 'c6_m2'] as const) expect(MISSIONS[id]).not.toHaveProperty('bonus');
+  });
+
+  it('§4.2: every bonus keeps the invariants', () => {
+    expect(bonusProblems(missions, planetsById)).toEqual([]);
+  });
+
+  it('§4.2: each bonus invariant fails doctored content', () => {
+    const reward = { items: [{ itemId: 'medkit' as const, qty: 1 }] };
+    const doctored: Mission[] = [
+      { ...MISSIONS.c4_s2, bonus: { kind: 'no_death', reward } },
+      { ...MISSIONS.c1_m1, bonus: { kind: 'no_death', reward } },
+      { ...MISSIONS.c6_m2, bonus: { kind: 'no_death', reward } },
+      // c1_s2's heatwave survive is 90 s: a par must be at least 150.
+      { ...MISSIONS.c1_s2, bonus: { kind: 'par', seconds: 149, reward } },
+      // c1_m2 has no survive stage, so no forced weather to shelter from.
+      { ...MISSIONS.c1_m2, bonus: { kind: 'no_shelter', reward } },
+      { ...MISSIONS.c3_s1, bonus: { kind: 'elites', count: 0, reward } },
+      { ...MISSIONS.c3_m3, bonus: { kind: 'no_death', reward: {} } },
+      { ...MISSIONS.c3_m3, bonus: { kind: 'no_death', reward: { items: [{ itemId: 'nope' as never, qty: 0 }] } } },
+      { ...MISSIONS.c2_m2, bonus: { kind: 'par', seconds: 240, reward: { resources: { water: 10 } } } },
+    ] as Mission[];
+    expect(bonusProblems(doctored, planetsById)).toEqual([
+      'c4_s2 (no_death): a bonus on a flight mission',
+      'c1_m1 (no_death): no bonus on the tutorial or the finale',
+      'c6_m2 (no_death): no bonus on the tutorial or the finale',
+      "c1_s2 (par): par 149 s is under the timed stages' 90 s + 60",
+      'c1_m2 (no_shelter): no survive stage forces weather',
+      'c3_s1 (elites): asks for 0 elites',
+      'c3_m3 (no_death): an empty reward',
+      'c3_m3 (no_death): unknown item nope',
+      'c3_m3 (no_death): nope ×0',
+      "c2_m2 (par): a main mission's bonus pays resources",
+    ]);
+    // `elites` on a planet with no elites: Thessaly with its chance at zero.
+    const calm = { ...planetsById, thessaly: { ...planetsById.thessaly, surface: { ...planetsById.thessaly.surface, eliteChance: 0 } } };
+    expect(bonusProblems([MISSIONS.c3_s1], calm)).toEqual(['c3_s1 (elites): thessaly spawns no elites']);
+  });
+});
+
+describe('contracts (SPEC-043 §4.3)', () => {
+  it('CONTRACTS is the four of the table, in its order, with their numbers', () => {
+    expect([...CONTRACT_IDS]).toEqual(Object.keys(CONTRACTS));
+    expect(CONTRACT_IDS).toEqual(['elite_surge', 'swarm', 'storm_front', 'no_cover']);
+    expect(CONTRACTS.elite_surge).toMatchObject({ name: 'Elite surge', needsWeather: false, eliteChanceMult: 4 });
+    expect(CONTRACTS.swarm).toMatchObject({ name: 'Swarm', needsWeather: false, populationScale: 1.5 });
+    expect(CONTRACTS.storm_front).toMatchObject({ name: 'Storm front', needsWeather: true, calmScale: 0.25 });
+    expect(CONTRACTS.no_cover).toMatchObject({ name: 'No cover', needsWeather: true, sheltersKeepWeather: false });
+    expect(CONTRACT_REWARD_FRACTION).toBe(0.75);
+    expect(CONTRACT_LITHIUM).toBe(20);
+  });
+
+  it('names stay inside 16 characters and blurbs inside 80', () => {
+    for (const id of CONTRACT_IDS) {
+      const contract = CONTRACTS[id];
+      expect(contract.id).toBe(id);
+      expect(contract.name.length, id).toBeLessThanOrEqual(16);
+      expect(contract.blurb.length, id).toBeLessThanOrEqual(80);
+      expect(contract.blurb.trim(), id).not.toBe('');
     }
   });
 });

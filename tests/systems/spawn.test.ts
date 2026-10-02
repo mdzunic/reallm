@@ -14,6 +14,7 @@ import { makeEnemy, type EnemyEntity } from '@/entities/Enemy';
 import { generateLayout, type Layout } from '@/systems/Layout';
 import {
   DESPAWN_SECONDS,
+  ELITE_CHANCE_CAP,
   FORCED_SPAWN_SECONDS,
   PACK_OVERSHOOT,
   PACK_RADIUS,
@@ -821,5 +822,61 @@ describe('pack aggro (SPEC-041 §4.5)', () => {
     expect(pack[1]?.aggro).toBe(true);
     expect(pack[2]?.aggro).toBe(true);
     expect(stranger.aggro).toBe(false);
+  });
+});
+
+// ------------------------------------------------------------- SPEC-043 §4.4
+
+describe('SpawnDirector — eliteMult and the swarm (SPEC-043 §4.3, §4.4)', () => {
+  /** The share of ambient rolls — a single or a pack's leader — that came up elite. */
+  function eliteRate(mult: number, seconds: number): { rate: number; rolls: number } {
+    const h = harness('cinder4', 'high', 8);
+    h.director.eliteMult = mult;
+    churn(h, seconds);
+    const rolls = rollsOf(h.spawned);
+    return { rate: rolls.filter((roll) => roll[0]?.elite === true).length / rolls.length, rolls: rolls.length };
+  }
+
+  it('eliteMult 2 doubles the ambient elite rate over 10 000 seeded rolls', () => {
+    const base = eliteRate(1, 5600);
+    const doubled = eliteRate(2, 5600);
+    expect(base.rolls).toBeGreaterThanOrEqual(10_000);
+    expect(doubled.rolls).toBeGreaterThanOrEqual(10_000);
+    // Cinder-4's 5 %, and 10 % at ×2 — each within a percentage point.
+    expect(Math.abs(base.rate - 0.05), `${base.rate}`).toBeLessThanOrEqual(0.01);
+    expect(Math.abs(doubled.rate - 0.1), `${doubled.rate}`).toBeLessThanOrEqual(0.01);
+    expect(doubled.rate / base.rate).toBeGreaterThan(1.7);
+    expect(doubled.rate / base.rate).toBeLessThan(2.3);
+  });
+
+  it('the chance is capped at 0.5 however much multiplies it (43-g)', () => {
+    const hive = harness('hive', 'high');
+    expect(hive.director.eliteChance).toBe(PLANETS.hive.surface.eliteChance);
+    // Hard ×2 with elite_surge ×4 on the Hive: 0.08 × 8 = 0.64 → 0.5.
+    hive.director.eliteMult = 2 * 4;
+    expect(hive.director.eliteChance).toBe(ELITE_CHANCE_CAP);
+    expect(ELITE_CHANCE_CAP).toBe(0.5);
+    const capped = eliteRate(40, 5600);
+    expect(Math.abs(capped.rate - 0.5), `${capped.rate}`).toBeLessThanOrEqual(0.02);
+  });
+
+  it('setRamp({ populationScale: 1.5 }) raises the target, still capped by maxEnemies', () => {
+    const high = harness('cinder4', 'high'); // P = 10, maxEnemies 32
+    high.director.setRamp({ populationScale: 1.5, excludeArchetypes: [] });
+    expect(high.director.populationTarget).toBe(15);
+    high.director.setRamp(null);
+    expect(high.director.populationTarget).toBe(10);
+    const low = harness('cinder4', 'low'); // maxEnemies 12
+    low.director.setRamp({ populationScale: 1.5, excludeArchetypes: [] });
+    expect(low.director.populationTarget).toBe(QUALITY.low.maxEnemies);
+  });
+
+  it('the swarm’s field fills to its raised target, and its pack rows still come as packs', () => {
+    const h = harness('cinder4', 'high');
+    h.director.setRamp({ populationScale: 1.5, excludeArchetypes: [] });
+    h.run(60);
+    expect(h.director.alive).toBeGreaterThanOrEqual(15);
+    expect(h.director.alive).toBeLessThanOrEqual(15 + PACK_OVERSHOOT);
+    expect(h.spawned.some((s) => s.packId > 0)).toBe(true);
   });
 });

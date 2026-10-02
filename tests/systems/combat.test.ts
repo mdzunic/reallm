@@ -2093,3 +2093,68 @@ describe('the target frame’s hit memory (SPEC-042 §4.9)', () => {
     expect(h.combat.lastEliteHit.entity).toBeNull();
   });
 });
+
+// ------------------------------------------------------------- SPEC-043
+
+describe('hard (SPEC-043 §4.4)', () => {
+  it('a surface enemy spawns with round(hp × 1.25) on hard — elites and bosses too', () => {
+    const h = harness({ patch: (s) => void (s.meta.difficulty = 'hard') });
+    expect(h.spawn('wurmling', 40, 0).maxHp).toBe(Math.round(ENEMIES.wurmling.hp * 1.25));
+    expect(h.spawn('wurmling', 50, 0).hp).toBe(Math.round(ENEMIES.wurmling.hp * 1.25));
+    expect(h.spawn('wurmling', 60, 0, true).maxHp).toBe(Math.round(ENEMIES.wurmling.hp * TUNING.ELITE_HP_MULT * 1.25));
+    expect(h.spawn('dune_wurm', 70, 0).maxHp).toBe(Math.round(ENEMIES.dune_wurm.hp * 1.25));
+  });
+
+  it('flight-domain enemies keep their HP on hard', () => {
+    const h = harness({ patch: (s) => void (s.meta.difficulty = 'hard') });
+    expect(ENEMIES.hive_interceptor.domain).toBe('flight');
+    expect(h.spawn('hive_interceptor', 40, 0).maxHp).toBe(ENEMIES.hive_interceptor.hp);
+    expect(h.spawn('scav_fighter', 50, 0).maxHp).toBe(ENEMIES.scav_fighter.hp);
+  });
+
+  it('casual and normal spawn at the table HP, as before', () => {
+    for (const difficulty of ['casual', 'normal'] as const) {
+      const h = harness({ patch: (s) => void (s.meta.difficulty = difficulty) });
+      expect(h.spawn('wurmling', 40, 0).maxHp, difficulty).toBe(ENEMIES.wurmling.hp);
+      expect(h.spawn('dune_wurm', 50, 0).maxHp, difficulty).toBe(ENEMIES.dune_wurm.hp);
+    }
+  });
+
+  it('enemyHitDamage is ×1.3 on hard, ×0.7 on casual, and unchanged on normal', () => {
+    const h = harness();
+    const wurmling = h.spawn('wurmling', 50, 0); // damage 9
+    expect(enemyHitDamage(wurmling, flatStats(), 'hard')).toBe(Math.round(9 * 1.3));
+    expect(enemyHitDamage(wurmling, flatStats({ armor: 45 }), 'hard')).toBe(Math.round(9 * 1.3 * (1 - 45 / 145)));
+    expect(enemyHitDamage(wurmling, flatStats(), 'casual')).toBe(Math.round(9 * 0.7));
+    expect(enemyHitDamage(wurmling, flatStats(), 'normal')).toBe(9);
+    const elite = h.spawn('wurmling', 60, 0, true);
+    expect(enemyHitDamage(elite, flatStats(), 'hard')).toBe(Math.round(9 * 1.5 * 1.3));
+  });
+
+  it('a melee hit lands ×1.3 on hard, and leaves windups and weather at casual’s 1 (43-h)', () => {
+    const h = harness({ patch: (s) => void (s.meta.difficulty = 'hard') });
+    const e = h.spawn('wurmling', 1.8, 0);
+    e.aggro = true;
+    e.state = 'windup';
+    e.stateTime = 1;
+    h.step();
+    expect(h.of('player:damaged')[0]?.amount).toBe(Math.round(9 * 1.3));
+    expect(h.world.windupMult).toBe(1);
+    const resist = h.world.stats.hazardResist;
+    const hp = h.world.player.hp;
+    h.world.player.invulnUntil = 0;
+    h.combat.damagePlayer(100, { kind: 'weather', weather: 'heatwave' }, true);
+    expect(hp - h.world.player.hp).toBe(Math.floor(100 * (1 - resist)));
+  });
+
+  it('a switch of difficulty applies from the next spawn; the living keep their HP (43-h)', () => {
+    const h = harness();
+    const before = h.spawn('wurmling', 40, 0);
+    expect(before.maxHp).toBe(ENEMIES.wurmling.hp);
+    h.save.meta.difficulty = 'hard';
+    const after = h.spawn('wurmling', 50, 0);
+    expect(after.maxHp).toBe(Math.round(ENEMIES.wurmling.hp * 1.25));
+    expect(before.maxHp).toBe(ENEMIES.wurmling.hp);
+    expect(before.hp).toBe(ENEMIES.wurmling.hp);
+  });
+});

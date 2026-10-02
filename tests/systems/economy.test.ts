@@ -9,7 +9,18 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { EventBus, type GameEvents } from '@/core/Events';
 import { setLogSink, type LogSink } from '@/core/Log';
 import { newSave, type CharacterCreation, type Save } from '@/core/Save';
-import { COMPANIONS, ITEMS, PLANETS, RECIPES, TUNING, UPGRADES, type RecipeId } from '@/data/index';
+import {
+  COMPANIONS,
+  CONTRACT_LITHIUM,
+  ITEMS,
+  MISSIONS,
+  PLANETS,
+  RECIPES,
+  TUNING,
+  UPGRADES,
+  type MissionDef,
+  type RecipeId,
+} from '@/data/index';
 import {
   Economy,
   INVENTORY_SLOTS,
@@ -1063,5 +1074,99 @@ describe('discount scope (SPEC-039 §4.3)', () => {
     expect(economy.discount('ship')).toBe(0.4);
     expect(economy.price('ship', 'shield', 1)?.tokens).toBe(discountTokens(50, 0.4));
     expect(economy.price('companion', 'field_medic', 1)?.tokens).toBe(discountTokens(30, 0.4));
+  });
+});
+
+// ---------------------------------------------------------------- SPEC-043
+
+describe('resource sources, contracts, bonuses and hard (SPEC-043)', () => {
+  it('resource:collected carries the source of each path: a pickup, a reward, a bonus, a voucher and the subsidy', () => {
+    const { economy, data, events } = world();
+    economy.addResource('wheat', 5, 'pickup');
+    economy.applyRewards({ ...MISSION_SHELL, rewards: { xp: 0, tokens: 0, resources: { water: 7 } } }, false);
+    economy.applyBonus(MISSIONS.c4_s1); // lithium 30
+    economy.setFlag('chapter1_done'); // Vetra's refuel voucher
+    data.resources.oil = 0;
+    economy.applyStationSubsidy();
+    expect(events.of('resource:collected').map(({ resource, source }) => [resource, source])).toEqual([
+      ['wheat', 'pickup'],
+      ['water', 'reward'],
+      ['lithium', 'reward'],
+      ['oil', 'voucher'],
+      ['oil', 'subsidy'],
+    ]);
+  });
+
+  it('applyRewards(def, true, true) pays 75 % and 20 lithium past the cap, and no items, resources or flags', () => {
+    const { economy, data, progression, events } = world(MARINE, (save) => {
+      save.resources.lithium = 400; // a full base hold
+    });
+    economy.applyRewards(
+      {
+        ...MISSION_SHELL,
+        id: 'c1_m2',
+        rewards: { xp: 150, tokens: 15, resources: { oil: 20 }, items: [{ itemId: 'medkit', qty: 3 }], flags: ['c1_oil'] },
+      },
+      true,
+      true,
+    );
+    expect(data.player.xp).toBe(112); // floor(150 × 0.75)
+    expect(progression.tokens).toBe(11); // floor(15 × 0.75)
+    expect(data.resources.lithium).toBe(400 + CONTRACT_LITHIUM);
+    expect(data.resources.oil).toBe(TUNING.START_OIL);
+    expect(economy.count('medkit')).toBe(0);
+    expect(data.progress.flags).toEqual([]);
+    expect(events.of('resource:collected')).toEqual([{ resource: 'lithium', amount: 20, total: 420, source: 'reward' }]);
+    // The contract flag only matters on a replay: a first run pays in full.
+    const first = world();
+    first.economy.applyRewards({ ...MISSION_SHELL, rewards: { xp: 150, tokens: 15 } }, false, true);
+    expect(first.data.player.xp).toBe(150);
+    expect(first.data.resources.lithium).toBe(0);
+  });
+
+  it('applyBonus adds resources past the cap as a reward, and items into the pack', () => {
+    const { economy, data, events, requested } = world(MARINE, (save) => {
+      save.resources.lithium = 395;
+    });
+    economy.applyBonus(MISSIONS.c5_s1); // lithium 40
+    expect(data.resources.lithium).toBe(435);
+    expect(events.of('resource:collected')).toEqual([{ resource: 'lithium', amount: 40, total: 435, source: 'reward' }]);
+    economy.applyBonus(MISSIONS.c1_m2); // frag grenade ×2
+    expect(economy.count('frag_grenade')).toBe(2);
+    expect(requested).toContain('mission');
+    // A mission with no bonus pays nothing.
+    events.clear();
+    economy.applyBonus(MISSIONS.c1_m1);
+    expect(events.emitted).toEqual([]);
+  });
+
+  it('applyBonus on a full pack emits item:noRoom and the toast, for the surface to spill (43-i)', () => {
+    const { economy, events } = world(MARINE, fillInventory);
+    economy.applyBonus(MISSIONS.c3_m2); // landmine ×3
+    expect(economy.count('landmine')).toBe(0);
+    expect(events.of('item:noRoom')).toEqual([{ itemId: 'landmine', qty: 3 }]);
+    expect(events.toasts()).toEqual([noRoomText(ITEMS.landmine, 3)]);
+  });
+
+  it('applyDeathPenalty on hard takes a fifth of every resource, read at death (43-h)', () => {
+    const { economy, data, events } = world({ ...MARINE, difficulty: 'hard' }, (save) => {
+      save.resources = { oil: 100, wheat: 55, water: 9, lithium: 4 };
+    });
+    expect(data.meta.difficulty).toBe('hard');
+    expect(economy.applyDeathPenalty()).toEqual({ oil: 20, wheat: 11, water: 1 });
+    expect(data.resources).toEqual({ oil: 80, wheat: 44, water: 8, lithium: 4 });
+    expect(events.of('resource:spent').map((entry) => entry.reason)).toEqual(['death', 'death', 'death']);
+    // Switched to normal: the next death is a tenth.
+    data.meta.difficulty = 'normal';
+    expect(economy.applyDeathPenalty()).toEqual({ oil: 8, wheat: 4 });
+  });
+
+  it('the side rewards of §4.1 pay on a first run through the same door', () => {
+    const { economy, data } = world();
+    economy.applyRewards(MISSIONS.c3_s1 as MissionDef, false);
+    expect(data.resources.lithium).toBe(30);
+    expect(data.progress.flags).toContain('scaffold_secret');
+    economy.applyRewards(MISSIONS.c1_s2 as MissionDef, false);
+    expect(economy.count('landmine')).toBe(2);
   });
 });
