@@ -11,10 +11,9 @@
 // test, not the test. Times from these reports replace the ones on file;
 // tests the suite no longer lists are dropped; tests the reports did not run
 // keep their old time.
-import { spawnSync } from 'node:child_process';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
-import { REPO, TIMINGS, reportTests, testKey } from './shard.mjs';
+import { TIMINGS, listSuite, reportTests, testKey } from './shard.mjs';
 
 /** `{ key: seconds }` from Playwright JSON run reports, fastest attempt, 0.1 s. */
 export function timingsFrom(reports) {
@@ -47,16 +46,7 @@ if (process.argv[1] !== undefined && fileURLToPath(import.meta.url) === process.
     process.exit(1);
   }
   const fresh = timingsFrom(files.map((file) => JSON.parse(readFileSync(file, 'utf8'))));
-  const listed = spawnSync('npx', ['playwright', 'test', '--list', '--reporter=json'], {
-    cwd: REPO,
-    encoding: 'utf8',
-    maxBuffer: 64 * 1024 * 1024,
-  });
-  if (listed.status !== 0) {
-    console.error(`playwright test --list failed:\n${listed.stderr}`);
-    process.exit(1);
-  }
-  const keys = reportTests(JSON.parse(listed.stdout)).map((t) => testKey(t.project, t.file, t.titles));
+  const keys = reportTests(listSuite()).map((t) => testKey(t.project, t.file, t.titles));
   const old = JSON.parse(readFileSync(TIMINGS, 'utf8')).tests;
   const tests = mergeTimings(old, fresh, keys);
   writeFileSync(TIMINGS, `${JSON.stringify({ tests }, null, 2)}\n`);
