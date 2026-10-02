@@ -66,10 +66,14 @@ const GUIDANCE_CHOICES = [
   ['off', 'Off'],
 ] as const satisfies readonly (readonly [GuidanceLevel, string])[];
 
-/** SPEC-038 §4.6: the difficulty row's segments, in the creation screen's order. */
+/**
+ * SPEC-038 §4.6: the difficulty row's segments, in the creation screen's order;
+ * SPEC-043 §4.4 adds the third, `Hard`.
+ */
 const DIFFICULTY_CHOICES = [
   ['normal', 'Normal'],
   ['casual', 'Casual'],
+  ['hard', 'Hard'],
 ] as const satisfies readonly (readonly [Difficulty, string])[];
 
 /** SPEC-034 §4.13: what an import into the slot in play says on its way out. */

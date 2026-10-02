@@ -16,6 +16,10 @@
 // boss reveal too, whose caption is text enough. Only a beat that speaks, the
 // ending with its own lines, has the layer let go while it runs; the banner
 // shows once the beat is over either way.
+//
+// SPEC-043 §4.6: up to three optional rows sit under the rewards line — the
+// bonus (earned or missed), the contract, and the run's time — each hidden
+// when `completionLines` left it null.
 import type { CompletionLines } from '@/systems/UiHelpers';
 import type { DialogueUI } from '@/ui/DialogueUI';
 import { el, SHORT_SCREEN_QUERY, testId, type UiRoot } from '@/ui/dom';
@@ -52,6 +56,10 @@ export class MissionBanner {
   readonly #root: HTMLDivElement;
   readonly #title: HTMLParagraphElement;
   readonly #rewards: HTMLParagraphElement;
+  /** SPEC-043 §4.6: the bonus, contract and time rows. */
+  readonly #bonus: HTMLParagraphElement;
+  readonly #contract: HTMLParagraphElement;
+  readonly #time: HTMLParagraphElement;
   readonly #next: HTMLParagraphElement;
   readonly #queue: CompletionLines[] = [];
   /** The banner on screen, or `null`. */
@@ -76,10 +84,21 @@ export class MissionBanner {
     this.#beatSpeaks = deps.beatSpeaks ?? ((): boolean => false);
     this.#title = testId(el('p', 'mission-banner-title'), 'mission-complete-title');
     this.#rewards = testId(el('p', 'mission-banner-rewards'), 'mission-complete-rewards');
+    this.#bonus = testId(el('p', 'mission-banner-extra mission-banner-bonus is-hidden'), 'mission-complete-bonus');
+    this.#contract = testId(el('p', 'mission-banner-extra mission-banner-contract is-hidden'), 'mission-complete-contract');
+    this.#time = testId(el('p', 'mission-banner-extra mission-banner-time is-hidden'), 'mission-complete-time');
     this.#next = testId(el('p', 'mission-banner-next'), 'mission-complete-next');
     this.#root = testId(el('div', 'mission-banner panel is-hidden'), 'mission-complete');
     this.#root.setAttribute('role', 'status');
-    this.#root.append(el('p', 'mission-banner-head', 'Mission complete'), this.#title, this.#rewards, this.#next);
+    this.#root.append(
+      el('p', 'mission-banner-head', 'Mission complete'),
+      this.#title,
+      this.#rewards,
+      this.#bonus,
+      this.#contract,
+      this.#time,
+      this.#next,
+    );
     // §4.1: the last row of the top-centre stack, so `--hud-tc-h` counts it and
     // the short-screen dialogue docks under it. Looked up once, here.
     const stack = ui.root.querySelector<HTMLElement>('.hud .hud-tc');
@@ -159,6 +178,9 @@ export class MissionBanner {
     this.#fading = 0;
     this.#title.textContent = lines.title;
     this.#rewards.textContent = lines.rewards;
+    setRow(this.#bonus, lines.bonus ?? null);
+    setRow(this.#contract, lines.contract ?? null);
+    setRow(this.#time, lines.time ?? null);
     this.#next.textContent = lines.next ?? '';
     this.#next.classList.toggle('is-hidden', lines.next === null);
     this.#root.classList.remove('is-hidden', 'is-fading');
@@ -198,4 +220,10 @@ export class MissionBanner {
   readonly #onMedia = (event: MediaQueryListEvent): void => {
     this.#short = event.matches;
   };
+}
+
+/** SPEC-043 §4.6: an optional row shows its text, or hides when there is none. */
+function setRow(row: HTMLParagraphElement, text: string | null): void {
+  row.textContent = text ?? '';
+  row.classList.toggle('is-hidden', text === null);
 }

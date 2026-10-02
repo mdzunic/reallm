@@ -336,6 +336,8 @@ describe('the settings object (SPEC-007 §3)', () => {
       zonesShown: 0,
       // SPEC-042 §4.10: vibration on, where the touch scheme has a motor.
       haptics: true,
+      // SPEC-043 §4.5: no mission has a best time on a new device.
+      bestTimes: {},
     });
   });
 
@@ -695,5 +697,30 @@ describe('the benchmark record, frameRate and adaptiveQuality (SPEC-040 §4.1, �
     for (const raw of ['"false"', '0', 'null']) {
       expect(createSettings(fakeStorage(`{"adaptiveQuality":${raw}}`).storage).get().adaptiveQuality, raw).toBe(true);
     }
+  });
+});
+
+describe('bestTimes (SPEC-043 §4.5)', () => {
+  it('defaults to {} and round-trips whole seconds per mission through the merge write', () => {
+    expect(defaultSettings().bestTimes).toEqual({});
+    const fake = fakeStorage();
+    const settings = createSettings(fake.storage);
+    expect(settings.get().bestTimes).toEqual({});
+    settings.set({ bestTimes: { c1_m2: 161, c1_s1: 1, c6_m1: 86_400 } });
+    expect(stored(fake)).toMatchObject({ bestTimes: { c1_m2: 161, c1_s1: 1, c6_m1: 86_400 } });
+    expect(createSettings(fake.storage).get().bestTimes).toEqual({ c1_m2: 161, c1_s1: 1, c6_m1: 86_400 });
+  });
+
+  it('keeps only mission ids with integers in 1…86 400, on load and on set (43-l)', () => {
+    const raw = JSON.stringify({
+      bestTimes: { c1_m2: 161, nope: 30, c1_m3: '90', c2_m1: 12.5, c2_m2: 0, c2_m3: 86_401, c3_m1: -5, c3_m2: null },
+    });
+    expect(createSettings(fakeStorage(raw).storage).get().bestTimes).toEqual({ c1_m2: 161 });
+    for (const value of ['[161]', '"fast"', 'null', '12']) {
+      expect(createSettings(fakeStorage(`{"bestTimes":${value}}`).storage).get().bestTimes, value).toEqual({});
+    }
+    const settings = createSettings(fakeStorage().storage);
+    settings.set({ bestTimes: { c1_m2: 99, c1_s1: 'x', c9_m9: 4 } as unknown as Settings['bestTimes'] });
+    expect(settings.get().bestTimes).toEqual({ c1_m2: 99 });
   });
 });

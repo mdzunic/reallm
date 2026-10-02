@@ -27,7 +27,10 @@ import type { Rng } from '@/core/Rng';
 import {
   BOSS_REVEALS,
   CLASSES,
+  CONTRACT_IDS,
+  CONTRACTS,
   DIALOGUE,
+  DIFFICULTY_RULES,
   ENEMIES,
   FOLLOWERS,
   HINTS,
@@ -43,12 +46,14 @@ import {
   TUNING,
   WAVES,
   type BossRevealDef,
+  type ContractId,
   type Dialogue,
   type DialogueId,
   type EnemyId,
   type HintPlaceholder,
   type Item,
   type ItemId,
+  type MissionBonus,
   type MissionDef,
   type MissionId,
   type PlanetDef,
@@ -110,6 +115,7 @@ import {
   cameraDistance,
   cameraFov,
   completionLines,
+  contractLabel,
   deathCause,
   deathTip,
   hasNodeRadar,
@@ -193,6 +199,8 @@ const RAMP_PLANET: PlanetId = 'cinder4';
 const RAMP_MISSION: MissionId = 'c1_m1';
 /** §4.7: the ambient field the ramp keeps, and the archetype it drops. */
 const RAMP: SpawnRamp = { populationScale: 0.5, excludeArchetypes: ['rusher'] };
+/** SPEC-043 §4.3: the `swarm` contract's ramp — half as many hostiles again, nobody excluded. */
+const SWARM_RAMP: SpawnRamp = { populationScale: CONTRACTS.swarm.populationScale, excludeArchetypes: [] };
 
 // --------------------------------------------------------- SPEC-035 §4.5
 
@@ -771,6 +779,18 @@ export class SurfaceScene extends UiScene<'surface'> {
   // field of view are untouched.
   /** SPEC-035 §4.7: true while the first-landing ramp is in force. */
   #ramp = false;
+  /**
+   * SPEC-043 §4.3: the contract modifiers in force on this landing, each once,
+   * in `CONTRACT_IDS` order — recomputed from `missions.activeContracts()` on
+   * entry and on every accept, completion and abandon.
+   */
+  #contracts: ContractId[] = [];
+  /** `elite_surge` in force: the director's `eliteMult` takes its ×4. */
+  #eliteSurge = false;
+  /** `no_cover` in force: shelters no longer keep the weather off. */
+  #noCover = false;
+  /** SPEC-043 §4.6: the last `mission:bonus` of each mission, for the banner it precedes. */
+  readonly #judged = new Map<MissionId, { bonus: MissionBonus; earned: boolean }>();
   // SPEC-035 §4.11 — the storm loop. It is shipped and was never played; the
   // scene owns it, like the other continuous channels (SPEC-006 §4.2).
   #stormVoice: Voice | null = null;
@@ -1018,7 +1038,9 @@ export class SurfaceScene extends UiScene<'surface'> {
     spawn.setObjectiveEnemies(missions.objectiveEnemies());
     this.#spawn = spawn;
 
-    const weather = new Weather(planet, visit.fork('weather'), bus);
+    // SPEC-043 §4.3: a landing that starts under `storm_front` starts on a short calm.
+    const stormFront = missions.activeContracts().includes('storm_front');
+    const weather = new Weather(planet, visit.fork('weather'), bus, stormFront ? CONTRACTS.storm_front.calmScale : 1);
     this.#weather = weather;
 
     // SPEC-035 §4.7: the first landing on Cinder-4 ramps in — half the ambient
@@ -1026,6 +1048,8 @@ export class SurfaceScene extends UiScene<'surface'> {
     // ends with `c1_m1`, so it is observable and saved (35-e, 35-f).
     this.#ramp = planet.id === RAMP_PLANET && !(save.progress.missionsDone as readonly string[]).includes(RAMP_MISSION);
     this.#applyRamp();
+    // SPEC-043 §4.3: the contracts this landing's replays run as.
+    this.#applyContracts();
 
     const pickups = new Pickups(economy, bus);
     this.#pickups = pickups;
@@ -1615,7 +1639,11 @@ export class SurfaceScene extends UiScene<'surface'> {
 
     // §4.5: spawning runs — a modal line or the ending choice returned above.
     // SPEC-016 D-21: the ambient spawner adds nothing while a perf run holds
-    // the population itself.
+    // the population itself. SPEC-043 §4.4: the elite roll reads the difficulty
+    // live — a switch in Settings reaches the next spawn — times the surge.
+    const difficulty = this.#save?.meta.difficulty ?? 'normal';
+    spawn.eliteMult =
+      DIFFICULTY_RULES[difficulty].eliteChanceMult * (this.#eliteSurge ? CONTRACTS.elite_surge.eliteChanceMult : 1);
     spawn.update(dt, world.player, this.#frustumXZ, this.#stress === null);
 
     for (const drop of combat.drops) pickups.spawn(drop);
@@ -2099,6 +2127,9 @@ export class SurfaceScene extends UiScene<'surface'> {
     info['weatherDps'] = Math.round((this.#weather?.exposureDps ?? 0) * 100) / 100;
     info['population'] = this.#spawn?.populationTarget ?? 0;
     info['difficulty'] = this.#save?.meta.difficulty ?? 'normal';
+    // SPEC-043 §4.3: the contract modifiers in force, e.g. `elite_surge+no_cover`.
+    info['contract'] = this.#contracts.length === 0 ? '-' : this.#contracts.join('+');
+    info['eliteChance'] = Math.round((this.#spawn?.eliteChance ?? 0) * 1000) / 1000;
     // SPEC-041 §3: the seal, the last boss move that landed, the live packs and
     // the elite plates on screen.
     info['sealed'] = this.#arena?.sealed === true ? 1 : 0;
@@ -2271,10 +2302,56 @@ export class SurfaceScene extends UiScene<'surface'> {
     this.#updateOccluders(dt, p);
   }
 
-  /** SPEC-035 §4.7: push `#ramp` into the spawn director and the weather. */
+  /**
+   * SPEC-035 §4.7: push `#ramp` into the spawn director and the weather.
+   * SPEC-043 §4.3: with no first-landing ramp, a `swarm` in force is the
+   * director's ramp; `setRamp(null)` once it leaves.
+   */
   #applyRamp(): void {
-    this.#spawn?.setRamp(this.#ramp ? RAMP : null);
+    this.#spawn?.setRamp(this.#ramp ? RAMP : this.#contracts.includes('swarm') ? SWARM_RAMP : null);
     this.#weather?.holdCalm(this.#ramp);
+  }
+
+  /**
+   * SPEC-043 §4.3: the set in force, from the active replays' contracts — each
+   * modifier once however many missions carry it (43-c), and gone when its
+   * mission completes or is abandoned. `elite_surge` is read by the step's
+   * `eliteMult`; `swarm` is the ramp; `storm_front` scales the calm windows
+   * rolled from now on (43-e); `no_cover` opens the shelters to the weather.
+   */
+  #applyContracts(): void {
+    const missions = this.#missions;
+    if (missions === null) return;
+    const active = missions.activeContracts();
+    this.#contracts = CONTRACT_IDS.filter((id) => active.includes(id));
+    this.#eliteSurge = this.#contracts.includes('elite_surge');
+    const noCover = this.#contracts.includes('no_cover');
+    const coverChanged = noCover !== this.#noCover;
+    this.#noCover = noCover;
+    this.#applyRamp();
+    this.#weather?.setCalmScale(this.#contracts.includes('storm_front') ? CONTRACTS.storm_front.calmScale : 1);
+    // A shelter the player stands in starts or stops pinning the storm's
+    // slow-down the moment `no_cover` comes or goes.
+    if (coverChanged && this.#insideShelter !== null) this.#combat?.setWeatherMoveMult(this.#weatherMoveMult());
+  }
+
+  /**
+   * SPEC-030 D-6: the storm's move multiplier, pinned at 1 inside a shelter —
+   * unless `no_cover` is in force (SPEC-043 §4.3), when the weather gets in.
+   */
+  #weatherMoveMult(): number {
+    const current = this.#weather?.current ?? null;
+    if (current === null || (this.#insideShelter !== null && !this.#noCover)) return 1;
+    return WEATHER_EFFECTS[current].moveMult;
+  }
+
+  /** SPEC-043 §4.5: a clean run's time, kept when it is this device's first or its fastest (43-j). */
+  #recordBest(id: MissionId, seconds: number): void {
+    const settings = this.services.settings;
+    const times = settings.get().bestTimes;
+    const stored = times[id];
+    if (stored !== undefined && stored <= seconds) return;
+    settings.set({ bestTimes: { ...times, [id]: seconds } });
   }
 
   /**
@@ -2393,12 +2470,12 @@ export class SurfaceScene extends UiScene<'surface'> {
 
     // D-6: entering pins the move multiplier at 1; leaving restores the storm
     // active at that moment (1 when calm) — never a value captured on entry.
+    // SPEC-043 §4.3: under `no_cover` the pin is off, inside and out.
     if (inside !== null && was === null) {
-      combat.setWeatherMoveMult(1);
+      combat.setWeatherMoveMult(this.#weatherMoveMult());
       this.#requestTip('shelter'); // §4.11: once, on the first entry
     } else if (inside === null && was !== null) {
-      const current = this.#weather?.current ?? null;
-      combat.setWeatherMoveMult(current === null ? 1 : WEATHER_EFFECTS[current].moveMult);
+      combat.setWeatherMoveMult(this.#weatherMoveMult());
     }
 
     // AC-25: hidden ⇔ inside ∧ no shot for REVEAL_AFTER_SHOT.
@@ -2442,8 +2519,9 @@ export class SurfaceScene extends UiScene<'surface'> {
     // planet's multiplier on top of `dps`, which keeps its SPEC-012 meaning.
     const dps = weather.exposureDps;
     // SPEC-030 D-7: inside a shelter, weather damage is skipped entirely —
-    // cycled storm, forced storm and avalanche burst alike (AC-20).
-    if (dps > 0 && world.player.alive && weather.current !== null && this.#insideShelter === null) {
+    // cycled storm, forced storm and avalanche burst alike (AC-20). SPEC-043
+    // §4.3 (43-f): not under `no_cover` — the storm reaches the player inside.
+    if (dps > 0 && world.player.alive && weather.current !== null && (this.#insideShelter === null || this.#noCover)) {
       // Combat applies hazardResist and the hazard-immunity window (§4.6).
       this.#combat?.damagePlayer(dps * dt, { kind: 'weather', weather: weather.current }, true);
     }
@@ -2501,6 +2579,8 @@ export class SurfaceScene extends UiScene<'surface'> {
     this.#ctxPlayer.x = world.player.x;
     this.#ctxPlayer.z = world.player.z;
     this.#ctxPlayer.alive = world.player.alive;
+    // SPEC-043 §4.2: inside a cave or a wreck — what forfeits `no_shelter`.
+    ctx.sheltered = this.#insideShelter !== null;
     if (world.follower === null) {
       ctx.follower = null;
     } else {
@@ -3722,9 +3802,14 @@ export class SurfaceScene extends UiScene<'surface'> {
     const rows: HTMLElement[] = [];
     rows.push(el('p', 'terminal-title', 'PAD TERMINAL'));
 
+    const save = this.#save;
+    // SPEC-043 §4.3: a replay this landing runs as a contract says so — read
+    // with `visits[planet]`, the landing the scene counted on entry.
+    const landing = save?.progress.visits[this.#planet.id] ?? 0;
     for (const def of missions.available()) {
       const replay = missions.isReplay(def.id as MissionId);
-      const label = replay ? `${def.title} (replay · 50%)` : def.title;
+      const contract = replay && save !== null ? contractLabel(save, def, landing) : null;
+      const label = contract !== null ? `${def.title} (${contract})` : replay ? `${def.title} (replay · 50%)` : def.title;
       rows.push(
         h(
           'div',
@@ -3748,7 +3833,6 @@ export class SurfaceScene extends UiScene<'surface'> {
     }
     // 12-k: a terminal with nothing on it reads as a broken terminal. Say what
     // is holding the planet's work back, and where that work is taken.
-    const save = this.#save;
     if (rows.length === 1 && save !== null) rows.push(el('p', 'terminal-empty', padEmptyText(save, this.#planet.id)));
 
     rows.push(
@@ -5164,7 +5248,8 @@ export class SurfaceScene extends UiScene<'surface'> {
           this.#stormTarget = effects === null ? 0 : 1;
           // SPEC-030 30-m / D-6: a change while the player is inside keeps
           // the multiplier at 1; leaving restores the storm live then.
-          const mult = effects === null || this.#insideShelter !== null ? 1 : effects.moveMult;
+          // SPEC-043 §4.3: `no_cover` lets the storm's slow-down in too.
+          const mult = effects === null || (this.#insideShelter !== null && !this.#noCover) ? 1 : effects.moveMult;
           this.#combat?.setWeatherMoveMult(mult);
           // SPEC-035 §4.11: the storm loop follows the storm, over a 0.5 s fade.
           this.#stormLoopTarget = weather === null ? 0 : 1;
@@ -5248,7 +5333,23 @@ export class SurfaceScene extends UiScene<'surface'> {
         },
         this,
       ),
-      bus.on('mission:accepted', () => this.#syncMissionStages(), this),
+      bus.on(
+        'mission:accepted',
+        () => {
+          this.#syncMissionStages();
+          this.#applyContracts(); // SPEC-043 §4.3
+        },
+        this,
+      ),
+      // SPEC-043 §4.6: kept for the banner the completion right behind it builds.
+      bus.on(
+        'mission:bonus',
+        ({ id, earned }) => {
+          const bonus = MISSION_TABLE[id].bonus;
+          if (bonus !== undefined) this.#judged.set(id, { bonus, earned });
+        },
+        this,
+      ),
       // SPEC-027 §4.6: progress on the tracked mission is progress, so the
       // escalation clock and any route it drew start over (AC-52).
       bus.on(
@@ -5294,7 +5395,7 @@ export class SurfaceScene extends UiScene<'surface'> {
       ),
       bus.on(
         'mission:completed',
-        ({ id, replay }) => {
+        ({ id, replay, contract, seconds }) => {
           // SPEC-035 §4.7: the tutorial is over, so the ramp is too. A replay
           // does not bring it back — the mission is already in `missionsDone`.
           if (id === RAMP_MISSION && this.#ramp) {
@@ -5305,6 +5406,13 @@ export class SurfaceScene extends UiScene<'surface'> {
           // leaves rather than being restarted.
           this.#dismissDefendWave = true;
           this.#syncMissionStages();
+          // SPEC-043 §4.3: its contract leaves with it — and a chapter flag it
+          // set may have made another active replay one (43-d).
+          this.#applyContracts();
+          // SPEC-043 §4.5: a clean run's time, on this device.
+          if (seconds !== undefined) this.#recordBest(id, seconds);
+          const judged = this.#judged.get(id) ?? null;
+          this.#judged.delete(id);
           // SPEC-034 §4.10: the trip's list the station debriefs from.
           const data = this.#save;
           if (data !== null) LINE_LEDGER.noteCompleted(data, id);
@@ -5320,7 +5428,11 @@ export class SurfaceScene extends UiScene<'surface'> {
           // follows its chain; otherwise the banner goes up first and the
           // line waits behind its hold.
           if (!held) {
-            const lines = completionLines(MISSION_TABLE[id], replay, this.#nextOffer());
+            const lines = completionLines(MISSION_TABLE[id], replay, this.#nextOffer(), {
+              contract: contract ?? null,
+              bonus: judged,
+              seconds: seconds ?? null,
+            });
             if (dialogueId !== undefined && DIALOGUE_TABLE[dialogueId].modal === true) {
               this.#playThenBanner(dialogueId, lines);
             } else {
@@ -5332,7 +5444,14 @@ export class SurfaceScene extends UiScene<'surface'> {
         },
         this,
       ),
-      bus.on('mission:abandoned', () => this.#syncMissionStages(), this),
+      bus.on(
+        'mission:abandoned',
+        () => {
+          this.#syncMissionStages();
+          this.#applyContracts(); // SPEC-043 §4.3
+        },
+        this,
+      ),
       bus.on(
         'mission:stageReset',
         ({ id, stage, reason }) => {
