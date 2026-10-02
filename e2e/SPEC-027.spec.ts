@@ -95,7 +95,7 @@ test('1. the tracker names the tracked mission, its stage and the distance to th
   await acceptFirstMission(page);
   // D-2: the title is in the DOM as the data writes it; CSS does the shouting.
   await expect(tracker(page)).toContainText(/dry land/i);
-  await expect(tracker(page)).toContainText(/stage \d\/3/);
+  await expect(tracker(page)).toContainText(/Stage \d\/3/);
   await expect(page.locator('[data-testid="objective-tracker"] .tracker-dist')).toContainText(/\d+ m/);
   // AC-17: the focus row *is* the objective line, and it is the only one.
   await expect(page.locator('[data-testid="hud"] .hud-objective')).toHaveCount(1);
