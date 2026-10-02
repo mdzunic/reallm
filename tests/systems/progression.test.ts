@@ -16,6 +16,7 @@ import {
   cumulativeXp,
   levelForXp,
   levelUpText,
+  LEVEL_UP_TOAST_MS,
   xpToNext,
   type EventSink,
 } from '@/systems/Progression';
@@ -170,7 +171,9 @@ describe('Progression.addXp (§4.1)', () => {
     new Progression(data, sink).addXp(150, 'kill:dust_skitter');
 
     expect(seen).toEqual([{ tokens: 25, hp: hpBefore + 4, level: 2 }]);
-    expect(events.of('ui:toast')).toEqual([{ kind: 'good', text: levelUpText(2, 25) }]);
+    // SPEC-042 §4.7: the level-up toast stays up for 4 s.
+    expect(events.of('ui:toast')).toEqual([{ kind: 'good', text: levelUpText(2, 25), ms: 4000 }]);
+    expect(LEVEL_UP_TOAST_MS).toBe(4000);
     expect(levelUpText(2, 25)).toBe('Level 2 — +25 tokens · +4 HP · +2% damage');
   });
 

@@ -334,6 +334,8 @@ describe('the settings object (SPEC-007 §3)', () => {
       pauseOnBlur: true,
       // SPEC-036 §4.12: no landing has shown the zone ghosts yet.
       zonesShown: 0,
+      // SPEC-042 §4.10: vibration on, where the touch scheme has a motor.
+      haptics: true,
     });
   });
 
@@ -527,6 +529,20 @@ describe('guidance and tipsSeen (SPEC-027 AC-72, AC-73, AC-74)', () => {
     settings.set({ guidance: 'off', tipsSeen: ['move'] });
     expect(stored(fake)).toMatchObject({ guidance: 'off', tipsSeen: ['move'] });
     expect(createSettings(fake.storage).get()).toMatchObject({ guidance: 'off', tipsSeen: ['move'] });
+  });
+});
+
+describe('haptics (SPEC-042 §4.10)', () => {
+  it('defaults on, round-trips, and a stored non-boolean reads the default', () => {
+    expect(defaultSettings().haptics).toBe(true);
+    const fake = fakeStorage();
+    const settings = createSettings(fake.storage);
+    expect(settings.get().haptics).toBe(true);
+    settings.set({ haptics: false });
+    expect(stored(fake)).toMatchObject({ haptics: false });
+    expect(createSettings(fake.storage).get().haptics).toBe(false);
+    expect(createSettings(fakeStorage('{"haptics":"yes"}').storage).get().haptics).toBe(true);
+    expect(createSettings(fakeStorage('{"haptics":0}').storage).get().haptics).toBe(true);
   });
 });
 

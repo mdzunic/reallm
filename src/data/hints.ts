@@ -156,6 +156,32 @@ export const TIPS: Readonly<Record<TipId, TipText>> = {
   },
 };
 
+/**
+ * SPEC-042 §4.5 — the death overlay's one tip, by id. `deathTip`
+ * (systems/UiHelpers.ts) picks the first row that applies to the cause; the
+ * wording pairs like the tips above, ≤ 160 characters (content test).
+ */
+export type DeathTipId = 'shelter' | 'autofire' | 'heal' | 'craft';
+
+export const DEATH_TIPS: Readonly<Record<DeathTipId, TipText>> = {
+  shelter: {
+    keyboard: 'Storms cannot reach you in caves and wrecks.',
+    touch: 'Storms cannot reach you in caves and wrecks.',
+  },
+  autofire: {
+    keyboard: 'Auto-fire is off — hold Space or the left button to fire, or turn it on in Settings.',
+    touch: 'Auto-fire is off — turn it on in Settings.',
+  },
+  heal: {
+    keyboard: 'Heal with Q before the bar turns red.',
+    touch: 'Tap the heal slot before the bar turns red.',
+  },
+  craft: {
+    keyboard: 'Craft medkits at the station: wheat and water.',
+    touch: 'Craft medkits at the station: wheat and water.',
+  },
+};
+
 export interface HintText {
   /** Shown at stuck level 2; may carry placeholders. */
   readonly nudge: string;

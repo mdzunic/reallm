@@ -1291,7 +1291,7 @@ describe('the boot manifest stays five files (SPEC-019 AC-34 … AC-36, PLAN R6-
 
 // ------------------------------------------------------------- SPEC-027 §4.10
 
-import { HINTS, HINT_PLACEHOLDERS, MISSION_HINTS, TIPS, TIP_IDS } from '@/data/index';
+import { DEATH_TIPS, HINTS, HINT_PLACEHOLDERS, MISSION_HINTS, TIPS, TIP_IDS } from '@/data/index';
 
 /** Every line the guidance layer can print, with the key that produced it. */
 function guidanceTemplates(): Array<[string, string]> {
@@ -1309,6 +1309,22 @@ function guidanceTemplates(): Array<[string, string]> {
   }
   return out;
 }
+
+describe('the death tips (SPEC-042 §4.5)', () => {
+  it('every DEATH_TIPS entry has both wordings, each at most 160 characters', () => {
+    const ids = Object.keys(DEATH_TIPS).sort();
+    expect(ids).toEqual(['autofire', 'craft', 'heal', 'shelter']);
+    for (const [id, tip] of Object.entries(DEATH_TIPS)) {
+      expect(tip.keyboard.length, `${id}.keyboard`).toBeGreaterThan(0);
+      expect(tip.touch.length, `${id}.touch`).toBeGreaterThan(0);
+      expect(tip.keyboard.length, `${id}.keyboard`).toBeLessThanOrEqual(160);
+      expect(tip.touch.length, `${id}.touch`).toBeLessThanOrEqual(160);
+    }
+    // §4.5's table: the two rows that name a key or a slot differ by scheme.
+    expect(DEATH_TIPS.heal.touch).not.toBe(DEATH_TIPS.heal.keyboard);
+    expect(DEATH_TIPS.autofire.touch).not.toBe(DEATH_TIPS.autofire.keyboard);
+  });
+});
 
 describe('tips and hints (SPEC-027 AC-81..AC-84)', () => {
   it('every tip and hint is at most 160 characters', () => {

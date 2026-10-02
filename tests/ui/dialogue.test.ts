@@ -37,3 +37,29 @@ describe('DialogueDef.next (SPEC-034 §4.7)', () => {
     expect(source).toMatch(/#playNext[\s\S]*?if \(set\.has\(id\)\) return;/);
   });
 });
+
+describe('the banner\'s hold (SPEC-042 §4.1)', () => {
+  // The layer is DOM, so the rule is read off its source, as the queue rule
+  // above is; `e2e/SPEC-042.spec.ts` case 1 drives it for real.
+  const source = SOURCES['../../src/ui/DialogueUI.ts'] as string;
+
+  it('#next() starts no queued job while held', () => {
+    expect(source).toMatch(/#next\(\): void \{\s*const job = this\.#held \? null : \(this\.#queue\.shift\(\) \?\? null\);/);
+  });
+
+  it('setHeld(false) starts the next job at once — unless one is still on screen', () => {
+    expect(source).toMatch(/setHeld\(held: boolean\): void \{[\s\S]*?this\.#held = held;\s*if \(!held && this\.#active === null\) this\.#next\(\);/);
+  });
+
+  it('a scene change lets the hold go with the queue', () => {
+    expect(source).toMatch(/'scene:transition',\s*\(\) => \{\s*this\.#held = false;\s*this\.#clear\(\);/);
+  });
+
+  it('the banner holds from its push and lets go when its last queued banner has gone', () => {
+    const banner = SOURCES['../../src/ui/MissionBanner.ts'] as string;
+    expect(banner).toMatch(/push\(lines: CompletionLines\): void \{[\s\S]*?this\.#holdDialogue\(true\);/);
+    expect(banner).toMatch(/#finish\(\): void \{[\s\S]*?if \(this\.#queue\.length > 0\) return;[\s\S]*?this\.#holdDialogue\(false\);/);
+    expect(banner).toContain('export const BANNER_SECONDS = 4.0;');
+    expect(banner).toContain('export const BANNER_FADE_MS = 150;');
+  });
+});

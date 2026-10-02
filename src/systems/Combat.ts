@@ -356,6 +356,23 @@ export interface CombatWorld {
   windupMult?: number;
 }
 
+/**
+ * SPEC-042 §3: the last enemy a player's shot or blast damaged — the entity,
+ * its spawn id (a recycled pool slot carries a new one, 42-l) and the world
+ * time. `entity` is `null` until the first hit.
+ */
+export interface HitMemory {
+  entity: EnemyEntity | null;
+  id: number;
+  at: number;
+}
+
+function remember(memory: HitMemory, e: EnemyEntity, time: number): void {
+  memory.entity = e;
+  memory.id = e.id;
+  memory.at = time;
+}
+
 /** What `killEnemy` rolled; SPEC-012 drains these into pickup entities (§4.7). */
 export type LootDrop =
   | { kind: 'resource'; resource: ResourceId; amount: number; x: number; z: number }
@@ -429,6 +446,15 @@ export class Combat {
    */
   readonly menderPulses: { x: number; z: number }[] = Array.from({ length: MENDER_PULSE_CAP }, () => ({ x: 0, z: 0 }));
   menderPulseCount = 0;
+
+  /**
+   * SPEC-042 §4.9: the last non-boss enemy the player's shots or blasts
+   * damaged — written in place, so the target frame reads a field, not the DOM.
+   * The boss has its own frame, and the drone's shots write neither.
+   */
+  readonly lastHit: HitMemory = { entity: null, id: 0, at: -Infinity };
+  /** The same, for elites only — an elite hit in the window wins the frame. */
+  readonly lastEliteHit: HitMemory = { entity: null, id: 0, at: -Infinity };
 
   /** SPEC-041 §3: the last boss move that landed, or `null` (`sceneInfo.bossMove`). */
   get lastBossMove(): BossMove['id'] | null {
@@ -657,6 +683,12 @@ export class Combat {
     e.lastHitCrit = crit;
     // SPEC-041 §4.6: the number of a hit a bulwark turned reads grey.
     e.lastHitGuarded = guarded;
+    // SPEC-042 §4.9: the target frame's memory — the player's hits on anything
+    // but a boss; an elite is remembered twice, so it can win the frame.
+    if (cause === 'player' && e.def.archetype !== 'boss') {
+      remember(this.lastHit, e, this.#world.time);
+      if (e.elite) remember(this.lastEliteHit, e, this.#world.time);
+    }
     // SPEC-035 §4.11: every projectile and blast hit on a live enemy thuds. Both
     // callers of this method are exactly those two paths. SPEC-038 §4.8: a
     // critical projectile hit says so, and only then carries the flag.

@@ -910,6 +910,11 @@ describe('mission rewards (§4.7)', () => {
     expect(events.toasts()).toEqual([noRoomText(ITEMS.plasma_cell, 1)]);
     expect(data.inventory).toHaveLength(1);
   });
+
+  it('says where the spilled item went (SPEC-042 §4.2): at the feet, with the count above one', () => {
+    expect(noRoomText(ITEMS.plasma_cell, 1)).toBe('Inventory full — Plasma Cell dropped at your feet');
+    expect(noRoomText(ITEMS.wheat_ration, 3)).toBe('Inventory full — 3 × Wheat Ration dropped at your feet');
+  });
 });
 
 // ------------------------------------------------------------------ death

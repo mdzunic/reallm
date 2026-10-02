@@ -6,7 +6,8 @@
 import type { Save } from '@/core/Save';
 import { ITEMS, type GearLine, type Item, type ItemId, type Price } from '@/data/index';
 import type { Economy } from '@/systems/Economy';
-import { balanceAfterText, failText, gearCompareText, gearStatLines, priceText, shortfallText } from '@/systems/UiHelpers';
+import { balanceAfterText, failText, gearStatLines, prerequisiteText, priceText, purchaseText, shortfallText } from '@/systems/UiHelpers';
+import { compareNodes } from '@/ui/Compare';
 import { confirmSheet } from '@/ui/ConfirmSheet';
 import { el, h, testId, type UiRoot } from '@/ui/dom';
 import { itemIcon } from '@/ui/ItemIcon';
@@ -85,8 +86,9 @@ export function openGearCard(id: ItemId, deps: GearCardDeps): Promise<void> {
 
     const stats = h('ul', { class: 'gear-card-stats' }, ...gearStatLines(id).map((lineText) => h('li', {}, lineText)));
     // SPEC-039 §4.6: against the piece worn in this item's own slot — a
-    // machine gun reads against the rifle it would replace.
-    const compare = worn !== null && worn !== id ? gearCompareText(worn, id) : '';
+    // machine gun reads against the rifle it would replace. SPEC-042 §4.8:
+    // each part points the way it goes for the player.
+    const compare = worn !== null && worn !== id ? compareNodes(worn, id) : [];
 
     // The buy line: the priced path the row uses, or Equip when it is owned.
     const buy = el('div', 'gear-card-buy shop-buy-line');
@@ -134,14 +136,15 @@ export function openGearCard(id: ItemId, deps: GearCardDeps): Promise<void> {
                   () => {
                     const result = deps.economy.buyGear(id);
                     if (!result.ok) {
-                      deps.ui.toast(failText(result.reason), 'error');
+                      // SPEC-042 §4.8: a missing rung is named, here as in the row.
+                      deps.ui.toast(result.reason === 'prerequisite' ? prerequisiteText(id) : failText(result.reason), 'error');
                       return false; // 14-c: the sheet stays open
                     }
                     return true;
                   },
                 ).then((bought) => {
                   if (!bought) return;
-                  deps.ui.toast('Purchased', 'good');
+                  deps.ui.toast(purchaseText({ kind: 'gear', id }), 'good');
                   deps.onChanged();
                   close();
                 });
@@ -161,7 +164,7 @@ export function openGearCard(id: ItemId, deps: GearCardDeps): Promise<void> {
       h('h2', { class: 'gear-card-name' }, item.name),
       badges,
       stats,
-      compare === '' ? null : h('p', { class: 'gear-card-compare' }, compare),
+      compare.length === 0 ? null : h('p', { class: 'gear-card-compare' }, ...compare),
       h('p', { class: 'gear-card-blurb' }, item.blurb),
       buy,
     ];

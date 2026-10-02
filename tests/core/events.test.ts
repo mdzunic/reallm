@@ -556,6 +556,9 @@ const NAMES: Record<keyof GameEvents, true> = {
   'resource:collected': true,
   'resource:spent': true,
   'item:noRoom': true,
+  // SPEC-042 §4.2: a pickup into the pack, and one a full pack refused.
+  'item:collected': true,
+  'item:blocked': true,
   'inventory:changed': true,
   'gear:equipped': true,
   // SPEC-028 §3: the loadout runtime's switch and quick-slot spend.
@@ -618,8 +621,8 @@ describe('GameEvents (§3.2)', () => {
     // SPEC-034 added `player:recalled`, `enemy:dismissed` and `item:noRoom`;
     // SPEC-035 §4.11 added `weapon:fired` and `enemy:hit`; SPEC-038 §4.10
     // `player:dashed` and `enemy:windup`; SPEC-041 §4.10 `boss:move` and
-    // `flight:hazardHit`.
-    expect(Object.keys(NAMES)).toHaveLength(68);
+    // `flight:hazardHit`; SPEC-042 §4.2 `item:collected` and `item:blocked`.
+    expect(Object.keys(NAMES)).toHaveLength(70);
   });
 
   it('still carries the nine names SPEC-002 and SPEC-003 already emit', () => {

@@ -8,6 +8,7 @@ import { createAudio } from '@/core/Audio';
 import { createBackGuard } from '@/core/BackGuard';
 import { EventBus, type GameEvents } from '@/core/Events';
 import { DEFAULT_SEED, Game, parseFlags, SIMULATED_RESTORE_MS } from '@/core/Game';
+import { Haptics } from '@/core/Haptics';
 import { Input } from '@/core/Input';
 import { log } from '@/core/Log';
 import { RngRoot } from '@/core/Rng';
@@ -58,6 +59,19 @@ const flags = parseFlags(globalThis.location.search);
  */
 const settings = createSettings(undefined, events);
 const input = new Input(canvas, events, settings);
+
+/**
+ * SPEC-042 §4.10: the vibration layer, built once after `Input`, whose scheme
+ * is its gate. A missing Vibration API (iOS, most desktops) is `null`, and
+ * nothing ever vibrates there.
+ */
+const haptics = new Haptics({
+  events,
+  settings,
+  input,
+  vibrate: typeof navigator.vibrate === 'function' ? (pattern) => navigator.vibrate(pattern) : null,
+  now: () => performance.now(),
+});
 
 /**
  * SPEC-037 §4.3: `html.scheme-touch` while the scheme is touch — the one class
@@ -374,6 +388,7 @@ if (import.meta.env.DEV) {
   // (02-d, AC-61).
   import.meta.hot?.dispose(() => {
     document.removeEventListener('keydown', onKeyDown);
+    haptics.dispose();
     releaseGuardSync();
     events.releaseOwner(guardOwner);
     events.releaseOwner(workerOwner);

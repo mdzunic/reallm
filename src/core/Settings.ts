@@ -148,6 +148,12 @@ export type Settings = {
   pauseOnBlur: boolean;
   /** SPEC-036 §4.12: surface landings that showed the zone ghosts, 0…2; no control. */
   zonesShown: number;
+  /**
+   * SPEC-042 §4.10: short vibrations for hits, a lock, a death and a completion
+   * — on the touch scheme, where `navigator.vibrate` exists. Default on; a
+   * stored non-boolean reads the default.
+   */
+  haptics: boolean;
 };
 
 export interface SettingsStore {
@@ -242,6 +248,7 @@ export function defaultSettings(): Settings {
     serviceMode: false,
     pauseOnBlur: true,
     zonesShown: 0,
+    haptics: true,
   };
 }
 
@@ -452,6 +459,9 @@ function coerce<K extends keyof Settings>(key: K, value: unknown, current: Setti
         return bool(value, current.pauseOnBlur);
       case 'zonesShown':
         return zonesShown(value);
+      case 'haptics':
+        // SPEC-042 §3: default-on, so an unusable value must not turn it off.
+        return bool(value, true);
       default:
         return current[key];
     }

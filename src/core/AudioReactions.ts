@@ -156,7 +156,7 @@ export function pickupSound(resource: ResourceId): SoundId {
 /**
  * The 19 events of §5.2 (SPEC-029 §4.12 adds four, SPEC-035 §4.11 two more,
  * SPEC-038 §4.10 the dash and the windup cue, SPEC-041 §4.10 a boss move
- * landing and a flight hit) that make a sound.
+ * landing and a flight hit, SPEC-042 §4.2 an item picked up) that make a sound.
  */
 export type ReactedEvent =
   | 'combat:blast'
@@ -180,6 +180,8 @@ export type ReactedEvent =
   | 'flight:hazardHit'
   | 'boss:defeated'
   | 'resource:collected'
+  // SPEC-042 §4.2: an item or gear pickup that went into the pack.
+  | 'item:collected'
   | 'poi:scanned'
   | 'mission:completed'
   | 'weather:warning'
@@ -189,8 +191,9 @@ export type ReactedEvent =
   | 'flight:arrived';
 
 /**
- * The 38 events of §5.4 that deliberately make none. `satisfies` is what makes
- * a name outside `GameEvents` a compile error here (AC-40).
+ * The 38 events of §5.4 that deliberately make none (and those later specs
+ * silenced). `satisfies` is what makes a name outside `GameEvents` a compile
+ * error here (AC-40).
  */
 const SILENT_EVENTS = [
   'app:paused',
@@ -217,6 +220,8 @@ const SILENT_EVENTS = [
   'inventory:changed',
   // SPEC-034 §4.15: the toast beside it is the sound.
   'item:noRoom',
+  // SPEC-042 §4.2: likewise — its warn toast plays `ui_warn` through `ui:toast`.
+  'item:blocked',
   'gear:equipped',
   // SPEC-028: the quick-slot spend stays silent — the consumable's own effect
   // (heal, boost) already carries the feedback. SPEC-029 §4.12 gave the switch
@@ -323,6 +328,11 @@ export const AUDIO_REACTIONS: { [K in ReactedEvent]: Reaction<K> } = {
     p.blocked === 'cargo_full'
       ? { id: 'ui_warn', opts: { minIntervalMs: 80 } }
       : { id: pickupSound(p.resource), opts: { minIntervalMs: 80 } },
+  /**
+   * SPEC-042 §4.2: the generic chime, on the 80 ms floor a resource pickup
+   * keeps — an elite's drop and its stack can land in the same step.
+   */
+  'item:collected': () => ({ id: 'pickup_generic', opts: { minIntervalMs: 80 } }),
   /** The scan channel loop itself is started by the scene; this is the finish. */
   'poi:scanned': () => ({ id: 'scan_done' }),
   'mission:completed': () => ({ id: 'mission_done', opts: { priority: 2 } }),

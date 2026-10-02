@@ -102,6 +102,14 @@ export type GameEvents = {
    * `applyRewards` raises is all there is.
    */
   'item:noRoom': { itemId: ItemId; qty: number };
+  /**
+   * SPEC-042 §4.2: an item or gear pickup went into the pack — `qty` is what
+   * fitted. Its own event rather than `item:noRoom`'s twin: the surface answers
+   * that one by spilling the item at the player's feet.
+   */
+  'item:collected': { itemId: ItemId; qty: number };
+  /** SPEC-042 §4.2: a full pack refused a pickup — once per pickup, however often it retries. */
+  'item:blocked': { itemId: ItemId };
   'inventory:changed': { itemId: ItemId; qty: number };
   // SPEC-025 §3: the save carries three weapon slots, so the equip event names
   // the one that moved rather than the kind of thing that moved into it.

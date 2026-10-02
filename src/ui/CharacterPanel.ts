@@ -19,7 +19,8 @@ import {
 } from '@/data/index';
 import { INVENTORY_SLOTS, type Economy } from '@/systems/Economy';
 import { quickEligible } from '@/systems/Loadout';
-import { computePlayerStats, failText, gearCompareText, gearTooltip, HP_FULL_TEXT } from '@/systems/UiHelpers';
+import { characterXpText, computePlayerStats, failText, gearTooltip, HP_FULL_TEXT } from '@/systems/UiHelpers';
+import { compareNodes } from '@/ui/Compare';
 import { confirmSheet } from '@/ui/ConfirmSheet';
 import { el, h, testId, type UiRoot } from '@/ui/dom';
 import { itemIcon } from '@/ui/ItemIcon';
@@ -101,6 +102,8 @@ export class CharacterPanel {
         ),
         `${player.name} — Lv ${player.level}`,
       ),
+      // SPEC-042 §4.7: what the HUD's 6 px bar has no room to say.
+      testId(h('p', { class: 'char-xp' }, characterXpText(player.level, player.xp)), 'character-xp'),
       testId(
         h(
           'div',
@@ -373,8 +376,9 @@ export class CharacterPanel {
       // slot this item would go into (SPEC-025 §4.6). An empty heavy slot has
       // nothing to compare against.
       const worn = item.kind === 'weapon' ? this.#deps.data.equipped[item.slot] : this.#deps.data.equipped.armor;
-      const compare = worn === null ? '' : gearCompareText(worn, entry.itemId);
-      if (compare !== '') bar.append(h('span', { class: 'inv-compare' }, compare));
+      // SPEC-042 §4.8: each part points the way it goes for the player.
+      const compare = worn === null ? [] : compareNodes(worn, entry.itemId);
+      if (compare.length > 0) bar.append(h('span', { class: 'inv-compare' }, ...compare));
       bar.append(
         testId(
           h('button', { class: 'ui-btn is-primary', type: 'button', click: () => this.#equip(entry.itemId) }, 'Equip'),

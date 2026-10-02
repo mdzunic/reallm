@@ -115,9 +115,13 @@ export function refuelVoucherText(oil: number): string {
   return `Earth Command refuel voucher: +${oil} oil`;
 }
 
-/** E25: a reward item with nowhere to go. */
+/**
+ * E25: a reward item with nowhere to go. SPEC-042 §4.2: the surface spills it
+ * at the player's feet (SPEC-034 §4.15), so that is what the line says — and
+ * "Inventory" is the word the shop's refusal and the character panel use.
+ */
 export function noRoomText(item: Item, qty: number): string {
-  return `Inventory full — ${qty} × ${item.name} left behind`;
+  return `Inventory full — ${qty > 1 ? `${qty} × ${item.name}` : item.name} dropped at your feet`;
 }
 
 // The schema-typed views of the content tables (see the header).

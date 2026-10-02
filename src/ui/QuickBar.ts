@@ -80,6 +80,9 @@ export class QuickBar {
   #lastDash = '';
   #pressTimer: ReturnType<typeof setTimeout> | null = null;
   #longFired = false;
+  /** SPEC-042 §4.4: HP is low — and the heal slot's count, last rendered. */
+  #urgent = false;
+  #healQty = 0;
 
   constructor(host: HTMLElement, handlers: QuickBarHandlers) {
     this.#handlers = handlers;
@@ -109,6 +112,20 @@ export class QuickBar {
     this.#lastDash = value;
     this.#dash.style.setProperty('--cd', value);
     this.#dash.classList.toggle('is-cooling', cd > 0);
+  }
+
+  /**
+   * SPEC-042 §4.4: below a quarter of HP the heal slot asks to be used —
+   * `is-urgent`, a static outline — while it holds a heal with a count above 0.
+   * An empty slot stays quiet (42-i): there is nothing for it to ask.
+   */
+  setUrgent(on: boolean): void {
+    this.#urgent = on;
+    this.#applyUrgent();
+  }
+
+  #applyUrgent(): void {
+    this.#quick.heal.root.classList.toggle('is-urgent', this.#urgent && this.#healQty > 0);
   }
 
   /**
@@ -190,6 +207,8 @@ export class QuickBar {
         // Dimmed at 0 *and* with the count beside it — never hue alone (§4.5).
         nodes.root.classList.toggle('is-empty', item === null || entry.qty === 0);
       }
+      this.#healQty = quick.heal.itemId === null ? 0 : quick.heal.qty;
+      this.#applyUrgent();
     }
   }
 

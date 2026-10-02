@@ -52,6 +52,12 @@ export function levelUpText(level: number, tokens: number): string {
   return level % ATTRIBUTE_POINT_LEVELS === 0 ? `${text} · +1 attribute point` : text;
 }
 
+/**
+ * SPEC-042 §4.7: the level-up toast stays up this long — a level is worth
+ * more than the 2.5 s a refusal gets (*initial tuning*).
+ */
+export const LEVEL_UP_TOAST_MS = 4000;
+
 /** XP needed to go from `level` to `level + 1` (§4.1). */
 export function xpToNext(level: number): number {
   return TUNING.XP_BASE + TUNING.XP_PER_LEVEL * level;
@@ -117,7 +123,7 @@ export class Progression {
       levelsGained += 1;
       this.#events.emit('tokens:changed', { delta: TOKENS_PER_LEVEL, total: player.tokens, reason: 'level' });
       this.#events.emit('player:leveledUp', { level: player.level, tokens: TOKENS_PER_LEVEL });
-      this.#events.emit('ui:toast', { kind: 'good', text: levelUpText(player.level, TOKENS_PER_LEVEL) });
+      this.#events.emit('ui:toast', { kind: 'good', text: levelUpText(player.level, TOKENS_PER_LEVEL), ms: LEVEL_UP_TOAST_MS });
       log.debug('progression', `level ${player.level} from ${reason}`);
     }
     // 10-d: at the cap the XP is kept and nothing else happens.

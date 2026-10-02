@@ -148,6 +148,90 @@ describe('Pickups — items and gear (AC-20, E25)', () => {
   });
 });
 
+/** Every event of `name` the harness's bus carried while `run` ran. */
+function record<K extends keyof GameEvents>(h: Harness, name: K): GameEvents[K][] {
+  const out: GameEvents[K][] = [];
+  h.events.on(name, (payload) => out.push(payload));
+  return out;
+}
+
+/** 20 slots: 19 single coolant packs and one medkit stack at `medkits`. */
+function fullPack(medkits: number): (save: Save) => void {
+  return (save) => {
+    save.inventory = [
+      ...Array.from({ length: 19 }, () => ({ itemId: 'coolant_pack' as const, qty: 1 })),
+      { itemId: 'medkit' as const, qty: medkits },
+    ];
+  };
+}
+
+describe('Pickups — item:collected and item:blocked (SPEC-042 §4.2)', () => {
+  it('an item pickup emits item:collected with its quantity; gear with one', () => {
+    const h = harness();
+    const collected = record(h, 'item:collected');
+    h.pickups.spawn({ kind: 'item', itemId: 'medkit', qty: 2, x: 0.2, z: 0 });
+    h.pickups.spawn({ kind: 'gear', line: 'armor', itemId: 'armor_composite', x: -0.2, z: 0 });
+    h.run(0.5);
+    expect(collected).toEqual([
+      { itemId: 'armor_composite', qty: 1 },
+      { itemId: 'medkit', qty: 2 },
+    ]);
+  });
+
+  it('a full inventory emits one item:blocked over 5 s of retries, and no collected', () => {
+    const h = harness(fullPack(5));
+    const collected = record(h, 'item:collected');
+    const blocked = record(h, 'item:blocked');
+    h.pickups.spawn({ kind: 'gear', line: 'rifle', itemId: 'weapon_laser', x: 0.2, z: 0 });
+    h.run(5);
+    expect(h.pickups.pool.size).toBe(1);
+    expect(blocked).toEqual([{ itemId: 'weapon_laser' }]);
+    expect(collected).toEqual([]);
+  });
+
+  it('a partial fit emits both, and the rest stays on the ground (42-f)', () => {
+    // The medkit stack (5) has room for one more; nothing else does.
+    const h = harness(fullPack(4));
+    const collected = record(h, 'item:collected');
+    const blocked = record(h, 'item:blocked');
+    const pickup = h.pickups.spawn({ kind: 'item', itemId: 'medkit', qty: 3, x: 0.2, z: 0 });
+    h.run(3);
+    expect(collected).toEqual([{ itemId: 'medkit', qty: 1 }]);
+    expect(blocked).toEqual([{ itemId: 'medkit' }]);
+    expect(h.pickups.pool.size).toBe(1);
+    expect(pickup.amount).toBe(2);
+  });
+
+  it('room made while the player stands on it: collected on the next retry, no second blocked (42-g)', () => {
+    const h = harness(fullPack(5));
+    const collected = record(h, 'item:collected');
+    const blocked = record(h, 'item:blocked');
+    // Plasma cells: the pack holds none, so no stack has room for them.
+    h.pickups.spawn({ kind: 'item', itemId: 'plasma_cell', qty: 2, x: 0.2, z: 0 });
+    h.run(1);
+    expect(blocked).toHaveLength(1);
+    h.save.inventory.splice(0, 1);
+    h.run(1);
+    expect(collected).toEqual([{ itemId: 'plasma_cell', qty: 2 }]);
+    expect(blocked).toHaveLength(1);
+    expect(h.pickups.pool.size).toBe(0);
+  });
+
+  it('a recycled pickup starts unrefused: spawn clears the flag', () => {
+    const h = harness(fullPack(5));
+    const blocked = record(h, 'item:blocked');
+    const first = h.pickups.spawn({ kind: 'item', itemId: 'plasma_cell', qty: 1, x: 0.2, z: 0 });
+    h.run(1);
+    expect(first.refused).toBe(true);
+    h.run(60); // it expires, and its slot goes back to the pool
+    expect(h.pickups.pool.size).toBe(0);
+    const second = h.pickups.spawn({ kind: 'item', itemId: 'plasma_cell', qty: 1, x: 0.2, z: 0 });
+    expect(second.refused).toBe(false);
+    h.run(1);
+    expect(blocked).toHaveLength(2);
+  });
+});
+
 // ---------------------------------------------------------------------- nodes
 
 function nodeEconomy(save: Save, economy: Economy): NodeEconomy {
