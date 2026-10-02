@@ -10,6 +10,7 @@ import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { PLANETS } from '@/data/index';
 import { compositeOver, contrastRatio } from '@/systems/UiHelpers';
+import { DEFICIENCIES, deltaE76 } from '../fixtures/colourVision';
 
 const CSS = readFileSync(new URL('../../src/style.css', import.meta.url).pathname, 'utf8');
 const HTML = readFileSync(new URL('../../index.html', import.meta.url).pathname, 'utf8');
@@ -140,7 +141,8 @@ describe('what the theme must not move (SPEC-020 AC-24 … AC-26)', () => {
   it('keeps the touch floors, the font floor and the accessibility rules (AC-25)', () => {
     expect(CSS).toMatch(/\.ui-btn\s*\{[^}]*min-height:\s*44px/);
     expect(CSS).toMatch(/\.ui-btn\s*\{[^}]*min-width:\s*44px/);
-    expect(CSS).toContain('font-size: clamp(14px, 1.6vmin + 8px, 18px)');
+    // SPEC-045 §4.10: the base now multiplies by the player's text size.
+    expect(CSS).toContain('font-size: calc(clamp(14px, 1.6vmin + 8px, 18px) * var(--text-scale))');
     expect(CSS).toContain('56px'); // the gameplay targets of SPEC-014 §4.10
     expect(CSS).toContain('user-select: none');
     expect(CSS).toContain('env(safe-area-inset-bottom)');
@@ -406,5 +408,199 @@ describe('the text floor, the hover rule and the selection rules (SPEC-037 §4.4
     const rule = allRules().find((candidate) => candidate.selector.includes("#ui input:not([type='range'])"));
     expect(rule?.body).toMatch(/font-size:\s*max\(16px,\s*1em\)/);
     expect(rule?.selector).toContain('#ui textarea');
+  });
+});
+
+// ------------------------------------------------------------------ SPEC-045
+
+/** One rule's declarations by name — the last of a name wins, as in CSS. */
+function declarationMap(body: string): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const part of body.split(';')) {
+    const at = part.indexOf(':');
+    if (at > 0) out[part.slice(0, at).trim()] = part.slice(at + 1).trim();
+  }
+  return out;
+}
+
+/** The value `property` takes in the first rule naming `selector` that sets it. */
+function declared(selector: string, property: string): string | undefined {
+  return rulesFor(selector)
+    .map((rule) => declarationMap(rule.body)[property])
+    .find((value) => value !== undefined);
+}
+
+/** The colour-blind preset's tokens, read off its one rule. */
+function colourBlind(): Record<string, string> {
+  const rules = rulesFor('html.colour-blind');
+  expect(rules, 'one html.colour-blind rule').toHaveLength(1);
+  return declarationMap(rules[0]?.body ?? '');
+}
+
+describe('UI scale, text size and the ultrawide box (SPEC-045 §4.4)', () => {
+  it('declares the two scales, the HUD side, the hull and the radius in :root', () => {
+    const root = rootBlock();
+    for (const token of ['--ui-scale', '--text-scale', '--hud-side', '--hull', '--radius']) {
+      expect(declarations(token, root), `${token} in :root`).toBe(1);
+    }
+    expect(tokenValue('--ui-scale')).toBe('1');
+    expect(tokenValue('--text-scale')).toBe('1');
+    expect(tokenValue('--hud-side')).toBe('10px');
+    expect(tokenValue('--hull')).toBe('#9fb3c8');
+    expect(tokenValue('--radius')).toBe('3px');
+  });
+
+  it("multiplies the five type tokens and #ui's base by --text-scale", () => {
+    expect(tokenValue('--type-xs')).toBe('calc(12px * var(--text-scale))');
+    expect(tokenValue('--type-sm')).toBe('calc(14px * var(--text-scale))');
+    expect(tokenValue('--type-md')).toBe('calc(16px * var(--text-scale))');
+    expect(tokenValue('--type-lg')).toBe('calc(clamp(18px, 3vmin, 24px) * var(--text-scale))');
+    expect(tokenValue('--type-xl')).toBe('calc(clamp(22px, 4.2vmin, 34px) * var(--text-scale))');
+    expect(declared('#ui', 'font-size')).toBe('calc(clamp(14px, 1.6vmin + 8px, 18px) * var(--text-scale))');
+  });
+
+  it('keeps HUD readouts out of the text size: a plain base, and no type token under the HUD', () => {
+    expect(declared('.hud', 'font-size')).toBe('clamp(14px, 1.6vmin + 8px, 18px)');
+    const hud = allRules().filter((rule) => /\.(hud|qb-|tracker|boss-frame|target-frame|mission-banner|bar)/.test(rule.selector));
+    expect(hud.length).toBeGreaterThan(40);
+    expect(hud.filter((rule) => /--type-|--text-scale/.test(rule.body)).map((rule) => rule.selector)).toEqual([]);
+  });
+
+  it('scales each corner box and the interact prompt about its anchor, on the keyboard scheme only', () => {
+    const anchors: ReadonlyArray<readonly [string, string, string]> = [
+      ['.hud-tl', 'scale(var(--ui-scale))', 'top left'],
+      ['.hud-tr', 'scale(var(--ui-scale))', 'top right'],
+      ['.hud-tc', 'translateX(-50%) scale(var(--ui-scale))', 'top center'],
+      ['.hud-bl', 'scale(var(--ui-scale))', 'bottom left'],
+      ['.hud-br', 'scale(var(--ui-scale))', 'bottom right'],
+      ['.hud-bc', 'translateX(-50%) scale(var(--ui-scale))', 'bottom center'],
+      ['.hud-interact', 'translateX(-50%) scale(var(--ui-scale))', 'bottom center'],
+    ];
+    for (const [box, transform, origin] of anchors) {
+      const selector = `html:not(.scheme-touch) ${box}`;
+      expect(rulesFor(selector), selector).toHaveLength(1);
+      expect(declared(selector, 'transform'), box).toBe(transform);
+      expect(declared(selector, 'transform-origin'), box).toBe(origin);
+    }
+    // The offsets that clear them follow: the bottom stack, the prompt's lift
+    // above the bar, and SPEC-037's short-screen docking.
+    expect(tokenValue('--hud-bottom-stack')).toBe('calc(166px * var(--ui-scale))');
+    expect(declared('.hud-interact', 'bottom')).toBe('calc(max(48px, calc(env(safe-area-inset-bottom) + 38px)) + 82px * var(--ui-scale))');
+    const docked = allRules().find(
+      (rule) => rule.within.includes('@media (max-height: 500px)') && rule.selector.startsWith('html[data-play] .dialogue,'),
+    );
+    const dock = declarationMap(docked?.body ?? '');
+    expect(dock['top']).toContain('var(--hud-tc-h, 0px) * var(--ui-scale)');
+    expect(dock['left']).toContain('var(--hud-tl-w) * var(--ui-scale)');
+    expect(dock['right']).toContain('var(--hud-tr-w) * var(--ui-scale)');
+  });
+
+  it("puts the corner boxes and the in-play toast rack on a centred 16 : 9 box's edges past 21 : 9", () => {
+    const wide = allRules().find(
+      (rule) => rule.within.includes('@media (min-aspect-ratio: 21/9)') && rule.selector === 'html:not(.scheme-touch)',
+    );
+    expect(declarationMap(wide?.body ?? '')['--hud-side']).toBe('calc((100vw - 100dvh * 16 / 9) / 2)');
+    const edges: ReadonlyArray<readonly [string, string]> = [
+      ['.hud-tl', 'left'],
+      ['.hud-tr', 'right'],
+      ['.hud-bl', 'left'],
+      ['.hud-br', 'right'],
+      ['html[data-play] .toast-rack', 'right'],
+    ];
+    for (const [selector, edge] of edges) {
+      expect(declared(selector, edge), `${selector} { ${edge} }`).toBe(`max(var(--hud-side), env(safe-area-inset-${edge}))`);
+    }
+  });
+});
+
+describe('plain text, toast glyphs and the colour-blind preset (SPEC-045 §4.5, §4.6)', () => {
+  it('turns off CSS capitals and wide tracking in #ui, and opens up reading text', () => {
+    const plain = allRules().find((rule) => rule.selector.startsWith('html.plain-text #ui *,'));
+    expect(plain?.selector).toBe('html.plain-text #ui *, html.plain-text #ui *::before, html.plain-text #ui *::after');
+    expect(declarationMap(plain?.body ?? '')['text-transform']).toBe('none');
+    expect(declarationMap(plain?.body ?? '')['letter-spacing']).toBe('0.02em');
+    const reading = allRules().find((rule) => rule.selector.startsWith('html.plain-text #ui :is('));
+    for (const box of ['.screen-body', '.settings', '.sheet', '.comms-log', '.dialogue', '.film-caption', '.toast', '.aria-hint']) {
+      expect(reading?.selector, box).toContain(box);
+    }
+    expect(declarationMap(reading?.body ?? '')['line-height']).toBe('1.55');
+    expect(declarationMap(reading?.body ?? '')['word-spacing']).toBe('0.12em');
+  });
+
+  it('colours the good and error glyphs as the warn glyph is, and fills the hull bar with --hull', () => {
+    for (const [selector, token] of [
+      ['.toast-warn .glyph', 'var(--warn)'],
+      ['.toast-good .glyph', 'var(--good)'],
+      ['.toast-error .glyph', 'var(--hp)'],
+    ] as const) {
+      expect(declared(selector, 'color'), selector).toBe(token);
+      expect(declared(selector, 'margin-right'), selector).toBe('8px');
+    }
+    expect(CSS).toContain('.bar-hull { background: var(--hull); }');
+  });
+
+  it('sets exactly --good, --hp and --danger under html.colour-blind', () => {
+    expect(colourBlind()).toEqual({ '--good': '#3fb6ff', '--hp': '#ff8a1f', '--danger': '#ff8a1f' });
+  });
+
+  it('holds good apart from error and from warn by ΔE76 ≥ 20 under each simulation (AC-25)', () => {
+    const preset = colourBlind();
+    const good = preset['--good'] as string;
+    const error = preset['--hp'] as string;
+    const warn = hexToken('--warn');
+    for (const type of DEFICIENCIES) {
+      expect(deltaE76(good, error, type), `good / error, ${type}`).toBeGreaterThanOrEqual(20);
+      expect(deltaE76(good, warn, type), `good / warn, ${type}`).toBeGreaterThanOrEqual(20);
+    }
+  });
+
+  it("keeps SPEC-037's plate contrast under the preset: good on the plate, error on the state band", () => {
+    const preset = colourBlind();
+    const plate = tokenValue('--hud-plate');
+    const problems: string[] = [];
+    for (const planet of Object.values(PLANETS)) {
+      const ground = planet.surface.palette.ground;
+      const onPlate = contrastRatio(preset['--good'] as string, compositeOver(plate, ground));
+      if (onPlate < 4.5) problems.push(`--good on ${planet.id}: ${onPlate.toFixed(2)}`);
+      const band = compositeOver('rgba(0, 0, 0, 0.8)', compositeOver('rgba(0, 0, 0, 0.55)', ground));
+      const onBand = contrastRatio(preset['--hp'] as string, band);
+      if (onBand < 4.5) problems.push(`--hp on ${planet.id}: ${onBand.toFixed(2)}`);
+    }
+    expect(problems).toEqual([]);
+  });
+});
+
+describe('one radius, the legacy styles and the dead rules (SPEC-045 §4.8)', () => {
+  it('rounds every corner with 0, 50 % or var(--radius), outside the dev overlay', () => {
+    const exempt = ['.overlay-debug', '.debug-row', 'button.debug-button'];
+    const offenders: string[] = [];
+    let radii = 0;
+    for (const rule of allRules()) {
+      if (exempt.includes(rule.selector)) continue;
+      for (const match of rule.body.matchAll(/border(?:-(?:top|bottom)-(?:left|right))?-radius:\s*([^;]+)/g)) {
+        radii++;
+        const value = (match[1] ?? '').trim();
+        if (!['0', '50%', 'var(--radius)'].includes(value)) offenders.push(`${rule.selector} { ${value} }`);
+      }
+    }
+    expect(radii).toBeGreaterThan(40);
+    expect(offenders).toEqual([]);
+  });
+
+  it("drops SPEC-011's dead demo-HUD rules, and keeps the dev strip", () => {
+    const selectors = allRules()
+      .map((rule) => rule.selector)
+      .join('\n');
+    for (const dead of ['.combat-hud', '.hud-counters', '.hud-boss', '.hud-toast', '.hud-death']) {
+      expect(selectors, dead).not.toContain(dead);
+    }
+    expect(rulesFor('.hud-debug')).toHaveLength(1);
+    expect(rulesFor('button.hud-button')).toHaveLength(1);
+  });
+
+  it('keeps only the placeholder scenes\' button in the legacy group, and nothing styles Resume or Reload', () => {
+    const legacy = allRules().filter((rule) => /#16202b|#1d2a38/i.test(rule.body) && !rule.selector.includes('debug'));
+    expect(legacy.map((rule) => rule.selector)).toEqual(['button.scene-nav-button', 'button.scene-nav-button:hover']);
+    expect(CSS.replace(/\/\*[\s\S]*?\*\//g, '')).not.toMatch(/pause-resume|context-lost-reload/);
   });
 });
