@@ -424,21 +424,28 @@ test.describe('6b. at 1920 × 1080', () => {
     await land(page);
     for (const percent of [115, 130]) {
       await setUiScale(page, percent);
-      await page.evaluate(() => window.__reallm.toast('Saved', 'good'));
-      await expect(page.locator('.toast')).toHaveCount(1);
-      const named: Array<[string, string]> = [
-        ['top-left', '[data-testid="hud"] .hud-tl'],
-        ['top-centre', '[data-testid="hud"] .hud-tc'],
-        ['quick bar', '[data-testid="hud"] .hud-bc'],
-        ['interact', '[data-testid="hud-interact"]'],
-        ['minimap', '[data-testid="minimap"]'],
-        ['toasts', '[data-testid="toasts"]'],
-      ];
-      const boxes: Array<[string, Box]> = [];
-      for (const [name, selector] of named) {
-        const rect = await box(page, selector);
-        if (rect !== null) boxes.push([name, rect]);
-      }
+      // Up long enough to be measured on a starved container; one read for all.
+      await page.evaluate(() => window.__reallm.toast('Saved', 'good', 20_000));
+      await expect(page.locator('.toast-good').first()).toBeVisible();
+      const boxes = await page.evaluate(() => {
+        const named: Array<[string, string]> = [
+          ['top-left', '[data-testid="hud"] .hud-tl'],
+          ['top-centre', '[data-testid="hud"] .hud-tc'],
+          ['quick bar', '[data-testid="hud"] .hud-bc'],
+          ['interact', '[data-testid="hud-interact"]'],
+          ['minimap', '[data-testid="minimap"]'],
+          ['toasts', '[data-testid="toasts"]'],
+        ];
+        const out: Array<[string, { left: number; top: number; right: number; bottom: number; width: number }]> = [];
+        for (const [name, selector] of named) {
+          const node = document.querySelector(selector);
+          if (node === null) continue;
+          const rect = node.getBoundingClientRect();
+          if (rect.width === 0 || rect.height === 0) continue;
+          out.push([name, { left: rect.left, top: rect.top, right: rect.right, bottom: rect.bottom, width: rect.width }]);
+        }
+        return out;
+      });
       expect(boxes.map(([name]) => name)).toEqual(expect.arrayContaining(['top-left', 'top-centre', 'quick bar', 'minimap', 'toasts']));
       for (let i = 0; i < boxes.length; i++) {
         for (let j = i + 1; j < boxes.length; j++) {
@@ -447,7 +454,6 @@ test.describe('6b. at 1920 × 1080', () => {
           expect(overlaps(rectA, rectB), `${a} and ${b} at ${percent} %`).toBe(false);
         }
       }
-      await page.waitForTimeout(100);
     }
   });
 });
@@ -579,15 +585,18 @@ test('11. toasts lead with their glyph, and the colour-blind preset recolours go
   await start(page, URL);
   await bind(page);
   await station(page);
+  // The rack holds three at a time (SPEC-014 §4.6).
   await page.evaluate(() => {
-    window.__reallm.toast('Saved', 'good');
-    window.__reallm.toast('Not enough tokens', 'error');
-    window.__reallm.toast('Cargo nearly full', 'warn');
-    window.__reallm.toast('Quality: low', 'info');
+    window.__reallm.toast('Saved', 'good', 20_000);
+    window.__reallm.toast('Not enough tokens', 'error', 20_000);
+    window.__reallm.toast('Cargo nearly full', 'warn', 20_000);
   });
   await expect(page.locator('.toast-good .glyph')).toHaveText('✓');
   await expect(page.locator('.toast-error .glyph')).toHaveText('✗');
   await expect(page.locator('.toast-warn .glyph')).toHaveText('▲');
+  await expect(page.locator('.toast-error')).toHaveText('✗Not enough tokens');
+  await page.evaluate(() => window.__reallm.toast('Quality: low', 'info', 20_000));
+  await expect(page.locator('.toast-info')).toHaveText('Quality: low');
   await expect(page.locator('.toast-info .glyph')).toHaveCount(0);
 
   await stationSettings(page);
