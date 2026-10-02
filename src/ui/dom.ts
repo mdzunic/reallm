@@ -239,11 +239,12 @@ export function openModal(root: HTMLElement, options: ModalOptions): () => void 
   // first of them that takes focus. A disabled control (a Buy the wallet
   // cannot meet) or one that is not laid out ignores `focus()`, and focus
   // would stay outside the dialog.
-  for (const target of [options.initialFocus, shownFocusablesIn(root)[0], root]) {
-    if (target === null || target === undefined) continue;
+  const takes = (target: HTMLElement | null | undefined): boolean => {
+    if (target === null || target === undefined) return false;
     target.focus({ preventScroll: true });
-    if (document.activeElement === target) break;
-  }
+    return document.activeElement === target;
+  };
+  if (!takes(options.initialFocus) && !takes(shownFocusablesIn(root)[0])) takes(root);
 
   let open = true;
   return (): void => {
