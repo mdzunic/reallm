@@ -13,43 +13,37 @@
 //
 // Everything else a menu has — Continue, New Game, the Backup panel of §4.6 —
 // is SPEC-014's, which mounts this panel where its own slot list goes.
+//
+// SPEC-044 §4.10: the rows read as the Load list's (`Slot <n> · ` + `slotLine`);
+// a save from a newer version is named as one and offered only Export (E9 —
+// "Corrupt" with Delete one click away is how it gets lost); and Delete asks
+// first, with Cancel focused, because it takes the backup with it.
 import { STORAGE_UNAVAILABLE_TEXT, type SaveStore, type SlotId, type SlotSummary } from '@/core/Save';
-import { el, testId } from '@/ui/dom';
+import { slotLine } from '@/systems/UiHelpers';
+import { confirmSheet } from '@/ui/ConfirmSheet';
+import { el, keepFocus, testId, uiLayers, type UiRoot } from '@/ui/dom';
 
-/** The two words a row is read by; the tests and E8 share them. */
-const EMPTY_TEXT = 'Empty';
-const CORRUPT_TEXT = 'Corrupt';
-
-/** `1h 04m` / `12m` — playtime is a summary field, never a computation (§3). */
-function playtime(seconds: number): string {
-  const total = Number.isFinite(seconds) ? Math.max(0, Math.floor(seconds)) : 0;
-  const hours = Math.floor(total / 3600);
-  const minutes = Math.floor((total % 3600) / 60);
-  return hours > 0 ? `${hours}h ${String(minutes).padStart(2, '0')}m` : `${minutes}m`;
-}
-
-/** One line per slot: what `list()` knows, in the order a player reads it. */
+/** One line per slot: what `list()` knows, in the words the Load list uses. */
 function rowText(summary: SlotSummary): string {
-  const label = `Slot ${summary.slot + 1}`;
-  if (summary.corrupt === true) return `${label} · ${CORRUPT_TEXT}`;
-  if (summary.empty) return `${label} · ${EMPTY_TEXT}`;
-  return `${label} · ${summary.name ?? ''} · ${summary.classId ?? ''} · Lv ${summary.level ?? 1} · ${playtime(
-    summary.playtimeSec ?? 0,
-  )}`;
+  return `Slot ${summary.slot + 1} · ${slotLine(summary)}`;
 }
 
 export class SavePanel {
   readonly #save: SaveStore;
   readonly #root: HTMLElement;
   readonly #list: HTMLUListElement;
+  /** SPEC-044 §4.10: where the delete sheet opens and the export toasts. */
+  readonly #ui: UiRoot | null;
   /** The one slot whose paste field is open, if any. */
   #importing: SlotId | null = null;
 
   /** The E8 banner, when there is one; removed with the panel. */
   #banner: HTMLElement | null = null;
 
-  constructor(root: HTMLElement, save: SaveStore, opts?: { bannerHost?: HTMLElement }) {
+  constructor(root: HTMLElement, save: SaveStore, opts?: { bannerHost?: HTMLElement; ui?: UiRoot }) {
     this.#save = save;
+    const host = document.getElementById('ui');
+    this.#ui = opts?.ui ?? (host === null ? null : uiLayers(host));
     this.#root = testId(el('section', 'save-panel'), 'save-panel');
     this.#root.setAttribute('aria-label', 'Saves');
     // E8/AC-17: the banner, and only when there is something to say. The store
@@ -68,10 +62,12 @@ export class SavePanel {
     this.refresh();
   }
 
-  /** Rebuilds every row from `list()`. Cheap: three rows, and never in a frame. */
+  /**
+   * Rebuilds every row from `list()`. Cheap: three rows, and never in a frame.
+   * SPEC-044 §4.2: through `keepFocus`, so a row's control keeps its focus.
+   */
   refresh(): void {
-    this.#list.replaceChildren();
-    for (const summary of this.#save.list()) this.#list.append(this.#row(summary));
+    keepFocus(this.#list, () => this.#list.replaceChildren(...this.#save.list().map((summary) => this.#row(summary))));
   }
 
   dispose(): void {
@@ -83,11 +79,18 @@ export class SavePanel {
     const slot = summary.slot;
     const row = testId(el('li', 'slot-row'), `slot-${slot}`);
     row.append(el('span', 'slot-text', rowText(summary)));
-    // Only a corrupt slot carries actions: it is the one state a player cannot
-    // get out of by playing (E8). A readable slot is SPEC-014's business.
+    // Only an unreadable slot carries actions: it is the one state a player
+    // cannot get out of by playing (E8). A readable slot is SPEC-014's business.
     if (summary.corrupt !== true) return row;
 
     const actions = el('div', 'slot-actions');
+    // SPEC-044 §4.10, E9: a newer version's save is readable — by that version.
+    // The way out is its code, never Delete or an Import over it.
+    if (summary.newer === true) {
+      actions.append(this.#button(`slot-${slot}-export`, 'Export', `Copy slot ${slot + 1}'s save code`, () => this.#export(slot)));
+      row.append(actions);
+      return row;
+    }
     // 07-f: no `CompressionStream`, no codes — the entry point is not offered
     // at all rather than failing on the click.
     if (this.#save.codesSupported) {
@@ -101,16 +104,47 @@ export class SavePanel {
         }),
       );
     }
-    actions.append(
-      this.#button(`slot-${slot}-delete`, 'Delete', `Delete slot ${slot + 1}`, () => {
-        this.#save.delete(slot); // main *and* `:bak` (§3)
-        this.#importing = null;
-        this.refresh();
-      }),
-    );
+    actions.append(this.#button(`slot-${slot}-delete`, 'Delete', `Delete slot ${slot + 1}`, () => this.#delete(slot)));
     row.append(actions);
     if (this.#importing === slot) row.append(this.#codeField(slot));
     return row;
+  }
+
+  /**
+   * SPEC-044 §4.10: a danger sheet, Cancel focused, and the delete only on its
+   * confirm — the slot goes with its `:bak` (§3), so there is no second chance.
+   */
+  #delete(slot: SlotId): void {
+    const remove = (): void => {
+      this.#save.delete(slot); // main *and* `:bak` (§3)
+      this.#importing = null;
+      this.refresh();
+    };
+    const ui = this.#ui;
+    if (ui === null) {
+      remove();
+      return;
+    }
+    void confirmSheet(ui, {
+      title: `Delete slot ${slot + 1} and its backup?`,
+      body: 'This cannot be undone.',
+      confirmText: 'Delete',
+      danger: true,
+    }).then((yes) => {
+      if (yes) remove();
+    });
+  }
+
+  /** E9: the code of a save this build cannot read, copied — as the Load list's Export does. */
+  #export(slot: SlotId): void {
+    const ui = this.#ui;
+    void this.#save.exportCode(slot).then(
+      (code) =>
+        void navigator.clipboard?.writeText(code).then(
+          () => ui?.toast('Save code copied', 'good'),
+          () => ui?.toast(code, 'info', 8000),
+        ),
+    );
   }
 
   /** The Paste/Import half of §4.6, scoped to the slot that needs rescuing. */

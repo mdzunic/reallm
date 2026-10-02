@@ -101,7 +101,7 @@ import { fillQuickFromPickup, quickEligible, refillQuick, type SlotView } from '
 import { generateLayout, ObstacleGrid, WALL_INSET, type Layout, type LayoutPoi, type LayoutShelter } from '@/systems/Layout';
 import { REVEAL_AFTER_SHOT, SHELTER_INSET, shelterAt, STORM_SHELTER_FACTOR } from '@/systems/Shelter';
 import { nodeIcon, poiIcon } from '@/systems/MapModel';
-import { Missions, type MissionContext, type ObjectiveProgress } from '@/systems/Missions';
+import { contractFor, Missions, type MissionContext, type ObjectiveProgress } from '@/systems/Missions';
 import { CARGO_TOAST_SECONDS, Nodes, Pickups, SHIPPED_TOAST_TEXT } from '@/systems/Pickups';
 import { cumulativeXp, LEVEL_CAP, Progression, xpToNext } from '@/systems/Progression';
 import { SpawnDirector, WAVE_CEILING_BONUS, type FrustumXZ, type SpawnRamp, type WaveHandle } from '@/systems/Spawn';
@@ -114,9 +114,11 @@ import {
   bossPhaseMarks,
   cameraDistance,
   cameraFov,
+  acceptedText,
   completionLines,
   contractLabel,
   deathCause,
+  firstSentence,
   deathTip,
   hasNodeRadar,
   HP_FULL_TEXT,
@@ -124,6 +126,8 @@ import {
   OCCLUDER_OPACITY,
   padEmptyText,
   pickupText,
+  quitNote,
+  rewardsText,
   stageResetText,
   holdIsIdle,
   surfaceFogRange,
@@ -156,7 +160,7 @@ import { DamageNumbers } from '@/ui/DamageNumbers';
 import { ELITE_PLATE_SLOTS, ElitePlates } from '@/ui/ElitePlates';
 import { DeathOverlay } from '@/ui/DeathOverlay';
 import { dialogueLayer, type DialogueUI } from '@/ui/DialogueUI';
-import { el, h, shortScreen, testId } from '@/ui/dom';
+import { el, h, keepFocus, openModal, shortScreen, testId } from '@/ui/dom';
 import { clearEndingOverlays, EndingOverlay } from '@/ui/EndingOverlay';
 import { Hud } from '@/ui/Hud';
 import { MapLayers } from '@/ui/MapLayers';
@@ -595,8 +599,13 @@ export class SurfaceScene extends UiScene<'surface'> {
 
   #terminal: HTMLElement | null = null;
   #terminalOpen = false;
-  /** SPEC-036 §4.10: the open terminal's back-stack entry. */
-  #terminalBack: (() => void) | null = null;
+  /**
+   * SPEC-044 §4.3: the open terminal's modal close — it removes the SPEC-036
+   * §4.10 back-stack entry the modal carries and gives focus back.
+   */
+  #terminalModal: (() => void) | null = null;
+  /** SPEC-044 §4.7: the offers whose whole brief the player has opened. */
+  readonly #terminalBriefs = new Set<MissionId>();
   /** SPEC-036 §4.3: the rotate block, read every step. */
   #rotate: RotateOverlay | null = null;
 
@@ -1324,10 +1333,21 @@ export class SurfaceScene extends UiScene<'surface'> {
     this.disposer.add(() => touch.dispose());
     // SPEC-034 §4.2: the surface's way out of a corner. The flight menu never
     // passes one — there, Save & Quit and E5's recall already cover it.
-    const pauseMenu = new PauseMenu(services, () => services.requestResume(), undefined, {
-      allowed: () => this.#recallAllowed(),
-      run: () => this.#recallToPad(),
-    });
+    // SPEC-044 §4.8: Save & Quit says what it costs — Continue lands at the
+    // station, so the way back here is the jump's fuel.
+    const pauseMenu = new PauseMenu(
+      services,
+      () => services.requestResume(),
+      undefined,
+      {
+        allowed: () => this.#recallAllowed(),
+        run: () => this.#recallToPad(),
+      },
+      {
+        note: () =>
+          quitNote('surface', this.#planet.name, this.#economy?.fuelCost(this.#planet.id) ?? this.#planet.fuelCost),
+      },
+    );
     this.#pauseMenu = pauseMenu;
     this.disposer.add(() => pauseMenu.dispose());
     // Quitting out of an open pause menu never calls resume(); the disposer is
@@ -3758,8 +3778,9 @@ export class SurfaceScene extends UiScene<'surface'> {
     this.services.uiRoot.append(terminal);
     this.#terminal = terminal;
     this.disposer.add(() => {
-      this.#terminalBack?.();
-      this.#terminalBack = null;
+      const close = this.#terminalModal;
+      this.#terminalModal = null;
+      close?.();
       terminal.remove();
     });
   }
@@ -3769,13 +3790,15 @@ export class SurfaceScene extends UiScene<'surface'> {
    * holds the world as the map and the picker do — a storm warning or a swarm
    * waits for it. It is a back-stack entry too: E, Escape, the system Back and
    * its Close button all close it, and walking away is not possible while held.
+   *
+   * SPEC-044 §4.3: it opens as a modal — focus on its first Accept, else
+   * Return to ship, Tab kept inside — and the modal carries its back entry.
    */
   #openTerminal(): void {
     const terminal = this.#terminal;
     if (terminal === null || this.#terminalOpen) return;
     this.#terminalOpen = true;
     this.#uiHolds++;
-    this.#terminalBack = this.ui.pushBack(() => this.#closeTerminal());
     const world = this.#world;
     if (world !== null) {
       world.player.vx = 0;
@@ -3783,22 +3806,36 @@ export class SurfaceScene extends UiScene<'surface'> {
     }
     this.#renderTerminal();
     terminal.classList.remove('is-hidden');
+    this.#terminalModal = openModal(terminal, {
+      label: 'Pad terminal',
+      initialFocus:
+        terminal.querySelector<HTMLElement>('[data-testid^="terminal-accept-"]') ??
+        terminal.querySelector<HTMLElement>('[data-testid="terminal-return"]'),
+      onBack: () => this.#closeTerminal(),
+    });
   }
 
-  /** Idempotent: releases the hold and the back entry once, however it closes. */
+  /** Idempotent: releases the hold, the back entry and the focus once, however it closes. */
   #closeTerminal(): void {
     if (!this.#terminalOpen) return;
     this.#terminalOpen = false;
     this.#uiHolds = Math.max(0, this.#uiHolds - 1);
-    this.#terminalBack?.();
-    this.#terminalBack = null;
     this.#terminal?.classList.add('is-hidden');
+    const close = this.#terminalModal;
+    this.#terminalModal = null;
+    close?.();
   }
 
+  /** SPEC-044 §4.2: rebuilt through `keepFocus`, so an accept by keyboard keeps its place. */
   #renderTerminal(): void {
     const terminal = this.#terminal;
+    if (terminal === null) return;
+    keepFocus(terminal, () => this.#fillTerminal(terminal));
+  }
+
+  #fillTerminal(terminal: HTMLElement): void {
     const missions = this.#missions;
-    if (terminal === null || missions === null) return;
+    if (missions === null) return;
     const rows: HTMLElement[] = [];
     rows.push(el('p', 'terminal-title', 'PAD TERMINAL'));
 
@@ -3806,30 +3843,68 @@ export class SurfaceScene extends UiScene<'surface'> {
     // SPEC-043 §4.3: a replay this landing runs as a contract says so — read
     // with `visits[planet]`, the landing the scene counted on entry.
     const landing = save?.progress.visits[this.#planet.id] ?? 0;
-    for (const def of missions.available()) {
-      const replay = missions.isReplay(def.id as MissionId);
+    // SPEC-044 §4.7: new work first, then replays — the board's order
+    // (SPEC-035 §4.12) — so the first Accept, which takes focus, is new work.
+    const offers = missions.available();
+    const fresh = offers.filter((def) => !missions.isReplay(def.id as MissionId));
+    for (const def of [...fresh, ...offers.filter((offer) => !fresh.includes(offer))]) {
+      const id = def.id as MissionId;
+      const replay = missions.isReplay(id);
       const contract = replay && save !== null ? contractLabel(save, def, landing) : null;
-      const label = contract !== null ? `${def.title} (${contract})` : replay ? `${def.title} (replay · 50%)` : def.title;
+      const full = this.#terminalBriefs.has(id);
+      // SPEC-044 §4.7: an offer says what it is — its type, a replay's half
+      // pay (a contract keeps SPEC-043's label), its rewards and the first
+      // sentence of its brief, which a tap on the title opens in full.
       rows.push(
-        h(
-          'div',
-          { class: 'terminal-row' },
-          el('span', 'terminal-label', label),
-          testId(
-            h('button', {
-              class: 'ui-btn',
-              type: 'button',
-              click: () => this.#acceptAtTerminal(def.id as MissionId),
-            }, 'Accept'),
-            `terminal-accept-${def.id}`,
+        testId(
+          h(
+            'div',
+            { class: 'terminal-row terminal-offer' },
+            h(
+              'div',
+              { class: 'terminal-offer-head' },
+              h(
+                'button',
+                {
+                  class: 'terminal-offer-title',
+                  type: 'button',
+                  'aria-expanded': String(full),
+                  click: () => {
+                    if (!this.#terminalBriefs.delete(id)) this.#terminalBriefs.add(id);
+                    this.#renderTerminal();
+                  },
+                },
+                def.title,
+              ),
+              h('span', { class: `badge badge-${def.type}` }, def.type === 'main' ? 'Main' : 'Side'),
+              contract !== null
+                ? h('span', { class: 'badge badge-contract' }, contract)
+                : replay
+                  ? h('span', { class: 'badge badge-replay' }, 'Replay · 50 %')
+                  : null,
+            ),
+            h('p', { class: 'terminal-rewards' }, rewardsText(def.rewards, replay, contract !== null) || '—'),
+            testId(h('p', { class: 'terminal-brief' }, full ? def.brief : firstSentence(def.brief)), `terminal-brief-${def.id}`),
+            testId(
+              h('button', { class: 'ui-btn is-primary', type: 'button', click: () => this.#acceptAtTerminal(id) }, 'Accept'),
+              `terminal-accept-${def.id}`,
+            ),
           ),
+          `terminal-row-${def.id}`,
         ),
       );
     }
+    // SPEC-044 §4.7: what is running here, by stage, and the tracked one named.
     for (const state of missions.active) {
       const def = MISSION_TABLE[state.id];
-      const pin = state.id === missions.pinned ? ' ◈' : '';
-      rows.push(el('p', 'terminal-active', `${def.title} — stage ${state.stage + 1}/${def.stages.length}${pin}`));
+      rows.push(
+        h(
+          'p',
+          { class: 'terminal-active' },
+          `${def.title} — Stage ${state.stage + 1}/${def.stages.length}`,
+          state.id === missions.pinned ? h('span', { class: 'badge badge-pin' }, 'Tracked') : null,
+        ),
+      );
     }
     // 12-k: a terminal with nothing on it reads as a broken terminal. Say what
     // is holding the planet's work back, and where that work is taken.
@@ -3856,9 +3931,16 @@ export class SurfaceScene extends UiScene<'surface'> {
     const save = this.#save;
     if (missions === null || save === null) return;
     if (!missions.available().some((def) => def.id === id)) return;
-    const dialogueId = MISSION_TABLE[id].dialogue.onAccept;
+    const def = MISSION_TABLE[id];
+    // SPEC-044 §4.7: read before the accept — a replay is a replay of a mission
+    // already done, and its contract is this landing's.
+    const replay = missions.isReplay(id);
+    const contract = replay ? contractFor(save, def, save.progress.visits[this.#planet.id] ?? 0) : null;
+    const dialogueId = def.dialogue.onAccept;
     if (dialogueId !== undefined && !LINE_LEDGER.played(save, dialogueId)) this.#playDialogue(dialogueId);
     if (!missions.accept(id).ok) return;
+    // SPEC-044 §4.7: the board's toast, at the pad too.
+    this.ui.toast(acceptedText(def.title, replay, contract === null ? null : CONTRACTS[contract].name), 'good');
     this.#renderTerminal();
   }
 

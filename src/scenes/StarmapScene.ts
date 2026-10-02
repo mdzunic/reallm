@@ -8,6 +8,10 @@
 // the button's disabled text comes from `departReason`, the confirm sheet
 // re-validates through `payFuel` itself, and `transitioning` guards the
 // double-tap (14-b).
+//
+// SPEC-044 §4.6: the map opens on the planet the player most likely came to
+// fly to (`starmapPreselect`), with Depart focused, and a ◆ marks every world
+// with work waiting.
 import * as THREE from 'three';
 import type { GameServices } from '@/core/Services';
 import type { SceneParams } from '@/core/StateMachine';
@@ -25,10 +29,10 @@ import { Economy } from '@/systems/Economy';
 import { Progression } from '@/systems/Progression';
 import { departureDue, departureKey } from '@/systems/StoryBeats';
 import { activeFlightMission, runSkip } from '@/systems/Flight';
-import { departReason, formatTime, missionStatus, requirementText, skipRefusalText } from '@/systems/UiHelpers';
+import { departReason, formatTime, missionStatus, requirementText, skipRefusalText, starmapPreselect } from '@/systems/UiHelpers';
 import { director } from '@/scenes/Director';
 import { choiceSheet } from '@/ui/ConfirmSheet';
-import { el, h, testId } from '@/ui/dom';
+import { el, h, keepFocus, testId } from '@/ui/dom';
 import type { Look } from '@/core/Quality';
 import { NEUTRAL_SKY } from '@/views/Environment';
 import { addHubLights, hubSkyMesh, loadHubSky } from '@/views/HubBackdrop';
@@ -86,14 +90,19 @@ export class StarmapScene extends UiScene<'starmap'> {
     return STARMAP_LOOK;
   }
 
-  protected onEnter(_params: SceneParams['starmap']): void {
+  protected onEnter(params: SceneParams['starmap']): void {
     this.useEnvironment(NEUTRAL_SKY, HUB_ENVIRONMENT_INTENSITY);
     const data = this.services.save.current;
     if (data !== null) {
       const progression = new Progression(data, this.services.events);
-      this.#economy = new Economy(data, this.services.events, progression, this.services.save);
+      const economy = new Economy(data, this.services.events, progression, this.services.save);
+      this.#economy = economy;
       // SPEC-032 §4.7: the service override waives the unlocks, kept in step.
-      this.#economy.serviceMode = this.services.settings.serviceMode;
+      economy.serviceMode = this.services.settings.serviceMode;
+      // SPEC-044 §4.6: the planet it was given, the tracked mission's, the
+      // newest with a main mission open, else Cinder-4. With no save bound the
+      // map keeps `PLANET_IDS[0]`, which SPEC-014's e2e pins.
+      this.#selected = starmapPreselect(data, (planet) => economy.isUnlocked(planet), params?.planet);
     }
     this.#buildMap();
     this.#mountUi();
@@ -271,6 +280,27 @@ export class StarmapScene extends UiScene<'starmap'> {
     });
     this.#layoutNodes();
     this.#renderInfo();
+    // SPEC-044 §4.6: the player came to fly — Depart takes focus, or Back
+    // while Depart is disabled.
+    const depart = this.#info.querySelector<HTMLButtonElement>('[data-testid="starmap-depart"]');
+    const back = this.#info.querySelector<HTMLButtonElement>('[data-testid="starmap-back"]');
+    (depart !== null && !depart.disabled ? depart : back)?.focus({ preventScroll: true });
+  }
+
+  /**
+   * SPEC-044 §4.6: whether `planet` has a mission reading `active` or
+   * `available`. Only an open world counts: a locked one's missions are on no
+   * board yet — `c2_m1` needs nothing, but Vetra does — so they wait for no one.
+   */
+  #hasMissions(planet: PlanetId): boolean {
+    const data = this.services.save.current;
+    if (data === null || this.#economy?.isUnlocked(planet) !== true) return false;
+    return MISSION_IDS.some((id) => {
+      const def = MISSIONS[id];
+      if (def.planet !== planet) return false;
+      const status = missionStatus(data, def, 'station');
+      return status === 'active' || status === 'available';
+    });
   }
 
   /** SPEC-031 / AC-24: Back rides the info panel's action row — in flow, so it
@@ -299,25 +329,29 @@ export class StarmapScene extends UiScene<'starmap'> {
       const x = (projected.x * 0.5 + 0.5) * width - origin.left;
       const y = (-projected.y * 0.5 + 0.5) * height - origin.top;
       const unlocked = this.#economy?.isUnlocked(planet) ?? false;
+      const missions = this.#hasMissions(planet);
       return testId(
         h(
           'button',
           {
-            class: `starmap-node${unlocked ? '' : ' is-locked'}${this.#selected === planet ? ' is-selected' : ''}`,
+            class: `starmap-node${unlocked ? '' : ' is-locked'}${this.#selected === planet ? ' is-selected' : ''}${missions ? ' has-missions' : ''}`,
             type: 'button',
             style: `left:${Math.round(x)}px;top:${Math.round(y)}px`,
-            'aria-label': `${PLANETS[planet].name}${unlocked ? '' : ' (locked)'}`,
+            'aria-label': `${PLANETS[planet].name}${unlocked ? '' : ' (locked)'}${missions ? ', missions waiting' : ''}`,
             'aria-pressed': String(this.#selected === planet),
             click: () => this.#select(planet),
           },
           h('span', { class: 'starmap-node-name' }, PLANETS[planet].name),
           // AC-50: the lock glyph on dim nodes.
           unlocked ? null : h('span', { class: 'starmap-lock' }, '🔒'),
+          // SPEC-044 §4.6: work waits here — an active or an open mission.
+          missions ? testId(h('span', { class: 'starmap-node-missions', 'aria-hidden': 'true' }, '◆'), `map-node-${planet}-missions`) : null,
         ),
         `map-node-${planet}`,
       );
     });
-    box.replaceChildren(...buttons);
+    // SPEC-044 §4.2: a node chosen by keyboard keeps its focus.
+    keepFocus(box, () => box.replaceChildren(...buttons));
   }
 
   #select(planet: PlanetId): void {
@@ -343,10 +377,14 @@ export class StarmapScene extends UiScene<'starmap'> {
 
   // ------------------------------------------------------------- info panel
 
-  /** AC-53/54: everything the decision needs, on one panel. */
+  /** AC-53/54: everything the decision needs, on one panel — SPEC-044 §4.2: through `keepFocus`. */
   #renderInfo(): void {
     const info = this.#info;
     if (info === null) return;
+    keepFocus(info, () => this.#buildInfo(info));
+  }
+
+  #buildInfo(info: HTMLDivElement): void {
     const planet = PLANETS[this.#selected];
     const data = this.services.save.current;
     const economy = this.#economy;

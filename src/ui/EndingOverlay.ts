@@ -8,7 +8,7 @@
 //     prompt reading `instance/62 disconnected` over ~3 s, then resolves; the
 //     caller returns to the menu. Under reduce-motion the degradation is a
 //     cut, not a fade — the same states, nothing animated.
-import { el, h, testId } from '@/ui/dom';
+import { el, h, openModal, testId } from '@/ui/dom';
 
 /** ~3 s of degradation (AC-105); a single beat when motion is reduced. */
 export const ESCAPE_SEQUENCE_MS = 3000;
@@ -38,34 +38,42 @@ export class EndingOverlay {
     this.#host = host;
   }
 
-  /** AC-104: the report card, then whatever the caller calls free roam. */
+  /**
+   * AC-104: the report card, then whatever the caller calls free roam.
+   * SPEC-044 §4.3: a modal on Continue — the card has no back, so it carries
+   * no back-stack entry; its close gives focus back.
+   */
   playStay(lines: readonly string[]): Promise<void> {
     return new Promise((resolve) => {
       const card = testId(el('div', 'overlay-panel overlay-ending is-visible'), 'ending-stay');
       card.setAttribute('role', 'dialog');
+      let closeModal: (() => void) | null = null;
+      const next = testId(
+        h(
+          'button',
+          {
+            class: 'ui-btn is-primary',
+            type: 'button',
+            click: () => {
+              card.remove();
+              closeModal?.();
+              resolve();
+            },
+          },
+          'Continue',
+        ),
+        'ending-continue',
+      );
       const body = h(
         'div',
         { class: 'ending-report panel' },
         h('p', { class: 'ending-report-head' }, 'EARTH COMMAND — SURVEY REPORT · FILED'),
         ...lines.map((line) => h('p', { class: 'ending-report-line' }, line)),
-        testId(
-          h(
-            'button',
-            {
-              class: 'ui-btn is-primary',
-              type: 'button',
-              click: () => {
-                card.remove();
-                resolve();
-              },
-            },
-            'Continue',
-          ),
-          'ending-continue',
-        ),
+        next,
       );
       card.append(body);
       this.#host.append(card);
+      closeModal = openModal(card, { label: 'Survey report', initialFocus: next });
     });
   }
 

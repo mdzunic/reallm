@@ -2889,7 +2889,6 @@ html.debug .scene-tag {
 
 .credits .credits-text {
   margin: 0;
-  white-space: pre-wrap;
   font-size: 14px;
   color: var(--ink-dim);
   overflow-y: auto;
@@ -3112,7 +3111,10 @@ html.debug .scene-tag {
 
 .creation-foot {
   display: flex;
+  flex-wrap: wrap;
+  align-items: center;
   justify-content: flex-end;
+  gap: 10px;
 }
 
 /* AC-19: the scissor viewport tracks this box; the canvas shows through it,
@@ -5826,5 +5828,261 @@ html.reduce-motion .tracker-row.is-bumped {
   html.scheme-touch .mission-banner-body > p:not(.is-hidden) ~ p:not(.is-hidden)::before {
     content: ' · ';
     color: var(--ink-dim);
+  }
+}
+
+/* ================================================================ SPEC-044 */
+/* §4.1: the continue cue of a complete modal line — a label in the panel's
+   bottom-right corner, in the accent. It never animates. */
+.dialogue-next {
+  position: absolute;
+  right: 12px;
+  bottom: 6px;
+  color: var(--accent);
+  font-size: var(--type-xs);
+  letter-spacing: var(--track);
+  pointer-events: none;
+}
+
+.dialogue-next[hidden] {
+  display: none;
+}
+
+/* The cue's own line under a modal transmission's text. */
+.dialogue.is-modal {
+  padding-bottom: 24px;
+}
+
+/* §4.4: what a point buys, under each attribute row. */
+.attr-item {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.attr-desc {
+  margin: 0;
+  color: var(--ink-dim);
+  font-size: var(--type-xs);
+}
+
+/* §4.4: the one reason a disabled Confirm would otherwise leave a puzzle. */
+.creation-confirm-reason {
+  color: var(--warn);
+  font-size: var(--type-sm);
+}
+
+/* §4.5: the controls rows, in the pause menu's sheet and in their own. */
+.controls-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  text-align: left;
+}
+
+.controls-sheet {
+  max-height: calc(100dvh - 24px);
+  overflow-y: auto;
+}
+
+.controls-sheet .controls-rows {
+  margin-bottom: 14px;
+}
+
+/* §4.5: Controls beside Close in the settings head. */
+.settings-head-actions {
+  display: flex;
+  gap: 8px;
+}
+
+/* §4.6: an active board row's next step. */
+.board-next {
+  margin: 0;
+  color: var(--accent);
+  font-size: 14px;
+}
+
+/* §4.11: finished work, folded per planet and closed by default. */
+.board-done {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.board-done-summary {
+  min-height: 44px;
+  display: flex;
+  align-items: center;
+  color: var(--ink-dim);
+  cursor: pointer;
+  pointer-events: auto;
+}
+
+.board-done[open] > .board-done-summary {
+  margin-bottom: 10px;
+}
+
+/* §4.6: a world with work waiting carries a ◆ beside its name. */
+.starmap-node-missions {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  color: var(--accent-2);
+  font-size: var(--type-sm);
+  line-height: 1;
+  pointer-events: none;
+}
+
+/* §4.7: an offer at the pad — title, badges, rewards, the brief's first
+   sentence, Accept. */
+.pad-terminal .terminal-offer {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 4px;
+  padding: 8px 0;
+  border-top: 1px solid var(--panel-edge);
+}
+
+.terminal-offer-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.terminal-offer-title {
+  min-height: 44px;
+  padding: 0;
+  border: none;
+  background: none;
+  color: inherit;
+  font: inherit;
+  font-weight: 700;
+  text-align: left;
+  cursor: pointer;
+  pointer-events: auto;
+}
+
+.terminal-rewards {
+  margin: 0;
+  color: var(--good);
+  font-size: 14px;
+}
+
+.terminal-brief {
+  margin: 0;
+  color: var(--ink-dim);
+  font-size: 14px;
+}
+
+.pad-terminal .terminal-offer .ui-btn {
+  align-self: flex-end;
+}
+
+.pad-terminal .terminal-active .badge {
+  margin-left: 8px;
+}
+
+/* §4.9: the prologue replay and the licence file, side by side. */
+.credits-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.credits-heading {
+  margin: 12px 0 4px;
+  font-size: var(--type-sm);
+  letter-spacing: var(--track);
+  text-transform: uppercase;
+  color: var(--ink);
+}
+
+.credits-line {
+  margin: 0 0 6px;
+}
+
+a.credits-licences {
+  display: inline-flex;
+  align-items: center;
+  text-decoration: none;
+}
+
+/* §4.11: the station's sections are a tablist, then a rule, then its actions
+   as plain buttons — laid out as the tabs were in each of the rail's shapes. */
+.screen-tabs {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.screen-rail-rule {
+  width: 100%;
+  margin: 2px 0;
+  border: 0;
+  border-top: 1px solid var(--rule);
+}
+
+.screen-action {
+  width: 100%;
+  padding-left: 8px;
+  padding-right: 8px;
+}
+
+.screen.is-touch .screen-action {
+  min-height: 56px;
+}
+
+@media (max-width: 700px) {
+  .screen-tabs {
+    grid-column: 1 / -1;
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 6px;
+  }
+
+  .screen-rail-rule {
+    display: none;
+  }
+
+  .screen-action {
+    width: auto;
+    min-width: 0;
+    padding-left: 4px;
+    padding-right: 4px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+}
+
+@media (orientation: landscape) and (max-height: 500px) {
+  .screen-tabs {
+    display: flex;
+    flex-direction: row;
+    flex: 3 1 0;
+    min-width: 0;
+    gap: 6px;
+  }
+
+  .screen-rail-rule {
+    display: block;
+    width: 0;
+    margin: 0;
+    align-self: stretch;
+    border-top: 0;
+    border-left: 1px solid var(--rule);
+  }
+
+  .screen-action {
+    flex: 1 1 0;
+    width: auto;
+    min-width: 0;
+    padding-left: 4px;
+    padding-right: 4px;
+    letter-spacing: 0.04em;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
   }
 }

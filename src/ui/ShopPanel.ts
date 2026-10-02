@@ -46,7 +46,7 @@ import {
 } from '@/systems/UiHelpers';
 import { compareNodes } from '@/ui/Compare';
 import { confirmSheet } from '@/ui/ConfirmSheet';
-import { el, h, testId, type UiRoot } from '@/ui/dom';
+import { el, h, keepFocus, testId, type UiRoot } from '@/ui/dom';
 import { openGearCard } from '@/ui/GearCard';
 import { itemIcon } from '@/ui/ItemIcon';
 
@@ -113,7 +113,12 @@ export class ShopPanel {
     this.refresh();
   }
 
+  /** SPEC-044 §4.2: through `keepFocus`, so a purchase by keyboard keeps its place. */
   refresh(): void {
+    keepFocus(this.#container, () => this.#render());
+  }
+
+  #render(): void {
     const tabs = h(
       'div',
       { class: 'shop-tabs' },

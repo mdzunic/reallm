@@ -124,6 +124,60 @@ export function passiveText(passive: Class['passive']): string {
   return parts.join(' · ');
 }
 
+/** SPEC-044 §4.4: the attribute names as a player reads them, in the form's order. */
+const ATTRIBUTE_NAMES: Readonly<Record<keyof Attributes, string>> = {
+  might: 'Might',
+  vigor: 'Vigor',
+  agility: 'Agility',
+  tech: 'Tech',
+};
+
+/** SPEC-044 §4.4: a class card's base line — `Might 3 · Vigor 3 · Agility 1 · Tech 1`. */
+export function attributeLine(attributes: Attributes): string {
+  return (Object.keys(ATTRIBUTE_NAMES) as (keyof Attributes)[])
+    .map((attribute) => `${ATTRIBUTE_NAMES[attribute]} ${attributes[attribute]}`)
+    .join(' · ');
+}
+
+/** Every per-point effect key `ATTRIBUTE_EFFECTS` holds, across the four attributes. */
+export type AttributeEffectKey = {
+  [A in keyof typeof ATTRIBUTE_EFFECTS]: keyof (typeof ATTRIBUTE_EFFECTS)[A];
+}[keyof typeof ATTRIBUTE_EFFECTS];
+
+/** A per-point share as the form prints it: `0.04` → `4`. */
+function points(perPoint: number): number {
+  return Math.round(perPoint * 100);
+}
+
+/**
+ * SPEC-044 §4.4: the words for each `ATTRIBUTE_EFFECTS` key. Keyed by the
+ * table's own union, so a new effect without words is a compile error — and
+ * `tests/ui/helpers.test.ts` walks the table at runtime as well.
+ */
+export const ATTRIBUTE_EFFECT_WORDS: Readonly<Record<AttributeEffectKey, (perPoint: number) => string>> = {
+  damage: (p) => `+${points(p)} % damage`,
+  maxHp: (n) => `+${n} max HP`,
+  moveSpeed: (p) => `+${points(p)} % speed`,
+  critChance: (p) => `+${points(p)} % crit chance`,
+  dashCooldownCut: (p) => `−${points(p)} % dash cooldown`,
+  companionEffect: (p) => `+${points(p)} % companion effect`,
+  priceCut: (p) => `−${points(p)} % prices`,
+};
+
+/**
+ * SPEC-044 §4.4: what one point of `attribute` buys — `Agility — +2 % speed ·
+ * +2 % crit chance · −3 % dash cooldown per point`. It reads the table the
+ * stat formulas read (SPEC-039 §4.3), so a retune never leaves the form lying.
+ */
+export function attributeEffectText(attribute: keyof Attributes): string {
+  const effects = ATTRIBUTE_EFFECTS[attribute] as Readonly<Partial<Record<AttributeEffectKey, number>>>;
+  const parts: string[] = [];
+  for (const [key, perPoint] of Object.entries(effects) as [AttributeEffectKey, number][]) {
+    parts.push(ATTRIBUTE_EFFECT_WORDS[key](perPoint));
+  }
+  return `${ATTRIBUTE_NAMES[attribute]} — ${parts.join(' · ')} per point`;
+}
+
 /**
  * SPEC-014 AC-18, SPEC-038 §4.6: the one honest line under each difficulty —
  * the creation toggle and the settings row print the same words, so it lives
@@ -136,13 +190,20 @@ export const DIFFICULTY_LINES: Readonly<Record<Difficulty, string>> = {
   hard: 'Hard — tougher, deadlier hostiles and twice the elites; a death costs a fifth of the hold.',
 };
 
+/** E9 / SPEC-044 §4.10: a slot this build cannot read because a newer one wrote it. */
+export const NEWER_SAVE_TEXT = 'Save from a newer version';
+
 /**
  * One line per occupied slot for the Load list (AC-4): name, class, level,
  * planet, playtime — in the order a player reads them. `Corrupt` and `Empty`
  * match SPEC-007's SavePanel wording; a run parked at the station has no
  * `currentPlanet` and reads as `Station`.
+ *
+ * SPEC-044 §4.10: a save from a newer version is readable, just not by this
+ * build (E9) — it says so before the `Corrupt` rule, which it also carries.
  */
 export function slotLine(summary: SlotSummary): string {
+  if (summary.newer === true) return NEWER_SAVE_TEXT;
   if (summary.corrupt === true) return 'Corrupt';
   if (summary.empty) return 'Empty';
   const cls = summary.classId !== undefined ? CLASS_TABLE[summary.classId].name : '';
@@ -170,6 +231,34 @@ export function requirementText(req: Requirement): string {
       return `Requires: ${req.flag.replace(/_/g, ' ')}`;
     }
   }
+}
+
+/**
+ * SPEC-044 §4.11: one requirement as an item of the board's `Needs:` line —
+ * `Level 3`, `Ship shield tier 2`, `Complete 'Black Gold'`, `Complete Chapter 2`,
+ * or a flag in words. `requirementText` keeps its own wording for the star map
+ * and the pad terminal.
+ */
+export function requirementItem(req: Requirement): string {
+  switch (req.kind) {
+    case 'ship':
+      return `Ship ${UPGRADES[req.system].name.toLowerCase()} tier ${req.tier}`;
+    case 'mission':
+      return `Complete '${MISSIONS[req.id as MissionId]?.title ?? req.id}'`;
+    case 'level':
+      return `Level ${req.level}`;
+    case 'flag': {
+      const chapter = /^chapter(\d)_done$/.exec(req.flag);
+      if (chapter !== null) return `Complete Chapter ${chapter[1]}`;
+      const words = req.flag.replace(/_/g, ' ');
+      return words.charAt(0).toUpperCase() + words.slice(1);
+    }
+  }
+}
+
+/** SPEC-044 §4.11: a locked row's requirements in one grammar — `Needs: Complete 'Black Gold' · Level 3`. */
+export function needsLine(reqs: readonly Requirement[]): string {
+  return `Needs: ${reqs.map(requirementItem).join(' · ')}`;
 }
 
 /**
@@ -547,6 +636,78 @@ export function missionStatus(save: Save, def: MissionDef, scene: MissionScene):
   }
   if (missingRequirements(save, def.requires).length > 0) return 'locked';
   return 'available';
+}
+
+/** SPEC-044 §4.11: what the board prints for each status — never the status id itself. */
+export const STATUS_LABELS: Readonly<Record<MissionStatus, string>> = {
+  active: 'In progress',
+  available: 'New',
+  locked: 'Locked',
+  replayable: 'Done · replay for 50 %',
+  done: 'Done',
+};
+
+/**
+ * SPEC-044 §4.7: the text up to and including the first `. `, `! ` or `? ` —
+ * the pad terminal's one-line brief — or the whole text when it has none.
+ */
+export function firstSentence(text: string): string {
+  let end = -1;
+  for (const stop of ['. ', '! ', '? ']) {
+    const at = text.indexOf(stop);
+    if (at >= 0 && (end < 0 || at < end)) end = at;
+  }
+  return end < 0 ? text : text.slice(0, end + 1);
+}
+
+/**
+ * SPEC-044 §4.7: the toast an accept raises, at the board and at the pad
+ * terminal alike — `Accepted '<title>'`, a plain replay's half pay, or the
+ * contract a replay runs as (SPEC-043 §4.3).
+ */
+export function acceptedText(title: string, replay: boolean, contract: string | null = null): string {
+  if (contract !== null) return `Replaying '${title}' — ${contract} contract`;
+  return replay ? `Replaying '${title}' — 50 % rewards` : `Accepted '${title}'`;
+}
+
+/**
+ * SPEC-044 §4.6: the planet the star map opens on — the first of
+ *   1. `requested`, if it is unlocked (44-h: a locked one falls through);
+ *   2. the tracked mission's planet, if unlocked;
+ *   3. the unlocked planet of the highest chapter with a main mission reading
+ *      `available` at the station;
+ *   4. Cinder-4.
+ */
+export function starmapPreselect(save: Save, unlocked: (planet: PlanetId) => boolean, requested?: PlanetId): PlanetId {
+  if (requested !== undefined && unlocked(requested)) return requested;
+  const tracked = pinnedMission(save);
+  if (tracked !== null) {
+    const planet = MISSIONS[tracked].planet;
+    if (unlocked(planet)) return planet;
+  }
+  let newest: PlanetId | null = null;
+  for (const planet of PLANET_IDS) {
+    if (!unlocked(planet)) continue;
+    if (newest !== null && PLANET_TABLE[planet].chapter < PLANET_TABLE[newest].chapter) continue;
+    const offers = (Object.values(MISSIONS) as MissionDef[]).some(
+      (def) => def.planet === planet && def.type === 'main' && missionStatus(save, def, 'station') === 'available',
+    );
+    if (offers) newest = planet;
+  }
+  return newest ?? (PLANET_IDS[0] as PlanetId);
+}
+
+/**
+ * SPEC-044 §4.8: what Save & Quit costs, said before it happens — Continue
+ * lands at the station (PLAN R18 decision 12), so a quit on a planet costs the
+ * jump back, and a quit in flight has already spent this one. `fuel` is
+ * `Economy.fuelCost` for the planet.
+ */
+export function quitNote(scene: 'surface' | 'flight', planetName: string, fuel: number): string {
+  if (scene === 'surface') {
+    return `You will resume at Command Relay. Flying back to ${planetName} costs ${fuel} oil, and timed objectives restart.`;
+  }
+  return `You will resume at Command Relay. The fuel for this jump (${fuel} oil) is already spent.`;
 }
 
 /**

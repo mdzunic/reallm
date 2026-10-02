@@ -297,12 +297,13 @@ describe('the scene graph (§4.2)', () => {
     }
   });
 
-  it('lets the pausable scenes and the station quit to the menu (D-10, SPEC-014 AC-29)', () => {
+  it('lets the pausable scenes, the station and creation go back to the menu (D-10, SPEC-014 AC-29, SPEC-044 §4.4)', () => {
     expect(isAllowedTransition('flight', 'menu')).toBe(true);
     expect(isAllowedTransition('surface', 'menu')).toBe(true);
-    // The station earned its row with SPEC-014's Quit tab.
+    // The station earned its row with SPEC-014's Quit tab…
     expect(isAllowedTransition('station', 'menu')).toBe(true);
-    expect(isAllowedTransition('creation', 'menu')).toBe(false);
+    // …and creation with SPEC-044's `creation-back`, which was its dead end.
+    expect(ALLOWED_TRANSITIONS.creation).toEqual(['station', 'menu']);
     expect(isAllowedTransition('starmap', 'menu')).toBe(false);
   });
 });

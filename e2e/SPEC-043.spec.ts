@@ -167,8 +167,11 @@ test.describe('2. the contract label', () => {
     await start(page, URL);
     await prepare(page, { done: ['c1_m1', 'c1_m2'] });
     await board(page);
+    // SPEC-044 §4.11: a plain replay sits in the planet's Completed fold, and
+    // its badge reads `50 % rewards`.
+    await page.getByTestId('board-done-cinder4').locator('summary').click();
     await expect(page.getByTestId('mission-c1_m2-replay')).toHaveText(/^Replay/);
-    await expect(page.getByTestId('mission-c1_m2-replay')).toContainText('50% rewards');
+    await expect(page.getByTestId('mission-c1_m2-replay')).toContainText('50 % rewards');
     await expect(page.getByTestId('mission-c1_m2-contract')).toHaveCount(0);
   });
 });
@@ -302,6 +305,8 @@ test('7. c1_m2 accepted on the pad and finished records a best time, which the b
   expect(Number.isInteger(seconds) && seconds >= 1).toBe(true);
 
   await board(page);
+  // SPEC-044 §4.11: the finished mission is in Cinder-4's Completed fold.
+  await page.getByTestId('board-done-cinder4').locator('summary').click();
   const minutes = Math.floor(seconds / 60);
   await expect(page.getByTestId('mission-c1_m2-best')).toHaveText(`Best ${minutes}:${String(seconds % 60).padStart(2, '0')}`);
 });

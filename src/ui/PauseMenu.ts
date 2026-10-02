@@ -10,11 +10,16 @@
 // §4.7: Resume, Settings (the shared panel), Controls (a scheme-aware
 // cheat-sheet, SPEC-005), Save & Quit (flush the save, back to the menu).
 // The music duck while it is open stays the scene's (SPEC-006 AC-54, AC-83).
+//
+// SPEC-044: the menu opens as a modal on Resume (§4.3); Controls docks the one
+// controls sheet, `controls-sheet`, built from `CONTROL_ROWS` (§4.5); and with
+// a quit hook, Save & Quit first says what the quit costs (§4.8).
 import type { BenchmarkOutcome } from '@/core/Benchmark';
 import type { SaveStore } from '@/core/Save';
 import type { SettingsStore } from '@/core/Settings';
 import { confirmSheet } from '@/ui/ConfirmSheet';
-import { el, h, testId, uiLayers } from '@/ui/dom';
+import { dockedControlsSheet } from '@/ui/ControlsSheet';
+import { el, h, openModal, testId, uiLayers } from '@/ui/dom';
 import { createScreen, type Screen } from '@/ui/Screen';
 import { SettingsPanel, type QualityTarget } from '@/ui/SettingsPanel';
 
@@ -54,48 +59,17 @@ export interface PauseRecall {
 export const RECALL_TITLE = 'Recall to pad';
 export const RECALL_BODY = 'Return to the landing pad? Timed objectives restart.';
 
-/** AC-84: the cheat-sheet rows, per scheme (bindings are SPEC-005's). */
-const CONTROL_SHEETS = {
-  keyboard: [
-    ['Move / steer', 'WASD or Arrow keys'],
-    ['Aim', 'Mouse'],
-    // SPEC-038 §4.7, §4.9: the gun fires on its own; a held button aims it.
-    ['Fire', 'Automatic — hold Space or Left mouse to aim'],
-    ['Dash', 'Right mouse or V'],
-    ['Interact', 'E or F'],
-    // SPEC-028 §4.8: the loadout keys — the digits switch, Q heals.
-    ['Switch weapon', '1 / 2 / 3, R or wheel'],
-    ['Heal', 'Q'],
-    ['Throw / plant', 'G'],
-    ['Gadget', 'C'],
-    // SPEC-034 §4.16: X, not Ctrl — Ctrl+W closes the tab next to WASD.
-    ['Throttle (flight)', 'Shift up · X down'],
-    // SPEC-026 §4.7: M opens the surface map; T cycles the tracked mission.
-    ['Map', 'M'],
-    ['Track mission', 'T'],
-    ['Pause', 'Esc or P'],
-  ],
-  // SPEC-036 §4.11: the words match the controls — a drag on the right is
-  // the fire zone, never a throttle, and the launcher fires from its slot.
-  touch: [
-    ['Move / steer', 'Drag on the left side'],
-    ['Aim & fire', 'Drag on the right side — auto-fire shoots for you'],
-    // SPEC-038 §4.9: the thumb arc's corner cell.
-    ['Dash', 'DASH button'],
-    ['Throttle (flight)', '▲ / ▼ buttons'],
-    // SPEC-028 §4.5: the bar doubles as the touch buttons. SPEC-037 §4.10:
-    // it is the only way now — the weapon-cycle and item buttons are gone.
-    ['Switch weapon', 'Tap a weapon on the bar'],
-    ['Launcher', 'Tap its slot to fire it'],
-    ['Heal', 'Tap the heal slot on the bar'],
-    ['Use a pack', 'Tap it on the bar; hold to choose'],
-    ['Interact', 'USE'],
-    ['Map', 'Tap the minimap'],
-    ['Track mission', 'Tap the tracker'],
-    ['Pause', 'Pause button, or the Back gesture'],
-  ],
-  gamepad: [['Controls', 'Gamepad bindings follow the keyboard sheet']],
-} as const;
+/**
+ * SPEC-044 §4.8: the surface's and the flight's Save & Quit. `note()` is asked
+ * on every press — `quitNote` with the planet and its fuel — and becomes the
+ * body of the sheet the press opens.
+ */
+export interface PauseQuit {
+  note(): string;
+}
+
+/** SPEC-044 §4.8: the quit sheet's title. */
+export const QUIT_TITLE = 'Quit to the main menu?';
 
 export class PauseMenu {
   readonly #deps: PauseDeps;
@@ -107,13 +81,17 @@ export class PauseMenu {
   readonly #skip: { readonly button: HTMLButtonElement; readonly hooks: PauseSkip } | null;
   readonly #recall: { readonly button: HTMLButtonElement; readonly hooks: PauseRecall } | null;
   readonly #onResume: () => void;
+  readonly #quit: PauseQuit | null;
   /** SPEC-036 §4.4: this menu's back-stack entry while it is open. */
   #releaseBack: (() => void) | null = null;
+  /** SPEC-044 §4.3: the open modal's close, which gives focus back. */
+  #closeModal: (() => void) | null = null;
   #quitting = false;
 
-  constructor(deps: PauseDeps, onResume: () => void, skip?: PauseSkip, recall?: PauseRecall) {
+  constructor(deps: PauseDeps, onResume: () => void, skip?: PauseSkip, recall?: PauseRecall, quit?: PauseQuit) {
     this.#deps = deps;
     this.#onResume = onResume;
+    this.#quit = quit ?? null;
     // SPEC-031 §4.4: the pause menu wears the console frame too — SYSTEM HOLD
     // on the channel — while staying a UI layer inside its scene, never a
     // scene of its own (D-1). Hidden until `show()`.
@@ -144,9 +122,9 @@ export class PauseMenu {
     this.#resume.type = 'button';
     this.#resume.addEventListener('click', onResume);
 
-    const settings = testId(h('button', { class: 'ui-btn', type: 'button', click: () => this.#settings.show() }, 'Settings'), 'pause-settings');
+    const settings = testId(h('button', { class: 'ui-btn', type: 'button', click: () => this.#openSettings() }, 'Settings'), 'pause-settings');
     const controls = testId(h('button', { class: 'ui-btn', type: 'button', click: () => this.#toggleControls() }, 'Controls'), 'pause-controls');
-    const quit = testId(h('button', { class: 'ui-btn', type: 'button', click: () => this.#saveAndQuit() }, 'Save & Quit'), 'pause-quit');
+    const quitButton = testId(h('button', { class: 'ui-btn', type: 'button', click: () => this.#quitPressed() }, 'Save & Quit'), 'pause-quit');
 
     this.#controls = testId(el('div', 'pause-sheet is-hidden'), 'pause-sheet');
 
@@ -185,7 +163,7 @@ export class PauseMenu {
     this.#recall = recallButton === null || recall === undefined ? null : { button: recallButton, hooks: recall };
 
     this.#screen.body.append(
-      h('div', { class: 'pause-actions' }, this.#resume, settings, controls, skipButton, recallButton, quit),
+      h('div', { class: 'pause-actions' }, this.#resume, settings, controls, skipButton, recallButton, quitButton),
       this.#controls,
     );
     deps.uiRoot.append(this.#root);
@@ -212,34 +190,79 @@ export class PauseMenu {
     this.#root.classList.add('is-visible');
     // SPEC-036 §4.4: Escape and the system Back resume, as Resume does.
     this.#releaseBack ??= uiLayers(this.#deps.uiRoot).pushBack(() => this.#onResume());
-    this.#resume.focus();
+    // SPEC-044 §4.3: a modal on Resume, so Enter right away resumes.
+    this.#closeModal ??= openModal(this.#root, { label: 'Paused', initialFocus: this.#resume });
   }
 
   hide(): void {
     this.#root.classList.remove('is-visible');
-    this.#controls.classList.add('is-hidden');
+    this.#closeControls();
     this.#settings.hide();
     this.#releaseBack?.();
     this.#releaseBack = null;
+    this.#releaseModal();
   }
 
   dispose(): void {
     this.#releaseBack?.();
     this.#releaseBack = null;
+    this.#releaseModal();
     this.#settings.dispose();
     this.#screen.dispose();
   }
 
-  /** AC-84: rebuilt on each open, so it follows the scheme that is live now. */
+  #releaseModal(): void {
+    const close = this.#closeModal;
+    this.#closeModal = null;
+    close?.();
+  }
+
+  /**
+   * AC-84: rebuilt on each open, so it follows the scheme that is live now.
+   * SPEC-044 §4.5: the sheet is the controls sheet, `controls-sheet`, the same
+   * the settings panel opens; the gamepad scheme reads the keyboard's rows.
+   */
   #toggleControls(): void {
-    if (!this.#controls.classList.toggle('is-hidden')) {
-      const scheme = this.#deps.input.state.scheme;
-      this.#controls.replaceChildren(
-        ...CONTROL_SHEETS[scheme].map(([what, how]) =>
-          h('div', { class: 'pause-sheet-row' }, h('span', { class: 'pause-sheet-what' }, what), h('span', {}, how)),
-        ),
-      );
+    if (this.#controls.classList.toggle('is-hidden')) this.#controls.replaceChildren();
+    else this.#controls.replaceChildren(dockedControlsSheet(this.#deps.input.state.scheme));
+  }
+
+  /** A closed sheet holds nothing, so `controls-sheet` names one sheet at a time. */
+  #closeControls(): void {
+    this.#controls.classList.add('is-hidden');
+    this.#controls.replaceChildren();
+  }
+
+  /**
+   * SPEC-044 §4.5: the settings panel opens over the menu with its own
+   * Controls, so the docked sheet closes first; there is one controls sheet.
+   */
+  #openSettings(): void {
+    this.#closeControls();
+    this.#settings.show();
+  }
+
+  /**
+   * SPEC-044 §4.8: with a quit hook — the surface and the flight — the press
+   * first asks, naming what the quit costs, with `Keep playing` focused; only
+   * `Quit` runs today's save-and-quit. Without one it quits at once.
+   */
+  #quitPressed(): void {
+    if (this.#quitting) return;
+    const quit = this.#quit;
+    if (quit === null) {
+      this.#saveAndQuit();
+      return;
     }
+    void confirmSheet(uiLayers(this.#deps.uiRoot), {
+      title: QUIT_TITLE,
+      body: quit.note(),
+      confirmText: 'Quit',
+      cancelText: 'Keep playing',
+      focus: 'cancel',
+    }).then((yes) => {
+      if (yes) this.#saveAndQuit();
+    });
   }
 
   /** AC-85: the save is flushed before the scene machine is asked to leave. */

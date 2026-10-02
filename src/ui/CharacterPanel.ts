@@ -22,7 +22,7 @@ import { quickEligible } from '@/systems/Loadout';
 import { characterXpText, computePlayerStats, failText, gearTooltip, HP_FULL_TEXT } from '@/systems/UiHelpers';
 import { compareNodes } from '@/ui/Compare';
 import { confirmSheet } from '@/ui/ConfirmSheet';
-import { el, h, testId, type UiRoot } from '@/ui/dom';
+import { el, h, keepFocus, testId, type UiRoot } from '@/ui/dom';
 import { itemIcon } from '@/ui/ItemIcon';
 import { portraitManifest, portraitSource } from '@/ui/portraits';
 
@@ -70,9 +70,12 @@ export class CharacterPanel {
    * station header's is the one, and the Cargo block below keeps the hold.
    */
   refresh(): void {
-    const panel = testId(el('div', 'character'), 'character-panel');
-    panel.append(this.#statsBlock(), this.#gearBlock(), this.#inventoryBlock(), this.#resourcesBlock());
-    this.#container.replaceChildren(panel);
+    // SPEC-044 §4.2: through `keepFocus`, so an equip or a use by keyboard keeps its place.
+    keepFocus(this.#container, () => {
+      const panel = testId(el('div', 'character'), 'character-panel');
+      panel.append(this.#statsBlock(), this.#gearBlock(), this.#inventoryBlock(), this.#resourcesBlock());
+      this.#container.replaceChildren(panel);
+    });
   }
 
   // ------------------------------------------------------------------ stats

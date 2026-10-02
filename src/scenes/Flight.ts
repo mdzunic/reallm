@@ -42,7 +42,7 @@ import {
 } from '@/systems/Flight';
 import { Missions } from '@/systems/Missions';
 import { cumulativeXp, LEVEL_CAP, Progression, xpToNext } from '@/systems/Progression';
-import { completionLines } from '@/systems/UiHelpers';
+import { completionLines, quitNote } from '@/systems/UiHelpers';
 import { AriaHint } from '@/ui/AriaHint';
 import { el, h, shortScreen, testId } from '@/ui/dom';
 import { Hud } from '@/ui/Hud';
@@ -120,6 +120,8 @@ export class FlightScene extends UiScene<'flight'> {
 
   #planet: PlanetDef = PLANETS.cinder4;
   #save: Save | null = null;
+  /** SPEC-044 §4.8: `Economy.fuelCost` of this trip's destination, for the quit sheet. */
+  #jumpFuelCost = 0;
   #ephemeralSave = false;
   #flight: Flight | null = null;
   #missions: Missions | null = null;
@@ -204,6 +206,8 @@ export class FlightScene extends UiScene<'flight'> {
     const visitRng = services.rng.visit(this.#planet.id, visits);
     const progression = new Progression(save, services.events);
     const economy = new Economy(save, services.events, progression, bound === null ? undefined : services.save);
+    // SPEC-044 §4.8: what this jump cost — the engine cannot change mid-flight.
+    this.#jumpFuelCost = economy.fuelCost(this.#planet.id);
     // SPEC-032 §4.7: the service override, kept in step with the setting.
     economy.serviceMode = services.settings.serviceMode;
     this.disposer.add(
@@ -491,13 +495,21 @@ export class FlightScene extends UiScene<'flight'> {
 
     // SPEC-032 §4.4: `Skip the run` under `runSkip`'s rule; it resumes the
     // scene and runs the skip on the next update, so the loop is live.
-    const menu = new PauseMenu(services, () => services.requestResume(), {
-      allowed: () => this.#canSkipRun(),
-      run: () => {
-        this.#skipPending = true;
-        services.requestResume();
+    // SPEC-044 §4.8: Save & Quit says what it costs — this jump's fuel is
+    // spent, and Continue lands at the station (44-i: the landing too).
+    const menu = new PauseMenu(
+      services,
+      () => services.requestResume(),
+      {
+        allowed: () => this.#canSkipRun(),
+        run: () => {
+          this.#skipPending = true;
+          services.requestResume();
+        },
       },
-    });
+      undefined,
+      { note: () => quitNote('flight', this.#planet.name, this.#jumpFuelCost) },
+    );
     this.#pauseMenu = menu;
     this.disposer.add(() => {
       menu.dispose();

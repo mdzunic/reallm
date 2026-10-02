@@ -1752,3 +1752,82 @@ What the container showed:
 - [ ] after chapter 1, replay `c1_m2` as a contract and play its modifier;
 - [ ] switch to hard mid-chapter and feel the difference;
 - [ ] read your best times on the board.
+
+## SPEC-044 — focus and flow: keys, focus, the station's next step and honest screens (M7f)
+
+- **Build:** `spec/SPEC-044` — untagged
+- **Devices:**
+  - desktop — headless Chromium 1280 × 720 (Playwright, Linux container, **software GL / SwiftShader**)
+  - phone — the `phone-landscape` project's Chromium phone at every `PHONE_VIEWPORTS` size, for the
+    neighbours' layouts only; _no handset in the build container_ (§7's pass on the reference phone is owed, below)
+
+Recorded from the container the branch was built in: `npm run check` — 100
+files and 2,179 tests, none skipped — and, a few files per invocation,
+`e2e/SPEC-044.spec.ts` (§6.2's thirteen cases in twenty-one tests — 1b, 1c, 6b,
+8b, 8c, 9b, 10b and 13b beside them — all green under four workers, the key cases
+twice over), the three pins §4.10 and §4.11 move (`SPEC-007`, `SPEC-024`,
+`SPEC-043`), and the neighbours this spec touches: `SPEC-003`, `SPEC-005`, `SPEC-006`,
+`SPEC-008` to `SPEC-011`, the three `SPEC-012` files, `SPEC-013`, `SPEC-014`,
+`SPEC-015` (desktop, `mobile` and `pwa`), `SPEC-017`, `SPEC-019`, `SPEC-020`,
+`SPEC-022`, `SPEC-023`, `SPEC-025` to `SPEC-029`, `SPEC-031`, `SPEC-032`,
+`SPEC-034` to `SPEC-036`, `SPEC-037` with its whole phone matrix, `SPEC-038`,
+`SPEC-039`, `SPEC-040`, `SPEC-041`, `SPEC-042` with its phone matrix,
+`boot-gate`, `dev-skip-flight`, `lifecycle`, `pause`, `scene-cycle`, `smoke`,
+`stats-overlay`, `surface-env` and `touch-controls`. Under four workers seven
+cases outside this spec failed once each and passed on a rerun: `SPEC-026`
+cases 4 (a 1.5 s walk that lit nothing new on a crawling frame clock) and 5,
+and `SPEC-034` case 7 (both in their own `dismiss` helper's unguarded click on
+a line that had moved on by itself — case 7 is on the known-flaky list from
+`main`), `SPEC-012`'s CARGO FULL count (the toast gone between its two reads),
+`SPEC-019`'s reduce-motion fade (not faded inside its 5 s sampling window),
+`SPEC-011`'s surface bed (the `?scene=` jump not landed inside 5 s) and
+`SPEC-036` case 17's zone ghosts (their 12 s clock ran out during a slow
+landing; green in the same file's earlier run on this branch).
+
+After QA's first pass, two fixes followed. AC-9: a modal now falls past a
+control that cannot take focus, so the gear card opens on Close while its Buy
+is disabled. AC-17: the pause menu's Controls now shows the one
+`controls-sheet`. They added cases 8b and 8c and rewrote case 9. The file's
+twenty-one tests then ran green twice under four workers. So did the cases in
+other files that drive the pause menu's `pause-sheet`: `SPEC-034` case 4,
+`SPEC-036` case 13 at all five short phones and in flight, `SPEC-036` case 16
+and `SPEC-037` case 13. `npm run check` again counted 100 files and 2,179 tests.
+
+What the container showed:
+
+| Signal | Observed |
+| --- | --- |
+| Modal line by keyboard | `intro_command` took focus as `role="dialog"` / `aria-modal="true"`; `dialogue-next` read `▸ Enter` once the line had typed out, with no animation or transition; at most six Enters 0.35 s apart ended it, and focus went back to `station-tab-missions` |
+| Grace, repeat, Space / E / F | a Space dispatched in the task that opened the line, and a repeated Enter 0.4 s later, left it as it was; fresh Space, E, F and Space each filled the line they found or moved it on — judged in the page at the press — and none reached the game |
+| Non-modal line | the Scav's line on Cinder-4 stayed a log with no cue and no focus; Space left it as it was and the game took it as play; Enter filled it and then moved it on to ARIA |
+| A modal above a line | with the pause menu over `intro_command` and focus on the menu itself, Enter and E left the line alone; Escape resumed, focus came back to the line, and Enter read it |
+| Creation | no class pressed, `Choose a class to continue` beside the disabled Confirm, `creation-back` left of it; Enter on `class-marine` removed the reason; Enter twice on `attr-might-plus` spent two points and kept its focus; the last point disabled it and focus went to a neighbour; `Might — +4 % damage per point`, `Agility — +2 % speed · +2 % crit chance · −3 % dash cooldown per point`; the card reads `Might 3 · Vigor 3 · Agility 1 · Tech 1` |
+| Creation's Back | with a name typed: `Leave without creating a salvager?` on `Stay`; Leave reached the menu with no slot key written; Escape opened the same sheet and a second Escape stayed; untouched, Escape and the browser's Back both went straight to the menu |
+| Station rail | three `role="tab"` buttons in `Station`'s tablist; ArrowDown then Enter opened the Shop with focus on its tab; Home, End and the wrap; the panel a `tabpanel` labelled by the tab; `Star Map ›`, `Settings` and `Quit to menu` after the rule with no role and no pressed state |
+| Next step | `c2_m1` accepted by Enter: `Accepted 'Whiteout'`, `Next: Star Map → depart for Vetra`, the actions `Star Map` (primary), Pin, Abandon with focus kept in the row, and the rail's Star Map primary; `Star Map` opened the map on Vetra with Depart focused; `◆` on Vetra and Cinder-4 (`missions waiting`), none on locked Ferrum |
+| Preselection | with `c1_s1` tracked and Vetra open, the map opened on Cinder-4; a locked Ferrum given fell through to Cinder-4; arrowed onto Ferrum, Depart disabled and focus went to Back |
+| Pad terminal | E opened it on `terminal-accept-c1_m2`, as a dialog on the back-stack; the row reads `Main`, `+150 XP`, the brief's first sentence (all of it after a tap on the title), and `c1_m1` reads `Replay · 50 %`; Enter accepted, `Accepted 'Black Gold'`, `Black Gold — Stage 1/…` marked `Tracked` and no `◈`; twenty Tabs and three Shift+Tabs stayed inside; Escape closed it and the back-stack lost one entry |
+| Sheets | the board's Abandon opened on `confirm-no`, Enter kept the mission and focus went back to Abandon |
+| Gear card and stay card | on a fresh save the Hand Cannon's card opened on `gear-card-close`, its Buy disabled; with 500 tokens it opened on `gear-card-buy`; Tab stayed inside, and Escape gave focus back to Details. The stay-ending card opened as a dialog on `ending-continue`, and Enter continued |
+| Controls | `settings-controls` opened `controls-sheet` on `controls-close` with `Continue a transmission` and `Back / close`; Escape closed one layer at a time, focus walking back to `settings-controls`, then `station-tab-settings`; the pause menu's Controls docked the same `controls-sheet`, with the same rows, in its `pause-sheet` beside the actions. Closed, it held nothing, and Settings opened from there left the panel's sheet as the only one |
+| Menu settings | the arrows stayed inside the panel; Escape gave focus back to `menu-settings`, and the arrows walked the menu again |
+| Save & Quit | on Ferrum: `Quit to the main menu?`, `You will resume at Command Relay. Flying back to Ferrum costs 100 oil, and timed objectives restart.`, `Keep playing` focused and Enter on it kept the pause menu; Quit saved slot 0 and reached the menu. In flight: `The fuel for this jump (100 oil) is already spent.` |
+| Credits | `Google Gemini`, `Apache License 2.0` and `Play prologue`; `Asset licences` opened `assets/LICENSES.md` in a new tab; no `ending_escape`, `SPEC-`, `PLAN R` or table rule on the screen |
+| Storage | a version-99 slot read `Slot 2 · Save from a newer version` with Export only; a corrupt slot's Delete asked `Delete slot 3 and its backup?` on `confirm-no`; Cancel kept both keys, Delete removed the slot and its backup |
+| Board words | `In progress`, `New`, `Locked`, `Needs: Complete 'Black Gold'`, `Done · replay for 50 %`, `Main`, `Side`, `Tracked`; `Completed (1)` closed, opened by its summary, still open after a pin; with chapter 1 done, `c1_m2`'s contract outside the fold after the open work, and Cinder-4 with no fold |
+
+**Owed on hardware (§7).** On desktop, keyboard only after START:
+
+- [ ] create a salvager, and read the intro;
+- [ ] accept a mission, open the star map and depart;
+- [ ] on Cinder-4, accept at the pad terminal;
+- [ ] pause, open Settings and the Controls sheet, and close everything with Escape;
+- [ ] quit to the menu and read the cost sheet.
+
+On the reference phone:
+
+- [ ] tap through the same path, and check that the cue reads `▸ Tap`.
+
+Then, on either:
+
+- [ ] read the credits and the storage block.

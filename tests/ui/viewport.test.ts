@@ -100,6 +100,10 @@ const NOT_VIEWPORT_ANCHORED: Readonly<Record<string, string>> = {
   '.qb-state': 'inside .qb-slot (position: relative)',
   '.qb-pips': 'inside .qb-slot (position: relative)',
   '.starmap-lock': 'inside the .starmap-node button (position: absolute)',
+  // SPEC-044 §4.6: the missions ◆ rides the node's other top corner.
+  '.starmap-node-missions': 'inside the .starmap-node button (position: absolute)',
+  // SPEC-044 §4.1: the continue cue sits in the dialogue panel's corner.
+  '.dialogue-next': 'inside the .dialogue panel (position: absolute)',
   '.starmap-info': 'inside .starmap-root, in the console frame body',
   '.hud-reticle::after': 'inside .hud-reticle (position: absolute)',
   '.waypoint-dist': 'inside .waypoint (position: absolute)',

@@ -21,7 +21,7 @@ import {
 } from '@/systems/MapModel';
 import type { PlanetDef } from '@/data/index';
 import { drawMapLayers, type MapLayers } from '@/ui/MapLayers';
-import { el, h, testId, type UiRoot } from '@/ui/dom';
+import { el, h, openModal, testId, type UiRoot } from '@/ui/dom';
 import {
   backingFor,
   drawMapIcon,
@@ -78,6 +78,8 @@ export class MapScreen {
   readonly #explored: HTMLParagraphElement;
   readonly #missionList: HTMLDivElement;
   readonly #zoom: HTMLButtonElement;
+  /** SPEC-044 §4.3: what takes focus when the map opens. */
+  readonly #close: HTMLButtonElement;
   readonly #point: MapPoint = { x: 0, y: 0, inside: true, angle: 0 };
   readonly #onKey: (event: KeyboardEvent) => void;
   /** The last frame and percentage drawn, so a zoom can repaint without one. */
@@ -88,6 +90,8 @@ export class MapScreen {
   #disposed = false;
   /** SPEC-036 §4.4: the map's back-stack entry while it is open. */
   #releaseBack: (() => void) | null = null;
+  /** SPEC-044 §4.3: the open modal's close, which gives focus back. */
+  #closeModal: (() => void) | null = null;
 
   constructor(deps: MapScreenDeps) {
     this.#deps = deps;
@@ -105,6 +109,7 @@ export class MapScreen {
       h('button', { class: 'ui-btn', type: 'button', click: () => this.#deps.close() }, 'Close'),
       'map-close',
     );
+    this.#close = close;
 
     this.#panel = testId(el('aside', 'map-panel panel'), 'map-panel');
     this.#panel.append(
@@ -152,6 +157,8 @@ export class MapScreen {
     this.#deps.ui.mount(this.#root, 'panel');
     this.#releaseBack = this.#deps.ui.pushBack(() => this.#deps.close());
     this.redraw(frame, explored);
+    // SPEC-044 §4.3: a modal on Close, Tab kept inside; closing gives focus back.
+    this.#closeModal = openModal(this.#root, { label: 'Surface map', initialFocus: this.#close });
   }
 
   /** §4.5: on open, on zoom and on track — nothing moves in between. */
@@ -170,6 +177,9 @@ export class MapScreen {
     this.#releaseBack?.();
     this.#releaseBack = null;
     this.#deps.ui.unmount(this.#root);
+    const closeModal = this.#closeModal;
+    this.#closeModal = null;
+    closeModal?.();
   }
 
   dispose(): void {

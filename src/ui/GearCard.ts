@@ -9,7 +9,7 @@ import type { Economy } from '@/systems/Economy';
 import { balanceAfterText, failText, gearStatLines, prerequisiteText, priceText, purchaseText, shortfallText } from '@/systems/UiHelpers';
 import { compareNodes } from '@/ui/Compare';
 import { confirmSheet } from '@/ui/ConfirmSheet';
-import { el, h, testId, type UiRoot } from '@/ui/dom';
+import { el, h, openModal, testId, type UiRoot } from '@/ui/dom';
 import { itemIcon } from '@/ui/ItemIcon';
 
 /** SPEC-029 §4.10's line headings, as the card's line badge. */
@@ -53,11 +53,14 @@ export function openGearCard(id: ItemId, deps: GearCardDeps): Promise<void> {
     // SPEC-036 §4.4: Escape and the system Back close the card through the
     // back-stack — and a buy sheet opened over it closes first.
     let releaseBack: (() => void) | null = null;
+    // SPEC-044 §4.3: the card is a modal; its close gives focus back.
+    let closeModal: (() => void) | null = null;
     const close = (): void => {
       if (!open) return;
       open = false;
       releaseBack?.();
       backdrop.remove();
+      closeModal?.();
       resolve();
     };
     backdrop.addEventListener('click', (event) => {
@@ -171,6 +174,8 @@ export function openGearCard(id: ItemId, deps: GearCardDeps): Promise<void> {
     card.append(...children.filter((child): child is HTMLElement => child !== null));
     backdrop.append(card);
     deps.ui.mount(backdrop, 'overlay');
-    card.querySelector('button')?.focus();
+    // SPEC-044 §4.3: focus on its first button that can take it — a Buy the
+    // wallet cannot meet is disabled, and Close follows it — Tab kept inside.
+    closeModal = openModal(card, { label: item.name, initialFocus: card.querySelector<HTMLElement>('button:not(:disabled)') });
   });
 }
