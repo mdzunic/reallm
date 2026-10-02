@@ -1,9 +1,10 @@
 // The controls sheet (SPEC-044 §4.5): one table of what each scheme's controls
-// do, and the two places that show it — the pause menu's inline Controls and a
-// sheet the settings panel opens. Two hand-kept sheets drifted (the pause
-// sheet never listed the terminal, dialogue or the quick picker), so the rows
-// live here once, and `tests/ui/controls.test.ts` fails when an action bound
-// in `KEY_BINDINGS` has no keyboard row.
+// do, and the two places that show it as `controls-sheet` — docked in the
+// pause menu beside its actions, and over the screen from the settings panel.
+// Two hand-kept sheets drifted (the pause sheet never listed the terminal,
+// dialogue or the quick picker), so the rows live here once, and
+// `tests/ui/controls.test.ts` fails when an action bound in `KEY_BINDINGS` has
+// no keyboard row.
 import type { Scheme } from '@/core/Input';
 import { h, openModal, testId, type UiRoot } from '@/ui/dom';
 
@@ -81,8 +82,19 @@ export function controlsRows(scheme: Scheme): HTMLElement {
 }
 
 /**
+ * §4.5: the pause menu's Controls — the same sheet, `controls-sheet`, docked in
+ * the menu's own `pause-sheet` beside its actions (SPEC-036 §4.8) rather than
+ * over them, so Resume stays on screen and on top. The menu holds it only while
+ * it is open, so the testid names one sheet at a time.
+ */
+export function dockedControlsSheet(scheme: Scheme): HTMLElement {
+  return testId(controlsRows(scheme), 'controls-sheet');
+}
+
+/**
  * §4.5: the rows as a sheet of their own (`controls-sheet`), opened from the
- * settings panel over whatever holds it. A modal with its own back-stack entry
+ * settings panel over whatever holds it — the pause menu among them, which
+ * closes its docked sheet first. A modal with its own back-stack entry
  * (§4.3): Escape, the system Back, `Close` and a tap outside all close it, and
  * focus goes back to the button that opened it. Returns the close function.
  */

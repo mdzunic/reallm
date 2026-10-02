@@ -763,7 +763,7 @@ test('8c. the stay-ending card is a modal on Continue, and Enter continues', asy
 
 // ------------------------------------------------------------ 9: controls
 
-test('9. Settings opens the controls sheet; the pause menu’s Controls shows the same rows', async ({ page }) => {
+test('9. Settings and the pause menu’s Controls both open `controls-sheet`, with the same rows', async ({ page }) => {
   await start(page, DEBUG_URL);
   await prepare(page, {});
   await station(page);
@@ -799,8 +799,37 @@ test('9. Settings opens the controls sheet; the pause menu’s Controls shows th
   expect(await focused(page)).toBe('pause-resume');
   await page.getByTestId('pause-controls').focus();
   await page.keyboard.press('Enter');
-  await expect(page.getByTestId('pause-sheet')).toBeVisible();
-  expect(await rows('[data-testid="pause-sheet"]')).toEqual(fromSettings);
+  // §4.5: the same sheet, docked in the menu's `pause-sheet` beside the
+  // actions (SPEC-036 §4.8) rather than over them.
+  const docked = page.getByTestId('pause-sheet').getByTestId('controls-sheet');
+  await expect(docked).toBeVisible();
+  await expect(page.getByTestId('controls-sheet')).toHaveCount(1);
+  expect(await rows('[data-testid="pause-sheet"] [data-testid="controls-sheet"]')).toEqual(fromSettings);
+  // Controls again closes it, and a closed sheet holds nothing.
+  await page.keyboard.press('Enter');
+  await expect(page.getByTestId('controls-sheet')).toHaveCount(0);
+  await expect(page.getByTestId('pause-sheet')).toBeHidden();
+
+  // Docked, then Settings: the panel's own sheet is then the one controls sheet.
+  await page.keyboard.press('Enter');
+  await expect(docked).toBeVisible();
+  await page.getByTestId('pause-settings').focus();
+  await page.keyboard.press('Enter');
+  await expect(page.getByTestId('settings-panel')).toBeVisible();
+  await page.getByTestId('settings-controls').focus();
+  await page.keyboard.press('Enter');
+  await expect(page.getByTestId('controls-sheet')).toHaveCount(1);
+  await expect(page.getByTestId('controls-sheet')).toBeVisible();
+  expect(await rows('[data-testid="controls-sheet"]')).toEqual(fromSettings);
+  expect(await focused(page)).toBe('controls-close');
+  // One layer per Escape again, and focus walks back to the pause menu.
+  await page.keyboard.press('Escape');
+  await expect(page.getByTestId('controls-sheet')).toHaveCount(0);
+  expect(await focused(page)).toBe('settings-controls');
+  await page.keyboard.press('Escape');
+  await expect(page.getByTestId('settings-panel')).toBeHidden();
+  expect(await focused(page)).toBe('pause-settings');
+  await expect(page.getByTestId('pause-menu')).toBeVisible();
 });
 
 test('9b. on the menu the settings panel keeps the arrow keys; closed, focus is back on Settings', async ({ page }) => {

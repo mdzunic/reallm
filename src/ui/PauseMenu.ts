@@ -11,14 +11,14 @@
 // cheat-sheet, SPEC-005), Save & Quit (flush the save, back to the menu).
 // The music duck while it is open stays the scene's (SPEC-006 AC-54, AC-83).
 //
-// SPEC-044: the menu opens as a modal on Resume (§4.3); Controls reads the one
-// `CONTROL_ROWS` table (§4.5); and with a quit hook, Save & Quit first says
-// what the quit costs (§4.8).
+// SPEC-044: the menu opens as a modal on Resume (§4.3); Controls docks the one
+// controls sheet, `controls-sheet`, built from `CONTROL_ROWS` (§4.5); and with
+// a quit hook, Save & Quit first says what the quit costs (§4.8).
 import type { BenchmarkOutcome } from '@/core/Benchmark';
 import type { SaveStore } from '@/core/Save';
 import type { SettingsStore } from '@/core/Settings';
 import { confirmSheet } from '@/ui/ConfirmSheet';
-import { controlsRows } from '@/ui/ControlsSheet';
+import { dockedControlsSheet } from '@/ui/ControlsSheet';
 import { el, h, openModal, testId, uiLayers } from '@/ui/dom';
 import { createScreen, type Screen } from '@/ui/Screen';
 import { SettingsPanel, type QualityTarget } from '@/ui/SettingsPanel';
@@ -122,7 +122,7 @@ export class PauseMenu {
     this.#resume.type = 'button';
     this.#resume.addEventListener('click', onResume);
 
-    const settings = testId(h('button', { class: 'ui-btn', type: 'button', click: () => this.#settings.show() }, 'Settings'), 'pause-settings');
+    const settings = testId(h('button', { class: 'ui-btn', type: 'button', click: () => this.#openSettings() }, 'Settings'), 'pause-settings');
     const controls = testId(h('button', { class: 'ui-btn', type: 'button', click: () => this.#toggleControls() }, 'Controls'), 'pause-controls');
     const quitButton = testId(h('button', { class: 'ui-btn', type: 'button', click: () => this.#quitPressed() }, 'Save & Quit'), 'pause-quit');
 
@@ -196,7 +196,7 @@ export class PauseMenu {
 
   hide(): void {
     this.#root.classList.remove('is-visible');
-    this.#controls.classList.add('is-hidden');
+    this.#closeControls();
     this.#settings.hide();
     this.#releaseBack?.();
     this.#releaseBack = null;
@@ -219,13 +219,27 @@ export class PauseMenu {
 
   /**
    * AC-84: rebuilt on each open, so it follows the scheme that is live now.
-   * SPEC-044 §4.5: the rows are `CONTROL_ROWS`', the same the settings panel's
-   * sheet shows; the gamepad scheme reads the keyboard's.
+   * SPEC-044 §4.5: the sheet is the controls sheet, `controls-sheet`, the same
+   * the settings panel opens; the gamepad scheme reads the keyboard's rows.
    */
   #toggleControls(): void {
-    if (!this.#controls.classList.toggle('is-hidden')) {
-      this.#controls.replaceChildren(controlsRows(this.#deps.input.state.scheme));
-    }
+    if (this.#controls.classList.toggle('is-hidden')) this.#controls.replaceChildren();
+    else this.#controls.replaceChildren(dockedControlsSheet(this.#deps.input.state.scheme));
+  }
+
+  /** A closed sheet holds nothing, so `controls-sheet` names one sheet at a time. */
+  #closeControls(): void {
+    this.#controls.classList.add('is-hidden');
+    this.#controls.replaceChildren();
+  }
+
+  /**
+   * SPEC-044 §4.5: the settings panel opens over the menu with its own
+   * Controls, so the docked sheet closes first; there is one controls sheet.
+   */
+  #openSettings(): void {
+    this.#closeControls();
+    this.#settings.show();
   }
 
   /**
