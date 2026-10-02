@@ -1763,8 +1763,8 @@ What the container showed:
 
 Recorded from the container the branch was built in: `npm run check` — 100
 files and 2,179 tests, none skipped — and, a few files per invocation,
-`e2e/SPEC-044.spec.ts` (§6.2's thirteen cases in nineteen tests — 1b, 1c, 6b,
-9b, 10b and 13b beside them — all green under four workers, the key cases
+`e2e/SPEC-044.spec.ts` (§6.2's thirteen cases in twenty-one tests — 1b, 1c, 6b,
+8b, 8c, 9b, 10b and 13b beside them — all green under four workers, the key cases
 twice over), the three pins §4.10 and §4.11 move (`SPEC-007`, `SPEC-024`,
 `SPEC-043`), and the neighbours this spec touches: `SPEC-003`, `SPEC-005`, `SPEC-006`,
 `SPEC-008` to `SPEC-011`, the three `SPEC-012` files, `SPEC-013`, `SPEC-014`,
@@ -1784,6 +1784,15 @@ a line that had moved on by itself — case 7 is on the known-flaky list from
 `SPEC-036` case 17's zone ghosts (their 12 s clock ran out during a slow
 landing; green in the same file's earlier run on this branch).
 
+After QA's first pass, two fixes followed. AC-9: a modal now falls past a
+control that cannot take focus, so the gear card opens on Close while its Buy
+is disabled. AC-17: the pause menu's Controls now shows the one
+`controls-sheet`. They added cases 8b and 8c and rewrote case 9. The file's
+twenty-one tests then ran green twice under four workers. So did the cases in
+other files that drive the pause menu's `pause-sheet`: `SPEC-034` case 4,
+`SPEC-036` case 13 at all five short phones and in flight, `SPEC-036` case 16
+and `SPEC-037` case 13. `npm run check` again counted 100 files and 2,179 tests.
+
 What the container showed:
 
 | Signal | Observed |
@@ -1799,7 +1808,8 @@ What the container showed:
 | Preselection | with `c1_s1` tracked and Vetra open, the map opened on Cinder-4; a locked Ferrum given fell through to Cinder-4; arrowed onto Ferrum, Depart disabled and focus went to Back |
 | Pad terminal | E opened it on `terminal-accept-c1_m2`, as a dialog on the back-stack; the row reads `Main`, `+150 XP`, the brief's first sentence (all of it after a tap on the title), and `c1_m1` reads `Replay · 50 %`; Enter accepted, `Accepted 'Black Gold'`, `Black Gold — Stage 1/…` marked `Tracked` and no `◈`; twenty Tabs and three Shift+Tabs stayed inside; Escape closed it and the back-stack lost one entry |
 | Sheets | the board's Abandon opened on `confirm-no`, Enter kept the mission and focus went back to Abandon |
-| Controls | `settings-controls` opened `controls-sheet` on `controls-close` with `Continue a transmission` and `Back / close`; Escape closed one layer at a time, focus walking back to `settings-controls`, then `station-tab-settings`; the pause menu's Controls showed the same rows |
+| Gear card and stay card | on a fresh save the Hand Cannon's card opened on `gear-card-close`, its Buy disabled; with 500 tokens it opened on `gear-card-buy`; Tab stayed inside, and Escape gave focus back to Details. The stay-ending card opened as a dialog on `ending-continue`, and Enter continued |
+| Controls | `settings-controls` opened `controls-sheet` on `controls-close` with `Continue a transmission` and `Back / close`; Escape closed one layer at a time, focus walking back to `settings-controls`, then `station-tab-settings`; the pause menu's Controls docked the same `controls-sheet`, with the same rows, in its `pause-sheet` beside the actions. Closed, it held nothing, and Settings opened from there left the panel's sheet as the only one |
 | Menu settings | the arrows stayed inside the panel; Escape gave focus back to `menu-settings`, and the arrows walked the menu again |
 | Save & Quit | on Ferrum: `Quit to the main menu?`, `You will resume at Command Relay. Flying back to Ferrum costs 100 oil, and timed objectives restart.`, `Keep playing` focused and Enter on it kept the pause menu; Quit saved slot 0 and reached the menu. In flight: `The fuel for this jump (100 oil) is already spent.` |
 | Credits | `Google Gemini`, `Apache License 2.0` and `Play prologue`; `Asset licences` opened `assets/LICENSES.md` in a new tab; no `ending_escape`, `SPEC-`, `PLAN R` or table rule on the screen |
