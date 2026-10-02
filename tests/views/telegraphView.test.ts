@@ -6,7 +6,8 @@ import { describe, expect, it } from 'vitest';
 import * as THREE from 'three';
 import { Pool } from '@/core/Pool';
 import { makeTelegraph, resetTelegraph, type TelegraphEntity } from '@/entities/Telegraph';
-import { TELEGRAPH_LIFT, TelegraphView } from '@/views/TelegraphView';
+import { HOSTILE_RIM, HOSTILE_RIM_COLOUR_BLIND, setHostileRim } from '@/views/ProceduralMeshes';
+import { ELITE_OUTLINE, TELEGRAPH_LIFT, TelegraphView } from '@/views/TelegraphView';
 
 const flat = (): number => 0;
 
@@ -83,5 +84,64 @@ describe('TelegraphView (SPEC-038 §4.2)', () => {
       expect(position.y).toBeCloseTo(2 + TELEGRAPH_LIFT, 5);
     }
     view.dispose();
+  });
+});
+
+describe('the decals follow the colour preset (SPEC-045 §4.5, AC-24)', () => {
+  /** One instance's outline colour, as the shader receives it. */
+  function outlineAt(mesh: THREE.InstancedMesh, slot: number): [number, number, number] {
+    const outline = mesh.geometry.attributes['aOutline'] as THREE.InstancedBufferAttribute;
+    return [outline.getX(slot), outline.getY(slot), outline.getZ(slot)];
+  }
+
+  function expectColour(actual: [number, number, number], hex: string): void {
+    const expected = new THREE.Color(hex);
+    expect(actual[0]).toBeCloseTo(expected.r, 6);
+    expect(actual[1]).toBeCloseTo(expected.g, 6);
+    expect(actual[2]).toBeCloseTo(expected.b, 6);
+  }
+
+  it('draws a non-elite decal in the rim of the moment, and keeps an elite outline gold', () => {
+    const root = new THREE.Group();
+    const view = new TelegraphView(root);
+    const pool = new Pool(makeTelegraph);
+    add(pool, { kind: 'circle', x: 0, z: 0 });
+    add(pool, { kind: 'circle', x: 6, z: 0, elite: true });
+    try {
+      view.sync(pool, 0.5, flat, false);
+      const mesh = root.children.find((node) => node.name === 'telegraph-circle') as THREE.InstancedMesh;
+      const material = mesh.material as THREE.MeshBasicMaterial;
+      expect(material.color.getHex()).toBe(new THREE.Color(HOSTILE_RIM).getHex());
+      expectColour(outlineAt(mesh, 0), HOSTILE_RIM);
+      expectColour(outlineAt(mesh, 1), ELITE_OUTLINE);
+
+      // 45-n: the preset changes mid-fight; the next sync retints the live
+      // decals — fill and plain outline — and leaves the elite's gold alone.
+      const before = material.color;
+      setHostileRim('colour-blind');
+      view.sync(pool, 0.6, flat, false);
+      expect(material.color).toBe(before); // copied into, never replaced
+      expect(material.color.getHex()).toBe(0xff4fd8);
+      expectColour(outlineAt(mesh, 0), HOSTILE_RIM_COLOUR_BLIND);
+      expectColour(outlineAt(mesh, 1), ELITE_OUTLINE);
+
+      // A kind first built under the preset starts in it.
+      add(pool, { kind: 'line', x: 0, z: 4 });
+      view.sync(pool, 0.7, flat, false);
+      const line = root.children.find((node) => node.name === 'telegraph-line') as THREE.InstancedMesh;
+      expect((line.material as THREE.MeshBasicMaterial).color.getHex()).toBe(0xff4fd8);
+      expectColour(outlineAt(line, 0), HOSTILE_RIM_COLOUR_BLIND);
+
+      // And back.
+      setHostileRim('standard');
+      view.sync(pool, 0.8, flat, false);
+      expect(material.color.getHex()).toBe(new THREE.Color(HOSTILE_RIM).getHex());
+      expectColour(outlineAt(mesh, 0), HOSTILE_RIM);
+      expectColour(outlineAt(mesh, 1), ELITE_OUTLINE);
+    } finally {
+      // Module state: the next test starts on the standard preset.
+      setHostileRim('standard');
+      view.dispose();
+    }
   });
 });
