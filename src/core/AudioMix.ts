@@ -27,6 +27,19 @@ export const ATTENUATION_FLOOR = 0.15;
 /** `0` ambient/looped, `1` the default, `2` high (§4.2). */
 export type Priority = 0 | 1 | 2;
 
+/**
+ * SPEC-045 §4.9: the ids that play on the interface bus in place of Effects —
+ * the menu, HUD and dialogue blips. The prefix, not the `ui` bank: `level_up`
+ * and `mission_done` share that bank and stay on Effects (45-u), and the
+ * manifest's `bus` fields do not change.
+ */
+export const INTERFACE_SOUND_PREFIX = 'ui_';
+
+/** The bus a sound effect plays on: `'interface'` for a `ui_*` id, else `'sfx'` (SPEC-045 §4.9). */
+export function soundBus(id: string): 'sfx' | 'interface' {
+  return id.startsWith(INTERFACE_SOUND_PREFIX) ? 'interface' : 'sfx';
+}
+
 function clamp(value: number, low: number, high: number): number {
   return Math.min(high, Math.max(low, value));
 }
