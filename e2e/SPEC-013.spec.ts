@@ -79,7 +79,7 @@ test.describe('station → star map → Cinder-4 (desktop)', () => {
     const hud = page.locator('[data-testid="hud"]');
     await expect(hud.locator('.bar-shield')).toBeVisible();
     await expect(hud.locator('.bar-hull')).toBeVisible();
-    await expect(page.locator('[data-testid="hud-throttle"]')).toHaveText('THR 1.0×');
+    await expect(page.locator('[data-testid="hud-throttle"]')).toHaveText('Throttle 1.0×');
     await expect(page.locator('[data-testid="hud-progress"]')).toBeVisible();
     await expect(page.locator('[data-testid="reticle"]')).toBeVisible();
     // Cinder-4 storms never and starts with an empty sky: both stay hidden.
@@ -184,7 +184,7 @@ test.describe('flight on a phone', () => {
 
     // The throttle buttons drive the model: one tap up reads 1.2× on the HUD.
     await page.locator('[data-testid="touch-throttleUp"]').tap();
-    await expect(page.locator('[data-testid="hud-throttle"]')).toHaveText('THR 1.2×');
+    await expect(page.locator('[data-testid="hud-throttle"]')).toHaveText('Throttle 1.2×');
   });
 });
 

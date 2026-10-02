@@ -160,7 +160,7 @@ test('4. standing in the scan ring fills it, and the stage advances behind it', 
   await page.locator('[data-testid="surface-goto-objective"]').click();
   await expect(page.locator('[data-testid="scan-progress"]')).toBeVisible({ timeout: 10_000 });
   // SCAN_SECONDS is 3; the stage is the third of three once it completes.
-  await expect(tracker(page)).toContainText('stage 3/3', { timeout: 20_000 });
+  await expect(tracker(page)).toContainText('Stage 3/3', { timeout: 20_000 });
 });
 
 test('5. guidance off keeps the tracker and drops the waypoint', async ({ page }) => {

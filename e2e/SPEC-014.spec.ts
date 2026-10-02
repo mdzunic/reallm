@@ -193,7 +193,8 @@ test.describe('the purchase confirm sheet', () => {
     });
     await page.locator('[data-testid="confirm-yes"]').click();
 
-    await expect(page.locator('.toast-error')).toHaveText('Not enough tokens');
+    // SPEC-045 §4.5: an error toast leads with its ✗.
+    await expect(page.locator('.toast-error')).toHaveText('✗Not enough tokens');
     await expect(sheet).toBeVisible(); // it does not close on a refusal
     expect(await page.evaluate(() => window.__reallm.save().current?.ship['hull'])).toBe(0);
 
