@@ -55,6 +55,8 @@ export class StationScene extends UiScene<'station'> {
   #leaving = false;
   /** False from `dispose()`; what an awaited film comes back to (SPEC-023 §4.3). */
   #alive = true;
+  /** SPEC-045 §4.1: the open comms log's close, or `null`. */
+  #closeComms: (() => void) | null = null;
 
   constructor(services: GameServices) {
     super(services, 'station', 'station');
@@ -362,6 +364,8 @@ export class StationScene extends UiScene<'station'> {
     // SPEC-015 §10: a build that lands while the station is open grows its
     // Update row without the screen having to poll for it (AC-52).
     this.disposer.add(this.services.events.on('app:update-ready', () => this.#renderRail(), this));
+    // SPEC-045 §4.1: an open comms log closes with the scene, before its screen.
+    this.disposer.add(() => this.#closeComms?.());
     if (data === null) {
       this.#renderRail();
       this.#panelBox.replaceChildren(h('p', { class: 'settings-note station-empty' }, 'No save loaded.'));
@@ -415,13 +419,18 @@ export class StationScene extends UiScene<'station'> {
    * the scene; Escape and `comms-log-close` give focus back to the rail.
    */
   #openComms(): void {
+    this.#closeComms?.();
     const dialogue = dialogueLayer(this.services.uiRoot, this.services.events, {
       input: this.services.input,
       saveKey: () => this.services.save.current,
       typewriter: () => this.services.settings.get().typewriter,
       speed: () => this.services.settings.get().dialogueSpeed,
     });
-    this.disposer.add(openCommsLog(this.ui, dialogue.log));
+    const close = openCommsLog(this.ui, dialogue.log);
+    this.#closeComms = (): void => {
+      this.#closeComms = null;
+      close();
+    };
   }
 
   #openTab(tab: StationTab): void {

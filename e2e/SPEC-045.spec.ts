@@ -276,6 +276,13 @@ test('3. the comms log lists the lines shown, opens from the rail and the pause 
   await page.keyboard.press('Escape');
   await expect(log).toHaveCount(0);
   expect(await page.evaluate(() => (document.activeElement as HTMLElement | null)?.dataset['testid'] ?? null)).toBe('station-tab-comms');
+  // Opened again on the same visit: the one log up, and its Close works too.
+  await page.getByTestId('station-tab-comms').click();
+  await expect(log).toHaveCount(1);
+  await expect(lines).toHaveCount(2);
+  await page.getByTestId('comms-log-close').click();
+  await expect(log).toHaveCount(0);
+  expect(await page.evaluate(() => (document.activeElement as HTMLElement | null)?.dataset['testid'] ?? null)).toBe('station-tab-comms');
 
   // On the surface: Escape, then the pause menu's Comms log.
   await land(page);

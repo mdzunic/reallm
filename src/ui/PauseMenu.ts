@@ -46,10 +46,12 @@ export interface PauseDeps {
  * SPEC-045 §4.1: `deps` with the dialogue layer's log beside it, for the
  * surface and the flight. Their deps are the services bag — the `Game`, whose
  * methods read private fields — so it is wrapped by delegation, not spread.
+ * The copy names every key of `PauseDeps`, optional ones included: a field
+ * added there and not carried here is a compile error, not a menu without it.
  */
 export function withComms(deps: PauseDeps, comms: CommsLog): PauseDeps {
   const detect = deps.detectQuality;
-  return {
+  const wrapped: PauseDeps & Record<keyof PauseDeps, unknown> = {
     uiRoot: deps.uiRoot,
     settings: deps.settings,
     save: deps.save,
@@ -59,6 +61,7 @@ export function withComms(deps: PauseDeps, comms: CommsLog): PauseDeps {
     go: (id, params) => deps.go(id, params),
     comms,
   };
+  return wrapped;
 }
 
 /**
