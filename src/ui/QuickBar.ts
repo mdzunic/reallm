@@ -158,7 +158,7 @@ export class QuickBar {
         write(nodes.name, item?.short ?? '—');
         write(nodes.key, keys ? KEY_HINTS[slot] : '');
         nodes.key.classList.toggle('is-hidden', !keys);
-        // SPEC-029 §4.11, SPEC-037 §4.4: the state line — `HEAT nn%` while
+        // SPEC-029 §4.11, SPEC-037 §4.4: the state line — `HEAT nn %` while
         // warm, `LOCK` with `.is-locked`, the seconds left on a recharge or a
         // switch — and nothing at all while the slot is ready. An empty text
         // hides the band (CSS `:empty`), so no slot prints READY.
