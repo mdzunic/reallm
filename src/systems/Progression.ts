@@ -24,6 +24,7 @@ import { log } from '@/core/Log';
 import { HP_PER_LEVEL, maxHp, type Save } from '@/core/Save';
 import { ATTRIBUTE_POINT_LEVELS, TUNING } from '@/data/index';
 import { DAMAGE_PER_LEVEL } from '@/systems/Combat';
+import { multPercent } from '@/systems/Format';
 
 /**
  * The slice of the bus SPEC-010 emits through. A structural port rather than
@@ -44,11 +45,11 @@ export const TOKENS_PER_LEVEL = TUNING.TOKENS_PER_LEVEL;
 /**
  * E20: the level-up is a toast, never a modal. The text is shared with the UI.
  * SPEC-039 §4.7: it says what the level gave — the tokens, `HP_PER_LEVEL` max
- * HP and `DAMAGE_PER_LEVEL` damage — and, at every fifth level, the attribute
- * point waiting on the character panel.
+ * HP and `DAMAGE_PER_LEVEL` damage (SPEC-045 §4.7: `+2 % damage`) — and, at
+ * every fifth level, the attribute point waiting on the character panel.
  */
 export function levelUpText(level: number, tokens: number): string {
-  const text = `Level ${level} — +${tokens} tokens · +${HP_PER_LEVEL} HP · +${Math.round(DAMAGE_PER_LEVEL * 100)}% damage`;
+  const text = `Level ${level} — +${tokens} tokens · +${HP_PER_LEVEL} HP · ${multPercent(1 + DAMAGE_PER_LEVEL)} damage`;
   return level % ATTRIBUTE_POINT_LEVELS === 0 ? `${text} · +1 attribute point` : text;
 }
 
