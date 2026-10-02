@@ -111,10 +111,17 @@ async function board(page: Page): Promise<void> {
   await expect(page.getByTestId('mission-board')).toBeVisible();
 }
 
-/** `surface-finish-stage` until `id` is in `missionsDone`. */
+/**
+ * `surface-finish-stage` until `id` has left `missionsActive` — completed. A
+ * replay is in `missionsDone` before it starts, so that list cannot say so.
+ */
 async function finish(page: Page, id: string): Promise<void> {
   const done = (): Promise<boolean> =>
-    page.evaluate((mission) => window.__reallm.save().current?.progress.missionsDone.includes(mission) === true, id);
+    page.evaluate(
+      (mission) => window.__reallm.save().current?.progress.missionsActive.every((entry) => entry.id !== mission) === true,
+      id,
+    );
+  expect(await done(), `${id} is not running`).toBe(false);
   for (let i = 0; i < 6 && !(await done()); i++) {
     await press(page, 'surface-finish-stage');
     await page.waitForTimeout(250);
