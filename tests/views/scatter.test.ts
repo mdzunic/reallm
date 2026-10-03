@@ -4,8 +4,10 @@
 import { describe, expect, it } from 'vitest';
 import * as THREE from 'three';
 import { buildHeightField } from '@/core/HeightField';
-import { PLANETS } from '@/data/index';
-import { SCATTER_CAP, buildDecals, buildScatter } from '@/views/Scatter';
+import { RngRoot } from '@/core/Rng';
+import { PLANETS, type PlanetId } from '@/data/index';
+import { generateLayout } from '@/systems/Layout';
+import { SCATTER_CAP, TUFT_TINT, TUFT_TINT_AMOUNT, buildDecals, buildScatter, tuftTexture } from '@/views/Scatter';
 import type { ViewLayout } from '@/views/SurfaceView';
 
 const LAYOUT: ViewLayout = {
@@ -102,6 +104,103 @@ describe('buildScatter (SPEC-018 §4.6)', () => {
       expect(meshA.count).toBe(meshB.count);
       expect(meshA.instanceMatrix.array).toEqual(meshB.instanceMatrix.array);
     }
+  });
+});
+
+// ---------------------------------------------------------------- SPEC-046
+
+function triangles(mesh: THREE.InstancedMesh): number {
+  const geometry = mesh.geometry;
+  return (geometry.index?.count ?? (geometry.getAttribute('position') as THREE.BufferAttribute).count) / 3;
+}
+
+describe('the scatter fixes (SPEC-046 §4.4)', () => {
+  it('bones are three thicker capsules, 72 triangles an instance; spores are 20', () => {
+    const [bones] = buildScatter(LAYOUT, field, LOOK, 'medium', PALETTE) as [THREE.InstancedMesh];
+    expect(triangles(bones)).toBe(72);
+    expect(triangles(bones) / 3).toBe(new THREE.CapsuleGeometry(0.1, 0.9, 1, 4).toNonIndexed().getAttribute('position').count / 3);
+    const hive = PLANETS.hive.surface;
+    expect(hive.look.scatter.kind).toBe('spores');
+    const [spores] = buildScatter(LAYOUT, field, hive.look, 'medium', hive.palette) as [THREE.InstancedMesh];
+    expect(triangles(spores)).toBe(20);
+    expect((spores.material as THREE.MeshStandardMaterial).emissive.getHexString()).toBe('b0e080');
+    expect((spores.material as THREE.MeshStandardMaterial).emissiveIntensity).toBeCloseTo(1.2, 6);
+  });
+
+  it('the tuft mask is 64², mipmapped, trilinear, alpha-tested at 0.5', () => {
+    const mask = tuftTexture();
+    expect(mask.image.width).toBe(64);
+    expect(mask.image.height).toBe(64);
+    expect(mask.generateMipmaps).toBe(true);
+    expect(mask.minFilter).toBe(THREE.LinearMipmapLinearFilter);
+    expect(mask.magFilter).toBe(THREE.LinearFilter);
+    const thessaly = PLANETS.thessaly.surface;
+    const [tufts] = buildScatter(LAYOUT, field, thessaly.look, 'medium', thessaly.palette) as [THREE.InstancedMesh];
+    const material = tufts.material as THREE.MeshStandardMaterial;
+    expect(material.map).toBe(mask);
+    expect(material.alphaTest).toBe(0.5);
+    expect(triangles(tufts)).toBe(4);
+  });
+
+  it("a tuft's colour lies between palette.ground and TUFT_TINT — 45 % of the way, ± 8 %", () => {
+    expect(TUFT_TINT).toBe('#d8d0a0');
+    expect(TUFT_TINT_AMOUNT).toBe(0.45);
+    for (const id of ['thessaly', 'eden'] as const) {
+      const surface = PLANETS[id].surface;
+      const [tufts] = buildScatter(LAYOUT, field, surface.look, 'medium', surface.palette) as [THREE.InstancedMesh];
+      const ground = new THREE.Color(surface.palette.ground);
+      const tint = new THREE.Color(TUFT_TINT);
+      const base = ground.clone().lerp(tint, TUFT_TINT_AMOUNT);
+      const colors = tufts.instanceColor as THREE.InstancedBufferAttribute;
+      expect(tufts.count).toBeGreaterThan(0);
+      for (let i = 0; i < tufts.count; i++) {
+        const shade = colors.getX(i) / base.r;
+        expect(shade, `${id} tuft ${i}`).toBeGreaterThanOrEqual(0.92 - 1e-6);
+        expect(shade, `${id} tuft ${i}`).toBeLessThanOrEqual(1.08 + 1e-6);
+        // One shade across the channels: the hue is the lerp's.
+        expect(colors.getY(i) / base.g).toBeCloseTo(shade, 5);
+        expect(colors.getZ(i) / base.b).toBeCloseTo(shade, 5);
+        for (const [channel, value] of [
+          ['r', colors.getX(i)],
+          ['g', colors.getY(i)],
+          ['b', colors.getZ(i)],
+        ] as const) {
+          const lo = Math.min(ground[channel], tint[channel]) * 0.92;
+          const hi = Math.max(ground[channel], tint[channel]) * 1.08;
+          expect(value, `${id} tuft ${i} ${channel}`).toBeGreaterThanOrEqual(lo - 1e-6);
+          expect(value, `${id} tuft ${i} ${channel}`).toBeLessThanOrEqual(hi + 1e-6);
+        }
+      }
+    }
+    // Pebbles and the rest keep the ground's own colour, ± 8 %.
+    const pebbles = buildScatter(LAYOUT, field, LOOK, 'medium', PALETTE)[1] as THREE.InstancedMesh;
+    const ground = new THREE.Color(PALETTE.ground);
+    const shade = (pebbles.instanceColor as THREE.InstancedBufferAttribute).getX(0) / ground.r;
+    expect(shade).toBeGreaterThanOrEqual(0.92 - 1e-6);
+    expect(shade).toBeLessThanOrEqual(1.08 + 1e-6);
+  });
+
+  it("totals Cinder-4's scatter at 25,928 triangles and Thessaly's at 7,200 on medium, seed 20121 (§4.4's table)", () => {
+    // §4.4: Cinder-4 is 324 bones + 130 pebbles (51,200 before), Thessaly
+    // 600 tufts + 240 spores (21,600 before). The counts and the placement
+    // are unchanged — only the geometry moved.
+    const total = (planet: PlanetId): { triangles: number; counts: number[] } => {
+      const def = PLANETS[planet];
+      const layout = generateLayout(def, new RngRoot(20121).layout(planet));
+      const terrain = buildHeightField({ halfSize: layout.halfSize, hash: layout.hash, pois: layout.pois }, def.surface.look.relief);
+      const meshes = buildScatter(layout, terrain, def.surface.look, 'medium', def.surface.palette);
+      return {
+        triangles: meshes.reduce((sum, mesh) => sum + mesh.count * triangles(mesh), 0),
+        counts: meshes.map((mesh) => mesh.count),
+      };
+    };
+    const cinder = total('cinder4');
+    expect(cinder.counts).toEqual([324, 130]);
+    expect(cinder.triangles).toBe(25_928);
+    expect(cinder.triangles).toBeLessThanOrEqual(26_000);
+    const thessaly = total('thessaly');
+    expect(thessaly.counts).toEqual([600, 240]);
+    expect(thessaly.triangles).toBe(7_200);
   });
 });
 

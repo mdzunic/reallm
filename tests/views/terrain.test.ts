@@ -6,7 +6,14 @@ import * as THREE from 'three';
 import { buildHeightField, type HeightFieldLayout } from '@/core/HeightField';
 import { PLANETS } from '@/data/index';
 import { groundLayer } from '@/views/ProceduralTextures';
-import { TERRAIN_TILE, buildTerrainTiles, createTerrainMaterial, setTerrainLayers, terrainUniforms } from '@/views/TerrainMesh';
+import {
+  TERRAIN_TILE,
+  TERRAIN_TINT_AMOUNT,
+  buildTerrainTiles,
+  createTerrainMaterial,
+  setTerrainLayers,
+  terrainUniforms,
+} from '@/views/TerrainMesh';
 
 const LAYOUT: HeightFieldLayout = {
   halfSize: 40,
@@ -112,9 +119,36 @@ describe('createTerrainMaterial (SPEC-018 §4.4)', () => {
     expect(uniforms.uTileRatio.value).toBeCloseTo(4 / 5.5, 6);
     expect(uniforms.uHeightBlend.value).toBeCloseTo(1.5, 6);
     expect(uniforms.uMacroScale.value).toBeCloseTo(0.137, 6);
+    // SPEC-046 §4.5: the macro tint pulls at 35 % unless the look says otherwise.
+    expect(TERRAIN_TINT_AMOUNT).toBe(0.35);
+    expect(uniforms.uTintAmount.value).toBe(0.35);
     expect(material.customProgramCacheKey()).toBe('terrain/1');
     // No cracks on Cinder-4: the uniform is black, the emissive chunk untouched.
     expect(uniforms.uCrackColor.value.getHex()).toBe(0x000000);
+  });
+
+  it("takes a look's own tint amount, with no change to the program key (SPEC-046 §4.5)", () => {
+    const base = PLANETS.cinder4.surface.look;
+    const look = { ...base, ground: { ...base.ground, tint: 0.6 } };
+    const material = createTerrainMaterial(A, B, look, PLANETS.cinder4.surface.palette);
+    expect(terrainUniforms(material).uTintAmount.value).toBe(0.6);
+    expect(material.customProgramCacheKey()).toBe('terrain/1');
+    const none = createTerrainMaterial(A, B, { ...base, ground: { ...base.ground, tint: 0 } }, PLANETS.cinder4.surface.palette);
+    expect(terrainUniforms(none).uTintAmount.value).toBe(0);
+  });
+
+  it('multiplies the albedo by mix(1, uMacroTint, uTintAmount) (SPEC-046 §4.5)', () => {
+    const material = createTerrainMaterial(A, B, PLANETS.cinder4.surface.look, PLANETS.cinder4.surface.palette);
+    const shader = {
+      uniforms: {} as Record<string, unknown>,
+      vertexShader: '#include <common>\n#include <begin_vertex>',
+      fragmentShader: '#include <common>\n#include <map_fragment>\n#include <roughnessmap_fragment>\n#include <normal_fragment_maps>',
+    };
+    material.onBeforeCompile?.(shader as unknown as Parameters<NonNullable<THREE.Material['onBeforeCompile']>>[0], undefined as never);
+    expect(shader.fragmentShader).toContain('uniform float uTintAmount;');
+    expect(shader.fragmentShader).toContain('* mix( vec3( 1.0 ), uMacroTint, uTintAmount );');
+    expect(shader.fragmentShader).not.toMatch(/\*\s*uMacroTint;/);
+    expect(shader.uniforms['uTintAmount']).toBe(terrainUniforms(material).uTintAmount);
   });
 
   it('the cracks variant keys a different program and a hot uniform', () => {
@@ -171,6 +205,8 @@ describe('createTerrainMaterial (SPEC-018 §4.4)', () => {
     expect(material.normalMap).toBe(A2.normalRough);
     expect(terrainUniforms(material).mapB.value).toBe(B2.albedo);
     expect(terrainUniforms(material).uTileRatio.value).toBeCloseTo(0.5, 6);
+    // SPEC-046 §4.5: the tint amount is the planet's, not the layers'.
+    expect(terrainUniforms(material).uTintAmount.value).toBe(0.35);
     expect(A2.albedo.repeat.x).toBeCloseTo(1 / 3, 6);
     // `needsUpdate` was never touched: the program key and version held.
     expect(material.version).toBe(version);

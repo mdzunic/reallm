@@ -4,15 +4,21 @@
 import { describe, expect, it } from 'vitest';
 import * as THREE from 'three';
 import type { Assets } from '@/core/Assets';
+import { hash32 } from '@/core/Rng';
 import {
+  LANDMARK_SCALE,
   PROP_MODELS,
   SHELTER_MODELS,
   boundaryGeometry,
   geometryFromModel,
   hullPieceGeometry,
+  isTreeContract,
   obstacleGeometry,
+  obstacleModelIds,
   poiGeometry,
+  propFromModel,
   shelterGeometry,
+  variantIndex,
   wallPieceGeometry,
   type Biome,
   type ObstacleKind,
@@ -80,10 +86,14 @@ describe('the GLB seam (SPEC-018 §4.10, 18-n, 18-o)', () => {
   const fakeAssets = (loaded: boolean): Assets =>
     ({ hasModel: () => loaded, model: () => crateModel() }) as unknown as Assets;
 
-  it('every biome:kind pair names its _a model', () => {
+  it('every biome:kind pair names both its variants, _a then _b (SPEC-046 §4.2)', () => {
     for (const [biome, kind] of OBSTACLES) {
-      expect(PROP_MODELS[`${biome}:${kind}`], `${biome}:${kind}`).toBe(`${biome}_${kind}_a`);
+      expect(PROP_MODELS[`${biome}:${kind}`], `${biome}:${kind}`).toEqual([`${biome}_${kind}_a`, `${biome}_${kind}_b`]);
     }
+    expect(Object.keys(PROP_MODELS)).toHaveLength(12);
+    // The collision-only kinds never look a model up (SPEC-030 D-19).
+    expect(obstacleModelIds('wreck_hull', 'desert')).toEqual([]);
+    expect(obstacleModelIds('spire', 'desert')).toEqual([]);
   });
 
   it('PROP_MODELS wins when the assets are loaded, and splits the Glow part', () => {
@@ -92,6 +102,13 @@ describe('the GLB seam (SPEC-018 §4.10, 18-n, 18-o)', () => {
     expect(tris(fromModel.body)).toBe(12); // the one-box body, not the icosphere
     expect(fromModel.glow).toBeDefined();
     expect(tris(fromModel.glow as THREE.BufferGeometry)).toBe(12);
+  });
+
+  it('takes the first loaded variant when only the second has landed (46-b)', () => {
+    const second = { hasModel: (id: string) => id === 'desert_rock_b', model: () => crateModel() } as unknown as Assets;
+    const prop = obstacleGeometry('rock', 'desert', 7, second);
+    expect(prop.fromModel).toBe(true);
+    expect(tris(prop.body)).toBe(12);
   });
 
   it('falls back to procedural when the drop has not landed (18-o)', () => {
@@ -124,6 +141,79 @@ describe('the GLB seam (SPEC-018 §4.10, 18-n, 18-o)', () => {
     const without = poiGeometry('deliver', 'desert');
     expect(without.fromModel).toBeUndefined();
     expect(tris(without.body)).toBe(12);
+  });
+});
+
+// ---------------------------------------------------------------- SPEC-046
+
+describe('variants and the tree contract (SPEC-046 §4.1, §4.2)', () => {
+  it('variantIndex is hash32(layoutHash, "variant", kind, index) % n — deterministic and in range', () => {
+    for (const [hash, kind, index, n] of [
+      [0x18a7c3d1, 'rock', 0, 2],
+      [0x18a7c3d1, 'rock_small', 41, 2],
+      [3559157477, 'ruin', 7, 3],
+    ] as const) {
+      const v = variantIndex(hash, kind, index, n);
+      expect(v).toBe(hash32(hash, 'variant', kind, index) % n);
+      expect(variantIndex(hash, kind, index, n)).toBe(v);
+      expect(Number.isInteger(v) && v >= 0 && v < n).toBe(true);
+    }
+    // The layout kind string is part of the key: an obstacle and a small prop
+    // at the same index pick independently.
+    let differ = 0;
+    for (let i = 0; i < 64; i++) if (variantIndex(99, 'rock', i, 2) !== variantIndex(99, 'rock_small', i, 2)) differ++;
+    expect(differ).toBeGreaterThan(0);
+  });
+
+  it('over 1,000 indices, two variants each take 40–60 %', () => {
+    for (const [hash, kind] of [
+      [0x5eed0046, 'rock'],
+      [2630545287, 'tree_small'],
+    ] as const) {
+      let b = 0;
+      for (let i = 0; i < 1_000; i++) b += variantIndex(hash, kind, i, 2);
+      expect(b, `${kind} _b share`).toBeGreaterThanOrEqual(400);
+      expect(b, `${kind} _b share`).toBeLessThanOrEqual(600);
+    }
+  });
+
+  /** SPEC-052's tree contract: a trunk, an LOD1 copy and the leaf cards. */
+  function treeModel(lod: boolean): THREE.Group {
+    const group = new THREE.Group();
+    const trunk = new THREE.Mesh(new THREE.CylinderGeometry(0.2, 0.3, 2, 6), new THREE.MeshStandardMaterial());
+    trunk.name = 'Trunk';
+    group.add(trunk);
+    const other = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), new THREE.MeshStandardMaterial());
+    other.name = lod ? 'Tree_LOD1' : 'Leaf';
+    group.add(other);
+    return group;
+  }
+
+  it('isTreeContract is true for a group with a Leaf or *_LOD1 node, false for a crate', () => {
+    expect(isTreeContract(treeModel(false))).toBe(true);
+    expect(isTreeContract(treeModel(true))).toBe(true);
+    const crate = new THREE.Group();
+    const box = new THREE.Mesh(new THREE.BoxGeometry(), new THREE.MeshStandardMaterial());
+    box.name = 'Crate';
+    crate.add(box);
+    expect(isTreeContract(crate)).toBe(false);
+    // A name that merely contains the word is not the contract.
+    box.name = 'Leafless_LOD0';
+    expect(isTreeContract(crate)).toBe(false);
+  });
+
+  it('propFromModel refuses a tree contract, and that kind draws procedurally (46-c)', () => {
+    expect(propFromModel(treeModel(false))).toBeNull();
+    const trees = { hasModel: () => true, model: () => treeModel(false) } as unknown as Assets;
+    const prop = obstacleGeometry('tree', 'jungle', 7, trees);
+    expect(prop.fromModel).toBeUndefined();
+    expect(tris(prop.body)).toBe(tris(obstacleGeometry('tree', 'jungle', 7).body));
+  });
+
+  it('a landmark scales by 0.4 × its radius (SPEC-046 §4.3)', () => {
+    expect(LANDMARK_SCALE).toBe(0.4);
+    expect(LANDMARK_SCALE * 6).toBeCloseTo(2.4, 9);
+    expect(LANDMARK_SCALE * 7).toBeCloseTo(2.8, 9);
   });
 });
 
