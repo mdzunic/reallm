@@ -42,6 +42,7 @@ import {
 } from '@/systems/Flight';
 import { Missions } from '@/systems/Missions';
 import { cumulativeXp, LEVEL_CAP, Progression, xpToNext } from '@/systems/Progression';
+import { watchRunStats } from '@/systems/RunStats';
 import { completionLines, quitNote } from '@/systems/UiHelpers';
 import { AriaHint } from '@/ui/AriaHint';
 import { el, h, shortScreen, testId } from '@/ui/dom';
@@ -219,6 +220,9 @@ export class FlightScene extends UiScene<'flight'> {
     // dispose, which the narrow structural bus in `Services` cannot express —
     // the same cast the surface scene makes for the same reason.
     const bus = services.events as EventBus<GameEvents>;
+    // SPEC-047 §4.5: kills and deaths count in flight too; there is no ground
+    // here, so a crash leaves `lastDeath` alone (47-f).
+    this.disposer.add(watchRunStats(bus, save, this, () => null));
     const missions = new Missions(save, economy, bus, 'flight', this.#planet.id);
     this.#missions = missions;
     const flight = new Flight(

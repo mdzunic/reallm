@@ -23,6 +23,44 @@ export type ResourceId = (typeof RESOURCE_IDS)[number];
 export const PLANET_IDS = ['cinder4', 'vetra', 'thessaly', 'ferrum', 'hive', 'eden'] as const;
 export type PlanetId = (typeof PLANET_IDS)[number];
 
+/**
+ * SPEC-047 §4.2: the four kinds of cache a planet's caves hold (SPEC-054). The
+ * slot of an id is its suffix; SPEC-054's `CACHES[id].slot` carries it as data.
+ */
+export type CacheSlot = 'loose_a' | 'loose_b' | 'vault' | 'relic';
+
+/**
+ * SPEC-047 §4.2: every cache a save may claim, in `PLANET_IDS` order. The Hive
+ * has no relic terminal — its landmark anchors `c5_s1` — so there are 23.
+ * Declared before SPEC-054 builds the caves so the validator can keep a claim.
+ */
+export const CACHE_IDS = [
+  'cinder4_loose_a',
+  'cinder4_loose_b',
+  'cinder4_vault',
+  'cinder4_relic',
+  'vetra_loose_a',
+  'vetra_loose_b',
+  'vetra_vault',
+  'vetra_relic',
+  'thessaly_loose_a',
+  'thessaly_loose_b',
+  'thessaly_vault',
+  'thessaly_relic',
+  'ferrum_loose_a',
+  'ferrum_loose_b',
+  'ferrum_vault',
+  'ferrum_relic',
+  'hive_loose_a',
+  'hive_loose_b',
+  'hive_vault',
+  'eden_loose_a',
+  'eden_loose_b',
+  'eden_vault',
+  'eden_relic',
+] as const;
+export type CacheId = (typeof CACHE_IDS)[number];
+
 /** The three classes of PLAN §4; `data/characters.ts` carries their stats. */
 export const CLASS_IDS = ['marine', 'engineer', 'scout'] as const;
 export type ClassId = (typeof CLASS_IDS)[number];
