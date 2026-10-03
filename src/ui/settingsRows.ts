@@ -122,6 +122,15 @@ export const SETTINGS_ROWS: readonly SettingsRowDef[] = [
     ],
   },
   { id: 'settings-adaptive-quality', key: 'adaptiveQuality', section: 'display', label: 'Adaptive quality', control: 'toggle' },
+  // SPEC-046 §4.7.
+  {
+    id: 'settings-sharp-render',
+    key: 'sharpRender',
+    section: 'display',
+    label: 'Sharp rendering',
+    control: 'toggle',
+    note: 'Medium quality at up to 2× resolution. Uses more battery.',
+  },
   // New: −30 … +30 %, in steps of 5 (§4.9).
   { id: 'settings-brightness', key: 'brightness', section: 'display', label: 'Brightness', control: 'slider' },
   { id: 'settings-fullscreen', key: 'fullscreen', section: 'display', label: 'Fullscreen', control: 'toggle', shown: 'fullscreen' },

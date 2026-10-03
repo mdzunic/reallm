@@ -99,6 +99,26 @@ export const QUALITY = {
   },
 } as const satisfies Record<QualityPreset, QualitySettings>;
 
+// ------------------------------------------- SPEC-046 §4.7: sharp rendering
+
+/**
+ * The resolution `medium` may reach when the player asks for sharp rendering.
+ * `QUALITY.medium.maxDpr` stays 1.5: the preset table and the benchmark are
+ * SPEC-015's and SPEC-040's, and a phone that cannot hold 2 has SPEC-040's
+ * governor to step it back down.
+ */
+export const SHARP_MEDIUM_MAX_DPR = 2;
+
+/**
+ * SPEC-046 §4.7, pure: the pixel-ratio ceiling a preset renders under — 2 for
+ * `medium` with `sharp`, the preset's own `maxDpr` otherwise. `low` and `high`
+ * are unchanged by it (46-i), and the renderer still takes the lower of this,
+ * the device's ratio and the governor's cap.
+ */
+export function effectiveMaxDpr(preset: QualityPreset, sharp: boolean): number {
+  return preset === 'medium' && sharp ? SHARP_MEDIUM_MAX_DPR : QUALITY[preset].maxDpr;
+}
+
 // ------------------------------------------------- SPEC-015 §4.4: the preset
 //
 // The boot benchmark is two halves, deliberately split (SPEC-015 D-4): the GL

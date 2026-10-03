@@ -7,9 +7,11 @@
 //
 // The loaders are injected so the unit tests run in node with fakes and no
 // browser (D-29); they default to `GLTFLoader` / `TextureLoader` on one shared
-// `LoadingManager`.
+// `LoadingManager`. SPEC-046 §4.9: the default GLTF loader decodes
+// `EXT_meshopt_compression`, with the decoder that ships inside `three`.
 import type { AnimationClip, BufferGeometry, Group, Material, Object3D, Texture } from 'three';
 import { LoadingManager, NoColorSpace, SRGBColorSpace, TextureLoader } from 'three';
+import { MeshoptDecoder } from 'three/examples/jsm/libs/meshopt_decoder.module.js';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { clone as cloneSkinned } from 'three/examples/jsm/utils/SkeletonUtils.js';
 import type { ModelId, TextureId } from '@/data/assets';
@@ -112,6 +114,16 @@ export function clampTexture(texture: Texture, max: number, resize: TextureResiz
   texture.image = scaled;
   texture.needsUpdate = true;
   return true;
+}
+
+/**
+ * SPEC-046 §4.9: the default loader — a `GLTFLoader` on `manager` with three's
+ * `MeshoptDecoder` set, so a model exported with `EXT_meshopt_compression`
+ * (SPEC-052's, −50 to −70 % bytes) decodes to the same float attributes an
+ * uncompressed export has. Uncompressed models load exactly as before.
+ */
+export function createGltfLoader(manager: LoadingManager): GLTFLoader {
+  return new GLTFLoader(manager).setMeshoptDecoder(MeshoptDecoder);
 }
 
 interface ModelEntry {
@@ -395,7 +407,7 @@ export class Assets {
   }
 
   #gltf(): AssetLoaders['gltf'] {
-    this.#gltfLoader ??= this.#injected.gltf ?? new GLTFLoader(this.#manager);
+    this.#gltfLoader ??= this.#injected.gltf ?? createGltfLoader(this.#manager);
     return this.#gltfLoader;
   }
 

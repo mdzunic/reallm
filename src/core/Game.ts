@@ -409,6 +409,8 @@ export class Game implements GameServices {
       onContextLost: () => this.#onContextLost(),
       onContextRestored: () => this.#onContextRestored(),
     });
+    // SPEC-046 §4.7: sharp rendering is the player's choice, from the first frame.
+    this.#renderer.setSharpRender(this.#settings.get().sharpRender);
 
     this.#assets = new Assets();
     this.#loop = new Loop();
@@ -1422,10 +1424,17 @@ export class Game implements GameServices {
       // SPEC-040 §4.3: a preset chosen in Settings — `auto` included — clears
       // the governor's dpr cap and restarts its clocks. The panel writes the
       // setting before it calls `setQuality`, and the governor never writes it.
+      // SPEC-046 §4.7: so does sharp rendering, either way (46-j) — after the
+      // renderer has taken it, so the new ceiling is the one the clocks watch.
       events.on(
         'settings:changed',
         ({ patch }) => {
-          if ('quality' in patch) this.#resetGovernor();
+          if (patch.sharpRender !== undefined) {
+            this.#renderer.setSharpRender(patch.sharpRender);
+            this.#resetGovernor();
+          } else if ('quality' in patch) {
+            this.#resetGovernor();
+          }
         },
         this,
       ),

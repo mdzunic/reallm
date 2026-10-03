@@ -222,6 +222,11 @@ export type Settings = {
    * non-boolean stored value reads `true`.
    */
   adaptiveQuality: boolean;
+  /**
+   * SPEC-046 §4.7: `medium` renders at up to 2× the CSS pixel instead of 1.5×
+   * (`effectiveMaxDpr`). Default off; a non-boolean stored value reads `false`.
+   */
+  sharpRender: boolean;
   /** SPEC-027 §4.9; an unusable value reads `'full'` (SPEC-027 D-15). */
   guidance: GuidanceLevel;
   /**
@@ -357,6 +362,7 @@ export function defaultSettings(): Settings {
     benchmark: null,
     frameRate: 60,
     adaptiveQuality: true,
+    sharpRender: false,
     guidance: 'full',
     tipsSeen: [],
     serviceMode: false,
@@ -627,6 +633,9 @@ function coerce<K extends keyof Settings>(key: K, value: unknown, current: Setti
       case 'adaptiveQuality':
         // Default-on: an unusable value must not quietly turn it off.
         return bool(value, true);
+      case 'sharpRender':
+        // SPEC-046 §4.7: default off, so only a real `true` turns it on.
+        return value === true;
       case 'guidance':
         // D-15: unusable reads `'full'`, never "whatever is in memory" — the
         // player who asked for less guidance asked for one of three words.

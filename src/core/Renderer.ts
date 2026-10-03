@@ -18,6 +18,7 @@ import {
   applyLook,
   DEFAULT_LOOK,
   effectiveExposure,
+  effectiveMaxDpr,
   postPlanFor,
   QUALITY,
   resolvePostPlan,
@@ -90,6 +91,12 @@ export interface Renderer {
    * never persisted, and re-applies at once.
    */
   setDprCap(cap: number | null): void;
+  /**
+   * SPEC-046 §4.7: `settings.sharpRender` — `medium` may render at up to 2×
+   * (`effectiveMaxDpr`). A session value, never persisted here; re-applies at
+   * once.
+   */
+  setSharpRender(on: boolean): void;
   dispose(): void;
 }
 
@@ -175,6 +182,8 @@ class CanvasRenderer implements Renderer {
   #pending = true;
   /** SPEC-040 §4.3: the governor's session-only dpr cap; `null` when uncapped. */
   #dprCap: number | null = null;
+  /** SPEC-046 §4.7: `medium` may reach `SHARP_MEDIUM_MAX_DPR`. */
+  #sharp = false;
   /** SPEC-040 §4.1: `sync()`'s read-back target, allocated once. */
   readonly #pixel = new Uint8Array(4);
   #dprQuery: MediaQueryList | null = null;
@@ -360,6 +369,17 @@ class CanvasRenderer implements Renderer {
     this.#apply(false);
   }
 
+  /**
+   * SPEC-046 §4.7: forced like a preset change, so the chain is re-planned
+   * (it only rebuilds when the plan moved) and `renderer:resized` goes out
+   * even on a screen whose ratio sits under both ceilings.
+   */
+  setSharpRender(on: boolean): void {
+    if (on === this.#sharp) return;
+    this.#sharp = on;
+    this.#apply(true);
+  }
+
   dispose(): void {
     if (this.#disposed) return;
     this.#disposed = true;
@@ -423,8 +443,9 @@ class CanvasRenderer implements Renderer {
     const measuredAtZero = rawWidth === 0 || rawHeight === 0;
     const width = Math.max(1, Math.round(rawWidth));
     const height = Math.max(1, Math.round(rawHeight));
-    // SPEC-040 §4.3: the governor's cap sits under the preset's own clamp.
-    const dpr = Math.min(deviceDpr(), this.quality.maxDpr, this.#dprCap ?? Infinity);
+    // SPEC-040 §4.3: the governor's cap sits under the preset's own clamp,
+    // which SPEC-046 §4.7's sharp rendering lifts to 2 on `medium`.
+    const dpr = Math.min(deviceDpr(), effectiveMaxDpr(this.#preset, this.#sharp), this.#dprCap ?? Infinity);
     this.#pending = measuredAtZero;
 
     const changed = width !== this.#width || height !== this.#height || dpr !== this.#dpr;
