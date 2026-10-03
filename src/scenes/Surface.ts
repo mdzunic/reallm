@@ -104,7 +104,7 @@ import {
 } from '@/systems/Guidance';
 import { fillQuickFromPickup, quickEligible, refillQuick, type SlotView } from '@/systems/Loadout';
 import { generateLayout, ObstacleGrid, tugObstacle, WALL_INSET, type Layout, type LayoutPoi, type LayoutShelter } from '@/systems/Layout';
-import { REVEAL_AFTER_SHOT, SHELTER_INSET, shelterAt, STORM_SHELTER_FACTOR } from '@/systems/Shelter';
+import { isHidden, SHELTER_INSET, shelterAt, STORM_SHELTER_FACTOR } from '@/systems/Shelter';
 import { nodeIcon, poiIcon } from '@/systems/MapModel';
 import { contractFor, Missions, type MissionContext, type ObjectiveProgress } from '@/systems/Missions';
 import { CARGO_TOAST_SECONDS, Nodes, Pickups, SHIPPED_TOAST_TEXT } from '@/systems/Pickups';
@@ -2806,8 +2806,7 @@ export class SurfaceScene extends UiScene<'surface'> {
 
     // AC-25: hidden ⇔ inside ∧ no shot for REVEAL_AFTER_SHOT — and SPEC-050
     // §4.3 (50-e): not loud; a player who runs into a cave is heard for 1.5 s.
-    world.playerHidden =
-      inside !== null && world.time - combat.lastShotAt >= REVEAL_AFTER_SHOT && world.time >= p.loudUntil;
+    world.playerHidden = isHidden(inside !== null, world.time, combat.lastShotAt, p.loudUntil);
     this.#shelterState = inside === null ? 'none' : world.playerHidden ? 'hidden' : 'sheltered';
     this.#view?.setOccupiedShelter(inside?.index ?? null);
 

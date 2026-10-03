@@ -17,9 +17,11 @@ import {
   DASH_SECONDS,
   dashCooldown,
   isDashing,
+  pressDash,
   stepDash,
   tryDash,
 } from '@/systems/Dash';
+import { DASH_STAMINA, stepStamina } from '@/systems/Stamina';
 import { WINDUP_SECONDS } from '@/systems/EnemyAi';
 import { STEP, harness, type Harness } from './combatFixtures';
 
@@ -86,6 +88,67 @@ describe('tryDash (SPEC-038 §4.1)', () => {
     p.invulnUntil = 5; // a respawn's 2 s, say
     expect(tryDash(p, 1, 0, 4, 1)).toBe(true);
     expect(p.invulnUntil).toBe(5);
+  });
+});
+
+describe('the dash draws on the sprint’s stamina (SPEC-050 §4.2, E79)', () => {
+  it('a press at 29 stamina, or while exhausted, does nothing at all', () => {
+    const low = makePlayer(0, 0, 100);
+    low.stamina = 29;
+    const before = { ...low };
+    expect(pressDash(low, 1, 0, 10, 1.358)).toBe('refused');
+    expect(low).toEqual(before);
+
+    const spent = makePlayer(0, 0, 100);
+    spent.stamina = 80;
+    spent.exhausted = true;
+    const was = { ...spent };
+    expect(pressDash(spent, 1, 0, 10, 1.358)).toBe('refused');
+    expect(spent).toEqual(was);
+  });
+
+  it('a press at 30 dashes, and leaves 0 and exhausted', () => {
+    const p = makePlayer(0, 0, 100);
+    p.stamina = DASH_STAMINA;
+    expect(pressDash(p, 1, 0, 10, 1.358)).toBe('exhausted');
+    expect(isDashing(p, 10.1)).toBe(true);
+    expect(p.stamina).toBe(0);
+    expect(p.exhausted).toBe(true);
+    expect(p.staminaSpentAt).toBe(10);
+  });
+
+  it('a press from full costs 30 and leaves the player able to run', () => {
+    const p = makePlayer(0, 0, 100);
+    expect(pressDash(p, 0, 1, 2, 1.358)).toBe('dashed');
+    expect(p.stamina).toBe(70);
+    expect(p.exhausted).toBe(false);
+  });
+
+  it('the cooldown still refuses — and then nothing is spent', () => {
+    const p = makePlayer(0, 0, 100);
+    expect(pressDash(p, 1, 0, 0, 1.358)).toBe('dashed');
+    expect(pressDash(p, 1, 0, 1, 1.358)).toBe('refused');
+    expect(p.stamina).toBe(70);
+  });
+
+  it('a dash taken during a sprint leaves the sprint running after it (50-i)', () => {
+    const h = harness();
+    const p = h.world.player;
+    // Sprinting in combat, still wanted, at its own 25 m/s for 0.2 s…
+    stepStamina(p, true, true, true, 1, 20.6, h.world.time, STEP);
+    expect(p.sprinting).toBe(true);
+    expect(pressDash(p, 1, 0, h.world.time, 1.358)).toBe('dashed');
+    // Twelve steps, or a thirteenth should the clock round short.
+    for (let i = 0; i < 13 && isDashing(p, h.world.time); i++) {
+      stepStamina(p, true, true, true, 1, 20.6, h.world.time, STEP);
+      sceneStep(h);
+    }
+    // …and once it is over the run goes on, the dash's 30 and the drain paid.
+    expect(isDashing(p, h.world.time)).toBe(false);
+    stepStamina(p, true, true, true, 1, 20.6, h.world.time, STEP);
+    expect(p.sprinting).toBe(true);
+    expect(p.stamina).toBeLessThan(70);
+    expect(p.stamina).toBeGreaterThan(60);
   });
 });
 

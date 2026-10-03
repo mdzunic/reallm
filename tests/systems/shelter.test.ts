@@ -1,15 +1,19 @@
 // SPEC-030 §4.5 — the pure shelter rules: `shelterAt` over the inset ellipse,
-// inside, outside, in the doorway (30-h), and for a rotated wreck.
+// inside, outside, in the doorway (30-h), and for a rotated wreck; and the
+// hidden rule, which SPEC-050 §4.3 makes refuse a loud player.
 import { describe, expect, it } from 'vitest';
+import { makePlayer } from '@/entities/Player';
 import type { LayoutShelter } from '@/systems/Layout';
 import {
   HIDDEN_DETECT_RADIUS,
+  isHidden,
   LOSE_TRACK_SECONDS,
   REVEAL_AFTER_SHOT,
   SHELTER_INSET,
   STORM_SHELTER_FACTOR,
   shelterAt,
 } from '@/systems/Shelter';
+import { LOUD_SECONDS, stepStamina } from '@/systems/Stamina';
 
 const CAVE: LayoutShelter = { kind: 'cave', index: 0, x: 50, z: -20, rx: 6, rz: 6, angle: 0, gapAngle: Math.PI, gapWidth: 4.5 };
 /** A wreck rotated 45°: long axis along the (1, 1) diagonal. */
@@ -69,5 +73,28 @@ describe('shelterAt (AC-19)', () => {
   it('the first shelter that contains the point wins', () => {
     const twin: LayoutShelter = { ...CAVE, index: 1 };
     expect(shelterAt([CAVE, twin], 50, -20)).toBe(CAVE);
+  });
+});
+
+describe('isHidden (SPEC-030 AC-25, SPEC-050 §4.3)', () => {
+  it('is inside, with no shot for REVEAL_AFTER_SHOT', () => {
+    expect(isHidden(true, 10, -Infinity, -Infinity)).toBe(true);
+    expect(isHidden(false, 10, -Infinity, -Infinity)).toBe(false);
+    expect(isHidden(true, 10, 10 - REVEAL_AFTER_SHOT + 0.01, -Infinity)).toBe(false);
+    expect(isHidden(true, 10, 10 - REVEAL_AFTER_SHOT, -Infinity)).toBe(true);
+  });
+
+  it('a player inside a shelter with time < loudUntil is not hidden (50-e)', () => {
+    expect(isHidden(true, 10, -Infinity, 10.01)).toBe(false);
+    expect(isHidden(true, 10, -Infinity, 10)).toBe(true);
+  });
+
+  it('a run into a cave is heard for 1.5 s after the last sprinting step', () => {
+    const p = makePlayer(0, 0, 100);
+    // The last sprinting step at t = 2, out of combat; then the player walks in.
+    stepStamina(p, true, true, false, 1, 20.6, 2, 1 / 60);
+    expect(isHidden(true, 2.5, -Infinity, p.loudUntil)).toBe(false);
+    expect(isHidden(true, 2 + LOUD_SECONDS - 0.01, -Infinity, p.loudUntil)).toBe(false);
+    expect(isHidden(true, 2 + LOUD_SECONDS, -Infinity, p.loudUntil)).toBe(true);
   });
 });
