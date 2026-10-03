@@ -346,10 +346,7 @@ export class StationScene extends UiScene<'station'> {
   async #askMemory(data: Save, dialogue: DialogueUI): Promise<void> {
     await dialogue.play('station_memory');
     if (!this.#memoryAsked || !this.#alive || !this.#present) return;
-    const index = await dialogue.playChoice(
-      MEMORY_PROMPT,
-      MEMORY_ANSWERS.map((answer) => answer.label),
-    );
+    const index = await dialogue.playChoice(MEMORY_PROMPT, MEMORY_ANSWERS.map((answer) => answer.label));
     const answer = MEMORY_ANSWERS[index];
     const economy = this.#economy;
     if (answer === undefined || economy === null || !this.#alive) return;
