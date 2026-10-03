@@ -649,6 +649,27 @@ const SOUNDS = {
     },
   },
 
+  // SPEC-050 §4.8: the end of the stamina pool — a breath out, not a cue. It
+  // sits under the fight and is the player's own, so it is soft and short.
+  exhale: {
+    // Noise through a band-pass that falls as the breath empties, a touch of
+    // low-passed air beneath it, swelling fast and fading over the rest.
+    peak: -9,
+    render: (n) => {
+      const nz = noise(651);
+      const bp = svf('bp');
+      const lp = svf();
+      const len = n / SR;
+      return fill(n, (t) => {
+        const u = clamp(t / len, 0, 1);
+        const env = attack(t, 0.045) * (1 - u) ** 1.3;
+        const breath = bp(nz(), sweep(t, 1500, 420, len * 0.9), 0.9);
+        const air = lp(nz(), sweep(t, 900, 300, len));
+        return (1.3 * breath + 0.45 * air) * env;
+      });
+    },
+  },
+
   // -------------------------------------------------------------- flight
   ship_hit_shield: {
     peak: -4,
