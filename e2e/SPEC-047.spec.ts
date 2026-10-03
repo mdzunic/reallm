@@ -5,7 +5,7 @@
 // is still counted after a reload, and a code carried to another slot.
 import { readFileSync } from 'node:fs';
 import { expect, test, type Page } from '@playwright/test';
-import { start, type SaveSnapshot } from './start';
+import { frames, start, type SaveSnapshot } from './start';
 
 const CREATION = {
   name: 'Vance',
@@ -185,6 +185,7 @@ test('5. 47-a: a code exported from slot 0 imports into slot 2 as the same versi
 interface FlightHook {
   phase(): string;
   blockArrival(): void;
+  clearSky(): void;
   hit(amount: number): void;
 }
 
@@ -246,17 +247,30 @@ test('7. 47-f: in flight a kill counts, and a crash counts a death without touch
   const before = await stats(page);
   expect(before).not.toBeNull();
 
-  // A still fighter dead ahead; aim at its lead pip and hold fire on Space.
-  await page.evaluate(() => (window as unknown as { __reallmFlight: FlightHook }).__reallmFlight.blockArrival());
+  // The guns wake after the launch, and the chase camera settles with them: a
+  // pointer swept while it still moves finds the cone somewhere else.
+  await page.waitForFunction(() => (window as unknown as { __reallmFlight: FlightHook }).__reallmFlight.phase() !== 'launch', null, {
+    timeout: 20_000,
+  });
+  // One still fighter dead ahead and nothing else in the sky, found as
+  // SPEC-042's case 6 finds it: the pointer down the screen's middle a few
+  // pixels at a time — three frames each, so the step has read it — until
+  // ARIA's 6° cone takes it; then on its lead pip, and hold fire on Space.
+  await page.evaluate(() => {
+    const hook = (window as unknown as { __reallmFlight: FlightHook }).__reallmFlight;
+    hook.clearSky();
+    hook.blockArrival();
+  });
   const viewport = page.viewportSize() ?? { width: 1280, height: 720 };
-  const pip = page.getByTestId('lead-pip');
-  for (let k = 0; k <= 16 && !(await pip.isVisible()); k++) {
-    await page.mouse.move(viewport.width / 2, viewport.height * (0.4 + 0.035 * k));
-    await page.waitForTimeout(150);
+  for (let k = 0; k <= 30 && Number((await info(page))['lead']) !== 1; k++) {
+    await page.mouse.move(viewport.width / 2, viewport.height * (0.4 + 0.01 * k));
+    await frames(page, 3);
   }
-  await expect(pip).toBeVisible({ timeout: 15_000 });
+  const pip = page.getByTestId('lead-pip');
+  await expect(pip).toBeVisible({ timeout: 10_000 });
   const at = await pip.boundingBox();
-  if (at !== null) await page.mouse.move(at.x + at.width / 2, at.y + at.height / 2);
+  if (at === null) throw new Error('the lead pip has no box');
+  await page.mouse.move(at.x + at.width / 2, at.y + at.height / 2);
   await page.keyboard.down('Space');
   await expect.poll(async () => (await stats(page))?.kills ?? 0, { timeout: 60_000, intervals: [250] }).toBe((before?.kills ?? 0) + 1);
   await page.keyboard.up('Space');
