@@ -309,8 +309,13 @@ test('5. chapter 3 done: the mission clock, then the memory question on the next
   expect(await page.evaluate(() => window.__reallm.backDepth())).toBe(depth);
   expect((await flags(page)).filter((flag) => flag.startsWith('memory_'))).toEqual([]);
 
+  // The reply is on screen and waits: the click that chose the answer is not
+  // also the box's tap that would end it (lines land whole here).
   await page.getByTestId('dialogue-choice-0').click();
   await expect(text(page)).toHaveText('Thank you. It is on file now.');
+  await page.waitForTimeout(500);
+  await expect(text(page)).toBeVisible();
+  await expect(dialogue(page)).toHaveClass(/is-modal/);
   const answered = await flags(page);
   expect(answered).toContain('memory_roof');
   expect(answered).not.toContain('memory_tap');

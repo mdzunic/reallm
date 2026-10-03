@@ -257,4 +257,13 @@ describe('the home speaker (SPEC-049 §4.1)', () => {
     // A choice resets the style to ARIA's, so a letter's paper never carries over.
     expect(layer).toMatch(/playChoice\([^)]*\)[^{]*\{[\s\S]*?this\.#setStyle\('aria'\)/);
   });
+
+  it('a choice\'s click stops at its button, so the box never skips the reply the answer starts', () => {
+    // §4.5: `station_memory_reply` is on screen before the click would bubble
+    // to the box's `skip()`, which ends a whole line (Typewriter text off).
+    const layer = SOURCES['../../src/ui/DialogueUI.ts'] as string;
+    const choice = /playChoice\(prompt: string[\s\S]*?\n {2}\}/.exec(layer)?.[0] ?? '';
+    expect(choice).toMatch(/const choose = \(index: number\) => \(event: Event\) => \{\s*event\.stopPropagation\(\);\s*this\.#choose\(index\);\s*\};/);
+    expect(choice).toContain("h('button', { class: 'ui-btn dialogue-choice', type: 'button', click: choose(index) }");
+  });
 });

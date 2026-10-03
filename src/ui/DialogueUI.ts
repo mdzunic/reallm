@@ -370,10 +370,17 @@ export class DialogueUI {
         onChoice: (index) => resolve(index),
         resolve: () => {},
       };
+      // SPEC-049 §4.5: the press is the choice's alone — a dialogue the answer
+      // starts (`station_memory_reply`) is already on screen when the click
+      // would bubble to the box's `skip()`, which ends a line already whole.
+      const choose = (index: number) => (event: Event) => {
+        event.stopPropagation();
+        this.#choose(index);
+      };
       this.#choices.replaceChildren(
         ...options.map((option, index) =>
           testId(
-            h('button', { class: 'ui-btn dialogue-choice', type: 'button', click: () => this.#choose(index) }, `${index + 1}. ${option}`),
+            h('button', { class: 'ui-btn dialogue-choice', type: 'button', click: choose(index) }, `${index + 1}. ${option}`),
             `dialogue-choice-${index}`,
           ),
         ),
