@@ -120,10 +120,18 @@ async function press(page: Page, testid: string): Promise<void> {
   await page.getByTestId(testid).dispatchEvent('click');
 }
 
-/** §6.3 case 1's busy state: the storm banner, one toast, and USE at the pad. */
-async function busy(page: Page): Promise<void> {
-  await press(page, 'surface-storm');
+/** The busy state's toast, up for a minute. Toasts coalesce by text, so it is raised once. */
+async function shipped(page: Page): Promise<void> {
   await page.evaluate((text) => window.__reallm.toast(text, 'warn', 60_000), SHIPPED);
+}
+
+/**
+ * §6.3 case 1's busy state: the storm banner, one toast, and USE at the pad.
+ * `toasted` when the caller has already raised the toast.
+ */
+async function busy(page: Page, toasted = false): Promise<void> {
+  await press(page, 'surface-storm');
+  if (!toasted) await shipped(page);
   await press(page, 'surface-goto-pad');
   await expect(page.getByTestId('hud-weather')).toBeVisible();
   await expect(page.getByTestId('touch-interact')).toBeVisible({ timeout: 10_000 });
@@ -191,14 +199,21 @@ for (const size of PHONE_VIEWPORTS) {
     }) => {
       await land(page);
       // The zone ghosts of a first touch landing (SPEC-036 §4.12), read
-      // before anything takes them down.
+      // before anything takes them down. Their 12 s is wall clock from the
+      // scene's enter, and a starved landing spends most of it on its own — a
+      // loaded gate run took 8.6 s inside `go()` — so the ghost is read against
+      // the arc and the busy state's toast as soon as the toast is up, ahead of
+      // the slower steps (the storm, the jump to the pad, the wait for USE).
+      // Neither the storm nor USE moves the ghost or the toast.
       const aim = page.getByTestId('touch-zone-aim');
       await expect(aim).toBeVisible();
-      await busy(page);
+      await shipped(page);
+      await expect.poll(async () => (await shownToasts(page)).length).toBe(1);
       await expect(aim).toBeVisible();
       const ghost = await box(page, 'touch-zone-aim');
       expect(intersects(ghost, await box(page, 'thumb-arc')), 'the aim ghost is on the arc').toBe(false);
       expect(intersects(ghost, (await shownToasts(page))[0] as Box), 'the aim ghost is under the toast').toBe(false);
+      await busy(page, true);
 
       await checkLayout(page, size.width, size.height, 'left');
 

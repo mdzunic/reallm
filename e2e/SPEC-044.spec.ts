@@ -262,8 +262,15 @@ test('1. a modal line is read by keyboard: ▸ Enter once complete, Enter advanc
   expect(await focused(page)).toBe('dialogue');
 
   // The cue appears once the first line has typed out, and it never animates.
+  // Typed out is the whole line on screen: the typewriter adds a character per
+  // 25 ms tick of the page's own clock, so a starved tab types far below 40 a
+  // second — a loaded gate run had 76 of SPEC-048's 77 characters up when the
+  // old 10 s ran out — and the wait is for the line, not for a speed. The line
+  // is modal, so it stays until a press; the cue is shown in the same tick as
+  // its last character.
+  await expect(dialogue.locator('.dialogue-text')).toHaveText(INTRO_LINES[0]!.text, { timeout: 30_000 });
   const cue = page.getByTestId('dialogue-next');
-  await expect(cue).toBeVisible({ timeout: 10_000 });
+  await expect(cue).toBeVisible();
   await expect(cue).toHaveText('▸ Enter');
   expect(await cue.evaluate((node) => getComputedStyle(node).animationName)).toBe('none');
   expect(await cue.evaluate((node) => getComputedStyle(node).transitionDuration)).toBe('0s');

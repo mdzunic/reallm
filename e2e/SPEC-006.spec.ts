@@ -1378,7 +1378,9 @@ test('the reactions table is what the game actually hears (AC-38 … AC-50, AC-5
     await new Promise((resolve) => setTimeout(resolve, 700));
     const full = gain();
     bus.emit('player:died', { cause: 'enemy', scene: 'surface' });
-    const death = await sample(2800, 100);
+    // Read on the ramp's own 25 ms tick: a starved tab stretches every step of
+    // an interval, and a finer step keeps the hold densely read anyway.
+    const death = await sample(2800, 25);
     await new Promise((resolve) => setTimeout(resolve, 400));
     audio['duck'](true);
     await new Promise((resolve) => setTimeout(resolve, 300));
@@ -1391,7 +1393,16 @@ test('the reactions table is what the game actually hears (AC-38 … AC-50, AC-5
   });
 
   expect(ducks.full).toBeCloseTo(MUSIC_FULL, 2);
-  const ducked = ducks.death.filter(([t]) => t >= 300 && t <= 1900);
+  // The ramp down is 200 ms on the page's clock, ticked every 25 ms, and the
+  // sampler runs on the same clock: a starved tab lands the ramp late — a
+  // loaded gate run still read 0.2531 at 311 ms — and stretched the old 100 ms
+  // step to about 150. So the hold is read from the first sample at the ducked
+  // level, which must come inside the first second, through 1.9 s: on a quiet
+  // host that is from 300 ms, as it always was.
+  const landed = ducks.death.find(([, value]) => value !== null && Math.abs(value - MUSIC_DUCKED) < 5e-4);
+  expect(landed, 'the bus reaches the ducked level').toBeDefined();
+  expect(landed![0]).toBeLessThan(1000);
+  const ducked = ducks.death.filter(([t]) => t >= Math.max(300, landed![0]) && t <= 1900);
   expect(ducked.length).toBeGreaterThan(10);
   for (const [t, value] of ducked) expect(value, `at ${t} ms`).toBeCloseTo(MUSIC_DUCKED, 3);
   // It lets go by itself: no second call anywhere in the block above.

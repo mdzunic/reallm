@@ -63,10 +63,13 @@ test('a forced storm does nothing inside a shelter and bites outside (§6.2 case
   await page.waitForTimeout(3000);
   expect(await hp(page)).toBe(before);
 
-  // Outside, the same storm drains HP within 4 s.
+  // Outside, the same storm drains HP within 4 s — of game time, which a
+  // starved tab stretches: a loaded gate run drew 4 fps, the simulation at a
+  // third of the wall clock, and had taken the first point only after the old
+  // 8 s. The wall clock is only the patience.
   await page.getByTestId('surface-goto-pad').click();
   await expect
-    .poll(async () => await hp(page), { timeout: 8_000 })
+    .poll(async () => await hp(page), { timeout: 30_000 })
     .toBeLessThan(before);
 });
 
