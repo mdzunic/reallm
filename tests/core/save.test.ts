@@ -2233,21 +2233,19 @@ describe('version 3 (SPEC-047)', () => {
   }
 
   /**
-   * §4.6 bounds the worst case's growth at 4,096 characters, and AC-26 with
-   * it. That bound does not hold, and no implementation of this spec can make
-   * it hold: with §3's canonical field names and the plain JSON the store and
-   * export codes write (unchanged, AC-27), the floor below is already 4,439 —
-   * eight entries with six `lastDeath` points each are 2,884 characters on
-   * their own. AC-26 is reported as blocked for a spec amendment, not met.
+   * §4.6 bounds the worst case's growth at 6,144 characters, and AC-26 with
+   * it (amended from 4,096, which §3's canonical field names in the plain JSON
+   * the store and export codes write could not meet: the eight entries' 48
+   * `lastDeath` points alone are 1,100–1,500 characters).
    *
-   * What this case holds instead, until §4.6 is amended: both growths, pinned
-   * exactly, so any change to the v3 shape that grows the save has to move
-   * these literals deliberately; and PLAN §8's 100 KB, the limit §4.6's bound
-   * exists to protect, which the whole worst-case save is nowhere near.
+   * Both growths are also pinned exactly, so any change to the v3 shape that
+   * grows the save has to move these literals deliberately; and PLAN §8's
+   * 100 KB, the limit §4.6's bound exists to protect, is nowhere near.
    */
-  it('§4.6: the worst-case v3 save grows by exactly the pinned amount over v2, and stays far inside 100 KB', () => {
+  it('§4.6: the worst-case v3 save grows by at most 6,144 characters over v2, and stays far inside 100 KB', () => {
     const floor = worstCase(false);
     const worst = worstCase(true);
+    expect(worst.asV3.length - worst.asV2.length).toBeLessThanOrEqual(6_144);
     expect(floor.asV3.length - floor.asV2.length).toBe(4_439);
     expect(worst.asV3.length - worst.asV2.length).toBe(5_397);
     expect(worst.asV3.length).toBeLessThan(100_000 / 4);
