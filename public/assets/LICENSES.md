@@ -214,8 +214,6 @@ scripts or synthesised.
 | `textures/ground/lava_rock_nr.webp` | Original to this repository — baked seamless 4D noise/Voronoi fields, packed with numpy; generated in Blender by `scripts/assets/blender/ground.py` | CC0 | — |
 | `textures/ground/moss_albedo.webp` | Original to this repository — baked seamless 4D noise/Voronoi fields, packed with numpy; generated in Blender by `scripts/assets/blender/ground.py` | CC0 | — |
 | `textures/ground/moss_nr.webp` | Original to this repository — baked seamless 4D noise/Voronoi fields, packed with numpy; generated in Blender by `scripts/assets/blender/ground.py` | CC0 | — |
-| `textures/ground/rock_albedo.webp` | Original to this repository — baked seamless 4D noise/Voronoi fields, packed with numpy; generated in Blender by `scripts/assets/blender/ground.py` | CC0 | — |
-| `textures/ground/rock_nr.webp` | Original to this repository — baked seamless 4D noise/Voronoi fields, packed with numpy; generated in Blender by `scripts/assets/blender/ground.py` | CC0 | — |
 | `textures/ground/sand_albedo.webp` | Original to this repository — baked seamless 4D noise/Voronoi fields, packed with numpy; generated in Blender by `scripts/assets/blender/ground.py` | CC0 | — |
 | `textures/ground/sand_nr.webp` | Original to this repository — baked seamless 4D noise/Voronoi fields, packed with numpy; generated in Blender by `scripts/assets/blender/ground.py` | CC0 | — |
 | `textures/ground/snow_albedo.webp` | Original to this repository — baked seamless 4D noise/Voronoi fields, packed with numpy; generated in Blender by `scripts/assets/blender/ground.py` | CC0 | — |

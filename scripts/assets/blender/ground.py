@@ -109,14 +109,6 @@ def cracked_earth(f):
     return mixc(alb, col('#3b2716'), crack), h, 0.9 - 0.05 * n, None, 7.0
 
 
-def rock(f):
-    n, g, e = f
-    ridge = 1 - np.abs(2 * n - 1)
-    h = np.clip(0.55 * n + 0.3 * ridge + 0.15 * g - 0.2 * (1 - ss(0.0, 0.08, e)), 0, 1)
-    alb = ramp(h, [(0, '#4f4843'), (0.5, '#7d746b'), (1, '#a69d92')]) * (0.9 + 0.2 * g)[..., None]
-    return alb, h, 0.88 - 0.1 * g, None, 8.0
-
-
 def snow(f):
     n, g, _ = f
     h = 0.7 * n + 0.3 * g
@@ -202,7 +194,6 @@ FBM = 'fbm'
 LAYERS = {
     'sand': ([(FBM, 3, 1, {}), (FBM, 18, 2, {'detail': 3}), (FBM, 6, 3, {'detail': 6, 'distortion': 0.5})], sand),
     'cracked_earth': ([('edge', 6, 4, {}), ('cell', 6, 4, {}), (FBM, 10, 5, {'detail': 6})], cracked_earth),
-    'rock': ([(FBM, 4, 6, {'detail': 8, 'rough': 0.6}), (FBM, 12, 7, {}), ('edge', 3, 8, {})], rock),
     'snow': ([(FBM, 3, 9, {'detail': 5}), (FBM, 24, 10, {'detail': 2}), (FBM, 1, 11, {})], snow),
     'ice': ([('edge', 5, 12, {}), ('cell', 5, 12, {}), (FBM, 8, 13, {'detail': 5})], ice),
     'moss': ([(FBM, 10, 14, {'detail': 6, 'rough': 0.65}), (FBM, 3, 15, {}), ('smooth', 16, 16, {})], moss),
