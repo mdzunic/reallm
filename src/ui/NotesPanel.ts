@@ -117,7 +117,7 @@ export function renderLetters(flags: ReadonlySet<string>, fill: (text: string) =
                   .filter((line) => line.speaker === 'home')
                   .flatMap((line, index): (Node | string)[] => (index === 0 ? [fill(line.text)] : [h('br'), fill(line.text)])),
               )
-            : h('span', { class: 'notes-missing' }, LETTER_WAITING_TEXT);
+            : h('span', { class: 'notes-letter-waiting' }, LETTER_WAITING_TEXT);
           return testId(h('li', { class: 'notes-letter' }, body), `notes-letter-${letter.chapter}`);
         }),
       ),

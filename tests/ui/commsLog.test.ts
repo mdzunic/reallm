@@ -102,6 +102,8 @@ describe('Notes’ Letters (SPEC-049 §4.3)', () => {
     // Only Iris's lines, and only once the letter is read.
     expect(panel).toContain("line.speaker === 'home'");
     expect(panel).toContain('flags.has(letter.flag)');
+    // A waiting letter is not an unfound clue: SPEC-048's `.notes-missing` counts stay clue counts.
+    expect(panel).toContain("h('span', { class: 'notes-letter-waiting' }, LETTER_WAITING_TEXT)");
   });
 
   it('comes after the chapters, and with nothing found still follows the empty line', () => {
