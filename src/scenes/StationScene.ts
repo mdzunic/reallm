@@ -324,10 +324,14 @@ export class StationScene extends UiScene<'station'> {
    */
   async #homeOnEntry(data: Save): Promise<void> {
     if (!this.#alive || !this.#present) return;
+    const flags = new Set(data.progress.flags);
+    const letter = letterDue(flags);
+    const aside = asideDue(flags, this.#awakeQueued);
+    // Nothing owed, nothing built: a plain entry leaves the page-lifetime layer
+    // as the debrief left it (SPEC-020's font floor measures the panels).
+    if (letter === null && aside === null) return;
     const dialogue = this.#dialogueLayer();
-    const letter = letterDue(new Set(data.progress.flags));
     if (letter !== null) void dialogue.play(letter);
-    const aside = asideDue(new Set(data.progress.flags), this.#awakeQueued);
     if (aside === 'station_awake') {
       this.#awakeQueued = true;
       void dialogue.play('station_awake');
