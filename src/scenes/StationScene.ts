@@ -9,6 +9,10 @@
 // Every enter effect is skipped, not crashed, when no save is bound: the e2e
 // fleet cycles menu → station → starmap with nothing loaded, and D-19 makes
 // a throwing `enter()` a fallback to the menu.
+//
+// SPEC-048 §4.3, §4.4: a clue line the debrief plays — `c2_m1_done` after a
+// reload — finds its clue here as it starts, and the rail's `Comms log` wears
+// the `notes-new` dot while a clue found this session is unread in Notes.
 import * as THREE from 'three';
 import { log } from '@/core/Log';
 import { maxHp, type Save } from '@/core/Save';
@@ -16,10 +20,12 @@ import type { GameServices } from '@/core/Services';
 import { applyUpdate, updateReady } from '@/core/Updates';
 import type { SceneParams } from '@/core/StateMachine';
 import { DIALOGUE, PLANET_IDS, PLANETS, type DialogueId, type PlanetId } from '@/data/index';
+import { ClueTracker } from '@/systems/Clues';
 import { Economy } from '@/systems/Economy';
 import { applySupplies } from '@/systems/Service';
 import { Progression } from '@/systems/Progression';
 import { endingPending, interludeToPlay, LINE_LEDGER, stayReport } from '@/systems/StoryBeats';
+import { storyContextOf } from '@/systems/StoryContext';
 import { director } from '@/scenes/Director';
 import { CharacterPanel } from '@/ui/CharacterPanel';
 import { openCommsLog } from '@/ui/CommsLog';
@@ -27,6 +33,7 @@ import { dialogueLayer } from '@/ui/DialogueUI';
 import { el, h, testId } from '@/ui/dom';
 import { clearEndingOverlays, EndingOverlay } from '@/ui/EndingOverlay';
 import { MissionBoard } from '@/ui/MissionBoard';
+import { notesFor, NOTES_UNSEEN, syncNotesDot } from '@/ui/NotesPanel';
 import { SettingsPanel } from '@/ui/SettingsPanel';
 import { ShopPanel } from '@/ui/ShopPanel';
 import type { Look } from '@/core/Quality';
@@ -88,6 +95,7 @@ export class StationScene extends UiScene<'station'> {
         ),
       );
       this.#enterEffects(data);
+      this.#watchClues(data);
       // SPEC-023 §4.3: the story the entry owes — an interlude, then the
       // debrief — runs off `scene:entered` rather than here, so a film never
       // holds the transition open behind it.
@@ -166,6 +174,41 @@ export class StationScene extends UiScene<'station'> {
       if (art.ring !== null) swapModule(spin, ring, art.ring);
       if (art.dock !== null) swapModule(spin, pad, art.dock);
     });
+  }
+
+  // -------------------------------------------------------------- clues
+
+  /**
+   * SPEC-048 §4.3: the station feeds the clue tracker `dialogue:started` only —
+   * a clue line it plays is a debrief (`c2_m1_done` after a reload). The flag
+   * is set as the line starts, the checkpoint saves it, and Notes marks it
+   * unread; `story:clue` re-renders the rail so `Comms log` wears the dot.
+   */
+  #watchClues(data: Save): void {
+    const tracker = new ClueTracker();
+    this.disposer.add(
+      this.services.events.on(
+        'dialogue:started',
+        ({ id }) => {
+          const economy = this.#economy;
+          const def = tracker.started(id, new Set(data.progress.flags));
+          if (def === null || economy === null) return;
+          economy.setFlag(def.id);
+          this.services.save.request('checkpoint');
+          NOTES_UNSEEN.mark(data);
+          this.#syncNotesDot();
+        },
+        this,
+      ),
+    );
+    this.disposer.add(this.services.events.on('story:clue', () => this.#renderRail(), this));
+  }
+
+  /** SPEC-048 §4.4: `station-tab-comms` wears the dot while the save has an unread clue. */
+  #syncNotesDot(): void {
+    const save = this.services.save.current;
+    const button = this.#screen?.root.querySelector<HTMLElement>('[data-testid="station-tab-comms"]') ?? null;
+    syncNotesDot(button, save !== null && NOTES_UNSEEN.has(save));
   }
 
   // ---------------------------------------------------------- enter effects
@@ -411,6 +454,7 @@ export class StationScene extends UiScene<'station'> {
       ...(updateReady() ? [action('update', 'Update', () => applyUpdate())] : []),
     ]);
     this.#panelBox?.setAttribute('aria-labelledby', `station-tab-${this.#tab}`);
+    this.#syncNotesDot();
   }
 
   /**
@@ -426,7 +470,11 @@ export class StationScene extends UiScene<'station'> {
       typewriter: () => this.services.settings.get().typewriter,
       speed: () => this.services.settings.get().dialogueSpeed,
     });
-    const close = openCommsLog(this.ui, dialogue.log);
+    // SPEC-048 §4.4: Notes for the bound save, up to the chapter its flags have
+    // reached; opening it takes the dot down in place, so focus can come back.
+    const save = this.services.save.current;
+    const notes = save === null ? null : notesFor(save, () => storyContextOf(save).chapter, () => this.#syncNotesDot());
+    const close = openCommsLog(this.ui, dialogue.log, notes?.notes ?? (() => null), notes?.fill);
     this.#closeComms = (): void => {
       this.#closeComms = null;
       close();

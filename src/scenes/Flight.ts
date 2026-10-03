@@ -21,11 +21,23 @@ import type { GameServices } from '@/core/Services';
 import type { SceneParams } from '@/core/StateMachine';
 import { cargoCap, maxHp } from '@/core/Save';
 import { FLIGHT_ASSETS, PLANET_ART } from '@/data/assets';
-import { CHAPTER_CARDS, ENEMIES, MISSIONS, PLANETS, TIPS, type DialogueId, type EnemyDef, type PlanetDef, type TipId } from '@/data/index';
+import {
+  CHAPTER_CARDS,
+  ENEMIES,
+  MISSIONS,
+  PLANETS,
+  TIPS,
+  type ClueDef,
+  type DialogueId,
+  type EnemyDef,
+  type PlanetDef,
+  type TipId,
+} from '@/data/index';
+import { ClueTracker, FlagView, type ClueScene } from '@/systems/Clues';
 import { computePlayerStats } from '@/systems/Combat';
 import { Economy } from '@/systems/Economy';
 import { tipDue, tipKey } from '@/systems/Guidance';
-import { CARD, cardDue, cardKey, LINE_LEDGER } from '@/systems/StoryBeats';
+import { CARD, cardDue, cardKey, LINE_LEDGER, missionLinePlays } from '@/systems/StoryBeats';
 import { showChapterCard } from '@/ui/ChapterCard';
 import { dialogueLayer } from '@/ui/DialogueUI';
 import { director } from '@/scenes/Director';
@@ -47,6 +59,7 @@ import { AriaHint } from '@/ui/AriaHint';
 import { el, h, shortScreen, testId } from '@/ui/dom';
 import { Hud } from '@/ui/Hud';
 import { MissionBanner } from '@/ui/MissionBanner';
+import { NOTES_UNSEEN } from '@/ui/NotesPanel';
 import { PauseMenu, withComms } from '@/ui/PauseMenu';
 import { RotateOverlay } from '@/ui/RotateOverlay';
 import { TouchControls } from '@/ui/TouchControls';
@@ -219,6 +232,9 @@ export class FlightScene extends UiScene<'flight'> {
     // dispose, which the narrow structural bus in `Services` cannot express —
     // the same cast the surface scene makes for the same reason.
     const bus = services.events as EventBus<GameEvents>;
+    // SPEC-048 §4.3: the clue tracker hears a kill before the missions do, so
+    // the kill that completes a kill clue's mission still counts as made during it.
+    this.#watchClues(save, economy, bus);
     const missions = new Missions(save, economy, bus, 'flight', this.#planet.id);
     this.#missions = missions;
     const flight = new Flight(
@@ -289,10 +305,13 @@ export class FlightScene extends UiScene<'flight'> {
     // debriefed in flight, and the ledger keeps the station from saying it again.
     // SPEC-042 §4.1: the banner goes up first, and the line waits behind its
     // hold — flight lines are never modal. There is no pad here, so no next.
+    // SPEC-048 §4.6 (E76): a replay keeps its banner and loses its line, and
+    // the station debriefs no replay.
     this.disposer.add(this.services.events.on('mission:completed', ({ id, replay }) => {
       const data = this.#save;
       if (data === null) return;
       this.#banner?.push(completionLines(MISSIONS[id], replay, null));
+      if (!missionLinePlays('complete', replay)) return;
       LINE_LEDGER.noteCompleted(data, id);
       const line = MISSIONS[id].dialogue.onComplete;
       if (line !== undefined) this.#playLine(data, line);
@@ -510,6 +529,8 @@ export class FlightScene extends UiScene<'flight'> {
           typewriter: () => services.settings.get().typewriter,
           speed: () => services.settings.get().dialogueSpeed,
         }).log,
+        // SPEC-048 §4.4: Notes lists the chapters up to the destination's.
+        () => this.#planet.chapter,
       ),
       () => services.requestResume(),
       {
@@ -1052,6 +1073,65 @@ export class FlightScene extends UiScene<'flight'> {
       if (id === undefined) continue;
       this.#playLine(save, id);
     }
+  }
+
+  /**
+   * SPEC-048 §4.3: the flight's clue tracker — kills in, the destination as its
+   * planet. A clue's line is found as it starts (`dialogue:started`): its flag
+   * through the flight's economy, a checkpoint, and Notes' unread mark; a clue
+   * found under the pause menu dots `pause-comms` at once.
+   */
+  #watchClues(save: Save, economy: Economy, bus: EventBus<GameEvents>): void {
+    const tracker = new ClueTracker();
+    const flags = new FlagView();
+    const scene: ClueScene = {
+      planet: this.#planet.id,
+      get flags(): ReadonlySet<string> {
+        return flags.of(save.progress.flags);
+      },
+      firstRun: (mission) => {
+        const missions = this.#missions;
+        return missions !== null && missions.active.some((state) => state.id === mission) && !missions.isReplay(mission);
+      },
+      hasShelter: () => false,
+    };
+    this.disposer.add(bus.on('enemy:killed', ({ enemyId }) => this.#playClue(tracker, tracker.onKill(enemyId, scene)), this));
+    this.disposer.add(
+      bus.on(
+        'dialogue:started',
+        ({ id }) => {
+          const def = tracker.started(id, scene.flags);
+          if (def === null) return;
+          economy.setFlag(def.id);
+          this.services.save.request('checkpoint');
+          NOTES_UNSEEN.mark(save);
+        },
+        this,
+      ),
+    );
+    this.disposer.add(bus.on('story:clue', () => this.#pauseMenu?.refreshNotes(), this));
+  }
+
+  /**
+   * SPEC-048 §4.3: a clue's first line on the flight's non-modal path, past the
+   * ledger — the flag gates it — and its pending mark settled when `play` is,
+   * played or dropped (E75).
+   */
+  #playClue(tracker: ClueTracker, def: ClueDef | null): void {
+    if (def === null) return;
+    const line = def.lines[0];
+    if (line === undefined) {
+      tracker.settle(def.id);
+      return;
+    }
+    void dialogueLayer(this.services.uiRoot, this.services.events, {
+      input: this.services.input,
+      saveKey: () => this.services.save.current,
+      typewriter: () => this.services.settings.get().typewriter,
+      speed: () => this.services.settings.get().dialogueSpeed,
+    })
+      .play(line, { modal: false })
+      .then(() => tracker.settle(def.id));
   }
 
   /** Plays a mission line once per save, through the shared ledger (§4.10). */

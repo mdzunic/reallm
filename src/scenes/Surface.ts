@@ -27,6 +27,7 @@ import type { Rng } from '@/core/Rng';
 import {
   BOSS_REVEALS,
   CLASSES,
+  CLUES,
   CONTRACT_IDS,
   CONTRACTS,
   DIALOGUE,
@@ -46,6 +47,7 @@ import {
   TUNING,
   WAVES,
   type BossRevealDef,
+  type ClueDef,
   type ContractId,
   type Dialogue,
   type DialogueId,
@@ -75,6 +77,7 @@ import { makePlayer } from '@/entities/Player';
 import { makeProjectile } from '@/entities/Projectile';
 import { resetTelegraph, TELEGRAPH_CAPACITY } from '@/entities/Telegraph';
 import { ARENA_RESPAWN_OUTSET, clampToSeal, type ArenaState } from '@/entities/World';
+import { ClueTracker, clueFound, FlagView, type ClueScene } from '@/systems/Clues';
 import { Combat, computePlayerStats, ELITE_SCALE, type CombatWorld, type HitMemory } from '@/systems/Combat';
 import { DASH_DISTANCE, dashCooldown, isDashing, stepDash, tryDash } from '@/systems/Dash';
 import { Economy } from '@/systems/Economy';
@@ -107,7 +110,7 @@ import { CARGO_TOAST_SECONDS, Nodes, Pickups, SHIPPED_TOAST_TEXT } from '@/syste
 import { cumulativeXp, LEVEL_CAP, Progression, xpToNext } from '@/systems/Progression';
 import { SpawnDirector, WAVE_CEILING_BONUS, type FrustumXZ, type SpawnRamp, type WaveHandle } from '@/systems/Spawn';
 import { Weather, WEATHER_EFFECTS, type WeatherEffects } from '@/systems/Weather';
-import { LINE_LEDGER, revealCamera, revealDue, revealKey, stayReport, type Ending } from '@/systems/StoryBeats';
+import { LINE_LEDGER, missionLinePlays, revealCamera, revealDue, revealKey, stayReport, type Ending } from '@/systems/StoryBeats';
 import {
   activeEffects,
   affixLine,
@@ -146,6 +149,7 @@ import { UiScene } from '@/scenes/base';
 import { director } from '@/scenes/Director';
 import { INSTANCES_PER_PART, setHostileRim } from '@/views/ProceduralMeshes';
 import { layerFromAssets } from '@/views/ProceduralTextures';
+import { bearingToward, echoBodySpot, SCAV_BODY_RADIUS, SCAV_PAD_OFFSET } from '@/views/ScavBody';
 import {
   advanceViewTime,
   cameraBob,
@@ -168,6 +172,7 @@ import { MapLayers } from '@/ui/MapLayers';
 import { MissionBanner } from '@/ui/MissionBanner';
 import { MapScreen, type MapMissionRow } from '@/ui/MapScreen';
 import { Minimap, type MapMark, type MinimapFrame } from '@/ui/Minimap';
+import { NOTES_UNSEEN } from '@/ui/NotesPanel';
 import { PauseMenu, withComms } from '@/ui/PauseMenu';
 import { openQuickPicker, type QuickChoice } from '@/ui/QuickPicker';
 import { RevealOverlay } from '@/ui/RevealOverlay';
@@ -217,6 +222,14 @@ const OCCLUDER_TEST_SECONDS = 0.1;
 const LOOK_AHEAD = 2;
 /** SPEC-046 §4.8: where `surface-goto-pad` stands the salvager, from the pad's centre toward the spawn. */
 const GOTO_PAD_DISTANCE = 5;
+
+// --------------------------------------------------------- SPEC-048 §4.8
+
+/** §4.8: the scavengers lie on Cinder-4 only — the pad's while its first mission runs. */
+const SCAV_PLANET: PlanetId = 'cinder4';
+const SCAV_PAD_MISSION: MissionId = 'c1_m1';
+/** §4.8: the line whose start lays the second, identical body down. */
+const SCAV_ECHO_LINE: DialogueId = 'c1_s2_echo';
 /** Touch aim-drags point the shot this far ahead (matches SPEC-011's demo). */
 const AIM_DRAG_DISTANCE = 12;
 
@@ -616,6 +629,12 @@ export class SurfaceScene extends UiScene<'surface'> {
   #insideShelter: LayoutShelter | null = null;
   #shelterState: 'none' | 'sheltered' | 'hidden' = 'none';
   #shelterDiscovered: boolean[] = [];
+
+  // SPEC-048 §4.3, §4.8 — the clue tracker this visit feeds, the scene it
+  // reads, and whether the echo's body is down yet (one per visit).
+  #clues: ClueTracker | null = null;
+  #clueScene: ClueScene | null = null;
+  #echoBodyPlaced = false;
 
   #deathAt: number | null = null;
   #modalOpen = 0;
@@ -1050,6 +1069,10 @@ export class SurfaceScene extends UiScene<'surface'> {
     this.#combat = combat;
     this.disposer.add(() => combat.dispose());
 
+    // SPEC-048 §4.3: the clue tracker subscribes before the missions do, so the
+    // kill that completes a kill clue's mission still counts as made during it.
+    this.#watchClues(save, layout, planet.id);
+
     // §4.1 step 4: the runtimes.
     const missions = new Missions(save, economy, bus, 'surface', planet.id, services.save);
     this.#missions = missions;
@@ -1137,6 +1160,7 @@ export class SurfaceScene extends UiScene<'surface'> {
     view.reduceMotion = services.settings.get().reduceMotion;
     this.#view = view;
     this.disposer.add(() => view.dispose());
+    this.#placePadBody(save, planet.id);
     // SPEC-045 §4.5: every hostile rim and non-elite telegraph reads one shared
     // uniform, set from the Colours preset now and on each change of it — the
     // next frame shows it, and no shader compiles (45-n).
@@ -1382,6 +1406,8 @@ export class SurfaceScene extends UiScene<'surface'> {
           typewriter: () => services.settings.get().typewriter,
           speed: () => services.settings.get().dialogueSpeed,
         }).log,
+        // SPEC-048 §4.4: Notes lists the chapters up to this planet's.
+        () => this.#planet.chapter,
       ),
       () => services.requestResume(),
       undefined,
@@ -1480,10 +1506,15 @@ export class SurfaceScene extends UiScene<'surface'> {
     // SPEC-034 §4.10: the ledger, not a set of its own, so the station's debrief
     // knows what the surface has already said. A mission already past stage 0
     // gets its *stage* line here — its accept was two scenes ago.
+    // SPEC-048 §4.6 (E76): a replay plays its accept line only, so past stage 0
+    // it plays nothing here.
     for (const state of missions.active) {
       const def = MISSION_TABLE[state.id];
-      const stageLine = (def.dialogue.onStage as Record<number, DialogueId> | undefined)?.[state.stage];
-      const id = state.stage > 0 ? stageLine : def.dialogue.onAccept;
+      const replay = missions.isReplay(state.id);
+      const stageLine = missionLinePlays('stage', replay)
+        ? (def.dialogue.onStage as Record<number, DialogueId> | undefined)?.[state.stage]
+        : undefined;
+      const id = state.stage > 0 ? stageLine : missionLinePlays('accept', replay) ? def.dialogue.onAccept : undefined;
       if (id === undefined || LINE_LEDGER.played(save, id)) continue;
       this.#playDialogue(id);
     }
@@ -1696,6 +1727,10 @@ export class SurfaceScene extends UiScene<'surface'> {
     // SPEC-030 §4.5: after combat (so a shot this step ends hiding at once),
     // before weather (so the DPS skip sees this step's "inside").
     this.#updateShelter(world);
+    // SPEC-048 §4.3: a shelter clue counts unbroken seconds inside.
+    const clues = this.#clues;
+    const clueScene = this.#clueScene;
+    if (clues !== null && clueScene !== null) this.#playClue(clues.dwell(dt, this.#insideShelter?.kind ?? null, clueScene));
     this.#updateWeather(world, dt);
     missions.update(dt, this.#missionContext(world));
     this.#updatePois(world, dt);
@@ -2198,6 +2233,14 @@ export class SurfaceScene extends UiScene<'surface'> {
     info['hidden'] = this.#shelterState === 'hidden' ? 1 : 0;
     info['shelters'] = this.#layout?.shelters.length ?? 0;
     info['wallVisible'] = this.#view?.wallVisible ?? 0;
+    // SPEC-048 §4.3, §4.8: the bodies on the ground, the clues found and the
+    // shelter clue's dwell, in seconds to one decimal.
+    info['scavBodies'] = this.#view?.scavBodies ?? 0;
+    const clueScene = this.#clueScene;
+    let cluesFound = 0;
+    if (clueScene !== null) for (const def of CLUES) if (clueFound(def, clueScene.flags)) cluesFound++;
+    info['cluesFound'] = cluesFound;
+    info['clueDwell'] = Math.round((this.#clues?.dwellSeconds ?? 0) * 10) / 10;
     // SPEC-038 §3: the dash count, the live telegraphs (and their draws), the
     // storm wave running, what the weather deals in the open, the director's
     // target and the difficulty in force.
@@ -3520,6 +3563,11 @@ export class SurfaceScene extends UiScene<'surface'> {
       world.player.x = best.x;
       world.player.z = best.z;
     });
+    // SPEC-048 §4.3: the shelter and reach clues' places — the first cave, the
+    // first wreck and the first landmark instance of the layout.
+    button('surface-goto-cave', 'To cave', () => this.#debugGotoShelter('cave'));
+    button('surface-goto-wreck', 'To wreck', () => this.#debugGotoShelter('wreck'));
+    button('surface-goto-landmark', 'To landmark', () => this.#debugGotoLandmark());
     // SPEC-035 §4.5: the fade needs a prop between the camera and the salvager,
     // which is a metre-precise placement at a fixed 55°/45° rig — not something
     // a QA session can reach by walking. This walks the view's own candidate
@@ -4074,6 +4122,155 @@ export class SurfaceScene extends UiScene<'surface'> {
     const save = this.#save;
     if (save !== null) LINE_LEDGER.markPlayed(save, id);
     return dialogue.play(id);
+  }
+
+  // ------------------------------------------------- SPEC-048: clues, bodies
+
+  /**
+   * SPEC-048 §4.3: this visit's clue tracker and the scene it reads. `flags`
+   * is a live view over the save's list, rebuilt only when it grows, so the
+   * per-step dwell allocates nothing; `firstRun` is "active here and not a
+   * replay"; `hasShelter` reads the layout's shelters once.
+   */
+  #watchClues(save: Save, layout: Layout, planet: PlanetId): void {
+    const tracker = new ClueTracker();
+    const view = new FlagView();
+    const caves = layout.shelters.some((shelter) => shelter.kind === 'cave');
+    const wrecks = layout.shelters.some((shelter) => shelter.kind === 'wreck');
+    this.#clues = tracker;
+    this.#clueScene = {
+      planet,
+      get flags(): ReadonlySet<string> {
+        return view.of(save.progress.flags);
+      },
+      firstRun: (mission) => {
+        const missions = this.#missions;
+        return missions !== null && missions.active.some((state) => state.id === mission) && !missions.isReplay(mission);
+      },
+      hasShelter: (kind) => (kind === 'cave' ? caves : wrecks),
+    };
+    this.#echoBodyPlaced = false;
+    this.disposer.add(() => {
+      this.#clues = null;
+      this.#clueScene = null;
+    });
+    const bus = this.services.events as EventBus<GameEvents>;
+    this.disposer.add(
+      bus.on(
+        'enemy:killed',
+        ({ enemyId }) => {
+          const scene = this.#clueScene;
+          if (scene !== null) this.#playClue(tracker.onKill(enemyId, scene));
+        },
+        this,
+      ),
+    );
+  }
+
+  /**
+   * SPEC-048 §4.3: a trigger fired — the clue's first line, non-modal and past
+   * `LINE_LEDGER` (the flag gates it). Its pending mark settles when `play`
+   * does, whether the line played or a full queue dropped it (E75); a line
+   * that starts has set the flag by then, so it never fires twice.
+   */
+  #playClue(def: ClueDef | null): void {
+    const clues = this.#clues;
+    if (def === null || clues === null) return;
+    const line = def.lines[0];
+    const dialogue = this.#dialogue;
+    if (line === undefined || dialogue === null) {
+      clues.settle(def.id);
+      return;
+    }
+    void dialogue.play(line, { modal: false }).then(() => clues.settle(def.id));
+  }
+
+  /**
+   * SPEC-048 §4.3: on `dialogue:started`, the clue that line finds — its flag
+   * through `Economy.setFlag` (which announces `story:clue`), a checkpoint save
+   * and Notes' unread mark. A flag a reward already set finds nothing (48-e).
+   * §4.8: `c1_s2_echo` starting lays the second body down.
+   */
+  #clueStarted(id: DialogueId): void {
+    const clues = this.#clues;
+    const scene = this.#clueScene;
+    const economy = this.#economy;
+    const save = this.#save;
+    if (clues === null || scene === null || economy === null || save === null) return;
+    const def = clues.started(id, scene.flags);
+    if (def !== null) {
+      economy.setFlag(def.id);
+      this.services.save.request('checkpoint');
+      NOTES_UNSEEN.mark(save);
+    }
+    if (id === SCAV_ECHO_LINE) this.#placeEchoBody();
+  }
+
+  /**
+   * SPEC-048 §4.8: on a Cinder-4 landing while `c1_m1` is not done, a scav lies
+   * at `SCAV_PAD_OFFSET` from the pad's centre — clear of SPEC-046's tug —
+   * facing it. A completion during the visit leaves it; the next landing has none.
+   */
+  #placePadBody(save: Save, planet: PlanetId): void {
+    const view = this.#view;
+    const pad = this.#pad;
+    if (view === null || pad === null || planet !== SCAV_PLANET) return;
+    if ((save.progress.missionsDone as readonly string[]).includes(SCAV_PAD_MISSION)) return;
+    const x = pad.x + SCAV_PAD_OFFSET.x;
+    const z = pad.z + SCAV_PAD_OFFSET.z;
+    view.addScavBody(x, z, Math.atan2(pad.z - z, pad.x - x));
+  }
+
+  /**
+   * SPEC-048 §4.8: the identical body, `SCAV_ECHO_DISTANCE` from the player on
+   * the first of eight bearings — from the camera's side — whose circle is
+   * clear of obstacles and inside the wall, else toward the pad. Once a visit,
+   * on Cinder-4; it stays until the scene exits.
+   */
+  #placeEchoBody(): void {
+    const view = this.#view;
+    const world = this.#world;
+    const layout = this.#layout;
+    if (this.#echoBodyPlaced || view === null || world === null || layout === null || this.#planet.id !== SCAV_PLANET) return;
+    this.#echoBodyPlaced = true;
+    const p = world.player;
+    const edge = layout.halfSize - WALL_INSET - 1;
+    const clear = (x: number, z: number): boolean =>
+      Math.abs(x) <= edge && Math.abs(z) <= edge && !world.obstacles.hitsCircle(x, z, SCAV_BODY_RADIUS);
+    const pad = this.#pad;
+    const spot = echoBodySpot(p.x, p.z, CAMERA_YAW, clear, pad === null ? undefined : bearingToward(p.x, p.z, pad.x, pad.z));
+    view.addScavBody(spot.x, spot.z, spot.facing);
+  }
+
+  /** SPEC-048 §4.3 (`?debug`): the player to the layout's first shelter of `kind`. */
+  #debugGotoShelter(kind: 'cave' | 'wreck'): void {
+    const world = this.#world;
+    const shelter = this.#layout?.shelters.find((entry) => entry.kind === kind) ?? null;
+    if (world === null || shelter === null || !world.player.alive) return;
+    world.player.x = shelter.x;
+    world.player.z = shelter.z;
+  }
+
+  /**
+   * SPEC-048 §4.3 (`?debug`): the player into the layout's first landmark
+   * instance — its centre, or the first clear spot on a ring inside its radius.
+   */
+  #debugGotoLandmark(): void {
+    const world = this.#world;
+    const poi = this.#layout?.pois.find((entry) => entry.kind === 'landmark') ?? null;
+    if (world === null || poi === null || !world.player.alive) return;
+    const p = world.player;
+    let x = poi.x;
+    let z = poi.z;
+    for (let ring = 0; ring < poi.radius && world.obstacles.hitsCircle(x, z, p.radius); ring++) {
+      for (let k = 0; k < 8; k++) {
+        x = poi.x + Math.cos((k * Math.PI) / 4) * ring;
+        z = poi.z + Math.sin((k * Math.PI) / 4) * ring;
+        if (!world.obstacles.hitsCircle(x, z, p.radius)) break;
+      }
+    }
+    p.x = x;
+    p.z = z;
   }
 
   /**
@@ -5283,11 +5480,27 @@ export class SurfaceScene extends UiScene<'surface'> {
       // SPEC-042 §4.6: `▲ Wave incoming` for 3 s; a second wave restarts the clock.
       bus.on(
         'wave:started',
-        () => {
+        ({ wave }) => {
           this.#waveLeft = WAVE_LINE_SECONDS;
+          // SPEC-048 §4.3: a wave clue — the Hive at Eden's beacon.
+          const clues = this.#clues;
+          const scene = this.#clueScene;
+          if (clues !== null && scene !== null) this.#playClue(clues.onWave(wave, scene));
         },
         this,
       ),
+      // SPEC-048 §4.3: a reach clue — a landmark entered.
+      bus.on(
+        'poi:reached',
+        ({ poi }) => {
+          const clues = this.#clues;
+          const scene = this.#clueScene;
+          if (clues !== null && scene !== null) this.#playClue(clues.onReach(poi, scene));
+        },
+        this,
+      ),
+      // SPEC-048 §4.4: a clue found while the menu is up dots `pause-comms`.
+      bus.on('story:clue', () => this.#pauseMenu?.refreshNotes(), this),
       // SPEC-027 §4.5: the storm tip rides the ten-second warning itself.
       bus.on('weather:warning', () => this.#requestTip('storm'), this),
       // SPEC-029 §4.12: a blast bursts, scorches to its radius and shakes the
@@ -5435,6 +5648,8 @@ export class SurfaceScene extends UiScene<'surface'> {
           if (shortScreen()) this.ui.holdToasts(true);
           // SPEC-042 §4.1: a line of a modal `onComplete` chain is up; its banner waits for its end.
           for (const chain of this.#chains) if (chain.link === id) chain.started = true;
+          // SPEC-048 §4.3, §4.8: a clue is found as its line starts; the echo lays its body down.
+          this.#clueStarted(id);
         },
         this,
       ),
@@ -5539,8 +5754,11 @@ export class SurfaceScene extends UiScene<'surface'> {
           for (const state of this.#pois) {
             if (state.inside) bus.emit('poi:reached', { poi: state.poi.poi, instance: state.poi.instance });
           }
+          // SPEC-048 §4.6: a replay's stages pass in silence.
           const dialogueId = MISSION_TABLE[id].dialogue.onStage?.[stage];
-          if (dialogueId !== undefined) this.#playDialogue(dialogueId);
+          if (dialogueId !== undefined && missionLinePlays('stage', this.#missions?.isReplay(id) ?? false)) {
+            this.#playDialogue(dialogueId);
+          }
           // SPEC-042 §4.6: a new stage of the tracked mission says what it
           // asks first — `Stage 2/3 — Scan Dune Sea`. Other missions say nothing.
           if (stage > 0 && id === this.#missions?.pinned) {
@@ -5580,10 +5798,13 @@ export class SurfaceScene extends UiScene<'surface'> {
           if (seconds !== undefined) this.#recordBest(id, seconds);
           const judged = this.#judged.get(id) ?? null;
           this.#judged.delete(id);
-          // SPEC-034 §4.10: the trip's list the station debriefs from.
+          // SPEC-034 §4.10: the trip's list the station debriefs from. SPEC-048
+          // §4.6 (E76): a replay plays no completion line here and is not
+          // debriefed there — its banner still shows.
           const data = this.#save;
-          if (data !== null) LINE_LEDGER.noteCompleted(data, id);
-          const dialogueId = MISSION_TABLE[id].dialogue.onComplete;
+          const speaks = missionLinePlays('complete', replay);
+          if (data !== null && speaks) LINE_LEDGER.noteCompleted(data, id);
+          const dialogueId = speaks ? MISSION_TABLE[id].dialogue.onComplete : undefined;
           // SPEC-024 §4.1: inside the ending sequence the mission's own
           // debrief is held back — "Verdict filed" contradicts the escape, and
           // the ending dialogue replaces it for the stay. The station plays it
