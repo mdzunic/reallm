@@ -1878,3 +1878,54 @@ On the reference phone:
 - [ ] the settings rows match the phone (no Mouse steer, a Button size row);
 - [ ] Text size 140 % — a dialogue, a toast and the station;
 - [ ] Mono with one earbud in.
+
+## SPEC-046 — props that look like their art, and only what is on screen (M7i)
+
+- **Build:** `spec/SPEC-046` — untagged
+- **Devices:**
+  - desktop — headless Chromium at 1280 × 720, and 320 × 180 at a device ratio of 3 for the sharp case
+    (Playwright, Linux container, **software GL / SwiftShader**)
+  - phone — _no handset in the build container_ (§7's pass is owed, below)
+
+Recorded from the container the branch was built in: `npm run check` — 105
+files and 2,331 tests, none skipped — and the e2e files the spec names, a few
+per invocation: `e2e/SPEC-046.spec.ts` (§6.2's six cases in ten tests),
+`e2e/surface-env.spec.ts` (its five cases with the spawn ratchet folded into
+the per-planet medium frame) and `e2e/SPEC-018.spec.ts`'s two clamp cases,
+all green under three or four workers.
+
+**The spawn frame on `medium`** (seed 20121, 1280 × 720, 30 frames after
+landing, props drawn from their GLBs, the tug on the pad):
+
+| Planet | Draws | Triangles | Static instances drawn | Last cull |
+|---|---|---|---|---|
+| Cinder-4 | 38 | 19,592 | 3 | 0.2 ms |
+| Vetra | 40 | 23,582 | 0 | 0.4 ms |
+| Thessaly | 43 | 24,838 | 3 | 0.3 ms |
+| Ferrum | 45 | 26,224 | 3 | 0.2 ms |
+| The Hive | 39 | 29,096 | 2 | 0.4 ms |
+| Eden | 33 | 18,834 | 4 | 0.3 ms |
+
+The spawn's view is mostly the pad's 15 m clearing, where nothing is
+scattered, so a handful of static instances is what is there to draw; the
+ratchet's 60 k holds with room on every planet.
+
+| Area | What the container showed |
+|---|---|
+| Scatter, seed 20121, `medium` | Cinder-4 324 bones + 130 pebbles = 25,928 triangles; Thessaly 600 tufts + 240 spores = 7,200 (§4.4's table — AC-14's "≤ 7,000" for Thessaly cannot hold with §4.4's own geometry and unchanged counts) |
+| The rect | the rig's rect from the look-at point misses 3–9 m of what a camera turned toward its 2 m look-ahead sees; widening it to the frustum's own ground corners left nothing outside, over 64 headings and four screen shapes |
+| Moving | `surface-goto-occluder` on Cinder-4 (seed 20121) changed `instancesDrawn` and faded a desert ruin; at seed 123 no GLB prop on Cinder-4 can hide the salvager's head — the rocks are 0.5-unit slabs |
+| The tug | `sceneInfo.tug` 1 on all six planets; a held walk from the spawn stopped at the hull, 3.9–6 m from the pad's centre, with `Open pad terminal` up; `surface-goto-pad` then E opened the terminal |
+| Sharp | dpr 1.5 → 2 after the toggle on a 3× screen; with `slowDraw(40)` the governor stepped it below 2 inside 30 s |
+| Meshopt | a GLB with `EXT_meshopt_compression` in `extensionsRequired` decoded to the same floats as its plain twin (node); three's bare loader refuses it |
+
+**Owed on hardware (§7).** On the laptop (`high`, DPR 2) and the reference
+phone (`medium`), on all six planets:
+
+- [ ] Cinder-4's rocks read sandstone, Vetra's boulders snow and ice, not blue; no facets at 22 m;
+- [ ] both variants of each kind appear; landmarks are visible from 20 m;
+- [ ] Cinder-4's bones and the tufts read at play distance; Thessaly and Eden are different greens;
+- [ ] the tug sits on every pad, clear of the pylons, and fades when it hides the salvager;
+- [ ] walking across Thessaly, nothing pops in at the screen's edges;
+- [ ] on the phone, `Sharp rendering` visibly sharpens `medium`;
+- [ ] a before/after screenshot pair per planet and the `?perf` row on `medium`.

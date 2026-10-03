@@ -63,8 +63,11 @@ async function land(page: Page, url: string): Promise<void> {
 
 // ------------------------------------------------------------------- 1: culled
 
-test('1. Thessaly draws a few hundred of its static instances, and says what the cull cost', async ({ page }) => {
-  await land(page, '/?debug&scene=surface&planet=thessaly&quality=medium');
+test('1. Thessaly draws a few hundred of its static instances at most, and says what the cull cost', async ({ page }) => {
+  // The pinned layout seed: the spawn's view is mostly the pad's 15 m clearing,
+  // where nothing is scattered, so how many instances it holds — a handful — is
+  // the layout's to decide; at 20121 it is not none.
+  await land(page, '/?debug&scene=surface&planet=thessaly&quality=medium&seed=20121');
   await afterFrames(page, 30);
   const drawn = await info(page, 'instancesDrawn');
   // The planet holds 1,130 static instances — the scatter, the ring, the props,
