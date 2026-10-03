@@ -2177,18 +2177,12 @@ describe('version 3 (SPEC-047)', () => {
   /**
    * §4.6's worst case: the v2 fixture plus eight 16-character predecessors who
    * each died on all six planets, seven-digit counts, every claim there is, six
-   * underground masks, a full set of remains and a resume point — every number
-   * as long as the game can write it.
-   *
-   * §4.6 states this grows the save by at most 4,096 characters. That bound
-   * cannot hold with the §3 field names: eight entries with six `lastDeath`
-   * points each are about 3,600 characters on their own, and even with every
-   * field §4.6 does not list set to zero the growth is 4,439. Measured, it is
-   * 5,397 (a whole save of about 15 KB), so the pin here is 6,144 — and PLAN
-   * §8's 100 KB, which is what the bound protects, is nowhere near.
+   * underground masks, a full set of remains and a resume point. `longest`
+   * writes every number §4.6 leaves open as long as the game can write it; the
+   * other build writes each at its shortest (0, `null`, the shortest class and
+   * planet), which is the floor of that growth. Returns both serialisations.
    */
-  it('§4.6: the worst-case v3 save stays a few KB over the same save at v2, far inside 100 KB', () => {
-    const MAX_GROWTH = 6_144;
+  function worstCase(longest: boolean): { asV2: string; asV3: string } {
     const v2 = JSON.parse(JSON.stringify(FIXTURES['../fixtures/save-v2.json'])) as Record<string, Record<string, unknown>>;
     // The arena-sized masks a long v2 run carries, so the whole-save check is honest.
     for (const planet of PLANET_IDS) {
@@ -2199,44 +2193,63 @@ describe('version 3 (SPEC-047)', () => {
     const migrated = migrate(JSON.parse(JSON.stringify(v2)) as { version: number } & Record<string, unknown>);
     if (!migrated.ok) throw new Error('the v2 fixture did not migrate');
     const worst = migrated.data;
+    const at = longest ? -159.9 : 0;
     const everywhere = (): Save['meta']['stats']['lastDeath'] =>
-      Object.fromEntries(PLANET_IDS.map((planet: PlanetId) => [planet, { x: -159.9, z: -159.9 }]));
+      Object.fromEntries(PLANET_IDS.map((planet: PlanetId) => [planet, { x: at, z: at }]));
     worst.meta.lineage = Array.from({ length: LINEAGE_MAX }, (_, i) => ({
-      iteration: 92 + i,
+      iteration: longest ? 92 + i : 1,
       name: 'ABCDEFGHIJKLMNOP',
-      classId: 'engineer',
-      appearance: { portrait: 999, primary: '#abcdef', secondary: '#abcdef' },
-      level: 30,
-      playtimeSec: 359_999.98333333333,
-      ending: 'escape',
-      memory: 'stair',
-      deaths: STAT_CEILING,
+      classId: longest ? 'engineer' : 'scout',
+      appearance: { portrait: longest ? 999 : 0, primary: '#abcdef', secondary: '#abcdef' },
+      level: longest ? 30 : 1,
+      playtimeSec: longest ? 359_999.98333333333 : 0,
+      ending: longest ? 'escape' : 'stay',
+      memory: longest ? 'stair' : null,
+      deaths: longest ? STAT_CEILING : 0,
       lastDeath: everywhere(),
-      endedAt: 1_799_999_999_999,
+      endedAt: longest ? 1_799_999_999_999 : 0,
     }));
     worst.meta.stats = { deaths: STAT_CEILING, kills: STAT_CEILING, elites: STAT_CEILING, bosses: STAT_CEILING, recoveries: STAT_CEILING, lastDeath: everywhere() };
-    worst.progress.claimed = [...CACHE_IDS, ...PLANET_IDS.map((planet) => lineageClaimId(99, planet))];
+    worst.progress.claimed = [...CACHE_IDS, ...PLANET_IDS.map((planet) => lineageClaimId(longest ? 99 : 1, planet))];
     worst.progress.exploredBelow = Object.fromEntries(
       PLANET_IDS.map((planet) => [planet, encodeBits(new Uint8Array(exploreBytes(BELOW_HALF_SIZE)).fill(0xff))]),
     );
     worst.progress.remains = {
-      planet: 'thessaly',
-      x: -197.9,
-      z: -197.9,
+      planet: longest ? 'thessaly' : 'hive',
+      x: longest ? -197.9 : 0,
+      z: longest ? -197.9 : 0,
       resources: { oil: RESOURCE_CEILING, wheat: RESOURCE_CEILING, water: RESOURCE_CEILING, lithium: RESOURCE_CEILING },
-      restart: STAT_CEILING,
+      restart: longest ? STAT_CEILING : 0,
     };
-    worst.progress.resume = { planet: 'thessaly', at: 1_799_999_999_999 };
+    worst.progress.resume = { planet: longest ? 'thessaly' : 'hive', at: longest ? 1_799_999_999_999 : 0 };
 
     // It is a save the validator keeps exactly as it is.
     const validated = validateSave(worst);
     expect(validated.ok && validated.warnings).toEqual([]);
+    expect(worst.meta.lineage.every((entry) => Object.keys(entry.lastDeath).length === PLANET_IDS.length)).toBe(true);
     expect(worst.progress.claimed).toHaveLength(29);
     expect(Object.values(worst.progress.exploredBelow).every((mask) => mask.length === 96)).toBe(true);
+    return { asV2: JSON.stringify(v2), asV3: JSON.stringify(worst) };
+  }
 
-    const asV2 = JSON.stringify(v2);
-    const asV3 = JSON.stringify(worst);
-    expect(asV3.length - asV2.length).toBeLessThanOrEqual(MAX_GROWTH);
-    expect(asV3.length).toBeLessThan(100_000 / 4);
+  /**
+   * §4.6 bounds the worst case's growth at 4,096 characters, and AC-26 with
+   * it. That bound does not hold, and no implementation of this spec can make
+   * it hold: with §3's canonical field names and the plain JSON the store and
+   * export codes write (unchanged, AC-27), the floor below is already 4,439 —
+   * eight entries with six `lastDeath` points each are 2,884 characters on
+   * their own. AC-26 is reported as blocked for a spec amendment, not met.
+   *
+   * What this case holds instead, until §4.6 is amended: both growths, pinned
+   * exactly, so any change to the v3 shape that grows the save has to move
+   * these literals deliberately; and PLAN §8's 100 KB, the limit §4.6's bound
+   * exists to protect, which the whole worst-case save is nowhere near.
+   */
+  it('§4.6: the worst-case v3 save grows by exactly the pinned amount over v2, and stays far inside 100 KB', () => {
+    const floor = worstCase(false);
+    const worst = worstCase(true);
+    expect(floor.asV3.length - floor.asV2.length).toBe(4_439);
+    expect(worst.asV3.length - worst.asV2.length).toBe(5_397);
+    expect(worst.asV3.length).toBeLessThan(100_000 / 4);
   });
 });
