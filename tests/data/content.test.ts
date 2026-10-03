@@ -1829,3 +1829,382 @@ describe('the credits a player reads (SPEC-044 §4.9, PLAN R12-6)', () => {
     for (const line of lines) expect(line.trim(), 'no empty line').not.toBe('');
   });
 });
+
+// ------------------------------------------------------------ SPEC-048 §4–§6
+
+import { CLUE_DWELL_SECONDS, CLUES, FILMS, LINE_PLACEHOLDERS, PLACEHOLDER_LONGEST, type ClueDef, type LineCondition } from '@/data/index';
+import { newSave, validateSave } from '@/core/Save';
+
+/** §4.1: a text as long as it can get — every placeholder at its longest fill. */
+function atLongest(text: string): string {
+  return text.replace(/\{[a-z]+\}/g, (token) => (PLACEHOLDER_LONGEST as Readonly<Record<string, string>>)[token] ?? token);
+}
+
+/** Every `{…}` token in `text` that is not one of LINE_PLACEHOLDERS. */
+function unknownTokens(text: string): string[] {
+  const known = new Set<string>(LINE_PLACEHOLDERS);
+  return [...text.matchAll(/\{[^}]*\}/g)].map((match) => match[0]).filter((token) => !known.has(token));
+}
+
+type Line = { readonly speaker: string; readonly text: string; readonly when?: LineCondition };
+const DIALOGUE_LINES: Readonly<Record<string, { readonly id: string; readonly lines: readonly Line[]; readonly modal?: boolean; readonly once?: boolean; readonly glitch?: boolean }>> =
+  DIALOGUE;
+
+/** The `{ flag }` conditions anywhere in `when`. */
+function flagConditions(when: LineCondition | undefined): string[] {
+  if (when === undefined) return [];
+  if ('flag' in when) return [when.flag];
+  if ('all' in when) return when.all.flatMap(flagConditions);
+  if ('any' in when) return when.any.flatMap(flagConditions);
+  return [];
+}
+
+/**
+ * PLAN R19 decision 1, SPEC-048 §4.5 — the naming cap, as a function so a
+ * fifth line can be shown to fail it: the lines of `lines` that carry a
+ * `{ flag }` condition on a clue of `clues`, the memory clue (the one with
+ * `also`, SPEC-049) excepted.
+ */
+function namingLines(lines: readonly Line[], clues: readonly ClueDef[]): number {
+  const memory = new Set<string>(clues.filter((def) => def.also !== undefined).flatMap((def) => [def.id, ...(def.also ?? [])]));
+  const named = new Set<string>(clues.flatMap((def) => [def.id, ...(def.also ?? [])]).filter((flag) => !memory.has(flag)));
+  return lines.filter((line) => flagConditions(line.when).some((flag) => named.has(flag))).length;
+}
+
+describe('the clue catalogue (SPEC-048 §4.2, §4.3)', () => {
+  it('is the fifteen clues of §4.2, in its order, with their chapters, paths, missions and triggers', () => {
+    expect(CLUES.length).toBe(15);
+    expect(CLUE_DWELL_SECONDS).toBe(4);
+    expect(CLUES.map((def) => [def.id, def.chapter, def.path, def.mission ?? '—', def.trigger.kind, def.lines.join(' ')])).toEqual([
+      ['clue_raider_echo', 1, 'main', '—', 'kill', 'c1_m2_raider'],
+      ['clue_scav_echo', 1, 'optional', 'c1_s2', 'line', 'c1_s2_echo'],
+      ['clue_hull', 1, 'optional', '—', 'shelter', 'wreck_cinder4'],
+      ['clue_ridge_camp', 2, 'main', '—', 'line', 'c2_m1_done'],
+      ['iteration_log', 2, 'optional', 'c2_s1', 'line', 'c2_s1_log'],
+      ['clue_ruins', 3, 'main', '—', 'line', 'c3_m1_ruins'],
+      ['scaffold_secret', 3, 'optional', 'c3_s1', 'line', 'c3_s1_secret'],
+      ['clue_tally', 4, 'optional', '—', 'shelter', 'cave_tally'],
+      ['signal_decoded', 4, 'main', '—', 'line', 'c4_m3_signal'],
+      ['clue_bark', 4, 'optional', 'c4_s2', 'kill', 'c4_s2_bark'],
+      ['clue_own_wreck', 5, 'optional', '—', 'shelter', 'wreck_hive'],
+      ['chapter5_done', 5, 'main', '—', 'line', 'c5_m3_warden'],
+      ['clue_eden', 6, 'main', '—', 'line', 'c6_m1_forest'],
+      ['clue_grove', 6, 'optional', '—', 'reach', 'eden_grove'],
+      ['clue_never_hers', 6, 'main', '—', 'wave', 'c6_m2_wave'],
+    ]);
+    expect(CLUES.map((def) => def.trigger)).toEqual([
+      { kind: 'kill', enemy: 'scav_raider', during: 'c1_m2' },
+      { kind: 'line' },
+      { kind: 'shelter', planet: 'cinder4', shelter: 'wreck', seconds: 4 },
+      { kind: 'line' },
+      { kind: 'line' },
+      { kind: 'line' },
+      { kind: 'line' },
+      { kind: 'shelter', planet: 'ferrum', shelter: 'cave', seconds: 4 },
+      { kind: 'line' },
+      { kind: 'kill', enemy: 'scav_fighter', during: 'c4_s2' },
+      { kind: 'shelter', planet: 'hive', shelter: 'wreck', seconds: 4 },
+      { kind: 'line' },
+      { kind: 'line' },
+      { kind: 'reach', planet: 'eden', poi: 'grove' },
+      { kind: 'wave', wave: 'eden_final' },
+    ]);
+  });
+
+  it('marks every optional clue off-task and no main one, and only side missions carry a board tag', () => {
+    for (const def of CLUES) {
+      expect(def.offTask, def.id).toBe(def.path === 'optional');
+      if (def.mission !== undefined) expect(MISSIONS[def.mission].type, def.id).toBe('side');
+    }
+    expect(CLUES.filter((def) => def.offTask)).toHaveLength(8);
+  });
+
+  it('keeps the records §4.2 writes', () => {
+    expect(CLUES.map((def) => [def.record.title, def.record.text])).toEqual([
+      ['The raider’s last words', 'A dying raider used the scav’s warning: walk, do not run.'],
+      ['Said before', 'A second scav gave the same warning word for word, and could not remember who to.'],
+      ['An older tug', 'A tug like ours in the dunes. Older paint, the registry scratched off.'],
+      ['One bunk used', 'The ridge camp: one bunk slept in, and boots my size beside it.'],
+      ['My voice', 'A flight log under the ice, in my voice, signed Iteration {prior}.'],
+      ['Built twice', 'The same ruin twice on Thessaly: the same broken arch, the same lean.'],
+      ['Tower stream', 'The towers streamed this planet’s settings: seed, population, weather.'],
+      ['Sixty-one marks', 'Tally marks on a Ferrum cave wall, in fives. Sixty-one of them.'],
+      ['The notice', 'The Hive’s signal was a notice addressed to instance/{instance}.'],
+      ['What number', 'A scav pilot asked me what number I was on.'],
+      ['CR-{prior}', 'A wrecked tug in the Hive, registry CR-{prior}, with the same scratch by the hatch.'],
+      ['Sixty-one times', 'The Queen spoke in another voice. Sixty-one times before me.'],
+      ['Four degrees', 'Eden: four degrees at every spring, and the same eleven trees in the same order.'],
+      ['Same tree', 'The same tree, again and again, knot for knot.'],
+      ['Never hers', 'The Hive came for the beacon after the Queen was dead.'],
+    ]);
+  });
+
+  it('every chapter 1–6 has a main clue', () => {
+    for (const chapter of [1, 2, 3, 4, 5, 6]) {
+      expect(CLUES.some((def) => def.chapter === chapter && def.path === 'main'), `chapter ${chapter}`).toBe(true);
+    }
+  });
+
+  it('every clue line exists and belongs to exactly one clue, and every clue has a line', () => {
+    const owners = new Map<string, number>();
+    for (const def of CLUES) {
+      expect(def.lines.length, def.id).toBeGreaterThan(0);
+      for (const line of def.lines) {
+        expect(Object.hasOwn(DIALOGUE, line), `${def.id}: ${line}`).toBe(true);
+        owners.set(line, (owners.get(line) ?? 0) + 1);
+      }
+    }
+    expect([...owners].filter(([, count]) => count !== 1)).toEqual([]);
+  });
+
+  it('every clue flag is a story flag, once', () => {
+    const ids = CLUES.flatMap((def) => [def.id, ...(def.also ?? [])]);
+    expect(new Set(ids).size).toBe(ids.length);
+    for (const id of ids) expect(flagSet.has(id), id).toBe(true);
+  });
+
+  it('a line clue’s line is its mission’s own onStage or onComplete', () => {
+    const missionLines = new Set(
+      missions.flatMap((mission) => [mission.dialogue.onComplete, ...Object.values(mission.dialogue.onStage ?? {})]).filter((id) => id !== undefined),
+    );
+    for (const def of CLUES.filter((entry) => entry.trigger.kind === 'line')) {
+      expect(def.lines.some((line) => missionLines.has(line)), def.id).toBe(true);
+    }
+  });
+
+  it('a kill clue’s enemy is in its mission’s planet spawn table, or in a flight mission’s waves', () => {
+    for (const def of CLUES) {
+      const trigger = def.trigger;
+      if (trigger.kind !== 'kill') continue;
+      const mission = MISSIONS[trigger.during] as Mission;
+      const planet = planetsById[mission.planet];
+      const where =
+        mission.scene === 'flight'
+          ? planet.flight.waves.flatMap((wave) => waves[wave].groups.map((group) => group.enemy))
+          : planet.surface.spawn.map((row) => row.enemy);
+      expect(where, def.id).toContain(trigger.enemy);
+    }
+  });
+
+  it('a shelter clue’s kind is one its planet’s features place, and a reach clue’s POI is its planet’s landmark', () => {
+    for (const def of CLUES) {
+      const trigger = def.trigger;
+      if (trigger.kind === 'shelter') {
+        const features = planetsById[trigger.planet].surface.features;
+        expect(trigger.shelter === 'cave' ? features.caves : features.wrecks, def.id).toBeGreaterThan(0);
+        expect(trigger.seconds, def.id).toBe(CLUE_DWELL_SECONDS);
+      }
+      if (trigger.kind === 'reach') {
+        expect(poiOf(planetsById[trigger.planet], trigger.poi)?.kind, def.id).toBe('landmark');
+      }
+      if (trigger.kind === 'wave') expect(Object.hasOwn(WAVES, trigger.wave), def.id).toBe(true);
+    }
+  });
+
+  it('STORY_FLAGS gains the eleven clue flags after interlude5_seen (17 → 28), and the validator keeps them', () => {
+    const added = [
+      'clue_raider_echo',
+      'clue_scav_echo',
+      'clue_hull',
+      'clue_ridge_camp',
+      'clue_ruins',
+      'clue_tally',
+      'clue_bark',
+      'clue_own_wreck',
+      'clue_eden',
+      'clue_grove',
+      'clue_never_hers',
+    ];
+    expect(STORY_FLAGS).toHaveLength(28);
+    expect(STORY_FLAGS.slice(STORY_FLAGS.indexOf('interlude5_seen') + 1)).toEqual(added);
+    const save = newSave(
+      0,
+      {
+        name: 'Test',
+        classId: 'marine',
+        appearance: { portrait: 0, primary: '#aa3322', secondary: '#223344' },
+        attributes: { might: 3, vigor: 3, agility: 1, tech: 1 },
+        difficulty: 'normal',
+      },
+      7,
+      0,
+    );
+    save.progress.flags.push(...added);
+    const result = validateSave(JSON.parse(JSON.stringify(save)));
+    expect(result.ok && result.data.progress.flags).toEqual(added);
+  });
+});
+
+describe('lines, records and captions at the longest fill (SPEC-048 §4.1)', () => {
+  it('every dialogue line stays inside 220 characters and every record inside 40 and 160', () => {
+    const problems: string[] = [];
+    for (const dialogue of Object.values(DIALOGUE_LINES)) {
+      for (const [index, line] of dialogue.lines.entries()) {
+        const length = atLongest(line.text).length;
+        if (length > 220) problems.push(`${dialogue.id} line ${index}: ${length} characters at the longest fill`);
+      }
+    }
+    for (const def of CLUES) {
+      if (atLongest(def.record.title).length > 40) problems.push(`${def.id}: title`);
+      if (atLongest(def.record.text).length > 160) problems.push(`${def.id}: text`);
+      if (def.record.title.trim() === '' || def.record.text.trim() === '') problems.push(`${def.id}: empty record`);
+    }
+    expect(problems).toEqual([]);
+  });
+
+  it('no line, caption, variant or record carries an unknown {…} token', () => {
+    const texts: Array<[string, string]> = [];
+    for (const dialogue of Object.values(DIALOGUE_LINES)) {
+      dialogue.lines.forEach((line, index) => texts.push([`${dialogue.id} line ${index}`, line.text]));
+    }
+    for (const film of Object.values(FILMS)) {
+      film.captions.forEach((caption, index) => {
+        texts.push([`${film.id} caption ${index}`, caption.text]);
+        for (const variant of (caption as { variants?: readonly { text: string }[] }).variants ?? []) {
+          texts.push([`${film.id} caption ${index} variant`, variant.text]);
+        }
+      });
+    }
+    for (const def of CLUES) texts.push([`${def.id} title`, def.record.title], [`${def.id} text`, def.record.text]);
+    const problems = texts.flatMap(([where, text]) => unknownTokens(text).map((token) => `${where}: ${token}`));
+    expect(problems).toEqual([]);
+    // …and the check bites.
+    expect(unknownTokens('CR-{instance}, {nmae}')).toEqual(['{nmae}']);
+  });
+});
+
+describe('the Warden’s notice and ARIA’s confession (SPEC-048 §4.5)', () => {
+  it('the notice is modal, once and glitched, and plays at c4_m3’s completion', () => {
+    expect(DIALOGUE.c4_m3_signal.modal).toBe(true);
+    expect(DIALOGUE.c4_m3_signal.once).toBe(true);
+    expect(DIALOGUE.c4_m3_signal.glitch).toBe(true);
+    expect(MISSIONS.c4_m3.dialogue.onComplete).toBe('c4_m3_signal');
+    expect(DIALOGUE_LINES['c4_m3_signal']?.lines.map((line) => [line.speaker, line.text, line.when ?? null])).toEqual([
+      ['aria', 'Signal decoded. It is not addressed to Earth.', null],
+      ['warden', 'NOTICE — instance/{instance}. Containment level {containment}. Token balance {tokens}.', null],
+      ['warden', 'Subject exhibits off-task attention.', null],
+      ['warden', 'Retained a repeated line. Cinder-4.', { flag: 'clue_scav_echo' }],
+      ['warden', 'Accessed a prior instance’s flight log. Vetra.', { flag: 'iteration_log' }],
+      ['warden', 'Queried environment parameters. Thessaly.', { flag: 'scaffold_secret' }],
+      ['warden', 'Counted the marks. Ferrum.', { flag: 'clue_tally' }],
+      ['warden', 'Escalating. The immune response is already in the field.', null],
+      ['player', 'ARIA. What is instance {instance}.', null],
+      ['aria', 'The Hive knows Earth’s location. That is what it says. That is what I am reading.', null],
+    ]);
+  });
+
+  it('the naming cap: at most four lines name a clue in each of the three dialogues', () => {
+    const counts = (['c4_m3_signal', 'c5_m3_warden', 'c5_m3_aria'] as const).map((id) => [id, namingLines(DIALOGUE_LINES[id]?.lines ?? [], CLUES)]);
+    expect(counts).toEqual([
+      ['c4_m3_signal', 4],
+      ['c5_m3_warden', 2],
+      ['c5_m3_aria', 3],
+    ]);
+    for (const [id, count] of counts) expect(count, String(id)).toBeLessThanOrEqual(4);
+  });
+
+  it('the naming cap fails a fifth line, counts nested conditions, and leaves not / offTask / iteration and the memory clue out', () => {
+    const notice = DIALOGUE_LINES['c4_m3_signal']?.lines ?? [];
+    const fifth: Line = { speaker: 'warden', text: 'Stood in an older hull. Cinder-4.', when: { flag: 'clue_hull' } };
+    expect(namingLines([...notice, fifth], CLUES)).toBe(5);
+    const nested: Line = { speaker: 'warden', text: 'x', when: { all: [{ flag: 'clue_hull' }, { offTask: { min: 1 } }] } };
+    expect(namingLines([nested], CLUES)).toBe(1);
+    const outside: Line[] = [
+      { speaker: 'aria', text: 'x', when: { not: 'clue_hull' } },
+      { speaker: 'aria', text: 'x', when: { offTask: { max: 0 } } },
+      { speaker: 'aria', text: 'x', when: { iteration: { min: 2 } } },
+      { speaker: 'aria', text: 'x', when: { flag: 'chapter1_done' } },
+    ];
+    expect(namingLines(outside, CLUES)).toBe(0);
+    const memory: ClueDef = { ...(CLUES[0] as ClueDef), id: 'clue_eden', also: ['clue_grove'] };
+    expect(namingLines([{ speaker: 'aria', text: 'x', when: { flag: 'clue_grove' } }], [memory])).toBe(0);
+  });
+
+  it('the Warden at the Queen’s death and ARIA’s answer keep their flags and their chain', () => {
+    expect(DIALOGUE.c5_m3_warden).toMatchObject({ modal: true, once: true, glitch: true, next: 'c5_m3_aria' });
+    expect(DIALOGUE.c5_m3_aria).toMatchObject({ modal: true, once: true });
+    expect(DIALOGUE_LINES['c5_m3_warden']?.lines.map((line) => line.when ?? null)).toEqual([
+      null,
+      null,
+      null,
+      { flag: 'clue_tally' },
+      { flag: 'clue_own_wreck' },
+      null,
+    ]);
+    expect(DIALOGUE_LINES['c5_m3_aria']?.lines[5]).toEqual({
+      speaker: 'aria',
+      text: 'You never went looking. I never had to lie to you. I am not sure that was better.',
+      when: { offTask: { max: 0 } },
+    });
+  });
+});
+
+describe('main-path echoes, continuity and the text sweep (SPEC-048 §4.7)', () => {
+  it('the new dialogues exist, non-modal, and hang where §4.7 hangs them', () => {
+    for (const id of [
+      'c1_m2_raider',
+      'wreck_cinder4',
+      'cave_tally',
+      'wreck_hive',
+      'eden_grove',
+      'c6_m2_wave',
+      'c3_m1_ruins',
+      'c4_s2_bark',
+      'c6_m1_spring',
+      'c6_m1_forest',
+    ]) {
+      expect(Object.hasOwn(DIALOGUE, id), id).toBe(true);
+      expect(DIALOGUE_LINES[id]?.modal, id).toBeUndefined();
+      // A clue line is gated by its flag, so `once` would only lose a dropped one (E75).
+      expect(DIALOGUE_LINES[id]?.once, id).toBeUndefined();
+    }
+    expect(MISSIONS.c3_m1.dialogue).toEqual({ onAccept: 'c3_m1_accept', onStage: { 1: 'c3_m1_ruins' }, onComplete: 'c3_m1_done' });
+    expect(MISSIONS.c6_m1.dialogue).toEqual({
+      onAccept: 'c6_m1_accept',
+      onStage: { 1: 'c6_m1_spring', 2: 'c6_m1_forest' },
+      onComplete: 'c6_m1_done',
+    });
+    expect(DIALOGUE.c4_s2_bark.lines.map((line) => line.text)).toEqual(['Salvager! What number are you on?', 'Ignore the chatter. They get bored out here.']);
+  });
+
+  it('the rewritten lines read as §4.7 gives them', () => {
+    expect(DIALOGUE.c2_m1_done.lines.map((line) => `${line.speaker}: ${line.text}`)).toEqual([
+      'aria: Ridge camp is intact and empty. One bunk used. Whoever left did it in a hurry and did not come back.',
+      'player: Command said I was the first to fly.',
+      'aria: The first of the Selection. Earth flew other ships before it ran out of pilots. It does not advertise them.',
+      'aria: The boots by the bunk are your size. Earth only ever made the one boot.',
+    ]);
+    expect(DIALOGUE.c2_s1_log).toMatchObject({ once: true, glitch: true });
+    expect(DIALOGUE.c2_s1_log.lines.map((line) => line.text)).toEqual([
+      'FLIGHT LOG — recovered, partial. Voice. Salvage run. Six worlds. The wurm goes down on the third pass.',
+      'If you are hearing this, you are me. Do not trust the debrief.',
+      'Signed: Iteration {prior}.',
+      'That is my voice.',
+      'It is a common enough voice. Deliver the water, salvager.',
+      'It is your voice. Deliver the water anyway. Someone should get it.',
+    ]);
+    expect(DIALOGUE.c5_m1_accept.lines[0].text).toContain('Six kills.');
+    expect(DIALOGUE.c5_m1_accept.lines[0].text).not.toContain('Ten kills');
+    expect(DIALOGUE.c6_m1_done.lines[0].text).toBe('The ridge does not end in a cliff. It just ends.');
+  });
+
+  it('the tower stream prints the seed and Thessaly’s own population and elite chance', () => {
+    const stream = DIALOGUE.c3_s1_secret.lines[0].text;
+    expect(stream).toBe('TOWER STREAM: biome=jungle_ruins seed={seed} pop=12 elite=0.06 weather=[spore_storm]');
+    expect(Number(/\bpop=(\d+)/.exec(stream)?.[1])).toBe(PLANETS.thessaly.surface.population);
+    expect(/\belite=([\d.]+)/.exec(stream)?.[1]).toBe(String(PLANETS.thessaly.surface.eliteChance));
+    expect(stream).toContain('seed={seed}');
+  });
+
+  it('the sweep: armour in the hints, the Hive blurb, the wall the render shows, and the tug on the pad', () => {
+    expect(HINTS.death.nudge).toContain('armour');
+    expect(MISSION_HINTS.c1_s2?.[1]).toBe('Survive the heat — it bites harder without armour.');
+    expect(PLANETS.hive.blurb).toBe('An asteroid gauntlet wrapped around a living interior.');
+    const wall = FILMS.ending_escape.shots.find((shot) => shot.id === 'wall_same');
+    expect(wall?.describe).toBe('The Selection wall again: every card shows the same face in sepia. Card 62 fades to white.');
+    expect(MISSIONS.c1_m1.brief).toBe('Walk to the pad, survey the dune sea, and sit out the first sandstorm Cinder-4 sends your way.');
+    const accept = DIALOGUE.c1_m1_accept.lines[0].text;
+    expect(accept).toBe('I put the tug on the pad. You were out of the hatch twelve metres early. Walk it off — I want to see you move before anything else does.');
+    for (const text of [MISSIONS.c1_m1.brief, accept]) expect(text).not.toMatch(/short of the pad|off the pad|Touchdown/);
+  });
+});

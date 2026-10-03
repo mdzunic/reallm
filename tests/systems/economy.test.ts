@@ -841,6 +841,30 @@ describe('setFlag (SPEC-023 §3)', () => {
     expect(events.toasts()).toEqual([]);
   });
 
+  it('SPEC-048 §4.3: a clue flag emits flag:set, then story:clue — once', () => {
+    const { economy, events } = world();
+    economy.setFlag('clue_hull');
+    expect(events.emitted.filter((entry) => entry.name === 'flag:set' || entry.name === 'story:clue')).toEqual([
+      { name: 'flag:set', payload: { flag: 'clue_hull' } },
+      { name: 'story:clue', payload: { id: 'clue_hull' } },
+    ]);
+    events.clear();
+    economy.setFlag('clue_hull');
+    expect(events.emitted).toEqual([]);
+  });
+
+  it('SPEC-048 §4.3: a flag that is no clue emits no story:clue; a clue a reward sets does', () => {
+    const { economy, events } = world();
+    economy.setFlag('chapter1_done');
+    economy.setFlag('interlude1_seen');
+    expect(events.of('story:clue')).toEqual([]);
+    // `chapter5_done` is the Warden's clue as well as a chapter flag.
+    economy.setFlag('chapter5_done');
+    expect(events.of('story:clue')).toEqual([{ id: 'chapter5_done' }]);
+    const names = events.emitted.map((entry) => entry.name);
+    expect(names.indexOf('story:clue')).toBeGreaterThan(names.lastIndexOf('flag:set'));
+  });
+
   it('a chapter flag still pays its voucher, exactly once', () => {
     const { economy, data, events } = world();
     data.resources.oil = 0;
