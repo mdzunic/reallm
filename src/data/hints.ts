@@ -46,6 +46,9 @@ export const TIP_IDS = [
   'zones',
   // SPEC-038 §4.9: the first telegraph drawn near the player teaches the dash.
   'dash',
+  // SPEC-050 §4.7: the first in-combat sprint, and the Wurm's first burrow.
+  'sprint',
+  'wurm',
 ] as const;
 
 export type TipId = (typeof TIP_IDS)[number];
@@ -155,6 +158,16 @@ export const TIPS: Readonly<Record<TipId, TipText>> = {
     keyboard: 'A red lane or ring marks what is about to land. Right-click or V to dash through it — nothing touches you mid-dash.',
     touch: 'A red lane or ring marks what is about to land. Tap DASH to slip through it — nothing touches you mid-dash.',
   },
+  // SPEC-050 §4.7: the first in-combat sprint — the run's two prices.
+  sprint: {
+    keyboard: 'Shift runs. Running is loud and holsters your gun — walk when you want to shoot.',
+    touch: 'Push the stick past its ring to run. Running is loud and holsters your gun.',
+  },
+  // SPEC-050 §4.7: the first `enemy:windup` of kind `burrow` — one wording for both.
+  wurm: {
+    keyboard: 'It hunts by vibration: walk out of the ring — running pulls it after you.',
+    touch: 'It hunts by vibration: walk out of the ring — running pulls it after you.',
+  },
 };
 
 /**
@@ -252,7 +265,8 @@ export const MISSION_HINTS: Readonly<Partial<Record<MissionId, Readonly<Record<n
     0: 'Stand beside the oil derricks until your hold fills. Raiders keep their distance — close in.',
   },
   c1_m3: {
-    0: 'The nest is {dist} {dir}, marked in red. The wurm burrows — move when the ground shakes.',
+    // SPEC-050 §4.4: walking out of the ring is the answer, and running is not.
+    0: 'The nest is {dist} {dir}, marked in red. When the ground shakes, walk out of the ring — running pulls it after you.',
     1: 'Carry {amount} oil to {label}, {dist} {dir}.',
   },
   c1_s1: {

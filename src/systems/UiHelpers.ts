@@ -79,6 +79,7 @@ import { clock, duration, MINUS, multPercent, percent, percentChange, rate } fro
 import { weaponDps, type SlotView } from '@/systems/Loadout';
 import { campaignLocked, contractFor } from '@/systems/Missions';
 import { cumulativeXp, LEVEL_CAP, xpToNext } from '@/systems/Progression';
+import { STAMINA_MAX } from '@/systems/Stamina';
 import type { Class, Item, QuickSlot, WeaponSlot } from '@/data/index';
 
 // The schema-typed views of the content tables: on the `as const` literal types
@@ -109,6 +110,9 @@ export function passiveText(passive: Class['passive']): string {
   if (passive.pickupRadiusMult !== undefined) parts.push(`${multPercent(passive.pickupRadiusMult)} pickup radius`);
   if (passive.nodeRadar === true) parts.push('resource radar');
   if (passive.dashCooldownMult !== undefined) parts.push(`${multPercent(passive.dashCooldownMult)} dash cooldown`);
+  // SPEC-050 §4.1: the drain's multiplier read as the time it buys — ×0.8 is
+  // 5 s of in-combat sprint against 4, `+25 % sprint time`.
+  if (passive.sprintDrainMult !== undefined) parts.push(`${multPercent(1 / passive.sprintDrainMult)} sprint time`);
   return parts.join(' · ');
 }
 
@@ -144,13 +148,15 @@ export const ATTRIBUTE_EFFECT_WORDS: Readonly<Record<AttributeEffectKey, (perPoi
   moveSpeed: (p) => `+${percent(p)} speed`,
   critChance: (p) => `+${percent(p)} crit chance`,
   dashCooldownCut: (p) => `${MINUS}${percent(p)} dash cooldown`,
+  // SPEC-050 §4.1: agility's share of the stamina regeneration.
+  staminaRegen: (p) => `+${percent(p)} stamina regen`,
   companionEffect: (p) => `+${percent(p)} companion effect`,
   priceCut: (p) => `${MINUS}${percent(p)} prices`,
 };
 
 /**
  * SPEC-044 §4.4: what one point of `attribute` buys — `Agility — +2 % speed ·
- * +2 % crit chance · −3 % dash cooldown per point`. It reads the table the
+ * +2 % crit chance · −3 % dash cooldown · +3 % stamina regen per point`. It reads the table the
  * stat formulas read (SPEC-039 §4.3), so a retune never leaves the form lying.
  */
 export function attributeEffectText(attribute: keyof Attributes): string {
@@ -1533,6 +1539,14 @@ export interface HudModel {
   walletLit: boolean;
   /** SPEC-038 §4.1: the dash's cooldown ring — 1 at the press, 0 when ready. */
   dash: number;
+  /**
+   * SPEC-050 §4.6: the stamina ring beside the salvager — the rounded pool, its
+   * max, the two states it shows, and whether it is up at all (`staminaShown`).
+   * One reused object on the surface; `null` elsewhere.
+   */
+  stamina: { value: number; max: number; exhausted: boolean; sprinting: boolean; shown: boolean } | null;
+  /** SPEC-050 §4.6: the gun is holstered — sprinting, or drawing after a sprint. */
+  holstered: boolean;
   flight?: {
     shield: [number, number];
     hull: [number, number];
@@ -1545,6 +1559,17 @@ export interface HudModel {
 }
 
 export type HudKey = keyof HudModel;
+
+/** SPEC-050 §4.6: how long a full pool waits, out of combat, before the ring goes. */
+export const STAMINA_FULL_HIDE_SECONDS = 1;
+
+/**
+ * SPEC-050 §4.6: whether the stamina ring is up — false only once the pool is
+ * full, the player is out of combat, and it has been full for at least 1 s.
+ */
+export function staminaShown(value: number, inCombat: boolean, fullFor: number): boolean {
+  return !(value >= STAMINA_MAX && !inCombat && fullFor >= STAMINA_FULL_HIDE_SECONDS);
+}
 
 /** A zeroed model, so a scene can write only what it knows. */
 export function createHudModel(): HudModel {
@@ -1569,6 +1594,8 @@ export function createHudModel(): HudModel {
     interactAction: false,
     walletLit: false,
     dash: 0,
+    stamina: null,
+    holstered: false,
   };
 }
 
@@ -1598,6 +1625,8 @@ const HUD_KEY_TABLE = {
   interactAction: true,
   walletLit: true,
   dash: true,
+  stamina: true,
+  holstered: true,
   flight: true,
 } as const satisfies Record<HudKey, true>;
 
