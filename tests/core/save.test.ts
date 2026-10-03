@@ -23,6 +23,7 @@ import {
   crcText,
   createNullSave,
   decodeBits,
+  emptyRunStats,
   encodeBits,
   epochClock,
   EXPLORE_CELL,
@@ -32,6 +33,9 @@ import {
   toBase64Url,
   INSTALL_HINT_INTERVAL_MS,
   INSTALL_HINT_TEXT,
+  LINEAGE_CLAIM_PATTERN,
+  LINEAGE_MAX,
+  lineageClaimId,
   migrate,
   newSave,
   PROBE_KEY,
@@ -42,6 +46,7 @@ import {
   SaveStore,
   SLOT_KEY_PREFIX,
   SLOTS,
+  STAT_CEILING,
   STORAGE_UNAVAILABLE_TEXT,
   TRANSITION_HOLD_MAX_MS,
   unspentAttributePoints,
@@ -54,6 +59,7 @@ import {
   type SlotId,
   type SlotSummary,
 } from '@/core/Save';
+import { BELOW_HALF_SIZE, CACHE_IDS, PLANET_IDS, type PlanetId } from '@/data/index';
 import { slotLine } from '@/systems/UiHelpers';
 
 // --------------------------------------------------------------- test doubles
@@ -232,12 +238,16 @@ describe('newSave (§4.1)', () => {
       visits: {},
       endingSeen: false,
       explored: {},
+      claimed: [],
+      exploredBelow: {},
+      remains: null,
+      resume: null,
     });
   });
 
   it('matches the §3 shape, and validates without a single warning (AC-1)', () => {
     expect(fresh.version).toBe(SAVE_VERSION);
-    expect(SAVE_VERSION).toBe(2);
+    expect(SAVE_VERSION).toBe(3);
     expect(Object.keys(fresh).sort()).toEqual(
       [
         'activeWeapon',
@@ -254,7 +264,7 @@ describe('newSave (§4.1)', () => {
       ].sort(),
     );
     expect(Object.keys(fresh.meta).sort()).toEqual(
-      ['appVersion', 'createdAt', 'difficulty', 'iteration', 'playtimeSec', 'seed', 'slot', 'updatedAt'].sort(),
+      ['appVersion', 'createdAt', 'difficulty', 'iteration', 'lineage', 'playtimeSec', 'seed', 'slot', 'stats', 'updatedAt'].sort(),
     );
     const result = validateSave(fresh);
     expect(result.ok && result.warnings).toEqual([]);
@@ -1083,7 +1093,7 @@ describe('migrations (§4.3)', () => {
     const validated = validateSave(migrated.data);
     expect(validated.ok && validated.warnings).toEqual([]);
     if (!validated.ok) return;
-    expect(validated.data.version).toBe(2);
+    expect(validated.data.version).toBe(3);
     expect(validated.data.equipped).toEqual({
       // The fixture's own weapon and armor, untouched.
       armor: 'armor_composite',
@@ -1132,14 +1142,37 @@ describe('migrations (§4.3)', () => {
     expect(validated.ok && validated.warnings.join('\n')).toContain('equipped.primary');
   });
 
-  it('the v2 fixture is the current shape and validates with no warnings', () => {
-    const raw = FIXTURES['../fixtures/save-v2.json'];
+  it('the v3 fixture is the current shape and validates with no warnings', () => {
+    const raw = FIXTURES['../fixtures/save-v3.json'];
     expect(raw).toBeDefined();
     expect(raw?.['version']).toBe(SAVE_VERSION);
     const validated = validateSave(raw);
     expect(validated.ok && validated.warnings).toEqual([]);
     if (!validated.ok) return;
     expect(validated.data).toEqual(raw);
+  });
+
+  it('E74: the v2 fixture migrates to v3 with every v2 value kept and the new fields empty', () => {
+    const raw = FIXTURES['../fixtures/save-v2.json'] as { version: number } & Record<string, unknown>;
+    const before = JSON.parse(JSON.stringify(raw)) as Record<string, unknown>;
+    const migrated = migrate(raw);
+    expect(migrated.ok && migrated.from).toBe(2);
+    if (!migrated.ok) return;
+    const validated = validateSave(migrated.data);
+    expect(validated.ok && validated.warnings).toEqual([]);
+    if (!validated.ok) return;
+    const data = validated.data;
+    expect(data.version).toBe(3);
+    // Every v2 field as it was…
+    expect(Object.keys(data).sort()).toEqual(Object.keys(before).sort());
+    for (const key of ['player', 'resources', 'inventory', 'equipped', 'activeWeapon', 'quick', 'ship', 'companions'] as const) {
+      expect(data[key], key).toEqual(before[key]);
+    }
+    // …and the six new ones empty (§4.1).
+    expect(data.meta).toEqual({ ...(before['meta'] as object), lineage: [], stats: emptyRunStats() });
+    expect(data.progress).toEqual({ ...(before['progress'] as object), claimed: [], exploredBelow: {}, remains: null, resume: null });
+    // The step reshapes a copy: the stored object is not touched.
+    expect(raw).toEqual(before);
   });
 
   it('refuses a newer version and an unknown one, rather than guessing (E9)', () => {
@@ -1766,5 +1799,444 @@ describe('attribute points (SPEC-039 §4.7)', () => {
     expect(allocateAttribute(save, 'might')).toBe(false);
     expect(save.player.attributes.might).toBe(10);
     expect(allocateAttribute(save, 'tech')).toBe(true);
+  });
+});
+
+// ------------------------------------------------------------------ SPEC-047
+
+describe('version 3 (SPEC-047)', () => {
+  /** A valid fresh save, with `meta` and `progress` keys patched for the one rule under test. */
+  function v3(patch: { meta?: Record<string, unknown>; progress?: Record<string, unknown> } = {}): Record<string, Record<string, unknown>> {
+    const base = JSON.parse(JSON.stringify(newSave(0, CREATION, 1, 1000))) as Record<string, Record<string, unknown>>;
+    return { ...base, meta: { ...base['meta'], ...patch.meta }, progress: { ...base['progress'], ...patch.progress } };
+  }
+
+  function expectOk(raw: unknown, content = SAVE_CONTENT): { data: Save; warnings: string[] } {
+    const result = validateSave(raw, content);
+    if (!result.ok) throw new Error(`expected a valid save, got: ${result.errors.join('; ')}`);
+    return result;
+  }
+
+  /** One predecessor, as SPEC-058 will write it. */
+  const ENTRY = {
+    iteration: 1,
+    name: 'Marlow',
+    classId: 'scout',
+    appearance: { portrait: 3, primary: '#3a8fb7', secondary: '#f0c419' },
+    level: 24,
+    playtimeSec: 41230,
+    ending: 'stay',
+    memory: 'roof',
+    deaths: 7,
+    lastDeath: { cinder4: { x: 18.2, z: -44.6 } },
+    endedAt: 1_700_100_000_000,
+  } as const;
+
+  const REMAINS = { planet: 'vetra', x: 41.3, z: -27.8, resources: { oil: 24, water: 7 }, restart: 3 } as const;
+
+  // ---------------------------------------------------------- §4.1, §4.2
+
+  it('a fresh save writes the six new fields empty, and is still iteration 1 (§4.1)', () => {
+    const fresh = newSave(0, CREATION, 42, 1_700_000_000_000);
+    expect(fresh.meta.lineage).toEqual([]);
+    expect(fresh.meta.stats).toEqual({ deaths: 0, kills: 0, elites: 0, bosses: 0, recoveries: 0, lastDeath: {} });
+    expect(fresh.meta.stats).toEqual(emptyRunStats());
+    expect(fresh.progress.claimed).toEqual([]);
+    expect(fresh.progress.exploredBelow).toEqual({});
+    expect(fresh.progress.remains).toBeNull();
+    expect(fresh.progress.resume).toBeNull();
+    expect(fresh.meta.iteration).toBe(1);
+    // Two runs never share one set of counts.
+    expect(newSave(1, CREATION, 42, 0).meta.stats).not.toBe(fresh.meta.stats);
+    expect(emptyRunStats().lastDeath).not.toBe(emptyRunStats().lastDeath);
+  });
+
+  it('pins the constants of §3', () => {
+    expect(LINEAGE_MAX).toBe(8);
+    expect(STAT_CEILING).toBe(9_999_999);
+    expect(SAVE_CONTENT.cacheIds).toEqual(CACHE_IDS);
+    expect(SAVE_CONTENT.belowHalfSize).toBe(BELOW_HALF_SIZE);
+    // §4.2: 24 × 24 cells of 4 m over [−48, 48), so 72 bytes and 96 characters.
+    expect(exploreGridSize(BELOW_HALF_SIZE)).toBe(24);
+    expect(exploreBytes(BELOW_HALF_SIZE)).toBe(72);
+    expect(encodeBits(new Uint8Array(exploreBytes(BELOW_HALF_SIZE)))).toHaveLength(96);
+  });
+
+  it('lineageClaimId(2, "eden") is lineage:2:eden and matches the pattern', () => {
+    expect(lineageClaimId(2, 'eden')).toBe('lineage:2:eden');
+    expect(LINEAGE_CLAIM_PATTERN.test(lineageClaimId(2, 'eden'))).toBe(true);
+    for (const planet of PLANET_IDS) {
+      for (const iteration of [1, 63, 99]) expect(LINEAGE_CLAIM_PATTERN.test(lineageClaimId(iteration, planet)), `${iteration}:${planet}`).toBe(true);
+    }
+    for (const bad of ['lineage:x:vetra', 'lineage:100:eden', 'lineage:1:mars', 'lineage:1:vetra:extra', 'cinder4_vault']) {
+      expect(LINEAGE_CLAIM_PATTERN.test(bad), bad).toBe(false);
+    }
+  });
+
+  // ---------------------------------------------------------------- §4.3
+
+  it('E9, E73: migrate({ version: 4 }) is newer_version', () => {
+    expect(migrate({ version: 4 })).toEqual({ ok: false, reason: 'newer_version' });
+    expect(migrate({ version: 3 }).ok).toBe(true);
+  });
+
+  it('the v0 and v1 fixtures run every step to v3, with the new fields empty', () => {
+    for (const path of ['../fixtures/save-v0.json', '../fixtures/save-v1.json']) {
+      const migrated = migrate(FIXTURES[path] as { version: number } & Record<string, unknown>);
+      expect(migrated.ok, path).toBe(true);
+      if (!migrated.ok) continue;
+      const validated = validateSave(migrated.data);
+      expect(validated.ok && validated.warnings, path).toEqual([]);
+      if (!validated.ok) continue;
+      expect(validated.data.version).toBe(3);
+      expect(validated.data.meta.lineage).toEqual([]);
+      expect(validated.data.meta.stats).toEqual(emptyRunStats());
+      expect(validated.data.progress).toMatchObject({ claimed: [], exploredBelow: {}, remains: null, resume: null });
+    }
+  });
+
+  it('the v3 fixture carries every new field, non-empty', () => {
+    const raw = FIXTURES['../fixtures/save-v3.json'] as unknown as Save;
+    expect(raw.meta.lineage).toHaveLength(1);
+    expect(Object.keys(raw.meta.stats.lastDeath)).toHaveLength(2);
+    expect(raw.meta.stats.deaths).toBeGreaterThan(0);
+    expect(raw.progress.claimed).toEqual(['cinder4_loose_a', 'cinder4_vault', 'lineage:1:cinder4']);
+    expect(Object.keys(raw.progress.exploredBelow)).toHaveLength(1);
+    expect(raw.progress.remains?.planet).toBe('vetra');
+    expect(raw.progress.resume).not.toBeNull();
+  });
+
+  // ------------------------------------------------- E73: version 4 refused
+
+  it('E73: a stored version-4 save is refused as newer_version, and its Load row says so', () => {
+    const fake = fakeStorage({ 'reallm:slot:1': JSON.stringify({ version: 4, player: {} }) });
+    const saves = store(fake, recorder());
+    expect(saves.load(1)).toEqual({ ok: false, reason: 'newer_version', foundVersion: 4 });
+    const row = saves.list()[1] as SlotSummary;
+    expect(row).toEqual({ slot: 1, empty: false, corrupt: true, newer: true });
+    expect(slotLine(row)).toBe('Save from a newer version');
+    // Nothing rewrote it: it is still there to export.
+    expect(JSON.parse(fake.data.get('reallm:slot:1') as string).version).toBe(4);
+  });
+
+  it('E73: a version-4 export code is refused as newer_version, naming version 4', async () => {
+    const fake = fakeStorage();
+    const events = recorder();
+    const saves = store(fake, events);
+    const code = await encodeJson(JSON.stringify({ version: 4, player: {} }));
+    const result = await saves.importCode(code, 0);
+    expect(result).toEqual({ ok: false, reason: 'newer_version', foundVersion: 4 });
+    expect(events.toasts).toEqual([CODE_NEWER_TEXT]);
+    expect(fake.data.has('reallm:slot:0')).toBe(false);
+  });
+
+  it('47-a: a v2 export code imports into a slot as version 3', async () => {
+    const fake = fakeStorage();
+    const saves = store(fake, recorder());
+    const v2 = FIXTURES['../fixtures/save-v2.json'] as Record<string, unknown>;
+    const code = await encodeJson(JSON.stringify(v2));
+    const result = await saves.importCode(code, 2);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.migratedFrom).toBe(2);
+    expect(result.data.version).toBe(3);
+    expect(result.data.player).toEqual(v2['player']);
+    expect(result.data.meta.lineage).toEqual([]);
+    expect(result.data.progress).toMatchObject({ claimed: [], exploredBelow: {}, remains: null, resume: null });
+    const stored = JSON.parse(fake.data.get('reallm:slot:2') as string) as Save;
+    expect(stored.version).toBe(3);
+    expect(stored.meta.slot).toBe(2);
+    expect(stored.meta.stats).toEqual(emptyRunStats());
+  });
+
+  it('the counts ride the save: a flush and a load bring them back', () => {
+    const fake = fakeStorage();
+    const saves = store(fake, recorder());
+    const data = saves.create(0, CREATION);
+    data.meta.stats.deaths = 1;
+    data.meta.stats.kills = 12;
+    data.meta.stats.lastDeath.cinder4 = { x: 10.5, z: -3.2 };
+    saves.flush();
+    const loaded = store(fake, recorder()).load(0);
+    expect(loaded.ok && loaded.data.meta.stats).toEqual({ ...emptyRunStats(), deaths: 1, kills: 12, lastDeath: { cinder4: { x: 10.5, z: -3.2 } } });
+  });
+
+  // ---------------------------------------------------------------- §4.4
+
+  it('47-b: keeps the first LINEAGE_MAX entries, with a warning for the rest', () => {
+    const ten = Array.from({ length: 10 }, (_, i) => ({ ...ENTRY, iteration: i + 1 }));
+    const ok = expectOk(v3({ meta: { lineage: ten } }));
+    expect(ok.data.meta.lineage.map((entry) => entry.iteration)).toEqual([1, 2, 3, 4, 5, 6, 7, 8]);
+    expect(ok.data.meta.lineage[0]).toEqual(ENTRY);
+    expect(ok.warnings.join('\n')).toContain('meta.lineage: 2 entries past the first 8 dropped');
+    // Exactly eight is the cap, not past it.
+    expect(expectOk(v3({ meta: { lineage: ten.slice(0, 8) } })).warnings).toEqual([]);
+    // Not a list reads as none.
+    const junk = expectOk(v3({ meta: { lineage: 'many' } }));
+    expect(junk.data.meta.lineage).toEqual([]);
+    expect(junk.warnings.join('\n')).toContain('meta.lineage');
+  });
+
+  it('47-c: drops an entry with an unknown class or ending, and keeps the rest', () => {
+    const ok = expectOk(
+      v3({ meta: { lineage: [{ ...ENTRY, classId: 'pirate' }, { ...ENTRY, iteration: 2 }, { ...ENTRY, ending: 'ascend' }, 'junk'] } }),
+    );
+    expect(ok.data.meta.lineage).toEqual([{ ...ENTRY, iteration: 2 }]);
+    const warnings = ok.warnings.join('\n');
+    expect(warnings).toContain('meta.lineage[0]: unknown class "pirate"');
+    expect(warnings).toContain('meta.lineage[2]: unknown ending "ascend"');
+    expect(warnings).toContain('meta.lineage[3]');
+  });
+
+  it('clamps the rest of a lineage entry, warning for each field it changes', () => {
+    const ok = expectOk(
+      v3({
+        meta: {
+          lineage: [
+            {
+              ...ENTRY,
+              iteration: 250,
+              name: '   ',
+              appearance: { portrait: 5000, primary: 'red', secondary: '#ABCDEF' },
+              level: 99,
+              playtimeSec: -5,
+              memory: 'basement',
+              deaths: -1,
+              endedAt: Number.NaN,
+              lastDeath: { cinder4: { x: 181, z: 0 }, atlantis: { x: 0, z: 0 }, vetra: { x: 12.3, z: -4.5 } },
+            },
+            { ...ENTRY, iteration: 3, deaths: STAT_CEILING + 5, memory: null },
+          ],
+        },
+      }),
+    );
+    expect(ok.data.meta.lineage).toEqual([
+      {
+        ...ENTRY,
+        iteration: 99,
+        name: 'Salvager',
+        appearance: { portrait: 999, primary: '#c8c8c8', secondary: '#abcdef' },
+        level: 30,
+        playtimeSec: 0,
+        memory: null,
+        deaths: 0,
+        endedAt: 0,
+        lastDeath: { vetra: { x: 12.3, z: -4.5 } },
+      },
+      { ...ENTRY, iteration: 3, deaths: STAT_CEILING, memory: null },
+    ]);
+    const warnings = ok.warnings.join('\n');
+    for (const field of [
+      'iteration',
+      'name',
+      'appearance.portrait',
+      'appearance.primary',
+      'appearance.secondary',
+      'level',
+      'playtimeSec',
+      'memory',
+      'deaths',
+      'endedAt',
+      'lastDeath.cinder4',
+      'lastDeath.atlantis',
+    ]) {
+      expect(warnings, field).toContain(`meta.lineage[0].${field}`);
+    }
+    expect(warnings).toContain('meta.lineage[1].deaths');
+    expect(warnings).not.toContain('meta.lineage[1].memory');
+    expect(warnings).not.toContain('lastDeath.vetra');
+  });
+
+  it('keeps stats that are whole counts in 0..STAT_CEILING, and reads anything else as 0', () => {
+    const ok = expectOk(
+      v3({
+        meta: {
+          stats: {
+            deaths: -1,
+            kills: 2.5,
+            elites: 'many',
+            bosses: STAT_CEILING + 1,
+            recoveries: STAT_CEILING,
+            lastDeath: {
+              cinder4: { x: 180.1, z: 0 }, // a 180 m arena: past its edge
+              vetra: { x: 180, z: -180 }, // on it
+              thessaly: { x: Number.NaN, z: 0 },
+              atlantis: { x: 0, z: 0 },
+              hive: { x: 12.5, z: -160 },
+              ferrum: 'here',
+            },
+          },
+        },
+      }),
+    );
+    expect(ok.data.meta.stats).toEqual({
+      deaths: 0,
+      kills: 0,
+      elites: 0,
+      bosses: 0,
+      recoveries: STAT_CEILING,
+      lastDeath: { vetra: { x: 180, z: -180 }, hive: { x: 12.5, z: -160 } },
+    });
+    const warnings = ok.warnings.join('\n');
+    for (const field of ['deaths', 'kills', 'elites', 'bosses', 'lastDeath.cinder4', 'lastDeath.thessaly', 'lastDeath.atlantis', 'lastDeath.ferrum']) {
+      expect(warnings, field).toContain(`meta.stats.${field}`);
+    }
+    expect(warnings).not.toContain('meta.stats.recoveries');
+    expect(warnings).not.toContain('lastDeath.vetra');
+  });
+
+  it('reads a missing stats as an empty run', () => {
+    const raw = v3();
+    delete raw['meta']?.['stats'];
+    const ok = expectOk(raw);
+    expect(ok.data.meta.stats).toEqual(emptyRunStats());
+    expect(ok.warnings).toEqual([]);
+  });
+
+  it('47-e: keeps a cache id and a lineage claim, and drops anything else with a warning', () => {
+    const ok = expectOk(
+      v3({
+        progress: {
+          claimed: ['cinder4_vault', 'lineage:1:vetra', 'lineage:x:vetra', 'vault_mars', 'cinder4_vault', 42, 'hive_relic', 'lineage:100:eden'],
+        },
+      }),
+    );
+    expect(ok.data.progress.claimed).toEqual(['cinder4_vault', 'lineage:1:vetra']);
+    const warnings = ok.warnings.join('\n');
+    for (const dropped of ['lineage:x:vetra', 'vault_mars', 'hive_relic', 'lineage:100:eden', '42', 'duplicate "cinder4_vault"']) {
+      expect(warnings, dropped).toContain(dropped);
+    }
+    // Every cache there is survives, through the content seam.
+    expect(expectOk(v3({ progress: { claimed: [...CACHE_IDS] } })).data.progress.claimed).toEqual([...CACHE_IDS]);
+    const narrow = expectOk(v3({ progress: { claimed: ['cinder4_vault', 'vetra_vault'] } }), { ...SAVE_CONTENT, cacheIds: ['cinder4_vault'] });
+    expect(narrow.data.progress.claimed).toEqual(['cinder4_vault']);
+  });
+
+  it('keeps an underground mask of exactly 72 bytes, and drops one of 71', () => {
+    const right = encodeBits(new Uint8Array(exploreBytes(BELOW_HALF_SIZE)).fill(0x5a));
+    const short = encodeBits(new Uint8Array(71));
+    const arena = encodeBits(new Uint8Array(exploreBytes(180)));
+    const ok = expectOk(v3({ progress: { exploredBelow: { cinder4: right, vetra: short, thessaly: arena, atlantis: right, ferrum: 42 } } }));
+    expect(ok.data.progress.exploredBelow).toEqual({ cinder4: right });
+    const warnings = ok.warnings.join('\n');
+    for (const key of ['vetra', 'thessaly', 'atlantis', 'ferrum']) expect(warnings, key).toContain(`progress.exploredBelow.${key}`);
+    // The length follows `content.belowHalfSize`, not a constant of its own.
+    const smaller = expectOk(v3({ progress: { exploredBelow: { cinder4: right } } }), { ...SAVE_CONTENT, belowHalfSize: 40 });
+    expect(smaller.data.progress.exploredBelow).toEqual({});
+  });
+
+  it('47-d: remains past halfSize − 2, or holding nothing, read null with a warning', () => {
+    expect(expectOk(v3({ progress: { remains: REMAINS } }))).toMatchObject({ data: { progress: { remains: REMAINS } }, warnings: [] });
+    // Vetra is a 180 m arena: 178 is the last place a body may lie.
+    const edge = expectOk(v3({ progress: { remains: { ...REMAINS, x: -178, z: 178 } } }));
+    expect(edge.data.progress.remains).toEqual({ ...REMAINS, x: -178, z: 178 });
+    for (const remains of [
+      { ...REMAINS, x: 178.1 },
+      { ...REMAINS, z: -179 },
+      { ...REMAINS, x: Number.POSITIVE_INFINITY },
+      { ...REMAINS, planet: 'atlantis' },
+      { ...REMAINS, resources: { oil: 0, water: 0 } },
+      { ...REMAINS, resources: {} },
+      'a body',
+    ]) {
+      const ok = expectOk(v3({ progress: { remains } }));
+      expect(ok.data.progress.remains, JSON.stringify(remains)).toBeNull();
+      expect(ok.warnings.join('\n')).toContain('progress.remains');
+    }
+  });
+
+  it('drops unknown resources, zeros and negatives inside remains, and keeps the rest', () => {
+    const ok = expectOk(
+      v3({
+        progress: {
+          remains: { ...REMAINS, resources: { oil: 0, water: -3, lithium: 12, plutonium: 5, wheat: 2.5 } },
+        },
+      }),
+    );
+    expect(ok.data.progress.remains).toEqual({ ...REMAINS, resources: { lithium: 12 } });
+    const warnings = ok.warnings.join('\n');
+    for (const key of ['oil', 'water', 'plutonium', 'wheat']) expect(warnings, key).toContain(`progress.remains.resources.${key}`);
+    const ceiling = expectOk(v3({ progress: { remains: { ...REMAINS, resources: { oil: RESOURCE_CEILING, water: RESOURCE_CEILING + 1 } } } }));
+    expect(ceiling.data.progress.remains?.resources).toEqual({ oil: RESOURCE_CEILING });
+  });
+
+  it('a resume point needs a known planet and a finite, non-negative at', () => {
+    expect(expectOk(v3({ progress: { resume: { planet: 'eden', at: 0 } } }))).toMatchObject({
+      data: { progress: { resume: { planet: 'eden', at: 0 } } },
+      warnings: [],
+    });
+    for (const resume of [{ planet: 'eden', at: Number.NaN }, { planet: 'eden', at: -1 }, { planet: 'atlantis', at: 5 }, { planet: 'eden' }, 7]) {
+      const ok = expectOk(v3({ progress: { resume } }));
+      expect(ok.data.progress.resume, JSON.stringify(resume)).toBeNull();
+      expect(ok.warnings.join('\n')).toContain('progress.resume');
+    }
+  });
+
+  // ---------------------------------------------------------------- §4.6
+
+  /**
+   * §4.6's worst case: the v2 fixture plus eight 16-character predecessors who
+   * each died on all six planets, seven-digit counts, every claim there is, six
+   * underground masks, a full set of remains and a resume point — every number
+   * as long as the game can write it.
+   *
+   * §4.6 states this grows the save by at most 4,096 characters. That bound
+   * cannot hold with the §3 field names: eight entries with six `lastDeath`
+   * points each are about 3,600 characters on their own, and even with every
+   * field §4.6 does not list set to zero the growth is 4,439. Measured, it is
+   * 5,397 (a whole save of about 15 KB), so the pin here is 6,144 — and PLAN
+   * §8's 100 KB, which is what the bound protects, is nowhere near.
+   */
+  it('§4.6: the worst-case v3 save stays a few KB over the same save at v2, far inside 100 KB', () => {
+    const MAX_GROWTH = 6_144;
+    const v2 = JSON.parse(JSON.stringify(FIXTURES['../fixtures/save-v2.json'])) as Record<string, Record<string, unknown>>;
+    // The arena-sized masks a long v2 run carries, so the whole-save check is honest.
+    for (const planet of PLANET_IDS) {
+      (v2['progress'] as { explored: Record<string, string> }).explored[planet] = encodeBits(
+        new Uint8Array(exploreBytes(SAVE_CONTENT.planetHalfSize[planet])).fill(0xff),
+      );
+    }
+    const migrated = migrate(JSON.parse(JSON.stringify(v2)) as { version: number } & Record<string, unknown>);
+    if (!migrated.ok) throw new Error('the v2 fixture did not migrate');
+    const worst = migrated.data;
+    const everywhere = (): Save['meta']['stats']['lastDeath'] =>
+      Object.fromEntries(PLANET_IDS.map((planet: PlanetId) => [planet, { x: -159.9, z: -159.9 }]));
+    worst.meta.lineage = Array.from({ length: LINEAGE_MAX }, (_, i) => ({
+      iteration: 92 + i,
+      name: 'ABCDEFGHIJKLMNOP',
+      classId: 'engineer',
+      appearance: { portrait: 999, primary: '#abcdef', secondary: '#abcdef' },
+      level: 30,
+      playtimeSec: 359_999.98333333333,
+      ending: 'escape',
+      memory: 'stair',
+      deaths: STAT_CEILING,
+      lastDeath: everywhere(),
+      endedAt: 1_799_999_999_999,
+    }));
+    worst.meta.stats = { deaths: STAT_CEILING, kills: STAT_CEILING, elites: STAT_CEILING, bosses: STAT_CEILING, recoveries: STAT_CEILING, lastDeath: everywhere() };
+    worst.progress.claimed = [...CACHE_IDS, ...PLANET_IDS.map((planet) => lineageClaimId(99, planet))];
+    worst.progress.exploredBelow = Object.fromEntries(
+      PLANET_IDS.map((planet) => [planet, encodeBits(new Uint8Array(exploreBytes(BELOW_HALF_SIZE)).fill(0xff))]),
+    );
+    worst.progress.remains = {
+      planet: 'thessaly',
+      x: -197.9,
+      z: -197.9,
+      resources: { oil: RESOURCE_CEILING, wheat: RESOURCE_CEILING, water: RESOURCE_CEILING, lithium: RESOURCE_CEILING },
+      restart: STAT_CEILING,
+    };
+    worst.progress.resume = { planet: 'thessaly', at: 1_799_999_999_999 };
+
+    // It is a save the validator keeps exactly as it is.
+    const validated = validateSave(worst);
+    expect(validated.ok && validated.warnings).toEqual([]);
+    expect(worst.progress.claimed).toHaveLength(29);
+    expect(Object.values(worst.progress.exploredBelow).every((mask) => mask.length === 96)).toBe(true);
+
+    const asV2 = JSON.stringify(v2);
+    const asV3 = JSON.stringify(worst);
+    expect(asV3.length - asV2.length).toBeLessThanOrEqual(MAX_GROWTH);
+    expect(asV3.length).toBeLessThan(100_000 / 4);
   });
 });

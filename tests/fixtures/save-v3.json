@@ -1,0 +1,76 @@
+{
+  "version": 3,
+  "meta": {
+    "slot": 0,
+    "seed": 246813579,
+    "createdAt": 1700200000000,
+    "updatedAt": 1700207200000,
+    "playtimeSec": 7200,
+    "difficulty": "normal",
+    "iteration": 2,
+    "appVersion": "0.0.0",
+    "lineage": [
+      {
+        "iteration": 1,
+        "name": "Marlow",
+        "classId": "scout",
+        "appearance": { "portrait": 3, "primary": "#3a8fb7", "secondary": "#f0c419" },
+        "level": 24,
+        "playtimeSec": 41230,
+        "ending": "stay",
+        "memory": "roof",
+        "deaths": 7,
+        "lastDeath": { "cinder4": { "x": 18.2, "z": -44.6 }, "eden": { "x": -101.5, "z": 12 } },
+        "endedAt": 1700100000000
+      }
+    ],
+    "stats": {
+      "deaths": 3,
+      "kills": 214,
+      "elites": 9,
+      "bosses": 1,
+      "recoveries": 1,
+      "lastDeath": { "cinder4": { "x": -12.4, "z": 63.1 }, "vetra": { "x": 41.3, "z": -27.8 } }
+    }
+  },
+  "player": {
+    "name": "Vance",
+    "classId": "marine",
+    "appearance": { "portrait": 1, "primary": "#b7472a", "secondary": "#2a3b4c" },
+    "attributes": { "might": 6, "vigor": 5, "agility": 1, "tech": 1 },
+    "level": 11,
+    "xp": 2480,
+    "tokens": 65,
+    "hp": 180
+  },
+  "resources": { "oil": 240, "wheat": 90, "water": 70, "lithium": 30 },
+  "inventory": [
+    { "itemId": "wheat_ration", "qty": 4 },
+    { "itemId": "medkit", "qty": 2 },
+    { "itemId": "coolant_pack", "qty": 1 },
+    { "itemId": "weapon_kinetic", "qty": 1 }
+  ],
+  "equipped": { "armor": "armor_composite", "sidearm": "pistol_service", "primary": "weapon_plasma", "heavy": null },
+  "activeWeapon": "primary",
+  "quick": { "heal": "medkit", "explosive": null, "utility": "coolant_pack" },
+  "ship": { "engine": 2, "hull": 1, "shield": 2, "cargo": 1, "weapon": 2 },
+  "companions": [
+    { "id": "aria", "level": 2, "enabled": true },
+    { "id": "combat_drone", "level": 1, "enabled": false }
+  ],
+  "progress": {
+    "missionsDone": ["c1_m1", "c1_m2", "c1_m3", "c2_m1"],
+    "missionsActive": [{ "id": "c2_m2", "stage": 0, "counters": { "0:0": 120, "0:1": 3 } }],
+    "flags": ["c1_oil", "chapter1_done"],
+    "currentPlanet": "vetra",
+    "location": "station",
+    "poisDiscovered": ["cinder4:dune_sea:0", "vetra:ridge_camp:0"],
+    "visits": { "cinder4": 3, "vetra": 1 },
+    "endingSeen": false,
+    "explored": { "cinder4": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAMCrPwAAAAAAAAAAALr_AAAAAAAAAAAAnIsDAAAAAAAAAADwiwsAAAAAAAAAAEDvNwAAAAAAAAAAAP_9AAAAAAAAAAAAfP0DAAAAAAAAAADg-g4AAAAAAAAAAED-PwAAAAAAAAAAAKu9AAAAAAAAAAAA7P8DAAAAAAAAAADw-wYAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA" },
+    "claimed": ["cinder4_loose_a", "cinder4_vault", "lineage:1:cinder4"],
+    "exploredBelow": { "cinder4": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA8P8H8P8H8P8H8P8HAIADAIADAIADAIADAIADAIADAAAAAAAAAAAAAAAA" },
+    "remains": { "planet": "vetra", "x": 41.3, "z": -27.8, "resources": { "oil": 24, "water": 7 }, "restart": 3 },
+    "resume": { "planet": "vetra", "at": 1700207100000 }
+  }
+}
