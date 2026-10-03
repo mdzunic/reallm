@@ -124,6 +124,19 @@ for (const planet of PLANET_IDS) {
   });
 }
 
+// SPEC-046 §6.2 case 7, the spawn ratchet: with only what is on screen drawn,
+// every planet's medium frame at the spawn sits far under the 130 k budget —
+// ≈ 20–35 k measured — and this holds the gain at 60 k, so a layer that stops
+// culling fails here instead of in a frame-time chart.
+for (const planet of PLANET_IDS) {
+  test(`${planet}: the spawn frame on medium draws at most 60 k triangles (SPEC-046 ratchet)`, async ({ page }) => {
+    await start(page, `/?debug&scene=surface&planet=${planet}&quality=medium`);
+    const stats = await afterFrames(page, 30);
+    expect(stats.triangles).toBeGreaterThan(5_000); // the terrain, at least, drew
+    expect(stats.triangles).toBeLessThanOrEqual(60_000);
+  });
+}
+
 test('the debug-scene row still parses on the environment build', async ({ page }) => {
   await start(page, URL);
   await afterFrames(page, 30);
