@@ -16,6 +16,7 @@ import {
   holdMs,
   LINE_KEY_GRACE,
   MODAL_ADVANCE_KEYS,
+  SPEAKER_NAMES,
 } from '@/ui/DialogueUI';
 import { stripComments } from '../architecture/source';
 
@@ -238,5 +239,22 @@ describe('lines chosen as a job starts (SPEC-048 §4.1)', () => {
     expect(advance).toContain('const line = job.lines?.[this.#lineIndex];');
     expect(finish).toContain('const line = job.lines?.[this.#lineIndex];');
     expect(source).not.toMatch(/DIALOGUE_TABLE\[job\.id\]\.lines\[/);
+  });
+});
+
+// SPEC-049 §4.1 — Iris speaks in her letters: named, and on paper. The panel
+// is DOM, driven for real by `e2e/SPEC-049.spec.ts` case 2.
+describe('the home speaker (SPEC-049 §4.1)', () => {
+  it('names every speaker, and home is Iris', () => {
+    expect(SPEAKER_NAMES.home).toBe('Iris');
+    expect(Object.keys(SPEAKER_NAMES)).toEqual(['aria', 'command', 'scav', 'log', 'player', 'warden', 'home']);
+  });
+
+  it('#setStyle puts dialogue-letter on a home line and takes it off every other', () => {
+    const layer = SOURCES['../../src/ui/DialogueUI.ts'] as string;
+    const style = layer.slice(layer.indexOf('#setStyle(speaker: SpeakerId): void {'));
+    expect(style).toMatch(/classList\.toggle\('dialogue-letter', speaker === 'home'\)/);
+    // A choice resets the style to ARIA's, so a letter's paper never carries over.
+    expect(layer).toMatch(/playChoice\([^)]*\)[^{]*\{[\s\S]*?this\.#setStyle\('aria'\)/);
   });
 });

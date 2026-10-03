@@ -2,7 +2,7 @@
 // for real by `e2e/SPEC-045.spec.ts` case 3; this pins what it lists.
 import { describe, expect, it } from 'vitest';
 import { COMMS_LOG_MAX, CommsLog } from '@/ui/CommsLog';
-import { NOTES_EMPTY_TEXT, NOTES_MISSING_TEXT, NOTES_UNSEEN } from '@/ui/NotesPanel';
+import { LETTER_WAITING_TEXT, NOTES_EMPTY_TEXT, NOTES_MISSING_TEXT, NOTES_UNSEEN } from '@/ui/NotesPanel';
 import { stripComments } from '../architecture/source';
 
 const RAW = import.meta.glob<string>('../../src/ui/*.ts', { query: '?raw', import: 'default', eager: true });
@@ -87,5 +87,27 @@ describe('Notes (SPEC-048 §4.4)', () => {
     expect(sheet).toContain("tab('comms-tab-notes', 'Notes')");
     expect(sheet).toMatch(/select\(comms\);\s*return list;/);
     expect(sheet).toMatch(/event\.key !== 'ArrowLeft' && event\.key !== 'ArrowRight'/);
+  });
+});
+
+// SPEC-049 §4.3 — the Letters section, after the chapters. Its DOM is driven by
+// `e2e/SPEC-049.spec.ts` case 3; this pins its words and test ids.
+describe('Notes’ Letters (SPEC-049 §4.3)', () => {
+  it('reads Waiting at the station for an unplayed letter, under its own test ids', () => {
+    expect(LETTER_WAITING_TEXT).toBe('Waiting at the station');
+    const panel = SOURCES['../../src/ui/NotesPanel.ts'] as string;
+    expect(panel).toContain("'notes-letters'");
+    expect(panel).toContain('`notes-letter-${letter.chapter}`');
+    expect(panel).toContain("h('p', { class: 'notes-chapter-title' }, 'Letters')");
+    // Only Iris's lines, and only once the letter is read.
+    expect(panel).toContain("line.speaker === 'home'");
+    expect(panel).toContain('flags.has(letter.flag)');
+  });
+
+  it('comes after the chapters, and with nothing found still follows the empty line', () => {
+    const panel = SOURCES['../../src/ui/NotesPanel.ts'] as string;
+    const render = panel.slice(panel.indexOf('export function renderNotes'), panel.indexOf('export function renderLetters'));
+    expect(render).toMatch(/NOTES_EMPTY_TEXT\), 'notes-empty'\), letters\)/);
+    expect(render.lastIndexOf('letters,')).toBeGreaterThan(render.indexOf('`notes-chapter-${chapter.chapter}`'));
   });
 });
