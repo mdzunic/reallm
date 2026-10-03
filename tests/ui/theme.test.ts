@@ -628,6 +628,10 @@ describe('Iris’s letters (SPEC-049 §3, §4.1)', () => {
     expect(letter).toHaveLength(1);
     expect(letter[0]?.body).toMatch(/background:\s*var\(--letter-bg\)/);
     expect(letter[0]?.body).toMatch(/(?:^|[;\s])color:\s*var\(--letter-ink\)/);
+    // The paper outranks the opaque fill the low preset and play give every other panel.
+    for (const selector of ['html.quality-low .dialogue.dialogue-letter', 'html[data-play] .dialogue.dialogue-letter']) {
+      expect(rulesFor(selector), selector).toEqual(letter);
+    }
     for (const selector of [
       ".dialogue[data-speaker='home'] .dialogue-speaker",
       ".comms-line[data-speaker='home'] .comms-speaker",

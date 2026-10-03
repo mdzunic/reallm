@@ -2342,8 +2342,12 @@ html.reduce-motion .hud.is-static .hud-static {
   color: var(--good);
 }
 
-/* SPEC-049 §4.1: a `home` line is one of Iris's letters — paper, not glass. */
-.dialogue.dialogue-letter {
+/* SPEC-049 §4.1: a `home` line is one of Iris's letters — paper, not glass.
+   The paper is opaque, so it stands in for the opaque fill the low preset and
+   play give every other panel (20-a, SPEC-040), and outranks both. */
+.dialogue.dialogue-letter,
+html.quality-low .dialogue.dialogue-letter,
+html[data-play] .dialogue.dialogue-letter {
   background: var(--letter-bg);
   color: var(--letter-ink);
 }
