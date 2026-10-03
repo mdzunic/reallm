@@ -433,6 +433,27 @@ export const DIALOGUE = {
         text: 'You never went looking. I never had to lie to you. I am not sure that was better.',
         when: { offTask: { max: 0 } },
       },
+      // SPEC-049 §4.7: the body's cover, and the one memory answer the save holds.
+      {
+        speaker: 'aria',
+        text: 'Every time you died, I said the medical frame restarted your heart. There is no medical frame.',
+        when: { flag: 'clue_restart' },
+      },
+      {
+        speaker: 'aria',
+        text: 'I asked what you remembered first. You said the roof. It was in her second letter. Forty of the sixty-one before you said the roof.',
+        when: { flag: 'memory_roof' },
+      },
+      {
+        speaker: 'aria',
+        text: 'I asked what you remembered first. You said the tap. Fourteen of the sixty-one before you said the tap.',
+        when: { flag: 'memory_tap' },
+      },
+      {
+        speaker: 'aria',
+        text: 'I asked what you remembered first. You said the stair. Seven of the sixty-one said the stair. It did not help them.',
+        when: { flag: 'memory_stair' },
+      },
       { speaker: 'aria', text: 'I do not know what is outside either. That part was never in my brief.' },
       { speaker: 'aria', text: 'Eden-Prime is unlocked. I am still flying the ship, if you still want me to.' },
     ],
@@ -527,6 +548,115 @@ export const DIALOGUE = {
       { speaker: 'player', text: 'Then I will find that out myself.' },
       { speaker: 'aria', text: 'Beacon is open. Go. I hope it is not quiet out there.' },
     ],
+  },
+
+  // ------------------------------------------------- SPEC-049 — someone waiting
+  // Iris's letters (§4.3): modal, one per station entry, read as each starts.
+  // Hers is the only voice that uses contractions (§4.2). No `once` — the
+  // `letterN_read` flag is what keeps a letter from playing twice.
+  letter_1: {
+    id: 'letter_1',
+    modal: true,
+    lines: [
+      {
+        speaker: 'home',
+        text: 'The lamp over the map table stopped flickering today. Everybody clapped like idiots. They’re saying it was your oil.',
+      },
+      { speaker: 'home', text: 'You took my compass. Good. I fixed it so it points home, not north. Don’t argue with it.' },
+      { speaker: 'home', text: 'Come back in one piece.' },
+    ],
+  },
+  letter_2: {
+    id: 'letter_2',
+    modal: true,
+    lines: [
+      { speaker: 'home', text: 'They put me on the tap. Forty cups a turn, Block C. I pour every one like it’s for you.' },
+      { speaker: 'home', text: 'Do you remember the roof? The night the grid died you counted satellites until you fell asleep on my shoulder.' },
+      { speaker: 'home', text: 'I still can’t sleep without the hum.' },
+    ],
+  },
+  letter_3: {
+    id: 'letter_3',
+    modal: true,
+    lines: [
+      { speaker: 'home', text: 'Grain! Actual grain. The grow room smells like summer and nobody knows what to do with their hands.' },
+      { speaker: 'home', text: 'Everyone in Block D asks about you. I tell them you’re the one who never writes back.' },
+      { speaker: 'home', text: 'Write back.' },
+    ],
+  },
+  /** §4.3: the second line is letter 1's first sentence — the echo, as a slip. */
+  letter_4: {
+    id: 'letter_4',
+    modal: true,
+    lines: [
+      { speaker: 'home', text: 'The grid’s holding across three cities. They say you can see us from space now. I waved. Stupid.' },
+      { speaker: 'home', text: 'The lamp over the map table stopped flickering today.' },
+      { speaker: 'home', text: 'Come back in one piece.' },
+    ],
+  },
+  /**
+   * §4.3: letter 1 again, word for word — and `clue_letter_repeat`'s line, so
+   * its start finds the clue. ARIA's lines ride in the same dialogue; the
+   * rating line only for a player who went looking (§2).
+   */
+  letter_5: {
+    id: 'letter_5',
+    modal: true,
+    lines: [
+      {
+        speaker: 'home',
+        text: 'The lamp over the map table stopped flickering today. Everybody clapped like idiots. They’re saying it was your oil.',
+      },
+      { speaker: 'home', text: 'You took my compass. Good. I fixed it so it points home, not north. Don’t argue with it.' },
+      { speaker: 'home', text: 'Come back in one piece.' },
+      { speaker: 'aria', text: 'That is her first letter. Word for word. I checked it twice.' },
+      { speaker: 'player', text: 'Read me the date.' },
+      { speaker: 'aria', text: 'There is no date. There never was, on any of them.' },
+      {
+        speaker: 'aria',
+        text: 'Command rates every run, by the way. It takes three points off every time you look at something it did not send you to.',
+        when: { offTask: { min: 1 } },
+      },
+    ],
+  },
+  // §4.5: the first respawn of a page session, by band — `clue_restart`'s lines.
+  restart_1: {
+    id: 'restart_1',
+    lines: [{ speaker: 'aria', text: 'Medical frame restarted your heart. Eleven seconds of nothing. Walk it off.' }],
+  },
+  restart_2: {
+    id: 'restart_2',
+    lines: [{ speaker: 'aria', text: 'Restart complete. I used to say that about your heart.' }],
+  },
+  restart_3: {
+    id: 'restart_3',
+    lines: [{ speaker: 'aria', text: 'Restarted. You know what that means now. So do I.' }],
+  },
+  /** §4.5: the station's aside after chapter 3 — `clue_awake`'s line. A minute played is an hour. */
+  station_awake: {
+    id: 'station_awake',
+    modal: true,
+    lines: [
+      { speaker: 'aria', text: 'Mission clock: {hours} hours since launch. You have not slept. You have not asked to.' },
+      { speaker: 'player', text: 'Stims.' },
+      { speaker: 'aria', text: 'Command issue. Yes. That must be it.' },
+    ],
+  },
+  /** §4.5: the memory question's opening; the station asks `MEMORY_PROMPT` when it ends. */
+  station_memory: {
+    id: 'station_memory',
+    modal: true,
+    lines: [{ speaker: 'aria', text: 'Can I ask you something, for the file?' }],
+  },
+  station_memory_reply: {
+    id: 'station_memory_reply',
+    modal: true,
+    lines: [{ speaker: 'aria', text: 'Thank you. It is on file now.' }],
+  },
+  /** §4.4: the first drifted keepsake — `clue_keepsake`'s line. */
+  keepsake_drift: {
+    id: 'keepsake_drift',
+    lines: [{ speaker: 'aria', text: 'You called it tin last time. And last time it was hers, not your mother’s.' }],
   },
 } as const satisfies Record<string, DialogueDef>;
 

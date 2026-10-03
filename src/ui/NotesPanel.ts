@@ -7,15 +7,24 @@
 // Unfound clues show as one blank line each, per chapter reached: a target
 // that spoils nothing. The labels are written in sentence case and uppercased
 // by CSS, so plain text shows them as written (SPEC-045 §4.5).
+//
+// SPEC-049 §4.3: after the chapters, Iris's letters — every one whose chapter
+// is done, so a letter the station has not played yet still has its place.
 import type { Save } from '@/core/Save';
+import { DIALOGUE, type DialogueDef, type DialogueId } from '@/data/index';
 import { notesModel, type NotesModel } from '@/systems/Clues';
+import { lettersDone } from '@/systems/Home';
 import { fillLine, storyContextOf } from '@/systems/StoryContext';
 import { h, testId } from '@/ui/dom';
+
+const DIALOGUE_TABLE: Readonly<Record<DialogueId, DialogueDef>> = DIALOGUE;
 
 /** §4.4: what Notes says with nothing found. */
 export const NOTES_EMPTY_TEXT = 'Nothing on file yet.';
 /** §4.4: an unfound clue of a reached chapter. */
 export const NOTES_MISSING_TEXT = '— not recorded —';
+/** SPEC-049 §4.3: a letter whose chapter is done and that the station has not played yet. */
+export const LETTER_WAITING_TEXT = 'Waiting at the station';
 
 const UNSEEN = new WeakSet<object>();
 
@@ -43,8 +52,10 @@ export const NOTES_UNSEEN: { mark(save: object): void; clear(save: object): void
  * `notes-empty`.
  */
 export function renderNotes(model: NotesModel, fill: (text: string) => string): HTMLElement {
+  // SPEC-049 §4.3: absent until a chapter is done; with nothing found, under the empty line.
+  const letters = lettersDone(model.flags).length === 0 ? null : renderLetters(model.flags, fill);
   if (model.found === 0) {
-    return h('div', { class: 'notes' }, testId(h('p', { class: 'notes-empty' }, NOTES_EMPTY_TEXT), 'notes-empty'));
+    return h('div', { class: 'notes' }, testId(h('p', { class: 'notes-empty' }, NOTES_EMPTY_TEXT), 'notes-empty'), letters);
   }
   return h(
     'div',
@@ -79,6 +90,39 @@ export function renderNotes(model: NotesModel, fill: (text: string) => string): 
         `notes-chapter-${chapter.chapter}`,
       ),
     ),
+    letters,
+  );
+}
+
+/**
+ * SPEC-049 §4.3: the Letters section — one `notes-letter-<n>` per letter whose
+ * chapter is done, in chapter order. A read letter shows Iris's lines, one per
+ * line; one the station has not played yet reads `Waiting at the station` (E78).
+ */
+export function renderLetters(flags: ReadonlySet<string>, fill: (text: string) => string): HTMLElement {
+  return testId(
+    h(
+      'section',
+      { class: 'notes-letters' },
+      h('p', { class: 'notes-chapter-title' }, 'Letters'),
+      h(
+        'ul',
+        { class: 'notes-list' },
+        ...lettersDone(flags).map((letter) => {
+          const body = flags.has(letter.flag)
+            ? h(
+                'span',
+                { class: 'notes-letter-text' },
+                ...DIALOGUE_TABLE[letter.dialogue].lines
+                  .filter((line) => line.speaker === 'home')
+                  .flatMap((line, index): (Node | string)[] => (index === 0 ? [fill(line.text)] : [h('br'), fill(line.text)])),
+              )
+            : h('span', { class: 'notes-missing' }, LETTER_WAITING_TEXT);
+          return testId(h('li', { class: 'notes-letter' }, body), `notes-letter-${letter.chapter}`);
+        }),
+      ),
+    ),
+    'notes-letters',
   );
 }
 

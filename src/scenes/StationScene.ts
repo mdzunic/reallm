@@ -13,15 +13,21 @@
 // SPEC-048 §4.3, §4.4: a clue line the debrief plays — `c2_m1_done` after a
 // reload — finds its clue here as it starts, and the rail's `Comms log` wears
 // the `notes-new` dot while a clue found this session is unread in Notes.
+//
+// SPEC-049 §4.3–§4.5: after the entry's story, at most one of Iris's letters
+// and then at most one aside — ARIA's mission clock, or her question about a
+// first memory — and an opening of the Character tab whose compass has
+// drifted plays ARIA's line about it.
 import * as THREE from 'three';
 import { log } from '@/core/Log';
 import { maxHp, type Save } from '@/core/Save';
 import type { GameServices } from '@/core/Services';
 import { applyUpdate, updateReady } from '@/core/Updates';
 import type { SceneParams } from '@/core/StateMachine';
-import { DIALOGUE, PLANET_IDS, PLANETS, type DialogueId, type PlanetId } from '@/data/index';
+import { DIALOGUE, MEMORY_ANSWERS, MEMORY_PROMPT, PLANET_IDS, PLANETS, type DialogueId, type PlanetId } from '@/data/index';
 import { ClueTracker } from '@/systems/Clues';
 import { Economy } from '@/systems/Economy';
+import { asideDue, HOME_SESSION, isDriftedKeepsake, keepsakeText, letterDue, letterOf } from '@/systems/Home';
 import { applySupplies } from '@/systems/Service';
 import { Progression } from '@/systems/Progression';
 import { endingPending, interludeToPlay, LINE_LEDGER, stayReport } from '@/systems/StoryBeats';
@@ -29,7 +35,7 @@ import { storyContextOf } from '@/systems/StoryContext';
 import { director } from '@/scenes/Director';
 import { CharacterPanel } from '@/ui/CharacterPanel';
 import { openCommsLog } from '@/ui/CommsLog';
-import { dialogueLayer } from '@/ui/DialogueUI';
+import { dialogueLayer, type DialogueUI } from '@/ui/DialogueUI';
 import { el, h, testId } from '@/ui/dom';
 import { clearEndingOverlays, EndingOverlay } from '@/ui/EndingOverlay';
 import { MissionBoard } from '@/ui/MissionBoard';
@@ -62,6 +68,18 @@ export class StationScene extends UiScene<'station'> {
   #leaving = false;
   /** False from `dispose()`; what an awaited film comes back to (SPEC-023 §4.3). */
   #alive = true;
+  /**
+   * SPEC-049 §4.5: false from the transition out, which comes a fade before
+   * `dispose()` — the dialogue layer has already dropped this scene's queue
+   * by then, so nothing it was waiting on may ask its question over the next.
+   */
+  #present = true;
+  /** SPEC-049 §4.5: this entry queued `station_awake`, so it asks no memory question. */
+  #awakeQueued = false;
+  /** SPEC-049 §4.5: `station_memory` started on this entry — the choice follows only a line that played. */
+  #memoryAsked = false;
+  /** SPEC-049 §4.4: `keepsake_drift` is queued and not settled, so another opening does not queue it twice. */
+  #driftQueued = false;
   /** SPEC-045 §4.1: the open comms log's close, or `null`. */
   #closeComms: (() => void) | null = null;
 
@@ -96,6 +114,7 @@ export class StationScene extends UiScene<'station'> {
       );
       this.#enterEffects(data);
       this.#watchClues(data);
+      this.#watchHome();
       // SPEC-023 §4.3: the story the entry owes — an interlude, then the
       // debrief — runs off `scene:entered` rather than here, so a film never
       // holds the transition open behind it.
@@ -204,6 +223,37 @@ export class StationScene extends UiScene<'station'> {
     this.disposer.add(this.services.events.on('story:clue', () => this.#renderRail(), this));
   }
 
+  /**
+   * SPEC-049 §4.3: a letter's flag is set as the letter starts — a reload
+   * during it does not replay it (49-b) — and the station asks for a `mission`
+   * save. `letter_5`'s clue is `#watchClues`'s, as any clue line's is.
+   */
+  #watchHome(): void {
+    this.disposer.add(
+      this.services.events.on(
+        'scene:transition',
+        () => {
+          this.#present = false;
+        },
+        this,
+      ),
+    );
+    this.disposer.add(
+      this.services.events.on(
+        'dialogue:started',
+        ({ id }) => {
+          if (id === 'station_memory') this.#memoryAsked = true;
+          const letter = letterOf(id);
+          const economy = this.#economy;
+          if (letter === null || economy === null) return;
+          economy.setFlag(letter.flag);
+          this.services.save.request('mission');
+        },
+        this,
+      ),
+    );
+  }
+
   /** SPEC-048 §4.4: `station-tab-comms` wears the dot while the save has an unread clue. */
   #syncNotesDot(): void {
     const save = this.services.save.current;
@@ -235,7 +285,8 @@ export class StationScene extends UiScene<'station'> {
   /**
    * SPEC-023 §4.3: the entry's story, in order — the chapter interlude the
    * flags still owe, then SPEC-014's debrief (AC-24: what finished out there
-   * gets its line here, once per session).
+   * gets its line here, once per session). SPEC-049 §4.3, §4.5: then at most
+   * one letter and at most one aside, once the interlude has settled.
    *
    * The trigger is the flags, not `arrivedFrom`: a Continue or a Load into the
    * station plays a pending interlude too (23-h). Skipping counts as seen, and
@@ -262,6 +313,78 @@ export class StationScene extends UiScene<'station'> {
       for (const flag of interlude.markSeen) economy.setFlag(flag);
       this.services.save.request('mission');
     }
+    await this.#homeOnEntry(data);
+  }
+
+  /**
+   * SPEC-049 §4.3, §4.5: steps 4 and 5 of the entry — the oldest letter the
+   * flags owe (one per entry, E78), then the aside, queued behind it on the
+   * shared dialogue layer. Never after an escape (`#storyOnEntry` has returned
+   * by then, 49-h), and never once the scene is on its way out.
+   */
+  async #homeOnEntry(data: Save): Promise<void> {
+    if (!this.#alive || !this.#present) return;
+    const dialogue = this.#dialogueLayer();
+    const letter = letterDue(new Set(data.progress.flags));
+    if (letter !== null) void dialogue.play(letter);
+    const aside = asideDue(new Set(data.progress.flags), this.#awakeQueued);
+    if (aside === 'station_awake') {
+      this.#awakeQueued = true;
+      void dialogue.play('station_awake');
+    } else if (aside === 'station_memory') {
+      await this.#askMemory(data, dialogue);
+    }
+  }
+
+  /**
+   * SPEC-049 §4.5: ARIA's opening line, then the question — a `playChoice`
+   * opened through `openModal` with no `onBack`, so Escape and the system Back
+   * leave it open. The answer is the clue's flag (`setFlag` announces
+   * `story:clue`); a quit before it sets nothing, so the question returns at
+   * the next entry (49-c).
+   */
+  async #askMemory(data: Save, dialogue: DialogueUI): Promise<void> {
+    await dialogue.play('station_memory');
+    if (!this.#memoryAsked || !this.#alive || !this.#present) return;
+    const index = await dialogue.playChoice(
+      MEMORY_PROMPT,
+      MEMORY_ANSWERS.map((answer) => answer.label),
+    );
+    const answer = MEMORY_ANSWERS[index];
+    const economy = this.#economy;
+    if (answer === undefined || economy === null || !this.#alive) return;
+    // Unread first: `setFlag`'s `story:clue` re-renders the rail with the dot.
+    NOTES_UNSEEN.mark(data);
+    economy.setFlag(answer.flag);
+    void dialogue.play('station_memory_reply');
+    this.services.save.request('mission');
+  }
+
+  /**
+   * SPEC-049 §4.4: an opening of the Character tab whose compass reads T2 or
+   * T3 while `clue_keepsake` is unset plays ARIA's drift line, non-modal; its
+   * start finds the clue (`#watchClues`), so later views never play it again.
+   */
+  #keepsakeDrift(data: Save): void {
+    const ctx = storyContextOf(data);
+    if (this.#driftQueued || ctx.flags.has('clue_keepsake')) return;
+    if (!isDriftedKeepsake(keepsakeText(ctx, HOME_SESSION.keepsakeView(data)))) return;
+    this.#driftQueued = true;
+    void this.#dialogueLayer()
+      .play('keepsake_drift')
+      .then(() => {
+        this.#driftQueued = false;
+      });
+  }
+
+  /** The page-lifetime dialogue layer, with the options every station caller passes. */
+  #dialogueLayer(): DialogueUI {
+    return dialogueLayer(this.services.uiRoot, this.services.events, {
+      input: this.services.input,
+      saveKey: () => this.services.save.current,
+      typewriter: () => this.services.settings.get().typewriter,
+      speed: () => this.services.settings.get().dialogueSpeed,
+    });
   }
 
   /**
@@ -319,12 +442,7 @@ export class StationScene extends UiScene<'station'> {
       LINE_LEDGER.closeTrip(data);
       return;
     }
-    const dialogue = dialogueLayer(this.services.uiRoot, this.services.events, {
-      input: this.services.input,
-      saveKey: () => this.services.save.current,
-      typewriter: () => this.services.settings.get().typewriter,
-      speed: () => this.services.settings.get().dialogueSpeed,
-    });
+    const dialogue = this.#dialogueLayer();
     for (const id of LINE_LEDGER.completedThisTrip(data)) {
       const done = `${id}_done`;
       if (!Object.hasOwn(DIALOGUE, done)) continue;
@@ -464,12 +582,7 @@ export class StationScene extends UiScene<'station'> {
    */
   #openComms(): void {
     this.#closeComms?.();
-    const dialogue = dialogueLayer(this.services.uiRoot, this.services.events, {
-      input: this.services.input,
-      saveKey: () => this.services.save.current,
-      typewriter: () => this.services.settings.get().typewriter,
-      speed: () => this.services.settings.get().dialogueSpeed,
-    });
+    const dialogue = this.#dialogueLayer();
     // SPEC-048 §4.4: Notes for the bound save, up to the chapter its flags have
     // reached; opening it takes the dot down in place, so focus can come back.
     const save = this.services.save.current;
@@ -483,8 +596,13 @@ export class StationScene extends UiScene<'station'> {
 
   #openTab(tab: StationTab): void {
     this.#tab = tab;
+    // SPEC-049 §4.4: each opening of the Character tab is the keepsake's next
+    // view; the panel's own re-renders inside the tab read the same one.
+    const data = this.services.save.current;
+    if (tab === 'character' && data !== null) HOME_SESSION.nextKeepsakeView(data);
     this.#renderRail();
     this.#renderPanel();
+    if (tab === 'character' && data !== null) this.#keepsakeDrift(data);
   }
 
   #renderPanel(): void {

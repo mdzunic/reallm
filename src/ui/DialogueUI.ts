@@ -138,6 +138,8 @@ export const SPEAKER_NAMES: Record<SpeakerId, string> = {
   log: 'LOG',
   player: 'You',
   warden: '???',
+  // SPEC-049 §4.1: the salvager's sister, in her letters.
+  home: 'Iris',
 };
 
 /**
@@ -619,6 +621,8 @@ export class DialogueUI {
   #setStyle(speaker: SpeakerId): void {
     this.#root.classList.toggle('dialogue-log', speaker === 'log');
     this.#root.classList.toggle('dialogue-warden', speaker === 'warden');
+    // SPEC-049 §4.1: a letter reads on paper, line by line — `letter_5` switches back to ARIA mid-dialogue.
+    this.#root.classList.toggle('dialogue-letter', speaker === 'home');
     this.#root.dataset['speaker'] = speaker;
   }
 

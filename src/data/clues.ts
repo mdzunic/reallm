@@ -19,7 +19,7 @@ import type { MissionId } from '@/data/missions';
 import type { PoiId } from '@/data/pois';
 import type { WaveId } from '@/data/waves';
 
-/** What finds a clue. SPEC-049 adds `respawn`, `station`, `keepsake` and `choice`; SPEC-056 adds `cache`. */
+/** What finds a clue. SPEC-049 added `respawn`, `station`, `keepsake` and `choice`; SPEC-056 adds `cache`. */
 export type ClueTrigger =
   /** The clue's line is a mission's own `onStage` / `onComplete`. */
   | { readonly kind: 'line' }
@@ -30,7 +30,17 @@ export type ClueTrigger =
   /** Entering an instance of the landmark `poi` on `planet`. */
   | { readonly kind: 'reach'; readonly planet: PlanetId; readonly poi: PoiId }
   /** `wave:started` of `wave`. */
-  | { readonly kind: 'wave'; readonly wave: WaveId };
+  | { readonly kind: 'wave'; readonly wave: WaveId }
+  // SPEC-049 §4.6: the tracker fires none of these — their owners play the
+  // lines, and `ClueTracker.started` still sets the flag as one starts.
+  /** The surface's restart line, on a session's first `player:respawned`. */
+  | { readonly kind: 'respawn' }
+  /** A station beat: an aside or a letter. */
+  | { readonly kind: 'station' }
+  /** The Character tab's drifted keepsake. */
+  | { readonly kind: 'keepsake' }
+  /** The memory answer is the flag; the clue has no line. */
+  | { readonly kind: 'choice' };
 
 export interface ClueDef {
   /** The clue is found when this flag is set… */
@@ -44,7 +54,7 @@ export interface ClueDef {
   /** The side mission whose own clue this is — its board row reads `Irregular reading` until found (§4.4). */
   readonly mission?: MissionId;
   readonly trigger: ClueTrigger;
-  /** The start of any of them sets `id`. */
+  /** The start of any of them sets `id`. Empty only for a `choice` clue (SPEC-049). */
   readonly lines: readonly DialogueId[];
   /** What Notes shows once found, filled with `fillLine` (title ≤ 40, text ≤ 160 at the longest fill). */
   readonly record: { readonly title: string; readonly text: string };
@@ -84,6 +94,15 @@ export const CLUES: readonly ClueDef[] = [
     record: { title: 'An older tug', text: 'A tug like ours in the dunes. Older paint, the registry scratched off.' },
   },
   {
+    id: 'clue_restart',
+    chapter: 1,
+    path: 'main',
+    offTask: false,
+    trigger: { kind: 'respawn' },
+    lines: ['restart_1', 'restart_2', 'restart_3'],
+    record: { title: 'Eleven seconds', text: 'I died and woke on the pad. ARIA called it the medical frame.' },
+  },
+  {
     id: 'clue_ridge_camp',
     chapter: 2,
     path: 'main',
@@ -120,6 +139,34 @@ export const CLUES: readonly ClueDef[] = [
     trigger: { kind: 'line' },
     lines: ['c3_s1_secret'],
     record: { title: 'Tower stream', text: 'The towers streamed this planet’s settings: seed, population, weather.' },
+  },
+  {
+    id: 'clue_awake',
+    chapter: 3,
+    path: 'main',
+    offTask: false,
+    trigger: { kind: 'station' },
+    lines: ['station_awake'],
+    record: { title: 'No sleep', text: 'Awake since launch. I have not slept, or asked to.' },
+  },
+  {
+    id: 'memory_roof',
+    also: ['memory_tap', 'memory_stair'],
+    chapter: 3,
+    path: 'main',
+    offTask: false,
+    trigger: { kind: 'choice' },
+    lines: [],
+    record: { title: 'First memory', text: 'ARIA asked what I remember first, and put my answer on file.' },
+  },
+  {
+    id: 'clue_keepsake',
+    chapter: 3,
+    path: 'optional',
+    offTask: true,
+    trigger: { kind: 'keepsake' },
+    lines: ['keepsake_drift'],
+    record: { title: 'Tin, then brass', text: 'Iris’s compass was tin. Now I remember it brass.' },
   },
   {
     id: 'clue_tally',
@@ -166,6 +213,15 @@ export const CLUES: readonly ClueDef[] = [
     trigger: { kind: 'line' },
     lines: ['c5_m3_warden'],
     record: { title: 'Sixty-one times', text: 'The Queen spoke in another voice. Sixty-one times before me.' },
+  },
+  {
+    id: 'clue_letter_repeat',
+    chapter: 5,
+    path: 'main',
+    offTask: false,
+    trigger: { kind: 'station' },
+    lines: ['letter_5'],
+    record: { title: 'The first letter, again', text: 'Her fifth letter is her first, word for word. None of them is dated.' },
   },
   {
     id: 'clue_eden',

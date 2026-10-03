@@ -139,11 +139,29 @@ export const STORY_FLAGS = [
   'clue_eden',
   'clue_grove',
   'clue_never_hers',
+  // SPEC-049 §3: Iris's letters, read as each one starts (§4.3)…
+  'letter1_read',
+  'letter2_read',
+  'letter3_read',
+  'letter4_read',
+  'letter5_read',
+  // …and the body's clues and the memory answer (§4.5, §4.6). `memory_roof`
+  // is the memory clue's id; `memory_tap` and `memory_stair` are its `also`.
+  'clue_restart',
+  'clue_awake',
+  'clue_keepsake',
+  'clue_letter_repeat',
+  'memory_roof',
+  'memory_tap',
+  'memory_stair',
 ] as const;
 export type FlagId = (typeof STORY_FLAGS)[number];
 
-/** PLAN §5 cast. `warden` speaks through the Hive Queen and system notices. */
-export const SPEAKERS = ['aria', 'command', 'scav', 'log', 'player', 'warden'] as const;
+/**
+ * PLAN §5 cast. `warden` speaks through the Hive Queen and system notices.
+ * SPEC-049 §4.1: `home` is Iris, the salvager's sister, who speaks only in her letters.
+ */
+export const SPEAKERS = ['aria', 'command', 'scav', 'log', 'player', 'warden', 'home'] as const;
 export type SpeakerId = (typeof SPEAKERS)[number];
 
 /**
