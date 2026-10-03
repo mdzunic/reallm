@@ -537,14 +537,18 @@ test('8, 9. running pulls the burrow ring after the salvager until 0.4 s before 
   await page.keyboard.down('ShiftLeft');
   await page.keyboard.down('KeyD');
   // The loud dig ends early and the ring comes down where the salvager is.
-  const drawnAt = await viewTimeWhen(page, 'burrowRing', 0);
-  await viewTimeWhen(page, 'viewTime', drawnAt + 1.3);
+  const seenAt = await viewTimeWhen(page, 'burrowRing', 0);
+  await viewTimeWhen(page, 'viewTime', seenAt + 1.3);
   await page.keyboard.up('KeyD');
   await page.keyboard.up('ShiftLeft');
   const samples = await stopSampling(page);
 
-  // It lands 1.2 s after it is drawn and stops following 0.4 s before that;
-  // the first frame that shows it can be up to a few steps late.
+  // It lands 1.2 s after it is drawn and stops following 0.4 s before that.
+  // The clock is the first sampled frame that shows it — the poll above may
+  // see it late — which is at most a frame's five steps after the draw.
+  const drawn = samples.find((s) => s.burrowRing >= 0) as Sample;
+  expect(drawn).toBeDefined();
+  const drawnAt = drawn.viewTime;
   const following = samples.filter((s) => s.burrowRing >= 0 && s.viewTime <= drawnAt + 0.8 - 5 / 60);
   expect(following.length).toBeGreaterThan(3);
   for (const s of following) {
