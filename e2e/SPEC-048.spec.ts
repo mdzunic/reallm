@@ -230,7 +230,8 @@ test('3, 5. four seconds in a Cinder-4 wreck find the older tug, and Notes recor
   await expect(page.getByTestId('notes-rating')).toHaveText('Command rating 0.97 — a good run');
   await expect(page.getByTestId('notes-clue-clue_hull')).toContainText('An older tug');
   await expect(page.getByTestId('notes-clue-clue_hull')).toContainText('A tug like ours in the dunes.');
-  await expect(page.getByTestId('notes-chapter-1').locator('.notes-missing')).toHaveCount(2);
+  // SPEC-049 §4.6: chapter 1 holds `clue_restart` too.
+  await expect(page.getByTestId('notes-chapter-1').locator('.notes-missing')).toHaveCount(3);
   await expect(page.getByTestId('notes-chapter-1').locator('.notes-missing').first()).toHaveText('— not recorded —');
   // CSS uppercases the header lines; the text is written in sentence case.
   expect(await page.getByTestId('notes-count').evaluate((node) => getComputedStyle(node).textTransform)).toBe('uppercase');
