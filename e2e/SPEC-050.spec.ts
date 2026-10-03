@@ -103,7 +103,14 @@ interface Sampler {
   __sampling: boolean;
 }
 
-/** Records `keys` of `sceneInfo` on every rendered frame until `stopSampling`. */
+/**
+ * Records `keys` of `sceneInfo` on every rendered frame until `stopSampling`.
+ * Three keys read the stamina ring's element in the same frame instead:
+ * `ringUp` (1 while it is drawn — neither `is-hidden` nor faded out),
+ * `ringExhausted` (1 with `is-exhausted`) and `ringNow` (its `aria-valuenow`).
+ * A state that lasts two seconds of game time is then read where it happened,
+ * not a handful of Playwright round trips later on a starved run.
+ */
 async function startSampling(page: Page, keys: readonly string[]): Promise<void> {
   await page.evaluate((names) => {
     const scope = window as unknown as Sampler;
@@ -112,8 +119,14 @@ async function startSampling(page: Page, keys: readonly string[]): Promise<void>
     const tick = (): void => {
       if (!scope.__sampling) return;
       const sample = window.__reallm.stats().sceneInfo ?? {};
+      const ring = document.querySelector('[data-testid="hud-stamina"]');
       const row: Record<string, number> = {};
-      for (const name of names) row[name] = Number(sample[name]);
+      for (const name of names) {
+        if (name === 'ringUp') row[name] = ring !== null && !ring.classList.contains('is-hidden') && !ring.classList.contains('is-faded') ? 1 : 0;
+        else if (name === 'ringExhausted') row[name] = ring?.classList.contains('is-exhausted') === true ? 1 : 0;
+        else if (name === 'ringNow') row[name] = Number(ring?.getAttribute('aria-valuenow') ?? Number.NaN);
+        else row[name] = Number(sample[name]);
+      }
       scope.__samples.push(row);
       requestAnimationFrame(tick);
     };
@@ -180,11 +193,16 @@ test('1, 9. a run in combat drains to exhaustion, the ring says so, and a fresh 
   expect(await info(page, 'stamina')).toBe(100);
   await press(page, 'surface-spawn-pack');
   await watchKeys(page);
-  await startSampling(page, ['viewTime', 'sprinting', 'stamina', 'exhausted']);
+  await startSampling(page, ['viewTime', 'sprinting', 'stamina', 'exhausted', 'ringUp', 'ringExhausted', 'ringNow']);
   await page.keyboard.down('ShiftLeft');
   await page.keyboard.down('KeyW');
-  await viewTimeWhen(page, 'exhausted', 1);
+  const exhaustedAt = await viewTimeWhen(page, 'exhausted', 1);
+  // A few frames more with Shift still held, well inside the 0.8 s before the
+  // pool starts back toward 30.
+  await viewTimeWhen(page, 'viewTime', exhaustedAt + 0.3);
   const samples = await stopSampling(page);
+  await page.keyboard.up('KeyW');
+  await page.keyboard.up('ShiftLeft');
   const pressedAt = Math.max(await keyAt(page, 'ShiftLeft'), await keyAt(page, 'KeyW'));
 
   // Within 0.5 s of the keys the salvager runs, and the pool is falling.
@@ -195,23 +213,34 @@ test('1, 9. a run in combat drains to exhaustion, the ring says so, and a fresh 
   expect(later.stamina).toBeLessThan(run.stamina);
 
   // 25 a second empties it in 4 s: exhausted within 4.8 s, with the event.
-  const exhausted = samples.find((s) => s.exhausted === 1) as Sample;
+  const first = samples.findIndex((s) => s.exhausted === 1);
+  const exhausted = samples[first] as Sample;
+  expect(exhausted).toBeDefined();
   expect(exhausted.viewTime - run.viewTime).toBeLessThanOrEqual(4.8);
   expect(exhausted.stamina).toBe(0);
   await expect.poll(() => eventLines(messages, 'player:exhausted').length).toBe(1);
-  expect(await info(page, 'sprinting')).toBe(0);
 
-  // The ring beside the salvager: up, amber and dashed — `is-exhausted`.
+  // Every frame after it, inside the regen delay and still in combat: the run
+  // is refused with Shift held, and the ring beside the salvager is up, amber
+  // and dashed — `is-exhausted` — and reads under the notch at 30.
+  const after = samples.slice(first + 1).filter((s) => s.viewTime <= exhausted.viewTime + 0.75);
+  expect(after.length).toBeGreaterThan(0);
+  for (const s of after) {
+    const at = `${s.viewTime}`;
+    expect(s.exhausted, at).toBe(1);
+    expect(s.sprinting, at).toBe(0);
+    expect(s.ringUp, at).toBe(1);
+    expect(s.ringExhausted, at).toBe(1);
+    expect(s.ringNow, at).toBeLessThan(30);
+  }
+
+  // The ring's standing parts: a meter named Stamina, by its id, notched at 30.
   const ring = page.getByTestId('hud-stamina');
   await expect(ring).toBeVisible();
-  await expect(ring).toHaveClass(/is-exhausted/);
   await expect(ring).toHaveAttribute('role', 'meter');
   await expect(ring).toHaveAttribute('aria-label', 'Stamina');
   await expect(ring).toHaveAttribute('id', 'hud-stamina');
   await expect(ring.locator('.stamina-ring-notch')).toHaveCount(1);
-  expect(Number(await ring.getAttribute('aria-valuenow'))).toBeLessThan(30);
-  await page.keyboard.up('KeyW');
-  await page.keyboard.up('ShiftLeft');
 
   // §6.2 case 9: the first in-combat sprint queued the sprint tip. Tips wait
   // 12 s of game time behind each other (SPEC-027) and the landing's `move`
@@ -328,10 +357,17 @@ test('4. an exhausted dash press does nothing; at 30 or more the dash costs 30',
   await landOnCinder(page);
   const dashes = await info(page, 'dashes');
 
-  await press(page, 'surface-exhaust');
-  await expect.poll(() => info(page, 'exhausted')).toBe(1);
-  expect(await info(page, 'stamina')).toBe(0);
-  expect(eventLines(messages, 'player:exhausted')).toHaveLength(1);
+  // The strip's Exhaust empties the pool as a spend would. Read in the click's
+  // own task: the pool reads 0 only until the 0.8 s regen delay runs out.
+  const emptied = await page.evaluate(() => {
+    const button = document.querySelector<HTMLElement>('[data-testid="surface-exhaust"]');
+    if (button === null) throw new Error('the debug strip has no surface-exhaust');
+    button.click();
+    const sample = window.__reallm.stats().sceneInfo ?? {};
+    return { stamina: Number(sample['stamina']), exhausted: Number(sample['exhausted']) };
+  });
+  expect(emptied).toEqual({ stamina: 0, exhausted: 1 });
+  await expect.poll(() => eventLines(messages, 'player:exhausted').length).toBe(1);
   await page.keyboard.press('KeyV');
   await frames(page, 10);
   expect(await info(page, 'dashes')).toBe(dashes);
@@ -517,11 +553,24 @@ test('7. in flight ShiftLeft still raises the throttle, and runs nothing', async
 
 // ---------------------------------------------------------------- 8: the Wurm
 
-/** The Wurm woken and wounded into phase 2, which opens its burrow. */
-async function burrowing(page: Page, messages: ConsoleMessage[]): Promise<void> {
+/**
+ * The Wurm woken and wounded into phase 2. The phase's first step starts the
+ * burrow's dig (SPEC-041 §4.1), so this returns on the frame `sceneInfo.boss`
+ * first reads `p2` — polled in the page, not through the console's backoff, so
+ * a case's keys land well inside the 2.5 s quiet dig even on a starved run.
+ */
+async function burrowing(page: Page): Promise<void> {
   await press(page, 'surface-spawn-boss');
   await expect.poll(async () => String((await sceneInfo(page))['boss'] ?? ''), { timeout: 60_000 }).toMatch(/^p1 /);
   for (let i = 0; i < 3; i++) await press(page, 'surface-wound-boss');
+  await page.waitForFunction(() => String(window.__reallm.stats().sceneInfo?.['boss'] ?? '').startsWith('p2 '), null, {
+    polling: 'raf',
+    timeout: 60_000,
+  });
+}
+
+/** §6.2 case 8's cue: the dig's `enemy:windup`, of kind `burrow`, is in the event log. */
+async function expectBurrowWindup(messages: ConsoleMessage[]): Promise<void> {
   await expect.poll(() => eventLines(messages, 'enemy:windup').some((line) => line.includes('burrow')), { timeout: 60_000 }).toBe(true);
 }
 
@@ -531,11 +580,12 @@ test('8, 9. running pulls the burrow ring after the salvager until 0.4 s before 
   page.on('console', (message) => void messages.push(message));
   await start(page, '/?debug&seed=123');
   await landOnCinder(page);
-  await burrowing(page, messages);
-
+  // Sampled from before the dig, so the run's keys follow phase 2 at once.
   await startSampling(page, ['viewTime', 'burrowRing', 'loud']);
+  await burrowing(page);
   await page.keyboard.down('ShiftLeft');
   await page.keyboard.down('KeyD');
+  await expectBurrowWindup(messages);
   // The loud dig ends early and the ring comes down where the salvager is.
   const seenAt = await viewTimeWhen(page, 'burrowRing', 0);
   await viewTimeWhen(page, 'viewTime', seenAt + 1.3);
@@ -567,12 +617,12 @@ test('8. walking leaves the burrow ring where it came down: past 3 m within 0.9 
   page.on('console', (message) => void messages.push(message));
   await start(page, '/?debug&seed=123');
   await landOnCinder(page);
-  await burrowing(page, messages);
-
   // Walking from the windup, as case 8 runs: a quiet dig runs its 2.5 s, the
   // ring comes down where the salvager is, and the walk carries on away from it.
   await startSampling(page, ['viewTime', 'burrowRing', 'loud']);
+  await burrowing(page);
   await page.keyboard.down('KeyD');
+  await expectBurrowWindup(messages);
   await viewTimeWhen(page, 'burrowRing', 3.0001);
   await page.keyboard.up('KeyD');
   const samples = await stopSampling(page);
