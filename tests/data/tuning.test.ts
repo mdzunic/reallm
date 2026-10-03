@@ -2,7 +2,7 @@
 // change to a tunable must be deliberate and visible in the diff (SPEC-016 §2).
 import { describe, expect, it } from 'vitest';
 import { DIFFICULTIES } from '@/data/ids';
-import { DIFFICULTY_RULES, TUNING } from '@/data/tuning';
+import { BELOW_HALF_SIZE, DIFFICULTY_RULES, TUNING } from '@/data/tuning';
 
 describe('TUNING', () => {
   it('carries the SPEC-009 §4.13 values', () => {
@@ -28,6 +28,11 @@ describe('TUNING', () => {
       SHIELD_REGEN_DELAY: 3,
       HOLD_PATTERN_MAX_SECONDS: 90,
     });
+  });
+
+  it('SPEC-047 §2: the underground size is its own export, not a TUNING key', () => {
+    expect(BELOW_HALF_SIZE).toBe(48);
+    expect(Object.keys(TUNING)).not.toContain('BELOW_HALF_SIZE');
   });
 
   it('fractions stay fractions and multipliers stay above one', () => {

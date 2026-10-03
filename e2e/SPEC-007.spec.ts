@@ -252,7 +252,7 @@ test('a fresh save is the character §3 describes, seeded from ?seed= (AC-1 … 
   await start(page, '/?seed=424242');
   const fresh = await page.evaluate((creation) => window.__reallm.save().create(0, creation), CREATION);
 
-  expect(fresh.version).toBe(2);
+  expect(fresh.version).toBe(3);
   expect(fresh.meta).toMatchObject({ slot: 0, seed: 424242, iteration: 1, difficulty: 'normal' });
   expect(fresh.player).toMatchObject({ name: 'Vance', classId: 'marine', level: 1, xp: 0, tokens: 0 });
   // hp is maxHp(class, attributes, level), not a constant: it moves with the
@@ -281,6 +281,11 @@ test('a fresh save is the character §3 describes, seeded from ?seed= (AC-1 … 
     visits: {},
     endingSeen: false,
     explored: {},
+    // SPEC-047 §4.1: the four version-3 progress fields start empty.
+    claimed: [],
+    exploredBelow: {},
+    remains: null,
+    resume: null,
   });
 
   // §3: the slot keys, and a `:bak` of the previous good save under the second
@@ -403,7 +408,7 @@ test('a save written by an older build migrates up the chain on load (AC-34)', a
   }, v0);
 
   expect(loaded.ok).toBe(true);
-  expect(loaded.data?.version).toBe(2);
+  expect(loaded.data?.version).toBe(3);
   expect(loaded.data?.player).toMatchObject({ name: 'Kestrel', classId: 'scout', level: 4, tokens: 75 });
   expect(loaded.data?.meta).toMatchObject({ seed: 123456, playtimeSec: 612, difficulty: 'casual' });
   expect(loaded.data?.progress.currentPlanet).toBe('cinder4');

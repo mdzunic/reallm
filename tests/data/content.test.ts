@@ -16,6 +16,8 @@ import {
   ATTRIBUTE_EFFECTS,
   ATTRIBUTE_MAX,
   ATTRIBUTE_POINT_LEVELS,
+  BELOW_HALF_SIZE,
+  CACHE_IDS,
   CLASSES,
   CLASS_IDS,
   COMPANIONS,
@@ -49,6 +51,7 @@ import {
   TUNING,
   UPGRADES,
   WAVES,
+  type CacheSlot,
   type CompanionEffect,
   type DialogueId,
   type Enemy,
@@ -1827,6 +1830,54 @@ describe('the credits a player reads (SPEC-044 §4.9, PLAN R12-6)', () => {
   it('names no film file, no spec or plan reference, and no markdown table', () => {
     for (const line of lines) expect(line, line).not.toMatch(/SPEC-\d|PLAN R\d|ending_|\|\s*---/);
     for (const line of lines) expect(line.trim(), 'no empty line').not.toBe('');
+  });
+});
+
+// ------------------------------------------------------------------ SPEC-047
+
+describe('cache ids and the underground (SPEC-047 §4.2)', () => {
+  it('CACHE_IDS is the 23 ids of §4.2, in PLANET order', () => {
+    expect(CACHE_IDS).toEqual([
+      'cinder4_loose_a',
+      'cinder4_loose_b',
+      'cinder4_vault',
+      'cinder4_relic',
+      'vetra_loose_a',
+      'vetra_loose_b',
+      'vetra_vault',
+      'vetra_relic',
+      'thessaly_loose_a',
+      'thessaly_loose_b',
+      'thessaly_vault',
+      'thessaly_relic',
+      'ferrum_loose_a',
+      'ferrum_loose_b',
+      'ferrum_vault',
+      'ferrum_relic',
+      'hive_loose_a',
+      'hive_loose_b',
+      'hive_vault',
+      'eden_loose_a',
+      'eden_loose_b',
+      'eden_vault',
+      'eden_relic',
+    ]);
+    expect(new Set(CACHE_IDS).size).toBe(23);
+    // The Hive's landmark anchors `c5_s1`, so it has no relic terminal.
+    expect(CACHE_IDS as readonly string[]).not.toContain('hive_relic');
+  });
+
+  it('every id is <planet>_<slot>', () => {
+    const slots: readonly CacheSlot[] = ['loose_a', 'loose_b', 'vault', 'relic'];
+    for (const id of CACHE_IDS) {
+      const planet = PLANET_IDS.find((p) => id.startsWith(`${p}_`));
+      expect(planet, id).toBeDefined();
+      expect(slots, id).toContain(id.slice((planet as string).length + 1));
+    }
+  });
+
+  it('BELOW_HALF_SIZE is 48 — a 96 m square', () => {
+    expect(BELOW_HALF_SIZE).toBe(48);
   });
 });
 

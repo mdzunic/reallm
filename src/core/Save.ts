@@ -29,6 +29,8 @@ import {
   ATTRIBUTE_EFFECTS,
   ATTRIBUTE_MAX,
   ATTRIBUTE_POINT_LEVELS,
+  BELOW_HALF_SIZE,
+  CACHE_IDS,
   CLASSES,
   type ClassPassive,
   CLASS_IDS,
@@ -65,7 +67,7 @@ import {
  */
 export { DIFFICULTIES, type Difficulty } from '@/data/index';
 
-export const SAVE_VERSION = 2 as const;
+export const SAVE_VERSION = 3 as const;
 
 /** `reallm:slot:{n}` and `reallm:slot:{n}:bak`; settings live in their own key. */
 export const SLOT_KEY_PREFIX = 'reallm:slot:';
@@ -173,7 +175,8 @@ export interface SaveV1 {
  * SPEC-025 §3. Version 2 is the one PLAN R10 needs: three weapon slots, three
  * consumable quick slots and a per-planet bitset of the ground that has been
  * walked. Everything else is `SaveV1`'s, named through it rather than copied,
- * so a later bump has one place to diverge from.
+ * so a later bump has one place to diverge from. Like `SaveV1`, it is kept for
+ * the step of §4.3 that migrates from it, and named nowhere else.
  *
  * `heavy` may be empty; `sidearm` and `primary` never are — firing always has
  * something in hand (§2). A quick slot stores an id, not a stack: the inventory
@@ -195,11 +198,106 @@ export interface SaveV2 {
 }
 
 /**
+ * SPEC-047 §3: this run's counts — the records, the share card (SPEC-059), the
+ * Warden's lines and the next instance's bodies (SPEC-058). Lives in `meta`
+ * because it describes the run as a whole and is copied into the next
+ * lineage entry.
+ */
+export interface RunStats {
+  deaths: number;
+  kills: number;
+  elites: number;
+  bosses: number;
+  /** Written by SPEC-057. */
+  recoveries: number;
+  /** Where this run last died on each planet, rounded to 0.1 m. */
+  lastDeath: Partial<Record<PlanetId, { x: number; z: number }>>;
+}
+
+/** SPEC-047 §3: one earlier instance of this slot (written by SPEC-058). */
+export interface LineageEntry {
+  /** 1…99; the instance is 61 + iteration. */
+  iteration: number;
+  name: string;
+  classId: ClassId;
+  appearance: { portrait: number; primary: string; secondary: string };
+  level: number;
+  playtimeSec: number;
+  ending: 'stay' | 'escape';
+  memory: 'roof' | 'tap' | 'stair' | null;
+  deaths: number;
+  lastDeath: RunStats['lastDeath'];
+  /** Epoch ms. */
+  endedAt: number;
+}
+
+/** SPEC-047 §3: the one set of remains a death leaves (written by SPEC-057). */
+export interface Remains {
+  planet: PlanetId;
+  x: number;
+  z: number;
+  resources: Partial<Record<ResourceId, number>>;
+  /** `stats.deaths` after that death: the "restart" number on the tag. */
+  restart: number;
+}
+
+/** SPEC-047 §3: where a phone player was when the page went away (written by SPEC-059). */
+export interface ResumePoint {
+  planet: PlanetId;
+  at: number;
+}
+
+/**
+ * SPEC-047 §3. Version 3 is the third review's one bump (PLAN R20 decision 2):
+ * every `SaveV2` field, plus the lineage and the run's statistics in `meta`,
+ * and the claimed caches, the underground ground, the remains and the resume
+ * point in `progress`. Built before any of its consumers, so an older build
+ * refuses a v3 save (E73) rather than stripping the new fields and rewriting it.
+ */
+export interface SaveV3 {
+  version: 3;
+  meta: SaveV2['meta'] & { lineage: LineageEntry[]; stats: RunStats };
+  player: SaveV2['player'];
+  resources: SaveV2['resources'];
+  inventory: SaveV2['inventory'];
+  equipped: SaveV2['equipped'];
+  activeWeapon: SaveV2['activeWeapon'];
+  quick: SaveV2['quick'];
+  ship: SaveV2['ship'];
+  companions: SaveV2['companions'];
+  progress: SaveV2['progress'] & {
+    /** Cache ids and lineage claim ids, each opened once. */
+    claimed: string[];
+    /** One base64url bitset per planet's underground (§4.2). */
+    exploredBelow: Partial<Record<PlanetId, string>>;
+    remains: Remains | null;
+    resume: ResumePoint | null;
+  };
+}
+
+/**
  * The version the game is written against (§2). A later bump moves this alias
  * instead of thirty imports, which is why nothing outside this module and its
  * own suite names a numbered save type.
  */
-export type Save = SaveV2;
+export type Save = SaveV3;
+
+/** SPEC-047 §4.4: the most predecessors a slot remembers. */
+export const LINEAGE_MAX = 8;
+/** SPEC-047 §4.5: no count in `RunStats` rises past this. */
+export const STAT_CEILING = 9_999_999;
+
+/** SPEC-047 §3: a run that has done nothing yet. */
+export function emptyRunStats(): RunStats {
+  return { deaths: 0, kills: 0, elites: 0, bosses: 0, recoveries: 0, lastDeath: {} };
+}
+
+/** SPEC-047 §3: `lineage:<iteration>:<planet>` — a predecessor's body cache (SPEC-058). */
+export const LINEAGE_CLAIM_PATTERN = /^lineage:\d{1,2}:(cinder4|vetra|thessaly|ferrum|hive|eden)$/;
+
+export function lineageClaimId(iteration: number, planet: PlanetId): string {
+  return `lineage:${iteration}:${planet}`;
+}
 
 export interface SlotSummary {
   slot: SlotId;
@@ -315,6 +413,10 @@ export interface SaveContent {
   readonly quickPreference: Readonly<Record<QuickSlot, readonly ItemId[]>>;
   /** Arena half-extents, for the bitset length `explored` is checked against. */
   readonly planetHalfSize: Readonly<Record<PlanetId, number>>;
+  /** SPEC-047 §4.4: every cache a `progress.claimed` entry may name. */
+  readonly cacheIds: readonly string[];
+  /** SPEC-047 §4.4: the underground's half-extent, for `exploredBelow`'s bitset length. */
+  readonly belowHalfSize: number;
 }
 
 const ITEM_IDS = Object.keys(ITEMS) as ItemId[];
@@ -396,6 +498,8 @@ export const SAVE_CONTENT: SaveContent = {
   quickUse: QUICK_USE_OF_ITEM,
   quickPreference: QUICK_PREFERENCE,
   planetHalfSize: PLANET_HALF_SIZE,
+  cacheIds: CACHE_IDS,
+  belowHalfSize: BELOW_HALF_SIZE,
 };
 
 /**
@@ -503,6 +607,9 @@ export function newSave(slot: SlotId, creation: CharacterCreation, seed: number,
       difficulty: creation.difficulty,
       iteration: 1,
       appVersion: APP_VERSION,
+      // SPEC-047 §4.1: no predecessors yet, and a run that has done nothing.
+      lineage: [],
+      stats: emptyRunStats(),
     },
     player: {
       name: creation.name,
@@ -539,6 +646,11 @@ export function newSave(slot: SlotId, creation: CharacterCreation, seed: number,
       visits: {},
       endingSeen: false,
       explored: {},
+      // SPEC-047 §4.1: written by SPEC-054, SPEC-057 and SPEC-059 when they land.
+      claimed: [],
+      exploredBelow: {},
+      remains: null,
+      resume: null,
     },
   };
 }
@@ -616,7 +728,7 @@ export function validateSave(
       return { ok: false, errors: [`player.classId: unknown class ${JSON.stringify(rawPlayer['classId'])}`] };
     }
 
-    const meta = validateMeta(rawMeta, warnings);
+    const meta = validateMeta(rawMeta, content, warnings);
     const player = validatePlayer(rawPlayer, classId, content, warnings);
     const ship = validateShip(bagAt(raw, 'ship'), warnings);
     const resources = validateResources(bagAt(raw, 'resources'), warnings);
@@ -658,7 +770,7 @@ export function validateSave(
   }
 }
 
-function validateMeta(raw: Bag, warnings: string[]): Save['meta'] {
+function validateMeta(raw: Bag, content: SaveContent, warnings: string[]): Save['meta'] {
   const slot = int(raw['slot'], 0, 0, 2) as SlotId;
   if (raw['slot'] !== slot) warnings.push(`meta.slot: ${JSON.stringify(raw['slot'])} clamped to ${slot}`);
   const iteration = int(raw['iteration'], 1, 1, 99);
@@ -679,7 +791,225 @@ function validateMeta(raw: Bag, warnings: string[]): Save['meta'] {
     difficulty: oneOf(raw['difficulty'], DIFFICULTIES, 'normal'),
     iteration,
     appVersion: typeof raw['appVersion'] === 'string' ? raw['appVersion'] : APP_VERSION,
+    lineage: validateLineage(raw['lineage'], content, warnings),
+    stats: validateStats(raw['stats'], content, warnings),
   };
+}
+
+// ------------------------------------------------ SPEC-047 §4.4: version 3
+
+const ENDINGS = ['stay', 'escape'] as const;
+const MEMORIES = ['roof', 'tap', 'stair'] as const;
+const STAT_COUNTS = ['deaths', 'kills', 'elites', 'bosses', 'recoveries'] as const;
+
+function isPlanet(value: unknown): value is PlanetId {
+  return typeof value === 'string' && (PLANET_IDS as readonly string[]).includes(value);
+}
+
+/** A finite coordinate no further than `reach` from the centre on its axis. */
+function within(value: unknown, reach: number): value is number {
+  return typeof value === 'number' && Number.isFinite(value) && Math.abs(value) <= reach;
+}
+
+/** Warns when the rebuilt value is not the stored one. */
+function note(path: string, raw: unknown, kept: unknown, warnings: string[]): void {
+  if (raw !== kept) warnings.push(`${path}: ${JSON.stringify(raw)} read as ${JSON.stringify(kept)}`);
+}
+
+/**
+ * §4.4: a `meta.stats` count is a whole number from 0 to `STAT_CEILING`, and
+ * anything else reads 0 — a count that cannot be trusted is not clamped into
+ * one that looks earned.
+ */
+function count(value: unknown, path: string, warnings: string[]): number {
+  if (typeof value === 'number' && Number.isInteger(value) && value >= 0 && value <= STAT_CEILING) return value;
+  warnings.push(`${path}: ${JSON.stringify(value)} is not a count from 0 to ${STAT_CEILING}; read as 0`);
+  return 0;
+}
+
+/**
+ * §4.4: a `lastDeath` point survives only on a planet we ship, inside that
+ * planet's arena. A point outside it is a body nothing could reach.
+ */
+function validateLastDeath(raw: unknown, path: string, content: SaveContent, warnings: string[]): RunStats['lastDeath'] {
+  const out: RunStats['lastDeath'] = {};
+  if (raw === undefined) return out;
+  if (!isBag(raw)) {
+    warnings.push(`${path}: not a record; read as empty`);
+    return out;
+  }
+  for (const [key, value] of Object.entries(raw)) {
+    if (!isPlanet(key)) {
+      warnings.push(`${path}.${key}: unknown planet dropped`);
+      continue;
+    }
+    const half = content.planetHalfSize[key];
+    const point = isBag(value) ? value : {};
+    const x = point['x'];
+    const z = point['z'];
+    if (!within(x, half) || !within(z, half)) {
+      warnings.push(`${path}.${key}: ${JSON.stringify(value)} is not inside ±${half} m and was dropped`);
+      continue;
+    }
+    out[key] = { x, z };
+  }
+  return out;
+}
+
+/** §4.4: every count through `count()`; a save with no `stats` at all reads an empty run. */
+function validateStats(raw: unknown, content: SaveContent, warnings: string[]): RunStats {
+  const stats = emptyRunStats();
+  if (raw === undefined) return stats;
+  if (!isBag(raw)) {
+    warnings.push('meta.stats: not a record; read as an empty run');
+    return stats;
+  }
+  for (const key of STAT_COUNTS) stats[key] = count(raw[key], `meta.stats.${key}`, warnings);
+  stats.lastDeath = validateLastDeath(raw['lastDeath'], 'meta.stats.lastDeath', content, warnings);
+  return stats;
+}
+
+/**
+ * §4.4 (47-b, 47-c): an entry naming a class or an ending we do not ship is
+ * dropped — it is someone we cannot draw — and at most `LINEAGE_MAX` of the
+ * rest are kept, the first ones.
+ */
+function validateLineage(raw: unknown, content: SaveContent, warnings: string[]): LineageEntry[] {
+  if (raw === undefined) return [];
+  if (!Array.isArray(raw)) {
+    warnings.push('meta.lineage: not a list; read as empty');
+    return [];
+  }
+  const out: LineageEntry[] = [];
+  raw.forEach((entry, index) => {
+    const kept = validateLineageEntry(entry, `meta.lineage[${index}]`, content, warnings);
+    if (kept !== null) out.push(kept);
+  });
+  if (out.length > LINEAGE_MAX) {
+    warnings.push(`meta.lineage: ${out.length - LINEAGE_MAX} entries past the first ${LINEAGE_MAX} dropped`);
+    out.length = LINEAGE_MAX;
+  }
+  return out;
+}
+
+function validateLineageEntry(raw: unknown, path: string, content: SaveContent, warnings: string[]): LineageEntry | null {
+  if (!isBag(raw)) {
+    warnings.push(`${path}: not a record; dropped`);
+    return null;
+  }
+  const classId = raw['classId'];
+  if (typeof classId !== 'string' || !(CLASS_IDS as readonly string[]).includes(classId)) {
+    warnings.push(`${path}: unknown class ${JSON.stringify(classId)}; dropped`);
+    return null;
+  }
+  const ending = raw['ending'];
+  if (typeof ending !== 'string' || !(ENDINGS as readonly string[]).includes(ending)) {
+    warnings.push(`${path}: unknown ending ${JSON.stringify(ending)}; dropped`);
+    return null;
+  }
+  const appearance = bagAt(raw, 'appearance');
+  const memory = raw['memory'];
+  const entry: LineageEntry = {
+    iteration: int(raw['iteration'], 1, 1, 99),
+    name: normalizeName(raw['name']),
+    classId: classId as ClassId,
+    appearance: {
+      portrait: int(appearance['portrait'], 0, 0, 999),
+      primary: color(appearance['primary']),
+      secondary: color(appearance['secondary']),
+    },
+    level: int(raw['level'], 1, 1, TUNING.LEVEL_CAP),
+    playtimeSec: Math.max(0, num(raw['playtimeSec'], 0)),
+    ending: ending as LineageEntry['ending'],
+    memory: typeof memory === 'string' && (MEMORIES as readonly string[]).includes(memory) ? (memory as LineageEntry['memory']) : null,
+    deaths: int(raw['deaths'], 0, 0, STAT_CEILING),
+    lastDeath: validateLastDeath(raw['lastDeath'], `${path}.lastDeath`, content, warnings),
+    endedAt: Math.max(0, num(raw['endedAt'], 0)),
+  };
+  for (const key of ['iteration', 'name', 'level', 'playtimeSec', 'memory', 'deaths', 'endedAt'] as const) {
+    note(`${path}.${key}`, raw[key], entry[key], warnings);
+  }
+  for (const key of ['portrait', 'primary', 'secondary'] as const) {
+    note(`${path}.appearance.${key}`, appearance[key], entry.appearance[key], warnings);
+  }
+  return entry;
+}
+
+/**
+ * §4.4 (47-e): a claim is a cache id or a lineage claim, each once. The list is
+ * the "opened once" record, so a forged or stale string has nowhere to hide.
+ */
+function validateClaimed(raw: unknown, content: SaveContent, warnings: string[]): string[] {
+  if (raw === undefined) return [];
+  if (!Array.isArray(raw)) {
+    warnings.push('progress.claimed: not a list; read as empty');
+    return [];
+  }
+  const out: string[] = [];
+  const seen = new Set<string>();
+  for (const value of raw) {
+    if (typeof value === 'string' && seen.has(value)) {
+      warnings.push(`progress.claimed: duplicate ${JSON.stringify(value)} dropped`);
+      continue;
+    }
+    if (typeof value !== 'string' || !(content.cacheIds.includes(value) || LINEAGE_CLAIM_PATTERN.test(value))) {
+      warnings.push(`progress.claimed: ${JSON.stringify(value)} is neither a cache nor a lineage claim; dropped`);
+      continue;
+    }
+    seen.add(value);
+    out.push(value);
+  }
+  return out;
+}
+
+/**
+ * §4.4 (47-d): remains survive only where a salvager could walk to them — on a
+ * planet we ship, two metres inside its wall — and only while they hold
+ * something. Anything else is lost with a warning, as E37 loses a mask.
+ */
+function validateRemains(raw: unknown, content: SaveContent, warnings: string[]): Remains | null {
+  if (raw === null || raw === undefined) return null;
+  const lost = (why: string): null => {
+    warnings.push(`progress.remains: ${why}; read as null`);
+    return null;
+  };
+  if (!isBag(raw)) return lost('not a record');
+  const planet = raw['planet'];
+  if (!isPlanet(planet)) return lost(`unknown planet ${JSON.stringify(planet)}`);
+  const reach = content.planetHalfSize[planet] - 2;
+  const x = raw['x'];
+  const z = raw['z'];
+  if (!within(x, reach) || !within(z, reach)) {
+    return lost(`(${JSON.stringify(x)}, ${JSON.stringify(z)}) is not inside ±${reach} m of ${planet}`);
+  }
+  const resources: Remains['resources'] = {};
+  for (const [key, value] of Object.entries(bagAt(raw, 'resources'))) {
+    if (!(RESOURCE_IDS as readonly string[]).includes(key)) {
+      warnings.push(`progress.remains.resources.${key}: unknown resource dropped`);
+      continue;
+    }
+    if (typeof value !== 'number' || !Number.isInteger(value) || value < 1 || value > RESOURCE_CEILING) {
+      warnings.push(`progress.remains.resources.${key}: ${JSON.stringify(value)} is not 1..${RESOURCE_CEILING}; dropped`);
+      continue;
+    }
+    resources[key as ResourceId] = value;
+  }
+  if (Object.keys(resources).length === 0) return lost('it holds no resources');
+  const restart = int(raw['restart'], 0, 0, STAT_CEILING);
+  note('progress.remains.restart', raw['restart'], restart, warnings);
+  return { planet, x, z, resources, restart };
+}
+
+/** §4.4: a resume point names a planet we ship and a time that is not negative. */
+function validateResume(raw: unknown, warnings: string[]): ResumePoint | null {
+  if (raw === null || raw === undefined) return null;
+  const planet = isBag(raw) ? raw['planet'] : undefined;
+  const at = isBag(raw) ? raw['at'] : undefined;
+  if (!isPlanet(planet) || typeof at !== 'number' || !Number.isFinite(at) || at < 0) {
+    warnings.push(`progress.resume: ${JSON.stringify(raw)} is not a planet and a time; read as null`);
+    return null;
+  }
+  return { planet, at };
 }
 
 function validatePlayer(raw: Bag, classId: ClassId, content: SaveContent, warnings: string[]): Save['player'] {
@@ -963,7 +1293,12 @@ function validateProgress(raw: Bag, content: SaveContent, warnings: string[]): S
     poisDiscovered: uniqueStrings(arrayAt(raw, 'poisDiscovered')),
     visits,
     endingSeen: raw['endingSeen'] === true,
-    explored: validateExplored(bagAt(raw, 'explored'), content, warnings),
+    explored: validateMasks(bagAt(raw, 'explored'), 'explored', (planet) => exploreBytes(content.planetHalfSize[planet]), warnings),
+    claimed: validateClaimed(raw['claimed'], content, warnings),
+    // SPEC-047 §4.4: every planet's underground is the same square.
+    exploredBelow: validateMasks(bagAt(raw, 'exploredBelow'), 'exploredBelow', () => exploreBytes(content.belowHalfSize), warnings),
+    remains: validateRemains(raw['remains'], content, warnings),
+    resume: validateResume(raw['resume'], warnings),
   };
 }
 
@@ -971,22 +1306,28 @@ function validateProgress(raw: Bag, content: SaveContent, warnings: string[]): S
  * SPEC-025 §4.4: an `explored` entry survives only for a planet we ship whose
  * value decodes to exactly the bitset that planet's arena needs. An arena that
  * was resized leaves a mask of the wrong length behind, and that planet simply
- * starts dark again (E37).
+ * starts dark again (E37). SPEC-047 §4.4: `exploredBelow` follows the same
+ * rule, sized from the underground instead.
  */
-function validateExplored(raw: Bag, content: SaveContent, warnings: string[]): Partial<Record<PlanetId, string>> {
+function validateMasks(
+  raw: Bag,
+  field: 'explored' | 'exploredBelow',
+  bytesFor: (planet: PlanetId) => number,
+  warnings: string[],
+): Partial<Record<PlanetId, string>> {
   const out: Partial<Record<PlanetId, string>> = {};
+  const ground = field === 'explored' ? 'this arena' : 'the underground';
   for (const [key, value] of Object.entries(raw)) {
-    if (!(PLANET_IDS as readonly string[]).includes(key)) {
-      warnings.push(`progress.explored.${key}: unknown planet dropped`);
+    if (!isPlanet(key)) {
+      warnings.push(`progress.${field}.${key}: unknown planet dropped`);
       continue;
     }
-    const planet = key as PlanetId;
-    const bytes = typeof value === 'string' ? decodeBits(value, exploreBytes(content.planetHalfSize[planet])) : null;
+    const bytes = typeof value === 'string' ? decodeBits(value, bytesFor(key)) : null;
     if (bytes === null) {
-      warnings.push(`progress.explored.${planet}: the explored mask is not the size of this arena and was dropped`);
+      warnings.push(`progress.${field}.${key}: the explored mask is not the size of ${ground} and was dropped`);
       continue;
     }
-    out[planet] = value as string;
+    out[key] = value as string;
   }
   return out;
 }
@@ -1085,6 +1426,15 @@ const MIGRATIONS: Record<number, (raw: Bag) => Bag> = {
       progress: { ...bagAt(raw, 'progress'), explored: {} },
     };
   },
+  // SPEC-047 §4.3 (E74): every v2 value stays as it was and the six new fields
+  // start empty. Only a reshape, like the steps before it — `validateSave`
+  // hardens the result.
+  2: (raw: Bag): Bag => ({
+    ...raw,
+    version: 3,
+    meta: { ...bagAt(raw, 'meta'), lineage: [], stats: emptyRunStats() },
+    progress: { ...bagAt(raw, 'progress'), claimed: [], exploredBelow: {}, remains: null, resume: null },
+  }),
 };
 
 export function migrate(

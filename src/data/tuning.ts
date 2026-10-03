@@ -69,6 +69,14 @@ export const TUNING = {
 } as const satisfies Tuning;
 
 /**
+ * SPEC-047 §2: the underground level's half-extent, in metres (SPEC-054): a
+ * 96 m square. Its own export rather than a `TUNING` key — the save validator
+ * sizes `progress.exploredBelow` from it before SPEC-054 exists, and the
+ * `TUNING` literal stays pinned.
+ */
+export const BELOW_HALF_SIZE = 48;
+
+/**
  * SPEC-043 §4.4 (*initial tuning*). Casual and normal keep the numbers SPEC-038
  * and SPEC-010 gave them — casual's ×0.7 hit and no death loss, normal's tenth
  * of the hold. Hard multiplies what already exists and nothing else: SPEC-038's

@@ -108,6 +108,7 @@ import { nodeIcon, poiIcon } from '@/systems/MapModel';
 import { contractFor, Missions, type MissionContext, type ObjectiveProgress } from '@/systems/Missions';
 import { CARGO_TOAST_SECONDS, Nodes, Pickups, SHIPPED_TOAST_TEXT } from '@/systems/Pickups';
 import { cumulativeXp, LEVEL_CAP, Progression, xpToNext } from '@/systems/Progression';
+import { watchRunStats } from '@/systems/RunStats';
 import { SpawnDirector, WAVE_CEILING_BONUS, type FrustumXZ, type SpawnRamp, type WaveHandle } from '@/systems/Spawn';
 import { Weather, WEATHER_EFFECTS, type WeatherEffects } from '@/systems/Weather';
 import { LINE_LEDGER, missionLinePlays, revealCamera, revealDue, revealKey, stayReport, type Ending } from '@/systems/StoryBeats';
@@ -1044,6 +1045,9 @@ export class SurfaceScene extends UiScene<'surface'> {
     this.#world = world;
 
     const bus = services.events as EventBus<GameEvents>;
+    // SPEC-047 §4.5: this run's counts, ahead of every other subscriber, so a
+    // death reads the salvager where they fell.
+    this.disposer.add(watchRunStats(bus, save, this, () => ({ planet: planet.id, x: world.player.x, z: world.player.z })));
     const progression = new Progression(save, bus);
     const economy = new Economy(save, bus, progression, services.save);
     // SPEC-032 §4.7: the service override, kept in step with the setting.

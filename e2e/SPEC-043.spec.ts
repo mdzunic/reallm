@@ -258,8 +258,10 @@ test('6. Settings switches the run to hard, and the Wurm then wakes with 1.25× 
   // The next spawn reads the new rules: the boss comes in at round(1800 × 1.25).
   await press(page, 'surface-spawn-boss');
   await expect.poll(async () => String((await sceneInfo(page))['boss'])).toMatch(new RegExp(`^p\\d+ \\d+/${HARD_WURM_HP}$`));
-  // Hard doubles the ambient elite chance: Cinder-4's 0.05 reads 0.1.
-  expect(Number((await sceneInfo(page))['eliteChance'])).toBeCloseTo(0.1, 6);
+  // Hard doubles the ambient elite chance: Cinder-4's 0.05 reads 0.1. The roll
+  // takes the difficulty on the next step's spawn, and a boss woken from the
+  // strip between steps does not wait for one — a fast runner reads it first.
+  await expect.poll(async () => Number((await sceneInfo(page))['eliteChance'])).toBeCloseTo(0.1, 6);
 });
 
 test('6. creation’s difficulty-hard makes a hard save', async ({ page }) => {
