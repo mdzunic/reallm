@@ -1912,7 +1912,7 @@ ratchet's 60 k holds with room on every planet.
 
 | Area | What the container showed |
 |---|---|
-| Scatter, seed 20121, `medium` | Cinder-4 324 bones + 130 pebbles = 25,928 triangles; Thessaly 600 tufts + 240 spores = 7,200 (§4.4's table — AC-14's "≤ 7,000" for Thessaly cannot hold with §4.4's own geometry and unchanged counts) |
+| Scatter, seed 20121, `medium` | Cinder-4 324 bones + 130 pebbles = 25,928 triangles; Thessaly 600 tufts + 240 spores = 6,000. A tuft is two crossed cards of one triangle each (the quads were 4 triangles), which brings Thessaly under AC-14's 7,000 with §4.4's counts, placement, mask and colours unchanged — §4.4's table, at 4-triangle tufts, says 7,200. The quads hung the mask upside down (a `DataTexture`'s first row is v = 0); the cards stand it on the ground |
 | The rect | the rig's rect from the look-at point misses 3–9 m of what a camera turned toward its 2 m look-ahead sees; widening it to the frustum's own ground corners left nothing outside, over 64 headings and four screen shapes |
 | Moving | `surface-goto-occluder` on Cinder-4 (seed 20121) changed `instancesDrawn` and faded a desert ruin; at seed 123 no GLB prop on Cinder-4 can hide the salvager's head — the rocks are 0.5-unit slabs |
 | The tug | `sceneInfo.tug` 1 on all six planets; a held walk from the spawn stopped at the hull, 3.9–6 m from the pad's centre, with `Open pad terminal` up; `surface-goto-pad` then E opened the terminal |

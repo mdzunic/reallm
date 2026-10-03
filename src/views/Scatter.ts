@@ -40,9 +40,14 @@ const scratchBase = new THREE.Color();
 
 /** The tuft mask's side, in texels (SPEC-046 §4.4). */
 const TUFT_MASK_SIZE = 64;
+/** The mask's footprint on a tuft card, in metres: SPEC-018's 0.7 × 0.5 m quad. */
+const TUFT_WIDTH = 0.7;
+const TUFT_HEIGHT = 0.5;
+/** How high a tuft card's apex stands, in mask heights. */
+const TUFT_APEX = 3;
 
 /**
- * A 64² five-blade alpha mask for the tuft quads, computed like a sprite.
+ * A 64² five-blade alpha mask for the tuft cards, computed like a sprite.
  * SPEC-046 §4.4: mipmapped and trilinear — the nearest-filtered 32² mask
  * shimmered into noise at play distance.
  */
@@ -81,6 +86,27 @@ export function tuftTexture(): THREE.DataTexture {
   return tuftMask;
 }
 
+/**
+ * One tuft card (SPEC-046 §4.4, AC-14): a single upright triangle whose base
+ * is the bottom edge of SPEC-018's 0.7 × 0.5 m quad and whose apex stands
+ * `TUFT_APEX` mask heights up, so the mask keeps the quad's size. A
+ * `DataTexture` uploads its first row at v = 0 and the mask writes its ground
+ * line last, so the base samples v = 1 and the blades stand on the ground (the
+ * quads hung them upside down). Past the blade tips (v < 0) the clamp repeats
+ * the mask's empty tip row; the converging sides trim only the two outer
+ * blades, which lean out of the quad anyway — the card keeps about 90 % of the
+ * mask's opaque texels.
+ */
+function tuftCard(): THREE.BufferGeometry {
+  const half = TUFT_WIDTH / 2;
+  const top = TUFT_HEIGHT * TUFT_APEX;
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute('position', new THREE.BufferAttribute(new Float32Array([-half, 0, 0, half, 0, 0, 0, top, 0]), 3));
+  geometry.setAttribute('normal', new THREE.BufferAttribute(new Float32Array([0, 0, 1, 0, 0, 1, 0, 0, 1]), 3));
+  geometry.setAttribute('uv', new THREE.BufferAttribute(new Float32Array([0, 1, 1, 1, 0.5, 1 - TUFT_APEX]), 2));
+  return geometry;
+}
+
 interface ScatterSpec {
   geometry: THREE.BufferGeometry;
   material: THREE.MeshStandardMaterial;
@@ -96,11 +122,13 @@ function scatterSpec(kind: ScatterKind, accent: string): ScatterSpec {
       return { geometry, material: new THREE.MeshStandardMaterial({ roughness: 0.9, metalness: 0 }) };
     }
     case 'tufts': {
-      const a = new THREE.PlaneGeometry(0.7, 0.5);
-      a.translate(0, 0.25, 0);
-      const b = a.clone();
+      // SPEC-046 AC-14: two crossed cards of one triangle each — 2 triangles
+      // a tuft where two quads were 4, so Thessaly's unchanged 600 tufts and
+      // 240 spores total 6,000 on medium, under its 7,000.
+      const a = tuftCard();
+      const b = tuftCard();
       b.rotateY(Math.PI / 2);
-      const geometry = mergePlanes(a, b);
+      const geometry = mergeAll([a, b]);
       return {
         geometry,
         material: new THREE.MeshStandardMaterial({
@@ -160,10 +188,6 @@ function scatterSpec(kind: ScatterKind, accent: string): ScatterSpec {
       return { geometry, material: new THREE.MeshStandardMaterial({ roughness: 0.9, metalness: 0 }) };
     }
   }
-}
-
-function mergePlanes(a: THREE.BufferGeometry, b: THREE.BufferGeometry): THREE.BufferGeometry {
-  return mergeAll([a.toNonIndexed(), b.toNonIndexed()]);
 }
 
 function mergeAll(parts: THREE.BufferGeometry[]): THREE.BufferGeometry {

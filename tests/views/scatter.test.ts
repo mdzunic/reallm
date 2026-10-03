@@ -139,7 +139,36 @@ describe('the scatter fixes (SPEC-046 §4.4)', () => {
     const material = tufts.material as THREE.MeshStandardMaterial;
     expect(material.map).toBe(mask);
     expect(material.alphaTest).toBe(0.5);
-    expect(triangles(tufts)).toBe(4);
+  });
+
+  it('a tuft is two crossed cards of one triangle each, standing the mask on the ground at the old 0.7 × 0.5 m', () => {
+    const thessaly = PLANETS.thessaly.surface;
+    const [tufts] = buildScatter(LAYOUT, field, thessaly.look, 'medium', thessaly.palette) as [THREE.InstancedMesh];
+    expect(triangles(tufts)).toBe(2);
+    const geometry = tufts.geometry;
+    const position = geometry.getAttribute('position') as THREE.BufferAttribute;
+    const normal = geometry.getAttribute('normal') as THREE.BufferAttribute;
+    const uv = geometry.getAttribute('uv') as THREE.BufferAttribute;
+    // The two cards cross at right angles, as the two quads did.
+    expect(normal.getX(0) * normal.getX(3) + normal.getZ(0) * normal.getZ(3)).toBeCloseTo(0, 6);
+    for (let i = 0; i < position.count; i++) {
+      // Along the card (up × its normal), the mask spans 0.7 m; up it, 0.5 m —
+      // the ground line (v = 1, the mask's last row) at y = 0.
+      const along = position.getX(i) * normal.getZ(i) - position.getZ(i) * normal.getX(i);
+      expect(uv.getX(i), `vertex ${i} u`).toBeCloseTo(0.5 + along / 0.7, 6);
+      expect(uv.getY(i), `vertex ${i} v`).toBeCloseTo(1 - position.getY(i) / 0.5, 6);
+      expect(position.getY(i)).toBeGreaterThanOrEqual(0);
+    }
+    // A DataTexture's first row is v = 0. The mask's last row, on the ground,
+    // holds the five blade roots; its first, which the clamp repeats past the
+    // blade tips up to the apex, is empty.
+    const data = tuftTexture().image.data as Uint8Array;
+    const alphaRow = (row: number): number[] => Array.from({ length: 64 }, (_, x) => data[(row * 64 + x) * 4 + 3] as number);
+    const roots = alphaRow(63);
+    let runs = 0;
+    for (let x = 0; x < 64; x++) if ((roots[x] as number) > 0 && (x === 0 || roots[x - 1] === 0)) runs++;
+    expect(runs).toBe(5);
+    expect(alphaRow(0).every((alpha) => alpha === 0)).toBe(true);
   });
 
   it("a tuft's colour lies between palette.ground and TUFT_TINT — 45 % of the way, ± 8 %", () => {
@@ -180,10 +209,11 @@ describe('the scatter fixes (SPEC-046 §4.4)', () => {
     expect(shade).toBeLessThanOrEqual(1.08 + 1e-6);
   });
 
-  it("totals Cinder-4's scatter at 25,928 triangles and Thessaly's at 7,200 on medium, seed 20121 (§4.4's table)", () => {
+  it("totals Cinder-4's scatter at 25,928 triangles (≤ 26,000) and Thessaly's at 6,000 (≤ 7,000) on medium, seed 20121", () => {
     // §4.4: Cinder-4 is 324 bones + 130 pebbles (51,200 before), Thessaly
     // 600 tufts + 240 spores (21,600 before). The counts and the placement
-    // are unchanged — only the geometry moved.
+    // are unchanged — only the geometry moved: 72-triangle bones, 20-triangle
+    // spores, and 2-triangle tufts, which bring Thessaly under its 7,000.
     const total = (planet: PlanetId): { triangles: number; counts: number[] } => {
       const def = PLANETS[planet];
       const layout = generateLayout(def, new RngRoot(20121).layout(planet));
@@ -200,7 +230,8 @@ describe('the scatter fixes (SPEC-046 §4.4)', () => {
     expect(cinder.triangles).toBeLessThanOrEqual(26_000);
     const thessaly = total('thessaly');
     expect(thessaly.counts).toEqual([600, 240]);
-    expect(thessaly.triangles).toBe(7_200);
+    expect(thessaly.triangles).toBe(6_000);
+    expect(thessaly.triangles).toBeLessThanOrEqual(7_000);
   });
 });
 
