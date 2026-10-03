@@ -41,10 +41,10 @@ type Assert<T extends true> = T;
 type Equal<A, B> = (<T>() => T extends A ? 1 : 2) extends <T>() => T extends B ? 1 : 2 ? true : false;
 
 /**
- * The 58 sound ids — the 29 of §2.2, the story films' 15 (SPEC-021 §6.3), the
+ * The 59 sound ids — the 29 of §2.2, the story films' 15 (SPEC-021 §6.3), the
  * seven weapon, impact and blast sprites of SPEC-035 §4.11, the dash and
- * three windup cues of SPEC-038 §4.10, and SPEC-041 §4.10's boss windup, boss
- * slam and flight hit tick —
+ * three windup cues of SPEC-038 §4.10, SPEC-041 §4.10's boss windup, boss
+ * slam and flight hit tick, and SPEC-050 §4.8's exhale —
  * pinned as an explicit literal (SPEC-001: pinned constants in tests are
  * literals). `SoundId` is derived from the sprite keys, so this is what makes
  * AC-5 a compile error rather than a surprise: recutting a bank without
@@ -90,6 +90,8 @@ const SOUND_IDS = [
   // SPEC-041 §4.10: the boss windup and the slam that lands it.
   'windup_boss',
   'boss_slam',
+  // SPEC-050 §4.8: the breath out when the stamina runs dry.
+  'exhale',
   'ship_hit_shield',
   'ship_hit_hull',
   'landing_thrusters',
@@ -147,6 +149,8 @@ const EVENT_KEYS = [
   // SPEC-038 §4.10: both reacted — the dash's whoosh and the windup cue.
   'player:dashed',
   'enemy:windup',
+  // SPEC-050 §4.8: reacted — the breath out.
+  'player:exhausted',
   'player:xp',
   'player:leveledUp',
   'tokens:changed',
@@ -257,14 +261,14 @@ describe('the audio manifest (SPEC-006 §2)', () => {
     expect(Object.keys(ASSETS.audio).sort()).toEqual([...SFX_BANKS, ...MUSIC_BANKS].sort());
   });
 
-  it('the sprite keys across the banks are the 58 sound ids (AC-5; SPEC-035 §4.11 adds seven, SPEC-038 §4.10 four, SPEC-041 §4.10 three)', () => {
+  it('the sprite keys across the banks are the 59 sound ids (AC-5; SPEC-035 §4.11 adds seven, SPEC-038 §4.10 four, SPEC-041 §4.10 three, SPEC-050 §4.8 one)', () => {
     const sprites = Object.values(ASSETS.audio).flatMap((entry) =>
       Object.keys((entry as { sprite?: object }).sprite ?? {}),
     );
     expect(sprites.slice().sort()).toEqual([...SOUND_IDS].sort());
-    expect(sprites).toHaveLength(58);
+    expect(sprites).toHaveLength(59);
     // No id appears in two banks: `SoundId` → bank has to be a function.
-    expect(new Set(sprites).size).toBe(58);
+    expect(new Set(sprites).size).toBe(59);
   });
 
   it('the SPEC-038 cues sit in the surface bank inside §4.10’s lengths', () => {
@@ -282,6 +286,10 @@ describe('the audio manifest (SPEC-006 §2)', () => {
     expect(surface.windup_boss[1]).toBeLessThanOrEqual(700);
     expect(surface.boss_slam[1]).toBeLessThanOrEqual(800);
     expect(ASSETS.audio.flight.sprite.ship_hit_tick[1]).toBeLessThanOrEqual(80);
+  });
+
+  it('the SPEC-050 exhale sits in the surface bank, at most 350 ms long (§4.8)', () => {
+    expect(ASSETS.audio.surface.sprite.exhale[1]).toBeLessThanOrEqual(350);
   });
 
   it('every sprite is a forward [offset, duration] span that does not overlap its neighbour', () => {
@@ -491,8 +499,8 @@ describe('the ramp curve (SPEC-006 §4.3, §4.5)', () => {
 // ------------------------------------------------------------ reactions table
 
 describe('the reactions table is exhaustive over GameEvents (SPEC-006 §5)', () => {
-  it('covers the 26 reacted events of §5.2 (AC-38; SPEC-029 §4.12 adds four, SPEC-035 §4.11 two, SPEC-038 §4.10 two, SPEC-041 §4.10 two, SPEC-042 §4.2 one)', () => {
-    expect(REACTED_EVENTS).toHaveLength(26);
+  it('covers the 27 reacted events of §5.2 (AC-38; SPEC-029 §4.12 adds four, SPEC-035 §4.11 two, SPEC-038 §4.10 two, SPEC-041 §4.10 two, SPEC-042 §4.2 one, SPEC-050 §4.8 one)', () => {
+    expect(REACTED_EVENTS).toHaveLength(27);
     expect(REACTED_EVENTS.slice().sort()).toEqual(
       [
         'combat:blast',
@@ -500,6 +508,7 @@ describe('the reactions table is exhaustive over GameEvents (SPEC-006 §5)', () 
         'enemy:hit',
         'player:dashed',
         'enemy:windup',
+        'player:exhausted',
         'weapon:locked',
         'weapon:switched',
         'mine:armed',
@@ -535,8 +544,8 @@ describe('the reactions table is exhaustive over GameEvents (SPEC-006 §5)', () 
     expect(AUDIO_SILENT.has('story:clue')).toBe(true);
   });
 
-  it('gives every one of the 72 event keys exactly one home (AC-40)', () => {
-    expect(EVENT_KEYS).toHaveLength(72);
+  it('gives every one of the 73 event keys exactly one home (AC-40)', () => {
+    expect(EVENT_KEYS).toHaveLength(73);
     const reacted = new Set<string>(REACTED_EVENTS);
     for (const key of EVENT_KEYS) {
       const hasSound = reacted.has(key);
@@ -648,6 +657,13 @@ describe('reaction outcomes (SPEC-006 §5.2)', () => {
       id: 'dash',
       opts: { x: 3, z: -1 },
     });
+  });
+
+  it('player:exhausted breathes out, unpositioned, 2 s apart at most, at 0.8 (SPEC-050 §4.8)', () => {
+    const reaction = AUDIO_REACTIONS['player:exhausted']({});
+    expect(reaction).toEqual({ id: 'exhale', opts: { minIntervalMs: 2000, volume: 0.8 } });
+    expect(reaction?.opts?.x).toBeUndefined();
+    expect(AUDIO_SILENT.has('player:exhausted')).toBe(false);
   });
 
   it('enemy:windup cues its kind, positioned, with the §4.10 floors and volumes', () => {

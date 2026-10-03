@@ -550,6 +550,8 @@ const NAMES: Record<keyof GameEvents, true> = {
   'player:recalled': true,
   // SPEC-038 §4.1: one per dash.
   'player:dashed': true,
+  // SPEC-050 §4.1: once per exhaustion.
+  'player:exhausted': true,
   'player:xp': true,
   'player:leveledUp': true,
   'tokens:changed': true,
@@ -625,8 +627,9 @@ describe('GameEvents (§3.2)', () => {
     // SPEC-035 §4.11 added `weapon:fired` and `enemy:hit`; SPEC-038 §4.10
     // `player:dashed` and `enemy:windup`; SPEC-041 §4.10 `boss:move` and
     // `flight:hazardHit`; SPEC-042 §4.2 `item:collected` and `item:blocked`;
-    // SPEC-043 §4.7 `mission:bonus`; SPEC-048 §4.9 `story:clue`.
-    expect(Object.keys(NAMES)).toHaveLength(72);
+    // SPEC-043 §4.7 `mission:bonus`; SPEC-048 §4.9 `story:clue`; SPEC-050 §4.1
+    // `player:exhausted`.
+    expect(Object.keys(NAMES)).toHaveLength(73);
   });
 
   it('still carries the nine names SPEC-002 and SPEC-003 already emit', () => {
