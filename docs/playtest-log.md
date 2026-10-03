@@ -1960,6 +1960,24 @@ raider's line and the echo), all green under one to four workers.
 | Bodies | `scavBodies` 1 on a landing with `c1_m1` active, 2 after `c1_s2_echo`, still 2 after a second echo, 0 with `c1_m1` done. Medium, both down, adaptive quality off: 40 draws and 26,424 triangles (budget 96 and 130 k) |
 | Covers, caption, kills | the echo ended on `That line again…`; `interlude_c3` at 8 s read `The towers were not alien.` with `scaffold_secret`, its own line without; `c5_m1_accept` said `Six kills.` |
 
+**The merge gate's run.** The gate ran the whole suite on this tree on a host
+at a load of about 40 over 10 cores: its pages drew 4–7 fps with update and
+render under 4 ms, and six cases outside this spec's file failed on both of
+its passes, each on a wall-clock budget for something that runs on game time
+or on the page's own clock — SPEC-006's death duck (10 samples where it wants
+more), SPEC-026 case 4, SPEC-029 case 2, SPEC-030 case 3, SPEC-037's phone
+case 1 at 844 × 390, and SPEC-044 case 1, whose intro line SPEC-048 made 77
+characters long (76 were typed when its 10 s ran out). Each now waits on what
+it asserts — the whole line, game time, the layer's own writes to the gain, a
+single-task read of the zone ghost — and passed here under up to four workers
+and again with every draw held to at least 150 ms (`slowDraw`, ~5 fps), where
+the old SPEC-044 case fails as it did on the gate. The scav body's own cost
+was measured on the way: one more skinned program linked on a Cinder-4
+landing before `c1_m1` (14 for 13), 100–200 ms of the first frames on
+SwiftShader, nothing per frame after. Transparent, as the salvager's clones
+are, it would share their program but draw twice (three.js draws double-sided
+transparency in two passes), so it stays opaque: one draw (AC-33).
+
 **Owed on hardware (§7).** On desktop and the reference phone:
 
 - [ ] play chapter 1 from a fresh save on the main path only: the pad body is there when the scav speaks, a raider's dying words repeat the warning, and no line reads a raw `{…}`;
