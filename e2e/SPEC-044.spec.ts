@@ -21,9 +21,12 @@ const CREATION = {
 const URL = '/?seed=123';
 const DEBUG_URL = '/?debug&seed=123';
 
-/** `intro_command` as the panel shows it (`data/dialogue.ts`): a modal transmission of three lines. */
+/**
+ * `intro_command` as the panel shows it (`data/dialogue.ts`): a modal transmission of three lines.
+ * SPEC-048 §4.1: the first is filled from the bound save — instance 62 on a first run, and the name.
+ */
 const INTRO_LINES = [
-  { speaker: 'Earth Command', text: 'Earth Command to salvager. You are cleared for the Cinder-4 approach.' },
+  { speaker: 'Earth Command', text: 'Earth Command to tug CR-62. Vance, you are cleared for the Cinder-4 approach.' },
   { speaker: 'Earth Command', text: 'Survey, extract, report. Answer one question: can we live out there.' },
   { speaker: 'ARIA', text: 'I am ARIA. I fly the ship and I keep you honest. Try not to make that hard.' },
 ];
