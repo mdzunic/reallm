@@ -172,6 +172,21 @@ function stormWaveProblems(
   return [...new Set(problems)];
 }
 
+/**
+ * SPEC-046 §4.5 — the terrain's macro tint amount, as a function so its
+ * failure is shown on doctored content: absent reads the default, anything
+ * given must be a number in [0, 1].
+ */
+function groundTintProblems(worlds: readonly PlanetDef[]): string[] {
+  const problems: string[] = [];
+  for (const planet of worlds) {
+    const tint = planet.surface.look.ground.tint;
+    if (tint === undefined) continue;
+    if (!(typeof tint === 'number' && tint >= 0 && tint <= 1)) problems.push(`${planet.id}: look.ground.tint ${tint} is outside [0, 1]`);
+  }
+  return problems;
+}
+
 describe('content invariants (SPEC-009 §7)', () => {
   it('1. every requirement exists, and every mission is reachable without a cycle', () => {
     expect(Object.keys(UPGRADES)).toEqual([...SHIP_SYSTEMS]);
@@ -941,6 +956,21 @@ describe('content invariants (SPEC-009 §7)', () => {
       expect(look.relief.bermHeight, planet.id).toBeLessThanOrEqual(10);
       for (const layer of look.ground.layers) expect(layerIds.has(layer), `${planet.id} layer ${layer}`).toBe(true);
     }
+  });
+
+  it('18b. a look.ground.tint, where a planet gives one, lies in [0, 1] (SPEC-046 §4.5)', () => {
+    expect(groundTintProblems(planets)).toEqual([]);
+    const withTint = (tint: number): PlanetDef => {
+      const base = planetsById.thessaly;
+      return {
+        ...base,
+        surface: { ...base.surface, look: { ...base.surface.look, ground: { ...base.surface.look.ground, tint } } },
+      };
+    };
+    expect(groundTintProblems([withTint(0), withTint(0.35), withTint(1)])).toEqual([]);
+    expect(groundTintProblems([withTint(1.2)])).toEqual(['thessaly: look.ground.tint 1.2 is outside [0, 1]']);
+    expect(groundTintProblems([withTint(-0.1)])).toHaveLength(1);
+    expect(groundTintProblems([withTint(Number.NaN)])).toHaveLength(1);
   });
 
   // SPEC-025 §4.7. The slot/line split is only safe while the two agree: a

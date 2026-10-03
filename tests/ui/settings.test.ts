@@ -187,6 +187,22 @@ describe('the settings row table (SPEC-045 §4.2)', () => {
     expect(rowNote(row('master'), 'keyboard')).toBeNull();
   });
 
+  it('holds Sharp rendering in Display, right after Adaptive quality, with its note (SPEC-046 §4.7)', () => {
+    for (const env of [KEYBOARD, TOUCH]) {
+      const display = visibleRows(env)
+        .filter((row) => row.section === 'display')
+        .map((row) => row.key);
+      expect(display.indexOf('sharpRender')).toBe(display.indexOf('adaptiveQuality') + 1);
+    }
+    const row = SETTINGS_ROWS.find((entry) => entry.key === 'sharpRender') as SettingsRowDef;
+    expect(row.id).toBe('settings-sharp-render');
+    expect(row.label).toBe('Sharp rendering');
+    expect(row.control).toBe('toggle');
+    expect(row.shown ?? 'always').toBe('always');
+    expect(rowNote(row, 'keyboard')).toBe('Medium quality at up to 2× resolution. Uses more battery.');
+    expect(rowNote(row, 'touch')).toBe('Medium quality at up to 2× resolution. Uses more battery.');
+  });
+
   it('offers Button size at 100, 125 and 150 % (§4.2)', () => {
     const scale = SETTINGS_ROWS.find((row) => row.key === 'buttonScale');
     expect(scale?.choices?.map((choice) => [choice.value, choice.label])).toEqual([

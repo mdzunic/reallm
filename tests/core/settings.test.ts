@@ -341,6 +341,8 @@ describe('the settings object (SPEC-007 §3)', () => {
       // SPEC-040 §4.3: 60 frames a second, and the governor may step down.
       frameRate: 60,
       adaptiveQuality: true,
+      // SPEC-046 §4.7: medium renders at 1.5× unless the player asks for 2×.
+      sharpRender: false,
       // SPEC-027 §4.9: guidance starts at `full` and no tip has been seen yet.
       guidance: 'full',
       tipsSeen: [],
@@ -561,6 +563,22 @@ describe('haptics (SPEC-042 §4.10)', () => {
     expect(createSettings(fake.storage).get().haptics).toBe(false);
     expect(createSettings(fakeStorage('{"haptics":"yes"}').storage).get().haptics).toBe(true);
     expect(createSettings(fakeStorage('{"haptics":0}').storage).get().haptics).toBe(true);
+  });
+});
+
+describe('sharpRender (SPEC-046 §4.7)', () => {
+  it('defaults off, round-trips, and a non-boolean stored value reads false', () => {
+    expect(defaultSettings().sharpRender).toBe(false);
+    const fake = fakeStorage();
+    const settings = createSettings(fake.storage);
+    expect(settings.get().sharpRender).toBe(false);
+    settings.set({ sharpRender: true });
+    expect(stored(fake)).toMatchObject({ sharpRender: true });
+    expect(createSettings(fake.storage).get().sharpRender).toBe(true);
+    expect(createSettings(fakeStorage('{"sharpRender":"yes"}').storage).get().sharpRender).toBe(false);
+    expect(createSettings(fakeStorage('{"sharpRender":1}').storage).get().sharpRender).toBe(false);
+    settings.set({ sharpRender: 'on' as unknown as boolean });
+    expect(settings.get().sharpRender).toBe(false);
   });
 });
 
