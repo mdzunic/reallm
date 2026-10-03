@@ -23,6 +23,12 @@ const CREATION = {
 const SPRINT_TIP_KEYBOARD = 'Shift runs. Running is loud and holsters your gun — walk when you want to shoot.';
 const WURM_TIP = 'It hunts by vibration: walk out of the ring — running pulls it after you.';
 
+/**
+ * The third tip of a landing shows 24 s of game time in; a GPU-less run under
+ * load moves the game at a third of the wall clock.
+ */
+const TIP_WAIT_MS = 150_000;
+
 /** A landscape phone: coarse pointer, no hover, touch points (SPEC-036 §4.2). */
 const PHONE = { viewport: { width: 844, height: 390 }, hasTouch: true, isMobile: true } as const;
 
@@ -166,7 +172,7 @@ async function ariaHint(page: Page): Promise<string> {
 // ------------------------------------------------------- 1, 9: the run in combat
 
 test('1, 9. a run in combat drains to exhaustion, the ring says so, and a fresh profile is taught the sprint tip', async ({ page }) => {
-  test.setTimeout(180_000);
+  test.setTimeout(300_000);
   const messages: ConsoleMessage[] = [];
   page.on('console', (message) => void messages.push(message));
   await start(page, '/?debug&seed=123');
@@ -204,9 +210,11 @@ test('1, 9. a run in combat drains to exhaustion, the ring says so, and a fresh 
   await page.keyboard.up('KeyW');
   await page.keyboard.up('ShiftLeft');
 
-  // §6.2 case 9: the first in-combat sprint queued the sprint tip; tips wait
-  // 12 s behind each other (SPEC-027), so it shows after the landing's own.
-  await expect.poll(() => ariaHint(page), { timeout: 60_000 }).toContain(SPRINT_TIP_KEYBOARD);
+  // §6.2 case 9: the first in-combat sprint queued the sprint tip. Tips wait
+  // 12 s of game time behind each other (SPEC-027) and the landing's `move`
+  // and `pad` go first, so it shows about 24 s in — a minute and more of wall
+  // clock on a starved run.
+  await expect.poll(() => ariaHint(page), { timeout: TIP_WAIT_MS }).toContain(SPRINT_TIP_KEYBOARD);
 });
 
 // ----------------------------------------------------------- 2: the travel run
@@ -464,7 +472,7 @@ async function burrowing(page: Page, messages: ConsoleMessage[]): Promise<void> 
 }
 
 test('8, 9. running pulls the burrow ring after the salvager until 0.4 s before the hit, and a fresh profile is taught the wurm tip', async ({ page }) => {
-  test.setTimeout(180_000);
+  test.setTimeout(300_000);
   const messages: ConsoleMessage[] = [];
   page.on('console', (message) => void messages.push(message));
   await start(page, '/?debug&seed=123');
@@ -490,8 +498,9 @@ test('8, 9. running pulls the burrow ring after the salvager until 0.4 s before 
     expect(s.burrowRing, `${s.viewTime}`).toBeLessThan(2);
   }
 
-  // §6.2 case 9: the first burrow windup queued the wurm tip.
-  await expect.poll(() => ariaHint(page), { timeout: 60_000 }).toContain(WURM_TIP);
+  // §6.2 case 9: the first burrow windup queued the wurm tip, behind the
+  // landing's two, as case 1's.
+  await expect.poll(() => ariaHint(page), { timeout: TIP_WAIT_MS }).toContain(WURM_TIP);
 });
 
 test('8. walking leaves the burrow ring where it came down: past 3 m within 0.9 s', async ({ page }) => {
