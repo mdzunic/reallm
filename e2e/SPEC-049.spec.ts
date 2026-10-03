@@ -168,7 +168,6 @@ test('2. chapter 1 done: the entry plays letter 1, from Iris, on paper; its star
   expect(style).toEqual({ bg: 'rgb(43, 38, 32)', ink: 'rgb(239, 228, 207)' });
   await readModal(page, LETTER_1);
   await expect(dialogue(page)).toBeHidden();
-  await expect(dialogue(page)).not.toHaveClass(/dialogue-letter/);
 
   // 49-i: logged like any line, named Iris, in the letter's ink.
   await page.getByTestId('station-tab-comms').click();
@@ -238,8 +237,12 @@ test('4. letter 5 is letter 1 again, then ARIA, the date, and the rating with an
   });
   await station(page);
   await expect(speaker(page)).toHaveText('Iris');
+  await expect(dialogue(page)).toHaveClass(/dialogue-letter/);
+  await readModal(page, LETTER_1);
+  // The style switches per line: ARIA reads on glass, in her own name.
+  await expect(speaker(page)).toHaveText('ARIA');
+  await expect(dialogue(page)).not.toHaveClass(/dialogue-letter/);
   await readModal(page, [
-    ...LETTER_1,
     'That is her first letter. Word for word. I checked it twice.',
     'Read me the date.',
     'There is no date. There never was, on any of them.',
