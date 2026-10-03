@@ -80,8 +80,10 @@ test('1. Thessaly draws a few hundred of its static instances, and says what the
 
 test('2–3. on Cinder-4 the drawn set follows the camera, the fade still works, and both variants fit 96 draws', async ({ page }) => {
   test.setTimeout(120_000);
-  // A fixed session seed, so the occluder the shortcut finds is the same one.
-  await land(page, '/?debug&scene=surface&planet=cinder4&quality=medium&seed=123');
+  // The pinned layout seed (tests/systems/layout.test.ts): its desert ruins
+  // stand tall enough to hide the salvager's head from the 55° camera. With the
+  // GLB props in, not every layout has one — Cinder-4's rocks are low slabs.
+  await land(page, '/?debug&scene=surface&planet=cinder4&quality=medium&seed=20121');
   // Case 3 measures with the models in: both variants of each kind drawing.
   await expect.poll(async () => (await sceneInfo(page))['propSource'], COLD_START).toBe('glb');
   await afterFrames(page, 30);
@@ -113,15 +115,21 @@ const WALKS: ReadonlyArray<{ keys: readonly string[]; x: number; z: number }> = 
 ];
 
 /**
- * Hold a walk toward the pad's centre (the origin) for `ms`, re-aimed every
- * tenth of a second with whichever of the eight key walks points closest.
+ * Hold a walk toward the pad's centre (the origin) for `seconds` of game time,
+ * re-aimed every tenth of a second with whichever of the eight key walks
+ * points closest. Game time, not wall clock: on a CPU rasteriser the fixed-step
+ * loop's five-steps-a-frame ceiling (SPEC-002 §4.2) runs the world slower than
+ * the clock, and a wall-clock walk would stop short of the pad for no reason
+ * the spec is about.
  */
-async function walkToPad(page: Page, ms: number): Promise<void> {
+async function walkToPad(page: Page, seconds: number): Promise<void> {
   const held = new Set<string>();
-  const until = Date.now() + ms;
+  const from = await info(page, 'viewTime');
+  const deadline = Date.now() + 60_000;
   try {
-    while (Date.now() < until) {
+    for (;;) {
       const at = await sceneInfo(page);
+      if (Number(at['viewTime']) - from >= seconds || Date.now() > deadline) break;
       const px = Number(at['px'] ?? 0);
       const pz = Number(at['pz'] ?? 0);
       const length = Math.hypot(px, pz);
@@ -156,12 +164,12 @@ for (const planet of PLANET_IDS) {
     test.setTimeout(120_000);
     // Nothing fires while the salvager walks: the walk is the measurement.
     await page.addInitScript(() => localStorage.setItem('reallm:settings', JSON.stringify({ autoFire: 'off' })));
-    await land(page, `/?debug&scene=surface&planet=${planet}&quality=medium`);
+    await land(page, `/?debug&scene=surface&planet=${planet}`);
     await expect.poll(() => info(page, 'tug'), COLD_START).toBe(1);
     const spawn = await sceneInfo(page);
     expect(Math.hypot(Number(spawn['px']), Number(spawn['pz']))).toBeGreaterThan(10); // 12 m out
 
-    await walkToPad(page, 4_000);
+    await walkToPad(page, 4);
     await page.waitForTimeout(200);
     const at = await sceneInfo(page);
     const distance = Math.hypot(Number(at['px']), Number(at['pz']));
