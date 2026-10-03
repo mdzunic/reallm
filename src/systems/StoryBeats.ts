@@ -272,6 +272,22 @@ export function stayReport(save: { player: { name: string } }): readonly string[
   ];
 }
 
+// --------------------------------------------- SPEC-048 §4.6: replays
+
+/** Where a mission line plays: its accept, a stage start, or its completion. */
+export type MissionLineHook = 'accept' | 'stage' | 'complete';
+
+/**
+ * SPEC-048 §4.6 (E76): the one rule for a replay — a mission that was in
+ * `missionsDone` when it was accepted, contracts included. The story's beats
+ * belong to the first run, so a replay plays its accept line and nothing
+ * else: no stage line, no completion line, no station debrief. The banner and
+ * the rewards are not this rule's business.
+ */
+export function missionLinePlays(hook: MissionLineHook, replay: boolean): boolean {
+  return hook === 'accept' || !replay;
+}
+
 // ------------------------------------------------- SPEC-034: the line ledger
 
 /**

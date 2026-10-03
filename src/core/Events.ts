@@ -29,6 +29,7 @@ import type {
   DamageSource,
   DialogueId,
   EnemyId,
+  FlagId,
   FollowerId,
   ItemId,
   MissionBonusKind,
@@ -193,6 +194,12 @@ export type GameEvents = {
   'mission:bonus': { id: MissionId; bonus: MissionBonusKind; earned: boolean };
   'mission:abandoned': { id: MissionId };
   'flag:set': { flag: string };
+  /**
+   * SPEC-048 §4.3: a clue was found — `Economy.setFlag` emits it right after
+   * the clue flag's `flag:set`, once per clue per save. Silent by design; the
+   * Notes marker and the station's rail read it.
+   */
+  'story:clue': { id: FlagId };
   'dialogue:started': { id: DialogueId };
   'dialogue:ended': { id: DialogueId };
   'ship:damaged': { shield: number; hull: number; source: 'asteroid' | 'enemy' | 'storm' };

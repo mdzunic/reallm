@@ -6271,3 +6271,100 @@ html.plain-text #ui :is(.screen-body, .settings, .sheet, .comms-log, .dialogue, 
   line-height: 1.55;
   word-spacing: 0.12em;
 }
+
+/* ================================================================ SPEC-048 */
+/* §4.4: the comms-log sheet's two tabs — the log and the salvager's Notes —
+   the Notes tab itself, the `notes-new` dot on the buttons that open it, and
+   the board's `Irregular reading` tag. Notes' header lines are written in
+   sentence case and uppercased here, so plain text shows them as written
+   (SPEC-045 §4.5). */
+.comms-tabs {
+  display: flex;
+  gap: 6px;
+}
+
+.comms-tab {
+  flex: 1 1 0;
+}
+
+.comms-pane {
+  flex: 0 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.notes {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.notes-count,
+.notes-rating,
+.notes-empty,
+.notes-chapter-title {
+  margin: 0;
+  font-size: var(--type-sm);
+  letter-spacing: var(--track);
+  text-transform: uppercase;
+}
+
+.notes-count {
+  color: var(--ink);
+  font-weight: 600;
+}
+
+.notes-rating {
+  color: var(--good);
+}
+
+.notes-empty,
+.notes-chapter-title,
+.notes-missing {
+  color: var(--ink-dim);
+}
+
+.notes-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 4px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.notes-clue {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.notes-title {
+  font-weight: 700;
+  color: var(--ink);
+}
+
+.notes-text {
+  color: var(--ink);
+}
+
+/* A 6 px dot in the accent after the label: a clue found this session, unread. */
+.notes-new {
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  margin-left: 6px;
+  border-radius: 50%;
+  background: var(--accent);
+  vertical-align: middle;
+}
+
+/* After the type badge, in the second accent: something here is not what it seems. */
+.board-irregular {
+  border-color: var(--accent-2);
+  color: var(--accent-2);
+}

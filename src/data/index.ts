@@ -17,6 +17,7 @@
 export * from '@/data/affixes';
 export * from '@/data/assets';
 export * from '@/data/characters';
+export * from '@/data/clues';
 export * from '@/data/companions';
 export * from '@/data/contracts';
 export * from '@/data/credits';
@@ -32,6 +33,7 @@ export * from '@/data/missions';
 export * from '@/data/planets';
 export * from '@/data/pois';
 export * from '@/data/recipes';
+export * from '@/data/story';
 export * from '@/data/tuning';
 export * from '@/data/upgrades';
 export * from '@/data/waves';

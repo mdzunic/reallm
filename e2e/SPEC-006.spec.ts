@@ -1278,12 +1278,12 @@ test('the reactions table is what the game actually hears (AC-38 … AC-50, AC-5
   // `enemy:windup`, both reacted; SPEC-041 §4.10 added `boss:move` and
   // `flight:hazardHit`, both reacted; SPEC-042 §4.2 added `item:collected`,
   // reacted, and `item:blocked`, silent; SPEC-043 §4.7 added `mission:bonus`,
-  // silent). That
+  // silent; SPEC-048 §4.9 added `story:clue`, silent). That
   // the two halves cover `GameEvents` exactly is a compile-time assertion in
   // the module, and `tests/core/audioReactions.test.ts` pins the same pair of
   // counts in node.
   expect(reactions.counts.reacted).toBe(26);
-  expect(reactions.counts.silent).toBe(45);
+  expect(reactions.counts.silent).toBe(46);
   expect(reactions.counts.overlap).toEqual([]);
   // SPEC-012 §4.12 populated the set from the dialogue table's `glitch` marks
   // (it shipped empty under SPEC-006); the unit suite pins it to those marks.

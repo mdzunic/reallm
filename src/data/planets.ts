@@ -373,7 +373,8 @@ export const PLANETS = {
     name: 'The Hive',
     chapter: 5,
     biome: 'hive',
-    blurb: 'An asteroid gauntlet wrapped around a living interior. The Queen has known you were coming since Thessaly.',
+    // SPEC-048 §4.7: the Queen's sentence is `c5_m2_done`'s alone.
+    blurb: 'An asteroid gauntlet wrapped around a living interior.',
     unlock: [{ kind: 'flag', flag: 'chapter4_done' }],
     fuelCost: 120,
     travelSeconds: 200,

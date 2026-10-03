@@ -66,6 +66,7 @@ import {
   type ShipSystem,
   type Upgrade,
 } from '@/data/index';
+import { isClueFlag } from '@/systems/Clues';
 import type { EventSink, Progression } from '@/systems/Progression';
 
 // ------------------------------------------------------------------- results
@@ -766,6 +767,10 @@ export class Economy {
     if (this.#save.progress.flags.includes(flag)) return;
     this.#save.progress.flags.push(flag);
     this.#events.emit('flag:set', { flag });
+    // SPEC-048 §4.3: every flag passes this door — rewards, clues, choices — so
+    // a clue's flag announces the clue here, once per save: a set flag returned
+    // above. Silent; the Notes marker reads it.
+    if (isClueFlag(flag)) this.#events.emit('story:clue', { id: flag });
     // §4.6: `chapterN_done` funds the jump to chapter N+1 — `chapter5_done`
     // pays for Eden (10-f). Chapter 6 ends the campaign and funds nothing.
     const match = /^chapter([1-5])_done$/.exec(flag);

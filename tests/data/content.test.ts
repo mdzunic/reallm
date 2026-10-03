@@ -1546,14 +1546,14 @@ describe('words that match the touch controls (SPEC-036 §4.11, §4.12)', () => 
     expect(TIPS.heavy.touch).toBe("Tap the launcher's slot to fire it at the nearest enemy — it recharges by itself.");
   });
 
-  it('the death hint has a touch wording, and neither wording sends the player to Settings', () => {
-    expect(HINTS.death.nudge).toBe('Dying twice here? Q heals, and armor helps.');
+  it('the death hint has a touch wording; only the keyboard one points at casual difficulty in Settings', () => {
+    // SPEC-048 §4.7: `armour`, and — difficulty has been a setting since
+    // SPEC-038 — where casual is, which SPEC-036 §4.11 could not yet say.
+    expect(HINTS.death.nudge).toBe('Dying twice here? Q heals, armour helps, and casual difficulty is in Settings.');
     // SPEC-037 §4.10 rewrote the touch wording: the ITEM button is gone.
-    expect(HINTS.death.touch).toBe('Dying twice here? Tap the heal slot on the bar, and armor helps.');
-    for (const text of [HINTS.death.nudge, HINTS.death.touch ?? '']) {
-      expect(text).not.toContain('Settings');
-      expect(text).not.toMatch(/difficulty/i);
-    }
+    expect(HINTS.death.touch).toBe('Dying twice here? Tap the heal slot on the bar, and armour helps.');
+    expect(HINTS.death.touch).not.toContain('Settings');
+    expect(HINTS.death.touch).not.toMatch(/difficulty/i);
   });
 });
 
@@ -1581,7 +1581,7 @@ describe('no SWAP or ITEM in the touch words (SPEC-037 §4.10)', () => {
     expect(TIPS.storm.touch).toBe(
       'A storm is ten seconds out. Caves and wrecks keep it off you — or tap the heal slot on the bar and push through.',
     );
-    expect(HINTS.death.touch).toBe('Dying twice here? Tap the heal slot on the bar, and armor helps.');
+    expect(HINTS.death.touch).toBe('Dying twice here? Tap the heal slot on the bar, and armour helps.');
   });
 
   it('no touch wording in TIPS or HINTS names SWAP or ITEM', () => {

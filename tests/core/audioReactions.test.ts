@@ -195,6 +195,8 @@ const EVENT_KEYS = [
   'mission:bonus',
   'mission:abandoned',
   'flag:set',
+  // SPEC-048 §4.3: a found clue, silent.
+  'story:clue',
   'dialogue:started',
   'dialogue:ended',
   'ship:damaged',
@@ -523,16 +525,18 @@ describe('the reactions table is exhaustive over GameEvents (SPEC-006 §5)', () 
     );
   });
 
-  it('silences exactly the 45 events of §5.4 (AC-39; SPEC-015 added the two app: signals)', () => {
+  it('silences exactly the 46 events of §5.4 (AC-39; SPEC-015 added the two app: signals)', () => {
     // SPEC-034 added `player:recalled`, `enemy:dismissed` and `item:noRoom`;
     // SPEC-042 §4.2 `item:blocked`, whose warn toast is its sound; SPEC-043
-    // §4.7 `mission:bonus`.
-    expect(AUDIO_SILENT.size).toBe(45);
+    // §4.7 `mission:bonus`; SPEC-048 §4.9 `story:clue` — a clue is quiet by
+    // design, and the reacted and sprite counts do not move.
+    expect(AUDIO_SILENT.size).toBe(46);
     expect(AUDIO_SILENT.has('mission:bonus')).toBe(true);
+    expect(AUDIO_SILENT.has('story:clue')).toBe(true);
   });
 
-  it('gives every one of the 71 event keys exactly one home (AC-40)', () => {
-    expect(EVENT_KEYS).toHaveLength(71);
+  it('gives every one of the 72 event keys exactly one home (AC-40)', () => {
+    expect(EVENT_KEYS).toHaveLength(72);
     const reacted = new Set<string>(REACTED_EVENTS);
     for (const key of EVENT_KEYS) {
       const hasSound = reacted.has(key);
