@@ -390,13 +390,25 @@ test('9. after the confession the echo ends on ARIA’s candid line, not the san
   await start(page, URL);
   await prepare(page, { flags: ['chapter5_done'] });
   await station(page);
+  await expect(page.getByTestId('station-tab-comms').getByTestId('notes-new')).toHaveCount(0);
   await play(page, 'c1_s2_echo');
   await expect(page.locator('[data-testid="dialogue"] .dialogue-text')).toContainText('Off-worlder. Listen.');
+  // §4.3, §4.4: the station finds the clue its line carries, and its rail says so.
+  await expect.poll(() => flags(page)).toContain('clue_scav_echo');
+  await expect(page.getByTestId('station-tab-comms').getByTestId('notes-new')).toBeVisible();
   await dismiss(page);
   await page.getByTestId('station-tab-comms').click();
   const lines = await commsLines(page);
   expect(lines.at(-1)).toBe('ARIA|That line again. I will not blame the sand this time.');
   expect(lines.join('\n')).not.toContain('Coincidence. Sand does things to people.');
+  // Opening Notes takes the dot down; the record is there, filled.
+  await page.getByTestId('comms-tab-notes').click();
+  await expect(page.getByTestId('notes-clue-clue_scav_echo')).toContainText('Said before');
+  // The confession counts too; its chapter's section waits for the flags to reach it.
+  await expect(page.getByTestId('notes-count')).toHaveText('Recorded 2 of 15');
+  await page.getByTestId('comms-log-close').click();
+  await expect(page.getByTestId('station-tab-comms').getByTestId('notes-new')).toHaveCount(0);
+  await expect(page.getByTestId('station-tab-comms')).toBeFocused();
 });
 
 // ------------------------------------------------------- 10: caption variant

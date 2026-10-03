@@ -1102,9 +1102,10 @@ export class FlightScene extends UiScene<'flight'> {
         ({ id }) => {
           const def = tracker.started(id, scene.flags);
           if (def === null) return;
+          // Unread first: `setFlag`'s `story:clue` is what dots `pause-comms`.
+          NOTES_UNSEEN.mark(save);
           economy.setFlag(def.id);
           this.services.save.request('checkpoint');
-          NOTES_UNSEEN.mark(save);
         },
         this,
       ),

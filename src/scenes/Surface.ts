@@ -4199,9 +4199,10 @@ export class SurfaceScene extends UiScene<'surface'> {
     if (clues === null || scene === null || economy === null || save === null) return;
     const def = clues.started(id, scene.flags);
     if (def !== null) {
+      // Unread first: `setFlag`'s `story:clue` is what dots `pause-comms`.
+      NOTES_UNSEEN.mark(save);
       economy.setFlag(def.id);
       this.services.save.request('checkpoint');
-      NOTES_UNSEEN.mark(save);
     }
     if (id === SCAV_ECHO_LINE) this.#placeEchoBody();
   }

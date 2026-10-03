@@ -193,10 +193,10 @@ export class StationScene extends UiScene<'station'> {
           const economy = this.#economy;
           const def = tracker.started(id, new Set(data.progress.flags));
           if (def === null || economy === null) return;
+          // Unread first: `setFlag`'s `story:clue` re-renders the rail with the dot.
+          NOTES_UNSEEN.mark(data);
           economy.setFlag(def.id);
           this.services.save.request('checkpoint');
-          NOTES_UNSEEN.mark(data);
-          this.#syncNotesDot();
         },
         this,
       ),

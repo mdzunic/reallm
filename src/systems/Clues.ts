@@ -34,10 +34,15 @@ export interface ClueScene {
   hasShelter(kind: 'cave' | 'wreck'): boolean;
 }
 
-/** A clue is found when its flag — or any of its `also` flags — is set. */
+/**
+ * A clue is found when its flag — or any of its `also` flags — is set. The
+ * dwell asks it every step, so it allocates nothing (SPEC-001 §7).
+ */
 export function clueFound(def: ClueDef, flags: ReadonlySet<string>): boolean {
   if (flags.has(def.id)) return true;
-  for (const flag of def.also ?? []) if (flags.has(flag)) return true;
+  const also = def.also;
+  if (also === undefined) return false;
+  for (let i = 0; i < also.length; i++) if (flags.has(also[i] as FlagId)) return true;
   return false;
 }
 
