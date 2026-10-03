@@ -1357,9 +1357,12 @@ test('the reactions table is what the game actually hears (AC-38 … AC-50, AC-5
     const { audio, bus, known } = (window as unknown as {
       __qaAudio2: { audio: Record<string, (...args: unknown[]) => unknown>; bus: { emit(name: string, payload?: unknown): void }; known: Set<unknown> };
     }).__qaAudio2;
-    const gain = (): number | null => {
+    const playing = () => {
       const howl = window.Howler._howls.find((h) => !known.has(h) && h._src.includes('music/ending'));
-      const sound = howl?._sounds.find((s) => !s._paused && !s._ended);
+      return howl?._sounds.find((s) => !s._paused && !s._ended);
+    };
+    const gain = (): number | null => {
+      const sound = playing();
       return sound ? Number(sound._node.gain.value.toFixed(4)) : null;
     };
     const sample = (ms: number, step: number): Promise<Array<[number, number | null]>> =>
@@ -1377,10 +1380,24 @@ test('the reactions table is what the game actually hears (AC-38 … AC-50, AC-5
     audio['music']('ending', { fadeMs: 300 });
     await new Promise((resolve) => setTimeout(resolve, 700));
     const full = gain();
+    // Every value the layer writes to the track's gain from the death on,
+    // stamped from it — `Howl.volume()` is `setValueAtTime` on this param — so
+    // the duck's whole course is on record however seldom a starved page gets
+    // to sample it.
+    const param = playing()?._node.gain as unknown as AudioParam | undefined;
+    const written: Array<[number, number]> = [];
+    let since = 0;
+    if (param !== undefined) {
+      const write = param.setValueAtTime;
+      param.setValueAtTime = function (value: number, when: number): AudioParam {
+        written.push([Math.round(performance.now() - since), Number(value.toFixed(4))]);
+        return write.call(this, value, when);
+      };
+    }
+    since = performance.now();
     bus.emit('player:died', { cause: 'enemy', scene: 'surface' });
-    // Read on the ramp's own 25 ms tick: a starved tab stretches every step of
-    // an interval, and a finer step keeps the hold densely read anyway.
-    const death = await sample(2800, 25);
+    const death = await sample(2800, 100);
+    if (param !== undefined) delete (param as { setValueAtTime?: unknown }).setValueAtTime;
     await new Promise((resolve) => setTimeout(resolve, 400));
     audio['duck'](true);
     await new Promise((resolve) => setTimeout(resolve, 300));
@@ -1389,21 +1406,28 @@ test('the reactions table is what the game actually hears (AC-38 … AC-50, AC-5
     const both = await sample(2600, 200);
     audio['duck'](false);
     const released = await sample(500, 100);
-    return { full, death, pauseOnly, both, released };
+    return { full, death, written, pauseOnly, both, released };
   });
 
   expect(ducks.full).toBeCloseTo(MUSIC_FULL, 2);
-  // The ramp down is 200 ms on the page's clock, ticked every 25 ms, and the
-  // sampler runs on the same clock: a starved tab lands the ramp late — a
-  // loaded gate run still read 0.2531 at 311 ms — and stretched the old 100 ms
-  // step to about 150. So the hold is read from the first sample at the ducked
-  // level, which must come inside the first second, through 1.9 s: on a quiet
-  // host that is from 300 ms, as it always was.
-  const landed = ducks.death.find(([, value]) => value !== null && Math.abs(value - MUSIC_DUCKED) < 5e-4);
-  expect(landed, 'the bus reaches the ducked level').toBeDefined();
-  expect(landed![0]).toBeLessThan(1000);
-  const ducked = ducks.death.filter(([t]) => t >= Math.max(300, landed![0]) && t <= 1900);
-  expect(ducked.length).toBeGreaterThan(10);
+  // The hold, from the layer's own writes: the ramp takes the gain down to the
+  // ducked level inside the first second, and nothing moves it off that level
+  // before 1.9 s — not one write, so the bus sat there throughout, rather than
+  // at each of the instants a sampler happened to read it. The ramp and the
+  // sampler both run on the page's clock, and a starved tab gets to neither on
+  // time: a loaded gate run had the ramp still at 0.2531 at 311 ms and took 10
+  // samples, not 16, over 0.3–1.9 s.
+  const written = ducks.written;
+  const landing = written.findIndex(([, value]) => Math.abs(value - MUSIC_DUCKED) < 5e-4);
+  expect(landing, `the gain is written down to the ducked level: ${JSON.stringify(written)}`).toBeGreaterThanOrEqual(0);
+  const landedAt = written[landing]![0];
+  expect(landedAt).toBeLessThan(1000);
+  const lifted = written.slice(landing + 1).find(([, value]) => Math.abs(value - MUSIC_DUCKED) >= 5e-4);
+  expect(lifted, 'the hold lets go').toBeDefined();
+  expect(lifted![0], `the first write off the ducked level: ${JSON.stringify(written)}`).toBeGreaterThan(1900);
+  // …and every sample the page took of it in that span reads the same.
+  const ducked = ducks.death.filter(([t]) => t >= Math.max(300, landedAt) && t <= 1900);
+  expect(ducked.length).toBeGreaterThan(0);
   for (const [t, value] of ducked) expect(value, `at ${t} ms`).toBeCloseTo(MUSIC_DUCKED, 3);
   // It lets go by itself: no second call anywhere in the block above.
   expect(ducks.death[ducks.death.length - 1]![1]).toBeCloseTo(MUSIC_FULL, 2);
