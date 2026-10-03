@@ -53,6 +53,17 @@ export const KEY_BINDINGS: Readonly<Record<string, Action | MoveAxis>> = {
   Backquote: 'debug',
 };
 
+/**
+ * SPEC-050 §4.5: the keys that mean something else on the surface, read only
+ * while `input.mode` is `'surface'` — either Shift runs there, while in flight
+ * `ShiftLeft` keeps `KEY_BINDINGS`' `throttleUp`. The wheel maps by mode the
+ * same way; `KEY_BINDINGS` itself is unchanged.
+ */
+export const SURFACE_KEY_OVERRIDES: Readonly<Record<string, Action>> = {
+  ShiftLeft: 'sprint',
+  ShiftRight: 'sprint',
+};
+
 /** SPEC-028 §4.1: wheel notches closer than this are one flick of the wheel. */
 export const WHEEL_INTERVAL_MS = 120;
 
@@ -133,6 +144,12 @@ export class KeyboardMouseDriver implements InputDriver {
   readonly #holders = new Map<Action, Set<string>>();
   /** The movement half-axes currently held, by binding name (AC-8). */
   readonly #axes = new Set<MoveAxis>();
+  /**
+   * SPEC-050 §4.5: what each held key pressed on key-down, by `event.code` — a
+   * Shift pressed on the surface releases `sprint` even after the mode
+   * changed to flight (E80).
+   */
+  readonly #pressed = new Map<string, Action | MoveAxis>();
   /** The canvas box, re-measured on resize rather than on every pointer move. */
   #left = 0;
   #top = 0;
@@ -195,6 +212,7 @@ export class KeyboardMouseDriver implements InputDriver {
   forget(): void {
     this.#holders.clear();
     this.#axes.clear();
+    this.#pressed.clear();
   }
 
   dispose(): void {
@@ -210,10 +228,12 @@ export class KeyboardMouseDriver implements InputDriver {
     if (event.repeat) return; // AC-5: auto-repeat is not a new press
     if (isEditable(event.target)) return; // AC-7
     this.#input.setScheme(SCHEME); // AC-19: any key event, bound or not
-    const binding = KEY_BINDINGS[event.code];
+    // SPEC-050 §4.5: on the surface the overrides come first.
+    const binding = (this.#input.mode === 'surface' ? SURFACE_KEY_OVERRIDES[event.code] : undefined) ?? KEY_BINDINGS[event.code];
     if (binding === undefined) return; // AC-6: browser shortcuts keep working
     // AC-6/AC-21: only a live gameplay scene may swallow a key.
     if (this.#input.gameplayActive && this.#input.enabled) event.preventDefault();
+    this.#pressed.set(event.code, binding);
     if (isMoveAxis(binding)) {
       this.#axes.add(binding);
       this.#pushMove();
@@ -225,7 +245,9 @@ export class KeyboardMouseDriver implements InputDriver {
   #onKeyUp(event: KeyboardEvent): void {
     if (isEditable(event.target)) return;
     this.#input.setScheme(SCHEME);
-    const binding = KEY_BINDINGS[event.code];
+    // SPEC-050 §4.5: the key lets go of what it pressed, whatever the mode is now.
+    const binding = this.#pressed.get(event.code) ?? KEY_BINDINGS[event.code];
+    this.#pressed.delete(event.code);
     if (binding === undefined) return;
     if (this.#input.gameplayActive && this.#input.enabled) event.preventDefault();
     if (isMoveAxis(binding)) {

@@ -167,6 +167,10 @@ export const SETTINGS_ROWS: readonly SettingsRowDef[] = [
     label: 'Pause when the game loses focus',
     control: 'toggle',
   },
+  // SPEC-050 §4.5: a Shift press toggles the run instead of holding it…
+  { id: 'settings-sprint-toggle', key: 'sprintToggle', section: 'controls', label: 'Run toggle', control: 'toggle', shown: 'keyboard' },
+  // …and the stick pushed past its ring runs.
+  { id: 'settings-stick-sprint', key: 'stickSprint', section: 'controls', label: 'Run with the stick', control: 'toggle', shown: 'touch' },
   {
     id: 'settings-joystick-side',
     key: 'joystickSide',

@@ -17,7 +17,9 @@
 // there; pause sits alone at the top right in both modes; the flight's + / −
 // keep the row at the bottom corner. SPEC-038 §4.1 adds DASH, mounted into the
 // arc's corner cell the same way. The HUD's own reticle is the flight's one
-// aim mark, so this layer draws none.
+// aim mark, so this layer draws none. SPEC-050 §4.5 adds no button for the
+// run: the stick reports its travel to `Input`, which presses `sprint` past
+// the drawn ring, and the ring brightens (`is-sprint`) while the salvager runs.
 import {
   FLIGHT_STEER_FRACTION,
   FLOAT_DRIFT,
@@ -89,6 +91,8 @@ const BUTTON_LABELS: Readonly<Record<Action, string>> = {
   throwItem: 'THROW',
   useUtility: 'GADGET',
   dash: 'DASH',
+  // SPEC-050 §4.5: never drawn — the stick pushed past its ring is the run.
+  sprint: 'RUN',
 };
 
 export class TouchControls {
@@ -234,6 +238,15 @@ export class TouchControls {
     }, ZONES_SECONDS * 1000);
   }
 
+  /**
+   * SPEC-050 §4.5: `.touch-stick.is-sprint` — a brighter, thicker ring — while
+   * the salvager runs. The scene calls it when the value changes; it touches
+   * nothing else, so a raised stick stays where the thumb put it.
+   */
+  setSprinting(on: boolean): void {
+    this.#stick.classList.toggle('is-sprint', on);
+  }
+
   /** The interact button only exists while the scene offers something (AC-17). */
   setInteractHint(label: string | null): void {
     this.#interactHint = label;
@@ -325,6 +338,7 @@ export class TouchControls {
     const claimed: ZonePointer = { id: event.pointerId, startX: x, startY: y, originX: x, originY: y, dragging: false };
     if (zone === 'move') {
       this.#move = claimed;
+      this.#input.setStickTravel(0);
       // AC-11: the stick appears where the thumb landed. Flight steers without
       // one — the ship is the cursor (AC-28).
       if (this.#mode === 'surface') this.#showStick(x, y, 0, 0);
@@ -366,6 +380,8 @@ export class TouchControls {
     if (move !== null && move.id === event.pointerId) {
       this.#move = null;
       this.#input.setMove(0, 0, 'touch'); // AC-28: the steer offset returns to 0
+      // SPEC-050 §4.5 (E80): a lift or the stick's own cancel ends its run.
+      this.#input.setStickTravel(0);
       this.#stick.classList.add('is-hidden');
     }
     const aim = this.#aim;
@@ -392,6 +408,9 @@ export class TouchControls {
     let dx = x - pointer.originX;
     let dy = y - pointer.originY;
     const distance = Math.hypot(dx, dy);
+    // SPEC-050 §4.5: the run reads the raw travel, before the origin drifts.
+    // The flight's steer zone runs nothing.
+    if (this.#mode === 'surface') this.#input.setStickTravel(distance / JOYSTICK_RADIUS_PX);
     const drift = JOYSTICK_RADIUS_PX * FLOAT_DRIFT;
     if (distance > drift) {
       // Drag the origin along behind the thumb so it sits exactly `drift` away.
@@ -425,6 +444,7 @@ export class TouchControls {
     this.#aim = null;
     this.#stick.classList.add('is-hidden');
     this.#input.setMove(0, 0, 'touch');
+    this.#input.setStickTravel(0);
     this.#input.setAimDrag(0, 0, false);
     this.#input.releaseAction('fire', 'touch');
     for (const action of this.#buttons.keys()) this.#input.releaseAction(action, 'touch');
