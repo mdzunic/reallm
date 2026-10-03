@@ -104,7 +104,25 @@ export interface SaveBridge {
 
 export interface SaveSnapshot {
   version: number;
-  meta: { slot: number; seed: number; playtimeSec: number; updatedAt: number; iteration: number; difficulty: string };
+  meta: {
+    slot: number;
+    seed: number;
+    playtimeSec: number;
+    updatedAt: number;
+    iteration: number;
+    difficulty: string;
+    /** SPEC-047 §3: the instances before this one (written by SPEC-058). */
+    lineage: unknown[];
+    /** SPEC-047 §4.5: this run's counts. */
+    stats: {
+      deaths: number;
+      kills: number;
+      elites: number;
+      bosses: number;
+      recoveries: number;
+      lastDeath: Record<string, { x: number; z: number }>;
+    };
+  };
   player: {
     name: string;
     classId: string;
@@ -133,6 +151,11 @@ export interface SaveSnapshot {
     endingSeen: boolean;
     /** SPEC-025 §4.5: one base64url bitset per planet with ground walked. */
     explored: Record<string, string>;
+    /** SPEC-047 §3: opened caches and lineage bodies. */
+    claimed: string[];
+    exploredBelow: Record<string, string>;
+    remains: { planet: string; x: number; z: number; resources: Record<string, number>; restart: number } | null;
+    resume: { planet: string; at: number } | null;
   };
 }
 

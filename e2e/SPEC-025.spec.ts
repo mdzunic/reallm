@@ -104,7 +104,7 @@ test('a fresh save shows four gear cards in the character panel (§6.2)', async 
   await expect(page.getByTestId('shop-gear-weapon_laser')).not.toContainText('equipped');
 });
 
-test('a v1 save in storage loads as version 2 with its rifle in the primary slot (§6.2, E38)', async ({ page }) => {
+test('a v1 save in storage loads as version 3 with its rifle in the primary slot (§6.2, E38, SPEC-047 §4.7)', async ({ page }) => {
   await start(page, '/?debug');
   await page.evaluate((fixture) => localStorage.setItem('reallm:slot:0', JSON.stringify(fixture)), V1_SAVE);
 
@@ -128,7 +128,7 @@ test('a v1 save in storage loads as version 2 with its rifle in the primary slot
     };
   });
 
-  expect(loaded.version).toBe(2);
+  expect(loaded.version).toBe(3);
   expect(loaded.equipped).toEqual({
     armor: 'armor_composite',
     sidearm: 'pistol_service',
