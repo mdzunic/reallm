@@ -19,6 +19,9 @@ import {
   TAP_SLOP_PX,
   TOUCH_BUTTON_PX,
   TOUCH_FULL_TRAVEL,
+  TOUCH_SPRINT_DWELL,
+  TOUCH_SPRINT_RELEASE,
+  TOUCH_SPRINT_TRAVEL,
   zoneFor,
 } from '@/core/Input';
 import { KEY_BINDINGS, KeyboardMouseDriver, SURFACE_KEY_OVERRIDES } from '@/core/KeyboardMouseDriver';
@@ -1116,5 +1119,204 @@ describe('KeyboardMouseDriver', () => {
     expect(bus.subscriptions).toBeGreaterThan(0);
     input.dispose();
     expect(bus.subscriptions).toBe(0);
+  });
+});
+
+// ------------------------------------------------------------- SPEC-050
+
+describe('the sprint action (SPEC-050 §4.5)', () => {
+  it('is the eighteenth action, and every state carries it', () => {
+    expect(ACTIONS).toHaveLength(18);
+    expect(ACTIONS.at(-1)).toBe('sprint');
+    expect(new Input().state.buttons.sprint).toEqual({ down: false, justPressed: false, justReleased: false, heldFor: 0 });
+  });
+
+  it('SURFACE_KEY_OVERRIDES is both Shifts to sprint, and KEY_BINDINGS is unchanged', () => {
+    expect(SURFACE_KEY_OVERRIDES).toEqual({ ShiftLeft: 'sprint', ShiftRight: 'sprint' });
+    expect(KEY_BINDINGS['ShiftLeft']).toBe('throttleUp');
+    expect(KEY_BINDINGS['ShiftRight']).toBeUndefined();
+  });
+
+  it('Shift raises sprint in surface mode, and throttleUp in flight mode', () => {
+    const { input, win } = harness();
+    input.setMode('surface');
+    win.fire('keydown', keyEvent('ShiftLeft'));
+    input.beginFrame(DT);
+    expect(input.state.buttons.sprint.justPressed).toBe(true);
+    expect(input.state.buttons.throttleUp.down).toBe(false);
+    input.endFrame();
+    win.fire('keyup', keyEvent('ShiftLeft'));
+    input.beginFrame(DT);
+    expect(input.state.buttons.sprint.down).toBe(false);
+    input.endFrame();
+
+    input.setMode('flight');
+    win.fire('keydown', keyEvent('ShiftLeft'));
+    input.beginFrame(DT);
+    expect(input.state.buttons.throttleUp.justPressed).toBe(true);
+    expect(input.state.buttons.sprint.down).toBe(false);
+    input.endFrame();
+    win.fire('keyup', keyEvent('ShiftLeft'));
+    // ShiftRight is nothing in flight.
+    const right = keyEvent('ShiftRight');
+    win.fire('keydown', right);
+    input.beginFrame(DT);
+    expect(input.state.buttons.throttleUp.down).toBe(false);
+    expect(input.state.buttons.sprint.down).toBe(false);
+  });
+
+  it('a Shift pressed in surface mode and released after setMode(flight) releases sprint (E80)', () => {
+    const { input, win } = harness();
+    input.setMode('surface');
+    win.fire('keydown', keyEvent('ShiftLeft'));
+    input.beginFrame(DT);
+    expect(input.state.buttons.sprint.down).toBe(true);
+    input.endFrame();
+    input.setMode('flight');
+    win.fire('keyup', keyEvent('ShiftLeft'));
+    input.beginFrame(DT);
+    expect(input.state.buttons.sprint.down).toBe(false);
+    expect(input.state.buttons.sprint.justReleased).toBe(true);
+    expect(input.state.buttons.throttleUp.down).toBe(false);
+  });
+
+  it('both Shifts hold one sprint, released when the last lets go (50-k)', () => {
+    const { input, win } = harness();
+    win.fire('keydown', keyEvent('ShiftLeft'));
+    win.fire('keydown', keyEvent('ShiftRight'));
+    win.fire('keyup', keyEvent('ShiftLeft'));
+    input.beginFrame(DT);
+    expect(input.state.buttons.sprint.down).toBe(true);
+    input.endFrame();
+    win.fire('keyup', keyEvent('ShiftRight'));
+    input.beginFrame(DT);
+    expect(input.state.buttons.sprint.down).toBe(false);
+  });
+
+  it('a blur forgets the recorded key, so its later key-up touches nothing', () => {
+    const { input, win } = harness();
+    win.fire('keydown', keyEvent('ShiftLeft'));
+    win.fire('blur', {});
+    input.setMode('flight');
+    win.fire('keydown', keyEvent('Space'));
+    win.fire('keyup', keyEvent('ShiftLeft'));
+    input.beginFrame(DT);
+    expect(input.state.buttons.sprint.down).toBe(false);
+    expect(input.state.buttons.fire.down).toBe(true);
+  });
+});
+
+describe('the stick runs past its ring (SPEC-050 §4.5)', () => {
+  it('pins the gesture: 1.0 × the radius for 0.15 s, released below 0.85 ×', () => {
+    expect(TOUCH_SPRINT_TRAVEL).toBe(1);
+    expect(TOUCH_SPRINT_RELEASE).toBe(0.85);
+    expect(TOUCH_SPRINT_DWELL).toBe(0.15);
+    expect(TOUCH_SPRINT_TRAVEL * JOYSTICK_RADIUS_PX).toBe(56);
+    expect(TOUCH_SPRINT_RELEASE * JOYSTICK_RADIUS_PX).toBeCloseTo(47.6, 6);
+  });
+
+  it('travel 1.0 held for 0.15 s of frames presses sprint from touch; 0.14 s does not', () => {
+    const input = new Input();
+    input.setStickTravel(1.0);
+    input.beginFrame(0.14);
+    expect(input.state.buttons.sprint.down).toBe(false);
+    input.endFrame();
+    input.beginFrame(0.01);
+    expect(input.state.buttons.sprint.down).toBe(true);
+    expect(input.state.buttons.sprint.justPressed).toBe(true);
+  });
+
+  it('the dwell runs on frames, so a still thumb past the ring sprints', () => {
+    const input = new Input();
+    input.setStickTravel(1.2);
+    for (let i = 0; i < 8; i++) {
+      input.beginFrame(DT);
+      input.endFrame();
+    }
+    expect(input.state.buttons.sprint.down).toBe(false);
+    input.beginFrame(DT);
+    input.beginFrame(DT);
+    expect(input.state.buttons.sprint.down).toBe(true);
+  });
+
+  it('a travel back under 1.0 restarts the dwell', () => {
+    const input = new Input();
+    input.setStickTravel(1.0);
+    input.beginFrame(0.1);
+    input.setStickTravel(0.95);
+    input.beginFrame(0.1);
+    input.setStickTravel(1.0);
+    input.beginFrame(0.1);
+    expect(input.state.buttons.sprint.down).toBe(false);
+  });
+
+  it('holds above 0.85, releases at 0.84, and releases on a lift (travel 0)', () => {
+    const input = new Input();
+    input.setStickTravel(1.0);
+    input.beginFrame(0.2);
+    expect(input.state.buttons.sprint.down).toBe(true);
+    input.endFrame();
+    input.setStickTravel(0.86);
+    input.beginFrame(DT);
+    expect(input.state.buttons.sprint.down).toBe(true);
+    input.endFrame();
+    input.setStickTravel(0.84);
+    input.beginFrame(DT);
+    expect(input.state.buttons.sprint.down).toBe(false);
+    expect(input.state.buttons.sprint.justReleased).toBe(true);
+    input.endFrame();
+
+    input.setStickTravel(1.0);
+    input.beginFrame(0.2);
+    expect(input.state.buttons.sprint.down).toBe(true);
+    input.endFrame();
+    input.setStickTravel(0);
+    input.beginFrame(DT);
+    expect(input.state.buttons.sprint.down).toBe(false);
+  });
+
+  it('another holder keeps sprint down when the stick lets go (50-k)', () => {
+    const input = new Input();
+    input.pressAction('sprint', 'keyboard');
+    input.setStickTravel(1.0);
+    input.beginFrame(0.2);
+    input.setStickTravel(0);
+    input.beginFrame(DT);
+    expect(input.state.buttons.sprint.down).toBe(true);
+  });
+
+  it('with stickSprint off the stick never presses sprint, and turning it off releases a held run', () => {
+    const settings = createSettings(null);
+    settings.set({ stickSprint: false });
+    const off = new Input(null, null, settings);
+    off.setStickTravel(1.5);
+    off.beginFrame(1);
+    expect(off.state.buttons.sprint.down).toBe(false);
+
+    const live = createSettings(null);
+    const input = new Input(null, null, live);
+    input.setStickTravel(1.5);
+    input.beginFrame(0.2);
+    expect(input.state.buttons.sprint.down).toBe(true);
+    input.endFrame();
+    live.set({ stickSprint: false });
+    input.beginFrame(DT);
+    expect(input.state.buttons.sprint.down).toBe(false);
+  });
+
+  it('releaseAll and a suspended input drop the stick’s run (E80)', () => {
+    const input = new Input();
+    input.setStickTravel(1.0);
+    input.beginFrame(0.2);
+    expect(input.state.buttons.sprint.down).toBe(true);
+    input.releaseAll();
+    expect(input.state.buttons.sprint.down).toBe(false);
+    input.beginFrame(0.2);
+    expect(input.state.buttons.sprint.down).toBe(false);
+
+    input.setEnabled(false);
+    input.setStickTravel(1.0);
+    input.beginFrame(0.2);
+    expect(input.state.buttons.sprint.down).toBe(false);
   });
 });
