@@ -16,7 +16,7 @@ Auditor: narrative. Snapshot: `SCRATCH/game-r19` (game `main` @ 2cf398a). Nothin
 6. **The fix is mostly data, not systems.** It needs:
    - `when:` conditions and placeholders on lines;
    - a 20-entry clue catalogue stored in flags (no save version change);
-   - one human anchor, Ines (a sister in Shelter Nine: letters, a keepsake, one question);
+   - one human anchor, Iris (a sister in Shelter Nine: letters, a keepsake, one question);
    - a Selection card that shows the suit, never a face;
    - about 11 retaken shots, costing +0.35–0.65 MB against the 3.52 MiB of headroom in the 12 MiB films budget.
 
@@ -346,7 +346,7 @@ An optional `story:clue { id }` event (+1 on the event-count pin) drives the Not
 | 8 | `scaffold_secret` (existing) | 3 | optional (c3_s1) | line `c3_s1_secret` | `c3_s1_secret` (`{seed}`) | Tower stream — The towers streamed this planet's settings: seed, population, weather. |
 | 9 | `clue_awake` | 3 | main | station, first entry after `interlude3` / `letter3_read` | `station_awake` | No sleep — Awake since launch. I have not slept, or asked to. |
 | 10 | `memory_roof` / `_tap` / `_stair` | 3 | main | station, next entry after `clue_awake`: a choice | `station_memory` | First memory — What I remember first: the roof / the tap / the stair. |
-| 11 | `clue_keepsake` | 3 | optional | second Keepsake view in a session with `chapter2_done` | `keepsake_drift` | Tin, then brass — Ines's compass was tin. Now I remember it brass. |
+| 11 | `clue_keepsake` | 3 | optional | second Keepsake view in a session with `chapter2_done` | `keepsake_drift` | Tin, then brass — Iris's compass was tin. Now I remember it brass. |
 | 12 | `clue_tally` | 4 | optional (likely: c4_m1's storm) | 4 s inside a Ferrum cave | `cave_tally` | Sixty-one marks — Tally marks in a Ferrum cave, in fives. Sixty-one of them. |
 | 13 | `signal_decoded` (existing) | 4 | main | `c4_m3` complete | `c4_m3_signal` (conditional, modal) | The notice — The Hive's signal was a notice addressed to instance/{instance}. |
 | 14 | `clue_bark` | 4 | optional (c4_s2, flight) | first `scav_fighter` kill during `c4_s2` | `c4_s2_bark` | What number — A scav pilot asked me what number I was on. |
@@ -403,7 +403,7 @@ An optional `story:clue { id }` event (+1 on the event-count pin) drives the Not
   - `shelter` kinds exist on that planet (`features`).
 - **E2E:** seed a save with clue flags, then `playDialogue('c4_m3_signal')` shows the matching Warden lines; `station-tab-comms` → Notes lists the found records and the rating.
 
-### 4.3 P-C — The human anchor: Ines, and a body that is not there
+### 4.3 P-C — The human anchor: Iris, and a body that is not there
 
 **Why a sister.**
 - It never genders the player (the text never has; review §8.1).
@@ -412,11 +412,11 @@ An optional `story:clue { id }` event (+1 on the event-count pin) drives the Not
 
 **Pieces:**
 
-1. **Creation** (`CreationScene`, `PERSONNEL FILE`). Add a read-only row: `Next of kin — Ines (sister) · Shelter Nine, Block C`. It is not editable, and it is the same for everyone, which is the eventual point.
-2. **A new speaker `home`**, displayed as `Ines`. `SPEAKERS` gains it (the `e2e/SPEC-009` pin moves deliberately), and the dialogue gets a warm-paper style (`dialogue-letter`).
-   - **Ines is the only voice that uses contractions.**
+1. **Creation** (`CreationScene`, `PERSONNEL FILE`). Add a read-only row: `Next of kin — Iris (sister) · Shelter Nine, Block C`. It is not editable, and it is the same for everyone, which is the eventual point.
+2. **A new speaker `home`**, displayed as `Iris`. `SPEAKERS` gains it (the `e2e/SPEC-009` pin moves deliberately), and the dialogue gets a warm-paper style (`dialogue-letter`).
+   - **Iris is the only voice that uses contractions.**
    - A content test enforces the house style: contractions (`n't`, `'re`, `'ve`, `'ll`, `'d`, `'m`, and `it's` / `that's` / `there's` / `what's` / `let's`) appear only in `home` lines. Possessives are allowed.
-3. **Letters.** A modal dialogue plays at the station after interlude N, or on the first entry with `chapterN_done` when films are off. Each sets `letterN_read`, and at most one plays per entry. Ines's lines carry no signature line (her name is the speaker); in the table they are separated by `/`.
+3. **Letters.** A modal dialogue plays at the station after interlude N, or on the first entry with `chapterN_done` when films are off. Each sets `letterN_read`, and at most one plays per entry. Iris's lines carry no signature line (her name is the speaker); in the table they are separated by `/`.
 
    | Letter | Lines |
    |---|---|
@@ -430,8 +430,8 @@ An optional `story:clue { id }` event (+1 on the event-count pin) drives the Not
 
    | State | Text |
    |---|---|
-   | Before `chapter2_done` | "A tin compass from Ines, pressed into your hand at the shelter stair. It points home, she says. Not north." |
-   | `chapter2_done`, before `signal_decoded` | Views alternate between "A brass compass from Ines. She gave it to you on the roof. It points home." and "A tin compass. Your mother's, you think. It points home." |
+   | Before `chapter2_done` | "A tin compass from Iris, pressed into your hand at the shelter stair. It points home, she says. Not north." |
+   | `chapter2_done`, before `signal_decoded` | Views alternate between "A brass compass from Iris. She gave it to you on the roof. It points home." and "A tin compass. Your mother's, you think. It points home." |
    | `signal_decoded` | "A compass. It points at your next objective. It has never once pointed home." — the gold waypoint is the only home it knows. |
    | `chapter5_done` | "A compass. Standard kit. Every salvager was issued one, and a letter." |
 
@@ -462,7 +462,7 @@ An optional `story:clue { id }` event (+1 on the event-count pin) drives the Not
 **Tests:**
 - **Unit:** `keepsakeText` by state and view.
 - **Content:** the contraction rule.
-- **E2E:** with a save at `chapter1_done` and `?films=off`, entering the station plays `letter_1` (speaker `Ines`) and sets `letter1_read`, and Notes → Letters lists it.
+- **E2E:** with a save at `chapter1_done` and `?films=off`, entering the station plays `letter_1` (speaker `Iris`) and sets `letter1_read`, and Notes → Letters lists it.
 
 ### 4.4 P-D — The Warden and ARIA name what happened (sample lines; all ≤ 220 characters filled)
 
@@ -588,8 +588,8 @@ An optional `story:clue { id }` event (+1 on the event-count pin) drives the Not
 | Interlude | Clue planted | Where it comes from |
 |---|---|---|
 | c1 "First Light" | Same frame | The shelter plate is the prologue's, and nobody has moved. It exists today; keep it silent. |
-| c2 "Meltwater" | Keeping score | ARIA's caption "Earth is keeping score…" (exists), and the rating in the Notes. Ines at the tap (exists) sets up letter 2. |
-| c3 "Harvest" | A built world | Relit lights on a too-regular grid. Ines in the grow room sets up letter 3. |
+| c2 "Meltwater" | Keeping score | ARIA's caption "Earth is keeping score…" (exists), and the rating in the Notes. Iris at the tap (exists) sets up letter 2. |
+| c3 "Harvest" | A built world | Relit lights on a too-regular grid. Iris in the grow room sets up letter 3. |
 | c4 "Grid" | The world tears | Six frames of Earth as the clay sphere under a UV grid. |
 | c5 "Silence" | The next card | The Selection board with a blank No. 63 pinned beside the stamped 62. |
 
@@ -601,13 +601,13 @@ An optional `story:clue { id }` event (+1 on the event-count pin) drives the Not
 | P1 | `wall_63` (stay 21–30) | Card 63 is **the same visor photo**, stamped. The DOM card (§4.5) then puts your name on it. | Same plate | ±0.01 | ~3 min |
 | P1 | `wall_same` (escape 22–29) | Every card shows the visor, desaturated. Card 62's visor clears onto an **empty helmet** (replacing `blank_62`). Description fixed. | **Plate** `selection/visor_empty.webp` | ±0.02 | ~2 min |
 | P1 | `stranded` (prologue 56–66) | A **photograph**: an ash street and a line of the photographed hulking Machines frozen mid-stride. Eyes dim through emissive overlays, or the plate dims with `lift` gain < 1. This restores the escape's contrast and makes one Machine design (N-06). | **Plate** `prologue_stranded.jpg` | +0.10–0.22 | < 1 min |
-| P1 | `earth_unmade` (escape 14–22) | **Unmake what the player saw**, 2 s per beat: the `city_flash` plate, the new `stranded` plate and the `shelter` plate (Ines at the table) each go grey + posterised + UV grid; then the clay Earth under a grid. Existing caption "EARTH — placeholder geometry. Population field: 0." | Geometry + `plate.py` `unmake` (no new plates) | +0.10–0.15 | ~1 min |
+| P1 | `earth_unmade` (escape 14–22) | **Unmake what the player saw**, 2 s per beat: the `city_flash` plate, the new `stranded` plate and the `shelter` plate (Iris at the table) each go grey + posterised + UV grid; then the clay Earth under a grid. Existing caption "EARTH — placeholder geometry. Population field: 0." | Geometry + `plate.py` `unmake` (no new plates) | +0.10–0.15 | ~1 min |
 | P1 | `earth_c1`, `earth_c2`, `earth_c3` | Camera lower and closer; the lit coast fills the lower 40 % (phone). `earth_c3`'s new lights fall on a **perfect grid** (the ch3 clue). | Geometry, `earth.py` relight `pattern: 'grid'` | +0.08 | 10–20 min |
 | P2 | `watchers` (c4 11–16) | The static tear (15.1 s) becomes a 6-frame cut to the clay Earth under a UV grid, at low contrast (flash check unchanged). | Geometry | ±0.01 | ~3 min |
 | P2 | `cockpit` → **`board`** (c5 12–16) | The Selection wall: 62 stamped, and a **blank card "No. 63" pinned beside it, unstamped**. Caption ARIA "There is a new card on the board. Nobody has told me whose." | Geometry (`selection_wall`) | ±0.02 | ~2 min |
 | P2 | `hive_dark` (c5 0–6) | The last vein dies at 5.5 s, not 4.0; no 2 s of black. | Geometry | ±0 | ~4 min |
-| P2 | `liftoff` (prologue 83–90) | A photographed spaceport at dawn with **Ines at the fence, back to camera**, and the CG tug composited in front. It sets up letter 1 and replaces the toy tug. | **Plate** `prologue_liftoff.jpg` + `plate.py` `backdrop` for a perspective camera | +0.04–0.14 | ~3 min |
-| P2 | `greenhouse` (c3 0–7) | A photographed grow room with **Ines tending a tray** (review clash; sets up letter 3). | **Plate** `interlude_c3_greenhouse.jpg` | −0.10 to 0 | < 1 min |
+| P2 | `liftoff` (prologue 83–90) | A photographed spaceport at dawn with **Iris at the fence, back to camera**, and the CG tug composited in front. It sets up letter 1 and replaces the toy tug. | **Plate** `prologue_liftoff.jpg` + `plate.py` `backdrop` for a perspective camera | +0.04–0.14 | ~3 min |
+| P2 | `greenhouse` (c3 0–7) | A photographed grow room with **Iris tending a tray** (review clash; sets up letter 3). | **Plate** `interlude_c3_greenhouse.jpg` | −0.10 to 0 | < 1 min |
 | P3 | `capsule`, `tanks`, `reactor`, `fleet` | Plates; `fleet` composites the CG tugs (review §6.4) | 4 plates | +0.2 | < 5 min |
 
 **Totals (P1 + P2):**
@@ -686,11 +686,11 @@ An optional `story:clue { id }` event (+1 on the event-count pin) drives the Not
 
 The current row: "the truth arrives in optional logs and ARIA's slips; no fourth-wall UI tricks outside the two endings." The proposals need three things the rule does not yet cover: main-path echoes, a Notes screen, and post-ending surfaces. The proposed wording:
 
-> *Surface fiction stays coherent on its own. Until chapter 4 every anomaly arrives with an in-fiction explanation someone offers (sand, a common hand, colony moulds, stims, the medical frame). Each chapter carries one main-path echo; the rest stay optional. The salvager's Notes, Command's rating and Ines's letters are diegetic. Fourth-wall surfaces appear only in the endings and what follows them: the escaped slot's marker, the restore line, Notes after an escape, and Iteration 63.*
+> *Surface fiction stays coherent on its own. Until chapter 4 every anomaly arrives with an in-fiction explanation someone offers (sand, a common hand, colony moulds, stims, the medical frame). Each chapter carries one main-path echo; the rest stay optional. The salvager's Notes, Command's rating and Iris's letters are diegetic. Fourth-wall surfaces appear only in the endings and what follows them: the escaped slot's marker, the restore line, Notes after an escape, and Iteration 63.*
 
 It also adds three house rules:
 - the salvager's card never shows a face;
-- only Ines uses contractions;
+- only Iris uses contractions;
 - a replay plays its accept line only.
 
 ### 4.11 Suggested spec split, costs and tests
@@ -734,7 +734,7 @@ It also adds three house rules:
    - It makes the escape image of an empty helmet possible.
 2. **Likeness check.** Check all six Gemini faces before release. If 01 fails, 3 plates must be regenerated (N-04).
 3. **Vetra log number.** **Recommend 61 via `{prior}`.** 62 would need the Warden to explain "I put it there".
-4. **Ines.** The name, "sister", and whether creation shows her. **Recommend yes to all three.** A child would raise the stakes, but it would fix the player's age.
+4. **Iris.** The name, "sister", and whether creation shows her. **Recommend yes to all three.** A child would raise the stakes, but it would fix the player's age.
 5. **Contractions as the human tell.** It becomes a house rule enforced by a content test. **Recommend yes.**
 6. **A rating that grades curiosity down.** It could read as a penalty. **Recommend yes**, clearly Command's and with no gameplay effect. Show it in Notes early so it is not a surprise.
 7. **Clue density.** About 95 new lines risk over-explaining. Mitigations:
