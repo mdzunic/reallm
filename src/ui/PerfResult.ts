@@ -9,6 +9,7 @@
 import type { EmitArgs, GameEvents } from '@/core/Events';
 import type { PerfUi } from '@/core/Game';
 import { PERF_BUDGETS, type PerfBudget, type PerfResult } from '@/core/Perf';
+import { GLYPHS } from '@/data/glossary';
 import { el, h, testId } from '@/ui/dom';
 
 /** The slice of the bus the card toasts through. */
@@ -141,7 +142,7 @@ export class PerfResultCard implements PerfUi {
       const pass = line.judged <= line.budget;
       row.dataset['verdict'] = pass ? 'pass' : 'fail';
       row.classList.add(pass ? 'is-pass' : 'is-fail');
-      value.append(el('span', 'perf-budget', ` ≤ ${line.budget}${line.unit} ${pass ? '✓' : '✗'}`));
+      value.append(el('span', 'perf-budget', ` ≤ ${line.budget}${line.unit} ${pass ? GLYPHS.good : GLYPHS.error}`));
     }
     return row;
   }

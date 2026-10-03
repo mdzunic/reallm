@@ -1,18 +1,23 @@
 // The ground telegraphs (SPEC-038 §4.2): every live telegraph drawn on the
-// ground in `HOSTILE_RIM` — its outline from `startAt`, a fill that grows by
-// `telegraphProgress`, and a ring's travelling band. One `InstancedMesh` per
-// kind, each hidden while its kind has none, so the whole layer costs at most
-// three draw calls and nothing at all while the pool is empty (§4.11).
+// ground in the hostile rim's colour — its outline from `startAt`, a fill that
+// grows by `telegraphProgress`, and a ring's travelling band. One
+// `InstancedMesh` per kind, each hidden while its kind has none, so the whole
+// layer costs at most three draw calls and nothing at all while the pool is
+// empty (§4.11).
 //
 // Each decal is one flat quad; its shader draws the outline and the fill from
 // per-instance attributes, so the outline and the fill share the draw. Decals
 // sit 0.05 m over the highest ground under them, under the enemies. A kind's
 // mesh is built the first time that kind is drawn. Read-only over the pool:
 // nothing here writes an entity.
+//
+// SPEC-045 §4.5: the colour is read from `HOSTILE_RIM_UNIFORM` on every sync,
+// so the colour-blind preset retints the live decals on the next frame, as it
+// does the enemies' rims. An elite's gold outline is not the rim and stays.
 import * as THREE from 'three';
 import type { Pool } from '@/core/Pool';
 import { ringRadius, TELEGRAPH_CAPACITY, telegraphProgress, type TelegraphEntity, type TelegraphKind } from '@/entities/Telegraph';
-import { HOSTILE_RIM } from '@/views/ProceduralMeshes';
+import { HOSTILE_RIM_UNIFORM } from '@/views/ProceduralMeshes';
 
 /** §4.2: an elite's decal outline is gold. */
 export const ELITE_OUTLINE = '#e0b34a';
@@ -36,8 +41,8 @@ const KIND_INDEX: Readonly<Record<TelegraphKind, number>> = { circle: 0, line: 1
  * standard-or-basic and keeps three's fog, tone mapping and colour space.
  * `vShape` by kind — circle: (radius, progress, 0, 0); line: (length, width,
  * progress, 0); ring: (half extent, ringMax, band radius or −1 in the windup,
- * band width). The fill is the material colour (`HOSTILE_RIM`); the outline
- * is `vOutline` (gold for an elite's).
+ * band width). The fill is the material colour (the rim's); the outline is
+ * `vOutline` (gold for an elite's).
  */
 const SHAPE_CHUNK = /* glsl */ `
   float outlineAlpha = ${OUTLINE_ALPHA.toFixed(3)} * (1.0 - 0.18 * uPulse * (0.5 + 0.5 * sin(uTime * ${PULSE_RATE.toFixed(3)})));
@@ -94,7 +99,6 @@ const scratchPosition = new THREE.Vector3();
 const scratchQuaternion = new THREE.Quaternion();
 const scratchScale = new THREE.Vector3();
 const UP = new THREE.Vector3(0, 1, 0);
-const RIM = new THREE.Color(HOSTILE_RIM);
 const GOLD = new THREE.Color(ELITE_OUTLINE);
 
 interface KindMesh {
@@ -126,7 +130,7 @@ export class TelegraphView {
     const built = this.#kinds[kind];
     if (built !== undefined) return built;
     const material = new THREE.MeshBasicMaterial({
-      color: RIM,
+      color: HOSTILE_RIM_UNIFORM.value,
       transparent: true,
       depthWrite: false,
       polygonOffset: true,
@@ -182,9 +186,14 @@ export class TelegraphView {
   sync(pool: Pool<TelegraphEntity>, time: number, ground: (x: number, z: number) => number, reduceMotion: boolean): void {
     this.#pulse.value = reduceMotion ? 0 : 1;
     this.#clock.value = time;
+    // SPEC-045 §4.5: the rim's colour as it is this frame — copied into each
+    // kind's fill and written into each non-elite outline, never allocated.
+    const rim = HOSTILE_RIM_UNIFORM.value;
     for (const kind of KINDS) {
       const built = this.#kinds[kind];
-      if (built !== undefined) built.mesh.count = 0;
+      if (built === undefined) continue;
+      built.mesh.count = 0;
+      built.material.color.copy(rim);
     }
     for (let i = 0; i < pool.size; i++) {
       const t = pool.at(i);
@@ -192,7 +201,7 @@ export class TelegraphView {
       const slot = target.mesh.count;
       if (slot >= target.mesh.instanceMatrix.count) continue;
       target.mesh.count++;
-      const outline = t.elite ? GOLD : RIM;
+      const outline = t.elite ? GOLD : rim;
       target.outline.setXYZ(slot, outline.r, outline.g, outline.b);
       const progress = telegraphProgress(t, time);
       if (t.kind === 'circle') {

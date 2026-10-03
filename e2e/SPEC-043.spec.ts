@@ -247,7 +247,7 @@ test('6. Settings switches the run to hard, and the Wurm then wakes with 1.25× 
   await hard.click();
   await expect(hard).toHaveAttribute('aria-pressed', 'true');
   await expect(page.getByTestId('settings-difficulty-line')).toHaveText(
-    'Hard — tougher, deadlier hostiles and twice the elites; a death costs a fifth of the hold.',
+    'Hard — tougher, deadlier hostiles and twice the elites; a death costs a fifth of your cargo.',
   );
   expect(await page.evaluate(() => window.__reallm.save().current?.meta.difficulty)).toBe('hard');
   expect((await sceneInfo(page))['difficulty']).toBe('hard');
@@ -272,7 +272,7 @@ test('6. creation’s difficulty-hard makes a hard save', async ({ page }) => {
   await hard.click();
   await expect(page.getByTestId('difficulty-hard')).toHaveAttribute('aria-pressed', 'true');
   await expect(page.locator('.creation-difficulty .settings-note')).toHaveText(
-    'Hard — tougher, deadlier hostiles and twice the elites; a death costs a fifth of the hold.',
+    'Hard — tougher, deadlier hostiles and twice the elites; a death costs a fifth of your cargo.',
   );
   await page.getByTestId('creation-confirm').click();
   await expect.poll(() => page.evaluate(() => window.__reallm.save().current?.meta.difficulty ?? null)).toBe('hard');

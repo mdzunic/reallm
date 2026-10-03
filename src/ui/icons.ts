@@ -3,6 +3,7 @@
 // a single fetch of `assets/items/manifest.json`, memoised for the session —
 // never rejects, never blocks a screen, and is never part of the boot
 // manifest (AC-41).
+import { GLYPHS } from '@/data/glossary';
 import { COMPANIONS, ITEMS, type CompanionId, type ConsumableEffect, type ItemId } from '@/data/index';
 
 export type IconSource =
@@ -13,13 +14,17 @@ export type IconId = ItemId | CompanionId;
 
 const MANIFEST_URL = 'assets/items/manifest.json';
 
-/** §4.13: one glyph per weapon line, for armor, per consumable effect, and for companions. */
+/**
+ * §4.13: one glyph per weapon line, for armor, per consumable effect, and for
+ * companions. SPEC-045 §4.6: armour is the glossary's `▣` — `⛨` is the ship's
+ * shield, and nothing else.
+ */
 const LINE_GLYPHS = {
   handgun: '⌐',
   rifle: '⌖',
   machine_gun: '☰',
   launcher: '⚟',
-  armor: '⛨',
+  armor: GLYPHS.armor,
 } as const;
 
 /** SPEC-042 §3: exported — the HUD's effect chips wear the glyph of the effect's item. */

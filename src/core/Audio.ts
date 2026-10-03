@@ -30,6 +30,7 @@ import {
   pitchFor,
   rampValue,
   RateLimiter,
+  soundBus,
   VoiceLimiter,
   type Priority,
 } from '@/core/AudioMix';
@@ -43,7 +44,11 @@ import type { SoundId } from '@/data/assets';
 
 // --------------------------------------------------------------------- types
 
-export type Bus = 'master' | 'music' | 'sfx';
+/**
+ * SPEC-045 §4.9 adds `interface`: the `ui_*` sounds, at `settings.volumeInterface`
+ * in place of Effects (`soundBus`). The manifest's `bus` fields stay as they are.
+ */
+export type Bus = 'master' | 'music' | 'sfx' | 'interface';
 
 /**
  * One looping track. The manifest bank for each is `music_<id>` (§2.3).
@@ -126,8 +131,12 @@ const UNLOCK_POLL_MS = 25;
 const RAMP_STEP_MS = 25;
 /** The `music_` prefix that turns a `MusicId` into its manifest bank id (§2.3). */
 const MUSIC_BANK_PREFIX = 'music_';
-/** The two buses a duck can lower; `master` is the player's own setting. */
-const DUCKABLE: readonly Exclude<Bus, 'master'>[] = ['music', 'sfx'];
+/**
+ * The two buses a duck can lower; `master` is the player's own setting, and
+ * SPEC-045's interface bus is never ducked — the pause menu lowers the fight,
+ * not its own blips.
+ */
+const DUCKABLE: readonly ('music' | 'sfx')[] = ['music', 'sfx'];
 /** Duck holds (§4.5): the pause menu, and the self-releasing one `player:died` takes. */
 const PAUSE_HOLD = 'pause';
 const DEATH_HOLD = 'death';
@@ -175,6 +184,8 @@ interface LiveVoice {
   readonly key: string;
   readonly howl: Howl;
   readonly howlId: number;
+  /** SPEC-045 §4.9: recorded when it plays — `'interface'` for a `ui_*` id. */
+  readonly bus: 'sfx' | 'interface';
   /** The distance gain of §4.2, fixed for the life of the voice. */
   readonly attenuation: number;
   base: number;
@@ -253,6 +264,18 @@ export function installOpusCodecProbe(): void {
 /** `Howler.ctx` is typed non-null but is genuinely absent until Howler sets up. */
 function context(): AudioContext | null {
   return (Howler as { ctx?: AudioContext | null }).ctx ?? null;
+}
+
+/**
+ * SPEC-045 §4.9 — Howler's master gain, the one node every voice passes through
+ * on its way to the destination. Typed non-null like `ctx` and as genuinely
+ * absent: `null` until Howler has set Web Audio up, and for good on its HTML5
+ * fallback, where there is no graph to fold (45-o).
+ */
+function masterGain(): GainNode | null {
+  const howler = Howler as { usingWebAudio?: boolean; masterGain?: GainNode | null };
+  if (howler.usingWebAudio !== true) return null;
+  return howler.masterGain ?? null;
 }
 
 /**
@@ -384,6 +407,8 @@ class HowlerAudio implements Audio {
     // `dispose()` settles every waiter, so an unlock in flight lands here on a
     // layer that is already gone. It has nothing left to unlock.
     if (this.#disposed) return;
+    // SPEC-045 §4.9: the context exists now, and with it the node mono folds at.
+    this.#applyMono();
     this.#markUnlocked();
   }
 
@@ -495,6 +520,8 @@ class HowlerAudio implements Audio {
     const value = clamp01(volume);
     if (bus === 'master') this.#settings.setMaster(value);
     else if (bus === 'music') this.#settings.setMusic(value);
+    // SPEC-045 §4.9: the store has no named setter for it; `set` merge-writes.
+    else if (bus === 'interface') this.#settings.set({ volumeInterface: value });
     else this.#settings.setSfx(value);
     // AC-21: applied now even while the context is suspended, so it is already
     // right when the page comes back.
@@ -504,6 +531,16 @@ class HowlerAudio implements Audio {
   /** The audible bus factor: the player's setting times the duck ramp. */
   #busGain(bus: 'music' | 'sfx'): number {
     return this.#settings.get()[bus] * this.#duckGain[bus];
+  }
+
+  /**
+   * What a sound effect's `base` is multiplied by: its bus, then master.
+   * SPEC-045 §4.9: an interface voice plays at `volumeInterface × master`,
+   * with no duck; every other voice is on Effects, ducked as before.
+   */
+  #voiceGain(bus: 'sfx' | 'interface'): number {
+    const settings = this.#settings.get();
+    return (bus === 'interface' ? settings.volumeInterface : this.#busGain('sfx')) * settings.master;
   }
 
   /**
@@ -521,8 +558,11 @@ class HowlerAudio implements Audio {
    */
   #applyGains(): void {
     const master = this.#settings.get().master;
-    const sfx = this.#busGain('sfx') * master;
-    for (const voice of this.#voices.values()) voice.howl.volume(clamp01(voice.base * sfx), voice.howlId);
+    const sfx = this.#voiceGain('sfx');
+    const ui = this.#voiceGain('interface');
+    for (const voice of this.#voices.values()) {
+      voice.howl.volume(clamp01(voice.base * (voice.bus === 'interface' ? ui : sfx)), voice.howlId);
+    }
     const music = this.#busGain('music') * master;
     for (const track of [this.#current, this.#outgoing]) {
       if (track === null || track.howl.state() !== 'loaded') continue;
@@ -576,6 +616,7 @@ class HowlerAudio implements Audio {
       key,
       howl: bank.howl,
       howlId,
+      bus: soundBus(id),
       attenuation: gain,
       base: clamp01(opts.volume ?? 1) * gain,
     };
@@ -584,7 +625,7 @@ class HowlerAudio implements Audio {
     // AC-37: 1 ± 0.06 off the seeded stream, so a swarm does not phase.
     const rate = opts.rate ?? (PITCH_VARIED.has(id) ? pitchFor(this.#rng.next()) : 1);
     if (rate !== 1) bank.howl.rate(rate, howlId);
-    bank.howl.volume(clamp01(voice.base * this.#busGain('sfx') * this.#settings.get().master), howlId);
+    bank.howl.volume(clamp01(voice.base * this.#voiceGain(voice.bus)), howlId);
     // A one-shot frees its slot when it ends; a loop holds it until `stop()`.
     if (!loop) bank.howl.once('end', () => this.#release(key), howlId);
 
@@ -649,6 +690,8 @@ class HowlerAudio implements Audio {
         log.warn('audio', `the "${bankId}" sound bank could not be decoded; its sounds are silent`, error);
       },
     });
+    // SPEC-045 §4.9: a first Howl can rebuild Howler's master gain (`#applyMono`).
+    this.#applyMono();
     this.#banks.set(bankId, bank);
     return bank;
   }
@@ -750,6 +793,8 @@ class HowlerAudio implements Audio {
         log.warn('audio', `the "${bankId}" music track could not be decoded; it stays silent`, error);
       },
     });
+    // SPEC-045 §4.9: as for a bank — the first Howl may have swapped the node.
+    this.#applyMono();
     this.#music.set(id, howl);
     return howl;
   }
@@ -780,6 +825,34 @@ class HowlerAudio implements Audio {
       howl.once('load', finish);
       howl.once('loaderror', finish);
     });
+  }
+
+  // -------------------------------------------------------------------- mono
+
+  /**
+   * SPEC-045 §4.9: mono folds at Howler's master gain — every voice passes
+   * through it, and the music is the stereo part. One channel, `'explicit'`,
+   * mixes the input down; the destination then plays that one channel in both
+   * ears (`'speakers'` up-mixes mono to left and right). Off puts back a gain
+   * node's defaults: 2, `'max'`, `'speakers'`.
+   *
+   * Applied at unlock, on a `settings:changed` that carries `mono`, and after
+   * every Howl this layer builds: inside the first one, Howler's `_unlockAudio`
+   * closes a context that does not run at 44.1 kHz and builds a new one, with
+   * a new master gain in stereo. Without Web Audio there is no node, so it does
+   * nothing, and the setting is kept (45-o).
+   */
+  #applyMono(): void {
+    const node = masterGain();
+    if (node === null) return;
+    const mono = this.#settings.get().mono;
+    try {
+      node.channelCount = mono ? 1 : 2;
+      node.channelCountMode = mono ? 'explicit' : 'max';
+      node.channelInterpretation = 'speakers';
+    } catch (error) {
+      log.warn('audio', 'the master gain refused a channel layout; mono is not applied', error);
+    }
   }
 
   // ----------------------------------------------------------------- ducking
@@ -892,7 +965,8 @@ class HowlerAudio implements Audio {
   /**
    * Every key of `AUDIO_REACTIONS`, with this instance as the owner, plus the
    * two mixing subscriptions: the death duck of §4.5 and the settings change
-   * that has to reach live voices even while the context is suspended (AC-21).
+   * that has to reach live voices even while the context is suspended (AC-21)
+   * — SPEC-045 §4.9's interface volume among them, and its mono switch.
    */
   #subscribe(): void {
     for (const name of REACTED_EVENTS) {
@@ -923,7 +997,15 @@ class HowlerAudio implements Audio {
         'settings:changed',
         (payload) => {
           const patch = payload.patch;
-          if (patch.master === undefined && patch.music === undefined && patch.sfx === undefined) return;
+          if (patch.mono !== undefined) this.#applyMono();
+          if (
+            patch.master === undefined &&
+            patch.music === undefined &&
+            patch.sfx === undefined &&
+            patch.volumeInterface === undefined
+          ) {
+            return;
+          }
           this.#applyGains();
         },
         this,

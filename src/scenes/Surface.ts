@@ -78,6 +78,7 @@ import { ARENA_RESPAWN_OUTSET, clampToSeal, type ArenaState } from '@/entities/W
 import { Combat, computePlayerStats, ELITE_SCALE, type CombatWorld, type HitMemory } from '@/systems/Combat';
 import { DASH_DISTANCE, dashCooldown, isDashing, stepDash, tryDash } from '@/systems/Dash';
 import { Economy } from '@/systems/Economy';
+import { seconds, stage as stageText } from '@/systems/Format';
 import { ExploreMask, REVEAL_CAPACITY } from '@/systems/Exploration';
 import {
   bearingWord,
@@ -143,7 +144,7 @@ import {
 } from '@/systems/UiHelpers';
 import { UiScene } from '@/scenes/base';
 import { director } from '@/scenes/Director';
-import { INSTANCES_PER_PART } from '@/views/ProceduralMeshes';
+import { INSTANCES_PER_PART, setHostileRim } from '@/views/ProceduralMeshes';
 import { layerFromAssets } from '@/views/ProceduralTextures';
 import {
   advanceViewTime,
@@ -167,7 +168,7 @@ import { MapLayers } from '@/ui/MapLayers';
 import { MissionBanner } from '@/ui/MissionBanner';
 import { MapScreen, type MapMissionRow } from '@/ui/MapScreen';
 import { Minimap, type MapMark, type MinimapFrame } from '@/ui/Minimap';
-import { PauseMenu } from '@/ui/PauseMenu';
+import { PauseMenu, withComms } from '@/ui/PauseMenu';
 import { openQuickPicker, type QuickChoice } from '@/ui/QuickPicker';
 import { RevealOverlay } from '@/ui/RevealOverlay';
 import { RotateOverlay } from '@/ui/RotateOverlay';
@@ -281,7 +282,7 @@ const GROUND_MOVE_KINDS: ReadonlySet<GameEvents['boss:move']['kind']> = new Set(
   'ring',
   'burrow',
 ]);
-/** SPEC-041 §4.1: the ground move's shake — 0.3 for 0.3 s; reduce motion zeroes it. */
+/** SPEC-041 §4.1: the ground move's shake — 0.3 for 0.3 s; Camera shake scales it (SPEC-045 §4.3). */
 const BOSS_MOVE_SHAKE_AMPLITUDE = 0.3;
 const BOSS_MOVE_SHAKE_SECONDS = 0.3;
 /** SPEC-041 §4.6: the mender's pulse ring. */
@@ -1124,6 +1125,19 @@ export class SurfaceScene extends UiScene<'surface'> {
     view.reduceMotion = services.settings.get().reduceMotion;
     this.#view = view;
     this.disposer.add(() => view.dispose());
+    // SPEC-045 §4.5: every hostile rim and non-elite telegraph reads one shared
+    // uniform, set from the Colours preset now and on each change of it — the
+    // next frame shows it, and no shader compiles (45-n).
+    setHostileRim(services.settings.get().colourPreset);
+    this.disposer.add(
+      services.events.on(
+        'settings:changed',
+        ({ patch }) => {
+          if (patch.colourPreset !== undefined) setHostileRim(patch.colourPreset);
+        },
+        this,
+      ),
+    );
     this.#groundColor = hexColor(planet.surface.palette.ground);
 
     // SPEC-018 §4.10: the lazy per-planet drop `enter()` started and waited
@@ -1240,6 +1254,10 @@ export class SurfaceScene extends UiScene<'surface'> {
         ({ patch }) => {
           if (patch.joystickSide !== undefined) hud.setSide(patch.joystickSide);
           if (patch.damageFlash !== undefined) hud.setDamageFlash(patch.damageFlash);
+          // SPEC-045 §4.4: a new UI scale redraws the minimap's corner at a new
+          // size (`main.ts`, subscribed at boot, has already written
+          // `--ui-scale`), so its backing store is measured off the new box.
+          if (patch.uiScale !== undefined) this.#minimap?.measure();
         },
         this,
       ),
@@ -1336,7 +1354,16 @@ export class SurfaceScene extends UiScene<'surface'> {
     // SPEC-044 §4.8: Save & Quit says what it costs — Continue lands at the
     // station, so the way back here is the jump's fuel.
     const pauseMenu = new PauseMenu(
-      services,
+      // SPEC-045 §4.1: `Comms log` reads the shared dialogue layer's log.
+      withComms(
+        services,
+        dialogueLayer(services.uiRoot, services.events, {
+          input: services.input,
+          saveKey: () => services.save.current,
+          typewriter: () => services.settings.get().typewriter,
+          speed: () => services.settings.get().dialogueSpeed,
+        }).log,
+      ),
       () => services.requestResume(),
       undefined,
       {
@@ -1385,7 +1412,8 @@ export class SurfaceScene extends UiScene<'surface'> {
     const dialogue = dialogueLayer(services.uiRoot, services.events, {
       input: services.input,
       saveKey: () => this.services.save.current,
-      reduceMotion: () => this.services.settings.get().reduceMotion,
+      typewriter: () => this.services.settings.get().typewriter,
+      speed: () => this.services.settings.get().dialogueSpeed,
     });
     this.#dialogue = dialogue;
     // SPEC-042 §4.1: the mission banner, after the HUD so it is the top
@@ -1987,8 +2015,9 @@ export class SurfaceScene extends UiScene<'surface'> {
     info['viewTime'] = Math.round(this.#viewTime * 100) / 100;
     // SPEC-015 AC-39: how far the shake and the walk bob actually moved the
     // camera on the last frame, for the same reason SPEC-020 20-g publishes
-    // `skyTint` — reduce motion zeroes both, and that is otherwise a claim
-    // about a Three.js vector nothing outside the renderer can read.
+    // `skyTint` — Camera shake Off zeroes both (SPEC-045 §4.3), and that is
+    // otherwise a claim about a Three.js vector nothing outside the renderer
+    // can read.
     info['camShake'] = Math.round(this.#shakeScratch.length() * 1000) / 1000;
     info['camBob'] = Math.round(this.#shakeScratch.y * 1000) / 1000;
     // SPEC-035 §4.2, §4.4, §4.5, §4.7: the camera's distance, the linear fog's
@@ -2461,11 +2490,13 @@ export class SurfaceScene extends UiScene<'surface'> {
     // look-at target move by the same vector, so only the position changes —
     // the orientation, and with it the aim ray, is untouched.
     const time = this.#viewTimeNow();
-    const reduceMotion = this.services.settings.get().reduceMotion;
-    shakeOffset(this.#shake, time, reduceMotion, this.#shakeScratch);
+    // SPEC-045 §4.3: both scale by Camera shake, and at 0 (which reduce motion
+    // sets) both are exactly zero.
+    const cameraShake = this.services.settings.get().cameraShake;
+    shakeOffset(this.#shake, time, cameraShake, this.#shakeScratch);
     // SPEC-015 AC-41: the walk bob joins the shake on the same side of the
-    // frustum capture, and reduce motion zeroes its amplitude outright.
-    this.#shakeScratch.y += cameraBob(this.#camSpeed, time, reduceMotion);
+    // frustum capture.
+    this.#shakeScratch.y += cameraBob(this.#camSpeed, time, cameraShake);
     if (this.#shakeScratch.lengthSq() > 0) {
       this.camera.position.add(this.#shakeScratch);
       this.camera.updateMatrixWorld();
@@ -3422,7 +3453,7 @@ export class SurfaceScene extends UiScene<'surface'> {
     button('surface-goto-objective', 'To objective', () => this.#debugGotoObjective());
     // SPEC-027 AC-86: a minute of idle guidance time per press, so the whole
     // escalation is reachable in a QA session instead of in two and a half.
-    button('surface-stuck', 'Stuck +60s', () => this.#stuck.advance(60));
+    button('surface-stuck', 'Stuck +60 s', () => this.#stuck.advance(60));
     // SPEC-030 §4.12 (D-14): the shelter, edge and storm shortcuts are plain
     // `?debug` controls, so the packaged e2e run can press them.
     button('surface-goto-shelter', 'To shelter', () => {
@@ -3901,7 +3932,7 @@ export class SurfaceScene extends UiScene<'surface'> {
         h(
           'p',
           { class: 'terminal-active' },
-          `${def.title} — Stage ${state.stage + 1}/${def.stages.length}`,
+          `${def.title} — ${stageText(state.stage + 1, def.stages.length)}`,
           state.id === missions.pinned ? h('span', { class: 'badge badge-pin' }, 'Tracked') : null,
         ),
       );
@@ -4393,7 +4424,7 @@ export class SurfaceScene extends UiScene<'surface'> {
       const dx = target.x - player.x;
       const dz = target.z - player.z;
       this.#focusDistance = Math.hypot(dx, dz);
-      // The ▲ beside the focus row turns clockwise from map-up (SPEC-026 §4.1).
+      // The arrow beside the focus row turns clockwise from map-up (SPEC-026 §4.1).
       const u = (dx - dz) * Math.SQRT1_2;
       const v = (dx + dz) * Math.SQRT1_2;
       this.#focusBearing = Math.atan2(u, -v);
@@ -4781,7 +4812,8 @@ export class SurfaceScene extends UiScene<'surface'> {
     const count = def.stages.length;
     const stage = this.#stageOf(missions, pinned);
     tracker.title = def.title;
-    tracker.stage = `stage ${Math.min(count, Math.max(1, stage + 1))}/${count}`;
+    // SPEC-045 §4.7: `Stage 2/3`, through the formatter.
+    tracker.stage = stageText(Math.min(count, Math.max(1, stage + 1)), count);
     for (let i = 0; i < this.#guideRows.length && i < this.#trackerRows.length; i++) {
       const progress = this.#guideRows[i] as ObjectiveProgress;
       const row = this.#trackerRows[i] as HudTrackerRow;
@@ -4813,9 +4845,15 @@ export class SurfaceScene extends UiScene<'surface'> {
     return tracker;
   }
 
-  /** D-3: the focus row keeps the wording the bottom-centre line used to have. */
+  /**
+   * D-3: the focus row keeps the wording the bottom-centre line used to have.
+   * SPEC-045 §4.7: a survive or defend row counts down — `(48 s)`, never
+   * `(12/60)` — as every other timer does (45-s: 0.3 s left reads `1 s`).
+   */
   #focusRowText(title: string, progress: ObjectiveProgress): string {
     const line = this.#objectiveLine(progress.objective);
+    const kind = progress.objective.kind;
+    if (kind === 'survive' || kind === 'defend') return `${title} — ${line} (${seconds(progress.target - progress.value)})`;
     if (progress.target > 1) return `${title} — ${line} (${Math.floor(progress.value)}/${progress.target})`;
     return `${title} — ${line}`;
   }
@@ -4838,9 +4876,9 @@ export class SurfaceScene extends UiScene<'surface'> {
       case 'boss':
         return `Defeat ${ENEMIES[objective.enemy].name}`;
       case 'survive':
-        return `Survive ${Math.max(0, Math.ceil(objective.seconds - progress.value))} s`;
+        return `Survive ${seconds(objective.seconds - progress.value)}`;
       case 'defend':
-        return `Defend ${this.#poiLabel(objective.poi)} ${Math.max(0, Math.ceil(objective.seconds - progress.value))} s`;
+        return `Defend ${this.#poiLabel(objective.poi)} ${seconds(objective.seconds - progress.value)}`;
       case 'deliver': {
         const held = (this.#save as Save).resources[objective.resource] ?? 0;
         const line = `Deliver ${objective.amount} ${objective.resource} to ${this.#poiLabel(objective.poi)}`;
@@ -5152,7 +5190,7 @@ export class SurfaceScene extends UiScene<'surface'> {
       this.#missionRows.push({
         id: state.id,
         title: def.title,
-        stage: `Stage ${state.stage + 1}/${def.stages.length}`,
+        stage: stageText(state.stage + 1, def.stages.length),
         line: next === undefined ? 'Stage complete' : this.#objectiveLine(next.objective),
         tracked: state.id === missions.pinned,
       });
@@ -5206,7 +5244,7 @@ export class SurfaceScene extends UiScene<'surface'> {
       // SPEC-027 §4.5: the storm tip rides the ten-second warning itself.
       bus.on('weather:warning', () => this.#requestTip('storm'), this),
       // SPEC-029 §4.12: a blast bursts, scorches to its radius and shakes the
-      // camera 0.3 — reduce motion already zeroes the shake in shakeOffset.
+      // camera 0.3 — shakeOffset scales the shake by Camera shake (SPEC-045).
       bus.on(
         'combat:blast',
         ({ x, z, radius }) => {
@@ -5243,7 +5281,7 @@ export class SurfaceScene extends UiScene<'surface'> {
         this,
       ),
       // SPEC-041 §4.1: a ground move lands with a dust ring and a 0.3 s shake —
-      // reduce motion already zeroes the shake in shakeOffset.
+      // shakeOffset scales the shake by Camera shake (SPEC-045).
       bus.on(
         'boss:move',
         ({ kind, x, z }) => {
@@ -5462,7 +5500,7 @@ export class SurfaceScene extends UiScene<'surface'> {
             const def = MISSION_TABLE[id];
             const first = def.stages[stage]?.[0];
             if (first !== undefined) {
-              bus.emit('ui:toast', { kind: 'good', text: `Stage ${stage + 1}/${def.stages.length} — ${this.#objectiveLine(first)}` });
+              bus.emit('ui:toast', { kind: 'good', text: `${stageText(stage + 1, def.stages.length)} — ${this.#objectiveLine(first)}` });
             }
           }
           // §4.6: forced mission weather ends when a boss stage starts.

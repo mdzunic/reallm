@@ -8,8 +8,11 @@
 // the session — never throws, never blocks a screen, and is never part of the
 // boot manifest (PLAN R6-5).
 
-/** AC-15: the twelve faces, in the order `data/characters.ts` indexes them. */
-export const PORTRAIT_GLYPHS = ['☉', '☍', '⚙', '✦', '◈', '⌬', '☄', '♆', '⚑', '◮', '⌘', '✧'] as const;
+/**
+ * AC-15: the twelve faces, in the order `data/characters.ts` indexes them.
+ * SPEC-045 §4.6: the fifth is `❖`, because `◈` means tokens.
+ */
+export const PORTRAIT_GLYPHS = ['☉', '☍', '⚙', '✦', '❖', '⌬', '☄', '♆', '⚑', '◮', '⌘', '✧'] as const;
 
 export type PortraitSource = { readonly kind: 'image'; readonly url: string } | { readonly kind: 'glyph'; readonly glyph: string };
 

@@ -86,7 +86,8 @@ describe('the instanceEmissive attribute (AC-45, AC-46)', () => {
         expect(attribute.count).toBe(INSTANCES_PER_PART);
         expect(attribute.usage).toBe(THREE.DynamicDrawUsage);
         const material = part.material as THREE.MeshStandardMaterial;
-        expect(material.customProgramCacheKey()).toBe('enemy/2');
+        // SPEC-045 §4.10: the rim's colour became a uniform, so the key moved.
+        expect(material.customProgramCacheKey()).toBe('enemy/3');
       }
       dispose();
     }

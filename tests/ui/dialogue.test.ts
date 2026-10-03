@@ -6,7 +6,17 @@
 // reads the typewriter's, and driven for real by `e2e/SPEC-034.spec.ts` case 3.
 import { describe, expect, it } from 'vitest';
 import { DIALOGUE, MISSIONS } from '@/data/index';
-import { ADVANCE_KEYS, advanceAccepted, LINE_KEY_GRACE, MODAL_ADVANCE_KEYS } from '@/ui/DialogueUI';
+import {
+  ADVANCE_KEYS,
+  advanceAccepted,
+  DIALOGUE_SPEED_FACTOR,
+  HOLD_BASE_MS,
+  HOLD_MIN_MS,
+  HOLD_PER_CHAR_MS,
+  holdMs,
+  LINE_KEY_GRACE,
+  MODAL_ADVANCE_KEYS,
+} from '@/ui/DialogueUI';
 import { stripComments } from '../architecture/source';
 
 const RAW = import.meta.glob<string>('../../src/**/*.ts', { query: '?raw', import: 'default', eager: true });
@@ -143,5 +153,58 @@ describe('the dialogue keys in the layer (SPEC-044 §4.1)', () => {
     expect(source).toContain("openModal(this.#root, { label: 'Transmission', initialFocus })");
     expect(source).toMatch(/this\.#openModal\(this\.#choices\.querySelector<HTMLElement>\('\[data-testid="dialogue-choice-0"\]'\)\);/);
     expect(source).toMatch(/#end\(job: Job\): void \{[\s\S]*?this\.#releaseModal\(\);/);
+  });
+});
+
+describe('the hold (SPEC-045 §4.1)', () => {
+  const line = (length: number): string => 'x'.repeat(length);
+
+  it('holds a whole line by its length: 20 characters 3.0 s, 79 5.15 s, 121 7.25 s at Normal', () => {
+    expect([HOLD_MIN_MS, HOLD_BASE_MS, HOLD_PER_CHAR_MS]).toEqual([3000, 1200, 50]);
+    expect(holdMs(line(20), 'normal')).toBe(3000);
+    expect(holdMs(line(79), 'normal')).toBe(5150);
+    expect(holdMs(line(121), 'normal')).toBe(7250);
+  });
+
+  it('scales by the speed: Slow 1.5, Fast 0.75, and Manual has no timer', () => {
+    expect(DIALOGUE_SPEED_FACTOR).toEqual({ slow: 1.5, normal: 1, fast: 0.75 });
+    expect(holdMs(line(20), 'slow')).toBe(4500);
+    expect(holdMs(line(79), 'slow')).toBe(7725);
+    expect(holdMs(line(121), 'slow')).toBe(10875);
+    expect(holdMs(line(20), 'fast')).toBe(2250);
+    expect(holdMs(line(79), 'fast')).toBe(3863); // 3862.5, rounded
+    expect(holdMs(line(121), 'fast')).toBe(5438); // 5437.5, rounded
+    for (const length of [20, 79, 121]) expect(holdMs(line(length), 'manual')).toBeNull();
+  });
+
+  // The layer is DOM, so the rule is read off its source, as the queue rule
+  // above is; `e2e/SPEC-045.spec.ts` cases 1 and 2 drive it for real.
+  const source = SOURCES['../../src/ui/DialogueUI.ts'] as string;
+
+  it('arms the hold in #finishLine — whenever the line is whole — and never in #advanceLine', () => {
+    const finish = /#finishLine\(\): void \{[\s\S]*?\n {2}\}/.exec(source)?.[0] ?? '';
+    expect(finish).toContain('holdMs(line.text, this.#speed?.()');
+    expect(finish).toMatch(/setTimeout\(\(\) => this\.#advanceLine\(\), hold\)/);
+    // A modal job never arms one.
+    expect(finish).toMatch(/job\.modal \|\| line === undefined \? null : holdMs/);
+    const advance = /#advanceLine\(\): void \{[\s\S]*?\n {2}\}/.exec(source)?.[0] ?? '';
+    expect(advance).not.toContain('setTimeout');
+    expect(source).not.toContain('AUTO_ADVANCE_MS');
+  });
+
+  it('shows the continue cue on a whole line that waits — a modal one, or any under Manual', () => {
+    const finish = /#finishLine\(\): void \{[\s\S]*?\n {2}\}/.exec(source)?.[0] ?? '';
+    expect(finish).toMatch(/\} else if \(hold === null && line !== undefined\) \{[\s\S]*?this\.#cue\.hidden = false;/);
+  });
+
+  it('logs each line as it is shown, and clears the log when the main menu is entered', () => {
+    const advance = /#advanceLine\(\): void \{[\s\S]*?\n {2}\}/.exec(source)?.[0] ?? '';
+    expect(advance).toContain('this.log.push(line.speaker, line.text);');
+    // Before any typing: the push comes before the reveal.
+    expect(advance.indexOf('this.log.push(')).toBeLessThan(advance.indexOf('lineReveal('));
+    expect(source).toMatch(/'scene:transition',\s*\(\{ to \}\) => \{\s*if \(to === 'menu'\) this\.log\.clear\(\);/);
+    // A choice prompt is not logged.
+    const choice = /playChoice\(prompt: string[\s\S]*?\n {2}\}/.exec(source)?.[0] ?? '';
+    expect(choice).not.toContain('this.log.push');
   });
 });

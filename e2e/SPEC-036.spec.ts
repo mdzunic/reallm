@@ -877,14 +877,14 @@ test.describe('15. the pad terminal holds the world (§4.10)', () => {
 test.describe('16. the controls sheet matches the touch controls (§4.11)', () => {
   test.use(PHONE);
 
-  test('in flight the throttle is the ▲ / ▼ buttons, never a drag', async ({ page }) => {
+  test('in flight the throttle is the + / − buttons, never a drag', async ({ page }) => {
     await startTouch(page, '/?scene=flight&planet=cinder4');
     await settle(page, 'flight');
     await page.locator('[data-testid="touch-pause"]').tap();
     await expect(page.locator('[data-testid="pause-menu"]')).toBeVisible();
     await page.locator('[data-testid="pause-controls"]').tap();
     const sheet = page.locator('[data-testid="pause-sheet"]');
-    await expect(sheet).toContainText('▲ / ▼ buttons');
+    await expect(sheet).toContainText('+ / − buttons');
     await expect(sheet).not.toContainText('Drag up / down');
     await expect(sheet).toContainText('Tap its slot to fire it');
     await expect(sheet).toContainText('Tap the minimap');

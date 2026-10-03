@@ -20,6 +20,7 @@ import {
   type MapPoint,
 } from '@/systems/MapModel';
 import type { PlanetDef } from '@/data/index';
+import { percent } from '@/systems/Format';
 import { drawMapLayers, type MapLayers } from '@/ui/MapLayers';
 import { el, h, openModal, testId, type UiRoot } from '@/ui/dom';
 import {
@@ -99,7 +100,7 @@ export class MapScreen {
     this.#wrap = el('div', 'map-canvas-wrap');
     this.#wrap.append(this.#canvas);
 
-    this.#explored = testId(el('p', 'map-explored', 'Explored 0 %'), 'map-explored');
+    this.#explored = testId(el('p', 'map-explored', `Explored ${percent(0)}`), 'map-explored');
     this.#missionList = testId(el('div', 'map-missions'), 'map-missions');
     this.#zoom = testId(
       h('button', { class: 'ui-btn', type: 'button', click: () => this.#toggleZoom() }, 'Zoom 2×'),
@@ -166,7 +167,8 @@ export class MapScreen {
     if (!this.#open) return;
     this.#lastFrame = frame;
     this.#lastExplored = explored;
-    this.#explored.textContent = `Explored ${Math.round(explored * 100)} %`;
+    // SPEC-045 §4.7: through the formatter, `Explored 42 %`.
+    this.#explored.textContent = `Explored ${percent(explored)}`;
     this.#renderMissions();
     this.#paint(frame);
   }

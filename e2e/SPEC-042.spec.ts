@@ -727,7 +727,8 @@ test('9. levels: the toast stays 4 s, the label glows, the XP bar and the panel 
     (window as unknown as { __spec042: typeof rec }).__spec042 = rec;
     const check = (): void => {
       const now = performance.now();
-      const toast = [...document.querySelectorAll('.toast')].some((node) => node.textContent?.startsWith('Level 2 — ') === true);
+      // SPEC-045 §4.5: a good toast's text starts with its ✓.
+      const toast = [...document.querySelectorAll('.toast')].some((node) => node.textContent?.startsWith('✓Level 2 — ') === true);
       if (toast && rec.toastUp === undefined) rec.toastUp = now;
       if (!toast && rec.toastUp !== undefined && rec.toastDown === undefined) rec.toastDown = now;
       const glow = document.querySelector('[data-testid="hud"] .hud-level')?.classList.contains('is-levelled') === true;
@@ -739,7 +740,8 @@ test('9. levels: the toast stays 4 s, the label glows, the XP bar and the panel 
   await press(page, 'surface-spawn-pack');
   await page.waitForTimeout(300);
   await press(page, 'surface-smite');
-  await expect(page.locator('.toast', { hasText: /^Level 2 — / })).toBeVisible({ timeout: 10_000 });
+  // SPEC-045 §4.5: a good toast leads with its ✓.
+  await expect(page.locator('.toast', { hasText: /^✓Level 2 — / })).toBeVisible({ timeout: 10_000 });
   await expect(level).toHaveText('Lv 2');
   // The glow is read off the page's own record: a loaded host's round trip
   // can outlast its 2 s.
@@ -777,7 +779,7 @@ test('10. shop: a craft says what it made, and the compare line points up', asyn
   await page.getByTestId('shop-craft-medkit-buy').click();
   await page.getByTestId('confirm-yes').click();
   await expect(page.locator('.toast', { hasText: 'Crafted Medkit ×2' })).toBeVisible();
-  await expect(page.locator('.toast', { hasText: /^Purchased$/ })).toHaveCount(0);
+  await expect(page.locator('.toast', { hasText: /^✓?Purchased$/ })).toHaveCount(0);
   await expect(page.locator('.shop-price').first()).toHaveCSS('color', 'rgb(230, 237, 243)');
 
   await page.getByTestId('shop-tab-gear').click();
@@ -1035,7 +1037,7 @@ test('18. shop words: a bought weapon, an upgraded system, a named missing rung;
   await page.getByTestId('shop-tab-ship').click();
   await page.getByTestId('shop-ship-shield-buy').click();
   await page.getByTestId('confirm-yes').click();
-  await expect(page.locator('.toast', { hasText: /^Shield upgraded to tier 1 — Shield \d+ → \d+$/ })).toBeVisible();
+  await expect(page.locator('.toast', { hasText: /^✓Shield upgraded to tier 1 — Shield \d+ → \d+$/ })).toBeVisible();
   await page.getByTestId('station-tab-character').click();
   await expect(page.getByTestId('character-xp')).toHaveText('Level 30 — the cap');
 });

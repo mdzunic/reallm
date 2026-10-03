@@ -7,6 +7,7 @@
 // gesture is the START THE GAME control alone (E46): a stray tap anywhere else
 // must not start the game.
 import type { BootGateUi } from '@/core/Game';
+import { percent } from '@/systems/Format';
 import { el, testId } from '@/ui/dom';
 
 export const ASSET_LOAD_FAILED_TEXT = 'Could not load assets — check connection';
@@ -21,10 +22,10 @@ export function progressPercent(done: number, total: number): number {
   return Math.min(100, Math.max(0, Math.round((done / total) * 100)));
 }
 
-/** §4.2: the status line — a percentage, never a raw `done/total` count. */
+/** §4.2: the status line — a percentage, never a raw `done/total` count (SPEC-045 §4.7: `percent`). */
 export function progressText(done: number, total: number): string {
   if (!Number.isFinite(total) || total <= 0) return 'Loading…';
-  return `Loading ${progressPercent(done, total)} %`;
+  return `Loading ${percent(progressPercent(done, total) / 100)}`;
 }
 
 /** §4.2 / 31-b: the shown percentage never falls inside one attempt. */
@@ -89,7 +90,7 @@ export class BootOverlay implements BootGateUi {
       return;
     }
     this.#shown = monotone(this.#shown, progressPercent(done, total));
-    this.#progress.textContent = `Loading ${this.#shown} %`;
+    this.#progress.textContent = `Loading ${percent(this.#shown / 100)}`;
     this.#bar.style.width = `${this.#shown}%`;
   }
 

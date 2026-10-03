@@ -332,10 +332,12 @@ test('death restarts a timed survive stage (AC-49)', async ({ page }) => {
     .toBe(2);
 
   // Let the survive timer run, then die: the stage must restart from zero.
+  // SPEC-045 §4.7: the focus row counts down — `(52 s)` — so the time
+  // survived is the 60 s objective less what is left.
   const survived = async (): Promise<number> => {
     const text = (await page.locator('[data-testid="hud"] .hud-objective').textContent()) ?? '';
-    const match = /\((\d+)\/60\)/.exec(text);
-    return match === null ? -1 : Number(match[1]);
+    const match = /\((\d+) s\)/.exec(text);
+    return match === null ? -1 : 60 - Number(match[1]);
   };
   await expect.poll(survived, { timeout: 30_000 }).toBeGreaterThanOrEqual(8);
   await hurtUntilDead(page);

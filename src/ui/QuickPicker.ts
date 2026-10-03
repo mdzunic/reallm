@@ -9,6 +9,7 @@
 // the arc's outer edge — which edge is the joystick side's mirror, so the
 // scene passes the side and CSS reads it off `data-side`.
 import type { JoystickSide } from '@/core/Settings';
+import { QUICK_SLOT_NAMES } from '@/data/glossary';
 import type { ItemId, QuickSlot } from '@/data/index';
 import { el, h, openModal, testId, type UiRoot } from '@/ui/dom';
 import { itemIcon } from '@/ui/ItemIcon';
@@ -22,6 +23,8 @@ export interface QuickChoice {
 /**
  * Mounts the picker into the `panel` layer and returns its close function.
  * `onChoose` fires before `onClose`; a dismissal fires `onClose` alone.
+ * SPEC-045 §4.6: titled by the slot's name as a player reads it —
+ * `Gadget slot`, never the `utility` id.
  */
 export function openQuickPicker(
   ui: UiRoot,
@@ -31,10 +34,12 @@ export function openQuickPicker(
   onClose: () => void,
   side: JoystickSide = 'left',
 ): () => void {
+  const name = QUICK_SLOT_NAMES[slot];
+  const label = `Choose the ${name.toLowerCase()} slot`;
   const root = testId(el('div', 'quick-picker panel'), 'quick-picker');
   root.dataset['side'] = side;
   root.setAttribute('role', 'dialog');
-  root.setAttribute('aria-label', `Choose the ${slot} slot`);
+  root.setAttribute('aria-label', label);
 
   let open = true;
   let releaseBack: (() => void) | null = null;
@@ -61,7 +66,7 @@ export function openQuickPicker(
     close();
   };
 
-  root.append(el('p', 'quick-picker-title', `${slot} slot`));
+  root.append(el('p', 'quick-picker-title', `${name} slot`));
   for (const choice of choices) {
     if (choice.itemId === null) continue;
     root.append(
@@ -87,6 +92,6 @@ export function openQuickPicker(
   releaseBack = ui.pushBack(close);
   globalThis.addEventListener('pointerdown', onOutside, true);
   // SPEC-044 §4.3: focus on its first `quick-pick-*`, Tab kept inside.
-  closeModal = openModal(root, { label: `Choose the ${slot} slot`, initialFocus: root.querySelector<HTMLElement>('.quick-pick') });
+  closeModal = openModal(root, { label, initialFocus: root.querySelector<HTMLElement>('.quick-pick') });
   return close;
 }

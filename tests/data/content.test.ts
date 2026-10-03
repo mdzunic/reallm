@@ -1509,7 +1509,7 @@ describe('words that match the touch controls (SPEC-036 §4.11, §4.12)', () => 
     for (const id of TIP_IDS.filter((tip) => tip.startsWith('flight_'))) {
       expect(TIPS[id].touch, id).not.toMatch(/drag (up|down)/i);
     }
-    expect(TIPS.flight_throttle.touch).toBe('Tap ▲ or ▼ to change speed.');
+    expect(TIPS.flight_throttle.touch).toBe('Tap + or − to change speed.');
   });
 
   it('the launcher tip says a tap on its slot fires it', () => {

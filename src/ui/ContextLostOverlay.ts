@@ -20,7 +20,8 @@ export class ContextLostOverlay implements ContextLostUi {
     this.#root = testId(el('div', 'overlay-panel overlay-context-lost'), 'context-lost');
     this.#root.id = 'context-lost';
     this.#root.setAttribute('role', 'alert');
-    this.#reload = testId(el('button', 'context-lost-reload', 'Reload'), 'context-lost-reload');
+    // SPEC-045 §4.8: a plain `ui-btn` — the legacy button rule no longer names it.
+    this.#reload = testId(el('button', 'ui-btn', 'Reload'), 'context-lost-reload');
     this.#reload.type = 'button';
     this.#reload.addEventListener('click', () => this.#onReload?.());
     this.#root.append(el('p', 'context-lost-text', CONTEXT_LOST_TEXT));

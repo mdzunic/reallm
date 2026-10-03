@@ -99,13 +99,19 @@ function createDirector(services: GameServices): StoryDirector {
       // page; Escape keeps E33's rule inside the player's own key capture.
       const releaseBack = uiLayers(services.uiRoot).pushBack(() => {});
       try {
+        // SPEC-045 §4.3: Films and Typewriter text choose the picture and the
+        // captions; reduce motion keeps the poster pans and the end fade. With
+        // reduce motion on and Films set back to video, the video plays (45-b).
+        const settings = services.settings.get();
         // SPEC-036 §4.9: a 93 s prologue watched without a touch is longer
         // than a phone's auto-lock — the screen stays on from the film's start
         // to its end, skip or failure. A refusal is ignored (15-e).
         return await whileHeld(async () =>
           player.play(def, {
             manifest: await manifest(),
-            reduceMotion: services.settings.get().reduceMotion,
+            stills: settings.filmMode === 'stills',
+            typewriter: settings.typewriter,
+            reduceMotion: settings.reduceMotion,
             videoBroken,
             // 22-h: a refused voice returns null and the film goes on.
             onCue: (cue) => void services.audio.play(cue.sound, { volume: cue.volume ?? 1, priority: 2 }),

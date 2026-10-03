@@ -20,6 +20,7 @@ import { normalizeName, type CharacterCreation, type SlotId } from '@/core/Save'
 import type { GameServices } from '@/core/Services';
 import type { Renderer } from '@/core/Renderer';
 import type { SceneParams } from '@/core/StateMachine';
+import { GLYPHS } from '@/data/glossary';
 import { ATTRIBUTE_MAX, CLASSES, CREATION_POINTS, type Attributes, type ClassId, type Difficulty } from '@/data/index';
 import { attributeEffectText, attributeLine, computePlayerStats, DIFFICULTY_LINES, passiveText } from '@/systems/UiHelpers';
 import { confirmSheet } from '@/ui/ConfirmSheet';
@@ -506,7 +507,8 @@ export class CreationScene extends UiScene<'creation'> {
         h(
           'div',
           { class: 'attr-row' },
-          h('span', { class: 'attr-name' }, attribute),
+          // SPEC-045 §4.5: capitalised in the source, so plain text keeps the capital.
+          h('span', { class: 'attr-name' }, attribute.charAt(0).toUpperCase() + attribute.slice(1)),
           minus,
           testId(h('span', { class: 'attr-value' }, String(total)), `attr-${attribute}`),
           plus,
@@ -533,7 +535,7 @@ export class CreationScene extends UiScene<'creation'> {
       h(
         'div',
         { class: 'creation-stats' },
-        h('span', {}, `♥ ${stats.hp} HP`),
+        h('span', {}, `${GLYPHS.health} ${stats.hp} HP`),
         h('span', {}, `⚔ ${stats.damage} damage`),
         h('span', {}, `➤ ${stats.speed} m/s`),
       ),
@@ -668,7 +670,8 @@ export class CreationScene extends UiScene<'creation'> {
       void dialogueLayer(services.uiRoot, services.events, {
         input: services.input,
         saveKey: () => services.save.current,
-        reduceMotion: () => services.settings.get().reduceMotion,
+        typewriter: () => services.settings.get().typewriter,
+        speed: () => services.settings.get().dialogueSpeed,
       }).play('intro_command');
     });
   }

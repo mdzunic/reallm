@@ -114,7 +114,7 @@ test('1. rows: every gear row prints its stat line, and the compare line against
   await expect(compare).toContainText('DPS 36 → 64');
   await expect(compare).not.toContainText('T0');
   // Armour prints its own line; a launcher its sustained DPS.
-  await expect(page.locator('[data-testid="shop-gear-armor_composite-stats"]')).toHaveText('armor 15 · −13% damage · hazard 25%');
+  await expect(page.locator('[data-testid="shop-gear-armor_composite-stats"]')).toHaveText('armor 15 · −13 % damage · hazard 25 %');
   await expect(page.locator('[data-testid="shop-gear-launcher_rocket-stats"]')).toContainText('DPS 15 sustained');
   // The same piece worn, or an empty slot, prints no compare line.
   await expect(page.locator('[data-testid="shop-gear-weapon_kinetic-compare"]')).toHaveCount(0);
@@ -270,7 +270,7 @@ test('9. quartermaster: its effect is on shop prices, not craft', async ({ page 
   await station(page, 'shop');
   await page.locator('[data-testid="shop-tab-companions"]').click();
   const row = page.locator('[data-testid="shop-companion-quartermaster"]');
-  await expect(row).toContainText('−5% shop prices');
+  await expect(row).toContainText('−5 % shop prices');
   await expect(row).toContainText('shop prices');
   await expect(row).not.toContainText('craft');
 });

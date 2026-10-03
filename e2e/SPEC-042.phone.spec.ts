@@ -26,7 +26,7 @@ const CREATION = {
 } as const;
 
 /** SPEC-037 §6.3 case 1's toast — SPEC-034's two-line shipped-home line. */
-const SHIPPED = 'Hold full — surplus shipped to Command Relay.';
+const SHIPPED = 'Cargo full — surplus shipped to Command Relay.';
 const QUICK_BAR = ['qb-sidearm', 'qb-primary', 'qb-heavy', 'qb-heal', 'qb-explosive', 'qb-utility'] as const;
 
 interface Box {

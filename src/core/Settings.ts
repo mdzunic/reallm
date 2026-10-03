@@ -45,6 +45,62 @@ export type JoystickSide = 'left' | 'right';
  */
 export type DamageFlashMode = 'full' | 'subtle' | 'off';
 
+/**
+ * SPEC-045 §4.1: how long a whole non-modal line holds before it moves on —
+ * `'manual'` is the slowest speed: the line waits for Enter or `›`.
+ */
+export type DialogueSpeed = 'slow' | 'normal' | 'fast' | 'manual';
+/** SPEC-045 §4.3: the camera's shake, walk bob and cockpit kick — off, half or full. */
+export type CameraShake = 0 | 0.5 | 1;
+/** SPEC-045 §4.3: a film plays as video, or as its posters. */
+export type FilmPreference = 'video' | 'stills';
+/** SPEC-045 §4.5: the one colour-blind preset — blue good, orange danger, a magenta rim. */
+export type ColourPreset = 'standard' | 'colour-blind';
+/** SPEC-045 §4.4: the HUD's scale on the keyboard scheme; no step below 100 % (R18's 11 px floor). */
+export const UI_SCALES = [1, 1.15, 1.3, 1.5] as const;
+export type UiScale = (typeof UI_SCALES)[number];
+/** SPEC-045 §4.4: the reading text's scale; HUD readouts do not take it. */
+export const TEXT_SCALES = [1, 1.2, 1.4] as const;
+export type TextScale = (typeof TEXT_SCALES)[number];
+/** SPEC-045 §4.9: brightness moves the exposure at most this far either way. */
+export const BRIGHTNESS_LIMIT = 0.3;
+
+/** SPEC-045 §4.3: reduce motion and the four settings it seeds. */
+export type MotionKeys = 'reduceMotion' | 'cameraShake' | 'damageFlash' | 'filmMode' | 'typewriter';
+
+/**
+ * SPEC-045 §4.3: what turning reduce motion on or off writes — itself and the
+ * four settings it seeds, in one `set()`. Each of the four can be changed on
+ * its own afterwards; toggling reduce motion again re-seeds all four (45-b).
+ */
+export function reduceMotionPreset(on: boolean): Pick<Settings, MotionKeys> {
+  return on
+    ? { reduceMotion: true, cameraShake: 0, damageFlash: 'subtle', filmMode: 'stills', typewriter: false }
+    : { reduceMotion: false, cameraShake: 1, damageFlash: 'full', filmMode: 'video', typewriter: true };
+}
+
+/** The four settings `reduceMotionPreset` seeds — reduce motion itself aside. */
+const SEEDED_KEYS = ['cameraShake', 'damageFlash', 'filmMode', 'typewriter'] as const satisfies readonly MotionKeys[];
+
+/**
+ * SPEC-045 §4.4: 115 % on a screen whose short side is at least 1000 px *and*
+ * a window at least 900 px tall at boot, else 100 % — a small window on a big
+ * monitor stays at 100 %, and so does Playwright's 1280 × 720 desktop window.
+ */
+export function defaultUiScale(env: { screenShort: number; innerHeight: number }): UiScale {
+  return env.screenShort >= 1000 && env.innerHeight >= 900 ? 1.15 : 1;
+}
+
+/** `defaultUiScale` for the page this runs in; 1 where there is no screen or window (node). */
+function bootUiScale(): UiScale {
+  const scope = globalThis as { screen?: { width?: unknown; height?: unknown }; innerHeight?: unknown };
+  const width = scope.screen?.width;
+  const height = scope.screen?.height;
+  const inner = scope.innerHeight;
+  if (typeof width !== 'number' || typeof height !== 'number' || typeof inner !== 'number') return 1;
+  return defaultUiScale({ screenShort: Math.min(width, height), innerHeight: inner });
+}
+
 /** The touch buttons are never smaller than their 56 px base (SPEC-005 AC-16). */
 export const MIN_BUTTON_SCALE = 1;
 export const MAX_BUTTON_SCALE = 2;
@@ -99,14 +155,45 @@ export type Settings = {
   sfx: number;
   /** `null` = auto; the boot benchmark decides (SPEC-015 §4). */
   quality: QualityPreset | null;
-  /** Defaults from `prefers-reduced-motion`. */
+  /**
+   * Defaults from `prefers-reduced-motion`. SPEC-045 §4.3: it seeds the four
+   * settings below and still gates every other static form on its own.
+   */
   reduceMotion: boolean;
   /**
-   * SPEC-037 §4.6: the damage vignette's strength; `'full'`, or `'subtle'` when
-   * `prefers-reduced-motion` matches. A stored value outside the three reads
-   * the default.
+   * SPEC-045 §4.3: scales the surface's shake and walk bob and the flight's
+   * cockpit kick; the reduce-motion preset's. Anything but 0, 0.5 or 1 stored
+   * reads the preset's value.
+   */
+  cameraShake: CameraShake;
+  /**
+   * SPEC-037 §4.6: the damage vignette's strength. SPEC-045 §4.3: the
+   * reduce-motion preset's — `'full'`, or `'subtle'` under reduce motion. A
+   * stored value outside the three reads the preset's.
    */
   damageFlash: DamageFlashMode;
+  /** SPEC-045 §4.3: `'stills'` plays a film as its posters; the reduce-motion preset's. */
+  filmMode: FilmPreference;
+  /** SPEC-045 §4.3: dialogue lines and film captions type out; the reduce-motion preset's. */
+  typewriter: boolean;
+  /** SPEC-045 §4.1: how long a whole non-modal line holds; default `'normal'`. */
+  dialogueSpeed: DialogueSpeed;
+  /** SPEC-045 §4.4: the HUD's scale on the keyboard scheme; `defaultUiScale` at boot. */
+  uiScale: UiScale;
+  /** SPEC-045 §4.4: the reading text's scale; default 1. */
+  textScale: TextScale;
+  /** SPEC-045 §4.5: no CSS uppercase, tight tracking and a taller line in `#ui`; default off. */
+  plainText: boolean;
+  /** SPEC-045 §4.5: default `'standard'`. */
+  colourPreset: ColourPreset;
+  /** SPEC-045 §4.9: −0.3…0.3; every scene's exposure × (1 + brightness). Default 0. */
+  brightness: number;
+  /** SPEC-045 §4.9: every sound folded to one channel, in both ears; default off. */
+  mono: boolean;
+  /** SPEC-045 §4.9: 0..1, the `ui_*` sounds' bus in place of Effects; default 1. */
+  volumeInterface: number;
+  /** SPEC-045 §4.9: the keys' and the stick's up / down steering inverted in flight; default off. */
+  invertFlightY: boolean;
   autoFire: AutoFireMode;
   /** SPEC-029 §4.4: the locked-primary sidearm fallback; default `'touch'`. */
   weaponAutoSwap: WeaponAutoSwapMode;
@@ -215,6 +302,10 @@ const WEAPON_AUTO_SWAP_MODES: readonly WeaponAutoSwapMode[] = ['touch', 'on', 'o
 const JOYSTICK_SIDES: readonly JoystickSide[] = ['left', 'right'];
 const GUIDANCE_LEVELS: readonly GuidanceLevel[] = ['full', 'minimal', 'off'];
 const DAMAGE_FLASH_MODES: readonly DamageFlashMode[] = ['full', 'subtle', 'off'];
+const DIALOGUE_SPEEDS: readonly DialogueSpeed[] = ['slow', 'normal', 'fast', 'manual'];
+const FILM_PREFERENCES: readonly FilmPreference[] = ['video', 'stills'];
+const COLOUR_PRESETS: readonly ColourPreset[] = ['standard', 'colour-blind'];
+const CAMERA_SHAKES: readonly CameraShake[] = [0, 0.5, 1];
 
 /** `prefers-reduced-motion: reduce` where the platform reports it. */
 function prefersReducedMotion(): boolean {
@@ -240,8 +331,17 @@ export function defaultSettings(): Settings {
     music: 0.7,
     sfx: 1,
     quality: null,
-    reduceMotion: prefersReducedMotion(),
-    damageFlash: prefersReducedMotion() ? 'subtle' : 'full',
+    // SPEC-045 §4.3: reduce motion, then the four settings it seeds.
+    ...reduceMotionPreset(prefersReducedMotion()),
+    dialogueSpeed: 'normal',
+    uiScale: bootUiScale(),
+    textScale: 1,
+    plainText: false,
+    colourPreset: 'standard',
+    brightness: 0,
+    mono: false,
+    volumeInterface: 1,
+    invertFlightY: false,
     // SPEC-038 §4.7: on for every scheme; only keys a player changed persist,
     // so a stored `'touch'` or `'off'` keeps its choice (38-l).
     autoFire: 'on',
@@ -418,8 +518,29 @@ function zonesShown(value: unknown): number {
   return typeof value === 'number' && Number.isInteger(value) && value >= 0 && value <= ZONES_SHOWN_MAX ? value : 0;
 }
 
-/** Which side of the store a value arrived from; only the volumes read differently. */
+/** Which side of the store a value arrived from; only the volumes and brightness read differently. */
 type Source = 'stored' | 'set';
+
+/**
+ * SPEC-045 §4.3: what an unusable value of one of the four seeded settings
+ * reads. From storage, the preset of the stored `reduceMotion` — read before
+ * them, as the defaults' key order puts it first (45-m); from a setter, what
+ * is there now.
+ */
+function seeded<K extends (typeof SEEDED_KEYS)[number]>(key: K, current: Settings, source: Source): Settings[K] {
+  const preset: Pick<Settings, K> = reduceMotionPreset(current.reduceMotion);
+  return source === 'stored' ? preset[key] : current[key];
+}
+
+/**
+ * SPEC-045 §4.9: brightness reads like a volume — a setter's finite number is
+ * clamped into ±`BRIGHTNESS_LIMIT`, and a stored one out of range reads 0.
+ */
+function brightness(value: unknown, fallback: number, source: Source): number {
+  if (typeof value !== 'number' || !Number.isFinite(value)) return fallback;
+  if (source === 'set') return clamp(value, -BRIGHTNESS_LIMIT, BRIGHTNESS_LIMIT);
+  return Math.abs(value) <= BRIGHTNESS_LIMIT ? value : 0;
+}
 
 /**
  * One key of a raw bag, validated against `current`. The same function runs on
@@ -447,10 +568,37 @@ function coerce<K extends keyof Settings>(key: K, value: unknown, current: Setti
         // The default is the platform's answer to `prefers-reduced-motion`, so
         // this is the other setting an unusable stored value must not turn off.
         return bool(value, current.reduceMotion);
+      case 'cameraShake':
+        return typeof value === 'number' && (CAMERA_SHAKES as readonly number[]).includes(value)
+          ? (value as CameraShake)
+          : seeded('cameraShake', current, source);
       case 'damageFlash':
-        // SPEC-037 §4.6: on load `current` is the defaults, so an unusable
-        // stored value reads the default — `'subtle'` under reduced motion.
-        return oneOf(value, DAMAGE_FLASH_MODES, current.damageFlash);
+        // SPEC-037 §4.6, SPEC-045 §4.3: an unusable stored value reads the
+        // reduce-motion preset's — `'subtle'` under reduce motion.
+        return oneOf(value, DAMAGE_FLASH_MODES, seeded('damageFlash', current, source));
+      case 'filmMode':
+        return oneOf(value, FILM_PREFERENCES, seeded('filmMode', current, source));
+      case 'typewriter':
+        return bool(value, seeded('typewriter', current, source));
+      case 'dialogueSpeed':
+        return oneOf(value, DIALOGUE_SPEEDS, current.dialogueSpeed);
+      case 'uiScale':
+        // 45-m: a stored 0.85 reads the boot default, which `current` holds on load.
+        return typeof value === 'number' && (UI_SCALES as readonly number[]).includes(value) ? (value as UiScale) : current.uiScale;
+      case 'textScale':
+        return typeof value === 'number' && (TEXT_SCALES as readonly number[]).includes(value) ? (value as TextScale) : current.textScale;
+      case 'plainText':
+        return bool(value, current.plainText);
+      case 'colourPreset':
+        return oneOf(value, COLOUR_PRESETS, current.colourPreset);
+      case 'brightness':
+        return brightness(value, current.brightness, source);
+      case 'mono':
+        return bool(value, current.mono);
+      case 'volumeInterface':
+        return bus(value, current.volumeInterface);
+      case 'invertFlightY':
+        return bool(value, current.invertFlightY);
       case 'autoFire':
         return oneOf(value, AUTO_FIRE_MODES, current.autoFire);
       case 'weaponAutoSwap':
@@ -528,6 +676,13 @@ export function createSettings(storage?: Storage | null, events?: SettingsEvents
     if (key === 'version') continue;
     if (!(key in initial.data)) continue;
     assign(values, key, coerce(key, initial.data[key], values, 'stored'));
+  }
+  // SPEC-045 §4.3 (45-a): a store from before the preset holds `reduceMotion`
+  // and none of the four it seeds — each absent one reads the stored flag's
+  // preset, so still films, no shake and no typewriter carry over.
+  const preset = reduceMotionPreset(values.reduceMotion);
+  for (const key of SEEDED_KEYS) {
+    if (!(key in initial.data)) assign(values, key, preset[key]);
   }
 
   /** 07-e: unreadable content is replaced with the defaults, with no prompt. */

@@ -130,7 +130,7 @@ html[data-play].scheme-touch #ui > .boot-note {
   display: none;
   padding: 16px 20px;
   border: 1px solid var(--panel-edge);
-  border-radius: 8px;
+  border-radius: var(--radius);
   background: var(--panel-glass);
   backdrop-filter: blur(6px);
   -webkit-backdrop-filter: blur(6px);
@@ -179,7 +179,7 @@ html[data-play].scheme-touch #ui > .boot-note {
 
 .boot-title {
   margin: 0;
-  font-size: clamp(34px, 8vmin, 64px);
+  font-size: calc(clamp(34px, 8vmin, 64px) * var(--text-scale));
   font-weight: 700;
   letter-spacing: 0.18em;
   color: var(--ink);
@@ -197,7 +197,7 @@ html[data-play].scheme-touch #ui > .boot-note {
 
 @media (max-width: 380px) {
   .boot-title {
-    font-size: clamp(28px, 11vmin, 40px);
+    font-size: calc(clamp(28px, 11vmin, 40px) * var(--text-scale));
   }
 }
 
@@ -238,14 +238,15 @@ html[data-play].scheme-touch #ui > .boot-note {
   margin: 0 0 8px;
 }
 
-button.pause-resume,
-button.scene-nav-button,
-button.context-lost-reload {
+/* SPEC-045 §4.8: the placeholder scenes' buttons are all that is left of the
+   legacy style. Resume and Reload left it — they are plain `ui-btn`s, console
+   keys like every other. */
+button.scene-nav-button {
   font: inherit;
   color: inherit;
   padding: 6px 14px;
   border: 1px solid #33465a;
-  border-radius: 6px;
+  border-radius: var(--radius);
   background: #16202b;
   cursor: pointer;
 }
@@ -253,9 +254,7 @@ button.context-lost-reload {
 /* SPEC-037 §4.9: a hover state only where there is a hover — a tapped button
    on a phone kept it and looked selected. */
 @media (hover: hover) {
-  button.pause-resume:hover,
-  button.scene-nav-button:hover,
-  button.context-lost-reload:hover {
+  button.scene-nav-button:hover {
     background: #1d2a38;
   }
 }
@@ -266,7 +265,7 @@ button.context-lost-reload {
 .boot-bar-track {
   width: min(420px, 72vw);
   height: 6px;
-  border-radius: 3px;
+  border-radius: var(--radius);
   background: var(--panel-edge);
   box-shadow: inset 0 0 0 1px var(--edge-glow);
   overflow: hidden;
@@ -467,7 +466,7 @@ button.touch-button.touch-pause {
   min-height: 44px;
   width: 44px;
   height: 44px;
-  border-radius: 8px;
+  border-radius: var(--radius);
 }
 
 /* SPEC-037 §4.1: USE, mounted into the arc's 56 × 56 action cell, fills it. */
@@ -652,9 +651,9 @@ button.debug-button {
   margin: 0 0 8px;
   padding: 6px 8px;
   border: 1px solid #6b4a1f;
-  border-radius: 6px;
+  border-radius: var(--radius);
   background: rgb(36 26 13 / 92%);
-  font-size: 13px;
+  font-size: calc(13px * var(--text-scale));
   line-height: 1.35;
 }
 
@@ -674,9 +673,9 @@ button.debug-button {
   gap: 8px;
   padding: 6px 8px;
   border: 1px solid #22303c;
-  border-radius: 6px;
+  border-radius: var(--radius);
   background: rgb(17 24 32 / 88%);
-  font-size: 13px;
+  font-size: calc(13px * var(--text-scale));
 }
 
 .slot-text {
@@ -699,7 +698,7 @@ button.debug-button {
   flex: 1 1 auto;
   padding: 4px 6px;
   border: 1px solid #33465a;
-  border-radius: 6px;
+  border-radius: var(--radius);
   background: #0d141b;
   color: inherit;
   font: inherit;
@@ -738,16 +737,17 @@ button.debug-button {
   /* SPEC-031 §4.7 — the console frame (*initial tuning*). The scrim floors the
      text over the bright, moving backdrops; the frame tokens are the cut, the
      edge and the rule every screen wears; the type scale replaces literal
-     font sizes in the shell; the key face is the flat button plate. */
+     font sizes in the shell, and SPEC-045 §4.4 multiplies it by the player's
+     text size; the key face is the flat button plate. */
   --screen-scrim: radial-gradient(ellipse at 50% 40%, rgba(5, 8, 12, 0.55), rgba(5, 8, 12, 0.9) 78%);
   --frame-edge: rgba(118, 158, 198, 0.5);
   --frame-cut: 14px;
   --rule: rgba(118, 158, 198, 0.28);
-  --type-xs: 12px;
-  --type-sm: 14px;
-  --type-md: 16px;
-  --type-lg: clamp(18px, 3vmin, 24px);
-  --type-xl: clamp(22px, 4.2vmin, 34px);
+  --type-xs: calc(12px * var(--text-scale));
+  --type-sm: calc(14px * var(--text-scale));
+  --type-md: calc(16px * var(--text-scale));
+  --type-lg: calc(clamp(18px, 3vmin, 24px) * var(--text-scale));
+  --type-xl: calc(clamp(22px, 4.2vmin, 34px) * var(--text-scale));
   --track: 0.12em;
   --key-face: rgba(18, 26, 36, 0.92);
 
@@ -759,11 +759,26 @@ button.debug-button {
      top-right cluster, and the thumb arc's height. */
   --hud-plate: rgba(4, 6, 10, 0.75);
   --hud-halo: 0 0 2px #000, 1px 1px 0 #000, -1px -1px 0 #000, 1px -1px 0 #000, -1px 1px 0 #000;
-  --hud-bottom-stack: 166px;
+  --hud-bottom-stack: calc(166px * var(--ui-scale));
   --hud-tl-w: calc(clamp(200px, 30vw, 320px) + 16px);
   --minimap-size: clamp(128px, 24vmin, 184px);
   --hud-tr-w: 0px;
   --arc-h: 150px;
+
+  /* SPEC-045 §3 — the player's own settings. `main.ts` writes both scales
+     inline on <html>: `--ui-scale` grows the HUD's corner boxes on the
+     keyboard scheme (it is 1 on touch), and with them the keyboard bottom
+     stack above; `--text-scale` grows every panel's reading text. HUD
+     readouts stay out of the text size, so nothing grows twice (§4.4).
+     `--hud-side` is the gutter the corner boxes keep from the screen's sides,
+     widened to a centred 16 : 9 box on an ultrawide screen (§4.4); `--hull`
+     fills the ship's hull bar (§4.6); `--radius` is the one corner radius,
+     the console key's (§4.8). */
+  --ui-scale: 1;
+  --text-scale: 1;
+  --hud-side: 10px;
+  --hull: #9fb3c8;
+  --radius: 3px;
 }
 
 /* SPEC-037 §3: the touch scheme's values. `--hud-tc-h` is not declared here —
@@ -778,6 +793,18 @@ html.scheme-touch[data-play='surface'] {
   --hud-tr-w: calc(52px + var(--minimap-size));
 }
 
+/* SPEC-045 §4.5: the colour-blind preset — good is blue, danger is orange —
+   and this is the whole palette change: every rule that means good or danger
+   reads these tokens (the toast borders and glyphs, the requirement marks, the
+   compare parts, the Warden's name, the damage vignette, the low-HP edge). The
+   HP bar keeps `--bar-hp`, and its ♥ names it. Warn and error share a hue
+   under deuteranopia, so their glyphs, ▲ and ✗, tell them apart. */
+html.colour-blind {
+  --good: #3fb6ff;
+  --hp: #ff8a1f;
+  --danger: #ff8a1f;
+}
+
 /* SPEC-037 §4.1: the compact arc — 56 px slots and cell — on a screen this short. */
 @media (max-height: 360px) {
   :root {
@@ -787,9 +814,11 @@ html.scheme-touch[data-play='surface'] {
 
 /* Font floor 14 px (AC-107); larger sizes clamp with the viewport (AC-60).
    SPEC-031 §4.7: every readout in the UI uses tabular numerals, so a ticking
-   counter never wobbles — inherited from the root, overridden nowhere. */
+   counter never wobbles — inherited from the root, overridden nowhere.
+   SPEC-045 §4.4: the base multiplies by the player's text size; the HUD keeps
+   the plain base (`.hud`). */
 #ui {
-  font-size: clamp(14px, 1.6vmin + 8px, 18px);
+  font-size: calc(clamp(14px, 1.6vmin + 8px, 18px) * var(--text-scale));
   font-variant-numeric: tabular-nums;
 }
 
@@ -894,13 +923,15 @@ html[data-play] .overlay-panel:not(.overlay-rotate) {
   min-width: 44px;
   padding: 8px 16px;
   border: 1px solid var(--frame-edge);
-  border-radius: 3px;
+  border-radius: var(--radius);
   background: var(--key-face);
   color: var(--ink);
   font: inherit;
   font-size: var(--type-sm);
   text-transform: uppercase;
   letter-spacing: var(--track);
+  /* SPEC-045 §4.4: at a larger text size a label wraps, never overflows. */
+  overflow-wrap: anywhere;
   cursor: pointer;
   touch-action: manipulation;
 }
@@ -974,7 +1005,8 @@ html[data-play] .toast-rack {
   position: absolute;
   top: calc(max(10px, env(safe-area-inset-top)) + 8px);
   left: auto;
-  right: max(10px, env(safe-area-inset-right));
+  /* SPEC-045 §4.4: on the ultrawide box's edge, with the corner boxes. */
+  right: max(var(--hud-side), env(safe-area-inset-right));
   transform: none;
   align-items: flex-end;
   max-width: min(300px, 38vw);
@@ -1033,7 +1065,7 @@ html[data-play] .toast {
 /* §4.5: toasts wear the same glass as the panels. */
 .toast {
   padding: 8px 14px;
-  border-radius: 6px;
+  border-radius: var(--radius);
   background: var(--panel-glass);
   backdrop-filter: blur(6px);
   -webkit-backdrop-filter: blur(6px);
@@ -1051,6 +1083,18 @@ html[data-play] .toast {
 }
 .toast-error { border-color: var(--hp); }
 .toast-good { border-color: var(--good); }
+
+/* SPEC-045 §4.5: every kind but info leads with its glyph — ✓ good, ✗ error,
+   ▲ warn — so a refusal and a success differ by shape, not a border hue. */
+.toast-good .glyph {
+  color: var(--good);
+  margin-right: 8px;
+}
+
+.toast-error .glyph {
+  color: var(--hp);
+  margin-right: 8px;
+}
 
 .toast-count {
   margin-left: 8px;
@@ -1128,6 +1172,9 @@ html.reduce-motion .sheet {
 .hud {
   position: absolute;
   inset: 0;
+  /* SPEC-045 §4.4: HUD readouts stay out of the text size — this is `#ui`'s
+     base without `--text-scale`; the HUD grows with the UI scale instead. */
+  font-size: clamp(14px, 1.6vmin + 8px, 18px);
   user-select: none;
   -webkit-user-select: none;
   pointer-events: none;
@@ -1149,12 +1196,12 @@ html.reduce-motion .sheet {
    value the top centre and the short-screen dialogue can span from. */
 .hud-tl {
   top: max(10px, env(safe-area-inset-top));
-  left: max(10px, env(safe-area-inset-left));
+  left: max(var(--hud-side), env(safe-area-inset-left));
   flex-direction: column;
   width: var(--hud-tl-w);
   box-sizing: border-box;
   padding: 6px 8px;
-  border-radius: 6px;
+  border-radius: var(--radius);
   background: var(--hud-plate);
 }
 
@@ -1163,7 +1210,7 @@ html.reduce-motion .sheet {
    left of the pause button. */
 .hud-tr {
   top: max(10px, env(safe-area-inset-top));
-  right: max(10px, env(safe-area-inset-right));
+  right: max(var(--hud-side), env(safe-area-inset-right));
   flex-direction: column;
   align-items: flex-end;
 }
@@ -1196,14 +1243,14 @@ html.scheme-touch[data-play] .hud-tc {
 
 .hud-bl {
   bottom: max(10px, env(safe-area-inset-bottom));
-  left: max(10px, env(safe-area-inset-left));
+  left: max(var(--hud-side), env(safe-area-inset-left));
 }
 
 /* SPEC-037 §4.2: the keyboard corner — the minimap sits here, with no margin
    under it; on touch it has moved to the top right and this box is empty. */
 .hud-br {
   bottom: max(10px, env(safe-area-inset-bottom));
-  right: max(10px, env(safe-area-inset-right));
+  right: max(var(--hud-side), env(safe-area-inset-right));
   flex-direction: column;
   align-items: flex-end;
 }
@@ -1212,6 +1259,55 @@ html.scheme-touch[data-play] .hud-tc {
   bottom: max(48px, calc(env(safe-area-inset-bottom) + 38px));
   left: 50%;
   transform: translateX(-50%);
+}
+
+/* SPEC-045 §4.4: UI scale, on the keyboard scheme. Each corner box, and the
+   interact prompt, grows about its anchor by a transform — never by resizing
+   — so there is no layout pass and no DOM read, and SPEC-037's pixel rules
+   stay as written. The two centred boxes keep their `translateX(-50%)`, so
+   they stay centred. In tree order the top centre draws above the top-left
+   plate, which it may meet at 150 % in a 1280 px window in a boss fight
+   (45-j). On touch `--ui-scale` is 1 and none of this applies. */
+html:not(.scheme-touch) .hud-tl {
+  transform: scale(var(--ui-scale));
+  transform-origin: top left;
+}
+
+html:not(.scheme-touch) .hud-tr {
+  transform: scale(var(--ui-scale));
+  transform-origin: top right;
+}
+
+html:not(.scheme-touch) .hud-tc {
+  transform: translateX(-50%) scale(var(--ui-scale));
+  transform-origin: top center;
+}
+
+html:not(.scheme-touch) .hud-bl {
+  transform: scale(var(--ui-scale));
+  transform-origin: bottom left;
+}
+
+html:not(.scheme-touch) .hud-br {
+  transform: scale(var(--ui-scale));
+  transform-origin: bottom right;
+}
+
+html:not(.scheme-touch) .hud-bc,
+html:not(.scheme-touch) .hud-interact {
+  transform: translateX(-50%) scale(var(--ui-scale));
+  transform-origin: bottom center;
+}
+
+/* SPEC-045 §4.4: wider than 21 : 9 on the keyboard scheme, the corner boxes
+   and the in-play toast rack sit on the edges of a centred 16 : 9 box — they
+   read `--hud-side` beside their safe-area inset. The damage vignette, the
+   low-HP edge and the hit wedges keep the HUD root's `inset: 0`, so they still
+   cover the whole screen. Touch keeps the full width (45-q). */
+@media (min-aspect-ratio: 21/9) {
+  html:not(.scheme-touch) {
+    --hud-side: calc((100vw - 100dvh * 16 / 9) / 2);
+  }
 }
 
 .bar-row {
@@ -1225,7 +1321,7 @@ html.scheme-touch[data-play] .hud-tc {
 .bar {
   width: 140px;
   height: 10px;
-  border-radius: 5px;
+  border-radius: var(--radius);
   background: rgba(255, 255, 255, 0.12);
   box-shadow: inset 0 0 0 1px var(--panel-edge);
   overflow: hidden;
@@ -1239,13 +1335,14 @@ html.scheme-touch[data-play] .hud-tc {
   transform: scaleX(0);
 }
 
-/* §4.5: the three gradient tokens; the hull keeps its flat hue, which is
-   still the colourblind-safe pair its glyph backs up (AC-68). SPEC-042 §4.9:
-   the boss frame draws its own `--bar-boss`. */
+/* §4.5: the three gradient tokens; the hull keeps a flat hue, which its glyph
+   backs up (AC-68). SPEC-045 §4.6: the hue is its own `--hull`, so amber means
+   tokens, XP, the waypoint and warnings only. SPEC-042 §4.9: the boss frame
+   draws its own `--bar-boss`. */
 .bar-hp { background: var(--bar-hp); }
 .bar-xp { background: var(--bar-xp); height: 100%; }
 .bar-shield { background: var(--bar-shield); }
-.bar-hull { background: var(--warn); }
+.bar-hull { background: var(--hull); }
 
 /* SPEC-042 §4.7: 6 px, with its numbers in `title` and `aria-label`. */
 .bar-row:has(.bar-xp) .bar { height: 6px; }
@@ -1271,7 +1368,7 @@ html.scheme-touch[data-play] .hud-tc {
   align-items: center;
   gap: 6px;
   padding: 3px 8px;
-  border-radius: 6px;
+  border-radius: var(--radius);
   background: var(--hud-plate);
   font-size: 13px;
   line-height: 16px;
@@ -1317,7 +1414,7 @@ html.reduce-motion .hud-wallet {
    sit on the plate, and their text is --ink, --warn or --good only. */
 .hud-weather {
   padding: 4px 12px;
-  border-radius: 6px;
+  border-radius: var(--radius);
   background: var(--hud-plate);
   color: var(--warn);
 }
@@ -1325,7 +1422,7 @@ html.reduce-motion .hud-wallet {
 /* SPEC-030 D-11: the shelter chip under the weather banner. */
 .hud-shelter {
   padding: 2px 10px;
-  border-radius: 6px;
+  border-radius: var(--radius);
   background: var(--hud-plate);
   color: var(--ink);
   letter-spacing: 0.08em;
@@ -1333,7 +1430,7 @@ html.reduce-motion .hud-wallet {
 
 .hud-objective {
   padding: 4px 12px;
-  border-radius: 6px;
+  border-radius: var(--radius);
   background: var(--hud-plate);
   color: var(--ink);
   white-space: nowrap;
@@ -1379,7 +1476,7 @@ html.reduce-motion .hud-wallet {
   height: 64px;
   padding: 2px;
   border: 1px solid var(--panel-edge);
-  border-radius: 8px;
+  border-radius: var(--radius);
   background:
     /* SPEC-037 §4.4: heat is a full-width 4 px bar at the slot's foot, --warn
        below 0.85 and --hp from there (`--qb-heat`)… */
@@ -1411,22 +1508,23 @@ html.reduce-motion .hud-wallet {
   font-size: 11px;
 }
 
-/* §4.5: the active slot has an accent border *and* a ▲ above it — never
-   colour alone (colourblind safety). SPEC-037 §4.4: 12 px, 16 px above. */
+/* §4.5: the active slot has an accent border *and* a mark above it — never
+   colour alone (colourblind safety). SPEC-045 §4.6: the mark is a 3 px
+   --accent bar where SPEC-037's ▲ sat, since ▲ means a warning now. */
 .qb-slot.is-active {
   border-color: var(--accent);
   box-shadow: 0 0 0 1px var(--accent);
 }
 
 .qb-slot.is-active::after {
-  content: '▲';
+  content: '';
   position: absolute;
-  top: -16px;
+  top: -8px;
   left: 50%;
+  width: 24px;
+  height: 3px;
   transform: translateX(-50%);
-  font-size: 12px;
-  line-height: 1;
-  color: var(--accent);
+  background: var(--accent);
 }
 
 .qb-slot.is-empty {
@@ -1470,7 +1568,7 @@ html.reduce-motion .hud-wallet {
   padding: 0 2px;
   box-sizing: border-box;
   border: 1px solid var(--frame-edge);
-  border-radius: 3px;
+  border-radius: var(--radius);
   background: var(--key-face);
   color: var(--ink);
   font: inherit;
@@ -1490,7 +1588,7 @@ html.reduce-motion .hud-wallet {
   z-index: 1;
   transform: translateX(-50%);
   padding: 1px 3px;
-  border-radius: 2px;
+  border-radius: var(--radius);
   background: rgba(0, 0, 0, 0.8);
   color: var(--ink);
   font-size: 11px;
@@ -1701,21 +1799,22 @@ html.scheme-touch .quick-picker[data-side='right'] {
 
 .quick-picker-title {
   margin: 0;
-  font-size: 12px;
+  font-size: var(--type-xs);
   opacity: 0.8;
   text-transform: capitalize;
 }
 
 /* SPEC-037 §4.3: the interact prompt, on the plate. On the keyboard it sits
    centred directly above the quick bar, 130 px up at 1280 × 720, and an
-   actionable one is led by its `E` cap. */
+   actionable one is led by its `E` cap. SPEC-045 §4.4: the 82 px it rides
+   above the bar's base grow with the UI scale, as the bar does. */
 .hud-interact {
   position: absolute;
   left: 50%;
-  bottom: calc(max(48px, calc(env(safe-area-inset-bottom) + 38px)) + 82px);
+  bottom: calc(max(48px, calc(env(safe-area-inset-bottom) + 38px)) + 82px * var(--ui-scale));
   transform: translateX(-50%);
   padding: 6px 12px;
-  border-radius: 6px;
+  border-radius: var(--radius);
   background: var(--hud-plate);
   color: var(--ink);
   white-space: nowrap;
@@ -1753,7 +1852,7 @@ kbd.keycap {
   padding: 0 4px;
   box-sizing: border-box;
   border: 1px solid var(--frame-edge);
-  border-radius: 3px;
+  border-radius: var(--radius);
   background: var(--key-face);
   color: var(--ink);
   font: inherit;
@@ -1964,7 +2063,7 @@ html.reduce-motion .hud-vignette {
 
 .map-canvas {
   border: 1px solid var(--panel-edge);
-  border-radius: 8px;
+  border-radius: var(--radius);
   background: #05070b;
 }
 
@@ -2026,7 +2125,7 @@ html.reduce-motion .hud-vignette {
   gap: 4px;
   padding: 6px 8px;
   border: 1px solid var(--panel-edge);
-  border-radius: 6px;
+  border-radius: var(--radius);
 }
 
 .map-mission.is-tracked {
@@ -2133,7 +2232,7 @@ html.reduce-motion .hud.is-static .hud-static {
   align-items: center;
   gap: 1px;
   padding: 2px 6px;
-  border-radius: 4px;
+  border-radius: var(--radius);
   background: var(--hud-plate);
   pointer-events: none;
   white-space: nowrap;
@@ -2193,7 +2292,7 @@ html.reduce-motion .hud.is-static .hud-static {
   background: transparent;
   color: var(--ink);
   font: inherit;
-  font-size: 30px;
+  font-size: calc(30px * var(--text-scale));
   line-height: 1;
   pointer-events: auto;
   cursor: pointer;
@@ -2283,21 +2382,23 @@ html.reduce-motion .hud.is-static .hud-static {
 /* SPEC-037 §4.3: on a short screen in play the line docks 8 px under the top
    centre (`--hud-tc-h`, kept by the HUD's ResizeObserver), spans the gap
    between the corner columns up to 560 px, and ends above half the height;
-   its text scrolls inside. The tip strip docks the same way. */
+   its text scrolls inside. The tip strip docks the same way. SPEC-045 §4.4:
+   the boxes it clears are as large as the UI scale draws them, and as far in
+   as the ultrawide box sets them. */
 @media (max-height: 500px) {
   html[data-play] .dialogue,
   html[data-play] .aria-hint {
     position: absolute;
-    top: calc(max(10px, env(safe-area-inset-top)) + var(--hud-tc-h, 0px) + 8px);
+    top: calc(max(10px, env(safe-area-inset-top)) + var(--hud-tc-h, 0px) * var(--ui-scale) + 8px);
     bottom: auto;
-    left: calc(max(10px, env(safe-area-inset-left)) + var(--hud-tl-w) + 8px);
-    right: calc(max(10px, env(safe-area-inset-right)) + var(--hud-tr-w) + 8px);
+    left: calc(max(var(--hud-side), env(safe-area-inset-left)) + var(--hud-tl-w) * var(--ui-scale) + 8px);
+    right: calc(max(var(--hud-side), env(safe-area-inset-right)) + var(--hud-tr-w) * var(--ui-scale) + 8px);
     width: auto;
     max-width: 560px;
     margin-inline: auto;
     transform: none;
     box-sizing: border-box;
-    max-height: calc(50dvh - 16px - max(10px, env(safe-area-inset-top)) - var(--hud-tc-h, 0px));
+    max-height: calc(50dvh - 16px - max(10px, env(safe-area-inset-top)) - var(--hud-tc-h, 0px) * var(--ui-scale));
     overflow-y: auto;
   }
 
@@ -2376,6 +2477,22 @@ html.reduce-motion .dialogue-dim {
   padding-top: 10px;
 }
 
+/* SPEC-045 §4.2: a row's block inside its section — Backup's fields, the
+   service switch and its note — spaced like the section, without its rule. */
+.settings-block {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+/* SPEC-045 §4.9: the brightness slider's `+10 %` beside it. */
+.settings-value {
+  min-width: 4.5em;
+  text-align: right;
+  color: var(--ink-dim);
+  font-variant-numeric: tabular-nums;
+}
+
 .settings-row {
   display: flex;
   justify-content: space-between;
@@ -2388,6 +2505,19 @@ html.reduce-motion .dialogue-dim {
 .settings-section .settings-row {
   border-top: none;
   padding-top: 0;
+}
+
+/* SPEC-045 §4.2: six titled sections — Audio, Display, Controls,
+   Accessibility, Gameplay, Data — each opened by a console section header:
+   small, dim, uppercased by CSS at the shared tracking (plain text shows it
+   as written). A smaller group inside one keeps the same class and rule. */
+.settings-section-title {
+  margin: 0;
+  font-size: var(--type-sm);
+  font-weight: 700;
+  letter-spacing: var(--track);
+  text-transform: uppercase;
+  color: var(--ink-dim);
 }
 
 .settings-row input[type='range'] {
@@ -2414,7 +2544,9 @@ html.reduce-motion .dialogue-dim {
   border-color: var(--shield);
 }
 
+/* SPEC-045 §4.2: a row's note sits under it, in the section's own gap. */
 .settings-note {
+  margin: 0;
   color: var(--ink-dim);
 }
 
@@ -2424,7 +2556,7 @@ html.reduce-motion .dialogue-dim {
   background: #0a0f15;
   color: var(--ink);
   border: 1px solid var(--panel-edge);
-  border-radius: 6px;
+  border-radius: var(--radius);
   font: inherit;
   padding: 6px;
 }
@@ -2506,7 +2638,7 @@ html.reduce-motion .dialogue-dim {
 
 .death-title {
   margin: 0;
-  font-size: clamp(22px, 4vmin, 34px);
+  font-size: calc(clamp(22px, 4vmin, 34px) * var(--text-scale));
   letter-spacing: 0.3em;
   color: var(--hp);
 }
@@ -2580,7 +2712,7 @@ html.reduce-motion .dialogue-dim {
 
 .rotate-glyph {
   margin: 0;
-  font-size: 42px;
+  font-size: calc(42px * var(--text-scale));
 }
 
 .rotate-text {
@@ -2594,7 +2726,7 @@ html.reduce-motion .dialogue-dim {
   left: 50%;
   transform: translateX(-50%);
   padding: 8px 14px;
-  border-radius: 6px;
+  border-radius: var(--radius);
   background: var(--panel);
   border: 1px solid var(--good);
   color: var(--ink);
@@ -2768,7 +2900,7 @@ html.debug .scene-tag {
    §4.5: the title's halo is the theme's, not its own. */
 .menu-title {
   margin: 0;
-  font-size: clamp(28px, 6vmin, 48px);
+  font-size: calc(clamp(28px, 6vmin, 48px) * var(--text-scale));
   letter-spacing: 0.18em;
   text-transform: none;
   color: var(--ink);
@@ -2872,7 +3004,7 @@ html.debug .scene-tag {
   background: #0a0f15;
   color: var(--ink);
   border: 1px solid var(--panel-edge);
-  border-radius: 6px;
+  border-radius: var(--radius);
   font: inherit;
   padding: 6px;
 }
@@ -2880,7 +3012,7 @@ html.debug .scene-tag {
 .menu-hint {
   margin: 0;
   padding: 6px 12px;
-  border-radius: 6px;
+  border-radius: var(--radius);
   border: 1px solid var(--warn);
   background: var(--panel);
   color: var(--warn);
@@ -2889,7 +3021,7 @@ html.debug .scene-tag {
 
 .credits .credits-text {
   margin: 0;
-  font-size: 14px;
+  font-size: var(--type-sm);
   color: var(--ink-dim);
   overflow-y: auto;
   max-height: 40dvh;
@@ -2934,7 +3066,7 @@ html.debug .scene-tag {
 .creation-title {
   margin: 0;
   font-weight: 700;
-  font-size: clamp(18px, 3vmin, 24px);
+  font-size: var(--type-lg);
 }
 
 .creation-subtitle {
@@ -2959,7 +3091,7 @@ html.debug .scene-tag {
   background: #0a0f15;
   color: var(--ink);
   border: 1px solid var(--panel-edge);
-  border-radius: 6px;
+  border-radius: var(--radius);
   font: inherit;
 }
 
@@ -2979,7 +3111,7 @@ html.debug .scene-tag {
   background: #1a232e;
   color: var(--ink);
   border: 1px solid var(--panel-edge);
-  border-radius: 8px;
+  border-radius: var(--radius);
   font: inherit;
   cursor: pointer;
 }
@@ -2996,12 +3128,12 @@ html.debug .scene-tag {
 .class-blurb,
 .class-base {
   color: var(--ink-dim);
-  font-size: 14px;
+  font-size: var(--type-sm);
 }
 
 .class-passive {
   color: var(--good);
-  font-size: 14px;
+  font-size: var(--type-sm);
 }
 
 .portrait-row,
@@ -3014,11 +3146,11 @@ html.debug .scene-tag {
 .portrait {
   width: 44px;
   height: 44px;
-  font-size: 22px;
+  font-size: calc(22px * var(--text-scale));
   background: #1a232e;
   color: var(--ink);
   border: 1px solid var(--panel-edge);
-  border-radius: 8px;
+  border-radius: var(--radius);
   cursor: pointer;
 }
 
@@ -3029,7 +3161,7 @@ html.debug .scene-tag {
   display: block;
   width: 100%;
   height: 100%;
-  border-radius: 7px;
+  border-radius: var(--radius);
   object-fit: cover;
 }
 
@@ -3062,7 +3194,7 @@ html.debug .scene-tag {
   width: 44px;
   height: 44px;
   border: 2px solid var(--panel-edge);
-  border-radius: 8px;
+  border-radius: var(--radius);
   cursor: pointer;
 }
 
@@ -3131,7 +3263,7 @@ html.debug .scene-tag {
   width: clamp(120px, 22vmin, 200px);
   height: clamp(150px, 30vmin, 240px);
   border: 1px solid var(--panel-edge);
-  border-radius: 8px;
+  border-radius: var(--radius);
   background: transparent;
 }
 
@@ -3213,7 +3345,7 @@ html.debug .scene-tag {
 
 .board-row {
   border: 1px solid var(--panel-edge);
-  border-radius: 8px;
+  border-radius: var(--radius);
   padding: 10px;
   display: flex;
   flex-direction: column;
@@ -3250,9 +3382,9 @@ html.debug .scene-tag {
 
 .badge {
   padding: 2px 8px;
-  border-radius: 10px;
+  border-radius: var(--radius);
   border: 1px solid var(--panel-edge);
-  font-size: 14px;
+  font-size: var(--type-sm);
   color: var(--ink-dim);
 }
 
@@ -3268,27 +3400,27 @@ html.debug .scene-tag {
 .board-rewards {
   margin: 0;
   color: var(--good);
-  font-size: 14px;
+  font-size: var(--type-sm);
 }
 
 /* SPEC-039 §4.6: the boss's signature piece, or the lithium in its place. */
 .board-drop {
   margin: 0;
   color: var(--ink-dim);
-  font-size: 14px;
+  font-size: var(--type-sm);
 }
 
 /* SPEC-043 §4.2: the optional objective and what it pays. */
 .board-bonus {
   margin: 0;
   color: var(--ink-dim);
-  font-size: 14px;
+  font-size: var(--type-sm);
 }
 
 /* SPEC-043 §4.5: this device's record, beside the status. */
 .board-best {
   color: var(--good);
-  font-size: 14px;
+  font-size: var(--type-sm);
 }
 
 /* 14-e: long briefs scroll inside the panel, never the body. */
@@ -3300,7 +3432,7 @@ html.debug .scene-tag {
 .board-locked {
   margin: 0;
   color: var(--warn);
-  font-size: 14px;
+  font-size: var(--type-sm);
 }
 
 .board-actions {
@@ -3337,7 +3469,7 @@ html.debug .scene-tag {
 /* SPEC-029 §4.10: the Gear tab's line headings, and the heavy-slot badge. */
 .shop-heading {
   margin: 10px 0 2px;
-  font-size: 12px;
+  font-size: var(--type-xs);
   letter-spacing: 0.08em;
   text-transform: uppercase;
   color: var(--ink-dim);
@@ -3350,7 +3482,7 @@ html.debug .scene-tag {
 
 .shop-row {
   border: 1px solid var(--panel-edge);
-  border-radius: 8px;
+  border-radius: var(--radius);
   padding: 10px;
   display: flex;
   flex-direction: column;
@@ -3378,7 +3510,7 @@ html.debug .scene-tag {
 .shop-stats {
   margin: 0;
   color: var(--ink-dim);
-  font-size: 14px;
+  font-size: var(--type-sm);
 }
 
 /* SPEC-039 §4.6: what the next planet asks for, above the tabs. */
@@ -3386,8 +3518,8 @@ html.debug .scene-tag {
   margin: 0;
   padding: 8px 10px;
   border: 1px solid var(--panel-edge);
-  border-radius: 8px;
-  font-size: 14px;
+  border-radius: var(--radius);
+  font-size: var(--type-sm);
 }
 
 /* SPEC-039 §4.6: the row against the piece worn in its slot. SPEC-042 §4.8:
@@ -3395,21 +3527,21 @@ html.debug .scene-tag {
 .shop-compare {
   margin: 0;
   color: var(--ink-dim);
-  font-size: 14px;
+  font-size: var(--type-sm);
 }
 
 /* SPEC-039 §4.5: the planet that still gates on this system. */
 .shop-gate {
   margin: 0;
   color: var(--warn);
-  font-size: 14px;
+  font-size: var(--type-sm);
   font-weight: 700;
 }
 
 .shop-effect {
   margin: 0;
   color: var(--ink-dim);
-  font-size: 14px;
+  font-size: var(--type-sm);
 }
 
 .shop-effect.is-current {
@@ -3432,7 +3564,7 @@ html.debug .scene-tag {
 /* AC-42: the reason a button refuses, next to the button that refuses. */
 .shop-reason {
   color: var(--warn);
-  font-size: 14px;
+  font-size: var(--type-sm);
 }
 
 .shop-toggle {
@@ -3509,7 +3641,7 @@ html.debug .scene-tag {
   flex: 1;
   min-width: 180px;
   border: 1px solid var(--panel-edge);
-  border-radius: 8px;
+  border-radius: var(--radius);
   padding: 10px;
   display: flex;
   flex-direction: column;
@@ -3550,7 +3682,7 @@ html.debug .scene-tag {
 
 .gear-line {
   color: var(--ink-dim);
-  font-size: 14px;
+  font-size: var(--type-sm);
 }
 
 /* AC-48: the twenty slots. */
@@ -3563,11 +3695,11 @@ html.debug .scene-tag {
 .inv-cell {
   min-height: 56px;
   border: 1px solid var(--panel-edge);
-  border-radius: 6px;
+  border-radius: var(--radius);
   background: #131b24;
   color: var(--ink);
   font: inherit;
-  font-size: 14px;
+  font-size: var(--type-sm);
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -3605,7 +3737,7 @@ html.debug .scene-tag {
 
 .inv-compare {
   color: var(--ink-dim);
-  font-size: 14px;
+  font-size: var(--type-sm);
 }
 
 .res-row {
@@ -3649,7 +3781,7 @@ html.debug .scene-tag {
   border-radius: 50%;
   color: var(--ink);
   font: inherit;
-  font-size: 14px;
+  font-size: var(--type-sm);
   cursor: pointer;
   pointer-events: auto;
   display: flex;
@@ -3673,7 +3805,7 @@ html.debug .scene-tag {
   position: absolute;
   top: 4px;
   right: 2px;
-  font-size: 14px;
+  font-size: var(--type-sm);
 }
 
 .starmap-info {
@@ -3702,12 +3834,12 @@ html.debug .scene-tag {
 .starmap-name {
   margin: 0;
   font-weight: 700;
-  font-size: clamp(16px, 2.6vmin, 22px);
+  font-size: calc(clamp(16px, 2.6vmin, 22px) * var(--text-scale));
 }
 
 .starmap-line {
   margin: 0;
-  font-size: 14px;
+  font-size: var(--type-sm);
 }
 
 .starmap-line.is-short {
@@ -3719,7 +3851,7 @@ html.debug .scene-tag {
   margin: 0;
   padding-left: 4px;
   list-style: none;
-  font-size: 14px;
+  font-size: var(--type-sm);
 }
 
 .req-met {
@@ -3755,66 +3887,10 @@ html.debug .scene-tag {
   }
 }
 
-/* --------------------------- SPEC-011 surface combat demo HUD (SPEC-012 replaces it) */
-/* SPEC-037 §4.2: its `.hud-boss` bar rules went — they matched no element; the
-   real boss bar is an in-flow row of the HUD's top centre. */
-
-/* Read-only chrome never eats a tap; only the buttons opt back in. */
-.combat-hud {
-  position: absolute;
-  inset: 0;
-  pointer-events: none;
-  z-index: 11;
-}
-
-.hud-counters {
-  position: absolute;
-  left: 50%;
-  bottom: calc(max(18px, env(safe-area-inset-bottom)) + 24px);
-  transform: translateX(-50%);
-  margin: 0;
-  font-size: 12px;
-  opacity: 0.85;
-}
-
-.hud-toast {
-  position: absolute;
-  left: 50%;
-  top: max(76px, calc(env(safe-area-inset-top) + 64px));
-  transform: translateX(-50%);
-  margin: 0;
-  font-size: 14px;
-  text-shadow: 0 1px 3px #000;
-}
-
-.hud-death {
-  position: absolute;
-  inset: 0;
-  display: none;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 10px;
-  background: #0d141bd0;
-  pointer-events: auto;
-}
-
-.hud-death.is-visible {
-  display: flex;
-}
-
-.hud-death-title {
-  margin: 0;
-  font-size: 26px;
-  letter-spacing: 0.1em;
-  text-transform: uppercase;
-}
-
-.hud-death-cause {
-  margin: 0;
-  font-size: 14px;
-  opacity: 0.8;
-}
+/* -------------------------------------------- the surface's dev strip (SPEC-011) */
+/* SPEC-045 §4.8: SPEC-011's demo HUD rules are gone — none matched an element,
+   and the boss frame is SPEC-042's `.boss-frame`. What stays styles the dev
+   strip: read-only chrome never eats a tap; only the buttons opt back in. */
 
 .hud-debug {
   position: absolute;
@@ -3915,14 +3991,14 @@ button.hud-button {
   width: min(340px, 44vw);
   height: 6px;
   background: rgba(255, 255, 255, 0.12);
-  border-radius: 3px;
+  border-radius: var(--radius);
 }
 
 .hud-progress-fill {
   position: absolute;
   inset: 0;
   background: var(--good);
-  border-radius: 3px;
+  border-radius: var(--radius);
   transform: scaleX(0);
   transform-origin: left center;
 }
@@ -3950,7 +4026,7 @@ button.hud-button {
   color: var(--warn);
   background: var(--hud-plate);
   padding: 2px 10px;
-  border-radius: 4px;
+  border-radius: var(--radius);
 }
 
 /* The ion-storm static overlay: a repeating scanline sheet, no animation
@@ -3975,7 +4051,7 @@ button.hud-button {
   color: var(--ink);
   background: var(--hud-plate);
   padding: 4px 14px;
-  border-radius: 4px;
+  border-radius: var(--radius);
   border: 1px solid var(--warn);
 }
 
@@ -4007,11 +4083,11 @@ button.hud-button {
   left: 50%;
   bottom: max(12%, calc(env(safe-area-inset-bottom) + 12px));
   transform: translateX(-50%);
-  font-size: 13px;
+  font-size: calc(13px * var(--text-scale));
   color: var(--ink-dim);
   background: rgba(0, 0, 0, 0.45);
   padding: 4px 12px;
-  border-radius: 4px;
+  border-radius: var(--radius);
 }
 
 /* Mounted beside the .hud root, not inside it, so it needs its own rule. */
@@ -4053,7 +4129,7 @@ button.hud-button {
 
 .autopilot-title {
   margin: 0;
-  font-size: 22px;
+  font-size: calc(22px * var(--text-scale));
   letter-spacing: 0.3em;
   color: var(--accent-2);
 }
@@ -4065,7 +4141,7 @@ button.hud-button {
 
 .autopilot-line {
   margin: 0;
-  font-size: 14px;
+  font-size: var(--type-sm);
   color: var(--ink-dim);
 }
 
@@ -4105,7 +4181,7 @@ html.reduce-motion .autopilot-bar-fill {
   right: max(8px, env(safe-area-inset-right));
   display: none;
   padding: 2px 8px;
-  border-radius: 3px;
+  border-radius: var(--radius);
   border: 1px solid var(--accent-2);
   background: rgba(8, 10, 14, 0.85);
   color: var(--accent-2);
@@ -4213,8 +4289,8 @@ html.reduce-motion .autopilot-bar-fill {
   padding: 8px 14px;
   background: var(--panel-glass);
   border: 1px solid var(--panel-edge);
-  border-radius: 8px;
-  font-size: clamp(16px, 2.2vmin + 8px, 22px);
+  border-radius: var(--radius);
+  font-size: calc(clamp(16px, 2.2vmin + 8px, 22px) * var(--text-scale));
   text-align: left;
 }
 
@@ -4291,7 +4367,7 @@ html.reduce-motion .film-caption[data-speaker='warden'] .film-caption-text {
   border: none;
   text-align: center;
   letter-spacing: 0.12em;
-  font-size: clamp(20px, 3.2vmin + 8px, 34px);
+  font-size: calc(clamp(20px, 3.2vmin + 8px, 34px) * var(--text-scale));
   text-shadow: var(--text-glow);
 }
 
@@ -4401,7 +4477,7 @@ html.reduce-motion .film-describe {
 }
 
 .chapter-card-title {
-  font-size: clamp(28px, 6vmin, 56px);
+  font-size: calc(clamp(28px, 6vmin, 56px) * var(--text-scale));
   letter-spacing: 0.08em;
   text-shadow: var(--text-glow);
 }
@@ -4480,7 +4556,7 @@ html.reduce-motion .reveal-bar {
 
 .reveal-name {
   margin: 0;
-  font-size: clamp(28px, 6vmin, 56px);
+  font-size: calc(clamp(28px, 6vmin, 56px) * var(--text-scale));
   letter-spacing: 0.12em;
   color: var(--hp);
   text-shadow: var(--text-glow);
@@ -4623,7 +4699,7 @@ html.reduce-motion .reveal-name.is-glitched {
   flex: 1;
   height: 3px;
   background: rgba(255, 255, 255, 0.14);
-  border-radius: 2px;
+  border-radius: var(--radius);
   overflow: hidden;
 }
 
@@ -4654,8 +4730,10 @@ html.reduce-motion .reveal-name.is-glitched {
   white-space: normal;
 }
 
-/* The two live spans beside the focus row: metres, and a ▲ turned to the
-   target's map bearing. The arrow only ever gets a `transform`. */
+/* The two live spans beside the focus row: metres, and an arrow turned to the
+   target's map bearing. The arrow only ever gets a `transform`. SPEC-045
+   §4.6: it is drawn — an empty span cut to a 10 × 12 arrowhead — since ▲
+   means a warning now. */
 .tracker-dist {
   margin-left: auto;
   color: var(--accent-2);
@@ -4663,8 +4741,13 @@ html.reduce-motion .reveal-name.is-glitched {
 }
 
 .tracker-arrow {
-  color: var(--accent-2);
+  flex: none;
+  align-self: center;
   display: inline-block;
+  width: 10px;
+  height: 12px;
+  background: var(--accent-2);
+  clip-path: polygon(50% 0, 100% 100%, 50% 72%, 0 100%);
 }
 
 .tracker .is-hidden {
@@ -4782,11 +4865,11 @@ html.reduce-motion .waypoint.is-stuck {
   transform: translateX(-50%);
   max-width: min(560px, 88vw);
   padding: 8px 14px;
-  border-radius: 6px;
+  border-radius: var(--radius);
   background: var(--hud-plate);
   border: 1px solid var(--panel-edge);
   color: var(--ink);
-  font-size: 14px;
+  font-size: var(--type-sm);
   text-align: center;
 }
 
@@ -4864,7 +4947,8 @@ html.quality-low .screen::before {
    empty right column, so the body's centre is the frame's centre at every
    width (§4.4: the header's and the body's centres agree). */
 .screen.has-rail .screen-frame {
-  --rail-w: 148px;
+  /* SPEC-045 §4.4: the rail widens with the text size it is read at. */
+  --rail-w: calc(148px * var(--text-scale));
 }
 
 /* §4.4: the star map widens and lets the backdrop through the frame. */
@@ -5601,13 +5685,15 @@ html.reduce-motion .hud-level.is-levelled {
 }
 
 /* §4.4: below a quarter of HP (of hull, in flight) a static red edge — never
-   animated, on any setting; a full-screen layer that takes no touch. */
+   animated, on any setting; a full-screen layer that takes no touch. SPEC-045
+   §4.5: it reads --hp, so the colour-blind preset turns it with every other
+   danger mark. */
 .hud-lowhp {
   position: absolute;
   inset: 0;
   display: none;
   pointer-events: none;
-  background: radial-gradient(ellipse at center, transparent 55%, rgba(229, 72, 77, 0.28));
+  background: radial-gradient(ellipse at center, transparent 55%, color-mix(in srgb, var(--hp) 28%, transparent));
 }
 
 .hud.is-low-hp .hud-lowhp {
@@ -5635,7 +5721,7 @@ html.reduce-motion .tracker-row.is-bumped {
 /* §4.6: `▲ Wave incoming` on the weather banner's pill. */
 .hud-wave {
   padding: 4px 12px;
-  border-radius: 6px;
+  border-radius: var(--radius);
   background: var(--hud-plate);
   color: var(--warn);
   pointer-events: none;
@@ -5668,7 +5754,7 @@ html.reduce-motion .tracker-row.is-bumped {
   width: clamp(280px, 40vw, 640px);
   max-width: 100%;
   height: 12px;
-  border-radius: 6px;
+  border-radius: var(--radius);
   background: rgba(255, 255, 255, 0.12);
   box-shadow: inset 0 0 0 1px var(--panel-edge);
   overflow: hidden;
@@ -5739,7 +5825,7 @@ html.reduce-motion .tracker-row.is-bumped {
 .target-frame-track {
   width: 160px;
   height: 6px;
-  border-radius: 3px;
+  border-radius: var(--radius);
   background: rgba(255, 255, 255, 0.12);
   box-shadow: inset 0 0 0 1px var(--panel-edge);
   overflow: hidden;
@@ -5853,6 +5939,17 @@ html.reduce-motion .tracker-row.is-bumped {
   padding-bottom: 24px;
 }
 
+/* SPEC-045 §4.1: under Manual a whole non-modal line shows the cue too. It
+   keeps left of the 44 × 44 advance control's column, and takes the same line
+   of its own under the text. */
+.dialogue:not(.is-modal) .dialogue-next {
+  right: 52px;
+}
+
+.dialogue:not(.is-modal):has(> .dialogue-next:not([hidden])) {
+  padding-bottom: 24px;
+}
+
 /* §4.4: what a point buys, under each attribute row. */
 .attr-item {
   display: flex;
@@ -5899,7 +5996,7 @@ html.reduce-motion .tracker-row.is-bumped {
 .board-next {
   margin: 0;
   color: var(--accent);
-  font-size: 14px;
+  font-size: var(--type-sm);
 }
 
 /* §4.11: finished work, folded per planet and closed by default. */
@@ -5966,13 +6063,13 @@ html.reduce-motion .tracker-row.is-bumped {
 .terminal-rewards {
   margin: 0;
   color: var(--good);
-  font-size: 14px;
+  font-size: var(--type-sm);
 }
 
 .terminal-brief {
   margin: 0;
   color: var(--ink-dim);
-  font-size: 14px;
+  font-size: var(--type-sm);
 }
 
 .pad-terminal .terminal-offer .ui-btn {
@@ -6085,4 +6182,92 @@ a.credits-licences {
     overflow: hidden;
     text-overflow: ellipsis;
   }
+}
+
+/* ================================================================ SPEC-045 */
+/* §4.1: the comms log — the lines shown since the main menu, in a sheet over
+   the confirm sheet's backdrop: at most 560 px wide and 70dvh tall, its title
+   and Close fixed and only the list scrolling, opened at its end. Each speaker
+   wears the dialogue's colour beside the name, never colour alone, and the
+   text takes the player's text size through `#ui`'s base. */
+.comms-log {
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  width: min(560px, 100vw - 24px);
+  max-height: 70dvh;
+  margin-bottom: max(12px, env(safe-area-inset-bottom));
+  padding: 16px;
+  text-align: left;
+  animation: sheet-in 150ms ease-out;
+}
+
+html.reduce-motion .comms-log {
+  animation: none;
+}
+
+.comms-title {
+  margin: 0;
+  font-weight: 600;
+}
+
+.comms-lines {
+  flex: 0 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.comms-line {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.comms-speaker {
+  font-weight: 700;
+}
+
+.comms-line[data-speaker='aria'] .comms-speaker { color: var(--shield); }
+.comms-line[data-speaker='command'] .comms-speaker { color: var(--warn); }
+.comms-line[data-speaker='scav'] .comms-speaker { color: var(--good); }
+.comms-line[data-speaker='player'] .comms-speaker { color: var(--ink); }
+.comms-line[data-speaker='log'] .comms-speaker { color: var(--good); }
+.comms-line[data-speaker='warden'] .comms-speaker { color: var(--hp); }
+
+.comms-text {
+  color: var(--ink);
+}
+
+.comms-empty {
+  margin: 0;
+  color: var(--ink-dim);
+}
+
+/* §4.5: plain text, opt-in — the console look stays the default. Nothing in
+   `#ui` is uppercased by CSS, or set in small capitals, and nothing is tracked
+   past 0.02 em; the id outranks every label, key and title rule. Labels
+   written in capitals in the source keep them (45-r). */
+html.plain-text #ui *,
+html.plain-text #ui *::before,
+html.plain-text #ui *::after {
+  text-transform: none;
+  font-variant-caps: normal;
+  letter-spacing: 0.02em;
+}
+
+/* …and reading text opens up: the frames' bodies, settings, sheets, the comms
+   log, the dialogue, film captions, toasts and the tip strip, with everything
+   inside them. HUD readouts keep their line heights (*initial tuning*). */
+html.plain-text #ui :is(.screen-body, .settings, .sheet, .comms-log, .dialogue, .film-caption, .toast, .aria-hint),
+html.plain-text #ui :is(.screen-body, .settings, .sheet, .comms-log, .dialogue, .film-caption, .toast, .aria-hint) * {
+  line-height: 1.55;
+  word-spacing: 0.12em;
 }

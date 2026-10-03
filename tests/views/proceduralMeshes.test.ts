@@ -7,17 +7,21 @@
 import { describe, expect, it } from 'vitest';
 import * as THREE from 'three';
 import { Pool } from '@/core/Pool';
-import { ENEMIES, type EnemyDef } from '@/data/index';
+import { ENEMIES, PLANET_IDS, PLANETS, type EnemyDef } from '@/data/index';
 import { makeEnemy, type EnemyEntity } from '@/entities/Enemy';
 import {
   EnemyMeshes,
   FLASH_RIM_SCALE,
   HOSTILE_RIM,
+  HOSTILE_RIM_COLOUR_BLIND,
+  HOSTILE_RIM_UNIFORM,
   INSTANCES_PER_PART,
   RIM_INTENSITY,
   RIM_POWER,
+  setHostileRim,
 } from '@/views/ProceduralMeshes';
 import { nodeCrystalScale } from '@/views/SurfaceView';
+import { DEFICIENCIES, deltaE76 } from '../fixtures/colourVision';
 
 function spawn(pool: Pool<EnemyEntity>, id: keyof typeof ENEMIES, patch: Partial<EnemyEntity> = {}): EnemyEntity {
   const e = pool.alloc();
@@ -351,14 +355,18 @@ function rimScaleAt(parent: THREE.Object3D, slot: number): number {
 }
 
 /** Runs a material's `onBeforeCompile` over the chunk names it patches. */
-function compiled(material: THREE.MeshStandardMaterial): { vertex: string; fragment: string } {
+function compiled(material: THREE.MeshStandardMaterial): {
+  vertex: string;
+  fragment: string;
+  uniforms: Record<string, THREE.IUniform>;
+} {
   const shader = {
     vertexShader: '#include <common>\n#include <begin_vertex>\n',
     fragmentShader: '#include <common>\n#include <emissivemap_fragment>\n',
     uniforms: {},
   } as unknown as Parameters<NonNullable<THREE.MeshStandardMaterial['onBeforeCompile']>>[0];
   material.onBeforeCompile(shader, null as never);
-  return { vertex: shader.vertexShader, fragment: shader.fragmentShader };
+  return { vertex: shader.vertexShader, fragment: shader.fragmentShader, uniforms: shader.uniforms };
 }
 
 describe('the hostile rim (SPEC-035 §4.1)', () => {
@@ -377,7 +385,6 @@ describe('the hostile rim (SPEC-035 §4.1)', () => {
     spawn(pool, 'dust_skitter');
     spawn(pool, 'magma_wraith', { x: 20 });
     meshes.sync(pool, 0);
-    const rim = new THREE.Color(HOSTILE_RIM);
     const all = instancedMeshes(parent);
     expect(all.length).toBeGreaterThan(1);
     for (const mesh of all) {
@@ -389,7 +396,8 @@ describe('the hostile rim (SPEC-035 §4.1)', () => {
       expect(emissiveAtIndex).toBeGreaterThan(0);
       expect(rimAtIndex).toBeGreaterThan(emissiveAtIndex);
       expect(fragment).toContain(`pow( 1.0 - saturate( dot( normal, normalize( vViewPosition ) ) ), ${RIM_POWER.toFixed(6)} )`);
-      expect(fragment).toContain(rim.r.toFixed(6));
+      // SPEC-045 §4.10: the colour is a uniform now, not a baked literal.
+      expect(fragment).toContain('uniform vec3 uHostileRim;');
       expect(fragment).toContain(`${RIM_INTENSITY.toFixed(6)} * hostileRim * vInstanceEmissive.w`);
     }
     meshes.dispose();
@@ -411,5 +419,80 @@ describe('the hostile rim (SPEC-035 §4.1)', () => {
     meshes.sync(pool, 0.2);
     expect(rimScaleAt(parent, 0)).toBe(1);
     meshes.dispose();
+  });
+});
+
+// --------------------------------------------------------------- SPEC-045 §4.5
+
+describe('the colour-blind rim (SPEC-045 §4.5, AC-24, AC-25)', () => {
+  it('is magenta, and every enemy material reads the one shared uniform', () => {
+    expect(HOSTILE_RIM_COLOUR_BLIND).toBe('#ff4fd8');
+    const parent = new THREE.Group();
+    const meshes = new EnemyMeshes(parent);
+    const pool = new Pool(makeEnemy);
+    // A plain recipe, a glowing definition and a recipe whose emissive core
+    // builds a part material of its own: every one of them shares the object.
+    spawn(pool, 'dust_skitter');
+    spawn(pool, 'hive_interceptor', { x: 10 });
+    spawn(pool, 'magma_wraith', { x: 20 });
+    meshes.sync(pool, 0);
+    const all = materials(parent);
+    expect(all.length).toBeGreaterThan(2);
+    for (const material of all) {
+      expect(compiled(material).uniforms['uHostileRim']).toBe(HOSTILE_RIM_UNIFORM);
+      // …and the same object again on a second compile, never a copy.
+      expect(compiled(material).uniforms['uHostileRim']).toBe(HOSTILE_RIM_UNIFORM);
+    }
+    meshes.dispose();
+  });
+
+  it('setHostileRim writes the working-space colour in place, and back', () => {
+    const value = HOSTILE_RIM_UNIFORM.value;
+    try {
+      // The standard preset is the module's starting state: the literal's
+      // colour, converted from sRGB exactly as `new THREE.Color` converts it.
+      expect(value.equals(new THREE.Color(HOSTILE_RIM))).toBe(true);
+      setHostileRim('colour-blind');
+      expect(HOSTILE_RIM_UNIFORM.value).toBe(value); // the same Color, written into
+      expect(value.equals(new THREE.Color(HOSTILE_RIM_COLOUR_BLIND))).toBe(true);
+      expect(value.getHex()).toBe(0xff4fd8);
+      setHostileRim('standard');
+      expect(HOSTILE_RIM_UNIFORM.value).toBe(value);
+      expect(value.equals(new THREE.Color(HOSTILE_RIM))).toBe(true);
+      expect(value.getHex()).toBe(0xff5a3c);
+    } finally {
+      // Module state: whatever happened above, the next test starts standard.
+      setHostileRim('standard');
+    }
+  });
+
+  it('changes no program: the source and the cache key are the same under both presets (45-n)', () => {
+    const parent = new THREE.Group();
+    const meshes = new EnemyMeshes(parent);
+    const pool = new Pool(makeEnemy);
+    spawn(pool, 'dust_skitter');
+    meshes.sync(pool, 0);
+    const material = materials(parent)[0] as THREE.MeshStandardMaterial;
+    try {
+      const standard = compiled(material);
+      setHostileRim('colour-blind');
+      const blind = compiled(material);
+      expect(blind.vertex).toBe(standard.vertex);
+      expect(blind.fragment).toBe(standard.fragment);
+      expect(material.customProgramCacheKey()).toBe('enemy/3');
+    } finally {
+      setHostileRim('standard');
+      meshes.dispose();
+    }
+  });
+
+  it("stays at least 20 ΔE76 from every planet's ground under each simulation", () => {
+    expect(PLANET_IDS.length).toBe(6);
+    for (const type of DEFICIENCIES) {
+      for (const id of PLANET_IDS) {
+        const ground = PLANETS[id].surface.palette.ground;
+        expect(deltaE76(HOSTILE_RIM_COLOUR_BLIND, ground, type), `${type} vs ${id} (${ground})`).toBeGreaterThanOrEqual(20);
+      }
+    }
   });
 });

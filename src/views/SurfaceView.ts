@@ -131,16 +131,26 @@ export interface ShakeState {
 }
 
 /**
- * §4.7, pure so `tests/views/` can pin it: the decaying offset, deterministic
- * from view time; reduce motion forces it to zero (19-g).
+ * SPEC-045 §4.3: `settings.cameraShake` as a 0…1 multiplier. Anything that is
+ * not a positive number reads as 0 — the still camera, never a full one.
  */
-export function shakeOffset(shake: ShakeState, time: number, reduceMotion: boolean, out: THREE.Vector3): void {
-  if (reduceMotion || shake.duration <= 0 || time >= shake.until) {
+function shakeScale(scale: number): number {
+  return scale > 0 ? Math.min(1, scale) : 0;
+}
+
+/**
+ * §4.7, pure so `tests/views/` can pin it: the decaying offset, deterministic
+ * from view time, times `scale` (SPEC-045 §4.3, `settings.cameraShake`). At 0
+ * it is exactly the zero vector — no `-0` from a negative sine (19-g).
+ */
+export function shakeOffset(shake: ShakeState, time: number, scale: number, out: THREE.Vector3): void {
+  const k = shakeScale(scale);
+  if (k === 0 || shake.duration <= 0 || time >= shake.until) {
     out.set(0, 0, 0);
     return;
   }
   const decay = Math.min(1, Math.max(0, (shake.until - time) / shake.duration));
-  out.set(Math.sin(37 * time), 0, Math.cos(29 * time)).multiplyScalar(shake.amplitude * decay);
+  out.set(Math.sin(37 * time), 0, Math.cos(29 * time)).multiplyScalar(shake.amplitude * decay * k);
 }
 
 // ------------------------------------------------------------- SPEC-015 §9
@@ -154,13 +164,15 @@ export function shakeOffset(shake: ShakeState, time: number, reduceMotion: boole
 export const CAMERA_BOB = { amplitude: 0.035, frequency: 7.5, speedFull: 4 } as const;
 
 /**
- * AC-41: how far the bob may move the camera this frame. Reduce motion makes it
- * exactly zero — not "small", zero — so the whole term drops out.
+ * AC-41: how far the bob may move the camera this frame, times `scale`
+ * (SPEC-045 §4.3, `settings.cameraShake`). At 0 it is exactly zero — not
+ * "small", zero — so the whole term drops out.
  */
-export function cameraBobAmplitude(speed: number, reduceMotion: boolean): number {
-  if (reduceMotion) return 0;
+export function cameraBobAmplitude(speed: number, scale: number): number {
+  const k = shakeScale(scale);
+  if (k === 0) return 0;
   const safe = Number.isFinite(speed) ? Math.max(0, speed) : 0;
-  return CAMERA_BOB.amplitude * Math.min(1, safe / CAMERA_BOB.speedFull);
+  return CAMERA_BOB.amplitude * Math.min(1, safe / CAMERA_BOB.speedFull) * k;
 }
 
 /**
@@ -168,8 +180,8 @@ export function cameraBobAmplitude(speed: number, reduceMotion: boolean): number
  * frustum is captured — the same discipline `shakeOffset` follows, so spawn
  * culling and the aim ray are bit-identical whether it moves or not (§4.7).
  */
-export function cameraBob(speed: number, time: number, reduceMotion: boolean): number {
-  const amplitude = cameraBobAmplitude(speed, reduceMotion);
+export function cameraBob(speed: number, time: number, scale: number): number {
+  const amplitude = cameraBobAmplitude(speed, scale);
   return amplitude === 0 ? 0 : amplitude * Math.sin(time * CAMERA_BOB.frequency);
 }
 

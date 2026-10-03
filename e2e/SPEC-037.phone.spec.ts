@@ -26,7 +26,7 @@ const CREATION = {
 } as const;
 
 /** The busy state's toast (§6.3 case 1) — SPEC-034's two-line shipped-home line. */
-const SHIPPED = 'Hold full — surplus shipped to Command Relay.';
+const SHIPPED = 'Cargo full — surplus shipped to Command Relay.';
 
 const QUICK_BAR = ['qb-sidearm', 'qb-primary', 'qb-heavy', 'qb-heal', 'qb-explosive', 'qb-utility'] as const;
 
@@ -258,10 +258,16 @@ for (const size of PHONE_VIEWPORTS) {
           expect(aimed, 'the drag aimed from the play surface').toBe(true);
         }
 
-        // `›` advances the line; once it ends, a held toast shows.
+        // `›` advances the line; once it ends, a held toast shows. SPEC-045
+        // §4.1: the line's hold runs from when it is whole, so it can still
+        // run out between the check and the tap — a tap that finds the line
+        // gone has nothing left to advance, and one that misses a line still
+        // up fails.
         const advance = page.getByTestId('dialogue-advance');
         for (let i = 0; i < 6 && (await dialogue.isVisible()); i++) {
-          await advance.tap();
+          await advance.tap({ timeout: 10_000 }).catch(async (error: unknown) => {
+            if (await dialogue.isVisible()) throw error;
+          });
           await page.waitForTimeout(150);
         }
         await expect(dialogue).toBeHidden();

@@ -30,9 +30,11 @@ import {
   type HudKey,
   type HudModel,
 } from '@/systems/UiHelpers';
+import { GLYPHS } from '@/data/glossary';
 import { RESOURCE_IDS, type ResourceId } from '@/data/index';
+import { multiplier, seconds } from '@/systems/Format';
 import { el, testId, type UiRoot } from '@/ui/dom';
-import { RESOURCE_GLYPHS, TOKEN_GLYPH } from '@/ui/glyphs';
+import { RESOURCE_GLYPHS } from '@/ui/glyphs';
 import { EFFECT_GLYPHS } from '@/ui/icons';
 import { QuickBar, type QuickBarHandlers } from '@/ui/QuickBar';
 import { Tracker } from '@/ui/Tracker';
@@ -111,12 +113,13 @@ export class Hud {
   #lastEdgeAt = -Infinity;
   #flashMode: DamageFlashMode = 'full';
 
-  // Cached nodes, written only when their key diffs.
-  readonly #hp = bar('hp', '♥', 'Hull points');
+  // Cached nodes, written only when their key diffs. SPEC-045 §4.6: the
+  // salvager's bar is announced as Health; Hull and Shield are the ship's.
+  readonly #hp = bar('hp', GLYPHS.health, 'Health');
   readonly #xp = bar('xp', '', 'Experience');
-  readonly #shield = bar('shield', '⛨', 'Shield');
+  readonly #shield = bar('shield', GLYPHS.shield, 'Shield');
   /** SPEC-035 §4.9: the ship's hull has its own glyph — two hearts read as one bar. */
-  readonly #hull = bar('hull', '⛭', 'Hull');
+  readonly #hull = bar('hull', GLYPHS.hull, 'Hull');
   readonly #level = el('span', 'hud-level');
   readonly #tokens = el('span', 'hud-tokens');
   readonly #resources = {} as Record<ResourceId, HTMLSpanElement>;
@@ -127,7 +130,7 @@ export class Hud {
   /** SPEC-030 D-11: always in the DOM, hidden while `shelter === 'none'`. */
   readonly #shelter = testId(el('div', 'hud-shelter is-hidden'), 'sheltered');
   /** SPEC-042 §4.6: `▲ Wave incoming`, on the weather banner's pill, under the shelter chip. */
-  readonly #wave = testId(el('div', 'hud-wave is-hidden', '▲ Wave incoming'), 'hud-wave');
+  readonly #wave = testId(el('div', 'hud-wave is-hidden', `${GLYPHS.warn} Wave incoming`), 'hud-wave');
   /**
    * SPEC-042 §4.9: the boss frame — the name over its own `--bar-boss` bar,
    * a tick at each later phase, and `Phase N` for 2 s at a turn. It took the
@@ -268,7 +271,7 @@ export class Hud {
       const wallet = testId(el('div', 'hud-wallet'), 'hud-wallet');
       wallet.setAttribute('aria-label', 'Wallet');
       const tokens = el('span', 'res res-tokens');
-      tokens.append(el('span', 'glyph', TOKEN_GLYPH), this.#tokens);
+      tokens.append(el('span', 'glyph', GLYPHS.tokens), this.#tokens);
       wallet.append(tokens);
       for (const resource of RESOURCE_IDS) {
         const row = el('span', 'res');
@@ -299,7 +302,7 @@ export class Hud {
     if (mode === 'flight') {
       this.#progress.append(this.#progressFill, this.#markers);
       this.#progress.setAttribute('aria-label', 'Trip progress');
-      this.#storm.textContent = '▲ Ion storm';
+      this.#storm.textContent = `${GLYPHS.warn} Ion storm`;
       this.#holding.textContent = HOLD_HOSTILES;
       this.#hostiles.classList.add('is-hidden');
       this.#storm.classList.add('is-hidden');
@@ -648,12 +651,13 @@ export class Hud {
         return;
       }
       case 'weather': {
+        // SPEC-045 §4.7: `▲ Heatwave — 10 s`, `▲ Heatwave in 10 s`.
         const { warning, active, secondsLeft } = m.weather;
         const text =
           active !== null
-            ? `▲ ${label(active)} — ${Math.ceil(secondsLeft)}s`
+            ? `${GLYPHS.warn} ${label(active)} — ${seconds(secondsLeft)}`
             : warning !== null
-              ? `▲ ${label(warning)} in ${Math.ceil(secondsLeft)}s`
+              ? `${GLYPHS.warn} ${label(warning)} in ${seconds(secondsLeft)}`
               : '';
         this.#weather.textContent = text;
         this.#weather.classList.toggle('is-hidden', text === '');
@@ -702,7 +706,8 @@ export class Hud {
         if (m.flight === undefined || this.#mode !== 'flight') return;
         this.#setBar(this.#shield, m.flight.shield);
         this.#setBar(this.#hull, m.flight.hull);
-        const throttle = `THR ${m.flight.throttle.toFixed(1)}×`;
+        // SPEC-045 §4.7: the word, not `THR` — `Throttle 1.0×`.
+        const throttle = `Throttle ${multiplier(m.flight.throttle)}`;
         if (this.#throttle.textContent !== throttle) this.#throttle.textContent = throttle;
         this.#progressFill.style.transform = `scaleX(${Math.max(0, Math.min(1, m.flight.progress))})`;
         const hostiles = m.flight.hostiles > 0 ? `Hostiles: ${m.flight.hostiles}` : '';
@@ -735,18 +740,18 @@ export class Hud {
     const effects = this.model.effects;
     for (const kind of EFFECT_KINDS) {
       const chip = this.#effects[kind];
-      let seconds = -1;
+      let left = -1;
       for (let i = 0; i < effects.length; i++) {
         const effect = effects[i];
-        if (effect !== undefined && effect.kind === kind) seconds = Math.max(0, effect.seconds);
+        if (effect !== undefined && effect.kind === kind) left = Math.max(0, effect.seconds);
       }
-      if (seconds === chip.seconds) continue;
-      chip.node.classList.toggle('is-hidden', seconds < 0);
-      if (seconds >= 0) {
-        chip.node.textContent = `${EFFECT_GLYPHS[kind]} ${seconds} s`;
-        chip.node.setAttribute('aria-label', `${EFFECT_WORDS[kind]}, ${seconds} seconds`);
+      if (left === chip.seconds) continue;
+      chip.node.classList.toggle('is-hidden', left < 0);
+      if (left >= 0) {
+        chip.node.textContent = `${EFFECT_GLYPHS[kind]} ${seconds(left)}`;
+        chip.node.setAttribute('aria-label', `${EFFECT_WORDS[kind]}, ${left} seconds`);
       }
-      chip.seconds = seconds;
+      chip.seconds = left;
     }
   }
 

@@ -146,9 +146,9 @@ interface Opened {
  * own, so it runs straight after it in the same dispatch — even for a press
  * the line stopped). The judgement is read in the page, at the press: a round
  * trip on a loaded container can take half a second, and a line types for
- * about 1.7 s while a non-modal one moves on by itself 6 s after it opens
- * (`AUTO_ADVANCE_MS`), so what the test reads afterwards could be the line's
- * own doing rather than the key's.
+ * about 1.7 s while a non-modal one moves on by itself once its hold runs out
+ * (`holdMs`: at least 3 s from when it is whole, SPEC-045 §4.1), so what the
+ * test reads afterwards could be the line's own doing rather than the key's.
  */
 async function playWatched(page: Page, id: string, options: { graceKey?: string } = {}): Promise<Opened> {
   return page.evaluate(

@@ -51,7 +51,8 @@ export const CONTROL_ROWS: Readonly<Record<'keyboard' | 'touch', readonly Contro
     { what: 'Aim & fire', how: 'Drag on the right side — auto-fire shoots for you' },
     // SPEC-038 §4.9: the thumb arc's corner cell.
     { what: 'Dash', how: 'DASH button' },
-    { what: 'Throttle (flight)', how: '▲ / ▼ buttons' },
+    // SPEC-045 §4.6: the buttons read + and −, as they are drawn.
+    { what: 'Throttle (flight)', how: '+ / − buttons' },
     // SPEC-028 §4.5: the bar doubles as the touch buttons. SPEC-037 §4.10:
     // it is the only way now — the weapon-cycle and item buttons are gone.
     { what: 'Switch weapon', how: 'Tap a weapon on the bar' },

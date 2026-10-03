@@ -8,7 +8,8 @@
 // mesh each, player shots instanced capsules, enemy shots instanced spheres,
 // explosions one pooled particle cloud, the planet one sphere, and the cockpit
 // a static frame glued to the camera. The camera lags the ship at 10/s and
-// rolls with the bank (reduce-motion: roll capped at 8°, no shake).
+// rolls with the bank (reduce-motion: roll capped at 8°); a hit's shake
+// follows the camera-shake setting (SPEC-045 §4.3).
 //
 // Everything starts as primitives, which need no download, and `useArt()`
 // swaps in the art the scene loads for the trip (PLAN R8, SPEC-020 §4.8): the
@@ -884,10 +885,15 @@ export class FlightView {
     for (let v = 0; v < this.#hitFlashRocks.length; v++) this.#hitFlashRockCounts.push(0);
   }
 
-  /** A hit landed: kick the cockpit (reduce-motion: the HUD vignette is all). */
-  kick(strength = 1): void {
-    if (this.#reduceMotion) return;
-    this.#shake = Math.min(1.5, this.#shake + 0.4 * strength);
+  /**
+   * A hit landed: kick the cockpit. SPEC-045 §4.3: `strength` is
+   * `settings.cameraShake`, a 0…1 scale on both the kick and its ceiling, and
+   * at 0 nothing changes — the HUD vignette is all.
+   */
+  kick(strength: number): void {
+    if (!(strength > 0)) return;
+    const k = Math.min(1, strength);
+    this.#shake = Math.min(1.5 * k, this.#shake + 0.4 * k);
   }
 
   /** Landing cutscene progress 0..1: pitch down, planet fills the view (§4.1). */

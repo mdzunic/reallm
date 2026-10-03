@@ -1831,3 +1831,50 @@ On the reference phone:
 Then, on either:
 
 - [ ] read the credits and the storage block.
+
+## SPEC-045 — settings and accessibility: sections, scale, motion, colour and one voice (M7f)
+
+- **Build:** `spec/SPEC-045` — untagged
+- **Devices:**
+  - desktop — headless Chromium at 1280 × 720, 1920 × 1080, 1920 × 1000 (screen 1920 × 1080) and
+    2560 × 1080 (Playwright, Linux container, **software GL / SwiftShader**)
+  - phone — Chromium's 844 × 390 touch context and the `phone-landscape` matrix, for the scheme's rows
+    and the neighbours' layouts only; _no handset in the build container_ (§7's pass is owed, below)
+
+Recorded from the container the branch was built in: `npm run check` — 104
+files and 2,280 tests, none skipped — and, a few files per invocation,
+`e2e/SPEC-045.spec.ts` (§6.2's seventeen cases in twenty-one tests, all green
+under four workers), the files whose literals §4.10 moves (`SPEC-012`,
+`SPEC-013`, `SPEC-014`, `SPEC-027`, `SPEC-034`, `SPEC-036`, `SPEC-039`,
+`SPEC-042` and the two phone matrices), and `SPEC-006`, whose `sfxBuses` pin
+holds. Under four workers on software GL, five cases outside this spec ran out
+of their in-game time (`SPEC-006` ×3, `SPEC-012` ×2, `SPEC-036` 17, one
+`SPEC-037.phone` dialogue tap); each passed alone.
+
+| Area | What the container showed |
+|---|---|
+| Hold | Slow, typewriter off: `c3_m3_done`'s 82-character line stayed 7 s and gave way to ARIA's line before 9.5 s |
+| Manual | `c2_m3_done`'s first line still up after 15 s with `▸ Enter`; Enter showed the second |
+| Comms log | `station-tab-comms` listed Earth Command then ARIA, in their colours; Escape gave focus back to the rail; `pause-comms` opened it on the surface; after the menu it read `No transmissions yet.` |
+| Sections | six titled sections in order; Mouse steer and UI scale on the keyboard, Joystick side and Button size on touch |
+| Reduce motion | the toggle pressed shake Off, flash Subtle, films Stills and cleared typewriter; Films → Video left the other three; the store matched |
+| UI scale | 150 % at 1280 × 720: the quick bar 1.5 × as wide about the same centre, every corner box in view; 115 % and 130 % at 1920 × 1080: no overlaps; 1920 × 1000 on a 1080 screen read 115 % without storing it |
+| Text size | 140 %: the reading text 1.4 × (25.2 / 19.6 px), `hud-hp` unchanged, no `.ui-btn` clipped |
+| Ultrawide | 2560 × 1080: `.hud-tl` at 320 px, `.hud-br` ending at 2240 px, the vignette 2560 px wide |
+| Plain text, colour | no uppercase, 0.02 em; the dialogue at 1.55; `✓` / `✗` / `▲` toasts; the colour-blind borders `rgb(63, 182, 255)` and `rgb(255, 138, 31)` |
+| Words, formats | `Health`, `Gadget slot`, the touch throttle's `+` / `−`; no `\d%`-style text in the station, star map, settings or either HUD; `Throttle 1.0×` |
+| Sound, brightness, invert | `ui_blip` at 0.5 and `bug_pop` at 1 with Interface at 50 %; Mono folded Howler's master gain to one channel; +30 % brightness read exposure 1.3 on the menu; Invert turned W the other way |
+
+**Owed on hardware (§7).** On desktop:
+
+- [ ] play a chapter at Normal and read every non-modal line; switch to Manual in a fight and read a missed line in the comms log;
+- [ ] try each UI scale at 1920 × 1080 and 1280 × 720, and each text size in the station and the settings panel;
+- [ ] turn Reduce motion on, then Films back to Video, and watch a departure;
+- [ ] play a surface stretch with Plain text, then with the colour-blind preset — a purchase refusal, a purchase, and enemies on Eden;
+- [ ] check Brightness in Ferrum and on Vetra's snow.
+
+On the reference phone:
+
+- [ ] the settings rows match the phone (no Mouse steer, a Button size row);
+- [ ] Text size 140 % — a dialogue, a toast and the station;
+- [ ] Mono with one earbud in.

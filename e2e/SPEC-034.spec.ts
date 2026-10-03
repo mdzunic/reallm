@@ -243,7 +243,7 @@ test('7. the tracker shows the defended beacon at 100 %', async ({ page }) => {
 
   const bar = page.locator('[data-testid="tracker-defend-hp"]');
   await expect(bar).toBeVisible();
-  await expect(bar).toContainText('100%');
+  await expect(bar).toContainText('100 %');
 });
 
 // ------------------------------------------------------------------ the pin

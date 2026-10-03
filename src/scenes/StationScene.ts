@@ -22,6 +22,7 @@ import { Progression } from '@/systems/Progression';
 import { endingPending, interludeToPlay, LINE_LEDGER, stayReport } from '@/systems/StoryBeats';
 import { director } from '@/scenes/Director';
 import { CharacterPanel } from '@/ui/CharacterPanel';
+import { openCommsLog } from '@/ui/CommsLog';
 import { dialogueLayer } from '@/ui/DialogueUI';
 import { el, h, testId } from '@/ui/dom';
 import { clearEndingOverlays, EndingOverlay } from '@/ui/EndingOverlay';
@@ -54,6 +55,8 @@ export class StationScene extends UiScene<'station'> {
   #leaving = false;
   /** False from `dispose()`; what an awaited film comes back to (SPEC-023 §4.3). */
   #alive = true;
+  /** SPEC-045 §4.1: the open comms log's close, or `null`. */
+  #closeComms: (() => void) | null = null;
 
   constructor(services: GameServices) {
     super(services, 'station', 'station');
@@ -276,7 +279,8 @@ export class StationScene extends UiScene<'station'> {
     const dialogue = dialogueLayer(this.services.uiRoot, this.services.events, {
       input: this.services.input,
       saveKey: () => this.services.save.current,
-      reduceMotion: () => this.services.settings.get().reduceMotion,
+      typewriter: () => this.services.settings.get().typewriter,
+      speed: () => this.services.settings.get().dialogueSpeed,
     });
     for (const id of LINE_LEDGER.completedThisTrip(data)) {
       const done = `${id}_done`;
@@ -295,6 +299,8 @@ export class StationScene extends UiScene<'station'> {
       settings: this.services.settings,
       save: this.services.save,
       renderer: this.services.renderer,
+      // SPEC-045 §4.2: the rows follow the hands the player is using.
+      scheme: () => this.services.input.state.scheme,
       // SPEC-015 AC-20: `Re-detect` runs the real boot benchmark.
       redetect: this.services.detectQuality?.bind(this.services),
       onReset: () => this.#quit(false),
@@ -358,6 +364,8 @@ export class StationScene extends UiScene<'station'> {
     // SPEC-015 §10: a build that lands while the station is open grows its
     // Update row without the screen having to poll for it (AC-52).
     this.disposer.add(this.services.events.on('app:update-ready', () => this.#renderRail(), this));
+    // SPEC-045 §4.1: an open comms log closes with the scene, before its screen.
+    this.disposer.add(() => this.#closeComms?.());
     if (data === null) {
       this.#renderRail();
       this.#panelBox.replaceChildren(h('p', { class: 'settings-note station-empty' }, 'No save loaded.'));
@@ -395,12 +403,34 @@ export class StationScene extends UiScene<'station'> {
       section('character', 'Character'),
       action('starmap', 'Star Map ›', () => this.#starmap(), active),
       action('settings', 'Settings', () => this.#settings?.show()),
+      // SPEC-045 §4.1: the lines the dialogue layer showed this run.
+      action('comms', 'Comms log', () => this.#openComms()),
       action('quit', 'Quit to menu', () => this.#quit(true)),
       // SPEC-015 AC-52: the station is the other safe moment to restart into a
       // new build; the row only exists while one is waiting (15-c).
       ...(updateReady() ? [action('update', 'Update', () => applyUpdate())] : []),
     ]);
     this.#panelBox?.setAttribute('aria-labelledby', `station-tab-${this.#tab}`);
+  }
+
+  /**
+   * SPEC-045 §4.1: the comms log over the station — the page-lifetime dialogue
+   * layer's, so the debrief lines played on this entry are in it. Closed with
+   * the scene; Escape and `comms-log-close` give focus back to the rail.
+   */
+  #openComms(): void {
+    this.#closeComms?.();
+    const dialogue = dialogueLayer(this.services.uiRoot, this.services.events, {
+      input: this.services.input,
+      saveKey: () => this.services.save.current,
+      typewriter: () => this.services.settings.get().typewriter,
+      speed: () => this.services.settings.get().dialogueSpeed,
+    });
+    const close = openCommsLog(this.ui, dialogue.log);
+    this.#closeComms = (): void => {
+      this.#closeComms = null;
+      close();
+    };
   }
 
   #openTab(tab: StationTab): void {

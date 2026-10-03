@@ -7,8 +7,10 @@ import { setLogSink, type LogSink } from '@/core/Log';
 import {
   createSettings,
   defaultSettings,
+  defaultUiScale,
   MAX_BUTTON_SCALE,
   MIN_BUTTON_SCALE,
+  reduceMotionPreset,
   SETTINGS_KEY,
   SETTINGS_VERSION,
   type Settings,
@@ -306,8 +308,22 @@ describe('the settings object (SPEC-007 §3)', () => {
       sfx: 1,
       quality: null,
       reduceMotion: false,
+      // SPEC-045 §4.3: the reduce-motion preset's "off" values.
+      cameraShake: 1,
       // SPEC-037 §4.6: the damage flash is full unless reduced motion is asked for.
       damageFlash: 'full',
+      filmMode: 'video',
+      typewriter: true,
+      // SPEC-045 §4.1, §4.4, §4.5, §4.9: the settings this spec adds.
+      dialogueSpeed: 'normal',
+      uiScale: 1,
+      textScale: 1,
+      plainText: false,
+      colourPreset: 'standard',
+      brightness: 0,
+      mono: false,
+      volumeInterface: 1,
+      invertFlightY: false,
       // SPEC-038 §4.7: auto-fire is on by default.
       autoFire: 'on',
       weaponAutoSwap: 'touch',
@@ -722,5 +738,183 @@ describe('bestTimes (SPEC-043 §4.5)', () => {
     const settings = createSettings(fakeStorage().storage);
     settings.set({ bestTimes: { c1_m2: 99, c1_s1: 'x', c9_m9: 4 } as unknown as Settings['bestTimes'] });
     expect(settings.get().bestTimes).toEqual({ c1_m2: 99 });
+  });
+});
+
+describe('the reduce-motion preset (SPEC-045 §4.3)', () => {
+  it('gives the four seeded settings for each value of reduce motion', () => {
+    expect(reduceMotionPreset(true)).toEqual({
+      reduceMotion: true,
+      cameraShake: 0,
+      damageFlash: 'subtle',
+      filmMode: 'stills',
+      typewriter: false,
+    });
+    expect(reduceMotionPreset(false)).toEqual({
+      reduceMotion: false,
+      cameraShake: 1,
+      damageFlash: 'full',
+      filmMode: 'video',
+      typewriter: true,
+    });
+  });
+
+  it('defaults the four to the "on" preset where the platform asks for reduced motion', () => {
+    withReducedMotion(() => {
+      expect(defaultSettings()).toMatchObject(reduceMotionPreset(true));
+      expect(createSettings(fakeStorage().storage).get()).toMatchObject(reduceMotionPreset(true));
+    });
+    expect(createSettings(fakeStorage().storage).get()).toMatchObject(reduceMotionPreset(false));
+  });
+
+  it('seeds the four a stored reduceMotion has never seen, and keeps the ones stored (45-a)', () => {
+    // A store from before this spec: reduce motion on, none of the four.
+    expect(createSettings(fakeStorage('{"reduceMotion":true}').storage).get()).toMatchObject(reduceMotionPreset(true));
+    // A stored choice of one of them is the player's, and is kept.
+    expect(createSettings(fakeStorage('{"reduceMotion":true,"filmMode":"video"}').storage).get()).toMatchObject({
+      reduceMotion: true,
+      cameraShake: 0,
+      damageFlash: 'subtle',
+      filmMode: 'video',
+      typewriter: false,
+    });
+    // The other way round on a platform that asks for reduced motion.
+    withReducedMotion(() => {
+      expect(createSettings(fakeStorage('{"reduceMotion":false}').storage).get()).toMatchObject(reduceMotionPreset(false));
+    });
+  });
+
+  it('writes all five keys in one set() and one settings:changed (AC-11)', () => {
+    const fake = fakeStorage();
+    const events = eventRecorder();
+    const settings = createSettings(fake.storage, events);
+    settings.set(reduceMotionPreset(true));
+    expect(events.patches).toEqual([reduceMotionPreset(true)]);
+    expect(stored(fake)).toEqual({ version: SETTINGS_VERSION, ...reduceMotionPreset(true) });
+    // One of the four on its own changes only that one (45-b).
+    settings.set({ filmMode: 'video' });
+    expect(events.patches.at(-1)).toEqual({ filmMode: 'video' });
+    expect(settings.get()).toMatchObject({ reduceMotion: true, cameraShake: 0, damageFlash: 'subtle', typewriter: false });
+    // Toggling reduce motion again re-seeds all four.
+    settings.set(reduceMotionPreset(true));
+    expect(settings.get().filmMode).toBe('stills');
+  });
+
+  it('reads an unusable stored seeded value as the stored flag\'s preset (45-m)', () => {
+    muteLog();
+    expect(createSettings(fakeStorage('{"cameraShake":0.3}').storage).get().cameraShake).toBe(1);
+    expect(createSettings(fakeStorage('{"reduceMotion":true,"cameraShake":0.3}').storage).get().cameraShake).toBe(0);
+    expect(createSettings(fakeStorage('{"reduceMotion":true,"filmMode":"vhs"}').storage).get().filmMode).toBe('stills');
+    expect(createSettings(fakeStorage('{"reduceMotion":true,"typewriter":"no"}').storage).get().typewriter).toBe(false);
+    expect(createSettings(fakeStorage('{"reduceMotion":true,"damageFlash":"strobe"}').storage).get().damageFlash).toBe('subtle');
+    expect(createSettings(fakeStorage('{"reduceMotion":false,"damageFlash":"strobe"}').storage).get().damageFlash).toBe('full');
+    // Each of the three camera-shake steps round-trips.
+    const fake = fakeStorage();
+    const settings = createSettings(fake.storage);
+    for (const step of [0, 0.5, 1] as const) {
+      settings.set({ cameraShake: step });
+      expect(createSettings(fake.storage).get().cameraShake).toBe(step);
+    }
+    // A setter's unusable value keeps what is there.
+    settings.set({ cameraShake: 0.5 });
+    settings.set({ cameraShake: 0.7 as unknown as Settings['cameraShake'], filmMode: 'gif' as unknown as Settings['filmMode'] });
+    expect(settings.get().cameraShake).toBe(0.5);
+    expect(settings.get().filmMode).toBe('video');
+  });
+});
+
+describe('the settings SPEC-045 adds (§4.1, §4.4, §4.5, §4.9)', () => {
+  it('defaults UI scale to 115 % on a large screen and a tall window at boot, else 100 % (§4.4)', () => {
+    expect(defaultUiScale({ screenShort: 1080, innerHeight: 950 })).toBe(1.15);
+    expect(defaultUiScale({ screenShort: 1080, innerHeight: 720 })).toBe(1);
+    expect(defaultUiScale({ screenShort: 900, innerHeight: 900 })).toBe(1);
+    expect(defaultUiScale({ screenShort: 1000, innerHeight: 900 })).toBe(1.15);
+    // In node there is no screen, so the default reads 1.
+    expect(defaultSettings().uiScale).toBe(1);
+  });
+
+  it('reads the boot screen and window for the UI scale default', () => {
+    const scope = globalThis as { screen?: unknown; innerHeight?: unknown };
+    const before = { screen: scope.screen, innerHeight: scope.innerHeight };
+    scope.screen = { width: 1920, height: 1080 };
+    scope.innerHeight = 1000;
+    try {
+      expect(defaultSettings().uiScale).toBe(1.15);
+      // A stored scale outside the four reads that default (45-m).
+      muteLog();
+      expect(createSettings(fakeStorage('{"uiScale":0.85}').storage).get().uiScale).toBe(1.15);
+      expect(createSettings(fakeStorage('{"uiScale":1.3}').storage).get().uiScale).toBe(1.3);
+      scope.innerHeight = 720;
+      expect(defaultSettings().uiScale).toBe(1);
+    } finally {
+      if (before.screen === undefined) delete scope.screen;
+      else scope.screen = before.screen;
+      if (before.innerHeight === undefined) delete scope.innerHeight;
+      else scope.innerHeight = before.innerHeight;
+    }
+  });
+
+  it('takes each listed scale and step, and reads anything else as the default (45-m)', () => {
+    muteLog();
+    const fake = fakeStorage();
+    const settings = createSettings(fake.storage);
+    for (const uiScale of [1, 1.15, 1.3, 1.5] as const) {
+      settings.set({ uiScale });
+      expect(createSettings(fake.storage).get().uiScale).toBe(uiScale);
+    }
+    for (const textScale of [1, 1.2, 1.4] as const) {
+      settings.set({ textScale });
+      expect(createSettings(fake.storage).get().textScale).toBe(textScale);
+    }
+    for (const dialogueSpeed of ['slow', 'normal', 'fast', 'manual'] as const) {
+      settings.set({ dialogueSpeed });
+      expect(createSettings(fake.storage).get().dialogueSpeed).toBe(dialogueSpeed);
+    }
+    expect(createSettings(fakeStorage('{"textScale":2}').storage).get().textScale).toBe(1);
+    expect(createSettings(fakeStorage('{"dialogueSpeed":"warp"}').storage).get().dialogueSpeed).toBe('normal');
+    expect(createSettings(fakeStorage('{"colourPreset":"sepia"}').storage).get().colourPreset).toBe('standard');
+    expect(createSettings(fakeStorage('{"colourPreset":"colour-blind"}').storage).get().colourPreset).toBe('colour-blind');
+    // A setter's unusable value keeps what is there.
+    settings.set({ uiScale: 1.3, textScale: 1.2 });
+    settings.set({ uiScale: 0.85 as unknown as Settings['uiScale'], textScale: 2 as unknown as Settings['textScale'] });
+    expect(settings.get()).toMatchObject({ uiScale: 1.3, textScale: 1.2 });
+  });
+
+  it('round-trips the booleans, and an unusable stored one reads its default', () => {
+    muteLog();
+    const fake = fakeStorage();
+    const settings = createSettings(fake.storage);
+    settings.set({ plainText: true, mono: true, invertFlightY: true });
+    expect(createSettings(fake.storage).get()).toMatchObject({ plainText: true, mono: true, invertFlightY: true });
+    expect(createSettings(fakeStorage('{"plainText":"yes","mono":1,"invertFlightY":null}').storage).get()).toMatchObject({
+      plainText: false,
+      mono: false,
+      invertFlightY: false,
+    });
+  });
+
+  it('clamps brightness on set and reads an out-of-range stored value as 0 (§4.9)', () => {
+    muteLog();
+    const settings = createSettings(fakeStorage().storage);
+    settings.set({ brightness: 0.9 });
+    expect(settings.get().brightness).toBe(0.3);
+    settings.set({ brightness: -2 });
+    expect(settings.get().brightness).toBe(-0.3);
+    settings.set({ brightness: Number.NaN });
+    expect(settings.get().brightness).toBe(-0.3); // NaN keeps what was there
+    expect(createSettings(fakeStorage('{"brightness":0.15}').storage).get().brightness).toBe(0.15);
+    expect(createSettings(fakeStorage('{"brightness":0.6}').storage).get().brightness).toBe(0);
+    expect(createSettings(fakeStorage('{"brightness":"bright"}').storage).get().brightness).toBe(0);
+  });
+
+  it('treats the interface volume as a volume (§4.9)', () => {
+    muteLog();
+    const settings = createSettings(fakeStorage().storage);
+    settings.set({ volumeInterface: 1.4 });
+    expect(settings.get().volumeInterface).toBe(1);
+    settings.set({ volumeInterface: -1 });
+    expect(settings.get().volumeInterface).toBe(0);
+    expect(createSettings(fakeStorage('{"volumeInterface":0.5}').storage).get().volumeInterface).toBe(0.5);
+    expect(createSettings(fakeStorage('{"volumeInterface":3}').storage).get().volumeInterface).toBe(1);
   });
 });

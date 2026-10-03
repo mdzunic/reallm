@@ -47,7 +47,7 @@ import { AriaHint } from '@/ui/AriaHint';
 import { el, h, shortScreen, testId } from '@/ui/dom';
 import { Hud } from '@/ui/Hud';
 import { MissionBanner } from '@/ui/MissionBanner';
-import { PauseMenu } from '@/ui/PauseMenu';
+import { PauseMenu, withComms } from '@/ui/PauseMenu';
 import { RotateOverlay } from '@/ui/RotateOverlay';
 import { TouchControls } from '@/ui/TouchControls';
 import { FlightView } from '@/views/FlightView';
@@ -281,7 +281,9 @@ export class FlightScene extends UiScene<'flight'> {
       // SPEC-037 §4.6: an ion-storm tick never flashes — the storm pill and the
       // static already say it — but the view still kicks.
       if (source !== 'storm') this.#hud?.damageFlash();
-      this.#view?.kick();
+      // SPEC-045 §4.3: the kick follows Camera shake — half at 0.5, and at 0
+      // (which reduce motion sets) nothing moves.
+      this.#view?.kick(this.services.settings.get().cameraShake);
     }, this));
     // SPEC-034 §4.10 step 2: a flight mission that finishes in flight is
     // debriefed in flight, and the ledger keeps the station from saying it again.
@@ -432,7 +434,8 @@ export class FlightScene extends UiScene<'flight'> {
     const dialogue = dialogueLayer(services.uiRoot, services.events, {
       input: services.input,
       saveKey: () => services.save.current,
-      reduceMotion: () => services.settings.get().reduceMotion,
+      typewriter: () => services.settings.get().typewriter,
+      speed: () => services.settings.get().dialogueSpeed,
     });
     const banner = new MissionBanner(this.ui, {
       dialogue,
@@ -498,7 +501,16 @@ export class FlightScene extends UiScene<'flight'> {
     // SPEC-044 §4.8: Save & Quit says what it costs — this jump's fuel is
     // spent, and Continue lands at the station (44-i: the landing too).
     const menu = new PauseMenu(
-      services,
+      // SPEC-045 §4.1: `Comms log` reads the shared dialogue layer's log.
+      withComms(
+        services,
+        dialogueLayer(services.uiRoot, services.events, {
+          input: services.input,
+          saveKey: () => services.save.current,
+          typewriter: () => services.settings.get().typewriter,
+          speed: () => services.settings.get().dialogueSpeed,
+        }).log,
+      ),
       () => services.requestResume(),
       {
         allowed: () => this.#canSkipRun(),
@@ -757,7 +769,9 @@ export class FlightScene extends UiScene<'flight'> {
     const flight = this.#flight as Flight;
     const frame = this.#frameInput;
     frame.steerX = state.move.x;
-    frame.steerY = state.move.y;
+    // SPEC-045 §4.9: Invert flight up / down flips the keys' and the stick's
+    // axis. Mouse steer chases the reticle instead and is unaffected (45-t).
+    frame.steerY = this.services.settings.get().invertFlightY ? -state.move.y : state.move.y;
     frame.fire = state.buttons.fire.down;
     frame.autoFire = state.autoFire;
     frame.throttleUp = state.buttons.throttleUp.justPressed;
@@ -1047,7 +1061,8 @@ export class FlightScene extends UiScene<'flight'> {
     void dialogueLayer(this.services.uiRoot, this.services.events, {
       input: this.services.input,
       saveKey: () => this.services.save.current,
-      reduceMotion: () => this.services.settings.get().reduceMotion,
+      typewriter: () => this.services.settings.get().typewriter,
+      speed: () => this.services.settings.get().dialogueSpeed,
     }).play(id, { modal: false });
   }
 

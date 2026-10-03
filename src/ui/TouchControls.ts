@@ -14,7 +14,7 @@
 //
 // SPEC-037 §4.1: the surface keeps only USE and pause. USE is mounted into the
 // HUD's thumb arc (`mountButton`) and keeps this layer's visibility rules
-// there; pause sits alone at the top right in both modes; the flight's ▲ / ▼
+// there; pause sits alone at the top right in both modes; the flight's + / −
 // keep the row at the bottom corner. SPEC-038 §4.1 adds DASH, mounted into the
 // arc's corner cell the same way. The HUD's own reticle is the flight's one
 // aim mark, so this layer draws none.
@@ -73,8 +73,9 @@ const BUTTON_LABELS: Readonly<Record<Action, string>> = {
   interact: 'USE',
   useItem: 'ITEM',
   pause: 'II',
-  throttleUp: '▲',
-  throttleDown: '▼',
+  // SPEC-045 §4.6: `+` and `−` (U+2212) — `▲` means a warning.
+  throttleUp: '+',
+  throttleDown: '−',
   map: 'MAP',
   track: 'TRACK',
   debug: '`',

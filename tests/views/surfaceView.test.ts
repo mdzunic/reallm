@@ -590,24 +590,25 @@ describe('shake and hit-stop (SPEC-019 §4.7, AC-89 … AC-94)', () => {
   it('shakeOffset decays to zero at until, deterministic from view time', () => {
     const shake: ShakeState = { amplitude: 0.5, until: 2, duration: 0.5 };
     const out = new THREE.Vector3();
-    shakeOffset(shake, 1.6, false, out);
+    shakeOffset(shake, 1.6, 1, out);
     const expectedDecay = (2 - 1.6) / 0.5;
     expect(out.x).toBeCloseTo(0.5 * expectedDecay * Math.sin(37 * 1.6), 6);
     expect(out.y).toBe(0);
     expect(out.z).toBeCloseTo(0.5 * expectedDecay * Math.cos(29 * 1.6), 6);
     // Deterministic: the same time gives the same offset.
     const again = new THREE.Vector3();
-    shakeOffset(shake, 1.6, false, again);
+    shakeOffset(shake, 1.6, 1, again);
     expect(again.equals(out)).toBe(true);
     // At and past `until` the offset is exactly zero.
-    shakeOffset(shake, 2, false, out);
+    shakeOffset(shake, 2, 1, out);
     expect(out.length()).toBe(0);
   });
 
-  it('reduce motion forces the offset to zero (AC-90, 19-g)', () => {
+  it('camera shake at 0 forces the offset to zero (AC-90, 19-g; SPEC-045 §4.3)', () => {
+    // Reduce motion sets Camera shake to 0, the scale `shakeOffset` takes.
     const shake: ShakeState = { amplitude: 0.5, until: 2, duration: 0.5 };
     const out = new THREE.Vector3(9, 9, 9);
-    shakeOffset(shake, 1.6, true, out);
+    shakeOffset(shake, 1.6, 0, out);
     expect(out.toArray()).toEqual([0, 0, 0]);
   });
 

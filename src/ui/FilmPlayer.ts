@@ -74,6 +74,11 @@ export interface FilmSnapshot {
 
 export interface FilmPlayOptions {
   manifest: FilmManifest | null;
+  /** SPEC-045 §4.3: `settings.filmMode === 'stills'` — the posters, not the video. */
+  stills: boolean;
+  /** SPEC-045 §4.3: `settings.typewriter` — captions type, or land whole. */
+  typewriter: boolean;
+  /** Kept on reduce motion (SPEC-045 §4.3): the poster pans and the end fade. */
   reduceMotion: boolean;
   /** A video failure already remembered this session (E27). */
   videoBroken: boolean;
@@ -165,7 +170,7 @@ export class FilmPlayer {
     const mode = chooseFilmMode({
       manifestFilm: entry !== undefined,
       posters: entry !== undefined,
-      reduceMotion: opts.reduceMotion,
+      preferStills: opts.stills,
       videoBroken: opts.videoBroken,
     });
 
@@ -532,7 +537,7 @@ export class FilmPlayer {
     const caption = captionAt(run.def, run.t);
     if (caption !== run.shownCaption) this.#showCaption(run, caption);
     if (caption !== null) {
-      const typed = typedChars(caption.text, run.t - caption.at, run.opts.reduceMotion);
+      const typed = typedChars(caption.text, run.t - caption.at, !run.opts.typewriter);
       const text = caption.text.slice(0, typed);
       if (run.captionText.textContent !== text) run.captionText.textContent = text;
     }

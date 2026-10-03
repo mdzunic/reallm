@@ -7,6 +7,7 @@
 // through the `.panel`/`pointer-events: auto` CSS, so the canvas keeps
 // receiving gameplay pointers while panels receive theirs.
 import { BackStack } from '@/core/BackGuard';
+import { GLYPHS } from '@/data/glossary';
 import {
   pruneToasts,
   pushToast,
@@ -15,6 +16,18 @@ import {
   type ToastEntry,
   type ToastKind,
 } from '@/systems/UiHelpers';
+
+/**
+ * SPEC-045 §4.5: the glyph each toast kind leads with, so the kind never rests
+ * on hue alone — `✓` good, `✗` error, `▲` warn (SPEC-014 AC-68), and nothing
+ * for info, which is neither.
+ */
+export const TOAST_GLYPHS: Readonly<Record<ToastKind, string | null>> = {
+  good: GLYPHS.good,
+  error: GLYPHS.error,
+  warn: GLYPHS.warn,
+  info: null,
+};
 
 export function el<K extends keyof HTMLElementTagNameMap>(
   tag: K,
@@ -420,16 +433,18 @@ export class UiRoot {
 
   #renderToasts(): void {
     this.#toastRack.replaceChildren(
-      ...this.#toasts.map((entry) =>
-        h(
+      ...this.#toasts.map((entry) => {
+        // AC-68: the warn pair is amber *and* ▲, never hue alone. SPEC-045
+        // §4.5: good and error lead with their glyph the same way.
+        const glyph = TOAST_GLYPHS[entry.kind];
+        return h(
           'div',
           { class: `toast toast-${entry.kind}` },
-          // AC-68: the warn pair is amber *and* ▲, never hue alone.
-          entry.kind === 'warn' ? el('span', 'glyph', '▲') : null,
+          glyph === null ? null : el('span', 'glyph', glyph),
           entry.text,
           entry.count > 1 ? el('span', 'toast-count', `×${entry.count}`) : null,
-        ),
-      ),
+        );
+      }),
     );
   }
 

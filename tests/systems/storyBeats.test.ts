@@ -73,17 +73,18 @@ const SMALL: FilmDef = {
 describe('chooseFilmMode (SPEC-022 §4.1)', () => {
   it('covers every row of the mode table', () => {
     // No manifest entry: text, whatever else holds.
-    expect(chooseFilmMode({ manifestFilm: false, posters: false, reduceMotion: false, videoBroken: false })).toBe('text');
-    expect(chooseFilmMode({ manifestFilm: false, posters: true, reduceMotion: true, videoBroken: true })).toBe('text');
-    // Reduce motion: stills with posters, text without.
-    expect(chooseFilmMode({ manifestFilm: true, posters: true, reduceMotion: true, videoBroken: false })).toBe('stills');
-    expect(chooseFilmMode({ manifestFilm: true, posters: false, reduceMotion: true, videoBroken: false })).toBe('text');
+    expect(chooseFilmMode({ manifestFilm: false, posters: false, preferStills: false, videoBroken: false })).toBe('text');
+    expect(chooseFilmMode({ manifestFilm: false, posters: true, preferStills: true, videoBroken: true })).toBe('text');
+    // Films set to stills (SPEC-045 §4.3; reduce motion sets it): stills with
+    // posters, text without.
+    expect(chooseFilmMode({ manifestFilm: true, posters: true, preferStills: true, videoBroken: false })).toBe('stills');
+    expect(chooseFilmMode({ manifestFilm: true, posters: false, preferStills: true, videoBroken: false })).toBe('text');
     // A remembered video failure: the same fallback.
-    expect(chooseFilmMode({ manifestFilm: true, posters: true, reduceMotion: false, videoBroken: true })).toBe('stills');
-    expect(chooseFilmMode({ manifestFilm: true, posters: false, reduceMotion: false, videoBroken: true })).toBe('text');
+    expect(chooseFilmMode({ manifestFilm: true, posters: true, preferStills: false, videoBroken: true })).toBe('stills');
+    expect(chooseFilmMode({ manifestFilm: true, posters: false, preferStills: false, videoBroken: true })).toBe('text');
     // Otherwise: video.
-    expect(chooseFilmMode({ manifestFilm: true, posters: true, reduceMotion: false, videoBroken: false })).toBe('video');
-    expect(chooseFilmMode({ manifestFilm: true, posters: false, reduceMotion: false, videoBroken: false })).toBe('video');
+    expect(chooseFilmMode({ manifestFilm: true, posters: true, preferStills: false, videoBroken: false })).toBe('video');
+    expect(chooseFilmMode({ manifestFilm: true, posters: false, preferStills: false, videoBroken: false })).toBe('video');
   });
 });
 
@@ -155,7 +156,7 @@ describe('typedChars', () => {
     expect(typedChars(text, -1, false)).toBe(0);
   });
 
-  it('shows the full length under reduce motion', () => {
+  it('shows the full length when the caption lands whole (SPEC-045 §4.3: typing off)', () => {
     expect(typedChars('hello', 0, true)).toBe(5);
   });
 });

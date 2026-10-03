@@ -28,6 +28,7 @@ import { disposeObject3D } from '@/core/Disposer';
 import { fbm2, voronoi2 } from '@/core/Noise';
 import type { Pool } from '@/core/Pool';
 import { hash32 } from '@/core/Rng';
+import type { ColourPreset } from '@/core/Settings';
 import type { ProceduralRecipeId } from '@/data/ids';
 import { isBuried, type EnemyEntity } from '@/entities/Enemy';
 
@@ -69,6 +70,12 @@ const ELITE_GOLD: readonly [number, number, number] = [0.9 * 0.3, 0.7 * 0.3, 0.3
  * `pow` per fragment, on every preset, that reads against any ground.
  */
 export const HOSTILE_RIM = '#ff5a3c';
+/**
+ * SPEC-045 §4.5 — the colour-blind preset's rim. `HOSTILE_RIM` sits 10.3 ΔE76
+ * from Eden's grass under protanopia; this magenta stays at least 20 from every
+ * planet's ground under protan, deutan and tritan simulation alike.
+ */
+export const HOSTILE_RIM_COLOUR_BLIND = '#ff4fd8';
 /** *Initial tuning*: bright enough to read in daylight, dim enough not to bloom. */
 export const RIM_INTENSITY = 0.9;
 /** The fresnel exponent — how tightly the rim hugs the edge. */
@@ -480,10 +487,30 @@ function isMoving(e: EnemyEntity): boolean {
 }
 
 /**
- * SPEC-035 §4.1 — the rim, in working (linear) space: `THREE.Color` converts the
- * sRGB hex once, at module load, and the result is baked into the shader.
+ * SPEC-035 §4.1, SPEC-045 §4.5 — the two rims in working (linear) space:
+ * `THREE.Color` converts each sRGB hex once, at module load.
  */
-const RIM_COLOR = new THREE.Color(HOSTILE_RIM);
+const RIM_STANDARD = new THREE.Color(HOSTILE_RIM);
+const RIM_COLOUR_BLIND = new THREE.Color(HOSTILE_RIM_COLOUR_BLIND);
+
+/**
+ * SPEC-045 §4.5 — the rim's colour as one uniform. Every enemy material's
+ * `uHostileRim` *is* this object, not a copy of it, and `TelegraphView` copies
+ * its value into the non-elite decals. `setHostileRim` writes the value in
+ * place, so a preset change reaches every rim on the next frame and compiles
+ * nothing (45-n).
+ */
+export const HOSTILE_RIM_UNIFORM: { value: THREE.Color } = { value: RIM_STANDARD.clone() };
+
+/**
+ * SPEC-045 §4.5: the rim the colour preset asks for — `HOSTILE_RIM`, or
+ * `HOSTILE_RIM_COLOUR_BLIND` under the colour-blind preset. A copy into the
+ * shared colour: nothing allocates and no program changes. The surface calls
+ * it on enter and on a `settings:changed` that carries `colourPreset`.
+ */
+export function setHostileRim(preset: ColourPreset): void {
+  HOSTILE_RIM_UNIFORM.value.copy(preset === 'colour-blind' ? RIM_COLOUR_BLIND : RIM_STANDARD);
+}
 
 /** A GLSL float literal — `3` on its own is an int and will not compile. */
 function glsl(value: number): string {
@@ -495,33 +522,39 @@ function glsl(value: number): string {
  * `vInstanceEmissive.w` is the per-instance rim scale — 1 normally,
  * `FLASH_RIM_SCALE` while the instance flashes. `normal` and `vViewPosition`
  * are both in scope by `<emissivemap_fragment>`, and `saturate` is three's own.
+ * SPEC-045 §4.5: the colour is the `uHostileRim` uniform, no longer a baked
+ * `vec3` literal, so the colour-blind preset retints it without a recompile.
  */
 const RIM_CHUNK = `
   float hostileRim = pow( 1.0 - saturate( dot( normal, normalize( vViewPosition ) ) ), ${glsl(RIM_POWER)} );
-  totalEmissiveRadiance += vec3( ${glsl(RIM_COLOR.r)}, ${glsl(RIM_COLOR.g)}, ${glsl(RIM_COLOR.b)} ) * ${glsl(RIM_INTENSITY)} * hostileRim * vInstanceEmissive.w;`;
+  totalEmissiveRadiance += uHostileRim * ${glsl(RIM_INTENSITY)} * hostileRim * vInstanceEmissive.w;`;
 
 /**
  * §4.3: the `instanceEmissive` attribute, injected around the standard chunks
  * so everything else about the material — lights, shadow, normal map — is
  * stock three. One cache key for every enemy material: same program, whatever
  * the variant, because SPEC-035's rim is on every preset and every recipe.
+ * SPEC-045 §4.5 moved it to `'enemy/3'` when the rim's colour became a uniform.
  *
  * The attribute is a `vec4`: `rgb` is the emissive of SPEC-019 §4.3, `w` the
  * rim scale of SPEC-035 §4.1.
  */
 function injectInstanceEmissive(material: THREE.MeshStandardMaterial): void {
   material.onBeforeCompile = (shader) => {
+    // SPEC-045 §4.5: the shared object itself, the same one for every material
+    // and every compile, so one write to its value retints them all.
+    shader.uniforms['uHostileRim'] = HOSTILE_RIM_UNIFORM;
     shader.vertexShader = shader.vertexShader
       .replace('#include <common>', 'attribute vec4 instanceEmissive;\nvarying vec4 vInstanceEmissive;\n#include <common>')
       .replace('#include <begin_vertex>', '#include <begin_vertex>\nvInstanceEmissive = instanceEmissive;');
     shader.fragmentShader = shader.fragmentShader
-      .replace('#include <common>', 'varying vec4 vInstanceEmissive;\n#include <common>')
+      .replace('#include <common>', 'uniform vec3 uHostileRim;\nvarying vec4 vInstanceEmissive;\n#include <common>')
       .replace(
         '#include <emissivemap_fragment>',
         `#include <emissivemap_fragment>\ntotalEmissiveRadiance += vInstanceEmissive.rgb;${RIM_CHUNK}`,
       );
   };
-  material.customProgramCacheKey = () => 'enemy/2';
+  material.customProgramCacheKey = () => 'enemy/3';
 }
 
 export class EnemyMeshes {
