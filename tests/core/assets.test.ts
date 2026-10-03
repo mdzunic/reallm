@@ -2,7 +2,8 @@
 // so it runs in node with no browser and no network.
 import { afterEach, describe, expect, it } from 'vitest';
 import * as THREE from 'three';
-import { Assets, clampedTextureSize, type AssetLoaders, type AssetManifest } from '@/core/Assets';
+import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
+import { Assets, clampedTextureSize, createGltfLoader, type AssetLoaders, type AssetManifest } from '@/core/Assets';
 import { QUALITY } from '@/core/Quality';
 import { setLogSink } from '@/core/Log';
 import { ASSETS, type ModelId, type TextureId } from '@/data/assets';
@@ -553,5 +554,123 @@ describe('Assets.release() (SPEC-040 §4.6, AC-23)', () => {
       assets.release({ models: { nope: 'x.glb', ...PLANET.models }, textures: { nada: { url: 'y.png' } } }),
     ).resolves.toBeUndefined();
     expect(assets.hasModel(CRATE)).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------- SPEC-046 §4.9
+
+/** A GLB around `json` and one BIN chunk — what a Blender export writes, built in memory. */
+function glb(json: object, bin: Uint8Array): ArrayBuffer {
+  const text = new TextEncoder().encode(JSON.stringify(json));
+  const jsonLength = Math.ceil(text.length / 4) * 4;
+  const binLength = Math.ceil(bin.length / 4) * 4;
+  const total = 12 + 8 + jsonLength + 8 + binLength;
+  const out = new ArrayBuffer(total);
+  const view = new DataView(out);
+  const bytes = new Uint8Array(out);
+  view.setUint32(0, 0x46546c67, true); // 'glTF'
+  view.setUint32(4, 2, true);
+  view.setUint32(8, total, true);
+  view.setUint32(12, jsonLength, true);
+  view.setUint32(16, 0x4e4f534a, true); // 'JSON'
+  bytes.fill(0x20, 20, 20 + jsonLength);
+  bytes.set(text, 20);
+  view.setUint32(20 + jsonLength, binLength, true);
+  view.setUint32(24 + jsonLength, 0x004e4942, true); // 'BIN'
+  bytes.set(bin, 28 + jsonLength);
+  return out;
+}
+
+/**
+ * meshoptimizer's vertex codec, version 0, at its plainest: one block, every
+ * byte group stored raw (header code 3), zigzag deltas from the previous
+ * vertex, and the first vertex as the tail, padded to 32 bytes. A real export
+ * packs tighter; the decoder reads both the same way.
+ */
+function meshoptEncodeVertices(data: Uint8Array, count: number, stride: number): Uint8Array {
+  const out: number[] = [0xa0];
+  const aligned = Math.ceil(count / 16) * 16;
+  for (let k = 0; k < stride; k++) {
+    const deltas = new Uint8Array(aligned);
+    let previous = data[k] as number;
+    for (let i = 0; i < count; i++) {
+      const value = data[i * stride + k] as number;
+      const delta = (value - previous) & 0xff;
+      deltas[i] = ((delta << 1) ^ (delta & 0x80 ? 0xff : 0)) & 0xff;
+      previous = value;
+    }
+    const groups = aligned / 16;
+    const header = new Uint8Array(Math.ceil(groups / 4));
+    for (let g = 0; g < groups; g++) header[g >> 2] = (header[g >> 2] as number) | (3 << ((g & 3) * 2));
+    out.push(...header, ...deltas);
+  }
+  for (let i = stride; i < 32; i++) out.push(0);
+  out.push(...data.subarray(0, stride));
+  return new Uint8Array(out);
+}
+
+/** One triangle, its positions in a buffer view — compressed or not. */
+function triangle(compressed: boolean): ArrayBuffer {
+  const positions = new Float32Array([0, 0, 0, 1.5, 0, 0.25, -0.5, 2, 0]);
+  const raw = new Uint8Array(positions.buffer);
+  const accessors = [{ bufferView: 0, componentType: 5126, count: 3, type: 'VEC3', min: [-0.5, 0, 0], max: [1.5, 2, 0.25] }];
+  const base = {
+    asset: { version: '2.0' },
+    scene: 0,
+    scenes: [{ nodes: [0] }],
+    nodes: [{ mesh: 0, name: 'Prop' }],
+    meshes: [{ primitives: [{ attributes: { POSITION: 0 } }] }],
+    accessors,
+  };
+  if (!compressed) {
+    return glb({ ...base, buffers: [{ byteLength: raw.length }], bufferViews: [{ buffer: 0, byteLength: raw.length, byteStride: 12 }] }, raw);
+  }
+  const packed = meshoptEncodeVertices(raw, 3, 12);
+  return glb(
+    {
+      ...base,
+      extensionsUsed: ['EXT_meshopt_compression'],
+      extensionsRequired: ['EXT_meshopt_compression'],
+      buffers: [{ byteLength: packed.length }, { byteLength: raw.length, extensions: { EXT_meshopt_compression: { fallback: true } } }],
+      bufferViews: [
+        {
+          buffer: 1,
+          byteLength: raw.length,
+          byteStride: 12,
+          extensions: {
+            EXT_meshopt_compression: { buffer: 0, byteOffset: 0, byteLength: packed.length, byteStride: 12, count: 3, mode: 'ATTRIBUTES', filter: 'NONE' },
+          },
+        },
+      ],
+    },
+    packed,
+  );
+}
+
+async function positionsOf(buffer: ArrayBuffer): Promise<number[]> {
+  const parsed = await createGltfLoader(new THREE.LoadingManager()).parseAsync(buffer, '');
+  let out: number[] = [];
+  parsed.scene.traverse((node) => {
+    const mesh = node as THREE.Mesh;
+    if (mesh.isMesh === true) out = [...(mesh.geometry.getAttribute('position').array as Float32Array)];
+  });
+  return out;
+}
+
+describe('createGltfLoader (SPEC-046 §4.9)', () => {
+  it('is a GLTFLoader on the given manager with three\'s MeshoptDecoder set', () => {
+    const manager = new THREE.LoadingManager();
+    const loader = createGltfLoader(manager);
+    expect(loader.manager).toBe(manager);
+    expect(loader.meshoptDecoder).not.toBeNull();
+    expect(loader.meshoptDecoder?.supported).toBe(true);
+  });
+
+  it('loads an uncompressed model as before, and decodes EXT_meshopt_compression to the same floats', async () => {
+    const plain = await positionsOf(triangle(false));
+    expect(plain).toEqual([0, 0, 0, 1.5, 0, 0.25, -0.5, 2, 0]);
+    expect(await positionsOf(triangle(true))).toEqual(plain);
+    // The control: three's bare loader, as `Assets` built it before, refuses it.
+    await expect(new GLTFLoader(new THREE.LoadingManager()).parseAsync(triangle(true), '')).rejects.toThrow(/meshopt/i);
   });
 });

@@ -12,6 +12,7 @@ import {
   MAX_REPAIRS,
   ObstacleGrid,
   RESOLVE_PASSES,
+  TUG_RADIUS,
   WALL_INSET,
   generateLayout,
   insideShelter,
@@ -19,6 +20,7 @@ import {
   layoutHash,
   repairReachability,
   segmentDistance,
+  tugObstacle,
   type Layout,
   type LayoutShelter,
 } from '@/systems/Layout';
@@ -216,6 +218,79 @@ describe('ObstacleGrid', () => {
     // Edge distance: 9 for the first, 1 for the second.
     expect(grid.nearest(0, 0)?.z).toBe(4);
     expect(new ObstacleGrid({ obstacles: [] }).nearest(0, 0)).toBeNull();
+  });
+});
+
+// ---------------------------------------------------------------- SPEC-046
+
+describe('tugObstacle (SPEC-046 §4.8)', () => {
+  it('is a wreck_hull circle of radius 3.5 at the pad, wherever the pad is', () => {
+    expect(TUG_RADIUS).toBe(3.5);
+    expect(tugObstacle(layoutFor('cinder4', PIN_SEED))).toEqual({ x: 0, z: 0, radius: 3.5, kind: 'wreck_hull' });
+    expect(tugObstacle({ pad: { x: 12, z: -7 } })).toEqual({ x: 12, z: -7, radius: TUG_RADIUS, kind: 'wreck_hull' });
+  });
+
+  it('never enters layout.obstacles, so the hash, the map and the route grid keep their layout', () => {
+    for (const planet of PLANET_IDS) {
+      for (const seed of [PIN_SEED, 1, 77]) {
+        const layout = layoutFor(planet, seed);
+        const tug = tugObstacle(layout);
+        expect(layout.obstacles.some((o) => o.x === tug.x && o.z === tug.z && o.radius === tug.radius), `${planet} ${seed}`).toBe(false);
+        // The pad clearing holds: nothing of the layout's own sits on the hull.
+        expect(layout.obstacles.every((o) => Math.hypot(o.x - tug.x, o.z - tug.z) > tug.radius + o.radius), `${planet} ${seed}`).toBe(true);
+      }
+    }
+  });
+
+  it('an ObstacleGrid built with it stops a circle walking into the pad at the hull', () => {
+    for (const planet of PLANET_IDS) {
+      const layout = layoutFor(planet, PIN_SEED);
+      const tug = tugObstacle(layout);
+      const radius = 0.5; // the salvager's
+      const walk = (grid: ObstacleGrid): number => {
+        // The surface's own step: each axis moves only where it lands clear.
+        let x = layout.playerSpawn.x;
+        let z = layout.playerSpawn.z;
+        for (let step = 0; step < 240; step++) {
+          const dx = tug.x - x;
+          const dz = tug.z - z;
+          const d = Math.hypot(dx, dz);
+          if (d < 1e-6) break;
+          const nx = x + (dx / d) * 6 * (1 / 60);
+          const nz = z + (dz / d) * 6 * (1 / 60);
+          if (!grid.hitsCircle(nx, z, radius)) x = nx;
+          if (!grid.hitsCircle(x, nz, radius)) z = nz;
+        }
+        return Math.hypot(x - tug.x, z - tug.z);
+      };
+      const withTug = new ObstacleGrid({ obstacles: [...layout.obstacles, tug], halfSize: layout.halfSize });
+      const stopped = walk(withTug);
+      expect(stopped, planet).toBeGreaterThanOrEqual(TUG_RADIUS + radius);
+      expect(stopped, planet).toBeLessThanOrEqual(6); // still inside the 6 m terminal radius
+      // Without the hull, the same walk reaches the pad's centre.
+      expect(walk(new ObstacleGrid(layout)), planet).toBeLessThan(0.2);
+      // A circle pushed inside the hull comes back out of it (46-m).
+      const out = { x: 0, z: 0 };
+      expect(withTug.resolveCircle(tug.x + 1, tug.z, radius, out)).toBe(true);
+      expect(Math.hypot(out.x - tug.x, out.z - tug.z)).toBeGreaterThanOrEqual(TUG_RADIUS + radius);
+    }
+  });
+
+  it("surface-goto-pad's spot, 5 m toward the spawn, is clear of the hull and on the terminal", () => {
+    for (const planet of PLANET_IDS) {
+      const layout = layoutFor(planet, PIN_SEED);
+      const grid = new ObstacleGrid({ obstacles: [...layout.obstacles, tugObstacle(layout)], halfSize: layout.halfSize });
+      const dx = layout.playerSpawn.x - layout.pad.x;
+      const dz = layout.playerSpawn.z - layout.pad.z;
+      const d = Math.hypot(dx, dz);
+      const x = layout.pad.x + (dx / d) * 5;
+      const z = layout.pad.z + (dz / d) * 5;
+      expect(grid.hitsCircle(x, z, 0.5), planet).toBe(false);
+      const pad = layout.pois.find((poi) => poi.kind === 'landing_pad');
+      expect(Math.hypot(x - layout.pad.x, z - layout.pad.z), planet).toBeLessThanOrEqual(pad?.radius ?? 0);
+      // And the landing itself never starts on the hull.
+      expect(grid.hitsCircle(layout.playerSpawn.x, layout.playerSpawn.z, 0.5), planet).toBe(false);
+    }
   });
 });
 

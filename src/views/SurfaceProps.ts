@@ -1,9 +1,11 @@
 // Sculpted surface props and POIs (SPEC-018 §4.7) — procedural geometry per
 // biome, with emissive parts split out so `SurfaceView` can instance them
-// under an emissive material, plus the GLB seam: `PROP_MODELS` names a model
-// per biome × obstacle kind, and `obstacleGeometry` prefers it whenever the
-// lazy per-planet drop has landed (§4.10). Everything bakes vertex colours,
-// because one shared accent material draws every body.
+// under an emissive material, plus the GLB seam: `PROP_MODELS` names the
+// models per biome × obstacle kind, and `obstacleGeometry` prefers one
+// whenever the lazy per-planet drop has landed (§4.10). Everything bakes
+// vertex colours: a procedural body's greys are tinted by the accent
+// material, a GLB body's authored colours draw under a white one (SPEC-046
+// §4.1).
 //
 // All geometry is built non-indexed so any mix of primitives merges cleanly;
 // triangle caps per kind are pinned by tests/views/surfaceProps.test.ts.
@@ -11,6 +13,7 @@ import * as THREE from 'three';
 import { mergeGeometries, toCreasedNormals } from 'three/addons/utils/BufferGeometryUtils.js';
 import type { Assets } from '@/core/Assets';
 import { fbm2, hash01, ridged2 } from '@/core/Noise';
+import { hash32 } from '@/core/Rng';
 import type { ModelId } from '@/data/assets';
 import type { BoundaryKind } from '@/data/ids';
 import type { PlanetDef } from '@/data/planets';
@@ -27,24 +30,54 @@ export interface PropGeometry {
 }
 
 /**
- * The GLB seam (§4.10): every biome × obstacle-kind pair maps to its `_a`
- * model from the PLAN R7 drop (`_b` is held for a later variant pass). A data
+ * The GLB seam (§4.10): every biome × obstacle-kind pair maps to its two
+ * variants from the PLAN R7 drop, `_a` then `_b` (SPEC-046 §4.2). A data
  * change here swaps a whole kind.
  */
-export const PROP_MODELS: Partial<Record<`${Biome}:${ObstacleKind}`, ModelId>> = {
-  'desert:rock': 'desert_rock_a',
-  'desert:ruin': 'desert_ruin_a',
-  'ice:rock': 'ice_rock_a',
-  'ice:spire': 'ice_spire_a',
-  'jungle:tree': 'jungle_tree_a',
-  'jungle:ruin': 'jungle_ruin_a',
-  'volcanic:rock': 'volcanic_rock_a',
-  'volcanic:vent': 'volcanic_vent_a',
-  'hive:spire': 'hive_spire_a',
-  'hive:rock': 'hive_rock_a',
-  'temperate:tree': 'temperate_tree_a',
-  'temperate:rock': 'temperate_rock_a',
+export const PROP_MODELS: Partial<Record<`${Biome}:${ObstacleKind}`, readonly ModelId[]>> = {
+  'desert:rock': ['desert_rock_a', 'desert_rock_b'],
+  'desert:ruin': ['desert_ruin_a', 'desert_ruin_b'],
+  'ice:rock': ['ice_rock_a', 'ice_rock_b'],
+  'ice:spire': ['ice_spire_a', 'ice_spire_b'],
+  'jungle:tree': ['jungle_tree_a', 'jungle_tree_b'],
+  'jungle:ruin': ['jungle_ruin_a', 'jungle_ruin_b'],
+  'volcanic:rock': ['volcanic_rock_a', 'volcanic_rock_b'],
+  'volcanic:vent': ['volcanic_vent_a', 'volcanic_vent_b'],
+  'hive:spire': ['hive_spire_a', 'hive_spire_b'],
+  'hive:rock': ['hive_rock_a', 'hive_rock_b'],
+  'temperate:tree': ['temperate_tree_a', 'temperate_tree_b'],
+  'temperate:rock': ['temperate_rock_a', 'temperate_rock_b'],
 };
+
+/**
+ * SPEC-046 §4.2, pure: which of `n` variants the `index`-th instance of
+ * `kind` draws. `kind` is the layout's own string (`rock`, `rock_small`) and
+ * `index` the instance's place among that string's instances in layout order,
+ * so the choice is a function of the layout hash and nothing else.
+ */
+export function variantIndex(layoutHash: number, kind: string, index: number, n: number): number {
+  return hash32(layoutHash, 'variant', kind, index) % n;
+}
+
+/**
+ * SPEC-046 §4.1: true for a model carrying a `Leaf` or `*_LOD1` node —
+ * SPEC-052's tree contract. Merged into one prop body it would draw its LOD1
+ * over its LOD0 and its leaf cards as opaque squares, so it is not a prop
+ * model until SPEC-053 draws trees.
+ */
+export function isTreeContract(root: THREE.Object3D): boolean {
+  let tree = false;
+  root.traverse((node) => {
+    if (node.name === 'Leaf' || node.name.endsWith('_LOD1')) tree = true;
+  });
+  return tree;
+}
+
+/**
+ * SPEC-046 §4.3: a landmark POI's procedural body draws at this × its
+ * trigger radius — 2.4 for a 6 m landmark (*initial tuning*).
+ */
+export const LANDMARK_SCALE = 0.4;
 
 // ---------------------------------------------------------------- utilities
 
@@ -138,8 +171,12 @@ export function geometryFromModel(root: THREE.Object3D): THREE.BufferGeometry {
   return merge(parts);
 }
 
-/** Split a model into body and `Glow`-material parts (§4.10). */
-function propFromModel(root: THREE.Object3D): PropGeometry {
+/**
+ * Split a model into body and `Glow`-material parts (§4.10) — or `null` for a
+ * tree-contract model, which is not a prop model (SPEC-046 §4.1).
+ */
+export function propFromModel(root: THREE.Object3D): PropGeometry | null {
+  if (isTreeContract(root)) return null;
   root.updateMatrixWorld(true);
   const body = new THREE.Group();
   const glow = new THREE.Group();
@@ -284,25 +321,34 @@ function treeBody(seed: number, biome: Biome): THREE.BufferGeometry {
 }
 
 /**
- * The model that draws a biome's obstacle kind, or `undefined` when the kind is
- * procedural only (§4.10). SPEC-030 D-19: the collision-only kinds are never
- * looked up in `PROP_MODELS`. SPEC-040 §4.6 reads it to know which kinds a
- * late set can still swap in.
+ * The models that draw a biome's obstacle kind, its variants in order — empty
+ * when the kind is procedural only (§4.10). SPEC-030 D-19: the collision-only
+ * kinds are never looked up in `PROP_MODELS`. SPEC-040 §4.6 reads it to know
+ * which kinds a late set can still swap in.
  */
-export function obstacleModelId(kind: ObstacleKind, biome: Biome): ModelId | undefined {
-  if (kind === 'cave_wall' || kind === 'wreck_hull') return undefined;
-  return PROP_MODELS[`${biome}:${kind}`];
+export function obstacleModelIds(kind: ObstacleKind, biome: Biome): readonly ModelId[] {
+  if (kind === 'cave_wall' || kind === 'wreck_hull') return [];
+  return PROP_MODELS[`${biome}:${kind}`] ?? [];
 }
 
 /**
  * A biome's obstacle, procedural by default; the `PROP_MODELS` table wins when
- * it names a model and the lazy assets have landed (§4.10, 18-o).
+ * it names a model and the lazy assets have landed (§4.10, 18-o) — its first
+ * loaded variant that is not a tree contract (SPEC-046 §4.1).
  */
 export function obstacleGeometry(kind: ObstacleKind, biome: Biome, seed: number, assets?: Assets, small = false): PropGeometry {
-  const modelId = obstacleModelId(kind, biome);
-  if (assets !== undefined && modelId !== undefined && assets.hasModel(modelId)) {
-    return propFromModel(assets.model(modelId));
+  if (assets !== undefined) {
+    for (const id of obstacleModelIds(kind, biome)) {
+      if (!assets.hasModel(id)) continue;
+      const prop = propFromModel(assets.model(id));
+      if (prop !== null) return prop;
+    }
   }
+  return proceduralObstacle(kind, biome, seed, small);
+}
+
+/** The §4.7 sculpted body for a kind, whatever the assets hold. */
+export function proceduralObstacle(kind: ObstacleKind, biome: Biome, seed: number, small = false): PropGeometry {
   switch (kind) {
     case 'rock':
       return { body: rockBody(seed, small) };

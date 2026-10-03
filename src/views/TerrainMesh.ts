@@ -15,6 +15,14 @@ import type { SurfaceLook } from '@/data/planets';
 import type { GroundLayer } from '@/views/ProceduralTextures';
 
 export const TERRAIN_TILE = 60;
+/**
+ * SPEC-046 §4.5: how far the macro tint pulls the albedo toward the planet's
+ * ground colour. At full strength it multiplied Cinder-4's blue channel by
+ * 0.20 and gave Thessaly and Eden one green; at 0.35 the hue survives in the
+ * light and the fog, and the layers' own colours come back (*initial tuning*).
+ * `look.ground.tint` overrides it per planet.
+ */
+export const TERRAIN_TINT_AMOUNT = 0.35;
 /** PlaneGeometry segments per tile — 2 m quads, matching `HEIGHT_CELL`. */
 const TILE_SEGMENTS = 30;
 
@@ -94,6 +102,8 @@ interface TerrainUniforms {
   uHeightBlend: THREE.IUniform<number>;
   uMacroScale: THREE.IUniform<number>;
   uMacroTint: THREE.IUniform<THREE.Color>;
+  /** SPEC-046 §4.5: 0 leaves the albedo alone, 1 multiplies it by `uMacroTint`. */
+  uTintAmount: THREE.IUniform<number>;
   uCrackColor: THREE.IUniform<THREE.Color>;
   uTime: THREE.IUniform<number>;
 }
@@ -111,6 +121,7 @@ uniform float uHeightBlend;
 uniform float uMacroScale;
 uniform float uTime;
 uniform vec3 uMacroTint;
+uniform float uTintAmount;
 uniform vec3 uCrackColor;
 varying float vSplat;
 `;
@@ -120,7 +131,7 @@ vec4 texA = texture2D( map, vMapUv );
 vec4 texB = texture2D( mapB, vMapUv * uTileRatio );
 vec3 macro = texture2D( map, vMapUv * uMacroScale ).rgb;
 float splatW = smoothstep( 0.3, 0.7, clamp( vSplat + ( 0.5 - texA.a ) * uHeightBlend, 0.0, 1.0 ) );
-vec3 albedo = mix( texA.rgb, texB.rgb, splatW ) * mix( vec3( 1.0 ), macro * 2.0, 0.35 ) * uMacroTint;
+vec3 albedo = mix( texA.rgb, texB.rgb, splatW ) * mix( vec3( 1.0 ), macro * 2.0, 0.35 ) * mix( vec3( 1.0 ), uMacroTint, uTintAmount );
 diffuseColor.rgb *= albedo;
 `;
 
@@ -184,6 +195,8 @@ export function createTerrainMaterial(
     uHeightBlend: { value: 1.5 },
     uMacroScale: { value: 0.137 },
     uMacroTint: { value: macroTint(palette.ground) },
+    // A uniform, not a define: the program key stays `terrain/1…`.
+    uTintAmount: { value: look.ground.tint ?? TERRAIN_TINT_AMOUNT },
     uCrackColor: {
       value: cracks === undefined ? new THREE.Color(0, 0, 0) : new THREE.Color(cracks.color).multiplyScalar(cracks.intensity),
     },
@@ -212,6 +225,7 @@ export function createTerrainMaterial(
 /**
  * Swap both layers in place — same defines, so no shader recompile: the maps
  * stay set, only which texture object each slot points at changes (§4.10).
+ * The tint amount is the planet's, not the layers', so it stays (SPEC-046).
  */
 export function setTerrainLayers(material: THREE.MeshStandardMaterial, a: GroundLayer, b: GroundLayer): void {
   const uniforms = terrainUniforms(material);

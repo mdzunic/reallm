@@ -99,7 +99,7 @@ import {
   type PathGrid,
 } from '@/systems/Guidance';
 import { fillQuickFromPickup, quickEligible, refillQuick, type SlotView } from '@/systems/Loadout';
-import { generateLayout, ObstacleGrid, WALL_INSET, type Layout, type LayoutPoi, type LayoutShelter } from '@/systems/Layout';
+import { generateLayout, ObstacleGrid, tugObstacle, WALL_INSET, type Layout, type LayoutPoi, type LayoutShelter } from '@/systems/Layout';
 import { REVEAL_AFTER_SHOT, SHELTER_INSET, shelterAt, STORM_SHELTER_FACTOR } from '@/systems/Shelter';
 import { nodeIcon, poiIcon } from '@/systems/MapModel';
 import { contractFor, Missions, type MissionContext, type ObjectiveProgress } from '@/systems/Missions';
@@ -215,6 +215,8 @@ const OCCLUDER_RANGE = 30;
 const OCCLUDER_TEST_SECONDS = 0.1;
 /** §4.3: look-at bias, metres ahead of the player in the movement direction. */
 const LOOK_AHEAD = 2;
+/** SPEC-046 §4.8: where `surface-goto-pad` stands the salvager, from the pad's centre toward the spawn. */
+const GOTO_PAD_DISTANCE = 5;
 /** Touch aim-drags point the shot this far ahead (matches SPEC-011's demo). */
 const AIM_DRAG_DISTANCE = 12;
 
@@ -823,6 +825,14 @@ export class SurfaceScene extends UiScene<'surface'> {
   #fogCamApplied = -1;
   #fogNear = 0;
   readonly #frustum = new THREE.Frustum();
+  /**
+   * SPEC-046 §4.6: the camera `#frustum` was captured with — the look-at point
+   * (the look-ahead included), the distance, the field of view and the aspect —
+   * handed to `SurfaceView.setView` on the next render, never inside a step.
+   */
+  readonly #frustumView = { x: 0, z: 0, distance: 0, fov: 0, aspect: 1 };
+  /** The look-ahead the camera was last placed with — `render()` re-places it after a resize. */
+  readonly #camBias = { x: 0, z: 0 };
   readonly #frustumMatrix = new THREE.Matrix4();
   readonly #frustumSphere = new THREE.Sphere();
   readonly #frustumXZ: FrustumXZ = {
@@ -992,7 +1002,9 @@ export class SurfaceScene extends UiScene<'surface'> {
     save.progress.location = 'surface';
     save.progress.currentPlanet = planet.id;
 
-    const grid = new ObstacleGrid(layout);
+    // SPEC-046 §4.8: the combat world's grid holds the parked tug's hull too —
+    // the layout, its hash, the map and the route grid never see it (46-l).
+    const grid = new ObstacleGrid({ obstacles: [...layout.obstacles, tugObstacle(layout)], halfSize: layout.halfSize });
 
     // §4.1 step 3: landing always restores HP (SPEC-011 §4.8).
     const stats = computePlayerStats(save);
@@ -1182,6 +1194,9 @@ export class SurfaceScene extends UiScene<'surface'> {
     this.#viewWidth = services.renderer.width;
     this.#viewHeight = services.renderer.height;
     this.camera.fov = cameraFov(this.#viewWidth / this.#viewHeight);
+    // The base render sets the same on every frame; the first frustum — and
+    // SPEC-046's first cull — already needs it.
+    this.camera.aspect = this.#viewWidth / this.#viewHeight;
     this.camera.near = 1;
     this.camera.far = services.renderer.quality.drawDistance + 40;
     this.camera.updateProjectionMatrix();
@@ -1198,8 +1213,12 @@ export class SurfaceScene extends UiScene<'surface'> {
           this.#viewWidth = width;
           this.#viewHeight = height;
           const fov = cameraFov(width / height);
-          if (fov !== this.camera.fov) {
+          // The base render sets the aspect too, a frame later; SPEC-046's
+          // cull recaptures the frustum as soon as the projection moves.
+          const aspect = width / height;
+          if (fov !== this.camera.fov || aspect !== this.camera.aspect) {
             this.camera.fov = fov;
+            this.camera.aspect = aspect;
             this.camera.updateProjectionMatrix();
           }
           this.#setCameraScheme(this.services.input.state.scheme, false);
@@ -1760,6 +1779,14 @@ export class SurfaceScene extends UiScene<'surface'> {
       view.setArena(world.arena ?? (this.#arena?.sealed === true ? this.#arena : null));
       // SPEC-030 D-22: the wall chunks against this frame's frustum.
       view.updateWallVisibility(this.#frustum);
+      // SPEC-046 §4.6: the static layers draw what this camera sees; the view
+      // refreshes them only when the camera has moved enough to matter. A
+      // resize changes the projection without a step to re-place the camera —
+      // paused, or held by the map or a beat — so the frustum is recaptured
+      // here when it no longer matches the camera that draws.
+      const seen = this.#frustumView;
+      if (seen.fov !== this.camera.fov || seen.aspect !== this.camera.aspect) this.#placeCamera(this.#camBias.x, this.#camBias.z);
+      view.setView(seen.x, seen.z, seen.distance, seen.fov, seen.aspect, this.#frustum);
       // SPEC-027 §4.11: the waypoint, the scan ring and the two view meshes.
       this.#renderGuidance(world, view);
       // SPEC-041 §4.6: the nameplates follow this frame's camera.
@@ -2030,6 +2057,11 @@ export class SurfaceScene extends UiScene<'surface'> {
     info['occluders'] = this.#view?.fadedOccluders ?? 0;
     // SPEC-040 §4.6: whether every modelled prop kind draws its GLB yet.
     info['propSource'] = this.#view?.propSource ?? 'procedural';
+    // SPEC-046 §4.6, §4.8: the instances the culled layers draw, the last
+    // refresh's cost, and whether the tug stands on the pad.
+    info['instancesDrawn'] = this.#view?.instancesDrawn ?? 0;
+    info['cullMs'] = this.#view?.cullMs ?? 0;
+    info['tug'] = this.#view?.tugDrawn === true ? 1 : 0;
     // SPEC-035 §4.3: the surface's own bloom threshold, which the shared default
     // (0.85) is not — a whiteout is otherwise a claim about a post uniform
     // nothing outside the chain can read.
@@ -2485,6 +2517,14 @@ export class SurfaceScene extends UiScene<'surface'> {
     this.camera.updateMatrixWorld();
     this.#frustumMatrix.multiplyMatrices(this.camera.projectionMatrix, this.camera.matrixWorldInverse);
     this.#frustum.setFromProjectionMatrix(this.#frustumMatrix);
+    this.#camBias.x = biasX;
+    this.#camBias.z = biasZ;
+    const view = this.#frustumView;
+    view.x = this.#camTarget.x + biasX;
+    view.z = this.#camTarget.z + biasZ;
+    view.distance = d;
+    view.fov = this.camera.fov;
+    view.aspect = this.camera.aspect;
     // SPEC-019 §4.7: the shake lands after the frustum capture, so spawn
     // culling is bit-identical to an unshaken frame (AC-92). Camera and
     // look-at target move by the same vector, so only the position changes —
@@ -3425,12 +3465,19 @@ export class SurfaceScene extends UiScene<'surface'> {
         { x: p.x - Math.sin(CAMERA_YAW) * off, z: p.z - Math.cos(CAMERA_YAW) * off },
       );
     });
+    // SPEC-046 §4.8: the tug's hull fills the pad's centre, so "to pad" is
+    // 5 m out from it, toward the spawn — inside the 6 m terminal radius and
+    // clear of the 3.5 m hull.
     button('surface-goto-pad', 'To pad', () => {
       const world = this.#world;
       const pad = this.#pad;
-      if (world === null || pad === null || !world.player.alive) return;
-      world.player.x = pad.x;
-      world.player.z = pad.z;
+      const layout = this.#layout;
+      if (world === null || pad === null || layout === null || !world.player.alive) return;
+      const dx = layout.playerSpawn.x - pad.x;
+      const dz = layout.playerSpawn.z - pad.z;
+      const length = Math.hypot(dx, dz);
+      world.player.x = pad.x + (length > 1e-6 ? dx / length : 1) * GOTO_PAD_DISTANCE;
+      world.player.z = pad.z + (length > 1e-6 ? dz / length : 0) * GOTO_PAD_DISTANCE;
     });
     button('surface-spawn-boss', 'Wake boss', () => this.#debugSpawnBoss());
     button('surface-goto-boss', 'To boss', () => {

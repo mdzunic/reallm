@@ -17,6 +17,7 @@ import { hash01 } from '@/core/Noise';
 import { hash32 } from '@/core/Rng';
 import type { Look, QualityPreset, QualitySettings } from '@/core/Quality';
 import type { Pool } from '@/core/Pool';
+import type { ModelId } from '@/data/assets';
 import type { PlanetDef, ResourceId } from '@/data/index';
 import { isBuried, type EnemyEntity } from '@/entities/Enemy';
 import type { FollowerEntity } from '@/entities/Follower';
@@ -33,13 +34,27 @@ import { groundLayer, type GroundLayer } from '@/views/ProceduralTextures';
 import { buildScatter, buildDecals } from '@/views/Scatter';
 import { buildArenaWall } from '@/views/ArenaWall';
 import {
+  CULL_REFRESH_DISTANCE,
+  CulledInstances,
+  cullMargin,
+  extendByFrustum,
+  frustumGroundCorners,
+  viewRect,
+  type CullMaster,
+  type CullRect,
+} from '@/views/InstanceCuller';
+import {
   boundaryGeometry,
-  obstacleGeometry,
-  obstacleModelId,
+  LANDMARK_SCALE,
+  obstacleModelIds,
   poiGeometry,
+  proceduralObstacle,
+  propFromModel,
   shelterGeometry,
+  variantIndex,
   type ObstacleKind,
   type PoiKind,
+  type PropGeometry,
 } from '@/views/SurfaceProps';
 import { StormParticles, STORM_LOOK, type ParticleKind } from '@/views/StormParticles';
 import { TelegraphView } from '@/views/TelegraphView';
@@ -427,48 +442,85 @@ function injectInstanceFade(material: THREE.MeshStandardMaterial): void {
 const ROCK_LIFT = 0.5;
 
 /**
- * SPEC-040 §4.6: one instanced prop or obstacle kind, as built — what a late
- * GLB set swaps into (`setPropModels`) and what `propSource` reads.
+ * SPEC-046 §4.8: the parked tug — the boot set's ship model, scaled to sit on
+ * the pad (*initial tuning*). Nose toward world +z, as the glTF faces.
  */
-interface PropKind {
-  readonly kind: ObstacleKind;
+export const TUG_SCALE = 2.8;
+/** The pad slab's top face above the ground (`SurfaceProps` builds it 0.4 m thick). */
+const PAD_TOP = 0.4;
+/** Mirrors `systems/Layout.TUG_RADIUS` — views must not import systems. */
+export const TUG_FADE_RADIUS = 3.5;
+
+/** SPEC-035 §4.5 / SPEC-046 §4.6: one instance of a culled layer — `setPropModels` re-points it. */
+interface InstanceTarget {
+  readonly kind: 'instance';
+  layer: CulledInstances | null;
+  index: number;
+}
+
+/** A whole mesh that fades by swapping in a per-view clone of its material (a landmark, the tug). */
+interface FadePart {
+  readonly mesh: THREE.Mesh;
+  readonly base: THREE.Material;
+  faded: THREE.Material | null;
+}
+
+type OccluderTarget = InstanceTarget | { readonly kind: 'mesh'; readonly parts: readonly FadePart[] };
+
+/** SPEC-046 §4.2: one instance of a prop kind — its obstacles first, then its small props. */
+interface PropInstance {
+  readonly x: number;
+  readonly z: number;
+  readonly scale: number;
+  readonly rot: number;
+  /** The layout's own kind string (`rock`, `rock_small`) — `variantIndex`'s key. */
+  readonly layoutKind: string;
+  /** Its place among `layoutKind`'s instances, in layout order. */
+  readonly ordinal: number;
   readonly small: boolean;
-  readonly seed: number;
-  readonly mesh: THREE.InstancedMesh;
-  /** The per-instance fade the occluder slots write into; it moves to the new geometry. */
-  readonly fade: THREE.InstancedBufferAttribute;
-  glow: THREE.InstancedMesh | null;
-  /** `PROP_MODELS` names a model for this kind in this biome. */
-  readonly modelled: boolean;
-  /** The body draws from that model now. */
-  fromModel: boolean;
+  /** Its SPEC-035 fade; created with the occluder candidate, pointed at a layer once one holds it. */
+  readonly target: InstanceTarget;
+}
+
+/** One drawn layer of a kind: a body, its glow, and the kind instances it holds, by master index. */
+interface PropLayer {
+  readonly body: CulledInstances;
+  readonly glow: CulledInstances | null;
+  readonly members: readonly number[];
 }
 
 /**
- * Puts `body` on `mesh` in place of its geometry, which is disposed. The
- * instance matrices, the count and the per-instance fade live on the mesh and
- * on `fade`, so none of them move; the fade is taken off the old geometry
- * first, so disposing it cannot free the buffer the new one draws with.
+ * SPEC-040 §4.6 / SPEC-046 §4.2: one instanced prop or obstacle kind, as built
+ * — what a late GLB set swaps into (`setPropModels`) and what `propSource`
+ * reads.
  */
-function swapGeometry(mesh: THREE.InstancedMesh, body: THREE.BufferGeometry, fade: THREE.InstancedBufferAttribute | null): void {
-  const old = mesh.geometry;
-  if (fade !== null) {
-    body.setAttribute('instanceFade', fade);
-    old.deleteAttribute('instanceFade');
-  }
-  mesh.geometry = body;
-  old.dispose();
-  // The instanced bounds were computed from the old geometry; three rebuilds
-  // them from the new one on the next cull.
-  mesh.boundingBox = null;
-  mesh.boundingSphere = null;
+interface PropKind {
+  readonly kind: ObstacleKind;
+  readonly seed: number;
+  /** `PROP_MODELS`' variants for this kind in this biome; empty when it has none. */
+  readonly ids: readonly ModelId[];
+  /** The variants that loaded as tree contracts — never drawable (SPEC-046 §4.1). */
+  readonly undrawable: Set<ModelId>;
+  readonly instances: readonly PropInstance[];
+  /** 16 floats per instance, in `instances` order — what every layer of the kind draws. */
+  readonly matrices: Float32Array;
+  /** The matrices carry the procedural rock's lift (18-d), which a model's geometry gives back. */
+  lifted: boolean;
+  layers: PropLayer[];
+  /** The kind draws from its models now. */
+  fromModel: boolean;
 }
 
-/** One instance's worth of `instanceFade`, filled opaque. */
-function fadeAttribute(count: number): THREE.InstancedBufferAttribute {
-  const attribute = new THREE.InstancedBufferAttribute(new Float32Array(count).fill(1), 1);
-  attribute.setUsage(THREE.DynamicDrawUsage);
-  return attribute;
+/** The geometry's top, in its own units — how tall an occluder candidate stands. */
+function topOf(geometry: THREE.BufferGeometry): number {
+  geometry.computeBoundingBox();
+  return geometry.boundingBox?.max.y ?? 1;
+}
+
+/** The geometry's bounding sphere — a culled layer's `localSphere`. */
+function sphereOf(geometry: THREE.BufferGeometry): THREE.Sphere {
+  geometry.computeBoundingSphere();
+  return geometry.boundingSphere ?? new THREE.Sphere(new THREE.Vector3(), 1);
 }
 
 /** The §4.7 glow accents per obstacle kind (colour, emissive intensity). */
@@ -531,8 +583,36 @@ export class SurfaceView {
   /** SPEC-019 §4.8: built on the first frame that carries a follower. */
   #followerView: FollowerView | null = null;
   readonly #biome: PlanetDef['biome'];
+  /** The layout hash every variant pick derives from (SPEC-046 §4.2). */
+  readonly #layoutHash: number;
   /** SPEC-040 §4.6: every instanced prop and obstacle kind, in build order. */
   readonly #propKinds: PropKind[] = [];
+  /**
+   * SPEC-046 §4.1: a GLB body draws its authored `COLOR_0` under white; a
+   * procedural body (and a shelter body) keeps the planet's accent. Neither is
+   * flat-shaded, both carry SPEC-035's fade, and they flip together.
+   */
+  readonly #glbMaterial: THREE.MeshStandardMaterial;
+  readonly #accentMaterial: THREE.MeshStandardMaterial;
+
+  // SPEC-046 §4.6 — every static instanced layer, drawn through compaction,
+  // and the view they were last refreshed for.
+  readonly #culled: CulledInstances[] = [];
+  readonly #cullView = { x: 0, z: 0, distance: -1, fov: -1, aspect: -1, frustum: null as THREE.Frustum | null };
+  readonly #cullRect: CullRect = { minX: 0, maxX: 0, minZ: 0, maxZ: 0 };
+  /** The frustum's ground corners at the last refresh, and the ones `setView` was just handed. */
+  readonly #cullCorners = new Float32Array(8);
+  readonly #viewCorners = new Float32Array(8);
+  /** A layer was built or rebuilt, or the shadow pad moved, since the last refresh. */
+  #cullDirty = true;
+  #cullMs = 0;
+  /** `1 / tan(sun elevation)` while the shadow map is on — how far a metre of caster throws (§4.6). */
+  #shadowReach = 0;
+  readonly #sunSlope: number;
+
+  /** SPEC-046 §4.8: the parked tug, when the ship model is in. */
+  #tug: THREE.Object3D | null = null;
+  readonly #tugMeshes: THREE.Mesh[] = [];
   readonly #arenaRing: THREE.Mesh;
   #fx: CombatFx;
   /** SPEC-038 §4.2: the ground telegraphs — at most three draws, none while the pool is empty. */
@@ -558,27 +638,24 @@ export class SurfaceView {
 
   // SPEC-035 §4.5 — occluder fading. `#occluders` is the candidate list the
   // scene tests with the pure `occludes`; the parallel arrays hold what each
-  // candidate is (an instanced slot, or a whole landmark mesh), whether it is
-  // occluding right now, and how far its fade has travelled.
+  // candidate is (an instance of a culled layer, or whole meshes — a landmark,
+  // the tug), whether it is occluding right now, and how far its fade has
+  // travelled.
   readonly #occluders: OccluderProp[] = [];
-  readonly #occluderTargets: Array<
-    | { readonly kind: 'instance'; readonly attribute: THREE.InstancedBufferAttribute; readonly slot: number }
-    | { readonly kind: 'mesh'; readonly mesh: THREE.Mesh; readonly base: THREE.Material; faded: THREE.MeshStandardMaterial | null }
-  > = [];
+  readonly #occluderTargets: OccluderTarget[] = [];
   #occluding: Uint8Array<ArrayBufferLike> = new Uint8Array(0);
   #occluderFade = new Float32Array(0);
   #occluderOpacity = 1;
   #fadedOccluders = 0;
-  /** The shared prop material, transparent only while something is faded. */
-  #propMaterial: THREE.MeshStandardMaterial | null = null;
+  /** Both body materials are transparent only while something is faded. */
   #propsTransparent = false;
 
   // SPEC-030 §4.8–§4.9 — the arena wall and the shelters.
   #wall: THREE.Group | null = null;
   #wallChunks: THREE.InstancedMesh[] = [];
   #wallVisible = 0;
-  /** Per shelter index: the roof instance to lift when occupied (§4.9). */
-  readonly #roofSlots: { mesh: THREE.InstancedMesh; slot: number }[] = [];
+  /** Per shelter index: the roof instance to lift when occupied (§4.9), in its layer's master. */
+  readonly #roofSlots: { layer: CulledInstances; slot: number }[] = [];
   readonly #roofMatrices: THREE.Matrix4[] = [];
   #occupiedShelter: number | null = null;
   #shelterMeshes: THREE.InstancedMesh[] = [];
@@ -629,6 +706,7 @@ export class SurfaceView {
     this.#fog = new THREE.Fog(palette.fog, 0, layout.halfSize * 2);
     scene.fog = this.#fog;
     this.#lightningSeed = hash32(layout.hash, 'lightning');
+    this.#layoutHash = layout.hash;
     // SPEC-017 §4.1: the planet's own grade — a touch hotter and crisper than
     // the hubs, pulled 8 % toward its fog colour so each world reads different.
     this.look = {
@@ -653,6 +731,7 @@ export class SurfaceView {
     this.#hemi = new THREE.HemisphereLight(look.light.sky, look.light.ground, look.light.ambient);
     this.#key = new THREE.DirectionalLight(look.light.sun.color, look.light.sun.intensity);
     this.#sunDir = sunDirection(look.light.sun);
+    this.#sunSlope = 1 / Math.tan((Math.max(1, look.light.sun.elevation) * Math.PI) / 180);
     this.#key.position.set(this.#sunDir.x * KEY_DISTANCE, this.#sunDir.y * KEY_DISTANCE, this.#sunDir.z * KEY_DISTANCE);
     this.#key.target = this.#keyTarget;
     const rim = new THREE.DirectionalLight(0x7fa6ff, 0.6);
@@ -667,74 +746,25 @@ export class SurfaceView {
     this.#groundMaterial = createTerrainMaterial(a, b, look, palette);
     for (const tile of buildTerrainTiles(this.field, this.#groundMaterial)) this.#root.add(tile);
 
-    // Obstacles and props: instanced per kind (§4.10), sculpted per biome
-    // (SPEC-018 §4.7), glow parts as their own instanced meshes.
-    const accent = new THREE.MeshStandardMaterial({
-      color: palette.accent,
-      flatShading: true,
+    // Obstacles and props: instanced per kind and variant (§4.10, SPEC-046
+    // §4.2), sculpted per biome where no model is drawable (SPEC-018 §4.7),
+    // glow parts as their own instanced meshes.
+    this.#glbMaterial = new THREE.MeshStandardMaterial({
+      color: '#ffffff',
       roughness: 0.85,
       metalness: 0.05,
       vertexColors: true,
     });
-    const byKind = new Map<string, { x: number; z: number; scale: number; rot: number }[]>();
-    for (const o of layout.obstacles) {
-      // SPEC-030 D-19: shelter walls are collision-only — the shelter body is
-      // their visual; `debris` draws like any other kind.
-      if (o.kind === 'cave_wall' || o.kind === 'wreck_hull') continue;
-      const list = byKind.get(o.kind) ?? [];
-      list.push({ x: o.x, z: o.z, scale: o.radius, rot: (o.x * 7 + o.z * 3) % Math.PI });
-      byKind.set(o.kind, list);
-    }
-    for (const prop of layout.props) {
-      const kind = prop.kind.replace('_small', '');
-      const list = byKind.get(`${kind}#prop`) ?? [];
-      list.push({ x: prop.x, z: prop.z, scale: prop.scale * 0.5, rot: prop.rot });
-      byKind.set(`${kind}#prop`, list);
-    }
-    // SPEC-035 §4.5: one shared material for every prop body, with the
-    // per-instance opacity the fade writes into.
-    injectInstanceFade(accent);
-    this.#propMaterial = accent;
-    for (const [key, list] of byKind) {
-      const small = key.endsWith('#prop');
-      const kind = key.replace('#prop', '') as ObstacleKind;
-      const seed = hash32(layout.hash, 'prop', kind);
-      const prop = obstacleGeometry(kind, planet.biome, seed, assets, small);
-      const mesh = new THREE.InstancedMesh(prop.body, accent, list.length);
-      const fade = fadeAttribute(list.length);
-      prop.body.setAttribute('instanceFade', fade);
-      prop.body.computeBoundingBox();
-      const topY = prop.body.boundingBox?.max.y ?? 1;
-      list.forEach((entry, i) => {
-        const h = this.field.heightAt(entry.x, entry.z);
-        // 18-d: bases sit at h; procedural rocks embed half their radius. A GLB
-        // prop has its origin at the base centre, so it takes no lift (§4.10).
-        const lift = prop.fromModel !== true && kind === 'rock' ? entry.scale * ROCK_LIFT : 0;
-        scratchMatrix.makeRotationY(entry.rot);
-        scratchMatrix.scale(scratchVector.set(entry.scale, entry.scale, entry.scale));
-        scratchMatrix.setPosition(entry.x, h + lift, entry.z);
-        mesh.setMatrixAt(i, scratchMatrix);
-        // SPEC-035 §4.5: the cylinder the pure test uses — the instance's own
-        // footprint, as tall as its geometry reaches above the ground.
-        this.#occluders.push({ x: entry.x, z: entry.z, radius: entry.scale, height: Math.max(0.5, topY * entry.scale + lift) });
-        this.#occluderTargets.push({ kind: 'instance', attribute: fade, slot: i });
-      });
-      mesh.instanceMatrix.needsUpdate = true;
-      mesh.castShadow = true;
-      mesh.receiveShadow = true;
-      this.#root.add(mesh);
-      const glow = prop.glow === undefined ? null : this.#addPropGlow(kind, prop.glow, mesh);
-      this.#propKinds.push({
-        kind,
-        small,
-        seed,
-        mesh,
-        fade,
-        glow,
-        modelled: obstacleModelId(kind, planet.biome) !== undefined,
-        fromModel: prop.fromModel === true,
-      });
-    }
+    this.#accentMaterial = new THREE.MeshStandardMaterial({
+      color: palette.accent,
+      roughness: 0.85,
+      metalness: 0.05,
+      vertexColors: true,
+    });
+    // SPEC-035 §4.5: the per-instance opacity the fade writes into, on both.
+    injectInstanceFade(this.#glbMaterial);
+    injectInstanceFade(this.#accentMaterial);
+    this.#buildProps(layout, assets);
 
     // POIs: one small sculpted mesh per instance (SPEC-018 §4.7); glow parts
     // share one emissive material, the pad ring its own pulsing one.
@@ -761,18 +791,19 @@ export class SurfaceView {
       mesh.name = `poi:${poi.kind}`;
       const h = this.field.heightAt(poi.x, poi.z); // ≈ 0 on flattened ground
       if (poi.kind === 'arena') mesh.scale.setScalar(poi.radius * 0.2);
+      // SPEC-046 §4.3: a 1–3 m landmark read as nothing on its 6–7 m trigger.
+      if (poi.kind === 'landmark') mesh.scale.setScalar(LANDMARK_SCALE * poi.radius);
       mesh.position.set(poi.x, h, poi.z);
       // SPEC-035 §4.5: only landmarks join the occluder list — every other POI
       // is something the player is being sent to and must be able to see.
       if (poi.kind === 'landmark') {
-        prop.body.computeBoundingBox();
         this.#occluders.push({
           x: poi.x,
           z: poi.z,
           radius: poi.radius * 0.5,
-          height: Math.max(0.5, prop.body.boundingBox?.max.y ?? 1),
+          height: topOf(prop.body) * LANDMARK_SCALE * poi.radius,
         });
-        this.#occluderTargets.push({ kind: 'mesh', mesh, base: poiMaterial, faded: null });
+        this.#occluderTargets.push({ kind: 'mesh', parts: [{ mesh, base: poiMaterial, faded: null }] });
       }
       // The pad is flat on the ground: its own shadow would only stripe it.
       mesh.castShadow = poi.kind !== 'landing_pad';
@@ -790,7 +821,13 @@ export class SurfaceView {
     this.#pad = pad;
 
     // SPEC-018 §4.6: scatter and decals, deterministic from the layout hash.
-    for (const mesh of buildScatter(layout, this.field, look, presetOf(quality), palette)) this.#root.add(mesh);
+    // SPEC-046 §4.6: the scatter draws only what is on screen.
+    for (const mesh of buildScatter(layout, this.field, look, presetOf(quality), palette)) {
+      const total = mesh.count;
+      const matrices = (mesh.instanceMatrix.array as Float32Array).slice(0, total * 16);
+      const colors = mesh.instanceColor === null ? null : (mesh.instanceColor.array as Float32Array).slice(0, total * 3);
+      this.#addCulled(mesh, colors === null ? { matrices } : { matrices, colors }, sphereOf(mesh.geometry));
+    }
     this.#root.add(buildDecals(layout, this.field, look));
 
     // SPEC-018 §4.8: the silhouette ring past the berm hides the void.
@@ -801,7 +838,9 @@ export class SurfaceView {
     this.#wall = wall.group;
     this.#wallChunks = wall.chunks;
     this.#root.add(wall.group);
-    this.#buildShelters(layout, planet, accent, assets);
+    this.#buildShelters(layout, planet, assets);
+    // SPEC-046 §4.8: the salvager's tug, parked on the pad.
+    this.#buildTug(assets, quality.shadowMapSize > 0);
 
     // The arena lock ring — visible only while a boss fight seals the arena.
     this.#arenaRing = new THREE.Mesh(
@@ -984,15 +1023,17 @@ export class SurfaceView {
    * cave body, cave roof, wreck body, wreck roof, and up to two glows — ≤ 6
    * draw calls (AC-40). Instances rotate so the geometry's canonical entrance
    * (local +x for a cave, local +z for a wreck's breach) lands on `gapAngle`.
+   * SPEC-046 §4.6: each part draws through compaction; the body fades and the
+   * roof lifts through the masters.
    */
-  #buildShelters(layout: ViewLayout, planet: PlanetDef, accent: THREE.Material, assets?: Assets): void {
+  #buildShelters(layout: ViewLayout, planet: PlanetDef, assets?: Assets): void {
     const shelters = layout.shelters;
     this.#roofSlots.length = 0;
     this.#roofMatrices.length = 0;
     this.#shelterMeshes.length = 0;
     if (shelters.length === 0) return;
+    // SPEC-046 §4.1: no flat shading; the roofs keep their computed normals.
     const roofMaterial = new THREE.MeshStandardMaterial({
-      flatShading: true,
       roughness: 0.85,
       metalness: 0.05,
       vertexColors: true,
@@ -1002,7 +1043,6 @@ export class SurfaceView {
       emissive: new THREE.Color(planet.surface.palette.accent),
       emissiveIntensity: 1.4,
     });
-    const bySlot = new Map<number, { mesh: THREE.InstancedMesh; slot: number }>();
     for (const kind of ['cave', 'wreck'] as const) {
       const mine: number[] = [];
       shelters.forEach((s, index) => {
@@ -1010,15 +1050,7 @@ export class SurfaceView {
       });
       if (mine.length === 0) continue;
       const geometry = shelterGeometry(kind, planet.biome, hash32(layout.hash, 'shelter', kind), assets);
-      const body = new THREE.InstancedMesh(geometry.body, accent, mine.length);
-      // SPEC-035 §4.5: the body fades like any other prop; the roof keeps its
-      // SPEC-030 lift and is never faded on top of it (35-c).
-      const bodyFade = fadeAttribute(mine.length);
-      geometry.body.setAttribute('instanceFade', bodyFade);
-      geometry.body.computeBoundingBox();
-      const bodyTop = geometry.body.boundingBox?.max.y ?? 1;
-      const roof = new THREE.InstancedMesh(geometry.roof, roofMaterial, mine.length);
-      const glow = geometry.glow === undefined ? null : new THREE.InstancedMesh(geometry.glow, glowMaterial, mine.length);
+      const matrices = new Float32Array(mine.length * 16);
       mine.forEach((index, i) => {
         const s = shelters[index] as ViewLayout['shelters'][number];
         let rotation = kind === 'cave' ? -s.gapAngle : -s.angle;
@@ -1030,31 +1062,46 @@ export class SurfaceView {
         }
         scratchMatrix.makeRotationY(rotation);
         scratchMatrix.setPosition(s.x, this.field.heightAt(s.x, s.z), s.z);
-        body.setMatrixAt(i, scratchMatrix);
-        roof.setMatrixAt(i, scratchMatrix);
-        glow?.setMatrixAt(i, scratchMatrix);
-        bySlot.set(index, { mesh: roof, slot: i });
-        this.#occluders.push({ x: s.x, z: s.z, radius: Math.max(s.rx, s.rz), height: Math.max(0.5, bodyTop) });
-        this.#occluderTargets.push({ kind: 'instance', attribute: bodyFade, slot: i });
+        scratchMatrix.toArray(matrices, i * 16);
         this.#roofMatrices[index] = scratchMatrix.clone();
       });
-      for (const mesh of [body, roof, ...(glow === null ? [] : [glow])]) {
-        mesh.instanceMatrix.needsUpdate = true;
-        mesh.receiveShadow = true;
-        this.#root.add(mesh);
-        this.#shelterMeshes.push(mesh);
+      // SPEC-035 §4.5: the body fades like any other prop; the roof keeps its
+      // SPEC-030 lift and is never faded on top of it (35-c).
+      const bodyTop = topOf(geometry.body);
+      const body = this.#addCulled(
+        new THREE.InstancedMesh(geometry.body, this.#accentMaterial, mine.length),
+        { matrices, fades: new Float32Array(mine.length).fill(1) },
+        sphereOf(geometry.body),
+      );
+      // The roof's master is its own: the lift writes into it.
+      const roof = this.#addCulled(
+        new THREE.InstancedMesh(geometry.roof, roofMaterial, mine.length),
+        { matrices: matrices.slice() },
+        sphereOf(geometry.roof),
+      );
+      const glow =
+        geometry.glow === undefined
+          ? null
+          : this.#addCulled(new THREE.InstancedMesh(geometry.glow, glowMaterial, mine.length), { matrices }, sphereOf(geometry.glow));
+      mine.forEach((index, i) => {
+        const s = shelters[index] as ViewLayout['shelters'][number];
+        this.#occluders.push({ x: s.x, z: s.z, radius: Math.max(s.rx, s.rz), height: Math.max(0.5, bodyTop) });
+        this.#occluderTargets.push({ kind: 'instance', layer: body, index: i });
+        this.#roofSlots[index] = { layer: roof, slot: i };
+      });
+      for (const layer of [body, roof, ...(glow === null ? [] : [glow])]) {
+        layer.mesh.receiveShadow = true;
+        this.#shelterMeshes.push(layer.mesh);
       }
     }
-    shelters.forEach((_s, index) => {
-      const entry = bySlot.get(index);
-      if (entry !== undefined) this.#roofSlots[index] = entry;
-    });
   }
 
   /**
    * SPEC-030 §4.9: scale the occupied shelter's roof instance to zero and
    * restore the previously occupied one, so the player stays visible under
-   * the 55° camera (AC-41; instant even under reduce motion, 30-j).
+   * the 55° camera (AC-41; instant even under reduce motion, 30-j). SPEC-046
+   * §4.6: through the roof layer's master, so a roof lifted while off screen
+   * is lifted when it is drawn again (46-d).
    */
   setOccupiedShelter(index: number | null): void {
     if (index === this.#occupiedShelter) return;
@@ -1063,10 +1110,7 @@ export class SurfaceView {
     if (previous !== null) {
       const entry = this.#roofSlots[previous];
       const matrix = this.#roofMatrices[previous];
-      if (entry !== undefined && matrix !== undefined) {
-        entry.mesh.setMatrixAt(entry.slot, matrix);
-        entry.mesh.instanceMatrix.needsUpdate = true;
-      }
+      if (entry !== undefined && matrix !== undefined) entry.layer.setMatrix(entry.slot, matrix);
     }
     if (index !== null) {
       const entry = this.#roofSlots[index];
@@ -1074,8 +1118,7 @@ export class SurfaceView {
       if (entry !== undefined && matrix !== undefined) {
         scratchMatrix.copy(matrix);
         scratchMatrix.scale(scratchVector.set(1e-6, 1e-6, 1e-6));
-        entry.mesh.setMatrixAt(entry.slot, scratchMatrix);
-        entry.mesh.instanceMatrix.needsUpdate = true;
+        entry.layer.setMatrix(entry.slot, scratchMatrix);
       }
     }
   }
@@ -1104,11 +1147,15 @@ export class SurfaceView {
     const seed = hash32(layout.hash, 'boundary');
     const perimeter = 8 * (layout.halfSize + (RING_INNER + RING_OUTER) / 2);
     const count = Math.min(RING_MAX, Math.max(RING_MIN, Math.round(perimeter / RING_SPACING)));
+    const geometry = boundaryGeometry(look.boundary);
+    // SPEC-046 §4.1: no flat shading — the bodies keep their builders' normals.
     const mesh = new THREE.InstancedMesh(
-      boundaryGeometry(look.boundary),
-      new THREE.MeshStandardMaterial({ flatShading: true, roughness: 0.9, metalness: 0, vertexColors: true }),
+      geometry,
+      new THREE.MeshStandardMaterial({ roughness: 0.9, metalness: 0, vertexColors: true }),
       count,
     );
+    const matrices = new Float32Array(count * 16);
+    const shades = new Float32Array(count * 3);
     for (let i = 0; i < count; i++) {
       // Around the square boundary: an angle walk with jitter, pushed out to a
       // jittered band between +6 and +28 m past halfSize.
@@ -1124,17 +1171,37 @@ export class SurfaceView {
       scratchMatrix.makeRotationY(hash01(seed, i, 3) * Math.PI * 2);
       scratchMatrix.scale(scratchVector.set(scale, scale, scale));
       scratchMatrix.setPosition(x, this.field.heightAt(x, z), z);
-      mesh.setMatrixAt(i, scratchMatrix);
+      scratchMatrix.toArray(matrices, i * 16);
       const shade = 0.8 + hash01(seed, i, 4) * 0.3;
-      mesh.setColorAt(i, scratchColor.setScalar(shade));
+      shades[i * 3] = shade;
+      shades[i * 3 + 1] = shade;
+      shades[i * 3 + 2] = shade;
     }
-    mesh.instanceMatrix.needsUpdate = true;
-    if (mesh.instanceColor !== null) mesh.instanceColor.needsUpdate = true;
     mesh.castShadow = false;
     mesh.receiveShadow = true;
     mesh.name = 'boundary-ring';
-    mesh.computeBoundingSphere();
+    this.#addCulled(mesh, { matrices, colors: shades }, sphereOf(geometry));
+  }
+
+  /** SPEC-046 §4.6: one static instanced layer under the root, drawn through compaction. */
+  #addCulled(mesh: THREE.InstancedMesh, master: CullMaster, localSphere: THREE.Sphere): CulledInstances {
+    const layer = new CulledInstances(mesh, master, localSphere);
     this.#root.add(mesh);
+    this.#culled.push(layer);
+    this.#cullDirty = true;
+    return layer;
+  }
+
+  /** Takes a layer out of the scene and the cull list, freeing its geometry (and a glow's own material). */
+  #dropLayer(layer: CulledInstances, ownMaterial: boolean): void {
+    const mesh = layer.mesh;
+    this.#root.remove(mesh);
+    mesh.geometry.dispose();
+    if (ownMaterial) (mesh.material as THREE.Material).dispose();
+    mesh.dispose();
+    const at = this.#culled.indexOf(layer);
+    if (at >= 0) this.#culled.splice(at, 1);
+    this.#cullDirty = true;
   }
 
   /**
@@ -1170,6 +1237,14 @@ export class SurfaceView {
     // SPEC-030 AC-38 / SPEC-017 §4.5: casters on high only; receivers always.
     for (const mesh of this.#wallChunks) mesh.castShadow = size > 0;
     for (const mesh of this.#shelterMeshes) mesh.castShadow = size > 0;
+    for (const mesh of this.#tugMeshes) mesh.castShadow = size > 0;
+    // SPEC-046 §4.6 (46-h): with a shadow map, a caster off screen can throw
+    // its shadow on screen, so every layer's pad grows by its shadow's reach.
+    const reach = size > 0 ? this.#sunSlope : 0;
+    if (reach !== this.#shadowReach) {
+      this.#shadowReach = reach;
+      this.#cullDirty = true;
+    }
 
     // 18-p: the storm capacity is the preset's particle budget.
     if (quality.maxParticles !== this.#stormCapacity) {
@@ -1369,70 +1444,353 @@ export class SurfaceView {
     }
   }
 
-  // ------------------------------------------------------- SPEC-040 §4.6
+  // ------------------------------------------------ SPEC-040 §4.6, SPEC-046 §4.2
+
+  /**
+   * SPEC-046 §4.2: every prop and obstacle kind. A kind gathers its instances
+   * in layout order — its obstacles, then its small props — and draws one
+   * mesh per variant from its models when one is drawable, or SPEC-018's two
+   * sculpted meshes (obstacles, small props) when none is. The occluder
+   * candidates go in today's order, so `occluderProps` keeps its length and
+   * order whichever way a kind is drawn.
+   */
+  #buildProps(layout: ViewLayout, assets: Assets | undefined): void {
+    const groups = new Map<ObstacleKind, PropInstance[]>();
+    /** Today's occluder order: obstacle kinds, then small-prop kinds, each by first appearance. */
+    const order: { kind: ObstacleKind; small: boolean }[] = [];
+    const ordinals = new Map<string, number>();
+    const place = (kind: ObstacleKind, layoutKind: string, small: boolean, x: number, z: number, scale: number, rot: number): void => {
+      let list = groups.get(kind);
+      if (list === undefined) {
+        list = [];
+        groups.set(kind, list);
+      }
+      if (!order.some((group) => group.kind === kind && group.small === small)) order.push({ kind, small });
+      const ordinal = ordinals.get(layoutKind) ?? 0;
+      ordinals.set(layoutKind, ordinal + 1);
+      list.push({ x, z, scale, rot, layoutKind, ordinal, small, target: { kind: 'instance', layer: null, index: -1 } });
+    };
+    for (const o of layout.obstacles) {
+      // SPEC-030 D-19: shelter walls are collision-only — the shelter body is
+      // their visual; `debris` draws like any other kind.
+      if (o.kind === 'cave_wall' || o.kind === 'wreck_hull') continue;
+      place(o.kind, o.kind, false, o.x, o.z, o.radius, (o.x * 7 + o.z * 3) % Math.PI);
+    }
+    for (const prop of layout.props) {
+      place(prop.kind.replace('_small', '') as ObstacleKind, prop.kind, true, prop.x, prop.z, prop.scale * 0.5, prop.rot);
+    }
+
+    const plans = new Map<ObstacleKind, { prop: PropKind; shapes: (PropGeometry | null)[]; shapeOf: readonly number[] }>();
+    for (const [kind, instances] of groups) {
+      const prop: PropKind = {
+        kind,
+        seed: hash32(layout.hash, 'prop', kind),
+        ids: obstacleModelIds(kind, this.#biome),
+        undrawable: new Set(),
+        instances,
+        matrices: new Float32Array(instances.length * 16),
+        lifted: false,
+        layers: [],
+        fromModel: false,
+      };
+      const variants = this.#variantShapes(prop, assets);
+      let shapes: (PropGeometry | null)[];
+      let shapeOf: readonly number[];
+      if (variants.some((shape) => shape !== null)) {
+        prop.fromModel = true;
+        shapes = variants;
+        shapeOf = this.#variantOf(prop, variants);
+      } else {
+        // 18-d: the procedural rock embeds half its radius, lifted back out.
+        prop.lifted = kind === 'rock';
+        shapes = [
+          instances.some((p) => !p.small) ? proceduralObstacle(kind, this.#biome, prop.seed, false) : null,
+          instances.some((p) => p.small) ? proceduralObstacle(kind, this.#biome, prop.seed, true) : null,
+        ];
+        shapeOf = instances.map((p) => (p.small ? 1 : 0));
+      }
+      instances.forEach((entry, i) => {
+        // 18-d: bases sit at h. A GLB prop has its origin at the base centre,
+        // so it takes no lift (§4.10).
+        const lift = prop.lifted ? entry.scale * ROCK_LIFT : 0;
+        scratchMatrix.makeRotationY(entry.rot);
+        scratchMatrix.scale(scratchVector.set(entry.scale, entry.scale, entry.scale));
+        scratchMatrix.setPosition(entry.x, this.field.heightAt(entry.x, entry.z) + lift, entry.z);
+        scratchMatrix.toArray(prop.matrices, i * 16);
+      });
+      plans.set(kind, { prop, shapes, shapeOf });
+      this.#propKinds.push(prop);
+    }
+
+    // SPEC-035 §4.5: the cylinder the pure test uses — the instance's own
+    // footprint, as tall as its geometry reaches above the ground.
+    const tops = new Map<PropGeometry, number>();
+    for (const { kind, small } of order) {
+      const plan = plans.get(kind);
+      if (plan === undefined) continue;
+      plan.prop.instances.forEach((entry, i) => {
+        if (entry.small !== small) return;
+        const shape = plan.shapes[plan.shapeOf[i] as number];
+        if (shape === null || shape === undefined) return;
+        let top = tops.get(shape);
+        if (top === undefined) {
+          top = topOf(shape.body);
+          tops.set(shape, top);
+        }
+        const lift = plan.prop.lifted ? entry.scale * ROCK_LIFT : 0;
+        this.#occluders.push({ x: entry.x, z: entry.z, radius: entry.scale, height: Math.max(0.5, top * entry.scale + lift) });
+        this.#occluderTargets.push(entry.target);
+      });
+    }
+
+    for (const { prop, shapes, shapeOf } of plans.values()) {
+      prop.layers = this.#propLayers(prop, shapes, shapeOf, prop.fromModel ? this.#glbMaterial : this.#accentMaterial);
+    }
+  }
+
+  /**
+   * SPEC-046 §4.2: each of the kind's variants as a prop body, or `null` where
+   * its model is not loaded — or loaded as a tree contract, which is noted so
+   * `propSource` stops waiting for it (§4.1).
+   */
+  #variantShapes(prop: PropKind, assets: Assets | undefined): (PropGeometry | null)[] {
+    return prop.ids.map((id) => {
+      if (assets === undefined || prop.undrawable.has(id) || !assets.hasModel(id)) return null;
+      const shape = propFromModel(assets.model(id));
+      if (shape === null) prop.undrawable.add(id);
+      return shape;
+    });
+  }
+
+  /** SPEC-046 §4.2: each instance's variant by hash; one whose model is missing draws the first loaded one. */
+  #variantOf(prop: PropKind, variants: readonly (PropGeometry | null)[]): number[] {
+    const n = prop.ids.length;
+    const first = variants.findIndex((shape) => shape !== null);
+    return prop.instances.map((entry) => {
+      const v = variantIndex(this.#layoutHash, entry.layoutKind, entry.ordinal, n);
+      return variants[v] === null || variants[v] === undefined ? first : v;
+    });
+  }
+
+  /**
+   * One layer per shape that holds instances — a body on `material`, plus a
+   * glow when the shape has one — whose masters copy the kind's matrices and
+   * each member's current fade. Points every member's occluder target at its
+   * new layer and index. A shape nothing draws is disposed.
+   */
+  #propLayers(prop: PropKind, shapes: readonly (PropGeometry | null)[], shapeOf: readonly number[], material: THREE.Material): PropLayer[] {
+    const layers: PropLayer[] = [];
+    shapes.forEach((shape, s) => {
+      if (shape === null) return;
+      const members: number[] = [];
+      shapeOf.forEach((of, i) => {
+        if (of === s) members.push(i);
+      });
+      if (members.length === 0) {
+        shape.body.dispose();
+        shape.glow?.dispose();
+        return;
+      }
+      const matrices = new Float32Array(members.length * 16);
+      const fades = new Float32Array(members.length);
+      members.forEach((member, j) => {
+        for (let e = 0; e < 16; e++) matrices[j * 16 + e] = prop.matrices[member * 16 + e] as number;
+        const target = (prop.instances[member] as PropInstance).target;
+        // E72: a fade in flight carries across a rebuild.
+        fades[j] = target.layer === null ? 1 : target.layer.fadeAt(target.index);
+      });
+      const mesh = new THREE.InstancedMesh(shape.body, material, members.length);
+      mesh.castShadow = true;
+      mesh.receiveShadow = true;
+      const body = this.#addCulled(mesh, { matrices, fades }, sphereOf(shape.body));
+      members.forEach((member, j) => {
+        const target = (prop.instances[member] as PropInstance).target;
+        target.layer = body;
+        target.index = j;
+      });
+      let glow: CulledInstances | null = null;
+      if (shape.glow !== undefined) {
+        // §4.7: the emissive parts, instanced on the body's own matrices.
+        const glowMesh = new THREE.InstancedMesh(shape.glow, obstacleGlow(prop.kind, this.#biome, this.#palette.accent), members.length);
+        glowMesh.castShadow = false;
+        glow = this.#addCulled(glowMesh, { matrices }, sphereOf(shape.glow));
+      }
+      layers.push({ body, glow, members });
+    });
+    return layers;
+  }
 
   /**
    * SPEC-040 §4.6, E72: the planet's prop models, swapped in after the view was
-   * built — the set landed later than the surface would wait for it. Each prop
-   * and obstacle `InstancedMesh` whose kind has a model now in `assets` takes
-   * the GLB geometry in place: the same count, instance matrices, fades and
-   * occluder slots, so no position, collision, fade or layout hash moves. The
-   * procedural geometry is disposed. A kind with no model, or already drawn
-   * from its model, is left alone.
+   * built — the set landed later than the surface would wait for it. SPEC-046
+   * §4.2: each kind still drawn from its stand-ins that now has a drawable
+   * model is rebuilt into its variant meshes — the procedural meshes and their
+   * geometry disposed, every instance keeping its matrix, its fade and its
+   * occluder candidate — so no position, collision, fade or layout hash moves.
+   * A kind with no drawable model, or already drawn from its models, is left
+   * alone.
    */
   setPropModels(assets: Assets): void {
+    let rebuilt = false;
     for (const prop of this.#propKinds) {
-      if (prop.fromModel || !prop.modelled) continue;
-      const id = obstacleModelId(prop.kind, this.#biome);
-      if (id === undefined || !assets.hasModel(id)) continue;
-      const next = obstacleGeometry(prop.kind, this.#biome, prop.seed, assets, prop.small);
-      if (next.fromModel !== true) {
-        next.body.dispose();
-        next.glow?.dispose();
-        continue;
-      }
-      if (prop.kind === 'rock') {
+      if (prop.fromModel || prop.ids.length === 0) continue;
+      const variants = this.#variantShapes(prop, assets);
+      if (!variants.some((shape) => shape !== null)) continue;
+      if (prop.lifted) {
         // The matrices still carry the procedural rock's lift; the model's own
         // geometry gives it back, so the rock stands on the ground (18-d).
-        next.body.translate(0, -ROCK_LIFT, 0);
-        next.glow?.translate(0, -ROCK_LIFT, 0);
+        for (const shape of variants) {
+          shape?.body.translate(0, -ROCK_LIFT, 0);
+          shape?.glow?.translate(0, -ROCK_LIFT, 0);
+        }
       }
-      swapGeometry(prop.mesh, next.body, prop.fade);
-      if (prop.glow !== null && next.glow !== undefined) {
-        swapGeometry(prop.glow, next.glow, null);
-      } else if (prop.glow !== null) {
-        // The model has no glow part: the procedural one goes with its body.
-        this.#root.remove(prop.glow);
-        prop.glow.geometry.dispose();
-        (prop.glow.material as THREE.Material).dispose();
-        prop.glow.dispose();
-        prop.glow = null;
-      } else if (next.glow !== undefined) {
-        prop.glow = this.#addPropGlow(prop.kind, next.glow, prop.mesh);
+      const old = prop.layers;
+      prop.layers = this.#propLayers(prop, variants, this.#variantOf(prop, variants), this.#glbMaterial);
+      for (const layer of old) {
+        this.#dropLayer(layer.body, false);
+        if (layer.glow !== null) this.#dropLayer(layer.glow, true);
       }
       prop.fromModel = true;
+      rebuilt = true;
     }
+    if (rebuilt) this.#refreshCulled();
   }
 
   /**
    * SPEC-040 §4.6: `'glb'` once every prop kind that has a model draws it,
-   * `'procedural'` while any of them still draws its stand-in.
+   * `'procedural'` while any of them still draws its stand-in. SPEC-046 §4.2:
+   * a variant that loaded as a tree contract is not drawable, so a kind whose
+   * models all did holds nothing up.
    */
   get propSource(): 'glb' | 'procedural' {
     for (const prop of this.#propKinds) {
-      if (prop.modelled && !prop.fromModel) return 'procedural';
+      if (prop.fromModel) continue;
+      if (prop.ids.some((id) => !prop.undrawable.has(id))) return 'procedural';
     }
     return 'glb';
   }
 
-  /** §4.7: a prop kind's emissive parts, instanced on the body's own matrices. */
-  #addPropGlow(kind: ObstacleKind, geometry: THREE.BufferGeometry, body: THREE.InstancedMesh): THREE.InstancedMesh {
-    const glow = new THREE.InstancedMesh(geometry, obstacleGlow(kind, this.#biome, this.#palette.accent), body.count);
-    glow.instanceMatrix.copy(body.instanceMatrix);
-    glow.instanceMatrix.needsUpdate = true;
-    glow.castShadow = false;
-    this.#root.add(glow);
-    return glow;
+  // ------------------------------------------------------- SPEC-046 §4.8
+
+  /**
+   * The salvager's tug on the pad: a clone of the boot set's ship, nose toward
+   * +z, its lowest vertex on the slab's top face. Its materials are the
+   * cache's and are never written — a fade swaps in per-view clones. The
+   * collision circle is the scene's (`tugObstacle`); this is only the look.
+   */
+  #buildTug(assets: Assets | undefined, shadows: boolean): void {
+    const pad = this.#pad;
+    if (pad === null || assets === undefined || !assets.hasModel('ship')) return;
+    const ship = assets.model('ship');
+    ship.updateMatrixWorld(true);
+    const bounds = new THREE.Box3().setFromObject(ship);
+    if (bounds.isEmpty()) return;
+    ship.name = 'tug';
+    ship.rotation.y = 0;
+    ship.scale.setScalar(TUG_SCALE);
+    ship.position.set(pad.x, this.field.heightAt(pad.x, pad.z) + PAD_TOP - bounds.min.y * TUG_SCALE, pad.z);
+    const parts: FadePart[] = [];
+    ship.traverse((node) => {
+      const mesh = node as THREE.Mesh;
+      if (mesh.isMesh !== true) return;
+      mesh.castShadow = shadows;
+      mesh.receiveShadow = true;
+      this.#tugMeshes.push(mesh);
+      if (!Array.isArray(mesh.material)) parts.push({ mesh, base: mesh.material, faded: null });
+    });
+    this.#root.add(ship);
+    this.#tug = ship;
+    // SPEC-035 §4.5: it stands between the camera and a salvager behind it.
+    this.#occluders.push({
+      x: pad.x,
+      z: pad.z,
+      radius: TUG_FADE_RADIUS,
+      height: PAD_TOP + (bounds.max.y - bounds.min.y) * TUG_SCALE,
+    });
+    this.#occluderTargets.push({ kind: 'mesh', parts });
+  }
+
+  /** SPEC-046 §4.8: the tug is on the pad — `sceneInfo.tug`. */
+  get tugDrawn(): boolean {
+    return this.#tug !== null;
+  }
+
+  // ------------------------------------------------------- SPEC-046 §4.6
+
+  /**
+   * Called by the scene with the camera it placed: the look-at point, the live
+   * distance, the field of view, the aspect and the frustum. The culled layers
+   * refresh when the target has moved `CULL_REFRESH_DISTANCE` since the last
+   * refresh, when the distance, field of view or aspect changed, or when a
+   * layer was built or rebuilt since — and when a corner of the ground the
+   * frustum sees has drifted that far, which a look-ahead swinging round a
+   * turn does while the target itself moves less. A steady frame is a handful
+   * of comparisons.
+   */
+  setView(targetX: number, targetZ: number, camDistance: number, fovDeg: number, aspect: number, frustum: THREE.Frustum): void {
+    const view = this.#cullView;
+    view.frustum = frustum;
+    let stale =
+      this.#cullDirty ||
+      Math.hypot(targetX - view.x, targetZ - view.z) >= CULL_REFRESH_DISTANCE ||
+      camDistance !== view.distance ||
+      fovDeg !== view.fov ||
+      aspect !== view.aspect;
+    const corners = this.#viewCorners;
+    const seen = frustumGroundCorners(frustum, corners);
+    if (!stale && seen) {
+      const last = this.#cullCorners;
+      for (let i = 0; i < 8 && !stale; i += 2) {
+        const dx = (corners[i] as number) - (last[i] as number);
+        const dz = (corners[i + 1] as number) - (last[i + 1] as number);
+        stale = dx * dx + dz * dz >= CULL_REFRESH_DISTANCE * CULL_REFRESH_DISTANCE;
+      }
+    }
+    if (!stale) return;
+    view.x = targetX;
+    view.z = targetZ;
+    view.distance = camDistance;
+    view.fov = fovDeg;
+    view.aspect = aspect;
+    if (seen) this.#cullCorners.set(corners);
+    this.#refreshCulled();
+  }
+
+  /**
+   * Every culled layer against the last view: the rig's rect grown by the
+   * layer's margin (and by its shadow on `high`, 46-h), widened to whatever
+   * the frustum itself sees on the ground — the camera turns toward its
+   * look-ahead — then the sphere test. A view never given one keeps drawing
+   * everything.
+   */
+  #refreshCulled(): void {
+    const view = this.#cullView;
+    const frustum = view.frustum;
+    if (frustum === null) return;
+    const started = performance.now();
+    const rect = this.#cullRect;
+    for (let i = 0; i < this.#culled.length; i++) {
+      const layer = this.#culled[i] as CulledInstances;
+      const shadow = layer.maxHeight * this.#shadowReach;
+      const margin = cullMargin(layer.maxRadius, layer.maxHeight, view.fov) + shadow;
+      viewRect(view, view.distance, view.fov, view.aspect, margin, rect);
+      extendByFrustum(frustum, margin, rect);
+      layer.refresh(rect, frustum, CULL_REFRESH_DISTANCE + shadow);
+    }
+    this.#cullMs = Math.round((performance.now() - started) * 100) / 100;
+    this.#cullDirty = false;
+  }
+
+  /** SPEC-046 §4.6: instances the culled layers draw now — `sceneInfo.instancesDrawn`. */
+  get instancesDrawn(): number {
+    let drawn = 0;
+    for (let i = 0; i < this.#culled.length; i++) drawn += (this.#culled[i] as CulledInstances).drawn;
+    return drawn;
+  }
+
+  /** SPEC-046 §4.6: the last refresh's time, in ms to two decimals — `sceneInfo.cullMs`. */
+  get cullMs(): number {
+    return this.#cullMs;
   }
 
   // ------------------------------------------------------- SPEC-035 §4.5
@@ -1483,39 +1841,43 @@ export class SurfaceView {
       if (value < 1) faded++;
     }
     this.#fadedOccluders = faded;
-    // §4.14: one flag flip on one shared material, however many props fade.
+    // §4.14: one flag flip on the two shared body materials, together, however
+    // many props fade (SPEC-046 §4.1).
     const wantTransparent = faded > 0;
     if (wantTransparent !== this.#propsTransparent) {
       this.#propsTransparent = wantTransparent;
-      const material = this.#propMaterial;
-      if (material !== null) {
-        material.transparent = wantTransparent;
-        material.depthWrite = !wantTransparent;
-      }
+      this.#glbMaterial.transparent = wantTransparent;
+      this.#glbMaterial.depthWrite = !wantTransparent;
+      this.#accentMaterial.transparent = wantTransparent;
+      this.#accentMaterial.depthWrite = !wantTransparent;
     }
   }
 
-  /** §4.5: an instanced slot's attribute, or a landmark's own material clone. */
+  /**
+   * §4.5: an instance's fade in its culled layer — the master always, the slot
+   * while it is drawn (SPEC-046 §4.6) — or a whole mesh's own material clone.
+   */
   #writeFade(index: number, value: number): void {
     const target = this.#occluderTargets[index];
     if (target === undefined) return;
     if (target.kind === 'instance') {
-      target.attribute.setX(target.slot, value);
-      target.attribute.needsUpdate = true;
+      target.layer?.setFade(target.index, value);
       return;
     }
-    if (value >= 1) {
-      target.mesh.material = target.base;
-      return;
+    for (const part of target.parts) {
+      if (value >= 1) {
+        part.mesh.material = part.base;
+        continue;
+      }
+      if (part.faded === null) {
+        const clone = part.base.clone();
+        clone.transparent = true;
+        clone.depthWrite = false;
+        part.faded = clone;
+      }
+      part.faded.opacity = value;
+      part.mesh.material = part.faded;
     }
-    if (target.faded === null) {
-      const clone = (target.base as THREE.MeshStandardMaterial).clone();
-      clone.transparent = true;
-      clone.depthWrite = false;
-      target.faded = clone;
-    }
-    target.faded.opacity = value;
-    target.mesh.material = target.faded;
   }
 
   sync(frame: SurfaceFrame): void {
@@ -1777,14 +2139,20 @@ export class SurfaceView {
     // idempotent and covers the visit that never resolved a target.
     this.#pillarMaterial.dispose();
     this.#routeMaterial.dispose();
-    // §4.5: a landmark's fade clone sits on its mesh only while the prop is
-    // faded, so the walk above misses the one that already faded back — one
-    // clone per landmark that ever occluded the salvager.
+    // §4.5: a landmark's (or the tug's) fade clone sits on its mesh only while
+    // it is faded, so the walk above misses the one that already faded back —
+    // one clone per mesh that ever occluded the salvager. The tug's own
+    // materials are the asset cache's, which the walk leaves alone.
     for (const target of this.#occluderTargets) {
       if (target.kind !== 'mesh') continue;
-      target.faded?.dispose();
-      target.faded = null;
+      for (const part of target.parts) {
+        part.faded?.dispose();
+        part.faded = null;
+      }
     }
+    // Both body materials, whichever of them no kind ended up drawing with.
+    this.#glbMaterial.dispose();
+    this.#accentMaterial.dispose();
     // SPEC-040 AC-27: the key's shadow map is a render target three allocates
     // on the first shadow pass — a colour and a depth texture, which the walk
     // above cannot see. Left alone, every visit on `high` kept both on the GPU.

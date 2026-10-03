@@ -15,6 +15,13 @@ import type { ViewLayout } from '@/views/SurfaceView';
 
 export const SCATTER_CAP = { low: 300, medium: 600, high: 900 } as const;
 
+/**
+ * SPEC-046 §4.4: a tuft is the planet's ground pulled this far toward a dry
+ * straw, in linear space — the ground's own colour hid it (*initial tuning*).
+ */
+export const TUFT_TINT = '#d8d0a0';
+export const TUFT_TINT_AMOUNT = 0.45;
+
 /** §4.6 clearances. */
 const POI_CLEARANCE = 2;
 const PAD_CLEARANCE = 15;
@@ -26,15 +33,29 @@ const WALL_MARGIN = 3;
 const scratchMatrix = new THREE.Matrix4();
 const scratchScale = new THREE.Vector3();
 const scratchColor = new THREE.Color();
+const scratchTint = new THREE.Color();
+const scratchBase = new THREE.Color();
 
 // ------------------------------------------------------------- geometries
 
-/** A 32² two-blade alpha mask for the tuft quads, computed like a sprite. */
+/** The tuft mask's side, in texels (SPEC-046 §4.4). */
+const TUFT_MASK_SIZE = 64;
+/** The mask's footprint on a tuft card, in metres: SPEC-018's 0.7 × 0.5 m quad. */
+const TUFT_WIDTH = 0.7;
+const TUFT_HEIGHT = 0.5;
+/** How high a tuft card's apex stands, in mask heights. */
+const TUFT_APEX = 3;
+
+/**
+ * A 64² five-blade alpha mask for the tuft cards, computed like a sprite.
+ * SPEC-046 §4.4: mipmapped and trilinear — the nearest-filtered 32² mask
+ * shimmered into noise at play distance.
+ */
 let tuftMask: THREE.DataTexture | null = null;
 
-function tuftTexture(): THREE.DataTexture {
+export function tuftTexture(): THREE.DataTexture {
   if (tuftMask !== null) return tuftMask;
-  const size = 32;
+  const size = TUFT_MASK_SIZE;
   const data = new Uint8Array(size * size * 4);
   for (let y = 0; y < size; y++) {
     for (let x = 0; x < size; x++) {
@@ -46,7 +67,7 @@ function tuftTexture(): THREE.DataTexture {
       for (let blade = 0; blade < 5; blade++) {
         const centre = 0.1 + blade * 0.2 + Math.sin(blade * 7.3) * 0.04;
         const lean = (blade - 2) * 0.12 * v;
-        const width = 0.05 * (1 - v * 0.8);
+        const width = 0.07 * (1 - v * 0.8);
         if (Math.abs(u - centre - lean) < width && v < 0.95) alpha = Math.max(alpha, 1 - v * 0.35);
       }
       const at = (y * size + x) * 4;
@@ -57,9 +78,33 @@ function tuftTexture(): THREE.DataTexture {
     }
   }
   tuftMask = new THREE.DataTexture(data, size, size, THREE.RGBAFormat);
+  tuftMask.generateMipmaps = true;
+  tuftMask.minFilter = THREE.LinearMipmapLinearFilter;
+  tuftMask.magFilter = THREE.LinearFilter;
   tuftMask.needsUpdate = true;
   tuftMask.userData['shared'] = true;
   return tuftMask;
+}
+
+/**
+ * One tuft card (SPEC-046 §4.4, AC-14): a single upright triangle whose base
+ * is the bottom edge of SPEC-018's 0.7 × 0.5 m quad and whose apex stands
+ * `TUFT_APEX` mask heights up, so the mask keeps the quad's size. A
+ * `DataTexture` uploads its first row at v = 0 and the mask writes its ground
+ * line last, so the base samples v = 1 and the blades stand on the ground (the
+ * quads hung them upside down). Past the blade tips (v < 0) the clamp repeats
+ * the mask's empty tip row; the converging sides trim only the two outer
+ * blades, which lean out of the quad anyway — the card keeps about 90 % of the
+ * mask's opaque texels.
+ */
+function tuftCard(): THREE.BufferGeometry {
+  const half = TUFT_WIDTH / 2;
+  const top = TUFT_HEIGHT * TUFT_APEX;
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute('position', new THREE.BufferAttribute(new Float32Array([-half, 0, 0, half, 0, 0, 0, top, 0]), 3));
+  geometry.setAttribute('normal', new THREE.BufferAttribute(new Float32Array([0, 0, 1, 0, 0, 1, 0, 0, 1]), 3));
+  geometry.setAttribute('uv', new THREE.BufferAttribute(new Float32Array([0, 1, 1, 1, 0.5, 1 - TUFT_APEX]), 2));
+  return geometry;
 }
 
 interface ScatterSpec {
@@ -77,11 +122,13 @@ function scatterSpec(kind: ScatterKind, accent: string): ScatterSpec {
       return { geometry, material: new THREE.MeshStandardMaterial({ roughness: 0.9, metalness: 0 }) };
     }
     case 'tufts': {
-      const a = new THREE.PlaneGeometry(0.7, 0.5);
-      a.translate(0, 0.25, 0);
-      const b = a.clone();
+      // SPEC-046 AC-14: two crossed cards of one triangle each — 2 triangles
+      // a tuft where two quads were 4, so Thessaly's unchanged 600 tufts and
+      // 240 spores total 6,000 on medium, under its 7,000.
+      const a = tuftCard();
+      const b = tuftCard();
       b.rotateY(Math.PI / 2);
-      const geometry = mergePlanes(a, b);
+      const geometry = mergeAll([a, b]);
       return {
         geometry,
         material: new THREE.MeshStandardMaterial({
@@ -94,9 +141,10 @@ function scatterSpec(kind: ScatterKind, accent: string): ScatterSpec {
       };
     }
     case 'bones': {
+      // SPEC-046 §4.4: twice the old 5 cm thickness, at 24 triangles a bone.
       const parts: THREE.BufferGeometry[] = [];
       for (let i = 0; i < 3; i++) {
-        const bone = new THREE.CapsuleGeometry(0.05, 0.5 + i * 0.15, 2, 5);
+        const bone = new THREE.CapsuleGeometry(0.1, 0.9 + i * 0.2, 1, 4);
         bone.rotateZ(Math.PI / 2 + (i - 1) * 0.4);
         bone.rotateY(i * 1.9);
         bone.translate((i - 1) * 0.12, 0.08, i * 0.08);
@@ -120,7 +168,8 @@ function scatterSpec(kind: ScatterKind, accent: string): ScatterSpec {
       };
     }
     case 'spores': {
-      const geometry = new THREE.IcosahedronGeometry(0.3, 1);
+      // SPEC-046 §4.4: 20 triangles; the 80 of detail 1 bought nothing at 0.6 m.
+      const geometry = new THREE.IcosahedronGeometry(0.3, 0);
       geometry.translate(0, 0.3, 0);
       return {
         geometry,
@@ -139,10 +188,6 @@ function scatterSpec(kind: ScatterKind, accent: string): ScatterSpec {
       return { geometry, material: new THREE.MeshStandardMaterial({ roughness: 0.9, metalness: 0 }) };
     }
   }
-}
-
-function mergePlanes(a: THREE.BufferGeometry, b: THREE.BufferGeometry): THREE.BufferGeometry {
-  return mergeAll([a.toNonIndexed(), b.toNonIndexed()]);
 }
 
 function mergeAll(parts: THREE.BufferGeometry[]): THREE.BufferGeometry {
@@ -221,11 +266,22 @@ function placements(layout: ViewLayout, seed: number, count: number): Placement[
   return out;
 }
 
+/**
+ * A kind's base instance colour: `palette.ground`, except a tuft, which is the
+ * ground moved `TUFT_TINT_AMOUNT` toward `TUFT_TINT` in linear space
+ * (SPEC-046 §4.4). Written into `out`.
+ */
+export function scatterBaseColor(kind: ScatterKind, ground: string, out: THREE.Color): THREE.Color {
+  out.set(ground);
+  if (kind === 'tufts') out.lerp(scratchTint.set(TUFT_TINT), TUFT_TINT_AMOUNT);
+  return out;
+}
+
 function instancedMesh(
   spec: ScatterSpec,
   entries: Placement[],
   field: HeightField,
-  ground: string,
+  base: THREE.Color,
   emberSubset?: { color: string; fraction: number },
 ): THREE.InstancedMesh {
   const mesh = new THREE.InstancedMesh(spec.geometry, spec.material, Math.max(1, entries.length));
@@ -234,11 +290,11 @@ function instancedMesh(
     scratchMatrix.scale(scratchScale.set(entry.scale, entry.scale, entry.scale));
     scratchMatrix.setPosition(entry.x, field.heightAt(entry.x, entry.z), entry.z);
     mesh.setMatrixAt(i, scratchMatrix);
-    // Tint: palette.ground ± 8 % — or the ember accent on the §4.6 slag subset.
+    // Tint: the kind's base ± 8 % — or the ember accent on the §4.6 slag subset.
     if (emberSubset !== undefined && entry.tint < emberSubset.fraction) {
       mesh.setColorAt(i, scratchColor.set(emberSubset.color).multiplyScalar(2));
     } else {
-      mesh.setColorAt(i, scratchColor.set(ground).multiplyScalar(0.92 + entry.tint * 0.16));
+      mesh.setColorAt(i, scratchColor.copy(base).multiplyScalar(0.92 + entry.tint * 0.16));
     }
   });
   mesh.count = entries.length;
@@ -270,12 +326,13 @@ export function buildScatter(
   const spec = scatterSpec(look.scatter.kind, palette.accent);
   // Slag carries its own §4.6 ember subset: 30 % of instances glow-tinted.
   const embers = look.scatter.kind === 'slag' ? { color: '#ff6a2a', fraction: 0.3 } : undefined;
-  meshes.push(instancedMesh(spec, primary, field, palette.ground, embers));
+  meshes.push(instancedMesh(spec, primary, field, scatterBaseColor(look.scatter.kind, palette.ground, scratchBase), embers));
 
   if (look.scatter.second !== undefined) {
     const secondSeed = hash32(layout.hash, 'scatter', 2);
     const second = placements(layout, secondSeed, Math.round(count * 0.4));
-    meshes.push(instancedMesh(scatterSpec(look.scatter.second, palette.accent), second, field, palette.ground));
+    const base = scatterBaseColor(look.scatter.second, palette.ground, scratchBase);
+    meshes.push(instancedMesh(scatterSpec(look.scatter.second, palette.accent), second, field, base));
   }
   return meshes;
 }

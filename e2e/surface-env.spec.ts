@@ -121,6 +121,11 @@ for (const planet of PLANET_IDS) {
     expect(stats.drawCalls).toBeGreaterThan(10);
     expect(stats.drawCalls).toBeLessThanOrEqual(96); // 80 scene + 16 post
     expect(stats.triangles).toBeLessThanOrEqual(130_000);
+    // SPEC-046 §6.2 case 7, the spawn ratchet — the same frame, 30 frames after
+    // landing at the spawn: with only what is on screen drawn it sits far under
+    // the budget (≈ 20–35 k), and this holds the gain at 60 k, so a layer that
+    // stops culling fails here instead of in a frame-time chart.
+    expect(stats.triangles, `${planet}: SPEC-046 spawn ratchet`).toBeLessThanOrEqual(60_000);
   });
 }
 

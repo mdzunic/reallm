@@ -21,8 +21,10 @@ import {
   GOVERNOR_SUSTAIN_S,
   GOVERNOR_WINDOW_S,
   governorStep,
+  effectiveMaxDpr,
   presetFor,
   QUALITY,
+  SHARP_MEDIUM_MAX_DPR,
   type GovernorInput,
   type GovernorState,
   type GovernorStep,
@@ -409,5 +411,22 @@ describe('effectiveExposure (SPEC-045 §4.9, AC-37)', () => {
     expect(effectiveExposure(0, 0.3)).toBe(0);
     expect(effectiveExposure(-1, 0.3)).toBe(0);
     expect(effectiveExposure(Number.NaN, 0)).toBe(0);
+  });
+});
+
+describe('effectiveMaxDpr (SPEC-046 §4.7)', () => {
+  it('is 2 for medium with sharp rendering, and the preset\'s own maxDpr for the other five pairs', () => {
+    expect(SHARP_MEDIUM_MAX_DPR).toBe(2);
+    expect(effectiveMaxDpr('medium', true)).toBe(2);
+    expect(effectiveMaxDpr('medium', false)).toBe(1.5);
+    expect(effectiveMaxDpr('low', true)).toBe(1);
+    expect(effectiveMaxDpr('low', false)).toBe(1);
+    expect(effectiveMaxDpr('high', true)).toBe(2);
+    expect(effectiveMaxDpr('high', false)).toBe(2);
+    for (const preset of ['low', 'medium', 'high'] as const) {
+      expect(effectiveMaxDpr(preset, false)).toBe(QUALITY[preset].maxDpr);
+    }
+    // The table itself does not move: medium stays 1.5 unless the player asks (§1).
+    expect(QUALITY.medium.maxDpr).toBe(1.5);
   });
 });
