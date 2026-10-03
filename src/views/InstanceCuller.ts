@@ -272,12 +272,17 @@ export interface CullMaster {
 const scratchMatrix = new THREE.Matrix4();
 const scratchSphere = new THREE.Sphere();
 
-/** Upload `[0, count)` items of `attribute` on the next draw, through a reused range. */
+/**
+ * Upload `[0, count)` items of `attribute` on the next draw, through a reused
+ * range. With nothing drawn there is nothing the GPU needs, and no ranges would
+ * mean the whole buffer.
+ */
 function uploadPrefix(attribute: THREE.BufferAttribute, range: { start: number; count: number }, count: number): void {
+  if (count === 0) return;
   attribute.clearUpdateRanges();
   range.start = 0;
   range.count = count * attribute.itemSize;
-  if (range.count > 0) attribute.updateRanges.push(range);
+  attribute.updateRanges.push(range);
   attribute.needsUpdate = true;
 }
 
