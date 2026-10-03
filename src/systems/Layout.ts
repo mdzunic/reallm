@@ -917,3 +917,20 @@ export function layoutHash(layout: Layout): number {
   }
   return hash32(...parts);
 }
+
+// ------------------------------------------------------ SPEC-046 §4.8: the tug
+
+/** The parked tug's collision radius, in metres (*initial tuning*). */
+export const TUG_RADIUS = 3.5;
+
+/**
+ * SPEC-046 §4.8: the parked tug's collision circle, at the pad. It is never
+ * part of `layout.obstacles`: the hash, the reachability flood from the pad,
+ * the map and SPEC-027's route grid all keep the layout they had — the scene
+ * adds the circle to the combat world's `ObstacleGrid` only, so the player,
+ * enemies, shots and the dash stop at the hull. A route to the terminal ends
+ * at the pad's centre and reaches the 6 m terminal radius before the hull.
+ */
+export function tugObstacle(layout: Pick<Layout, 'pad'>): LayoutObstacle {
+  return { x: layout.pad.x, z: layout.pad.z, radius: TUG_RADIUS, kind: 'wreck_hull' };
+}

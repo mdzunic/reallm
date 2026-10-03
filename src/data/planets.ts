@@ -68,6 +68,8 @@ export interface SurfaceLook {
     readonly layers: readonly [GroundLayerId, GroundLayerId];
     readonly tileMetres: readonly [number, number];
     readonly cracks?: { readonly color: string; readonly intensity: number };
+    /** SPEC-046 §4.5: 0..1, how strongly the macro tint pulls the ground; absent reads `TERRAIN_TINT_AMOUNT`. */
+    readonly tint?: number;
   };
   readonly relief: { readonly amplitude: number; readonly wavelength: number; readonly ridged: number; readonly bermHeight: number };
   readonly scatter: { readonly kind: ScatterKind; readonly density: number; readonly second?: ScatterKind };

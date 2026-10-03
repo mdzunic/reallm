@@ -100,14 +100,14 @@ export function buildArenaWall(
   group.name = 'arena-wall';
   const chunks: THREE.InstancedMesh[] = [];
 
+  // SPEC-046 §4.1: no flat shading — the pieces keep the 45° creased normals
+  // `wallPieceGeometry` gives them, and the hull its computed ones.
   const material = new THREE.MeshStandardMaterial({
-    flatShading: true,
     roughness: 0.9,
     metalness: 0.05,
     vertexColors: true,
   });
   const hullMaterial = new THREE.MeshStandardMaterial({
-    flatShading: true,
     roughness: 0.6,
     metalness: 0.4,
     vertexColors: true,
