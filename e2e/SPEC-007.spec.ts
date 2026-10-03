@@ -281,6 +281,11 @@ test('a fresh save is the character §3 describes, seeded from ?seed= (AC-1 … 
     visits: {},
     endingSeen: false,
     explored: {},
+    // SPEC-047 §4.1: the four version-3 progress fields start empty.
+    claimed: [],
+    exploredBelow: {},
+    remains: null,
+    resume: null,
   });
 
   // §3: the slot keys, and a `:bak` of the previous good save under the second
