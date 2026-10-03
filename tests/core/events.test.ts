@@ -599,6 +599,8 @@ const NAMES: Record<keyof GameEvents, true> = {
   'mission:bonus': true,
   'mission:abandoned': true,
   'flag:set': true,
+  // SPEC-048 §4.3: a clue found, after its `flag:set`.
+  'story:clue': true,
   'dialogue:started': true,
   'dialogue:ended': true,
   'ship:damaged': true,
@@ -623,8 +625,8 @@ describe('GameEvents (§3.2)', () => {
     // SPEC-035 §4.11 added `weapon:fired` and `enemy:hit`; SPEC-038 §4.10
     // `player:dashed` and `enemy:windup`; SPEC-041 §4.10 `boss:move` and
     // `flight:hazardHit`; SPEC-042 §4.2 `item:collected` and `item:blocked`;
-    // SPEC-043 §4.7 `mission:bonus`.
-    expect(Object.keys(NAMES)).toHaveLength(71);
+    // SPEC-043 §4.7 `mission:bonus`; SPEC-048 §4.9 `story:clue`.
+    expect(Object.keys(NAMES)).toHaveLength(72);
   });
 
   it('still carries the nine names SPEC-002 and SPEC-003 already emit', () => {

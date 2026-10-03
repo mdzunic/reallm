@@ -220,11 +220,12 @@ export const HINTS: Readonly<Record<Objective['kind'] | 'death' | 'none' | 'no_w
   deliver: { nudge: '{label} is {dist} {dir}. You need {need} more {resource}.' },
   escort: { nudge: 'The probe follows you — lead it to {label}, {dist} {dir}.' },
   choice: { nudge: 'A call is waiting on you — open the prompt and choose.' },
-  // SPEC-036 §4.11: difficulty is not a setting, and Q means nothing on a phone.
-  // SPEC-037 §4.10: nor does ITEM, which the touch layout no longer draws.
+  // SPEC-036 §4.11: Q means nothing on a phone. SPEC-037 §4.10: nor does ITEM,
+  // which the touch layout no longer draws. SPEC-048 §4.7: armour, spelt as
+  // the game spells it, and casual difficulty — a setting since SPEC-038.
   death: {
-    nudge: 'Dying twice here? Q heals, and armor helps.',
-    touch: 'Dying twice here? Tap the heal slot on the bar, and armor helps.',
+    nudge: 'Dying twice here? Q heals, armour helps, and casual difficulty is in Settings.',
+    touch: 'Dying twice here? Tap the heal slot on the bar, and armour helps.',
   },
   none: {
     nudge: 'No mission running. The pad terminal has work — {dist} {dir}.',
@@ -259,6 +260,6 @@ export const MISSION_HINTS: Readonly<Partial<Record<MissionId, Readonly<Record<n
   },
   c1_s2: {
     0: 'Skitters swarm near the pad — thin them there.',
-    1: 'Survive the heat — it bites harder without armor.',
+    1: 'Survive the heat — it bites harder without armour.',
   },
 };

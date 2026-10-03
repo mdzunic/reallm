@@ -30,6 +30,7 @@ import { CombatFx } from '@/views/CombatFx';
 import { buildEnvironment, skyParamsFor } from '@/views/Environment';
 import { FollowerView } from '@/views/FollowerView';
 import { EnemyMeshes, INSTANCES_PER_PART } from '@/views/ProceduralMeshes';
+import { ScavBody } from '@/views/ScavBody';
 import { groundLayer, type GroundLayer } from '@/views/ProceduralTextures';
 import { buildScatter, buildDecals } from '@/views/Scatter';
 import { buildArenaWall } from '@/views/ArenaWall';
@@ -582,6 +583,10 @@ export class SurfaceView {
   readonly #assets: Assets | undefined;
   /** SPEC-019 §4.8: built on the first frame that carries a follower. */
   #followerView: FollowerView | null = null;
+  /** SPEC-048 §4.8: the scavenger bodies placed this visit — the pad's, then the echo's. */
+  readonly #scavBodies: ScavBody[] = [];
+  /** Whether the preset casts shadows — what a body placed mid-visit is built with. */
+  #shadowsOn = false;
   readonly #biome: PlanetDef['biome'];
   /** The layout hash every variant pick derives from (SPEC-046 §4.2). */
   readonly #layoutHash: number;
@@ -694,6 +699,7 @@ export class SurfaceView {
   ) {
     this.#scene = scene;
     this.#assets = assets;
+    this.#shadowsOn = quality.shadowMapSize > 0;
     this.#biome = planet.biome;
     scene.add(this.#root);
     const palette = planet.surface.palette;
@@ -1233,6 +1239,8 @@ export class SurfaceView {
     }
     this.enemies.setShadows(size > 0);
     this.#character?.setShadows(size > 0);
+    this.#shadowsOn = size > 0;
+    for (const body of this.#scavBodies) body.setShadows(size > 0);
     this.#blobMaterial.opacity = size > 0 ? BLOB_OPACITY_WITH_MAP : BLOB_OPACITY_ALONE;
     // SPEC-030 AC-38 / SPEC-017 §4.5: casters on high only; receivers always.
     for (const mesh of this.#wallChunks) mesh.castShadow = size > 0;
@@ -1715,6 +1723,30 @@ export class SurfaceView {
     return this.#tug !== null;
   }
 
+  // ------------------------------------------------------- SPEC-048 §4.8
+
+  /**
+   * A scavenger body at `(x, z)`, on the ground, facing `facing`. It stays
+   * until the view is disposed. False — and nothing placed — when the boot
+   * set's character model is not in: a body is scenery, never a requirement.
+   */
+  addScavBody(x: number, z: number, facing: number): boolean {
+    const assets = this.#assets;
+    if (assets === undefined || !assets.loaded || !assets.hasModel('character')) return false;
+    try {
+      this.#scavBodies.push(new ScavBody(this.#root, assets, x, z, facing, this.#shadowsOn, this.field.heightAt(x, z)));
+      return true;
+    } catch (cause) {
+      log.warn('view', 'the scav body could not be built', cause);
+      return false;
+    }
+  }
+
+  /** SPEC-048 §4.8: the bodies on the ground — `sceneInfo.scavBodies`. */
+  get scavBodies(): number {
+    return this.#scavBodies.length;
+  }
+
   // ------------------------------------------------------- SPEC-046 §4.6
 
   /**
@@ -2132,6 +2164,7 @@ export class SurfaceView {
     this.#character = null;
     this.#followerView?.dispose();
     this.#followerView = null;
+    for (const body of this.#scavBodies.splice(0)) body.dispose();
     this.#scene.remove(this.#root);
     disposeObject3D(this.#root);
     // The guidance meshes are built on demand, so `disposeObject3D` only reaches

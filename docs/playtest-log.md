@@ -1931,3 +1931,58 @@ phone (`medium`), on all six planets:
 - [ ] walking across Thessaly, nothing pops in at the screen's edges;
 - [ ] on the phone, `Sharp rendering` visibly sharpens `medium`;
 - [ ] a before/after screenshot pair per planet and the `?perf` row on `medium`.
+
+## SPEC-048 — the story listens: conditions, clues, notes and the Warden's notice (M7h)
+
+- **Build:** `spec/SPEC-048` — untagged
+- **Devices:**
+  - desktop — headless Chromium at 1280 × 720 (Playwright, Linux container, **software GL / SwiftShader**)
+  - phone — _no handset in the build container_ (§7's pass is owed, below)
+
+Recorded from the container the branch was built in: `npm run check` — 108
+files and 2,433 tests, none skipped — and, a few files per invocation,
+`e2e/SPEC-048.spec.ts` (§6.2's eleven cases in thirteen tests, with the c4_m3
+banner order and the cave and landmark shortcuts), the files whose pins §4.9
+moves (`SPEC-006`, `SPEC-009`), `SPEC-044` (its intro line now reads the
+bound save's name) and `SPEC-012-missions` (chapter 1 end to end, through the
+raider's line and the echo), all green under one to four workers.
+
+| Area | What the container showed |
+|---|---|
+| Placeholders | at the station, a save named Vega: `Earth Command to tug CR-62. Vega, you are cleared for the Cinder-4 approach.`, and the comms log kept the filled line |
+| The notice | Ferrum, echo and log found: modal, `held` 1, `instance/62. Containment level 4. Token balance 0.`, eight lines; the log listed the echo and the log, not the towers |
+| c4_m3 | `surface-finish-stage` on the delivery: the notice first, the banner after its last line |
+| A dwell clue | `surface-goto-wreck` on Cinder-4 (seed 123): `Tug-class hull. Earth pattern, older paint.` inside 15 s of wall clock, `clue_hull` set, `cluesFound` 1 |
+| E75 | Manual speed, five `c1_s1_done` queued: the dwell reached 4 s and started over with the flag unset; after the queue was read, the next dwell set it |
+| Notes | `pause-comms` wore the dot; `Recorded 1 of 15`, `Command rating 0.97 — a good run`, two `— not recorded —` in chapter 1, uppercased by CSS; the arrows switched the tabs; reopened, no dot. At the station the echo dotted `station-tab-comms`, Notes took it down, focus came back to the rail |
+| The board | `mission-c1_s2-irregular` read `Irregular reading`; gone once `clue_scav_echo` was set |
+| Replay | `c1_m1` replayed from the pad terminal: its accept line only, and the `Dry Land` banner |
+| Bodies | `scavBodies` 1 on a landing with `c1_m1` active, 2 after `c1_s2_echo`, still 2 after a second echo, 0 with `c1_m1` done. Medium, both down, adaptive quality off: 40 draws and 26,424 triangles (budget 96 and 130 k) |
+| Covers, caption, kills | the echo ended on `That line again…`; `interlude_c3` at 8 s read `The towers were not alien.` with `scaffold_secret`, its own line without; `c5_m1_accept` said `Six kills.` |
+
+**The merge gate's run.** The gate ran the whole suite on this tree on a host
+at a load of about 40 over 10 cores: its pages drew 4–7 fps with update and
+render under 4 ms, and six cases outside this spec's file failed on both of
+its passes, each on a wall-clock budget for something that runs on game time
+or on the page's own clock — SPEC-006's death duck (10 samples where it wants
+more), SPEC-026 case 4, SPEC-029 case 2, SPEC-030 case 3, SPEC-037's phone
+case 1 at 844 × 390, and SPEC-044 case 1, whose intro line SPEC-048 made 77
+characters long (76 were typed when its 10 s ran out). Each now waits on what
+it asserts — the whole line, game time, the layer's own writes to the gain, a
+single-task read of the zone ghost — and passed here under up to four workers
+and again with every draw held to at least 150 ms (`slowDraw`, ~5 fps), where
+the old SPEC-044 case fails as it did on the gate. The scav body's own cost
+was measured on the way: one more skinned program linked on a Cinder-4
+landing before `c1_m1` (14 for 13), 100–200 ms of the first frames on
+SwiftShader, nothing per frame after. Transparent, as the salvager's clones
+are, it would share their program but draw twice (three.js draws double-sided
+transparency in two passes), so it stays opaque: one draw (AC-33).
+
+**Owed on hardware (§7).** On desktop and the reference phone:
+
+- [ ] play chapter 1 from a fresh save on the main path only: the pad body is there when the scav speaks, a raider's dying words repeat the warning, and no line reads a raw `{…}`;
+- [ ] shelter in a Cinder-4 wreck through a storm and read `wreck_cinder4`;
+- [ ] play `c1_s2` and see the second body;
+- [ ] open Notes from the pause menu and the station: the count, the rating and the records;
+- [ ] with a save at chapter 4, finish `c4_m3`: the notice holds the world and names what was found, and the banner follows it;
+- [ ] replay `c1_m1` and hear only its accept line.

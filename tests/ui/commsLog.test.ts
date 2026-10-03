@@ -2,6 +2,11 @@
 // for real by `e2e/SPEC-045.spec.ts` case 3; this pins what it lists.
 import { describe, expect, it } from 'vitest';
 import { COMMS_LOG_MAX, CommsLog } from '@/ui/CommsLog';
+import { NOTES_EMPTY_TEXT, NOTES_MISSING_TEXT, NOTES_UNSEEN } from '@/ui/NotesPanel';
+import { stripComments } from '../architecture/source';
+
+const RAW = import.meta.glob<string>('../../src/ui/*.ts', { query: '?raw', import: 'default', eager: true });
+const SOURCES: Record<string, string> = Object.fromEntries(Object.entries(RAW).map(([file, source]) => [file, stripComments(source)]));
 
 describe('CommsLog (SPEC-045 §4.1)', () => {
   it('keeps the lines in the order they were pushed, oldest first', () => {
@@ -43,5 +48,44 @@ describe('CommsLog (SPEC-045 §4.1)', () => {
     // Reading changes nothing; a second read lists the same lines.
     expect(log.lines()).toEqual(first);
     expect(log.size).toBe(2);
+  });
+});
+
+// SPEC-048 §4.4 — the Notes tab. Its sheet is DOM, driven by `e2e/SPEC-048.spec.ts`
+// case 5; the model is `tests/systems/clues.test.ts`'s. This pins the page-session
+// memory of unread clues and the words and test ids the sheet is built from.
+describe('Notes (SPEC-048 §4.4)', () => {
+  it('remembers unread clues per save object, until Notes is opened', () => {
+    const a = {};
+    const b = {};
+    expect(NOTES_UNSEEN.has(a)).toBe(false);
+    NOTES_UNSEEN.mark(a);
+    NOTES_UNSEEN.mark(a);
+    expect(NOTES_UNSEEN.has(a)).toBe(true);
+    expect(NOTES_UNSEEN.has(b)).toBe(false);
+    NOTES_UNSEEN.clear(a);
+    expect(NOTES_UNSEEN.has(a)).toBe(false);
+    NOTES_UNSEEN.clear(b); // clearing what was never marked is harmless
+    expect(NOTES_UNSEEN.has(b)).toBe(false);
+  });
+
+  it('writes its lines in sentence case, as §4.4 gives them', () => {
+    expect(NOTES_EMPTY_TEXT).toBe('Nothing on file yet.');
+    expect(NOTES_MISSING_TEXT).toBe('— not recorded —');
+    const panel = SOURCES['../../src/ui/NotesPanel.ts'] as string;
+    expect(panel).toContain('`Recorded ${model.found} of ${model.total}`');
+    expect(panel).toContain('`Command rating ${model.rating.toFixed(2)} — ${model.grade}`');
+    for (const id of ['notes-empty', 'notes-count', 'notes-rating', 'notes-new']) expect(panel, id).toContain(`'${id}'`);
+    expect(panel).toContain('`notes-chapter-${chapter.chapter}`');
+    expect(panel).toContain('`notes-clue-${def.id}`');
+  });
+
+  it('puts Comms and Notes in a tablist that opens on the log and answers the arrow keys', () => {
+    const sheet = SOURCES['../../src/ui/CommsLog.ts'] as string;
+    expect(sheet).toContain("role: 'tablist'");
+    expect(sheet).toContain("tab('comms-tab-comms', 'Comms')");
+    expect(sheet).toContain("tab('comms-tab-notes', 'Notes')");
+    expect(sheet).toMatch(/select\(comms\);\s*return list;/);
+    expect(sheet).toMatch(/event\.key !== 'ArrowLeft' && event\.key !== 'ArrowRight'/);
   });
 });

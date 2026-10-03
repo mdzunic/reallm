@@ -26,6 +26,7 @@ import {
   typedChars,
   type FilmMode,
 } from '@/systems/StoryBeats';
+import { captionText, type StoryContext } from '@/systems/StoryContext';
 import { SPEAKER_NAMES } from '@/ui/DialogueUI';
 import { el, h, testId } from '@/ui/dom';
 
@@ -82,6 +83,11 @@ export interface FilmPlayOptions {
   reduceMotion: boolean;
   /** A video failure already remembered this session (E27). */
   videoBroken: boolean;
+  /**
+   * SPEC-048 §4.1: what a caption is chosen and filled from — the director
+   * passes the bound save's context, or the default before one exists.
+   */
+  story: StoryContext;
   /** The director plays each crossed cue; the player never touches audio. */
   onCue(cue: CueDef): void;
   /** Called once when video fails mid-film, so the session remembers it. */
@@ -127,6 +133,8 @@ interface Run {
   poster: HTMLImageElement | null;
   shownShot: number;
   shownCaption: CaptionDef | null;
+  /** SPEC-048 §4.1: `captionText` of the caption on screen — its variant, filled. */
+  shownText: string;
   /** Shot id → poster URL, from the manifest entry (stills mode). */
   posters: Map<string, string>;
   // video
@@ -234,6 +242,7 @@ export class FilmPlayer {
       poster: null,
       shownShot: -1,
       shownCaption: null,
+      shownText: '',
       posters,
       video: null,
       fetchAbort: null,
@@ -313,7 +322,7 @@ export class FilmPlayer {
       state: run.state,
       time: run.t,
       shot: run.def.shots[shotAt(run.def, run.t)]?.id ?? '',
-      caption: captionAt(run.def, run.t)?.text ?? null,
+      caption: this.#captionTextAt(run),
     };
   }
 
@@ -537,8 +546,8 @@ export class FilmPlayer {
     const caption = captionAt(run.def, run.t);
     if (caption !== run.shownCaption) this.#showCaption(run, caption);
     if (caption !== null) {
-      const typed = typedChars(caption.text, run.t - caption.at, !run.opts.typewriter);
-      const text = caption.text.slice(0, typed);
+      const typed = typedChars(run.shownText, run.t - caption.at, !run.opts.typewriter);
+      const text = run.shownText.slice(0, typed);
       if (run.captionText.textContent !== text) run.captionText.textContent = text;
     }
 
@@ -617,13 +626,23 @@ export class FilmPlayer {
     else run.frame.append(img);
   }
 
+  /** SPEC-048 §4.1: the caption at the run's clock as the player reads it, or null between captions. */
+  #captionTextAt(run: Run): string | null {
+    const caption = captionAt(run.def, run.t);
+    if (caption === null) return null;
+    return caption === run.shownCaption ? run.shownText : captionText(caption, run.opts.story);
+  }
+
   #showCaption(run: Run, caption: CaptionDef | null): void {
     run.shownCaption = caption;
     if (caption === null) {
+      run.shownText = '';
       run.caption.classList.add('is-hidden');
       run.captionText.textContent = '';
       return;
     }
+    // SPEC-048 §4.1: chosen and filled once, as the caption comes up.
+    run.shownText = captionText(caption, run.opts.story);
     run.caption.classList.remove('is-hidden');
     run.caption.dataset['speaker'] = caption.speaker;
     // §4.3: a `title` line is centred with no name; the rest carry the
@@ -631,7 +650,7 @@ export class FilmPlayer {
     run.captionSpeaker.textContent = caption.speaker === 'title' ? '' : SPEAKER_NAMES[caption.speaker];
     run.captionText.textContent = '';
     // The screen reader hears the whole line once, at `at` (§4.3).
-    run.live.textContent = caption.text;
+    run.live.textContent = run.shownText;
   }
 
   // ------------------------------------------------------- input and hiding

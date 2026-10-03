@@ -132,8 +132,8 @@ export const MISSIONS = {
   c1_m1: {
     id: 'c1_m1',
     title: 'Dry Land',
-    brief:
-      'Touchdown put you twelve metres off the pad. Walk to it, survey the dune sea, and sit out the first sandstorm Cinder-4 sends your way.',
+    // SPEC-048 §4.7: SPEC-046 parks the tug on the pad, so the brief no longer says the touchdown missed it.
+    brief: 'Walk to the pad, survey the dune sea, and sit out the first sandstorm Cinder-4 sends your way.',
     type: 'main',
     chapter: 1,
     planet: 'cinder4',
@@ -322,7 +322,8 @@ export const MISSIONS = {
     ],
     rewards: { xp: 220, tokens: 20 },
     bonus: { kind: 'no_shelter', reward: { items: [{ itemId: 'medkit', qty: 2 }] } },
-    dialogue: { onAccept: 'c3_m1_accept', onComplete: 'c3_m1_done' },
+    // SPEC-048 §4.7: the storm stage after the harvest opens on chapter 3's echo.
+    dialogue: { onAccept: 'c3_m1_accept', onStage: { 1: 'c3_m1_ruins' }, onComplete: 'c3_m1_done' },
   },
   c3_m2: {
     id: 'c3_m2',
@@ -564,7 +565,8 @@ export const MISSIONS = {
     ],
     rewards: { xp: 400, tokens: 40 },
     bonus: { kind: 'par', seconds: 270, reward: { items: [{ itemId: 'medkit', qty: 3 }] } },
-    dialogue: { onAccept: 'c6_m1_accept', onComplete: 'c6_m1_done' },
+    // SPEC-048 §4.7: the spring, then the forest — chapter 6's echo.
+    dialogue: { onAccept: 'c6_m1_accept', onStage: { 1: 'c6_m1_spring', 2: 'c6_m1_forest' }, onComplete: 'c6_m1_done' },
   },
   c6_m2: {
     id: 'c6_m2',

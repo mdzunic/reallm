@@ -120,10 +120,42 @@ async function press(page: Page, testid: string): Promise<void> {
   await page.getByTestId(testid).dispatchEvent('click');
 }
 
-/** §6.3 case 1's busy state: the storm banner, one toast, and USE at the pad. */
-async function busy(page: Page): Promise<void> {
+/**
+ * The busy state's toast raised, and the aim ghost, the arc and the drawn toasts
+ * read back — in one task, once the toast's 150 ms entry has run, so its box is
+ * where it settles. `ghost` is null when the ghost is down.
+ */
+async function toastAndGhost(page: Page): Promise<{ ghost: Box | null; arc: Box; toasts: Box[] }> {
+  return page.evaluate(async (text) => {
+    window.__reallm.toast(text, 'warn', 60_000);
+    const rect = (node: Element): Box => {
+      const r = node.getBoundingClientRect();
+      return { x: r.x, y: r.y, width: r.width, height: r.height };
+    };
+    const drawn = (): HTMLElement[] =>
+      [...document.querySelectorAll<HTMLElement>('[data-testid="toasts"] .toast')].filter(
+        (node) => node.getClientRects().length > 0 && getComputedStyle(node).display !== 'none',
+      );
+    await Promise.all(drawn().flatMap((node) => node.getAnimations().map((animation) => animation.finished)));
+    const ghost = document.querySelector('[data-testid="touch-zone-aim"]');
+    const arc = document.querySelector('[data-testid="thumb-arc"]');
+    if (arc === null) throw new Error('thumb-arc is not in the DOM');
+    return {
+      ghost: ghost !== null && ghost.getClientRects().length > 0 ? rect(ghost) : null,
+      arc: rect(arc),
+      toasts: drawn().map(rect),
+    };
+  }, SHIPPED);
+}
+
+/**
+ * §6.3 case 1's busy state: the storm banner, one toast, and USE at the pad.
+ * `toasted` when the caller has already raised the toast — toasts coalesce by
+ * text, so a second would read `×2`.
+ */
+async function busy(page: Page, toasted = false): Promise<void> {
   await press(page, 'surface-storm');
-  await page.evaluate((text) => window.__reallm.toast(text, 'warn', 60_000), SHIPPED);
+  if (!toasted) await page.evaluate((text) => window.__reallm.toast(text, 'warn', 60_000), SHIPPED);
   await press(page, 'surface-goto-pad');
   await expect(page.getByTestId('hud-weather')).toBeVisible();
   await expect(page.getByTestId('touch-interact')).toBeVisible({ timeout: 10_000 });
@@ -191,14 +223,20 @@ for (const size of PHONE_VIEWPORTS) {
     }) => {
       await land(page);
       // The zone ghosts of a first touch landing (SPEC-036 §4.12), read
-      // before anything takes them down.
-      const aim = page.getByTestId('touch-zone-aim');
-      await expect(aim).toBeVisible();
-      await busy(page);
-      await expect(aim).toBeVisible();
-      const ghost = await box(page, 'touch-zone-aim');
-      expect(intersects(ghost, await box(page, 'thumb-arc')), 'the aim ghost is on the arc').toBe(false);
-      expect(intersects(ghost, (await shownToasts(page))[0] as Box), 'the aim ghost is under the toast').toBe(false);
+      // before anything takes them down. Their 12 s is wall clock from the
+      // scene's enter, and a starved landing spends most of it on its own — a
+      // loaded gate run took 8.6 s inside `go()`, and up to a second a round
+      // trip after it — so the ghost is read against the arc and the busy
+      // state's toast in the task that raises the toast, ahead of the slower
+      // steps (the storm, the jump to the pad, the wait for USE). Neither the
+      // storm nor USE moves the ghost (60 %, 50 %) or the toast rack.
+      const read = await toastAndGhost(page);
+      expect(read.ghost, 'the aim ghost is up').not.toBeNull();
+      expect(read.toasts).toHaveLength(1);
+      const ghost = read.ghost as Box;
+      expect(intersects(ghost, read.arc), 'the aim ghost is on the arc').toBe(false);
+      expect(intersects(ghost, read.toasts[0] as Box), 'the aim ghost is under the toast').toBe(false);
+      await busy(page, true);
 
       await checkLayout(page, size.width, size.height, 'left');
 

@@ -18,9 +18,13 @@
 // `Tracked`, `Needs: …`), an active row names its next step and carries the
 // Star Map button that takes it, and finished work folds away per planet —
 // except a contract, which is an offer and stays in the list.
+//
+// SPEC-048 §4.4: a side mission whose own clue is still out there reads
+// `Irregular reading` on its row, until the clue is found.
 import type { Save, SaveStore } from '@/core/Save';
 import type { BestTimes } from '@/core/Settings';
 import { CONTRACTS, MISSIONS, PLANET_IDS, PLANETS, type ContractId, type MissionDef, type MissionId, type PlanetId } from '@/data/index';
+import { clueFound, irregularClue } from '@/systems/Clues';
 import type { Economy } from '@/systems/Economy';
 import { contractFor } from '@/systems/Missions';
 import type { EventSink } from '@/systems/Progression';
@@ -178,6 +182,8 @@ export class MissionBoard {
       h('span', { class: 'board-title' }, def.title),
       // SPEC-044 §4.11: the type in words — `Main` or `Side`.
       h('span', { class: `badge badge-${def.type}` }, def.type === 'main' ? 'Main' : 'Side'),
+      // SPEC-048 §4.4: after the type badge, while the mission's own clue is unfound.
+      this.#irregular(def, status),
       // AC-36: flight missions say where they happen.
       def.scene === 'flight' ? h('span', { class: 'badge badge-flight' }, `Flight · during the trip to ${PLANETS[def.planet].name}`) : null,
       // SPEC-043 §4.3: the contract's name, its blurb on hover.
@@ -270,6 +276,18 @@ export class MissionBoard {
     }
     if (actions.childElementCount > 0) row.append(actions);
     return row;
+  }
+
+  /**
+   * SPEC-048 §4.4: `Irregular reading` on an `available` or `active` row whose
+   * side mission's own clue is unfound. A contract row is `replayable`, so it
+   * shows none.
+   */
+  #irregular(def: MissionDef, status: MissionStatus): HTMLElement | null {
+    if (status !== 'available' && status !== 'active') return null;
+    const clue = irregularClue(def.id as MissionId);
+    if (clue === null || clueFound(clue, new Set(this.#deps.data.progress.flags))) return null;
+    return testId(h('span', { class: 'badge board-irregular' }, 'Irregular reading'), `mission-${def.id}-irregular`);
   }
 
   /**

@@ -15,15 +15,41 @@ import {
   PLANET_IDS,
   SPEAKERS,
   STORY_FLAGS,
+  type CaptionDef,
   type FilmDef,
   type Enemy,
 } from '@/data/index';
 import { newSave, validateSave } from '@/core/Save';
+import { captionText, DEFAULT_STORY_CONTEXT, type StoryContext } from '@/systems/StoryContext';
 
 const films: readonly FilmDef[] = Object.values(FILMS);
 const duration = (film: FilmDef): number => film.shots[film.shots.length - 1]?.end ?? 0;
 const onGrid = (seconds: number): boolean => Math.abs(seconds * FILM_FPS - Math.round(seconds * FILM_FPS)) < 1e-6;
 const MB = 1024 * 1024;
+
+/**
+ * SPEC-048 §4.1: the context every placeholder fills longest in — a
+ * 16-character name, iteration 99, chapter 6, the hour and token caps and the
+ * largest seed — so a caption is measured as long as it can ever read.
+ */
+const LONGEST: StoryContext = {
+  ...DEFAULT_STORY_CONTEXT,
+  name: 'W'.repeat(16),
+  iteration: 99,
+  chapter: 6,
+  playtimeSec: 10_000_000,
+  tokens: 1_000_000,
+  seed: 0xffffffff,
+};
+
+/** The texts a caption can show, each through `captionText` at the longest fill: its own, then each variant held. */
+function shownTexts(caption: CaptionDef): string[] {
+  const base = captionText({ ...caption, variants: [] }, LONGEST);
+  const variants = (caption.variants ?? []).map((variant) =>
+    captionText({ ...caption, variants: [{ when: { all: [] }, text: variant.text }] }, LONGEST),
+  );
+  return [base, ...variants];
+}
 
 interface ManifestShot { id: string; start: number; end: number; poster: string; posterBytes: number }
 interface ManifestFilm { file: string; frames: number; bytes: number; crf: number; shots: ManifestShot[] }
@@ -81,9 +107,12 @@ describe('story films (SPEC-021 §8)', () => {
         const previous = film.captions[i - 1];
         if (previous !== undefined) expect(caption.at, where).toBeGreaterThanOrEqual(previous.until);
         expect(film.shots.some((shot) => caption.at >= shot.start && caption.until <= shot.end), where).toBe(true);
-        expect(caption.text.length, where).toBeGreaterThan(0);
-        expect(caption.text.length, where).toBeLessThanOrEqual(140);
-        expect(caption.until - caption.at, where).toBeGreaterThanOrEqual(1.5 + caption.text.length / 40 - 1e-9);
+        // SPEC-048 §4.1: the base and every variant, at the longest fill.
+        for (const text of shownTexts(caption)) {
+          expect(text.length, where).toBeGreaterThan(0);
+          expect(text.length, where).toBeLessThanOrEqual(140);
+          expect(caption.until - caption.at, where).toBeGreaterThanOrEqual(1.5 + text.length / 40 - 1e-9);
+        }
         expect(speakers.has(caption.speaker), where).toBe(true);
       });
     }
@@ -147,6 +176,20 @@ describe('story films (SPEC-021 §8)', () => {
       bytes += entry.bytes;
     }
     expect(bytes).toBeLessThanOrEqual(12 * MB);
+  });
+
+  it('4b (SPEC-048 §4.1). measures a filled caption, and the one variant interlude_c3 carries', () => {
+    const pool = FILMS.ending_escape.captions.find((caption) => caption.text.startsWith('SELECTION POOL')) as CaptionDef;
+    expect(shownTexts(pool)).toEqual(['SELECTION POOL — 1 model. 160 instances.']);
+    const towers = FILMS.interlude_c3.captions[1] as CaptionDef;
+    expect([towers.at, towers.until]).toEqual([7.4, 13.8]);
+    expect(towers.variants).toEqual([
+      { when: { flag: 'scaffold_secret' }, text: 'The towers were not alien. I wrote alien in my report anyway.' },
+    ]);
+    // 61 characters: on screen for at least 3.03 s, and it has 6.4.
+    expect(shownTexts(towers)[1]).toHaveLength(61);
+    const withVariants = films.flatMap((film) => film.captions.filter((caption) => (caption.variants ?? []).length > 0));
+    expect(withVariants).toHaveLength(1);
   });
 
   it('10. keeps the interlude flags through the save validator', () => {
