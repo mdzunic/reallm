@@ -1890,9 +1890,9 @@ On the reference phone:
 Recorded from the container the branch was built in: `npm run check` — 105
 files and 2,331 tests, none skipped — and the e2e files the spec names, a few
 per invocation: `e2e/SPEC-046.spec.ts` (§6.2's six cases in ten tests),
-`e2e/surface-env.spec.ts` (its five cases with the spawn ratchet folded into
-the per-planet medium frame) and `e2e/SPEC-018.spec.ts`'s two clamp cases,
-all green under three or four workers.
+`e2e/surface-env.spec.ts` (nine tests, the spawn ratchet folded into the six
+per-planet medium frames) and `e2e/SPEC-018.spec.ts`'s two clamp cases, all
+green under three or four workers.
 
 **The spawn frame on `medium`** (seed 20121, 1280 × 720, 30 frames after
 landing, props drawn from their GLBs, the tug on the pad):
