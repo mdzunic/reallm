@@ -245,6 +245,8 @@ const SILENT_EVENTS = [
   // sting is the sound; the banner's bonus row is what says how it went.
   'mission:bonus',
   'flag:set',
+  // SPEC-048 §4.3: a clue is quiet by design — its own line is what the player hears.
+  'story:clue',
   'dialogue:ended',
   'flight:recalled',
   'ui:orientation',

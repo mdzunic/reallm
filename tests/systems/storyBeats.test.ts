@@ -32,6 +32,7 @@ import {
   FILM_TYPE_CPS,
   interludeToPlay,
   LINE_LEDGER,
+  missionLinePlays,
   REVEAL,
   revealCamera,
   revealDue,
@@ -433,6 +434,34 @@ describe('LINE_LEDGER (SPEC-034 §4.10)', () => {
       if (!Object.hasOwn(DIALOGUE, done)) continue;
       expect(DIALOGUE[done as DialogueId].lines.length).toBeGreaterThan(0);
     }
+  });
+});
+
+describe('missionLinePlays (SPEC-048 §4.6, E76)', () => {
+  it('a first run plays every hook; a replay plays its accept line only', () => {
+    const table = (['accept', 'stage', 'complete'] as const).flatMap((hook) =>
+      [false, true].map((replay) => [hook, replay, missionLinePlays(hook, replay)]),
+    );
+    expect(table).toEqual([
+      ['accept', false, true],
+      ['accept', true, true],
+      ['stage', false, true],
+      ['stage', true, false],
+      ['complete', false, true],
+      ['complete', true, false],
+    ]);
+  });
+
+  it('is the one rule the surface and the flight read at each hook', () => {
+    const surface = SOURCES['../../src/scenes/Surface.ts'] as string;
+    // The landing's lines, the stage start and the completion each ask it.
+    expect(surface).toContain("missionLinePlays('stage', replay)");
+    expect(surface).toContain("missionLinePlays('accept', replay)");
+    expect(surface).toContain("missionLinePlays('stage', this.#missions?.isReplay(id) ?? false)");
+    // A replay's completion plays no line and is never noted for the debrief.
+    expect(surface).toMatch(/const speaks = missionLinePlays\('complete', replay\);\s*if \(data !== null && speaks\) LINE_LEDGER\.noteCompleted\(data, id\);/);
+    const flight = SOURCES['../../src/scenes/Flight.ts'] as string;
+    expect(flight).toMatch(/if \(!missionLinePlays\('complete', replay\)\) return;\s*LINE_LEDGER\.noteCompleted\(data, id\);/);
   });
 });
 

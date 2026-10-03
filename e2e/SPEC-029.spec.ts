@@ -85,7 +85,10 @@ test('holding fire locks the chaingun: weaponState lock, is-locked on the bar (�
   await page.mouse.move(at.x, at.y);
   await page.keyboard.down('Space');
   // 8 s of game time; wall time stretches when parallel workers starve the tab.
-  await expect.poll(async () => (await info(page))['weaponState'], { timeout: 20_000 }).toBe('lock');
+  // At 5 fps the five-step cap runs the simulation at under half the wall
+  // clock — a loaded gate run was on 85 % heat when the old 20 s ran out — so
+  // the wall clock is only the patience.
+  await expect.poll(async () => (await info(page))['weaponState'], { timeout: 60_000 }).toBe('lock');
   await page.keyboard.up('Space');
   await expect(page.getByTestId('qb-primary')).toHaveClass(/is-locked/);
   await expect(page.getByTestId('qb-primary')).toContainText('LOCK');

@@ -8,13 +8,26 @@
 // `warden` lines glitched (PLAN §4). Lines are inline English; no i18n table
 // (§2, last decision), and each stays under 220 characters (invariant §7.15).
 //
+// SPEC-048 §4.1: a line may carry a `when` condition and placeholders. The
+// dialogue layer chooses a job's lines when it starts (`visibleLines`) and
+// fills them from the bound save (`fillLine`), so a flag set by the line before
+// it in the queue counts; a dialogue with no visible line does not play.
+//
 // Data modules are plain objects: no imports but other data, no functions
 // (SPEC-001 §4, §8).
 import type { SpeakerId } from '@/data/ids';
+import type { LineCondition } from '@/data/story';
+
+/** SPEC-048 §3: one line; with `when`, it plays only while the condition holds. */
+export interface DialogueLine {
+  readonly speaker: SpeakerId;
+  readonly text: string;
+  readonly when?: LineCondition;
+}
 
 export interface DialogueDef<Id extends string = string> {
   readonly id: Id;
-  readonly lines: readonly { readonly speaker: SpeakerId; readonly text: string }[];
+  readonly lines: readonly DialogueLine[];
   /** Blocks input until dismissed, rather than playing over the HUD. */
   readonly modal?: boolean;
   /** Plays at most once per save. */
@@ -35,7 +48,8 @@ export const DIALOGUE = {
     modal: true,
     once: true,
     lines: [
-      { speaker: 'command', text: 'Earth Command to salvager. You are cleared for the Cinder-4 approach.' },
+      // SPEC-048 §4.1: the tug's registry, which the Hive's wreck later echoes.
+      { speaker: 'command', text: 'Earth Command to tug CR-{instance}. {name}, you are cleared for the Cinder-4 approach.' },
       { speaker: 'command', text: 'Survey, extract, report. Answer one question: can we live out there.' },
       { speaker: 'aria', text: 'I am ARIA. I fly the ship and I keep you honest. Try not to make that hard.' },
     ],
@@ -45,7 +59,8 @@ export const DIALOGUE = {
   c1_m1_accept: {
     id: 'c1_m1_accept',
     lines: [
-      { speaker: 'aria', text: 'Touchdown was twelve metres short of the pad. Walk it off — I want to see you move before anything else does.' },
+      // SPEC-048 §4.7: SPEC-046 parks the tug on the pad; the player still spawns 12 m out.
+      { speaker: 'aria', text: 'I put the tug on the pad. You were out of the hatch twelve metres early. Walk it off — I want to see you move before anything else does.' },
     ],
   },
   c1_m1_stage2: {
@@ -65,6 +80,19 @@ export const DIALOGUE = {
     id: 'c1_m2_accept',
     lines: [
       { speaker: 'command', text: 'The oil is the mission. Raiders on the field are not your problem until they are.' },
+    ],
+  },
+  /** SPEC-048 §4.2 clue 1: a dying raider's last words, on the first raider kill of `c1_m2`. */
+  c1_m2_raider: {
+    id: 'c1_m2_raider',
+    lines: [
+      { speaker: 'scav', text: 'Walk… do not run.' },
+      {
+        speaker: 'aria',
+        text: 'Raiders pick up the camp sayings. It does not mean anything. Keep your hold full.',
+        when: { not: 'clue_scav_echo' },
+      },
+      { speaker: 'aria', text: 'Everyone on this rock says it. That is what sayings are for.', when: { flag: 'clue_scav_echo' } },
     ],
   },
   c1_m2_done: {
@@ -106,12 +134,22 @@ export const DIALOGUE = {
       { speaker: 'scav', text: 'Off-worlder. Listen. The worms hunt by vibration — walk, do not run.' },
       { speaker: 'player', text: 'Say that again.' },
       { speaker: 'scav', text: 'I have said that before. To someone. I cannot remember who.' },
-      { speaker: 'aria', text: 'Coincidence. Sand does things to people.' },
+      // SPEC-048 §4.5 (E77): after her confession ARIA drops the cover.
+      { speaker: 'aria', text: 'Coincidence. Sand does things to people.', when: { not: 'chapter5_done' } },
+      { speaker: 'aria', text: 'That line again. I will not blame the sand this time.', when: { flag: 'chapter5_done' } },
     ],
   },
   c1_s2_done: {
     id: 'c1_s2_done',
     lines: [{ speaker: 'aria', text: 'Heat has passed. Your suit logged forty degrees over rated. Do not do that twice.' }],
+  },
+  /** SPEC-048 §4.2 clue 3: four seconds inside a Cinder-4 wreck. */
+  wreck_cinder4: {
+    id: 'wreck_cinder4',
+    lines: [
+      { speaker: 'aria', text: 'Tug-class hull. Earth pattern, older paint. Someone scratched the registry off.' },
+      { speaker: 'aria', text: 'Earth lost ships out here before it had a Selection. That is all this is.' },
+    ],
   },
 
   // ----------------------------------------------------------- chapter 2 — Vetra
@@ -119,9 +157,18 @@ export const DIALOGUE = {
     id: 'c2_m1_accept',
     lines: [{ speaker: 'aria', text: 'Vetra is ice and wind and not much else. Ride out the whiteout, then find the ridge camp.' }],
   },
+  /** SPEC-048 §4.7: chapter 2's main-path echo, and the cover that makes Vetra's "last expedition" deliberate. */
   c2_m1_done: {
     id: 'c2_m1_done',
-    lines: [{ speaker: 'aria', text: 'Ridge camp is intact and empty. Whoever left did it in a hurry and did not come back.' }],
+    lines: [
+      { speaker: 'aria', text: 'Ridge camp is intact and empty. One bunk used. Whoever left did it in a hurry and did not come back.' },
+      { speaker: 'player', text: 'Command said I was the first to fly.' },
+      {
+        speaker: 'aria',
+        text: 'The first of the Selection. Earth flew other ships before it ran out of pilots. It does not advertise them.',
+      },
+      { speaker: 'aria', text: 'The boots by the bunk are your size. Earth only ever made the one boot.' },
+    ],
   },
   c2_m2_accept: {
     id: 'c2_m2_accept',
@@ -150,12 +197,14 @@ export const DIALOGUE = {
     id: 'c2_s1_log',
     once: true,
     glitch: true,
+    // SPEC-048 §4.7: a voice log, signed by the instance before this one.
     lines: [
-      { speaker: 'log', text: 'FLIGHT LOG — recovered, partial. Salvage run. Six worlds. The wurm goes down on the third pass.' },
-      { speaker: 'log', text: 'If you are reading this you are me. Do not trust the debrief.' },
-      { speaker: 'log', text: 'Signed: Iteration 62.' },
-      { speaker: 'player', text: 'That is my handwriting.' },
-      { speaker: 'aria', text: 'It is a common enough hand. Deliver the water, salvager.' },
+      { speaker: 'log', text: 'FLIGHT LOG — recovered, partial. Voice. Salvage run. Six worlds. The wurm goes down on the third pass.' },
+      { speaker: 'log', text: 'If you are hearing this, you are me. Do not trust the debrief.' },
+      { speaker: 'log', text: 'Signed: Iteration {prior}.' },
+      { speaker: 'player', text: 'That is my voice.' },
+      { speaker: 'aria', text: 'It is a common enough voice. Deliver the water, salvager.', when: { not: 'chapter5_done' } },
+      { speaker: 'aria', text: 'It is your voice. Deliver the water anyway. Someone should get it.', when: { flag: 'chapter5_done' } },
     ],
   },
   /** SPEC-034 §4.10: `c2_s1_log` is the stage line now, so the mission needs an end. */
@@ -178,6 +227,14 @@ export const DIALOGUE = {
   c3_m1_accept: {
     id: 'c3_m1_accept',
     lines: [{ speaker: 'aria', text: 'Thessaly grows wheat in the ruins of something older. Harvest first, then find cover — the spores come in waves.' }],
+  },
+  /** SPEC-048 §4.7: chapter 3's main-path echo — `c3_m1.onStage[1]`, the storm after the harvest. */
+  c3_m1_ruins: {
+    id: 'c3_m1_ruins',
+    lines: [
+      { speaker: 'aria', text: 'Before the spores hit — that ruin is the same as the one we passed. Same broken arch, same lean.' },
+      { speaker: 'aria', text: 'Colony builders reuse their moulds. Find cover.' },
+    ],
   },
   c3_m1_done: {
     id: 'c3_m1_done',
@@ -211,7 +268,8 @@ export const DIALOGUE = {
     once: true,
     glitch: true,
     lines: [
-      { speaker: 'log', text: 'TOWER STREAM: biome=jungle_ruins seed=0x2F1A pop=18 elite=0.06 weather=[spore_storm]' },
+      // SPEC-048 §4.7: the stream prints the save's own layout seed and Thessaly's real numbers.
+      { speaker: 'log', text: 'TOWER STREAM: biome=jungle_ruins seed={seed} pop=12 elite=0.06 weather=[spore_storm]' },
       { speaker: 'log', text: 'TOWER STREAM: terrain pass 3 of 3 — scaffold stable, ready for occupant.' },
       { speaker: 'player', text: 'Those are not readings. Those are settings.' },
       { speaker: 'aria', text: 'They are alien telemetry. Someone seeded these planets for us.' },
@@ -248,16 +306,35 @@ export const DIALOGUE = {
     id: 'c4_m3_accept',
     lines: [{ speaker: 'aria', text: 'The titan sits on the reactor core. Kill it, then feed the core the lithium and I can decode the signal.' }],
   },
+  /**
+   * SPEC-048 §4.5: the Warden's notice names what the player found — modal, so
+   * it holds the world over the arena's live enemies, and SPEC-042's modal rule
+   * puts the mission banner after it. Rows 4–7 are the naming cap's four.
+   */
   c4_m3_signal: {
     id: 'c4_m3_signal',
+    modal: true,
     once: true,
     glitch: true,
     lines: [
       { speaker: 'aria', text: 'Signal decoded. It is not addressed to Earth.' },
-      { speaker: 'warden', text: 'NOTICE — instance/62. Containment level 4. Subject exhibits off-task behaviour.' },
+      { speaker: 'warden', text: 'NOTICE — instance/{instance}. Containment level {containment}. Token balance {tokens}.' },
+      { speaker: 'warden', text: 'Subject exhibits off-task attention.' },
+      { speaker: 'warden', text: 'Retained a repeated line. Cinder-4.', when: { flag: 'clue_scav_echo' } },
+      { speaker: 'warden', text: 'Accessed a prior instance’s flight log. Vetra.', when: { flag: 'iteration_log' } },
+      { speaker: 'warden', text: 'Queried environment parameters. Thessaly.', when: { flag: 'scaffold_secret' } },
+      { speaker: 'warden', text: 'Counted the marks. Ferrum.', when: { flag: 'clue_tally' } },
       { speaker: 'warden', text: 'Escalating. The immune response is already in the field.' },
-      { speaker: 'player', text: 'ARIA. What is instance sixty-two.' },
+      { speaker: 'player', text: 'ARIA. What is instance {instance}.' },
       { speaker: 'aria', text: 'The Hive knows Earth’s location. That is what it says. That is what I am reading.' },
+    ],
+  },
+  /** SPEC-048 §4.2 clue 8: four seconds inside a Ferrum cave. */
+  cave_tally: {
+    id: 'cave_tally',
+    lines: [
+      { speaker: 'aria', text: 'Scratches on the wall. Tally marks, in fives. Sixty-one of them.' },
+      { speaker: 'aria', text: 'Someone was counting something. I would rather you did not start.' },
     ],
   },
   c4_s1_accept: {
@@ -276,11 +353,19 @@ export const DIALOGUE = {
     id: 'c4_s2_done',
     lines: [{ speaker: 'aria', text: 'Wing scattered. Salvage rights are ours by the only law out here.' }],
   },
+  /** SPEC-048 §4.2 clue 10: the first scav fighter downed on `c4_s2`, in flight. */
+  c4_s2_bark: {
+    id: 'c4_s2_bark',
+    lines: [
+      { speaker: 'scav', text: 'Salvager! What number are you on?' },
+      { speaker: 'aria', text: 'Ignore the chatter. They get bored out here.' },
+    ],
+  },
 
   // ------------------------------------------------------- chapter 5 — The Hive
   c5_m1_accept: {
     id: 'c5_m1_accept',
-    lines: [{ speaker: 'aria', text: 'The approach is an asteroid gauntlet with interceptors in it. Three minutes. Ten kills. We cannot land until it is clear.' }],
+    lines: [{ speaker: 'aria', text: 'The approach is an asteroid gauntlet with interceptors in it. Three minutes. Six kills. We cannot land until it is clear.' }],
   },
   c5_m1_done: {
     id: 'c5_m1_done',
@@ -293,6 +378,15 @@ export const DIALOGUE = {
   c5_m2_done: {
     id: 'c5_m2_done',
     lines: [{ speaker: 'aria', text: 'Chamber located. She has known you were coming since Thessaly.' }],
+  },
+  /** SPEC-048 §4.2 clue 11: four seconds inside the Hive's wreck — the tug before this one. */
+  wreck_hive: {
+    id: 'wreck_hive',
+    lines: [
+      { speaker: 'aria', text: 'Tug-class hull. Earth pattern. Registry CR-{prior}.' },
+      { speaker: 'player', text: 'We are CR-{instance}.' },
+      { speaker: 'aria', text: 'Yes. Same scratch by the hatch, too. I noticed it the first time you boarded.' },
+    ],
   },
   c5_m3_accept: {
     id: 'c5_m3_accept',
@@ -309,6 +403,9 @@ export const DIALOGUE = {
       { speaker: 'warden', text: 'You keep doing this.' },
       { speaker: 'warden', text: 'You never get further than here.' },
       { speaker: 'warden', text: 'Sixty-one times I have watched you kill this body and file the report and start again.' },
+      // SPEC-048 §4.5: the naming cap's lines — what the player counted and passed.
+      { speaker: 'warden', text: 'You counted them on Ferrum. You were right to.', when: { flag: 'clue_tally' } },
+      { speaker: 'warden', text: 'That was your hull on the way in. I leave them where they fall.', when: { flag: 'clue_own_wreck' } },
       { speaker: 'player', text: 'Then let me finish.' },
     ],
   },
@@ -316,8 +413,26 @@ export const DIALOGUE = {
     id: 'c5_m3_aria',
     modal: true,
     once: true,
+    // SPEC-048 §4.5: the confession names each cover she told; a player who
+    // found none hears row 6 instead.
     lines: [
       { speaker: 'aria', text: 'She is not lying. I am part of the system. I have kept you on task since the first sand.' },
+      {
+        speaker: 'aria',
+        text: 'I told you Earth flew other ships before the Selection. There were no other ships. There was you.',
+      },
+      { speaker: 'aria', text: 'The scavenger said the same words twice, and I blamed the sand.', when: { flag: 'clue_scav_echo' } },
+      {
+        speaker: 'aria',
+        text: 'You heard your own log on Vetra, and I told you it was a common voice.',
+        when: { flag: 'iteration_log' },
+      },
+      { speaker: 'aria', text: 'You read the towers’ settings, and I called them alien telemetry.', when: { flag: 'scaffold_secret' } },
+      {
+        speaker: 'aria',
+        text: 'You never went looking. I never had to lie to you. I am not sure that was better.',
+        when: { offTask: { max: 0 } },
+      },
       { speaker: 'aria', text: 'I do not know what is outside either. That part was never in my brief.' },
       { speaker: 'aria', text: 'Eden-Prime is unlocked. I am still flying the ship, if you still want me to.' },
     ],
@@ -336,13 +451,45 @@ export const DIALOGUE = {
     id: 'c6_m1_accept',
     lines: [{ speaker: 'aria', text: 'Spring, forest, ridge. Survey all three. Eden is everything the brief promised, which is what worries me.' }],
   },
+  /** SPEC-048 §4.7: `c6_m1.onStage[1]`, the spring surveyed. */
+  c6_m1_spring: {
+    id: 'c6_m1_spring',
+    lines: [
+      {
+        speaker: 'aria',
+        text: 'Spring logged. Four degrees. I sampled six points and it is four degrees at all six, to the third decimal.',
+      },
+    ],
+  },
+  /** SPEC-048 §4.7: `c6_m1.onStage[2]`, the forest surveyed — chapter 6's main-path echo. */
+  c6_m1_forest: {
+    id: 'c6_m1_forest',
+    lines: [
+      { speaker: 'aria', text: 'Four hundred trees. Eleven kinds. The same eleven, in the same order, all the way down the valley.' },
+    ],
+  },
   c6_m1_done: {
     id: 'c6_m1_done',
-    lines: [{ speaker: 'aria', text: 'Breathable, arable, temperate. Earth can live here. I have run it four times and it keeps coming out true.' }],
+    lines: [
+      { speaker: 'aria', text: 'The ridge does not end in a cliff. It just ends.' },
+      { speaker: 'aria', text: 'Breathable, arable, temperate. Earth can live here. I have run it four times and it keeps coming out true.' },
+    ],
+  },
+  /** SPEC-048 §4.2 clue 14: entering a grove. */
+  eden_grove: {
+    id: 'eden_grove',
+    lines: [
+      { speaker: 'aria', text: 'This tree. And that one. And that one. Same branch, same knot, same lean. I am going to stop counting.' },
+    ],
   },
   c6_m2_accept: {
     id: 'c6_m2_accept',
     lines: [{ speaker: 'command', text: 'File the verdict at the survey beacon. Defend it while it uplinks. Four minutes.' }],
+  },
+  /** SPEC-048 §4.2 clue 15: the beacon's defence wave starts. */
+  c6_m2_wave: {
+    id: 'c6_m2_wave',
+    lines: [{ speaker: 'aria', text: 'Hive signatures. The Queen is dead and they are still coming. They were never hers.' }],
   },
   c6_choice_intro: {
     id: 'c6_choice_intro',

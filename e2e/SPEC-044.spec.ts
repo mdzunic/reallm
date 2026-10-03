@@ -21,9 +21,12 @@ const CREATION = {
 const URL = '/?seed=123';
 const DEBUG_URL = '/?debug&seed=123';
 
-/** `intro_command` as the panel shows it (`data/dialogue.ts`): a modal transmission of three lines. */
+/**
+ * `intro_command` as the panel shows it (`data/dialogue.ts`): a modal transmission of three lines.
+ * SPEC-048 §4.1: the first is filled from the bound save — instance 62 on a first run, and the name.
+ */
 const INTRO_LINES = [
-  { speaker: 'Earth Command', text: 'Earth Command to salvager. You are cleared for the Cinder-4 approach.' },
+  { speaker: 'Earth Command', text: 'Earth Command to tug CR-62. Vance, you are cleared for the Cinder-4 approach.' },
   { speaker: 'Earth Command', text: 'Survey, extract, report. Answer one question: can we live out there.' },
   { speaker: 'ARIA', text: 'I am ARIA. I fly the ship and I keep you honest. Try not to make that hard.' },
 ];
@@ -259,8 +262,15 @@ test('1. a modal line is read by keyboard: ▸ Enter once complete, Enter advanc
   expect(await focused(page)).toBe('dialogue');
 
   // The cue appears once the first line has typed out, and it never animates.
+  // Typed out is the whole line on screen: the typewriter adds a character per
+  // 25 ms tick of the page's own clock, so a starved tab types far below 40 a
+  // second — a loaded gate run had 76 of SPEC-048's 77 characters up when the
+  // old 10 s ran out — and the wait is for the line, not for a speed. The line
+  // is modal, so it stays until a press; the cue is shown in the same tick as
+  // its last character.
+  await expect(dialogue.locator('.dialogue-text')).toHaveText(INTRO_LINES[0]!.text, { timeout: 30_000 });
   const cue = page.getByTestId('dialogue-next');
-  await expect(cue).toBeVisible({ timeout: 10_000 });
+  await expect(cue).toBeVisible();
   await expect(cue).toHaveText('▸ Enter');
   expect(await cue.evaluate((node) => getComputedStyle(node).animationName)).toBe('none');
   expect(await cue.evaluate((node) => getComputedStyle(node).transitionDuration)).toBe('0s');

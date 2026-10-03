@@ -11,6 +11,7 @@
 // Source is read through Vite's `import.meta.glob` (`?raw`), so this needs no
 // node APIs and no extra type packages.
 import { describe, expect, it } from 'vitest';
+import { stripComments } from './source';
 
 type Folder = 'core' | 'data' | 'systems' | 'entities' | 'views' | 'scenes' | 'ui' | 'root';
 type Target = Folder | 'three' | 'external';
@@ -113,6 +114,38 @@ export function violations(files: Record<string, string>): string[] {
   return out;
 }
 
+/**
+ * SPEC-048 §4.4: Command's rating grades the run and changes nothing in it, so
+ * the gameplay modules may not read it. These are the modules, by file name.
+ */
+const RATING_FREE = ['Combat', 'Economy', 'Missions', 'Spawn', 'Progression', 'Loadout', 'EnemyAi'];
+/** …and what they may not import: the rating and the count it is made of. */
+const RATING_NAMES = ['commandRating', 'offTaskCount'];
+
+/**
+ * Every import of `commandRating` or `offTaskCount` — by name, aliased or
+ * not, or through a namespace import of `systems/Clues` — into a module of
+ * `RATING_FREE` under `src/systems/`. Comments are not imports.
+ */
+export function ratingViolations(files: Record<string, string>): string[] {
+  const out: string[] = [];
+  for (const [file, source] of Object.entries(files)) {
+    const match = /(?:^|\/)src\/systems\/([A-Za-z]+)\.ts$/.exec(file);
+    if (match === null || !RATING_FREE.includes(match[1] as string)) continue;
+    const code = stripComments(source);
+    for (const named of code.matchAll(/\b(?:import|export)\s+(?:type\s+)?(?:[\w$]+\s*,\s*)?\{([^}]*)\}\s*from\s*['"][^'"]+['"]/g)) {
+      for (const part of (named[1] as string).split(',')) {
+        const name = part.trim().replace(/^type\s+/, '').split(/\s+as\s+/)[0]?.trim() ?? '';
+        if (RATING_NAMES.includes(name)) out.push(`${file} imports ${name} — the rating changes nothing in play (SPEC-048 §4.4)`);
+      }
+    }
+    for (const spaced of code.matchAll(/\bimport\s+\*\s+as\s+[\w$]+\s+from\s*['"]([^'"]+)['"]/g)) {
+      if (/(?:^|\/)Clues$/.test(spaced[1] as string)) out.push(`${file} imports systems/Clues whole — the rating changes nothing in play (SPEC-048 §4.4)`);
+    }
+  }
+  return out;
+}
+
 const SRC = import.meta.glob<string>('../../src/**/*.ts', { query: '?raw', import: 'default', eager: true });
 const TESTS = import.meta.glob<string>('../**/*.ts', { query: '?raw', import: 'default', eager: true });
 
@@ -143,5 +176,31 @@ describe('import boundaries (SPEC-001 §4)', () => {
     expect(violations({ 'src/scenes/Surface.ts': "import * as THREE from 'three';\nimport { hit } from '@/systems/Combat';" })).toEqual([]);
     expect(violations({ 'tests/systems/combat.test.ts': "import { EnemyView } from '@/views/EnemyView';" })).toHaveLength(1);
     expect(violations({ 'tests/core/log.test.ts': "import { log } from '@/core/Log';\nimport { it } from 'vitest';" })).toEqual([]);
+  });
+});
+
+describe('the rating changes nothing in play (SPEC-048 §4.4)', () => {
+  it('no gameplay module imports commandRating or offTaskCount', () => {
+    expect(ratingViolations(SRC)).toEqual([]);
+  });
+
+  it('the economy reads isClueFlag from the same module, and that is allowed', () => {
+    const economy = SRC['../../src/systems/Economy.ts'] as string;
+    expect(economy).toMatch(/import \{ isClueFlag \} from '@\/systems\/Clues';/);
+    expect(ratingViolations({ 'src/systems/Economy.ts': economy })).toEqual([]);
+  });
+
+  it('fails each forbidden import, aliased, typed or whole', () => {
+    for (const module of ['Combat', 'Economy', 'Missions', 'Spawn', 'Progression', 'Loadout', 'EnemyAi']) {
+      const file = `src/systems/${module}.ts`;
+      expect(ratingViolations({ [file]: "import { commandRating } from '@/systems/Clues';" }), module).toHaveLength(1);
+    }
+    expect(ratingViolations({ 'src/systems/Combat.ts': "import { isClueFlag, offTaskCount as n } from './Clues';" })).toHaveLength(1);
+    expect(ratingViolations({ 'src/systems/Spawn.ts': "import {\n  type RatingGrade,\n  commandRating,\n} from '@/systems/Clues';" })).toHaveLength(1);
+    expect(ratingViolations({ 'src/systems/Missions.ts': "import * as clues from '@/systems/Clues';" })).toHaveLength(1);
+    expect(ratingViolations({ 'src/systems/Missions.ts': "// import { commandRating } from '@/systems/Clues';" })).toEqual([]);
+    // Everywhere else the rating is read freely: Notes, the station, the tests.
+    expect(ratingViolations({ 'src/ui/NotesPanel.ts': "import { commandRating } from '@/systems/Clues';" })).toEqual([]);
+    expect(ratingViolations({ 'src/systems/Clues.ts': 'export function commandRating() {}' })).toEqual([]);
   });
 });

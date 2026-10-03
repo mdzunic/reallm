@@ -224,12 +224,15 @@ test('4. travel lights ground; a reload and a station round trip both land on it
   expect(await num(page, 'mmExplored')).toBeGreaterThanOrEqual(walked);
 
   // …and so does a station round trip: walking lights a fresh crescent, and
-  // the scene writes the mask on exit rather than waiting for a timer.
+  // the scene writes the mask on exit rather than waiting for a timer. W stays
+  // down until the crescent shows: the walk is game time, and a loaded gate
+  // run at 4 fps got 1.1 s of it out of the 1.5 s hold — 5.6 m, all of it on
+  // ground the two landings had already lit.
   await dismiss(page);
   await page.keyboard.down('KeyW');
   await page.waitForTimeout(1500);
+  await expect.poll(async () => num(page, 'mmExplored'), { timeout: 30_000 }).toBeGreaterThan(walked);
   await page.keyboard.up('KeyW');
-  await expect.poll(async () => num(page, 'mmExplored'), { timeout: 10_000 }).toBeGreaterThan(walked);
   const lit = await num(page, 'mmExplored');
 
   await page.locator('[data-testid="surface-goto-pad"]').click();

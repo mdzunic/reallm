@@ -125,6 +125,20 @@ export const STORY_FLAGS = [
   'interlude3_seen',
   'interlude4_seen',
   'interlude5_seen',
+  // PLAN R19, SPEC-048 §4.2: one flag per clue that had none. `iteration_log`,
+  // `scaffold_secret`, `signal_decoded` and `chapter5_done` stand for the other
+  // four, so a found clue needs no save field and no migration.
+  'clue_raider_echo',
+  'clue_scav_echo',
+  'clue_hull',
+  'clue_ridge_camp',
+  'clue_ruins',
+  'clue_tally',
+  'clue_bark',
+  'clue_own_wreck',
+  'clue_eden',
+  'clue_grove',
+  'clue_never_hers',
 ] as const;
 export type FlagId = (typeof STORY_FLAGS)[number];
 

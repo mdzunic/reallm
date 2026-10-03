@@ -208,3 +208,35 @@ describe('the hold (SPEC-045 §4.1)', () => {
     expect(choice).not.toContain('this.log.push');
   });
 });
+
+describe('lines chosen as a job starts (SPEC-048 §4.1)', () => {
+  // The layer is DOM, so the rule is read off its source, as the queue rule
+  // above is; `tests/systems/storyContext.test.ts` pins the evaluator and
+  // `e2e/SPEC-048.spec.ts` drives the layer for real.
+  const source = SOURCES['../../src/ui/DialogueUI.ts'] as string;
+  const next = /#next\(\): void \{[\s\S]*?\n {2}\}/.exec(source)?.[0] ?? '';
+
+  it('#next() chooses and fills the lines from the bound save’s context, or the default with none', () => {
+    expect(next).toContain('visibleLines(DIALOGUE_TABLE[job.id], this.#storyContext())');
+    expect(source).toMatch(/#storyContext\(\): StoryContext \{[\s\S]*?save === null \? DEFAULT_STORY_CONTEXT : storyContextOf\(save\)/);
+    expect(source).toContain('saveKey?: () => Save | null;');
+  });
+
+  it('a job with no visible line ends before dialogue:started, unspends its once and starts the next', () => {
+    const empty = /if \(lines\.length === 0\) \{[\s\S]*?\n {4}\}/.exec(next)?.[0] ?? '';
+    expect(empty).toContain('this.#forget(job.id);');
+    expect(empty).toContain('job.resolve();');
+    expect(empty).toContain('this.#next();');
+    expect(empty).not.toContain('dialogue:started');
+    expect(next.indexOf('if (lines.length === 0)')).toBeLessThan(next.indexOf("this.#events.emit('dialogue:started'"));
+    expect(source).toMatch(/#forget\(id: DialogueId\): void \{[\s\S]*?SEEN\.get\(key\)\?\.delete\(id\);/);
+  });
+
+  it('the line shown, typed, held and logged is the job’s own filled line', () => {
+    const advance = /#advanceLine\(\): void \{[\s\S]*?\n {2}\}/.exec(source)?.[0] ?? '';
+    const finish = /#finishLine\(\): void \{[\s\S]*?\n {2}\}/.exec(source)?.[0] ?? '';
+    expect(advance).toContain('const line = job.lines?.[this.#lineIndex];');
+    expect(finish).toContain('const line = job.lines?.[this.#lineIndex];');
+    expect(source).not.toMatch(/DIALOGUE_TABLE\[job\.id\]\.lines\[/);
+  });
+});

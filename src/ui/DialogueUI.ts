@@ -17,11 +17,18 @@
 // are free — during a non-modal line the player is playing, and they keep
 // their gameplay meaning. A modal line takes focus as a dialog and gives it
 // back when it ends, and a complete one says what it waits for (`dialogue-next`).
+//
+// SPEC-048 §4.1: a job's lines are chosen when it *starts* — the lines whose
+// `when` holds for the bound save, placeholders filled — so a flag the line
+// before it set already counts. A dialogue with no visible line does not
+// play at all: no `dialogue:started`, no hold, and its `once` is not spent.
 import type { EmitArgs, GameEvents } from '@/core/Events';
 import type { Unsubscribe } from '@/core/Events';
 import type { Scheme } from '@/core/Input';
+import type { Save } from '@/core/Save';
 import type { DialogueSpeed } from '@/core/Settings';
-import { DIALOGUE, type DialogueDef, type DialogueId, type SpeakerId } from '@/data/index';
+import { DIALOGUE, type DialogueDef, type DialogueId, type DialogueLine, type SpeakerId } from '@/data/index';
+import { DEFAULT_STORY_CONTEXT, storyContextOf, visibleLines, type StoryContext } from '@/systems/StoryContext';
 import { CommsLog } from '@/ui/CommsLog';
 import { el, h, openModal, testId, topModal, uiLayers, type UiRoot } from '@/ui/dom';
 
@@ -141,7 +148,11 @@ export const SPEAKER_NAMES: Record<SpeakerId, string> = {
  */
 export interface DialogueOptions {
   input?: DialogueInput;
-  saveKey?: () => object | null;
+  /**
+   * The bound save: the key `once` is remembered by, and since SPEC-048 §4.1
+   * the story context a job's lines are chosen and filled from.
+   */
+  saveKey?: () => Save | null;
   /**
    * SPEC-045 §4.3: `settings.typewriter`, live — replaces SPEC-015's
    * `reduceMotion`. Off, a line lands whole on its first frame.
@@ -157,6 +168,8 @@ interface Job {
   onChoice?: (index: number) => void;
   choices?: readonly string[];
   resolve: () => void;
+  /** SPEC-048 §4.1: the visible lines, filled — chosen when the job starts. */
+  lines?: readonly DialogueLine[];
 }
 
 /**
@@ -197,7 +210,7 @@ export class DialogueUI {
   readonly #ui: UiRoot;
   readonly #events: DialogueEvents;
   readonly #input: DialogueInput | null;
-  readonly #saveKey: (() => object | null) | null;
+  readonly #saveKey: (() => Save | null) | null;
   readonly #typewriter: (() => boolean) | null;
   readonly #speed: (() => DialogueSpeed) | null;
   readonly #releases: Unsubscribe[] = [];
@@ -420,6 +433,19 @@ export class DialogueUI {
       this.#dim.classList.remove('is-visible');
       return;
     }
+    // SPEC-048 §4.1: the lines are chosen now, from the save as it is now.
+    const lines = visibleLines(DIALOGUE_TABLE[job.id], this.#storyContext());
+    job.lines = lines;
+    if (lines.length === 0) {
+      // Nothing to say: no `dialogue:started`, no hold, and a `once` dialogue
+      // stays unheard, so a later trigger can still play it. Its `next` is not
+      // reached either — the chain runs from a dialogue that played.
+      this.#active = null;
+      this.#forget(job.id);
+      job.resolve();
+      this.#next();
+      return;
+    }
     this.#events.emit('dialogue:started', { id: job.id });
     this.#root.classList.remove('is-hidden');
     // SPEC-037 §4.3: the root says which kind of line this is; CSS gives a
@@ -439,7 +465,7 @@ export class DialogueUI {
     if (job === null) return;
     this.#stopTimers();
     this.#lineIndex++;
-    const line = DIALOGUE_TABLE[job.id].lines[this.#lineIndex];
+    const line = job.lines?.[this.#lineIndex];
     if (line === undefined) {
       this.#end(job);
       return;
@@ -476,7 +502,7 @@ export class DialogueUI {
     if (job === null) return;
     if (this.#typeTimer !== null) clearInterval(this.#typeTimer);
     this.#typeTimer = null;
-    const line = DIALOGUE_TABLE[job.id].lines[this.#lineIndex];
+    const line = job.lines?.[this.#lineIndex];
     if (line !== undefined) this.#text.textContent = line.text;
     this.#lineDone = true;
     // SPEC-045 §4.1: the hold starts now that the line is whole — typed out,
@@ -534,6 +560,22 @@ export class DialogueUI {
     }
     if (this.#queue.length >= QUEUE_MAX) return; // AC-74: the overflow drops
     this.#queue.unshift({ id, modal: def.modal === true, resolve: () => {} });
+  }
+
+  /**
+   * SPEC-048 §4.1: the context a starting job's lines are chosen and filled
+   * from — the bound save's, or the default with none (the menu, the dev
+   * bridge before a save, 48-f).
+   */
+  #storyContext(): StoryContext {
+    const save = this.#saveKey?.() ?? null;
+    return save === null ? DEFAULT_STORY_CONTEXT : storyContextOf(save);
+  }
+
+  /** SPEC-048 §4.1: a `once` dialogue that never started is not spent. */
+  #forget(id: DialogueId): void {
+    const key = this.#saveKey?.() ?? null;
+    if (key !== null) SEEN.get(key)?.delete(id);
   }
 
   #choose(index: number): void {

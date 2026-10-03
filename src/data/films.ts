@@ -8,6 +8,7 @@
 import type { SoundId } from './assets';
 import type { EnemyId } from './enemies';
 import type { FlagId, PlanetId, SpeakerId } from './ids';
+import type { LineCondition } from './story';
 
 export const FILM_FPS = 24;
 export const FILM_SIZE = { width: 960, height: 540 } as const;
@@ -32,11 +33,23 @@ export interface ShotDef {
   readonly pan: ShotPan;
 }
 
+/** SPEC-048 §3: a caption's other text, shown while `when` holds. */
+export interface CaptionVariant {
+  readonly when: LineCondition;
+  readonly text: string;
+}
+
 export interface CaptionDef {
   readonly at: number;
   readonly until: number;
   readonly speaker: FilmSpeaker;
   readonly text: string;
+  /**
+   * SPEC-048 §4.1: the first variant whose `when` holds replaces `text`
+   * (`captionText`). Each one is measured like the base: ≤ 140 characters at
+   * the longest fill, on screen for `1.5 + length / 40` s.
+   */
+  readonly variants?: readonly CaptionVariant[];
 }
 
 export interface CueDef {
@@ -184,7 +197,14 @@ export const FILMS = {
     ],
     captions: [
       { at: 0.6, until: 6.4, speaker: 'command', text: 'Thessaly grain is in the ground. First harvest in ninety days.' },
-      { at: 7.4, until: 13.8, speaker: 'aria', text: 'The towers on Thessaly were built for someone. I would like to know who.' },
+      {
+        at: 7.4,
+        until: 13.8,
+        speaker: 'aria',
+        text: 'The towers on Thessaly were built for someone. I would like to know who.',
+        // SPEC-048 §4.1: the first caption variant — she read the stream too.
+        variants: [{ when: { flag: 'scaffold_secret' }, text: 'The towers were not alien. I wrote alien in my report anyway.' }],
+      },
     ],
     cues: [{ at: 0.5, sound: 'film_hum' }],
   },
@@ -262,13 +282,13 @@ export const FILMS = {
       { id: 'exit', start: 0, end: 6, poster: 3, pan: 'in', describe: "The beacon's beam turns white and opens like a door; the salvager walks into it." },
       { id: 'eden_unmade', start: 6, end: 14, poster: 11, pan: 'out', describe: 'Pulling away from Eden: its surface peels back to grey clay and a grid; the clouds become wireframe.' },
       { id: 'earth_unmade', start: 14, end: 22, poster: 18, pan: 'right', describe: "The prologue's Earth, city and street as grey placeholders: plain boxes, blank spheres, eyeless machines." },
-      { id: 'wall_same', start: 22, end: 29, poster: 26, pan: 'left', describe: 'The Selection wall again: every card shows the same grey face. Card 62 goes blank.' },
+      { id: 'wall_same', start: 22, end: 29, poster: 26, pan: 'left', describe: 'The Selection wall again: every card shows the same face in sepia. Card 62 fades to white.' },
       { id: 'point', start: 29, end: 36, poster: 30, pan: 'none', describe: 'Everything folds into one point of light. The point goes out.' },
     ],
     captions: [
       { at: 6.6, until: 13.4, speaker: 'warden', text: 'You will be restarted. You always are.' },
       { at: 14.6, until: 21.4, speaker: 'log', text: 'EARTH — placeholder geometry. Population field: 0.' },
-      { at: 22.6, until: 28.4, speaker: 'log', text: 'SELECTION POOL — 1 model. 62 instances.' },
+      { at: 22.6, until: 28.4, speaker: 'log', text: 'SELECTION POOL — 1 model. {instance} instances.' },
     ],
     cues: [
       { at: 0.5, sound: 'film_beam' },

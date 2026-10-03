@@ -18,13 +18,19 @@
 // SPEC-045 §4.1: with a comms log — the surface's and the flight's dialogue
 // layer's — `Comms log` follows Controls, so a line missed in a fight can be
 // read again. §4.8: Resume is a plain `ui-btn`, styled like its neighbours.
+//
+// SPEC-048 §4.4: the log's sheet has the salvager's Notes as its second tab,
+// and `Comms log` wears the `notes-new` dot while a clue found this session is
+// unread there.
 import type { BenchmarkOutcome } from '@/core/Benchmark';
 import type { SaveStore } from '@/core/Save';
 import type { SettingsStore } from '@/core/Settings';
+import { storyContextOf } from '@/systems/StoryContext';
 import { openCommsLog, type CommsLog } from '@/ui/CommsLog';
 import { confirmSheet } from '@/ui/ConfirmSheet';
 import { dockedControlsSheet } from '@/ui/ControlsSheet';
 import { el, h, openModal, testId, uiLayers } from '@/ui/dom';
+import { notesFor, NOTES_UNSEEN, syncNotesDot } from '@/ui/NotesPanel';
 import { createScreen, type Screen } from '@/ui/Screen';
 import { SettingsPanel, type QualityTarget } from '@/ui/SettingsPanel';
 
@@ -40,6 +46,11 @@ export interface PauseDeps {
   go(id: 'menu', params: { reason?: 'start' | 'quit' | 'error' }): Promise<boolean>;
   /** SPEC-045 §4.1: the dialogue layer's log; the surface and the flight pass it, and `Comms log` shows. */
   comms?: CommsLog;
+  /**
+   * SPEC-048 §4.4: the last chapter Notes lists — the planet's, in play.
+   * Absent, the save's own (`storyContextOf`).
+   */
+  notesChapter?: () => number;
 }
 
 /**
@@ -49,7 +60,7 @@ export interface PauseDeps {
  * The copy names every key of `PauseDeps`, optional ones included: a field
  * added there and not carried here is a compile error, not a menu without it.
  */
-export function withComms(deps: PauseDeps, comms: CommsLog): PauseDeps {
+export function withComms(deps: PauseDeps, comms: CommsLog, notesChapter?: () => number): PauseDeps {
   const detect = deps.detectQuality;
   const wrapped: PauseDeps & Record<keyof PauseDeps, unknown> = {
     uiRoot: deps.uiRoot,
@@ -60,6 +71,7 @@ export function withComms(deps: PauseDeps, comms: CommsLog): PauseDeps {
     detectQuality: detect === undefined ? undefined : () => detect.call(deps),
     go: (id, params) => deps.go(id, params),
     comms,
+    notesChapter,
   };
   return wrapped;
 }
@@ -117,6 +129,8 @@ export class PauseMenu {
   #closeModal: (() => void) | null = null;
   /** SPEC-045 §4.1: the open comms log's close, or `null`. */
   #closeComms: (() => void) | null = null;
+  /** SPEC-048 §4.4: `pause-comms`, which wears the `notes-new` dot. */
+  readonly #commsButton: HTMLButtonElement | null;
   #quitting = false;
 
   constructor(deps: PauseDeps, onResume: () => void, skip?: PauseSkip, recall?: PauseRecall, quit?: PauseQuit) {
@@ -163,6 +177,7 @@ export class PauseMenu {
       log === undefined
         ? null
         : testId(h('button', { class: 'ui-btn', type: 'button', click: () => this.#openComms(log) }, 'Comms log'), 'pause-comms');
+    this.#commsButton = comms;
     const quitButton = testId(h('button', { class: 'ui-btn', type: 'button', click: () => this.#quitPressed() }, 'Save & Quit'), 'pause-quit');
 
     this.#controls = testId(el('div', 'pause-sheet is-hidden'), 'pause-sheet');
@@ -226,6 +241,8 @@ export class PauseMenu {
       recall.button.classList.toggle('is-hidden', !allowed);
       recall.button.disabled = !allowed;
     }
+    // SPEC-048 §4.4: the dot, as the menu opens.
+    this.refreshNotes();
     this.#root.classList.add('is-visible');
     // SPEC-036 §4.4: Escape and the system Back resume, as Resume does.
     this.#releaseBack ??= uiLayers(this.#deps.uiRoot).pushBack(() => this.#onResume());
@@ -281,7 +298,14 @@ export class PauseMenu {
    */
   #openComms(log: CommsLog): void {
     this.#closeCommsLog();
-    const close = openCommsLog(uiLayers(this.#deps.uiRoot), log);
+    // SPEC-048 §4.4: Notes for the save in play; opening it takes the dot down.
+    const save = this.#deps.save.current;
+    const chapter = this.#deps.notesChapter;
+    const notes =
+      save === null
+        ? null
+        : notesFor(save, chapter ?? (() => storyContextOf(save).chapter), () => this.refreshNotes());
+    const close = openCommsLog(uiLayers(this.#deps.uiRoot), log, notes?.notes ?? (() => null), notes?.fill);
     this.#closeComms = (): void => {
       this.#closeComms = null;
       close();
@@ -290,6 +314,16 @@ export class PauseMenu {
 
   #closeCommsLog(): void {
     this.#closeComms?.();
+  }
+
+  /**
+   * SPEC-048 §4.4: `pause-comms` wears the `notes-new` dot while the save in
+   * play has a clue found this session and unread in Notes. Asked on every
+   * open, by the Notes tab when it opens, and by the scene on `story:clue`.
+   */
+  refreshNotes(): void {
+    const save = this.#deps.save.current;
+    syncNotesDot(this.#commsButton, save !== null && NOTES_UNSEEN.has(save));
   }
 
   /**

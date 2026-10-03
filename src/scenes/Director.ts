@@ -12,6 +12,7 @@ import type { MusicId } from '@/core/Audio';
 import type { GameServices } from '@/core/Services';
 import { whileHeld } from '@/core/WakeLock';
 import { FILMS, type FilmId } from '@/data/films';
+import { DEFAULT_STORY_CONTEXT, storyContextOf } from '@/systems/StoryContext';
 import { uiLayers } from '@/ui/dom';
 import { FilmPlayer, type FilmManifest, type FilmResult, type FilmSnapshot } from '@/ui/FilmPlayer';
 
@@ -103,6 +104,9 @@ function createDirector(services: GameServices): StoryDirector {
         // captions; reduce motion keeps the poster pans and the end fade. With
         // reduce motion on and Films set back to video, the video plays (45-b).
         const settings = services.settings.get();
+        // SPEC-048 §4.1: captions are chosen and filled from the bound save —
+        // the prologue plays before creation, on the default context.
+        const save = services.save.current;
         // SPEC-036 §4.9: a 93 s prologue watched without a touch is longer
         // than a phone's auto-lock — the screen stays on from the film's start
         // to its end, skip or failure. A refusal is ignored (15-e).
@@ -113,6 +117,7 @@ function createDirector(services: GameServices): StoryDirector {
             typewriter: settings.typewriter,
             reduceMotion: settings.reduceMotion,
             videoBroken,
+            story: save === null ? DEFAULT_STORY_CONTEXT : storyContextOf(save),
             // 22-h: a refused voice returns null and the film goes on.
             onCue: (cue) => void services.audio.play(cue.sound, { volume: cue.volume ?? 1, priority: 2 }),
             onVideoBroken: () => {
