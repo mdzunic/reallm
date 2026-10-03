@@ -4945,7 +4945,6 @@ html.reduce-motion .stamina-ring {
   width: 2px;
   height: 8px;
   margin-left: -1px;
-  border-radius: 1px;
   background: var(--ink);
   box-shadow: 0 0 1px #000;
   transform-origin: 1px 16px;

@@ -331,6 +331,9 @@ describe('the settings object (SPEC-007 §3)', () => {
       // §3 annotates this one `default true`. SPEC-005 owns the aim-assist
       // itself and only requires that it apply while the setting is on.
       flightMouseSteer: true,
+      // SPEC-050 §4.5: Shift holds the run, and the stick runs past its ring.
+      sprintToggle: false,
+      stickSprint: true,
       buttonScale: MIN_BUTTON_SCALE,
       showFps: false,
       lastSlot: null,

@@ -692,7 +692,8 @@ describe('passiveText (AC-14)', () => {
   it('prints the dash cooldown multiplier, and the Scout carries it (SPEC-038 §4.1)', () => {
     expect(passiveText({ dashCooldownMult: 0.8 })).toBe('−20 % dash cooldown');
     expect(passiveText(CLASSES.scout.passive)).toBe(
-      '+15 % move speed · +25 % pickup radius · resource radar · −20 % dash cooldown',
+      // SPEC-050 §4.1: the Scout's ×0.8 sprint drain reads as the time it buys.
+      '+15 % move speed · +25 % pickup radius · resource radar · −20 % dash cooldown · +25 % sprint time',
     );
   });
 });
@@ -1992,7 +1993,10 @@ describe('attributeEffectText and attributeLine (SPEC-044 §4.4)', () => {
   it('reads all four attributes at SPEC-039\'s numbers', () => {
     expect(attributeEffectText('might')).toBe('Might — +4 % damage per point');
     expect(attributeEffectText('vigor')).toBe('Vigor — +8 max HP per point');
-    expect(attributeEffectText('agility')).toBe('Agility — +2 % speed · +2 % crit chance · −3 % dash cooldown per point');
+    // SPEC-050 §4.1: agility's stamina regen joins the line.
+    expect(attributeEffectText('agility')).toBe(
+      'Agility — +2 % speed · +2 % crit chance · −3 % dash cooldown · +3 % stamina regen per point',
+    );
     expect(attributeEffectText('tech')).toBe('Tech — +10 % companion effect · −3 % prices per point');
   });
 

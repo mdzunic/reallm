@@ -928,7 +928,8 @@ describe('content invariants (SPEC-009 §7)', () => {
     expect(ATTRIBUTE_EFFECTS).toEqual({
       might: { damage: 0.04 },
       vigor: { maxHp: 8 },
-      agility: { moveSpeed: 0.02, critChance: 0.02, dashCooldownCut: 0.03 },
+      // SPEC-050 §4.1: agility's share of the stamina regeneration.
+      agility: { moveSpeed: 0.02, critChance: 0.02, dashCooldownCut: 0.03, staminaRegen: 0.03 },
       tech: { companionEffect: 0.1, priceCut: 0.03 },
     });
     expect(ATTRIBUTE_POINT_LEVELS).toBe(5);

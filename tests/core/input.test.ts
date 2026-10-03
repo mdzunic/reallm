@@ -21,7 +21,7 @@ import {
   TOUCH_FULL_TRAVEL,
   zoneFor,
 } from '@/core/Input';
-import { KEY_BINDINGS, KeyboardMouseDriver } from '@/core/KeyboardMouseDriver';
+import { KEY_BINDINGS, KeyboardMouseDriver, SURFACE_KEY_OVERRIDES } from '@/core/KeyboardMouseDriver';
 import type { EventBus } from '@/core/Services';
 import { createSettings } from '@/core/Settings';
 
@@ -845,17 +845,23 @@ describe('the mouse wheel (SPEC-028 §4.1)', () => {
 
 describe('KeyboardMouseDriver', () => {
   it('maps every bound action key through to the state (AC-4)', () => {
-    const { input, win } = harness();
-    for (const [code, action] of Object.entries(KEY_BINDINGS)) {
-      if (action.startsWith('move')) continue;
-      win.fire('keydown', keyEvent(code));
-      input.beginFrame(DT);
-      expect(input.state.buttons[action as 'fire'].down, code).toBe(true);
-      input.endFrame();
-      win.fire('keyup', keyEvent(code));
-      input.beginFrame(DT);
-      expect(input.state.buttons[action as 'fire'].down, code).toBe(false);
-      input.endFrame();
+    // SPEC-050 §4.5: in each mode — on the surface the overrides answer first
+    // (Shift runs), and in flight `KEY_BINDINGS` alone does.
+    for (const mode of ['surface', 'flight'] as const) {
+      const { input, win } = harness();
+      input.setMode(mode);
+      for (const [code, bound] of Object.entries(KEY_BINDINGS)) {
+        if (bound.startsWith('move')) continue;
+        const action = (mode === 'surface' ? SURFACE_KEY_OVERRIDES[code] : undefined) ?? (bound as 'fire');
+        win.fire('keydown', keyEvent(code));
+        input.beginFrame(DT);
+        expect(input.state.buttons[action].down, `${mode} ${code}`).toBe(true);
+        input.endFrame();
+        win.fire('keyup', keyEvent(code));
+        input.beginFrame(DT);
+        expect(input.state.buttons[action].down, `${mode} ${code}`).toBe(false);
+        input.endFrame();
+      }
     }
   });
 
