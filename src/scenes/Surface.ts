@@ -146,6 +146,7 @@ import {
   quitNote,
   rewardsText,
   stageResetText,
+  STAMINA_FULL_HIDE_SECONDS,
   staminaShown,
   holdIsIdle,
   surfaceFogRange,
@@ -752,7 +753,8 @@ export class SurfaceScene extends UiScene<'surface'> {
   #sprintsShort = 0;
   #shots = 0;
   #speed = 0;
-  #staminaFullFor = 0;
+  /** Seconds the pool has sat full — a landing's has always been, so its ring starts hidden. */
+  #staminaFullFor = STAMINA_FULL_HIDE_SECONDS;
   #staminaRing: StaminaRing | null = null;
   /** SPEC-050 §4.6: the one stamina object the HUD model is fed, reused every step. */
   readonly #staminaScratch: NonNullable<HudModel['stamina']> = {
@@ -3660,9 +3662,11 @@ export class SurfaceScene extends UiScene<'surface'> {
     // SPEC-038 §4.1: a respawn or a recall resets the dash.
     p.dashReadyAt = 0;
     p.dashUntil = -Infinity;
-    // SPEC-050 §4.1 (50-c): and the stamina — full, quiet, the gun drawn.
+    // SPEC-050 §4.1 (50-c): and the stamina — full, quiet, the gun drawn, and
+    // no ring to show for it.
     resetStamina(p);
     this.#sprintLatch = false;
+    this.#staminaFullFor = STAMINA_FULL_HIDE_SECONDS;
     const save = this.#save as Save;
     save.player.hp = p.hp;
     this.#camTarget.x = p.x;

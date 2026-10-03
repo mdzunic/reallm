@@ -206,6 +206,8 @@ test('1, 9. a run in combat drains to exhaustion, the ring says so, and a fresh 
   await expect(ring).toBeVisible();
   await expect(ring).toHaveClass(/is-exhausted/);
   await expect(ring).toHaveAttribute('role', 'meter');
+  await expect(ring).toHaveAttribute('aria-label', 'Stamina');
+  await expect(ring.locator('.stamina-ring-notch')).toHaveCount(1);
   expect(Number(await ring.getAttribute('aria-valuenow'))).toBeLessThan(30);
   await page.keyboard.up('KeyW');
   await page.keyboard.up('ShiftLeft');
@@ -258,11 +260,23 @@ test('3. a run holsters the gun: no shot while running, and the first after it 0
   await press(page, 'surface-spawn-pack');
   // The pack is aggroed within 10 m, and auto-fire is on by default: it shoots.
   await expect.poll(() => info(page, 'shots'), { timeout: 60_000 }).toBeGreaterThan(0);
+  const slot = page.getByTestId('qb-primary');
+  await expect(slot).not.toHaveClass(/is-holstered/);
+  // §4.3: firing makes no noise — walking on auto-fire stays quiet.
+  await page.keyboard.down('KeyS');
+  const walking = await info(page, 'shots');
+  await expect.poll(() => info(page, 'shots'), { timeout: 60_000 }).toBeGreaterThan(walking);
+  expect(await info(page, 'loud')).toBe(0);
+  expect(await info(page, 'sprinting')).toBe(0);
+  await page.keyboard.up('KeyS');
 
   await startSampling(page, ['viewTime', 'sprinting', 'shots']);
   await page.keyboard.down('ShiftLeft');
   await page.keyboard.down('KeyW');
   const runAt = await viewTimeWhen(page, 'sprinting', 1);
+  // §4.6: the weapon slots dim while the gun is holstered.
+  await expect(slot).toHaveClass(/is-holstered/);
+  expect(await info(page, 'loud')).toBe(1);
   await viewTimeWhen(page, 'viewTime', runAt + 1);
   await page.keyboard.up('ShiftLeft');
   const shotsAtRelease = await info(page, 'shots');
@@ -282,6 +296,26 @@ test('3. a run holsters the gun: no shot while running, and the first after it 0
   const shot = samples.slice(end + 1).find((s) => s.shots > last.shots);
   expect(shot).toBeDefined();
   expect((shot as Sample).viewTime - last.viewTime).toBeGreaterThanOrEqual(0.25 - 1e-3);
+  // Drawn again, the slots light up.
+  await expect(slot).not.toHaveClass(/is-holstered/);
+});
+
+// ------------------------------------------------- 11: explicit fire suppresses it
+
+test('11. holding Space — explicit fire — suppresses the run; letting go runs again', async ({ page }) => {
+  await start(page, '/?debug&seed=123');
+  await landOnCinder(page);
+  await page.keyboard.down('ShiftLeft');
+  await page.keyboard.down('KeyW');
+  await expect.poll(() => info(page, 'sprinting')).toBe(1);
+  await page.keyboard.down('Space');
+  await expect.poll(() => info(page, 'sprinting')).toBe(0);
+  await gameSeconds(page, 0.3);
+  expect(await info(page, 'sprinting')).toBe(0);
+  await page.keyboard.up('Space');
+  await expect.poll(() => info(page, 'sprinting')).toBe(1);
+  await page.keyboard.up('KeyW');
+  await page.keyboard.up('ShiftLeft');
 });
 
 // ------------------------------------------------------------ 4: the dash cost
@@ -353,6 +387,16 @@ test('5. with the run toggle on, one Shift tap runs and a second walks', async (
   expect(await info(page, 'sprinting')).toBe(1);
   await page.keyboard.press('ShiftLeft');
   await expect.poll(() => info(page, 'sprinting')).toBe(0);
+
+  // §4.5: any hold lets the latch go — here the full map.
+  await page.keyboard.press('ShiftLeft');
+  await expect.poll(() => info(page, 'sprinting')).toBe(1);
+  await page.keyboard.press('KeyM');
+  await expect.poll(() => info(page, 'mapOpen')).toBe(1);
+  await page.keyboard.press('KeyM');
+  await expect.poll(() => info(page, 'mapOpen')).toBe(0);
+  await gameSeconds(page, 0.3);
+  expect(await info(page, 'sprinting')).toBe(0);
   await page.keyboard.up('KeyW');
 });
 
@@ -414,6 +458,15 @@ test.describe('6. the stick runs past its ring', () => {
     await gameSeconds(page, 0.3);
     await expect.poll(() => info(page, 'sprinting')).toBe(1);
     await expect(stick).toHaveClass(/is-sprint/);
+
+    // §4.2: an aim-drag on the right is explicit fire, and suppresses it.
+    await fingers(page, [
+      { type: 'pointerdown', id: 2, x: 650, y: 200 },
+      { type: 'pointermove', id: 2, x: 700, y: 160 },
+    ]);
+    await expect.poll(() => info(page, 'sprinting')).toBe(0);
+    await fingers(page, [{ type: 'pointerup', id: 2, x: 700, y: 160 }]);
+    await expect.poll(() => info(page, 'sprinting')).toBe(1);
 
     await fingers(page, [{ type: 'pointermove', id: 1, x: 160, y: 250 }]);
     await expect.poll(() => info(page, 'sprinting')).toBe(0);
