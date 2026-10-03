@@ -96,6 +96,20 @@ async function finish(page: Page): Promise<void> {
   await expect(dialogue(page)).toBeHidden();
 }
 
+/**
+ * A non-modal line moved on by its `›`. The line can end on its own between the
+ * visibility check and the click, so a click that finds nothing is not a
+ * failure (the SPEC-048 `dismiss` idiom); the line being gone is the assertion.
+ */
+async function advanceAway(page: Page): Promise<void> {
+  const advance = page.getByTestId('dialogue-advance');
+  for (let i = 0; i < 4 && (await dialogue(page).isVisible().catch(() => false)); i++) {
+    await advance.click({ force: true, timeout: 2_000 }).catch(() => undefined);
+    await page.waitForTimeout(200);
+  }
+  await expect(dialogue(page)).toBeHidden();
+}
+
 /** The comms log's lines, oldest first, as `speaker|text`. */
 async function commsLines(page: Page): Promise<string[]> {
   return page.evaluate(() =>
@@ -340,11 +354,7 @@ test('6. the keepsake reads T1, then T2 with ARIA’s drift line and its clue, t
   await expect(dialogue(page)).not.toHaveClass(/is-modal/);
   await expect.poll(() => flags(page)).toContain('clue_keepsake');
   // Moved on by its `›`, so the third opening has nothing on screen to confuse.
-  for (let i = 0; i < 4 && (await dialogue(page).isVisible()); i++) {
-    await page.getByTestId('dialogue-advance').click({ force: true });
-    await page.waitForTimeout(200);
-  }
-  await expect(dialogue(page)).toBeHidden();
+  await advanceAway(page);
 
   await page.getByTestId('station-tab-shop').click();
   await page.getByTestId('station-tab-character').click();
@@ -377,11 +387,7 @@ test('7. the session’s first respawn plays the restart line and finds its clue
   await expect(speaker(page)).toHaveText('ARIA');
   await expect(dialogue(page)).not.toHaveClass(/is-modal/);
   await expect.poll(() => flags(page)).toContain('clue_restart');
-  for (let i = 0; i < 4 && (await dialogue(page).isVisible()); i++) {
-    await page.getByTestId('dialogue-advance').click({ force: true });
-    await page.waitForTimeout(200);
-  }
-  await expect(dialogue(page)).toBeHidden();
+  await advanceAway(page);
 
   // 49-e: only the session's first respawn speaks.
   await dieAndRespawn();
