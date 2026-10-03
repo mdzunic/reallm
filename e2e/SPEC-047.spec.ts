@@ -176,3 +176,103 @@ test('5. 47-a: a code exported from slot 0 imports into slot 2 as the same versi
   expect(slot2.meta.stats.kills).toBe(31);
   expect(slot2.progress.claimed).toEqual(['cinder4_vault', 'lineage:1:vetra']);
 });
+
+// ---------------------------------------------------------------- QA additions
+// The paths §4.5 names beyond the one kill and one death above, each through
+// the game's own controls: a boss's kill, a Recall to pad, and the flight
+// scene's subscription (its kill and its crash).
+
+interface FlightHook {
+  phase(): string;
+  blockArrival(): void;
+  hit(amount: number): void;
+}
+
+const flightHook = (page: Page): Promise<FlightHook | undefined> =>
+  page.evaluate(() => (window as unknown as { __reallmFlight?: FlightHook }).__reallmFlight);
+
+test('6. a boss kill raises bosses and kills, and a Recall to pad changes no count', async ({ page }) => {
+  test.setTimeout(120_000);
+  await page.addInitScript(() => localStorage.setItem('reallm:settings', JSON.stringify({ autoFire: 'off' })));
+  await start(page, '/?debug&seed=123');
+  await page.evaluate((creation) => void window.__reallm.save().create(0, creation, 123), CREATION);
+  await page.evaluate(() => window.__reallm.go('surface', { planet: 'cinder4', firstLanding: false }, { force: true }));
+  await expect(page.locator('[data-testid="scene-label"]')).toHaveText('surface');
+  expect(await stats(page)).toEqual(EMPTY_STATS);
+
+  // Wake the wurm and stand at its nest, then wound and smite it until it falls.
+  await page.getByTestId('surface-spawn-boss').click();
+  await expect.poll(async () => String((await info(page))['boss'] ?? '-'), { timeout: 15_000 }).not.toBe('-');
+  await page.getByTestId('surface-goto-boss').click();
+  await expect
+    .poll(
+      async () => {
+        if ((await stats(page))?.bosses === 0) {
+          await page.getByTestId('surface-wound-boss').click();
+          await page.getByTestId('surface-smite').click();
+        }
+        return (await stats(page))?.bosses ?? 0;
+      },
+      { timeout: 60_000, intervals: [800] },
+    )
+    .toBe(1);
+  const afterBoss = await stats(page);
+  expect(afterBoss?.kills).toBeGreaterThanOrEqual(1);
+  expect(afterBoss?.deaths).toBe(0);
+
+  // A Recall is a respawn without the death: no count moves.
+  await page.keyboard.press('Escape');
+  await page.getByTestId('pause-recall').click();
+  await page.getByTestId('confirm-yes').click();
+  await expect.poll(async () => Number((await info(page))['recalls'] ?? 0), { timeout: 15_000 }).toBe(1);
+  expect(await stats(page)).toEqual(afterBoss);
+});
+
+test('7. 47-f: in flight a kill counts, and a crash counts a death without touching lastDeath', async ({ page }) => {
+  test.setTimeout(150_000);
+  await page.addInitScript(() =>
+    localStorage.setItem('reallm:settings', JSON.stringify({ autoFire: 'off', flightMouseSteer: false })),
+  );
+  await start(page, '/?debug&seed=123');
+  await page.evaluate((creation) => void window.__reallm.save().create(0, creation, 123), CREATION);
+  await page.evaluate(() => window.__reallm.go('flight', { destination: 'cinder4' }, { force: true }));
+  await expect(page.locator('[data-testid="scene-label"]')).toHaveText('flight');
+  await expect.poll(async () => (await flightHook(page)) !== undefined, { timeout: 30_000 }).toBe(true);
+  // A surface death from an earlier run, so "left alone" has something to leave.
+  await page.evaluate(() => {
+    const current = window.__reallm.save().current;
+    if (current !== null) current.meta.stats.lastDeath['vetra'] = { x: 4.2, z: -7.5 };
+  });
+  const before = await stats(page);
+  expect(before).not.toBeNull();
+
+  // A still fighter dead ahead; aim at its lead pip and hold fire on Space.
+  await page.evaluate(() => (window as unknown as { __reallmFlight: FlightHook }).__reallmFlight.blockArrival());
+  const viewport = page.viewportSize() ?? { width: 1280, height: 720 };
+  const pip = page.getByTestId('lead-pip');
+  for (let k = 0; k <= 16 && !(await pip.isVisible()); k++) {
+    await page.mouse.move(viewport.width / 2, viewport.height * (0.4 + 0.035 * k));
+    await page.waitForTimeout(150);
+  }
+  await expect(pip).toBeVisible({ timeout: 15_000 });
+  const at = await pip.boundingBox();
+  if (at !== null) await page.mouse.move(at.x + at.width / 2, at.y + at.height / 2);
+  await page.keyboard.down('Space');
+  await expect.poll(async () => (await stats(page))?.kills ?? 0, { timeout: 60_000, intervals: [250] }).toBe((before?.kills ?? 0) + 1);
+  await page.keyboard.up('Space');
+
+  // More damage than any hull carries: the crash.
+  const killed = await stats(page);
+  await page.evaluate(() => (window as unknown as { __reallmFlight: FlightHook }).__reallmFlight.hit(10_000));
+  await expect.poll(async () => (await stats(page))?.deaths, { timeout: 10_000 }).toBe((before?.deaths ?? 0) + 1);
+  const crashed = await stats(page);
+  expect(crashed?.lastDeath).toEqual(before?.lastDeath);
+  expect(crashed?.kills).toBe(killed?.kills);
+
+  // The recall lands at the station, which counts nothing, and the crash rode the autosave.
+  await expect(page.locator('[data-testid="scene-label"]')).toHaveText('station', { timeout: 30_000 });
+  await expect
+    .poll(async () => page.evaluate(() => JSON.parse(localStorage.getItem('reallm:slot:0') ?? '{}').meta?.stats?.deaths), { timeout: 10_000 })
+    .toBe(crashed?.deaths);
+  expect(await stats(page)).toEqual(crashed);
+});
