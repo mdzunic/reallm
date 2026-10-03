@@ -14,6 +14,7 @@ import {
   RIG_YAW_DEG,
   cullMargin,
   extendByFrustum,
+  frustumGroundCorners,
   viewRect,
   type CullRect,
 } from '@/views/InstanceCuller';
@@ -109,6 +110,34 @@ describe('extendByFrustum (SPEC-046 §4.6)', () => {
       expect(outside(out)).toBeLessThanOrEqual(1e-6);
     }
     expect(missedBefore).toBeGreaterThan(1); // the case is real: the look-ahead does skew the view
+  });
+
+  it("frustumGroundCorners are the camera's own corner rays on the ground", () => {
+    const camera = new THREE.PerspectiveCamera(48, 1.6, 1, 130);
+    camera.position.set(17, 18.02, -3);
+    camera.lookAt(8, 0, -12);
+    camera.updateMatrixWorld();
+    const frustum = new THREE.Frustum().setFromProjectionMatrix(
+      new THREE.Matrix4().multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse),
+    );
+    const corners = new Float32Array(8);
+    expect(frustumGroundCorners(frustum, corners)).toBe(true);
+    const ground = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
+    const expected: number[][] = [];
+    for (const [x, y] of [[1, -1], [1, 1], [-1, -1], [-1, 1]] as const) {
+      const through = new THREE.Vector3(x, y, 0.5).unproject(camera).sub(camera.position).normalize();
+      const hit = new THREE.Ray(camera.position.clone(), through).intersectPlane(ground, new THREE.Vector3()) as THREE.Vector3;
+      expected.push([hit.x, hit.z]);
+    }
+    const got = [0, 2, 4, 6].map((i) => [corners[i] as number, corners[i + 1] as number]);
+    for (const [x, z] of expected) {
+      expect(got.some(([gx, gz]) => Math.abs((gx as number) - x) < 1e-3 && Math.abs((gz as number) - z) < 1e-3)).toBe(true);
+    }
+    // A camera looking up at the sky has no ground corners in front of it.
+    camera.lookAt(8, 40, -12);
+    camera.updateMatrixWorld();
+    frustum.setFromProjectionMatrix(new THREE.Matrix4().multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse));
+    expect(frustumGroundCorners(frustum, corners)).toBe(false);
   });
 
   it('grows by the margin, and never shrinks the rect it is given', () => {

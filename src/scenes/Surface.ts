@@ -831,6 +831,8 @@ export class SurfaceScene extends UiScene<'surface'> {
    * handed to `SurfaceView.setView` on the next render, never inside a step.
    */
   readonly #frustumView = { x: 0, z: 0, distance: 0, fov: 0, aspect: 1 };
+  /** The look-ahead the camera was last placed with — `render()` re-places it after a resize. */
+  readonly #camBias = { x: 0, z: 0 };
   readonly #frustumMatrix = new THREE.Matrix4();
   readonly #frustumSphere = new THREE.Sphere();
   readonly #frustumXZ: FrustumXZ = {
@@ -1211,8 +1213,12 @@ export class SurfaceScene extends UiScene<'surface'> {
           this.#viewWidth = width;
           this.#viewHeight = height;
           const fov = cameraFov(width / height);
-          if (fov !== this.camera.fov) {
+          // The base render sets the aspect too, a frame later; SPEC-046's
+          // cull recaptures the frustum as soon as the projection moves.
+          const aspect = width / height;
+          if (fov !== this.camera.fov || aspect !== this.camera.aspect) {
             this.camera.fov = fov;
+            this.camera.aspect = aspect;
             this.camera.updateProjectionMatrix();
           }
           this.#setCameraScheme(this.services.input.state.scheme, false);
@@ -1774,8 +1780,12 @@ export class SurfaceScene extends UiScene<'surface'> {
       // SPEC-030 D-22: the wall chunks against this frame's frustum.
       view.updateWallVisibility(this.#frustum);
       // SPEC-046 §4.6: the static layers draw what this camera sees; the view
-      // refreshes them only when the camera has moved enough to matter.
+      // refreshes them only when the camera has moved enough to matter. A
+      // resize changes the projection without a step to re-place the camera —
+      // paused, or held by the map or a beat — so the frustum is recaptured
+      // here when it no longer matches the camera that draws.
       const seen = this.#frustumView;
+      if (seen.fov !== this.camera.fov || seen.aspect !== this.camera.aspect) this.#placeCamera(this.#camBias.x, this.#camBias.z);
       view.setView(seen.x, seen.z, seen.distance, seen.fov, seen.aspect, this.#frustum);
       // SPEC-027 §4.11: the waypoint, the scan ring and the two view meshes.
       this.#renderGuidance(world, view);
@@ -2507,6 +2517,8 @@ export class SurfaceScene extends UiScene<'surface'> {
     this.camera.updateMatrixWorld();
     this.#frustumMatrix.multiplyMatrices(this.camera.projectionMatrix, this.camera.matrixWorldInverse);
     this.#frustum.setFromProjectionMatrix(this.#frustumMatrix);
+    this.#camBias.x = biasX;
+    this.#camBias.z = biasZ;
     const view = this.#frustumView;
     view.x = this.#camTarget.x + biasX;
     view.z = this.#camTarget.z + biasZ;

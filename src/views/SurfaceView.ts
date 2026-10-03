@@ -38,6 +38,7 @@ import {
   CulledInstances,
   cullMargin,
   extendByFrustum,
+  frustumGroundCorners,
   viewRect,
   type CullMaster,
   type CullRect,
@@ -599,6 +600,9 @@ export class SurfaceView {
   readonly #culled: CulledInstances[] = [];
   readonly #cullView = { x: 0, z: 0, distance: -1, fov: -1, aspect: -1, frustum: null as THREE.Frustum | null };
   readonly #cullRect: CullRect = { minX: 0, maxX: 0, minZ: 0, maxZ: 0 };
+  /** The frustum's ground corners at the last refresh, and the ones `setView` was just handed. */
+  readonly #cullCorners = new Float32Array(8);
+  readonly #viewCorners = new Float32Array(8);
   /** A layer was built or rebuilt, or the shadow pad moved, since the last refresh. */
   #cullDirty = true;
   #cullMs = 0;
@@ -1718,19 +1722,37 @@ export class SurfaceView {
    * distance, the field of view, the aspect and the frustum. The culled layers
    * refresh when the target has moved `CULL_REFRESH_DISTANCE` since the last
    * refresh, when the distance, field of view or aspect changed, or when a
-   * layer was built or rebuilt since — and only then: a steady frame is five
-   * comparisons.
+   * layer was built or rebuilt since — and when a corner of the ground the
+   * frustum sees has drifted that far, which a look-ahead swinging round a
+   * turn does while the target itself moves less. A steady frame is a handful
+   * of comparisons.
    */
   setView(targetX: number, targetZ: number, camDistance: number, fovDeg: number, aspect: number, frustum: THREE.Frustum): void {
     const view = this.#cullView;
-    const moved = Math.hypot(targetX - view.x, targetZ - view.z) >= CULL_REFRESH_DISTANCE;
     view.frustum = frustum;
-    if (!this.#cullDirty && !moved && camDistance === view.distance && fovDeg === view.fov && aspect === view.aspect) return;
+    let stale =
+      this.#cullDirty ||
+      Math.hypot(targetX - view.x, targetZ - view.z) >= CULL_REFRESH_DISTANCE ||
+      camDistance !== view.distance ||
+      fovDeg !== view.fov ||
+      aspect !== view.aspect;
+    const corners = this.#viewCorners;
+    const seen = frustumGroundCorners(frustum, corners);
+    if (!stale && seen) {
+      const last = this.#cullCorners;
+      for (let i = 0; i < 8 && !stale; i += 2) {
+        const dx = (corners[i] as number) - (last[i] as number);
+        const dz = (corners[i + 1] as number) - (last[i + 1] as number);
+        stale = dx * dx + dz * dz >= CULL_REFRESH_DISTANCE * CULL_REFRESH_DISTANCE;
+      }
+    }
+    if (!stale) return;
     view.x = targetX;
     view.z = targetZ;
     view.distance = camDistance;
     view.fov = fovDeg;
     view.aspect = aspect;
+    if (seen) this.#cullCorners.set(corners);
     this.#refreshCulled();
   }
 

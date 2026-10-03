@@ -1396,6 +1396,38 @@ describe('SPEC-046 — props in their own colours, both variants, only what is o
     }
   });
 
+  it('refreshes when the look-ahead swings the view a metre at its corners, though the target moved less', () => {
+    const refresh = vi.spyOn(CulledInstances.prototype, 'refresh');
+    try {
+      const { view } = setup();
+      // The scene's camera: anchored at the player, turned toward a 2 m look-ahead.
+      const anchored = (bias: { x: number; z: number }): THREE.Frustum => {
+        const pitch = (55 * Math.PI) / 180;
+        const yaw = (45 * Math.PI) / 180;
+        const camera = new THREE.PerspectiveCamera(40, 16 / 9, 1, 130);
+        camera.position.set(22 * Math.cos(pitch) * Math.sin(yaw), 22 * Math.sin(pitch), 22 * Math.cos(pitch) * Math.cos(yaw));
+        camera.lookAt(bias.x, 0, bias.z);
+        camera.updateMatrixWorld();
+        return new THREE.Frustum().setFromProjectionMatrix(new THREE.Matrix4().multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse));
+      };
+      const east = { x: 2, z: 0 };
+      view.setView(east.x, east.z, 22, 40, 16 / 9, anchored(east));
+      const once = refresh.mock.calls.length;
+      // A 28° turn: the look-at point moves 0.97 m, the far corners over 2 m.
+      const turn = (28 * Math.PI) / 180;
+      const turned = { x: 2 * Math.cos(turn), z: 2 * Math.sin(turn) };
+      expect(Math.hypot(turned.x - east.x, turned.z - east.z)).toBeLessThan(1);
+      view.setView(turned.x, turned.z, 22, 40, 16 / 9, anchored(turned));
+      expect(refresh.mock.calls.length).toBe(once * 2);
+      // Holding that heading changes nothing more.
+      view.setView(turned.x, turned.z, 22, 40, 16 / 9, anchored(turned));
+      expect(refresh.mock.calls.length).toBe(once * 2);
+      view.dispose();
+    } finally {
+      refresh.mockRestore();
+    }
+  });
+
   it('reports instancesDrawn and cullMs, and draws only part of a large layout at the spawn', () => {
     const layout: ViewLayout = { ...LAYOUT, halfSize: 160 };
     const scene = new THREE.Scene();

@@ -101,22 +101,16 @@ export function viewRect(
 }
 
 /**
- * Pure: grows `out` to take in the ground (y = 0) the frustum itself sees,
- * grown by `margin`, and reports whether it could. The rig model of
- * `viewRect` aims the camera at its target, but the scene's camera stays
- * anchored to the player and only turns toward the 2 m look-ahead — which
- * moves the far corners of what is on screen by 3–9 m. The four edge rays
- * (where two side planes meet) are cut with the ground; an edge that misses
- * it in front of the camera leaves `out` alone and returns `false`.
+ * Pure: the four corners of the ground (y = 0) the frustum sees, as x, z pairs
+ * into `out` (8 floats) — where its four edge rays (two side planes meeting)
+ * cut the ground. `false`, with `out` partly written, when an edge misses the
+ * ground in front of the camera.
  */
-export function extendByFrustum(frustum: THREE.Frustum, margin: number, out: CullRect): boolean {
+export function frustumGroundCorners(frustum: THREE.Frustum, out: Float32Array): boolean {
   // three's order: 0 right, 1 left, 2 bottom, 3 top, 4 far, 5 near; normals inward.
   const planes = frustum.planes;
   const near = planes[5] as THREE.Plane;
-  let minX = Infinity;
-  let maxX = -Infinity;
-  let minZ = Infinity;
-  let maxZ = -Infinity;
+  let at = 0;
   for (let side = 0; side < 2; side++) {
     const a = planes[side] as THREE.Plane;
     for (let edge = 2; edge < 4; edge++) {
@@ -128,16 +122,33 @@ export function extendByFrustum(frustum: THREE.Frustum, margin: number, out: Cul
       const z = (-b.constant * a.normal.x + a.constant * b.normal.x) / det;
       // Behind the camera: the edge ray rose above the horizon.
       if (near.normal.x * x + near.normal.z * z + near.constant < -1e-3) return false;
-      if (x < minX) minX = x;
-      if (x > maxX) maxX = x;
-      if (z < minZ) minZ = z;
-      if (z > maxZ) maxZ = z;
+      out[at++] = x;
+      out[at++] = z;
     }
   }
-  out.minX = Math.min(out.minX, minX - margin);
-  out.maxX = Math.max(out.maxX, maxX + margin);
-  out.minZ = Math.min(out.minZ, minZ - margin);
-  out.maxZ = Math.max(out.maxZ, maxZ + margin);
+  return true;
+}
+
+const scratchCorners = new Float32Array(8);
+
+/**
+ * Pure: grows `out` to take in the ground (y = 0) the frustum itself sees,
+ * grown by `margin`, and reports whether it could. The rig model of
+ * `viewRect` aims the camera at its target, but the scene's camera stays
+ * anchored to the player and only turns toward the 2 m look-ahead — which
+ * moves the far corners of what is on screen by 3–9 m. An edge that misses
+ * the ground in front of the camera leaves `out` alone and returns `false`.
+ */
+export function extendByFrustum(frustum: THREE.Frustum, margin: number, out: CullRect): boolean {
+  if (!frustumGroundCorners(frustum, scratchCorners)) return false;
+  for (let i = 0; i < 8; i += 2) {
+    const x = scratchCorners[i] as number;
+    const z = scratchCorners[i + 1] as number;
+    if (x - margin < out.minX) out.minX = x - margin;
+    if (x + margin > out.maxX) out.maxX = x + margin;
+    if (z - margin < out.minZ) out.minZ = z - margin;
+    if (z + margin > out.maxZ) out.maxZ = z + margin;
+  }
   return true;
 }
 
