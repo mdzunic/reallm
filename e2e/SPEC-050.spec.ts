@@ -207,6 +207,7 @@ test('1, 9. a run in combat drains to exhaustion, the ring says so, and a fresh 
   await expect(ring).toHaveClass(/is-exhausted/);
   await expect(ring).toHaveAttribute('role', 'meter');
   await expect(ring).toHaveAttribute('aria-label', 'Stamina');
+  await expect(ring).toHaveAttribute('id', 'hud-stamina');
   await expect(ring.locator('.stamina-ring-notch')).toHaveCount(1);
   expect(Number(await ring.getAttribute('aria-valuenow'))).toBeLessThan(30);
   await page.keyboard.up('KeyW');

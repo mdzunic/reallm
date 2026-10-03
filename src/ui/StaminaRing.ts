@@ -31,6 +31,8 @@ export class StaminaRing {
 
   constructor(root: HTMLElement) {
     this.#root = testId(el('div', 'stamina-ring is-hidden is-faded'), 'hud-stamina');
+    // One per scene, so its testid doubles as its id.
+    this.#root.id = 'hud-stamina';
     this.#root.setAttribute('role', 'meter');
     this.#root.setAttribute('aria-label', 'Stamina');
     this.#root.setAttribute('aria-valuemin', '0');
