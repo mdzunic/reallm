@@ -120,6 +120,15 @@ async function prepareSave(page: Page): Promise<void> {
       'interlude3_seen',
       'interlude4_seen',
       'interlude5_seen',
+      // SPEC-049 §4.3, §4.5: so are Iris's letters and ARIA's two station
+      // asides — the mission clock and the memory question, answered.
+      'letter1_read',
+      'letter2_read',
+      'letter3_read',
+      'letter4_read',
+      'letter5_read',
+      'clue_awake',
+      'memory_roof',
     );
     save.progress.missionsDone = ['c6_m1'];
     save.progress.missionsActive = [{ id: 'c6_m2', stage: 0, counters: {} }];

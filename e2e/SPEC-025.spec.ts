@@ -68,13 +68,19 @@ const V1_SAVE = {
   },
 } as const;
 
-/** Walks to the station past the arrival dialogue, which covers the tabs. */
+/**
+ * Walks to the station past the arrival dialogue, which covers the tabs — with
+ * `chapter1_done` and no letter read, Iris's first letter (SPEC-049 §4.3), a
+ * modal line. The dim takes no tap; the panel does: the first fills the line,
+ * the next advances it.
+ */
 async function dismissDialogue(page: Page): Promise<void> {
-  for (let i = 0; i < 12; i++) {
+  for (let i = 0; i < 20; i++) {
     if ((await page.locator('.dialogue-dim.is-visible').count()) === 0) return;
-    await page.locator('.dialogue-dim.is-visible').click({ force: true });
+    await page.getByTestId('dialogue').click({ force: true });
     await page.waitForTimeout(150);
   }
+  await expect(page.locator('.dialogue-dim.is-visible')).toHaveCount(0);
 }
 
 test('a fresh save shows four gear cards in the character panel (§6.2)', async ({ page }) => {
