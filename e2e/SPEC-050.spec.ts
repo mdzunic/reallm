@@ -69,8 +69,11 @@ async function landOnCinder(page: Page): Promise<void> {
  * The world clock (`sceneInfo.viewTime`) on the first rendered frame where
  * `sceneInfo[key] ≥ min` — read in the same frame, so a slow container that
  * runs the game behind the wall clock measures game seconds, not wall ones.
+ * The wall-clock budget is wide for the same reason: a starved GPU-less run
+ * draws a few frames a second, and the loop's five-step ceiling then moves the
+ * game at a third of the wall clock.
  */
-async function viewTimeWhen(page: Page, key: string, min: number, timeout = 15_000): Promise<number> {
+async function viewTimeWhen(page: Page, key: string, min: number, timeout = 60_000): Promise<number> {
   const handle = await page.waitForFunction(
     ({ key: name, min: floor }) => {
       const sample = window.__reallm.stats().sceneInfo ?? {};
@@ -85,7 +88,7 @@ async function viewTimeWhen(page: Page, key: string, min: number, timeout = 15_0
 /** Waits until `seconds` of game time have passed from now. */
 async function gameSeconds(page: Page, seconds: number): Promise<void> {
   const now = await info(page, 'viewTime');
-  await viewTimeWhen(page, 'viewTime', now + seconds, 30_000);
+  await viewTimeWhen(page, 'viewTime', now + seconds);
 }
 
 type Sample = Record<string, number>;
@@ -120,6 +123,34 @@ async function stopSampling(page: Page): Promise<Sample[]> {
   });
 }
 
+interface KeyClock {
+  __keyAt: Record<string, number>;
+}
+
+/**
+ * Records the view clock when each key's first keydown reaches the page, so a
+ * measurement leaves out Playwright's own latency — on a starved run a key
+ * round trip can take half a second of wall clock, while the game runs on.
+ */
+async function watchKeys(page: Page): Promise<void> {
+  await page.evaluate(() => {
+    const scope = window as unknown as KeyClock;
+    scope.__keyAt = {};
+    window.addEventListener(
+      'keydown',
+      (event) => {
+        if (scope.__keyAt[event.code] !== undefined) return;
+        scope.__keyAt[event.code] = Number(window.__reallm.stats().sceneInfo?.['viewTime'] ?? Number.NaN);
+      },
+      true,
+    );
+  });
+}
+
+async function keyAt(page: Page, code: string): Promise<number> {
+  return page.evaluate((name) => (window as unknown as KeyClock).__keyAt[name] ?? Number.NaN, code);
+}
+
 /** The `[events]` debug lines `?debug` writes for every emit (SPEC-004 §4.6). */
 function eventLines(messages: ConsoleMessage[], name: string): string[] {
   return messages.filter((m) => m.type() === 'debug' && m.text().startsWith(`[events] ${name}`)).map((m) => m.text());
@@ -135,27 +166,32 @@ async function ariaHint(page: Page): Promise<string> {
 // ------------------------------------------------------- 1, 9: the run in combat
 
 test('1, 9. a run in combat drains to exhaustion, the ring says so, and a fresh profile is taught the sprint tip', async ({ page }) => {
-  test.setTimeout(150_000);
+  test.setTimeout(180_000);
   const messages: ConsoleMessage[] = [];
   page.on('console', (message) => void messages.push(message));
   await start(page, '/?debug&seed=123');
   await landOnCinder(page);
   expect(await info(page, 'stamina')).toBe(100);
   await press(page, 'surface-spawn-pack');
-  const pressedAt = await info(page, 'viewTime');
+  await watchKeys(page);
+  await startSampling(page, ['viewTime', 'sprinting', 'stamina', 'exhausted']);
   await page.keyboard.down('ShiftLeft');
   await page.keyboard.down('KeyW');
+  await viewTimeWhen(page, 'exhausted', 1);
+  const samples = await stopSampling(page);
+  const pressedAt = Math.max(await keyAt(page, 'ShiftLeft'), await keyAt(page, 'KeyW'));
 
-  // Within 0.5 s the salvager runs, and the pool is falling.
-  const runAt = await viewTimeWhen(page, 'sprinting', 1);
-  expect(runAt - pressedAt).toBeLessThanOrEqual(0.5);
-  const first = await info(page, 'stamina');
-  await gameSeconds(page, 0.4);
-  expect(await info(page, 'stamina')).toBeLessThan(first);
+  // Within 0.5 s of the keys the salvager runs, and the pool is falling.
+  const run = samples.find((s) => s.sprinting === 1) as Sample;
+  expect(run).toBeDefined();
+  expect(run.viewTime - pressedAt).toBeLessThanOrEqual(0.5);
+  const later = samples.find((s) => s.viewTime >= run.viewTime + 0.4) as Sample;
+  expect(later.stamina).toBeLessThan(run.stamina);
 
   // 25 a second empties it in 4 s: exhausted within 4.8 s, with the event.
-  const exhaustedAt = await viewTimeWhen(page, 'exhausted', 1);
-  expect(exhaustedAt - runAt).toBeLessThanOrEqual(4.8);
+  const exhausted = samples.find((s) => s.exhausted === 1) as Sample;
+  expect(exhausted.viewTime - run.viewTime).toBeLessThanOrEqual(4.8);
+  expect(exhausted.stamina).toBe(0);
   await expect.poll(() => eventLines(messages, 'player:exhausted').length).toBe(1);
   expect(await info(page, 'sprinting')).toBe(0);
 
@@ -208,12 +244,12 @@ test('2. a travel run on Eden costs nothing, runs 8.26 m/s, and the ring stays h
 // ------------------------------------------------------------- 3: the holster
 
 test('3. a run holsters the gun: no shot while running, and the first after it 0.25 s later', async ({ page }) => {
-  test.setTimeout(120_000);
+  test.setTimeout(180_000);
   await start(page, '/?debug&seed=123');
   await landOnCinder(page);
   await press(page, 'surface-spawn-pack');
   // The pack is aggroed within 10 m, and auto-fire is on by default: it shoots.
-  await expect.poll(() => info(page, 'shots'), { timeout: 15_000 }).toBeGreaterThan(0);
+  await expect.poll(() => info(page, 'shots'), { timeout: 60_000 }).toBeGreaterThan(0);
 
   await startSampling(page, ['viewTime', 'sprinting', 'shots']);
   await page.keyboard.down('ShiftLeft');
@@ -222,7 +258,7 @@ test('3. a run holsters the gun: no shot while running, and the first after it 0
   await viewTimeWhen(page, 'viewTime', runAt + 1);
   await page.keyboard.up('ShiftLeft');
   const shotsAtRelease = await info(page, 'shots');
-  await expect.poll(() => info(page, 'shots'), { timeout: 15_000 }).toBeGreaterThan(shotsAtRelease);
+  await expect.poll(() => info(page, 'shots'), { timeout: 60_000 }).toBeGreaterThan(shotsAtRelease);
   await page.keyboard.up('KeyW');
   const samples = await stopSampling(page);
 
@@ -258,15 +294,17 @@ test('4. an exhausted dash press does nothing; at 30 or more the dash costs 30',
   expect(await info(page, 'dashes')).toBe(dashes);
   expect(eventLines(messages, 'player:dashed')).toHaveLength(0);
 
-  // Back at 30 the dash is allowed again, and takes its 30.
+  // Back at 30 the dash is allowed again, and takes its 30. The sampler has
+  // frames of its own before the press, whatever the pool has reached by then.
   await startSampling(page, ['viewTime', 'stamina', 'exhausted', 'dashes']);
+  await frames(page, 2);
   await page.waitForFunction(
     () => {
       const sample = window.__reallm.stats().sceneInfo ?? {};
       return Number(sample['stamina']) >= 30 && Number(sample['exhausted']) === 0;
     },
     null,
-    { polling: 'raf', timeout: 15_000 },
+    { polling: 'raf', timeout: 60_000 },
   );
   await page.keyboard.press('KeyV');
   await expect.poll(() => info(page, 'dashes')).toBe(dashes + 1);
@@ -277,6 +315,7 @@ test('4. an exhausted dash press does nothing; at 30 or more the dash costs 30',
   const before = samples[at - 1] as Sample;
   const after = samples[at] as Sample;
   expect(before.stamina).toBeGreaterThanOrEqual(30);
+  expect(before.exhausted).toBe(0);
   expect(after.stamina - before.stamina).toBeGreaterThanOrEqual(-31);
   expect(after.stamina - before.stamina).toBeLessThanOrEqual(-29);
 });
@@ -354,7 +393,7 @@ test.describe('6. the stick runs past its ring', () => {
   test.use(PHONE);
 
   test('a 70 px hold for 0.3 s runs and lights the ring, 40 px walks, and with Run with the stick off it never runs', async ({ page }) => {
-    test.setTimeout(120_000);
+    test.setTimeout(180_000);
     await startTouch(page, '/?debug&scene=surface&planet=eden&seed=123');
     await dismiss(page);
     await expect(page.getByTestId('touch-controls')).toBeVisible();
@@ -419,13 +458,13 @@ test('7. in flight ShiftLeft still raises the throttle, and runs nothing', async
 /** The Wurm woken and wounded into phase 2, which opens its burrow. */
 async function burrowing(page: Page, messages: ConsoleMessage[]): Promise<void> {
   await press(page, 'surface-spawn-boss');
-  await expect.poll(async () => String((await sceneInfo(page))['boss'] ?? ''), { timeout: 15_000 }).toMatch(/^p1 /);
+  await expect.poll(async () => String((await sceneInfo(page))['boss'] ?? ''), { timeout: 60_000 }).toMatch(/^p1 /);
   for (let i = 0; i < 3; i++) await press(page, 'surface-wound-boss');
-  await expect.poll(() => eventLines(messages, 'enemy:windup').some((line) => line.includes('burrow')), { timeout: 15_000 }).toBe(true);
+  await expect.poll(() => eventLines(messages, 'enemy:windup').some((line) => line.includes('burrow')), { timeout: 60_000 }).toBe(true);
 }
 
 test('8, 9. running pulls the burrow ring after the salvager until 0.4 s before the hit, and a fresh profile is taught the wurm tip', async ({ page }) => {
-  test.setTimeout(150_000);
+  test.setTimeout(180_000);
   const messages: ConsoleMessage[] = [];
   page.on('console', (message) => void messages.push(message));
   await start(page, '/?debug&seed=123');
@@ -436,7 +475,7 @@ test('8, 9. running pulls the burrow ring after the salvager until 0.4 s before 
   await page.keyboard.down('ShiftLeft');
   await page.keyboard.down('KeyD');
   // The loud dig ends early and the ring comes down where the salvager is.
-  const drawnAt = await viewTimeWhen(page, 'burrowRing', 0, 20_000);
+  const drawnAt = await viewTimeWhen(page, 'burrowRing', 0);
   await viewTimeWhen(page, 'viewTime', drawnAt + 1.3);
   await page.keyboard.up('KeyD');
   await page.keyboard.up('ShiftLeft');
@@ -456,26 +495,33 @@ test('8, 9. running pulls the burrow ring after the salvager until 0.4 s before 
 });
 
 test('8. walking leaves the burrow ring where it came down: past 3 m within 0.9 s', async ({ page }) => {
-  test.setTimeout(120_000);
+  test.setTimeout(180_000);
   const messages: ConsoleMessage[] = [];
   page.on('console', (message) => void messages.push(message));
   await start(page, '/?debug&seed=123');
   await landOnCinder(page);
   await burrowing(page, messages);
 
-  // A quiet dig runs its 2.5 s; the ring comes down where the salvager stands.
-  const drawnAt = await viewTimeWhen(page, 'burrowRing', 0, 20_000);
+  // A quiet dig runs its 2.5 s; the ring comes down where the salvager stands,
+  // and a walk away from the moment the key lands leaves it there.
+  await viewTimeWhen(page, 'burrowRing', 0);
+  await watchKeys(page);
+  await startSampling(page, ['viewTime', 'burrowRing', 'loud']);
   await page.keyboard.down('KeyD');
-  const grownAt = await viewTimeWhen(page, 'burrowRing', 3.0001, 10_000);
+  await viewTimeWhen(page, 'burrowRing', 3.0001);
   await page.keyboard.up('KeyD');
-  expect(grownAt - drawnAt).toBeLessThanOrEqual(0.9);
-  expect(await info(page, 'loud')).toBe(0);
+  const samples = await stopSampling(page);
+  const walkedAt = await keyAt(page, 'KeyD');
+  const grown = samples.find((s) => s.burrowRing > 3) as Sample;
+  expect(grown).toBeDefined();
+  expect(grown.viewTime - walkedAt).toBeLessThanOrEqual(0.9);
+  for (const s of samples) expect(s.loud).toBe(0);
 });
 
 // --------------------------------------------------------------- the budget
 
 test('10. a run on medium stays inside SPEC-015 §5 — the ring is DOM, not a draw (96 draws)', async ({ page }) => {
-  test.setTimeout(120_000);
+  test.setTimeout(180_000);
   // SPEC-040 §4.3: a GPU-less container would step the governor down to `low`;
   // the budget is `medium`'s, so the preset holds still.
   await page.addInitScript(() => localStorage.setItem('reallm:settings', JSON.stringify({ adaptiveQuality: false })));
