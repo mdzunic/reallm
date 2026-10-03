@@ -280,16 +280,13 @@ export class MissionBoard {
 
   /**
    * SPEC-048 §4.4: `Irregular reading` on an `available` or `active` row whose
-   * side mission's own clue is unfound. A replay shows none — a contract
-   * included — because a replay plays no stage line (§4.6), so it could never
-   * find the clue the tag points at.
+   * side mission's own clue is unfound. A contract row is `replayable`, so it
+   * shows none.
    */
   #irregular(def: MissionDef, status: MissionStatus): HTMLElement | null {
     if (status !== 'available' && status !== 'active') return null;
-    const { data } = this.#deps;
-    if (data.progress.missionsDone.includes(def.id as MissionId)) return null;
     const clue = irregularClue(def.id as MissionId);
-    if (clue === null || clueFound(clue, new Set(data.progress.flags))) return null;
+    if (clue === null || clueFound(clue, new Set(this.#deps.data.progress.flags))) return null;
     return testId(h('span', { class: 'badge board-irregular' }, 'Irregular reading'), `mission-${def.id}-irregular`);
   }
 
