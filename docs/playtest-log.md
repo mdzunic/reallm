@@ -1888,11 +1888,13 @@ On the reference phone:
   - phone — _no handset in the build container_ (§7's pass is owed, below)
 
 Recorded from the container the branch was built in: `npm run check` — 105
-files and 2,331 tests, none skipped — and the e2e files the spec names, a few
+files and 2,334 tests, none skipped — and the e2e files the spec names, a few
 per invocation: `e2e/SPEC-046.spec.ts` (§6.2's six cases in ten tests),
 `e2e/surface-env.spec.ts` (nine tests, the spawn ratchet folded into the six
 per-planet medium frames) and `e2e/SPEC-018.spec.ts`'s two clamp cases, all
-green under three or four workers.
+green under three or four workers. After the tufts became one-triangle cards,
+`e2e/SPEC-046.spec.ts` and surface-env's Thessaly and Eden frames ran green
+again.
 
 **The spawn frame on `medium`** (seed 20121, 1280 × 720, 30 frames after
 landing, props drawn from their GLBs, the tug on the pad):
