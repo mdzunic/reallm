@@ -222,6 +222,8 @@ const OCCLUDER_TEST_SECONDS = 0.1;
 const LOOK_AHEAD = 2;
 /** SPEC-046 §4.8: where `surface-goto-pad` stands the salvager, from the pad's centre toward the spawn. */
 const GOTO_PAD_DISTANCE = 5;
+/** Touch aim-drags point the shot this far ahead (matches SPEC-011's demo). */
+const AIM_DRAG_DISTANCE = 12;
 
 // --------------------------------------------------------- SPEC-048 §4.8
 
@@ -230,8 +232,6 @@ const SCAV_PLANET: PlanetId = 'cinder4';
 const SCAV_PAD_MISSION: MissionId = 'c1_m1';
 /** §4.8: the line whose start lays the second, identical body down. */
 const SCAV_ECHO_LINE: DialogueId = 'c1_s2_echo';
-/** Touch aim-drags point the shot this far ahead (matches SPEC-011's demo). */
-const AIM_DRAG_DISTANCE = 12;
 
 /** §4.12: a POI within this range of the player becomes discovered. */
 const DISCOVER_RANGE = 40;
