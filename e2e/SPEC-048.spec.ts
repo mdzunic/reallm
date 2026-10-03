@@ -366,6 +366,9 @@ test('8. one scav lies by the pad while c1_m1 runs, the echo lays an identical o
 
 test('8b. with both bodies down the medium frame stays inside SPEC-015 §5 (96 draws, 130 k triangles)', async ({ page }) => {
   test.setTimeout(150_000);
+  // SPEC-040 §4.3: a GPU-less container would step the governor down to `low`
+  // while the echo plays; the budget is `medium`'s, so the preset holds still.
+  await page.addInitScript(() => localStorage.setItem('reallm:settings', JSON.stringify({ adaptiveQuality: false })));
   await start(page, '/?debug&seed=123&quality=medium');
   await prepare(page, { active: [{ id: 'c1_m1', stage: 0 }] });
   await land(page, 'cinder4', true);
