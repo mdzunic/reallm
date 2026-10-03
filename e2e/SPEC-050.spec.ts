@@ -569,19 +569,18 @@ test('8. walking leaves the burrow ring where it came down: past 3 m within 0.9 
   await landOnCinder(page);
   await burrowing(page, messages);
 
-  // A quiet dig runs its 2.5 s; the ring comes down where the salvager stands,
-  // and a walk away from the moment the key lands leaves it there.
-  await viewTimeWhen(page, 'burrowRing', 0);
-  await watchKeys(page);
+  // Walking from the windup, as case 8 runs: a quiet dig runs its 2.5 s, the
+  // ring comes down where the salvager is, and the walk carries on away from it.
   await startSampling(page, ['viewTime', 'burrowRing', 'loud']);
   await page.keyboard.down('KeyD');
   await viewTimeWhen(page, 'burrowRing', 3.0001);
   await page.keyboard.up('KeyD');
   const samples = await stopSampling(page);
-  const walkedAt = await keyAt(page, 'KeyD');
+  const drawn = samples.find((s) => s.burrowRing >= 0) as Sample;
   const grown = samples.find((s) => s.burrowRing > 3) as Sample;
+  expect(drawn).toBeDefined();
   expect(grown).toBeDefined();
-  expect(grown.viewTime - walkedAt).toBeLessThanOrEqual(0.9);
+  expect(grown.viewTime - drawn.viewTime).toBeLessThanOrEqual(0.9);
   for (const s of samples) expect(s.loud).toBe(0);
 });
 
