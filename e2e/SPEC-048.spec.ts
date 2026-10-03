@@ -99,6 +99,17 @@ async function dismiss(page: Page): Promise<void> {
   await expect(dialogue).toBeHidden();
 }
 
+/**
+ * A first landing with c1_m1 at stage 0 queues its accept line as the scene
+ * enters, ahead of anything the case plays. At Normal speed it held for ~8 s of
+ * wall clock — longer than a GPU runner takes to land, shorter than a GPU-less
+ * one — so the cases that play behind it run at Manual and move it on here.
+ */
+async function passAcceptLine(page: Page): Promise<void> {
+  await expect(page.locator('[data-testid="dialogue"] .dialogue-text')).toContainText('I put the tug on the pad.', COLD_START);
+  await dismiss(page);
+}
+
 /** The comms log's lines, oldest first, as `speaker|text`. */
 async function commsLines(page: Page): Promise<string[]> {
   return page.evaluate(() =>
@@ -337,10 +348,12 @@ test('8. one scav lies by the pad while c1_m1 runs, the echo lays an identical o
   page,
 }) => {
   test.setTimeout(150_000);
+  await page.addInitScript(() => localStorage.setItem('reallm:settings', JSON.stringify({ version: 1, dialogueSpeed: 'manual' })));
   await start(page, URL);
   await prepare(page, { active: [{ id: 'c1_m1', stage: 0 }] });
   await land(page, 'cinder4', true);
   await expect.poll(async () => (await info(page))['scavBodies']).toBe(1);
+  await passAcceptLine(page);
   await play(page, 'c1_s2_echo');
   await expect(page.locator('[data-testid="dialogue"] .dialogue-text')).toContainText('Off-worlder. Listen.');
   await expect.poll(async () => (await info(page))['scavBodies']).toBe(2);
@@ -351,6 +364,7 @@ test('8. one scav lies by the pad while c1_m1 runs, the echo lays an identical o
   await play(page, 'c1_s2_echo');
   await page.waitForTimeout(300);
   expect((await info(page))['scavBodies']).toBe(2);
+  await dismiss(page);
 
   await page.evaluate(() => {
     const save = window.__reallm.save().current;
@@ -368,10 +382,11 @@ test('8b. with both bodies down the medium frame stays inside SPEC-015 §5 (96 d
   test.setTimeout(150_000);
   // SPEC-040 §4.3: a GPU-less container would step the governor down to `low`
   // while the echo plays; the budget is `medium`'s, so the preset holds still.
-  await page.addInitScript(() => localStorage.setItem('reallm:settings', JSON.stringify({ adaptiveQuality: false })));
+  await page.addInitScript(() => localStorage.setItem('reallm:settings', JSON.stringify({ adaptiveQuality: false, dialogueSpeed: 'manual' })));
   await start(page, '/?debug&seed=123&quality=medium');
   await prepare(page, { active: [{ id: 'c1_m1', stage: 0 }] });
   await land(page, 'cinder4', true);
+  await passAcceptLine(page);
   await play(page, 'c1_s2_echo');
   await expect.poll(async () => (await info(page))['scavBodies']).toBe(2);
   await dismiss(page);
