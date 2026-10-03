@@ -2,9 +2,11 @@
 // the press, on a cooldown that falls with agility, is ×0.8 for the Scout and
 // ×0.8 on casual, and never drops below 0.8 s. Pure: the surface step moves the
 // player along `dashX/dashZ` while `isDashing`, and `Combat` reads the same
-// clock to hold its fire, its push-out and its knockback.
+// clock to hold its fire, its push-out and its knockback. SPEC-050 §4.2 makes
+// it draw on the sprint's stamina (`pressDash`).
 import { ATTRIBUTE_EFFECTS, type ClassPassive, type Difficulty } from '@/data/index';
 import type { PlayerEntity } from '@/entities/Player';
+import { canSpend, DASH_STAMINA, spend } from '@/systems/Stamina';
 
 // ------------------------------------------------------------ initial tuning
 
@@ -57,6 +59,25 @@ export function tryDash(p: PlayerEntity, dirX: number, dirZ: number, time: numbe
   p.dashReadyAt = time + cooldown;
   p.invulnUntil = Math.max(p.invulnUntil, time + DASH_IFRAMES);
   return true;
+}
+
+/**
+ * SPEC-050 §4.2 — a `dash` press, as the surface step reads it. Under
+ * `DASH_STAMINA` or exhausted it is refused like SPEC-038's other refusals:
+ * nothing changes, and the caller emits nothing. Otherwise `tryDash` runs, and
+ * a dash that starts spends `DASH_STAMINA`. `'exhausted'` is a dash whose
+ * spend exhausted the player — the caller emits `player:exhausted`.
+ */
+export function pressDash(
+  p: PlayerEntity,
+  dirX: number,
+  dirZ: number,
+  time: number,
+  cooldown: number,
+): 'refused' | 'dashed' | 'exhausted' {
+  if (!canSpend(p, DASH_STAMINA)) return 'refused';
+  if (!tryDash(p, dirX, dirZ, time, cooldown)) return 'refused';
+  return spend(p, DASH_STAMINA, time) ? 'exhausted' : 'dashed';
 }
 
 /** True while the current dash's movement runs. */

@@ -244,13 +244,14 @@ match. The 12 MB audio budget above is what they share.
 | File | Source | License | Modifications |
 | --- | --- | --- | --- |
 | `audio/sfx/ui.webm` | Original to this repository — synthesised by `scripts/assets/audio/sfx.mjs` | CC0 | — |
-| `audio/sfx/surface.webm` | Original to this repository — synthesised by `scripts/assets/audio/sfx.mjs` | CC0 | SPEC-035 §4.11 recut it with `shot_handgun`, `shot_rifle`, `shot_mg`, `shot_launcher`, `impact` and `explosion`; SPEC-038 §4.10 with the four sprites below; SPEC-041 §4.10 with `windup_boss` and `boss_slam` |
+| `audio/sfx/surface.webm` | Original to this repository — synthesised by `scripts/assets/audio/sfx.mjs` | CC0 | SPEC-035 §4.11 recut it with `shot_handgun`, `shot_rifle`, `shot_mg`, `shot_launcher`, `impact` and `explosion`; SPEC-038 §4.10 with the four sprites below; SPEC-041 §4.10 with `windup_boss` and `boss_slam`; SPEC-050 §4.8 with `exhale` |
 | `audio/sfx/surface.webm#dash` | Original to this repository — synthesised by `scripts/assets/audio/sfx.mjs`: a filtered-noise whoosh sweeping down, 250 ms | CC0 | SPEC-038 §4.10 |
 | `audio/sfx/surface.webm#windup_melee` | Original to this repository — synthesised by `scripts/assets/audio/sfx.mjs`: a dry chitter of two short clicks, 150 ms | CC0 | SPEC-038 §4.10 |
 | `audio/sfx/surface.webm#windup_charge` | Original to this repository — synthesised by `scripts/assets/audio/sfx.mjs`: a low growl rising in pitch, 450 ms | CC0 | SPEC-038 §4.10 |
 | `audio/sfx/surface.webm#windup_shot` | Original to this repository — synthesised by `scripts/assets/audio/sfx.mjs`: a rising whine, 400 ms | CC0 | SPEC-038 §4.10 |
 | `audio/sfx/surface.webm#windup_boss` | Original to this repository — synthesised by `scripts/assets/audio/sfx.mjs`: a deep rising rumble, 700 ms | CC0 | SPEC-041 §4.10 |
 | `audio/sfx/surface.webm#boss_slam` | Original to this repository — synthesised by `scripts/assets/audio/sfx.mjs`: a low impact with a gravel tail, 800 ms | CC0 | SPEC-041 §4.10 |
+| `audio/sfx/surface.webm#exhale` | Original to this repository — synthesised by `scripts/assets/audio/sfx.mjs`: noise through a falling band-pass, a breath out, 350 ms | CC0 | SPEC-050 §4.8 |
 | `audio/sfx/flight.webm` | Original to this repository — synthesised by `scripts/assets/audio/sfx.mjs` | CC0 | SPEC-035 §4.11 recut it with `ship_laser`; SPEC-041 §4.9 with `ship_hit_tick` |
 | `audio/sfx/flight.webm#ship_hit_tick` | Original to this repository — synthesised by `scripts/assets/audio/sfx.mjs`: a bright metallic tick, 80 ms | CC0 | SPEC-041 §4.9 |
 | `audio/music/menu.webm` | Original to this repository — synthesised by `scripts/assets/audio/music.mjs` | CC0 | — |

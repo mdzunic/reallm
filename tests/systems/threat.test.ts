@@ -10,6 +10,11 @@
 // kiter engaged, and each boss is fought in its sealed arena by four bots — the
 // kiter must win, a bot that reads the telegraphs must barely be touched, and
 // one that stands still must not survive on luck.
+//
+// SPEC-050 §4.9 adds the run: a kiter that sprints from what reaches it, under
+// the real rules — the holstered gun and the noise — must pay for it in damage
+// per kill, and a free run (fast, still firing, silent) must be able to fail
+// the same check.
 import { describe, expect, it } from 'vitest';
 import { makeEnemy } from '@/entities/Enemy';
 import { makePlayer } from '@/entities/Player';
@@ -18,15 +23,20 @@ import { ENEMIES, PLANETS } from '@/data/index';
 import { NO_OBSTACLES } from '@/entities/World';
 import type { CombatWorld, PlayerStats } from '@/systems/Combat';
 import {
+  AGILE_SCOUT_CREATION,
   BOSSES,
   COMBAT_PLANETS,
+  damagePerKill,
   kite,
   referenceKit,
   runBoss,
   runField,
+  sprintWanted,
   summarize,
+  WORST_CASE_CREATION,
   type BossBot,
   type BossResult,
+  type FieldBot,
   type PlanetSummary,
 } from './threatBots';
 
@@ -171,4 +181,79 @@ describe('the boss suite (SPEC-041 §6.1)', () => {
       });
     });
   }
+});
+
+describe('the run costs the gun (SPEC-050 §4.9)', () => {
+  /** §4.9: SPEC-038's field suite at seeds 1–4, three minutes, the five combat planets. */
+  const SPRINT_SEEDS = [1, 2, 3, 4] as const;
+  const CLASSES_UNDER_TEST = [
+    ['the worst-case Marine', WORST_CASE_CREATION],
+    ['a Scout 2/1/9/1', AGILE_SCOUT_CREATION],
+  ] as const;
+  const BOTS: readonly FieldBot[] = ['kite', 'sprintKite', 'sprintFree'];
+  const dpk = new Map<string, number>();
+  const rows: string[] = [];
+  for (const [name, creation] of CLASSES_UNDER_TEST) {
+    for (const bot of BOTS) {
+      const summaries = COMBAT_PLANETS.map((planet) =>
+        summarize(
+          planet,
+          SPRINT_SEEDS.map((seed) => runField(planet, seed, 180, { bot, creation })),
+        ),
+      );
+      dpk.set(`${name}/${bot}`, damagePerKill(summaries));
+      rows.push(
+        `${name} ${bot}: ${damagePerKill(summaries).toFixed(3)} per kill — ` +
+          summaries.map((s) => `${s.planet} ${s.perMinute.toFixed(1)} %/min, ${s.killsPerMinute.toFixed(1)} kills/min`).join('; '),
+      );
+    }
+  }
+  const ratio = (name: string, bot: FieldBot): number => (dpk.get(`${name}/${bot}`) ?? 0) / (dpk.get(`${name}/kite`) ?? Infinity);
+  const table = rows.join('\n');
+
+  it('the Scout under test is the class base with all five creation points on agility', () => {
+    expect(AGILE_SCOUT_CREATION.classId).toBe('scout');
+    expect(AGILE_SCOUT_CREATION.attributes).toEqual({ might: 2, vigor: 1, agility: 9, tech: 1 });
+  });
+
+  it('sprintKite’s damage per kill is at least 1.25 × kite’s, for each class', () => {
+    for (const [name] of CLASSES_UNDER_TEST) {
+      expect(ratio(name, 'sprintKite'), `${name}\n${table}`).toBeGreaterThanOrEqual(1.25);
+    }
+  });
+
+  it('the control, sprintFree, scores under 1.25 × for at least one class — so the check can fail', () => {
+    const under = CLASSES_UNDER_TEST.filter(([name]) => ratio(name, 'sprintFree') < 1.25);
+    expect(under.length, table).toBeGreaterThanOrEqual(1);
+  });
+});
+
+describe('sprintWanted (SPEC-050 §4.9)', () => {
+  it('starts within melee reach + 3.5 m of an aggroed swarm, and holds it until the gap passes 6.5 m', () => {
+    const w = world();
+    place(w, 'dust_skitter', 0, 0, true);
+    const skitter = w.enemies.at(0);
+    const reach = skitter.radius + (ENEMIES.dust_skitter.attack.kind === 'melee' ? ENEMIES.dust_skitter.attack.range : 0) + 0.5;
+    skitter.x = reach + 3.4;
+    expect(sprintWanted(w, false)).toBe(true);
+    skitter.x = reach + 3.6;
+    expect(sprintWanted(w, false)).toBe(false);
+    // Running already: it holds out to 6.5 m.
+    expect(sprintWanted(w, true)).toBe(true);
+    skitter.x = reach + 6.4;
+    expect(sprintWanted(w, true)).toBe(true);
+    skitter.x = reach + 6.6;
+    expect(sprintWanted(w, true)).toBe(false);
+  });
+
+  it('a rusher winding up a charge within 8 m starts it; an unaggroed enemy and a ranged one never do', () => {
+    const w = world();
+    place(w, 'wurmling', 7.5, 0, true);
+    w.enemies.at(0).state = 'chargeWindup';
+    expect(sprintWanted(w, false)).toBe(true);
+    const calm = world();
+    place(calm, 'dust_skitter', 1, 0, false);
+    place(calm, 'scav_raider', 2, 0, true);
+    expect(sprintWanted(calm, false)).toBe(false);
+  });
 });

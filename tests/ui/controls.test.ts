@@ -2,10 +2,17 @@
 // drifted (the pause sheet never listed the terminal, dialogue or the quick
 // picker), so the rows live in `CONTROL_ROWS` and this suite fails when an
 // action bound in `KEY_BINDINGS` has no keyboard row to explain it. SPEC-038's
-// dash is covered by whatever `KEY_BINDINGS` holds when this runs.
+// dash is covered by whatever `KEY_BINDINGS` holds when this runs; SPEC-050
+// adds the surface's `SURFACE_KEY_OVERRIDES` to what the rows must explain.
 import { describe, expect, it } from 'vitest';
-import { KEY_BINDINGS } from '@/core/KeyboardMouseDriver';
+import { KEY_BINDINGS, SURFACE_KEY_OVERRIDES } from '@/core/KeyboardMouseDriver';
 import { CONTROL_ROWS, controlRowsFor, type ControlRow } from '@/ui/ControlsSheet';
+
+/** SPEC-050 §4.5: every binding the keyboard driver can resolve — the flat table and the surface's overrides. */
+const ALL_BINDINGS: Readonly<Record<string, string>> = {
+  ...KEY_BINDINGS,
+  ...Object.fromEntries(Object.entries(SURFACE_KEY_OVERRIDES).map(([code, action]) => [`surface:${code}`, action])),
+};
 
 /** The `KEY_BINDINGS` values no keyboard row lists in its `actions` — `debug` is a developer key. */
 export function unexplained(bindings: Readonly<Record<string, string>>, rows: readonly ControlRow[]): string[] {
@@ -15,8 +22,22 @@ export function unexplained(bindings: Readonly<Record<string, string>>, rows: re
 }
 
 describe('CONTROL_ROWS (SPEC-044 §4.5)', () => {
-  it('every action KEY_BINDINGS binds, but debug, has a keyboard row', () => {
-    expect(unexplained(KEY_BINDINGS, CONTROL_ROWS.keyboard)).toEqual([]);
+  it('every action KEY_BINDINGS and SURFACE_KEY_OVERRIDES bind, but debug, has a keyboard row', () => {
+    expect(unexplained(ALL_BINDINGS, CONTROL_ROWS.keyboard)).toEqual([]);
+    // SPEC-050 §4.5: the collection holds the surface's run, which only the overrides bind.
+    expect(Object.values(ALL_BINDINGS)).toContain('sprint');
+    expect(Object.values(KEY_BINDINGS)).not.toContain('sprint');
+    const noRun = CONTROL_ROWS.keyboard.filter((row) => !(row.actions ?? []).includes('sprint'));
+    expect(unexplained(ALL_BINDINGS, noRun)).toEqual(['sprint']);
+  });
+
+  it('gains the Run rows of SPEC-050 §4.5: Shift on the keyboard, after Dash; the stick on touch', () => {
+    const keyboard = CONTROL_ROWS.keyboard;
+    const run = keyboard.find((row) => row.what === 'Run');
+    expect(run).toEqual({ what: 'Run', how: 'Hold Shift (on the ground)', actions: ['sprint'] });
+    const whats = keyboard.map((row) => row.what);
+    expect(whats.indexOf('Run')).toBe(whats.indexOf('Dash') + 1);
+    expect(CONTROL_ROWS.touch.find((row) => row.what === 'Run')?.how).toBe('Push the stick past its ring');
   });
 
   it('the rule fails on a binding with no row, so it cannot pass vacuously', () => {

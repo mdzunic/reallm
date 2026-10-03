@@ -84,6 +84,8 @@ export class QuickBar {
   /** SPEC-042 §4.4: HP is low — and the heal slot's count, last rendered. */
   #urgent = false;
   #healQty = 0;
+  /** SPEC-050 §4.6: the weapon slots are dimmed while the gun is holstered. */
+  #holstered = false;
 
   constructor(host: HTMLElement, handlers: QuickBarHandlers) {
     this.#handlers = handlers;
@@ -127,6 +129,17 @@ export class QuickBar {
 
   #applyUrgent(): void {
     this.#quick.heal.root.classList.toggle('is-urgent', this.#urgent && this.#healQty > 0);
+  }
+
+  /**
+   * SPEC-050 §4.6: `is-holstered` on the three weapon slots — dimmed to half —
+   * while the salvager runs and through the gun's draw after. The same slots
+   * sit in the thumb arc on touch, so both schemes show it. Writes only on a change.
+   */
+  setHolstered(on: boolean): void {
+    if (on === this.#holstered) return;
+    this.#holstered = on;
+    for (const slot of WEAPON_SLOTS) this.#weapons[slot].root.classList.toggle('is-holstered', on);
   }
 
   /**

@@ -10,6 +10,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { LAUNCH_SECONDS, THROTTLES } from '@/systems/Flight';
 import { DASH_IFRAMES } from '@/systems/Dash';
+import { SPRINT_MULT } from '@/systems/Stamina';
 import {
   AFFIX_IDS,
   AFFIXES,
@@ -928,7 +929,8 @@ describe('content invariants (SPEC-009 §7)', () => {
     expect(ATTRIBUTE_EFFECTS).toEqual({
       might: { damage: 0.04 },
       vigor: { maxHp: 8 },
-      agility: { moveSpeed: 0.02, critChance: 0.02, dashCooldownCut: 0.03 },
+      // SPEC-050 §4.1: agility's share of the stamina regeneration.
+      agility: { moveSpeed: 0.02, critChance: 0.02, dashCooldownCut: 0.03, staminaRegen: 0.03 },
       tech: { companionEffect: 0.1, priceCut: 0.03 },
     });
     expect(ATTRIBUTE_POINT_LEVELS).toBe(5);
@@ -2257,5 +2259,78 @@ describe('main-path echoes, continuity and the text sweep (SPEC-048 §4.7)', () 
     const accept = DIALOGUE.c1_m1_accept.lines[0].text;
     expect(accept).toBe('I put the tug on the pad. You were out of the hatch twelve metres early. Walk it off — I want to see you move before anything else does.');
     for (const text of [MISSIONS.c1_m1.brief, accept]) expect(text).not.toMatch(/short of the pad|off the pad|Touchdown/);
+  });
+});
+
+// ------------------------------------------------------------ SPEC-050 §4.4
+
+/**
+ * SPEC-050 §4.4: the fastest sprint the tables allow — the quickest class at
+ * `ATTRIBUTE_MAX` agility, × `SPRINT_MULT`: 6 × 1.15 × 1.2 × 1.35 = 11.18 m/s.
+ */
+function fastestSprint(): number {
+  let mult = 1;
+  for (const cls of Object.values(CLASSES)) mult = Math.max(mult, (cls.passive as { moveSpeedMult?: number }).moveSpeedMult ?? 1);
+  return TUNING.PLAYER_SPEED * mult * (1 + ATTRIBUTE_EFFECTS.agility.moveSpeed * ATTRIBUTE_MAX) * SPRINT_MULT;
+}
+
+/** The moves whose `trackLoud` a sprinting player could outrun — at or below `fastest`. */
+export function outrunTrackers(moves: readonly { id: string; trackLoud?: number }[], fastest: number): string[] {
+  return moves.filter((move) => move.trackLoud !== undefined && !(move.trackLoud > fastest)).map((move) => move.id);
+}
+
+describe('the Wurm listens, and no sprint outruns it (SPEC-050 §4.4)', () => {
+  const moves = (Object.values(ENEMIES) as Enemy[]).flatMap((enemy) => enemy.moves ?? []);
+
+  it('the fastest sprint the tables allow is 11.18 m/s', () => {
+    expect(fastestSprint()).toBeCloseTo(11.178, 3);
+  });
+
+  it('every trackLoud beats it — and the rule fails one at or below it', () => {
+    expect(outrunTrackers(moves, fastestSprint())).toEqual([]);
+    const trackers = moves.filter((move) => move.trackLoud !== undefined);
+    expect(trackers.map((move) => move.id)).toEqual(['burrow']);
+    // At the fastest sprint is too slow, as is anything under it; just over it passes.
+    const fastest = fastestSprint();
+    expect(outrunTrackers([{ id: 'at', trackLoud: fastest }, { id: 'under', trackLoud: 9 }, { id: 'over', trackLoud: 11.2 }], fastest)).toEqual([
+      'at',
+      'under',
+    ]);
+  });
+
+  it('the burrow row carries trackLoud 12 and loudDigMult 0.6, and still passes SPEC-041’s walk-out rule (4.0 ≤ 5.4)', () => {
+    const burrow = ENEMIES.dune_wurm.moves.find((move) => move.id === 'burrow');
+    expect(burrow).toMatchObject({ trackLoud: 12, loudDigMult: 0.6 });
+    const radius = burrow?.radius ?? Infinity;
+    const windup = burrow?.windup ?? 0;
+    expect(radius + 0.5).toBeCloseTo(4, 9);
+    expect(TUNING.PLAYER_SPEED * (windup - 0.3)).toBeCloseTo(5.4, 9);
+    expect(radius + 0.5).toBeLessThanOrEqual(TUNING.PLAYER_SPEED * (windup - 0.3));
+  });
+});
+
+describe('the run’s words (SPEC-050 §4.4, §4.7)', () => {
+  it('adds the sprint and wurm tips with §4.7’s wordings, each at most 160 characters', () => {
+    expect(TIP_IDS).toContain('sprint');
+    expect(TIP_IDS).toContain('wurm');
+    expect(TIPS.sprint.keyboard).toBe('Shift runs. Running is loud and holsters your gun — walk when you want to shoot.');
+    expect(TIPS.sprint.touch).toBe('Push the stick past its ring to run. Running is loud and holsters your gun.');
+    expect(TIPS.wurm.keyboard).toBe('It hunts by vibration: walk out of the ring — running pulls it after you.');
+    expect(TIPS.wurm.touch).toBe(TIPS.wurm.keyboard);
+    for (const id of ['sprint', 'wurm'] as const) {
+      expect(TIPS[id].keyboard.length, id).toBeLessThanOrEqual(160);
+      expect(TIPS[id].touch.length, id).toBeLessThanOrEqual(160);
+    }
+  });
+
+  it('c1_m3’s first hint says to walk out of the ring', () => {
+    expect(MISSION_HINTS.c1_m3?.[0]).toBe(
+      'The nest is {dist} {dir}, marked in red. When the ground shakes, walk out of the ring — running pulls it after you.',
+    );
+  });
+
+  it('the controls sheets gain a Run row', () => {
+    expect(sheetRows('keyboard')).toContainEqual(['Run', 'Hold Shift (on the ground)']);
+    expect(sheetRows('touch')).toContainEqual(['Run', 'Push the stick past its ring']);
   });
 });

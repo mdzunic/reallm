@@ -156,7 +156,8 @@ export function pickupSound(resource: ResourceId): SoundId {
 /**
  * The 19 events of §5.2 (SPEC-029 §4.12 adds four, SPEC-035 §4.11 two more,
  * SPEC-038 §4.10 the dash and the windup cue, SPEC-041 §4.10 a boss move
- * landing and a flight hit, SPEC-042 §4.2 an item picked up) that make a sound.
+ * landing and a flight hit, SPEC-042 §4.2 an item picked up, SPEC-050 §4.8 an
+ * exhaustion) that make a sound.
  */
 export type ReactedEvent =
   | 'combat:blast'
@@ -166,6 +167,8 @@ export type ReactedEvent =
   // SPEC-038 §4.10: the dash's whoosh, and the cue that an attack is coming.
   | 'player:dashed'
   | 'enemy:windup'
+  // SPEC-050 §4.8: the salvager's breath out at the end of the pool.
+  | 'player:exhausted'
   | 'weapon:locked'
   | 'weapon:switched'
   | 'mine:armed'
@@ -299,6 +302,11 @@ export const AUDIO_REACTIONS: { [K in ReactedEvent]: Reaction<K> } = {
   'enemy:hit': (p) => ({ id: 'impact', opts: { x: p.x, z: p.z, minIntervalMs: 50, volume: p.crit === true ? 1 : 0.6 } }),
   /** SPEC-038 §4.10: positioned, with no floor — a dash has its own cooldown. */
   'player:dashed': (p) => ({ id: 'dash', opts: { x: p.x, z: p.z } }),
+  /**
+   * SPEC-050 §4.8: the player's own breath, so not positioned; 2 s apart at
+   * most, under the fight at 0.8.
+   */
+  'player:exhausted': () => ({ id: 'exhale', opts: { minIntervalMs: 2000, volume: 0.8 } }),
   /** SPEC-038 §4.10: one cue per kind, each with its own floor and level. */
   'enemy:windup': (p) => ({ id: WINDUP_SOUNDS[p.kind], opts: { x: p.x, z: p.z, ...WINDUP_OPTS[p.kind] } }),
   'weapon:locked': () => ({ id: 'ui_warn' }),

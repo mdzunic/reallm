@@ -13,6 +13,7 @@ import type { BossMove, EnemyId } from '@/data/enemies';
 import { hasAffix, type EnemyEntity } from '@/entities/Enemy';
 import type { CombatWorld } from '@/systems/Combat';
 import { HIDDEN_DETECT_RADIUS, LOSE_TRACK_SECONDS } from '@/systems/Shelter';
+import { isLoud } from '@/systems/Stamina';
 
 // ------------------------------------------------------- tuning & constants
 
@@ -137,7 +138,20 @@ export interface AiHooks {
     damageMult: number,
     bodyResolved: boolean,
   ): boolean;
-  telegraphCircle(e: EnemyEntity, x: number, z: number, radius: number, windup: number, damageMult: number): boolean;
+  /**
+   * SPEC-050 §4.4: a `trackLoud` above 0 draws the burrow's circle, which
+   * follows a loud player at up to that many m/s until `LOUD_TRACK_LOCK` s
+   * before it lands.
+   */
+  telegraphCircle(
+    e: EnemyEntity,
+    x: number,
+    z: number,
+    radius: number,
+    windup: number,
+    damageMult: number,
+    trackLoud?: number,
+  ): boolean;
   telegraphRing(
     e: EnemyEntity,
     x: number,
@@ -322,8 +336,9 @@ function updateWander(e: EnemyEntity, world: CombatWorld, dt: number, rng: Rng, 
     const target = targetOf(e, world);
     if (target.alive) {
       const d = distance(e.x, e.z, target.x, target.z);
-      // SPEC-012 §4.6: storm visibility narrows the aggro radius.
-      const aggroRadius = e.def.aggroRadius * (world.aggroMult ?? 1);
+      // SPEC-012 §4.6: storm visibility narrows the aggro radius; SPEC-050
+      // §4.3: a loud player widens it.
+      const aggroRadius = e.def.aggroRadius * (world.aggroMult ?? 1) * (world.noiseMult ?? 1);
       let acquires = aggroRadius > 0 && d <= aggroRadius;
       // SPEC-030 §4.6: a hidden player is acquired only within 5 m with a
       // clear line — hiding narrows the rule, it never widens it. It covers
@@ -993,15 +1008,25 @@ function bossPhases(e: EnemyEntity, world: CombatWorld, hooks: AiHooks): void {
  * (`burrow_telegraph`, still invulnerable and out of reach); when the circle
  * resolves the boss surfaces at its centre, lands the move, and is due again
  * `every` s later (§4.1).
+ *
+ * SPEC-050 §4.4: the burrow listens. From the first step of the dig the player
+ * is loud on, the dig ends at `digStart + dig × windupMult × loudDigMult` — at
+ * once if that moment has passed — and the circle follows a loud player at
+ * the move's `trackLoud` (Combat moves it, and the surfacing point with it).
  */
 function updateSpecial(e: EnemyEntity, world: CombatWorld, hooks: AiHooks): void {
-  if (world.time < e.specialUntil) return;
   const move = currentMove(e);
+  if (e.specialKind === 'burrow_dig' && move !== null && move.loudDigMult !== undefined && isLoud(world.player, world.time)) {
+    // The special state started with the dig, so its clock is the dig's.
+    const digStart = world.time - e.stateTime;
+    e.specialUntil = Math.min(e.specialUntil, digStart + windupFor(move.dig ?? 0, world, e) * move.loudDigMult);
+  }
+  if (world.time < e.specialUntil) return;
   if (e.specialKind === 'burrow_dig' && move !== null) {
     const p = world.player;
     e.castX = p.x;
     e.castZ = p.z;
-    if (hooks.telegraphCircle(e, p.x, p.z, move.radius ?? 0, move.windup * e.windupScale, move.damageMult)) {
+    if (hooks.telegraphCircle(e, p.x, p.z, move.radius ?? 0, move.windup * e.windupScale, move.damageMult, move.trackLoud ?? 0)) {
       e.specialKind = 'burrow_telegraph';
       e.specialUntil = world.time + windupFor(move.windup, world, e);
       return;

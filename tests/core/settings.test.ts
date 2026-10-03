@@ -331,6 +331,9 @@ describe('the settings object (SPEC-007 §3)', () => {
       // §3 annotates this one `default true`. SPEC-005 owns the aim-assist
       // itself and only requires that it apply while the setting is on.
       flightMouseSteer: true,
+      // SPEC-050 §4.5: Shift holds the run, and the stick runs past its ring.
+      sprintToggle: false,
+      stickSprint: true,
       buttonScale: MIN_BUTTON_SCALE,
       showFps: false,
       lastSlot: null,
@@ -563,6 +566,26 @@ describe('haptics (SPEC-042 §4.10)', () => {
     expect(createSettings(fake.storage).get().haptics).toBe(false);
     expect(createSettings(fakeStorage('{"haptics":"yes"}').storage).get().haptics).toBe(true);
     expect(createSettings(fakeStorage('{"haptics":0}').storage).get().haptics).toBe(true);
+  });
+});
+
+describe('sprintToggle and stickSprint (SPEC-050 §4.5)', () => {
+  it('default off and on, round-trip, and a bad stored value falls back to the default', () => {
+    muteLog();
+    expect(defaultSettings().sprintToggle).toBe(false);
+    expect(defaultSettings().stickSprint).toBe(true);
+    const fake = fakeStorage();
+    const settings = createSettings(fake.storage);
+    settings.set({ sprintToggle: true, stickSprint: false });
+    expect(stored(fake)).toMatchObject({ sprintToggle: true, stickSprint: false });
+    expect(createSettings(fake.storage).get()).toMatchObject({ sprintToggle: true, stickSprint: false });
+    // Unusable values read the defaults — the toggle off, the stick on.
+    const bad = createSettings(fakeStorage('{"sprintToggle":"yes","stickSprint":0}').storage).get();
+    expect(bad.sprintToggle).toBe(false);
+    expect(bad.stickSprint).toBe(true);
+    settings.set({ sprintToggle: 1 as unknown as boolean, stickSprint: 'off' as unknown as boolean });
+    expect(settings.get().sprintToggle).toBe(false);
+    expect(settings.get().stickSprint).toBe(true);
   });
 });
 

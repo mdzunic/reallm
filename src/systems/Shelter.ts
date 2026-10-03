@@ -15,6 +15,16 @@ export const REVEAL_AFTER_SHOT = 1.5;
 export const STORM_SHELTER_FACTOR = 0.25;
 
 /**
+ * §4.5 (AC-25): `CombatWorld.playerHidden` — inside a shelter with no shot for
+ * `REVEAL_AFTER_SHOT`. SPEC-050 §4.3 adds that a loud player is never hidden:
+ * also `time ≥ loudUntil`, so a player who runs into a cave is heard for the
+ * 1.5 s after their last sprinting step (50-e).
+ */
+export function isHidden(inside: boolean, time: number, lastShotAt: number, loudUntil: number): boolean {
+  return inside && time - lastShotAt >= REVEAL_AFTER_SHOT && time >= loudUntil;
+}
+
+/**
  * §4.5: the first shelter whose inset interior ellipse contains (x, z), or
  * `null`. The point is transformed into the shelter's frame (rotated by
  * −angle) and tested against `(u / (rx − inset))² + (v / (rz − inset))² ≤ 1`

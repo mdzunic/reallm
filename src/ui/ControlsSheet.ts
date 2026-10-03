@@ -3,8 +3,8 @@
 // pause menu beside its actions, and over the screen from the settings panel.
 // Two hand-kept sheets drifted (the pause sheet never listed the terminal,
 // dialogue or the quick picker), so the rows live here once, and
-// `tests/ui/controls.test.ts` fails when an action bound in `KEY_BINDINGS` has
-// no keyboard row.
+// `tests/ui/controls.test.ts` fails when an action bound in `KEY_BINDINGS` or
+// SPEC-050's `SURFACE_KEY_OVERRIDES` has no keyboard row.
 import type { Scheme } from '@/core/Input';
 import { h, openModal, testId, type UiRoot } from '@/ui/dom';
 
@@ -26,6 +26,8 @@ export const CONTROL_ROWS: Readonly<Record<'keyboard' | 'touch', readonly Contro
     { what: 'Aim', how: 'Mouse' },
     { what: 'Fire', how: 'Automatic — hold Space or Left mouse to aim', actions: ['fire'] },
     { what: 'Dash', how: 'Right mouse or V', actions: ['dash'] },
+    // SPEC-050 §4.5: either Shift, through the surface's key overrides.
+    { what: 'Run', how: 'Hold Shift (on the ground)', actions: ['sprint'] },
     { what: 'Interact · pad terminal', how: 'E or F', actions: ['interact'] },
     { what: 'Continue a transmission', how: 'Enter, Space or E' },
     { what: 'Answer a choice', how: '1 to 9' },
@@ -51,6 +53,8 @@ export const CONTROL_ROWS: Readonly<Record<'keyboard' | 'touch', readonly Contro
     { what: 'Aim & fire', how: 'Drag on the right side — auto-fire shoots for you' },
     // SPEC-038 §4.9: the thumb arc's corner cell.
     { what: 'Dash', how: 'DASH button' },
+    // SPEC-050 §4.5: no button — the stick's own drawn ring.
+    { what: 'Run', how: 'Push the stick past its ring' },
     // SPEC-045 §4.6: the buttons read + and −, as they are drawn.
     { what: 'Throttle (flight)', how: '+ / − buttons' },
     // SPEC-028 §4.5: the bar doubles as the touch buttons. SPEC-037 §4.10:

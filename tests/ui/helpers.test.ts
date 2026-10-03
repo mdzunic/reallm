@@ -92,6 +92,8 @@ import {
   quitNote,
   requirementItem,
   starmapPreselect,
+  STAMINA_FULL_HIDE_SECONDS,
+  staminaShown,
   STATUS_LABELS,
   type HudModel,
   type MissionStatus,
@@ -689,10 +691,16 @@ describe('passiveText (AC-14)', () => {
     expect(passiveText({})).toBe('');
   });
 
+  it('prints the sprint drain as the sprint time it buys (SPEC-050 §4.1)', () => {
+    expect(passiveText({ sprintDrainMult: 0.8 })).toBe('+25 % sprint time');
+    expect(CLASSES.scout.passive.sprintDrainMult).toBe(0.8);
+  });
+
   it('prints the dash cooldown multiplier, and the Scout carries it (SPEC-038 §4.1)', () => {
     expect(passiveText({ dashCooldownMult: 0.8 })).toBe('−20 % dash cooldown');
     expect(passiveText(CLASSES.scout.passive)).toBe(
-      '+15 % move speed · +25 % pickup radius · resource radar · −20 % dash cooldown',
+      // SPEC-050 §4.1: the Scout's ×0.8 sprint drain reads as the time it buys.
+      '+15 % move speed · +25 % pickup radius · resource radar · −20 % dash cooldown · +25 % sprint time',
     );
   });
 });
@@ -1457,7 +1465,12 @@ describe('diffHudInto and copyHudInto (SPEC-040 §4.4, AC-20)', () => {
         return rng.chance(0.5) ? null : pick(rng, ['Press E', 'Need 20 more oil']);
       case 'interactAction':
       case 'walletLit':
+      case 'holstered':
         return rng.chance(0.5);
+      case 'stamina':
+        return rng.chance(0.3)
+          ? null
+          : { value: small(rng), max: 100, exhausted: rng.chance(0.5), sprinting: rng.chance(0.5), shown: rng.chance(0.5) };
       case 'flight':
         return rng.chance(0.5)
           ? undefined
@@ -1988,11 +2001,46 @@ describe('quitNote (SPEC-044 §4.8)', () => {
   });
 });
 
+describe('the stamina ring’s model (SPEC-050 §4.6)', () => {
+  it('staminaShown is false only for a full pool out of combat, full for at least 1 s', () => {
+    expect(STAMINA_FULL_HIDE_SECONDS).toBe(1);
+    expect(staminaShown(100, false, 1)).toBe(false);
+    expect(staminaShown(100, false, 5)).toBe(false);
+    expect(staminaShown(100, false, 0.99)).toBe(true);
+    expect(staminaShown(100, true, 5)).toBe(true);
+    expect(staminaShown(99, false, 5)).toBe(true);
+    expect(staminaShown(0, false, 0)).toBe(true);
+    expect(staminaShown(40, true, 0)).toBe(true);
+  });
+
+  it('is null and not holstered in a fresh model — the flight never sets them', () => {
+    const model = createHudModel();
+    expect(model.stamina).toBeNull();
+    expect(model.holstered).toBe(false);
+    expect(HUD_KEYS).toContain('stamina');
+    expect(HUD_KEYS).toContain('holstered');
+  });
+
+  it('a change of value, state or shown diffs the stamina key alone', () => {
+    const a = createHudModel();
+    a.stamina = { value: 100, max: 100, exhausted: false, sprinting: false, shown: false };
+    const b = copyHudInto(createHudModel(), a);
+    expect(diffHud(a, b).size).toBe(0);
+    (b.stamina as NonNullable<HudModel['stamina']>).value = 99;
+    expect([...diffHud(a, b)]).toEqual(['stamina']);
+    b.holstered = true;
+    expect([...diffHud(a, b)].sort()).toEqual(['holstered', 'stamina']);
+  });
+});
+
 describe('attributeEffectText and attributeLine (SPEC-044 §4.4)', () => {
   it('reads all four attributes at SPEC-039\'s numbers', () => {
     expect(attributeEffectText('might')).toBe('Might — +4 % damage per point');
     expect(attributeEffectText('vigor')).toBe('Vigor — +8 max HP per point');
-    expect(attributeEffectText('agility')).toBe('Agility — +2 % speed · +2 % crit chance · −3 % dash cooldown per point');
+    // SPEC-050 §4.1: agility's stamina regen joins the line.
+    expect(attributeEffectText('agility')).toBe(
+      'Agility — +2 % speed · +2 % crit chance · −3 % dash cooldown · +3 % stamina regen per point',
+    );
     expect(attributeEffectText('tech')).toBe('Tech — +10 % companion effect · −3 % prices per point');
   });
 

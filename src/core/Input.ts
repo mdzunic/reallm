@@ -41,7 +41,8 @@ export type Action =
   | 'weaponPrev'
   | 'throwItem'
   | 'useUtility'
-  | 'dash';
+  | 'dash'
+  | 'sprint';
 export type Scheme = 'keyboard' | 'touch' | 'gamepad';
 /** The four movement half-axes a key can bind to; they are not actions (AC-4). */
 export type MoveAxis = 'moveUp' | 'moveDown' | 'moveLeft' | 'moveRight';
@@ -74,6 +75,9 @@ export const ACTIONS = [
   'useUtility',
   // SPEC-038 §4.1: the surface's dodge — V, the right mouse button, DASH.
   'dash',
+  // SPEC-050 §4.5: the surface's run — either Shift through the surface key
+  // overrides, or the touch stick pushed past its ring. Flight reads none.
+  'sprint',
 ] as const satisfies readonly Action[];
 
 // ------------------------------------------------------------------ tunables
@@ -100,6 +104,15 @@ export const FLIGHT_AIM_ASSIST = 0.35;
  * and kiting needs full speed.
  */
 export const TOUCH_FULL_TRAVEL = 0.6;
+/**
+ * SPEC-050 §4.5 (*initial tuning*): the touch stick presses `sprint` once its
+ * thumb has stayed at least this share of `JOYSTICK_RADIUS_PX` from the origin
+ * — the drawn ring, 22 px past `TOUCH_FULL_TRAVEL`'s full speed — for
+ * `TOUCH_SPRINT_DWELL` seconds, and releases it below `TOUCH_SPRINT_RELEASE`.
+ */
+export const TOUCH_SPRINT_TRAVEL = 1.0;
+export const TOUCH_SPRINT_RELEASE = 0.85;
+export const TOUCH_SPRINT_DWELL = 0.15;
 /**
  * SPEC-036 §4.2: a device with no hover and a finger for its pointer — a phone
  * or a tablet. A touchscreen laptop with a mouse does not match, and boots on
@@ -260,6 +273,12 @@ export class Input {
   readonly #rawMove = new Map<Scheme, { x: number; y: number }>();
   /** Scratch for the touch source's shaped vector (SPEC-001 §7: no allocation). */
   readonly #touchShaped = { x: 0, y: 0 };
+  /** SPEC-050 §4.5: the touch stick's raw travel (distance ÷ `JOYSTICK_RADIUS_PX`). */
+  #stickTravel = 0;
+  /** Seconds the travel has stayed at or past `TOUCH_SPRINT_TRAVEL`, summed per frame. */
+  #stickOver = 0;
+  /** The stick is holding `sprint` from the `touch` source. */
+  #stickSprint = false;
 
   #enabled = true;
   #mode: InputMode = 'surface';
@@ -351,6 +370,9 @@ export class Input {
    * surface together, with `down` already false (AC-2).
    */
   beginFrame(frameDt: number): void {
+    // SPEC-050 §4.5: the stick's run dwells on frames, so a still thumb past
+    // the ring sprints; a press it makes here publishes with this frame.
+    this.#stepStickSprint(frameDt);
     for (const action of ACTIONS) {
       const track = this.#track[action];
       const button = track.button;
@@ -410,6 +432,11 @@ export class Input {
     this.#rawMove.clear();
     this.#state.move.x = 0;
     this.#state.move.y = 0;
+    // SPEC-050 E80: the stick's run goes with the rest; the next stick move
+    // starts its dwell again.
+    this.#stickTravel = 0;
+    this.#stickOver = 0;
+    this.#stickSprint = false;
     const aim = this.#state.aim;
     aim.dragging = false;
     aim.dirX = 0;
@@ -460,6 +487,16 @@ export class Input {
     raw.x = x;
     raw.y = y;
     this.#applyMove();
+  }
+
+  /**
+   * SPEC-050 §4.5: the touch stick's raw travel — its thumb's distance from the
+   * origin ÷ `JOYSTICK_RADIUS_PX`, measured before the origin drifts; 0 on
+   * lift or cancel. `beginFrame` turns it into the `sprint` press.
+   */
+  setStickTravel(travel: number): void {
+    if (!this.#enabled) return;
+    this.#stickTravel = Number.isFinite(travel) && travel > 0 ? travel : 0;
   }
 
   /** Screen aim in CSS px inside the canvas box, plus its NDC (AC-24). */
@@ -585,6 +622,28 @@ export class Input {
         this,
       ),
     );
+  }
+
+  /**
+   * SPEC-050 §4.5: the stick presses `sprint` from `touch` once its travel has
+   * stayed at or past `TOUCH_SPRINT_TRAVEL` for `TOUCH_SPRINT_DWELL` — with
+   * `settings.stickSprint` on — and releases it when the travel drops below
+   * `TOUCH_SPRINT_RELEASE` (a lift or a cancel sets 0) or the setting turns
+   * off. Another holder of `sprint` (Shift) keeps it down (AC-22).
+   */
+  #stepStickSprint(dt: number): void {
+    const travel = this.#stickTravel;
+    this.#stickOver = travel >= TOUCH_SPRINT_TRAVEL ? this.#stickOver + dt : 0;
+    const allowed = this.#settings?.get().stickSprint ?? true;
+    if (this.#stickSprint) {
+      if (allowed && travel >= TOUCH_SPRINT_RELEASE) return;
+      this.#stickSprint = false;
+      this.releaseAction('sprint', 'touch');
+      return;
+    }
+    if (!allowed || !this.#enabled || this.#stickOver < TOUCH_SPRINT_DWELL) return;
+    this.#stickSprint = true;
+    this.pressAction('sprint', 'touch');
   }
 
   #computeAutoFire(): boolean {
