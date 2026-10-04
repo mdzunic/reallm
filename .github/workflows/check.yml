@@ -15,8 +15,9 @@
 # unverified: its e2e step was still going when the job ran out, every time.
 # So:
 #
-# - `check` and every e2e part run side by side (no `needs:`), each its own
-#   check run from the start;
+# - `check` and every e2e part run side by side, each its own check run; the
+#   parts wait only for `prove` (seconds, and on a push to main only — see it
+#   below), never for `check`;
 # - every budget fails: Playwright's `--global-timeout` first, then the step's
 #   `timeout-minutes` (a step that times out is a failed step). A job-level
 #   `timeout-minutes` is only a backstop for setup that hangs.
@@ -39,6 +40,14 @@ on:
   pull_request:
   # A manual run, for timing a branch or asking again about a commit.
   workflow_dispatch:
+# A pull request's run is superseded by its next push: the factory gates the
+# head it pushed last and reads no older head's checks, so finishing the old run
+# only holds macOS slots the new one is queueing for (the Free plan runs five at
+# once, one run's worth). Pushes to main are never cancelled: every commit that
+# lands is the revert watcher's to judge.
+concurrency:
+  group: check-${{ github.event_name == 'pull_request' && format('pr-{0}', github.event.pull_request.number) || github.sha }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 jobs:
   check:
     runs-on: ubuntu-latest
@@ -54,9 +63,60 @@ jobs:
       - run: npm run check
         timeout-minutes: 5
 
+  # On a push to main: did this commit's pull request already pass the browser
+  # suite on this exact tree? A squash merge of an up-to-date branch lands the
+  # PR head's tree byte for byte — every one of the 20 factory merges between
+  # 2026-09-26 and 10-04 did — and running the whole suite on it again held all
+  # five macOS slots for ten minutes after each merge, queueing the next PR's
+  # run behind it (16–24 minutes, past the watcher's 22). When the trees match
+  # and every `e2e N/5` on the head concluded `success`, the parts below report
+  # that proof instead of running. The same tree is the same code, tests and
+  # workflow, so the verdict carries over the way a cache keyed on the tree
+  # would. Anything else — no merged PR, a different tree (main moved under the
+  # PR, a direct push), a part that did not pass, an unanswered API call — and
+  # the parts run as before.
+  prove:
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    permissions:
+      contents: read
+      pull-requests: read
+      checks: read
+    outputs:
+      head: ${{ steps.twin.outputs.head }}
+    steps:
+      - id: twin
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          api() { gh api -H 'Accept: application/vnd.github+json' "$@"; }
+          head=$(api "repos/$GITHUB_REPOSITORY/commits/$GITHUB_SHA/pulls" --jq '[.[] | select(.merged_at != null)][0].head.sha // ""') \
+            || { echo "::notice::could not ask which PR landed $GITHUB_SHA — the e2e parts run"; exit 0; }
+          if [ -z "$head" ]; then echo "no merged PR landed $GITHUB_SHA — the e2e parts run"; exit 0; fi
+          here=$(api "repos/$GITHUB_REPOSITORY/git/commits/$GITHUB_SHA" --jq .tree.sha) || exit 0
+          there=$(api "repos/$GITHUB_REPOSITORY/git/commits/$head" --jq .tree.sha) || exit 0
+          if [ "$here" != "$there" ]; then
+            echo "tree $here is not PR head $head's ($there) — the e2e parts run"; exit 0
+          fi
+          parts=$(api "repos/$GITHUB_REPOSITORY/commits/$head/check-runs?per_page=100" \
+            --jq '[.check_runs[] | select(.name | test("^e2e [0-9]+/[0-9]+$")) | .conclusion]') || exit 0
+          total=$(jq length <<<"$parts")
+          passed=$(jq '[.[] | select(. == "success")] | length' <<<"$parts")
+          if [ "$total" -eq 0 ] || [ "$passed" -ne "$total" ]; then
+            echo "PR head $head's e2e parts: $parts — the e2e parts run"; exit 0
+          fi
+          echo "::notice::tree $here passed all $total e2e parts on PR head $head — not run again"
+          echo "head=$head" >> "$GITHUB_OUTPUT"
+
   e2e:
     name: e2e ${{ matrix.part }}
-    runs-on: macos-15
+    needs: prove
+    # `prove` is skipped on a pull request, and can fail; neither may skip the
+    # parts — only a proof does, and it still reports every part.
+    if: ${{ !cancelled() }}
+    # A proved part takes no macOS slot: it reports on Ubuntu in seconds.
+    runs-on: ${{ needs.prove.outputs.head && 'ubuntu-latest' || 'macos-15' }}
     timeout-minutes: 19
     strategy:
       # A cancelled part is no verdict, and every part's failures are worth
@@ -70,15 +130,23 @@ jobs:
       E2E_CHANNEL: chromium
       E2E_REQUIRE_GPU: '1'
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-node@v7
+      # A proved part says what proved it and runs nothing; every step after
+      # this one is the real part, and is skipped on a proof.
+      - if: ${{ needs.prove.outputs.head }}
+        run: echo "::notice::e2e ${{ matrix.part }} passed on PR head ${{ needs.prove.outputs.head }}, whose tree this commit has — not run again (see the prove job)"
+      - if: ${{ !needs.prove.outputs.head }}
+        uses: actions/checkout@v7
+      - if: ${{ !needs.prove.outputs.head }}
+        uses: actions/setup-node@v7
         with:
           node-version: 24
           cache: npm
-      - run: npm ci
+      - if: ${{ !needs.prove.outputs.head }}
+        run: npm ci
       # The full build only: `E2E_CHANNEL=chromium` never launches the shell.
       # The browser revision follows the pinned @playwright/test.
-      - run: npx playwright install --no-shell chromium
+      - if: ${{ !needs.prove.outputs.head }}
+        run: npx playwright install --no-shell chromium
       # The parts are planned by time, not count (scripts/e2e/shard.mjs).
       # `--shard` split by count, and the budget had to grow every few specs
       # with no test failing: 8 → 10 minutes (#57, #60), 10 → 13 (#66, #67),
@@ -86,7 +154,7 @@ jobs:
       # sat idle — the part that ran only SPEC-011 and SPEC-012-missions used
       # four of its nine minutes. Every part now plans the whole suite from
       # `scripts/e2e/timings.json` and the same commit, so the five agree
-      # without a planning job (no `needs:`, see above), and runs its own share
+      # without a planning job to wait for (see above), and runs its own share
       # with `--test-list`. The plan is printed at the top of the step, and a
       # warning is raised when the longest part plans past three quarters of
       # the budget or a fifth of the tests have no timing yet.
@@ -101,6 +169,7 @@ jobs:
       # (revertWatchMinutes, above): queueing, setup and this step's fifteen
       # minutes must end inside it.
       - name: playwright test ${{ matrix.part }}
+        if: ${{ !needs.prove.outputs.head }}
         timeout-minutes: 15
         env:
           PART: ${{ matrix.part }}
@@ -109,7 +178,7 @@ jobs:
           node scripts/e2e/shard.mjs --part "$PART" --out "$RUNNER_TEMP/e2e-part.txt" --budget-ms 780000
           npx playwright test --test-list "$RUNNER_TEMP/e2e-part.txt" --workers=2 --retries=1 --global-timeout=780000 --add-reporter=github,json
       # The traces of whatever failed (trace: 'retain-on-failure').
-      - if: failure()
+      - if: ${{ failure() && !needs.prove.outputs.head }}
         uses: actions/upload-artifact@v7
         with:
           name: e2e-test-results-${{ strategy.job-index }}
@@ -118,7 +187,7 @@ jobs:
           if-no-files-found: ignore
       # Every test's time, green or red, for refreshing the timings the parts
       # are planned with (scripts/e2e/timings.mjs).
-      - if: always()
+      - if: ${{ always() && !needs.prove.outputs.head }}
         uses: actions/upload-artifact@v7
         with:
           name: e2e-report-${{ strategy.job-index }}
