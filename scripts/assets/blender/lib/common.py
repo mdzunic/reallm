@@ -192,6 +192,56 @@ def torus(major, minor, n=24, m=8, arc=360.0):
     return lathe(profile, n=n, arc=arc)
 
 
+def tube(points, radii, n=6, cap_start=False, cap_end=True, uv_rect=None):
+    """A ring of `n` swept along the polyline `points` (SPEC-052's trunks, limbs,
+    roots and cables), radius `radii[i]` at point i. Rings turn with the line by
+    parallel transport, so a curve never twists. `uv_rect=(u0, v0, u1, v1)`
+    lays a UV layer over the sides — u around, v along the length — for a part
+    sampled from an atlas cell; Builder.add copies it."""
+    bm = bmesh.new()
+    uv = bm.loops.layers.uv.new('UVMap') if uv_rect is not None else None
+    pts = [Vector(p) for p in points]
+    tangents = []
+    for i in range(len(pts)):
+        a, b = pts[max(i - 1, 0)], pts[min(i + 1, len(pts) - 1)]
+        tangents.append((b - a).normalized())
+    side = Vector((1, 0, 0)) if abs(tangents[0].x) < 0.9 else Vector((0, 1, 0))
+    normal = tangents[0].cross(side).normalized()
+    rings = []
+    for i, (p, t) in enumerate(zip(pts, tangents)):
+        if i > 0:
+            # parallel transport: turn the previous frame by the tangent's turn
+            normal = tangents[i - 1].rotation_difference(t).to_matrix() @ normal
+            normal = (normal - t * normal.dot(t)).normalized()
+        binormal = t.cross(normal)
+        rings.append([bm.verts.new(p + (normal * math.cos(2 * math.pi * k / n) + binormal * math.sin(2 * math.pi * k / n)) * radii[i])
+                      for k in range(n)])
+    total = sum((pts[i + 1] - pts[i]).length for i in range(len(pts) - 1)) or 1.0
+    along_at = [0.0]
+    for i in range(len(pts) - 1):
+        along_at.append(along_at[-1] + (pts[i + 1] - pts[i]).length / total)
+    for i in range(len(rings) - 1):
+        for k in range(n):
+            k1 = (k + 1) % n
+            f = bm.faces.new([rings[i][k], rings[i][k1], rings[i + 1][k1], rings[i + 1][k]])
+            if uv is not None:
+                u0, v0, u1, v1 = uv_rect
+                for loop, (kk, ii) in zip(f.loops, ((k, i), (k + 1, i), (k + 1, i + 1), (k, i + 1))):
+                    loop[uv].uv = (u0 + (u1 - u0) * kk / n, v0 + (v1 - v0) * along_at[ii])
+    caps = []
+    if cap_start and radii[0] > 0:
+        caps.append(bm.faces.new(list(reversed(rings[0]))))
+    if cap_end and radii[-1] > 0:
+        caps.append(bm.faces.new(rings[-1]))
+    if uv is not None:
+        u0, v0, u1, v1 = uv_rect
+        for f in caps:
+            for loop in f.loops:
+                loop[uv].uv = ((u0 + u1) / 2, v1)
+    bmesh.ops.recalc_face_normals(bm, faces=bm.faces)
+    return bm
+
+
 def displace(bm, fn):
     """Move every vertex along its normal by fn(co) (co is a Vector)."""
     bm.normal_update()
@@ -221,8 +271,11 @@ class Builder:
         return self.groups.index(name)
 
     def add(self, part, color=(1, 1, 1, 1), uv=None, bone=None, mat=0, smooth=35.0, uv_scale=None):
-        """Copy `part` in. `smooth`: sharp above this angle (deg); None → flat."""
+        """Copy `part` in. `smooth`: sharp above this angle (deg); None → flat.
+        UVs: `uv` for every loop, else `uv_scale`'s box projection, else the
+        part's own UV layer when it carries one (tube(), SPEC-052's cards)."""
         part.normal_update()
+        part_uv = part.loops.layers.uv.active
         vmap = {}
         g = self.group(bone) if bone else None
         for v in part.verts:
@@ -238,7 +291,7 @@ class Builder:
             n = f.normal
             nf.material_index = mat(f.calc_center_median(), n) if callable(mat) else mat
             nf.smooth = smooth is not None
-            for loop in nf.loops:
+            for loop, src in zip(nf.loops, f.loops):
                 if self.col is not None:
                     loop[self.col] = color(loop.vert.co, n) if callable(color) else color
                 if uv is not None:
@@ -248,6 +301,8 @@ class Builder:
                     ax = max(range(3), key=lambda k: abs(n[k]))
                     a, b = [(1, 2), (0, 2), (0, 1)][ax]
                     loop[self.uv].uv = (co[a] * uv_scale, co[b] * uv_scale)
+                elif part_uv is not None:
+                    loop[self.uv].uv = src[part_uv].uv
         if smooth is not None:
             limit = math.radians(smooth)
             self.bm.normal_update()
@@ -376,11 +431,17 @@ def select_only(objs):
     bpy.context.view_layer.objects.active = objs[0]
 
 
-def export_glb(path, objs, animations=False):
+def export_glb(path, objs, animations=False, texcoords=True, meshopt=False):
+    """SPEC-052: `texcoords=False` leaves TEXCOORD_0 out (a prop's colours are
+    in COLOR_0, and the seam drops `uv`); `meshopt=True` compresses every buffer
+    view with EXT_meshopt_compression, float attributes kept (three's
+    MeshoptDecoder reads it, SPEC-046). The defaults are the exports every
+    other generator has always written."""
     select_only(objs)
     bpy.ops.export_scene.gltf(
         filepath=ensure_dir(path), export_format='GLB', use_selection=True, export_apply=True,
-        export_yup=True, export_texcoords=True, export_normals=True, export_tangents=False,
+        export_yup=True, export_texcoords=texcoords, export_normals=True, export_tangents=False,
+        export_meshopt_compression_enable=meshopt, export_meshopt_extension='EXT_meshopt_compression',
         export_materials='EXPORT', export_vertex_color='MATERIAL', export_all_vertex_colors=False,
         export_active_vertex_color_when_no_material=False, export_image_format='WEBP', export_image_quality=88,
         export_cameras=False, export_lights=False, export_extras=False,
