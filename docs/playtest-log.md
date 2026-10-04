@@ -2203,6 +2203,34 @@ The plates:
   - `node scripts/assets/check.mjs` passes: films 8.95 MB of 12, precache 22.82 MB of 25;
   - `films/` is unchanged by the merge at 9 384 351 B;
   - `e2e/SPEC-051.spec.ts`: 5 passed.
+- [x] **The render checks measured again on the committed films**, 2026-10-04, in the factory's container.
+  - **Why.** QA's browser could not decode H.264. So the `watchers` tear and the `hive_dark` black run (§4.5) went unseen, and the per-frame numbers above rested on the Blender machine's log alone.
+  - **The decoders.** Playwright's Firefox and WebKit decode the films here. Its Chromium crashes when it seeks and draws one, `departure.mp4` from `main` included.
+  - **The method.** Frame k is sought at (k + 0.5) / 24 and drawn at 960 × 540. Of 11 posters tried, 10 match their own frame best, and `stranded`'s slow push is a 0.02 tie with the next frame.
+  - **The rules.** `film.py`'s checks are ported line for line: `luminance` (10 × 10 block means to 96 × 54, then linear Rec. 709 Y), `flash_check`, `black_run`, `swing_check`, `mean_check`, `unmake_check` and `lit_box`.
+
+  | Check | Blender's log | Firefox | WebKit |
+  |---|---|---|---|
+  | Flashes, all nine films | the table above | the same nine counts, no red jump | the same |
+  | `watchers` swing, 4.1–4.35 s | 0.000 | 0.0005 | 0.0004 |
+  | `hive_dark` black run | 4 | 4: frames 141–144, from 5.83 s | 4 |
+  | `greenhouse` mean luminance | 0.042–0.051 | 0.0420–0.0515 | 0.0390–0.0480 |
+  | Unmake means | 0.079 ± 0.001, 0.065 ± 0.000, 0.040 ± 0.001 | 0.0789 ± 0.0013, 0.0656 ± 0.0004, 0.0407 ± 0.0006 | 0.0743 ± 0.0013, 0.0611 ± 0.0006, 0.0374 ± 0.0010 |
+  | Lit boxes at the posters | the three above | 353,328–621,449; 150,338–769,461; 232,210–749,393 | — |
+
+  - **The lit boxes** are 269, 620 and 518 px wide. Each is at least 78 px from every edge and centred below y = 216.
+  - **The tear** is frames 362–367 (15.08–15.33 s). Earth is a grey sphere in a wire grid, at its own place and size, and the violet points stay. Frames 361 and 368 show the lit Earth.
+  - **`hive_dark`** still has live veins at the frame's edges at 5.75 s. Its mean falls from 0.018 at 4 s to 0.005 at 5.79 s, and only then goes black.
+  - **Card 62** stays inside the inner 88 % from its stamp (frame 1838, 76.58 s) to the shot's last frame. That was checked by eye, with the box drawn on four frames.
+  - **`wall_same`:** card 62's visor clears from 26.0 to 27.5 s, and every card is the grey visor.
+  - **`earth_unmade`'s four beats** show in order: the skyline, the street, the shelter, each unmaking to grey under the grid, then the clay Earth.
+  - **The flashes** fall at 47.25 and 86.33 s (prologue), 6.25 s (`departure`) and 5.875 s (`ending_escape`). `main`'s films, decoded the same way, flash at 47.25 and 86.08 s and at 5.75 s. So the drop moves only `liftoff`'s flash, by six frames, still 0.67 s before its poster. `ending_escape`'s moves three frames, where only its CRF changed.
+  - **Beside `main`'s films**, decoded the same way, the shots the drop does not retake match:
+    - pixel for pixel (mean MAD 0.00 of 255): the prologue's other shots but `shelter`, and `reactor`, `earth_c4`, `uplink`, `fleet`, `earth_full` and `earth_again`;
+    - within encoder noise (a mean MAD of 1.6 or less): `shelter` and `eden`, each encoded beside a retaken shot, and `ending_escape`'s `exit`, `eden_unmade` and `point`, its CRF having moved from 26 to 28.
+
+    `watchers` matches before 2.8 s, and after that differs by under 1 of 255 except on the tear's frames 362–367.
+  - **The eyes in `stranded`** go dark left to right. Each group's red reaches zero at 59.0, 61.5 and 64.0 s, the end of its 0.5 s fade from the cue. The one-frame dip to strength 4 before each fade does not register, because the slit stays saturated at any strength above about 1. That is the spec's initial tuning, and the drop is not rebuilt for it (the owner's ruling); the watch-through below should judge it.
 
 **The likeness check (§7) — performed 2026-10-04: every face failed.**
 
