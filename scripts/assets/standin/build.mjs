@@ -70,19 +70,22 @@ function runPython(script, ids, out) {
   return lines.filter((line) => line.startsWith('STANDIN meshopt ')).map((line) => line.slice('STANDIN meshopt '.length));
 }
 
-async function compressAll(paths, out) {
+async function compressAll(paths, out, wrote) {
   for (const path of paths) {
     const bytes = await compressGlb(readFileSync(path));
     writeFileSync(path, bytes);
-    console.log(`NOTE meshopt ${relative(out, path)} ${bytes.length} bytes`);
+    const rel = relative(out, path).split('\\').join('/');
+    wrote.set(rel, 'built');
+    console.log(`NOTE meshopt ${rel} ${bytes.length} bytes`);
   }
 }
 
 /** §4.3: the Blender export of an `_a`/`_b`, without its UVs and meshopt-compressed (once). */
-async function reencode(name, out) {
+async function reencode(name, out, wrote) {
   const path = join(out, 'models', 'props', `${name}.glb`);
   const bytes = readFileSync(path);
   const { json } = readGlb(bytes);
+  wrote.set(`models/props/${name}.glb`, 'reencoded');
   if (json.extensionsRequired?.includes('EXT_meshopt_compression')) return;
   const packed = await compressGlb(bytes, { dropTexcoords: true });
   writeFileSync(path, packed);
@@ -99,26 +102,28 @@ async function main() {
   if (unknown.length > 0) throw new Error(`unknown generator(s): ${unknown.join(', ')} — choose from ${GENERATORS.join(', ')}`);
   const wanted = (id) => only.length === 0 || only.includes(id);
   const started = Date.now();
+  const wrote = new Map();
   let codec = null;
   try {
     for (const name of names.length > 0 ? names : GENERATORS) {
       console.log(`\n== ${name} (stand-in) ==`);
       if (name === 'props') {
         const ids = PROPS_NEW.filter(wanted);
-        if (ids.length > 0) await compressAll(runPython('props.py', ids, out), out);
-        for (const id of REENCODED.filter(wanted)) await reencode(id, out);
+        if (ids.length > 0) await compressAll(runPython('props.py', ids, out), out, wrote);
+        for (const id of REENCODED.filter(wanted)) await reencode(id, out, wrote);
       } else if (name === 'cave') {
-        await compressAll(runPython('cave.py', only, out), out);
+        await compressAll(runPython('cave.py', only, out), out, wrote);
       } else {
         codec ??= await openCodec();
         const module = await import(`./${name}.mjs`);
-        await module.build({ out, only, preview, codec });
+        for (const rel of (await module.build({ out, only, preview, codec })) ?? []) wrote.set(rel, 'built');
       }
     }
   } finally {
     await codec?.close();
   }
-  if (out === OUT) writeLicenses();
+  // no Blender generator ran: every earlier stand-in row stays one
+  if (out === OUT) writeLicenses({ ran: new Set(), standIn: wrote });
   console.log(`\ndone in ${((Date.now() - started) / 1000).toFixed(1)} s — now run: node scripts/assets/check.mjs`);
 }
 

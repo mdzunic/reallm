@@ -78,14 +78,19 @@ function main() {
       process.exit(1);
     }
   }
-  writeLicenses();
+  writeLicenses({ ran: new Set((names.length > 0 ? names : GENERATORS).map((name) => `${name}.py`)) });
   console.log(`\ndone in ${((Date.now() - started) / 1000).toFixed(1)} s — now run: node scripts/assets/check.mjs`);
 }
 
 // ---------------------------------------------------------------- LICENSES.md
 // The rows for generated files live between two markers and are rewritten from
 // what is on disk, so the table cannot drift from the build.
-export function writeLicenses() {
+//
+// SPEC-052: a file the stand-in build wrote (scripts/assets/standin/, a machine
+// without Blender) says so in its row — `standIn` maps each path it wrote to
+// 'built' or 'reencoded' — and keeps saying so until Blender re-runs the
+// generator that owns it (`ran`, the scripts this build ran; all by default).
+export function writeLicenses({ ran = null, standIn = new Map() } = {}) {
   const GENERATED = [
     [/^models\/character\.glb$/, 'character.py', 'rigged salvager, clips Idle · Run · Attack · Hit · Death'],
     [/^models\/(ship|fighter|interceptor|probe)\.glb$/, 'ships.py', 'modelled from code, hull maps baked in Cycles'],
@@ -121,17 +126,33 @@ export function writeLicenses() {
     }
   };
   walk(OUT);
-  const rows = files
-    .map((rel) => [rel, GENERATED.find(([pattern]) => pattern.test(rel))])
-    .filter(([, match]) => match)
-    .sort(([a], [b]) => a.localeCompare(b))
-    .map(([rel, [, script, what]]) => `| \`${rel}\` | Original to this repository — ${what}; generated in Blender by \`scripts/assets/blender/${script}\` | CC0 | — |`);
   const path = join(OUT, 'LICENSES.md');
   const text = readFileSync(path, 'utf8');
   const start = '<!-- blender:start -->';
   const end = '<!-- blender:end -->';
   const i = text.indexOf(start);
   const j = text.indexOf(end);
+  const STAND_IN = 'the stand-in build without Blender (`scripts/assets/standin/`, SPEC-052)';
+  const previous = new Map();
+  if (i >= 0 && j > i) {
+    for (const line of text.slice(i, j).split('\n')) {
+      const m = /^\| `([^`]+)` \|/.exec(line);
+      if (m) previous.set(m[1], line);
+    }
+  }
+  const rows = files
+    .map((rel) => [rel, GENERATED.find(([pattern]) => pattern.test(rel))])
+    .filter(([, match]) => match)
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([rel, [, script, what]]) => {
+      const source = `scripts/assets/blender/${script}`;
+      const how = standIn.get(rel);
+      if (how === 'built') return `| \`${rel}\` | Original to this repository — ${what}; generated from \`${source}\` by ${STAND_IN} | CC0 | — |`;
+      if (how === 'reencoded') return `| \`${rel}\` | Original to this repository — ${what}; generated in Blender by \`${source}\`, meshopt-compressed without UVs by ${STAND_IN} | CC0 | — |`;
+      const kept = previous.get(rel);
+      if (kept?.includes('stand-in build') && ran !== null && !ran.has(script)) return kept;
+      return `| \`${rel}\` | Original to this repository — ${what}; generated in Blender by \`${source}\` | CC0 | — |`;
+    });
   if (i < 0 || j < i) {
     console.warn('WARN LICENSES.md has no blender markers; rows not written');
     return;
