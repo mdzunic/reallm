@@ -30,6 +30,12 @@ LOOK_VERSION = 2           # bump when the shared look changes: every shot re-re
 RATE_CAP = 44 * 1024       # bytes per second of film (SPEC-021 §5.4)
 CRFS = (26, 29)
 POSTER_QUALITY = 75
+# SPEC-051 §4.9 (PLAN R12): the flashes each film counted before the SPEC-051 drop;
+# a rebuild that counts more fails, so a retake never adds one
+FLASHES = {'prologue': 2, 'departure': 1, 'interlude_c1': 0, 'interlude_c2': 0, 'interlude_c3': 0, 'interlude_c4': 0,
+           'interlude_c5': 0, 'ending_stay': 0, 'ending_escape': 1}
+BLACK = 0.002              # SPEC-051 §4.5: a frame this dark (mean relative luminance) reads as black
+BLACK_RUN = 6              # … and no more frames than this in a row
 
 
 # ---------------------------------------------------------------- options
@@ -68,14 +74,24 @@ def options():
 
 
 class Shot:
-    def __init__(self, id, start, end, poster, build, samples=16, deps=(), bloom=0.5, vignette=0.14, plates=()):
+    """`checks` (SPEC-051) are functions `(film, shot, frame_dir) → [problem, …]` run
+    on the rendered frames before the film encodes: a problem fails the build."""
+
+    def __init__(self, id, start, end, poster, build, samples=16, deps=(), bloom=0.5, vignette=0.14, plates=(),
+                 checks=()):
         self.id, self.start, self.end, self.poster = id, start, end, poster
         self.build, self.samples, self.deps = build, samples, tuple(deps)
         self.bloom, self.vignette, self.plates = bloom, vignette, tuple(plates)
+        self.checks = tuple(checks)
 
     @property
     def frames(self):
         return round((self.end - self.start) * FPS)
+
+    @property
+    def poster_frame(self):
+        """The frame number the poster is cut from."""
+        return min(max(int(round((self.poster - self.start) * FPS)) + 1, 1), self.frames)
 
 
 class Film:
@@ -371,6 +387,42 @@ def children(root):
     return out
 
 
+def framed(obj_corners, cam, frames, margin=0.06):
+    """Every corner inside the inner (1 − 2·margin) of the frame (SPEC-051 §4.1):
+    `obj_corners` are mesh objects whose vertices are the corners (a card's photo
+    plane), projected through `cam` at each frame number in `frames`. Returns the
+    (frame, object, x, y) of each corner outside — empty when all are framed."""
+    from bpy_extras.object_utils import world_to_camera_view
+    scene = bpy.context.scene
+    out = []
+    for f in frames:
+        scene.frame_set(f)
+        for o in obj_corners:
+            for v in o.data.vertices:
+                p = world_to_camera_view(scene, cam, o.matrix_world @ v.co)
+                if p.z <= 0 or not (margin <= p.x <= 1 - margin and margin <= p.y <= 1 - margin):
+                    out.append((f, o.name, round(p.x, 3), round(p.y, 3)))
+    scene.frame_set(1)
+    return out
+
+
+def require_framed(ctx, obj_corners, cam, frames, margin=0.06):
+    """`framed`, as a build check: a corner outside fails the shot. A still or a
+    draft (look development) only warns, so the frame still renders."""
+    frames = list(frames)
+    out = framed(obj_corners, cam, frames, margin)
+    where = f'{ctx.film.id}/{ctx.shot.id}'
+    inner = round(100 * (1 - 2 * margin))
+    if not out:
+        print(f'NOTE {where} framed: {len(obj_corners)} cards inside the inner {inner} % over {len(frames)} frames')
+        return
+    message = f'{where}: {len(out)} card corners leave the inner {inner} % of the frame, first {out[:4]}'
+    if ctx.draft or ctx.opts['stills']:
+        print(f'WARN {message}')
+        return
+    raise RuntimeError(message)
+
+
 # ------------------------------------------------------------ render setup
 
 
@@ -555,7 +607,106 @@ def flash_check(film, lum):
         problems.append(f'{film.id}: {worst} flashes within 24 frames')
     if len(jumps):
         problems.append(f'{film.id}: saturated-red transitions at frames {[int(j) + 1 for j in jumps[:8]]}')
+    if len(flashes) > FLASHES.get(film.id, len(flashes)):
+        problems.append(f'{film.id}: {len(flashes)} flashes, more than the {FLASHES[film.id]} it had before (R12)')
     return problems
+
+
+# ------------------------------------------------------------ shot checks (SPEC-051)
+
+
+def lit_box(rgb):
+    """§4.4: the bounding box (x0, y0, x1, y1) of the warm pixels of an sRGB frame
+    (row 0 at the top) — linear R ≥ 1.4 × linear B and relative luminance ≥ 0.05:
+    the city lights, not the blue limb or the stars — or None when there are none."""
+    lin = np.where(rgb <= 0.04045, rgb / 12.92, ((rgb + 0.055) / 1.055) ** 2.4)
+    y = 0.2126 * lin[..., 0] + 0.7152 * lin[..., 1] + 0.0722 * lin[..., 2]
+    ys, xs = np.nonzero((lin[..., 0] >= 1.4 * lin[..., 2]) & (y >= 0.05))
+    if len(xs) == 0:
+        return None
+    return int(xs.min()), int(ys.min()), int(xs.max()), int(ys.max())
+
+
+def black_run(lum):
+    """§4.5: the longest run of frames whose mean relative luminance is below BLACK."""
+    run = best = 0
+    for y in lum[:, 0]:
+        run = run + 1 if y < BLACK else 0
+        best = max(best, run)
+    return best
+
+
+def lit_box_problems(where, rgb):
+    """§4.4's rule on one frame, measured on the 960 × 540 frame (a draft's half
+    frame is held to half the numbers): the box at least 240 px wide, 32 px clear of
+    every edge, its centre in the lower 60 %."""
+    h, w = rgb.shape[:2]
+    s = w / WIDTH
+    box = lit_box(rgb)
+    if box is None:
+        print(f'NOTE {where} lit box none')
+        return [f'{where}: no lit box']
+    x0, y0, x1, y1 = box
+    print(f'NOTE {where} lit box {x0},{y0}–{x1},{y1}')
+    problems = []
+    if x1 - x0 + 1 < 240 * s:
+        problems.append(f'{where}: lit box {x1 - x0 + 1} px wide, under {240 * s:.0f}')
+    if min(x0, y0, w - 1 - x1, h - 1 - y1) < 32 * s:
+        problems.append(f'{where}: lit box within {32 * s:.0f} px of an edge')
+    if (y0 + y1) / 2 < 0.4 * h:
+        problems.append(f'{where}: lit box centred at y = {(y0 + y1) / 2:.0f}, above {0.4 * h:.0f}')
+    return problems
+
+
+def lit_box_check(film, shot, d):
+    """§4.4: the relit coast, readable on a phone — `lit_box_problems` on the poster frame."""
+    return lit_box_problems(f'{film.id}/{shot.id}', _load(frame_path(d, shot.poster_frame)))
+
+
+def black_run_check(film, shot, d):
+    """§4.5: no more than BLACK_RUN frames in a row darker than BLACK."""
+    run = black_run(luminance(d, shot.frames))
+    print(f'NOTE {film.id}/{shot.id} black run: {run} frames')
+    return [f'{film.id}/{shot.id}: {run} frames in a row below {BLACK}'] if run > BLACK_RUN else []
+
+
+def swing_check(t0, t1, limit=0.06):
+    """§4.5: a cut held from shot-local t0 to t1 swings the mean luminance by no
+    more than `limit` from one frame to the next, going in or coming out."""
+    def check(film, shot, d):
+        y = luminance(d, shot.frames)[:, 0]
+        lo, hi = max(frame(t0) - 2, 0), min(frame(t1), shot.frames)   # 0-based: the frame before to the first after
+        swing = float(np.abs(np.diff(y[lo:hi])).max()) if hi - lo > 1 else 0.0
+        print(f'NOTE {film.id}/{shot.id} swing across {t0:g}–{t1:g} s: {swing:.3f}')
+        return [f'{film.id}/{shot.id}: a {swing:.3f} luminance swing across the cut, over {limit}'] if swing > limit else []
+    return check
+
+
+def mean_check(lo, hi):
+    """§4.6: every frame's mean relative luminance inside [lo, hi]."""
+    def check(film, shot, d):
+        y = luminance(d, shot.frames)[:, 0]
+        print(f'NOTE {film.id}/{shot.id} mean luminance {y.min():.3f}–{y.max():.3f}')
+        if y.min() < lo or y.max() > hi:
+            return [f'{film.id}/{shot.id}: mean luminance {y.min():.3f}–{y.max():.3f}, outside {lo}–{hi}']
+        return []
+    return check
+
+
+def unmake_check(windows, tolerance=0.02):
+    """§4.3: while a picture unmakes over each (t0, t1), every frame's mean
+    luminance stays within `tolerance` of the photograph's, the frame before t0."""
+    def check(film, shot, d):
+        y = luminance(d, shot.frames)[:, 0]
+        problems = []
+        for t0, t1 in windows:
+            base = float(y[frame(t0) - 2])
+            worst = float(np.abs(y[frame(t0) - 1:frame(t1)] - base).max())
+            print(f'NOTE {film.id}/{shot.id} unmake {t0:g}–{t1:g} s: mean {base:.3f} ± {worst:.3f}')
+            if worst > tolerance:
+                problems.append(f'{film.id}/{shot.id}: unmaking at {t0:g} s moves the mean by {worst:.3f}, over {tolerance}')
+        return problems
+    return check
 
 
 # ------------------------------------------------------------ encode
@@ -617,7 +768,7 @@ def verify(film, path, draft):
 
 
 def poster(film, shot, d, out_root):
-    i = min(max(int(round((shot.poster - shot.start) * FPS)) + 1, 1), shot.frames)
+    i = shot.poster_frame
     rgb = _load(frame_path(d, i))
     rel = f'films/posters/{film.id}_{shot.id}.webp'
     size = C.save_image(os.path.join(out_root, rel), rgb, 'WEBP', POSTER_QUALITY)
@@ -640,10 +791,11 @@ def write_manifest(out_root, entries, order):
 
 
 def build_film(film, opts):
-    """Render (or reuse) every shot, check flashes, encode, poster, verify."""
+    """Render (or reuse) every shot, run its checks, check flashes, encode, poster, verify."""
     dirs = [render_shot(film, shot, opts) for shot in film.shots]
+    problems = [p for shot, d in zip(film.shots, dirs) for check in shot.checks for p in check(film, shot, d)]
     lum = np.concatenate([luminance(d, s.frames) for s, d in zip(film.shots, dirs)])
-    problems = flash_check(film, lum)
+    problems += flash_check(film, lum)
     if problems and not opts['draft']:
         raise RuntimeError('; '.join(problems))
     C.reset()
@@ -677,6 +829,5 @@ def sheet(film, dirs, out):
     import preview as PV
     paths = []
     for shot, d in zip(film.shots, dirs):
-        i = min(max(int(round((shot.poster - shot.start) * FPS)) + 1, 1), shot.frames)
-        paths.append(frame_path(d, i))
+        paths.append(frame_path(d, shot.poster_frame))
     return PV.sheet(paths, out, cols=3)

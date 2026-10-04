@@ -1,58 +1,118 @@
 # Shots of the chapter interludes (SPEC-021 §4.3, §5.3) — "First Light",
 # "Meltwater", "Harvest", "Grid" and "Silence". Each delivered resource lights a
 # little more of Earth's night side (lib/earth.py `relight`). Times are
-# shot-local seconds.
+# shot-local seconds. SPEC-051 §4.4–§4.5 plants one clue per interlude: the
+# coast lights up on a too-perfect grid in chapter 3, chapter 4's tear shows a
+# grey Earth, and chapter 5 ends on the Selection board with a blank No. 63.
 import math
+import os
 
 import bpy
+import numpy as np
 from mathutils import Vector, noise
 
 import common as C
 import earth as E
 import film as F
 import nodes as N
+import plate as PL
+import shots_endings as X
 import shots_prologue as P
 
+LATTICE_POINT = 0.2   # SPEC-051 §4.4: a lattice light's radius, degrees
+LATTICE_LIGHT = 1.2   # … and its brightness on the lights map's scale (0–1.6)
 
-def earth_relit(ctx, level, push=(3.1, 2.9), pan=0.0, height=0.35):
+
+def earth_relit(ctx, level, push=(2.05, 1.9), pan=0.0, height=0.12, lattice=None, look=(1.0, 0.1)):
     """Earth's night side as Shelter Nine's coast lights up to `level`; the new
-    patch fades in over the first second. The frame holds the lit coast in its
-    lower third and the limb across its top."""
+    patch fades in over 0.4–1.4 s. SPEC-051 §4.4 frames it for phones (initial
+    tuning): the camera about two radii out, aimed at `home × look[0] + up ×
+    look[1]`, so the coast fills the lower part of the frame; films.py's lit-box
+    check holds it there. `lattice=(t_in, t_resolve, t_done, spacing_deg)`: the
+    new level's lights come in as a lattice, then resolve (`_lattice`)."""
     F.world('#000000', 1.0, stars=1.8)
     home, east, up = E.basis(ctx)
     sun = (-home * 0.85 + up * 0.25 + east * 0.45).normalized()
-    E.earth(ctx, relight=level, relight_from=level - 1, fade=(0.4, 1.4), sun_dir=sun)
+    rig = E.earth(ctx, relight=level, relight_from=level - 1, fade=(0.4, lattice[0] if lattice else 1.4), sun_dir=sun)
+    if lattice is not None:
+        _lattice(ctx, rig, level, lattice)
     F.sun(-sun, 2.4)
     start = home * push[0] + up * height - east * pan
     end = home * push[1] + up * height + east * pan
-    cam, aim = F.camera(tuple(start), tuple(up * (height + 0.07)), lens=35)
+    cam, aim = F.camera(tuple(start), tuple(home * look[0] + up * look[1]), lens=35)
     F.keys(cam, 'location', [(0, start), (ctx.duration, end)])
     return cam, aim
 
 
-def static_band(cam, t0, t1, width=1.4, height=0.03):
-    """A thin tear of grey static in front of the camera from t0 to t1 (low contrast)."""
-    m = bpy.data.materials.new('Static')
-    m.use_nodes = True
-    m.surface_render_method = 'BLENDED'
-    g = N.Graph(m)
-    n = g.noise(g.coords('Object'), 160.0, 5, detail=1.0)
-    F.keys(n.node.inputs['W'], 'default_value', [(0, 0.0), (t1 + 1, 60.0)], interp='LINEAR')
-    gain = g.node('ShaderNodeMath', operation='MULTIPLY')
-    g.link(n, gain.inputs[0])
-    F.keys(gain.inputs[1], 'default_value', [(0, 0.0), (t0, 0.0), (t0 + 1 / 24, 0.9), (t1, 0.9), (t1 + 1 / 24, 0.0)],
-           interp='CONSTANT')
-    em = g.node('ShaderNodeEmission')
-    g.link(gain.outputs[0], em.inputs['Strength'])
-    tr = g.node('ShaderNodeBsdfTransparent')
-    add = g.node('ShaderNodeAddShader')
-    g.link(tr.outputs[0], add.inputs[0])
-    g.link(em.outputs[0], add.inputs[1])
-    out = g.node('ShaderNodeOutputMaterial')
-    g.link(add.outputs[0], out.inputs['Surface'])
-    band = F.plane('Static', width, height, m, (0, -0.08, -1.0), (0, 0, 0))
-    band.parent = cam
-    return band
+def _lattice(ctx, rig, level, lattice):
+    """SPEC-051 §4.4: the new level's lights load like a texture streaming in — a
+    placeholder grid of points LATTICE_POINT° across at every `spacing`° of
+    latitude and longitude, on the land where relight_mask(level) −
+    relight_mask(level − 1) is above 0.5 — then resolve from t_resolve to t_done
+    into the organic map every later shot keeps. lib/earth.py is untouched, so no
+    other shot re-renders."""
+    t_in, t_resolve, t_done, spacing = lattice
+    m = E._maps(os.path.join(ctx.opts['frames'], '_earth'))
+    before = E.relight_mask(m, level - 1)
+    new = (E.relight_mask(m, level) - before > 0.5) & (m['land'] > 0.5)
+    d = m['d']
+    lat = np.degrees(np.arcsin(np.clip(d[..., 1], -1.0, 1.0)))   # mesh space: Y is north
+    lon = np.degrees(np.arctan2(d[..., 2], -d[..., 0]))
+    off = np.hypot(lat - np.round(lat / spacing) * spacing,
+                   (lon - np.round(lon / spacing) * spacing) * np.cos(np.radians(lat)))
+    points = 1 - E._ss(LATTICE_POINT * 0.5, LATTICE_POINT, off)
+    em = np.maximum(np.clip(m['lights'] * before, 0, 1.6), points * new * LATTICE_LIGHT)
+    e = np.repeat(np.clip(em / 1.6, 0, 1)[..., None], 3, -1)
+    e = np.concatenate([e, np.ones(e.shape[:2] + (1,), np.float32)], -1)[::-1]
+    # earth() fades the previous level's lights into this level's through one Mix
+    # feeding the warm tint: the lattice becomes that fade's target, and a second
+    # Mix resolves it into the organic map
+    nt = rig.obj.data.materials[0].node_tree
+    fade = next(n for n in nt.nodes if n.type == 'MIX' and n.blend_type == 'MIX')
+    warm = next(n for n in nt.nodes if n.type == 'MIX' and n.blend_type == 'MULTIPLY')
+    organic = next(link.from_socket for link in nt.links if link.to_node == fade and link.to_socket.name == 'B')
+    grid = nt.nodes.new('ShaderNodeTexImage')
+    grid.image = C.image_from_array(f'EarthLights_lattice{level}', e.astype(np.float32), 'Non-Color')
+    nt.links.new(grid.outputs['Color'], fade.inputs['B'])
+    settle = nt.nodes.new('ShaderNodeMix')
+    settle.data_type = 'RGBA'
+    nt.links.new(fade.outputs['Result'], settle.inputs['A'])
+    nt.links.new(organic, settle.inputs['B'])
+    nt.links.new(settle.outputs['Result'], warm.inputs['A'])
+    F.keys(settle.inputs['Factor'], 'default_value', [(t_resolve, 0.0), (t_done, 1.0)], interp='LINEAR')
+    print(f'NOTE earth lattice: level {level}, {int((points * new > 0.5).sum())} texels lit')
+
+
+def tear(rig, t0, t1):
+    """SPEC-051 §4.5: chapter 4's clue — from t0 to t1 Earth is a placeholder at its
+    own place and size: the clay grey under Blender's UV grid (X.clay), inside a
+    wireframe shell at 1.01 radii. The planet, its clouds and its air are hidden
+    meanwhile; everything else stays."""
+    grid = bpy.data.images.new('TearGrid', 1024, 512)
+    grid.generated_type = 'UV_GRID'
+    clay = X.clay('TearClay')
+    nt = clay.node_tree
+    bsdf = next(n for n in nt.nodes if n.type == 'BSDF_PRINCIPLED')
+    tex = nt.nodes.new('ShaderNodeTexImage')
+    tex.image = grid
+    under = nt.nodes.new('ShaderNodeMix')
+    under.data_type, under.blend_type = 'RGBA', 'MULTIPLY'
+    under.inputs['Factor'].default_value = 0.6
+    under.inputs['A'].default_value = bsdf.inputs['Base Color'].default_value[:]
+    nt.links.new(tex.outputs['Color'], under.inputs['B'])
+    nt.links.new(under.outputs['Result'], bsdf.inputs['Base Color'])
+    ball = E._sphere_mesh('TearEarth', 192, 96)
+    ball.rotation_euler = (math.radians(90), 0, 0)   # Earth's own UV layout, so the grid wraps it as the map did
+    ball.location, ball.scale = rig.obj.location, (rig.radius,) * 3
+    ball.data.materials.append(clay)
+    shell = E._sphere_mesh('TearShell', 48, 24)
+    shell.parent, shell.scale = ball, (1.01,) * 3
+    shell.modifiers.new('Wire', 'WIREFRAME').thickness = 0.004
+    shell.data.materials.append(F.emit('TearWire', '#dfefff', 1.0))
+    for o in [rig.obj] + F.children(rig.obj):
+        F.keys(o, 'hide_render', [(0, False), (t0, True), (t1, False)])
+    for o in (ball, shell):
+        F.keys(o, 'hide_render', [(0, True), (t0, False), (t1, True)])
 
 
 # ------------------------------------------------------------ First Light
@@ -76,19 +136,6 @@ def capsule(ctx):
     cam, aim = F.camera((-26, -44, 2.2), (0, 0, 154), lens=70)
     # the aim rides 4 m above the capsule's base, so capsule and canopy stay framed
     F.keys(aim, 'location', [(0, Vector((0, 0, 154))), (ctx.duration, Vector((5, 3, 42)))], interp='LINEAR')
-
-
-def shelter_light(ctx):
-    P.shelter_room(ctx, lamp_steady_at=1.0, people_pose='look_up')
-    strip = F.emit('Strip', '#fff1d8', 0.0)
-    for x in (-3.2, 0.0, 3.2):
-        F.obj('Strip', C.box(1.6, 0.14, 0.05), strip, (x, 1.2, 3.17))
-        lamp = F.lamp((x, 1.2, 3.05), 0.0, '#fff1d8', kind='AREA')
-        lamp.data.size = 1.6
-        F.keys(lamp.data, 'energy', [(2.0, 0.0), (2.5, 220.0)], interp='LINEAR')
-    F.keys(F.strength_socket(strip), 'default_value', [(2.0, 0.0), (2.5, 9.0)], interp='LINEAR')
-    cam, aim = F.camera((-3.4, -3.7, 2.2), (0.2, 0.4, 1.3), lens=28)
-    F.keys(cam, 'location', [(0, Vector((-3.4, -3.7, 2.2))), (ctx.duration, Vector((-2.9, -3.1, 2.0)))])
 
 
 def earth_c1(ctx):
@@ -129,47 +176,16 @@ def tanks(ctx):
 
 
 def earth_c2(ctx):
-    earth_relit(ctx, 2, push=(3.2, 3.0))
+    earth_relit(ctx, 2)
 
 
 # ------------------------------------------------------------ Harvest
 
 
-def greenhouse(ctx):
-    F.world('#08060c', 0.3)
-    frame_m = F.mat('Rack', '#2a2a30', 0.5, 0.6)
-    soil = F.mat('Soil', '#2e2016', 1.0)
-    grow = F.emit('Grow', '#b070ff', 6.0)
-    wheat, nt, wbsdf = C._principled('Wheat')
-    wbsdf.inputs['Roughness'].default_value = 0.7
-    F.keys(wbsdf.inputs['Base Color'], 'default_value', [(0, C.lin('#7ab83a')), (ctx.duration, C.lin('#c8b050'))])
-    parts = []
-    for z in (0.5, 1.3, 2.1):
-        for y in (0.0, 1.6):
-            parts.append((6.0, 0.8, 0.1, (0, y, z), (0, 0, 0), (1, 1, 1, 1)))
-            F.obj('Soil', C.box(5.8, 0.7, 0.08), soil, (0, y, z + 0.09))
-            F.obj('GrowBar', C.box(5.6, 0.08, 0.03), grow, (0, y, z + 0.66))
-            lamp = F.lamp((0, y, z + 0.62), 60.0, '#b070ff', kind='AREA')
-            lamp.data.shape, lamp.data.size, lamp.data.size_y = 'RECTANGLE', 5.6, 0.3
-            b = C.Builder(vcol=False)
-            for _ in range(170):
-                h = ctx.rng.uniform(0.28, 0.45)
-                blade = C.cyl(0.008, 0.0, h, n=3)
-                C.place(blade, (0, 0, h / 2), (ctx.rng.uniform(-8, 8), ctx.rng.uniform(-8, 8), ctx.rng.uniform(0, 120)))
-                b.add(C.place(blade, (ctx.rng.uniform(-2.8, 2.8), ctx.rng.uniform(-0.3, 0.3), 0)), smooth=None)
-            tray = b.object('WheatTray', [wheat])
-            tray.location = (0, y, z + 0.13)
-            F.keys(tray, 'scale', [(0, Vector((1, 1, 0.05))), (ctx.duration - 0.5, Vector((1, 1, 1)))])
-            for x in (-3.1, 3.1):
-                parts.append((0.08, 0.08, 0.8, (x, y, z + 0.4), (0, 0, 0), (1, 1, 1, 1)))
-    P.boxes('Racks', parts, frame_m)
-    cam, aim = F.camera((-3.0, -2.2, 1.5), (-1.5, 0.8, 1.2), lens=28)
-    F.keys(cam, 'location', [(0, Vector((-3.0, -2.2, 1.5))), (ctx.duration, Vector((1.2, -2.2, 1.6)))])
-    F.keys(aim, 'location', [(0, Vector((-1.5, 0.8, 1.2))), (ctx.duration, Vector((1.8, 0.8, 1.3)))])
-
-
 def earth_c3(ctx):
-    earth_relit(ctx, 3, push=(3.1, 2.95), pan=0.12)
+    """SPEC-051 §4.4: the coast lights up on a lattice 1.2° apart (1.4–5.6 s, the
+    poster at 5.0 s shows it whole), then settles into towns and roads by 6.6 s."""
+    earth_relit(ctx, 3, pan=0.05, lattice=(1.4, 5.6, 6.6, 1.2))
 
 
 # ------------------------------------------------------------ Grid
@@ -217,7 +233,7 @@ def reactor(ctx):
 
 
 def earth_c4(ctx):
-    earth_relit(ctx, 4, push=(3.3, 3.0), height=0.4)
+    earth_relit(ctx, 4, push=(3.3, 3.0), height=0.4, look=(0.0, 0.47))   # its framing before SPEC-051: the same pictures
 
 
 def watchers(ctx):
@@ -225,7 +241,7 @@ def watchers(ctx):
     home, east, up = E.basis(ctx)
     at = Vector((0, 60, 0))
     sun = (-home * 0.6 + east * 0.8).normalized()
-    E.earth(ctx, relight=4, loc=tuple(at), sun_dir=sun)
+    rig = E.earth(ctx, relight=4, loc=tuple(at), sun_dir=sun)
     F.sun(-sun, 2.4)
     moon = F.mat('Moon', '#8a8a86', 0.9)
     bm = C.sphere(0.27, 48, 32)
@@ -252,7 +268,7 @@ def watchers(ctx):
     start, end = at + home * 3.2 + up * 0.15, at + home * 24 + up * 0.6
     cam, aim = F.camera(tuple(start), tuple(at), lens=35, clip=(0.05, 200.0))
     F.keys(cam, 'location', [(0, start), (ctx.duration, end)])
-    static_band(cam, 4.1, 4.3)
+    tear(rig, 4.1, 4.35)   # six frames: the film's static cue at 15.1 s
 
 
 # ------------------------------------------------------------ Silence
@@ -272,18 +288,19 @@ def hive_dark(ctx):
     bsdf.inputs['Roughness'].default_value = 0.7
     g.link(te.outputs['Color'], bsdf.inputs['Emission Color'])
     # the dark spreads from the heart (+x, where the camera looks) outward: slow
-    # at first, so the poster has a dead centre ringed by live veins, then fast
+    # at first, so the poster has a dead centre ringed by live veins, then fast,
+    # reaching the edge at 5.9 s (SPEC-051 §4.5: no more than 6 black frames)
     dist = g.vmath('DISTANCE', g.coords('Object'), (1.0, 0.0, 0.0))
     alive = g.node('ShaderNodeMapRange', interpolation_type='SMOOTHSTEP', clamp=True)
     g.link(dist, alive.inputs['Value'])
-    F.keys(alive.inputs['From Min'], 'default_value', [(0.5, -0.3), (4.0, 0.45), (5.6, 2.05)], interp='LINEAR')
-    F.keys(alive.inputs['From Max'], 'default_value', [(0.5, 0.0), (4.0, 0.75), (5.6, 2.35)], interp='LINEAR')
+    F.keys(alive.inputs['From Min'], 'default_value', [(0.5, -0.3), (4.5, 0.45), (5.9, 2.05)], interp='LINEAR')
+    F.keys(alive.inputs['From Max'], 'default_value', [(0.5, 0.0), (4.5, 0.75), (5.9, 2.35)], interp='LINEAR')
     g.link(g.math('MULTIPLY', alive.outputs['Result'], 4.0), bsdf.inputs['Emission Strength'])
     out = g.node('ShaderNodeOutputMaterial')
     g.link(bsdf.outputs[0], out.inputs['Surface'])
     shell.data.materials.append(m)
     glow = F.lamp((6, 0, 0), 1500.0, '#8a6aa0', radius=2.0)
-    F.keys(glow.data, 'energy', [(0.5, 1500.0), (4.0, 900.0), (5.6, 0.0)], interp='LINEAR')
+    F.keys(glow.data, 'energy', [(0.5, 1500.0), (4.5, 900.0), (5.9, 0.0)], interp='LINEAR')
     cam, aim = F.camera((4, 0, 0.5), (20, 0, 0), lens=24, clip=(0.05, 100.0))
     F.keys(cam, 'location', [(0, Vector((4, 0, 0.5))), (ctx.duration, Vector((-10, 0, 1.5)))])
 
@@ -299,12 +316,18 @@ def eden(ctx):
     F.keys(cam, 'location', [(0, Vector((0.2, -2.6, 0.55))), (ctx.duration, Vector((0.15, -2.35, 0.5)))])
 
 
-def cockpit(ctx):
-    F.world('#000000', 1.0, stars=1.6)
-    sun = Vector((0.6, -0.3, 0.5)).normalized()
-    F.sun(-sun, 2.5)
-    E.planet(ctx, 'textures/flight/planet_eden.webp', radius=9.0, loc=(3, 40, -4), sun_dir=sun, name='EdenFar')
-    F.import_glb(ctx.asset('models/cockpit.glb'))
-    F.lamp((0, 0.3, 0.2), 6, '#9fc4ff', radius=0.3)
-    cam, aim = F.camera((0, 0, 0), (0, 10, -1.2), lens=24, clip=(0.02, 200.0))
-    static_band(cam, 0.8, 1.2, width=0.5, height=0.02)
+def board(ctx):
+    """SPEC-051 §4.5: chapter 5's clue, where the cockpit was — the Selection wall,
+    card 62 stamped SELECTED from the first frame, and pinned to its left a new card
+    numbered 63: a pale panel with no photograph and no stamp. The build fails
+    unless both photos sit inside the inner 88 % of the frame at the poster (2.5 s)."""
+    cards = P.selection_wall(ctx, card62=PL.VISOR)
+    P.stamp(cards, P.CARD_NUMBERS.index(62), None)
+    x, z = -2.1, 1.62
+    blank = F.plane('Blank63', 0.3, 0.3, F.mat('Blank63', '#d8d4cc', 0.8), (x, -0.005, z + 0.04), (90, 0, 0))
+    F.plane('BlankBar63', 0.3, 0.1, F.mat('BlankBar63', '#e8e4da', 0.8), (x, -0.005, z - 0.17), (90, 0, 0))
+    F.text('No. 63', 0.05, F.mat('BlankInk63', '#1a1a1a', 0.8), (x, -0.008, z - 0.17), (90, 0, 0))
+    F.obj('BlankPin63', C.sphere(0.012, 8, 6), F.mat('BlankPin63', '#b02020', 0.4), (x, -0.02, z + 0.21))
+    cam, aim = F.camera((-1.55, -1.65, 1.64), (-1.7, 0, 1.62), lens=40)
+    F.keys(cam, 'location', [(0, Vector((-1.55, -1.65, 1.64))), (ctx.duration, Vector((-1.75, -1.5, 1.63)))])
+    F.require_framed(ctx, [P.photo(P.CARD_NUMBERS.index(62)), blank], cam, [F.frame(2.5)])

@@ -93,9 +93,9 @@ function writeLicenses() {
     [/^textures\/sprites\/.+\.webp$/, 'sprites.py', 'numpy radial and noise fields'],
     [/^portraits\/.+\.(webp|json)$/, 'portraits.py', 'EEVEE bust of the salvager'],
     [/^items\/.+\.(webp|json)$/, 'items.py', 'item picture built from primitives, rendered in EEVEE on transparent (SPEC-031)'],
-    // R11, R12: some shots are photographic plates, so their film and poster say so
-    [/^films\/(prologue|interlude_c2|ending_stay|ending_escape)\.mp4$/, 'films.py', 'story film rendered in EEVEE from code over the photographic plates listed under Plates above (PLAN R9, R11, R12)'],
-    [/^films\/posters\/(prologue_(curfew|sabotage|reprisal|city_flash|shelter|selection)|interlude_c2_tap|ending_(stay_wall_63|escape_wall_same))\.webp$/, 'films.py', 'story film poster, a frame of a plate shot (PLAN R11, R12)'],
+    // R11, R12, SPEC-051 §4.9: some shots are photographic plates, so their film and poster say so
+    [/^films\/(prologue|interlude_c1|interlude_c2|interlude_c3|interlude_c5|ending_stay|ending_escape)\.mp4$/, 'films.py', 'story film rendered in EEVEE from code over the photographic plates listed under Plates above (PLAN R9, R11, R12)'],
+    [/^films\/posters\/(prologue_(curfew|sabotage|reprisal|city_flash|stranded|shelter|selection|liftoff)|interlude_c1_shelter_light|interlude_c2_tap|interlude_c3_greenhouse|interlude_c5_board|ending_(stay_wall_63|escape_wall_same|escape_earth_unmade))\.webp$/, 'films.py', 'story film poster, a frame of a plate shot (PLAN R11, R12)'],
     [/^films\/[^/]+\.mp4$/, 'films.py', 'story film rendered in EEVEE from code (PLAN R9)'],
     [/^films\/posters\/.+\.webp$/, 'films.py', 'story film poster, a frame of its shot (PLAN R9)'],
     [/^films\/manifest\.json$/, 'films.py', 'story film manifest (PLAN R9)'],

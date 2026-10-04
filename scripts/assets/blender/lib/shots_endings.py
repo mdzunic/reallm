@@ -1,7 +1,9 @@
 # Shots of the two ending films (SPEC-021 §4.4, §5.3): "A Good Run" (stay) and
-# "Disconnected" (escape). The stay film closes the loop — a 63rd card, then the
-# prologue's first shot again; the escape film unmakes the world it shows into
-# clay, UV grids, wireframes and one face on every card. Times are shot-local.
+# "Disconnected" (escape). The stay film closes the loop — a 63rd card, the same
+# visor, then the prologue's first shot again; the escape film unmakes the world
+# it shows — Eden into clay and wireframe, the prologue's own photographs into
+# grey under a UV grid (SPEC-051 §4.3) — and puts one visor on every card.
+# Times are shot-local.
 import math
 import random
 
@@ -18,6 +20,15 @@ import shots_prologue as P
 
 def clay(name='Clay', color='#9a9a96'):
     return F.mat(name, color, 0.85)
+
+
+# SPEC-051 §4.3: the photographs `earth_unmade` unmakes, as the prologue shows them —
+# (plate, exposure, saturation), one 2 s beat each — each over the middle 1.2 s of its beat
+UNMADE = ((PL.path('prologue_city_flash'), 0.92, 0.95), (PL.path('prologue_stranded'), 0.8, 0.9),
+          (PL.path('prologue_shelter'), 0.75, 0.92))
+BEAT = 2.0
+UNMAKE = tuple((BEAT * k + 0.4, BEAT * k + 1.6) for k in range(len(UNMADE)))
+CUT_SWING = 0.05   # 51-c: a cut between means this far apart ramps the incoming beat in over 4 frames
 
 
 def _tone(base, top, ground=0.7, height=1.0):
@@ -175,10 +186,12 @@ def earth_full(ctx):
 
 
 def wall_63(ctx):
-    P.selection_wall(ctx)
+    """SPEC-051 §4.1: the thirteenth card, No. 63, is the visor again — card 62's own
+    picture (out of this frame) — slid into the last slot and stamped at 4.0 s."""
+    P.selection_wall(ctx, card62=PL.VISOR)
     x, z = 2.1, 1.08
     card = C.link(bpy.data.objects.new('Card63', None))
-    F.plane('Photo63', 0.3, 0.3, F.textured('Photo63', PL.face(1), rough=0.6), (0, 0, 0.04), (90, 0, 0)).parent = card
+    F.plane('Photo63', 0.3, 0.3, F.textured('Photo63', PL.VISOR, rough=0.6), (0, 0, 0.04), (90, 0, 0)).parent = card
     F.plane('Bar63', 0.3, 0.1, F.mat('Bar63', '#e8e4da', 0.8), (0, 0, -0.17), (90, 0, 0)).parent = card
     F.text('No. 63', 0.05, F.mat('Ink63', '#1a1a1a', 0.8), (0, -0.003, -0.17), (90, 0, 0)).parent = card
     F.obj('Pin63', C.sphere(0.012, 8, 6), F.mat('Pin63', '#b02020', 0.4), (0, -0.015, 0.21)).parent = card
@@ -262,36 +275,39 @@ def eden_unmade(ctx):
 
 
 def earth_unmade(ctx):
+    """SPEC-051 §4.3: four 2 s beats cut inside the shot — the skyline, the street and
+    the shelter, each photograph blending into posterised grey under a UV grid over
+    the middle 1.2 s of its beat at its own mean luminance, then Earth itself as a
+    clay sphere under a wire grid in the void. Each beat has its own camera, bound
+    to a marker at its cut."""
+    ctx.scene.view_settings.view_transform = 'Standard'   # the plates are graded already
+    ctx.scene.render.motion_blur_position = 'START'      # a cut's first frame blurs only toward its own beat
+    cams, before = [], None
+    for k, (plate, exposure, saturation) in enumerate(UNMADE):
+        level = PL.mean(plate, saturation) * exposure
+        # the outgoing beat ends as grey at its photograph's mean: start from that mean if it is far off
+        ramp = (4, before / level) if before is not None and abs(level - before) >= CUT_SWING else None
+        build = PL.shot(plate, push=0.02, exposure=exposure, saturation=saturation, unmake=(0.4, 1.6), fade_in=ramp)
+        cams.append(build(ctx, at=(10.0 * k, 0.0, 0.0), start=BEAT * k, length=BEAT, alone=False))
+        before = level
+    # beat 4: Earth as a plain sphere under a grid, in the void; the clay is on its own objects only
     F.world('#101012', 1.0)
     F.sun((0.4, 0.6, -0.8), 2.2, '#ffffff')
     grey = clay()
-    ctx.scene.view_layers[0].material_override = grey
-    # beat 1: the skyline as plain boxes
-    b = C.Builder(vcol=False)
-    for _ in range(300):
-        bx, by = ctx.rng.uniform(-700, 700), ctx.rng.uniform(900, 1800)
-        h = ctx.rng.uniform(12, 120)
-        b.add(C.place(C.box(ctx.rng.uniform(20, 50), ctx.rng.uniform(20, 50), h), (bx, by, h / 2)), smooth=None)
-    b.object('ClayCity', [grey])
-    F.plane('ClayGround', 8000, 8000, grey, (2500, 1000, 0))   # under beats 1 and 2; beat 3 floats in the void
-    # beat 2: the street's machines, eyeless
-    for i, x in enumerate((-4.0, -1.5, 1.0, 3.5)):
-        FG.machine(f'ClayM{i}', grey, grey, 'stride', (5000 + x, 12, 0), ctx.rng.uniform(-10, 10))
-    # beat 3: Earth as a plain sphere under a grid
-    ball = C.sphere(50, 48, 24)
-    F.obj('ClayEarth', ball, grey, (10000, 0, 0), smooth=True)
-    lat = C.sphere(50.6, 24, 12)
-    shell = F.obj('ClayGrid', lat, grey, (10000, 0, 0))
+    F.obj('ClayEarth', C.sphere(50, 48, 24), grey, (10000, 0, 0), smooth=True)
+    shell = F.obj('ClayGrid', C.sphere(50.6, 24, 12), grey, (10000, 0, 0))
     shell.modifiers.new('Wire', 'WIREFRAME').thickness = 0.35
-    cam, aim = F.camera((0, 0, 30), (0, 1200, 80), lens=32, clip=(0.5, 8000.0))
-    for t, c, a in ((0.0, (0, 0, 30), (0, 1200, 80)), (2.67, (4990, 0.5, 1.6), (4998, 12, 1.7)),
-                    (5.33, (10000, -170, 25), (10000, 0, 0))):
-        F.key(cam, 'location', t, Vector(c), interp='CONSTANT')
-        F.key(aim, 'location', t, Vector(a), interp='CONSTANT')
+    cam, aim = F.camera((10000, -170, 25), (10000, 0, 0), lens=32, clip=(0.5, 8000.0))
+    cams.append(cam)
+    for k, c in enumerate(cams):
+        ctx.scene.timeline_markers.new(f'beat{k + 1}', frame=F.frame(BEAT * k)).camera = c
+    ctx.scene.camera = cams[0]
 
 
 def wall_same(ctx):
-    P.selection_wall(ctx, same=PL.face(1), blank_62=4.0, desaturate=True)
+    """SPEC-051 §4.1: every card is the visor, desaturated; from 4.0 s card 62's visor
+    clears over 1.5 s onto the empty helmet. No card shows a face."""
+    P.selection_wall(ctx, same=PL.VISOR, desaturate=True, card62_to=(4.0, PL.VISOR_EMPTY))
     cam, aim = F.camera((-0.3, -1.9, 1.4), (-0.5, 0, 1.33), lens=36)
     F.keys(cam, 'location', [(0, Vector((-0.3, -1.9, 1.4))), (ctx.duration, Vector((-1.1, -1.85, 1.38)))])
     F.keys(aim, 'location', [(0, Vector((-0.5, 0, 1.33))), (ctx.duration, Vector((-1.2, 0, 1.33)))])

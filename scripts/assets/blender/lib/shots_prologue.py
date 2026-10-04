@@ -23,6 +23,14 @@ CARD_NUMBERS = (62, 7, 13, 19, 24, 28, 33, 38, 41, 46, 50, 55)
 # `selection` reads this one too, and 5b7e57a took both: card indices stamped at
 # 1.6, 3.2, 4.8 and 6.4 s — number 62 first.
 STAMP_ORDER = (0, 2, 7, 1)
+# SPEC-051 §4.2: the Machines' lit eye slits on prologue_stranded.jpg as (u, v, radius,
+# group) in plate space (u right, v up, radius in plate widths), groups 0–2 left to
+# right; they go out at STRANDED_OFF, under the film's three `film_powerdown` cues.
+# While this is empty the build measures them on the plate (PL.glints) and prints them.
+STRANDED_EYES = ()
+STRANDED_OFF = (2.5, 5.0, 7.5)
+# SPEC-051 §4.6: the ruined spaceport at dawn, Iris at the fence in the foreground
+LIFTOFF_PLATE = PL.path('prologue_liftoff')
 
 
 # ------------------------------------------------------------ small helpers
@@ -191,59 +199,12 @@ def launch(ctx):
     F.keys(aim, 'location', [(0, home * 0.92 + up * 0.62), (ctx.duration, home * 0.95 + up * 0.85)])
 
 
-def stranded(ctx):
-    F.world('#4a505a', 1.25)
-    F.sun((0.3, 0.6, -1.0), 2.0, '#c8ccd4', angle=0.6)
-    ground = concrete('Street', '#3a3834', 0.3)
-    F.plane('Street', 60, 140, ground, (0, 40, 0))
-    facade = concrete('Facade', '#34322f', 0.15, 0.9)
-    parts = []
-    for side in (-1, 1):
-        y = -10.0
-        while y < 90:
-            w = ctx.rng.uniform(7, 13)
-            h = ctx.rng.uniform(9, 26)
-            parts.append((8, w - 0.6, h, (side * (10 + 4), y + w / 2, h / 2), (0, 0, 0), (1, 1, 1, 1)))
-            for _ in range(3):
-                parts.append((ctx.rng.uniform(1, 3), ctx.rng.uniform(1, 3), ctx.rng.uniform(1, 4),
-                              (side * ctx.rng.uniform(10, 14), y + ctx.rng.uniform(0, w), h + ctx.rng.uniform(0, 1.5)),
-                              (ctx.rng.uniform(-20, 20), ctx.rng.uniform(-20, 20), 0), (1, 1, 1, 1)))
-            y += w
-    for _ in range(260):
-        s = ctx.rng.uniform(0.15, 0.9)
-        parts.append((s, s * ctx.rng.uniform(0.6, 1.4), s * 0.6, (ctx.rng.uniform(-9, 9), ctx.rng.uniform(0, 70), s * 0.25),
-                      (ctx.rng.uniform(-30, 30), ctx.rng.uniform(-30, 30), ctx.rng.uniform(0, 90)), (1, 1, 1, 1)))
-    boxes('Ruins', parts, facade)
-    body = F.mat('Machine', '#3a4048', 0.5, 0.7)
-    xs = [-7.5, -5.6, -3.8, -1.8, 0.2, 2.1, 4.0, 6.1, 8.0]
-    for i, x in enumerate(xs):
-        eye = eye_mat(i, 12.0)
-        FG.machine(f'M{i}', body, eye, 'stride', (x, 12 + ctx.rng.uniform(-1.2, 1.2), 0), ctx.rng.uniform(-12, 12),
-                   head_tilt=ctx.rng.uniform(-6, 10))
-        t = (2.5, 5.0, 7.5)[i // 3]
-        s = F.strength_socket(eye)
-        F.keys(s, 'default_value', [(t - 0.2, 12.0), (t - 0.16, 4.0), (t - 0.12, 12.0), (t, 12.0), (t + 0.9, 0.0)],
-               interp='LINEAR')
-    flake = F.obj('Flake', C.box(0.04, 0.04, 0.002), F.mat('Ash', '#8a8a86', 1.0), (0, 0, -50))
-    em = F.plane('AshSky', 40, 60, None, (0, 25, 16))
-    ps = em.modifiers.new('Ash', 'PARTICLE_SYSTEM').particle_system
-    st = ps.settings
-    st.count, st.frame_start, st.frame_end, st.lifetime = 2600, -400, 240, 700
-    st.normal_factor = 0.0
-    st.effector_weights.gravity = 0.012
-    st.brownian_factor = 0.35
-    st.render_type, st.instance_object = 'OBJECT', flake
-    st.particle_size, st.size_random = 1.0, 0.7
-    st.use_rotations, st.rotation_factor_random = True, 1.0
-    em.show_instancer_for_render = False
-    cam, aim = F.camera((-9, 0.5, 1.6), (-5, 12, 1.7), lens=30)   # from x = −9: the facades begin at ±10
-    F.keys(cam, 'location', [(0, Vector((-9, 0.5, 1.6))), (ctx.duration, Vector((5, 0.5, 1.6)))], interp='LINEAR')
-    F.keys(aim, 'location', [(0, Vector((-5, 12, 1.7))), (ctx.duration, Vector((9, 12, 1.7)))], interp='LINEAR')
-
-
-def selection_wall(ctx, same=None, blank_62=None, desaturate=False):
-    """The Selection board (shared with the endings). `same` = one image path for
-    every card; `blank_62` = when card 62 fades to white; `desaturate` greys the photos."""
+def selection_wall(ctx, same=None, blank_62=None, desaturate=False, card62=None, card62_to=None):
+    """The Selection board (shared with the endings and interlude_c5). `same` = one
+    image path for every card; `blank_62` = when card 62 fades to white; `desaturate`
+    greys the photos. SPEC-051 §4.1: `card62` = card 62's own picture (the visor) while
+    the rest keep the six faces; `card62_to` = (t, path): card 62's picture cross-fades
+    to `path` over 1.5 s from t."""
     F.world('#0c0b0a', 0.3)
     F.plane('Board', 5.0, 2.6, F.mat('Cork', '#6a4a30', 0.95), (0, 0.01, 1.3), (90, 0, 0))
     F.plane('WallBack', 12, 6, F.mat('WallPaint', '#2a2826', 0.9), (0, 0.05, 2.0), (90, 0, 0))
@@ -258,15 +219,26 @@ def selection_wall(ctx, same=None, blank_62=None, desaturate=False):
     for i, (x, z) in enumerate(slots[:12]):
         number = CARD_NUMBERS[i]
         # the second row shows the same six shifted by three, so no two cards pair up
-        path = same or PL.face((i + 3 * (i // 6)) % 6 + 1)
+        path = same or (card62 if card62 is not None and number == 62 else PL.face((i + 3 * (i // 6)) % 6 + 1))
         photo = F.textured(f'Photo{i}', path, rough=0.6)
+        nt = photo.node_tree
+        col = next(n for n in nt.nodes if n.type == 'TEX_IMAGE').outputs['Color']
+        if card62_to is not None and number == 62:
+            at, other = card62_to
+            tex = nt.nodes.new('ShaderNodeTexImage')
+            tex.image = F.image(other)
+            fade = nt.nodes.new('ShaderNodeMix')
+            fade.data_type = 'RGBA'
+            nt.links.new(col, fade.inputs['A'])
+            nt.links.new(tex.outputs['Color'], fade.inputs['B'])
+            F.keys(fade.inputs['Factor'], 'default_value', [(at, 0.0), (at + 1.5, 1.0)], interp='LINEAR')
+            col = fade.outputs['Result']
         if desaturate:
-            nt = photo.node_tree
-            tex = next(n for n in nt.nodes if n.type == 'TEX_IMAGE')
             hs = nt.nodes.new('ShaderNodeHueSaturation')
             hs.inputs['Saturation'].default_value = 0.0
-            nt.links.new(tex.outputs['Color'], hs.inputs['Color'])
-            nt.links.new(hs.outputs['Color'], next(n for n in nt.nodes if n.type == 'BSDF_PRINCIPLED').inputs['Base Color'])
+            nt.links.new(col, hs.inputs['Color'])
+            col = hs.outputs['Color']
+        nt.links.new(col, next(n for n in nt.nodes if n.type == 'BSDF_PRINCIPLED').inputs['Base Color'])
         if blank_62 is not None and number == 62:
             nt = photo.node_tree
             bsdf = next(n for n in nt.nodes if n.type == 'BSDF_PRINCIPLED')
@@ -284,21 +256,32 @@ def selection_wall(ctx, same=None, blank_62=None, desaturate=False):
 
 
 def stamp(cards, index, t, name='Stamp'):
+    """A SELECTED stamp on card `index`, landing at t; `t=None` has it there from the
+    first frame (SPEC-051 §4.5's board)."""
     x, z = cards[index]
     red = F.mat('StampInk', '#b3261e', 0.7, 0.0, '#b3261e', 0.25)
     s = F.text('SELECTED', 0.055, red, (x, -0.012, z + 0.04), (90, -14, 0))
-    F.keys(s, 'scale', [(t - 1 / 24, Vector((0, 0, 0))), (t, Vector((1.3, 1.3, 1.3))), (t + 2 / 24, Vector((1, 1, 1)))],
-           interp='LINEAR')
+    if t is not None:
+        F.keys(s, 'scale', [(t - 1 / 24, Vector((0, 0, 0))), (t, Vector((1.3, 1.3, 1.3))), (t + 2 / 24, Vector((1, 1, 1)))],
+               interp='LINEAR')
     return s
 
 
+def photo(index):
+    """Card `index`'s photo plane, as `selection_wall` named it."""
+    return bpy.data.objects[f'Photo{index}']
+
+
 def selection(ctx):
-    cards = selection_wall(ctx)
+    """SPEC-051 §4.1: card 62 carries the visor; the camera holds it inside the inner
+    88 % of the frame from its stamp (shot-local 1.6 s) to the end, or the build fails."""
+    cards = selection_wall(ctx, card62=PL.VISOR)
     for k, idx in enumerate(STAMP_ORDER):
         stamp(cards, idx, 1.6 + k * 1.6)
-    cam, aim = F.camera((-0.6, -1.75, 1.4), (-0.8, 0, 1.33), lens=40)
-    F.keys(cam, 'location', [(0, Vector((-0.6, -1.75, 1.4))), (ctx.duration, Vector((-1.0, -1.7, 1.38)))])
-    F.keys(aim, 'location', [(0, Vector((-0.8, 0, 1.33))), (ctx.duration, Vector((-1.0, 0, 1.33)))])
+    cam, aim = F.camera((-1.3, -1.75, 1.46), (-1.2, 0, 1.46), lens=40)
+    F.keys(cam, 'location', [(0, Vector((-1.3, -1.75, 1.46))), (ctx.duration, Vector((-1.0, -1.72, 1.44)))])
+    F.keys(aim, 'location', [(0, Vector((-1.2, 0, 1.46))), (ctx.duration, Vector((-1.1, 0, 1.44)))])
+    F.require_framed(ctx, [photo(CARD_NUMBERS.index(62))], cam, range(F.frame(1.6), ctx.shot.frames + 1))
 
 
 def gantry(ctx, swing=None, at=(14.0, 2.0), height=34.0):
@@ -387,7 +370,14 @@ def tug(ctx, loc, rot=(0, 0, 0), scale=2.5, engines=None):
 
 
 def liftoff(ctx):
-    spaceport(ctx, swing=(0.15, 0.9))   # the arm clears just as the engines light
+    """SPEC-051 §4.6: the spaceport is the photograph — pad, gantry and its arm, and
+    Iris at the fence, in frame for the whole shot — set behind a locked-off camera,
+    and the tug stands on the plate's pad and lifts at 0.8 s on its exhaust, heat
+    lamp and plume. The camera matches the plate's horizon (initial tuning)."""
+    sky_gradient([(0.0, '#2a2420'), (0.5, '#ffb070'), (0.55, '#c07060'), (0.7, '#6a6a80'), (1.0, '#3a4458')], 0.8)
+    F.sun((-0.6, 1.0, -0.25), 2.2, '#ffc890')   # the dawn of the plate, on the tug
+    cam, aim = F.camera((-16, -24, 2.5), (0, 0, 4), lens=30)
+    PL.backdrop(LIFTOFF_PLATE, cam, distance=120)
     ship = tug(ctx, (0, 0, 2.5), (0, 0, 0), 6.0)
     F.keys(ship, 'location', [(0.8, Vector((0, 0, 2.5))), (ctx.duration, Vector((0, 8, 48)))])
     F.keys(ship, 'rotation_euler', [(0.8, Vector((0, 0, 0))), (ctx.duration, Vector((math.radians(14), 0, 0)))])
@@ -405,8 +395,6 @@ def liftoff(ctx):
         p = F.plane('Plume', 6, 6, smoke, (math.cos(a) * 5, math.sin(a) * 5, 2.0), (90, 0, math.degrees(a)))
         F.keys(p, 'scale', [(0.8, Vector((0.3, 0.3, 0.3))), (ctx.duration, Vector((3.2, 3.2, 3.2)))])
         F.keys(p, 'location', [(0.8, Vector(p.location)), (ctx.duration, Vector((math.cos(a) * 16, math.sin(a) * 16, 9.0)))])
-    cam, aim = F.camera((-16, -24, 2.5), (0, 0, 4), lens=30)
-    F.keys(aim, 'location', [(0, Vector((0, 0, 4))), (0.8, Vector((0, 0, 4))), (ctx.duration, Vector((0, 6, 42)))])
 
 
 def relay(ctx):
