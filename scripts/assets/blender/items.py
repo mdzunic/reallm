@@ -15,6 +15,12 @@
 # backdrop sits behind the subject, so gunmetal reads against the navy UI at
 # 28–40 px.
 #
+# SPEC-052 §4.8 appends seven pictures for SPEC-056's items, drawn before the
+# items exist (tests/ui/icons.test.ts holds them in PENDING_PICTURES until
+# then): five relics — each its line's weapon() build plus the relic finish of
+# brass furniture, an engraved serial plate and one emissive line in its twist
+# colour — and two consumables, a road flare and an auto-injector.
+#
 #   node scripts/assets/blender/build.mjs items
 #   node scripts/assets/blender/build.mjs items --preview=DIR   # + a contact sheet
 #
@@ -63,6 +69,12 @@ AMBER = '#f5a623'
 GREEN = '#46c973'
 RED = '#e5484d'
 DRONE = '#8a97a3'
+
+# SPEC-052 §4.8: the relic finish and the seven new subjects' own colours.
+BRASS = '#b08d57'
+SERIAL = '#2a2118'
+FROST = '#bfe3f2'
+SLAG = '#6a4632'
 
 
 def mat(name, colour, rough=0.55, metal=0.6, emissive=None, strength=0.0):
@@ -203,6 +215,124 @@ def drone(kind):
     return parts
 
 
+# SPEC-052 §4.8 — the relic finish. A relic is its line's weapon() build plus
+# brass furniture (#b08d57, roughness 0.35, metal 0.9: the grip and the stock
+# re-clad, and a brass band at the muzzle), an engraved serial plate on the
+# receiver and one emissive line in its twist colour. The silhouette stays its
+# line's, so a relic reads as its weapon at 40 px; the brass and the coloured
+# line say which one. The line glows at half a cell's strength: brighter than
+# any lit surface, but not so bright that AgX bleaches red, orange and purple
+# to the same pastel.
+LINE_STRENGTH = 1.5
+
+
+def brass(bm, name):
+    return add(bm, name, BRASS, rough=0.35, metal=0.9)
+
+
+def relic(parts, twist, line, plate, muzzle, side=0.045):
+    """The finish on a weapon() build. `side` is the x of the receiver face the
+    camera sees — the body's, or a launcher's tube, which hides the body;
+    `line` is (y0, y1, z), `plate` (y, z) and `muzzle` (radius, length, y, z)."""
+    for obj in parts:
+        if obj.name in ('grip', 'stock'):
+            obj.data.materials[0] = mat(f'{obj.name}_brass', BRASS, rough=0.35, metal=0.9)
+    py, pz = plate
+    parts.append(brass(C.place(C.box(0.008, 0.15, 0.05, bevel=0.003), (side + 0.002, py, pz)), 'plate'))
+    for i in range(4):  # the serial, four engraved marks
+        parts.append(add(C.place(C.box(0.004, 0.016, 0.02), (side + 0.006, py - 0.045 + i * 0.03, pz)), f'serial{i}', SERIAL, rough=0.6, metal=0.3))
+    y0, y1, lz = line
+    parts.append(add(C.place(C.box(0.006, y1 - y0, 0.026, bevel=0.002), (side + 0.001, (y0 + y1) / 2, lz)), 'line', twist,
+                     rough=0.3, metal=0.1, emissive=twist, strength=LINE_STRENGTH))
+    radius, length, my, mz = muzzle
+    parts.append(brass(C.place(C.cyl(radius, radius, length, n=16, bevel=0.004), (0, my, mz), (90, 0, 0)), 'muzzle'))
+    return parts
+
+
+def relic_last_word():
+    """A long-barrelled revolver: the handgun line with a brass cylinder."""
+    parts = weapon(body_len=0.56, barrel_len=0.42, body_h=0.14, magazine=False, sight=True)
+    parts.append(brass(C.place(C.cyl(0.07, 0.07, 0.15, n=12, bevel=0.008), (0, 0.15, 0.085), (90, 0, 0)), 'cylinder'))
+    return relic(parts, '#e5484d', line=(-0.24, 0.06, 0.135), plate=(-0.1, 0.07), muzzle=(0.045, 0.04, 0.68, 0.1))
+
+
+def relic_cold_coil():
+    """A machine gun with frost coils wound around the barrel: rings tilted 20°
+    off square, so side-on they read as the strands of one coil."""
+    parts = weapon(body_len=1.0, barrel_len=0.6, drum=True, magazine=False)
+    for i in range(8):
+        parts.append(add(C.place(C.torus(0.068, 0.018, n=16, m=6), (0, 0.6 + i * 0.058, 0.1), (70, 0, 0)), f'coil{i}', FROST, rough=0.3, metal=0.5))
+    return relic(parts, '#7fdcff', line=(-0.42, 0.42, 0.145), plate=(-0.3, 0.07), muzzle=(0.046, 0.04, 1.08, 0.1))
+
+
+def relic_seed_drum():
+    """A launcher with a large seed-pod drum of glowing canisters, the drum's
+    face to the camera so the canisters read as a ring of seeds."""
+    parts = weapon(body_len=0.7, barrel_len=0.0, tube=True, sight=True, magazine=False)
+    parts.append(add(C.place(C.cyl(0.17, 0.17, 0.13, n=16, bevel=0.012), (0, 0.1, -0.07), (0, 90, 0)), 'pod', DARK, rough=0.5))
+    for i in range(6):
+        angle = (i / 6) * math.pi * 2
+        parts.append(add(C.place(C.cyl(0.034, 0.034, 0.15, n=10), (0, 0.1 + math.cos(angle) * 0.105, -0.07 + math.sin(angle) * 0.105), (0, 90, 0)),
+                         f'seed{i}', '#8fe06a', rough=0.3, metal=0.1, emissive='#8fe06a', strength=1.5))
+    parts.append(brass(C.place(C.cyl(0.045, 0.045, 0.16, n=12, bevel=0.006), (0, 0.1, -0.07), (0, 90, 0)), 'hub'))
+    return relic(parts, '#8fe06a', line=(-0.2, 0.4, 0.145), plate=(-0.18, 0.095), muzzle=(0.092, 0.05, 0.46, 0.12), side=0.086)
+
+
+def relic_slag_vent():
+    """A heavy machine gun (the rotary's build) with vent fins along its shroud."""
+    parts = weapon(body_len=1.0, barrel_len=0.6, drum=True, shroud=True, magazine=False, twin=True, stock=True)
+    for i in range(6):
+        parts.append(add(C.place(C.box(0.17, 0.03, 0.3, bevel=0.004), (0, 0.53 + i * 0.065, 0.1)), f'fin{i}', SLAG, rough=0.45, metal=0.6))
+    return relic(parts, '#ff6a2a', line=(-0.42, 0.42, 0.145), plate=(-0.3, 0.07), muzzle=(0.07, 0.04, 1.08, 0.1))
+
+
+def relic_seeker():
+    """A launcher tube with a seeker dome at the muzzle and a brass band aft."""
+    parts = weapon(body_len=0.8, barrel_len=0.0, tube=True, sight=True, magazine=False)
+    parts.append(add(C.place(C.sphere(0.082, segs=16, rings=12), (0, 0.54, 0.12), (0, 0, 0), (1, 1.45, 1)), 'dome', '#6b4e94', rough=0.15, metal=0.3))
+    parts.append(brass(C.place(C.cyl(0.091, 0.091, 0.05, n=16, bevel=0.004), (0, -0.3, 0.12), (90, 0, 0)), 'band'))
+    return relic(parts, '#b07ad8', line=(-0.24, 0.44, 0.145), plate=(-0.12, 0.095), muzzle=(0.09, 0.05, 0.52, 0.12), side=0.086)
+
+
+# SPEC-052 §4.8 — two consumables, shot like the others from the front
+# three-quarter. A stick is thin, so each lies on a diagonal of the tile: its
+# parts are built along +Z, then the whole is tilted by one rotation — the flare
+# up to the right with its tip toward the camera, the injector the other way
+# with its window turned to the camera.
+FLARE_TILT = (45, 0, -135)
+STIM_TILT = (60, 0, 65)
+
+
+def tilted(bm, loc, tilt):
+    return C.place(C.place(bm, loc), (0, 0, 0), tilt)
+
+
+def flare():
+    """A road flare: a red cylinder, a striker cap and a glowing tip."""
+    t = FLARE_TILT
+    return [
+        add(tilted(C.cyl(0.045, 0.045, 0.6, n=16, bevel=0.006), (0, 0, 0.3), t), 'tube', '#c4352b', rough=0.75, metal=0.0),
+        add(tilted(C.cyl(0.0465, 0.0465, 0.05, n=16), (0, 0, 0.42), t), 'label', '#e6dfcc', rough=0.8, metal=0.0),
+        add(tilted(C.cyl(0.053, 0.053, 0.13, n=16, bevel=0.008), (0, 0, -0.02), t), 'cap', DARK, rough=0.6, metal=0.1),
+        add(tilted(C.cyl(0.04, 0.04, 0.012, n=16), (0, 0, -0.088), t), 'striker', '#8c8273', rough=0.9, metal=0.0),
+        add(tilted(C.cyl(0.044, 0.014, 0.11, n=12), (0, 0, 0.655), t), 'tip', '#ff5a3c', rough=0.3, metal=0.0, emissive='#ff5a3c', strength=2.5),
+    ]
+
+
+def stim():
+    """An auto-injector pen: a grey body, a green band and a clear window with
+    the dose showing through it."""
+    t = STIM_TILT
+    return [
+        add(tilted(C.cyl(0.065, 0.065, 0.46, n=16, bevel=0.01), (0, 0, 0.23), t), 'body', '#8d969f', rough=0.45, metal=0.1),
+        add(tilted(C.cyl(0.0665, 0.0665, 0.05, n=16), (0, 0, 0.37), t), 'band', GREEN, rough=0.3, metal=0.1, emissive=GREEN, strength=1.6),
+        add(tilted(C.box(0.03, 0.05, 0.17, bevel=0.008), (0.052, 0, 0.19), t), 'window', '#d4eef2', rough=0.08, metal=0.0),
+        add(tilted(C.box(0.032, 0.03, 0.11, bevel=0.006), (0.054, 0, 0.19), t), 'dose', GREEN, rough=0.2, metal=0.0),
+        add(tilted(C.cyl(0.05, 0.04, 0.07, n=16, bevel=0.006), (0, 0, -0.035), t), 'tip', DARK, rough=0.5, metal=0.2),
+        add(tilted(C.cyl(0.06, 0.055, 0.05, n=16, bevel=0.006), (0, 0, 0.485), t), 'cap', GUNMETAL, rough=0.45, metal=0.6),
+    ]
+
+
 # ------------------------------------------------------------------ subjects
 # Every key of ITEMS and COMPANIONS (src/data/items.ts, companions.ts). The
 # content test guarantees a glyph for any id missing here; this table aims to
@@ -243,6 +373,14 @@ SUBJECTS = {
     'field_medic': ('other', lambda: drone('medic')),
     'quartermaster': ('other', lambda: drone('quartermaster')),
     'aria': ('other', lambda: drone('aria')),
+    # SPEC-052 §4.8: SPEC-056's relics and consumables, ahead of their items.
+    'relic_last_word': ('weapon', relic_last_word),
+    'relic_cold_coil': ('weapon', relic_cold_coil),
+    'relic_seed_drum': ('weapon', relic_seed_drum),
+    'relic_slag_vent': ('weapon', relic_slag_vent),
+    'relic_seeker': ('weapon', relic_seeker),
+    'flare': ('other', flare),
+    'stim': ('other', stim),
 }
 
 

@@ -446,7 +446,9 @@ test('18. every item surface draws a picture, not a glyph', async ({ page }) => 
   // id resolves — the glyph fallback of SPEC-031 31-i is no longer reached.
   const response = await page.request.get('/assets/items/manifest.json');
   expect(response.ok()).toBe(true);
-  expect(((await response.json()) as { items: string[] }).items).toHaveLength(26);
+  // SPEC-052 §4.8: the 26 items and companions, plus the seven pictures drawn
+  // ahead of SPEC-056's items (tests/ui/icons.test.ts' PENDING_PICTURES).
+  expect(((await response.json()) as { items: string[] }).items).toHaveLength(33);
   await station(page);
   await page.locator('[data-testid="station-tab-shop"]').click();
   await page.locator('[data-testid="shop-tab-gear"]').click();

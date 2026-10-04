@@ -99,3 +99,85 @@ def panels(size=256, grid=8, seed=7, accent=(0.85, 0.47, 0.17)):
     seam_soft = np.maximum(seam, blur(seam, 0.8) * 0.6)
     rgb = rgb * (1 - 0.62 * np.clip(seam_soft, 0, 1))[..., None]
     return np.clip(rgb, 0, 1).astype(np.float32)
+
+
+# ------------------------------------------------- portable seeded helpers
+# SPEC-052: the painters (foliage.py, ground.py's scatter) draw their random
+# numbers and lattice noise from these rather than numpy's generator, so a
+# build without Blender (scripts/assets/standin/tex.mjs, the same functions in
+# Node) scatters the same leaves in the same places. 32-bit integer maths only.
+
+M32 = 0xFFFFFFFF
+
+
+def name_seed(name):
+    """FNV-1a over the UTF-8 bytes of `name`: a model's or a cell's seed."""
+    h = 0x811C9DC5
+    for byte in str(name).encode('utf8'):
+        h = ((h ^ byte) * 0x01000193) & M32
+    return h
+
+
+class Rand:
+    """mulberry32 — a tiny generator whose stream JavaScript reproduces exactly."""
+
+    def __init__(self, seed):
+        self.a = int(seed) & M32
+
+    def random(self):
+        self.a = (self.a + 0x6D2B79F5) & M32
+        a = self.a
+        t = ((a ^ (a >> 15)) * (1 | a)) & M32
+        t = (((t + (((t ^ (t >> 7)) * (61 | t)) & M32)) & M32) ^ t) & M32
+        return ((t ^ (t >> 14)) & M32) / 4294967296.0
+
+    def uniform(self, lo, hi):
+        return lo + (hi - lo) * self.random()
+
+    def integers(self, lo, hi):
+        """An int in [lo, hi)."""
+        return lo + min(int(self.random() * (hi - lo)), hi - lo - 1)
+
+
+def hash32(x):
+    """lowbias32 on uint32 numpy arrays (or ints)."""
+    x = np.asarray(x, dtype=np.uint32)
+    x = x ^ (x >> np.uint32(16))
+    x = x * np.uint32(0x7FEB352D)
+    x = x ^ (x >> np.uint32(15))
+    x = x * np.uint32(0x846CA68B)
+    return x ^ (x >> np.uint32(16))
+
+
+def lattice(ix, iy, seed):
+    """A float32 in [0, 1) per integer lattice point, from (ix, iy, seed)."""
+    with np.errstate(over='ignore'):
+        h = hash32(np.asarray(iy, np.uint32) + hash32(np.uint32(int(seed) & M32)))
+        h = hash32(np.asarray(ix, np.uint32) + h)
+    return (h >> np.uint32(8)).astype(np.float32) / np.float32(16777216.0)
+
+
+def pnoise(size, cells, seed):
+    """Seamless value noise in [0, 1], `cells` lattice cells per side (lattice())."""
+    t = np.arange(size, dtype=np.float32) * cells / size
+    i0 = np.floor(t).astype(np.int64)
+    f = t - i0
+    i1 = (i0 + 1) % cells
+    i0 = i0 % cells
+    f = f * f * f * (f * (f * 6 - 15) + 10)
+    fx, fy = f[None, :], f[:, None]
+    a = lattice(i0[None, :], i0[:, None], seed)
+    b = lattice(i1[None, :], i0[:, None], seed)
+    c = lattice(i0[None, :], i1[:, None], seed)
+    d = lattice(i1[None, :], i1[:, None], seed)
+    return (a * (1 - fx) + b * fx) * (1 - fy) + (c * (1 - fx) + d * fx) * fy
+
+
+def pfbm(size, cells, octaves, seed, gain=0.5):
+    total = np.zeros((size, size), np.float32)
+    amp, norm = 1.0, 0.0
+    for o in range(octaves):
+        total += amp * pnoise(size, cells * 2 ** o, seed + 101 * o)
+        norm += amp
+        amp *= gain
+    return total / norm
