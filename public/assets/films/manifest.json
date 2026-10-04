@@ -7,7 +7,7 @@
     "prologue": {
       "file": "films/prologue.mp4",
       "frames": 2232,
-      "bytes": 3045936,
+      "bytes": 3122960,
       "crf": 29,
       "shots": [
         {
@@ -64,7 +64,7 @@
           "start": 1344,
           "end": 1584,
           "poster": "films/posters/prologue_stranded.webp",
-          "posterBytes": 5194
+          "posterBytes": 33898
         },
         {
           "id": "shelter",
@@ -78,14 +78,14 @@
           "start": 1800,
           "end": 1992,
           "poster": "films/posters/prologue_selection.webp",
-          "posterBytes": 13656
+          "posterBytes": 9652
         },
         {
           "id": "liftoff",
           "start": 1992,
           "end": 2160,
           "poster": "films/posters/prologue_liftoff.webp",
-          "posterBytes": 11070
+          "posterBytes": 29378
         },
         {
           "id": "relay",
@@ -121,7 +121,7 @@
     "interlude_c1": {
       "file": "films/interlude_c1.mp4",
       "frames": 336,
-      "bytes": 471206,
+      "bytes": 505901,
       "crf": 26,
       "shots": [
         {
@@ -143,14 +143,14 @@
           "start": 240,
           "end": 336,
           "poster": "films/posters/interlude_c1_earth_c1.webp",
-          "posterBytes": 8192
+          "posterBytes": 8098
         }
       ]
     },
     "interlude_c2": {
       "file": "films/interlude_c2.mp4",
       "frames": 336,
-      "bytes": 491392,
+      "bytes": 526351,
       "crf": 26,
       "shots": [
         {
@@ -172,36 +172,36 @@
           "start": 240,
           "end": 336,
           "poster": "films/posters/interlude_c2_earth_c2.webp",
-          "posterBytes": 8260
+          "posterBytes": 8938
         }
       ]
     },
     "interlude_c3": {
       "file": "films/interlude_c3.mp4",
       "frames": 336,
-      "bytes": 530201,
-      "crf": 29,
+      "bytes": 602575,
+      "crf": 26,
       "shots": [
         {
           "id": "greenhouse",
           "start": 0,
           "end": 168,
           "poster": "films/posters/interlude_c3_greenhouse.webp",
-          "posterBytes": 24050
+          "posterBytes": 43940
         },
         {
           "id": "earth_c3",
           "start": 168,
           "end": 336,
           "poster": "films/posters/interlude_c3_earth_c3.webp",
-          "posterBytes": 9348
+          "posterBytes": 10162
         }
       ]
     },
     "interlude_c4": {
       "file": "films/interlude_c4.mp4",
       "frames": 384,
-      "bytes": 562435,
+      "bytes": 561123,
       "crf": 26,
       "shots": [
         {
@@ -230,7 +230,7 @@
     "interlude_c5": {
       "file": "films/interlude_c5.mp4",
       "frames": 384,
-      "bytes": 446424,
+      "bytes": 498585,
       "crf": 26,
       "shots": [
         {
@@ -238,7 +238,7 @@
           "start": 0,
           "end": 144,
           "poster": "films/posters/interlude_c5_hive_dark.webp",
-          "posterBytes": 11604
+          "posterBytes": 14722
         },
         {
           "id": "eden",
@@ -248,18 +248,18 @@
           "posterBytes": 9700
         },
         {
-          "id": "cockpit",
+          "id": "board",
           "start": 288,
           "end": 384,
-          "poster": "films/posters/interlude_c5_cockpit.webp",
-          "posterBytes": 14738
+          "poster": "films/posters/interlude_c5_board.webp",
+          "posterBytes": 5822
         }
       ]
     },
     "ending_stay": {
       "file": "films/ending_stay.mp4",
       "frames": 864,
-      "bytes": 1307245,
+      "bytes": 1304542,
       "crf": 26,
       "shots": [
         {
@@ -288,7 +288,7 @@
           "start": 504,
           "end": 720,
           "poster": "films/posters/ending_stay_wall_63.webp",
-          "posterBytes": 8228
+          "posterBytes": 7612
         },
         {
           "id": "earth_again",
@@ -302,8 +302,8 @@
     "ending_escape": {
       "file": "films/ending_escape.mp4",
       "frames": 864,
-      "bytes": 1089752,
-      "crf": 26,
+      "bytes": 1223445,
+      "crf": 28,
       "shots": [
         {
           "id": "exit",
@@ -324,14 +324,14 @@
           "start": 336,
           "end": 528,
           "poster": "films/posters/ending_escape_earth_unmade.webp",
-          "posterBytes": 3840
+          "posterBytes": 43136
         },
         {
           "id": "wall_same",
           "start": 528,
           "end": 696,
           "poster": "films/posters/ending_escape_wall_same.webp",
-          "posterBytes": 10334
+          "posterBytes": 9638
         },
         {
           "id": "point",

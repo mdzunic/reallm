@@ -2035,7 +2035,7 @@ the real rules.
 
 ## SPEC-051 — films retaken: the visor, the unmaking and Iris (asset drop, M7h)
 
-- **Build:** `spec/SPEC-051` — untagged; **the code half of the drop only**
+- **Build:** `spec/SPEC-051` — untagged. The code half was written in the factory's container. The drop was rendered on 2026-10-04 with Blender 5.2.1 on the owner's Mac (M4 Pro); see "The drop" below.
 - **Devices:**
   - desktop — headless Chromium at 1280 × 720 (Playwright, Linux container, **software GL / SwiftShader**)
   - phone — _no handset in the build container_ (§7's pass is owed, below)
@@ -2060,30 +2060,74 @@ timing.
 |---|---|
 | Next of kin | `ending_escape` at 30 s, a first-run save: `NEXT OF KIN — 1 template. 62 recipients.` |
 | Mail | `ending_stay` at 31 s: `MAIL QUEUED — No. 63: “The lamp over the map table stopped flickering today.”` |
-| The board | `interlude_c5` at 13 s: `There is a new card on the board. Nobody has told me whose.`; the board's poster at 14 s is owed to the drop (passed with the drop's manifest stood in by a route) |
+| The board | `interlude_c5` at 13 s: `There is a new card on the board. Nobody has told me whose.`. The board's poster at 14 s was owed to the drop; it passed on the drop's own files (e2e case 3, 2026-10-04) |
 | Seeks | the prologue's still at 76 s is `prologue_selection.webp`; 92.9 s ends it |
-| Posters | owed to the drop: `interlude_c5_cockpit.webp` is still on disk and `interlude_c5_board.webp` is not |
+| Posters | Owed to the drop, and done: `interlude_c5_cockpit.webp` is deleted (404), and `interlude_c5_board.webp` and every poster the manifest lists answer 200 (e2e case 5, 2026-10-04) |
 
-**Owed to the drop (§4.9, §7).** On the Blender machine, with the five plates
-committed under `plates/`:
+**The drop (§4.9, §7), 2026-10-04.** Blender 5.2.1, M4 Pro, macOS.
 
-- [ ] `node scripts/assets/blender/build.mjs films --stills --shots=selection,board,earth_c3,watchers,stranded,liftoff,greenhouse --preview=DIR`: the look; `stranded` prints the eye slits it measured (`NOTE prologue_stranded.jpg eyes: …`) — pin them in `STRANDED_EYES` or correct them there; match the liftoff camera to the plate's horizon and pad;
-- [ ] the full build of every film but `departure`, then `node scripts/assets/check.mjs`; record here the build time, each film's size, rate and flash count (the build fails a film that counts more than R12's), the three lit boxes (`NOTE … lit box`), `hive_dark`'s black run, the watchers swing and the unmake means;
-- [ ] if a lit box or a framing check fails, move the camera, not the threshold (51-d);
-- [ ] delete `films/posters/interlude_c5_cockpit.webp` (the build rewrites the generated `LICENSES.md` rows from the files on disk);
-- [ ] `npm run check` and `e2e/SPEC-051.spec.ts` green on the drop.
+The plates:
+- **Three photographs:** `prologue_stranded.jpg`, `prologue_liftoff.jpg` and `interlude_c3_greenhouse.jpg`, each 1376 × 768 and generated with Google Gemini.
+- **The two visor cards** (`selection/visor.webp`, `visor_empty.webp`) are **rendered, not photographed**, by the owner's decision. `scripts/assets/blender/visor_cards.py` renders them from the salvager of `lib/salvager.py`, the suit of the creation portraits and the `exit` shot. Their Plates rows say so.
 
-**The likeness check (§7) — not performed.** Reverse image search of each,
-against well-known faces (actors, video-game protagonists); record passed or
-failed, and a failure is a follow-up drop (51-b):
+- [x] **Stills of the look.**
+  - `stranded`: `PL.glints` measured eight eye slits in three groups, now pinned in `STRANDED_EYES`.
+  - The liftoff camera is tuned to its plate:
+    - it tilts 0.77° up to the plate's horizon at 0.52;
+    - the tug stands on the pad's deck (1.6 m high, 51 m out);
+    - the photograph itself on a box at the pad and on the apron (`PL.occluder`) hides the exhaust below the deck;
+    - the plume stays within ~12 m of the pad, clear of Iris.
+- [x] **Every film but `departure` built** (`departure` is untouched).
+  - Rendering the 22 re-rendered shots took 650 s of Blender time, at 0.08–0.26 s a frame; the rest came from the frame cache. Each film encodes in 3–10 s.
+  - `node scripts/assets/check.mjs` passes: precache 22.54 MB of 25, every budget met.
+  - `films/` is 9 384 351 B, 497 369 B over the old folder against the 734 003 B allotment.
 
-- [ ] face 01
-- [ ] face 02
-- [ ] face 03
-- [ ] face 04
-- [ ] face 05
-- [ ] face 06
-- [ ] the greenhouse plate's woman
+  | Film | Bytes | Rate | CRF | Flashes |
+  |---|---|---|---|---|
+  | `prologue` | 3 122 960 | 32.8 KB/s | 29 | 2 |
+  | `interlude_c1` | 505 901 | 35.3 KB/s | 26 | 0 |
+  | `interlude_c2` | 526 351 | 36.7 KB/s | 26 | 0 |
+  | `interlude_c3` | 602 575 | 42.0 KB/s | 26 | 0 |
+  | `interlude_c4` | 561 123 | 34.2 KB/s | 26 | 0 |
+  | `interlude_c5` | 498 585 | 30.4 KB/s | 26 | 0 |
+  | `ending_stay` | 1 304 542 | 35.4 KB/s | 26 | 0 |
+  | `ending_escape` | 1 223 445 | 33.2 KB/s | 28 | 1 |
+
+  - **Lit boxes:**
+    - `earth_c1`: 351,326–620,449;
+    - `earth_c2`: 150,335–769,461;
+    - `earth_c3`: 232,209–749,393.
+  - `hive_dark`'s black run: 4 frames.
+  - The watchers swing across 4.1–4.35 s: 0.000.
+  - The unmake means: 0.079 ± 0.001, 0.065 ± 0.000 and 0.040 ± 0.001.
+  - `greenhouse`'s mean luminance: 0.042–0.051.
+  - The `selection` framing holds card 62 inside the inner 88 % over 154 frames. The `board` framing holds both cards at its poster.
+- [x] **Three checks failed on the first full build; each was fixed without moving a threshold.**
+  - **The lit boxes.** The shared initial framing drew level 1's coast 73 px wide and put level 3's lattice on the bottom edge. Each level is now framed for its own patch (`RELIT_FRAMING`, 51-d). Levels 1 and 2 are seen from south of the coast, level 3 from the north, with the camera's up away from the planet. `earth_c4` keeps its own framing.
+  - **`hive_dark`.** It held 31 frames below 0.002. Its dark front now slows through the field of view from 4.5 to 5.8 s and takes the rest in the last 0.1 s, still reaching the edge at 5.9 s.
+  - **`films/` growth.** It was 81 KB past the 0.70 MB allotment with `ending_escape` at 41.8 KB/s. That film now encodes from CRF 28 (`FILM_CRFS`). Holding the unmake beats still made it no smaller, so the cost is the picture, not the move.
+- [x] `films/posters/interlude_c5_cockpit.webp` is deleted, and the build rewrote the generated `LICENSES.md` rows.
+- [x] **Tests on the drop**, in the factory's container (SwiftShader):
+  - `npm run check`: 111 files and 2 597 tests green;
+  - `e2e/SPEC-051.spec.ts`, `e2e/SPEC-022.spec.ts` and `e2e/SPEC-015-pwa.spec.ts`: 23 passed on the first run.
+
+**The likeness check (§7) — performed 2026-10-04: every face failed.**
+
+How it was run:
+- Each face was searched by its public URL on `main`
+  (`raw.githubusercontent.com/mdzunic/reallm/main/scripts/assets/blender/plates/selection/NN.webp`).
+- Bing Visual Search was used for every face. It names the known person or character a face is closest to.
+- Google Lens was used for faces 01–03 only. After that it refused further searches from the browser (403).
+
+Bing names the *closest* well-known face, and it named one for every face. A match therefore means "close enough that a search engine calls it that", not proof of a copy. The resemblance to *The Last of Us* is visible in the faces' styling all the same. Per 51-b, each failure is a follow-up drop, and they block the milestone tag. This drop's visor removes a face from cards 62 and 63 either way.
+
+- [x] face 01 — **failed**: Bing names Joel Miller (*The Last of Us*). Lens's matches lean on the jacket (Gerard Butler, Jeffrey Dean Morgan, "Joel Miller jacket" shops).
+- [x] face 02 — **failed**: Bing names Ellie Williams (*The Last of Us*). Its matches include Lauren Cohan (*The Walking Dead*).
+- [x] face 03 — **failed**: Bing names Josh Holloway (*Lost*, *Colony*). Lens's AI summary names Christoph Kottenkamp.
+- [x] face 04 — **failed**: Bing names Ellie Williams (*The Last of Us*, HBO). Its matches include Lauren Cohan and Rebecca Ferguson. This is Iris's face, so the follow-up drop also replaces her in `prologue_shelter.jpg`, `interlude_c2_tap.jpg`, `prologue_liftoff.jpg` and `interlude_c3_greenhouse.jpg`.
+- [x] face 05 — **failed**: Bing names Captain John Price (*Call of Duty: Modern Warfare*).
+- [x] face 06 — **failed**: Bing names Ellie Williams (*The Last of Us*, HBO). Its matches include Lara Croft.
+- [x] the greenhouse plate's woman — **failed with face 04**. She is drawn to match face 04, and the plate is not public, so it was not searched on its own (the owner's ruling).
 
 **Owed on hardware (§7).** Every retaken film with sound, on desktop Chrome, Safari and the reference phone (landscape):
 

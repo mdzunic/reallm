@@ -92,7 +92,7 @@ generated from the committed scripts or synthesised.
 | `films/posters/interlude_c4_earth_c4.webp` | Original to this repository — story film poster, a frame of its shot (PLAN R9); generated in Blender by `scripts/assets/blender/films.py` | CC0 | — |
 | `films/posters/interlude_c4_reactor.webp` | Original to this repository — story film poster, a frame of its shot (PLAN R9); generated in Blender by `scripts/assets/blender/films.py` | CC0 | — |
 | `films/posters/interlude_c4_watchers.webp` | Original to this repository — story film poster, a frame of its shot (PLAN R9); generated in Blender by `scripts/assets/blender/films.py` | CC0 | — |
-| `films/posters/interlude_c5_cockpit.webp` | Original to this repository — story film poster, a frame of its shot (PLAN R9); generated in Blender by `scripts/assets/blender/films.py` | CC0 | — |
+| `films/posters/interlude_c5_board.webp` | Original to this repository — story film poster, a frame of a plate shot (PLAN R11, R12); generated in Blender by `scripts/assets/blender/films.py` | CC0 | — |
 | `films/posters/interlude_c5_eden.webp` | Original to this repository — story film poster, a frame of its shot (PLAN R9); generated in Blender by `scripts/assets/blender/films.py` | CC0 | — |
 | `films/posters/interlude_c5_hive_dark.webp` | Original to this repository — story film poster, a frame of its shot (PLAN R9); generated in Blender by `scripts/assets/blender/films.py` | CC0 | — |
 | `films/posters/prologue_city_flash.webp` | Original to this repository — story film poster, a frame of a plate shot (PLAN R11, R12); generated in Blender by `scripts/assets/blender/films.py` | CC0 | — |
