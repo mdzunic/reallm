@@ -200,6 +200,16 @@ export type Settings = {
   joystickSide: JoystickSide;
   /** Flight only: blend keyboard steering toward the mouse reticle (SPEC-005 AC-29). */
   flightMouseSteer: boolean;
+  /**
+   * SPEC-050 §4.5: on the keyboard scheme a `sprint` press toggles running
+   * instead of holding it. Default off; a stored non-boolean reads `false`.
+   */
+  sprintToggle: boolean;
+  /**
+   * SPEC-050 §4.5: on touch the stick pushed past its ring runs. Default on; a
+   * stored non-boolean reads `true`.
+   */
+  stickSprint: boolean;
   /** Multiplies the 56 px touch-button base; never below 1 (SPEC-005 AC-16). */
   buttonScale: number;
   showFps: boolean;
@@ -353,6 +363,9 @@ export function defaultSettings(): Settings {
     weaponAutoSwap: 'touch',
     joystickSide: 'left',
     flightMouseSteer: true,
+    // SPEC-050 §4.5: Shift holds the run; the stick runs past its ring.
+    sprintToggle: false,
+    stickSprint: true,
     buttonScale: MIN_BUTTON_SCALE,
     showFps: false,
     lastSlot: null,
@@ -613,6 +626,12 @@ function coerce<K extends keyof Settings>(key: K, value: unknown, current: Setti
         return oneOf(value, JOYSTICK_SIDES, current.joystickSide);
       case 'flightMouseSteer':
         return bool(value, current.flightMouseSteer);
+      case 'sprintToggle':
+        // SPEC-050 §4.5: default off, so only a real boolean turns it on.
+        return bool(value, false);
+      case 'stickSprint':
+        // SPEC-050 §4.5: default on — an unusable value must not turn it off.
+        return bool(value, true);
       case 'buttonScale':
         return clampScale(value);
       case 'showFps':

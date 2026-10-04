@@ -2,13 +2,14 @@
 // in a chapter's reference kit, kiting the real field and fighting each boss in
 // its arena. Everything here is the shipped code — `Combat`, `SpawnDirector`
 // and `EnemyAi` — on open ground, driven at the fixed 60 Hz step from fixed
-// seeds, so a run is a pure function of its inputs.
+// seeds, so a run is a pure function of its inputs. SPEC-050 §4.9 adds the two
+// sprint bots to the field, for that Marine and for an agile Scout.
 import { EventBus, type GameEvents } from '@/core/Events';
 import { Pool } from '@/core/Pool';
 import { QUALITY } from '@/core/Renderer';
 import { Rng, RngRoot, hash32 } from '@/core/Rng';
 import { newSave, type CharacterCreation, type Save } from '@/core/Save';
-import { CLASSES, ENEMIES, ITEMS, PLANETS, type EnemyId, type ItemId, type PlanetId } from '@/data/index';
+import { CLASSES, ENEMIES, ITEMS, PLANETS, type ClassPassive, type EnemyId, type ItemId, type PlanetId } from '@/data/index';
 import { isBuried, makeEnemy, type EnemyEntity } from '@/entities/Enemy';
 import { makePlayer, type PlayerEntity } from '@/entities/Player';
 import { makeProjectile, type ProjectileEntity } from '@/entities/Projectile';
@@ -20,6 +21,7 @@ import { DASH_DISTANCE, DASH_IFRAMES, dashCooldown, isDashing, stepDash, tryDash
 import { ATTACK_REACH_BONUS, CHARGE, WINDUP_SECONDS } from '@/systems/EnemyAi';
 import { generateLayout, WALL_INSET } from '@/systems/Layout';
 import { SpawnDirector, type FrustumXZ } from '@/systems/Spawn';
+import { isLoud, resetStamina, SPRINT_MULT, SPRINT_NOISE, staminaRegen, stepStamina } from '@/systems/Stamina';
 import { STEP, makeInput } from './combatFixtures';
 
 /** SPEC-016's worst case: a Marine with might 6, vigor 5, agility 1, tech 1. */
@@ -28,6 +30,15 @@ export const WORST_CASE_CREATION: CharacterCreation = {
   classId: 'marine',
   appearance: { portrait: 0, primary: '#c8c8c8', secondary: '#c8c8c8' },
   attributes: { might: 6, vigor: 5, agility: 1, tech: 1 },
+  difficulty: 'normal',
+};
+
+/** SPEC-050 §4.9: a Scout with all five creation points on agility — 2/1/9/1. */
+export const AGILE_SCOUT_CREATION: CharacterCreation = {
+  name: 'Sable',
+  classId: 'scout',
+  appearance: { portrait: 6, primary: '#c8c8c8', secondary: '#c8c8c8' },
+  attributes: { might: 2, vigor: 1, agility: 9, tech: 1 },
   difficulty: 'normal',
 };
 
@@ -73,9 +84,9 @@ export function referenceKit(chapter: Chapter): ReferenceKit {
   return { level: CHAPTER_LEVEL[chapter], rifle, armor, drone, heavy: chapter >= 2 ? 'launcher_rocket' : null };
 }
 
-/** A save in `kit`, for `seed`. */
-function kitSave(kit: ReferenceKit, seed: number): Save {
-  const save = newSave(0, WORST_CASE_CREATION, seed, 1_700_000_000_000);
+/** A save in `kit`, for `seed` — SPEC-016's worst-case Marine unless another creation is named. */
+function kitSave(kit: ReferenceKit, seed: number, creation: CharacterCreation = WORST_CASE_CREATION): Save {
+  const save = newSave(0, creation, seed, 1_700_000_000_000);
   save.player.level = kit.level;
   save.equipped.primary = kit.rifle;
   save.equipped.armor = kit.armor;
@@ -211,6 +222,45 @@ export function kiteInRing(world: CombatWorld, weaponRange: number, arena: Arena
   out.z = tz / len;
 }
 
+// ------------------------------------------------------------ the sprint bots
+
+/**
+ * SPEC-050 §4.9: the field suite's bots — SPEC-038's `kite`; `sprintKite`, the
+ * same policy running under the real rules (stamina, the holstered gun, the
+ * noise); and `sprintFree`, the control, which runs ×1.35 and changes nothing
+ * else — it keeps firing and stays quiet.
+ */
+export type FieldBot = 'kite' | 'sprintKite' | 'sprintFree';
+
+/** §4.9: a sprint bot runs from an aggroed swarm, rusher or boss within its melee reach + 3.5 m… */
+export const SPRINT_TRIGGER_MARGIN = 3.5;
+/** …or from a rusher winding up or running a charge within 8 m… */
+export const SPRINT_CHARGE_RADIUS = 8;
+/** …and keeps running until that gap exceeds 6.5 m. */
+export const SPRINT_RELEASE_MARGIN = 6.5;
+
+/**
+ * §4.9 — whether a sprint bot wants to run this step. `running` is whether it
+ * wanted to last step: the gap to let go (6.5 m past melee reach) is wider than
+ * the one to start (3.5 m), so a bot at the edge does not flicker.
+ */
+export function sprintWanted(world: CombatWorld, running: boolean): boolean {
+  const p = world.player;
+  const margin = running ? SPRINT_RELEASE_MARGIN : SPRINT_TRIGGER_MARGIN;
+  for (let i = 0; i < world.enemies.size; i++) {
+    const e = world.enemies.at(i);
+    if (e.state === 'dead' || !e.aggro || isBuried(e)) continue;
+    const arch = e.def.archetype;
+    if (arch !== 'swarm' && arch !== 'rusher' && arch !== 'boss') continue;
+    const d = Math.hypot(e.x - p.x, e.z - p.z);
+    if (arch === 'rusher' && (e.state === 'chargeWindup' || e.state === 'charge') && d <= SPRINT_CHARGE_RADIUS) return true;
+    const attack = e.def.attack;
+    const reach = e.radius + (attack.kind === 'melee' ? attack.range : 0) + p.radius;
+    if (d - reach <= margin) return true;
+  }
+  return false;
+}
+
 // ---------------------------------------------------------------- rotation
 
 /**
@@ -268,6 +318,12 @@ function rocketTarget(world: CombatWorld): EnemyEntity | null {
 
 // ------------------------------------------------------------------- field
 
+/** SPEC-050 §4.9: who runs the field, and as whom; `kite` and the worst-case Marine by default. */
+export interface FieldOptions {
+  readonly bot?: FieldBot;
+  readonly creation?: CharacterCreation;
+}
+
 export interface FieldResult {
   readonly planet: PlanetId;
   readonly seed: number;
@@ -318,11 +374,18 @@ function engagedCount(world: CombatWorld, radius: number): number {
  * `QUALITY.medium` around a kite bot at (60, 60), for `seconds`, at the
  * planet's chapter kit (SPEC-041: `referenceKit`, with its Rocket rotation),
  * with auto-fire on. A death respawns the bot where it stands with full HP,
- * the E4 sweep and 2 s of i-frames.
+ * the E4 sweep and 2 s of i-frames — SPEC-050: and full stamina.
+ *
+ * SPEC-050 §4.9: `options.bot` picks the policy. `sprintKite` presses its run
+ * into this movement step, which calls `stepStamina` as the surface does —
+ * the rotation's held trigger is explicit fire, which suppresses it — applies
+ * `SPRINT_MULT` while it sprints and sets `noiseMult` before combat, so
+ * `Combat` holsters and the brains hear it. `sprintFree` only moves ×1.35.
  */
-export function runField(planet: PlanetId, seed: number, seconds = 180): FieldResult {
+export function runField(planet: PlanetId, seed: number, seconds = 180, options: FieldOptions = {}): FieldResult {
   const def = PLANETS[planet];
-  const save = kitSave(referenceKit(def.chapter), seed);
+  const bot = options.bot ?? 'kite';
+  const save = kitSave(referenceKit(def.chapter), seed, options.creation);
 
   const events = new EventBus<GameEvents>({ dev: false });
   const layout = generateLayout(def, new RngRoot(seed).layout(planet));
@@ -365,6 +428,10 @@ export function runField(planet: PlanetId, seed: number, seconds = 180): FieldRe
   const dir = { x: 0, z: 0 };
   const p = world.player;
   const edge = layout.halfSize - WALL_INSET;
+  const passive: ClassPassive = CLASSES[save.player.classId].passive;
+  const drainMult = passive.sprintDrainMult ?? 1;
+  const regen = staminaRegen(save.player.attributes.agility, save.meta.difficulty);
+  let running = false;
   const steps = Math.round(seconds / STEP);
   for (let i = 0; i < steps; i++) {
     if (dead) {
@@ -372,13 +439,27 @@ export function runField(planet: PlanetId, seed: number, seconds = 180): FieldRe
       p.alive = true;
       p.hp = world.stats.maxHp;
       p.invulnUntil = world.time + RESPAWN_IFRAMES;
+      resetStamina(p);
+      running = false;
       save.player.hp = p.hp;
       spawn.despawnNear(p.x, p.z, SWEEP_RADIUS);
     }
     // The scene's order: the player moves, combat runs, then the director.
+    // §4.9: both sprint bots walk `kite`'s heading; the trigger and its 6.5 m
+    // release say when they hold the run.
     kite(world, combat.loadout.activeWeapon().range, dir);
-    p.vx = dir.x * world.stats.moveSpeed;
-    p.vz = dir.z * world.stats.moveSpeed;
+    let speed = world.stats.moveSpeed;
+    if (bot !== 'kite') running = sprintWanted(world, running);
+    if (bot === 'sprintKite') {
+      const moving = dir.x !== 0 || dir.z !== 0;
+      stepStamina(p, running && !input.buttons.fire.down, moving, combat.inCombat, drainMult, regen, world.time, STEP);
+      world.noiseMult = isLoud(p, world.time) ? SPRINT_NOISE : 1;
+      if (p.sprinting) speed *= SPRINT_MULT;
+    } else if (bot === 'sprintFree' && running) {
+      speed *= SPRINT_MULT;
+    }
+    p.vx = dir.x * speed;
+    p.vz = dir.z * speed;
     p.x = Math.max(-edge, Math.min(edge, p.x + p.vx * STEP));
     p.z = Math.max(-edge, Math.min(edge, p.z + p.vz * STEP));
     const aim = rotation.step(combat, world, input);
@@ -406,6 +487,8 @@ export interface PlanetSummary {
   readonly planet: PlanetId;
   /** Damage taken per minute, as a percentage of max HP, over every run. */
   readonly perMinute: number;
+  /** SPEC-050 §4.9: kills per minute, over every run. */
+  readonly killsPerMinute: number;
   /** The share of it whose source kind is `enemy` — blows and charges. */
   readonly enemyShare: number;
   /** SPEC-041 §6.1: the mean engaged count over every run. */
@@ -420,20 +503,39 @@ export function summarize(planet: PlanetId, runs: readonly FieldResult[]): Plane
   let minutes = 0;
   let maxHp = 1;
   let engaged = 0;
+  let kills = 0;
   for (const run of runs) {
     damage += run.damage;
     enemy += run.enemyDamage;
     minutes += run.seconds / 60;
     maxHp = run.maxHp;
     engaged += run.engaged;
+    kills += run.kills;
   }
   return {
     planet,
     perMinute: minutes > 0 ? (damage / maxHp / minutes) * 100 : 0,
+    killsPerMinute: minutes > 0 ? kills / minutes : 0,
     enemyShare: damage > 0 ? enemy / damage : 0,
     engaged: runs.length > 0 ? engaged / runs.length : 0,
     runs,
   };
+}
+
+/**
+ * SPEC-050 §4.9 — damage per kill over a set of planets:
+ * `mean(damage % max HP per minute) / mean(kills per minute)`. A bot that
+ * kills nothing has an infinite cost per kill.
+ */
+export function damagePerKill(summaries: readonly PlanetSummary[]): number {
+  let damage = 0;
+  let kills = 0;
+  for (const summary of summaries) {
+    damage += summary.perMinute;
+    kills += summary.killsPerMinute;
+  }
+  if (summaries.length === 0) return 0;
+  return kills > 0 ? damage / kills : Infinity;
 }
 
 // ------------------------------------------------------------------ bosses

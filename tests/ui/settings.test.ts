@@ -178,6 +178,19 @@ describe('the settings row table (SPEC-045 §4.2)', () => {
     expect(section('gameplay')[0]).toBe('settings-difficulty');
   });
 
+  it('holds the two run rows in Controls, each shown on its scheme (SPEC-050 §4.5)', () => {
+    const toggle = SETTINGS_ROWS.find((row) => row.key === 'sprintToggle') as SettingsRowDef;
+    expect(toggle).toMatchObject({ id: 'settings-sprint-toggle', section: 'controls', label: 'Run toggle', control: 'toggle', shown: 'keyboard' });
+    const stick = SETTINGS_ROWS.find((row) => row.key === 'stickSprint') as SettingsRowDef;
+    expect(stick).toMatchObject({ id: 'settings-stick-sprint', section: 'controls', label: 'Run with the stick', control: 'toggle', shown: 'touch' });
+    expect(keysOf(visibleRows(KEYBOARD))).toContain('sprintToggle');
+    expect(keysOf(visibleRows(KEYBOARD))).not.toContain('stickSprint');
+    expect(keysOf(visibleRows(TOUCH))).toContain('stickSprint');
+    expect(keysOf(visibleRows(TOUCH))).not.toContain('sprintToggle');
+    // The gamepad reads as the keyboard (PLAN R18 decision 12).
+    expect(keysOf(visibleRows({ ...KEYBOARD, scheme: 'gamepad' }))).toContain('sprintToggle');
+  });
+
   it('notes the preset, Manual in the scheme\'s words, and what the colours mean', () => {
     const row = (key: string): SettingsRowDef => SETTINGS_ROWS.find((entry) => entry.key === key) as SettingsRowDef;
     expect(rowNote(row('reduceMotion'), 'keyboard')).toBe('Also sets camera shake, damage flash, films and typewriter text.');

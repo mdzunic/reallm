@@ -1986,3 +1986,49 @@ transparency in two passes), so it stays opaque: one draw (AC-33).
 - [ ] open Notes from the pause menu and the station: the count, the rating and the records;
 - [ ] with a save at chapter 4, finish `c4_m3`: the notice holds the world and names what was found, and the banner follows it;
 - [ ] replay `c1_m1` and hear only its accept line.
+
+## SPEC-050 — walk, do not run: stamina, the sprint, noise and the Wurm that listens (M7h)
+
+- **Build:** `spec/SPEC-050` — untagged
+- **Devices:**
+  - desktop — headless Chromium at 1280 × 720 (Playwright, Linux container, **software GL / SwiftShader**)
+  - phone — _no handset in the build container_ (§7's pass is owed, below)
+
+Recorded from the container the branch was built in: `npm run check` — 110
+files and 2,547 tests, none skipped — and `e2e/SPEC-050.spec.ts` (§6.2's nine
+cases in eleven tests, with explicit fire and the medium budget beside them)
+and `SPEC-006` (whose reacted and sprite pins §4.8 moves), green under one to
+five workers.
+
+| Area | What the container showed |
+|---|---|
+| Running in combat | Cinder-4, `c1_m1` done, `surface-spawn-pack`, Shift + W: running on the first frame after the keys landed, 2 stamina a frame at the five-step ceiling, exhausted 4 s of game time later with one `player:exhausted`; `hud-stamina` up, `is-exhausted`, `aria-valuenow` under 30 |
+| Travel run | Eden, Shift + W for 2 s: stamina 100 throughout, `loud` 1, `speed` 8.26 on the unobstructed steps; the ring hidden |
+| Holster | a pack in range: no shot in a 1 s run, the first one ≥ 0.25 s of game time after the last running frame; `qb-primary` wore `is-holstered` only while holstered; walking on auto-fire kept `loud` 0 |
+| Dash | `surface-exhaust`, V: `dashes` unchanged and no `player:dashed`; back at 30, V: `dashes` +1, stamina −30 (rounded, ±1) |
+| Controls | the Run toggle latched and released on Shift taps and let go when the map opened; Space held stopped the run; on a phone the stick past 70 px for 0.3 s ran with `is-sprint`, 40 px walked, an aim-drag stopped it, and `Run with the stick` off never ran; in flight ShiftLeft still raised the throttle |
+| The Wurm | phase 2 from `surface-wound-boss`, the player at the pad: running, `burrowRing` stayed under 2 m until 0.4 s before the hit; walking, it passed 3 m inside 0.9 s of the first step |
+| Tips | fresh profiles: the sprint tip's keyboard words, and the wurm tip, each third in its landing's queue (about 24 s of game time in) |
+| Budget | medium, adaptive quality off, the pack up and the ring showing mid-run: 40 draws and 31,416 triangles (budget 96 and 130 k) |
+
+**The threat check (§4.9).** `tests/systems/threat.test.ts`, seeds 1–4 × the
+five combat planets × 3 min, the chapter kit on `medium`. Damage per kill
+against `kite`'s: `sprintKite` 2.54× for the worst-case Marine and 1.32× for
+the Scout 2/1/9/1; `sprintFree` 1.05× and 0.44×. The audit's port measured
+2.9×, 2.0×, 0.90× and 0.47×. The Scout's sprint-kite sits closest to its
+1.25× floor, and the number moves with the bot's details: the Rocket
+rotation's held trigger is explicit fire, which ends a run (without that rule
+the Scout reads 0.92×), and a bot that kept fleeing until the 6.5 m release
+instead of walking `kite`'s heading outran everything (the Marine 0.50×). The
+suite follows §4.9's words — `kite`'s heading, the run held from melee reach
++ 3.5 m (or a charging rusher inside 8 m) until the gap passes 6.5 m — under
+the real rules.
+
+**Owed on hardware (§7).** On desktop and the reference phone:
+
+- [ ] Cinder-4 with `c1_m1` done: run from a skitter pack and hear the gun go quiet and come back a beat after the run ends;
+- [ ] run until exhausted, then try to dash — nothing happens;
+- [ ] cross 120 m out of combat walking and running, and compare;
+- [ ] fight the Wurm to phase 2: walk out of the burrow ring; run and watch it follow; dash out of a followed ring;
+- [ ] phone: push the stick past its ring and back, and check the ring's glow;
+- [ ] phone: 10 minutes of fights, then read `sprints` and `sprintsShort` from the `?debug` overlay — at 10 % or more short, raise `TOUCH_SPRINT_TRAVEL` to 1.15 and measure again.

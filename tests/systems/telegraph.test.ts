@@ -294,6 +294,9 @@ describe('the pool (SPEC-038 §4.2, 38-c, 38-d)', () => {
       startAt: 9,
       hitAt: 9,
       lockAt: 9,
+      // SPEC-050 §3: a burrow circle's following is reset too.
+      followsLoud: true,
+      trackSpeed: 9,
       damage: 9,
       elite: true,
       ownerId: 9,
@@ -324,6 +327,8 @@ describe('the pool (SPEC-038 §4.2, 38-c, 38-d)', () => {
       startAt: h.world.time,
       hitAt: h.world.time + 0.5,
       lockAt: h.world.time + 0.5 - 0.15,
+      followsLoud: false,
+      trackSpeed: 0,
       damage: 9 * 1.3,
       elite: false,
       ownerId: e.id,

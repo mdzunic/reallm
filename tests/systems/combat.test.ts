@@ -46,7 +46,9 @@ import {
 } from '@/systems/Combat';
 import { DEPLOYABLE_CAPACITY, MAX_ARMED_MINES } from '@/entities/Deployable';
 import { cumulativeXp } from '@/systems/Progression';
-import { STEP, harness, MARINE, SCOUT } from './combatFixtures';
+import { SPRINT_DRAW_SECONDS, stepStamina } from '@/systems/Stamina';
+import type { SlotView } from '@/systems/Loadout';
+import { STEP, harness, MARINE, SCOUT, type Harness } from './combatFixtures';
 
 const KINETIC = ITEMS.weapon_kinetic as WeaponDef;
 
@@ -2156,5 +2158,120 @@ describe('hard (SPEC-043 §4.4)', () => {
     expect(after.maxHp).toBe(Math.round(ENEMIES.wurmling.hp * 1.25));
     expect(before.maxHp).toBe(ENEMIES.wurmling.hp);
     expect(before.hp).toBe(ENEMIES.wurmling.hp);
+  });
+});
+
+// ------------------------------------------------------------- SPEC-050
+
+/** One slot's view, through a fresh scratch. */
+function slotView(h: Harness, slot: 'primary' | 'heavy'): SlotView {
+  return h.combat.loadout.view(slot, h.world.time, {
+    itemId: null,
+    state: 'ready',
+    cd: 0,
+    heat: 0,
+    charges: 0,
+    maxCharges: 0,
+    cdSeconds: 0,
+  });
+}
+
+describe('the holstered gun (SPEC-050 §4.2)', () => {
+  it('fires nothing while the player sprints: no auto-fire and no held fire', () => {
+    const h = harness();
+    h.spawn('hive_egg', 4, 0);
+    h.input.autoFire = true;
+    h.world.player.sprinting = true;
+    h.run(1);
+    expect(h.world.projectiles.size).toBe(0);
+    h.input.buttons.fire.down = true;
+    h.aim = { x: 10, z: 0 };
+    h.run(0.5);
+    expect(h.world.projectiles.size).toBe(0);
+    expect(h.of('weapon:fired')).toHaveLength(0);
+  });
+
+  it('the first shot after a sprint ends comes no earlier than drawAt — the end + 0.25 s', () => {
+    const h = harness();
+    h.spawn('hive_egg', 4, 0);
+    h.input.autoFire = true;
+    const p = h.world.player;
+    // The scene's order: the stamina step, then combat. Sprinting for 0.5 s…
+    for (let i = 0; i < 30; i++) {
+      stepStamina(p, true, true, false, 1, 20.6, h.world.time, STEP);
+      h.step();
+    }
+    expect(h.of('weapon:fired')).toHaveLength(0);
+    // …then the step it ends draws the gun.
+    stepStamina(p, false, true, false, 1, 20.6, h.world.time, STEP);
+    expect(p.drawAt).toBeCloseTo(h.world.time + SPRINT_DRAW_SECONDS, 9);
+    let firstShot = -1;
+    for (let i = 0; i < 60 && firstShot < 0; i++) {
+      h.step();
+      if (h.of('weapon:fired').length > 0) firstShot = h.world.time;
+      stepStamina(p, false, true, false, 1, 20.6, h.world.time, STEP);
+    }
+    expect(firstShot).toBeGreaterThanOrEqual(p.drawAt - 1e-9);
+    expect(firstShot).toBeLessThan(p.drawAt + 2 * STEP);
+    expect(h.combat.lastShotAt).toBe(firstShot);
+  });
+
+  it('keeps ticking cooldowns, heat and charges while holstered', () => {
+    const mg = harness({ patch: (s) => void (s.equipped.primary = 'mg_scrap') });
+    mg.input.buttons.fire.down = true;
+    mg.aim = { x: 10, z: 0 };
+    mg.run(1);
+    const hot = slotView(mg, 'primary').heat;
+    expect(hot).toBeGreaterThan(0);
+    mg.world.player.sprinting = true;
+    mg.run(1);
+    expect(slotView(mg, 'primary').heat).toBeLessThan(hot);
+
+    const rocket = harness({ patch: (s) => void (s.equipped.heavy = 'launcher_rocket') });
+    expect(rocket.combat.fireSlotOnce('heavy')).toBe('fired');
+    expect(slotView(rocket, 'heavy').charges).toBe(0);
+    rocket.world.player.sprinting = true;
+    rocket.run(6.1);
+    expect(slotView(rocket, 'heavy').charges).toBe(1);
+  });
+
+  it('the combat drone keeps firing while the player runs', () => {
+    const h = harness({ patch: (s) => s.companions.push({ id: 'combat_drone', level: 1, enabled: true }) });
+    const egg = h.spawn('hive_egg', 6, 0);
+    egg.aggro = true;
+    h.world.player.sprinting = true;
+    h.step();
+    expect(h.world.projectiles.size).toBe(1);
+    expect(h.world.projectiles.at(0).owner).toBe('drone');
+  });
+
+  it('fireSlotOnce returns holstered while sprinting or drawing, before any other check, and fires nothing (50-g)', () => {
+    const h = harness({ patch: (s) => void (s.equipped.heavy = 'launcher_rocket') });
+    const p = h.world.player;
+    p.sprinting = true;
+    expect(h.combat.fireSlotOnce('heavy')).toBe('holstered');
+    p.sprinting = false;
+    p.drawAt = h.world.time + 0.1;
+    expect(h.combat.fireSlotOnce('heavy')).toBe('holstered');
+    expect(h.world.projectiles.size).toBe(0);
+    expect(h.of('weapon:fired')).toHaveLength(0);
+    expect(h.of('ui:toast')).toHaveLength(0);
+    // Ahead of the empty slot's answer too.
+    const bare = harness();
+    bare.world.player.sprinting = true;
+    expect(bare.combat.fireSlotOnce('heavy')).toBe('holstered');
+    // Drawn: it fires.
+    h.run(0.1 + STEP);
+    expect(h.combat.fireSlotOnce('heavy')).toBe('fired');
+  });
+
+  it('walking with auto-fire fires as before — nothing holsters a walk', () => {
+    const h = harness();
+    h.spawn('hive_egg', 4, 0);
+    h.input.autoFire = true;
+    const p = h.world.player;
+    stepStamina(p, false, true, true, 1, 20.6, h.world.time, STEP);
+    h.step();
+    expect(h.of('weapon:fired')).toHaveLength(1);
   });
 });

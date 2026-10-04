@@ -32,8 +32,15 @@ export interface TelegraphEntity {
   startAt: number;
   /** Lands at (a ring starts growing). */
   hitAt: number;
-  /** A line follows its owner's position and facing until then. */
+  /**
+   * A line follows its owner's position and facing until then; SPEC-050 §4.4:
+   * a `followsLoud` circle follows a loud player until then.
+   */
   lockAt: number;
+  /** SPEC-050 §4.4: the burrow's circle — its centre moves toward a loud player before `lockAt`. */
+  followsLoud: boolean;
+  /** SPEC-050 §4.4: how fast a `followsLoud` centre moves, m/s (the move's `trackLoud`). */
+  trackSpeed: number;
   /** Outgoing damage before armour, difficulty and the elite ×1.5, applied at the hit like a melee blow. */
   damage: number;
   elite: boolean;
@@ -51,6 +58,9 @@ export interface TelegraphEntity {
 
 /** §4.2: the most telegraphs alive at once; a request past it is refused (38-c). */
 export const TELEGRAPH_CAPACITY = 32;
+
+/** SPEC-050 §4.4: seconds before `hitAt` a burrow circle stops following a loud player. */
+export const LOUD_TRACK_LOCK = 0.4;
 
 /** `hitMask` bits. */
 export const HIT_PLAYER = 1;
@@ -72,6 +82,8 @@ export function makeTelegraph(): TelegraphEntity {
     startAt: 0,
     hitAt: 0,
     lockAt: 0,
+    followsLoud: false,
+    trackSpeed: 0,
     damage: 0,
     elite: false,
     ownerId: 0,
@@ -98,6 +110,8 @@ export function resetTelegraph(t: TelegraphEntity): void {
   t.startAt = 0;
   t.hitAt = 0;
   t.lockAt = 0;
+  t.followsLoud = false;
+  t.trackSpeed = 0;
   t.damage = 0;
   t.elite = false;
   t.ownerId = 0;

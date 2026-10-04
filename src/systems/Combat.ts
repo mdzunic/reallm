@@ -77,6 +77,7 @@ import type { ProjectileEntity } from '@/entities/Projectile';
 import {
   HIT_FOLLOWER,
   HIT_PLAYER,
+  LOUD_TRACK_LOCK,
   makeTelegraph,
   resetTelegraph,
   ringRadius,
@@ -89,6 +90,7 @@ import { isDashing } from '@/systems/Dash';
 import { BOSS_FIRST_MOVE_SECONDS, updateEnemy, type AiHooks, type WindupKind } from '@/systems/EnemyAi';
 import { FIRE_CARRY, Loadout } from '@/systems/Loadout';
 import { updateProjectiles, type ProjectileHooks } from '@/systems/Projectiles';
+import { isHolstered, isLoud } from '@/systems/Stamina';
 
 export type { DamageSource } from '@/data/index';
 
@@ -344,8 +346,15 @@ export interface CombatWorld {
    */
   aggroMult?: number;
   /**
+   * SPEC-050 §4.3: the player's noise, multiplying every wandering enemy's
+   * aggro radius — the scene sets `SPRINT_NOISE` while the player is loud and
+   * 1 otherwise, each step before `update`. Absent or 1: quiet.
+   */
+  noiseMult?: number;
+  /**
    * SPEC-030 §4.5: the scene sets this each step — inside a shelter and no
-   * shot for `REVEAL_AFTER_SHOT`. Absent means never hidden.
+   * shot for `REVEAL_AFTER_SHOT` (SPEC-050 §4.3: and not loud). Absent means
+   * never hidden.
    */
   playerHidden?: boolean;
   /**
@@ -542,7 +551,8 @@ export class Combat {
       windup: (e, kind) => this.#windup(e, kind),
       telegraphLine: (e, length, width, windup, lockIn, damageMult, bodyResolved) =>
         this.#telegraphLine(e, length, width, windup, lockIn, damageMult, bodyResolved),
-      telegraphCircle: (e, x, z, radius, windup, damageMult) => this.#telegraphCircle(e, x, z, radius, windup, damageMult),
+      telegraphCircle: (e, x, z, radius, windup, damageMult, trackLoud) =>
+        this.#telegraphCircle(e, x, z, radius, windup, damageMult, trackLoud),
       telegraphRing: (e, x, z, ringMax, ringSpeed, band, windup, damageMult) =>
         this.#telegraphRing(e, x, z, ringMax, ringSpeed, band, windup, damageMult),
       cancelTelegraphs: (e) => this.#cancelTelegraphs(e),
@@ -864,13 +874,32 @@ export class Combat {
     return true;
   }
 
-  #telegraphCircle(e: EnemyEntity, x: number, z: number, radius: number, windup: number, damageMult: number): boolean {
+  /**
+   * SPEC-050 §4.4: a `trackLoud` above 0 (the burrow's 12 m/s) draws a circle
+   * that follows a loud player at up to that speed until `LOUD_TRACK_LOCK` s
+   * before it lands — an offset that does not scale with casual, as a line's
+   * lock does not.
+   */
+  #telegraphCircle(
+    e: EnemyEntity,
+    x: number,
+    z: number,
+    radius: number,
+    windup: number,
+    damageMult: number,
+    trackLoud = 0,
+  ): boolean {
     const t = this.#drawTelegraph(e, windup, damageMult);
     if (t === null) return false;
     t.kind = 'circle';
     t.x = x;
     t.z = z;
     t.radius = radius;
+    if (trackLoud > 0) {
+      t.followsLoud = true;
+      t.trackSpeed = trackLoud;
+      t.lockAt = t.hitAt - LOUD_TRACK_LOCK;
+    }
     return true;
   }
 
@@ -929,10 +958,14 @@ export class Combat {
    * ring's band grows from `hitAt` and hits each target once as it crosses; a
    * charge lane never lands by itself and goes when its owner leaves the charge.
    * An owner that died, leashed or was sent away takes its pending ones with it.
+   * SPEC-050 §4.4: a `followsLoud` circle moves toward a loud player by at most
+   * `trackSpeed × dt` until `lockAt` — a quiet player leaves it where it is —
+   * and its owner surfaces wherever it ends up.
    */
-  #updateTelegraphs(): void {
+  #updateTelegraphs(dt: number): void {
     const w = this.#world;
     const time = w.time;
+    const p = w.player;
     const pool = this.telegraphs;
     for (let i = pool.size - 1; i >= 0; i--) {
       const t = pool.at(i);
@@ -946,6 +979,20 @@ export class Combat {
         t.z = owner.z;
         t.dirX = Math.cos(owner.facing);
         t.dirZ = Math.sin(owner.facing);
+      }
+      if (t.followsLoud && time < t.lockAt && p.alive && isLoud(p, time)) {
+        const dx = p.x - t.x;
+        const dz = p.z - t.z;
+        const d = Math.hypot(dx, dz);
+        if (d > 1e-6) {
+          const step = Math.min(d, t.trackSpeed * dt) / d;
+          t.x += dx * step;
+          t.z += dz * step;
+          if (owner !== null) {
+            owner.castX = t.x;
+            owner.castZ = t.z;
+          }
+        }
       }
       if (t.bodyResolved) {
         // SPEC-041 §4.1: a boss's charge lane lives through its cast as well.
@@ -1548,13 +1595,16 @@ export class Combat {
    * range, else 10 m along facing (36-k). `'empty'` for a slot with no weapon,
    * `'not-ready'` while the slot's cooldown says no — no charge left, or
    * inside the burst interval (36-j). The active slot does not change.
+   * SPEC-050 §4.2 (50-g): `'holstered'` while the player sprints or draws,
+   * before any other check — nothing fires, and the scene toasts nothing.
    */
-  fireSlotOnce(slot: WeaponSlot): 'fired' | 'not-ready' | 'empty' {
+  fireSlotOnce(slot: WeaponSlot): 'fired' | 'not-ready' | 'empty' | 'holstered' {
+    const time = this.#world.time;
+    const p = this.#world.player;
+    if (isHolstered(p, time)) return 'holstered';
     const weapon = this.loadout.weaponIn(slot);
     if (weapon === null) return 'empty';
-    const time = this.#world.time;
     if (!this.loadout.ready(slot, time)) return 'not-ready';
-    const p = this.#world.player;
     let dirX = Math.cos(p.facing);
     let dirZ = Math.sin(p.facing);
     let targetX = p.x + dirX * 10;
@@ -1699,6 +1749,10 @@ export class Combat {
     // SPEC-038 §4.1: while the dash's movement runs nothing fires, nothing
     // pushes the player out of a body and the step's knockback is dropped.
     const dashing = isDashing(p, w.time);
+    // SPEC-050 §4.2: a sprint holsters the gun, through its draw — no auto-fire
+    // and no held fire, as during a dash; cooldowns, heat and charges still
+    // tick below, and the drone still fires.
+    const holstered = isHolstered(p, w.time);
 
     // Expired damage boosts drop and the cache recomputes (§4.8).
     if (p.boosts.length > 0) {
@@ -1716,11 +1770,11 @@ export class Combat {
     if (p.alive) {
       this.#tickHealing(dt);
       p.fireCooldown -= dt;
-      if (dashing) this.#aimedThisStep = false;
+      if (dashing || holstered) this.#aimedThisStep = false;
       else this.#updateFiring(input, aimWorld);
       // SPEC-039 §4.4, 39-j: a step that did not fire banks at most one step,
       // so a released trigger rests at −1/60 s and carries nothing more. The
-      // steps of a dash, which never fire, are held to it too.
+      // steps of a dash or a holster, which never fire, are held to it too.
       if (p.fireCooldown < -FIRE_CARRY) p.fireCooldown = -FIRE_CARRY;
       this.#updateDrone(dt);
       if (!this.#aimedThisStep && Math.hypot(p.vx, p.vz) > 1e-3) {
@@ -1745,7 +1799,7 @@ export class Combat {
     // SPEC-041 §4.6: the menders pulse on the same hash.
     this.#updateMenders();
     // SPEC-038 §4.2: the ground telegraphs resolve right after the brains.
-    this.#updateTelegraphs();
+    this.#updateTelegraphs(dt);
 
     updateProjectiles(w, this.#hash, dt, this.#projectileHooks);
     // SPEC-029 §4.7: mines and charges, right after the projectile pass.

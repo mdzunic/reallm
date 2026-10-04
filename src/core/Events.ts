@@ -91,6 +91,8 @@ export type GameEvents = {
   'player:recalled': Record<string, never>;
   /** SPEC-038 §4.1: one per dash, where it started and which way it went. */
   'player:dashed': { x: number; z: number; dirX: number; dirZ: number };
+  /** SPEC-050 §4.1: once per exhaustion — the stamina pool reached 0. */
+  'player:exhausted': Record<string, never>;
   'player:xp': { amount: number; total: number };
   'player:leveledUp': { level: number; tokens: number };
   'tokens:changed': { delta: number; total: number; reason: string };

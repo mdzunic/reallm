@@ -431,7 +431,10 @@ test('3. creation by keyboard: Enter on a class removes the reason, Enter twice 
   // Each attribute row says what a point buys.
   await expect(page.getByTestId('attr-might-desc')).toHaveText('Might — +4 % damage per point');
   await expect(page.getByTestId('attr-vigor-desc')).toHaveText('Vigor — +8 max HP per point');
-  await expect(page.getByTestId('attr-agility-desc')).toHaveText('Agility — +2 % speed · +2 % crit chance · −3 % dash cooldown per point');
+  // SPEC-050 §4.1: agility's stamina regen joins the line.
+  await expect(page.getByTestId('attr-agility-desc')).toHaveText(
+    'Agility — +2 % speed · +2 % crit chance · −3 % dash cooldown · +3 % stamina regen per point',
+  );
   await expect(page.getByTestId('attr-tech-desc')).toHaveText('Tech — +10 % companion effect · −3 % prices per point');
 
   // 44-c: the last point spent disables might-plus; focus moves to a neighbour, not the page.

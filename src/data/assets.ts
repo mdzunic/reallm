@@ -98,6 +98,8 @@ export const ASSETS = {
         // SPEC-041 §4.10: a boss winding up a ground move, and the move landing.
         windup_boss: [22070, 700],
         boss_slam: [22920, 800],
+        // SPEC-050 §4.8: the salvager's breath out when the stamina runs dry.
+        exhale: [23870, 350],
       },
     },
     /** The rail scene: hits on the ship, and the two continuous channels. */

@@ -97,6 +97,13 @@ export interface BossMove {
   /** burrow: dig seconds, and seconds from one burrow's end to the next. */
   readonly dig?: number;
   readonly every?: number;
+  /**
+   * SPEC-050 §4.4, burrow: the circle follows a loud player at up to this many
+   * m/s until `LOUD_TRACK_LOCK` s before it lands — faster than any sprint.
+   */
+  readonly trackLoud?: number;
+  /** SPEC-050 §4.4, burrow: a loud step during the dig cuts it to this share of its length. */
+  readonly loudDigMult?: number;
 }
 
 /**
@@ -224,8 +231,9 @@ export const ENEMIES = {
       { id: 'sand_rush', kind: 'charge', phaseMin: 1, range: [5, 22], weight: 3, windup: 0.9, lock: 0.25, length: 14, width: 3.2, speed: 18, damageMult: 1.2, cooldown: 5, recover: 1 },
       { id: 'tail_slam', kind: 'slam_self', phaseMin: 1, range: [0, 9], weight: 2, windup: 1, radius: 3.5, damageMult: 1, cooldown: 4, recover: 0.8 },
       // Timed, never weighted: it starts at phase-2 entry and comes back
-      // `every` s after each one ends (§4.1).
-      { id: 'burrow', kind: 'burrow', phaseMin: 2, range: [0, Infinity], weight: 0, windup: 1.2, dig: 2.5, every: 9, radius: 3.5, damageMult: 1.5, cooldown: 0, recover: 0 },
+      // `every` s after each one ends (§4.1). SPEC-050 §4.4: it listens — a
+      // loud player cuts the dig to 0.6 of its length and pulls the circle.
+      { id: 'burrow', kind: 'burrow', phaseMin: 2, range: [0, Infinity], weight: 0, windup: 1.2, dig: 2.5, every: 9, radius: 3.5, damageMult: 1.5, cooldown: 0, recover: 0, trackLoud: 12, loudDigMult: 0.6 },
     ],
   },
 

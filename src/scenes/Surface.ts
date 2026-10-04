@@ -47,6 +47,7 @@ import {
   TUNING,
   WAVES,
   type BossRevealDef,
+  type ClassPassive,
   type ClueDef,
   type ContractId,
   type Dialogue,
@@ -79,7 +80,7 @@ import { resetTelegraph, TELEGRAPH_CAPACITY } from '@/entities/Telegraph';
 import { ARENA_RESPAWN_OUTSET, clampToSeal, type ArenaState } from '@/entities/World';
 import { ClueTracker, clueFound, FlagView, type ClueScene } from '@/systems/Clues';
 import { Combat, computePlayerStats, ELITE_SCALE, type CombatWorld, type HitMemory } from '@/systems/Combat';
-import { DASH_DISTANCE, dashCooldown, isDashing, stepDash, tryDash } from '@/systems/Dash';
+import { DASH_DISTANCE, dashCooldown, isDashing, pressDash, stepDash } from '@/systems/Dash';
 import { Economy } from '@/systems/Economy';
 import { seconds, stage as stageText } from '@/systems/Format';
 import { ExploreMask, REVEAL_CAPACITY } from '@/systems/Exploration';
@@ -103,13 +104,24 @@ import {
 } from '@/systems/Guidance';
 import { fillQuickFromPickup, quickEligible, refillQuick, type SlotView } from '@/systems/Loadout';
 import { generateLayout, ObstacleGrid, tugObstacle, WALL_INSET, type Layout, type LayoutPoi, type LayoutShelter } from '@/systems/Layout';
-import { REVEAL_AFTER_SHOT, SHELTER_INSET, shelterAt, STORM_SHELTER_FACTOR } from '@/systems/Shelter';
+import { isHidden, SHELTER_INSET, shelterAt, STORM_SHELTER_FACTOR } from '@/systems/Shelter';
 import { nodeIcon, poiIcon } from '@/systems/MapModel';
 import { contractFor, Missions, type MissionContext, type ObjectiveProgress } from '@/systems/Missions';
 import { CARGO_TOAST_SECONDS, Nodes, Pickups, SHIPPED_TOAST_TEXT } from '@/systems/Pickups';
 import { cumulativeXp, LEVEL_CAP, Progression, xpToNext } from '@/systems/Progression';
 import { watchRunStats } from '@/systems/RunStats';
 import { SpawnDirector, WAVE_CEILING_BONUS, type FrustumXZ, type SpawnRamp, type WaveHandle } from '@/systems/Spawn';
+import {
+  isHolstered,
+  isLoud,
+  resetStamina,
+  spend,
+  SPRINT_MULT,
+  SPRINT_NOISE,
+  STAMINA_MAX,
+  staminaRegen,
+  stepStamina,
+} from '@/systems/Stamina';
 import { Weather, WEATHER_EFFECTS, type WeatherEffects } from '@/systems/Weather';
 import { HOME_SESSION, restartLine } from '@/systems/Home';
 import { LINE_LEDGER, missionLinePlays, revealCamera, revealDue, revealKey, stayReport, type Ending } from '@/systems/StoryBeats';
@@ -135,6 +147,8 @@ import {
   quitNote,
   rewardsText,
   stageResetText,
+  STAMINA_FULL_HIDE_SECONDS,
+  staminaShown,
   holdIsIdle,
   surfaceFogRange,
   surfaceHoldReason,
@@ -181,6 +195,7 @@ import { RevealOverlay } from '@/ui/RevealOverlay';
 import { RotateOverlay } from '@/ui/RotateOverlay';
 
 import { ScanRing } from '@/ui/ScanRing';
+import { StaminaRing } from '@/ui/StaminaRing';
 import { TouchControls } from '@/ui/TouchControls';
 import { Waypoint } from '@/ui/Waypoint';
 
@@ -314,6 +329,10 @@ const ELITE_PACK_DISTANCE = 10;
 const CHARGER_DISTANCE = 8;
 /** SPEC-038 §4.1: the dash streaks' colour — the salvager's cool white. */
 const DASH_STREAK_COLOR = 0xbfe6ff;
+/** SPEC-050 §4.2: an in-combat sprint shorter than this is a short one (`sceneInfo.sprintsShort`). */
+const SHORT_SPRINT_SECONDS = 0.5;
+/** SPEC-050 §4.6: the stamina ring is placed off the salvager's head, this far above the ground. */
+const STAMINA_HEAD_LIFT = 1.6;
 /** SPEC-029 §4.8: any explosive use waits this long after the last. */
 const EXPLOSIVE_USE_SECONDS = 0.5;
 /** SPEC-029 §4.12: the blast camera shake. */
@@ -723,6 +742,29 @@ export class SurfaceScene extends UiScene<'surface'> {
   #dashQueued = false;
   #dashes = 0;
   #dashCooldown = 1;
+  // SPEC-050 — the run: the keyboard toggle's latch, the value the touch
+  // stick's ring last showed, the current sprint's start and whether it began
+  // in combat, this visit's counts (sceneInfo), the player's speed over the
+  // last step, how long the pool has sat full, and the ring by the head.
+  #sprintLatch = false;
+  #sprintShown = false;
+  #sprintStartedAt = 0;
+  #sprintInCombat = false;
+  #sprints = 0;
+  #sprintsShort = 0;
+  #shots = 0;
+  #speed = 0;
+  /** Seconds the pool has sat full — a landing's has always been, so its ring starts hidden. */
+  #staminaFullFor = STAMINA_FULL_HIDE_SECONDS;
+  #staminaRing: StaminaRing | null = null;
+  /** SPEC-050 §4.6: the one stamina object the HUD model is fed, reused every step. */
+  readonly #staminaScratch: NonNullable<HudModel['stamina']> = {
+    value: STAMINA_MAX,
+    max: STAMINA_MAX,
+    exhausted: false,
+    sprinting: false,
+    shown: false,
+  };
   // SPEC-038 §4.5 — the storm wave of the current survive stage, keyed
   // `${mission}:${stage}:${wave}`, and its running handle (null while a death
   // has dismissed it and the respawn has not started it again).
@@ -1383,6 +1425,19 @@ export class SurfaceScene extends UiScene<'surface'> {
       plates.dispose();
       this.#plates = null;
     });
+    // SPEC-050 §4.6: the stamina ring beside the salvager's head, on both
+    // schemes, in a layer of its own so it can fade.
+    const staminaLayer = el('div', 'stamina-layer');
+    this.ui.mount(staminaLayer, 'hud');
+    const staminaRing = new StaminaRing(staminaLayer);
+    this.#staminaRing = staminaRing;
+    this.disposer.add(() => {
+      staminaRing.dispose();
+      this.ui.unmount(staminaLayer);
+      this.#staminaRing = null;
+      // §4.5: the toggle's latch never outlives the scene.
+      this.#sprintLatch = false;
+    });
 
     const death = new DeathOverlay(services.uiRoot);
     this.#death = death;
@@ -1640,6 +1695,7 @@ export class SurfaceScene extends UiScene<'surface'> {
     if (this.#holds > 0) {
       this.#qbLength = 0; // taps made during the beat are dropped like the edges
       this.#dashQueued = false;
+      this.#sprintLatch = false; // SPEC-050 §4.5 (50-b): any hold lets the run go
       this.#updateReveal(dt);
       return;
     }
@@ -1651,6 +1707,7 @@ export class SurfaceScene extends UiScene<'surface'> {
     if (this.#rotateBlocked()) {
       this.#qbLength = 0;
       this.#dashQueued = false;
+      this.#sprintLatch = false;
       world.player.vx = 0;
       world.player.vz = 0;
       return;
@@ -1665,6 +1722,7 @@ export class SurfaceScene extends UiScene<'surface'> {
     if (this.#uiHolds > 0) {
       this.#qbLength = 0; // the bar is inert while the simulation is held
       this.#dashQueued = false;
+      this.#sprintLatch = false;
       if (this.#edges.pressed('map')) this.#closeMap();
       if (this.#edges.pressed('interact') && this.#terminalOpen) this.#closeTerminal();
       world.player.vx = 0;
@@ -1688,6 +1746,7 @@ export class SurfaceScene extends UiScene<'surface'> {
     if (this.#modalOpen > 0) {
       this.#qbLength = 0;
       this.#dashQueued = false; // 38-a: a dash pressed under a modal line is dropped
+      this.#sprintLatch = false;
       world.player.vx = 0;
       world.player.vz = 0;
       return;
@@ -1706,6 +1765,7 @@ export class SurfaceScene extends UiScene<'surface'> {
     // the map — stops the rest of this step too, not just the next one, so
     // no combat, weather or spawning runs behind a freshly opened overlay.
     if (this.#uiHolds > 0) {
+      this.#sprintLatch = false;
       world.player.vx = 0;
       world.player.vz = 0;
       return;
@@ -1831,6 +1891,8 @@ export class SurfaceScene extends UiScene<'surface'> {
       this.#renderGuidance(world, view);
       // SPEC-041 §4.6: the nameplates follow this frame's camera.
       this.#renderElitePlates(world);
+      // SPEC-050 §4.6: so does the stamina ring.
+      this.#renderStamina(world);
       this.#forwardGrade();
       if (this.#minimapIn <= 0) {
         this.#minimapIn = MINIMAP_INTERVAL;
@@ -1917,6 +1979,23 @@ export class SurfaceScene extends UiScene<'surface'> {
       plates.show(slot, this.#screenPoint.x, this.#screenPoint.y, this.#plateName(e.def.id), affixLine(e));
     }
     plates.hideFrom(count);
+  }
+
+  /**
+   * SPEC-050 §4.6: the stamina ring at the projected head of the salvager, off
+   * the HUD model; off at once while they are down, or while a beat or the map
+   * owns the screen — as the scan ring is.
+   */
+  #renderStamina(world: CombatWorld): void {
+    const ring = this.#staminaRing;
+    if (ring === null) return;
+    const model = this.#hud?.model.stamina ?? null;
+    if (model === null || !world.player.alive || this.#uiHolds > 0 || this.#holds > 0) {
+      ring.hide();
+      return;
+    }
+    this.#project(world.player.x, world.player.z, STAMINA_HEAD_LIFT);
+    ring.set(this.#screenPoint.x, this.#screenPoint.y, model);
   }
 
   #plateName(id: EnemyId): string {
@@ -2250,6 +2329,20 @@ export class SurfaceScene extends UiScene<'surface'> {
     // storm wave running, what the weather deals in the open, the director's
     // target and the difficulty in force.
     info['dashes'] = this.#dashes;
+    // SPEC-050 §3: the pool, the run and its noise, the step's speed, the
+    // visit's shots and in-combat sprints, and how far the burrow's circle is.
+    if (this.#world !== null) {
+      const p = this.#world.player;
+      info['stamina'] = Math.round(p.stamina);
+      info['sprinting'] = p.sprinting ? 1 : 0;
+      info['exhausted'] = p.exhausted ? 1 : 0;
+      info['loud'] = isLoud(p, this.#world.time) ? 1 : 0;
+      info['burrowRing'] = this.#burrowRing(this.#world);
+    }
+    info['speed'] = Math.round(this.#speed * 100) / 100;
+    info['shots'] = this.#shots;
+    info['sprints'] = this.#sprints;
+    info['sprintsShort'] = this.#sprintsShort;
     info['telegraphs'] = this.#combat?.telegraphs.size ?? 0;
     info['telegraphDraws'] = this.#view?.telegraphDraws ?? 0;
     info['stormWave'] = this.#stormHandle === null || this.#storm === null ? '-' : this.#storm.wave;
@@ -2272,6 +2365,20 @@ export class SurfaceScene extends UiScene<'surface'> {
       info['arenaDist'] = Math.round(Math.hypot(this.#world.player.x - nest.x, this.#world.player.z - nest.z) * 10) / 10;
     }
     return info;
+  }
+
+  /**
+   * SPEC-050 §3: metres, to one decimal, from the burrow's circle — the one
+   * telegraph that follows a loud player — to the player; −1 with none down.
+   */
+  #burrowRing(world: CombatWorld): number {
+    const pool = this.#combat?.telegraphs;
+    if (pool === undefined) return -1;
+    for (let i = 0; i < pool.size; i++) {
+      const t = pool.at(i);
+      if (t.kind === 'circle' && t.followsLoud) return Math.round(Math.hypot(t.x - world.player.x, t.z - world.player.z) * 10) / 10;
+    }
+    return -1;
   }
 
   // ----------------------------------------------------------------- grade
@@ -2325,9 +2432,15 @@ export class SurfaceScene extends UiScene<'surface'> {
     // `qb-dash` since the last step counts as one. A dead player's is dropped.
     const dashPressed = this.#edges.pressed('dash') || this.#dashQueued;
     this.#dashQueued = false;
+    // SPEC-050 §4.1: the stamina step runs before the player moves — and while
+    // dead, so a death ends the run.
+    this.#stepSprint(world, dt);
+    const fromX = p.x;
+    const fromZ = p.z;
     if (!p.alive) {
       p.vx = 0;
       p.vz = 0;
+      this.#speed = 0;
       return;
     }
     const move = this.services.input.state.move;
@@ -2336,14 +2449,19 @@ export class SurfaceScene extends UiScene<'surface'> {
     const moveZ = (-move.x - move.y) * inv;
     if (dashPressed) this.#tryDash(world, moveX, moveZ);
     if (isDashing(p, world.time)) {
-      // SPEC-038 §4.1: the dash moves the salvager instead of the stick (E59).
+      // SPEC-038 §4.1: the dash moves the salvager instead of the stick (E59),
+      // at its own 25 m/s — SPEC-050 §4.2: the sprint multiplier is not its.
       stepDash(p, world.obstacles, this.#planet.surface.halfSize - WALL_INSET, world.time, dt, this.#resolved);
       // SPEC-041 §4.4, E62: a sealed ring stops the dash like the wall does.
       if (clampToSeal(world.arena, p)) p.dashUntil = world.time;
+      this.#speed = Math.hypot(p.x - fromX, p.z - fromZ) / dt;
       return;
     }
-    p.vx = moveX * world.stats.moveSpeed;
-    p.vz = moveZ * world.stats.moveSpeed;
+    // SPEC-050 §4.2: a sprint runs at ×1.35 the walk — the storm's slow is
+    // already inside `moveSpeed`, so a blizzard sprint is slowed as well.
+    const speed = world.stats.moveSpeed * (p.sprinting ? SPRINT_MULT : 1);
+    p.vx = moveX * speed;
+    p.vz = moveZ * speed;
     // SPEC-034 §4.1: resolve out of any obstacle *before* the slide, so a
     // player knocked into a rock can always walk away from it.
     if (world.obstacles.resolveCircle(p.x, p.z, p.radius, this.#resolved)) {
@@ -2360,12 +2478,82 @@ export class SurfaceScene extends UiScene<'surface'> {
     p.z = Math.max(-edge, Math.min(edge, p.z));
     // SPEC-041 §4.4, E62: while the boss lives, the sealed ring holds them in.
     clampToSeal(world.arena, p);
+    // SPEC-050 §3: `sceneInfo.speed` — how far this step actually carried them.
+    this.#speed = Math.hypot(p.x - fromX, p.z - fromZ) / dt;
+  }
+
+  /**
+   * SPEC-050 §4.1 — one stamina step, before the player moves. What is wanted
+   * (§4.5): with `sprintToggle` on the keyboard scheme the latch each `sprint`
+   * press flips, otherwise the held action — and never while explicit fire is
+   * held (Space, the left button, a touch aim-drag; auto-fire is not explicit,
+   * §4.2). It then sets the step's noise (§4.3), counts in-combat sprints and
+   * raises the `sprint` tip at the first (§4.2, §4.7), and keeps the touch
+   * stick's ring in step (§4.5). Allocates nothing.
+   */
+  #stepSprint(world: CombatWorld, dt: number): void {
+    const p = world.player;
+    const save = this.#save as Save;
+    const combat = this.#combat as Combat;
+    const input = this.services.input.state;
+    const toggle = this.services.settings.get().sprintToggle && input.scheme !== 'touch';
+    if (!toggle) this.#sprintLatch = false;
+    else if (this.#edges.pressed('sprint')) this.#sprintLatch = !this.#sprintLatch;
+    const wanted = toggle ? this.#sprintLatch : input.buttons.sprint.down;
+    const explicitFire = input.buttons.fire.down || input.aim.dragging;
+    const moving = Math.hypot(input.move.x, input.move.y) > 0;
+    const inCombat = combat.inCombat;
+    // Widened to the interface: the concrete class passives are disjoint literals.
+    const passive: ClassPassive = CLASSES[save.player.classId].passive;
+    const wasSprinting = p.sprinting;
+    const wasExhausted = p.exhausted;
+    stepStamina(
+      p,
+      wanted && !explicitFire,
+      moving,
+      inCombat,
+      passive.sprintDrainMult ?? 1,
+      staminaRegen(save.player.attributes.agility, save.meta.difficulty),
+      world.time,
+      dt,
+    );
+    if (p.exhausted && !wasExhausted) this.#onExhausted();
+    // §4.3: the noise the brains hear this step, set before `combat.update`.
+    world.noiseMult = isLoud(p, world.time) ? SPRINT_NOISE : 1;
+    // §4.2: an episode is a run of sprinting steps; it counts when combat was
+    // on at its start, and is short under half a second.
+    if (p.sprinting && !wasSprinting) {
+      this.#sprintStartedAt = world.time;
+      this.#sprintInCombat = inCombat;
+      if (inCombat) {
+        this.#sprints++;
+        this.#requestTip('sprint');
+      }
+    } else if (!p.sprinting && wasSprinting && this.#sprintInCombat) {
+      if (world.time - this.#sprintStartedAt < SHORT_SPRINT_SECONDS) this.#sprintsShort++;
+    }
+    if (p.sprinting !== this.#sprintShown) {
+      this.#sprintShown = p.sprinting;
+      this.#touch?.setSprinting(p.sprinting);
+    }
+  }
+
+  /**
+   * SPEC-050 §4.1: the step stamina reached 0 — by a sprint, a dash or the
+   * debug strip — `player:exhausted` once, and the toggle's latch lets go
+   * (§4.5): an exhausted player who still wants to run presses again.
+   */
+  #onExhausted(): void {
+    this.#sprintLatch = false;
+    this.services.events.emit('player:exhausted', {});
   }
 
   /**
    * SPEC-038 §4.1: start a dash along the camera-mapped move input — the same
    * rotation walking uses — or the facing when the stick and keys are idle. A
    * refused press (the cooldown) does nothing at all: no toast, no sound.
+   * SPEC-050 §4.2: nor does one under 30 stamina or while exhausted; a dash
+   * that starts spends its 30, and may exhaust (§4.1).
    */
   #tryDash(world: CombatWorld, moveX: number, moveZ: number): void {
     const p = world.player;
@@ -2374,10 +2562,12 @@ export class SurfaceScene extends UiScene<'surface'> {
     const dirX = moving ? moveX : Math.cos(p.facing);
     const dirZ = moving ? moveZ : Math.sin(p.facing);
     const cooldown = dashCooldown(CLASSES[save.player.classId].passive, save.player.attributes.agility, save.meta.difficulty);
-    if (!tryDash(p, dirX, dirZ, world.time, cooldown)) return;
+    const pressed = pressDash(p, dirX, dirZ, world.time, cooldown);
+    if (pressed === 'refused') return;
     this.#dashes++;
     this.#dashCooldown = cooldown;
     this.services.events.emit('player:dashed', { x: p.x, z: p.z, dirX: p.dashX, dirZ: p.dashZ });
+    if (pressed === 'exhausted') this.#onExhausted();
   }
 
   /** §4.3: mouse unprojects onto y = 0; a touch drag rotates by the camera yaw. */
@@ -2617,8 +2807,9 @@ export class SurfaceScene extends UiScene<'surface'> {
       combat.setWeatherMoveMult(this.#weatherMoveMult());
     }
 
-    // AC-25: hidden ⇔ inside ∧ no shot for REVEAL_AFTER_SHOT.
-    world.playerHidden = inside !== null && world.time - combat.lastShotAt >= REVEAL_AFTER_SHOT;
+    // AC-25: hidden ⇔ inside ∧ no shot for REVEAL_AFTER_SHOT — and SPEC-050
+    // §4.3 (50-e): not loud; a player who runs into a cave is heard for 1.5 s.
+    world.playerHidden = isHidden(inside !== null, world.time, combat.lastShotAt, p.loudUntil);
     this.#shelterState = inside === null ? 'none' : world.playerHidden ? 'hidden' : 'sheltered';
     this.#view?.setOccupiedShelter(inside?.index ?? null);
 
@@ -3472,6 +3663,11 @@ export class SurfaceScene extends UiScene<'surface'> {
     // SPEC-038 §4.1: a respawn or a recall resets the dash.
     p.dashReadyAt = 0;
     p.dashUntil = -Infinity;
+    // SPEC-050 §4.1 (50-c): and the stamina — full, quiet, the gun drawn, and
+    // no ring to show for it.
+    resetStamina(p);
+    this.#sprintLatch = false;
+    this.#staminaFullFor = STAMINA_FULL_HIDE_SECONDS;
     const save = this.#save as Save;
     save.player.hp = p.hp;
     this.#camTarget.x = p.x;
@@ -3638,6 +3834,13 @@ export class SurfaceScene extends UiScene<'surface'> {
     button('surface-spawn-elite', 'Spawn elite', () => this.#debugSpawnElite());
     // SPEC-038 §4.11: a charge on demand — the planet's rusher, aggroed.
     button('surface-spawn-charger', 'Spawn charger', () => this.#debugSpawnCharger());
+    // SPEC-050 §4.10: an empty pool, as a spend would leave it — exhausted,
+    // with `player:exhausted` on the way in.
+    button('surface-exhaust', 'Exhaust', () => {
+      const world = this.#world;
+      if (world === null || !world.player.alive) return;
+      if (spend(world.player, world.player.stamina, world.time)) this.#onExhausted();
+    });
     // SPEC-038 §4.11: the budget case needs all three kinds live at once, and
     // nothing in this spec draws a circle or a ring — so a long-fused pair.
     if (import.meta.env.DEV) {
@@ -4429,6 +4632,19 @@ export class SurfaceScene extends UiScene<'surface'> {
     // SPEC-038 §4.1: the ring runs from 1 at the press to 0 when ready.
     const dashLeft = world.player.dashReadyAt - world.time;
     m.dash = dashLeft > 0 ? Math.round(Math.min(1, dashLeft / Math.max(1e-6, this.#dashCooldown)) * 1000) / 1000 : 0;
+
+    // SPEC-050 §4.6: the stamina ring's model, through one reused object, and
+    // the holstered weapon slots — sprinting, or drawing after a sprint.
+    const p = world.player;
+    this.#staminaFullFor = p.stamina >= STAMINA_MAX ? this.#staminaFullFor + dt : 0;
+    const stamina = this.#staminaScratch;
+    stamina.value = Math.round(p.stamina);
+    stamina.max = STAMINA_MAX;
+    stamina.exhausted = p.exhausted;
+    stamina.sprinting = p.sprinting;
+    stamina.shown = staminaShown(p.stamina, combat?.inCombat === true, this.#staminaFullFor);
+    m.stamina = stamina;
+    m.holstered = p.alive && isHolstered(p, world.time);
 
     const interact = this.#interactHint(world);
     m.interact = interact === null ? null : interact.text;
@@ -5479,6 +5695,8 @@ export class SurfaceScene extends UiScene<'surface'> {
         'player:died',
         ({ cause }) => {
           this.#deathAt = 0;
+          // SPEC-050 §4.5: a death lets the toggle's latch go.
+          this.#sprintLatch = false;
           // SPEC-041 §4.4: a death opens the seal at once; the respawn clears the arena.
           if (this.#arena !== null) this.#arena.sealed = false;
           const lost = this.#economy?.applyDeathPenalty() ?? {};
@@ -5539,6 +5757,9 @@ export class SurfaceScene extends UiScene<'surface'> {
       ),
       // SPEC-029 §4.9: the first lock teaches the cover switch.
       bus.on('weapon:locked', () => this.#requestTip('overheat'), this),
+      // SPEC-050 §3: the player's shots this visit (`sceneInfo.shots`) — every
+      // trigger and launcher shot; the drone's carry no event.
+      bus.on('weapon:fired', () => void this.#shots++, this),
       // SPEC-038 §4.1: three afterimage streaks along the path, once per dash;
       // under reduce motion there are none — the ring says it.
       bus.on(
@@ -5555,8 +5776,12 @@ export class SurfaceScene extends UiScene<'surface'> {
         ({ kind, x, z }) => {
           const world = this.#world;
           if (world === null || !TELEGRAPH_WINDUPS.has(kind)) return;
-          // SPEC-041 §4.1: the wurm going under kicks up a ring of sand.
-          if (kind === 'burrow') this.#view?.fx.burst('dust_ring', x, z, this.#groundColor);
+          // SPEC-041 §4.1: the wurm going under kicks up a ring of sand, and
+          // SPEC-050 §4.7: its first burrow says how to walk out of it.
+          if (kind === 'burrow') {
+            this.#view?.fx.burst('dust_ring', x, z, this.#groundColor);
+            this.#requestTip('wurm');
+          }
           if (Math.hypot(x - world.player.x, z - world.player.z) <= DASH_TIP_RANGE) this.#requestTip('dash');
         },
         this,

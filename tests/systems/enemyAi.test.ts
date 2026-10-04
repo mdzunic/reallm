@@ -15,6 +15,8 @@ import {
 } from '@/systems/EnemyAi';
 import { damageReduction } from '@/systems/Combat';
 import { isDashing, stepDash, tryDash } from '@/systems/Dash';
+import { LOUD_TRACK_LOCK } from '@/entities/Telegraph';
+import { SPRINT_NOISE } from '@/systems/Stamina';
 import { STEP, harness, type Harness } from './combatFixtures';
 
 /** Steps until `predicate` holds, or -1; bounded by `seconds`. */
@@ -859,5 +861,170 @@ describe('the windup cue (SPEC-038 §4.2)', () => {
       expect(cue?.enemyId).toBe(id);
     }
     expect(Object.fromEntries(kinds)).toEqual({ dust_skitter: 'melee', wurmling: 'charge', scav_raider: 'shot' });
+  });
+});
+
+// ------------------------------------------------------------- SPEC-050
+
+describe('noise widens acquisition (SPEC-050 §4.3)', () => {
+  it('a wandering dust_skitter 25 m away acquires a loud player, and not a quiet one', () => {
+    const quiet = harness();
+    quiet.world.noiseMult = 1;
+    const calm = quiet.spawn('dust_skitter', 25, 0);
+    quiet.step();
+    expect(calm.aggro).toBe(false);
+    expect(['wander', 'idle']).toContain(calm.state);
+
+    const loud = harness();
+    loud.world.noiseMult = SPRINT_NOISE;
+    const heard = loud.spawn('dust_skitter', 25, 0);
+    loud.step();
+    expect(heard.aggro).toBe(true);
+    expect(heard.state).toBe('chase');
+  });
+
+  it('it is aggroRadius × aggroMult × noiseMult: 27 m for a skitter, and a storm narrows it again', () => {
+    const edge = harness();
+    edge.world.noiseMult = SPRINT_NOISE;
+    const beyond = edge.spawn('dust_skitter', 27.5, 0);
+    edge.step();
+    expect(beyond.aggro).toBe(false);
+
+    const storm = harness();
+    storm.world.noiseMult = SPRINT_NOISE;
+    storm.world.aggroMult = 0.5; // 18 × 0.5 × 1.5 = 13.5 m
+    const far = storm.spawn('dust_skitter', 15, 0);
+    storm.step();
+    expect(far.aggro).toBe(false);
+  });
+});
+
+describe('the Wurm listens (SPEC-050 §4.4)', () => {
+  /** A Wurm 30 m out, wounded into phase 2 — the step that opens its dig. */
+  function digging(h: Harness): { wurm: EnemyEntity; digStart: number } {
+    const wurm = h.spawn('dune_wurm', 30, 0);
+    wurm.aggro = true;
+    wurm.hp = wurm.maxHp * 0.35;
+    h.step();
+    expect(wurm.specialKind).toBe('burrow_dig');
+    return { wurm, digStart: h.world.time };
+  }
+
+  it('the burrow row carries trackLoud 12 and loudDigMult 0.6', () => {
+    const burrow = (harness().spawn('dune_wurm', 0, 0).def.moves ?? []).find((move) => move.kind === 'burrow');
+    expect(burrow?.trackLoud).toBe(12);
+    expect(burrow?.loudDigMult).toBe(0.6);
+  });
+
+  it('a quiet dig runs its 2.5 s', () => {
+    const h = harness();
+    const { wurm, digStart } = digging(h);
+    expect(runUntil(h, 3, () => wurm.specialKind === 'burrow_telegraph')).toBeGreaterThan(0);
+    expect(h.world.time - digStart).toBeCloseTo(2.5, 1);
+  });
+
+  it('a loud step during the dig ends it at digStart + 2.5 × 0.6', () => {
+    const h = harness();
+    const { wurm, digStart } = digging(h);
+    h.run(0.5);
+    h.world.player.loudUntil = h.world.time + 0.2; // one short burst is enough
+    expect(runUntil(h, 3, () => wurm.specialKind === 'burrow_telegraph')).toBeGreaterThan(0);
+    expect(h.world.time - digStart).toBeGreaterThanOrEqual(1.5 - 1e-9);
+    expect(h.world.time - digStart).toBeLessThan(1.5 + 2 * STEP);
+  });
+
+  it('ends at once when that moment has passed', () => {
+    const h = harness();
+    const { wurm, digStart } = digging(h);
+    h.run(2);
+    expect(wurm.specialKind).toBe('burrow_dig');
+    h.world.player.loudUntil = Infinity;
+    h.step();
+    expect(wurm.specialKind).toBe('burrow_telegraph');
+    expect(h.world.time - digStart).toBeLessThan(2.1);
+  });
+
+  it('is 1.875 s on casual (2.5 × 1.25 × 0.6)', () => {
+    const h = harness({ patch: (s) => void (s.meta.difficulty = 'casual') });
+    const { wurm, digStart } = digging(h);
+    h.world.player.loudUntil = Infinity;
+    expect(runUntil(h, 3, () => wurm.specialKind === 'burrow_telegraph')).toBeGreaterThan(0);
+    expect(h.world.time - digStart).toBeGreaterThanOrEqual(1.875 - 1e-9);
+    expect(h.world.time - digStart).toBeLessThan(1.875 + 2 * STEP);
+  });
+
+  it('hiding does not quiet a loud player under the Wurm (50-m)', () => {
+    const h = harness();
+    const { wurm, digStart } = digging(h);
+    h.world.playerHidden = true;
+    h.world.player.loudUntil = Infinity;
+    expect(runUntil(h, 3, () => wurm.specialKind === 'burrow_telegraph')).toBeGreaterThan(0);
+    expect(h.world.time - digStart).toBeLessThan(1.5 + 2 * STEP);
+  });
+
+  /** The burrow's circle, drawn at the origin by a quiet dig, and its owner. */
+  function circleDown(): { h: Harness; wurm: EnemyEntity } {
+    const h = harness();
+    const { wurm } = digging(h);
+    expect(runUntil(h, 3, () => wurm.specialKind === 'burrow_telegraph')).toBeGreaterThan(0);
+    expect(h.combat.telegraphs.size).toBe(1);
+    return { h, wurm };
+  }
+
+  it('draws a circle that follows, locking 0.4 s before it lands', () => {
+    const { h } = circleDown();
+    const t = h.combat.telegraphs.at(0);
+    expect(t.kind).toBe('circle');
+    expect(t.followsLoud).toBe(true);
+    expect(t.trackSpeed).toBe(12);
+    expect(LOUD_TRACK_LOCK).toBe(0.4);
+    expect(t.lockAt).toBeCloseTo(t.hitAt - LOUD_TRACK_LOCK, 9);
+  });
+
+  it('a loud player 3 m from the circle pulls it at up to 12 m/s until hitAt − 0.4, and not after', () => {
+    const { h, wurm } = circleDown();
+    const t = h.combat.telegraphs.at(0);
+    const p = h.world.player;
+    p.loudUntil = Infinity;
+    p.x = t.x + 3;
+    p.z = t.z;
+    // One step closes 12/60 = 0.2 m of the 3.
+    let x = t.x;
+    let z = t.z;
+    h.step();
+    expect(Math.hypot(t.x - x, t.z - z)).toBeCloseTo(12 * STEP, 6);
+    // Outrun it at 20 m/s: it follows at 12, never faster, until the lock.
+    let moved = 0;
+    let after = 0;
+    while (h.combat.telegraphs.size > 0 && h.combat.telegraphs.at(0) === t && h.world.time < t.hitAt - 2 * STEP) {
+      p.x += 20 * STEP;
+      x = t.x;
+      z = t.z;
+      h.step();
+      const d = Math.hypot(t.x - x, t.z - z);
+      expect(d).toBeLessThanOrEqual(12 * STEP + 1e-9);
+      if (h.world.time >= t.lockAt) after += d;
+      else moved += d;
+    }
+    expect(moved).toBeGreaterThan(5);
+    expect(after).toBe(0);
+    // The Wurm surfaces where the circle ended up.
+    const end = { x: t.x, z: t.z };
+    expect(runUntil(h, 1, () => wurm.specialKind === 'none')).toBeGreaterThan(0);
+    expect(wurm.x).toBeCloseTo(end.x, 9);
+    expect(wurm.z).toBeCloseTo(end.z, 9);
+  });
+
+  it('a walking or standing player leaves it where it was sampled', () => {
+    const { h } = circleDown();
+    const t = h.combat.telegraphs.at(0);
+    const at = { x: t.x, z: t.z };
+    const p = h.world.player;
+    for (let i = 0; i < 30; i++) {
+      p.x += 6 * STEP;
+      h.step();
+    }
+    expect(t.x).toBe(at.x);
+    expect(t.z).toBe(at.z);
   });
 });

@@ -4,8 +4,8 @@
 // (PLAN §4) and lives in the save, not here.
 //
 // Attribute effects are `ATTRIBUTE_EFFECTS` below (SPEC-039 §4.3): might +4 %
-// damage per point, vigor +8 max HP, agility +2 % move speed and +2 % crit,
-// tech +10 % companion effect and −3 % token cost (SPEC-010 caps the total
+// damage per point, vigor +8 max HP, agility +2 % move speed, +2 % crit, −3 %
+// dash cooldown and +3 % stamina regen (SPEC-050), tech +10 % companion effect and −3 % token cost (SPEC-010 caps the total
 // discount at 40 %). The stat formulas read that table and nothing else.
 //
 // Data modules are plain objects: no imports but other data, no functions
@@ -31,6 +31,8 @@ export interface ClassPassive {
   readonly nodeRadar?: boolean;
   /** SPEC-038 §4.1: scales the dash cooldown (the Scout's ×0.8). */
   readonly dashCooldownMult?: number;
+  /** SPEC-050 §4.1: scales the in-combat sprint's drain (the Scout's ×0.8 — 5 s from full). */
+  readonly sprintDrainMult?: number;
 }
 
 export interface ClassDef<Id extends string = string> {
@@ -55,12 +57,13 @@ export const ATTRIBUTE_MAX = 10;
 /**
  * Every attribute's per-point effects; the stat formulas read nothing else
  * (SPEC-039 §4.3, *initial tuning*). `dashCooldownCut` is agility's share of
- * the dash cooldown SPEC-038 owns.
+ * the dash cooldown SPEC-038 owns, and `staminaRegen` its share of SPEC-050's
+ * stamina regeneration.
  */
 export const ATTRIBUTE_EFFECTS = {
   might: { damage: 0.04 },
   vigor: { maxHp: 8 },
-  agility: { moveSpeed: 0.02, critChance: 0.02, dashCooldownCut: 0.03 },
+  agility: { moveSpeed: 0.02, critChance: 0.02, dashCooldownCut: 0.03, staminaRegen: 0.03 },
   tech: { companionEffect: 0.1, priceCut: 0.03 },
 } as const;
 
@@ -95,7 +98,7 @@ export const CLASSES = {
     name: 'Scout',
     blurb: 'Survey specialist. Moves fast, picks up wide, and reads the ground for nodes.',
     baseAttributes: { might: 2, vigor: 1, agility: 4, tech: 1 },
-    passive: { moveSpeedMult: 1.15, pickupRadiusMult: 1.25, nodeRadar: true, dashCooldownMult: 0.8 },
+    passive: { moveSpeedMult: 1.15, pickupRadiusMult: 1.25, nodeRadar: true, dashCooldownMult: 0.8, sprintDrainMult: 0.8 },
     startingWeapon: 'weapon_kinetic',
     startingSidearm: 'pistol_service',
     startingArmor: 'armor_scrap',

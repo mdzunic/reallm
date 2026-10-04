@@ -690,6 +690,14 @@ export class Hud {
         }
         return;
       }
+      case 'stamina':
+        // SPEC-050 §4.6: the scene draws the ring beside the salvager's head
+        // in `render()`, off this field, as it does the scan ring.
+        return;
+      case 'holstered':
+        // SPEC-050 §4.6: the weapon slots dim while the gun is holstered.
+        this.#quickBar?.setHolstered(m.holstered);
+        return;
       case 'interact':
       case 'interactAction': {
         // SPEC-037 §4.3: an actionable prompt leads with its `E` keycap on the
