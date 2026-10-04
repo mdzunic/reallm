@@ -867,7 +867,7 @@ def landmark_ice(b):
     b.add(C.place(cyl(0.32, 0.08, 5.6, n=6), (0, 0, 2.8)), mat=1, smooth=None)
     for i in range(8):
         a = math.radians(i * 45 + 13)
-        r = 2.55 + 0.35 * (i % 3) / 2
+        r = 2.35 + 0.3 * (i % 3) / 2
         h = 0.9 + 0.4 * ((i * 3) % 4) / 3
         b.add(C.place(cyl(0.22, 0.04, h, n=6), (r * math.cos(a), r * math.sin(a), 0.16), (78, 0, math.degrees(a) + 90 + 20 * (i % 2))),
               color=ice, smooth=None)
@@ -914,13 +914,15 @@ def landmark_volcanic(b):
     profile = [(4.2, 0.0), (3.5, 0.6), (2.4, 2.0), (1.4, 3.6), (1.0, 4.0), (0.7, 3.7), (0.55, 3.0)]
     cone = lathe(profile, n=16)
     C.displace(cone, lambda co: 0.14 * nz(co, 71, 0.6))
+    for v in cone.verts:
+        v.co.z = max(v.co.z, 0.0)   # the rim stays on the ground
     b.add(cone, color=shade('#2e2622', '#4a3d35', 72, ground=0.7, height=4.0), smooth=45)
     b.add(C.place(cyl(0.62, 0.62, 0.1, n=12), (0, 0, 3.15)), mat=1, smooth=None)
     for i, a0 in enumerate((0.6, 2.4)):
         pts = []
         for k in range(8):
             f = k / 7
-            r = 1.0 + 3.0 * f
+            r = 1.15 + 2.85 * f
             a = a0 + 0.25 * math.sin(f * 4 + i)
             pts.append((r * math.cos(a), r * math.sin(a), on_profile(profile[:5], r) + 0.06))
         b.add(C.tube(pts, [0.22, 0.24, 0.26, 0.28, 0.3, 0.3, 0.32, 0.34], n=4, cap_start=False), mat=1, smooth=None)
