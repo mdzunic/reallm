@@ -109,6 +109,8 @@ export interface NotesModel {
   readonly rating: number | null;
   readonly grade: RatingGrade | null;
   readonly chapters: readonly NotesChapter[];
+  /** The flags the model was built from — Notes' Letters section reads them (SPEC-049 §4.3). */
+  readonly flags: ReadonlySet<string>;
 }
 
 /** §4.4: Notes for the flags, one section per chapter 1…`chapterReached`. */
@@ -123,7 +125,7 @@ export function notesModel(flags: ReadonlySet<string>, chapterReached: number): 
     const here = all.filter((def) => clueFound(def, flags));
     chapters.push({ chapter, found: here, missing: all.length - here.length });
   }
-  return { found, total: CLUES.length, rating, grade: rating === null ? null : ratingGrade(rating), chapters };
+  return { found, total: CLUES.length, rating, grade: rating === null ? null : ratingGrade(rating), chapters, flags };
 }
 
 /**

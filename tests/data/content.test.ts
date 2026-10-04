@@ -1435,6 +1435,9 @@ describe('tips and hints (SPEC-027 AC-81..AC-84)', () => {
     }
     for (const dialogue of Object.values(DIALOGUE)) {
       for (const [index, line] of dialogue.lines.entries()) {
+        // SPEC-049 §4.3: Iris writes from Shelter Nine and guides nobody — her
+        // compass "points home, not north" — so her letters name no bearing.
+        if (line.speaker === 'home') continue;
         if (compass.test(line.text)) problems.push(`${dialogue.id}: line ${index}`);
       }
     }
@@ -1923,22 +1926,29 @@ function namingLines(lines: readonly Line[], clues: readonly ClueDef[]): number 
 }
 
 describe('the clue catalogue (SPEC-048 §4.2, §4.3)', () => {
-  it('is the fifteen clues of §4.2, in its order, with their chapters, paths, missions and triggers', () => {
-    expect(CLUES.length).toBe(15);
+  // SPEC-049 §4.6 adds five clues at their positions (15 → 20): the restart,
+  // the awake aside, the memory answer, the keepsake and the repeated letter.
+  it('is the fifteen clues of §4.2 and SPEC-049’s five, in order, with their chapters, paths, missions and triggers', () => {
+    expect(CLUES.length).toBe(20);
     expect(CLUE_DWELL_SECONDS).toBe(4);
     expect(CLUES.map((def) => [def.id, def.chapter, def.path, def.mission ?? '—', def.trigger.kind, def.lines.join(' ')])).toEqual([
       ['clue_raider_echo', 1, 'main', '—', 'kill', 'c1_m2_raider'],
       ['clue_scav_echo', 1, 'optional', 'c1_s2', 'line', 'c1_s2_echo'],
       ['clue_hull', 1, 'optional', '—', 'shelter', 'wreck_cinder4'],
+      ['clue_restart', 1, 'main', '—', 'respawn', 'restart_1 restart_2 restart_3'],
       ['clue_ridge_camp', 2, 'main', '—', 'line', 'c2_m1_done'],
       ['iteration_log', 2, 'optional', 'c2_s1', 'line', 'c2_s1_log'],
       ['clue_ruins', 3, 'main', '—', 'line', 'c3_m1_ruins'],
       ['scaffold_secret', 3, 'optional', 'c3_s1', 'line', 'c3_s1_secret'],
+      ['clue_awake', 3, 'main', '—', 'station', 'station_awake'],
+      ['memory_roof', 3, 'main', '—', 'choice', ''],
+      ['clue_keepsake', 3, 'optional', '—', 'keepsake', 'keepsake_drift'],
       ['clue_tally', 4, 'optional', '—', 'shelter', 'cave_tally'],
       ['signal_decoded', 4, 'main', '—', 'line', 'c4_m3_signal'],
       ['clue_bark', 4, 'optional', 'c4_s2', 'kill', 'c4_s2_bark'],
       ['clue_own_wreck', 5, 'optional', '—', 'shelter', 'wreck_hive'],
       ['chapter5_done', 5, 'main', '—', 'line', 'c5_m3_warden'],
+      ['clue_letter_repeat', 5, 'main', '—', 'station', 'letter_5'],
       ['clue_eden', 6, 'main', '—', 'line', 'c6_m1_forest'],
       ['clue_grove', 6, 'optional', '—', 'reach', 'eden_grove'],
       ['clue_never_hers', 6, 'main', '—', 'wave', 'c6_m2_wave'],
@@ -1947,15 +1957,20 @@ describe('the clue catalogue (SPEC-048 §4.2, §4.3)', () => {
       { kind: 'kill', enemy: 'scav_raider', during: 'c1_m2' },
       { kind: 'line' },
       { kind: 'shelter', planet: 'cinder4', shelter: 'wreck', seconds: 4 },
+      { kind: 'respawn' },
       { kind: 'line' },
       { kind: 'line' },
       { kind: 'line' },
       { kind: 'line' },
+      { kind: 'station' },
+      { kind: 'choice' },
+      { kind: 'keepsake' },
       { kind: 'shelter', planet: 'ferrum', shelter: 'cave', seconds: 4 },
       { kind: 'line' },
       { kind: 'kill', enemy: 'scav_fighter', during: 'c4_s2' },
       { kind: 'shelter', planet: 'hive', shelter: 'wreck', seconds: 4 },
       { kind: 'line' },
+      { kind: 'station' },
       { kind: 'line' },
       { kind: 'reach', planet: 'eden', poi: 'grove' },
       { kind: 'wave', wave: 'eden_final' },
@@ -1967,23 +1982,29 @@ describe('the clue catalogue (SPEC-048 §4.2, §4.3)', () => {
       expect(def.offTask, def.id).toBe(def.path === 'optional');
       if (def.mission !== undefined) expect(MISSIONS[def.mission].type, def.id).toBe('side');
     }
-    expect(CLUES.filter((def) => def.offTask)).toHaveLength(8);
+    // SPEC-049 §4.6: `clue_keepsake` is its only off-task clue.
+    expect(CLUES.filter((def) => def.offTask)).toHaveLength(9);
   });
 
-  it('keeps the records §4.2 writes', () => {
+  it('keeps the records §4.2 and SPEC-049 §4.6 write', () => {
     expect(CLUES.map((def) => [def.record.title, def.record.text])).toEqual([
       ['The raider’s last words', 'A dying raider used the scav’s warning: walk, do not run.'],
       ['Said before', 'A second scav gave the same warning word for word, and could not remember who to.'],
       ['An older tug', 'A tug like ours in the dunes. Older paint, the registry scratched off.'],
+      ['Eleven seconds', 'I died and woke on the pad. ARIA called it the medical frame.'],
       ['One bunk used', 'The ridge camp: one bunk slept in, and boots my size beside it.'],
       ['My voice', 'A flight log under the ice, in my voice, signed Iteration {prior}.'],
       ['Built twice', 'The same ruin twice on Thessaly: the same broken arch, the same lean.'],
       ['Tower stream', 'The towers streamed this planet’s settings: seed, population, weather.'],
+      ['No sleep', 'Awake since launch. I have not slept, or asked to.'],
+      ['First memory', 'ARIA asked what I remember first, and put my answer on file.'],
+      ['Tin, then brass', 'Iris’s compass was tin. Now I remember it brass.'],
       ['Sixty-one marks', 'Tally marks on a Ferrum cave wall, in fives. Sixty-one of them.'],
       ['The notice', 'The Hive’s signal was a notice addressed to instance/{instance}.'],
       ['What number', 'A scav pilot asked me what number I was on.'],
       ['CR-{prior}', 'A wrecked tug in the Hive, registry CR-{prior}, with the same scratch by the hatch.'],
       ['Sixty-one times', 'The Queen spoke in another voice. Sixty-one times before me.'],
+      ['The first letter, again', 'Her fifth letter is her first, word for word. None of them is dated.'],
       ['Four degrees', 'Eden: four degrees at every spring, and the same eleven trees in the same order.'],
       ['Same tree', 'The same tree, again and again, knot for knot.'],
       ['Never hers', 'The Hive came for the beacon after the Queen was dead.'],
@@ -1996,9 +2017,14 @@ describe('the clue catalogue (SPEC-048 §4.2, §4.3)', () => {
     }
   });
 
-  it('every clue line exists and belongs to exactly one clue, and every clue has a line', () => {
+  it('every clue line exists and belongs to exactly one clue, and every clue but a choice has a line', () => {
     const owners = new Map<string, number>();
     for (const def of CLUES) {
+      // SPEC-049 §4.6: the memory answer is the flag — a `choice` clue has no line.
+      if (def.trigger.kind === 'choice') {
+        expect(def.lines, def.id).toEqual([]);
+        continue;
+      }
       expect(def.lines.length, def.id).toBeGreaterThan(0);
       for (const line of def.lines) {
         expect(Object.hasOwn(DIALOGUE, line), `${def.id}: ${line}`).toBe(true);
@@ -2052,7 +2078,7 @@ describe('the clue catalogue (SPEC-048 §4.2, §4.3)', () => {
     }
   });
 
-  it('STORY_FLAGS gains the eleven clue flags after interlude5_seen (17 → 28), and the validator keeps them', () => {
+  it('STORY_FLAGS gains the eleven clue flags after interlude5_seen (17 → 28), SPEC-049’s twelve after them (→ 40), and the validator keeps them', () => {
     const added = [
       'clue_raider_echo',
       'clue_scav_echo',
@@ -2066,8 +2092,23 @@ describe('the clue catalogue (SPEC-048 §4.2, §4.3)', () => {
       'clue_grove',
       'clue_never_hers',
     ];
-    expect(STORY_FLAGS).toHaveLength(28);
-    expect(STORY_FLAGS.slice(STORY_FLAGS.indexOf('interlude5_seen') + 1)).toEqual(added);
+    // SPEC-049 §3, §4.6: the letters, the body's clues and the memory answers.
+    const home = [
+      'letter1_read',
+      'letter2_read',
+      'letter3_read',
+      'letter4_read',
+      'letter5_read',
+      'clue_restart',
+      'clue_awake',
+      'clue_keepsake',
+      'clue_letter_repeat',
+      'memory_roof',
+      'memory_tap',
+      'memory_stair',
+    ];
+    expect(STORY_FLAGS).toHaveLength(40);
+    expect(STORY_FLAGS.slice(STORY_FLAGS.indexOf('interlude5_seen') + 1)).toEqual([...added, ...home]);
     const save = newSave(
       0,
       {
@@ -2080,9 +2121,9 @@ describe('the clue catalogue (SPEC-048 §4.2, §4.3)', () => {
       7,
       0,
     );
-    save.progress.flags.push(...added);
+    save.progress.flags.push(...added, ...home);
     const result = validateSave(JSON.parse(JSON.stringify(save)));
-    expect(result.ok && result.data.progress.flags).toEqual(added);
+    expect(result.ok && result.data.progress.flags).toEqual([...added, ...home]);
   });
 });
 
@@ -2146,10 +2187,11 @@ describe('the Warden’s notice and ARIA’s confession (SPEC-048 §4.5)', () =>
 
   it('the naming cap: at most four lines name a clue in each of the three dialogues', () => {
     const counts = (['c4_m3_signal', 'c5_m3_warden', 'c5_m3_aria'] as const).map((id) => [id, namingLines(DIALOGUE_LINES[id]?.lines ?? [], CLUES)]);
+    // SPEC-049 §4.7: ARIA names a fourth cover, the restart; the memory lines stay outside the cap.
     expect(counts).toEqual([
       ['c4_m3_signal', 4],
       ['c5_m3_warden', 2],
-      ['c5_m3_aria', 3],
+      ['c5_m3_aria', 4],
     ]);
     for (const [id, count] of counts) expect(count, String(id)).toBeLessThanOrEqual(4);
   });
@@ -2257,5 +2299,237 @@ describe('main-path echoes, continuity and the text sweep (SPEC-048 §4.7)', () 
     const accept = DIALOGUE.c1_m1_accept.lines[0].text;
     expect(accept).toBe('I put the tug on the pad. You were out of the hatch twelve metres early. Walk it off — I want to see you move before anything else does.');
     for (const text of [MISSIONS.c1_m1.brief, accept]) expect(text).not.toMatch(/short of the pad|off the pad|Touchdown/);
+  });
+});
+
+// ------------------------------------------------------------ SPEC-049 §4, §6.1
+
+import {
+  BOSS_REVEALS,
+  CHAPTER_CARDS,
+  CONTRACTION_PATTERN,
+  KEEPSAKE,
+  KIN_ROW,
+  LETTERS,
+  MEMORY_ANSWERS,
+  MEMORY_PROMPT,
+  SPEAKERS,
+  type FilmDef,
+} from '@/data/index';
+
+interface HouseText {
+  readonly where: string;
+  readonly speaker: string;
+  readonly text: string;
+}
+
+/** §4.2: every text the house rule reads — dialogue, captions and their variants, chapter cards, boss reveals. */
+function houseTexts(): HouseText[] {
+  const out: HouseText[] = [];
+  for (const dialogue of Object.values(DIALOGUE_LINES)) {
+    dialogue.lines.forEach((line, index) => out.push({ where: `${dialogue.id} line ${index}`, speaker: line.speaker, text: line.text }));
+  }
+  const films: readonly FilmDef[] = Object.values(FILMS);
+  for (const film of films) {
+    film.captions.forEach((caption, index) => {
+      out.push({ where: `${film.id} caption ${index}`, speaker: caption.speaker, text: caption.text });
+      for (const variant of caption.variants ?? []) {
+        out.push({ where: `${film.id} caption ${index} variant`, speaker: caption.speaker, text: variant.text });
+      }
+    });
+  }
+  for (const [planet, card] of Object.entries(CHAPTER_CARDS)) out.push({ where: `chapter card ${planet}`, speaker: 'card', text: card.line });
+  for (const [boss, reveal] of Object.entries(BOSS_REVEALS)) out.push({ where: `boss reveal ${boss}`, speaker: reveal.speaker, text: reveal.line });
+  return out;
+}
+
+/** §4.2: the texts that break the house rule — a contraction from anyone but Iris. */
+function contractionProblems(texts: readonly HouseText[]): string[] {
+  return texts.filter((entry) => entry.speaker !== 'home' && CONTRACTION_PATTERN.test(entry.text)).map((entry) => `${entry.where}: ${entry.text}`);
+}
+
+const said = (id: string): string[] => (DIALOGUE_LINES[id]?.lines ?? []).map((line) => `${line.speaker}: ${line.text}`);
+
+describe('the house rule (SPEC-049 §4.2)', () => {
+  it('no dialogue line, caption, variant, chapter card or boss reveal uses a contraction unless Iris speaks it', () => {
+    const texts = houseTexts();
+    expect(texts.length).toBeGreaterThan(150);
+    expect(contractionProblems(texts)).toEqual([]);
+  });
+
+  it('the pattern catches contractions over either apostrophe, in any case, and lets possessives through', () => {
+    expect(CONTRACTION_PATTERN.flags).not.toContain('g');
+    for (const text of ['Don’t argue.', "don't", 'They’re saying', "we've", 'I’ll go', "you'd know", 'I’m here', "It's late", 'LET’S GO', 'that’s all', 'Who’s there', 'can’t sleep', "won't", 'He’s gone', 'there’s one']) {
+      expect(CONTRACTION_PATTERN.test(text), text).toBe(true);
+    }
+    // A noun's `’s` is a possessive to the pattern, whatever it stands for.
+    for (const text of ['Earth’s location', 'Iris’s compass', 'your mother’s', 'the towers’ settings', "the reactor's heat", 'Do not run.', 'I am ARIA.', 'o’clock']) {
+      expect(CONTRACTION_PATTERN.test(text), text).toBe(false);
+    }
+  });
+
+  it('fails a contraction wherever it reads and names the line; Iris keeps hers', () => {
+    expect(contractionProblems([{ where: 'x line 0', speaker: 'aria', text: 'It’s fine.' }])).toEqual(['x line 0: It’s fine.']);
+    expect(contractionProblems([{ where: 'chapter card x', speaker: 'card', text: "Don't land." }])).toHaveLength(1);
+    expect(contractionProblems([{ where: 'letter', speaker: 'home', text: 'Don’t argue with it.' }])).toEqual([]);
+    // …and she is the one voice that does use them.
+    expect(houseTexts().filter((entry) => entry.speaker === 'home' && CONTRACTION_PATTERN.test(entry.text)).length).toBeGreaterThan(0);
+  });
+});
+
+describe('Iris and her letters (SPEC-049 §4.1, §4.3)', () => {
+  it('the cast gains home, and the personnel file names her', () => {
+    expect(SPEAKERS).toEqual(['aria', 'command', 'scav', 'log', 'player', 'warden', 'home']);
+    expect(KIN_ROW).toBe('Next of kin — Iris (sister) · Shelter Nine, Block C');
+  });
+
+  it('the five letters are modal, carry no once, and read as §4.3 gives them', () => {
+    const letter1 = [
+      'home: The lamp over the map table stopped flickering today. Everybody clapped like idiots. They’re saying it was your oil.',
+      'home: You took my compass. Good. I fixed it so it points home, not north. Don’t argue with it.',
+      'home: Come back in one piece.',
+    ];
+    expect(said('letter_1')).toEqual(letter1);
+    expect(said('letter_2')).toEqual([
+      'home: They put me on the tap. Forty cups a turn, Block C. I pour every one like it’s for you.',
+      'home: Do you remember the roof? The night the grid died you counted satellites until you fell asleep on my shoulder.',
+      'home: I still can’t sleep without the hum.',
+    ]);
+    expect(said('letter_3')).toEqual([
+      'home: Grain! Actual grain. The grow room smells like summer and nobody knows what to do with their hands.',
+      'home: Everyone in Block D asks about you. I tell them you’re the one who never writes back.',
+      'home: Write back.',
+    ]);
+    expect(said('letter_4')).toEqual([
+      'home: The grid’s holding across three cities. They say you can see us from space now. I waved. Stupid.',
+      'home: The lamp over the map table stopped flickering today.',
+      'home: Come back in one piece.',
+    ]);
+    expect(said('letter_5')).toEqual([
+      ...letter1,
+      'aria: That is her first letter. Word for word. I checked it twice.',
+      'player: Read me the date.',
+      'aria: There is no date. There never was, on any of them.',
+      'aria: Command rates every run, by the way. It takes three points off every time you look at something it did not send you to.',
+    ]);
+    expect(DIALOGUE_LINES['letter_5']?.lines.map((line) => line.when ?? null)).toEqual([null, null, null, null, null, null, { offTask: { min: 1 } }]);
+    for (const letter of LETTERS) {
+      expect(DIALOGUE_LINES[letter.dialogue]?.modal, letter.dialogue).toBe(true);
+      expect(DIALOGUE_LINES[letter.dialogue]?.once, letter.dialogue).toBeUndefined();
+    }
+  });
+
+  it('letter 4 repeats letter 1’s first sentence, and letter 5 opens with letter 1 word for word (§6.1)', () => {
+    const first = DIALOGUE_LINES['letter_1']?.lines ?? [];
+    const firstSentence = /^[^.!?]*[.!?]/.exec(first[0]?.text ?? '')?.[0];
+    expect(firstSentence).toBe('The lamp over the map table stopped flickering today.');
+    expect(DIALOGUE_LINES['letter_4']?.lines[1]?.text).toBe(firstSentence);
+    expect(DIALOGUE_LINES['letter_5']?.lines.slice(0, 3)).toEqual(first);
+  });
+
+  it('every home line belongs to a letter: letters 1–4 are all Iris, and letter 5 hands over after three', () => {
+    const letterIds = new Set<string>(LETTERS.map((letter) => letter.dialogue));
+    for (const dialogue of Object.values(DIALOGUE_LINES)) {
+      for (const [index, line] of dialogue.lines.entries()) {
+        if (line.speaker === 'home') expect(letterIds.has(dialogue.id), `${dialogue.id} line ${index}`).toBe(true);
+      }
+    }
+    for (const id of ['letter_1', 'letter_2', 'letter_3', 'letter_4']) {
+      expect(DIALOGUE_LINES[id]?.lines.every((line) => line.speaker === 'home'), id).toBe(true);
+    }
+    expect(DIALOGUE_LINES['letter_5']?.lines.map((line) => line.speaker)).toEqual(['home', 'home', 'home', 'aria', 'player', 'aria', 'aria']);
+  });
+
+  it('LETTERS maps chapter N to letter_N and letterN_read, in order', () => {
+    expect(LETTERS.map((letter) => [letter.chapter, letter.dialogue, letter.flag])).toEqual([
+      [1, 'letter_1', 'letter1_read'],
+      [2, 'letter_2', 'letter2_read'],
+      [3, 'letter_3', 'letter3_read'],
+      [4, 'letter_4', 'letter4_read'],
+      [5, 'letter_5', 'letter5_read'],
+    ]);
+    for (const letter of LETTERS) expect(flagSet.has(letter.flag), letter.flag).toBe(true);
+  });
+});
+
+describe('the keepsake and the body (SPEC-049 §4.4, §4.5)', () => {
+  it('the keepsake’s five texts', () => {
+    expect(KEEPSAKE).toEqual({
+      t1: 'A tin compass from Iris, pressed into your hand at the shelter stair. It points home, she says. Not north.',
+      t2: 'A brass compass from Iris. She gave it to you on the roof. It points home.',
+      t3: 'A tin compass. Your mother’s, you think. It points home.',
+      t4: 'A compass. It points at your next objective. It has never once pointed home.',
+      t5: 'A compass. Standard kit. Every salvager was issued one, and a letter.',
+    });
+    expect(said('keepsake_drift')).toEqual(['aria: You called it tin last time. And last time it was hers, not your mother’s.']);
+    expect(DIALOGUE_LINES['keepsake_drift']?.modal).toBeUndefined();
+  });
+
+  it('the restart lines are ARIA’s, one each, non-modal, by band', () => {
+    expect(['restart_1', 'restart_2', 'restart_3'].map(said)).toEqual([
+      ['aria: Medical frame restarted your heart. Eleven seconds of nothing. Walk it off.'],
+      ['aria: Restart complete. I used to say that about your heart.'],
+      ['aria: Restarted. You know what that means now. So do I.'],
+    ]);
+    for (const id of ['restart_1', 'restart_2', 'restart_3']) {
+      expect(DIALOGUE_LINES[id]?.modal, id).toBeUndefined();
+      expect(DIALOGUE_LINES[id]?.once, id).toBeUndefined();
+    }
+  });
+
+  it('the asides are modal: the mission clock, and the question with its three answers', () => {
+    expect(said('station_awake')).toEqual([
+      'aria: Mission clock: {hours} hours since launch. You have not slept. You have not asked to.',
+      'player: Stims.',
+      'aria: Command issue. Yes. That must be it.',
+    ]);
+    expect(said('station_memory')).toEqual(['aria: Can I ask you something, for the file?']);
+    expect(said('station_memory_reply')).toEqual(['aria: Thank you. It is on file now.']);
+    for (const id of ['station_awake', 'station_memory', 'station_memory_reply']) {
+      expect(DIALOGUE_LINES[id]?.modal, id).toBe(true);
+      expect(DIALOGUE_LINES[id]?.once, id).toBeUndefined();
+    }
+    expect(MEMORY_PROMPT).toBe('What is the first thing you remember from before the Selection?');
+    expect(MEMORY_ANSWERS).toEqual([
+      { label: 'The roof. Counting satellites.', flag: 'memory_roof' },
+      { label: 'The tap in Block C.', flag: 'memory_tap' },
+      { label: 'The stair, the day the door shut.', flag: 'memory_stair' },
+    ]);
+  });
+
+  it('the memory clue is memory_roof, found by any answer, and its trigger is the choice', () => {
+    const memory = CLUES.find((def) => def.id === 'memory_roof');
+    expect(memory?.also).toEqual(['memory_tap', 'memory_stair']);
+    expect(memory?.trigger).toEqual({ kind: 'choice' });
+    expect(memory?.lines).toEqual([]);
+    expect([memory?.id, ...(memory?.also ?? [])]).toEqual(MEMORY_ANSWERS.map((answer) => answer.flag));
+    // Only the keepsake is off-task among the five.
+    const added = ['clue_restart', 'clue_awake', 'memory_roof', 'clue_keepsake', 'clue_letter_repeat'];
+    expect(CLUES.filter((def) => added.includes(def.id) && def.offTask).map((def) => def.id)).toEqual(['clue_keepsake']);
+  });
+});
+
+describe('ARIA remembers (SPEC-049 §4.7)', () => {
+  it('c5_m3_aria gains four rows after “You never went looking” and before “I do not know what is outside”', () => {
+    const lines = DIALOGUE_LINES['c5_m3_aria']?.lines ?? [];
+    expect(lines).toHaveLength(12);
+    expect(lines[5]?.text).toBe('You never went looking. I never had to lie to you. I am not sure that was better.');
+    expect(lines.slice(6, 10).map((line) => [line.speaker, line.text, line.when])).toEqual([
+      ['aria', 'Every time you died, I said the medical frame restarted your heart. There is no medical frame.', { flag: 'clue_restart' }],
+      [
+        'aria',
+        'I asked what you remembered first. You said the roof. It was in her second letter. Forty of the sixty-one before you said the roof.',
+        { flag: 'memory_roof' },
+      ],
+      ['aria', 'I asked what you remembered first. You said the tap. Fourteen of the sixty-one before you said the tap.', { flag: 'memory_tap' }],
+      [
+        'aria',
+        'I asked what you remembered first. You said the stair. Seven of the sixty-one said the stair. It did not help them.',
+        { flag: 'memory_stair' },
+      ],
+    ]);
+    expect(lines[10]?.text).toBe('I do not know what is outside either. That part was never in my brief.');
+    // The answers' counts are the sixty-one runs before this one: 40 + 14 + 7.
+    expect(40 + 14 + 7).toBe(61);
   });
 });

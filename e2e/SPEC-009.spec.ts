@@ -233,11 +233,13 @@ test.describe('SPEC-009 content data layer', () => {
       'quartermaster',
       'aria',
     ]);
-    // PLAN R9 added the five interlude flags (SPEC-021 §4.7), and PLAN R19 the
-    // eleven clue flags (SPEC-048 §4.2) — each a deliberate pin change.
-    expect(c.idUnions['STORY_FLAGS']).toHaveLength(28);
+    // PLAN R9 added the five interlude flags (SPEC-021 §4.7), PLAN R19 the
+    // eleven clue flags (SPEC-048 §4.2), and SPEC-049 §4.8 the letters, the
+    // body's clues and the memory answers (28 → 40) and Iris — each a
+    // deliberate pin change.
+    expect(c.idUnions['STORY_FLAGS']).toHaveLength(40);
     expect(c.idUnions['STORY_FLAGS']).toContain('chapter1_done');
-    expect(c.idUnions['SPEAKERS']).toEqual(['aria', 'command', 'scav', 'log', 'player', 'warden']);
+    expect(c.idUnions['SPEAKERS']).toEqual(['aria', 'command', 'scav', 'log', 'player', 'warden', 'home']);
     expect(c.idUnions['MESH_RECIPE_IDS']).toHaveLength(10);
     expect(c.idUnions['MUSIC_IDS'].length).toBeGreaterThan(0);
 

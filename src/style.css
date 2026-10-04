@@ -779,6 +779,10 @@ button.debug-button {
   --hud-side: 10px;
   --hull: #9fb3c8;
   --radius: 3px;
+
+  /* SPEC-049 §3 — Iris's letters: warm paper and ink, 7 : 1 or better. */
+  --letter-bg: #2b2620;
+  --letter-ink: #efe4cf;
 }
 
 /* SPEC-037 §3: the touch scheme's values. `--hud-tc-h` is not declared here —
@@ -2320,6 +2324,7 @@ html.reduce-motion .hud.is-static .hud-static {
 .dialogue[data-speaker='player'] .dialogue-speaker { color: var(--ink); }
 .dialogue[data-speaker='log'] .dialogue-speaker { color: var(--good); }
 .dialogue[data-speaker='warden'] .dialogue-speaker { color: var(--hp); }
+.dialogue[data-speaker='home'] .dialogue-speaker { color: var(--letter-ink); }
 
 .dialogue-text {
   margin: 0;
@@ -2335,6 +2340,16 @@ html.reduce-motion .hud.is-static .hud-static {
 
 .dialogue-log .dialogue-text {
   color: var(--good);
+}
+
+/* SPEC-049 §4.1: a `home` line is one of Iris's letters — paper, not glass.
+   The paper is opaque, so it stands in for the opaque fill the low preset and
+   play give every other panel (20-a, SPEC-040), and outranks both. */
+.dialogue.dialogue-letter,
+html.quality-low .dialogue.dialogue-letter,
+html[data-play] .dialogue.dialogue-letter {
+  background: var(--letter-bg);
+  color: var(--letter-ink);
 }
 
 /* AC-70: `warden` glitches; AC-71 pins it still under reduce-motion. */
@@ -4326,6 +4341,7 @@ html.reduce-motion .autopilot-bar-fill {
 .film-caption[data-speaker='player'] .film-caption-speaker { color: var(--ink); }
 .film-caption[data-speaker='log'] .film-caption-speaker { color: var(--good); }
 .film-caption[data-speaker='warden'] .film-caption-speaker { color: var(--hp); }
+.film-caption[data-speaker='home'] .film-caption-speaker { color: var(--letter-ink); }
 
 /* `log` reads as a terminal, as in the dialogue panel. */
 .film-caption[data-speaker='log'] {
@@ -6241,6 +6257,7 @@ html.reduce-motion .comms-log {
 .comms-line[data-speaker='player'] .comms-speaker { color: var(--ink); }
 .comms-line[data-speaker='log'] .comms-speaker { color: var(--good); }
 .comms-line[data-speaker='warden'] .comms-speaker { color: var(--hp); }
+.comms-line[data-speaker='home'] .comms-speaker { color: var(--letter-ink); }
 
 .comms-text {
   color: var(--ink);
@@ -6361,6 +6378,35 @@ html.plain-text #ui :is(.screen-body, .settings, .sheet, .comms-log, .dialogue, 
   border-radius: 50%;
   background: var(--accent);
   vertical-align: middle;
+}
+
+/* SPEC-049 §4.3: Iris's lines under Letters, one per line. A letter the
+   station has not played yet is dimmed like an unfound clue, under a class of
+   its own so a count of `.notes-missing` stays a count of clues. */
+.notes-letter-text {
+  color: var(--ink);
+}
+
+.notes-letter-waiting {
+  color: var(--ink-dim);
+}
+
+/* SPEC-049 §4.1: creation's next-of-kin row — a line of the personnel file,
+   not a control, so it reads as one run of text rather than label and field. */
+.creation-row.creation-kin {
+  display: block;
+  margin: 0;
+  color: var(--ink-dim);
+}
+
+.creation-kin-value {
+  color: var(--ink);
+}
+
+/* SPEC-049 §4.4: the compass in the Character tab. */
+.char-keepsake-text {
+  margin: 0;
+  color: var(--ink);
 }
 
 /* After the type badge, in the second accent: something here is not what it seems. */

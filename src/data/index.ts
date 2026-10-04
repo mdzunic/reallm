@@ -26,6 +26,7 @@ export * from '@/data/enemies';
 export * from '@/data/films';
 export * from '@/data/followers';
 export * from '@/data/hints';
+export * from '@/data/home';
 export * from '@/data/ids';
 export * from '@/data/items';
 export * from '@/data/loot';

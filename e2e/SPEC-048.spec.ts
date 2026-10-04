@@ -225,11 +225,13 @@ test('3, 5. four seconds in a Cinder-4 wreck find the older tug, and Notes recor
   await expect(page.getByTestId('comms-tab-comms')).toHaveAttribute('aria-selected', 'true');
   await expect(page.getByTestId('comms-tab-notes')).toHaveAttribute('aria-selected', 'false');
   await page.getByTestId('comms-tab-notes').click();
-  await expect(page.getByTestId('notes-count')).toHaveText('Recorded 1 of 15');
+  // SPEC-049 §4.6: the catalogue holds 20 clues now.
+  await expect(page.getByTestId('notes-count')).toHaveText('Recorded 1 of 20');
   await expect(page.getByTestId('notes-rating')).toHaveText('Command rating 0.97 — a good run');
   await expect(page.getByTestId('notes-clue-clue_hull')).toContainText('An older tug');
   await expect(page.getByTestId('notes-clue-clue_hull')).toContainText('A tug like ours in the dunes.');
-  await expect(page.getByTestId('notes-chapter-1').locator('.notes-missing')).toHaveCount(2);
+  // SPEC-049 §4.6: chapter 1 holds `clue_restart` too.
+  await expect(page.getByTestId('notes-chapter-1').locator('.notes-missing')).toHaveCount(3);
   await expect(page.getByTestId('notes-chapter-1').locator('.notes-missing').first()).toHaveText('— not recorded —');
   // CSS uppercases the header lines; the text is written in sentence case.
   expect(await page.getByTestId('notes-count').evaluate((node) => getComputedStyle(node).textTransform)).toBe('uppercase');
@@ -403,7 +405,9 @@ test('8b. with both bodies down the medium frame stays inside SPEC-015 §5 (96 d
 
 test('9. after the confession the echo ends on ARIA’s candid line, not the sand (E77)', async ({ page }) => {
   await start(page, URL);
-  await prepare(page, { flags: ['chapter5_done'] });
+  // SPEC-049 §4.3: chapter 5 done owes Iris's fifth letter, whose start would
+  // find a clue of its own; this case reads it as already read.
+  await prepare(page, { flags: ['chapter5_done', 'letter5_read'] });
   await station(page);
   await expect(page.getByTestId('station-tab-comms').getByTestId('notes-new')).toHaveCount(0);
   await play(page, 'c1_s2_echo');
@@ -420,7 +424,7 @@ test('9. after the confession the echo ends on ARIA’s candid line, not the san
   await page.getByTestId('comms-tab-notes').click();
   await expect(page.getByTestId('notes-clue-clue_scav_echo')).toContainText('Said before');
   // The confession counts too; its chapter's section waits for the flags to reach it.
-  await expect(page.getByTestId('notes-count')).toHaveText('Recorded 2 of 15');
+  await expect(page.getByTestId('notes-count')).toHaveText('Recorded 2 of 20');
   await page.getByTestId('comms-log-close').click();
   await expect(page.getByTestId('station-tab-comms').getByTestId('notes-new')).toHaveCount(0);
   await expect(page.getByTestId('station-tab-comms')).toBeFocused();

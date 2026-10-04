@@ -315,3 +315,56 @@ describe('captionText (§4.1)', () => {
     expect(captionText(caption, ctx({ name: 'Ash' }))).toBe('Base, Ash.');
   });
 });
+
+// SPEC-049 §4.3, §4.5, §4.7, §6.1 — the lines that listen to the body, the
+// memory answer and the off-task count.
+describe('SPEC-049: the confession, letter 5 and the mission clock', () => {
+  const withFlags = (...flags: string[]): Save => save((s) => s.progress.flags.push(...(flags as Save['progress']['flags'])));
+
+  it('ARIA plays 7 lines with no optional clue, the restart and the roof: rows 1, 2, 6, the restart, the roof, 7, 8 (AC)', () => {
+    const texts = visibleLines(DIALOGUE.c5_m3_aria, storyContextOf(withFlags('clue_restart', 'memory_roof'), 'hive')).map((line) => line.text);
+    expect(texts).toEqual([
+      'She is not lying. I am part of the system. I have kept you on task since the first sand.',
+      'I told you Earth flew other ships before the Selection. There were no other ships. There was you.',
+      'You never went looking. I never had to lie to you. I am not sure that was better.',
+      'Every time you died, I said the medical frame restarted your heart. There is no medical frame.',
+      'I asked what you remembered first. You said the roof. It was in her second letter. Forty of the sixty-one before you said the roof.',
+      'I do not know what is outside either. That part was never in my brief.',
+      'Eden-Prime is unlocked. I am still flying the ship, if you still want me to.',
+    ]);
+    // SPEC-048's pins hold: 5 with nothing found, 7 with the three covers.
+    expect(visibleLines(DIALOGUE.c5_m3_aria, storyContextOf(save(), 'hive'))).toHaveLength(5);
+    expect(visibleLines(DIALOGUE.c5_m3_aria, storyContextOf(withFlags('clue_scav_echo', 'iteration_log', 'scaffold_secret'), 'hive'))).toHaveLength(7);
+  });
+
+  it('each memory answer shows its own line and no other', () => {
+    const memoryLines = (flag: string): string[] =>
+      visibleLines(DIALOGUE.c5_m3_aria, storyContextOf(withFlags(flag), 'hive'))
+        .map((line) => line.text)
+        .filter((text) => text.startsWith('I asked what you remembered first.'));
+    expect(memoryLines('memory_roof')).toEqual([expect.stringContaining('You said the roof.')]);
+    expect(memoryLines('memory_tap')).toEqual([expect.stringContaining('You said the tap.')]);
+    expect(memoryLines('memory_stair')).toEqual([expect.stringContaining('You said the stair.')]);
+  });
+
+  it('letter 5’s rating line plays only with an off-task clue found (§4.3)', () => {
+    const none = visibleLines(DIALOGUE.letter_5, storyContextOf(save()));
+    expect(none).toHaveLength(6);
+    expect(none.map((line) => line.text).join(' ')).not.toContain('Command rates every run');
+    // A main clue is not off-task; the hull is.
+    expect(visibleLines(DIALOGUE.letter_5, storyContextOf(withFlags('clue_restart', 'clue_letter_repeat')))).toHaveLength(6);
+    const hull = visibleLines(DIALOGUE.letter_5, storyContextOf(withFlags('clue_hull')));
+    expect(hull).toHaveLength(7);
+    expect(hull.at(-1)?.text).toBe(
+      'Command rates every run, by the way. It takes three points off every time you look at something it did not send you to.',
+    );
+  });
+
+  it('the mission clock reads min(9999, floor(playtime / 60)) hours: 9 000 s is 150 (§4.5)', () => {
+    const at = (seconds: number): string | undefined =>
+      visibleLines(DIALOGUE.station_awake, storyContextOf(save((s) => (s.meta.playtimeSec = seconds))))[0]?.text;
+    expect(at(9000)).toBe('Mission clock: 150 hours since launch. You have not slept. You have not asked to.');
+    expect(at(59)).toBe('Mission clock: 0 hours since launch. You have not slept. You have not asked to.');
+    expect(at(10_000_000)).toContain('Mission clock: 9999 hours');
+  });
+});
