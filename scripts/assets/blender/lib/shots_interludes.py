@@ -23,13 +23,41 @@ LATTICE_POINT = 0.2   # SPEC-051 §4.4: a lattice light's radius, degrees
 LATTICE_LIGHT = 1.2   # … and its brightness on the lights map's scale (0–1.6)
 
 
-def earth_relit(ctx, level, push=(2.05, 1.9), pan=0.0, height=0.12, lattice=None, look=(1.0, 0.1)):
+# SPEC-051 §4.4's framing per level, 51-d's "move the camera, not the threshold".
+# One framing for all three failed the first render (2026-10-04, push 2.05 → 1.9,
+# the whole disc in frame): level 1's coast drew a lit box 73 px wide against the
+# 240 asked, and level 3's lattice, four times wider, already reached the bottom
+# edge — no single distance makes the first 240 px wide and keeps the third 32 px
+# clear. So each level is framed for its own patch: the camera south of the coast
+# and below the old height, looking north, so the coast fills the lower part of the
+# frame and the limb crosses the top third. `push`, `height` and `look` as below,
+# and `side`, a sideways shift of camera and aim together (east +): level 2 lights a
+# second town west of the coast. Level 3's lattice runs far south of the coast, so
+# from the south its rows reach the bottom edge at any tilt; it is framed from the
+# north, looking south, where they fall away toward the limb. A caller that passes
+# its own framing (earth_c4) keeps it, world-Z roll included. Poster lit boxes at
+# these values (960 × 540, Blender 5.2.1, M4 Pro): level 1 351,326–620,449;
+# level 2 150,335–769,461; level 3 232,209–749,393.
+RELIT_FRAMING = {
+    1: {'push': (1.13, 1.10), 'height': -0.23, 'look': (1.0, 0.077), 'side': 0.0},
+    2: {'push': (1.16, 1.13), 'height': -0.244, 'look': (1.0, 0.080), 'side': -0.05},
+    3: {'push': (1.37, 1.34), 'height': 0.42, 'look': (1.0, -0.082), 'side': 0.0},
+}
+
+
+def earth_relit(ctx, level, push=None, pan=0.0, height=None, lattice=None, look=None):
     """Earth's night side as Shelter Nine's coast lights up to `level`; the new
     patch fades in over 0.4–1.4 s. SPEC-051 §4.4 frames it for phones (initial
     tuning): the camera about two radii out, aimed at `home × look[0] + up ×
     look[1]`, so the coast fills the lower part of the frame; films.py's lit-box
     check holds it there. `lattice=(t_in, t_resolve, t_done, spacing_deg)`: the
     new level's lights come in as a lattice, then resolve (`_lattice`)."""
+    framing = RELIT_FRAMING.get(level, RELIT_FRAMING[1])
+    own = push is not None or height is not None or look is not None
+    push = framing['push'] if push is None else push
+    height = framing['height'] if height is None else height
+    look = framing['look'] if look is None else look
+    side = 0.0 if own else framing['side']
     F.world('#000000', 1.0, stars=1.8)
     home, east, up = E.basis(ctx)
     sun = (-home * 0.85 + up * 0.25 + east * 0.45).normalized()
@@ -37,9 +65,14 @@ def earth_relit(ctx, level, push=(2.05, 1.9), pan=0.0, height=0.12, lattice=None
     if lattice is not None:
         _lattice(ctx, rig, level, lattice)
     F.sun(-sun, 2.4)
-    start = home * push[0] + up * height - east * pan
-    end = home * push[1] + up * height + east * pan
-    cam, aim = F.camera(tuple(start), tuple(home * look[0] + up * look[1]), lens=35)
+    start = home * push[0] + up * height + east * (side - pan)
+    end = home * push[1] + up * height + east * (side + pan)
+    cam, aim = F.camera(tuple(start), tuple(home * look[0] + up * look[1] + east * side), lens=35)
+    if not own:
+        # Up is away from the planet, not world Z: the limb stays level across the
+        # top whichever side of the coast the camera stands (level 3 looks south).
+        aim.rotation_euler = home.to_track_quat('Z', 'Y').to_euler()
+        cam.constraints[-1].use_target_z = True
     F.keys(cam, 'location', [(0, start), (ctx.duration, end)])
     return cam, aim
 
