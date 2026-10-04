@@ -192,6 +192,14 @@ test('1, 9. a run in combat drains to exhaustion, the ring says so, and a fresh 
   await landOnCinder(page);
   expect(await info(page, 'stamina')).toBe(100);
   await press(page, 'surface-spawn-pack');
+  // §4.2: a run is an in-combat one only if combat was on at its first step,
+  // and the stamina step reads `inCombat` before the combat update that first
+  // sees the pack. Held at once, the keys can land with no frame drawn since
+  // the click — CI's fast runners did, twice — and the run starts a step
+  // before the pack is noticed: it still drains, but counts as no in-combat
+  // sprint and queues no tip. A quarter second of game time lets the pack,
+  // spawned well inside its 18 m aggro radius, notice the salvager first.
+  await gameSeconds(page, 0.25);
   await watchKeys(page);
   await startSampling(page, ['viewTime', 'sprinting', 'stamina', 'exhausted', 'ringUp', 'ringExhausted', 'ringNow']);
   await page.keyboard.down('ShiftLeft');
@@ -241,6 +249,10 @@ test('1, 9. a run in combat drains to exhaustion, the ring says so, and a fresh 
   await expect(ring).toHaveAttribute('aria-label', 'Stamina');
   await expect(ring).toHaveAttribute('id', 'hud-stamina');
   await expect(ring.locator('.stamina-ring-notch')).toHaveCount(1);
+
+  // §4.2: the run counted as the visit's one in-combat sprint — the tip's
+  // trigger, read here so a run that missed it fails now and says why.
+  expect(await info(page, 'sprints')).toBe(1);
 
   // §6.2 case 9: the first in-combat sprint queued the sprint tip. Tips wait
   // 12 s of game time behind each other (SPEC-027) and the landing's `move`
