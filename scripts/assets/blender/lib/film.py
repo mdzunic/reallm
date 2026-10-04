@@ -29,6 +29,12 @@ WIDTH, HEIGHT = 960, 540
 LOOK_VERSION = 2           # bump when the shared look changes: every shot re-renders
 RATE_CAP = 44 * 1024       # bytes per second of film (SPEC-021 §5.4)
 CRFS = (26, 29)
+# A film whose rungs start coarser. SPEC-051 §4.9 lets films/ grow 0.70 MB in the
+# drop; ending_escape's unmaking turns three photographs into posterised grey under
+# a grid, and at CRF 26 it came out at 41.8 KB/s — under the cap, 451 KB over its
+# old size, and films/ 81 KB past the allotment. Held still, it was no smaller: the
+# cost is the picture, not the move (51-f).
+FILM_CRFS = {'ending_escape': (28, 29)}
 POSTER_QUALITY = 75
 # SPEC-051 §4.9 (PLAN R12): the flashes each film counted before the SPEC-051 drop;
 # a rebuild that counts more fails, so a retake never adds one
@@ -809,7 +815,7 @@ def build_film(film, opts):
     rel = f'films/{film.id}.mp4'
     path = os.path.join(opts['out'], rel)
     duration = film.frames / FPS
-    for crf in CRFS:
+    for crf in FILM_CRFS.get(film.id, CRFS):
         size = encode(film, dirs, path, crf, False)
         if size / duration <= RATE_CAP:
             break

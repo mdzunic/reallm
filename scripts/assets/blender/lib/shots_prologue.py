@@ -27,7 +27,12 @@ STAMP_ORDER = (0, 2, 7, 1)
 # group) in plate space (u right, v up, radius in plate widths), groups 0–2 left to
 # right; they go out at STRANDED_OFF, under the film's three `film_powerdown` cues.
 # While this is empty the build measures them on the plate (PL.glints) and prints them.
-STRANDED_EYES = ()
+# Pinned from that measurement of the committed plate (2026-10-04): eight slits.
+STRANDED_EYES = (
+    (0.1933, 0.4479, 0.0029, 0), (0.2782, 0.4479, 0.004, 0), (0.3664, 0.4466, 0.0036, 0),
+    (0.4622, 0.4486, 0.0036, 1), (0.5398, 0.4455, 0.004, 1), (0.6386, 0.4461, 0.0036, 1),
+    (0.7266, 0.444, 0.004, 2), (0.815, 0.4478, 0.0036, 2),
+)
 STRANDED_OFF = (2.5, 5.0, 7.5)
 # SPEC-051 §4.6: the ruined spaceport at dawn, Iris at the fence in the foreground
 LIFTOFF_PLATE = PL.path('prologue_liftoff')

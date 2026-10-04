@@ -322,18 +322,22 @@ def hive_dark(ctx):
     g.link(te.outputs['Color'], bsdf.inputs['Emission Color'])
     # the dark spreads from the heart (+x, where the camera looks) outward: slow
     # at first, so the poster has a dead centre ringed by live veins, then fast,
-    # reaching the edge at 5.9 s (SPEC-051 §4.5: no more than 6 black frames)
+    # reaching the edge at 5.9 s (SPEC-051 §4.5: no more than 6 black frames).
+    # Through the field of view the front slows from 4.5 to 5.8 s, and only the
+    # last 0.1 s takes the rest: keyed straight from 4.5 to 5.9 it crossed every
+    # visible vein by 4.75 s, and the first full render held 31 frames below
+    # 0.002 (mean 0.012 at 4.5 s, 0.0011 at 4.75 s, ~0 from 5.0 s).
     dist = g.vmath('DISTANCE', g.coords('Object'), (1.0, 0.0, 0.0))
     alive = g.node('ShaderNodeMapRange', interpolation_type='SMOOTHSTEP', clamp=True)
     g.link(dist, alive.inputs['Value'])
-    F.keys(alive.inputs['From Min'], 'default_value', [(0.5, -0.3), (4.5, 0.45), (5.9, 2.05)], interp='LINEAR')
-    F.keys(alive.inputs['From Max'], 'default_value', [(0.5, 0.0), (4.5, 0.75), (5.9, 2.35)], interp='LINEAR')
+    F.keys(alive.inputs['From Min'], 'default_value', [(0.5, -0.3), (4.5, 0.45), (5.8, 0.62), (5.9, 2.05)], interp='LINEAR')
+    F.keys(alive.inputs['From Max'], 'default_value', [(0.5, 0.0), (4.5, 0.75), (5.8, 0.92), (5.9, 2.35)], interp='LINEAR')
     g.link(g.math('MULTIPLY', alive.outputs['Result'], 4.0), bsdf.inputs['Emission Strength'])
     out = g.node('ShaderNodeOutputMaterial')
     g.link(bsdf.outputs[0], out.inputs['Surface'])
     shell.data.materials.append(m)
     glow = F.lamp((6, 0, 0), 1500.0, '#8a6aa0', radius=2.0)
-    F.keys(glow.data, 'energy', [(0.5, 1500.0), (4.5, 900.0), (5.9, 0.0)], interp='LINEAR')
+    F.keys(glow.data, 'energy', [(0.5, 1500.0), (4.5, 900.0), (5.8, 250.0), (5.9, 0.0)], interp='LINEAR')
     cam, aim = F.camera((4, 0, 0.5), (20, 0, 0), lens=24, clip=(0.05, 100.0))
     F.keys(cam, 'location', [(0, Vector((4, 0, 0.5))), (ctx.duration, Vector((-10, 0, 1.5)))])
 
