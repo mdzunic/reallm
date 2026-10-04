@@ -218,7 +218,7 @@ def glints(plate, groups=3, count=(7, 9)):
                     if (y + dy, x + dx) in todo:
                         todo.remove((y + dy, x + dx))
                         stack.append((y + dy, x + dx))
-        if len(pts) >= 4:
+        if 4 <= len(pts) <= 0.002 * h * w:   # a slit, not a fire or a red sky
             blobs.append(np.array(pts, np.float32))
     blobs = sorted(blobs, key=len, reverse=True)[:count[1]]
     if len(blobs) < count[0]:
