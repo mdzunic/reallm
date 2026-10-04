@@ -31,6 +31,21 @@ STRANDED_EYES = ()
 STRANDED_OFF = (2.5, 5.0, 7.5)
 # SPEC-051 §4.6: the ruined spaceport at dawn, Iris at the fence in the foreground
 LIFTOFF_PLATE = PL.path('prologue_liftoff')
+# The camera and the pad, tuned to that photograph. Measured on it (fractions of
+# the frame, y down): the horizon at 0.52; the pad's front face meets the apron at
+# 0.612 and its deck's near edge is at 0.553; the pad spans x 0.309–0.756. From
+# the shot's 2.5 m camera with a 30 mm lens that is a 0.77° tilt up, the pad's
+# front 40.3 m out, a raised deck 1.6 m high and some 21.6 m across, its centre
+# 51 m away at frame x 0.533. The tug stands on the deck there (ship.glb's lowest
+# point is 0.229 below its origin), and the photograph itself on a box where the
+# pad is and on the apron (PL.occluder) hides its exhaust below the deck. The plume stays within ~12 m of the
+# pad, clear of Iris in the left third — the photograph is behind everything
+# modelled, so smoke drawn where she stands would cross in front of her.
+LIFTOFF_CAMERA = ((-16, -24, 2.5), (0, 0, 2.89))
+LIFTOFF_PAD = Vector((13.97, 17.32, 1.6))
+LIFTOFF_PAD_SIZE = 21.6
+LIFTOFF_PAD_YAW = -33.7   # the deck's front edge square to the camera
+SHIP_BASE = 0.229
 
 
 # ------------------------------------------------------------ small helpers
@@ -376,10 +391,16 @@ def liftoff(ctx):
     lamp and plume. The camera matches the plate's horizon (initial tuning)."""
     sky_gradient([(0.0, '#2a2420'), (0.5, '#ffb070'), (0.55, '#c07060'), (0.7, '#6a6a80'), (1.0, '#3a4458')], 0.8)
     F.sun((-0.6, 1.0, -0.25), 2.2, '#ffc890')   # the dawn of the plate, on the tug
-    cam, aim = F.camera((-16, -24, 2.5), (0, 0, 4), lens=30)
+    cam, aim = F.camera(*LIFTOFF_CAMERA, lens=30)
     PL.backdrop(LIFTOFF_PLATE, cam, distance=120)
-    ship = tug(ctx, (0, 0, 2.5), (0, 0, 0), 6.0)
-    F.keys(ship, 'location', [(0.8, Vector((0, 0, 2.5))), (ctx.duration, Vector((0, 8, 48)))])
+    # The pad and the apron, as the photograph: the exhaust below the deck goes behind them.
+    deck = LIFTOFF_PAD.z - 0.02
+    PL.occluder(LIFTOFF_PLATE, C.box(LIFTOFF_PAD_SIZE, LIFTOFF_PAD_SIZE, deck), (LIFTOFF_PAD.x, LIFTOFF_PAD.y, deck / 2),
+                (0, 0, LIFTOFF_PAD_YAW))
+    PL.occluder(LIFTOFF_PLATE, C.box(400, 400, 0.02), (LIFTOFF_PAD.x, LIFTOFF_PAD.y, -0.01))
+    rest = LIFTOFF_PAD + Vector((0, 0, SHIP_BASE * 6.0))
+    ship = tug(ctx, tuple(rest), (0, 0, 0), 6.0)
+    F.keys(ship, 'location', [(0.8, rest), (ctx.duration, rest + Vector((0, 8, 45.5)))])
     F.keys(ship, 'rotation_euler', [(0.8, Vector((0, 0, 0))), (ctx.duration, Vector((math.radians(14), 0, 0)))])
     burn = F.glow('Exhaust', '#ffcf8a', 0.0)
     for dx in (-0.45, 0.45):
@@ -392,9 +413,10 @@ def liftoff(ctx):
     smoke = F.textured('Plume', ctx.asset('textures/sprites/smoke.webp'), alpha=True, rough=1.0, tint='#bdb2a8')
     for i in range(12):
         a = i / 12 * 2 * math.pi
-        p = F.plane('Plume', 6, 6, smoke, (math.cos(a) * 5, math.sin(a) * 5, 2.0), (90, 0, math.degrees(a)))
-        F.keys(p, 'scale', [(0.8, Vector((0.3, 0.3, 0.3))), (ctx.duration, Vector((3.2, 3.2, 3.2)))])
-        F.keys(p, 'location', [(0.8, Vector(p.location)), (ctx.duration, Vector((math.cos(a) * 16, math.sin(a) * 16, 9.0)))])
+        out = Vector((math.cos(a), math.sin(a), 0.0))
+        p = F.plane('Plume', 6, 6, smoke, tuple(LIFTOFF_PAD + out * 5 + Vector((0, 0, 0.9))), (90, 0, math.degrees(a)))
+        F.keys(p, 'scale', [(0.8, Vector((0.3, 0.3, 0.3))), (ctx.duration, Vector((2.0, 2.0, 2.0)))])
+        F.keys(p, 'location', [(0.8, Vector(p.location)), (ctx.duration, LIFTOFF_PAD + out * 6 + Vector((0, 0, 5.0)))])
 
 
 def relay(ctx):

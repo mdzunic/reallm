@@ -392,3 +392,31 @@ def backdrop(plate, cam, distance, exposure=1.0, saturation=1.0):
     plane = F.plane('Backdrop', w, w / aspect, m, (0, 0, -distance))
     plane.parent = cam
     return plane
+
+
+def occluder(plate, bm, loc=(0, 0, 0), rot=(0, 0, 0), exposure=1.0):
+    """The photograph itself on `bm`, a mesh set where a surface in the picture
+    stands (the liftoff pad, the apron): textured through the camera's window
+    coordinates — the backdrop's crop, cover never stretch — it shows exactly
+    the backdrop's pixels, so it cannot be seen, and it hides whatever modelled
+    thing passes behind it (the tug's exhaust below the deck). It casts no
+    shadow."""
+    m = bpy.data.materials.new('PlatePatch')
+    m.use_nodes = True
+    g = N.Graph(m)
+    tex = g.node('ShaderNodeTexImage', image=F.image(plate), extension='EXTEND')
+    crop = ASPECT / (tex.image.size[0] / tex.image.size[1])   # the backdrop's cover crop, across
+    coords = g.node('ShaderNodeTexCoord')
+    fit = g.node('ShaderNodeMapping')
+    fit.inputs['Location'].default_value = (0.5 * (1 - crop), 0.0, 0.0)
+    fit.inputs['Scale'].default_value = (crop, 1.0, 1.0)
+    g.link(coords.outputs['Window'], fit.inputs['Vector'])
+    g.link(fit.outputs['Vector'], tex.inputs['Vector'])
+    emit = g.node('ShaderNodeEmission')
+    g.link(tex.outputs['Color'], emit.inputs['Color'])
+    emit.inputs['Strength'].default_value = exposure
+    out = g.node('ShaderNodeOutputMaterial')
+    g.link(emit.outputs['Emission'], out.inputs['Surface'])
+    patch = F.obj('PlatePatch', bm, m, loc, rot)
+    patch.visible_shadow = False
+    return patch
