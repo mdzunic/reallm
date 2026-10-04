@@ -27,7 +27,14 @@ def _bounds(objs):
     return lo, hi
 
 
-def _rig(scene, bg):
+RIG = (
+    ('key', 'SUN', 3.2, '#fff1dc', (50, 0, -35)),
+    ('rim', 'SUN', 2.2, '#8fb4ff', (60, 0, 150)),
+    ('fill', 'SUN', 0.7, '#ffffff', (70, 0, 60)),
+)
+
+
+def _rig(scene, bg, lights=RIG):
     world = bpy.data.worlds.new('PreviewWorld')
     world.use_nodes = True
     back = next(n for n in world.node_tree.nodes if n.type == 'BACKGROUND')
@@ -35,11 +42,7 @@ def _rig(scene, bg):
     back.inputs['Strength'].default_value = 1.0
     scene.world = world
     made = []
-    for name, kind, energy, colour, rot in (
-        ('key', 'SUN', 3.2, '#fff1dc', (50, 0, -35)),
-        ('rim', 'SUN', 2.2, '#8fb4ff', (60, 0, 150)),
-        ('fill', 'SUN', 0.7, '#ffffff', (70, 0, 60)),
-    ):
+    for name, kind, energy, colour, rot in lights:
         light = bpy.data.lights.new(name, kind)
         light.energy = energy
         light.color = C.lin(colour)[:3]
@@ -49,15 +52,17 @@ def _rig(scene, bg):
     return made
 
 
-def render(objs, path, azimuth=35.0, elevation=16.0, size=384, bg='#1a2029', margin=1.12, focus=None):
-    """Frame `objs` (or the box `focus`) from azimuth/elevation (deg, 0 = front, −Y)."""
+def render(objs, path, azimuth=35.0, elevation=16.0, size=384, bg='#1a2029', margin=1.12, focus=None, lights=RIG):
+    """Frame `objs` (or the box `focus`) from azimuth/elevation (deg, 0 = front, −Y).
+    `lights`: (name, kind, energy, '#colour', rotation°) rows; the default rig
+    is a key, a rim and a fill (SPEC-052's cave sheet asks for one warm key)."""
     scene = bpy.context.scene
     scene.render.engine = 'BLENDER_EEVEE'
     scene.render.resolution_x = scene.render.resolution_y = size
     scene.render.image_settings.file_format = 'PNG'
     scene.render.film_transparent = False
     scene.view_settings.view_transform = 'AgX'
-    lights = _rig(scene, bg)
+    lamps = _rig(scene, bg, lights)
     lo, hi = focus if focus is not None else _bounds(objs)
     centre = (lo + hi) / 2
     radius = max((hi - lo).length / 2, 0.05)
@@ -73,7 +78,7 @@ def render(objs, path, azimuth=35.0, elevation=16.0, size=384, bg='#1a2029', mar
     scene.camera = cam
     scene.render.filepath = C.ensure_dir(path)
     bpy.ops.render.render(write_still=True)
-    for obj in lights + [cam]:
+    for obj in lamps + [cam]:
         bpy.data.objects.remove(obj, do_unlink=True)
     scene.view_settings.view_transform = 'Standard'
     print(f'PREVIEW {path}')

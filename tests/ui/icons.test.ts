@@ -55,15 +55,22 @@ describe('itemManifest (SPEC-031 §4.14)', () => {
 // longer the normal case: every id the shelf can show must name a picture. The
 // test reads the manifest the Blender build wrote, not a fixture, so an item
 // added without a render fails here and names itself.
-describe('the committed manifest (SPEC-035 §4.15, AC-45)', () => {
+//
+// SPEC-052 §4.8 draws seven pictures before their items exist. They wait in
+// PENDING_PICTURES; SPEC-056 adds the items, moves the 26 to 33 and empties the
+// list, so an item id that does not match its picture fails there (52-f).
+const PENDING_PICTURES = ['relic_last_word', 'relic_cold_coil', 'relic_seed_drum', 'relic_slag_vent',
+  'relic_seeker', 'flare', 'stim'] as const;   // SPEC-056 empties it when the items exist
+
+describe('the committed manifest (SPEC-035 §4.15, AC-45; SPEC-052 §4.8)', () => {
   const manifest = parseItemManifest(
     JSON.parse(readFileSync(new URL('../../public/assets/items/manifest.json', import.meta.url).pathname, 'utf8')) as unknown,
   );
   const ids = [...Object.keys(ITEMS), ...Object.keys(COMPANIONS)] as IconId[];
 
-  it('lists a render for all 21 items and 5 companions', () => {
+  it('lists a render for all 21 items and 5 companions, and the pictures still waiting for theirs', () => {
     expect(ids).toHaveLength(26);
-    expect([...manifest].sort()).toEqual([...ids].sort());
+    expect([...manifest].sort()).toEqual([...ids, ...PENDING_PICTURES].sort());
   });
 
   it('resolves every item and companion id to an image, never a glyph', () => {
