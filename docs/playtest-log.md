@@ -2231,6 +2231,7 @@ The plates:
 
     `watchers` matches before 2.8 s, and after that differs by under 1 of 255 except on the tear's frames 362–367.
   - **The eyes in `stranded`** go dark left to right. Each group's red reaches zero at 59.0, 61.5 and 64.0 s, the end of its 0.5 s fade from the cue. The one-frame dip to strength 4 before each fade does not register, because the slit stays saturated at any strength above about 1. That is the spec's initial tuning, and the drop is not rebuilt for it (the owner's ruling); the watch-through below should judge it.
+  - **`earth_unmade`'s beat 2** shows the street photograph's own eye slits, a dim red of about 110 px in all, from 16.0 s until the unmaking greys them by about 17.2 s. §4.3's table asks for them unlit. This is also for the watch-through, and is not rebuilt for.
 
 **The likeness check (§7) — performed 2026-10-04: every face failed.**
 
