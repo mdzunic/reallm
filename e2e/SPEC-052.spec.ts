@@ -103,18 +103,15 @@ test('4. the cave kit, the landmarks and the atlas are served', async ({ page })
 
 /** Draws a served image to a canvas of its own size and returns its RGBA. */
 async function readBack(page: Page, url: string): Promise<{ width: number; height: number; data: number[] }> {
-  // Any document on the dev server's origin will do; the image itself needs no game.
+  // Any document on the dev server's origin will do (the image needs no game);
+  // an OffscreenCanvas works in the SVG document this one is.
   await page.goto('/favicon.svg');
   return page.evaluate(async (src) => {
-    const image = new Image();
-    image.src = src;
-    await image.decode();
-    const canvas = document.createElement('canvas');
-    canvas.width = image.naturalWidth;
-    canvas.height = image.naturalHeight;
+    const bitmap = await createImageBitmap(await (await fetch(src)).blob());
+    const canvas = new OffscreenCanvas(bitmap.width, bitmap.height);
     const g = canvas.getContext('2d', { willReadFrequently: true });
     if (g === null) throw new Error('no 2d context');
-    g.drawImage(image, 0, 0);
+    g.drawImage(bitmap, 0, 0);
     const { data } = g.getImageData(0, 0, canvas.width, canvas.height);
     return { width: canvas.width, height: canvas.height, data: Array.from(data) };
   }, url);
