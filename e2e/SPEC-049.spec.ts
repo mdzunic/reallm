@@ -34,6 +34,8 @@ const KEEPSAKE = {
   t1: 'A tin compass from Iris, pressed into your hand at the shelter stair. It points home, she says. Not north.',
   t2: 'A brass compass from Iris. She gave it to you on the roof. It points home.',
   t3: 'A tin compass. Your mother’s, you think. It points home.',
+  t4: 'A compass. It points at your next objective. It has never once pointed home.',
+  t5: 'A compass. Standard kit. Every salvager was issued one, and a letter.',
 };
 const DRIFT = 'You called it tin last time. And last time it was hers, not your mother’s.';
 const RESTART_1 = 'Medical frame restarted your heart. Eleven seconds of nothing. Walk it off.';
@@ -41,6 +43,7 @@ const RESTART_1 = 'Medical frame restarted your heart. Eleven seconds of nothing
 interface Prep {
   flags?: string[];
   playtimeSec?: number;
+  endingSeen?: boolean;
 }
 
 /** A fresh slot-0 save named Vega, bound, with `prep` written into it. */
@@ -53,6 +56,7 @@ async function prepare(page: Page, prep: Prep = {}): Promise<void> {
       if (save === null) throw new Error('no save bound');
       if (prep.flags !== undefined) save.progress.flags.push(...prep.flags);
       if (prep.playtimeSec !== undefined) save.meta.playtimeSec = prep.playtimeSec;
+      if (prep.endingSeen !== undefined) save.progress.endingSeen = prep.endingSeen;
     },
     { creation: CREATION, prep },
   );
@@ -425,4 +429,108 @@ test('8. with the restart and the roof on file, the confession names the medical
   expect(lines).toContain('Forty of the sixty-one before you said the roof.');
   expect(lines).not.toContain('You said the tap.');
   expect(lines).not.toContain('You said the stair.');
+});
+
+// ------------------------------------------------------------ 9: escape (49-h)
+
+test('9. an escape the entry still owes ends it at the menu: no letter and no aside play (§4.3, 49-h)', async ({ page }) => {
+  await start(page, URL);
+  // A reload inside the escape: the verdict is filed, the ending not yet seen,
+  // and a letter and the mission clock would both be due on a normal entry.
+  await prepare(page, {
+    flags: ['chapter1_done', 'chapter2_done', 'chapter3_done', 'campaign_done', 'ending_escape'],
+    playtimeSec: 9000,
+    endingSeen: false,
+  });
+  await page.evaluate(() => window.__reallm.go('station', {}, { force: true }));
+  await expect(page.getByTestId('menu-new')).toBeVisible(COLD_START);
+  await settle(page, 'menu');
+  await page.waitForTimeout(800);
+  await expect(dialogue(page)).toBeHidden();
+  const now = await flags(page);
+  expect(now).not.toContain('letter1_read');
+  expect(now).not.toContain('clue_awake');
+  expect(await page.evaluate(() => window.__reallm.save().current?.progress.endingSeen ?? false)).toBe(true);
+});
+
+// ------------------------------------------- 10: the later keepsake, the clock
+
+test('10. the keepsake reads T4 on every view after the signal and T5 after chapter 5; the clock stops at 9999 hours (§4.4, §4.5)', async ({ page }) => {
+  await start(page, URL);
+  const keepsake = page.getByTestId('char-keepsake').locator('.char-keepsake-text');
+  const view = async (): Promise<void> => {
+    await page.getByTestId('station-tab-shop').click();
+    await page.getByTestId('station-tab-character').click();
+  };
+
+  await prepare(page, { flags: ['chapter1_done', 'chapter2_done', 'letter1_read', 'letter2_read', 'signal_decoded'] });
+  await station(page);
+  await expect(dialogue(page)).toBeHidden();
+  for (let i = 0; i < 3; i++) {
+    await view();
+    await expect(keepsake).toHaveText(KEEPSAKE.t4);
+  }
+  // T4 is not a drift: no line, no clue.
+  await page.waitForTimeout(600);
+  await expect(dialogue(page)).toBeHidden();
+  expect(await flags(page)).not.toContain('clue_keepsake');
+
+  await prepare(page, {
+    flags: [
+      'chapter1_done',
+      'chapter2_done',
+      'chapter3_done',
+      'chapter4_done',
+      'chapter5_done',
+      'letter1_read',
+      'letter2_read',
+      'letter3_read',
+      'letter4_read',
+      'letter5_read',
+      'signal_decoded',
+      'clue_awake',
+      'memory_roof',
+    ],
+  });
+  await station(page);
+  await expect(dialogue(page)).toBeHidden();
+  for (let i = 0; i < 2; i++) {
+    await view();
+    await expect(keepsake).toHaveText(KEEPSAKE.t5);
+  }
+
+  // `min(9999, floor(playtimeSec / 60))`: a very long run reads the cap.
+  await prepare(page, {
+    flags: ['chapter1_done', 'chapter2_done', 'chapter3_done', 'letter1_read', 'letter2_read', 'letter3_read'],
+    playtimeSec: 10_000_000,
+  });
+  await station(page);
+  await expect(text(page)).toHaveText('Mission clock: 9999 hours since launch. You have not slept. You have not asked to.');
+  await finish(page);
+  expect(await flags(page)).toContain('clue_awake');
+});
+
+// ------------------------------------------ 11: the answer from the keyboard
+
+test('11. Enter on a focused answer sets only its flag, and the reply waits on screen (§4.5)', async ({ page }) => {
+  await start(page, URL);
+  await prepare(page, {
+    flags: ['chapter1_done', 'chapter2_done', 'chapter3_done', 'letter1_read', 'letter2_read', 'letter3_read', 'clue_awake'],
+  });
+  await station(page);
+  await readModal(page, ['Can I ask you something, for the file?']);
+  await expect(page.getByTestId('dialogue-choice-0')).toBeFocused();
+  await page.getByTestId('dialogue-choice-2').focus();
+  await enter(page);
+  await expect(text(page)).toHaveText('Thank you. It is on file now.');
+  await page.waitForTimeout(500);
+  await expect(text(page)).toBeVisible();
+  await expect(dialogue(page)).toHaveClass(/is-modal/);
+  expect((await flags(page)).filter((flag) => flag.startsWith('memory_'))).toEqual(['memory_stair']);
+  await finish(page);
+  // The stair is filed under the memory clue's id.
+  await page.getByTestId('station-tab-comms').click();
+  await page.getByTestId('comms-tab-notes').click();
+  await expect(page.getByTestId('notes-clue-memory_roof')).toContainText('First memory');
+  await expect(page.getByTestId('notes-clue-memory_stair')).toHaveCount(0);
 });
