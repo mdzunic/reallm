@@ -109,6 +109,7 @@ export function writeLicenses({ ran = null, standIn = new Map() } = {}) {
     [/^textures\/foliage\/.+\.webp$/, 'foliage.py', 'leaf, grass and bark atlas painted from code (SPEC-052)'],
     [/^textures\/sprites\/.+\.webp$/, 'sprites.py', 'numpy radial and noise fields'],
     [/^portraits\/.+\.(webp|json)$/, 'portraits.py', 'EEVEE bust of the salvager'],
+    [/^items\/(relic_[a-z_]+|flare|stim)\.webp$/, 'items.py', 'item picture built from primitives, rendered on transparent (SPEC-052 §4.8)'],
     [/^items\/.+\.(webp|json)$/, 'items.py', 'item picture built from primitives, rendered in EEVEE on transparent (SPEC-031)'],
     // R11, R12: some shots are photographic plates, so their film and poster say so
     [/^films\/(prologue|interlude_c2|ending_stay|ending_escape)\.mp4$/, 'films.py', 'story film rendered in EEVEE from code over the photographic plates listed under Plates above (PLAN R9, R11, R12)'],
