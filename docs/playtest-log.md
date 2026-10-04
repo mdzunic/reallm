@@ -1987,6 +1987,93 @@ transparency in two passes), so it stays opaque: one draw (AC-33).
 - [ ] with a save at chapter 4, finish `c4_m3`: the notice holds the world and names what was found, and the banner follows it;
 - [ ] replay `c1_m1` and hear only its accept line.
 
+## SPEC-052 — the world art drop: trees, dressing, landmarks, ground, the cave kit and seven pictures (M7i)
+
+- **Build:** `spec/SPEC-052` — untagged
+- **Where:** the factory's Linux arm64 container — **no Blender 5.2** (no arm64 build exists), no numpy,
+  no PIL, no network; headless Chromium with SwiftShader for the browser cases
+
+**How the drop was made here.** §7 asks for a run of
+`node scripts/assets/blender/build.mjs props foliage ground cave items --preview=<dir>`
+on a Blender machine. That run is still owed (below). The committed files come
+from the stand-in build, `node scripts/assets/standin/build.mjs props foliage ground cave items`
+(scripts/assets/README.md §7):
+
+- `props.py` and `cave.py` ran **unchanged** under plain Python 3, with
+  `scripts/assets/standin/blender_api/` standing in for `bpy`, `bmesh` and
+  `mathutils`. As a check, the twenty untouched `_a`/`_b` builders came out at
+  exactly §3.4's triangle counts and within about 1 % of Blender's bytes.
+  meshoptimizer's own encoder applied `EXT_meshopt_compression`.
+- The twenty `_a`/`_b` props are their Blender exports, re-encoded: no
+  `TEXCOORD_0`, meshopt, the same triangles.
+- The atlas, the four ground recipes with `detail_nr`, and the seven pictures
+  are Node ports of `foliage.py`, `ground.py` and `items.py`'s SPEC-052 parts.
+  They are encoded through Chromium's libwebp, with exact alpha. The pictures
+  were rendered with three under `items.py`'s rig, calibrated against fifteen
+  existing EEVEE pictures.
+- Every one of these files says so in its `LICENSES.md` row, and every GLB in
+  its `asset.generator`. Two runs of the stand-in wrote byte-identical files.
+
+**Build time:** the stand-in build of the whole drop runs in about 15 s (props
+2 s, cave 0.3 s, the atlas, ground and pictures through one Chromium).
+
+**`node scripts/assets/check.mjs`** with `dist/` built:
+
+| Folder | Before (main) | After | Ceiling |
+|---|---|---|---|
+| `models/` | 2.59 MB | 2.87 MB | 3.50 MB |
+| `textures/` | 4.24 MB | 4.46 MB | 4.90 MB |
+| `items/` | 0.23 MB | 0.32 MB | 1.00 MB |
+| precache (`dist/`) | — | 22.35 MB | 25 MB |
+
+The drop adds about 0.50 MB of models and textures (budget 1.0) and 0.09 MB of
+pictures (budget 0.1). The twenty rebuilt props went from 0.56 MB to 0.32 MB.
+
+**Pinned in node:** `tests/assets/worldArt.test.ts` covers every model,
+texture and constant claim of the spec, and `tests/ui/icons.test.ts` covers
+`PENDING_PICTURES`.
+
+**In the browser:** `e2e/SPEC-052.spec.ts` — §6.2's six cases in seven tests,
+green:
+
+- Cinder-4's props read `glb` within 2 s of landing, and no console error
+  names a GLB;
+- Thessaly and Eden stay inside 96 draws and 130 k triangles on `medium`, the
+  tree kinds drawing procedurally (46-c);
+- the pictures, the kit, the landmark and the atlas are served;
+- the atlas's gutters read back at alpha 0 and its bark at 255;
+- every `detail_nr` sample decodes to a unit normal with z > 0.5.
+
+`e2e/SPEC-035.spec.ts` case 18 counts 33 manifest ids.
+
+**Contact sheets.** None were written by Blender here. The stand-in's own
+three.js previews were looked at while tuning: trees at LOD0/LOD1 with the
+atlas, from 35° and from the game's 55°; the dressing, the landmarks, the cave
+kit; the atlas on grey and on each planet's ground; the four ground layers
+tiled; the pictures on navy at 384 and 40 px.
+
+**Owed on the Blender machine (§7):**
+
+- [ ] `node scripts/assets/blender/build.mjs props foliage ground cave items --preview=<dir>`
+      on Blender 5.2, then `node scripts/assets/check.mjs` with `dist/` built; record the time
+      and the table here. This is the first real run of the new Python
+      (`cave.py`, `foliage.py`, the tree, dressing and landmark builders, the four
+      ground recipes, the seven picture builders); expect small fixes.
+- [ ] `npm run test` on the rebuilt files: worldArt pins the contracts, not
+      the stand-in's bytes (52-g).
+- [ ] the seven contact sheets:
+  - trees read as trees at both LODs, and the jungle, fern and Eden trees are distinct;
+  - `temperate_tree_c` looks uncannily regular;
+  - the dressing reads at unit scale, and the landmarks beside the 1.8 m figure;
+  - the cave pieces read under one warm light;
+  - the atlas has no dark fringes;
+  - the four ground layers read as leaf litter, grass, moss and plates;
+  - the seven pictures are distinct at 40 px.
+- [ ] a second build on a clean checkout, compared for triangle counts and sizes.
+- [ ] the eight unchanged ground layers re-saved at quality 90/92: the stand-in
+      cannot re-bake their Cycles fields, so they keep their quality-84 bytes
+      until the Blender run.
+
 ## SPEC-050 — walk, do not run: stamina, the sprint, noise and the Wurm that listens (M7h)
 
 - **Build:** `spec/SPEC-050` — untagged

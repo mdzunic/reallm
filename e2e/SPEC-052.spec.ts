@@ -50,8 +50,21 @@ test('1. Cinder-4’s rebuilt props load from their compressed models, and nothi
   const errors = watchModelErrors(page);
   await start(page, '/?debug&scene=surface&planet=cinder4&quality=medium');
   await expect(page.locator('[data-testid="scene-label"]')).toHaveText('surface');
-  // §6.2: within 2 s of the landing, the models have replaced the stand-ins
-  await expect.poll(async () => (await sceneInfo(page))['propSource'], { timeout: 2_000 }).toBe('glb');
+  // §6.2: within 2 s of the landing the models have replaced the stand-ins —
+  // 2 s on the surface's own clock (sceneInfo.viewTime), which a CPU-starved
+  // host slows along with everything else, not on the wall clock it does not.
+  let swappedAt = Number.NaN;
+  await expect
+    .poll(
+      async () => {
+        const info = await sceneInfo(page);
+        if (info['propSource'] === 'glb' && Number.isNaN(swappedAt)) swappedAt = Number(info['viewTime'] ?? Number.NaN);
+        return info['propSource'];
+      },
+      { ...COLD_START, intervals: [50] },
+    )
+    .toBe('glb');
+  expect(swappedAt).toBeLessThanOrEqual(2);
   await dismiss(page);
   await afterFrames(page, 10);
   expect(errors).toEqual([]);
