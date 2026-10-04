@@ -191,10 +191,10 @@ describe('Command’s rating (§4.4)', () => {
   const MAIN = CLUES.filter((def) => !def.offTask).map((def) => def.id);
   const found = (n: number): Set<string> => new Set(OFF_TASK.slice(0, n));
 
-  it('counts only off-task clues — eight in this spec', () => {
-    expect(OFF_TASK).toHaveLength(8);
+  it('counts only off-task clues — eight in this spec, nine with SPEC-049’s keepsake', () => {
+    expect(OFF_TASK).toHaveLength(9);
     expect(offTaskCount(new Set(MAIN))).toBe(0);
-    expect(offTaskCount(new Set(OFF_TASK))).toBe(8);
+    expect(offTaskCount(new Set(OFF_TASK))).toBe(9);
     expect(offTaskCount(new Set([...MAIN, 'clue_hull', 'clue_tally']))).toBe(2);
   });
 
@@ -227,9 +227,10 @@ describe('Command’s rating (§4.4)', () => {
 describe('notesModel (§4.4)', () => {
   it('with nothing found: no rating, no grade, and blank lines for every chapter reached', () => {
     const model = notesModel(new Set(), 2);
-    expect(model).toMatchObject({ found: 0, total: 15, rating: null, grade: null });
+    // SPEC-049 §4.6: 20 clues, chapter 1 gaining `clue_restart`.
+    expect(model).toMatchObject({ found: 0, total: 20, rating: null, grade: null });
     expect(model.chapters.map((chapter) => [chapter.chapter, chapter.found.length, chapter.missing])).toEqual([
-      [1, 0, 3],
+      [1, 0, 4],
       [2, 0, 2],
     ]);
   });
@@ -241,9 +242,10 @@ describe('notesModel (§4.4)', () => {
     expect(model.grade).toBe('an acceptable run');
     expect(model.chapters).toHaveLength(3);
     expect(model.chapters[0]?.found.map((def) => def.id)).toEqual(['clue_raider_echo', 'clue_hull']);
-    expect(model.chapters[0]?.missing).toBe(1);
+    expect(model.chapters[0]?.missing).toBe(2);
     expect(model.chapters[1]?.found.map((def) => def.id)).toEqual(['iteration_log']);
-    expect(model.chapters[2]).toMatchObject({ chapter: 3, missing: 2 });
+    // SPEC-049 §4.6: chapter 3 gains the awake aside, the memory answer and the keepsake.
+    expect(model.chapters[2]).toMatchObject({ chapter: 3, missing: 5 });
   });
 
   it('rates a single main clue 1.00, a good run', () => {
@@ -252,10 +254,10 @@ describe('notesModel (§4.4)', () => {
     expect(model.grade).toBe('a good run');
   });
 
-  it('reads one clue found as Recorded 1 of 15 at 0.97 (§6.2 case 5)', () => {
+  it('reads one clue found as Recorded 1 of 20 at 0.97 (§6.2 case 5, SPEC-049 §4.8)', () => {
     const model = notesModel(new Set(['clue_hull']), 1);
-    expect([model.found, model.total, model.rating?.toFixed(2), model.grade]).toEqual([1, 15, '0.97', 'a good run']);
-    expect(model.chapters[0]?.missing).toBe(2);
+    expect([model.found, model.total, model.rating?.toFixed(2), model.grade]).toEqual([1, 20, '0.97', 'a good run']);
+    expect(model.chapters[0]?.missing).toBe(3);
   });
 
   it('clamps the chapters to 1…6', () => {

@@ -604,3 +604,42 @@ describe('one radius, the legacy styles and the dead rules (SPEC-045 §4.8)', ()
     expect(CSS.replace(/\/\*[\s\S]*?\*\//g, '')).not.toMatch(/pause-resume|context-lost-reload/);
   });
 });
+
+describe('Iris’s letters (SPEC-049 §3, §4.1)', () => {
+  it('declares --letter-bg and --letter-ink once each, in :root, with §3’s values', () => {
+    const root = rootBlock();
+    for (const token of ['--letter-bg', '--letter-ink']) {
+      expect(declarations(token, root), `${token} in :root`).toBe(1);
+      expect(declarations(token), `${token} declarations`).toBe(1);
+    }
+    expect(hexToken('--letter-bg')).toBe('#2b2620');
+    expect(hexToken('--letter-ink')).toBe('#efe4cf');
+  });
+
+  it('keeps the ink at 7 : 1 or better on the paper', () => {
+    const ratio = contrastRatio(hexToken('--letter-ink'), hexToken('--letter-bg'));
+    expect(ratio).toBeGreaterThanOrEqual(7);
+    // …and the test's own WCAG arithmetic agrees.
+    expect(contrast(parseColor('#efe4cf').slice(0, 3) as [number, number, number], parseColor('#2b2620').slice(0, 3) as [number, number, number])).toBeCloseTo(ratio, 6);
+  });
+
+  it('a letter line dresses the panel through the tokens, and the log and captions name Iris in the ink', () => {
+    const letter = rulesFor('.dialogue.dialogue-letter');
+    expect(letter).toHaveLength(1);
+    expect(letter[0]?.body).toMatch(/background:\s*var\(--letter-bg\)/);
+    expect(letter[0]?.body).toMatch(/(?:^|[;\s])color:\s*var\(--letter-ink\)/);
+    // The paper outranks the opaque fill the low preset and play give every other panel.
+    for (const selector of ['html.quality-low .dialogue.dialogue-letter', 'html[data-play] .dialogue.dialogue-letter']) {
+      expect(rulesFor(selector), selector).toEqual(letter);
+    }
+    for (const selector of [
+      ".dialogue[data-speaker='home'] .dialogue-speaker",
+      ".comms-line[data-speaker='home'] .comms-speaker",
+      ".film-caption[data-speaker='home'] .film-caption-speaker",
+    ]) {
+      const rules = rulesFor(selector);
+      expect(rules, selector).toHaveLength(1);
+      expect(rules[0]?.body, selector).toMatch(/color:\s*var\(--letter-ink\)/);
+    }
+  });
+});

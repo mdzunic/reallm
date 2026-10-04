@@ -155,7 +155,8 @@ test('3 — interlude: the first return after chapter 1 plays it, marks it seen,
   await newSave(page);
   await page.evaluate(() => {
     const save = window.__reallm.save().current;
-    if (save !== null) save.progress.flags.push('c1_oil', 'chapter1_done');
+    // SPEC-049 §4.3: Iris's first letter would follow the film; read already, so the case is the film's.
+    if (save !== null) save.progress.flags.push('c1_oil', 'chapter1_done', 'letter1_read');
   });
   await enterStation(page, { arrivedFrom: 'cinder4' });
 
@@ -297,19 +298,21 @@ test('8 — films off: no beat plays and no flag is written (23-f)', async ({ pa
   await page.evaluate((creation) => void window.__reallm.save().create(0, creation, 123), CREATION);
   await page.evaluate(() => {
     const save = window.__reallm.save().current;
-    if (save !== null) save.progress.flags.push('chapter1_done');
+    // SPEC-049 §4.3: letters play under films=off and write their own flag;
+    // letter 1 is read already, so any flag this entry wrote would show here.
+    if (save !== null) save.progress.flags.push('chapter1_done', 'letter1_read');
   });
   await enterStation(page, { arrivedFrom: 'cinder4' });
   await page.waitForTimeout(800);
   await expect(page.locator(FILM)).toHaveCount(0);
-  expect(await flags(page)).toEqual(['chapter1_done']);
+  expect(await flags(page)).toEqual(['chapter1_done', 'letter1_read']);
 
   await departForCinder4(page);
   await settled(page, 'flight');
   await page.waitForTimeout(800);
   await expect(page.locator(FILM)).toHaveCount(0);
   await expect(page.locator(CARD)).toHaveCount(0);
-  expect(await flags(page)).toEqual(['chapter1_done']);
+  expect(await flags(page)).toEqual(['chapter1_done', 'letter1_read']);
 });
 
 /** Click through the landing's accept dialogue; chapter-1 beats are non-modal. */

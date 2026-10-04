@@ -21,7 +21,7 @@ import type { GameServices } from '@/core/Services';
 import type { Renderer } from '@/core/Renderer';
 import type { SceneParams } from '@/core/StateMachine';
 import { GLYPHS } from '@/data/glossary';
-import { ATTRIBUTE_MAX, CLASSES, CREATION_POINTS, type Attributes, type ClassId, type Difficulty } from '@/data/index';
+import { ATTRIBUTE_MAX, CLASSES, CREATION_POINTS, KIN_ROW, type Attributes, type ClassId, type Difficulty } from '@/data/index';
 import { attributeEffectText, attributeLine, computePlayerStats, DIFFICULTY_LINES, passiveText } from '@/systems/UiHelpers';
 import { confirmSheet } from '@/ui/ConfirmSheet';
 import { dialogueLayer } from '@/ui/DialogueUI';
@@ -363,6 +363,7 @@ export class CreationScene extends UiScene<'creation'> {
     form.replaceChildren(
       h('p', { class: 'creation-title' }, 'New salvager'),
       h('label', { class: 'creation-row' }, h('span', {}, 'Name'), this.#nameField),
+      this.#kinRow(),
       this.#classCards(),
       this.#portraitRow(),
       this.#swatchRow('Primary', PRIMARY_SWATCHES, this.#primary, (colour) => {
@@ -375,6 +376,18 @@ export class CreationScene extends UiScene<'creation'> {
       this.#statsPreview(),
       this.#difficultyRow(),
       this.#previewAndConfirm(),
+    );
+  }
+
+  /**
+   * SPEC-049 §4.1: the personnel file's next of kin — the same for every class
+   * and name, read-only: no control, nothing in the tab order, nothing saved.
+   */
+  #kinRow(): HTMLParagraphElement {
+    const [label = '', value = ''] = KIN_ROW.split(' — ');
+    return testId(
+      h('p', { class: 'creation-row creation-kin' }, h('span', {}, label), ' — ', h('span', { class: 'creation-kin-value' }, value)),
+      'creation-kin',
     );
   }
 

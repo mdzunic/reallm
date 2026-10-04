@@ -123,6 +123,7 @@ import {
   stepStamina,
 } from '@/systems/Stamina';
 import { Weather, WEATHER_EFFECTS, type WeatherEffects } from '@/systems/Weather';
+import { HOME_SESSION, restartLine } from '@/systems/Home';
 import { LINE_LEDGER, missionLinePlays, revealCamera, revealDue, revealKey, stayReport, type Ending } from '@/systems/StoryBeats';
 import {
   activeEffects,
@@ -4372,6 +4373,21 @@ export class SurfaceScene extends UiScene<'surface'> {
         this,
       ),
     );
+    // SPEC-049 §4.5: `clue_restart`'s trigger is the body's — a respawn.
+    this.disposer.add(bus.on('player:respawned', () => this.#playRestart(save), this));
+  }
+
+  /**
+   * SPEC-049 §4.5: the page session's first respawn for this save — E4's, or
+   * a recall's (49-d) — plays its band's restart line, non-modal; later ones
+   * play nothing (49-e). The lines are `clue_restart`'s, so the first that ever
+   * starts finds it through `#clueStarted`, and a later session's sets nothing.
+   */
+  #playRestart(save: Save): void {
+    const dialogue = this.#dialogue;
+    if (dialogue === null || HOME_SESSION.restartPlayed(save)) return;
+    HOME_SESSION.markRestart(save);
+    void dialogue.play(restartLine(new Set(save.progress.flags)), { modal: false });
   }
 
   /**

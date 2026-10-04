@@ -6,6 +6,9 @@
 // SPEC-039 §4.7: a point earned at every fifth level waits here — a `+` beside
 // each attribute while one is unspent, behind a confirm sheet, because a point
 // cannot be moved once it is spent.
+//
+// SPEC-049 §4.4: under the stats, Iris's compass — its words read the story
+// flags and the view the station counted when it opened this tab.
 import { allocateAttribute, maxHp, unspentAttributePoints, type Save, type SaveStore } from '@/core/Save';
 import {
   ATTRIBUTE_MAX,
@@ -20,7 +23,9 @@ import {
 import { GLYPHS, QUICK_SLOT_NAMES } from '@/data/glossary';
 import { INVENTORY_SLOTS, type Economy } from '@/systems/Economy';
 import { percent } from '@/systems/Format';
+import { HOME_SESSION, keepsakeText } from '@/systems/Home';
 import { quickEligible } from '@/systems/Loadout';
+import { storyContextOf } from '@/systems/StoryContext';
 import { characterXpText, computePlayerStats, failText, gearTooltip, HP_FULL_TEXT } from '@/systems/UiHelpers';
 import { compareNodes } from '@/ui/Compare';
 import { confirmSheet } from '@/ui/ConfirmSheet';
@@ -75,7 +80,7 @@ export class CharacterPanel {
     // SPEC-044 §4.2: through `keepFocus`, so an equip or a use by keyboard keeps its place.
     keepFocus(this.#container, () => {
       const panel = testId(el('div', 'character'), 'character-panel');
-      panel.append(this.#statsBlock(), this.#gearBlock(), this.#inventoryBlock(), this.#resourcesBlock());
+      panel.append(this.#statsBlock(), this.#keepsakeBlock(), this.#gearBlock(), this.#inventoryBlock(), this.#resourcesBlock());
       this.#container.replaceChildren(panel);
     });
   }
@@ -122,6 +127,19 @@ export class CharacterPanel {
         'character-stats',
       ),
       ...this.#attributeLines(),
+    );
+  }
+
+  /**
+   * SPEC-049 §4.4: `keepsakeText` at the view of this opening of the tab — the
+   * station counts openings, so a re-render inside the tab reads the same words.
+   */
+  #keepsakeBlock(): HTMLElement {
+    const data = this.#deps.data;
+    const text = keepsakeText(storyContextOf(data), HOME_SESSION.keepsakeView(data));
+    return testId(
+      h('section', { class: 'char-block char-keepsake' }, h('p', { class: 'char-title' }, 'Keepsake'), h('p', { class: 'char-keepsake-text' }, text)),
+      'char-keepsake',
     );
   }
 

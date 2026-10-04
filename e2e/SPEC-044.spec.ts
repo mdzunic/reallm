@@ -39,10 +39,13 @@ interface Prep {
   oil?: number;
 }
 
-/** Chapter 1 finished, its interlude already watched — Vetra open, `c2_m1` on its board. */
+/**
+ * Chapter 1 finished, its interlude already watched and Iris's first letter
+ * read (SPEC-049 §4.3) — Vetra open, `c2_m1` on its board, nothing modal on entry.
+ */
 const CHAPTER_ONE_DONE: Prep = {
   done: ['c1_m1', 'c1_m2', 'c1_m3'],
-  flags: ['c1_oil', 'chapter1_done', 'interlude1_seen'],
+  flags: ['c1_oil', 'chapter1_done', 'interlude1_seen', 'letter1_read'],
   oil: 200,
 };
 
