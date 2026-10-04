@@ -2,11 +2,14 @@
 // in src/data/films.ts, the rendered files and their manifest in step. The
 // pictures are rendered by scripts/assets/blender/films.py; captions and cues
 // live here and change without a re-render, shot timing does not.
+import { readdirSync, statSync } from 'node:fs';
+import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import {
   ASSETS,
   BOSS_REVEALS,
   CHAPTER_CARDS,
+  DIALOGUE,
   ENEMIES,
   FILMS,
   FILM_FPS,
@@ -64,6 +67,16 @@ const ON_DISK = new Set(
 const SPRITES = new Set(
   Object.values(ASSETS.audio).flatMap((entry) => ('sprite' in entry ? Object.keys(entry.sprite) : [])),
 );
+const FILMS_DIR = new URL('../../public/assets/films/', import.meta.url).pathname;
+
+/** Every byte under `dir`: the MP4s, the posters and the manifest. */
+function folderBytes(dir: string): number {
+  let bytes = 0;
+  for (const entry of readdirSync(dir, { withFileTypes: true })) {
+    bytes += entry.isDirectory() ? folderBytes(join(dir, entry.name)) : statSync(join(dir, entry.name)).size;
+  }
+  return bytes;
+}
 
 describe('story films (SPEC-021 §8)', () => {
   it('1. names the nine films, each under its own id', () => {
@@ -190,6 +203,29 @@ describe('story films (SPEC-021 §8)', () => {
     expect(shownTexts(towers)[1]).toHaveLength(61);
     const withVariants = films.flatMap((film) => film.captions.filter((caption) => (caption.variants ?? []).length > 0));
     expect(withVariants).toHaveLength(1);
+  });
+
+  it('11 (SPEC-051 §4.9). keeps films/ inside the retake wave’s 0.70 MB', () => {
+    // 8 886 982 bytes before the drop, plus its 734 003-byte allotment
+    const bytes = folderBytes(FILMS_DIR);
+    expect(bytes).toBeGreaterThan(0);
+    expect(bytes).toBeLessThanOrEqual(9_620_985);
+  });
+
+  it('12 (SPEC-051 §4.7). queues Iris’s first letter word for word, and fills both new log captions', () => {
+    const mail = FILMS.ending_stay.captions.find((caption) => caption.text.startsWith('MAIL QUEUED')) as CaptionDef;
+    expect([mail.at, mail.until, mail.speaker]).toEqual([30.6, 35.4, 'log']);
+    const first = /^[^.!?]*[.!?]/.exec(DIALOGUE.letter_1.lines[0].text)?.[0];
+    expect(first).toBe('The lamp over the map table stopped flickering today.');
+    expect(/“([^”]+)”/.exec(mail.text)?.[1]).toBe(first);
+    // SPEC-048's captionText on a first run: instance 62, the next one 63
+    expect(captionText(mail, DEFAULT_STORY_CONTEXT)).toBe('MAIL QUEUED — No. 63: “The lamp over the map table stopped flickering today.”');
+    const kin = FILMS.ending_escape.captions.find((caption) => caption.text.startsWith('NEXT OF KIN')) as CaptionDef;
+    expect([kin.at, kin.until, kin.speaker]).toEqual([29.6, 33, 'log']);
+    expect(captionText(kin, DEFAULT_STORY_CONTEXT)).toBe('NEXT OF KIN — 1 template. 62 recipients.');
+    // and at the longest fill they still fit their windows (case 4): 78 and 41 characters
+    expect(shownTexts(mail).map((text) => text.length)).toEqual([78]);
+    expect(shownTexts(kin).map((text) => text.length)).toEqual([41]);
   });
 
   it('10. keeps the interlude flags through the save validator', () => {

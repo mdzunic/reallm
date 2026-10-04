@@ -86,8 +86,8 @@ export const FILMS = {
       { id: 'city_flash', start: 46, end: 56, poster: 50, pan: 'out', describe: 'A city skyline seen across a dead plain. A white flash swallows the towers and the cloud climbs over them.' },
       { id: 'stranded', start: 56, end: 66, poster: 63, pan: 'right', describe: 'Ash falls on a ruined street. A line of machines stands frozen mid-stride; their eyes dim one by one.' },
       { id: 'shelter', start: 66, end: 75, poster: 71, pan: 'in', describe: 'Shelter Nine: men and women around a paper map under one flickering lamp; empty drums, a dry tank.' },
-      { id: 'selection', start: 75, end: 83, poster: 81, pan: 'left', describe: 'A wall of salvager ID cards. SELECTED stamps land on them one by one; the first card is number 62.' },
-      { id: 'liftoff', start: 83, end: 90, poster: 87, pan: 'up', describe: 'A ruined spaceport at dawn. The salvage tug lifts off on a column of fire through the ash.' },
+      { id: 'selection', start: 75, end: 83, poster: 81, pan: 'left', describe: 'A wall of salvager ID cards. SELECTED stamps land one by one; the first, No. 62, shows a visored flight helmet.' },
+      { id: 'liftoff', start: 83, end: 90, poster: 87, pan: 'up', describe: 'A ruined spaceport at dawn. A woman watches from the fence as the salvage tug lifts off on a column of fire.' },
       { id: 'relay', start: 90, end: 93, poster: 91, pan: 'none', describe: "The tug crosses Earth's dark limb toward the lights of Command Relay. Fade to black." },
     ],
     captions: [
@@ -192,8 +192,8 @@ export const FILMS = {
     music: 'film_hope',
     flashes: [],
     shots: [
-      { id: 'greenhouse', start: 0, end: 7, poster: 5.5, pan: 'in', describe: 'Racks of grow lights in the shelter; wheat shoots climb in time-lapse under violet light.' },
-      { id: 'earth_c3', start: 7, end: 14, poster: 12, pan: 'right', describe: "Earth's night side: lights spread along a coastline and the roads between the towns." },
+      { id: 'greenhouse', start: 0, end: 7, poster: 5.5, pan: 'in', describe: 'The shelter’s grow room: wheat under violet lights, and the woman from the tap tending a tray.' },
+      { id: 'earth_c3', start: 7, end: 14, poster: 12, pan: 'right', describe: 'Earth’s night side: new lights along the coast come on as a perfect grid, then settle into towns and roads.' },
     ],
     captions: [
       { at: 0.6, until: 6.4, speaker: 'command', text: 'Thessaly grain is in the ground. First harvest in ninety days.' },
@@ -216,7 +216,7 @@ export const FILMS = {
     shots: [
       { id: 'reactor', start: 0, end: 6, poster: 4.5, pan: 'in', describe: 'Lithium cells slide into a reactor ring; blue light climbs the core and the turbines spin up.' },
       { id: 'earth_c4', start: 6, end: 11, poster: 9.5, pan: 'in', describe: 'Earth from orbit: a lit grid spans a whole continent.' },
-      { id: 'watchers', start: 11, end: 16, poster: 13.5, pan: 'out', describe: 'Far past the Moon, a haze of violet points turns toward the lit Earth; a tear of static.' },
+      { id: 'watchers', start: 11, end: 16, poster: 13.5, pan: 'out', describe: 'Far past the Moon, violet points turn toward the lit Earth; a tear of static shows it as a grey grid.' },
     ],
     captions: [
       { at: 0.6, until: 5.6, speaker: 'command', text: 'Ferrum lithium is in the reactor. The grid is holding across three cities.' },
@@ -237,12 +237,12 @@ export const FILMS = {
     shots: [
       { id: 'hive_dark', start: 0, end: 6, poster: 4, pan: 'out', describe: "The Hive's living interior; its glowing veins go dark from the heart outward." },
       { id: 'eden', start: 6, end: 12, poster: 10, pan: 'in', describe: 'Eden-Prime at sunrise, blue and green under clouds; the tug crosses the terminator.' },
-      { id: 'cockpit', start: 12, end: 16, poster: 14.5, pan: 'in', describe: "In the tug's cockpit, ARIA's status screen stutters with a line of static, then steadies." },
+      { id: 'board', start: 12, end: 16, poster: 14.5, pan: 'left', describe: 'The Selection wall: card 62 stamped SELECTED, and beside it a new blank card, No. 63, not yet stamped.' },
     ],
     captions: [
       { at: 0.6, until: 5.6, speaker: 'command', text: 'The Hive has gone quiet. Every signal from the field has stopped.' },
       { at: 6.4, until: 11.6, speaker: 'command', text: 'Eden-Prime is open to survey. It may be the one.' },
-      { at: 12.4, until: 15.8, speaker: 'aria', text: 'I am still flying the ship. Whatever I am.' },
+      { at: 12.4, until: 15.8, speaker: 'aria', text: 'There is a new card on the board. Nobody has told me whose.' },
     ],
     cues: [
       { at: 0.5, sound: 'film_powerdown' },
@@ -258,7 +258,7 @@ export const FILMS = {
       { id: 'uplink', start: 0, end: 6, poster: 3, pan: 'up', describe: "Eden's survey beacon fires a beam into the sky; pulses of data climb it." },
       { id: 'fleet', start: 6, end: 14, poster: 11, pan: 'up', describe: "Earth's spaceport at dawn, lit and crowded: three colony ships lift off together." },
       { id: 'earth_full', start: 14, end: 21, poster: 18, pan: 'in', describe: "Earth's night side lit from coast to coast, an aurora over the pole." },
-      { id: 'wall_63', start: 21, end: 30, poster: 28, pan: 'left', describe: 'The Selection wall. A new card slides into an empty slot and is stamped SELECTED. Its number is 63.' },
+      { id: 'wall_63', start: 21, end: 30, poster: 28, pan: 'left', describe: 'The Selection wall. A new card slides into the last slot and is stamped SELECTED: No. 63, the same visored helmet.' },
       { id: 'earth_again', start: 30, end: 36, poster: 32, pan: 'in', describe: "The prologue's first shot again, frame for frame: Earth at night, every coast lit, a satellite drifting by." },
     ],
     captions: [
@@ -266,6 +266,8 @@ export const FILMS = {
       { at: 6.6, until: 13.4, speaker: 'command', text: 'The colony fleet launches at first light. Earth thanks you, salvager.' },
       { at: 14.6, until: 20.4, speaker: 'aria', text: 'Earth has lights again. You did that.' },
       { at: 22.0, until: 29.4, speaker: 'command', text: 'Selection board: next salvager cleared for launch.' },
+      // SPEC-051 §4.7: Iris's first letter, queued for the next instance (SPEC-048 fills {next}).
+      { at: 30.6, until: 35.4, speaker: 'log', text: 'MAIL QUEUED — No. {next}: “The lamp over the map table stopped flickering today.”' },
     ],
     cues: [
       { at: 0.4, sound: 'film_beam' },
@@ -281,14 +283,16 @@ export const FILMS = {
     shots: [
       { id: 'exit', start: 0, end: 6, poster: 3, pan: 'in', describe: "The beacon's beam turns white and opens like a door; the salvager walks into it." },
       { id: 'eden_unmade', start: 6, end: 14, poster: 11, pan: 'out', describe: 'Pulling away from Eden: its surface peels back to grey clay and a grid; the clouds become wireframe.' },
-      { id: 'earth_unmade', start: 14, end: 22, poster: 18, pan: 'right', describe: "The prologue's Earth, city and street as grey placeholders: plain boxes, blank spheres, eyeless machines." },
-      { id: 'wall_same', start: 22, end: 29, poster: 26, pan: 'left', describe: 'The Selection wall again: every card shows the same face in sepia. Card 62 fades to white.' },
+      { id: 'earth_unmade', start: 14, end: 22, poster: 18, pan: 'right', describe: 'The prologue’s pictures unmade into grey placeholders: the skyline, the street, the shelter, then Earth itself.' },
+      { id: 'wall_same', start: 22, end: 29, poster: 26, pan: 'left', describe: 'The Selection wall again: every card shows the same visored helmet. Card 62’s visor clears; the helmet is empty.' },
       { id: 'point', start: 29, end: 36, poster: 30, pan: 'none', describe: 'Everything folds into one point of light. The point goes out.' },
     ],
     captions: [
       { at: 6.6, until: 13.4, speaker: 'warden', text: 'You will be restarted. You always are.' },
       { at: 14.6, until: 21.4, speaker: 'log', text: 'EARTH — placeholder geometry. Population field: 0.' },
       { at: 22.6, until: 28.4, speaker: 'log', text: 'SELECTION POOL — 1 model. {instance} instances.' },
+      // SPEC-051 §4.7: one next-of-kin template, sent to every instance (SPEC-048 fills {instance}).
+      { at: 29.6, until: 33.0, speaker: 'log', text: 'NEXT OF KIN — 1 template. {instance} recipients.' },
     ],
     cues: [
       { at: 0.5, sound: 'film_beam' },

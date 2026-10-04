@@ -2296,7 +2296,8 @@ describe('main-path echoes, continuity and the text sweep (SPEC-048 §4.7)', () 
     expect(MISSION_HINTS.c1_s2?.[1]).toBe('Survive the heat — it bites harder without armour.');
     expect(PLANETS.hive.blurb).toBe('An asteroid gauntlet wrapped around a living interior.');
     const wall = FILMS.ending_escape.shots.find((shot) => shot.id === 'wall_same');
-    expect(wall?.describe).toBe('The Selection wall again: every card shows the same face in sepia. Card 62 fades to white.');
+    // SPEC-051 §4.7: the render shows the visor now, and card 62's clearing onto the empty helmet
+    expect(wall?.describe).toBe('The Selection wall again: every card shows the same visored helmet. Card 62’s visor clears; the helmet is empty.');
     expect(MISSIONS.c1_m1.brief).toBe('Walk to the pad, survey the dune sea, and sit out the first sandstorm Cinder-4 sends your way.');
     const accept = DIALOGUE.c1_m1_accept.lines[0].text;
     expect(accept).toBe('I put the tug on the pad. You were out of the hatch twelve metres early. Walk it off — I want to see you move before anything else does.');
