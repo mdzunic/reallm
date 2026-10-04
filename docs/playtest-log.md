@@ -2032,3 +2032,65 @@ the real rules.
 - [ ] fight the Wurm to phase 2: walk out of the burrow ring; run and watch it follow; dash out of a followed ring;
 - [ ] phone: push the stick past its ring and back, and check the ring's glow;
 - [ ] phone: 10 minutes of fights, then read `sprints` and `sprintsShort` from the `?debug` overlay — at 10 % or more short, raise `TOUCH_SPRINT_TRAVEL` to 1.15 and measure again.
+
+## SPEC-051 — films retaken: the visor, the unmaking and Iris (asset drop, M7h)
+
+- **Build:** `spec/SPEC-051` — untagged; **the code half of the drop only**
+- **Devices:**
+  - desktop — headless Chromium at 1280 × 720 (Playwright, Linux container, **software GL / SwiftShader**)
+  - phone — _no handset in the build container_ (§7's pass is owed, below)
+
+The drop is made in two places. The factory's container wrote the generator,
+the data and the tests; the pictures need the Blender 5.2 machine, an H.264
+encoder, Gemini for the five plates and a person for the likeness check, and
+the container has none of them. So nothing below was rendered, and no film,
+poster or manifest moved.
+
+Recorded from that container: `npm run check` — 111 files and 2,597 tests —
+green but for the two tests that read the drop's files. `filmScripts` 51-a
+names `interlude_c3_greenhouse.jpg`, `prologue_liftoff.jpg`,
+`prologue_stranded.jpg`, `selection/visor.webp` and `selection/visor_empty.webp`
+as missing under `plates/`. `films.test` case 9 finds `cockpit` in
+`manifest.json` where the data has `board` (51-h). `node scripts/assets/check.mjs`
+passes: films 8.48 MB of 12, precache 21.76 MB of 25. Importing `films.py`
+over stub Blender modules builds all nine films' shot tables with the data's
+timing.
+
+| Area | What the container showed |
+|---|---|
+| Next of kin | `ending_escape` at 30 s, a first-run save: `NEXT OF KIN — 1 template. 62 recipients.` |
+| Mail | `ending_stay` at 31 s: `MAIL QUEUED — No. 63: “The lamp over the map table stopped flickering today.”` |
+| The board | `interlude_c5` at 13 s: `There is a new card on the board. Nobody has told me whose.`; the board's poster at 14 s is owed to the drop (passed with the drop's manifest stood in by a route) |
+| Seeks | the prologue's still at 76 s is `prologue_selection.webp`; 92.9 s ends it |
+| Posters | owed to the drop: `interlude_c5_cockpit.webp` is still on disk and `interlude_c5_board.webp` is not |
+
+**Owed to the drop (§4.9, §7).** On the Blender machine, with the five plates
+committed under `plates/`:
+
+- [ ] `node scripts/assets/blender/build.mjs films --stills --shots=selection,board,earth_c3,watchers,stranded,liftoff,greenhouse --preview=DIR`: the look; `stranded` prints the eye slits it measured (`NOTE prologue_stranded.jpg eyes: …`) — pin them in `STRANDED_EYES` or correct them there; match the liftoff camera to the plate's horizon and pad;
+- [ ] the full build of every film but `departure`, then `node scripts/assets/check.mjs`; record here the build time, each film's size, rate and flash count (the build fails a film that counts more than R12's), the three lit boxes (`NOTE … lit box`), `hive_dark`'s black run, the watchers swing and the unmake means;
+- [ ] if a lit box or a framing check fails, move the camera, not the threshold (51-d);
+- [ ] delete `films/posters/interlude_c5_cockpit.webp` (the build rewrites the generated `LICENSES.md` rows from the files on disk);
+- [ ] `npm run check` and `e2e/SPEC-051.spec.ts` green on the drop.
+
+**The likeness check (§7) — not performed.** Reverse image search of each,
+against well-known faces (actors, video-game protagonists); record passed or
+failed, and a failure is a follow-up drop (51-b):
+
+- [ ] face 01
+- [ ] face 02
+- [ ] face 03
+- [ ] face 04
+- [ ] face 05
+- [ ] face 06
+- [ ] the greenhouse plate's woman
+
+**Owed on hardware (§7).** Every retaken film with sound, on desktop Chrome, Safari and the reference phone (landscape):
+
+- [ ] card 62 is a visor in the prologue, and card 63 the same visor in the stay ending;
+- [ ] every card is the visor in the escape ending, and card 62's empties;
+- [ ] the prologue's street and the escape's unmaking are the same photographs;
+- [ ] the relit coast reads on the phone, and chapter 3's lights come on as a grid, then settle;
+- [ ] chapter 4's tear shows a grey Earth, and chapter 5's board shows the blank No. 63;
+- [ ] the woman at the fence and in the grow room is the woman at the tap;
+- [ ] nothing strobes.
