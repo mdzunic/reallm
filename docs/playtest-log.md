@@ -2130,10 +2130,11 @@ the real rules.
 The drop is made in two places. The factory's container wrote the generator,
 the data and the tests; the pictures need the Blender 5.2 machine, an H.264
 encoder, Gemini for the five plates and a person for the likeness check, and
-the container has none of them. So nothing below was rendered, and no film,
-poster or manifest moved.
+the container has none of them. So the container rendered nothing: the
+plates, films, posters and manifest come from the Blender machine ("The drop",
+below).
 
-Recorded from that container: `npm run check` — 111 files and 2,597 tests —
+Recorded from that container before the drop: `npm run check` — 111 files and 2,597 tests —
 green but for the two tests that read the drop's files. `filmScripts` 51-a
 names `interlude_c3_greenhouse.jpg`, `prologue_liftoff.jpg`,
 `prologue_stranded.jpg`, `selection/visor.webp` and `selection/visor_empty.webp`
@@ -2197,6 +2198,11 @@ The plates:
 - [x] **Tests on the drop**, in the factory's container (SwiftShader):
   - `npm run check`: 111 files and 2 597 tests green;
   - `e2e/SPEC-051.spec.ts`, `e2e/SPEC-022.spec.ts` and `e2e/SPEC-015-pwa.spec.ts`: 23 passed on the first run.
+- [x] **Again after `main` (SPEC-052) was merged into the drop** (f63e7b9), in the factory's container:
+  - `npm run check`: 112 files and 2 621 tests green;
+  - `node scripts/assets/check.mjs` passes: films 8.95 MB of 12, precache 22.82 MB of 25;
+  - `films/` is unchanged by the merge at 9 384 351 B;
+  - `e2e/SPEC-051.spec.ts`: 5 passed.
 
 **The likeness check (§7) — performed 2026-10-04: every face failed.**
 
