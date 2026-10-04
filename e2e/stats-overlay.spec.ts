@@ -192,73 +192,124 @@ test.describe('immediate refreshes', () => {
 const MENU_SPIN_RATE = 0.008;
 
 /**
- * `loop.stats.frame`, the current scene's own render count, the simulated
- * clock and the wall clock, all read in one evaluate so they belong to the
- * same instant.
+ * SPEC-040 §4.2 at a 30 target: `paceFrame` draws a stepped frame once its draw
+ * credit reaches a period less `PACING_SLACK_MS` (`core/FrameSkip.ts`, 2 ms).
+ * Outside idle the credit is never less than the time since the last draw,
+ * until that time passes two periods and the credit is capped — still over
+ * the bar. So a stepped frame that ends at least that long after the last
+ * draw is always drawn, whatever the frames before it did. The half
+ * millisecond on top keeps the sampler's sum of frame times, which is not the
+ * pacer's, off the edge.
  */
-async function frameAndRenders(
-  page: Page,
-): Promise<{ frame: number; renders: number; simulated: number; dropped: number; now: number }> {
-  return page.evaluate(() => {
-    const stats = window.__reallm.stats();
-    return {
-      frame: stats.frame,
-      renders: Number(stats.sceneInfo?.['renders'] ?? 0),
-      simulated: Number(stats.sceneInfo?.['spin'] ?? 0),
-      dropped: stats.droppedTime,
-      now: performance.now(),
-    };
-  });
+const DUE_AT_30_MS = 1000 / 30 - 2 + 0.5;
+
+/** One reading of the paced 30 fps menu, frame by frame (see the test below). */
+interface PacedWindow {
+  /** Seconds between the first and the last sampled frame, on the rAF clock. */
+  wall: number;
+  renders: number;
+  /** Seconds the starfield turned through: the fixed steps that ran. */
+  simulated: number;
+  /** Seconds the five-step cap threw away inside the window (E23). */
+  dropped: number;
+  /** Frames that ran at least one fixed step. */
+  stepped: number;
+  /** Stepped frames that ended `DUE_AT_30_MS` or more after the last draw. */
+  due: number;
+  /** The due frames that were not drawn, as `+ms since draw (steps)`. */
+  missed: string[];
 }
 
 /**
- * Wait until the loop has advanced past `frames` animation frames, and answer
- * the reading that spans them: how many frames and renders it took, how far
- * the simulation advanced inside it, and how long it lasted on the wall clock.
- *
- * The sample used to be a flat second, which assumed a ~60 Hz frame. Neither
- * preset can hold one here: SPEC-017 put a post-processing chain behind
- * `Renderer.render()` and this container has no GPU, so `high`'s sixteen
- * full-screen passes at 720p cost the software rasteriser ~110 ms a frame, and
- * `low` — which takes the direct path — still drops to ~20 Hz whenever the
- * suite runs several browsers at once. Neither claim below is about the frame
- * *rate*: one is a ratio of renders to frames, the other a ratio of simulated
- * to real time. So the window is counted in frames and both are measured over
- * it, whatever rate the host manages.
+ * Samples `frames` of the loop's frames on the menu. The game's loop callback is
+ * registered before the sampler's, so each sample reads the frame the loop has
+ * just finished, and every rAF callback of a frame is handed the same
+ * timestamp, so the sampler's frame times are the loop's. A frame the counter
+ * did not advance by exactly one — a paused frame, or one the sampler missed —
+ * forgets the last draw until the next one the sampler sees.
  */
-async function overFrames(
-  page: Page,
-  frames: number,
-): Promise<{ frames: number; renders: number; simulated: number; dropped: number; wall: number }> {
-  const before = await frameAndRenders(page);
-  await expect
-    .poll(async () => (await frameAndRenders(page)).frame - before.frame, { timeout: 30_000 })
-    .toBeGreaterThan(frames);
-  const after = await frameAndRenders(page);
-  return {
-    frames: after.frame - before.frame,
-    renders: after.renders - before.renders,
-    simulated: (after.simulated - before.simulated) / MENU_SPIN_RATE,
-    dropped: after.dropped - before.dropped,
-    wall: (after.now - before.now) / 1000,
-  };
+function pacedWindow(page: Page, frames: number): Promise<PacedWindow> {
+  return page.evaluate(
+    ({ frames, dueMs, spinRate }) =>
+      new Promise<PacedWindow>((resolve) => {
+        type Stats = ReturnType<typeof window.__reallm.stats>;
+        const spin = (stats: Stats): number => Number(stats.sceneInfo?.['spin'] ?? 0);
+        // The window opens on the first sampled frame: its renders, spin and
+        // dropped time are the baseline, not part of the reading.
+        let first: Stats | null = null;
+        let previous: Stats | null = null;
+        let firstAt = 0;
+        let lastAt = 0;
+        let sinceDraw: number | null = null;
+        let stepped = 0;
+        let due = 0;
+        const missed: string[] = [];
+        const sample = (at: number): void => {
+          const now = window.__reallm.stats();
+          if (first === null || previous === null) {
+            first = now;
+            firstAt = at;
+          } else if (now.frame !== previous.frame + 1) {
+            sinceDraw = null;
+          } else {
+            const drawn = now.renders > previous.renders;
+            if (sinceDraw !== null) sinceDraw += at - lastAt;
+            if (now.updates > 0) {
+              stepped++;
+              if (sinceDraw !== null && sinceDraw >= dueMs) {
+                due++;
+                if (!drawn) missed.push(`+${sinceDraw.toFixed(1)}ms (${now.updates})`);
+              }
+            }
+            if (drawn) sinceDraw = 0;
+          }
+          previous = now;
+          lastAt = at;
+          if (now.frame - first.frame < frames) {
+            requestAnimationFrame(sample);
+            return;
+          }
+          resolve({
+            wall: (at - firstAt) / 1000,
+            renders: now.renders - first.renders,
+            simulated: (spin(now) - spin(first)) / spinRate,
+            dropped: now.droppedTime - first.droppedTime,
+            stepped,
+            due,
+            missed,
+          });
+        };
+        requestAnimationFrame(sample);
+      }),
+    { frames, dueMs: DUE_AT_30_MS, spinRate: MENU_SPIN_RATE },
+  );
 }
 
+// SPEC-040 §4.2 supersedes D-3's tick parity: 30 is paced by the clock. A
+// 60 Hz display draws every second frame, as before; a host that cannot reach
+// 60 — this container, with several browsers at once — draws every frame it
+// gets, up to 30 a second, where parity would have halved it again (40-c).
+//
+// The lower half of that used to be counted over the whole window, as at least
+// 0.8 × min(frames, 30 × seconds) draws. That holds for a steady frame rate and
+// not for a bursty one, because the minimum of two sums is not the sum of the
+// minima. The macOS CI runner's frames come in bursts faster than 30 a second
+// between stalls of 100–250 ms (the five-step cap drops time inside the
+// window): about 30 frames a second on average, while the pacer, correctly,
+// draws about every second frame of a burst and one frame per stall. That read
+// 41–42 draws against floors of 43–46 on about one CI job in six. So the claim
+// is read frame by frame instead: every stepped frame that is due is drawn.
 test('quality.targetFps 30 draws at most 30 frames a second, updates untouched (AC-57, SPEC-040 §4.2)', async ({ page }) => {
   await start(page, '/?debug&quality=low');
   expect((await page.evaluate(() => window.__reallm.stats())).preset).toBe('low');
 
-  const { frames, renders, simulated, dropped, wall } = await overFrames(page, 40);
+  const { wall, renders, simulated, dropped, stepped, due, missed } = await pacedWindow(page, 90);
 
-  expect(frames).toBeGreaterThan(20); // the loop really ran
-  // SPEC-040 §4.2 supersedes D-3's tick parity: 30 is paced by the clock. A
-  // 60 Hz display draws every second frame, as before; a host that cannot
-  // reach 60 — this container, with several browsers at once — draws every
-  // frame it gets, up to 30 a second, where parity would have halved it again
-  // (40-c). So the draws are min(frame rate, 30) a second, give or take one.
-  const expected = Math.min(frames, wall * 30);
+  expect(stepped).toBeGreaterThan(20); // the loop really ran, and was sampled
+  expect(due).toBeGreaterThan(10); // and the claim below was really put to it
+  expect(missed, `${due} due frames, ${renders} draws in ${wall.toFixed(2)} s`).toEqual([]);
+  // At most 30 a second, give or take the one the credit carried in.
   expect(renders).toBeLessThanOrEqual(Math.ceil(wall * 30) + 1);
-  expect(renders).toBeGreaterThanOrEqual(Math.floor(expected * 0.8) - 1);
   // The fixed updates kept their own rate: the pacer drops draws and leaves
   // the simulation alone, so the seconds the starfield turned through are the
   // seconds the window actually lasted — minus whatever the five-step cap
