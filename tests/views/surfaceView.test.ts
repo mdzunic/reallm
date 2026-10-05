@@ -2037,6 +2037,35 @@ describe('SPEC-053 — trees through the foliage seam, the canopy fade, the cut-
     expect(Math.abs(low.total - medium.total / 2)).toBeLessThanOrEqual(medium.total * 0.15);
   });
 
+  it('grows underPer1000m2 × canopy area of undergrowth under each tree, within 0.8 of its canopy (§4.4)', () => {
+    const base: PlanetDef = PLANETS.thessaly;
+    const planet: PlanetDef = {
+      ...base,
+      surface: { ...base.surface, look: { ...base.surface.look, undergrowth: { cells: [4], underPer1000m2: 1000, openPer1000m2: 0 } } },
+    };
+    const layout: ViewLayout = { ...LAYOUT, halfSize: 80, obstacles: [{ x: 40, z: -30, radius: 0.7, kind: 'tree' }], props: [] };
+    const scene = new THREE.Scene();
+    const view = new SurfaceView(scene, layout, planet, QUALITY.medium, assets(JUNGLE));
+    let mesh: THREE.InstancedMesh | null = null;
+    scene.traverse((node) => {
+      if (node.name === 'undergrowth') mesh = node as THREE.InstancedMesh;
+    });
+    const undergrowth = mesh as unknown as THREE.InstancedMesh;
+    const canopy = 0.7 / 0.14;
+    const area = Math.PI * canopy * canopy; // ≈ 78.5 m² → ≈ 79 candidates
+    // A few fall inside the trunk + 0.4 m and are dropped.
+    expect(undergrowth.count).toBeGreaterThan(0.85 * area);
+    expect(undergrowth.count).toBeLessThanOrEqual(Math.round(area));
+    const matrix = new THREE.Matrix4();
+    const at = new THREE.Vector3();
+    for (let i = 0; i < undergrowth.count; i++) {
+      undergrowth.getMatrixAt(i, matrix);
+      at.setFromMatrixPosition(matrix);
+      expect(Math.hypot(at.x - 40, at.z + 30)).toBeLessThanOrEqual(0.8 * canopy + 1e-6);
+    }
+    view.dispose();
+  });
+
   it('a planet with no foliage builds no tree, undergrowth or grove layer; its cover follows its look (53-h)', () => {
     const scene = new THREE.Scene();
     const view = new SurfaceView(scene, LAYOUT, PLANETS.cinder4, QUALITY.medium, assets([]));

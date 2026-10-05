@@ -586,14 +586,16 @@ function placeUndergrowth(
   for (let i = 0; i < open; i++) {
     candidates.push({ x: (hash01(seed, i, 0) * 2 - 1) * reach, z: (hash01(seed, i, 1) * 2 - 1) * reach });
   }
-  // Under the canopies: each tree's share of `underPer1000m2 × area`, carried so the total rounds once.
+  // Under the canopies: each tree's share of `underPer1000m2 × canopy area`,
+  // carried so the total rounds once, each within 0.8 of its canopy radius.
   let owed = 0;
   let k = 0;
   for (const tree of trees) {
-    const r = (UNDERGROWTH_CANOPY * tree.radius) / TRUNK_UNIT_RADIUS;
-    owed += (spec.underPer1000m2 * Math.PI * r * r) / 1000;
+    const canopy = tree.radius / TRUNK_UNIT_RADIUS;
+    owed += (spec.underPer1000m2 * Math.PI * canopy * canopy) / 1000;
+    const within = UNDERGROWTH_CANOPY * canopy;
     for (; owed >= 0.5; owed -= 1, k++) {
-      const d = r * Math.sqrt(hash01(seed, k, 5));
+      const d = within * Math.sqrt(hash01(seed, k, 5));
       const angle = hash01(seed, k, 6) * Math.PI * 2;
       candidates.push({ x: tree.x + Math.cos(angle) * d, z: tree.z + Math.sin(angle) * d });
     }
