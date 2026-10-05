@@ -81,12 +81,26 @@ export interface ViewGrade {
   desaturate: number;
 }
 
+/** SPEC-053 §3: one placed grove, orchard or cluster, as the view reads it. */
+export interface ViewFeature {
+  kind: 'grove' | 'orchard' | 'cluster';
+  x: number;
+  z: number;
+  radius: number;
+  /** An orchard's half-extents along x and z. */
+  halfW?: number;
+  halfD?: number;
+  pieces: number;
+}
+
 export interface ViewLayout {
   /** The pinned layout hash — the seed every decoration stream derives from. */
   hash: number;
   halfSize: number;
-  pois: readonly { kind: PoiKind; x: number; z: number; radius: number }[];
-  obstacles: readonly { x: number; z: number; radius: number; kind: ObstacleKind }[];
+  /** `poi` and `instance` are the layout's own (SPEC-053: Eden's seam, a landmark's yaw). */
+  pois: readonly { kind: PoiKind; x: number; z: number; radius: number; poi?: string; instance?: number }[];
+  /** A `tree`'s radius is its trunk; `feature` names the grove, orchard or cluster that placed it (SPEC-053). */
+  obstacles: readonly { x: number; z: number; radius: number; kind: ObstacleKind; feature?: ViewFeature['kind'] }[];
   nodes: readonly { resource: ResourceId; x: number; z: number }[];
   props: readonly { x: number; z: number; rot: number; scale: number; kind: string }[];
   /** SPEC-030: the placed shelters, in `layout.shelters` order. */
@@ -99,6 +113,8 @@ export interface ViewLayout {
     angle: number;
     gapAngle: number;
   }[];
+  /** SPEC-053 §4.3: the placed features; absent reads as none. */
+  features?: readonly ViewFeature[];
 }
 
 export interface ViewNode {
