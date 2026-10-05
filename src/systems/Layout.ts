@@ -1124,6 +1124,27 @@ export function repairReachability(layout: Layout): number {
 }
 
 /**
+ * SPEC-053 §4.3: the obstacles `feature` placed, in order. Features append
+ * their pieces one contiguous run each, in `layout.features` order, and
+ * `pieces` is the run's length — exact even where two groves' discs overlap.
+ */
+export function featurePieces(layout: Pick<Layout, 'obstacles' | 'features'>, feature: LayoutFeature): LayoutObstacle[] {
+  let skip = 0;
+  for (const entry of layout.features) {
+    if (entry === feature) break;
+    skip += entry.pieces;
+  }
+  const out: LayoutObstacle[] = [];
+  let seen = 0;
+  for (const o of layout.obstacles) {
+    if (o.feature === undefined) continue;
+    if (seen >= skip && seen < skip + feature.pieces) out.push(o);
+    seen++;
+  }
+  return out;
+}
+
+/**
  * The feature that placed the tagged obstacle at `index`: features append
  * their pieces in their own order, one contiguous run each, and `pieces` is
  * each run's length — so the tagged obstacles before it say whose it is.

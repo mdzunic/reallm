@@ -103,7 +103,16 @@ import {
   type PathGrid,
 } from '@/systems/Guidance';
 import { fillQuickFromPickup, quickEligible, refillQuick, type SlotView } from '@/systems/Loadout';
-import { generateLayout, ObstacleGrid, tugObstacle, WALL_INSET, type Layout, type LayoutPoi, type LayoutShelter } from '@/systems/Layout';
+import {
+  featurePieces,
+  generateLayout,
+  ObstacleGrid,
+  tugObstacle,
+  WALL_INSET,
+  type Layout,
+  type LayoutPoi,
+  type LayoutShelter,
+} from '@/systems/Layout';
 import { isHidden, SHELTER_INSET, shelterAt, STORM_SHELTER_FACTOR } from '@/systems/Shelter';
 import { nodeIcon, poiIcon } from '@/systems/MapModel';
 import { contractFor, Missions, type MissionContext, type ObjectiveProgress } from '@/systems/Missions';
@@ -4538,8 +4547,7 @@ export class SurfaceScene extends UiScene<'surface'> {
     if (feature === null) return;
     let tree: (typeof layout.obstacles)[number] | null = null;
     let nearest = Infinity;
-    for (const o of layout.obstacles) {
-      if (o.feature !== feature.kind) continue;
+    for (const o of featurePieces(layout, feature)) {
       const d = Math.hypot(o.x - feature.x, o.z - feature.z);
       if (d < nearest) {
         nearest = d;

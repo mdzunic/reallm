@@ -693,7 +693,7 @@ describe('SPEC-030 — repair, pins and the hash (AC-14, AC-16, AC-17)', () => {
 // ---------------------------------------------------------------- SPEC-053
 
 import type { PlanetDef } from '@/data/index';
-import { ORCHARD_TRUNK_RADIUS, TRUNK_MAX, TRUNK_MIN, type LayoutFeature, type LayoutObstacle } from '@/systems/Layout';
+import { ORCHARD_TRUNK_RADIUS, TRUNK_MAX, TRUNK_MIN, featurePieces, type LayoutFeature, type LayoutObstacle } from '@/systems/Layout';
 
 /** A planet with no groves, orchards or clusters: SPEC-030's counts alone. */
 function featureless(planet: PlanetId): PlanetDef {
@@ -903,6 +903,44 @@ describe('SPEC-053 — groves, orchards and clusters (§4.3, E81)', () => {
         }
       }
     }
+  });
+
+  it('featurePieces is each feature’s own run of pieces, in its extent, even where groves overlap', () => {
+    let overlapping = 0;
+    for (const planet of PLANET_IDS) {
+      for (let seed = 0; seed < 10; seed++) {
+        const layout = layoutFor(planet, 200_000 + seed);
+        const runs = piecesOf(layout);
+        for (const feature of layout.features) {
+          const pieces = featurePieces(layout, feature);
+          expect(pieces).toEqual(runs.get(feature));
+          expect(pieces).toHaveLength(feature.pieces);
+          for (const piece of pieces) {
+            expect(piece.feature).toBe(feature.kind);
+            if (feature.kind === 'orchard') {
+              expect(Math.abs(piece.x - feature.x)).toBeLessThanOrEqual((feature.halfW ?? 0) + 1e-9);
+              expect(Math.abs(piece.z - feature.z)).toBeLessThanOrEqual((feature.halfD ?? 0) + 1e-9);
+            } else {
+              expect(Math.hypot(piece.x - feature.x, piece.z - feature.z)).toBeLessThanOrEqual(feature.radius + 1e-9);
+            }
+          }
+          // A piece of another grove inside this one's disc is not one of its pieces.
+          if (feature.kind === 'grove') {
+            for (const other of layout.features) {
+              if (other === feature || other.kind !== 'grove') continue;
+              for (const piece of featurePieces(layout, other)) {
+                if (Math.hypot(piece.x - feature.x, piece.z - feature.z) <= feature.radius) {
+                  overlapping++;
+                  expect(pieces.includes(piece)).toBe(false);
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+    // Grove discs of 20–30 m with centres 30 m apart do overlap: the case is real.
+    expect(overlapping).toBeGreaterThan(0);
   });
 
   it('a repaired-away feature piece leaves its gap and its feature’s count follows (53-e)', () => {
