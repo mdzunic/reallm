@@ -15,7 +15,7 @@ import { hash01 } from '@/core/Noise';
 import type { QualityPreset } from '@/core/Quality';
 import { hash32 } from '@/core/Rng';
 import type { CoverLook } from '@/data/planets';
-import { TRUNK_UNIT_RADIUS } from '@/views/Foliage';
+import { TRUNK_UNIT_RADIUS, type FoliageMaterial } from '@/views/Foliage';
 import type { CullRect } from '@/views/InstanceCuller';
 import type { ViewLayout } from '@/views/SurfaceView';
 
@@ -305,7 +305,7 @@ export class GroundCover {
     field: HeightField,
     look: CoverLook,
     preset: QualityPreset,
-    material: THREE.MeshLambertMaterial,
+    material: FoliageMaterial,
   ) {
     this.#root = root;
     this.#field = field;

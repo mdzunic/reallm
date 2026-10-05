@@ -341,6 +341,8 @@ export function buildScatter(
 
 const DECAL_HOVER = 0.03;
 const DECAL_SEGMENTS = 4;
+/** SPEC-053 §4.9: decals keep this far outside an orchard's rectangle. */
+const ORCHARD_DECAL_MARGIN = 2;
 
 /** Atlas quadrant per kind; frost shares the slick tile (§4.5). */
 const DECAL_TILE: Record<string, readonly [number, number]> = {
@@ -364,6 +366,8 @@ export function buildDecals(layout: ViewLayout, field: HeightField, look: Surfac
   const indices: number[] = [];
   const scratchNormal = { x: 0, y: 1, z: 0 };
 
+  // SPEC-053 §4.9: nothing scuffs an orchard's lawn — its rectangle, plus 2 m.
+  const orchards = (layout.features ?? []).filter((f) => f.kind === 'orchard');
   let placed = 0;
   for (let i = 0; placed < target && i < target * 8; i++) {
     const reach = layout.halfSize - 8;
@@ -376,6 +380,11 @@ export function buildDecals(layout: ViewLayout, field: HeightField, look: Surfac
         clear = false;
         break;
       }
+    }
+    for (const orchard of orchards) {
+      const halfW = (orchard.halfW ?? orchard.radius) + ORCHARD_DECAL_MARGIN;
+      const halfD = (orchard.halfD ?? orchard.radius) + ORCHARD_DECAL_MARGIN;
+      if (Math.abs(cx - orchard.x) <= halfW && Math.abs(cz - orchard.z) <= halfD) clear = false;
     }
     if (!clear) continue;
 

@@ -43,6 +43,13 @@ const BAYER_SIZE = 4;
 const ATLAS_GRID = 4;
 const CELL_INSET = 4 / 128;
 
+/**
+ * The foliage seam's material type. SPEC-053 §4.1 draws leaves and grass with
+ * Lambert, not three's standard material: an alpha-tested atlas over a large
+ * share of the screen, lit cheaply. This module is the one place it is built.
+ */
+export type FoliageMaterial = THREE.MeshLambertMaterial;
+
 export interface FoliageUniforms {
   uWind: THREE.IUniform<number>;
   uTime: THREE.IUniform<number>;
@@ -137,7 +144,7 @@ function makeUniforms(): FoliageUniforms {
  * the model's vertex colours and `tint` — opaque and in the depth buffer at
  * every fade. Every mesh drawing it is a `CulledInstances` layer with fades.
  */
-export function createFoliageMaterial(atlas: THREE.Texture, tint: string): THREE.MeshLambertMaterial {
+export function createFoliageMaterial(atlas: THREE.Texture, tint: string): FoliageMaterial {
   useAtlas(atlas);
   const material = new THREE.MeshLambertMaterial({
     map: atlas,
@@ -171,7 +178,7 @@ export function createFoliageMaterial(atlas: THREE.Texture, tint: string): THREE
  * instanced `uvCell` attribute mapped to that cell's rectangle. No fade, no
  * dither and no cut-out — undergrowth and ground cover draw on it.
  */
-export function createCoverMaterial(atlas: THREE.Texture): THREE.MeshLambertMaterial {
+export function createCoverMaterial(atlas: THREE.Texture): FoliageMaterial {
   useAtlas(atlas);
   const material = new THREE.MeshLambertMaterial({
     map: atlas,
