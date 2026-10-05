@@ -1140,6 +1140,7 @@ export class Combat {
     e.castZ = z;
     e.packId = 0;
     e.menderAt = this.#world.time + MENDER_PULSE_SECONDS;
+    e.mendedUntil = 0;
     e.lastHitGuarded = false;
     // Set immediately before the emit, so a subscriber can read the position.
     this.#lastSpawned = e;
@@ -1860,7 +1861,9 @@ export class Combat {
    * SPEC-041 §4.6: every `MENDER_PULSE_SECONDS`, each live mender heals the
    * other live non-boss enemies within `MENDER_RADIUS` by
    * `MENDER_HEAL_FRACTION` of their own max HP, up to it — never itself, never
-   * a boss (41-g) — and leaves a pulse for the scene's green ring.
+   * a boss (41-g) — and leaves a pulse for the scene's green ring. 41-m: an
+   * enemy in reach of several menders takes one heal per pulse period, so a
+   * pack of menders mends no faster than one.
    */
   #updateMenders(): void {
     const w = this.#world;
@@ -1874,8 +1877,9 @@ export class Combat {
       for (let c = 0; c < blastCandidates.length; c++) {
         const other = enemies.at(blastCandidates[c] as number);
         if (other === m || other.state === 'dead' || other.def.archetype === 'boss' || other.hp >= other.maxHp) continue;
-        if (Math.hypot(other.x - m.x, other.z - m.z) > MENDER_RADIUS) continue;
+        if (time < other.mendedUntil || Math.hypot(other.x - m.x, other.z - m.z) > MENDER_RADIUS) continue;
         other.hp = Math.min(other.maxHp, other.hp + MENDER_HEAL_FRACTION * other.maxHp);
+        other.mendedUntil = time + MENDER_PULSE_SECONDS;
       }
       if (this.menderPulseCount < MENDER_PULSE_CAP) {
         const pulse = this.menderPulses[this.menderPulseCount] as { x: number; z: number };
