@@ -217,6 +217,13 @@ describe('GroundCover (§4.5)', () => {
       expect(drawn).toBe(COVER_CAPACITY[preset]);
       expect(mesh.count).toBe(drawn);
       expect(ground.drawn).toBe(drawn);
+      // The near cells win: the rig looks from +x, +z, so the far half of the arena is what goes without.
+      const matrix = new THREE.Matrix4();
+      const at = new THREE.Vector3();
+      for (let i = 0; i < drawn; i++) {
+        mesh.getMatrixAt(i, matrix);
+        expect(at.setFromMatrixPosition(matrix).z).toBeGreaterThan(0);
+      }
       ground.dispose();
       expect(root.children).toHaveLength(0);
     }

@@ -380,8 +380,10 @@ export class GroundCover {
     const cz0 = Math.floor(rect.minZ / COVER_CELL);
     const cz1 = Math.floor(rect.maxZ / COVER_CELL);
     let written = 0;
-    for (let cz = cz0; cz <= cz1 && written < capacity; cz++) {
-      for (let cx = cx0; cx <= cx1 && written < capacity; cx++) {
+    // Nearest the camera first: the fixed rig stands at +x, +z of what it
+    // looks at, so if the capacity binds, the cells it drops are the far ones.
+    for (let cz = cz1; cz >= cz0 && written < capacity; cz--) {
+      for (let cx = cx1; cx >= cx0 && written < capacity; cx--) {
         const centreX = cx * COVER_CELL + COVER_CELL / 2;
         const centreZ = cz * COVER_CELL + COVER_CELL / 2;
         scratchSphere.center.set(centreX, field.heightAt(centreX, centreZ), centreZ);
