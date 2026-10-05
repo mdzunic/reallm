@@ -422,6 +422,17 @@ describe('Assets.release() (SPEC-040 §4.6, AC-23)', () => {
     expect(assets.loaded).toBe(true);
   });
 
+  it('hasTexture answers whether a texture is cached, without throwing (SPEC-053 §4.1)', async () => {
+    const fakes = fakeLoaders();
+    const assets = new Assets(fakes);
+    expect(assets.hasTexture(SAND)).toBe(false);
+    await assets.load(PLANET);
+    expect(assets.hasTexture(SAND)).toBe(true);
+    expect(assets.hasTexture('foliage_atlas')).toBe(false);
+    await assets.release(PLANET);
+    expect(assets.hasTexture(SAND)).toBe(false);
+  });
+
   it('fetches a released set again on the next load', async () => {
     const fakes = fakeLoaders();
     const assets = new Assets(fakes);

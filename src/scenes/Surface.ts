@@ -1019,9 +1019,10 @@ export class SurfaceScene extends UiScene<'surface'> {
     const assets = this.services.assets;
     const surfaceAssets = SURFACE_ASSETS[planet.biome];
     this.disposer.add(() => void assets.release(surfaceAssets));
+    // SPEC-053 §4.1: the shared set's atlas and detail normal ride along.
     this.#planetAssets = assets.load({
       models: { ...surfaceAssets.models, ...SURFACE_SHARED_ASSETS.models },
-      textures: { ...surfaceAssets.textures },
+      textures: { ...surfaceAssets.textures, ...SURFACE_SHARED_ASSETS.textures },
       audio: {},
     });
     return this.#planetAssets;
