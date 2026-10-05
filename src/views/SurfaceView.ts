@@ -1973,6 +1973,7 @@ export class SurfaceView {
         // §4.7: the emissive parts, instanced on the body's own matrices.
         const glowMesh = new THREE.InstancedMesh(shape.glow, obstacleGlow(prop.kind, this.#biome, this.#palette.accent), members.length);
         glowMesh.castShadow = false;
+        if (foliage) glowMesh.name = `tree-glow:${s}`;
         glow = this.#addCulled(glowMesh, { matrices }, sphereOf(shape.glow));
         // SPEC-053 §4.1: a tree's glow is LOD0's; `low` draws its LOD1 alone.
         if (lods !== null && this.#preset === 'low') this.#setCulledActive(glow, false);
