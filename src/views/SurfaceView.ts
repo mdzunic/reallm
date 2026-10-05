@@ -1541,11 +1541,10 @@ export class SurfaceView {
     // terrain material once when the detail comes or goes.
     const preset = presetOf(quality);
     if (preset !== this.#preset) {
-      const detailBefore = this.#preset !== 'low';
+      const lowChanged = (this.#preset === 'low') !== (preset === 'low');
       this.#preset = preset;
       this.#applyTreeLod();
-      if (detailBefore !== (preset !== 'low')) this.#rebuildGround();
-      const lowChanged = detailBefore !== (preset !== 'low');
+      if (lowChanged) this.#rebuildGround();
       if (this.#undergrowth !== null && lowChanged) {
         this.#dropLayer(this.#undergrowth, false);
         this.#undergrowth = null;
