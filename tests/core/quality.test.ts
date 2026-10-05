@@ -33,7 +33,7 @@ import {
 } from '@/core/Quality';
 import { BRIGHTNESS_LIMIT } from '@/core/Settings';
 
-/** Reference §3, transcribed. Fifteen fields, three presets, no arithmetic. */
+/** Reference §3, transcribed — plus SPEC-054's `flashlight`. Sixteen fields, three presets, no arithmetic. */
 const TABLE: Record<QualityPreset, QualitySettings> = {
   low: {
     maxDpr: 1,
@@ -42,6 +42,7 @@ const TABLE: Record<QualityPreset, QualitySettings> = {
     shadowMapSize: 0,
     ibl: false,
     ao: false,
+    flashlight: 'fake',
     maxParticles: 60,
     maxEnemies: 12,
     drawDistance: 60,
@@ -59,6 +60,7 @@ const TABLE: Record<QualityPreset, QualitySettings> = {
     shadowMapSize: 0,
     ibl: true,
     ao: false,
+    flashlight: 'spot',
     maxParticles: 150,
     maxEnemies: 20,
     drawDistance: 90,
@@ -76,6 +78,7 @@ const TABLE: Record<QualityPreset, QualitySettings> = {
     shadowMapSize: 1024,
     ibl: true,
     ao: false,
+    flashlight: 'spot-shadow',
     maxParticles: 300,
     maxEnemies: 32,
     drawDistance: 140,
@@ -89,7 +92,7 @@ const TABLE: Record<QualityPreset, QualitySettings> = {
 };
 
 const PRESETS: readonly QualityPreset[] = ['low', 'medium', 'high'];
-/** The fifteen field names of §3, so an added or dropped row fails here first. */
+/** The sixteen field names (§3 and SPEC-054 §4.5), so an added or dropped row fails here first. */
 const FIELDS = Object.keys(TABLE.low) as Array<keyof QualitySettings>;
 
 describe('QUALITY (SPEC-015 §3)', () => {
@@ -97,8 +100,8 @@ describe('QUALITY (SPEC-015 §3)', () => {
     expect(Object.keys(QUALITY).sort()).toEqual(['high', 'low', 'medium']);
   });
 
-  it('carries exactly the fifteen fields of §3 on every preset (AC-1)', () => {
-    expect(FIELDS).toHaveLength(15);
+  it('carries exactly the sixteen fields of §3 and SPEC-054 on every preset (AC-1)', () => {
+    expect(FIELDS).toHaveLength(16);
     for (const preset of PRESETS) {
       expect(Object.keys(QUALITY[preset]).sort()).toEqual([...FIELDS].sort());
     }
@@ -116,6 +119,8 @@ describe('QUALITY (SPEC-015 §3)', () => {
       expect(shipped.shadowMapSize).toBe(row.shadowMapSize);
       expect(shipped.ibl).toBe(row.ibl);
       expect(shipped.ao).toBe(row.ao);
+      // SPEC-054 §4.5: the flashlight's mode per preset.
+      expect(shipped.flashlight).toBe(row.flashlight);
       expect(shipped.maxParticles).toBe(row.maxParticles);
       expect(shipped.maxEnemies).toBe(row.maxEnemies);
       expect(shipped.drawDistance).toBe(row.drawDistance);

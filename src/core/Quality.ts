@@ -33,6 +33,12 @@ export interface QualitySettings {
   readonly ibl: boolean;
   /** Ambient occlusion: a slot only, `false` on every preset in v1. */
   readonly ao: boolean;
+  /**
+   * SPEC-054 §4.5: how the flashlight below is drawn — a lightless ground
+   * cookie and cone (`fake`), one `SpotLight` (`spot`), or that spot with a
+   * 512² shadow map and the cookie as its map (`spot-shadow`).
+   */
+  readonly flashlight: 'fake' | 'spot' | 'spot-shadow';
 }
 
 /**
@@ -62,6 +68,7 @@ export const QUALITY = {
     shadowMapSize: 0,
     ibl: false,
     ao: false,
+    flashlight: 'fake',
   },
   medium: {
     maxDpr: 1.5,
@@ -79,6 +86,7 @@ export const QUALITY = {
     shadowMapSize: 0,
     ibl: true,
     ao: false,
+    flashlight: 'spot',
   },
   high: {
     maxDpr: 2,
@@ -96,6 +104,7 @@ export const QUALITY = {
     shadowMapSize: 1024,
     ibl: true,
     ao: false,
+    flashlight: 'spot-shadow',
   },
 } as const satisfies Record<QualityPreset, QualitySettings>;
 
