@@ -306,6 +306,14 @@ export class Assets {
     return this.#models.has(id);
   }
 
+  /**
+   * True once `load()` has cached this texture — SPEC-053's question for the
+   * shared surface set: is the foliage atlas (or the detail normal) in yet?
+   */
+  hasTexture(id: string): boolean {
+    return this.#textures.has(id);
+  }
+
   /** The one shared instance, tagged `userData.shared === true` (D-33). */
   texture(id: TextureId): Texture {
     if (!this.#loaded) throw new Error(`assets: texture("${id}") requested before load() finished`);

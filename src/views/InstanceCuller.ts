@@ -278,6 +278,11 @@ export interface CullMaster {
   readonly colors?: Float32Array;
   /** 1 per instance. */
   readonly fades?: Float32Array;
+  /**
+   * SPEC-053 §4.4: one more float per instance, drawn as the instanced
+   * attribute `name` — the undergrowth's atlas cell (`uvCell`).
+   */
+  readonly extra?: { readonly name: string; readonly values: Float32Array };
 }
 
 const scratchMatrix = new THREE.Matrix4();
@@ -315,20 +320,20 @@ function uploadAll(attribute: THREE.BufferAttribute): void {
 export class CulledInstances {
   readonly mesh: THREE.InstancedMesh;
   readonly total: number;
-  /** The local sphere's reach from the instance origin × the largest instance scale. */
-  readonly maxRadius: number;
-  /** The highest any instance's sphere reaches above y = 0, in metres. */
-  readonly maxHeight: number;
   readonly #master: CullMaster;
   readonly #sphere: THREE.Sphere;
+  #maxRadius = 0;
+  #maxHeight = 0;
   readonly #grid: InstanceGrid;
   readonly #candidates: Int32Array;
   readonly #slotOf: Int32Array;
   readonly #instanceOf: Int32Array;
   readonly #fade: THREE.InstancedBufferAttribute | null;
+  readonly #extra: THREE.InstancedBufferAttribute | null;
   readonly #matrixRange = { start: 0, count: 0 };
   readonly #colorRange = { start: 0, count: 0 };
   readonly #fadeRange = { start: 0, count: 0 };
+  readonly #extraRange = { start: 0, count: 0 };
   #drawn: number;
 
   constructor(mesh: THREE.InstancedMesh, master: CullMaster, localSphere: THREE.Sphere) {
@@ -343,22 +348,11 @@ export class CulledInstances {
 
     const matrices = master.matrices;
     const xz = new Float32Array(total * 2);
-    const reach = Math.hypot(localSphere.center.x, localSphere.center.z) + localSphere.radius;
-    const top = localSphere.center.y + localSphere.radius;
-    let maxScale = 0;
-    let maxHeight = 0;
     for (let i = 0; i < total; i++) {
-      const at = i * 16;
-      xz[i * 2] = matrices[at + 12] as number;
-      xz[i * 2 + 1] = matrices[at + 14] as number;
-      scratchMatrix.fromArray(matrices, at);
-      const scale = scratchMatrix.getMaxScaleOnAxis();
-      if (scale > maxScale) maxScale = scale;
-      const height = (matrices[at + 13] as number) + top * scale;
-      if (height > maxHeight) maxHeight = height;
+      xz[i * 2] = matrices[i * 16 + 12] as number;
+      xz[i * 2 + 1] = matrices[i * 16 + 14] as number;
     }
-    this.maxRadius = reach * maxScale;
-    this.maxHeight = maxHeight;
+    this.#measure();
     this.#grid = new InstanceGrid(CULL_CELL, xz);
     this.#candidates = new Int32Array(total);
     this.#slotOf = new Int32Array(total);
@@ -382,6 +376,13 @@ export class CulledInstances {
       fade.setUsage(THREE.DynamicDrawUsage);
     }
     this.#fade = fade;
+    let extra: THREE.InstancedBufferAttribute | null = null;
+    if (master.extra !== undefined) {
+      extra = new THREE.InstancedBufferAttribute(new Float32Array(capacity), 1);
+      extra.setUsage(THREE.DynamicDrawUsage);
+      mesh.geometry.setAttribute(master.extra.name, extra);
+    }
+    this.#extra = extra;
 
     // Everything drawn, in order, until the first refresh.
     for (let i = 0; i < total; i++) {
@@ -398,6 +399,51 @@ export class CulledInstances {
   /** How many instances the last refresh drew (every one before the first). */
   get drawn(): number {
     return this.#drawn;
+  }
+
+  /** The local sphere's reach from the instance origin × the largest instance scale. */
+  get maxRadius(): number {
+    return this.#maxRadius;
+  }
+
+  /** The highest any instance's sphere reaches above y = 0, in metres. */
+  get maxHeight(): number {
+    return this.#maxHeight;
+  }
+
+  /**
+   * SPEC-053 §4.1: draws the same instances with another geometry — a tree's
+   * LOD — re-based on its sphere. The per-instance attributes move across, so
+   * nothing about an instance changes; the next `refresh` culls with the new
+   * sphere.
+   */
+  setGeometry(geometry: THREE.BufferGeometry, localSphere: THREE.Sphere): void {
+    if (this.#fade !== null) geometry.setAttribute('instanceFade', this.#fade);
+    const extra = this.#master.extra;
+    if (extra !== undefined && this.#extra !== null) geometry.setAttribute(extra.name, this.#extra);
+    this.mesh.geometry = geometry;
+    this.#sphere.copy(localSphere);
+    this.#measure();
+  }
+
+  /** `maxRadius` and `maxHeight` from the master's matrices and the local sphere. */
+  #measure(): void {
+    const matrices = this.#master.matrices;
+    const sphere = this.#sphere;
+    const reach = Math.hypot(sphere.center.x, sphere.center.z) + sphere.radius;
+    const top = sphere.center.y + sphere.radius;
+    let maxScale = 0;
+    let maxHeight = 0;
+    for (let i = 0; i < this.total; i++) {
+      const at = i * 16;
+      scratchMatrix.fromArray(matrices, at);
+      const scale = scratchMatrix.getMaxScaleOnAxis();
+      if (scale > maxScale) maxScale = scale;
+      const height = (matrices[at + 13] as number) + top * scale;
+      if (height > maxHeight) maxHeight = height;
+    }
+    this.#maxRadius = reach * maxScale;
+    this.#maxHeight = maxHeight;
   }
 
   /**
@@ -478,6 +524,8 @@ export class CulledInstances {
     }
     const fades = master.fades;
     if (fades !== undefined && this.#fade !== null) (this.#fade.array as Float32Array)[slot] = fades[i] as number;
+    const extra = master.extra;
+    if (extra !== undefined && this.#extra !== null) (this.#extra.array as Float32Array)[slot] = extra.values[i] as number;
   }
 
   #markUpload(): void {
@@ -487,5 +535,6 @@ export class CulledInstances {
       uploadPrefix(mesh.instanceColor, this.#colorRange, this.#drawn);
     }
     if (this.#fade !== null) uploadPrefix(this.#fade, this.#fadeRange, this.#drawn);
+    if (this.#extra !== null) uploadPrefix(this.#extra, this.#extraRange, this.#drawn);
   }
 }

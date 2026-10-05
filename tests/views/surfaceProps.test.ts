@@ -6,8 +6,13 @@ import * as THREE from 'three';
 import type { Assets } from '@/core/Assets';
 import { hash32 } from '@/core/Rng';
 import {
+  LANDMARK_FOOTPRINT,
+  LANDMARK_MODELS,
   LANDMARK_SCALE,
+  ORCHARD_MODEL,
   PROP_MODELS,
+  foliageAtlas,
+  foliageFromModel,
   SHELTER_MODELS,
   boundaryGeometry,
   geometryFromModel,
@@ -86,10 +91,20 @@ describe('the GLB seam (SPEC-018 §4.10, 18-n, 18-o)', () => {
   const fakeAssets = (loaded: boolean): Assets =>
     ({ hasModel: () => loaded, model: () => crateModel() }) as unknown as Assets;
 
-  it('every biome:kind pair names both its variants, _a then _b (SPEC-046 §4.2)', () => {
+  it('every biome:kind pair names its variants in order: _a, _b, then a non-tree kind’s _c (SPEC-046 §4.2, SPEC-053 §4.1)', () => {
+    // SPEC-053 §4.1 moved this table: the ten non-tree kinds gained their _c
+    // as a third variant, the jungle's trees are a, b and c, and the temperate
+    // trees stay a and b — their _c is ORCHARD_MODEL, which only orchards draw.
     for (const [biome, kind] of OBSTACLES) {
-      expect(PROP_MODELS[`${biome}:${kind}`], `${biome}:${kind}`).toEqual([`${biome}_${kind}_a`, `${biome}_${kind}_b`]);
+      const expected =
+        biome === 'temperate' && kind === 'tree'
+          ? ['temperate_tree_a', 'temperate_tree_b']
+          : [`${biome}_${kind}_a`, `${biome}_${kind}_b`, `${biome}_${kind}_c`];
+      expect(PROP_MODELS[`${biome}:${kind}`], `${biome}:${kind}`).toEqual(expected);
     }
+    expect(PROP_MODELS['jungle:tree']).toEqual(['jungle_tree_a', 'jungle_tree_b', 'jungle_tree_c']);
+    expect(ORCHARD_MODEL).toBe('temperate_tree_c');
+    expect(Object.values(PROP_MODELS).some((ids) => ids?.includes(ORCHARD_MODEL))).toBe(false);
     expect(Object.keys(PROP_MODELS)).toHaveLength(12);
     // The collision-only kinds never look a model up (SPEC-030 D-19).
     expect(obstacleModelIds('wreck_hull', 'desert')).toEqual([]);
@@ -366,5 +381,105 @@ describe('SPEC-030 — wall pieces (AC-35)', () => {
     expect(box.max.y).toBeLessThanOrEqual(1 + 1e-6);
     expect(box.min.z).toBeGreaterThanOrEqual(-1e-6);
     expect(box.max.z).toBeLessThanOrEqual(1 + 1e-6);
+  });
+});
+
+// ---------------------------------------------------------------- SPEC-053
+
+describe('the foliage seam and the landmarks (SPEC-053 §4.1, §4.8)', () => {
+  /** A strip of `n` triangles with uvs and colours, indexed like the GLB's. */
+  function strip(n: number, y: number, u: number): THREE.BufferGeometry {
+    const geometry = new THREE.PlaneGeometry(1, 1, n, 1);
+    geometry.translate(0, y, 0);
+    const count = (geometry.getAttribute('position') as THREE.BufferAttribute).count;
+    const uv = geometry.getAttribute('uv') as THREE.BufferAttribute;
+    for (let i = 0; i < count; i++) uv.setXY(i, u + uv.getX(i) * 0.25, uv.getY(i) * 0.25);
+    geometry.setAttribute('color', new THREE.BufferAttribute(new Float32Array(count * 3).fill(0.5), 3));
+    return geometry;
+  }
+
+  /** SPEC-052's tree contract: five named nodes, `Foliage` on four and `Glow` on the pods. */
+  function tree(): THREE.Group {
+    const group = new THREE.Group();
+    const foliage = new THREE.MeshStandardMaterial({ name: 'Foliage', vertexColors: true });
+    const parts: [string, THREE.BufferGeometry, THREE.Material][] = [
+      ['Bark', strip(4, 0.5, 0.75), foliage],
+      ['Leaf', strip(6, 1.8, 0), foliage],
+      ['Bark_LOD1', strip(1, 0.5, 0.75), foliage],
+      ['Leaf_LOD1', strip(2, 1.8, 0), foliage],
+      ['Glow', new THREE.SphereGeometry(0.1, 4, 3), new THREE.MeshStandardMaterial({ name: 'Glow' })],
+    ];
+    for (const [name, geometry, material] of parts) {
+      const mesh = new THREE.Mesh(geometry, material);
+      mesh.name = name;
+      group.add(mesh);
+    }
+    return group;
+  }
+
+  const indexedTris = (geometry: THREE.BufferGeometry): number => (geometry.index?.count ?? geometry.getAttribute('position').count) / 3;
+
+  it('foliageFromModel merges Bark and Leaf into a body that keeps its atlas uvs, and splits glow and lod1', () => {
+    const prop = foliageFromModel(tree());
+    expect(prop.foliage).toBe(true);
+    expect(prop.fromModel).toBe(true);
+    expect(Object.keys(prop.body.attributes).sort()).toEqual(['color', 'normal', 'position', 'uv']);
+    expect(indexedTris(prop.body)).toBe(4 * 2 + 6 * 2); // Bark + Leaf
+    expect(prop.lod1).toBeDefined();
+    expect(indexedTris(prop.lod1 as THREE.BufferGeometry)).toBe(1 * 2 + 2 * 2); // Bark_LOD1 + Leaf_LOD1
+    expect((prop.lod1 as THREE.BufferGeometry).getAttribute('uv')).toBeDefined();
+    // The leaf's uvs are the atlas cell's, untouched: u in [0, 0.25] for the leaf, [0.75, 1] for the bark.
+    const uv = prop.body.getAttribute('uv') as THREE.BufferAttribute;
+    let maxU = 0;
+    for (let i = 0; i < uv.count; i++) maxU = Math.max(maxU, uv.getX(i));
+    expect(maxU).toBeCloseTo(1, 6);
+    // COLOR_0 × the white material: the authored 0.5 survives.
+    expect((prop.body.getAttribute('color') as THREE.BufferAttribute).getX(0)).toBeCloseTo(0.5, 6);
+    expect(prop.glow).toBeDefined();
+    expect(prop.glow?.getAttribute('uv')).toBeUndefined(); // the glow is a plain prop part
+  });
+
+  it('obstacleGeometry draws a tree through the seam once the model and the atlas are both in (53-a)', () => {
+    const atlas = new THREE.Texture();
+    const both = {
+      hasModel: (id: string) => id === 'jungle_tree_a',
+      model: () => tree(),
+      hasTexture: (id: string) => id === 'foliage_atlas',
+      texture: () => atlas,
+    } as unknown as Assets;
+    expect(foliageAtlas(both)).toBe(atlas);
+    const seam = obstacleGeometry('tree', 'jungle', 7, both);
+    expect(seam.foliage).toBe(true);
+    expect(seam.lod1).toBeDefined();
+    // The model without the atlas stays procedural.
+    const noAtlas = { ...both, hasTexture: () => false } as unknown as Assets;
+    expect(foliageAtlas(noAtlas)).toBeNull();
+    const procedural = obstacleGeometry('tree', 'jungle', 7, noAtlas);
+    expect(procedural.foliage).toBeUndefined();
+    expect(tris(procedural.body)).toBe(tris(obstacleGeometry('tree', 'jungle', 7).body));
+  });
+
+  it('LANDMARK_FOOTPRINT is 4, 3.5, 4, 4.5, 4, 4.2 m and each biome names landmark_<biome>', () => {
+    expect(LANDMARK_FOOTPRINT).toEqual({ desert: 4, ice: 3.5, jungle: 4, volcanic: 4.5, hive: 4, temperate: 4.2 });
+    for (const biome of ['desert', 'ice', 'jungle', 'volcanic', 'hive', 'temperate'] as const) {
+      expect(LANDMARK_MODELS[biome]).toBe(`landmark_${biome}`);
+    }
+  });
+
+  it('a landmark POI takes its model once loaded, with its Glow split, and the procedural body until then', () => {
+    const landmark = (): THREE.Group => {
+      const group = new THREE.Group();
+      group.add(new THREE.Mesh(new THREE.BoxGeometry(4, 5, 4).translate(0, 2.5, 0), new THREE.MeshStandardMaterial({ name: 'Body' })));
+      group.add(new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.5, 0.5), new THREE.MeshStandardMaterial({ name: 'Glow' })));
+      return group;
+    };
+    const loaded = { hasModel: (id: string) => id === 'landmark_ice', model: () => landmark() } as unknown as Assets;
+    const prop = poiGeometry('landmark', 'ice', loaded);
+    expect(prop.fromModel).toBe(true);
+    expect(tris(prop.body)).toBe(12);
+    expect(prop.glow).toBeDefined();
+    // Another biome's model is not this one's; nothing loaded keeps SPEC-046's body.
+    expect(poiGeometry('landmark', 'desert', loaded).fromModel).toBeUndefined();
+    expect(poiGeometry('landmark', 'ice').fromModel).toBeUndefined();
   });
 });

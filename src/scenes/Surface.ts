@@ -103,7 +103,16 @@ import {
   type PathGrid,
 } from '@/systems/Guidance';
 import { fillQuickFromPickup, quickEligible, refillQuick, type SlotView } from '@/systems/Loadout';
-import { generateLayout, ObstacleGrid, tugObstacle, WALL_INSET, type Layout, type LayoutPoi, type LayoutShelter } from '@/systems/Layout';
+import {
+  featurePieces,
+  generateLayout,
+  ObstacleGrid,
+  tugObstacle,
+  WALL_INSET,
+  type Layout,
+  type LayoutPoi,
+  type LayoutShelter,
+} from '@/systems/Layout';
 import { isHidden, SHELTER_INSET, shelterAt, STORM_SHELTER_FACTOR } from '@/systems/Shelter';
 import { nodeIcon, poiIcon } from '@/systems/MapModel';
 import { contractFor, Missions, type MissionContext, type ObjectiveProgress } from '@/systems/Missions';
@@ -989,6 +998,14 @@ export class SurfaceScene extends UiScene<'surface'> {
 
   /** SPEC-040 §4.6: the planet's set, loading since `enter()`; `null` before it. */
   #planetAssets: Promise<void> | null = null;
+  /** SPEC-053 §4.10 (dev): the trunk `surface-goto-grove` last stood the salvager beside — `sceneInfo.groveX/Z/R`. */
+  #groveTree: { x: number; z: number; radius: number } | null = null;
+  /** SPEC-053 §4.1.2: `SurfaceFrame.screen`, one object rewritten every rendered frame. */
+  readonly #screenFrame: { camera: THREE.PerspectiveCamera; width: number; height: number } = {
+    camera: this.camera,
+    width: 0,
+    height: 0,
+  };
 
   constructor(services: GameServices) {
     super(services, 'surface', 'surface_calm');
@@ -1019,9 +1036,10 @@ export class SurfaceScene extends UiScene<'surface'> {
     const assets = this.services.assets;
     const surfaceAssets = SURFACE_ASSETS[planet.biome];
     this.disposer.add(() => void assets.release(surfaceAssets));
+    // SPEC-053 §4.1: the shared set's atlas and detail normal ride along.
     this.#planetAssets = assets.load({
       models: { ...surfaceAssets.models, ...SURFACE_SHARED_ASSETS.models },
-      textures: { ...surfaceAssets.textures },
+      textures: { ...surfaceAssets.textures, ...SURFACE_SHARED_ASSETS.textures },
       audio: {},
     });
     return this.#planetAssets;
@@ -1264,6 +1282,11 @@ export class SurfaceScene extends UiScene<'surface'> {
     // distance follow the screen — set now, and again on every resize.
     this.#viewWidth = services.renderer.width;
     this.#viewHeight = services.renderer.height;
+    // SPEC-053 §4.1.2: the scene's draw target in device pixels — the space of
+    // `gl_FragCoord` the cut-out works in — now and on every resize (53-m).
+    const size = services.renderer.size;
+    this.#screenFrame.width = Math.round(size.width * size.dpr);
+    this.#screenFrame.height = Math.round(size.height * size.dpr);
     this.camera.fov = cameraFov(this.#viewWidth / this.#viewHeight);
     // The base render sets the same on every frame; the first frustum — and
     // SPEC-046's first cull — already needs it.
@@ -1278,11 +1301,13 @@ export class SurfaceScene extends UiScene<'surface'> {
     this.disposer.add(
       services.events.on(
         'renderer:resized',
-        ({ width, height }) => {
+        ({ width, height, dpr }) => {
           // SPEC-037 §4.7: the field of view snaps; the distance eases as a
           // scheme change does (and snaps under reduce motion).
           this.#viewWidth = width;
           this.#viewHeight = height;
+          this.#screenFrame.width = Math.round(width * dpr);
+          this.#screenFrame.height = Math.round(height * dpr);
           const fov = cameraFov(width / height);
           // The base render sets the aspect too, a frame later; SPEC-046's
           // cull recaptures the frustum as soon as the projection moves.
@@ -1862,6 +1887,11 @@ export class SurfaceScene extends UiScene<'surface'> {
       const dt = Math.max(0, time - this.#lastViewTime);
       this.#lastViewTime = time;
       this.#renderFeedback(world, view);
+      // SPEC-053 §4.1.2, 53-c: the camera that draws and its target's device
+      // pixels (`#screenFrame`, kept by `renderer:resized`) for the head
+      // cut-out; reduce motion stills the wind the next frame it changes.
+      const screen = this.#screenFrame;
+      view.reduceMotion = this.services.settings.get().reduceMotion;
       view.sync({
         player: world.player,
         follower: world.follower,
@@ -1874,6 +1904,7 @@ export class SurfaceScene extends UiScene<'surface'> {
         telegraphs: { pool: (this.#combat as Combat).telegraphs, time: world.time },
         time,
         dt,
+        screen,
       });
       // SPEC-041 §4.4: the ring shows while the arena is armed — and so while sealed.
       view.setArena(world.arena ?? (this.#arena?.sealed === true ? this.#arena : null));
@@ -2181,6 +2212,26 @@ export class SurfaceScene extends UiScene<'surface'> {
     info['instancesDrawn'] = this.#view?.instancesDrawn ?? 0;
     info['cullMs'] = this.#view?.cullMs ?? 0;
     info['tug'] = this.#view?.tugDrawn === true ? 1 : 0;
+    // SPEC-053 §3: the foliage sub-budget, the canopy fade (E82), the cover,
+    // the trees' LOD and source, the wind in force, and Eden's seam.
+    const view = this.#view;
+    if (view !== null) {
+      info['foliageTris'] = view.foliageTris;
+      info['foliageDraws'] = view.foliageDraws;
+      info['canopyFaded'] = view.canopyFaded;
+      info['canopyHolders'] = view.canopyHolders;
+      info['coverDrawn'] = view.coverDrawn;
+      info['treeLod'] = view.treeLod;
+      info['treeSource'] = view.treeSource;
+      info['wind'] = Math.round(view.wind * 10_000) / 10_000;
+      if (view.seamAt !== null) info['seamAt'] = Math.round(view.seamAt * 100) / 100;
+    }
+    const grove = this.#groveTree;
+    if (grove !== null) {
+      info['groveX'] = Math.round(grove.x * 100) / 100;
+      info['groveZ'] = Math.round(grove.z * 100) / 100;
+      info['groveR'] = Math.round(grove.radius * 100) / 100;
+    }
     // SPEC-035 §4.3: the surface's own bloom threshold, which the shared default
     // (0.85) is not — a whiteout is otherwise a claim about a post uniform
     // nothing outside the chain can read.
@@ -3783,7 +3834,11 @@ export class SurfaceScene extends UiScene<'surface'> {
       // opposite bearing.
       const ux = Math.sin(CAMERA_YAW);
       const uz = Math.cos(CAMERA_YAW);
-      for (const prop of view.occluderProps) {
+      for (let index = 0; index < view.occluderProps.length; index++) {
+        // SPEC-053 §4.1: a tree drawn through the foliage seam is cut away
+        // around the head, never faded — so it is not what this looks for.
+        if (!view.occluderFades(index)) continue;
+        const prop = view.occluderProps[index] as (typeof view.occluderProps)[number];
         for (const gap of [0.5, 1, 2, 3, 5, 8]) {
           const off = prop.radius + gap;
           const x = prop.x - ux * off;
@@ -3809,6 +3864,11 @@ export class SurfaceScene extends UiScene<'surface'> {
       world.player.x = this.#planet.surface.halfSize - WALL_INSET;
       world.player.z = 0;
     });
+    // SPEC-053 §4.10: beside a tree of the biggest grove, orchard or cluster,
+    // inside its canopy — where the foliage budget is measured.
+    if (import.meta.env.DEV) {
+      button('surface-goto-grove', 'To grove', () => this.#debugGotoGrove());
+    }
     // D-15: the planet cycle's highest-dps storm, ties toward the earlier
     // entry; present and inert on a weatherless planet (30-g).
     button('surface-storm', 'Storm', () => {
@@ -4473,6 +4533,38 @@ export class SurfaceScene extends UiScene<'surface'> {
     if (world === null || shelter === null || !world.player.alive) return;
     world.player.x = shelter.x;
     world.player.z = shelter.z;
+  }
+
+  /**
+   * SPEC-053 §4.10 (dev builds): beside a tree of the feature with the most
+   * pieces (the first on a tie) — of its pieces, the one nearest its centre —
+   * at `(x + radius + 1, z)`, stepped 0.5 m along +x while the salvager's
+   * circle stands in an obstacle's. That ends inside the tree's canopy disc
+   * unless more than three steps were needed. Inert with no features.
+   */
+  #debugGotoGrove(): void {
+    const world = this.#world;
+    const layout = this.#layout;
+    if (world === null || layout === null || !world.player.alive) return;
+    let feature: (typeof layout.features)[number] | null = null;
+    for (const entry of layout.features) if (feature === null || entry.pieces > feature.pieces) feature = entry;
+    if (feature === null) return;
+    let tree: (typeof layout.obstacles)[number] | null = null;
+    let nearest = Infinity;
+    for (const o of featurePieces(layout, feature)) {
+      const d = Math.hypot(o.x - feature.x, o.z - feature.z);
+      if (d < nearest) {
+        nearest = d;
+        tree = o;
+      }
+    }
+    if (tree === null) return;
+    this.#groveTree = tree;
+    const p = world.player;
+    let x = tree.x + tree.radius + 1;
+    for (let step = 0; step < 40 && world.obstacles.hitsCircle(x, tree.z, p.radius); step++) x += 0.5;
+    p.x = x;
+    p.z = tree.z;
   }
 
   /**

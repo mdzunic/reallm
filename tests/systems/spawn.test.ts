@@ -880,3 +880,28 @@ describe('SpawnDirector — eliteMult and the swarm (SPEC-043 §4.3, §4.4)', ()
     expect(h.spawned.some((s) => s.packId > 0)).toBe(true);
   });
 });
+
+// ---------------------------------------------------------------- SPEC-053
+
+import { ObstacleGrid } from '@/systems/Layout';
+
+describe('ring spawns among the groves (SPEC-053 §6.1, E81)', () => {
+  it('500 ring spawns on Thessaly (seed 5) never stand inside an obstacle circle', () => {
+    const h = harness('thessaly', 'high', 5);
+    // The scene hands the director its obstacle grid; the trunks are in it.
+    h.director.setObstacles(new ObstacleGrid(h.layout));
+    // Stand in the middle of the biggest grove, so the 25–40 m ring sweeps the trees.
+    const grove = [...h.layout.features].filter((f) => f.kind === 'grove').sort((a, b) => b.pieces - a.pieces)[0];
+    expect(grove).toBeDefined();
+    const player = { x: grove?.x ?? 0, z: grove?.z ?? 0 };
+    for (let round = 0; round < 200 && h.spawned.length < 500; round++) churn(h, 10, player);
+    expect(h.spawned.length).toBeGreaterThanOrEqual(500);
+    const trees = h.layout.obstacles.filter((o) => o.kind === 'tree').length;
+    expect(trees).toBeGreaterThan(100);
+    for (const s of h.spawned.slice(0, 500)) {
+      for (const o of h.layout.obstacles) {
+        expect(Math.hypot(s.x - o.x, s.z - o.z), `${s.id} at ${s.x.toFixed(2)}, ${s.z.toFixed(2)}`).toBeGreaterThan(o.radius);
+      }
+    }
+  });
+});

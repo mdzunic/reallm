@@ -1092,11 +1092,15 @@ describe('content invariants (SPEC-009 §7)', () => {
   // short-name rule already holds that slot below): every planet's `features`
   // counts stay within 0–4, and every planet with a weather cycle asks for at
   // least one cave or wreck, so a storm always has a shelter to point at.
+  // SPEC-053 §3 adds the groves, orchards and clusters to `features` as
+  // objects with counts of their own (the case below), so this one names the
+  // three counts SPEC-030 owns rather than every key.
   it('22 (SPEC-030). features counts stay in 0–4 and weather planets ask for a shelter', () => {
     const problems: string[] = [];
     for (const planet of planets) {
       const features = planet.surface.features;
-      for (const [key, count] of Object.entries(features)) {
+      for (const key of ['caves', 'wrecks', 'outcrops'] as const) {
+        const count = features[key];
         if (!Number.isInteger(count) || count < 0 || count > 4) {
           problems.push(`${planet.id}: features.${key} = ${count}`);
         }
@@ -2607,5 +2611,79 @@ describe('ARIA remembers (SPEC-049 §4.7)', () => {
     expect(lines[10]?.text).toBe('I do not know what is outside either. That part was never in my brief.');
     // The answers' counts are the sixty-one runs before this one: 40 + 14 + 7.
     expect(40 + 14 + 7).toBe(61);
+  });
+});
+
+// ------------------------------------------------------------- SPEC-053 §6.1
+
+describe('groves, orchards, clusters and the ground looks (SPEC-053 §6.1)', () => {
+  it('every feature band is ordered and positive, and every count a positive integer', () => {
+    const problems: string[] = [];
+    const positiveInt = (value: number): boolean => Number.isInteger(value) && value > 0;
+    for (const planet of planets) {
+      const { groves, orchards, clusters } = planet.surface.features;
+      if (groves !== undefined) {
+        if (!positiveInt(groves.count)) problems.push(`${planet.id}: groves.count ${groves.count}`);
+        if (!(groves.radius[0] > 0 && groves.radius[0] <= groves.radius[1])) problems.push(`${planet.id}: groves.radius ${groves.radius.join('–')}`);
+        if (!(groves.treesPer1000m2 > 0)) problems.push(`${planet.id}: groves.treesPer1000m2 ${groves.treesPer1000m2}`);
+      }
+      if (orchards !== undefined) {
+        for (const key of ['count', 'rows', 'cols'] as const) {
+          if (!positiveInt(orchards[key])) problems.push(`${planet.id}: orchards.${key} ${orchards[key]}`);
+        }
+        if (!(orchards.spacing > 0)) problems.push(`${planet.id}: orchards.spacing ${orchards.spacing}`);
+      }
+      if (clusters !== undefined) {
+        if (!positiveInt(clusters.count)) problems.push(`${planet.id}: clusters.count ${clusters.count}`);
+        if (!(positiveInt(clusters.pieces[0]) && clusters.pieces[0] <= clusters.pieces[1])) {
+          problems.push(`${planet.id}: clusters.pieces ${clusters.pieces.join('–')}`);
+        }
+        if (!(clusters.spread > 0)) problems.push(`${planet.id}: clusters.spread ${clusters.spread}`);
+      }
+    }
+    expect(problems).toEqual([]);
+    // §4.3's table: Thessaly's groves, Eden's orchards, clusters on the other four.
+    expect(PLANETS.thessaly.surface.features.groves).toBeDefined();
+    expect(PLANETS.eden.surface.features.orchards).toBeDefined();
+    for (const id of ['cinder4', 'vetra', 'ferrum', 'hive'] as const) expect(PLANETS[id].surface.features.clusters, id).toBeDefined();
+  });
+
+  it('cover and undergrowth cells lie in 0–14, with positive weights, sizes and densities', () => {
+    const problems: string[] = [];
+    const cell = (value: number): boolean => Number.isInteger(value) && value >= 0 && value <= 14;
+    for (const planet of planets) {
+      const { cover, undergrowth } = planet.surface.look;
+      if (cover !== undefined) {
+        if (cover.kinds.length === 0) problems.push(`${planet.id}: cover has no kinds`);
+        for (const kind of cover.kinds) {
+          if (!cell(kind.cell)) problems.push(`${planet.id}: cover cell ${kind.cell}`);
+          if (!(kind.weight > 0)) problems.push(`${planet.id}: cover weight ${kind.weight}`);
+          if (!(kind.size[0] > 0 && kind.size[0] <= kind.size[1])) problems.push(`${planet.id}: cover size ${kind.size.join('–')}`);
+        }
+        if (!(cover.per1000m2 >= 0)) problems.push(`${planet.id}: cover.per1000m2 ${cover.per1000m2}`);
+        if (cover.underCanopy !== undefined && !(cover.underCanopy > 0)) problems.push(`${planet.id}: cover.underCanopy ${cover.underCanopy}`);
+      }
+      if (undergrowth !== undefined) {
+        if (undergrowth.cells.length === 0) problems.push(`${planet.id}: undergrowth has no cells`);
+        for (const value of undergrowth.cells) if (!cell(value)) problems.push(`${planet.id}: undergrowth cell ${value}`);
+        if (!(undergrowth.underPer1000m2 >= 0 && undergrowth.openPer1000m2 >= 0)) problems.push(`${planet.id}: undergrowth density`);
+      }
+    }
+    expect(problems).toEqual([]);
+  });
+
+  it('every seam.poi exists on its planet, and every foliage.wind lies in [0, 2]', () => {
+    const problems: string[] = [];
+    for (const planet of planets) {
+      const seam = planet.surface.look.ground.seam;
+      if (seam !== undefined) {
+        if (!planet.surface.pois.some((poi) => poi.id === seam.poi)) problems.push(`${planet.id}: seam.poi ${seam.poi} is not a POI here`);
+        if (!(seam.shift > 0)) problems.push(`${planet.id}: seam.shift ${seam.shift}`);
+      }
+      const foliage = planet.surface.look.foliage;
+      if (foliage !== undefined && !(foliage.wind >= 0 && foliage.wind <= 2)) problems.push(`${planet.id}: foliage.wind ${foliage.wind}`);
+    }
+    expect(problems).toEqual([]);
+    expect(PLANETS.eden.surface.look.ground.seam).toEqual({ poi: 'eden_ridge', axis: 'x', shift: 1.75 });
   });
 });

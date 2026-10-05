@@ -8,6 +8,12 @@
 // The simulation stays on y = 0 (SPEC-012 §2): every height here is visual,
 // sampled from `field.heightAt` — the one sampler the tiles, entities, scatter
 // and boundary all share, so nothing ever floats or clips a seam.
+//
+// SPEC-053 adds the foliage: trees drawn through the seam on
+// `#foliageMaterial` (wind, the dither, the head cut-out, LOD by preset, and
+// canopies that thin over enemies and pickups), undergrowth, streamed ground
+// cover, contact shadows, landmark models, and a ground with detail, shade
+// under the canopies and Eden's seam.
 import * as THREE from 'three';
 import { disposeObject3D } from '@/core/Disposer';
 import type { Assets } from '@/core/Assets';
@@ -35,8 +41,23 @@ import { groundLayer, type GroundLayer } from '@/views/ProceduralTextures';
 import { buildScatter, buildDecals } from '@/views/Scatter';
 import { buildArenaWall } from '@/views/ArenaWall';
 import {
+  CANOPY_FADE,
+  CANOPY_FADE_RANGE,
+  CANOPY_FADE_SECONDS,
+  CUTOUT_HEAD_LIFT,
+  TRUNK_UNIT_RADIUS,
+  WIND_SWAY,
+  createCoverMaterial,
+  createFoliageMaterial,
+  cutoutUniform,
+  foliageUniforms,
+  type FoliageMaterial,
+} from '@/views/Foliage';
+import { GroundCover, crossedQuads } from '@/views/GroundCover';
+import {
   CULL_REFRESH_DISTANCE,
   CulledInstances,
+  InstanceGrid,
   cullMargin,
   extendByFrustum,
   frustumGroundCorners,
@@ -46,8 +67,14 @@ import {
 } from '@/views/InstanceCuller';
 import {
   boundaryGeometry,
+  foliageAtlas,
+  foliageFromModel,
+  isTreeContract,
+  LANDMARK_FOOTPRINT,
+  LANDMARK_MODELS,
   LANDMARK_SCALE,
   obstacleModelIds,
+  ORCHARD_MODEL,
   poiGeometry,
   proceduralObstacle,
   propFromModel,
@@ -59,7 +86,14 @@ import {
 } from '@/views/SurfaceProps';
 import { StormParticles, STORM_LOOK, type ParticleKind } from '@/views/StormParticles';
 import { TelegraphView } from '@/views/TelegraphView';
-import { buildTerrainTiles, createTerrainMaterial, setTerrainLayers, terrainUniforms } from '@/views/TerrainMesh';
+import {
+  buildTerrainTiles,
+  createTerrainMaterial,
+  setGroundDetail,
+  setTerrainLayers,
+  terrainUniforms,
+  type TerrainOptions,
+} from '@/views/TerrainMesh';
 
 export type { ObstacleKind, PoiKind } from '@/views/SurfaceProps';
 export type { ParticleKind } from '@/views/StormParticles';
@@ -81,12 +115,26 @@ export interface ViewGrade {
   desaturate: number;
 }
 
+/** SPEC-053 §3: one placed grove, orchard or cluster, as the view reads it. */
+export interface ViewFeature {
+  kind: 'grove' | 'orchard' | 'cluster';
+  x: number;
+  z: number;
+  radius: number;
+  /** An orchard's half-extents along x and z. */
+  halfW?: number;
+  halfD?: number;
+  pieces: number;
+}
+
 export interface ViewLayout {
   /** The pinned layout hash — the seed every decoration stream derives from. */
   hash: number;
   halfSize: number;
-  pois: readonly { kind: PoiKind; x: number; z: number; radius: number }[];
-  obstacles: readonly { x: number; z: number; radius: number; kind: ObstacleKind }[];
+  /** `poi` and `instance` are the layout's own (SPEC-053: Eden's seam, a landmark's yaw). */
+  pois: readonly { kind: PoiKind; x: number; z: number; radius: number; poi?: string; instance?: number }[];
+  /** A `tree`'s radius is its trunk; `feature` names the grove, orchard or cluster that placed it (SPEC-053). */
+  obstacles: readonly { x: number; z: number; radius: number; kind: ObstacleKind; feature?: ViewFeature['kind'] }[];
   nodes: readonly { resource: ResourceId; x: number; z: number }[];
   props: readonly { x: number; z: number; rot: number; scale: number; kind: string }[];
   /** SPEC-030: the placed shelters, in `layout.shelters` order. */
@@ -99,6 +147,8 @@ export interface ViewLayout {
     angle: number;
     gapAngle: number;
   }[];
+  /** SPEC-053 §4.3: the placed features; absent reads as none. */
+  features?: readonly ViewFeature[];
 }
 
 export interface ViewNode {
@@ -135,6 +185,13 @@ export interface SurfaceFrame {
   time: number;
   /** The rendered-frame delta; 0 while hit-stop freezes the view (SPEC-019 §4.7). */
   dt: number;
+  /**
+   * SPEC-053 §4.1.2: the camera that draws, and its draw target in device
+   * pixels (`Math.round(size × dpr)` from `renderer.size`) — the space of
+   * `gl_FragCoord`. The scene passes one preallocated object, rewritten each
+   * frame; absent, the head cut-out is off.
+   */
+  screen?: { camera: THREE.PerspectiveCamera; width: number; height: number };
 }
 
 // ------------------------------------------------------------- SPEC-019 §4.7
@@ -452,6 +509,121 @@ const PAD_TOP = 0.4;
 /** Mirrors `systems/Layout.TUG_RADIUS` — views must not import systems. */
 export const TUG_FADE_RADIUS = 3.5;
 
+// ------------------------------------------------------------- SPEC-053
+
+/** §4.7: the contact shadows' opacity, under every obstacle, tree and landmark. */
+export const CONTACT_OPACITY = 0.28;
+/** §4.7: a contact shadow's radius — × an obstacle's radius, a tree's canopy, a landmark's footprint. */
+const CONTACT_OBSTACLE = 1.4;
+const CONTACT_TREE = 0.9;
+const CONTACT_LANDMARK = 1.2;
+/** §4.7: how far above the ground a contact shadow lies. */
+const CONTACT_LIFT = 0.05;
+/** §4.2: a `tree_small` prop draws at `prop.scale × 0.8`; every other small prop at × 0.5. */
+const SMALL_TREE_SCALE = 0.8;
+const SMALL_PROP_SCALE = 0.5;
+/** E82: how often the canopy fade asks which trees hold an enemy or a pickup. */
+const CANOPY_QUERY_SECONDS = 0.1;
+/** §4.5: the cover's wind when the look gives the foliage none. */
+const COVER_WIND = 0.6;
+/** §4.4: an undergrowth clump — three quads crossed at 60°, 1.25 m across before its 0.8–1.6 scale. */
+const UNDERGROWTH_WIDTH = 1.25;
+const UNDERGROWTH_HEIGHT = 1;
+const UNDERGROWTH_SCALE: readonly [number, number] = [0.8, 1.6];
+/** §4.4: undergrowth keeps clear of obstacles + 0.4, POIs + 1, nodes + 1.5, shelters + 1 and the pad's 15 m… */
+const UNDERGROWTH_OBSTACLE = 0.4;
+const UNDERGROWTH_POI = 1;
+const UNDERGROWTH_NODE = 1.5;
+const UNDERGROWTH_SHELTER = 1;
+const UNDERGROWTH_PAD = 15;
+/** …grows within this share of a canopy's radius under a tree, and off the arena's outer 3 m. */
+const UNDERGROWTH_CANOPY = 0.8;
+const UNDERGROWTH_WALL = 3;
+
+/** Triangles one instance of `geometry` draws. */
+function trianglesOf(geometry: THREE.BufferGeometry): number {
+  return (geometry.index?.count ?? (geometry.getAttribute('position') as THREE.BufferAttribute).count) / 3;
+}
+
+/** True when (x, z) lies inside the shelter's interior ellipse grown by `grow` (as `systems/Layout.insideShelter`). */
+function insideShelter(shelter: ViewLayout['shelters'][number], x: number, z: number, grow: number): boolean {
+  const dx = x - shelter.x;
+  const dz = z - shelter.z;
+  const cos = Math.cos(-shelter.angle);
+  const sin = Math.sin(-shelter.angle);
+  const u = dx * cos - dz * sin;
+  const v = dx * sin + dz * cos;
+  return (u / (shelter.rx + grow)) ** 2 + (v / (shelter.rz + grow)) ** 2 <= 1;
+}
+
+/** §4.6: the seam's line — its POI's instance 0, along its axis — or `null` for a look with none. */
+function seamLine(layout: ViewLayout, look: PlanetDef['surface']['look']): number | null {
+  const seam = look.ground.seam;
+  if (seam === undefined) return null;
+  const poi = layout.pois.find((entry) => entry.poi === seam.poi && (entry.instance ?? 0) === 0);
+  if (poi === undefined) return null;
+  return seam.axis === 'z' ? poi.z : poi.x;
+}
+
+/**
+ * §4.4: the undergrowth, placed once — `openPer1000m2` across the arena and
+ * `underPer1000m2` more within 0.8 of each canopy, deterministic from
+ * `hash32(layout.hash, 'undergrowth')`, every second candidate dropped on
+ * `low`, none inside an obstacle + 0.4 m, a POI + 1 m, a node + 1.5 m, a
+ * shelter + 1 m or the pad's 15 m. Matrices, ± 8 % shades and atlas cells.
+ */
+function placeUndergrowth(
+  layout: ViewLayout,
+  field: HeightField,
+  spec: NonNullable<PlanetDef['surface']['look']['undergrowth']>,
+  preset: QualityPreset,
+): { matrices: Float32Array; colors: Float32Array; cells: Float32Array; count: number } {
+  const seed = hash32(layout.hash, 'undergrowth');
+  const reach = layout.halfSize - UNDERGROWTH_WALL;
+  const trees = layout.obstacles.filter((o) => o.kind === 'tree');
+  const candidates: { x: number; z: number }[] = [];
+  const open = Math.round((spec.openPer1000m2 * (2 * layout.halfSize) ** 2) / 1000);
+  for (let i = 0; i < open; i++) {
+    candidates.push({ x: (hash01(seed, i, 0) * 2 - 1) * reach, z: (hash01(seed, i, 1) * 2 - 1) * reach });
+  }
+  // Under the canopies: each tree's share of `underPer1000m2 × canopy area`,
+  // carried so the total rounds once, each within 0.8 of its canopy radius.
+  let owed = 0;
+  let k = 0;
+  for (const tree of trees) {
+    const canopy = tree.radius / TRUNK_UNIT_RADIUS;
+    owed += (spec.underPer1000m2 * Math.PI * canopy * canopy) / 1000;
+    const within = UNDERGROWTH_CANOPY * canopy;
+    for (; owed >= 0.5; owed -= 1, k++) {
+      const d = within * Math.sqrt(hash01(seed, k, 5));
+      const angle = hash01(seed, k, 6) * Math.PI * 2;
+      candidates.push({ x: tree.x + Math.cos(angle) * d, z: tree.z + Math.sin(angle) * d });
+    }
+  }
+  const matrices: number[] = [];
+  const colors: number[] = [];
+  const cells: number[] = [];
+  candidates.forEach((at, i) => {
+    if (preset === 'low' && i % 2 === 1) return;
+    const { x, z } = at;
+    if (Math.abs(x) > reach || Math.abs(z) > reach || Math.hypot(x, z) < UNDERGROWTH_PAD) return;
+    if (layout.obstacles.some((o) => Math.hypot(x - o.x, z - o.z) < o.radius + UNDERGROWTH_OBSTACLE)) return;
+    if (layout.pois.some((poi) => Math.hypot(x - poi.x, z - poi.z) < poi.radius + UNDERGROWTH_POI)) return;
+    if (layout.nodes.some((node) => Math.hypot(x - node.x, z - node.z) < UNDERGROWTH_NODE)) return;
+    if (layout.shelters.some((shelter) => insideShelter(shelter, x, z, UNDERGROWTH_SHELTER))) return;
+    const scale = UNDERGROWTH_SCALE[0] + (UNDERGROWTH_SCALE[1] - UNDERGROWTH_SCALE[0]) * hash01(seed, i, 2);
+    scratchQuat.setFromAxisAngle(Y_AXIS, hash01(seed, i, 3) * Math.PI * 2);
+    scratchPosition2.set(x, field.heightAt(x, z), z);
+    scratchScale2.setScalar(scale);
+    scratchMatrix.compose(scratchPosition2, scratchQuat, scratchScale2);
+    matrices.push(...scratchMatrix.elements);
+    const shade = 0.92 + 0.16 * hash01(seed, i, 4);
+    colors.push(shade, shade, shade);
+    cells.push(spec.cells[Math.min(spec.cells.length - 1, Math.floor(hash01(seed, i, 7) * spec.cells.length))] as number);
+  });
+  return { matrices: new Float32Array(matrices), colors: new Float32Array(colors), cells: new Float32Array(cells), count: cells.length };
+}
+
 /** SPEC-035 §4.5 / SPEC-046 §4.6: one instance of a culled layer — `setPropModels` re-points it. */
 interface InstanceTarget {
   readonly kind: 'instance';
@@ -472,6 +644,7 @@ type OccluderTarget = InstanceTarget | { readonly kind: 'mesh'; readonly parts: 
 interface PropInstance {
   readonly x: number;
   readonly z: number;
+  /** A tree's is `radius / TRUNK_UNIT_RADIUS` — its canopy's radius (SPEC-053 §4.2). */
   readonly scale: number;
   readonly rot: number;
   /** The layout's own kind string (`rock`, `rock_small`) — `variantIndex`'s key. */
@@ -479,6 +652,8 @@ interface PropInstance {
   /** Its place among `layoutKind`'s instances, in layout order. */
   readonly ordinal: number;
   readonly small: boolean;
+  /** SPEC-053 §4.9: an orchard tree — `ORCHARD_MODEL`, never a hashed variant. */
+  readonly orchard: boolean;
   /** Its SPEC-035 fade; created with the occluder candidate, pointed at a layer once one holds it. */
   readonly target: InstanceTarget;
 }
@@ -488,6 +663,17 @@ interface PropLayer {
   readonly body: CulledInstances;
   readonly glow: CulledInstances | null;
   readonly members: readonly number[];
+  /** SPEC-053 §4.1: a foliage layer's two geometries; the preset picks which one it draws. */
+  readonly lods: { readonly body: THREE.BufferGeometry; readonly lod1: THREE.BufferGeometry } | null;
+}
+
+/** SPEC-053 §4.8: one landmark POI — its meshes, its occluder slot, and whether it draws its model yet. */
+interface LandmarkEntry {
+  readonly mesh: THREE.Mesh;
+  glow: THREE.Mesh | null;
+  readonly occluder: number;
+  readonly yaw: number;
+  fromModel: boolean;
 }
 
 /**
@@ -624,7 +810,7 @@ export class SurfaceView {
   readonly #telegraphs: TelegraphView;
   #fxCapacity: number;
 
-  readonly #groundMaterial: THREE.MeshStandardMaterial;
+  #groundMaterial: THREE.MeshStandardMaterial;
   readonly #padGlowMaterial: THREE.MeshStandardMaterial;
   readonly #pad: { x: number; z: number } | null;
 
@@ -686,6 +872,43 @@ export class SurfaceView {
     blending: THREE.AdditiveBlending,
   });
 
+  // SPEC-053 — the foliage seam, the ground beneath it, and the landmarks.
+  readonly #layout: ViewLayout;
+  readonly #look: PlanetDef['surface']['look'];
+  /** The preset in force: trees' LOD, cover capacity, undergrowth and terrain detail follow it. */
+  #preset: QualityPreset;
+  /** `#foliageMaterial` and the cover material, built once the atlas is in. */
+  #foliageMaterial: FoliageMaterial | null = null;
+  #coverMaterial: FoliageMaterial | null = null;
+  /** The `tree` kind, when the planet has any. */
+  #trees: PropKind | null = null;
+  /** E82, per tree instance in `#trees.instances` order: its fade, its target, and the grid that finds it. */
+  #canopyFade = new Float32Array(0);
+  #canopyTarget = new Float32Array(0);
+  #canopyGrid: InstanceGrid | null = null;
+  #canopyCandidates = new Int32Array(0);
+  #canopyHeld = new Int32Array(0);
+  #canopyHeldCount = 0;
+  #canopyClock = CANOPY_QUERY_SECONDS;
+  #canopyFaded = 0;
+  readonly #canopyRect: CullRect = { minX: 0, maxX: 0, minZ: 0, maxZ: 0 };
+  /** `WIND_SWAY × look.foliage.wind` (or the cover's 0.6), and what `sync` last wrote: 0 under reduce motion. */
+  readonly #windAmplitude: number;
+  #wind = 0;
+  readonly #head = new THREE.Vector3();
+  #undergrowth: CulledInstances | null = null;
+  #cover: GroundCover | null = null;
+  readonly #coverRect: CullRect = { minX: 0, maxX: 0, minZ: 0, maxZ: 0 };
+  #contact: CulledInstances | null = null;
+  readonly #landmarks: LandmarkEntry[] = [];
+  readonly #landmarkMaterial = new THREE.MeshStandardMaterial({ color: '#ffffff', roughness: 0.85, metalness: 0.05, vertexColors: true });
+  #landmarkGlow: THREE.Material | null = null;
+  /** The terrain's tiles and current layers, so a preset change can rebuild its material once (53-b). */
+  readonly #tiles: THREE.Mesh[] = [];
+  #groundLayers: { a: GroundLayer; b: GroundLayer };
+  #groundDetail: THREE.Texture | null = null;
+  readonly #seamAt: number | null;
+
   /** The ground sampler handed to enemies and the storm — bound once (§4.3). */
   readonly #ground = (x: number, z: number): number => this.field.heightAt(x, z);
 
@@ -705,6 +928,11 @@ export class SurfaceView {
     const palette = planet.surface.palette;
     const look = planet.surface.look;
     this.#palette = palette;
+    // SPEC-053: what the foliage, cover and terrain read again after the build.
+    this.#layout = layout;
+    this.#look = look;
+    this.#preset = presetOf(quality);
+    this.#windAmplitude = WIND_SWAY * (look.foliage?.wind ?? COVER_WIND);
     scene.background = new THREE.Color(palette.sky);
     this.#baseFog = planet.surface.fogDensity;
     // A placeholder span: `SurfaceScene` calls `setFogRange` before its first
@@ -746,11 +974,21 @@ export class SurfaceView {
 
     // SPEC-018 §4.3–§4.4: terrain tiles under one splat material. Procedural
     // layers first; the lazy asset drop swaps them through `setGroundTextures`.
+    // SPEC-053 §4.6: detail on `medium` and `high`, Eden's seam on every
+    // preset, and the shade under every canopy baked into the tiles once.
     const [layerAId, layerBId] = look.ground.layers;
     const a: GroundLayer = { ...groundLayer(layerAId), tileMetres: look.ground.tileMetres[0] };
     const b: GroundLayer = { ...groundLayer(layerBId), tileMetres: look.ground.tileMetres[1] };
-    this.#groundMaterial = createTerrainMaterial(a, b, look, palette);
-    for (const tile of buildTerrainTiles(this.field, this.#groundMaterial)) this.#root.add(tile);
+    this.#groundLayers = { a, b };
+    this.#seamAt = seamLine(layout, look);
+    this.#groundMaterial = createTerrainMaterial(a, b, look, palette, this.#terrainOptions());
+    const canopies: { x: number; z: number; r: number }[] = [];
+    for (const o of layout.obstacles) if (o.kind === 'tree') canopies.push({ x: o.x, z: o.z, r: o.radius / TRUNK_UNIT_RADIUS });
+    for (const tile of buildTerrainTiles(this.field, this.#groundMaterial, { canopies })) {
+      this.#root.add(tile);
+      this.#tiles.push(tile);
+    }
+    if (assets?.hasTexture?.('ground_detail') === true) this.#setDetail(assets.texture('ground_detail'));
 
     // Obstacles and props: instanced per kind and variant (§4.10, SPEC-046
     // §4.2), sculpted per biome where no model is drawable (SPEC-018 §4.7),
@@ -770,6 +1008,9 @@ export class SurfaceView {
     // SPEC-035 §4.5: the per-instance opacity the fade writes into, on both.
     injectInstanceFade(this.#glbMaterial);
     injectInstanceFade(this.#accentMaterial);
+    // SPEC-053 §4.1: the trees' and the ground clumps' materials, once the atlas is in.
+    const atlas = foliageAtlas(assets);
+    if (atlas !== null) this.#makeFoliageMaterials(atlas);
     this.#buildProps(layout, assets);
 
     // POIs: one small sculpted mesh per instance (SPEC-018 §4.7); glow parts
@@ -790,26 +1031,36 @@ export class SurfaceView {
       emissive: new THREE.Color('#8ad7ff'),
       emissiveIntensity: 1.2,
     });
+    this.#landmarkGlow = poiGlowMaterial;
     let pad: { x: number; z: number } | null = null;
+    const landmarkSeed = hash32(layout.hash, 'landmark');
+    let landmarks = 0;
     for (const poi of layout.pois) {
       const prop = poiGeometry(poi.kind, planet.biome, assets);
-      const mesh = new THREE.Mesh(prop.body, poiMaterial);
+      // SPEC-053 §4.8: an authored landmark draws in its own colours, at scale 1.
+      const modelled = poi.kind === 'landmark' && prop.fromModel === true;
+      const mesh = new THREE.Mesh(prop.body, modelled ? this.#landmarkMaterial : poiMaterial);
       mesh.name = `poi:${poi.kind}`;
       const h = this.field.heightAt(poi.x, poi.z); // ≈ 0 on flattened ground
       if (poi.kind === 'arena') mesh.scale.setScalar(poi.radius * 0.2);
       // SPEC-046 §4.3: a 1–3 m landmark read as nothing on its 6–7 m trigger.
-      if (poi.kind === 'landmark') mesh.scale.setScalar(LANDMARK_SCALE * poi.radius);
+      if (poi.kind === 'landmark' && !modelled) mesh.scale.setScalar(LANDMARK_SCALE * poi.radius);
       mesh.position.set(poi.x, h, poi.z);
       // SPEC-035 §4.5: only landmarks join the occluder list — every other POI
       // is something the player is being sent to and must be able to see.
       if (poi.kind === 'landmark') {
+        // SPEC-053 §4.8: yawed by `hash01(hash32(layout.hash, 'landmark'), instance) × 2π`.
+        const yaw = hash01(landmarkSeed, poi.instance ?? landmarks) * Math.PI * 2;
+        landmarks++;
+        if (modelled) mesh.rotation.y = yaw;
+        this.#landmarks.push({ mesh, glow: null, occluder: this.#occluders.length, yaw, fromModel: modelled });
         this.#occluders.push({
           x: poi.x,
           z: poi.z,
           radius: poi.radius * 0.5,
-          height: topOf(prop.body) * LANDMARK_SCALE * poi.radius,
+          height: topOf(prop.body) * mesh.scale.y,
         });
-        this.#occluderTargets.push({ kind: 'mesh', parts: [{ mesh, base: poiMaterial, faded: null }] });
+        this.#occluderTargets.push({ kind: 'mesh', parts: [{ mesh, base: mesh.material as THREE.Material, faded: null }] });
       }
       // The pad is flat on the ground: its own shadow would only stripe it.
       mesh.castShadow = poi.kind !== 'landing_pad';
@@ -819,12 +1070,16 @@ export class SurfaceView {
         const glow = new THREE.Mesh(prop.glow, poi.kind === 'landing_pad' ? this.#padGlowMaterial : poiGlowMaterial);
         glow.name = `poi-glow:${poi.kind}`;
         glow.scale.copy(mesh.scale);
+        glow.rotation.copy(mesh.rotation);
         glow.position.copy(mesh.position);
         this.#root.add(glow);
+        if (poi.kind === 'landmark') (this.#landmarks.at(-1) as LandmarkEntry).glow = glow;
       }
       if (poi.kind === 'landing_pad') pad = { x: poi.x, z: poi.z };
     }
     this.#pad = pad;
+    // SPEC-053 §4.7: a contact shadow under every obstacle, tree and landmark.
+    this.#buildContactShadows(layout);
 
     // SPEC-018 §4.6: scatter and decals, deterministic from the layout hash.
     // SPEC-046 §4.6: the scatter draws only what is on screen.
@@ -835,6 +1090,8 @@ export class SurfaceView {
       this.#addCulled(mesh, colors === null ? { matrices } : { matrices, colors }, sphereOf(mesh.geometry));
     }
     this.#root.add(buildDecals(layout, this.field, look));
+    // SPEC-053 §4.4, §4.5: undergrowth and ground cover, on the atlas.
+    this.#buildGroundClumps();
 
     // SPEC-018 §4.8: the silhouette ring past the berm hides the void.
     this.#buildBoundaryRing(layout, planet);
@@ -1021,6 +1278,7 @@ export class SurfaceView {
    * recompile (same defines, same program).
    */
   setGroundTextures(a: GroundLayer, b: GroundLayer): void {
+    this.#groundLayers = { a, b };
     setTerrainLayers(this.#groundMaterial, a, b);
   }
 
@@ -1279,6 +1537,37 @@ export class SurfaceView {
     } else {
       this.#clearEnvironment();
     }
+
+    // SPEC-053 53-b: a preset change swaps the trees' LOD in place, rebuilds
+    // the cover at its capacity and the undergrowth at its density, and the
+    // terrain material once when the detail comes or goes.
+    const preset = presetOf(quality);
+    if (preset !== this.#preset) {
+      const lowChanged = (this.#preset === 'low') !== (preset === 'low');
+      this.#preset = preset;
+      this.#applyTreeLod();
+      if (lowChanged) this.#rebuildGround();
+      if (this.#undergrowth !== null && lowChanged) {
+        this.#dropLayer(this.#undergrowth, false);
+        this.#undergrowth = null;
+      }
+      if (this.#cover !== null) {
+        this.#cover.dispose();
+        this.#cover = null;
+      }
+      this.#buildGroundClumps();
+    }
+  }
+
+  /** 53-b: the terrain material for the new preset, its layers and detail carried over, on every tile. */
+  #rebuildGround(): void {
+    const old = this.#groundMaterial;
+    const { a, b } = this.#groundLayers;
+    const material = createTerrainMaterial(a, b, this.#look, this.#palette, this.#terrainOptions());
+    if (this.#groundDetail !== null) setGroundDetail(material, this.#groundDetail);
+    for (const tile of this.#tiles) tile.material = material;
+    this.#groundMaterial = material;
+    old.dispose();
   }
 
   /** D-10: clear the reference first, then free the texture. */
@@ -1467,7 +1756,16 @@ export class SurfaceView {
     /** Today's occluder order: obstacle kinds, then small-prop kinds, each by first appearance. */
     const order: { kind: ObstacleKind; small: boolean }[] = [];
     const ordinals = new Map<string, number>();
-    const place = (kind: ObstacleKind, layoutKind: string, small: boolean, x: number, z: number, scale: number, rot: number): void => {
+    const place = (
+      kind: ObstacleKind,
+      layoutKind: string,
+      small: boolean,
+      x: number,
+      z: number,
+      scale: number,
+      rot: number,
+      orchard: boolean,
+    ): void => {
       let list = groups.get(kind);
       if (list === undefined) {
         list = [];
@@ -1476,16 +1774,22 @@ export class SurfaceView {
       if (!order.some((group) => group.kind === kind && group.small === small)) order.push({ kind, small });
       const ordinal = ordinals.get(layoutKind) ?? 0;
       ordinals.set(layoutKind, ordinal + 1);
-      list.push({ x, z, scale, rot, layoutKind, ordinal, small, target: { kind: 'instance', layer: null, index: -1 } });
+      list.push({ x, z, scale, rot, layoutKind, ordinal, small, orchard, target: { kind: 'instance', layer: null, index: -1 } });
     };
     for (const o of layout.obstacles) {
       // SPEC-030 D-19: shelter walls are collision-only — the shelter body is
       // their visual; `debris` draws like any other kind.
       if (o.kind === 'cave_wall' || o.kind === 'wreck_hull') continue;
-      place(o.kind, o.kind, false, o.x, o.z, o.radius, (o.x * 7 + o.z * 3) % Math.PI);
+      // SPEC-053 §4.2: a tree's radius is its trunk, so it draws at the
+      // contract's scale, `radius / 0.14` — its canopy's radius; §4.9: every
+      // orchard tree stands at yaw 0.
+      const tree = o.kind === 'tree';
+      const orchard = tree && o.feature === 'orchard';
+      place(o.kind, o.kind, false, o.x, o.z, tree ? o.radius / TRUNK_UNIT_RADIUS : o.radius, orchard ? 0 : (o.x * 7 + o.z * 3) % Math.PI, orchard);
     }
     for (const prop of layout.props) {
-      place(prop.kind.replace('_small', '') as ObstacleKind, prop.kind, true, prop.x, prop.z, prop.scale * 0.5, prop.rot);
+      const kind = prop.kind.replace('_small', '') as ObstacleKind;
+      place(kind, prop.kind, true, prop.x, prop.z, prop.scale * (kind === 'tree' ? SMALL_TREE_SCALE : SMALL_PROP_SCALE), prop.rot, false);
     }
 
     const plans = new Map<ObstacleKind, { prop: PropKind; shapes: (PropGeometry | null)[]; shapeOf: readonly number[] }>();
@@ -1501,6 +1805,7 @@ export class SurfaceView {
         layers: [],
         fromModel: false,
       };
+      if (kind === 'tree') this.#adoptTrees(prop);
       const variants = this.#variantShapes(prop, assets);
       let shapes: (PropGeometry | null)[];
       let shapeOf: readonly number[];
@@ -1559,25 +1864,64 @@ export class SurfaceView {
   /**
    * SPEC-046 §4.2: each of the kind's variants as a prop body, or `null` where
    * its model is not loaded — or loaded as a tree contract, which is noted so
-   * `propSource` stops waiting for it (§4.1).
+   * `propSource` stops waiting for it (§4.1). SPEC-053 §4.1: a tree contract
+   * draws through the foliage seam once the atlas is in — until then it is
+   * noted the same way, and `setPropModels` asks again — and the trees of a
+   * planet with orchards gain `ORCHARD_MODEL` as one more shape, after the
+   * variants.
    */
   #variantShapes(prop: PropKind, assets: Assets | undefined): (PropGeometry | null)[] {
-    return prop.ids.map((id) => {
+    const atlas = prop.kind === 'tree' && this.#foliageMaterial !== null ? foliageAtlas(assets) : null;
+    const shape = (id: ModelId): PropGeometry | null => {
       if (assets === undefined || prop.undrawable.has(id) || !assets.hasModel(id)) return null;
-      const shape = propFromModel(assets.model(id));
-      if (shape === null) prop.undrawable.add(id);
-      return shape;
-    });
+      const model = assets.model(id);
+      if (prop.kind === 'tree' && isTreeContract(model)) {
+        if (atlas !== null) return foliageFromModel(model);
+        prop.undrawable.add(id);
+        return null;
+      }
+      const drawable = propFromModel(model);
+      if (drawable === null) prop.undrawable.add(id);
+      return drawable;
+    };
+    const shapes = prop.ids.map(shape);
+    if (prop.kind === 'tree' && prop.instances.some((entry) => entry.orchard)) shapes.push(shape(ORCHARD_MODEL));
+    return shapes;
   }
 
-  /** SPEC-046 §4.2: each instance's variant by hash; one whose model is missing draws the first loaded one. */
+  /**
+   * SPEC-046 §4.2: each instance's variant by hash; one whose model is missing
+   * draws the first loaded one. SPEC-053 §4.9: an orchard tree draws the
+   * orchard's shape, never a hashed variant, while it is loaded.
+   */
   #variantOf(prop: PropKind, variants: readonly (PropGeometry | null)[]): number[] {
     const n = prop.ids.length;
     const first = variants.findIndex((shape) => shape !== null);
+    const orchard = variants.length > n && variants[n] !== null ? n : -1;
     return prop.instances.map((entry) => {
+      if (entry.orchard && orchard >= 0) return orchard;
       const v = variantIndex(this.#layoutHash, entry.layoutKind, entry.ordinal, n);
       return variants[v] === null || variants[v] === undefined ? first : v;
     });
+  }
+
+  /**
+   * SPEC-053 E82: the tree kind's canopy-fade state — every instance at 1 —
+   * and the grid that finds the trees around the player.
+   */
+  #adoptTrees(prop: PropKind): void {
+    const count = prop.instances.length;
+    this.#trees = prop;
+    this.#canopyFade = new Float32Array(count).fill(1);
+    this.#canopyTarget = new Float32Array(count).fill(1);
+    this.#canopyCandidates = new Int32Array(count);
+    this.#canopyHeld = new Int32Array(count);
+    const xz = new Float32Array(count * 2);
+    prop.instances.forEach((entry, i) => {
+      xz[i * 2] = entry.x;
+      xz[i * 2 + 1] = entry.z;
+    });
+    this.#canopyGrid = new InstanceGrid(CANOPY_FADE_RANGE, xz);
   }
 
   /**
@@ -1596,21 +1940,30 @@ export class SurfaceView {
       });
       if (members.length === 0) {
         shape.body.dispose();
+        shape.lod1?.dispose();
         shape.glow?.dispose();
         return;
       }
+      // SPEC-053 §4.1: a tree from the seam draws on `#foliageMaterial`, its
+      // fade the canopy's (E82) — SPEC-035's never reaches it — and its LOD
+      // the preset's.
+      const foliage = shape.foliage === true && this.#foliageMaterial !== null;
+      const lods = foliage ? { body: shape.body, lod1: shape.lod1 ?? shape.body } : null;
       const matrices = new Float32Array(members.length * 16);
       const fades = new Float32Array(members.length);
       members.forEach((member, j) => {
         for (let e = 0; e < 16; e++) matrices[j * 16 + e] = prop.matrices[member * 16 + e] as number;
         const target = (prop.instances[member] as PropInstance).target;
         // E72: a fade in flight carries across a rebuild.
-        fades[j] = target.layer === null ? 1 : target.layer.fadeAt(target.index);
+        if (foliage) fades[j] = this.#canopyFade[member] ?? 1;
+        else fades[j] = target.layer === null ? 1 : target.layer.fadeAt(target.index);
       });
-      const mesh = new THREE.InstancedMesh(shape.body, material, members.length);
+      const geometry = lods === null ? shape.body : this.#preset === 'low' ? lods.lod1 : lods.body;
+      const mesh = new THREE.InstancedMesh(geometry, foliage ? (this.#foliageMaterial as THREE.Material) : material, members.length);
       mesh.castShadow = true;
       mesh.receiveShadow = true;
-      const body = this.#addCulled(mesh, { matrices, fades }, sphereOf(shape.body));
+      if (foliage) mesh.name = `tree:${s}`;
+      const body = this.#addCulled(mesh, { matrices, fades }, sphereOf(geometry));
       members.forEach((member, j) => {
         const target = (prop.instances[member] as PropInstance).target;
         target.layer = body;
@@ -1621,9 +1974,12 @@ export class SurfaceView {
         // §4.7: the emissive parts, instanced on the body's own matrices.
         const glowMesh = new THREE.InstancedMesh(shape.glow, obstacleGlow(prop.kind, this.#biome, this.#palette.accent), members.length);
         glowMesh.castShadow = false;
+        if (foliage) glowMesh.name = `tree-glow:${s}`;
         glow = this.#addCulled(glowMesh, { matrices }, sphereOf(shape.glow));
+        // SPEC-053 §4.1: a tree's glow is LOD0's; `low` draws its LOD1 alone.
+        if (lods !== null && this.#preset === 'low') this.#setCulledActive(glow, false);
       }
-      layers.push({ body, glow, members });
+      layers.push({ body, glow, members, lods });
     });
     return layers;
   }
@@ -1640,6 +1996,15 @@ export class SurfaceView {
    */
   setPropModels(assets: Assets): void {
     let rebuilt = false;
+    // SPEC-053 53-i: the shared set's atlas makes the trees, the undergrowth
+    // and the cover drawable; its detail normal swaps into the ground.
+    const atlas = foliageAtlas(assets);
+    if (atlas !== null && this.#foliageMaterial === null) {
+      this.#makeFoliageMaterials(atlas);
+      // A tree contract waited for the atlas, not forever.
+      for (const prop of this.#propKinds) if (prop.kind === 'tree') prop.undrawable.clear();
+    }
+    if (this.#groundDetail === null && assets.hasTexture?.('ground_detail') === true) this.#setDetail(assets.texture('ground_detail'));
     for (const prop of this.#propKinds) {
       if (prop.fromModel || prop.ids.length === 0) continue;
       const variants = this.#variantShapes(prop, assets);
@@ -1661,6 +2026,8 @@ export class SurfaceView {
       prop.fromModel = true;
       rebuilt = true;
     }
+    if (this.#buildGroundClumps()) rebuilt = true;
+    if (this.#swapLandmarks(assets)) rebuilt = true;
     if (rebuilt) this.#refreshCulled();
   }
 
@@ -1676,6 +2043,378 @@ export class SurfaceView {
       if (prop.ids.some((id) => !prop.undrawable.has(id))) return 'procedural';
     }
     return 'glb';
+  }
+
+  // ------------------------------------------------------- SPEC-053
+
+  /** §4.1: `#foliageMaterial` and the cover material, on the atlas, once. */
+  #makeFoliageMaterials(atlas: THREE.Texture): void {
+    if (this.#foliageMaterial !== null) return;
+    this.#foliageMaterial = createFoliageMaterial(atlas, this.#look.foliage?.tint ?? '#ffffff');
+    this.#coverMaterial = createCoverMaterial(atlas);
+  }
+
+  /** §4.6: detail on `medium` and `high`; the seam, where the look has one, on every preset. */
+  #terrainOptions(): TerrainOptions {
+    const seam = this.#look.ground.seam;
+    const options: TerrainOptions = { detail: this.#preset !== 'low' };
+    if (seam !== undefined && this.#seamAt !== null) options.seam = { at: this.#seamAt, shift: seam.shift, axis: seam.axis };
+    return options;
+  }
+
+  /** §4.6, 53-i: the detail normal landed — into the ground's uniform, with no recompile. */
+  #setDetail(detail: THREE.Texture): void {
+    this.#groundDetail = detail;
+    setGroundDetail(this.#groundMaterial, detail);
+  }
+
+  /**
+   * §4.7: one culled layer of the blob-shadow texture on a ground quad of
+   * radius 1 — under every drawn obstacle at 1.4 × its radius, every tree at
+   * 0.9 × its canopy and every landmark at 1.2 × its footprint, at
+   * `heightAt + 0.05`. The collision-only kinds have nothing to ground.
+   */
+  #buildContactShadows(layout: ViewLayout): void {
+    const spots: number[] = [];
+    for (const o of layout.obstacles) {
+      if (o.kind === 'cave_wall' || o.kind === 'wreck_hull') continue;
+      spots.push(o.x, o.z, o.kind === 'tree' ? (CONTACT_TREE * o.radius) / TRUNK_UNIT_RADIUS : CONTACT_OBSTACLE * o.radius);
+    }
+    for (const poi of layout.pois) {
+      if (poi.kind === 'landmark') spots.push(poi.x, poi.z, CONTACT_LANDMARK * LANDMARK_FOOTPRINT[this.#biome]);
+    }
+    const count = spots.length / 3;
+    if (count === 0) return;
+    const geometry = new THREE.PlaneGeometry(2, 2);
+    geometry.rotateX(-Math.PI / 2);
+    const material = new THREE.MeshBasicMaterial({
+      color: 0x000000,
+      map: radialAlpha(),
+      transparent: true,
+      depthWrite: false,
+      opacity: CONTACT_OPACITY,
+      polygonOffset: true,
+      polygonOffsetFactor: -1,
+    });
+    const mesh = new THREE.InstancedMesh(geometry, material, count);
+    mesh.name = 'contact-shadows';
+    mesh.renderOrder = 1;
+    mesh.castShadow = false;
+    mesh.receiveShadow = false;
+    const matrices = new Float32Array(count * 16);
+    for (let i = 0; i < count; i++) {
+      const x = spots[i * 3] as number;
+      const z = spots[i * 3 + 1] as number;
+      const r = spots[i * 3 + 2] as number;
+      scratchMatrix.makeScale(r, 1, r);
+      scratchMatrix.setPosition(x, this.field.heightAt(x, z) + CONTACT_LIFT, z);
+      scratchMatrix.toArray(matrices, i * 16);
+    }
+    this.#contact = this.#addCulled(mesh, { matrices }, sphereOf(geometry));
+  }
+
+  /**
+   * §4.4, §4.5: the undergrowth (placed once, half of it on `low`) and the
+   * streamed cover, each built the first time the cover material exists.
+   * True when either was built now.
+   */
+  #buildGroundClumps(): boolean {
+    const material = this.#coverMaterial;
+    if (material === null) return false;
+    let built = false;
+    const spec = this.#look.undergrowth;
+    if (this.#undergrowth === null && spec !== undefined) {
+      const placed = placeUndergrowth(this.#layout, this.field, spec, this.#preset);
+      const geometry = crossedQuads(3, UNDERGROWTH_WIDTH, UNDERGROWTH_HEIGHT);
+      const mesh = new THREE.InstancedMesh(geometry, material, Math.max(1, placed.count));
+      mesh.name = 'undergrowth';
+      mesh.castShadow = false;
+      mesh.receiveShadow = true;
+      this.#undergrowth = this.#addCulled(
+        mesh,
+        { matrices: placed.matrices, colors: placed.colors, extra: { name: 'uvCell', values: placed.cells } },
+        sphereOf(geometry),
+      );
+      built = true;
+    }
+    const cover = this.#look.cover;
+    if (this.#cover === null && cover !== undefined) {
+      this.#cover = new GroundCover(this.#root, this.#layout, this.field, cover, this.#preset, material);
+      this.#cullDirty = true;
+      built = true;
+    }
+    return built;
+  }
+
+  /**
+   * §4.8: every landmark still drawing SPEC-046's procedural body takes its
+   * model once it has landed — scale 1, its hashed yaw, its own colours and
+   * glow — and its occluder grows to the model's top. True when one swapped.
+   */
+  #swapLandmarks(assets: Assets): boolean {
+    let swapped = false;
+    const id = LANDMARK_MODELS[this.#biome];
+    for (const landmark of this.#landmarks) {
+      if (landmark.fromModel || !assets.hasModel(id)) continue;
+      const prop = propFromModel(assets.model(id));
+      if (prop === null) continue;
+      const mesh = landmark.mesh;
+      const target = this.#occluderTargets[landmark.occluder];
+      if (target !== undefined && target.kind === 'mesh') {
+        for (const part of target.parts) part.faded?.dispose();
+      }
+      mesh.geometry.dispose();
+      mesh.geometry = prop.body;
+      mesh.material = this.#landmarkMaterial;
+      mesh.scale.setScalar(1);
+      mesh.rotation.y = landmark.yaw;
+      this.#occluderTargets[landmark.occluder] = { kind: 'mesh', parts: [{ mesh, base: this.#landmarkMaterial, faded: null }] };
+      const before = this.#occluders[landmark.occluder];
+      if (before !== undefined) this.#occluders[landmark.occluder] = { ...before, height: topOf(prop.body) };
+      if (landmark.glow !== null) {
+        this.#root.remove(landmark.glow);
+        landmark.glow.geometry.dispose();
+        landmark.glow = null;
+      }
+      if (prop.glow !== undefined && this.#landmarkGlow !== null) {
+        const glow = new THREE.Mesh(prop.glow, this.#landmarkGlow);
+        glow.name = 'poi-glow:landmark';
+        glow.position.copy(mesh.position);
+        glow.rotation.y = landmark.yaw;
+        this.#root.add(glow);
+        landmark.glow = glow;
+      }
+      landmark.fromModel = true;
+      swapped = true;
+    }
+    return swapped;
+  }
+
+  /** Puts a culled layer in or out of the refresh list — a tree glow off on `low`. */
+  #setCulledActive(layer: CulledInstances, active: boolean): void {
+    const at = this.#culled.indexOf(layer);
+    if (active && at < 0) {
+      this.#culled.push(layer);
+      layer.mesh.count = layer.drawn;
+      layer.mesh.visible = layer.drawn > 0;
+      this.#cullDirty = true;
+    } else if (!active && at >= 0) {
+      this.#culled.splice(at, 1);
+      layer.mesh.count = 0;
+      layer.mesh.visible = false;
+    }
+  }
+
+  /** §4.1, 53-b: every foliage layer draws its `lod1` on `low` and its body otherwise, swapped in place. */
+  #applyTreeLod(): void {
+    const trees = this.#trees;
+    if (trees === null) return;
+    const low = this.#preset === 'low';
+    for (const layer of trees.layers) {
+      if (layer.lods === null) continue;
+      const geometry = low ? layer.lods.lod1 : layer.lods.body;
+      if (layer.body.mesh.geometry !== geometry) {
+        layer.body.setGeometry(geometry, sphereOf(geometry));
+        this.#cullDirty = true;
+      }
+      if (layer.glow !== null) this.#setCulledActive(layer.glow, !low);
+    }
+  }
+
+  /** True for a layer drawn on `#foliageMaterial`, which SPEC-035's fade leaves alone. */
+  #isFoliage(layer: CulledInstances | null): boolean {
+    return layer !== null && this.#foliageMaterial !== null && layer.mesh.material === this.#foliageMaterial;
+  }
+
+  /**
+   * E82: every 0.1 s of view time, the trees within 25 m of the player whose
+   * canopy disc holds a live enemy or a pickup target `CANOPY_FADE`, and the
+   * rest 1; every `sync` then steps each fade toward its target at
+   * `(1 − CANOPY_FADE) / CANOPY_FADE_SECONDS` a second. The query runs before
+   * the step, so a new holder is already below 1 when it is counted. Allocates
+   * nothing.
+   */
+  #stepCanopies(frame: SurfaceFrame): void {
+    const trees = this.#trees;
+    const grid = this.#canopyGrid;
+    if (trees === null || grid === null) return;
+    this.#canopyClock += frame.dt;
+    // Only a frame that moves the clock asks: a frozen one (hit-stop) cannot step a new holder's fade.
+    if (frame.dt > 0 && this.#canopyClock >= CANOPY_QUERY_SECONDS) {
+      this.#canopyClock %= CANOPY_QUERY_SECONDS;
+      this.#queryCanopies(frame, trees, grid);
+    }
+    const step = frame.dt <= 0 ? 0 : ((1 - CANOPY_FADE) / CANOPY_FADE_SECONDS) * frame.dt;
+    const fades = this.#canopyFade;
+    const targets = this.#canopyTarget;
+    let faded = 0;
+    for (let i = 0; i < fades.length; i++) {
+      const from = fades[i] as number;
+      const to = targets[i] as number;
+      let value = from;
+      if (from < to) value = Math.min(to, from + step);
+      else if (from > to) value = Math.max(to, from - step);
+      if (value !== from) {
+        fades[i] = value;
+        const target = (trees.instances[i] as PropInstance).target;
+        if (this.#isFoliage(target.layer)) target.layer?.setFade(target.index, fades[i] as number);
+      }
+      if ((fades[i] as number) < 1) faded++;
+    }
+    this.#canopyFaded = faded;
+  }
+
+  #queryCanopies(frame: SurfaceFrame, trees: PropKind, grid: InstanceGrid): void {
+    const targets = this.#canopyTarget;
+    const held = this.#canopyHeld;
+    for (let k = 0; k < this.#canopyHeldCount; k++) targets[held[k] as number] = 1;
+    this.#canopyHeldCount = 0;
+    const p = frame.player;
+    const rect = this.#canopyRect;
+    rect.minX = p.x - CANOPY_FADE_RANGE;
+    rect.maxX = p.x + CANOPY_FADE_RANGE;
+    rect.minZ = p.z - CANOPY_FADE_RANGE;
+    rect.maxZ = p.z + CANOPY_FADE_RANGE;
+    const count = grid.query(rect, this.#canopyCandidates);
+    for (let k = 0; k < count; k++) {
+      const i = this.#canopyCandidates[k] as number;
+      const tree = trees.instances[i] as PropInstance;
+      const dx = tree.x - p.x;
+      const dz = tree.z - p.z;
+      if (dx * dx + dz * dz > CANOPY_FADE_RANGE * CANOPY_FADE_RANGE) continue;
+      if (!this.#isFoliage(tree.target.layer) || !this.#canopyHolds(frame, tree.x, tree.z, tree.scale)) continue;
+      targets[i] = CANOPY_FADE;
+      held[this.#canopyHeldCount++] = i;
+    }
+  }
+
+  /** E82: a live enemy, or a pickup, inside the canopy disc of radius `r` at (x, z). */
+  #canopyHolds(frame: SurfaceFrame, x: number, z: number, r: number): boolean {
+    const reach = r * r;
+    const enemies = frame.enemies;
+    for (let i = 0; i < enemies.size; i++) {
+      const e = enemies.at(i);
+      if (e.state === 'dead' || isBuried(e)) continue;
+      if ((e.x - x) ** 2 + (e.z - z) ** 2 <= reach) return true;
+    }
+    const pickups = frame.pickups;
+    for (let i = 0; i < pickups.size; i++) {
+      const pickup = pickups.at(i);
+      if ((pickup.x - x) ** 2 + (pickup.z - z) ** 2 <= reach) return true;
+    }
+    return false;
+  }
+
+  /**
+   * §4.1: the wind (0 under reduce motion, the next frame it changes), the
+   * view clock, and the head cut-out — off with no living player or no
+   * `screen` (53-n).
+   */
+  #syncFoliage(frame: SurfaceFrame, playerGround: number): void {
+    const wind = this.reduceMotion ? 0 : this.#windAmplitude;
+    this.#wind = wind;
+    const foliage = this.#foliageMaterial;
+    if (foliage !== null) {
+      const uniforms = foliageUniforms(foliage);
+      uniforms.uWind.value = wind;
+      uniforms.uTime.value = frame.time;
+      const cutout = uniforms.uCutout.value;
+      const p = frame.player;
+      const screen = frame.screen;
+      if (!p.alive || screen === undefined) {
+        cutout.set(0, 0, 0, 0);
+      } else {
+        this.#head.set(p.x, playerGround + CUTOUT_HEAD_LIFT, p.z);
+        cutoutUniform(screen.camera, this.#head, screen.width, screen.height, cutout);
+      }
+    }
+    const cover = this.#coverMaterial;
+    if (cover !== null) {
+      const uniforms = foliageUniforms(cover);
+      uniforms.uWind.value = wind;
+      uniforms.uTime.value = frame.time;
+    }
+  }
+
+  /** E82: the trees below full opacity — `sceneInfo.canopyFaded`. */
+  get canopyFaded(): number {
+    return this.#canopyFaded;
+  }
+
+  /** E82: the trees within range whose canopy holds an enemy or a pickup — `sceneInfo.canopyHolders`. */
+  get canopyHolders(): number {
+    return this.#canopyHeldCount;
+  }
+
+  /** §4.5: the cover clumps drawn now — `sceneInfo.coverDrawn`. */
+  get coverDrawn(): number {
+    return this.#cover?.drawn ?? 0;
+  }
+
+  /** §4.1: 1 while the trees draw their LOD1 (`low`), else 0 — `sceneInfo.treeLod`. */
+  get treeLod(): number {
+    return this.#preset === 'low' ? 1 : 0;
+  }
+
+  /** §4.1, 53-a: `glb` once the trees draw through the seam — `sceneInfo.treeSource`. */
+  get treeSource(): 'glb' | 'procedural' {
+    const trees = this.#trees;
+    return trees !== null && trees.layers.length > 0 && trees.layers.every((layer) => layer.lods !== null) ? 'glb' : 'procedural';
+  }
+
+  /** §4.1: the sway at the crown top in force, 0 under reduce motion — `sceneInfo.wind`. */
+  get wind(): number {
+    return this.#wind;
+  }
+
+  /** §4.6: the seam's line, where the look has one — `sceneInfo.seamAt`. */
+  get seamAt(): number | null {
+    return this.#seamAt;
+  }
+
+  /**
+   * §4.10: the triangles the foliage draws now — trees and their glows,
+   * undergrowth, cover and contact shadows, each as instances drawn ×
+   * triangles an instance.
+   */
+  get foliageTris(): number {
+    let triangles = 0;
+    const count = (layer: CulledInstances | null): void => {
+      if (layer !== null && layer.mesh.visible) triangles += layer.mesh.count * trianglesOf(layer.mesh.geometry);
+    };
+    for (const layer of this.#trees?.layers ?? []) {
+      count(layer.body);
+      count(layer.glow);
+    }
+    count(this.#undergrowth);
+    count(this.#contact);
+    triangles += this.coverDrawn * (this.#cover?.trianglesPerClump ?? 0);
+    return triangles;
+  }
+
+  /** §4.10: those layers with an instance drawn — `sceneInfo.foliageDraws`. */
+  get foliageDraws(): number {
+    let draws = 0;
+    const count = (layer: CulledInstances | null): void => {
+      if (layer !== null && layer.mesh.visible && layer.mesh.count > 0) draws++;
+    };
+    for (const layer of this.#trees?.layers ?? []) {
+      count(layer.body);
+      count(layer.glow);
+    }
+    count(this.#undergrowth);
+    count(this.#contact);
+    if (this.coverDrawn > 0) draws++;
+    return draws;
+  }
+
+  /**
+   * SPEC-035 §4.5 / SPEC-053 §4.1: whether occluder `index` still fades — a
+   * tree drawn through the foliage seam never does; the cut-out does its work.
+   */
+  occluderFades(index: number): boolean {
+    const target = this.#occluderTargets[index];
+    return target !== undefined && !(target.kind === 'instance' && this.#isFoliage(target.layer));
   }
 
   // ------------------------------------------------------- SPEC-046 §4.8
@@ -1809,6 +2548,14 @@ export class SurfaceView {
       extendByFrustum(frustum, margin, rect);
       layer.refresh(rect, frustum, CULL_REFRESH_DISTANCE + shadow);
     }
+    // SPEC-053 §4.5: the cover's cells, the rect grown by a clump's metre.
+    const cover = this.#cover;
+    if (cover !== null) {
+      const margin = 1 + CULL_REFRESH_DISTANCE;
+      viewRect(view, view.distance, view.fov, view.aspect, margin, this.#coverRect);
+      extendByFrustum(frustum, margin, this.#coverRect);
+      cover.refresh(this.#coverRect, frustum);
+    }
     this.#cullMs = Math.round((performance.now() - started) * 100) / 100;
     this.#cullDirty = false;
   }
@@ -1861,7 +2608,11 @@ export class SurfaceView {
     const step = dt <= 0 ? 0 : dt / OCCLUDER_FADE_SECONDS;
     let faded = 0;
     for (let i = 0; i < count; i++) {
-      const target = (this.#occluding[i] ?? 0) === 1 ? this.#occluderOpacity : 1;
+      // SPEC-053 §4.1: a tree drawn through the foliage seam never fades
+      // here — the head cut-out does that work, and the canopy fade (E82)
+      // owns its instance fade.
+      const fades = (this.#occluding[i] ?? 0) === 1 && this.occluderFades(i);
+      const target = fades ? this.#occluderOpacity : 1;
       const from = this.#occluderFade[i] as number;
       let value = from;
       if (from < target) value = Math.min(target, from + step);
@@ -1893,6 +2644,8 @@ export class SurfaceView {
     const target = this.#occluderTargets[index];
     if (target === undefined) return;
     if (target.kind === 'instance') {
+      // SPEC-053 §4.1: foliage-drawn trees are the cut-out's, not this fade's.
+      if (this.#isFoliage(target.layer)) return;
       target.layer?.setFade(target.index, value);
       return;
     }
@@ -1921,6 +2674,9 @@ export class SurfaceView {
     // way; the scene decided which ones, this walks the fades.
     this.#stepOccluders(frame.dt);
     const playerGround = ground(p.x, p.z);
+    // SPEC-053 §4.1: the foliage's wind, clock and cut-out, then E82's canopy fade.
+    this.#syncFoliage(frame, playerGround);
+    this.#stepCanopies(frame);
     this.#player.visible = p.alive;
     this.#player.position.set(p.x, playerGround, p.z);
     this.#player.rotation.y = -p.facing;
@@ -2159,6 +2915,17 @@ export class SurfaceView {
     this.enemies.dispose();
     this.#storm.dispose();
     this.#fx.dispose();
+    // SPEC-053: the cover's mesh, the LOD geometry a foliage layer is not
+    // drawing (the walk below frees the one it is), and the clump materials.
+    this.#cover?.dispose();
+    this.#cover = null;
+    for (const layer of this.#trees?.layers ?? []) {
+      if (layer.lods === null) continue;
+      for (const geometry of [layer.lods.body, layer.lods.lod1]) if (geometry !== layer.body.mesh.geometry) geometry.dispose();
+    }
+    this.#foliageMaterial?.dispose();
+    this.#coverMaterial?.dispose();
+    this.#landmarkMaterial.dispose();
     this.#telegraphs.dispose();
     this.#character?.dispose();
     this.#character = null;

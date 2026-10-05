@@ -6,6 +6,12 @@
 // that position, on the two planets with the smallest and largest halfSize
 // (Hive 160, Ferrum 200) so a future regression in the apron/clamp math on
 // either extreme fails here instead of only in a manual pass.
+//
+// SPEC-053 §4.10: a cluster, a grove or an orchard can now stand on the 190 m
+// line this case used to walk from the spawn — at the suite's seed the Hive's
+// has a spire on it — so it starts from `surface-goto-edge` and pushes +x
+// against the wall for 2 s instead. The clamp, the draws and the triangles it
+// asserts there are the same.
 import { expect, test, type Page } from '@playwright/test';
 import { start } from './start';
 
@@ -19,22 +25,35 @@ const PLANETS: readonly Clamp[] = [
   { planet: 'ferrum', halfSizeMinus2: 198 },
 ];
 
-/** Holds moveRight + moveDown together, which cancels to a pure +x walk (Surface.ts's vx=(move.x-move.y)·inv·speed). */
-async function walkToPositiveXBoundary(page: Page, target: number): Promise<{ px: number; pz: number }> {
+/** A debug-strip button, clicked in the page (the strip may sit under the HUD). */
+async function press(page: Page, id: string): Promise<void> {
+  await page.evaluate((testId) => {
+    const button = document.querySelector<HTMLButtonElement>(`[data-testid="${testId}"]`);
+    if (button === null) throw new Error(`no ${testId} on the debug strip`);
+    button.click();
+  }, id);
+}
+
+/**
+ * From `surface-goto-edge`, holds moveRight + moveDown together — a pure +x
+ * walk (Surface.ts's vx=(move.x-move.y)·inv·speed) — into the wall for 2 s,
+ * then reads where the clamp left the salvager.
+ */
+async function pushIntoPositiveXBoundary(page: Page, target: number): Promise<{ px: number; pz: number }> {
+  // Pressed until it takes: the strip ignores a press while a beat holds the step.
+  await expect
+    .poll(
+      async () => {
+        await press(page, 'surface-goto-edge');
+        return Number((await page.evaluate(() => window.__reallm.stats().sceneInfo))?.px);
+      },
+      { timeout: 30_000 },
+    )
+    .toBeGreaterThanOrEqual(target);
   await page.keyboard.down('KeyD');
   await page.keyboard.down('KeyS');
   try {
-    // Wall-clock speed only holds when the fixed-step loop keeps up with real
-    // time; under a full parallel `npm run e2e` run this suite shares five
-    // workers with the software-GL-heaviest files in the repo (SPEC-006's
-    // audio ramps, SPEC-011's spawn load), and the loop's five-steps-per-frame
-    // ceiling means simulated time can fall tens of seconds behind wall clock
-    // (`docs/playtest-log.md`, SPEC-017 — this is the same class of
-    // contention flake already tracked there, not a bug in the clamp). 150 s
-    // covers a 198 m walk at 6 m/s even with ~30 s of dropped time.
-    await expect
-      .poll(async () => (await page.evaluate(() => window.__reallm.stats().sceneInfo))?.px, { timeout: 150_000, intervals: [1000] })
-      .toBeGreaterThanOrEqual(target);
+    await page.waitForTimeout(2_000);
   } finally {
     await page.keyboard.up('KeyD');
     await page.keyboard.up('KeyS');
@@ -50,7 +69,7 @@ for (const { planet, halfSizeMinus2 } of PLANETS) {
     test.setTimeout(180_000);
     await start(page, `/?debug&scene=surface&planet=${planet}&quality=low`);
 
-    const { px } = await walkToPositiveXBoundary(page, halfSizeMinus2);
+    const { px } = await pushIntoPositiveXBoundary(page, halfSizeMinus2);
     // The clamp is exact (±0.5 m for the last frame's step before the poll saw it).
     expect(px).toBeGreaterThanOrEqual(halfSizeMinus2);
     expect(px).toBeLessThan(halfSizeMinus2 + 1);

@@ -7,10 +7,14 @@ import { buildHeightField, type HeightFieldLayout } from '@/core/HeightField';
 import { PLANETS } from '@/data/index';
 import { groundLayer } from '@/views/ProceduralTextures';
 import {
+  CANOPY_SHADE,
+  DETAIL_STRENGTH,
+  DETAIL_TILE_METRES,
   TERRAIN_TILE,
   TERRAIN_TINT_AMOUNT,
   buildTerrainTiles,
   createTerrainMaterial,
+  setGroundDetail,
   setTerrainLayers,
   terrainUniforms,
 } from '@/views/TerrainMesh';
@@ -210,5 +214,126 @@ describe('createTerrainMaterial (SPEC-018 §4.4)', () => {
     expect(A2.albedo.repeat.x).toBeCloseTo(1 / 3, 6);
     // `needsUpdate` was never touched: the program key and version held.
     expect(material.version).toBe(version);
+  });
+});
+
+// ---------------------------------------------------------------- SPEC-053
+
+/** The shader as the GPU sees it under `defines`: `#ifdef` / `#else` / `#endif` resolved, nesting kept. */
+function preprocess(source: string, defines: readonly string[]): string {
+  const kept: string[] = [];
+  const stack: boolean[] = [];
+  for (const line of source.split('\n')) {
+    const trimmed = line.trim();
+    const active = stack.every(Boolean);
+    if (trimmed.startsWith('#ifdef ')) stack.push(defines.includes(trimmed.slice(7).trim()));
+    else if (trimmed.startsWith('#else')) stack.push(!(stack.pop() ?? true));
+    else if (trimmed.startsWith('#endif')) stack.pop();
+    else if (active) kept.push(line);
+  }
+  return kept.join('\n');
+}
+
+describe('detail, anti-tiling, the seam and canopy shade (SPEC-053 §4.6)', () => {
+  type Shader = Parameters<NonNullable<THREE.Material['onBeforeCompile']>>[0];
+  const CHUNKS = '#include <common>\n#include <map_fragment>\n#include <roughnessmap_fragment>\n#include <normal_fragment_maps>\n#include <emissivemap_fragment>';
+
+  function compiled(material: THREE.MeshStandardMaterial): string {
+    const shader = { uniforms: {} as Record<string, unknown>, vertexShader: '#include <common>\n#include <begin_vertex>', fragmentShader: CHUNKS };
+    material.onBeforeCompile(shader as unknown as Shader, undefined as never);
+    return shader.fragmentShader;
+  }
+
+  it('compiles terrain/2 with TERRAIN_DETAIL and TERRAIN_ANTITILE on medium and high, terrain/1 without', () => {
+    expect(DETAIL_TILE_METRES).toBe(1.2);
+    expect(DETAIL_STRENGTH).toBe(0.35);
+    const cinder = PLANETS.cinder4.surface;
+    const detailed = createTerrainMaterial(A, B, cinder.look, cinder.palette, { detail: true });
+    expect(detailed.customProgramCacheKey()).toBe('terrain/2+detail');
+    expect(detailed.defines).toMatchObject({ STANDARD: '', TERRAIN_DETAIL: '', TERRAIN_ANTITILE: '' });
+    const low = createTerrainMaterial(A, B, cinder.look, cinder.palette, { detail: false });
+    expect(low.customProgramCacheKey()).toBe('terrain/1');
+    expect(low.defines).toEqual({ STANDARD: '' });
+    const ferrum = PLANETS.ferrum.surface;
+    expect(createTerrainMaterial(A, B, ferrum.look, ferrum.palette, { detail: true }).customProgramCacheKey()).toBe('terrain/2+detail+cracks');
+    // The detail normal every 1.2 m in layer A's UVs, at 0.35.
+    const uniforms = terrainUniforms(detailed);
+    expect(uniforms.uDetailRatio.value).toBeCloseTo(4 / 1.2, 9);
+    expect(uniforms.uDetailStrength.value).toBe(0.35);
+    // The flat 1 × 1 stand-in: (128, 128, 255, 128).
+    expect(Array.from((uniforms.detailMap.value as THREE.DataTexture).image.data as Uint8Array)).toEqual([128, 128, 255, 128]);
+  });
+
+  it('samples the detail normal, layer A again at R(37°) · uv · 0.43, and blends by the macro sample', () => {
+    const cinder = PLANETS.cinder4.surface;
+    const fragment = compiled(createTerrainMaterial(A, B, cinder.look, cinder.palette, { detail: true }));
+    expect(fragment).toContain('texture2D( detailMap, terrainNrUv * uDetailRatio )');
+    expect(fragment).toContain('mapN.xy += detailN.xy * uDetailStrength;');
+    expect(fragment).toContain(`mat2( ${Math.cos((37 * Math.PI) / 180).toFixed(8)}, ${Math.sin((37 * Math.PI) / 180).toFixed(8)}`);
+    expect(fragment).toContain('ANTI_ROTATION * terrainUv * 0.43');
+    expect(fragment).toContain('ANTI_ROTATION * terrainNrUv * 0.43');
+    expect(fragment).toContain('0.5 * smoothstep( 0.35, 0.65, macro.g )');
+    // Three more fetches than the low program: albedo and normal again, and the detail.
+    const fetches = (text: string, defines: readonly string[]): number =>
+      (preprocess(text, defines).match(/texture2D\(/g) ?? []).length;
+    const low = compiled(createTerrainMaterial(A, B, cinder.look, cinder.palette));
+    expect(fetches(fragment, ['TERRAIN_DETAIL', 'TERRAIN_ANTITILE']) - fetches(low, [])).toBe(3);
+  });
+
+  it('defines TERRAIN_SEAM with a seam, on every preset, past its line by its shift', () => {
+    const eden = PLANETS.eden.surface;
+    for (const detail of [false, true]) {
+      const material = createTerrainMaterial(A, B, eden.look, eden.palette, { detail, seam: { at: 42.5, shift: 1.75 } });
+      expect(material.defines).toHaveProperty('TERRAIN_SEAM');
+      expect(material.customProgramCacheKey()).toBe(detail ? 'terrain/2+detail+seam' : 'terrain/1+seam');
+      expect(terrainUniforms(material).uSeamAt.value).toBe(42.5);
+      expect(terrainUniforms(material).uSeamShift.value).toBe(1.75);
+      expect(terrainUniforms(material).uTileA.value).toBe(4);
+      const fragment = compiled(material);
+      expect(fragment).toContain('if ( vMapUv.x * uTileA > uSeamAt ) {');
+      expect(fragment).toContain('terrainUv += uSeamShift / uTileA;');
+    }
+    // No seam, no define.
+    expect(createTerrainMaterial(A, B, eden.look, eden.palette, { detail: true }).defines).not.toHaveProperty('TERRAIN_SEAM');
+  });
+
+  it('setGroundDetail swaps the detail map in with no program change', () => {
+    const cinder = PLANETS.cinder4.surface;
+    const material = createTerrainMaterial(A, B, cinder.look, cinder.palette, { detail: true });
+    const version = material.version;
+    const key = material.customProgramCacheKey();
+    const detail = new THREE.Texture();
+    setGroundDetail(material, detail);
+    expect(terrainUniforms(material).detailMap.value).toBe(detail);
+    expect(detail.wrapS).toBe(THREE.RepeatWrapping);
+    expect(detail.wrapT).toBe(THREE.RepeatWrapping);
+    expect(material.version).toBe(version);
+    expect(material.customProgramCacheKey()).toBe(key);
+  });
+
+  it('darkens the vertex tint × 0.7 at a canopy’s centre and leaves it × 1 at its radius', () => {
+    expect(CANOPY_SHADE).toBe(0.3);
+    const plain = buildTerrainTiles(field, new THREE.MeshStandardMaterial());
+    const mesh = plain[0] as THREE.Mesh;
+    const position = mesh.geometry.getAttribute('position') as THREE.BufferAttribute;
+    // A vertex well inside the first tile, and the canopy centred on it.
+    const centre = 31 * 15 + 15;
+    const x = position.getX(centre);
+    const z = position.getZ(centre);
+    const r = 4;
+    const shaded = buildTerrainTiles(field, new THREE.MeshStandardMaterial(), { canopies: [{ x, z, r }] })[0] as THREE.Mesh;
+    const tint = (m: THREE.Mesh, i: number): number => (m.geometry.getAttribute('color') as THREE.BufferAttribute).getX(i);
+    expect(tint(shaded, centre) / tint(mesh, centre)).toBeCloseTo(0.7, 6);
+    // Two nodes (4 m) along x is the rim: untouched.
+    const rim = centre + 2;
+    expect(Math.hypot(position.getX(rim) - x, position.getZ(rim) - z)).toBeCloseTo(r, 6);
+    expect(tint(shaded, rim) / tint(mesh, rim)).toBeCloseTo(1, 6);
+    // One node (2 m, half the radius) is in between.
+    const half = tint(shaded, centre + 1) / tint(mesh, centre + 1);
+    expect(half).toBeGreaterThan(0.7);
+    expect(half).toBeLessThan(1);
+    // Overlapping canopies take the strongest, never the product.
+    const twice = buildTerrainTiles(field, new THREE.MeshStandardMaterial(), { canopies: [{ x, z, r }, { x, z, r: r * 2 }] })[0] as THREE.Mesh;
+    expect(tint(twice, centre) / tint(mesh, centre)).toBeCloseTo(0.7, 6);
   });
 });

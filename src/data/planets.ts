@@ -53,6 +53,17 @@ export interface PoiDef {
 }
 
 /**
+ * SPEC-053 §3: a planet's streamed ground cover — the atlas cells it draws, by
+ * weight, each sized in metres, and how many clumps per 1,000 m².
+ */
+export interface CoverLook {
+  readonly kinds: readonly { readonly cell: number; readonly weight: number; readonly size: readonly [number, number] }[];
+  readonly per1000m2: number;
+  /** Density multiplier under a canopy; 1 when absent. */
+  readonly underCanopy?: number;
+}
+
+/**
  * Everything the surface environment draws for one planet (SPEC-018 §4.1,
  * *initial tuning*): the lighting rig, the two-layer ground, the visual-only
  * relief, scatter, decals and the arena-edge boundary.
@@ -70,11 +81,22 @@ export interface SurfaceLook {
     readonly cracks?: { readonly color: string; readonly intensity: number };
     /** SPEC-046 §4.5: 0..1, how strongly the macro tint pulls the ground; absent reads `TERRAIN_TINT_AMOUNT`. */
     readonly tint?: number;
+    /**
+     * SPEC-053 §4.6: one straight line where the lawn does not match itself —
+     * past `poi` instance 0 along `axis`, both layers' UVs move by `shift` m.
+     */
+    readonly seam?: { readonly poi: PoiId; readonly axis: 'x' | 'z'; readonly shift: number };
   };
   readonly relief: { readonly amplitude: number; readonly wavelength: number; readonly ridged: number; readonly bermHeight: number };
   readonly scatter: { readonly kind: ScatterKind; readonly density: number; readonly second?: ScatterKind };
   readonly decals: readonly DecalKind[];
   readonly boundary: BoundaryKind;
+  /** SPEC-053 §4.1: the leaves' colour and how hard the wind moves them (0–2); a planet with trees has one. */
+  readonly foliage?: { readonly tint: string; readonly wind: number };
+  /** SPEC-053 §4.4: atlas clumps placed once, denser under canopies. */
+  readonly undergrowth?: { readonly cells: readonly number[]; readonly underPer1000m2: number; readonly openPer1000m2: number };
+  /** SPEC-053 §4.5: ground cover streamed around the view. */
+  readonly cover?: CoverLook;
 }
 
 export interface PlanetDef {
@@ -116,8 +138,20 @@ export interface PlanetDef {
       readonly regenPerSec: number;
     }[];
     readonly obstacles: { readonly density: number; readonly minRadius: number; readonly maxRadius: number };
-    /** SPEC-030 §4.1: shelter and outcrop counts — targets, not guarantees (D-25). */
-    readonly features: { readonly caves: number; readonly wrecks: number; readonly outcrops: number };
+    /**
+     * SPEC-030 §4.1: shelter and outcrop counts — targets, not guarantees
+     * (D-25). SPEC-053 §4.3: and the set pieces placed after the outcrops,
+     * also targets — groves of trees, all-or-nothing orchards on an exact
+     * lattice, and clusters of the planet's two obstacle kinds.
+     */
+    readonly features: {
+      readonly caves: number;
+      readonly wrecks: number;
+      readonly outcrops: number;
+      readonly groves?: { readonly count: number; readonly radius: readonly [number, number]; readonly treesPer1000m2: number };
+      readonly orchards?: { readonly count: number; readonly rows: number; readonly cols: number; readonly spacing: number };
+      readonly clusters?: { readonly count: number; readonly pieces: readonly [number, number]; readonly spread: number };
+    };
     /**
      * SPEC-041 §4.5 (*initial tuning*): a row with `pack` spawns `[min, max]`
      * together around one ring point, its leader rolling the elite for all of
@@ -171,6 +205,8 @@ export const PLANETS = {
         scatter: { kind: 'bones', density: 2.5, second: 'pebbles' },
         decals: ['crater', 'scorch'],
         boundary: 'dunes',
+        // SPEC-053 §4.5 (*initial tuning*): dry grass.
+        cover: { kinds: [{ cell: 8, weight: 1, size: [0.4, 0.7] }], per1000m2: 20 },
       },
       // SPEC-038 §4.5: Cinder-4's heat runs at 1.3 dps — the first chapter's
       // storms bite without costing the whole bar.
@@ -188,7 +224,8 @@ export const PLANETS = {
         { resource: 'wheat', count: 4, capacity: 80, regenPerSec: 0.4 },
       ],
       obstacles: { density: 0.06, minRadius: 1.2, maxRadius: 3.5 },
-      features: { caves: 2, wrecks: 2, outcrops: 3 },
+      // SPEC-053 §4.3 (*initial tuning*): rock-and-ruin clusters on the walks between objectives.
+      features: { caves: 2, wrecks: 2, outcrops: 3, clusters: { count: 24, pieces: [3, 7], spread: 10 } },
       spawn: [
         { enemy: 'dust_skitter', weight: 6, maxAlive: 10, pack: [3, 5] },
         { enemy: 'wurmling', weight: 3, maxAlive: 5, pack: [1, 2] },
@@ -226,6 +263,8 @@ export const PLANETS = {
         scatter: { kind: 'crystals', density: 2.0, second: 'pebbles' },
         decals: ['frost', 'cracks'],
         boundary: 'ice_wall',
+        // SPEC-053 §4.5 (*initial tuning*): frost fern.
+        cover: { kinds: [{ cell: 10, weight: 1, size: [0.4, 0.8] }], per1000m2: 12 },
       },
       weather: { cycle: ['blizzard', 'avalanche'], calmSeconds: [90, 150], stormSeconds: [45, 90] },
       pois: [
@@ -242,7 +281,8 @@ export const PLANETS = {
         { resource: 'wheat', count: 2, capacity: 60, regenPerSec: 0.4 },
       ],
       obstacles: { density: 0.07, minRadius: 1.2, maxRadius: 4 },
-      features: { caves: 2, wrecks: 2, outcrops: 3 },
+      // SPEC-053 §4.3 (*initial tuning*).
+      features: { caves: 2, wrecks: 2, outcrops: 3, clusters: { count: 20, pieces: [3, 6], spread: 10 } },
       spawn: [
         { enemy: 'frost_mite', weight: 6, maxAlive: 12, pack: [3, 5] },
         { enemy: 'ice_crawler', weight: 3, maxAlive: 6, pack: [1, 2] },
@@ -282,6 +322,19 @@ export const PLANETS = {
         scatter: { kind: 'tufts', density: 4.0, second: 'spores' },
         decals: ['slick', 'cracks'],
         boundary: 'jungle_bank',
+        // SPEC-053 §4.1, §4.4, §4.5 (*initial tuning*): a humid canopy in a
+        // steady wind, ferns and broad leaves under it, moss and grass between.
+        foliage: { tint: '#e2ebcc', wind: 1 },
+        undergrowth: { cells: [4, 5, 14], underPer1000m2: 40, openPer1000m2: 8 },
+        cover: {
+          kinds: [
+            { cell: 13, weight: 3, size: [0.4, 0.8] },
+            { cell: 6, weight: 2, size: [0.4, 0.7] },
+            { cell: 4, weight: 2, size: [0.6, 1.0] },
+          ],
+          per1000m2: 220,
+          underCanopy: 1.6,
+        },
       },
       weather: { cycle: ['spore_storm'], calmSeconds: [100, 160], stormSeconds: [60, 75] },
       pois: [
@@ -299,7 +352,9 @@ export const PLANETS = {
         { resource: 'water', count: 2, capacity: 60, regenPerSec: 0.4 },
       ],
       obstacles: { density: 0.1, minRadius: 1.5, maxRadius: 4.5 },
-      features: { caves: 2, wrecks: 1, outcrops: 3 },
+      // SPEC-053 §4.3 (*initial tuning*): the jungle inside the wall — six
+      // trees per 1,000 m² cover about half of each grove.
+      features: { caves: 2, wrecks: 1, outcrops: 3, groves: { count: 14, radius: [20, 30], treesPer1000m2: 6 } },
       spawn: [
         { enemy: 'hive_drone', weight: 6, maxAlive: 14, pack: [3, 5] },
         { enemy: 'spore_hound', weight: 3, maxAlive: 6, pack: [1, 2] },
@@ -341,6 +396,8 @@ export const PLANETS = {
         scatter: { kind: 'slag', density: 2.5 },
         decals: ['scorch', 'cracks'],
         boundary: 'lava_ridge',
+        // SPEC-053 §4.5 (*initial tuning*): ash fronds.
+        cover: { kinds: [{ cell: 11, weight: 1, size: [0.5, 0.9] }], per1000m2: 10 },
       },
       weather: { cycle: ['radiation_storm', 'heatwave'], calmSeconds: [90, 140], stormSeconds: [60, 90] },
       pois: [
@@ -356,7 +413,8 @@ export const PLANETS = {
         { resource: 'oil', count: 2, capacity: 60, regenPerSec: 0.4 },
       ],
       obstacles: { density: 0.09, minRadius: 1.5, maxRadius: 5 },
-      features: { caves: 2, wrecks: 2, outcrops: 3 },
+      // SPEC-053 §4.3 (*initial tuning*).
+      features: { caves: 2, wrecks: 2, outcrops: 3, clusters: { count: 24, pieces: [3, 7], spread: 10 } },
       spawn: [
         { enemy: 'ash_crawler', weight: 6, maxAlive: 14, pack: [3, 5] },
         { enemy: 'magma_wraith', weight: 3, maxAlive: 6, pack: [1, 2] },
@@ -400,6 +458,8 @@ export const PLANETS = {
         scatter: { kind: 'spores', density: 2.0, second: 'crystals' },
         decals: ['slick'],
         boundary: 'chitin_wall',
+        // SPEC-053 §4.5 (*initial tuning*): hive tendrils.
+        cover: { kinds: [{ cell: 12, weight: 1, size: [0.5, 1.0] }], per1000m2: 40 },
       },
       weather: null,
       pois: [
@@ -410,7 +470,8 @@ export const PLANETS = {
       ],
       nodes: [{ resource: 'lithium', count: 2, capacity: 60, regenPerSec: 0.4 }],
       obstacles: { density: 0.12, minRadius: 1.5, maxRadius: 4 },
-      features: { caves: 2, wrecks: 1, outcrops: 2 },
+      // SPEC-053 §4.3 (*initial tuning*).
+      features: { caves: 2, wrecks: 1, outcrops: 2, clusters: { count: 16, pieces: [3, 6], spread: 9 } },
       spawn: [
         { enemy: 'hive_drone', weight: 6, maxAlive: 16, pack: [4, 6] },
         { enemy: 'hive_warrior', weight: 3, maxAlive: 6, pack: [1, 2] },
@@ -445,11 +506,26 @@ export const PLANETS = {
           ground: '#4f7a3a',
           ambient: 0.6,
         },
-        ground: { layers: ['grass', 'soil'], tileMetres: [3.5, 5] },
+        // SPEC-053 §4.6: the seam — one straight line through the High Ridge
+        // where the lawn does not match itself.
+        ground: { layers: ['grass', 'soil'], tileMetres: [3.5, 5], seam: { poi: 'eden_ridge', axis: 'x', shift: 1.75 } },
         relief: { amplitude: 0.4, wavelength: 32, ridged: 0.2, bermHeight: 5 },
         scatter: { kind: 'tufts', density: 5.0, second: 'pebbles' },
         decals: ['crater'],
         boundary: 'hills',
+        // SPEC-053 §4.1, §4.4, §4.5 (*initial tuning*): leaves exactly as
+        // authored in a light breeze, broad leaves and flowers under them, and
+        // the densest, greenest lawn in the game.
+        foliage: { tint: '#ffffff', wind: 0.6 },
+        undergrowth: { cells: [14, 9], underPer1000m2: 20, openPer1000m2: 6 },
+        cover: {
+          kinds: [
+            { cell: 6, weight: 3, size: [0.4, 0.6] },
+            { cell: 7, weight: 2, size: [0.4, 0.6] },
+            { cell: 9, weight: 1, size: [0.4, 0.6] },
+          ],
+          per1000m2: 300,
+        },
       },
       weather: null,
       pois: [
@@ -465,7 +541,9 @@ export const PLANETS = {
         { resource: 'water', count: 3, capacity: 80, regenPerSec: 0.5 },
       ],
       obstacles: { density: 0.05, minRadius: 1.2, maxRadius: 3 },
-      features: { caves: 1, wrecks: 1, outcrops: 2 },
+      // SPEC-053 §4.3 (*initial tuning*): four orchards of one tree on a 7 m
+      // lattice — rows no forest grows.
+      features: { caves: 1, wrecks: 1, outcrops: 2, orchards: { count: 4, rows: 5, cols: 7, spacing: 7 } },
       // Eden is empty until the beacon calls them: everything that fights here
       // arrives with `eden_final` during `c6_m2` (§4.5).
       spawn: [],

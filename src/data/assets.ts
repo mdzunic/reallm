@@ -289,6 +289,9 @@ type SurfaceBiome = 'desert' | 'ice' | 'jungle' | 'volcanic' | 'hive' | 'tempera
  * `props.py` (PLAN R7). Loaded lazily by `SurfaceScene.onEnter`, never at boot
  * — the boot e2e suites delay every manifest request, so boot stays five
  * files. Tables may be empty for a biome whose drop has not landed.
+ *
+ * SPEC-053 §4.1, §4.8: each biome also loads its two `_c` pieces (SPEC-052's
+ * dressing, and on Thessaly and Eden a third tree) and its `landmark_<biome>`.
  */
 export const SURFACE_ASSETS = {
   desert: {
@@ -297,6 +300,9 @@ export const SURFACE_ASSETS = {
       desert_rock_b: 'assets/models/props/desert_rock_b.glb',
       desert_ruin_a: 'assets/models/props/desert_ruin_a.glb',
       desert_ruin_b: 'assets/models/props/desert_ruin_b.glb',
+      desert_rock_c: 'assets/models/props/desert_rock_c.glb',
+      desert_ruin_c: 'assets/models/props/desert_ruin_c.glb',
+      landmark_desert: 'assets/models/props/landmark_desert.glb',
     },
     textures: {
       sand_albedo: { url: 'assets/textures/ground/sand_albedo.webp', kind: 'color' },
@@ -311,6 +317,9 @@ export const SURFACE_ASSETS = {
       ice_rock_b: 'assets/models/props/ice_rock_b.glb',
       ice_spire_a: 'assets/models/props/ice_spire_a.glb',
       ice_spire_b: 'assets/models/props/ice_spire_b.glb',
+      ice_rock_c: 'assets/models/props/ice_rock_c.glb',
+      ice_spire_c: 'assets/models/props/ice_spire_c.glb',
+      landmark_ice: 'assets/models/props/landmark_ice.glb',
     },
     textures: {
       snow_albedo: { url: 'assets/textures/ground/snow_albedo.webp', kind: 'color' },
@@ -325,6 +334,9 @@ export const SURFACE_ASSETS = {
       jungle_tree_b: 'assets/models/props/jungle_tree_b.glb',
       jungle_ruin_a: 'assets/models/props/jungle_ruin_a.glb',
       jungle_ruin_b: 'assets/models/props/jungle_ruin_b.glb',
+      jungle_tree_c: 'assets/models/props/jungle_tree_c.glb',
+      jungle_ruin_c: 'assets/models/props/jungle_ruin_c.glb',
+      landmark_jungle: 'assets/models/props/landmark_jungle.glb',
     },
     textures: {
       moss_albedo: { url: 'assets/textures/ground/moss_albedo.webp', kind: 'color' },
@@ -339,6 +351,9 @@ export const SURFACE_ASSETS = {
       volcanic_rock_b: 'assets/models/props/volcanic_rock_b.glb',
       volcanic_vent_a: 'assets/models/props/volcanic_vent_a.glb',
       volcanic_vent_b: 'assets/models/props/volcanic_vent_b.glb',
+      volcanic_rock_c: 'assets/models/props/volcanic_rock_c.glb',
+      volcanic_vent_c: 'assets/models/props/volcanic_vent_c.glb',
+      landmark_volcanic: 'assets/models/props/landmark_volcanic.glb',
     },
     textures: {
       basalt_albedo: { url: 'assets/textures/ground/basalt_albedo.webp', kind: 'color' },
@@ -353,6 +368,9 @@ export const SURFACE_ASSETS = {
       hive_spire_b: 'assets/models/props/hive_spire_b.glb',
       hive_rock_a: 'assets/models/props/hive_rock_a.glb',
       hive_rock_b: 'assets/models/props/hive_rock_b.glb',
+      hive_spire_c: 'assets/models/props/hive_spire_c.glb',
+      hive_rock_c: 'assets/models/props/hive_rock_c.glb',
+      landmark_hive: 'assets/models/props/landmark_hive.glb',
     },
     textures: {
       chitin_albedo: { url: 'assets/textures/ground/chitin_albedo.webp', kind: 'color' },
@@ -367,6 +385,10 @@ export const SURFACE_ASSETS = {
       temperate_tree_b: 'assets/models/props/temperate_tree_b.glb',
       temperate_rock_a: 'assets/models/props/temperate_rock_a.glb',
       temperate_rock_b: 'assets/models/props/temperate_rock_b.glb',
+      // SPEC-053 §4.9: `temperate_tree_c` is `ORCHARD_MODEL` — only orchards draw it.
+      temperate_tree_c: 'assets/models/props/temperate_tree_c.glb',
+      temperate_rock_c: 'assets/models/props/temperate_rock_c.glb',
+      landmark_temperate: 'assets/models/props/landmark_temperate.glb',
     },
     textures: {
       grass_albedo: { url: 'assets/textures/ground/grass_albedo.webp', kind: 'color' },
@@ -395,7 +417,15 @@ export const SURFACE_SHARED_ASSETS = {
     /** The escort probe (PLAN R8-1): a centred 1 m drone, lens toward +Z. */
     probe: 'assets/models/probe.glb',
   },
-  textures: {},
+  textures: {
+    /**
+     * SPEC-053 §4.1: SPEC-052's leaf-and-grass atlas — 4 × 4 cells of 128 px,
+     * row-major from the top-left — the trees' map and every ground clump's.
+     */
+    foliage_atlas: { url: 'assets/textures/foliage/atlas.webp', kind: 'color' },
+    /** SPEC-053 §4.6: the terrain's 1.2 m micro normal, OpenGL convention — data, not colour. */
+    ground_detail: { url: 'assets/textures/ground/detail_nr.webp', kind: 'data' },
+  },
 } as const;
 
 /** Every prop model id across the biome tables — the `PROP_MODELS` universe. */
@@ -413,6 +443,7 @@ export type TextureId =
   | keyof typeof ASSETS.textures
   | keyof typeof FLIGHT_ASSETS.textures
   | keyof typeof HUB_ASSETS.textures
+  | keyof typeof SURFACE_SHARED_ASSETS.textures
   | SurfaceTextureId;
 
 /** Every key of `ASSETS.audio` — a sprite bank or a music track (§2.4). */

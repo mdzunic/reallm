@@ -14,7 +14,10 @@
 //    facade's `sync()` — no module outside the two owners calls `readPixels`.
 // 2. Nothing under `src/` builds a `MeshLambertMaterial` any more (§4.7):
 //    Lambert has no roughness, no metalness and no environment response, so one
-//    left behind would be a matte hole in an otherwise PBR scene.
+//    left behind would be a matte hole in an otherwise PBR scene. SPEC-053 §4.1
+//    makes one deliberate exception: the foliage seam draws its alpha-tested
+//    leaves and grass on Lambert (`#foliageMaterial` and the cover material),
+//    both built in `views/Foliage.ts` — and only there.
 //
 // Only *code* counts: a comment naming the banned shape — this file's own prose
 // included — must not trip the rule, so the scanner blanks comments first, the
@@ -28,6 +31,8 @@ const RENDER_OWNERS = /(?:^|\/)src\/core\/(?:Renderer|PostChain)\.ts$/;
 /** A draw on the raw context, or a second renderer — never a facade call. */
 const RAW_RENDER = [/\bgl\s*\.\s*render\s*\(/, /\.\s*gl\s*\.\s*render\s*\(/, /new\s+WebGLRenderer\b/];
 const LAMBERT = /\bMeshLambertMaterial\b/;
+/** SPEC-053 §4.1: the one module that builds Lambert — the foliage seam's two materials. */
+const LAMBERT_OWNER = /(?:^|\/)src\/views\/Foliage\.ts$/;
 /** A read-back from the GPU — raw, or through three's render-target helpers. */
 const PIXEL_READ = [/\breadPixels\s*\(/, /\breadRenderTargetPixels(?:Async)?\s*\(/];
 
@@ -53,10 +58,10 @@ export function pixelReadOffenders(files: Record<string, string>): string[] {
     .map(([file]) => file);
 }
 
-/** Files that still build a Lambert material. */
+/** Files that still build a Lambert material, outside SPEC-053's foliage seam. */
 export function lambertOffenders(files: Record<string, string>): string[] {
   return Object.entries(files)
-    .filter(([, source]) => LAMBERT.test(stripComments(source)))
+    .filter(([file, source]) => !LAMBERT_OWNER.test(file) && LAMBERT.test(stripComments(source)))
     .map(([file]) => file);
 }
 
@@ -131,16 +136,21 @@ describe('pixel reads (SPEC-040 §4.1, AC-3)', () => {
 });
 
 describe('materials (SPEC-017 §4.7, AC-51)', () => {
-  it('nothing under src/ builds a Lambert material', () => {
+  it('nothing under src/ builds a Lambert material but the foliage seam (SPEC-053 §4.1)', () => {
     expect(lambertOffenders(SRC)).toEqual([]);
+    // The exception is real and confined: the seam's two factories, in its one module.
+    const foliage = Object.entries(SRC).find(([file]) => LAMBERT_OWNER.test(file))?.[1] ?? '';
+    expect(stripComments(foliage).match(/new THREE\.MeshLambertMaterial\(/g)).toHaveLength(2);
   });
 
-  it('reports one wherever it appears, and ignores a comment about it', () => {
+  it('reports one wherever it appears outside the seam, and ignores a comment about it', () => {
     expect(
       lambertOffenders({
         'src/views/SurfaceView.ts': 'const m = new THREE.MeshLambertMaterial();',
         'src/views/ProceduralMeshes.ts': '// MeshLambertMaterial was replaced in SPEC-017\nconst m = new THREE.MeshStandardMaterial();',
+        'src/views/GroundCover.ts': 'const m: THREE.MeshLambertMaterial = material;',
+        'src/views/Foliage.ts': 'const material = new THREE.MeshLambertMaterial({ map: atlas });',
       }),
-    ).toEqual(['src/views/SurfaceView.ts']);
+    ).toEqual(['src/views/SurfaceView.ts', 'src/views/GroundCover.ts']);
   });
 });

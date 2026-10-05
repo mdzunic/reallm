@@ -1545,3 +1545,567 @@ describe('SPEC-046 — props in their own colours, both variants, only what is o
     expect(named).toBe(3);
   });
 });
+
+// ---------------------------------------------------------------- SPEC-053
+
+import { CANOPY_FADE, TRUNK_UNIT_RADIUS, WIND_SWAY, foliageUniforms } from '@/views/Foliage';
+import { CONTACT_OPACITY } from '@/views/SurfaceView';
+
+describe('SPEC-053 — trees through the foliage seam, the canopy fade, the cut-out and the ground', () => {
+  /** A strip of `n` indexed triangle pairs with atlas uvs and white COLOR_0. */
+  function strip(n: number, y: number): THREE.BufferGeometry {
+    const geometry = new THREE.PlaneGeometry(1, 1, n, 1).translate(0, y, 0);
+    const count = (geometry.getAttribute('position') as THREE.BufferAttribute).count;
+    geometry.setAttribute('color', new THREE.BufferAttribute(new Float32Array(count * 3).fill(1), 3));
+    return geometry;
+  }
+
+  /** SPEC-052's contract with `leaves` triangle pairs of Leaf (so models tell apart), LOD1 two pairs, and a Glow when asked. */
+  function tree(leaves: number, glow = false): THREE.Group {
+    const group = new THREE.Group();
+    const foliage = new THREE.MeshStandardMaterial({ name: 'Foliage', vertexColors: true });
+    const parts: [string, THREE.BufferGeometry, THREE.Material][] = [
+      ['Bark', strip(2, 0.5), foliage],
+      ['Leaf', strip(leaves, 1.8), foliage],
+      ['Bark_LOD1', strip(1, 0.5), foliage],
+      ['Leaf_LOD1', strip(1, 1.8), foliage],
+    ];
+    if (glow) parts.push(['Glow', new THREE.BoxGeometry(0.1, 0.1, 0.1).translate(0, 1.5, 0), new THREE.MeshStandardMaterial({ name: 'Glow' })]);
+    for (const [name, geometry, material] of parts) {
+      const mesh = new THREE.Mesh(geometry, material);
+      mesh.name = name;
+      group.add(mesh);
+    }
+    return group;
+  }
+
+  /** A landmark in metres: a 4 m body, 5 m tall. */
+  function landmark(): THREE.Group {
+    const group = new THREE.Group();
+    group.add(new THREE.Mesh(new THREE.BoxGeometry(4, 5, 4).translate(0, 2.5, 0), new THREE.MeshStandardMaterial({ name: 'Body' })));
+    return group;
+  }
+
+  const ATLAS = new THREE.Texture();
+  /** Leaf pairs per model id, so each tree's mesh tells which model it draws. */
+  const LEAVES: Record<string, number> = {
+    jungle_tree_a: 10,
+    jungle_tree_b: 11,
+    jungle_tree_c: 12,
+    temperate_tree_a: 13,
+    temperate_tree_b: 14,
+    temperate_tree_c: 15,
+  };
+
+  function assets(models: readonly string[], atlas = true): Assets {
+    return {
+      loaded: false,
+      hasModel: (id: string) => models.includes(id),
+      model: (id: string) => {
+        if (id.startsWith('landmark_')) return landmark();
+        const leaves = LEAVES[id];
+        if (leaves === undefined) throw new Error(`no ${id}`);
+        return tree(leaves, id.startsWith('jungle_tree_'));
+      },
+      hasTexture: (id: string) => atlas && id === 'foliage_atlas',
+      texture: () => ATLAS,
+    } as unknown as Assets;
+  }
+
+  const JUNGLE = ['jungle_tree_a', 'jungle_tree_b', 'jungle_tree_c'];
+  const TEMPERATE = ['temperate_tree_a', 'temperate_tree_b', 'temperate_tree_c'];
+
+  const GROVE: ViewLayout = {
+    ...LAYOUT,
+    obstacles: [
+      { x: 10, z: 10, radius: 0.7, kind: 'tree', feature: 'grove' },
+      { x: 14, z: -4, radius: 0.5, kind: 'tree' },
+      { x: 4, z: 4, radius: 1.2, kind: 'rock' },
+    ],
+    props: [{ x: -8, z: 8, rot: 0.2, scale: 1, kind: 'tree_small' }],
+  };
+
+  const pairs = (geometry: THREE.BufferGeometry): number => (geometry.index?.count ?? geometry.getAttribute('position').count) / 3;
+
+  /** The scene's fixed rig around `target`, and its frustum. */
+  function rig(target: { x: number; z: number }, distance = 22, fov = 40, aspect = 16 / 9): THREE.Frustum {
+    const pitch = (55 * Math.PI) / 180;
+    const yaw = (45 * Math.PI) / 180;
+    const camera = new THREE.PerspectiveCamera(fov, aspect, 1, 130);
+    camera.position.set(
+      target.x + distance * Math.cos(pitch) * Math.sin(yaw),
+      distance * Math.sin(pitch),
+      target.z + distance * Math.cos(pitch) * Math.cos(yaw),
+    );
+    camera.lookAt(target.x, 0, target.z);
+    camera.updateMatrixWorld();
+    return new THREE.Frustum().setFromProjectionMatrix(new THREE.Matrix4().multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse));
+  }
+
+  /** Every tree mesh — the instanced meshes on `#foliageMaterial`. */
+  function trees(scene: THREE.Scene): THREE.InstancedMesh[] {
+    const out: THREE.InstancedMesh[] = [];
+    scene.traverse((node) => {
+      const mesh = node as THREE.InstancedMesh;
+      if (mesh.isInstancedMesh === true && (mesh.material as THREE.Material).type === 'MeshLambertMaterial' && mesh.name.startsWith('tree:')) out.push(mesh);
+    });
+    return out;
+  }
+
+  /** The instance at (x, z) among `meshes`: its mesh, slot and matrix. */
+  function at(meshes: THREE.InstancedMesh[], x: number, z: number): { mesh: THREE.InstancedMesh; slot: number; matrix: THREE.Matrix4 } {
+    const matrix = new THREE.Matrix4();
+    const position = new THREE.Vector3();
+    for (const mesh of meshes) {
+      for (let slot = 0; slot < mesh.count; slot++) {
+        mesh.getMatrixAt(slot, matrix);
+        position.setFromMatrixPosition(matrix);
+        if (Math.abs(position.x - x) < 1e-4 && Math.abs(position.z - z) < 1e-4) return { mesh, slot, matrix };
+      }
+    }
+    throw new Error(`no tree at ${x}, ${z}`);
+  }
+
+  function frameWith(pool: Pool<EnemyEntity>, x: number, z: number): SurfaceFrame {
+    const f = frame(pool);
+    f.player = makePlayer(x, z, 100);
+    return f;
+  }
+
+  it('draws each tree at radius / 0.14 and a small tree at prop.scale × 0.8, on #foliageMaterial (§4.1, §4.2)', () => {
+    expect(TRUNK_UNIT_RADIUS).toBe(0.14);
+    const scene = new THREE.Scene();
+    const view = new SurfaceView(scene, GROVE, PLANETS.thessaly, QUALITY.medium, assets(JUNGLE));
+    expect(view.treeSource).toBe('glb');
+    expect(view.propSource).toBe('glb');
+    const meshes = trees(scene);
+    expect(meshes.length).toBeGreaterThan(0);
+    const scale = new THREE.Vector3();
+    at(meshes, 10, 10).matrix.decompose(new THREE.Vector3(), new THREE.Quaternion(), scale);
+    expect(scale.x).toBeCloseTo(0.7 / 0.14, 5);
+    at(meshes, 14, -4).matrix.decompose(new THREE.Vector3(), new THREE.Quaternion(), scale);
+    expect(scale.x).toBeCloseTo(0.5 / 0.14, 5);
+    at(meshes, -8, 8).matrix.decompose(new THREE.Vector3(), new THREE.Quaternion(), scale);
+    expect(scale.x).toBeCloseTo(0.8, 5);
+    // One mesh per variant; the material is the atlas's Lambert, alpha-tested and opaque.
+    const material = meshes[0]?.material as THREE.MeshLambertMaterial;
+    expect(meshes.every((mesh) => mesh.material === material)).toBe(true);
+    expect(material.map).toBe(ATLAS);
+    expect(material.transparent).toBe(false);
+    view.dispose();
+  });
+
+  it('stays procedural while the atlas is missing, and swaps to the seam when it lands (53-a, 53-i)', () => {
+    const scene = new THREE.Scene();
+    const early = assets(JUNGLE, false);
+    const view = new SurfaceView(scene, GROVE, PLANETS.thessaly, QUALITY.medium, early);
+    expect(view.treeSource).toBe('procedural');
+    expect(trees(scene)).toHaveLength(0);
+    // A tree contract does not hold propSource back (SPEC-046 46-c).
+    expect(view.propSource).toBe('glb');
+    const occluders = view.occluderProps;
+    const before = occluders.map((o) => `${o.x},${o.z}`);
+    view.setPropModels(assets(JUNGLE));
+    expect(view.treeSource).toBe('glb');
+    expect(trees(scene).length).toBeGreaterThan(0);
+    // SPEC-035's list keeps its length and order (§4.1).
+    expect(view.occluderProps).toBe(occluders);
+    expect(view.occluderProps.map((o) => `${o.x},${o.z}`)).toEqual(before);
+    view.dispose();
+  });
+
+  it('draws every orchard tree as ORCHARD_MODEL at one scale and yaw 0 (§4.9)', () => {
+    const orchard: ViewLayout = {
+      ...LAYOUT,
+      obstacles: [
+        { x: 20, z: 20, radius: 0.5, kind: 'tree', feature: 'orchard' },
+        { x: 27, z: 20, radius: 0.5, kind: 'tree', feature: 'orchard' },
+        { x: 34, z: 20, radius: 0.5, kind: 'tree', feature: 'orchard' },
+        { x: -20, z: -20, radius: 0.8, kind: 'tree' },
+      ],
+      props: [],
+    };
+    const scene = new THREE.Scene();
+    const view = new SurfaceView(scene, orchard, PLANETS.eden, QUALITY.medium, assets(TEMPERATE));
+    const meshes = trees(scene);
+    const rows = [20, 27, 34].map((x) => at(meshes, x, 20));
+    const mesh = rows[0]?.mesh as THREE.InstancedMesh;
+    expect(rows.every((row) => row.mesh === mesh)).toBe(true);
+    // temperate_tree_c's 15 leaf pairs + 2 bark pairs.
+    expect(pairs(mesh.geometry)).toBe((15 + 2) * 2);
+    const quaternion = new THREE.Quaternion();
+    const scale = new THREE.Vector3();
+    for (const row of rows) {
+      row.matrix.decompose(new THREE.Vector3(), quaternion, scale);
+      expect(scale.x).toBeCloseTo(0.5 / 0.14, 6);
+      expect(quaternion.angleTo(new THREE.Quaternion())).toBeCloseTo(0, 6);
+    }
+    // The wild tree is not the orchard's.
+    expect(at(meshes, -20, -20).mesh).not.toBe(mesh);
+    view.dispose();
+  });
+
+  it('draws lod1 on low and the body on medium and high, swapped in place; glows are LOD0 (§4.1, 53-b)', () => {
+    const scene = new THREE.Scene();
+    const view = new SurfaceView(scene, GROVE, PLANETS.thessaly, QUALITY.low, assets(JUNGLE));
+    expect(view.treeLod).toBe(1);
+    const meshes = trees(scene);
+    // LOD1: Bark_LOD1 + Leaf_LOD1, one pair each.
+    for (const mesh of meshes) expect(pairs(mesh.geometry)).toBe(2 * 2);
+    const glows = (): THREE.InstancedMesh[] => {
+      const out: THREE.InstancedMesh[] = [];
+      scene.traverse((node) => {
+        const mesh = node as THREE.InstancedMesh;
+        if (mesh.isInstancedMesh === true && mesh.name.startsWith('tree-glow:') && mesh.visible && mesh.count > 0) out.push(mesh);
+      });
+      return out;
+    };
+    // jungle_tree_a's pods are LOD0's: none on low.
+    const glowCount = glows().length;
+    expect(glowCount).toBe(0);
+    view.applyQuality(QUALITY.medium);
+    expect(view.treeLod).toBe(0);
+    const after = trees(scene);
+    expect(after).toEqual(meshes); // the same meshes, re-pointed
+    for (const mesh of after) expect(pairs(mesh.geometry)).toBeGreaterThan(2 * 2);
+    expect(after.every((mesh) => mesh.geometry.getAttribute('instanceFade') !== undefined)).toBe(true);
+    expect(glows().length).toBeGreaterThan(glowCount);
+    view.applyQuality(QUALITY.low);
+    for (const mesh of trees(scene)) expect(pairs(mesh.geometry)).toBe(2 * 2);
+    view.dispose();
+  });
+
+  it('thins a canopy holding an enemy within 25 m to 0.35 over 0.2 s, and back (E82)', () => {
+    expect(CANOPY_FADE).toBe(0.35);
+    const scene = new THREE.Scene();
+    const view = new SurfaceView(scene, GROVE, PLANETS.thessaly, QUALITY.medium, assets(JUNGLE));
+    const pool = new Pool<EnemyEntity>(() => makeEnemy());
+    const enemy = spawn(pool, SKITTER, { x: 11, z: 11 }); // inside the 5 m canopy at (10, 10)
+    const fadeOf = (): number => {
+      const { mesh, slot } = at(trees(scene), 10, 10);
+      return (mesh.geometry.getAttribute('instanceFade') as THREE.BufferAttribute).getX(slot);
+    };
+    const step = (dt: number): void => {
+      const f = frameWith(pool, 0, 0);
+      f.dt = dt;
+      view.sync(f);
+    };
+    step(0.05);
+    expect(view.canopyHolders).toBe(1);
+    expect(view.canopyFaded).toBeGreaterThanOrEqual(view.canopyHolders);
+    expect(fadeOf()).toBeLessThan(1);
+    expect(fadeOf()).toBeGreaterThan(CANOPY_FADE);
+    for (let i = 0; i < 3; i++) step(0.05);
+    expect(fadeOf()).toBeCloseTo(CANOPY_FADE, 6);
+    // The far tree, holding nothing, never moved.
+    const far = at(trees(scene), 14, -4);
+    expect((far.mesh.geometry.getAttribute('instanceFade') as THREE.BufferAttribute).getX(far.slot)).toBe(1);
+    // The enemy dies: back to 1 over 0.2 s, once the next 0.1 s query has seen it go.
+    enemy.state = 'dead';
+    for (let i = 0; i < 6; i++) step(0.05);
+    expect(view.canopyHolders).toBe(0);
+    expect(fadeOf()).toBeCloseTo(1, 6);
+    expect(view.canopyFaded).toBe(0);
+    // Out of range: the same enemy alive again, the player 40 m away, holds nothing.
+    enemy.state = 'chase';
+    for (let i = 0; i < 4; i++) {
+      const f = frameWith(pool, 40, 40);
+      f.dt = 0.05;
+      view.sync(f);
+    }
+    expect(view.canopyHolders).toBe(0);
+    view.dispose();
+  });
+
+  it('a pickup under a canopy holds it too; a hit-stop frame asks nothing it cannot step', () => {
+    const scene = new THREE.Scene();
+    const view = new SurfaceView(scene, GROVE, PLANETS.thessaly, QUALITY.medium, assets(JUNGLE));
+    const f = frameWith(new Pool<EnemyEntity>(() => makeEnemy()), 0, 0);
+    const pickup = f.pickups.alloc();
+    Object.assign(pickup, { kind: 'resource', x: 10, z: 9, seed: 1, resource: 'oil' });
+    f.dt = 0;
+    view.sync(f);
+    expect(view.canopyHolders).toBe(0); // a frozen frame does not query
+    f.dt = 0.02;
+    view.sync(f);
+    expect(view.canopyHolders).toBe(1);
+    expect(view.canopyFaded).toBe(1);
+    view.dispose();
+  });
+
+  it('SPEC-035’s fade leaves foliage-drawn trees alone and still fades the rock (§4.1, 53-d)', () => {
+    const scene = new THREE.Scene();
+    const view = new SurfaceView(scene, GROVE, PLANETS.thessaly, QUALITY.medium, assets(JUNGLE));
+    const flags = new Uint8Array(view.occluderProps.length).fill(1);
+    view.setOccluding(flags, 0.3);
+    const f = frame(new Pool<EnemyEntity>(() => makeEnemy()));
+    f.dt = 1;
+    view.sync(f);
+    const fadeAt = (x: number, z: number): number => {
+      const { mesh, slot } = at(trees(scene), x, z);
+      return (mesh.geometry.getAttribute('instanceFade') as THREE.BufferAttribute).getX(slot);
+    };
+    expect(fadeAt(10, 10)).toBe(1);
+    expect(fadeAt(14, -4)).toBe(1);
+    // Only the rock counts as faded; the trees' candidates are not this fade's.
+    expect(view.fadedOccluders).toBe(1);
+    view.occluderProps.forEach((_, i) => {
+      const prop = view.occluderProps[i] as (typeof view.occluderProps)[number];
+      const isTree = GROVE.obstacles.some((o) => o.kind === 'tree' && o.x === prop.x && o.z === prop.z) || (prop.x === -8 && prop.z === 8);
+      expect(view.occluderFades(i), `${prop.x},${prop.z}`).toBe(!isTree);
+    });
+    view.dispose();
+  });
+
+  it('writes the cut-out for a living player with a screen, and (0, 0, 0, 0) without either (§4.1.2, 53-n)', () => {
+    const scene = new THREE.Scene();
+    const view = new SurfaceView(scene, GROVE, PLANETS.thessaly, QUALITY.medium, assets(JUNGLE));
+    const camera = new THREE.PerspectiveCamera(50, 16 / 9, 0.1, 200);
+    camera.position.set(12, 18, 12);
+    camera.lookAt(2, 0, -2);
+    camera.updateMatrixWorld();
+    const uniforms = foliageUniforms((trees(scene)[0] as THREE.InstancedMesh).material as THREE.Material);
+    const f = frame(new Pool<EnemyEntity>(() => makeEnemy()));
+    f.screen = { camera, width: 1600, height: 900 };
+    view.sync(f);
+    const cut = uniforms.uCutout.value;
+    expect(cut.w).toBeGreaterThan(0);
+    expect(cut.w).toBeLessThan(1);
+    expect(cut.z).toBeGreaterThan(0);
+    // Dead: off.
+    f.player.alive = false;
+    view.sync(f);
+    expect(cut.toArray()).toEqual([0, 0, 0, 0]);
+    // Alive, but no screen: off.
+    f.player.alive = true;
+    delete f.screen;
+    view.sync(f);
+    expect(cut.toArray()).toEqual([0, 0, 0, 0]);
+    view.dispose();
+  });
+
+  it('sways the trees and the cover by WIND_SWAY × the look’s wind, and not at all under reduce motion (§4.1, 53-c)', () => {
+    const scene = new THREE.Scene();
+    const view = new SurfaceView(scene, GROVE, PLANETS.thessaly, QUALITY.medium, assets(JUNGLE));
+    const uniforms = foliageUniforms((trees(scene)[0] as THREE.InstancedMesh).material as THREE.Material);
+    const f = frame(new Pool<EnemyEntity>(() => makeEnemy()));
+    view.sync(f);
+    expect(uniforms.uWind.value).toBeCloseTo(WIND_SWAY * (PLANETS.thessaly.surface.look.foliage?.wind ?? 0), 9);
+    expect(view.wind).toBe(uniforms.uWind.value);
+    expect(uniforms.uTime.value).toBe(f.time);
+    view.reduceMotion = true;
+    view.sync(f);
+    expect(uniforms.uWind.value).toBe(0);
+    expect(view.wind).toBe(0);
+    view.dispose();
+  });
+
+  it('draws a landmark model at scale 1 with its hashed yaw, its occluder as tall as the model (§4.8)', () => {
+    const layout: ViewLayout = {
+      ...LAYOUT,
+      pois: [...LAYOUT.pois, { kind: 'landmark', x: -20, z: 15, radius: 6, poi: 'overgrown_ruin', instance: 2 }],
+      obstacles: [],
+      props: [],
+    };
+    for (const loaded of [true, false]) {
+      const scene = new THREE.Scene();
+      const view = new SurfaceView(scene, layout, PLANETS.thessaly, QUALITY.medium, assets(loaded ? ['landmark_jungle'] : []));
+      let mesh: THREE.Mesh | null = null;
+      scene.traverse((node) => {
+        if (node.name === 'poi:landmark') mesh = node as THREE.Mesh;
+      });
+      const landmarkMesh = mesh as unknown as THREE.Mesh;
+      if (loaded) {
+        expect(landmarkMesh.scale.toArray()).toEqual([1, 1, 1]);
+        expect(landmarkMesh.rotation.y).toBeCloseTo(hash01(hash32(layout.hash, 'landmark'), 2) * Math.PI * 2, 9);
+        expect(view.occluderProps[0]?.height).toBeCloseTo(5, 6);
+      } else {
+        expect(landmarkMesh.scale.x).toBeCloseTo(0.4 * 6, 6); // SPEC-046's body until it lands
+        view.setPropModels(assets(['landmark_jungle']));
+        expect(landmarkMesh.scale.toArray()).toEqual([1, 1, 1]);
+        expect(view.occluderProps[0]?.height).toBeCloseTo(5, 6);
+      }
+      view.dispose();
+    }
+  });
+
+  it('lays one culled contact shadow under every obstacle, tree and landmark, at 0.28 (§4.7)', () => {
+    expect(CONTACT_OPACITY).toBe(0.28);
+    const layout: ViewLayout = {
+      ...GROVE,
+      halfSize: 120,
+      pois: [...LAYOUT.pois, { kind: 'landmark', x: -20, z: 15, radius: 6 }],
+      obstacles: [...GROVE.obstacles, { x: 90, z: 90, radius: 2, kind: 'rock' }, { x: 0, z: 30, radius: 1, kind: 'cave_wall' }],
+    };
+    const scene = new THREE.Scene();
+    const view = new SurfaceView(scene, layout, PLANETS.thessaly, QUALITY.medium, assets(JUNGLE));
+    let shadows: THREE.InstancedMesh | null = null;
+    scene.traverse((node) => {
+      if (node.name === 'contact-shadows') shadows = node as THREE.InstancedMesh;
+    });
+    const mesh = shadows as unknown as THREE.InstancedMesh;
+    const material = mesh.material as THREE.MeshBasicMaterial;
+    expect(material.opacity).toBe(0.28);
+    expect(material.transparent).toBe(true);
+    expect(material.depthWrite).toBe(false);
+    expect(mesh.renderOrder).toBe(1);
+    // Two trees, two rocks and the landmark — the cave wall is collision only.
+    expect(mesh.count).toBe(5);
+    const radii = new Map<string, number>();
+    const matrix = new THREE.Matrix4();
+    const position = new THREE.Vector3();
+    const scale = new THREE.Vector3();
+    for (let i = 0; i < mesh.count; i++) {
+      mesh.getMatrixAt(i, matrix);
+      matrix.decompose(position, new THREE.Quaternion(), scale);
+      radii.set(`${Math.round(position.x)},${Math.round(position.z)}`, scale.x);
+      expect(position.y).toBeCloseTo(view.field.heightAt(position.x, position.z) + 0.05, 5);
+    }
+    expect(radii.get('10,10')).toBeCloseTo((0.9 * 0.7) / 0.14, 5);
+    expect(radii.get('4,4')).toBeCloseTo(1.4 * 1.2, 5);
+    expect(radii.get('-20,15')).toBeCloseTo(1.2 * 4, 5);
+    // It culls: looking at the far rock draws that one and not the grove.
+    view.setView(90, 90, 22, 40, 16 / 9, rig({ x: 90, z: 90 }));
+    expect(mesh.count).toBe(1);
+    view.dispose();
+  });
+
+  it('foliageTris and foliageDraws add up the trees, their glows, the undergrowth, the cover and the shadows (§4.10)', () => {
+    const scene = new THREE.Scene();
+    const view = new SurfaceView(scene, { ...GROVE, halfSize: 80 }, PLANETS.thessaly, QUALITY.medium, assets(JUNGLE));
+    view.setView(8, 4, 22, 40, 16 / 9, rig({ x: 8, z: 4 }));
+    let triangles = 0;
+    let draws = 0;
+    scene.traverse((node) => {
+      const mesh = node as THREE.InstancedMesh;
+      if (mesh.isInstancedMesh !== true || !mesh.visible || mesh.count === 0) return;
+      const foliage =
+        mesh.name.startsWith('tree:') ||
+        mesh.name.startsWith('tree-glow:') ||
+        mesh.name === 'undergrowth' ||
+        mesh.name === 'contact-shadows' ||
+        mesh.name === 'ground-cover';
+      if (!foliage) return;
+      triangles += mesh.count * pairs(mesh.geometry);
+      draws++;
+    });
+    expect(view.coverDrawn).toBeGreaterThan(0);
+    expect(view.foliageTris).toBe(triangles);
+    expect(view.foliageDraws).toBe(draws);
+    view.dispose();
+  });
+
+  it('builds the undergrowth on its atlas cells, and half of it on low (§4.4)', () => {
+    const spec = PLANETS.thessaly.surface.look.undergrowth;
+    expect(spec).toBeDefined();
+    const count = (quality: QualitySettings): { total: number; cells: Set<number> } => {
+      const scene = new THREE.Scene();
+      const view = new SurfaceView(scene, { ...GROVE, halfSize: 80 }, PLANETS.thessaly, quality, assets(JUNGLE));
+      let mesh: THREE.InstancedMesh | null = null;
+      scene.traverse((node) => {
+        if (node.name === 'undergrowth') mesh = node as THREE.InstancedMesh;
+      });
+      const undergrowth = mesh as unknown as THREE.InstancedMesh;
+      expect(pairs(undergrowth.geometry)).toBe(6); // three crossed quads
+      const cells = new Set<number>();
+      const attribute = undergrowth.geometry.getAttribute('uvCell') as THREE.BufferAttribute;
+      for (let i = 0; i < undergrowth.count; i++) cells.add(attribute.getX(i));
+      // Never inside an obstacle + 0.4, a POI + 1, a node + 1.5 or the pad's 15 m; 1–2 m across.
+      const matrix = new THREE.Matrix4();
+      const position = new THREE.Vector3();
+      const scale = new THREE.Vector3();
+      for (let i = 0; i < undergrowth.count; i++) {
+        undergrowth.getMatrixAt(i, matrix);
+        matrix.decompose(position, new THREE.Quaternion(), scale);
+        const { x, z } = position;
+        expect(Math.hypot(x, z)).toBeGreaterThanOrEqual(15);
+        for (const o of GROVE.obstacles) expect(Math.hypot(x - o.x, z - o.z)).toBeGreaterThanOrEqual(o.radius + 0.4);
+        for (const poi of GROVE.pois) expect(Math.hypot(x - poi.x, z - poi.z)).toBeGreaterThanOrEqual(poi.radius + 1);
+        for (const node of GROVE.nodes) expect(Math.hypot(x - node.x, z - node.z)).toBeGreaterThanOrEqual(1.5);
+        expect(scale.x * 1.25).toBeGreaterThanOrEqual(1 - 1e-6);
+        expect(scale.x * 1.25).toBeLessThanOrEqual(2 + 1e-6);
+        expect(position.y).toBeCloseTo(view.field.heightAt(x, z), 5);
+      }
+      view.dispose();
+      return { total: undergrowth.count, cells };
+    };
+    const medium = count(QUALITY.medium);
+    const low = count(QUALITY.low);
+    expect(medium.total).toBeGreaterThan(20);
+    const allowed: readonly number[] = spec?.cells ?? [];
+    expect([...medium.cells].every((cell) => allowed.includes(cell))).toBe(true);
+    expect(Math.abs(low.total - medium.total / 2)).toBeLessThanOrEqual(medium.total * 0.15);
+  });
+
+  it('grows underPer1000m2 × canopy area of undergrowth under each tree, within 0.8 of its canopy (§4.4)', () => {
+    const base: PlanetDef = PLANETS.thessaly;
+    const planet: PlanetDef = {
+      ...base,
+      surface: { ...base.surface, look: { ...base.surface.look, undergrowth: { cells: [4], underPer1000m2: 1000, openPer1000m2: 0 } } },
+    };
+    const layout: ViewLayout = { ...LAYOUT, halfSize: 80, obstacles: [{ x: 40, z: -30, radius: 0.7, kind: 'tree' }], props: [] };
+    const scene = new THREE.Scene();
+    const view = new SurfaceView(scene, layout, planet, QUALITY.medium, assets(JUNGLE));
+    let mesh: THREE.InstancedMesh | null = null;
+    scene.traverse((node) => {
+      if (node.name === 'undergrowth') mesh = node as THREE.InstancedMesh;
+    });
+    const undergrowth = mesh as unknown as THREE.InstancedMesh;
+    const canopy = 0.7 / 0.14;
+    const area = Math.PI * canopy * canopy; // ≈ 78.5 m² → ≈ 79 candidates
+    // A few fall inside the trunk + 0.4 m and are dropped.
+    expect(undergrowth.count).toBeGreaterThan(0.85 * area);
+    expect(undergrowth.count).toBeLessThanOrEqual(Math.round(area));
+    const matrix = new THREE.Matrix4();
+    const at = new THREE.Vector3();
+    for (let i = 0; i < undergrowth.count; i++) {
+      undergrowth.getMatrixAt(i, matrix);
+      at.setFromMatrixPosition(matrix);
+      expect(Math.hypot(at.x - 40, at.z + 30)).toBeLessThanOrEqual(0.8 * canopy + 1e-6);
+    }
+    view.dispose();
+  });
+
+  it('a planet with no foliage builds no tree, undergrowth or grove layer; its cover follows its look (53-h)', () => {
+    const scene = new THREE.Scene();
+    const view = new SurfaceView(scene, LAYOUT, PLANETS.cinder4, QUALITY.medium, assets([]));
+    expect(trees(scene)).toHaveLength(0);
+    let undergrowth = false;
+    let cover = false;
+    scene.traverse((node) => {
+      if (node.name === 'undergrowth') undergrowth = true;
+      if (node.name === 'ground-cover') cover = true;
+    });
+    expect(undergrowth).toBe(false);
+    expect(cover).toBe(true); // Cinder-4's dry grass
+    expect(view.treeSource).toBe('procedural');
+    expect(view.seamAt).toBeNull();
+    view.dispose();
+  });
+
+  it('reports Eden’s seam at eden_ridge instance 0’s x, and rebuilds the terrain once when low and medium swap (§4.6, 53-b)', () => {
+    const layout: ViewLayout = {
+      ...LAYOUT,
+      pois: [...LAYOUT.pois, { kind: 'scan', x: 42.5, z: -30, radius: 8, poi: 'eden_ridge', instance: 0 }],
+    };
+    const scene = new THREE.Scene();
+    const view = new SurfaceView(scene, layout, PLANETS.eden, QUALITY.medium);
+    expect(view.seamAt).toBe(42.5);
+    const terrain = (): THREE.MeshStandardMaterial => {
+      let material: THREE.MeshStandardMaterial | null = null;
+      scene.traverse((node) => {
+        if (node.name === 'terrain') material = (node as THREE.Mesh).material as THREE.MeshStandardMaterial;
+      });
+      return material as unknown as THREE.MeshStandardMaterial;
+    };
+    const medium = terrain();
+    expect(medium.customProgramCacheKey()).toBe('terrain/2+detail+seam');
+    view.applyQuality(QUALITY.high);
+    expect(terrain()).toBe(medium); // high keeps the detail: nothing to rebuild
+    view.applyQuality(QUALITY.low);
+    const low = terrain();
+    expect(low).not.toBe(medium);
+    expect(low.customProgramCacheKey()).toBe('terrain/1+seam');
+    view.dispose();
+  });
+});

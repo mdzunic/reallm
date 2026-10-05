@@ -31,14 +31,18 @@ const PIN_SEED = 20121;
 const layoutFor = (planet: PlanetId, seed: number): Layout =>
   generateLayout(PLANETS[planet], new RngRoot(seed).layout(planet));
 
-/** Pinned per planet for the current data (§6 `deterministic`; SPEC-030 D-16). */
+/**
+ * Pinned per planet for the current data (§6 `deterministic`; SPEC-030 D-16).
+ * SPEC-053 §4.3 moved every pin once, deliberately: trunk radii, and the
+ * groves, orchards and clusters placed before the scattered obstacles.
+ */
 const PINNED: Record<PlanetId, number> = {
-  cinder4: 3559157477,
-  vetra: 1763254407,
-  thessaly: 2630545287,
-  ferrum: 957609825,
-  hive: 2917833905,
-  eden: 150940712,
+  cinder4: 4002393954,
+  vetra: 659373692,
+  thessaly: 2252960167,
+  ferrum: 2206317975,
+  hive: 587259144,
+  eden: 331058040,
 };
 
 describe('generateLayout — determinism (AC-1)', () => {
@@ -683,5 +687,297 @@ describe('SPEC-030 — repair, pins and the hash (AC-14, AC-16, AC-17)', () => {
     shelter.x -= 0.01;
     shelter.gapAngle += 0.01;
     expect(layoutHash(layout)).not.toBe(before);
+  });
+});
+
+// ---------------------------------------------------------------- SPEC-053
+
+import type { PlanetDef } from '@/data/index';
+import { ORCHARD_TRUNK_RADIUS, TRUNK_MAX, TRUNK_MIN, featurePieces, type LayoutFeature, type LayoutObstacle } from '@/systems/Layout';
+
+/** A planet with no groves, orchards or clusters: SPEC-030's counts alone. */
+function featureless(planet: PlanetId): PlanetDef {
+  const base: PlanetDef = PLANETS[planet];
+  const { caves, wrecks, outcrops } = base.surface.features;
+  return { ...base, surface: { ...base.surface, features: { caves, wrecks, outcrops } } };
+}
+
+/** The obstacles placed before the first feature piece: shelters' walls, debris, boulders, and the outcrops. */
+function beforeFeatures(layout: Layout): Layout['obstacles'] {
+  const first = layout.obstacles.findIndex((o) => o.feature !== undefined);
+  return first < 0 ? layout.obstacles : layout.obstacles.slice(0, first);
+}
+
+/** Each feature's own tagged obstacles: features append their pieces in order, one contiguous run each. */
+function piecesOf(layout: Layout): Map<LayoutFeature, LayoutObstacle[]> {
+  const tagged = layout.obstacles.filter((o) => o.feature !== undefined);
+  const out = new Map<LayoutFeature, LayoutObstacle[]>();
+  let at = 0;
+  for (const feature of layout.features) {
+    out.set(feature, tagged.slice(at, at + feature.pieces));
+    at += feature.pieces;
+  }
+  expect(at, `${layout.planet}: features account for every tagged obstacle`).toBe(tagged.length);
+  return out;
+}
+
+describe('SPEC-053 — groves, orchards and clusters (§4.3, E81)', () => {
+  const SEEDS = 50;
+
+  it('every centre keeps an outcrop’s clearances, and every piece an ordinary obstacle’s, over 50 seeds per planet', () => {
+    // Problems are collected and asserted once: thousands of pairs per layout.
+    const problems: string[] = [];
+    const short = (what: string, d: number, need: number): void => {
+      if (d < need - 1e-9) problems.push(`${what}: ${d.toFixed(3)} < ${need.toFixed(3)}`);
+    };
+    for (const planet of PLANET_IDS) {
+      const half = PLANETS[planet].surface.halfSize;
+      for (let seed = 0; seed < SEEDS; seed++) {
+        const layout = layoutFor(planet, 200_000 + seed);
+        const label = `${planet} seed ${seed}`;
+        layout.features.forEach((f, index) => {
+          const at = `${label} ${f.kind} centre ${f.x.toFixed(1)}, ${f.z.toFixed(1)}`;
+          short(`${at} from the pad`, Math.hypot(f.x - layout.pad.x, f.z - layout.pad.z), 25);
+          if (Math.max(Math.abs(f.x), Math.abs(f.z)) > half - 30 + 1e-9) problems.push(`${at} past half − 30`);
+          for (const poi of layout.pois) {
+            short(`${at} from ${poi.poi}`, Math.hypot(f.x - poi.x, f.z - poi.z), poi.radius + 12);
+            short(`${at} from the ${poi.poi} corridor`, segmentDistance(f.x, f.z, layout.pad.x, layout.pad.z, poi.x, poi.z), 10);
+          }
+          for (const node of layout.nodes) short(`${at} from a node`, Math.hypot(f.x - node.x, f.z - node.z), 10);
+          for (const s of layout.shelters) short(`${at} from shelter ${s.index}`, Math.hypot(f.x - s.x, f.z - s.z), 30);
+          for (const earlier of layout.features.slice(0, index)) {
+            short(`${at} from an earlier feature`, Math.hypot(f.x - earlier.x, f.z - earlier.z), 30);
+          }
+        });
+        const first = layout.obstacles.findIndex((o) => o.feature !== undefined);
+        layout.obstacles.forEach((o, index) => {
+          if (o.feature === undefined) return;
+          const at = `${label} ${o.feature} piece ${o.x.toFixed(1)}, ${o.z.toFixed(1)}`;
+          short(`${at} from the pad`, Math.hypot(o.x, o.z), 15);
+          for (const poi of layout.pois) {
+            short(`${at} from ${poi.poi}`, Math.hypot(o.x - poi.x, o.z - poi.z), poi.radius + 6 + o.radius);
+            short(`${at} from the ${poi.poi} corridor`, segmentDistance(o.x, o.z, layout.pad.x, layout.pad.z, poi.x, poi.z), o.radius + CORRIDOR);
+          }
+          for (const node of layout.nodes) short(`${at} from a node`, Math.hypot(o.x - node.x, o.z - node.z), 4 + o.radius);
+          for (const s of layout.shelters) short(`${at} from shelter ${s.index}`, Math.hypot(o.x - s.x, o.z - s.z), Math.max(s.rx, s.rz) + 3);
+          // 3 m plus both radii from everything placed before it…
+          for (let k = 0; k < index; k++) {
+            const before = layout.obstacles[k] as LayoutObstacle;
+            short(`${at} from ${before.kind} ${k}`, Math.hypot(o.x - before.x, o.z - before.z), 3 + o.radius + before.radius);
+          }
+          // …and every scattered obstacle placed after it keeps the same (E81).
+          for (let k = first; k < layout.obstacles.length; k++) {
+            const after = layout.obstacles[k] as LayoutObstacle;
+            if (after.feature !== undefined) continue;
+            short(`${at} from scattered ${after.kind} ${k}`, Math.hypot(o.x - after.x, o.z - after.z), 3 + o.radius + after.radius);
+          }
+        });
+      }
+    }
+    expect(problems.slice(0, 20)).toEqual([]);
+  });
+
+  it('grove trees stand in their disc on trunks of 0.5–0.9 m; cluster pieces within their spread', () => {
+    for (const planet of PLANET_IDS) {
+      const def: PlanetDef = PLANETS[planet];
+      const clusters = def.surface.features.clusters;
+      for (let seed = 0; seed < SEEDS; seed++) {
+        const layout = layoutFor(planet, 200_000 + seed);
+        for (const [feature, pieces] of piecesOf(layout)) {
+          const label = `${planet} seed ${seed} ${feature.kind} at ${feature.x.toFixed(1)}, ${feature.z.toFixed(1)}`;
+          expect(pieces.length, label).toBeGreaterThan(0);
+          for (const piece of pieces) {
+            expect(piece.feature, label).toBe(feature.kind);
+            if (feature.kind === 'orchard') continue;
+            expect(Math.hypot(piece.x - feature.x, piece.z - feature.z), label).toBeLessThanOrEqual(feature.radius + 1e-9);
+            if (feature.kind === 'grove') {
+              expect(piece.kind, label).toBe('tree');
+              expect(piece.radius, label).toBeGreaterThanOrEqual(TRUNK_MIN);
+              expect(piece.radius, label).toBeLessThanOrEqual(TRUNK_MAX);
+            } else {
+              expect(feature.radius, label).toBe(clusters?.spread);
+            }
+          }
+        }
+      }
+    }
+  });
+
+  it('every orchard is complete and exact: rows × cols trunks of 0.5 m at exactly `spacing`, none partial', () => {
+    const spec = PLANETS.eden.surface.features.orchards;
+    expect(spec).toBeDefined();
+    if (spec === undefined) return;
+    expect(ORCHARD_TRUNK_RADIUS).toBe(0.5);
+    for (let seed = 0; seed < SEEDS; seed++) {
+      const layout = layoutFor('eden', 200_000 + seed);
+      const orchards = [...piecesOf(layout)].filter(([feature]) => feature.kind === 'orchard');
+      for (const [feature, trunks] of orchards) {
+        const label = `eden seed ${seed} orchard at ${feature.x.toFixed(1)}, ${feature.z.toFixed(1)}`;
+        expect(feature.halfW, label).toBe(((spec.cols - 1) * spec.spacing) / 2);
+        expect(feature.halfD, label).toBe(((spec.rows - 1) * spec.spacing) / 2);
+        expect(feature.pieces, label).toBe(spec.rows * spec.cols);
+        expect(trunks, label).toHaveLength(spec.rows * spec.cols);
+        trunks.forEach((trunk, k) => {
+          const i = Math.floor(k / spec.cols);
+          const j = k % spec.cols;
+          expect(trunk.kind, label).toBe('tree');
+          expect(trunk.radius, label).toBe(ORCHARD_TRUNK_RADIUS);
+          expect(Math.abs(trunk.x - (feature.x + (j - (spec.cols - 1) / 2) * spec.spacing)), label).toBeLessThanOrEqual(1e-9);
+          expect(Math.abs(trunk.z - (feature.z + (i - (spec.rows - 1) / 2) * spec.spacing)), label).toBeLessThanOrEqual(1e-9);
+        });
+        // Exactly `spacing` between neighbours, along x within a row and along z within a column.
+        for (let k = 1; k < trunks.length; k++) {
+          const a = trunks[k - 1] as LayoutObstacle;
+          const b = trunks[k] as LayoutObstacle;
+          if (k % spec.cols !== 0) {
+            expect(Math.abs(b.x - a.x - spec.spacing), label).toBeLessThanOrEqual(1e-9);
+            expect(Math.abs(b.z - a.z), label).toBeLessThanOrEqual(1e-9);
+          }
+          if (k >= spec.cols) {
+            const above = trunks[k - spec.cols] as LayoutObstacle;
+            expect(Math.abs(b.z - above.z - spec.spacing), label).toBeLessThanOrEqual(1e-9);
+            expect(Math.abs(b.x - above.x), label).toBeLessThanOrEqual(1e-9);
+          }
+        }
+      }
+    }
+  });
+
+  it('on Thessaly and Eden every tree obstacle’s radius is its trunk, in [0.5, 0.9] (§4.2)', () => {
+    expect([TRUNK_MIN, TRUNK_MAX]).toEqual([0.5, 0.9]);
+    for (const planet of ['thessaly', 'eden'] as const) {
+      for (const seed of [PIN_SEED, ...Array.from({ length: SEEDS }, (_, i) => 200_000 + i)]) {
+        const trees = layoutFor(planet, seed).obstacles.filter((o) => o.kind === 'tree');
+        expect(trees.length, `${planet} seed ${seed}`).toBeGreaterThan(0);
+        for (const tree of trees) {
+          expect(tree.radius, `${planet} seed ${seed}`).toBeGreaterThanOrEqual(TRUNK_MIN);
+          expect(tree.radius, `${planet} seed ${seed}`).toBeLessThanOrEqual(TRUNK_MAX);
+        }
+      }
+    }
+  });
+
+  it('at seed 20121: Thessaly ≥ 100 grove trees, Eden ≥ 2 complete orchards, ≥ 12 clusters on the other four (AC-20)', () => {
+    const thessaly = layoutFor('thessaly', PIN_SEED);
+    expect(thessaly.obstacles.filter((o) => o.feature === 'grove').length).toBeGreaterThanOrEqual(100);
+    const eden = layoutFor('eden', PIN_SEED);
+    const complete = eden.features.filter((f) => f.kind === 'orchard' && f.pieces === 5 * 7);
+    expect(complete.length).toBeGreaterThanOrEqual(2);
+    for (const planet of ['cinder4', 'vetra', 'ferrum', 'hive'] as const) {
+      expect(layoutFor(planet, PIN_SEED).features.filter((f) => f.kind === 'cluster').length, planet).toBeGreaterThanOrEqual(12);
+    }
+  });
+
+  it('the earlier streams are untouched: pois, nodes, shelters, outcrops and playerSpawn equal a build without features', () => {
+    for (const planet of PLANET_IDS) {
+      for (const seed of [PIN_SEED, 1, 77, 200_003]) {
+        const layout = layoutFor(planet, seed);
+        const control = generateLayout(featureless(planet), new RngRoot(seed).layout(planet));
+        const label = `${planet} seed ${seed}`;
+        expect(control.features, label).toEqual([]);
+        expect(layout.pois, label).toEqual(control.pois);
+        expect(layout.nodes, label).toEqual(control.nodes);
+        expect(layout.shelters, label).toEqual(control.shelters);
+        expect(layout.playerSpawn, label).toEqual(control.playerSpawn);
+        const before = beforeFeatures(layout);
+        expect(before, label).toEqual(control.obstacles.slice(0, before.length));
+      }
+    }
+  });
+
+  it('features holds one entry per placed feature, each counting its tagged obstacles', () => {
+    for (const planet of PLANET_IDS) {
+      const def: PlanetDef = PLANETS[planet];
+      const spec = def.surface.features;
+      for (let seed = 0; seed < 10; seed++) {
+        const layout = layoutFor(planet, 200_000 + seed);
+        const kinds = layout.features.map((f) => f.kind);
+        // Groves, then orchards, then clusters, each at most its count.
+        expect(kinds, planet).toEqual([...kinds].sort((a, b) => ['grove', 'orchard', 'cluster'].indexOf(a) - ['grove', 'orchard', 'cluster'].indexOf(b)));
+        expect(kinds.filter((k) => k === 'grove').length).toBeLessThanOrEqual(spec.groves?.count ?? 0);
+        expect(kinds.filter((k) => k === 'orchard').length).toBeLessThanOrEqual(spec.orchards?.count ?? 0);
+        expect(kinds.filter((k) => k === 'cluster').length).toBeLessThanOrEqual(spec.clusters?.count ?? 0);
+        for (const kind of ['grove', 'orchard', 'cluster'] as const) {
+          const counted = layout.features.filter((f) => f.kind === kind).reduce((sum, f) => sum + f.pieces, 0);
+          expect(layout.obstacles.filter((o) => o.feature === kind).length, `${planet} ${kind}`).toBe(counted);
+        }
+      }
+    }
+  });
+
+  it('featurePieces is each feature’s own run of pieces, in its extent, even where groves overlap', () => {
+    let overlapping = 0;
+    for (const planet of PLANET_IDS) {
+      for (let seed = 0; seed < 10; seed++) {
+        const layout = layoutFor(planet, 200_000 + seed);
+        const runs = piecesOf(layout);
+        for (const feature of layout.features) {
+          const pieces = featurePieces(layout, feature);
+          expect(pieces).toEqual(runs.get(feature));
+          expect(pieces).toHaveLength(feature.pieces);
+          for (const piece of pieces) {
+            expect(piece.feature).toBe(feature.kind);
+            if (feature.kind === 'orchard') {
+              expect(Math.abs(piece.x - feature.x)).toBeLessThanOrEqual((feature.halfW ?? 0) + 1e-9);
+              expect(Math.abs(piece.z - feature.z)).toBeLessThanOrEqual((feature.halfD ?? 0) + 1e-9);
+            } else {
+              expect(Math.hypot(piece.x - feature.x, piece.z - feature.z)).toBeLessThanOrEqual(feature.radius + 1e-9);
+            }
+          }
+          // A piece of another grove inside this one's disc is not one of its pieces.
+          if (feature.kind === 'grove') {
+            for (const other of layout.features) {
+              if (other === feature || other.kind !== 'grove') continue;
+              for (const piece of featurePieces(layout, other)) {
+                if (Math.hypot(piece.x - feature.x, piece.z - feature.z) <= feature.radius) {
+                  overlapping++;
+                  expect(pieces.includes(piece)).toBe(false);
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+    // Grove discs of 20–30 m with centres 30 m apart do overlap: the case is real.
+    expect(overlapping).toBeGreaterThan(0);
+  });
+
+  it('a repaired-away feature piece leaves its gap and its feature’s count follows (53-e)', () => {
+    const layout = layoutFor('eden', PIN_SEED);
+    const orchard = layout.features.find((f) => f.kind === 'orchard') as LayoutFeature;
+    expect(orchard).toBeDefined();
+    const trunk = layout.obstacles.find((o) => o.feature === 'orchard') as LayoutObstacle;
+    // A node under the first orchard's first trunk, the trunk grown until it
+    // covers the node's flood-fill cell: the repair's nearest circle to the
+    // pad→node segment is that trunk, and it goes.
+    trunk.radius = 2;
+    layout.nodes.push({ resource: 'water', x: trunk.x, z: trunk.z, capacity: 10 });
+    expect(isReachable(layout, trunk)).toBe(false);
+    expect(repairReachability(layout)).toBeGreaterThanOrEqual(1);
+    expect(layout.obstacles.includes(trunk)).toBe(false);
+    expect(orchard.pieces).toBe(5 * 7 - 1);
+    expect(layout.obstacles.filter((o) => o.feature === 'orchard').length).toBe(
+      layout.features.filter((f) => f.kind === 'orchard').reduce((sum, f) => sum + f.pieces, 0),
+    );
+  });
+
+  it('neither an obstacle’s feature tag nor layout.features moves the hash', () => {
+    for (const planet of PLANET_IDS) {
+      const layout = layoutFor(planet, PIN_SEED);
+      const stripped: Layout = {
+        ...layout,
+        obstacles: layout.obstacles.map(({ x, z, radius, kind }) => ({ x, z, radius, kind })),
+        features: [],
+      };
+      expect(layoutHash(stripped), planet).toBe(layout.hash);
+      // The pieces themselves are hashed through `obstacles`, like any obstacle.
+      const piece = layout.obstacles.find((o) => o.feature !== undefined);
+      expect(piece, planet).toBeDefined();
+      if (piece !== undefined) {
+        piece.x += 0.01;
+        expect(layoutHash(layout), planet).not.toBe(layout.hash);
+      }
+    }
   });
 });

@@ -260,4 +260,22 @@ describe('buildDecals (SPEC-018 §4.6)', () => {
     const b = buildDecals(LAYOUT, field, LOOK).geometry.getAttribute('position') as THREE.BufferAttribute;
     expect(a.array).toEqual(b.array);
   });
+
+  it('leaves an orchard’s rectangle, plus 2 m, without a decal (SPEC-053 §4.9)', () => {
+    /** Each 5 × 5 patch's middle vertex is its centre. */
+    const centres = (layout: ViewLayout): { x: number; z: number }[] => {
+      const position = buildDecals(layout, field, LOOK).geometry.getAttribute('position') as THREE.BufferAttribute;
+      const out: { x: number; z: number }[] = [];
+      for (let i = 12; i < position.count; i += 25) out.push({ x: position.getX(i), z: position.getZ(i) });
+      return out;
+    };
+    // A big orchard over the east half, so its rectangle would catch decals.
+    const orchard = { kind: 'orchard' as const, x: 100, z: 0, radius: 120, halfW: 80, halfD: 150, pieces: 35 };
+    const inside = (c: { x: number; z: number }): boolean =>
+      Math.abs(c.x - orchard.x) <= orchard.halfW + 2 && Math.abs(c.z - orchard.z) <= orchard.halfD + 2;
+    expect(centres(LAYOUT).some(inside)).toBe(true);
+    const placed = centres({ ...LAYOUT, features: [orchard] });
+    expect(placed.length).toBeGreaterThan(0);
+    expect(placed.filter(inside)).toEqual([]);
+  });
 });
