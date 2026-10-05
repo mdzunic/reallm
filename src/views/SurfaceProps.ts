@@ -7,6 +7,11 @@
 // material, a GLB body's authored colours draw under a white one (SPEC-046
 // §4.1).
 //
+// SPEC-053 §4.1 adds the foliage seam: a tree-contract model, once the
+// foliage atlas is in, becomes `{ body, glow?, lod1 }` with its atlas UVs kept
+// (`foliageFromModel`), drawn by `SurfaceView` on `#foliageMaterial`; and
+// §4.8 gives each biome's landmark POI its model.
+//
 // All geometry is built non-indexed so any mix of primitives merges cleanly;
 // triangle caps per kind are pinned by tests/views/surfaceProps.test.ts.
 import * as THREE from 'three';
@@ -27,27 +32,73 @@ export interface PropGeometry {
   glow?: THREE.BufferGeometry;
   /** True when the body came from a GLB — origin at the base, no rock lift. */
   fromModel?: boolean;
+  /** SPEC-053 §4.1, trees only: `Bark_LOD1` and `Leaf_LOD1`, what `low` draws. */
+  lod1?: THREE.BufferGeometry;
+  /** SPEC-053 §4.1: drawn with `#foliageMaterial` — the body and `lod1` keep their atlas UVs. */
+  foliage?: true;
 }
 
 /**
- * The GLB seam (§4.10): every biome × obstacle-kind pair maps to its two
- * variants from the PLAN R7 drop, `_a` then `_b` (SPEC-046 §4.2). A data
- * change here swaps a whole kind.
+ * The GLB seam (§4.10): every biome × obstacle-kind pair maps to its variants
+ * from the PLAN R7 drop, `_a` then `_b` (SPEC-046 §4.2). A data change here
+ * swaps a whole kind. SPEC-053 §4.1: each of the ten non-tree kinds gains
+ * its `_c` dressing piece as a third variant; the jungle's trees are three,
+ * and the temperate trees two — `temperate_tree_c` is `ORCHARD_MODEL`, which
+ * only orchards draw.
  */
 export const PROP_MODELS: Partial<Record<`${Biome}:${ObstacleKind}`, readonly ModelId[]>> = {
-  'desert:rock': ['desert_rock_a', 'desert_rock_b'],
-  'desert:ruin': ['desert_ruin_a', 'desert_ruin_b'],
-  'ice:rock': ['ice_rock_a', 'ice_rock_b'],
-  'ice:spire': ['ice_spire_a', 'ice_spire_b'],
-  'jungle:tree': ['jungle_tree_a', 'jungle_tree_b'],
-  'jungle:ruin': ['jungle_ruin_a', 'jungle_ruin_b'],
-  'volcanic:rock': ['volcanic_rock_a', 'volcanic_rock_b'],
-  'volcanic:vent': ['volcanic_vent_a', 'volcanic_vent_b'],
-  'hive:spire': ['hive_spire_a', 'hive_spire_b'],
-  'hive:rock': ['hive_rock_a', 'hive_rock_b'],
+  'desert:rock': ['desert_rock_a', 'desert_rock_b', 'desert_rock_c'],
+  'desert:ruin': ['desert_ruin_a', 'desert_ruin_b', 'desert_ruin_c'],
+  'ice:rock': ['ice_rock_a', 'ice_rock_b', 'ice_rock_c'],
+  'ice:spire': ['ice_spire_a', 'ice_spire_b', 'ice_spire_c'],
+  'jungle:tree': ['jungle_tree_a', 'jungle_tree_b', 'jungle_tree_c'],
+  'jungle:ruin': ['jungle_ruin_a', 'jungle_ruin_b', 'jungle_ruin_c'],
+  'volcanic:rock': ['volcanic_rock_a', 'volcanic_rock_b', 'volcanic_rock_c'],
+  'volcanic:vent': ['volcanic_vent_a', 'volcanic_vent_b', 'volcanic_vent_c'],
+  'hive:spire': ['hive_spire_a', 'hive_spire_b', 'hive_spire_c'],
+  'hive:rock': ['hive_rock_a', 'hive_rock_b', 'hive_rock_c'],
   'temperate:tree': ['temperate_tree_a', 'temperate_tree_b'],
-  'temperate:rock': ['temperate_rock_a', 'temperate_rock_b'],
+  'temperate:rock': ['temperate_rock_a', 'temperate_rock_b', 'temperate_rock_c'],
 };
+
+/**
+ * SPEC-053 §4.9: the one tree every orchard draws — the four-fold symmetric
+ * temperate tree, at yaw 0 and one scale, with no variant hash.
+ */
+export const ORCHARD_MODEL: ModelId = 'temperate_tree_c';
+
+/** SPEC-053 §4.8: each biome's authored landmark, in metres. */
+export const LANDMARK_MODELS: Readonly<Record<Biome, ModelId>> = {
+  desert: 'landmark_desert',
+  ice: 'landmark_ice',
+  jungle: 'landmark_jungle',
+  volcanic: 'landmark_volcanic',
+  hive: 'landmark_hive',
+  temperate: 'landmark_temperate',
+};
+
+/**
+ * SPEC-053 §4.8: each landmark's drawn radius, in metres. Anything placed
+ * beside a landmark keeps `LANDMARK_FOOTPRINT + 1.5` m from its centre.
+ */
+export const LANDMARK_FOOTPRINT: Readonly<Record<Biome, number>> = {
+  desert: 4,
+  ice: 3.5,
+  jungle: 4,
+  volcanic: 4.5,
+  hive: 4,
+  temperate: 4.2,
+};
+
+/**
+ * SPEC-053 §4.1: the foliage atlas once the shared surface set has landed,
+ * else `null` — the seam needs it as much as the models (53-a). A fake
+ * `Assets` without `hasTexture` reads as "not yet".
+ */
+export function foliageAtlas(assets: Assets | undefined): THREE.Texture | null {
+  if (assets === undefined || assets.hasTexture?.('foliage_atlas') !== true) return null;
+  return assets.texture('foliage_atlas');
+}
 
 /**
  * SPEC-046 §4.2, pure: which of `n` variants the `index`-th instance of
@@ -197,6 +248,104 @@ export function propFromModel(root: THREE.Object3D): PropGeometry | null {
   return result;
 }
 
+// ------------------------------------------------------------ SPEC-053 §4.1
+
+/** The tree contract's nodes (SPEC-052 §3.2), and the part of a `PropGeometry` each merges into. */
+const TREE_PARTS: Readonly<Record<string, 'body' | 'lod1' | 'glow'>> = {
+  Bark: 'body',
+  Leaf: 'body',
+  Bark_LOD1: 'lod1',
+  Leaf_LOD1: 'lod1',
+  Glow: 'glow',
+};
+
+/** Which contract part a mesh belongs to: its own node's name or an ancestor's, else a `Glow` material. */
+function treePart(mesh: THREE.Mesh, root: THREE.Object3D): 'body' | 'lod1' | 'glow' | null {
+  for (let node: THREE.Object3D | null = mesh; node !== null; node = node === root ? null : node.parent) {
+    const part = TREE_PARTS[node.name];
+    if (part !== undefined) return part;
+  }
+  const material = (Array.isArray(mesh.material) ? mesh.material[0] : mesh.material) as THREE.Material | undefined;
+  return material?.name === 'Glow' ? 'glow' : null;
+}
+
+/**
+ * One foliage part in world space with exactly `position`, `normal`, `uv` and
+ * `color` — the atlas UVs kept, COLOR_0 × the material colour (18-n) — so any
+ * of a tree's parts merge with the others.
+ */
+function foliagePart(mesh: THREE.Mesh): THREE.BufferGeometry {
+  const geometry = mesh.geometry.clone().applyMatrix4(mesh.matrixWorld);
+  const material = (Array.isArray(mesh.material) ? mesh.material[0] : mesh.material) as THREE.MeshStandardMaterial | undefined;
+  const tint = material?.color ?? scratchColor.set('#ffffff');
+  const count = (geometry.getAttribute('position') as THREE.BufferAttribute).count;
+  const existing = geometry.getAttribute('color') as THREE.BufferAttribute | undefined;
+  if (existing === undefined || existing.itemSize < 3) {
+    bake(geometry, tint.getHex());
+  } else {
+    const colors = new Float32Array(count * 3);
+    for (let i = 0; i < count; i++) {
+      colors[i * 3] = existing.getX(i) * tint.r;
+      colors[i * 3 + 1] = existing.getY(i) * tint.g;
+      colors[i * 3 + 2] = existing.getZ(i) * tint.b;
+    }
+    geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+  }
+  if (geometry.getAttribute('uv') === undefined) geometry.setAttribute('uv', new THREE.BufferAttribute(new Float32Array(count * 2), 2));
+  if (geometry.getAttribute('normal') === undefined) geometry.computeVertexNormals();
+  for (const name of Object.keys(geometry.attributes)) {
+    if (name !== 'position' && name !== 'normal' && name !== 'uv' && name !== 'color') geometry.deleteAttribute(name);
+  }
+  geometry.morphAttributes = {};
+  return geometry;
+}
+
+/** Merge foliage parts, indexed when every part is (the contract's are), else flattened. */
+function mergeFoliage(parts: THREE.BufferGeometry[]): THREE.BufferGeometry {
+  const indexed = parts.every((part) => part.index !== null);
+  return mergeGeometries(indexed ? parts : parts.map((part) => (part.index === null ? part : part.toNonIndexed())));
+}
+
+/**
+ * SPEC-053 §4.1, the foliage seam: a SPEC-052 tree as `{ body, glow?, lod1 }`
+ * — `Bark` and `Leaf` merged into `body`, `Bark_LOD1` and `Leaf_LOD1` into
+ * `lod1`, both keeping their atlas UVs, and `Glow` into `glow`. A model that
+ * carries no LOD1 draws its body on `low` too.
+ */
+export function foliageFromModel(root: THREE.Object3D): PropGeometry {
+  root.updateMatrixWorld(true);
+  const body: THREE.BufferGeometry[] = [];
+  const lod1: THREE.BufferGeometry[] = [];
+  const glow = new THREE.Group();
+  const meshes: THREE.Mesh[] = [];
+  root.traverse((node) => {
+    const mesh = node as THREE.Mesh;
+    if (mesh.isMesh === true) meshes.push(mesh);
+  });
+  for (const mesh of meshes) {
+    const part = treePart(mesh, root);
+    if (part === 'glow') {
+      const clone = mesh.clone();
+      clone.matrixAutoUpdate = false;
+      clone.matrix.copy(mesh.matrixWorld);
+      glow.add(clone);
+    } else if (part === 'lod1') {
+      lod1.push(foliagePart(mesh));
+    } else if (part === 'body') {
+      body.push(foliagePart(mesh));
+    }
+  }
+  const bodyGeometry = mergeFoliage(body.length > 0 ? body : lod1.map((part) => part.clone()));
+  const result: PropGeometry = {
+    body: bodyGeometry,
+    lod1: lod1.length > 0 ? mergeFoliage(lod1) : bodyGeometry.clone(),
+    fromModel: true,
+    foliage: true,
+  };
+  if (glow.children.length > 0) result.glow = geometryFromModel(glow);
+  return result;
+}
+
 // ------------------------------------------------------------------- bodies
 
 function rockBody(seed: number, small: boolean): THREE.BufferGeometry {
@@ -334,13 +483,21 @@ export function obstacleModelIds(kind: ObstacleKind, biome: Biome): readonly Mod
 /**
  * A biome's obstacle, procedural by default; the `PROP_MODELS` table wins when
  * it names a model and the lazy assets have landed (§4.10, 18-o) — its first
- * loaded variant that is not a tree contract (SPEC-046 §4.1).
+ * loaded variant that is not a tree contract (SPEC-046 §4.1). SPEC-053 §4.1:
+ * a `tree` whose variant is a tree contract draws through `foliageFromModel`
+ * once the foliage atlas has landed too, and procedurally until then.
  */
 export function obstacleGeometry(kind: ObstacleKind, biome: Biome, seed: number, assets?: Assets, small = false): PropGeometry {
   if (assets !== undefined) {
+    const atlas = kind === 'tree' ? foliageAtlas(assets) : null;
     for (const id of obstacleModelIds(kind, biome)) {
       if (!assets.hasModel(id)) continue;
-      const prop = propFromModel(assets.model(id));
+      const model = assets.model(id);
+      if (isTreeContract(model)) {
+        if (atlas !== null) return foliageFromModel(model);
+        continue;
+      }
+      const prop = propFromModel(model);
       if (prop !== null) return prop;
     }
   }
@@ -543,8 +700,11 @@ export function poiGeometry(kind: PoiKind, biome: Biome, assets?: Assets): PropG
       }
       return { body: merge(prongs) };
     }
-    case 'landmark':
-      return landmarkGeometry(biome);
+    case 'landmark': {
+      // SPEC-053 §4.8: the authored landmark once the planet's set is in.
+      const model = assets?.hasModel(LANDMARK_MODELS[biome]) === true ? propFromModel(assets.model(LANDMARK_MODELS[biome])) : null;
+      return model ?? landmarkGeometry(biome);
+    }
   }
 }
 
