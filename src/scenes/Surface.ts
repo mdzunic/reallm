@@ -1282,6 +1282,11 @@ export class SurfaceScene extends UiScene<'surface'> {
     // distance follow the screen — set now, and again on every resize.
     this.#viewWidth = services.renderer.width;
     this.#viewHeight = services.renderer.height;
+    // SPEC-053 §4.1.2: the scene's draw target in device pixels — the space of
+    // `gl_FragCoord` the cut-out works in — now and on every resize (53-m).
+    const size = services.renderer.size;
+    this.#screenFrame.width = Math.round(size.width * size.dpr);
+    this.#screenFrame.height = Math.round(size.height * size.dpr);
     this.camera.fov = cameraFov(this.#viewWidth / this.#viewHeight);
     // The base render sets the same on every frame; the first frustum — and
     // SPEC-046's first cull — already needs it.
@@ -1296,11 +1301,13 @@ export class SurfaceScene extends UiScene<'surface'> {
     this.disposer.add(
       services.events.on(
         'renderer:resized',
-        ({ width, height }) => {
+        ({ width, height, dpr }) => {
           // SPEC-037 §4.7: the field of view snaps; the distance eases as a
           // scheme change does (and snaps under reduce motion).
           this.#viewWidth = width;
           this.#viewHeight = height;
+          this.#screenFrame.width = Math.round(width * dpr);
+          this.#screenFrame.height = Math.round(height * dpr);
           const fov = cameraFov(width / height);
           // The base render sets the aspect too, a frame later; SPEC-046's
           // cull recaptures the frustum as soon as the projection moves.
@@ -1880,13 +1887,10 @@ export class SurfaceScene extends UiScene<'surface'> {
       const dt = Math.max(0, time - this.#lastViewTime);
       this.#lastViewTime = time;
       this.#renderFeedback(world, view);
-      // SPEC-053 §4.1.2: the camera that draws and its target in device
-      // pixels, for the head cut-out; reduce motion stills the wind the next
-      // frame it changes (53-c).
-      const size = renderer.size;
+      // SPEC-053 §4.1.2, 53-c: the camera that draws and its target's device
+      // pixels (`#screenFrame`, kept by `renderer:resized`) for the head
+      // cut-out; reduce motion stills the wind the next frame it changes.
       const screen = this.#screenFrame;
-      screen.width = Math.round(size.width * size.dpr);
-      screen.height = Math.round(size.height * size.dpr);
       view.reduceMotion = this.services.settings.get().reduceMotion;
       view.sync({
         player: world.player,
