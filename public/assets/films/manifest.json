@@ -7,7 +7,7 @@
     "prologue": {
       "file": "films/prologue.mp4",
       "frames": 2232,
-      "bytes": 3122960,
+      "bytes": 2992542,
       "crf": 29,
       "shots": [
         {
@@ -29,14 +29,14 @@
           "start": 384,
           "end": 552,
           "poster": "films/posters/prologue_curfew.webp",
-          "posterBytes": 31470
+          "posterBytes": 30406
         },
         {
           "id": "sabotage",
           "start": 552,
           "end": 720,
           "poster": "films/posters/prologue_sabotage.webp",
-          "posterBytes": 57188
+          "posterBytes": 46910
         },
         {
           "id": "reprisal",
@@ -71,14 +71,14 @@
           "start": 1584,
           "end": 1800,
           "poster": "films/posters/prologue_shelter.webp",
-          "posterBytes": 43228
+          "posterBytes": 36988
         },
         {
           "id": "selection",
           "start": 1800,
           "end": 1992,
           "poster": "films/posters/prologue_selection.webp",
-          "posterBytes": 9652
+          "posterBytes": 9650
         },
         {
           "id": "liftoff",
@@ -121,7 +121,7 @@
     "interlude_c1": {
       "file": "films/interlude_c1.mp4",
       "frames": 336,
-      "bytes": 505901,
+      "bytes": 462622,
       "crf": 26,
       "shots": [
         {
@@ -136,7 +136,7 @@
           "start": 120,
           "end": 240,
           "poster": "films/posters/interlude_c1_shelter_light.webp",
-          "posterBytes": 46656
+          "posterBytes": 39502
         },
         {
           "id": "earth_c1",
@@ -150,7 +150,7 @@
     "interlude_c2": {
       "file": "films/interlude_c2.mp4",
       "frames": 336,
-      "bytes": 526351,
+      "bytes": 515938,
       "crf": 26,
       "shots": [
         {
@@ -165,7 +165,7 @@
           "start": 120,
           "end": 240,
           "poster": "films/posters/interlude_c2_tap.webp",
-          "posterBytes": 38560
+          "posterBytes": 36962
         },
         {
           "id": "earth_c2",
@@ -179,7 +179,7 @@
     "interlude_c3": {
       "file": "films/interlude_c3.mp4",
       "frames": 336,
-      "bytes": 602575,
+      "bytes": 596760,
       "crf": 26,
       "shots": [
         {
@@ -187,7 +187,7 @@
           "start": 0,
           "end": 168,
           "poster": "films/posters/interlude_c3_greenhouse.webp",
-          "posterBytes": 43940
+          "posterBytes": 43070
         },
         {
           "id": "earth_c3",
@@ -230,7 +230,7 @@
     "interlude_c5": {
       "file": "films/interlude_c5.mp4",
       "frames": 384,
-      "bytes": 498585,
+      "bytes": 498480,
       "crf": 26,
       "shots": [
         {
@@ -252,14 +252,14 @@
           "start": 288,
           "end": 384,
           "poster": "films/posters/interlude_c5_board.webp",
-          "posterBytes": 5822
+          "posterBytes": 5870
         }
       ]
     },
     "ending_stay": {
       "file": "films/ending_stay.mp4",
       "frames": 864,
-      "bytes": 1304542,
+      "bytes": 1300075,
       "crf": 26,
       "shots": [
         {
@@ -288,7 +288,7 @@
           "start": 504,
           "end": 720,
           "poster": "films/posters/ending_stay_wall_63.webp",
-          "posterBytes": 7612
+          "posterBytes": 7306
         },
         {
           "id": "earth_again",
@@ -302,7 +302,7 @@
     "ending_escape": {
       "file": "films/ending_escape.mp4",
       "frames": 864,
-      "bytes": 1223445,
+      "bytes": 1216437,
       "crf": 28,
       "shots": [
         {
@@ -324,7 +324,7 @@
           "start": 336,
           "end": 528,
           "poster": "films/posters/ending_escape_earth_unmade.webp",
-          "posterBytes": 43136
+          "posterBytes": 36646
         },
         {
           "id": "wall_same",

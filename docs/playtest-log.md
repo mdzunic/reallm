@@ -2235,6 +2235,8 @@ The plates:
 
 **The likeness check (§7) — performed 2026-10-04: every face failed.**
 
+> **Superseded by SPEC-062 (2026-10-05).** The six faces below, and every plate that showed them, were replaced by a new cast that passes the check. See "SPEC-062" below.
+
 How it was run:
 - Each face was searched by its public URL on `main`
   (`raw.githubusercontent.com/mdzunic/reallm/main/scripts/assets/blender/plates/selection/NN.webp`).
@@ -2259,4 +2261,86 @@ Bing names the *closest* well-known face, and it named one for every face. A mat
 - [ ] the relit coast reads on the phone, and chapter 3's lights come on as a grid, then settle;
 - [ ] chapter 4's tear shows a grey Earth, and chapter 5's board shows the blank No. 63;
 - [ ] the woman at the fence and in the grow room is the woman at the tap;
+- [ ] nothing strobes.
+
+## SPEC-062 — faces retaken: a new cast for the Selection cards and the shelter (asset drop, M7h)
+
+- **Build:** `assets/spec-062-faces` — untagged. A hand-run drop over `main` 0e1e64c (SPEC-051 merged), rendered on 2026-10-05 with Blender 5.2.1 on the owner's Mac (M4 Pro).
+- **Pictures:** generated with Google Gemini, prompted by the owner.
+- **Likeness searches:** run by the owner, except Bing for the first sheet's faces 01, 02, 03, 03b and 04, which Claude ran in the built-in browser, each upload approved by the owner.
+
+**The cast (§3, §5).**
+- **The sheet, 2026-10-04.** Gemini drew a 4 × 2 grid of eight ID photographs where §3 asked for six. The two extras, a second man in a quilted vest (03b) and a second woman with a black bob (06b), were kept as spares. Each face was cut square and searched head-only, with no shoulders' clothing.
+- **Round 1.** Bing passed 01 and 03 and named a real person for 02, 03b, 04, 05, 06 and 06b. For 02, 03b and 04 the names were actors. The names for 05, 06 and 06b were not recorded. The faces Bing named were the four women and the oldest man, so the redo moved them away from a studio headshot.
+- **Round 2, 2026-10-05.** 02, 04, 05 and 06 were regenerated alone, from their briefs with stronger distinguishing features (62-a), graded as a worn file photograph rather than a studio portrait:
+  - 02: close-cropped grey hair, a mole, a gap tooth, reading glasses on a cord;
+  - 04 (Iris): freckles, a scar through the right eyebrow, SPEC-051's bun, coat, straps and scarf;
+  - 05: bald, large ears, liver spots, white stubble;
+  - 06: a home-cut fringe and a scar along the jaw.
+- **The cards.** Each card is the face cut to 320² WebP and graded and framed like the old cards, its head about 45 % of the width.
+
+| Face | From | Bing | Lens | Date | Result |
+|---|---|---|---|---|---|
+| 01 | sheet, 2026-10-04 | none ("Man With Glasses On Head") | none | 2026-10-04 / 05 | **pass** |
+| 02 | sheet | Sheila Atim | — | 2026-10-05 | fail, regenerated |
+| 02 | portrait, 2026-10-05 | none | none | 2026-10-05 | **pass** |
+| 03 | sheet | none ("Portrait Photography Of Middle Eastern Man") | none | 2026-10-05 | **pass** |
+| 03b | sheet (spare) | Abdelatif Hwidar | — | 2026-10-05 | fail, not used |
+| 04 (Iris) | sheet | Clare Calbraith | — | 2026-10-05 | fail, regenerated |
+| 04 (Iris) | portrait, 2026-10-05 | none | none | 2026-10-05 | **pass** |
+| 05 | sheet | a real person (name not recorded) | — | 2026-10-05 | fail, regenerated |
+| 05 | portrait, 2026-10-05 | none | none | 2026-10-05 | **pass** |
+| 06 | sheet | a real person (name not recorded) | — | 2026-10-05 | fail, regenerated |
+| 06b | sheet (spare) | a real person (name not recorded) | — | 2026-10-05 | fail, not used |
+| 06 | portrait, 2026-10-05 | none | none | 2026-10-05 | **pass** |
+
+**The plates (§4).**
+- **How they were made.** Each plate was made in Gemini by editing the old plate, with the six cards as the reference for its people. The prompt kept everything that is not a person and replaced each person, in their own place and pose, with a numbered member of the cast.
+- **The map room took a second edit.** Its man on the far left (01) kept the old long brown leather coat, which §3 rules out, so his coat alone was changed to a grey wool overcoat.
+- **Sizes.** Every plate keeps its old size and aspect but `prologue_sabotage.jpg`. Gemini returned that one at 1380 × 752, which has the old aspect, so it is resampled ×1.021 to the old 1408 × 768.
+- **Light.** Measured as the whole plate's mean linear Rec. 709 luminance. The grow room went from 0.054 to 0.052, darker. The map room went from 0.056 to 0.061 and the tap from 0.034 to 0.040.
+
+| Plate | Size | Who is in it | Faces checked (cast number) |
+|---|---|---|---|
+| `prologue_shelter.jpg` | 1365 × 768 | the six around the map | 1, 6, 3, 4, 5, 2 |
+| `interlude_c2_tap.jpg` | 1365 × 768 | Iris at the tap in profile; 01, 02, 03 and 05 queue with cups | 1, 2, 3, 5, 4 |
+| `interlude_c3_greenhouse.jpg` | 1376 × 768 | Iris at the wheat | 4 |
+| `prologue_sabotage.jpg` | 1408 × 768 | 03 and 05 at the Machine's leg; 02 keeps watch | 3, 5, 2 |
+| `prologue_curfew.jpg` | 1584 × 672 | 01, 06, 03 and 02 at the head of the line down the stair | 1, 6, 3, 2 |
+| `prologue_reprisal.jpg` | 1408 × 768 | unchanged: check only | runners a–f |
+
+- [x] **Every face a player can make out at 960 × 540 passes, Bing and Lens, 2026-10-05:** the 19 cast faces above and the reprisal's six runners. Each was cropped square from the full-size plate and enlarged to 300 px. None was named, and no top match showed the same face. The curfew line behind the cast is about 10 px tall at 960 × 540, too small to make out. So `prologue_reprisal.jpg` is not regenerated.
+- [x] Iris is one woman across the tap, the grow room and the map room, and the woman at the fence in `prologue_liftoff.jpg` (unchanged) is her from behind.
+
+**The drop (§6), 2026-10-05.** Blender 5.2.1, M4 Pro, macOS.
+
+- [x] **Stills of the look:** `selection`, `board`, `wall_63`, `shelter`, `shelter_light`, `tap`, `greenhouse`, `sabotage`, `curfew` and `earth_unmade` frame as before. The cards show the new faces beside the visor on No. 62, and on No. 63 in the stay ending.
+- [x] **The seven films rebuilt** in 280.6 s. Only the retaken shots rendered (0.08–0.14 s a frame); every other frame came from SPEC-051's frame cache. `departure` and `interlude_c4` are byte-identical to `main`.
+
+  | Film | Bytes | Rate | CRF | Flashes |
+  |---|---|---|---|---|
+  | `prologue` | 2 992 542 | 31.4 KB/s | 29 | 2 |
+  | `interlude_c1` | 462 622 | 32.3 KB/s | 26 | 0 |
+  | `interlude_c2` | 515 938 | 36.0 KB/s | 26 | 0 |
+  | `interlude_c3` | 596 760 | 41.6 KB/s | 26 | 0 |
+  | `interlude_c5` | 498 480 | 30.4 KB/s | 26 | 0 |
+  | `ending_stay` | 1 300 075 | 35.3 KB/s | 26 | 0 |
+  | `ending_escape` | 1 216 437 | 33.0 KB/s | 28 | 1 |
+
+  - **Framing:** `selection` holds card 62 inside the inner 88 % over 154 frames, and `board` holds both cards at its poster.
+  - **Lit boxes:** `earth_c1` 351,326–620,449, `earth_c2` 150,335–769,461 and `earth_c3` 232,209–749,393, as before.
+  - **`greenhouse`'s mean luminance:** 0.040–0.049, inside 0.007–0.138.
+  - **The unmake means:** 0.079 ± 0.001, 0.065 ± 0.000 and 0.042 ± 0.001. The shelter beat is the third, and the shelter plate's own mean is 0.059.
+  - **`hive_dark`'s black run:** 4 frames.
+  - **No check failed**, so no shot code or threshold moved.
+- [x] **`films/` is 9 148 892 B**, 235 459 B under `main`'s 9 384 351, against a bound of +0.15 MB. `node scripts/assets/check.mjs` passes: films 8.73 MB of 12, precache 21.06 MB of 25. The ten posters of the retaken shots and their manifest entries changed. The generated `LICENSES.md` rows are unchanged, and the faces row names the cast's dates.
+- [x] **Tests on the drop**, on the owner's Mac (headless Chromium on its GPU), 2026-10-05:
+  - `npm run check`: 112 files and 2 621 tests green; the build precaches 487 entries, 23 081 KiB;
+  - `e2e/SPEC-022.spec.ts`, `e2e/SPEC-051.spec.ts` and `e2e/SPEC-015-pwa.spec.ts`: 23 passed on the first run, in 34.7 s.
+
+**Owed on hardware (§9).** Every rebuilt film, on desktop Chrome, Safari and the reference phone (landscape):
+
+- [ ] the cards show six new faces beside the visor;
+- [ ] the map room, the tap, the grow room, the sabotage and the curfew stair show the new people;
+- [ ] Iris is one woman from the tap to the grow room, and the woman at the fence is her from behind;
 - [ ] nothing strobes.
