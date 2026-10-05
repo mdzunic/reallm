@@ -376,3 +376,59 @@ describe('CulledInstances (SPEC-046 §4.6)', () => {
     expect(() => new CulledInstances(mesh, { matrices: new Float32Array(48) }, new THREE.Sphere())).toThrow();
   });
 });
+
+// ---------------------------------------------------------------- SPEC-053
+
+describe('CulledInstances — LOD swaps and an extra attribute (SPEC-053 §4.1, §4.4)', () => {
+  it('setGeometry draws the same instances with another geometry, re-based on its sphere', () => {
+    const { mesh, layer } = row(5);
+    const fade = mesh.geometry.getAttribute('instanceFade');
+    const before = { radius: layer.maxRadius, height: layer.maxHeight };
+    // A taller, wider body: the culling margins grow with it.
+    const tall = new THREE.CylinderGeometry(2, 2, 6, 6).translate(0, 3, 0);
+    tall.computeBoundingSphere();
+    layer.setGeometry(tall, tall.boundingSphere as THREE.Sphere);
+    expect(mesh.geometry).toBe(tall);
+    expect(tall.getAttribute('instanceFade')).toBe(fade);
+    expect(layer.maxHeight).toBeGreaterThan(before.height);
+    expect(layer.maxRadius).toBeGreaterThan(before.radius);
+    // The instances are untouched: the same matrices and fades, slot for slot.
+    layer.refresh({ minX: -1e3, maxX: 1e3, minZ: -1e3, maxZ: 1e3 }, EVERYTHING, 1);
+    expect(layer.drawn).toBe(5);
+    expect((fade.array as Float32Array)[4]).toBeCloseTo(1 - 4 / 10, 6);
+    // And back, with nothing lost.
+    const box = new THREE.BoxGeometry(1, 1, 1);
+    box.computeBoundingSphere();
+    layer.setGeometry(box, box.boundingSphere as THREE.Sphere);
+    expect(layer.maxHeight).toBeCloseTo(before.height, 6);
+    expect(layer.maxRadius).toBeCloseTo(before.radius, 6);
+  });
+
+  it('an extra per-instance float is compacted with its instance, under its own name', () => {
+    const n = 6;
+    const geometry = new THREE.PlaneGeometry(1, 1);
+    geometry.computeBoundingSphere();
+    const mesh = new THREE.InstancedMesh(geometry, new THREE.MeshBasicMaterial(), n);
+    const matrices = new Float32Array(n * 16);
+    const cells = new Float32Array(n);
+    for (let i = 0; i < n; i++) {
+      scratch.makeTranslation(i * 10, 0, 0).toArray(matrices, i * 16);
+      cells[i] = i + 4;
+    }
+    const layer = new CulledInstances(mesh, { matrices, extra: { name: 'uvCell', values: cells } }, geometry.boundingSphere as THREE.Sphere);
+    const uvCell = mesh.geometry.getAttribute('uvCell') as THREE.InstancedBufferAttribute;
+    expect(uvCell.isInstancedBufferAttribute).toBe(true);
+    expect(Array.from(uvCell.array as Float32Array)).toEqual([4, 5, 6, 7, 8, 9]);
+    // Keep instances 2 and 4: their cells move to slots 0 and 1 with them.
+    layer.refresh({ minX: 15, maxX: 25, minZ: -1, maxZ: 1 }, EVERYTHING, 0);
+    expect(layer.drawn).toBe(1);
+    expect((uvCell.array as Float32Array)[0]).toBe(6);
+    layer.refresh({ minX: 35, maxX: 45, minZ: -1, maxZ: 1 }, EVERYTHING, 0);
+    expect((uvCell.array as Float32Array)[0]).toBe(8);
+    // An LOD swap carries it across.
+    const other = new THREE.PlaneGeometry(2, 2);
+    other.computeBoundingSphere();
+    layer.setGeometry(other, other.boundingSphere as THREE.Sphere);
+    expect(other.getAttribute('uvCell')).toBe(uvCell);
+  });
+});
