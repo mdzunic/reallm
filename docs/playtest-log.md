@@ -2353,7 +2353,7 @@ Bing names the *closest* well-known face, and it named one for every face. A mat
   - phone — _no handset in the build container_ (§7's pass is owed, below)
 
 Recorded from the container the branch was built in: `npm run check` — 114
-files and 2,684 tests, none skipped — and the e2e files the spec names:
+files and 2,689 tests, none skipped — and the e2e files the spec names:
 `e2e/SPEC-053.spec.ts` (§6.2's eight cases in thirteen tests),
 `e2e/surface-env.spec.ts` (nine tests, SPEC-046's spawn ratchet included) and
 `e2e/SPEC-018.spec.ts`'s two clamp cases, now started from `surface-goto-edge`
@@ -2364,12 +2364,12 @@ again after `surface-goto-grove`, every model and the atlas in):
 
 | Planet | Where | Draws | Triangles | Static instances | Foliage triangles | Foliage draws | Cover clumps |
 |---|---|---|---|---|---|---|---|
-| Cinder-4 | spawn / cluster | 39 / 41 | 19,582 / 20,124 | 2 / 15 | 82 / 104 | 2 / 2 | 20 / 22 |
-| Vetra | spawn / cluster | 42 / 44 | 23,670 / 24,718 | 1 / 15 | 68 / 112 | 1 / 2 | 17 / 25 |
-| Thessaly | spawn / grove | 50 / 49 | 27,642 / 34,421 | 18 / 51 | 2,826 / 7,097 | 7 / 8 | 236 / 430 |
-| Ferrum | spawn / cluster | 46 / 51 | 26,220 / 34,280 | 3 / 19 | 76 / 120 | 1 / 2 | 19 / 27 |
-| The Hive | spawn / cluster | 41 / 44 | 29,261 / 31,595 | 4 / 23 | 188 / 334 | 2 / 2 | 46 / 80 |
-| Eden | spawn / orchard | 35 / 37 | 20,018 / 35,884 | 5 / 68 | 1,206 / 12,562 | 2 / 4 | 300 / 467 |
+| Cinder-4 | spawn / cluster | 39 / 41 | 19,574 / 20,108 | 2 / 15 | 74 / 88 | 2 / 2 | 18 / 18 |
+| Vetra | spawn / cluster | 42 / 44 | 23,654 / 24,702 | 1 / 15 | 52 / 96 | 1 / 2 | 13 / 21 |
+| Thessaly | spawn / grove | 50 / 49 | 27,466 / 34,213 | 22 / 57 | 2,650 / 6,889 | 7 / 8 | 186 / 369 |
+| Ferrum | spawn / cluster | 46 / 51 | 26,208 / 34,272 | 3 / 19 | 64 / 112 | 1 / 2 | 16 / 25 |
+| The Hive | spawn / cluster | 41 / 44 | 29,225 / 31,571 | 4 / 23 | 152 / 310 | 2 / 2 | 37 / 74 |
+| Eden | spawn / orchard | 35 / 37 | 19,830 / 35,486 | 5 / 73 | 1,018 / 12,164 | 2 / 4 | 253 / 360 |
 
 Every frame keeps §4.10's budgets — the foliage ≤ 30 k triangles and ≤ 12
 draws, the frame ≤ 96 draws and ≤ 130 k triangles — and SPEC-046's 60 k
@@ -2380,7 +2380,7 @@ ratchet at the spawn.
 | The layout, seed 20121 | Thessaly 14 groves, 161 trees; Eden 4 complete orchards of 35; clusters 24 / 20 / 24 / 16 on Cinder-4, Vetra, Ferrum and the Hive; every tree trunk on Thessaly and Eden in 0.5–0.9 m. Over 50 seeds a planet, every feature placed its count, and AC-2–AC-5, SPEC-030's cases, spawn and defend stayed green unchanged |
 | The trees | `treeSource` reads `glb` from the first frame; LOD0 is 215–557 triangles a tree, LOD1 36–40, the jungle pods 80–100 |
 | The cut-out | in a grove the salvager shows through a dithered disc of the canopy over their head; the trees stay opaque and sorted |
-| Ground clumps | three's double-sided normal flip turned every clump seen from behind black; both foliage materials now light a card's two faces by its authored normal |
+| Ground clumps | three's double-sided normal flip turned every clump seen from behind black; both foliage materials now light a card's two faces by its authored normal. The cover's 2 m mask blocks every cell a shape reaches: a trunk near a cell corner, or one on a mown-lattice point, blocked none while the mask tested cell centres |
 | E82 | a pack spawned at a grove: `canopyHolders` reached 1 and `canopyFaded` ≥ `canopyHolders` in all 30 samples |
 | Trunks | a W + A walk into the grove trunk `surface-goto-grove` stood beside stopped at its circle |
 | Wind | `wind` 0.025 on Thessaly, 0.015 on Eden, 0 the frame after Reduce motion |
