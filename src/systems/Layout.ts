@@ -6,6 +6,10 @@
 // Validation never re-rolls — a failed flood fill removes the obstacle nearest
 // to the blocked corridor instead (E17), which keeps the hash stable across
 // quality settings and is what AC-4 pins.
+//
+// SPEC-053 §4.3 adds groves, orchards and clusters between the outcrops and the
+// scattered obstacles, each from its own fork, so every earlier stream — and
+// every POI, node, shelter and outcrop — stays where it was.
 import { log } from '@/core/Log';
 import { hash32, type Rng } from '@/core/Rng';
 import type { PlanetDef, PlanetId, PoiDef, ResourceId } from '@/data/index';
@@ -42,11 +46,31 @@ export interface LayoutPoi {
   kind: PoiDef['kind'];
 }
 
+/** SPEC-053 §3: the three placed set pieces. */
+export type FeatureKind = 'grove' | 'orchard' | 'cluster';
+
 export interface LayoutObstacle {
   x: number;
   z: number;
+  /** A `tree`'s radius is its trunk (SPEC-053 §4.2). */
   radius: number;
   kind: ObstacleKind;
+  /** SPEC-053 §4.3: the feature that placed it. Never hashed. */
+  feature?: FeatureKind;
+}
+
+/** SPEC-053 §3: one placed feature. `radius` is a grove's or cluster's disc; an orchard also has its half-extents. */
+export interface LayoutFeature {
+  kind: FeatureKind;
+  x: number;
+  z: number;
+  radius: number;
+  /** An orchard's half-extent along x: `(cols − 1) × spacing / 2`. */
+  halfW?: number;
+  /** An orchard's half-extent along z: `(rows − 1) × spacing / 2`. */
+  halfD?: number;
+  /** The obstacles it placed, tagged with its kind, in `layout.obstacles` order. */
+  pieces: number;
 }
 
 export interface LayoutNode {
@@ -76,6 +100,8 @@ export interface Layout {
   props: LayoutProp[];
   /** SPEC-030 §4.2: caves first (in placement order), then wrecks (D-3). */
   shelters: LayoutShelter[];
+  /** SPEC-053 §4.3: groves, then orchards, then clusters, in placement order. `layoutHash` never reads it. */
+  features: LayoutFeature[];
 }
 
 // ------------------------------------------------------------------ tunables
@@ -150,6 +176,36 @@ const OUTCROP_ARC_RADIUS: readonly [number, number] = [9, 14];
 const OUTCROP_SPAN: readonly [number, number] = [(100 * Math.PI) / 180, (160 * Math.PI) / 180];
 const OUTCROP_ROCKS: readonly [number, number] = [5, 8];
 const OUTCROP_ROCK_RADIUS: readonly [number, number] = [1.8, 4.0];
+
+// ------------------------------------------------------- SPEC-053 tunables
+
+/** §4.2: a `tree` obstacle's radius is its trunk, in this band (m). */
+export const TRUNK_MIN = 0.5;
+export const TRUNK_MAX = 0.9;
+/** §4.3: every orchard trunk's radius (m). */
+export const ORCHARD_TRUNK_RADIUS = 0.5;
+/** §4.3: a feature centre's tries, as an outcrop's. */
+const FEATURE_TRIES = 80;
+/** §4.3: a grove or cluster draws up to this many candidates per piece it wants. */
+const FEATURE_CANDIDATES = 6;
+/** §4.3: a cluster piece is the primary kind with this chance, and its radius this share of the scatter band. */
+const CLUSTER_PRIMARY = 0.6;
+const CLUSTER_RADIUS_SCALE = 0.6;
+
+/**
+ * §4.2: a radius drawn from `[a, b]` for a tree becomes its trunk, mapped
+ * linearly into `[TRUNK_MIN, TRUNK_MAX]` — the draw itself is unchanged, so
+ * the stream stays aligned.
+ */
+function trunkRadius(r: number, a: number, b: number): number {
+  if (!(b > a)) return TRUNK_MIN;
+  return TRUNK_MIN + ((TRUNK_MAX - TRUNK_MIN) * (r - a)) / (b - a);
+}
+
+/** A drawn radius as the obstacle keeps it: a tree's is its trunk (§4.2). */
+function obstacleRadius(kind: ObstacleKind, r: number, a: number, b: number): number {
+  return kind === 'tree' ? trunkRadius(r, a, b) : r;
+}
 
 /** Wrap an angle into (−π, π]. */
 function wrapAngle(a: number): number {
@@ -475,6 +531,10 @@ export function generateLayout(planet: PlanetDef, rng: Rng): Layout {
   const rngOutcrops = rng.fork('outcrops');
   const rngObstacles = rng.fork('obstacles');
   const rngProps = rng.fork('props');
+  // SPEC-053 §4.3: one fork per feature kind.
+  const rngGroves = rng.fork('groves');
+  const rngOrchards = rng.fork('orchards');
+  const rngClusters = rng.fork('clusters');
 
   const pad = { x: 0, z: 0 };
   const pois: LayoutPoi[] = [];
@@ -493,13 +553,21 @@ export function generateLayout(planet: PlanetDef, rng: Rng): Layout {
   }
 
   // SPEC-030: pad → POIs → nodes → shelters → outcrops → obstacles → props.
+  // SPEC-053 §4.3: groves → orchards → clusters between the outcrops and the
+  // scattered obstacles, their pieces appended after the outcrops' rocks.
   const shelters: LayoutShelter[] = [];
   const shelterObstacles: LayoutObstacle[] = [];
   placeShelters(shelters, shelterObstacles);
   const outcropCentres: { x: number; z: number }[] = [];
   placeOutcrops(shelters, outcropCentres, shelterObstacles);
+  const features: LayoutFeature[] = [];
+  const firstPiece = shelterObstacles.length;
+  placeGroves(shelters, outcropCentres, features, shelterObstacles);
+  placeOrchards(shelters, outcropCentres, features, shelterObstacles);
+  placeClusters(shelters, outcropCentres, features, shelterObstacles);
+  const featurePieces = shelterObstacles.slice(firstPiece);
 
-  const obstacles = [...shelterObstacles, ...scatterObstacles(shelters)];
+  const obstacles = [...shelterObstacles, ...scatterObstacles(shelters, featurePieces)];
   const props = scatterProps(obstacles, shelters);
 
   const layout: Layout = {
@@ -513,6 +581,7 @@ export function generateLayout(planet: PlanetDef, rng: Rng): Layout {
     nodes,
     props,
     shelters,
+    features,
   };
   repairReachability(layout);
   layout.hash = layoutHash(layout);
@@ -707,7 +776,8 @@ export function generateLayout(planet: PlanetDef, rng: Rng): Layout {
       for (let attempt = 0; attempt < 20; attempt++) {
         const bearing = rngShelters.angle();
         const d = rngShelters.float(BOULDER_DISTANCE[0], BOULDER_DISTANCE[1]);
-        const radius = rngShelters.float(BOULDER_RADIUS[0], BOULDER_RADIUS[1]);
+        // SPEC-053 §4.2: a tree boulder keeps its draw and takes its trunk.
+        const radius = obstacleRadius(kind, rngShelters.float(BOULDER_RADIUS[0], BOULDER_RADIUS[1]), BOULDER_RADIUS[0], BOULDER_RADIUS[1]);
         const x = shelter.x + Math.cos(bearing) * d;
         const z = shelter.z + Math.sin(bearing) * d;
         // Boulders keep the same entrance cone clear — a 2.4 m rock in the
@@ -755,7 +825,13 @@ export function generateLayout(planet: PlanetDef, rng: Rng): Layout {
       const start = rngOutcrops.angle();
       for (let i = 0; i < rocks; i++) {
         const bearing = start + (rocks === 1 ? 0 : (i / (rocks - 1)) * span);
-        const radius = rngOutcrops.float(OUTCROP_ROCK_RADIUS[0], OUTCROP_ROCK_RADIUS[1]);
+        // SPEC-053 §4.2: on Thessaly and Eden the crescent is trees, and a tree's radius is its trunk.
+        const radius = obstacleRadius(
+          kind,
+          rngOutcrops.float(OUTCROP_ROCK_RADIUS[0], OUTCROP_ROCK_RADIUS[1]),
+          OUTCROP_ROCK_RADIUS[0],
+          OUTCROP_ROCK_RADIUS[1],
+        );
         const x = placedAt.x + Math.cos(bearing) * arcRadius;
         const z = placedAt.z + Math.sin(bearing) * arcRadius;
         // Ordinary obstacles: the corridor, POI, node and pad rules all hold.
@@ -768,7 +844,177 @@ export function generateLayout(planet: PlanetDef, rng: Rng): Layout {
     }
   }
 
-  function scatterObstacles(shelters: readonly LayoutShelter[]): LayoutObstacle[] {
+  // ------------------------------------------------ SPEC-053 §4.3: features
+
+  /**
+   * One centre candidate under an outcrop's rules: bearing and distance drawn
+   * from `stream`, then the edge, POI, node, shelter, outcrop, earlier-feature
+   * and corridor clearances. `null` when the candidate fails them.
+   */
+  function featureCentre(
+    stream: Rng,
+    shelters: readonly LayoutShelter[],
+    outcrops: readonly { x: number; z: number }[],
+    features: readonly LayoutFeature[],
+  ): { x: number; z: number } | null {
+    const bearing = stream.angle();
+    const d = stream.float(OUTCROP_PAD_MIN, half - SHELTER_EDGE_MARGIN);
+    const x = Math.cos(bearing) * d;
+    const z = Math.sin(bearing) * d;
+    if (Math.max(Math.abs(x), Math.abs(z)) > half - SHELTER_EDGE_MARGIN) return null;
+    if (pois.some((poi) => distance(x, z, poi.x, poi.z) < poi.radius + OUTCROP_POI_CLEARANCE)) return null;
+    if (nodes.some((node) => distance(x, z, node.x, node.z) < OUTCROP_NODE_CLEARANCE)) return null;
+    if (shelters.some((s) => distance(x, z, s.x, s.z) < OUTCROP_SEPARATION)) return null;
+    if (outcrops.some((c) => distance(x, z, c.x, c.z) < OUTCROP_SEPARATION)) return null;
+    if (features.some((f) => distance(x, z, f.x, f.z) < OUTCROP_SEPARATION)) return null;
+    if (pois.some((poi) => segmentDistance(x, z, pad.x, pad.z, poi.x, poi.z) < OUTCROP_CORRIDOR_CLEARANCE)) return null;
+    return { x, z };
+  }
+
+  /**
+   * §4.3: a feature piece is an ordinary obstacle — the pad clearing,
+   * `poi.radius + 6 + r` from a POI, `4 + r` from a node, `3 + r + o.radius`
+   * from everything placed before it, off every shelter, out of every corridor.
+   */
+  function pieceClear(x: number, z: number, r: number, placed: readonly LayoutObstacle[], shelters: readonly LayoutShelter[]): boolean {
+    if (Math.hypot(x, z) < PAD_CLEARING) return false;
+    if (pois.some((poi) => distance(x, z, poi.x, poi.z) < poi.radius + OBSTACLE_POI_CLEARANCE + r)) return false;
+    if (nodes.some((node) => distance(x, z, node.x, node.z) < OBSTACLE_NODE_CLEARANCE + r)) return false;
+    if (placed.some((o) => distance(x, z, o.x, o.z) < OBSTACLE_OBSTACLE_CLEARANCE + r + o.radius)) return false;
+    if (shelters.some((s) => distance(x, z, s.x, s.z) < Math.max(s.rx, s.rz) + SHELTER_SCATTER_CLEARANCE)) return false;
+    return !inCorridor(x, z, r);
+  }
+
+  /** A feature whose centre never cleared, or that placed nothing, is skipped: counts are targets. */
+  function skipped(kind: FeatureKind): void {
+    if (import.meta.env.DEV) log.warn('layout', `${kind} skipped on ${planet.id}: nothing fits`);
+  }
+
+  /** §4.3: trees uniform in a disc, to `treesPer1000m2`. */
+  function placeGroves(
+    shelters: readonly LayoutShelter[],
+    outcrops: readonly { x: number; z: number }[],
+    features: LayoutFeature[],
+    walls: LayoutObstacle[],
+  ): void {
+    const spec = surface.features.groves;
+    if (spec === undefined) return;
+    for (let n = 0; n < spec.count; n++) {
+      let centre: { x: number; z: number } | null = null;
+      for (let attempt = 0; attempt < FEATURE_TRIES && centre === null; attempt++) {
+        centre = featureCentre(rngGroves, shelters, outcrops, features);
+      }
+      if (centre === null) {
+        skipped('grove');
+        continue;
+      }
+      const radius = rngGroves.float(spec.radius[0], spec.radius[1]);
+      const want = Math.round((spec.treesPer1000m2 * Math.PI * radius * radius) / 1000);
+      let pieces = 0;
+      for (let c = 0; c < FEATURE_CANDIDATES * want && pieces < want; c++) {
+        const at = rngGroves.inDisc(radius);
+        const trunk = rngGroves.float(TRUNK_MIN, TRUNK_MAX);
+        const x = centre.x + at.x;
+        const z = centre.z + at.z;
+        if (!pieceClear(x, z, trunk, walls, shelters)) continue;
+        walls.push({ x, z, radius: trunk, kind: 'tree', feature: 'grove' });
+        pieces++;
+      }
+      if (pieces === 0) {
+        skipped('grove');
+        continue;
+      }
+      features.push({ kind: 'grove', x: centre.x, z: centre.z, radius, pieces });
+    }
+  }
+
+  /**
+   * §4.3: `rows × cols` trunks on an axis-aligned lattice at exactly `spacing`,
+   * all or nothing — a centre whose lattice has one invalid trunk is a failed
+   * try, and the next centre is drawn.
+   */
+  function placeOrchards(
+    shelters: readonly LayoutShelter[],
+    outcrops: readonly { x: number; z: number }[],
+    features: LayoutFeature[],
+    walls: LayoutObstacle[],
+  ): void {
+    const spec = surface.features.orchards;
+    if (spec === undefined) return;
+    const halfW = ((spec.cols - 1) * spec.spacing) / 2;
+    const halfD = ((spec.rows - 1) * spec.spacing) / 2;
+    for (let n = 0; n < spec.count; n++) {
+      let lattice: LayoutObstacle[] | null = null;
+      let centre: { x: number; z: number } | null = null;
+      for (let attempt = 0; attempt < FEATURE_TRIES && lattice === null; attempt++) {
+        centre = featureCentre(rngOrchards, shelters, outcrops, features);
+        if (centre === null) continue;
+        const trunks: LayoutObstacle[] = [];
+        let whole = true;
+        for (let i = 0; i < spec.rows && whole; i++) {
+          for (let j = 0; j < spec.cols && whole; j++) {
+            const x = centre.x + (j - (spec.cols - 1) / 2) * spec.spacing;
+            const z = centre.z + (i - (spec.rows - 1) / 2) * spec.spacing;
+            const crowded = trunks.some(
+              (t) => distance(x, z, t.x, t.z) < OBSTACLE_OBSTACLE_CLEARANCE + ORCHARD_TRUNK_RADIUS + t.radius,
+            );
+            whole = !crowded && pieceClear(x, z, ORCHARD_TRUNK_RADIUS, walls, shelters);
+            if (whole) trunks.push({ x, z, radius: ORCHARD_TRUNK_RADIUS, kind: 'tree', feature: 'orchard' });
+          }
+        }
+        if (whole) lattice = trunks;
+      }
+      if (lattice === null || centre === null) {
+        skipped('orchard');
+        continue;
+      }
+      walls.push(...lattice);
+      features.push({ kind: 'orchard', x: centre.x, z: centre.z, radius: Math.hypot(halfW, halfD), halfW, halfD, pieces: lattice.length });
+    }
+  }
+
+  /** §4.3: `pieces` of the planet's two kinds, within `spread` of the centre. */
+  function placeClusters(
+    shelters: readonly LayoutShelter[],
+    outcrops: readonly { x: number; z: number }[],
+    features: LayoutFeature[],
+    walls: LayoutObstacle[],
+  ): void {
+    const spec = surface.features.clusters;
+    if (spec === undefined) return;
+    const [primary, secondary] = BIOME_OBSTACLES[planet.biome];
+    const lo = CLUSTER_RADIUS_SCALE * surface.obstacles.minRadius;
+    const hi = CLUSTER_RADIUS_SCALE * surface.obstacles.maxRadius;
+    for (let n = 0; n < spec.count; n++) {
+      let centre: { x: number; z: number } | null = null;
+      for (let attempt = 0; attempt < FEATURE_TRIES && centre === null; attempt++) {
+        centre = featureCentre(rngClusters, shelters, outcrops, features);
+      }
+      if (centre === null) {
+        skipped('cluster');
+        continue;
+      }
+      const want = rngClusters.int(spec.pieces[0], spec.pieces[1]);
+      let pieces = 0;
+      for (let c = 0; c < FEATURE_CANDIDATES * want && pieces < want; c++) {
+        const at = rngClusters.inDisc(spec.spread);
+        const kind = rngClusters.chance(CLUSTER_PRIMARY) ? primary : secondary;
+        const radius = obstacleRadius(kind, rngClusters.float(lo, hi), lo, hi);
+        const x = centre.x + at.x;
+        const z = centre.z + at.z;
+        if (!pieceClear(x, z, radius, walls, shelters)) continue;
+        walls.push({ x, z, radius, kind, feature: 'cluster' });
+        pieces++;
+      }
+      if (pieces === 0) {
+        skipped('cluster');
+        continue;
+      }
+      features.push({ kind: 'cluster', x: centre.x, z: centre.z, radius: spec.spread, pieces });
+    }
+  }
+
+  function scatterObstacles(shelters: readonly LayoutShelter[], featurePieces: readonly LayoutObstacle[]): LayoutObstacle[] {
     const spec = surface.obstacles;
     const area = (half * 2) ** 2;
     const attempts = Math.round((spec.density * area) / 1000);
@@ -777,12 +1023,16 @@ export function generateLayout(planet: PlanetDef, rng: Rng): Layout {
     for (let i = 0; i < attempts; i++) {
       const x = rngObstacles.float(-half, half);
       const z = rngObstacles.float(-half, half);
-      const radius = rngObstacles.float(spec.minRadius, spec.maxRadius);
+      const drawn = rngObstacles.float(spec.minRadius, spec.maxRadius);
       const kind = rngObstacles.chance(0.7) ? kinds[0] : kinds[1];
+      // SPEC-053 §4.2: the same draws, a tree keeping its trunk.
+      const radius = obstacleRadius(kind, drawn, spec.minRadius, spec.maxRadius);
       if (Math.hypot(x, z) < PAD_CLEARING) continue;
       if (pois.some((poi) => distance(x, z, poi.x, poi.z) < radius + OBSTACLE_POI_CLEARANCE)) continue;
       if (nodes.some((node) => distance(x, z, node.x, node.z) < radius + OBSTACLE_NODE_CLEARANCE)) continue;
       if (out.some((o) => distance(x, z, o.x, o.z) < radius + o.radius + OBSTACLE_OBSTACLE_CLEARANCE)) continue;
+      // SPEC-053 E81: 3 m plus both radii from every feature piece too.
+      if (featurePieces.some((o) => distance(x, z, o.x, o.z) < radius + o.radius + OBSTACLE_OBSTACLE_CLEARANCE)) continue;
       // SPEC-030 AC-13: nothing scatters onto a shelter.
       if (shelters.some((s) => distance(x, z, s.x, s.z) < Math.max(s.rx, s.rz) + SHELTER_SCATTER_CLEARANCE)) continue;
       // E17: the corridor — nothing lands within (r + 8) of any pad→POI segment.
@@ -856,10 +1106,36 @@ export function repairReachability(layout: Layout): number {
       }
     }
     if (worstIndex < 0) return removed; // nothing left to remove
+    const gone = layout.obstacles[worstIndex] as LayoutObstacle;
+    // SPEC-053 53-e: a feature piece leaves a gap — an orchard with one is
+    // still an orchard — and its feature's count follows, so `pieces` stays
+    // the number of its tagged obstacles.
+    if (gone.feature !== undefined) {
+      const owner = featureOf(layout, worstIndex);
+      if (owner !== null) owner.pieces--;
+      if (import.meta.env.DEV) {
+        log.warn('layout', `repair removed a ${gone.feature} piece at ${gone.x.toFixed(1)}, ${gone.z.toFixed(1)} on ${layout.planet}`);
+      }
+    }
     layout.obstacles.splice(worstIndex, 1);
     removed++;
   }
   return removed;
+}
+
+/**
+ * The feature that placed the tagged obstacle at `index`: features append
+ * their pieces in their own order, one contiguous run each, and `pieces` is
+ * each run's length — so the tagged obstacles before it say whose it is.
+ */
+function featureOf(layout: Layout, index: number): LayoutFeature | null {
+  let before = 0;
+  for (let i = 0; i < index; i++) if ((layout.obstacles[i] as LayoutObstacle).feature !== undefined) before++;
+  for (const feature of layout.features) {
+    if (before < feature.pieces) return feature;
+    before -= feature.pieces;
+  }
+  return null;
 }
 
 function firstUnreachable(layout: Layout): { x: number; z: number } | null {
@@ -876,7 +1152,11 @@ function firstUnreachable(layout: Layout): { x: number; z: number } | null {
   return null;
 }
 
-/** §4.2: `hash32` over every placed position rounded to 0.01 (AC-1). */
+/**
+ * §4.2: `hash32` over every placed position rounded to 0.01 (AC-1). SPEC-053
+ * §4.3: feature pieces count through `obstacles`; neither an obstacle's
+ * `feature` tag nor `layout.features` is read.
+ */
 export function layoutHash(layout: Layout): number {
   const parts: number[] = [];
   const push = (v: number): void => {
