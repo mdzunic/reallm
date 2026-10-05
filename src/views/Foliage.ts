@@ -127,6 +127,16 @@ const DITHER_FRAGMENT = /* glsl */ `#include <alphatest_fragment>
 	if ( ditherD >= vFade ) discard;
 	if ( gl_FragCoord.z < uCutout.w && distance( gl_FragCoord.xy, uCutout.xy ) < uCutout.z * ( 0.75 + 0.25 * ditherD ) ) discard;`;
 
+/**
+ * Both faces of a card light by its authored normal: SPEC-052 bends the
+ * leaves' normals out of the canopy and the clumps' point up, and three's
+ * double-sided flip would turn every card seen from behind dark.
+ */
+const TWO_SIDED_NORMAL = /* glsl */ `#include <normal_fragment_begin>
+#if defined( DOUBLE_SIDED ) && ! defined( FLAT_SHADED )
+	normal = normalize( vNormal );
+#endif`;
+
 /** The atlas samples with v down from the top-left, as glTF does (SPEC-052 §3.3). */
 function useAtlas(atlas: THREE.Texture): void {
   if (atlas.flipY) {
@@ -167,7 +177,8 @@ export function createFoliageMaterial(atlas: THREE.Texture, tint: string): Folia
       .replace('#include <begin_vertex>', `${WIND_VERTEX}\n\tvFade = instanceFade;`);
     shader.fragmentShader = shader.fragmentShader
       .replace('#include <common>', `#include <common>\nuniform vec4 uCutout;\nvarying float vFade;${BAYER_GLSL}`)
-      .replace('#include <alphatest_fragment>', DITHER_FRAGMENT);
+      .replace('#include <alphatest_fragment>', DITHER_FRAGMENT)
+      .replace('#include <normal_fragment_begin>', TWO_SIDED_NORMAL);
   };
   material.customProgramCacheKey = () => 'foliage/1';
   return material;
@@ -202,6 +213,7 @@ export function createCoverMaterial(atlas: THREE.Texture): FoliageMaterial {
 #endif`,
       )
       .replace('#include <begin_vertex>', WIND_VERTEX);
+    shader.fragmentShader = shader.fragmentShader.replace('#include <normal_fragment_begin>', TWO_SIDED_NORMAL);
   };
   material.customProgramCacheKey = () => 'cover/1';
   return material;

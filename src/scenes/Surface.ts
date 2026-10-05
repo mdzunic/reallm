@@ -989,6 +989,8 @@ export class SurfaceScene extends UiScene<'surface'> {
 
   /** SPEC-040 §4.6: the planet's set, loading since `enter()`; `null` before it. */
   #planetAssets: Promise<void> | null = null;
+  /** SPEC-053 §4.10 (dev): the trunk `surface-goto-grove` last stood the salvager beside — `sceneInfo.groveX/Z/R`. */
+  #groveTree: { x: number; z: number; radius: number } | null = null;
   /** SPEC-053 §4.1.2: `SurfaceFrame.screen`, one object rewritten every rendered frame. */
   readonly #screenFrame: { camera: THREE.PerspectiveCamera; width: number; height: number } = {
     camera: this.camera,
@@ -2210,6 +2212,12 @@ export class SurfaceScene extends UiScene<'surface'> {
       info['treeSource'] = view.treeSource;
       info['wind'] = Math.round(view.wind * 10_000) / 10_000;
       if (view.seamAt !== null) info['seamAt'] = Math.round(view.seamAt * 100) / 100;
+    }
+    const grove = this.#groveTree;
+    if (grove !== null) {
+      info['groveX'] = Math.round(grove.x * 100) / 100;
+      info['groveZ'] = Math.round(grove.z * 100) / 100;
+      info['groveR'] = Math.round(grove.radius * 100) / 100;
     }
     // SPEC-035 §4.3: the surface's own bloom threshold, which the shared default
     // (0.85) is not — a whiteout is otherwise a claim about a post uniform
@@ -4539,6 +4547,7 @@ export class SurfaceScene extends UiScene<'surface'> {
       }
     }
     if (tree === null) return;
+    this.#groveTree = tree;
     const p = world.player;
     let x = tree.x + tree.radius + 1;
     for (let step = 0; step < 40 && world.obstacles.hitsCircle(x, tree.z, p.radius); step++) x += 0.5;
