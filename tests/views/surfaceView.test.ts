@@ -2010,6 +2010,22 @@ describe('SPEC-053 — trees through the foliage seam, the canopy fade, the cut-
       const cells = new Set<number>();
       const attribute = undergrowth.geometry.getAttribute('uvCell') as THREE.BufferAttribute;
       for (let i = 0; i < undergrowth.count; i++) cells.add(attribute.getX(i));
+      // Never inside an obstacle + 0.4, a POI + 1, a node + 1.5 or the pad's 15 m; 1–2 m across.
+      const matrix = new THREE.Matrix4();
+      const position = new THREE.Vector3();
+      const scale = new THREE.Vector3();
+      for (let i = 0; i < undergrowth.count; i++) {
+        undergrowth.getMatrixAt(i, matrix);
+        matrix.decompose(position, new THREE.Quaternion(), scale);
+        const { x, z } = position;
+        expect(Math.hypot(x, z)).toBeGreaterThanOrEqual(15);
+        for (const o of GROVE.obstacles) expect(Math.hypot(x - o.x, z - o.z)).toBeGreaterThanOrEqual(o.radius + 0.4);
+        for (const poi of GROVE.pois) expect(Math.hypot(x - poi.x, z - poi.z)).toBeGreaterThanOrEqual(poi.radius + 1);
+        for (const node of GROVE.nodes) expect(Math.hypot(x - node.x, z - node.z)).toBeGreaterThanOrEqual(1.5);
+        expect(scale.x * 1.25).toBeGreaterThanOrEqual(1 - 1e-6);
+        expect(scale.x * 1.25).toBeLessThanOrEqual(2 + 1e-6);
+        expect(position.y).toBeCloseTo(view.field.heightAt(x, z), 5);
+      }
       view.dispose();
       return { total: undergrowth.count, cells };
     };
