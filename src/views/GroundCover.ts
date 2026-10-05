@@ -69,7 +69,7 @@ interface MownRect {
   readonly maxZ: number;
 }
 
-/** Marks every mask cell whose centre passes `inside`, over the box (x0, z0)–(x1, z1). */
+/** Marks every mask cell over the box (x0, z0)–(x1, z1) for which `inside(cell centre)` holds. */
 function mark(
   mask: BlockedMask,
   grid: Uint8Array,
@@ -92,14 +92,30 @@ function mark(
   }
 }
 
-function markDisc(mask: BlockedMask, grid: Uint8Array, cx: number, cz: number, r: number): void {
-  mark(mask, grid, cx - r, cz - r, cx + r, cz + r, (x, z) => (x - cx) ** 2 + (z - cz) ** 2 <= r * r);
+/**
+ * Blocks every cell the disc reaches — any part of the square within `r` —
+ * so no point of an unblocked cell lies inside it: a 0.5 m trunk grown by
+ * 0.6 m can sit where no cell centre is within 1.1 m of it.
+ */
+function blockDisc(mask: BlockedMask, cx: number, cz: number, r: number): void {
+  const half = mask.cell / 2;
+  mark(mask, mask.bits, cx - r, cz - r, cx + r, cz + r, (x, z) => {
+    const nx = Math.max(x - half, Math.min(cx, x + half));
+    const nz = Math.max(z - half, Math.min(cz, z + half));
+    return (nx - cx) ** 2 + (nz - cz) ** 2 <= r * r;
+  });
+}
+
+/** Marks the canopy cells: those whose centre lies within `r` of a tree. */
+function markCanopy(mask: BlockedMask, cx: number, cz: number, r: number): void {
+  mark(mask, mask.canopy, cx - r, cz - r, cx + r, cz + r, (x, z) => (x - cx) ** 2 + (z - cz) ** 2 <= r * r);
 }
 
 /**
- * §4.5, built once per view: POIs + 2 m and the pad's 15 m, nodes + 1.5 m,
- * every obstacle circle + 0.6 m and every shelter's footprint + 1 m are
- * blocked; the ground within 0.8 × a tree's canopy radius is canopy.
+ * §4.5, built once per view: every cell that POIs + 2 m and the pad's 15 m,
+ * nodes + 1.5 m, every obstacle circle + 0.6 m or a shelter's footprint + 1 m
+ * reaches is blocked, so no clump of an unblocked cell stands inside one; the
+ * cells whose centre is within 0.8 × a tree's canopy radius are canopy.
  */
 export function buildBlockedMask(layout: ViewLayout): BlockedMask {
   const n = Math.ceil((layout.halfSize * 2) / MASK_CELL);
@@ -110,21 +126,26 @@ export function buildBlockedMask(layout: ViewLayout): BlockedMask {
     bits: new Uint8Array(n * n),
     canopy: new Uint8Array(n * n),
   };
-  markDisc(mask, mask.bits, 0, 0, MASK_PAD);
-  for (const poi of layout.pois) markDisc(mask, mask.bits, poi.x, poi.z, poi.radius + MASK_POI);
-  for (const node of layout.nodes) markDisc(mask, mask.bits, node.x, node.z, MASK_NODE);
+  blockDisc(mask, 0, 0, MASK_PAD);
+  for (const poi of layout.pois) blockDisc(mask, poi.x, poi.z, poi.radius + MASK_POI);
+  for (const node of layout.nodes) blockDisc(mask, node.x, node.z, MASK_NODE);
   for (const o of layout.obstacles) {
-    markDisc(mask, mask.bits, o.x, o.z, o.radius + MASK_OBSTACLE);
-    if (o.kind === 'tree') markDisc(mask, mask.canopy, o.x, o.z, (CANOPY_REACH * o.radius) / TRUNK_UNIT_RADIUS);
+    blockDisc(mask, o.x, o.z, o.radius + MASK_OBSTACLE);
+    if (o.kind === 'tree') markCanopy(mask, o.x, o.z, (CANOPY_REACH * o.radius) / TRUNK_UNIT_RADIUS);
   }
+  // A shelter's ellipse grown by its 1 m and then by a cell's half-diagonal,
+  // tested at cell centres: every cell the grown footprint reaches is blocked.
+  const halfDiagonal = (mask.cell * Math.SQRT2) / 2;
   for (const s of layout.shelters) {
-    const reach = Math.max(s.rx, s.rz) + MASK_SHELTER;
+    const rx = s.rx + MASK_SHELTER + halfDiagonal;
+    const rz = s.rz + MASK_SHELTER + halfDiagonal;
+    const reach = Math.max(rx, rz);
     const cos = Math.cos(-s.angle);
     const sin = Math.sin(-s.angle);
     mark(mask, mask.bits, s.x - reach, s.z - reach, s.x + reach, s.z + reach, (x, z) => {
       const u = (x - s.x) * cos - (z - s.z) * sin;
       const v = (x - s.x) * sin + (z - s.z) * cos;
-      return (u / (s.rx + MASK_SHELTER)) ** 2 + (v / (s.rz + MASK_SHELTER)) ** 2 <= 1;
+      return (u / rx) ** 2 + (v / rz) ** 2 <= 1;
     });
   }
   return mask;

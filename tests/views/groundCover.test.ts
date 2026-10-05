@@ -81,7 +81,7 @@ describe('buildBlockedMask (§4.5)', () => {
     expect(blockedAt(13, 0)).toBe(true);
     expect(blockedAt(-40 + 9, 30)).toBe(true); // within 8 + 2 of the scan
     expect(blockedAt(50, 50)).toBe(true);
-    // A cell is blocked when its centre is inside the grown shape.
+    // A cell is blocked when the grown shape reaches it.
     expect(blockedAt(-20 + 1.5, -50)).toBe(true); // the cell centred 1 m from the 2 m rock
     expect(blockedAt(-60 + 5, 60)).toBe(true); // the cell centred 5.1 m from a 6 m cave: inside + 1
     expect(blockedAt(0, 60)).toBe(false); // open ground
@@ -145,6 +145,53 @@ describe('coverCandidates (§4.5)', () => {
       }
     }
     expect(seen).toBeGreaterThan(1000);
+  });
+});
+
+describe('the mask keeps every clump out of what it blocks (§4.5)', () => {
+  // A trunk on a mask-cell corner: no 2 m cell centre is within its 0.5 + 0.6 m.
+  // Another exactly on a mown-lattice point of the orchard below: corner (37, −76), 1.8 m steps.
+  const corner = { x: 40, z: 40, radius: 0.5, kind: 'tree' as const };
+  const onLattice = { x: 37 + 5 * 1.8, z: -76 + 5 * 1.8, radius: 0.5, kind: 'tree' as const, feature: 'orchard' as const };
+  const layout: ViewLayout = { ...LAYOUT, obstacles: [...LAYOUT.obstacles, corner, onLattice] };
+  const blocked = buildBlockedMask(layout);
+
+  function clear(x: number, z: number): string | null {
+    if (Math.hypot(x, z) < 15) return 'the pad';
+    for (const o of layout.obstacles) if (Math.hypot(x - o.x, z - o.z) < o.radius + 0.6) return `${o.kind} at ${o.x}, ${o.z}`;
+    for (const poi of layout.pois) if (Math.hypot(x - poi.x, z - poi.z) < poi.radius + 2) return `${poi.kind}`;
+    for (const node of layout.nodes) if (Math.hypot(x - node.x, z - node.z) < 1.5) return 'a node';
+    for (const shelter of layout.shelters) {
+      if (((x - shelter.x) / (shelter.rx + 1)) ** 2 + ((z - shelter.z) / (shelter.rz + 1)) ** 2 <= 1) return 'a shelter';
+    }
+    return null;
+  }
+
+  it('blocks every cell a trunk + 0.6 m reaches, even one on a cell corner', () => {
+    const at = (x: number, z: number): number => blocked.bits[Math.floor((z - blocked.origin) / 2) * blocked.n + Math.floor((x - blocked.origin) / 2)] as number;
+    for (const [dx, dz] of [[-0.5, -0.5], [0.5, -0.5], [-0.5, 0.5], [0.5, 0.5]] as const) expect(at(40 + dx, 40 + dz)).toBe(1);
+  });
+
+  it('writes no cover or mown clump inside an obstacle + 0.6 m, a POI + 2 m, a node + 1.5 m, the pad’s 15 m or a shelter + 1 m', () => {
+    const out = new Float32Array(COVER_CELL_MAX * COVER_STRIDE);
+    const problems: string[] = [];
+    let seen = 0;
+    for (let cz = -12; cz < 12; cz++) {
+      for (let cx = -12; cx < 12; cx++) {
+        for (const mown of [false, true]) {
+          const n = mown ? mownCandidates(37, -76, cx, cz, blocked, out) : coverCandidates(11, cx, cz, LOOK, blocked, out);
+          for (let k = 0; k < n; k++) {
+            const x = out[k * COVER_STRIDE] as number;
+            const z = out[k * COVER_STRIDE + 1] as number;
+            const inside = clear(x, z);
+            if (inside !== null) problems.push(`${mown ? 'mown' : 'cover'} clump at ${x.toFixed(2)}, ${z.toFixed(2)} inside ${inside}`);
+            seen++;
+          }
+        }
+      }
+    }
+    expect(seen).toBeGreaterThan(2000);
+    expect(problems).toEqual([]);
   });
 });
 
