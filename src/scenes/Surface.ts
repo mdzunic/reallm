@@ -1432,7 +1432,18 @@ export class SurfaceScene extends UiScene<'surface'> {
     // preset change from the pause menu reaches the shadow map and the
     // environment while the player is standing on the planet.
     this.disposer.add(
-      services.events.on('renderer:resized', () => view.applyQuality(services.renderer.quality), this),
+      services.events.on(
+        'renderer:resized',
+        () => {
+          const mode = view.flashlightMode;
+          view.applyQuality(services.renderer.quality);
+          // SPEC-054 54-g: a flashlight rebuilt in the preset's mode may have
+          // moved the light count — the programs recompile now, as at the
+          // first descent, rather than at the next draw.
+          if (mode !== null && view.flashlightMode !== mode) services.renderer.gl.compile(this.scene, this.camera);
+        },
+        this,
+      ),
     );
     this.props = this.scene.children.length;
 
@@ -3132,9 +3143,13 @@ export class SurfaceScene extends UiScene<'surface'> {
     const missions = this.#missions as Missions;
 
     // AC-26 / 12-i: an active survive stage forces its storm, after the grace.
+    // SPEC-054 §4.9 (E83): not below — a stage that starts there forces its
+    // storm on the ascent, with its waves and its clock.
+    const below = this.#level?.id === 'underground';
     const required = missions.requiredWeather();
     if (
       required !== null &&
+      !below &&
       this.elapsed >= FORCED_WEATHER_GRACE &&
       weather.current !== required.weather &&
       missions.bossStage() === null &&
@@ -3152,7 +3167,6 @@ export class SurfaceScene extends UiScene<'surface'> {
     // cycled storm, forced storm and avalanche burst alike (AC-20). SPEC-043
     // §4.3 (43-f): not under `no_cover` — the storm reaches the player inside.
     // SPEC-054 §4.4: below, nothing of the storm reaches the player; its clock runs on above.
-    const below = this.#level?.id === 'underground';
     if (dps > 0 && world.player.alive && weather.current !== null && !below && (this.#insideShelter === null || this.#noCover)) {
       // Combat applies hazardResist and the hazard-immunity window (§4.6).
       this.#combat?.damagePlayer(dps * dt, { kind: 'weather', weather: weather.current }, true);

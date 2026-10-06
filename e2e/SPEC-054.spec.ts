@@ -203,6 +203,31 @@ test.describe('SPEC-054 the underground', () => {
     expect((await info(page))['recalls']).toBe(Number(recalls) + 1);
   });
 
+  // E83. Waterless opens on a hunt, so the descent is allowed; the dev
+  // shortcut finishes the hunt below, and its survive stage — 90 s under a
+  // forced heatwave, with its storm wave — starts down there.
+  test('E83: a stage that starts below holds its clock, its storm and its wave until the ascent, and says the way up', async ({ page }) => {
+    await start(page, '/?debug');
+    await land(page, 'cinder4', { done: ['c1_m1'], active: { id: 'c1_s2', stage: 0, counters: {} } });
+    await descend(page);
+    await tap(page, 'surface-finish-stage');
+    const tracker = page.locator('[data-testid="objective-tracker"]');
+    await expect(tracker).toContainText('Stage 2/2', SLOW);
+    await expect(tracker).toContainText(/Return to the surface — \d+ m/, SLOW);
+    // Five seconds on the game's clock below — a calm Cinder-4 rolls 90 s at least.
+    const from = Number((await info(page))['viewTime']);
+    await page.waitForFunction((t) => Number(window.__reallm.stats().sceneInfo?.['viewTime']) >= t + 5, from, SLOW);
+    expect(await info(page)).toMatchObject({ level: 'underground', stormWave: '-', weatherPhase: 'calm' });
+
+    await tap(page, 'surface-ascend');
+    await untilInfo(page, 'level', 'surface');
+    await untilInfo(page, 'held', 0);
+    await untilInfo(page, 'stormWave', 'cinder4_storm');
+    await untilInfo(page, 'weatherPhase', 'active');
+    // The 90 s start at the ascent: had they run below, 5 of them would be gone.
+    await expect(tracker).toContainText(/Waterless — Survive \((90|89|88) s\)/, SLOW);
+  });
+
   test('7: a running clock refuses the descent with its reason', async ({ page }) => {
     await start(page, '/?debug');
     await land(page, 'cinder4', { done: ['c1_m1'], active: { id: 'c1_s2', stage: 1, counters: {} } });
