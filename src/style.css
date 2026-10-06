@@ -3014,6 +3014,14 @@ html.reduce-motion .selection-stamp {
   color: var(--ink-dim);
 }
 
+/* SPEC-059 §4.5.5: the card's share, left of its Continue. */
+.selection-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 10px;
+}
+
 html.reduce-motion .overlay-loading::before {
   animation: none;
 }
@@ -3082,6 +3090,17 @@ html.debug .scene-tag {
 }
 
 .menu-buttons .ui-btn {
+  pointer-events: auto;
+}
+
+/* SPEC-059 §4.5.5: the escaped run's Selection card, under the button column. */
+.menu-share {
+  display: flex;
+  justify-content: center;
+  min-width: min(280px, 80vw);
+}
+
+.menu-share .ui-btn {
   pointer-events: auto;
 }
 
@@ -3834,6 +3853,19 @@ html.debug .scene-tag {
 .char-title {
   margin: 0;
   font-weight: 700;
+}
+
+/* SPEC-059 §4.5.5: the Selection card's share, in the panel's title row. */
+.char-title .share-btn {
+  margin-left: 12px;
+  vertical-align: middle;
+  font-weight: 400;
+}
+
+/* SPEC-059 §4.5.5: after an interlude, in the station's head. */
+.screen-head-text .share-btn {
+  align-self: flex-start;
+  margin-top: 4px;
 }
 
 .char-stats {

@@ -48,6 +48,7 @@ import { confirmSheet } from '@/ui/ConfirmSheet';
 import { el, h, keepFocus, testId, type UiRoot } from '@/ui/dom';
 import { itemIcon } from '@/ui/ItemIcon';
 import { portraitManifest, portraitSource } from '@/ui/portraits';
+import { shareButton, type PreparedCard } from '@/ui/ShareCard';
 
 /** SPEC-039 §4.7: the `char-attrs` line's order and names. */
 const ATTRIBUTE_NAMES: readonly [keyof Attributes, string][] = [
@@ -64,6 +65,8 @@ export interface CharacterDeps {
   economy: Economy;
   /** SPEC-056 §4.6: this device's unlocked swatches (`settings.unlocks`); none when absent. */
   unlocks?: () => readonly string[];
+  /** SPEC-059 §4.5.5: the Selection card drawn when the tab opened — `char-share` in the title row. */
+  share?: PreparedCard;
 }
 
 /** SPEC-056 §4.3: an item's twist line, `''` for anything that is not a relic. */
@@ -81,10 +84,13 @@ export class CharacterPanel {
   #changing: WeaponSlot | 'armor' | null = null;
   /** SPEC-020 §4.6: the portrait files that shipped; empty means glyphs. */
   #available: ReadonlySet<number> = new Set();
+  /** SPEC-059 §4.5.5: the share button, built once and kept across re-renders. */
+  readonly #share: HTMLButtonElement | null;
 
   constructor(container: HTMLElement, deps: CharacterDeps) {
     this.#container = container;
     this.#deps = deps;
+    this.#share = deps.share === undefined ? null : shareButton('char-share', deps.share, deps.ui);
     this.refresh();
     // The manifest is a session-memoised fetch, so this is one request per
     // run at most; a panel the player has already tabbed away from is gone
@@ -139,6 +145,8 @@ export class CharacterPanel {
           'character-portrait',
         ),
         `${player.name} — Lv ${player.level}`,
+        // A card that could not be drawn hides its button for good.
+        this.#share !== null && !this.#share.hidden ? this.#share : null,
       ),
       // SPEC-042 §4.7: what the HUD's 6 px bar has no room to say.
       testId(h('p', { class: 'char-xp' }, characterXpText(player.level, player.xp)), 'character-xp'),

@@ -242,6 +242,7 @@ import { confirmSheet } from '@/ui/ConfirmSheet';
 import { DamageNumbers } from '@/ui/DamageNumbers';
 import { ELITE_PLATE_SLOTS, ElitePlates } from '@/ui/ElitePlates';
 import { RemainsTag } from '@/ui/RemainsTag';
+import { prepareSaveCard } from '@/ui/ShareCard';
 import { DeathOverlay } from '@/ui/DeathOverlay';
 import { dialogueLayer, type DialogueUI } from '@/ui/DialogueUI';
 import { el, h, keepFocus, openModal, shortScreen, testId } from '@/ui/dom';
@@ -3943,11 +3944,15 @@ export class SurfaceScene extends UiScene<'surface'> {
       // SPEC-058 §4.7: the Selection card stamps the next number with the
       // player's own name, and only after it is the ending seen — a reload
       // during it replays the film, the report and the card at the station.
-      await overlay.playSelectionCard({
-        number: instanceNumber(save.meta.iteration) + 1,
-        name: save.player.name,
-        portrait: save.player.appearance.portrait,
-      });
+      // SPEC-059 §4.5.5: with the run's own card to share, drawn as it mounts.
+      await overlay.playSelectionCard(
+        {
+          number: instanceNumber(save.meta.iteration) + 1,
+          name: save.player.name,
+          portrait: save.player.appearance.portrait,
+        },
+        prepareSaveCard(save, services.settings.get().commendations),
+      );
       if (!this.#alive) return;
       save.progress.endingSeen = true;
       services.save.request('mission');

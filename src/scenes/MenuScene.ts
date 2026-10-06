@@ -21,9 +21,11 @@ import { Progression } from '@/systems/Progression';
 import { applySupplies, EMPTY_CODE, pushCode } from '@/systems/Service';
 import { RECORDS, recordsOffText } from '@/systems/Records';
 import { awayMs, previouslyCard, RESUME_WINDOW_MS, resumeTarget } from '@/systems/Resume';
+import { shareAtMenu } from '@/systems/Share';
 import { archiveLine, beginInstanceText, NEWER_SAVE_TEXT, nextInstanceSheet, restoreArchiveSheet, slotLine } from '@/systems/UiHelpers';
 import { confirmSheet } from '@/ui/ConfirmSheet';
 import { openResumeCard } from '@/ui/ResumeCard';
+import { prepareSaveCard, shareButton } from '@/ui/ShareCard';
 import { el, h, keepFocus, testId, topModal } from '@/ui/dom';
 import { SavePanel } from '@/ui/SavePanel';
 import { SettingsPanel } from '@/ui/SettingsPanel';
@@ -88,6 +90,8 @@ export class MenuScene extends UiScene<'menu'> {
   #leaving = false;
   /** SPEC-059 §4.1.3: the "previously" card is up, waiting for its answer. */
   #asking = false;
+  /** SPEC-059 §4.5.5: the escaped save's share, keyed by the save it was drawn for. */
+  #share: { key: string; box: HTMLDivElement } | null = null;
 
   constructor(services: GameServices) {
     super(services, 'menu', 'menu');
@@ -336,6 +340,7 @@ export class MenuScene extends UiScene<'menu'> {
     this.disposer.add(() => {
       this.#releaseSub?.();
       this.#releaseSub = null;
+      this.#share = null;
       this.ui.unmount(screen.root);
       screen.dispose();
       this.#root = null;
@@ -375,6 +380,7 @@ export class MenuScene extends UiScene<'menu'> {
   #rebuild(): void {
     if (this.#buttons === null) return;
     const continueTarget = this.#continueTarget();
+    this.#syncShare(continueTarget);
     const buttons = [
       // AC-2: hidden — not built at all — when there is nothing to continue.
       continueTarget === null
@@ -396,6 +402,32 @@ export class MenuScene extends UiScene<'menu'> {
     this.#buttons.replaceChildren(...buttons.filter((button): button is HTMLButtonElement => button !== null));
     this.#renderSub();
     this.#savePanel?.refresh();
+  }
+
+  /**
+   * SPEC-059 §4.5.5: `ending-share` under the button column while the save
+   * Continue would enter has escaped and not yet played its restore lines
+   * (`shareAtMenu`). The card is drawn on the first render that shows it and
+   * kept while the same save is the one shown; the element is in the column
+   * only while it shows, so the buttons never move for an empty slot.
+   */
+  #syncShare(target: { slot: SlotId; data: Save } | 'bound' | null): void {
+    const data = target === null ? null : target === 'bound' ? this.services.save.current : target.data;
+    const buttons = this.#buttons;
+    if (data === null || buttons === null || !shareAtMenu(data)) {
+      this.#share?.box.remove();
+      this.#share = null;
+      return;
+    }
+    const key = `${data.meta.slot}:${data.meta.updatedAt}`;
+    if (this.#share?.key !== key) {
+      this.#share?.box.remove();
+      const card = prepareSaveCard(data, this.services.settings.get().commendations);
+      const box = el('div', 'menu-share');
+      box.append(shareButton('ending-share', card, this.ui));
+      this.#share = { key, box };
+    }
+    if (this.#share.box.previousElementSibling !== buttons) buttons.after(this.#share.box);
   }
 
   /**

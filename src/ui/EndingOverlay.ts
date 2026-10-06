@@ -11,8 +11,9 @@
 //     cut, not a fade — the same states, nothing animated. SPEC-058 §4.7: the
 //     number is the run's own (`escapePromptText`).
 import { instanceNumber } from '@/systems/StoryContext';
-import { el, h, openModal, testId } from '@/ui/dom';
+import { el, h, openModal, testId, uiLayers } from '@/ui/dom';
 import { portraitManifest, portraitSource } from '@/ui/portraits';
+import { shareButton, type PreparedCard } from '@/ui/ShareCard';
 
 /** ~3 s of degradation (AC-105); a single beat when motion is reduced. */
 export const ESCAPE_SEQUENCE_MS = 3000;
@@ -113,8 +114,11 @@ export class EndingOverlay {
    * visored cards. Opened through `openModal` with the focus on its Continue;
    * the stamp lands with a 0.3 s scale, and under reduce motion is simply
    * there. Resolves on `ending-card-continue`.
+   *
+   * SPEC-059 §4.5.5: with a prepared Selection card — the share kind, drawn
+   * as this card mounts — `ending-share` sits left of the Continue.
    */
-  playSelectionCard(model: SelectionCardModel): Promise<void> {
+  playSelectionCard(model: SelectionCardModel, share?: PreparedCard): Promise<void> {
     return new Promise((resolve) => {
       const card = testId(el('div', 'overlay-panel overlay-ending overlay-selection is-visible'), 'ending-card');
       card.setAttribute('role', 'dialog');
@@ -157,7 +161,7 @@ export class EndingOverlay {
         testId(h('p', { class: 'selection-name' }, model.name), 'ending-card-name'),
         stamp,
         testId(h('p', { class: 'selection-mail' }, SELECTION_MAIL_TEXT), 'ending-card-mail'),
-        next,
+        share === undefined ? next : h('div', { class: 'selection-actions' }, shareButton('ending-share', share, uiLayers(this.#host)), next),
       );
       card.append(body);
       this.#host.append(card);

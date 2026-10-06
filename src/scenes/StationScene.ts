@@ -49,6 +49,7 @@ import { clearEndingOverlays, EndingOverlay } from '@/ui/EndingOverlay';
 import { MissionBoard } from '@/ui/MissionBoard';
 import { notesFor, NOTES_UNSEEN, syncNotesDot } from '@/ui/NotesPanel';
 import { SettingsPanel } from '@/ui/SettingsPanel';
+import { prepareSaveCard, shareButton, type PreparedCard } from '@/ui/ShareCard';
 import { ShopPanel } from '@/ui/ShopPanel';
 import type { Look } from '@/core/Quality';
 import { NEUTRAL_SKY } from '@/views/Environment';
@@ -90,6 +91,8 @@ export class StationScene extends UiScene<'station'> {
   #driftQueued = false;
   /** SPEC-045 §4.1: the open comms log's close, or `null`. */
   #closeComms: (() => void) | null = null;
+  /** SPEC-059 §4.5.5: the card drawn when the Character tab last opened. */
+  #charCard: PreparedCard | null = null;
 
   constructor(services: GameServices) {
     super(services, 'station', 'station');
@@ -323,14 +326,29 @@ export class StationScene extends UiScene<'station'> {
     const beats = director(this.services);
     const interlude = interludeToPlay(new Set(data.progress.flags));
     if (interlude !== null && beats.enabled && economy !== null) {
+      // SPEC-059 §4.5.5: the card is drawn as the interlude starts…
+      const card = prepareSaveCard(data, this.services.settings.get().commendations);
       await beats.playFilm(interlude.film, { musicAfter: 'station' });
       // E29: the flags are written when the film settles — ended or skipped —
       // so a reload during one replays it at the next entry.
       for (const flag of interlude.markSeen) economy.setFlag(flag);
       this.services.save.request('mission');
+      // …and offered from the moment it settles until the station exits.
+      this.#offerInterludeShare(card);
     }
     await this.#homeOnEntry(data);
     this.#aftermathOnEntry(data);
+  }
+
+  /**
+   * SPEC-059 §4.5.5: `interlude-share` in the head, under the channel line,
+   * once the interlude has settled — never on a station already leaving.
+   */
+  #offerInterludeShare(card: PreparedCard): void {
+    if (!this.#alive || !this.#present) return;
+    const headText = this.#screen?.root.querySelector('.screen-head-text');
+    if (headText === null || headText === undefined || headText.querySelector('[data-testid="interlude-share"]') !== null) return;
+    headText.append(shareButton('interlude-share', card, this.ui));
   }
 
   /**
@@ -442,11 +460,15 @@ export class StationScene extends UiScene<'station'> {
       await overlay.playStay(stayReport(data));
       if (!this.#alive) return false;
       // SPEC-058 §4.7: the Selection card, then the ending is seen (58-a).
-      await overlay.playSelectionCard({
-        number: instanceNumber(data.meta.iteration) + 1,
-        name: data.player.name,
-        portrait: data.player.appearance.portrait,
-      });
+      // SPEC-059 §4.5.5: with the run's own card to share, drawn as it mounts.
+      await overlay.playSelectionCard(
+        {
+          number: instanceNumber(data.meta.iteration) + 1,
+          name: data.player.name,
+          portrait: data.player.appearance.portrait,
+        },
+        prepareSaveCard(data, this.services.settings.get().commendations),
+      );
       if (!this.#alive) return false;
       data.progress.endingSeen = true;
       this.services.save.request('mission');
@@ -648,6 +670,8 @@ export class StationScene extends UiScene<'station'> {
     // view; the panel's own re-renders inside the tab read the same one.
     const data = this.services.save.current;
     if (tab === 'character' && data !== null) HOME_SESSION.nextKeepsakeView(data);
+    // SPEC-059 §4.5.5: the Character panel's card is drawn as the tab opens.
+    if (tab === 'character' && data !== null) this.#charCard = prepareSaveCard(data, this.services.settings.get().commendations);
     this.#renderRail();
     this.#renderPanel();
     if (tab === 'character' && data !== null) this.#keepsakeDrift(data);
@@ -677,7 +701,12 @@ export class StationScene extends UiScene<'station'> {
         return;
       case 'character':
         // SPEC-056 §4.6: the Locker offers this device's unlocked swatches.
-        new CharacterPanel(box, { ...shared, unlocks: () => this.services.settings.get().unlocks });
+        // SPEC-059 §4.5.5: `char-share` in its title row, with this opening's card.
+        new CharacterPanel(box, {
+          ...shared,
+          unlocks: () => this.services.settings.get().unlocks,
+          ...(this.#charCard === null ? {} : { share: this.#charCard }),
+        });
         return;
     }
   }
