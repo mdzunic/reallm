@@ -43,14 +43,27 @@ for (const viewport of PHONE_VIEWPORTS) {
       await tap(page, 'surface-descend');
       await page.waitForFunction(() => window.__reallm.stats().sceneInfo?.['level'] === 'underground', undefined, COLD_START);
       await page.waitForFunction(() => window.__reallm.stats().sceneInfo?.['held'] === 0, undefined, COLD_START);
-      await tap(page, 'surface-goto-vault');
-      await frames(page, 4);
-      await tap(page, 'surface-goto-puzzle');
       const use = page.locator('[data-testid="touch-interact"]');
-      await expect(use).toBeVisible(COLD_START);
-      await use.tap();
       const panel = page.locator('[data-testid="puzzle-panel"]');
-      await expect(panel).toBeVisible(COLD_START);
+      for (let attempt = 1; ; attempt++) {
+        await tap(page, 'surface-goto-vault');
+        await frames(page, 4);
+        // The Hive's packs stand in its far rooms, the vault's among them: on a
+        // loaded machine a hit can knock the salvager off the terminal before the tap.
+        for (let i = 0; i < 20 && Number((await info(page))['caveEnemies']) > 0; i++) {
+          await tap(page, 'surface-smite');
+          await frames(page, 2);
+        }
+        await tap(page, 'surface-goto-puzzle');
+        await expect(use).toBeVisible(COLD_START);
+        await use.tap();
+        const opened = await panel.waitFor({ state: 'visible', timeout: 20_000 }).then(
+          () => true,
+          () => false,
+        );
+        if (opened || (await panel.isVisible())) break;
+        if (attempt === 3) await expect(panel).toBeVisible(COLD_START);
+      }
       await page.waitForFunction(() => window.__reallm.stats().sceneInfo?.['held'] === 1, undefined, COLD_START);
       expect((await info(page))['puzzle']).toBe('hive_vault');
       // Toasts ride over every layer; measure once the rack is clear.

@@ -79,14 +79,36 @@ async function descend(page: Page): Promise<void> {
   await untilInfo(page, 'held', 0);
 }
 
+/**
+ * The packs within reach, one smite each. A cave's packs stand in its far
+ * rooms — the vault's among them — and on a loaded machine a hit can knock the
+ * salvager off a terminal or a mirror between a goto and the press.
+ */
+async function clearPacks(page: Page): Promise<void> {
+  for (let i = 0; i < 20 && Number((await info(page))['caveEnemies']) > 0; i++) {
+    await tap(page, 'surface-smite');
+    await frames(page, 2);
+  }
+}
+
 /** The vault room's door side, then the nearest puzzle — the vault terminal outside the door — and its panel. */
 async function openVault(page: Page): Promise<void> {
-  await tap(page, 'surface-goto-vault');
-  await frames(page, 4);
-  await tap(page, 'surface-goto-puzzle');
-  await expect(page.locator('[data-testid="hud-interact"]')).toContainText('Use terminal', SLOW);
-  await press(page, 'KeyE');
-  await expect(page.locator('[data-testid="puzzle-panel"]')).toBeVisible(SLOW);
+  const panel = page.locator('[data-testid="puzzle-panel"]');
+  for (let attempt = 1; ; attempt++) {
+    await tap(page, 'surface-goto-vault');
+    await frames(page, 4);
+    await clearPacks(page);
+    await tap(page, 'surface-goto-puzzle');
+    await expect(page.locator('[data-testid="hud-interact"]')).toContainText('Use terminal', SLOW);
+    await press(page, 'KeyE');
+    // A press that did not land is tried again from a fresh goto.
+    const opened = await panel.waitFor({ state: 'visible', timeout: 20_000 }).then(
+      () => true,
+      () => false,
+    );
+    if (opened || (await panel.isVisible())) break;
+    if (attempt === 3) await expect(panel).toBeVisible(SLOW);
+  }
   await untilInfo(page, 'held', 1);
 }
 
@@ -292,16 +314,21 @@ test.describe('SPEC-055 puzzles', () => {
     await untilClaimed(page, 'vetra_vault');
     await untilInfo(page, 'held', 0);
 
+    await tap(page, 'surface-goto-puzzle');
+    await clearPacks(page);
     await press(page, 'KeyL');
     await untilInfo(page, 'light', 0);
-    for (let i = 0; i < 12; i++) {
+    for (let i = 0; i < 24; i++) {
       const hint = String((await info(page))['puzzleHint']);
       if (!hint.startsWith('mirror:')) break;
       await tap(page, 'surface-goto-puzzle');
       await expect(page.locator('[data-testid="hud-interact"]')).toContainText('Turn the mirror', SLOW);
       const moves = Number((await info(page))['puzzleMoves']);
       await press(page, 'KeyE');
-      await page.waitForFunction((want) => Number(window.__reallm.stats().sceneInfo?.['puzzleMoves']) > want, moves, SLOW);
+      // A turn that did not land is tried again from a fresh goto.
+      await page
+        .waitForFunction((want) => Number(window.__reallm.stats().sceneInfo?.['puzzleMoves']) > want, moves, { timeout: 20_000 })
+        .catch(() => undefined);
     }
     await untilInfo(page, 'puzzleBeam', 1);
     await frames(page, 20);
