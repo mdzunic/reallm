@@ -555,7 +555,8 @@ describe('plates (§4.2, §4.6) on real caves', () => {
         // The panel stands in the panel room — never the puzzle room — and off every cache.
         expect(u.panelRoom, at).not.toBe(u.puzzleRoom);
         expect(gap(p.panel, panelRoom), at).toBeLessThan(panelRoom.r);
-        for (const cache of u.caches) expect(gap(p.panel, cache), `${at} ${cache.id}`).toBeGreaterThanOrEqual(1.6);
+        // The panel's and every cache's 1.5 m interact circles never meet.
+        for (const cache of u.caches) expect(gap(p.panel, cache), `${at} ${cache.id}`).toBeGreaterThan(3);
 
         // Walking the order solves it, every step accepted; nothing presses a solved board.
         const walked = structuredClone(p);
@@ -597,15 +598,16 @@ describe('plates (§4.2, §4.6) on real caves', () => {
     }
   });
 
-  it('a panel room centre on a cache moves the panel 2.5 m off it, toward the centre', () => {
+  it('a cache within 3.2 m of the panel room centre moves the panel 3.5 m off it, toward the centre — past both 1.5 m circles', () => {
     const room = { x: 0, z: 0, r: 8 };
     const panelRoom = { x: 30, z: 10, r: 7 };
     const on = generatePuzzle('plates', 1, new Rng(1), { room, panelRoom, avoid: [{ x: 30, z: 10 }] }) as PlatesPuzzle;
-    expect(gap(on.panel, { x: 30, z: 10 })).toBeCloseTo(2.5, 9);
-    const near = generatePuzzle('plates', 1, new Rng(1), { room, panelRoom, avoid: [{ x: 31, z: 10 }] }) as PlatesPuzzle;
+    expect(gap(on.panel, { x: 30, z: 10 })).toBeCloseTo(3.5, 9);
+    // A loose_a 2 m off its room's centre.
+    const near = generatePuzzle('plates', 1, new Rng(1), { room, panelRoom, avoid: [{ x: 32, z: 10 }] }) as PlatesPuzzle;
     expect(near.panel.x).toBeCloseTo(28.5, 9);
     expect(near.panel.z).toBeCloseTo(10, 9);
-    const clear = generatePuzzle('plates', 1, new Rng(1), { room, panelRoom, avoid: [{ x: 32, z: 10 }] }) as PlatesPuzzle;
+    const clear = generatePuzzle('plates', 1, new Rng(1), { room, panelRoom, avoid: [{ x: 33.3, z: 10 }] }) as PlatesPuzzle;
     expect(clear.panel).toEqual({ x: 30, z: 10 });
   });
 });

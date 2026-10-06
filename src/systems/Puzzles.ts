@@ -172,10 +172,13 @@ const PLATE_JAM = 60;
 const PLATE_FALLBACK_RING = 0.85;
 /** The ring's turns tried, per gap between two plates, for one that clears the caches. */
 const PLATE_RING_TURNS = 24;
-/** §4.2: a panel whose room centre lies this close to a cache… */
-const PANEL_AVOID = 1.6;
-/** …stands this far from that cache instead, on the centre's side. */
-const PANEL_SHIFT = 2.5;
+/**
+ * §4.2: a panel whose room centre lies this close to a cache — the vault's at
+ * its room's centre, a `loose_a` 2 m off its own — …
+ */
+const PANEL_AVOID = 3.2;
+/** …stands this far from that cache instead, on the centre's side: past both interact circles (1.5 m each). */
+const PANEL_SHIFT = 3.5;
 
 /** §4.2: a beam layout is re-drawn up to this many times… */
 const BEAM_TRIES = 50;
@@ -703,8 +706,9 @@ function ringSpots(room: { x: number; z: number }, reach: number, count: number,
  * §4.2: plates by seeded rejection within `r − 2` of the puzzle room's centre,
  * `PLATE_SPACING` apart and 2 m from every cache; a seeded shuffle of the
  * glyphs; a seeded order; and the panel at the panel room's centre — or, when
- * a cache stands within 1.6 m of it, 2.5 m from that cache on the centre's
- * side (along a seeded bearing if the two coincide). An anchor without a panel
+ * a cache stands within 3.2 m of it, 3.5 m from that cache on the centre's
+ * side (along a seeded bearing if the two coincide), so the panel's and the
+ * cache's interact circles never meet. An anchor without a panel
  * room puts the panel at the puzzle room's centre (robustness only).
  *
  * In a 6 m room five plates can jam — the first four leaving no spot for the
