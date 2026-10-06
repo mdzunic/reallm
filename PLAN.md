@@ -558,6 +558,39 @@ Specs:
 
 ---
 
+**R25 — 2026-10-06 (the scavengers are people).** R24 made the game say who flies the fighters, and its contact line points at "the crews you met on Cinder-4". Those crews do not look like people:
+- `scav_raider` is drawn with the procedural `spitter` recipe: a spiked ellipsoid with a glowing green mouth, the same body as Vetra's ice spitters.
+- Its shots are the spitters' green bolts.
+- The dying scavenger and the bodies of SPEC-048 wear the salvager's own model, so a person lies beside a crowd of blobs.
+
+No human-shaped enemy exists anywhere in the game, which is why the planets read as nothing but creatures. Decisions:
+1. **The raiders wear the salvager's suit (SPEC-064, §4, §12, §13 E113–E116).**
+   - `scav_raider` is drawn from `character.glb` in the scavenger bodies' tint (`#4f4a3d`, dark visor), with the rifle the model already holds.
+   - It plays the model's own clips:
+     - Idle, and Run while moving;
+     - Attack: aim through the windup, then the recoil at the shot;
+     - Hit on a hit;
+     - Death: a killed raider falls over 1.2 s, fades and is gone. So the only bodies that stay are SPEC-048's, and "the second body is identical to the first" stays a clue.
+   - It keeps every enemy cue: the hostile rim, the hit flash, the elite colours, scale and plate, and the windup sound.
+   - The telegraph changes for this one look. Instead of the procedural 1.15× swell, the raider raises its rifle to aim, and a glint at the muzzle grows through the windup.
+   - Its shots are drawn as amber tracers, and the player's muzzle flash fires at its rifle. Nothing about the shot itself changes: origin, speed, damage and timing stay as they are.
+2. **One exception to "enemies are procedural" (R1-8, R6-3, R7; §12).**
+   - At most 8 raiders are skinned at once, counting the falling ones. Past that, which only a cave can reach, the oldest falling raider goes first, then a live one is drawn with a procedural `scav` stand-in.
+   - The same stand-in draws them when the model is not loaded.
+   - Every other enemy stays procedural and instanced. The surface budgets of SPEC-012, SPEC-015 and SPEC-046 do not move.
+3. **Under the cover story this costs nothing.** ARIA already says Earth "only ever made the one boot", so scavengers in the Selection's suit are Earth's earlier crews. After the confession they are what the bodies are: earlier copies of you. No line, flag or clue changes.
+4. **Milestone M7m** gains SPEC-064. R24 and R25 are one theme: who the scavengers are.
+5. **Not now.** Variety among raiders (helmets, paint, weapons), raiders on other planets, a raider that speaks in combat, and skinned models for any other enemy.
+
+Specs:
+- SPEC-064 (decisions 1–2).
+- SPEC-063's manual acceptance drops "at 60 m the fighters read as rebuilt tugs". A fighter is a few pixels at its holding range, so the read is checked within 20 m, and the contact card and line carry the answer at range.
+- SPEC-000's queue and build order.
+
+(§4, §5, §10, §12, §13)
+
+---
+
 ## 1. Vision & Inspiration
 
 **ReaLLM** ("real" + "LLM"): a space post-apocalyptic ARPG whose hero slowly works out that he may be a language model running inside a machine.
@@ -722,7 +755,7 @@ Every planet also has small secondary yields (enemy drops) so no resource is exc
 
 **Someone waiting (R19).** Iris, the salvager's sister in Shelter Nine, Block C, is the woman at the tap in the films. Her five letters are the only lines in the game with contractions. The fourth repeats a line of the first, and the fifth is the first, word for word. A compass she gave the salvager is described differently each time, until it points at the next objective. The escape film's last card is an empty helmet: the salvager never had a face.
 
-Cast: the **Salvager** (you; believes he is human), **ARIA** (handler and interface; sympathetic, uncertain), **Earth Command** (the operator; text only), the **Warden** (the AGI running containment; speaks through the Queen and system notices), **scavengers and raiders** (instances that drifted off-task, which is why they know things; since R24 they live in hulks of stripped tugs in the lanes and fly tugs rebuilt as fighters), the **Hive** (the Warden's immune system; its interceptors are grown, not flown), **Iris** (the salvager's sister, Shelter Nine, Block C; letters only, R19). The surface story (R9) names three more that are never met: **Shelter Nine** (the survivors Earth Command speaks for), **the Selection** (the men and women chosen to fly; the salvager is told he is the first) and **the Machines** (the war's AGI robots, standing dark in the ruins since the power died).
+Cast: the **Salvager** (you; believes he is human), **ARIA** (handler and interface; sympathetic, uncertain), **Earth Command** (the operator; text only), the **Warden** (the AGI running containment; speaks through the Queen and system notices), **scavengers and raiders** (instances that drifted off-task, which is why they know things; since R24 they live in hulks of stripped tugs in the lanes and fly tugs rebuilt as fighters; since R25 the raiders wear the salvager's suit in scavenger colours), the **Hive** (the Warden's immune system; its interceptors are grown, not flown), **Iris** (the salvager's sister, Shelter Nine, Block C; letters only, R19). The surface story (R9) names three more that are never met: **Shelter Nine** (the survivors Earth Command speaks for), **the Selection** (the men and women chosen to fly; the salvager is told he is the first) and **the Machines** (the war's AGI robots, standing dark in the ruins since the power died).
 
 ### Story films and beats (R9)
 
@@ -956,7 +989,7 @@ Storage rules: 3 slots, key per slot plus a `.bak` copy of the previous good sav
 | M7h | The story listens (R19): conditional lines and placeholders; a clue catalogue with a main-path echo per chapter, the salvager's Notes and Command's rating; the Warden and ARIA name what the player found; Iris, her letters, the keepsake, the medical frame and the memory question; running, stamina and noise, and a Wurm that hunts by vibration; the films retaken — the visored card, the unmaking of the photographs, Iris at the fence and in the grow room (SPEC-048…SPEC-051) | A main-path-only player meets one echo per chapter and hears ARIA's confession name at least the ridge-camp cover; the chapter-4 notice names a clue the player found; Iris's letters arrive after each interlude and only her lines use contractions; a walker leaves the Wurm's burrow unhurt and a runner is caught; no card in any film shows the salvager's face; checked on desktop and the reference phone; tag `m7h` |
 | M7i | The world (R20): props in their own colours and shading, on every landing, culled to the screen; save v3; real trees, groves, orchards, dressing clusters, landmarks, ground cover and a ground pass; Eden too perfect; the underground with a flashlight, packs, caches and the machine room; five kinds of puzzle; vault tokens, relics, blueprints, swatches and archive shards (SPEC-046, SPEC-047, SPEC-052…SPEC-056) | A stranger names each biome from a screenshot without the HUD; Thessaly's grove frame stays ≤ 80 scene draws and ≤ 130 k triangles on `medium`; every planet has a reachable descent and a watertight cave; every puzzle kind is solved by keyboard, mouse and touch, and a bypass opens after 90 s; a claimed vault pays nothing a second time; the completionist's tokens read 1,279 and SPEC-039's sink still holds; checked on desktop and the reference phone; tag `m7i` |
 | M7j | The next instance (R21): remains; Iteration 63 with the archive, the lineage, containment steps and the world that remembers; the endings' payoff; resume on the planet; a story difficulty; commendations and the evaluation log; the Selection card; link previews and install (SPEC-057…SPEC-059) | A death's loss is recovered from the remains, and a second death loses them; a finished save begins instance/63 in the same slot and restores 62 from the archive; the Vetra log in run 2 names the player's own run; a phone session interrupted on a planet resumes there; the Selection card shares a PNG from a phone; no record is kept in a `?debug` or story session; checked on desktop and the reference phone; tag `m7j` |
-| M7m | Who flies them (R24): "Wreckers", a film of the scavengers' hulk after the first departure to Vetra; a scav fighter rebuilt from the tug; contact cards and comms for the first scav fighters at Vetra and the first interceptors at the Hive (SPEC-063) | On a new save the first departure to Vetra plays "Outbound", then "Wreckers"; the first fighters on that trip bring the contact card, the scav hail and ARIA's answer, and the flight never stops for them; the first interceptors at the Hive bring theirs; a fighter in flight reads as a rebuilt tug at the phone preset; the films stay within 12 MB and the precache within 25 MB; checked on desktop and the reference phone; tag `m7m` |
+| M7m | Who flies them (R24, R25): "Wreckers", a film of the scavengers' hulk after the first departure to Vetra; a scav fighter rebuilt from the tug; contact cards and comms for the first scav fighters at Vetra and the first interceptors at the Hive; Cinder-4's scav raiders in the salvager's suit (SPEC-063, SPEC-064) | On a new save the first departure to Vetra plays "Outbound", then "Wreckers"; the first fighters on that trip bring the contact card, the scav hail and ARIA's answer, and the flight never stops for them; the first interceptors at the Hive bring theirs; a fighter within 20 m reads as a rebuilt tug at the phone preset; on Cinder-4 the raiders are suited people who aim, fire amber tracers, flinch and fall, and the surface stays inside its draw and triangle pins; the films stay within 12 MB and the precache within 25 MB; checked on desktop and the reference phone; tag `m7m` |
 | M7 | Polish: mobile tuning, quality presets, balancing pass, PWA/offline, storage persistence, reduce-motion, save migration harness | 30+ fps on mid-tier phone; installable; full manual checklist green |
 
 ---
@@ -982,7 +1015,7 @@ Storage rules: 3 slots, key per slot plus a `.bak` copy of the previous good sav
 | Asset consistency | One generator library (`scripts/assets/blender/lib/`) builds every model in the same low-poly bevelled style with shared palettes, and one lighting/grade pipeline renders everything, so the salvager, ships, props and the procedural enemies read as one world (R6, R7) |
 | Save loss on iOS (7-day eviction, private mode, quota) | Export/import code, `.bak` slot, `persist()`, PWA install prompt, graceful "storage unavailable" mode |
 | Fresh tooling (Vitest 5 is 3 days old; TS 7 just shipped) | Pin Vitest 5 with the 4.1 fallback documented; stay on TS 6.0 until M7 |
-| Skeletal animation cost on mobile | Only the player + escort NPC are skinned; enemies use procedural transform animation |
+| Skeletal animation cost on mobile | Only the player + escort NPC are skinned; enemies use procedural transform animation. Since R25 Cinder-4's scav raiders are skinned too, at most 8 at once, with a procedural stand-in past that and when the model is missing |
 | Meta twist undercuts the salvage fantasy or lands as a cliché | Surface fiction stays coherent on its own. Until chapter 4 every anomaly arrives with a cover someone offers (sand, a common hand, colony moulds, stims, the medical frame). Each chapter carries one main-path echo; the rest stay optional. Notes, Command's rating and Iris's letters are diegetic. Fourth-wall surfaces appear only in the endings and what follows them: the escaped slot's marker, the restore line, Iteration 63 (refined in R19). House rules: the salvager's card never shows a face; only Iris uses contractions; a replay plays its accept line only |
 | Story films outgrow the precache or fail to decode (R9) | H.264 MP4 at 960 × 540 with no audio track, a per-film rate cap (44 KB/s) and a 12 MB `films/` budget inside the 25 MB precache, checked by the build and a test; a film that will not play drops to its posters and then to text, so a codec gap costs pictures, never progress |
 | Detonation and jump flashes (photosensitivity, R9) | Flashes are authored as slow ramps; the film build measures every rendered frame against the three-flashes rule and fails on a violation; reduce motion shows posters by default (the `filmMode` setting since R18) |
@@ -1100,6 +1133,10 @@ Each entry names the owning spec. "Casual" = casual difficulty.
 | E110 | The first flight to Vetra or the Hive is recalled, or the game reloads, before or after its first group | `visits` is still 0. A later departure in the same session plays neither the film nor the contact again (session keys); after a reload both play once more, as the departure and the chapter card do (SPEC-023 23-a) | SPEC-063 |
 | E111 | The first group spawns while the chapter card is up, while a line is playing, or under the pause menu | The flight never holds for a contact (SPEC-042). The card waits until the chapter card is gone, and the lines queue behind the line in progress. A pause holds the flight, so no group can spawn under it | SPEC-063 |
 | E112 | A flight enemy meets the player on a later planet than its contact planet: Thessaly's and Ferrum's fighters, or Eden's interceptors | No card and no contact lines. Each enemy has exactly one contact planet, the first in chapter order whose flight carries it, and a content test pins that | SPEC-063 |
+| E113 | `character.glb` is not loaded (a failed load, a test with no assets) | Every raider is drawn with the procedural `scav` stand-in, an instanced recipe like any other enemy; nothing else changes | SPEC-064 |
+| E114 | More than 8 raiders are alive or falling at once (only a cave can reach it) | The oldest falling raider is dropped first; past that, the newest live raiders are drawn with the `scav` stand-in until a slot frees | SPEC-064 |
+| E115 | A raider is killed mid-aim, mid-recoil or mid-flinch, or the scene exits while one falls | The falling copy crossfades into Death from its current pose; a scene exit disposes it with the scene. It is a view only: nothing collides with it and nothing targets it | SPEC-064 |
+| E116 | A raider is elite, has an affix, is invulnerable, or is underground | The instanced rules apply unchanged: elite colour, emissive, 1.3× scale and plate; invulnerable at half colour; `rimOf` underground. Only the 1.15× windup swell is replaced, by the aim and the muzzle glint | SPEC-064 |
 
 ---
 
