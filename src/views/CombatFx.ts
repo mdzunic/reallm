@@ -290,12 +290,15 @@ export class CombatFx {
       discs.setMatrixAt(n, scratchMatrix);
       discs.setColorAt(n, scratchColor.copy(this.#flareColor).multiplyScalar(flicker));
       n++;
-      scratchPosition.set(flare.x, floor + FLARE_GLOW_LIFT, flare.z);
-      scratchScale.set(FLARE_GLOW_SIZE, FLARE_GLOW_SIZE, 1);
-      scratchMatrix.compose(scratchPosition, this.#billboard, scratchScale);
-      sprites.setMatrixAt(glow, scratchMatrix);
-      sprites.setColorAt(glow, scratchColor.copy(this.#flareColor).multiplyScalar(FLARE_GLOW_GAIN * flicker));
-      glow++;
+      // The two reserved slots past the pool; a second call without a `sync` between finds them taken.
+      if (glow < sprites.instanceMatrix.count) {
+        scratchPosition.set(flare.x, floor + FLARE_GLOW_LIFT, flare.z);
+        scratchScale.set(FLARE_GLOW_SIZE, FLARE_GLOW_SIZE, 1);
+        scratchMatrix.compose(scratchPosition, this.#billboard, scratchScale);
+        sprites.setMatrixAt(glow, scratchMatrix);
+        sprites.setColorAt(glow, scratchColor.copy(this.#flareColor).multiplyScalar(FLARE_GLOW_GAIN * flicker));
+        glow++;
+      }
       drawnFlares++;
     }
     this.#cloudsDrawn = drawnClouds;
