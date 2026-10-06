@@ -969,6 +969,14 @@ html[data-play] .overlay-panel:not(.overlay-rotate) {
   cursor: default;
 }
 
+/* SPEC-059 §4.5.4: a share button waiting for its card reads dim rather than
+   faded, so its label keeps the panel's 4.5:1 while the canvas draws. */
+.ui-btn.share-btn:disabled {
+  opacity: 1;
+  color: var(--ink-dim);
+  border-color: var(--rule);
+}
+
 .ui-btn.is-primary {
   background: color-mix(in srgb, var(--accent) 18%, var(--key-face));
   border-color: var(--accent);
@@ -3261,7 +3269,7 @@ html.debug .scene-tag {
 
 .records-row-status {
   color: var(--ink-dim);
-  font-size: var(--type-xs);
+  font-size: var(--type-sm);
 }
 
 .records-row.is-earned .records-row-status {
