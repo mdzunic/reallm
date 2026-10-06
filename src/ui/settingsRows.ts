@@ -324,6 +324,10 @@ export const BOOKKEEPING_KEYS: readonly (keyof Settings)[] = [
   'bestTimes',
   // SPEC-056 §4.6: the swatches the caves unlocked — the Locker reads them.
   'unlocks',
+  // SPEC-059 §4.4.2, §4.6.5: the commendations this device earned, and
+  // whether the app is installed — the Records panel and the install toast read them.
+  'commendations',
+  'installed',
 ];
 
 function shownIn(row: SettingsRowDef, env: RowEnv): boolean {

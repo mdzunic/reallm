@@ -14,6 +14,7 @@ import { log } from '@/core/Log';
 import { RngRoot } from '@/core/Rng';
 import { SaveStore } from '@/core/Save';
 import { createSettings, reduceMotionPreset } from '@/core/Settings';
+import { CommendationTracker } from '@/systems/Commendations';
 import { debugClosesRecords, RECORDS } from '@/systems/Records';
 import { SERVICE_OFF_TEXT, SERVICE_ON_TEXT } from '@/systems/Service';
 import { hasOfflineWorker, offerUpdate, offlineStatus, registeredStatus, setOfflineStatus } from '@/core/Updates';
@@ -175,6 +176,13 @@ events.on('settings:changed', () => RECORDS.refresh(), recordsOwner);
 events.on('save:written', () => RECORDS.refresh(), recordsOwner);
 events.on('save:failed', () => RECORDS.refresh(), recordsOwner);
 events.on('scene:entered', () => RECORDS.refresh(), recordsOwner);
+
+/**
+ * SPEC-059 §4.4.3: the commendation tracker, one for the page's lifetime. It
+ * queues on gameplay events and grants at the next save write or scene entry,
+ * through the same gate, the bound save and this device's settings.
+ */
+const commendations = new CommendationTracker({ events, save: () => save.current, settings, records: RECORDS, now: Date.now });
 
 /**
  * SPEC-006's audio layer. Built here for the same reason as the two above — it
@@ -460,6 +468,8 @@ if (import.meta.env.DEV) {
   import.meta.hot?.dispose(() => {
     document.removeEventListener('keydown', onKeyDown);
     haptics.dispose();
+    commendations.dispose();
+    events.releaseOwner(recordsOwner);
     releaseGuardSync();
     events.releaseOwner(guardOwner);
     events.releaseOwner(workerOwner);

@@ -164,6 +164,28 @@ const SOUNDS = {
     },
   },
 
+  commend: {
+    // SPEC-059 §4.4.4: a commendation granted — a soft rising two-note chime,
+    // B5 then the F♯6 a fifth above, each a gentle FM bell with a slow
+    // attack and a long tail; under `level_up`'s run, and done inside 900 ms.
+    peak: -8,
+    render: (n) =>
+      fill(n, (t) => {
+        let y = 0;
+        const notes = [
+          [987.77, 0, 0.8],
+          [1479.98, 0.16, 1],
+        ];
+        for (const [f, at, gain] of notes) {
+          const u = t - at;
+          if (u < 0) continue;
+          const bell = fm(u, f, 2, 0.7 * decay(u, 0.12)) * 0.85 + 0.15 * Math.sin(TAU * 2 * f * u);
+          y += bell * decay(u, 0.26) * attack(u, 0.015) * gain;
+        }
+        return y;
+      }),
+  },
+
   // ------------------------------------------------------------- surface
   hit_player: {
     peak: -3,

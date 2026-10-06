@@ -52,6 +52,8 @@ export const ASSETS = {
         ui_dialogue_open: [1800, 300],
         level_up: [2200, 900],
         mission_done: [3200, 1200],
+        /** SPEC-059 §4.4.4: a commendation granted — a soft rising two-note chime. */
+        commend: [4500, 900],
       },
     },
     /** Ground combat, pickups and weather on the XZ plane; the positioned bank. */

@@ -14,10 +14,12 @@ import type { GameServices } from '@/core/Services';
 import { applyUpdate, updateReady } from '@/core/Updates';
 import { nextInstanceOffered, slotSummaryOf, SLOTS, type Save, type SlotId } from '@/core/Save';
 import type { SceneParams } from '@/core/StateMachine';
-import { CREDITS, CREDITS_VERSION_LINE } from '@/data/index';
+import { COMMENDATION_IDS, CREDITS, CREDITS_VERSION_LINE } from '@/data/index';
+import { bestTimeRows, recordsRows, recordsRowStatus, recordsTitle } from '@/systems/Commendations';
 import { Economy } from '@/systems/Economy';
 import { Progression } from '@/systems/Progression';
 import { applySupplies, EMPTY_CODE, pushCode } from '@/systems/Service';
+import { RECORDS, recordsOffText } from '@/systems/Records';
 import { awayMs, previouslyCard, RESUME_WINDOW_MS, resumeTarget } from '@/systems/Resume';
 import { archiveLine, beginInstanceText, NEWER_SAVE_TEXT, nextInstanceSheet, restoreArchiveSheet, slotLine } from '@/systems/UiHelpers';
 import { confirmSheet } from '@/ui/ConfirmSheet';
@@ -61,7 +63,8 @@ function colourMapSpace(root: THREE.Object3D): string {
   return space;
 }
 
-type SubPanel = 'new' | 'load' | 'credits' | null;
+/** SPEC-059 §4.4.5 adds `records`, the fourth. */
+type SubPanel = 'new' | 'load' | 'credits' | 'records' | null;
 
 export class MenuScene extends UiScene<'menu'> {
   /** §4.4: every mesh this screen draws hangs off this one group. */
@@ -379,6 +382,8 @@ export class MenuScene extends UiScene<'menu'> {
         : testId(h('button', { class: 'ui-btn is-primary', type: 'button', click: () => this.#continue() }, 'Continue'), 'go-station'),
       testId(h('button', { class: 'ui-btn', type: 'button', click: () => this.#toggleSub('new') }, 'New Game'), 'menu-new'),
       testId(h('button', { class: 'ui-btn', type: 'button', click: () => this.#toggleSub('load') }, 'Load'), 'menu-load'),
+      // SPEC-059 §4.4.5: this device's commendations and best times, after Load.
+      testId(h('button', { class: 'ui-btn', type: 'button', click: () => this.#toggleSub('records') }, 'Records'), 'menu-records'),
       testId(h('button', { class: 'ui-btn', type: 'button', click: () => this.#settings?.show() }, 'Settings'), 'menu-settings'),
       testId(h('button', { class: 'ui-btn', type: 'button', click: () => this.#toggleSub('credits') }, 'Credits'), 'menu-credits'),
       // SPEC-015 AC-52: offered here and at the station only, and only while a
@@ -439,6 +444,9 @@ export class MenuScene extends UiScene<'menu'> {
         return;
       case 'credits':
         this.#renderCredits();
+        return;
+      case 'records':
+        this.#renderRecords();
         return;
     }
   }
@@ -831,6 +839,57 @@ export class MenuScene extends UiScene<'menu'> {
         h('p', { class: 'menu-list-title' }, 'Credits'),
         h('div', { class: 'credits-actions' }, replay, licences),
         body,
+      ),
+    );
+  }
+
+  // --------------------------------------------------------------- records
+
+  /**
+   * SPEC-059 §4.4.5: the Records panel — the title the slots and one
+   * commendation decide (§4.4.6), the count, `records-off` while the page's
+   * gate is closed, one row per commendation (a hidden one classified until
+   * earned), and the best times. Per device, like the list itself (59-t).
+   */
+  #renderRecords(): void {
+    if (this.#sub === null) return;
+    const { commendations: earned, bestTimes } = this.services.settings.get();
+    const saves: Save[] = [];
+    for (const slot of SLOTS) {
+      const result = this.services.save.load(slot);
+      if (result.ok) saves.push(result.data);
+    }
+    const count = COMMENDATION_IDS.filter((id) => earned[id] !== undefined).length;
+    const reason = RECORDS.reason;
+    const rows = recordsRows(earned).map((row) => {
+      const status = recordsRowStatus(row);
+      return testId(
+        h(
+          'li',
+          { class: `records-row${row.earnedAt !== null ? ' is-earned' : ''}` },
+          h('span', { class: 'records-row-title' }, row.title),
+          h('span', { class: 'records-row-detail' }, row.detail),
+          status === null ? null : h('span', { class: 'records-row-status' }, status),
+        ),
+        `records-${row.id}`,
+      );
+    });
+    const best = bestTimeRows(bestTimes);
+    this.#sub.replaceChildren(
+      testId(
+        h(
+          'div',
+          { class: 'menu-list panel records' },
+          testId(h('p', { class: 'menu-list-title' }, recordsTitle(saves, earned)), 'records-title'),
+          testId(h('p', { class: 'records-count' }, `${count} of ${COMMENDATION_IDS.length}`), 'records-count'),
+          reason === null ? null : testId(h('p', { class: 'records-off' }, recordsOffText(reason)), 'records-off'),
+          h('ul', { class: 'records-list' }, ...rows),
+          h('p', { class: 'records-heading' }, 'Best times'),
+          best.length === 0
+            ? h('p', { class: 'records-row-detail' }, 'No best times yet.')
+            : h('ul', { class: 'records-list' }, ...best.map((row) => testId(h('li', { class: 'records-best' }, row.text), `records-best-${row.id}`))),
+        ),
+        'records-panel',
       ),
     );
   }

@@ -299,7 +299,8 @@ match. The 12 MB audio budget above is what they share.
 
 | File | Source | License | Modifications |
 | --- | --- | --- | --- |
-| `audio/sfx/ui.webm` | Original to this repository — synthesised by `scripts/assets/audio/sfx.mjs` | CC0 | — |
+| `audio/sfx/ui.webm` | Original to this repository — synthesised by `scripts/assets/audio/sfx.mjs` | CC0 | SPEC-059 §4.4.4 recut it with `commend` |
+| `audio/sfx/ui.webm#commend` | Original to this repository — synthesised by `scripts/assets/audio/sfx.mjs`: a soft rising two-note FM chime, 900 ms | CC0 | SPEC-059 §4.4.4 |
 | `audio/sfx/surface.webm` | Original to this repository — synthesised by `scripts/assets/audio/sfx.mjs` | CC0 | SPEC-035 §4.11 recut it with `shot_handgun`, `shot_rifle`, `shot_mg`, `shot_launcher`, `impact` and `explosion`; SPEC-038 §4.10 with the four sprites below; SPEC-041 §4.10 with `windup_boss` and `boss_slam`; SPEC-050 §4.8 with `exhale`; SPEC-054 §4.13 with `light_click` and `cache_open`; SPEC-055 §4.9 with `puzzle_solved` |
 | `audio/sfx/surface.webm#dash` | Original to this repository — synthesised by `scripts/assets/audio/sfx.mjs`: a filtered-noise whoosh sweeping down, 250 ms | CC0 | SPEC-038 §4.10 |
 | `audio/sfx/surface.webm#windup_melee` | Original to this repository — synthesised by `scripts/assets/audio/sfx.mjs`: a dry chitter of two short clicks, 150 ms | CC0 | SPEC-038 §4.10 |

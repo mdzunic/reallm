@@ -361,6 +361,9 @@ describe('the settings object (SPEC-007 §3)', () => {
       bestTimes: {},
       // SPEC-056 §4.6: no swatch is unlocked on a new device.
       unlocks: [],
+      // SPEC-059 §4.4.2, §4.6.5: nothing earned yet, and not installed.
+      commendations: {},
+      installed: false,
     });
   });
 
@@ -804,6 +807,40 @@ describe('unlocks (SPEC-056 §4.6)', () => {
     const settings = createSettings(fakeStorage().storage);
     settings.set({ unlocks: ['thessaly_relic', 'thessaly_relic', 'x'] });
     expect(settings.get().unlocks).toEqual(['thessaly_relic']);
+  });
+});
+
+describe('commendations and installed (SPEC-059 §4.4.2, §4.6.5)', () => {
+  it('default to {} and false, and round-trip through the merge write', () => {
+    expect(defaultSettings().commendations).toEqual({});
+    expect(defaultSettings().installed).toBe(false);
+    const fake = fakeStorage();
+    const settings = createSettings(fake.storage);
+    settings.set({ commendations: { dry_land: 1_790_000_000_000, instance_65: 1 }, installed: true });
+    expect(stored(fake)).toMatchObject({ commendations: { dry_land: 1_790_000_000_000, instance_65: 1 }, installed: true });
+    const again = createSettings(fake.storage).get();
+    expect(again.commendations).toEqual({ dry_land: 1_790_000_000_000, instance_65: 1 });
+    expect(again.installed).toBe(true);
+  });
+
+  it('keep only known ids whose values are integer epoch ms above 0, on load and on set (59-o)', () => {
+    const raw = JSON.stringify({
+      commendations: { dry_land: 1_790_000_000_000, nope: 5, below: '1790000000000', recycler: -3, scaffold: 0, untouched: 2.5, off_task: null },
+    });
+    expect(createSettings(fakeStorage(raw).storage).get().commendations).toEqual({ dry_land: 1_790_000_000_000 });
+    for (const value of ['[1]', '"dry_land"', 'null', '12']) {
+      expect(createSettings(fakeStorage(`{"commendations":${value}}`).storage).get().commendations, value).toEqual({});
+    }
+    const settings = createSettings(fakeStorage().storage);
+    settings.set({ commendations: { below: 7, dry_land: -1, made_up: 3 } as unknown as Settings['commendations'] });
+    expect(settings.get().commendations).toEqual({ below: 7 });
+  });
+
+  it('reads anything but a stored true as not installed', () => {
+    for (const value of ['"yes"', '1', 'null', '{}']) {
+      expect(createSettings(fakeStorage(`{"installed":${value}}`).storage).get().installed, value).toBe(false);
+    }
+    expect(createSettings(fakeStorage('{"installed":true}').storage).get().installed).toBe(true);
   });
 });
 

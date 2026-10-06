@@ -3200,6 +3200,62 @@ html.debug .scene-tag {
   -webkit-user-select: text;
 }
 
+/* SPEC-059 §4.4.5: the Records panel — the count, the closed-session line,
+   one row per commendation (an earned one in the good colour) and the best
+   times, in the menu list's scroll. */
+.records-count {
+  margin: 0;
+  color: var(--ink-dim);
+}
+
+.records-off {
+  margin: 0;
+  color: var(--warn);
+}
+
+.records-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.records-row {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  border-top: 1px solid var(--panel-edge);
+  padding-top: 8px;
+}
+
+.records-row-title {
+  font-weight: 600;
+}
+
+.records-row-detail {
+  margin: 0;
+  color: var(--ink-dim);
+  font-size: var(--type-sm);
+}
+
+.records-row-status {
+  color: var(--ink-dim);
+  font-size: var(--type-xs);
+}
+
+.records-row.is-earned .records-row-status {
+  color: var(--good);
+}
+
+.records-heading {
+  margin: 8px 0 0;
+  font-size: var(--type-sm);
+  letter-spacing: var(--track);
+  text-transform: uppercase;
+}
+
 /* E22: menus reflow to one column on a portrait phone; no rotate wall here. */
 @media (max-width: 520px) {
   .menu-row {
