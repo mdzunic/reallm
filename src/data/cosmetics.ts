@@ -1,5 +1,6 @@
 // What the salvager wears (SPEC-014 §4.2, SPEC-056 §4.6): the eight base
-// swatches of each part that creation offers, and the six suit swatches the
+// swatches of each part and the shared portraits that creation offers — the
+// Locker offers the same — and the six suit swatches the
 // caves hold. A swatch is a primary and a secondary colour pair; opening the
 // cache that names one adds its id to `settings.unlocks` — per device, so the
 // machine remembers what the instance forgets — and from then on creation's
@@ -13,6 +14,8 @@
 export const PRIMARY_SWATCHES = ['#b7472a', '#2a6db7', '#3e8e4f', '#8e3e8e', '#b7972a', '#7a7a7a', '#a0522d', '#20b2aa'] as const;
 /** SPEC-014 AC-16: eight secondary swatches. */
 export const SECONDARY_SWATCHES = ['#2a3b4c', '#4c2a3b', '#3b4c2a', '#24243a', '#4c3b2a', '#2e4c4a', '#3d3d3d', '#552a2a'] as const;
+/** SPEC-014 AC-15: the three portraits every class may wear, after its own three. */
+export const SHARED_PORTRAITS = [9, 10, 11] as const;
 
 /** SPEC-056 §3: one suit swatch — a name of at most 16 characters and two lower-case `#rrggbb` colours. */
 export interface SwatchDef<Id extends string = string> {

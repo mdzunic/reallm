@@ -21,8 +21,26 @@ import type { GameServices } from '@/core/Services';
 import type { Renderer } from '@/core/Renderer';
 import type { SceneParams } from '@/core/StateMachine';
 import { GLYPHS } from '@/data/glossary';
-import { ATTRIBUTE_MAX, CLASSES, CREATION_POINTS, KIN_ROW, type Attributes, type ClassId, type Difficulty } from '@/data/index';
-import { attributeEffectText, attributeLine, computePlayerStats, DIFFICULTY_LINES, passiveText } from '@/systems/UiHelpers';
+import {
+  ATTRIBUTE_MAX,
+  CLASSES,
+  CREATION_POINTS,
+  KIN_ROW,
+  PRIMARY_SWATCHES,
+  SECONDARY_SWATCHES,
+  SHARED_PORTRAITS,
+  type Attributes,
+  type ClassId,
+  type Difficulty,
+} from '@/data/index';
+import {
+  attributeEffectText,
+  attributeLine,
+  availableSwatches,
+  computePlayerStats,
+  DIFFICULTY_LINES,
+  passiveText,
+} from '@/systems/UiHelpers';
 import { confirmSheet } from '@/ui/ConfirmSheet';
 import { dialogueLayer } from '@/ui/DialogueUI';
 import { el, h, keepFocus, testId } from '@/ui/dom';
@@ -37,12 +55,12 @@ import { createScreen } from '@/ui/Screen';
 const CLASS_IDS = Object.keys(CLASSES) as ClassId[];
 const ATTRIBUTES = ['might', 'vigor', 'agility', 'tech'] as const;
 
-/** AC-16: eight swatches a side. Hex pairs the save schema stores verbatim. */
-export const PRIMARY_SWATCHES = ['#b7472a', '#2a6db7', '#3e8e4f', '#8e3e8e', '#b7972a', '#7a7a7a', '#a0522d', '#20b2aa'] as const;
-export const SECONDARY_SWATCHES = ['#2a3b4c', '#4c2a3b', '#3b4c2a', '#24243a', '#4c3b2a', '#2e4c4a', '#3d3d3d', '#552a2a'] as const;
-
-/** AC-15: six faces — the class's own three, then three every class shares. */
-const SHARED_PORTRAITS = [9, 10, 11] as const;
+/**
+ * AC-16: eight swatches a side, and AC-15's three shared faces. SPEC-056 §4.6
+ * moved them to `data/cosmetics.ts`, which the Locker reads too; the rows
+ * render `availableSwatches` — these eight, then the device's unlocks.
+ */
+export { PRIMARY_SWATCHES, SECONDARY_SWATCHES };
 
 /** SPEC-044 §4.4: the sheet Back opens over a form that was changed. */
 export const LEAVE_TITLE = 'Leave without creating a salvager?';
@@ -366,10 +384,11 @@ export class CreationScene extends UiScene<'creation'> {
       this.#kinRow(),
       this.#classCards(),
       this.#portraitRow(),
-      this.#swatchRow('Primary', PRIMARY_SWATCHES, this.#primary, (colour) => {
+      // SPEC-056 §4.6: the base eight, then the colours this device unlocked.
+      this.#swatchRow('Primary', availableSwatches('primary', this.services.settings.get().unlocks), this.#primary, (colour) => {
         this.#primary = colour;
       }),
-      this.#swatchRow('Secondary', SECONDARY_SWATCHES, this.#secondary, (colour) => {
+      this.#swatchRow('Secondary', availableSwatches('secondary', this.services.settings.get().unlocks), this.#secondary, (colour) => {
         this.#secondary = colour;
       }),
       this.#attributeRows(),

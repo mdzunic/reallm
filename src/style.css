@@ -3725,6 +3725,37 @@ html.debug .scene-tag {
   font-size: var(--type-sm);
 }
 
+/* SPEC-056 §4.3: a relic's twist, on its gear card and in the rack. */
+.gear-twist {
+  margin: 0;
+  color: var(--good);
+  font-size: var(--type-sm);
+}
+
+/* SPEC-056 §4.3: the rack — one row per owned relic: picture, name and
+   twist, then Equip (or a disabled Equipped while it is worn). */
+.char-relic {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  border: 1px solid var(--panel-edge);
+  border-radius: var(--radius);
+  padding: 6px 10px;
+}
+
+.char-relic-body {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+/* SPEC-056 §4.5: a locked recipe's line, in place of its stepper and buy. */
+.shop-locked {
+  color: var(--ink-dim);
+  font-style: italic;
+}
+
 /* AC-48: the twenty slots. */
 .inv-grid {
   display: grid;

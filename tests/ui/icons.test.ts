@@ -3,7 +3,7 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it, vi } from 'vitest';
 import { COMPANIONS, ITEMS } from '@/data/index';
-import { type IconId, iconGlyph, itemIconSource, itemManifest, parseItemManifest } from '@/ui/icons';
+import { EFFECT_GLYPHS, type IconId, iconGlyph, itemIconSource, itemManifest, parseItemManifest } from '@/ui/icons';
 
 describe('itemIconSource (SPEC-031 §4.14)', () => {
   it('returns the image when the manifest lists the id', () => {
@@ -56,11 +56,10 @@ describe('itemManifest (SPEC-031 §4.14)', () => {
 // test reads the manifest the Blender build wrote, not a fixture, so an item
 // added without a render fails here and names itself.
 //
-// SPEC-052 §4.8 draws seven pictures before their items exist. They wait in
+// SPEC-052 §4.8 drew seven pictures before their items existed. They waited in
 // PENDING_PICTURES; SPEC-056 adds the items, moves the 26 to 33 and empties the
-// list, so an item id that does not match its picture fails there (52-f).
-const PENDING_PICTURES = ['relic_last_word', 'relic_cold_coil', 'relic_seed_drum', 'relic_slag_vent',
-  'relic_seeker', 'flare', 'stim'] as const;   // SPEC-056 empties it when the items exist
+// list, so an item id that does not match its picture fails here (52-f).
+const PENDING_PICTURES = [] as const;
 
 describe('the committed manifest (SPEC-035 §4.15, AC-45; SPEC-052 §4.8)', () => {
   const manifest = parseItemManifest(
@@ -68,8 +67,9 @@ describe('the committed manifest (SPEC-035 §4.15, AC-45; SPEC-052 §4.8)', () =
   );
   const ids = [...Object.keys(ITEMS), ...Object.keys(COMPANIONS)] as IconId[];
 
-  it('lists a render for all 21 items and 5 companions, and the pictures still waiting for theirs', () => {
-    expect(ids).toHaveLength(26);
+  it('lists a render for all 28 items and 5 companions, and no picture is still waiting for its item', () => {
+    expect(ids).toHaveLength(33);
+    expect(PENDING_PICTURES).toHaveLength(0);
     expect([...manifest].sort()).toEqual([...ids, ...PENDING_PICTURES].sort());
   });
 
@@ -86,5 +86,24 @@ describe('the committed manifest (SPEC-035 §4.15, AC-45; SPEC-052 §4.8)', () =
       expect(source.url).toBe(`assets/items/${id}.webp`);
       expect(readFileSync(new URL(`../../public/${source.url}`, import.meta.url).pathname).byteLength).toBeGreaterThan(0);
     }
+  });
+});
+
+// SPEC-056 §4.5 — the flare's and the stim's effects wear glyphs of their own.
+describe('the light and stamina glyphs (SPEC-056 §4.5)', () => {
+  it('light is ☼ and stamina is », each distinct from every other effect', () => {
+    expect(EFFECT_GLYPHS.light).toBe('☼');
+    expect(EFFECT_GLYPHS.stamina).toBe('»');
+    expect(iconGlyph('flare')).toBe('☼');
+    expect(iconGlyph('stim')).toBe('»');
+    const glyphs = Object.values(EFFECT_GLYPHS);
+    expect(new Set(glyphs).size).toBe(glyphs.length);
+  });
+
+  it('a relic wears its line\'s glyph until its picture is listed (56-k)', () => {
+    expect(iconGlyph('relic_last_word')).toBe(iconGlyph('pistol_service'));
+    expect(iconGlyph('relic_cold_coil')).toBe(iconGlyph('mg_scrap'));
+    expect(iconGlyph('relic_seeker')).toBe(iconGlyph('launcher_rocket'));
+    expect(itemIconSource('relic_seeker', new Set())).toEqual({ kind: 'glyph', glyph: iconGlyph('launcher_rocket') });
   });
 });

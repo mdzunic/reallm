@@ -28,11 +28,12 @@ import {
   type ShipSystem,
 } from '@/data/index';
 import type { GearLine, Item, ShipSystemDef } from '@/data/index';
-import type { Economy, Result } from '@/systems/Economy';
+import { isRelic, recipeUnlocked, type Economy, type Result } from '@/systems/Economy';
 import {
   balanceAfterText,
   companionEffectText,
   failText,
+  lockedRecipeText,
   prerequisiteText,
   priceText,
   purchaseText,
@@ -223,7 +224,8 @@ export class ShopPanel {
    */
   #gearRows(): HTMLElement[] {
     const { data, economy } = this.#deps;
-    const gear = ITEM_IDS.filter((id) => ITEMS[id].kind === 'weapon' || ITEMS[id].kind === 'armor').sort((a, b) => {
+    // SPEC-056 §4.3: a relic is on no shelf — the Character tab's rack holds it.
+    const gear = ITEM_IDS.filter((id) => (ITEMS[id].kind === 'weapon' || ITEMS[id].kind === 'armor') && !isRelic(id)).sort((a, b) => {
       const ia = ITEM_TABLE[a];
       const ib = ITEM_TABLE[b];
       const byLine = LINE_ORDER.indexOf(lineOf(ia) as GearLine) - LINE_ORDER.indexOf(lineOf(ib) as GearLine);
@@ -404,6 +406,15 @@ export class ShopPanel {
         `shop-craft-${id}-plus`,
       ),
     );
+    // SPEC-056 §4.5: until its blueprint's cache is claimed, a recipe shows
+    // where the blueprint lies in place of the stepper and the buy line.
+    if (!recipeUnlocked(this.#deps.data, id)) {
+      row.append(
+        h('div', { class: 'shop-row-head' }, itemIcon(def.output, 40), h('span', { class: 'shop-name' }, item.name)),
+        testId(h('p', { class: 'shop-note shop-locked' }, lockedRecipeText(id)), `recipe-${id}-locked`),
+      );
+      return row;
+    }
     row.append(
       h(
         'div',
@@ -463,9 +474,10 @@ export class ShopPanel {
       // The ladder runs down the item's own line: this rung wants the one below
       // it owned, carried or worn (SPEC-025 §4.6).
       if (item.kind === 'weapon' || item.kind === 'armor') {
+        // SPEC-056 §4.3: a relic is no rung.
         const previous = ITEM_IDS.filter((candidate) => {
           const other = ITEM_TABLE[candidate];
-          return other.kind !== 'consumable' && other.line === item.line && other.tier < item.tier;
+          return other.kind !== 'consumable' && other.line === item.line && other.tier < item.tier && !isRelic(candidate);
         }).sort((a, b) => tierOf(ITEM_TABLE[b]) - tierOf(ITEM_TABLE[a]))[0];
         const { armor, sidearm, primary, heavy } = data.equipped;
         const equippedIds: (string | null)[] = [armor, sidearm, primary, heavy];

@@ -6,7 +6,16 @@
 import type { Save } from '@/core/Save';
 import { ITEMS, type GearLine, type Item, type ItemId, type Price } from '@/data/index';
 import type { Economy } from '@/systems/Economy';
-import { balanceAfterText, failText, gearStatLines, prerequisiteText, priceText, purchaseText, shortfallText } from '@/systems/UiHelpers';
+import {
+  balanceAfterText,
+  failText,
+  gearStatLines,
+  prerequisiteText,
+  priceText,
+  purchaseText,
+  shortfallText,
+  twistText,
+} from '@/systems/UiHelpers';
 import { compareNodes } from '@/ui/Compare';
 import { confirmSheet } from '@/ui/ConfirmSheet';
 import { el, h, openModal, testId, type UiRoot } from '@/ui/dom';
@@ -88,6 +97,10 @@ export function openGearCard(id: ItemId, deps: GearCardDeps): Promise<void> {
     );
 
     const stats = h('ul', { class: 'gear-card-stats' }, ...gearStatLines(id).map((lineText) => h('li', {}, lineText)));
+    // SPEC-056 §4.3: a relic's card says what its twist does.
+    const schema: Item = item;
+    const twist =
+      schema.kind === 'weapon' && schema.twist !== undefined ? testId(h('p', { class: 'gear-twist' }, twistText(schema.twist)), 'gear-twist') : null;
     // SPEC-039 §4.6: against the piece worn in this item's own slot — a
     // machine gun reads against the rifle it would replace. SPEC-042 §4.8:
     // each part points the way it goes for the player.
@@ -167,6 +180,7 @@ export function openGearCard(id: ItemId, deps: GearCardDeps): Promise<void> {
       h('h2', { class: 'gear-card-name' }, item.name),
       badges,
       stats,
+      twist,
       compare.length === 0 ? null : h('p', { class: 'gear-card-compare' }, ...compare),
       h('p', { class: 'gear-card-blurb' }, item.blurb),
       buy,

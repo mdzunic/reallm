@@ -1649,9 +1649,16 @@ import {
   pickupText,
   prerequisiteText,
   purchaseText,
+  availableSwatches,
+  cacheRewardText,
+  lockedRecipeText,
+  STAMINA_FULL_TEXT,
+  swatchUnlockedText,
+  twistText,
   type DeathContext,
   type HudEffect,
 } from '@/systems/UiHelpers';
+import { CACHES, PRIMARY_SWATCHES, SECONDARY_SWATCHES, SWATCH_IDS, type ItemId } from '@/data/index';
 
 describe('completionLines (SPEC-042 §4.1)', () => {
   it('reads c1_m1’s XP, tokens and resources, and names the next offer', () => {
@@ -2399,5 +2406,85 @@ describe('the stones’ words (SPEC-055 §4.6)', () => {
   it('the panel says the rule, then the glyphs in order; the tracker lists them', () => {
     expect(platesPanelLine(plates)).toBe('Step on the stones in this order. Do not deviate. circle, triangle, square');
     expect(stonesText(plates)).toBe('Stones: circle · triangle · square');
+  });
+});
+
+// ------------------------------------------------------------- SPEC-056
+
+describe('the treasure\'s words (SPEC-056 §4.1, §4.4, §4.5, §4.6)', () => {
+  it('twistText reads each twist kind', () => {
+    const twist = (id: ItemId): NonNullable<Extract<(typeof ITEMS)[ItemId], { kind: 'weapon' }>['twist']> => {
+      const item = ITEMS[id] as { twist?: unknown };
+      if (item.twist === undefined) throw new Error(id);
+      return item.twist as NonNullable<Extract<(typeof ITEMS)[ItemId], { kind: 'weapon' }>['twist']>;
+    };
+    expect(twistText(twist('relic_last_word'))).toBe('Double damage to targets under 30 % health');
+    expect(twistText(twist('relic_cold_coil'))).toBe('Hits slow the target by 25 % for 1 s (bosses 10 %)');
+    expect(twistText(twist('relic_seed_drum'))).toBe('Shells leave a 3 m cloud: 8 damage a second for 3 s');
+    expect(twistText(twist('relic_slag_vent'))).toBe('Overheating vents a 3.5 m blast of 60');
+    expect(twistText(twist('relic_seeker'))).toBe('Rockets turn toward the nearest target ahead');
+  });
+
+  it('cacheRewardText prints tokens, resources, items, relic, blueprint, swatch and shard, in that order', () => {
+    expect(
+      cacheRewardText({
+        shard: 'shard_cinder4',
+        swatch: 'eden_vault',
+        blueprint: 'flare',
+        relic: 'relic_last_word',
+        items: [
+          { itemId: 'plasma_cell', qty: 1 },
+          { itemId: 'medkit', qty: 2 },
+        ],
+        resources: { lithium: 8, oil: 3 },
+        tokens: 5,
+      }),
+    ).toBe('+5 ◈ · +3 oil · +8 lithium · +1 Plasma Cell · +2 Medkit · Relic: Last Word · Blueprint: Flare · Swatch: Checkpoint · Archive shard');
+    // The rows as they are: a vault, a world puzzle with a blueprint, a relic terminal.
+    expect(cacheRewardText(CACHES.cinder4_vault.reward)).toBe(
+      '+5 ◈ · +8 lithium · +1 Plasma Cell · +1 Coolant Pack · Relic: Last Word · Archive shard',
+    );
+    expect(cacheRewardText(CACHES.vetra_loose_b.reward)).toBe('+20 oil · +2 Frag Grenade · Blueprint: Flare');
+    expect(cacheRewardText(CACHES.cinder4_relic.reward)).toBe('+5 lithium · +1 Plasma Cell · Swatch: Dune Rust');
+    expect(cacheRewardText({})).toBe('');
+  });
+
+  it('lockedRecipeText names the planet whose cave holds the blueprint', () => {
+    expect(lockedRecipeText('flare')).toBe('Locked — found in a Vetra cave');
+    expect(lockedRecipeText('stim')).toBe('Locked — found in a Thessaly cave');
+    expect(lockedRecipeText('medkit')).toBe('');
+  });
+
+  it('swatchUnlockedText is the unlock toast', () => {
+    expect(swatchUnlockedText('cinder4_relic')).toBe('Swatch unlocked: Dune Rust — wear it from the Locker');
+  });
+
+  it('availableSwatches is the base eight, then each unlocked colour in SWATCH_IDS order, once', () => {
+    expect(availableSwatches('primary', [])).toEqual([...PRIMARY_SWATCHES]);
+    expect(availableSwatches('secondary', [])).toEqual([...SECONDARY_SWATCHES]);
+    // Unlocked out of order, with a duplicate and an unknown id: the table's order, once each.
+    expect(availableSwatches('primary', ['eden_vault', 'cinder4_relic', 'eden_vault', 'nope'])).toEqual([
+      ...PRIMARY_SWATCHES,
+      '#c2703d',
+      '#e6e9ec',
+    ]);
+    expect(availableSwatches('secondary', ['vetra_relic'])).toEqual([...SECONDARY_SWATCHES, '#1d3b4a']);
+    expect(availableSwatches('primary', [...SWATCH_IDS])).toHaveLength(14);
+  });
+
+  it('the stim refusal\'s text, and a relic\'s tooltip says its twist rather than a ladder', () => {
+    expect(STAMINA_FULL_TEXT).toBe('Stamina is full');
+    expect(gearTooltip('relic_slag_vent')).toBe('Relic — Overheating vents a 3.5 m blast of 60');
+    // The Last Word (handgun T1) is no rung above the Service Pistol: its
+    // tooltip reads as it did before the relic existed.
+    expect(gearTooltip('pistol_service')).toBe('T0 — top tier');
+    expect(gearTooltip('mg_scrap')).not.toContain('Cold Coil');
+    expect(prerequisiteText('pistol_magnum')).toBe('Requires Service Pistol (T0)');
+    expect(prerequisiteText('mg_rotary')).toBe('Requires Scrap Chaingun (T1)');
+  });
+
+  it('the flare\'s and the stim\'s cards say what they do', () => {
+    expect(gearStatLines('flare')).toEqual(['Lights 12 m for 60 s where it lands', 'Stack of 5']);
+    expect(gearStatLines('stim')).toEqual(['Refills stamina and clears exhaustion', 'Stack of 5']);
   });
 });

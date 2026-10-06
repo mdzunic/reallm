@@ -9,13 +9,20 @@
 //
 // SPEC-049 §4.4: under the stats, Iris's compass — its words read the story
 // flags and the view the station counted when it opened this tab.
+//
+// SPEC-056 §4.3, §4.6: after the loadout, the relic rack — every relic a
+// claimed vault holds, each with its twist and an Equip — and the Locker,
+// where the portrait and the suit's two colours change at any time.
 import { allocateAttribute, maxHp, unspentAttributePoints, type Save, type SaveStore } from '@/core/Save';
 import {
   ATTRIBUTE_MAX,
+  CLASSES,
   ITEMS,
   QUICK_SLOTS,
   RESOURCE_IDS,
+  SHARED_PORTRAITS,
   type Attributes,
+  type Item,
   type ItemId,
   type QuickSlot,
   type WeaponSlot,
@@ -26,7 +33,16 @@ import { percent } from '@/systems/Format';
 import { HOME_SESSION, keepsakeText } from '@/systems/Home';
 import { quickEligible } from '@/systems/Loadout';
 import { storyContextOf } from '@/systems/StoryContext';
-import { characterXpText, computePlayerStats, failText, gearTooltip, HP_FULL_TEXT } from '@/systems/UiHelpers';
+import {
+  availableSwatches,
+  characterXpText,
+  computePlayerStats,
+  failText,
+  gearTooltip,
+  HP_FULL_TEXT,
+  makeRoomText,
+  twistText,
+} from '@/systems/UiHelpers';
 import { compareNodes } from '@/ui/Compare';
 import { confirmSheet } from '@/ui/ConfirmSheet';
 import { el, h, keepFocus, testId, type UiRoot } from '@/ui/dom';
@@ -46,6 +62,14 @@ export interface CharacterDeps {
   save: SaveStore;
   data: Save;
   economy: Economy;
+  /** SPEC-056 §4.6: this device's unlocked swatches (`settings.unlocks`); none when absent. */
+  unlocks?: () => readonly string[];
+}
+
+/** SPEC-056 §4.3: an item's twist line, `''` for anything that is not a relic. */
+function twistLine(id: ItemId): string {
+  const item: Item = ITEMS[id];
+  return item.kind === 'weapon' && item.twist !== undefined ? twistText(item.twist) : '';
 }
 
 export class CharacterPanel {
@@ -80,7 +104,11 @@ export class CharacterPanel {
     // SPEC-044 §4.2: through `keepFocus`, so an equip or a use by keyboard keeps its place.
     keepFocus(this.#container, () => {
       const panel = testId(el('div', 'character'), 'character-panel');
-      panel.append(this.#statsBlock(), this.#keepsakeBlock(), this.#gearBlock(), this.#inventoryBlock(), this.#resourcesBlock());
+      panel.append(this.#statsBlock(), this.#keepsakeBlock(), this.#gearBlock());
+      // SPEC-056 §4.3: the rack sits after the loadout, only once a relic is owned.
+      const relics = this.#relicsBlock();
+      if (relics !== null) panel.append(relics);
+      panel.append(this.#lockerBlock(), this.#inventoryBlock(), this.#resourcesBlock());
       this.#container.replaceChildren(panel);
     });
   }
@@ -243,6 +271,8 @@ export class CharacterPanel {
             h('span', { class: 'settings-note' }, slot),
             h('span', { class: 'gear-name' }, `${ITEMS[id].name} · T${this.#tierOf(id)}`),
             h('span', { class: 'gear-line' }, this.#statLine(id)),
+            // SPEC-056 §4.3: a relic's card says what its twist does.
+            twistLine(id) === '' ? null : testId(h('span', { class: 'gear-twist' }, twistLine(id)), 'gear-twist'),
           );
     testId(card, `equipped-${slot}`);
 
@@ -435,13 +465,126 @@ export class CharacterPanel {
   }
 
   #equip(id: ItemId): void {
+    // SPEC-056 56-a: what a relic would push into a full pack, named.
+    const item: Item = ITEMS[id];
+    const displaced = item.kind === 'weapon' ? this.#deps.data.equipped[item.slot] : this.#deps.data.equipped.armor;
     const result = this.#deps.economy.equip(id);
     if (!result.ok) {
-      this.#deps.ui.toast(failText(result.reason), 'error');
+      this.#deps.ui.toast(result.reason === 'inventory_full' && displaced !== null ? makeRoomText(displaced) : failText(result.reason), 'error');
       return;
     }
     this.#selected = null;
     this.#deps.ui.toast(`${ITEMS[id].name} equipped`, 'good');
+    this.refresh();
+  }
+
+  // ----------------------------------------------------------------- relics
+
+  /**
+   * SPEC-056 §4.3: the rack — one `char-relic-<id>` row per owned relic, in
+   * `CACHE_IDS` order, with its picture, name, twist and `Equip` (a disabled
+   * `Equipped` while it is worn). `null` while no relic is owned.
+   */
+  #relicsBlock(): HTMLElement | null {
+    const relics = this.#deps.economy.relics();
+    if (relics.length === 0) return null;
+    const { sidearm, primary, heavy } = this.#deps.data.equipped;
+    const rows = relics.map((id) => {
+      const worn = sidearm === id || primary === id || heavy === id;
+      const button = worn
+        ? h('button', { class: 'ui-btn char-relic-equip', type: 'button', disabled: true }, 'Equipped')
+        : h('button', { class: 'ui-btn is-primary char-relic-equip', type: 'button', click: () => this.#equip(id) }, 'Equip');
+      return testId(
+        h(
+          'div',
+          { class: `char-relic${worn ? ' is-worn' : ''}` },
+          itemIcon(id, 40),
+          h('span', { class: 'char-relic-body' }, h('span', { class: 'gear-name' }, ITEMS[id].name), h('span', { class: 'gear-line' }, twistLine(id))),
+          testId(button, `char-relic-${id}-equip`),
+        ),
+        `char-relic-${id}`,
+      );
+    });
+    return testId(h('section', { class: 'char-block char-relics' }, h('p', { class: 'char-title' }, 'Relics'), ...rows), 'char-relics');
+  }
+
+  // ----------------------------------------------------------------- locker
+
+  /**
+   * SPEC-056 §4.6: the Locker — the class's three portraits and the shared
+   * three, as creation offers them, and both colour rows (`availableSwatches`:
+   * the base eight, then this device's unlocks). A press writes
+   * `save.player.appearance`, re-renders the panel's portrait and rides a
+   * `purchase` save; the suit wears it from the next scene entry.
+   */
+  #lockerBlock(): HTMLElement {
+    const { player } = this.#deps.data;
+    const appearance = player.appearance;
+    const unlocks = this.#deps.unlocks?.() ?? [];
+    const portraits = [...CLASSES[player.classId].portraits, ...SHARED_PORTRAITS];
+    const portraitTiles = portraits.map((index) => {
+      const source = portraitSource(index, this.#available);
+      const selected = appearance.portrait === index;
+      return testId(
+        h(
+          'button',
+          {
+            class: `portrait${selected ? ' is-selected' : ''}`,
+            type: 'button',
+            'aria-label': `Portrait ${index + 1}`,
+            'aria-pressed': String(selected),
+            click: () => this.#wear('portrait', index),
+          },
+          source.kind === 'image' ? h('img', { class: 'portrait-img', src: source.url, alt: '', 'aria-hidden': 'true' }) : source.glyph,
+        ),
+        `locker-portrait-${index}`,
+      );
+    });
+    const swatchRow = (part: 'primary' | 'secondary', label: string): HTMLElement =>
+      h(
+        'div',
+        { class: 'creation-row' },
+        h('span', {}, label),
+        h(
+          'div',
+          { class: 'swatch-row' },
+          ...availableSwatches(part, unlocks).map((colour) => {
+            const selected = appearance[part] === colour;
+            return testId(
+              h('button', {
+                class: `swatch${selected ? ' is-selected' : ''}`,
+                type: 'button',
+                style: `background:${colour}`,
+                'aria-label': `${label} colour ${colour}`,
+                'aria-pressed': String(selected),
+                click: () => this.#wear(part, colour),
+              }),
+              `locker-${part}-${colour.slice(1)}`,
+            );
+          }),
+        ),
+      );
+    return testId(
+      h(
+        'section',
+        { class: 'char-block char-locker' },
+        h('p', { class: 'char-title' }, 'Locker'),
+        h('div', { class: 'creation-row' }, h('span', {}, 'Portrait'), h('div', { class: 'portrait-row' }, ...portraitTiles)),
+        swatchRow('primary', 'Primary'),
+        swatchRow('secondary', 'Secondary'),
+      ),
+      'char-locker',
+    );
+  }
+
+  /** SPEC-056 §4.6: one Locker press — the appearance, a `purchase` save and the panel again. */
+  #wear(part: 'portrait', value: number): void;
+  #wear(part: 'primary' | 'secondary', value: string): void;
+  #wear(part: 'portrait' | 'primary' | 'secondary', value: number | string): void {
+    const appearance = this.#deps.data.player.appearance;
+    if (part === 'portrait') appearance.portrait = value as number;
+    else appearance[part] = value as string;
+    this.#deps.save.request('purchase');
     this.refresh();
   }
 
