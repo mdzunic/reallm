@@ -164,6 +164,71 @@ test.describe('SPEC-054 the underground', () => {
     await expect(page.locator('[data-testid="hud-light"]')).toHaveText('◐ Light on · L');
   });
 
+  // AC-11, AC-12, AC-13: every animation frame of the swap, recorded in the
+  // page — the fade's opacity, the level and the hold. On Eden, so no pack
+  // interrupts the held key. The recorded swap is the ascent after a first
+  // descent: that descent builds the flashlight, and on this GPU-less
+  // container the first frame drawn with its programs holds the main thread
+  // for seconds — long enough to swallow a 300 ms fade without one frame.
+  test('3: the swap fades out, changes the level under black, fades in, holds the step and lets go of a held key; reduced motion swaps at once', async ({ page }) => {
+    await start(page, '/?debug');
+    await land(page, 'eden');
+    await descend(page);
+    await frames(page, 10);
+    const record = (): Promise<void> =>
+      page.evaluate(() => {
+        const log: Array<[string, number, number]> = [];
+        Object.assign(window, { __swapLog: log });
+        const fade = document.querySelector('[data-testid="transition-fade"]') as HTMLElement;
+        const step = (): void => {
+          const s = window.__reallm.stats().sceneInfo ?? {};
+          log.push([String(s['level']), Number(s['held']), Number(getComputedStyle(fade).opacity)]);
+          if (log.length < 2_000) requestAnimationFrame(step);
+        };
+        requestAnimationFrame(step);
+      });
+    const recorded = (): Promise<Array<[string, number, number]>> =>
+      page.evaluate(() => (window as unknown as { __swapLog: Array<[string, number, number]> }).__swapLog.splice(0));
+    const moveX = (): Promise<number> => page.evaluate(() => window.__reallm.input().move.x);
+
+    await page.keyboard.down('KeyD');
+    await page.waitForFunction(() => window.__reallm.input().move.x === 1, undefined, SLOW);
+    await record();
+    await tap(page, 'surface-ascend');
+    await untilInfo(page, 'level', 'surface');
+    await untilInfo(page, 'held', 0);
+    // AC-13: the key is still down, but the swap released it.
+    expect(await moveX()).toBe(0);
+    await page.keyboard.up('KeyD');
+    await frames(page, 4);
+    const log = await recorded();
+
+    const start0 = log.findIndex(([, held]) => held === 1);
+    const flip = log.findIndex(([level]) => level === 'surface');
+    const end = log.findIndex(([level, held]) => level === 'surface' && held === 0);
+    expect(start0).toBeGreaterThanOrEqual(0);
+    expect(flip).toBeGreaterThan(start0);
+    expect(end).toBeGreaterThan(flip);
+    // AC-12: held from the first frame of the swap to the last.
+    expect(log.slice(start0, end).every(([, held]) => held === 1)).toBe(true);
+    // AC-11: the fade-out climbs through partial opacity to black, the level
+    // changes only under black, and the fade-in falls through partial opacity.
+    const partial = (o: number): boolean => o > 0.05 && o < 0.95;
+    expect(log.slice(start0, flip).some(([, , o]) => partial(o))).toBe(true);
+    expect(log[flip]?.[2]).toBeGreaterThanOrEqual(0.99);
+    expect(log.slice(flip, end).some(([, , o]) => partial(o))).toBe(true);
+    expect(log[end]?.[2]).toBeLessThanOrEqual(0.01);
+
+    // AC-11: with reduced motion the swap is instant — no frame shows the fade.
+    await page.emulateMedia({ reducedMotion: 'reduce' });
+    await record();
+    await tap(page, 'surface-descend');
+    await untilInfo(page, 'level', 'underground');
+    await untilInfo(page, 'held', 0);
+    await frames(page, 4);
+    expect((await recorded()).every(([, , o]) => o <= 0.01)).toBe(true);
+  });
+
   // Eden's machine room holds no packs, so nothing can hurt the salvager while
   // the tip queue and the light count are read.
   test('3, 4: the dark tip shows; L and the swaps change the light, never the light count', async ({ page }) => {

@@ -62,9 +62,13 @@ for (const viewport of PHONE_VIEWPORTS) {
       // USE is hidden while LIGHT shows.
       await expect(page.locator('[data-testid="touch-interact"]')).toBeHidden();
 
+      // The chip names the state without the keyboard's `· L` (§4.5).
+      const chipText = page.locator('[data-testid="hud-light"]');
       const before = await light(page);
+      await expect(chipText).toHaveText(before === 1 ? '◐ Light on' : '○ Light off');
       await button.tap();
       await page.waitForFunction((was) => Number(window.__reallm.stats().sceneInfo?.['light']) !== was, before, COLD_START);
+      await expect(chipText).toHaveText(before === 1 ? '○ Light off' : '◐ Light on');
 
       // The chip clears the wallet and every toast.
       const chip = (await box(page, '[data-testid="hud-light"]')) as Box;
