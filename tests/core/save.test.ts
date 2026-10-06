@@ -656,7 +656,8 @@ describe('validateSave (§4.4)', () => {
   });
 
   it('keeps a hard meta, and reads an unknown difficulty as normal (SPEC-043 §4.4)', () => {
-    expect(DIFFICULTIES).toEqual(['casual', 'normal', 'hard']);
+    // SPEC-059 §4.2.1 widened the list in place, story first.
+    expect(DIFFICULTIES).toEqual(['story', 'casual', 'normal', 'hard']);
     const meta = newSave(0, CREATION, 1, 0).meta;
     const hard = expectOk(withPatch({ meta: { ...meta, difficulty: 'hard' } }));
     expect(hard.data.meta.difficulty).toBe('hard');
@@ -672,6 +673,18 @@ describe('validateSave (§4.4)', () => {
     expect(created.meta.difficulty).toBe('hard');
     expect(created.version).toBe(SAVE_VERSION);
     expect(expectOk(JSON.parse(JSON.stringify(created))).data.meta.difficulty).toBe('hard');
+  });
+
+  it('keeps a story meta with the version unchanged (SPEC-059 §4.2.4)', () => {
+    const meta = newSave(0, CREATION, 1, 0).meta;
+    const story = expectOk(withPatch({ meta: { ...meta, difficulty: 'story' } }));
+    expect(story.data.meta.difficulty).toBe('story');
+    expect(story.warnings).toEqual([]);
+    const created = newSave(0, { ...CREATION, difficulty: 'story' }, 1, 0);
+    expect(created.version).toBe(SAVE_VERSION);
+    expect(expectOk(JSON.parse(JSON.stringify(created))).data.meta.difficulty).toBe('story');
+    // An unknown value still reads normal.
+    expect(expectOk(withPatch({ meta: { ...meta, difficulty: 'STORY' } })).data.meta.difficulty).toBe('normal');
   });
 
   it('clamps resources to 0..RESOURCE_CEILING, never to the cargo cap (AC-24, SPEC-034 §4.13)', () => {
@@ -1712,6 +1725,31 @@ describe('persistence hints (§4.7)', () => {
     const saves = new SaveStore(events, fakeStorage().storage, { window: null, settings: settingsStub() });
     saves.create(0, CREATION);
     expect(events.toasts).toEqual([]);
+  });
+});
+
+// ------------------------------------------------------- SPEC-059 §4.1.7
+
+describe('bind writes lastSlot (SPEC-059 §4.1.7, E-12)', () => {
+  it('records each bound slot through the settings port, on every load path', () => {
+    const patches: object[] = [];
+    const settings = {
+      get: () => ({ persistGranted: null, installHintShownAt: null }),
+      set: (patch: object) => void patches.push(patch),
+    };
+    const saves = new SaveStore(recorder(), fakeStorage().storage, { window: null, settings });
+    saves.bind(newSave(2, CREATION, 1, 0));
+    expect(patches).toEqual([{ lastSlot: 2 }]);
+    // A New Game binds through `create`.
+    saves.create(1, CREATION);
+    expect(patches).toContainEqual({ lastSlot: 1 });
+    expect(saves.current?.meta.slot).toBe(1);
+  });
+
+  it('writes nothing without a settings port', () => {
+    const saves = new SaveStore(recorder(), fakeStorage().storage, { window: null });
+    expect(() => saves.bind(newSave(0, CREATION, 1, 0))).not.toThrow();
+    expect(saves.current?.meta.slot).toBe(0);
   });
 });
 

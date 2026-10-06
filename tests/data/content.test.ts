@@ -3757,3 +3757,111 @@ describe('the next instance’s lines (SPEC-058 §4.6, §4.7)', () => {
     );
   });
 });
+
+// ------------------------------------------------------- SPEC-059 §4.4.1, §6.1
+
+import { COMMENDATION_IDS, COMMENDATIONS, DIFFICULTY_RULES, type CommendationRule } from '@/data/index';
+
+/** §4.4.1: the six rows that name the loop. */
+const HIDDEN_COMMENDATIONS = ['sixty_one_marks', 'sixty_one_times', 'disconnected', 'verification_failed', 'deviation_zero', 'instance_65'];
+
+/** What each rule names, if anything, that must exist in the content. */
+function ruleProblems(id: string, rule: CommendationRule): string[] {
+  const out: string[] = [];
+  const arenaBosses = new Set<string>(
+    PLANET_IDS.flatMap((planet) => PLANETS[planet].surface.pois.flatMap((poi) => (poi.kind === 'arena' && poi.boss !== undefined ? [poi.boss] : []))),
+  );
+  const slots = new Set<string>(Object.values(CACHES).map((cache) => cache.slot));
+  switch (rule.kind) {
+    case 'mission':
+    case 'bonus':
+      if (!Object.hasOwn(MISSIONS, rule.mission)) out.push(`${id}: no mission ${rule.mission}`);
+      if (rule.kind === 'bonus' && (MISSIONS[rule.mission] as MissionDef).bonus === undefined) out.push(`${id}: ${rule.mission} has no bonus`);
+      break;
+    case 'boss':
+      if (!arenaBosses.has(rule.boss)) out.push(`${id}: ${rule.boss} is no planet's arena boss`);
+      break;
+    case 'flag':
+      if (!(STORY_FLAGS as readonly string[]).includes(rule.flag)) out.push(`${id}: no flag ${rule.flag}`);
+      break;
+    case 'ending':
+      if (!(STORY_FLAGS as readonly string[]).includes(`ending_${rule.ending}`)) out.push(`${id}: no flag ending_${rule.ending}`);
+      break;
+    case 'claims':
+      if (!slots.has(rule.slot)) out.push(`${id}: no cache slot ${rule.slot}`);
+      if (rule.planet !== undefined && !(PLANET_IDS as readonly string[]).includes(rule.planet)) out.push(`${id}: no planet ${rule.planet}`);
+      if (rule.planet !== undefined && !Object.values(CACHES).some((cache) => cache.slot === rule.slot && cache.planet === rule.planet)) {
+        out.push(`${id}: ${rule.planet} has no ${rule.slot}`);
+      }
+      break;
+    default:
+      break;
+  }
+  return out;
+}
+
+describe('the commendations (SPEC-059 §4.4.1)', () => {
+  it('holds the 24 rows, ids unique, COMMENDATION_IDS in table order', () => {
+    expect(COMMENDATION_IDS).toHaveLength(24);
+    expect([...COMMENDATION_IDS]).toEqual(Object.keys(COMMENDATIONS));
+    expect(new Set(COMMENDATION_IDS).size).toBe(24);
+    for (const id of COMMENDATION_IDS) expect(COMMENDATIONS[id].id, id).toBe(id);
+  });
+
+  it('titles are at most 32 characters and details at most 80, with no contraction', () => {
+    for (const id of COMMENDATION_IDS) {
+      const { title, detail } = COMMENDATIONS[id];
+      expect(title.length, id).toBeLessThanOrEqual(32);
+      expect(detail.length, id).toBeLessThanOrEqual(80);
+      expect(CONTRACTION_PATTERN.test(title), title).toBe(false);
+      expect(CONTRACTION_PATTERN.test(detail), detail).toBe(false);
+    }
+  });
+
+  it('every rule names an existing mission, flag, arena boss, cache slot or planet', () => {
+    const problems = COMMENDATION_IDS.flatMap((id) => ruleProblems(id, COMMENDATIONS[id].rule));
+    expect(problems).toEqual([]);
+    // …and the check would see a name that does not exist.
+    expect(ruleProblems('x', { kind: 'boss', boss: 'dust_skitter', without: 'hit' })).toHaveLength(1);
+    expect(ruleProblems('x', { kind: 'claims', slot: 'relic', planet: 'hive', min: 1 })).toHaveLength(1);
+  });
+
+  it('every_reading’s min equals the optional clues in CLUES (15)', () => {
+    const optional = CLUES.filter((clue) => clue.path === 'optional').length;
+    expect(optional).toBe(15);
+    expect(COMMENDATIONS.every_reading.rule).toEqual({ kind: 'offTask', min: optional });
+    // Finding them all is what offTaskCount counts.
+    expect(offTaskCount(new Set(CLUES.filter((clue) => clue.path === 'optional').map((clue) => clue.id)))).toBe(optional);
+  });
+
+  it('exactly the six rows marked hidden in §4.4.1 are hidden', () => {
+    const hidden = COMMENDATION_IDS.filter((id) => (COMMENDATIONS[id] as { hidden?: true }).hidden === true);
+    expect(hidden).toEqual(HIDDEN_COMMENDATIONS);
+  });
+
+  it('every ending grade is a value ratingGrade returns', () => {
+    const grades = new Set([1, 0.94, 0.91, 0.85, 0.82, 0.5].map(ratingGrade));
+    for (const id of COMMENDATION_IDS) {
+      const rule = COMMENDATIONS[id].rule;
+      if (rule.kind !== 'ending' || !('grade' in rule)) continue;
+      expect(grades.has(rule.grade), `${id}: ${rule.grade}`).toBe(true);
+    }
+  });
+});
+
+describe('the story row (SPEC-059 §4.2.1)', () => {
+  it('zeroes every hit on the player and the allies and keeps the fights', () => {
+    expect(DIFFICULTY_RULES.story).toEqual({
+      enemyHpMult: 1,
+      enemyDamageMult: 0,
+      eliteChanceMult: 1,
+      deathLoss: 0,
+      weatherMult: 0,
+      allyDamageMult: 0,
+      assisted: true,
+    });
+    // Its enemy HP and elite chance are normal's.
+    expect(DIFFICULTY_RULES.story.enemyHpMult).toBe(DIFFICULTY_RULES.normal.enemyHpMult);
+    expect(DIFFICULTY_RULES.story.eliteChanceMult).toBe(DIFFICULTY_RULES.normal.eliteChanceMult);
+  });
+});

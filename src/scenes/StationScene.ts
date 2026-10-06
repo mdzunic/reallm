@@ -46,9 +46,11 @@ import { openCommsLog } from '@/ui/CommsLog';
 import { dialogueLayer, type DialogueUI } from '@/ui/DialogueUI';
 import { el, h, testId } from '@/ui/dom';
 import { clearEndingOverlays, EndingOverlay } from '@/ui/EndingOverlay';
+import { INSTALL_TOAST_TEXT, installAvailable } from '@/ui/InstallButton';
 import { MissionBoard } from '@/ui/MissionBoard';
 import { notesFor, NOTES_UNSEEN, syncNotesDot } from '@/ui/NotesPanel';
 import { SettingsPanel } from '@/ui/SettingsPanel';
+import { prepareSaveCard, shareButton, type PreparedCard } from '@/ui/ShareCard';
 import { ShopPanel } from '@/ui/ShopPanel';
 import type { Look } from '@/core/Quality';
 import { NEUTRAL_SKY } from '@/views/Environment';
@@ -59,6 +61,8 @@ import { Wallet } from '@/ui/Wallet';
 
 /** SPEC-017 §4.1 (*initial tuning*): the station reads cool and clean. */
 const STATION_LOOK: Partial<Look> = { vignette: 0.35, bloomStrength: 0.3, tint: [0.96, 1, 1.04] };
+/** SPEC-059 §4.6.6: how long the one-time install toast stays up. */
+const INSTALL_TOAST_MS = 10_000;
 /** SPEC-042 §4.5: what a flight death cost — the jump's fuel — and what it kept (E5). */
 export const RECALL_DETAIL_TEXT = "Hull breached — ARIA flew you home. The jump's fuel is spent; your cargo is safe.";
 const HUB_ENVIRONMENT_INTENSITY = 0.9;
@@ -90,6 +94,8 @@ export class StationScene extends UiScene<'station'> {
   #driftQueued = false;
   /** SPEC-045 §4.1: the open comms log's close, or `null`. */
   #closeComms: (() => void) | null = null;
+  /** SPEC-059 §4.5.5: the card drawn when the Character tab last opened. */
+  #charCard: PreparedCard | null = null;
 
   constructor(services: GameServices) {
     super(services, 'station', 'station');
@@ -291,8 +297,10 @@ export class StationScene extends UiScene<'station'> {
     // AC-22: the ship is docked; the hull comes back to full.
     data.player.hp = maxHp(data.player.classId, data.player.attributes, data.player.level);
     // AC-23: the save knows where it is, and writes at this safe point.
+    // SPEC-059 §4.1.1: a save at the station has no planet to resume on.
     data.progress.location = 'station';
     data.progress.currentPlanet = null;
+    data.progress.resume = null;
     this.services.save.request('station_enter');
   }
 
@@ -321,14 +329,45 @@ export class StationScene extends UiScene<'station'> {
     const beats = director(this.services);
     const interlude = interludeToPlay(new Set(data.progress.flags));
     if (interlude !== null && beats.enabled && economy !== null) {
+      // SPEC-059 §4.5.5: the card is drawn as the interlude starts…
+      const card = prepareSaveCard(data, this.services.settings.get().commendations);
       await beats.playFilm(interlude.film, { musicAfter: 'station' });
       // E29: the flags are written when the film settles — ended or skipped —
       // so a reload during one replays it at the next entry.
       for (const flag of interlude.markSeen) economy.setFlag(flag);
       this.services.save.request('mission');
+      // …and offered from the moment it settles until the station exits.
+      this.#offerInterludeShare(card);
     }
     await this.#homeOnEntry(data);
     this.#aftermathOnEntry(data);
+    this.#installHint(data);
+  }
+
+  /**
+   * SPEC-059 §4.6.6: at the end of the entry's story, once — after the first
+   * chapter, while the browser keeps an install prompt, the app is not
+   * installed and no install nudge has shown on this device (the key iOS's
+   * Home Screen hint shares).
+   */
+  #installHint(data: Save): void {
+    if (!this.#alive || !this.#present) return;
+    const settings = this.services.settings;
+    const { installed, installHintShownAt } = settings.get();
+    if (!data.progress.flags.includes('chapter1_done') || !installAvailable() || installed || installHintShownAt !== null) return;
+    this.ui.toast(INSTALL_TOAST_TEXT, 'info', INSTALL_TOAST_MS);
+    settings.set({ installHintShownAt: Date.now() });
+  }
+
+  /**
+   * SPEC-059 §4.5.5: `interlude-share` in the head, under the channel line,
+   * once the interlude has settled — never on a station already leaving.
+   */
+  #offerInterludeShare(card: PreparedCard): void {
+    if (!this.#alive || !this.#present) return;
+    const headText = this.#screen?.root.querySelector('.screen-head-text');
+    if (headText === null || headText === undefined || headText.querySelector('[data-testid="interlude-share"]') !== null) return;
+    headText.append(shareButton('interlude-share', card, this.ui));
   }
 
   /**
@@ -440,11 +479,15 @@ export class StationScene extends UiScene<'station'> {
       await overlay.playStay(stayReport(data));
       if (!this.#alive) return false;
       // SPEC-058 §4.7: the Selection card, then the ending is seen (58-a).
-      await overlay.playSelectionCard({
-        number: instanceNumber(data.meta.iteration) + 1,
-        name: data.player.name,
-        portrait: data.player.appearance.portrait,
-      });
+      // SPEC-059 §4.5.5: with the run's own card to share, drawn as it mounts.
+      await overlay.playSelectionCard(
+        {
+          number: instanceNumber(data.meta.iteration) + 1,
+          name: data.player.name,
+          portrait: data.player.appearance.portrait,
+        },
+        prepareSaveCard(data, this.services.settings.get().commendations),
+      );
       if (!this.#alive) return false;
       data.progress.endingSeen = true;
       this.services.save.request('mission');
@@ -455,6 +498,8 @@ export class StationScene extends UiScene<'station'> {
     await overlay.playEscape(data.meta.iteration);
     if (!this.#alive) return false;
     data.progress.endingSeen = true;
+    // SPEC-059 §4.1.1: the escape leaves no planet to resume on.
+    data.progress.resume = null;
     this.services.save.request('manual');
     void this.services.go('menu', { reason: 'quit' });
     return false;
@@ -644,6 +689,8 @@ export class StationScene extends UiScene<'station'> {
     // view; the panel's own re-renders inside the tab read the same one.
     const data = this.services.save.current;
     if (tab === 'character' && data !== null) HOME_SESSION.nextKeepsakeView(data);
+    // SPEC-059 §4.5.5: the Character panel's card is drawn as the tab opens.
+    if (tab === 'character' && data !== null) this.#charCard = prepareSaveCard(data, this.services.settings.get().commendations);
     this.#renderRail();
     this.#renderPanel();
     if (tab === 'character' && data !== null) this.#keepsakeDrift(data);
@@ -673,7 +720,12 @@ export class StationScene extends UiScene<'station'> {
         return;
       case 'character':
         // SPEC-056 §4.6: the Locker offers this device's unlocked swatches.
-        new CharacterPanel(box, { ...shared, unlocks: () => this.services.settings.get().unlocks });
+        // SPEC-059 §4.5.5: `char-share` in its title row, with this opening's card.
+        new CharacterPanel(box, {
+          ...shared,
+          unlocks: () => this.services.settings.get().unlocks,
+          ...(this.#charCard === null ? {} : { share: this.#charCard }),
+        });
         return;
     }
   }

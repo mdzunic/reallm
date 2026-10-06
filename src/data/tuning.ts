@@ -43,6 +43,12 @@ export interface DifficultyRules {
   readonly enemyDamageMult: number;
   readonly eliteChanceMult: number;
   readonly deathLoss: number;
+  /** SPEC-059 §4.2.1: weather damage after hazard resist. */
+  readonly weatherMult: number;
+  /** SPEC-059 §4.2.1: enemy damage to the escort follower and to a defended structure. */
+  readonly allyDamageMult: number;
+  /** SPEC-059 §4.2.1: the assists SPEC-038 and SPEC-050 gave casual alone: windups ×1.25, dash cooldown ×0.8, stamina regeneration ×1.25. */
+  readonly assisted: boolean;
 }
 
 export const TUNING = {
@@ -82,14 +88,29 @@ export const BELOW_HALF_SIZE = 48;
  * of the hold. Hard multiplies what already exists and nothing else: SPEC-038's
  * weather, windup and dash multipliers stay at 1 on it.
  *
- * Keyed by the three names; `tests/data/tuning.test.ts` pins the keys to
+ * SPEC-059 §4.2.1 (*initial tuning* for the story row): the three columns that
+ * were casual's alone — the weather's share, the allies' share of enemy damage
+ * and the assists — and `story`, which zeroes every hit on the player and the
+ * allies but keeps enemy HP and the elite chance: the fights still happen.
+ *
+ * Keyed by the four names; `tests/data/tuning.test.ts` pins the keys to
  * `DIFFICULTIES`, which keeps this file free of imports.
  */
 export const DIFFICULTY_RULES = {
-  casual: { enemyHpMult: 1, enemyDamageMult: 0.7, eliteChanceMult: 1, deathLoss: 0 },
-  normal: { enemyHpMult: 1, enemyDamageMult: 1, eliteChanceMult: 1, deathLoss: TUNING.DEATH_RESOURCE_LOSS },
-  hard: { enemyHpMult: 1.25, enemyDamageMult: 1.3, eliteChanceMult: 2, deathLoss: 0.2 },
+  story: { enemyHpMult: 1, enemyDamageMult: 0, eliteChanceMult: 1, deathLoss: 0, weatherMult: 0, allyDamageMult: 0, assisted: true },
+  casual: { enemyHpMult: 1, enemyDamageMult: 0.7, eliteChanceMult: 1, deathLoss: 0, weatherMult: 0.7, allyDamageMult: 1, assisted: true },
+  normal: {
+    enemyHpMult: 1,
+    enemyDamageMult: 1,
+    eliteChanceMult: 1,
+    deathLoss: TUNING.DEATH_RESOURCE_LOSS,
+    weatherMult: 1,
+    allyDamageMult: 1,
+    assisted: false,
+  },
+  hard: { enemyHpMult: 1.25, enemyDamageMult: 1.3, eliteChanceMult: 2, deathLoss: 0.2, weatherMult: 1, allyDamageMult: 1, assisted: false },
 } as const satisfies {
+  readonly story: DifficultyRules;
   readonly casual: DifficultyRules;
   readonly normal: DifficultyRules;
   readonly hard: DifficultyRules;

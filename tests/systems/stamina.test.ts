@@ -102,6 +102,11 @@ describe('staminaRegen (SPEC-050 §4.1)', () => {
     expect(staminaRegen(1, 'casual')).toBeCloseTo(20.6 * 1.25, 10);
     expect(staminaRegen(9, 'casual')).toBeCloseTo(25.4 * 1.25, 10);
   });
+
+  it('is casual’s on story (SPEC-059 §4.2.2)', () => {
+    for (const agility of [0, 1, 4, 9]) expect(staminaRegen(agility, 'story')).toBe(staminaRegen(agility, 'casual'));
+    expect(staminaRegen(1, 'story')).toBeCloseTo(20.6 * CASUAL_STAMINA_MULT, 10);
+  });
 });
 
 describe('the drain (SPEC-050 §4.1)', () => {

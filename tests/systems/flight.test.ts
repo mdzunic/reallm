@@ -397,6 +397,30 @@ describe('damage, shield, hull', () => {
     expect(v.flight.ship.shield).toBeCloseTo(v.flight.ship.maxShield - 13, 9);
   });
 
+  it('story changes nothing on a hit and emits nothing, so damage never recalls the ship (SPEC-059 §4.2.2)', () => {
+    const w = world({ difficulty: 'normal' });
+    step(w.flight, LAUNCH_SECONDS + DT);
+    w.flight.setDifficulty('story');
+    const { shield, hull, shieldRegenAt } = w.flight.ship;
+    const damaged = w.of('ship:damaged').length;
+    w.flight.hit(30, 'asteroid', { kind: 'asteroid' });
+    w.flight.hit(9999, 'enemy', { kind: 'enemy', enemyId: 'scav_fighter' });
+    w.flight.hit(1, 'storm', { kind: 'storm' });
+    expect(w.flight.ship.shield).toBe(shield);
+    expect(w.flight.ship.hull).toBe(hull);
+    expect(w.flight.ship.shieldRegenAt).toBe(shieldRegenAt);
+    expect(w.flight.ship.alive).toBe(true);
+    expect(w.of('ship:damaged')).toHaveLength(damaged);
+    expect(w.of('player:died')).toEqual([]);
+    expect(w.of('flight:recalled')).toEqual([]);
+    // A story config is the same from its first hit.
+    const v = world({ difficulty: 'story' });
+    step(v.flight, LAUNCH_SECONDS + DT);
+    v.flight.hit(30, 'asteroid', { kind: 'asteroid' });
+    expect(v.flight.ship.shield).toBe(v.flight.ship.maxShield);
+    expect(v.of('ship:damaged')).toEqual([]);
+  });
+
   it('setDifficulty(\'normal\', 2) multiplies incoming damage by 1.15 — containment’s step (SPEC-058 §4.4)', () => {
     const w = world({ difficulty: 'normal' });
     step(w.flight, LAUNCH_SECONDS + DT);

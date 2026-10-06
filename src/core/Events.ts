@@ -26,6 +26,7 @@ import type {
   BossMoveId,
   BossMoveKind,
   CacheId,
+  CommendationId,
   ContractId,
   DamageSource,
   DialogueId,
@@ -246,6 +247,11 @@ export type GameEvents = {
   /** SPEC-057 §4.1, E91: the next surface death forfeited the set — what was in it (silent). */
   'remains:lost': { planet: PlanetId; resources: Partial<Record<ResourceId, number>> };
   'ui:toast': { text: string; kind?: 'info' | 'warn' | 'good' | 'error'; ms?: number };
+  /**
+   * SPEC-059 §4.4.3: a commendation was granted on this device — at a save
+   * write or a scene's entry, never inside `update()`. Reacted: `commend`.
+   */
+  'commendation:earned': { id: CommendationId };
   /** The rotate prompt itself is SPEC-015 §6; this is the signal it listens to. */
   'ui:orientation': { orientation: 'portrait' | 'landscape' };
   /**

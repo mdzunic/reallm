@@ -343,6 +343,22 @@ test.describe('an old cached build and a newer save (AC-59, 15-d)', () => {
   });
 });
 
+test.describe('the URL flags a production build keeps to itself (SPEC-059 §4.1.6, §4.3.4)', () => {
+  test('?scene= opens nothing, so the page stays at the menu; ?debug still shows the read-only stats', async ({ page }) => {
+    // 59-u: the dev-only flag must not ride the menu → surface edge onto a planet.
+    await page.goto(gameUrl('/?debug&scene=surface&planet=cinder4'));
+    await passGate(page);
+    await expect(page.locator('[data-testid="scene-label"]')).toHaveText('menu', COLD_START);
+    await expect(page.locator('[data-testid="transition-fade"]')).toHaveCSS('pointer-events', 'none', COLD_START);
+    // A forced transition would have started at once; give it time to show it did not.
+    await page.waitForTimeout(1_500);
+    await expect(page.locator('[data-testid="scene-label"]')).toHaveText('menu');
+    await expect(page.locator('[data-testid="menu-new"]')).toBeVisible();
+    // A production `?debug` keeps the stats overlay's read-only rows (§4.3.4).
+    await expect(page.locator('[data-testid="debug-fps"]')).toBeVisible();
+  });
+});
+
 test.describe('story films through the worker (AC-63)', () => {
   // New Game's prologue as posters (see `newGameToStation`): nothing here
   // decodes a film.

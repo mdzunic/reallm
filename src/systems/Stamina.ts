@@ -9,7 +9,7 @@
 // `stepStamina` once per fixed step, before it moves the player; `Combat`
 // holsters on `isHolstered`, and the scene, `EnemyAi` and the telegraph pass
 // read `isLoud`. Nothing here allocates.
-import { ATTRIBUTE_EFFECTS, type Difficulty } from '@/data/index';
+import { ATTRIBUTE_EFFECTS, DIFFICULTY_RULES, type Difficulty } from '@/data/index';
 import type { PlayerEntity } from '@/entities/Player';
 
 // ------------------------------------------------------------ initial tuning
@@ -35,20 +35,21 @@ export const SPRINT_DRAW_SECONDS = 0.25;
 export const SPRINT_NOISE = 1.5;
 /** Loud this long after the last sprinting step, in seconds. */
 export const LOUD_SECONDS = 1.5;
-/** Casual's regeneration multiplier. */
+/** Casual's regeneration multiplier; SPEC-059 §4.2.2: every `assisted` difficulty's. */
 export const CASUAL_STAMINA_MULT = 1.25;
 
 /**
- * `20 × (1 + 0.03 × agility) × (casual ? 1.25 : 1)` per second — a Marine at
+ * `20 × (1 + 0.03 × agility) × (assisted ? 1.25 : 1)` per second — a Marine at
  * agility 1 on normal regains 20.6, a Scout at agility 9 regains 25.4. The
  * per-point share is `ATTRIBUTE_EFFECTS.agility.staminaRegen` (SPEC-039's
- * table, which every per-point effect reads).
+ * table, which every per-point effect reads). SPEC-059 §4.2.2: `assisted` is
+ * casual's and story's.
  */
 export function staminaRegen(agility: number, difficulty: Difficulty): number {
   return (
     STAMINA_REGEN *
     (1 + ATTRIBUTE_EFFECTS.agility.staminaRegen * agility) *
-    (difficulty === 'casual' ? CASUAL_STAMINA_MULT : 1)
+    (DIFFICULTY_RULES[difficulty].assisted ? CASUAL_STAMINA_MULT : 1)
   );
 }
 

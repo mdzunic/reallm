@@ -16,6 +16,7 @@
 import type { QualityPreset } from '@/core/Renderer';
 import type { EmitArgs, GameEvents } from '@/core/Events';
 import { log } from '@/core/Log';
+import { COMMENDATION_IDS, type CommendationId } from '@/data/commendations';
 import { SWATCH_IDS } from '@/data/cosmetics';
 import { TIP_IDS, type TipId } from '@/data/hints';
 import { MISSIONS, type MissionId } from '@/data/missions';
@@ -127,6 +128,9 @@ export const BEST_TIME_MAX_SECONDS = 86_400;
 
 /** SPEC-043 §4.5: a mission's fastest clean run on this device, in whole seconds. */
 export type BestTimes = Partial<Record<MissionId, number>>;
+
+/** SPEC-059 §4.4.2: when each commendation was earned on this device, in epoch milliseconds. */
+export type Commendations = Partial<Record<CommendationId, number>>;
 
 /**
  * SPEC-015 §4 stores what the boot benchmark measured, so it runs once.
@@ -277,6 +281,19 @@ export type Settings = {
    * the machine remembers what the instance forgets.
    */
   unlocks: string[];
+  /**
+   * SPEC-059 §4.4.2: the commendations earned on this device and when, in
+   * epoch milliseconds. Per device, like `bestTimes` — nothing in a save
+   * records one, so a New Game, a deleted slot or Iteration 63 keeps them.
+   * Only known ids with integer values above 0 are kept (59-o).
+   */
+  commendations: Commendations;
+  /**
+   * SPEC-059 §4.6.5: the browser installed the app — `appinstalled`, or a
+   * launch in standalone display mode. It only silences the install toast;
+   * the button follows `beforeinstallprompt`.
+   */
+  installed: boolean;
 };
 
 export interface SettingsStore {
@@ -391,6 +408,8 @@ export function defaultSettings(): Settings {
     haptics: true,
     bestTimes: {},
     unlocks: [],
+    commendations: {},
+    installed: false,
   };
 }
 
@@ -554,6 +573,23 @@ function swatchUnlocks(value: unknown): string[] {
   return out;
 }
 
+/**
+ * SPEC-059 §4.4.2 (59-o): an object of commendation id → the epoch
+ * milliseconds it was earned, cleaned like `bestTimes` — a non-object reads as
+ * `{}`, and an unknown id or a value that is not an integer above 0 is
+ * dropped. The same rule on load and on `set`.
+ */
+function commendations(value: unknown): Commendations {
+  const out: Commendations = {};
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return out;
+  for (const [id, at] of Object.entries(value as Record<string, unknown>)) {
+    if (!(COMMENDATION_IDS as readonly string[]).includes(id)) continue;
+    if (typeof at !== 'number' || !Number.isInteger(at) || at <= 0) continue;
+    out[id as CommendationId] = at;
+  }
+  return out;
+}
+
 /** SPEC-036 §4.12: an integer 0…2; anything else reads as 0. */
 function zonesShown(value: unknown): number {
   return typeof value === 'number' && Number.isInteger(value) && value >= 0 && value <= ZONES_SHOWN_MAX ? value : 0;
@@ -697,6 +733,11 @@ function coerce<K extends keyof Settings>(key: K, value: unknown, current: Setti
         return bestTimes(value);
       case 'unlocks':
         return swatchUnlocks(value);
+      case 'commendations':
+        return commendations(value);
+      case 'installed':
+        // SPEC-059 §4.6.5: default false, so only a real `true` sets it.
+        return value === true;
       default:
         return current[key];
     }

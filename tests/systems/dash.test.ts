@@ -62,6 +62,19 @@ describe('the dash constants and cooldown (SPEC-038 §3, §4.1)', () => {
     expect(dashCooldown(CLASSES.scout.passive, 10, 'casual')).toBe(0.8);
     expect(CLASSES.scout.passive.dashCooldownMult).toBe(0.8);
   });
+
+  it('is casual’s on story, and hard’s is normal’s (SPEC-059 §4.2.2)', () => {
+    for (const [passive, agility] of [
+      [CLASSES.marine.passive, 1],
+      [CLASSES.engineer.passive, 3],
+      [CLASSES.scout.passive, 4],
+      [CLASSES.scout.passive, 10],
+    ] as const) {
+      expect(dashCooldown(passive, agility, 'story')).toBe(dashCooldown(passive, agility, 'casual'));
+      expect(dashCooldown(passive, agility, 'hard')).toBe(dashCooldown(passive, agility, 'normal'));
+    }
+    expect(dashCooldown(CLASSES.marine.passive, 1, 'story')).toBeCloseTo(1.358 * CASUAL_DASH_MULT, 10);
+  });
 });
 
 describe('tryDash (SPEC-038 §4.1)', () => {

@@ -1062,7 +1062,8 @@ export class Flight {
    * SPEC-038 §4.6: a difficulty changed in Settings mid-trip reaches the next
    * hit — the scene calls this when it resumes from its pause menu (38-g).
    * SPEC-043 §4.4: the multiplier is the difficulty's `enemyDamageMult` — 0.7,
-   * 1 or 1.3; flight enemies keep their HP on every difficulty. SPEC-058 §4.4:
+   * 1 or 1.3, and 0 on story (SPEC-059 §4.2.2); flight enemies keep their HP
+   * on every difficulty. SPEC-058 §4.4:
    * times the containment of the save's iteration (×1.15 a step, 1 on a first
    * run); the iteration never changes mid-trip, so the scene passes the same
    * one on every call.
@@ -1074,12 +1075,15 @@ export class Flight {
   /**
    * §4.6: shield first, remainder to hull; ×0.7 on casual and ×1.3 on hard
    * (SPEC-043 §4.4); three seconds of no regen. Public — the storm tick and
-   * the tests route through the same door.
+   * the tests route through the same door. SPEC-059 §4.2.2: a hit worth
+   * nothing (story's multiplier is 0) changes nothing and emits nothing, so
+   * damage never recalls the ship.
    */
   hit(amount: number, source: 'asteroid' | 'enemy' | 'storm', cause: DamageSource): void {
     const ship = this.ship;
     if (!ship.alive || amount <= 0) return;
     let damage = amount * this.#damageMult;
+    if (damage <= 0) return;
     if (ship.shield > 0) {
       const absorbed = Math.min(ship.shield, damage);
       ship.shield -= absorbed;

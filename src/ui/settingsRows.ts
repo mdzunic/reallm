@@ -279,13 +279,14 @@ export const SETTINGS_ROWS: readonly SettingsRowDef[] = [
   // --------------------------------------------------------------- Gameplay
   // SPEC-038 §4.6 and SPEC-043 §4.4, in the creation screen's order, with
   // `DIFFICULTY_LINES` under it. It writes the save, not the settings.
+  // SPEC-059 §4.2.3: `Story` is the first segment.
   {
     id: 'settings-difficulty',
     key: 'difficulty',
     section: 'gameplay',
     label: 'Difficulty',
     control: 'choice',
-    choices: named(['normal', 'Normal'], ['casual', 'Casual'], ['hard', 'Hard']),
+    choices: named(['story', 'Story'], ['normal', 'Normal'], ['casual', 'Casual'], ['hard', 'Hard']),
     shown: 'save',
   },
   // SPEC-027 §4.9.
@@ -323,6 +324,10 @@ export const BOOKKEEPING_KEYS: readonly (keyof Settings)[] = [
   'bestTimes',
   // SPEC-056 §4.6: the swatches the caves unlocked — the Locker reads them.
   'unlocks',
+  // SPEC-059 §4.4.2, §4.6.5: the commendations this device earned, and
+  // whether the app is installed — the Records panel and the install toast read them.
+  'commendations',
+  'installed',
 ];
 
 function shownIn(row: SettingsRowDef, env: RowEnv): boolean {
