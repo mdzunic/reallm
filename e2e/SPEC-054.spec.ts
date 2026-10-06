@@ -1,8 +1,10 @@
 // SPEC-054 §6.2 — the underground in a real browser: the surface unchanged,
 // the seal, the descent behind its held fade, the light, the loose cache, death
-// and recall through the surface, the refusals, a cave position at the pad's
-// coordinates reaching nothing, loot left behind, the medium budget, and Eden's
-// machine room. The rules are pinned in node — tests/systems/underground,
+// and recall through the surface, the refusals, a stage that starts below
+// (E83), a cave position at the pad's coordinates reaching nothing, loot left
+// behind, the medium budget, and Eden's machine room — its racks, trays,
+// cradles in the save's colours and the hum on the weather-loop channel. The
+// rules are pinned in node — tests/systems/underground,
 // light, interactables, enemyAi, combat, spawn, economy, missions,
 // exploration, tests/ui/helpers, map and tests/views/flashlight,
 // undergroundView.
