@@ -120,6 +120,9 @@ test('a v1 save in storage loads as version 3 with its rifle in the primary slot
   await expect(page.locator('[data-testid="menu-root"]')).toBeVisible();
   await page.getByTestId('menu-load').click();
   await page.getByTestId('load-slot-0').click();
+  // SPEC-059 §4.1.3: the fixture was last written long ago, so the
+  // "previously" card comes first; its Continue goes on to the station.
+  await page.getByTestId('resume-continue').click();
   await expect(page.locator('[data-testid="scene-label"]')).toHaveText('station');
 
   const loaded = await page.evaluate(() => {
