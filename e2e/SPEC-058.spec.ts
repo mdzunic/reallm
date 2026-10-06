@@ -246,6 +246,8 @@ test('2. begin: the sheet, creation restored from the profile, a logged variant,
 // ------------------------------------------------------------ 3. containment
 
 test('3. containment: the header reads level 2, and the Wurm spawns with ×1.15 HP', async ({ page }) => {
+  // Auto-fire off: nothing may chip the Wurm before its HP is read.
+  await page.addInitScript(() => localStorage.setItem('reallm:settings', JSON.stringify({ autoFire: 'off' })));
   await start(page, DEBUG_URL);
   await secondInstance(page);
   await toStation(page);
