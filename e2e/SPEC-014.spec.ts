@@ -68,6 +68,40 @@ test.describe('star map nodes', () => {
     await expect(page.locator('[data-testid="map-node-cinder4"]')).toHaveAttribute('aria-pressed', 'false');
     await expect(page.locator('[data-testid="starmap-info-name"]')).toHaveText('Vetra');
   });
+
+  // Centred on the whole viewport, the map hid Cinder-4, Vetra and Thessaly
+  // under the side panel on a landscape phone, and its lower half under the
+  // bottom panel upright. Every node has to be the thing a tap at its centre
+  // reaches, with a save bound so the panel carries its full text.
+  test('no node sits under the info panel on a phone, either way up (AC-52)', async ({ page }) => {
+    await start(page);
+    await page.evaluate((creation) => window.__reallm.save().create(0, creation), CREATION);
+    expect(await go(page, 'station', {})).toBe(true);
+    expect(await go(page, 'starmap', undefined)).toBe(true);
+
+    for (const [width, height] of [
+      [740, 360],
+      [667, 375],
+      [390, 844],
+    ] as const) {
+      await page.setViewportSize({ width, height });
+      await expect
+        .poll(
+          () =>
+            page.evaluate(() =>
+              [...document.querySelectorAll<HTMLElement>('.starmap-node')]
+                .filter((node) => {
+                  const box = node.getBoundingClientRect();
+                  const hit = document.elementFromPoint(box.x + box.width / 2, box.y + box.height / 2);
+                  return hit === null || !node.contains(hit);
+                })
+                .map((node) => node.dataset['testid']),
+            ),
+          { message: `nodes covered at ${width}×${height}` },
+        )
+        .toEqual([]);
+    }
+  });
 });
 
 test.describe('depart confirm sheet', () => {

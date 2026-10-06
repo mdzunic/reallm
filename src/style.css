@@ -3848,11 +3848,13 @@ html.debug .scene-tag {
   font-size: var(--type-sm);
 }
 
+/* The map frames its nodes in the room this panel leaves (`#mapArea`), so on a
+   landscape phone the panel keeps to a share of the body short of half. */
 .starmap-info {
   position: absolute;
   top: 10px;
   right: 10px;
-  width: min(320px, calc(100% - 20px));
+  width: min(320px, 42%);
   max-height: calc(100% - 20px);
   overflow: hidden;
   padding: 12px;
@@ -3916,14 +3918,18 @@ html.debug .scene-tag {
   pointer-events: auto;
 }
 
-@media (max-width: 700px) {
+/* Upright, the panel docks along the bottom at a fixed height — the map sits
+   in the room above it, which must not move as the selection's text changes.
+   A landscape phone keeps the side panel: docked below, it left the map a strip. */
+@media (orientation: portrait) and (max-width: 900px) {
   .starmap-info {
     top: auto;
     bottom: 10px;
     left: 10px;
     right: 10px;
     width: auto;
-    max-height: 60%;
+    height: 45%;
+    max-height: none;
   }
 }
 
