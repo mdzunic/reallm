@@ -63,6 +63,34 @@ async function land(page: Page, setup: Setup = {}): Promise<void> {
   );
   await page.evaluate(() => window.__reallm.go('surface', { planet: 'cinder4', firstLanding: false }, { force: true }));
   await expect(page.locator('[data-testid="scene-label"]')).toHaveText('surface');
+  await recordToasts(page);
+}
+
+/**
+ * Every toast the rack shows from here on, as SPEC-054's suite records them: a
+ * toast lives 2.5 s, which a starved host can spend between two assertions.
+ */
+async function recordToasts(page: Page): Promise<void> {
+  await page.evaluate(() => {
+    const rack = document.querySelector('[data-testid="toasts"]');
+    if (rack === null) throw new Error('no toast rack');
+    const shown: string[] = [];
+    Object.assign(window, { __remainsToasts: shown });
+    new MutationObserver(() => {
+      for (const node of Array.from(rack.children)) {
+        const text = node.textContent ?? '';
+        if (!shown.includes(text)) shown.push(text);
+      }
+    }).observe(rack, { childList: true });
+  });
+}
+
+const toastsShown = (page: Page): Promise<string[]> =>
+  page.evaluate(() => (window as unknown as { __remainsToasts?: string[] }).__remainsToasts ?? []);
+
+/** Waits until the rack has shown a toast reading exactly `text`. */
+async function toastShown(page: Page, text: string): Promise<void> {
+  await expect.poll(async () => toastsShown(page), { timeout: 10_000 }).toContain(text);
 }
 
 /** `surface-hurt` until the death overlay is up — a hit inside the i-frames is ignored, so the count of presses is not fixed. */
@@ -85,8 +113,6 @@ async function dieByThePad(page: Page): Promise<void> {
   await page.getByTestId('surface-goto-pad').click();
   await die(page);
 }
-
-const toast = (page: Page, text: string) => page.locator('.toast', { hasText: text });
 
 test('1. drop: the overlay names the pack, and the remains, the minimap icon and the tracker row follow', async ({ page }) => {
   test.setTimeout(120_000);
@@ -130,8 +156,8 @@ test('2. recover: surface-goto-remains takes the 20 oil back, the remains go and
   // "Within 1 s" is game time; a starved container gets longer to reach it.
   await expect.poll(async () => (await current(page))?.resources.oil, { timeout: 10_000 }).toBe(200);
   expect(await remainsOf(page)).toBeNull();
-  await expect(toast(page, 'Recovered: 20 oil')).toBeVisible();
-  await expect(toast(page, 'Recovered: 20 oil')).not.toContainText('the rest stays');
+  // Exactly this: nothing was left, so no `— the rest stays` suffix.
+  await toastShown(page, 'Recovered: 20 oil');
   expect((await current(page))?.meta.stats.recoveries).toBe(1);
   const after = await info(page);
   expect(after['remains']).toBe('-');
@@ -149,7 +175,7 @@ test('3. lose: a second death before the walk back forfeits the pack, and the ne
   await page.getByTestId('surface-goto-edge').click();
   await page.waitForTimeout(2_500); // the respawn's 2 s of i-frames, in game time at least
   await die(page);
-  await expect(toast(page, 'Your earlier pack is gone: 20 oil.')).toBeVisible();
+  await toastShown(page, 'Your earlier pack is gone: 20 oil.');
   await expect(page.getByTestId('death-remains')).toHaveText('Your pack holds 18 oil — reach it before you fall again.');
   expect(await remainsOf(page)).toMatchObject({ planet: 'cinder4', resources: { oil: 18 }, restart: 2 });
   expect((await current(page))?.resources.oil).toBe(162);
@@ -169,7 +195,7 @@ test('4. a full hold takes what fits; the rest stays with the pack, retried whil
   await page.getByTestId('surface-goto-remains').click();
   await expect.poll(async () => (await info(page))['remainsHeld'], { timeout: 10_000 }).toBe(15);
   expect((await current(page))?.resources.oil).toBe(400);
-  await expect(toast(page, 'Recovered: 5 oil — the rest stays with your pack')).toBeVisible();
+  await toastShown(page, 'Recovered: 5 oil — the rest stays with your pack');
   expect((await current(page))?.meta.stats.recoveries).toBe(1);
   // E93: room again while standing there — the next retry takes the rest.
   await page.evaluate(() => {
@@ -209,7 +235,7 @@ test('6. casual: a death takes nothing and leaves the remains already lying as t
   await expect(page.getByTestId('death-remains')).toBeHidden();
   expect(await remainsOf(page)).toEqual(lying);
   expect((await current(page))?.resources.oil).toBe(200);
-  await expect(toast(page, 'is gone')).toHaveCount(0);
+  expect((await toastsShown(page)).filter((text) => text.includes('is gone'))).toEqual([]);
 });
 
 test('7. reload: the remains survive a reload and the next landing names the same point', async ({ page }) => {
@@ -387,5 +413,5 @@ test('12. a Recall to pad neither creates nor forfeits: the remains lying stay a
   await expect.poll(async () => Number((await info(page))['recalls']), { timeout: 10_000 }).toBe(1);
   expect(await remainsOf(page)).toEqual(lying);
   expect((await current(page))?.resources.oil).toBe(200);
-  await expect(toast(page, 'is gone')).toHaveCount(0);
+  expect((await toastsShown(page)).filter((text) => text.includes('is gone'))).toEqual([]);
 });
