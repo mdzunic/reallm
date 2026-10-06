@@ -414,12 +414,12 @@ const ELITE_PLATE_RANGE = 25;
 const ELITE_PLATE_LIFT = 2.2;
 /** SPEC-041 §4.10: the debug elite pack — four of the swarm species, 10 m ahead. */
 const ELITE_PACK_SIZE = 4;
+const ELITE_PACK_DISTANCE = 10;
 /** SPEC-057 §4.6: the remains' tag shows within this many metres, lifted this far over the ground. */
 const REMAINS_TAG_RANGE = 30;
 const REMAINS_TAG_LIFT = 1.4;
 /** SPEC-057 §4.7 (dev): `surface-goto-remains` stands the salvager this far from the remains, toward the pad. */
 const GOTO_REMAINS_DISTANCE = 1;
-const ELITE_PACK_DISTANCE = 10;
 /** SPEC-038 §4.11: the debug charger stands this far along the player's facing. */
 const CHARGER_DISTANCE = 8;
 /** SPEC-038 §4.1: the dash streaks' colour — the salvager's cool white. */
