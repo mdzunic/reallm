@@ -50,19 +50,31 @@ const ENGINE: ShipSystemDef = UPGRADES.engine;
  * The orbit each world sits on, in world units, innermost first — `PLANET_IDS`
  * is chapter order, so the map reads outward as the campaign does. SPEC-020
  * §4.4 draws a ring on each of them, which is only legible if the six are not
- * the one circle they used to share. The outermost stays well inside the
- * reach `#frameCamera` frames — the camera pulls back until the widest orbit
- * projects inside the viewport, so every DOM hit area still lands on screen
- * at any aspect (SPEC-014 AC-52, SPEC-031 AC-24).
+ * the one circle they used to share. `#frameCamera` fits the nodes themselves
+ * into the part of the body the info panel leaves free, so every DOM hit area
+ * lands on screen and none sits under the panel at any aspect (SPEC-014 AC-52,
+ * SPEC-031 AC-24).
  */
 const ORBIT_RADII: readonly number[] = [2.0, 2.4, 2.8, 3.2, 3.6, 4.0];
 
 /**
- * How much viewport a projected node needs around its centre, in px: half the
- * 56 px hit box plus the name label riding under it, which can be wider than
- * the box itself. `#frameCamera` keeps every orbit this far off both edges.
+ * How much room a projected node needs around its centre, in px: half the
+ * 56 px hit box above it, the box and the name label riding under it below,
+ * and half the widest label to either side. `#frameCamera` keeps every node
+ * this far inside the map area.
  */
-const NODE_MARGIN_PX = 48;
+const NODE_ROOM = { side: 48, top: 32, bottom: 60 } as const;
+
+/** The gap the map area keeps from the info panel's edge, in px. */
+const PANEL_GAP_PX = 10;
+
+/** A box in viewport px. */
+interface Area {
+  left: number;
+  top: number;
+  width: number;
+  height: number;
+}
 
 /** SPEC-017 §4.1 (*initial tuning*): the map's nodes are meant to glow. */
 const STARMAP_LOOK: Partial<Look> = { bloomStrength: 0.6, bloomThreshold: 0.6, vignette: 0.4 };
@@ -114,8 +126,8 @@ export class StarmapScene extends UiScene<'starmap'> {
         // The map has no settings panel of its own, so the globes built on
         // enter stay as they are; the DOM that decides a departure follows.
         this.#economy.serviceMode = patch.serviceMode;
-        this.#layoutNodes();
         this.#renderInfo();
+        this.#layoutNodes();
       }, this),
     );
     this.disposer.add(this.services.events.on('renderer:resized', () => this.#layoutNodes(), this));
@@ -211,12 +223,13 @@ export class StarmapScene extends UiScene<'starmap'> {
   }
 
   /**
-   * AC-24: the overhead camera, pulled back far enough that every node — the
-   * outermost orbit plus `NODE_MARGIN_PX` of hit box and label — projects
-   * inside the viewport. At desktop aspects that is the classic y = 8; at a
-   * phone's narrow aspect the half-width (height · tan(fov/2) · aspect) is
-   * what binds, and a fixed height left two planets wholly off the left edge
-   * at 320 × 640. Runs on enter and on every resize, before any projection.
+   * AC-24: the overhead camera, pulled back far enough that every node plus
+   * its `NODE_ROOM` of hit box and label fits the map area (`#mapArea`), and
+   * slid sideways so the nodes sit in the middle of it. At desktop sizes the
+   * classic y = 8 binds; on a phone the area does. Centred on the whole
+   * viewport, the landscape info panel covered Cinder-4, Vetra and Thessaly,
+   * and the portrait one the lower half of the map. Runs on enter and on every
+   * resize, before any projection.
    */
   #frameCamera(): void {
     const { width, height } = this.services.renderer;
@@ -225,20 +238,61 @@ export class StarmapScene extends UiScene<'starmap'> {
       this.camera.aspect = aspect;
       this.camera.updateProjectionMatrix();
     }
-    const reach = ORBIT_RADII[ORBIT_RADII.length - 1] as number;
+    let minX = Infinity;
+    let maxX = -Infinity;
+    let minZ = Infinity;
+    let maxZ = -Infinity;
+    for (let index = 0; index < PLANET_IDS.length; index++) {
+      const node = this.#worldOf(index);
+      minX = Math.min(minX, node.x);
+      maxX = Math.max(maxX, node.x);
+      minZ = Math.min(minZ, node.z);
+      maxZ = Math.max(maxZ, node.z);
+    }
+    // Where the node centres may go: the map area less each node's room.
+    const area = this.#mapArea(width, height);
+    const left = area.left + NODE_ROOM.side;
+    const top = area.top + NODE_ROOM.top;
+    const roomX = Math.max(1, area.width - 2 * NODE_ROOM.side);
+    const roomZ = Math.max(1, area.height - NODE_ROOM.top - NODE_ROOM.bottom);
     const tanHalf = Math.tan((this.camera.fov * Math.PI) / 360);
-    // Solve (reach / halfWidth) · (width / 2) ≤ width / 2 − margin for the
-    // world half-extent each axis must see, then take the taller camera.
-    const halfW = (reach * width) / Math.max(1, width - 2 * NODE_MARGIN_PX);
-    const halfH = (reach * height) / Math.max(1, height - 2 * NODE_MARGIN_PX);
-    const y = Math.max(8, halfW / (tanHalf * aspect), halfH / tanHalf);
-    this.camera.position.set(0, y, 0.001);
-    this.camera.lookAt(0, 0, 0);
+    // Looking straight down, one world unit spans height / (2 · y · tanHalf)
+    // px on both axes. Fit the nodes' extent into that room, then take the
+    // taller of that camera and the classic one.
+    const fit = Math.min(roomX / Math.max(0.001, maxX - minX), roomZ / Math.max(0.001, maxZ - minZ));
+    const y = Math.max(8, height / (2 * tanHalf * fit));
+    const perUnit = height / (2 * y * tanHalf);
+    // Slide the camera so the nodes' centre projects onto the room's centre:
+    // screen right is +x and screen down is +z.
+    const x = (minX + maxX) / 2 - (left + roomX / 2 - width / 2) / perUnit;
+    const z = (minZ + maxZ) / 2 - (top + roomZ / 2 - height / 2) / perUnit;
+    this.camera.position.set(x, y, z + 0.001);
+    this.camera.lookAt(x, 0, z);
     // On enter this runs before the first render, and `lookAt()` refreshes
     // `matrixWorldInverse` *before* it writes the new quaternion — so without
     // this the projection still uses the orientation `base.enter()` left
     // behind and every button lands off-screen.
     this.camera.updateMatrixWorld(true);
+  }
+
+  /**
+   * Where the nodes may land, in viewport px: the frame's body less the info
+   * panel — beside it while it docks on the right, above it while it docks
+   * along the bottom (portrait), whichever leaves the larger square. Before the
+   * DOM is mounted, the whole viewport.
+   */
+  #mapArea(width: number, height: number): Area {
+    const box = this.#nodesBox?.getBoundingClientRect();
+    if (box === undefined || box.width <= 0 || box.height <= 0) return { left: 0, top: 0, width, height };
+    const body: Area = { left: box.left, top: box.top, width: box.width, height: box.height };
+    const info = this.#info?.getBoundingClientRect();
+    if (info === undefined || info.width <= 0 || info.height <= 0) return body;
+    const besideWidth = info.left - PANEL_GAP_PX - box.left;
+    const aboveHeight = info.top - PANEL_GAP_PX - box.top;
+    if (Math.min(besideWidth, box.height) >= Math.min(box.width, aboveHeight)) {
+      return { ...body, width: Math.max(1, besideWidth) };
+    }
+    return { ...body, height: Math.max(1, aboveHeight) };
   }
 
   #worldOf(index: number): THREE.Vector3 {
@@ -280,8 +334,9 @@ export class StarmapScene extends UiScene<'starmap'> {
       this.#nodeMeshes.clear();
       this.#ring = null;
     });
-    this.#layoutNodes();
+    // The panel first: `#layoutNodes` frames the map around it.
     this.#renderInfo();
+    this.#layoutNodes();
     // SPEC-044 §4.6: the player came to fly — Depart takes focus, or Back
     // while Depart is disabled.
     const depart = this.#info.querySelector<HTMLButtonElement>('[data-testid="starmap-depart"]');
@@ -359,8 +414,8 @@ export class StarmapScene extends UiScene<'starmap'> {
   #select(planet: PlanetId): void {
     this.#selected = planet;
     this.#moveRing();
-    this.#layoutNodes();
     this.#renderInfo();
+    this.#layoutNodes();
   }
 
   /** AC-52: arrows walk the circle. */

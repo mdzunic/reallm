@@ -265,6 +265,30 @@ export function cameraBob(speed: number, time: number, scale: number): number {
   return amplitude === 0 ? 0 : amplitude * Math.sin(time * CAMERA_BOB.frequency);
 }
 
+/** SPEC-012 §4.3: look-at bias, metres ahead of the player in the movement direction. */
+export const LOOK_AHEAD = 2;
+/**
+ * How fast the look-ahead swings onto a new heading, or back onto a player who
+ * stopped, per second (*initial tuning*). The player's velocity is a step — 0
+ * to full speed in one update — so a bias that followed it directly turned the
+ * camera the full 2 m on the first frame of a single tap of W and straight back
+ * on the release.
+ */
+export const LOOK_AHEAD_RATE = 3;
+
+/**
+ * Walks `lead` toward the look-ahead of a player moving at `(vx, vz)` at
+ * `1 − e^(−LOOK_AHEAD_RATE·dt)`, in place. Pure and allocation-free.
+ */
+export function stepLookAhead(lead: { x: number; z: number }, vx: number, vz: number, dt: number): void {
+  const speed = Math.hypot(vx, vz);
+  const tx = speed > 0.01 ? (vx / speed) * LOOK_AHEAD : 0;
+  const tz = speed > 0.01 ? (vz / speed) * LOOK_AHEAD : 0;
+  const k = 1 - Math.exp(-LOOK_AHEAD_RATE * dt);
+  lead.x += (tx - lead.x) * k;
+  lead.z += (tz - lead.z) * k;
+}
+
 /** How far the storm sheet's opacity swings either side of its mean (SPEC-015 §9). */
 export const STORM_FLICKER = 0.12;
 /** The sheet never goes fully opaque: the player has to be able to see (SPEC-012 §4.12). */
