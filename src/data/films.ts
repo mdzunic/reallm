@@ -1,11 +1,13 @@
 // The story films (PLAN R9, SPEC-021 §3.1, §4): every shot, caption and sound
-// cue of the nine films, plus the chapter cards and the boss reveals. The
+// cue of the ten films, plus the chapter cards, the boss reveals and the
+// flight contacts (SPEC-063 §4.3). The
 // pictures are rendered in Blender (scripts/assets/blender/films.py) and must
 // keep this file's shot timing — tests/data/films.test.ts compares it with
 // public/assets/films/manifest.json. Captions and cues change without a
 // re-render. Earth Command and ARIA speak without contractions, as in
 // dialogue.ts.
 import type { SoundId } from './assets';
+import type { DialogueId } from './dialogue';
 import type { EnemyId } from './enemies';
 import type { FlagId, PlanetId, SpeakerId } from './ids';
 import type { LineCondition } from './story';
@@ -360,6 +362,29 @@ export const BOSS_REVEALS: Readonly<Record<BossId, BossRevealDef>> = {
   hive_broodlord: { epithet: 'Keeper of the hive mouth', speaker: 'aria', line: 'It is guarding a way in. That means there is an in.' },
   ash_titan: { epithet: "Born in the reactor's heat", speaker: 'aria', line: 'It is standing on the lithium. Of course it is.' },
   hive_queen: { epithet: 'Heart of the swarm', speaker: 'aria', line: 'This is where the signal ends. Whatever she says, keep firing.', glitch: true },
+};
+
+/** SPEC-063 §3: the enemies that meet the salvager in flight (`domain: 'flight'`). */
+export type FlightEnemyId = Extract<EnemyId, 'scav_fighter' | 'hive_interceptor'>;
+
+export interface ContactDef {
+  /** The contact planet: the first in chapter order whose flight wave carries the enemy. */
+  readonly planet: PlanetId;
+  /** ≤ 40 characters, the card's third line. */
+  readonly epithet: string;
+  /** The comms exchange, played non-modal through the flight's dialogue layer. */
+  readonly line: DialogueId;
+  /** Played after `departure` on the first departure to `planet` (SPEC-063 §4.4). */
+  readonly film?: FilmId;
+}
+
+/**
+ * SPEC-063 §4.3: each flight enemy's first meeting — a card over the live
+ * flight and a line, on the first trip to its contact planet, once a session.
+ */
+export const CONTACTS: Readonly<Record<FlightEnemyId, ContactDef>> = {
+  scav_fighter: { planet: 'vetra', epithet: 'A tug, rebuilt to take tugs', line: 'contact_scav_fighter', film: 'wreckers' },
+  hive_interceptor: { planet: 'hive', epithet: 'Grown, not flown', line: 'contact_hive_interceptor' },
 };
 
 export interface InterludeDef {

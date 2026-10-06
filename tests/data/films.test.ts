@@ -2,6 +2,9 @@
 // in src/data/films.ts, the rendered files and their manifest in step. The
 // pictures are rendered by scripts/assets/blender/films.py; captions and cues
 // live here and change without a re-render, shot timing does not.
+//
+// SPEC-063 §6.4 adds "Wreckers" and the flight contacts: one contact per
+// flight enemy, on the first planet in chapter order whose flight meets it.
 import { readdirSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
@@ -9,6 +12,8 @@ import {
   ASSETS,
   BOSS_REVEALS,
   CHAPTER_CARDS,
+  CONTACTS,
+  CONTRACTION_PATTERN,
   DIALOGUE,
   ENEMIES,
   FILMS,
@@ -18,9 +23,14 @@ import {
   PLANET_IDS,
   SPEAKERS,
   STORY_FLAGS,
+  WAVES,
   type CaptionDef,
+  type ContactDef,
+  type Dialogue,
+  type EnemyId,
   type FilmDef,
   type Enemy,
+  type PlanetDef,
 } from '@/data/index';
 import { newSave, validateSave } from '@/core/Save';
 import { captionText, DEFAULT_STORY_CONTEXT, type StoryContext } from '@/systems/StoryContext';
@@ -263,5 +273,97 @@ describe('story films (SPEC-021 §8)', () => {
     save.progress.flags.push('interlude2_seen');
     const result = validateSave(JSON.parse(JSON.stringify(save)));
     expect(result.ok && result.data.progress.flags).toContain('interlude2_seen');
+  });
+});
+
+describe('"Wreckers" and the flight contacts (SPEC-063 §6.4)', () => {
+  const contacts = CONTACTS as Readonly<Record<string, ContactDef>>;
+
+  it('tiles "Wreckers" over [0, 12) on whole frames, as §4.1 times it', () => {
+    const film: FilmDef = FILMS.wreckers;
+    expect(film.shots.map((shot) => [shot.id, shot.start, shot.end, shot.poster, shot.pan])).toEqual([
+      ['hulk', 0, 4, 2, 'in'],
+      ['cutting', 4, 8.5, 6.5, 'right'],
+      ['sortie', 8.5, 12, 10.5, 'none'],
+    ]);
+    expect(film.shots[0]?.start).toBe(0);
+    expect(duration(film)).toBe(12);
+    for (const shot of film.shots) expect(onGrid(shot.start) && onGrid(shot.end), shot.id).toBe(true);
+    expect([film.title, film.music, film.flashes]).toEqual(['Wreckers', 'film_dark', []]);
+  });
+
+  it('speaks ARIA’s three captions with no contraction, and cues the grinder, the clamp and the whoosh', () => {
+    const film: FilmDef = FILMS.wreckers;
+    expect(film.captions.map((caption) => [caption.at, caption.until, caption.speaker])).toEqual([
+      [0.5, 3.7, 'aria'],
+      [4.3, 8.2, 'aria'],
+      [8.8, 11.6, 'aria'],
+    ]);
+    for (const caption of film.captions) expect(CONTRACTION_PATTERN.test(caption.text), caption.text).toBe(false);
+    expect(film.cues).toEqual([
+      { at: 4.4, sound: 'film_grind', volume: 0.8 },
+      { at: 8.6, sound: 'film_clamp' },
+      { at: 9.2, sound: 'film_whoosh', volume: 0.6 },
+    ]);
+  });
+
+  it('has its manifest entry, with the posters of its three shots', () => {
+    const entry = MANIFEST?.films['wreckers'];
+    expect(entry, 'manifest.films.wreckers').toBeDefined();
+    expect(entry?.file).toBe('films/wreckers.mp4');
+    expect(entry?.shots.map((shot) => shot.poster)).toEqual([
+      'films/posters/wreckers_hulk.webp',
+      'films/posters/wreckers_cutting.webp',
+      'films/posters/wreckers_sortie.webp',
+    ]);
+  });
+
+  it('gives every flight enemy a contact, and nothing else one', () => {
+    const flight = (Object.values(ENEMIES) as readonly Enemy[]).filter((enemy) => enemy.domain === 'flight').map((enemy) => enemy.id);
+    expect(flight.length).toBeGreaterThan(0);
+    expect(Object.keys(CONTACTS).sort()).toEqual([...flight].sort());
+  });
+
+  it('puts each contact on the first planet in chapter order whose flight carries its enemy', () => {
+    const byChapter = [...(Object.values(PLANETS) as readonly PlanetDef[])].sort((a, b) => a.chapter - b.chapter);
+    const carries = (planet: PlanetDef, enemy: EnemyId): boolean =>
+      planet.flight.waves.some((wave) => WAVES[wave].groups.some((group) => group.enemy === enemy));
+    for (const [enemy, contact] of Object.entries(contacts)) {
+      const first = byChapter.find((planet) => carries(planet, enemy as EnemyId));
+      expect(first?.id, enemy).toBe(contact.planet);
+    }
+    expect([CONTACTS.scav_fighter.planet, CONTACTS.hive_interceptor.planet]).toEqual(['vetra', 'hive']);
+  });
+
+  it('names a dialogue for every contact’s line, and keeps every epithet within 40 characters', () => {
+    for (const [enemy, contact] of Object.entries(contacts)) {
+      expect(Object.hasOwn(DIALOGUE, contact.line), `${enemy}: ${contact.line}`).toBe(true);
+      expect(contact.epithet.length, enemy).toBeGreaterThan(0);
+      expect(contact.epithet.length, enemy).toBeLessThanOrEqual(40);
+    }
+  });
+
+  it('holds §4.3’s two contacts word for word, and their lines neither modal nor once', () => {
+    expect(CONTACTS).toEqual({
+      scav_fighter: { planet: 'vetra', epithet: 'A tug, rebuilt to take tugs', line: 'contact_scav_fighter', film: 'wreckers' },
+      hive_interceptor: { planet: 'hive', epithet: 'Grown, not flown', line: 'contact_hive_interceptor' },
+    });
+    expect(DIALOGUE.contact_scav_fighter.lines).toEqual([
+      { speaker: 'scav', text: 'Tug, drop your hold and turn for home. Nobody has to burn today.' },
+      { speaker: 'aria', text: 'Scav fighters. The crews you met on Cinder-4, in tugs they stripped. They want the hold. Shoot back.' },
+    ]);
+    expect(DIALOGUE.contact_hive_interceptor.lines).toEqual([
+      { speaker: 'aria', text: 'Nobody is flying those. The Hive grows them, and they ram. Keep them off the nose.' },
+    ]);
+    for (const id of ['contact_scav_fighter', 'contact_hive_interceptor'] as const) {
+      const def: Dialogue = DIALOGUE[id];
+      expect(def.modal, id).toBeUndefined();
+      expect(def.once, id).toBeUndefined();
+    }
+  });
+
+  it('gives a film to the scav fighter’s contact only, and that film is wreckers', () => {
+    const withFilm = Object.entries(contacts).filter(([, contact]) => contact.film !== undefined);
+    expect(withFilm.map(([enemy, contact]) => [enemy, contact.film])).toEqual([['scav_fighter', 'wreckers']]);
   });
 });

@@ -268,6 +268,14 @@ export const DIALOGUE = {
     id: 'c2_s2_done',
     lines: [{ speaker: 'aria', text: 'Hides stowed, avalanche outrun. You are getting better at reading the ground.' }],
   },
+  /** SPEC-063 §4.3: the first scav fighter group on the first flight to Vetra (`CONTACTS.scav_fighter`). */
+  contact_scav_fighter: {
+    id: 'contact_scav_fighter',
+    lines: [
+      { speaker: 'scav', text: 'Tug, drop your hold and turn for home. Nobody has to burn today.' },
+      { speaker: 'aria', text: 'Scav fighters. The crews you met on Cinder-4, in tugs they stripped. They want the hold. Shoot back.' },
+    ],
+  },
 
   // -------------------------------------------------------- chapter 3 — Thessaly
   c3_m1_accept: {
@@ -534,6 +542,11 @@ export const DIALOGUE = {
   c5_s1_done: {
     id: 'c5_s1_done',
     lines: [{ speaker: 'aria', text: 'Clusters destroyed. The tunnels are very quiet now and I like it less than the noise.' }],
+  },
+  /** SPEC-063 §4.3: the first interceptor group on the first flight to the Hive (`CONTACTS.hive_interceptor`). */
+  contact_hive_interceptor: {
+    id: 'contact_hive_interceptor',
+    lines: [{ speaker: 'aria', text: 'Nobody is flying those. The Hive grows them, and they ram. Keep them off the nose.' }],
   },
 
   // ---------------------------------------------------- chapter 6 — Eden-Prime
