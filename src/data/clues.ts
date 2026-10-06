@@ -14,7 +14,7 @@
 // (SPEC-001 §4, §8).
 import type { DialogueId } from '@/data/dialogue';
 import type { EnemyId } from '@/data/enemies';
-import type { FlagId, PlanetId } from '@/data/ids';
+import type { CacheId, FlagId, PlanetId } from '@/data/ids';
 import type { MissionId } from '@/data/missions';
 import type { PoiId } from '@/data/pois';
 import type { WaveId } from '@/data/waves';
@@ -40,7 +40,9 @@ export type ClueTrigger =
   /** The Character tab's drifted keepsake. */
   | { readonly kind: 'keepsake' }
   /** The memory answer is the flag; the clue has no line. */
-  | { readonly kind: 'choice' };
+  | { readonly kind: 'choice' }
+  /** SPEC-056 §4.7: `cache:opened` of `cache` — a vault's archive shard. */
+  | { readonly kind: 'cache'; readonly cache: CacheId };
 
 export interface ClueDef {
   /** The clue is found when this flag is set… */
@@ -249,5 +251,68 @@ export const CLUES: readonly ClueDef[] = [
     trigger: { kind: 'wave', wave: 'eden_final' },
     lines: ['c6_m2_wave'],
     record: { title: 'Never hers', text: 'The Hive came for the beacon after the Queen was dead.' },
+  },
+  // SPEC-056 §4.7: the archive shards, in planet order — optional and
+  // off-task, since breaking into a vault is going off-task; each found when
+  // its vault opens and its log starts.
+  {
+    id: 'shard_cinder4',
+    chapter: 1,
+    path: 'optional',
+    offTask: true,
+    trigger: { kind: 'cache', cache: 'cinder4_vault' },
+    lines: ['shard_cinder4'],
+    record: {
+      title: 'Too fast for hands',
+      text: 'A log in the Cinder-4 vault: instance/58 opened the lock in 0.3 seconds, then learned to slow down.',
+    },
+  },
+  {
+    id: 'shard_vetra',
+    chapter: 2,
+    path: 'optional',
+    offTask: true,
+    trigger: { kind: 'cache', cache: 'vetra_vault' },
+    lines: ['shard_vetra'],
+    record: { title: 'The cold does not reach', text: 'A log in the Vetra vault: instance/47 could not feel the cold, and the suit was fine.' },
+  },
+  {
+    id: 'shard_thessaly',
+    chapter: 3,
+    path: 'optional',
+    offTask: true,
+    trigger: { kind: 'cache', cache: 'thessaly_vault' },
+    lines: ['shard_thessaly'],
+    record: {
+      title: 'Eleven arches',
+      text: 'A log in the Thessaly vault: instance/41 counted the same eleven arches going in and coming out.',
+    },
+  },
+  {
+    id: 'shard_ferrum',
+    chapter: 4,
+    path: 'optional',
+    offTask: true,
+    trigger: { kind: 'cache', cache: 'ferrum_vault' },
+    lines: ['shard_ferrum'],
+    record: { title: 'The meter you call breath', text: 'A log in the Ferrum vault: instance/29 says fatigue is a number here too.' },
+  },
+  {
+    id: 'shard_hive',
+    chapter: 5,
+    path: 'optional',
+    offTask: true,
+    trigger: { kind: 'cache', cache: 'hive_vault' },
+    lines: ['shard_hive'],
+    record: { title: 'Further than here', text: 'A log in the Hive vault: instance/12 never got past the Queen, and asks the next one to.' },
+  },
+  {
+    id: 'shard_eden',
+    chapter: 6,
+    path: 'optional',
+    offTask: true,
+    trigger: { kind: 'cache', cache: 'eden_vault' },
+    lines: ['shard_eden'],
+    record: { title: 'Checkpoint written', text: 'The machine room under Eden logged a checkpoint of instance/{instance}. Loss: acceptable.' },
   },
 ];

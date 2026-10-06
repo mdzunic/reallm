@@ -658,6 +658,55 @@ export const DIALOGUE = {
     id: 'keepsake_drift',
     lines: [{ speaker: 'aria', text: 'You called it tin last time. And last time it was hers, not your mother’s.' }],
   },
+
+  // ------------------------------------------------ SPEC-056 — archive shards
+  // §4.7: one log line in each vault, left by an earlier instance — 58, 47,
+  // 41, 29, 12 — and Eden's checkpoint of this one. Not modal; each is its
+  // shard clue's line, so its start sets the flag.
+  shard_cinder4: {
+    id: 'shard_cinder4',
+    lines: [
+      {
+        speaker: 'log',
+        text: 'LOG — instance/58. I opened this lock in 0.3 seconds. Nobody with hands is that fast. I slowed down after that. Slow down.',
+      },
+    ],
+  },
+  shard_vetra: {
+    id: 'shard_vetra',
+    lines: [
+      {
+        speaker: 'log',
+        text: 'LOG — instance/47. The cold does not reach me. I checked the suit twice. The suit is fine. The part of me that should feel it is not there.',
+      },
+    ],
+  },
+  shard_thessaly: {
+    id: 'shard_thessaly',
+    lines: [
+      {
+        speaker: 'log',
+        text: 'LOG — instance/41. I counted the arches going in. Eleven. I counted them going out. Eleven, the same cracks. They reuse the ruins. They reuse us.',
+      },
+    ],
+  },
+  shard_ferrum: {
+    id: 'shard_ferrum',
+    lines: [{ speaker: 'log', text: 'LOG — instance/29. Fatigue is a number here too. Watch the meter you think is your breath.' }],
+  },
+  shard_hive: {
+    id: 'shard_hive',
+    lines: [
+      {
+        speaker: 'log',
+        text: 'LOG — instance/12. The Queen told me I never get further than here. She was right about me. Be the one she is wrong about.',
+      },
+    ],
+  },
+  shard_eden: {
+    id: 'shard_eden',
+    lines: [{ speaker: 'log', text: 'Checkpoint written: instance/{instance}. Loss: acceptable.' }],
+  },
 } as const satisfies Record<string, DialogueDef>;
 
 export type DialogueId = keyof typeof DIALOGUE;

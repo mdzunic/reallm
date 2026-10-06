@@ -387,6 +387,11 @@ function effectWords(effect: Extract<Item, { kind: 'consumable' }>['effect']): s
       return `${multPercent(effect.mult)} damage for ${effect.seconds} s`;
     case 'explosive':
       return `Explosive — ${effect.damage} damage in a ${effect.radius} m blast`;
+    // SPEC-056 §4.5: the flare and the stim.
+    case 'light':
+      return `Lights ${effect.radius} m for ${effect.seconds} s where it lands`;
+    case 'stamina':
+      return 'Refills stamina and clears exhaustion';
   }
 }
 

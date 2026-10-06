@@ -3,9 +3,13 @@
 // wheat and water worth carrying home. SPEC-029 §4.3 adds the three explosives,
 // all fed by oil — a second use for fuel, per PLAN's resource-sink rule.
 //
+// SPEC-056 §4.5 adds the two blueprints: the flare and the stim, each locked
+// until the cave cache that holds its blueprint is claimed — a lasting wheat,
+// water and oil sink that can never be lost.
+//
 // Data modules are plain objects: no imports but other data, no functions
 // (SPEC-001 §4, §8).
-import type { ResourceId } from '@/data/ids';
+import type { CacheId, ResourceId } from '@/data/ids';
 import type { ItemId } from '@/data/items';
 
 export interface RecipeDef<Id extends string = string> {
@@ -13,6 +17,11 @@ export interface RecipeDef<Id extends string = string> {
   readonly output: ItemId;
   readonly qty: number;
   readonly cost: Partial<Record<ResourceId, number>>;
+  /**
+   * SPEC-056 §4.5: the cache whose claim unlocks the recipe — its blueprint.
+   * Until then `Economy.craft` refuses it with `locked`.
+   */
+  readonly requires?: CacheId;
 }
 
 export const RECIPES = {
@@ -22,6 +31,9 @@ export const RECIPES = {
   frag_grenade: { id: 'frag_grenade', output: 'frag_grenade', qty: 1, cost: { oil: 10, water: 5 } },
   landmine: { id: 'landmine', output: 'landmine', qty: 1, cost: { oil: 20 } },
   demo_charge: { id: 'demo_charge', output: 'demo_charge', qty: 1, cost: { oil: 15, lithium: 10 } },
+  // SPEC-056 §4.5 (*initial tuning*): the blueprints of Vetra's and Thessaly's world puzzles.
+  flare: { id: 'flare', output: 'flare', qty: 1, cost: { oil: 5, wheat: 5 }, requires: 'vetra_loose_b' },
+  stim: { id: 'stim', output: 'stim', qty: 1, cost: { wheat: 10, water: 5 }, requires: 'thessaly_loose_b' },
 } as const satisfies Record<string, RecipeDef>;
 
 export type RecipeId = keyof typeof RECIPES;
