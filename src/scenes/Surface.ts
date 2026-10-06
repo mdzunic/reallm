@@ -680,6 +680,8 @@ export class SurfaceScene extends UiScene<'surface'> {
   #remainsHere = false;
   readonly #remainsAt = { x: 0, z: 0 };
   readonly #remainsEntrance = { x: 0, z: 0, facing: 0 };
+  /** E63's choice, made once at the death (`#placeRemains`) and kept for the respawn it decides. */
+  #respawnAtArena = false;
   readonly #remainsTaken: Record<ResourceId, number> = { oil: 0, wheat: 0, water: 0, lithium: 0 };
   #remainsInside = false;
   #remainsRetryIn = 0;
@@ -4144,7 +4146,10 @@ export class SurfaceScene extends UiScene<'surface'> {
     // SPEC-041 §4.4, E63: a death in an active boss stage comes back at the
     // arena's mouth instead of a 110–160 m walk from the pad.
     if (this.#deathAt >= DEATH_OVERLAY_SECONDS || tapped) {
-      this.#respawn(world, (this.#missions?.bossStage() ?? null) !== null && this.#levels?.surface.arena != null ? 'arena' : 'pad');
+      // SPEC-057 §4.3: read as it stood at the death, where the remains were
+      // placed — a mine that kills the boss under the overlay must not send the
+      // respawn to the pad while the remains wait at the arena's mouth.
+      this.#respawn(world, this.#respawnAtArena ? 'arena' : 'pad');
     }
   }
 
@@ -4258,12 +4263,16 @@ export class SurfaceScene extends UiScene<'surface'> {
     const surface = this.#levels?.surface ?? null;
     const missions = this.#missions;
     if (surface === null) {
+      this.#respawnAtArena = false;
       this.#remainsAt.x = world.player.x;
       this.#remainsAt.z = world.player.z;
       return;
     }
     const descent = this.#level?.id === 'underground' ? this.#descent : null;
+    // SPEC-041 E63's own test, taken once here and kept for `#deathTick`, so
+    // the respawn always lands where the remains were placed (§4.3, §4.4).
     const boss = missions !== null && missions.bossStage() !== null && surface.arena !== null;
+    this.#respawnAtArena = boss;
     const entrance = boss && this.#arenaEntrance(this.#remainsEntrance) ? this.#remainsEntrance : null;
     placeRemains(
       world.player,
