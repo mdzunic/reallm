@@ -512,6 +512,7 @@ describe('diffHud (AC-115, AC-62)', () => {
       distance: 84,
       bearing: 0,
       pulse: false,
+      remains: null,
     };
     expect(diffHud(a, b)).toEqual(new Set(['tracker']));
     expect(diffHud(b, cloneHud(b)).size).toBe(0);
@@ -1592,7 +1593,7 @@ describe('diffHudInto and copyHudInto (SPEC-040 §4.4, AC-20)', () => {
 
   it('reuses every nested object when only values move', () => {
     const a = createHudModel();
-    a.tracker = { title: 'Dry Land', stage: 'stage 1/2', rows: [{ text: 'Reach', done: false, focus: true, defendHp: null, count: -1 }], distance: 12, bearing: 0, pulse: false };
+    a.tracker = { title: 'Dry Land', stage: 'stage 1/2', rows: [{ text: 'Reach', done: false, focus: true, defendHp: null, count: -1 }], distance: 12, bearing: 0, pulse: false, remains: null };
     a.boss = { name: 'Wurm', hp: 10, max: 20, phase: 1, marks: [0.4] };
     const last = copyHudInto(createHudModel(), a);
     const before = containers(last);
@@ -1610,7 +1611,7 @@ describe('diffHudInto and copyHudInto (SPEC-040 §4.4, AC-20)', () => {
 
   it('shrinks an array in place and allocates only for a longer one or null → object', () => {
     const a = createHudModel();
-    a.tracker = { title: 'T', stage: '', rows: [1, 2, 3].map((n) => ({ text: `r${n}`, done: false, focus: false, defendHp: null, count: -1 })), distance: null, bearing: 0, pulse: false };
+    a.tracker = { title: 'T', stage: '', rows: [1, 2, 3].map((n) => ({ text: `r${n}`, done: false, focus: false, defendHp: null, count: -1 })), distance: null, bearing: 0, pulse: false, remains: null };
     const last = copyHudInto(createHudModel(), a);
     const rows = last.tracker?.rows;
     const first = rows?.[0];
@@ -1623,7 +1624,7 @@ describe('diffHudInto and copyHudInto (SPEC-040 §4.4, AC-20)', () => {
     a.tracker = null;
     copyHudInto(last, a);
     expect(last.tracker).toBeNull();
-    a.tracker = { title: 'U', stage: '', rows: [], distance: null, bearing: 0, pulse: false };
+    a.tracker = { title: 'U', stage: '', rows: [], distance: null, bearing: 0, pulse: false, remains: null };
     copyHudInto(last, a);
     expect(last.tracker).not.toBe(a.tracker);
     expect(last.tracker).toEqual(a.tracker);
@@ -2487,5 +2488,34 @@ describe('the treasure\'s words (SPEC-056 §4.1, §4.4, §4.5, §4.6)', () => {
   it('the flare\'s and the stim\'s cards say what they do', () => {
     expect(gearStatLines('flare')).toEqual(['Lights 12 m for 60 s where it lands', 'Stack of 5']);
     expect(gearStatLines('stim')).toEqual(['Refills stamina and clears exhaustion', 'Stack of 5']);
+  });
+});
+
+// ------------------------------------------------------------- SPEC-057 §4.7
+
+import { remainsLostText, remainsOverlayLine, remainsRecoveredText, remainsTrackerText } from '@/systems/UiHelpers';
+
+describe('the remains lines (SPEC-057 §4.1, §4.4, §4.5, §4.7)', () => {
+  it('the overlay line names what the pack or the body holds, and is null when nothing was taken', () => {
+    expect(remainsOverlayLine('pack', { oil: 30, lithium: 12 })).toBe('Your pack holds 30 oil · 12 lithium — reach it before you fall again.');
+    expect(remainsOverlayLine('body', { lithium: 12, oil: 30 })).toBe('Your body holds 30 oil · 12 lithium — reach it before you fall again.');
+    expect(remainsOverlayLine('pack', {})).toBeNull();
+    expect(remainsOverlayLine('pack', { oil: 0 })).toBeNull();
+  });
+
+  it('the recovery toast adds the rest only while some is left', () => {
+    expect(remainsRecoveredText('pack', { oil: 20 }, false)).toBe('Recovered: 20 oil');
+    expect(remainsRecoveredText('pack', { oil: 5, wheat: 0 }, true)).toBe('Recovered: 5 oil — the rest stays with your pack');
+    expect(remainsRecoveredText('body', { oil: 5, water: 3 }, true)).toBe('Recovered: 5 oil · 3 water — the rest stays with your body');
+  });
+
+  it('the forfeit toast names the lost set', () => {
+    expect(remainsLostText('pack', { oil: 20 })).toBe('Your earlier pack is gone: 20 oil.');
+    expect(remainsLostText('body', { wheat: 4, oil: 20 })).toBe('Your earlier body is gone: 20 oil · 4 wheat.');
+  });
+
+  it('the tracker row reads the whole-metre distance', () => {
+    expect(remainsTrackerText('pack', 42.4)).toBe('Recover your pack — 42 m');
+    expect(remainsTrackerText('body', 0.3)).toBe('Recover your body — 0 m');
   });
 });

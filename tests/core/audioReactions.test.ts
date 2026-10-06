@@ -222,6 +222,10 @@ const EVENT_KEYS = [
   // (both reacted).
   'puzzle:moved',
   'puzzle:solved',
+  // SPEC-057 §4.8: the drop and the forfeit (silent), and a recovery (reacted).
+  'remains:created',
+  'remains:recovered',
+  'remains:lost',
   'ui:toast',
   'ui:orientation',
   // SPEC-015 §10: the service-worker update signal (D-10) and the iOS install
@@ -525,8 +529,8 @@ describe('the ramp curve (SPEC-006 §4.3, §4.5)', () => {
 // ------------------------------------------------------------ reactions table
 
 describe('the reactions table is exhaustive over GameEvents (SPEC-006 §5)', () => {
-  it('covers the 31 reacted events of §5.2 (AC-38; SPEC-029 §4.12 adds four, SPEC-035 §4.11 two, SPEC-038 §4.10 two, SPEC-041 §4.10 two, SPEC-042 §4.2 one, SPEC-050 §4.8 one, SPEC-054 §4.13 two, SPEC-055 §4.9 two)', () => {
-    expect(REACTED_EVENTS).toHaveLength(31);
+  it('covers the 32 reacted events of §5.2 (AC-38; SPEC-029 §4.12 adds four, SPEC-035 §4.11 two, SPEC-038 §4.10 two, SPEC-041 §4.10 two, SPEC-042 §4.2 one, SPEC-050 §4.8 one, SPEC-054 §4.13 two, SPEC-055 §4.9 two, SPEC-057 §4.8 one)', () => {
+    expect(REACTED_EVENTS).toHaveLength(32);
     expect(REACTED_EVENTS.slice().sort()).toEqual(
       [
         'combat:blast',
@@ -560,25 +564,30 @@ describe('the reactions table is exhaustive over GameEvents (SPEC-006 §5)', () 
         'cache:opened',
         'puzzle:moved',
         'puzzle:solved',
+        'remains:recovered',
       ].sort(),
     );
   });
 
-  it('silences exactly the 47 events of §5.4 (AC-39; SPEC-015 added the two app: signals)', () => {
+  it('silences exactly the 49 events of §5.4 (AC-39; SPEC-015 added the two app: signals)', () => {
     // SPEC-034 added `player:recalled`, `enemy:dismissed` and `item:noRoom`;
     // SPEC-042 §4.2 `item:blocked`, whose warn toast is its sound; SPEC-043
     // §4.7 `mission:bonus`; SPEC-048 §4.9 `story:clue` — a clue is quiet by
     // design, and the reacted and sprite counts do not move; SPEC-054 §4.13
     // `level:changed` — a level swap has no sound of its own. SPEC-055 §4.9's
     // two puzzle events are both reacted, so this count does not move.
-    expect(AUDIO_SILENT.size).toBe(47);
+    // SPEC-057 §4.8 silences `remains:created` and `remains:lost`; its
+    // `remains:recovered` plays the existing `pickup_generic`.
+    expect(AUDIO_SILENT.size).toBe(49);
+    expect(AUDIO_SILENT.has('remains:created')).toBe(true);
+    expect(AUDIO_SILENT.has('remains:lost')).toBe(true);
     expect(AUDIO_SILENT.has('mission:bonus')).toBe(true);
     expect(AUDIO_SILENT.has('story:clue')).toBe(true);
     expect(AUDIO_SILENT.has('level:changed')).toBe(true);
   });
 
-  it('gives every one of the 78 event keys exactly one home (AC-40; SPEC-055 §4.9 adds two)', () => {
-    expect(EVENT_KEYS).toHaveLength(78);
+  it('gives every one of the 81 event keys exactly one home (AC-40; SPEC-055 §4.9 adds two, SPEC-057 §4.8 three)', () => {
+    expect(EVENT_KEYS).toHaveLength(81);
     const reacted = new Set<string>(REACTED_EVENTS);
     for (const key of EVENT_KEYS) {
       const hasSound = reacted.has(key);
@@ -877,6 +886,12 @@ describe('reaction outcomes (SPEC-006 §5.2)', () => {
     expect(react({ site: 'ferrum_vault', hints: 3, bypassed: true })).toEqual(sting);
     expect(react({ site: 'eden_vault', hints: 0, bypassed: false })).toEqual(sting);
     expect(AUDIO_SILENT.has('puzzle:solved')).toBe(false);
+  });
+
+  it('remains:recovered chimes the existing generic pickup on its 80 ms floor (SPEC-057 §4.8)', () => {
+    const react = AUDIO_REACTIONS['remains:recovered'];
+    expect(react({ planet: 'cinder4', resources: { oil: 20 } })).toEqual({ id: 'pickup_generic', opts: { minIntervalMs: 80 } });
+    expect(AUDIO_SILENT.has('remains:recovered')).toBe(false);
   });
 
   it('every sound a reaction can name exists in a bank', () => {

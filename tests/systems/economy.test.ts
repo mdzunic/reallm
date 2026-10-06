@@ -1200,6 +1200,50 @@ describe('resource sources, contracts, bonuses and hard (SPEC-043)', () => {
   });
 });
 
+// ------------------------------------------------------------- SPEC-057 §4.4
+
+describe('the recovered source and the death penalty (SPEC-057 §4.2, §4.4)', () => {
+  it("addResource('oil', 50, 'recovered') at 380 of 400 adds 20, ships 0, and never flags blocked", () => {
+    const { economy, data, events } = world(MARINE, (save) => {
+      save.resources.oil = 380;
+    });
+    expect(economy.cargoCap()).toBe(400);
+    // An active collect's demand ships a pickup's surplus home — never a recovery's.
+    economy.setCollectDemand(() => 100);
+    expect(economy.addResource('oil', 50, 'recovered')).toEqual({ added: 20, shipped: 0, blocked: 30 });
+    expect(data.resources.oil).toBe(400);
+    expect(events.of('resource:collected')).toEqual([{ resource: 'oil', amount: 20, total: 400, source: 'recovered' }]);
+    expect(events.of('resource:collected')[0]).not.toHaveProperty('blocked');
+    expect(events.of('resource:collected')[0]).not.toHaveProperty('shipped');
+  });
+
+  it('a recovery into a full hold adds nothing and says nothing — no event, so no full-hold warning', () => {
+    const { economy, data, events } = world(MARINE, (save) => {
+      save.resources.oil = 400;
+    });
+    expect(economy.addResource('oil', 20, 'recovered')).toEqual({ added: 0, shipped: 0, blocked: 20 });
+    expect(data.resources.oil).toBe(400);
+    expect(events.of('resource:collected')).toEqual([]);
+  });
+
+  it('applyDeathPenalty is unchanged: 10 % on normal, 20 % on hard, nothing on casual', () => {
+    const resources = { oil: 200, wheat: 55, water: 9, lithium: 0 };
+    const normal = world(MARINE, (save) => {
+      save.resources = { ...resources };
+    });
+    expect(normal.economy.applyDeathPenalty()).toEqual({ oil: 20, wheat: 5 });
+    const hard = world({ ...MARINE, difficulty: 'hard' }, (save) => {
+      save.resources = { ...resources };
+    });
+    expect(hard.economy.applyDeathPenalty()).toEqual({ oil: 40, wheat: 11, water: 1 });
+    const casual = world({ ...MARINE, difficulty: 'casual' }, (save) => {
+      save.resources = { ...resources };
+    });
+    expect(casual.economy.applyDeathPenalty()).toEqual({});
+    expect(casual.data.resources).toEqual(resources);
+  });
+});
+
 // ------------------------------------------------------------- SPEC-054 §4.8
 
 describe('claimCache (SPEC-054 §4.8)', () => {

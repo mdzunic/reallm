@@ -363,6 +363,23 @@ function drawShape(ctx: CanvasRenderingContext2D, shape: MapShape, s: number, sc
       ctx.fill();
       return;
     }
+    case 'bag': {
+      // SPEC-057 §4.5: the remains — a sack outline, its neck tied off at the top.
+      ctx.beginPath();
+      ctx.moveTo(-h * 0.3, -h * 0.55);
+      ctx.quadraticCurveTo(-h, -h * 0.1, -h * 0.8, h * 0.6);
+      ctx.quadraticCurveTo(-h * 0.7, h, 0, h);
+      ctx.quadraticCurveTo(h * 0.7, h, h * 0.8, h * 0.6);
+      ctx.quadraticCurveTo(h, -h * 0.1, h * 0.3, -h * 0.55);
+      ctx.closePath();
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.moveTo(-h * 0.45, -h);
+      ctx.lineTo(0, -h * 0.55);
+      ctx.lineTo(h * 0.45, -h);
+      ctx.stroke();
+      return;
+    }
   }
 }
 
@@ -391,7 +408,7 @@ export class Minimap {
    * `debugInfo()` reports these, so the acceptance run can see through the
    * canvas. One object, mutated in place (SPEC-012 AC-55..AC-59).
    */
-  readonly lastDrawn = { pois: 0, objectives: 0, arrows: 0, nodes: 0, enemies: 0 };
+  readonly lastDrawn = { pois: 0, objectives: 0, arrows: 0, nodes: 0, enemies: 0, remains: 0 };
 
   constructor(canvas: HTMLCanvasElement, layers: MapLayers) {
     this.#canvas = canvas;
@@ -436,6 +453,7 @@ export class Minimap {
     drawn.arrows = 0;
     drawn.nodes = 0;
     drawn.enemies = 0;
+    drawn.remains = 0;
 
     const size = this.#canvas.width;
     if (size <= 0) return;
@@ -493,7 +511,9 @@ export class Minimap {
       const p = this.#at(frame, mark.x, mark.z, pxPerMetre, rimPx);
       if (!p.inside) continue;
       drawMapIcon(ctx, mark.icon, p.x, p.y, scale, mark.hollow);
-      drawn.pois++;
+      // SPEC-057 §4.5: the remains are a mark, not a POI — counted on their own.
+      if (mark.icon === 'remains') drawn.remains++;
+      else drawn.pois++;
     }
     for (const mark of frame.marks) {
       if (!mark.objective) continue;

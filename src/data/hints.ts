@@ -54,6 +54,8 @@ export const TIP_IDS = [
   'dark',
   // SPEC-055 §4.4: the first puzzle panel opened.
   'puzzle',
+  // SPEC-057 §4.7: the first death that leaves remains.
+  'remains',
 ] as const;
 
 export type TipId = (typeof TIP_IDS)[number];
@@ -188,6 +190,12 @@ export const TIPS: Readonly<Record<TipId, TipText>> = {
   puzzle: {
     keyboard: 'Arrows move, Enter turns a tile. H asks ARIA for a hint — hints are free.',
     touch: 'Tap a tile to turn it. HINT asks ARIA — hints are free.',
+  },
+  // SPEC-057 §4.7: shown at the first death that leaves remains — one wording
+  // for both schemes, since walking back is the same on each.
+  remains: {
+    keyboard: 'What you carried stays where you fell. Walk back to it. Fall again first and it is gone.',
+    touch: 'What you carried stays where you fell. Walk back to it. Fall again first and it is gone.',
   },
 };
 

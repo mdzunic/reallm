@@ -7,6 +7,9 @@
 // SPEC-042 §4.5: it names what killed the player (`deathCause`), offers one
 // tip for next time (`deathTip`), and says which stage a death restarted. The
 // words arrive as arguments too — the pure helpers own them.
+//
+// SPEC-057 §4.7: under what was lost, where it went — `death-remains`, written
+// by the scene after `show` (`setRemains`), empty when nothing was taken.
 import type { ResourceId } from '@/data/index';
 import { el, testId } from '@/ui/dom';
 
@@ -16,6 +19,7 @@ export class DeathOverlay {
   readonly #tip: HTMLParagraphElement;
   readonly #restarts: HTMLParagraphElement;
   readonly #lost: HTMLParagraphElement;
+  readonly #remains: HTMLParagraphElement;
 
   constructor(root: HTMLElement) {
     this.#root = testId(el('div', 'overlay-panel overlay-death'), 'death-overlay');
@@ -24,12 +28,14 @@ export class DeathOverlay {
     this.#tip = testId(el('p', 'death-tip is-hidden'), 'death-tip');
     this.#restarts = testId(el('p', 'death-restarts'), 'death-restarts');
     this.#lost = el('p', 'death-lost');
+    this.#remains = testId(el('p', 'death-remains'), 'death-remains');
     this.#root.append(
       el('p', 'death-title', 'SIGNAL LOST'),
       this.#cause,
       this.#tip,
       this.#restarts,
       this.#lost,
+      this.#remains,
       el('p', 'death-respawn', 'Respawning…'),
     );
     root.append(this.#root);
@@ -56,9 +62,18 @@ export class DeathOverlay {
     this.#restarts.textContent = line ?? '';
   }
 
+  /**
+   * SPEC-057 §4.7: `Your pack holds <list> — reach it before you fall again.`
+   * (`Your body holds …` once the look is the body); `null` empties it.
+   */
+  setRemains(line: string | null): void {
+    this.#remains.textContent = line ?? '';
+  }
+
   hide(): void {
     this.#root.classList.remove('is-visible');
     this.setRestarts(null);
+    this.setRemains(null);
   }
 
   dispose(): void {

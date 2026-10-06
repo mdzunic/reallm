@@ -92,9 +92,11 @@ export type Difficulty = (typeof DIFFICULTIES)[number];
  * SPEC-043 §3: where a resource came from. Only `'pickup'` is charged against
  * the cap (SPEC-010 §4.5), and only a pickup counts toward a collect objective
  * (43-h). Declared here so `core/Events.ts` can name it on `resource:collected`;
- * `systems/Economy.ts` re-exports it.
+ * `systems/Economy.ts` re-exports it. SPEC-057 §3 appends `'recovered'` — what
+ * a salvager takes back from their remains: charged against the cap, never
+ * shipped home, and never counted toward a collect.
  */
-export const RESOURCE_SOURCES = ['pickup', 'reward', 'voucher', 'subsidy'] as const;
+export const RESOURCE_SOURCES = ['pickup', 'reward', 'voucher', 'subsidy', 'recovered'] as const;
 export type ResourceSource = (typeof RESOURCE_SOURCES)[number];
 
 /** The five assistants of PLAN §4; `aria` is free from the first save. */

@@ -37,6 +37,7 @@ import { Flashlight, type FlashlightMode } from '@/views/Flashlight';
 import { buildEnvironment, skyParamsFor } from '@/views/Environment';
 import { FollowerView } from '@/views/FollowerView';
 import { EnemyMeshes, INSTANCES_PER_PART } from '@/views/ProceduralMeshes';
+import { RemainsView, type RemainsModel } from '@/views/RemainsView';
 import { ScavBody } from '@/views/ScavBody';
 import { groundLayer, type GroundLayer } from '@/views/ProceduralTextures';
 import { buildScatter, buildDecals } from '@/views/Scatter';
@@ -844,6 +845,8 @@ export class SurfaceView {
   #followerView: FollowerView | null = null;
   /** SPEC-048 §4.8: the scavenger bodies placed this visit — the pad's, then the echo's. */
   readonly #scavBodies: ScavBody[] = [];
+  /** SPEC-057 §4.6: the remains, built on the first `setRemains` that shows them. */
+  #remains: RemainsView | null = null;
   /** Whether the preset casts shadows — what a body placed mid-visit is built with. */
   #shadowsOn = false;
   readonly #biome: PlanetDef['biome'];
@@ -1591,6 +1594,7 @@ export class SurfaceView {
     this.#character?.setShadows(size > 0);
     this.#shadowsOn = size > 0;
     for (const body of this.#scavBodies) body.setShadows(size > 0);
+    this.#remains?.setShadows(size > 0);
     this.#blobMaterial.opacity = size > 0 ? BLOB_OPACITY_WITH_MAP : BLOB_OPACITY_ALONE;
     // SPEC-030 AC-38 / SPEC-017 §4.5: casters on high only; receivers always.
     for (const mesh of this.#wallChunks) mesh.castShadow = size > 0;
@@ -2677,6 +2681,44 @@ export class SurfaceView {
     return this.#scavBodies.length;
   }
 
+  // ------------------------------------------------------- SPEC-057 §4.6
+
+  /**
+   * The remains on this surface — the pack or the body, under its pillar — or
+   * `null` to hide them. Built on the first call that shows something, so a
+   * visit without remains pays nothing. They stand in the environment root,
+   * which the underground hides with the rest of the surface.
+   */
+  setRemains(model: RemainsModel | null): void {
+    if (model === null && this.#remains === null) return;
+    if (this.#remains === null) {
+      // `hasModel` answers per model whether the boot set's crate and character
+      // are in; a missing one falls back rather than throwing (§4.6).
+      this.#remains = new RemainsView(this.#envRoot, this.#assets, (x, z) => this.field.heightAt(x, z), this.#shadowsOn);
+    }
+    this.#remains.set(model);
+  }
+
+  /** SPEC-057 §4.6: the remains' draws and triangles while shown, 0 otherwise — `sceneInfo.remainsDraws/Tris`. */
+  get remainsDraws(): number {
+    return this.#remains?.draws ?? 0;
+  }
+
+  get remainsTris(): number {
+    return this.#remains?.triangles ?? 0;
+  }
+
+  /** SPEC-057 §4.6: the look the remains were built as (`sceneInfo.remainsDrawn`), `-` while none show. */
+  get remainsDrawn(): string {
+    const remains = this.#remains;
+    return remains === null || !remains.shown ? '-' : (remains.look ?? '-');
+  }
+
+  /** SPEC-057 §4.6: the `Death` clip time the body is frozen at, or −1 (the pack, or a bind pose). */
+  get remainsPosedAt(): number {
+    return this.#remains?.posedAt ?? -1;
+  }
+
   // ------------------------------------------------------- SPEC-046 §4.6
 
   /**
@@ -3136,6 +3178,8 @@ export class SurfaceView {
     this.#followerView?.dispose();
     this.#followerView = null;
     for (const body of this.#scavBodies.splice(0)) body.dispose();
+    this.#remains?.dispose();
+    this.#remains = null;
     this.#scene.remove(this.#root);
     disposeObject3D(this.#root);
     // The guidance meshes are built on demand, so `disposeObject3D` only reaches
