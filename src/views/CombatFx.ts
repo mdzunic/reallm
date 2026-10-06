@@ -8,10 +8,12 @@
 // (`hash01`), never `Math.random` (SPEC-008 §4.3). The quads billboard toward
 // the fixed surface camera, which never rotates (SPEC-012 §4.3).
 //
-// SPEC-056 §4.4, §4.5: the Seed Drum's spore clouds are one instanced
-// translucent disc (1 draw), and the flares an additive ground disc and an
-// emissive billboard, each instanced for two (2 draws) — and no `THREE.Light`,
-// so SPEC-054's light count never moves mid-level.
+// SPEC-056 §4.4, §4.5: the Seed Drum's spore clouds and the flares' lit
+// ground share one instanced, additive, unfogged disc (1 draw), and each
+// flare's emissive billboard rides two slots reserved past the sprite pool —
+// so the clouds cost 1 draw, the flares at most 2, the surface's mesh budget
+// (SPEC-018) gains one mesh, and no `THREE.Light` is added: SPEC-054's light
+// count never moves mid-level.
 import * as THREE from 'three';
 import { hash01 } from '@/core/Noise';
 import { decalAtlas, particleSprite } from '@/views/ProceduralTextures';
@@ -94,9 +96,8 @@ export const FLARE_DISC_OPACITY = 0.35;
 const FLARE_GLOW_SIZE = 0.9;
 const FLARE_GLOW_LIFT = 0.35;
 const FLARE_GLOW_GAIN = 2.2;
-/** The spore cloud's tint and veil (*initial tuning*). */
-const CLOUD_COLOR = '#a6d86a';
-const CLOUD_OPACITY = 0.3;
+/** The spore cloud's tint on the shared additive disc (*initial tuning*). */
+const CLOUD_COLOR = '#7fbf45';
 const GROUND_LIFT = 0.04;
 
 const scratchMatrix = new THREE.Matrix4();
@@ -144,13 +145,13 @@ export class CombatFx {
   #scorchHead = 0;
   #scorchCount = 0;
 
-  readonly #clouds: THREE.InstancedMesh;
-  readonly #cloudMaterial: THREE.MeshBasicMaterial;
-  readonly #flareDiscs: THREE.InstancedMesh;
-  readonly #flareDiscMaterial: THREE.MeshBasicMaterial;
-  readonly #flareGlows: THREE.InstancedMesh;
-  readonly #flareGlowMaterial: THREE.MeshBasicMaterial;
+  /** SPEC-056: the clouds, then the flares' ground, on one additive disc. */
+  readonly #discs: THREE.InstancedMesh;
+  readonly #discMaterial: THREE.MeshBasicMaterial;
   readonly #flareColor = new THREE.Color(FLARE_DISC_COLOR);
+  readonly #cloudColor = new THREE.Color(CLOUD_COLOR);
+  #cloudsDrawn = 0;
+  #flaresDrawn = 0;
 
   readonly #light: THREE.PointLight;
   #lightFiredAt = -Infinity;
@@ -183,7 +184,8 @@ export class CombatFx {
       depthWrite: false,
       blending: THREE.AdditiveBlending,
     });
-    this.#mesh = new THREE.InstancedMesh(new THREE.PlaneGeometry(1, 1), this.#material, this.#capacity);
+    // SPEC-056 §4.5: two slots past the pool for the flares' glow.
+    this.#mesh = new THREE.InstancedMesh(new THREE.PlaneGeometry(1, 1), this.#material, this.#capacity + FLARE_CAPACITY);
     this.#mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
     this.#mesh.setColorAt(0, scratchColor.set('#ffffff'));
     this.#mesh.count = 0;
@@ -208,16 +210,9 @@ export class CombatFx {
     this.#scorches.renderOrder = 1;
     parent.add(this.#scorches);
 
-    // SPEC-056 §4.4: the spore clouds — one translucent disc, instanced for six.
-    this.#cloudMaterial = new THREE.MeshBasicMaterial({
-      color: CLOUD_COLOR,
-      transparent: true,
-      opacity: CLOUD_OPACITY,
-      depthWrite: false,
-    });
-    this.#clouds = groundDiscs(this.#cloudMaterial, CLOUD_CAPACITY, parent);
-    // SPEC-056 §4.5: the flares — the lit ground and the flare itself, two each.
-    this.#flareDiscMaterial = new THREE.MeshBasicMaterial({
+    // SPEC-056 §4.4, §4.5: the spore clouds and the flares' lit ground — one
+    // additive, unfogged disc, its colour per instance, room for six and two.
+    this.#discMaterial = new THREE.MeshBasicMaterial({
       color: '#ffffff',
       transparent: true,
       opacity: FLARE_DISC_OPACITY,
@@ -225,21 +220,16 @@ export class CombatFx {
       blending: THREE.AdditiveBlending,
       fog: false,
     });
-    this.#flareDiscs = groundDiscs(this.#flareDiscMaterial, FLARE_CAPACITY, parent);
-    this.#flareGlowMaterial = new THREE.MeshBasicMaterial({
-      map: particleSprite('dot'),
-      transparent: true,
-      depthWrite: false,
-      blending: THREE.AdditiveBlending,
-      fog: false,
-    });
-    this.#flareGlows = new THREE.InstancedMesh(new THREE.PlaneGeometry(1, 1), this.#flareGlowMaterial, FLARE_CAPACITY);
-    this.#flareGlows.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
-    this.#flareGlows.setColorAt(0, scratchColor.set('#ffffff'));
-    this.#flareGlows.count = 0;
-    this.#flareGlows.visible = false;
-    this.#flareGlows.frustumCulled = false;
-    parent.add(this.#flareGlows);
+    const disc = new THREE.CircleGeometry(1, 40);
+    disc.rotateX(-Math.PI / 2);
+    this.#discs = new THREE.InstancedMesh(disc, this.#discMaterial, CLOUD_CAPACITY + FLARE_CAPACITY);
+    this.#discs.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+    this.#discs.setColorAt(0, scratchColor.set('#ffffff'));
+    this.#discs.count = 0;
+    this.#discs.visible = false;
+    this.#discs.frustumCulled = false;
+    this.#discs.renderOrder = 1;
+    parent.add(this.#discs);
 
     // §4.4: created once, parented once, never added or removed at runtime —
     // so no shader recompile lands mid-combat (19-k discussion, Decisions #15).
@@ -247,21 +237,23 @@ export class CombatFx {
     parent.add(this.#light);
   }
 
-  /** SPEC-056 §4.4: the draws the clouds take this frame — 0 or 1. */
+  /** SPEC-056 §4.4: the draws the clouds take this frame — the disc's, 0 or 1. */
   get cloudDraws(): number {
-    return this.#clouds.visible ? 1 : 0;
+    return this.#cloudsDrawn > 0 ? 1 : 0;
   }
 
-  /** SPEC-056 §4.5: the draws the flares take this frame — 0 or 2, never a light. */
+  /** SPEC-056 §4.5: the draws the flares take this frame — the disc's and the sprites', 0 or 2; never a light. */
   get flareDraws(): number {
-    return (this.#flareDiscs.visible ? 1 : 0) + (this.#flareGlows.visible ? 1 : 0);
+    return this.#flaresDrawn > 0 ? 2 : 0;
   }
 
   /**
    * SPEC-056 §4.4, §4.5: the clouds and the flares still burning at `time` —
-   * the world clock their `until` is stamped on. A cloud is a veil of its
-   * radius; a flare lights 12 m of ground and glows at its centre, the ground
-   * flickering unless `still` (reduce motion). Allocates nothing.
+   * the world clock their `until` is stamped on. A cloud is a glow of its
+   * radius on the shared disc; a flare lights 12 m of the same disc in its
+   * own colour and glows at its centre from the sprite pool's two reserved
+   * slots, the light flickering unless `still` (reduce motion). Call it after
+   * `sync`, which rewrites the sprites. Allocates nothing.
    */
   syncTreasure(
     flares: readonly TimedGround[],
@@ -270,20 +262,24 @@ export class CombatFx {
     ground: (x: number, z: number) => number,
     still: boolean,
   ): void {
+    const discs = this.#discs;
     let n = 0;
-    for (let k = 0; k < clouds.length && n < CLOUD_CAPACITY; k++) {
+    let drawnClouds = 0;
+    for (let k = 0; k < clouds.length && drawnClouds < CLOUD_CAPACITY; k++) {
       const c = clouds[k] as TimedCloud;
       if (time >= c.until) continue;
       scratchPosition.set(c.x, ground(c.x, c.z) + GROUND_LIFT, c.z);
       scratchScale.set(c.radius, 1, c.radius);
       scratchMatrix.compose(scratchPosition, IDENTITY_QUAT, scratchScale);
-      this.#clouds.setMatrixAt(n, scratchMatrix);
+      discs.setMatrixAt(n, scratchMatrix);
+      discs.setColorAt(n, this.#cloudColor);
       n++;
+      drawnClouds++;
     }
-    finish(this.#clouds, n);
-
-    let f = 0;
-    for (let k = 0; k < flares.length && f < FLARE_CAPACITY; k++) {
+    const sprites = this.#mesh;
+    let glow = sprites.count;
+    let drawnFlares = 0;
+    for (let k = 0; k < flares.length && drawnFlares < FLARE_CAPACITY; k++) {
       const flare = flares[k] as TimedGround;
       if (time >= flare.until) continue;
       const floor = ground(flare.x, flare.z);
@@ -291,17 +287,31 @@ export class CombatFx {
       scratchPosition.set(flare.x, floor + GROUND_LIFT, flare.z);
       scratchScale.set(FLARE_DISC_RADIUS, 1, FLARE_DISC_RADIUS);
       scratchMatrix.compose(scratchPosition, IDENTITY_QUAT, scratchScale);
-      this.#flareDiscs.setMatrixAt(f, scratchMatrix);
-      this.#flareDiscs.setColorAt(f, scratchColor.copy(this.#flareColor).multiplyScalar(flicker));
+      discs.setMatrixAt(n, scratchMatrix);
+      discs.setColorAt(n, scratchColor.copy(this.#flareColor).multiplyScalar(flicker));
+      n++;
       scratchPosition.set(flare.x, floor + FLARE_GLOW_LIFT, flare.z);
       scratchScale.set(FLARE_GLOW_SIZE, FLARE_GLOW_SIZE, 1);
       scratchMatrix.compose(scratchPosition, this.#billboard, scratchScale);
-      this.#flareGlows.setMatrixAt(f, scratchMatrix);
-      this.#flareGlows.setColorAt(f, scratchColor.copy(this.#flareColor).multiplyScalar(FLARE_GLOW_GAIN * flicker));
-      f++;
+      sprites.setMatrixAt(glow, scratchMatrix);
+      sprites.setColorAt(glow, scratchColor.copy(this.#flareColor).multiplyScalar(FLARE_GLOW_GAIN * flicker));
+      glow++;
+      drawnFlares++;
     }
-    finish(this.#flareDiscs, f);
-    finish(this.#flareGlows, f);
+    this.#cloudsDrawn = drawnClouds;
+    this.#flaresDrawn = drawnFlares;
+    discs.count = n;
+    discs.visible = n > 0;
+    if (n > 0) {
+      discs.instanceMatrix.needsUpdate = true;
+      if (discs.instanceColor !== null) discs.instanceColor.needsUpdate = true;
+    }
+    if (glow > sprites.count) {
+      sprites.count = glow;
+      sprites.visible = true;
+      sprites.instanceMatrix.needsUpdate = true;
+      if (sprites.instanceColor !== null) sprites.instanceColor.needsUpdate = true;
+    }
   }
 
   /** §4.4: emit one burst at `(x, z)`. Never allocates, never throws (19-d). */
@@ -508,14 +518,10 @@ export class CombatFx {
     this.#scorches.geometry.dispose();
     this.#scorchMaterial.dispose();
     this.#scorches.dispose();
-    for (const mesh of [this.#clouds, this.#flareDiscs, this.#flareGlows]) {
-      mesh.parent?.remove(mesh);
-      mesh.geometry.dispose();
-      mesh.dispose();
-    }
-    this.#cloudMaterial.dispose();
-    this.#flareDiscMaterial.dispose();
-    this.#flareGlowMaterial.dispose(); // the sprite map is shared, session-lifetime
+    this.#discs.parent?.remove(this.#discs);
+    this.#discs.geometry.dispose();
+    this.#discMaterial.dispose();
+    this.#discs.dispose();
     this.#light.parent?.remove(this.#light);
     this.#light.dispose();
   }
@@ -523,27 +529,3 @@ export class CombatFx {
 
 const IDENTITY_QUAT = new THREE.Quaternion();
 
-/** SPEC-056: a flat unit disc on XZ, instanced `capacity` times under `parent`, hidden until synced. */
-function groundDiscs(material: THREE.MeshBasicMaterial, capacity: number, parent: THREE.Object3D): THREE.InstancedMesh {
-  const geometry = new THREE.CircleGeometry(1, 40);
-  geometry.rotateX(-Math.PI / 2);
-  const mesh = new THREE.InstancedMesh(geometry, material, capacity);
-  mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
-  mesh.setColorAt(0, scratchColor.set('#ffffff'));
-  mesh.count = 0;
-  mesh.visible = false;
-  mesh.frustumCulled = false;
-  mesh.renderOrder = 1;
-  parent.add(mesh);
-  return mesh;
-}
-
-/** The instance count drawn, and the upload flags when there is anything to draw. */
-function finish(mesh: THREE.InstancedMesh, count: number): void {
-  mesh.count = count;
-  mesh.visible = count > 0;
-  if (count > 0) {
-    mesh.instanceMatrix.needsUpdate = true;
-    if (mesh.instanceColor !== null) mesh.instanceColor.needsUpdate = true;
-  }
-}

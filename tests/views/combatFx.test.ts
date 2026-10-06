@@ -36,8 +36,8 @@ describe('the burst pool (AC-52 … AC-54)', () => {
   it('500 bursts then 1 000 syncs leave every typed-array length unchanged, count ≤ capacity', () => {
     const { parent, fx } = build(256);
     const meshes = instancedMeshes(parent);
-    // Sprites + scorches, and SPEC-056 §4.4, §4.5's clouds, flare discs and flare glows.
-    expect(meshes).toHaveLength(5);
+    // Sprites + scorches, and SPEC-056 §4.4, §4.5's disc for the clouds and the flares' ground.
+    expect(meshes).toHaveLength(3);
     fx.sync(0, ground);
     const arrays = meshes.map((mesh) => ({
       matrix: mesh.instanceMatrix.array as Float32Array,
@@ -182,50 +182,62 @@ describe('the spore clouds and the flares (SPEC-056 §4.4, §4.5)', () => {
       { x: 5, z: 5, until: 1, radius: 3 },
       { x: 9, z: 9, until: -Infinity, radius: 3 },
     ];
+    fx.sync(0.5, ground);
     fx.syncTreasure([], clouds, 0.5, ground, false);
     expect(fx.cloudDraws).toBe(1);
-    const mesh = instancedMeshes(parent)[2] as THREE.InstancedMesh;
-    expect(mesh.count).toBe(2);
-    expect(mesh.instanceMatrix.count).toBe(CLOUD_CAPACITY);
+    expect(fx.flareDraws).toBe(0);
+    const discs = instancedMeshes(parent)[2] as THREE.InstancedMesh;
+    expect(discs.count).toBe(2);
+    expect(discs.instanceMatrix.count).toBe(CLOUD_CAPACITY + FLARE_CAPACITY);
     const matrix = new THREE.Matrix4();
-    mesh.getMatrixAt(0, matrix);
+    discs.getMatrixAt(0, matrix);
     expect(matrix.elements[0]).toBeCloseTo(3, 6);
     fx.syncTreasure([], clouds, 2, ground, false);
-    expect(mesh.count).toBe(1);
+    expect(discs.count).toBe(1);
     fx.syncTreasure([], clouds, 3, ground, false);
     expect(fx.cloudDraws).toBe(0);
+    expect(discs.visible).toBe(false);
   });
 
-  it('two burning flares cost two draws together — a 12 m disc and a glow, instanced — and add no light', () => {
+  it('two burning flares cost two draws together — a 12 m additive, unfogged disc and a glow — and add no mesh and no light', () => {
     const { parent, fx } = build(32);
-    const before = lights(parent);
+    const before = { lights: lights(parent), meshes: instancedMeshes(parent).length };
     const flares = [
       { x: 0, z: 0, until: 60 },
       { x: 10, z: 0, until: 70 },
     ];
+    fx.sync(1, ground);
     fx.syncTreasure(flares, [], 1, ground, false);
     expect(fx.flareDraws).toBe(2);
-    const discs = instancedMeshes(parent)[3] as THREE.InstancedMesh;
-    const glows = instancedMeshes(parent)[4] as THREE.InstancedMesh;
-    expect([discs.count, glows.count]).toEqual([2, 2]);
-    expect([discs.instanceMatrix.count, glows.instanceMatrix.count]).toEqual([FLARE_CAPACITY, FLARE_CAPACITY]);
+    const [sprites, , discs] = instancedMeshes(parent) as THREE.InstancedMesh[];
+    // The glows ride the sprite pool's two reserved slots; the ground, the disc.
+    expect(sprites?.count).toBe(2);
+    expect(sprites?.instanceMatrix.count).toBe(32 + FLARE_CAPACITY);
+    expect(discs?.count).toBe(2);
     const matrix = new THREE.Matrix4();
-    discs.getMatrixAt(1, matrix);
+    discs?.getMatrixAt(1, matrix);
     expect(matrix.elements[0]).toBeCloseTo(FLARE_DISC_RADIUS, 6);
-    expect((discs.material as THREE.MeshBasicMaterial).fog).toBe(false);
-    expect((discs.material as THREE.MeshBasicMaterial).blending).toBe(THREE.AdditiveBlending);
-    expect(lights(parent)).toBe(before);
+    const material = discs?.material as THREE.MeshBasicMaterial;
+    expect([material.fog, material.blending, material.opacity]).toEqual([false, THREE.AdditiveBlending, 0.35]);
+    expect({ lights: lights(parent), meshes: instancedMeshes(parent).length }).toEqual(before);
+    // A burst shares the sprite draw: the glows go after it.
+    fx.burst('hit', 3, 3, 0xffffff);
+    fx.sync(65, ground);
     fx.syncTreasure(flares, [], 65, ground, false);
-    expect([discs.count, glows.count]).toEqual([1, 1]);
+    expect(sprites?.count).toBe(1); // the hit's sparks are long gone; one flare still burns
+    expect(discs?.count).toBe(1);
+    fx.sync(70, ground);
     fx.syncTreasure(flares, [], 70, ground, false);
     expect(fx.flareDraws).toBe(0);
+    expect(discs?.visible).toBe(false);
   });
 
   it('under reduce motion the flare\'s ground does not flicker', () => {
     const { parent, fx } = build(32);
-    const discs = instancedMeshes(parent)[3] as THREE.InstancedMesh;
+    const discs = instancedMeshes(parent)[2] as THREE.InstancedMesh;
     const colour = new THREE.Color();
     const read = (time: number, still: boolean): number => {
+      fx.sync(time, ground);
       fx.syncTreasure([{ x: 0, z: 0, until: 60 }], [], time, ground, still);
       discs.getColorAt(0, colour);
       return colour.r;
