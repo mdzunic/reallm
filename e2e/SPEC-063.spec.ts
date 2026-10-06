@@ -17,9 +17,10 @@
 // then, whether the chapter card was still up, and when it began to fade and
 // was removed. A round trip from here can take longer than the card lives on
 // a loaded GPU-less host, so nothing about its timing is read from outside.
-// Once the first group has made contact the sky is cleared, so the idle ship
-// is not shot down — a recall clears the dialogue queue — before the lines
-// have played; the contact has fired by then, and the trip runs on.
+// Once the first group has made contact the page keeps the sky clear, so the
+// idle ship is neither shot down nor holed by a rock — a recall clears the
+// dialogue queue — before the lines have played; the contact has fired by
+// then, and the trip runs on underneath.
 import { expect, test, type Page } from '@playwright/test';
 import { start } from './start';
 
@@ -107,13 +108,15 @@ interface Setup {
 
 /**
  * A fresh slot-0 save with `flags`, the oil for any jump, mouse steer off (so
- * the steer keys drive the ship whatever the pointer did) and the dialogue
- * recorder armed — then the star map, entered straight from the save.
+ * the steer keys drive the ship whatever the pointer did), typed text off (a
+ * line lands whole — on a loaded host the typing interval starves, and which
+ * lines play is what is under test) and the recorder armed — then the star
+ * map, entered straight from the save.
  */
 async function newSaveAtStarmap(page: Page, setup: Setup): Promise<void> {
   await page.route(MP4S, (route) => route.abort());
   await page.addInitScript((reduceMotion) => {
-    const settings: Record<string, unknown> = { version: 1, flightMouseSteer: false };
+    const settings: Record<string, unknown> = { version: 1, flightMouseSteer: false, typewriter: false };
     if (reduceMotion) settings['reduceMotion'] = true;
     localStorage.setItem('reallm:settings', JSON.stringify(settings));
     const seen: string[] = [];
@@ -212,9 +215,17 @@ async function firstCard(page: Page): Promise<CardRecord> {
   return card;
 }
 
-/** Clears the sky through the flight hook (see the header). */
-const clearSky = (page: Page): Promise<void> =>
-  page.evaluate(() => (window as unknown as { __reallmFlight: FlightHook }).__reallmFlight.clearSky());
+/**
+ * Clears the sky through the flight hook now and every 200 ms after (see the
+ * header). A rock spawns 220 m out and an interceptor 160 m out, each seconds
+ * from the ship, so nothing reaches it.
+ */
+const keepSkyClear = (page: Page): Promise<void> =>
+  page.evaluate(() => {
+    const clear = (): void => (window as unknown as { __reallmFlight?: FlightHook }).__reallmFlight?.clearSky();
+    clear();
+    setInterval(clear, 200);
+  });
 
 /** CONTACT of `systems/StoryBeats.ts`, in ms — the card's hold and its fade. */
 const SHOW_MS = 3500;
@@ -275,7 +286,7 @@ test('1 & 2 — the first departure to Vetra plays Outbound then Wreckers, and t
   const warped = await warpToFirstGroup(page);
   expect(warped.hostiles).toBeGreaterThan(0);
   expect(warped).toMatchObject({ chapterUp: true, contactUp: false });
-  await clearSky(page);
+  await keepSkyClear(page);
 
   // §4.5, no hold: the trip advances and the steer key moves the ship under the card.
   const held = await heldUnderCard(page);
@@ -299,14 +310,16 @@ test('1 & 2 — the first departure to Vetra plays Outbound then Wreckers, and t
   await expect.poll(() => lineShown(page, ARIA_SCAV_LINE), { timeout: 30_000 }).toBe(true);
   expect(await contacts(page)).toEqual(['scav_fighter']);
 
-  // The card holds CONTACT.show, then fades out over CONTACT.fade and is removed.
+  // The card holds CONTACT.show, then fades out over CONTACT.fade and is
+  // removed — each timed from the mount, since the two timers slip apart.
   await expect(page.locator(CONTACT_CARD)).toHaveCount(0, { timeout: 10_000 });
   const [life] = await cards(page);
   if (life?.fadeAt == null || life.goneAt === null) throw new Error('the card did not fade and go');
   expect(life.fadeAt - life.at).toBeGreaterThanOrEqual(SHOW_MS - 20);
   expect(life.fadeAt - life.at).toBeLessThanOrEqual(SHOW_MS + LATE_MS);
-  expect(life.goneAt - life.fadeAt).toBeGreaterThanOrEqual(FADE_MS - 20);
-  expect(life.goneAt - life.fadeAt).toBeLessThanOrEqual(FADE_MS + LATE_MS);
+  expect(life.goneAt - life.at).toBeGreaterThanOrEqual(SHOW_MS + FADE_MS - 20);
+  expect(life.goneAt - life.at).toBeLessThanOrEqual(SHOW_MS + FADE_MS + LATE_MS);
+  expect(life.goneAt).toBeGreaterThan(life.fadeAt);
   // One card on this trip, and the session key holds it (63-c).
   expect(await cards(page)).toHaveLength(1);
 });
@@ -320,7 +333,7 @@ test('3 — a later trip to Vetra plays neither film, and its fighters make no c
   await expect(page.locator(FILM)).toHaveCount(0);
   const warped = await warpToFirstGroup(page);
   expect(warped.hostiles).toBeGreaterThan(0);
-  await clearSky(page);
+  await keepSkyClear(page);
   // Past a card's whole life: nothing was scheduled, the chapter card included.
   await page.waitForTimeout(SHOW_MS + FADE_MS);
   expect(await cards(page)).toEqual([]);
@@ -344,26 +357,26 @@ test('4 — the first flight to the Hive: Outbound alone, then the interceptors�
 
   const warped = await warpToFirstGroup(page);
   expect(warped.hostiles).toBeGreaterThan(0);
-  await clearSky(page);
+  await keepSkyClear(page);
   const card = await firstCard(page);
   expect(card).toMatchObject({ enemy: 'hive_interceptor', texts: ['CONTACT', 'HIVE INTERCEPTOR', HIVE_EPITHET], chapterUp: false });
   await expect.poll(() => lineShown(page, ARIA_HIVE_LINE), { timeout: 20_000 }).toBe(true);
   expect(await contacts(page)).toEqual(['hive_interceptor']);
 
-  // The trip's second group — 45 s of 200 — makes no contact of its own (63-c).
-  // Half a second at a time with the sky cleared after each, so nothing reaches the ship.
+  // The trip's second group — 45 s of 200, a fraction of 0.225 — makes no
+  // contact of its own (63-c). Past 0.25 it has spawned (SPEC-013 §4.4, and
+  // tests/systems/flight.test.ts); half a second at a time, the sky cleared
+  // after each, so nothing reaches the ship.
   const second = await page.evaluate(() => {
     const hook = (window as unknown as { __reallmFlight: FlightHook }).__reallmFlight;
-    let spawned = false;
-    for (let i = 0; i < 200 && !spawned && hook.phase() !== 'recalled'; i++) {
+    for (let i = 0; i < 400 && hook.state().progress < 0.25 && hook.phase() === 'cruise'; i++) {
       hook.warp(0.5);
-      spawned = hook.state().hostiles > 0 && hook.state().progress > 0.2;
       hook.clearSky();
     }
-    return { spawned, phase: hook.phase() };
+    return { progress: hook.state().progress, phase: hook.phase() };
   });
-  expect(second.spawned).toBe(true);
-  expect(second.phase).not.toBe('recalled');
+  expect(second.progress).toBeGreaterThanOrEqual(0.25);
+  expect(second.phase).toBe('cruise');
   await page.waitForTimeout(SHOW_MS + FADE_MS);
   expect(await cards(page)).toHaveLength(1);
   expect(await contacts(page)).toEqual(['hive_interceptor']);
@@ -381,7 +394,7 @@ test('5 — films off: no film and no card, but the fighters’ contact still fi
   await expect(page.locator(FILM)).toHaveCount(0);
   const warped = await warpToFirstGroup(page);
   expect(warped.hostiles).toBeGreaterThan(0);
-  await clearSky(page);
+  await keepSkyClear(page);
   expect(await contacts(page)).toEqual(['scav_fighter']);
   await expect.poll(() => lineShown(page, ARIA_SCAV_LINE), { timeout: 30_000 }).toBe(true);
   expect(await cards(page)).toEqual([]);
@@ -400,7 +413,7 @@ test.describe('6 — reduce motion', () => {
     await settled(page, 'flight');
 
     await warpToFirstGroup(page);
-    await clearSky(page);
+    await keepSkyClear(page);
     const card = await firstCard(page);
     expect(card).toMatchObject({ enemy: 'scav_fighter', isStatic: true, transition: '0s' });
     await expect(page.locator(CONTACT_CARD)).toHaveCount(0, { timeout: 10_000 });
