@@ -369,6 +369,23 @@ test.describe('SPEC-055 puzzles', () => {
     expect((await info(page))['puzzle']).toBe('-');
   });
 
+  // §4.10: a world puzzle's pieces stay inside SPEC-054's budget below on medium
+  // — the plates and their glyphs on Cinder-4, the mirrors, lens, receiver and
+  // a lit beam on Vetra and in Eden's machine room — with the vault terminal
+  // standing by its door.
+  for (const planet of ['cinder4', 'vetra', 'eden'] as const) {
+    test(`§4.10: ${planet} below on medium, its world puzzle drawn, stays in SPEC-054's budget`, async ({ page }) => {
+      await start(page, `/?scene=surface&planet=${planet}&debug&quality=medium`);
+      await dismiss(page);
+      await descend(page);
+      await frames(page, 30);
+      const stats = await page.evaluate(() => window.__reallm.stats());
+      expect(stats.drawCalls).toBeLessThanOrEqual(96);
+      expect(stats.triangles).toBeLessThanOrEqual(130_000);
+      expect(String((await info(page))['puzzleHint'])).toMatch(planet === 'cinder4' ? /^plate:\d$/ : /^mirror:\d$/);
+    });
+  }
+
   test('10: the keys — the arrows move the roving focus, Enter turns the focused cell', async ({ page }) => {
     await start(page, '/?debug');
     await land(page, 'cinder4');
