@@ -41,11 +41,11 @@ type Assert<T extends true> = T;
 type Equal<A, B> = (<T>() => T extends A ? 1 : 2) extends <T>() => T extends B ? 1 : 2 ? true : false;
 
 /**
- * The 61 sound ids — the 29 of §2.2, the story films' 15 (SPEC-021 §6.3), the
+ * The 62 sound ids — the 29 of §2.2, the story films' 15 (SPEC-021 §6.3), the
  * seven weapon, impact and blast sprites of SPEC-035 §4.11, the dash and
  * three windup cues of SPEC-038 §4.10, SPEC-041 §4.10's boss windup, boss
- * slam and flight hit tick, SPEC-050 §4.8's exhale, and SPEC-054 §4.13's
- * flashlight click and cache opening —
+ * slam and flight hit tick, SPEC-050 §4.8's exhale, SPEC-054 §4.13's
+ * flashlight click and cache opening, and SPEC-055 §4.9's puzzle solve —
  * pinned as an explicit literal (SPEC-001: pinned constants in tests are
  * literals). `SoundId` is derived from the sprite keys, so this is what makes
  * AC-5 a compile error rather than a surprise: recutting a bank without
@@ -120,6 +120,8 @@ const SOUND_IDS = [
   // SPEC-054 §4.13: the flashlight's click, and a loose cache opening.
   'light_click',
   'cache_open',
+  // SPEC-055 §4.9: a puzzle site solved.
+  'puzzle_solved',
 ] as const;
 
 /** Exported so `noUnusedLocals` keeps it; it exists purely to be compiled. */
@@ -216,6 +218,10 @@ const EVENT_KEYS = [
   'level:changed',
   'light:toggled',
   'cache:opened',
+  // SPEC-055 §4.4, §4.6, §4.8: a move on a puzzle board and a site solved
+  // (both reacted).
+  'puzzle:moved',
+  'puzzle:solved',
   'ui:toast',
   'ui:orientation',
   // SPEC-015 §10: the service-worker update signal (D-10) and the iOS install
@@ -270,14 +276,14 @@ describe('the audio manifest (SPEC-006 §2)', () => {
     expect(Object.keys(ASSETS.audio).sort()).toEqual([...SFX_BANKS, ...MUSIC_BANKS].sort());
   });
 
-  it('the sprite keys across the banks are the 61 sound ids (AC-5; SPEC-035 §4.11 adds seven, SPEC-038 §4.10 four, SPEC-041 §4.10 three, SPEC-050 §4.8 one, SPEC-054 §4.13 two)', () => {
+  it('the sprite keys across the banks are the 62 sound ids (AC-5; SPEC-035 §4.11 adds seven, SPEC-038 §4.10 four, SPEC-041 §4.10 three, SPEC-050 §4.8 one, SPEC-054 §4.13 two, SPEC-055 §4.9 one)', () => {
     const sprites = Object.values(ASSETS.audio).flatMap((entry) =>
       Object.keys((entry as { sprite?: object }).sprite ?? {}),
     );
     expect(sprites.slice().sort()).toEqual([...SOUND_IDS].sort());
-    expect(sprites).toHaveLength(61);
+    expect(sprites).toHaveLength(62);
     // No id appears in two banks: `SoundId` → bank has to be a function.
-    expect(new Set(sprites).size).toBe(61);
+    expect(new Set(sprites).size).toBe(62);
   });
 
   it('the SPEC-038 cues sit in the surface bank inside §4.10’s lengths', () => {
@@ -304,6 +310,12 @@ describe('the audio manifest (SPEC-006 §2)', () => {
   it('the SPEC-054 sprites sit in the surface bank inside §4.13’s lengths', () => {
     expect(ASSETS.audio.surface.sprite.light_click[1]).toBeLessThanOrEqual(80);
     expect(ASSETS.audio.surface.sprite.cache_open[1]).toBeLessThanOrEqual(600);
+  });
+
+  it('the SPEC-055 solve sits in the surface bank, at most 900 ms long (§4.9)', () => {
+    const span = ASSETS.audio.surface.sprite.puzzle_solved;
+    expect(span).toBeDefined();
+    expect(span[1]).toBeLessThanOrEqual(900);
   });
 
   it('every sprite is a forward [offset, duration] span that does not overlap its neighbour', () => {
@@ -513,8 +525,8 @@ describe('the ramp curve (SPEC-006 §4.3, §4.5)', () => {
 // ------------------------------------------------------------ reactions table
 
 describe('the reactions table is exhaustive over GameEvents (SPEC-006 §5)', () => {
-  it('covers the 29 reacted events of §5.2 (AC-38; SPEC-029 §4.12 adds four, SPEC-035 §4.11 two, SPEC-038 §4.10 two, SPEC-041 §4.10 two, SPEC-042 §4.2 one, SPEC-050 §4.8 one, SPEC-054 §4.13 two)', () => {
-    expect(REACTED_EVENTS).toHaveLength(29);
+  it('covers the 31 reacted events of §5.2 (AC-38; SPEC-029 §4.12 adds four, SPEC-035 §4.11 two, SPEC-038 §4.10 two, SPEC-041 §4.10 two, SPEC-042 §4.2 one, SPEC-050 §4.8 one, SPEC-054 §4.13 two, SPEC-055 §4.9 two)', () => {
+    expect(REACTED_EVENTS).toHaveLength(31);
     expect(REACTED_EVENTS.slice().sort()).toEqual(
       [
         'combat:blast',
@@ -546,6 +558,8 @@ describe('the reactions table is exhaustive over GameEvents (SPEC-006 §5)', () 
         'flight:arrived',
         'light:toggled',
         'cache:opened',
+        'puzzle:moved',
+        'puzzle:solved',
       ].sort(),
     );
   });
@@ -555,15 +569,16 @@ describe('the reactions table is exhaustive over GameEvents (SPEC-006 §5)', () 
     // SPEC-042 §4.2 `item:blocked`, whose warn toast is its sound; SPEC-043
     // §4.7 `mission:bonus`; SPEC-048 §4.9 `story:clue` — a clue is quiet by
     // design, and the reacted and sprite counts do not move; SPEC-054 §4.13
-    // `level:changed` — a level swap has no sound of its own.
+    // `level:changed` — a level swap has no sound of its own. SPEC-055 §4.9's
+    // two puzzle events are both reacted, so this count does not move.
     expect(AUDIO_SILENT.size).toBe(47);
     expect(AUDIO_SILENT.has('mission:bonus')).toBe(true);
     expect(AUDIO_SILENT.has('story:clue')).toBe(true);
     expect(AUDIO_SILENT.has('level:changed')).toBe(true);
   });
 
-  it('gives every one of the 76 event keys exactly one home (AC-40)', () => {
-    expect(EVENT_KEYS).toHaveLength(76);
+  it('gives every one of the 78 event keys exactly one home (AC-40; SPEC-055 §4.9 adds two)', () => {
+    expect(EVENT_KEYS).toHaveLength(78);
     const reacted = new Set<string>(REACTED_EVENTS);
     for (const key of EVENT_KEYS) {
       const hasSound = reacted.has(key);
@@ -845,6 +860,23 @@ describe('reaction outcomes (SPEC-006 §5.2)', () => {
       id: 'cache_open',
       opts: { x: 5, z: -2, priority: 1 },
     });
+  });
+
+  it('puzzle:moved blips when ok and warns otherwise, 50 ms apart at most (SPEC-055 §4.9)', () => {
+    const react = AUDIO_REACTIONS['puzzle:moved'];
+    expect(react({ site: 'cinder4_vault', ok: true })).toEqual({ id: 'ui_blip', opts: { minIntervalMs: 50 } });
+    // A wrong plate, a wrong pick or a move that changes nothing.
+    expect(react({ site: 'vetra_world', ok: false })).toEqual({ id: 'ui_warn', opts: { minIntervalMs: 50 } });
+    expect(AUDIO_SILENT.has('puzzle:moved')).toBe(false);
+  });
+
+  it('puzzle:solved plays its own sting at priority 2, bypassed or not (SPEC-055 §4.9)', () => {
+    const react = AUDIO_REACTIONS['puzzle:solved'];
+    const sting = { id: 'puzzle_solved', opts: { priority: 2 } };
+    expect(react({ site: 'cinder4_relic', hints: 0, bypassed: false })).toEqual(sting);
+    expect(react({ site: 'ferrum_vault', hints: 3, bypassed: true })).toEqual(sting);
+    expect(react({ site: 'eden_vault', hints: 0, bypassed: false })).toEqual(sting);
+    expect(AUDIO_SILENT.has('puzzle:solved')).toBe(false);
   });
 
   it('every sound a reaction can name exists in a bank', () => {

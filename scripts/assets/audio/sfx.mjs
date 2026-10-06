@@ -715,6 +715,43 @@ const SOUNDS = {
     },
   },
 
+  // SPEC-055 §4.9: a puzzle site solved — the lock giving way. Plain sines where
+  // `level_up` rings FM bells, and it ends on a latch, as a cache opening does.
+  puzzle_solved: {
+    // Three sine tones rising through an A-major arpeggio, 110 ms apart, each
+    // with a little second harmonic and the last ringing longest; then, as it
+    // fades, a soft latch: two dull noise ticks over a low thump.
+    peak: -5,
+    render: (n) => {
+      const nz = noise(903);
+      const lp = svf();
+      const notes = [
+        [0, 880, 0.09, 0.8],
+        [0.11, 1108.73, 0.1, 0.9],
+        [0.22, 1318.51, 0.18, 1],
+      ];
+      const ticks = [
+        [0.5, 1500, 1],
+        [0.535, 1050, 0.6],
+      ];
+      const bps = ticks.map(() => svf('bp'));
+      return fill(n, (t) => {
+        let tones = 0;
+        for (const [at, f, tau, level] of notes) {
+          const u = t - at;
+          if (u >= 0) tones += level * (Math.sin(TAU * f * u) + 0.2 * Math.sin(TAU * 2 * f * u)) * decay(u, tau) * attack(u, 0.004);
+        }
+        let latch = 0;
+        for (let k = 0; k < ticks.length; k++) {
+          const [at, f, level] = ticks[k];
+          const u = t - at;
+          if (u >= 0) latch += level * (bps[k](nz(), f, 2.5) + Math.sin(TAU * 170 * u) * 0.5) * decay(u, 0.012) * attack(u, 0.0006);
+        }
+        return 0.6 * tones + 0.45 * lp(latch, 3200);
+      });
+    },
+  },
+
   // -------------------------------------------------------------- flight
   ship_hit_shield: {
     peak: -4,
