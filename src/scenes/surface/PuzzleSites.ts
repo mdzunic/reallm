@@ -213,6 +213,8 @@ export class PuzzleSites {
   /** The room seconds from which ARIA may ask again — `Not yet` pushes it 60 s on. */
   #askAt = 0;
   #asking = false;
+  /** The open `ARIA: force the lock?` sheet — the UI root outlives the scene, so dispose answers it. */
+  #forceSheet: HTMLElement | null = null;
   #mirrorPulse = -1;
   /** §4.6, §4.10: the beam's last trace — run on a mirror move or a light toggle only. */
   #beamHits = false;
@@ -671,7 +673,12 @@ export class PuzzleSites {
   #askForce(state: SiteState): void {
     this.#asking = true;
     this.#host.holdUi(true);
-    void choiceSheet(this.#host.ui, { title: FORCE_TITLE, confirmText: FORCE_YES, cancelText: FORCE_NO }).then((answer) => {
+    const answered = choiceSheet(this.#host.ui, { title: FORCE_TITLE, confirmText: FORCE_YES, cancelText: FORCE_NO });
+    // The sheet mounts as it is asked; the newest one is this one.
+    const sheets = this.#host.ui.root.querySelectorAll<HTMLElement>('[data-testid="confirm-sheet"]');
+    this.#forceSheet = sheets[sheets.length - 1] ?? null;
+    void answered.then((answer) => {
+      this.#forceSheet = null;
       this.#asking = false;
       this.#host.holdUi(false);
       if (answer === 'primary' && !state.solved && !this.#claimed(state.def)) {
@@ -1050,6 +1057,9 @@ export class PuzzleSites {
     const open = this.#open;
     this.#open = null;
     open?.panel.close();
+    // An unanswered offer leaves with the scene, as `Not yet`.
+    this.#forceSheet?.querySelector<HTMLElement>('[data-testid="confirm-no"]')?.click();
+    this.#forceSheet = null;
     this.#surfaceView?.dispose();
     this.#caveView?.dispose();
     this.#surfaceView = null;
