@@ -391,6 +391,29 @@ describe('RngRoot (§3, §4.2)', () => {
     expect(root.visit('cinder4', 3).next()).not.toBe(root.visit('cinder4', 4).next());
   });
 
+  it('visit(p, n, 1) is visit(p, n), and a later instance’s visits are streams of their own (SPEC-058 §4.4)', () => {
+    const root = new RngRoot(9001);
+    for (const planet of ['cinder4', 'vetra', 'eden'] as const) {
+      for (const n of [0, 1, 3, 12]) {
+        expect(root.visit(planet, n, 1).seed).toBe(root.visit(planet, n).seed);
+        expect(root.visit(planet, n, 2).seed).not.toBe(root.visit(planet, n).seed);
+        expect(root.visit(planet, n, 2).seed).toBe(hash32(9001, planet, 'visit', n, 2));
+      }
+    }
+    // Iteration 1 is the pin it always was; 2 and 3 differ from each other too.
+    expect(root.visit('cinder4', 3, 1).seed).toBe(hash32(9001, 'cinder4', 'visit', 3));
+    expect(root.visit('cinder4', 3, 2).next()).not.toBe(root.visit('cinder4', 3, 3).next());
+  });
+
+  it('the layout stream never takes the iteration: the same world for every instance (SPEC-058 §4.4)', () => {
+    const root = new RngRoot(9001);
+    const before = [...Array(5)].map(() => root.layout('thessaly').next());
+    const visit = root.visit('thessaly', 4, 2).fork('spawn');
+    for (let i = 0; i < 1000; i++) visit.next();
+    expect([...Array(5)].map(() => root.layout('thessaly').next())).toEqual(before);
+    expect(root.layoutSeed('thessaly')).toBe(hash32(9001, 'thessaly', 'layout'));
+  });
+
   it('the layout stream is untouched by a visit stream, however hard it is used', () => {
     const root = new RngRoot(2);
     const expected = [...Array(10)].map(() => root.layout('hive').next());

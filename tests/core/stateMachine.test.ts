@@ -287,7 +287,8 @@ describe('the scene graph (§4.2)', () => {
     expect(isAllowedTransition(null, 'menu')).toBe(true);
     expect(isAllowedTransition(null, 'station')).toBe(false);
     // SPEC-014 AC-29: the station's Quit tab added its route to the menu.
-    expect(ALLOWED_TRANSITIONS.station).toEqual(['starmap', 'menu']);
+    // SPEC-058 §4.1: `Next instance` goes from the station straight to creation.
+    expect(ALLOWED_TRANSITIONS.station).toEqual(['starmap', 'menu', 'creation']);
     expect(BOOT_SCENE).toBe('menu');
   });
 

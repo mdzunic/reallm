@@ -1,10 +1,10 @@
 // The interactables of a level (SPEC-054 §3, §4.1): the pad terminal, the
-// descent and the exit shaft, the caches and the vault, and SPEC-055's relic
-// terminals, mirrors and panels — each a circle the player stands in to act.
-// Pure, so the scene's prompt (`#interactHint`) and its `interact` press read
-// the same answer.
+// descent and the exit shaft, the caches and the vault, SPEC-055's relic
+// terminals, mirrors and panels, and SPEC-058's predecessor's body — each a
+// circle the player stands in to act. Pure, so the scene's prompt
+// (`#interactHint`) and its `interact` press read the same answer.
 
-export type InteractKind = 'pad' | 'descent' | 'exit' | 'cache' | 'vault' | 'relic' | 'mirror' | 'panel';
+export type InteractKind = 'pad' | 'descent' | 'exit' | 'cache' | 'vault' | 'relic' | 'mirror' | 'panel' | 'body';
 
 export interface Interactable {
   kind: InteractKind;
@@ -24,6 +24,7 @@ const KIND_ORDER: Readonly<Record<InteractKind, number>> = {
   relic: 5,
   mirror: 6,
   panel: 7,
+  body: 8,
 };
 
 /**

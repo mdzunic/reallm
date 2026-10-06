@@ -18,7 +18,7 @@
 import { EventBus, type GameEvents } from '@/core/Events';
 import { QUALITY } from '@/core/Quality';
 import { RngRoot } from '@/core/Rng';
-import { newSave, type CharacterCreation, type Save } from '@/core/Save';
+import { newSave, nextCreation, nextInstance, type CharacterCreation, type Save } from '@/core/Save';
 import {
   ENEMIES,
   MISSIONS,
@@ -56,6 +56,15 @@ export interface RunOptions {
   extraPurchases?: Partial<Record<1 | 2 | 3 | 4 | 5 | 6, readonly LoadoutEntry[]>>;
   /** The newSave seed, and so the flight streams (default 1234). */
   seed?: number;
+  /**
+   * SPEC-058 §4.9: the instance the run plays (default 1). Above 1 the
+   * harness first plays the instance before it — these options at
+   * `iteration − 1` — and begins this one from that finished save the way
+   * `SaveStore.beginNextIteration` does (`nextInstance` on its
+   * `nextCreation`): the old seed, the lineage, the containment of a real
+   * next instance, and nothing economic carried.
+   */
+  iteration?: number;
 }
 
 export interface Jump {
@@ -184,8 +193,18 @@ interface Run {
   readonly ctx: MissionContext;
 }
 
+/** The save a run starts from: a fresh one, or the next instance of the run before it (SPEC-058 §4.9). */
+function startingSave(options: RunOptions): Save {
+  const iteration = options.iteration ?? 1;
+  if (iteration <= 1) return newSave(0, WORST_CASE_CREATION, options.seed ?? DEFAULT_SEED, CREATED_AT);
+  const predecessor = runCampaign({ ...options, iteration: iteration - 1 }).save;
+  // The ending's overlay is the scene's; the harness has no screen to watch it on.
+  predecessor.progress.endingSeen = true;
+  return nextInstance(predecessor, nextCreation(predecessor), CREATED_AT);
+}
+
 export function runCampaign(options: RunOptions): RunReport {
-  const save = newSave(0, WORST_CASE_CREATION, options.seed ?? DEFAULT_SEED, CREATED_AT);
+  const save = startingSave(options);
   const bus = new EventBus<GameEvents>();
   const progression = new Progression(save, bus);
   const economy = new Economy(save, bus, progression);
@@ -359,13 +378,15 @@ function fly(run: Run, planet: PlanetId, cost: number): boolean {
       companions: save.companions,
       quality: QUALITY.medium,
       difficulty: save.meta.difficulty,
+      // SPEC-058 §4.4: a later instance's containment, as the flight scene passes it.
+      iteration: save.meta.iteration,
       companionMult: computePlayerStats(save).companionMult,
     },
     economy,
     run.progression,
     missions,
     bus,
-    new RngRoot(save.meta.seed).visit(planet, visits).fork('flight'),
+    new RngRoot(save.meta.seed).visit(planet, visits, save.meta.iteration).fork('flight'),
   );
 
   // One throttle edge per notch away from 1.

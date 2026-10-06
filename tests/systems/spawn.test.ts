@@ -1083,3 +1083,48 @@ describe('a cave’s packs: spawnPackAt (SPEC-054 §4.7)', () => {
     expect(h.director.alive).toBe(0);
   });
 });
+
+// ------------------------------------------------------------- SPEC-058 §4.4
+
+describe('SpawnDirector — eliteBonus (SPEC-058 §4.4)', () => {
+  it('defaults to 0, so the planet’s chance reads as before', () => {
+    const h = harness('cinder4', 'high');
+    expect(h.director.eliteBonus).toBe(0);
+    expect(h.director.eliteChance).toBe(PLANETS.cinder4.surface.eliteChance);
+  });
+
+  it('at 0.02 the Cinder-4 elite rate is 7 % ± 1.5 % over ≥ 2,000 rolls, pack leaders included', () => {
+    const h = harness('cinder4', 'high', 8);
+    h.director.eliteBonus = 0.02;
+    expect(h.director.eliteChance).toBeCloseTo(0.07, 12);
+    churn(h, 1100);
+    const rolls = rollsOf(h.spawned);
+    expect(rolls.length).toBeGreaterThanOrEqual(2000);
+    const rate = rolls.filter((roll) => roll[0]?.elite === true).length / rolls.length;
+    expect(rate, `${rate}`).toBeGreaterThanOrEqual(0.055);
+    expect(rate, `${rate}`).toBeLessThanOrEqual(0.085);
+    // The bonus rides the leader's one roll; the members never roll.
+    for (const roll of rolls) for (const member of roll.slice(1)) expect(member.elite).toBe(false);
+  });
+
+  it('adds before eliteMult — (chance + bonus) × mult — and the cap holds at 0.5', () => {
+    const h = harness('hive', 'high');
+    h.director.eliteBonus = 0.06;
+    h.director.eliteMult = 2;
+    expect(h.director.eliteChance).toBeCloseTo((PLANETS.hive.surface.eliteChance + 0.06) * 2, 12);
+    h.director.eliteMult = 2 * 4;
+    expect(h.director.eliteChance).toBe(ELITE_CHANCE_CAP);
+    expect(ELITE_CHANCE_CAP).toBe(0.5);
+  });
+
+  it('wave groups keep their own flags whatever the bonus', () => {
+    const plain = harness('eden', 'high');
+    plain.director.startWave('eden_final', { x: 0, z: 0 });
+    plain.run(1, PLAYER, NOWHERE, false);
+    const bonus = harness('eden', 'high');
+    bonus.director.eliteBonus = 0.06;
+    bonus.director.startWave('eden_final', { x: 0, z: 0 });
+    bonus.run(1, PLAYER, NOWHERE, false);
+    expect(bonus.spawned.map((s) => [s.id, s.elite])).toEqual(plain.spawned.map((s) => [s.id, s.elite]));
+  });
+});

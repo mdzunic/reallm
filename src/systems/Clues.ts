@@ -75,7 +75,15 @@ export const RATING_FLOOR = 0.5;
  * 1.00, 0.94, 0.91, 0.85 and 0.82.
  */
 export function commandRating(flags: ReadonlySet<string>): number {
-  return Math.max(RATING_FLOOR, Math.round(100 * (1 - RATING_STEP * offTaskCount(flags))) / 100);
+  return ratingFor(offTaskCount(flags));
+}
+
+/**
+ * The same rating for a bare off-task count — so SPEC-058 §4.7's test can
+ * check `ending_stay`'s grade bands for counts no clue table reaches.
+ */
+export function ratingFor(offTask: number): number {
+  return Math.max(RATING_FLOOR, Math.round(100 * (1 - RATING_STEP * offTask)) / 100);
 }
 
 export type RatingGrade = 'a good run' | 'an acceptable run' | 'a noisy run';

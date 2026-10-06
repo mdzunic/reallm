@@ -205,6 +205,52 @@ describe('Worst case', () => {
   });
 });
 
+describe('Worst case, iteration 2 (SPEC-058 §4.9)', () => {
+  let run: RunReport;
+  let first: RunReport;
+
+  beforeAll(() => {
+    run = runCampaign({ ...WORST_CASE, iteration: 2 });
+    first = runCampaign(WORST_CASE);
+  });
+
+  it('is a real next instance: the first run’s seed, iteration 2, and that run first in its lineage', () => {
+    expect(run.save.meta.iteration).toBe(2);
+    expect(run.save.meta.seed).toBe(first.save.meta.seed);
+    expect(run.save.meta.lineage).toHaveLength(1);
+    expect(run.save.meta.lineage[0]).toMatchObject({ iteration: 1, name: 'Vance', ending: 'stay', level: 13 });
+  });
+
+  it('finishes, with nothing refusing along the way, and files its verdict', () => {
+    expect(run.problems).toEqual([]);
+    expect(run.missionsDone).toEqual(MAIN_MISSIONS);
+    expect(run.save.progress.flags).toContain('campaign_done');
+    expect(run.serviceModeSeen).toBe(false);
+  });
+
+  it('lands on the iteration-1 literals: 5,480 XP and level 13; 970 earned, 609 spent, 361 left', () => {
+    expect(run.save.player.xp).toBe(5480);
+    expect(run.save.player.level).toBe(13);
+    expect(run.tokensEarned).toBe(970);
+    expect(run.tokensSpent).toBe(609);
+    expect(run.save.player.tokens).toBe(361);
+  });
+
+  it('buys the same thirteen purchases, at the same prices, in the same order', () => {
+    expect(run.purchases).toHaveLength(13);
+    expect(run.purchases).toEqual(first.purchases);
+    expect(tokensOf(run.purchases)).toBe(609);
+  });
+
+  it('pays the same jumps and vouchers, and never needs the subsidy', () => {
+    expect(run.jumps.map((jump) => jump.planet)).toEqual(['cinder4', 'vetra', 'thessaly', 'ferrum', 'hive', 'eden']);
+    expect(run.jumps.map((jump) => jump.cost)).toEqual([40, 60, 80, 100, 108, 108]);
+    expect(run.vouchers).toBe(5);
+    expect(run.subsidyOil).toBe(0);
+    expectEveryRunRules(run);
+  });
+});
+
 describe('The escape run', () => {
   let escape: RunReport;
   let stay: RunReport;

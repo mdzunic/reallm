@@ -251,9 +251,16 @@ export class RngRoot {
     return new Rng(this.layoutSeed(planet));
   }
 
-  /** Spawns, loot, weather, AI jitter — a different world every visit (§4.2). */
-  visit(planet: PlanetId, visitCount: number): Rng {
-    return new Rng(hash32(this.seed, planet, 'visit', visitCount));
+  /**
+   * Spawns, loot, weather, AI jitter — a different world every visit (§4.2).
+   * SPEC-058 §4.4: a later instance folds its iteration in, so the next run's
+   * spawns, loot and weather differ from its predecessor's on the same seed;
+   * iteration 1 hashes exactly as before, so every existing stream is
+   * bit-identical. `layout` never takes it — the world is the same world.
+   */
+  visit(planet: PlanetId, visitCount: number, iteration = 1): Rng {
+    if (iteration <= 1) return new Rng(hash32(this.seed, planet, 'visit', visitCount));
+    return new Rng(hash32(this.seed, planet, 'visit', visitCount, iteration));
   }
 
   /**

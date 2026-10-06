@@ -10,11 +10,16 @@ import { Economy } from '@/systems/Economy';
 import { ObstacleGrid } from '@/systems/Layout';
 import { Progression, type EventSink } from '@/systems/Progression';
 import {
+  PREDECESSOR_ALWAYS,
+  PREDECESSOR_PAD_DISTANCE,
+  PREDECESSOR_SEARCH_RADIUS,
   REMAINS_BODY_RADIUS,
   REMAINS_RECOVER_RADIUS,
   REMAINS_RETRY_SECONDS,
   dropRemains,
   placeRemains,
+  predecessorStart,
+  predecessorTag,
   recoverRemains,
   remainsHeld,
   remainsListText,
@@ -245,5 +250,57 @@ describe('remainsListText (§4.7)', () => {
     expect(remainsListText({ water: 3, lithium: 1, wheat: 2, oil: 4 })).toBe('4 oil · 2 wheat · 3 water · 1 lithium');
     expect(remainsListText({ oil: 0, water: 5 })).toBe('5 water');
     expect(remainsListText({})).toBe('');
+  });
+});
+
+// ------------------------------------------------------------- SPEC-058 §4.5
+
+describe('the predecessor’s body (SPEC-058 §4.5)', () => {
+  const PAD = { x: 0, z: 0 };
+  const SPAWN = { x: 12, z: 0 };
+  const prior = (lastDeath: Save['meta']['stats']['lastDeath'] = {}): { lastDeath: Save['meta']['stats']['lastDeath'] } => ({ lastDeath });
+
+  it('the constants: 6 m from the pad on Cinder-4, searched within 2.5 m', () => {
+    expect(PREDECESSOR_PAD_DISTANCE).toBe(6);
+    expect(PREDECESSOR_ALWAYS).toBe('cinder4');
+    expect(PREDECESSOR_SEARCH_RADIUS).toBe(2.5);
+  });
+
+  it('starts where the predecessor last died on the planet', () => {
+    const out = { x: 0, z: 0 };
+    expect(predecessorStart(prior({ vetra: { x: -20, z: 15.5 } }), 'vetra', PAD, SPAWN, out)).toBe(true);
+    expect(out).toEqual({ x: -20, z: 15.5 });
+    // Cinder-4 too, when it died there: the death wins over the pad.
+    expect(predecessorStart(prior({ cinder4: { x: 30, z: -8 } }), 'cinder4', PAD, SPAWN, out)).toBe(true);
+    expect(out).toEqual({ x: 30, z: -8 });
+  });
+
+  it('58-d: on Cinder-4 with no death there, 6 m from the pad along the line to the spawn', () => {
+    const out = { x: 0, z: 0 };
+    expect(predecessorStart(prior(), 'cinder4', PAD, SPAWN, out)).toBe(true);
+    expect(out).toEqual({ x: 6, z: 0 });
+    expect(predecessorStart(prior(), 'cinder4', { x: 10, z: 10 }, { x: 10, z: 22 }, out)).toBe(true);
+    expect(out.x).toBeCloseTo(10, 9);
+    expect(out.z).toBeCloseTo(16, 9);
+  });
+
+  it('every other planet without a death shows no body', () => {
+    const out = { x: 0, z: 0 };
+    for (const planet of ['vetra', 'thessaly', 'ferrum', 'hive', 'eden'] as const) {
+      expect(predecessorStart(prior({ cinder4: { x: 1, z: 1 } }), planet, PAD, SPAWN, out), planet).toBe(false);
+    }
+  });
+
+  it('is pushed clear of the obstacles by placeRemains, like the player’s own remains', () => {
+    const start = { x: 0, z: 0 };
+    predecessorStart(prior({ cinder4: { x: 11, z: 0 } }), 'cinder4', PAD, SPAWN, start);
+    const out = { x: 0, z: 0 };
+    placeRemains(start, { obstacles: GRID, halfSize: HALF, arenaEntrance: null, descent: null }, out);
+    expect(GRID.hitsCircle(out.x, out.z, REMAINS_BODY_RADIUS)).toBe(false);
+  });
+
+  it('the tag names the predecessor’s instance and name', () => {
+    expect(predecessorTag({ iteration: 1, name: 'Vance' })).toBe('instance/62 · Vance');
+    expect(predecessorTag({ iteration: 4, name: 'Ash' })).toBe('instance/65 · Ash');
   });
 });

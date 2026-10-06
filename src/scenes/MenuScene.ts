@@ -12,13 +12,13 @@ import * as THREE from 'three';
 import { log } from '@/core/Log';
 import type { GameServices } from '@/core/Services';
 import { applyUpdate, updateReady } from '@/core/Updates';
-import { SLOTS, type Save, type SlotId } from '@/core/Save';
+import { nextInstanceOffered, slotSummaryOf, SLOTS, type Save, type SlotId } from '@/core/Save';
 import type { SceneParams } from '@/core/StateMachine';
 import { CREDITS, CREDITS_VERSION_LINE } from '@/data/index';
 import { Economy } from '@/systems/Economy';
 import { Progression } from '@/systems/Progression';
 import { applySupplies, EMPTY_CODE, pushCode } from '@/systems/Service';
-import { NEWER_SAVE_TEXT, slotLine } from '@/systems/UiHelpers';
+import { archiveLine, beginInstanceText, NEWER_SAVE_TEXT, nextInstanceSheet, restoreArchiveSheet, slotLine } from '@/systems/UiHelpers';
 import { confirmSheet } from '@/ui/ConfirmSheet';
 import { el, h, keepFocus, testId, topModal } from '@/ui/dom';
 import { SavePanel } from '@/ui/SavePanel';
@@ -522,7 +522,12 @@ export class MenuScene extends UiScene<'menu'> {
 
   // ------------------------------------------------------------------ load
 
-  /** AC-4..7: summaries with Load / Delete / Import, and the E9 special row. */
+  /**
+   * AC-4..7: summaries with Load / Delete / Import, and the E9 special row.
+   * SPEC-058 §4.1, §4.3: an ended run's row offers `Begin instance/{next}`,
+   * and a slot with an archive gains its line and `Archive` — the way to
+   * restore it once.
+   */
   #renderLoad(): void {
     if (this.#sub === null) return;
     const save = this.services.save;
@@ -530,17 +535,12 @@ export class MenuScene extends UiScene<'menu'> {
       const result = save.load(slot);
       const line = el('span', 'menu-slot-text');
       const actions = el('div', 'menu-slot-actions');
+      let archived: HTMLElement | null = null;
       if (result.ok) {
-        const { player, progress, meta } = result.data;
-        line.textContent = slotLine({
-          slot,
-          empty: false,
-          name: player.name,
-          classId: player.classId,
-          level: player.level,
-          planet: progress.currentPlanet,
-          playtimeSec: meta.playtimeSec,
-        });
+        const archive = save.loadArchive(slot);
+        const summary = slotSummaryOf(slot, result.data, archive.ok ? archive.data : null);
+        line.textContent = slotLine(summary);
+        if (summary.archive !== undefined) archived = testId(el('span', 'menu-slot-archive', archiveLine(summary.archive)), `load-slot-${slot}-archive-line`);
         actions.append(
           testId(
             h(
@@ -561,6 +561,8 @@ export class MenuScene extends UiScene<'menu'> {
             ),
             `load-slot-${slot}`,
           ),
+          ...(nextInstanceOffered(result.data) ? [this.#nextInstanceButton(slot, result.data)] : []),
+          ...(archive.ok ? [this.#archiveButton(slot, archive.data, result.data)] : []),
           this.#deleteButton(slot),
           ...this.#importButton(slot),
         );
@@ -577,10 +579,68 @@ export class MenuScene extends UiScene<'menu'> {
       }
       const row = testId(el('div', 'menu-row'), `load-row-${slot}`);
       row.append(el('span', 'menu-slot-label', `Slot ${slot + 1}`), line, actions);
+      if (archived !== null) row.append(archived);
       if (this.#importing === slot) row.append(this.#importField(slot));
       return row;
     });
     this.#sub.replaceChildren(h('div', { class: 'menu-list panel' }, h('p', { class: 'menu-list-title' }, 'Load'), ...rows));
+  }
+
+  /**
+   * SPEC-058 §4.1: `Begin instance/{next}` — the station's `Next instance`
+   * from the menu: the same sheet, in the slot save's own numbers, then
+   * creation in next mode with no prologue. Cancel changes nothing.
+   */
+  #nextInstanceButton(slot: SlotId, data: Save): HTMLButtonElement {
+    return testId(
+      h(
+        'button',
+        {
+          class: 'ui-btn',
+          type: 'button',
+          click: () => {
+            if (this.#leaving) return;
+            void confirmSheet(this.ui, nextInstanceSheet(data.meta.iteration)).then((yes) => {
+              if (!yes || this.#leaving) return;
+              this.#leaving = true;
+              void this.services.go('creation', { slot, next: true }).then((went) => {
+                if (!went) this.#leaving = false;
+              });
+            });
+          },
+        },
+        beginInstanceText(data.meta.iteration),
+      ),
+      `load-slot-${slot}-next`,
+    );
+  }
+
+  /**
+   * SPEC-058 §4.3: `Archive` asks, with a danger confirm, before the archived
+   * instance replaces the slot's save; it can be restored once. A damaged
+   * archive is refused with a toast by the store, and nothing changes.
+   */
+  #archiveButton(slot: SlotId, archive: Save, current: Save): HTMLButtonElement {
+    return testId(
+      h(
+        'button',
+        {
+          class: 'ui-btn',
+          type: 'button',
+          click: () => {
+            void confirmSheet(this.ui, { ...restoreArchiveSheet(archive.meta.iteration, current.meta.iteration), danger: true }).then((yes) => {
+              if (!yes) return;
+              const restored = this.services.save.restoreArchive(slot);
+              if (!restored.ok) return;
+              this.ui.toast('Archive restored', 'good');
+              this.#refresh();
+            });
+          },
+        },
+        'Archive',
+      ),
+      `load-slot-${slot}-archive`,
+    );
   }
 
   #deleteButton(slot: SlotId): HTMLButtonElement {

@@ -8,7 +8,18 @@ import { setLogSink, type LogSink } from '@/core/Log';
 import { Rng } from '@/core/Rng';
 import {
   allocateAttribute,
+  ARCHIVE_DAMAGED_TEXT,
+  ARCHIVE_SUFFIX,
+  archiveFailedText,
   attributePointsEarned,
+  ITERATION_MAX,
+  lineageOf,
+  nextCreation,
+  nextInstance,
+  nextInstanceOffered,
+  runEnding,
+  slotSummaryOf,
+  type LineageEntry,
   AUTOSAVE_DEBOUNCE_MS,
   BACKUP_RESTORED_TEXT,
   BAK_SUFFIX,
@@ -2331,5 +2342,319 @@ describe('relics in the validator (SPEC-056 §4.3, 56-b)', () => {
     expect(data.equipped.heavy).toBe('relic_seeker');
     const forged = validated(withGear({ equipped: { heavy: 'relic_seeker' }, claimed: 'hive_vault' }));
     expect(forged.data.equipped.heavy).toBeNull();
+  });
+});
+
+// ------------------------------------------------------------- SPEC-058 §6.1
+
+describe('the next instance (SPEC-058 §4.1–§4.3)', () => {
+  const SEED = 777;
+
+  /** What the slot-0 run ends with: a level, a wallet, gear, a ship, a hold, flags, ground, claims, deaths. */
+  function play(save: Save, opts: { escape?: boolean; memory?: string | null; seen?: boolean; iteration?: number; lineage?: LineageEntry[] } = {}): void {
+    // Its own look: another suite writes into the shared CREATION's appearance.
+    save.player.appearance = { portrait: 4, primary: '#b7472a', secondary: '#2a3b4c' };
+    save.player.level = 18;
+    save.player.xp = 9000;
+    save.player.tokens = 361;
+    // Level 18 earned three attribute points on top of the creation five.
+    save.player.attributes.might = 9;
+    save.equipped.primary = 'weapon_plasma';
+    save.equipped.armor = 'armor_reactive';
+    save.ship = { engine: 1, hull: 2, shield: 2, cargo: 0, weapon: 1 };
+    save.companions.push({ id: 'combat_drone', level: 2, enabled: true });
+    save.resources = { oil: 300, wheat: 40, water: 55, lithium: 120 };
+    save.inventory.push({ itemId: 'medkit', qty: 3 });
+    save.progress.flags.push('chapter1_done', 'chapter5_done', 'clue_hull', 'campaign_done', opts.escape === true ? 'ending_escape' : 'ending_stay');
+    if (opts.memory !== null) save.progress.flags.push((opts.memory ?? 'memory_tap') as Save['progress']['flags'][number]);
+    save.progress.missionsDone.push('c1_m1', 'c1_m2');
+    save.progress.visits = { cinder4: 3, vetra: 2 };
+    save.progress.claimed.push('cinder4_loose_a');
+    save.progress.endingSeen = opts.seen ?? true;
+    save.meta.iteration = opts.iteration ?? 1;
+    save.meta.lineage = opts.lineage ?? [];
+    save.meta.playtimeSec = 8040;
+    save.meta.stats.deaths = 4;
+    save.meta.stats.kills = 210;
+    save.meta.stats.lastDeath = { cinder4: { x: 3.2, z: -4.1 }, vetra: { x: -20, z: 15.5 } };
+  }
+
+  /** A store with slot 0 holding a finished run, written; the clock is the test's. */
+  function ended(opts: Parameters<typeof play>[1] = {}): { fake: FakeStorage; events: Recorder; saves: SaveStore; time: ReturnType<typeof clock>; old: Save } {
+    const fake = fakeStorage();
+    const events = recorder();
+    const time = clock();
+    const saves = store(fake, events, { now: time.now });
+    const save = saves.create(0, CREATION, SEED);
+    play(save, opts);
+    expect(saves.flush()).toBe(true);
+    const loaded = saves.load(0);
+    if (!loaded.ok) throw new Error('the finished run did not load');
+    events.clear();
+    time.advance(60_000);
+    return { fake, events, saves, time, old: loaded.data };
+  }
+
+  /** `count` predecessors, the newest first. */
+  function lineage(count: number): LineageEntry[] {
+    return Array.from({ length: count }, (_, i) => ({
+      iteration: count - i,
+      name: `Run${count - i}`,
+      classId: 'scout' as const,
+      appearance: { portrait: 1, primary: '#112233', secondary: '#445566' },
+      level: 10,
+      playtimeSec: 600,
+      ending: 'escape' as const,
+      memory: null,
+      deaths: i,
+      lastDeath: {},
+      endedAt: 1000 + i,
+    }));
+  }
+
+  it('qualifies a run whose campaign is done and whose ending was seen, below iteration 99', () => {
+    const save = newSave(0, CREATION, SEED, 0);
+    expect(runEnding(save)).toBeNull();
+    expect(nextInstanceOffered(save)).toBe(false);
+    play(save);
+    expect(runEnding(save)).toBe('stay');
+    expect(nextInstanceOffered(save)).toBe(true);
+    save.progress.flags.push('ending_escape');
+    expect(runEnding(save)).toBe('escape');
+    save.progress.endingSeen = false;
+    expect(runEnding(save)).toBeNull();
+    expect(nextInstanceOffered(save)).toBe(false);
+    save.progress.endingSeen = true;
+    save.meta.iteration = ITERATION_MAX;
+    expect(ITERATION_MAX).toBe(99);
+    expect(nextInstanceOffered(save)).toBe(false);
+    save.meta.iteration = 98;
+    expect(nextInstanceOffered(save)).toBe(true);
+  });
+
+  it('lineageOf fills every field: the run, the ending and memory from the flags, the deaths from stats', () => {
+    const save = newSave(0, CREATION, SEED, 0);
+    play(save, { memory: 'memory_tap', iteration: 3 });
+    const entry = lineageOf(save, 1_234_567);
+    expect(entry).toEqual({
+      iteration: 3,
+      name: 'Vance',
+      classId: 'marine',
+      appearance: { portrait: 4, primary: '#b7472a', secondary: '#2a3b4c' },
+      level: 18,
+      playtimeSec: 8040,
+      ending: 'stay',
+      memory: 'tap',
+      deaths: 4,
+      lastDeath: { cinder4: { x: 3.2, z: -4.1 }, vetra: { x: -20, z: 15.5 } },
+      endedAt: 1_234_567,
+    });
+    // Copies: the archive and the successor never share an object.
+    expect(entry.lastDeath.cinder4).not.toBe(save.meta.stats.lastDeath.cinder4);
+    expect(entry.appearance).not.toBe(save.player.appearance);
+    const escaped = newSave(0, CREATION, SEED, 0);
+    play(escaped, { escape: true, memory: null });
+    expect(lineageOf(escaped, 0)).toMatchObject({ ending: 'escape', memory: null });
+    for (const answer of ['roof', 'stair'] as const) {
+      const answered = newSave(0, CREATION, SEED, 0);
+      play(answered, { memory: `memory_${answer}` });
+      expect(lineageOf(answered, 0).memory).toBe(answer);
+    }
+  });
+
+  it('nextCreation carries the profile and clamps the attributes to the class base plus CREATION_POINTS', () => {
+    const save = newSave(0, { ...CREATION, difficulty: 'hard' }, SEED, 0);
+    play(save);
+    expect(save.player.attributes).toEqual({ might: 9, vigor: 5, agility: 1, tech: 1 });
+    const fill = nextCreation(save);
+    expect(fill).toEqual({
+      name: 'Vance',
+      classId: 'marine',
+      appearance: { portrait: 4, primary: '#b7472a', secondary: '#2a3b4c' },
+      // Marine base {3, 3, 1, 1}; the five points go in field order: might first.
+      attributes: { might: 8, vigor: 3, agility: 1, tech: 1 },
+      difficulty: 'hard',
+    });
+    const total = (a: CharacterCreation['attributes']): number => a.might + a.vigor + a.agility + a.tech;
+    expect(total(fill.attributes)).toBe(8 + 5);
+    // A run that never spent past its creation points keeps them as they were.
+    expect(nextCreation(newSave(0, CREATION, SEED, 0)).attributes).toEqual(CREATION.attributes);
+  });
+
+  it('beginNextIteration archives the old run, then binds and flushes its successor with reason new', () => {
+    const { fake, events, saves, time, old } = ended();
+    const before = fake.data.get('reallm:slot:0') as string;
+    const next = saves.beginNextIteration(0, nextCreation(old));
+    expect(next).not.toBeNull();
+    // The archive key holds the run as it ended.
+    expect(`reallm:slot:0${ARCHIVE_SUFFIX}`).toBe('reallm:slot:0:archive');
+    expect(JSON.parse(fake.data.get('reallm:slot:0:archive') as string)).toEqual(JSON.parse(JSON.stringify(old)));
+    // The successor is bound and on disk; the main key's previous JSON went to `:bak`.
+    expect(saves.current).toBe(next);
+    expect(JSON.parse(fake.data.get('reallm:slot:0') as string)).toEqual(JSON.parse(JSON.stringify(next)));
+    expect(fake.data.get(`reallm:slot:0${BAK_SUFFIX}`)).toBe(before);
+    expect(events.of('save:written')).toEqual([{ slot: 0, reason: 'new' }]);
+    // The old seed, one iteration on, the old run first in the lineage.
+    expect(next?.meta.seed).toBe(SEED);
+    expect(next?.meta.iteration).toBe(2);
+    expect(next?.meta.lineage).toEqual([lineageOf(old, Math.round(time.now()))]);
+  });
+
+  it('nothing economic carries: apart from the iteration, the lineage, the seed and the timestamps, it is newSave', () => {
+    const { saves, time, old } = ended();
+    const creation = nextCreation(old);
+    const next = saves.beginNextIteration(0, creation) as Save;
+    const fresh = newSave(0, creation, 1, time.now());
+    const strip = (save: Save): unknown => {
+      const copy = JSON.parse(JSON.stringify(save)) as Save;
+      for (const key of ['iteration', 'lineage', 'seed', 'createdAt', 'updatedAt'] as const) delete (copy.meta as Partial<Save['meta']>)[key];
+      return copy;
+    };
+    expect(strip(next)).toEqual(strip(fresh));
+    // Spelled out, so a reader need not diff: a fresh run in every pocket.
+    expect(next.player).toMatchObject({ level: 1, xp: 0, tokens: 0 });
+    expect(next.inventory).toEqual([{ itemId: 'wheat_ration', qty: 3 }]);
+    expect(next.ship).toEqual({ engine: 0, hull: 0, shield: 0, cargo: 0, weapon: 0 });
+    expect(next.companions).toEqual([{ id: 'aria', level: 1, enabled: true }]);
+    expect(next.progress).toMatchObject({ flags: [], missionsDone: [], visits: {}, claimed: [], remains: null, endingSeen: false });
+    expect(next.meta.stats).toEqual(emptyRunStats());
+  });
+
+  it('the lineage keeps the old run first and its own after it, cut to LINEAGE_MAX', () => {
+    const { saves, old } = ended({ iteration: 9, lineage: lineage(8) });
+    expect(old.meta.lineage).toHaveLength(LINEAGE_MAX);
+    const next = saves.beginNextIteration(0, nextCreation(old)) as Save;
+    expect(next.meta.iteration).toBe(10);
+    expect(next.meta.lineage).toHaveLength(LINEAGE_MAX);
+    expect(next.meta.lineage[0]).toMatchObject({ iteration: 9, name: 'Vance' });
+    expect(next.meta.lineage.slice(1)).toEqual(old.meta.lineage.slice(0, LINEAGE_MAX - 1));
+  });
+
+  it('refuses an unfinished run, an unseen ending, iteration 99 and an empty slot — writing nothing', () => {
+    const cases: Array<Parameters<typeof play>[1]> = [{ seen: false }, { iteration: 99 }];
+    for (const opts of cases) {
+      const { fake, saves, old } = ended(opts);
+      const before = new Map(fake.data);
+      expect(saves.beginNextIteration(0, nextCreation(old))).toBeNull();
+      expect(fake.data).toEqual(before);
+    }
+    const fake = fakeStorage();
+    const saves = store(fake, recorder());
+    const fresh = saves.create(0, CREATION, SEED);
+    expect(saves.beginNextIteration(0, CREATION)).toBeNull();
+    expect(saves.current).toBe(fresh);
+    expect(saves.beginNextIteration(1, CREATION)).toBeNull();
+    expect(fake.data.has('reallm:slot:0:archive')).toBe(false);
+  });
+
+  it('a failed archive write changes nothing — not the slot, not the binding, not an older archive — and says so', () => {
+    const { fake, events, saves, old } = ended();
+    fake.data.set('reallm:slot:0:archive', JSON.stringify({ version: 3, older: true }));
+    const before = new Map(fake.data);
+    const bound = saves.current;
+    const original = fake.storage.setItem.bind(fake.storage);
+    fake.storage.setItem = (key: string, value: string): void => {
+      if (key.endsWith(ARCHIVE_SUFFIX)) throw new DOMException('quota exceeded', 'QuotaExceededError');
+      original(key, value);
+    };
+    expect(saves.beginNextIteration(0, nextCreation(old))).toBeNull();
+    expect(fake.data).toEqual(before);
+    expect(saves.current).toBe(bound);
+    expect(events.toasts).toEqual([archiveFailedText(62)]);
+    expect(archiveFailedText(62)).toBe('Could not archive instance/62 — export it first');
+  });
+
+  it('a torn archive write is put back, so the slot is as it was', () => {
+    const { fake, saves, old } = ended();
+    const before = new Map(fake.data);
+    fake.truncate();
+    expect(saves.beginNextIteration(0, nextCreation(old))).toBeNull();
+    expect(fake.data).toEqual(before);
+    expect(fake.data.has('reallm:slot:0:archive')).toBe(false);
+  });
+
+  it('restoreArchive makes the archive the slot’s save, removes the key, rebinds — and can do it once', () => {
+    const { fake, saves, old } = ended();
+    const next = saves.beginNextIteration(0, nextCreation(old)) as Save;
+    const replaced = fake.data.get('reallm:slot:0') as string;
+    const restored = saves.restoreArchive(0);
+    expect(restored).toMatchObject({ ok: true, source: 'main', rebound: true });
+    expect(restored.ok && restored.data.meta.iteration).toBe(1);
+    expect(JSON.parse(fake.data.get('reallm:slot:0') as string).meta.iteration).toBe(1);
+    expect(fake.data.has('reallm:slot:0:archive')).toBe(false);
+    // The usual backup: the instance it replaced.
+    expect(fake.data.get(`reallm:slot:0${BAK_SUFFIX}`)).toBe(replaced);
+    expect(saves.current?.meta.iteration).toBe(1);
+    expect(saves.current).not.toBe(next);
+    // 58-g: its own lineage is the archive's, as it was.
+    expect(saves.current?.meta.lineage).toEqual([]);
+    expect(saves.restoreArchive(0)).toEqual({ ok: false, reason: 'empty' });
+  });
+
+  it('restoreArchive leaves another slot’s binding alone', () => {
+    const { saves, old } = ended();
+    saves.beginNextIteration(0, nextCreation(old));
+    const other = saves.create(1, { ...CREATION, name: 'Other' }, 5);
+    const restored = saves.restoreArchive(0);
+    expect(restored.ok).toBe(true);
+    expect(restored).not.toHaveProperty('rebound');
+    expect(saves.current).toBe(other);
+  });
+
+  it('a damaged archive toasts and changes nothing', () => {
+    const { fake, events, saves } = ended();
+    fake.data.set('reallm:slot:0:archive', 'not json at all');
+    const before = new Map(fake.data);
+    const result = saves.restoreArchive(0);
+    expect(result).toMatchObject({ ok: false, reason: 'corrupt' });
+    expect(fake.data).toEqual(before);
+    expect(events.toasts).toEqual([ARCHIVE_DAMAGED_TEXT]);
+    expect(ARCHIVE_DAMAGED_TEXT).toBe('Archive is damaged');
+  });
+
+  it('delete removes the main key, :bak and :archive', () => {
+    const { fake, saves, old } = ended();
+    saves.beginNextIteration(0, nextCreation(old));
+    expect([...fake.data.keys()].sort()).toEqual(['reallm:slot:0', 'reallm:slot:0:archive', 'reallm:slot:0:bak']);
+    saves.delete(0);
+    expect([...fake.data.keys()]).toEqual([]);
+  });
+
+  it('58-h: an import into a slot with an archive leaves the archive alone', async () => {
+    const { fake, saves, old } = ended();
+    saves.beginNextIteration(0, nextCreation(old));
+    const archive = fake.data.get('reallm:slot:0:archive');
+    const code = await saves.exportCode(0);
+    expect((await saves.importCode(code, 0)).ok).toBe(true);
+    expect(fake.data.get('reallm:slot:0:archive')).toBe(archive);
+  });
+
+  it('list() fills the iteration, the ending and the archive', () => {
+    const { saves, old } = ended({ escape: true });
+    expect(saves.list()[0]).toMatchObject({ slot: 0, iteration: 1, ending: 'escape' });
+    expect(saves.list()[0]).not.toHaveProperty('archive');
+    saves.beginNextIteration(0, nextCreation(old));
+    expect(saves.list()[0]).toMatchObject({
+      slot: 0,
+      empty: false,
+      level: 1,
+      iteration: 2,
+      ending: null,
+      archive: { iteration: 1, name: 'Vance', ending: 'escape', level: 18, playtimeSec: 8040 },
+    });
+    expect(slotLine(saves.list()[0] as SlotSummary)).toMatch(/^instance\/63 · Vance · Marine · Lv 1 · Station · /);
+    // An archive that will not parse is no archive.
+    const { fake, saves: other } = ended();
+    fake.data.set('reallm:slot:0:archive', '{');
+    expect(other.list()[0]).not.toHaveProperty('archive');
+    expect(other.list()[0]).toMatchObject({ iteration: 1, ending: 'stay' });
+  });
+
+  it('slotSummaryOf and nextInstance are the pure halves list() and beginNextIteration use', () => {
+    const { old } = ended();
+    const next = nextInstance(old, nextCreation(old), 5000);
+    expect(next.meta).toMatchObject({ slot: 0, seed: SEED, iteration: 2, createdAt: 5000 });
+    expect(slotSummaryOf(0, next, old)).toMatchObject({ iteration: 2, ending: null, archive: { iteration: 1, ending: 'stay' } });
+    expect(slotSummaryOf(0, old)).toMatchObject({ iteration: 1, ending: 'stay' });
   });
 });

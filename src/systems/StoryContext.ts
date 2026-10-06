@@ -9,6 +9,11 @@
 // save bound — the menu, the prologue, the dev bridge — it plays
 // `DEFAULT_STORY_CONTEXT`: unconditional lines only, `{instance}` 62 and
 // `{name}` `Salvager` (48-f).
+//
+// SPEC-058 §4.6: a later instance's lines may read how its predecessor ended
+// and what it remembered first. Those cross-run facts live in
+// `meta.lineage[0]` (PLAN R19 decision 9) — a new instance's flags start
+// empty — so without a lineage both conditions are false.
 import { RngRoot } from '@/core/Rng';
 import type { Save } from '@/core/Save';
 import {
@@ -21,12 +26,13 @@ import {
   type PlanetId,
 } from '@/data/index';
 import { offTaskCount } from '@/systems/Clues';
+import { containmentLevel } from '@/systems/Containment';
 
 export interface StoryContext {
   readonly flags: ReadonlySet<string>;
   /** `offTaskCount(flags)`. */
   readonly offTask: number;
-  /** `save.meta.iteration` — 1 until SPEC-058. */
+  /** `save.meta.iteration` — 1 on a first run (SPEC-058 counts the instances up). */
   readonly iteration: number;
   readonly name: string;
   readonly playtimeSec: number;
@@ -35,9 +41,19 @@ export interface StoryContext {
   readonly chapter: number;
   /** The planet's layout seed, or the save's own seed (§4.1). */
   readonly seed: number;
+  /** SPEC-058 §4.6: `lineage[0]?.ending` — how the instance before this one ended. */
+  readonly prior: 'stay' | 'escape' | null;
+  /** SPEC-058 §4.6: `lineage[0]?.memory` — its answer to the memory question. */
+  readonly priorMemory: 'roof' | 'tap' | 'stair' | null;
+  /** SPEC-058 §4.6: `lineage[0]?.name ?? ''`. */
+  readonly priorName: string;
+  /** SPEC-058 §4.6: `lineage[0]?.deaths ?? 0` — the restarts its log counts. */
+  readonly priorRestarts: number;
+  /** SPEC-058 §4.6: `deviationText(save)`. */
+  readonly deviation: string;
 }
 
-/** 48-f: no save bound — no flags, the first iteration, the validator's default name. */
+/** 48-f: no save bound — no flags, the first iteration, the validator's default name, and no predecessor. */
 export const DEFAULT_STORY_CONTEXT: StoryContext = Object.freeze({
   flags: new Set<string>() as ReadonlySet<string>,
   offTask: 0,
@@ -47,7 +63,35 @@ export const DEFAULT_STORY_CONTEXT: StoryContext = Object.freeze({
   tokens: 0,
   chapter: 1,
   seed: 0,
+  prior: null,
+  priorMemory: null,
+  priorName: '',
+  priorRestarts: 0,
+  deviation: 'none',
 });
+
+/** SPEC-058 §4.6: what `{deviation}` reads when nothing changed — or there is nothing to compare with. */
+export const NO_DEVIATION = 'none';
+
+/**
+ * SPEC-058 §4.6: what this instance changed from the profile it was restored
+ * from (`lineage[0]`) — the changed fields among `name`, `class`, `portrait`
+ * and `colours` (the primary or the secondary), joined with `, ` in that
+ * order — or `none`, which is also what a save with no lineage reads.
+ */
+export function deviationText(save: Save): string {
+  const prior = save.meta.lineage[0];
+  if (prior === undefined) return NO_DEVIATION;
+  const player = save.player;
+  const changed: string[] = [];
+  if (player.name !== prior.name) changed.push('name');
+  if (player.classId !== prior.classId) changed.push('class');
+  if (player.appearance.portrait !== prior.appearance.portrait) changed.push('portrait');
+  if (player.appearance.primary !== prior.appearance.primary || player.appearance.secondary !== prior.appearance.secondary) {
+    changed.push('colours');
+  }
+  return changed.length === 0 ? NO_DEVIATION : changed.join(', ');
+}
 
 /** PLAN R19 decision 1: run 1 is instance/62 — the Warden's sixty-one are the runs before it. */
 export function instanceNumber(iteration: number): number {
@@ -73,6 +117,7 @@ export function storyContextOf(save: Save, planet: PlanetId | undefined = save.p
     for (const flag of CHAPTER_FLAGS) if (flags.has(flag)) chapter++;
     chapter = Math.min(6, chapter);
   }
+  const prior = save.meta.lineage[0];
   return {
     flags,
     offTask: offTaskCount(flags),
@@ -82,6 +127,11 @@ export function storyContextOf(save: Save, planet: PlanetId | undefined = save.p
     tokens: save.player.tokens,
     chapter,
     seed: planet !== undefined ? new RngRoot(save.meta.seed).layoutSeed(planet) : save.meta.seed >>> 0,
+    prior: prior?.ending ?? null,
+    priorMemory: prior?.memory ?? null,
+    priorName: prior?.name ?? '',
+    priorRestarts: prior?.deaths ?? 0,
+    deviation: deviationText(save),
   };
 }
 
@@ -92,7 +142,8 @@ function within(value: number, range: { readonly min?: number; readonly max?: nu
 /**
  * §4.1: `undefined` holds; `flag` and `not` read the flags; `offTask` and
  * `iteration` hold inside their inclusive bounds; `all` of nothing holds and
- * `any` of nothing does not.
+ * `any` of nothing does not. SPEC-058 §4.6: `prior` and `memory` compare with
+ * the predecessor's ending and memory, so both are false without one.
  */
 export function lineVisible(when: LineCondition | undefined, ctx: StoryContext): boolean {
   if (when === undefined) return true;
@@ -100,6 +151,8 @@ export function lineVisible(when: LineCondition | undefined, ctx: StoryContext):
   if ('not' in when) return !ctx.flags.has(when.not);
   if ('offTask' in when) return within(ctx.offTask, when.offTask);
   if ('iteration' in when) return within(ctx.iteration, when.iteration);
+  if ('prior' in when) return ctx.prior === when.prior;
+  if ('memory' in when) return ctx.priorMemory === when.memory;
   if ('all' in when) return when.all.every((condition) => lineVisible(condition, ctx));
   return when.any.some((condition) => lineVisible(condition, ctx));
 }
@@ -117,8 +170,8 @@ function placeholderValue(token: LinePlaceholder, ctx: StoryContext): string {
     case '{next}':
       return String(instance + 1);
     case '{containment}':
-      // SPEC-058 caps this as its `containmentSteps`; at iteration 1 both read the chapter.
-      return String(ctx.chapter + ctx.iteration - 1);
+      // SPEC-058 §4.4: the capped level the enemies are scaled by — the chapter at iteration 1.
+      return String(containmentLevel(ctx.chapter, ctx.iteration));
     case '{hours}':
       // A minute of play is an hour of mission clock.
       return String(Math.min(9999, Math.floor(ctx.playtimeSec / 60)));
@@ -126,10 +179,16 @@ function placeholderValue(token: LinePlaceholder, ctx: StoryContext): string {
       return String(Math.min(99999, ctx.tokens));
     case '{seed}':
       return `0x${(ctx.seed >>> 0).toString(16).toUpperCase().padStart(8, '0')}`;
+    case '{priorName}':
+      return ctx.priorName;
+    case '{priorRestarts}':
+      return String(ctx.priorRestarts);
+    case '{deviation}':
+      return ctx.deviation;
   }
 }
 
-const PLACEHOLDER = /\{(?:name|instance|prior|next|containment|hours|tokens|seed)\}/g;
+const PLACEHOLDER = /\{(?:name|instance|priorName|priorRestarts|prior|next|containment|hours|tokens|seed|deviation)\}/g;
 
 /** §4.1: every placeholder in `text`, replaced. An unknown `{…}` is left as written — the content suite fails it. */
 export function fillLine(text: string, ctx: StoryContext): string {

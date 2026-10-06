@@ -1,9 +1,13 @@
 // SPEC-048 §4.1, §6.1 — the story context: line conditions, placeholders and
 // caption variants, read off a save. One evaluator serves the dialogue layer,
 // the film player and Notes; this pins it in node.
+//
+// SPEC-058 §4.6, §6.1 adds what a next instance knows of the one before it:
+// the `prior` and `memory` conditions, read from `meta.lineage[0]` and false
+// without one, `deviationText`, and the three placeholders that name it.
 import { describe, expect, it } from 'vitest';
 import { RngRoot } from '@/core/Rng';
-import { newSave, type CharacterCreation, type Save } from '@/core/Save';
+import { lineageOf, newSave, type CharacterCreation, type Save } from '@/core/Save';
 import {
   DIALOGUE,
   FILMS,
@@ -15,6 +19,7 @@ import {
 import {
   captionText,
   DEFAULT_STORY_CONTEXT,
+  deviationText,
   fillLine,
   instanceNumber,
   lineVisible,
@@ -118,7 +123,7 @@ describe('fillLine (§4.1)', () => {
     expect(fillLine('{seed}', ctx({ seed: 0x2f1a }))).toBe('0x00002F1A');
   });
 
-  it('every longest fill is exactly as long as PLACEHOLDER_LONGEST says', () => {
+  it('every longest fill is exactly as long as PLACEHOLDER_LONGEST says — containment within it, since SPEC-058 caps it', () => {
     const longest = ctx({
       name: 'W'.repeat(16),
       iteration: 99,
@@ -126,16 +131,46 @@ describe('fillLine (§4.1)', () => {
       playtimeSec: 10_000_000,
       tokens: 1_000_000,
       seed: 0xffffffff,
+      priorName: 'W'.repeat(16),
+      priorRestarts: 9_999_999,
+      deviation: 'name, class, portrait, colours',
     });
     for (const token of LINE_PLACEHOLDERS) {
+      // SPEC-058 §4.4: the level is the chapter plus at most three steps — 9
+      // at its highest — so the uncapped 104 it was measured at still bounds it.
+      if (token === '{containment}') {
+        expect(fillLine(token, longest)).toBe('9');
+        expect(fillLine(token, longest).length).toBeLessThanOrEqual(PLACEHOLDER_LONGEST[token].length);
+        continue;
+      }
       expect(fillLine(token, longest), token).toBe(PLACEHOLDER_LONGEST[token]);
       expect(fillLine(token, longest).length, token).toBe(PLACEHOLDER_LONGEST[token].length);
     }
+    expect(PLACEHOLDER_LONGEST['{containment}']).toBe('104');
     expect(Object.keys(PLACEHOLDER_LONGEST).sort()).toEqual([...LINE_PLACEHOLDERS].sort());
   });
 
-  it('names exactly the eight placeholders', () => {
-    expect([...LINE_PLACEHOLDERS]).toEqual(['{name}', '{instance}', '{prior}', '{next}', '{containment}', '{hours}', '{tokens}', '{seed}']);
+  it('names exactly the eleven placeholders — SPEC-048’s eight and SPEC-058’s three', () => {
+    expect([...LINE_PLACEHOLDERS]).toEqual([
+      '{name}',
+      '{instance}',
+      '{prior}',
+      '{next}',
+      '{containment}',
+      '{hours}',
+      '{tokens}',
+      '{seed}',
+      '{priorName}',
+      '{priorRestarts}',
+      '{deviation}',
+    ]);
+  });
+
+  it('{containment} is the capped containmentLevel — the chapter at iteration 1, then a step an iteration to three (SPEC-058 §4.4)', () => {
+    expect(fillLine('{containment}', ctx({ chapter: 4, iteration: 1 }))).toBe('4');
+    expect(fillLine('{containment}', ctx({ chapter: 4, iteration: 2 }))).toBe('5');
+    expect(fillLine('{containment}', ctx({ chapter: 1, iteration: 4 }))).toBe('4');
+    expect(fillLine('{containment}', ctx({ chapter: 6, iteration: 99 }))).toBe('9');
   });
 });
 
@@ -273,7 +308,8 @@ describe('the dialogues that listen (§4.5, §4.7)', () => {
     expect(visibleLines(DIALOGUE.intro_command, first)[0]?.text).toBe('Earth Command to tug CR-62. Vega, you are cleared for the Cinder-4 approach.');
     expect(DIALOGUE.c4_m3_signal.lines[1].text).toContain('instance/{instance}');
     expect(visibleLines(DIALOGUE.c4_m3_signal, first)[1]?.text).toContain('instance/62.');
-    expect(DIALOGUE.c2_s1_log.lines[2].text).toBe('Signed: Iteration {prior}.');
+    // SPEC-058 §4.6 put the next instance's rows ahead of it in the table; a first run reads it third.
+    expect(DIALOGUE.c2_s1_log.lines.find((line) => line.text.startsWith('Signed'))?.text).toBe('Signed: Iteration {prior}.');
     expect(visibleLines(DIALOGUE.c2_s1_log, first)[2]?.text).toBe('Signed: Iteration 61.');
     const pool = FILMS.ending_escape.captions.find((caption) => caption.text.startsWith('SELECTION POOL')) as CaptionDef;
     expect(pool.text).toBe('SELECTION POOL — 1 model. {instance} instances.');
@@ -282,7 +318,7 @@ describe('the dialogues that listen (§4.5, §4.7)', () => {
 
   it('no dialogue plays a raw placeholder on the menu’s default context', () => {
     for (const dialogue of Object.values(DIALOGUE)) {
-      for (const line of visibleLines(dialogue, DEFAULT_STORY_CONTEXT)) expect(line.text, dialogue.id).not.toMatch(/\{[a-z]+\}/);
+      for (const line of visibleLines(dialogue, DEFAULT_STORY_CONTEXT)) expect(line.text, dialogue.id).not.toMatch(/\{[a-zA-Z]+\}/);
     }
   });
 });
@@ -366,5 +402,121 @@ describe('SPEC-049: the confession, letter 5 and the mission clock', () => {
     expect(at(9000)).toBe('Mission clock: 150 hours since launch. You have not slept. You have not asked to.');
     expect(at(59)).toBe('Mission clock: 0 hours since launch. You have not slept. You have not asked to.');
     expect(at(10_000_000)).toContain('Mission clock: 9999 hours');
+  });
+});
+
+// ------------------------------------------------------------- SPEC-058 §6.1
+
+/** A next instance of `save(patch)`: iteration 2, its predecessor the patched first run as it ended. */
+function successor(patch: (s: Save) => void = () => {}, then: (next: Save) => void = () => {}): Save {
+  const first = save((s) => {
+    s.progress.flags.push('campaign_done', 'ending_stay');
+    s.progress.endingSeen = true;
+    patch(s);
+  });
+  const next = save((s) => {
+    s.meta.iteration = 2;
+    s.meta.lineage = [lineageOf(first, 1_000)];
+  });
+  then(next);
+  return next;
+}
+
+describe('the prior and memory conditions (SPEC-058 §4.6)', () => {
+  it('read lineage[0]’s ending and memory', () => {
+    const stay = storyContextOf(successor((s) => s.progress.flags.push('memory_tap')));
+    expect(stay.prior).toBe('stay');
+    expect(stay.priorMemory).toBe('tap');
+    expect(lineVisible({ prior: 'stay' }, stay)).toBe(true);
+    expect(lineVisible({ prior: 'escape' }, stay)).toBe(false);
+    expect(lineVisible({ memory: 'tap' }, stay)).toBe(true);
+    expect(lineVisible({ memory: 'roof' }, stay)).toBe(false);
+    const escape = storyContextOf(successor((s) => s.progress.flags.push('ending_escape')));
+    expect(escape.prior).toBe('escape');
+    expect(escape.priorMemory).toBeNull();
+    expect(lineVisible({ prior: 'escape' }, escape)).toBe(true);
+    for (const memory of ['roof', 'tap', 'stair'] as const) expect(lineVisible({ memory }, escape)).toBe(false);
+  });
+
+  it('are false without a lineage — a first run, and the default context', () => {
+    const first = storyContextOf(save((s) => s.progress.flags.push('memory_roof', 'ending_stay')));
+    expect(first.prior).toBeNull();
+    expect(first.priorMemory).toBeNull();
+    for (const ending of ['stay', 'escape'] as const) {
+      expect(lineVisible({ prior: ending }, first)).toBe(false);
+      expect(lineVisible({ prior: ending }, DEFAULT_STORY_CONTEXT)).toBe(false);
+    }
+    for (const memory of ['roof', 'tap', 'stair'] as const) {
+      expect(lineVisible({ memory }, first)).toBe(false);
+      expect(lineVisible({ memory }, DEFAULT_STORY_CONTEXT)).toBe(false);
+    }
+  });
+
+  it('nest inside all and any like the other kinds', () => {
+    const c = ctx({ flags: new Set(['memory_roof']), prior: 'stay', priorMemory: 'roof' });
+    expect(lineVisible({ all: [{ flag: 'memory_roof' }, { memory: 'roof' }] }, c)).toBe(true);
+    expect(lineVisible({ all: [{ flag: 'memory_roof' }, { memory: 'tap' }] }, c)).toBe(false);
+    expect(lineVisible({ any: [{ prior: 'escape' }, { memory: 'roof' }] }, c)).toBe(true);
+  });
+
+  it('the default context has no predecessor: null, null, an empty name, no restarts and no deviation', () => {
+    expect(DEFAULT_STORY_CONTEXT).toMatchObject({ prior: null, priorMemory: null, priorName: '', priorRestarts: 0, deviation: 'none' });
+  });
+});
+
+describe('deviationText (SPEC-058 §4.6)', () => {
+  it('is none without a lineage, and none for an unchanged profile', () => {
+    expect(deviationText(save())).toBe('none');
+    expect(deviationText(successor())).toBe('none');
+  });
+
+  it('names each changed field — the name, the class, the portrait, either colour', () => {
+    expect(deviationText(successor(undefined, (s) => void (s.player.name = 'Ash')))).toBe('name');
+    expect(deviationText(successor(undefined, (s) => void (s.player.classId = 'scout')))).toBe('class');
+    expect(deviationText(successor(undefined, (s) => void (s.player.appearance.portrait = 4)))).toBe('portrait');
+    expect(deviationText(successor(undefined, (s) => void (s.player.appearance.primary = '#ffffff')))).toBe('colours');
+    expect(deviationText(successor(undefined, (s) => void (s.player.appearance.secondary = '#000000')))).toBe('colours');
+    // Attributes and difficulty are not part of the profile it reads.
+    expect(deviationText(successor(undefined, (s) => void (s.meta.difficulty = 'hard')))).toBe('none');
+  });
+
+  it('joins every changed field with a comma, in the order name, class, portrait, colours', () => {
+    const all = successor(undefined, (s) => {
+      s.player.appearance.secondary = '#000000';
+      s.player.appearance.portrait = 5;
+      s.player.classId = 'engineer';
+      s.player.name = 'Ash';
+    });
+    expect(deviationText(all)).toBe('name, class, portrait, colours');
+    expect(deviationText(successor(undefined, (s) => void ((s.player.name = 'Ash'), (s.player.appearance.primary = '#ffffff'))))).toBe('name, colours');
+  });
+});
+
+describe('the predecessor placeholders (SPEC-058 §4.6)', () => {
+  it('fill {priorName}, {priorRestarts} and {deviation} from lineage[0] and the save', () => {
+    const next = successor(
+      (s) => void (s.meta.stats.deaths = 7),
+      (s) => void (s.player.name = 'Ash'),
+    );
+    const c = storyContextOf(next);
+    expect(c.priorName).toBe('Vega');
+    expect(c.priorRestarts).toBe(7);
+    expect(c.deviation).toBe('name');
+    expect(fillLine('Salvager {priorName}. {priorRestarts} restarts. Deviation: {deviation}.', c)).toBe('Salvager Vega. 7 restarts. Deviation: name.');
+    // …beside SPEC-048's own: instance 63, prior 62, next 64.
+    expect(fillLine('{instance} {prior} {next}', c)).toBe('63 62 64');
+  });
+
+  it('read an empty name, no restarts and none without a lineage', () => {
+    expect(fillLine('[{priorName}] {priorRestarts} {deviation}', storyContextOf(save()))).toBe('[] 0 none');
+    expect(fillLine('[{priorName}] {priorRestarts} {deviation}', DEFAULT_STORY_CONTEXT)).toBe('[] 0 none');
+  });
+
+  it('the Vetra log reads the predecessor’s real run on a next instance', () => {
+    const next = successor((s) => void (s.meta.stats.deaths = 12));
+    const lines = visibleLines(DIALOGUE.c2_s1_log, storyContextOf(next, 'vetra')).map((line) => line.text);
+    expect(lines[0]).toBe('FLIGHT LOG — recovered, partial. Salvager Vega. Six worlds. 12 restarts.');
+    expect(lines[1]).toBe('I filed it. It did not end. Do not file it.');
+    expect(lines).toContain('Signed: Iteration 62.');
   });
 });

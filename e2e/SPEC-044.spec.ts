@@ -775,6 +775,15 @@ test('8c. the stay-ending card is a modal on Continue, and Enter continues', asy
   expect(await focusInside(page, 'ending-stay')).toBe(true);
   await page.keyboard.press('Enter');
   await expect(card).toHaveCount(0);
+  // SPEC-058 §4.7: the Selection card follows, a modal of its own with the
+  // focus on its Continue — and only its Continue sees the ending.
+  const selection = page.getByTestId('ending-card');
+  await expect(selection).toBeVisible();
+  await expect(selection).toHaveAttribute('aria-modal', 'true');
+  await expect.poll(() => focused(page)).toBe('ending-card-continue');
+  expect(await page.evaluate(() => window.__reallm.save().current?.progress.endingSeen)).toBe(false);
+  await page.keyboard.press('Enter');
+  await expect(selection).toHaveCount(0);
   expect(await page.evaluate(() => window.__reallm.save().current?.progress.endingSeen)).toBe(true);
 });
 

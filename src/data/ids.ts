@@ -163,6 +163,9 @@ export const STORY_FLAGS = [
   'shard_ferrum',
   'shard_hive',
   'shard_eden',
+  // SPEC-058 §4.7: the run's aftermath has played — `aftermath_stay` or
+  // `aftermath_escape`, set as either starts.
+  'aftermath_seen',
 ] as const;
 export type FlagId = (typeof STORY_FLAGS)[number];
 

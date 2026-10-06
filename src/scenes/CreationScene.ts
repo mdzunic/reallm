@@ -14,9 +14,16 @@
 // here, so Escape and the system Back do the same. Each attribute says what a
 // point buys, the class cards spell their base attributes, and a disabled
 // Confirm says why. The form re-renders through `keepFocus` (§4.2).
+//
+// SPEC-058 §4.2: in next mode (`{ slot, next: true }`) the form opens on the
+// slot's finished run — its name, class, look, attributes (inside the
+// creation budget) and difficulty — and says which instance it restores.
+// Anything changed is a logged variant; Back still writes nothing; Confirm
+// archives the old run and binds its successor, then the Warden's notice
+// plays ahead of the intro.
 import * as THREE from 'three';
 import { log } from '@/core/Log';
-import { normalizeName, type CharacterCreation, type SlotId } from '@/core/Save';
+import { nextCreation, nextInstanceOffered, normalizeName, type CharacterCreation, type SlotId } from '@/core/Save';
 import type { GameServices } from '@/core/Services';
 import type { Renderer } from '@/core/Renderer';
 import type { SceneParams } from '@/core/StateMachine';
@@ -38,8 +45,11 @@ import {
   attributeLine,
   availableSwatches,
   computePlayerStats,
+  creationNextText,
   DIFFICULTY_LINES,
+  NEXT_REFUSED_TEXT,
   passiveText,
+  VARIANT_LOGGED_TEXT,
 } from '@/systems/UiHelpers';
 import { confirmSheet } from '@/ui/ConfirmSheet';
 import { dialogueLayer } from '@/ui/DialogueUI';
@@ -90,6 +100,16 @@ export class CreationScene extends UiScene<'creation'> {
   /** SPEC-020 §4.6: the portrait files that shipped; empty until the manifest lands. */
   #portraits: ReadonlySet<number> = new Set();
   #leaving = false;
+  /**
+   * SPEC-058 §4.2: in next mode, the pre-fill — the profile the form opened
+   * on, which `creation-variant` and Back compare against — and the finished
+   * run's iteration; `null` for a new salvager.
+   */
+  #restored: { fill: CharacterCreation; iteration: number } | null = null;
+  /** The name the field opens with: empty for a new salvager, the old name in next mode. */
+  #startName = '';
+  /** SPEC-058 §4.2: `creation-variant`, toggled as the name is typed without a re-render. */
+  #variant: HTMLElement | null = null;
 
   #root: HTMLDivElement | null = null;
   #form: HTMLDivElement | null = null;
@@ -119,6 +139,7 @@ export class CreationScene extends UiScene<'creation'> {
 
   protected onEnter(params: SceneParams['creation']): void {
     this.#slot = params.slot;
+    if (params.next === true) this.#prefill(params.slot);
     this.useEnvironment(NEUTRAL_SKY, HUB_ENVIRONMENT_INTENSITY);
     this.#buildBackdrop();
     this.#buildPreviewScene();
@@ -142,6 +163,40 @@ export class CreationScene extends UiScene<'creation'> {
 
   protected override onUpdate(_dt: number): void {
     if (this.#model) this.#model.rotation.y = this.elapsed * 0.5;
+  }
+
+  /**
+   * SPEC-058 §4.2: next mode loads the slot. A run that does not qualify (§4.1)
+   * is refused with a toast, back to the menu — once the transition in has
+   * landed, since `go()` is ignored inside one. Otherwise the form opens on
+   * `nextCreation(save)`.
+   */
+  #prefill(slot: SlotId): void {
+    const result = this.services.save.load(slot);
+    if (!result.ok || !nextInstanceOffered(result.data)) {
+      this.disposer.add(
+        this.services.events.on(
+          'scene:entered',
+          ({ id }) => {
+            if (id !== 'creation') return;
+            this.ui.toast(NEXT_REFUSED_TEXT, 'warn');
+            this.#leave();
+          },
+          this,
+        ),
+      );
+      return;
+    }
+    const fill = nextCreation(result.data);
+    this.#restored = { fill, iteration: result.data.meta.iteration };
+    const base = CLASSES[fill.classId].baseAttributes;
+    this.#classId = fill.classId;
+    this.#portrait = fill.appearance.portrait;
+    this.#primary = fill.appearance.primary;
+    this.#secondary = fill.appearance.secondary;
+    for (const attribute of ATTRIBUTES) this.#alloc[attribute] = fill.attributes[attribute] - base[attribute];
+    this.#difficulty = fill.difficulty;
+    this.#startName = fill.name;
   }
 
   override render(renderer: Renderer): void {
@@ -355,7 +410,7 @@ export class CreationScene extends UiScene<'creation'> {
 
   #buildForm(form: HTMLDivElement): void {
     // The name field survives re-renders by value, not by node: keep the text.
-    const nameValue = this.#nameField?.value ?? '';
+    const nameValue = this.#nameField?.value ?? this.#startName;
     this.#nameField = testId(
       h('input', {
         class: 'creation-name',
@@ -375,11 +430,23 @@ export class CreationScene extends UiScene<'creation'> {
         keydown: (event: Event) => {
           if ((event as KeyboardEvent).key === 'Enter') (event.currentTarget as HTMLInputElement).blur();
         },
+        // SPEC-058 §4.2: a renamed instance is a variant, as the name is typed.
+        input: () => this.#syncVariant(),
       }),
       'creation-name',
     );
+    const restored = this.#restored;
+    this.#variant = null;
+    const nextRows: HTMLElement[] = [];
+    if (restored !== null) {
+      // SPEC-058 §4.2: which instance this is, and whose profile it was restored from.
+      const variant = testId(h('p', { class: 'creation-variant' }, VARIANT_LOGGED_TEXT), 'creation-variant');
+      this.#variant = variant;
+      nextRows.push(testId(h('p', { class: 'creation-next' }, creationNextText(restored.iteration)), 'creation-next'), variant);
+    }
     form.replaceChildren(
       h('p', { class: 'creation-title' }, 'New salvager'),
+      ...nextRows,
       h('label', { class: 'creation-row' }, h('span', {}, 'Name'), this.#nameField),
       this.#kinRow(),
       this.#classCards(),
@@ -396,6 +463,14 @@ export class CreationScene extends UiScene<'creation'> {
       this.#difficultyRow(),
       this.#previewAndConfirm(),
     );
+    this.#syncVariant();
+  }
+
+  /** SPEC-058 §4.2: `creation-variant` shows while any field differs from the restored profile. */
+  #syncVariant(): void {
+    const variant = this.#variant;
+    if (variant === null) return;
+    variant.hidden = !this.#changed();
   }
 
   /**
@@ -632,9 +707,24 @@ export class CreationScene extends UiScene<'creation'> {
   /**
    * SPEC-044 §4.4: whether anything differs from the form the scene opened
    * with — a name typed (and still there), a class, a face, either colour, a
-   * point spent, the difficulty.
+   * point spent, the difficulty. SPEC-058 §4.2: in next mode the form opened
+   * on the restored profile, so that is what a change is measured from.
    */
   #changed(): boolean {
+    const restored = this.#restored;
+    if (restored !== null) {
+      const fill = restored.fill;
+      const totals = this.#totals();
+      return (
+        normalizeName(this.#nameField?.value ?? this.#startName) !== fill.name ||
+        this.#classId !== fill.classId ||
+        this.#portrait !== fill.appearance.portrait ||
+        this.#primary !== fill.appearance.primary ||
+        this.#secondary !== fill.appearance.secondary ||
+        ATTRIBUTES.some((attribute) => totals[attribute] !== fill.attributes[attribute]) ||
+        this.#difficulty !== fill.difficulty
+      );
+    }
     return (
       (this.#nameField?.value ?? '').trim() !== '' ||
       this.#classId !== null ||
@@ -689,22 +779,37 @@ export class CreationScene extends UiScene<'creation'> {
       attributes: this.#totals(),
       difficulty: this.#difficulty,
     };
-    // The store resolves the seed (the ?seed flag, else its own); passing none
-    // here keeps SPEC-008's single seeding path.
-    this.services.save.create(this.#slot, creation);
     const services = this.services;
+    // SPEC-058 §4.2: next mode archives the finished run and binds its
+    // successor on the old seed; a failed archive write leaves the slot as it
+    // was, and the store has said so. A new salvager is created as ever.
+    const next = this.#restored !== null;
+    if (next) {
+      if (services.save.beginNextIteration(this.#slot, creation) === null) {
+        this.#leaving = false;
+        this.#renderForm();
+        return;
+      }
+    } else {
+      // The store resolves the seed (the ?seed flag, else its own); passing none
+      // here keeps SPEC-008's single seeding path.
+      services.save.create(this.#slot, creation);
+    }
     void services.go('station', {}).then((went) => {
       if (!went) {
         this.#leaving = false;
         return;
       }
       // Queued after the transition, or 14-d would clear it with the scene.
-      void dialogueLayer(services.uiRoot, services.events, {
+      const layer = dialogueLayer(services.uiRoot, services.events, {
         input: services.input,
         saveKey: () => services.save.current,
         typewriter: () => services.settings.get().typewriter,
         speed: () => services.settings.get().dialogueSpeed,
-      }).play('intro_command');
+      });
+      // SPEC-058 §4.6: a next instance hears the Warden's notice first.
+      if (next) void layer.play('ng_notice');
+      void layer.play('intro_command');
     });
   }
 }

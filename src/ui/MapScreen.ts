@@ -49,6 +49,8 @@ export interface MapScreenDeps {
   missions: () => readonly MapMissionRow[];
   track: (id: MissionId) => void;
   close: () => void;
+  /** SPEC-058 §4.5: a predecessor's body lies on this planet, so the legend lists `A salvager's body`. */
+  predecessor?: boolean;
 }
 
 /** §4.5: the canvas keeps 12 px of margin around the arena's diamond. */
@@ -219,10 +221,12 @@ export class MapScreen {
    * SPEC-054 §4.10: the underground's four marks list the same way — every
    * planet gets a descent and a cache, and a relic row even on Hive, which
    * has none (the same 26-h reasoning). SPEC-057 §4.5: `Your remains` lists
-   * on every planet too — a death can leave them on any surface.
+   * on every planet too — a death can leave them on any surface. SPEC-058
+   * §4.5: `A salvager's body` lists where the visit placed one.
    */
   #legend(): HTMLElement {
     const present = new Set<MapIconKind>(['player', 'objective', 'enemy', 'descent', 'cache', 'vault', 'relic', 'remains']);
+    if (this.#deps.predecessor === true) present.add('predecessor');
     for (const poi of this.#deps.planet.surface.pois) present.add(poiIcon(poi.kind));
     for (const node of this.#deps.planet.surface.nodes) present.add(nodeIcon(node.resource));
     // SPEC-030 §4.10: the shelter rows appear on planets that have shelters.

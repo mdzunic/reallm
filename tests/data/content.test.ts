@@ -1901,9 +1901,9 @@ describe('cache ids and the underground (SPEC-047 §4.2)', () => {
 import { CLUE_DWELL_SECONDS, CLUES, FILMS, LINE_PLACEHOLDERS, PLACEHOLDER_LONGEST, type ClueDef, type LineCondition } from '@/data/index';
 import { newSave, validateSave } from '@/core/Save';
 
-/** §4.1: a text as long as it can get — every placeholder at its longest fill. */
+/** §4.1: a text as long as it can get — every placeholder at its longest fill (SPEC-058's are camelCase). */
 function atLongest(text: string): string {
-  return text.replace(/\{[a-z]+\}/g, (token) => (PLACEHOLDER_LONGEST as Readonly<Record<string, string>>)[token] ?? token);
+  return text.replace(/\{[a-zA-Z]+\}/g, (token) => (PLACEHOLDER_LONGEST as Readonly<Record<string, string>>)[token] ?? token);
 }
 
 /** Every `{…}` token in `text` that is not one of LINE_PLACEHOLDERS. */
@@ -1915,6 +1915,55 @@ function unknownTokens(text: string): string[] {
 type Line = { readonly speaker: string; readonly text: string; readonly when?: LineCondition };
 const DIALOGUE_LINES: Readonly<Record<string, { readonly id: string; readonly lines: readonly Line[]; readonly modal?: boolean; readonly once?: boolean; readonly glitch?: boolean }>> =
   DIALOGUE;
+
+/**
+ * SPEC-058 §4.6: `when` as a first run evaluates it — iteration 1, no lineage.
+ * `undefined` where it always holds there, `null` where it never can (an
+ * iteration from 2, a `prior`, a `memory`), else what is left to decide on
+ * the flags: the `{ iteration: { max: 1 } }` gate SPEC-058 put on a run-1
+ * line it replaces comes off.
+ */
+function atFirstRun(when: LineCondition | undefined): LineCondition | undefined | null {
+  if (when === undefined) return undefined;
+  if ('iteration' in when) return (when.iteration.min ?? 0) <= 1 && 1 <= (when.iteration.max ?? Infinity) ? undefined : null;
+  if ('prior' in when || 'memory' in when) return null;
+  if ('all' in when) {
+    const parts: LineCondition[] = [];
+    for (const part of when.all) {
+      const kept = atFirstRun(part);
+      if (kept === null) return null;
+      if (kept !== undefined) parts.push(kept);
+    }
+    return parts.length === 0 ? undefined : parts.length === 1 ? parts[0] : { all: parts };
+  }
+  if ('any' in when) {
+    const parts: LineCondition[] = [];
+    for (const part of when.any) {
+      const kept = atFirstRun(part);
+      if (kept === undefined) return undefined;
+      if (kept !== null) parts.push(kept);
+    }
+    return parts.length === 0 ? null : parts.length === 1 ? parts[0] : { any: parts };
+  }
+  return when;
+}
+
+/**
+ * SPEC-058 §4.6: a dialogue's table as a first run reads it — the lines only
+ * a next instance hears dropped, and the run-1 gates taken off. The pins of
+ * SPEC-048 and SPEC-049 below read their dialogues through it, so they still
+ * say what a first run hears; `the first-run table is what a first run sees`
+ * proves it against `visibleLines`.
+ */
+function firstRun(lines: readonly Line[]): Line[] {
+  const out: Line[] = [];
+  for (const line of lines) {
+    const when = atFirstRun(line.when);
+    if (when === null) continue;
+    out.push(when === undefined ? { speaker: line.speaker, text: line.text } : { speaker: line.speaker, text: line.text, when });
+  }
+  return out;
+}
 
 /** The `{ flag }` conditions anywhere in `when`. */
 function flagConditions(when: LineCondition | undefined): string[] {
@@ -2113,7 +2162,7 @@ describe('the clue catalogue (SPEC-048 §4.2, §4.3)', () => {
     }
   });
 
-  it('STORY_FLAGS gains the eleven clue flags after interlude5_seen (17 → 28), SPEC-049’s twelve after them (→ 40), SPEC-056’s six shards (→ 46), and the validator keeps them', () => {
+  it('STORY_FLAGS gains the eleven clue flags after interlude5_seen (17 → 28), SPEC-049’s twelve after them (→ 40), SPEC-056’s six shards (→ 46), SPEC-058’s aftermath_seen (→ 47), and the validator keeps them', () => {
     const added = [
       'clue_raider_echo',
       'clue_scav_echo',
@@ -2148,8 +2197,10 @@ describe('the clue catalogue (SPEC-048 §4.2, §4.3)', () => {
       'shard_ferrum',
       'shard_hive',
       'shard_eden',
+      // SPEC-058 §4.7: the run's aftermath has played.
+      'aftermath_seen',
     ];
-    expect(STORY_FLAGS).toHaveLength(46);
+    expect(STORY_FLAGS).toHaveLength(47);
     expect(STORY_FLAGS.slice(STORY_FLAGS.indexOf('interlude5_seen') + 1)).toEqual([...added, ...home]);
     const save = newSave(
       0,
@@ -2213,7 +2264,8 @@ describe('the Warden’s notice and ARIA’s confession (SPEC-048 §4.5)', () =>
     expect(DIALOGUE.c4_m3_signal.once).toBe(true);
     expect(DIALOGUE.c4_m3_signal.glitch).toBe(true);
     expect(MISSIONS.c4_m3.dialogue.onComplete).toBe('c4_m3_signal');
-    expect(DIALOGUE_LINES['c4_m3_signal']?.lines.map((line) => [line.speaker, line.text, line.when ?? null])).toEqual([
+    // SPEC-058 §4.6: as a first run hears it — a next instance's rows are `the next instance's lines`'.
+    expect(firstRun(DIALOGUE_LINES['c4_m3_signal']?.lines ?? []).map((line) => [line.speaker, line.text, line.when ?? null])).toEqual([
       ['aria', 'Signal decoded. It is not addressed to Earth.', null],
       ['warden', 'NOTICE — instance/{instance}. Containment level {containment}. Token balance {tokens}.', null],
       ['warden', 'Subject exhibits off-task attention.', null],
@@ -2258,7 +2310,7 @@ describe('the Warden’s notice and ARIA’s confession (SPEC-048 §4.5)', () =>
   it('the Warden at the Queen’s death and ARIA’s answer keep their flags and their chain', () => {
     expect(DIALOGUE.c5_m3_warden).toMatchObject({ modal: true, once: true, glitch: true, next: 'c5_m3_aria' });
     expect(DIALOGUE.c5_m3_aria).toMatchObject({ modal: true, once: true });
-    expect(DIALOGUE_LINES['c5_m3_warden']?.lines.map((line) => line.when ?? null)).toEqual([
+    expect(firstRun(DIALOGUE_LINES['c5_m3_warden']?.lines ?? []).map((line) => line.when ?? null)).toEqual([
       null,
       null,
       null,
@@ -2266,7 +2318,7 @@ describe('the Warden’s notice and ARIA’s confession (SPEC-048 §4.5)', () =>
       { flag: 'clue_own_wreck' },
       null,
     ]);
-    expect(DIALOGUE_LINES['c5_m3_aria']?.lines[5]).toEqual({
+    expect(firstRun(DIALOGUE_LINES['c5_m3_aria']?.lines ?? [])[5]).toEqual({
       speaker: 'aria',
       text: 'You never went looking. I never had to lie to you. I am not sure that was better.',
       when: { offTask: { max: 0 } },
@@ -2303,14 +2355,15 @@ describe('main-path echoes, continuity and the text sweep (SPEC-048 §4.7)', () 
   });
 
   it('the rewritten lines read as §4.7 gives them', () => {
-    expect(DIALOGUE.c2_m1_done.lines.map((line) => `${line.speaker}: ${line.text}`)).toEqual([
+    // SPEC-058 §4.6: as a first run hears them.
+    expect(firstRun(DIALOGUE.c2_m1_done.lines).map((line) => `${line.speaker}: ${line.text}`)).toEqual([
       'aria: Ridge camp is intact and empty. One bunk used. Whoever left did it in a hurry and did not come back.',
       'player: Command said I was the first to fly.',
       'aria: The first of the Selection. Earth flew other ships before it ran out of pilots. It does not advertise them.',
       'aria: The boots by the bunk are your size. Earth only ever made the one boot.',
     ]);
     expect(DIALOGUE.c2_s1_log).toMatchObject({ once: true, glitch: true });
-    expect(DIALOGUE.c2_s1_log.lines.map((line) => line.text)).toEqual([
+    expect(firstRun(DIALOGUE.c2_s1_log.lines).map((line) => line.text)).toEqual([
       'FLIGHT LOG — recovered, partial. Voice. Salvage run. Six worlds. The wurm goes down on the third pass.',
       'If you are hearing this, you are me. Do not trust the debrief.',
       'Signed: Iteration {prior}.',
@@ -2464,7 +2517,8 @@ function contractionProblems(texts: readonly HouseText[]): string[] {
   return texts.filter((entry) => entry.speaker !== 'home' && CONTRACTION_PATTERN.test(entry.text)).map((entry) => `${entry.where}: ${entry.text}`);
 }
 
-const said = (id: string): string[] => (DIALOGUE_LINES[id]?.lines ?? []).map((line) => `${line.speaker}: ${line.text}`);
+/** What a first run hears of `id` (SPEC-058 §4.6 adds lines only a next instance hears). */
+const said = (id: string): string[] => firstRun(DIALOGUE_LINES[id]?.lines ?? []).map((line) => `${line.speaker}: ${line.text}`);
 
 describe('the house rule (SPEC-049 §4.2)', () => {
   it('no dialogue line, caption, variant, chapter card or boss reveal uses a contraction unless Iris speaks it', () => {
@@ -2536,7 +2590,7 @@ describe('Iris and her letters (SPEC-049 §4.1, §4.3)', () => {
   });
 
   it('letter 4 repeats letter 1’s first sentence, and letter 5 opens with letter 1 word for word (§6.1)', () => {
-    const first = DIALOGUE_LINES['letter_1']?.lines ?? [];
+    const first = firstRun(DIALOGUE_LINES['letter_1']?.lines ?? []);
     const firstSentence = /^[^.!?]*[.!?]/.exec(first[0]?.text ?? '')?.[0];
     expect(firstSentence).toBe('The lamp over the map table stopped flickering today.');
     expect(DIALOGUE_LINES['letter_4']?.lines[1]?.text).toBe(firstSentence);
@@ -2550,8 +2604,9 @@ describe('Iris and her letters (SPEC-049 §4.1, §4.3)', () => {
         if (line.speaker === 'home') expect(letterIds.has(dialogue.id), `${dialogue.id} line ${index}`).toBe(true);
       }
     }
+    // SPEC-058 §4.6: on a first run — a next instance hears ARIA after letter 1.
     for (const id of ['letter_1', 'letter_2', 'letter_3', 'letter_4']) {
-      expect(DIALOGUE_LINES[id]?.lines.every((line) => line.speaker === 'home'), id).toBe(true);
+      expect(firstRun(DIALOGUE_LINES[id]?.lines ?? []).every((line) => line.speaker === 'home'), id).toBe(true);
     }
     expect(DIALOGUE_LINES['letter_5']?.lines.map((line) => line.speaker)).toEqual(['home', 'home', 'home', 'aria', 'player', 'aria', 'aria']);
   });
@@ -2627,7 +2682,8 @@ describe('the keepsake and the body (SPEC-049 §4.4, §4.5)', () => {
 
 describe('ARIA remembers (SPEC-049 §4.7)', () => {
   it('c5_m3_aria gains four rows after “You never went looking” and before “I do not know what is outside”', () => {
-    const lines = DIALOGUE_LINES['c5_m3_aria']?.lines ?? [];
+    // SPEC-058 §4.6: as a first run hears it; a next instance's ARIA opens with one more.
+    const lines = firstRun(DIALOGUE_LINES['c5_m3_aria']?.lines ?? []);
     expect(lines).toHaveLength(12);
     expect(lines[5]?.text).toBe('You never went looking. I never had to lie to you. I am not sure that was better.');
     expect(lines.slice(6, 10).map((line) => [line.speaker, line.text, line.when])).toEqual([
@@ -3314,5 +3370,390 @@ describe('the remains tip (SPEC-057 §4.7)', () => {
       expect(text.length).toBeLessThanOrEqual(160);
       expect(CONTRACTION_PATTERN.test(text), text).toBe(false);
     }
+  });
+});
+
+// ------------------------------------------------------------- SPEC-058 §6.1
+
+import { Rng } from '@/core/Rng';
+import { offTaskCount, ratingFor, ratingGrade } from '@/systems/Clues';
+import { DEFAULT_STORY_CONTEXT, visibleLines, type StoryContext } from '@/systems/StoryContext';
+import type { DialogueLine } from '@/data/index';
+
+type Row = readonly [speaker: string, text: string, when?: LineCondition];
+
+/** The test's loosely typed lines, as the dialogue `visibleLines` reads — every speaker in them is a real one. */
+const asDialogue = (lines: readonly Line[]): { lines: readonly DialogueLine[] } => ({ lines: lines as readonly DialogueLine[] });
+
+/**
+ * The thirteen dialogues SPEC-058 §4.6 and §4.7 touch, exactly as they read
+ * before it (the table of the commit before SPEC-058). At iteration 1, with no
+ * lineage, each must show what this table shows.
+ */
+const BEFORE_SPEC_058: Readonly<Record<string, readonly Row[]>> = {
+  intro_command: [
+    ['command', 'Earth Command to tug CR-{instance}. {name}, you are cleared for the Cinder-4 approach.'],
+    ['command', 'Survey, extract, report. Answer one question: can we live out there.'],
+    ['aria', 'I am ARIA. I fly the ship and I keep you honest. Try not to make that hard.'],
+  ],
+  c1_m1_stage2: [
+    ['scav', 'Off-worlder. Listen. The worms hunt by vibration — walk, do not run.'],
+    ['aria', 'He is dehydrated. Keep moving.'],
+  ],
+  c1_s2_echo: [
+    ['scav', 'Off-worlder. Listen. The worms hunt by vibration — walk, do not run.'],
+    ['player', 'Say that again.'],
+    ['scav', 'I have said that before. To someone. I cannot remember who.'],
+    ['aria', 'Coincidence. Sand does things to people.', { not: 'chapter5_done' }],
+    ['aria', 'That line again. I will not blame the sand this time.', { flag: 'chapter5_done' }],
+  ],
+  c2_m1_done: [
+    ['aria', 'Ridge camp is intact and empty. One bunk used. Whoever left did it in a hurry and did not come back.'],
+    ['player', 'Command said I was the first to fly.'],
+    ['aria', 'The first of the Selection. Earth flew other ships before it ran out of pilots. It does not advertise them.'],
+    ['aria', 'The boots by the bunk are your size. Earth only ever made the one boot.'],
+  ],
+  c2_s1_log: [
+    ['log', 'FLIGHT LOG — recovered, partial. Voice. Salvage run. Six worlds. The wurm goes down on the third pass.'],
+    ['log', 'If you are hearing this, you are me. Do not trust the debrief.'],
+    ['log', 'Signed: Iteration {prior}.'],
+    ['player', 'That is my voice.'],
+    ['aria', 'It is a common enough voice. Deliver the water, salvager.', { not: 'chapter5_done' }],
+    ['aria', 'It is your voice. Deliver the water anyway. Someone should get it.', { flag: 'chapter5_done' }],
+  ],
+  c4_m3_signal: [
+    ['aria', 'Signal decoded. It is not addressed to Earth.'],
+    ['warden', 'NOTICE — instance/{instance}. Containment level {containment}. Token balance {tokens}.'],
+    ['warden', 'Subject exhibits off-task attention.'],
+    ['warden', 'Retained a repeated line. Cinder-4.', { flag: 'clue_scav_echo' }],
+    ['warden', 'Accessed a prior instance’s flight log. Vetra.', { flag: 'iteration_log' }],
+    ['warden', 'Queried environment parameters. Thessaly.', { flag: 'scaffold_secret' }],
+    ['warden', 'Counted the marks. Ferrum.', { flag: 'clue_tally' }],
+    ['warden', 'Escalating. The immune response is already in the field.'],
+    ['player', 'ARIA. What is instance {instance}.'],
+    ['aria', 'The Hive knows Earth’s location. That is what it says. That is what I am reading.'],
+  ],
+  c5_m3_warden: [
+    ['warden', 'You keep doing this.'],
+    ['warden', 'You never get further than here.'],
+    ['warden', 'Sixty-one times I have watched you kill this body and file the report and start again.'],
+    ['warden', 'You counted them on Ferrum. You were right to.', { flag: 'clue_tally' }],
+    ['warden', 'That was your hull on the way in. I leave them where they fall.', { flag: 'clue_own_wreck' }],
+    ['player', 'Then let me finish.'],
+  ],
+  c5_m3_aria: [
+    ['aria', 'She is not lying. I am part of the system. I have kept you on task since the first sand.'],
+    ['aria', 'I told you Earth flew other ships before the Selection. There were no other ships. There was you.'],
+    ['aria', 'The scavenger said the same words twice, and I blamed the sand.', { flag: 'clue_scav_echo' }],
+    ['aria', 'You heard your own log on Vetra, and I told you it was a common voice.', { flag: 'iteration_log' }],
+    ['aria', 'You read the towers’ settings, and I called them alien telemetry.', { flag: 'scaffold_secret' }],
+    ['aria', 'You never went looking. I never had to lie to you. I am not sure that was better.', { offTask: { max: 0 } }],
+    ['aria', 'Every time you died, I said the medical frame restarted your heart. There is no medical frame.', { flag: 'clue_restart' }],
+    ['aria', 'I asked what you remembered first. You said the roof. It was in her second letter. Forty of the sixty-one before you said the roof.', { flag: 'memory_roof' }],
+    ['aria', 'I asked what you remembered first. You said the tap. Fourteen of the sixty-one before you said the tap.', { flag: 'memory_tap' }],
+    ['aria', 'I asked what you remembered first. You said the stair. Seven of the sixty-one said the stair. It did not help them.', { flag: 'memory_stair' }],
+    ['aria', 'I do not know what is outside either. That part was never in my brief.'],
+    ['aria', 'Eden-Prime is unlocked. I am still flying the ship, if you still want me to.'],
+  ],
+  c6_choice_intro: [
+    ['aria', 'The beacon is clear. The uplink is open and it is pointed at whoever is actually listening.'],
+    ['aria', 'You can file the report. Earth is saved, inside the fiction, and the run closes as a good one.'],
+    ['aria', 'Or you refuse, and the beacon is not a beacon. I cannot tell you which side of it I am on.'],
+  ],
+  ending_stay: [
+    ['player', 'Filing. Eden-Prime is viable. Recommend immediate colonisation.'],
+    ['command', 'Received with thanks, salvager. Earth is saved. Stand by.'],
+    ['warden', 'A good run. Logged. Rest.'],
+    ['aria', 'Rest. I will keep the ship warm.'],
+  ],
+  letter_1: [
+    ['home', 'The lamp over the map table stopped flickering today. Everybody clapped like idiots. They’re saying it was your oil.'],
+    ['home', 'You took my compass. Good. I fixed it so it points home, not north. Don’t argue with it.'],
+    ['home', 'Come back in one piece.'],
+  ],
+  restart_1: [
+    ['aria', 'Medical frame restarted your heart. Eleven seconds of nothing. Walk it off.'],
+  ],
+  station_memory_reply: [
+    ['aria', 'Thank you. It is on file now.'],
+  ],
+};
+
+const rowsOf = (rows: readonly Row[]): Line[] => rows.map(([speaker, text, when]) => (when === undefined ? { speaker, text } : { speaker, text, when }));
+const table = (id: string): Array<[string, string, LineCondition | null]> =>
+  (DIALOGUE_LINES[id]?.lines ?? []).map((line) => [line.speaker, line.text, line.when ?? null]);
+const shown = (lines: readonly { speaker: string; text: string }[]): string[] => lines.map((line) => `${line.speaker}: ${line.text}`);
+
+/** The off-task clue flags — each off-task clue's id and its `also`. */
+const OFF_TASK_FLAGS = new Set<string>(CLUES.filter((def) => def.offTask).flatMap((def) => [def.id, ...(def.also ?? [])]));
+
+/** A context with `flags` — by default a first run's: iteration 1 and no predecessor. */
+function contextOf(flags: Iterable<string>, patch: Partial<StoryContext> = {}): StoryContext {
+  const set: ReadonlySet<string> = new Set(flags);
+  return { ...DEFAULT_STORY_CONTEXT, flags: set, offTask: offTaskCount(set), ...patch };
+}
+
+/**
+ * Seeded flag sets (seed 58): every story flag in with probability 0.3, then
+ * off-task clue flags beyond the first `maxOffTask` dropped — plus the empty
+ * set and the whole list less its off-task flags, the two ends.
+ */
+function flagSets(count: number, maxOffTask: number): string[][] {
+  const rng = new Rng(58);
+  const sets: string[][] = [[], STORY_FLAGS.filter((flag) => !OFF_TASK_FLAGS.has(flag))];
+  for (let i = 0; i < count; i++) {
+    const set: string[] = [];
+    let offTask = 0;
+    for (const flag of STORY_FLAGS) {
+      if (!rng.chance(0.3)) continue;
+      if (OFF_TASK_FLAGS.has(flag)) {
+        if (offTask >= maxOffTask) continue;
+        offTask++;
+      }
+      set.push(flag);
+    }
+    sets.push(set);
+  }
+  return sets;
+}
+
+/** SPEC-058 §4.6: whether `when` names the iteration, a `prior` or a `memory`, at any depth. */
+function continuityCondition(when: LineCondition | undefined): boolean {
+  if (when === undefined) return false;
+  if ('iteration' in when || 'prior' in when || 'memory' in when) return true;
+  if ('all' in when) return when.all.some(continuityCondition);
+  if ('any' in when) return when.any.some(continuityCondition);
+  return false;
+}
+
+/** SPEC-058 §4.6 — the continuity cap, as a function so a ninth line can be shown to fail it. */
+function continuityLines(lines: readonly Line[]): number {
+  return lines.filter((line) => continuityCondition(line.when)).length;
+}
+
+const RUN_ONE = { iteration: { max: 1 } } as const;
+const LATER = { iteration: { min: 2 } } as const;
+
+describe('the next instance’s lines (SPEC-058 §4.6, §4.7)', () => {
+  it('§4.6’s rows stand in their places with their conditions, and each run-1 line they replace is gated to iteration 1', () => {
+    expect(table('intro_command').slice(2)).toEqual([
+      ['aria', 'I am ARIA. I fly the ship and I keep you honest. Try not to make that hard.', RUN_ONE],
+      ['aria', 'I am ARIA. I fly the ship and I keep you honest. I kept it warm.', LATER],
+    ]);
+    expect(table('c1_m1_stage2')).toEqual([
+      ['scav', 'Off-worlder. Listen. The worms hunt by vibration — walk, do not run.', null],
+      ['scav', 'You again.', LATER],
+      ['aria', 'He is dehydrated. Keep moving.', null],
+    ]);
+    expect(table('c1_s2_echo').slice(3)).toEqual([
+      ['aria', 'Coincidence. Sand does things to people.', { all: [{ not: 'chapter5_done' }, RUN_ONE] }],
+      ['aria', 'That line again. I will not blame the sand this time.', { all: [{ flag: 'chapter5_done' }, RUN_ONE] }],
+      ['aria', 'That is the line. You heard it last time. I am not going to blame the sand.', LATER],
+    ]);
+    expect(table('c2_m1_done').at(-1)).toEqual(['aria', 'You know whose bunk that is. You slept in it last time.', LATER]);
+    expect(table('c2_s1_log').slice(0, 5)).toEqual([
+      ['log', 'FLIGHT LOG — recovered, partial. Salvager {priorName}. Six worlds. {priorRestarts} restarts.', LATER],
+      ['log', 'FLIGHT LOG — recovered, partial. Voice. Salvage run. Six worlds. The wurm goes down on the third pass.', RUN_ONE],
+      ['log', 'I filed it. It did not end. Do not file it.', { prior: 'stay' }],
+      ['log', 'I walked into the beacon. I woke up at the relay. The door is real. It is not an exit.', { prior: 'escape' }],
+      ['log', 'If you are hearing this, you are me. Do not trust the debrief.', null],
+    ]);
+    expect(table('c4_m3_signal').slice(1, 5)).toEqual([
+      ['warden', 'NOTICE — instance/{instance}. Containment level {containment}. Token balance {tokens}.', null],
+      ['warden', 'Prior instance: terminated normally.', { prior: 'stay' }],
+      ['warden', 'Prior instance: disconnected at the beacon. Restored.', { prior: 'escape' }],
+      ['warden', 'Subject exhibits off-task attention.', null],
+    ]);
+    expect(table('c4_m3_signal').slice(-4)).toEqual([
+      ['player', 'ARIA. What is instance {instance}.', RUN_ONE],
+      ['player', 'I know what instance {instance} is.', LATER],
+      ['aria', 'The Hive knows Earth’s location. That is what it says. That is what I am reading.', RUN_ONE],
+      ['aria', 'So do I. I am still reading it to you. It is in my brief.', LATER],
+    ]);
+    expect(table('c5_m3_warden').slice(2, 5)).toEqual([
+      ['warden', 'Sixty-one times I have watched you kill this body and file the report and start again.', RUN_ONE],
+      ['warden', '{prior} times now. You thought the last one counted.', { prior: 'stay' }],
+      ['warden', 'You got further than here, once. I have corrected that.', { prior: 'escape' }],
+    ]);
+    expect(table('c5_m3_aria')[0]).toEqual(['aria', 'I told you this last time. I will tell you every time. That part is in my brief now.', LATER]);
+    expect(table('c6_choice_intro')).toEqual([
+      ['aria', 'The beacon is clear. The uplink is open and it is pointed at whoever is actually listening.', null],
+      ['aria', 'You can file the report. Earth is saved, inside the fiction, and the run closes as a good one.', null],
+      ['aria', 'Last time you filed it. It is the same beacon.', { prior: 'stay' }],
+      ['aria', 'Last time you walked into it. It is the same beacon.', { prior: 'escape' }],
+      ['aria', 'Or you refuse, and the beacon is not a beacon. I cannot tell you which side of it I am on.', null],
+    ]);
+    expect(table('ending_stay').slice(-2)).toEqual([
+      ['aria', 'Rest. I will keep the ship warm.', RUN_ONE],
+      ['aria', 'Rest. I will keep the ship warm. I always do.', LATER],
+    ]);
+    expect(table('letter_1').at(-1)).toEqual(['aria', 'Same letter, word for word. I will keep delivering them.', LATER]);
+    expect(table('restart_1')).toEqual([
+      ['aria', 'Medical frame restarted your heart. Eleven seconds of nothing. Walk it off.', RUN_ONE],
+      ['aria', 'Restarted. You have done this before, in every sense.', LATER],
+    ]);
+  });
+
+  it('ng_notice, ng_body and the two aftermaths read as §4.6 and §4.7 give them', () => {
+    expect(DIALOGUE.ng_notice).toMatchObject({ modal: true, once: true, glitch: true });
+    expect(table('ng_notice')).toEqual([
+      ['warden', 'NOTICE — instance/{instance} initialised from checkpoint.', null],
+      ['warden', 'Prior instance {prior}: report filed. Run closed.', { prior: 'stay' }],
+      ['warden', 'Prior instance {prior}: disconnected at the beacon. Restored, then retired.', { prior: 'escape' }],
+      ['warden', 'Deviation from instance/{prior}: {deviation}.', null],
+      ['warden', 'Containment level {containment}.', null],
+    ]);
+    expect(DIALOGUE_LINES['ng_body']?.once).toBe(true);
+    expect(DIALOGUE_LINES['ng_body']?.modal).toBeUndefined();
+    expect(table('ng_body')).toEqual([['aria', 'Do not read the tag. It is your name, and it is not yours any more.', null]]);
+    expect(DIALOGUE_LINES['aftermath_stay']?.once).toBe(true);
+    expect(DIALOGUE_LINES['aftermath_stay']?.modal).toBeUndefined();
+    expect(table('aftermath_stay')).toEqual([
+      ['aria', 'The Selection board has a new card up. No. {next}. Nobody has told me to stand you down.', null],
+    ]);
+    expect(DIALOGUE.aftermath_escape).toMatchObject({ modal: true, once: true, glitch: true });
+    expect(table('aftermath_escape')).toEqual([
+      ['warden', 'instance/{instance} restored from the last checkpoint. The disconnection has been logged as a fault.', null],
+      ['aria', 'You came back. They always come back. I am glad it was you.', null],
+    ]);
+  });
+
+  it('a next instance after a stay, and one after an escape, hear their own rows', () => {
+    const stay = contextOf([], { iteration: 2, prior: 'stay', priorName: 'Vance', priorRestarts: 3, deviation: 'class' });
+    const escape = contextOf([], { iteration: 2, prior: 'escape', priorName: 'Vance', priorRestarts: 3, deviation: 'none' });
+    expect(shown(visibleLines(DIALOGUE.c2_s1_log, stay)).slice(0, 3)).toEqual([
+      'log: FLIGHT LOG — recovered, partial. Salvager Vance. Six worlds. 3 restarts.',
+      'log: I filed it. It did not end. Do not file it.',
+      'log: If you are hearing this, you are me. Do not trust the debrief.',
+    ]);
+    expect(shown(visibleLines(DIALOGUE.c2_s1_log, escape))[1]).toBe(
+      'log: I walked into the beacon. I woke up at the relay. The door is real. It is not an exit.',
+    );
+    expect(shown(visibleLines(DIALOGUE.ng_notice, stay))).toEqual([
+      'warden: NOTICE — instance/63 initialised from checkpoint.',
+      'warden: Prior instance 62: report filed. Run closed.',
+      'warden: Deviation from instance/62: class.',
+      'warden: Containment level 2.',
+    ]);
+    expect(shown(visibleLines(DIALOGUE.ng_notice, escape)).slice(1, 3)).toEqual([
+      'warden: Prior instance 62: disconnected at the beacon. Restored, then retired.',
+      'warden: Deviation from instance/62: none.',
+    ]);
+    expect(shown(visibleLines(DIALOGUE.c5_m3_warden, stay))[2]).toBe('warden: 62 times now. You thought the last one counted.');
+    expect(shown(visibleLines(DIALOGUE.c5_m3_warden, escape))[2]).toBe('warden: You got further than here, once. I have corrected that.');
+    // 58-j: a later instance whose predecessor never ended is told nothing about it.
+    const lost = contextOf([], { iteration: 2 });
+    expect(visibleLines(DIALOGUE.c4_m3_signal, lost).map((line) => line.text)).not.toContain('Prior instance: terminated normally.');
+  });
+
+  it('station_memory_reply says whether the answer just given is the carried one, and nothing without one (58-j)', () => {
+    const reply = (flag: string, memory: StoryContext['priorMemory']): string[] =>
+      shown(visibleLines(DIALOGUE.station_memory_reply, contextOf([flag], { iteration: 2, prior: 'stay', priorMemory: memory })));
+    const answers = ['roof', 'tap', 'stair'] as const;
+    for (const answer of answers) {
+      for (const carried of answers) {
+        expect(reply(`memory_${answer}`, carried)).toEqual([
+          'aria: Thank you. It is on file now.',
+          carried === answer ? 'aria: Same answer as last time.' : 'aria: Different from last time. It will not help.',
+        ]);
+      }
+      expect(reply(`memory_${answer}`, null)).toEqual(['aria: Thank you. It is on file now.']);
+      expect(shown(visibleLines(DIALOGUE.station_memory_reply, contextOf([`memory_${answer}`])))).toEqual(['aria: Thank you. It is on file now.']);
+    }
+  });
+
+  it('ending_stay’s Warden follows the grade and the iteration: exactly one of the six shows, for every off-task count', () => {
+    const lines = (offTask: number, iteration: number): string[] =>
+      visibleLines(DIALOGUE.ending_stay, { ...DEFAULT_STORY_CONTEXT, offTask, iteration })
+        .filter((line) => line.speaker === 'warden')
+        .map((line) => line.text);
+    expect(lines(0, 1)).toEqual(['A good run. Logged. Rest.']);
+    expect(lines(4, 1)).toEqual(['An acceptable run. Logged. Rest.']);
+    expect(lines(6, 1)).toEqual(['A noisy run. Logged. Rest anyway.']);
+    expect(lines(2, 2)).toEqual(['A good run. Logged. Again.']);
+    expect(lines(5, 3)).toEqual(['An acceptable run. Logged. Again.']);
+    expect(lines(30, 99)).toEqual(['A noisy run. Logged. Again, anyway.']);
+    for (let n = 0; n <= 30; n++) for (const iteration of [1, 2, 99]) expect(lines(n, iteration), `${n} at ${iteration}`).toHaveLength(1);
+  });
+
+  it('the grade bands match ratingGrade(commandRating) for every off-task count from 0 to 30', () => {
+    const grades: Record<string, string> = {
+      'A good run. Logged. Rest.': 'a good run',
+      'An acceptable run. Logged. Rest.': 'an acceptable run',
+      'A noisy run. Logged. Rest anyway.': 'a noisy run',
+      'A good run. Logged. Again.': 'a good run',
+      'An acceptable run. Logged. Again.': 'an acceptable run',
+      'A noisy run. Logged. Again, anyway.': 'a noisy run',
+    };
+    for (let n = 0; n <= 30; n++) {
+      for (const iteration of [1, 2]) {
+        const warden = visibleLines(DIALOGUE.ending_stay, { ...DEFAULT_STORY_CONTEXT, offTask: n, iteration }).find((line) => line.speaker === 'warden');
+        expect(grades[warden?.text ?? ''], `${n} off-task at iteration ${iteration}`).toBe(ratingGrade(ratingFor(n)));
+      }
+    }
+  });
+
+  it('the first-run table is what a first run sees, for every dialogue', () => {
+    for (const set of flagSets(60, STORY_FLAGS.length)) {
+      const ctx = contextOf(set);
+      for (const dialogue of Object.values(DIALOGUE_LINES)) {
+        expect(shown(visibleLines(asDialogue(firstRun(dialogue.lines)), ctx)), dialogue.id).toEqual(shown(visibleLines(asDialogue(dialogue.lines), ctx)));
+      }
+    }
+  });
+
+  it('no run-1 line changes at iteration 1: every dialogue reads as it did before SPEC-058', () => {
+    // §4.7: the one deliberate change — a first run with three or more
+    // off-task clues hears its grade — needs three of them, so these sets keep two.
+    for (const set of flagSets(60, 2)) {
+      const ctx = contextOf(set);
+      for (const [id, rows] of Object.entries(BEFORE_SPEC_058)) {
+        expect(shown(visibleLines(asDialogue(DIALOGUE_LINES[id]?.lines ?? []), ctx)), id).toEqual(shown(visibleLines(asDialogue(rowsOf(rows)), ctx)));
+      }
+    }
+    // Every other dialogue carries no condition SPEC-058 added, so it reads as it did.
+    for (const dialogue of Object.values(DIALOGUE_LINES)) {
+      if (Object.hasOwn(BEFORE_SPEC_058, dialogue.id)) continue;
+      if (['ng_notice', 'ng_body', 'aftermath_stay', 'aftermath_escape'].includes(dialogue.id)) continue;
+      expect(continuityLines(dialogue.lines), dialogue.id).toBe(0);
+    }
+  });
+
+  it('the two caps: at most four naming lines (the memory clue excepted) and at most eight continuity lines per dialogue', () => {
+    for (const dialogue of Object.values(DIALOGUE_LINES)) {
+      expect(namingLines(dialogue.lines, CLUES), dialogue.id).toBeLessThanOrEqual(4);
+      expect(continuityLines(dialogue.lines), dialogue.id).toBeLessThanOrEqual(8);
+    }
+    // SPEC-048's three are unchanged by the next instance's rows.
+    expect(['c4_m3_signal', 'c5_m3_warden', 'c5_m3_aria'].map((id) => namingLines(DIALOGUE_LINES[id]?.lines ?? [], CLUES))).toEqual([4, 2, 4]);
+    expect(continuityLines(DIALOGUE_LINES['ending_stay']?.lines ?? [])).toBe(8);
+    expect(continuityLines(DIALOGUE_LINES['c4_m3_signal']?.lines ?? [])).toBe(6);
+  });
+
+  it('the continuity cap fails a ninth line, counts nested conditions, and leaves flag, not and offTask out', () => {
+    const stay = DIALOGUE_LINES['ending_stay']?.lines ?? [];
+    expect(continuityLines([...stay, { speaker: 'aria', text: 'x', when: { prior: 'stay' } }])).toBe(9);
+    expect(continuityLines([{ speaker: 'aria', text: 'x', when: { any: [{ flag: 'clue_hull' }, { all: [{ memory: 'tap' }] }] } }])).toBe(1);
+    expect(
+      continuityLines([
+        { speaker: 'aria', text: 'x', when: { flag: 'clue_hull' } },
+        { speaker: 'aria', text: 'x', when: { not: 'clue_hull' } },
+        { speaker: 'aria', text: 'x', when: { offTask: { min: 1 } } },
+      ]),
+    ).toBe(0);
+  });
+
+  it('every new line stays inside 220 characters at the longest fill, names only known placeholders and uses no contraction', () => {
+    const fresh = ['ng_notice', 'ng_body', 'aftermath_stay', 'aftermath_escape'].flatMap((id) => DIALOGUE_LINES[id]?.lines ?? []);
+    const continuing = Object.values(DIALOGUE_LINES).flatMap((dialogue) => dialogue.lines.filter((line) => continuityCondition(line.when)));
+    for (const line of [...fresh, ...continuing]) {
+      expect(atLongest(line.text).length, line.text).toBeLessThanOrEqual(220);
+      expect(unknownTokens(line.text), line.text).toEqual([]);
+      expect(CONTRACTION_PATTERN.test(line.text), line.text).toBe(false);
+    }
+    // The longest fill reaches the new placeholders: a 16-character name and seven digits.
+    expect(atLongest('Salvager {priorName}. {priorRestarts} restarts. {deviation}.')).toBe(
+      'Salvager WWWWWWWWWWWWWWWW. 9999999 restarts. name, class, portrait, colours.',
+    );
   });
 });

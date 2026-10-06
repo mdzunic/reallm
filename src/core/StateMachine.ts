@@ -16,7 +16,8 @@ export type SceneId = 'menu' | 'creation' | 'station' | 'starmap' | 'flight' | '
 
 export interface SceneParams {
   menu: { reason?: 'start' | 'quit' | 'error' };
-  creation: { slot: 0 | 1 | 2 };
+  /** SPEC-058 §4.1: `next` opens creation pre-filled from the slot's finished run, to begin its next instance. */
+  creation: { slot: 0 | 1 | 2; next?: boolean };
   /** The oil subsidy is computed in `Station.enter()` (SPEC-010 §4.6), never passed in. */
   station: { arrivedFrom?: PlanetId; recalled?: boolean };
   /** SPEC-044 §4.6: `planet` is preselected when it is unlocked; `undefined` lets the map choose. */
@@ -83,12 +84,13 @@ export const FATAL_TRANSITION_TEXT = 'Something went wrong — reload the page.'
  * `surface` are the pausable scenes, which is where "quit to menu" comes from
  * (D-10) — the other scenes get their route back when the spec that adds the UI
  * for it adds the row. SPEC-014's Quit tab (AC-29) added `station → menu`, and
- * SPEC-044's `creation-back` (§4.4) added `creation → menu`.
+ * SPEC-044's `creation-back` (§4.4) added `creation → menu`, and SPEC-058's
+ * `Next instance` (§4.1) `station → creation`.
  */
 export const ALLOWED_TRANSITIONS = {
   menu: ['creation', 'station'],
   creation: ['station', 'menu'],
-  station: ['starmap', 'menu'],
+  station: ['starmap', 'menu', 'creation'],
   starmap: ['station', 'flight'],
   flight: ['surface', 'station', 'menu'],
   surface: ['station', 'menu'],

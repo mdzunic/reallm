@@ -18,9 +18,14 @@
 // and then at most one aside — ARIA's mission clock, or her question about a
 // first memory — and an opening of the Character tab whose compass has
 // drifted plays ARIA's line about it.
+//
+// SPEC-058: an ended run's rail offers `Next instance` (§4.1); the replayed
+// stay ends on the Selection card (§4.7); after the ending, the entry plays
+// the aftermath once (§4.7, E95); and the header's containment level is the
+// capped one the enemies are scaled by (§4.4).
 import * as THREE from 'three';
 import { log } from '@/core/Log';
-import { maxHp, type Save } from '@/core/Save';
+import { maxHp, nextInstanceOffered, type Save } from '@/core/Save';
 import type { GameServices } from '@/core/Services';
 import { applyUpdate, updateReady } from '@/core/Updates';
 import type { SceneParams } from '@/core/StateMachine';
@@ -29,9 +34,12 @@ import { ClueTracker } from '@/systems/Clues';
 import { Economy } from '@/systems/Economy';
 import { asideDue, HOME_SESSION, isDriftedKeepsake, keepsakeText, letterDue, letterOf } from '@/systems/Home';
 import { applySupplies } from '@/systems/Service';
+import { containmentLevel } from '@/systems/Containment';
 import { Progression } from '@/systems/Progression';
-import { endingPending, interludeToPlay, LINE_LEDGER, stayReport } from '@/systems/StoryBeats';
-import { storyContextOf } from '@/systems/StoryContext';
+import { aftermathDue, endingPending, interludeToPlay, LINE_LEDGER, stayReport } from '@/systems/StoryBeats';
+import { instanceNumber, storyContextOf } from '@/systems/StoryContext';
+import { nextInstanceSheet } from '@/systems/UiHelpers';
+import { confirmSheet } from '@/ui/ConfirmSheet';
 import { director } from '@/scenes/Director';
 import { CharacterPanel } from '@/ui/CharacterPanel';
 import { openCommsLog } from '@/ui/CommsLog';
@@ -243,8 +251,14 @@ export class StationScene extends UiScene<'station'> {
         'dialogue:started',
         ({ id }) => {
           if (id === 'station_memory') this.#memoryAsked = true;
-          const letter = letterOf(id);
           const economy = this.#economy;
+          // SPEC-058 §4.7: the aftermath is seen as it starts — the rule SPEC-048 uses for clues.
+          if ((id === 'aftermath_stay' || id === 'aftermath_escape') && economy !== null) {
+            economy.setFlag('aftermath_seen');
+            this.services.save.request('mission');
+            return;
+          }
+          const letter = letterOf(id);
           if (letter === null || economy === null) return;
           economy.setFlag(letter.flag);
           this.services.save.request('mission');
@@ -314,6 +328,20 @@ export class StationScene extends UiScene<'station'> {
       this.services.save.request('mission');
     }
     await this.#homeOnEntry(data);
+    this.#aftermathOnEntry(data);
+  }
+
+  /**
+   * SPEC-058 §4.7 (E95): once the ending has been seen, the entry's last
+   * beat — after any owed ending, interlude, letter and debrief — is the
+   * aftermath, once: the escape's restore, played by a Continue or a Load
+   * after the veil, or the stay's new card at the next entry (and at the same
+   * entry as a replayed stay, 58-a). `aftermath_seen` is set as it starts.
+   */
+  #aftermathOnEntry(data: Save): void {
+    if (!this.#alive || !this.#present) return;
+    const due = aftermathDue(new Set(data.progress.flags), data.progress.endingSeen);
+    if (due !== null) void this.#dialogueLayer().play(due);
   }
 
   /**
@@ -411,11 +439,20 @@ export class StationScene extends UiScene<'station'> {
     if (ending === 'stay') {
       await overlay.playStay(stayReport(data));
       if (!this.#alive) return false;
+      // SPEC-058 §4.7: the Selection card, then the ending is seen (58-a).
+      await overlay.playSelectionCard({
+        number: instanceNumber(data.meta.iteration) + 1,
+        name: data.player.name,
+        portrait: data.player.appearance.portrait,
+      });
+      if (!this.#alive) return false;
       data.progress.endingSeen = true;
       this.services.save.request('mission');
+      // §4.1: the run has ended — the rail offers the next instance now.
+      this.#renderRail();
       return true;
     }
-    await overlay.playEscape();
+    await overlay.playEscape(data.meta.iteration);
     if (!this.#alive) return false;
     data.progress.endingSeen = true;
     this.services.save.request('manual');
@@ -477,12 +514,15 @@ export class StationScene extends UiScene<'station'> {
     const data = this.services.save.current;
     // AC-27: the containment level is the highest unlocked chapter — the
     // diegetic difficulty label of PLAN §5, now the frame's channel line.
-    let containment = 1;
+    // SPEC-058 §4.4: plus the instance's capped steps, the ones the enemies
+    // are scaled by.
+    let chapter = 1;
     if (this.#economy !== null) {
       for (const planet of PLANET_IDS) {
-        if (this.#economy.isUnlocked(planet)) containment = Math.max(containment, PLANETS[planet].chapter);
+        if (this.#economy.isUnlocked(planet)) chapter = Math.max(chapter, PLANETS[planet].chapter);
       }
     }
+    const containment = containmentLevel(chapter, data?.meta.iteration ?? 1);
     // SPEC-031 §4.4: the station's header, rail and panel are the frame's
     // head, rail and body.
     const screen = createScreen({ id: 'station', channel: channelText('station') });
@@ -558,12 +598,15 @@ export class StationScene extends UiScene<'station'> {
       primary,
       onSelect,
     });
-    const active = (this.services.save.current?.progress.missionsActive.length ?? 0) > 0;
+    const save = this.services.save.current;
+    const active = (save?.progress.missionsActive.length ?? 0) > 0;
     this.#screen?.setTabs([
       section('missions', 'Missions'),
       section('shop', 'Shop'),
       section('character', 'Character'),
       action('starmap', 'Star Map ›', () => this.#starmap(), active),
+      // SPEC-058 §4.1: an ended run, below the iteration cap, may begin its next instance.
+      ...(save !== null && nextInstanceOffered(save) ? [action('next', 'Next instance', () => this.#nextInstance())] : []),
       action('settings', 'Settings', () => this.#settings?.show()),
       // SPEC-045 §4.1: the lines the dialogue layer showed this run.
       action('comms', 'Comms log', () => this.#openComms()),
@@ -633,6 +676,26 @@ export class StationScene extends UiScene<'station'> {
         new CharacterPanel(box, { ...shared, unlocks: () => this.services.settings.get().unlocks });
         return;
     }
+  }
+
+  /**
+   * SPEC-058 §4.1: `Next instance` asks first, in the save's own numbers;
+   * `Initialise` writes the run as it stands — so the slot creation loads is
+   * this one, ending seen — and opens creation in next mode with no prologue.
+   * Cancel changes nothing.
+   */
+  #nextInstance(): void {
+    const data = this.services.save.current;
+    if (this.#leaving || data === null || !nextInstanceOffered(data)) return;
+    void confirmSheet(this.ui, nextInstanceSheet(data.meta.iteration)).then((yes) => {
+      if (!yes || this.#leaving || !this.#alive) return;
+      this.#leaving = true;
+      this.services.save.request('manual');
+      this.services.save.flush();
+      void this.services.go('creation', { slot: data.meta.slot, next: true }).then((went) => {
+        if (!went) this.#leaving = false;
+      });
+    });
   }
 
   /** SPEC-044 §4.6: `planet`, when given, is the one the map opens on. */

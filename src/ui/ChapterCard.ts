@@ -9,6 +9,7 @@
 // fade-out — and the returned `remove()` takes it away at once, which is what
 // the scene's `Disposer` calls when the trip ends first.
 import type { ChapterCardDef } from '@/data/films';
+import { containmentLevel } from '@/systems/Containment';
 import { CARD } from '@/systems/StoryBeats';
 import { el, testId } from '@/ui/dom';
 
@@ -19,11 +20,15 @@ import { el, testId } from '@/ui/dom';
  *
  * Under reduce motion the card appears and disappears without fading, and the
  * containment line does not glitch (§4.2, Motion).
+ *
+ * SPEC-058 §4.4: the containment line reads `containmentLevel(chapter,
+ * iteration)` — the chapter itself on a first run.
  */
 export function showChapterCard(
   host: HTMLElement,
   card: Pick<ChapterCardDef, 'chapter' | 'title' | 'line'>,
   reduceMotion: boolean,
+  iteration = 1,
 ): () => void {
   const layer = testId(el('div', 'chapter-card'), 'chapter-card');
   layer.setAttribute('aria-live', 'polite');
@@ -33,7 +38,7 @@ export function showChapterCard(
     el('p', 'chapter-card-chapter', `CHAPTER ${card.chapter}`),
     el('p', 'chapter-card-title', card.title),
     el('p', 'chapter-card-line', card.line),
-    el('p', 'chapter-card-containment', `containment level ${card.chapter}`),
+    el('p', 'chapter-card-containment', `containment level ${containmentLevel(card.chapter, iteration)}`),
   );
   host.append(layer);
   // The class flips after the initial state has committed, so the opacity

@@ -47,7 +47,9 @@ export type MapIconKind =
   | 'vault'
   | 'relic'
   // SPEC-057 §4.5: where the salvager's last death left the hold's loss.
-  | 'remains';
+  | 'remains'
+  // SPEC-058 §4.5: where the instance before this one died.
+  | 'predecessor';
 
 export type MapShape =
   | 'pad'
@@ -115,6 +117,9 @@ export const MAP_ICONS: Readonly<Record<MapIconKind, MapIcon>> = {
   // SPEC-057 §4.5: a sack outline of its own — not an objective, and the
   // waypoint never targets it.
   remains: { shape: 'bag', color: '#f2efe6', size: 10, label: 'Your remains' },
+  // SPEC-058 §4.5: the predecessor's body — the remains' bag in the grey of
+  // its pillar, so the two never share both a shape and a colour.
+  predecessor: { shape: 'bag', color: '#8f99a3', size: 10, label: "A salvager's body" },
 };
 
 /** Every icon kind, in table order — the legend and the uniqueness test iterate it. */

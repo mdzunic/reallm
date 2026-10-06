@@ -88,6 +88,7 @@ import {
   type TelegraphEntity,
 } from '@/entities/Telegraph';
 import { clampToSeal, type ArenaState, type ObstacleGrid } from '@/entities/World';
+import { containment, type Containment } from '@/systems/Containment';
 import { isDashing } from '@/systems/Dash';
 import { BOSS_FIRST_MOVE_SECONDS, updateEnemy, type AiHooks, type WindupKind } from '@/systems/EnemyAi';
 import { inFlare, lit, type FlareState } from '@/systems/Light';
@@ -287,17 +288,19 @@ export function rollPlayerDamage(weapon: WeaponDef, stats: PlayerStats, rng: Rng
  * §4.2: what one enemy hit takes off the player. The elite ×1.5 lands here —
  * `EnemyEntity.damage` stays the def value (times boss phase multipliers) —
  * and the difficulty's `enemyDamageMult` scales it (SPEC-043 §4.4): ×0.7 on
- * casual, ×1.3 on hard.
+ * casual, ×1.3 on hard. SPEC-058 §4.4: then the instance's containment
+ * `damageMult` (1 at iteration 1).
  */
-export function enemyHitDamage(enemy: EnemyEntity, stats: PlayerStats, difficulty: Difficulty): number {
-  return hitDamage(enemy.damage, enemy.elite, stats, difficulty);
+export function enemyHitDamage(enemy: EnemyEntity, stats: PlayerStats, difficulty: Difficulty, damageMult = 1): number {
+  return hitDamage(enemy.damage, enemy.elite, stats, difficulty, damageMult);
 }
 
-function hitDamage(base: number, elite: boolean, stats: PlayerStats, difficulty: Difficulty): number {
+function hitDamage(base: number, elite: boolean, stats: PlayerStats, difficulty: Difficulty, damageMult: number): number {
   const raw =
     base *
     (elite ? TUNING.ELITE_DMG_MULT : 1) *
     DIFFICULTY_RULES[difficulty].enemyDamageMult *
+    damageMult *
     (1 - damageReduction(stats.armor));
   return Math.max(1, Math.round(raw));
 }
@@ -478,6 +481,11 @@ export class Combat {
 
   readonly #world: CombatWorld;
   readonly #save: Save;
+  /**
+   * SPEC-058 §4.4: the save's iteration's containment, read once — the
+   * iteration never changes mid-visit. Surface HP and every enemy hit take it.
+   */
+  readonly #containment: Containment;
   readonly #progression: ProgressionPort;
   readonly #events: EventBus<GameEvents>;
   readonly #rng: { loot: Rng; ai: Rng; combat: Rng };
@@ -588,6 +596,7 @@ export class Combat {
   ) {
     this.#world = world;
     this.#save = save;
+    this.#containment = containment(save.meta.iteration);
     this.economy = economy;
     this.#progression = progression;
     this.#events = events;
@@ -876,7 +885,7 @@ export class Combat {
     const p = this.#world.player;
     this.#knockbackPlayer(p.x - e.x, p.z - e.z, knockback);
     this.damagePlayer(
-      hitDamage(e.damage * damageMult, e.elite, this.#world.stats, this.#save.meta.difficulty),
+      hitDamage(e.damage * damageMult, e.elite, this.#world.stats, this.#save.meta.difficulty, this.#containment.damageMult),
       { kind: 'enemy', enemyId: e.def.id },
       false,
       { x: e.x, z: e.z },
@@ -1174,7 +1183,7 @@ export class Combat {
     } else {
       this.#knockbackPlayer(p.x - t.x, p.z - t.z, TELEGRAPH_KNOCKBACK);
     }
-    const amount = hitDamage(t.damage, t.elite, w.stats, this.#save.meta.difficulty);
+    const amount = hitDamage(t.damage, t.elite, w.stats, this.#save.meta.difficulty, this.#containment.damageMult);
     this.damagePlayer(amount, { kind: 'enemy', enemyId: t.source }, false, { x: t.x, z: t.z });
   }
 
@@ -1203,6 +1212,8 @@ export class Combat {
    * read at the spawn — waves, packs, summons and bosses all come through
    * here, and an enemy already alive keeps what it spawned with (43-h).
    * Flight-domain enemies never do: SPEC-034 authored the Gauntlet against them.
+   * SPEC-058 §4.4: nor do they take containment's `hpMult`, which every
+   * surface spawn — the underground's packs included — multiplies on top.
    */
   spawnEnemy(id: EnemyId, x: number, z: number, elite: boolean, affixA: AffixId | null = null, affixB: AffixId | null = null): EnemyEntity {
     const def = ENEMIES[id];
@@ -1220,7 +1231,7 @@ export class Combat {
     e.vx = 0;
     e.vz = 0;
     e.radius = def.radius * (isElite ? ELITE_SCALE : 1);
-    const hpMult = def.domain === 'surface' ? DIFFICULTY_RULES[this.#save.meta.difficulty].enemyHpMult : 1;
+    const hpMult = def.domain === 'surface' ? DIFFICULTY_RULES[this.#save.meta.difficulty].enemyHpMult * this.#containment.hpMult : 1;
     e.maxHp = Math.round(def.hp * (isElite ? TUNING.ELITE_HP_MULT : 1) * hpMult);
     e.hp = e.maxHp;
     e.damage = def.damage;
@@ -1690,7 +1701,7 @@ export class Combat {
   #projectileHitPlayer(p: ProjectileEntity): void {
     if (p.enemyId === null) return; // every enemy shot carries its shooter (§3)
     const stats = this.#world.stats;
-    const amount = hitDamage(p.damage, p.elite, stats, this.#save.meta.difficulty);
+    const amount = hitDamage(p.damage, p.elite, stats, this.#save.meta.difficulty, this.#containment.damageMult);
     this.#knockbackPlayer(p.vx, p.vz, PLAYER_KNOCKBACK);
     // SPEC-035 §4.6: the shot's origin, not the bullet's current position.
     this.damagePlayer(amount, { kind: 'projectile', enemyId: p.enemyId }, false, {

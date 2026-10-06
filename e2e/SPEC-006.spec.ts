@@ -316,17 +316,17 @@ test('the manifest declares four sfx banks and nine music tracks (AC-3, AC-4, AC
   expect(manifest.musicBuses).toEqual(['music']);
   expect(manifest.musicLoops).toBe(true);
   expect(manifest.musicOrder).toBe(true);
-  // AC-5: the 62 sprite keys `SoundId` is derived from (29 + the 15 film cues of
+  // AC-5: the 63 sprite keys `SoundId` is derived from (29 + the 15 film cues of
   // PLAN R9 + the seven weapon, impact and blast sprites of SPEC-035 §4.11 + the
   // dash and three windup cues of SPEC-038 §4.10 + SPEC-041 §4.10's
   // `windup_boss`, `boss_slam` and `ship_hit_tick` + SPEC-050 §4.8's `exhale` +
   // SPEC-054 §4.13's `light_click` and `cache_open` + SPEC-055 §4.9's
-  // `puzzle_solved`).
+  // `puzzle_solved` + SPEC-063 §4.2's `film_grind`).
   // The other half of that criterion — an id outside the union is a compile
   // error — is `npm run typecheck`, which the union's `SpriteKeysOf`
   // derivation is written for.
-  expect(new Set(manifest.sprites).size).toBe(62);
-  expect(manifest.sprites).toHaveLength(62);
+  expect(new Set(manifest.sprites).size).toBe(63);
+  expect(manifest.sprites).toHaveLength(63);
 });
 
 // ------------------------------------------------------------------- unlock

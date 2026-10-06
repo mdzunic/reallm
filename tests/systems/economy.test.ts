@@ -32,6 +32,7 @@ import {
   noRoomText,
   ownedRelics,
   ownsItem,
+  PREDECESSOR_CACHE,
   recipeUnlocked,
   refuelVoucherText,
   type Fail,
@@ -1529,5 +1530,53 @@ describe('blueprints (SPEC-056 §4.5)', () => {
     for (const recipe of ['wheat_ration', 'medkit', 'coolant_pack', 'frag_grenade', 'landmine', 'demo_charge'] as const) {
       expect(recipeUnlocked(data, recipe), recipe).toBe(true);
     }
+  });
+});
+
+// ------------------------------------------------------------- SPEC-058 §4.5
+
+describe('claimBody (SPEC-058 §4.5)', () => {
+  it('PREDECESSOR_CACHE is two medkits and two frag grenades', () => {
+    expect(PREDECESSOR_CACHE).toEqual([
+      { itemId: 'medkit', qty: 2 },
+      { itemId: 'frag_grenade', qty: 2 },
+    ]);
+  });
+
+  it('pays the cache once per claim id, records the claim and requests a checkpoint', () => {
+    const { economy, data, requested } = world();
+    expect(economy.claimBody('lineage:1:cinder4')).toEqual({ ok: true });
+    expect(data.progress.claimed).toEqual(['lineage:1:cinder4']);
+    expect(economy.count('medkit')).toBe(2);
+    expect(economy.count('frag_grenade')).toBe(2);
+    expect(requested).toContain('checkpoint');
+  });
+
+  it('a second claim of the same body pays nothing; another body pays again', () => {
+    const { economy, data } = world();
+    economy.claimBody('lineage:1:cinder4');
+    expect(economy.claimBody('lineage:1:cinder4')).toEqual({ ok: false, reason: 'claimed' });
+    expect(data.progress.claimed).toEqual(['lineage:1:cinder4']);
+    expect(economy.count('medkit')).toBe(2);
+    expect(economy.claimBody('lineage:1:vetra')).toEqual({ ok: true });
+    expect(economy.count('frag_grenade')).toBe(4);
+  });
+
+  it('no tokens, no XP, no resources — only the two items (§2: no economy weight)', () => {
+    const { economy, data } = world();
+    const before = JSON.parse(JSON.stringify({ resources: data.resources, player: data.player }));
+    economy.claimBody('lineage:2:hive');
+    expect({ resources: data.resources, player: data.player }).toEqual(before);
+  });
+
+  it('a full pack spills: item:noRoom and the toast for each item, as a cache (E25)', () => {
+    const { economy, events } = world(MARINE, fillInventory);
+    expect(economy.claimBody('lineage:1:cinder4')).toEqual({ ok: true });
+    expect(economy.count('medkit')).toBe(0);
+    expect(events.of('item:noRoom')).toEqual([
+      { itemId: 'medkit', qty: 2 },
+      { itemId: 'frag_grenade', qty: 2 },
+    ]);
+    expect(events.toasts()).toEqual([noRoomText(ITEMS.medkit, 2), noRoomText(ITEMS.frag_grenade, 2)]);
   });
 });

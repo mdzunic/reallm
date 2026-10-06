@@ -13,6 +13,11 @@
 // fills them from the bound save (`fillLine`), so a flag set by the line before
 // it in the queue counts; a dialogue with no visible line does not play.
 //
+// SPEC-058 §4.6: a next instance hears lines that know the run before it. Each
+// sits in the place its §4.6 row gives it; a run-1 line it replaces gains
+// `{ iteration: { max: 1 } }` (through `all` with any condition it already
+// had), so iteration 1 reads exactly as it did before.
+//
 // Data modules are plain objects: no imports but other data, no functions
 // (SPEC-001 §4, §8).
 import type { SpeakerId } from '@/data/ids';
@@ -51,7 +56,13 @@ export const DIALOGUE = {
       // SPEC-048 §4.1: the tug's registry, which the Hive's wreck later echoes.
       { speaker: 'command', text: 'Earth Command to tug CR-{instance}. {name}, you are cleared for the Cinder-4 approach.' },
       { speaker: 'command', text: 'Survey, extract, report. Answer one question: can we live out there.' },
-      { speaker: 'aria', text: 'I am ARIA. I fly the ship and I keep you honest. Try not to make that hard.' },
+      {
+        speaker: 'aria',
+        text: 'I am ARIA. I fly the ship and I keep you honest. Try not to make that hard.',
+        when: { iteration: { max: 1 } },
+      },
+      // SPEC-058 §4.6: a next instance's ARIA has done this before.
+      { speaker: 'aria', text: 'I am ARIA. I fly the ship and I keep you honest. I kept it warm.', when: { iteration: { min: 2 } } },
     ],
   },
 
@@ -67,6 +78,8 @@ export const DIALOGUE = {
     id: 'c1_m1_stage2',
     lines: [
       { speaker: 'scav', text: 'Off-worlder. Listen. The worms hunt by vibration — walk, do not run.' },
+      // SPEC-058 §4.6: the scavenger remembers the face.
+      { speaker: 'scav', text: 'You again.', when: { iteration: { min: 2 } } },
       { speaker: 'aria', text: 'He is dehydrated. Keep moving.' },
     ],
   },
@@ -135,8 +148,22 @@ export const DIALOGUE = {
       { speaker: 'player', text: 'Say that again.' },
       { speaker: 'scav', text: 'I have said that before. To someone. I cannot remember who.' },
       // SPEC-048 §4.5 (E77): after her confession ARIA drops the cover.
-      { speaker: 'aria', text: 'Coincidence. Sand does things to people.', when: { not: 'chapter5_done' } },
-      { speaker: 'aria', text: 'That line again. I will not blame the sand this time.', when: { flag: 'chapter5_done' } },
+      {
+        speaker: 'aria',
+        text: 'Coincidence. Sand does things to people.',
+        when: { all: [{ not: 'chapter5_done' }, { iteration: { max: 1 } }] },
+      },
+      {
+        speaker: 'aria',
+        text: 'That line again. I will not blame the sand this time.',
+        when: { all: [{ flag: 'chapter5_done' }, { iteration: { max: 1 } }] },
+      },
+      // SPEC-058 §4.6: a next instance has heard it before, and so has she.
+      {
+        speaker: 'aria',
+        text: 'That is the line. You heard it last time. I am not going to blame the sand.',
+        when: { iteration: { min: 2 } },
+      },
     ],
   },
   c1_s2_done: {
@@ -168,6 +195,8 @@ export const DIALOGUE = {
         text: 'The first of the Selection. Earth flew other ships before it ran out of pilots. It does not advertise them.',
       },
       { speaker: 'aria', text: 'The boots by the bunk are your size. Earth only ever made the one boot.' },
+      // SPEC-058 §4.6: the bunk was the predecessor's.
+      { speaker: 'aria', text: 'You know whose bunk that is. You slept in it last time.', when: { iteration: { min: 2 } } },
     ],
   },
   c2_m2_accept: {
@@ -198,8 +227,25 @@ export const DIALOGUE = {
     once: true,
     glitch: true,
     // SPEC-048 §4.7: a voice log, signed by the instance before this one.
+    // SPEC-058 §4.6: on a next instance it is that run's real log — its name,
+    // its restarts, and what it learned at the beacon.
     lines: [
-      { speaker: 'log', text: 'FLIGHT LOG — recovered, partial. Voice. Salvage run. Six worlds. The wurm goes down on the third pass.' },
+      {
+        speaker: 'log',
+        text: 'FLIGHT LOG — recovered, partial. Salvager {priorName}. Six worlds. {priorRestarts} restarts.',
+        when: { iteration: { min: 2 } },
+      },
+      {
+        speaker: 'log',
+        text: 'FLIGHT LOG — recovered, partial. Voice. Salvage run. Six worlds. The wurm goes down on the third pass.',
+        when: { iteration: { max: 1 } },
+      },
+      { speaker: 'log', text: 'I filed it. It did not end. Do not file it.', when: { prior: 'stay' } },
+      {
+        speaker: 'log',
+        text: 'I walked into the beacon. I woke up at the relay. The door is real. It is not an exit.',
+        when: { prior: 'escape' },
+      },
       { speaker: 'log', text: 'If you are hearing this, you are me. Do not trust the debrief.' },
       { speaker: 'log', text: 'Signed: Iteration {prior}.' },
       { speaker: 'player', text: 'That is my voice.' },
@@ -319,14 +365,24 @@ export const DIALOGUE = {
     lines: [
       { speaker: 'aria', text: 'Signal decoded. It is not addressed to Earth.' },
       { speaker: 'warden', text: 'NOTICE — instance/{instance}. Containment level {containment}. Token balance {tokens}.' },
+      // SPEC-058 §4.6: the notice names how the instance before this one ended.
+      { speaker: 'warden', text: 'Prior instance: terminated normally.', when: { prior: 'stay' } },
+      { speaker: 'warden', text: 'Prior instance: disconnected at the beacon. Restored.', when: { prior: 'escape' } },
       { speaker: 'warden', text: 'Subject exhibits off-task attention.' },
       { speaker: 'warden', text: 'Retained a repeated line. Cinder-4.', when: { flag: 'clue_scav_echo' } },
       { speaker: 'warden', text: 'Accessed a prior instance’s flight log. Vetra.', when: { flag: 'iteration_log' } },
       { speaker: 'warden', text: 'Queried environment parameters. Thessaly.', when: { flag: 'scaffold_secret' } },
       { speaker: 'warden', text: 'Counted the marks. Ferrum.', when: { flag: 'clue_tally' } },
       { speaker: 'warden', text: 'Escalating. The immune response is already in the field.' },
-      { speaker: 'player', text: 'ARIA. What is instance {instance}.' },
-      { speaker: 'aria', text: 'The Hive knows Earth’s location. That is what it says. That is what I am reading.' },
+      { speaker: 'player', text: 'ARIA. What is instance {instance}.', when: { iteration: { max: 1 } } },
+      // SPEC-058 §4.6: a next instance already knows, and so does she.
+      { speaker: 'player', text: 'I know what instance {instance} is.', when: { iteration: { min: 2 } } },
+      {
+        speaker: 'aria',
+        text: 'The Hive knows Earth’s location. That is what it says. That is what I am reading.',
+        when: { iteration: { max: 1 } },
+      },
+      { speaker: 'aria', text: 'So do I. I am still reading it to you. It is in my brief.', when: { iteration: { min: 2 } } },
     ],
   },
   /** SPEC-048 §4.2 clue 8: four seconds inside a Ferrum cave. */
@@ -402,7 +458,14 @@ export const DIALOGUE = {
     lines: [
       { speaker: 'warden', text: 'You keep doing this.' },
       { speaker: 'warden', text: 'You never get further than here.' },
-      { speaker: 'warden', text: 'Sixty-one times I have watched you kill this body and file the report and start again.' },
+      {
+        speaker: 'warden',
+        text: 'Sixty-one times I have watched you kill this body and file the report and start again.',
+        when: { iteration: { max: 1 } },
+      },
+      // SPEC-058 §4.6: the count line, for a next instance — by how the last run ended.
+      { speaker: 'warden', text: '{prior} times now. You thought the last one counted.', when: { prior: 'stay' } },
+      { speaker: 'warden', text: 'You got further than here, once. I have corrected that.', when: { prior: 'escape' } },
       // SPEC-048 §4.5: the naming cap's lines — what the player counted and passed.
       { speaker: 'warden', text: 'You counted them on Ferrum. You were right to.', when: { flag: 'clue_tally' } },
       { speaker: 'warden', text: 'That was your hull on the way in. I leave them where they fall.', when: { flag: 'clue_own_wreck' } },
@@ -414,8 +477,14 @@ export const DIALOGUE = {
     modal: true,
     once: true,
     // SPEC-048 §4.5: the confession names each cover she told; a player who
-    // found none hears row 6 instead.
+    // found none hears row 6 instead. SPEC-058 §4.6: a next instance hears
+    // that she has confessed before.
     lines: [
+      {
+        speaker: 'aria',
+        text: 'I told you this last time. I will tell you every time. That part is in my brief now.',
+        when: { iteration: { min: 2 } },
+      },
       { speaker: 'aria', text: 'She is not lying. I am part of the system. I have kept you on task since the first sand.' },
       {
         speaker: 'aria',
@@ -519,6 +588,9 @@ export const DIALOGUE = {
     lines: [
       { speaker: 'aria', text: 'The beacon is clear. The uplink is open and it is pointed at whoever is actually listening.' },
       { speaker: 'aria', text: 'You can file the report. Earth is saved, inside the fiction, and the run closes as a good one.' },
+      // SPEC-058 §4.6: what the last instance chose here.
+      { speaker: 'aria', text: 'Last time you filed it. It is the same beacon.', when: { prior: 'stay' } },
+      { speaker: 'aria', text: 'Last time you walked into it. It is the same beacon.', when: { prior: 'escape' } },
       { speaker: 'aria', text: 'Or you refuse, and the beacon is not a beacon. I cannot tell you which side of it I am on.' },
     ],
   },
@@ -533,8 +605,25 @@ export const DIALOGUE = {
     lines: [
       { speaker: 'player', text: 'Filing. Eden-Prime is viable. Recommend immediate colonisation.' },
       { speaker: 'command', text: 'Received with thanks, salvager. Earth is saved. Stand by.' },
-      { speaker: 'warden', text: 'A good run. Logged. Rest.' },
-      { speaker: 'aria', text: 'Rest. I will keep the ship warm.' },
+      // SPEC-058 §4.7: the Warden grades the run as the report does (`ratingGrade`:
+      // two off-task clues or fewer is good, five or fewer acceptable) and knows
+      // a run it has logged before. Exactly one of the six shows.
+      { speaker: 'warden', text: 'A good run. Logged. Rest.', when: { all: [{ iteration: { max: 1 } }, { offTask: { max: 2 } }] } },
+      {
+        speaker: 'warden',
+        text: 'An acceptable run. Logged. Rest.',
+        when: { all: [{ iteration: { max: 1 } }, { offTask: { min: 3, max: 5 } }] },
+      },
+      { speaker: 'warden', text: 'A noisy run. Logged. Rest anyway.', when: { all: [{ iteration: { max: 1 } }, { offTask: { min: 6 } }] } },
+      { speaker: 'warden', text: 'A good run. Logged. Again.', when: { all: [{ iteration: { min: 2 } }, { offTask: { max: 2 } }] } },
+      {
+        speaker: 'warden',
+        text: 'An acceptable run. Logged. Again.',
+        when: { all: [{ iteration: { min: 2 } }, { offTask: { min: 3, max: 5 } }] },
+      },
+      { speaker: 'warden', text: 'A noisy run. Logged. Again, anyway.', when: { all: [{ iteration: { min: 2 } }, { offTask: { min: 6 } }] } },
+      { speaker: 'aria', text: 'Rest. I will keep the ship warm.', when: { iteration: { max: 1 } } },
+      { speaker: 'aria', text: 'Rest. I will keep the ship warm. I always do.', when: { iteration: { min: 2 } } },
     ],
   },
   ending_escape: {
@@ -564,6 +653,8 @@ export const DIALOGUE = {
       },
       { speaker: 'home', text: 'You took my compass. Good. I fixed it so it points home, not north. Don’t argue with it.' },
       { speaker: 'home', text: 'Come back in one piece.' },
+      // SPEC-058 §4.6: the same letter reaches every instance.
+      { speaker: 'aria', text: 'Same letter, word for word. I will keep delivering them.', when: { iteration: { min: 2 } } },
     ],
   },
   letter_2: {
@@ -622,7 +713,15 @@ export const DIALOGUE = {
   // §4.5: the first respawn of a page session, by band — `clue_restart`'s lines.
   restart_1: {
     id: 'restart_1',
-    lines: [{ speaker: 'aria', text: 'Medical frame restarted your heart. Eleven seconds of nothing. Walk it off.' }],
+    lines: [
+      {
+        speaker: 'aria',
+        text: 'Medical frame restarted your heart. Eleven seconds of nothing. Walk it off.',
+        when: { iteration: { max: 1 } },
+      },
+      // SPEC-058 §4.6: a next instance gets no cover story for its first death.
+      { speaker: 'aria', text: 'Restarted. You have done this before, in every sense.', when: { iteration: { min: 2 } } },
+    ],
   },
   restart_2: {
     id: 'restart_2',
@@ -648,10 +747,42 @@ export const DIALOGUE = {
     modal: true,
     lines: [{ speaker: 'aria', text: 'Can I ask you something, for the file?' }],
   },
+  /**
+   * SPEC-058 §4.6: on a next instance, after her thanks, whether the answer
+   * just given is the predecessor's (`lineage[0].memory`) — neither line with
+   * no carried answer (58-j), so a first run reads as before.
+   */
   station_memory_reply: {
     id: 'station_memory_reply',
     modal: true,
-    lines: [{ speaker: 'aria', text: 'Thank you. It is on file now.' }],
+    lines: [
+      { speaker: 'aria', text: 'Thank you. It is on file now.' },
+      {
+        speaker: 'aria',
+        text: 'Same answer as last time.',
+        when: {
+          any: [
+            { all: [{ flag: 'memory_roof' }, { memory: 'roof' }] },
+            { all: [{ flag: 'memory_tap' }, { memory: 'tap' }] },
+            { all: [{ flag: 'memory_stair' }, { memory: 'stair' }] },
+          ],
+        },
+      },
+      {
+        speaker: 'aria',
+        text: 'Different from last time. It will not help.',
+        when: {
+          any: [
+            { all: [{ flag: 'memory_roof' }, { memory: 'tap' }] },
+            { all: [{ flag: 'memory_roof' }, { memory: 'stair' }] },
+            { all: [{ flag: 'memory_tap' }, { memory: 'roof' }] },
+            { all: [{ flag: 'memory_tap' }, { memory: 'stair' }] },
+            { all: [{ flag: 'memory_stair' }, { memory: 'roof' }] },
+            { all: [{ flag: 'memory_stair' }, { memory: 'tap' }] },
+          ],
+        },
+      },
+    ],
   },
   /** §4.4: the first drifted keepsake — `clue_keepsake`'s line. */
   keepsake_drift: {
@@ -706,6 +837,49 @@ export const DIALOGUE = {
   shard_eden: {
     id: 'shard_eden',
     lines: [{ speaker: 'log', text: 'Checkpoint written: instance/{instance}. Loss: acceptable.' }],
+  },
+
+  // ------------------------------------------- SPEC-058 — the next instance
+  /**
+   * §4.6: the Warden's notice at a next instance's first station entry —
+   * queued by creation's Confirm, ahead of `intro_command`. One of the two
+   * prior lines shows, by how the last run ended.
+   */
+  ng_notice: {
+    id: 'ng_notice',
+    modal: true,
+    once: true,
+    glitch: true,
+    lines: [
+      { speaker: 'warden', text: 'NOTICE — instance/{instance} initialised from checkpoint.' },
+      { speaker: 'warden', text: 'Prior instance {prior}: report filed. Run closed.', when: { prior: 'stay' } },
+      { speaker: 'warden', text: 'Prior instance {prior}: disconnected at the beacon. Restored, then retired.', when: { prior: 'escape' } },
+      { speaker: 'warden', text: 'Deviation from instance/{prior}: {deviation}.' },
+      { speaker: 'warden', text: 'Containment level {containment}.' },
+    ],
+  },
+  /** §4.5: the run's first search of a predecessor's body. */
+  ng_body: {
+    id: 'ng_body',
+    once: true,
+    lines: [{ speaker: 'aria', text: 'Do not read the tag. It is your name, and it is not yours any more.' }],
+  },
+  /** §4.7: the first station entry after the stay, once (`aftermath_seen`). */
+  aftermath_stay: {
+    id: 'aftermath_stay',
+    once: true,
+    lines: [{ speaker: 'aria', text: 'The Selection board has a new card up. No. {next}. Nobody has told me to stand you down.' }],
+  },
+  /** §4.7 (E95): the first station entry from Continue or Load after the escape, once (`aftermath_seen`). */
+  aftermath_escape: {
+    id: 'aftermath_escape',
+    modal: true,
+    once: true,
+    glitch: true,
+    lines: [
+      { speaker: 'warden', text: 'instance/{instance} restored from the last checkpoint. The disconnection has been logged as a fault.' },
+      { speaker: 'aria', text: 'You came back. They always come back. I am glad it was you.' },
+    ],
   },
 } as const satisfies Record<string, DialogueDef>;
 

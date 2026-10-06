@@ -217,7 +217,8 @@ export class FlightScene extends UiScene<'flight'> {
 
     const visits = save.progress.visits[this.#planet.id] ?? 0;
     this.#firstLanding = visits === 0;
-    const visitRng = services.rng.visit(this.#planet.id, visits);
+    // SPEC-058 §4.4: a later instance's trips run on streams of their own.
+    const visitRng = services.rng.visit(this.#planet.id, visits, save.meta.iteration);
     const progression = new Progression(save, services.events);
     const economy = new Economy(save, services.events, progression, bound === null ? undefined : services.save);
     // SPEC-044 §4.8: what this jump cost — the engine cannot change mid-flight.
@@ -248,6 +249,8 @@ export class FlightScene extends UiScene<'flight'> {
         companions: save.companions,
         quality: services.renderer.quality,
         difficulty: save.meta.difficulty,
+        // SPEC-058 §4.4: incoming damage takes the instance's containment too.
+        iteration: save.meta.iteration,
         // SPEC-039 §4.3: ARIA's shield regeneration is a companion effect.
         companionMult: computePlayerStats(save).companionMult,
       },
@@ -428,7 +431,8 @@ export class FlightScene extends UiScene<'flight'> {
     uiRootEl().append(host);
     let remove: (() => void) | null = null;
     const timer = setTimeout(() => {
-      remove = showChapterCard(host, CHAPTER_CARDS[planet], reduceMotion);
+      // SPEC-058 §4.4: the containment line reads the save's capped level.
+      remove = showChapterCard(host, CHAPTER_CARDS[planet], reduceMotion, save.meta.iteration);
     }, CARD.delay * 1000);
     this.disposer.add(() => {
       clearTimeout(timer);
@@ -1177,7 +1181,7 @@ export class FlightScene extends UiScene<'flight'> {
     // SPEC-038 §4.6: the pause menu is where Settings changes the difficulty,
     // so the trip picks it up here — it is never cached for the whole run.
     const save = this.#save;
-    if (save !== null) this.#flight?.setDifficulty(save.meta.difficulty);
+    if (save !== null) this.#flight?.setDifficulty(save.meta.difficulty, save.meta.iteration);
   }
 
   /**
