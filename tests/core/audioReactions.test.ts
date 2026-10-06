@@ -41,11 +41,12 @@ type Assert<T extends true> = T;
 type Equal<A, B> = (<T>() => T extends A ? 1 : 2) extends <T>() => T extends B ? 1 : 2 ? true : false;
 
 /**
- * The 62 sound ids — the 29 of §2.2, the story films' 15 (SPEC-021 §6.3), the
+ * The 63 sound ids — the 29 of §2.2, the story films' 15 (SPEC-021 §6.3), the
  * seven weapon, impact and blast sprites of SPEC-035 §4.11, the dash and
  * three windup cues of SPEC-038 §4.10, SPEC-041 §4.10's boss windup, boss
  * slam and flight hit tick, SPEC-050 §4.8's exhale, SPEC-054 §4.13's
- * flashlight click and cache opening, and SPEC-055 §4.9's puzzle solve —
+ * flashlight click and cache opening, SPEC-055 §4.9's puzzle solve and
+ * SPEC-063 §4.2's grinder —
  * pinned as an explicit literal (SPEC-001: pinned constants in tests are
  * literals). `SoundId` is derived from the sprite keys, so this is what makes
  * AC-5 a compile error rather than a surprise: recutting a bank without
@@ -117,6 +118,8 @@ const SOUND_IDS = [
   'film_static',
   'film_beam',
   'film_dissolve',
+  /** SPEC-063 §4.2: the grinder in "Wreckers". */
+  'film_grind',
   // SPEC-054 §4.13: the flashlight's click, and a loose cache opening.
   'light_click',
   'cache_open',
@@ -280,14 +283,14 @@ describe('the audio manifest (SPEC-006 §2)', () => {
     expect(Object.keys(ASSETS.audio).sort()).toEqual([...SFX_BANKS, ...MUSIC_BANKS].sort());
   });
 
-  it('the sprite keys across the banks are the 62 sound ids (AC-5; SPEC-035 §4.11 adds seven, SPEC-038 §4.10 four, SPEC-041 §4.10 three, SPEC-050 §4.8 one, SPEC-054 §4.13 two, SPEC-055 §4.9 one)', () => {
+  it('the sprite keys across the banks are the 63 sound ids (AC-5; SPEC-035 §4.11 adds seven, SPEC-038 §4.10 four, SPEC-041 §4.10 three, SPEC-050 §4.8 one, SPEC-054 §4.13 two, SPEC-055 §4.9 one, SPEC-063 §4.2 one)', () => {
     const sprites = Object.values(ASSETS.audio).flatMap((entry) =>
       Object.keys((entry as { sprite?: object }).sprite ?? {}),
     );
     expect(sprites.slice().sort()).toEqual([...SOUND_IDS].sort());
-    expect(sprites).toHaveLength(62);
+    expect(sprites).toHaveLength(63);
     // No id appears in two banks: `SoundId` → bank has to be a function.
-    expect(new Set(sprites).size).toBe(62);
+    expect(new Set(sprites).size).toBe(63);
   });
 
   it('the SPEC-038 cues sit in the surface bank inside §4.10’s lengths', () => {

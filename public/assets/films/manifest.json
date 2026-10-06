@@ -118,6 +118,35 @@
         }
       ]
     },
+    "wreckers": {
+      "file": "films/wreckers.mp4",
+      "frames": 288,
+      "bytes": 462520,
+      "crf": 29,
+      "shots": [
+        {
+          "id": "hulk",
+          "start": 0,
+          "end": 96,
+          "poster": "films/posters/wreckers_hulk.webp",
+          "posterBytes": 15330
+        },
+        {
+          "id": "cutting",
+          "start": 96,
+          "end": 204,
+          "poster": "films/posters/wreckers_cutting.webp",
+          "posterBytes": 12892
+        },
+        {
+          "id": "sortie",
+          "start": 204,
+          "end": 288,
+          "poster": "films/posters/wreckers_sortie.webp",
+          "posterBytes": 10034
+        }
+      ]
+    },
     "interlude_c1": {
       "file": "films/interlude_c1.mp4",
       "frames": 336,
