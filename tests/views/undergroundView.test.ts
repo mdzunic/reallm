@@ -477,11 +477,16 @@ describe('Eden’s machine room (SPEC-054 §4.12)', () => {
     expect(plain.cradles).toBe(0);
     expect(named(plain, 'cave-cradles')).toHaveLength(0);
     expect(named(plain, 'cave-trays')).toHaveLength(0);
+    // What `sceneInfo` reports of it: rock walls, no trays, no suits.
+    expect([plain.wallModel, plain.trays, plain.suit]).toEqual(['rock', 0, '-']);
     plain.dispose();
 
     const cave = fixture('eden');
     const eden = new UndergroundView(new THREE.Group(), cave, EDEN, 'temperate');
     expect(eden.cradles).toBe(6);
+    // …and of the machine room: racks, a tray down every corridor (the
+    // fixture's are all longer than their rooms' radii), the default swatches.
+    expect([eden.wallModel, eden.trays, eden.suit]).toEqual(['cave_rack', CORRIDORS.length, '#b7472a/#2a3b4c']);
     const cradles = one<THREE.InstancedMesh>(eden, 'cave-cradles');
     expect(cradles.count).toBe(6);
     // Each faces the room's entrance: the front (+z) along `facing`.
@@ -503,6 +508,7 @@ describe('Eden’s machine room (SPEC-054 §4.12)', () => {
   it('dresses the suits in the save’s colours: Suit takes the primary, Trim the secondary', () => {
     const appearance = { primary: '#33aa55', secondary: '#aa3355' };
     const view = new UndergroundView(new THREE.Group(), fixture('eden'), EDEN, 'temperate', kitAssets(), appearance);
+    expect(view.suit).toBe('#33aa55/#aa3355');
     const geometry = one(view, 'cave-cradles').geometry;
     const position = geometry.getAttribute('position') as THREE.BufferAttribute;
     const color = geometry.getAttribute('color') as THREE.BufferAttribute;

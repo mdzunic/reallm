@@ -345,6 +345,8 @@ const HUM_VOLUME = 0.5;
 const CAVE_DUST_MOTES = 60;
 /** §4.14 (dev): `surface-goto-cache` stands the salvager this far from the cache, toward its room. */
 const GOTO_CACHE_DISTANCE = 1;
+/** §4.12 (dev): `surface-goto-vault` stands the salvager this far in front of what the vault holds. */
+const GOTO_VAULT_DISTANCE = 3;
 /** §4.11: what `poiAt` answers below — no POI is ever under a cave position. */
 const NO_POIS: LayoutPoi[] = [];
 /** The cave's empty POI states and node list, shared and never written. */
@@ -684,6 +686,12 @@ export class SurfaceScene extends UiScene<'surface'> {
   #caveGrid: PathGrid | null = null;
   /** §4.2: true from a swap's start to its end — the `'level'` hold. */
   #swapping = false;
+  /**
+   * §4.2: true from a swap's change-over to the next draw. The `'level'` hold
+   * paces at five frames a second (SPEC-040 §4.2), so without this the fade-in
+   * could open on the level just left for up to 200 ms.
+   */
+  #swapUndrawn = false;
   /** §4.7: descents this visit — the `underground:<n>` fork the packs draw from. */
   #descents = 0;
   /** §4.5: the flashlight's state for the visit — on at its first descent. */
@@ -959,6 +967,8 @@ export class SurfaceScene extends UiScene<'surface'> {
   // SPEC-035 §4.11 — the storm loop. It is shipped and was never played; the
   // scene owns it, like the other continuous channels (SPEC-006 §4.2).
   #stormVoice: Voice | null = null;
+  /** SPEC-054 §4.12: what the channel's voice plays — Eden's machine room hums on it below. */
+  #stormSound: 'storm_loop' | 'film_hum' = 'storm_loop';
   #stormLoopVolume = 0;
   #stormLoopTarget = 0;
   #camDistance = 0;
@@ -1785,6 +1795,9 @@ export class SurfaceScene extends UiScene<'surface'> {
    * decision as `#holdReason()` is read off a state written in place.
    */
   idle(): boolean {
+    // SPEC-054 §4.2: the level a swap changed over to draws on the next frame,
+    // so its fade-in opens on it and never on the level just left.
+    if (this.#swapUndrawn) return false;
     const state = this.#holdState;
     state.beats = this.#holds;
     state.rotate = this.#rotateBlocked();
@@ -2101,6 +2114,7 @@ export class SurfaceScene extends UiScene<'surface'> {
       }
     }
     super.render(renderer);
+    this.#swapUndrawn = false;
   }
 
   // ------------------------------------------------- SPEC-019 hit feedback
@@ -2623,6 +2637,22 @@ export class SurfaceScene extends UiScene<'surface'> {
     info['descentDist'] =
       descent === null || world === null || below ? -1 : Math.round(Math.hypot(world.player.x - descent.x, world.player.z - descent.z) * 10) / 10;
     info['cradles'] = this.#caveView?.cradles ?? 0;
+    // §4.12: the machine room as drawn — the wall model, the cable trays and
+    // the colours the cradles' suits wear — and the room the salvager stands
+    // in (−1 above or in a corridor) beside the vault's.
+    info['caveWallModel'] = this.#caveView?.wallModel ?? '-';
+    info['caveTrays'] = this.#caveView?.trays ?? 0;
+    info['cradleSuit'] = this.#caveView?.suit ?? '-';
+    let room = -1;
+    if (below && cave !== null && world !== null) {
+      const p = world.player;
+      room = cave.rooms.findIndex((r) => Math.hypot(p.x - r.x, p.z - r.z) <= r.r);
+    }
+    info['caveRoom'] = room;
+    info['vaultRoom'] = cave?.vault.room ?? -1;
+    // §4.12: the weather-loop channel — what it plays (`-` silent) and how loud.
+    info['weatherLoop'] = this.#stormVoice === null ? '-' : this.#stormSound;
+    info['weatherLoopVolume'] = Math.round(this.#stormLoopVolume * 100) / 100;
   }
 
   /**
@@ -3166,7 +3196,8 @@ export class SurfaceScene extends UiScene<'surface'> {
       return;
     }
     if (this.#stormVoice === null) {
-      this.#stormVoice = this.services.audio.play(hum ? 'film_hum' : 'storm_loop', { loop: true, priority: 0, volume: this.#stormLoopVolume });
+      this.#stormSound = hum ? 'film_hum' : 'storm_loop';
+      this.#stormVoice = this.services.audio.play(this.#stormSound, { loop: true, priority: 0, volume: this.#stormLoopVolume });
       return;
     }
     this.#stormVoice.setVolume(this.#stormLoopVolume);
@@ -4202,6 +4233,7 @@ export class SurfaceScene extends UiScene<'surface'> {
       // §4.9 (E83): what a stage started below waits for starts now.
       this.#syncMissionStages();
     }
+    this.#swapUndrawn = true;
     this.services.events.emit('level:changed', { planet: this.#planet.id, level: to });
   }
 
@@ -4398,6 +4430,9 @@ export class SurfaceScene extends UiScene<'surface'> {
       void this.#swapLevel('surface');
     });
     button('surface-goto-cache', 'To cache', () => this.#debugGotoCache());
+    // §4.12: the vault room lies at the end of the tree, a long walk through
+    // the dark — on Eden, in front of the cradle row.
+    button('surface-goto-vault', 'To vault', () => this.#debugGotoVault());
     button('surface-goto-origin', 'To origin', () => {
       const world = this.#world;
       if (world === null || !world.player.alive) return;
@@ -4578,6 +4613,39 @@ export class SurfaceScene extends UiScene<'surface'> {
     }
     p.x = best.x + toX * GOTO_CACHE_DISTANCE;
     p.z = best.z + toZ * GOTO_CACHE_DISTANCE;
+  }
+
+  /**
+   * §4.12 (dev): below, inside the vault room, facing what it holds — on Eden
+   * the middle of the cradle row, elsewhere the vault's cache at the centre —
+   * from `GOTO_VAULT_DISTANCE` toward the vault door.
+   */
+  #debugGotoVault(): void {
+    const world = this.#world;
+    const cave = this.#cave;
+    if (world === null || cave === null || this.#level?.id !== 'underground' || !world.player.alive) return;
+    const room = cave.rooms[cave.vault.room];
+    if (room === undefined) return;
+    let targetX = room.x;
+    let targetZ = room.z;
+    if (cave.cradles.length > 0) {
+      targetX = 0;
+      targetZ = 0;
+      for (const c of cave.cradles) {
+        targetX += c.x / cave.cradles.length;
+        targetZ += c.z / cave.cradles.length;
+      }
+    }
+    const doorX = cave.vault.doorX - room.x;
+    const doorZ = cave.vault.doorZ - room.z;
+    const length = Math.hypot(doorX, doorZ);
+    const toX = length > 1e-6 ? doorX / length : 1;
+    const toZ = length > 1e-6 ? doorZ / length : 0;
+    const p = world.player;
+    world.obstacles.resolveCircle(targetX + toX * GOTO_VAULT_DISTANCE, targetZ + toZ * GOTO_VAULT_DISTANCE, p.radius, this.#resolved);
+    p.x = this.#resolved.x;
+    p.z = this.#resolved.z;
+    p.facing = Math.atan2(targetZ - p.z, targetX - p.x);
   }
 
   /** SPEC-029 §4.13: 5 skitters in a 1.5 m ring at the aim point or 7 m ahead. */

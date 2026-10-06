@@ -64,10 +64,13 @@ async function dismiss(page: Page): Promise<void> {
 interface Landing {
   done?: readonly string[];
   active?: { id: string; stage: number; counters: Record<string, number> };
+  /** The creation's two swatches, for a test that reads them back off the cradles (§4.12). */
+  appearance?: { primary: string; secondary: string };
 }
 
 /** A slot-0 save on seed 123, then a landing through the scene machine; the page must be past the gate. */
 async function land(page: Page, planet: string, landing: Landing = { done: ['c1_m1'] }): Promise<void> {
+  const creation = { ...CREATION, appearance: { ...CREATION.appearance, ...landing.appearance } };
   await page.evaluate(
     ({ creation, done, active }) => {
       const bridge = window.__reallm.save();
@@ -77,7 +80,7 @@ async function land(page: Page, planet: string, landing: Landing = { done: ['c1_
       save.progress.missionsDone.push(...done);
       if (active !== null) save.progress.missionsActive.push(active);
     },
-    { creation: CREATION, done: [...(landing.done ?? [])], active: landing.active ?? null },
+    { creation, done: [...(landing.done ?? [])], active: landing.active ?? null },
   );
   await page.evaluate((id) => window.__reallm.go('surface', { planet: id }, { force: true }), planet);
   await expect(page.locator('[data-testid="scene-label"]')).toHaveText('surface', COLD_START);
@@ -238,11 +241,50 @@ test.describe('SPEC-054 the underground', () => {
       const stats = await page.evaluate(() => window.__reallm.stats());
       expect(stats.drawCalls).toBeLessThanOrEqual(96);
       expect(stats.triangles).toBeLessThanOrEqual(130_000);
+      const below = await info(page);
       if (planet === 'eden') {
-        const below = await info(page);
         expect(below['caveEnemies']).toBe(0);
         expect(below['cradles']).toBe(6);
+      } else {
+        // §4.12: a cave is rock, with no trays or cradles, and below the
+        // weather-loop channel is silent everywhere but Eden.
+        expect(below).toMatchObject({ caveWallModel: 'rock', caveTrays: 0, cradles: 0, cradleSuit: '-', weatherLoop: '-' });
       }
     });
   }
+
+  // §4.12: swatches far from the view's defaults, so a suit that ignored the
+  // save could not pass.
+  test('11: Eden’s machine room — racks and trays, six cradles in the save’s colours, and film_hum only below', async ({ page }) => {
+    const swatches = { primary: '#3fa34d', secondary: '#d4af37' };
+    await start(page, '/?debug');
+    await land(page, 'eden', { done: ['c1_m1'], appearance: swatches });
+    // The channel is a real voice only once the gate's gesture has unlocked audio.
+    await page.waitForFunction(() => window.__reallm.audio().unlocked === true, undefined, SLOW);
+    expect(await info(page)).toMatchObject({ weatherLoop: '-', weatherLoopVolume: 0 });
+    await descend(page);
+    await untilInfo(page, 'weatherLoop', 'film_hum');
+    await untilInfo(page, 'weatherLoopVolume', 0.5);
+
+    await tap(page, 'surface-goto-vault');
+    await frames(page, 30);
+    const vault = await info(page);
+    expect(Number(vault['vaultRoom'])).toBeGreaterThan(0);
+    expect(vault['caveRoom']).toBe(vault['vaultRoom']);
+    expect(vault).toMatchObject({
+      caveWallModel: 'cave_rack',
+      cradles: 6,
+      cradleSuit: `${swatches.primary}/${swatches.secondary}`,
+      caveEnemies: 0,
+      weatherLoop: 'film_hum',
+      weatherLoopVolume: 0.5,
+    });
+    expect(Number(vault['caveTrays'])).toBeGreaterThan(0);
+    await test.info().attach('eden-vault', { body: await page.screenshot(), contentType: 'image/png' });
+
+    await tap(page, 'surface-ascend');
+    await untilInfo(page, 'level', 'surface');
+    await untilInfo(page, 'held', 0);
+    expect(await info(page)).toMatchObject({ weatherLoop: '-', weatherLoopVolume: 0, caveRoom: -1 });
+  });
 });

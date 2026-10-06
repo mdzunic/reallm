@@ -289,9 +289,10 @@ function floorGeometry(cave: ViewCave, width: number): THREE.BufferGeometry {
 
 /**
  * §4.12: a tray 0.8 m wide down each corridor's axis, rim to rim — not into
- * the rooms, where the shaft, the caches and the cradles stand.
+ * the rooms, where the shaft, the caches and the cradles stand — merged, with
+ * how many trays it holds.
  */
-function trayGeometry(cave: ViewCave): THREE.BufferGeometry | null {
+function trayGeometry(cave: ViewCave): { geometry: THREE.BufferGeometry; trays: number } | null {
   const parts: THREE.BufferGeometry[] = [];
   for (const corridor of cave.corridors) {
     const a = cave.rooms[corridor.a];
@@ -310,7 +311,8 @@ function trayGeometry(cave: ViewCave): THREE.BufferGeometry | null {
     parts.push(tray);
   }
   if (parts.length === 0) return null;
-  return mergeGeometries(parts);
+  const geometry = mergeGeometries(parts);
+  return geometry === null ? null : { geometry, trays: parts.length };
 }
 
 /**
@@ -406,6 +408,12 @@ export class UndergroundView {
   /** Per `caches` entry: 1 once claimed. */
   readonly #claimed: Uint8Array;
   readonly #cradles: number;
+  /** §4.12: what the walls draw as — `cave_rack` in the machine room. */
+  readonly #wallModel: 'cave_rack' | 'rock';
+  /** §4.12: the cable trays laid, one per corridor long enough to hold one. */
+  readonly #trays: number;
+  /** §4.12: the colours the cradles' suits wear, `#primary/#secondary`; `-` with no cradles. */
+  readonly #suit: string;
   // SPEC-046 §4.6: the last view the walls were culled for.
   readonly #view = { x: 0, z: 0, distance: -1, fov: -1, aspect: -1 };
   readonly #rect: CullRect = { minX: 0, maxX: 0, minZ: 0, maxZ: 0 };
@@ -471,6 +479,7 @@ export class UndergroundView {
     u.obstacles.forEach((o, i) => {
       if (o.kind === 'cave_wall') walls.push(i);
     });
+    this.#wallModel = def.machineRoom === true ? 'cave_rack' : 'rock';
     if (def.machineRoom === true) {
       // §4.12: Eden's walls are racks, each along the wall's tangent with its
       // LEDs (+z) facing into the room or corridor it rings.
@@ -590,9 +599,12 @@ export class UndergroundView {
     // §4.12: Eden's cradle row, the suits in the save's colours, and the
     // cable trays down the corridors.
     this.#cradles = def.machineRoom === true ? u.cradles.length : 0;
+    this.#suit = '-';
+    this.#trays = 0;
     if (this.#cradles > 0) {
       const colours = appearance ?? DEFAULT_APPEARANCE;
       const suit: SuitColours = { primary: new THREE.Color(colours.primary), secondary: new THREE.Color(colours.secondary) };
+      this.#suit = `#${suit.primary.getHexString()}/#${suit.secondary.getHexString()}`;
       const cradles = new THREE.InstancedMesh(kitGeometry('cave_cradle', assets, suit), kitMaterial, this.#cradles);
       cradles.name = 'cave-cradles';
       const matrices = cradles.instanceMatrix.array as Float32Array;
@@ -603,10 +615,11 @@ export class UndergroundView {
       this.root.add(cradles);
     }
     if (def.machineRoom === true) {
-      const geometry = trayGeometry(u);
-      if (geometry !== null) {
+      const laid = trayGeometry(u);
+      if (laid !== null) {
+        this.#trays = laid.trays;
         const trays = new THREE.Mesh(
-          geometry,
+          laid.geometry,
           new THREE.MeshStandardMaterial({
             color: '#30343c',
             roughness: 0.55,
@@ -629,6 +642,21 @@ export class UndergroundView {
   /** §4.12: the cradles in the vault room — 6 on Eden, else 0 (`sceneInfo.cradles`). */
   get cradles(): number {
     return this.#cradles;
+  }
+
+  /** §4.12: what the walls draw as — `cave_rack` in the machine room, else `rock` (`sceneInfo.caveWallModel`). */
+  get wallModel(): 'cave_rack' | 'rock' {
+    return this.#wallModel;
+  }
+
+  /** §4.12: the cable trays down the machine room's corridors; 0 in a cave (`sceneInfo.caveTrays`). */
+  get trays(): number {
+    return this.#trays;
+  }
+
+  /** §4.12: the colours the cradles' suits wear, `#primary/#secondary`, or `-` with none (`sceneInfo.cradleSuit`). */
+  get suit(): string {
+    return this.#suit;
   }
 
   /** Meshes under the root that can draw — each at most one draw call (§4.14's ≤ 12). */
