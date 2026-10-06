@@ -16,6 +16,7 @@
 import type { QualityPreset } from '@/core/Renderer';
 import type { EmitArgs, GameEvents } from '@/core/Events';
 import { log } from '@/core/Log';
+import { SWATCH_IDS } from '@/data/cosmetics';
 import { TIP_IDS, type TipId } from '@/data/hints';
 import { MISSIONS, type MissionId } from '@/data/missions';
 
@@ -270,6 +271,12 @@ export type Settings = {
    * 1…86 400 are kept.
    */
   bestTimes: BestTimes;
+  /**
+   * SPEC-056 §4.6: the suit swatches this device has unlocked — `SwatchId`s,
+   * each once, in the order they were found. Per device, like `bestTimes`:
+   * the machine remembers what the instance forgets.
+   */
+  unlocks: string[];
 };
 
 export interface SettingsStore {
@@ -383,6 +390,7 @@ export function defaultSettings(): Settings {
     zonesShown: 0,
     haptics: true,
     bestTimes: {},
+    unlocks: [],
   };
 }
 
@@ -532,6 +540,20 @@ function bestTimes(value: unknown): BestTimes {
   return out;
 }
 
+/**
+ * SPEC-056 §4.6 (56-i): the unlocked swatches — `SwatchId` strings only, each
+ * once, in stored order. Anything else is dropped; a non-list reads `[]`.
+ */
+function swatchUnlocks(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  const out: string[] = [];
+  for (const entry of value) {
+    if (typeof entry !== 'string' || !(SWATCH_IDS as readonly string[]).includes(entry) || out.includes(entry)) continue;
+    out.push(entry);
+  }
+  return out;
+}
+
 /** SPEC-036 §4.12: an integer 0…2; anything else reads as 0. */
 function zonesShown(value: unknown): number {
   return typeof value === 'number' && Number.isInteger(value) && value >= 0 && value <= ZONES_SHOWN_MAX ? value : 0;
@@ -673,6 +695,8 @@ function coerce<K extends keyof Settings>(key: K, value: unknown, current: Setti
         return bool(value, true);
       case 'bestTimes':
         return bestTimes(value);
+      case 'unlocks':
+        return swatchUnlocks(value);
       default:
         return current[key];
     }

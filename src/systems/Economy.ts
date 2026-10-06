@@ -28,6 +28,7 @@
 import { maxHp, type Save, type SaveReason } from '@/core/Save';
 import {
   ATTRIBUTE_EFFECTS,
+  CACHE_IDS,
   CACHES,
   CLASSES,
   COMPANIONS,
@@ -180,11 +181,44 @@ export function missingRequirements(save: Save, reqs: readonly Requirement[]): R
  * free function as well as a method, for the reason `missingRequirements` is
  * one: the board's boss-drop line and the shop's Refit line (SPEC-039 §4.6)
  * read ownership off saves no `Economy` wraps.
+ *
+ * SPEC-056 §4.3: a relic is owned exactly when its vault is claimed — the rack
+ * derives from `progress.claimed`, never from the pack or the body.
  */
 export function ownsItem(save: Save, itemId: ItemId): boolean {
+  if (isRelic(itemId)) return ownedRelics(save).includes(itemId);
   if (save.inventory.some((slot) => slot.itemId === itemId && slot.qty > 0)) return true;
   const { armor, sidearm, primary, heavy } = save.equipped;
   return armor === itemId || sidearm === itemId || primary === itemId || heavy === itemId;
+}
+
+/** SPEC-056 §4.3: an item with `relic: true` — a vault's first-clear weapon. */
+export function isRelic(itemId: ItemId): boolean {
+  const item = ITEM_TABLE[itemId];
+  return item !== undefined && item.kind === 'weapon' && item.relic === true;
+}
+
+/**
+ * SPEC-056 §4.3: the rack — the relics named by the claimed vault caches, in
+ * `CACHE_IDS` order. A free function for the reason `ownsItem` is one.
+ */
+export function ownedRelics(save: Save): ItemId[] {
+  const out: ItemId[] = [];
+  const claimed = save.progress.claimed;
+  for (const id of CACHE_IDS) {
+    const relic = (CACHES[id].reward as CacheReward).relic;
+    if (relic !== undefined && claimed.includes(id)) out.push(relic);
+  }
+  return out;
+}
+
+/**
+ * SPEC-056 §4.5: whether a recipe's blueprint is in hand — it names no cache,
+ * or that cache is claimed. Free for the shop's row, like `ownsItem`.
+ */
+export function recipeUnlocked(save: Save, recipe: RecipeId): boolean {
+  const requires = RECIPE_TABLE[recipe].requires;
+  return requires === undefined || save.progress.claimed.includes(requires);
 }
 
 /**
@@ -200,7 +234,8 @@ export function discountTokens(tokens: number, discount: number): number {
 /**
  * SPEC-055 §4.8: a cache's reward with its flawless part — resources summed,
  * items merged by id in first-seen order — as one `CacheReward`, so the claim
- * pays and toasts it in one go.
+ * pays and toasts it in one go. SPEC-056 §3: tokens add up too, and the
+ * relic, blueprint, swatch and shard are `a`'s, else `b`'s.
  */
 export function joinRewards(a: CacheReward, b: CacheReward): CacheReward {
   const resources: Partial<Record<ResourceId, number>> = {};
@@ -214,9 +249,27 @@ export function joinRewards(a: CacheReward, b: CacheReward): CacheReward {
     if (entry === undefined) items.push({ itemId, qty });
     else entry.qty += qty;
   }
-  const out: { resources?: Partial<Record<ResourceId, number>>; items?: { itemId: ItemId; qty: number }[] } = {};
+  const out: {
+    resources?: Partial<Record<ResourceId, number>>;
+    items?: { itemId: ItemId; qty: number }[];
+    tokens?: number;
+    relic?: ItemId;
+    blueprint?: RecipeId;
+    swatch?: CacheReward['swatch'];
+    shard?: FlagId;
+  } = {};
   if (Object.keys(resources).length > 0) out.resources = resources;
   if (items.length > 0) out.items = items;
+  const tokens = (a.tokens ?? 0) + (b.tokens ?? 0);
+  if (tokens > 0) out.tokens = tokens;
+  const relic = a.relic ?? b.relic;
+  if (relic !== undefined) out.relic = relic;
+  const blueprint = a.blueprint ?? b.blueprint;
+  if (blueprint !== undefined) out.blueprint = blueprint;
+  const swatch = a.swatch ?? b.swatch;
+  if (swatch !== undefined) out.swatch = swatch;
+  const shard = a.shard ?? b.shard;
+  if (shard !== undefined) out.shard = shard;
   return out;
 }
 
@@ -472,11 +525,15 @@ export class Economy {
   /**
    * §4.3: `times` crafts in one atomic call. A batch that would overflow the
    * stack cap is refused whole — a partial craft would spend the resources for
-   * items the hold cannot hold.
+   * items the hold cannot hold. SPEC-056 §4.5: a recipe whose `requires`
+   * cache is unclaimed is `locked` before anything else is checked.
    */
   craft(recipe: RecipeId, times = 1): Result<{ qty: number }> {
     if (!Object.hasOwn(RECIPES, recipe)) return fail('not_found');
     const def = RECIPE_TABLE[recipe];
+    // SPEC-056 §4.5: a blueprint's recipe is refused, and nothing spent, until
+    // the cache that holds it is claimed.
+    if (!recipeUnlocked(this.#save, recipe)) return fail('locked');
     const runs = Math.max(1, Math.floor(Number.isFinite(times) ? times : 1));
     const cost: Partial<Record<ResourceId, number>> = {};
     for (const resource of RESOURCE_IDS) {
@@ -512,10 +569,14 @@ export class Economy {
   /**
    * §4.4: fills the existing stack first, then takes fresh slots, and reports
    * what did not fit — the surface scene leaves that on the ground (E25).
+   * SPEC-056 §4.3: a relic adds none and emits nothing.
    */
   addItem(itemId: ItemId, qty: number): { added: number; blocked: number } {
     const want = Math.floor(qty);
     if (!Number.isFinite(want) || want <= 0) return { added: 0, blocked: 0 };
+    // SPEC-056 §4.3: a relic lives on the rack; no path puts one in the pack,
+    // and the refusal says nothing — it was never the pack's to take.
+    if (isRelic(itemId)) return { added: 0, blocked: want };
     const added = Math.min(want, this.#roomFor(itemId));
     if (added > 0) {
       const entry = this.#save.inventory.find((slot) => slot.itemId === itemId);
@@ -557,17 +618,28 @@ export class Economy {
    * slot the gear just left is free (10-g). A weapon goes to the slot *it*
    * names, so a rifle can never land in the sidearm hand; an empty `heavy` slot
    * takes it with nothing to swap back.
+   *
+   * SPEC-056 §4.3: a relic comes off the rack, not the pack — it must be owned
+   * (`relics()`) and not already worn — so the slot it frees is no pack slot,
+   * and a displaced non-relic needs room there (`inventory_full`, nothing
+   * moved, otherwise). A displaced relic simply returns to the rack.
    */
   equip(itemId: ItemId): Result {
     if (!Object.hasOwn(ITEMS, itemId)) return fail('not_found');
     const item = ITEM_TABLE[itemId];
     if (item.kind === 'consumable') return fail('not_found');
-    if (this.count(itemId) < 1) return fail('not_found');
     const slot = item.kind === 'weapon' ? item.slot : 'armor';
     const previous = this.#save.equipped[slot];
-    this.removeItem(itemId, 1);
+    const relic = isRelic(itemId);
+    if (relic) {
+      if (!this.relics().includes(itemId) || previous === itemId) return fail('not_found');
+      if (previous !== null && !isRelic(previous) && this.#roomFor(previous) < 1) return fail('inventory_full');
+    } else {
+      if (this.count(itemId) < 1) return fail('not_found');
+      this.removeItem(itemId, 1);
+    }
     this.#save.equipped[slot] = itemId;
-    if (previous !== null && previous !== itemId) this.addItem(previous, 1);
+    if (previous !== null && previous !== itemId && !isRelic(previous)) this.addItem(previous, 1);
     this.#events.emit('gear:equipped', { slot, itemId });
     // SPEC-014 AC-45: equips autosave the same way purchases do.
     this.#saves?.request('purchase');
@@ -600,9 +672,15 @@ export class Economy {
   /**
    * Owned means carried or worn — a bought tier that is equipped still counts.
    * Public since SPEC-039 §4.1: a boss's signature drop asks it at the kill.
+   * SPEC-056 §4.3: for a relic, `relics().includes(relic)`.
    */
   owns(itemId: ItemId): boolean {
     return ownsItem(this.#save, itemId);
+  }
+
+  /** SPEC-056 §4.3: the rack — the relics of the claimed vaults, in `CACHE_IDS` order. */
+  relics(): ItemId[] {
+    return ownedRelics(this.#save);
   }
 
   /**
@@ -610,14 +688,14 @@ export class Economy {
    * is the bottom of its ladder. Tiers are unique per line, so "highest below"
    * is exactly the one step down — for rifles and armor that is the v1 rule of
    * tier − 1, and for handguns anything above the Service Pistol wants the
-   * Service Pistol, which every save owns.
+   * Service Pistol, which every save owns. SPEC-056 §4.3: relics are no rung.
    */
   #gearBelow(line: GearLine, tier: number): ItemId | null {
     let best: ItemId | null = null;
     let bestTier = -1;
     for (const id of Object.keys(ITEMS) as ItemId[]) {
       const item = ITEM_TABLE[id];
-      if (item.kind === 'consumable' || item.line !== line) continue;
+      if (item.kind === 'consumable' || item.line !== line || isRelic(id)) continue;
       if (item.tier >= tier || item.tier <= bestTier) continue;
       best = id;
       bestTier = item.tier;
@@ -845,6 +923,11 @@ export class Economy {
    * SPEC-055 §4.8: a cache's `flawless` part is paid too when `flawless` is
    * true — the default — and held back from a solve ARIA forced. `reward` is
    * everything this claim paid, the flawless part included.
+   *
+   * SPEC-056 §4.2: a vault's tokens follow, through `Progression.addTokens`
+   * as `cache:<id>`; no cache pays XP. Its relic and blueprint are already
+   * paid — both derive from the id just pushed (E90) — and its swatch and
+   * shard are the scene's, on `cache:opened`.
    */
   claimCache(id: CacheId, opts?: { flawless?: boolean }): { ok: true; reward: CacheReward } | { ok: false; reason: 'claimed' } {
     if (this.#save.progress.claimed.includes(id)) return { ok: false, reason: 'claimed' };
@@ -853,6 +936,8 @@ export class Economy {
     const extra = opts?.flawless === false ? undefined : def.flawless;
     const reward = extra === undefined ? def.reward : joinRewards(def.reward, extra);
     this.#grant(reward);
+    const tokens = reward.tokens ?? 0;
+    if (tokens > 0) this.#progression.addTokens(tokens, `cache:${id}`);
     this.#saves?.request('checkpoint');
     return { ok: true, reward };
   }

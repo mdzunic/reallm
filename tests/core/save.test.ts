@@ -2251,3 +2251,85 @@ describe('version 3 (SPEC-047)', () => {
     expect(worst.asV3.length).toBeLessThan(100_000 / 4);
   });
 });
+
+// ------------------------------------------------------------------ SPEC-056
+
+describe('relics in the validator (SPEC-056 §4.3, 56-b)', () => {
+  /** A valid fresh save with `inventory`, `equipped` and `progress.claimed` patched. */
+  function withGear(patch: { inventory?: unknown; equipped?: Record<string, unknown>; claimed?: unknown }): unknown {
+    const base = JSON.parse(JSON.stringify(newSave(0, CREATION, 1, 1000))) as Record<string, Record<string, unknown>>;
+    return {
+      ...base,
+      ...(patch.inventory === undefined ? {} : { inventory: patch.inventory }),
+      equipped: { ...base['equipped'], ...patch.equipped },
+      progress: { ...base['progress'], ...(patch.claimed === undefined ? {} : { claimed: patch.claimed }) },
+    };
+  }
+
+  function validated(raw: unknown): { data: Save; warnings: string[] } {
+    const result = validateSave(raw);
+    if (!result.ok) throw new Error(`expected a valid save, got: ${result.errors.join('; ')}`);
+    return result;
+  }
+
+  it('maps each relic to the vault that pays it', () => {
+    expect(SAVE_CONTENT.relicCache).toEqual({
+      relic_last_word: 'cinder4_vault',
+      relic_cold_coil: 'vetra_vault',
+      relic_seed_drum: 'thessaly_vault',
+      relic_slag_vent: 'ferrum_vault',
+      relic_seeker: 'hive_vault',
+    });
+  });
+
+  it('drops a relic from the inventory with a warning, claimed or not', () => {
+    const { data, warnings } = validated(
+      withGear({
+        inventory: [
+          { itemId: 'medkit', qty: 2 },
+          { itemId: 'relic_last_word', qty: 1 },
+          { itemId: 'relic_seeker', qty: 1 },
+        ],
+        claimed: ['cinder4_vault'],
+      }),
+    );
+    expect(data.inventory).toEqual([{ itemId: 'medkit', qty: 2 }]);
+    expect(warnings.filter((w) => w.startsWith('inventory.relic_'))).toHaveLength(2);
+  });
+
+  it('an equipped relic whose vault is unclaimed falls back: the class starter, or an empty heavy slot', () => {
+    const { data, warnings } = validated(
+      withGear({ equipped: { sidearm: 'relic_last_word', primary: 'relic_cold_coil', heavy: 'relic_seeker' }, claimed: [] }),
+    );
+    expect(data.equipped.sidearm).toBe(SAVE_CONTENT.starterSidearm.marine);
+    expect(data.equipped.primary).toBe(SAVE_CONTENT.starterWeapon.marine);
+    expect(data.equipped.heavy).toBeNull();
+    for (const relic of ['relic_last_word', 'relic_cold_coil', 'relic_seeker']) {
+      expect(warnings.some((w) => w.includes(relic)), relic).toBe(true);
+    }
+  });
+
+  it('a claimed vault keeps its relic in its slot', () => {
+    const { data, warnings } = validated(
+      withGear({
+        equipped: { sidearm: 'relic_last_word', primary: 'relic_slag_vent', heavy: 'relic_seed_drum' },
+        claimed: ['cinder4_vault', 'thessaly_vault', 'ferrum_vault'],
+      }),
+    );
+    expect(data.equipped).toMatchObject({ sidearm: 'relic_last_word', primary: 'relic_slag_vent', heavy: 'relic_seed_drum' });
+    expect(warnings.filter((w) => w.includes('relic'))).toEqual([]);
+  });
+
+  it('a claimed relic still has to fit its slot', () => {
+    const { data } = validated(withGear({ equipped: { sidearm: 'relic_seeker' }, claimed: ['hive_vault'] }));
+    expect(data.equipped.sidearm).toBe(SAVE_CONTENT.starterSidearm.marine);
+  });
+
+  it('reads claimed through its own rules first: a forged claim racks nothing', () => {
+    const { data } = validated(withGear({ equipped: { heavy: 'relic_seeker' }, claimed: ['hive_vault', 'hive_vault', 'nope'] }));
+    expect(data.progress.claimed).toEqual(['hive_vault']);
+    expect(data.equipped.heavy).toBe('relic_seeker');
+    const forged = validated(withGear({ equipped: { heavy: 'relic_seeker' }, claimed: 'hive_vault' }));
+    expect(forged.data.equipped.heavy).toBeNull();
+  });
+});

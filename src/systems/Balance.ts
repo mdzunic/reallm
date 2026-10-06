@@ -16,12 +16,15 @@
 //
 // Pure: no `three`, no DOM, no `Math.random` (SPEC-001 §4, §7).
 import {
+  CACHE_IDS,
+  CACHES,
   COMPANIONS,
   ITEMS,
   LOOT_TABLES,
   MISSIONS,
   PLANETS,
   UPGRADES,
+  type CacheReward,
   type Companion,
   type CompanionId,
   type Item,
@@ -155,13 +158,28 @@ export function worstCaseTokensBefore(chapter: number): number {
  */
 export const COMPLETIONIST_LEVEL = 20;
 
-/** PLAN §7: main + side + level tokens, the most a run can earn. */
+/**
+ * SPEC-056 §4.2: the tokens the caves pay — every `CACHES` row's
+ * `reward.tokens`, which only the six vaults carry (5 each, 30 in all).
+ * Optional income, so the worst-case model never counts it.
+ */
+export function treasureTokens(): number {
+  let total = 0;
+  for (const id of CACHE_IDS) total += (CACHES[id].reward as CacheReward).tokens ?? 0;
+  return total;
+}
+
+/**
+ * PLAN §7: main + side + level tokens, the most a run can earn. SPEC-056 §4.2:
+ * plus the vaults' treasure — 1,249 + 30 = 1,279.
+ */
 export function completionistTokens(): number {
   const chapters = 6;
   return (
     guaranteedMainTokensThrough(chapters) +
     sideTokensThrough(chapters) +
-    TOKENS_PER_LEVEL * (COMPLETIONIST_LEVEL - 1)
+    TOKENS_PER_LEVEL * (COMPLETIONIST_LEVEL - 1) +
+    treasureTokens()
   );
 }
 

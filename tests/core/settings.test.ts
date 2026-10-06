@@ -359,6 +359,8 @@ describe('the settings object (SPEC-007 §3)', () => {
       haptics: true,
       // SPEC-043 §4.5: no mission has a best time on a new device.
       bestTimes: {},
+      // SPEC-056 §4.6: no swatch is unlocked on a new device.
+      unlocks: [],
     });
   });
 
@@ -779,6 +781,29 @@ describe('bestTimes (SPEC-043 §4.5)', () => {
     const settings = createSettings(fakeStorage().storage);
     settings.set({ bestTimes: { c1_m2: 99, c1_s1: 'x', c9_m9: 4 } as unknown as Settings['bestTimes'] });
     expect(settings.get().bestTimes).toEqual({ c1_m2: 99 });
+  });
+});
+
+describe('unlocks (SPEC-056 §4.6)', () => {
+  it('defaults to [] and round-trips swatch ids through the merge write', () => {
+    expect(defaultSettings().unlocks).toEqual([]);
+    const fake = fakeStorage();
+    const settings = createSettings(fake.storage);
+    expect(settings.get().unlocks).toEqual([]);
+    settings.set({ unlocks: ['vetra_relic', 'cinder4_relic'] });
+    expect(stored(fake)).toMatchObject({ unlocks: ['vetra_relic', 'cinder4_relic'] });
+    expect(createSettings(fake.storage).get().unlocks).toEqual(['vetra_relic', 'cinder4_relic']);
+  });
+
+  it('keeps unique SwatchIds in order and drops anything else, on load and on set (56-i)', () => {
+    const raw = JSON.stringify({ unlocks: ['eden_vault', 'nope', 3, 'eden_vault', null, 'ferrum_relic', 'hive_relic'] });
+    expect(createSettings(fakeStorage(raw).storage).get().unlocks).toEqual(['eden_vault', 'ferrum_relic']);
+    for (const value of ['"eden_vault"', '{"a":1}', 'null', '12']) {
+      expect(createSettings(fakeStorage(`{"unlocks":${value}}`).storage).get().unlocks, value).toEqual([]);
+    }
+    const settings = createSettings(fakeStorage().storage);
+    settings.set({ unlocks: ['thessaly_relic', 'thessaly_relic', 'x'] });
+    expect(settings.get().unlocks).toEqual(['thessaly_relic']);
   });
 });
 
