@@ -568,6 +568,14 @@ export class EnemyMeshes {
    */
   readonly #recipes = new Map<string, RecipeMeshes>();
   #shadows: boolean;
+  /**
+   * SPEC-054 §4.6: what multiplies each instance's rim scale on top of the
+   * flash's — below, `DARK_RIM_SCALE` for an enemy outside the lit cone. The
+   * scene sets it at a descent and clears it on the surface; `null` reads as
+   * ×1, so the surface's rims are exactly SPEC-035's. Called once per live
+   * enemy per `sync`, so it must not allocate.
+   */
+  rimOf: ((e: EnemyEntity) => number) | null = null;
 
   constructor(parent: THREE.Object3D, options?: { shadows?: boolean }) {
     parent.add(this.#root);
@@ -641,8 +649,9 @@ export class EnemyMeshes {
       }
       if (e.invulnerable) scratchEmissive.multiplyScalar(0.5);
       // SPEC-035 §4.1: the rim steps back while the flash is on, so the flash
-      // stays the brightest thing on the body.
-      const rimScale = e.hitFlash > 0 ? FLASH_RIM_SCALE : 1;
+      // stays the brightest thing on the body. SPEC-054 §4.6: below, the
+      // light rules scale it again — an enemy in the dark keeps 60 %.
+      const rimScale = (e.hitFlash > 0 ? FLASH_RIM_SCALE : 1) * (this.rimOf === null ? 1 : this.rimOf(e));
 
       for (const part of recipe.parts) {
         let y = 0;

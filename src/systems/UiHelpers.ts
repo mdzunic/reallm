@@ -802,10 +802,12 @@ export function stageResetText(
 
 // ------------------------------------------------------- the surface's holds
 
-/** SPEC-034 §4.6: the three counters the surface step reads before it runs. */
+/** SPEC-034 §4.6: the counters the surface step reads before it runs. */
 export interface SurfaceHoldState {
   /** SPEC-023 §4.4: a held story beat — a film, a reveal, the ending sequence. */
   beats: number;
+  /** SPEC-054 §4.2: a level swap's fade — the descent or the climb back up. */
+  level: boolean;
   /** SPEC-036 §4.3: the rotate block — a phone held upright, or entered upright. */
   rotate: boolean;
   /**
@@ -817,7 +819,7 @@ export interface SurfaceHoldState {
   modal: number;
 }
 
-export type SurfaceHold = 'beat' | 'rotate' | 'ui' | 'modal' | null;
+export type SurfaceHold = 'beat' | 'level' | 'rotate' | 'ui' | 'modal' | null;
 
 /**
  * SPEC-034 §4.6: why the surface step is holding, or `null` when it is not.
@@ -825,11 +827,14 @@ export type SurfaceHold = 'beat' | 'rotate' | 'ui' | 'modal' | null;
  * A modal line takes the player's movement, aim, healing and fire away, so the
  * enemies should not be able to act either: the world waits for a modal
  * dialogue and the verdict choice exactly as it already waits for the map. The
- * order is the order the step checks them in — a beat outranks the rotate
- * block (SPEC-036 §4.3), which outranks the map, which outranks a line.
+ * order is the order the step checks them in — a beat outranks a level swap
+ * (SPEC-054 §4.2: nothing else should start while the fade is in flight),
+ * which outranks the rotate block (SPEC-036 §4.3), which outranks the map,
+ * which outranks a line.
  */
 export function surfaceHoldReason(state: SurfaceHoldState): SurfaceHold {
   if (state.beats > 0) return 'beat';
+  if (state.level) return 'level';
   if (state.rotate) return 'rotate';
   if (state.ui > 0) return 'ui';
   if (state.modal > 0) return 'modal';
@@ -838,12 +843,61 @@ export function surfaceHoldReason(state: SurfaceHoldState): SurfaceHold {
 
 /**
  * SPEC-040 §4.2: whether a hold leaves nothing on screen moving with the world
- * — the map, the quick picker, the pad terminal, a modal line and the rotate
- * block all stand the world still, so the surface is idle and draws at most
- * five frames a second. A beat never is: a film or a reveal moves the camera.
+ * — the map, the quick picker, the pad terminal, a modal line, the rotate
+ * block and a level swap's fade (SPEC-054 §4.2) all stand the world still, so
+ * the surface is idle and draws at most five frames a second. A beat never
+ * is: a film or a reveal moves the camera.
  */
 export function holdIsIdle(hold: SurfaceHold): boolean {
-  return hold === 'ui' || hold === 'modal' || hold === 'rotate';
+  return hold === 'ui' || hold === 'modal' || hold === 'rotate' || hold === 'level';
+}
+
+// --------------------------------------------------------- SPEC-054: the descent
+
+/**
+ * SPEC-054 §4.2 — what `descentRefusal` reads. The scene digests the mission
+ * runtime and the world down to these five facts so the decision stays pure;
+ * none of the lookups behind them (`missions.bossStage()`, `world.arena`,
+ * `missions.requiredWeather()`, the active stages' objectives) live here.
+ */
+export interface DescentContext {
+  /** `c1_m1` is in `missionsDone` — the tutorial the seal waits for. */
+  readonly tutorialDone: boolean;
+  /**
+   * The title of the first active mission with a current, unfinished
+   * `survive`, `defend` or `escort` objective; `null` with none running.
+   */
+  readonly clockTitle: string | null;
+  /** `missions.bossStage() !== null`, or the arena is locked. */
+  readonly bossAwake: boolean;
+  /** `world.follower !== null` — a follower cannot climb down after you. */
+  readonly follower: boolean;
+  /** `missions.requiredWeather() !== null` — a survive stage is forcing it. */
+  readonly stormForced: boolean;
+}
+
+/**
+ * SPEC-054 §4.2 — the descent's refusal, checked in this order, or `null`
+ * when it is allowed and the prompt reads `Descend`. SPEC-049 house style:
+ * straight quotes and an em dash, no contractions.
+ */
+export function descentRefusal(ctx: DescentContext): string | null {
+  if (!ctx.tutorialDone) return 'Sealed — finish "Dry Land" first';
+  if (ctx.clockTitle !== null) return `Not now — the clock is running on "${ctx.clockTitle}"`;
+  if (ctx.bossAwake) return 'Not now — the boss is awake';
+  if (ctx.follower) return 'Not now — the probe cannot follow you down';
+  if (ctx.stormForced) return 'Not now — ride out the storm first';
+  return null;
+}
+
+/**
+ * SPEC-054 §4.5 "The chip" — the flashlight chip's words: `◐ Light on · L` /
+ * `○ Light off · L` on keyboard (and a gamepad, which reads the same legend),
+ * and without the key legend on touch, where `touch-light` is the button.
+ */
+export function lightChipText(on: boolean, scheme: Scheme): string {
+  const state = on ? '◐ Light on' : '○ Light off';
+  return scheme === 'touch' ? state : `${state} · L`;
 }
 
 // -------------------------------------------------------------- player stats
@@ -1547,6 +1601,11 @@ export interface HudModel {
   stamina: { value: number; max: number; exhausted: boolean; sprinting: boolean; shown: boolean } | null;
   /** SPEC-050 §4.6: the gun is holstered — sprinting, or drawing after a sprint. */
   holstered: boolean;
+  /**
+   * SPEC-054 §4.5: the flashlight chip below — `null` hides it (above, or in
+   * flight); `true`/`false` shows it on or off.
+   */
+  light: boolean | null;
   flight?: {
     shield: [number, number];
     hull: [number, number];
@@ -1596,6 +1655,7 @@ export function createHudModel(): HudModel {
     dash: 0,
     stamina: null,
     holstered: false,
+    light: null,
   };
 }
 
@@ -1627,6 +1687,7 @@ const HUD_KEY_TABLE = {
   dash: true,
   stamina: true,
   holstered: true,
+  light: true,
   flight: true,
 } as const satisfies Record<HudKey, true>;
 
@@ -1896,6 +1957,15 @@ export function surfaceFogRange(density: number, fogMult: number, camDistance: n
   const near = Math.max(0, camDistance);
   const thickness = Math.max(1e-4, density * fogMult);
   return { near, far: near + FOG_SPAN_K / thickness };
+}
+
+/**
+ * SPEC-054 §4.4 — the cave's linear fog: `near` is the camera's own distance
+ * to its target, exactly as `surfaceFogRange` keeps nothing between the
+ * camera and the salvager ever hazed; `far` is `near` plus `DarkLook.fogSpan`.
+ */
+export function darkFogRange(camDistance: number, span: number): { near: number; far: number } {
+  return { near: camDistance, far: camDistance + span };
 }
 
 /** §4.5: what a prop between the camera and the player fades to. */

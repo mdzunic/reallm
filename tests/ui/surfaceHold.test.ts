@@ -15,7 +15,7 @@ const SOURCES: Record<string, string> = Object.fromEntries(
   Object.entries(RAW).map(([file, source]) => [file, stripComments(source)]),
 );
 
-const RUNNING: SurfaceHoldState = { beats: 0, rotate: false, ui: 0, modal: 0 };
+const RUNNING: SurfaceHoldState = { beats: 0, level: false, rotate: false, ui: 0, modal: 0 };
 
 describe('surfaceHoldReason (SPEC-034 §4.6)', () => {
   it('runs with nothing open', () => {
@@ -39,12 +39,18 @@ describe('surfaceHoldReason (SPEC-034 §4.6)', () => {
 
   it('holds for the rotate block, between a beat and the map (SPEC-036 §4.3)', () => {
     expect(surfaceHoldReason({ ...RUNNING, rotate: true })).toBe('rotate');
-    expect(surfaceHoldReason({ beats: 1, rotate: true, ui: 1, modal: 1 })).toBe('beat');
-    expect(surfaceHoldReason({ beats: 0, rotate: true, ui: 1, modal: 1 })).toBe('rotate');
+    expect(surfaceHoldReason({ beats: 1, level: false, rotate: true, ui: 1, modal: 1 })).toBe('beat');
+    expect(surfaceHoldReason({ beats: 0, level: false, rotate: true, ui: 1, modal: 1 })).toBe('rotate');
+  });
+
+  it('holds for a level swap, between a beat and the rotate block (SPEC-054 §4.2)', () => {
+    expect(surfaceHoldReason({ ...RUNNING, level: true })).toBe('level');
+    expect(surfaceHoldReason({ ...RUNNING, beats: 1, level: true })).toBe('beat');
+    expect(surfaceHoldReason({ ...RUNNING, level: true, rotate: true, ui: 1, modal: 1 })).toBe('level');
   });
 
   it('resumes the moment the line closes', () => {
-    const state: SurfaceHoldState = { beats: 0, rotate: false, ui: 0, modal: 1 };
+    const state: SurfaceHoldState = { beats: 0, level: false, rotate: false, ui: 0, modal: 1 };
     expect(surfaceHoldReason(state)).toBe('modal');
     state.modal = 0;
     expect(surfaceHoldReason(state)).toBeNull();
@@ -87,9 +93,10 @@ describe("the surface step obeys it (SPEC-034 §4.6)", () => {
 
   it('publishes the hold as sceneInfo.held', () => {
     expect(surface()).toContain("info['held'] = this.#holdReason() === null ? 0 : 1;");
-    // SPEC-036 §4.3: the rotate block is one of the reasons, in its place.
-    expect(surface()).toContain(
-      'surfaceHoldReason({ beats: this.#holds, rotate: this.#rotateBlocked(), ui: this.#uiHolds, modal: this.#modalOpen })',
+    // SPEC-036 §4.3 and SPEC-054 §4.2: the rotate block and a level swap are
+    // both among the reasons, each wired into the call.
+    expect(surface()).toMatch(
+      /surfaceHoldReason\(\{\s*beats:\s*this\.#holds,\s*rotate:\s*this\.#rotateBlocked\(\),\s*ui:\s*this\.#uiHolds,\s*modal:\s*this\.#modalOpen,\s*level:\s*this\.#swapping,?\s*\}\)/,
     );
   });
 
@@ -109,10 +116,12 @@ describe("the surface step obeys it (SPEC-034 §4.6)", () => {
 });
 
 describe('holdIsIdle (SPEC-040 §4.2, AC-10)', () => {
-  it("is idle for the map, a modal line and the rotate block — never for a beat or no hold", () => {
+  it("is idle for the map, a modal line, the rotate block and a level swap — never for a beat or no hold", () => {
     expect(holdIsIdle('ui')).toBe(true);
     expect(holdIsIdle('modal')).toBe(true);
     expect(holdIsIdle('rotate')).toBe(true);
+    // SPEC-054 §4.2: nothing moves during the swap's fade either.
+    expect(holdIsIdle('level')).toBe(true);
     // A film or a reveal moves the camera; the running step moves everything.
     expect(holdIsIdle('beat')).toBe(false);
     expect(holdIsIdle(null)).toBe(false);
@@ -123,6 +132,7 @@ describe('holdIsIdle (SPEC-040 §4.2, AC-10)', () => {
     expect(holdIsIdle(surfaceHoldReason({ ...RUNNING, rotate: true }))).toBe(true);
     expect(holdIsIdle(surfaceHoldReason({ ...RUNNING, ui: 1 }))).toBe(true);
     expect(holdIsIdle(surfaceHoldReason({ ...RUNNING, modal: 1 }))).toBe(true);
+    expect(holdIsIdle(surfaceHoldReason({ ...RUNNING, level: true }))).toBe(true);
     expect(holdIsIdle(surfaceHoldReason(RUNNING))).toBe(false);
   });
 

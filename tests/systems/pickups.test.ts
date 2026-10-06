@@ -94,6 +94,33 @@ describe('Pickups — magnet (AC-18)', () => {
   });
 });
 
+describe('Pickups — clear (SPEC-054 §4.2, E86)', () => {
+  it('frees every pickup and counts only the ones within radius', () => {
+    const h = harness();
+    h.pickups.spawn({ kind: 'resource', resource: 'oil', amount: 3, x: 2, z: 0 }); // near
+    h.pickups.spawn({ kind: 'item', itemId: 'medkit', qty: 1, x: -1, z: 1 }); // near
+    h.pickups.spawn({ kind: 'resource', resource: 'wheat', amount: 5, x: 50, z: 50 }); // far
+    expect(h.pickups.pool.size).toBe(3);
+
+    const near = h.pickups.clear(0, 0, 10);
+    expect(near).toBe(2);
+    expect(h.pickups.pool.size).toBe(0); // every pickup is gone, near and far alike
+  });
+
+  it('counts nothing and still clears when every pickup lies outside radius', () => {
+    const h = harness();
+    h.pickups.spawn({ kind: 'resource', resource: 'oil', amount: 3, x: 40, z: 40 });
+    expect(h.pickups.clear(0, 0, 10)).toBe(0);
+    expect(h.pickups.pool.size).toBe(0);
+  });
+
+  it('is a no-op on an empty pool', () => {
+    const h = harness();
+    expect(h.pickups.clear(0, 0, 10)).toBe(0);
+    expect(h.pickups.pool.size).toBe(0);
+  });
+});
+
 describe('Pickups — cargo cap (AC-19, E3)', () => {
   it('bounces blocked units back and throttles CARGO FULL to one per 3 s', () => {
     const h = harness((save) => {

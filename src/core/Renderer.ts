@@ -175,7 +175,11 @@ class CanvasRenderer implements Renderer {
   #warnedNoHalfFloat = false;
   /** Rendered frames; the grade's only time source, and reset on a loss (17-c). */
   #frame = 0;
-  readonly #look: Look = { ...DEFAULT_LOOK, tint: [...DEFAULT_LOOK.tint] };
+  // SPEC-054 §4.4: `lift` is cloned exactly like `tint` — otherwise this field
+  // would alias `DEFAULT_LOOK.lift`, and `applyLook`'s component-wise write
+  // (which mutates whatever array is already there) would corrupt the shared
+  // constant the moment any scene first set a lift.
+  readonly #look: Look = { ...DEFAULT_LOOK, tint: [...DEFAULT_LOOK.tint], lift: DEFAULT_LOOK.lift && [...DEFAULT_LOOK.lift] };
   /** SPEC-045 §4.9: the player's brightness, kept across looks; `effectiveExposure` clamps it. */
   #brightness = 0;
   /** Set by every resize signal; consumed at the start of the next render step. */

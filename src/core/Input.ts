@@ -42,7 +42,9 @@ export type Action =
   | 'throwItem'
   | 'useUtility'
   | 'dash'
-  | 'sprint';
+  | 'sprint'
+  // SPEC-054 §4.5: the flashlight toggle below; does nothing above or in flight.
+  | 'light';
 export type Scheme = 'keyboard' | 'touch' | 'gamepad';
 /** The four movement half-axes a key can bind to; they are not actions (AC-4). */
 export type MoveAxis = 'moveUp' | 'moveDown' | 'moveLeft' | 'moveRight';
@@ -78,6 +80,8 @@ export const ACTIONS = [
   // SPEC-050 §4.5: the surface's run — either Shift through the surface key
   // overrides, or the touch stick pushed past its ring. Flight reads none.
   'sprint',
+  // SPEC-054 §4.5: the flashlight toggle below.
+  'light',
 ] as const satisfies readonly Action[];
 
 // ------------------------------------------------------------------ tunables

@@ -25,6 +25,7 @@ import {
   createHudModel,
   diffHudInto,
   flashGate,
+  lightChipText,
   type DamageFlashMode,
   type EffectKind,
   type HudKey,
@@ -129,6 +130,8 @@ export class Hud {
   readonly #weather = testId(el('div', 'hud-weather'), 'hud-weather');
   /** SPEC-030 D-11: always in the DOM, hidden while `shelter === 'none'`. */
   readonly #shelter = testId(el('div', 'hud-shelter is-hidden'), 'sheltered');
+  /** SPEC-054 §4.5: the flashlight chip — a top-centre row, shown below only. */
+  readonly #light = testId(el('div', 'hud-light is-hidden'), 'hud-light');
   /** SPEC-042 §4.6: `▲ Wave incoming`, on the weather banner's pill, under the shelter chip. */
   readonly #wave = testId(el('div', 'hud-wave is-hidden', `${GLYPHS.warn} Wave incoming`), 'hud-wave');
   /**
@@ -296,7 +299,7 @@ export class Hud {
     const targetTrack = el('div', 'target-frame-track');
     targetTrack.append(this.#targetFill);
     this.#target.append(targetHead, this.#targetAffixes, targetTrack);
-    tc.append(this.#weather, this.#shelter, this.#wave, this.#boss, this.#target);
+    tc.append(this.#weather, this.#shelter, this.#light, this.#wave, this.#boss, this.#target);
     // SPEC-013 §4.10: trip progress with wave markers, the hostiles counter,
     // the storm warning + static, the holding banner, and the reticle.
     if (mode === 'flight') {
@@ -539,6 +542,8 @@ export class Hud {
       else this.#br.prepend(this.#minimap);
     }
     this.#quickBar?.render(this.model.loadout, this.model.quick, scheme);
+    // SPEC-054 §4.5: the chip names its key on the keyboard only.
+    this.#write('light');
   }
 
   dispose(): void {
@@ -661,6 +666,13 @@ export class Hud {
               : '';
         this.#weather.textContent = text;
         this.#weather.classList.toggle('is-hidden', text === '');
+        return;
+      }
+      case 'light': {
+        // SPEC-054 §4.5: `◐ Light on · L` / `○ Light off · L`, without the key on touch.
+        const on = m.light;
+        this.#light.textContent = on === null ? '' : lightChipText(on, this.#scheme);
+        this.#light.classList.toggle('is-hidden', on === null);
         return;
       }
       case 'shelter': {

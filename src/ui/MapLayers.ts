@@ -15,9 +15,9 @@ import { exploreGridSize, EXPLORE_CELL } from '@/core/Save';
 /** §4.4: the unexplored ground, over everything the player has not walked. */
 export const FOG_COLOR = 'rgba(5, 7, 11, 0.92)';
 /** The ground fill, dimmed so icons and the fog edge both read over it. */
-const GROUND_SHADE = 0.55;
+export const GROUND_SHADE = 0.55;
 /** Obstacles are the same ground, darker — a map of cover, not of rocks. */
-const OBSTACLE_SHADE = 0.3;
+export const OBSTACLE_SHADE = 0.3;
 /** A POI plate is the planet's accent, dimmed; the pad and the arena override it. */
 const PLATE_SHADE = 0.45;
 const PAD_PLATE = '#1d4a55';
@@ -27,6 +27,29 @@ const WALL_COLOR = '#11151a';
 const WALL_WIDTH = 3;
 /** SPEC-030 §4.10: shelter footprints ride lighter than the ground. */
 const SHELTER_RING_SHADE = 0.9;
+/** SPEC-054 §4.10: with `open`, everything outside a room or corridor starts this colour. */
+export const OPEN_VOID_COLOR = '#000000';
+
+/**
+ * SPEC-054 §4.10: the structural slice of `Layout` the terrain painter
+ * actually reads. `UndergroundLayout` (`systems/Underground.ts`) picks the
+ * same keys plus its rooms, corridors and roles, so it satisfies this without
+ * a cast — the terrain painter never needs to know which one it was handed.
+ */
+export type TerrainLayout = Pick<Layout, 'halfSize' | 'obstacles' | 'pois' | 'shelters'>;
+
+/**
+ * SPEC-054 §4.10: a cave's rooms and corridors, in the same world units as
+ * `layout.obstacles`. With this, `MapLayers` paints only the open ground
+ * instead of the whole square.
+ */
+export interface MapOpen {
+  readonly rooms: readonly { x: number; z: number; r: number }[];
+  /** Indexes into `rooms`. */
+  readonly corridors: readonly { a: number; b: number }[];
+  /** Corridor width, metres (4.5 below). */
+  readonly width: number;
+}
 
 /** `'#rrggbb'` scaled toward black — the one colour operation the layers need. */
 export function shade(hex: string, factor: number): string {
@@ -60,7 +83,7 @@ export class MapLayers {
   readonly #cells: number;
   #builds = 0;
 
-  constructor(layout: Layout, palette: { ground: string; accent: string }) {
+  constructor(layout: TerrainLayout, palette: { ground: string; accent: string }, open?: MapOpen) {
     const half = layout.halfSize;
     this.halfSize = half;
     const size = Math.round(half * 2);
@@ -68,7 +91,7 @@ export class MapLayers {
     this.terrain = canvasOf(size);
     this.fog = canvasOf(size);
     this.#fogCtx = this.fog.getContext('2d');
-    this.#buildTerrain(layout, palette, size);
+    this.#buildTerrain(layout, palette, size, open);
     this.#fillFog();
   }
 
@@ -113,12 +136,23 @@ export class MapLayers {
     ctx.fillRect(0, 0, size, size);
   }
 
-  /** §4.4: ground, obstacles, POI plates, the arena wall — once per visit. */
-  #buildTerrain(layout: Layout, palette: { ground: string; accent: string }, size: number): void {
+  /**
+   * §4.4: ground, obstacles, POI plates, the arena wall — once per visit.
+   * SPEC-054 §4.10: with `open`, the square starts black and only the rooms,
+   * the corridors and the walls over them are painted (`#buildOpenTerrain`);
+   * everything below this guard — the POI plates, the shelter rings, the
+   * arena wall line — is the surface-only picture.
+   */
+  #buildTerrain(layout: TerrainLayout, palette: { ground: string; accent: string }, size: number, open?: MapOpen): void {
     const ctx = this.terrain.getContext('2d');
     if (ctx === null) return;
     this.#builds++;
     const half = this.halfSize;
+
+    if (open !== undefined) {
+      this.#buildOpenTerrain(ctx, layout, palette, size, half, open);
+      return;
+    }
 
     ctx.fillStyle = shade(palette.ground, GROUND_SHADE);
     ctx.fillRect(0, 0, size, size);
@@ -153,6 +187,59 @@ export class MapLayers {
     ctx.strokeStyle = WALL_COLOR;
     ctx.lineWidth = WALL_WIDTH;
     ctx.strokeRect(2, 2, size - 4, size - 4);
+  }
+
+  /**
+   * SPEC-054 §4.10: the cave picture — black, but for the rooms (discs) and
+   * the corridors (strips between room centres, `open.width` wide) in the
+   * planet's ground colour, with the walls (`layout.obstacles`) darker on
+   * top. Same world→px offset as `#buildTerrain`'s surface path (`+ half`),
+   * so a reveal and the §4.1 view transform land on the same pixels either
+   * way.
+   */
+  #buildOpenTerrain(
+    ctx: CanvasRenderingContext2D,
+    layout: TerrainLayout,
+    palette: { ground: string; accent: string },
+    size: number,
+    half: number,
+    open: MapOpen,
+  ): void {
+    ctx.fillStyle = OPEN_VOID_COLOR;
+    ctx.fillRect(0, 0, size, size);
+
+    const ground = shade(palette.ground, GROUND_SHADE);
+    ctx.fillStyle = ground;
+    ctx.beginPath();
+    for (const room of open.rooms) {
+      ctx.moveTo(room.x + half + room.r, room.z + half);
+      ctx.arc(room.x + half, room.z + half, room.r, 0, Math.PI * 2);
+    }
+    ctx.fill();
+
+    // Flat-capped strips: each stops exactly at its two room centres, which
+    // the discs above already cover well past the strip's half-width.
+    ctx.strokeStyle = ground;
+    ctx.lineWidth = open.width;
+    ctx.lineCap = 'butt';
+    ctx.beginPath();
+    for (const corridor of open.corridors) {
+      const a = open.rooms[corridor.a];
+      const b = open.rooms[corridor.b];
+      if (a === undefined || b === undefined) continue;
+      ctx.moveTo(a.x + half, a.z + half);
+      ctx.lineTo(b.x + half, b.z + half);
+    }
+    ctx.stroke();
+
+    // The walls, on top and darker — the same shade the surface uses for cover.
+    ctx.fillStyle = shade(palette.ground, OBSTACLE_SHADE);
+    ctx.beginPath();
+    for (const obstacle of layout.obstacles) {
+      ctx.moveTo(obstacle.x + half + obstacle.radius, obstacle.z + half);
+      ctx.arc(obstacle.x + half, obstacle.z + half, obstacle.radius, 0, Math.PI * 2);
+    }
+    ctx.fill();
   }
 }
 

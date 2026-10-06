@@ -39,7 +39,13 @@ export type MapIconKind =
   // The last two are reserved for SPEC-030's shelters; they have their shape
   // and their legend row here so the table is closed, and nothing emits them yet.
   | 'shelter_cave'
-  | 'shelter_wreck';
+  | 'shelter_wreck'
+  // SPEC-054 §4.10: the underground's four marks — the way down, a loose
+  // cache, the vault door and a relic terminal (reserved for SPEC-055).
+  | 'descent'
+  | 'cache'
+  | 'vault'
+  | 'relic';
 
 export type MapShape =
   | 'pad'
@@ -56,7 +62,11 @@ export type MapShape =
   | 'arrow'
   | 'cross'
   | 'arch'
-  | 'hull';
+  | 'hull'
+  | 'shaft'
+  | 'chest'
+  | 'lock'
+  | 'tablet';
 
 export interface MapIcon {
   readonly shape: MapShape;
@@ -94,6 +104,11 @@ export const MAP_ICONS: Readonly<Record<MapIconKind, MapIcon>> = {
   target: { shape: 'cross', color: '#ffc857', size: 10, label: 'Current target' },
   shelter_cave: { shape: 'arch', color: '#c8a27a', size: 10, label: 'Cave shelter' },
   shelter_wreck: { shape: 'hull', color: '#a9b8c8', size: 10, label: 'Wreck shelter' },
+  // SPEC-054 §4.10: the underground's icon table.
+  descent: { shape: 'shaft', color: '#e0c088', size: 10, label: 'Way down' },
+  cache: { shape: 'chest', color: '#ffd166', size: 9, label: 'Cache' },
+  vault: { shape: 'lock', color: '#ff9f43', size: 11, label: 'Vault' },
+  relic: { shape: 'tablet', color: '#7ee0c3', size: 9, label: 'Relic terminal' },
 };
 
 /** Every icon kind, in table order — the legend and the uniqueness test iterate it. */

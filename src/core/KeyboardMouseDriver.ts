@@ -42,6 +42,9 @@ export const KEY_BINDINGS: Readonly<Record<string, Action | MoveAxis>> = {
   KeyC: 'useUtility',
   // SPEC-038 §4.1: the dash; the right mouse button holds it too.
   KeyV: 'dash',
+  // SPEC-054 §4.5: the flashlight, below only — `Input.mode` does not gate it,
+  // the scene does, so the binding is a plain `KEY_BINDINGS` row like any other.
+  KeyL: 'light',
   Escape: 'pause',
   KeyP: 'pause',
   KeyM: 'map',

@@ -49,6 +49,9 @@ export const TIP_IDS = [
   // SPEC-050 §4.7: the first in-combat sprint, and the Wurm's first burrow.
   'sprint',
   'wurm',
+  // SPEC-054 §4.2, §4.5: the first descent prompt, and the first descent itself.
+  'descent',
+  'dark',
 ] as const;
 
 export type TipId = (typeof TIP_IDS)[number];
@@ -167,6 +170,16 @@ export const TIPS: Readonly<Record<TipId, TipText>> = {
   wurm: {
     keyboard: 'It hunts by vibration: walk out of the ring — running pulls it after you.',
     touch: 'It hunts by vibration: walk out of the ring — running pulls it after you.',
+  },
+  // SPEC-054 §4.2: shown the first time the `Descend` prompt shows.
+  descent: {
+    keyboard: 'E at the back of a cave climbs down. Caves hold caches and locks — nothing you need.',
+    touch: 'Tap USE at the back of a cave to climb down. Caves hold caches and locks — nothing you need.',
+  },
+  // SPEC-054 §4.5: shown at the first descent of a visit.
+  dark: {
+    keyboard: 'L switches your light. Bugs shy from it; hunters follow it. In the dark you cannot aim far.',
+    touch: 'Tap LIGHT to switch your light. Bugs shy from it; hunters follow it.',
   },
 };
 

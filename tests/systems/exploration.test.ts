@@ -4,19 +4,20 @@
 // free, and that a visit survives the round trip through the save.
 import { describe, expect, it } from 'vitest';
 import { decodeBits, exploreBytes, exploreGridSize, EXPLORE_CELL } from '@/core/Save';
-import { EXPLORE_RADIUS, ExploreMask, REVEAL_CAPACITY } from '@/systems/Exploration';
+import { BELOW_HALF_SIZE } from '@/data/index';
+import { EXPLORE_RADIUS, EXPLORE_RADIUS_BELOW, ExploreMask, revealCapacity, REVEAL_CAPACITY } from '@/systems/Exploration';
 
 const HALF = 180;
 
-/** Independent answer to "which cells have their centre within 24 m of (x, z)". */
-function expected(halfSize: number, x: number, z: number): Set<number> {
+/** Independent answer to "which cells have their centre within `radius` m of (x, z)". */
+function expected(halfSize: number, x: number, z: number, radius: number = EXPLORE_RADIUS): Set<number> {
   const n = exploreGridSize(halfSize);
   const out = new Set<number>();
   for (let iz = 0; iz < n; iz++) {
     for (let ix = 0; ix < n; ix++) {
       const cx = (ix + 0.5) * EXPLORE_CELL - halfSize;
       const cz = (iz + 0.5) * EXPLORE_CELL - halfSize;
-      if (Math.hypot(cx - x, cz - z) <= EXPLORE_RADIUS) out.add(iz * n + ix);
+      if (Math.hypot(cx - x, cz - z) <= radius) out.add(iz * n + ix);
     }
   }
   return out;
@@ -109,5 +110,56 @@ describe('ExploreMask encoding (§4.4, SPEC-025 §4.5)', () => {
       expect(mask.fraction()).toBe(0);
       expect(mask.dirty).toBe(false);
     }
+  });
+});
+
+// ------------------------------------------------------------- SPEC-054 §4.10
+
+describe('revealCapacity (SPEC-054 §3)', () => {
+  it('is 169 at 24 m and 49 at 10 m', () => {
+    expect(revealCapacity(EXPLORE_RADIUS)).toBe(169);
+    expect(revealCapacity(EXPLORE_RADIUS_BELOW)).toBe(49);
+    // REVEAL_CAPACITY is the surface's own figure, derived the same way.
+    expect(REVEAL_CAPACITY).toBe(169);
+    expect(REVEAL_CAPACITY).toBe(revealCapacity(EXPLORE_RADIUS));
+  });
+});
+
+describe('ExploreMask below (SPEC-054 §4.10)', () => {
+  it('a radius-10 reveal marks at most 49 cells, and exactly the cells within 10 m', () => {
+    const mask = new ExploreMask(BELOW_HALF_SIZE, undefined, EXPLORE_RADIUS_BELOW);
+    const out = new Int32Array(revealCapacity(EXPLORE_RADIUS_BELOW));
+    const count = mask.reveal(0, 0, out);
+    const want = expected(BELOW_HALF_SIZE, 0, 0, EXPLORE_RADIUS_BELOW);
+    expect(count).toBeLessThanOrEqual(49);
+    expect(count).toBe(want.size);
+    expect(new Set([...out.slice(0, count)])).toEqual(want);
+    // The same point would have lit a far wider patch at the surface's 24 m.
+    expect(count).toBeLessThan(expected(BELOW_HALF_SIZE, 0, 0, EXPLORE_RADIUS).size);
+  });
+
+  it('defaults to EXPLORE_RADIUS when no radius is given, unchanged from before', () => {
+    const mask = new ExploreMask(BELOW_HALF_SIZE);
+    const out = new Int32Array(REVEAL_CAPACITY);
+    expect(mask.reveal(0, 0, out)).toBe(expected(BELOW_HALF_SIZE, 0, 0, EXPLORE_RADIUS).size);
+  });
+
+  it('a BELOW_HALF_SIZE mask round-trips through encode, at the save validator’s byte length', () => {
+    const mask = new ExploreMask(BELOW_HALF_SIZE, undefined, EXPLORE_RADIUS_BELOW);
+    const out = new Int32Array(revealCapacity(EXPLORE_RADIUS_BELOW));
+    mask.reveal(5, -5, out);
+    expect(mask.dirty).toBe(true);
+    const code = mask.encode();
+
+    // SPEC-047 §4.4: `exploreBytes(belowHalfSize)` is what the save validator
+    // checks `progress.exploredBelow`'s entries against.
+    const bytes = decodeBits(code, exploreBytes(BELOW_HALF_SIZE));
+    expect(bytes).not.toBeNull();
+    expect((bytes as Uint8Array).length).toBe(exploreBytes(BELOW_HALF_SIZE));
+
+    const restored = new ExploreMask(BELOW_HALF_SIZE, code, EXPLORE_RADIUS_BELOW);
+    expect(restored.exploredCount).toBe(mask.exploredCount);
+    expect(restored.fraction()).toBe(mask.fraction());
+    expect(restored.encode()).toBe(code);
   });
 });

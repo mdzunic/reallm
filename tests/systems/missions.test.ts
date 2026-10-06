@@ -67,6 +67,8 @@ function harness(
       return null;
     },
     follower: null,
+    // SPEC-054 §3: every harness run is on the surface unless a test flips it.
+    level: 'surface',
   };
   return {
     save,
@@ -217,6 +219,7 @@ describe('Missions — defend resets when the POI dies (AC-34, AC-42)', () => {
       heldResource: () => 0,
       nearPoi: () => null,
       follower: null,
+      level: 'surface',
     };
     for (let i = 0; i < Math.round(30 / STEP); i++) missions.update(STEP, ctx);
     const timer = () => missions.currentObjectives('c6_m2').find((o) => o.objective.kind === 'defend')?.value ?? 0;
@@ -298,6 +301,7 @@ describe('Missions — escort (AC-36, AC-41)', () => {
       heldResource: () => 0,
       nearPoi: () => null,
       follower,
+      level: 'surface',
     };
 
     // E13: the follower dying resets the stage.
@@ -704,6 +708,7 @@ describe('Missions — recall and the escort restart (SPEC-034 §4.2, §4.9)', (
       poiAt: () => [],
       heldResource: () => 0,
       nearPoi: () => null,
+      level: 'surface',
     };
     for (let i = 0; i < 60 * 20; i++) missions.update(STEP, ctx);
     const timer = () => missions.currentObjectives('c6_m2').find((o) => o.objective.kind === 'defend')?.value ?? 0;
@@ -1243,5 +1248,44 @@ describe('Missions — only pickups advance a collect objective (SPEC-043 43-h)'
     h.save.resources.lithium = h.economy.cargoCap();
     expect(h.economy.addResource('lithium', 15, 'pickup')).toEqual({ added: 0, shipped: 15, blocked: 0 });
     expect(counter()).toBe(25);
+  });
+});
+
+// ------------------------------------------------------------- SPEC-054 §4.11
+
+describe('Missions — below (SPEC-054 §4.11, E83)', () => {
+  it('a kill still counts underground, and the survive timer that follows it holds at zero', () => {
+    const h = harness((save) => save.progress.missionsDone.push('c1_m1'));
+    h.missions.accept('c1_s2'); // stage 0: kill 8 skitters; stage 1: survive 90 s
+    h.ctx.level = 'underground';
+    for (let i = 0; i < 8; i++) h.events.emit('enemy:killed', { enemyId: 'dust_skitter', elite: false, x: 0, z: 0, xp: 4 });
+    // The kill advanced the stage: nothing about `level` touches kill counting.
+    expect(h.missions.active[0]?.stage).toBe(1);
+
+    const timer = () => h.missions.currentObjectives('c1_s2').find((o) => o.objective.kind === 'survive')?.value ?? 0;
+    h.run(30);
+    expect(timer()).toBe(0); // held — the clock does not run below
+
+    // Above, the same seconds move the clock (AC-33): the hold is `level`'s
+    // doing, not a timer that stopped working.
+    h.ctx.level = 'surface';
+    h.run(30);
+    expect(timer()).toBeGreaterThan(29);
+  });
+
+  it('a deliver objective makes no progress while nearPoi answers null, as the cave supplies it', () => {
+    const h = harness((save) => save.progress.missionsDone.push('c1_m1', 'c1_m2'));
+    h.missions.accept('c1_m3');
+    h.events.emit('boss:defeated', { boss: 'dune_wurm' });
+    expect(h.missions.active[0]?.stage).toBe(1); // the deliver stage
+
+    h.ctx.level = 'underground';
+    h.ctx.nearPoi = () => null; // §4.11: what the cave's context answers
+    h.save.resources.oil = 150;
+    h.ctx.player.x = 50;
+    h.ctx.player.z = 20; // the beacon's position above — unreachable below
+    h.run(1);
+    expect(h.save.resources.oil).toBe(150); // no delivery: nothing is "near"
+    expect(h.of('poi:delivered')).toEqual([]);
   });
 });

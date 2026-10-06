@@ -610,6 +610,10 @@ const NAMES: Record<keyof GameEvents, true> = {
   'flight:recalled': true,
   // SPEC-041 §4.9: every player hit on a flight hazard.
   'flight:hazardHit': true,
+  // SPEC-054 §4.2, §4.5, §4.8: a level swap, the flashlight toggle and a cache opening.
+  'level:changed': true,
+  'light:toggled': true,
+  'cache:opened': true,
   'ui:toast': true,
   'ui:orientation': true,
   // SPEC-015 §10 / AC-51: the `prompt`-mode update signal, and AC-55's hint.
@@ -628,8 +632,9 @@ describe('GameEvents (§3.2)', () => {
     // `player:dashed` and `enemy:windup`; SPEC-041 §4.10 `boss:move` and
     // `flight:hazardHit`; SPEC-042 §4.2 `item:collected` and `item:blocked`;
     // SPEC-043 §4.7 `mission:bonus`; SPEC-048 §4.9 `story:clue`; SPEC-050 §4.1
-    // `player:exhausted`.
-    expect(Object.keys(NAMES)).toHaveLength(73);
+    // `player:exhausted`; SPEC-054 §4.13 `level:changed`, `light:toggled` and
+    // `cache:opened`.
+    expect(Object.keys(NAMES)).toHaveLength(76);
   });
 
   it('still carries the nine names SPEC-002 and SPEC-003 already emit', () => {

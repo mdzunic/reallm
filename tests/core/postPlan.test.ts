@@ -24,7 +24,10 @@ const PRESETS: readonly QualityPreset[] = ['low', 'medium', 'high'];
 const RATIOS = [1, 1.5, 2] as const;
 
 function look(): Look {
-  return { ...DEFAULT_LOOK, tint: [...DEFAULT_LOOK.tint] };
+  // SPEC-054 §4.4: `lift` is cloned exactly like `tint` — otherwise every
+  // look built here would share one array, and a component-wise write to one
+  // test's target would leak into the next.
+  return { ...DEFAULT_LOOK, tint: [...DEFAULT_LOOK.tint], lift: DEFAULT_LOOK.lift && [...DEFAULT_LOOK.lift] };
 }
 
 describe('QUALITY rows (SPEC-017 §4.1, AC-7 … AC-11)', () => {
@@ -185,6 +188,9 @@ describe('the look (SPEC-017 §4.1, AC-20 … AC-24)', () => {
       contrast: 1.03,
       grain: 0.025,
       tint: [1, 1, 1],
+      // SPEC-054 §4.4: neutral, so a scene that never sets it resets whatever
+      // the previous one asked for.
+      lift: [0, 0, 0],
     });
   });
 
@@ -231,10 +237,47 @@ describe('the look (SPEC-017 §4.1, AC-20 … AC-24)', () => {
 
   it('an empty partial is a no-op, and an explicit undefined is skipped', () => {
     const target = look();
-    const before = { ...target, tint: [...target.tint] };
+    const before = { ...target, tint: [...target.tint], lift: target.lift && [...target.lift] };
     applyLook(target, {});
     expect(target).toEqual(before);
-    applyLook(target, { exposure: undefined, vignette: undefined, tint: undefined });
+    applyLook(target, { exposure: undefined, vignette: undefined, tint: undefined, lift: undefined });
     expect(target).toEqual(before);
+  });
+});
+
+describe('the look’s lift (SPEC-054 §4.4)', () => {
+  it('writes lift component-wise, keeping the target array’s identity', () => {
+    const target = look();
+    const lift = target.lift;
+    const result = applyLook(target, { lift: [0.012, 0.014, 0.02] });
+    expect(result).toBeUndefined();
+    expect(target.lift).toBe(lift); // component-wise, so PostChain's uniform array survives
+    expect(target.lift).toEqual([0.012, 0.014, 0.02]);
+  });
+
+  it('clamps every lift component to zero or more', () => {
+    const target = look();
+    applyLook(target, { lift: [-1, -2, -3] });
+    expect(target.lift).toEqual([0, 0, 0]);
+  });
+
+  it('allocates the array once when the target has none, then reuses that one', () => {
+    const target: Look = { ...look(), lift: undefined };
+    expect(target.lift).toBeUndefined();
+    applyLook(target, { lift: [0.1, 0.2, 0.3] });
+    const lift = target.lift;
+    expect(lift).toEqual([0.1, 0.2, 0.3]);
+    applyLook(target, { lift: [0.4, 0.5, 0.6] });
+    expect(target.lift).toBe(lift);
+    expect(target.lift).toEqual([0.4, 0.5, 0.6]);
+  });
+
+  it('leaves lift alone when the partial omits it or sets it to undefined', () => {
+    const target = look();
+    const before = target.lift && [...target.lift];
+    applyLook(target, {});
+    expect(target.lift).toEqual(before);
+    applyLook(target, { lift: undefined });
+    expect(target.lift).toEqual(before);
   });
 });

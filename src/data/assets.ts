@@ -100,6 +100,9 @@ export const ASSETS = {
         boss_slam: [22920, 800],
         // SPEC-050 §4.8: the salvager's breath out when the stamina runs dry.
         exhale: [23870, 350],
+        // SPEC-054 §4.13: the flashlight's click, and a loose cache opening.
+        light_click: [24320, 80],
+        cache_open: [24500, 600],
       },
     },
     /** The rail scene: hits on the ship, and the two continuous channels. */

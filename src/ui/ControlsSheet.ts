@@ -42,6 +42,8 @@ export const CONTROL_ROWS: Readonly<Record<'keyboard' | 'touch', readonly Contro
     // SPEC-026 §4.5, §4.7: M opens the surface map, + and − zoom it.
     { what: 'Map', how: 'M · zoom + / −', actions: ['map'] },
     { what: 'Track mission', how: 'T', actions: ['track'] },
+    // SPEC-054 §4.5: the flashlight below, beside the interact key.
+    { what: 'Flashlight (below)', how: 'L', actions: ['light'] },
     { what: 'Pause', how: 'Esc or P', actions: ['pause'] },
     // SPEC-036 §4.4: one back-stack — the top layer closes first.
     { what: 'Back / close', how: 'Esc' },
@@ -66,6 +68,8 @@ export const CONTROL_ROWS: Readonly<Record<'keyboard' | 'touch', readonly Contro
     { what: 'Interact', how: 'USE' },
     { what: 'Map', how: 'Tap the minimap' },
     { what: 'Track mission', how: 'Tap the tracker' },
+    // SPEC-054 §4.5: LIGHT joins USE in the thumb arc, below only.
+    { what: 'Flashlight', how: 'LIGHT (below)' },
     { what: 'Pause', how: 'Pause button, or the Back gesture' },
   ],
 };

@@ -113,6 +113,7 @@ describe("Eden's last wave reaches the beacon (SPEC-034 §4.8)", () => {
       poiAt: (id) => layout.pois.filter((p) => p.poi === id),
       heldResource: (r) => save.resources[r],
       nearPoi: () => null,
+      level: 'surface',
     };
 
     /** Every wave enemy that has been aggroed inside `ENGAGE_RADIUS` of the beacon. */

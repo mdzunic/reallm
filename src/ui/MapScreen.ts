@@ -7,7 +7,6 @@
 // Nothing moves while it is up, so it paints on open, on zoom and on track,
 // and never per frame.
 import type { MissionId } from '@/data/index';
-import type { Layout } from '@/systems/Layout';
 import {
   MAP_ICONS,
   MAP_ICON_KINDS,
@@ -21,7 +20,7 @@ import {
 } from '@/systems/MapModel';
 import type { PlanetDef } from '@/data/index';
 import { percent } from '@/systems/Format';
-import { drawMapLayers, type MapLayers } from '@/ui/MapLayers';
+import { drawMapLayers, type MapLayers, type TerrainLayout } from '@/ui/MapLayers';
 import { el, h, openModal, testId, type UiRoot } from '@/ui/dom';
 import {
   backingFor,
@@ -44,7 +43,8 @@ export interface MapMissionRow {
 export interface MapScreenDeps {
   ui: UiRoot;
   layers: MapLayers;
-  layout: Layout;
+  /** The initial level's layout; the title starts as `planet.name` (SPEC-054 §4.10's `setLevel` overrides both). */
+  layout: TerrainLayout;
   planet: PlanetDef;
   missions: () => readonly MapMissionRow[];
   track: (id: MissionId) => void;
@@ -72,10 +72,14 @@ const COLORS = {
 
 export class MapScreen {
   readonly #deps: MapScreenDeps;
+  /** SPEC-054 §4.10: the active level's layout and layers; `setLevel` swaps both. */
+  #layout: TerrainLayout;
+  #layers: MapLayers;
   readonly #root: HTMLDivElement;
   readonly #canvas: HTMLCanvasElement;
   readonly #wrap: HTMLDivElement;
   readonly #panel: HTMLElement;
+  readonly #title: HTMLParagraphElement;
   readonly #explored: HTMLParagraphElement;
   readonly #missionList: HTMLDivElement;
   readonly #zoom: HTMLButtonElement;
@@ -96,10 +100,13 @@ export class MapScreen {
 
   constructor(deps: MapScreenDeps) {
     this.#deps = deps;
+    this.#layout = deps.layout;
+    this.#layers = deps.layers;
     this.#canvas = testId(el('canvas', 'map-canvas'), 'map-canvas');
     this.#wrap = el('div', 'map-canvas-wrap');
     this.#wrap.append(this.#canvas);
 
+    this.#title = testId(el('p', 'map-title', deps.planet.name), 'map-title');
     this.#explored = testId(el('p', 'map-explored', `Explored ${percent(0)}`), 'map-explored');
     this.#missionList = testId(el('div', 'map-missions'), 'map-missions');
     this.#zoom = testId(
@@ -114,7 +121,7 @@ export class MapScreen {
 
     this.#panel = testId(el('aside', 'map-panel panel'), 'map-panel');
     this.#panel.append(
-      el('p', 'map-title', deps.planet.name),
+      this.#title,
       this.#explored,
       this.#legend(),
       this.#missionList,
@@ -162,6 +169,18 @@ export class MapScreen {
     this.#closeModal = openModal(this.#root, { label: 'Surface map', initialFocus: this.#close });
   }
 
+  /**
+   * SPEC-054 §4.10: switch the full map's layout, layers and title at a
+   * level swap. The `Explored NN %` line stays the next `redraw`'s job —
+   * unchanged — so this never paints with one level's frame against the
+   * other's layout.
+   */
+  setLevel(level: { layout: TerrainLayout; layers: MapLayers; title: string }): void {
+    this.#layout = level.layout;
+    this.#layers = level.layers;
+    this.#title.textContent = level.title;
+  }
+
   /** §4.5: on open, on zoom and on track — nothing moves in between. */
   redraw(frame: MinimapFrame, explored: number): void {
     if (!this.#open) return;
@@ -197,9 +216,12 @@ export class MapScreen {
    * §4.5: one row per icon kind this planet can show — its POI kinds and its
    * resources — plus the player, the objective ring and the enemy, which are
    * listed wherever the player is (26-h: Eden lists the enemy it does not have).
+   * SPEC-054 §4.10: the underground's four marks list the same way — every
+   * planet gets a descent and a cache, and a relic row even on Hive, which
+   * has none (the same 26-h reasoning).
    */
   #legend(): HTMLElement {
-    const present = new Set<MapIconKind>(['player', 'objective', 'enemy']);
+    const present = new Set<MapIconKind>(['player', 'objective', 'enemy', 'descent', 'cache', 'vault', 'relic']);
     for (const poi of this.#deps.planet.surface.pois) present.add(poiIcon(poi.kind));
     for (const node of this.#deps.planet.surface.nodes) present.add(nodeIcon(node.resource));
     // SPEC-030 §4.10: the shelter rows appear on planets that have shelters.
@@ -269,7 +291,7 @@ export class MapScreen {
     if (ctx === null || cssSize <= 0) return;
     const size = canvas.width;
     const scale = size / cssSize;
-    const half = this.#deps.layout.halfSize;
+    const half = this.#layout.halfSize;
 
     // §4.5: the arena's diamond fits the canvas with 12 px margins; 2× is
     // twice that, centred on the player and clamped to the arena.
@@ -291,7 +313,7 @@ export class MapScreen {
     ctx.clearRect(0, 0, size, size);
     const cx = size / 2;
     const cy = size / 2;
-    drawMapLayers(ctx, this.#deps.layers, { centreX, centreZ, cx, cy, pxPerMetre, blur: FOG_BLUR * scale });
+    drawMapLayers(ctx, this.#layers, { centreX, centreZ, cx, cy, pxPerMetre, blur: FOG_BLUR * scale });
 
     ctx.save();
     ctx.translate(cx, cy);
@@ -316,7 +338,7 @@ export class MapScreen {
     ctx.textBaseline = 'middle';
     for (const mark of frame.marks) {
       const p = project(mark.x, mark.z);
-      drawMapIcon(ctx, mark.icon, p.x, p.y, scale);
+      drawMapIcon(ctx, mark.icon, p.x, p.y, scale, mark.hollow);
       if (mark.objective) drawObjectiveRing(ctx, mark.icon, p.x, p.y, scale);
       if (isNodeIcon(mark.icon)) {
         // §4.2: the resource's initial, so a node never rides on hue alone.

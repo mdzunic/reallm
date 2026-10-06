@@ -905,3 +905,181 @@ describe('ring spawns among the groves (SPEC-053 §6.1, E81)', () => {
     }
   });
 });
+
+// ---------------------------------------------------------------- SPEC-054
+
+describe('a cave’s packs: spawnPackAt (SPEC-054 §4.7)', () => {
+  /** What the scene passes below: placed, `BELOW_LEASH` 24 m, `BELOW_MAX_ALIVE` 12 − the live count. */
+  const BELOW = { placed: true, leash: 24, cap: 12 } as const;
+
+  /** One `spawnPackAt` and the records of what it stood up, the pool emptied after. */
+  function packAt(h: Harness, id: EnemyId, x: number, z: number, cap: number = BELOW.cap): Harness['spawned'] {
+    const before = h.spawned.length;
+    const n = h.director.spawnPackAt(id, x, z, { ...BELOW, cap });
+    const made = h.spawned.slice(before);
+    expect(made).toHaveLength(n);
+    return made;
+  }
+
+  function emptyPool(h: Harness): void {
+    for (let j = h.pool.size - 1; j >= 0; j--) h.pool.free(j);
+  }
+
+  it('follows SPEC-041’s sizes: skitters 3–5, wurmlings 1–2 and the Hive’s drones 4–6 as one pack; a raider alone', () => {
+    const h = harness('cinder4', 'high', 5, false);
+    const sizes = new Map<EnemyId, Set<number>>();
+    for (let i = 0; i < 200; i++) {
+      for (const id of ['dust_skitter', 'wurmling', 'scav_raider'] as const) {
+        const made = packAt(h, id, 10, -10);
+        const seen = sizes.get(id) ?? new Set<number>();
+        seen.add(made.length);
+        sizes.set(id, seen);
+        const lead = made[0]?.entity as EnemyEntity;
+        for (const m of made) {
+          expect(m.id).toBe(id);
+          expect(m.entity.packId).toBe(lead.packId);
+        }
+        // A pack row shares a pack's id, so it aggroes together; a ranged row comes alone.
+        if (id === 'scav_raider') expect(lead.packId).toBe(0);
+        else expect(lead.packId).toBeGreaterThan(0);
+        emptyPool(h);
+      }
+    }
+    expect([...(sizes.get('dust_skitter') ?? [])].sort()).toEqual([3, 4, 5]);
+    expect([...(sizes.get('wurmling') ?? [])].sort()).toEqual([1, 2]);
+    expect([...(sizes.get('scav_raider') ?? [])]).toEqual([1]);
+
+    const hive = harness('hive', 'high', 5, false);
+    const drones = new Set<number>();
+    for (let i = 0; i < 200; i++) {
+      drones.add(packAt(hive, 'hive_drone', 0, 30).length);
+      emptyPool(hive);
+    }
+    expect([...drones].sort()).toEqual([4, 5, 6]);
+  });
+
+  it('rolls the elite once, for the leader alone, at the director’s eliteChance with the chapter’s affixes', () => {
+    const h = harness('ferrum', 'high', 21, false);
+    h.director.eliteMult = 40; // Ferrum's 0.07 × 40, capped at 0.5 (SPEC-043 §4.4)
+    expect(h.director.eliteChance).toBe(ELITE_CHANCE_CAP);
+    let elites = 0;
+    const packs = 1000;
+    for (let i = 0; i < packs; i++) {
+      const made = packAt(h, 'ash_crawler', -20, 5);
+      made.forEach((member, k) => {
+        if (k === 0) return;
+        expect(member.elite).toBe(false);
+        expect(member.affixA).toBeNull();
+      });
+      const lead = made[0] as Harness['spawned'][number];
+      if (lead.elite) {
+        elites++;
+        // Ferrum is chapter 4: two distinct affixes from the archetype's pool.
+        expect(lead.affixA).not.toBeNull();
+        expect(lead.affixB).not.toBeNull();
+        expect(lead.affixA).not.toBe(lead.affixB);
+      }
+      emptyPool(h);
+    }
+    // One roll at 0.5 per pack — two rolls for a leader would read about 0.75.
+    expect(Math.abs(elites / packs - 0.5), `${elites} of ${packs}`).toBeLessThanOrEqual(0.05);
+  });
+
+  it('trims the pack to cap; a cap of 0 or less spawns nothing', () => {
+    const h = harness('cinder4', 'high', 5, false);
+    for (let i = 0; i < 50; i++) {
+      expect(packAt(h, 'dust_skitter', 0, 0, 2)).toHaveLength(2); // never fewer than 3 untrimmed
+      emptyPool(h);
+      const one = packAt(h, 'dust_skitter', 0, 0, 1);
+      expect(one).toHaveLength(1);
+      expect(one[0]?.entity.packId).toBeGreaterThan(0);
+      emptyPool(h);
+    }
+    const before = h.spawned.length;
+    expect(h.director.spawnPackAt('dust_skitter', 0, 0, { ...BELOW, cap: 0 })).toBe(0);
+    expect(h.director.spawnPackAt('scav_raider', 0, 0, { ...BELOW, cap: -3 })).toBe(0);
+    expect(h.spawned.length).toBe(before);
+    expect(h.pool.size).toBe(0);
+  });
+
+  it('stamps every member placed, leashed 24 m from the anchor it shares as its spawn point', () => {
+    const h = harness('cinder4', 'high', 5, false);
+    const made = packAt(h, 'dust_skitter', 7, -3);
+    expect(made.length).toBeGreaterThanOrEqual(3);
+    expect(made[0]?.x).toBe(7); // the leader stands on the anchor
+    expect(made[0]?.z).toBe(-3);
+    for (const m of made) {
+      expect(m.entity.placed).toBe(true);
+      expect(m.entity.leash).toBe(24);
+      expect(m.entity.spawnX).toBe(7);
+      expect(m.entity.spawnZ).toBe(-3);
+      expect(Math.hypot(m.x - 7, m.z + 3)).toBeLessThanOrEqual(PACK_RADIUS + 1e-9);
+    }
+    // The director's own spawns carry no stamp, whatever a recycled slot held.
+    emptyPool(h);
+    h.run(5, { x: 100, z: 40 });
+    expect(h.living().length).toBeGreaterThan(0);
+    for (const e of h.living()) {
+      expect(e.placed).toBe(false);
+      expect(e.leash).toBe(e.def.leashRadius);
+    }
+  });
+
+  it('pulls a blocked member back toward the anchor instead of dropping it, clear of the grid', () => {
+    const h = harness('cinder4', 'high', 5, false);
+    // A wall 1.5 m round the anchor: a skitter's circle is clear only within 1.1 m of it.
+    const hits = (x: number, z: number, r: number): boolean => Math.hypot(x - 20, z - 20) + r > 1.5;
+    h.director.setObstacles({ circleHits: hits });
+    let pulled = 0;
+    for (let i = 0; i < 100; i++) {
+      const made = packAt(h, 'dust_skitter', 20, 20);
+      expect(made.length).toBeGreaterThanOrEqual(3); // none dropped
+      for (const m of made.slice(1)) {
+        expect(hits(m.x, m.z, ENEMIES.dust_skitter.radius)).toBe(false);
+        if (Math.hypot(m.x - 20, m.z - 20) < 1.1) pulled++;
+      }
+      emptyPool(h);
+    }
+    expect(pulled).toBeGreaterThan(100);
+  });
+
+  it('a surface shelter does not crowd a cave pack: its clearance is not below', () => {
+    const h = harness('cinder4', 'high', 5); // with the surface's shelters
+    const shelter = h.layout.shelters[0];
+    expect(shelter).toBeDefined();
+    const x = shelter?.x ?? 0;
+    const z = shelter?.z ?? 0;
+    for (let i = 0; i < 50; i++) {
+      expect(packAt(h, 'dust_skitter', x, z).length).toBeGreaterThanOrEqual(3);
+      emptyPool(h);
+    }
+  });
+
+  it('placed enemies are never culled — an unplaced pack on the same spot is', () => {
+    const h = harness('cinder4', 'high', 5, false);
+    const cave = packAt(h, 'dust_skitter', 0, 0).map((m) => m.entity);
+    h.director.spawnElitePack('dust_skitter', 2, 0, 3); // the debug pack: not placed
+    const loose = h.living().filter((e) => !cave.includes(e));
+    expect(loose.length).toBeGreaterThan(0);
+    // Far off and un-aggroed for well past DESPAWN_SECONDS, with no ambient spawns.
+    h.run(DESPAWN_SECONDS + 5, { x: 150, z: 150 }, NOWHERE, false);
+    const left = h.living();
+    for (const e of cave) expect(left).toContain(e);
+    for (const e of loose) expect(left).not.toContain(e);
+    expect(left).toHaveLength(cave.length);
+  });
+
+  it('missionsWantSpawns false adds no ambient enemy — no ring spawn, no E14 — and never refills a pack', () => {
+    const h = harness('cinder4', 'high', 5);
+    h.director.setObjectiveEnemies(['scav_raider']);
+    const cave = packAt(h, 'wurmling', 0, 0).map((m) => m.entity);
+    const count = h.spawned.length;
+    h.run(FORCED_SPAWN_SECONDS + 5, PLAYER, NOWHERE, false);
+    expect(h.spawned.length).toBe(count);
+    // The pack dies; below, nothing takes its place.
+    for (const e of cave) e.state = 'dead';
+    h.run(FORCED_SPAWN_SECONDS + 5, PLAYER, NOWHERE, false);
+    expect(h.spawned.length).toBe(count);
+    expect(h.director.alive).toBe(0);
+  });
+});

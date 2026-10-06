@@ -724,6 +724,8 @@ describe('KEY_BINDINGS (AC-4)', () => {
       KeyC: 'useUtility',
       // SPEC-038 §4.1: V dashes (the right mouse button holds it too).
       KeyV: 'dash',
+      // SPEC-054 §4.5: L toggles the flashlight, below only.
+      KeyL: 'light',
       Escape: 'pause',
       KeyP: 'pause',
       KeyM: 'map',
@@ -1126,8 +1128,10 @@ describe('KeyboardMouseDriver', () => {
 
 describe('the sprint action (SPEC-050 §4.5)', () => {
   it('is the eighteenth action, and every state carries it', () => {
-    expect(ACTIONS).toHaveLength(18);
-    expect(ACTIONS.at(-1)).toBe('sprint');
+    // SPEC-054 §4.5 appends `light` after it, so `sprint` is no longer last —
+    // its own index is what this pins now.
+    expect(ACTIONS).toHaveLength(19);
+    expect(ACTIONS.indexOf('sprint')).toBe(17);
     expect(new Input().state.buttons.sprint).toEqual({ down: false, justPressed: false, justReleased: false, heldFor: 0 });
   });
 
@@ -1203,6 +1207,28 @@ describe('the sprint action (SPEC-050 §4.5)', () => {
     input.beginFrame(DT);
     expect(input.state.buttons.sprint.down).toBe(false);
     expect(input.state.buttons.fire.down).toBe(true);
+  });
+});
+
+describe('the light action (SPEC-054 §4.5)', () => {
+  it('is the nineteenth and last action, and every state carries it', () => {
+    expect(ACTIONS).toHaveLength(19);
+    expect(ACTIONS.at(-1)).toBe('light');
+    expect(new Input().state.buttons.light).toEqual({ down: false, justPressed: false, justReleased: false, heldFor: 0 });
+  });
+
+  it('KeyL presses light the same way in surface and flight mode — no override picks it up', () => {
+    for (const mode of ['surface', 'flight'] as const) {
+      const { input, win } = harness();
+      input.setMode(mode);
+      win.fire('keydown', keyEvent('KeyL'));
+      input.beginFrame(DT);
+      expect(input.state.buttons.light.justPressed, mode).toBe(true);
+      input.endFrame();
+      win.fire('keyup', keyEvent('KeyL'));
+      input.beginFrame(DT);
+      expect(input.state.buttons.light.down, mode).toBe(false);
+    }
   });
 });
 

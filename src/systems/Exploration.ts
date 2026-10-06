@@ -13,11 +13,29 @@ import { decodeBits, encodeBits, exploreBytes, exploreGridSize, EXPLORE_CELL } f
 export const EXPLORE_RADIUS = 24;
 
 /**
- * The widest reveal a 24 m radius can produce: 13 × 13 cells of 4 m, which is
- * the bounding square of the circle plus the two partial columns it can touch.
- * The scene's scratch buffer is this long, and `reveal` never writes past it.
+ * SPEC-054 §3, §4.10: metres of ground a cave reveals — close quarters, not
+ * the open ground above. `ExploreMask`'s own `radius` constructor argument
+ * defaults to `EXPLORE_RADIUS`; the underground level passes this instead.
  */
-export const REVEAL_CAPACITY = 169;
+export const EXPLORE_RADIUS_BELOW = 10;
+
+/**
+ * SPEC-054 §3: the bounding cell count a `radius`-metre reveal can touch —
+ * the circle's bounding square of `EXPLORE_CELL`-wide cells, plus the two
+ * partial columns and rows it can still graze on every side:
+ * `(2 × ceil(radius / EXPLORE_CELL) + 1)²`. 169 at `EXPLORE_RADIUS` (24), 49 at
+ * `EXPLORE_RADIUS_BELOW` (10) — check it against how `reveal` walks the same
+ * bounding square in 4 m cells.
+ */
+export function revealCapacity(radius: number): number {
+  return (2 * Math.ceil(radius / EXPLORE_CELL) + 1) ** 2;
+}
+
+/**
+ * The widest reveal `EXPLORE_RADIUS` can produce. The scene's scratch buffer
+ * is this long, and a surface `reveal` never writes past it.
+ */
+export const REVEAL_CAPACITY = revealCapacity(EXPLORE_RADIUS);
 
 /** Bits set in a byte — the popcount of a freshly decoded mask. */
 function bitsIn(byte: number): number {
@@ -35,16 +53,21 @@ export class ExploreMask {
   readonly n: number;
   readonly #half: number;
   readonly #bits: Uint8Array;
+  /** SPEC-054 §3, §4.10: metres `reveal` lights per call — `EXPLORE_RADIUS` above, `EXPLORE_RADIUS_BELOW` below. */
+  readonly #radius: number;
   #count = 0;
   #dirty = false;
 
   /**
    * A mask of the size this arena needs. A missing code — and a code SPEC-025
    * refuses, which is any code that is not base64url of exactly the right
-   * length (E37) — starts the planet dark rather than throwing.
+   * length (E37) — starts the planet dark rather than throwing. `radius`
+   * defaults to `EXPLORE_RADIUS`; SPEC-054 §4.10 builds the underground's mask
+   * with `EXPLORE_RADIUS_BELOW` instead.
    */
-  constructor(halfSize: number, encoded?: string) {
+  constructor(halfSize: number, encoded?: string, radius: number = EXPLORE_RADIUS) {
     this.#half = halfSize;
+    this.#radius = radius;
     this.n = exploreGridSize(halfSize);
     const bytes = exploreBytes(halfSize);
     const decoded = typeof encoded === 'string' ? decodeBits(encoded, bytes) : null;
@@ -74,16 +97,17 @@ export class ExploreMask {
   }
 
   /**
-   * §4.4: mark every cell whose centre lies within `EXPLORE_RADIUS` of
-   * `(x, z)`. Returns how many were new and writes their indices into `out`,
-   * so a repaint touches only those squares; a second call at the same point
-   * returns 0 and paints nothing.
+   * §4.4: mark every cell whose centre lies within this mask's reveal radius
+   * of `(x, z)` — `EXPLORE_RADIUS` above, `EXPLORE_RADIUS_BELOW` below
+   * (SPEC-054 §4.10). Returns how many were new and writes their indices into
+   * `out`, so a repaint touches only those squares; a second call at the same
+   * point returns 0 and paints nothing.
    */
   reveal(x: number, z: number, out: Int32Array): number {
     const n = this.n;
     const half = this.#half;
     const cell = EXPLORE_CELL;
-    const radius = EXPLORE_RADIUS;
+    const radius = this.#radius;
     const limit = radius * radius;
     const ix0 = Math.max(0, Math.floor((x - radius + half) / cell));
     const ix1 = Math.min(n - 1, Math.floor((x + radius + half) / cell));
@@ -102,8 +126,9 @@ export class ExploreMask {
         this.#bits[at] = (this.#bits[at] as number) | bit;
         this.#count++;
         this.#dirty = true;
-        // The caller's buffer is `REVEAL_CAPACITY` long, which no reveal can
-        // fill; a shorter one simply stops collecting rather than overrunning.
+        // The caller's buffer is `revealCapacity` of this mask's own radius
+        // long, which no reveal can fill; a shorter one simply stops
+        // collecting rather than overrunning.
         if (count < out.length) out[count++] = index;
       }
     }

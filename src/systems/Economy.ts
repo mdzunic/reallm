@@ -28,6 +28,7 @@
 import { maxHp, type Save, type SaveReason } from '@/core/Save';
 import {
   ATTRIBUTE_EFFECTS,
+  CACHES,
   CLASSES,
   COMPANIONS,
   COMPANION_IDS,
@@ -44,6 +45,8 @@ import {
   TUNING,
   UPGRADES,
   type BonusReward,
+  type CacheId,
+  type CacheReward,
   type Class,
   type ClassId,
   type Companion,
@@ -803,6 +806,26 @@ export class Economy {
       this.#events.emit('resource:spent', { resource, amount: loss, total, reason: 'death' });
     }
     return lost;
+  }
+
+  // ------------------------------------------------------------------ caches
+
+  /**
+   * SPEC-054 §4.8: pays a cave cache's reward once. `progress.claimed` is the
+   * record — shared with a lineage body's claim (SPEC-047 §3) — so a second
+   * call on the same id pays nothing and says so. Otherwise the id is pushed
+   * first, and the reward is paid through `#grant`, exactly as a mission's
+   * `applyBonus` pays its own: resources as a `reward` (past the cargo cap,
+   * never shipped) and items through `addItem`, with E25's `item:noRoom` and
+   * toast for whatever does not fit. Then the save checkpoints (54-j).
+   */
+  claimCache(id: CacheId): { ok: true; reward: CacheReward } | { ok: false; reason: 'claimed' } {
+    if (this.#save.progress.claimed.includes(id)) return { ok: false, reason: 'claimed' };
+    this.#save.progress.claimed.push(id);
+    const reward = CACHES[id].reward;
+    this.#grant(reward);
+    this.#saves?.request('checkpoint');
+    return { ok: true, reward };
   }
 
   // ---------------------------------------------------------------- derived

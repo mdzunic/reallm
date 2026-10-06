@@ -88,6 +88,7 @@ import {
 import { clampToSeal, type ArenaState, type ObstacleGrid } from '@/entities/World';
 import { isDashing } from '@/systems/Dash';
 import { BOSS_FIRST_MOVE_SECONDS, updateEnemy, type AiHooks, type WindupKind } from '@/systems/EnemyAi';
+import { lit } from '@/systems/Light';
 import { FIRE_CARRY, Loadout } from '@/systems/Loadout';
 import { updateProjectiles, type ProjectileHooks } from '@/systems/Projectiles';
 import { isHolstered, isLoud } from '@/systems/Stamina';
@@ -368,6 +369,17 @@ export interface CombatWorld {
    * else 1; absent reads as 1.
    */
   windupMult?: number;
+  /**
+   * SPEC-054 §4.6: the flashlight's switch below, which the scene sets each
+   * step there. `undefined` on the surface, where no light rule applies —
+   * `systems/Light.ts` reads it for acquisition, fear and targeting.
+   */
+  light?: { on: boolean };
+  /**
+   * SPEC-054 §4.6: below, how far auto-fire reaches an enemy the light does
+   * not fall on (`DARK_SIGHT`, 9 m). `undefined` on the surface: unrestricted.
+   */
+  sight?: number;
 }
 
 /**
@@ -569,6 +581,18 @@ export class Combat {
   /** Releases the recompute subscriptions; the scene's `Disposer` calls it. */
   dispose(): void {
     this.#events.releaseOwner(this);
+  }
+
+  /**
+   * SPEC-054 §4.2 (54-a): a level swap frees every projectile, telegraph and
+   * deployable where it stands — a mine, a charge or a lob in the air goes with
+   * no blast, no refund and no event. The scene calls it going down and coming
+   * up; the enemies (`SpawnDirector.despawnNear`) and the pickups are its own.
+   */
+  clearLevel(): void {
+    this.#world.projectiles.clear();
+    this.telegraphs.clear();
+    this.deployables.clear();
   }
 
   // ------------------------------------------------------------------ stats
@@ -1141,6 +1165,10 @@ export class Combat {
     e.packId = 0;
     e.menderAt = this.#world.time + MENDER_PULSE_SECONDS;
     e.lastHitGuarded = false;
+    // SPEC-054 §4.7: everything leashes on its def, as before; the director
+    // stamps a cave pack's `placed` and its 24 m leash after this.
+    e.placed = false;
+    e.leash = def.leashRadius;
     // Set immediately before the emit, so a subscriber can read the position.
     this.#lastSpawned = e;
     this.#events.emit('enemy:spawned', { enemyId: id, elite: isElite });
@@ -1641,10 +1669,17 @@ export class Combat {
     return 'fired';
   }
 
-  /** 11-j: nearest with a clear line wins; if every candidate is blocked, nearest overall. */
+  /**
+   * 11-j: nearest with a clear line wins; if every candidate is blocked, nearest
+   * overall. SPEC-054 §4.6: below (`world.sight` set), a candidate farther than
+   * the sight counts only while the light falls on it — you cannot shoot what
+   * you cannot see. A held pointer aim or an aim-drag never comes through here.
+   */
   #autoTarget(range: number): EnemyEntity | null {
     const p = this.#world.player;
     const enemies = this.#world.enemies;
+    const sight = this.#world.sight;
+    const lightOn = this.#world.light?.on === true;
     let best: EnemyEntity | null = null;
     let bestD = Infinity;
     let bestClear: EnemyEntity | null = null;
@@ -1656,6 +1691,7 @@ export class Combat {
       const dz = e.z - p.z;
       const d = Math.hypot(dx, dz);
       if (d > range) continue;
+      if (sight !== undefined && d > sight && !lit(p.x, p.z, p.facing, lightOn, e.x, e.z)) continue;
       if (d < bestD) {
         best = e;
         bestD = d;

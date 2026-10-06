@@ -362,6 +362,13 @@ export interface Look {
   contrast: number;
   grain: number;
   tint: [number, number, number];
+  /**
+   * SPEC-054 §4.4: a shadow lift, carried to `PostChain`'s `uLift`. Optional so
+   * a `Look` built before this spec still satisfies the interface; every real
+   * look starts from `DEFAULT_LOOK`'s neutral `[0, 0, 0]`, so a scene that never
+   * sets it resets whatever the previous one asked for.
+   */
+  lift?: [number, number, number];
 }
 
 /** *Initial tuning*. Every scene's look starts from a copy of this (D-4). */
@@ -375,6 +382,7 @@ export const DEFAULT_LOOK: Readonly<Look> = {
   contrast: 1.03,
   grain: 0.025,
   tint: [1, 1, 1],
+  lift: [0, 0, 0],
 };
 
 function atLeastZero(value: number): number {
@@ -406,6 +414,20 @@ export function applyLook(target: Look, partial: Partial<Look>): void {
     target.tint[0] = atLeastZero(tint[0]);
     target.tint[1] = atLeastZero(tint[1]);
     target.tint[2] = atLeastZero(tint[2]);
+  }
+  // SPEC-054 §4.4: component-wise like `tint`, so `PostChain`'s `uLift` array
+  // keeps its identity. `target.lift` is created once, the one time it is
+  // absent, rather than replaced on every call.
+  const lift = partial.lift;
+  if (lift !== undefined) {
+    let targetLift = target.lift;
+    if (targetLift === undefined) {
+      targetLift = [0, 0, 0];
+      target.lift = targetLift;
+    }
+    targetLift[0] = atLeastZero(lift[0]);
+    targetLift[1] = atLeastZero(lift[1]);
+    targetLift[2] = atLeastZero(lift[2]);
   }
 }
 

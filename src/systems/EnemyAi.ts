@@ -3,15 +3,17 @@
 // §5 edge cases: stuck side-steps (11-d) and the boss arena leash (11-e).
 // SPEC-041 §4.1 gives every boss a move list — casts on SPEC-038's telegraphs,
 // with the wurm's burrow as its one timed move — and §4.5–§4.6 add pack aggro
-// and the affixes a brain carries out (swift windups, the volley's fan). Pure
-// code over the entity pools; side effects that touch the player, projectiles
-// or events go through `AiHooks`, which `systems/Combat.ts` implements — so
-// this module never imports it at runtime.
+// and the affixes a brain carries out (swift windups, the volley's fan).
+// SPEC-054 §4.6–§4.7 add the light rules below and the cave packs' own leash.
+// Pure code over the entity pools; side effects that touch the player,
+// projectiles or events go through `AiHooks`, which `systems/Combat.ts`
+// implements — so this module never imports it at runtime.
 import type { Rng, WeightedEntry } from '@/core/Rng';
 import { VOLLEY_SPEED_MULT, VOLLEY_SPREAD } from '@/data/affixes';
 import type { BossMove, EnemyId } from '@/data/enemies';
 import { hasAffix, type EnemyEntity } from '@/entities/Enemy';
 import type { CombatWorld } from '@/systems/Combat';
+import { inLightCone, LIGHT_FEAR_SPEED, lightAggroMult, lit } from '@/systems/Light';
 import { HIDDEN_DETECT_RADIUS, LOSE_TRACK_SECONDS } from '@/systems/Shelter';
 import { isLoud } from '@/systems/Stamina';
 
@@ -328,6 +330,31 @@ function heedsHiding(e: EnemyEntity): boolean {
   return !e.fromWave && e.def.archetype !== 'boss';
 }
 
+/**
+ * SPEC-054 §4.6: the light's share of an aggro radius. 1 on the surface
+ * (`world.light` unset) and for a wave's enemies; below, `lightAggroMult` —
+ * a rusher counts as in the cone while the beam points at it at any range,
+ * because its ×1.6 reaches past `LIGHT_RANGE` and its radius bounds it.
+ */
+function lightAggroOf(e: EnemyEntity, world: CombatWorld): number {
+  const light = world.light;
+  if (light === undefined || e.fromWave) return 1;
+  const arch = e.def.archetype;
+  const p = world.player;
+  return lightAggroMult(arch, light, light.on && arch === 'rusher' && inLightCone(p.x, p.z, p.facing, e.x, e.z));
+}
+
+/**
+ * SPEC-054 §4.6: below, a swarm the light falls on shies from it — it closes
+ * at `LIGHT_FEAR_SPEED` and starts no windup. A wave's swarm never does.
+ */
+function shiesFromLight(e: EnemyEntity, world: CombatWorld): boolean {
+  const light = world.light;
+  if (light === undefined || !light.on || e.fromWave || e.def.archetype !== 'swarm') return false;
+  const p = world.player;
+  return lit(p.x, p.z, p.facing, true, e.x, e.z);
+}
+
 function updateWander(e: EnemyEntity, world: CombatWorld, dt: number, rng: Rng, hooks: AiHooks): void {
   // §4.5 de-aggro: a dead player ends combat outright — acquiring the live
   // follower here would undo the forced wander and flip states every step.
@@ -337,8 +364,8 @@ function updateWander(e: EnemyEntity, world: CombatWorld, dt: number, rng: Rng, 
     if (target.alive) {
       const d = distance(e.x, e.z, target.x, target.z);
       // SPEC-012 §4.6: storm visibility narrows the aggro radius; SPEC-050
-      // §4.3: a loud player widens it.
-      const aggroRadius = e.def.aggroRadius * (world.aggroMult ?? 1) * (world.noiseMult ?? 1);
+      // §4.3: a loud player widens it; SPEC-054 §4.6: below, the light moves it.
+      const aggroRadius = e.def.aggroRadius * (world.aggroMult ?? 1) * (world.noiseMult ?? 1) * lightAggroOf(e, world);
       let acquires = aggroRadius > 0 && d <= aggroRadius;
       // SPEC-030 §4.6: a hidden player is acquired only within 5 m with a
       // clear line — hiding narrows the rule, it never widens it. It covers
@@ -350,6 +377,12 @@ function updateWander(e: EnemyEntity, world: CombatWorld, dt: number, rng: Rng, 
         heedsHiding(e) &&
         (d > HIDDEN_DETECT_RADIUS || !world.obstacles.lineClear(e.x, e.z, world.player.x, world.player.z))
       ) {
+        acquires = false;
+      }
+      // SPEC-054 §4.7: a placed enemy never takes up a target standing past its
+      // leash from its anchor — it would leash home the next step and flip
+      // back. It stays home until the target comes within the leash.
+      if (acquires && e.placed && distance(e.spawnX, e.spawnZ, target.x, target.z) > e.leash) {
         acquires = false;
       }
       if (e.aggro || acquires) {
@@ -387,12 +420,16 @@ function updateChase(e: EnemyEntity, world: CombatWorld, dt: number, rng: Rng, h
     }
   }
 
+  // SPEC-054 §4.6: a swarm in the lit cone below starts no windup and closes
+  // at ×0.4; a windup already running continues and lands as usual.
+  const feared = shiesFromLight(e, world);
+
   if (arch === 'ranged') {
     if (e.def.attack.kind === 'ranged' && d <= e.def.attack.range * 0.8) {
       enterState(e, 'strafe');
       return;
     }
-  } else if (d <= meleeReach(e, target) && e.cooldown <= 0) {
+  } else if (!feared && d <= meleeReach(e, target) && e.cooldown <= 0) {
     // SPEC-038 §4.3: inside melee reach the SPEC-011 melee wins; the charge is
     // the opener.
     enterState(e, 'windup');
@@ -420,13 +457,16 @@ function updateChase(e: EnemyEntity, world: CombatWorld, dt: number, rng: Rng, h
   const dirD = Math.max(1e-6, distance(e.x, e.z, gx, gz));
   const dirX = (gx - e.x) / dirD;
   const dirZ = (gz - e.z) / dirD;
-  let vx = dirX * e.speed;
-  let vz = dirZ * e.speed;
+  // SPEC-054 §4.6: a feared swarm's whole chase runs at ×0.4, its weave too.
+  const speed = feared ? e.speed * LIGHT_FEAR_SPEED : e.speed;
+  let vx = dirX * speed;
+  let vz = dirZ * speed;
 
   // §4.5: swarms weave — a lateral ±1 m sine at 1.5 Hz while chasing.
   if (arch === 'swarm') {
     const omega = TAU * SWARM_SINE_HZ;
-    const lateral = Math.cos(omega * world.time + e.id * 2.399) * omega * SWARM_SINE_AMPLITUDE;
+    let lateral = Math.cos(omega * world.time + e.id * 2.399) * omega * SWARM_SINE_AMPLITUDE;
+    if (feared) lateral *= LIGHT_FEAR_SPEED;
     vx += -dirZ * lateral;
     vz += dirX * lateral;
   }
@@ -1151,18 +1191,20 @@ export function updateEnemy(e: EnemyEntity, world: CombatWorld, dt: number, rng:
     e.lostTrack = 0;
   }
 
-  // De-aggro (§4.5): player dead → wander; target out of leashRadius → leash.
+  // De-aggro (§4.5): player dead → wander; it or its target out of its leash
+  // from its spawn → leash. SPEC-054 §4.7: the leash is the entity's own —
+  // `def.leashRadius` from the spawn, a cave pack's 24 m from its anchor.
   if (e.aggro && !world.player.alive && !committed) {
     e.aggro = false;
     e.stuckTime = 0;
     enterState(e, 'wander');
     e.wanderAt = world.time;
   }
-  if (e.state !== 'leash' && e.def.leashRadius > 0 && (arch !== 'boss' || world.arena === null)) {
+  if (e.state !== 'leash' && e.leash > 0 && (arch !== 'boss' || world.arena === null)) {
     const target = targetOf(e, world);
     const outOfLeash =
-      distance(e.spawnX, e.spawnZ, e.x, e.z) > e.def.leashRadius ||
-      (e.aggro && distance(e.spawnX, e.spawnZ, target.x, target.z) > e.def.leashRadius);
+      distance(e.spawnX, e.spawnZ, e.x, e.z) > e.leash ||
+      (e.aggro && distance(e.spawnX, e.spawnZ, target.x, target.z) > e.leash);
     if (outOfLeash) {
       enterLeash(e);
       hooks.cancelTelegraphs(e); // SPEC-038 §4.2: a leash takes its lane with it

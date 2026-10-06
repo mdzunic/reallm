@@ -670,6 +670,51 @@ const SOUNDS = {
     },
   },
 
+  // SPEC-054 §4.13: the flashlight's switch, and a loose cache opening. Both
+  // dry, mechanical sounds — nothing in the cave makes them but the salvager.
+  light_click: {
+    // A two-transient switch click: the press, then the catch a beat later.
+    peak: -5,
+    render: (n) => {
+      const nz = noise(901);
+      const bp = svf('bp');
+      const hp = svf('hp');
+      const ticks = [
+        [0, 3800],
+        [0.026, 2600],
+      ];
+      return fill(n, (t) => {
+        let y = 0;
+        for (const [at, f] of ticks) {
+          const u = t - at;
+          if (u < 0) continue;
+          y += (bp(nz(), f, 5) * 1.4 + hp(nz(), 6000) * 0.3) * decay(u, 0.004) * attack(u, 0.0004);
+        }
+        return y;
+      });
+    },
+  },
+  cache_open: {
+    // A latch catching, the lid's short creak, then a small chime for what is inside.
+    peak: -5,
+    render: (n) => {
+      const nz = noise(902);
+      const bp = svf('bp');
+      const creak = svf('bp');
+      return fill(n, (t) => {
+        const latch = (bp(nz(), 2400, 4) * 1.3 + Math.sin(TAU * 220 * t) * 0.6) * decay(t, 0.025) * attack(t, 0.0008);
+        const u = t - 0.07;
+        const lid =
+          u < 0 || u > 0.28
+            ? 0
+            : creak(nz(), 300 + 220 * (0.5 + 0.5 * Math.sin(TAU * 5.5 * u)), 7) * adsr(u, 0.2, 0.04, 0.04, 0.75, 0.08) * 1.5;
+        const v = t - 0.4;
+        const chime = v < 0 ? 0 : fm(v, 1567.98, 2, 1.1 * decay(v, 0.04)) * decay(v, 0.06) * attack(v, 0.004);
+        return soft(latch + lid + 0.6 * chime, 1.3);
+      });
+    },
+  },
+
   // -------------------------------------------------------------- flight
   ship_hit_shield: {
     peak: -4,

@@ -2687,3 +2687,108 @@ describe('groves, orchards, clusters and the ground looks (SPEC-053 §6.1)', () 
     expect(PLANETS.eden.surface.look.ground.seam).toEqual({ poi: 'eden_ridge', axis: 'x', shift: 1.75 });
   });
 });
+
+// ------------------------------------------------------------- SPEC-054 §4.8
+
+import { CACHES, UNDERGROUND } from '@/data/index';
+
+/**
+ * Every name a requirement or an objective carries — each string value, with a
+ * choice's prose (`prompt`, `label`) left out — as `[where, value]`.
+ */
+function namesIn(value: unknown, where: string, out: Array<[string, string]>): Array<[string, string]> {
+  if (typeof value === 'string') out.push([where, value]);
+  else if (Array.isArray(value)) value.forEach((entry, i) => namesIn(entry, `${where}[${i}]`, out));
+  else if (typeof value === 'object' && value !== null) {
+    for (const [key, entry] of Object.entries(value)) if (key !== 'prompt' && key !== 'label') namesIn(entry, `${where}.${key}`, out);
+  }
+  return out;
+}
+
+/** §4.8: the names that point below — a cache id, or a word of the underground's. */
+function undergroundNames(names: readonly [string, string][]): string[] {
+  const caches = new Set<string>(CACHE_IDS);
+  const below = /cache|cave|vault|relic|underground|descent/i;
+  return names.filter(([, value]) => caches.has(value) || below.test(value)).map(([where, value]) => `${where}: ${value}`);
+}
+
+describe('the caves and their caches (SPEC-054 §4.8)', () => {
+  it('UNDERGROUND covers the six planets — packs 3, 3, 4, 4, 5, and none in Eden’s machine room', () => {
+    expect(Object.keys(UNDERGROUND)).toEqual([...PLANET_IDS]);
+    expect(PLANET_IDS.map((planet) => UNDERGROUND[planet].packs)).toEqual([3, 3, 4, 4, 5, 0]);
+    for (const planet of PLANET_IDS) {
+      const def = UNDERGROUND[planet];
+      expect(def.planet, planet).toBe(planet);
+      expect(def.rooms, planet).toEqual([5, 7]);
+      expect(def.roomRadius, planet).toEqual([6, 10]);
+      expect(def.corridor, planet).toBe(4.5);
+      expect(def.machineRoom === true, planet).toBe(planet === 'eden');
+      // §4.3: `2 + ceil(chapter / 2)` pack anchors outside the entrance, none in the machine room.
+      expect(def.packs, planet).toBe(def.machineRoom === true ? 0 : 2 + Math.ceil(planetsById[planet].chapter / 2));
+    }
+  });
+
+  it('CACHES covers exactly the 23 ids of CACHE_IDS, each with the planet, slot and guard its id names', () => {
+    expect(Object.keys(CACHES).sort()).toEqual([...CACHE_IDS].sort());
+    const guards: Record<CacheSlot, string> = { loose_a: 'none', loose_b: 'world', vault: 'vault', relic: 'relic' };
+    for (const id of CACHE_IDS) {
+      const cache = CACHES[id];
+      expect(cache.id, id).toBe(id);
+      expect(PLANET_IDS as readonly string[], id).toContain(cache.planet);
+      expect(`${cache.planet}_${cache.slot}`, id).toBe(id);
+      expect(cache.guard, id).toBe(guards[cache.slot]);
+    }
+  });
+
+  it('every unguarded cache pays something; every guarded one pays nothing until SPEC-055 fills it', () => {
+    for (const cache of Object.values(CACHES)) {
+      const resources = Object.values(cache.reward.resources ?? {}).some((amount) => (amount ?? 0) > 0);
+      const items = (cache.reward.items ?? []).some((item) => item.qty > 0);
+      if (cache.guard === 'none') expect(resources || items, cache.id).toBe(true);
+      else expect(cache.reward, cache.id).toEqual({});
+    }
+  });
+
+  it('each <planet>_loose_a pays lithium 3 + 2 × chapter and exactly one medkit', () => {
+    for (const planet of PLANET_IDS) {
+      const cache = CACHES[`${planet}_loose_a`];
+      expect(cache.reward, planet).toEqual({
+        resources: { lithium: 3 + 2 * planetsById[planet].chapter },
+        items: [{ itemId: 'medkit', qty: 1 }],
+      });
+    }
+    // §4.8's table: 5, 7, 9, 11, 13, 15.
+    expect(PLANET_IDS.map((planet) => CACHES[`${planet}_loose_a`].reward.resources?.lithium)).toEqual([5, 7, 9, 11, 13, 15]);
+  });
+
+  it('every item a cache pays is a consumable in whole units, never gear', () => {
+    let paid = 0;
+    for (const cache of Object.values(CACHES)) {
+      for (const item of cache.reward.items ?? []) {
+        paid++;
+        expect(ITEM_TABLE[item.itemId]?.kind, `${cache.id}: ${item.itemId}`).toBe('consumable');
+        expect(Number.isInteger(item.qty) && item.qty > 0, `${cache.id}: ${item.itemId} × ${item.qty}`).toBe(true);
+      }
+    }
+    expect(paid).toBeGreaterThan(0);
+  });
+
+  it('no requirement, planet unlock or mission objective names a cache or the underground', () => {
+    const names: Array<[string, string]> = [];
+    for (const mission of missions) {
+      namesIn(mission.requires, `${mission.id}.requires`, names);
+      for (const { objective, where } of objectivesOf(mission)) namesIn(objective, where, names);
+    }
+    for (const planet of planets) namesIn(planet.unlock, `${planet.id}.unlock`, names);
+    // The walk read the tables, and the rule would catch a planted reference.
+    expect(names.length).toBeGreaterThan(100);
+    expect(
+      undergroundNames([
+        ['planted.requires[0].flag', 'cinder4_vault'],
+        ['planted stage 0 objective 0 (reach).poi', 'cave_mouth'],
+        ['planted.unlock[0].kind', 'underground'],
+      ]),
+    ).toHaveLength(3);
+    expect(undergroundNames(names)).toEqual([]);
+  });
+});

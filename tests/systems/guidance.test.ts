@@ -11,6 +11,7 @@ import {
   bearingWord,
   buildPathGrid,
   distanceText,
+  exitTarget,
   fillHint,
   findPath,
   focusObjective,
@@ -84,6 +85,7 @@ describe('the module surface (SPEC-027 AC-1)', () => {
         'bearingWord',
         'buildPathGrid',
         'distanceText',
+        'exitTarget',
         'fillHint',
         'findPath',
         'focusObjective',
@@ -220,6 +222,24 @@ describe('padTarget (SPEC-027 §4.1 last row, AC-8, D-11)', () => {
 
   it('is null while the player stands on the pad (27-o)', () => {
     expect(padTarget(makeCtx({ player: { x: 2, z: 1 } }))).toBeNull();
+  });
+});
+
+describe('exitTarget (SPEC-054 §3, §4.10)', () => {
+  it('points at the exit shaft when ctx.exit is set', () => {
+    const target = exitTarget(makeCtx({ exit: { x: 5, z: -3 } }));
+    expect(target).toMatchObject({ kind: 'exit', x: 5, z: -3, radius: 1.5, label: 'Surface', key: 'exit' });
+  });
+
+  it('is null above, where ctx.exit is unset', () => {
+    expect(exitTarget(makeCtx())).toBeNull();
+  });
+
+  it('reuses one object rather than allocating per call', () => {
+    const first = exitTarget(makeCtx({ exit: { x: 1, z: 1 } }));
+    const second = exitTarget(makeCtx({ exit: { x: 9, z: -9 } }));
+    expect(second).toBe(first);
+    expect(second).toMatchObject({ x: 9, z: -9 });
   });
 });
 

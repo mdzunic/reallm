@@ -45,6 +45,8 @@ import {
   CASUAL_WEATHER_MULT,
 } from '@/systems/Combat';
 import { DEPLOYABLE_CAPACITY, MAX_ARMED_MINES } from '@/entities/Deployable';
+import { resetTelegraph } from '@/entities/Telegraph';
+import { DARK_SIGHT } from '@/systems/Light';
 import { cumulativeXp } from '@/systems/Progression';
 import { SPRINT_DRAW_SECONDS, stepStamina } from '@/systems/Stamina';
 import type { SlotView } from '@/systems/Loadout';
@@ -2273,5 +2275,166 @@ describe('the holstered gun (SPEC-050 §4.2)', () => {
     stepStamina(p, false, true, true, 1, 20.6, h.world.time, STEP);
     h.step();
     expect(h.of('weapon:fired')).toHaveLength(1);
+  });
+});
+
+// ------------------------------------------------------------- SPEC-054
+
+describe('auto-fire in the dark (SPEC-054 §4.6)', () => {
+  /** The scene's world below: the light's switch and the 9 m sight. */
+  function below(on: boolean): Harness {
+    const h = harness();
+    h.world.light = { on };
+    h.world.sight = DARK_SIGHT;
+    h.world.player.facing = 0; // the beam points along +x
+    return h;
+  }
+
+  it('skips a 12 m enemy outside the cone, and fires at it inside the cone', () => {
+    const h = below(true);
+    h.spawn('hive_egg', 0, 12); // 90° off the beam, inside the 14 m range
+    h.input.autoFire = true;
+    h.run(0.5);
+    expect(h.of('weapon:fired')).toHaveLength(0);
+    expect(h.world.projectiles.size).toBe(0);
+    // The salvager turns the light onto it: now it is a target.
+    h.world.player.facing = Math.PI / 2;
+    h.step();
+    expect(h.of('weapon:fired')).toHaveLength(1);
+    expect(h.world.projectiles.at(0).vz).toBeCloseTo(22, 5);
+  });
+
+  it('with the light off nothing past 9 m is a target, and anything within 9 m still is', () => {
+    const h = below(false);
+    h.spawn('hive_egg', 12, 0); // dead ahead, but dark
+    h.input.autoFire = true;
+    h.run(0.5);
+    expect(h.world.projectiles.size).toBe(0);
+    h.spawn('hive_egg', -8.5, 0); // behind, but inside the sight
+    h.step();
+    expect(h.world.projectiles.size).toBe(1);
+    expect(h.world.projectiles.at(0).vx).toBeCloseTo(-22, 5);
+  });
+
+  it('a nearer enemy in the dark past 9 m loses the shot to a farther lit one', () => {
+    const h = below(true);
+    h.spawn('hive_egg', 13, 0); // lit
+    h.spawn('hive_egg', 0, -11); // nearer, unlit
+    h.input.autoFire = true;
+    h.step();
+    expect(h.world.projectiles.size).toBe(1);
+    expect(h.world.projectiles.at(0).vx).toBeCloseTo(22, 5); // at the lit one
+  });
+
+  it('a held pointer aim and an aim-drag are not restricted', () => {
+    const h = below(false);
+    h.spawn('hive_egg', 0, 12);
+    h.input.buttons.fire.down = true;
+    h.aim = { x: 0, z: 12 };
+    h.step();
+    expect(h.world.projectiles.size).toBe(1);
+    expect(h.world.projectiles.at(0).vz).toBeCloseTo(22, 5);
+
+    const drag = below(false);
+    drag.spawn('hive_egg', 0, -12);
+    drag.input.autoFire = true;
+    drag.input.aim.dragging = true;
+    drag.aim = { x: 0, z: -12 };
+    drag.step();
+    expect(drag.world.projectiles.at(0).vz).toBeCloseTo(-22, 5);
+  });
+
+  it('the launcher tap aims the same way: an unlit enemy past 9 m is not its target (36-k)', () => {
+    const h = harness({ patch: (s) => void (s.equipped.heavy = 'launcher_grenade') });
+    h.world.light = { on: true };
+    h.world.sight = DARK_SIGHT;
+    h.world.player.facing = 0;
+    h.spawn('hive_egg', 0, 11);
+    expect(h.combat.fireSlotOnce('heavy')).toBe('fired');
+    const shell = h.world.projectiles.at(0);
+    expect(shell.targetX).toBeCloseTo(10, 6); // 10 m along facing, not at the egg
+    expect(shell.targetZ).toBeCloseTo(0, 6);
+  });
+
+  it('on the surface (light and sight unset) nothing changes: a 12 m enemy behind is a target', () => {
+    const h = harness();
+    expect(h.world.light).toBeUndefined();
+    expect(h.world.sight).toBeUndefined();
+    h.world.player.facing = 0;
+    h.spawn('hive_egg', -12, 0);
+    h.input.autoFire = true;
+    h.step();
+    expect(h.world.projectiles.size).toBe(1);
+    expect(h.world.projectiles.at(0).vx).toBeCloseTo(-22, 5);
+  });
+});
+
+describe('a level swap clears the field (SPEC-054 §4.2, 54-a)', () => {
+  it('clearLevel frees every projectile, telegraph and deployable — no blast, no hit, no event', () => {
+    const h = harness();
+    // A shot in flight, a grenade in the air, an enemy bolt, a mine, a charge…
+    h.input.buttons.fire.down = true;
+    h.aim = { x: 10, z: 0 };
+    h.step();
+    h.input.buttons.fire.down = false;
+    h.combat.throwExplosive(FRAG, 6, 0);
+    h.shot({ owner: 'enemy', enemyId: 'scav_raider', x: 5, z: 0, vx: -15, damage: 7 });
+    expect(h.combat.deploy(MINE, 3, 3)).toBe('ok');
+    expect(h.combat.deploy(CHARGE, -3, 0)).toBe('ok');
+    // …and a burst circle landing on the player in 0.5 s.
+    const t = h.combat.telegraphs.alloc();
+    resetTelegraph(t);
+    t.radius = 3;
+    t.startAt = h.world.time;
+    t.hitAt = h.world.time + 0.5;
+    t.lockAt = t.hitAt;
+    t.damage = 30;
+    expect(h.world.projectiles.size).toBe(3);
+    const events = h.recorded.length;
+
+    h.combat.clearLevel();
+    expect(h.world.projectiles.size).toBe(0);
+    expect(h.combat.telegraphs.size).toBe(0);
+    expect(h.combat.deployables.size).toBe(0);
+    expect(h.recorded.length).toBe(events); // clearing says nothing
+
+    // A walk past where they stood: nothing arms, nothing goes off, nothing lands.
+    const egg = h.spawn('hive_egg', 3, 3);
+    h.run(5);
+    expect(h.of('combat:blast')).toHaveLength(0);
+    expect(h.of('mine:armed')).toHaveLength(0);
+    expect(h.of('player:damaged')).toHaveLength(0);
+    expect(h.of('enemy:hit')).toHaveLength(0);
+    expect(egg.hp).toBe(egg.maxHp);
+    expect(h.world.player.hp).toBe(h.world.stats.maxHp);
+  });
+
+  it('the cleared pools refill as before', () => {
+    const h = harness();
+    expect(h.combat.deploy(MINE, 3, 0)).toBe('ok');
+    h.combat.clearLevel();
+    for (let i = 0; i < MAX_ARMED_MINES; i++) expect(h.combat.deploy(MINE, i * 5, 40)).toBe('ok');
+    expect(h.combat.deploy(MINE, 40, 40)).toBe('mine_limit');
+    h.run(1.1);
+    expect(h.of('mine:armed')).toHaveLength(MAX_ARMED_MINES);
+  });
+});
+
+describe('every spawn leashes on its def (SPEC-054 §4.7)', () => {
+  it('spawnEnemy resets placed and leash, a recycled slot included', () => {
+    const h = harness();
+    const e = h.spawn('wurmling', 30, 0);
+    expect(e.placed).toBe(false);
+    expect(e.leash).toBe(ENEMIES.wurmling.leashRadius);
+    // A cave pack's stamp on the slot, then the slot goes back to the pool.
+    e.placed = true;
+    e.leash = 24;
+    h.combat.killEnemy(e, 'script');
+    h.step();
+    expect(h.world.enemies.size).toBe(0);
+    const next = h.spawn('dust_skitter', 30, 0);
+    expect(next).toBe(e); // the same pooled object
+    expect(next.placed).toBe(false);
+    expect(next.leash).toBe(ENEMIES.dust_skitter.leashRadius);
   });
 });
