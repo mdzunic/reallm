@@ -85,6 +85,11 @@ describe('the plugin is configured as §10 writes it (AC-48, AC-56)', () => {
   it('answers every navigation with the precached index.html (AC-58)', () => {
     expect(PWA_OPTIONS.workbox.navigateFallback).toBe('index.html');
   });
+
+  it('keeps the four promo images out of the precache (SPEC-059 §4.6.4)', () => {
+    // Workbox's default, plus the link preview and the install screenshots.
+    expect(PWA_OPTIONS.workbox.globIgnores).toEqual(['**/node_modules/**/*', 'og.png', 'screenshots/**']);
+  });
 });
 
 describe('the registration (AC-53)', () => {
@@ -186,6 +191,11 @@ describe.skipIf(!built)(`the emitted build (AC-49, AC-56, AC-57)${skipNote(fresh
       if (!extensions.some((extension) => path.endsWith(`.${extension}`))) continue;
       // The worker and its Workbox runtime are not precache entries themselves.
       if (path === 'sw.js' || /^workbox-[\da-f]+\.js$/.test(path)) continue;
+      // SPEC-059 §4.6.4: nor are the promo images, which `globIgnores` names.
+      if (path === 'og.png' || path.startsWith('screenshots/')) {
+        expect(precached, path).not.toContain(path);
+        continue;
+      }
       expect(statSync(join(DIST, path)).size, path).toBeLessThanOrEqual(cap);
       expect(precached, path).toContain(path);
     }

@@ -46,6 +46,7 @@ import { openCommsLog } from '@/ui/CommsLog';
 import { dialogueLayer, type DialogueUI } from '@/ui/DialogueUI';
 import { el, h, testId } from '@/ui/dom';
 import { clearEndingOverlays, EndingOverlay } from '@/ui/EndingOverlay';
+import { INSTALL_TOAST_TEXT, installAvailable } from '@/ui/InstallButton';
 import { MissionBoard } from '@/ui/MissionBoard';
 import { notesFor, NOTES_UNSEEN, syncNotesDot } from '@/ui/NotesPanel';
 import { SettingsPanel } from '@/ui/SettingsPanel';
@@ -60,6 +61,8 @@ import { Wallet } from '@/ui/Wallet';
 
 /** SPEC-017 §4.1 (*initial tuning*): the station reads cool and clean. */
 const STATION_LOOK: Partial<Look> = { vignette: 0.35, bloomStrength: 0.3, tint: [0.96, 1, 1.04] };
+/** SPEC-059 §4.6.6: how long the one-time install toast stays up. */
+const INSTALL_TOAST_MS = 10_000;
 /** SPEC-042 §4.5: what a flight death cost — the jump's fuel — and what it kept (E5). */
 export const RECALL_DETAIL_TEXT = "Hull breached — ARIA flew you home. The jump's fuel is spent; your cargo is safe.";
 const HUB_ENVIRONMENT_INTENSITY = 0.9;
@@ -338,6 +341,22 @@ export class StationScene extends UiScene<'station'> {
     }
     await this.#homeOnEntry(data);
     this.#aftermathOnEntry(data);
+    this.#installHint(data);
+  }
+
+  /**
+   * SPEC-059 §4.6.6: at the end of the entry's story, once — after the first
+   * chapter, while the browser keeps an install prompt, the app is not
+   * installed and no install nudge has shown on this device (the key iOS's
+   * Home Screen hint shares).
+   */
+  #installHint(data: Save): void {
+    if (!this.#alive || !this.#present) return;
+    const settings = this.services.settings;
+    const { installed, installHintShownAt } = settings.get();
+    if (!data.progress.flags.includes('chapter1_done') || !installAvailable() || installed || installHintShownAt !== null) return;
+    this.ui.toast(INSTALL_TOAST_TEXT, 'info', INSTALL_TOAST_MS);
+    settings.set({ installHintShownAt: Date.now() });
   }
 
   /**

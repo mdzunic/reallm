@@ -57,6 +57,13 @@ export const PWA_OPTIONS = {
      * `tests/build/pwa.test.ts` fails if a url is ever emitted twice over.
      */
     dontCacheBustURLsMatching: /^assets\/[^/]+-[\w-]{8}\.(js|css)$/,
+    /**
+     * SPEC-059 §4.6.4: Workbox's default, plus the four promo images. Crawlers
+     * and install sheets fetch them; offline play never does. `og.png` matches
+     * `globPatterns`' `png` and would otherwise be precached; the JPEG
+     * screenshots match no pattern and are listed anyway.
+     */
+    globIgnores: ['**/node_modules/**/*', 'og.png', 'screenshots/**'],
   },
   manifest: {
     name: 'ReaLLM',
@@ -73,6 +80,18 @@ export const PWA_OPTIONS = {
     icons: [
       { src: 'icons/icon-192.png', sizes: '192x192', type: 'image/png' },
       { src: 'icons/icon-512.png', sizes: '512x512', type: 'image/png', purpose: 'any maskable' },
+    ],
+    // SPEC-059 §4.6.2: what Chrome's richer install sheet reads. The `id`
+    // resolves against the start URL's origin, and `/reallm/` is the identity
+    // installed copies already have on Pages. The screenshots are JPEG — the
+    // sheet takes only JPEG or PNG — and stay out of the precache (§4.6.4).
+    description: 'Earth sent the Selection to find a new home. Six worlds, one salvager, and a feeling you have done this before.',
+    id: '/reallm/',
+    categories: ['games'],
+    screenshots: [
+      { src: 'screenshots/wide-1.jpg', sizes: '1280x720', type: 'image/jpeg', form_factor: 'wide', label: 'A salvager on Cinder-4' },
+      { src: 'screenshots/wide-2.jpg', sizes: '1280x720', type: 'image/jpeg', form_factor: 'wide', label: 'The ruins of Thessaly' },
+      { src: 'screenshots/narrow-1.jpg', sizes: '1280x720', type: 'image/jpeg', form_factor: 'narrow', label: 'Playing on a phone' },
     ],
   },
 } satisfies Partial<VitePWAOptions>;

@@ -24,6 +24,7 @@ import { awayMs, previouslyCard, RESUME_WINDOW_MS, resumeTarget } from '@/system
 import { shareAtMenu } from '@/systems/Share';
 import { archiveLine, beginInstanceText, NEWER_SAVE_TEXT, nextInstanceSheet, restoreArchiveSheet, slotLine } from '@/systems/UiHelpers';
 import { confirmSheet } from '@/ui/ConfirmSheet';
+import { installAvailable, onInstallChange, promptInstall } from '@/ui/InstallButton';
 import { openResumeCard } from '@/ui/ResumeCard';
 import { prepareSaveCard, shareButton } from '@/ui/ShareCard';
 import { el, h, keepFocus, testId, topModal } from '@/ui/dom';
@@ -361,6 +362,8 @@ export class MenuScene extends UiScene<'menu'> {
     // SPEC-015 §10: a build that lands while the menu is open adds its button
     // without the screen having to poll for it.
     this.disposer.add(this.services.events.on('app:update-ready', () => this.#refresh(), this));
+    // SPEC-059 §4.6.5 (59-n): so does a kept install prompt, and an install takes it away.
+    this.disposer.add(onInstallChange(() => this.#refresh()));
 
     this.#refresh();
     this.#buttons.querySelector('button')?.focus();
@@ -392,6 +395,11 @@ export class MenuScene extends UiScene<'menu'> {
       testId(h('button', { class: 'ui-btn', type: 'button', click: () => this.#toggleSub('records') }, 'Records'), 'menu-records'),
       testId(h('button', { class: 'ui-btn', type: 'button', click: () => this.#settings?.show() }, 'Settings'), 'menu-settings'),
       testId(h('button', { class: 'ui-btn', type: 'button', click: () => this.#toggleSub('credits') }, 'Credits'), 'menu-credits'),
+      // SPEC-059 §4.6.5: while the browser's install prompt is kept. A press
+      // spends it, whatever the answer, and the button goes with it.
+      installAvailable()
+        ? testId(h('button', { class: 'ui-btn', type: 'button', click: () => void promptInstall() }, 'Install'), 'menu-install')
+        : null,
       // SPEC-015 AC-52: offered here and at the station only, and only while a
       // build is actually waiting. `applyUpdate` is `updateSW(true)` — nothing
       // reloads the page on its own (15-c).

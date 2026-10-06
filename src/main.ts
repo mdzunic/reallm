@@ -28,6 +28,7 @@ import { dialogueLayer } from '@/ui/DialogueUI';
 import { uiLayers } from '@/ui/dom';
 import { StatsOverlay } from '@/ui/StatsOverlay';
 import { TransitionOverlay } from '@/ui/TransitionOverlay';
+import { watchInstall } from '@/ui/InstallButton';
 import { InstallHintOverlay } from '@/ui/InstallHint';
 import { PerfResultCard } from '@/ui/PerfResult';
 import { UPDATE_BANNER_TEXT, UpdateOverlay } from '@/ui/UpdateOverlay';
@@ -213,6 +214,12 @@ let running: Game | undefined;
 new UpdateOverlay(uiRoot, events);
 /** SPEC-015 AC-55: the two taps iOS needs, raised by the hint of SPEC-007 §4.7. */
 new InstallHintOverlay(uiRoot, events);
+/**
+ * SPEC-059 §4.6.5: the install prompt a browser may fire before any scene is
+ * up — kept for the menu's `Install`, and the launch read as installed when
+ * the app opens standalone.
+ */
+watchInstall(window, settings);
 
 /**
  * SPEC-015 §10 / AC-51 — what happens when a new build has finished
