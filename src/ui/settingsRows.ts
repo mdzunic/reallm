@@ -279,13 +279,14 @@ export const SETTINGS_ROWS: readonly SettingsRowDef[] = [
   // --------------------------------------------------------------- Gameplay
   // SPEC-038 §4.6 and SPEC-043 §4.4, in the creation screen's order, with
   // `DIFFICULTY_LINES` under it. It writes the save, not the settings.
+  // SPEC-059 §4.2.3: `Story` is the first segment.
   {
     id: 'settings-difficulty',
     key: 'difficulty',
     section: 'gameplay',
     label: 'Difficulty',
     control: 'choice',
-    choices: named(['normal', 'Normal'], ['casual', 'Casual'], ['hard', 'Hard']),
+    choices: named(['story', 'Story'], ['normal', 'Normal'], ['casual', 'Casual'], ['hard', 'Hard']),
     shown: 'save',
   },
   // SPEC-027 §4.9.

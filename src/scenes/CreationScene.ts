@@ -650,9 +650,12 @@ export class CreationScene extends UiScene<'creation'> {
     ) as HTMLDivElement;
   }
 
-  /** AC-18: three positions since SPEC-043 §4.4 added `hard`, and one honest line. */
+  /**
+   * AC-18: three positions since SPEC-043 §4.4 added `hard`, and one honest
+   * line. SPEC-059 §4.2.3: `story` joins them, first; the default stays normal.
+   */
   #difficultyRow(): HTMLDivElement {
-    const seg = (['normal', 'casual', 'hard'] as const satisfies readonly Difficulty[]).map((choice) =>
+    const seg = (['story', 'normal', 'casual', 'hard'] as const satisfies readonly Difficulty[]).map((choice) =>
       testId(
         h(
           'button',

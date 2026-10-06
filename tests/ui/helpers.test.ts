@@ -804,6 +804,10 @@ describe('DIFFICULTY_LINES (SPEC-038 §4.6)', () => {
       'Hard — tougher, deadlier hostiles and twice the elites; a death costs a fifth of your cargo.',
     );
   });
+
+  it('SPEC-059 §4.2.3: story says what it spares and that records are off', () => {
+    expect(DIFFICULTY_LINES.story).toBe('Story — hostiles and storms cannot hurt you; the fights still happen. Records are off.');
+  });
 });
 
 describe('failText (AC-42)', () => {

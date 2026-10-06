@@ -3776,6 +3776,8 @@ export class SurfaceScene extends UiScene<'surface'> {
   #updateDefend(world: CombatWorld, dt: number): void {
     const poi = this.#defendPoi;
     if (poi === null || this.#defendHp <= 0) return;
+    // SPEC-059 §4.2.2: on story the structure takes no enemy damage.
+    if (DIFFICULTY_RULES[this.#save?.meta.difficulty ?? 'normal'].allyDamageMult === 0) return;
     let pressure = 0;
     for (let i = 0; i < world.enemies.size; i++) {
       const e = world.enemies.at(i);
@@ -4355,17 +4357,19 @@ export class SurfaceScene extends UiScene<'surface'> {
   }
 
   /**
-   * §4.1 step 4 (E91): unless the difficulty is casual, forfeit whatever set
-   * lies anywhere — `remains:lost` and its toast — and leave this death's loss
-   * at the placed point (`remains:created`). Returns the overlay's line, or
-   * `null` when nothing was left (casual, or an empty hold).
+   * §4.1 step 4 (E91): unless the difficulty takes nothing (casual, story),
+   * forfeit whatever set lies anywhere — `remains:lost` and its toast — and
+   * leave this death's loss at the placed point (`remains:created`). Returns
+   * the overlay's line, or `null` when nothing was left (a zero `deathLoss`,
+   * or an empty hold).
    */
   #dropRemains(lost: Partial<Record<ResourceId, number>>): string | null {
     const save = this.#save;
     const world = this.#world;
     if (save === null || world === null) return null;
-    // §2: casual takes nothing, so nothing is at stake — neither created nor forfeited.
-    if (save.meta.difficulty === 'casual') return null;
+    // §2: casual takes nothing, so nothing is at stake — neither created nor
+    // forfeited. SPEC-059 §4.2.2: nor does story; a zero `deathLoss` leaves none.
+    if (DIFFICULTY_RULES[save.meta.difficulty].deathLoss <= 0) return null;
     // `watchRunStats` placed it a moment ago; placing again reads the same inputs.
     this.#placeRemains(world);
     const planet = this.#planet.id;

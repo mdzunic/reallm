@@ -197,6 +197,8 @@ export function attributeEffectText(attribute: keyof Attributes): string {
  * here rather than in either of them.
  */
 export const DIFFICULTY_LINES: Readonly<Record<Difficulty, string>> = {
+  // SPEC-059 §4.2.3: no badge marks a story save; the line says what it costs.
+  story: 'Story — hostiles and storms cannot hurt you; the fights still happen. Records are off.',
   normal: 'Normal — the pressure the game was tuned for.',
   casual: 'Casual — softer hits and storms, longer wind-ups, kinder deaths; the story is unchanged.',
   // SPEC-043 §4.4. SPEC-045 §4.6: resources carried are cargo.
