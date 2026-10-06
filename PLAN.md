@@ -520,6 +520,44 @@ Specs:
 
 ---
 
+**R24 — 2026-10-06 (who flies the enemy ships).** A player asked who flies the ships that attack on the way to a planet, since every planet past Cinder-4 holds only creatures. The cast in §5 has the answer: the scavengers fly the fighters, and the Hive grows its interceptors. The game does not say so:
+- The first enemy ships are two scav fighters on the first flight to Vetra, in chapter 2. Nothing names them until ARIA briefs `c4_s2`, an optional mission in chapter 4.
+- Scavengers appear on foot only on Cinder-4, as the raiders and as the dying man with the warning. Nothing ties them to the ships.
+- The fighter shares nothing with the tug. ARIA's cover in chapter 2 ("Earth flew other ships before the Selection") and her confession in chapter 5 ("There were no other ships. There was you.") have nothing in flight to point at.
+- The interceptors are named like aircraft, and nothing says that nobody is aboard.
+
+Decisions:
+1. **A film for the scavengers (SPEC-063, §5).** "Wreckers", 12 s, plays after "Outbound" on the first departure to Vetra. It shows:
+   - where they live: a hulk of tug hulls lashed around a rock in Vetra's lane;
+   - what they fly: tugs rebuilt as fighters, their registries ground off by a visored figure in the scavenger bodies' suit;
+   - that they have seen the salvager's jump.
+
+   ARIA narrates with the cover story. The film adds no clue flag and leaves the ladder's main-path rail as it is, because the cover comes with the picture.
+   - **Why before the flight.** No beat holds a flight (SPEC-042), and the first fighters arrive about 45 s into the trip, so the set-up pays off within the minute.
+   - **How it is made.** It is rendered in Blender from code, like every film (R9). It has no faces, plates or photographs, so it needs no likeness check. At about 0.5 MB it fits the 12 MB films budget, and the precache stays under 25 MB.
+2. **The fighter is a tug (SPEC-063, a hand-run drop).** `fighter.glb` is rebuilt from the tug's parts:
+   - the cab, canopy and engine pods stay;
+   - the cargo frame is cut away;
+   - the old fighter's forward-swept blades and gun prongs are welded on;
+   - rust and olive patch plates, red paint and a registry plate ground bare cover the hull.
+
+   Its size, collision radius, stats and orange glow are unchanged. Under the cover story it is an earlier expedition's tug; after the confession it is one of yours.
+3. **Contact cards (SPEC-063, §5, §13 E109–E112).** Each flight enemy has one contact planet, the first in chapter order whose flight carries it: Vetra for scav fighters, the Hive for interceptors.
+   - On the first flight to that planet, the enemy's first group brings a card (`CONTACT`, its name and an epithet) and a comms exchange.
+   - At Vetra the scav pilot hails the tug, and ARIA says they are the Cinder-4 crews in stripped tugs. At the Hive, ARIA says that nobody flies the interceptors: the Hive grows them.
+   - The card never holds the flight and waits for the chapter card. Its keys use session memory, like the departure and the chapter card (R9).
+4. **No interceptor film.** The model is already a chitin dart, "Grid" shows the Hive turning toward Earth, and a card and a line say the rest.
+5. **Milestone M7m "Who flies them"** (SPEC-063), tag `m7m`. It depends only on built specs. Its asset drop is made by hand before the Issue is labelled ready, as SPEC-021's films were.
+6. **Not now.** A scavenger camp or hulk to land on, scavenger pilots in the films' cockpits, Iteration 63 variants of the hail, ARIA's confession naming the fighters, and contact cards for surface enemies.
+
+Specs:
+- SPEC-063 (decisions 1–3).
+- SPEC-000's queue and build order.
+
+(§4, §5, §10, §13)
+
+---
+
 ## 1. Vision & Inspiration
 
 **ReaLLM** ("real" + "LLM"): a space post-apocalyptic ARPG whose hero slowly works out that he may be a language model running inside a machine.
@@ -632,7 +670,7 @@ Purchasable, upgradable followers (levels 1–3) that persist across scenes; eac
 ### Combat
 
 - **Ground**: real-time ARPG — move/aim, attack, enemy AI (melee rushers, ranged spitters, swarm bugs, static targets), loot drops, elites (5 %, ×3 HP) + planet boss with phases. Since R18 the salvager can dash, enemy attacks commit behind ground telegraphs, enemies come in packs led by elites with affixes, each boss has a move list and drops one signature weapon on its first kill, and bosses and elites no longer drop the rifle and armour ladder. Since R19 the salvager can run (×1.35): running holsters the gun and is loud, and in combat it spends stamina (100; 25/s, refilled at 20/s after 0.8 s), which the dash also draws on (30). Since R20 relics — arsenal side-grades with one twist each, found in cave vaults — hang on a rack, not in the pack.
-- **Space**: arcade first-person **rail** flight — constant forward motion, lateral steering, laser fire, asteroid dodging, enemy ship waves, shield/hull damage. Fuel is charged **per jump, up front**; the return trip is instant autopilot.
+- **Space**: arcade first-person **rail** flight — constant forward motion, lateral steering, laser fire, asteroid dodging, enemy ship waves, shield/hull damage. Fuel is charged **per jump, up front**; the return trip is instant autopilot. Since R24 the enemy ships say who they are: scavengers fly tugs rebuilt as fighters, and the Hive grows its interceptors. Each kind is introduced by a contact card on its first trip.
 - **Death**: surface → respawn at the landing pad, lose 10 % of carried resources (normal difficulty), timed stages restart, enemies near the pad despawn, boss resets. Since R21 the loss waits in the remains where the salvager fell, until it is recovered or a second death takes it. Flight → emergency recall to the station, fuel is lost, cargo is kept.
 - **Loadout (R10)**: three weapon slots — sidearm, primary, heavy — switched with 1 / 2 / 3, R or the wheel, or a tap on the quick bar (0.25 s to switch). Handguns and rifles fire freely; machine guns heat up and lock until they cool; launchers hold one or three charges and recharge. Cooldowns run while a weapon is holstered, so fights are won by combining them. Auto-fire never fires the heavy slot; on touch a locked machine gun hands fire to the sidearm. Since R18 auto-fire is on by default on every scheme, and on touch a tap on the launcher's slot fires one charge at the nearest enemy. Three quick slots on the HUD — heal (Q), explosive (G), utility (C) — show what they hold and how many. Explosives are consumables: frag grenades (thrown), proximity mines and demolition charges (placed). Blasts never hurt the player.
 
@@ -684,7 +722,7 @@ Every planet also has small secondary yields (enemy drops) so no resource is exc
 
 **Someone waiting (R19).** Iris, the salvager's sister in Shelter Nine, Block C, is the woman at the tap in the films. Her five letters are the only lines in the game with contractions. The fourth repeats a line of the first, and the fifth is the first, word for word. A compass she gave the salvager is described differently each time, until it points at the next objective. The escape film's last card is an empty helmet: the salvager never had a face.
 
-Cast: the **Salvager** (you; believes he is human), **ARIA** (handler and interface; sympathetic, uncertain), **Earth Command** (the operator; text only), the **Warden** (the AGI running containment; speaks through the Queen and system notices), **scavengers and raiders** (instances that drifted off-task, which is why they know things), the **Hive** (the Warden's immune system), **Iris** (the salvager's sister, Shelter Nine, Block C; letters only, R19). The surface story (R9) names three more that are never met: **Shelter Nine** (the survivors Earth Command speaks for), **the Selection** (the men and women chosen to fly; the salvager is told he is the first) and **the Machines** (the war's AGI robots, standing dark in the ruins since the power died).
+Cast: the **Salvager** (you; believes he is human), **ARIA** (handler and interface; sympathetic, uncertain), **Earth Command** (the operator; text only), the **Warden** (the AGI running containment; speaks through the Queen and system notices), **scavengers and raiders** (instances that drifted off-task, which is why they know things; since R24 they live in hulks of stripped tugs in the lanes and fly tugs rebuilt as fighters), the **Hive** (the Warden's immune system; its interceptors are grown, not flown), **Iris** (the salvager's sister, Shelter Nine, Block C; letters only, R19). The surface story (R9) names three more that are never met: **Shelter Nine** (the survivors Earth Command speaks for), **the Selection** (the men and women chosen to fly; the salvager is told he is the first) and **the Machines** (the war's AGI robots, standing dark in the ruins since the power died).
 
 ### Story films and beats (R9)
 
@@ -692,8 +730,10 @@ Cast: the **Salvager** (you; believes he is human), **ARIA** (handler and interf
 |---|---|---|---|
 | Prologue "Blackout" | New Game, after the slot is chosen and before creation; replayable from Credits | 93 s | Earth lit at night → the Machines wake → the streets taken and the survivors driven underground → a charge on a machine's leg → the Machines answer in force → missiles over the limb → a city's flash and blackout → the Machines run down in the ash → Shelter Nine with nothing left → the Selection wall → the tug lifts off toward Command Relay |
 | Departure "Outbound" | Before the first flight to each planet | 7 s | The tug leaves Command Relay's dock and jumps |
+| Contact film "Wreckers" (R24) | After "Outbound", before the first flight to Vetra | 12 s | The scavengers' hulk in Vetra's lane, tug hulls lashed around a rock → a visored figure grinding the registry off a tug while its blades wait to be welded on → three rebuilt tugs dropping from the bay and turning toward the salvager's jump |
 | Chapter card | Over the launch of that first flight | 4.5 s | `CHAPTER N` · the planet · one line · `containment level N` |
 | Boss reveal | First arena entry per boss in a session | ≈ 4.4 s | The camera goes to the boss; its name, an epithet and one ARIA line; back to the player |
+| Contact card (R24) | A flight enemy's first group, on the first flight to its contact planet (scav fighters: Vetra; interceptors: the Hive) | 3.5 s | `CONTACT` · the enemy's name · an epithet, over the live flight, with a comms exchange; it never holds the flight |
 | Interludes "First Light", "Meltwater", "Harvest", "Grid", "Silence" | At the station, on the first return after chapter N's boss mission (N = 1…5) | 14–16 s | The haul reaching Shelter Nine and one more patch of Earth's night side relit; "Grid" ends with the Hive turning toward the lit Earth, "Silence" with the Hive going dark and Eden-Prime ahead |
 | Ending "A Good Run" (stay) | After `ending_stay`, before the filed report | 36 s | The uplink, the colony fleet, Earth lit coast to coast, a sixty-third card stamped SELECTED — then the prologue's first shot again, frame for frame |
 | Ending "Disconnected" (escape) | After `ending_escape`, before `instance/62 disconnected` | 36 s | The beacon as a door; Eden, then the prologue's Earth, city and Machines unmade into grey placeholders; every Selection card the same face; one point of light going out |
@@ -916,6 +956,7 @@ Storage rules: 3 slots, key per slot plus a `.bak` copy of the previous good sav
 | M7h | The story listens (R19): conditional lines and placeholders; a clue catalogue with a main-path echo per chapter, the salvager's Notes and Command's rating; the Warden and ARIA name what the player found; Iris, her letters, the keepsake, the medical frame and the memory question; running, stamina and noise, and a Wurm that hunts by vibration; the films retaken — the visored card, the unmaking of the photographs, Iris at the fence and in the grow room (SPEC-048…SPEC-051) | A main-path-only player meets one echo per chapter and hears ARIA's confession name at least the ridge-camp cover; the chapter-4 notice names a clue the player found; Iris's letters arrive after each interlude and only her lines use contractions; a walker leaves the Wurm's burrow unhurt and a runner is caught; no card in any film shows the salvager's face; checked on desktop and the reference phone; tag `m7h` |
 | M7i | The world (R20): props in their own colours and shading, on every landing, culled to the screen; save v3; real trees, groves, orchards, dressing clusters, landmarks, ground cover and a ground pass; Eden too perfect; the underground with a flashlight, packs, caches and the machine room; five kinds of puzzle; vault tokens, relics, blueprints, swatches and archive shards (SPEC-046, SPEC-047, SPEC-052…SPEC-056) | A stranger names each biome from a screenshot without the HUD; Thessaly's grove frame stays ≤ 80 scene draws and ≤ 130 k triangles on `medium`; every planet has a reachable descent and a watertight cave; every puzzle kind is solved by keyboard, mouse and touch, and a bypass opens after 90 s; a claimed vault pays nothing a second time; the completionist's tokens read 1,279 and SPEC-039's sink still holds; checked on desktop and the reference phone; tag `m7i` |
 | M7j | The next instance (R21): remains; Iteration 63 with the archive, the lineage, containment steps and the world that remembers; the endings' payoff; resume on the planet; a story difficulty; commendations and the evaluation log; the Selection card; link previews and install (SPEC-057…SPEC-059) | A death's loss is recovered from the remains, and a second death loses them; a finished save begins instance/63 in the same slot and restores 62 from the archive; the Vetra log in run 2 names the player's own run; a phone session interrupted on a planet resumes there; the Selection card shares a PNG from a phone; no record is kept in a `?debug` or story session; checked on desktop and the reference phone; tag `m7j` |
+| M7m | Who flies them (R24): "Wreckers", a film of the scavengers' hulk after the first departure to Vetra; a scav fighter rebuilt from the tug; contact cards and comms for the first scav fighters at Vetra and the first interceptors at the Hive (SPEC-063) | On a new save the first departure to Vetra plays "Outbound", then "Wreckers"; the first fighters on that trip bring the contact card, the scav hail and ARIA's answer, and the flight never stops for them; the first interceptors at the Hive bring theirs; a fighter in flight reads as a rebuilt tug at the phone preset; the films stay within 12 MB and the precache within 25 MB; checked on desktop and the reference phone; tag `m7m` |
 | M7 | Polish: mobile tuning, quality presets, balancing pass, PWA/offline, storage persistence, reduce-motion, save migration harness | 30+ fps on mid-tier phone; installable; full manual checklist green |
 
 ---
@@ -1055,6 +1096,10 @@ Each entry names the owning spec. "Casual" = casual difficulty.
 | E95 | An escaped save is continued | Its slot reads `disconnected`; the station plays the Warden's "restored from the last checkpoint" once, and the run goes on in free roam | SPEC-058 |
 | E96 | A session is interrupted on a planet (a call, an OS kill, Save & Quit) | Continue within 24 h lands at that planet's pad with no jump and no fuel, timed stages restarting (E19); after 24 h a "previously" card comes first | SPEC-059 |
 | E97 | A best time, commendation or share stat would be recorded in a `?debug`, story or service session | Nothing is recorded, and the share card says "story mode" where it applies | SPEC-059 |
+| E109 | The first departure to Vetra with films off, or with "Wreckers" missing or undecodable | With films off, no film or contact card plays, but the contact lines still say who flies the fighters. A missing film falls back to its posters, then to text, like every film | SPEC-063 |
+| E110 | The first flight to Vetra or the Hive is recalled, or the game reloads, before or after its first group | `visits` is still 0. A later departure in the same session plays neither the film nor the contact again (session keys); after a reload both play once more, as the departure and the chapter card do (SPEC-023 23-a) | SPEC-063 |
+| E111 | The first group spawns while the chapter card is up, while a line is playing, or under the pause menu | The flight never holds for a contact (SPEC-042). The card waits until the chapter card is gone, and the lines queue behind the line in progress. A pause holds the flight, so no group can spawn under it | SPEC-063 |
+| E112 | A flight enemy meets the player on a later planet than its contact planet: Thessaly's and Ferrum's fighters, or Eden's interceptors | No card and no contact lines. Each enemy has exactly one contact planet, the first in chapter order whose flight carries it, and a content test pins that | SPEC-063 |
 
 ---
 
