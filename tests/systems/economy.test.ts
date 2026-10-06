@@ -1236,3 +1236,66 @@ describe('claimCache (SPEC-054 §4.8)', () => {
     expect(data.resources.lithium).toBe(before + (CACHES.cinder4_loose_a.reward.resources?.lithium ?? 0));
   });
 });
+
+// ------------------------------------------------------------- SPEC-055 §4.8
+
+describe('claimCache and the flawless part (SPEC-055 §4.8)', () => {
+  it('by default pays the reward and the flawless part, and returns both as what it paid', () => {
+    const { economy, data } = world();
+    const before = economy.count('medkit');
+    const lithium = data.resources.lithium ?? 0;
+    const result = economy.claimCache('cinder4_vault');
+    expect(result).toEqual({
+      ok: true,
+      reward: {
+        resources: { lithium: 8 },
+        items: [
+          { itemId: 'plasma_cell', qty: 1 },
+          { itemId: 'coolant_pack', qty: 1 },
+          { itemId: 'medkit', qty: 1 },
+        ],
+      },
+    });
+    expect(data.resources.lithium).toBe(lithium + 8);
+    expect(economy.count('plasma_cell')).toBe(1);
+    expect(economy.count('coolant_pack')).toBe(1);
+    expect(economy.count('medkit')).toBe(before + 1);
+    expect(data.progress.claimed).toEqual(['cinder4_vault']);
+  });
+
+  it('flawless: true pays the same as the default', () => {
+    const { economy } = world();
+    const before = economy.count('medkit');
+    economy.claimCache('vetra_vault', { flawless: true });
+    expect(economy.count('medkit')).toBe(before + 1);
+  });
+
+  it('flawless: false pays everything but the flawless part — a forced lock', () => {
+    const { economy, data, requested } = world();
+    const before = economy.count('medkit');
+    const lithium = data.resources.lithium ?? 0;
+    const result = economy.claimCache('cinder4_vault', { flawless: false });
+    expect(result).toEqual({ ok: true, reward: CACHES.cinder4_vault.reward });
+    expect(data.resources.lithium).toBe(lithium + 8);
+    expect(economy.count('plasma_cell')).toBe(1);
+    expect(economy.count('coolant_pack')).toBe(1);
+    expect(economy.count('medkit')).toBe(before);
+    expect(data.progress.claimed).toEqual(['cinder4_vault']);
+    expect(requested).toContain('checkpoint');
+    // …and the claim is spent either way: a later flawless call pays nothing.
+    expect(economy.claimCache('cinder4_vault')).toEqual({ ok: false, reason: 'claimed' });
+    expect(economy.count('medkit')).toBe(before);
+  });
+
+  it('a cache with no flawless part pays its reward whatever the option', () => {
+    const { economy, data } = world();
+    const lithium = data.resources.lithium ?? 0;
+    const oil = data.resources.oil ?? 0;
+    expect(economy.claimCache('cinder4_relic', { flawless: false })).toEqual({ ok: true, reward: CACHES.cinder4_relic.reward });
+    expect(economy.claimCache('cinder4_loose_b')).toEqual({ ok: true, reward: CACHES.cinder4_loose_b.reward });
+    expect(data.resources.lithium).toBe(lithium + 5);
+    expect(data.resources.oil).toBe(oil + 15);
+    expect(economy.count('frag_grenade')).toBe(2);
+    expect(economy.count('plasma_cell')).toBe(1);
+  });
+});

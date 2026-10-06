@@ -34,6 +34,7 @@ export * from '@/data/loot';
 export * from '@/data/missions';
 export * from '@/data/planets';
 export * from '@/data/pois';
+export * from '@/data/puzzles';
 export * from '@/data/recipes';
 export * from '@/data/story';
 export * from '@/data/tuning';

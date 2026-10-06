@@ -197,6 +197,29 @@ export function discountTokens(tokens: number, discount: number): number {
   return Math.max(1, Math.ceil(tokens * (1 - discount)));
 }
 
+/**
+ * SPEC-055 §4.8: a cache's reward with its flawless part — resources summed,
+ * items merged by id in first-seen order — as one `CacheReward`, so the claim
+ * pays and toasts it in one go.
+ */
+export function joinRewards(a: CacheReward, b: CacheReward): CacheReward {
+  const resources: Partial<Record<ResourceId, number>> = {};
+  for (const resource of RESOURCE_IDS) {
+    const amount = (a.resources?.[resource] ?? 0) + (b.resources?.[resource] ?? 0);
+    if (amount > 0) resources[resource] = amount;
+  }
+  const items: { itemId: ItemId; qty: number }[] = [];
+  for (const { itemId, qty } of [...(a.items ?? []), ...(b.items ?? [])]) {
+    const entry = items.find((item) => item.itemId === itemId);
+    if (entry === undefined) items.push({ itemId, qty });
+    else entry.qty += qty;
+  }
+  const out: { resources?: Partial<Record<ResourceId, number>>; items?: { itemId: ItemId; qty: number }[] } = {};
+  if (Object.keys(resources).length > 0) out.resources = resources;
+  if (items.length > 0) out.items = items;
+  return out;
+}
+
 export class Economy {
   readonly #save: Save;
   readonly #events: EventSink;
@@ -818,11 +841,17 @@ export class Economy {
    * `applyBonus` pays its own: resources as a `reward` (past the cargo cap,
    * never shipped) and items through `addItem`, with E25's `item:noRoom` and
    * toast for whatever does not fit. Then the save checkpoints (54-j).
+   *
+   * SPEC-055 §4.8: a cache's `flawless` part is paid too when `flawless` is
+   * true — the default — and held back from a solve ARIA forced. `reward` is
+   * everything this claim paid, the flawless part included.
    */
-  claimCache(id: CacheId): { ok: true; reward: CacheReward } | { ok: false; reason: 'claimed' } {
+  claimCache(id: CacheId, opts?: { flawless?: boolean }): { ok: true; reward: CacheReward } | { ok: false; reason: 'claimed' } {
     if (this.#save.progress.claimed.includes(id)) return { ok: false, reason: 'claimed' };
     this.#save.progress.claimed.push(id);
-    const reward = CACHES[id].reward;
+    const def = CACHES[id];
+    const extra = opts?.flawless === false ? undefined : def.flawless;
+    const reward = extra === undefined ? def.reward : joinRewards(def.reward, extra);
     this.#grant(reward);
     this.#saves?.request('checkpoint');
     return { ok: true, reward };
