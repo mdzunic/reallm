@@ -173,12 +173,14 @@ const PLATE_FALLBACK_RING = 0.85;
 /** The ring's turns tried, per gap between two plates, for one that clears the caches. */
 const PLATE_RING_TURNS = 24;
 /**
- * §4.2: a panel whose room centre lies this close to a cache — the vault's at
- * its room's centre, a `loose_a` 2 m off its own — …
+ * §4.2: a panel whose room centre lies this close to a point it must clear —
+ * a cache (the vault's is its room's centre, a `loose_a` 2 m off its own), or
+ * the entrance room's exit and landing spot — …
  */
 const PANEL_AVOID = 3.2;
-/** …stands this far from that cache instead, on the centre's side: past both interact circles (1.5 m each). */
+/** …stands this far from the centre instead, on the first of these many bearings that clears them all — past every 1.5 m interact circle. */
 const PANEL_SHIFT = 3.5;
+const PANEL_BEARINGS = 12;
 
 /** §4.2: a beam layout is re-drawn up to this many times… */
 const BEAM_TRIES = 50;
@@ -706,9 +708,10 @@ function ringSpots(room: { x: number; z: number }, reach: number, count: number,
  * §4.2: plates by seeded rejection within `r − 2` of the puzzle room's centre,
  * `PLATE_SPACING` apart and 2 m from every cache; a seeded shuffle of the
  * glyphs; a seeded order; and the panel at the panel room's centre — or, when
- * a cache stands within 3.2 m of it, 3.5 m from that cache on the centre's
- * side (along a seeded bearing if the two coincide), so the panel's and the
- * cache's interact circles never meet. An anchor without a panel
+ * a point to clear stands within 3.2 m of it, 3.5 m from the centre, away from
+ * the nearest such point (along a seeded bearing if it is the centre) or on
+ * the next bearing round that clears them all, so the panel's interact circle
+ * never meets a cache's, the exit's or the landing spot. An anchor without a panel
  * room puts the panel at the puzzle room's centre (robustness only).
  *
  * In a 6 m room five plates can jam — the first four leaving no spot for the
@@ -745,11 +748,27 @@ function generatePlates(row: PlatesRow, anchor: PuzzleAnchor, rng: Rng): PlatesP
 
   const centre = anchor.panelRoom ?? room;
   let panel = { x: centre.x, z: centre.z };
-  const near = avoid.find((a) => Math.hypot(a.x - centre.x, a.z - centre.z) < PANEL_AVOID);
-  if (near !== undefined) {
+  if (clearance(avoid, centre.x, centre.z) < PANEL_AVOID) {
+    // The first bearing straight away from the nearest point (a seeded one if
+    // it is the centre itself), then fanning out either side of it, until a
+    // spot `PANEL_SHIFT` from the centre clears every point.
+    let near = avoid[0] as { x: number; z: number };
+    for (const a of avoid) if (Math.hypot(a.x - centre.x, a.z - centre.z) < Math.hypot(near.x - centre.x, near.z - centre.z)) near = a;
     const d = Math.hypot(centre.x - near.x, centre.z - near.z);
-    const bearing = d > 1e-9 ? Math.atan2(centre.z - near.z, centre.x - near.x) : rng.angle();
-    panel = { x: near.x + Math.cos(bearing) * PANEL_SHIFT, z: near.z + Math.sin(bearing) * PANEL_SHIFT };
+    const away = d > 1e-9 ? Math.atan2(centre.z - near.z, centre.x - near.x) : rng.angle();
+    const spot = (bearing: number): { x: number; z: number } => ({
+      x: centre.x + Math.cos(bearing) * PANEL_SHIFT,
+      z: centre.z + Math.sin(bearing) * PANEL_SHIFT,
+    });
+    panel = spot(away);
+    for (let k = 0; k < PANEL_BEARINGS; k++) {
+      const turn = Math.ceil(k / 2) * (k % 2 === 1 ? 1 : -1) * ((Math.PI * 2) / PANEL_BEARINGS);
+      const at = spot(away + turn);
+      if (clearance(avoid, at.x, at.z) >= PANEL_AVOID) {
+        panel = at;
+        break;
+      }
+    }
   }
   return { kind: 'plates', plates, order, progress: 0, panel };
 }

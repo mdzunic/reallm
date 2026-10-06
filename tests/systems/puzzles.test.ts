@@ -73,7 +73,8 @@ const caveFor = (planet: PlanetId, seed: number): UndergroundLayout =>
 const anchorOf = (u: UndergroundLayout): PuzzleAnchor => ({
   room: u.rooms[u.puzzleRoom] as Room,
   panelRoom: u.rooms[u.panelRoom] as Room,
-  avoid: u.caches,
+  // As the scene hands it over: the caches, and the entrance's exit and landing spot.
+  avoid: [...u.caches, u.exit, u.playerSpawn],
 });
 
 /** Every move in order; each one's result. */
@@ -555,8 +556,12 @@ describe('plates (§4.2, §4.6) on real caves', () => {
         // The panel stands in the panel room — never the puzzle room — and off every cache.
         expect(u.panelRoom, at).not.toBe(u.puzzleRoom);
         expect(gap(p.panel, panelRoom), at).toBeLessThan(panelRoom.r);
-        // The panel's and every cache's 1.5 m interact circles never meet.
+        // The panel's and every cache's 1.5 m interact circles never meet, nor
+        // does the panel's reach the exit's or the spot a descent lands on.
         for (const cache of u.caches) expect(gap(p.panel, cache), `${at} ${cache.id}`).toBeGreaterThan(3);
+        expect(gap(p.panel, u.exit), `${at} exit`).toBeGreaterThan(3);
+        expect(gap(p.panel, u.playerSpawn), `${at} landing`).toBeGreaterThan(3);
+        expect(isReachable(u, p.panel), `${at} panel`).toBe(true);
 
         // Walking the order solves it, every step accepted; nothing presses a solved board.
         const walked = structuredClone(p);
@@ -598,15 +603,40 @@ describe('plates (§4.2, §4.6) on real caves', () => {
     }
   });
 
-  it('a cache within 3.2 m of the panel room centre moves the panel 3.5 m off it, toward the centre — past both 1.5 m circles', () => {
+  it('a point within 3.2 m of the panel room centre moves the panel 3.5 m from the centre, clear of every point', () => {
     const room = { x: 0, z: 0, r: 8 };
     const panelRoom = { x: 30, z: 10, r: 7 };
+    // The vault's cache at the centre: 3.5 m off along a seeded bearing.
     const on = generatePuzzle('plates', 1, new Rng(1), { room, panelRoom, avoid: [{ x: 30, z: 10 }] }) as PlatesPuzzle;
     expect(gap(on.panel, { x: 30, z: 10 })).toBeCloseTo(3.5, 9);
-    // A loose_a 2 m off its room's centre.
+    // A loose_a 2 m off its room's centre: straight away from it.
     const near = generatePuzzle('plates', 1, new Rng(1), { room, panelRoom, avoid: [{ x: 32, z: 10 }] }) as PlatesPuzzle;
-    expect(near.panel.x).toBeCloseTo(28.5, 9);
+    expect(near.panel.x).toBeCloseTo(26.5, 9);
     expect(near.panel.z).toBeCloseTo(10, 9);
+    // The entrance's landing spot 1 m off the centre and the exit 3 m off on the
+    // same side: the panel goes the other way, past both.
+    const entrance = generatePuzzle('plates', 1, new Rng(1), {
+      room,
+      panelRoom: { x: 30, z: 10, r: 6 },
+      avoid: [
+        { x: 33, z: 10 },
+        { x: 31, z: 10 },
+      ],
+    }) as PlatesPuzzle;
+    expect(entrance.panel.x).toBeCloseTo(26.5, 9);
+    expect(entrance.panel.z).toBeCloseTo(10, 9);
+    // Points either side of the centre: the first bearing round that clears them both.
+    const pinched = generatePuzzle('plates', 1, new Rng(1), {
+      room,
+      panelRoom,
+      avoid: [
+        { x: 31, z: 10 },
+        { x: 27.5, z: 10 },
+      ],
+    }) as PlatesPuzzle;
+    expect(gap(pinched.panel, { x: 30, z: 10 })).toBeCloseTo(3.5, 9);
+    expect(gap(pinched.panel, { x: 31, z: 10 })).toBeGreaterThanOrEqual(3.2);
+    expect(gap(pinched.panel, { x: 27.5, z: 10 })).toBeGreaterThanOrEqual(3.2);
     const clear = generatePuzzle('plates', 1, new Rng(1), { room, panelRoom, avoid: [{ x: 33.3, z: 10 }] }) as PlatesPuzzle;
     expect(clear.panel).toEqual({ x: 30, z: 10 });
   });

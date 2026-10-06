@@ -778,9 +778,11 @@ export class PuzzleSites {
     const cave = this.#cave;
     const room = cave?.rooms[cave.puzzleRoom];
     const panelRoom = cave?.rooms[cave.panelRoom];
+    // The caches, and the entrance's exit and landing spot: the panel keeps its
+    // interact circle off all of them (and the plates and mirrors off the caches).
     const anchor =
       def.where === 'world' && cave !== null && room !== undefined
-        ? { room, ...(panelRoom === undefined ? {} : { panelRoom }), avoid: cave.caches }
+        ? { room, ...(panelRoom === undefined ? {} : { panelRoom }), avoid: [...cave.caches, cave.exit, cave.playerSpawn] }
         : undefined;
     return generatePuzzle(def.kind, this.#host.planet.chapter, rng, anchor, def.family);
   }
