@@ -291,8 +291,10 @@ export class StationScene extends UiScene<'station'> {
     // AC-22: the ship is docked; the hull comes back to full.
     data.player.hp = maxHp(data.player.classId, data.player.attributes, data.player.level);
     // AC-23: the save knows where it is, and writes at this safe point.
+    // SPEC-059 §4.1.1: a save at the station has no planet to resume on.
     data.progress.location = 'station';
     data.progress.currentPlanet = null;
+    data.progress.resume = null;
     this.services.save.request('station_enter');
   }
 
@@ -455,6 +457,8 @@ export class StationScene extends UiScene<'station'> {
     await overlay.playEscape(data.meta.iteration);
     if (!this.#alive) return false;
     data.progress.endingSeen = true;
+    // SPEC-059 §4.1.1: the escape leaves no planet to resume on.
+    data.progress.resume = null;
     this.services.save.request('manual');
     void this.services.go('menu', { reason: 'quit' });
     return false;

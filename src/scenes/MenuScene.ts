@@ -18,8 +18,10 @@ import { CREDITS, CREDITS_VERSION_LINE } from '@/data/index';
 import { Economy } from '@/systems/Economy';
 import { Progression } from '@/systems/Progression';
 import { applySupplies, EMPTY_CODE, pushCode } from '@/systems/Service';
+import { awayMs, previouslyCard, RESUME_WINDOW_MS, resumeTarget } from '@/systems/Resume';
 import { archiveLine, beginInstanceText, NEWER_SAVE_TEXT, nextInstanceSheet, restoreArchiveSheet, slotLine } from '@/systems/UiHelpers';
 import { confirmSheet } from '@/ui/ConfirmSheet';
+import { openResumeCard } from '@/ui/ResumeCard';
 import { el, h, keepFocus, testId, topModal } from '@/ui/dom';
 import { SavePanel } from '@/ui/SavePanel';
 import { SettingsPanel } from '@/ui/SettingsPanel';
@@ -81,6 +83,8 @@ export class MenuScene extends UiScene<'menu'> {
   /** Which slot has its import paste field open in the Load list. */
   #importing: SlotId | null = null;
   #leaving = false;
+  /** SPEC-059 §4.1.3: the "previously" card is up, waiting for its answer. */
+  #asking = false;
 
   constructor(services: GameServices) {
     super(services, 'menu', 'menu');
@@ -108,6 +112,10 @@ export class MenuScene extends UiScene<'menu'> {
     }
     this.#mountUi();
     this.#watchServiceGestures();
+    // SPEC-059 §4.1.4: a "previously" card still up when the menu goes leaves with it, loading nothing.
+    this.disposer.add(() => {
+      if (this.#asking) this.ui.root.querySelector<HTMLButtonElement>('[data-testid="resume-back"]')?.click();
+    });
   }
 
   /**
@@ -458,10 +466,38 @@ export class MenuScene extends UiScene<'menu'> {
     if (this.#leaving) return;
     const target = this.#continueTarget();
     if (target === null) return;
-    if (target !== 'bound') this.services.save.bind(target.data);
+    const data = target === 'bound' ? this.services.save.current : target.data;
+    if (data !== null) void this.#enterSave(data);
+  }
+
+  /**
+   * SPEC-059 §4.1.3: Continue and `load-slot-<n>` share one path. The save's
+   * resume target first; after a day away the "previously" card, whose Back
+   * ends it with nothing bound (59-p); then the bind, and the planet's pad —
+   * with the point cleared in memory, so a landing that fails to enter leaves
+   * the next Continue at the station (59-e) — or the station, as before.
+   */
+  async #enterSave(data: Save): Promise<void> {
+    if (this.#leaving || this.#asking) return;
+    const services = this.services;
+    const target = resumeTarget(data, services.settings.serviceMode);
+    if (awayMs(data, Date.now()) >= RESUME_WINDOW_MS) {
+      this.#asking = true;
+      const go = await openResumeCard(this.ui, previouslyCard(data, target));
+      this.#asking = false;
+      if (!go || this.#root === null || this.#leaving) return;
+    }
+    if (services.save.current !== data) services.save.bind(data);
     this.#leaving = true;
-    void this.services.go('station', {}).then((went) => {
-      if (!went) this.#leaving = false;
+    let went: Promise<boolean>;
+    if (target.scene === 'surface') {
+      data.progress.resume = null;
+      went = services.go('surface', { planet: target.planet, firstLanding: false, resumed: true });
+    } else {
+      went = services.go('station', {});
+    }
+    void went.then((entered) => {
+      if (!entered) this.#leaving = false;
     });
   }
 
@@ -548,14 +584,8 @@ export class MenuScene extends UiScene<'menu'> {
               {
                 class: 'ui-btn is-primary',
                 type: 'button',
-                click: () => {
-                  if (this.#leaving) return;
-                  save.bind(result.data);
-                  this.#leaving = true;
-                  void this.services.go('station', {}).then((went) => {
-                    if (!went) this.#leaving = false;
-                  });
-                },
+                // SPEC-059 §4.1.3: the same path as Continue.
+                click: () => void this.#enterSave(result.data),
               },
               'Load',
             ),

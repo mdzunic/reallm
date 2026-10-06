@@ -1775,10 +1775,13 @@ export interface SaveEvents {
   on?<K extends keyof GameEvents>(name: K, handler: (payload: GameEvents[K]) => void, owner?: object): () => void;
 }
 
-/** The two settings keys SPEC-007 owns; the store writes them through §4.7. */
+/**
+ * The two settings keys SPEC-007 owns; the store writes them through §4.7.
+ * SPEC-059 §4.1.7: and `lastSlot`, which `bind` writes.
+ */
 export interface SavePersistSettings {
   get(): { persistGranted: boolean | null; installHintShownAt: number | null };
-  set(patch: { persistGranted?: boolean | null; installHintShownAt?: number | null }): void;
+  set(patch: { persistGranted?: boolean | null; installHintShownAt?: number | null; lastSlot?: SlotId }): void;
 }
 
 /**
@@ -2065,10 +2068,16 @@ export class SaveStore {
     return data;
   }
 
-  /** The live save the game mutates; `request()`/`flush()` serialize it (§3). */
+  /**
+   * The live save the game mutates; `request()`/`flush()` serialize it (§3).
+   * SPEC-059 §4.1.7 (E-12): every load path comes through here — Continue,
+   * Load, New Game, an import and the next instance — so this is where
+   * `lastSlot` is written, and Continue enters the slot last loaded.
+   */
   bind(data: Save): void {
     this.#current = data;
     this.#pending = null;
+    this.#settings?.set({ lastSlot: data.meta.slot });
   }
 
   /** Removes the main key *and* the backup (§3, M1 acceptance) — and SPEC-058's archive (§4.3). */

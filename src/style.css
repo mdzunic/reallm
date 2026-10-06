@@ -1166,6 +1166,27 @@ html[data-play] .toast {
   from { opacity: 0; transform: translateY(16px); }
 }
 
+/* SPEC-059 §4.1.4: the "previously" card — the chapter, where the salvager
+   resumes, the missions in progress and the next step, on a sheet. */
+.resume-chapter {
+  margin: 0 0 6px;
+}
+
+.resume-where {
+  margin: 0 0 10px;
+  color: var(--ink-dim);
+}
+
+.resume-missions {
+  margin: 0 0 10px;
+  padding-left: 18px;
+}
+
+.resume-next {
+  margin: 0 0 14px;
+  color: var(--accent);
+}
+
 /* Every animated affordance goes static when the player asked for less motion
    (AC-66, AC-71, AC-88, AC-110). The gate is the `reduce-motion` class the
    composition root keeps on <html> from the setting — which defaults from

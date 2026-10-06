@@ -882,7 +882,7 @@ test('9b. on the menu the settings panel keeps the arrow keys; closed, focus is 
 
 // --------------------------------------------------------- 10: Save & Quit
 
-test('10. Save & Quit on Ferrum names the cost; Keep playing leaves the pause menu open', async ({ page }) => {
+test('10. Save & Quit on Ferrum says where it resumes; Keep playing leaves the pause menu open', async ({ page }) => {
   await start(page, URL);
   await prepare(page, {});
   await land(page, 'ferrum');
@@ -893,7 +893,8 @@ test('10. Save & Quit on Ferrum names the cost; Keep playing leaves the pause me
   await page.keyboard.press('Enter');
   const sheet = page.getByTestId('confirm-sheet');
   await expect(sheet).toContainText('Quit to the main menu?');
-  await expect(sheet).toContainText('You will resume at Command Relay. Flying back to Ferrum costs 100 oil, and timed objectives restart.');
+  // SPEC-059 §4.1.5: a quit on a planet resumes at its pad, with no jump.
+  await expect(sheet).toContainText('You will resume at the Ferrum landing pad');
   await expect(page.getByTestId('confirm-no')).toHaveText('Keep playing');
   await expect(page.getByTestId('confirm-yes')).toHaveText('Quit');
   expect(await focused(page)).toBe('confirm-no');

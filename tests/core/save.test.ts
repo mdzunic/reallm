@@ -1728,6 +1728,31 @@ describe('persistence hints (§4.7)', () => {
   });
 });
 
+// ------------------------------------------------------- SPEC-059 §4.1.7
+
+describe('bind writes lastSlot (SPEC-059 §4.1.7, E-12)', () => {
+  it('records each bound slot through the settings port, on every load path', () => {
+    const patches: object[] = [];
+    const settings = {
+      get: () => ({ persistGranted: null, installHintShownAt: null }),
+      set: (patch: object) => void patches.push(patch),
+    };
+    const saves = new SaveStore(recorder(), fakeStorage().storage, { window: null, settings });
+    saves.bind(newSave(2, CREATION, 1, 0));
+    expect(patches).toEqual([{ lastSlot: 2 }]);
+    // A New Game binds through `create`.
+    saves.create(1, CREATION);
+    expect(patches).toContainEqual({ lastSlot: 1 });
+    expect(saves.current?.meta.slot).toBe(1);
+  });
+
+  it('writes nothing without a settings port', () => {
+    const saves = new SaveStore(recorder(), fakeStorage().storage, { window: null });
+    expect(() => saves.bind(newSave(0, CREATION, 1, 0))).not.toThrow();
+    expect(saves.current?.meta.slot).toBe(0);
+  });
+});
+
 // --------------------------------------------------------------- the seam
 
 describe('createNullSave', () => {
