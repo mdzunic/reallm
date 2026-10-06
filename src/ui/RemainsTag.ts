@@ -5,6 +5,9 @@
 // nothing read back from the DOM, so a frame allocates nothing (SPEC-001 §7).
 // It never animates, so reduce motion leaves it as it is (57-h). Imports no
 // `three` (SPEC-001 §4).
+//
+// SPEC-058 §4.5: the predecessor's body wears the same tag style under its own
+// test id, `predecessor-tag` — two separate tags, as the two are two views (58-f).
 import { el, testId } from '@/ui/dom';
 
 export class RemainsTag {
@@ -12,8 +15,8 @@ export class RemainsTag {
   #text = '';
   #shown = false;
 
-  constructor(root: HTMLElement) {
-    this.#root = testId(el('div', 'remains-tag is-hidden'), 'remains-tag');
+  constructor(root: HTMLElement, id = 'remains-tag') {
+    this.#root = testId(el('div', 'remains-tag is-hidden'), id);
     this.#root.setAttribute('aria-hidden', 'true');
     root.append(this.#root);
   }

@@ -847,6 +847,8 @@ export class SurfaceView {
   readonly #scavBodies: ScavBody[] = [];
   /** SPEC-057 §4.6: the remains, built on the first `setRemains` that shows them. */
   #remains: RemainsView | null = null;
+  /** SPEC-058 §4.5: the predecessor's body — a view of its own, never the remains' (58-f). */
+  #predecessor: RemainsView | null = null;
   /** Whether the preset casts shadows — what a body placed mid-visit is built with. */
   #shadowsOn = false;
   readonly #biome: PlanetDef['biome'];
@@ -1595,6 +1597,7 @@ export class SurfaceView {
     this.#shadowsOn = size > 0;
     for (const body of this.#scavBodies) body.setShadows(size > 0);
     this.#remains?.setShadows(size > 0);
+    this.#predecessor?.setShadows(size > 0);
     this.#blobMaterial.opacity = size > 0 ? BLOB_OPACITY_WITH_MAP : BLOB_OPACITY_ALONE;
     // SPEC-030 AC-38 / SPEC-017 §4.5: casters on high only; receivers always.
     for (const mesh of this.#wallChunks) mesh.castShadow = size > 0;
@@ -2719,6 +2722,33 @@ export class SurfaceView {
     return this.#remains?.posedAt ?? -1;
   }
 
+  // ------------------------------------------------------- SPEC-058 §4.5
+
+  /**
+   * The predecessor's body — SPEC-057's body look in `lineage[0]`'s colours
+   * under a grey pillar — or `null` to hide it. A second `RemainsView`, so it
+   * never shares a model or a spot's state with the player's own remains;
+   * built on the first call that shows it, so a visit without one pays
+   * nothing. At most 3 draws and the body's 2,640 triangles plus the pillar.
+   */
+  setPredecessor(model: RemainsModel | null): void {
+    if (model === null && this.#predecessor === null) return;
+    if (this.#predecessor === null) {
+      this.#predecessor = new RemainsView(this.#envRoot, this.#assets, (x, z) => this.field.heightAt(x, z), this.#shadowsOn);
+      this.#predecessor.root.name = 'predecessor';
+    }
+    this.#predecessor.set(model);
+  }
+
+  /** SPEC-058 §4.5: the predecessor's draws and triangles while shown, 0 otherwise. */
+  get predecessorDraws(): number {
+    return this.#predecessor?.draws ?? 0;
+  }
+
+  get predecessorTris(): number {
+    return this.#predecessor?.triangles ?? 0;
+  }
+
   // ------------------------------------------------------- SPEC-046 §4.6
 
   /**
@@ -3180,6 +3210,8 @@ export class SurfaceView {
     for (const body of this.#scavBodies.splice(0)) body.dispose();
     this.#remains?.dispose();
     this.#remains = null;
+    this.#predecessor?.dispose();
+    this.#predecessor = null;
     this.#scene.remove(this.#root);
     disposeObject3D(this.#root);
     // The guidance meshes are built on demand, so `disposeObject3D` only reaches

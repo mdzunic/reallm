@@ -49,6 +49,11 @@ export interface RemainsModel {
   look: RemainsLook;
   primary: string;
   secondary: string;
+  /**
+   * The pillar's colour — the secondary when absent. SPEC-058 §4.5: the
+   * predecessor's body stands under a grey one (`#8f99a3`).
+   */
+  pillar?: string;
 }
 
 export class RemainsView {
@@ -66,6 +71,7 @@ export class RemainsView {
   #builtLook: RemainsLook | null = null;
   #builtPrimary = '';
   #builtSecondary = '';
+  #builtPillar = '';
   /** The `Death` clip's time the body was posed at; null for the pack or a body with no clip. */
   #posedAt: number | null = null;
 
@@ -84,7 +90,14 @@ export class RemainsView {
       this.root.visible = false;
       return;
     }
-    if (this.#object === null || model.look !== this.#builtLook || model.primary !== this.#builtPrimary || model.secondary !== this.#builtSecondary) {
+    const pillar = model.pillar ?? model.secondary;
+    if (
+      this.#object === null ||
+      model.look !== this.#builtLook ||
+      model.primary !== this.#builtPrimary ||
+      model.secondary !== this.#builtSecondary ||
+      pillar !== this.#builtPillar
+    ) {
       this.#build(model);
     }
     this.root.position.set(model.x, this.#heightAt(model.x, model.z), model.z);
@@ -151,10 +164,12 @@ export class RemainsView {
       if (mesh.isMesh === true) this.#objectMeshes.push(mesh);
     });
     this.setShadows(this.#shadows);
-    this.#buildPillar().material.color.set(model.secondary);
+    const pillar = model.pillar ?? model.secondary;
+    this.#buildPillar().material.color.set(pillar);
     this.#builtLook = model.look;
     this.#builtPrimary = model.primary;
     this.#builtSecondary = model.secondary;
+    this.#builtPillar = pillar;
   }
 
   /** §4.6: the pack — the boot set's crate merged to one geometry, resting on the ground. */

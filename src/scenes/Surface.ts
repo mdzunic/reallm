@@ -15,7 +15,7 @@ import { Pool } from '@/core/Pool';
 import { PressEdges } from '@/core/PressEdges';
 import { holdWakeLock } from '@/core/WakeLock';
 import { DEFAULT_LOOK, type Look } from '@/core/Quality';
-import { EXPLORE_CELL, newSave, type CharacterCreation, type Save } from '@/core/Save';
+import { EXPLORE_CELL, LINEAGE_CLAIM_PATTERN, lineageClaimId, newSave, type CharacterCreation, type LineageEntry, type Save } from '@/core/Save';
 import { ZONES_SHOWN_MAX, type GuidanceLevel } from '@/core/Settings';
 import type { GameServices } from '@/core/Services';
 import { fadeMs, type SceneParams } from '@/core/StateMachine';
@@ -88,6 +88,7 @@ import { resetTelegraph, TELEGRAPH_CAPACITY } from '@/entities/Telegraph';
 import { ARENA_RESPAWN_OUTSET, clampToSeal, type ArenaState } from '@/entities/World';
 import { ClueTracker, clueFound, FlagView, type ClueScene } from '@/systems/Clues';
 import { Combat, computePlayerStats, ELITE_SCALE, staminaFull, type CombatWorld, type HitMemory } from '@/systems/Combat';
+import { containment, containmentSteps } from '@/systems/Containment';
 import { DASH_DISTANCE, dashCooldown, isDashing, pressDash, stepDash } from '@/systems/Dash';
 import { Economy } from '@/systems/Economy';
 import { seconds, stage as stageText } from '@/systems/Format';
@@ -130,10 +131,13 @@ import { contractFor, Missions, type MissionContext, type ObjectiveProgress } fr
 import { CARGO_TOAST_SECONDS, Nodes, Pickups, SHIPPED_TOAST_TEXT } from '@/systems/Pickups';
 import { cumulativeXp, LEVEL_CAP, Progression, xpToNext } from '@/systems/Progression';
 import {
+  PREDECESSOR_SEARCH_RADIUS,
   REMAINS_RECOVER_RADIUS,
   REMAINS_RETRY_SECONDS,
   dropRemains,
   placeRemains,
+  predecessorStart,
+  predecessorTag,
   recoverRemains,
   remainsHeld,
   remainsLook,
@@ -164,6 +168,7 @@ import {
 import { Weather, WEATHER_EFFECTS, type WeatherEffects } from '@/systems/Weather';
 import { HOME_SESSION, restartLine } from '@/systems/Home';
 import { LINE_LEDGER, missionLinePlays, revealCamera, revealDue, revealKey, stayReport, type Ending } from '@/systems/StoryBeats';
+import { instanceNumber } from '@/systems/StoryContext';
 import {
   activeEffects,
   affixLine,
@@ -186,12 +191,15 @@ import {
   OCCLUDER_OPACITY,
   padEmptyText,
   pickupText,
+  predecessorCacheText,
   quitNote,
   remainsLostText,
   remainsOverlayLine,
   remainsRecoveredText,
   remainsTrackerText,
   rewardsText,
+  SEARCH_BODY_TEXT,
+  SEARCHED_TEXT,
   stageResetText,
   STAMINA_FULL_HIDE_SECONDS,
   STAMINA_FULL_TEXT,
@@ -419,6 +427,12 @@ const REMAINS_TAG_RANGE = 30;
 const REMAINS_TAG_LIFT = 1.4;
 /** SPEC-057 §4.7 (dev): `surface-goto-remains` stands the salvager this far from the remains, toward the pad. */
 const GOTO_REMAINS_DISTANCE = 1;
+/** SPEC-058 §4.5: the predecessor's body stands under a grey pillar — its map icon's grey. */
+const PREDECESSOR_PILLAR = '#8f99a3';
+/** SPEC-058 §3 (dev): `surface-goto-body` stands the salvager this far from the body, toward the pad. */
+const GOTO_BODY_DISTANCE = 1;
+/** SPEC-058 §4.5: what the map says the body is. */
+const PREDECESSOR_LABEL = "A salvager's body";
 /** SPEC-038 §4.11: the debug charger stands this far along the player's facing. */
 const CHARGER_DISTANCE = 8;
 /** SPEC-038 §4.1: the dash streaks' colour — the salvager's cool white. */
@@ -687,6 +701,12 @@ export class SurfaceScene extends UiScene<'surface'> {
   /** The tracker row's text, rebuilt only when the whole metre changes. */
   #remainsRowText: string | null = null;
   #remainsRowMetres = -1;
+  // SPEC-058 §4.5 — the predecessor's body: where it lies this visit (null:
+  // nowhere on this planet), the lineage entry it is, its claim id, and its
+  // own tag. Placed once at entry; the iteration and the lineage never change
+  // mid-visit.
+  #predecessor: { x: number; z: number; prior: LineageEntry; claim: string } | null = null;
+  #predecessorTag: RemainsTag | null = null;
   #dialogue: DialogueUI | null = null;
   /** SPEC-042 §4.1: the mission banner, the top centre's last row. */
   #banner: MissionBanner | null = null;
@@ -1236,7 +1256,8 @@ export class SurfaceScene extends UiScene<'surface'> {
     const layout = generateLayout(planet, services.rng.layout(planet.id));
     const visits = (save.progress.visits[planet.id] ?? 0) + 1;
     save.progress.visits[planet.id] = visits;
-    const visit = services.rng.visit(planet.id, visits);
+    // SPEC-058 §4.4: a later instance's visits run on streams of their own.
+    const visit = services.rng.visit(planet.id, visits, save.meta.iteration);
     this.#visitRng = visit;
     this.disposer.add(() => {
       this.#stress = null;
@@ -1314,6 +1335,8 @@ export class SurfaceScene extends UiScene<'surface'> {
     this.disposer.add(() => missions.dispose());
 
     const spawn = new SpawnDirector(planet, layout, world.enemies, services.renderer.quality, visit.fork('spawn'), bus, combat);
+    // SPEC-058 §4.4: the instance's containment adds to every ambient elite roll.
+    spawn.eliteBonus = containment(save.meta.iteration).eliteBonus;
     spawn.setObstacles(grid);
     spawn.setObjectiveEnemies(missions.objectiveEnemies());
     this.#spawn = spawn;
@@ -1326,7 +1349,11 @@ export class SurfaceScene extends UiScene<'surface'> {
     // SPEC-035 §4.7: the first landing on Cinder-4 ramps in — half the ambient
     // population, no rushers among them, and a weather cycle held in calm. It
     // ends with `c1_m1`, so it is observable and saved (35-e, 35-f).
-    this.#ramp = planet.id === RAMP_PLANET && !(save.progress.missionsDone as readonly string[]).includes(RAMP_MISSION);
+    // SPEC-058 §4.4: on a first run only — a next instance has done this before.
+    this.#ramp =
+      save.meta.iteration === 1 &&
+      planet.id === RAMP_PLANET &&
+      !(save.progress.missionsDone as readonly string[]).includes(RAMP_MISSION);
     this.#applyRamp();
     // SPEC-043 §4.3: the contracts this landing's replays run as.
     this.#applyContracts();
@@ -1392,6 +1419,8 @@ export class SurfaceScene extends UiScene<'surface'> {
     };
     this.#levels = { surface: surfaceLevel, underground: null };
     this.#level = surfaceLevel;
+    // SPEC-058 §4.5: where the predecessor's body lies, and its search circle.
+    this.#placePredecessor(save, planet.id, layout, grid, pad, interactables);
     this.disposer.add(() => {
       this.#levels = null;
       this.#level = null;
@@ -1477,6 +1506,8 @@ export class SurfaceScene extends UiScene<'surface'> {
       this.#puzzles = null;
     });
     this.#placePadBody(save, planet.id);
+    // SPEC-058 §4.5: the predecessor's body, in its own colours, under the grey pillar.
+    this.#syncPredecessor();
     // SPEC-045 §4.5: every hostile rim and non-elite telegraph reads one shared
     // uniform, set from the Colours preset now and on each change of it — the
     // next frame shows it, and no shader compiles (45-n).
@@ -1682,6 +1713,7 @@ export class SurfaceScene extends UiScene<'surface'> {
       missions: () => this.#mapMissions(),
       track: (id) => this.#trackMission(id),
       close: () => this.#closeMap(),
+      predecessor: this.#predecessor !== null,
     });
     this.#mapScreen = mapScreen;
     this.disposer.add(() => {
@@ -1714,6 +1746,17 @@ export class SurfaceScene extends UiScene<'surface'> {
       remainsTagView.dispose();
       this.#remainsTag = null;
     });
+    // SPEC-058 §4.5: the predecessor's own tag, in the same style (58-f).
+    const predecessor = this.#predecessor;
+    if (predecessor !== null) {
+      const tag = new RemainsTag(dmgLayer, 'predecessor-tag');
+      tag.setText(predecessorTag(predecessor.prior));
+      this.#predecessorTag = tag;
+      this.disposer.add(() => {
+        tag.dispose();
+        this.#predecessorTag = null;
+      });
+    }
     // SPEC-050 §4.6: the stamina ring beside the salvager's head, on both
     // schemes, in a layer of its own so it can fade.
     const staminaLayer = el('div', 'stamina-layer');
@@ -2233,6 +2276,8 @@ export class SurfaceScene extends UiScene<'surface'> {
       this.#renderElitePlates(world);
       // SPEC-057 §4.6: so does the remains' tag.
       this.#renderRemainsTag(world);
+      // SPEC-058 §4.5: and the predecessor's.
+      this.#renderPredecessorTag(world);
       // SPEC-050 §4.6: so does the stamina ring.
       this.#renderStamina(world);
       // SPEC-055 §4.5: a hinted plate or mirror pulses on the view clock.
@@ -2707,6 +2752,16 @@ export class SurfaceScene extends UiScene<'surface'> {
     info['remainsTris'] = this.#view?.remainsTris ?? 0;
     info['remainsPosedAt'] = Math.round((this.#view?.remainsPosedAt ?? -1) * 1000) / 1000;
     info['remainsTag'] = this.#remainsTag?.shown === true ? 1 : 0;
+    // SPEC-058 §3: the save's iteration, its containment steps, and where the
+    // predecessor's body lies (`-` with none) — what the view draws for it and
+    // whether its tag is up.
+    info['iteration'] = this.#save?.meta.iteration ?? 1;
+    info['containment'] = containmentSteps(this.#save?.meta.iteration ?? 1);
+    const predecessor = this.#predecessor;
+    info['predecessor'] = predecessor === null ? '-' : `${Math.round(predecessor.x * 10) / 10},${Math.round(predecessor.z * 10) / 10}`;
+    info['predecessorDraws'] = this.#view?.predecessorDraws ?? 0;
+    info['predecessorTris'] = this.#view?.predecessorTris ?? 0;
+    info['predecessorTag'] = this.#predecessorTag?.shown === true ? 1 : 0;
     const clueScene = this.#clueScene;
     let cluesFound = 0;
     if (clueScene !== null) for (const def of CLUES) if (clueFound(def, clueScene.flags)) cluesFound++;
@@ -3477,6 +3532,10 @@ export class SurfaceScene extends UiScene<'surface'> {
       case 'cache':
         this.#openCache(target, world);
         return;
+      // SPEC-058 §4.5: the predecessor's body pays its cache once.
+      case 'body':
+        this.#searchBody(world);
+        return;
       // SPEC-055 §4.4, §4.6: a terminal opens its panel, a panel reads, a mirror turns.
       case 'vault':
       case 'relic':
@@ -3840,12 +3899,22 @@ export class SurfaceScene extends UiScene<'surface'> {
     if (ending === 'stay') {
       await overlay.playStay(stayReport(save));
       if (!this.#alive) return;
+      // SPEC-058 §4.7: the Selection card stamps the next number with the
+      // player's own name, and only after it is the ending seen — a reload
+      // during it replays the film, the report and the card at the station.
+      await overlay.playSelectionCard({
+        number: instanceNumber(save.meta.iteration) + 1,
+        name: save.player.name,
+        portrait: save.player.appearance.portrait,
+      });
+      if (!this.#alive) return;
       save.progress.endingSeen = true;
       services.save.request('mission');
       this.#endEnding();
       return;
     }
-    await overlay.playEscape();
+    // SPEC-058 §4.7: the veil names this run's own instance.
+    await overlay.playEscape(save.meta.iteration);
     if (!this.#alive) return;
     save.progress.endingSeen = true;
     // The last write of the run, before the scene goes: `manual` skips the
@@ -4415,6 +4484,94 @@ export class SurfaceScene extends UiScene<'surface'> {
     tag.show(x, y);
   }
 
+  // ------------------------------------------- SPEC-058: the predecessor
+
+  /**
+   * §4.5 (58-d, 58-e): where `lineage[0]`'s body lies on this planet, on a
+   * landing of iteration ≥ 2 — its last death here (SPEC-057 already placed
+   * that at an arena's entrance or a descent), else on Cinder-4 6 m from the
+   * pad toward the spawn, else nowhere — pushed clear of the surface level's
+   * obstacles through SPEC-057's `placeRemains`, and its search circle. Only
+   * `lineage[0]`'s bodies appear, and none is an obstacle.
+   */
+  #placePredecessor(
+    save: Save,
+    planet: PlanetId,
+    layout: Layout,
+    grid: ObstacleGrid,
+    pad: LayoutPoi | null,
+    interactables: Interactable[],
+  ): void {
+    this.#predecessor = null;
+    const prior = save.meta.lineage[0];
+    if (save.meta.iteration < 2 || prior === undefined) return;
+    const start = { x: 0, z: 0 };
+    if (!predecessorStart(prior, planet, pad, layout.playerSpawn, start)) return;
+    const at = { x: 0, z: 0 };
+    placeRemains(start, { obstacles: grid, halfSize: layout.halfSize, arenaEntrance: null, descent: null }, at);
+    const claim = lineageClaimId(prior.iteration, planet);
+    this.#predecessor = { x: at.x, z: at.z, prior, claim };
+    interactables.push({ kind: 'body', id: claim, x: at.x, z: at.z, radius: PREDECESSOR_SEARCH_RADIUS });
+  }
+
+  /** §4.5: the body's view — SPEC-057's body look in `lineage[0]`'s colours, under the grey pillar. */
+  #syncPredecessor(): void {
+    const predecessor = this.#predecessor;
+    if (predecessor === null) {
+      this.#view?.setPredecessor(null);
+      return;
+    }
+    const { primary, secondary } = predecessor.prior.appearance;
+    this.#view?.setPredecessor({ x: predecessor.x, z: predecessor.z, look: 'body', primary, secondary, pillar: PREDECESSOR_PILLAR });
+  }
+
+  /**
+   * §4.5: `interact` at the body. The first press claims
+   * `lineage:<lineage[0].iteration>:<planet>`: `Economy.claimBody` pays
+   * `PREDECESSOR_CACHE` through `addItem` — what does not fit spills at the
+   * feet (E25) — and checkpoints, and the toast names what the predecessor
+   * carried. The run's first search, the one before any lineage claim was on
+   * the record, plays `ng_body`. Later presses pay nothing.
+   */
+  #searchBody(world: CombatWorld): void {
+    const economy = this.#economy;
+    const save = this.#save;
+    const predecessor = this.#predecessor;
+    if (economy === null || save === null || predecessor === null || !world.player.alive) return;
+    const first = !save.progress.claimed.some((id) => LINEAGE_CLAIM_PATTERN.test(id));
+    if (!economy.claimBody(predecessor.claim).ok) return;
+    this.services.events.emit('ui:toast', { kind: 'good', text: predecessorCacheText(predecessor.prior) });
+    if (first) void this.#playDialogue('ng_body');
+  }
+
+  /**
+   * §4.5: the body's tag, as the remains' (SPEC-057 §4.6) — on screen and
+   * within 30 m, on the surface level, hidden while a beat or the map owns
+   * the screen.
+   */
+  #renderPredecessorTag(world: CombatWorld): void {
+    const tag = this.#predecessorTag;
+    const predecessor = this.#predecessor;
+    if (tag === null || predecessor === null) return;
+    if (this.#level?.id !== 'surface' || this.#uiHolds > 0 || this.#holds > 0) {
+      tag.hide();
+      return;
+    }
+    const p = world.player;
+    if (Math.hypot(predecessor.x - p.x, predecessor.z - p.z) > REMAINS_TAG_RANGE) {
+      tag.hide();
+      return;
+    }
+    const behind = this.#projectGuide(predecessor.x, predecessor.z, REMAINS_TAG_LIFT);
+    const x = this.#screenPoint.x;
+    const y = this.#screenPoint.y;
+    if (behind || x < 0 || y < 0 || x > this.services.renderer.width || y > this.services.renderer.height) {
+      tag.hide();
+      return;
+    }
+    tag.show(x, y);
+  }
+
   /** §4.5: `Recover your pack — <d> m`, rebuilt only when the whole metre moves; `null` with no remains here. */
   #remainsRow(world: CombatWorld): string | null {
     const remains = this.#save?.progress.remains ?? null;
@@ -4939,7 +5096,9 @@ export class SurfaceScene extends UiScene<'surface'> {
     // SPEC-057 §4.7: 1 m from the remains, toward the pad — on the surface
     // level, where they lie — so the next step recovers them.
     const toRemains = button('surface-goto-remains', 'To remains', () => this.#debugGotoRemains());
-    above.push(toDescent, descend, toRemains);
+    // SPEC-058 §3: 1 m from the predecessor's body, toward the pad — inside its search circle.
+    const toBody = button('surface-goto-body', 'To body', () => this.#debugGotoBody());
+    above.push(toDescent, descend, toRemains, toBody);
     below.push(ascend, toVault, toCorridor);
     this.#syncDebugStrip();
     button('surface-goto-origin', 'To origin', () => {
@@ -5086,6 +5245,19 @@ export class SurfaceScene extends UiScene<'surface'> {
    * the surface level of their planet — inside the recover radius, so the next
    * step takes them back. Nothing happens with none here, or below.
    */
+  /** SPEC-058 §3 (dev): `GOTO_BODY_DISTANCE` from the predecessor's body, toward the pad. */
+  #debugGotoBody(): void {
+    const predecessor = this.#predecessor;
+    const pad = this.#levels?.surface.pad ?? null;
+    if (predecessor === null || this.#level?.id !== 'surface') return;
+    const dx = pad === null ? 1 : pad.x - predecessor.x;
+    const dz = pad === null ? 0 : pad.z - predecessor.z;
+    const length = Math.hypot(dx, dz);
+    const ux = length > 1e-6 ? dx / length : 1;
+    const uz = length > 1e-6 ? dz / length : 0;
+    this.#teleport(predecessor.x + ux * GOTO_BODY_DISTANCE, predecessor.z + uz * GOTO_BODY_DISTANCE);
+  }
+
   #debugGotoRemains(): void {
     const remains = this.#save?.progress.remains ?? null;
     const pad = this.#levels?.surface.pad ?? null;
@@ -6104,6 +6276,13 @@ export class SurfaceScene extends UiScene<'surface'> {
         out.action = open;
         return out;
       }
+      // SPEC-058 §4.5: `E Search the body`, then `Searched` — words only, nothing left to take.
+      case 'body': {
+        const searched = save.progress.claimed.includes(target.id);
+        out.text = searched ? SEARCHED_TEXT : SEARCH_BODY_TEXT;
+        out.action = !searched;
+        return out;
+      }
       // SPEC-055 §4.4, §4.6, §4.8: `Use terminal` or `Unlocked`, `Read the panel`, `Turn the mirror`.
       case 'vault':
       case 'relic':
@@ -6918,6 +7097,9 @@ export class SurfaceScene extends UiScene<'surface'> {
     // objective, so no ring, no rim arrow and no waypoint.
     const remains = save.progress.remains;
     if (this.#remainsHere && remains !== null) this.#markAt(remains.x, remains.z, 'remains', 'Your remains').label = null;
+    // SPEC-058 §4.5: the predecessor's body, on the surface level — a mark, not an objective.
+    const predecessor = this.#predecessor;
+    if (level.id === 'surface' && predecessor !== null) this.#markAt(predecessor.x, predecessor.z, 'predecessor', PREDECESSOR_LABEL).label = null;
     // SPEC-055 §4.1: the relic terminal, once landmark instance 0 is discovered (hollow once spent).
     const relic = this.#puzzles?.relicMark() ?? null;
     if (relic !== null && this.#relicMarked(level)) this.#markAt(relic.x, relic.z, 'relic', 'Relic terminal').hollow = relic.spent;
