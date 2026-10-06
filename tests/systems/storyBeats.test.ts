@@ -12,6 +12,9 @@
 // §4.7 graded the run, a seventh on a later instance — and the aftermath a
 // station entry owes after the ending (SPEC-058 §4.7).
 //
+// SPEC-063 §6.1 adds the flight contacts: the session key, the one contact
+// planet per flight enemy, and the film the departure to it plays second.
+//
 // SPEC-034 §4.10 adds the line ledger. The surface, the flight and the station
 // each kept a partial memory of which mission lines had played, so the station's
 // debrief repeated what the surface had said a minute earlier and, after a
@@ -25,6 +28,10 @@ import {
   captionAt,
   cardDue,
   chooseFilmMode,
+  CONTACT,
+  contactDue,
+  contactFilm,
+  contactKey,
   cuesBetween,
   departureDue,
   endingPending,
@@ -228,6 +235,52 @@ describe('departureDue and cardDue (SPEC-023 §3)', () => {
 
   it('only the named planet’s visit count counts', () => {
     expect(departureDue('vetra', { cinder4: 3 }, none)).toBe(true);
+  });
+});
+
+// ---------------------------------------------- SPEC-063 §6.1: flight contacts
+
+describe('contactKey, contactDue and contactFilm (SPEC-063 §3, §6.1)', () => {
+  const none = new Set<string>();
+
+  it('pins the card’s life (initial tuning)', () => {
+    expect(CONTACT).toEqual({ show: 3.5, fade: 0.4 });
+  });
+
+  it('keys a contact by its enemy', () => {
+    expect(contactKey('scav_fighter')).toBe('contact:scav_fighter');
+    expect(contactKey('hive_interceptor')).toBe('contact:hive_interceptor');
+  });
+
+  it('the scav fighter is due on the first trip to Vetra, and only then', () => {
+    expect(contactDue('scav_fighter', 'vetra', {}, none)).toBe(true);
+    expect(contactDue('scav_fighter', 'vetra', { vetra: 0 }, none)).toBe(true);
+    // a later trip (E110)
+    expect(contactDue('scav_fighter', 'vetra', { vetra: 1 }, none)).toBe(false);
+    // a later group of the same trip, or a second departure this session (63-c, E110)
+    expect(contactDue('scav_fighter', 'vetra', {}, new Set(['contact:scav_fighter']))).toBe(false);
+    // the other planets whose waves carry fighters, and one whose do not (E112)
+    for (const planet of ['thessaly', 'ferrum', 'hive'] as const) expect(contactDue('scav_fighter', planet, {}, none), planet).toBe(false);
+  });
+
+  it('the interceptor is due on the first trip to the Hive, not Eden', () => {
+    expect(contactDue('hive_interceptor', 'hive', {}, none)).toBe(true);
+    expect(contactDue('hive_interceptor', 'eden', {}, none)).toBe(false);
+    expect(contactDue('hive_interceptor', 'hive', { hive: 2 }, none)).toBe(false);
+  });
+
+  it('only the named planet’s visits and the named enemy’s key count', () => {
+    expect(contactDue('scav_fighter', 'vetra', { cinder4: 3, hive: 1 }, none)).toBe(true);
+    expect(contactDue('scav_fighter', 'vetra', {}, new Set(['contact:hive_interceptor', 'departure:vetra', 'card:vetra']))).toBe(true);
+  });
+
+  it('a surface enemy has no contact', () => {
+    expect(contactDue('dust_skitter', 'cinder4', {}, none)).toBe(false);
+  });
+
+  it('Vetra’s departure plays wreckers second, and no other planet plays a second film', () => {
+    expect(contactFilm('vetra')).toBe('wreckers');
+    for (const planet of ['cinder4', 'thessaly', 'ferrum', 'hive', 'eden'] as const) expect(contactFilm(planet), planet).toBeNull();
   });
 });
 

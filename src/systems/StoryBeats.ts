@@ -4,9 +4,19 @@
 // test can pin — which of the three modes a film plays in, which shot and
 // caption a clock time lands on, which cues a frame crossed, how much of a
 // caption has typed, whether a skip input is accepted yet, and which beat is
-// due at a departure, a landing, a station entry or an arena entry. No `three`,
-// no DOM (SPEC-001 §4).
-import { BOSS_REVEALS, INTERLUDES, type CaptionDef, type CueDef, type FilmDef, type FilmId, type ShotPan } from '@/data/films';
+// due at a departure, a landing, a station entry, an arena entry or a flight
+// enemy's first group (SPEC-063). No `three`, no DOM (SPEC-001 §4).
+import {
+  BOSS_REVEALS,
+  CONTACTS,
+  INTERLUDES,
+  type CaptionDef,
+  type ContactDef,
+  type CueDef,
+  type FilmDef,
+  type FilmId,
+  type ShotPan,
+} from '@/data/films';
 import type { DialogueId, EnemyId, FlagId, PlanetId } from '@/data/index';
 import { commandRating, offTaskCount, ratingGrade } from '@/systems/Clues';
 import { instanceNumber } from '@/systems/StoryContext';
@@ -235,6 +245,45 @@ export function revealCamera(t: number, reduceMotion: boolean): RevealPose {
   if (phase === 'in') return { phase, k: smoothstep(0, 1, t / REVEAL.panIn) };
   if (phase === 'hold') return { phase, k: 1 };
   return { phase, k: 1 - smoothstep(0, 1, (t - REVEAL_HOLD_END) / REVEAL.panOut) };
+}
+
+// ------------------------------------------------- SPEC-063: flight contacts
+
+/** §3: the contact card's life, in seconds — it fades in and out over `fade`. *Initial tuning.* */
+export const CONTACT = { show: 3.5, fade: 0.4 } as const;
+
+/** §3: the session key — a contact plays once a page session, like a departure or a card. */
+export function contactKey(enemy: EnemyId): string {
+  return `contact:${enemy}`;
+}
+
+/** The contact of `enemy`, or undefined for an enemy without one (every surface enemy). */
+function contactOf(enemy: EnemyId): ContactDef | undefined {
+  return Object.hasOwn(CONTACTS, enemy) ? CONTACTS[enemy as keyof typeof CONTACTS] : undefined;
+}
+
+/**
+ * §4.5: true when `enemy` has a contact, `planet` is its contact planet, the
+ * planet has never been landed on, and the session lacks `contactKey(enemy)`
+ * — so a later group of the same trip (63-c), a later trip (E110) and a later
+ * planet (E112) stay quiet.
+ */
+export function contactDue(
+  enemy: EnemyId,
+  planet: PlanetId,
+  visits: Partial<Record<PlanetId, number>>,
+  session: ReadonlySet<string>,
+): boolean {
+  const contact = contactOf(enemy);
+  return contact !== undefined && contact.planet === planet && (visits[planet] ?? 0) === 0 && !session.has(contactKey(enemy));
+}
+
+/** §4.4: the film of the contact whose planet is `planet`, or null — `wreckers` for Vetra. */
+export function contactFilm(planet: PlanetId): FilmId | null {
+  for (const contact of Object.values(CONTACTS) as readonly ContactDef[]) {
+    if (contact.planet === planet && contact.film !== undefined) return contact.film;
+  }
+  return null;
 }
 
 // ------------------------------------------------------ SPEC-024: the endings
