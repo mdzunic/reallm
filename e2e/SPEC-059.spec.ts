@@ -255,7 +255,15 @@ test('3. the station clears the point, and the next Continue enters the station'
 
   expect(await page.evaluate(() => window.__reallm.go('station', {}))).toBe(true);
   await settle(page, 'station');
-  await expect.poll(async () => (await stored(page))?.progress.resume ?? 'unset', { timeout: 10_000 }).toBeNull();
+  await expect
+    .poll(
+      async () => {
+        const save = await stored(page);
+        return save === null ? 'no stored save' : save.progress.resume;
+      },
+      { timeout: 10_000 },
+    )
+    .toBeNull();
 
   await start(page, URL);
   await page.getByTestId('go-station').click();
