@@ -261,10 +261,11 @@ test.describe('SPEC-054 the underground', () => {
     await land(page, 'eden', { done: ['c1_m1'], appearance: swatches });
     // The channel is a real voice only once the gate's gesture has unlocked audio.
     await page.waitForFunction(() => window.__reallm.audio().unlocked === true, undefined, SLOW);
-    expect(await info(page)).toMatchObject({ weatherLoop: '-', weatherLoopVolume: 0 });
+    expect(await info(page)).toMatchObject({ weatherLoop: '-', weatherLoopVolume: 0, weatherLoopPlaying: 0 });
     await descend(page);
     await untilInfo(page, 'weatherLoop', 'film_hum');
     await untilInfo(page, 'weatherLoopVolume', 0.5);
+    await untilInfo(page, 'weatherLoopPlaying', 1);
 
     await tap(page, 'surface-goto-vault');
     await frames(page, 30);
@@ -278,13 +279,25 @@ test.describe('SPEC-054 the underground', () => {
       caveEnemies: 0,
       weatherLoop: 'film_hum',
       weatherLoopVolume: 0.5,
+      weatherLoopPlaying: 1,
     });
     expect(Number(vault['caveTrays'])).toBeGreaterThan(0);
-    await test.info().attach('eden-vault', { body: await page.screenshot(), contentType: 'image/png' });
+    // The row as drawn, and the tray down the corridor into it, kept beside
+    // the run's results for whoever reads them.
+    const shoot = async (name: string): Promise<void> => {
+      const path = test.info().outputPath(`${name}.png`);
+      await page.screenshot({ path });
+      await test.info().attach(name, { path, contentType: 'image/png' });
+    };
+    await shoot('eden-vault');
+    await tap(page, 'surface-goto-corridor');
+    await frames(page, 30);
+    expect((await info(page))['caveRoom']).toBe(-1);
+    await shoot('eden-corridor');
 
     await tap(page, 'surface-ascend');
     await untilInfo(page, 'level', 'surface');
     await untilInfo(page, 'held', 0);
-    expect(await info(page)).toMatchObject({ weatherLoop: '-', weatherLoopVolume: 0, caveRoom: -1 });
+    expect(await info(page)).toMatchObject({ weatherLoop: '-', weatherLoopVolume: 0, weatherLoopPlaying: 0, caveRoom: -1 });
   });
 });

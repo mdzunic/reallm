@@ -2650,9 +2650,11 @@ export class SurfaceScene extends UiScene<'surface'> {
     }
     info['caveRoom'] = room;
     info['vaultRoom'] = cave?.vault.room ?? -1;
-    // §4.12: the weather-loop channel — what it plays (`-` silent) and how loud.
+    // §4.12: the weather-loop channel — what it plays (`-` silent), how loud,
+    // and whether its voice is sounding yet (its bank may still be decoding).
     info['weatherLoop'] = this.#stormVoice === null ? '-' : this.#stormSound;
     info['weatherLoopVolume'] = Math.round(this.#stormLoopVolume * 100) / 100;
+    info['weatherLoopPlaying'] = this.#stormVoice?.playing === true ? 1 : 0;
   }
 
   /**
@@ -4431,8 +4433,10 @@ export class SurfaceScene extends UiScene<'surface'> {
     });
     button('surface-goto-cache', 'To cache', () => this.#debugGotoCache());
     // §4.12: the vault room lies at the end of the tree, a long walk through
-    // the dark — on Eden, in front of the cradle row.
+    // the dark — on Eden, in front of the cradle row; and halfway down the
+    // corridor into it, where Eden's cable tray runs.
     button('surface-goto-vault', 'To vault', () => this.#debugGotoVault());
+    button('surface-goto-corridor', 'To corridor', () => this.#debugGotoCorridor());
     button('surface-goto-origin', 'To origin', () => {
       const world = this.#world;
       if (world === null || !world.player.alive) return;
@@ -4646,6 +4650,34 @@ export class SurfaceScene extends UiScene<'surface'> {
     p.x = this.#resolved.x;
     p.z = this.#resolved.z;
     p.facing = Math.atan2(targetZ - p.z, targetX - p.x);
+  }
+
+  /**
+   * §4.12 (dev): below, halfway along the vault's one corridor — rim to rim,
+   * the stretch Eden's cable tray covers — facing the vault door.
+   */
+  #debugGotoCorridor(): void {
+    const world = this.#world;
+    const cave = this.#cave;
+    if (world === null || cave === null || this.#level?.id !== 'underground' || !world.player.alive) return;
+    const index = cave.vault.room;
+    const corridor = cave.corridors.find((c) => c.a === index || c.b === index);
+    const vault = cave.rooms[index];
+    const other = corridor === undefined ? undefined : cave.rooms[corridor.a === index ? corridor.b : corridor.a];
+    if (vault === undefined || other === undefined) return;
+    const span = Math.hypot(other.x - vault.x, other.z - vault.z);
+    if (span <= 1e-6) return;
+    const along = (vault.r + span - other.r) / 2;
+    const p = world.player;
+    world.obstacles.resolveCircle(
+      vault.x + ((other.x - vault.x) / span) * along,
+      vault.z + ((other.z - vault.z) / span) * along,
+      p.radius,
+      this.#resolved,
+    );
+    p.x = this.#resolved.x;
+    p.z = this.#resolved.z;
+    p.facing = Math.atan2(cave.vault.doorZ - p.z, cave.vault.doorX - p.x);
   }
 
   /** SPEC-029 §4.13: 5 skitters in a 1.5 m ring at the aim point or 7 m ahead. */
