@@ -692,6 +692,9 @@ export class SurfaceScene extends UiScene<'surface'> {
    * could open on the level just left for up to 200 ms.
    */
   #swapUndrawn = false;
+  /** §4.14 (dev): the debug strip's shortcuts for the surface only, and for below only. */
+  readonly #debugAbove: HTMLElement[] = [];
+  readonly #debugBelow: HTMLElement[] = [];
   /** §4.7: descents this visit — the `underground:<n>` fork the packs draw from. */
   #descents = 0;
   /** §4.5: the flashlight's state for the visit — on at its first descent. */
@@ -4254,8 +4257,21 @@ export class SurfaceScene extends UiScene<'surface'> {
       this.#syncMissionStages();
     }
     this.#swapUndrawn = true;
+    this.#syncDebugStrip();
     this.services.events.emit('level:changed', { planet: this.#planet.id, level: to });
     return left;
+  }
+
+  /**
+   * §4.14 (dev): the strip shows the active level's own shortcuts — the
+   * descent's above; the ascent, the vault and its corridor below — and hides
+   * the other level's, which would do nothing there. The surface's strip is
+   * the row it was, which the other suites' pointer clicks expect on screen.
+   */
+  #syncDebugStrip(): void {
+    const below = this.#level?.id === 'underground';
+    for (const element of this.#debugAbove) element.hidden = below;
+    for (const element of this.#debugBelow) element.hidden = !below;
   }
 
   /**
@@ -4345,7 +4361,7 @@ export class SurfaceScene extends UiScene<'surface'> {
   /** `?debug` only: shortcuts so the acceptance run fits a QA session. */
   #buildDebugStrip(): void {
     const strip = el('div', 'hud-debug');
-    const button = (id: string, label: string, click: () => void): void => {
+    const button = (id: string, label: string, click: () => void): HTMLElement => {
       // SPEC-023 §4.4: a held beat freezes the world, and these shortcuts are
       // shortcuts *through* it — a hurt or a smite during a reveal would touch
       // what the hold exists to protect (AC: no damage during a held beat).
@@ -4353,7 +4369,9 @@ export class SurfaceScene extends UiScene<'surface'> {
         if (this.#holds > 0) return;
         click();
       };
-      strip.append(testId(h('button', { class: 'hud-button', type: 'button', click: guarded }, label), id));
+      const element = testId(h('button', { class: 'hud-button', type: 'button', click: guarded }, label), id);
+      strip.append(element);
+      return element;
     };
     button('surface-hurt', 'Hurt me', () => this.#combat?.damagePlayer(60, { kind: 'fall' }));
     // SPEC-035 §4.6: a hit from off screen, which is the only kind that draws an
@@ -4431,21 +4449,26 @@ export class SurfaceScene extends UiScene<'surface'> {
     button('surface-goto-cave', 'To cave', () => this.#debugGotoShelter('cave'));
     // SPEC-054 §4.14: the underground's shortcuts — beside the descent, down at
     // once (the gate still refuses, but for the seal), up at once, beside the
-    // nearest unclaimed cache, and the level's (0, 0).
-    button('surface-goto-descent', 'To descent', () => {
+    // nearest unclaimed cache, and the level's (0, 0). Those that mean
+    // something on one level only show on it, so the strip keeps one row.
+    const above = this.#debugAbove;
+    const below = this.#debugBelow;
+    above.length = 0;
+    below.length = 0;
+    const toDescent = button('surface-goto-descent', 'To descent', () => {
       const world = this.#world;
       const descent = this.#descent;
       if (world === null || descent === null || this.#level?.id !== 'surface' || !world.player.alive) return;
       world.player.x = descent.x;
       world.player.z = descent.z;
     });
-    button('surface-descend', 'Descend', () => {
+    const descend = button('surface-descend', 'Descend', () => {
       const world = this.#world;
       if (world === null || !world.player.alive || this.#holdReason() !== null || this.#level?.id !== 'surface') return;
       if (this.#descentRefusal(true) !== null) return;
       void this.#swapLevel('underground');
     });
-    button('surface-ascend', 'Ascend', () => {
+    const ascend = button('surface-ascend', 'Ascend', () => {
       const world = this.#world;
       if (world === null || !world.player.alive || this.#holdReason() !== null) return;
       void this.#swapLevel('surface');
@@ -4454,8 +4477,11 @@ export class SurfaceScene extends UiScene<'surface'> {
     // §4.12: the vault room lies at the end of the tree, a long walk through
     // the dark — on Eden, in front of the cradle row; and halfway down the
     // corridor into it, where Eden's cable tray runs.
-    button('surface-goto-vault', 'To vault', () => this.#debugGotoVault());
-    button('surface-goto-corridor', 'To corridor', () => this.#debugGotoCorridor());
+    const toVault = button('surface-goto-vault', 'To vault', () => this.#debugGotoVault());
+    const toCorridor = button('surface-goto-corridor', 'To corridor', () => this.#debugGotoCorridor());
+    above.push(toDescent, descend);
+    below.push(ascend, toVault, toCorridor);
+    this.#syncDebugStrip();
     button('surface-goto-origin', 'To origin', () => {
       const world = this.#world;
       if (world === null || !world.player.alive) return;
