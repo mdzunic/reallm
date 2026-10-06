@@ -158,8 +158,8 @@ export function pickupSound(resource: ResourceId): SoundId {
  * SPEC-038 §4.10 the dash and the windup cue, SPEC-041 §4.10 a boss move
  * landing and a flight hit, SPEC-042 §4.2 an item picked up, SPEC-050 §4.8 an
  * exhaustion, SPEC-054 §4.13 the flashlight's click and a cache opening,
- * SPEC-055 §4.9 a puzzle move and a puzzle solved — 31 in all) that make a
- * sound.
+ * SPEC-055 §4.9 a puzzle move and a puzzle solved, SPEC-057 §4.8 a recovery
+ * — 32 in all) that make a sound.
  */
 export type ReactedEvent =
   | 'combat:blast'
@@ -199,7 +199,9 @@ export type ReactedEvent =
   | 'cache:opened'
   // SPEC-055 §4.9: a move on a puzzle board, and a site solved.
   | 'puzzle:moved'
-  | 'puzzle:solved';
+  | 'puzzle:solved'
+  // SPEC-057 §4.8: remains taken back.
+  | 'remains:recovered';
 
 /**
  * The 38 events of §5.4 that deliberately make none (and those later specs
@@ -267,6 +269,10 @@ const SILENT_EVENTS = [
   'app:install-hint',
   // SPEC-054 §4.2, §4.9: a level swap carries no sound of its own.
   'level:changed',
+  // SPEC-057 §4.8: a death's own sting covers the drop and the forfeit; the
+  // forfeit's toast blips beside it.
+  'remains:created',
+  'remains:lost',
 ] as const satisfies readonly (keyof GameEvents)[];
 
 export type SilentEvent = (typeof SILENT_EVENTS)[number];
@@ -377,6 +383,8 @@ export const AUDIO_REACTIONS: { [K in ReactedEvent]: Reaction<K> } = {
   'puzzle:moved': (p) => ({ id: p.ok ? 'ui_blip' : 'ui_warn', opts: { minIntervalMs: 50 } }),
   /** SPEC-055 §4.9: the lock giving way — loud enough to hold a voice (priority 2). */
   'puzzle:solved': () => ({ id: 'puzzle_solved', opts: { priority: 2 } }),
+  /** SPEC-057 §4.8: the existing generic chime — no new sprite (62 stay 62). */
+  'remains:recovered': () => ({ id: 'pickup_generic', opts: { minIntervalMs: 80 } }),
 };
 
 /** The runtime key list, for the subscription loop and the exhaustiveness test. */

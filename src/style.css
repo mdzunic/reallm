@@ -2717,6 +2717,18 @@ html.reduce-motion .dialogue-dim {
   color: var(--warn);
 }
 
+/* SPEC-057 §4.7: where the loss went — a promise, so it reads as ink, not warn. */
+.death-remains {
+  margin: 0;
+  max-width: min(520px, 90vw);
+  color: var(--ink);
+  text-align: center;
+}
+
+.death-remains:empty {
+  display: none;
+}
+
 .death-respawn {
   margin: 0;
   color: var(--ink-dim);
@@ -4754,6 +4766,18 @@ html.reduce-motion .reveal-name.is-glitched {
 .tracker-check {
   color: var(--good);
   min-width: 0.9em;
+}
+
+/* SPEC-057 §4.5: the remains row under the objectives — the pack's or the
+   body's colour, so it reads as the player's own thing, not a mission's. */
+.tracker-remains {
+  margin: 4px 0 0;
+  line-height: 1.35;
+  color: #f2efe6;
+}
+
+.tracker-remains.is-hidden {
+  display: none;
 }
 
 /* SPEC-034 §4.9: the defended POI's health under its tracker row — the number

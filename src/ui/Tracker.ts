@@ -12,6 +12,10 @@
 //
 // SPEC-045 §4.6: the bearing is a drawn arrow, not `▲`, which means a warning —
 // an empty span that CSS cuts into an arrowhead and `transform` turns.
+//
+// SPEC-057 §4.5: under the objectives, one more row says how far the remains
+// lie (`tracker-remains`). It is not an objective: it never takes the focus,
+// the distance chip or the bump.
 import { GLYPHS } from '@/data/glossary';
 import { percent } from '@/systems/Format';
 import { distanceText } from '@/systems/Guidance';
@@ -46,6 +50,9 @@ export class Tracker {
   readonly #head: HTMLSpanElement;
   readonly #rows: Row[] = [];
   readonly #list: HTMLDivElement;
+  /** SPEC-057 §4.5: the remains row, and what it says now (compared, never read back). */
+  readonly #remains: HTMLParagraphElement;
+  #remainsText: string | null = null;
   /** Live only beside the focus row, and only while there is a target (AC-20). */
   readonly #distance = el('span', 'tracker-dist');
   /** SPEC-045 §4.6: empty and hidden from screen readers; the distance says the rest. */
@@ -76,7 +83,8 @@ export class Tracker {
     const head = el('p', 'tracker-head');
     head.append(this.#head, cap);
     this.#list = el('div', 'tracker-rows');
-    this.#root.append(head, this.#list);
+    this.#remains = testId(el('p', 'tracker-remains is-hidden'), 'tracker-remains');
+    this.#root.append(head, this.#list, this.#remains);
     // §4.2: a tap anywhere on the panel cycles the tracked mission, exactly as
     // `KeyT` does. `pointerdown` rather than `click`, so a thumb that slides
     // off still counts — and so it never waits on the 300 ms click resolution.
@@ -139,6 +147,12 @@ export class Tracker {
         this.#arrow.style.transform = `rotate(${model.bearing}rad)`;
       }
       if (this.#distance.parentElement !== focus.root) focus.root.append(this.#distance, this.#arrow);
+    }
+
+    if (model.remains !== this.#remainsText) {
+      this.#remainsText = model.remains;
+      this.#remains.textContent = model.remains ?? '';
+      this.#remains.classList.toggle('is-hidden', model.remains === null);
     }
 
     if (model.pulse !== this.#pulse) {

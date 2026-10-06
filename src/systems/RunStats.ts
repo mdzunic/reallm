@@ -6,14 +6,15 @@
 // Only the surface and the flight scenes subscribe, so the station, the menu
 // and the SPEC-016 harness leave every count at zero. Nothing else writes the
 // counts: a Recall to pad, an `enemy:dismissed` and a mission's completion are
-// not on the bus slice below at all, and `recoveries` is SPEC-057's.
+// not on the bus slice below at all. `recoveries` is SPEC-057's: the scene
+// emits `remains:recovered` only for a recovery that took a unit (§4.4).
 import type { GameEvents } from '@/core/Events';
 import { STAT_CEILING, type RunStats, type Save } from '@/core/Save';
 import type { PlanetId } from '@/data/index';
 
 /** The slice of the event bus `watchRunStats` needs (a structural port, SPEC-004 D-7). */
 export interface RunStatsBus {
-  on<K extends 'enemy:killed' | 'boss:defeated' | 'player:died'>(
+  on<K extends 'enemy:killed' | 'boss:defeated' | 'player:died' | 'remains:recovered'>(
     name: K,
     handler: (payload: GameEvents[K]) => void,
     owner: object,
@@ -38,6 +39,11 @@ export function recordKill(stats: RunStats, elite: boolean): void {
 
 export function recordBoss(stats: RunStats): void {
   stats.bosses = bump(stats.bosses);
+}
+
+/** SPEC-057 §4.4: `recoveries + 1`, once per recovery that took at least one unit. */
+export function recordRecovery(stats: RunStats): void {
+  stats.recoveries = bump(stats.recoveries);
 }
 
 /**
@@ -67,6 +73,7 @@ export function watchRunStats(
   const releases = [
     bus.on('enemy:killed', ({ elite }) => recordKill(save.meta.stats, elite), owner),
     bus.on('boss:defeated', () => recordBoss(save.meta.stats), owner),
+    bus.on('remains:recovered', () => recordRecovery(save.meta.stats), owner),
     bus.on(
       'player:died',
       () => {

@@ -135,8 +135,8 @@ describe('mapAngle (§4.1)', () => {
 
 describe('MAP_ICONS (§4.2)', () => {
   it('gives every kind a shape, a colour and a legend label', () => {
-    // SPEC-054 §4.10: +4 — descent, cache, vault, relic.
-    expect(MAP_ICON_KINDS.length).toBe(24);
+    // SPEC-054 §4.10: +4 — descent, cache, vault, relic. SPEC-057 §4.5: +1 — remains.
+    expect(MAP_ICON_KINDS.length).toBe(25);
     for (const kind of MAP_ICON_KINDS) {
       const icon = MAP_ICONS[kind];
       expect(icon.shape, kind).toBeTruthy();
@@ -203,14 +203,25 @@ describe('the underground icons (SPEC-054 §4.10)', () => {
     expect(MAP_ICONS.relic).toMatchObject({ shape: 'tablet', color: '#7ee0c3' });
   });
 
-  it('is the only four kinds MAP_ICON_KINDS gained', () => {
+  it('is the only four kinds MAP_ICON_KINDS gained (and SPEC-057 the remains after them)', () => {
     const before = new Set<string>([
       'landing_pad', 'scan', 'reach', 'deliver', 'arena', 'defend', 'escort_start', 'landmark',
       'node_oil', 'node_wheat', 'node_water', 'node_lithium', 'enemy', 'elite', 'boss', 'objective',
       'player', 'target', 'shelter_cave', 'shelter_wreck',
     ]);
     const added = MAP_ICON_KINDS.filter((kind) => !before.has(kind));
-    expect(added.sort()).toEqual(['cache', 'descent', 'relic', 'vault']);
+    expect(added).toEqual(['descent', 'cache', 'vault', 'relic', 'remains']);
+  });
+});
+
+describe('the remains icon (SPEC-057 §4.5)', () => {
+  it('is a 10 px bag in #f2efe6, listed as Your remains', () => {
+    expect(MAP_ICONS.remains).toEqual({ shape: 'bag', color: '#f2efe6', size: 10, label: 'Your remains' });
+  });
+
+  it('the bag shape is the remains’ alone, so no other kind shares its shape and colour', () => {
+    expect(MAP_ICON_KINDS.filter((kind) => MAP_ICONS[kind].shape === 'bag')).toEqual(['remains']);
+    expect(MAP_ICON_KINDS.filter((kind) => MAP_ICONS[kind].color === '#f2efe6')).toEqual(['remains']);
   });
 });
 

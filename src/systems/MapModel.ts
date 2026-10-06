@@ -45,7 +45,9 @@ export type MapIconKind =
   | 'descent'
   | 'cache'
   | 'vault'
-  | 'relic';
+  | 'relic'
+  // SPEC-057 §4.5: where the salvager's last death left the hold's loss.
+  | 'remains';
 
 export type MapShape =
   | 'pad'
@@ -66,7 +68,8 @@ export type MapShape =
   | 'shaft'
   | 'chest'
   | 'lock'
-  | 'tablet';
+  | 'tablet'
+  | 'bag';
 
 export interface MapIcon {
   readonly shape: MapShape;
@@ -109,6 +112,9 @@ export const MAP_ICONS: Readonly<Record<MapIconKind, MapIcon>> = {
   cache: { shape: 'chest', color: '#ffd166', size: 9, label: 'Cache' },
   vault: { shape: 'lock', color: '#ff9f43', size: 11, label: 'Vault' },
   relic: { shape: 'tablet', color: '#7ee0c3', size: 9, label: 'Relic terminal' },
+  // SPEC-057 §4.5: a sack outline of its own — not an objective, and the
+  // waypoint never targets it.
+  remains: { shape: 'bag', color: '#f2efe6', size: 10, label: 'Your remains' },
 };
 
 /** Every icon kind, in table order — the legend and the uniqueness test iterate it. */

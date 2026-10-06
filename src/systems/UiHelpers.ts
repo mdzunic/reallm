@@ -98,6 +98,7 @@ import {
   type Puzzle,
   type PuzzleKind,
 } from '@/systems/Puzzles';
+import { remainsListText, type RemainsLook } from '@/systems/Remains';
 import { STAMINA_MAX } from '@/systems/Stamina';
 import type { Class, Item, QuickSlot, WeaponSlot } from '@/data/index';
 
@@ -1599,6 +1600,35 @@ export function deathCause(cause: DamageSource): string {
   }
 }
 
+/**
+ * SPEC-057 §4.7 — the death overlay's `death-remains` line: `Your pack holds
+ * 30 oil · 12 lithium — reach it before you fall again.` (`Your body holds …`
+ * once the look is the body), or `null` when the death took nothing.
+ */
+export function remainsOverlayLine(look: RemainsLook, lost: Partial<Record<ResourceId, number>>): string | null {
+  const list = remainsListText(lost);
+  return list === '' ? null : `Your ${look} holds ${list} — reach it before you fall again.`;
+}
+
+/**
+ * SPEC-057 §4.4 (E93) — the recovery's toast: `Recovered: <list>`, with
+ * ` — the rest stays with your pack` (or `body`) while some is left.
+ */
+export function remainsRecoveredText(look: RemainsLook, taken: Partial<Record<ResourceId, number>>, rest: boolean): string {
+  const line = `Recovered: ${remainsListText(taken)}`;
+  return rest ? `${line} — the rest stays with your ${look}` : line;
+}
+
+/** SPEC-057 §4.1 (E91) — the forfeit's toast: `Your earlier pack is gone: <list>.` (or `body`). */
+export function remainsLostText(look: RemainsLook, resources: Partial<Record<ResourceId, number>>): string {
+  return `Your earlier ${look} is gone: ${remainsListText(resources)}.`;
+}
+
+/** SPEC-057 §4.5 — the `tracker-remains` row: `Recover your pack — <d> m`, in whole metres. */
+export function remainsTrackerText(look: RemainsLook, distance: number): string {
+  return `Recover your ${look} — ${Math.round(Math.max(0, distance))} m`;
+}
+
 /** §4.5: what `deathTip` reads besides the cause. */
 export interface DeathContext {
   scheme: Scheme;
@@ -1794,6 +1824,11 @@ export interface HudTracker {
   bearing: number;
   /** Stuck level ≥ 1: the tracker and the waypoint pulse (SPEC-027 AC-28). */
   pulse: boolean;
+  /**
+   * SPEC-057 §4.5: the `tracker-remains` row under the objectives —
+   * `remainsTrackerText`'s — or `null` with no remains on this surface.
+   */
+  remains: string | null;
 }
 
 export interface HudModel {

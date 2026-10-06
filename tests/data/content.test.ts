@@ -3302,3 +3302,17 @@ describe('content invariant 24: the treasure (SPEC-056 §4.8)', () => {
     expect(treasureProblems({ ...TREASURE, missions: gated })).toContain(`c2_m1.requires[${at}].flag: reads shard_cinder4`);
   });
 });
+
+// ------------------------------------------------------------- SPEC-057 §4.7
+
+describe('the remains tip (SPEC-057 §4.7)', () => {
+  it('reads §4.7’s wording on both schemes, at most 160 characters and with no contraction', () => {
+    expect(TIP_IDS).toContain('remains');
+    const wording = 'What you carried stays where you fell. Walk back to it. Fall again first and it is gone.';
+    expect(TIPS.remains).toEqual({ keyboard: wording, touch: wording });
+    for (const text of [TIPS.remains.keyboard, TIPS.remains.touch]) {
+      expect(text.length).toBeLessThanOrEqual(160);
+      expect(CONTRACTION_PATTERN.test(text), text).toBe(false);
+    }
+  });
+});

@@ -617,6 +617,10 @@ const NAMES: Record<keyof GameEvents, true> = {
   // SPEC-055 §4.4, §4.6, §4.8: a move on a puzzle board, and a site solved.
   'puzzle:moved': true,
   'puzzle:solved': true,
+  // SPEC-057 §4.8: a set of remains dropped, taken back and forfeited.
+  'remains:created': true,
+  'remains:recovered': true,
+  'remains:lost': true,
   'ui:toast': true,
   'ui:orientation': true,
   // SPEC-015 §10 / AC-51: the `prompt`-mode update signal, and AC-55's hint.
@@ -636,8 +640,9 @@ describe('GameEvents (§3.2)', () => {
     // `flight:hazardHit`; SPEC-042 §4.2 `item:collected` and `item:blocked`;
     // SPEC-043 §4.7 `mission:bonus`; SPEC-048 §4.9 `story:clue`; SPEC-050 §4.1
     // `player:exhausted`; SPEC-054 §4.13 `level:changed`, `light:toggled` and
-    // `cache:opened`; SPEC-055 §4.9 `puzzle:moved` and `puzzle:solved`.
-    expect(Object.keys(NAMES)).toHaveLength(78);
+    // `cache:opened`; SPEC-055 §4.9 `puzzle:moved` and `puzzle:solved`;
+    // SPEC-057 §4.8 `remains:created`, `remains:recovered` and `remains:lost`.
+    expect(Object.keys(NAMES)).toHaveLength(81);
   });
 
   it('still carries the nine names SPEC-002 and SPEC-003 already emit', () => {

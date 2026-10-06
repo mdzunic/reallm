@@ -1087,6 +1087,7 @@ export class SurfaceScene extends UiScene<'surface'> {
     distance: null,
     bearing: 0,
     pulse: false,
+    remains: null,
   };
   /** Reused points: the minimap's target, the view's pillar, hint values. */
   readonly #targetPoint = { x: 0, z: 0 };

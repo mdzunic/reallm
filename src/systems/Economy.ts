@@ -99,8 +99,8 @@ export type Result<T = {}> = ({ ok: true } & T) | Fail;
 export type PurchaseKind = 'ship' | 'gear' | 'companion' | 'craft';
 
 /**
- * Where a resource came from; only `'pickup'` is charged against the cap
- * (§4.5). SPEC-043 §3 moved the union to `data/ids.ts`, so `core/Events.ts`
+ * Where a resource came from; only `'pickup'` (and SPEC-057's `'recovered'`)
+ * is charged against the cap (§4.5). SPEC-043 §3 moved the union to `data/ids.ts`, so `core/Events.ts`
  * can carry it on `resource:collected`; it is re-exported here.
  */
 export type { ResourceSource };
@@ -335,6 +335,12 @@ export class Economy {
    * the active collect objectives still want — it counts, but it never enters
    * the hold, so nothing is duplicated and a hoard can no longer stall an
    * objective. Only the rest is blocked.
+   *
+   * SPEC-057 §4.4: a `recovered` unit came out of the hold, so it goes back
+   * under the hold's rule — charged against the cap like a pickup — but it is
+   * never shipped home, and what does not fit stays in the remains: `blocked`
+   * says how much, and the event never carries the flag, so no full-hold
+   * warning plays.
    */
   addResource(
     resource: ResourceId,
@@ -344,11 +350,14 @@ export class Economy {
     const want = Math.floor(amount);
     if (!Number.isFinite(want) || want <= 0) return { added: 0, shipped: 0, blocked: 0 };
     const have = this.#save.resources[resource];
-    const added = source === 'pickup' ? Math.max(0, Math.min(want, this.cargoCap() - have)) : want;
+    const capped = source === 'pickup' || source === 'recovered';
+    const added = capped ? Math.max(0, Math.min(want, this.cargoCap() - have)) : want;
     const shipped = source === 'pickup' ? Math.min(want - added, this.collectDemand(resource)) : 0;
     const blocked = want - added - shipped;
+    // SPEC-057 §4.4: a recovery's rest stays in the remains — nothing bounced.
+    const bounced = source === 'recovered' ? 0 : blocked;
     this.#save.resources[resource] = have + added;
-    if (added > 0 || shipped > 0 || blocked > 0) {
+    if (added > 0 || shipped > 0 || bounced > 0) {
       this.#events.emit('resource:collected', {
         resource,
         // §4.12: a collect objective counts what went home as collected.
@@ -356,7 +365,7 @@ export class Economy {
         total: this.#save.resources[resource],
         ...(shipped > 0 ? { shipped } : {}),
         // The HUD throttles the toast to once every three seconds (§4.5).
-        ...(blocked > 0 ? { blocked: 'cargo_full' as const } : {}),
+        ...(bounced > 0 ? { blocked: 'cargo_full' as const } : {}),
         // SPEC-043 §4.2: only a pickup advances a collect objective (43-h).
         source,
       });

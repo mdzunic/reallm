@@ -4,7 +4,7 @@
 import { describe, expect, it } from 'vitest';
 import { EventBus, type GameEvents } from '@/core/Events';
 import { emptyRunStats, newSave, STAT_CEILING, type CharacterCreation, type Save } from '@/core/Save';
-import { recordBoss, recordDeath, recordKill, watchRunStats } from '@/systems/RunStats';
+import { recordBoss, recordDeath, recordKill, recordRecovery, watchRunStats } from '@/systems/RunStats';
 
 const CREATION: CharacterCreation = {
   name: 'Vance',
@@ -52,12 +52,33 @@ describe('recordKill / recordBoss / recordDeath (§4.5)', () => {
     expect(stats.lastDeath).toEqual({ vetra: { x: 5, z: 6 } });
   });
 
+  it('SPEC-057 §4.4: a recovery raises recoveries by 1', () => {
+    const stats = emptyRunStats();
+    recordRecovery(stats);
+    recordRecovery(stats);
+    expect(stats).toEqual({ ...emptyRunStats(), recoveries: 2 });
+  });
+
   it('47-h: a count at STAT_CEILING stays there', () => {
-    const stats = { ...emptyRunStats(), deaths: STAT_CEILING, kills: STAT_CEILING, elites: STAT_CEILING, bosses: STAT_CEILING };
+    const stats = {
+      ...emptyRunStats(),
+      deaths: STAT_CEILING,
+      kills: STAT_CEILING,
+      elites: STAT_CEILING,
+      bosses: STAT_CEILING,
+      recoveries: STAT_CEILING,
+    };
     recordKill(stats, true);
     recordBoss(stats);
     recordDeath(stats, 'eden', { x: 0, z: 0 });
-    expect(stats).toMatchObject({ deaths: STAT_CEILING, kills: STAT_CEILING, elites: STAT_CEILING, bosses: STAT_CEILING });
+    recordRecovery(stats);
+    expect(stats).toMatchObject({
+      deaths: STAT_CEILING,
+      kills: STAT_CEILING,
+      elites: STAT_CEILING,
+      bosses: STAT_CEILING,
+      recoveries: STAT_CEILING,
+    });
     // One short of it still counts up to it, and no further.
     const almost = { ...emptyRunStats(), kills: STAT_CEILING - 1 };
     recordKill(almost, false);
@@ -105,7 +126,7 @@ describe('watchRunStats (§4.5)', () => {
     expect(save.meta.stats).toEqual({ ...emptyRunStats(), deaths: 1, kills: 1 });
   });
 
-  it('a Recall, a dismissal and a mission completion change no count, and recoveries is never written', () => {
+  it('a Recall, a dismissal and a mission completion change no count, and none of them writes recoveries', () => {
     const { bus, save } = harness(() => ({ planet: 'cinder4', x: 0, z: 0 }));
     bus.emit('player:recalled', {});
     bus.emit('enemy:dismissed', { enemyId: 'dust_skitter', x: 1, z: 1 });
@@ -116,6 +137,17 @@ describe('watchRunStats (§4.5)', () => {
     expect(save.meta.stats.recoveries).toBe(0);
   });
 
+  it('SPEC-057 §4.4: recoveries rises once per remains:recovered — each a recovery that took a unit', () => {
+    const { bus, save } = harness(() => ({ planet: 'cinder4', x: 0, z: 0 }));
+    bus.emit('remains:created', { planet: 'cinder4', x: 4, z: 5, resources: { oil: 20 } });
+    bus.emit('remains:lost', { planet: 'cinder4', resources: { oil: 20 } });
+    expect(save.meta.stats.recoveries).toBe(0);
+    bus.emit('remains:recovered', { planet: 'cinder4', resources: { oil: 5 } });
+    expect(save.meta.stats.recoveries).toBe(1);
+    bus.emit('remains:recovered', { planet: 'cinder4', resources: { oil: 15 } });
+    expect(save.meta.stats).toEqual({ ...emptyRunStats(), recoveries: 2 });
+  });
+
   it('the release function unsubscribes every handler', () => {
     const { bus, save, owner, release } = harness(() => ({ planet: 'cinder4', x: 0, z: 0 }));
     bus.emit('enemy:killed', KILL);
@@ -123,6 +155,7 @@ describe('watchRunStats (§4.5)', () => {
     bus.emit('enemy:killed', KILL);
     bus.emit('boss:defeated', { boss: 'dune_wurm' });
     bus.emit('player:died', { cause: { kind: 'fall' }, scene: 'surface' });
+    bus.emit('remains:recovered', { planet: 'cinder4', resources: { oil: 5 } });
     expect(save.meta.stats).toEqual({ ...emptyRunStats(), kills: 1 });
     // Nothing is left on the bus or on the owner.
     expect(bus.count()).toBe(0);

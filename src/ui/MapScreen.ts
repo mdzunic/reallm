@@ -218,10 +218,11 @@ export class MapScreen {
    * listed wherever the player is (26-h: Eden lists the enemy it does not have).
    * SPEC-054 §4.10: the underground's four marks list the same way — every
    * planet gets a descent and a cache, and a relic row even on Hive, which
-   * has none (the same 26-h reasoning).
+   * has none (the same 26-h reasoning). SPEC-057 §4.5: `Your remains` lists
+   * on every planet too — a death can leave them on any surface.
    */
   #legend(): HTMLElement {
-    const present = new Set<MapIconKind>(['player', 'objective', 'enemy', 'descent', 'cache', 'vault', 'relic']);
+    const present = new Set<MapIconKind>(['player', 'objective', 'enemy', 'descent', 'cache', 'vault', 'relic', 'remains']);
     for (const poi of this.#deps.planet.surface.pois) present.add(poiIcon(poi.kind));
     for (const node of this.#deps.planet.surface.nodes) present.add(nodeIcon(node.resource));
     // SPEC-030 §4.10: the shelter rows appear on planets that have shelters.

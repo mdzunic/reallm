@@ -236,6 +236,15 @@ export type GameEvents = {
    * forced the lock, so the cache opens without its flawless extra.
    */
   'puzzle:solved': { site: PuzzleSiteId; hints: number; bypassed: boolean };
+  /**
+   * SPEC-057 §4.1: a surface death on normal or hard left its loss where the
+   * salvager fell — the placed point and what the remains hold (silent).
+   */
+  'remains:created': { planet: PlanetId; x: number; z: number; resources: Partial<Record<ResourceId, number>> };
+  /** SPEC-057 §4.4: a recovery took at least one unit — `resources` is what it took. */
+  'remains:recovered': { planet: PlanetId; resources: Partial<Record<ResourceId, number>> };
+  /** SPEC-057 §4.1, E91: the next surface death forfeited the set — what was in it (silent). */
+  'remains:lost': { planet: PlanetId; resources: Partial<Record<ResourceId, number>> };
   'ui:toast': { text: string; kind?: 'info' | 'warn' | 'good' | 'error'; ms?: number };
   /** The rotate prompt itself is SPEC-015 §6; this is the signal it listens to. */
   'ui:orientation': { orientation: 'portrait' | 'landscape' };
