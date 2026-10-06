@@ -9,8 +9,10 @@
 //
 // Data modules are plain objects: no imports but other data, no functions
 // (SPEC-001 §4, §8).
-import type { CacheId, CacheSlot, PlanetId, ResourceId } from '@/data/ids';
+import type { SwatchId } from '@/data/cosmetics';
+import type { CacheId, CacheSlot, FlagId, PlanetId, ResourceId } from '@/data/ids';
 import type { ItemId } from '@/data/items';
+import type { RecipeId } from '@/data/recipes';
 
 /** §4.4: how a cave is lit — darkness, the grade, the flashlight and the beacons. */
 export interface DarkLook {
@@ -68,11 +70,30 @@ export interface UndergroundDef {
   readonly machineRoom?: true;
 }
 
-/** §3: what a cache pays. SPEC-056 extends it. */
+/**
+ * §3: what a cache pays. SPEC-056 §3 extends it with the treasure: a vault's
+ * tokens, relic and archive shard, a world puzzle's blueprint, and a suit
+ * swatch. None of the five enters the pack — tokens go through `Progression`,
+ * a relic and a blueprint derive from `progress.claimed`, a swatch is the
+ * device's (`settings.unlocks`) and a shard is a clue's flag.
+ */
 export interface CacheReward {
   readonly resources?: Partial<Record<ResourceId, number>>;
   readonly items?: readonly { readonly itemId: ItemId; readonly qty: number }[];
+  /** SPEC-056 §4.2: vaults only — `TREASURE_TOKENS_PER_VAULT`. */
+  readonly tokens?: number;
+  /** SPEC-056 §4.3: an item with `relic: true`, racked on the claim. */
+  readonly relic?: ItemId;
+  /** SPEC-056 §4.5: a recipe whose `requires` is this cache. */
+  readonly blueprint?: RecipeId;
+  /** SPEC-056 §4.6: unlocked on this device when the cache opens. */
+  readonly swatch?: SwatchId;
+  /** SPEC-056 §4.7: `shard_<planet>`, the vault's archive log. */
+  readonly shard?: FlagId;
 }
+
+/** SPEC-056 §4.2: what every vault pays in tokens — 30 over the six, counted by `treasureTokens()`. */
+export const TREASURE_TOKENS_PER_VAULT = 5;
 
 /** §3: one cache — its planet, its slot and what keeps it shut. */
 export interface CacheDef {
@@ -205,38 +226,89 @@ const VAULT_ITEMS = [
   { itemId: 'coolant_pack', qty: 1 },
 ] as const;
 const VAULT_FLAWLESS: CacheReward = { items: MEDKIT };
-const RELIC: CacheReward = { resources: { lithium: 5 }, items: [{ itemId: 'plasma_cell', qty: 1 }] };
+const RELIC_RESOURCES = { lithium: 5 } as const;
+const RELIC_ITEMS = [{ itemId: 'plasma_cell', qty: 1 }] as const;
 const FRAG = [{ itemId: 'frag_grenade', qty: 2 }] as const;
 const MINES = [{ itemId: 'landmine', qty: 2 }] as const;
 const CHARGES = [{ itemId: 'demo_charge', qty: 2 }] as const;
+
+/** SPEC-056 §4.1: what every vault adds to its base pay. */
+const VAULT_TOKENS = TREASURE_TOKENS_PER_VAULT;
 
 /**
  * §4.8: all 23 caches of `CACHE_IDS`, with the planet and slot their ids name.
  * A `loose_a` pays lithium `3 + 2 × chapter` — 5, 7, 9, 11, 13, 15 — and one
  * medkit; the guarded ones pay SPEC-055 §4.8's table above.
+ *
+ * SPEC-056 §4.1 adds the treasure: each vault's 5 tokens and archive shard,
+ * chapters 1–5's vault relic and Eden's vault swatch, Vetra's and Thessaly's
+ * world-puzzle blueprints, and each surface relic terminal's swatch of its own
+ * id. Every `loose_a` and the other four `loose_b` add nothing.
  */
 export const CACHES: { readonly [C in CacheId]: CacheDef } = {
   cinder4_loose_a: { id: 'cinder4_loose_a', planet: 'cinder4', slot: 'loose_a', guard: 'none', reward: { resources: { lithium: 5 }, items: MEDKIT } },
   cinder4_loose_b: { id: 'cinder4_loose_b', planet: 'cinder4', slot: 'loose_b', guard: 'world', reward: { resources: { oil: 15 }, items: FRAG } },
-  cinder4_vault: { id: 'cinder4_vault', planet: 'cinder4', slot: 'vault', guard: 'vault', reward: { resources: { lithium: 8 }, items: VAULT_ITEMS }, flawless: VAULT_FLAWLESS },
-  cinder4_relic: { id: 'cinder4_relic', planet: 'cinder4', slot: 'relic', guard: 'relic', reward: RELIC },
+  cinder4_vault: {
+    id: 'cinder4_vault',
+    planet: 'cinder4',
+    slot: 'vault',
+    guard: 'vault',
+    reward: { resources: { lithium: 8 }, items: VAULT_ITEMS, tokens: VAULT_TOKENS, relic: 'relic_last_word', shard: 'shard_cinder4' },
+    flawless: VAULT_FLAWLESS,
+  },
+  cinder4_relic: { id: 'cinder4_relic', planet: 'cinder4', slot: 'relic', guard: 'relic', reward: { resources: RELIC_RESOURCES, items: RELIC_ITEMS, swatch: 'cinder4_relic' } },
   vetra_loose_a: { id: 'vetra_loose_a', planet: 'vetra', slot: 'loose_a', guard: 'none', reward: { resources: { lithium: 7 }, items: MEDKIT } },
-  vetra_loose_b: { id: 'vetra_loose_b', planet: 'vetra', slot: 'loose_b', guard: 'world', reward: { resources: { oil: 20 }, items: FRAG } },
-  vetra_vault: { id: 'vetra_vault', planet: 'vetra', slot: 'vault', guard: 'vault', reward: { resources: { lithium: 11 }, items: VAULT_ITEMS }, flawless: VAULT_FLAWLESS },
-  vetra_relic: { id: 'vetra_relic', planet: 'vetra', slot: 'relic', guard: 'relic', reward: RELIC },
+  vetra_loose_b: { id: 'vetra_loose_b', planet: 'vetra', slot: 'loose_b', guard: 'world', reward: { resources: { oil: 20 }, items: FRAG, blueprint: 'flare' } },
+  vetra_vault: {
+    id: 'vetra_vault',
+    planet: 'vetra',
+    slot: 'vault',
+    guard: 'vault',
+    reward: { resources: { lithium: 11 }, items: VAULT_ITEMS, tokens: VAULT_TOKENS, relic: 'relic_cold_coil', shard: 'shard_vetra' },
+    flawless: VAULT_FLAWLESS,
+  },
+  vetra_relic: { id: 'vetra_relic', planet: 'vetra', slot: 'relic', guard: 'relic', reward: { resources: RELIC_RESOURCES, items: RELIC_ITEMS, swatch: 'vetra_relic' } },
   thessaly_loose_a: { id: 'thessaly_loose_a', planet: 'thessaly', slot: 'loose_a', guard: 'none', reward: { resources: { lithium: 9 }, items: MEDKIT } },
-  thessaly_loose_b: { id: 'thessaly_loose_b', planet: 'thessaly', slot: 'loose_b', guard: 'world', reward: { resources: { oil: 25 }, items: MINES } },
-  thessaly_vault: { id: 'thessaly_vault', planet: 'thessaly', slot: 'vault', guard: 'vault', reward: { resources: { lithium: 14 }, items: VAULT_ITEMS }, flawless: VAULT_FLAWLESS },
-  thessaly_relic: { id: 'thessaly_relic', planet: 'thessaly', slot: 'relic', guard: 'relic', reward: RELIC },
+  thessaly_loose_b: { id: 'thessaly_loose_b', planet: 'thessaly', slot: 'loose_b', guard: 'world', reward: { resources: { oil: 25 }, items: MINES, blueprint: 'stim' } },
+  thessaly_vault: {
+    id: 'thessaly_vault',
+    planet: 'thessaly',
+    slot: 'vault',
+    guard: 'vault',
+    reward: { resources: { lithium: 14 }, items: VAULT_ITEMS, tokens: VAULT_TOKENS, relic: 'relic_seed_drum', shard: 'shard_thessaly' },
+    flawless: VAULT_FLAWLESS,
+  },
+  thessaly_relic: { id: 'thessaly_relic', planet: 'thessaly', slot: 'relic', guard: 'relic', reward: { resources: RELIC_RESOURCES, items: RELIC_ITEMS, swatch: 'thessaly_relic' } },
   ferrum_loose_a: { id: 'ferrum_loose_a', planet: 'ferrum', slot: 'loose_a', guard: 'none', reward: { resources: { lithium: 11 }, items: MEDKIT } },
   ferrum_loose_b: { id: 'ferrum_loose_b', planet: 'ferrum', slot: 'loose_b', guard: 'world', reward: { resources: { oil: 30 }, items: MINES } },
-  ferrum_vault: { id: 'ferrum_vault', planet: 'ferrum', slot: 'vault', guard: 'vault', reward: { resources: { lithium: 17 }, items: VAULT_ITEMS }, flawless: VAULT_FLAWLESS },
-  ferrum_relic: { id: 'ferrum_relic', planet: 'ferrum', slot: 'relic', guard: 'relic', reward: RELIC },
+  ferrum_vault: {
+    id: 'ferrum_vault',
+    planet: 'ferrum',
+    slot: 'vault',
+    guard: 'vault',
+    reward: { resources: { lithium: 17 }, items: VAULT_ITEMS, tokens: VAULT_TOKENS, relic: 'relic_slag_vent', shard: 'shard_ferrum' },
+    flawless: VAULT_FLAWLESS,
+  },
+  ferrum_relic: { id: 'ferrum_relic', planet: 'ferrum', slot: 'relic', guard: 'relic', reward: { resources: RELIC_RESOURCES, items: RELIC_ITEMS, swatch: 'ferrum_relic' } },
   hive_loose_a: { id: 'hive_loose_a', planet: 'hive', slot: 'loose_a', guard: 'none', reward: { resources: { lithium: 13 }, items: MEDKIT } },
   hive_loose_b: { id: 'hive_loose_b', planet: 'hive', slot: 'loose_b', guard: 'world', reward: { resources: { oil: 35 }, items: CHARGES } },
-  hive_vault: { id: 'hive_vault', planet: 'hive', slot: 'vault', guard: 'vault', reward: { resources: { lithium: 20 }, items: VAULT_ITEMS }, flawless: VAULT_FLAWLESS },
+  hive_vault: {
+    id: 'hive_vault',
+    planet: 'hive',
+    slot: 'vault',
+    guard: 'vault',
+    reward: { resources: { lithium: 20 }, items: VAULT_ITEMS, tokens: VAULT_TOKENS, relic: 'relic_seeker', shard: 'shard_hive' },
+    flawless: VAULT_FLAWLESS,
+  },
   eden_loose_a: { id: 'eden_loose_a', planet: 'eden', slot: 'loose_a', guard: 'none', reward: { resources: { lithium: 15 }, items: MEDKIT } },
   eden_loose_b: { id: 'eden_loose_b', planet: 'eden', slot: 'loose_b', guard: 'world', reward: { resources: { oil: 40 }, items: CHARGES } },
-  eden_vault: { id: 'eden_vault', planet: 'eden', slot: 'vault', guard: 'vault', reward: { resources: { lithium: 23 }, items: VAULT_ITEMS }, flawless: VAULT_FLAWLESS },
-  eden_relic: { id: 'eden_relic', planet: 'eden', slot: 'relic', guard: 'relic', reward: RELIC },
+  eden_vault: {
+    id: 'eden_vault',
+    planet: 'eden',
+    slot: 'vault',
+    guard: 'vault',
+    reward: { resources: { lithium: 23 }, items: VAULT_ITEMS, tokens: VAULT_TOKENS, swatch: 'eden_vault', shard: 'shard_eden' },
+    flawless: VAULT_FLAWLESS,
+  },
+  eden_relic: { id: 'eden_relic', planet: 'eden', slot: 'relic', guard: 'relic', reward: { resources: RELIC_RESOURCES, items: RELIC_ITEMS, swatch: 'eden_relic' } },
 };

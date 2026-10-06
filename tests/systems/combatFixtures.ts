@@ -171,6 +171,11 @@ export function harness(options: HarnessOptions = {}): Harness {
         targetX: 0,
         targetZ: 0,
         flight: 0,
+        // SPEC-056 §3: a recycled slot must not seek, twist or land as a flare.
+        seekTarget: -1,
+        seekTurn: 0,
+        twist: null,
+        flareSeconds: 0,
       });
       p.hitIds?.clear();
       Object.assign(p, patch);

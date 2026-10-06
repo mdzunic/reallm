@@ -14,6 +14,7 @@
 // `commandRating` or `offTaskCount` (`tests/architecture/imports.test.ts`).
 import {
   CLUES,
+  type CacheId,
   type ClueDef,
   type DialogueId,
   type EnemyId,
@@ -174,6 +175,19 @@ export class ClueTracker {
     for (const def of CLUES) {
       const trigger = def.trigger;
       if (trigger.kind !== 'wave' || trigger.wave !== wave) continue;
+      if (this.#fire(def, scene.flags)) return def;
+    }
+    return null;
+  }
+
+  /**
+   * SPEC-056 §4.7: cache — `cache:opened` of a vault, whose archive shard is
+   * the clue. A shard already found never fires again, so its log never replays.
+   */
+  onCache(cache: CacheId, scene: ClueScene): ClueDef | null {
+    for (const def of CLUES) {
+      const trigger = def.trigger;
+      if (trigger.kind !== 'cache' || trigger.cache !== cache) continue;
       if (this.#fire(def, scene.flags)) return def;
     }
     return null;

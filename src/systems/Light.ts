@@ -62,6 +62,34 @@ export function lit(px: number, pz: number, facing: number, on: boolean, x: numb
   return dx * Math.cos(facing) + dz * Math.sin(facing) >= d * COS_HALF_ANGLE;
 }
 
+// --------------------------------------------------------- SPEC-056 §4.5
+
+/** SPEC-056 §4.5: a burning flare lights this far around it — the `flare` item's `light.radius`. */
+export const FLARE_RADIUS = 12;
+
+/** SPEC-056 §3: a landed flare — where it burns, and the world time it goes out. */
+export interface FlareState {
+  x: number;
+  z: number;
+  until: number;
+}
+
+/**
+ * SPEC-056 §4.5: `(x, z)` lies within `FLARE_RADIUS` of a flare still burning
+ * at `time` — what the dark-sight rule counts as lit beside the beam. A flare
+ * past its `until` lights nothing. Never allocates.
+ */
+export function inFlare(x: number, z: number, flares: readonly FlareState[], time: number): boolean {
+  for (let i = 0; i < flares.length; i++) {
+    const f = flares[i] as FlareState;
+    if (time >= f.until) continue;
+    const dx = x - f.x;
+    const dz = z - f.z;
+    if (dx * dx + dz * dz <= FLARE_RADIUS * FLARE_RADIUS) return true;
+  }
+  return false;
+}
+
 /**
  * §4.6: what the light does to an aggro radius — `undefined` (the surface)
  * reads 1; the light off reads `DARK_AGGRO` for a swarm or a rusher; on, a

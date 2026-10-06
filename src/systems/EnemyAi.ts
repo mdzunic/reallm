@@ -355,6 +355,15 @@ function shiesFromLight(e: EnemyEntity, world: CombatWorld): boolean {
   return lit(p.x, p.z, p.facing, true, e.x, e.z);
 }
 
+/**
+ * SPEC-056 §4.4: the Cold Coil's chill — `slowMult` while `time < slowUntil`,
+ * else 1. It multiplies the chase and the wander only: a charge, a burrow, a
+ * knockback and a boss move's own motion run at their own speeds.
+ */
+export function slowOf(e: EnemyEntity, time: number): number {
+  return time < e.slowUntil ? e.slowMult : 1;
+}
+
 function updateWander(e: EnemyEntity, world: CombatWorld, dt: number, rng: Rng, hooks: AiHooks): void {
   // §4.5 de-aggro: a dead player ends combat outright — acquiring the live
   // follower here would undo the forced wander and flip states every step.
@@ -400,7 +409,7 @@ function updateWander(e: EnemyEntity, world: CombatWorld, dt: number, rng: Rng, 
   const dz = e.wanderZ - e.z;
   const d = Math.hypot(dx, dz);
   if (d < 0.3) return;
-  const speed = e.speed * WANDER_SPEED_MULT;
+  const speed = e.speed * WANDER_SPEED_MULT * slowOf(e, world.time);
   move(e, world, dt, (dx / d) * speed, (dz / d) * speed);
 }
 
@@ -458,7 +467,9 @@ function updateChase(e: EnemyEntity, world: CombatWorld, dt: number, rng: Rng, h
   const dirX = (gx - e.x) / dirD;
   const dirZ = (gz - e.z) / dirD;
   // SPEC-054 §4.6: a feared swarm's whole chase runs at ×0.4, its weave too.
-  const speed = feared ? e.speed * LIGHT_FEAR_SPEED : e.speed;
+  // SPEC-056 §4.4: so does a chilled one's, at its `slowMult`.
+  const slow = slowOf(e, world.time);
+  const speed = (feared ? e.speed * LIGHT_FEAR_SPEED : e.speed) * slow;
   let vx = dirX * speed;
   let vz = dirZ * speed;
 
@@ -467,6 +478,7 @@ function updateChase(e: EnemyEntity, world: CombatWorld, dt: number, rng: Rng, h
     const omega = TAU * SWARM_SINE_HZ;
     let lateral = Math.cos(omega * world.time + e.id * 2.399) * omega * SWARM_SINE_AMPLITUDE;
     if (feared) lateral *= LIGHT_FEAR_SPEED;
+    lateral *= slow;
     vx += -dirZ * lateral;
     vz += dirX * lateral;
   }

@@ -68,6 +68,7 @@ import {
   type PlanetDef,
   type PlanetId,
   type ExplosiveEffect,
+  type LightEffect,
   type PoiId,
   type QuickSlot,
   type ResourceId,
@@ -86,7 +87,7 @@ import { makeProjectile } from '@/entities/Projectile';
 import { resetTelegraph, TELEGRAPH_CAPACITY } from '@/entities/Telegraph';
 import { ARENA_RESPAWN_OUTSET, clampToSeal, type ArenaState } from '@/entities/World';
 import { ClueTracker, clueFound, FlagView, type ClueScene } from '@/systems/Clues';
-import { Combat, computePlayerStats, ELITE_SCALE, type CombatWorld, type HitMemory } from '@/systems/Combat';
+import { Combat, computePlayerStats, ELITE_SCALE, staminaFull, type CombatWorld, type HitMemory } from '@/systems/Combat';
 import { DASH_DISTANCE, dashCooldown, isDashing, pressDash, stepDash } from '@/systems/Dash';
 import { Economy } from '@/systems/Economy';
 import { seconds, stage as stageText } from '@/systems/Format';
@@ -160,7 +161,7 @@ import {
   cameraDistance,
   cameraFov,
   acceptedText,
-  bonusRewardText,
+  cacheRewardText,
   completionLines,
   contractLabel,
   darkFogRange,
@@ -178,7 +179,9 @@ import {
   rewardsText,
   stageResetText,
   STAMINA_FULL_HIDE_SECONDS,
+  STAMINA_FULL_TEXT,
   staminaShown,
+  swatchUnlockedText,
   holdIsIdle,
   surfaceFogRange,
   surfaceHoldReason,
@@ -930,6 +933,8 @@ export class SurfaceScene extends UiScene<'surface'> {
   #pickerClose: (() => void) | null = null;
   /** SPEC-029 §4.8: world time the next explosive use is allowed. */
   #throwReadyAt = 0;
+  /** SPEC-029 §4.8, SPEC-056 §4.5: where the last throw was aimed — `#throwTarget` writes it. */
+  readonly #throwAt = { x: 0, z: 0 };
   /** SPEC-029 §4.13: scratch `SlotView` for the debug overlay reads. */
   readonly #debugSlotView: SlotView = { itemId: null, state: 'empty', cd: 0, heat: 0, charges: 0, maxCharges: 0, cdSeconds: 0 };
 
@@ -2142,6 +2147,8 @@ export class SurfaceScene extends UiScene<'surface'> {
         nodes: (this.#levels?.surface.nodes as Nodes).states,
         // SPEC-038 §4.2: stamped on the world clock, which a held beat stops.
         telegraphs: { pool: (this.#combat as Combat).telegraphs, time: world.time },
+        // SPEC-056 §4.4, §4.5: the flares and the spore clouds, on the same clock.
+        treasure: { flares: (this.#combat as Combat).flares, clouds: (this.#combat as Combat).clouds, time: world.time },
         time,
         dt,
         screen,
@@ -2670,6 +2677,10 @@ export class SurfaceScene extends UiScene<'surface'> {
     info['puzzleMoves'] = 0;
     info['puzzlesSolved'] = 0;
     this.#puzzles?.info(info);
+    // SPEC-056 §3: the flares burning, the spore clouds alive and the relics on the rack.
+    info['flares'] = this.#combat?.flaresBurning ?? 0;
+    info['clouds'] = this.#combat?.cloudsAlive ?? 0;
+    info['relics'] = this.#economy?.relics().length ?? 0;
     // §4.1: the relic terminal on the map — `relic` once landmark 0 is discovered, `spent` once solved.
     info['relicMark'] = this.#relicMarked(level) ? ((this.#puzzles?.relicMark()?.spent ?? false) ? 'spent' : 'relic') : '-';
     return info;
@@ -2706,6 +2717,8 @@ export class SurfaceScene extends UiScene<'surface'> {
       for (const id of save.progress.claimed) if (Object.hasOwn(CACHES, id) && CACHES[id as CacheId].planet === this.#planet.id) claimed++;
     }
     info['claimed'] = claimed;
+    // SPEC-056 §4.8 (E89): a claimed cache draws opened on every later descent.
+    info['cachesOpen'] = this.#caveView?.openCaches ?? 0;
     const descent = this.#descent;
     const world = this.#world;
     info['descentDist'] =
@@ -3870,6 +3883,19 @@ export class SurfaceScene extends UiScene<'surface'> {
       this.#useExplosive(id, item.effect);
       return;
     }
+    const gadget = ITEM_TABLE[id];
+    if (gadget.kind === 'consumable') {
+      // SPEC-056 §4.5: a flare is thrown as a frag is, not applied…
+      if (gadget.effect.kind === 'light') {
+        this.#throwFlare(id, gadget.effect);
+        return;
+      }
+      // …and a stim at a full pool that is not exhausted is refused, unspent (56-g).
+      if (gadget.effect.kind === 'stamina' && staminaFull(world.player)) {
+        this.#quickToast(STAMINA_FULL_TEXT);
+        return;
+      }
+    }
 
     const result = economy.useConsumable(id);
     if (!result.ok) return;
@@ -3877,6 +3903,60 @@ export class SurfaceScene extends UiScene<'surface'> {
     this.services.events.emit('quick:used', { slot, itemId: id });
     // §4.4: the id stays when nothing replaces it, so the bar reads `×0`.
     if (economy.count(id) === 0) save.quick[slot] = refillQuick(save, slot) ?? id;
+  }
+
+  /**
+   * SPEC-029 §4.8: where a throw lands — the aim point (keyboard) or the
+   * nearest enemy with a clear line (touch), else 8 m along the facing —
+   * clamped to `range` along the aim direction (29-f). Into `#throwAt`.
+   */
+  #throwTarget(world: CombatWorld, range: number): { x: number; z: number } {
+    const p = world.player;
+    const out = this.#throwAt;
+    const scheme = this.services.input.state.scheme;
+    const aim = scheme === 'touch' ? null : this.#aimWorld(world);
+    if (aim !== null) {
+      out.x = aim.x;
+      out.z = aim.z;
+    } else {
+      const target = scheme === 'touch' ? this.#clearThrowTarget(world, range) : null;
+      if (target !== null) {
+        out.x = target.x;
+        out.z = target.z;
+      } else {
+        out.x = p.x + Math.cos(p.facing) * 8;
+        out.z = p.z + Math.sin(p.facing) * 8;
+      }
+    }
+    const dx = out.x - p.x;
+    const dz = out.z - p.z;
+    const len = Math.hypot(dx, dz);
+    if (len > range) {
+      out.x = p.x + (dx / len) * range;
+      out.z = p.z + (dz / len) * range;
+    }
+    return out;
+  }
+
+  /**
+   * SPEC-056 §4.5: a flare from the utility slot — aimed as a frag is
+   * (`#throwTarget`, clamped to its 12 m), waiting out the same 0.5 s, and
+   * spending one only when it flies.
+   */
+  #throwFlare(id: ItemId, effect: LightEffect): void {
+    const world = this.#world;
+    const combat = this.#combat;
+    const economy = this.#economy;
+    const save = this.#save;
+    if (world === null || combat === null || economy === null || save === null) return;
+    if (world.time < this.#throwReadyAt) return;
+    const at = this.#throwTarget(world, effect.range);
+    if (!combat.throwFlare(effect, at.x, at.z)) return;
+    economy.useConsumable(id);
+    this.#throwReadyAt = world.time + EXPLOSIVE_USE_SECONDS;
+    this.services.events.emit('quick:used', { slot: 'utility', itemId: id });
+    // §4.4: the id stays when nothing replaces it, so the bar reads `×0`.
+    if (economy.count(id) === 0) save.quick.utility = refillQuick(save, 'utility') ?? id;
   }
 
   /**
@@ -3894,33 +3974,8 @@ export class SurfaceScene extends UiScene<'surface'> {
     if (world.time < this.#throwReadyAt) return;
     const p = world.player;
     if (effect.mode === 'throw') {
-      const range = effect.range ?? 12;
-      let tx: number;
-      let tz: number;
-      const scheme = this.services.input.state.scheme;
-      const aim = scheme === 'touch' ? null : this.#aimWorld(world);
-      if (aim !== null) {
-        tx = aim.x;
-        tz = aim.z;
-      } else {
-        const target = scheme === 'touch' ? this.#clearThrowTarget(world, range) : null;
-        if (target !== null) {
-          tx = target.x;
-          tz = target.z;
-        } else {
-          tx = p.x + Math.cos(p.facing) * 8;
-          tz = p.z + Math.sin(p.facing) * 8;
-        }
-      }
-      // 29-f: clamp to range along the aim direction.
-      const dx = tx - p.x;
-      const dz = tz - p.z;
-      const len = Math.hypot(dx, dz);
-      if (len > range) {
-        tx = p.x + (dx / len) * range;
-        tz = p.z + (dz / len) * range;
-      }
-      combat.throwExplosive(effect, tx, tz);
+      const at = this.#throwTarget(world, effect.range ?? 12);
+      combat.throwExplosive(effect, at.x, at.z);
     } else {
       const result = combat.deploy(effect, p.x, p.z);
       if (result !== 'ok') {
@@ -4182,9 +4237,24 @@ export class SurfaceScene extends UiScene<'surface'> {
    */
   #cacheOpened(id: CacheId, x: number, z: number, reward: CacheReward): void {
     this.services.events.emit('cache:opened', { cache: id, x, z });
-    const paid = bonusRewardText(reward);
+    // SPEC-056 §4.1: the treasure reads in the toast too — tokens first.
+    const paid = cacheRewardText(reward);
     this.services.events.emit('ui:toast', { kind: 'good', text: paid === '' ? CACHE_OPENED_TEXT : `${CACHE_OPENED_TEXT} · ${paid}` });
     this.#caveView?.setClaimed(id);
+    // SPEC-056 §4.6: a swatch is this device's from now on — once.
+    const swatch = reward.swatch;
+    if (swatch !== undefined) {
+      const unlocks = this.services.settings.get().unlocks;
+      if (!unlocks.includes(swatch)) {
+        this.services.settings.set({ unlocks: [...unlocks, swatch] });
+        this.services.events.emit('ui:toast', { kind: 'good', text: swatchUnlockedText(swatch) });
+      }
+    }
+    // SPEC-056 §4.7: a vault's archive shard plays its log; the flag is set
+    // as it starts (`#clueStarted`), and a shard already found never replays.
+    const clues = this.#clues;
+    const scene = this.#clueScene;
+    if (clues !== null && scene !== null) this.#playClue(clues.onCache(id, scene));
   }
 
   /** SPEC-055 §4.4: a puzzle panel or ARIA's offer holds the world as the map does — and the touch layer goes with it. */

@@ -38,10 +38,28 @@ export type ConsumableEffect =
       readonly fuse: number;
       readonly range?: number;
       readonly trigger?: number;
-    };
+    }
+  // SPEC-056 §4.5: the flare lights the ground where it lands (`range` binds
+  // the throw, as an explosive's does); the stim refills the stamina pool.
+  | { readonly kind: 'light'; readonly radius: number; readonly seconds: number; readonly range: number }
+  | { readonly kind: 'stamina' };
 
 /** The explosive variant on its own — what `Combat.throwExplosive` takes (SPEC-029 §3). */
 export type ExplosiveEffect = Extract<ConsumableEffect, { kind: 'explosive' }>;
+/** SPEC-056 §3: the flare's effect on its own — what `Combat.throwFlare` takes. */
+export type LightEffect = Extract<ConsumableEffect, { kind: 'light' }>;
+
+/**
+ * SPEC-056 §3, §4.4: a relic's one twist, read from the equipped weapon at the
+ * moment of the shot, hit, blast or lock. Only relics carry one (content
+ * invariant 24).
+ */
+export type WeaponTwist =
+  | { readonly kind: 'execute'; readonly belowHp: number; readonly mult: number }
+  | { readonly kind: 'chill'; readonly slow: number; readonly seconds: number; readonly bossSlow: number }
+  | { readonly kind: 'linger'; readonly radius: number; readonly seconds: number; readonly dps: number }
+  | { readonly kind: 'vent'; readonly radius: number; readonly damage: number }
+  | { readonly kind: 'seek'; readonly turnRate: number; readonly cone: number };
 
 /**
  * SPEC-029 §3: one cooldown model per weapon line. Handguns and rifles carry
@@ -107,6 +125,14 @@ export type ItemDef<Id extends string = string> =
       readonly blast?: { readonly radius: number; readonly falloff: number };
       /** SPEC-029 §3: the shot arcs over bodies and obstacles to its aim point. */
       readonly lob?: boolean;
+      /**
+       * SPEC-056 §4.3: a vault's first-clear weapon. It lives on the rack —
+       * owned through `progress.claimed`, never in the pack — and nothing sells,
+       * drops or crafts it.
+       */
+      readonly relic?: true;
+      /** SPEC-056 §4.4: the relic's twist; no other item carries one. */
+      readonly twist?: WeaponTwist;
       readonly price: Price | null;
       readonly model: ModelId | 'procedural';
       readonly blurb: string;
@@ -485,6 +511,147 @@ export const ITEMS = {
     price: null,
     blurb: 'Three seconds of fuse and a crater where the nest was. Walk, do not run.',
   },
+  /**
+   * SPEC-056 §4.3 (*initial tuning*): the five relics — arsenal side-grades at
+   * 0.6–1.1 × their reference's sustained DPS, each trading raw damage for its
+   * twist. A vault pays one on its first clear; it goes to the rack, never the
+   * pack, and no shop, loot table or recipe names it.
+   */
+  relic_last_word: {
+    id: 'relic_last_word',
+    name: 'Last Word',
+    short: 'LastWord',
+    kind: 'weapon',
+    slot: 'sidearm',
+    line: 'handgun',
+    tier: 1,
+    damage: 14,
+    fireRate: 2.5,
+    projectileSpeed: 30,
+    range: 14,
+    pierce: 0,
+    energy: false,
+    cooldown: { kind: 'none' },
+    relic: true,
+    twist: { kind: 'execute', belowHp: 0.3, mult: 2 },
+    price: null,
+    model: 'procedural',
+    blurb: 'Instance/58 kept it for the last one standing. It finishes what the others start.',
+  },
+  relic_cold_coil: {
+    id: 'relic_cold_coil',
+    name: 'Cold Coil',
+    short: 'Coil',
+    kind: 'weapon',
+    slot: 'primary',
+    line: 'machine_gun',
+    tier: 2,
+    damage: 10,
+    fireRate: 9,
+    projectileSpeed: 32,
+    range: 14,
+    pierce: 0,
+    energy: true,
+    cooldown: { kind: 'heat', perShot: 0.035, coolPerSec: 0.24, resumeAt: 0.35 },
+    spread: 0.07,
+    relic: true,
+    twist: { kind: 'chill', slow: 0.25, seconds: 1, bossSlow: 0.1 },
+    price: null,
+    model: 'procedural',
+    blurb: 'Instance/47 packed the barrels with Vetra ice. Whatever it hits forgets how to run.',
+  },
+  relic_seed_drum: {
+    id: 'relic_seed_drum',
+    name: 'Seed Drum',
+    short: 'SeedDrum',
+    kind: 'weapon',
+    slot: 'heavy',
+    line: 'launcher',
+    tier: 2,
+    damage: 45,
+    fireRate: 2.5,
+    projectileSpeed: 16,
+    range: 16,
+    pierce: 0,
+    energy: false,
+    cooldown: { kind: 'charges', charges: 3, rechargeSeconds: 9, burstInterval: 0.4 },
+    blast: { radius: 3, falloff: 0.5 },
+    lob: true,
+    relic: true,
+    twist: { kind: 'linger', radius: 3, seconds: 3, dps: 8 },
+    price: null,
+    model: 'procedural',
+    blurb: 'Instance/41 loaded the drum with Thessaly spores. The shell bursts, and then the air keeps working.',
+  },
+  relic_slag_vent: {
+    id: 'relic_slag_vent',
+    name: 'Slag Vent',
+    short: 'SlagVent',
+    kind: 'weapon',
+    slot: 'primary',
+    line: 'machine_gun',
+    tier: 3,
+    damage: 13,
+    fireRate: 11,
+    projectileSpeed: 34,
+    range: 15,
+    pierce: 0,
+    energy: false,
+    cooldown: { kind: 'heat', perShot: 0.04, coolPerSec: 0.22, resumeAt: 0.35 },
+    spread: 0.06,
+    relic: true,
+    twist: { kind: 'vent', radius: 3.5, damage: 60 },
+    price: null,
+    model: 'procedural',
+    blurb: 'Instance/29 wrapped the jacket in Ferrum slag. When it overheats, everything near you finds out.',
+  },
+  relic_seeker: {
+    id: 'relic_seeker',
+    name: 'Seeker Tube',
+    short: 'Seeker',
+    kind: 'weapon',
+    slot: 'heavy',
+    line: 'launcher',
+    tier: 3,
+    damage: 80,
+    fireRate: 1,
+    projectileSpeed: 18,
+    range: 22,
+    pierce: 0,
+    energy: false,
+    cooldown: { kind: 'charges', charges: 1, rechargeSeconds: 6, burstInterval: 0 },
+    blast: { radius: 3.5, falloff: 0.4 },
+    relic: true,
+    twist: { kind: 'seek', turnRate: 2.1, cone: 0.7 },
+    price: null,
+    model: 'procedural',
+    blurb: 'Instance/12 wired Hive guidance into the tube. It looks for the thing you meant.',
+  },
+  /**
+   * SPEC-056 §4.5: the two blueprints' items — craft only (`price null`), each
+   * recipe locked until its cave's `loose_b` is claimed. Both sit in the
+   * utility slot.
+   */
+  flare: {
+    id: 'flare',
+    name: 'Flare',
+    short: 'Flare',
+    kind: 'consumable',
+    effect: { kind: 'light', radius: 12, seconds: 60, range: 12 },
+    stack: 5,
+    price: null,
+    blurb: 'Magnesium in a paper tube. Throw it where you want to see; it burns for a minute.',
+  },
+  stim: {
+    id: 'stim',
+    name: 'Stim',
+    short: 'Stim',
+    kind: 'consumable',
+    effect: { kind: 'stamina' },
+    stack: 5,
+    price: null,
+    blurb: 'One breath’s worth of chemistry. The lungs you think you have stop complaining.',
+  },
 } as const satisfies Record<string, ItemDef>;
 
 export type ItemId = keyof typeof ITEMS;
@@ -500,6 +667,9 @@ export const QUICK_SLOT_OF_EFFECT = {
   hazard_immunity: 'utility',
   damage_boost: 'utility',
   explosive: 'explosive',
+  // SPEC-056 §4.5: the flare and the stim are gadgets.
+  light: 'utility',
+  stamina: 'utility',
 } as const satisfies Record<ConsumableEffect['kind'], QuickSlot>;
 
 /**
@@ -510,7 +680,8 @@ export const QUICK_SLOT_OF_EFFECT = {
 export const QUICK_PREFERENCE = {
   heal: ['medkit', 'wheat_ration'],
   explosive: ['frag_grenade', 'landmine', 'demo_charge'],
-  utility: ['coolant_pack', 'plasma_cell'],
+  // SPEC-056 §4.5: the stim, then the flare, after the two it joins.
+  utility: ['coolant_pack', 'plasma_cell', 'stim', 'flare'],
 } as const satisfies Record<QuickSlot, readonly ItemId[]>;
 
 /**

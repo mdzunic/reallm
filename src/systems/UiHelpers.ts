@@ -15,6 +15,7 @@ import {
   AFFIX_IDS,
   AFFIXES,
   ATTRIBUTE_EFFECTS,
+  CACHES,
   CLASSES,
   COMPANIONS,
   CONTRACT_LITHIUM,
@@ -30,13 +31,18 @@ import {
   PLANETS,
   PLANET_IDS,
   POI_LABELS,
+  PRIMARY_SWATCHES,
   RECIPES,
   RESOURCE_IDS,
+  SECONDARY_SWATCHES,
   SIGNATURE_FALLBACK_LITHIUM,
+  SWATCHES,
+  SWATCH_IDS,
   TUNING,
   UPGRADES,
   type Attributes,
   type BonusReward,
+  type CacheReward,
   type ClassId,
   type CompanionId,
   type ContractId,
@@ -59,7 +65,9 @@ import {
   type RecipeId,
   type Requirement,
   type ResourceId,
+  type Recipe,
   type ShipSystem,
+  type WeaponTwist,
   type WeatherId,
 } from '@/data/index';
 import { GLYPHS } from '@/data/glossary';
@@ -100,6 +108,7 @@ const CLASS_TABLE: Readonly<Record<ClassId, Class>> = CLASSES;
 const ITEM_TABLE: Readonly<Record<ItemId, Item>> = ITEMS;
 const LOOT_TABLE: Readonly<Record<LootTableId, readonly LootEntry[]>> = LOOT_TABLES;
 const PLANET_TABLE: Readonly<Record<PlanetId, PlanetDef>> = PLANETS;
+const RECIPE_TABLE: Readonly<Record<RecipeId, Recipe>> = RECIPES;
 
 // ---------------------------------------------------------------- formatting
 // SPEC-045 §4.7: every number below prints through `systems/Format.ts`.
@@ -387,6 +396,11 @@ function effectWords(effect: Extract<Item, { kind: 'consumable' }>['effect']): s
       return `${multPercent(effect.mult)} damage for ${effect.seconds} s`;
     case 'explosive':
       return `Explosive — ${effect.damage} damage in a ${effect.radius} m blast`;
+    // SPEC-056 §4.5: the flare and the stim.
+    case 'light':
+      return `Lights ${effect.radius} m for ${effect.seconds} s where it lands`;
+    case 'stamina':
+      return 'Refills stamina and clears exhaustion';
   }
 }
 
@@ -604,6 +618,81 @@ export function bonusLine(bonus: MissionBonus): string {
   return `Bonus: ${bonusText(bonus)} → ${bonusRewardText(bonus.reward)}`;
 }
 
+// ------------------------------------------------------- SPEC-056: treasure
+
+/**
+ * SPEC-056 §4.4: a relic's twist in one line, numbers through `percent` —
+ * `Double damage to targets under 30 % health`.
+ */
+export function twistText(twist: WeaponTwist): string {
+  switch (twist.kind) {
+    case 'execute':
+      return `${twist.mult === 2 ? 'Double' : `${twist.mult}×`} damage to targets under ${percent(twist.belowHp)} health`;
+    case 'chill':
+      return `Hits slow the target by ${percent(twist.slow)} for ${twist.seconds} s (bosses ${percent(twist.bossSlow)})`;
+    case 'linger':
+      return `Shells leave a ${twist.radius} m cloud: ${twist.dps} damage a second for ${twist.seconds} s`;
+    case 'vent':
+      return `Overheating vents a ${twist.radius} m blast of ${twist.damage}`;
+    case 'seek':
+      return 'Rockets turn toward the nearest target ahead';
+  }
+}
+
+/**
+ * SPEC-056 §4.1: what a claim paid, for `Cache opened · <text>` — in place of
+ * `bonusRewardText`. In order, joined with ` · `: the tokens (`+5 ◈`), the
+ * resources, the items, `Relic: <name>`, `Blueprint: <name>`, `Swatch: <name>`
+ * and `Archive shard`.
+ */
+export function cacheRewardText(reward: CacheReward): string {
+  const parts: string[] = [];
+  if ((reward.tokens ?? 0) > 0) parts.push(`+${reward.tokens} ${GLYPHS.tokens}`);
+  for (const resource of RESOURCE_IDS) {
+    const amount = reward.resources?.[resource] ?? 0;
+    if (amount > 0) parts.push(`+${amount} ${resource}`);
+  }
+  for (const item of reward.items ?? []) {
+    if (item.qty > 0) parts.push(`+${item.qty} ${ITEM_TABLE[item.itemId].name}`);
+  }
+  if (reward.relic !== undefined) parts.push(`Relic: ${ITEM_TABLE[reward.relic].name}`);
+  if (reward.blueprint !== undefined) parts.push(`Blueprint: ${ITEM_TABLE[RECIPES[reward.blueprint].output].name}`);
+  if (reward.swatch !== undefined) parts.push(`Swatch: ${SWATCHES[reward.swatch].name}`);
+  if (reward.shard !== undefined) parts.push('Archive shard');
+  return parts.join(' · ');
+}
+
+/**
+ * SPEC-056 §4.5: a locked recipe's shop line — `Locked — found in a Vetra
+ * cave` — off the planet of the cache it `requires`; `''` for a recipe that
+ * needs no blueprint.
+ */
+export function lockedRecipeText(recipe: RecipeId): string {
+  const requires = RECIPE_TABLE[recipe].requires;
+  if (requires === undefined) return '';
+  return `Locked — found in a ${PLANET_TABLE[CACHES[requires].planet].name} cave`;
+}
+
+/** SPEC-056 §4.6: a swatch toast's line — `Swatch unlocked: Dune Rust — wear it from the Locker`. */
+export function swatchUnlockedText(swatch: keyof typeof SWATCHES): string {
+  return `Swatch unlocked: ${SWATCHES[swatch].name} — wear it from the Locker`;
+}
+
+/**
+ * SPEC-056 §4.6: one part's colours as creation's and the Locker's rows show
+ * them — its eight base swatches, then each unlocked swatch's colour of that
+ * part in `SWATCH_IDS` order, every colour once. Unknown ids read nothing.
+ */
+export function availableSwatches(part: 'primary' | 'secondary', unlocks: readonly string[]): readonly string[] {
+  const out: string[] = [...(part === 'primary' ? PRIMARY_SWATCHES : SECONDARY_SWATCHES)];
+  for (const id of SWATCH_IDS) {
+    if (!unlocks.includes(id)) continue;
+    const colour = SWATCHES[id][part];
+    if (!out.includes(colour)) out.push(colour);
+  }
+  return out;
+}
+
 /**
  * SPEC-043 §4.3: `Contract · <name> · 75 % + 20 lithium` when `def` runs as a
  * contract on that landing, else `null`. The board asks for the next landing
@@ -788,6 +877,14 @@ export function abandonMission(save: Save, id: MissionId): boolean {
  * a medkit used at the station was simply spent for nothing.
  */
 export const HP_FULL_TEXT = 'HP full';
+
+/** SPEC-056 §4.5 (56-g): what a stim at a full, unexhausted pool says — throttled like E40's. */
+export const STAMINA_FULL_TEXT = 'Stamina is full';
+
+/** SPEC-056 56-a: a relic's equip refused because the piece it would displace has no room in the pack. */
+export function makeRoomText(displaced: ItemId): string {
+  return `Pack full — make room for ${ITEM_TABLE[displaced].name} first`;
+}
 
 // ---------------------------------------------- SPEC-034 §4.9: stage resets
 
@@ -1176,8 +1273,11 @@ function compareText(part: StatDelta): string {
 export function gearTooltip(id: ItemId): string {
   const item = ITEM_TABLE[id];
   if (item.kind !== 'weapon' && item.kind !== 'armor') return '';
+  // SPEC-056 §4.3: a relic is on no ladder — it says what it does instead.
+  if (item.kind === 'weapon' && item.twist !== undefined) return `Relic — ${twistText(item.twist)}`;
   const next = (Object.keys(ITEM_TABLE) as ItemId[]).find((other) => {
     const candidate = ITEM_TABLE[other];
+    if (candidate.kind === 'weapon' && candidate.relic === true) return false;
     return candidate.kind !== 'consumable' && candidate.line === item.line && candidate.tier === item.tier + 1;
   });
   if (next === undefined) return `T${item.tier} — top tier`;
@@ -1573,6 +1673,8 @@ export function prerequisiteText(id: ItemId): string {
   let below: Extract<Item, { kind: 'weapon' | 'armor' }> | null = null;
   for (const other of Object.values(ITEM_TABLE)) {
     if (other.kind === 'consumable' || other.line !== item.line || other.tier >= item.tier) continue;
+    // SPEC-056 §4.3: a relic is no rung.
+    if (other.kind === 'weapon' && other.relic === true) continue;
     if (below === null || other.tier > below.tier) below = other;
   }
   return below === null ? failText('prerequisite') : `Requires ${below.name} (T${below.tier})`;

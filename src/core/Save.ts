@@ -31,7 +31,10 @@ import {
   ATTRIBUTE_POINT_LEVELS,
   BELOW_HALF_SIZE,
   CACHE_IDS,
+  CACHES,
   CLASSES,
+  type CacheId,
+  type CacheReward,
   type ClassPassive,
   CLASS_IDS,
   COMPANION_IDS,
@@ -417,6 +420,11 @@ export interface SaveContent {
   readonly cacheIds: readonly string[];
   /** SPEC-047 §4.4: the underground's half-extent, for `exploredBelow`'s bitset length. */
   readonly belowHalfSize: number;
+  /**
+   * SPEC-056 §4.3: relic → the vault cache whose claim racks it. A relic never
+   * sits in `inventory`, and is worn only while that cache is claimed.
+   */
+  readonly relicCache: Readonly<Record<string, CacheId>>;
 }
 
 const ITEM_IDS = Object.keys(ITEMS) as ItemId[];
@@ -479,6 +487,14 @@ const QUICK_USE_OF_ITEM: Record<ItemId, QuickSlot | null> = Object.fromEntries(
   }),
 ) as Record<ItemId, QuickSlot | null>;
 
+/** SPEC-056 §4.3: each relic and the vault that pays it, off `CACHES`. */
+const RELIC_CACHE: Record<string, CacheId> = Object.fromEntries(
+  CACHE_IDS.flatMap((id) => {
+    const relic = (CACHES[id].reward as CacheReward).relic;
+    return relic === undefined ? [] : [[relic, id] as const];
+  }),
+);
+
 /** SPEC-025 §4.5: the arena half-extent every planet's bitset is sized from. */
 const PLANET_HALF_SIZE: Record<PlanetId, number> = Object.fromEntries(
   PLANET_IDS.map((id) => [id, PLANETS[id].surface.halfSize]),
@@ -500,6 +516,7 @@ export const SAVE_CONTENT: SaveContent = {
   planetHalfSize: PLANET_HALF_SIZE,
   cacheIds: CACHE_IDS,
   belowHalfSize: BELOW_HALF_SIZE,
+  relicCache: RELIC_CACHE,
 };
 
 /**
@@ -732,12 +749,13 @@ export function validateSave(
     const player = validatePlayer(rawPlayer, classId, content, warnings);
     const ship = validateShip(bagAt(raw, 'ship'), warnings);
     const resources = validateResources(bagAt(raw, 'resources'), warnings);
+    // SPEC-056 §4.3: progress first, so the relic rule can read `claimed`.
+    const progress = validateProgress(bagAt(raw, 'progress'), content, warnings);
     const inventory = validateInventory(arrayAt(raw, 'inventory'), content, warnings);
-    const equipped = validateEquipped(bagAt(raw, 'equipped'), classId, content, warnings);
+    const equipped = validateEquipped(bagAt(raw, 'equipped'), classId, content, progress.claimed, warnings);
     const activeWeapon = validateActiveWeapon(raw['activeWeapon'], equipped, warnings);
     const quick = validateQuick(bagAt(raw, 'quick'), content, warnings);
     const companions = validateCompanions(arrayAt(raw, 'companions'), warnings);
-    const progress = validateProgress(bagAt(raw, 'progress'), content, warnings);
 
     // The hp cap depends on the rebuilt attributes and level, so it lands here.
     const cap2 = maxHp(classId, player.attributes, player.level);
@@ -1108,6 +1126,12 @@ function validateInventory(raw: unknown[], content: SaveContent, warnings: strin
       continue;
     }
     const itemId = raw as ItemId;
+    // SPEC-056 §4.3: a relic lives on the rack, which `claimed` derives — one
+    // in the pack is a forged or stale entry.
+    if (Object.hasOwn(content.relicCache, itemId)) {
+      warnings.push(`inventory.${itemId}: a relic hangs on the rack, never in the pack; dropped`);
+      continue;
+    }
     const qty = Math.round(num(entry['qty'], 0));
     if (qty <= 0) {
       warnings.push(`inventory.${itemId}: quantity ${JSON.stringify(entry['qty'])} dropped`);
@@ -1127,10 +1151,24 @@ function validateInventory(raw: unknown[], content: SaveContent, warnings: strin
  * empty and falls back to empty — the item is *not* put back into the
  * inventory, because only corrupt data reaches this rule and the validator
  * never invents items.
+ *
+ * SPEC-056 §4.3 (56-b): a relic is worn only while its vault is in `claimed`;
+ * otherwise its slot falls back by the same rule.
  */
-function validateEquipped(raw: Bag, classId: ClassId, content: SaveContent, warnings: string[]): Save['equipped'] {
+function validateEquipped(
+  raw: Bag,
+  classId: ClassId,
+  content: SaveContent,
+  claimed: readonly string[],
+  warnings: string[],
+): Save['equipped'] {
+  const relicCache = content.relicCache as Readonly<Record<string, string>>;
   const slotOf = (value: unknown): WeaponSlot | null => {
     if (typeof value !== 'string' || !Object.hasOwn(content.weaponSlot, value)) return null;
+    if (Object.hasOwn(relicCache, value) && !claimed.includes(relicCache[value] as string)) {
+      warnings.push(`equipped: the relic ${value} is not on the rack (${relicCache[value]} unclaimed)`);
+      return null;
+    }
     return (content.weaponSlot as Readonly<Record<string, WeaponSlot | null>>)[value] ?? null;
   };
 

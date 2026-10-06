@@ -321,6 +321,8 @@ export const BOOKKEEPING_KEYS: readonly (keyof Settings)[] = [
   'tipsSeen',
   'zonesShown',
   'bestTimes',
+  // SPEC-056 §4.6: the swatches the caves unlocked — the Locker reads them.
+  'unlocks',
 ];
 
 function shownIn(row: SettingsRowDef, env: RowEnv): boolean {

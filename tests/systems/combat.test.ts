@@ -43,12 +43,17 @@ import {
   type WeaponDef,
   AUTO_LEAD_MAX,
   CASUAL_WEATHER_MULT,
+  MAX_FLARES,
+  MAX_LINGER_CLOUDS,
+  staminaFull,
+  THROW_SPEED,
+  twistOf,
 } from '@/systems/Combat';
 import { DEPLOYABLE_CAPACITY, MAX_ARMED_MINES } from '@/entities/Deployable';
 import { resetTelegraph } from '@/entities/Telegraph';
-import { DARK_SIGHT } from '@/systems/Light';
+import { DARK_SIGHT, FLARE_RADIUS, inFlare } from '@/systems/Light';
 import { cumulativeXp } from '@/systems/Progression';
-import { SPRINT_DRAW_SECONDS, stepStamina } from '@/systems/Stamina';
+import { SPRINT_DRAW_SECONDS, STAMINA_MAX, stepStamina } from '@/systems/Stamina';
 import type { SlotView } from '@/systems/Loadout';
 import { STEP, harness, MARINE, SCOUT, type Harness } from './combatFixtures';
 
@@ -2463,5 +2468,305 @@ describe('every spawn leashes on its def (SPEC-054 §4.7)', () => {
     expect(next).toBe(e); // the same pooled object
     expect(next.placed).toBe(false);
     expect(next.leash).toBe(ENEMIES.dust_skitter.leashRadius);
+  });
+});
+
+// ------------------------------------------------------------- SPEC-056
+
+/** A relic's twist off the table, narrowed to its kind. */
+function twistOfKind<K extends 'execute' | 'chill' | 'linger' | 'vent' | 'seek'>(id: ItemId, kind: K) {
+  const twist = twistOf(id);
+  if (twist === null || twist.kind !== kind) throw new Error(`${id} carries no ${kind}`);
+  return twist as Extract<NonNullable<ReturnType<typeof twistOf>>, { kind: K }>;
+}
+
+/** A player shot from the origin along +x at an enemy on the x axis, carrying `twist` — run until it lands. */
+function twistShot(h: Harness, damage: number, twist: ReturnType<typeof twistOf>): void {
+  h.shot({ x: 0, z: 0, vx: 30, vz: 0, damage, twist, owner: 'player' });
+  for (let k = 0; k < 60 && h.world.projectiles.size > 0; k++) h.step();
+}
+
+describe('the relic twists (SPEC-056 §4.4)', () => {
+  it('only relics carry a twist, and the relic\'s own shot carries it', () => {
+    for (const id of Object.keys(ITEMS) as ItemId[]) {
+      const item = ITEMS[id];
+      expect(twistOf(id) !== null, id).toBe(item.kind === 'weapon' && 'relic' in item);
+    }
+    const h = harness({ patch: (s) => void (s.equipped.sidearm = 'relic_last_word') });
+    h.combat.loadout.select('sidearm', h.world.time);
+    h.run(0.3);
+    h.spawn('hive_egg', 6, 0);
+    h.input.autoFire = true;
+    h.step();
+    expect(h.world.projectiles.size).toBe(1);
+    expect(h.world.projectiles.at(0).twist).toEqual({ kind: 'execute', belowHp: 0.3, mult: 2 });
+    // A non-relic's shot carries none.
+    const plain = harness();
+    plain.spawn('hive_egg', 6, 0);
+    plain.input.autoFire = true;
+    plain.step();
+    expect(plain.world.projectiles.at(0).twist).toBeNull();
+  });
+
+  it('execute: a hit at 31 % of max HP is not doubled; at 30 % it is', () => {
+    const execute = twistOfKind('relic_last_word', 'execute');
+    const h = harness();
+    const egg = h.spawn('hive_egg', 3, 0);
+    egg.hp = 0.31 * egg.maxHp;
+    let before = egg.hp;
+    twistShot(h, 10, execute);
+    expect(before - egg.hp).toBeCloseTo(10, 6);
+    egg.hp = 0.3 * egg.maxHp;
+    before = egg.hp;
+    twistShot(h, 10, execute);
+    expect(before - egg.hp).toBeCloseTo(20, 6);
+    // Elites too.
+    h.combat.killEnemy(egg, 'script');
+    h.step();
+    const elite = h.spawn('dust_skitter', 3, 0, true);
+    expect(elite.elite).toBe(true);
+    elite.hp = 0.25 * elite.maxHp;
+    before = elite.hp;
+    twistShot(h, 2, execute);
+    expect(before - elite.hp).toBeCloseTo(4, 6);
+  });
+
+  it('chill: a hit sets slowUntil a second on and slowMult 0.75, a new hit refreshes it, and a boss gets 0.9', () => {
+    const chill = twistOfKind('relic_cold_coil', 'chill');
+    const h = harness();
+    const egg = h.spawn('hive_egg', 3, 0);
+    expect([egg.slowUntil, egg.slowMult]).toEqual([0, 1]);
+    twistShot(h, 1, chill);
+    expect(egg.slowMult).toBe(0.75);
+    // Set at the hit: a second on from then, which is at most a few steps ago.
+    expect(egg.slowUntil).toBeGreaterThan(h.world.time + 1 - 0.2);
+    expect(egg.slowUntil).toBeLessThanOrEqual(h.world.time + 1);
+    const first = egg.slowUntil;
+    h.run(0.5);
+    twistShot(h, 1, chill);
+    expect(egg.slowUntil).toBeCloseTo(first + 0.5 + (egg.slowUntil - first - 0.5), 9);
+    expect(egg.slowUntil - first).toBeGreaterThan(0.5);
+
+    h.combat.killEnemy(egg, 'script');
+    h.step();
+    const boss = h.spawn('frost_matriarch', 3, 0);
+    twistShot(h, 1, chill);
+    expect(boss.slowMult).toBeCloseTo(0.9, 9);
+    // A recycled slot starts unslowed (spawnEnemy resets both fields).
+    h.combat.killEnemy(boss, 'script');
+    h.step();
+    const fresh = h.spawn('hive_egg', 5, 5);
+    expect([fresh.slowUntil, fresh.slowMult]).toEqual([0, 1]);
+  });
+
+  it('linger: a Seed Drum shell leaves a 3 m cloud that deals 8 × damage multiplier a second for 3 s', () => {
+    const h = harness({ patch: (s) => void (s.equipped.heavy = 'relic_seed_drum') });
+    h.combat.loadout.select('heavy', h.world.time);
+    h.run(0.3);
+    const egg = h.spawn('hive_egg', 10, 0);
+    h.aim = { x: 10, z: 0 };
+    h.input.buttons.fire.down = true;
+    h.step();
+    h.input.buttons.fire.down = false;
+    // The shell flies 9.4 m at 16 m/s, then bursts.
+    let steps = 0;
+    while (h.of('combat:blast').length === 0 && steps++ < 120) h.step();
+    expect(h.combat.cloudsAlive).toBe(1);
+    const cloud = h.combat.clouds.find((c) => c.until > h.world.time);
+    expect(cloud).toMatchObject({ x: 10, z: 0, radius: 3, dps: 8 });
+    expect((cloud?.until ?? 0) - h.world.time).toBeCloseTo(3, 6);
+    const before = egg.hp;
+    h.run(1);
+    expect(before - egg.hp).toBeCloseTo(8 * h.world.stats.damageMult, 3);
+    // It hurts nothing of the player's and lands no extra blast.
+    expect(h.world.player.hp).toBe(h.world.stats.maxHp);
+    expect(h.of('combat:blast')).toHaveLength(1);
+    h.run(2.1);
+    expect(h.combat.cloudsAlive).toBe(0);
+    const after = egg.hp;
+    h.run(0.5);
+    expect(egg.hp).toBe(after);
+  });
+
+  it('linger: at most 6 clouds — a 7th replaces the oldest (56-e); a frag leaves none', () => {
+    const linger = twistOfKind('relic_seed_drum', 'linger');
+    const h = harness();
+    for (let k = 0; k < 7; k++) {
+      h.shot({ lob: true, x: 0, z: 0, vx: 1, vz: 0, targetX: k * 10, targetZ: 0, ttl: STEP / 2, flight: STEP / 2, blastRadius: 3, blastFalloff: 0.5, damage: 1, twist: linger });
+      h.run(0.1);
+    }
+    expect(MAX_LINGER_CLOUDS).toBe(6);
+    expect(h.combat.clouds).toHaveLength(6);
+    expect(h.combat.cloudsAlive).toBe(6);
+    const xs = h.combat.clouds.filter((c) => c.until > h.world.time).map((c) => c.x).sort((a, b) => a - b);
+    expect(xs).toEqual([10, 20, 30, 40, 50, 60]); // the first, at 0, went
+    const frag = harness();
+    frag.combat.throwExplosive(FRAG, 6, 0);
+    frag.run(1);
+    expect(frag.of('combat:blast')).toHaveLength(1);
+    expect(frag.combat.cloudsAlive).toBe(0);
+  });
+
+  it('vent: a Slag Vent lock blasts 3.5 m at the player — an enemy at 3 m takes 60 × damage multiplier with falloff, the player nothing', () => {
+    const h = harness({ patch: (s) => void (s.equipped.primary = 'relic_slag_vent') });
+    const egg = h.spawn('hive_egg', 3, 0);
+    const far = h.spawn('hive_egg', 0, 6);
+    h.events.emit('weapon:locked', { slot: 'primary', itemId: 'relic_slag_vent' });
+    h.step();
+    expect(h.of('combat:blast')).toEqual([{ x: 0, z: 0, radius: 3.5 }]);
+    const d = 3 - egg.radius;
+    const expected = Math.max(1, Math.round(60 * h.world.stats.damageMult * (1 - (1 - EXPLOSIVE_FALLOFF) * (d / 3.5))));
+    expect(egg.maxHp - egg.hp).toBe(expected);
+    expect(far.hp).toBe(far.maxHp);
+    expect(h.world.player.hp).toBe(h.world.stats.maxHp);
+  });
+
+  it('vent: a held trigger that locks the Slag Vent vents once; a Rotary Cannon lock vents nothing', () => {
+    const vent = harness({ patch: (s) => void (s.equipped.primary = 'relic_slag_vent') });
+    vent.aim = { x: 0, z: -20 };
+    vent.input.buttons.fire.down = true;
+    vent.run(6);
+    expect(vent.of('weapon:locked')).toEqual([{ slot: 'primary', itemId: 'relic_slag_vent' }]);
+    expect(vent.of('combat:blast')).toHaveLength(1);
+    expect(vent.world.player.hp).toBe(vent.world.stats.maxHp);
+
+    const rotary = harness({ patch: (s) => void (s.equipped.primary = 'mg_rotary') });
+    rotary.aim = { x: 0, z: -20 };
+    rotary.input.buttons.fire.down = true;
+    rotary.run(8);
+    expect(rotary.of('weapon:locked')).toHaveLength(1);
+    expect(rotary.of('combat:blast')).toHaveLength(0);
+  });
+
+  it('seek: the shot takes the nearest enemy within 0.7 rad and range, turns at most 2.1 rad/s, and flies straight once it dies', () => {
+    const h = harness({ patch: (s) => void (s.equipped.heavy = 'relic_seeker') });
+    h.combat.loadout.select('heavy', h.world.time);
+    h.run(0.3);
+    h.spawn('hive_egg', 0, 9); // 90° off the aim: outside the cone
+    const quarry = h.spawn('hive_egg', 16, 6); // 0.36 rad off the aim
+    h.aim = { x: 20, z: 0 };
+    h.input.buttons.fire.down = true;
+    h.step();
+    h.input.buttons.fire.down = false;
+    expect(h.world.projectiles.size).toBe(1);
+    const rocket = h.world.projectiles.at(0);
+    expect(rocket.seekTarget).toBe(quarry.id);
+    expect(rocket.seekTurn).toBe(2.1);
+    const launched = Math.atan2(rocket.vz, rocket.vx);
+    let heading = launched;
+    for (let k = 0; k < 20; k++) {
+      h.step();
+      const next = Math.atan2(rocket.vz, rocket.vx);
+      // Toward the quarry, by at most 2.1 rad/s — none once it points at it.
+      expect(next - heading).toBeGreaterThanOrEqual(-1e-12);
+      expect(next - heading).toBeLessThanOrEqual(2.1 * STEP + 1e-9);
+      expect(Math.hypot(rocket.vx, rocket.vz)).toBeCloseTo(18, 6); // the speed is kept
+      heading = next;
+    }
+    expect(heading - launched).toBeGreaterThan(0.2);
+    h.combat.killEnemy(quarry, 'script');
+    h.step();
+    expect(rocket.seekTarget).toBe(-1);
+    heading = Math.atan2(rocket.vz, rocket.vx);
+    h.step();
+    expect(Math.atan2(rocket.vz, rocket.vx)).toBe(heading); // straight on (56-d)
+  });
+
+  it('seek: with nothing in the cone the shot seeks nothing', () => {
+    const h = harness({ patch: (s) => void (s.equipped.heavy = 'relic_seeker') });
+    h.combat.loadout.select('heavy', h.world.time);
+    h.run(0.3);
+    h.spawn('hive_egg', 0, 9);
+    h.spawn('hive_egg', 30, 0); // in the cone, out of the 22 m range
+    h.aim = { x: 20, z: 0 };
+    h.input.buttons.fire.down = true;
+    h.step();
+    expect(h.world.projectiles.at(0).seekTarget).toBe(-1);
+  });
+});
+
+describe('the flare and the stim (SPEC-056 §4.5)', () => {
+  const FLARE = ITEMS.flare.effect;
+
+  it('throwFlare lobs at 14 m/s to the aim point, clamped to 12 m, and lands burning 60 s', () => {
+    const h = harness();
+    expect(h.combat.throwFlare(FLARE, 20, 0)).toBe(true);
+    const p = h.world.projectiles.at(0);
+    expect(p.lob).toBe(true);
+    expect(Math.hypot(p.vx, p.vz)).toBeCloseTo(THROW_SPEED, 6);
+    expect([p.targetX, p.targetZ]).toEqual([12, 0]);
+    h.run(1);
+    expect(h.world.projectiles.size).toBe(0);
+    expect(h.of('combat:blast')).toHaveLength(0); // it lands; nothing blows up
+    expect(h.combat.flaresBurning).toBe(1);
+    const flare = h.combat.flares.find((f) => f.until > h.world.time);
+    expect(flare).toMatchObject({ x: 12, z: 0 });
+    expect((flare?.until ?? 0) - h.world.time).toBeGreaterThan(59);
+    expect((flare?.until ?? 0) - h.world.time).toBeLessThanOrEqual(60);
+    // A short throw lands where it was aimed.
+    expect(h.combat.throwFlare(FLARE, 3, 4)).toBe(true);
+    h.run(1);
+    expect(h.combat.flares.some((f) => f.x === 3 && f.z === 4)).toBe(true);
+    h.run(60);
+    expect(h.combat.flaresBurning).toBe(0);
+  });
+
+  it('at most 2 flares burn — a third replaces the oldest (56-f); a downed player throws none', () => {
+    const h = harness();
+    expect(MAX_FLARES).toBe(2);
+    for (const x of [4, 6, 8]) {
+      h.combat.throwFlare(FLARE, x, 0);
+      h.run(1);
+    }
+    expect(h.combat.flares).toHaveLength(2);
+    expect(h.combat.flaresBurning).toBe(2);
+    expect(h.combat.flares.map((f) => f.x).sort()).toEqual([6, 8]);
+    h.world.player.alive = false;
+    expect(h.combat.throwFlare(FLARE, 4, 0)).toBe(false);
+    expect(h.world.projectiles.size).toBe(0);
+  });
+
+  it('below, an enemy within 12 m of a burning flare is lit for auto-fire; the surface ignores it', () => {
+    const h = harness();
+    h.world.light = { on: false };
+    h.world.sight = DARK_SIGHT;
+    h.spawn('hive_egg', 13, 0); // inside the 14 m range, past the 9 m sight
+    h.input.autoFire = true;
+    h.run(0.5);
+    expect(h.world.projectiles.size).toBe(0);
+    h.input.autoFire = false;
+    h.combat.throwFlare(FLARE, 12, 0);
+    h.run(1);
+    expect(inFlare(13, 0, h.combat.flares, h.world.time)).toBe(true);
+    h.input.autoFire = true;
+    h.step();
+    expect(h.of('weapon:fired')).toHaveLength(1);
+  });
+
+  it('a level swap puts the flares and the clouds out', () => {
+    const h = harness();
+    h.combat.throwFlare(FLARE, 5, 0);
+    h.run(1);
+    expect(h.combat.flaresBurning).toBe(1);
+    h.combat.clearLevel();
+    expect(h.combat.flaresBurning).toBe(0);
+    expect(h.combat.cloudsAlive).toBe(0);
+  });
+
+  it('the stim fills the pool and clears exhaustion; a full pool that is not exhausted refuses it (56-g)', () => {
+    const h = harness();
+    const p = h.world.player;
+    expect(STAMINA_MAX).toBe(100);
+    expect(staminaFull(p)).toBe(true);
+    p.stamina = 12;
+    p.exhausted = true;
+    expect(staminaFull(p)).toBe(false);
+    h.combat.applyConsumable(ITEMS.stim.effect);
+    expect([p.stamina, p.exhausted]).toEqual([STAMINA_MAX, false]);
+    expect(staminaFull(p)).toBe(true);
+    // Full but exhausted (a stale flag) still takes one.
+    p.exhausted = true;
+    expect(staminaFull(p)).toBe(false);
+    expect(FLARE_RADIUS).toBe(ITEMS.flare.effect.radius);
   });
 });

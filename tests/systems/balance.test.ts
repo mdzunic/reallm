@@ -21,6 +21,7 @@ import {
   lootGivenItems,
   sideTokensThrough,
   totalTokenSink,
+  treasureTokens,
   worstCaseTokensBefore,
 } from '@/systems/Balance';
 import { TOKENS_PER_LEVEL, levelForXp } from '@/systems/Progression';
@@ -94,12 +95,15 @@ describe('the invariants (§7)', () => {
     const sink = totalTokenSink();
     // SPEC-029 §4.10: the five arsenal prices add 370 to gear — 500 → 870.
     expect(sink).toEqual({ ship: 1095, gear: 870, companions: 415, total: 2380 });
-    // Main 670 + side 104 + 25 × 19 levels (PLAN §7).
-    expect(completionistTokens()).toBe(670 + 104 + 25 * (COMPLETIONIST_LEVEL - 1));
-    expect(completionistTokens()).toBe(1249);
+    // Main 670 + side 104 + 25 × 19 levels (PLAN §7), and SPEC-056 §4.2's
+    // vault treasure — 5 tokens a vault, 30 in all.
+    expect(treasureTokens()).toBe(30);
+    expect(completionistTokens()).toBe(670 + 104 + 25 * (COMPLETIONIST_LEVEL - 1) + treasureTokens());
+    expect(completionistTokens()).toBe(1279);
     expect(sink.total).toBeGreaterThanOrEqual(1.5 * completionistTokens());
-    // SPEC-029 §4.10: a completionist now affords 52 % of everything.
-    expect(Math.round((completionistTokens() / sink.total) * 100)).toBe(52);
+    // SPEC-029 §4.10: a completionist affords 52 % of everything; SPEC-056
+    // §4.2's 30 tokens of treasure move it to 54 %.
+    expect(Math.round((completionistTokens() / sink.total) * 100)).toBe(54);
   });
 
   // SPEC-039 §4.2, PLAN R18 decision 4b: the 2,380 counts ship tiers that act
@@ -110,7 +114,9 @@ describe('the invariants (§7)', () => {
   it('4b. the decision sink is at least 0.75 × a completionist\'s tokens', () => {
     expect(decisionSink()).toEqual({ gear: 500, companions: 335, gate: 140, total: 975 });
     expect(decisionSink().total).toBeGreaterThanOrEqual(0.75 * completionistTokens());
-    expect(0.75 * completionistTokens()).toBe(936.75);
+    // SPEC-056 §4.2: 975 ≥ 0.75 × 1,279 = 959.25, with 15.75 to spare.
+    expect(0.75 * completionistTokens()).toBe(959.25);
+    expect(decisionSink().total - 0.75 * completionistTokens()).toBe(15.75);
   });
 
   it('4c. the recommended loadout buys nothing a loot table hands out', () => {

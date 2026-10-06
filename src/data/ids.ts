@@ -154,6 +154,13 @@ export const STORY_FLAGS = [
   'memory_roof',
   'memory_tap',
   'memory_stair',
+  // SPEC-056 §4.7: the six archive shards — each vault's log, set as it starts.
+  'shard_cinder4',
+  'shard_vetra',
+  'shard_thessaly',
+  'shard_ferrum',
+  'shard_hive',
+  'shard_eden',
 ] as const;
 export type FlagId = (typeof STORY_FLAGS)[number];
 

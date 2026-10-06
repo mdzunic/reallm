@@ -27,8 +27,12 @@ import {
   INVENTORY_SLOTS,
   TECH_DISCOUNT_PER_POINT,
   discountTokens,
+  isRelic,
+  joinRewards,
   noRoomText,
+  ownedRelics,
   ownsItem,
+  recipeUnlocked,
   refuelVoucherText,
   type Fail,
 } from '@/systems/Economy';
@@ -1245,6 +1249,7 @@ describe('claimCache and the flawless part (SPEC-055 §4.8)', () => {
     const before = economy.count('medkit');
     const lithium = data.resources.lithium ?? 0;
     const result = economy.claimCache('cinder4_vault');
+    // SPEC-056 §4.1: the vault's treasure rides in what the claim paid.
     expect(result).toEqual({
       ok: true,
       reward: {
@@ -1254,6 +1259,9 @@ describe('claimCache and the flawless part (SPEC-055 §4.8)', () => {
           { itemId: 'coolant_pack', qty: 1 },
           { itemId: 'medkit', qty: 1 },
         ],
+        tokens: 5,
+        relic: 'relic_last_word',
+        shard: 'shard_cinder4',
       },
     });
     expect(data.resources.lithium).toBe(lithium + 8);
@@ -1297,5 +1305,185 @@ describe('claimCache and the flawless part (SPEC-055 §4.8)', () => {
     expect(data.resources.oil).toBe(oil + 15);
     expect(economy.count('frag_grenade')).toBe(2);
     expect(economy.count('plasma_cell')).toBe(1);
+  });
+});
+
+// ------------------------------------------------------------- SPEC-056
+
+describe('vault tokens (SPEC-056 §4.2)', () => {
+  it('claimCache(cinder4_vault) adds 5 tokens once, as cache:<id>, and no XP', () => {
+    const { economy, data, events } = world();
+    const tokens = data.player.tokens;
+    const xp = data.player.xp;
+    expect(economy.claimCache('cinder4_vault').ok).toBe(true);
+    expect(data.player.tokens).toBe(tokens + 5);
+    expect(events.of('tokens:changed')).toEqual([{ delta: 5, total: tokens + 5, reason: 'cache:cinder4_vault' }]);
+    expect(data.player.xp).toBe(xp);
+    expect(events.of('player:xp')).toEqual([]);
+    // A second call returns `claimed` and pays nothing (E89).
+    events.clear();
+    expect(economy.claimCache('cinder4_vault')).toEqual({ ok: false, reason: 'claimed' });
+    expect(data.player.tokens).toBe(tokens + 5);
+    expect(events.emitted).toEqual([]);
+  });
+
+  it('a forced vault pays its tokens too — only the flawless medkit is held back', () => {
+    const { economy, data } = world();
+    const tokens = data.player.tokens;
+    economy.claimCache('eden_vault', { flawless: false });
+    expect(data.player.tokens).toBe(tokens + 5);
+  });
+
+  it('no other cache pays tokens', () => {
+    const { economy, data } = world();
+    const tokens = data.player.tokens;
+    for (const id of ['cinder4_loose_a', 'cinder4_loose_b', 'cinder4_relic', 'vetra_loose_b'] as const) economy.claimCache(id);
+    expect(data.player.tokens).toBe(tokens);
+  });
+
+  it('joinRewards keeps the treasure fields and adds the tokens', () => {
+    expect(joinRewards({ tokens: 5, relic: 'relic_seeker', shard: 'shard_hive' }, { items: [{ itemId: 'medkit', qty: 1 }] })).toEqual({
+      items: [{ itemId: 'medkit', qty: 1 }],
+      tokens: 5,
+      relic: 'relic_seeker',
+      shard: 'shard_hive',
+    });
+    expect(joinRewards({ swatch: 'eden_vault' }, { tokens: 2, blueprint: 'flare' })).toEqual({ tokens: 2, blueprint: 'flare', swatch: 'eden_vault' });
+  });
+});
+
+describe('the relic rack (SPEC-056 §4.3)', () => {
+  it('relics() is the claimed vaults\' relics in CACHE_IDS order, and owns() is true exactly for them', () => {
+    const { economy, data } = world();
+    expect(economy.relics()).toEqual([]);
+    expect(economy.owns('relic_last_word')).toBe(false);
+    economy.claimCache('ferrum_vault');
+    economy.claimCache('cinder4_vault');
+    economy.claimCache('eden_vault'); // Eden's vault names no relic
+    expect(economy.relics()).toEqual(['relic_last_word', 'relic_slag_vent']);
+    expect(ownedRelics(data)).toEqual(['relic_last_word', 'relic_slag_vent']);
+    for (const relic of ['relic_last_word', 'relic_cold_coil', 'relic_seed_drum', 'relic_slag_vent', 'relic_seeker'] as const) {
+      expect(economy.owns(relic), relic).toBe(relic === 'relic_last_word' || relic === 'relic_slag_vent');
+      expect(isRelic(relic), relic).toBe(true);
+    }
+    expect(isRelic('pistol_magnum')).toBe(false);
+    expect(isRelic('flare')).toBe(false);
+    // The rack derives from `claimed`, not the pack: nothing was added to it.
+    expect(data.inventory.some((entry) => isRelic(entry.itemId))).toBe(false);
+  });
+
+  it('addItem(relic) adds 0 and emits nothing', () => {
+    const { economy, data, events } = world();
+    economy.claimCache('cinder4_vault');
+    events.clear();
+    expect(economy.addItem('relic_last_word', 1)).toEqual({ added: 0, blocked: 1 });
+    expect(economy.addItem('relic_seeker', 3)).toEqual({ added: 0, blocked: 3 });
+    expect(economy.count('relic_last_word')).toBe(0);
+    expect(data.inventory.some((entry) => isRelic(entry.itemId))).toBe(false);
+    expect(events.emitted).toEqual([]);
+  });
+
+  it('a relic claimed with a full pack goes to the rack and spills nothing of its own (E90)', () => {
+    const { economy, data, events } = world(MARINE, fillInventory);
+    economy.claimCache('cinder4_vault');
+    expect(economy.relics()).toEqual(['relic_last_word']);
+    // The vault's ordinary kit still has no room (SPEC-054) — and only it.
+    expect(events.of('item:noRoom').map((entry) => entry.itemId).sort()).toEqual(['coolant_pack', 'medkit', 'plasma_cell']);
+    expect(data.inventory).toEqual([{ itemId: 'wheat_ration', qty: ITEMS.wheat_ration.stack * INVENTORY_SLOTS }]);
+  });
+
+  it('equip: a relic over the pistol puts the pistol in the pack; the pistol over the relic racks the relic', () => {
+    const { economy, data, events, requested } = world();
+    economy.claimCache('cinder4_vault');
+    expect(data.equipped.sidearm).toBe('pistol_service');
+    expect(economy.equip('relic_last_word')).toEqual({ ok: true });
+    expect(data.equipped.sidearm).toBe('relic_last_word');
+    expect(economy.count('pistol_service')).toBe(1);
+    expect(economy.count('relic_last_word')).toBe(0);
+    expect(events.of('gear:equipped')).toContainEqual({ slot: 'sidearm', itemId: 'relic_last_word' });
+    expect(requested).toContain('purchase');
+    expect(economy.owns('relic_last_word')).toBe(true);
+    // Already worn: there is nothing to equip.
+    expect(economy.equip('relic_last_word')).toEqual({ ok: false, reason: 'not_found' });
+
+    expect(economy.equip('pistol_service')).toEqual({ ok: true });
+    expect(data.equipped.sidearm).toBe('pistol_service');
+    expect(economy.count('pistol_service')).toBe(0);
+    // Back on the rack, not in the pack.
+    expect(economy.count('relic_last_word')).toBe(0);
+    expect(data.inventory.some((entry) => isRelic(entry.itemId))).toBe(false);
+    expect(economy.relics()).toEqual(['relic_last_word']);
+  });
+
+  it('equip: an unclaimed relic is not_found; a relic over a relic swaps them on the rack', () => {
+    const { economy, data } = world();
+    expect(economy.equip('relic_seeker')).toEqual({ ok: false, reason: 'not_found' });
+    economy.claimCache('thessaly_vault');
+    economy.claimCache('hive_vault');
+    // The heavy slot starts empty: nothing to swap back.
+    expect(data.equipped.heavy).toBeNull();
+    expect(economy.equip('relic_seed_drum')).toEqual({ ok: true });
+    const pack = JSON.stringify(data.inventory);
+    expect(economy.equip('relic_seeker')).toEqual({ ok: true });
+    expect(data.equipped.heavy).toBe('relic_seeker');
+    expect(JSON.stringify(data.inventory)).toBe(pack);
+  });
+
+  it('equip: a displaced non-relic with no room in the pack refuses with inventory_full and moves nothing (56-a)', () => {
+    const { economy, data, events } = world();
+    economy.claimCache('cinder4_vault');
+    fillInventory(data);
+    events.clear();
+    const before = JSON.stringify({ equipped: data.equipped, inventory: data.inventory });
+    expect(economy.equip('relic_last_word')).toEqual({ ok: false, reason: 'inventory_full' });
+    expect(JSON.stringify({ equipped: data.equipped, inventory: data.inventory })).toBe(before);
+    expect(events.of('gear:equipped')).toEqual([]);
+  });
+
+  it('a relic is never a ladder rung: buying the Hand Cannon still wants only the Service Pistol', () => {
+    const { economy, data } = world();
+    data.player.tokens = 500;
+    // The Last Word (handgun T1) sits between the pistol (T0) and the cannon (T2).
+    expect(economy.buyGear('pistol_magnum')).toEqual({ ok: true });
+    // …and a relic is never for sale.
+    expect(economy.buyGear('relic_last_word')).toEqual({ ok: false, reason: 'not_found' });
+    expect(economy.price('gear', 'relic_slag_vent')).toBeNull();
+  });
+});
+
+describe('blueprints (SPEC-056 §4.5)', () => {
+  it("craft('flare') is locked, then ok after claimCache('vetra_loose_b')", () => {
+    const { economy, data } = world();
+    data.resources.oil = 100;
+    data.resources.wheat = 100;
+    const before = { ...data.resources };
+    expect(recipeUnlocked(data, 'flare')).toBe(false);
+    expect(economy.craft('flare')).toEqual({ ok: false, reason: 'locked' });
+    expect(data.resources).toEqual(before); // nothing spent
+    expect(economy.count('flare')).toBe(0);
+    economy.claimCache('vetra_loose_b');
+    expect(recipeUnlocked(data, 'flare')).toBe(true);
+    const oil = data.resources.oil;
+    const wheat = data.resources.wheat;
+    expect(economy.craft('flare')).toEqual({ ok: true, qty: 1 });
+    expect(economy.count('flare')).toBe(1);
+    expect([data.resources.oil, data.resources.wheat]).toEqual([oil - 5, wheat - 5]);
+  });
+
+  it("craft('stim') waits for thessaly_loose_b; the old recipes need no blueprint", () => {
+    const { economy, data } = world();
+    data.resources.wheat = 100;
+    data.resources.water = 100;
+    expect(economy.craft('stim')).toEqual({ ok: false, reason: 'locked' });
+    // A locked recipe is refused before the resources are checked.
+    data.resources.wheat = 0;
+    expect(economy.craft('stim')).toEqual({ ok: false, reason: 'locked' });
+    data.resources.wheat = 100;
+    economy.claimCache('thessaly_loose_b');
+    expect(economy.craft('stim', 2)).toEqual({ ok: true, qty: 2 });
+    expect(economy.count('stim')).toBe(2);
+    for (const recipe of ['wheat_ration', 'medkit', 'coolant_pack', 'frag_grenade', 'landmine', 'demo_charge'] as const) {
+      expect(recipeUnlocked(data, recipe), recipe).toBe(true);
+    }
   });
 });

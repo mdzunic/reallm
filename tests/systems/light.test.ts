@@ -14,6 +14,9 @@ import {
   LIGHT_SEEK_AGGRO,
   lightAggroMult,
   lit,
+  FLARE_RADIUS,
+  inFlare,
+  type FlareState,
 } from '@/systems/Light';
 
 const DEG = Math.PI / 180;
@@ -125,5 +128,33 @@ describe('lightAggroMult (SPEC-054 §4.6)', () => {
       expect(lightAggroMult(archetype, undefined, true)).toBe(1);
       expect(lightAggroMult(archetype, undefined, false)).toBe(1);
     }
+  });
+});
+
+describe('inFlare (SPEC-056 §4.5)', () => {
+  const flares: FlareState[] = [
+    { x: 10, z: 0, until: 60 },
+    { x: -20, z: 5, until: 30 },
+  ];
+
+  it('is true within 12 m of a burning flare, on its edge included', () => {
+    expect(FLARE_RADIUS).toBe(12);
+    expect(inFlare(10, 0, flares, 0)).toBe(true);
+    expect(inFlare(21.9, 0, flares, 0)).toBe(true);
+    expect(inFlare(10, 12, flares, 0)).toBe(true);
+    expect(inFlare(-20, -6.9, flares, 29)).toBe(true); // the second one
+  });
+
+  it('is false outside every flare', () => {
+    expect(inFlare(22.1, 0, flares, 0)).toBe(false);
+    expect(inFlare(0, 20, flares, 0)).toBe(false);
+    expect(inFlare(0, 0, [], 0)).toBe(false);
+  });
+
+  it('is false once a flare is past its until — a burnt-out flare lights nothing', () => {
+    expect(inFlare(-20, 5, flares, 30)).toBe(false);
+    expect(inFlare(10, 0, flares, 59.99)).toBe(true);
+    expect(inFlare(10, 0, flares, 60)).toBe(false);
+    expect(inFlare(10, 0, [{ x: 10, z: 0, until: -Infinity }], 0)).toBe(false);
   });
 });

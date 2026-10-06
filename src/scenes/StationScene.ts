@@ -629,7 +629,8 @@ export class StationScene extends UiScene<'station'> {
         new ShopPanel(box, shared);
         return;
       case 'character':
-        new CharacterPanel(box, shared);
+        // SPEC-056 §4.6: the Locker offers this device's unlocked swatches.
+        new CharacterPanel(box, { ...shared, unlocks: () => this.services.settings.get().unlocks });
         return;
     }
   }

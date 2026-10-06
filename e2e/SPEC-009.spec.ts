@@ -234,10 +234,10 @@ test.describe('SPEC-009 content data layer', () => {
       'aria',
     ]);
     // PLAN R9 added the five interlude flags (SPEC-021 §4.7), PLAN R19 the
-    // eleven clue flags (SPEC-048 §4.2), and SPEC-049 §4.8 the letters, the
-    // body's clues and the memory answers (28 → 40) and Iris — each a
-    // deliberate pin change.
-    expect(c.idUnions['STORY_FLAGS']).toHaveLength(40);
+    // eleven clue flags (SPEC-048 §4.2), SPEC-049 §4.8 the letters, the
+    // body's clues and the memory answers (28 → 40) and Iris, and SPEC-056
+    // §4.7 the six archive shards (40 → 46) — each a deliberate pin change.
+    expect(c.idUnions['STORY_FLAGS']).toHaveLength(46);
     expect(c.idUnions['STORY_FLAGS']).toContain('chapter1_done');
     expect(c.idUnions['SPEAKERS']).toEqual(['aria', 'command', 'scav', 'log', 'player', 'warden', 'home']);
     expect(c.idUnions['MESH_RECIPE_IDS']).toHaveLength(10);
@@ -277,7 +277,8 @@ test.describe('SPEC-009 content data layer', () => {
     // AC-5: the items of §4.2, with the stats that table pins. SPEC-025 §4.2
     // adds the Service Pistol, the free sidearm every class now lands with, and
     // SPEC-029 §4.1/§4.3 add the magnum, the two machine guns, the two launchers
-    // and the three explosives — twenty-one of them, handgun line leading.
+    // and the three explosives — twenty-one of them, handgun line leading —
+    // and SPEC-056 appends its seven: twenty-eight.
     expect(c.items).toEqual([
       'pistol_service',
       'weapon_kinetic',
@@ -300,6 +301,14 @@ test.describe('SPEC-009 content data layer', () => {
       'frag_grenade',
       'landmine',
       'demo_charge',
+      // SPEC-056 §4.3, §4.5: the five relics and the two blueprints' items.
+      'relic_last_word',
+      'relic_cold_coil',
+      'relic_seed_drum',
+      'relic_slag_vent',
+      'relic_seeker',
+      'flare',
+      'stim',
     ]);
     expect(c.itemStats).toEqual({
       pistol_service: ['sidearm', 'handgun', 0, 9],
@@ -344,8 +353,9 @@ test.describe('SPEC-009 content data layer', () => {
     expect(c.followers).toContain('science_probe'); // AC-14
     expect(c.companions).toHaveLength(5); // AC-15
     expect(c.upgrades).toEqual(['engine', 'hull', 'shield', 'cargo', 'weapon']); // AC-16
-    // AC-17, plus the three explosive recipes SPEC-029 §4.8 adds to the bench.
-    expect(c.recipes).toEqual(['wheat_ration', 'medkit', 'coolant_pack', 'frag_grenade', 'landmine', 'demo_charge']);
+    // AC-17, plus the three explosive recipes SPEC-029 §4.8 adds to the bench
+    // and SPEC-056 §4.5's two blueprints.
+    expect(c.recipes).toEqual(['wheat_ration', 'medkit', 'coolant_pack', 'frag_grenade', 'landmine', 'demo_charge', 'flare', 'stim']);
     // AC-18: tuning is the one §4 table that is a typed object rather than a
     // keyed roster, so it is pinned by the constants the economy spec reads.
     for (const key of ['XP_BASE', 'XP_PER_LEVEL', 'LEVEL_CAP', 'CARGO_BASE', 'START_OIL'])

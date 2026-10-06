@@ -21,6 +21,7 @@ export * from '@/data/characters';
 export * from '@/data/clues';
 export * from '@/data/companions';
 export * from '@/data/contracts';
+export * from '@/data/cosmetics';
 export * from '@/data/credits';
 export * from '@/data/dialogue';
 export * from '@/data/enemies';

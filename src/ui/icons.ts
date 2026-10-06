@@ -33,6 +33,9 @@ export const EFFECT_GLYPHS: Readonly<Record<ConsumableEffect['kind'], string>> =
   hazard_immunity: '☂',
   damage_boost: '↯',
   explosive: '✸',
+  // SPEC-056 §4.5: the flare and the stim.
+  light: '☼',
+  stamina: '»',
 };
 
 const COMPANION_GLYPH = '⌬';

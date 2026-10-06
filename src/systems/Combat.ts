@@ -57,10 +57,12 @@ import {
   type GearTier,
   type Item,
   type ItemId,
+  type LightEffect,
   type LootTableId,
   type ResourceId,
   type WeaponLine,
   type WeaponSlot,
+  type WeaponTwist,
 } from '@/data/index';
 import type { WeaponAutoSwapMode } from '@/core/Settings';
 import {
@@ -88,10 +90,10 @@ import {
 import { clampToSeal, type ArenaState, type ObstacleGrid } from '@/entities/World';
 import { isDashing } from '@/systems/Dash';
 import { BOSS_FIRST_MOVE_SECONDS, updateEnemy, type AiHooks, type WindupKind } from '@/systems/EnemyAi';
-import { lit } from '@/systems/Light';
+import { inFlare, lit, type FlareState } from '@/systems/Light';
 import { FIRE_CARRY, Loadout } from '@/systems/Loadout';
 import { updateProjectiles, type ProjectileHooks } from '@/systems/Projectiles';
-import { isHolstered, isLoud } from '@/systems/Stamina';
+import { isHolstered, isLoud, STAMINA_MAX } from '@/systems/Stamina';
 
 export type { DamageSource } from '@/data/index';
 
@@ -172,6 +174,30 @@ export const CASUAL_WEATHER_MULT = 0.7;
 export const AUTO_LEAD_MAX = 3;
 /** §4.2: a telegraph hit knocks the player this far — from a centre, or across a lane. */
 export const TELEGRAPH_KNOCKBACK = 1.0;
+
+// ------------------------------------------------ SPEC-056 (initial tuning)
+
+/** §4.4: the Seed Drum's spore clouds alive at once; a seventh replaces the oldest (56-e). */
+export const MAX_LINGER_CLOUDS = 6;
+/** §4.5: flares burning at once; a third replaces the oldest (56-f). */
+export const MAX_FLARES = 2;
+
+/** §4.4: one `linger` cloud — where it hangs, until when, how wide and how hard. */
+export interface LingerCloud {
+  x: number;
+  z: number;
+  until: number;
+  radius: number;
+  dps: number;
+}
+
+/**
+ * §4.5 (56-g): a stim is refused, and not spent, at a full pool that is not
+ * exhausted — the scene asks before it spends one, as E40 asks of a heal.
+ */
+export function staminaFull(p: Pick<PlayerEntity, 'stamina' | 'exhausted'>): boolean {
+  return p.stamina >= STAMINA_MAX && !p.exhausted;
+}
 
 // --------------------------------------------------------------- pure pieces
 
@@ -321,13 +347,21 @@ export function rollAffixes(
 
 /**
  * The unique gear item of a line at a tier (§4.7, SPEC-025 §4.2: tiers are
- * unique per *line*, so a handgun and a rifle may both be tier 0).
+ * unique per *line*, so a handgun and a rifle may both be tier 0). SPEC-056
+ * §4.3: a relic is no rung of its line, so it is never the answer.
  */
 export function gearAt(line: GearLine, tier: GearTier): ItemId {
-  for (const item of Object.values(ITEMS)) {
-    if (item.kind !== 'consumable' && item.line === line && item.tier === tier) return item.id;
+  for (const item of Object.values(ITEMS) as Item[]) {
+    if (item.kind === 'consumable' || (item.kind === 'weapon' && item.relic === true)) continue;
+    if (item.line === line && item.tier === tier) return item.id;
   }
   throw new Error(`no ${line} at tier ${tier}`); // content invariant (SPEC-009 §7)
+}
+
+/** SPEC-056 §4.4: a weapon's twist, or `null` — only relics carry one. */
+export function twistOf(itemId: ItemId): WeaponTwist | null {
+  const item: Item = ITEMS[itemId];
+  return item.kind === 'weapon' ? (item.twist ?? null) : null;
 }
 
 // -------------------------------------------------------------------- world
@@ -474,6 +508,44 @@ export class Combat {
   menderPulseCount = 0;
 
   /**
+   * SPEC-056 §4.5: the flares, pooled at `MAX_FLARES` — a slot burns while
+   * `time < until`, and a landing takes the slot that goes out first.
+   */
+  readonly #flares: FlareState[] = Array.from({ length: MAX_FLARES }, () => ({ x: 0, z: 0, until: -Infinity }));
+  /** SPEC-056 §4.4: the Seed Drum's clouds, pooled at `MAX_LINGER_CLOUDS` the same way. */
+  readonly #clouds: LingerCloud[] = Array.from({ length: MAX_LINGER_CLOUDS }, () => ({ x: 0, z: 0, until: -Infinity, radius: 0, dps: 0 }));
+  /** SPEC-056 §4.4: a vent the last lock asked for, set off once the step's hash is built. */
+  #ventPending = false;
+  #ventX = 0;
+  #ventZ = 0;
+  #ventRadius = 0;
+  #ventDamage = 0;
+
+  /** SPEC-056 §3: every flare slot — a slot lights only while `world.time < until` (`inFlare`). */
+  get flares(): readonly FlareState[] {
+    return this.#flares;
+  }
+
+  /** SPEC-056 §4.4: every cloud slot — a slot hangs only while `world.time < until`. */
+  get clouds(): readonly LingerCloud[] {
+    return this.#clouds;
+  }
+
+  /** SPEC-056 §3: the flares burning now, for `sceneInfo.flares`. */
+  get flaresBurning(): number {
+    let count = 0;
+    for (const f of this.#flares) if (this.#world.time < f.until) count++;
+    return count;
+  }
+
+  /** SPEC-056 §3: the linger clouds alive now, for `sceneInfo.clouds`. */
+  get cloudsAlive(): number {
+    let count = 0;
+    for (const c of this.#clouds) if (this.#world.time < c.until) count++;
+    return count;
+  }
+
+  /**
    * SPEC-042 §4.9: the last non-boss enemy the player's shots or blasts
    * damaged — written in place, so the target frame reads a field, not the DOM.
    * The boss has its own frame, and the drone's shots write neither.
@@ -550,6 +622,19 @@ export class Combat {
     events.on('weapon:switched', () => {
       this.#world.player.fireCooldown = 0;
     }, this);
+    // SPEC-056 §4.4: a `vent` relic locking in its own slot vents at the
+    // player. The lock fires mid-firing, before the step's hash is rebuilt, so
+    // the blast waits for it (`update`).
+    events.on('weapon:locked', ({ slot, itemId }) => {
+      const twist = twistOf(itemId);
+      if (twist?.kind !== 'vent' || this.#save.equipped[slot] !== itemId) return;
+      const p = this.#world.player;
+      this.#ventPending = true;
+      this.#ventX = p.x;
+      this.#ventZ = p.z;
+      this.#ventRadius = twist.radius;
+      this.#ventDamage = twist.damage;
+    }, this);
 
     this.#aiHooks = {
       meleeHit: (e, damageMult, knockback) => this.#meleeHit(e, damageMult, knockback),
@@ -574,7 +659,12 @@ export class Combat {
       hitPlayer: (p) => this.#projectileHitPlayer(p),
       hitFollower: (p) => this.#projectileHitFollower(p),
       // SPEC-029 §4.6: rockets and lobs detonate through the one blast path.
-      explode: (p, x, z) => void this.explode(x, z, p.blastRadius, p.damage, p.blastFalloff),
+      // SPEC-056 §4.4: a `linger` shell's blast leaves its cloud behind.
+      explode: (p, x, z) => {
+        this.explode(x, z, p.blastRadius, p.damage, p.blastFalloff);
+        if (p.twist?.kind === 'linger') this.#spawnCloud(x, z, p.twist);
+      },
+      landFlare: (p, x, z) => this.#landFlare(x, z, p.flareSeconds),
     };
   }
 
@@ -593,6 +683,11 @@ export class Combat {
     this.#world.projectiles.clear();
     this.telegraphs.clear();
     this.deployables.clear();
+    // SPEC-056 §4.4, §4.5: flares and spore clouds stay on the level they
+    // were thrown on — they go out with it, as a mine does.
+    for (const f of this.#flares) f.until = -Infinity;
+    for (const c of this.#clouds) c.until = -Infinity;
+    this.#ventPending = false;
   }
 
   // ------------------------------------------------------------------ stats
@@ -638,9 +733,15 @@ export class Combat {
       p.boosts.push({ damageMult: effect.mult, until: time + effect.seconds });
     } else if (effect.kind === 'hazard_immunity') {
       p.hazardImmuneUntil = Math.max(p.hazardImmuneUntil, time + effect.seconds);
+    } else if (effect.kind === 'stamina') {
+      // SPEC-056 §4.5: a stim fills the pool and clears exhaustion. The scene
+      // refuses one at a full pool before it is spent (`staminaFull`, 56-g).
+      p.stamina = STAMINA_MAX;
+      p.exhausted = false;
     }
     // SPEC-029 §4.8: explosives never come through here — the scene routes
-    // them to `throwExplosive`/`deploy` before spending the item.
+    // them to `throwExplosive`/`deploy` before spending the item, and SPEC-056
+    // §4.5 a flare to `throwFlare`.
     this.#recomputeStats();
   }
 
@@ -831,6 +932,11 @@ export class Combat {
     p.flight = 0;
     p.crit = false;
     p.armorPiercing = false;
+    // SPEC-056 §3: nor seeking, twisting or burning as a flare.
+    p.seekTarget = -1;
+    p.seekTurn = 0;
+    p.twist = null;
+    p.flareSeconds = 0;
   }
 
   /** §4.5: phase summons appear in a ring at 6 m around the boss. Never elite. */
@@ -1170,6 +1276,9 @@ export class Combat {
     // stamps a cave pack's `placed` and its 24 m leash after this.
     e.placed = false;
     e.leash = def.leashRadius;
+    // SPEC-056 §3: no chill carries into a recycled slot.
+    e.slowUntil = 0;
+    e.slowMult = 1;
     // Set immediately before the emit, so a subscriber can read the position.
     this.#lastSpawned = e;
     this.#events.emit('enemy:spawned', { enemyId: id, elite: isElite });
@@ -1362,6 +1471,103 @@ export class Combat {
     p.ttl = p.flight;
     p.crit = false;
     p.armorPiercing = false;
+    p.seekTarget = -1;
+    p.seekTurn = 0;
+    p.twist = null;
+    p.flareSeconds = 0;
+  }
+
+  /**
+   * SPEC-056 §4.5: a flare, launched the way `throwExplosive` launches a frag
+   * — a 14 m/s lob to `(toX, toZ)`, clamped to the effect's `range` — that
+   * lands as a flare burning `seconds` (`#landFlare`) rather than a blast. It
+   * hurts nothing. False, and nothing thrown, when the player is down; the
+   * caller spends the item only on true.
+   */
+  throwFlare(effect: LightEffect, toX: number, toZ: number): boolean {
+    const player = this.#world.player;
+    if (!player.alive) return false;
+    let dx = toX - player.x;
+    let dz = toZ - player.z;
+    let len = Math.hypot(dx, dz);
+    if (len > effect.range) {
+      dx *= effect.range / len;
+      dz *= effect.range / len;
+      len = effect.range;
+    }
+    const p = this.#world.projectiles.alloc();
+    p.x = player.x;
+    p.z = player.z;
+    p.vx = len > 1e-6 ? (dx / len) * THROW_SPEED : Math.cos(player.facing) * THROW_SPEED;
+    p.vz = len > 1e-6 ? (dz / len) * THROW_SPEED : Math.sin(player.facing) * THROW_SPEED;
+    p.radius = PLAYER_PROJECTILE_RADIUS;
+    p.damage = 0;
+    p.pierceLeft = 0;
+    p.owner = 'player';
+    if (p.hitIds === null) p.hitIds = new Set();
+    else p.hitIds.clear();
+    p.enemyId = null;
+    p.elite = false;
+    p.blastRadius = 0;
+    p.blastFalloff = 0;
+    p.lob = true;
+    p.targetX = player.x + dx;
+    p.targetZ = player.z + dz;
+    p.flight = len / THROW_SPEED;
+    p.ttl = p.flight;
+    p.crit = false;
+    p.armorPiercing = false;
+    p.seekTarget = -1;
+    p.seekTurn = 0;
+    p.twist = null;
+    p.flareSeconds = effect.seconds;
+    return true;
+  }
+
+  /** SPEC-056 §4.5: a flare lands — into the slot that goes out first, so a third replaces the oldest (56-f). */
+  #landFlare(x: number, z: number, seconds: number): void {
+    let slot = this.#flares[0] as FlareState;
+    for (const f of this.#flares) if (f.until < slot.until) slot = f;
+    slot.x = x;
+    slot.z = z;
+    slot.until = this.#world.time + seconds;
+  }
+
+  /** SPEC-056 §4.4: a `linger` blast's cloud — into the slot that goes out first, so a seventh replaces the oldest (56-e). */
+  #spawnCloud(x: number, z: number, twist: Extract<WeaponTwist, { kind: 'linger' }>): void {
+    let slot = this.#clouds[0] as LingerCloud;
+    for (const c of this.#clouds) if (c.until < slot.until) slot = c;
+    slot.x = x;
+    slot.z = z;
+    slot.until = this.#world.time + twist.seconds;
+    slot.radius = twist.radius;
+    slot.dps = twist.dps;
+  }
+
+  /**
+   * SPEC-056 §4.4: every live cloud deals `dps × damageMult × dt` to each
+   * live, hurtable, unburrowed enemy whose circle reaches it — no crit, no
+   * knockback, no flash and no hit sound (the steps are 1/60 s of a DoT). The
+   * player and the follower are never tested (E42). The step's hash.
+   */
+  #updateClouds(dt: number): void {
+    const w = this.#world;
+    const time = w.time;
+    for (let n = 0; n < this.#clouds.length; n++) {
+      const c = this.#clouds[n] as LingerCloud;
+      if (time >= c.until) continue;
+      const amount = c.dps * w.stats.damageMult * dt;
+      this.#hash.query(c.x, c.z, c.radius + 3, blastCandidates);
+      for (let k = 0; k < blastCandidates.length; k++) {
+        const e = w.enemies.at(blastCandidates[k] as number);
+        if (e.state === 'dead' || e.invulnerable || isBuried(e)) continue;
+        if (Math.hypot(e.x - c.x, e.z - c.z) - e.radius > c.radius) continue;
+        e.hp -= amount;
+        e.lostTrack = 0;
+        if (!e.aggro) this.#aggroFromDamage(e);
+        if (e.hp <= 0) this.killEnemy(e, 'player');
+      }
+    }
   }
 
   /**
@@ -1463,6 +1669,18 @@ export class Combat {
       if (len > 1e-6 && (-p.vx * Math.cos(e.facing) - p.vz * Math.sin(e.facing)) / len >= BULWARK_ARC_COS) {
         amount = Math.max(1, Math.round(p.damage * BULWARK_DAMAGE_MULT));
         guarded = true;
+      }
+    }
+    // SPEC-056 §4.4: the relic shot's twist, read at the hit — `execute`
+    // doubles a hit on a target at or below its line (its HP before the hit,
+    // bosses and elites alike); `chill` slows the target's chase and wander
+    // for its seconds, and a new hit refreshes it.
+    const twist = p.twist;
+    if (twist !== null && !e.invulnerable && e.state !== 'dead') {
+      if (twist.kind === 'execute' && e.hp <= twist.belowHp * e.maxHp) amount = Math.round(amount * twist.mult);
+      else if (twist.kind === 'chill') {
+        e.slowUntil = this.#world.time + twist.seconds;
+        e.slowMult = 1 - (e.def.archetype === 'boss' ? twist.bossSlow : twist.slow);
       }
     }
     this.#damageEnemy(e, amount, p.owner === 'drone' ? 'drone' : 'player', p.crit, guarded);
@@ -1674,13 +1892,15 @@ export class Combat {
    * 11-j: nearest with a clear line wins; if every candidate is blocked, nearest
    * overall. SPEC-054 §4.6: below (`world.sight` set), a candidate farther than
    * the sight counts only while the light falls on it — you cannot shoot what
-   * you cannot see. A held pointer aim or an aim-drag never comes through here.
+   * you cannot see. SPEC-056 §4.5: or a burning flare does. A held pointer
+   * aim or an aim-drag never comes through here.
    */
   #autoTarget(range: number): EnemyEntity | null {
     const p = this.#world.player;
     const enemies = this.#world.enemies;
     const sight = this.#world.sight;
     const lightOn = this.#world.light?.on === true;
+    const time = this.#world.time;
     let best: EnemyEntity | null = null;
     let bestD = Infinity;
     let bestClear: EnemyEntity | null = null;
@@ -1692,7 +1912,10 @@ export class Combat {
       const dz = e.z - p.z;
       const d = Math.hypot(dx, dz);
       if (d > range) continue;
-      if (sight !== undefined && d > sight && !lit(p.x, p.z, p.facing, lightOn, e.x, e.z)) continue;
+      // SPEC-056 §4.5: a burning flare lights what stands within its 12 m.
+      if (sight !== undefined && d > sight && !lit(p.x, p.z, p.facing, lightOn, e.x, e.z) && !inFlare(e.x, e.z, this.#flares, time)) {
+        continue;
+      }
       if (d < bestD) {
         best = e;
         bestD = d;
@@ -1738,7 +1961,40 @@ export class Combat {
     p.crit = false;
     // SPEC-041 §4.6: a piercing weapon's shot goes through a bulwark's guard.
     p.armorPiercing = weapon.pierce >= 1;
+    // SPEC-056 §4.4: a relic's shot carries its twist — the drone's shots,
+    // which only borrow the primary's numbers, carry none — and a `seek`
+    // shot takes its quarry now.
+    const twist = owner === 'player' ? (weapon.twist ?? null) : null;
+    p.twist = twist;
+    p.seekTarget = twist?.kind === 'seek' ? this.#seekQuarry(dirX, dirZ, weapon.range, twist.cone) : -1;
+    p.seekTurn = twist?.kind === 'seek' ? twist.turnRate : 0;
+    p.flareSeconds = 0;
     return p;
+  }
+
+  /**
+   * SPEC-056 §4.4: the nearest living, unburrowed enemy within `cone` rad of
+   * the aim `(dirX, dirZ)` and within `range` of the player — its entity id,
+   * or −1 when there is none.
+   */
+  #seekQuarry(dirX: number, dirZ: number, range: number, cone: number): number {
+    const p = this.#world.player;
+    const enemies = this.#world.enemies;
+    const cosCone = Math.cos(cone);
+    let best = -1;
+    let bestD = Infinity;
+    for (let i = 0; i < enemies.size; i++) {
+      const e = enemies.at(i);
+      if (e.state === 'dead' || isBuried(e)) continue;
+      const dx = e.x - p.x;
+      const dz = e.z - p.z;
+      const d = Math.hypot(dx, dz);
+      if (d > range || d >= bestD) continue;
+      if (d > 1e-6 && dx * dirX + dz * dirZ < d * cosCone) continue;
+      best = e.id;
+      bestD = d;
+    }
+    return best;
   }
 
   /** §4.3: the combat drone, every `1/droneFireRate` s at the nearest aggroed enemy ≤ 12 m. */
@@ -1826,6 +2082,11 @@ export class Combat {
       const e = w.enemies.at(i);
       if (e.state !== 'dead') this.#hash.insert(i, e.x, e.z, e.radius);
     }
+    // SPEC-056 §4.4: the vent a lock asked for this step, on the fresh hash.
+    if (this.#ventPending) {
+      this.#ventPending = false;
+      this.explode(this.#ventX, this.#ventZ, this.#ventRadius, this.#ventDamage, EXPLOSIVE_FALLOFF);
+    }
 
     // Brains (§4.5). Summons alloc during the loop; the cached count skips
     // them until next step, and nothing frees mid-loop (kills defer to the sweep).
@@ -1841,6 +2102,8 @@ export class Combat {
     updateProjectiles(w, this.#hash, dt, this.#projectileHooks);
     // SPEC-029 §4.7: mines and charges, right after the projectile pass.
     this.#updateDeployables();
+    // SPEC-056 §4.4: the spore clouds, on the same hash.
+    this.#updateClouds(dt);
 
     if (p.alive && !dashing) this.#pushPlayerOut();
     if (dashing) {
