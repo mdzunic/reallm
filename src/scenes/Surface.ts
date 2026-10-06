@@ -203,6 +203,7 @@ import {
   cameraBob,
   RESOURCE_COLORS,
   shakeOffset,
+  stepLookAhead,
   stormOverlayOpacity,
   SurfaceView,
   type ShakeState,
@@ -268,8 +269,6 @@ const SWARM_RAMP: SpawnRamp = { populationScale: CONTRACTS.swarm.populationScale
 const OCCLUDER_RANGE = 30;
 /** §4.5: the occlusion test runs at 10 Hz, not every frame. */
 const OCCLUDER_TEST_SECONDS = 0.1;
-/** §4.3: look-at bias, metres ahead of the player in the movement direction. */
-const LOOK_AHEAD = 2;
 /** SPEC-046 §4.8: where `surface-goto-pad` stands the salvager, from the pad's centre toward the spawn. */
 const GOTO_PAD_DISTANCE = 5;
 /** Touch aim-drags point the shot this far ahead (matches SPEC-011's demo). */
@@ -1003,6 +1002,8 @@ export class SurfaceScene extends UiScene<'surface'> {
   readonly #frustumView = { x: 0, z: 0, distance: 0, fov: 0, aspect: 1 };
   /** The look-ahead the camera was last placed with — `render()` re-places it after a resize. */
   readonly #camBias = { x: 0, z: 0 };
+  /** The eased look-ahead `#followCamera` walks toward the player's heading (`stepLookAhead`). */
+  readonly #camLead = { x: 0, z: 0 };
   readonly #frustumMatrix = new THREE.Matrix4();
   readonly #frustumSphere = new THREE.Sphere();
   readonly #frustumXZ: FrustumXZ = {
@@ -2444,6 +2445,9 @@ export class SurfaceScene extends UiScene<'surface'> {
     // near plane, how many props are faded out of the way, and whether the
     // first-landing ramp is running.
     info['camDistance'] = Math.round(this.#camDistance * 100) / 100;
+    // How far the eased look-ahead leads the player — a tap of W moves it a
+    // fraction of its 2 m, where it once jumped the whole way and back.
+    info['camLead'] = Math.round(Math.hypot(this.#camLead.x, this.#camLead.z) * 100) / 100;
     // SPEC-037 §4.7: the Hor+ field of view in force, to one decimal.
     info['fov'] = Math.round(this.camera.fov * 10) / 10;
     info['fogNear'] = Math.round(this.#fogNear * 100) / 100;
@@ -2973,15 +2977,15 @@ export class SurfaceScene extends UiScene<'surface'> {
     const k = 1 - Math.exp(-8 * dt);
     this.#camTarget.x += (p.x - this.#camTarget.x) * k;
     this.#camTarget.z += (p.z - this.#camTarget.z) * k;
-    const speed = Math.hypot(p.vx, p.vz);
     // SPEC-015 §9: the walk bob rides the same speed the look-ahead does.
-    this.#camSpeed = speed;
-    const bx = speed > 0.01 ? (p.vx / speed) * LOOK_AHEAD : 0;
-    const bz = speed > 0.01 ? (p.vz / speed) * LOOK_AHEAD : 0;
+    this.#camSpeed = Math.hypot(p.vx, p.vz);
+    // The look-ahead eases as well; set straight from the velocity, a tap of W
+    // jerked the camera 2 m forward and back.
+    stepLookAhead(this.#camLead, p.vx, p.vz, dt);
     // SPEC-035 §4.2, §4.4: the distance eases first, then the camera is placed
     // at it, then the fog's near plane follows it.
     this.#easeCameraDistance(dt);
-    this.#placeCamera(bx, bz);
+    this.#placeCamera(this.#camLead.x, this.#camLead.z);
     this.#applyFog();
     // SPEC-035 §4.5: the occlusion test runs off the camera just placed.
     this.#updateOccluders(dt, p);
