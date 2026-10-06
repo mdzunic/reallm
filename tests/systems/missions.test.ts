@@ -1249,6 +1249,23 @@ describe('Missions — only pickups advance a collect objective (SPEC-043 43-h)'
     expect(h.economy.addResource('lithium', 15, 'pickup')).toEqual({ added: 0, shipped: 15, blocked: 0 });
     expect(counter()).toBe(25);
   });
+
+  it('SPEC-057 §4.4 (57-f): a recovery while c1_m2 is active fills the hold and leaves its oil counter', () => {
+    const h = harness((save) => save.progress.missionsDone.push('c1_m1'));
+    h.missions.accept('c1_m2');
+    const counter = () => h.missions.currentObjectives('c1_m2').find((o) => o.objective.kind === 'collect')?.value;
+    expect(counter()).toBe(0);
+    const before = h.save.resources.oil;
+    h.economy.addResource('oil', 20, 'recovered');
+    expect(h.save.resources.oil).toBe(before + 20);
+    expect(counter()).toBe(0);
+    // The bus event alone, as the scene's recovery raises it, moves nothing either.
+    h.events.emit('resource:collected', { resource: 'oil', amount: 20, total: before + 40, source: 'recovered' });
+    expect(counter()).toBe(0);
+    // A pickup still counts.
+    h.economy.addResource('oil', 5, 'pickup');
+    expect(counter()).toBe(5);
+  });
 });
 
 // ------------------------------------------------------------- SPEC-054 §4.11
