@@ -1658,7 +1658,8 @@ import {
   type DeathContext,
   type HudEffect,
 } from '@/systems/UiHelpers';
-import { CACHES, PRIMARY_SWATCHES, SECONDARY_SWATCHES, SWATCH_IDS, type ItemId } from '@/data/index';
+import { CACHES, PRIMARY_SWATCHES, SECONDARY_SWATCHES, SWATCH_IDS, type ItemId, type WeaponTwist } from '@/data/index';
+import { twistOf } from '@/systems/Combat';
 
 describe('completionLines (SPEC-042 §4.1)', () => {
   it('reads c1_m1’s XP, tokens and resources, and names the next offer', () => {
@@ -2413,10 +2414,10 @@ describe('the stones’ words (SPEC-055 §4.6)', () => {
 
 describe('the treasure\'s words (SPEC-056 §4.1, §4.4, §4.5, §4.6)', () => {
   it('twistText reads each twist kind', () => {
-    const twist = (id: ItemId): NonNullable<Extract<(typeof ITEMS)[ItemId], { kind: 'weapon' }>['twist']> => {
-      const item = ITEMS[id] as { twist?: unknown };
-      if (item.twist === undefined) throw new Error(id);
-      return item.twist as NonNullable<Extract<(typeof ITEMS)[ItemId], { kind: 'weapon' }>['twist']>;
+    const twist = (id: ItemId): WeaponTwist => {
+      const found = twistOf(id);
+      if (found === null) throw new Error(id);
+      return found;
     };
     expect(twistText(twist('relic_last_word'))).toBe('Double damage to targets under 30 % health');
     expect(twistText(twist('relic_cold_coil'))).toBe('Hits slow the target by 25 % for 1 s (bosses 10 %)');
