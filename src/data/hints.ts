@@ -52,6 +52,8 @@ export const TIP_IDS = [
   // SPEC-054 §4.2, §4.5: the first descent prompt, and the first descent itself.
   'descent',
   'dark',
+  // SPEC-055 §4.4: the first puzzle panel opened.
+  'puzzle',
 ] as const;
 
 export type TipId = (typeof TIP_IDS)[number];
@@ -180,6 +182,12 @@ export const TIPS: Readonly<Record<TipId, TipText>> = {
   dark: {
     keyboard: 'L switches your light. Bugs shy from it; hunters follow it. In the dark you cannot aim far.',
     touch: 'Tap LIGHT to switch your light. Bugs shy from it; hunters follow it.',
+  },
+  // SPEC-055 §4.4: shown at the first open of a puzzle panel — over the panel,
+  // which holds the world, so the scene shows it at once rather than queueing it.
+  puzzle: {
+    keyboard: 'Arrows move, Enter turns a tile. H asks ARIA for a hint — hints are free.',
+    touch: 'Tap a tile to turn it. HINT asks ARIA — hints are free.',
   },
 };
 

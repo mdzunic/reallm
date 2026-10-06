@@ -157,8 +157,9 @@ export function pickupSound(resource: ResourceId): SoundId {
  * The 19 events of §5.2 (SPEC-029 §4.12 adds four, SPEC-035 §4.11 two more,
  * SPEC-038 §4.10 the dash and the windup cue, SPEC-041 §4.10 a boss move
  * landing and a flight hit, SPEC-042 §4.2 an item picked up, SPEC-050 §4.8 an
- * exhaustion, SPEC-054 §4.13 the flashlight's click and a cache opening) that
- * make a sound.
+ * exhaustion, SPEC-054 §4.13 the flashlight's click and a cache opening,
+ * SPEC-055 §4.9 a puzzle move and a puzzle solved — 31 in all) that make a
+ * sound.
  */
 export type ReactedEvent =
   | 'combat:blast'
@@ -195,7 +196,10 @@ export type ReactedEvent =
   | 'flight:arrived'
   // SPEC-054 §4.13: the flashlight's click, and a cache opening.
   | 'light:toggled'
-  | 'cache:opened';
+  | 'cache:opened'
+  // SPEC-055 §4.9: a move on a puzzle board, and a site solved.
+  | 'puzzle:moved'
+  | 'puzzle:solved';
 
 /**
  * The 38 events of §5.4 that deliberately make none (and those later specs
@@ -365,6 +369,14 @@ export const AUDIO_REACTIONS: { [K in ReactedEvent]: Reaction<K> } = {
   'light:toggled': () => ({ id: 'light_click', opts: { volume: 0.6 } }),
   /** SPEC-054 §4.13: positioned at the cache, like every other x/z event here. */
   'cache:opened': (p) => ({ id: 'cache_open', opts: { x: p.x, z: p.z, priority: 1 } }),
+  /**
+   * SPEC-055 §4.9: the UI blip for a move that counts, the warn for a wrong
+   * plate, a wrong pick or a move that changes nothing — 50 ms apart at most,
+   * so a run of fast taps reads as taps rather than a buzz.
+   */
+  'puzzle:moved': (p) => ({ id: p.ok ? 'ui_blip' : 'ui_warn', opts: { minIntervalMs: 50 } }),
+  /** SPEC-055 §4.9: the lock giving way — loud enough to hold a voice (priority 2). */
+  'puzzle:solved': () => ({ id: 'puzzle_solved', opts: { priority: 2 } }),
 };
 
 /** The runtime key list, for the subscription loop and the exhaustiveness test. */

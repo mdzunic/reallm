@@ -37,6 +37,7 @@ import type {
   MissionId,
   PlanetId,
   PoiId,
+  PuzzleSiteId,
   QuickSlot,
   ResourceId,
   ResourceSource,
@@ -224,6 +225,17 @@ export type GameEvents = {
   'light:toggled': { on: boolean };
   /** SPEC-054 §4.8: an unclaimed cache opened — `Economy.claimCache`'s first call. */
   'cache:opened': { cache: CacheId; x: number; z: number };
+  /**
+   * SPEC-055 §4.4, §4.6: a move on a puzzle board — a panel's tile or pick, a
+   * plate stepped onto, a mirror turned. `ok` is false for a wrong plate, a
+   * wrong pick or a move that changes nothing.
+   */
+  'puzzle:moved': { site: PuzzleSiteId; ok: boolean };
+  /**
+   * SPEC-055 §4.8: a site solved, with the hints it took — `bypassed` when ARIA
+   * forced the lock, so the cache opens without its flawless extra.
+   */
+  'puzzle:solved': { site: PuzzleSiteId; hints: number; bypassed: boolean };
   'ui:toast': { text: string; kind?: 'info' | 'warn' | 'good' | 'error'; ms?: number };
   /** The rotate prompt itself is SPEC-015 §6; this is the signal it listens to. */
   'ui:orientation': { orientation: 'portrait' | 'landscape' };

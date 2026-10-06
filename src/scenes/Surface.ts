@@ -52,6 +52,7 @@ import {
   WAVES,
   type BossRevealDef,
   type CacheId,
+  type CacheReward,
   type ClassPassive,
   type ClueDef,
   type ContractId,
@@ -192,6 +193,7 @@ import {
 } from '@/systems/UiHelpers';
 import { UiScene } from '@/scenes/base';
 import type { Level, LevelId, PoiState } from '@/scenes/surface/Level';
+import { PuzzleSites } from '@/scenes/surface/PuzzleSites';
 import { director } from '@/scenes/Director';
 import { INSTANCES_PER_PART, setHostileRim } from '@/views/ProceduralMeshes';
 import { layerFromAssets } from '@/views/ProceduralTextures';
@@ -714,6 +716,8 @@ export class SurfaceScene extends UiScene<'surface'> {
   }
   /** §4.4: the cave kit's load, started at the visit's first descent; `null` before. */
   #caveKit: Promise<void> | null = null;
+  /** SPEC-055: the visit's puzzles — the relic above, the vault terminal and the world puzzle below. */
+  #puzzles: PuzzleSites | null = null;
   /** SPEC-041 §4.4: the arena's radius — the ring, the seal and the entrance. */
   #arenaRadius = 0;
   #arena: ArenaState | null = null;
@@ -1135,9 +1139,13 @@ export class SurfaceScene extends UiScene<'surface'> {
       if (this.#caveKit !== null) void assets.release(CAVE_ASSETS);
       this.#caveKit = null;
     });
+    // SPEC-055 §4.1: the relic terminal's `cave_terminal` loads with the
+    // surface's lazy set, and leaves with it.
+    const terminal = { models: { cave_terminal: CAVE_ASSETS.models.cave_terminal }, textures: {} };
+    this.disposer.add(() => void assets.release(terminal));
     // SPEC-053 §4.1: the shared set's atlas and detail normal ride along.
     this.#planetAssets = assets.load({
-      models: { ...surfaceAssets.models, ...SURFACE_SHARED_ASSETS.models },
+      models: { ...surfaceAssets.models, ...SURFACE_SHARED_ASSETS.models, ...terminal.models },
       textures: { ...surfaceAssets.textures, ...SURFACE_SHARED_ASSETS.textures },
       audio: {},
     });
@@ -1386,6 +1394,33 @@ export class SurfaceScene extends UiScene<'surface'> {
       this.#caveView = null;
       this.#cave = null;
     });
+    // SPEC-055 §4.1: the visit's puzzles. Their views hang under the view's
+    // root too, and go before it; the relic terminal joins the surface level.
+    const puzzles = new PuzzleSites(
+      {
+        services,
+        ui: this.ui,
+        planet,
+        save,
+        economy,
+        viewRoot: view.levelRoot,
+        holdUi: (on) => this.#puzzleHold(on),
+        free: () => this.#puzzleFree(),
+        ariaLine: (text, ms) => this.#aria?.show(text, ms),
+        cacheOpened: (cache, x, z, reward) => this.#cacheOpened(cache, x, z, reward),
+        player: () => this.#world?.player ?? null,
+        level: () => this.#level?.id ?? 'surface',
+        lightOn: () => this.#level?.id === 'underground' && this.#lightOn,
+        teleport: (x, z, facing) => this.#teleport(x, z, facing),
+      },
+      layout,
+    );
+    this.#puzzles = puzzles;
+    interactables.push(...puzzles.surfaceInteractables());
+    this.disposer.add(() => {
+      puzzles.dispose();
+      this.#puzzles = null;
+    });
     this.#placePadBody(save, planet.id);
     // SPEC-045 §4.5: every hostile rim and non-elite telegraph reads one shared
     // uniform, set from the Colours preset now and on each change of it — the
@@ -1417,6 +1452,7 @@ export class SurfaceScene extends UiScene<'surface'> {
         .then(() => {
           if (disposed) return;
           view.setPropModels(services.assets);
+          this.#puzzles?.onAssets();
           if (Object.keys(surfaceAssets.textures).length === 0) return;
           const [layerA, layerB] = planet.surface.look.ground.layers;
           const [metresA, metresB] = planet.surface.look.ground.tileMetres;
@@ -1860,6 +1896,8 @@ export class SurfaceScene extends UiScene<'surface'> {
   /** SPEC-026 §4.6: the map is not a second pause — it closes before this one. */
   pause(): void {
     this.#closeMap();
+    // SPEC-055 §4.4: a puzzle panel closes with the scene pausing; the site keeps its board.
+    this.#puzzles?.closePanel();
     // SPEC-028 §4.6: the quick picker closes with the scene pausing too.
     this.#pickerClose?.();
     this.#pauseMenu?.show();
@@ -1942,6 +1980,8 @@ export class SurfaceScene extends UiScene<'surface'> {
       this.#sprintLatch = false;
       if (this.#edges.pressed('map')) this.#closeMap();
       if (this.#edges.pressed('interact') && this.#terminalOpen) this.#closeTerminal();
+      // SPEC-055 §4.4, §4.5: the open panel's clocks run on the held step.
+      this.#puzzles?.heldStep(dt);
       world.player.vx = 0;
       world.player.vz = 0;
       return;
@@ -2038,6 +2078,9 @@ export class SurfaceScene extends UiScene<'surface'> {
     combat.drops.length = 0;
     pickups.update(dt, world.player, world.stats.pickupRadius);
     this.#nodes?.update(dt, world.player);
+    // SPEC-055 §4.5, §4.6: the plates underfoot, the beam with the light on,
+    // and the world puzzle's clock in its room.
+    this.#puzzles?.step(dt);
 
     // SPEC-027 §4.11: guidance runs after the mission runtime, so the rows it
     // reads — and the target it picks out of them — are this step's.
@@ -2121,6 +2164,8 @@ export class SurfaceScene extends UiScene<'surface'> {
       this.#renderElitePlates(world);
       // SPEC-050 §4.6: so does the stamina ring.
       this.#renderStamina(world);
+      // SPEC-055 §4.5: a hinted plate or mirror pulses on the view clock.
+      this.#puzzles?.render(time, view.reduceMotion);
       this.#forwardGrade();
       if (this.#minimapIn <= 0) {
         this.#minimapIn = MINIMAP_INTERVAL;
@@ -2619,7 +2664,22 @@ export class SurfaceScene extends UiScene<'surface'> {
       info['arenaDist'] = Math.round(Math.hypot(this.#world.player.x - nest.x, this.#world.player.z - nest.z) * 10) / 10;
     }
     this.#underInfo(info, level);
+    // SPEC-055 §3: the open site, the next move, the moves and the solves.
+    info['puzzle'] = '-';
+    info['puzzleHint'] = '-';
+    info['puzzleMoves'] = 0;
+    info['puzzlesSolved'] = 0;
+    this.#puzzles?.info(info);
+    // §4.1: the relic terminal on the map — `relic` once landmark 0 is discovered, `spent` once solved.
+    info['relicMark'] = this.#relicMarked(level) ? ((this.#puzzles?.relicMark()?.spent ?? false) ? 'spent' : 'relic') : '-';
     return info;
+  }
+
+  /** SPEC-055 §4.1: the relic terminal shows on the surface's map once its landmark — instance 0 — is discovered. */
+  #relicMarked(level: Level | null): boolean {
+    if (level === null || level.id !== 'surface' || (this.#puzzles?.relicMark() ?? null) === null) return false;
+    for (const state of level.pois) if (state.poi.kind === 'landmark' && state.poi.instance === 0 && state.discovered) return true;
+    return false;
   }
 
   /** SPEC-054 §3: the level, the cave, the light, the caches and the descent. */
@@ -3322,6 +3382,13 @@ export class SurfaceScene extends UiScene<'surface'> {
         return;
       case 'cache':
         this.#openCache(target, world);
+        return;
+      // SPEC-055 §4.4, §4.6: a terminal opens its panel, a panel reads, a mirror turns.
+      case 'vault':
+      case 'relic':
+      case 'mirror':
+      case 'panel':
+        this.#puzzles?.interact(target);
         return;
       default:
         return;
@@ -4090,6 +4157,8 @@ export class SurfaceScene extends UiScene<'surface'> {
     this.#lightOn = on;
     this.#light.on = on;
     this.#view?.setFlashlightOn(on);
+    // SPEC-055 §4.6, 55-c: the beam draws only while the light is on.
+    this.#puzzles?.onLight();
   }
 
   /**
@@ -4104,10 +4173,59 @@ export class SurfaceScene extends UiScene<'surface'> {
     if (CACHES[id].guard !== 'none') return;
     const result = economy.claimCache(id);
     if (!result.ok) return;
-    this.services.events.emit('cache:opened', { cache: id, x: target.x, z: target.z });
-    const paid = bonusRewardText(result.reward);
+    this.#cacheOpened(id, target.x, target.z, result.reward);
+  }
+
+  /**
+   * §4.8: a claimed cache raises `cache:opened`, toasts what it paid and draws
+   * open from now on — a loose one here, a guarded one from SPEC-055's solve.
+   */
+  #cacheOpened(id: CacheId, x: number, z: number, reward: CacheReward): void {
+    this.services.events.emit('cache:opened', { cache: id, x, z });
+    const paid = bonusRewardText(reward);
     this.services.events.emit('ui:toast', { kind: 'good', text: paid === '' ? CACHE_OPENED_TEXT : `${CACHE_OPENED_TEXT} · ${paid}` });
     this.#caveView?.setClaimed(id);
+  }
+
+  /** SPEC-055 §4.4: a puzzle panel or ARIA's offer holds the world as the map does — and the touch layer goes with it. */
+  #puzzleHold(on: boolean): void {
+    if (on) {
+      this.#uiHolds++;
+      const world = this.#world;
+      if (world !== null) {
+        world.player.vx = 0;
+        world.player.vz = 0;
+      }
+      this.#touch?.hide();
+      return;
+    }
+    this.#uiHolds = Math.max(0, this.#uiHolds - 1);
+    this.#touch?.show('surface');
+  }
+
+  /** SPEC-055 §4.4: a panel never opens during another hold, a modal line, a beat, a swap or a death. */
+  #puzzleFree(): boolean {
+    return (
+      this.#uiHolds === 0 &&
+      this.#modalOpen === 0 &&
+      this.#holds === 0 &&
+      !this.#swapping &&
+      !this.#leaving &&
+      this.#deathAt === null &&
+      !this.#rotateBlocked() &&
+      this.#world?.player.alive === true
+    );
+  }
+
+  /** SPEC-055 §4.10 (dev): the salvager to (x, z), clear of obstacles, facing `facing`. */
+  #teleport(x: number, z: number, facing?: number): void {
+    const world = this.#world;
+    if (world === null || !world.player.alive) return;
+    const p = world.player;
+    world.obstacles.resolveCircle(x, z, p.radius, this.#resolved);
+    p.x = this.#resolved.x;
+    p.z = this.#resolved.z;
+    if (facing !== undefined) p.facing = facing;
   }
 
   /**
@@ -4226,6 +4344,8 @@ export class SurfaceScene extends UiScene<'surface'> {
       view.enemies.rimOf = null;
     }
     this.#touch?.setLightAvailable(to === 'underground');
+    // SPEC-055: the relic shows above, the vault terminal and the world puzzle below.
+    this.#puzzles?.onLevel(to);
 
     // §4.10: the maps follow the level.
     const title = to === 'underground' ? `${this.#planet.name} · ${UNDERGROUND_TITLE}` : this.#planet.name;
@@ -4292,6 +4412,9 @@ export class SurfaceScene extends UiScene<'surface'> {
     layers.syncFog(mask);
     const interactables: Interactable[] = [{ kind: 'exit', id: 'exit', x: u.exit.x, z: u.exit.z, radius: EXIT_RADIUS }];
     for (const cache of u.caches) interactables.push({ kind: 'cache', id: cache.id, x: cache.x, z: cache.z, radius: CACHE_RADIUS });
+    // SPEC-055 §4.1, §4.6: the vault terminal, and the world puzzle's panel or mirrors.
+    const puzzles = this.#puzzles?.buildCave(u, def.look.beacons.color) ?? [];
+    interactables.push(...puzzles);
     const level: Level = {
       id: 'underground',
       layout: u,
@@ -4474,6 +4597,10 @@ export class SurfaceScene extends UiScene<'surface'> {
       void this.#swapLevel('surface');
     });
     button('surface-goto-cache', 'To cache', () => this.#debugGotoCache());
+    // SPEC-055 §4.10: beside the nearest unsolved puzzle (onto the next plate,
+    // once the panel is read), and its solve — a beam still needs the light.
+    button('surface-goto-puzzle', 'To puzzle', () => this.#puzzles?.debugGoto());
+    button('surface-solve-puzzle', 'Solve puzzle', () => this.#puzzles?.debugSolve());
     // §4.12: the vault room lies at the end of the tree, a long walk through
     // the dark — on Eden, in front of the cradle row; and halfway down the
     // corridor into it, where Eden's cable tray runs.
@@ -5627,6 +5754,12 @@ export class SurfaceScene extends UiScene<'surface'> {
         out.action = open;
         return out;
       }
+      // SPEC-055 §4.4, §4.6, §4.8: `Use terminal` or `Unlocked`, `Read the panel`, `Turn the mirror`.
+      case 'vault':
+      case 'relic':
+      case 'mirror':
+      case 'panel':
+        return this.#puzzles?.prompt(target, out) ?? null;
       default:
         return null;
     }
@@ -6210,7 +6343,7 @@ export class SurfaceScene extends UiScene<'surface'> {
       const row = this.#trackerRows[i] as HudTrackerRow;
       row.done = progress.done;
       row.focus = i === this.#focusIndex;
-      row.text = row.focus ? (below ? this.#returnText() : this.#focusRowText(def.title, progress)) : this.#rowText(progress);
+      row.text = row.focus ? (below ? this.#belowFocusText() : this.#focusRowText(def.title, progress)) : this.#rowText(progress);
       // SPEC-034 §4.9: a defend row carries the POI's health. `#defendHp` is
       // what `poi:damaged` was raised from, and `#syncDefend` puts it back to
       // full on a stage reset, so the bar follows both for free.
@@ -6246,6 +6379,11 @@ export class SurfaceScene extends UiScene<'surface'> {
     return `Return to the surface — ${Math.round(this.#focusDistance ?? 0)} m`;
   }
 
+  /** SPEC-055 §4.6: below, the stones' order once the panel is read and until they are solved; else the way out. */
+  #belowFocusText(): string {
+    return this.#puzzles?.focusText() ?? this.#returnText();
+  }
+
   /** SPEC-054 §4.9: the way-out row, from the pool, when the stage gives none. */
   #pushReturnRow(rows: HudTrackerRow[]): void {
     const row = this.#trackerRows[rows.length];
@@ -6254,7 +6392,7 @@ export class SurfaceScene extends UiScene<'surface'> {
     row.focus = true;
     row.defendHp = null;
     row.count = -1;
-    row.text = this.#returnText();
+    row.text = this.#belowFocusText();
     rows.push(row);
   }
 
@@ -6424,6 +6562,9 @@ export class SurfaceScene extends UiScene<'surface'> {
     if (level.id === 'surface' && descent !== null && this.#shelterDiscovered[descent.shelter.index] === true) {
       this.#markAt(descent.x, descent.z, 'descent', 'Descent');
     }
+    // SPEC-055 §4.1: the relic terminal, once landmark instance 0 is discovered (hollow once spent).
+    const relic = this.#puzzles?.relicMark() ?? null;
+    if (relic !== null && this.#relicMarked(level)) this.#markAt(relic.x, relic.z, 'relic', 'Relic terminal').hollow = relic.spent;
     const cave = level.id === 'underground' ? this.#cave : null;
     if (cave !== null) {
       this.#markAt(cave.exit.x, cave.exit.z, 'descent', 'Surface');
@@ -6681,6 +6822,8 @@ export class SurfaceScene extends UiScene<'surface'> {
           });
           this.#death?.show(lost, deathCause(cause), tip);
           this.#onDeath(); // SPEC-027 §4.6: the first-death tip, the repeat hint
+          // SPEC-055 55-k: the plates' progress resets; nothing else does.
+          this.#puzzles?.onDeath();
         },
         this,
       ),

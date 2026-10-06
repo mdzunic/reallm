@@ -23,6 +23,7 @@ import {
   DEATH_TIPS,
   ENEMIES,
   FOLLOWERS,
+  HUMAN_LOCK,
   ITEMS,
   LOOT_TABLES,
   MISSIONS,
@@ -79,6 +80,16 @@ import { clock, duration, MINUS, multPercent, percent, percentChange, rate } fro
 import { weaponDps, type SlotView } from '@/systems/Loadout';
 import { campaignLocked, contractFor } from '@/systems/Missions';
 import { cumulativeXp, LEVEL_CAP, xpToNext } from '@/systems/Progression';
+import {
+  conduitMask,
+  PIECE_NAMES,
+  poweredCells,
+  PUZZLE_BYPASS_HINTS,
+  PUZZLE_BYPASS_SECONDS,
+  type PlatesPuzzle,
+  type Puzzle,
+  type PuzzleKind,
+} from '@/systems/Puzzles';
 import { STAMINA_MAX } from '@/systems/Stamina';
 import type { Class, Item, QuickSlot, WeaponSlot } from '@/data/index';
 
@@ -898,6 +909,133 @@ export function descentRefusal(ctx: DescentContext): string | null {
 export function lightChipText(on: boolean, scheme: Scheme): string {
   const state = on ? '◐ Light on' : '○ Light off';
   return scheme === 'touch' ? state : `${state} · L`;
+}
+
+// ------------------------------------------------------- SPEC-055: the puzzles
+
+/**
+ * SPEC-055 §4.4 — a panel's title, by kind and chapter: the terminals slip into
+ * the Warden's vocabulary as containment tightens — `ROUTE ATTENTION` and
+ * `ADJUST WEIGHTS` from chapter 4, `PREDICT THE NEXT TOKEN` from chapter 3.
+ * Eden's human lock (`human`) has its own. Plates and beam have no panel; their
+ * names are what the debug strip and a screen reader would call them.
+ */
+export function puzzleTitle(kind: PuzzleKind, chapter: number, human: boolean): string {
+  if (human) return HUMAN_LOCK.title;
+  switch (kind) {
+    case 'conduit':
+      return chapter < 4 ? 'ROUTE POWER' : 'ROUTE ATTENTION';
+    case 'calibration':
+      return chapter < 4 ? 'CALIBRATE ARRAY' : 'ADJUST WEIGHTS';
+    case 'sequence':
+      return chapter < 3 ? 'COMPLETE THE SEQUENCE' : 'PREDICT THE NEXT TOKEN';
+    case 'plates':
+      return 'STEP IN ORDER';
+    case 'beam':
+      return 'ALIGN THE LENS';
+  }
+}
+
+/** SPEC-055 §4.4 — the status line: `Moves 4 · Hints 1`. */
+export function puzzleStatus(moves: number, hints: number): string {
+  return `Moves ${moves} · Hints ${hints}`;
+}
+
+/** SPEC-055 §4.4 — what the status line reads in its place until the first move. */
+export function puzzleSubtitle(kind: PuzzleKind): string {
+  switch (kind) {
+    case 'conduit':
+      return 'Turn the tiles until power reaches every output.';
+    case 'calibration':
+      return 'Each press flips a cell and its neighbours. Clear the board.';
+    case 'sequence':
+      return 'Choose what comes next.';
+    case 'plates':
+      return 'Step on the stones in the order the panel gives.';
+    case 'beam':
+      return 'Turn the mirrors until the beam reaches the receiver.';
+  }
+}
+
+/** SPEC-055 §4.5 — ARIA's line in the status for 3 s after a hint: the first, then every later one. */
+export function puzzleHintLine(hints: number): string {
+  return hints <= 1 ? 'ARIA: try this one.' : 'ARIA: this one. Trust me.';
+}
+
+/** SPEC-055 §4.4: a solved board's status, for 1 s before the panel closes. */
+export const PUZZLE_SOLVED_TEXT = 'Solved';
+
+/**
+ * SPEC-055 §4.5 — under `puzzle-bypass` while it is disabled: the whole
+ * seconds left of `PUZZLE_BYPASS_SECONDS` open, as `ARIA can force it in 42 s`;
+ * `null` once the bypass is open — 90 s open or three hints.
+ */
+export function bypassNote(openSeconds: number, hints: number): string | null {
+  if (bypassOpen(openSeconds, hints)) return null;
+  return `ARIA can force it in ${Math.max(1, Math.ceil(PUZZLE_BYPASS_SECONDS - openSeconds))} s`;
+}
+
+/** SPEC-055 §4.5: the bypass enables after `PUZZLE_BYPASS_SECONDS` open, or `PUZZLE_BYPASS_HINTS` hints. */
+export function bypassOpen(openSeconds: number, hints: number): boolean {
+  return openSeconds >= PUZZLE_BYPASS_SECONDS || hints >= PUZZLE_BYPASS_HINTS;
+}
+
+/** SPEC-055 §4.2: a side's word, in the N, E, S, W order a label lists them. */
+const SIDE_WORDS: readonly [number, string][] = [
+  [1, 'north'],
+  [2, 'east'],
+  [4, 'south'],
+  [8, 'west'],
+];
+
+/**
+ * SPEC-055 §4.4 — a cell's `aria-label`: its row and column (from 1), its
+ * piece and its state, e.g. `Tile 2, 3: elbow, north–east, powered`. A conduit
+ * names the open sides after the cell's rotation and whether the source's
+ * flood reaches it, and marks the input and the outputs; a calibration cell is
+ * `aligned` or `misaligned`. A sequence's cell is a choice, a plate a stone and
+ * a beam's a mirror, for the same readers.
+ */
+export function cellLabel(p: Puzzle, cell: number): string {
+  switch (p.kind) {
+    case 'conduit': {
+      const where = `Tile ${Math.floor(cell / p.n) + 1}, ${(cell % p.n) + 1}`;
+      const piece = p.pieces[cell] ?? 0;
+      if (piece === 0) return `${where}: empty`;
+      const mask = conduitMask(piece, p.rots[cell] ?? 0);
+      const sides = SIDE_WORDS.filter(([bit]) => (mask & bit) !== 0).map(([, word]) => word).join('–');
+      const powered = poweredCells(p)[cell] === 1 ? 'powered' : 'unpowered';
+      const end = cell === p.source.cell ? ', input' : p.sinks.some((sink) => sink.cell === cell) ? ', output' : '';
+      return `${where}: ${PIECE_NAMES[piece] ?? 'tile'}, ${sides}, ${powered}${end}`;
+    }
+    case 'calibration':
+      return `Tile ${Math.floor(cell / p.n) + 1}, ${(cell % p.n) + 1}: array cell, ${p.lit[cell] === 1 ? 'misaligned' : 'aligned'}`;
+    case 'sequence':
+      return `Choice ${cell + 1}: ${p.choices[cell] ?? ''}`;
+    case 'plates': {
+      const at = p.order.indexOf(cell);
+      return `Stone ${cell + 1}: ${p.plates[cell]?.glyph ?? ''}, ${at >= 0 && at < p.progress ? 'pressed' : 'not pressed'}`;
+    }
+    case 'beam': {
+      const state = p.mirrors[cell]?.state ?? 2;
+      return `Mirror ${cell + 1}: ${state === 0 ? 'turned /' : state === 1 ? 'turned \\' : 'closed'}`;
+    }
+  }
+}
+
+/** SPEC-055 §4.6: the stones' glyphs in the order they are to be stepped on. */
+export function plateOrderGlyphs(p: PlatesPuzzle): string[] {
+  return p.order.map((index) => p.plates[index]?.glyph ?? '');
+}
+
+/** SPEC-055 §4.6 — the panel's line in the tip strip: the rule, then the glyph names. */
+export function platesPanelLine(p: PlatesPuzzle): string {
+  return `Step on the stones in this order. Do not deviate. ${plateOrderGlyphs(p).join(', ')}`;
+}
+
+/** SPEC-055 §4.6 — the tracker's focus row while the order is unsolved: `Stones: circle · triangle · square`. */
+export function stonesText(p: PlatesPuzzle): string {
+  return `Stones: ${plateOrderGlyphs(p).join(' · ')}`;
 }
 
 // -------------------------------------------------------------- player stats

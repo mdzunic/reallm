@@ -216,8 +216,39 @@ function standIn(id: CaveModelId): KitPart[] {
       capsule.translate(0, 1.15, 0);
       return [{ geometry: capsule, color: '#ffffff', material: 'Body' }];
     }
+    // SPEC-055: the puzzle furniture, at the GLBs' sizes — a slab with its
+    // screen on +z, a disc with a glowing rim, a framed glass on a post, a
+    // ring on a stand and a pylon with its receptor toward +z.
+    case 'cave_terminal':
+      return [box(0.6, 0.06, 0.5, 0, 0, 0, '#3a3e45'), box(0.78, 1.0, 0.44, 0, 0.4, 0, '#5c6068'), box(0.6, 0.3, 0.04, 0, 1.0, 0.23, '#ffffff', 'Glow')];
+    case 'cave_plate': {
+      const disc = new THREE.CylinderGeometry(0.8, 0.8, 0.1, 16);
+      disc.translate(0, 0.05, 0);
+      const rim = new THREE.TorusGeometry(0.66, 0.04, 4, 16);
+      rim.rotateX(Math.PI / 2);
+      rim.translate(0, 0.1, 0);
+      return [
+        { geometry: disc, color: '#4a4d52', material: 'Body' },
+        { geometry: rim, color: '#ffffff', material: 'Glow' },
+      ];
+    }
+    case 'cave_mirror':
+      return [box(0.1, 1.0, 0.1, 0, 0, 0, '#5c6068'), box(0.86, 0.58, 0.04, 0, 1.13, 0, '#c9d4dc'), box(0.98, 0.04, 0.07, 0, 1.72, 0, '#ffffff', 'Glow')];
+    case 'cave_lens': {
+      const lensRing = new THREE.TorusGeometry(0.25, 0.045, 4, 16);
+      lensRing.translate(0, 1.21, 0);
+      const glass = new THREE.CylinderGeometry(0.22, 0.22, 0.03, 16);
+      glass.rotateX(Math.PI / 2);
+      glass.translate(0, 1.21, 0);
+      return [box(0.12, 1.1, 0.12, 0, 0, 0, '#5c6068'), { geometry: lensRing, color: '#8a8e96', material: 'Body' }, { geometry: glass, color: '#ffffff', material: 'Glow' }];
+    }
+    case 'cave_receiver': {
+      const receptor = new THREE.IcosahedronGeometry(0.1, 1);
+      receptor.translate(0, 1.88, 0.3);
+      return [box(1.0, 0.16, 1.0, 0, 0, 0, '#3a3e45'), box(0.3, 1.7, 0.3, 0, 0.16, 0, '#5c6068'), { geometry: receptor, color: '#ffffff', material: 'Glow' }];
+    }
     default: {
-      // Every beacon and the puzzle pieces SPEC-055 draws.
+      // Every beacon.
       const octahedron = new THREE.OctahedronGeometry(0.3);
       octahedron.translate(0, 0.6, 0);
       return [{ geometry: octahedron, color: '#ffffff', material: 'Glow' }];
@@ -226,7 +257,7 @@ function standIn(id: CaveModelId): KitPart[] {
 }
 
 /** One kit piece as one geometry: the GLB once `assets` holds it (SPEC-052), else its stand-in. */
-function kitGeometry(id: CaveModelId, assets: Assets | undefined, suit?: SuitColours): THREE.BufferGeometry {
+export function kitGeometry(id: CaveModelId, assets: Assets | undefined, suit?: SuitColours): THREE.BufferGeometry {
   const parts = assets?.hasModel(id) === true ? modelParts(assets.model(id)) : standIn(id);
   return mergeKit(parts.length > 0 ? parts : standIn(id), suit);
 }
@@ -235,7 +266,7 @@ function kitGeometry(id: CaveModelId, assets: Assets | undefined, suit?: SuitCol
  * The kit's glow: the stock emissive (colour × intensity) masked per vertex by
  * the `glow` attribute, so a piece's body and its `Glow` parts share one draw.
  */
-function injectVertexGlow(material: THREE.MeshStandardMaterial): void {
+export function injectVertexGlow(material: THREE.MeshStandardMaterial): void {
   material.onBeforeCompile = (shader) => {
     shader.vertexShader = shader.vertexShader
       .replace('#include <common>', 'attribute float glow;\nvarying float vGlow;\n#include <common>')
@@ -388,7 +419,7 @@ function sphereOf(geometry: THREE.BufferGeometry): THREE.Sphere {
 }
 
 /** (x, 0, z), turned `yaw` about y and scaled (sx, sy, sz), into `out` at `at`. */
-function writeMatrix(out: Float32Array, at: number, x: number, z: number, yaw: number, sx: number, sy: number, sz: number): void {
+export function writeMatrix(out: Float32Array, at: number, x: number, z: number, yaw: number, sx: number, sy: number, sz: number): void {
   scratchPosition.set(x, 0, z);
   scratchQuat.setFromAxisAngle(Y_AXIS, yaw);
   scratchScale.set(sx, sy, sz);

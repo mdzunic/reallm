@@ -103,6 +103,8 @@ export const ASSETS = {
         // SPEC-054 §4.13: the flashlight's click, and a loose cache opening.
         light_click: [24320, 80],
         cache_open: [24500, 600],
+        // SPEC-055 §4.9: a puzzle site solved — three rising tones and a soft latch.
+        puzzle_solved: [25200, 900],
       },
     },
     /** The rail scene: hits on the ship, and the two continuous channels. */

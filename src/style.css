@@ -6519,3 +6519,236 @@ html.plain-text #ui :is(.screen-body, .settings, .sheet, .comms-log, .dialogue, 
   border-color: var(--accent-2);
   color: var(--accent-2);
 }
+
+/* ================================================================ SPEC-055 */
+/* The puzzle panel (§4.4): the title, the board and a column holding the
+   status, HINT, the bypass with its note, and Close. Side by side on a
+   landscape screen — at `max-height: 500px` the board takes the panel's whole
+   height on the left and the title moves to the head of its column — and
+   stacked on an upright one. A cell is `(100dvh − 56px) / n` square, held to
+   44–64 px, so a 5 × 5 board fits a 293 px-tall phone at 47 px a cell. */
+.puzzle-panel {
+  --cell: clamp(44px, calc((100dvh - 56px) / var(--n, 4)), 64px);
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  display: grid;
+  grid-template-columns: auto minmax(168px, 240px);
+  grid-template-areas:
+    'title title'
+    'board side';
+  align-items: start;
+  gap: 6px 12px;
+  padding: 8px 12px;
+  max-width: calc(100vw - 8px);
+  max-height: calc(100dvh - 8px);
+  overflow: auto;
+  z-index: 12;
+}
+
+.puzzle-body {
+  display: contents;
+}
+
+.puzzle-title {
+  grid-area: title;
+  margin: 0;
+  font-size: var(--type-sm);
+  font-weight: 600;
+  letter-spacing: var(--track);
+  line-height: 1.3;
+}
+
+.puzzle-board {
+  grid-area: board;
+}
+
+.puzzle-board.is-grid {
+  display: grid;
+  grid-template-columns: repeat(var(--n), var(--cell));
+  grid-auto-rows: var(--cell);
+  gap: 2px;
+}
+
+.puzzle-side {
+  grid-area: side;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+
+.puzzle-status {
+  margin: 0;
+  min-height: 2.6em;
+  font-size: var(--type-sm);
+  line-height: 1.3;
+  color: var(--ink);
+}
+
+.puzzle-status.is-verdict {
+  color: var(--accent-2);
+}
+
+.puzzle-bypass-note {
+  margin: -2px 0 0;
+  font-size: var(--type-xs);
+  color: var(--ink-dim);
+}
+
+.puzzle-side .ui-btn {
+  padding: 6px 10px;
+}
+
+/* A cell: a square button, its glyph centred. The hinted one carries a 2 px
+   dashed outline in the second accent (§4.5); focus is an inset ring, so the
+   two never hide each other. */
+.puzzle-cell {
+  display: grid;
+  place-items: center;
+  width: var(--cell);
+  height: var(--cell);
+  padding: 0;
+  border: 1px solid var(--rule);
+  border-radius: var(--radius);
+  background: rgba(4, 6, 10, 0.55);
+  color: var(--ink-dim);
+  font: inherit;
+  font-size: calc(var(--cell) * 0.5);
+  line-height: 1;
+  cursor: pointer;
+  touch-action: manipulation;
+  transition: color 120ms ease-out, background-color 120ms ease-out;
+}
+
+.puzzle-cell:focus-visible {
+  outline: none;
+  box-shadow: inset 0 0 0 2px var(--accent);
+}
+
+.puzzle-cell.is-hinted,
+.puzzle-choice.is-hinted {
+  outline: 2px dashed var(--accent-2);
+  outline-offset: -4px;
+}
+
+/* §4.4: misaligned is a filled ◆ in the warning colour, aligned a dim ·. */
+.puzzle-cell.is-lit {
+  color: var(--warn);
+  background: rgba(245, 166, 35, 0.12);
+}
+
+/* §4.4: a conduit's pipe. Unpowered arms are 3 px in the dim ink; powered
+   ones 5 px in the good colour with a dot at the centre — a powered path
+   differs in shape and stroke, not only in colour. A turn rotates it 120 ms. */
+.puzzle-pipe {
+  width: 100%;
+  height: 100%;
+  transition: transform 120ms ease-out;
+}
+
+.puzzle-pipe line {
+  stroke: var(--ink-dim);
+  stroke-width: 3;
+  stroke-linecap: round;
+  vector-effect: non-scaling-stroke;
+}
+
+.puzzle-pipe circle {
+  fill: var(--ink-dim);
+}
+
+.puzzle-pipe.is-powered line {
+  stroke: var(--good);
+  stroke-width: 5;
+}
+
+.puzzle-pipe.is-powered circle {
+  fill: var(--good);
+}
+
+/* A sequence: its terms in one row, the four choices two by two under it. */
+.puzzle-board.is-sequence {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-width: min(360px, 60vw);
+}
+
+.puzzle-tokens {
+  display: flex;
+  flex-wrap: nowrap;
+  gap: 6px;
+}
+
+/* One row: five terms and the blank fit the board's width. */
+.puzzle-token {
+  display: grid;
+  place-items: center;
+  box-sizing: border-box;
+  min-width: 44px;
+  min-height: 44px;
+  padding: 0 8px;
+  border: 1px solid var(--rule);
+  border-radius: var(--radius);
+  background: rgba(4, 6, 10, 0.55);
+  font-size: var(--type-md);
+}
+
+.puzzle-token.is-blank {
+  color: var(--accent-2);
+  border-style: dashed;
+}
+
+.puzzle-choices {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(96px, 1fr));
+  gap: 6px;
+}
+
+.puzzle-choice {
+  min-height: 44px;
+  text-transform: none;
+  font-size: var(--type-md);
+}
+
+/* §4.5: a hint greys one wrong choice — it stays readable, and stays put. */
+.puzzle-choice[aria-disabled='true'] {
+  opacity: 0.4;
+  text-decoration: line-through;
+  cursor: default;
+}
+
+@media (max-height: 500px) {
+  .puzzle-panel {
+    grid-template-rows: auto 1fr;
+    grid-template-areas:
+      'board title'
+      'board side';
+    padding: 6px 10px;
+    gap: 4px 10px;
+  }
+}
+
+@media (max-aspect-ratio: 1/1) {
+  .puzzle-panel {
+    grid-template-columns: auto;
+    grid-template-areas:
+      'title'
+      'board'
+      'side';
+  }
+}
+
+/* 55-l: the cells follow the scheme — a thumb gets up to 72 px where the
+   screen has room; the 44 px floor and the short-screen sum are the same. */
+html.scheme-touch .puzzle-panel {
+  --cell: clamp(44px, calc((100dvh - 56px) / var(--n, 4)), 72px);
+}
+
+/* §4.4: under reduce motion a turn and a flip are instant. */
+html.reduce-motion .puzzle-pipe,
+html.reduce-motion .puzzle-cell {
+  transition: none;
+}

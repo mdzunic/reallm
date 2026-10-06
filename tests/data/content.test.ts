@@ -2740,12 +2740,13 @@ describe('the caves and their caches (SPEC-054 §4.8)', () => {
     }
   });
 
-  it('every unguarded cache pays something; every guarded one pays nothing until SPEC-055 fills it', () => {
+  // SPEC-055 §4.8 filled the guarded caches, which paid nothing until then:
+  // every cache now pays something, whatever guards it.
+  it('every cache pays something, guarded or not (SPEC-055 §4.8)', () => {
     for (const cache of Object.values(CACHES)) {
       const resources = Object.values(cache.reward.resources ?? {}).some((amount) => (amount ?? 0) > 0);
       const items = (cache.reward.items ?? []).some((item) => item.qty > 0);
-      if (cache.guard === 'none') expect(resources || items, cache.id).toBe(true);
-      else expect(cache.reward, cache.id).toEqual({});
+      expect(resources || items, cache.id).toBe(true);
     }
   });
 
@@ -2764,7 +2765,8 @@ describe('the caves and their caches (SPEC-054 §4.8)', () => {
   it('every item a cache pays is a consumable in whole units, never gear', () => {
     let paid = 0;
     for (const cache of Object.values(CACHES)) {
-      for (const item of cache.reward.items ?? []) {
+      // SPEC-055 §4.8: the flawless part is held to the same rule.
+      for (const item of [...(cache.reward.items ?? []), ...(cache.flawless?.items ?? [])]) {
         paid++;
         expect(ITEM_TABLE[item.itemId]?.kind, `${cache.id}: ${item.itemId}`).toBe('consumable');
         expect(Number.isInteger(item.qty) && item.qty > 0, `${cache.id}: ${item.itemId} × ${item.qty}`).toBe(true);
@@ -2790,5 +2792,225 @@ describe('the caves and their caches (SPEC-054 §4.8)', () => {
       ]),
     ).toHaveLength(3);
     expect(undergroundNames(names)).toEqual([]);
+  });
+});
+
+// ------------------------------------------------------------- SPEC-055 §4.1, §4.3, §4.8
+
+import { HUMAN_LOCK, PUZZLE_DIFFICULTY, PUZZLE_SITES, PUZZLE_SITE_IDS, SEQUENCE_PHRASES, type CacheId } from '@/data/index';
+
+/** §4.3: a line's words, lower-cased, with punctuation dropped — how a phrase is looked for. */
+function wordsOf(text: string): string {
+  return text
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+/** §4.3: the phrase (three words, then `next`) occurs in a line of `from`. */
+function phraseIn(from: DialogueId, shown: readonly string[], next: string): boolean {
+  const wanted = ` ${wordsOf([...shown, next].join(' '))} `;
+  return (DIALOGUE[from].lines as readonly { text: string }[]).some((line) => ` ${wordsOf(line.text)} `.includes(wanted));
+}
+
+describe('puzzles: the sites, the rows and the caches they open (SPEC-055 §4.1, §4.3, §4.8)', () => {
+  const kinds: Record<string, string> = {
+    cinder4_vault: 'conduit',
+    cinder4_world: 'plates',
+    cinder4_relic: 'sequence',
+    vetra_vault: 'calibration',
+    vetra_world: 'beam',
+    vetra_relic: 'sequence',
+    thessaly_vault: 'conduit',
+    thessaly_world: 'plates',
+    thessaly_relic: 'sequence',
+    ferrum_vault: 'calibration',
+    ferrum_world: 'beam',
+    ferrum_relic: 'sequence',
+    hive_vault: 'conduit',
+    hive_world: 'plates',
+    eden_vault: 'sequence',
+    eden_world: 'beam',
+    eden_relic: 'sequence',
+  };
+
+  it('defines 17 sites — a vault and a world puzzle on each planet, a relic on all but the Hive', () => {
+    expect(PUZZLE_SITE_IDS).toHaveLength(17);
+    expect(Object.keys(PUZZLE_SITES).sort()).toEqual([...PUZZLE_SITE_IDS].sort());
+    for (const planet of PLANET_IDS) {
+      for (const where of ['vault', 'world', 'relic'] as const) {
+        const id = `${planet}_${where}`;
+        expect((PUZZLE_SITE_IDS as readonly string[]).includes(id), id).toBe(!(planet === 'hive' && where === 'relic'));
+      }
+    }
+  });
+
+  it('each site names its planet, its kind of §4.1 and a cache on its planet that its guard matches', () => {
+    const slots: Record<'vault' | 'world' | 'relic', string> = { vault: 'vault', world: 'loose_b', relic: 'relic' };
+    for (const id of PUZZLE_SITE_IDS) {
+      const site = PUZZLE_SITES[id];
+      expect(site.id, id).toBe(id);
+      expect(`${site.planet}_${site.where}`, id).toBe(id);
+      expect(site.kind, id).toBe(kinds[id]);
+      expect(site.cache, id).toBe(`${site.planet}_${slots[site.where]}`);
+      expect(CACHES[site.cache].planet, id).toBe(site.planet);
+      expect(CACHES[site.cache].guard, id).toBe(site.where);
+    }
+    // Every guarded cache has exactly one site, and no loose_a has any.
+    const guarded = Object.values(CACHES).filter((cache) => cache.guard !== 'none').map((cache) => cache.id).sort();
+    expect(PUZZLE_SITE_IDS.map((id) => PUZZLE_SITES[id].cache).sort()).toEqual(guarded);
+  });
+
+  it('the relics ask the families of §4.3 in chapter order, and Eden’s vault is the human lock', () => {
+    const relics = PUZZLE_SITE_IDS.filter((id) => PUZZLE_SITES[id].where === 'relic');
+    expect(relics.map((id) => [id, PUZZLE_SITES[id].family])).toEqual([
+      ['cinder4_relic', 'arithmetic'],
+      ['vetra_relic', 'alternating'],
+      ['thessaly_relic', 'fibonacci'],
+      ['ferrum_relic', 'interleaved'],
+      ['eden_relic', 'words'],
+    ]);
+    for (const id of relics) {
+      expect(PUZZLE_DIFFICULTY.sequence[planetsById[PUZZLE_SITES[id].planet].chapter]?.family, id).toBe(PUZZLE_SITES[id].family);
+    }
+    expect(PUZZLE_SITES.eden_vault.family).toBe('human');
+    for (const id of PUZZLE_SITE_IDS) {
+      if (PUZZLE_SITES[id].kind !== 'sequence') expect(PUZZLE_SITES[id].family, id).toBeUndefined();
+    }
+  });
+
+  it('PUZZLE_DIFFICULTY holds the rows of §4.3, each at its planet’s chapter', () => {
+    expect(PUZZLE_DIFFICULTY.conduit).toEqual({
+      1: { n: 4, sinks: 1, path: [5, 8] },
+      3: { n: 5, sinks: 1, path: [7, 11] },
+      5: { n: 5, sinks: 2, path: [9, 13] },
+    });
+    expect(PUZZLE_DIFFICULTY.calibration).toEqual({ 2: { n: 3, presses: 4 }, 4: { n: 4, presses: 6 } });
+    expect(PUZZLE_DIFFICULTY.plates).toEqual({ 1: { plates: 3 }, 3: { plates: 4 }, 5: { plates: 5 } });
+    expect(PUZZLE_DIFFICULTY.beam).toEqual({ 2: { mirrors: 2 }, 4: { mirrors: 3 }, 6: { mirrors: 3 } });
+    expect(PUZZLE_DIFFICULTY.sequence).toEqual({
+      1: { family: 'arithmetic' },
+      2: { family: 'alternating' },
+      3: { family: 'fibonacci' },
+      4: { family: 'interleaved' },
+      6: { family: 'words' },
+    });
+    // Every site's kind has a row at its planet's chapter (the human lock is fixed).
+    for (const id of PUZZLE_SITE_IDS) {
+      const site = PUZZLE_SITES[id];
+      const chapter = planetsById[site.planet].chapter;
+      if (site.kind === 'sequence') continue;
+      expect(PUZZLE_DIFFICULTY[site.kind][chapter], id).toBeDefined();
+    }
+    // §4.2: a lights-out row's presses stay under the board's lightest quiet pattern (none on 3 × 3, 8 on 4 × 4).
+    expect(PUZZLE_DIFFICULTY.calibration[2]?.presses).toBeLessThan(9);
+    expect(PUZZLE_DIFFICULTY.calibration[4]?.presses).toBeLessThan(8);
+  });
+
+  it('the guarded caches pay §4.8’s table — loose_b oil and explosives, vault lithium and kit with a flawless medkit, relic lithium and a cell', () => {
+    const explosive = (chapter: number): string => (chapter <= 2 ? 'frag_grenade' : chapter <= 4 ? 'landmine' : 'demo_charge');
+    for (const planet of PLANET_IDS) {
+      const c = planetsById[planet].chapter;
+      expect(CACHES[`${planet}_loose_b`].reward, planet).toEqual({ resources: { oil: 10 + 5 * c }, items: [{ itemId: explosive(c), qty: 2 }] });
+      expect(CACHES[`${planet}_loose_b`].flawless, planet).toBeUndefined();
+      expect(CACHES[`${planet}_vault`].reward, planet).toEqual({
+        resources: { lithium: 5 + 3 * c },
+        items: [
+          { itemId: 'plasma_cell', qty: 1 },
+          { itemId: 'coolant_pack', qty: 1 },
+        ],
+      });
+      expect(CACHES[`${planet}_vault`].flawless, planet).toEqual({ items: [{ itemId: 'medkit', qty: 1 }] });
+      if (planet === 'hive') continue;
+      const relic = `${planet}_relic` as CacheId;
+      expect(CACHES[relic].reward, planet).toEqual({ resources: { lithium: 5 }, items: [{ itemId: 'plasma_cell', qty: 1 }] });
+      expect(CACHES[relic].flawless, planet).toBeUndefined();
+    }
+  });
+
+  it('the campaign’s caches total 178 lithium, 165 oil, 12 medkits (6 flawless), 12 explosives, 11 cells, 6 coolant packs — and no tokens, XP or flags', () => {
+    const totals: Record<string, number> = {};
+    let flawlessMedkits = 0;
+    for (const cache of Object.values(CACHES)) {
+      for (const part of [cache.reward, cache.flawless ?? {}]) {
+        // A reward is resources and items only: nothing here can be a token, XP or a flag.
+        for (const key of Object.keys(part)) expect(['resources', 'items'], `${cache.id}.${key}`).toContain(key);
+        for (const [resource, amount] of Object.entries(part.resources ?? {})) totals[resource] = (totals[resource] ?? 0) + (amount ?? 0);
+        for (const item of part.items ?? []) totals[item.itemId] = (totals[item.itemId] ?? 0) + item.qty;
+      }
+      for (const item of cache.flawless?.items ?? []) if (item.itemId === 'medkit') flawlessMedkits += item.qty;
+    }
+    expect(totals['lithium']).toBe(178);
+    expect(totals['oil']).toBe(165);
+    expect(totals['medkit']).toBe(12);
+    expect(flawlessMedkits).toBe(6);
+    expect((totals['frag_grenade'] ?? 0) + (totals['landmine'] ?? 0) + (totals['demo_charge'] ?? 0)).toBe(12);
+    expect(totals['plasma_cell']).toBe(11);
+    expect(totals['coolant_pack']).toBe(6);
+  });
+
+  it('no requirement, planet unlock or objective reads a puzzle site, a cache or the word puzzle', () => {
+    const names: Array<[string, string]> = [];
+    for (const mission of missions) {
+      namesIn(mission.requires, `${mission.id}.requires`, names);
+      for (const { objective, where } of objectivesOf(mission)) namesIn(objective, where, names);
+    }
+    for (const planet of planets) namesIn(planet.unlock, `${planet.id}.unlock`, names);
+    const sites = new Set<string>(PUZZLE_SITE_IDS);
+    const puzzled = (list: readonly [string, string][]): string[] =>
+      list.filter(([, value]) => sites.has(value) || /puzzle/i.test(value)).map(([where, value]) => `${where}: ${value}`);
+    expect(names.length).toBeGreaterThan(100);
+    // The rule would catch a planted reference.
+    expect(puzzled([['planted.requires[0].flag', 'cinder4_relic'], ['planted.unlock[0].kind', 'puzzle_solved']])).toHaveLength(2);
+    expect(puzzled(names)).toEqual([]);
+    expect(undergroundNames(names)).toEqual([]);
+  });
+});
+
+describe('puzzles: the phrases and the human lock (SPEC-055 §4.3, §4.7)', () => {
+  it('names four phrases, one per main-path line SPEC-048, SPEC-049 and SPEC-058 leave alone', () => {
+    expect(SEQUENCE_PHRASES.map((phrase) => phrase.from)).toEqual(['c1_m3_done', 'c3_m2_accept', 'c3_m3_done', 'c4_m2_accept']);
+    for (const phrase of SEQUENCE_PHRASES) {
+      expect(phrase.shown).toHaveLength(3);
+      expect(phrase.others).toHaveLength(3);
+      expect(new Set([phrase.answer, ...phrase.others]).size, phrase.answer).toBe(4);
+    }
+  });
+
+  it('every phrase, with its answer, occurs in its from dialogue — and no other word completes it there', () => {
+    for (const phrase of SEQUENCE_PHRASES) {
+      const at = `${phrase.from}: ${phrase.shown.join(' ')} ?`;
+      expect(phraseIn(phrase.from, phrase.shown, phrase.answer), at).toBe(true);
+      for (const other of phrase.others) expect(phraseIn(phrase.from, phrase.shown, other), `${at} ${other}`).toBe(false);
+    }
+    // The check is a real one: a phrase from the wrong dialogue fails it.
+    expect(phraseIn('c1_m3_done', ['that', 'gets', 'us'], 'home')).toBe(false);
+  });
+
+  it('the human lock shows four tokens and four choices in order, and both lines carry {instance}', () => {
+    expect(HUMAN_LOCK.title).toBe('HUMAN VERIFICATION — complete the sentence');
+    expect(HUMAN_LOCK.shown).toEqual(['walk', 'do', 'not', '?']);
+    expect(HUMAN_LOCK.choices).toEqual(['stop', 'run', 'look', 'wake']);
+    expect(HUMAN_LOCK.choices).toContain(HUMAN_LOCK.predicted);
+    expect(HUMAN_LOCK.linePredicted).toContain('{instance}');
+    expect(HUMAN_LOCK.lineSampled).toContain('{instance}');
+    expect(HUMAN_LOCK.linePredicted).toContain('predicted');
+    expect(HUMAN_LOCK.lineSampled).toContain('sampled');
+  });
+
+  it('SPEC-048’s limits hold for the verdicts at the longest fill: 220 characters, and no unknown token', () => {
+    for (const line of [HUMAN_LOCK.linePredicted, HUMAN_LOCK.lineSampled]) {
+      expect(atLongest(line).length, line).toBeLessThanOrEqual(220);
+      expect(unknownTokens(line), line).toEqual([]);
+    }
+  });
+
+  it('the puzzle tip reads §4.4’s two wordings', () => {
+    expect(TIP_IDS).toContain('puzzle');
+    expect(TIPS.puzzle).toEqual({
+      keyboard: 'Arrows move, Enter turns a tile. H asks ARIA for a hint — hints are free.',
+      touch: 'Tap a tile to turn it. HINT asks ARIA — hints are free.',
+    });
   });
 });
