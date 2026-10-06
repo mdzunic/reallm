@@ -166,6 +166,15 @@ export const MEDIC_WEATHER_PAUSE = 1;
 
 // ------------------------------------------------ SPEC-038 (initial tuning)
 
+/** §4.6: on casual every windup and every telegraph's lead time lasts ×1.25. */
+export const CASUAL_WINDUP_MULT = 1.25;
+/** §4.6: on casual weather damage is ×0.7, after `hazardResist`. */
+export const CASUAL_WEATHER_MULT = 0.7;
+/** §4.7: the most auto-fire leads a strafing target by, in metres. */
+export const AUTO_LEAD_MAX = 3;
+/** §4.2: a telegraph hit knocks the player this far — from a centre, or across a lane. */
+export const TELEGRAPH_KNOCKBACK = 1.0;
+
 // ------------------------------------------------ SPEC-056 (initial tuning)
 
 /** §4.4: the Seed Drum's spore clouds alive at once; a seventh replaces the oldest (56-e). */
@@ -189,15 +198,6 @@ export interface LingerCloud {
 export function staminaFull(p: Pick<PlayerEntity, 'stamina' | 'exhausted'>): boolean {
   return p.stamina >= STAMINA_MAX && !p.exhausted;
 }
-
-/** §4.6: on casual every windup and every telegraph's lead time lasts ×1.25. */
-export const CASUAL_WINDUP_MULT = 1.25;
-/** §4.6: on casual weather damage is ×0.7, after `hazardResist`. */
-export const CASUAL_WEATHER_MULT = 0.7;
-/** §4.7: the most auto-fire leads a strafing target by, in metres. */
-export const AUTO_LEAD_MAX = 3;
-/** §4.2: a telegraph hit knocks the player this far — from a centre, or across a lane. */
-export const TELEGRAPH_KNOCKBACK = 1.0;
 
 // --------------------------------------------------------------- pure pieces
 
