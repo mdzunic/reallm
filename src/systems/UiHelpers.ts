@@ -9,7 +9,7 @@
 // `systems/` class does (SPEC-010's `Economy` is the model).
 import type { GameEvents } from '@/core/Events';
 import type { Scheme } from '@/core/Input';
-import { maxHp, type Save, type SlotSummary } from '@/core/Save';
+import { maxHp, type ArchiveSummary, type LineageEntry, type Save, type SlotSummary } from '@/core/Save';
 import type { AutoFireMode, DamageFlashMode } from '@/core/Settings';
 import {
   AFFIX_IDS,
@@ -79,6 +79,7 @@ import {
   discountTokens,
   missingRequirements,
   ownsItem,
+  PREDECESSOR_CACHE,
   type DepartResult,
   type Economy,
   type FailReason,
@@ -100,6 +101,7 @@ import {
 } from '@/systems/Puzzles';
 import { remainsListText, type RemainsLook } from '@/systems/Remains';
 import { STAMINA_MAX } from '@/systems/Stamina';
+import { instanceNumber } from '@/systems/StoryContext';
 import type { Class, Item, QuickSlot, WeaponSlot } from '@/data/index';
 
 // The schema-typed views of the content tables: on the `as const` literal types
@@ -204,6 +206,11 @@ export const DIFFICULTY_LINES: Readonly<Record<Difficulty, string>> = {
 /** E9 / SPEC-044 §4.10: a slot this build cannot read because a newer one wrote it. */
 export const NEWER_SAVE_TEXT = 'Save from a newer version';
 
+/** SPEC-058 §4.3: where an ended run says it is, in place of its planet. */
+function endedPlace(ending: 'stay' | 'escape' | null): string {
+  return ending === 'escape' ? 'disconnected' : 'filed';
+}
+
 /**
  * One line per occupied slot for the Load list (AC-4): name, class, level,
  * planet, playtime (SPEC-045 §4.7: a `duration`, `1 h 04 min`) — in the order a
@@ -212,14 +219,86 @@ export const NEWER_SAVE_TEXT = 'Save from a newer version';
  *
  * SPEC-044 §4.10: a save from a newer version is readable, just not by this
  * build (E9) — it says so before the `Corrupt` rule, which it also carries.
+ *
+ * SPEC-058 §4.3: an ended run reads `filed` or `disconnected` in place of its
+ * planet, and an ended run or a later instance leads with `instance/<n>`. A
+ * first run that has not ended is unchanged — the fourth wall surfaces only
+ * after the endings (PLAN §12 as refined).
  */
 export function slotLine(summary: SlotSummary): string {
   if (summary.newer === true) return NEWER_SAVE_TEXT;
   if (summary.corrupt === true) return 'Corrupt';
   if (summary.empty) return 'Empty';
   const cls = summary.classId !== undefined ? CLASS_TABLE[summary.classId].name : '';
-  const planet = summary.planet != null ? PLANETS[summary.planet].name : 'Station';
-  return `${summary.name ?? ''} · ${cls} · Lv ${summary.level ?? 1} · ${planet} · ${duration(summary.playtimeSec ?? 0)}`;
+  const ending = summary.ending ?? null;
+  const iteration = summary.iteration ?? 1;
+  const place = ending !== null ? endedPlace(ending) : summary.planet != null ? PLANETS[summary.planet].name : 'Station';
+  const line = `${summary.name ?? ''} · ${cls} · Lv ${summary.level ?? 1} · ${place} · ${duration(summary.playtimeSec ?? 0)}`;
+  return ending !== null || iteration >= 2 ? `instance/${instanceNumber(iteration)} · ${line}` : line;
+}
+
+/** SPEC-058 §4.3: the Load row's second line — `Archived: instance/62 · Vance · filed · Lv 18 · 2 h 14 min`. */
+export function archiveLine(archive: ArchiveSummary): string {
+  const instance = instanceNumber(archive.iteration);
+  return `Archived: instance/${instance} · ${archive.name} · ${endedPlace(archive.ending)} · Lv ${archive.level} · ${duration(archive.playtimeSec)}`;
+}
+
+/** SPEC-058 §4.1: the Load row's `load-slot-<n>-next` — `Begin instance/63` for a first run. */
+export function beginInstanceText(iteration: number): string {
+  return `Begin instance/${instanceNumber(iteration + 1)}`;
+}
+
+/** What `confirmSheet` is opened with. */
+export interface SheetText {
+  readonly title: string;
+  readonly body: string;
+  readonly confirmText: string;
+}
+
+/**
+ * SPEC-058 §4.1: the sheet `Next instance` and `Begin instance/{next}` open,
+ * in the slot save's own numbers.
+ */
+export function nextInstanceSheet(iteration: number): SheetText {
+  const instance = instanceNumber(iteration);
+  return {
+    title: `Initialise instance/${instanceNumber(iteration + 1)}?`,
+    body:
+      `instance/${instance} is archived and can be restored once from Load. ` +
+      `The new instance starts at level 1 with none of ${instance}'s tokens, gear or ship. ` +
+      'Your records and unlocks stay. The Warden starts one containment level higher.',
+    confirmText: 'Initialise',
+  };
+}
+
+/** SPEC-058 §4.3: the archive's sheet — restoring it loses the instance in the slot now. */
+export function restoreArchiveSheet(archiveIteration: number, currentIteration: number): SheetText {
+  return {
+    title: `Restore instance/${instanceNumber(archiveIteration)}?`,
+    body: `instance/${instanceNumber(currentIteration)} in this slot will be lost. The archive can be restored once.`,
+    confirmText: 'Restore',
+  };
+}
+
+/** SPEC-058 §4.2: creation's `creation-next` header — `instance/63 — restored from instance/62's profile`. */
+export function creationNextText(iteration: number): string {
+  return `instance/${instanceNumber(iteration + 1)} — restored from instance/${instanceNumber(iteration)}'s profile`;
+}
+
+/** SPEC-058 §4.2: `creation-variant`, once any field differs from the profile it was restored from. */
+export const VARIANT_LOGGED_TEXT = 'Variant logged';
+
+/** SPEC-058 §4.2: a next-mode creation whose slot does not qualify (§4.1) goes back to the menu with this. */
+export const NEXT_REFUSED_TEXT = 'This run cannot continue as a new instance';
+
+/** SPEC-058 §4.5: the body's prompt — `E Search the body` (the HUD adds the keycap), then `Searched`. */
+export const SEARCH_BODY_TEXT = 'Search the body';
+export const SEARCHED_TEXT = 'Searched';
+
+/** SPEC-058 §4.5: the search's toast — `instance/62: 2 Medkit · 2 Frag Grenade`. */
+export function predecessorCacheText(prior: Pick<LineageEntry, 'iteration'>): string {
+  const items = PREDECESSOR_CACHE.map((entry) => `${entry.qty} ${ITEMS[entry.itemId].name}`).join(' · ');
+  return `instance/${instanceNumber(prior.iteration)}: ${items}`;
 }
 
 /**

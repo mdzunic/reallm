@@ -75,6 +75,11 @@ export const SAVE_VERSION = 3 as const;
 /** `reallm:slot:{n}` and `reallm:slot:{n}:bak`; settings live in their own key. */
 export const SLOT_KEY_PREFIX = 'reallm:slot:';
 export const BAK_SUFFIX = ':bak';
+/**
+ * SPEC-058 §4.3: `reallm:slot:{n}:archive` — the instance a next instance
+ * replaced, restorable once. One per slot; a later next instance overwrites it.
+ */
+export const ARCHIVE_SUFFIX = ':archive';
 /** Written and removed once at construction to detect availability (§3). */
 export const PROBE_KEY = 'reallm:probe';
 export const SLOTS = [0, 1, 2] as const;
@@ -103,6 +108,13 @@ export const CODE_DAMAGED_TEXT = 'Code is damaged';
 export const CODE_NEWER_TEXT = 'Code is from a newer version';
 export const CODE_NOT_REALLM_TEXT = 'Not a ReaLLM save';
 export const CODES_UNSUPPORTED_TEXT = 'Save codes need a newer browser';
+/** SPEC-058 §4.3: a `restoreArchive` whose archive will not parse changes nothing. */
+export const ARCHIVE_DAMAGED_TEXT = 'Archive is damaged';
+
+/** SPEC-058 §4.2: the archive write failed, so the slot was left as it was. */
+export function archiveFailedText(instance: number): string {
+  return `Could not archive instance/${instance} — export it first`;
+}
 export const INSTALL_HINT_TEXT =
   'Add to Home Screen to keep saves safe (Safari clears site data after 7 days unused)';
 
@@ -302,6 +314,18 @@ export function lineageClaimId(iteration: number, planet: PlanetId): string {
   return `lineage:${iteration}:${planet}`;
 }
 
+/** SPEC-058 §4.3: how a finished run ended, once its ending has been seen. */
+export type RunEnding = 'stay' | 'escape';
+
+/** SPEC-058 §3: the archived predecessor a slot can restore once, as its Load row prints it. */
+export interface ArchiveSummary {
+  iteration: number;
+  name: string;
+  ending: RunEnding | null;
+  level: number;
+  playtimeSec: number;
+}
+
 export interface SlotSummary {
   slot: SlotId;
   empty: boolean;
@@ -315,6 +339,132 @@ export interface SlotSummary {
   corrupt?: boolean;
   /** A save written by a newer version (E9); `corrupt` stays true beside it for older readers. */
   newer?: boolean;
+  /** SPEC-058 §4.3, for a slot that loaded: `meta.iteration`. */
+  iteration?: number;
+  /** SPEC-058 §4.3, for a slot that loaded: `runEnding` — null until the ending has been seen. */
+  ending?: RunEnding | null;
+  /** SPEC-058 §4.3: present when the slot's archive key parses. */
+  archive?: ArchiveSummary;
+}
+
+/**
+ * SPEC-058 §4.1 (58-b): the validator clamps `meta.iteration` to 1…99, so an
+ * instance at 99 is offered no successor.
+ */
+export const ITERATION_MAX = 99;
+
+/**
+ * SPEC-058 §4.3: `'escape'` or `'stay'` once `campaign_done` and `endingSeen`
+ * both hold — escape wins over a stay flag beside it (SPEC-024's 24-d) — and
+ * `null` before: a run whose ending is still owed has not ended yet.
+ */
+export function runEnding(save: Save): RunEnding | null {
+  const flags = save.progress.flags as readonly string[];
+  if (!flags.includes('campaign_done') || !save.progress.endingSeen) return null;
+  return flags.includes('ending_escape') ? 'escape' : 'stay';
+}
+
+/** SPEC-058 §4.1: the save may begin its next instance — an ended run, below the iteration cap. */
+export function nextInstanceOffered(save: Save): boolean {
+  return runEnding(save) !== null && save.meta.iteration < ITERATION_MAX;
+}
+
+/** SPEC-058 §4.3: what a slot's Load row reads off its save, and off the archive beside it. */
+export function slotSummaryOf(slot: SlotId, data: Save, archive: Save | null = null): SlotSummary {
+  const { meta, player, progress } = data;
+  const summary: SlotSummary = {
+    slot,
+    empty: false,
+    name: player.name,
+    classId: player.classId,
+    level: player.level,
+    planet: progress.currentPlanet,
+    playtimeSec: meta.playtimeSec,
+    updatedAt: meta.updatedAt,
+    iteration: meta.iteration,
+    ending: runEnding(data),
+  };
+  if (archive !== null) {
+    summary.archive = {
+      iteration: archive.meta.iteration,
+      name: archive.player.name,
+      ending: runEnding(archive),
+      level: archive.player.level,
+      playtimeSec: archive.meta.playtimeSec,
+    };
+  }
+  return summary;
+}
+
+/**
+ * SPEC-058 §4.2's table: the run as its successor remembers it. The ending
+ * comes from the flags (escape when `ending_escape` is set, else stay), the
+ * memory from whichever `memory_*` answer is set, the deaths and the last
+ * death on each planet from `stats` (copied, so the successor never shares an
+ * object with the archive), and `endedAt` is `now`.
+ */
+export function lineageOf(save: Save, now: number): LineageEntry {
+  const flags = save.progress.flags as readonly string[];
+  const memory = MEMORIES.find((answer) => flags.includes(`memory_${answer}`)) ?? null;
+  const lastDeath: RunStats['lastDeath'] = {};
+  for (const planet of PLANET_IDS) {
+    const point = save.meta.stats.lastDeath[planet];
+    if (point !== undefined) lastDeath[planet] = { x: point.x, z: point.z };
+  }
+  return {
+    iteration: save.meta.iteration,
+    name: save.player.name,
+    classId: save.player.classId,
+    appearance: { ...save.player.appearance },
+    level: save.player.level,
+    playtimeSec: save.meta.playtimeSec,
+    ending: flags.includes('ending_escape') ? 'escape' : 'stay',
+    memory,
+    deaths: save.meta.stats.deaths,
+    lastDeath,
+    endedAt: now,
+  };
+}
+
+/**
+ * SPEC-058 §4.2: creation's pre-fill in next mode — the old run's name, class,
+ * look, attributes and difficulty. The attributes go back inside the class
+ * base plus `CREATION_POINTS`, because the points a level earned do not carry:
+ * the surplus is dropped in field order, as the validator drops it (39-l).
+ */
+export function nextCreation(save: Save): CharacterCreation {
+  const classId = save.player.classId;
+  const base = CLASS_BASE[classId];
+  const attributes: Attributes = { ...base };
+  let budget = CREATION_POINTS;
+  for (const key of ATTRIBUTE_KEYS) {
+    const over = Math.max(0, Math.min(save.player.attributes[key], ATTRIBUTE_MAX) - base[key]);
+    const give = Math.min(over, budget);
+    budget -= give;
+    attributes[key] = base[key] + give;
+  }
+  return {
+    name: save.player.name,
+    classId,
+    appearance: { ...save.player.appearance },
+    attributes,
+    difficulty: save.meta.difficulty,
+  };
+}
+
+/**
+ * SPEC-058 §4.2 step 3: the successor of `old` — `newSave` on the old seed,
+ * one iteration on, with the old run prepended to its lineage (at most
+ * `LINEAGE_MAX`). Nothing else carries: no level, XP, tokens, gear, ship,
+ * companions, resources, flags, missions, visits, ground, claims or remains
+ * (§4.2's second table), so every SPEC-010 invariant holds for it as for any
+ * fresh run.
+ */
+export function nextInstance(old: Save, creation: CharacterCreation, now: number): Save {
+  const next = newSave(old.meta.slot, creation, old.meta.seed, now);
+  next.meta.iteration = Math.min(ITERATION_MAX, old.meta.iteration + 1);
+  next.meta.lineage = [lineageOf(old, now), ...old.meta.lineage].slice(0, LINEAGE_MAX);
+  return next;
 }
 
 /**
@@ -791,7 +941,7 @@ export function validateSave(
 function validateMeta(raw: Bag, content: SaveContent, warnings: string[]): Save['meta'] {
   const slot = int(raw['slot'], 0, 0, 2) as SlotId;
   if (raw['slot'] !== slot) warnings.push(`meta.slot: ${JSON.stringify(raw['slot'])} clamped to ${slot}`);
-  const iteration = int(raw['iteration'], 1, 1, 99);
+  const iteration = int(raw['iteration'], 1, 1, ITERATION_MAX);
   if (raw['iteration'] !== iteration) {
     warnings.push(`meta.iteration: ${JSON.stringify(raw['iteration'])} clamped to ${iteration}`);
   }
@@ -1828,22 +1978,22 @@ export class SaveStore {
     }
   }
 
-  /** One line per slot for the menu (§3). Never throws on a corrupt slot. */
+  /** SPEC-058 §4.3: the slot's archive key. */
+  #archiveKey(slot: SlotId): string {
+    return this.#key(slot) + ARCHIVE_SUFFIX;
+  }
+
+  /**
+   * One line per slot for the menu (§3). Never throws on a corrupt slot.
+   * SPEC-058 §4.3: a slot that loads also carries its iteration, its ending
+   * and, when its archive key parses, the archived predecessor.
+   */
   list(): SlotSummary[] {
     return SLOTS.map((slot) => {
       const result = this.load(slot);
       if (result.ok) {
-        const { meta, player, progress } = result.data;
-        return {
-          slot,
-          empty: false,
-          name: player.name,
-          classId: player.classId,
-          level: player.level,
-          planet: progress.currentPlanet,
-          playtimeSec: meta.playtimeSec,
-          updatedAt: meta.updatedAt,
-        };
+        const archive = this.loadArchive(slot);
+        return slotSummaryOf(slot, result.data, archive.ok ? archive.data : null);
       }
       // E8/E9: "Corrupt" and "newer version" are both slots with something in
       // them — never a silent overwrite. SPEC-044 §4.10: a newer save says so,
@@ -1921,9 +2071,9 @@ export class SaveStore {
     this.#pending = null;
   }
 
-  /** Removes the main key *and* the backup (§3, M1 acceptance). */
+  /** Removes the main key *and* the backup (§3, M1 acceptance) — and SPEC-058's archive (§4.3). */
   delete(slot: SlotId): void {
-    for (const key of [this.#key(slot), this.#key(slot) + BAK_SUFFIX]) {
+    for (const key of [this.#key(slot), this.#key(slot) + BAK_SUFFIX, this.#archiveKey(slot)]) {
       try {
         this.#storage?.removeItem(key);
       } catch (error) {
@@ -1944,6 +2094,105 @@ export class SaveStore {
     if (this.#current === null) return;
     if (!Number.isFinite(seconds) || seconds <= 0) return;
     this.#current.meta.playtimeSec += seconds;
+  }
+
+  // ------------------------------------------- SPEC-058: the next instance
+
+  /**
+   * SPEC-058 §4.3: the slot's archived predecessor, parsed as a load is —
+   * migrated, then validated. It only reads: nothing is rewritten, and an
+   * archive has no backup to fall back on, so a damaged one is `corrupt`.
+   */
+  loadArchive(slot: SlotId): LoadResult {
+    if (!this.available) return { ok: false, reason: 'unavailable' };
+    const raw = this.#read(this.#archiveKey(slot));
+    if (raw === null) return { ok: false, reason: 'empty' };
+    const parsed = this.#parse(raw);
+    if (parsed.ok) return { ok: true, data: parsed.data, source: 'main', ...(parsed.from < SAVE_VERSION ? { migratedFrom: parsed.from } : {}) };
+    if (parsed.reason === 'newer_version') return { ok: false, reason: 'newer_version', foundVersion: parsed.foundVersion };
+    return { ok: false, reason: 'corrupt', errors: parsed.errors };
+  }
+
+  /**
+   * SPEC-058 §4.2 (E94): archives the slot's finished run and binds its
+   * successor. The slot must load and qualify (§4.1), else `null`. The loaded
+   * save goes to `:archive` through the write-and-verify a main write takes;
+   * when that fails the slot — and any archive it already had — is left as it
+   * was, with a toast, and the answer is `null`. Then the successor
+   * (`nextInstance`: the old seed, the next iteration, the lineage) is bound
+   * and flushed with reason `new`, so the old main JSON goes to `:bak` as on
+   * every write.
+   */
+  beginNextIteration(slot: SlotId, creation: CharacterCreation): Save | null {
+    const result = this.load(slot);
+    if (!result.ok || !nextInstanceOffered(result.data)) return null;
+    const old = result.data;
+    const key = this.#archiveKey(slot);
+    const previous = this.#read(key);
+    const error = this.#writeVerified(key, JSON.stringify(old));
+    if (error !== null) {
+      // A torn write must not cost the archive the slot already had.
+      this.#putBack(key, previous);
+      log.warn('save', `slot ${slot}: the archive write failed; the slot is unchanged`, error);
+      // PLAN R19 decision 1: run N is instance/(61 + N).
+      this.#events.emit('ui:toast', { kind: 'error', text: archiveFailedText(61 + old.meta.iteration), ms: 8000 });
+      return null;
+    }
+    const next = nextInstance(old, creation, this.#stamp());
+    next.meta.slot = slot;
+    this.bind(next);
+    this.#flush('new');
+    return next;
+  }
+
+  /**
+   * SPEC-058 §4.3: the archive becomes the slot's save, once. A damaged one
+   * toasts and changes nothing. Otherwise it is written as the main save —
+   * the instance it replaces goes to `:bak`, as on every write — the archive
+   * key is removed, and the binding follows when this slot is the bound one:
+   * otherwise the next autosave would write the replaced instance straight
+   * back over it (as `importCode` rebinds, SPEC-034 §4.13). 58-g: its own
+   * lineage is the archive's, as it was.
+   */
+  restoreArchive(slot: SlotId): LoadResult {
+    const archive = this.loadArchive(slot);
+    if (!archive.ok) {
+      if (archive.reason === 'corrupt' || archive.reason === 'newer_version') {
+        this.#events.emit('ui:toast', { kind: 'error', text: ARCHIVE_DAMAGED_TEXT });
+      }
+      return archive;
+    }
+    const data = archive.data;
+    data.meta.slot = slot;
+    const error = this.#writeWithBackup(slot, JSON.stringify(data));
+    if (error !== null) {
+      this.#fail(slot, error);
+      return { ok: false, reason: 'corrupt', errors: [String(error)] };
+    }
+    try {
+      this.#storage?.removeItem(this.#archiveKey(slot));
+    } catch (cause) {
+      log.warn('save', `could not remove the archive of slot ${slot}`, cause);
+    }
+    const rebound = this.#current?.meta.slot === slot;
+    if (rebound) this.bind(data);
+    return {
+      ok: true,
+      data,
+      source: 'main',
+      ...(rebound ? { rebound: true as const } : {}),
+      ...(archive.migratedFrom !== undefined ? { migratedFrom: archive.migratedFrom } : {}),
+    };
+  }
+
+  /** Puts `key` back to what it held before a failed write — or removes it, when it held nothing. */
+  #putBack(key: string, previous: string | null): void {
+    try {
+      if (previous === null) this.#storage?.removeItem(key);
+      else this.#storage?.setItem(key, previous);
+    } catch (cause) {
+      log.warn('save', `could not put ${key} back`, cause);
+    }
   }
 
   // -------------------------------------------------------------- autosaving
@@ -2039,6 +2288,21 @@ export class SaveStore {
     this.#events.emit('save:written', { slot, reason });
     this.#afterWrite(data);
     return true;
+  }
+
+  /**
+   * §4.2's write-and-verify for a key with no backup of its own (SPEC-058's
+   * archive): write, then read back. `null` on success, else what went wrong.
+   */
+  #writeVerified(key: string, json: string): unknown {
+    try {
+      if (this.#storage === null) throw new Error('no storage');
+      this.#storage.setItem(key, json);
+      if (this.#read(key) !== json) throw new Error('verify failed: the value read back is not the value written');
+      return null;
+    } catch (error) {
+      return error;
+    }
   }
 
   /** Returns `null` on success, or whatever went wrong. */

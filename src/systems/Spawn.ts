@@ -7,7 +7,9 @@
 // one elite roll for its leader, its affixes right after on the same stream.
 // SPEC-043 §4.4: every ambient elite roll — a single's, a pack leader's — is on
 // the planet's `eliteChance × eliteMult`, capped at 0.5; wave groups keep the
-// `elite` flags their scripts carry.
+// `elite` flags their scripts carry. SPEC-058 §4.4: a later instance's
+// containment adds its `eliteBonus` to the planet's chance before the
+// multiplier.
 // SPEC-054 §4.7: below, the director adds nothing ambient (the scene passes
 // `missionsWantSpawns = false`); the cave's packs stand at fixed anchors
 // through `spawnPackAt`, `placed` — never culled, leashed at 24 m.
@@ -173,6 +175,12 @@ export class SpawnDirector {
    * is capped at `ELITE_CHANCE_CAP`.
    */
   eliteMult = 1;
+  /**
+   * SPEC-058 §4.4: containment's `eliteBonus` — added to the planet's
+   * `eliteChance` in every ambient roll, before `eliteMult`; 0 on a first run.
+   * The surface sets it once, from the save's iteration.
+   */
+  eliteBonus = 0;
   #objectiveIds: readonly EnemyId[] = [];
   #time = 0;
   #spawnTimer = 0;
@@ -245,9 +253,12 @@ export class SpawnDirector {
     return Math.min(scaled, this.#quality.maxEnemies);
   }
 
-  /** SPEC-043 §4.4: the chance an ambient roll uses — `eliteChance × eliteMult`, capped at 0.5. */
+  /**
+   * SPEC-043 §4.4: the chance an ambient roll uses — `eliteChance × eliteMult`,
+   * capped at 0.5. SPEC-058 §4.4: `(eliteChance + eliteBonus) × eliteMult`.
+   */
   get eliteChance(): number {
-    return Math.min(ELITE_CHANCE_CAP, this.#planet.surface.eliteChance * this.eliteMult);
+    return Math.min(ELITE_CHANCE_CAP, (this.#planet.surface.eliteChance + this.eliteBonus) * this.eliteMult);
   }
 
   /** SPEC-035 §4.7: hold the ambient field down, or (`null`) let it back up. */

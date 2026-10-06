@@ -40,6 +40,7 @@ import {
   type PlanetDef,
   type PlanetId,
 } from '@/data/index';
+import { containment } from '@/systems/Containment';
 import type { Economy } from '@/systems/Economy';
 import { FIRE_CARRY } from '@/systems/Loadout';
 import { FLIGHT_MISSION_CONTEXT, type Missions } from '@/systems/Missions';
@@ -126,6 +127,12 @@ export interface FlightConfig {
   quality: QualitySettings;
   /** Casual multiplies incoming damage by 0.7 (§4.6, 13-h); SPEC-038 §4.6 re-reads it on resume. */
   difficulty: Difficulty;
+  /**
+   * SPEC-058 §4.4: the save's `meta.iteration` — its containment's
+   * `damageMult` scales incoming damage on top of the difficulty's. 1 when
+   * absent. Flight enemies keep their HP at every iteration (58-k).
+   */
+  iteration?: number;
   /**
    * SPEC-039 §4.3: the pilot's `companionMult`, which scales ARIA's shield
    * regeneration — the flight scene passes `computePlayerStats(save)`'s. 1
@@ -345,7 +352,7 @@ export class Flight {
   /** SPEC-041 §4.7, 41-k: ARIA aboard and enabled — the lead pip's gate. */
   readonly #ariaEnabled: boolean;
   /** SPEC-038 §4.6: never cached for the trip — `setDifficulty` moves it. */
-  #damageMult: number;
+  #damageMult = 1;
   readonly #asteroidCap: number;
   readonly #groups: WaveGroup[] = [];
 
@@ -385,7 +392,7 @@ export class Flight {
     this.#ariaAutoAim = effect?.autoAim ?? false;
     this.#ariaEnabled = effect !== undefined;
     const hullBonus = effect?.hullBonus ?? 0;
-    this.#damageMult = DIFFICULTY_RULES[cfg.difficulty].enemyDamageMult;
+    this.setDifficulty(cfg.difficulty, cfg.iteration);
     this.#asteroidCap = cfg.quality.asteroidCap;
 
     const maxShield = UPGRADES.shield.metrics['shieldHp']?.[cfg.ship.shield] ?? 40;
@@ -1055,10 +1062,13 @@ export class Flight {
    * SPEC-038 §4.6: a difficulty changed in Settings mid-trip reaches the next
    * hit — the scene calls this when it resumes from its pause menu (38-g).
    * SPEC-043 §4.4: the multiplier is the difficulty's `enemyDamageMult` — 0.7,
-   * 1 or 1.3; flight enemies keep their HP on every difficulty.
+   * 1 or 1.3; flight enemies keep their HP on every difficulty. SPEC-058 §4.4:
+   * times the containment of the save's iteration (×1.15 a step, 1 on a first
+   * run); the iteration never changes mid-trip, so the scene passes the same
+   * one on every call.
    */
-  setDifficulty(difficulty: Difficulty): void {
-    this.#damageMult = DIFFICULTY_RULES[difficulty].enemyDamageMult;
+  setDifficulty(difficulty: Difficulty, iteration = 1): void {
+    this.#damageMult = DIFFICULTY_RULES[difficulty].enemyDamageMult * containment(iteration).damageMult;
   }
 
   /**

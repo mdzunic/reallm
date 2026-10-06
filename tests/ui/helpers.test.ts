@@ -92,6 +92,12 @@ import {
   DIFFICULTY_LINES,
   rewardsText,
   slotLine,
+  archiveLine,
+  beginInstanceText,
+  creationNextText,
+  nextInstanceSheet,
+  predecessorCacheText,
+  restoreArchiveSheet,
   stageResetText,
   TOAST_COALESCE_MS,
   TOAST_DEFAULT_MS,
@@ -688,6 +694,67 @@ describe('slotLine (AC-4)', () => {
   it('empty and corrupt slots keep SPEC-007 wording', () => {
     expect(slotLine({ slot: 2, empty: true })).toBe('Empty');
     expect(slotLine({ slot: 2, empty: false, corrupt: true })).toBe('Corrupt');
+  });
+});
+
+describe('slotLine after the endings and in a later instance (SPEC-058 §4.3)', () => {
+  const vance = { slot: 0, empty: false, name: 'Vance', classId: 'marine', level: 11, planet: 'vetra', playtimeSec: 7200 } as const;
+
+  it('a first run with no ending is unchanged', () => {
+    expect(slotLine({ ...vance, iteration: 1, ending: null })).toBe('Vance · Marine · Lv 11 · Vetra · 2 h 00 min');
+    expect(slotLine({ ...vance, iteration: 1, ending: null })).toBe(slotLine(vance));
+  });
+
+  it('a later instance with no ending leads with its instance', () => {
+    expect(slotLine({ ...vance, level: 4, playtimeSec: 2400, iteration: 2, ending: null })).toBe('instance/63 · Vance · Marine · Lv 4 · Vetra · 40 min');
+  });
+
+  it('an ended run reads filed or disconnected in place of its planet', () => {
+    const ended = { ...vance, level: 18, playtimeSec: 8040, iteration: 1 };
+    expect(slotLine({ ...ended, ending: 'stay' })).toBe('instance/62 · Vance · Marine · Lv 18 · filed · 2 h 14 min');
+    expect(slotLine({ ...ended, ending: 'escape' })).toBe('instance/62 · Vance · Marine · Lv 18 · disconnected · 2 h 14 min');
+    expect(slotLine({ ...ended, planet: null, ending: 'escape', iteration: 3 })).toBe(
+      'instance/64 · Vance · Marine · Lv 18 · disconnected · 2 h 14 min',
+    );
+  });
+
+  it('the archive line names the archived instance and how it ended', () => {
+    expect(archiveLine({ iteration: 1, name: 'Vance', ending: 'stay', level: 18, playtimeSec: 8040 })).toBe(
+      'Archived: instance/62 · Vance · filed · Lv 18 · 2 h 14 min',
+    );
+    expect(archiveLine({ iteration: 2, name: 'Ash', ending: 'escape', level: 9, playtimeSec: 600 })).toBe(
+      'Archived: instance/63 · Ash · disconnected · Lv 9 · 10 min',
+    );
+  });
+});
+
+describe('the next instance’s words (SPEC-058 §4.1, §4.2, §4.3, §4.5)', () => {
+  it('the offer and its sheet name the slot save’s own numbers', () => {
+    expect(beginInstanceText(1)).toBe('Begin instance/63');
+    expect(beginInstanceText(3)).toBe('Begin instance/65');
+    expect(nextInstanceSheet(1)).toEqual({
+      title: 'Initialise instance/63?',
+      body:
+        'instance/62 is archived and can be restored once from Load. The new instance starts at level 1 with none of 62’s tokens, gear or ship. Your records and unlocks stay. The Warden starts one containment level higher.'.replace(
+          '’',
+          "'",
+        ),
+      confirmText: 'Initialise',
+    });
+    expect(nextInstanceSheet(2).title).toBe('Initialise instance/64?');
+  });
+
+  it('creation’s header and the archive’s sheet', () => {
+    expect(creationNextText(1)).toBe("instance/63 — restored from instance/62's profile");
+    expect(restoreArchiveSheet(1, 2)).toEqual({
+      title: 'Restore instance/62?',
+      body: 'instance/63 in this slot will be lost. The archive can be restored once.',
+      confirmText: 'Restore',
+    });
+  });
+
+  it('the body’s toast names what the predecessor carried', () => {
+    expect(predecessorCacheText({ iteration: 1 })).toBe('instance/62: 2 Medkit · 2 Frag Grenade');
   });
 });
 

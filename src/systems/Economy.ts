@@ -124,6 +124,15 @@ export const INVENTORY_SLOTS = 20;
 /** SPEC-009 §4.1: tech is worth −3 % on every token price (`ATTRIBUTE_EFFECTS`, SPEC-039 §4.3). */
 export const TECH_DISCOUNT_PER_POINT = ATTRIBUTE_EFFECTS.tech.priceCut;
 
+/**
+ * SPEC-058 §3: what a predecessor's body pays, once per claim id — two
+ * medkits and two frag grenades: a felt reward with no economy weight (§2).
+ */
+export const PREDECESSOR_CACHE: readonly { readonly itemId: ItemId; readonly qty: number }[] = [
+  { itemId: 'medkit', qty: 2 },
+  { itemId: 'frag_grenade', qty: 2 },
+];
+
 /** §4.6: the boss-mission voucher that pays for the next chapter's jump. */
 export function refuelVoucherText(oil: number): string {
   return `Earth Command refuel voucher: +${oil} oil`;
@@ -949,6 +958,22 @@ export class Economy {
     if (tokens > 0) this.#progression.addTokens(tokens, `cache:${id}`);
     this.#saves?.request('checkpoint');
     return { ok: true, reward };
+  }
+
+  /**
+   * SPEC-058 §4.5: a predecessor's body pays `PREDECESSOR_CACHE` once per
+   * claim id (`lineageClaimId`). `progress.claimed` is the record, shared with
+   * the caches (SPEC-047 §3): the id is pushed first, then the items go in
+   * through `addItem` — what does not fit raises E25's `item:noRoom` and its
+   * toast, and the surface spills it at the player's feet — and the save
+   * checkpoints. A second call pays nothing and says so.
+   */
+  claimBody(id: string): { ok: true } | { ok: false; reason: 'claimed' } {
+    if (this.#save.progress.claimed.includes(id)) return { ok: false, reason: 'claimed' };
+    this.#save.progress.claimed.push(id);
+    this.#grant({ items: PREDECESSOR_CACHE });
+    this.#saves?.request('checkpoint');
+    return { ok: true };
   }
 
   // ---------------------------------------------------------------- derived

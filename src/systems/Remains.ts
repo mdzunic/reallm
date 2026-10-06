@@ -7,7 +7,7 @@
 //
 // The scene owns when each of these runs (§4.1, §4.4); this module owns where
 // the remains lie, what the bookkeeping writes, and the words the tag uses.
-import type { Remains, Save } from '@/core/Save';
+import type { LineageEntry, Remains, Save } from '@/core/Save';
 import { RESOURCE_IDS, type PlanetId, type ResourceId } from '@/data/index';
 import type { Economy } from '@/systems/Economy';
 import type { ObstacleGrid } from '@/systems/Layout';
@@ -161,4 +161,47 @@ export function remainsListText(resources: Partial<Record<ResourceId, number>>):
     text += text === '' ? `${amount} ${resource}` : ` · ${amount} ${resource}`;
   }
   return text;
+}
+
+// ------------------------------------------- SPEC-058: the predecessor's body
+
+/** SPEC-058 §4.5: on Cinder-4 with no death there, the body lies this far from the pad toward the player's spawn. */
+export const PREDECESSOR_PAD_DISTANCE = 6;
+/** SPEC-058 §4.5: the one planet that always shows a body — the first landing's. */
+export const PREDECESSOR_ALWAYS: PlanetId = 'cinder4';
+/** SPEC-058 §4.5: a player this close to the body is offered `Search the body`, in metres. */
+export const PREDECESSOR_SEARCH_RADIUS = 2.5;
+
+/**
+ * SPEC-058 §4.5 (58-d, 58-e): where `prior`'s body starts on `planet`, into
+ * `out` — its `lastDeath` there, which SPEC-057 already placed at an arena's
+ * entrance or a descent; else, on Cinder-4 only, `PREDECESSOR_PAD_DISTANCE`
+ * from the pad along the line to the player's spawn. False where it lies
+ * nowhere. The scene then pushes the start clear through `placeRemains`.
+ */
+export function predecessorStart(
+  prior: Pick<LineageEntry, 'lastDeath'>,
+  planet: PlanetId,
+  pad: { x: number; z: number } | null,
+  spawn: { x: number; z: number },
+  out: { x: number; z: number },
+): boolean {
+  const death = prior.lastDeath[planet];
+  if (death !== undefined) {
+    out.x = death.x;
+    out.z = death.z;
+    return true;
+  }
+  if (planet !== PREDECESSOR_ALWAYS || pad === null) return false;
+  const dx = spawn.x - pad.x;
+  const dz = spawn.z - pad.z;
+  const length = Math.hypot(dx, dz);
+  out.x = pad.x + (length > 1e-6 ? dx / length : 1) * PREDECESSOR_PAD_DISTANCE;
+  out.z = pad.z + (length > 1e-6 ? dz / length : 0) * PREDECESSOR_PAD_DISTANCE;
+  return true;
+}
+
+/** SPEC-058 §4.5: the `predecessor-tag` label — `instance/{prior} · <name>`. */
+export function predecessorTag(prior: Pick<LineageEntry, 'iteration' | 'name'>): string {
+  return `instance/${instanceNumber(prior.iteration)} · ${prior.name}`;
 }

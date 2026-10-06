@@ -8,7 +8,9 @@
 // and the reveal camera's endpoints, phases and reduce-motion cuts.
 //
 // SPEC-024 §6 adds the endings: which one a save still owes after a reload
-// inside the sequence, and the five lines of the filed report.
+// inside the sequence, and the lines of the filed report — six since SPEC-058
+// §4.7 graded the run, a seventh on a later instance — and the aftermath a
+// station entry owes after the ending (SPEC-058 §4.7).
 //
 // SPEC-034 §4.10 adds the line ledger. The surface, the flight and the station
 // each kept a partial memory of which mission lines had played, so the station's
@@ -17,8 +19,9 @@
 // save object replaces `ACCEPT_SHOWN` and `DEBRIEFED`.
 import { describe, expect, it } from 'vitest';
 import { FILMS, type FilmDef } from '@/data/films';
-import { DIALOGUE, MISSIONS, type DialogueId } from '@/data/index';
+import { CLUES, DIALOGUE, MISSIONS, type DialogueId } from '@/data/index';
 import {
+  aftermathDue,
   captionAt,
   cardDue,
   chooseFilmMode,
@@ -42,6 +45,7 @@ import {
   skipAccepted,
   stayReport,
   typedChars,
+  type StayReportSave,
 } from '@/systems/StoryBeats';
 import { stripComments } from '../architecture/source';
 
@@ -351,23 +355,85 @@ describe('endingPending (SPEC-024 §4.5, E29, 24-d)', () => {
   });
 });
 
-describe('stayReport (SPEC-024 §4.3)', () => {
-  it('is five lines in order, with the salvager on the first', () => {
-    expect(stayReport({ player: { name: 'Vega' } })).toEqual([
+describe('stayReport (SPEC-024 §4.3, SPEC-058 §4.7)', () => {
+  /** A report's save: a name, the flags it found, and its iteration (1 — a first run — unless given). */
+  const report = (name: string, flags: readonly string[] = [], iteration = 1): readonly string[] =>
+    stayReport({ meta: { iteration }, player: { name }, progress: { flags } } satisfies StayReportSave);
+  /** The off-task clues' own flags, in table order. */
+  const OFF_TASK = CLUES.filter((def) => def.offTask).map((def) => def.id as string);
+
+  it('is six lines in order for a first run with no clue, the salvager first and the grade last', () => {
+    expect(report('Vega')).toEqual([
       'SALVAGER Vega',
       'WORLDS SURVEYED 6 of 6',
       'DELIVERED oil · water · grain · lithium',
       'VERDICT Eden-Prime viable — colonise',
+      'RATING 1.00 · 0 irregular readings',
       'RUN 62 logged · a good run',
     ]);
   });
 
-  it('carries the player name and nothing else from the save', () => {
-    const lines = stayReport({ player: { name: 'Ash' } });
+  it('reads the name, the flags and the iteration, and nothing else from the save', () => {
+    const lines = report('Ash');
     expect(lines[0]).toBe('SALVAGER Ash');
     // The run number is the loop's one glimpse of itself (PLAN §5).
     expect(lines[lines.length - 1]).toContain('RUN 62');
-    expect(stayReport({ player: { name: 'Ash' } }).slice(1)).toEqual(stayReport({ player: { name: 'Nox' } }).slice(1));
+    expect(report('Ash').slice(1)).toEqual(report('Nox').slice(1));
+    // A main-path flag is no irregular reading; an off-task clue is.
+    expect(report('Ash', ['chapter1_done', 'chapter5_done'])).toEqual(report('Ash'));
+    expect(report('Ash', [OFF_TASK[0] as string])).not.toEqual(report('Ash'));
+    expect(report('Ash', [], 2)).not.toEqual(report('Ash'));
+  });
+
+  it('the rating line: Command’s rating to two places and the irregular readings, one in the singular', () => {
+    expect(OFF_TASK.length).toBeGreaterThanOrEqual(7);
+    expect(report('Ash', OFF_TASK.slice(0, 1))[4]).toBe('RATING 0.97 · 1 irregular reading');
+    expect(report('Ash', OFF_TASK.slice(0, 2))[4]).toBe('RATING 0.94 · 2 irregular readings');
+    expect(report('Ash', OFF_TASK.slice(0, 5))[4]).toBe('RATING 0.85 · 5 irregular readings');
+  });
+
+  it('the grade: good to two readings, acceptable to five, noisy from six', () => {
+    expect(report('Ash', OFF_TASK.slice(0, 2))[5]).toBe('RUN 62 logged · a good run');
+    expect(report('Ash', OFF_TASK.slice(0, 3))[5]).toBe('RUN 62 logged · an acceptable run');
+    expect(report('Ash', OFF_TASK.slice(0, 5))[5]).toBe('RUN 62 logged · an acceptable run');
+    expect(report('Ash', OFF_TASK.slice(0, 6))[5]).toBe('RUN 62 logged · a noisy run');
+  });
+
+  it('a later instance files its own number and a seventh line, RUNS LOGGED', () => {
+    expect(report('Vega', [], 1)).toHaveLength(6);
+    expect(report('Vega', [], 2)).toEqual([
+      'SALVAGER Vega',
+      'WORLDS SURVEYED 6 of 6',
+      'DELIVERED oil · water · grain · lithium',
+      'VERDICT Eden-Prime viable — colonise',
+      'RATING 1.00 · 0 irregular readings',
+      'RUN 63 logged · a good run',
+      'RUNS LOGGED 2',
+    ]);
+    expect(report('Vega', OFF_TASK.slice(0, 6), 9).slice(-2)).toEqual(['RUN 70 logged · a noisy run', 'RUNS LOGGED 9']);
+  });
+});
+
+describe('aftermathDue (SPEC-058 §4.7)', () => {
+  const flags = (...list: string[]): ReadonlySet<string> => new Set(list);
+
+  it('is owed once the ending has been seen: the escape’s restore, else the stay’s card', () => {
+    expect(aftermathDue(flags('campaign_done', 'ending_stay'), true)).toBe('aftermath_stay');
+    expect(aftermathDue(flags('campaign_done', 'ending_escape'), true)).toBe('aftermath_escape');
+    // 24-d: an old save holding both is an escape.
+    expect(aftermathDue(flags('campaign_done', 'ending_stay', 'ending_escape'), true)).toBe('aftermath_escape');
+  });
+
+  it('is not owed before the ending is seen, after aftermath_seen, or before the campaign is done', () => {
+    expect(aftermathDue(flags('campaign_done', 'ending_stay'), false)).toBeNull();
+    expect(aftermathDue(flags('campaign_done', 'ending_escape', 'aftermath_seen'), true)).toBeNull();
+    expect(aftermathDue(flags('ending_stay'), true)).toBeNull();
+    expect(aftermathDue(flags(), false)).toBeNull();
+  });
+
+  it('names dialogues that exist, each once', () => {
+    expect(DIALOGUE.aftermath_stay.once).toBe(true);
+    expect(DIALOGUE.aftermath_escape.once).toBe(true);
   });
 });
 

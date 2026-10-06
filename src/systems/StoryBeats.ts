@@ -7,7 +7,9 @@
 // due at a departure, a landing, a station entry or an arena entry. No `three`,
 // no DOM (SPEC-001 §4).
 import { BOSS_REVEALS, INTERLUDES, type CaptionDef, type CueDef, type FilmDef, type FilmId, type ShotPan } from '@/data/films';
-import type { EnemyId, FlagId, PlanetId } from '@/data/index';
+import type { DialogueId, EnemyId, FlagId, PlanetId } from '@/data/index';
+import { commandRating, offTaskCount, ratingGrade } from '@/systems/Clues';
+import { instanceNumber } from '@/systems/StoryContext';
 
 export type FilmMode = 'video' | 'stills' | 'text';
 
@@ -254,22 +256,46 @@ export function endingPending(flags: ReadonlySet<string>, endingSeen: boolean): 
   return flags.has('ending_escape') ? 'escape' : 'stay';
 }
 
+/** SPEC-058 §4.7: what `stayReport` reads off a save — the name, the flags and the iteration. */
+export interface StayReportSave {
+  readonly meta: { readonly iteration: number };
+  readonly player: { readonly name: string };
+  readonly progress: { readonly flags: readonly string[] };
+}
+
 /**
- * §4.3: the five lines of the filed report the stay ending puts on screen.
- *
- * Everything but the name is fixed: the report is what Earth Command files at
- * the end of a run that reached Eden, not a tally of the session. The last
- * line is the ending's one quiet glimpse of the loop, matching the Warden's
- * "A good run. Logged." in `ending_stay`.
+ * SPEC-024 §4.3, SPEC-058 §4.7: the filed report the stay ending puts on
+ * screen. What Earth Command files at the end of a run that reached Eden —
+ * the salvager, the four fixed lines — and since SPEC-058 the grade Command
+ * gave it: the rating and its irregular readings (SPEC-048 §4.4), then the
+ * run's number and grade, which the Warden's line in `ending_stay` matches.
+ * A later instance adds the count of runs logged in the slot.
  */
-export function stayReport(save: { player: { name: string } }): readonly string[] {
-  return [
+export function stayReport(save: StayReportSave): readonly string[] {
+  const flags: ReadonlySet<string> = new Set(save.progress.flags);
+  const rating = commandRating(flags);
+  const readings = offTaskCount(flags);
+  const lines = [
     `SALVAGER ${save.player.name}`,
     'WORLDS SURVEYED 6 of 6',
     'DELIVERED oil · water · grain · lithium',
     'VERDICT Eden-Prime viable — colonise',
-    'RUN 62 logged · a good run',
+    `RATING ${rating.toFixed(2)} · ${readings} irregular reading${readings === 1 ? '' : 's'}`,
+    `RUN ${instanceNumber(save.meta.iteration)} logged · ${ratingGrade(rating)}`,
   ];
+  if (save.meta.iteration >= 2) lines.push(`RUNS LOGGED ${save.meta.iteration}`);
+  return lines;
+}
+
+/**
+ * SPEC-058 §4.7: the aftermath a station entry owes, from the save alone —
+ * once the ending has been seen and before `aftermath_seen`: the escape's
+ * restore (E95), else the stay's new card. `null` while the ending is still
+ * owed, after the aftermath, or before the campaign is done.
+ */
+export function aftermathDue(flags: ReadonlySet<string>, endingSeen: boolean): DialogueId | null {
+  if (!flags.has('campaign_done') || !endingSeen || flags.has('aftermath_seen')) return null;
+  return flags.has('ending_escape') ? 'aftermath_escape' : 'aftermath_stay';
 }
 
 // --------------------------------------------- SPEC-048 §4.6: replays
