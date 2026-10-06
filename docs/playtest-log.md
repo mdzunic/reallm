@@ -2404,7 +2404,8 @@ ratchet at the spawn.
 Recorded from the container the branch was built in: `npm run check` — 123
 files and 3,029 tests, none skipped — and the e2e files the spec touches:
 `e2e/SPEC-057.spec.ts` (§6.2's seven cases, plus another planet and the
-underground, a death below, a boss stage's death and the tip — eleven tests),
+underground, a death below, a boss stage's death, the tip and a Recall —
+twelve tests),
 `e2e/surface-env.spec.ts` (ten tests, one new: the medium frame with the body
 on screen) and `e2e/SPEC-006.spec.ts`'s reactions case (32 reacted, 49 silent).
 
@@ -2418,6 +2419,7 @@ on screen) and `e2e/SPEC-006.spec.ts`'s reactions case (32 reacted, 49 silent).
 | E92 | a death in `c1_m3`'s boss stage left the remains 25–27 m from the nest's centre — the arena mouth — and the respawn took them back on its first step; a death below left them at the descent on the surface |
 | The body | with `signal_decoded` the remains were the tinted salvager frozen on `Death`'s last frame (`remainsPosedAt` > 0), tagged `instance/62 · restart 1` |
 | Casual | a death took nothing, left a set already lying untouched, and `death-remains` stayed empty |
+| Recall | a Recall to pad left a set already lying untouched, with no toast |
 | Persistence | the remains survived a reload, the station and a landing on Vetra, where nothing showed; below on Cinder-4 the view, the icon, the tag and the row hid, and came back above |
 | Budget | the remains drew ≤ 3 calls and ≤ 2,700 triangles (the body 2,616 + the pillar 24); the medium frame with the body on screen stayed ≤ 96 draws and ≤ 120 k triangles |
 

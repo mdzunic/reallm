@@ -3,8 +3,9 @@
 // (`tests/systems/remains.test.ts`, `tests/ui/helpers.test.ts`); what only a
 // browser shows is the path a player takes: a death that leaves a pack on the
 // ground, the walk back that takes it home, a second death that loses it, a
-// full hold, the body after the reveal, casual's kinder deaths, a reload, and
-// the remains staying put on another planet and below.
+// full hold, the body after the reveal, casual's kinder deaths, a reload, the
+// remains staying put on another planet and below, a death below and in a boss
+// stage, the tip, and a Recall that leaves them alone.
 //
 // Each case lands on Cinder-4 (seed 123: the pad at the origin, the spawn 12 m
 // east of it) through `?debug`, with a bound save holding 200 oil and nothing
@@ -372,4 +373,19 @@ test('11. the remains tip shows at the first death that leaves remains, and is r
   await dieByThePad(page);
   await expect(page.getByTestId('aria-hint')).toContainText(REMAINS_TIP, { timeout: 20_000 });
   await expect.poll(async () => seenTips(page), { timeout: 10_000 }).toContain('remains');
+});
+
+test('12. a Recall to pad neither creates nor forfeits: the remains lying stay as they were', async ({ page }) => {
+  test.setTimeout(120_000);
+  const lying: Remains = { planet: 'cinder4', x: -100, z: 100, resources: { oil: 12 }, restart: 2 };
+  await land(page, { remains: lying });
+  await page.getByTestId('surface-goto-edge').click();
+  await page.keyboard.press('Escape');
+  await expect(page.locator('[data-testid="pause-recall"]')).toBeVisible();
+  await page.locator('[data-testid="pause-recall"]').click();
+  await page.locator('[data-testid="confirm-yes"]').click();
+  await expect.poll(async () => Number((await info(page))['recalls']), { timeout: 10_000 }).toBe(1);
+  expect(await remainsOf(page)).toEqual(lying);
+  expect((await current(page))?.resources.oil).toBe(200);
+  await expect(toast(page, 'is gone')).toHaveCount(0);
 });
