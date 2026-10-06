@@ -2717,6 +2717,8 @@ export class SurfaceScene extends UiScene<'surface'> {
       for (const id of save.progress.claimed) if (Object.hasOwn(CACHES, id) && CACHES[id as CacheId].planet === this.#planet.id) claimed++;
     }
     info['claimed'] = claimed;
+    // SPEC-056 §4.8 (E89): a claimed cache draws opened on every later descent.
+    info['cachesOpen'] = this.#caveView?.openCaches ?? 0;
     const descent = this.#descent;
     const world = this.#world;
     info['descentDist'] =

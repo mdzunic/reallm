@@ -225,8 +225,8 @@ test('3, 5. four seconds in a Cinder-4 wreck find the older tug, and Notes recor
   await expect(page.getByTestId('comms-tab-comms')).toHaveAttribute('aria-selected', 'true');
   await expect(page.getByTestId('comms-tab-notes')).toHaveAttribute('aria-selected', 'false');
   await page.getByTestId('comms-tab-notes').click();
-  // SPEC-049 §4.6: the catalogue holds 20 clues now.
-  await expect(page.getByTestId('notes-count')).toHaveText('Recorded 1 of 20');
+  // SPEC-049 §4.6: the catalogue holds 20 clues; SPEC-056 §4.7's shards make it 26.
+  await expect(page.getByTestId('notes-count')).toHaveText('Recorded 1 of 26');
   await expect(page.getByTestId('notes-rating')).toHaveText('Command rating 0.97 — a good run');
   await expect(page.getByTestId('notes-clue-clue_hull')).toContainText('An older tug');
   await expect(page.getByTestId('notes-clue-clue_hull')).toContainText('A tug like ours in the dunes.');
@@ -424,7 +424,7 @@ test('9. after the confession the echo ends on ARIA’s candid line, not the san
   await page.getByTestId('comms-tab-notes').click();
   await expect(page.getByTestId('notes-clue-clue_scav_echo')).toContainText('Said before');
   // The confession counts too; its chapter's section waits for the flags to reach it.
-  await expect(page.getByTestId('notes-count')).toHaveText('Recorded 2 of 20');
+  await expect(page.getByTestId('notes-count')).toHaveText('Recorded 2 of 26');
   await page.getByTestId('comms-log-close').click();
   await expect(page.getByTestId('station-tab-comms').getByTestId('notes-new')).toHaveCount(0);
   await expect(page.getByTestId('station-tab-comms')).toBeFocused();

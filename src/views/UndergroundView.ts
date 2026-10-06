@@ -706,6 +706,13 @@ export class UndergroundView {
     return drawn;
   }
 
+  /** SPEC-056 §4.8 (E89): how many of this cave's caches draw opened — `sceneInfo.cachesOpen`. */
+  get openCaches(): number {
+    let count = 0;
+    for (let i = 0; i < this.#claimed.length; i++) count += this.#claimed[i] as number;
+    return count;
+  }
+
   /** §4.8: the cache draws open from now on; an id not in this cave, or claimed already, changes nothing. */
   setClaimed(cache: CacheId): void {
     const caches = this.#cave.caches;
