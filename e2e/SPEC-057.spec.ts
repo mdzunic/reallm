@@ -31,12 +31,13 @@ const current = (page: Page): Promise<SaveSnapshot | null> => page.evaluate(() =
 
 const remainsOf = async (page: Page): Promise<Remains | null> => (await current(page))?.progress.remains ?? null;
 
-/** What a case changes in the bound save before it lands. */
+/** What a case changes in the bound save before it lands, and the device's tips already seen. */
 interface Setup {
   difficulty?: string;
   flags?: string[];
   missionsDone?: string[];
   remains?: Remains;
+  tipsSeen?: string[];
 }
 
 /**
@@ -44,7 +45,10 @@ interface Setup {
  * Auto-fire is off, so no kill drops anything into the hold.
  */
 async function land(page: Page, setup: Setup = {}): Promise<void> {
-  await page.addInitScript(() => localStorage.setItem('reallm:settings', JSON.stringify({ autoFire: 'off' })));
+  await page.addInitScript(
+    (tipsSeen) => localStorage.setItem('reallm:settings', JSON.stringify({ autoFire: 'off', ...(tipsSeen === null ? {} : { tipsSeen }) })),
+    setup.tipsSeen ?? null,
+  );
   await start(page, '/?debug&seed=123');
   await page.evaluate(
     ({ creation, setup }) => {
@@ -345,4 +349,27 @@ test('10. a death in a boss stage leaves the remains at the arena’s mouth, and
   await expect.poll(async () => remainsOf(page), { timeout: 10_000 }).toBeNull();
   expect((await current(page))?.resources.oil).toBe(200);
   expect((await current(page))?.meta.stats.recoveries).toBe(1);
+});
+
+// ----------------------------------------------------------------- the tip
+
+/** Every tip but `remains`, as seen on this device — so the queue holds that one alone. */
+const OTHER_TIPS = [
+  'move', 'map', 'track', 'pad', 'scan', 'harvest', 'deliver', 'storm', 'boss', 'death', 'quickbar', 'overheat',
+  'heavy', 'explosives', 'shelter', 'combat', 'flight_steer', 'flight_throttle', 'zones', 'dash', 'sprint', 'wurm',
+  'descent', 'dark', 'puzzle',
+];
+
+const REMAINS_TIP = 'What you carried stays where you fell. Walk back to it. Fall again first and it is gone.';
+
+const seenTips = (page: Page): Promise<string[]> =>
+  page.evaluate(() => (JSON.parse(localStorage.getItem('reallm:settings') ?? '{}') as { tipsSeen?: string[] }).tipsSeen ?? []);
+
+test('11. the remains tip shows at the first death that leaves remains, and is remembered for the device', async ({ page }) => {
+  test.setTimeout(150_000);
+  await land(page, { tipsSeen: OTHER_TIPS });
+  expect(await seenTips(page)).not.toContain('remains');
+  await dieByThePad(page);
+  await expect(page.getByTestId('aria-hint')).toContainText(REMAINS_TIP, { timeout: 20_000 });
+  await expect.poll(async () => seenTips(page), { timeout: 10_000 }).toContain('remains');
 });
