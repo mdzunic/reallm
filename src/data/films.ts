@@ -146,6 +146,28 @@ export const FILMS = {
       { at: 4.2, sound: 'film_jump' },
     ],
   },
+  /** SPEC-063 §4.1: after `departure` on the first departure to Vetra (PLAN R24). */
+  wreckers: {
+    id: 'wreckers',
+    title: 'Wreckers',
+    music: 'film_dark',
+    flashes: [],
+    shots: [
+      { id: 'hulk', start: 0, end: 4, poster: 2, pan: 'in', describe: "In Vetra's ice lane, a dozen tug hulls lashed by cable around a tumbling rock, a few ports lit amber." },
+      { id: 'cutting', start: 4, end: 8.5, poster: 6.5, pan: 'right', describe: "In the hulk's bay a visored figure grinds the registry off a tug's nose; welded blades hang behind." },
+      { id: 'sortie', start: 8.5, end: 12, poster: 10.5, pan: 'none', describe: 'Three rebuilt tugs drop from the bay and turn toward a far blue-white point: a jump, arriving.' },
+    ],
+    captions: [
+      { at: 0.5, until: 3.7, speaker: 'aria', text: 'Earth lost ships out here before the Selection. Somebody found them.' },
+      { at: 4.3, until: 8.2, speaker: 'aria', text: 'Scavengers. They live in what is left, and they fly what they can strip.' },
+      { at: 8.8, until: 11.6, speaker: 'aria', text: 'They have seen our jump. They will want the hold.' },
+    ],
+    cues: [
+      { at: 4.4, sound: 'film_grind', volume: 0.8 },
+      { at: 8.6, sound: 'film_clamp' },
+      { at: 9.2, sound: 'film_whoosh', volume: 0.6 },
+    ],
+  },
   interlude_c1: {
     id: 'interlude_c1',
     title: 'First Light',

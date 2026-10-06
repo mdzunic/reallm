@@ -1,5 +1,5 @@
-# Story films (PLAN R9, SPEC-021): the prologue, the departure, five chapter
-# interludes and the two endings, rendered in EEVEE from code and written to
+# Story films (PLAN R9, SPEC-021): the prologue, the departure, the contact film
+# "Wreckers" (PLAN R24, SPEC-063), five chapter interludes and the two endings, rendered in EEVEE from code and written to
 # public/assets/films/ as H.264 MP4 + one WebP poster per shot + a manifest.
 #
 #   node scripts/assets/blender/build.mjs films                       # every film (hours)
@@ -25,6 +25,8 @@ import earth as E  # noqa: E402
 import figures as FG  # noqa: E402
 import film as F  # noqa: E402
 import plate as PL  # noqa: E402
+import salvager as SV  # noqa: E402
+import shots_contact as K  # noqa: E402
 import shots_endings as X  # noqa: E402
 import shots_interludes as I  # noqa: E402
 import shots_prologue as P  # noqa: E402
@@ -71,6 +73,11 @@ FILMS = [
         S('undock', 0, 4, 2, P.undock, deps=(E, P.tug)),
         S('jump', 4, 7, 4.5, P.jump, deps=(P.tug,)),
     ], flashes=(6.25,)),
+    F.Film('wreckers', [   # SPEC-063 §4.1, §4.2
+        S('hulk', 0, 4, 2, K.hulk_shot, deps=(K,)),
+        S('cutting', 4, 8.5, 6.5, K.cutting, deps=(K, SV)),
+        S('sortie', 8.5, 12, 10.5, K.sortie, deps=(K,)),
+    ]),
     F.Film('interlude_c1', [
         S('capsule', 0, 5, 3, I.capsule, deps=(P.spaceport, P.gantry, P.sky_gradient, P.concrete, P.boxes)),
         S('shelter_light', 5, 10, 8.5, PL.shot(SHELTER_PLATE, push=0.06, drift=(-0.006, 0.004), exposure=0.55,
@@ -116,7 +123,7 @@ FILMS = [
         S('point', 29, 36, 30, X.point, deps=(X.clay,)),
     ]),
 ]
-ORDER = ['prologue', 'departure', 'interlude_c1', 'interlude_c2', 'interlude_c3', 'interlude_c4', 'interlude_c5',
+ORDER = ['prologue', 'departure', 'wreckers', 'interlude_c1', 'interlude_c2', 'interlude_c3', 'interlude_c4', 'interlude_c5',
          'ending_stay', 'ending_escape']
 
 

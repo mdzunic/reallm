@@ -113,20 +113,57 @@ def tug(preview=None):
 RUST, OLIVE, SOOT, GUNSTEEL, RED, VISOR = range(6)
 
 
+FIGHTER_K = 1.15            # SPEC-063 §4.3: the tug's parts at 1.15 × its size
+REGISTRY_PLATE = (0.37, -0.42, 0.1)   # x (each side), y, z of the ground-bare plate's centre
+
+
 def fighter(preview=None):
-    """Scavenger fighter: forward-swept blades with gun prongs; 3.2 m span, 2.6 m
-    long. Rust and olive plating, patched panels, red war paint, heavy wear."""
+    """Scavenger fighter (SPEC-063 §4.3): a tug rebuilt for war, 3.1 m span, 2.6 m
+    long. The tug's hull, nose, canopy and engine pods at 1.15 ×, its cargo wings,
+    fins, skids, antenna and lamp bar cut away; the old fighter's swept blades and
+    gun prongs bolted under the pods and its booster between them, its nozzle disc
+    at (0, 1.28, 0) where FlightView's glow expects it. Rust and olive plating,
+    patches, red paint across the nose, the registry plate ground to bare steel."""
+    k = FIGHTER_K
+
+    def at(x, y, z):
+        return (x * k, y * k, z * k)
+
     glow = C.mat_flat('Glow', '#ffffff', emission='#ff8a4a', strength=2.5)
     b = C.Builder()
-    b.add(place(sphere(0.46, 18, 12), (0, 0.12, 0), scale=(1.0, 2.0, 0.78)), color=P(RUST, B.DECAL_MARK, 0.8), smooth=70)
-    b.add(place(box(0.34, 0.5, 0.12, 0.04), (0, -0.55, 0.26), (8, 0, 0)), color=P(VISOR))
-    b.add(place(sphere(0.07, 8, 6), (0, -0.82, 0.18)), mat=1)
+    # the tug: hull, nose block, spine plate, canopy and its ring
+    b.add(place(box(0.62 * k, 1.45 * k, 0.34 * k, 0.08, 2), at(0, 0.05, 0.08)), color=P(RUST, B.DECAL_MARK, 0.8))
+    b.add(place(box(0.48 * k, 0.55 * k, 0.24 * k, 0.07, 2), at(0, -0.82, 0.02), (10, 0, 0)), color=P(RUST, B.DECAL_MARK, 0.9))
+    b.add(place(box(0.30 * k, 0.40 * k, 0.12 * k, 0.03), at(0, 0.45, 0.30)), color=P(GUNSTEEL, wear=0.7))
+    b.add(place(sphere(0.22 * k, 20, 12), at(0, -0.44, 0.27), scale=(1.0, 1.65, 0.68)), color=P(VISOR), smooth=80)
+    b.add(place(torus(0.2 * k, 0.018 * k, n=24, m=5), at(0, -0.44, 0.255), scale=(1.1, 1.75, 1.0)), color=P(GUNSTEEL, wear=0.9))
     for side in (-1, 1):
-        b.add(place(box(1.25, 0.62, 0.08, 0.03), (0.86 * side, 0.18, 0.0), (0, 0, 22 * side)), color=P(OLIVE, B.DECAL_MARK, 0.85))
-        b.add(place(box(0.9, 0.12, 0.09, 0.02), (0.9 * side, 0.42, 0.02), (0, 0, 22 * side)), color=P(SOOT, wear=0.6))
-        b.add(place(box(0.12, 1.0, 0.14, 0.03), (1.46 * side, -0.32, 0.0)), color=P(GUNSTEEL, B.DECAL_HAZARD, 1.0))
-        b.add(place(cyl(0.035, 0.035, 0.35, n=8), (1.46 * side, -0.95, 0.0), (90, 0, 0)), color=P(SOOT, wear=0.9))
-        b.add(place(box(0.05, 0.55, 0.42, 0.015), (0.22 * side, 0.78, 0.3), (-18, 0, 10 * side)), color=P(RUST, B.DECAL_MARK, 0.9))
+        x = 0.52 * side
+        # the tug's engine pods, front intake and rear discs still glowing — orange now
+        b.add(place(cyl(0.17 * k, 0.15 * k, 0.92 * k, n=16, bevel=0.02), at(x, 0.33, 0.05), (90, 0, 0)),
+              color=P(OLIVE, B.DECAL_MARK, 0.9))
+        b.add(place(cyl(0.195 * k, 0.2 * k, 0.09 * k, n=16), at(x, 0.80, 0.05), (90, 0, 0)), color=P(GUNSTEEL, wear=1.0))
+        b.add(place(cyl(0.135 * k, 0.135 * k, 0.02 * k, n=16), at(x, 0.846, 0.05), (90, 0, 0)), mat=1, smooth=None)
+        b.add(place(cyl(0.12 * k, 0.1 * k, 0.1 * k, n=12), at(x, -0.16, 0.05), (90, 0, 0)), color=P(SOOT, wear=0.8))
+        b.add(place(box(0.34 * k, 0.34 * k, 0.1 * k, 0.02), at(0.34 * side, 0.30, 0.05)), color=P(GUNSTEEL, wear=0.8))
+        # the old fighter's swept blade, bolted under the pod, with its gun prong
+        b.add(place(box(1.25, 0.62, 0.08, 0.03), (0.86 * side, 0.18, -0.1), (0, 0, 22 * side)), color=P(OLIVE, B.DECAL_MARK, 0.85))
+        b.add(place(box(0.9, 0.12, 0.09, 0.02), (0.9 * side, 0.42, -0.08), (0, 0, 22 * side)), color=P(SOOT, wear=0.6))
+        b.add(place(box(0.12, 1.0, 0.14, 0.03), (1.46 * side, -0.32, -0.1)), color=P(GUNSTEEL, B.DECAL_HAZARD, 1.0))
+        b.add(place(cyl(0.035, 0.035, 0.35, n=8), (1.46 * side, -0.95, -0.1), (90, 0, 0)), color=P(SOOT, wear=0.9))
+        # weld brackets where the blade meets the pod
+        for y in (0.05, 0.45):
+            b.add(place(box(0.1, 0.06, 0.12, 0.01), (0.62 * side, y, -0.06)), color=P(SOOT, wear=1.0))
+        # the registry plate on the hull's flank, ground to bare steel
+        rx, ry, rz = REGISTRY_PLATE
+        b.add(place(box(0.02, 0.32, 0.12, 0.004), (rx * side, ry, rz)), color=P(GUNSTEEL, wear=1.0))
+    # patch plates riveted over the hull, the nose and a pod
+    for size, loc, rot, slot in (((0.26, 0.30, 0.02), (-0.13, -0.02, 0.33), (0, 0, 6), OLIVE),
+                                 ((0.28, 0.20, 0.02), (0.05, -0.97, 0.19), (12, 0, -8), OLIVE),
+                                 ((0.02, 0.34, 0.18), (0.37, 0.32, 0.09), (0, 0, 0), SOOT),
+                                 ((0.16, 0.30, 0.02), (-0.6, 0.36, 0.27), (0, 0, -4), RUST)):
+        b.add(place(box(*size, 0.005), loc, rot), color=P(slot, wear=0.9))
+    # the old fighter's booster between the pods; its disc is the exhaust FlightView lights
     b.add(place(cyl(0.3, 0.24, 0.5, n=16, bevel=0.02), (0, 1.02, 0), (90, 0, 0)), color=P(GUNSTEEL, wear=1.0))
     b.add(place(cyl(0.2, 0.2, 0.02, n=16), (0, 1.28, 0), (90, 0, 0)), mat=1, smooth=None)
     obj = b.object('Fighter', [_bake_slot(), glow])
@@ -137,21 +174,30 @@ def fighter(preview=None):
     pn = p.hull(palette=['#8e4a26', '#5f5d52', '#252321', '#6f7276', '#8f2418', '#140c08'],
                 rough=[0.6, 0.62, 0.7, 0.4, 0.55, 0.05], metal=[0.25, 0.2, 0.1, 0.85, 0.1, 0.2],
                 seed=11, panel=(0.32, 0.22), tone=0.1, seam_dark=0.4, wear=0.85, grime=0.85)
-    pos = F.P
+    pos, nrm = F.P, F.N
     # scavenged patches: a few panels in the other plating colour
     patch = pn['tone'] > 0.86
     p.decal(patch & (F.slot == RUST), '#5f5d52')
     p.decal(patch & (F.slot == OLIVE), '#8e4a26')
-    # red war paint: bands across the wing tops, the fin tops
+    # red war paint: bands across the blade tops (not the pods), stripes across the nose
     ax = np.abs(pos[..., 0])
-    wing = (F.slot == OLIVE) & (np.abs(F.N[..., 2]) > 0.7) & (ax > 0.55)
-    p.decal(wing & (np.mod(ax - 0.55, 0.42) < 0.12), '#8f2418')
-    p.decal((F.slot == RUST) & (ax > 0.15) & (pos[..., 1] > 0.5) & (pos[..., 2] > 0.36), '#8f2418')
+    blade = (F.slot == OLIVE) & (np.abs(nrm[..., 2]) > 0.7) & (ax > 0.85)
+    p.decal(blade & (np.mod(ax - 0.85, 0.36) < 0.11), '#8f2418')
+    nose = (F.slot == RUST) & (nrm[..., 2] > 0.5) & (pos[..., 1] < -0.6)
+    for y in (-0.72, -0.9):
+        p.decal(nose & (np.abs(pos[..., 1] - y) < 0.045), '#8f2418')
+    # the registry plate: bare steel scored by the grinder, with no letters left on it
+    rx, ry, rz = REGISTRY_PLATE
+    plate = ((F.slot == GUNSTEEL) & (np.abs(ax - rx) < 0.02) & (np.abs(pos[..., 1] - ry) < 0.16)
+             & (np.abs(pos[..., 2] - rz) < 0.06))
+    p.decal(plate, '#a7aaad', rough=0.3)
+    p.decal(plate & (np.mod(pos[..., 1] * 31 + pos[..., 2] * 13, 1.0) < 0.35), '#c8cacc', rough=0.22)
     p.hazard(F.decal_is(B.DECAL_HAZARD), period=0.06)
     p.soot((0, 1.3, 0), 0.55, strength=0.9)
     for side in (-1, 1):
-        p.soot((1.46 * side, -1.1, 0), 0.3)
-    p.glass(F.slot == VISOR, (0, -0.55, 0.26), tint='#1a0e08', sky='#ff9a5a', level=0.35)
+        p.soot((1.46 * side, -1.1, -0.1), 0.3)
+        p.soot((0.52 * k * side, 0.97, 0.06), 0.35)
+    p.glass(F.slot == VISOR, (0, -0.44 * k, 0.27 * k), tint='#1a0e08', sky='#ff9a5a', level=0.35)
     obj.data.materials[0] = p.finish('Hull', emissive_strength=2.0)
     _sheet(p, preview, 'fighter')
     return obj

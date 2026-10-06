@@ -90,8 +90,9 @@ def _limb(b, bone, r1, r2, cell, n=8, inset=(0.0, 0.0)):
     b.add(C.along(C.cyl(r1, r2, (t - h).length, n=n), h, t), uv=uv(cell), bone=bone)
 
 
-def body(b, helmet='crest'):
-    """Add every part to Builder `b`. helmet: crest | antenna | goggles | hood."""
+def body(b, helmet='crest', rifle=True):
+    """Add every part to Builder `b`. helmet: crest | antenna | goggles | hood.
+    `rifle=False` leaves the hands empty (the scavenger at work in SPEC-063's film)."""
     box, cyl, sphere, place = C.box, C.cyl, C.sphere, C.place
 
     # hips: pelvis, belt, pouches, front plate
@@ -172,6 +173,8 @@ def body(b, helmet='crest'):
         b.add(place(box(0.135, 0.27, 0.115, 0.03), (x, -0.05, 0.075)), uv=uv('glove'), bone=ft)
         b.add(place(box(0.145, 0.28, 0.035), (x, -0.05, 0.0175)), uv=uv('sole'), bone=ft)
 
+    if not rifle:
+        return
     # rifle in the right hand, held at the hip, muzzle forward (−Y)
     gx = -0.12
     b.add(place(box(0.075, 0.46, 0.115, 0.012), (gx, -0.36, 1.10)), uv=uv('metal'), bone='hand.R')
@@ -186,7 +189,7 @@ def body(b, helmet='crest'):
     b.add(place(box(0.08, 0.17, 0.016), (gx, -0.45, 1.085)), uv=uv('glow'), bone='hand.R')
 
 
-def build(helmet='crest', overrides=None, name='Salvager', strength=3.0):
+def build(helmet='crest', overrides=None, name='Salvager', strength=3.0, rifle=True):
     """Armature + skinned mesh, rest pose holding the rifle. Returns (armature, mesh).
     `strength` is the emissive strength: 3 glows under the game's bloom, a
     close-up render wants about 1."""
@@ -206,7 +209,7 @@ def build(helmet='crest', overrides=None, name='Salvager', strength=3.0):
     arm_data.bones['root'].use_deform = False
 
     b = C.Builder(vcol=False)
-    body(b, helmet)
+    body(b, helmet, rifle)
     mesh = b.object(f'{name}Mesh', [palette_material(f'{name}', overrides, strength)], parent=arm)
     mod = mesh.modifiers.new('Armature', 'ARMATURE')
     mod.object = arm

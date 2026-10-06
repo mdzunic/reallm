@@ -143,6 +143,7 @@ export const ASSETS = {
         film_static: [24200, 600],
         film_beam: [24900, 2500],
         film_dissolve: [27500, 2000],
+        film_grind: [29600, 1800],
       },
     },
 
