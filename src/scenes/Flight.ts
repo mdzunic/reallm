@@ -508,7 +508,7 @@ export class FlightScene extends UiScene<'flight'> {
     let host: HTMLElement | null = null;
     let remove: (() => void) | null = null;
     const mount = (): void => {
-      if (this.#chapterCardHost?.firstElementChild != null) {
+      if ((this.#chapterCardHost?.firstElementChild ?? null) !== null) {
         timer = setTimeout(mount, CONTACT_RECHECK_MS);
         return;
       }
