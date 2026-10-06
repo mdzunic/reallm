@@ -4537,7 +4537,7 @@ export class SurfaceScene extends UiScene<'surface'> {
     save.quick.explosive = 'frag_grenade';
   }
 
-  /** SPEC-054 §4.14: beside the nearest unclaimed cache of the active level, toward its room. */
+  /** SPEC-054 §4.14: beside the nearest unclaimed cache of the active level — a loose one first — toward its room. */
   #debugGotoCache(): void {
     const world = this.#world;
     const save = this.#save;
@@ -4546,9 +4546,11 @@ export class SurfaceScene extends UiScene<'surface'> {
     const p = world.player;
     let best: Interactable | null = null;
     let bestD = Infinity;
+    // A loose cache — one that opens — wins over a guarded one, then the nearest.
     for (const entry of level.interactables) {
       if (entry.kind !== 'cache' || save.progress.claimed.includes(entry.id)) continue;
-      const d = Math.hypot(entry.x - p.x, entry.z - p.z);
+      const shut = CACHES[entry.id as CacheId].guard !== 'none';
+      const d = Math.hypot(entry.x - p.x, entry.z - p.z) + (shut ? 1e6 : 0);
       if (d < bestD) {
         bestD = d;
         best = entry;
