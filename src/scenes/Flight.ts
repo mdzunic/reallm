@@ -92,6 +92,9 @@ const RETICLE_HIT_SECONDS = 0.1;
 const RETICLE_KILL_SECONDS = 0.25;
 type ReticleMark = '' | 'is-hit' | 'is-kill';
 
+/** SPEC-063 §4.5 (E111): how often a contact card due under a late chapter card looks again, in ms. */
+const CONTACT_RECHECK_MS = 50;
+
 /** The stand-in pilot for a bare `?scene=flight` jump with no loaded save. */
 const DEMO_CREATION: CharacterCreation = {
   name: 'Salvager',
@@ -186,10 +189,11 @@ export class FlightScene extends UiScene<'flight'> {
   #leadShown = false;
   /**
    * SPEC-063 §4.5: when this trip's chapter card will have been removed, on
-   * `performance.now()`'s clock — 0 when there is none. A contact card due
-   * before it waits until then (E111).
+   * `performance.now()`'s clock — 0 when there is none — and the box it is
+   * mounted in. A contact card due before that moment waits until then (E111).
    */
   #chapterCardGoneAt = 0;
+  #chapterCardHost: HTMLElement | null = null;
   /** SPEC-063 §4.5: the enemies whose contact fired on this trip, in order — `sceneInfo.contacts`. */
   readonly #contacts: EnemyId[] = [];
 
@@ -442,6 +446,7 @@ export class FlightScene extends UiScene<'flight'> {
     // `display: contents` box, the pattern the damage-number layer uses.
     const host = el('div', 'chapter-card-host');
     uiRootEl().append(host);
+    this.#chapterCardHost = host;
     let remove: (() => void) | null = null;
     const timer = setTimeout(() => {
       // SPEC-058 §4.4: the containment line reads the save's capped level.
@@ -453,6 +458,7 @@ export class FlightScene extends UiScene<'flight'> {
       clearTimeout(timer);
       remove?.();
       host.remove();
+      this.#chapterCardHost = null;
     });
   }
 
@@ -490,19 +496,30 @@ export class FlightScene extends UiScene<'flight'> {
    * `Disposer` — once the chapter card has been removed (E111), else at once.
    * The group spawns inside the flight's step, so the mount always runs on a
    * timer of its own and the step builds no DOM.
+   *
+   * The chapter card's own timers run one after the other, so on a loaded
+   * frame they land later than the moment recorded for them; at that moment
+   * the card itself is looked for, and while it is still up the contact card
+   * looks again every `CONTACT_RECHECK_MS`.
    */
   #showContactCard(enemy: EnemyId, name: string, epithet: string): void {
     const reduceMotion = this.services.settings.get().reduceMotion;
-    const wait = Math.max(0, this.#chapterCardGoneAt - performance.now());
+    let timer: ReturnType<typeof setTimeout> | null = null;
     let host: HTMLElement | null = null;
     let remove: (() => void) | null = null;
-    const timer = setTimeout(() => {
+    const mount = (): void => {
+      if (this.#chapterCardHost?.firstElementChild != null) {
+        timer = setTimeout(mount, CONTACT_RECHECK_MS);
+        return;
+      }
+      timer = null;
       host = el('div', 'contact-card-host');
       uiRootEl().append(host);
       remove = showContactCard(host, { enemy, name, epithet }, reduceMotion);
-    }, wait);
+    };
+    timer = setTimeout(mount, Math.max(0, this.#chapterCardGoneAt - performance.now()));
     this.disposer.add(() => {
-      clearTimeout(timer);
+      if (timer !== null) clearTimeout(timer);
       remove?.();
       host?.remove();
     });

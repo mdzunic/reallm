@@ -11,6 +11,15 @@
 // is entered straight from the save, so no station beat (an interlude, a
 // letter) plays in front of the departure. The trip is warped through the
 // dev flight hook (SPEC-013), which steps the real simulation at 1/60 s.
+//
+// What the card did is recorded in the page, by a mutation observer armed
+// before the game boots: the moment it mounted, what it read and looked like
+// then, whether the chapter card was still up, and when it began to fade and
+// was removed. A round trip from here can take longer than the card lives on
+// a loaded GPU-less host, so nothing about its timing is read from outside.
+// Once the first group has made contact the sky is cleared, so the idle ship
+// is not shot down — a recall clears the dialogue queue — before the lines
+// have played; the contact has fired by then, and the trip runs on.
 import { expect, test, type Page } from '@playwright/test';
 import { start } from './start';
 
@@ -40,12 +49,29 @@ interface FlightHook {
   phase(): string;
   state(): { progress: number; hostiles: number };
   warp(seconds: number): void;
+  clearSky(): void;
+}
+
+/** One contact card's life, as the page saw it (performance.now() ms). */
+interface CardRecord {
+  enemy: string | null;
+  texts: string[];
+  /** The chapter card was still in the page when this card mounted (E111). */
+  chapterUp: boolean;
+  isStatic: boolean;
+  /** The computed `transition-duration` at mount. */
+  transition: string;
+  at: number;
+  /** When `is-visible` came off — the fade out began. */
+  fadeAt: number | null;
+  goneAt: number | null;
 }
 
 declare global {
   interface Window {
     /** Every text the dialogue layer's line has shown, armed before the game boots. */
     __spec063Lines?: string[];
+    __spec063Cards?: Array<CardRecord & { node: Element; seenVisible: boolean }>;
   }
 }
 
@@ -61,6 +87,10 @@ const contacts = async (page: Page): Promise<string[]> =>
 /** True once a line the dialogue layer typed reads `text` whole. */
 const lineShown = (page: Page, text: string): Promise<boolean> =>
   page.evaluate((line) => (window.__spec063Lines ?? []).some((seen) => seen.includes(line)), text);
+
+/** Every contact card the page has mounted, in order. */
+const cards = (page: Page): Promise<CardRecord[]> =>
+  page.evaluate(() => (window.__spec063Cards ?? []).map(({ node: _node, seenVisible: _seen, ...record }) => record));
 
 /** As SPEC-023's: the scene is on screen and its transition has settled. */
 async function settled(page: Page, scene: string): Promise<void> {
@@ -88,10 +118,42 @@ async function newSaveAtStarmap(page: Page, setup: Setup): Promise<void> {
     localStorage.setItem('reallm:settings', JSON.stringify(settings));
     const seen: string[] = [];
     window.__spec063Lines = seen;
-    new MutationObserver(() => {
+    const cards: NonNullable<typeof window.__spec063Cards> = [];
+    window.__spec063Cards = cards;
+    new MutationObserver((records) => {
+      const now = performance.now();
+      for (const record of records) {
+        if (record.type === 'childList') {
+          for (const node of record.addedNodes) {
+            if (!(node instanceof HTMLElement) || !node.matches('[data-testid="contact-card"]')) continue;
+            cards.push({
+              node,
+              seenVisible: node.classList.contains('is-visible'),
+              enemy: node.getAttribute('data-enemy'),
+              texts: [...node.querySelectorAll('p')].map((p) => p.textContent ?? ''),
+              chapterUp: document.querySelector('[data-testid="chapter-card"]') !== null,
+              isStatic: node.classList.contains('is-static'),
+              transition: getComputedStyle(node).transitionDuration,
+              at: now,
+              fadeAt: null,
+              goneAt: null,
+            });
+          }
+          for (const node of record.removedNodes) {
+            const card = cards.find((entry) => entry.node === node);
+            if (card !== undefined && card.goneAt === null) card.goneAt = now;
+          }
+        } else if (record.type === 'attributes') {
+          const card = cards.find((entry) => entry.node === record.target);
+          if (card === undefined) continue;
+          const visible = card.node.classList.contains('is-visible');
+          if (visible) card.seenVisible = true;
+          else if (card.seenVisible && card.fadeAt === null) card.fadeAt = now;
+        }
+      }
       const text = document.querySelector('[data-testid="dialogue"] .dialogue-text')?.textContent ?? '';
       if (text !== '' && seen[seen.length - 1] !== text) seen.push(text);
-    }).observe(document, { subtree: true, childList: true, characterData: true });
+    }).observe(document, { subtree: true, childList: true, characterData: true, attributes: true, attributeFilter: ['class'] });
   }, setup.reduceMotion === true);
   await start(page, setup.url ?? '/?films=on&seed=123');
   await page.evaluate(
@@ -142,28 +204,55 @@ async function warpToFirstGroup(page: Page): Promise<Warped> {
   });
 }
 
-interface CardAtMount {
-  enemy: string | null;
-  texts: string[];
-  chapterUp: boolean;
+/** Waits for the page's first contact card to have mounted, and returns its record. */
+async function firstCard(page: Page): Promise<CardRecord> {
+  await page.waitForFunction(() => (window.__spec063Cards ?? []).length > 0, null, { timeout: 20_000 });
+  const [card] = await cards(page);
+  if (card === undefined) throw new Error('no contact card was recorded');
+  return card;
 }
 
-/** Watched every frame: the contact card's first frame on screen, and whether the chapter card was still up then. */
-async function contactCardMounts(page: Page): Promise<CardAtMount> {
-  const handle = await page.waitForFunction(
-    () => {
-      const card = document.querySelector('[data-testid="contact-card"]');
-      if (card === null) return null;
-      return {
-        enemy: card.getAttribute('data-enemy'),
-        texts: [...card.querySelectorAll('p')].map((p) => p.textContent ?? ''),
-        chapterUp: document.querySelector('[data-testid="chapter-card"]') !== null,
-      };
-    },
-    null,
-    { polling: 'raf', timeout: 20_000 },
-  );
-  return (await handle.jsonValue()) as CardAtMount;
+/** Clears the sky through the flight hook (see the header). */
+const clearSky = (page: Page): Promise<void> =>
+  page.evaluate(() => (window as unknown as { __reallmFlight: FlightHook }).__reallmFlight.clearSky());
+
+/** CONTACT of `systems/StoryBeats.ts`, in ms — the card's hold and its fade. */
+const SHOW_MS = 3500;
+const FADE_MS = 400;
+/** A timer never fires early; on a loaded GPU-less host it can fire this late. */
+const LATE_MS = 2000;
+
+interface Held {
+  before: { progress: number; x: number };
+  after: { progress: number; x: number };
+  cardUp: boolean;
+}
+
+/**
+ * §4.5, no hold: the moment the first card mounts, in the page, hold the steer
+ * key for a second of real time and read the trip's progress and the ship's x
+ * on either side of it — with the card still up at the end.
+ */
+function heldUnderCard(page: Page): Promise<Held> {
+  return page.evaluate(async () => {
+    const hook = (window as unknown as { __reallmFlight: FlightHook }).__reallmFlight;
+    const read = (): { progress: number; x: number } => ({
+      progress: hook.state().progress,
+      x: Number(window.__reallm.stats().sceneInfo?.['shipX']),
+    });
+    const deadline = performance.now() + 20_000;
+    while ((window.__spec063Cards ?? []).length === 0 && performance.now() < deadline) {
+      await new Promise((done) => setTimeout(done, 10));
+    }
+    const key = (type: 'keydown' | 'keyup'): boolean =>
+      window.dispatchEvent(new KeyboardEvent(type, { code: 'KeyD', key: 'd', bubbles: true, cancelable: true }));
+    key('keydown');
+    const before = read();
+    await new Promise((done) => setTimeout(done, 1000));
+    const after = read();
+    key('keyup');
+    return { before, after, cardUp: document.querySelector('[data-testid="contact-card"]') !== null };
+  });
 }
 
 test('1 & 2 — the first departure to Vetra plays Outbound then Wreckers, and the first fighters make contact', async ({
@@ -181,36 +270,28 @@ test('1 & 2 — the first departure to Vetra plays Outbound then Wreckers, and t
   await expect(page.locator(FILM)).toHaveCount(0);
   await settled(page, 'flight');
 
-  // §6.3 case 2: warp to the first group; the chapter card is still up over the
-  // launch, so the contact card waits for it (E111).
+  // §6.3 case 2: warp to the first group — while the chapter card is still
+  // up over the launch, so the contact card waits for it (E111).
   const warped = await warpToFirstGroup(page);
   expect(warped.hostiles).toBeGreaterThan(0);
-  expect(warped.contactUp).toBe(false);
-  const card = await contactCardMounts(page);
-  expect(card).toEqual({ enemy: 'scav_fighter', texts: ['CONTACT', 'SCAV FIGHTER', SCAV_EPITHET], chapterUp: false });
+  expect(warped).toMatchObject({ chapterUp: true, contactUp: false });
+  await clearSky(page);
 
-  // §4.5, no hold: over a second of real time with the card up, the trip
-  // advances, and the steer keys still move the ship.
-  await page.keyboard.down('KeyD');
-  let held: { before: { progress: number; x: number }; after: { progress: number; x: number }; cardUp: boolean };
-  try {
-    held = await page.evaluate(async () => {
-      const hook = (window as unknown as { __reallmFlight: FlightHook }).__reallmFlight;
-      const read = (): { progress: number; x: number } => ({
-        progress: hook.state().progress,
-        x: Number(window.__reallm.stats().sceneInfo?.['shipX']),
-      });
-      const before = read();
-      await new Promise((done) => setTimeout(done, 1000));
-      return { before, after: read(), cardUp: document.querySelector('[data-testid="contact-card"]') !== null };
-    });
-  } finally {
-    await page.keyboard.up('KeyD');
-  }
+  // §4.5, no hold: the trip advances and the steer key moves the ship under the card.
+  const held = await heldUnderCard(page);
   expect(held.cardUp).toBe(true);
   expect(held.after.progress).toBeGreaterThan(held.before.progress);
   expect(held.after.x).toBeGreaterThan(held.before.x);
   expect(await page.evaluate(() => window.__reallm.stats().state)).toBe('running');
+
+  const card = await firstCard(page);
+  expect(card).toMatchObject({
+    enemy: 'scav_fighter',
+    texts: ['CONTACT', 'SCAV FIGHTER', SCAV_EPITHET],
+    chapterUp: false,
+    isStatic: false,
+    transition: '0.4s',
+  });
 
   // §4.5: the scav's line and ARIA's, non-modal through the shared layer.
   await expect.poll(() => lineShown(page, SCAV_LINE), { timeout: 20_000 }).toBe(true);
@@ -218,12 +299,16 @@ test('1 & 2 — the first departure to Vetra plays Outbound then Wreckers, and t
   await expect.poll(() => lineShown(page, ARIA_SCAV_LINE), { timeout: 30_000 }).toBe(true);
   expect(await contacts(page)).toEqual(['scav_fighter']);
 
-  // The card lives CONTACT.show + CONTACT.fade, then removes itself.
+  // The card holds CONTACT.show, then fades out over CONTACT.fade and is removed.
   await expect(page.locator(CONTACT_CARD)).toHaveCount(0, { timeout: 10_000 });
-  // 63-c: a later group of the same trip never shows another card. Vetra has
-  // one group, so the session key is what holds it: the card is gone for good.
-  await page.waitForTimeout(500);
-  await expect(page.locator(CONTACT_CARD)).toHaveCount(0);
+  const [life] = await cards(page);
+  if (life?.fadeAt == null || life.goneAt === null) throw new Error('the card did not fade and go');
+  expect(life.fadeAt - life.at).toBeGreaterThanOrEqual(SHOW_MS - 20);
+  expect(life.fadeAt - life.at).toBeLessThanOrEqual(SHOW_MS + LATE_MS);
+  expect(life.goneAt - life.fadeAt).toBeGreaterThanOrEqual(FADE_MS - 20);
+  expect(life.goneAt - life.fadeAt).toBeLessThanOrEqual(FADE_MS + LATE_MS);
+  // One card on this trip, and the session key holds it (63-c).
+  expect(await cards(page)).toHaveLength(1);
 });
 
 test('3 — a later trip to Vetra plays neither film, and its fighters make no contact', async ({ page }) => {
@@ -235,12 +320,15 @@ test('3 — a later trip to Vetra plays neither film, and its fighters make no c
   await expect(page.locator(FILM)).toHaveCount(0);
   const warped = await warpToFirstGroup(page);
   expect(warped.hostiles).toBeGreaterThan(0);
-  // Past the chapter card's window and a card's whole life: nothing was scheduled.
-  await page.waitForTimeout(1_500);
-  await expect(page.locator(CONTACT_CARD)).toHaveCount(0);
+  await clearSky(page);
+  // Past a card's whole life: nothing was scheduled, the chapter card included.
+  await page.waitForTimeout(SHOW_MS + FADE_MS);
+  expect(await cards(page)).toEqual([]);
   await expect(page.locator(CHAPTER_CARD)).toHaveCount(0);
   expect(await contacts(page)).toEqual([]);
   expect(await lineShown(page, SCAV_LINE)).toBe(false);
+  expect(await lineShown(page, ARIA_SCAV_LINE)).toBe(false);
+  await expect(page.locator(FILM)).toHaveCount(0);
 });
 
 test('4 — the first flight to the Hive: Outbound alone, then the interceptors’ contact', async ({ page }) => {
@@ -256,19 +344,28 @@ test('4 — the first flight to the Hive: Outbound alone, then the interceptors�
 
   const warped = await warpToFirstGroup(page);
   expect(warped.hostiles).toBeGreaterThan(0);
-  const card = await contactCardMounts(page);
-  expect(card).toEqual({ enemy: 'hive_interceptor', texts: ['CONTACT', 'HIVE INTERCEPTOR', HIVE_EPITHET], chapterUp: false });
+  await clearSky(page);
+  const card = await firstCard(page);
+  expect(card).toMatchObject({ enemy: 'hive_interceptor', texts: ['CONTACT', 'HIVE INTERCEPTOR', HIVE_EPITHET], chapterUp: false });
   await expect.poll(() => lineShown(page, ARIA_HIVE_LINE), { timeout: 20_000 }).toBe(true);
   expect(await contacts(page)).toEqual(['hive_interceptor']);
 
-  // The later groups of the same trip stay quiet (E110, 63-c).
-  await expect(page.locator(CONTACT_CARD)).toHaveCount(0, { timeout: 10_000 });
-  await page.evaluate(() => {
+  // The trip's second group — 45 s of 200 — makes no contact of its own (63-c).
+  // Half a second at a time with the sky cleared after each, so nothing reaches the ship.
+  const second = await page.evaluate(() => {
     const hook = (window as unknown as { __reallmFlight: FlightHook }).__reallmFlight;
-    for (let i = 0; i < 6 && hook.phase() !== 'arrived' && hook.phase() !== 'recalled'; i++) hook.warp(5);
+    let spawned = false;
+    for (let i = 0; i < 200 && !spawned && hook.phase() !== 'recalled'; i++) {
+      hook.warp(0.5);
+      spawned = hook.state().hostiles > 0 && hook.state().progress > 0.2;
+      hook.clearSky();
+    }
+    return { spawned, phase: hook.phase() };
   });
-  await page.waitForTimeout(500);
-  await expect(page.locator(CONTACT_CARD)).toHaveCount(0);
+  expect(second.spawned).toBe(true);
+  expect(second.phase).not.toBe('recalled');
+  await page.waitForTimeout(SHOW_MS + FADE_MS);
+  expect(await cards(page)).toHaveLength(1);
   expect(await contacts(page)).toEqual(['hive_interceptor']);
 });
 
@@ -284,9 +381,10 @@ test('5 — films off: no film and no card, but the fighters’ contact still fi
   await expect(page.locator(FILM)).toHaveCount(0);
   const warped = await warpToFirstGroup(page);
   expect(warped.hostiles).toBeGreaterThan(0);
+  await clearSky(page);
   expect(await contacts(page)).toEqual(['scav_fighter']);
   await expect.poll(() => lineShown(page, ARIA_SCAV_LINE), { timeout: 30_000 }).toBe(true);
-  await expect(page.locator(CONTACT_CARD)).toHaveCount(0);
+  expect(await cards(page)).toEqual([]);
   await expect(page.locator(FILM)).toHaveCount(0);
 });
 
@@ -302,14 +400,15 @@ test.describe('6 — reduce motion', () => {
     await settled(page, 'flight');
 
     await warpToFirstGroup(page);
-    const card = await contactCardMounts(page);
-    expect(card.enemy).toBe('scav_fighter');
-    const look = await page.locator(CONTACT_CARD).evaluate((node) => ({
-      static: node.classList.contains('is-static'),
-      opacity: getComputedStyle(node).opacity,
-      transition: getComputedStyle(node).transitionDuration,
-    }));
-    expect(look).toEqual({ static: true, opacity: '1', transition: '0s' });
+    await clearSky(page);
+    const card = await firstCard(page);
+    expect(card).toMatchObject({ enemy: 'scav_fighter', isStatic: true, transition: '0s' });
     await expect(page.locator(CONTACT_CARD)).toHaveCount(0, { timeout: 10_000 });
+    const [life] = await cards(page);
+    // No fade: the card is removed `CONTACT.show` after it went up, in one cut.
+    expect(life?.fadeAt).toBeNull();
+    const gone = (life?.goneAt ?? Number.NaN) - (life?.at ?? Number.NaN);
+    expect(gone).toBeGreaterThanOrEqual(SHOW_MS - 20);
+    expect(gone).toBeLessThanOrEqual(SHOW_MS + LATE_MS);
   });
 });
