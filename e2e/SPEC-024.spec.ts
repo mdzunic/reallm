@@ -3,6 +3,10 @@
 // overlay), the replay a reload owes at the next station entry, the E24 lock
 // on the board, and the whole sequence again with the films off.
 //
+// SPEC-058 §4.7, §4.9: the stay's report is six lines now — the rating, then
+// the run and its grade — and its Continue opens the Selection card, whose own
+// Continue is what hands the ending back (`endingSeen` after the card).
+//
 // The suite opts into films (`gameUrl` appends `films=off` everywhere else)
 // and aborts the MP4s, so the films run in SPEC-022's deterministic stills
 // mode — the pictures are that spec's business, and what is under test here is
@@ -16,6 +20,8 @@ const DIALOGUE = '[data-testid="dialogue"]';
 const FILM = '[data-testid="film"]';
 const HUD = '[data-testid="hud"]';
 const STAY = '[data-testid="ending-stay"]';
+/** SPEC-058 §4.7: the Selection card after the stay's report. */
+const SELECTION = '[data-testid="ending-card"]';
 const ESCAPE = '[data-testid="ending-escape"]';
 const MP4S = '**/assets/films/*.mp4';
 
@@ -187,12 +193,12 @@ test('2 & 5 — stay: dialogue, film, the filed report, free roam, and the locke
   await readLines(page, STAY_LINES);
   await skipFilm(page, 'ending_stay');
 
-  // §4.3: the filed report, five lines, the run number last.
+  // §4.3, SPEC-058 §4.7: the filed report, six lines, the run number last.
   const card = page.locator(STAY);
   await expect(card).toBeVisible({ timeout: 20_000 });
   await expect(card).toContainText('EARTH COMMAND — SURVEY REPORT · FILED');
   const lines = page.locator(`${STAY} .ending-report-line`);
-  await expect(lines).toHaveCount(5);
+  await expect(lines).toHaveCount(6);
   await expect(lines.first()).toContainText('SALVAGER Salvager');
   await expect(lines.last()).toContainText('RUN 62');
   // The HUD is still up; only the escape takes it away.
@@ -200,6 +206,10 @@ test('2 & 5 — stay: dialogue, film, the filed report, free roam, and the locke
 
   await page.locator('[data-testid="ending-continue"]').click();
   await expect(card).toHaveCount(0);
+  // SPEC-058 §4.7: the Selection card, then free roam.
+  await expect(page.locator(SELECTION)).toBeVisible({ timeout: 20_000 });
+  await page.locator('[data-testid="ending-card-continue"]').click();
+  await expect(page.locator(SELECTION)).toHaveCount(0);
   // Free roam on Eden: the scene is still here, the hold is released, the HUD
   // and the input are back, and the ending is recorded.
   await settled(page, 'surface');
@@ -330,10 +340,13 @@ test('7 — films off on the replay path: no film, and the overlay still runs (A
   const card = page.locator(STAY);
   await expect(card).toBeVisible({ timeout: 20_000 });
   await expect(page.locator(FILM)).toHaveCount(0);
-  await expect(page.locator(`${STAY} .ending-report-line`)).toHaveCount(5);
+  await expect(page.locator(`${STAY} .ending-report-line`)).toHaveCount(6);
 
   await page.locator('[data-testid="ending-continue"]').click();
   await expect(card).toHaveCount(0);
+  // SPEC-058 §4.7: the Selection card follows the report on the replay too.
+  await expect(page.locator(SELECTION)).toBeVisible({ timeout: 20_000 });
+  await page.locator('[data-testid="ending-card-continue"]').click();
   await settled(page, 'station');
   expect(await endingSeen(page)).toBe(true);
   await expect(page.locator('[data-testid="station-root"]')).toBeVisible();
@@ -351,10 +364,13 @@ test('6 — films off: the sequence runs dialogue → overlay, with no film at a
   // Straight from the dialogue to the report — no film node is ever built.
   await expect(page.locator(STAY)).toBeVisible({ timeout: 20_000 });
   await expect(page.locator(FILM)).toHaveCount(0);
-  await expect(page.locator(`${STAY} .ending-report-line`)).toHaveCount(5);
+  await expect(page.locator(`${STAY} .ending-report-line`)).toHaveCount(6);
 
   await page.locator('[data-testid="ending-continue"]').click();
   await expect(page.locator(STAY)).toHaveCount(0);
+  // SPEC-058 §4.7: the Selection card, then free roam.
+  await expect(page.locator(SELECTION)).toBeVisible({ timeout: 20_000 });
+  await page.locator('[data-testid="ending-card-continue"]').click();
   await settled(page, 'surface');
   expect(await endingSeen(page)).toBe(true);
 });

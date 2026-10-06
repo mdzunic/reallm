@@ -1088,6 +1088,9 @@ test('19. the verdict that starts the ending shows no banner', async ({ page }) 
   await expect(next).toBeVisible();
   await next.click();
   await expect(next).toBeHidden();
+  // SPEC-058 §4.7: the Selection card is the ending's last word; its Continue hands the planet back.
+  await page.getByTestId('ending-card-continue').click();
+  await expect(page.getByTestId('ending-card')).toHaveCount(0);
   await page.waitForTimeout(5_000);
   expect(await page.evaluate(() => window.__reallm.save().current?.progress.missionsDone ?? [])).toContain('c6_m2');
   expect(await page.evaluate(() => (window as unknown as { __spec042: { up: boolean } }).__spec042.up)).toBe(false);

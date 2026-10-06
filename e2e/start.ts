@@ -87,6 +87,10 @@ export interface SaveBridge {
     playtimeSec?: number;
     updatedAt?: number;
     corrupt?: boolean;
+    /** SPEC-058 §4.3: for a slot that loaded. */
+    iteration?: number;
+    ending?: 'stay' | 'escape' | null;
+    archive?: { iteration: number; name: string; ending: 'stay' | 'escape' | null; level: number; playtimeSec: number };
   }>;
   load(slot: number): { ok: boolean; source?: string; reason?: string; foundVersion?: number; data?: SaveSnapshot };
   create(slot: number, creation: unknown, seed?: number): SaveSnapshot;
@@ -100,6 +104,12 @@ export interface SaveBridge {
     code: string,
     slot: number,
   ): Promise<{ ok: boolean; reason?: string; foundVersion?: number; data?: SaveSnapshot }>;
+  /** SPEC-058 §4.2: archives the slot's finished run and binds its successor; `null` when the slot does not qualify. */
+  beginNextIteration(slot: number, creation: unknown): SaveSnapshot | null;
+  /** SPEC-058 §4.3: the slot's archived predecessor, parsed as a load is. */
+  loadArchive(slot: number): { ok: boolean; reason?: string; data?: SaveSnapshot };
+  /** SPEC-058 §4.3: the archive becomes the slot's save, once. */
+  restoreArchive(slot: number): { ok: boolean; reason?: string; data?: SaveSnapshot };
 }
 
 export interface SaveSnapshot {
