@@ -46,6 +46,7 @@ import {
   type WeaponDef,
   AUTO_LEAD_MAX,
   CASUAL_WEATHER_MULT,
+  CASUAL_WINDUP_MULT,
   MAX_FLARES,
   MAX_LINGER_CLOUDS,
   staminaFull,
@@ -1414,6 +1415,115 @@ describe('difficulty is read live (SPEC-038 §4.6)', () => {
     casual.combat.damagePlayer(100, { kind: 'weather', weather: 'heatwave' }, true);
     expect(hp0 - normal.world.player.hp).toBe(Math.floor(100 * (1 - resist)));
     expect(hp1 - casual.world.player.hp).toBe(Math.floor(100 * (1 - resist) * CASUAL_WEATHER_MULT));
+  });
+});
+
+// ------------------------------------------------------------- SPEC-059
+
+describe('the story difficulty (SPEC-059 §4.2.2)', () => {
+  /** A harness on `difficulty`, with nothing but the player in it. */
+  const on = (difficulty: Save['meta']['difficulty'], follower = false): Harness => {
+    const h = harness({ follower });
+    h.save.meta.difficulty = difficulty;
+    return h;
+  };
+  /** What a hit may touch: HP, the i-frames and the events it emits. */
+  const touched = (h: Harness): { hp: number; invulnUntil: number; events: number } => ({
+    hp: h.world.player.hp,
+    invulnUntil: h.world.player.invulnUntil,
+    events: h.of('player:damaged').length + h.of('player:died').length,
+  });
+
+  it('a melee blow leaves HP, the i-frames and the events alone — and still pushes', () => {
+    const blow = (h: Harness): void => {
+      const e = h.spawn('wurmling', 1.8, 0);
+      e.aggro = true;
+      e.state = 'windup';
+      e.stateTime = 1;
+      h.step();
+      h.step();
+    };
+    const story = on('story');
+    const before = touched(story);
+    blow(story);
+    expect(touched(story)).toEqual(before);
+    // Knockback is unchanged: a push is not damage.
+    const normal = on('normal');
+    blow(normal);
+    expect(normal.of('player:damaged')).toHaveLength(1);
+    expect(story.world.player.x).not.toBe(0);
+    expect(story.world.player.x).toBeCloseTo(normal.world.player.x, 10);
+  });
+
+  it('an enemy shot and a telegraph hit change nothing either', () => {
+    const story = on('story');
+    const before = touched(story);
+    story.shot({ x: -0.4, z: 0, vx: 40, owner: 'enemy', damage: 20, enemyId: 'dust_skitter', ttl: 1 });
+    story.step();
+    const t = story.combat.telegraphs.alloc();
+    resetTelegraph(t);
+    Object.assign(t, {
+      kind: 'circle',
+      x: 0.5,
+      z: 0,
+      radius: 1.5,
+      startAt: story.world.time,
+      hitAt: story.world.time + 0.1,
+      lockAt: story.world.time + 0.1,
+      damage: 20,
+      source: 'wurmling',
+    });
+    for (let i = 0; i < 12; i++) story.step();
+    expect(touched(story)).toEqual(before);
+    // The same direct calls the debug strip and SPEC-041's moves make.
+    story.combat.damagePlayer(30, { kind: 'enemy', enemyId: 'dune_wurm' });
+    story.combat.damagePlayer(30, { kind: 'projectile', enemyId: 'scav_raider' });
+    expect(touched(story)).toEqual(before);
+  });
+
+  it('ten seconds of weather deal nothing, and a fall still hurts', () => {
+    const story = on('story');
+    const before = touched(story);
+    for (let i = 0; i < 600; i++) story.combat.damagePlayer(4 * STEP, { kind: 'weather', weather: 'heatwave' }, true);
+    expect(touched(story)).toEqual(before);
+    story.combat.damagePlayer(60, { kind: 'fall' });
+    expect(story.world.player.hp).toBe(before.hp - 60);
+  });
+
+  it('the escort follower takes no enemy damage', () => {
+    const story = on('story', true);
+    const f = story.world.follower;
+    if (f === null) throw new Error('follower missing');
+    const hp = f.hp;
+    story.shot({ x: f.x - 2, z: f.z, vx: 40, owner: 'enemy', damage: 500, enemyId: 'scav_raider', ttl: 1 });
+    story.run(0.2);
+    expect(f.alive).toBe(true);
+    expect(f.hp).toBe(hp);
+    expect(story.of('follower:died')).toEqual([]);
+  });
+
+  it('assists like casual: windups ×1.25, while normal and hard stay at 1', () => {
+    for (const [difficulty, mult] of [
+      ['story', CASUAL_WINDUP_MULT],
+      ['casual', CASUAL_WINDUP_MULT],
+      ['normal', 1],
+      ['hard', 1],
+    ] as const) {
+      const h = on(difficulty);
+      h.step();
+      expect(h.world.windupMult, difficulty).toBe(mult);
+    }
+  });
+
+  it('keeps normal’s enemy HP and casual and hard their hits', () => {
+    expect(on('story').spawn('dune_wurm', 50, 0).maxHp).toBe(ENEMIES.dune_wurm.hp);
+    expect(CASUAL_WEATHER_MULT).toBe(0.7);
+    const casual = on('casual');
+    casual.combat.damagePlayer(10, { kind: 'enemy', enemyId: 'dune_wurm' });
+    expect(casual.of('player:damaged')).toHaveLength(1);
+    const hard = on('hard');
+    hard.combat.damagePlayer(10, { kind: 'projectile', enemyId: 'scav_raider' });
+    expect(hard.of('player:damaged')[0]?.amount).toBe(10);
   });
 });
 

@@ -84,8 +84,10 @@ export type WeatherId = (typeof WEATHER_IDS)[number];
  * SPEC-038 §3: the difficulty a run is played on — `save.meta.difficulty`, the
  * creation choice and the flight config. Changeable in Settings (PLAN §4).
  * SPEC-043 §4.4 appends `hard`; `core/Save.ts` re-exports both names.
+ * SPEC-059 §4.2.1 widens it in place with `story`, first: the gentlest level
+ * leads the row, and an older build reads it as `normal` (59-q).
  */
-export const DIFFICULTIES = ['casual', 'normal', 'hard'] as const;
+export const DIFFICULTIES = ['story', 'casual', 'normal', 'hard'] as const;
 export type Difficulty = (typeof DIFFICULTIES)[number];
 
 /**

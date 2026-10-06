@@ -255,7 +255,8 @@ test('7. reload: the remains survive a reload and the next landing names the sam
 
   // A reload is a `pagehide`: the autosave carries the remains. Back the way a
   // returning player comes: the menu's Load binds the stored save (`load()`
-  // alone only parses it), and a loaded run stands at the station.
+  // alone only parses it) and — SPEC-059 §4.1.3 — a run that stood on a
+  // planet resumes at its pad, with no flight.
   await start(page, '/?debug&seed=123');
   const loaded = await page.evaluate(() => window.__reallm.save().load(0));
   expect(loaded.ok).toBe(true);
@@ -263,11 +264,10 @@ test('7. reload: the remains survive a reload and the next landing names the sam
   await expect(page.locator('[data-testid="scene-label"]')).toHaveText('menu');
   await page.getByTestId('menu-load').click();
   await page.getByTestId('load-slot-0').click();
-  await expect(page.locator('[data-testid="scene-label"]')).toHaveText('station');
+  await expect(page.locator('[data-testid="scene-label"]')).toHaveText('surface');
   await expect(page.locator('[data-testid="transition-fade"]')).toHaveCSS('pointer-events', 'none');
   expect(await remainsOf(page)).toEqual(dropped);
-  await page.evaluate(() => window.__reallm.go('surface', { planet: 'cinder4', firstLanding: false }, { force: true }));
-  await expect(page.locator('[data-testid="scene-label"]')).toHaveText('surface');
+  expect((await info(page))['resumed']).toBe(1);
   expect((await info(page))['remains']).toBe(before);
   expect((await info(page))['remainsHeld']).toBe(20);
 });

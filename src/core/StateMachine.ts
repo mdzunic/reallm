@@ -24,7 +24,8 @@ export interface SceneParams {
   starmap: { planet?: PlanetId } | undefined;
   /** `skipRun`: the depart sheet's `Skip the run` — autopilot to the landing (SPEC-032 §4.4). */
   flight: { destination: PlanetId; skipRun?: boolean };
-  surface: { planet: PlanetId; firstLanding: boolean };
+  /** `resumed`: entered from the menu on a resume point (SPEC-059 §4.1.3) — no flight, no jump. */
+  surface: { planet: PlanetId; firstLanding: boolean; resumed?: boolean };
 }
 
 export interface Scene<K extends SceneId = SceneId> {
@@ -85,10 +86,11 @@ export const FATAL_TRANSITION_TEXT = 'Something went wrong — reload the page.'
  * (D-10) — the other scenes get their route back when the spec that adds the UI
  * for it adds the row. SPEC-014's Quit tab (AC-29) added `station → menu`, and
  * SPEC-044's `creation-back` (§4.4) added `creation → menu`, and SPEC-058's
- * `Next instance` (§4.1) `station → creation`.
+ * `Next instance` (§4.1) `station → creation`. SPEC-059 §4.1.6 added
+ * `menu → surface`: Continue landing back on a resume point, with no jump.
  */
 export const ALLOWED_TRANSITIONS = {
-  menu: ['creation', 'station'],
+  menu: ['creation', 'station', 'surface'],
   creation: ['station', 'menu'],
   station: ['starmap', 'menu', 'creation'],
   starmap: ['station', 'flight'],

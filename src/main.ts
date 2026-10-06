@@ -14,6 +14,8 @@ import { log } from '@/core/Log';
 import { RngRoot } from '@/core/Rng';
 import { SaveStore } from '@/core/Save';
 import { createSettings, reduceMotionPreset } from '@/core/Settings';
+import { CommendationTracker } from '@/systems/Commendations';
+import { debugClosesRecords, RECORDS } from '@/systems/Records';
 import { SERVICE_OFF_TEXT, SERVICE_ON_TEXT } from '@/systems/Service';
 import { hasOfflineWorker, offerUpdate, offlineStatus, registeredStatus, setOfflineStatus } from '@/core/Updates';
 import type { SceneId } from '@/core/StateMachine';
@@ -26,6 +28,7 @@ import { dialogueLayer } from '@/ui/DialogueUI';
 import { uiLayers } from '@/ui/dom';
 import { StatsOverlay } from '@/ui/StatsOverlay';
 import { TransitionOverlay } from '@/ui/TransitionOverlay';
+import { watchInstall } from '@/ui/InstallButton';
 import { InstallHintOverlay } from '@/ui/InstallHint';
 import { PerfResultCard } from '@/ui/PerfResult';
 import { UPDATE_BANNER_TEXT, UpdateOverlay } from '@/ui/UpdateOverlay';
@@ -159,6 +162,30 @@ if (typeof globalThis.matchMedia === 'function') {
 const save = new SaveStore(events, undefined, { settings });
 
 /**
+ * SPEC-059 §4.3.1: the page's records gate reads the flags, the service
+ * override and the bound save's difficulty, and looks again whenever any of
+ * them may have moved — a difficulty press writes the save with `manual`, so
+ * a story period is seen even when nothing is recorded during it.
+ */
+RECORDS.watch(() => ({
+  debug: debugClosesRecords(flags, import.meta.env.DEV),
+  serviceMode: settings.serviceMode,
+  difficulty: save.current?.meta.difficulty ?? null,
+}));
+const recordsOwner = {};
+events.on('settings:changed', () => RECORDS.refresh(), recordsOwner);
+events.on('save:written', () => RECORDS.refresh(), recordsOwner);
+events.on('save:failed', () => RECORDS.refresh(), recordsOwner);
+events.on('scene:entered', () => RECORDS.refresh(), recordsOwner);
+
+/**
+ * SPEC-059 §4.4.3: the commendation tracker, one for the page's lifetime. It
+ * queues on gameplay events and grants at the next save write or scene entry,
+ * through the same gate, the bound save and this device's settings.
+ */
+const commendations = new CommendationTracker({ events, save: () => save.current, settings, records: RECORDS, now: Date.now });
+
+/**
  * SPEC-006's audio layer. Built here for the same reason as the two above — it
  * needs the settings store the volume sliders write to.
  *
@@ -187,6 +214,12 @@ let running: Game | undefined;
 new UpdateOverlay(uiRoot, events);
 /** SPEC-015 AC-55: the two taps iOS needs, raised by the hint of SPEC-007 §4.7. */
 new InstallHintOverlay(uiRoot, events);
+/**
+ * SPEC-059 §4.6.5: the install prompt a browser may fire before any scene is
+ * up — kept for the menu's `Install`, and the launch read as installed when
+ * the app opens standalone.
+ */
+watchInstall(window, settings);
 
 /**
  * SPEC-015 §10 / AC-51 — what happens when a new build has finished
@@ -442,6 +475,8 @@ if (import.meta.env.DEV) {
   import.meta.hot?.dispose(() => {
     document.removeEventListener('keydown', onKeyDown);
     haptics.dispose();
+    commendations.dispose();
+    events.releaseOwner(recordsOwner);
     releaseGuardSync();
     events.releaseOwner(guardOwner);
     events.releaseOwner(workerOwner);

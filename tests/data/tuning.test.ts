@@ -48,16 +48,20 @@ describe('TUNING', () => {
 describe('DIFFICULTY_RULES (SPEC-043 §4.4)', () => {
   it('is keyed by exactly the difficulties the save knows', () => {
     // `data/` cannot import `core/`, so the table spells the keys out and this
-    // pins them to `DIFFICULTIES`.
+    // pins them to `DIFFICULTIES` — four since SPEC-059 §4.2.1 put story first.
     expect(Object.keys(DIFFICULTY_RULES).sort()).toEqual([...DIFFICULTIES].sort());
-    expect(DIFFICULTIES).toEqual(['casual', 'normal', 'hard']);
+    expect(DIFFICULTIES).toEqual(['story', 'casual', 'normal', 'hard']);
   });
 
   it('casual and normal keep their numbers, and hard multiplies what exists', () => {
+    // SPEC-059 §4.2.1: every row carries the three new columns; casual, normal
+    // and hard keep every value they had, and their new ones are what SPEC-038
+    // applied for casual alone.
     expect(DIFFICULTY_RULES).toEqual({
-      casual: { enemyHpMult: 1, enemyDamageMult: 0.7, eliteChanceMult: 1, deathLoss: 0 },
-      normal: { enemyHpMult: 1, enemyDamageMult: 1, eliteChanceMult: 1, deathLoss: 0.1 },
-      hard: { enemyHpMult: 1.25, enemyDamageMult: 1.3, eliteChanceMult: 2, deathLoss: 0.2 },
+      story: { enemyHpMult: 1, enemyDamageMult: 0, eliteChanceMult: 1, deathLoss: 0, weatherMult: 0, allyDamageMult: 0, assisted: true },
+      casual: { enemyHpMult: 1, enemyDamageMult: 0.7, eliteChanceMult: 1, deathLoss: 0, weatherMult: 0.7, allyDamageMult: 1, assisted: true },
+      normal: { enemyHpMult: 1, enemyDamageMult: 1, eliteChanceMult: 1, deathLoss: 0.1, weatherMult: 1, allyDamageMult: 1, assisted: false },
+      hard: { enemyHpMult: 1.25, enemyDamageMult: 1.3, eliteChanceMult: 2, deathLoss: 0.2, weatherMult: 1, allyDamageMult: 1, assisted: false },
     });
     expect(DIFFICULTY_RULES.normal.deathLoss).toBe(TUNING.DEATH_RESOURCE_LOSS);
   });

@@ -197,6 +197,8 @@ export function attributeEffectText(attribute: keyof Attributes): string {
  * here rather than in either of them.
  */
 export const DIFFICULTY_LINES: Readonly<Record<Difficulty, string>> = {
+  // SPEC-059 §4.2.3: no badge marks a story save; the line says what it costs.
+  story: 'Story — hostiles and storms cannot hurt you; the fights still happen. Records are off.',
   normal: 'Normal — the pressure the game was tuned for.',
   casual: 'Casual — softer hits and storms, longer wind-ups, kinder deaths; the story is unchanged.',
   // SPEC-043 §4.4. SPEC-045 §4.6: resources carried are cargo.
@@ -870,16 +872,19 @@ export function starmapPreselect(save: Save, unlocked: (planet: PlanetId) => boo
 }
 
 /**
- * SPEC-044 §4.8: what Save & Quit costs, said before it happens — Continue
- * lands at the station (PLAN R18 decision 12), so a quit on a planet costs the
- * jump back, and a quit in flight has already spent this one. `fuel` is
- * `Economy.fuelCost` for the planet.
+ * SPEC-044 §4.8: what Save & Quit costs, said before it happens — a quit in
+ * flight has already spent this jump. `fuel` is `Economy.fuelCost` for the
+ * planet. SPEC-059 §4.1.5: a quit on a planet now resumes at its pad, with no
+ * jump and no fuel, so the surface's note says only that the timers restart.
  */
 export function quitNote(scene: 'surface' | 'flight', planetName: string, fuel: number): string {
-  if (scene === 'surface') {
-    return `You will resume at Command Relay. Flying back to ${planetName} costs ${fuel} oil, and timed objectives restart.`;
-  }
+  if (scene === 'surface') return `You will resume at the ${planetName} landing pad. Timed objectives restart.`;
   return `You will resume at Command Relay. The fuel for this jump (${fuel} oil) is already spent.`;
+}
+
+/** SPEC-059 §4.1.3: the `info` toast a resumed landing raises. */
+export function resumedText(planetName: string): string {
+  return `Resumed at the ${planetName} landing pad. Timed objectives restart.`;
 }
 
 /**

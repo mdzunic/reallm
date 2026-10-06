@@ -20,6 +20,15 @@ const FAVICON = join(REPO, 'public', 'favicon.svg');
 const DIST = join(REPO, 'dist');
 const MB = 1024 * 1024;
 
+/**
+ * SPEC-059 §4.6.3, §4.6.4: the link preview and the install sheet's
+ * screenshots, relative to `public/` (and to `dist/`). Outside the precache —
+ * `PWA_OPTIONS.workbox.globIgnores` — so they are reported on their own line,
+ * against their own budget, and left out of the precache total.
+ */
+const PROMO_FILES = ['og.png', 'screenshots/wide-1.jpg', 'screenshots/wide-2.jpg', 'screenshots/narrow-1.jpg'];
+const PROMO_BUDGET = 2 * MB;
+
 /** Byte budgets per top-level folder (SPEC-001 §10; portraits from SPEC-020 §4.6; films from PLAN R9). */
 const BUDGETS = {
   models: 4 * MB,
@@ -142,6 +151,21 @@ let faviconBytes = 0;
 if (existsSync(FAVICON)) faviconBytes = statSync(FAVICON).size;
 else failures.push('public/favicon.svg is missing — index.html and the app icons both come from it');
 
+// -------------------------------- SPEC-059 §4.6.3: the promotional images
+
+let promoBytes = 0;
+for (const name of PROMO_FILES) {
+  const file = join(REPO, 'public', name);
+  if (!existsSync(file)) {
+    failures.push(`public/${name} is missing — run \`node scripts/assets/promo/build.mjs\` (SPEC-059 §4.6.3)`);
+    continue;
+  }
+  promoBytes += statSync(file).size;
+  if (!licenses.includes(`\`${name}\``)) failures.push(`${name}: no row in LICENSES.md (expected a backticked path \`${name}\`)`);
+}
+console.log(`${'promo'.padEnd(10)} ${fmt(promoBytes).padStart(10)} of ${fmt(PROMO_BUDGET)} (outside the precache)`);
+if (promoBytes > PROMO_BUDGET) failures.push(`the promo images are ${fmt(promoBytes)}, over their ${fmt(PROMO_BUDGET)} budget (SPEC-059 §4.6.3)`);
+
 // ------------------------------------- SPEC-015 D-11: the precache total
 
 /** Everything a first visit downloads, in bytes, and where it came from. */
@@ -154,6 +178,9 @@ if (existsSync(DIST)) {
   // twice and the budget reads double.
   for (const file of walk(DIST)) {
     if (!PRECACHE_EXTENSIONS.has(ext(file))) continue;
+    // SPEC-059 §4.6.4: `og.png` matches a precachable extension, but the
+    // worker ignores it, and every screenshot, by name.
+    if (PROMO_FILES.includes(relative(DIST, file).split(sep).join('/'))) continue;
     distBytes += statSync(file).size;
     distCount++;
   }

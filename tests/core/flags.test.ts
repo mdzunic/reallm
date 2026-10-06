@@ -31,8 +31,15 @@ describe('parseFlags (AC-67)', () => {
       seed: null,
       quality: null,
       perf: null,
+      records: false,
     });
     expect(parseFlags('?')).toEqual(parseFlags(''));
+  });
+
+  it('parses ?records beside ?debug (SPEC-059 §4.3.3)', () => {
+    expect(parseFlags('?debug&records')).toMatchObject({ debug: true, records: true });
+    expect(parseFlags('?records').records).toBe(true);
+    expect(parseFlags('?debug').records).toBe(false);
   });
 
   it('parses each flag', () => {
@@ -57,6 +64,7 @@ describe('parseFlags (AC-67)', () => {
       seed: 7,
       quality: 'high',
       perf: 60,
+      records: false,
     });
   });
 
