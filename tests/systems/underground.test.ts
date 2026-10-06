@@ -4,14 +4,24 @@
 // planet the rooms, the tree and its one loop, the roles, reachability from the
 // exit, walls that never intrude on open space, a 0.5 m flood that never leaks
 // and the cut-away rule; Eden's cradle row; the descent over 400 surface seeds
-// per planet; and the surface pins a cave must not move. The pins are explicit
-// literals; a deliberate change to the generator moves them deliberately
-// (CLAUDE.md).
+// per planet; and the surface pins a cave must not move. SPEC-055 adds the
+// relic terminals' spots by the landmarks, over 400 surface seeds per planet.
+// The pins are explicit literals; a deliberate change to the generator moves
+// them deliberately (CLAUDE.md).
 import { afterEach, describe, expect, it } from 'vitest';
 import { setLogSink } from '@/core/Log';
 import { RngRoot } from '@/core/Rng';
-import { BELOW_HALF_SIZE, PLANETS, PLANET_IDS, UNDERGROUND, type PlanetId } from '@/data/index';
-import { ObstacleGrid, generateLayout, isReachable, segmentDistance, type LayoutObstacle, type LayoutShelter } from '@/systems/Layout';
+import { BELOW_HALF_SIZE, PLANETS, PLANET_IDS, PUZZLE_SITES, PUZZLE_SITE_IDS, UNDERGROUND, type PlanetId } from '@/data/index';
+import {
+  ObstacleGrid,
+  generateLayout,
+  isReachable,
+  segmentDistance,
+  type LayoutObstacle,
+  type LayoutPoi,
+  type LayoutShelter,
+} from '@/systems/Layout';
+import { relicSpot } from '@/systems/Puzzles';
 import {
   BELOW_LEASH,
   BELOW_MAX_ALIVE,
@@ -26,6 +36,7 @@ import {
   undergroundHash,
   type UndergroundLayout,
 } from '@/systems/Underground';
+import { LANDMARK_FOOTPRINT } from '@/views/SurfaceProps';
 
 /** The seed the pins below were generated from, as SPEC-012's are. */
 const PIN_SEED = 20121;
@@ -535,4 +546,36 @@ describe('the surface pins stay put (§4.3, §6.1)', () => {
       }
     }
   });
+});
+
+describe('relic terminals (SPEC-055 §4.1, §6.1)', () => {
+  /** The planets with a `<planet>_relic` site. */
+  const RELIC_PLANETS = PUZZLE_SITE_IDS.filter((id) => PUZZLE_SITES[id].where === 'relic').map((id) => PUZZLE_SITES[id].planet);
+
+  it('every planet but the Hive has a relic terminal', () => {
+    expect(RELIC_PLANETS).toEqual(PLANET_IDS.filter((planet) => planet !== 'hive'));
+  });
+
+  for (const planet of RELIC_PLANETS) {
+    it(`${planet}: over 400 seeds the terminal stands LANDMARK_FOOTPRINT + 1.5 m from landmark 0 toward the pad, clear for a 0.9 m circle and reachable`, () => {
+      const reach = LANDMARK_FOOTPRINT[PLANETS[planet].biome] + 1.5;
+      // SPEC-053's footprints put every terminal 5.0–6.0 m from its landmark.
+      expect(reach).toBeGreaterThanOrEqual(5);
+      expect(reach).toBeLessThanOrEqual(6);
+      for (let seed = 0; seed < 400; seed++) {
+        const at = `${planet} seed ${seed}`;
+        const layout = generateLayout(PLANETS[planet], new RngRoot(seed).layout(planet));
+        const spot = relicSpot(layout, LANDMARK_FOOTPRINT[PLANETS[planet].biome]);
+        expect(spot, at).not.toBeNull();
+        const s = spot as { x: number; z: number; facing: number };
+        const landmark = layout.pois.find((poi) => poi.kind === 'landmark' && poi.instance === 0) as LayoutPoi;
+        expect(gap(s, landmark), at).toBeCloseTo(reach, 9);
+        // On the landmark's line to the pad — inside its clearing and the pad's corridor — facing the pad.
+        expect(gap(s, layout.pad), at).toBeCloseTo(gap(landmark, layout.pad) - reach, 9);
+        expect(s.facing, at).toBeCloseTo(Math.atan2(layout.pad.z - s.z, layout.pad.x - s.x), 9);
+        expect(new ObstacleGrid(layout).hitsCircle(s.x, s.z, 0.9), at).toBe(false);
+        expect(isReachable(layout, s), at).toBe(true);
+      }
+    }, 30_000);
+  }
 });
