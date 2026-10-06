@@ -78,7 +78,9 @@ async function recordToasts(page: Page): Promise<void> {
     Object.assign(window, { __remainsToasts: shown });
     new MutationObserver(() => {
       for (const node of Array.from(rack.children)) {
-        const text = node.textContent ?? '';
+        // The message alone: not the kind's leading glyph, nor a repeat's `×n`.
+        let text = '';
+        for (const child of Array.from(node.childNodes)) if (child.nodeType === Node.TEXT_NODE) text += child.textContent ?? '';
         if (!shown.includes(text)) shown.push(text);
       }
     }).observe(rack, { childList: true });
@@ -93,10 +95,14 @@ async function toastShown(page: Page, text: string): Promise<void> {
   await expect.poll(async () => toastsShown(page), { timeout: 10_000 }).toContain(text);
 }
 
-/** `surface-hurt` until the death overlay is up — a hit inside the i-frames is ignored, so the count of presses is not fixed. */
+/**
+ * `surface-hurt` until the death overlay is up — a hit inside the i-frames is
+ * ignored, so the count of presses is not fixed, and the respawn's 2 s of
+ * them are game time, which a starved host stretches.
+ */
 async function die(page: Page): Promise<void> {
   const death = page.getByTestId('death-overlay');
-  for (let i = 0; i < 16 && !(await death.isVisible()); i++) {
+  for (let i = 0; i < 40 && !(await death.isVisible()); i++) {
     await page.getByTestId('surface-hurt').click();
     await page.waitForTimeout(400);
   }
@@ -173,7 +179,6 @@ test('3. lose: a second death before the walk back forfeits the pack, and the ne
   await respawned(page);
   // Far from both the spawn and the first pack, so neither is recovered.
   await page.getByTestId('surface-goto-edge').click();
-  await page.waitForTimeout(2_500); // the respawn's 2 s of i-frames, in game time at least
   await die(page);
   await toastShown(page, 'Your earlier pack is gone: 20 oil.');
   await expect(page.getByTestId('death-remains')).toHaveText('Your pack holds 18 oil — reach it before you fall again.');
