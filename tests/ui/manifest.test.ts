@@ -94,22 +94,27 @@ function headTags(): Record<string, string>[] {
   );
 }
 
-/** A PNG's IHDR width × height. */
-function pngSize(bytes: Buffer): string {
-  return `${bytes.readUInt32BE(16)}x${bytes.readUInt32BE(20)}`;
+/** Big-endian reads over the bytes `readFileSync` gives (`tests/node-fs.d.ts` types them `Uint8Array`). */
+const view = (bytes: Uint8Array): DataView => new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+
+/** A PNG's IHDR chunk name and its width × height. */
+function pngSize(bytes: Uint8Array): string {
+  const chunk = String.fromCharCode(...bytes.subarray(12, 16));
+  return chunk === 'IHDR' ? `${view(bytes).getUint32(16, false)}x${view(bytes).getUint32(20, false)}` : `not a PNG (${chunk})`;
 }
 
 /** A baseline or progressive JPEG's frame size, from its first SOF marker. */
-function jpegSize(bytes: Buffer): string | null {
+function jpegSize(bytes: Uint8Array): string | null {
+  if (bytes[0] !== 0xff || bytes[1] !== 0xd8) return null;
+  const data = view(bytes);
   let at = 2;
   while (at + 9 < bytes.length) {
     if (bytes[at] !== 0xff) return null;
     const marker = bytes[at + 1] as number;
-    const length = bytes.readUInt16BE(at + 2);
     if (marker >= 0xc0 && marker <= 0xcf && marker !== 0xc4 && marker !== 0xc8 && marker !== 0xcc) {
-      return `${bytes.readUInt16BE(at + 7)}x${bytes.readUInt16BE(at + 5)}`;
+      return `${data.getUint16(at + 7, false)}x${data.getUint16(at + 5, false)}`;
     }
-    at += 2 + length;
+    at += 2 + data.getUint16(at + 2, false);
   }
   return null;
 }
@@ -145,12 +150,10 @@ describe('link previews and the install sheet (SPEC-059 §4.6)', () => {
 
   it('ships og.png at 1200 × 630 within 1 MB, and each screenshot at 1280 × 720 within 350 KB (§4.6.3)', () => {
     const og = readFileSync(root('public/og.png'));
-    expect(og.subarray(12, 16).toString('ascii')).toBe('IHDR');
     expect(pngSize(og)).toBe('1200x630');
     expect(statSync(root('public/og.png')).size).toBeLessThanOrEqual(1024 * 1024);
     for (const shot of MANIFEST.screenshots) {
       const bytes = readFileSync(root(`public/${shot.src}`));
-      expect(bytes.subarray(0, 2).toString('hex'), shot.src).toBe('ffd8');
       expect(jpegSize(bytes), shot.src).toBe('1280x720');
       expect(bytes.length, shot.src).toBeLessThanOrEqual(350 * 1024);
     }
