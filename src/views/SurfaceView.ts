@@ -32,7 +32,7 @@ import type { ProjectileEntity } from '@/entities/Projectile';
 import type { TelegraphEntity } from '@/entities/Telegraph';
 import { DEPLOYABLE_CAPACITY, type DeployableEntity } from '@/entities/Deployable';
 import { CharacterView } from '@/views/CharacterView';
-import { CombatFx } from '@/views/CombatFx';
+import { CombatFx, type TimedCloud, type TimedGround } from '@/views/CombatFx';
 import { Flashlight, type FlashlightMode } from '@/views/Flashlight';
 import { buildEnvironment, skyParamsFor } from '@/views/Environment';
 import { FollowerView } from '@/views/FollowerView';
@@ -183,6 +183,11 @@ export interface SurfaceFrame {
    * on — not the view clock, which a held beat runs ahead of `world.time`.
    */
   telegraphs?: { pool: Pool<TelegraphEntity>; time: number };
+  /**
+   * SPEC-056 §4.4, §4.5: the flares and the spore clouds, and the world clock
+   * their `until` is stamped on. Absent, neither draws.
+   */
+  treasure?: { flares: readonly TimedGround[]; clouds: readonly TimedCloud[]; time: number };
   time: number;
   /** The rendered-frame delta; 0 while hit-stop freezes the view (SPEC-019 §4.7). */
   dt: number;
@@ -2898,6 +2903,10 @@ export class SurfaceView {
     this.#flashlight?.sync(p.x, p.z, p.facing, frame.dt);
     this.#cave?.sync(p.x, p.z, frame.time);
     this.#fx.sync(frame.time, ground);
+    if (frame.treasure !== undefined) {
+      // SPEC-056 §4.5: under reduce motion the flare's ground does not flicker.
+      this.#fx.syncTreasure(frame.treasure.flares, frame.treasure.clouds, frame.treasure.time, ground, this.reduceMotion);
+    }
     if (frame.telegraphs !== undefined) {
       this.#telegraphs.sync(frame.telegraphs.pool, frame.telegraphs.time, ground, this.reduceMotion);
     }
