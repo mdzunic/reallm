@@ -3757,3 +3757,48 @@ describe('the next instance’s lines (SPEC-058 §4.6, §4.7)', () => {
     );
   });
 });
+
+describe('shot looks (SPEC-019 §4.5)', () => {
+  type WeaponItem = Extract<Item, { kind: 'weapon' }>;
+  const weapons = (Object.values(ITEMS) as readonly Item[]).filter((item): item is WeaponItem => item.kind === 'weapon');
+  const HEX = /^#[0-9a-f]{6}$/;
+  /** The enemies' shot colour, which only the view draws. */
+  const ENEMY_GREEN = '#7fff8a';
+  const rgbDistance = (a: string, b: string): number => {
+    const ca = [1, 3, 5].map((i) => Number.parseInt(a.slice(i, i + 2), 16));
+    const cb = [1, 3, 5].map((i) => Number.parseInt(b.slice(i, i + 2), 16));
+    return Math.hypot(...ca.map((v, i) => v - (cb[i] as number)));
+  };
+
+  it('every weapon names a look in lower-case #rrggbb, with a trail only as a colour', () => {
+    expect(weapons.length).toBeGreaterThan(0);
+    for (const weapon of weapons) {
+      expect(weapon.shot.color, weapon.id).toMatch(HEX);
+      if (weapon.shot.trail !== undefined) expect(weapon.shot.trail, weapon.id).toMatch(HEX);
+    }
+  });
+
+  it('no two weapons fire the same look', () => {
+    const seen = new Map<string, string>();
+    for (const weapon of weapons) {
+      const key = `${weapon.shot.shape}|${weapon.shot.color}`;
+      expect(seen.get(key), `${weapon.id} looks like ${seen.get(key) ?? ''}`).toBeUndefined();
+      seen.set(key, weapon.id);
+    }
+  });
+
+  it('no weapon\'s shot reads as an enemy\'s green', () => {
+    for (const weapon of weapons) {
+      expect(rgbDistance(weapon.shot.color, ENEMY_GREEN), weapon.id).toBeGreaterThanOrEqual(80);
+      if (weapon.shot.trail !== undefined) expect(rgbDistance(weapon.shot.trail, ENEMY_GREEN), weapon.id).toBeGreaterThanOrEqual(80);
+    }
+  });
+
+  it('a lob draws as a ball, a blast that flies straight as a rocket, and nothing else as either', () => {
+    for (const weapon of weapons) {
+      const shape = weapon.lob === true ? 'ball' : weapon.blast !== undefined ? 'rocket' : null;
+      if (shape !== null) expect(weapon.shot.shape, weapon.id).toBe(shape);
+      else expect(['ball', 'rocket'], weapon.id).not.toContain(weapon.shot.shape);
+    }
+  });
+});

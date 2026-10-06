@@ -9,14 +9,25 @@ import { Pool } from '@/core/Pool';
 import { hash01 } from '@/core/Noise';
 import { hash32 } from '@/core/Rng';
 import { QUALITY, type QualitySettings } from '@/core/Quality';
-import { ENEMIES, PLANETS, type PlanetDef } from '@/data/index';
+import { DRONE_SHOT, ENEMIES, FLARE_SHOT, ITEMS, PLANETS, THROWN_SHOT, type PlanetDef, type ShotLook } from '@/data/index';
 import { makeEnemy, type EnemyEntity } from '@/entities/Enemy';
 import { makePlayer } from '@/entities/Player';
 import { makeProjectile, type ProjectileEntity } from '@/entities/Projectile';
 import { makeDeployable, type DeployableEntity } from '@/entities/Deployable';
 import { INSTANCES_PER_PART } from '@/views/ProceduralMeshes';
 import { groundLayer } from '@/views/ProceduralTextures';
-import { presetOf, SurfaceView, type SurfaceFrame, type ViewLayout, type ViewPickup } from '@/views/SurfaceView';
+import {
+  GHOST_COVER,
+  HEAD_COVER,
+  lobLift,
+  presetOf,
+  SHOT_DRAW,
+  shotHeadGain,
+  SurfaceView,
+  type SurfaceFrame,
+  type ViewLayout,
+  type ViewPickup,
+} from '@/views/SurfaceView';
 
 const LAYOUT: ViewLayout = {
   shelters: [],
@@ -494,7 +505,7 @@ import { makeFollower } from '@/entities/Follower';
 import { FOLLOWERS } from '@/data/index';
 import { advanceViewTime, shakeOffset, type ShakeState } from '@/views/SurfaceView';
 
-/** The projectile head mesh: the capsule-geometry instanced mesh. */
+/** The streak mesh: the capsule-geometry instanced mesh, heads and ghosts together. */
 function projectileMesh(scene: THREE.Scene): THREE.InstancedMesh[] {
   const found: THREE.InstancedMesh[] = [];
   scene.traverse((node) => {
@@ -505,16 +516,30 @@ function projectileMesh(scene: THREE.Scene): THREE.InstancedMesh[] {
   return found;
 }
 
+/** The round shots' mesh: the other instanced mesh on the streaks' material. */
+function roundShotMesh(scene: THREE.Scene): THREE.InstancedMesh {
+  const streaks = projectileMesh(scene)[0] as THREE.InstancedMesh;
+  let found: THREE.InstancedMesh | undefined;
+  scene.traverse((node) => {
+    const mesh = node as THREE.InstancedMesh;
+    if (mesh.isInstancedMesh === true && mesh !== streaks && mesh.material === streaks.material) found = mesh;
+  });
+  expect(found).toBeDefined();
+  return found as THREE.InstancedMesh;
+}
+
 describe('projectiles (SPEC-019 AC-59 … AC-63)', () => {
-  it('orients the capsule along vx/vz and pushes the owner colour × 2.5', () => {
+  it('orients the capsule along vx/vz and pushes the plain tracer\'s colour × its head gain', () => {
     const { scene, view } = setup();
     const f = frame(new Pool<EnemyEntity>(() => makeEnemy()));
     const shot = f.projectiles.alloc();
     Object.assign(shot, { x: 2, z: 3, vx: 6, vz: 8, radius: 0.12, owner: 'player' });
     view.sync(f);
-    const [heads, ghosts] = projectileMesh(scene) as [THREE.InstancedMesh, THREE.InstancedMesh];
-    expect(heads.count).toBe(1);
-    expect(ghosts.count).toBe(2); // two trailing ghosts per shot
+    // One mesh holds the streaks — the head, then its two trailing ghosts.
+    expect(projectileMesh(scene)).toHaveLength(1);
+    const heads = projectileMesh(scene)[0] as THREE.InstancedMesh;
+    const ghosts = heads;
+    expect(heads.count).toBe(3);
     const matrix = new THREE.Matrix4();
     heads.getMatrixAt(0, matrix);
     // The rotated X basis must point along the (normalised) velocity.
@@ -522,21 +547,21 @@ describe('projectiles (SPEC-019 AC-59 … AC-63)', () => {
     expect(basisX.x).toBeCloseTo(0.6, 5);
     expect(basisX.z).toBeCloseTo(0.8, 5);
     expect(basisX.y).toBeCloseTo(0, 5);
-    // Owner colour × 2.5 clears the bloom threshold; the material stays white.
+    // The look's colour × its head gain; the material stays white.
     const color = heads.instanceColor as THREE.InstancedBufferAttribute;
     const base = new THREE.Color('#ffe9a0');
-    expect(color.getX(0)).toBeCloseTo(base.r * 2.5, 4);
+    expect(color.getX(0)).toBeCloseTo(base.r * shotHeadGain({ shape: 'tracer', color: '#ffe9a0' }), 4);
     expect(((heads.material as THREE.MeshBasicMaterial).color as THREE.Color).getHex()).toBe(0xffffff);
 
     // Ghosts trail at p − v · 0.03 and p − v · 0.06, at × 1.2 and × 0.6.
-    ghosts.getMatrixAt(0, matrix);
+    ghosts.getMatrixAt(1, matrix);
     expect(matrix.elements[12]).toBeCloseTo(2 - 6 * 0.03, 5);
     expect(matrix.elements[14]).toBeCloseTo(3 - 8 * 0.03, 5);
-    ghosts.getMatrixAt(1, matrix);
+    ghosts.getMatrixAt(2, matrix);
     expect(matrix.elements[12]).toBeCloseTo(2 - 6 * 0.06, 5);
     const ghostColor = ghosts.instanceColor as THREE.InstancedBufferAttribute;
-    expect(ghostColor.getX(0)).toBeCloseTo(base.r * 1.2, 4);
-    expect(ghostColor.getX(1)).toBeCloseTo(base.r * 0.6, 4);
+    expect(ghostColor.getX(1)).toBeCloseTo(base.r * 1.2, 4);
+    expect(ghostColor.getX(2)).toBeCloseTo(base.r * 0.6, 4);
     view.dispose();
   });
 
@@ -547,15 +572,144 @@ describe('projectiles (SPEC-019 AC-59 … AC-63)', () => {
     const shot = f.projectiles.alloc();
     Object.assign(shot, { x: 4, z: -1, vx: 0, vz: 0, radius: 0.12, owner: 'player' });
     view.sync(f);
-    const [heads, ghosts] = projectileMesh(scene) as [THREE.InstancedMesh, THREE.InstancedMesh];
+    const heads = projectileMesh(scene)[0] as THREE.InstancedMesh;
     const matrix = new THREE.Matrix4();
     heads.getMatrixAt(0, matrix);
     const basisX = new THREE.Vector3().setFromMatrixColumn(matrix, 0).normalize();
     expect(basisX.z).toBeCloseTo(1, 5); // facing π/2 points +Z
-    ghosts.getMatrixAt(0, matrix);
+    heads.getMatrixAt(1, matrix);
     expect(matrix.elements[12]).toBeCloseTo(4, 5);
     expect(matrix.elements[14]).toBeCloseTo(-1, 5);
     view.dispose();
+  });
+});
+
+describe('shot looks (SPEC-019 §4.5)', () => {
+  /** One shot at (0, 0) flying +X at `speed`, drawn alone; the mesh it landed on and its instance colours. */
+  function drawOne(look: ShotLook | null, owner: ProjectileEntity['owner'] = 'player', speed = 20) {
+    const { scene, view } = setup();
+    const f = frame(new Pool<EnemyEntity>(() => makeEnemy()));
+    const shot = f.projectiles.alloc();
+    Object.assign(shot, { x: 0, z: 0, vx: speed, vz: 0, radius: 0.15, owner, shot: look });
+    view.sync(f);
+    const streaks = projectileMesh(scene)[0] as THREE.InstancedMesh;
+    const rounds = roundShotMesh(scene);
+    return { view, streaks, rounds };
+  }
+
+  function colourAt(mesh: THREE.InstancedMesh, i: number): THREE.Color {
+    const c = mesh.instanceColor as THREE.InstancedBufferAttribute;
+    return new THREE.Color(c.getX(i), c.getY(i), c.getZ(i));
+  }
+
+  function scaleAt(mesh: THREE.InstancedMesh, i: number): THREE.Vector3 {
+    const m = new THREE.Matrix4();
+    mesh.getMatrixAt(i, m);
+    const scale = new THREE.Vector3();
+    m.decompose(new THREE.Vector3(), new THREE.Quaternion(), scale);
+    return scale;
+  }
+
+  it('every weapon\'s shot draws in its own colour × its head gain, a streak on the capsules and a round shot on the ellipsoids', () => {
+    for (const item of Object.values(ITEMS)) {
+      if (item.kind !== 'weapon') continue;
+      const { view, streaks, rounds } = drawOne(item.shot);
+      const round = SHOT_DRAW[item.shot.shape].round;
+      const mesh = round ? rounds : streaks;
+      expect(mesh.count, item.id).toBe(1 + SHOT_DRAW[item.shot.shape].ghosts);
+      expect((round ? streaks : rounds).count, item.id).toBe(0);
+      expect((round ? streaks : rounds).visible, item.id).toBe(false);
+      const want = new THREE.Color(item.shot.color).multiplyScalar(shotHeadGain(item.shot));
+      const got = colourAt(mesh, 0);
+      expect(got.r, item.id).toBeCloseTo(want.r, 4);
+      expect(got.g, item.id).toBeCloseTo(want.g, 4);
+      expect(got.b, item.id).toBeCloseTo(want.b, 4);
+      view.dispose();
+    }
+  });
+
+  it('an enemy shot stays green, and a bare player shot is the plain tracer', () => {
+    const enemy = drawOne(null, 'enemy');
+    expect(colourAt(enemy.streaks, 0).g).toBeCloseTo(new THREE.Color('#7fff8a').g * shotHeadGain({ shape: 'tracer', color: '#7fff8a' }), 4);
+    expect(enemy.rounds.count).toBe(0);
+    enemy.view.dispose();
+    const plain = drawOne(null, 'player');
+    expect(colourAt(plain.streaks, 0).b).toBeCloseTo(new THREE.Color('#ffe9a0').b * shotHeadGain({ shape: 'tracer', color: '#ffe9a0' }), 4);
+    plain.view.dispose();
+  });
+
+  it('a head gain falls from × 2.5 with chroma: a pale look still blooms, a saturated one floors at × 1', () => {
+    expect(shotHeadGain({ shape: 'tracer', color: '#ffffff' })).toBe(2.5);
+    expect(shotHeadGain({ shape: 'tracer', color: '#ffe9a0' })).toBeCloseTo(2.5 - 2 * (95 / 255), 9);
+    expect(shotHeadGain({ shape: 'needle', color: '#ff0000' })).toBe(1);
+    // Every pale look (chroma ≤ 0.2) clears the surface's 1.5 bloom threshold in luminance.
+    for (const look of [ITEMS.weapon_kinetic.shot, ITEMS.launcher_rocket.shot, ITEMS.relic_seeker.shot, DRONE_SHOT]) {
+      const c = new THREE.Color(look.color).multiplyScalar(shotHeadGain(look));
+      expect(0.2126 * c.r + 0.7152 * c.g + 0.0722 * c.b, look.color).toBeGreaterThan(1.5);
+    }
+  });
+
+  it('a head covers the ground and its ghosts glow over it, fading by the shape\'s fade', () => {
+    const { view, streaks } = drawOne(ITEMS.pistol_service.shot);
+    const cover = streaks.geometry.getAttribute('shotCover') as THREE.InstancedBufferAttribute;
+    expect(cover.getX(0)).toBe(HEAD_COVER);
+    expect(cover.getX(1)).toBeCloseTo(GHOST_COVER, 6);
+    expect(cover.getX(2)).toBeCloseTo(GHOST_COVER * SHOT_DRAW.tracer.fade, 6);
+    // Premultiplied: src + dst · (1 − cover), one material for both shot meshes.
+    const material = streaks.material as THREE.MeshBasicMaterial;
+    expect(material.blending).toBe(THREE.CustomBlending);
+    expect(material.blendSrc).toBe(THREE.OneFactor);
+    expect(material.blendDst).toBe(THREE.OneMinusSrcAlphaFactor);
+    expect(material.depthWrite).toBe(false);
+    view.dispose();
+  });
+
+  it('a needle is longer and thinner than a tracer at the same speed, and a dart shorter', () => {
+    const tracer = drawOne({ shape: 'tracer', color: '#ffffff' }, 'player', 30);
+    const needle = drawOne({ shape: 'needle', color: '#ffffff' }, 'player', 30);
+    const dart = drawOne({ shape: 'dart', color: '#ffffff' }, 'player', 30);
+    const t = scaleAt(tracer.streaks, 0);
+    const n = scaleAt(needle.streaks, 0);
+    const d = scaleAt(dart.streaks, 0);
+    expect(n.x).toBeGreaterThan(t.x * 1.5);
+    expect(n.y).toBeLessThan(t.y);
+    expect(d.x).toBeLessThan(t.x);
+    for (const v of [tracer, needle, dart]) v.view.dispose();
+  });
+
+  it('a rocket trails five exhaust puffs in its trail colour that grow and fade', () => {
+    const look = ITEMS.launcher_rocket.shot;
+    const { view, rounds } = drawOne(look);
+    expect(rounds.count).toBe(6);
+    const trail = new THREE.Color(look.trail);
+    expect(colourAt(rounds, 1).g).toBeCloseTo(trail.g * 1.2, 4);
+    for (let k = 2; k <= 5; k++) {
+      expect(scaleAt(rounds, k).y).toBeGreaterThan(scaleAt(rounds, k - 1).y);
+      expect(colourAt(rounds, k).r).toBeLessThan(colourAt(rounds, k - 1).r);
+    }
+    view.dispose();
+  });
+
+  it('the drone, a thrown frag and a flare have looks of their own', () => {
+    expect(SHOT_DRAW[THROWN_SHOT.shape].round).toBe(true);
+    expect(SHOT_DRAW[FLARE_SHOT.shape].round).toBe(true);
+    expect(DRONE_SHOT.color).not.toBe(ITEMS.weapon_kinetic.shot.color);
+    const { view, rounds } = drawOne(FLARE_SHOT);
+    expect(rounds.count).toBe(1 + SHOT_DRAW.ball.ghosts);
+    view.dispose();
+  });
+
+  it('a lob\'s ghosts ride the arc behind its head (SPEC-029 §4.6)', () => {
+    const shot = makeProjectile();
+    // 14 m/s over 1 s: H = 3.5. Head at t = 0.5, ghost 0.1 s behind at t = 0.4.
+    Object.assign(shot, { vx: 14, vz: 0, lob: true, flight: 1, ttl: 0.5 });
+    expect(lobLift(shot, 14, 0)).toBeCloseTo(3.5, 6);
+    expect(lobLift(shot, 14, 0.1)).toBeCloseTo(4 * 3.5 * 0.4 * 0.6, 6);
+    // At launch a ghost does not dip below the head's start.
+    shot.ttl = 1;
+    expect(lobLift(shot, 14, 0.1)).toBe(0);
+    shot.lob = false;
+    expect(lobLift(shot, 14, 0)).toBe(0);
   });
 });
 
