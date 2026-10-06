@@ -144,6 +144,7 @@ import {
   remainsTag,
   type RemainsLook,
 } from '@/systems/Remains';
+import { RECORDS } from '@/systems/Records';
 import { watchRunStats } from '@/systems/RunStats';
 import { SpawnDirector, WAVE_CEILING_BONUS, type FrustumXZ, type SpawnRamp, type WaveHandle } from '@/systems/Spawn';
 import {
@@ -1889,7 +1890,10 @@ export class SurfaceScene extends UiScene<'surface'> {
     this.#buildTerminal();
     this.#subscribe(bus);
     this.#syncMissionStages();
-    if (new URLSearchParams(globalThis.location.search).has('debug')) this.#buildDebugStrip();
+    // SPEC-059 §4.3.4: a dev build only — every control changes the world, and
+    // Smite pays XP and loot, so a production `?debug` keeps the stats overlay
+    // and builds no strip (`tests/architecture/debugStrip.test.ts`).
+    if (import.meta.env.DEV && new URLSearchParams(globalThis.location.search).has('debug')) this.#buildDebugStrip();
 
     // SPEC-036 §4.12: the first two touch landings show where the thumbs go —
     // never in a `?perf` run — and teach it in words with the `zones` tip.
@@ -3212,8 +3216,12 @@ export class SurfaceScene extends UiScene<'surface'> {
     return WEATHER_EFFECTS[current].moveMult;
   }
 
-  /** SPEC-043 §4.5: a clean run's time, kept when it is this device's first or its fastest (43-j). */
+  /**
+   * SPEC-043 §4.5: a clean run's time, kept when it is this device's first or
+   * its fastest (43-j). SPEC-059 §4.3.2: only while the page's records are open.
+   */
   #recordBest(id: MissionId, seconds: number): void {
+    if (!RECORDS.open) return;
     const settings = this.services.settings;
     const times = settings.get().bestTimes;
     const stored = times[id];

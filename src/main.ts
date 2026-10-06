@@ -14,6 +14,7 @@ import { log } from '@/core/Log';
 import { RngRoot } from '@/core/Rng';
 import { SaveStore } from '@/core/Save';
 import { createSettings, reduceMotionPreset } from '@/core/Settings';
+import { debugClosesRecords, RECORDS } from '@/systems/Records';
 import { SERVICE_OFF_TEXT, SERVICE_ON_TEXT } from '@/systems/Service';
 import { hasOfflineWorker, offerUpdate, offlineStatus, registeredStatus, setOfflineStatus } from '@/core/Updates';
 import type { SceneId } from '@/core/StateMachine';
@@ -157,6 +158,23 @@ if (typeof globalThis.matchMedia === 'function') {
  * §4.7 records what the browser answered.
  */
 const save = new SaveStore(events, undefined, { settings });
+
+/**
+ * SPEC-059 §4.3.1: the page's records gate reads the flags, the service
+ * override and the bound save's difficulty, and looks again whenever any of
+ * them may have moved — a difficulty press writes the save with `manual`, so
+ * a story period is seen even when nothing is recorded during it.
+ */
+RECORDS.watch(() => ({
+  debug: debugClosesRecords(flags, import.meta.env.DEV),
+  serviceMode: settings.serviceMode,
+  difficulty: save.current?.meta.difficulty ?? null,
+}));
+const recordsOwner = {};
+events.on('settings:changed', () => RECORDS.refresh(), recordsOwner);
+events.on('save:written', () => RECORDS.refresh(), recordsOwner);
+events.on('save:failed', () => RECORDS.refresh(), recordsOwner);
+events.on('scene:entered', () => RECORDS.refresh(), recordsOwner);
 
 /**
  * SPEC-006's audio layer. Built here for the same reason as the two above — it
