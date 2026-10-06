@@ -6678,13 +6678,15 @@ html.plain-text #ui :is(.screen-body, .settings, .sheet, .comms-log, .dialogue, 
 
 .puzzle-tokens {
   display: flex;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   gap: 6px;
 }
 
+/* One row: five terms and the blank fit the board's width. */
 .puzzle-token {
   display: grid;
   place-items: center;
+  box-sizing: border-box;
   min-width: 44px;
   min-height: 44px;
   padding: 0 8px;
