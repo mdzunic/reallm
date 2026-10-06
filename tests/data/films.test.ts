@@ -78,10 +78,20 @@ function folderBytes(dir: string): number {
   return bytes;
 }
 
+/** The film and posters of SPEC-063's drop. */
+function wreckersBytes(): number {
+  const posters = join(FILMS_DIR, 'posters');
+  const files = [join(FILMS_DIR, 'wreckers.mp4'),
+    ...readdirSync(posters, { withFileTypes: true })
+      .filter((entry) => entry.name.startsWith('wreckers_'))
+      .map((entry) => join(posters, entry.name))];
+  return files.reduce((sum, file) => sum + statSync(file).size, 0);
+}
+
 describe('story films (SPEC-021 §8)', () => {
-  it('1. names the nine films, each under its own id', () => {
+  it('1. names the ten films, each under its own id (SPEC-063 adds `wreckers`)', () => {
     expect(Object.keys(FILMS)).toEqual([
-      'prologue', 'departure', 'interlude_c1', 'interlude_c2', 'interlude_c3', 'interlude_c4', 'interlude_c5',
+      'prologue', 'departure', 'wreckers', 'interlude_c1', 'interlude_c2', 'interlude_c3', 'interlude_c4', 'interlude_c5',
       'ending_stay', 'ending_escape',
     ]);
     for (const [key, film] of Object.entries(FILMS)) expect(film.id, key).toBe(key);
@@ -107,7 +117,7 @@ describe('story films (SPEC-021 §8)', () => {
   it('3. pins every film length', () => {
     const lengths = Object.fromEntries(films.map((film) => [film.id, duration(film)]));
     expect(lengths).toEqual({
-      prologue: 93, departure: 7, interlude_c1: 14, interlude_c2: 14, interlude_c3: 14, interlude_c4: 16, interlude_c5: 16,
+      prologue: 93, departure: 7, wreckers: 12, interlude_c1: 14, interlude_c2: 14, interlude_c3: 14, interlude_c4: 16, interlude_c5: 16,
       ending_stay: 36, ending_escape: 36,
     });
   });
@@ -206,10 +216,18 @@ describe('story films (SPEC-021 §8)', () => {
   });
 
   it('11 (SPEC-051 §4.9). keeps films/ inside the retake wave’s 0.70 MB', () => {
-    // 8 886 982 bytes before the drop, plus its 734 003-byte allotment
-    const bytes = folderBytes(FILMS_DIR);
+    // 8 886 982 bytes before the drop, plus its 734 003-byte allotment; SPEC-063's
+    // film is counted against its own allotment (12)
+    const bytes = folderBytes(FILMS_DIR) - wreckersBytes();
     expect(bytes).toBeGreaterThan(0);
     expect(bytes).toBeLessThanOrEqual(9_620_985);
+  });
+
+  it('12 (SPEC-063 §4.2). keeps "Wreckers" inside its 0.6 MB, and films/ with it', () => {
+    // 9 148 892 bytes before the drop, plus its 600 000-byte allotment
+    expect(wreckersBytes()).toBeGreaterThan(0);
+    expect(wreckersBytes()).toBeLessThanOrEqual(600_000);
+    expect(folderBytes(FILMS_DIR)).toBeLessThanOrEqual(9_748_892);
   });
 
   it('12 (SPEC-051 §4.7). queues Iris’s first letter word for word, and fills both new log captions', () => {

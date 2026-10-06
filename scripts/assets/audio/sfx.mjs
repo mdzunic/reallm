@@ -1089,6 +1089,25 @@ const SOUNDS = {
       });
     },
   },
+  film_grind: {
+    // SPEC-063 §4.2: an angle grinder on plate steel. The motor's whine drops as
+    // the disc bites, under a resonant 3.2 kHz hiss of sparks.
+    peak: -6,
+    render: (n) => {
+      const nz = noise(416);
+      const bp = svf('bp');
+      const hp = svf('hp');
+      const lp = svf();
+      const motor = osc('saw');
+      const len = n / SR;
+      return fill(n, (t) => {
+        const bite = clamp((t - 0.3) / 0.15, 0, 1);
+        const whine = lp(motor(190 - 28 * bite + 4 * Math.sin(TAU * 5 * t)), 1400, 1.2) * 0.35;
+        const hiss = bp(nz(), 3200, 6) * (0.25 + 0.75 * bite) * 1.4 + hp(nz(), 6000) * 0.15 * bite;
+        return (whine + hiss) * adsr(t, len - 0.25, 0.05, 0.1, 0.9, 0.25);
+      });
+    },
+  },
 };
 
 /**

@@ -38,7 +38,7 @@ FILM_CRFS = {'ending_escape': (28, 29)}
 POSTER_QUALITY = 75
 # SPEC-051 §4.9 (PLAN R12): the flashes each film counted before the SPEC-051 drop;
 # a rebuild that counts more fails, so a retake never adds one
-FLASHES = {'prologue': 2, 'departure': 1, 'interlude_c1': 0, 'interlude_c2': 0, 'interlude_c3': 0, 'interlude_c4': 0,
+FLASHES = {'prologue': 2, 'departure': 1, 'wreckers': 0, 'interlude_c1': 0, 'interlude_c2': 0, 'interlude_c3': 0, 'interlude_c4': 0,
            'interlude_c5': 0, 'ending_stay': 0, 'ending_escape': 1}
 BLACK = 0.002              # SPEC-051 §4.5: a frame this dark (mean relative luminance) reads as black
 BLACK_RUN = 6              # … and no more frames than this in a row

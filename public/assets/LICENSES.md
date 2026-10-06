@@ -107,7 +107,11 @@ generated from the committed scripts or synthesised.
 | `films/posters/prologue_selection.webp` | Original to this repository — story film poster, a frame of a plate shot (PLAN R11, R12); generated in Blender by `scripts/assets/blender/films.py` | CC0 | — |
 | `films/posters/prologue_shelter.webp` | Original to this repository — story film poster, a frame of a plate shot (PLAN R11, R12); generated in Blender by `scripts/assets/blender/films.py` | CC0 | — |
 | `films/posters/prologue_stranded.webp` | Original to this repository — story film poster, a frame of a plate shot (PLAN R11, R12); generated in Blender by `scripts/assets/blender/films.py` | CC0 | — |
+| `films/posters/wreckers_cutting.webp` | Original to this repository — story film poster, a frame of its shot (PLAN R9); generated in Blender by `scripts/assets/blender/films.py` | CC0 | — |
+| `films/posters/wreckers_hulk.webp` | Original to this repository — story film poster, a frame of its shot (PLAN R9); generated in Blender by `scripts/assets/blender/films.py` | CC0 | — |
+| `films/posters/wreckers_sortie.webp` | Original to this repository — story film poster, a frame of its shot (PLAN R9); generated in Blender by `scripts/assets/blender/films.py` | CC0 | — |
 | `films/prologue.mp4` | Original to this repository — story film rendered in EEVEE from code over the photographic plates listed under Plates above (PLAN R9, R11, R12); generated in Blender by `scripts/assets/blender/films.py` | CC0 | — |
+| `films/wreckers.mp4` | Original to this repository — story film rendered in EEVEE from code (PLAN R9); generated in Blender by `scripts/assets/blender/films.py` | CC0 | — |
 | `items/aria.webp` | Original to this repository — item picture built from primitives, rendered in EEVEE on transparent (SPEC-031); generated in Blender by `scripts/assets/blender/items.py` | CC0 | — |
 | `items/armor_ablative.webp` | Original to this repository — item picture built from primitives, rendered in EEVEE on transparent (SPEC-031); generated in Blender by `scripts/assets/blender/items.py` | CC0 | — |
 | `items/armor_composite.webp` | Original to this repository — item picture built from primitives, rendered in EEVEE on transparent (SPEC-031); generated in Blender by `scripts/assets/blender/items.py` | CC0 | — |
