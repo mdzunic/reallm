@@ -44,6 +44,8 @@ export const CONTROL_ROWS: Readonly<Record<'keyboard' | 'touch', readonly Contro
     { what: 'Track mission', how: 'T', actions: ['track'] },
     // SPEC-054 §4.5: the flashlight below, beside the interact key.
     { what: 'Flashlight (below)', how: 'L', actions: ['light'] },
+    // SPEC-055 §4.9: a puzzle panel's own keys — read by the panel, bound to no action.
+    { what: 'Puzzle', how: 'Arrows · Enter turns · H hint · Esc closes' },
     { what: 'Pause', how: 'Esc or P', actions: ['pause'] },
     // SPEC-036 §4.4: one back-stack — the top layer closes first.
     { what: 'Back / close', how: 'Esc' },
@@ -70,6 +72,8 @@ export const CONTROL_ROWS: Readonly<Record<'keyboard' | 'touch', readonly Contro
     { what: 'Track mission', how: 'Tap the tracker' },
     // SPEC-054 §4.5: LIGHT joins USE in the thumb arc, below only.
     { what: 'Flashlight', how: 'LIGHT (below)' },
+    // SPEC-055 §4.9: a tap turns a tile or picks a choice; HINT asks ARIA.
+    { what: 'Puzzle', how: 'tap a tile · HINT' },
     { what: 'Pause', how: 'Pause button, or the Back gesture' },
   ],
 };

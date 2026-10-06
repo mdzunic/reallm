@@ -49,6 +49,14 @@ describe('CONTROL_ROWS (SPEC-044 §4.5)', () => {
     });
   });
 
+  it('gains the Puzzle row of SPEC-055 §4.9 on both schemes, bound to no action', () => {
+    expect(CONTROL_ROWS.keyboard.find((row) => row.what === 'Puzzle')).toEqual({
+      what: 'Puzzle',
+      how: 'Arrows · Enter turns · H hint · Esc closes',
+    });
+    expect(CONTROL_ROWS.touch.find((row) => row.what === 'Puzzle')).toEqual({ what: 'Puzzle', how: 'tap a tile · HINT' });
+  });
+
   it('the rule fails on a binding with no row, so it cannot pass vacuously', () => {
     const bound = new Set(Object.values(KEY_BINDINGS));
     expect(bound.size).toBeGreaterThan(15);
