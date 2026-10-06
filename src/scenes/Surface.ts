@@ -72,6 +72,7 @@ import {
   type PoiId,
   type QuickSlot,
   type ResourceId,
+  type ShotLook,
   type TipId,
   type UndergroundDef,
   type WaveId,
@@ -541,6 +542,18 @@ function remembered(memory: HitMemory, time: number): EnemyEntity | null {
 /** `'#rrggbb'` → the number `CombatFx.burst` takes; no allocation. */
 function hexColor(color: string): number {
   return Number.parseInt(color.slice(1), 16);
+}
+
+/** SPEC-019 §4.5: the muzzle flash in the last shot's colour, cached per look. */
+const muzzleColors = new Map<ShotLook, number>();
+function muzzleColor(look: ShotLook | null): number {
+  if (look === null) return MUZZLE_COLOR;
+  let color = muzzleColors.get(look);
+  if (color === undefined) {
+    color = hexColor(look.color);
+    muzzleColors.set(look, color);
+  }
+  return color;
 }
 
 /** SPEC-027: the rows of a scene with nothing tracked — shared, never written. */
@@ -2343,7 +2356,8 @@ export class SurfaceScene extends UiScene<'surface'> {
         'muzzle',
         p.x + Math.cos(p.facing) * MUZZLE_OFFSET,
         p.z + Math.sin(p.facing) * MUZZLE_OFFSET,
-        MUZZLE_COLOR,
+        // SPEC-019 §4.5: the flash takes the colour of the shot it fired.
+        muzzleColor(this.#combat?.lastShotLook ?? null),
       );
     }
     this.#lastFireCooldown = p.fireCooldown;

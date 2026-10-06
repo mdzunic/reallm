@@ -27,7 +27,9 @@ import {
   CLASSES,
   COMPANIONS,
   DIFFICULTY_RULES,
+  DRONE_SHOT,
   ENEMIES,
+  FLARE_SHOT,
   ITEMS,
   LOOT_TABLES,
   MENDER_HEAL_FRACTION,
@@ -36,6 +38,7 @@ import {
   SIGNATURE_FALLBACK_LITHIUM,
   SWIFT_SPEED_MULT,
   SWIFT_WINDUP_SCALE,
+  THROWN_SHOT,
   TUNING,
   VOLATILE_DAMAGE_MULT,
   VOLATILE_FUSE,
@@ -60,6 +63,7 @@ import {
   type LightEffect,
   type LootTableId,
   type ResourceId,
+  type ShotLook,
   type WeaponLine,
   type WeaponSlot,
   type WeaponTwist,
@@ -506,6 +510,7 @@ export class Combat {
   #nextEnemyId = 1;
   #aimedThisStep = false;
   #lastShotAt = -Infinity;
+  #lastShotLook: ShotLook | null = null;
   /** SPEC-039 §4.5: world time of the last weather damage past the immunity check. */
   #weatherHitAt = -Infinity;
   #signatureDrops = 0;
@@ -586,6 +591,11 @@ export class Combat {
   /** SPEC-029 §3: world time of the last player shot (SPEC-030 reads it). */
   get lastShotAt(): number {
     return this.#lastShotAt;
+  }
+
+  /** SPEC-019 §4.5: the look of the last player shot, so the muzzle flash matches it. */
+  get lastShotLook(): ShotLook | null {
+    return this.#lastShotLook;
   }
 
   readonly #aiHooks: AiHooks;
@@ -957,6 +967,8 @@ export class Combat {
     p.seekTurn = 0;
     p.twist = null;
     p.flareSeconds = 0;
+    // SPEC-019 §4.5: the view colours an enemy shot by its shooter.
+    p.shot = null;
   }
 
   /** §4.5: phase summons appear in a ring at 6 m around the boss. Never elite. */
@@ -1497,6 +1509,7 @@ export class Combat {
     p.seekTurn = 0;
     p.twist = null;
     p.flareSeconds = 0;
+    p.shot = THROWN_SHOT;
   }
 
   /**
@@ -1543,6 +1556,7 @@ export class Combat {
     p.seekTurn = 0;
     p.twist = null;
     p.flareSeconds = effect.seconds;
+    p.shot = FLARE_SHOT;
     return true;
   }
 
@@ -1858,6 +1872,7 @@ export class Combat {
       shot.ttl = shot.flight;
     }
     this.#lastShotAt = this.#world.time;
+    this.#lastShotLook = weapon.shot;
     // SPEC-035 §4.11: one event per shot, at the muzzle, with the weapon's line.
     this.#events.emit('weapon:fired', { line: FIRED_LINE[weapon.line], x: shot.x, z: shot.z });
     this.loadout.fired(slot, this.#world.time);
@@ -1911,6 +1926,7 @@ export class Combat {
       shot.ttl = shot.flight;
     }
     this.#lastShotAt = time;
+    this.#lastShotLook = weapon.shot;
     this.#events.emit('weapon:fired', { line: FIRED_LINE[weapon.line], x: shot.x, z: shot.z });
     this.loadout.fired(slot, time);
     p.fireCooldown = 1 / weapon.fireRate;
@@ -1998,6 +2014,8 @@ export class Combat {
     p.seekTarget = twist?.kind === 'seek' ? this.#seekQuarry(dirX, dirZ, weapon.range, twist.cone) : -1;
     p.seekTurn = twist?.kind === 'seek' ? twist.turnRate : 0;
     p.flareSeconds = 0;
+    // SPEC-019 §4.5: the drone fires its own look, not the primary's.
+    p.shot = owner === 'player' ? weapon.shot : DRONE_SHOT;
     return p;
   }
 

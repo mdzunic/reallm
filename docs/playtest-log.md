@@ -2430,3 +2430,31 @@ on screen) and `e2e/SPEC-006.spec.ts`'s reactions case (32 reacted, 49 silent).
 - [ ] die to a boss and see the pack recovered at the arena entrance;
 - [ ] after Ferrum's `c4_m3`, die again and see your own body in your colours;
 - [ ] on a phone, read the tag and the tracker row at arm's length.
+
+## SPEC-019 §4.5 amendment — every weapon fires its own shot
+
+Every weapon used to fire the same pale capsule. Each weapon now carries a
+`shot` look in `src/data/items.ts`: a shape (tracer, dart, needle, slug, bolt,
+rocket or ball) and a colour, sometimes with a trail colour. The drone, a
+thrown frag and a flare have looks of their own. Shots draw in two instanced
+meshes, capsules and ellipsoids, and a head covers the ground instead of adding
+light to it.
+
+Recorded 2026-10-06 on the development Mac, in Chromium (the Claude desktop
+browser pane, `high`, dpr 2): `npm run check`, with 125 files and 3,153 tests;
+`e2e/surface-env.spec.ts` (ten tests) and `e2e/SPEC-029.spec.ts` (six tests),
+all green.
+
+| Area | What the pane showed |
+|---|---|
+| Before | With additive capsules on Cinder-4's sand, the Plasma Lance's bolt came out white, like every other shot |
+| Method | A dev-console wrapper over `SurfaceView.prototype.sync` drew one standing shot per look beside the salvager, so all 19 could be compared in one frame. Nothing in `src/` changed for it |
+| Cinder-4 | Pistol: a pale tracer. Repeater: cream slugs. Laser: a red needle. Plasma: blue globs. Lithium: a violet needle. Hand Cannon: gold slugs. Chaingun: red-orange darts. Rotary: lemon darts. Rocket: a white head with an orange exhaust. Grenade: red balls. Last Word: pink slugs. Seed Drum: lime balls. Slag Vent: molten bolts. Seeker: a white head with a magenta plume. Drone: a cool white tracer. Enemy: the green tracer |
+| Hive | The same nineteen read apart on the dark ground, and the pale ones bloom |
+| Firing | With the trigger held, the Laser Carbine's red needles and the Plasma Lance's blue globs flew with their trails. The muzzle flash takes the colour of the shot that fired |
+| Budget | `surface-env` stayed ≤ 96 draws and ≤ 130 k triangles on all six planets and in the spawn-heavy frame. Shots stay within 2 draws, as before |
+
+**Owed on hardware.** On the reference phone (`medium`):
+
+- [ ] fire each weapon you own on Cinder-4, and read its shot at arm's length;
+- [ ] watch a Grenade Launcher lob and a Seeker Tube turn in flight.

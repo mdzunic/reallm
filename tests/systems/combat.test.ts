@@ -8,13 +8,16 @@ import {
   AFFIX_IDS,
   AFFIXES,
   BULWARK_DAMAGE_MULT,
+  DRONE_SHOT,
   ENEMIES,
+  FLARE_SHOT,
   ITEMS,
   MENDER_HEAL_FRACTION,
   MENDER_PULSE_SECONDS,
   SIGNATURE_FALLBACK_LITHIUM,
   SWIFT_SPEED_MULT,
   SWIFT_WINDUP_SCALE,
+  THROWN_SHOT,
   TUNING,
   VOLATILE_DAMAGE_MULT,
   VOLLEY_SPEED_MULT,
@@ -2967,5 +2970,59 @@ describe('containment (SPEC-058 §4.4)', () => {
     expect(enemyHitDamage(wurmling, flatStats(), 'normal', 1.15)).toBe(Math.round(9 * 1.15));
     expect(enemyHitDamage(wurmling, flatStats(), 'casual', 1.15)).toBe(Math.round(9 * 0.7 * 1.15));
     expect(enemyHitDamage(wurmling, flatStats(), 'normal')).toBe(9);
+  });
+});
+
+// ------------------------------------------------------------- shot looks
+
+describe('shot looks (SPEC-019 §4.5)', () => {
+  it('a held trigger stamps the weapon\'s look on its shot and on lastShotLook', () => {
+    const h = harness({ patch: (s) => void (s.equipped.primary = 'weapon_laser') });
+    expect(h.combat.lastShotLook).toBeNull();
+    h.input.buttons.fire.down = true;
+    h.aim = { x: 10, z: 0 };
+    h.step();
+    expect(h.world.projectiles.size).toBe(1);
+    expect(h.world.projectiles.at(0).shot).toBe(ITEMS.weapon_laser.shot);
+    expect(h.combat.lastShotLook).toBe(ITEMS.weapon_laser.shot);
+  });
+
+  it('a launcher tap stamps the launcher\'s look, not the weapon in hand', () => {
+    const h = harness({ patch: (s) => void (s.equipped.heavy = 'launcher_rocket') });
+    expect(h.combat.fireSlotOnce('heavy')).toBe('fired');
+    expect(h.world.projectiles.at(0).shot).toBe(ITEMS.launcher_rocket.shot);
+    expect(h.combat.lastShotLook).toBe(ITEMS.launcher_rocket.shot);
+  });
+
+  it('the drone fires its own look, and a frag and a flare theirs', () => {
+    const h = harness({ patch: (s) => s.companions.push({ id: 'combat_drone', level: 1, enabled: true }) });
+    const egg = h.spawn('hive_egg', 6, 0);
+    egg.aggro = true;
+    h.step();
+    expect(h.world.projectiles.at(0).owner).toBe('drone');
+    expect(h.world.projectiles.at(0).shot).toBe(DRONE_SHOT);
+    expect(h.combat.lastShotLook).toBeNull(); // the drone is not the player's muzzle
+
+    const t = harness();
+    t.combat.throwExplosive(FRAG, 6, 0);
+    expect(t.world.projectiles.at(0).shot).toBe(THROWN_SHOT);
+    expect(t.combat.throwFlare(ITEMS.flare.effect, 6, 0)).toBe(true);
+    expect(t.world.projectiles.at(1).shot).toBe(FLARE_SHOT);
+  });
+
+  it('an enemy shot reusing a player shot\'s pooled slot carries no look', () => {
+    const h = harness();
+    h.input.buttons.fire.down = true;
+    h.aim = { x: -10, z: 0 };
+    h.step();
+    h.input.buttons.fire.down = false;
+    expect(h.world.projectiles.at(0).shot).not.toBeNull();
+    h.run(1.5); // the repeater's shot runs out of range and returns to the pool
+    expect(h.world.projectiles.size).toBe(0);
+    h.spawn('scav_raider', 10, 0);
+    for (let i = 0; i < 300 && h.world.projectiles.size === 0; i++) h.step();
+    const p = h.world.projectiles.at(0);
+    expect(p.owner).toBe('enemy');
+    expect(p.shot).toBeNull();
   });
 });
