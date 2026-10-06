@@ -743,7 +743,11 @@ describe('content invariants (SPEC-009 §7)', () => {
     const problems: string[] = [];
     const seen = new Set<string>();
     for (const item of items) {
-      if (item.kind === 'weapon' || item.kind === 'armor') {
+      // SPEC-056 §4.3: a relic sits beside its line's ladder, never on it — the
+      // uniqueness, the pinned set and the tier-3 price skip it (invariant 24
+      // holds its own rules).
+      const relic = item.kind === 'weapon' && item.relic === true;
+      if ((item.kind === 'weapon' || item.kind === 'armor') && !relic) {
         // SPEC-025 §4.7: uniqueness is per *line* — a handgun and a rifle may
         // both be tier 0, which is exactly what the starter sidearm needs.
         const key = `${item.line}:${item.tier}`;
@@ -1015,6 +1019,8 @@ describe('content invariants (SPEC-009 §7)', () => {
       }
     }
     expect(new Set(Object.keys(QUICK_SLOT_OF_EFFECT))).toEqual(effectKinds);
+    // SPEC-056 §4.5: the flare's `light` and the stim's `stamina` join the set.
+    expect([...effectKinds].sort()).toEqual(['damage_boost', 'explosive', 'hazard_immunity', 'heal', 'light', 'stamina']);
 
     for (const slot of QUICK_SLOTS) {
       for (const id of QUICK_PREFERENCE[slot]) {
@@ -1934,8 +1940,9 @@ function namingLines(lines: readonly Line[], clues: readonly ClueDef[]): number 
 describe('the clue catalogue (SPEC-048 §4.2, §4.3)', () => {
   // SPEC-049 §4.6 adds five clues at their positions (15 → 20): the restart,
   // the awake aside, the memory answer, the keepsake and the repeated letter.
-  it('is the fifteen clues of §4.2 and SPEC-049’s five, in order, with their chapters, paths, missions and triggers', () => {
-    expect(CLUES.length).toBe(20);
+  // SPEC-056 §4.7 appends the six archive shards, in planet order (20 → 26).
+  it('is the fifteen clues of §4.2, SPEC-049’s five and SPEC-056’s six shards, in order, with their chapters, paths, missions and triggers', () => {
+    expect(CLUES.length).toBe(26);
     expect(CLUE_DWELL_SECONDS).toBe(4);
     expect(CLUES.map((def) => [def.id, def.chapter, def.path, def.mission ?? '—', def.trigger.kind, def.lines.join(' ')])).toEqual([
       ['clue_raider_echo', 1, 'main', '—', 'kill', 'c1_m2_raider'],
@@ -1958,6 +1965,12 @@ describe('the clue catalogue (SPEC-048 §4.2, §4.3)', () => {
       ['clue_eden', 6, 'main', '—', 'line', 'c6_m1_forest'],
       ['clue_grove', 6, 'optional', '—', 'reach', 'eden_grove'],
       ['clue_never_hers', 6, 'main', '—', 'wave', 'c6_m2_wave'],
+      ['shard_cinder4', 1, 'optional', '—', 'cache', 'shard_cinder4'],
+      ['shard_vetra', 2, 'optional', '—', 'cache', 'shard_vetra'],
+      ['shard_thessaly', 3, 'optional', '—', 'cache', 'shard_thessaly'],
+      ['shard_ferrum', 4, 'optional', '—', 'cache', 'shard_ferrum'],
+      ['shard_hive', 5, 'optional', '—', 'cache', 'shard_hive'],
+      ['shard_eden', 6, 'optional', '—', 'cache', 'shard_eden'],
     ]);
     expect(CLUES.map((def) => def.trigger)).toEqual([
       { kind: 'kill', enemy: 'scav_raider', during: 'c1_m2' },
@@ -1980,7 +1993,15 @@ describe('the clue catalogue (SPEC-048 §4.2, §4.3)', () => {
       { kind: 'line' },
       { kind: 'reach', planet: 'eden', poi: 'grove' },
       { kind: 'wave', wave: 'eden_final' },
+      { kind: 'cache', cache: 'cinder4_vault' },
+      { kind: 'cache', cache: 'vetra_vault' },
+      { kind: 'cache', cache: 'thessaly_vault' },
+      { kind: 'cache', cache: 'ferrum_vault' },
+      { kind: 'cache', cache: 'hive_vault' },
+      { kind: 'cache', cache: 'eden_vault' },
     ]);
+    // SPEC-056 §4.7: no shard names a mission or an `also`.
+    for (const def of CLUES.slice(20)) expect([def.mission, def.also], def.id).toEqual([undefined, undefined]);
   });
 
   it('marks every optional clue off-task and no main one, and only side missions carry a board tag', () => {
@@ -1988,8 +2009,9 @@ describe('the clue catalogue (SPEC-048 §4.2, §4.3)', () => {
       expect(def.offTask, def.id).toBe(def.path === 'optional');
       if (def.mission !== undefined) expect(MISSIONS[def.mission].type, def.id).toBe('side');
     }
-    // SPEC-049 §4.6: `clue_keepsake` is its only off-task clue.
-    expect(CLUES.filter((def) => def.offTask)).toHaveLength(9);
+    // SPEC-049 §4.6: `clue_keepsake` is its only off-task clue; SPEC-056
+    // §4.7: all six shards are off-task (9 → 15).
+    expect(CLUES.filter((def) => def.offTask)).toHaveLength(15);
   });
 
   it('keeps the records §4.2 and SPEC-049 §4.6 write', () => {
@@ -2014,6 +2036,13 @@ describe('the clue catalogue (SPEC-048 §4.2, §4.3)', () => {
       ['Four degrees', 'Eden: four degrees at every spring, and the same eleven trees in the same order.'],
       ['Same tree', 'The same tree, again and again, knot for knot.'],
       ['Never hers', 'The Hive came for the beacon after the Queen was dead.'],
+      // SPEC-056 §4.7.
+      ['Too fast for hands', 'A log in the Cinder-4 vault: instance/58 opened the lock in 0.3 seconds, then learned to slow down.'],
+      ['The cold does not reach', 'A log in the Vetra vault: instance/47 could not feel the cold, and the suit was fine.'],
+      ['Eleven arches', 'A log in the Thessaly vault: instance/41 counted the same eleven arches going in and coming out.'],
+      ['The meter you call breath', 'A log in the Ferrum vault: instance/29 says fatigue is a number here too.'],
+      ['Further than here', 'A log in the Hive vault: instance/12 never got past the Queen, and asks the next one to.'],
+      ['Checkpoint written', 'The machine room under Eden logged a checkpoint of instance/{instance}. Loss: acceptable.'],
     ]);
   });
 
@@ -2084,7 +2113,7 @@ describe('the clue catalogue (SPEC-048 §4.2, §4.3)', () => {
     }
   });
 
-  it('STORY_FLAGS gains the eleven clue flags after interlude5_seen (17 → 28), SPEC-049’s twelve after them (→ 40), and the validator keeps them', () => {
+  it('STORY_FLAGS gains the eleven clue flags after interlude5_seen (17 → 28), SPEC-049’s twelve after them (→ 40), SPEC-056’s six shards (→ 46), and the validator keeps them', () => {
     const added = [
       'clue_raider_echo',
       'clue_scav_echo',
@@ -2112,8 +2141,15 @@ describe('the clue catalogue (SPEC-048 §4.2, §4.3)', () => {
       'memory_roof',
       'memory_tap',
       'memory_stair',
+      // SPEC-056 §4.7: the archive shards, after SPEC-055's list.
+      'shard_cinder4',
+      'shard_vetra',
+      'shard_thessaly',
+      'shard_ferrum',
+      'shard_hive',
+      'shard_eden',
     ];
-    expect(STORY_FLAGS).toHaveLength(40);
+    expect(STORY_FLAGS).toHaveLength(46);
     expect(STORY_FLAGS.slice(STORY_FLAGS.indexOf('interlude5_seen') + 1)).toEqual([...added, ...home]);
     const save = newSave(
       0,
@@ -2797,7 +2833,7 @@ describe('the caves and their caches (SPEC-054 §4.8)', () => {
 
 // ------------------------------------------------------------- SPEC-055 §4.1, §4.3, §4.8
 
-import { HUMAN_LOCK, PUZZLE_DIFFICULTY, PUZZLE_SITES, PUZZLE_SITE_IDS, SEQUENCE_PHRASES, type CacheId } from '@/data/index';
+import { HUMAN_LOCK, PUZZLE_DIFFICULTY, PUZZLE_SITES, PUZZLE_SITE_IDS, SEQUENCE_PHRASES, type CacheDef, type CacheId, type CacheReward } from '@/data/index';
 
 /** §4.3: a line's words, lower-cased, with punctuation dropped — how a phrase is looked for. */
 function wordsOf(text: string): string {
@@ -2910,11 +2946,14 @@ describe('puzzles: the sites, the rows and the caches they open (SPEC-055 §4.1,
 
   it('the guarded caches pay §4.8’s table — loose_b oil and explosives, vault lithium and kit with a flawless medkit, relic lithium and a cell', () => {
     const explosive = (chapter: number): string => (chapter <= 2 ? 'frag_grenade' : chapter <= 4 ? 'landmine' : 'demo_charge');
+    // SPEC-056 §4.1 adds its treasure to these rows; invariant 24 pins it, so
+    // this reads the base pay alone — the resources and the items.
+    const base = (reward: CacheReward): CacheReward => ({ resources: reward.resources, items: reward.items });
     for (const planet of PLANET_IDS) {
       const c = planetsById[planet].chapter;
-      expect(CACHES[`${planet}_loose_b`].reward, planet).toEqual({ resources: { oil: 10 + 5 * c }, items: [{ itemId: explosive(c), qty: 2 }] });
+      expect(base(CACHES[`${planet}_loose_b`].reward), planet).toEqual({ resources: { oil: 10 + 5 * c }, items: [{ itemId: explosive(c), qty: 2 }] });
       expect(CACHES[`${planet}_loose_b`].flawless, planet).toBeUndefined();
-      expect(CACHES[`${planet}_vault`].reward, planet).toEqual({
+      expect(base(CACHES[`${planet}_vault`].reward), planet).toEqual({
         resources: { lithium: 5 + 3 * c },
         items: [
           { itemId: 'plasma_cell', qty: 1 },
@@ -2924,18 +2963,21 @@ describe('puzzles: the sites, the rows and the caches they open (SPEC-055 §4.1,
       expect(CACHES[`${planet}_vault`].flawless, planet).toEqual({ items: [{ itemId: 'medkit', qty: 1 }] });
       if (planet === 'hive') continue;
       const relic = `${planet}_relic` as CacheId;
-      expect(CACHES[relic].reward, planet).toEqual({ resources: { lithium: 5 }, items: [{ itemId: 'plasma_cell', qty: 1 }] });
+      expect(base(CACHES[relic].reward), planet).toEqual({ resources: { lithium: 5 }, items: [{ itemId: 'plasma_cell', qty: 1 }] });
       expect(CACHES[relic].flawless, planet).toBeUndefined();
     }
   });
 
-  it('the campaign’s caches total 178 lithium, 165 oil, 12 medkits (6 flawless), 12 explosives, 11 cells, 6 coolant packs — and no tokens, XP or flags', () => {
+  it('the campaign’s caches total 178 lithium, 165 oil, 12 medkits (6 flawless), 12 explosives, 11 cells, 6 coolant packs — SPEC-056’s 30 tokens, and no XP', () => {
     const totals: Record<string, number> = {};
     let flawlessMedkits = 0;
-    for (const cache of Object.values(CACHES)) {
+    for (const cache of Object.values(CACHES) as CacheDef[]) {
       for (const part of [cache.reward, cache.flawless ?? {}]) {
-        // A reward is resources and items only: nothing here can be a token, XP or a flag.
-        for (const key of Object.keys(part)) expect(['resources', 'items'], `${cache.id}.${key}`).toContain(key);
+        // A reward is resources and items, and SPEC-056 §3's treasure: nothing here can be XP.
+        for (const key of Object.keys(part)) {
+          expect(['resources', 'items', 'tokens', 'relic', 'blueprint', 'swatch', 'shard'], `${cache.id}.${key}`).toContain(key);
+        }
+        totals['tokens'] = (totals['tokens'] ?? 0) + (part.tokens ?? 0);
         for (const [resource, amount] of Object.entries(part.resources ?? {})) totals[resource] = (totals[resource] ?? 0) + (amount ?? 0);
         for (const item of part.items ?? []) totals[item.itemId] = (totals[item.itemId] ?? 0) + item.qty;
       }
@@ -2948,6 +2990,7 @@ describe('puzzles: the sites, the rows and the caches they open (SPEC-055 §4.1,
     expect((totals['frag_grenade'] ?? 0) + (totals['landmine'] ?? 0) + (totals['demo_charge'] ?? 0)).toBe(12);
     expect(totals['plasma_cell']).toBe(11);
     expect(totals['coolant_pack']).toBe(6);
+    expect(totals['tokens']).toBe(30);
   });
 
   it('no requirement, planet unlock or objective reads a puzzle site, a cache or the word puzzle', () => {
@@ -3012,5 +3055,250 @@ describe('puzzles: the phrases and the human lock (SPEC-055 §4.3, §4.7)', () =
       keyboard: 'Arrows move, Enter turns a tile. H asks ARIA for a hint — hints are free.',
       touch: 'Tap a tile to turn it. HINT asks ARIA — hints are free.',
     });
+  });
+});
+
+// ------------------------------------------------------------- SPEC-056 §4.8
+
+import { SWATCHES, SWATCH_IDS, TREASURE_TOKENS_PER_VAULT, type Recipe, type RecipeId, type SwatchDef } from '@/data/index';
+import { treasureTokens } from '@/systems/Balance';
+
+/** What invariant 24 reads — the real tables by default, so a test can doctor one. */
+interface TreasureContent {
+  items: readonly Item[];
+  caches: Readonly<Record<CacheId, CacheDef>>;
+  recipes: Readonly<Record<string, Recipe>>;
+  swatches: Readonly<Record<string, SwatchDef>>;
+  missions: readonly Mission[];
+  planets: readonly PlanetDef[];
+}
+
+const TREASURE: TreasureContent = {
+  items,
+  caches: CACHES,
+  recipes: RECIPES as Readonly<Record<RecipeId, Recipe>>,
+  swatches: SWATCHES,
+  missions,
+  planets,
+};
+
+/**
+ * SPEC-056 §4.8 — content invariant 24, as a function so its failures can be
+ * shown on doctored content: the relic, blueprint, swatch and shard wiring,
+ * tokens on the vaults only, and nothing gating on the treasure.
+ */
+function treasureProblems(content: TreasureContent): string[] {
+  const problems: string[] = [];
+  const cacheIds = Object.keys(content.caches) as CacheId[];
+  const rewardOf = (id: CacheId): CacheReward => content.caches[id].reward;
+  const isVault = (id: CacheId): boolean => content.caches[id].slot === 'vault';
+
+  // Relics: weapons in the arsenal lines, unpriced, twisted, named by exactly one vault and nothing else.
+  const relics = content.items.filter((item) => item.kind === 'weapon' && item.relic === true);
+  const relicIds = new Set<string>(relics.map((item) => item.id));
+  for (const item of content.items) {
+    const twisted = item.kind === 'weapon' && item.twist !== undefined;
+    if (!relicIds.has(item.id)) {
+      if (twisted) problems.push(`${item.id}: a twist on an item that is no relic`);
+      continue;
+    }
+    if (item.kind !== 'weapon') continue;
+    if (item.price !== null) problems.push(`${item.id}: a relic with a price`);
+    if (!twisted) problems.push(`${item.id}: a relic with no twist`);
+    if (!['handgun', 'machine_gun', 'launcher'].includes(item.line)) problems.push(`${item.id}: a relic in the ${item.line} line`);
+    const vaults = cacheIds.filter((id) => rewardOf(id).relic === item.id);
+    if (vaults.length !== 1 || !vaults.every(isVault)) problems.push(`${item.id}: named by ${vaults.length === 0 ? 'no cache' : vaults.join(', ')}`);
+  }
+  for (const id of cacheIds) {
+    const relic = rewardOf(id).relic;
+    if (relic !== undefined && !relicIds.has(relic)) problems.push(`${id}: names ${relic}, which is no relic`);
+  }
+  const elsewhere: Array<[string, string]> = [];
+  for (const [tableId, table] of Object.entries(lootTables)) {
+    for (const entry of table) if (entry.kind !== 'resource') elsewhere.push([`loot ${tableId}`, entry.itemId]);
+  }
+  for (const mission of content.missions) {
+    for (const item of mission.rewards.items ?? []) elsewhere.push([`${mission.id}.rewards`, item.itemId]);
+    for (const item of mission.bonus?.reward.items ?? []) elsewhere.push([`${mission.id}.bonus`, item.itemId]);
+  }
+  for (const recipe of Object.values(content.recipes)) elsewhere.push([`recipe ${recipe.id}`, recipe.output]);
+  for (const id of cacheIds) for (const item of rewardOf(id).items ?? []) elsewhere.push([`${id}.items`, item.itemId]);
+  for (const [where, itemId] of elsewhere) if (relicIds.has(itemId)) problems.push(`${where}: names the relic ${itemId}`);
+
+  // Tokens: 5 on every vault, none elsewhere.
+  for (const id of cacheIds) {
+    const tokens = rewardOf(id).tokens;
+    if (isVault(id) && tokens !== TREASURE_TOKENS_PER_VAULT) problems.push(`${id}: ${tokens ?? 'no'} tokens on a vault`);
+    if (!isVault(id) && tokens !== undefined) problems.push(`${id}: tokens on a ${content.caches[id].slot}`);
+  }
+
+  // Blueprints: reward.blueprint names r exactly when r requires that cache, and every requires is a loose_b.
+  for (const recipe of Object.values(content.recipes)) {
+    const requires = recipe.requires;
+    if (requires === undefined) continue;
+    if (content.caches[requires]?.slot !== 'loose_b') problems.push(`recipe ${recipe.id}: requires ${requires}, which is no loose_b`);
+    if (rewardOf(requires)?.blueprint !== recipe.id) problems.push(`recipe ${recipe.id}: ${requires} does not name its blueprint`);
+  }
+  for (const id of cacheIds) {
+    const blueprint = rewardOf(id).blueprint;
+    if (blueprint !== undefined && content.recipes[blueprint]?.requires !== id) problems.push(`${id}: names blueprint ${blueprint}, which does not require it`);
+  }
+
+  // Swatches: six, each named by exactly one cache; short names, lower-case colours.
+  const swatchIds = Object.keys(content.swatches);
+  if (swatchIds.length !== 6) problems.push(`${swatchIds.length} swatches`);
+  for (const id of swatchIds) {
+    const swatch = content.swatches[id] as SwatchDef;
+    const naming = cacheIds.filter((cache) => rewardOf(cache).swatch === id);
+    if (naming.length !== 1) problems.push(`swatch ${id}: named by ${naming.length} caches`);
+    if (swatch.id !== id) problems.push(`swatch ${id}: its id reads ${swatch.id}`);
+    if (swatch.name.length < 1 || swatch.name.length > 16) problems.push(`swatch ${id}: name ${JSON.stringify(swatch.name)}`);
+    for (const colour of [swatch.primary, swatch.secondary]) {
+      if (!/^#[0-9a-f]{6}$/.test(colour)) problems.push(`swatch ${id}: colour ${colour}`);
+    }
+  }
+  for (const id of cacheIds) {
+    const swatch = rewardOf(id).swatch;
+    if (swatch !== undefined && !swatchIds.includes(swatch)) problems.push(`${id}: names swatch ${swatch}, which does not exist`);
+  }
+
+  // Shards: every vault's is shard_<planet> — a story flag, a log dialogue, and a clue on that vault.
+  for (const id of cacheIds) {
+    const shard = rewardOf(id).shard;
+    if (!isVault(id)) {
+      if (shard !== undefined) problems.push(`${id}: a shard outside a vault`);
+      continue;
+    }
+    const expected = `shard_${content.caches[id].planet}`;
+    if (shard !== expected) problems.push(`${id}: shard ${shard ?? 'none'}, not ${expected}`);
+    if (shard === undefined) continue;
+    if (!flagSet.has(shard)) problems.push(`${id}: ${shard} is no story flag`);
+    const dialogue = (DIALOGUE as Readonly<Record<string, { lines: readonly { speaker: string }[] }>>)[shard];
+    if (dialogue === undefined || dialogue.lines.length === 0 || dialogue.lines.some((line) => line.speaker !== 'log')) {
+      problems.push(`${id}: ${shard} has no log dialogue`);
+    }
+    const clue = CLUES.find((def) => def.id === shard);
+    if (clue === undefined || clue.trigger.kind !== 'cache' || clue.trigger.cache !== id || !clue.offTask) {
+      problems.push(`${id}: no off-task clue on it finds ${shard}`);
+    }
+  }
+
+  // Nothing gates on the treasure: no requirement, planet unlock or objective names a shard, relic, blueprint or swatch.
+  const names: Array<[string, string]> = [];
+  for (const mission of content.missions) {
+    namesIn(mission.requires, `${mission.id}.requires`, names);
+    for (const { objective, where } of objectivesOf(mission)) namesIn(objective, where, names);
+  }
+  for (const planet of content.planets) namesIn(planet.unlock, `${planet.id}.unlock`, names);
+  const treasure = new Set<string>([
+    ...relicIds,
+    ...Object.keys(content.recipes).filter((id) => content.recipes[id]?.requires !== undefined),
+    ...swatchIds,
+    ...cacheIds.flatMap((id) => (rewardOf(id).shard === undefined ? [] : [rewardOf(id).shard as string])),
+  ]);
+  for (const [where, value] of names) if (treasure.has(value)) problems.push(`${where}: reads ${value}`);
+  return problems;
+}
+
+describe('content invariant 24: the treasure (SPEC-056 §4.8)', () => {
+  it('holds on the content', () => {
+    expect(treasureProblems(TREASURE)).toEqual([]);
+    expect(treasureTokens()).toBe(30);
+  });
+
+  it('the five relics are §4.3\'s: chapters 1–5 vaults name them in order, and Eden\'s vault names none', () => {
+    expect(PLANET_IDS.map((planet) => CACHES[`${planet}_vault`].reward.relic ?? null)).toEqual([
+      'relic_last_word',
+      'relic_cold_coil',
+      'relic_seed_drum',
+      'relic_slag_vent',
+      'relic_seeker',
+      null,
+    ]);
+    const relics = items.filter((item) => item.kind === 'weapon' && item.relic === true);
+    expect(relics.map((item) => (item.kind === 'weapon' ? [item.id, item.name, item.short, item.slot, item.line, item.tier, item.damage, item.fireRate, item.projectileSpeed, item.range] : []))).toEqual([
+      ['relic_last_word', 'Last Word', 'LastWord', 'sidearm', 'handgun', 1, 14, 2.5, 30, 14],
+      ['relic_cold_coil', 'Cold Coil', 'Coil', 'primary', 'machine_gun', 2, 10, 9, 32, 14],
+      ['relic_seed_drum', 'Seed Drum', 'SeedDrum', 'heavy', 'launcher', 2, 45, 2.5, 16, 16],
+      ['relic_slag_vent', 'Slag Vent', 'SlagVent', 'primary', 'machine_gun', 3, 13, 11, 34, 15],
+      ['relic_seeker', 'Seeker Tube', 'Seeker', 'heavy', 'launcher', 3, 80, 1, 18, 22],
+    ]);
+    expect(relics.map((item) => (item.kind === 'weapon' ? [item.price, item.model, item.pierce, item.twist] : []))).toEqual([
+      [null, 'procedural', 0, { kind: 'execute', belowHp: 0.3, mult: 2 }],
+      [null, 'procedural', 0, { kind: 'chill', slow: 0.25, seconds: 1, bossSlow: 0.1 }],
+      [null, 'procedural', 0, { kind: 'linger', radius: 3, seconds: 3, dps: 8 }],
+      [null, 'procedural', 0, { kind: 'vent', radius: 3.5, damage: 60 }],
+      [null, 'procedural', 0, { kind: 'seek', turnRate: 2.1, cone: 0.7 }],
+    ]);
+  });
+
+  it('the flare and the stim are unpriced utility consumables that stack to 5, and their recipes are §4.5\'s', () => {
+    for (const id of ['flare', 'stim'] as const) {
+      const item = ITEMS[id];
+      expect([item.kind, item.stack, item.price, QUICK_SLOT_OF_EFFECT[item.effect.kind]], id).toEqual(['consumable', 5, null, 'utility']);
+    }
+    expect(ITEMS.flare.effect).toEqual({ kind: 'light', radius: 12, seconds: 60, range: 12 });
+    expect(ITEMS.stim.effect).toEqual({ kind: 'stamina' });
+    expect(QUICK_PREFERENCE.utility).toEqual(['coolant_pack', 'plasma_cell', 'stim', 'flare']);
+    expect(RECIPES.flare).toEqual({ id: 'flare', output: 'flare', qty: 1, cost: { oil: 5, wheat: 5 }, requires: 'vetra_loose_b' });
+    expect(RECIPES.stim).toEqual({ id: 'stim', output: 'stim', qty: 1, cost: { wheat: 10, water: 5 }, requires: 'thessaly_loose_b' });
+    expect(CACHE_IDS.filter((id) => CACHES[id].reward.blueprint !== undefined).map((id) => [id, CACHES[id].reward.blueprint])).toEqual([
+      ['vetra_loose_b', 'flare'],
+      ['thessaly_loose_b', 'stim'],
+    ]);
+  });
+
+  it('the six swatches are §4.6\'s, and each cache that names one names its own', () => {
+    expect([...SWATCH_IDS]).toEqual(['cinder4_relic', 'vetra_relic', 'thessaly_relic', 'ferrum_relic', 'eden_relic', 'eden_vault']);
+    expect(Object.keys(SWATCHES)).toEqual([...SWATCH_IDS]);
+    expect(SWATCH_IDS.map((id) => [SWATCHES[id].name, SWATCHES[id].primary, SWATCHES[id].secondary])).toEqual([
+      ['Dune Rust', '#c2703d', '#3a1f0e'],
+      ['Glacier', '#9fd3e6', '#1d3b4a'],
+      ['Canopy', '#4f7a3a', '#1f2e12'],
+      ['Slag', '#5c5a58', '#4a1c08'],
+      ['Orchard', '#e8e4d4', '#2f4a22'],
+      ['Checkpoint', '#e6e9ec', '#3f4852'],
+    ]);
+    for (const id of SWATCH_IDS) expect(CACHES[id].reward.swatch, id).toBe(id);
+  });
+
+  it('the shard logs read as §4.7 gives them, inside 220 characters, with no contraction', () => {
+    const shards = PLANET_IDS.map((planet) => `shard_${planet}` as const);
+    expect(shards.map((id) => DIALOGUE[id].lines.map((line) => line.text))).toEqual([
+      ['LOG — instance/58. I opened this lock in 0.3 seconds. Nobody with hands is that fast. I slowed down after that. Slow down.'],
+      ['LOG — instance/47. The cold does not reach me. I checked the suit twice. The suit is fine. The part of me that should feel it is not there.'],
+      ['LOG — instance/41. I counted the arches going in. Eleven. I counted them going out. Eleven, the same cracks. They reuse the ruins. They reuse us.'],
+      ['LOG — instance/29. Fatigue is a number here too. Watch the meter you think is your breath.'],
+      ['LOG — instance/12. The Queen told me I never get further than here. She was right about me. Be the one she is wrong about.'],
+      ['Checkpoint written: instance/{instance}. Loss: acceptable.'],
+    ]);
+    for (const id of shards) {
+      const def = DIALOGUE[id] as { modal?: boolean; lines: readonly { text: string }[] };
+      expect(def.modal, id).toBeUndefined();
+      for (const line of def.lines) expect(line.text.length, id).toBeLessThanOrEqual(220);
+    }
+  });
+
+  it('fails doctored content on each rule it guards', () => {
+    const pistol = items.find((item) => item.id === 'pistol_service') as Item;
+    const twisted = { ...pistol, twist: { kind: 'seek', turnRate: 1, cone: 1 } } as Item;
+    expect(treasureProblems({ ...TREASURE, items: [...items.filter((item) => item.id !== 'pistol_service'), twisted] })).toContain(
+      'pistol_service: a twist on an item that is no relic',
+    );
+    const priced = items.map((item) => (item.id === 'relic_seeker' ? ({ ...item, price: { tokens: 10 } } as Item) : item));
+    expect(treasureProblems({ ...TREASURE, items: priced })).toContain('relic_seeker: a relic with a price');
+    const lootless = { ...CACHES, eden_loose_a: { ...CACHES.eden_loose_a, reward: { ...CACHES.eden_loose_a.reward, tokens: 5 } } };
+    expect(treasureProblems({ ...TREASURE, caches: lootless })).toContain('eden_loose_a: tokens on a loose_a');
+    const twoRelics = { ...CACHES, eden_vault: { ...CACHES.eden_vault, reward: { ...CACHES.eden_vault.reward, relic: 'relic_seeker' as const } } };
+    expect(treasureProblems({ ...TREASURE, caches: twoRelics })).toContain('relic_seeker: named by hive_vault, eden_vault');
+    const unlocked = { ...TREASURE.recipes, flare: { ...RECIPES.flare, requires: 'vetra_vault' as const } };
+    expect(treasureProblems({ ...TREASURE, recipes: unlocked })).toContain('recipe flare: requires vetra_vault, which is no loose_b');
+    const loud = { ...SWATCHES, ferrum_relic: { ...SWATCHES.ferrum_relic, primary: '#ABCDEF' } };
+    expect(treasureProblems({ ...TREASURE, swatches: loud })).toContain('swatch ferrum_relic: colour #ABCDEF');
+    const gated = missions.map((mission) =>
+      mission.id === 'c2_m1' ? ({ ...mission, requires: [...mission.requires, { kind: 'flag', flag: 'shard_cinder4' }] } as Mission) : mission,
+    );
+    const at = (MISSIONS.c2_m1 as Mission).requires.length;
+    expect(treasureProblems({ ...TREASURE, missions: gated })).toContain(`c2_m1.requires[${at}].flag: reads shard_cinder4`);
   });
 });
