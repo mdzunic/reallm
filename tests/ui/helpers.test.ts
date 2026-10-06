@@ -20,6 +20,7 @@ import {
 } from '@/data/index';
 import type { SlotState, SlotView } from '@/systems/Loadout';
 import { discountTokens, Economy } from '@/systems/Economy';
+import type { CalibrationPuzzle, ConduitPuzzle, PlatesPuzzle } from '@/systems/Puzzles';
 import { Progression, type EventSink } from '@/systems/Progression';
 import { CARGO_TOAST_SECONDS, SHIPPED_TOAST_TEXT } from '@/systems/Pickups';
 import {
@@ -47,6 +48,15 @@ import {
   darkFogRange,
   descentRefusal,
   lightChipText,
+  bypassNote,
+  bypassOpen,
+  cellLabel,
+  platesPanelLine,
+  puzzleHintLine,
+  puzzleStatus,
+  puzzleSubtitle,
+  puzzleTitle,
+  stonesText,
   upgradeDeltaText,
   UPGRADE_METRIC_KEYS,
   balanceAfterText,
@@ -2258,5 +2268,136 @@ describe('lightChipText (SPEC-054 §4.5)', () => {
 
   it('a gamepad reads the keyboard legend, like every other scheme-aware helper here', () => {
     expect(lightChipText(true, 'gamepad')).toBe('◐ Light on · L');
+  });
+});
+
+// ------------------------------------------------------------- SPEC-055 §4.4–§4.6
+
+describe('puzzleTitle (SPEC-055 §4.4)', () => {
+  it('names each kind by chapter: the Warden’s words from chapter 4 for conduit and calibration, from 3 for a sequence', () => {
+    for (let chapter = 1; chapter <= 6; chapter++) {
+      expect(puzzleTitle('conduit', chapter, false), `conduit ${chapter}`).toBe(chapter < 4 ? 'ROUTE POWER' : 'ROUTE ATTENTION');
+      expect(puzzleTitle('calibration', chapter, false), `calibration ${chapter}`).toBe(chapter < 4 ? 'CALIBRATE ARRAY' : 'ADJUST WEIGHTS');
+      expect(puzzleTitle('sequence', chapter, false), `sequence ${chapter}`).toBe(chapter < 3 ? 'COMPLETE THE SEQUENCE' : 'PREDICT THE NEXT TOKEN');
+      expect(puzzleTitle('plates', chapter, false)).toBe('STEP IN ORDER');
+      expect(puzzleTitle('beam', chapter, false)).toBe('ALIGN THE LENS');
+    }
+  });
+
+  it('the human lock reads its own title, whatever the kind or chapter', () => {
+    for (const kind of ['conduit', 'calibration', 'sequence', 'plates', 'beam'] as const) {
+      expect(puzzleTitle(kind, 6, true)).toBe('HUMAN VERIFICATION — complete the sentence');
+    }
+  });
+});
+
+describe('puzzleStatus, the subtitles and ARIA’s hint line (SPEC-055 §4.4, §4.5)', () => {
+  it('reads Moves <m> · Hints <h>', () => {
+    expect(puzzleStatus(4, 1)).toBe('Moves 4 · Hints 1');
+    expect(puzzleStatus(0, 0)).toBe('Moves 0 · Hints 0');
+  });
+
+  it('the three panel kinds read §4.4’s subtitles until the first move', () => {
+    expect(puzzleSubtitle('conduit')).toBe('Turn the tiles until power reaches every output.');
+    expect(puzzleSubtitle('calibration')).toBe('Each press flips a cell and its neighbours. Clear the board.');
+    expect(puzzleSubtitle('sequence')).toBe('Choose what comes next.');
+  });
+
+  it('ARIA tries the first hint, then insists', () => {
+    expect(puzzleHintLine(1)).toBe('ARIA: try this one.');
+    expect(puzzleHintLine(2)).toBe('ARIA: this one. Trust me.');
+    expect(puzzleHintLine(5)).toBe('ARIA: this one. Trust me.');
+  });
+});
+
+describe('bypassNote (SPEC-055 §4.5)', () => {
+  it('counts the open seconds left down to the bypass, and is null once it is open', () => {
+    expect(bypassNote(48, 1)).toBe('ARIA can force it in 42 s');
+    expect(bypassNote(0, 0)).toBe('ARIA can force it in 90 s');
+    expect(bypassNote(89.2, 2)).toBe('ARIA can force it in 1 s');
+    expect(bypassNote(90, 0)).toBeNull();
+    expect(bypassNote(10, 3)).toBeNull();
+  });
+
+  it('opens at 90 s or three hints, whichever is first', () => {
+    expect(bypassOpen(89.9, 2)).toBe(false);
+    expect(bypassOpen(90, 0)).toBe(true);
+    expect(bypassOpen(0, 3)).toBe(true);
+  });
+});
+
+describe('cellLabel (SPEC-055 §4.4)', () => {
+  /**
+   * A 4 × 4 board by hand: the input at the north-west corner, two straights
+   * east, an elbow down, an elbow across and the output straight on the east
+   * edge — row 2, column 3 is the `north–east` elbow of §4.4's example.
+   */
+  function board(): ConduitPuzzle {
+    const pieces = new Uint8Array(16);
+    const rots = new Uint8Array(16);
+    const set = (cell: number, piece: number, rot: number): void => {
+      pieces[cell] = piece;
+      rots[cell] = rot;
+    };
+    set(0, 2, 1); // straight, east–west
+    set(1, 2, 1);
+    set(2, 3, 2); // elbow, south–west
+    set(6, 3, 0); // elbow, north–east
+    set(7, 2, 1); // the output
+    set(12, 4, 0); // a stray tee, on no path
+    return {
+      kind: 'conduit',
+      n: 4,
+      pieces,
+      rots,
+      source: { cell: 0, side: 8 },
+      sinks: [{ cell: 7, side: 2 }],
+      solution: Uint8Array.from([1, 1, 2, 0, 1]),
+      path: Int16Array.from([0, 1, 2, 6, 7]),
+    };
+  }
+
+  it('names the row and column from 1, the piece, its open sides and whether power reaches it', () => {
+    const p = board();
+    expect(cellLabel(p, 6)).toBe('Tile 2, 3: elbow, north–east, powered');
+    expect(cellLabel(p, 2)).toBe('Tile 1, 3: elbow, south–west, powered');
+    expect(cellLabel(p, 0)).toBe('Tile 1, 1: straight, east–west, powered, input');
+    expect(cellLabel(p, 7)).toBe('Tile 2, 4: straight, east–west, powered, output');
+    expect(cellLabel(p, 12)).toBe('Tile 4, 1: tee, north–east–south, unpowered');
+    expect(cellLabel(p, 5)).toBe('Tile 2, 2: empty');
+  });
+
+  it('a turned tile reads its new sides, and the tiles past it lose their power', () => {
+    const p = board();
+    p.rots[1] = 0;
+    expect(cellLabel(p, 1)).toBe('Tile 1, 2: straight, north–south, unpowered');
+    expect(cellLabel(p, 6)).toBe('Tile 2, 3: elbow, north–east, unpowered');
+    expect(cellLabel(p, 0)).toBe('Tile 1, 1: straight, east–west, powered, input');
+  });
+
+  it('a calibration cell is aligned or misaligned', () => {
+    const p: CalibrationPuzzle = { kind: 'calibration', n: 3, lit: Uint8Array.from([0, 1, 0, 0, 0, 0, 0, 0, 1]), presses: 4 };
+    expect(cellLabel(p, 1)).toBe('Tile 1, 2: array cell, misaligned');
+    expect(cellLabel(p, 4)).toBe('Tile 2, 2: array cell, aligned');
+    expect(cellLabel(p, 8)).toBe('Tile 3, 3: array cell, misaligned');
+  });
+});
+
+describe('the stones’ words (SPEC-055 §4.6)', () => {
+  const plates: PlatesPuzzle = {
+    kind: 'plates',
+    plates: [
+      { x: 0, z: 0, glyph: 'square' },
+      { x: 4, z: 0, glyph: 'circle' },
+      { x: 0, z: 4, glyph: 'triangle' },
+    ],
+    order: [1, 2, 0],
+    progress: 0,
+    panel: { x: 20, z: 0 },
+  };
+
+  it('the panel says the rule, then the glyphs in order; the tracker lists them', () => {
+    expect(platesPanelLine(plates)).toBe('Step on the stones in this order. Do not deviate. circle, triangle, square');
+    expect(stonesText(plates)).toBe('Stones: circle · triangle · square');
   });
 });
