@@ -22,8 +22,10 @@ import { Pool } from '@/core/Pool';
 import { ENEMIES, PLANETS } from '@/data/index';
 import { NO_OBSTACLES } from '@/entities/World';
 import type { CombatWorld, PlayerStats } from '@/systems/Combat';
+import { containment } from '@/systems/Containment';
 import {
   AGILE_SCOUT_CREATION,
+  BOSS_LIMIT_SECONDS,
   BOSSES,
   COMBAT_PLANETS,
   damagePerKill,
@@ -178,6 +180,46 @@ describe('the boss suite (SPEC-041 §6.1)', () => {
 
       it('the stand bot loses ≥ 100 %', () => {
         for (const run of of(boss, 'stand')) expect(run.lost, row(of(boss, 'stand'))).toBeGreaterThanOrEqual(100);
+      });
+    });
+  }
+});
+
+describe('the boss suite at containment(4) (SPEC-058 §4.4, initial tuning)', () => {
+  /** SPEC-041's seeds, at the iteration whose containment is the cap: ×1.52 boss HP, ×1.52 every hit. */
+  const BOSS_SEEDS = [1, 2, 3, 4, 5, 6] as const;
+  const ITERATION = 4;
+  const fights = new Map<string, BossResult[]>();
+  for (const boss of BOSSES) {
+    for (const bot of ['kite', 'dasher'] as const) {
+      fights.set(`${boss}/${bot}`, BOSS_SEEDS.map((seed) => runBoss(boss, bot, seed, BOSS_LIMIT_SECONDS, undefined, ITERATION)));
+    }
+  }
+  const of = (boss: string, bot: BossBot): BossResult[] => fights.get(`${boss}/${bot}`) ?? [];
+  const row = (runs: readonly BossResult[]): string =>
+    runs.map((r) => `${r.seed}: ${r.won ? 'won' : r.died ? 'died' : 'timed out'} ${r.seconds.toFixed(0)} s, lost ${r.lost.toFixed(0)} %`).join('; ');
+
+  it('runs at the capped containment: the boss spawns with ×1.15³ HP', () => {
+    expect(containment(ITERATION).hpMult).toBeCloseTo(1.520875, 12);
+    for (const boss of BOSSES) {
+      let maxHp = 0;
+      runBoss(boss, 'stand', 1, 0.1, (_world, combat) => void (maxHp = combat.lastSpawned?.maxHp ?? 0), ITERATION);
+      expect(maxHp, boss).toBe(Math.round(ENEMIES[boss].hp * containment(ITERATION).hpMult));
+    }
+  });
+
+  for (const boss of BOSSES) {
+    describe(ENEMIES[boss].name, () => {
+      it('the kite bot wins every fight, with no death, in at most 110 s', () => {
+        for (const run of of(boss, 'kite')) {
+          expect(run.won, row(of(boss, 'kite'))).toBe(true);
+          expect(run.died).toBe(false);
+          expect(run.seconds, row(of(boss, 'kite'))).toBeLessThanOrEqual(110);
+        }
+      });
+
+      it('the dasher loses at most 20 %', () => {
+        for (const run of of(boss, 'dasher')) expect(run.lost, row(of(boss, 'dasher'))).toBeLessThanOrEqual(20);
       });
     });
   }

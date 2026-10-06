@@ -17,6 +17,7 @@ import { ringRadius, telegraphCovers, type TelegraphEntity } from '@/entities/Te
 import { clampToSeal, NO_OBSTACLES, type ArenaState } from '@/entities/World';
 import { LOADOUT_CHAPTERS, RECOMMENDED_LOADOUT } from '@/systems/Balance';
 import { Combat, computePlayerStats, type CombatWorld, type EconomyPort, type ProgressionPort } from '@/systems/Combat';
+import { containment } from '@/systems/Containment';
 import { DASH_DISTANCE, DASH_IFRAMES, dashCooldown, isDashing, stepDash, tryDash } from '@/systems/Dash';
 import { ATTACK_REACH_BONUS, CHARGE, WINDUP_SECONDS } from '@/systems/EnemyAi';
 import { generateLayout, WALL_INSET } from '@/systems/Layout';
@@ -588,6 +589,11 @@ export interface BossResult {
  * reference kit of the boss's chapter with three medkits, auto-fire on and the
  * Rocket rotation; seeds pick every stream. It ends when the boss dies, the
  * bot dies, or 240 s pass.
+ *
+ * SPEC-058 §4.4: `iteration` is the save's — Combat reads its containment, so
+ * the boss spawns with ×1.15 HP a step and hits ×1.15 a step, capped at three.
+ * The bot heals with the same margin in hits: below `MEDKIT_BELOW` times the
+ * containment's damage multiplier (35 % at iteration 1, as SPEC-041 tuned it).
  */
 export function runBoss(
   boss: BossId,
@@ -595,9 +601,12 @@ export function runBoss(
   seed: number,
   limit = BOSS_LIMIT_SECONDS,
   observe?: (world: CombatWorld, combat: Combat) => void,
+  iteration = 1,
 ): BossResult {
   const chapter = ENEMIES[boss].chapter;
   const save = kitSave(referenceKit(chapter), seed);
+  save.meta.iteration = iteration;
+  const medkitBelow = MEDKIT_BELOW * containment(iteration).damageMult;
   const radius = arenaRadius(boss);
   const arena: ArenaState = { x: 0, z: 0, radius, locked: true, sealed: true };
   const events = new EventBus<GameEvents>({ dev: false });
@@ -640,7 +649,7 @@ export function runBoss(
   const steps = Math.round(limit / STEP);
   let step = 0;
   for (; step < steps && !died && !killed; step++) {
-    if (p.hp < MEDKIT_BELOW * world.stats.maxHp && medkits > 0 && medkit.kind === 'consumable') {
+    if (p.hp < medkitBelow * world.stats.maxHp && medkits > 0 && medkit.kind === 'consumable') {
       combat.applyConsumable(medkit.effect);
       medkits--;
     }

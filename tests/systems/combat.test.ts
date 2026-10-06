@@ -2770,3 +2770,92 @@ describe('the flare and the stim (SPEC-056 §4.5)', () => {
     expect(FLARE_RADIUS).toBe(ITEMS.flare.effect.radius);
   });
 });
+
+// ------------------------------------------------------------- SPEC-058 §4.4
+
+describe('containment (SPEC-058 §4.4)', () => {
+  /** A harness on a save of `iteration` — Combat reads its containment at construction. */
+  const at = (iteration: number, difficulty: Save['meta']['difficulty'] = 'normal'): Harness =>
+    harness({
+      patch: (s) => {
+        s.meta.iteration = iteration;
+        s.meta.difficulty = difficulty;
+      },
+    });
+
+  it('at iteration 2 a surface enemy spawns with round(hp × 1.15), and a boss too', () => {
+    const h = at(2);
+    expect(h.spawn('wurmling', 40, 0).maxHp).toBe(Math.round(ENEMIES.wurmling.hp * 1.15));
+    expect(h.spawn('dune_wurm', 50, 0).maxHp).toBe(Math.round(ENEMIES.dune_wurm.hp * 1.15));
+    expect(h.spawn('dune_wurm', 60, 0).hp).toBe(Math.round(ENEMIES.dune_wurm.hp * 1.15));
+  });
+
+  it('the elite ×3 and hard’s ×1.25 multiply under it, and it caps at three steps', () => {
+    expect(at(2).spawn('wurmling', 40, 0, true).maxHp).toBe(Math.round(ENEMIES.wurmling.hp * TUNING.ELITE_HP_MULT * 1.15));
+    expect(at(3, 'hard').spawn('dune_wurm', 40, 0).maxHp).toBe(Math.round(ENEMIES.dune_wurm.hp * 1.25 * 1.15 ** 2));
+    const ceiling = Math.round(ENEMIES.dune_wurm.hp * 1.15 ** 3);
+    expect(at(4).spawn('dune_wurm', 40, 0).maxHp).toBe(ceiling);
+    expect(at(99).spawn('dune_wurm', 40, 0).maxHp).toBe(ceiling);
+  });
+
+  it('a flight-domain enemy keeps its HP at every iteration (58-k)', () => {
+    for (const iteration of [2, 4]) {
+      const h = at(iteration, 'hard');
+      expect(h.spawn('hive_interceptor', 40, 0).maxHp).toBe(ENEMIES.hive_interceptor.hp);
+      expect(h.spawn('scav_fighter', 50, 0).maxHp).toBe(ENEMIES.scav_fighter.hp);
+    }
+  });
+
+  it('iteration 1 spawns at the table HP, as before', () => {
+    const h = at(1);
+    expect(h.spawn('wurmling', 40, 0).maxHp).toBe(ENEMIES.wurmling.hp);
+    expect(h.spawn('dune_wurm', 50, 0).maxHp).toBe(ENEMIES.dune_wurm.hp);
+  });
+
+  it('a hit deals ×1.15 at iteration 2: a melee blow', () => {
+    const blow = (h: Harness): number | undefined => {
+      const e = h.spawn('wurmling', 1.8, 0); // damage 9
+      e.aggro = true;
+      e.state = 'windup';
+      e.stateTime = 1;
+      h.step();
+      return h.of('player:damaged')[0]?.amount;
+    };
+    expect(blow(at(1))).toBe(9);
+    expect(blow(at(2))).toBe(Math.round(9 * 1.15));
+    // After SPEC-043's multiplier: hard is ×1.3, then ×1.15.
+    expect(blow(at(2, 'hard'))).toBe(Math.round(9 * 1.3 * 1.15));
+  });
+
+  it('a hit deals ×1.15 at iteration 2: a projectile and a ground telegraph', () => {
+    const shot = (h: Harness): number | undefined => {
+      h.shot({ x: -0.4, z: 0, vx: 40, owner: 'enemy', damage: 20, enemyId: 'dust_skitter', ttl: 1 });
+      h.step();
+      return h.of('player:damaged')[0]?.amount;
+    };
+    const plate = (iteration: number): number => {
+      const h = at(iteration);
+      const reduction = 1 - h.world.stats.armor / (h.world.stats.armor + 100);
+      return Math.round(20 * reduction * (iteration === 1 ? 1 : 1.15));
+    };
+    expect(shot(at(1))).toBe(plate(1));
+    expect(shot(at(2))).toBe(plate(2));
+    const slam = (h: Harness): number | undefined => {
+      const t = h.combat.telegraphs.alloc();
+      resetTelegraph(t);
+      Object.assign(t, { kind: 'circle', x: 0.5, z: 0, radius: 1.5, startAt: h.world.time, hitAt: h.world.time + 0.1, lockAt: h.world.time + 0.1, damage: 20, source: 'wurmling' });
+      for (let i = 0; i < 12; i++) h.step();
+      return h.of('player:damaged')[0]?.amount;
+    };
+    expect(slam(at(1))).toBe(plate(1));
+    expect(slam(at(2))).toBe(plate(2));
+  });
+
+  it('enemyHitDamage takes containment’s damageMult after the difficulty’s', () => {
+    const h = at(1);
+    const wurmling = h.spawn('wurmling', 50, 0);
+    expect(enemyHitDamage(wurmling, flatStats(), 'normal', 1.15)).toBe(Math.round(9 * 1.15));
+    expect(enemyHitDamage(wurmling, flatStats(), 'casual', 1.15)).toBe(Math.round(9 * 0.7 * 1.15));
+    expect(enemyHitDamage(wurmling, flatStats(), 'normal')).toBe(9);
+  });
+});

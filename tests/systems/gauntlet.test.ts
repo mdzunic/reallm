@@ -55,8 +55,10 @@ interface Run {
  * engine 1, weapon 0), ARIA at level 1 (no aim assist, §4.7), `QUALITY.medium`,
  * normal difficulty, and `c5_m1` accepted.
  */
-function fly(seed: number, aim: PilotAim): Run {
+function fly(seed: number, aim: PilotAim, iteration = 1): Run {
   const save: Save = newSave(0, PILOT, seed, 1_700_000_000_000);
+  // SPEC-058 §4.4: a later instance's trip, built as the flight scene builds it.
+  save.meta.iteration = iteration;
   save.ship = { ...save.ship, hull: 2, shield: 2, engine: 1, weapon: 0 };
   save.companions = [{ id: 'aria', level: 1, enabled: true }];
   save.progress.missionsActive.push({ id: 'c5_m1', stage: 0, counters: {} });
@@ -81,6 +83,7 @@ function fly(seed: number, aim: PilotAim): Run {
     companions: save.companions,
     quality: QUALITY.medium,
     difficulty: save.meta.difficulty,
+    iteration: save.meta.iteration,
   };
   const flight = new Flight(cfg, economy, progression, missions, events, new Rng(hash32(seed, 'flight')));
   const pilot = new Pilot(new Rng(hash32(seed, 'pilot')), aim);
@@ -118,6 +121,12 @@ describe('the Hive Gauntlet is winnable (SPEC-034 §4.4)', () => {
     expect(runs.filter((run) => run.recalled)).toEqual([]);
     const won = runs.filter((run) => run.completed).length;
     expect(won, `lead wins: ${runs.map((r) => `${r.kills}`).join(' ')}`).toBe(16);
+  });
+
+  it('at iteration 4 — containment’s cap, every hit ×1.52, the interceptors at their HP — still completes in at least 12 of 16 (SPEC-058 §4.4)', () => {
+    const runs = SEEDS.map((seed) => fly(seed, 'none', 4));
+    const won = runs.filter((run) => run.completed).length;
+    expect(won, `iteration-4 wins: ${runs.map((r) => `${r.completed ? 'W' : r.recalled ? 'R' : '-'}${r.kills}`).join(' ')}`).toBeGreaterThanOrEqual(12);
   });
 });
 

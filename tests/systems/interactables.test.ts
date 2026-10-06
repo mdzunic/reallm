@@ -40,8 +40,8 @@ describe('nearestInteractable (SPEC-054 §4.1)', () => {
     expect(nearestInteractable([panel, mirror, pad], 0, 0)).toBe(pad);
   });
 
-  it('the kind order is pad, descent, exit, cache, vault, relic, mirror, panel', () => {
-    const order: InteractKind[] = ['pad', 'descent', 'exit', 'cache', 'vault', 'relic', 'mirror', 'panel'];
+  it('the kind order is pad, descent, exit, cache, vault, relic, mirror, panel, and SPEC-058’s body last', () => {
+    const order: InteractKind[] = ['pad', 'descent', 'exit', 'cache', 'vault', 'relic', 'mirror', 'panel', 'body'];
     for (let a = 0; a < order.length; a++) {
       for (let b = a + 1; b < order.length; b++) {
         const first = thing(order[a] as InteractKind, 'a', 0, 0);

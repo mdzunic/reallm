@@ -75,6 +75,8 @@ interface WorldOptions {
   seed?: number;
   /** SPEC-039 §4.3: the pilot's companionMult, as the flight scene passes it. */
   companionMult?: number;
+  /** SPEC-058 §4.4: the save's iteration, as the flight scene passes it. */
+  iteration?: number;
 }
 
 function world(options: WorldOptions = {}): World {
@@ -98,6 +100,7 @@ function world(options: WorldOptions = {}): World {
     quality: QUALITY.medium,
     difficulty: save.meta.difficulty,
     ...(options.companionMult === undefined ? {} : { companionMult: options.companionMult }),
+    ...(options.iteration === undefined ? {} : { iteration: options.iteration }),
   };
   const flight = new Flight(cfg, economy, progression, missions, events, new Rng(options.seed ?? 7));
   return {
@@ -392,6 +395,29 @@ describe('damage, shield, hull', () => {
     v.flight.setDifficulty('hard');
     v.flight.hit(10, 'asteroid', { kind: 'asteroid' });
     expect(v.flight.ship.shield).toBeCloseTo(v.flight.ship.maxShield - 13, 9);
+  });
+
+  it('setDifficulty(\'normal\', 2) multiplies incoming damage by 1.15 — containment’s step (SPEC-058 §4.4)', () => {
+    const w = world({ difficulty: 'normal' });
+    step(w.flight, LAUNCH_SECONDS + DT);
+    w.flight.setDifficulty('normal', 2);
+    w.flight.hit(20, 'enemy', { kind: 'enemy', enemyId: 'scav_fighter' });
+    expect(w.flight.ship.shield).toBeCloseTo(w.flight.ship.maxShield - 23, 9);
+    // And back: the iteration defaults to 1.
+    w.flight.setDifficulty('normal');
+    w.flight.hit(10, 'asteroid', { kind: 'asteroid' });
+    expect(w.flight.ship.shield).toBeCloseTo(w.flight.ship.maxShield - 33, 9);
+  });
+
+  it('the config’s iteration scales from the first hit, on top of the difficulty, capped at three steps (SPEC-058 §4.4)', () => {
+    const w = world({ difficulty: 'hard', iteration: 2 });
+    step(w.flight, LAUNCH_SECONDS + DT);
+    w.flight.hit(20, 'enemy', { kind: 'enemy', enemyId: 'scav_fighter' });
+    expect(w.flight.ship.shield).toBeCloseTo(w.flight.ship.maxShield - 20 * 1.3 * 1.15, 9);
+    const v = world({ difficulty: 'normal', iteration: 9 });
+    step(v.flight, LAUNCH_SECONDS + DT);
+    v.flight.hit(10, 'asteroid', { kind: 'asteroid' });
+    expect(v.flight.ship.shield).toBeCloseTo(v.flight.ship.maxShield - 10 * 1.15 ** 3, 9);
   });
 
   it('flight enemies keep their table HP on hard — only their hits change (SPEC-043 §2)', () => {
