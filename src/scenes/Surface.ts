@@ -129,6 +129,17 @@ import { nodeIcon, poiIcon } from '@/systems/MapModel';
 import { contractFor, Missions, type MissionContext, type ObjectiveProgress } from '@/systems/Missions';
 import { CARGO_TOAST_SECONDS, Nodes, Pickups, SHIPPED_TOAST_TEXT } from '@/systems/Pickups';
 import { cumulativeXp, LEVEL_CAP, Progression, xpToNext } from '@/systems/Progression';
+import {
+  REMAINS_RECOVER_RADIUS,
+  REMAINS_RETRY_SECONDS,
+  dropRemains,
+  placeRemains,
+  recoverRemains,
+  remainsHeld,
+  remainsLook,
+  remainsTag,
+  type RemainsLook,
+} from '@/systems/Remains';
 import { watchRunStats } from '@/systems/RunStats';
 import { SpawnDirector, WAVE_CEILING_BONUS, type FrustumXZ, type SpawnRamp, type WaveHandle } from '@/systems/Spawn';
 import {
@@ -176,6 +187,10 @@ import {
   padEmptyText,
   pickupText,
   quitNote,
+  remainsLostText,
+  remainsOverlayLine,
+  remainsRecoveredText,
+  remainsTrackerText,
   rewardsText,
   stageResetText,
   STAMINA_FULL_HIDE_SECONDS,
@@ -215,6 +230,7 @@ import { AriaHint } from '@/ui/AriaHint';
 import { confirmSheet } from '@/ui/ConfirmSheet';
 import { DamageNumbers } from '@/ui/DamageNumbers';
 import { ELITE_PLATE_SLOTS, ElitePlates } from '@/ui/ElitePlates';
+import { RemainsTag } from '@/ui/RemainsTag';
 import { DeathOverlay } from '@/ui/DeathOverlay';
 import { dialogueLayer, type DialogueUI } from '@/ui/DialogueUI';
 import { el, h, keepFocus, openModal, shortScreen, testId } from '@/ui/dom';
@@ -398,6 +414,11 @@ const ELITE_PLATE_RANGE = 25;
 const ELITE_PLATE_LIFT = 2.2;
 /** SPEC-041 §4.10: the debug elite pack — four of the swarm species, 10 m ahead. */
 const ELITE_PACK_SIZE = 4;
+/** SPEC-057 §4.6: the remains' tag shows within this many metres, lifted this far over the ground. */
+const REMAINS_TAG_RANGE = 30;
+const REMAINS_TAG_LIFT = 1.4;
+/** SPEC-057 §4.7 (dev): `surface-goto-remains` stands the salvager this far from the remains, toward the pad. */
+const GOTO_REMAINS_DISTANCE = 1;
 const ELITE_PACK_DISTANCE = 10;
 /** SPEC-038 §4.11: the debug charger stands this far along the player's facing. */
 const CHARGER_DISTANCE = 8;
@@ -650,6 +671,21 @@ export class SurfaceScene extends UiScene<'surface'> {
   // open; the explored mask and the layers both maps draw are the level's.
   #mapScreen: MapScreen | null = null;
   #death: DeathOverlay | null = null;
+  // SPEC-057 — the remains: the look chosen at entry (§4.6), the tag over them,
+  // the placed point a death writes (§4.3), the reused record a recovery
+  // writes into (§4.4), and the recovery's radius and retry clock (E93).
+  #remainsLook: RemainsLook = 'pack';
+  #remainsTag: RemainsTag | null = null;
+  /** The remains lie on this surface, on the surface level — the view, the tag, the map and the tracker show them. */
+  #remainsHere = false;
+  readonly #remainsAt = { x: 0, z: 0 };
+  readonly #remainsEntrance = { x: 0, z: 0, facing: 0 };
+  readonly #remainsTaken: Record<ResourceId, number> = { oil: 0, wheat: 0, water: 0, lithium: 0 };
+  #remainsInside = false;
+  #remainsRetryIn = 0;
+  /** The tracker row's text, rebuilt only when the whole metre changes. */
+  #remainsRowText: string | null = null;
+  #remainsRowMetres = -1;
   #dialogue: DialogueUI | null = null;
   /** SPEC-042 §4.1: the mission banner, the top centre's last row. */
   #banner: MissionBanner | null = null;
@@ -1231,8 +1267,15 @@ export class SurfaceScene extends UiScene<'surface'> {
 
     const bus = services.events as EventBus<GameEvents>;
     // SPEC-047 §4.5: this run's counts, ahead of every other subscriber, so a
-    // death reads the salvager where they fell.
-    this.disposer.add(watchRunStats(bus, save, this, () => ({ planet: planet.id, x: world.player.x, z: world.player.z })));
+    // death reads the salvager where they fell. SPEC-057 §4.3: where they fell
+    // is where the remains lie — the placed point — so `lastDeath` and the
+    // remains agree; the scene's own `player:died` reads the same point.
+    this.disposer.add(
+      watchRunStats(bus, save, this, () => {
+        this.#placeRemains(world);
+        return { planet: planet.id, x: this.#remainsAt.x, z: this.#remainsAt.z };
+      }),
+    );
     const progression = new Progression(save, bus);
     const economy = new Economy(save, bus, progression, services.save);
     // SPEC-032 §4.7: the service override, kept in step with the setting.
@@ -1394,6 +1437,9 @@ export class SurfaceScene extends UiScene<'surface'> {
     view.reduceMotion = services.settings.get().reduceMotion;
     this.#view = view;
     this.disposer.add(() => view.dispose());
+    // SPEC-057 §4.6: the look is chosen here, at entry — a reveal mid-visit
+    // changes it from the next landing on (57-g).
+    this.#remainsLook = remainsLook(save);
     // SPEC-054 §4.4: the cave's view hangs under the view's root; it goes first.
     this.disposer.add(() => {
       this.#caveView?.dispose();
@@ -1658,6 +1704,13 @@ export class SurfaceScene extends UiScene<'surface'> {
       plates.dispose();
       this.#plates = null;
     });
+    // SPEC-057 §4.6: the remains' tag, in the same layer.
+    const remainsTagView = new RemainsTag(dmgLayer);
+    this.#remainsTag = remainsTagView;
+    this.disposer.add(() => {
+      remainsTagView.dispose();
+      this.#remainsTag = null;
+    });
     // SPEC-050 §4.6: the stamina ring beside the salvager's head, on both
     // schemes, in a layer of its own so it can fade.
     const staminaLayer = el('div', 'stamina-layer');
@@ -1796,6 +1849,9 @@ export class SurfaceScene extends UiScene<'surface'> {
     // with an explosive in the slot; `#requestTip` drops the ones seen.
     if (save.equipped.heavy !== null) this.#requestTip('heavy');
     if (save.quick.explosive !== null) this.#requestTip('explosives');
+
+    // SPEC-057 §4.5: the remains this save carries, shown when they lie here.
+    this.#syncRemains();
 
     // §4.1 step 5: the landing save, and held-back accept dialogue.
     services.save.request('landing');
@@ -2084,6 +2140,8 @@ export class SurfaceScene extends UiScene<'surface'> {
     combat.drops.length = 0;
     pickups.update(dt, world.player, world.stats.pickupRadius);
     this.#nodes?.update(dt, world.player);
+    // SPEC-057 §4.4: walking back to the remains takes them back.
+    this.#stepRemains(world, dt);
     // SPEC-055 §4.5, §4.6: the plates underfoot, the beam with the light on,
     // and the world puzzle's clock in its room.
     this.#puzzles?.step(dt);
@@ -2170,6 +2228,8 @@ export class SurfaceScene extends UiScene<'surface'> {
       this.#renderGuidance(world, view);
       // SPEC-041 §4.6: the nameplates follow this frame's camera.
       this.#renderElitePlates(world);
+      // SPEC-057 §4.6: so does the remains' tag.
+      this.#renderRemainsTag(world);
       // SPEC-050 §4.6: so does the stamina ring.
       this.#renderStamina(world);
       // SPEC-055 §4.5: a hinted plate or mirror pulses on the view clock.
@@ -2598,6 +2658,8 @@ export class SurfaceScene extends UiScene<'surface'> {
       info['mmArrows'] = drawn.arrows;
       info['mmNodes'] = drawn.nodes;
       info['mmEnemies'] = drawn.enemies;
+      // SPEC-057 §4.5: the remains' icon on the last repaint.
+      info['mmRemains'] = drawn.remains;
     }
     // SPEC-026 §4.8: the explored share, the map's state, and the proof that
     // the terrain layer is built once per visit.
@@ -2627,6 +2689,18 @@ export class SurfaceScene extends UiScene<'surface'> {
     // SPEC-048 §4.3, §4.8: the bodies on the ground, the clues found and the
     // shelter clue's dwell, in seconds to one decimal.
     info['scavBodies'] = this.#view?.scavBodies ?? 0;
+    // SPEC-057 §3, §4.6: where the remains lie (`-` with none), what they
+    // hold, the look chosen at entry, what the view draws for them and
+    // whether the tag is up.
+    const remains = this.#save?.progress.remains ?? null;
+    info['remains'] = remains === null ? '-' : `${remains.planet}:${Math.round(remains.x * 10) / 10},${Math.round(remains.z * 10) / 10}`;
+    info['remainsHeld'] = remainsHeld(remains);
+    info['remainsLook'] = this.#remainsLook;
+    info['remainsDrawn'] = this.#view?.remainsDrawn ?? '-';
+    info['remainsDraws'] = this.#view?.remainsDraws ?? 0;
+    info['remainsTris'] = this.#view?.remainsTris ?? 0;
+    info['remainsPosedAt'] = Math.round((this.#view?.remainsPosedAt ?? -1) * 1000) / 1000;
+    info['remainsTag'] = this.#remainsTag?.shown === true ? 1 : 0;
     const clueScene = this.#clueScene;
     let cluesFound = 0;
     if (clueScene !== null) for (const def of CLUES) if (clueFound(def, clueScene.flags)) cluesFound++;
@@ -4170,6 +4244,176 @@ export class SurfaceScene extends UiScene<'surface'> {
     this.services.events.emit('player:respawned');
   }
 
+  // ---------------------------------------------------- SPEC-057: remains
+
+  /**
+   * §4.3 (E92): where a death's remains lie, into `#remainsAt`. The start is
+   * SPEC-054's descent for a death below (the handler runs while the level is
+   * still `underground`; the swap waits for the respawn), else E63's arena
+   * entrance while a boss stage is active — the respawn's own condition, so
+   * the respawn stands on them — else where the salvager fell. Pushed clear of
+   * the surface level's obstacles and clamped inside ±(halfSize − 3).
+   */
+  #placeRemains(world: CombatWorld): void {
+    const surface = this.#levels?.surface ?? null;
+    const missions = this.#missions;
+    if (surface === null) {
+      this.#remainsAt.x = world.player.x;
+      this.#remainsAt.z = world.player.z;
+      return;
+    }
+    const descent = this.#level?.id === 'underground' ? this.#descent : null;
+    const boss = missions !== null && missions.bossStage() !== null && surface.arena !== null;
+    const entrance = boss && this.#arenaEntrance(this.#remainsEntrance) ? this.#remainsEntrance : null;
+    placeRemains(
+      world.player,
+      { obstacles: surface.grid, halfSize: surface.layout.halfSize, arenaEntrance: entrance, descent },
+      this.#remainsAt,
+    );
+  }
+
+  /**
+   * §4.1 step 4 (E91): unless the difficulty is casual, forfeit whatever set
+   * lies anywhere — `remains:lost` and its toast — and leave this death's loss
+   * at the placed point (`remains:created`). Returns the overlay's line, or
+   * `null` when nothing was left (casual, or an empty hold).
+   */
+  #dropRemains(lost: Partial<Record<ResourceId, number>>): string | null {
+    const save = this.#save;
+    const world = this.#world;
+    if (save === null || world === null) return null;
+    // §2: casual takes nothing, so nothing is at stake — neither created nor forfeited.
+    if (save.meta.difficulty === 'casual') return null;
+    // `watchRunStats` placed it a moment ago; placing again reads the same inputs.
+    this.#placeRemains(world);
+    const planet = this.#planet.id;
+    const look = this.#remainsLook;
+    const { created, forfeited } = dropRemains(save, planet, this.#remainsAt, lost);
+    const bus = this.services.events;
+    if (forfeited !== null) {
+      bus.emit('remains:lost', { planet: forfeited.planet, resources: forfeited.resources });
+      bus.emit('ui:toast', { kind: 'warn', text: remainsLostText(look, forfeited.resources) });
+    }
+    if (created !== null) {
+      bus.emit('remains:created', { planet, x: created.x, z: created.z, resources: created.resources });
+    }
+    this.#remainsInside = false;
+    this.#syncRemains();
+    return created === null ? null : remainsOverlayLine(look, created.resources);
+  }
+
+  /**
+   * §4.5: the view, the tag's words and whether the map and the tracker show
+   * the remains — only when they lie on this planet and the surface level is
+   * the active one. Runs at entry, after a drop or a recovery, and at a swap.
+   */
+  #syncRemains(): void {
+    const save = this.#save;
+    const remains = save?.progress.remains ?? null;
+    const here = save !== null && remains !== null && remains.planet === this.#planet.id && this.#level?.id !== 'underground';
+    this.#remainsHere = here;
+    if (!here) {
+      this.#view?.setRemains(null);
+      this.#remainsTag?.hide();
+      this.#remainsRowText = null;
+      this.#remainsRowMetres = -1;
+      return;
+    }
+    const { primary, secondary } = save.player.appearance;
+    this.#view?.setRemains({ x: remains.x, z: remains.z, look: this.#remainsLook, primary, secondary });
+    this.#remainsTag?.setText(remainsTag(save, remains, this.#remainsLook));
+  }
+
+  /**
+   * §4.4 (E93): a living player on the surface level of the remains' planet
+   * recovers them on the step they come within `REMAINS_RECOVER_RADIUS`, then
+   * every `REMAINS_RETRY_SECONDS` while inside if any are left. Allocates
+   * nothing unless a recovery runs, and that writes into a reused record.
+   */
+  #stepRemains(world: CombatWorld, dt: number): void {
+    const save = this.#save;
+    const remains = save?.progress.remains ?? null;
+    const p = world.player;
+    if (save === null || remains === null || !this.#remainsHere || !p.alive) {
+      this.#remainsInside = false;
+      return;
+    }
+    const dx = p.x - remains.x;
+    const dz = p.z - remains.z;
+    if (dx * dx + dz * dz > REMAINS_RECOVER_RADIUS * REMAINS_RECOVER_RADIUS) {
+      this.#remainsInside = false;
+      return;
+    }
+    if (!this.#remainsInside) {
+      this.#remainsInside = true;
+      this.#remainsRetryIn = 0;
+    }
+    this.#remainsRetryIn -= dt;
+    if (this.#remainsRetryIn > 0) return;
+    this.#remainsRetryIn = REMAINS_RETRY_SECONDS;
+    this.#recoverRemains(save);
+  }
+
+  /**
+   * §4.4: the hold takes what fits (`'recovered'`: cap-charged, never shipped,
+   * never `blocked`); a recovery that took a unit emits `remains:recovered` —
+   * whose `pickup_generic` is the sound, and which `watchRunStats` counts into
+   * `stats.recoveries` — toasts it, and checkpoints the save.
+   */
+  #recoverRemains(save: Save): void {
+    const economy = this.#economy;
+    const planet = save.progress.remains?.planet ?? null;
+    if (economy === null || planet === null) return;
+    const taken = this.#remainsTaken;
+    if (!recoverRemains(save, economy, taken)) return;
+    const rest = save.progress.remains !== null;
+    const bus = this.services.events;
+    bus.emit('remains:recovered', { planet, resources: taken });
+    bus.emit('ui:toast', { kind: 'good', text: remainsRecoveredText(this.#remainsLook, taken, rest) });
+    this.services.save.request('checkpoint');
+    this.#syncRemains();
+  }
+
+  /**
+   * §4.6: the tag over the remains while they are on screen and within 30 m —
+   * hidden while a beat or the map owns the screen, as the stamina ring is.
+   */
+  #renderRemainsTag(world: CombatWorld): void {
+    const tag = this.#remainsTag;
+    const remains = this.#save?.progress.remains ?? null;
+    if (tag === null) return;
+    if (!this.#remainsHere || remains === null || this.#uiHolds > 0 || this.#holds > 0) {
+      tag.hide();
+      return;
+    }
+    const p = world.player;
+    if (Math.hypot(remains.x - p.x, remains.z - p.z) > REMAINS_TAG_RANGE) {
+      tag.hide();
+      return;
+    }
+    // Behind the camera or off the canvas: no tag.
+    const behind = this.#projectGuide(remains.x, remains.z, REMAINS_TAG_LIFT);
+    const x = this.#screenPoint.x;
+    const y = this.#screenPoint.y;
+    if (behind || x < 0 || y < 0 || x > this.services.renderer.width || y > this.services.renderer.height) {
+      tag.hide();
+      return;
+    }
+    tag.show(x, y);
+  }
+
+  /** §4.5: `Recover your pack — <d> m`, rebuilt only when the whole metre moves; `null` with no remains here. */
+  #remainsRow(world: CombatWorld): string | null {
+    const remains = this.#save?.progress.remains ?? null;
+    if (!this.#remainsHere || remains === null) return null;
+    const metres = Math.round(Math.hypot(remains.x - world.player.x, remains.z - world.player.z));
+    if (metres !== this.#remainsRowMetres || this.#remainsRowText === null) {
+      this.#remainsRowMetres = metres;
+      this.#remainsRowText = remainsTrackerText(this.#remainsLook, metres);
+    }
+    return this.#remainsRowText;
+  }
+
   // ------------------------------------------------------ SPEC-054: below
 
   /**
@@ -4449,6 +4693,8 @@ export class SurfaceScene extends UiScene<'surface'> {
     }
     this.#swapUndrawn = true;
     this.#syncDebugStrip();
+    // SPEC-057 §4.5: the remains show on the surface level only.
+    this.#syncRemains();
     this.services.events.emit('level:changed', { planet: this.#planet.id, level: to });
     return left;
   }
@@ -4677,7 +4923,10 @@ export class SurfaceScene extends UiScene<'surface'> {
     // corridor into it, where Eden's cable tray runs.
     const toVault = button('surface-goto-vault', 'To vault', () => this.#debugGotoVault());
     const toCorridor = button('surface-goto-corridor', 'To corridor', () => this.#debugGotoCorridor());
-    above.push(toDescent, descend);
+    // SPEC-057 §4.7: 1 m from the remains, toward the pad — on the surface
+    // level, where they lie — so the next step recovers them.
+    const toRemains = button('surface-goto-remains', 'To remains', () => this.#debugGotoRemains());
+    above.push(toDescent, descend, toRemains);
     below.push(ascend, toVault, toCorridor);
     this.#syncDebugStrip();
     button('surface-goto-origin', 'To origin', () => {
@@ -4817,6 +5066,23 @@ export class SurfaceScene extends UiScene<'surface'> {
     economy.addItem('landmine', 7);
     economy.addItem('demo_charge', 1);
     save.quick.explosive = 'frag_grenade';
+  }
+
+  /**
+   * SPEC-057 §4.7: `GOTO_REMAINS_DISTANCE` from the remains toward the pad, on
+   * the surface level of their planet — inside the recover radius, so the next
+   * step takes them back. Nothing happens with none here, or below.
+   */
+  #debugGotoRemains(): void {
+    const remains = this.#save?.progress.remains ?? null;
+    const pad = this.#levels?.surface.pad ?? null;
+    if (remains === null || !this.#remainsHere) return;
+    const dx = pad === null ? 1 : pad.x - remains.x;
+    const dz = pad === null ? 0 : pad.z - remains.z;
+    const length = Math.hypot(dx, dz);
+    const ux = length > 1e-6 ? dx / length : 1;
+    const uz = length > 1e-6 ? dz / length : 0;
+    this.#teleport(remains.x + ux * GOTO_REMAINS_DISTANCE, remains.z + uz * GOTO_REMAINS_DISTANCE);
   }
 
   /** SPEC-054 §4.14: beside the nearest unclaimed cache of the active level — a loose one first — toward its room. */
@@ -6378,6 +6644,8 @@ export class SurfaceScene extends UiScene<'surface'> {
     const tracker = this.#tracker;
     const rows = tracker.rows;
     rows.length = 0;
+    // SPEC-057 §4.5: the remains' row under the objectives, whatever they are.
+    tracker.remains = this.#world === null ? null : this.#remainsRow(this.#world);
     tracker.distance = this.#focusDistance;
     tracker.bearing = this.#focusBearing;
     tracker.pulse = this.#stuck.level >= 1;
@@ -6633,6 +6901,10 @@ export class SurfaceScene extends UiScene<'surface'> {
     if (level.id === 'surface' && descent !== null && this.#shelterDiscovered[descent.shelter.index] === true) {
       this.#markAt(descent.x, descent.z, 'descent', 'Descent');
     }
+    // SPEC-057 §4.5: the remains, on this planet's surface level — not an
+    // objective, so no ring, no rim arrow and no waypoint.
+    const remains = save.progress.remains;
+    if (this.#remainsHere && remains !== null) this.#markAt(remains.x, remains.z, 'remains', 'Your remains').label = null;
     // SPEC-055 §4.1: the relic terminal, once landmark instance 0 is discovered (hollow once spent).
     const relic = this.#puzzles?.relicMark() ?? null;
     if (relic !== null && this.#relicMarked(level)) this.#markAt(relic.x, relic.z, 'relic', 'Relic terminal').hollow = relic.spent;
@@ -6883,6 +7155,8 @@ export class SurfaceScene extends UiScene<'surface'> {
           // SPEC-041 §4.4: a death opens the seal at once; the respawn clears the arena.
           if (this.#arena !== null) this.#arena.sealed = false;
           const lost = this.#economy?.applyDeathPenalty() ?? {};
+          // SPEC-057 §4.1 steps 3–4: what was taken stays where they fell.
+          const remainsLine = this.#dropRemains(lost);
           // SPEC-042 §4.5: what killed the player, and the one tip that applies.
           // The cause names its species off the event, so an enemy that
           // despawned in the same step still has its name (42-j).
@@ -6892,7 +7166,11 @@ export class SurfaceScene extends UiScene<'surface'> {
             healsCarried: this.#healsCarried(),
           });
           this.#death?.show(lost, deathCause(cause), tip);
+          // SPEC-057 §4.1 step 5: and where it went.
+          this.#death?.setRemains(remainsLine);
           this.#onDeath(); // SPEC-027 §4.6: the first-death tip, the repeat hint
+          // SPEC-057 §4.1 step 6: the first remains this device has seen.
+          if (remainsLine !== null) this.#requestTip('remains');
           // SPEC-055 55-k: the plates' progress resets; nothing else does.
           this.#puzzles?.onDeath();
         },

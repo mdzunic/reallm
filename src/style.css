@@ -2284,6 +2284,26 @@ html.reduce-motion .hud.is-static .hud-static {
   text-shadow: var(--hud-halo);
 }
 
+/* SPEC-057 §4.6: the remains' tag — on the HUD plate and halo, like a plate. */
+.remains-tag {
+  position: absolute;
+  left: 0;
+  top: 0;
+  padding: 2px 6px;
+  border-radius: var(--radius);
+  background: var(--hud-plate);
+  font: 600 12px/1.2 var(--font-mono, monospace);
+  color: #f2efe6;
+  text-shadow: var(--hud-halo);
+  pointer-events: none;
+  white-space: nowrap;
+  will-change: transform;
+}
+
+.remains-tag.is-hidden {
+  display: none;
+}
+
 /* --------------------------------------------------------------- dialogue */
 /* Bottom-center (AC-69). SPEC-037 §4.3: on the bottom stack — clear of the
    quick bar, its ▲ and the interact prompt on the keyboard, and of the thumb
