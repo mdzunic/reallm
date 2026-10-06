@@ -4204,7 +4204,6 @@ export class SurfaceScene extends UiScene<'surface'> {
       !this.#leaving &&
       this.#deathAt === null &&
       !this.#rotateBlocked() &&
-      this.#dialogue?.busy !== true &&
       this.#world?.player.alive === true
     );
   }

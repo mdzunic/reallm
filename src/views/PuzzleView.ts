@@ -1,16 +1,16 @@
 // The puzzles as drawn (SPEC-055 §4.1, §4.6, §4.10): the terminals — a vault's
 // below, the plates' panel, and a relic's beside its landmark above — the
 // pressure plates with their glyphs, and the beam's mirrors, its lens and
-// receiver and the beam itself. One root per level: the scene hangs the cave's
-// under the cave view (so it shows and hides with the cave) and the surface's
-// beside the environment.
+// receiver and the beam itself. One view per level, both hung under the
+// surface view's level root; the scene shows the one of the level on show.
 //
 // Every piece is SPEC-052's cave kit through `kitGeometry` — the GLB once the
 // asset cache holds it, a procedural stand-in until then — under the kit's own
 // glow material. Nothing here collides: SPEC-054's walls and reachability are
 // fixed before a puzzle is generated, and props that never block keep that
-// proof valid (§2). A world puzzle adds at most four draws: plates and their
-// glyphs, or mirrors, the lens and receiver, and the beam (§4.10).
+// proof valid (§2). A world puzzle adds at most four draws: the plates, their
+// glyphs and the order on the panel's screen, or the mirrors, the lens and
+// receiver, and the beam (§4.10).
 //
 // Views may not import `systems/` (SPEC-001 §4): the scene hands in plain
 // positions, states and booleans, and this draws them. The beam's ribbon is
@@ -43,6 +43,11 @@ const PULSE_HZ = 1.6;
 const GLYPH_SIZE = 0.34;
 const GLYPH_LIFT = 0.135;
 const GLYPH_IDLE = new THREE.Color('#8f969e');
+/** §4.6: the panel's screen glyphs — their size, their spacing, and where they stand in the terminal's frame. */
+const PANEL_GLYPH_SIZE = 0.07;
+const PANEL_GLYPH_STEP = 0.17;
+const PANEL_GLYPH_HEIGHT = 1.24;
+const PANEL_GLYPH_OUT = 0.26;
 /** A plate's GLB is 1.6 m across; the plates are drawn at their 0.9 m radius (§3's `PLATE_RADIUS`). */
 const PLATE_MODEL_RADIUS = 0.8;
 /** §4.2: the mirror states' yaws — `/`, `\`, then the two closed states square to the grid. */
@@ -112,6 +117,8 @@ export class PuzzleView {
   #glyphRanges: { start: number; count: number }[] = [];
   #pressed: boolean[] = [];
   #platePulse = -1;
+  /** §4.6: the order's glyphs on the plates' panel's screen. */
+  #panelGlyphs: THREE.Mesh | null = null;
   #mirrors: THREE.InstancedMesh | null = null;
   #mirrorSpots: { x: number; z: number; state: number }[] = [];
   #mirrorPulse = -1;
@@ -223,6 +230,33 @@ export class PuzzleView {
     if (this.#platePulse === index) return;
     this.#platePulse = index;
     this.#writeGlyphs(0);
+  }
+
+  /**
+   * §4.6: the glyphs also draw on the panel's screen — the order, left to
+   * right, in the beacon colour, just in front of the terminal at `spot`;
+   * `null` (a solved board's dark screen) takes them away.
+   */
+  setPanelGlyphs(spot: { x: number; z: number; facing: number } | null, glyphs: readonly PlateGlyph[]): void {
+    this.#dropMesh(this.#panelGlyphs);
+    this.#panelGlyphs = null;
+    if (spot === null || glyphs.length === 0) return;
+    const scale = PANEL_GLYPH_SIZE / GLYPH_SIZE;
+    const parts = glyphs.map((glyph, i) => {
+      const shape = new THREE.ShapeGeometry(glyphShape(glyph), 6);
+      shape.scale(scale, scale, 1);
+      shape.translate((i - (glyphs.length - 1) / 2) * PANEL_GLYPH_STEP, PANEL_GLYPH_HEIGHT, PANEL_GLYPH_OUT);
+      return shape;
+    });
+    const merged = mergeGeometries(parts);
+    if (merged === null) return;
+    const matrix = new THREE.Matrix4().makeRotationY(yawOf(spot.facing));
+    matrix.setPosition(spot.x, 0, spot.z);
+    merged.applyMatrix4(matrix);
+    const mesh = new THREE.Mesh(merged, new THREE.MeshBasicMaterial({ color: this.#beacon, side: THREE.DoubleSide }));
+    mesh.name = 'puzzle-panel-glyphs';
+    this.root.add(mesh);
+    this.#panelGlyphs = mesh;
   }
 
   /** §4.6: the mirrors, each a `cave_mirror` turned to its state's yaw. */

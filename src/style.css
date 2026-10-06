@@ -6739,6 +6739,12 @@ html.plain-text #ui :is(.screen-body, .settings, .sheet, .comms-log, .dialogue, 
   }
 }
 
+/* 55-l: the cells follow the scheme — a thumb gets up to 72 px where the
+   screen has room; the 44 px floor and the short-screen sum are the same. */
+html.scheme-touch .puzzle-panel {
+  --cell: clamp(44px, calc((100dvh - 56px) / var(--n, 4)), 72px);
+}
+
 /* §4.4: under reduce motion a turn and a flip are instant. */
 html.reduce-motion .puzzle-pipe,
 html.reduce-motion .puzzle-cell {

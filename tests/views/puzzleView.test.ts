@@ -61,6 +61,24 @@ describe('the puzzle view (SPEC-055 §4.6, §4.10)', () => {
     }
   });
 
+  it('the panel’s screen shows the order in one more draw, and none once it is dark', () => {
+    const view = new PuzzleView(new THREE.Group(), BEACON);
+    view.setPlates(PLATES);
+    view.setPanelGlyphs({ x: 20, z: 0, facing: Math.PI }, ['triangle', 'star', 'circle']);
+    expect(view.drawObjects).toBe(3);
+    const glyphs = named(view, 'puzzle-panel-glyphs');
+    glyphs.geometry.computeBoundingBox();
+    const box = glyphs.geometry.boundingBox as THREE.Box3;
+    // At the terminal, at screen height, on its front (−x for a terminal facing −x).
+    expect(box.min.y).toBeGreaterThan(1);
+    expect(box.max.y).toBeLessThan(1.5);
+    expect(box.getCenter(new THREE.Vector3()).x).toBeLessThan(20);
+    expect(Math.abs(box.getCenter(new THREE.Vector3()).z)).toBeLessThan(0.05);
+    view.setPanelGlyphs(null, []);
+    expect(view.drawObjects).toBe(2);
+    view.dispose();
+  });
+
   it('terminals draw lit and spent apart — one object each, none for an empty side', () => {
     const view = new PuzzleView(new THREE.Group(), BEACON);
     view.setTerminals([{ x: 0, z: 0, facing: 0, spent: false }]);

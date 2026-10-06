@@ -56,6 +56,7 @@ import {
   bypassNote,
   bypassOpen,
   cellLabel,
+  plateOrderGlyphs,
   platesPanelLine,
   PUZZLE_SOLVED_TEXT,
   puzzleHintLine,
@@ -68,7 +69,7 @@ import type { LevelId } from '@/scenes/surface/Level';
 import { choiceSheet } from '@/ui/ConfirmSheet';
 import type { UiRoot } from '@/ui/dom';
 import { openPuzzlePanel, type PuzzlePanelView } from '@/ui/PuzzlePanel';
-import { PuzzleView, type TerminalSpot } from '@/views/PuzzleView';
+import { PuzzleView, type PlateGlyph, type TerminalSpot } from '@/views/PuzzleView';
 import { LANDMARK_FOOTPRINT } from '@/views/SurfaceProps';
 
 // ------------------------------------------------------------- the words
@@ -794,10 +795,11 @@ export class PuzzleSites {
     const state = world === null ? undefined : this.#states.get(world.id);
     const p = state?.puzzle;
     if (p?.kind === 'plates') {
-      // The plates' panel is a terminal too, its screen dark once solved.
-      const room = this.#cave?.rooms[this.#cave.panelRoom];
-      const facing = room === undefined ? 0 : Math.atan2(room.z - p.panel.z, room.x - p.panel.x) + Math.PI;
-      terminals.push({ x: p.panel.x, z: p.panel.z, facing: Number.isFinite(facing) ? facing : 0, spent: state?.solved === true });
+      // The plates' panel is a terminal too — the order on its screen, dark once solved.
+      const facing = this.#panelFacing(p);
+      const spent = state?.solved === true;
+      terminals.push({ x: p.panel.x, z: p.panel.z, facing, spent });
+      view.setPanelGlyphs(spent ? null : { x: p.panel.x, z: p.panel.z, facing }, plateOrderGlyphs(p) as PlateGlyph[]);
     }
     view.setTerminals(terminals);
     if (p?.kind === 'plates') {
@@ -813,6 +815,20 @@ export class PuzzleSites {
       this.#lit = false;
       this.#syncBeam();
     }
+  }
+
+  /**
+   * The way the plates' panel faces: out from its room's centre — or, standing
+   * at the centre, toward the puzzle room it reads for.
+   */
+  #panelFacing(p: PlatesPuzzle): number {
+    const cave = this.#cave;
+    const room = cave?.rooms[cave.panelRoom];
+    if (room !== undefined && Math.hypot(p.panel.x - room.x, p.panel.z - room.z) > 0.5) {
+      return Math.atan2(p.panel.z - room.z, p.panel.x - room.x);
+    }
+    const puzzle = cave?.rooms[cave.puzzleRoom];
+    return puzzle === undefined ? 0 : Math.atan2(puzzle.z - p.panel.z, puzzle.x - p.panel.x);
   }
 
   /** The pressed plates are the order's first `progress`; all of them once solved. */
@@ -949,12 +965,7 @@ export class PuzzleSites {
         if (puzzle.kind === 'plates') {
           const next = puzzle.plates[puzzle.order[puzzle.progress] ?? -1];
           if (this.#panelRead && next !== undefined) consider(next.x, next.z, next.x, next.z, p.facing);
-          else {
-            const room = this.#cave?.rooms[this.#cave.panelRoom];
-            const away = room === undefined ? 0 : Math.atan2(room.z - puzzle.panel.z, room.x - puzzle.panel.x);
-            const facing = Number.isFinite(away) && (room?.x !== puzzle.panel.x || room?.z !== puzzle.panel.z) ? away + Math.PI : 0;
-            terminal({ x: puzzle.panel.x, z: puzzle.panel.z, facing });
-          }
+          else terminal({ x: puzzle.panel.x, z: puzzle.panel.z, facing: this.#panelFacing(puzzle) });
         } else if (puzzle.kind === 'beam') {
           const move = hintMove(puzzle);
           const index = move !== null && 'mirror' in move ? move.mirror : 0;
