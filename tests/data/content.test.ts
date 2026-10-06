@@ -2999,6 +2999,13 @@ describe('puzzles: the phrases and the human lock (SPEC-055 §4.3, §4.7)', () =
     expect(HUMAN_LOCK.lineSampled).toContain('sampled');
   });
 
+  it('SPEC-048’s limits hold for the verdicts at the longest fill: 220 characters, and no unknown token', () => {
+    for (const line of [HUMAN_LOCK.linePredicted, HUMAN_LOCK.lineSampled]) {
+      expect(atLongest(line).length, line).toBeLessThanOrEqual(220);
+      expect(unknownTokens(line), line).toEqual([]);
+    }
+  });
+
   it('the puzzle tip reads §4.4’s two wordings', () => {
     expect(TIP_IDS).toContain('puzzle');
     expect(TIPS.puzzle).toEqual({
