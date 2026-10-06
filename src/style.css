@@ -4690,6 +4690,57 @@ html.reduce-motion .chapter-card-containment {
   animation: none;
 }
 
+/* SPEC-063 §4.5: the contact card — the chapter card's place and type, over
+   the live flight. It waits for the chapter card, so the two never share the
+   spot; opacity is all it animates, and the layer takes no pointer. */
+.contact-card-host {
+  display: contents;
+}
+
+.contact-card {
+  position: fixed;
+  left: 50%;
+  top: max(18%, calc(env(safe-area-inset-top) + 12px));
+  transform: translateX(-50%);
+  z-index: 54;
+  width: min(32em, 92%);
+  text-align: center;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity var(--card-fade, 0.4s) ease;
+}
+
+.contact-card.is-visible {
+  opacity: 1;
+}
+
+/* Under reduce motion the card cuts in and out. */
+.contact-card.is-static {
+  transition: none;
+  opacity: 1;
+}
+
+.contact-card p {
+  margin: 0 0 0.3em;
+}
+
+.contact-card-kicker {
+  font-variant-caps: all-small-caps;
+  letter-spacing: 0.32em;
+  color: var(--ink-dim);
+}
+
+.contact-card-name {
+  font-size: calc(clamp(22px, 4.5vmin, 40px) * var(--text-scale));
+  letter-spacing: 0.08em;
+  color: var(--hp);
+  text-shadow: var(--text-glow);
+}
+
+.contact-card-epithet {
+  font-style: italic;
+}
+
 /* The boss reveal (§4.4): letterbox, title and one caption at z 64 — above
    every panel and overlay, below the film layer (65). The bars and the words
    are the whole layer; the camera move is the scene's. */

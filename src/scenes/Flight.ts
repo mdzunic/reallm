@@ -23,13 +23,16 @@ import { cargoCap, maxHp } from '@/core/Save';
 import { FLIGHT_ASSETS, PLANET_ART } from '@/data/assets';
 import {
   CHAPTER_CARDS,
+  CONTACTS,
   ENEMIES,
   MISSIONS,
   PLANETS,
   TIPS,
   type ClueDef,
+  type ContactDef,
   type DialogueId,
   type EnemyDef,
+  type EnemyId,
   type PlanetDef,
   type TipId,
 } from '@/data/index';
@@ -37,8 +40,9 @@ import { ClueTracker, FlagView, type ClueScene } from '@/systems/Clues';
 import { computePlayerStats } from '@/systems/Combat';
 import { Economy } from '@/systems/Economy';
 import { tipDue, tipKey } from '@/systems/Guidance';
-import { CARD, cardDue, cardKey, LINE_LEDGER, missionLinePlays } from '@/systems/StoryBeats';
+import { CARD, cardDue, cardKey, contactDue, contactKey, LINE_LEDGER, missionLinePlays } from '@/systems/StoryBeats';
 import { showChapterCard } from '@/ui/ChapterCard';
+import { showContactCard } from '@/ui/ContactCard';
 import { dialogueLayer } from '@/ui/DialogueUI';
 import { director } from '@/scenes/Director';
 import {
@@ -180,6 +184,14 @@ export class FlightScene extends UiScene<'flight'> {
   #reticleMarkT = 0;
   /** SPEC-041 §4.7: the lead pip is up — `sceneInfo.lead`. */
   #leadShown = false;
+  /**
+   * SPEC-063 §4.5: when this trip's chapter card will have been removed, on
+   * `performance.now()`'s clock — 0 when there is none. A contact card due
+   * before it waits until then (E111).
+   */
+  #chapterCardGoneAt = 0;
+  /** SPEC-063 §4.5: the enemies whose contact fired on this trip, in order — `sceneInfo.contacts`. */
+  readonly #contacts: EnemyId[] = [];
 
   readonly #frameInput: FlightInput = {
     steerX: 0,
@@ -299,6 +311,7 @@ export class FlightScene extends UiScene<'flight'> {
       this.ui.toast(`ARIA: ${this.#planet.name} on approach. ${this.#planet.blurb}`, 'info', 6000);
     }
     this.#showChapterCard(save);
+    this.#watchContacts(bus);
 
     this.disposer.add(this.services.events.on('ship:damaged', ({ source }) => {
       // SPEC-037 §4.6: an ion-storm tick never flashes — the storm pill and the
@@ -434,10 +447,64 @@ export class FlightScene extends UiScene<'flight'> {
       // SPEC-058 §4.4: the containment line reads the save's capped level.
       remove = showChapterCard(host, CHAPTER_CARDS[planet], reduceMotion, save.meta.iteration);
     }, CARD.delay * 1000);
+    // SPEC-063 §4.5: the moment the card will be gone, for a contact card due under it.
+    this.#chapterCardGoneAt = performance.now() + (CARD.delay + CARD.show + CARD.fade) * 1000;
     this.disposer.add(() => {
       clearTimeout(timer);
       remove?.();
       host.remove();
+    });
+  }
+
+  /**
+   * SPEC-063 §4.5: the first group of a flight enemy on the first trip to its
+   * contact planet, once a page session — the card over the live flight, and
+   * the comms line through the shared layer. With films off the card stays
+   * away and the line still plays (E109). Nothing here touches the flight's
+   * step, the input, the music, the HUD or the save: no beat holds a flight
+   * (SPEC-042), and the line queues behind any line in progress.
+   */
+  #watchContacts(bus: EventBus<GameEvents>): void {
+    this.disposer.add(
+      bus.on(
+        'flight:groupSpawned',
+        ({ enemy }) => {
+          const save = this.#save;
+          const def = (CONTACTS as Partial<Record<EnemyId, ContactDef>>)[enemy];
+          if (save === null || def === undefined) return;
+          const beats = director(this.services);
+          if (!contactDue(enemy, this.#planet.id, save.progress.visits, beats.session)) return;
+          beats.session.add(contactKey(enemy));
+          this.#contacts.push(enemy);
+          if (beats.enabled) this.#showContactCard(enemy, ENEMIES[enemy].name.toUpperCase(), def.epithet);
+          this.#playLine(save, def.line);
+        },
+        this,
+      ),
+    );
+  }
+
+  /**
+   * SPEC-063 §4.5: mounts the contact card like `#showChapterCard` — a
+   * `display: contents` host directly under `#ui`, taken away by the
+   * `Disposer` — once the chapter card has been removed (E111), else at once.
+   * The group spawns inside the flight's step, so the mount always runs on a
+   * timer of its own and the step builds no DOM.
+   */
+  #showContactCard(enemy: EnemyId, name: string, epithet: string): void {
+    const reduceMotion = this.services.settings.get().reduceMotion;
+    const wait = Math.max(0, this.#chapterCardGoneAt - performance.now());
+    let host: HTMLElement | null = null;
+    let remove: (() => void) | null = null;
+    const timer = setTimeout(() => {
+      host = el('div', 'contact-card-host');
+      uiRootEl().append(host);
+      remove = showContactCard(host, { enemy, name, epithet }, reduceMotion);
+    }, wait);
+    this.disposer.add(() => {
+      clearTimeout(timer);
+      remove?.();
+      host?.remove();
     });
   }
 
@@ -1219,6 +1286,9 @@ export class FlightScene extends UiScene<'flight'> {
       info['shipY'] = Number(flight.ship.y.toFixed(2));
       // SPEC-041 §4.7: 1 while the lead pip is up.
       info['lead'] = this.#leadShown ? 1 : 0;
+      // SPEC-063 §4.5: the enemies whose contact fired on this trip, in order,
+      // card or not — comma-separated, the row's values being flat.
+      info['contacts'] = this.#contacts.join(',');
     }
     return info;
   }

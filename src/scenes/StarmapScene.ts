@@ -28,7 +28,7 @@ import {
 import { GLYPHS } from '@/data/glossary';
 import { Economy } from '@/systems/Economy';
 import { Progression } from '@/systems/Progression';
-import { departureDue, departureKey } from '@/systems/StoryBeats';
+import { contactFilm, departureDue, departureKey } from '@/systems/StoryBeats';
 import { activeFlightMission, runSkip } from '@/systems/Flight';
 import { duration } from '@/systems/Format';
 import { departReason, missionStatus, requirementText, skipRefusalText, starmapPreselect } from '@/systems/UiHelpers';
@@ -597,10 +597,14 @@ export class StarmapScene extends UiScene<'starmap'> {
       // nothing to hold and no timeline of its own, and the Depart button is
       // already disabled for the ride, so the film is simply awaited. The
       // flight scene starts its own bed, so the film's music fades to nothing.
+      // SPEC-063 §4.4: the contact planet's film follows under the same check
+      // — "Wreckers" after "Outbound" to Vetra — and each skips on its own.
       const beats = director(this.services);
       if (beats.enabled && departureDue(planet, data.progress.visits, beats.session)) {
         beats.session.add(departureKey(planet));
         await beats.playFilm('departure', { musicAfter: null });
+        const film = contactFilm(planet);
+        if (film !== null) await beats.playFilm(film, { musicAfter: null });
       }
       // SPEC-034 §4.16: from the moment the film settles until the flight scene
       // has entered, the star map is behind a black veil. It used to re-render
