@@ -129,6 +129,42 @@ for (const planet of PLANET_IDS) {
   });
 }
 
+// SPEC-057 §4.6: the remains — the body, the costlier look (2 616 triangles
+// under its pillar) — on screen 6 m from the spawn, and the same frame stays
+// inside the §4.11 budget. The remains' own share is at most 3 draws and
+// 2 700 triangles.
+test('the medium frame stays inside the §4.11 budget with the remains on screen (SPEC-057 §4.6)', async ({ page }) => {
+  await start(page, '/?debug&seed=123&quality=medium');
+  await page.evaluate(() => {
+    const save = window.__reallm.save().create(
+      0,
+      {
+        name: 'Vance',
+        classId: 'marine',
+        appearance: { portrait: 1, primary: '#b7472a', secondary: '#2a3b4c' },
+        attributes: { might: 6, vigor: 5, agility: 1, tech: 1 },
+        difficulty: 'normal',
+      },
+      123,
+    );
+    save.progress.flags.push('signal_decoded');
+    // Seed 123 lands the salvager at (11.9, 1.7): these lie 6 m off, outside the 2 m reach.
+    save.progress.remains = { planet: 'cinder4', x: 6, z: 1, resources: { oil: 20 }, restart: 1 };
+  });
+  await page.evaluate(() => window.__reallm.go('surface', { planet: 'cinder4', firstLanding: false }, { force: true }));
+  await expect(page.locator('[data-testid="scene-label"]')).toHaveText('surface');
+  const stats = await afterFrames(page, 30);
+  const info = (await page.evaluate(() => window.__reallm.stats())).sceneInfo ?? {};
+  expect(info['remainsDrawn']).toBe('body');
+  // The tag is up only while the remains are on screen and within 30 m.
+  expect(info['remainsTag']).toBe(1);
+  expect(Number(info['remainsDraws'])).toBeLessThanOrEqual(3);
+  expect(Number(info['remainsTris'])).toBeLessThanOrEqual(2700);
+  expect(stats.drawCalls).toBeGreaterThan(10);
+  expect(stats.drawCalls).toBeLessThanOrEqual(96); // 80 scene + 16 post
+  expect(stats.triangles).toBeLessThanOrEqual(120_000);
+});
+
 test('the debug-scene row still parses on the environment build', async ({ page }) => {
   await start(page, URL);
   await afterFrames(page, 30);

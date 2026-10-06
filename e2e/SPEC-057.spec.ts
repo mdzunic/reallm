@@ -289,3 +289,60 @@ test('9. a death below leaves the remains at the descent on the surface', async 
   expect((await info(page))['level']).toBe('surface');
   expect((await info(page))['remainsDrawn']).toBe('pack');
 });
+
+// ------------------------------------------------------- the arena entrance
+
+/** Click through any open dialogue, as the other surface suites do. */
+async function dismiss(page: Page): Promise<void> {
+  const dialogue = page.locator('[data-testid="dialogue"]');
+  const advance = page.locator('[data-testid="dialogue-advance"]');
+  for (let i = 0; i < 30; i++) {
+    if (!(await dialogue.isVisible().catch(() => false))) return;
+    if (await advance.isVisible().catch(() => false)) await advance.click({ force: true, timeout: 2_000 }).catch(() => undefined);
+    else await dialogue.click({ force: true, timeout: 2_000 }).catch(() => undefined);
+    await page.waitForTimeout(120);
+  }
+}
+
+test('10. a death in a boss stage leaves the remains at the arena’s mouth, and the respawn takes them back at once', async ({ page }) => {
+  test.setTimeout(150_000);
+  // `c1_m3` at stage 0 — the Wurm's nest — as SPEC-041's arena cases land.
+  await land(page, { missionsDone: ['c1_m1', 'c1_m2'] });
+  await page.evaluate(() => {
+    const save = window.__reallm.save().current;
+    if (save !== null) save.progress.missionsActive = [{ id: 'c1_m3', stage: 0, counters: {} }];
+  });
+  // The active list is read at entry: land again with it in place.
+  await page.evaluate(() => window.__reallm.go('surface', { planet: 'cinder4', firstLanding: false }, { force: true }));
+  await expect(page.locator('[data-testid="scene-label"]')).toHaveText('surface');
+  await expect(page.locator('[data-testid="transition-fade"]')).toHaveCSS('pointer-events', 'none', { timeout: 30_000 });
+  await dismiss(page);
+  // `surface-goto-boss` stands the salvager 12 m north of the nest's centre.
+  await page.getByTestId('surface-goto-boss').click();
+  const at = await info(page);
+  const nest = { x: Number(at['px']), z: Number(at['pz']) - 12 };
+  const reveal = page.locator('[data-testid="boss-reveal"]');
+  if (await reveal.isVisible({ timeout: 8_000 }).catch(() => false)) {
+    await expect
+      .poll(
+        async () => {
+          await page.evaluate(() => document.querySelector<HTMLButtonElement>('[data-testid="reveal-skip"]')?.click());
+          return reveal.count();
+        },
+        { timeout: 15_000 },
+      )
+      .toBe(0);
+  }
+  await die(page);
+  const dropped = await remainsOf(page);
+  expect(dropped).toMatchObject({ planet: 'cinder4', resources: { oil: 20 } });
+  // E63: on the line toward the pad, the nest's 20 m radius + 6 m out.
+  const out = Math.hypot((dropped?.x ?? Infinity) - nest.x, (dropped?.z ?? Infinity) - nest.z);
+  expect(out).toBeGreaterThanOrEqual(25);
+  expect(out).toBeLessThanOrEqual(27);
+  await respawned(page);
+  // The respawn stands on them: the first step takes them back.
+  await expect.poll(async () => remainsOf(page), { timeout: 10_000 }).toBeNull();
+  expect((await current(page))?.resources.oil).toBe(200);
+  expect((await current(page))?.meta.stats.recoveries).toBe(1);
+});
