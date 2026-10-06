@@ -191,10 +191,10 @@ describe('Command’s rating (§4.4)', () => {
   const MAIN = CLUES.filter((def) => !def.offTask).map((def) => def.id);
   const found = (n: number): Set<string> => new Set(OFF_TASK.slice(0, n));
 
-  it('counts only off-task clues — eight in this spec, nine with SPEC-049’s keepsake', () => {
-    expect(OFF_TASK).toHaveLength(9);
+  it('counts only off-task clues — eight in this spec, nine with SPEC-049’s keepsake, fifteen with SPEC-056’s shards', () => {
+    expect(OFF_TASK).toHaveLength(15);
     expect(offTaskCount(new Set(MAIN))).toBe(0);
-    expect(offTaskCount(new Set(OFF_TASK))).toBe(9);
+    expect(offTaskCount(new Set(OFF_TASK))).toBe(15);
     expect(offTaskCount(new Set([...MAIN, 'clue_hull', 'clue_tally']))).toBe(2);
   });
 
@@ -227,11 +227,12 @@ describe('Command’s rating (§4.4)', () => {
 describe('notesModel (§4.4)', () => {
   it('with nothing found: no rating, no grade, and blank lines for every chapter reached', () => {
     const model = notesModel(new Set(), 2);
-    // SPEC-049 §4.6: 20 clues, chapter 1 gaining `clue_restart`.
-    expect(model).toMatchObject({ found: 0, total: 20, rating: null, grade: null });
+    // SPEC-049 §4.6: 20 clues, chapter 1 gaining `clue_restart`; SPEC-056
+    // §4.7: 26, each chapter gaining its vault's shard.
+    expect(model).toMatchObject({ found: 0, total: 26, rating: null, grade: null });
     expect(model.chapters.map((chapter) => [chapter.chapter, chapter.found.length, chapter.missing])).toEqual([
-      [1, 0, 4],
-      [2, 0, 2],
+      [1, 0, 5],
+      [2, 0, 3],
     ]);
   });
 
@@ -242,10 +243,11 @@ describe('notesModel (§4.4)', () => {
     expect(model.grade).toBe('an acceptable run');
     expect(model.chapters).toHaveLength(3);
     expect(model.chapters[0]?.found.map((def) => def.id)).toEqual(['clue_raider_echo', 'clue_hull']);
-    expect(model.chapters[0]?.missing).toBe(2);
+    expect(model.chapters[0]?.missing).toBe(3);
     expect(model.chapters[1]?.found.map((def) => def.id)).toEqual(['iteration_log']);
-    // SPEC-049 §4.6: chapter 3 gains the awake aside, the memory answer and the keepsake.
-    expect(model.chapters[2]).toMatchObject({ chapter: 3, missing: 5 });
+    // SPEC-049 §4.6: chapter 3 gains the awake aside, the memory answer and
+    // the keepsake; SPEC-056 §4.7: and the Thessaly shard.
+    expect(model.chapters[2]).toMatchObject({ chapter: 3, missing: 6 });
   });
 
   it('rates a single main clue 1.00, a good run', () => {
@@ -254,10 +256,10 @@ describe('notesModel (§4.4)', () => {
     expect(model.grade).toBe('a good run');
   });
 
-  it('reads one clue found as Recorded 1 of 20 at 0.97 (§6.2 case 5, SPEC-049 §4.8)', () => {
+  it('reads one clue found as Recorded 1 of 26 at 0.97 (§6.2 case 5, SPEC-049 §4.8, SPEC-056 §4.7)', () => {
     const model = notesModel(new Set(['clue_hull']), 1);
-    expect([model.found, model.total, model.rating?.toFixed(2), model.grade]).toEqual([1, 20, '0.97', 'a good run']);
-    expect(model.chapters[0]?.missing).toBe(3);
+    expect([model.found, model.total, model.rating?.toFixed(2), model.grade]).toEqual([1, 26, '0.97', 'a good run']);
+    expect(model.chapters[0]?.missing).toBe(4);
   });
 
   it('clamps the chapters to 1…6', () => {
@@ -297,5 +299,54 @@ describe('the catalogue’s helpers (§4.3, §4.4)', () => {
     list.push('clue_tally');
     expect(view.of(list).has('clue_tally')).toBe(true);
     expect(view.of(['other']).has('clue_hull')).toBe(false);
+  });
+});
+
+describe('the archive shards (SPEC-056 §4.7)', () => {
+  const VAULTS = ['cinder4_vault', 'vetra_vault', 'thessaly_vault', 'ferrum_vault', 'hive_vault', 'eden_vault'] as const;
+  const SHARDS = ['shard_cinder4', 'shard_vetra', 'shard_thessaly', 'shard_ferrum', 'shard_hive', 'shard_eden'] as const;
+
+  it('the cache trigger fires its vault\'s shard — once, and never for another cache', () => {
+    VAULTS.forEach((vault, index) => {
+      const tracker = new ClueTracker();
+      const at = scene(null);
+      expect(tracker.onCache(vault, at)?.id, vault).toBe(SHARDS[index]);
+      // Pending until the line settles: no second play.
+      expect(tracker.onCache(vault, at), vault).toBeNull();
+      tracker.settle(SHARDS[index] as FlagId);
+      // Found: never again, on any later landing.
+      at.flags.add(SHARDS[index] as string);
+      expect(tracker.onCache(vault, at), vault).toBeNull();
+    });
+    const tracker = new ClueTracker();
+    for (const cache of ['cinder4_loose_a', 'cinder4_loose_b', 'cinder4_relic', 'eden_relic'] as const) {
+      expect(tracker.onCache(cache, scene('cinder4')), cache).toBeNull();
+    }
+  });
+
+  it('a dropped log settles and fires again on the next open (E75)', () => {
+    const tracker = new ClueTracker();
+    const at = scene('vetra');
+    expect(tracker.onCache('vetra_vault', at)?.id).toBe('shard_vetra');
+    tracker.settle('shard_vetra');
+    expect(tracker.onCache('vetra_vault', at)?.id).toBe('shard_vetra');
+  });
+
+  it('the flag is set when the log starts: started() finds the shard, then nothing once it is set', () => {
+    const tracker = new ClueTracker();
+    SHARDS.forEach((shard) => {
+      expect(tracker.started(shard, new Set())?.id, shard).toBe(shard);
+      expect(tracker.started(shard, new Set([shard])), shard).toBeNull();
+      expect(isClueFlag(shard), shard).toBe(true);
+    });
+  });
+
+  it('offTaskCount counts every found shard, and Notes records them', () => {
+    expect(offTaskCount(new Set(SHARDS))).toBe(6);
+    expect(offTaskCount(new Set(['shard_hive']))).toBe(1);
+    expect(commandRating(new Set(['shard_cinder4', 'shard_vetra']))).toBe(0.94);
+    const model = notesModel(new Set(['shard_cinder4']), 1);
+    expect([model.found, model.total]).toEqual([1, 26]);
+    expect(model.chapters[0]?.found.map((def) => def.id)).toEqual(['shard_cinder4']);
   });
 });

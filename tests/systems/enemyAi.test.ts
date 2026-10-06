@@ -12,7 +12,9 @@ import {
   CHARGE,
   POST_ATTACK_PAUSE,
   SWARM_WINDUP_TRACK,
+  WANDER_SPEED_MULT,
   WINDUP_SECONDS,
+  slowOf,
 } from '@/systems/EnemyAi';
 import { damageReduction } from '@/systems/Combat';
 import { isDashing, stepDash, tryDash } from '@/systems/Dash';
@@ -1276,5 +1278,78 @@ describe('placed enemies leash at their own 24 m (SPEC-054 §4.7)', () => {
       expect(e.state).not.toBe('leash');
       expect(e.state).not.toBe('wander');
     }
+  });
+});
+
+// ------------------------------------------------------------- SPEC-056
+
+describe('the chill (SPEC-056 §4.4)', () => {
+  /** A chill of `mult` on `e` for the next `seconds`, as a Cold Coil hit sets it. */
+  function chill(h: Harness, e: EnemyEntity, mult: number, seconds = 10): void {
+    e.slowUntil = h.world.time + seconds;
+    e.slowMult = mult;
+  }
+
+  it('slowOf reads slowMult until slowUntil, then 1', () => {
+    const h = harness();
+    const e = h.spawn('hive_egg', 5, 0);
+    expect(slowOf(e, h.world.time)).toBe(1);
+    chill(h, e, 0.75, 1);
+    expect(slowOf(e, h.world.time)).toBe(0.75);
+    expect(slowOf(e, h.world.time + 0.999)).toBe(0.75);
+    expect(slowOf(e, h.world.time + 1)).toBe(1);
+  });
+
+  it('a chilled chaser closes at ×0.75 of its speed', () => {
+    const run = (mult: number): number => {
+      const h = harness();
+      const e = h.spawn('wurmling', -12, 0); // past the 6 m charge trigger
+      e.aggro = true;
+      e.state = 'chase';
+      if (mult !== 1) chill(h, e, mult);
+      const start = e.x;
+      for (let k = 0; k < 20; k++) h.step();
+      return e.x - start;
+    };
+    const free = run(1);
+    expect(free).toBeCloseTo(ENEMIES.wurmling.speed * 20 * STEP, 3);
+    expect(run(0.75)).toBeCloseTo(free * 0.75, 3);
+  });
+
+  it('a chilled wanderer strolls at ×0.75 of its stroll', () => {
+    const run = (mult: number): number => {
+      const h = harness();
+      h.world.player.x = 200; // far out of aggro
+      const e = h.spawn('wurmling', 0, 0);
+      e.wanderX = 6;
+      e.wanderZ = 0;
+      e.wanderAt = Infinity;
+      if (mult !== 1) chill(h, e, mult);
+      for (let k = 0; k < 10; k++) h.step();
+      return e.x;
+    };
+    const free = run(1);
+    expect(free).toBeCloseTo(ENEMIES.wurmling.speed * WANDER_SPEED_MULT * 10 * STEP, 3);
+    expect(run(0.75)).toBeCloseTo(free * 0.75, 3);
+  });
+
+  it('a slowed rusher\'s charge runs at its full 20 m/s', () => {
+    const h = harness();
+    const e = rusher(h, 5);
+    chill(h, e, 0.75);
+    h.step();
+    expect(e.state).toBe('chargeWindup');
+    while (e.state === 'chargeWindup') {
+      if (e.stateTime > CHARGE.windup - CHARGE.lock + STEP) h.world.player.z = 6;
+      h.step();
+    }
+    expect(e.state).toBe('charge');
+    expect(slowOf(e, h.world.time)).toBe(0.75);
+    let last = { x: e.x, z: e.z };
+    h.step();
+    expect(Math.hypot(e.x - last.x, e.z - last.z)).toBeCloseTo(CHARGE.speed * STEP, 6);
+    last = { x: e.x, z: e.z };
+    h.step();
+    expect(Math.hypot(e.x - last.x, e.z - last.z)).toBeCloseTo(CHARGE.speed * STEP, 6);
   });
 });

@@ -145,6 +145,12 @@ export interface EnemyEntity {
    * also never acquires a target standing past it.
    */
   leash: number;
+
+  // ------------------------------------------- SPEC-056 §3: the chill twist
+  /** World time the Cold Coil's slow ends; `Combat.spawnEnemy` resets it to 0. */
+  slowUntil: number;
+  /** The chase and wander speed × while `time < slowUntil` — 0.75, or 0.9 on a boss. */
+  slowMult: number;
 }
 
 /**
@@ -224,5 +230,7 @@ export function makeEnemy(): EnemyEntity {
     lastHitGuarded: false,
     placed: false,
     leash: 0,
+    slowUntil: 0,
+    slowMult: 1,
   };
 }

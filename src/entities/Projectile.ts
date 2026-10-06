@@ -3,6 +3,7 @@
 // per pooled object and cleared on reuse, so piercing shots never allocate in
 // the loop.
 import type { EnemyId } from '@/data/enemies';
+import type { WeaponTwist } from '@/data/items';
 
 export type ProjectileOwner = 'player' | 'enemy' | 'drone';
 
@@ -42,6 +43,18 @@ export interface ProjectileEntity {
   crit: boolean;
   /** SPEC-041 §4.6: the weapon's `pierce ≥ 1` at spawn — a bulwark's guard does not turn it. */
   armorPiercing: boolean;
+  // SPEC-056 §3 — the relic twists and the flare (reset on every acquire).
+  /**
+   * The `seek` shot's quarry: the enemy's entity id (`EnemyEntity.id`, which
+   * outlives swap-remove), −1 for none. A dead or despawned quarry clears it.
+   */
+  seekTarget: number;
+  /** Radians per second the shot may turn toward `seekTarget`; 0 for none. */
+  seekTurn: number;
+  /** The relic twist of the weapon that fired it; `null` for every other shot. */
+  twist: WeaponTwist | null;
+  /** A thrown flare's burn, in seconds — it lands as a flare, not a blast; 0 for none. */
+  flareSeconds: number;
 }
 
 export function makeProjectile(): ProjectileEntity {
@@ -66,5 +79,9 @@ export function makeProjectile(): ProjectileEntity {
     flight: 0,
     crit: false,
     armorPiercing: false,
+    seekTarget: -1,
+    seekTurn: 0,
+    twist: null,
+    flareSeconds: 0,
   };
 }

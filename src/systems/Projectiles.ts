@@ -9,7 +9,7 @@
 // piercing consumes hits in flight order. `hitIds` remembers pierced bodies so
 // no enemy is ever hit twice by the same shot.
 import type { SpatialHash } from '@/core/SpatialHash';
-import type { EnemyEntity } from '@/entities/Enemy';
+import { isBuried, type EnemyEntity } from '@/entities/Enemy';
 import type { ProjectileEntity } from '@/entities/Projectile';
 import type { CombatWorld } from '@/systems/Combat';
 
@@ -20,6 +20,44 @@ export interface ProjectileHooks {
   hitFollower(p: ProjectileEntity): void;
   /** SPEC-029 §4.6: a shot with `blastRadius > 0` detonates at `(x, z)`. */
   explode(p: ProjectileEntity, x: number, z: number): void;
+  /** SPEC-056 §4.5: a thrown flare (`flareSeconds > 0`) lands at `(x, z)` instead of exploding. */
+  landFlare(p: ProjectileEntity, x: number, z: number): void;
+}
+
+/**
+ * SPEC-056 §4.4: the `seek` step. The quarry is looked up by its entity id —
+ * pool indices move on swap-remove — and a dead, buried or despawned quarry
+ * clears `seekTarget`, so the shot flies straight on (56-d). Otherwise the
+ * velocity turns toward it by at most `seekTurn × dt`, keeping its speed.
+ * Allocates nothing.
+ */
+export function steerSeeker(world: CombatWorld, p: ProjectileEntity, dt: number): void {
+  if (p.seekTarget < 0) return;
+  const enemies = world.enemies;
+  let target: EnemyEntity | null = null;
+  for (let i = 0; i < enemies.size; i++) {
+    const e = enemies.at(i);
+    if (e.id === p.seekTarget) {
+      target = e;
+      break;
+    }
+  }
+  if (target === null || target.state === 'dead' || isBuried(target)) {
+    p.seekTarget = -1;
+    return;
+  }
+  const speed = Math.hypot(p.vx, p.vz);
+  if (speed < 1e-6) return;
+  const heading = Math.atan2(p.vz, p.vx);
+  let turn = Math.atan2(target.z - p.z, target.x - p.x) - heading;
+  if (turn > Math.PI) turn -= 2 * Math.PI;
+  else if (turn < -Math.PI) turn += 2 * Math.PI;
+  const most = p.seekTurn * dt;
+  if (turn > most) turn = most;
+  else if (turn < -most) turn = -most;
+  const next = heading + turn;
+  p.vx = Math.cos(next) * speed;
+  p.vz = Math.sin(next) * speed;
 }
 
 /**
@@ -84,6 +122,8 @@ export function updateProjectiles(world: CombatWorld, hash: SpatialHash, dt: num
   const pool = world.projectiles;
   for (let i = pool.size - 1; i >= 0; i--) {
     const p = pool.at(i);
+    // SPEC-056 §4.4: a seeking shot turns before it moves.
+    if (p.seekTarget >= 0) steerSeeker(world, p, dt);
     const x0 = p.x;
     const z0 = p.z;
     const dx = p.vx * dt;
@@ -94,11 +134,13 @@ export function updateProjectiles(world: CombatWorld, hash: SpatialHash, dt: num
 
     // SPEC-029 §4.6: a lob passes over bodies and obstacles and explodes at
     // its target — clamped there exactly — when its flight time ends.
+    // SPEC-056 §4.5: a thrown flare lands there instead, and burns.
     if (p.lob) {
       if (p.ttl <= 0) {
         p.x = p.targetX;
         p.z = p.targetZ;
-        hooks.explode(p, p.targetX, p.targetZ);
+        if (p.flareSeconds > 0) hooks.landFlare(p, p.targetX, p.targetZ);
+        else hooks.explode(p, p.targetX, p.targetZ);
         pool.free(i);
       }
       continue;

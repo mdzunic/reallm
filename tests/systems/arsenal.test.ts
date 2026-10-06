@@ -139,3 +139,37 @@ describe('the benches (SPEC-039 §4.4)', () => {
     expect(sustained('weapon_lithium') / sustained('weapon_plasma')).toBeCloseTo(100 / 84, 2);
   });
 });
+
+// ------------------------------------------------------------- SPEC-056
+
+describe('the relics (SPEC-056 §4.3)', () => {
+  /** §4.3's table: each relic, its sustained DPS and the arsenal piece it side-grades. */
+  const RELICS: readonly [ItemId, number, ItemId][] = [
+    ['relic_last_word', 35, 'pistol_magnum'],
+    ['relic_cold_coil', 69, 'mg_scrap'],
+    ['relic_seed_drum', 14, 'launcher_grenade'],
+    ['relic_slag_vent', 73, 'mg_rotary'],
+    ['relic_seeker', 13, 'launcher_rocket'],
+  ];
+
+  it('weaponDps(relic).sustained / weaponDps(reference).sustained lies in 0.6…1.1 for each pair', () => {
+    for (const [relic, , reference] of RELICS) {
+      const ratio = sustained(relic) / sustained(reference);
+      expect(ratio, `${relic} / ${reference}`).toBeGreaterThanOrEqual(0.6);
+      expect(ratio, `${relic} / ${reference}`).toBeLessThanOrEqual(1.1);
+    }
+  });
+
+  it('reads §4.3\'s sustained values — 35, 69, 14, 73 and 13 — and ratios 0.73, 1.08, 0.75, 0.87, 0.89', () => {
+    expect(RELICS.map(([relic]) => Math.round(sustained(relic)))).toEqual([35, 69, 14, 73, 13]);
+    expect(RELICS.map(([relic, , reference]) => Math.round((sustained(relic) / sustained(reference)) * 100) / 100)).toEqual([
+      0.73, 1.08, 0.75, 0.87, 0.89,
+    ]);
+  });
+
+  it('each relic sits in its reference\'s slot and line', () => {
+    for (const [relic, , reference] of RELICS) {
+      expect([weapon(relic).slot, weapon(relic).line], relic).toEqual([weapon(reference).slot, weapon(reference).line]);
+    }
+  });
+});
