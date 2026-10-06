@@ -1966,6 +1966,33 @@ describe('elite affixes (SPEC-041 §4.6)', () => {
     expect(near.hp).toBe(near.maxHp);
   });
 
+  it('mender pulses never stack: three menders out of phase mend a neighbour as fast as one (41-m)', () => {
+    const h = harness();
+    h.world.player.x = 200; // nothing aggroes
+    const patient = h.spawn('dust_skitter', 0, 0);
+    const menders = [];
+    // Spawned 0.1 s apart, so their pulses fall at different steps.
+    for (const [x, z] of [
+      [3, 0],
+      [-3, 0],
+      [0, 3],
+    ] as const) {
+      menders.push(h.combat.spawnEnemy('wurmling', x, z, true, 'mender'));
+      h.run(0.1);
+    }
+    for (const e of [patient, ...menders]) {
+      e.wanderAt = Infinity;
+      e.wanderX = e.x;
+      e.wanderZ = e.z;
+    }
+    patient.hp = 1;
+    h.run(2);
+    // One heal per pulse period: 4 in these 2 s, where stacking gave 12.
+    expect(patient.hp).toBeCloseTo(1 + 4 * MENDER_HEAL_FRACTION * patient.maxHp, 6);
+    // Every mender still pulsed, so each still draws its ring.
+    expect(h.combat.menderPulseCount).toBeGreaterThanOrEqual(12);
+  });
+
   it('volatile: its death leaves a 3 m circle landing 1 s later for ×1.5, on the player only (41-f)', () => {
     const h = harness({ follower: true });
     const f = h.world.follower;

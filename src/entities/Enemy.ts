@@ -127,6 +127,8 @@ export interface EnemyEntity {
   windupScale: number;
   /** Mender pulse clock. */
   menderAt: number;
+  /** World time before which no mender heals it again — pulses never stack (41-m). */
+  mendedUntil: number;
   /** The last player hit on it was turned by a bulwark — the damage number reads it. */
   lastHitGuarded: boolean;
 
@@ -218,6 +220,7 @@ export function makeEnemy(): EnemyEntity {
     affixB: null,
     windupScale: 1,
     menderAt: 0,
+    mendedUntil: 0,
     lastHitGuarded: false,
     placed: false,
     leash: 0,
