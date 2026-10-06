@@ -63,12 +63,14 @@ export const ZONES_SECONDS = 12;
 export const MODE_BUTTONS: Readonly<Record<InputMode, readonly Action[]>> = {
   // SPEC-038 §4.1: DASH, mounted into the thumb arc's `arc-primary` cell. The
   // flight lists none, so the rail never sees the button (or the action).
-  surface: ['interact', 'dash', 'pause'],
+  // SPEC-054 §4.5: LIGHT, mounted beside USE in `arc-action` — below only,
+  // and only while USE itself is hidden (§4.5's visibility rule, `#applyMode`).
+  surface: ['interact', 'dash', 'light', 'pause'],
   flight: ['throttleUp', 'throttleDown', 'pause'],
 };
 
 /** Every button the layer builds: the union of `MODE_BUTTONS`, and nothing else. */
-const BUILT_BUTTONS = ['interact', 'dash', 'throttleUp', 'throttleDown', 'pause'] as const;
+const BUILT_BUTTONS = ['interact', 'dash', 'light', 'throttleUp', 'throttleDown', 'pause'] as const;
 
 const BUTTON_LABELS: Readonly<Record<Action, string>> = {
   fire: 'FIRE',
@@ -93,6 +95,8 @@ const BUTTON_LABELS: Readonly<Record<Action, string>> = {
   dash: 'DASH',
   // SPEC-050 §4.5: never drawn — the stick pushed past its ring is the run.
   sprint: 'RUN',
+  // SPEC-054 §4.5: shown beside USE, below only (`#applyMode`'s visibility rule).
+  light: 'LIGHT',
 };
 
 export class TouchControls {
@@ -118,6 +122,8 @@ export class TouchControls {
   #move: ZonePointer | null = null;
   #aim: ZonePointer | null = null;
   #interactHint: string | null = null;
+  /** SPEC-054 §4.5: true while the scene says the flashlight exists to toggle. */
+  #lightAvailable = false;
   #disposed = false;
   /** The surface box, measured at `pointerdown` so a move costs no DOM read. */
   #rect = { left: 0, top: 0, width: 0, height: 0 };
@@ -256,6 +262,19 @@ export class TouchControls {
     this.#applyMode();
   }
 
+  /**
+   * SPEC-054 §4.5: LIGHT shows only while the scene says the flashlight exists
+   * to toggle (below) — `#applyMode` also requires USE to be hidden. Idempotent
+   * and cheap, like `setInteractHint`'s own contract: the scene may call it
+   * every frame without it ever touching the floating stick or anything else
+   * in the arc.
+   */
+  setLightAvailable(available: boolean): void {
+    if (available === this.#lightAvailable) return;
+    this.#lightAvailable = available;
+    this.#applyMode();
+  }
+
   dispose(): void {
     if (this.#disposed) return;
     this.#disposed = true;
@@ -300,6 +319,8 @@ export class TouchControls {
       const visible =
         shown.includes(action) &&
         (action !== 'interact' || this.#interactHint !== null) &&
+        // SPEC-054 §4.5: LIGHT needs the scene's go-ahead *and* USE out of the way.
+        (action !== 'light' || (this.#lightAvailable && this.#interactHint === null)) &&
         (!this.#mounted.has(action) || mounted);
       button.classList.toggle('is-hidden', !visible);
       if (!visible) button.classList.remove('is-down');

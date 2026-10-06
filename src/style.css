@@ -1442,6 +1442,15 @@ html.reduce-motion .hud-wallet {
   letter-spacing: 0.08em;
 }
 
+/* SPEC-054 §4.5: the flashlight chip, a top-centre row below. */
+.hud-light {
+  padding: 2px 10px;
+  border-radius: var(--radius);
+  background: var(--hud-plate);
+  color: var(--ink);
+  white-space: nowrap;
+}
+
 .hud-objective {
   padding: 4px 12px;
   border-radius: var(--radius);

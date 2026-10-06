@@ -316,15 +316,16 @@ test('the manifest declares four sfx banks and nine music tracks (AC-3, AC-4, AC
   expect(manifest.musicBuses).toEqual(['music']);
   expect(manifest.musicLoops).toBe(true);
   expect(manifest.musicOrder).toBe(true);
-  // AC-5: the 59 sprite keys `SoundId` is derived from (29 + the 15 film cues of
+  // AC-5: the 61 sprite keys `SoundId` is derived from (29 + the 15 film cues of
   // PLAN R9 + the seven weapon, impact and blast sprites of SPEC-035 §4.11 + the
   // dash and three windup cues of SPEC-038 §4.10 + SPEC-041 §4.10's
-  // `windup_boss`, `boss_slam` and `ship_hit_tick` + SPEC-050 §4.8's `exhale`).
+  // `windup_boss`, `boss_slam` and `ship_hit_tick` + SPEC-050 §4.8's `exhale` +
+  // SPEC-054 §4.13's `light_click` and `cache_open`).
   // The other half of that criterion — an id outside the union is a compile
   // error — is `npm run typecheck`, which the union's `SpriteKeysOf`
   // derivation is written for.
-  expect(new Set(manifest.sprites).size).toBe(59);
-  expect(manifest.sprites).toHaveLength(59);
+  expect(new Set(manifest.sprites).size).toBe(61);
+  expect(manifest.sprites).toHaveLength(61);
 });
 
 // ------------------------------------------------------------------- unlock
@@ -1280,12 +1281,13 @@ test('the reactions table is what the game actually hears (AC-38 … AC-50, AC-5
   // `flight:hazardHit`, both reacted; SPEC-042 §4.2 added `item:collected`,
   // reacted, and `item:blocked`, silent; SPEC-043 §4.7 added `mission:bonus`,
   // silent; SPEC-048 §4.9 added `story:clue`, silent; SPEC-050 §4.8 added
-  // `player:exhausted`, reacted). That
+  // `player:exhausted`, reacted; SPEC-054 §4.13 added `light:toggled` and
+  // `cache:opened`, both reacted, and `level:changed`, silent). That
   // the two halves cover `GameEvents` exactly is a compile-time assertion in
   // the module, and `tests/core/audioReactions.test.ts` pins the same pair of
   // counts in node.
-  expect(reactions.counts.reacted).toBe(27);
-  expect(reactions.counts.silent).toBe(46);
+  expect(reactions.counts.reacted).toBe(29);
+  expect(reactions.counts.silent).toBe(47);
   expect(reactions.counts.overlap).toEqual([]);
   // SPEC-012 §4.12 populated the set from the dialogue table's `glitch` marks
   // (it shipped empty under SPEC-006); the unit suite pins it to those marks.

@@ -16,6 +16,7 @@
 // (SPEC-001 §4, §8).
 export * from '@/data/affixes';
 export * from '@/data/assets';
+export * from '@/data/caves';
 export * from '@/data/characters';
 export * from '@/data/clues';
 export * from '@/data/companions';

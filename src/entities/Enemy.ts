@@ -2,8 +2,8 @@
 // the canonical interface of the spec; the block after them is the per-entity
 // scratch the §5 edge cases need (stuck detection 11-d, arena leash 11-e) and
 // what SPEC-038 and SPEC-041 add — the charge, boss moves, packs and affixes —
-// flat values, so a pooled reset stays a field-by-field overwrite with no
-// allocation.
+// and SPEC-054's placed cave packs, flat values, so a pooled reset stays a
+// field-by-field overwrite with no allocation.
 import type { AffixId } from '@/data/affixes';
 import type { Enemy as EnemyDef } from '@/data/enemies';
 
@@ -129,6 +129,20 @@ export interface EnemyEntity {
   menderAt: number;
   /** The last player hit on it was turned by a bulwark — the damage number reads it. */
   lastHitGuarded: boolean;
+
+  // ------------------------------------------- SPEC-054 §3: the cave's packs
+  /**
+   * SPEC-054 §4.7: stood at a cave's pack anchor by `SpawnDirector.spawnPackAt`
+   * — never culled and never refilled. `Combat.spawnEnemy` resets it false.
+   */
+  placed: boolean;
+  /**
+   * SPEC-054 §4.7: the de-aggro leash `EnemyAi` reads, measured from
+   * `spawnX/spawnZ` — `def.leashRadius` from `Combat.spawnEnemy`, and
+   * `BELOW_LEASH` (24 m, from the pack's anchor) for a placed enemy, which
+   * also never acquires a target standing past it.
+   */
+  leash: number;
 }
 
 /**
@@ -205,5 +219,7 @@ export function makeEnemy(): EnemyEntity {
     windupScale: 1,
     menderAt: 0,
     lastHitGuarded: false,
+    placed: false,
+    leash: 0,
   };
 }

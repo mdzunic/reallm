@@ -10,6 +10,7 @@ import { EventBus, type GameEvents } from '@/core/Events';
 import { setLogSink, type LogSink } from '@/core/Log';
 import { newSave, type CharacterCreation, type Save } from '@/core/Save';
 import {
+  CACHES,
   COMPANIONS,
   CONTRACT_LITHIUM,
   ITEMS,
@@ -1192,5 +1193,46 @@ describe('resource sources, contracts, bonuses and hard (SPEC-043)', () => {
     expect(data.progress.flags).toContain('scaffold_secret');
     economy.applyRewards(MISSIONS.c1_s2 as MissionDef, false);
     expect(economy.count('landmine')).toBe(2);
+  });
+});
+
+// ------------------------------------------------------------- SPEC-054 §4.8
+
+describe('claimCache (SPEC-054 §4.8)', () => {
+  it('pays once, records the claim and requests a checkpoint', () => {
+    const { economy, data, requested } = world();
+    const reward = CACHES.cinder4_loose_a.reward;
+    expect(economy.claimCache('cinder4_loose_a')).toEqual({ ok: true, reward });
+    expect(data.progress.claimed).toEqual(['cinder4_loose_a']);
+    expect(data.resources.lithium).toBe(reward.resources?.lithium ?? 0);
+    expect(economy.count('medkit')).toBe(reward.items?.[0]?.qty ?? 0);
+    expect(requested).toContain('checkpoint');
+  });
+
+  it('the second call returns claimed and pays nothing more', () => {
+    const { economy, data } = world();
+    economy.claimCache('cinder4_loose_a');
+    const lithium = data.resources.lithium;
+    const medkits = economy.count('medkit');
+    expect(economy.claimCache('cinder4_loose_a')).toEqual({ ok: false, reason: 'claimed' });
+    expect(data.progress.claimed).toEqual(['cinder4_loose_a']); // not duplicated
+    expect(data.resources.lithium).toBe(lithium);
+    expect(economy.count('medkit')).toBe(medkits);
+  });
+
+  it('a full pack emits item:noRoom and the toast, exactly as applyBonus does (E25)', () => {
+    const { economy, events } = world(MARINE, fillInventory);
+    economy.claimCache('cinder4_loose_a');
+    expect(economy.count('medkit')).toBe(0);
+    expect(events.of('item:noRoom')).toEqual([{ itemId: 'medkit', qty: 1 }]);
+    expect(events.toasts()).toEqual([noRoomText(ITEMS.medkit, 1)]);
+  });
+
+  it('resources go past the cargo cap', () => {
+    const { economy, data } = world();
+    data.resources.lithium = economy.cargoCap(); // a full hold
+    const before = data.resources.lithium;
+    economy.claimCache('cinder4_loose_a');
+    expect(data.resources.lithium).toBe(before + (CACHES.cinder4_loose_a.reward.resources?.lithium ?? 0));
   });
 });

@@ -32,6 +32,8 @@ export interface MapMark {
   label: string | null;
   /** Arena ring radius in metres, 0 for everything else. */
   ring: number;
+  /** SPEC-054 §4.10: true for a claimed cache — the painter strokes its outline instead of filling it. */
+  hollow?: boolean;
 }
 
 export interface MinimapFrame {
@@ -80,8 +82,19 @@ export function backingFor(cssSize: number): number {
  * One icon, upright, centred on `(x, y)` (§4.1: icons never rotate with the
  * map). `scale` turns the table's CSS px into backing px, so an icon is the
  * same size on a phone's 3× screen as on a laptop's 1×.
+ *
+ * SPEC-054 §4.10: `hollow` draws a claimed cache emptied — the shape's own
+ * fill strokes its outline instead, decided per `MapShape` in `drawShape`, so
+ * nothing here allocates per call (§7: the minimap repaints at 4 Hz).
  */
-export function drawMapIcon(ctx: CanvasRenderingContext2D, kind: MapIconKind, x: number, y: number, scale: number): void {
+export function drawMapIcon(
+  ctx: CanvasRenderingContext2D,
+  kind: MapIconKind,
+  x: number,
+  y: number,
+  scale: number,
+  hollow = false,
+): void {
   const icon = MAP_ICONS[kind];
   const s = icon.size * scale;
   ctx.save();
@@ -89,7 +102,7 @@ export function drawMapIcon(ctx: CanvasRenderingContext2D, kind: MapIconKind, x:
   ctx.fillStyle = icon.color;
   ctx.strokeStyle = icon.color;
   ctx.lineWidth = Math.max(1, scale);
-  drawShape(ctx, icon.shape, s, scale);
+  drawShape(ctx, icon.shape, s, scale, hollow);
   ctx.restore();
 }
 
@@ -141,8 +154,14 @@ export function drawObjectiveRing(ctx: CanvasRenderingContext2D, kind: MapIconKi
   ctx.restore();
 }
 
-/** The fifteen shapes of §4.2, each drawn around the origin at size `s`. */
-function drawShape(ctx: CanvasRenderingContext2D, shape: MapShape, s: number, scale: number): void {
+/**
+ * The shapes of §4.2 and §4.10, each drawn around the origin at size `s`.
+ * `hollow` (SPEC-054 §4.10) asks a shape that would normally fill part of
+ * itself to stroke that part's outline instead — only `chest` (the cache)
+ * reads it today, but the parameter is threaded through generically so a
+ * later hollow kind needs no new plumbing here.
+ */
+function drawShape(ctx: CanvasRenderingContext2D, shape: MapShape, s: number, scale: number, hollow: boolean): void {
   const h = s / 2;
   switch (shape) {
     case 'pad': {
@@ -304,6 +323,46 @@ function drawShape(ctx: CanvasRenderingContext2D, shape: MapShape, s: number, sc
       ctx.stroke();
       return;
     }
+    case 'shaft': {
+      // SPEC-054 §4.10: a dark opening ringed at the rim — the way down.
+      ctx.beginPath();
+      ctx.arc(0, 0, h, 0, TAU);
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.arc(0, 0, h * 0.45, 0, TAU);
+      ctx.fill();
+      return;
+    }
+    case 'chest': {
+      // SPEC-054 §4.10: a loose cache — a lidded box with a latch. Claimed
+      // (hollow) draws the latch as a ring rather than a filled dot.
+      ctx.strokeRect(-h, -h * 0.7, s, s * 0.8);
+      ctx.beginPath();
+      ctx.moveTo(-h, -h * 0.25);
+      ctx.lineTo(h, -h * 0.25);
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.arc(0, -h * 0.25, Math.max(0.8, h * 0.16), 0, TAU);
+      if (hollow) ctx.stroke();
+      else ctx.fill();
+      return;
+    }
+    case 'lock': {
+      // SPEC-054 §4.10: the vault door — a padlock's shackle over its body.
+      ctx.beginPath();
+      ctx.arc(0, -h * 0.1, h * 0.45, Math.PI, 0);
+      ctx.stroke();
+      ctx.fillRect(-h * 0.55, -h * 0.1, h * 1.1, h);
+      return;
+    }
+    case 'tablet': {
+      // SPEC-054 §4.10: a relic terminal — an upright screen with a tell light.
+      ctx.strokeRect(-h * 0.55, -h, h * 1.1, s);
+      ctx.beginPath();
+      ctx.arc(0, -h * 0.35, Math.max(0.8, h * 0.18), 0, TAU);
+      ctx.fill();
+      return;
+    }
   }
 }
 
@@ -321,7 +380,8 @@ function drawEliteRing(ctx: CanvasRenderingContext2D, x: number, y: number, scal
 export class Minimap {
   readonly #canvas: HTMLCanvasElement;
   readonly #ctx: CanvasRenderingContext2D | null;
-  readonly #layers: MapLayers;
+  /** SPEC-054 §4.10: swapped by `setLayers` at each level swap. */
+  #layers: MapLayers;
   readonly #point: MapPoint = { x: 0, y: 0, inside: true, angle: 0 };
   /** CSS px of the box, re-measured on `renderer:resized` (§4.3). */
   #cssSize = 0;
@@ -342,6 +402,17 @@ export class Minimap {
 
   get canvas(): HTMLCanvasElement {
     return this.#canvas;
+  }
+
+  /**
+   * SPEC-054 §4.10: switch which level's layers the minimap draws from. The
+   * old `MapLayers` holds nothing but unattached canvases, so dropping the
+   * reference is the whole of its cleanup — there is no `dispose` to call and
+   * nothing to leak. The next `draw()` repaints from the new layers; neither
+   * the canvas nor its backing store needs a fresh `measure()` for this.
+   */
+  setLayers(layers: MapLayers): void {
+    this.#layers = layers;
   }
 
   /** §4.3: the backing store is `round(css × min(dpr, 2))` of the CSS box. */
@@ -414,21 +485,21 @@ export class Minimap {
       if (!isNodeIcon(mark.icon)) continue;
       const p = this.#at(frame, mark.x, mark.z, pxPerMetre, rimPx);
       if (!p.inside) continue;
-      drawMapIcon(ctx, mark.icon, p.x, p.y, scale);
+      drawMapIcon(ctx, mark.icon, p.x, p.y, scale, mark.hollow);
       drawn.nodes++;
     }
     for (const mark of frame.marks) {
       if (mark.objective || isNodeIcon(mark.icon)) continue;
       const p = this.#at(frame, mark.x, mark.z, pxPerMetre, rimPx);
       if (!p.inside) continue;
-      drawMapIcon(ctx, mark.icon, p.x, p.y, scale);
+      drawMapIcon(ctx, mark.icon, p.x, p.y, scale, mark.hollow);
       drawn.pois++;
     }
     for (const mark of frame.marks) {
       if (!mark.objective) continue;
       const p = this.#at(frame, mark.x, mark.z, pxPerMetre, rimPx);
       if (p.inside) {
-        drawMapIcon(ctx, mark.icon, p.x, p.y, scale);
+        drawMapIcon(ctx, mark.icon, p.x, p.y, scale, mark.hollow);
         drawObjectiveRing(ctx, mark.icon, p.x, p.y, scale);
         drawn.objectives++;
       } else {

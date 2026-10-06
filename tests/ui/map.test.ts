@@ -18,6 +18,7 @@ import {
   poiIcon,
   type MapPoint,
 } from '@/systems/MapModel';
+import { GROUND_SHADE, MapLayers, OBSTACLE_SHADE, OPEN_VOID_COLOR, shade, type MapOpen, type TerrainLayout } from '@/ui/MapLayers';
 
 const point = (): MapPoint => ({ x: 0, y: 0, inside: true, angle: 0 });
 const PLANET_IDS = Object.keys(PLANETS) as PlanetId[];
@@ -134,7 +135,8 @@ describe('mapAngle (§4.1)', () => {
 
 describe('MAP_ICONS (§4.2)', () => {
   it('gives every kind a shape, a colour and a legend label', () => {
-    expect(MAP_ICON_KINDS.length).toBe(20);
+    // SPEC-054 §4.10: +4 — descent, cache, vault, relic.
+    expect(MAP_ICON_KINDS.length).toBe(24);
     for (const kind of MAP_ICON_KINDS) {
       const icon = MAP_ICONS[kind];
       expect(icon.shape, kind).toBeTruthy();
@@ -190,5 +192,169 @@ describe('poiIcon / nodeIcon (§4.2)', () => {
       expect(MAP_ICONS[icon], resource).toBeDefined();
       expect(isNodeIcon(icon)).toBe(true);
     }
+  });
+});
+
+describe('the underground icons (SPEC-054 §4.10)', () => {
+  it('pins each new kind to its shape and colour', () => {
+    expect(MAP_ICONS.descent).toMatchObject({ shape: 'shaft', color: '#e0c088' });
+    expect(MAP_ICONS.cache).toMatchObject({ shape: 'chest', color: '#ffd166' });
+    expect(MAP_ICONS.vault).toMatchObject({ shape: 'lock', color: '#ff9f43' });
+    expect(MAP_ICONS.relic).toMatchObject({ shape: 'tablet', color: '#7ee0c3' });
+  });
+
+  it('is the only four kinds MAP_ICON_KINDS gained', () => {
+    const before = new Set<string>([
+      'landing_pad', 'scan', 'reach', 'deliver', 'arena', 'defend', 'escort_start', 'landmark',
+      'node_oil', 'node_wheat', 'node_water', 'node_lithium', 'enemy', 'elite', 'boss', 'objective',
+      'player', 'target', 'shelter_cave', 'shelter_wreck',
+    ]);
+    const added = MAP_ICON_KINDS.filter((kind) => !before.has(kind));
+    expect(added.sort()).toEqual(['cache', 'descent', 'relic', 'vault']);
+  });
+});
+
+describe('MapLayers with `open` (SPEC-054 §4.10)', () => {
+  // `MapLayers` paints through `document.createElement('canvas')`, and this
+  // suite runs in vitest's plain `node` environment (SPEC-001 §4: no `three`,
+  // and here no DOM either) — so this is just enough of the 2D canvas API for
+  // `#buildOpenTerrain` to run, recording what was drawn in painter's-algorithm
+  // order. `colorAt` then answers the same question a real `getImageData`
+  // would: the last shape covering a point decides its colour.
+  interface FakeOp {
+    test: (x: number, y: number) => boolean;
+    style: string;
+  }
+
+  class FakeContext {
+    fillStyle = '';
+    strokeStyle = '';
+    lineWidth = 1;
+    lineCap = 'butt';
+    readonly #ops: FakeOp[] = [];
+    #circles: { cx: number; cy: number; r: number }[] = [];
+    #segments: { x0: number; y0: number; x1: number; y1: number }[] = [];
+    #cur = { x: 0, y: 0 };
+
+    beginPath(): void {
+      this.#circles = [];
+      this.#segments = [];
+    }
+
+    moveTo(x: number, y: number): void {
+      this.#cur = { x, y };
+    }
+
+    lineTo(x: number, y: number): void {
+      this.#segments.push({ x0: this.#cur.x, y0: this.#cur.y, x1: x, y1: y });
+      this.#cur = { x, y };
+    }
+
+    arc(cx: number, cy: number, r: number): void {
+      this.#circles.push({ cx, cy, r });
+    }
+
+    fillRect(x: number, y: number, w: number, h: number): void {
+      const style = this.fillStyle;
+      this.#ops.push({ test: (px, py) => px >= x && px < x + w && py >= y && py < y + h, style });
+    }
+
+    /** The fog canvas's first clear; this suite never reads the fog layer. */
+    clearRect(): void {}
+
+    fill(): void {
+      const style = this.fillStyle;
+      for (const { cx, cy, r } of this.#circles) {
+        this.#ops.push({ test: (px, py) => Math.hypot(px - cx, py - cy) <= r, style });
+      }
+    }
+
+    stroke(): void {
+      const style = this.strokeStyle;
+      const half = this.lineWidth / 2;
+      for (const { x0, y0, x1, y1 } of this.#segments) {
+        this.#ops.push({
+          test: (px, py) => {
+            const dx = x1 - x0;
+            const dy = y1 - y0;
+            const lenSq = dx * dx + dy * dy;
+            if (lenSq === 0) return Math.hypot(px - x0, py - y0) <= half;
+            const t = ((px - x0) * dx + (py - y0) * dy) / lenSq;
+            if (t < 0 || t > 1) return false;
+            return Math.hypot(px - (x0 + t * dx), py - (y0 + t * dy)) <= half;
+          },
+          style,
+        });
+      }
+    }
+
+    /** Painter's algorithm: the last op covering `(x, y)` wins, or `undefined` if none do. */
+    colorAt(x: number, y: number): string | undefined {
+      let found: string | undefined;
+      for (const op of this.#ops) if (op.test(x, y)) found = op.style;
+      return found;
+    }
+  }
+
+  function fakeCanvas(): { width: number; height: number; getContext: () => FakeContext } {
+    const ctx = new FakeContext();
+    return { width: 0, height: 0, getContext: () => ctx };
+  }
+
+  /** `MapLayers` is the only thing in this suite that touches `document`. */
+  function withFakeDocument<T>(run: () => T): T {
+    (globalThis as { document?: unknown }).document = {
+      createElement: (tag: string) => {
+        if (tag !== 'canvas') throw new Error(`the stub only makes canvases, not ${tag}`);
+        return fakeCanvas();
+      },
+    };
+    try {
+      return run();
+    } finally {
+      delete (globalThis as { document?: unknown }).document;
+    }
+  }
+
+  it('paints black outside the rooms, the ground colour inside one, and the walls darker on top', () => {
+    withFakeDocument(() => {
+      const palette = { ground: '#336644', accent: '#ffaa00' };
+      const half = 48;
+      const layout: TerrainLayout = {
+        halfSize: half,
+        obstacles: [{ x: -20, z: 0, radius: 2, kind: 'cave_wall' }],
+        pois: [],
+        shelters: [],
+      };
+      const open: MapOpen = {
+        rooms: [
+          { x: -20, z: 0, r: 8 },
+          { x: 20, z: 0, r: 8 },
+        ],
+        corridors: [{ a: 0, b: 1 }],
+        width: 4.5,
+      };
+      const layers = new MapLayers(layout, palette, open);
+      const ctx = layers.terrain.getContext('2d') as unknown as FakeContext;
+
+      const ground = shade(palette.ground, GROUND_SHADE);
+      const obstacle = shade(palette.ground, OBSTACLE_SHADE);
+
+      // Outside every room, and outside the corridor's 2.25 m half-width either
+      // along or across it: black.
+      expect(ctx.colorAt(half + 40, half + 40)).toBe(OPEN_VOID_COLOR);
+      expect(ctx.colorAt(half + 0, half + 20)).toBe(OPEN_VOID_COLOR);
+      expect(ctx.colorAt(half + 0, half + 3)).toBe(OPEN_VOID_COLOR);
+
+      // Inside room A, clear of the wall: the ground colour.
+      expect(ctx.colorAt(half - 15, half + 0)).toBe(ground);
+      // On the corridor's centreline, between the two rooms: the ground colour.
+      expect(ctx.colorAt(half + 0, half + 0)).toBe(ground);
+      // The wall sits on room A's centre and paints over it, darker, on top.
+      expect(ctx.colorAt(half - 20, half + 0)).toBe(obstacle);
+
+      // §4.8: the open path still counts as exactly one terrain build.
+      expect(layers.terrainBuilds).toBe(1);
+    });
   });
 });

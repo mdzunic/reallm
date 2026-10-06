@@ -24,7 +24,7 @@ import { hash32 } from '@/core/Rng';
 import type { Look, QualityPreset, QualitySettings } from '@/core/Quality';
 import type { Pool } from '@/core/Pool';
 import type { ModelId } from '@/data/assets';
-import type { PlanetDef, ResourceId } from '@/data/index';
+import type { DarkLook, PlanetDef, ResourceId } from '@/data/index';
 import { isBuried, type EnemyEntity } from '@/entities/Enemy';
 import type { FollowerEntity } from '@/entities/Follower';
 import type { PlayerEntity } from '@/entities/Player';
@@ -33,6 +33,7 @@ import type { TelegraphEntity } from '@/entities/Telegraph';
 import { DEPLOYABLE_CAPACITY, type DeployableEntity } from '@/entities/Deployable';
 import { CharacterView } from '@/views/CharacterView';
 import { CombatFx } from '@/views/CombatFx';
+import { Flashlight, type FlashlightMode } from '@/views/Flashlight';
 import { buildEnvironment, skyParamsFor } from '@/views/Environment';
 import { FollowerView } from '@/views/FollowerView';
 import { EnemyMeshes, INSTANCES_PER_PART } from '@/views/ProceduralMeshes';
@@ -353,6 +354,23 @@ const TINT_TOWARD_FOG = 0.08;
 const PROJECTILE_GAIN = 2.5;
 /** Image-based lighting on the surface is a fill light, not the key (§4.4). */
 const ENVIRONMENT_INTENSITY = 0.6;
+/** §4.5: the cool rim's intensity on the surface. */
+const RIM_INTENSITY = 0.6;
+/** §4.5: the torch riding the player group — `PointLight(0xffc98a, 6, 14, 2)`. */
+const TORCH_INTENSITY = 6;
+const TORCH_DISTANCE = 14;
+/** SPEC-054 §4.5: with the `fake` flashlight on below, the torch widens to this, over this many metres. */
+const FAKE_TORCH_INTENSITY = 10;
+const FAKE_TORCH_DISTANCE = 10;
+
+/** SPEC-054 §4.4: what the view needs of the cave it shows below (`UndergroundView`). */
+export interface CaveView {
+  readonly root: THREE.Object3D;
+  /** The dust motes, once per rendered frame. */
+  sync(px: number, pz: number, time: number): void;
+  /** The walls draw through SPEC-046's culling, from the camera the scene placed. */
+  setView(targetX: number, targetZ: number, camDistance: number, fovDeg: number, aspect: number, frustum: THREE.Frustum): void;
+}
 
 // ------------------------------------------------------------ SPEC-018 §4.8
 
@@ -730,6 +748,17 @@ function obstacleGlow(kind: ObstacleKind, biome: PlanetDef['biome'], accent: str
 export class SurfaceView {
   readonly #scene: THREE.Scene;
   readonly #root = new THREE.Group();
+  /**
+   * SPEC-054 §4.1: the view in three groups under the one root. The surface
+   * environment — terrain, props, scatter, decals, POIs, shelters, nodes, the
+   * wall, the boundary and the storm particles — hides below; the actors —
+   * the player, enemies, shots, pickups, deployables, effects, telegraphs and
+   * guidance — draw on every level; and the light rig (hemisphere, key, its
+   * target, rim) is never hidden, so a level swap changes intensities only.
+   */
+  readonly #envRoot = new THREE.Group();
+  readonly #actorRoot = new THREE.Group();
+  readonly #lightRig = new THREE.Group();
   readonly enemies: EnemyMeshes;
   /** The planet's base grade; `SurfaceScene` forwards it on enter (§4.1). */
   readonly look: Readonly<Partial<Look>>;
@@ -754,6 +783,21 @@ export class SurfaceView {
   readonly #keyTarget = new THREE.Object3D();
   readonly #hemi: THREE.HemisphereLight;
   readonly #hemiBase: number;
+  /** SPEC-054 §4.4: the hemisphere's intensity on this level — the base above, the dark look's below. */
+  #hemiLevel: number;
+  /** The cool rim and the torch on the player group, kept for the level swap (SPEC-054 §4.4, §4.5). */
+  readonly #rim: THREE.DirectionalLight;
+  readonly #torch: THREE.PointLight;
+  /** The planet's own colours and the key's intensity — what coming up puts back. */
+  readonly #surfaceColors: { sky: string; fog: string; hemiSky: string; hemiGround: string; key: number };
+  /** SPEC-054 §4.4: the level on show, the cave drawn below, and the dark look in force. */
+  #level: 'surface' | 'underground' = 'surface';
+  #cave: CaveView | null = null;
+  #dark: DarkLook | null = null;
+  /** SPEC-054 §4.5: the flashlight, built at a visit's first descent and kept until the view goes. */
+  #flashlight: Flashlight | null = null;
+  #flashlightLook: DarkLook['flashlight'] | null = null;
+  #flashlightOn = false;
   readonly #sunDir: { x: number; y: number; z: number };
   readonly #palette: PlanetDef['surface']['palette'];
   readonly #lightningSeed: number;
@@ -909,8 +953,13 @@ export class SurfaceView {
   #groundDetail: THREE.Texture | null = null;
   readonly #seamAt: number | null;
 
-  /** The ground sampler handed to enemies and the storm — bound once (§4.3). */
-  readonly #ground = (x: number, z: number): number => this.field.heightAt(x, z);
+  /**
+   * The ground sampler handed to enemies and the storm — bound once (§4.3).
+   * SPEC-054 §4.4: below, the cave is flat, so every sample reads 0.
+   */
+  readonly #ground = (x: number, z: number): number => (this.#flat ? 0 : this.field.heightAt(x, z));
+  /** SPEC-054 §4.4: true while the cave is shown — heights read 0. */
+  #flat = false;
 
   constructor(
     scene: THREE.Scene,
@@ -924,6 +973,10 @@ export class SurfaceView {
     this.#assets = assets;
     this.#shadowsOn = quality.shadowMapSize > 0;
     this.#biome = planet.biome;
+    this.#lightRig.name = 'surface-lights';
+    this.#envRoot.name = 'surface-env';
+    this.#actorRoot.name = 'surface-actors';
+    this.#root.add(this.#lightRig, this.#envRoot, this.#actorRoot);
     scene.add(this.#root);
     const palette = planet.surface.palette;
     const look = planet.surface.look;
@@ -962,15 +1015,24 @@ export class SurfaceView {
     // §4.5 / SPEC-018 §4.1: hemisphere and key from the planet's look; the cool
     // rim stays fixed. No ambient — `SurfaceScene` sets `ownsLighting`.
     this.#hemiBase = look.light.ambient;
+    this.#hemiLevel = look.light.ambient;
+    this.#surfaceColors = {
+      sky: palette.sky,
+      fog: palette.fog,
+      hemiSky: look.light.sky,
+      hemiGround: look.light.ground,
+      key: look.light.sun.intensity,
+    };
     this.#hemi = new THREE.HemisphereLight(look.light.sky, look.light.ground, look.light.ambient);
     this.#key = new THREE.DirectionalLight(look.light.sun.color, look.light.sun.intensity);
     this.#sunDir = sunDirection(look.light.sun);
     this.#sunSlope = 1 / Math.tan((Math.max(1, look.light.sun.elevation) * Math.PI) / 180);
     this.#key.position.set(this.#sunDir.x * KEY_DISTANCE, this.#sunDir.y * KEY_DISTANCE, this.#sunDir.z * KEY_DISTANCE);
     this.#key.target = this.#keyTarget;
-    const rim = new THREE.DirectionalLight(0x7fa6ff, 0.6);
+    const rim = new THREE.DirectionalLight(0x7fa6ff, RIM_INTENSITY);
     rim.position.set(-30, 20, -24);
-    this.#root.add(this.#hemi, this.#key, this.#keyTarget, rim);
+    this.#rim = rim;
+    this.#lightRig.add(this.#hemi, this.#key, this.#keyTarget, rim);
 
     // SPEC-018 §4.3–§4.4: terrain tiles under one splat material. Procedural
     // layers first; the lazy asset drop swaps them through `setGroundTextures`.
@@ -985,7 +1047,7 @@ export class SurfaceView {
     const canopies: { x: number; z: number; r: number }[] = [];
     for (const o of layout.obstacles) if (o.kind === 'tree') canopies.push({ x: o.x, z: o.z, r: o.radius / TRUNK_UNIT_RADIUS });
     for (const tile of buildTerrainTiles(this.field, this.#groundMaterial, { canopies })) {
-      this.#root.add(tile);
+      this.#envRoot.add(tile);
       this.#tiles.push(tile);
     }
     if (assets?.hasTexture?.('ground_detail') === true) this.#setDetail(assets.texture('ground_detail'));
@@ -1065,14 +1127,14 @@ export class SurfaceView {
       // The pad is flat on the ground: its own shadow would only stripe it.
       mesh.castShadow = poi.kind !== 'landing_pad';
       mesh.receiveShadow = true;
-      this.#root.add(mesh);
+      this.#envRoot.add(mesh);
       if (prop.glow !== undefined) {
         const glow = new THREE.Mesh(prop.glow, poi.kind === 'landing_pad' ? this.#padGlowMaterial : poiGlowMaterial);
         glow.name = `poi-glow:${poi.kind}`;
         glow.scale.copy(mesh.scale);
         glow.rotation.copy(mesh.rotation);
         glow.position.copy(mesh.position);
-        this.#root.add(glow);
+        this.#envRoot.add(glow);
         if (poi.kind === 'landmark') (this.#landmarks.at(-1) as LandmarkEntry).glow = glow;
       }
       if (poi.kind === 'landing_pad') pad = { x: poi.x, z: poi.z };
@@ -1089,7 +1151,7 @@ export class SurfaceView {
       const colors = mesh.instanceColor === null ? null : (mesh.instanceColor.array as Float32Array).slice(0, total * 3);
       this.#addCulled(mesh, colors === null ? { matrices } : { matrices, colors }, sphereOf(mesh.geometry));
     }
-    this.#root.add(buildDecals(layout, this.field, look));
+    this.#envRoot.add(buildDecals(layout, this.field, look));
     // SPEC-053 §4.4, §4.5: undergrowth and ground cover, on the atlas.
     this.#buildGroundClumps();
 
@@ -1100,7 +1162,7 @@ export class SurfaceView {
     const wall = buildArenaWall(layout, this.field, planet.surface.look);
     this.#wall = wall.group;
     this.#wallChunks = wall.chunks;
-    this.#root.add(wall.group);
+    this.#envRoot.add(wall.group);
     this.#buildShelters(layout, planet, assets);
     // SPEC-046 §4.8: the salvager's tug, parked on the pad.
     this.#buildTug(assets, quality.shadowMapSize > 0);
@@ -1113,7 +1175,7 @@ export class SurfaceView {
     this.#arenaRing.rotation.x = -Math.PI / 2;
     this.#arenaRing.position.y = 0.3;
     this.#arenaRing.visible = false;
-    this.#root.add(this.#arenaRing);
+    this.#envRoot.add(this.#arenaRing);
 
     // Nodes: crystals whose height shows the fill level (AC-24).
     const crystal = new THREE.OctahedronGeometry(0.7);
@@ -1130,7 +1192,7 @@ export class SurfaceView {
     );
     this.#nodeCrystals.receiveShadow = true;
     layout.nodes.forEach((node, i) => this.#nodeCrystals.setColorAt(i, scratchColor.set(RESOURCE_COLORS[node.resource])));
-    this.#root.add(this.#nodeCrystals);
+    this.#envRoot.add(this.#nodeCrystals);
 
     // Pickups: three instanced meshes (§4.10).
     const pickupMaterial = new THREE.MeshStandardMaterial({ roughness: 0.3, metalness: 0.5 });
@@ -1145,7 +1207,7 @@ export class SurfaceView {
       mesh.count = 0;
       mesh.frustumCulled = false;
       mesh.receiveShadow = true;
-      this.#root.add(mesh);
+      this.#actorRoot.add(mesh);
     }
 
     // Projectiles (SPEC-019 §4.5): emissive capsules oriented along their
@@ -1167,7 +1229,7 @@ export class SurfaceView {
       mesh.setColorAt(0, scratchColor.set('#ffffff'));
       mesh.count = 0;
       mesh.frustumCulled = false;
-      this.#root.add(mesh);
+      this.#actorRoot.add(mesh);
     }
 
     // SPEC-029 §4.12: mines and charges — one instanced mesh, capacity 8, one
@@ -1183,15 +1245,15 @@ export class SurfaceView {
     this.#deployableMesh.count = 0;
     this.#deployableMesh.frustumCulled = false;
     this.#deployableMesh.receiveShadow = true;
-    this.#root.add(this.#deployableMesh);
+    this.#actorRoot.add(this.#deployableMesh);
 
     // SPEC-019 §4.4: the combat VFX pool, sized from the preset (19-k). Built
     // before the player group so its point light precedes the torch in
     // traversal order — instruments that walk the lights find the torch last.
     this.#billboard = cameraBillboard();
     this.#fxCapacity = Math.min(FX_CAPACITY_MAX, FX_CAPACITY_PER_PARTICLE * quality.maxParticles);
-    this.#fx = new CombatFx(this.#root, this.#billboard, this.#fxCapacity);
-    this.#telegraphs = new TelegraphView(this.#root);
+    this.#fx = new CombatFx(this.#actorRoot, this.#billboard, this.#fxCapacity);
+    this.#telegraphs = new TelegraphView(this.#actorRoot);
 
     // The player: capsule body + nose cone showing facing. `transparent` stays
     // on so the invulnerability blink can keep writing `opacity` (§4.7).
@@ -1213,10 +1275,11 @@ export class SurfaceView {
     this.#player = new THREE.Group();
     this.#player.add(body, nose);
     // The torch rides the player group, so it moves without `sync()` touching it.
-    const torch = new THREE.PointLight(0xffc98a, 6, 14, 2);
+    const torch = new THREE.PointLight(0xffc98a, TORCH_INTENSITY, TORCH_DISTANCE, 2);
     torch.position.y = 1.6;
+    this.#torch = torch;
     this.#player.add(torch);
-    this.#root.add(this.#player);
+    this.#actorRoot.add(this.#player);
 
     // SPEC-019 §4.1: the animated salvager replaces the capsule when the boot
     // assets are in. The player group stays — it carries the torch and is
@@ -1225,7 +1288,7 @@ export class SurfaceView {
     if (assets !== undefined && assets.loaded) {
       try {
         this.#character = new CharacterView(
-          this.#root,
+          this.#actorRoot,
           assets,
           'character',
           appearance ?? DEFAULT_APPEARANCE,
@@ -1242,7 +1305,7 @@ export class SurfaceView {
 
     // Storm sprites (SPEC-018 §4.9): instanced quads, camera-fixed billboard.
     this.#stormCapacity = quality.maxParticles;
-    this.#storm = new StormParticles(this.#root, this.#billboard, quality.maxParticles);
+    this.#storm = new StormParticles(this.#envRoot, this.#billboard, quality.maxParticles);
 
     // §4.6: one instanced blob layer on every preset — the thing that actually
     // grounds a character, at one draw call and one 32² texture. The shadow map
@@ -1262,9 +1325,9 @@ export class SurfaceView {
     this.#blobs.renderOrder = 1;
     this.#blobs.frustumCulled = false;
     this.#blobs.count = 0;
-    this.#root.add(this.#blobs);
+    this.#actorRoot.add(this.#blobs);
 
-    this.enemies = new EnemyMeshes(this.#root, { shadows: quality.shadowMapSize > 0 });
+    this.enemies = new EnemyMeshes(this.#actorRoot, { shadows: quality.shadowMapSize > 0 });
     this.applyQuality(quality);
   }
 
@@ -1450,7 +1513,7 @@ export class SurfaceView {
   /** SPEC-046 §4.6: one static instanced layer under the root, drawn through compaction. */
   #addCulled(mesh: THREE.InstancedMesh, master: CullMaster, localSphere: THREE.Sphere): CulledInstances {
     const layer = new CulledInstances(mesh, master, localSphere);
-    this.#root.add(mesh);
+    this.#envRoot.add(mesh);
     this.#culled.push(layer);
     this.#cullDirty = true;
     return layer;
@@ -1459,7 +1522,7 @@ export class SurfaceView {
   /** Takes a layer out of the scene and the cull list, freeing its geometry (and a glow's own material). */
   #dropLayer(layer: CulledInstances, ownMaterial: boolean): void {
     const mesh = layer.mesh;
-    this.#root.remove(mesh);
+    this.#envRoot.remove(mesh);
     mesh.geometry.dispose();
     if (ownMaterial) (mesh.material as THREE.Material).dispose();
     mesh.dispose();
@@ -1516,7 +1579,7 @@ export class SurfaceView {
     if (quality.maxParticles !== this.#stormCapacity) {
       this.#storm.dispose();
       this.#stormCapacity = quality.maxParticles;
-      this.#storm = new StormParticles(this.#root, this.#billboard, quality.maxParticles);
+      this.#storm = new StormParticles(this.#envRoot, this.#billboard, quality.maxParticles);
       this.#storm.set(this.#particleKind, this.#particleIntensity);
     }
 
@@ -1527,16 +1590,22 @@ export class SurfaceView {
     if (fxCapacity !== this.#fxCapacity) {
       this.#fx.dispose();
       this.#fxCapacity = fxCapacity;
-      this.#fx = new CombatFx(this.#root, this.#billboard, fxCapacity);
+      this.#fx = new CombatFx(this.#actorRoot, this.#billboard, fxCapacity);
     }
 
     if (quality.ibl) {
       if (this.#environment === null) this.#environment = buildEnvironment(skyParamsFor(this.#palette));
       this.#scene.environment = this.#environment;
-      this.#scene.environmentIntensity = ENVIRONMENT_INTENSITY;
+      // SPEC-054 §4.4: below, the map stays dimmed to the dark look's.
+      this.#scene.environmentIntensity = this.#dark?.ibl ?? ENVIRONMENT_INTENSITY;
     } else {
       this.#clearEnvironment();
     }
+
+    // SPEC-054 §4.5 (54-g): a flashlight already built follows the preset's
+    // mode — the one moment the light count may change after the first descent.
+    const flashLook = this.#flashlightLook;
+    if (flashLook !== null) this.ensureFlashlight(quality.flashlight, flashLook);
 
     // SPEC-053 53-b: a preset change swaps the trees' LOD in place, rebuilds
     // the cover at its capacity and the undergrowth at its density, and the
@@ -1624,6 +1693,99 @@ export class SurfaceView {
     this.#fog.far = Math.max(near + 1e-3, far);
   }
 
+  // ------------------------------------------------------- SPEC-054 §4.4
+
+  /** Where a cave view hangs its root: beside the environment, under the view's one root. */
+  get levelRoot(): THREE.Object3D {
+    return this.#root;
+  }
+
+  /** The level on show. */
+  get level(): 'surface' | 'underground' {
+    return this.#level;
+  }
+
+  /** The visual ground height at (x, z) on the level on show — 0 everywhere below. */
+  heightAt(x: number, z: number): number {
+    return this.#ground(x, z);
+  }
+
+  /**
+   * SPEC-054 §4.4 — swap what the camera sees. Going down hides the
+   * environment and shows `cave`; the background and the fog take
+   * `look.background`; the hemisphere takes `look.ambient`, the key drops to 0
+   * (it stays in the graph, `castShadow` untouched) and the rim to `look.rim`;
+   * the environment map dims to `look.ibl`; and every height sample reads 0.
+   * Coming up puts every surface value back. No light joins or leaves the
+   * graph here, so no program recompiles; the scene drives the linear fog's
+   * span (`darkFogRange` below) and the grade.
+   */
+  setLevel(id: 'surface' | 'underground', cave: CaveView | null, look: DarkLook | null): void {
+    const below = id === 'underground' && look !== null;
+    this.#level = below ? 'underground' : 'surface';
+    if (this.#cave !== null && this.#cave !== cave) this.#cave.root.visible = false;
+    this.#cave = below ? cave : null;
+    this.#dark = below ? look : null;
+    this.#envRoot.visible = !below;
+    if (cave !== null) cave.root.visible = below;
+    this.#flat = below;
+    const colors = this.#surfaceColors;
+    const background = this.#scene.background;
+    if (background instanceof THREE.Color) background.set(below ? look.background : colors.sky);
+    this.#fog.color.set(below ? look.background : colors.fog);
+    this.#hemi.color.set(below ? look.ambient.sky : colors.hemiSky);
+    this.#hemi.groundColor.set(below ? look.ambient.ground : colors.hemiGround);
+    this.#hemiLevel = below ? look.ambient.intensity : this.#hemiBase;
+    this.#hemi.intensity = this.#hemiLevel;
+    this.#key.intensity = below ? 0 : colors.key;
+    this.#rim.intensity = below ? look.rim : RIM_INTENSITY;
+    this.#scene.environmentIntensity = below ? look.ibl : ENVIRONMENT_INTENSITY;
+    this.#applyTorch();
+  }
+
+  // ------------------------------------------------------- SPEC-054 §4.5
+
+  /**
+   * The flashlight in `mode`: built the first time (a visit's first descent,
+   * behind its fade), rebuilt when the mode changes (a quality change, 54-g),
+   * kept otherwise. True when it was built or rebuilt — the moment the light
+   * count may have moved, which the scene answers with a program compile.
+   */
+  ensureFlashlight(mode: FlashlightMode, look: DarkLook['flashlight']): boolean {
+    const current = this.#flashlight;
+    if (current !== null && current.mode === mode) return false;
+    current?.dispose();
+    const flashlight = new Flashlight(this.#player, mode, look);
+    flashlight.setOn(this.#flashlightOn && this.#level === 'underground');
+    this.#flashlight = flashlight;
+    this.#flashlightLook = look;
+    this.#applyTorch();
+    return true;
+  }
+
+  /** On below with the light on; at intensity 0 above or off. Intensities only (§4.5). */
+  setFlashlightOn(on: boolean): void {
+    this.#flashlightOn = on;
+    this.#flashlight?.setOn(on && this.#level === 'underground');
+    this.#applyTorch();
+  }
+
+  /** The flashlight's mode, or `null` before the visit's first descent (`sceneInfo.flashlight`). */
+  get flashlightMode(): FlashlightMode | null {
+    return this.#flashlight?.mode ?? null;
+  }
+
+  /**
+   * §4.5: the torch widens to 10 over 10 m while the `fake` flashlight shines
+   * below — the fake mode adds no light of its own — and is the surface's
+   * 6 over 14 m everywhere else. Intensity and distance are uniforms.
+   */
+  #applyTorch(): void {
+    const wide = this.#level === 'underground' && this.#flashlightOn && this.#flashlight?.mode === 'fake';
+    this.#torch.intensity = wide ? FAKE_TORCH_INTENSITY : TORCH_INTENSITY;
+    this.#torch.distance = wide ? FAKE_TORCH_DISTANCE : TORCH_DISTANCE;
+  }
+
   /**
    * SPEC-027 §4.4 — the two world-space halves of the guidance layer: a light
    * pillar standing on the focus target, and the ground route the escalation's
@@ -1645,7 +1807,7 @@ export class SurfaceView {
     } else {
       const pillar = this.#buildPillar();
       pillar.visible = true;
-      pillar.position.set(beacon.x, this.field.heightAt(beacon.x, beacon.z) + PILLAR_HEIGHT / 2, beacon.z);
+      pillar.position.set(beacon.x, this.#ground(beacon.x, beacon.z) + PILLAR_HEIGHT / 2, beacon.z);
       // §4.4: `0.35 + 0.25·sin(2π·t)`, or a flat 0.5 when nothing may move.
       this.#pillarMaterial.opacity = animate ? 0.35 + 0.25 * Math.sin(time * Math.PI * 2) : 0.5;
     }
@@ -1673,7 +1835,7 @@ export class SurfaceView {
         const t = (nextAt - walked) / length;
         const x = ax + (bx - ax) * t;
         const z = az + (bz - az) * t;
-        scratchMatrix.makeTranslation(x, this.field.heightAt(x, z) + ROUTE_LIFT, z);
+        scratchMatrix.makeTranslation(x, this.#ground(x, z) + ROUTE_LIFT, z);
         markers.setMatrixAt(placed, scratchMatrix);
         // The travelling brightness wave: one period every six markers.
         const wave = animate ? 0.5 + 0.5 * Math.sin((time * ROUTE_WAVE_SPEED - placed * ROUTE_WAVE_STEP) * Math.PI * 2) : 1;
@@ -1709,7 +1871,7 @@ export class SurfaceView {
     const mesh = new THREE.Mesh(geometry, this.#pillarMaterial);
     mesh.renderOrder = 2;
     mesh.frustumCulled = false;
-    this.#root.add(mesh);
+    this.#actorRoot.add(mesh);
     this.#pillar = mesh;
     return mesh;
   }
@@ -1727,7 +1889,7 @@ export class SurfaceView {
     mesh.count = 0;
     // One `setColorAt` up front, so `instanceColor` exists before the wave runs.
     mesh.setColorAt(0, scratchColor.setScalar(1));
-    this.#root.add(mesh);
+    this.#actorRoot.add(mesh);
     this.#routeMarkers = mesh;
     return mesh;
   }
@@ -1736,7 +1898,7 @@ export class SurfaceView {
   setArena(arena: { x: number; z: number; radius: number } | null): void {
     this.#arenaRing.visible = arena !== null;
     if (arena !== null) {
-      this.#arenaRing.position.set(arena.x, 0.3 + this.field.heightAt(arena.x, arena.z), arena.z);
+      this.#arenaRing.position.set(arena.x, 0.3 + this.#ground(arena.x, arena.z), arena.z);
       this.#arenaRing.scale.setScalar(arena.radius);
     }
   }
@@ -2139,7 +2301,7 @@ export class SurfaceView {
     }
     const cover = this.#look.cover;
     if (this.#cover === null && cover !== undefined) {
-      this.#cover = new GroundCover(this.#root, this.#layout, this.field, cover, this.#preset, material);
+      this.#cover = new GroundCover(this.#envRoot, this.#layout, this.field, cover, this.#preset, material);
       this.#cullDirty = true;
       built = true;
     }
@@ -2172,7 +2334,7 @@ export class SurfaceView {
       const before = this.#occluders[landmark.occluder];
       if (before !== undefined) this.#occluders[landmark.occluder] = { ...before, height: topOf(prop.body) };
       if (landmark.glow !== null) {
-        this.#root.remove(landmark.glow);
+        this.#envRoot.remove(landmark.glow);
         landmark.glow.geometry.dispose();
         landmark.glow = null;
       }
@@ -2181,7 +2343,7 @@ export class SurfaceView {
         glow.name = 'poi-glow:landmark';
         glow.position.copy(mesh.position);
         glow.rotation.y = landmark.yaw;
-        this.#root.add(glow);
+        this.#envRoot.add(glow);
         landmark.glow = glow;
       }
       landmark.fromModel = true;
@@ -2445,7 +2607,7 @@ export class SurfaceView {
       this.#tugMeshes.push(mesh);
       if (!Array.isArray(mesh.material)) parts.push({ mesh, base: mesh.material, faded: null });
     });
-    this.#root.add(ship);
+    this.#envRoot.add(ship);
     this.#tug = ship;
     // SPEC-035 §4.5: it stands between the camera and a salvager behind it.
     this.#occluders.push({
@@ -2473,7 +2635,7 @@ export class SurfaceView {
     const assets = this.#assets;
     if (assets === undefined || !assets.loaded || !assets.hasModel('character')) return false;
     try {
-      this.#scavBodies.push(new ScavBody(this.#root, assets, x, z, facing, this.#shadowsOn, this.field.heightAt(x, z)));
+      this.#scavBodies.push(new ScavBody(this.#envRoot, assets, x, z, facing, this.#shadowsOn, this.field.heightAt(x, z)));
       return true;
     } catch (cause) {
       log.warn('view', 'the scav body could not be built', cause);
@@ -2499,6 +2661,8 @@ export class SurfaceView {
    * of comparisons.
    */
   setView(targetX: number, targetZ: number, camDistance: number, fovDeg: number, aspect: number, frustum: THREE.Frustum): void {
+    // SPEC-054 §4.4: below, the cave's walls are what the camera culls.
+    this.#cave?.setView(targetX, targetZ, camDistance, fovDeg, aspect, frustum);
     const view = this.#cullView;
     view.frustum = frustum;
     let stale =
@@ -2702,7 +2866,7 @@ export class SurfaceView {
     // definition's model id; the procedural probe is the fallback (19-l).
     const follower = frame.follower;
     if (follower !== null && this.#followerView === null) {
-      this.#followerView = new FollowerView(this.#root, this.#assets, follower.def?.model ?? 'procedural');
+      this.#followerView = new FollowerView(this.#actorRoot, this.#assets, follower.def?.model ?? 'procedural');
     }
     this.#followerView?.sync(follower, frame.time, follower === null ? 0 : ground(follower.x, follower.z));
 
@@ -2730,6 +2894,9 @@ export class SurfaceView {
 
     this.#syncLightning(frame.time);
     this.#storm.sync(p.x, p.z, frame.time, ground);
+    // SPEC-054 §4.5: the flashlight aims along the facing, eased; §4.4: the cave's dust drifts.
+    this.#flashlight?.sync(p.x, p.z, p.facing, frame.dt);
+    this.#cave?.sync(p.x, p.z, frame.time);
     this.#fx.sync(frame.time, ground);
     if (frame.telegraphs !== undefined) {
       this.#telegraphs.sync(frame.telegraphs.pool, frame.telegraphs.time, ground, this.reduceMotion);
@@ -2758,7 +2925,7 @@ export class SurfaceView {
         hash01(this.#lightningSeed, tick) < 0.15 * this.#particleIntensity &&
         time - tick * LIGHTNING_WINDOW < LIGHTNING_FLASH_SECONDS;
     }
-    this.#hemi.intensity = this.#hemiBase * (flash ? 4 : 1);
+    this.#hemi.intensity = this.#hemiLevel * (flash ? 4 : 1);
   }
 
   /** §4.6: player, follower and every live enemy, in one instanced layer. */
@@ -2768,7 +2935,7 @@ export class SurfaceView {
     const write = (x: number, z: number, scale: number): void => {
       if (n >= BLOB_CAPACITY) return;
       scratchMatrix.makeScale(scale, 1, scale);
-      scratchMatrix.setPosition(x, this.field.heightAt(x, z), z);
+      scratchMatrix.setPosition(x, this.#ground(x, z), z);
       mesh.setMatrixAt(n, scratchMatrix);
       n++;
     };
@@ -2800,7 +2967,7 @@ export class SurfaceView {
         if (pickup.kind !== kind || n >= mesh.instanceMatrix.count) continue;
         const bob = 0.4 + Math.sin(frame.time * 3 + pickup.seed) * 0.12;
         scratchMatrix.makeRotationY(frame.time + pickup.seed);
-        scratchMatrix.setPosition(pickup.x, bob + this.field.heightAt(pickup.x, pickup.z), pickup.z);
+        scratchMatrix.setPosition(pickup.x, bob + this.#ground(pickup.x, pickup.z), pickup.z);
         mesh.setMatrixAt(n, scratchMatrix);
         mesh.setColorAt(n, scratchColor.set(kind === 'resource' ? RESOURCE_COLORS[pickup.resource] : '#8ad7ff'));
         n++;
@@ -2832,7 +2999,7 @@ export class SurfaceView {
       const speed = Math.hypot(shot.vx, shot.vz);
       const yaw = speed > 0 ? -Math.atan2(shot.vz, shot.vx) : -(shot.owner === 'enemy' ? 0 : frame.player.facing);
       const bulk = Math.max(0.12, shot.radius) / 0.12;
-      let y = 0.9 + this.field.heightAt(shot.x, shot.z);
+      let y = 0.9 + this.#ground(shot.x, shot.z);
       // SPEC-029 §4.6: a lob arcs — `0.9 + h + 4·H·t·(1−t)` with
       // `H = min(4, 0.25 · distance)` and `t = 1 − ttl / flight`.
       if (shot.lob && shot.flight > 0) {
@@ -2882,7 +3049,7 @@ export class SurfaceView {
     for (let i = 0; i < count; i++) {
       const d = pool.at(i);
       const mine = d.kind === 'mine';
-      const y = this.field.heightAt(d.x, d.z);
+      const y = this.#ground(d.x, d.z);
       scratchPosition2.set(d.x, y + (mine ? 0.04 : 0.15), d.z);
       scratchQuat.identity();
       if (mine) scratchScale2.set(0.35, 0.08, 0.35);
@@ -2912,6 +3079,10 @@ export class SurfaceView {
   }
 
   dispose(): void {
+    // SPEC-054 §4.5: the flashlight's light, cookie and shadow map go with the view.
+    this.#flashlight?.dispose();
+    this.#flashlight = null;
+    this.#cave = null;
     this.enemies.dispose();
     this.#storm.dispose();
     this.#fx.dispose();

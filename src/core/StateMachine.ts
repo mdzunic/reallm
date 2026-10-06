@@ -102,8 +102,11 @@ export function isAllowedTransition(from: SceneId | null, to: SceneId): boolean 
   return (ALLOWED_TRANSITIONS[from] as readonly SceneId[]).includes(to);
 }
 
-/** 0 ms fades for players who asked for less motion; the call order is unchanged (D-16). */
-function fadeMs(): number {
+/**
+ * 0 ms fades for players who asked for less motion; the call order is unchanged
+ * (D-16). Exported for SPEC-054's level swap, which fades the same way.
+ */
+export function fadeMs(): number {
   const query = (globalThis as { matchMedia?: (q: string) => { matches: boolean } }).matchMedia;
   if (typeof query !== 'function') return FADE_MS; // node tests: no preference
   return query.call(globalThis, '(prefers-reduced-motion: reduce)').matches ? 0 : FADE_MS;

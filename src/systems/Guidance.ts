@@ -66,9 +66,11 @@ export interface GuideContext {
   shelters?: readonly { x: number; z: number; label: string; radius: number }[];
   /** SPEC-030 D-8: `weather.phase === 'active'` — cycled and forced alike. */
   stormActive?: boolean;
+  /** SPEC-054 §4.10: the exit shaft's position below; unset above. */
+  exit?: { x: number; z: number };
 }
 
-export type GuideKind = 'poi' | 'node' | 'enemy' | 'follower' | 'shelter';
+export type GuideKind = 'poi' | 'node' | 'enemy' | 'follower' | 'shelter' | 'exit';
 
 export interface GuideTarget {
   kind: GuideKind;
@@ -300,6 +302,22 @@ export function padTarget(ctx: GuideContext): GuideTarget | null {
     return { kind: 'poi', x: poi.x, z: poi.z, radius: PAD_RADIUS, label: PAD_LABEL, key: `poi:${poi.poi}:${poi.instance}` };
   }
   return null;
+}
+
+/** SPEC-054 §3, §4.10: one reused object — only `x` and `z` move between calls. */
+const EXIT_TARGET: GuideTarget = { kind: 'exit', x: 0, z: 0, radius: 1.5, label: 'Surface', key: 'exit' };
+
+/**
+ * SPEC-054 §4.10 — below, the guidance target is the way back up, whatever the
+ * tracked objective: the scene reads this ahead of `focusObjective` and skips
+ * the mission's own targets entirely while it is not `null`. `null` above,
+ * where `ctx.exit` is unset.
+ */
+export function exitTarget(ctx: GuideContext): GuideTarget | null {
+  if (ctx.exit === undefined) return null;
+  EXIT_TARGET.x = ctx.exit.x;
+  EXIT_TARGET.z = ctx.exit.z;
+  return EXIT_TARGET;
 }
 
 // -------------------------------------------------------- bearings and words

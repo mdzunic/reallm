@@ -44,6 +44,9 @@ import {
   OCCLUDER_OPACITY,
   relativeLuminance,
   surfaceFogRange,
+  darkFogRange,
+  descentRefusal,
+  lightChipText,
   upgradeDeltaText,
   UPGRADE_METRIC_KEYS,
   balanceAfterText,
@@ -95,6 +98,7 @@ import {
   STAMINA_FULL_HIDE_SECONDS,
   staminaShown,
   STATUS_LABELS,
+  type DescentContext,
   type HudModel,
   type MissionStatus,
 } from '@/systems/UiHelpers';
@@ -120,16 +124,19 @@ const GATED: MissionDef = MISSIONS.c1_m2;
 // SPEC-012 12-k / PLAN R16: the pad terminal is allowed to have nothing on it.
 // What it may not do is read empty, which is how a landing on The Hive with the
 // gauntlet unflown looks like a broken game.
-describe('surfaceHoldReason (SPEC-036 §4.3)', () => {
-  it('orders beat, rotate, ui, modal', () => {
-    const none = { beats: 0, rotate: false, ui: 0, modal: 0 };
+describe('surfaceHoldReason (SPEC-036 §4.3, SPEC-054 §4.2)', () => {
+  it('orders beat, level, rotate, ui, modal', () => {
+    const none = { beats: 0, level: false, rotate: false, ui: 0, modal: 0 };
     expect(surfaceHoldReason(none)).toBeNull();
-    expect(surfaceHoldReason({ beats: 1, rotate: true, ui: 1, modal: 1 })).toBe('beat');
-    expect(surfaceHoldReason({ beats: 0, rotate: true, ui: 1, modal: 1 })).toBe('rotate');
-    expect(surfaceHoldReason({ beats: 0, rotate: false, ui: 1, modal: 1 })).toBe('ui');
-    expect(surfaceHoldReason({ beats: 0, rotate: false, ui: 0, modal: 1 })).toBe('modal');
+    expect(surfaceHoldReason({ beats: 1, level: true, rotate: true, ui: 1, modal: 1 })).toBe('beat');
+    expect(surfaceHoldReason({ beats: 0, level: true, rotate: true, ui: 1, modal: 1 })).toBe('level');
+    expect(surfaceHoldReason({ beats: 0, level: false, rotate: true, ui: 1, modal: 1 })).toBe('rotate');
+    expect(surfaceHoldReason({ beats: 0, level: false, rotate: false, ui: 1, modal: 1 })).toBe('ui');
+    expect(surfaceHoldReason({ beats: 0, level: false, rotate: false, ui: 0, modal: 1 })).toBe('modal');
     // The rotate block alone holds, as the map does.
     expect(surfaceHoldReason({ ...none, rotate: true })).toBe('rotate');
+    // A level swap alone holds too, outranking the rotate block.
+    expect(surfaceHoldReason({ ...none, level: true })).toBe('level');
   });
 });
 
@@ -1471,6 +1478,8 @@ describe('diffHudInto and copyHudInto (SPEC-040 §4.4, AC-20)', () => {
         return rng.chance(0.3)
           ? null
           : { value: small(rng), max: 100, exhausted: rng.chance(0.5), sprinting: rng.chance(0.5), shown: rng.chance(0.5) };
+      case 'light':
+        return rng.chance(0.4) ? null : rng.chance(0.5);
       case 'flight':
         return rng.chance(0.5)
           ? undefined
@@ -2175,5 +2184,79 @@ describe('starmapPreselect (SPEC-044 §4.6)', () => {
     const before = JSON.stringify(data);
     starmapPreselect(data, unlockedIn(data), 'vetra');
     expect(JSON.stringify(data)).toBe(before);
+  });
+});
+
+// --------------------------------------------------------------- SPEC-054
+
+describe('darkFogRange (SPEC-054 §4.4)', () => {
+  it('near is the camera distance, far is near plus the span', () => {
+    expect(darkFogRange(17, 24)).toEqual({ near: 17, far: 41 });
+  });
+
+  it('tracks whatever camera distance and span it is given', () => {
+    expect(darkFogRange(0, 10)).toEqual({ near: 0, far: 10 });
+    expect(darkFogRange(22, 24)).toEqual({ near: 22, far: 46 });
+  });
+});
+
+describe('descentRefusal (SPEC-054 §4.2)', () => {
+  const OPEN_DESCENT: DescentContext = {
+    tutorialDone: true,
+    clockTitle: null,
+    bossAwake: false,
+    follower: false,
+    stormForced: false,
+  };
+
+  it('gives each text of §4.2 in order, and null once nothing refuses', () => {
+    expect(descentRefusal({ ...OPEN_DESCENT, tutorialDone: false })).toBe('Sealed — finish "Dry Land" first');
+    expect(descentRefusal({ ...OPEN_DESCENT, clockTitle: 'Dry Land' })).toBe(
+      'Not now — the clock is running on "Dry Land"',
+    );
+    expect(descentRefusal({ ...OPEN_DESCENT, bossAwake: true })).toBe('Not now — the boss is awake');
+    expect(descentRefusal({ ...OPEN_DESCENT, follower: true })).toBe('Not now — the probe cannot follow you down');
+    expect(descentRefusal({ ...OPEN_DESCENT, stormForced: true })).toBe('Not now — ride out the storm first');
+    expect(descentRefusal(OPEN_DESCENT)).toBeNull();
+  });
+
+  it('the seal outranks every other refusal', () => {
+    expect(
+      descentRefusal({
+        tutorialDone: false,
+        clockTitle: 'Dry Land',
+        bossAwake: true,
+        follower: true,
+        stormForced: true,
+      }),
+    ).toBe('Sealed — finish "Dry Land" first');
+  });
+
+  it('checks run in the given order once the seal is open', () => {
+    expect(
+      descentRefusal({ ...OPEN_DESCENT, clockTitle: 'Dry Land', bossAwake: true, follower: true, stormForced: true }),
+    ).toBe('Not now — the clock is running on "Dry Land"');
+    expect(descentRefusal({ ...OPEN_DESCENT, bossAwake: true, follower: true, stormForced: true })).toBe(
+      'Not now — the boss is awake',
+    );
+    expect(descentRefusal({ ...OPEN_DESCENT, follower: true, stormForced: true })).toBe(
+      'Not now — the probe cannot follow you down',
+    );
+  });
+});
+
+describe('lightChipText (SPEC-054 §4.5)', () => {
+  it('reads the state and the key legend on keyboard', () => {
+    expect(lightChipText(true, 'keyboard')).toBe('◐ Light on · L');
+    expect(lightChipText(false, 'keyboard')).toBe('○ Light off · L');
+  });
+
+  it('drops the key legend on touch, where the button is the control', () => {
+    expect(lightChipText(true, 'touch')).toBe('◐ Light on');
+    expect(lightChipText(false, 'touch')).toBe('○ Light off');
+  });
+
+  it('a gamepad reads the keyboard legend, like every other scheme-aware helper here', () => {
+    expect(lightChipText(true, 'gamepad')).toBe('◐ Light on · L');
   });
 });

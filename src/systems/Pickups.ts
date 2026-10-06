@@ -163,6 +163,23 @@ export class Pickups {
     this.#toastAt = this.#time;
     this.#events.emit('ui:toast', { text: CARGO_TOAST_TEXT, kind: 'warn' });
   }
+
+  /**
+   * SPEC-054 §4.2: a level swap leaves every pickup behind — its coordinates
+   * belong to the level being left, surface or cave. Frees the whole pool in
+   * one step (E86) and answers how many lay within `radius` of `(x, z)`, so
+   * the caller can toast `Loot left behind` only when something was actually
+   * close enough to matter.
+   */
+  clear(x: number, z: number, radius: number): number {
+    let near = 0;
+    for (let i = 0; i < this.pool.size; i++) {
+      const p = this.pool.at(i);
+      if (Math.hypot(x - p.x, z - p.z) <= radius) near++;
+    }
+    this.pool.clear();
+    return near;
+  }
 }
 
 // -------------------------------------------------------------------- nodes

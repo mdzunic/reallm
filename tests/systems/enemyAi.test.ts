@@ -3,6 +3,7 @@
 // simulated at the fixed 60 Hz step. SPEC-041 moved the wurm's burrow and the
 // queen's acid into boss moves; their cases live in `bossMoves.test.ts`.
 import { describe, expect, it } from 'vitest';
+import { ENEMIES } from '@/data/index';
 import type { EnemyEntity } from '@/entities/Enemy';
 import { CircleObstacles } from '@/entities/World';
 import {
@@ -16,6 +17,7 @@ import {
 import { damageReduction } from '@/systems/Combat';
 import { isDashing, stepDash, tryDash } from '@/systems/Dash';
 import { LOUD_TRACK_LOCK } from '@/entities/Telegraph';
+import { DARK_AGGRO, inLightCone, LIGHT_FEAR_SPEED, LIGHT_SEEK_AGGRO, lit } from '@/systems/Light';
 import { SPRINT_NOISE } from '@/systems/Stamina';
 import { STEP, harness, type Harness } from './combatFixtures';
 
@@ -1026,5 +1028,253 @@ describe('the Wurm listens (SPEC-050 §4.4)', () => {
     }
     expect(t.x).toBe(at.x);
     expect(t.z).toBe(at.z);
+  });
+});
+
+// ------------------------------------------------------------- SPEC-054
+
+/** SPEC-054 §3's `BELOW_LEASH` (`systems/Underground.ts`), *initial tuning*: a cave pack's leash. */
+const BELOW_LEASH = 24;
+
+/** The world below: the flashlight's switch, its beam along `facing`. */
+function below(on: boolean, facing = 0): Harness {
+  const h = harness();
+  h.world.light = { on };
+  h.world.player.facing = facing;
+  return h;
+}
+
+/** The salvager turns the light onto `e`, as a player tracking it would. */
+function faceAt(h: Harness, e: EnemyEntity): void {
+  const p = h.world.player;
+  p.facing = Math.atan2(e.z - p.z, e.x - p.x);
+}
+
+describe('the light below moves acquisition (SPEC-054 §4.6)', () => {
+  it('light off: a skitter at 15 m does not acquire and one at 10 m does (18 m × 0.6)', () => {
+    expect(ENEMIES.dust_skitter.archetype).toBe('swarm');
+    expect(ENEMIES.dust_skitter.aggroRadius * DARK_AGGRO).toBeCloseTo(10.8, 10);
+    const h = below(false);
+    const far = h.spawn('dust_skitter', 15, 0);
+    const near = h.spawn('dust_skitter', 0, 10);
+    h.step();
+    expect(far.aggro).toBe(false);
+    expect(near.aggro).toBe(true);
+    expect(near.state).toBe('chase');
+    // The light on, a swarm's radius is its own 18 m again — the beam does not draw it.
+    h.world.light = { on: true };
+    h.step();
+    expect(far.aggro).toBe(true);
+  });
+
+  it('light off: a rusher’s radius is ×0.6 too (12 m)', () => {
+    const h = below(false);
+    const out = h.spawn('wurmling', 13, 0);
+    const inside = h.spawn('wurmling', 0, -11);
+    h.step();
+    expect(out.aggro).toBe(false);
+    expect(inside.aggro).toBe(true);
+  });
+
+  it('a rusher in the lit cone acquires at 30 m (20 m × 1.6); off the beam, or on the surface, it does not', () => {
+    expect(ENEMIES.wurmling.archetype).toBe('rusher');
+    expect(ENEMIES.wurmling.aggroRadius * LIGHT_SEEK_AGGRO).toBeCloseTo(32, 10);
+    const h = below(true);
+    const seen = h.spawn('wurmling', 30, 0);
+    const unseen = h.spawn('wurmling', 0, 30);
+    h.step();
+    expect(seen.aggro).toBe(true);
+    expect(seen.state).toBe('chase');
+    expect(unseen.aggro).toBe(false);
+
+    const surface = harness();
+    surface.world.player.facing = 0;
+    const e = surface.spawn('wurmling', 30, 0);
+    surface.step();
+    expect(e.aggro).toBe(false);
+  });
+
+  it('a ranged enemy and a wave’s enemy read 1 in the dark', () => {
+    const h = below(false);
+    const raider = h.spawn('scav_raider', 20, 0); // its own 22 m
+    const wave = h.spawn('dust_skitter', 0, 15); // a wave's skitter keeps 18 m
+    wave.fromWave = true;
+    h.step();
+    expect(raider.aggro).toBe(true);
+    expect(wave.aggro).toBe(true);
+  });
+
+  it('the light’s share multiplies the noise (SPEC-050 §4.3): loud in the dark, 18 × 1.5 × 0.6 = 16.2 m', () => {
+    const h = below(false);
+    h.world.noiseMult = SPRINT_NOISE;
+    const out = h.spawn('dust_skitter', 16.5, 0);
+    const inside = h.spawn('dust_skitter', 0, 15.9);
+    h.step();
+    expect(out.aggro).toBe(false);
+    expect(inside.aggro).toBe(true);
+  });
+});
+
+describe('bugs shy from the light (SPEC-054 §4.6)', () => {
+  /** Metres a skitter closes on the player over 0.5 s of chase, from 10 m out along +x. */
+  function closed(light: { on: boolean } | undefined, facing: number): number {
+    const h = harness();
+    if (light !== undefined) h.world.light = light;
+    h.world.player.facing = facing;
+    const e = h.spawn('dust_skitter', 10, 0);
+    h.step(); // it acquires
+    expect(e.state).toBe('chase');
+    const x0 = e.x;
+    h.run(0.5);
+    expect(e.state).toBe('chase');
+    return x0 - e.x;
+  }
+
+  it('a swarm in the lit cone closes at ×0.4; off the beam, or in the dark, as on the surface', () => {
+    const surface = closed(undefined, 0);
+    expect(surface).toBeGreaterThan(ENEMIES.dust_skitter.speed * 0.5 * 0.9);
+    const feared = closed({ on: true }, 0);
+    expect(feared / surface).toBeCloseTo(LIGHT_FEAR_SPEED, 2);
+    expect(closed({ on: true }, Math.PI)).toBeCloseTo(surface, 9);
+    expect(closed({ on: false }, 0)).toBeCloseTo(surface, 9);
+  });
+
+  it('a swarm in the lit cone starts no windup at melee reach', () => {
+    const h = below(true);
+    const e = h.spawn('dust_skitter', 1.5, 0);
+    const p = h.world.player;
+    let atReach = 0;
+    for (let i = 0; i < Math.round(1.5 / STEP); i++) {
+      faceAt(h, e); // the salvager keeps the light on it
+      const reach = e.radius + 0.9 + p.radius; // the skitter's melee range is 0.9 m
+      if (e.state === 'chase' && e.cooldown <= 0 && Math.hypot(e.x - p.x, e.z - p.z) <= reach) atReach++;
+      h.step();
+      expect(e.state).not.toBe('windup');
+    }
+    expect(atReach).toBeGreaterThan(60); // a second at reach, unbitten
+    expect(h.of('enemy:windup')).toHaveLength(0);
+    expect(h.of('player:damaged')).toHaveLength(0);
+  });
+
+  it('a windup started in the dark still lands when the light turns onto it', () => {
+    const h = below(true, Math.PI); // facing away: the skitter behind is unlit
+    const e = h.spawn('dust_skitter', 1.5, 0);
+    expect(runUntil(h, 1, () => e.state === 'windup')).toBeGreaterThan(0);
+    faceAt(h, e);
+    const p = h.world.player;
+    expect(lit(p.x, p.z, p.facing, true, e.x, e.z)).toBe(true);
+    expect(runUntil(h, 1, () => h.of('player:damaged').length > 0)).toBeGreaterThan(0);
+    expect(e.state).toBe('attack');
+    expect(h.of('enemy:windup')).toHaveLength(1);
+  });
+
+  it('a wave’s swarm ignores the light', () => {
+    const h = below(true);
+    const e = h.spawn('dust_skitter', 1.5, 0);
+    e.fromWave = true;
+    expect(runUntil(h, 1, () => e.state === 'windup')).toBeGreaterThan(0);
+  });
+});
+
+describe('placed enemies leash at their own 24 m (SPEC-054 §4.7)', () => {
+  /** A wurmling at (0, 0) stamped as `spawnPackAt` stamps a cave pack's. */
+  function placed(h: Harness): EnemyEntity {
+    const e = h.spawn('wurmling', 0, 0);
+    e.placed = true;
+    e.leash = BELOW_LEASH;
+    return e;
+  }
+
+  it('one 25 m from its anchor leashes home; at 23 m, or unplaced at 25 m, it does not', () => {
+    const h = harness();
+    h.world.player.x = -80; // far off: nothing aggroes
+    const out = placed(h);
+    out.x = 25;
+    const inside = placed(h);
+    inside.z = 23;
+    const loose = h.spawn('wurmling', 0, 0);
+    expect(loose.leash).toBe(ENEMIES.wurmling.leashRadius);
+    loose.z = -25;
+    h.step();
+    expect(out.state).toBe('leash');
+    expect(out.invulnerable).toBe(true);
+    expect(inside.state).toBe('wander');
+    expect(loose.state).toBe('wander');
+    // It walks back to its anchor and is whole again there.
+    out.hp = 5;
+    expect(runUntil(h, 10, () => out.state === 'wander')).toBeGreaterThan(0);
+    expect(Math.hypot(out.x, out.z)).toBeLessThanOrEqual(0.5 + 1e-9);
+    expect(out.hp).toBe(out.maxHp);
+  });
+
+  it('a chase ends once its target is past 24 m from the anchor; an unplaced one holds on to 45 m', () => {
+    const h = harness();
+    const e = placed(h);
+    h.world.player.x = 19;
+    h.step(); // inside its 20 m: it acquires
+    expect(e.aggro).toBe(true);
+    h.run(0.5); // the chase pulls it a couple of metres off its anchor
+    expect(e.x).toBeGreaterThan(1);
+    h.world.player.x = 23.5;
+    h.step();
+    expect(e.state).toBe('chase');
+    h.world.player.x = 25;
+    h.step();
+    expect(e.state).toBe('leash');
+    expect(e.aggro).toBe(false);
+
+    const g = harness();
+    const loose = g.spawn('wurmling', 0, 0);
+    g.world.player.x = 19;
+    g.step();
+    expect(loose.aggro).toBe(true);
+    g.run(0.5);
+    g.world.player.x = 25;
+    g.step();
+    expect(loose.state).toBe('chase');
+  });
+
+  it('stays home while the player stands past its leash from the anchor, light on or not — and never flips', () => {
+    const h = below(true);
+    const p = h.world.player;
+    const e = placed(h);
+    e.x = -4; // wandered 4 m off its anchor, away from the player
+    p.x = 26; // 30 m from the rusher, 26 m from its anchor
+    faceAt(h, e);
+    // In the beam and within 20 × 1.6 = 32 m: only the leash keeps it home.
+    expect(Math.hypot(e.x - p.x, e.z - p.z)).toBeCloseTo(30, 9);
+    expect(inLightCone(p.x, p.z, p.facing, e.x, e.z)).toBe(true);
+    for (let i = 0; i < Math.round(2 / STEP); i++) {
+      faceAt(h, e); // the light stays on it
+      h.step();
+      expect(e.aggro).toBe(false);
+      expect(e.state).toBe('wander');
+    }
+
+    // Unplaced, the same geometry takes the player at once: the leash alone held it.
+    const g = below(true);
+    const loose = g.spawn('wurmling', 0, 0);
+    loose.x = -4;
+    g.world.player.x = 26;
+    faceAt(g, loose);
+    g.step();
+    expect(loose.aggro).toBe(true);
+
+    // The player steps in to 20 m from the anchor, the light still on it: it
+    // acquires within its lit 32 m, and holds the chase — no leash, no flip.
+    p.x = 20;
+    p.z = 0;
+    faceAt(h, e);
+    expect(Math.hypot(e.x - p.x, e.z - p.z)).toBeLessThanOrEqual(ENEMIES.wurmling.aggroRadius * LIGHT_SEEK_AGGRO);
+    h.step();
+    expect(e.aggro).toBe(true);
+    for (let i = 0; i < Math.round(2 / STEP); i++) {
+      p.x = 20; // the player holds its ground against shoves and knockback
+      p.z = 0;
+      h.step();
+      expect(e.aggro).toBe(true);
+      expect(e.state).not.toBe('leash');
+      expect(e.state).not.toBe('wander');
+    }
   });
 });

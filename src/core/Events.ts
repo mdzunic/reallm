@@ -25,6 +25,7 @@ import type { SceneId } from '@/core/StateMachine';
 import type {
   BossMoveId,
   BossMoveKind,
+  CacheId,
   ContractId,
   DamageSource,
   DialogueId,
@@ -213,6 +214,16 @@ export type GameEvents = {
    * plays, so a hit that does not kill is no longer silent.
    */
   'flight:hazardHit': { kind: 'asteroid' | 'fighter' | 'interceptor'; x: number; y: number; lethal: boolean };
+  /**
+   * SPEC-054 §4.2, §4.9: a level swap landed — the surface going down or the
+   * underground coming back up. `core/` may not import `scenes/`, so the
+   * `LevelId` union is spelled out rather than imported (silent).
+   */
+  'level:changed': { planet: PlanetId; level: 'surface' | 'underground' };
+  /** SPEC-054 §4.5: the flashlight toggled below; `light` does nothing above or in flight. */
+  'light:toggled': { on: boolean };
+  /** SPEC-054 §4.8: an unclaimed cache opened — `Economy.claimCache`'s first call. */
+  'cache:opened': { cache: CacheId; x: number; z: number };
   'ui:toast': { text: string; kind?: 'info' | 'warn' | 'good' | 'error'; ms?: number };
   /** The rotate prompt itself is SPEC-015 §6; this is the signal it listens to. */
   'ui:orientation': { orientation: 'portrait' | 'landscape' };

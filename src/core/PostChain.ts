@@ -42,6 +42,7 @@ interface GradeUniforms {
   uGrain: { value: number };
   uTime: { value: number };
   uTint: { value: Vector3 };
+  uLift: { value: Vector3 };
   uAspect: { value: Vector2 };
 }
 
@@ -206,6 +207,10 @@ export class PostChain {
     this.#uniforms.uContrast.value = look.contrast;
     this.#uniforms.uGrain.value = look.grain;
     this.#uniforms.uTint.value.set(look.tint[0], look.tint[1], look.tint[2]);
+    // SPEC-054 §4.4: `uLift` is already neutral; a look that never sets it
+    // (every surface look) keeps the shader's own [0, 0, 0] default.
+    const lift = look.lift ?? [0, 0, 0];
+    this.#uniforms.uLift.value.set(lift[0], lift[1], lift[2]);
   }
 
   dispose(): void {

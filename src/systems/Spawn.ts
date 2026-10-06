@@ -8,6 +8,9 @@
 // SPEC-043 §4.4: every ambient elite roll — a single's, a pack leader's — is on
 // the planet's `eliteChance × eliteMult`, capped at 0.5; wave groups keep the
 // `elite` flags their scripts carry.
+// SPEC-054 §4.7: below, the director adds nothing ambient (the scene passes
+// `missionsWantSpawns = false`); the cave's packs stand at fixed anchors
+// through `spawnPackAt`, `placed` — never culled, leashed at 24 m.
 //
 // Actual entity initialisation belongs to `Combat.spawnEnemy` (SPEC-011 §4.6),
 // so the director drives a small `Spawner` port rather than the pool directly;
@@ -77,6 +80,15 @@ export const PACK_RADIUS = 2.5;
 export const PACK_OVERSHOOT = 4;
 /** SPEC-043 §4.4 (43-g): the most an ambient elite roll may be, whatever multiplies it. */
 export const ELITE_CHANCE_CAP = 0.5;
+/**
+ * SPEC-054 §4.7: a placed member whose point is blocked is pulled back toward
+ * the anchor in this many even steps (¾, ½, ¼ of its offset), then stands on
+ * the anchor itself.
+ */
+const PLACED_PULLBACK_STEPS = 4;
+
+/** SPEC-054 §4.7: where `#pullTowardAnchor` puts a placed member — reused, never allocated. */
+const MEMBER_AT = { x: 0, z: 0 };
 
 /**
  * SPEC-038 §4.4: the planet's design count on every preset, capped by the
@@ -315,25 +327,96 @@ export class SpawnDirector {
     size = Math.min(size, row.maxAlive - (this.#aliveById.get(id) ?? 0));
     size = Math.max(1, Math.min(size, this.populationTarget + PACK_OVERSHOOT - this.#ambientAlive));
     const at = this.#place(player, def.radius, frustum);
-    this.#spawnPackAt(id, at.x, at.z, size, false);
+    this.#spawnPackAround(id, at.x, at.z, size, false, null);
   }
 
-  /** The pack itself: the leader at `(x, z)`, then the members around it. */
-  #spawnPackAt(id: EnemyId, x: number, z: number, size: number, forceElite: boolean): number {
+  /**
+   * The pack itself: the leader at `(x, z)`, then the members around it. With
+   * `leash` null (the ring's packs, the debug pack) a blocked member is dropped
+   * (E64); with a leash (SPEC-054 §4.7, a cave's pack) it is pulled back toward
+   * the anchor instead, and every member is stamped `placed`.
+   */
+  #spawnPackAround(id: EnemyId, x: number, z: number, size: number, forceElite: boolean, leash: number | null): number {
     const def = ENEMIES[id];
     const packId = this.#nextPackId++;
-    this.#spawnRolled(id, x, z, packId, forceElite);
+    const leader = this.#spawnRolled(id, x, z, packId, forceElite);
+    if (leash !== null) this.#stampPlaced(leader, x, z, leash);
     let members = 1;
     for (let k = 1; k < size; k++) {
       const off = this.#rng.inDisc(PACK_RADIUS);
-      const mx = x + off.x;
-      const mz = z + off.z;
-      if (this.#memberBlocked(mx, mz, def.radius)) continue; // E64
+      let mx: number;
+      let mz: number;
+      if (leash === null) {
+        mx = x + off.x;
+        mz = z + off.z;
+        if (this.#memberBlocked(mx, mz, def.radius)) continue; // E64
+      } else {
+        this.#pullTowardAnchor(x, z, off.x, off.z, def.radius);
+        mx = MEMBER_AT.x;
+        mz = MEMBER_AT.z;
+      }
       const e = this.#spawn(id, mx, mz, false, null, null);
       e.packId = packId;
+      if (leash !== null) this.#stampPlaced(e, x, z, leash);
       members++;
     }
     return members;
+  }
+
+  /**
+   * SPEC-054 §4.7: a placed member's point — the anchor plus the largest of
+   * 1, ¾, ½ and ¼ of its drawn offset whose circle clears the director's
+   * obstacle grid, else the anchor itself. Writes `MEMBER_AT`. The surface's
+   * shelters and wall margin do not apply: they are not where a cave is.
+   */
+  #pullTowardAnchor(x: number, z: number, offX: number, offZ: number, radius: number): void {
+    for (let k = PLACED_PULLBACK_STEPS; k > 0; k--) {
+      const t = k / PLACED_PULLBACK_STEPS;
+      const mx = x + offX * t;
+      const mz = z + offZ * t;
+      if (this.#obstacles === null || !this.#obstacles.circleHits(mx, mz, radius)) {
+        MEMBER_AT.x = mx;
+        MEMBER_AT.z = mz;
+        return;
+      }
+    }
+    MEMBER_AT.x = x;
+    MEMBER_AT.z = z;
+  }
+
+  /**
+   * SPEC-054 §4.7: a cave pack's stamp — never culled, and leashed `leash` m
+   * from the pack's anchor, which every member shares as its spawn point (as a
+   * wave's enemies share their centre, SPEC-034 §4.8).
+   */
+  #stampPlaced(e: EnemyEntity, x: number, z: number, leash: number): void {
+    e.placed = true;
+    e.leash = leash;
+    e.spawnX = x;
+    e.spawnZ = z;
+  }
+
+  /**
+   * SPEC-054 §4.7: SPEC-041's pack rules at a fixed anchor — a cave's pack.
+   * The size is the planet row's `pack` roll (a row without one, as a ranged
+   * enemy's, comes alone), trimmed to `cap`; a `cap` ≤ 0 spawns nothing. The
+   * leader stands on the anchor and takes the pack's one elite roll at
+   * `eliteChance` (× `eliteMult`), with the chapter's affixes; each member draws
+   * its point within `PACK_RADIUS`, pulled back toward the anchor until its
+   * circle clears the director's obstacle grid — the scene hands it the cave's
+   * (`setObstacles`) before calling this. The pack shares its id, so it aggroes
+   * together, and every member is `placed`, leashed `opts.leash` m from the
+   * anchor. Returns the count spawned.
+   */
+  spawnPackAt(enemy: EnemyId, x: number, z: number, opts: { placed: true; leash: number; cap: number }): number {
+    if (opts.cap <= 0) return 0;
+    const pack = this.#rowOf(enemy)?.pack;
+    if (pack === undefined) {
+      this.#stampPlaced(this.#spawnRolled(enemy, x, z, 0), x, z, opts.leash);
+      return 1;
+    }
+    const size = Math.min(this.#rng.int(pack[0], pack[1]), opts.cap);
+    return this.#spawnPackAround(enemy, x, z, size, false, opts.leash);
   }
 
   /** E64: a member's circle in a rock, a shelter's clearance or past the wall margin. */
@@ -350,7 +433,7 @@ export class SpawnDirector {
    * this director's stream like any other. Returns how many stood up.
    */
   spawnElitePack(id: EnemyId, x: number, z: number, size: number): number {
-    return this.#spawnPackAt(id, x, z, size, true);
+    return this.#spawnPackAround(id, x, z, size, true, null);
   }
 
   // ------------------------------------------------------------------ waves
@@ -537,8 +620,9 @@ export class SpawnDirector {
       const e = this.#enemies.at(i);
       if (e.state === 'dead' || e.def.archetype === 'boss' || e.def.archetype === 'static') continue;
       // SPEC-034 §4.8: a wave enemy is never a straggler — its own wave owns it,
-      // and culling one out of a besieging wave thinned the attack.
-      if (e.fromWave) continue;
+      // and culling one out of a besieging wave thinned the attack. SPEC-054
+      // §4.7: nor is a cave pack's — placed once and never refilled.
+      if (e.fromWave || e.placed) continue;
       const far = Math.hypot(e.x - player.x, e.z - player.z) > DESPAWN_DISTANCE;
       if (!far || e.aggro) {
         this.#farFor.delete(e.id);
@@ -641,8 +725,11 @@ export class SpawnDirector {
     this.#lastSpawnAt.set(id, this.#time);
     const e = this.#spawner.spawnEnemy(id, x, z, elite, affixA, affixB);
     // Stamped by the callers that make packs; a single, a summon and a wave
-    // enemy carry none, whatever a recycled slot held (core/Pool.ts).
+    // enemy carry none, whatever a recycled slot held (core/Pool.ts). SPEC-054
+    // §4.7: the same for a cave pack's stamp, which `spawnPackAt` sets after.
     e.packId = 0;
+    e.placed = false;
+    e.leash = e.def.leashRadius;
     this.#totalAlive++;
     this.#liveIds.add(e.id);
     this.#aliveById.set(id, (this.#aliveById.get(id) ?? 0) + 1);

@@ -40,6 +40,15 @@ describe('CONTROL_ROWS (SPEC-044 §4.5)', () => {
     expect(CONTROL_ROWS.touch.find((row) => row.what === 'Run')?.how).toBe('Push the stick past its ring');
   });
 
+  it('gains the Flashlight row of SPEC-054 §4.5: L on the keyboard, LIGHT beside USE on touch', () => {
+    const flashlight = CONTROL_ROWS.keyboard.find((row) => row.what === 'Flashlight (below)');
+    expect(flashlight).toEqual({ what: 'Flashlight (below)', how: 'L', actions: ['light'] });
+    expect(CONTROL_ROWS.touch.find((row) => row.what === 'Flashlight')).toEqual({
+      what: 'Flashlight',
+      how: 'LIGHT (below)',
+    });
+  });
+
   it('the rule fails on a binding with no row, so it cannot pass vacuously', () => {
     const bound = new Set(Object.values(KEY_BINDINGS));
     expect(bound.size).toBeGreaterThan(15);

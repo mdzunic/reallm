@@ -83,6 +83,13 @@ export interface MissionState {
 }
 
 /**
+ * SPEC-054 §3: the same union `scenes/surface/Level.ts` declares as `LevelId`
+ * — spelled again here, under its own name, because `systems/` may not import
+ * `scenes/` (SPEC-001 §4's import table).
+ */
+export type MissionLevel = 'surface' | 'underground';
+
+/**
  * What the scene knows each step. `follower` extends the spec's interface —
  * the escort objective completes on the *follower's* position (§4.7), which no
  * player-relative query can answer.
@@ -98,6 +105,13 @@ export interface MissionContext {
    * surface; flight never sets it. A step with it true forfeits `no_shelter`.
    */
   sheltered?: boolean;
+  /**
+   * SPEC-054 §3, §4.11: which level the scene is stepping. Below, `survive`
+   * and `defend` timers hold rather than advance (E83); everything else —
+   * kills, `nearPoi`, `poiAt`, `sheltered` — is unaffected here, since those
+   * are the level's own doing, not the runtime's.
+   */
+  level: MissionLevel;
 }
 
 export interface ObjectiveProgress {
@@ -570,6 +584,9 @@ export class Missions {
         switch (objective.kind) {
           case 'survive': {
             if (this.#done(state, objective, index)) break;
+            // SPEC-054 §4.11 (E83): the clock holds below — a stage that
+            // starts there waits for the ascent rather than ticking unseen.
+            if (ctx.level === 'underground') break;
             if (!ctx.player.alive) break;
             state.timers[key] = (state.timers[key] ?? 0) + dt;
             if ((state.timers[key] as number) >= objective.seconds) {
@@ -579,6 +596,8 @@ export class Missions {
           }
           case 'defend': {
             if (this.#done(state, objective, index)) break;
+            // SPEC-054 §4.11 (E83): the clock holds below, the same as survive.
+            if (ctx.level === 'underground') break;
             state.timers[key] = (state.timers[key] ?? 0) + dt;
             if ((state.timers[key] as number) >= objective.seconds) {
               this.#markDone(state, index);
@@ -984,6 +1003,9 @@ export const FLIGHT_MISSION_CONTEXT: MissionContext = Object.freeze({
   heldResource: () => 0,
   nearPoi: () => null,
   follower: null,
+  // SPEC-054 §3: flight never descends; this context names the surface level
+  // so `update` reads a value rather than `undefined`.
+  level: 'surface',
 });
 
 /** A short player-facing description of one objective, for the HUD row. */

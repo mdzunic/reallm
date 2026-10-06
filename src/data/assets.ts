@@ -100,6 +100,9 @@ export const ASSETS = {
         boss_slam: [22920, 800],
         // SPEC-050 §4.8: the salvager's breath out when the stamina runs dry.
         exhale: [23870, 350],
+        // SPEC-054 §4.13: the flashlight's click, and a loose cache opening.
+        light_click: [24320, 80],
+        cache_open: [24500, 600],
       },
     },
     /** The rail scene: hits on the ship, and the two continuous channels. */
@@ -428,6 +431,42 @@ export const SURFACE_SHARED_ASSETS = {
   },
 } as const;
 
+/**
+ * SPEC-054 §4.4: SPEC-052's cave kit — the caches, the vault door, the puzzle
+ * pieces SPEC-055 uses, the shaft, Eden's rack and cradle, and one beacon per
+ * biome. Loaded lazily at a visit's first descent and released when the
+ * surface scene exits, as SPEC-040 releases a planet's set; never at boot.
+ * Every piece has a procedural stand-in until its file lands.
+ */
+export const CAVE_ASSETS = {
+  models: {
+    cave_cache: 'assets/models/cave/cache.glb',
+    cave_cache_open: 'assets/models/cave/cache_open.glb',
+    cave_vault_door: 'assets/models/cave/vault_door.glb',
+    cave_terminal: 'assets/models/cave/terminal.glb',
+    cave_plate: 'assets/models/cave/plate.glb',
+    cave_mirror: 'assets/models/cave/mirror.glb',
+    cave_lens: 'assets/models/cave/lens.glb',
+    cave_receiver: 'assets/models/cave/receiver.glb',
+    cave_shaft: 'assets/models/cave/shaft.glb',
+    /** Eden's machine room draws its walls as racks; the LEDs face +z. */
+    cave_rack: 'assets/models/cave/rack.glb',
+    /** A suit standing in a cradle, one static mesh: `Body`, `Suit`, `Trim`, `Glow`. */
+    cave_cradle: 'assets/models/cave/cradle.glb',
+    cave_beacon_desert: 'assets/models/cave/beacon_desert.glb',
+    cave_beacon_ice: 'assets/models/cave/beacon_ice.glb',
+    cave_beacon_jungle: 'assets/models/cave/beacon_jungle.glb',
+    cave_beacon_volcanic: 'assets/models/cave/beacon_volcanic.glb',
+    cave_beacon_hive: 'assets/models/cave/beacon_hive.glb',
+    cave_beacon_temperate: 'assets/models/cave/beacon_temperate.glb',
+  },
+  textures: {},
+  audio: {},
+} as const;
+
+/** SPEC-054: every cave kit model id (`cave_<piece>`). */
+export type CaveModelId = keyof typeof CAVE_ASSETS.models;
+
 /** Every prop model id across the biome tables — the `PROP_MODELS` universe. */
 export type SurfaceModelId = { [B in SurfaceBiome]: keyof (typeof SURFACE_ASSETS)[B]['models'] }[SurfaceBiome];
 /** Every lazily loaded ground texture id (`<layer>_albedo` / `<layer>_nr`). */
@@ -438,6 +477,7 @@ export type ModelId =
   | keyof typeof FLIGHT_ASSETS.models
   | keyof typeof HUB_ASSETS.models
   | keyof typeof SURFACE_SHARED_ASSETS.models
+  | CaveModelId
   | SurfaceModelId;
 export type TextureId =
   | keyof typeof ASSETS.textures

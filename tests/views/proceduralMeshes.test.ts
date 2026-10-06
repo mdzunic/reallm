@@ -422,6 +422,48 @@ describe('the hostile rim (SPEC-035 §4.1)', () => {
   });
 });
 
+// --------------------------------------------------------------- SPEC-054 §4.6
+
+describe('the rim below (SPEC-054 §4.6)', () => {
+  it('starts with no rimOf, so the surface writes exactly SPEC-035’s rims', () => {
+    const parent = new THREE.Group();
+    const meshes = new EnemyMeshes(parent);
+    expect(meshes.rimOf).toBeNull();
+    const pool = new Pool(makeEnemy);
+    const e = spawn(pool, 'dust_skitter');
+    meshes.sync(pool, 0);
+    expect(rimScaleAt(parent, 0)).toBe(1);
+    e.hitFlash = 0.1;
+    meshes.sync(pool, 0.1);
+    expect(rimScaleAt(parent, 0)).toBeCloseTo(FLASH_RIM_SCALE, 6);
+    meshes.dispose();
+  });
+
+  it('multiplies each instance’s rim scale by rimOf, flash included, per enemy', () => {
+    const parent = new THREE.Group();
+    const meshes = new EnemyMeshes(parent);
+    const pool = new Pool(makeEnemy);
+    const dark = spawn(pool, 'dust_skitter');
+    const lit = spawn(pool, 'dust_skitter', { x: 9 });
+    meshes.rimOf = (enemy) => (enemy === dark ? 0.6 : 1);
+    meshes.sync(pool, 0);
+    expect(rimScaleAt(parent, 0)).toBeCloseTo(0.6, 6);
+    expect(rimScaleAt(parent, 1)).toBe(1);
+    // The flash still steps the rim back, on top of the dark.
+    dark.hitFlash = 0.1;
+    meshes.sync(pool, 0.1);
+    expect(rimScaleAt(parent, 0)).toBeCloseTo(FLASH_RIM_SCALE * 0.6, 6);
+    expect(lit.hitFlash).toBe(0);
+    // Back on the surface: null restores ×1.
+    dark.hitFlash = 0;
+    meshes.rimOf = null;
+    meshes.sync(pool, 0.2);
+    expect(rimScaleAt(parent, 0)).toBe(1);
+    expect(rimScaleAt(parent, 1)).toBe(1);
+    meshes.dispose();
+  });
+});
+
 // --------------------------------------------------------------- SPEC-045 §4.5
 
 describe('the colour-blind rim (SPEC-045 §4.5, AC-24, AC-25)', () => {

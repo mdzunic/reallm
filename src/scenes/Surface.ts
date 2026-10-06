@@ -18,14 +18,17 @@ import { DEFAULT_LOOK, type Look } from '@/core/Quality';
 import { EXPLORE_CELL, newSave, type CharacterCreation, type Save } from '@/core/Save';
 import { ZONES_SHOWN_MAX, type GuidanceLevel } from '@/core/Settings';
 import type { GameServices } from '@/core/Services';
-import type { SceneParams } from '@/core/StateMachine';
+import { fadeMs, type SceneParams } from '@/core/StateMachine';
 import type { Renderer } from '@/core/Renderer';
 import type { Voice } from '@/core/Audio';
 import type { InputState, Scheme } from '@/core/Input';
 import type { PerfStress } from '@/core/Perf';
 import type { Rng } from '@/core/Rng';
 import {
+  BELOW_HALF_SIZE,
   BOSS_REVEALS,
+  CACHES,
+  CAVE_ASSETS,
   CLASSES,
   CLUES,
   CONTRACT_IDS,
@@ -45,8 +48,10 @@ import {
   SURFACE_SHARED_ASSETS,
   TIPS,
   TUNING,
+  UNDERGROUND,
   WAVES,
   type BossRevealDef,
+  type CacheId,
   type ClassPassive,
   type ClueDef,
   type ContractId,
@@ -66,6 +71,7 @@ import {
   type QuickSlot,
   type ResourceId,
   type TipId,
+  type UndergroundDef,
   type WaveId,
   type WeaponSlot,
   MESH_RECIPE_IDS,
@@ -83,11 +89,12 @@ import { Combat, computePlayerStats, ELITE_SCALE, type CombatWorld, type HitMemo
 import { DASH_DISTANCE, dashCooldown, isDashing, pressDash, stepDash } from '@/systems/Dash';
 import { Economy } from '@/systems/Economy';
 import { seconds, stage as stageText } from '@/systems/Format';
-import { ExploreMask, REVEAL_CAPACITY } from '@/systems/Exploration';
+import { EXPLORE_RADIUS_BELOW, ExploreMask, REVEAL_CAPACITY } from '@/systems/Exploration';
 import {
   bearingWord,
   buildPathGrid,
   distanceText,
+  exitTarget,
   fillHint,
   findPath,
   focusObjective,
@@ -102,6 +109,7 @@ import {
   type GuideTarget,
   type PathGrid,
 } from '@/systems/Guidance';
+import { nearestInteractable, type Interactable } from '@/systems/Interactables';
 import { fillQuickFromPickup, quickEligible, refillQuick, type SlotView } from '@/systems/Loadout';
 import {
   featurePieces,
@@ -113,6 +121,7 @@ import {
   type LayoutPoi,
   type LayoutShelter,
 } from '@/systems/Layout';
+import { DARK_RIM_SCALE, DARK_SIGHT, lit } from '@/systems/Light';
 import { isHidden, SHELTER_INSET, shelterAt, STORM_SHELTER_FACTOR } from '@/systems/Shelter';
 import { nodeIcon, poiIcon } from '@/systems/MapModel';
 import { contractFor, Missions, type MissionContext, type ObjectiveProgress } from '@/systems/Missions';
@@ -131,6 +140,14 @@ import {
   staminaRegen,
   stepStamina,
 } from '@/systems/Stamina';
+import {
+  BELOW_LEASH,
+  BELOW_MAX_ALIVE,
+  descentPoint,
+  descentShelter,
+  generateUnderground,
+  type UndergroundLayout,
+} from '@/systems/Underground';
 import { Weather, WEATHER_EFFECTS, type WeatherEffects } from '@/systems/Weather';
 import { HOME_SESSION, restartLine } from '@/systems/Home';
 import { LINE_LEDGER, missionLinePlays, revealCamera, revealDue, revealKey, stayReport, type Ending } from '@/systems/StoryBeats';
@@ -142,8 +159,11 @@ import {
   cameraDistance,
   cameraFov,
   acceptedText,
+  bonusRewardText,
   completionLines,
   contractLabel,
+  darkFogRange,
+  descentRefusal,
   deathCause,
   firstSentence,
   deathTip,
@@ -171,6 +191,7 @@ import {
   type SurfaceHoldState,
 } from '@/systems/UiHelpers';
 import { UiScene } from '@/scenes/base';
+import type { Level, LevelId, PoiState } from '@/scenes/surface/Level';
 import { director } from '@/scenes/Director';
 import { INSTANCES_PER_PART, setHostileRim } from '@/views/ProceduralMeshes';
 import { layerFromAssets } from '@/views/ProceduralTextures';
@@ -184,6 +205,7 @@ import {
   SurfaceView,
   type ShakeState,
 } from '@/views/SurfaceView';
+import { UndergroundView } from '@/views/UndergroundView';
 import { AriaHint } from '@/ui/AriaHint';
 import { confirmSheet } from '@/ui/ConfirmSheet';
 import { DamageNumbers } from '@/ui/DamageNumbers';
@@ -292,6 +314,44 @@ const ARENA_DISENGAGE_DISTANCE = 45;
 const FOLLOWER_RESPAWN_SECONDS = 3;
 /** Defend POIs take contact damage from enemies inside `radius + this`. */
 const DEFEND_CONTACT_MARGIN = 2;
+
+// --------------------------------------------------------------- SPEC-054
+
+/** §4.2: the descent's interact circle (m); the exit's and a cache's are the same (§4.8). */
+const DESCENT_RADIUS = 1.5;
+const EXIT_RADIUS = 1.5;
+const CACHE_RADIUS = 1.5;
+/** §4.2: the seal — the tutorial a descent waits for. */
+const DESCENT_SEAL: MissionId = 'c1_m1';
+/** §4.2 (E86): surface loot within this many metres of the player at a descent is said to be left. */
+const LOOT_LEFT_RADIUS = 10;
+const LOOT_LEFT_TEXT = 'Loot left behind';
+/** §4.2, §4.8: the prompts the level's interactables raise. */
+const DESCEND_TEXT = 'Descend';
+const ASCEND_TEXT = 'Climb up';
+const OPEN_CACHE_TEXT = 'Open cache';
+const LOCKED_TEXT = 'Locked';
+/** §4.8: the good toast a claimed cache raises, before its reward line. */
+const CACHE_OPENED_TEXT = 'Cache opened';
+/** §4.10: the full map's title below. */
+const UNDERGROUND_TITLE = 'Underground';
+/** §4.4: how long the first descent of a visit waits, behind its fade, for the cave kit. */
+const CAVE_KIT_WAIT_MS = 1500;
+/** §4.4: the fog cache's key below, where the storm's multiplier means nothing. */
+const DARK_FOG_KEY = -2;
+/** §4.12: Eden's machine room hums on the weather-loop channel at this volume. */
+const HUM_VOLUME = 0.5;
+/** §4.4: the cave's dust motes — `min(60, quality.maxParticles)`. */
+const CAVE_DUST_MOTES = 60;
+/** §4.14 (dev): `surface-goto-cache` stands the salvager this far from the cache, toward its room. */
+const GOTO_CACHE_DISTANCE = 1;
+/** §4.12 (dev): `surface-goto-vault` stands the salvager this far in front of what the vault holds. */
+const GOTO_VAULT_DISTANCE = 3;
+/** §4.11: what `poiAt` answers below — no POI is ever under a cave position. */
+const NO_POIS: LayoutPoi[] = [];
+/** The cave's empty POI states and node list, shared and never written. */
+const NO_POI_STATES: readonly PoiState[] = Object.freeze([]);
+const NO_NODE_STATES: Nodes['states'] = Object.freeze([]) as unknown as Nodes['states'];
 
 // ------------------------------------------------------------- SPEC-028 §4.4
 // Quick slots: the empty texts, the per-text toast throttle, and the tip clock.
@@ -504,15 +564,6 @@ const DIALOGUE_TABLE: Readonly<Record<DialogueId, Dialogue>> = DIALOGUE;
 const ITEM_TABLE: Readonly<Record<ItemId, Item>> = ITEMS;
 const MISSION_TABLE: Readonly<Record<MissionId, MissionDef>> = MISSIONS;
 
-interface PoiRuntime {
-  poi: LayoutPoi;
-  discovered: boolean;
-  inside: boolean;
-  /** Seconds accumulated toward the hands-free scan. */
-  scanFor: number;
-  scanned: boolean;
-}
-
 /** A boss reveal in flight (SPEC-023 §4.4): the clock and the camera's two ends. */
 interface RevealState {
   /** Seconds since the beat started; `revealCamera` reads it. */
@@ -572,7 +623,14 @@ export class SurfaceScene extends UiScene<'surface'> {
 
   #planet: PlanetDef = PLANETS.cinder4;
   #save: Save | null = null;
-  #layout: Layout | null = null;
+  /**
+   * SPEC-054 §4.1: the planet's surface, and the cave below it once this
+   * visit has gone down; `#level` is the active one, which every read of the
+   * layout, the POIs, the shelters, the nodes, the pad terminal, the mask, the
+   * map layers and the clamp in the step goes through.
+   */
+  #levels: { surface: Level; underground: Level | null } | null = null;
+  #level: Level | null = null;
   #world: CombatWorld | null = null;
   #combat: Combat | null = null;
   #economy: Economy | null = null;
@@ -580,14 +638,11 @@ export class SurfaceScene extends UiScene<'surface'> {
   #spawn: SpawnDirector | null = null;
   #weather: Weather | null = null;
   #pickups: Pickups | null = null;
-  #nodes: Nodes | null = null;
   #view: SurfaceView | null = null;
   #hud: Hud | null = null;
   #minimap: Minimap | null = null;
-  // SPEC-026 — the two maps: the explored mask, the cached layers both draw
-  // from, and the full-screen map that holds the simulation while it is open.
-  #mask: ExploreMask | null = null;
-  #layers: MapLayers | null = null;
+  // SPEC-026 — the full-screen map that holds the simulation while it is
+  // open; the explored mask and the layers both maps draw are the level's.
   #mapScreen: MapScreen | null = null;
   #death: DeathOverlay | null = null;
   #dialogue: DialogueUI | null = null;
@@ -619,9 +674,46 @@ export class SurfaceScene extends UiScene<'surface'> {
   #touch: TouchControls | null = null;
   #pauseMenu: PauseMenu | null = null;
 
-  #pois: PoiRuntime[] = [];
-  #pad: LayoutPoi | null = null;
-  #arenaPoi: LayoutPoi | null = null;
+  // SPEC-054 — the underground. The descent is derived from the surface's
+  // shelters (§4.2); the cave, its view and the flashlight are built behind a
+  // visit's first descent and kept for the visit (§4.3–§4.5, 54-d).
+  #descent: { x: number; z: number; shelter: LayoutShelter } | null = null;
+  #cave: UndergroundLayout | null = null;
+  #caveDef: UndergroundDef = UNDERGROUND.cinder4;
+  #caveView: UndergroundView | null = null;
+  /** The surface's route grid, and the cave's — built once at the first descent (§4.10). */
+  #surfaceGrid: PathGrid | null = null;
+  #caveGrid: PathGrid | null = null;
+  /** §4.2: true from a swap's start to its end — the `'level'` hold. */
+  #swapping = false;
+  /**
+   * §4.2: true from a swap's change-over to the next draw. The `'level'` hold
+   * paces at five frames a second (SPEC-040 §4.2), so without this the fade-in
+   * could open on the level just left for up to 200 ms.
+   */
+  #swapUndrawn = false;
+  /** §4.14 (dev): the debug strip's shortcuts for the surface only, and for below only. */
+  readonly #debugAbove: HTMLElement[] = [];
+  readonly #debugBelow: HTMLElement[] = [];
+  /** §4.7: descents this visit — the `underground:<n>` fork the packs draw from. */
+  #descents = 0;
+  /** §4.5: the flashlight's state for the visit — on at its first descent. */
+  #lightOn = true;
+  /** §4.6: `CombatWorld.light` below — one object for the visit. */
+  readonly #light = { on: true };
+  /** §4.6: the hostile rim outside the lit cone below — one closure for the visit. */
+  readonly #rimBelow = (e: EnemyEntity): number => {
+    const world = this.#world;
+    if (world === null) return 1;
+    const p = world.player;
+    return lit(p.x, p.z, p.facing, this.#lightOn, e.x, e.z) ? 1 : DARK_RIM_SCALE;
+  };
+  /** SPEC-054 §4.1: the active level's nodes — none below. */
+  get #nodes(): Nodes | null {
+    return this.#level?.nodes ?? null;
+  }
+  /** §4.4: the cave kit's load, started at the visit's first descent; `null` before. */
+  #caveKit: Promise<void> | null = null;
   /** SPEC-041 §4.4: the arena's radius — the ring, the seal and the entrance. */
   #arenaRadius = 0;
   #arena: ArenaState | null = null;
@@ -732,7 +824,7 @@ export class SurfaceScene extends UiScene<'surface'> {
   // `world.time` stands still and nothing can reach the player.
   #uiHolds = 0;
   /** SPEC-040 §4.2: `idle()`'s hold state, written in place — the pacer reads it every frame. */
-  readonly #holdState: SurfaceHoldState = { beats: 0, rotate: false, ui: 0, modal: 0 };
+  readonly #holdState: SurfaceHoldState = { beats: 0, rotate: false, ui: 0, modal: 0, level: false };
   #exploreIn = 0;
   #exploreSaveIn = EXPLORE_SAVE_INTERVAL;
 
@@ -878,6 +970,8 @@ export class SurfaceScene extends UiScene<'surface'> {
   // SPEC-035 §4.11 — the storm loop. It is shipped and was never played; the
   // scene owns it, like the other continuous channels (SPEC-006 §4.2).
   #stormVoice: Voice | null = null;
+  /** SPEC-054 §4.12: what the channel's voice plays — Eden's machine room hums on it below. */
+  #stormSound: 'storm_loop' | 'film_hum' = 'storm_loop';
   #stormLoopVolume = 0;
   #stormLoopTarget = 0;
   #camDistance = 0;
@@ -959,7 +1053,7 @@ export class SurfaceScene extends UiScene<'surface'> {
   #focusDistance: number | null = null;
   #focusBearing = 0;
   /** The scan POI the ring is filling for, or `null` (§4.3, AC-35). */
-  #scanState: PoiRuntime | null = null;
+  #scanState: PoiState | null = null;
   #waypointState: 'on' | 'edge' | 'off' = 'off';
   /** The route: the smoothed path, its length in points, and its clocks. */
   readonly #route = new Float32Array(PATH_MAX_POINTS * 2);
@@ -1036,6 +1130,11 @@ export class SurfaceScene extends UiScene<'surface'> {
     const assets = this.services.assets;
     const surfaceAssets = SURFACE_ASSETS[planet.biome];
     this.disposer.add(() => void assets.release(surfaceAssets));
+    // SPEC-054 §4.4: the cave kit, if a descent loaded it, leaves with the planet's set.
+    this.disposer.add(() => {
+      if (this.#caveKit !== null) void assets.release(CAVE_ASSETS);
+      this.#caveKit = null;
+    });
     // SPEC-053 §4.1: the shared set's atlas and detail normal ride along.
     this.#planetAssets = assets.load({
       models: { ...surfaceAssets.models, ...SURFACE_SHARED_ASSETS.models },
@@ -1046,7 +1145,19 @@ export class SurfaceScene extends UiScene<'surface'> {
   }
 
   protected override look(): Partial<Look> {
-    return this.#view?.look ?? {};
+    const base = this.#view?.look ?? {};
+    if (this.#level?.id !== 'underground') return base;
+    // SPEC-054 §4.4: below, the dark look's grade — `lift` reaches `uLift`.
+    const grade = this.#caveDef.look.grade;
+    return {
+      ...base,
+      exposure: grade.exposure,
+      bloomThreshold: grade.bloomThreshold,
+      bloomStrength: grade.bloomStrength,
+      vignette: grade.vignette,
+      grain: grade.grain,
+      lift: [grade.lift[0], grade.lift[1], grade.lift[2]],
+    };
   }
 
   protected onEnter(params: SceneParams['surface']): void {
@@ -1070,7 +1181,6 @@ export class SurfaceScene extends UiScene<'surface'> {
     // alike — arrives through this `onEnter`, so counting it here counts it
     // once and keeps the visit streams consecutive.
     const layout = generateLayout(planet, services.rng.layout(planet.id));
-    this.#layout = layout;
     const visits = (save.progress.visits[planet.id] ?? 0) + 1;
     save.progress.visits[planet.id] = visits;
     const visit = services.rng.visit(planet.id, visits);
@@ -1165,13 +1275,13 @@ export class SurfaceScene extends UiScene<'surface'> {
     this.#pickups = pickups;
     const regenOf = (resource: ResourceId): number =>
       planet.surface.nodes.find((n) => n.resource === resource)?.regenPerSec ?? 0;
-    this.#nodes = new Nodes(layout.nodes, regenOf, {
+    const nodes = new Nodes(layout.nodes, regenOf, {
       addResource: (r, n, s) => economy.addResource(r, n, s),
       room: (r) => Math.max(0, economy.cargoCap() - (save.resources[r] ?? 0)),
     });
 
     // POI runtime state; discovery restores from the save (§4.12).
-    this.#pois = layout.pois.map((poi) => ({
+    const pois: PoiState[] = layout.pois.map((poi) => ({
       poi,
       discovered:
         poi.kind === 'landing_pad' ||
@@ -1180,12 +1290,52 @@ export class SurfaceScene extends UiScene<'surface'> {
       scanFor: 0,
       scanned: false,
     }));
-    this.#pad = layout.pois.find((p) => p.kind === 'landing_pad') ?? null;
-    this.#arenaPoi = layout.pois.find((p) => p.kind === 'arena') ?? null;
+    const pad = layout.pois.find((p) => p.kind === 'landing_pad') ?? null;
+    const arena = layout.pois.find((p) => p.kind === 'arena') ?? null;
     // SPEC-041 §4.4: the fight's ring is the planet's arena — its POI's own
     // radius (Cinder-4's nest 20, the Queen's chamber 22) — not the layout's
     // placement footprint, which is 22 for every arena.
-    this.#arenaRadius = planet.surface.pois.find((p) => p.kind === 'arena')?.radius ?? this.#arenaPoi?.radius ?? 0;
+    this.#arenaRadius = planet.surface.pois.find((p) => p.kind === 'arena')?.radius ?? arena?.radius ?? 0;
+
+    // SPEC-054 §4.2: the descent, derived from the shelters — never placed, so
+    // no layout hash moves. A seed with no shelter has no underground (E87).
+    const shelter = descentShelter(layout);
+    this.#descent = shelter === null ? null : { ...descentPoint(shelter), shelter };
+    this.#caveDef = UNDERGROUND[planet.id];
+
+    // SPEC-026 §4.4: the explored mask comes off the save (SPEC-025 has
+    // already dropped one of the wrong length, E37), and the two cached layers
+    // are built from the layout.
+    const mask = new ExploreMask(layout.halfSize, save.progress.explored[planet.id]);
+    const layers = new MapLayers(layout, planet.surface.palette);
+
+    // SPEC-054 §4.1: the surface level. The pad terminal is the `pad`
+    // interactable, at the pad's radius, beside the descent.
+    const interactables: Interactable[] = [];
+    if (pad !== null) interactables.push({ kind: 'pad', id: 'pad', x: pad.x, z: pad.z, radius: pad.radius });
+    const descent = this.#descent;
+    if (descent !== null) interactables.push({ kind: 'descent', id: 'descent', x: descent.x, z: descent.z, radius: DESCENT_RADIUS });
+    const surfaceLevel: Level = {
+      id: 'surface',
+      layout,
+      grid,
+      bounds: layout.halfSize - WALL_INSET,
+      pois,
+      shelters: layout.shelters,
+      nodes,
+      terminal: pad === null ? null : { x: pad.x, z: pad.z, radius: pad.radius },
+      interactables,
+      mask,
+      layers,
+      pad,
+      arena,
+    };
+    this.#levels = { surface: surfaceLevel, underground: null };
+    this.#level = surfaceLevel;
+    this.disposer.add(() => {
+      this.#levels = null;
+      this.#level = null;
+    });
 
     // SPEC-030 §4.10: shelter discovery restores from the save like POIs.
     this.#insideShelter = null;
@@ -1196,11 +1346,16 @@ export class SurfaceScene extends UiScene<'surface'> {
 
     // The mission context: one object for the scene's lifetime; `#missionCtx`
     // refreshes the player/follower snapshots in place each step.
+    // SPEC-054 §4.11: both POI questions read the active level — below there
+    // is no POI, so a cave position at a surface POI's coordinates reaches
+    // nothing.
     this.#ctx = {
       player: this.#ctxPlayer,
-      poiAt: (id: PoiId) => layout.pois.filter((p) => p.poi === id),
+      level: 'surface',
+      poiAt: (id: PoiId) => (this.#level?.id !== 'surface' ? NO_POIS : layout.pois.filter((p) => p.poi === id)),
       heldResource: (r: ResourceId) => save.resources[r] ?? 0,
       nearPoi: (id: PoiId, radius?: number) => {
+        if (this.#level?.id !== 'surface') return null;
         for (const p of layout.pois) {
           if (p.poi !== id) continue;
           const reach = radius ?? p.radius;
@@ -1225,6 +1380,12 @@ export class SurfaceScene extends UiScene<'surface'> {
     view.reduceMotion = services.settings.get().reduceMotion;
     this.#view = view;
     this.disposer.add(() => view.dispose());
+    // SPEC-054 §4.4: the cave's view hangs under the view's root; it goes first.
+    this.disposer.add(() => {
+      this.#caveView?.dispose();
+      this.#caveView = null;
+      this.#cave = null;
+    });
     this.#placePadBody(save, planet.id);
     // SPEC-045 §4.5: every hostile rim and non-elite telegraph reads one shared
     // uniform, set from the Colours preset now and on each change of it — the
@@ -1274,7 +1435,18 @@ export class SurfaceScene extends UiScene<'surface'> {
     // preset change from the pause menu reaches the shadow map and the
     // environment while the player is standing on the planet.
     this.disposer.add(
-      services.events.on('renderer:resized', () => view.applyQuality(services.renderer.quality), this),
+      services.events.on(
+        'renderer:resized',
+        () => {
+          const mode = view.flashlightMode;
+          view.applyQuality(services.renderer.quality);
+          // SPEC-054 54-g: a flashlight rebuilt in the preset's mode may have
+          // moved the light count — the programs recompile now, as at the
+          // first descent, rather than at the next draw.
+          if (mode !== null && view.flashlightMode !== mode) services.renderer.gl.compile(this.scene, this.camera);
+        },
+        this,
+      ),
     );
     this.props = this.scene.children.length;
 
@@ -1394,14 +1566,8 @@ export class SurfaceScene extends UiScene<'surface'> {
     // built once and refreshed in place every step (SPEC-001 §7).
     this.#buildGuidance(world, save, layout);
 
-    // SPEC-026 §4.4: the explored mask comes off the save (SPEC-025 has
-    // already dropped one of the wrong length, E37), the ground under the
-    // landing spot is lit, and the two cached layers are built from the layout.
-    const mask = new ExploreMask(layout.halfSize, save.progress.explored[planet.id]);
-    this.#mask = mask;
+    // SPEC-026 §4.4: the ground under the landing spot is lit.
     mask.reveal(world.player.x, world.player.z, this.#revealOut);
-    const layers = new MapLayers(layout, planet.surface.palette);
-    this.#layers = layers;
     layers.syncFog(mask);
 
     if (hud.minimapCanvas !== null) {
@@ -1474,7 +1640,10 @@ export class SurfaceScene extends UiScene<'surface'> {
     if (hud.arc !== null) {
       touch.mountButton('interact', hud.arc.action);
       touch.mountButton('dash', hud.arc.primary);
+      // SPEC-054 §4.5: LIGHT shares the action cell — shown below while USE is hidden.
+      touch.mountButton('light', hud.arc.action);
     }
+    touch.setLightAvailable(false);
     this.#touch = touch;
     this.disposer.add(() => touch.dispose());
     // SPEC-034 §4.2: the surface's way out of a corner. The flight menu never
@@ -1624,7 +1793,13 @@ export class SurfaceScene extends UiScene<'surface'> {
 
   /** SPEC-034 §4.6: why the step is holding, or `null` when it runs. */
   #holdReason(): SurfaceHold {
-    return surfaceHoldReason({ beats: this.#holds, rotate: this.#rotateBlocked(), ui: this.#uiHolds, modal: this.#modalOpen });
+    return surfaceHoldReason({
+      beats: this.#holds,
+      rotate: this.#rotateBlocked(),
+      ui: this.#uiHolds,
+      modal: this.#modalOpen,
+      level: this.#swapping,
+    });
   }
 
   /**
@@ -1634,11 +1809,15 @@ export class SurfaceScene extends UiScene<'surface'> {
    * decision as `#holdReason()` is read off a state written in place.
    */
   idle(): boolean {
+    // SPEC-054 §4.2: the level a swap changed over to draws on the next frame,
+    // so its fade-in opens on it and never on the level just left.
+    if (this.#swapUndrawn) return false;
     const state = this.#holdState;
     state.beats = this.#holds;
     state.rotate = this.#rotateBlocked();
     state.ui = this.#uiHolds;
     state.modal = this.#modalOpen;
+    state.level = this.#swapping;
     return holdIsIdle(surfaceHoldReason(state));
   }
 
@@ -1655,7 +1834,7 @@ export class SurfaceScene extends UiScene<'surface'> {
   #recallAllowed(): boolean {
     const world = this.#world;
     if (world === null || !world.player.alive) return false;
-    if (this.#deathAt !== null || this.#leaving) return false;
+    if (this.#deathAt !== null || this.#leaving || this.#swapping) return false;
     if (this.#holds > 0 || this.#modalOpen > 0) return false;
     return this.#ending === null;
   }
@@ -1670,6 +1849,8 @@ export class SurfaceScene extends UiScene<'surface'> {
   #recallToPad(): void {
     const world = this.#world;
     if (world === null || !this.#recallAllowed()) return;
+    // SPEC-054 §4.9 (E84): below, the swap to the surface comes first, then E55 unchanged.
+    if (this.#level?.id === 'underground') this.#applySwap(world, 'surface');
     this.#recalls++;
     this.services.events.emit('player:recalled', {});
     this.#respawn(world, 'pad');
@@ -1722,6 +1903,17 @@ export class SurfaceScene extends UiScene<'surface'> {
       this.#dashQueued = false;
       this.#sprintLatch = false; // SPEC-050 §4.5 (50-b): any hold lets the run go
       this.#updateReveal(dt);
+      return;
+    }
+
+    // SPEC-054 §4.2: a level swap holds the step through its two fades —
+    // nothing moves, nothing is read, and `sceneInfo.held` reads 1.
+    if (this.#swapping) {
+      this.#qbLength = 0;
+      this.#dashQueued = false;
+      this.#sprintLatch = false;
+      world.player.vx = 0;
+      world.player.vz = 0;
       return;
     }
 
@@ -1785,6 +1977,8 @@ export class SurfaceScene extends UiScene<'surface'> {
     // SPEC-034 §4.15: `cyclePinned` moves the entry to the front of
     // `missionsActive`, which is what makes the pin survive a reload.
     if (this.#edges.pressed('track')) missions.cyclePinned();
+    // SPEC-054 §4.5: `light` switches the flashlight below; above it does nothing (54-c).
+    if (this.#edges.pressed('light')) this.#toggleLight(world);
 
     // §4.6 (28-d): a hold taken by this step's own presses — the picker or
     // the map — stops the rest of this step too, not just the next one, so
@@ -1836,7 +2030,9 @@ export class SurfaceScene extends UiScene<'surface'> {
     const difficulty = this.#save?.meta.difficulty ?? 'normal';
     spawn.eliteMult =
       DIFFICULTY_RULES[difficulty].eliteChanceMult * (this.#eliteSurge ? CONTRACTS.elite_surge.eliteChanceMult : 1);
-    spawn.update(dt, world.player, this.#frustumXZ, this.#stress === null);
+    // SPEC-054 §4.7: below, the director adds no ambient enemy.
+    if (this.#level?.id === 'surface') spawn.update(dt, world.player, this.#frustumXZ, this.#stress === null);
+    else spawn.update(dt, world.player, this.#frustumXZ, false);
 
     for (const drop of combat.drops) pickups.spawn(drop);
     combat.drops.length = 0;
@@ -1899,7 +2095,8 @@ export class SurfaceScene extends UiScene<'surface'> {
         projectiles: world.projectiles,
         deployables: (this.#combat as Combat).deployables,
         pickups: (this.#pickups as Pickups).pool,
-        nodes: (this.#nodes as Nodes).states,
+        // SPEC-054 §4.1: the crystals are the surface's environment, hidden below.
+        nodes: (this.#levels?.surface.nodes as Nodes).states,
         // SPEC-038 §4.2: stamped on the world clock, which a held beat stops.
         telegraphs: { pool: (this.#combat as Combat).telegraphs, time: world.time },
         time,
@@ -1931,6 +2128,7 @@ export class SurfaceScene extends UiScene<'surface'> {
       }
     }
     super.render(renderer);
+    this.#swapUndrawn = false;
   }
 
   // ------------------------------------------------- SPEC-019 hit feedback
@@ -2073,7 +2271,7 @@ export class SurfaceScene extends UiScene<'surface'> {
 
   /** World XZ (+ a lift in metres) → screen pixels, through the camera. */
   #project(x: number, z: number, lift: number): void {
-    const v = this.#projectScratch.set(x, lift + (this.#view?.field.heightAt(x, z) ?? 0), z);
+    const v = this.#projectScratch.set(x, lift + (this.#view?.heightAt(x, z) ?? 0), z);
     v.project(this.camera);
     this.#screenPoint.x = (v.x * 0.5 + 0.5) * this.services.renderer.width;
     this.#screenPoint.y = (-v.y * 0.5 + 0.5) * this.services.renderer.height;
@@ -2301,7 +2499,7 @@ export class SurfaceScene extends UiScene<'surface'> {
       info['boss'] = boss === null ? '-' : `p${boss.phase} ${boss.hp}/${boss.maxHp}`;
       // AC-48: how many the pad sweep can reach right now, and what the last
       // death sweep actually removed.
-      const pad = this.#pad;
+      const pad = this.#level?.pad ?? null;
       if (pad !== null) {
         let near = 0;
         for (let i = 0; i < world.enemies.size; i++) {
@@ -2318,7 +2516,7 @@ export class SurfaceScene extends UiScene<'surface'> {
         info['aimZ'] = Math.round(this.#aimDebug.z * 10) / 10;
       }
       // AC-24: the nearest node's resource and fill fraction.
-      const nodes = this.#nodes;
+      const nodes = this.#level?.nodes ?? null;
       if (nodes !== null) {
         let best: number | null = null;
         let bestD = Infinity;
@@ -2350,8 +2548,11 @@ export class SurfaceScene extends UiScene<'surface'> {
     }
     // SPEC-026 §4.8: the explored share, the map's state, and the proof that
     // the terrain layer is built once per visit.
-    if (this.#mask !== null) info['mmExplored'] = Math.round(this.#mask.fraction() * 1000) / 10;
-    if (this.#layers !== null) info['mmTerrainBuilds'] = this.#layers.terrainBuilds;
+    const level = this.#level;
+    if (level !== null) {
+      info['mmExplored'] = Math.round(level.mask.fraction() * 1000) / 10;
+      info['mmTerrainBuilds'] = level.layers.terrainBuilds;
+    }
     info['mapOpen'] = this.#mapScreen?.isOpen === true ? 1 : 0;
     // SPEC-027 §4.11: what the guidance layer is pointing at, how far it is,
     // how stuck the player looks, and which form the marker is in. The label's
@@ -2362,11 +2563,13 @@ export class SurfaceScene extends UiScene<'surface'> {
     info['guideDist'] = this.#focusDistance === null ? -1 : Math.round(this.#focusDistance * 10) / 10;
     info['stuckLevel'] = this.#stuck.level;
     info['waypoint'] = this.#waypointState;
-    if (this.#layout !== null) info['layoutHash'] = this.#layout.hash;
+    // SPEC-054 §6.2 case 1: the surface's hash on every level; the cave's is `caveHash`.
+    const levels = this.#levels;
+    if (levels !== null) info['layoutHash'] = levels.surface.layout.hash;
     // SPEC-030 §4.12: the shelter state and the wall's visible chunk count.
     info['sheltered'] = this.#insideShelter === null ? 0 : 1;
     info['hidden'] = this.#shelterState === 'hidden' ? 1 : 0;
-    info['shelters'] = this.#layout?.shelters.length ?? 0;
+    info['shelters'] = level?.shelters.length ?? 0;
     info['wallVisible'] = this.#view?.wallVisible ?? 0;
     // SPEC-048 §4.3, §4.8: the bodies on the ground, the clues found and the
     // shelter clue's dwell, in seconds to one decimal.
@@ -2411,11 +2614,61 @@ export class SurfaceScene extends UiScene<'surface'> {
     info['elitePlates'] = this.#plates?.visible ?? 0;
     // The player's distance from the nest's centre, so a run can check the
     // seal's clamp and the arena respawn without knowing the layout.
-    const nest = this.#arenaPoi;
+    const nest = level?.arena ?? null;
     if (nest !== null && this.#world !== null) {
       info['arenaDist'] = Math.round(Math.hypot(this.#world.player.x - nest.x, this.#world.player.z - nest.z) * 10) / 10;
     }
+    this.#underInfo(info, level);
     return info;
+  }
+
+  /** SPEC-054 §3: the level, the cave, the light, the caches and the descent. */
+  #underInfo(info: Record<string, number | string>, level: Level | null): void {
+    const below = level?.id === 'underground';
+    const cave = this.#cave;
+    info['level'] = level?.id ?? 'surface';
+    info['caveHash'] = cave?.hash ?? 0;
+    info['caveRooms'] = cave?.rooms.length ?? 0;
+    let walls = 0;
+    if (cave !== null) for (const o of cave.obstacles) if (o.kind === 'cave_wall') walls++;
+    info['caveWalls'] = walls;
+    info['caveEnemies'] = below ? this.#liveEnemies() : 0;
+    info['light'] = below && this.#lightOn ? 1 : 0;
+    info['flashlight'] = this.#view?.flashlightMode ?? '-';
+    let lights = 0;
+    this.scene.traverseVisible((node) => {
+      if ((node as THREE.Light).isLight === true) lights++;
+    });
+    info['lights'] = lights;
+    let claimed = 0;
+    const save = this.#save;
+    if (save !== null) {
+      for (const id of save.progress.claimed) if (Object.hasOwn(CACHES, id) && CACHES[id as CacheId].planet === this.#planet.id) claimed++;
+    }
+    info['claimed'] = claimed;
+    const descent = this.#descent;
+    const world = this.#world;
+    info['descentDist'] =
+      descent === null || world === null || below ? -1 : Math.round(Math.hypot(world.player.x - descent.x, world.player.z - descent.z) * 10) / 10;
+    info['cradles'] = this.#caveView?.cradles ?? 0;
+    // §4.12: the machine room as drawn — the wall model, the cable trays and
+    // the colours the cradles' suits wear — and the room the salvager stands
+    // in (−1 above or in a corridor) beside the vault's.
+    info['caveWallModel'] = this.#caveView?.wallModel ?? '-';
+    info['caveTrays'] = this.#caveView?.trays ?? 0;
+    info['cradleSuit'] = this.#caveView?.suit ?? '-';
+    let room = -1;
+    if (below && cave !== null && world !== null) {
+      const p = world.player;
+      room = cave.rooms.findIndex((r) => Math.hypot(p.x - r.x, p.z - r.z) <= r.r);
+    }
+    info['caveRoom'] = room;
+    info['vaultRoom'] = cave?.vault.room ?? -1;
+    // §4.12: the weather-loop channel — what it plays (`-` silent), how loud,
+    // and whether its voice is sounding yet (its bank may still be decoding).
+    info['weatherLoop'] = this.#stormVoice === null ? '-' : this.#stormSound;
+    info['weatherLoopVolume'] = Math.round(this.#stormLoopVolume * 100) / 100;
+    info['weatherLoopPlaying'] = this.#stormVoice?.playing === true ? 1 : 0;
   }
 
   /**
@@ -2442,7 +2695,8 @@ export class SurfaceScene extends UiScene<'surface'> {
   /** Forward the storm grade through `renderer.setLook` when it changed. */
   #forwardGrade(): void {
     const view = this.#view;
-    if (view === null) return;
+    // SPEC-054 §4.4: the storm grade is not forwarded below.
+    if (view === null || this.#level?.id === 'underground') return;
     const grade = view.grade;
     const last = this.#lastGrade;
     if (
@@ -2502,7 +2756,7 @@ export class SurfaceScene extends UiScene<'surface'> {
     if (isDashing(p, world.time)) {
       // SPEC-038 §4.1: the dash moves the salvager instead of the stick (E59),
       // at its own 25 m/s — SPEC-050 §4.2: the sprint multiplier is not its.
-      stepDash(p, world.obstacles, this.#planet.surface.halfSize - WALL_INSET, world.time, dt, this.#resolved);
+      stepDash(p, world.obstacles, (this.#level as Level).bounds, world.time, dt, this.#resolved);
       // SPEC-041 §4.4, E62: a sealed ring stops the dash like the wall does.
       if (clampToSeal(world.arena, p)) p.dashUntil = world.time;
       this.#speed = Math.hypot(p.x - fromX, p.z - fromZ) / dt;
@@ -2523,8 +2777,9 @@ export class SurfaceScene extends UiScene<'surface'> {
     const nz = p.z + p.vz * dt;
     if (!world.obstacles.hitsCircle(nx, p.z, p.radius)) p.x = nx;
     if (!world.obstacles.hitsCircle(p.x, nz, p.radius)) p.z = nz;
-    // SPEC-030 AC-30: the clamp margin is the shared WALL_INSET constant.
-    const edge = this.#planet.surface.halfSize - WALL_INSET;
+    // SPEC-030 AC-30: the clamp margin is the shared WALL_INSET constant —
+    // SPEC-054 §4.1: on the active level's edge.
+    const edge = (this.#level as Level).bounds;
     p.x = Math.max(-edge, Math.min(edge, p.x));
     p.z = Math.max(-edge, Math.min(edge, p.z));
     // SPEC-041 §4.4, E62: while the boss lives, the sealed ring holds them in.
@@ -2711,6 +2966,8 @@ export class SurfaceScene extends UiScene<'surface'> {
    */
   #weatherMoveMult(): number {
     const current = this.#weather?.current ?? null;
+    // SPEC-054 §4.4: below, the move multiplier is 1.
+    if (this.#level?.id === 'underground') return 1;
     if (current === null || (this.#insideShelter !== null && !this.#noCover)) return 1;
     return WEATHER_EFFECTS[current].moveMult;
   }
@@ -2732,11 +2989,15 @@ export class SurfaceScene extends UiScene<'surface'> {
   #applyFog(): void {
     const view = this.#view;
     if (view === null) return;
-    const mult = view.fogMult;
+    // SPEC-054 §4.4: below, the linear fog runs from the camera distance over the dark look's span.
+    const below = this.#level?.id === 'underground';
+    const mult = below ? DARK_FOG_KEY : view.fogMult;
     if (mult === this.#fogMultApplied && this.#camDistance === this.#fogCamApplied) return;
     this.#fogMultApplied = mult;
     this.#fogCamApplied = this.#camDistance;
-    const range = surfaceFogRange(view.fogDensity, mult, this.#camDistance);
+    const range = below
+      ? darkFogRange(this.#camDistance, this.#caveDef.look.fogSpan)
+      : surfaceFogRange(view.fogDensity, mult, this.#camDistance);
     this.#fogNear = range.near;
     view.setFogRange(range.near, range.far);
   }
@@ -2747,7 +3008,8 @@ export class SurfaceScene extends UiScene<'surface'> {
    */
   #updateOccluders(dt: number, player: { x: number; z: number }): void {
     const view = this.#view;
-    if (view === null) return;
+    // SPEC-054 §4.4: the props are the surface's; below there is nothing to fade.
+    if (view === null || this.#level?.id !== 'surface') return;
     const props = view.occluderProps;
     if (props.length === 0) return;
     if (this.#occluderFlags.length !== props.length) {
@@ -2840,11 +3102,12 @@ export class SurfaceScene extends UiScene<'surface'> {
    * first-entry tip. Death drops `inside` (the roof comes back, 30-e).
    */
   #updateShelter(world: CombatWorld): void {
-    const layout = this.#layout as Layout;
+    // SPEC-054 §4.1: the active level's shelters — none below.
+    const level = this.#level as Level;
     const combat = this.#combat as Combat;
     const save = this.#save as Save;
     const p = world.player;
-    const inside = p.alive ? shelterAt(layout.shelters, p.x, p.z) : null;
+    const inside = p.alive ? shelterAt(level.shelters, p.x, p.z) : null;
     const was = this.#insideShelter;
     this.#insideShelter = inside;
 
@@ -2866,9 +3129,9 @@ export class SurfaceScene extends UiScene<'surface'> {
 
     // §4.10 (D-23): discovery — the POI check's 40 m, per step, persisted in
     // the same `poisDiscovered` array the autosaves already carry.
-    for (let i = 0; i < layout.shelters.length; i++) {
+    for (let i = 0; i < level.shelters.length; i++) {
       if (this.#shelterDiscovered[i] === true) continue;
-      const s = layout.shelters[i] as LayoutShelter;
+      const s = level.shelters[i] as LayoutShelter;
       if (Math.hypot(p.x - s.x, p.z - s.z) > DISCOVER_RANGE) continue;
       this.#shelterDiscovered[i] = true;
       const key = `${this.#planet.id}:shelter:${s.index}`;
@@ -2883,9 +3146,13 @@ export class SurfaceScene extends UiScene<'surface'> {
     const missions = this.#missions as Missions;
 
     // AC-26 / 12-i: an active survive stage forces its storm, after the grace.
+    // SPEC-054 §4.9 (E83): not below — a stage that starts there forces its
+    // storm on the ascent, with its waves and its clock.
+    const below = this.#level?.id === 'underground';
     const required = missions.requiredWeather();
     if (
       required !== null &&
+      !below &&
       this.elapsed >= FORCED_WEATHER_GRACE &&
       weather.current !== required.weather &&
       missions.bossStage() === null &&
@@ -2902,7 +3169,8 @@ export class SurfaceScene extends UiScene<'surface'> {
     // SPEC-030 D-7: inside a shelter, weather damage is skipped entirely —
     // cycled storm, forced storm and avalanche burst alike (AC-20). SPEC-043
     // §4.3 (43-f): not under `no_cover` — the storm reaches the player inside.
-    if (dps > 0 && world.player.alive && weather.current !== null && (this.#insideShelter === null || this.#noCover)) {
+    // SPEC-054 §4.4: below, nothing of the storm reaches the player; its clock runs on above.
+    if (dps > 0 && world.player.alive && weather.current !== null && !below && (this.#insideShelter === null || this.#noCover)) {
       // Combat applies hazardResist and the hazard-immunity window (§4.6).
       this.#combat?.damagePlayer(dps * dt, { kind: 'weather', weather: weather.current }, true);
     }
@@ -2914,16 +3182,17 @@ export class SurfaceScene extends UiScene<'surface'> {
     // SPEC-030 D-5: inside, the overlay and the view intensity are dampened
     // ×0.25 — cosmetic only; fog density and aggroMult keep their storm values.
     const shelterFactor = this.#insideShelter === null ? 1 : STORM_SHELTER_FACTOR;
-    this.#view?.setWeather(this.#stormEffects, this.#stormIntensity * shelterFactor, this.#stormIntensity);
+    const shown = below ? 0 : this.#stormIntensity;
+    this.#view?.setWeather(this.#stormEffects, shown * shelterFactor, shown);
     if (this.#stormOverlay !== null) {
-      const mean = (1 - this.#stormEffects.visibility) * this.#stormIntensity * shelterFactor;
+      const mean = (1 - this.#stormEffects.visibility) * shown * shelterFactor;
       // SPEC-015 AC-43: the sheet breathes around that mean, and reduce motion
       // holds it exactly at the mean with the flicker term gone.
       const opacity = stormOverlayOpacity(mean, this.#viewTimeNow(), this.services.settings.get().reduceMotion);
       this.#stormOverlay.style.opacity = opacity < 0.02 ? '0' : String(opacity);
     }
     // §4.6: visibility narrows enemy aggro.
-    world.aggroMult = 1 - (1 - this.#stormEffects.visibility) * this.#stormIntensity;
+    world.aggroMult = 1 - (1 - this.#stormEffects.visibility) * shown;
     this.#stepStormLoop(dt);
   }
 
@@ -2933,7 +3202,11 @@ export class SurfaceScene extends UiScene<'surface'> {
    * it is stopped once the fade reaches zero and on the way out of the scene.
    */
   #stepStormLoop(dt: number): void {
-    const target = this.#stormLoopTarget;
+    // SPEC-054 §4.4, §4.12: below, the storm loop stays at 0 — and on Eden the
+    // channel carries the machine room's hum instead, which adds no sound.
+    const below = this.#level?.id === 'underground';
+    const hum = below && this.#caveDef.machineRoom === true;
+    const target = below ? (hum ? HUM_VOLUME : 0) : this.#stormLoopTarget;
     const step = dt / STORM_LOOP_FADE_SECONDS;
     if (this.#stormLoopVolume < target) this.#stormLoopVolume = Math.min(target, this.#stormLoopVolume + step);
     else if (this.#stormLoopVolume > target) this.#stormLoopVolume = Math.max(target, this.#stormLoopVolume - step);
@@ -2942,7 +3215,8 @@ export class SurfaceScene extends UiScene<'surface'> {
       return;
     }
     if (this.#stormVoice === null) {
-      this.#stormVoice = this.services.audio.play('storm_loop', { loop: true, priority: 0, volume: this.#stormLoopVolume });
+      this.#stormSound = hum ? 'film_hum' : 'storm_loop';
+      this.#stormVoice = this.services.audio.play(this.#stormSound, { loop: true, priority: 0, volume: this.#stormLoopVolume });
       return;
     }
     this.#stormVoice.setVolume(this.#stormLoopVolume);
@@ -2961,7 +3235,10 @@ export class SurfaceScene extends UiScene<'surface'> {
     this.#ctxPlayer.z = world.player.z;
     this.#ctxPlayer.alive = world.player.alive;
     // SPEC-043 §4.2: inside a cave or a wreck — what forfeits `no_shelter`.
-    ctx.sheltered = this.#insideShelter !== null;
+    // SPEC-054 §4.11: below counts as sheltered, and its timers hold (E83).
+    const below = this.#level?.id === 'underground';
+    ctx.sheltered = below || this.#insideShelter !== null;
+    ctx.level = below ? 'underground' : 'surface';
     if (world.follower === null) {
       ctx.follower = null;
     } else {
@@ -2979,7 +3256,9 @@ export class SurfaceScene extends UiScene<'surface'> {
     const player = world.player;
     const atPad = this.#atPad(world);
 
-    for (const state of this.#pois) {
+    // SPEC-054 §4.1: the active level's POIs — none below, so a cave position
+    // at a surface POI's coordinates discovers and reaches nothing.
+    for (const state of (this.#level as Level).pois) {
       const poi = state.poi;
       const d = Math.hypot(player.x - poi.x, player.z - poi.z);
 
@@ -3014,15 +3293,44 @@ export class SurfaceScene extends UiScene<'surface'> {
 
     // The pad terminal (§4.1 step 5, §4.11): one toggle, one call site, and
     // the press comes through the sampler — one fire per press, any step count.
+    // SPEC-054 §4.1: the press goes to the level's nearest interactable — the
+    // pad, the descent, the exit or a cache.
     if (this.#edges.pressed('interact') && this.#modalOpen === 0) {
       if (this.#terminalOpen) this.#closeTerminal();
-      else if (atPad && player.alive) this.#openTerminal();
+      else if (player.alive) this.#interact(world);
     }
     if (this.#terminalOpen && (!atPad || !player.alive)) this.#closeTerminal();
   }
 
+  /** SPEC-054 §4.1: `interact` on the level's interactable under the player, if any. */
+  #interact(world: CombatWorld): void {
+    const level = this.#level;
+    if (level === null || this.#deathAt !== null || this.#leaving) return;
+    const p = world.player;
+    const target = nearestInteractable(level.interactables, p.x, p.z);
+    if (target === null) return;
+    switch (target.kind) {
+      case 'pad':
+        this.#openTerminal();
+        return;
+      case 'descent':
+        // §4.2: a refused descent is not an action — the prompt says why.
+        if (this.#descentRefusal(false) === null) void this.#swapLevel('underground');
+        return;
+      case 'exit':
+        void this.#swapLevel('surface');
+        return;
+      case 'cache':
+        this.#openCache(target, world);
+        return;
+      default:
+        return;
+    }
+  }
+
   #atPad(world: CombatWorld): boolean {
-    const pad = this.#pad;
+    // SPEC-054 §4.1: the active level's terminal — none below.
+    const pad = this.#level?.terminal ?? null;
     if (pad === null) return false;
     return Math.hypot(world.player.x - pad.x, world.player.z - pad.z) <= pad.radius;
   }
@@ -3031,7 +3339,7 @@ export class SurfaceScene extends UiScene<'surface'> {
 
   #updateBossArena(world: CombatWorld): void {
     const missions = this.#missions as Missions;
-    const nest = this.#arenaPoi;
+    const nest = this.#level?.arena ?? null;
     const wanted = missions.bossStage();
 
     if (nest === null || wanted === null) {
@@ -3220,6 +3528,8 @@ export class SurfaceScene extends UiScene<'surface'> {
 
   /** Wave + POI HP for an active defend stage (§4.7; none on Cinder-4). */
   #syncDefend(): void {
+    // SPEC-054 §4.9 (E83): a defence waits for the surface.
+    if (this.#level?.id === 'underground') return;
     const missions = this.#missions as Missions;
     const stage = missions.defendStage();
     const spawn = this.#spawn as SpawnDirector;
@@ -3234,7 +3544,8 @@ export class SurfaceScene extends UiScene<'surface'> {
       return;
     }
     this.#dismissDefendWave = false;
-    const poi = (this.#layout as Layout).pois.find((p) => p.poi === stage.poi) ?? null;
+    // SPEC-054 §4.9: a defence is the surface's — it waits there while the player is below.
+    const poi = (this.#levels as { surface: Level }).surface.layout.pois.find((p) => p.poi === stage.poi) ?? null;
     this.#defendPoi = poi;
     this.#defendMax = this.#planet.surface.pois.find((p) => p.id === stage.poi)?.hp ?? 100;
     this.#defendHp = this.#defendMax;
@@ -3264,6 +3575,8 @@ export class SurfaceScene extends UiScene<'surface'> {
 
   /** E13: the follower spawns at `from` on stage start (none on Cinder-4). */
   #syncEscort(): void {
+    // SPEC-054 §4.9 (E83): the follower waits for the surface.
+    if (this.#level?.id === 'underground') return;
     const world = this.#world as CombatWorld;
     const stage = (this.#missions as Missions).escortStage();
     if (stage === null) {
@@ -3271,7 +3584,7 @@ export class SurfaceScene extends UiScene<'surface'> {
       this.#followerRespawnIn = 0;
       return;
     }
-    const from = (this.#layout as Layout).pois.find((p) => p.poi === stage.from);
+    const from = (this.#levels as { surface: Level }).surface.layout.pois.find((p) => p.poi === stage.from);
     const def = FOLLOWERS[stage.follower];
     world.follower = makeFollower(def, from?.x ?? 0, from?.z ?? 0);
   }
@@ -3634,7 +3947,7 @@ export class SurfaceScene extends UiScene<'surface'> {
     // SPEC-041 §4.4, E63: a death in an active boss stage comes back at the
     // arena's mouth instead of a 110–160 m walk from the pad.
     if (this.#deathAt >= DEATH_OVERLAY_SECONDS || tapped) {
-      this.#respawn(world, (this.#missions?.bossStage() ?? null) !== null && this.#arenaPoi !== null ? 'arena' : 'pad');
+      this.#respawn(world, (this.#missions?.bossStage() ?? null) !== null && this.#levels?.surface.arena != null ? 'arena' : 'pad');
     }
   }
 
@@ -3644,8 +3957,9 @@ export class SurfaceScene extends UiScene<'surface'> {
    * keeps clear (E17) — written into `out`, with the facing toward the nest.
    */
   #arenaEntrance(out: { x: number; z: number; facing: number }): boolean {
-    const nest = this.#arenaPoi;
-    const pad = this.#pad;
+    // SPEC-054 §4.1: a respawn is always on the surface.
+    const nest = this.#levels?.surface.arena ?? null;
+    const pad = this.#levels?.surface.pad ?? null;
     if (nest === null || pad === null) return false;
     const dx = pad.x - nest.x;
     const dz = pad.z - nest.z;
@@ -3668,7 +3982,11 @@ export class SurfaceScene extends UiScene<'surface'> {
    * The sweep runs around wherever the player comes back.
    */
   #respawn(world: CombatWorld, at: 'pad' | 'arena'): void {
-    const layout = this.#layout as Layout;
+    // SPEC-054 §4.1, §4.9: the respawn reads the surface explicitly — a death
+    // or a recall below has already brought the player up (E84).
+    // E84: a death below comes up first — the swap's synchronous part, under the overlay.
+    if (this.#level?.id === 'underground') this.#applySwap(world, 'surface');
+    const layout = (this.#levels as { surface: Level }).surface.layout;
     this.#deathAt = null;
     if (this.#terminalOpen) this.#closeTerminal();
     const spot = this.#respawnAt;
@@ -3729,12 +4047,321 @@ export class SurfaceScene extends UiScene<'surface'> {
     this.services.events.emit('player:respawned');
   }
 
+  // ------------------------------------------------------ SPEC-054: below
+
+  /**
+   * §4.2 — the gate: why a descent is refused, or `null` when it is not. In
+   * order: the `c1_m1` seal (skipped by the debug descent), a current stage's
+   * running clock, the boss, a follower, forced weather.
+   */
+  #descentRefusal(skipSeal: boolean): string | null {
+    const save = this.#save;
+    const missions = this.#missions;
+    const world = this.#world;
+    if (save === null || missions === null || world === null) return null;
+    let clock: string | null = null;
+    for (const state of missions.active) {
+      for (const { objective, done } of missions.currentObjectives(state.id)) {
+        if (done) continue;
+        if (objective.kind === 'survive' || objective.kind === 'defend' || objective.kind === 'escort') {
+          clock = MISSION_TABLE[state.id].title;
+          break;
+        }
+      }
+      if (clock !== null) break;
+    }
+    return descentRefusal({
+      tutorialDone: skipSeal || (save.progress.missionsDone as readonly string[]).includes(DESCENT_SEAL),
+      clockTitle: clock,
+      bossAwake: missions.bossStage() !== null || world.arena?.locked === true || this.#arena?.locked === true,
+      follower: world.follower !== null,
+      stormForced: missions.requiredWeather() !== null,
+    });
+  }
+
+  /** §4.5: `light` below flips the flashlight — intensities only — and says so. */
+  #toggleLight(world: CombatWorld): void {
+    if (this.#level?.id !== 'underground' || !world.player.alive) return;
+    this.#setLight(!this.#lightOn);
+    this.services.events.emit('light:toggled', { on: this.#lightOn });
+  }
+
+  #setLight(on: boolean): void {
+    this.#lightOn = on;
+    this.#light.on = on;
+    this.#view?.setFlashlightOn(on);
+  }
+
+  /**
+   * §4.8: `interact` at a cache. A guarded cache waits for SPEC-055's puzzles;
+   * an unclaimed loose one pays once, raises `cache:opened`, toasts what it
+   * paid and draws open from now on.
+   */
+  #openCache(target: Interactable, world: CombatWorld): void {
+    const economy = this.#economy;
+    if (economy === null || !world.player.alive) return;
+    const id = target.id as CacheId;
+    if (CACHES[id].guard !== 'none') return;
+    const result = economy.claimCache(id);
+    if (!result.ok) return;
+    this.services.events.emit('cache:opened', { cache: id, x: target.x, z: target.z });
+    const paid = bonusRewardText(result.reward);
+    this.services.events.emit('ui:toast', { kind: 'good', text: paid === '' ? CACHE_OPENED_TEXT : `${CACHE_OPENED_TEXT} · ${paid}` });
+    this.#caveView?.setClaimed(id);
+  }
+
+  /**
+   * §4.4: SPEC-052's cave kit, loaded lazily at a visit's first descent. The
+   * release is registered on enter, so it runs after the views have gone.
+   */
+  #loadCaveKit(): Promise<void> {
+    if (this.#caveKit === null) this.#caveKit = this.services.assets.load(CAVE_ASSETS);
+    return this.#caveKit;
+  }
+
+  /**
+   * §4.2 — the swap: the `'level'` hold and the input released (54-h), the
+   * fade out (0 ms under reduced motion), the swap itself, the fade in. A
+   * scene disposed mid-swap stops at the next await. The first descent of a
+   * visit also waits, behind the fade, for the cave kit.
+   */
+  async #swapLevel(to: LevelId): Promise<void> {
+    const world = this.#world;
+    if (world === null || this.#swapping || this.#level === null || this.#level.id === to) return;
+    if (to === 'underground' && this.#descent === null) return;
+    this.#swapping = true;
+    this.services.input.releaseAll();
+    const ms = fadeMs();
+    const kit = to === 'underground' && this.#caveView === null ? this.#loadCaveKit() : null;
+    await this.services.ui.fadeOut(ms);
+    if (!this.#alive) return;
+    if (kit !== null) {
+      await settleWithin(kit, CAVE_KIT_WAIT_MS);
+      if (!this.#alive) return;
+    }
+    const left = this.#applySwap(world, to);
+    await this.services.ui.fadeIn(ms);
+    if (!this.#alive) return;
+    this.#swapping = false;
+    // E86: said once the cave is in sight. A toast raised under the black
+    // would spend its time where nobody can read it — on a slow device, all of
+    // it, while the first frame with the flashlight's programs is drawn.
+    if (to === 'underground' && left > 0) this.services.events.emit('ui:toast', { kind: 'warn', text: LOOT_LEFT_TEXT });
+  }
+
+  /**
+   * §4.2–§4.9 — the synchronous part of a swap, which a death or a recall
+   * below runs on its own (E84). Going down clears what the surface leaves
+   * behind: its waves stop, its enemies go silently, every shot, telegraph and
+   * deployable is freed with no blast and no refund (54-a), and its loot is
+   * cleared. Coming up does the same for the cave. Then the level, the world,
+   * the view, the light, the map and the grade change over, the player lands,
+   * and `level:changed` fires. Returns how many pickups lay within 10 m — the
+   * swap's caller toasts them going down (E86).
+   */
+  #applySwap(world: CombatWorld, to: LevelId): number {
+    const levels = this.#levels;
+    const view = this.#view;
+    const spawn = this.#spawn;
+    const combat = this.#combat;
+    const pickups = this.#pickups;
+    const save = this.#save;
+    const from = this.#level;
+    if (levels === null || view === null || spawn === null || combat === null || pickups === null || save === null) return 0;
+    if (from === null || from.id === to) return 0;
+    const p = world.player;
+    if (to === 'underground') this.#stopMissionWaves();
+    spawn.despawnNear(p.x, p.z, Infinity);
+    combat.clearLevel();
+    const left = pickups.clear(p.x, p.z, LOOT_LEFT_RADIUS);
+    this.#closeTerminal();
+
+    const level = to === 'underground' ? this.#ensureCave(levels, save) : levels.surface;
+    this.#level = level;
+    world.obstacles = level.grid;
+    world.bounds = level.bounds;
+    spawn.setObstacles(level.grid);
+    this.#pathGrid = to === 'underground' ? this.#caveGrid : this.#surfaceGrid;
+    this.#routeLength = 0;
+    this.#routeIn = 0;
+    this.#insideShelter = null;
+    this.#shelterState = 'none';
+
+    // §4.2: below, at the spawn by the exit, facing into room 0; above, at the
+    // descent point, facing out of the shelter. The camera snaps.
+    if (to === 'underground') {
+      const u = level.layout as UndergroundLayout;
+      p.x = u.playerSpawn.x;
+      p.z = u.playerSpawn.z;
+      p.facing = u.playerSpawn.facing;
+    } else {
+      const descent = this.#descent;
+      if (descent !== null) {
+        p.x = descent.x;
+        p.z = descent.z;
+        p.facing = descent.shelter.gapAngle;
+      }
+    }
+    p.vx = 0;
+    p.vz = 0;
+    this.#camTarget.x = p.x;
+    this.#camTarget.z = p.z;
+    this.#placeCamera(0, 0);
+
+    // §4.4, §4.5: the view, the flashlight and the light rules.
+    if (to === 'underground') {
+      view.setLevel('underground', this.#caveView, this.#caveDef.look);
+      const built = view.ensureFlashlight(this.services.renderer.quality.flashlight, this.#caveDef.look.flashlight);
+      this.#setLight(this.#lightOn);
+      // §4.5: the light count moved once, behind this fade — compile now.
+      if (built) this.services.renderer.gl.compile(this.scene, this.camera);
+      world.light = this.#light;
+      world.sight = DARK_SIGHT;
+      view.enemies.rimOf = this.#rimBelow;
+    } else {
+      view.setLevel('surface', null, null);
+      this.#setLight(this.#lightOn);
+      world.light = undefined;
+      world.sight = undefined;
+      view.enemies.rimOf = null;
+    }
+    this.#touch?.setLightAvailable(to === 'underground');
+
+    // §4.10: the maps follow the level.
+    const title = to === 'underground' ? `${this.#planet.name} · ${UNDERGROUND_TITLE}` : this.#planet.name;
+    this.#minimap?.setLayers(level.layers);
+    this.#mapScreen?.setLevel({ layout: level.layout, layers: level.layers, title });
+    const revealed = level.mask.reveal(p.x, p.z, this.#revealOut);
+    if (revealed > 0) level.layers.reveal(this.#revealOut, revealed, EXPLORE_CELL);
+    this.#minimapIn = 0;
+
+    // §4.4: the grade and the fog. Below the storm grade is not forwarded;
+    // coming up, the surface's is forwarded again on the next frame.
+    this.applyLook();
+    this.#lastGrade.vignette = -1;
+    this.#fogMultApplied = Number.NaN;
+    this.#applyFog();
+
+    // §4.4: below the storm is muted — no slow-down, no loop (Eden hums).
+    combat.setWeatherMoveMult(this.#weatherMoveMult());
+    this.#stormLoopVolume = 0;
+    this.#stopStormLoop();
+
+    if (to === 'underground') {
+      this.#descents++;
+      this.#spawnCavePacks(level.layout as UndergroundLayout);
+      // §4.5: the first descent teaches the light.
+      this.#requestTip('dark');
+    } else {
+      // §4.9 (E83): what a stage started below waits for starts now.
+      this.#syncMissionStages();
+    }
+    this.#swapUndrawn = true;
+    this.#syncDebugStrip();
+    this.services.events.emit('level:changed', { planet: this.#planet.id, level: to });
+    return left;
+  }
+
+  /**
+   * §4.14 (dev): the strip shows the active level's own shortcuts — the
+   * descent's above; the ascent, the vault and its corridor below — and hides
+   * the other level's, which would do nothing there. The surface's strip is
+   * the row it was, which the other suites' pointer clicks expect on screen.
+   */
+  #syncDebugStrip(): void {
+    const below = this.#level?.id === 'underground';
+    for (const element of this.#debugAbove) element.hidden = below;
+    for (const element of this.#debugBelow) element.hidden = !below;
+  }
+
+  /**
+   * §4.3: the cave — the same on every visit of the save, from the layout
+   * stream's `underground` fork — its level, its route grid and its view,
+   * built at the visit's first descent and kept (54-d, 54-e).
+   */
+  #ensureCave(levels: { surface: Level; underground: Level | null }, save: Save): Level {
+    const existing = levels.underground;
+    if (existing !== null) return existing;
+    const planet = this.#planet;
+    const def = this.#caveDef;
+    const u = generateUnderground(def, planet.chapter, this.services.rng.layout(planet.id).fork('underground'));
+    this.#cave = u;
+    // §4.10: the second mask — 10 m reveals, persisted in `exploredBelow`.
+    const mask = new ExploreMask(BELOW_HALF_SIZE, save.progress.exploredBelow[planet.id], EXPLORE_RADIUS_BELOW);
+    const layers = new MapLayers(u, planet.surface.palette, { rooms: u.rooms, corridors: u.corridors, width: def.corridor });
+    layers.syncFog(mask);
+    const interactables: Interactable[] = [{ kind: 'exit', id: 'exit', x: u.exit.x, z: u.exit.z, radius: EXIT_RADIUS }];
+    for (const cache of u.caches) interactables.push({ kind: 'cache', id: cache.id, x: cache.x, z: cache.z, radius: CACHE_RADIUS });
+    const level: Level = {
+      id: 'underground',
+      layout: u,
+      grid: new ObstacleGrid(u),
+      bounds: u.halfSize - WALL_INSET,
+      pois: [],
+      shelters: [],
+      nodes: null,
+      terminal: null,
+      interactables,
+      mask,
+      layers,
+      pad: null,
+      arena: null,
+    };
+    levels.underground = level;
+    this.#caveGrid = buildPathGrid(u);
+    const view = this.#view;
+    if (view !== null && this.#caveView === null) {
+      const caveView = new UndergroundView(
+        view.levelRoot,
+        u,
+        def,
+        planet.biome,
+        this.services.assets,
+        { primary: save.player.appearance.primary, secondary: save.player.appearance.secondary },
+        Math.min(CAVE_DUST_MOTES, this.services.renderer.quality.maxParticles),
+      );
+      for (const cache of u.caches) if (save.progress.claimed.includes(cache.id)) caveView.setClaimed(cache.id);
+      this.#caveView = caveView;
+    }
+    return level;
+  }
+
+  /**
+   * §4.7: each descent's packs — a species per anchor from the planet's
+   * surface roster (static archetypes excluded) on this descent's fork, at
+   * SPEC-041's pack sizes, placed and leashed, never more than 12 alive.
+   */
+  #spawnCavePacks(u: UndergroundLayout): void {
+    const spawn = this.#spawn;
+    const visit = this.#visitRng;
+    if (spawn === null || visit === null || u.packs.length === 0) return;
+    const rows = this.#planet.surface.spawn
+      .filter((row) => ENEMIES[row.enemy].archetype !== 'static')
+      .map((row) => ({ item: row.enemy, weight: row.weight }));
+    if (rows.length === 0) return;
+    const rng = visit.fork(`underground:${this.#descents}`);
+    for (const anchor of u.packs) {
+      const enemy = rng.weighted(rows);
+      const cap = BELOW_MAX_ALIVE - this.#liveEnemies();
+      if (cap <= 0) break;
+      spawn.spawnPackAt(enemy, anchor.x, anchor.z, { placed: true, leash: BELOW_LEASH, cap });
+    }
+  }
+
+  /** §4.2: a descent stops the active missions' waves; the ascent's sync starts them again. */
+  #stopMissionWaves(): void {
+    const spawn = this.#spawn;
+    if (spawn === null) return;
+    for (const handle of this.#missionWaves.values()) spawn.stopWave(handle);
+    this.#missionWaves.clear();
+  }
+
   // ----------------------------------------------------------- debug strip
 
   /** `?debug` only: shortcuts so the acceptance run fits a QA session. */
   #buildDebugStrip(): void {
     const strip = el('div', 'hud-debug');
-    const button = (id: string, label: string, click: () => void): void => {
+    const button = (id: string, label: string, click: () => void): HTMLElement => {
       // SPEC-023 §4.4: a held beat freezes the world, and these shortcuts are
       // shortcuts *through* it — a hurt or a smite during a reveal would touch
       // what the hold exists to protect (AC: no damage during a held beat).
@@ -3742,7 +4369,9 @@ export class SurfaceScene extends UiScene<'surface'> {
         if (this.#holds > 0) return;
         click();
       };
-      strip.append(testId(h('button', { class: 'hud-button', type: 'button', click: guarded }, label), id));
+      const element = testId(h('button', { class: 'hud-button', type: 'button', click: guarded }, label), id);
+      strip.append(element);
+      return element;
     };
     button('surface-hurt', 'Hurt me', () => this.#combat?.damagePlayer(60, { kind: 'fall' }));
     // SPEC-035 §4.6: a hit from off screen, which is the only kind that draws an
@@ -3765,8 +4394,8 @@ export class SurfaceScene extends UiScene<'surface'> {
     // clear of the 3.5 m hull.
     button('surface-goto-pad', 'To pad', () => {
       const world = this.#world;
-      const pad = this.#pad;
-      const layout = this.#layout;
+      const pad = this.#level?.pad ?? null;
+      const layout = this.#level?.layout ?? null;
       if (world === null || pad === null || layout === null || !world.player.alive) return;
       const dx = layout.playerSpawn.x - pad.x;
       const dz = layout.playerSpawn.z - pad.z;
@@ -3777,7 +4406,7 @@ export class SurfaceScene extends UiScene<'surface'> {
     button('surface-spawn-boss', 'Wake boss', () => this.#debugSpawnBoss());
     button('surface-goto-boss', 'To boss', () => {
       const world = this.#world;
-      const nest = this.#arenaPoi;
+      const nest = this.#level?.arena ?? null;
       if (world === null || nest === null || !world.player.alive) return;
       world.player.x = nest.x;
       world.player.z = nest.z + 12;
@@ -3800,11 +4429,11 @@ export class SurfaceScene extends UiScene<'surface'> {
     // `?debug` controls, so the packaged e2e run can press them.
     button('surface-goto-shelter', 'To shelter', () => {
       const world = this.#world;
-      const layout = this.#layout;
-      if (world === null || layout === null || !world.player.alive) return;
+      const level = this.#level;
+      if (world === null || level === null || !world.player.alive) return;
       let best: LayoutShelter | null = null;
       let bestD = Infinity;
-      for (const s of layout.shelters) {
+      for (const s of level.shelters) {
         const d = Math.hypot(s.x - world.player.x, s.z - world.player.z);
         if (d < bestD) {
           bestD = d;
@@ -3818,6 +4447,48 @@ export class SurfaceScene extends UiScene<'surface'> {
     // SPEC-048 §4.3: the shelter and reach clues' places — the first cave, the
     // first wreck and the first landmark instance of the layout.
     button('surface-goto-cave', 'To cave', () => this.#debugGotoShelter('cave'));
+    // SPEC-054 §4.14: the underground's shortcuts — beside the descent, down at
+    // once (the gate still refuses, but for the seal), up at once, beside the
+    // nearest unclaimed cache, and the level's (0, 0). Those that mean
+    // something on one level only show on it, so the strip keeps one row.
+    const above = this.#debugAbove;
+    const below = this.#debugBelow;
+    above.length = 0;
+    below.length = 0;
+    const toDescent = button('surface-goto-descent', 'To descent', () => {
+      const world = this.#world;
+      const descent = this.#descent;
+      if (world === null || descent === null || this.#level?.id !== 'surface' || !world.player.alive) return;
+      world.player.x = descent.x;
+      world.player.z = descent.z;
+    });
+    const descend = button('surface-descend', 'Descend', () => {
+      const world = this.#world;
+      if (world === null || !world.player.alive || this.#holdReason() !== null || this.#level?.id !== 'surface') return;
+      if (this.#descentRefusal(true) !== null) return;
+      void this.#swapLevel('underground');
+    });
+    const ascend = button('surface-ascend', 'Ascend', () => {
+      const world = this.#world;
+      if (world === null || !world.player.alive || this.#holdReason() !== null) return;
+      void this.#swapLevel('surface');
+    });
+    button('surface-goto-cache', 'To cache', () => this.#debugGotoCache());
+    // §4.12: the vault room lies at the end of the tree, a long walk through
+    // the dark — on Eden, in front of the cradle row; and halfway down the
+    // corridor into it, where Eden's cable tray runs.
+    const toVault = button('surface-goto-vault', 'To vault', () => this.#debugGotoVault());
+    const toCorridor = button('surface-goto-corridor', 'To corridor', () => this.#debugGotoCorridor());
+    above.push(toDescent, descend);
+    below.push(ascend, toVault, toCorridor);
+    this.#syncDebugStrip();
+    button('surface-goto-origin', 'To origin', () => {
+      const world = this.#world;
+      if (world === null || !world.player.alive) return;
+      world.obstacles.resolveCircle(0, 0, world.player.radius, this.#resolved);
+      world.player.x = this.#resolved.x;
+      world.player.z = this.#resolved.z;
+    });
     button('surface-goto-wreck', 'To wreck', () => this.#debugGotoShelter('wreck'));
     button('surface-goto-landmark', 'To landmark', () => this.#debugGotoLandmark());
     // SPEC-035 §4.5: the fade needs a prop between the camera and the salvager,
@@ -3861,7 +4532,7 @@ export class SurfaceScene extends UiScene<'surface'> {
     button('surface-goto-edge', 'To edge', () => {
       const world = this.#world;
       if (world === null || !world.player.alive) return;
-      world.player.x = this.#planet.surface.halfSize - WALL_INSET;
+      world.player.x = (this.#level as Level).bounds;
       world.player.z = 0;
     });
     // SPEC-053 §4.10: beside a tree of the biggest grove, orchard or cluster,
@@ -3948,6 +4619,110 @@ export class SurfaceScene extends UiScene<'surface'> {
     economy.addItem('landmine', 7);
     economy.addItem('demo_charge', 1);
     save.quick.explosive = 'frag_grenade';
+  }
+
+  /** SPEC-054 §4.14: beside the nearest unclaimed cache of the active level — a loose one first — toward its room. */
+  #debugGotoCache(): void {
+    const world = this.#world;
+    const save = this.#save;
+    const level = this.#level;
+    if (world === null || save === null || level === null || !world.player.alive) return;
+    const p = world.player;
+    let best: Interactable | null = null;
+    let bestD = Infinity;
+    // A loose cache — one that opens — wins over a guarded one, then the nearest.
+    for (const entry of level.interactables) {
+      if (entry.kind !== 'cache' || save.progress.claimed.includes(entry.id)) continue;
+      const shut = CACHES[entry.id as CacheId].guard !== 'none';
+      const d = Math.hypot(entry.x - p.x, entry.z - p.z) + (shut ? 1e6 : 0);
+      if (d < bestD) {
+        bestD = d;
+        best = entry;
+      }
+    }
+    if (best === null) return;
+    // Toward the room the cache stands in, so the salvager is inside its circle and clear.
+    let toX = 1;
+    let toZ = 0;
+    const cave = this.#cave;
+    if (cave !== null) {
+      let room = cave.rooms[0];
+      let roomD = Infinity;
+      for (const r of cave.rooms) {
+        const d = Math.hypot(r.x - best.x, r.z - best.z);
+        if (d < roomD) {
+          roomD = d;
+          room = r;
+        }
+      }
+      if (room !== undefined && roomD > 1e-3) {
+        toX = (room.x - best.x) / roomD;
+        toZ = (room.z - best.z) / roomD;
+      }
+    }
+    p.x = best.x + toX * GOTO_CACHE_DISTANCE;
+    p.z = best.z + toZ * GOTO_CACHE_DISTANCE;
+  }
+
+  /**
+   * §4.12 (dev): below, inside the vault room, facing what it holds — on Eden
+   * the middle of the cradle row, elsewhere the vault's cache at the centre —
+   * from `GOTO_VAULT_DISTANCE` toward the vault door.
+   */
+  #debugGotoVault(): void {
+    const world = this.#world;
+    const cave = this.#cave;
+    if (world === null || cave === null || this.#level?.id !== 'underground' || !world.player.alive) return;
+    const room = cave.rooms[cave.vault.room];
+    if (room === undefined) return;
+    let targetX = room.x;
+    let targetZ = room.z;
+    if (cave.cradles.length > 0) {
+      targetX = 0;
+      targetZ = 0;
+      for (const c of cave.cradles) {
+        targetX += c.x / cave.cradles.length;
+        targetZ += c.z / cave.cradles.length;
+      }
+    }
+    const doorX = cave.vault.doorX - room.x;
+    const doorZ = cave.vault.doorZ - room.z;
+    const length = Math.hypot(doorX, doorZ);
+    const toX = length > 1e-6 ? doorX / length : 1;
+    const toZ = length > 1e-6 ? doorZ / length : 0;
+    const p = world.player;
+    world.obstacles.resolveCircle(targetX + toX * GOTO_VAULT_DISTANCE, targetZ + toZ * GOTO_VAULT_DISTANCE, p.radius, this.#resolved);
+    p.x = this.#resolved.x;
+    p.z = this.#resolved.z;
+    p.facing = Math.atan2(targetZ - p.z, targetX - p.x);
+  }
+
+  /**
+   * §4.12 (dev): below, halfway along the vault's one corridor — rim to rim,
+   * the stretch Eden's cable tray covers — facing the vault door.
+   */
+  #debugGotoCorridor(): void {
+    const world = this.#world;
+    const cave = this.#cave;
+    if (world === null || cave === null || this.#level?.id !== 'underground' || !world.player.alive) return;
+    const index = cave.vault.room;
+    const corridor = cave.corridors.find((c) => c.a === index || c.b === index);
+    const vault = cave.rooms[index];
+    const other = corridor === undefined ? undefined : cave.rooms[corridor.a === index ? corridor.b : corridor.a];
+    if (vault === undefined || other === undefined) return;
+    const span = Math.hypot(other.x - vault.x, other.z - vault.z);
+    if (span <= 1e-6) return;
+    const along = (vault.r + span - other.r) / 2;
+    const p = world.player;
+    world.obstacles.resolveCircle(
+      vault.x + ((other.x - vault.x) / span) * along,
+      vault.z + ((other.z - vault.z) / span) * along,
+      p.radius,
+      this.#resolved,
+    );
+    p.x = this.#resolved.x;
+    p.z = this.#resolved.z;
+    p.facing = Math.atan2(cave.vault.doorZ - p.z, cave.vault.doorX - p.x);
   }
 
   /** SPEC-029 §4.13: 5 skitters in a 1.5 m ring at the aim point or 7 m ahead. */
@@ -4152,7 +4927,7 @@ export class SurfaceScene extends UiScene<'surface'> {
   /** The mission-less half of the SPEC-011 acceptance run: wake the nest boss. */
   #debugSpawnBoss(): void {
     const world = this.#world;
-    const nest = this.#arenaPoi;
+    const nest = this.#level?.arena ?? null;
     if (world === null || nest === null || this.#findBoss(world) !== null) return;
     const def = this.#planet.surface.pois.find((p) => p.kind === 'arena');
     if (def?.boss === undefined) return;
@@ -4497,7 +5272,7 @@ export class SurfaceScene extends UiScene<'surface'> {
    */
   #placePadBody(save: Save, planet: PlanetId): void {
     const view = this.#view;
-    const pad = this.#pad;
+    const pad = this.#levels?.surface.pad ?? null;
     if (view === null || pad === null || planet !== SCAV_PLANET) return;
     if ((save.progress.missionsDone as readonly string[]).includes(SCAV_PAD_MISSION)) return;
     const x = pad.x + SCAV_PAD_OFFSET.x;
@@ -4514,14 +5289,16 @@ export class SurfaceScene extends UiScene<'surface'> {
   #placeEchoBody(): void {
     const view = this.#view;
     const world = this.#world;
-    const layout = this.#layout;
+    const layout = this.#levels?.surface.layout ?? null;
     if (this.#echoBodyPlaced || view === null || world === null || layout === null || this.#planet.id !== SCAV_PLANET) return;
+    // SPEC-054 §4.1: the body lies on the surface, beside the salvager — never in a cave.
+    if (this.#level?.id !== 'surface') return;
     this.#echoBodyPlaced = true;
     const p = world.player;
     const edge = layout.halfSize - WALL_INSET - 1;
     const clear = (x: number, z: number): boolean =>
       Math.abs(x) <= edge && Math.abs(z) <= edge && !world.obstacles.hitsCircle(x, z, SCAV_BODY_RADIUS);
-    const pad = this.#pad;
+    const pad = this.#levels?.surface.pad ?? null;
     const spot = echoBodySpot(p.x, p.z, CAMERA_YAW, clear, pad === null ? undefined : bearingToward(p.x, p.z, pad.x, pad.z));
     view.addScavBody(spot.x, spot.z, spot.facing);
   }
@@ -4529,7 +5306,7 @@ export class SurfaceScene extends UiScene<'surface'> {
   /** SPEC-048 §4.3 (`?debug`): the player to the layout's first shelter of `kind`. */
   #debugGotoShelter(kind: 'cave' | 'wreck'): void {
     const world = this.#world;
-    const shelter = this.#layout?.shelters.find((entry) => entry.kind === kind) ?? null;
+    const shelter = this.#level?.shelters.find((entry) => entry.kind === kind) ?? null;
     if (world === null || shelter === null || !world.player.alive) return;
     world.player.x = shelter.x;
     world.player.z = shelter.z;
@@ -4544,7 +5321,8 @@ export class SurfaceScene extends UiScene<'surface'> {
    */
   #debugGotoGrove(): void {
     const world = this.#world;
-    const layout = this.#layout;
+    // SPEC-054 §4.1: groves grow on the surface only.
+    const layout = this.#level?.id === 'surface' ? (this.#level.layout as Layout) : null;
     if (world === null || layout === null || !world.player.alive) return;
     let feature: (typeof layout.features)[number] | null = null;
     for (const entry of layout.features) if (feature === null || entry.pieces > feature.pieces) feature = entry;
@@ -4573,7 +5351,7 @@ export class SurfaceScene extends UiScene<'surface'> {
    */
   #debugGotoLandmark(): void {
     const world = this.#world;
-    const poi = this.#layout?.pois.find((entry) => entry.kind === 'landmark') ?? null;
+    const poi = this.#level?.layout.pois.find((entry) => entry.kind === 'landmark') ?? null;
     if (world === null || poi === null || !world.player.alive) return;
     const p = world.player;
     let x = poi.x;
@@ -4679,9 +5457,13 @@ export class SurfaceScene extends UiScene<'surface'> {
     m.objective = null;
     m.tracker = this.#feedTracker(missions);
 
-    m.weather.active = weather.current;
-    m.weather.warning = weather.phase === 'warning' ? weather.pending : null;
+    // SPEC-054 §4.4: below, the storm is muted and `hud-weather` hidden.
+    const below = this.#level?.id === 'underground';
+    m.weather.active = below ? null : weather.current;
+    m.weather.warning = !below && weather.phase === 'warning' ? weather.pending : null;
     m.weather.secondsLeft = weather.secondsLeft;
+    // SPEC-054 §4.5: the light chip, below only.
+    m.light = below ? this.#lightOn : null;
     // SPEC-030 D-11: the chip under the banner.
     m.shelter = this.#shelterState;
 
@@ -4803,7 +5585,7 @@ export class SurfaceScene extends UiScene<'surface'> {
     for (const state of missions.active) {
       for (const { objective, done } of missions.currentObjectives(state.id)) {
         if (objective.kind !== 'deliver' || done) continue;
-        const poi = this.#pois.find((p) => p.poi.poi === objective.poi && p.inside);
+        const poi = (this.#level as Level).pois.find((p) => p.poi.poi === objective.poi && p.inside);
         if (poi === undefined) continue;
         const held = save.resources[objective.resource] ?? 0;
         if (held < objective.amount) {
@@ -4815,12 +5597,39 @@ export class SurfaceScene extends UiScene<'surface'> {
         }
       }
     }
-    if (this.#atPad(world)) {
-      out.text = 'Open pad terminal';
-      out.action = true;
-      return out;
+    // SPEC-054 §4.1: the level's interactable under the player — the pad
+    // terminal, the descent (or why not, §4.2), the exit or a cache (§4.8).
+    const level = this.#level as Level;
+    const target = nearestInteractable(level.interactables, world.player.x, world.player.z);
+    if (target === null) return null;
+    switch (target.kind) {
+      case 'pad':
+        out.text = 'Open pad terminal';
+        out.action = true;
+        return out;
+      case 'descent': {
+        const refusal = this.#descentRefusal(false);
+        out.text = refusal ?? DESCEND_TEXT;
+        out.action = refusal === null;
+        if (refusal === null) this.#requestTip('descent');
+        return out;
+      }
+      case 'exit':
+        out.text = ASCEND_TEXT;
+        out.action = true;
+        return out;
+      case 'cache': {
+        const id = target.id as CacheId;
+        // A claimed cache offers nothing; a guarded one is shut until SPEC-055.
+        if (save.progress.claimed.includes(id)) return null;
+        const open = CACHES[id].guard === 'none';
+        out.text = open ? OPEN_CACHE_TEXT : LOCKED_TEXT;
+        out.action = open;
+        return out;
+      }
+      default:
+        return null;
     }
-    return null;
   }
 
   #objectiveLine(objective: MissionDef['stages'][number][number]): string {
@@ -4878,11 +5687,12 @@ export class SurfaceScene extends UiScene<'surface'> {
     });
 
     this.#pathGrid = buildPathGrid(layout);
+    this.#surfaceGrid = this.#pathGrid;
     this.#guide = {
       player: this.#guidePlayer,
       pois: this.#guidePois,
       // `Nodes.states` is the live array; `remaining` moves in place (D-18).
-      nodes: (this.#nodes as Nodes).states,
+      nodes: (this.#levels?.surface.nodes as Nodes).states,
       nearestEnemy: (id, maxRange) => this.#nearestEnemy(world, id, maxRange),
       follower: null,
       held: (resource) => save.resources[resource] ?? 0,
@@ -4945,8 +5755,9 @@ export class SurfaceScene extends UiScene<'surface'> {
     this.#guidePlayer.x = world.player.x;
     this.#guidePlayer.z = world.player.z;
     const pois = this.#guidePois;
-    for (let i = 0; i < this.#pois.length; i++) {
-      const state = this.#pois[i] as PoiRuntime;
+    const states = (this.#level as Level).pois;
+    for (let i = 0; i < states.length; i++) {
+      const state = states[i] as PoiState;
       let entry = pois[i];
       if (entry === undefined) {
         entry = { poi: state.poi.poi, instance: 0, kind: state.poi.kind, x: 0, z: 0, radius: 0, label: '', scanned: false };
@@ -4961,11 +5772,13 @@ export class SurfaceScene extends UiScene<'surface'> {
       entry.label = this.#poiLabel(state.poi.poi);
       entry.scanned = state.scanned;
     }
-    pois.length = this.#pois.length;
+    pois.length = states.length;
     // `#ctxFollower` was refreshed for `missions.update` earlier this step.
     guide.follower = world.follower === null ? null : this.#ctxFollower;
     // SPEC-030 D-8: a cycled and a forced storm read the same.
     guide.stormActive = this.#weather?.phase === 'active';
+    // SPEC-054 §4.10: below, the exit is the way — whatever the tracked objective.
+    guide.exit = this.#level?.id === 'underground' ? (this.#cave?.exit ?? undefined) : undefined;
     return guide;
   }
 
@@ -4987,7 +5800,9 @@ export class SurfaceScene extends UiScene<'surface'> {
     this.#guideRows = pinned === null ? NO_ROWS : missions.currentObjectives(pinned);
     const focus = pinned === null ? null : focusObjective(this.#guideRows, ctx);
     this.#focusIndex = focus === null ? -1 : focus.index;
-    const target = pinned === null ? padTarget(ctx) : focus === null ? null : focus.target;
+    // SPEC-054 §4.10: below, guidance points at the exit, labelled `Surface` (54-k).
+    const exit = exitTarget(ctx);
+    const target = exit !== null ? exit : pinned === null ? padTarget(ctx) : focus === null ? null : focus.target;
     this.#focusTarget = target;
 
     const player = world.player;
@@ -5182,7 +5997,7 @@ export class SurfaceScene extends UiScene<'surface'> {
     if (missions.active.length >= 2) this.#requestTip('track');
     if (this.#atPad(world) && !this.#terminalOpen) this.#requestTip('pad');
     if (missions.bossStage() !== null) this.#requestTip('boss');
-    const nodes = this.#nodes;
+    const nodes = this.#level?.nodes ?? null;
     if (nodes === null) return;
     for (const node of nodes.states) {
       if (Math.hypot(node.x - world.player.x, node.z - world.player.z) <= HARVEST_TIP_RANGE) {
@@ -5198,9 +6013,9 @@ export class SurfaceScene extends UiScene<'surface'> {
    * also the `scan` tip's trigger.
    */
   #updateScanRing(world: CombatWorld, missions: Missions): void {
-    let found: PoiRuntime | null = null;
+    let found: PoiState | null = null;
     if (world.player.alive) {
-      for (const state of this.#pois) {
+      for (const state of (this.#level as Level).pois) {
         if (state.poi.kind !== 'scan' || !state.inside || state.scanned) continue;
         if (!this.#scanWanted(missions, state.poi.poi)) continue;
         found = state;
@@ -5341,7 +6156,7 @@ export class SurfaceScene extends UiScene<'surface'> {
 
   /** Like `#project`, but reporting a point behind the camera (§4.3). */
   #projectGuide(x: number, z: number, lift: number): boolean {
-    const v = this.#projectScratch.set(x, lift + (this.#view?.field.heightAt(x, z) ?? 0), z);
+    const v = this.#projectScratch.set(x, lift + (this.#view?.heightAt(x, z) ?? 0), z);
     v.applyMatrix4(this.camera.matrixWorldInverse);
     const behind = v.z >= 0;
     v.applyMatrix4(this.camera.projectionMatrix);
@@ -5363,7 +6178,10 @@ export class SurfaceScene extends UiScene<'surface'> {
     tracker.bearing = this.#focusBearing;
     tracker.pulse = this.#stuck.level >= 1;
     const pinned = missions.pinned;
+    // SPEC-054 §4.9 (E83): below, the focus row says the way out and how far.
+    const below = this.#level?.id === 'underground';
     if (pinned === null) {
+      if (below) this.#pushReturnRow(rows);
       // SPEC-035 §4.10: "No active mission" told the player nothing. Name the
       // next mission and where it is taken — the pad terminal's own list — and
       // fall back to R16's sentence when the pad has nothing to offer.
@@ -5392,7 +6210,7 @@ export class SurfaceScene extends UiScene<'surface'> {
       const row = this.#trackerRows[i] as HudTrackerRow;
       row.done = progress.done;
       row.focus = i === this.#focusIndex;
-      row.text = row.focus ? this.#focusRowText(def.title, progress) : this.#rowText(progress);
+      row.text = row.focus ? (below ? this.#returnText() : this.#focusRowText(def.title, progress)) : this.#rowText(progress);
       // SPEC-034 §4.9: a defend row carries the POI's health. `#defendHp` is
       // what `poi:damaged` was raised from, and `#syncDefend` puts it back to
       // full on a stage reset, so the bar follows both for free.
@@ -5405,6 +6223,11 @@ export class SurfaceScene extends UiScene<'surface'> {
       row.count = kind === 'kill' || kind === 'collect' || kind === 'scan' ? Math.floor(progress.value) : -1;
       rows.push(row);
     }
+    // SPEC-054 §4.9: below with no focus row, one says the way out.
+    if (below && this.#focusIndex < 0) {
+      this.#pushReturnRow(rows);
+      return tracker;
+    }
     // 27-p: between stages every row is done, and the focus row says so.
     if (this.#focusIndex < 0 && rows.length < this.#trackerRows.length) {
       const row = this.#trackerRows[rows.length] as HudTrackerRow;
@@ -5416,6 +6239,23 @@ export class SurfaceScene extends UiScene<'surface'> {
       rows.push(row);
     }
     return tracker;
+  }
+
+  /** SPEC-054 §4.9 (E83): `Return to the surface — <n> m`, to the exit. */
+  #returnText(): string {
+    return `Return to the surface — ${Math.round(this.#focusDistance ?? 0)} m`;
+  }
+
+  /** SPEC-054 §4.9: the way-out row, from the pool, when the stage gives none. */
+  #pushReturnRow(rows: HudTrackerRow[]): void {
+    const row = this.#trackerRows[rows.length];
+    if (row === undefined) return;
+    row.done = false;
+    row.focus = true;
+    row.defendHp = null;
+    row.count = -1;
+    row.text = this.#returnText();
+    rows.push(row);
   }
 
   /**
@@ -5540,13 +6380,15 @@ export class SurfaceScene extends UiScene<'surface'> {
         if (done) continue;
         if ('poi' in objective) this.#objectivePois.add(objective.poi);
         if (objective.kind === 'escort') this.#objectivePois.add(objective.to);
-        if (objective.kind === 'boss' && this.#arenaPoi !== null) this.#objectivePois.add(this.#arenaPoi.poi);
+        const arena = this.#level?.arena ?? null;
+        if (objective.kind === 'boss' && arena !== null) this.#objectivePois.add(arena.poi);
       }
     }
 
     // 26-a: a discovered POI shows even under still-dark ground, and an
     // objective POI shows whether or not it was ever discovered (26-b).
-    for (const state of this.#pois) {
+    const level = this.#level as Level;
+    for (const state of level.pois) {
       const objective = this.#objectivePois.has(state.poi.poi);
       if (!state.discovered && !objective) continue;
       const mark = this.#nextMark();
@@ -5563,7 +6405,7 @@ export class SurfaceScene extends UiScene<'surface'> {
     }
 
     // SPEC-030 §4.10: discovered shelters draw with the SPEC-026 icons.
-    const shelters = (this.#layout as Layout).shelters;
+    const shelters = level.shelters;
     for (let i = 0; i < shelters.length; i++) {
       if (this.#shelterDiscovered[i] !== true) continue;
       const s = shelters[i] as LayoutShelter;
@@ -5576,13 +6418,28 @@ export class SurfaceScene extends UiScene<'surface'> {
       mark.ring = 0;
     }
 
+    // SPEC-054 §4.10: the descent once its shelter is discovered; below, the
+    // exit, the caches (hollow once claimed) and the vault door.
+    const descent = this.#descent;
+    if (level.id === 'surface' && descent !== null && this.#shelterDiscovered[descent.shelter.index] === true) {
+      this.#markAt(descent.x, descent.z, 'descent', 'Descent');
+    }
+    const cave = level.id === 'underground' ? this.#cave : null;
+    if (cave !== null) {
+      this.#markAt(cave.exit.x, cave.exit.z, 'descent', 'Surface');
+      this.#markAt(cave.vault.doorX, cave.vault.doorZ, 'vault', 'Vault');
+      for (const cache of cave.caches) {
+        this.#markAt(cache.x, cache.z, 'cache', 'Cache').hollow = save.progress.claimed.includes(cache.id);
+      }
+    }
+
     // §4.3 step 5: nodes with radar, and — SPEC-027 AC-38 — every node of the
     // resource the *tracked* mission is collecting, radar or not. The guidance
     // half goes away at `guidance: 'off'` (D-6); the radar half is a companion
     // the player paid for and stays whatever the guidance level says.
     const guided = this.services.settings.get().guidance !== 'off';
     const radar = hasNodeRadar(save);
-    for (const node of (this.#nodes as Nodes).states) {
+    for (const node of level.nodes?.states ?? NO_NODE_STATES) {
       if (!radar && !(guided && this.#collecting(missions, node.resource))) continue;
       const mark = this.#nextMark();
       mark.x = node.x;
@@ -5646,7 +6503,20 @@ export class SurfaceScene extends UiScene<'surface'> {
       mark = { x: 0, z: 0, icon: 'landmark', objective: false, label: null, ring: 0 };
       this.#markPool.push(mark);
     }
+    mark.hollow = false;
     this.#marks.push(mark);
+    return mark;
+  }
+
+  /** SPEC-054 §4.10: a plain mark — no ring, never an objective. */
+  #markAt(x: number, z: number, icon: MapMark['icon'], label: string): MapMark {
+    const mark = this.#nextMark();
+    mark.x = x;
+    mark.z = z;
+    mark.icon = icon;
+    mark.objective = false;
+    mark.label = label;
+    mark.ring = 0;
     return mark;
   }
 
@@ -5699,9 +6569,11 @@ export class SurfaceScene extends UiScene<'surface'> {
    * The autosaves the game already makes are what carry it to storage.
    */
   #explore(world: CombatWorld, dt: number): void {
-    const mask = this.#mask;
-    const layers = this.#layers;
-    if (mask === null || layers === null) return;
+    // SPEC-054 §4.10: the active level's mask and layers — below, a 10 m reveal.
+    const level = this.#level;
+    if (level === null) return;
+    const mask = level.mask;
+    const layers = level.layers;
     this.#exploreIn -= dt;
     if (this.#exploreIn <= 0) {
       this.#exploreIn = EXPLORE_INTERVAL;
@@ -5717,12 +6589,19 @@ export class SurfaceScene extends UiScene<'surface'> {
     }
   }
 
-  /** The mask into the live save, when it holds ground the save has not seen. */
+  /**
+   * The masks into the live save, when they hold ground the save has not
+   * seen — SPEC-054 §4.10: the surface's to `explored`, the cave's to
+   * `exploredBelow`.
+   */
   #writeMask(): void {
-    const mask = this.#mask;
+    const levels = this.#levels;
     const save = this.#save;
-    if (mask === null || save === null || !mask.dirty) return;
-    save.progress.explored[this.#planet.id] = mask.encode();
+    if (levels === null || save === null) return;
+    const surface = levels.surface.mask;
+    if (surface.dirty) save.progress.explored[this.#planet.id] = surface.encode();
+    const below = levels.underground?.mask ?? null;
+    if (below !== null && below.dirty) save.progress.exploredBelow[this.#planet.id] = below.encode();
   }
 
   // ------------------------------------------------------------- full map
@@ -5741,7 +6620,7 @@ export class SurfaceScene extends UiScene<'surface'> {
     world.player.vx = 0;
     world.player.vz = 0;
     this.#touch?.hide();
-    screen.open(this.#mapFrame(world), this.#mask?.fraction() ?? 0);
+    screen.open(this.#mapFrame(world), this.#level?.mask.fraction() ?? 0);
   }
 
   #closeMap(): void {
@@ -5776,7 +6655,7 @@ export class SurfaceScene extends UiScene<'surface'> {
     const world = this.#world;
     this.#missions?.pin(id);
     if (world === null) return;
-    this.#mapScreen?.redraw(this.#mapFrame(world), this.#mask?.fraction() ?? 0);
+    this.#mapScreen?.redraw(this.#mapFrame(world), this.#level?.mask.fraction() ?? 0);
   }
 
   // ---------------------------------------------------------- subscriptions
@@ -5968,7 +6847,8 @@ export class SurfaceScene extends UiScene<'surface'> {
           // the multiplier at 1; leaving restores the storm live then.
           // SPEC-043 §4.3: `no_cover` lets the storm's slow-down in too.
           const mult = effects === null || (this.#insideShelter !== null && !this.#noCover) ? 1 : effects.moveMult;
-          this.#combat?.setWeatherMoveMult(mult);
+          // SPEC-054 §4.4: below, the storm changes nothing but its own clock.
+          this.#combat?.setWeatherMoveMult(this.#level?.id === 'underground' ? 1 : mult);
           // SPEC-035 §4.11: the storm loop follows the storm, over a 0.5 s fade.
           this.#stormLoopTarget = weather === null ? 0 : 1;
         },
@@ -6089,7 +6969,7 @@ export class SurfaceScene extends UiScene<'surface'> {
           // A reach objective for a POI the player is already standing in
           // completes now — entry is edge-triggered, and the edge is behind us
           // (accepting c1_m1 on the pad must not wait for a walk-out-and-back).
-          for (const state of this.#pois) {
+          for (const state of this.#level?.pois ?? NO_POI_STATES) {
             if (state.inside) bus.emit('poi:reached', { poi: state.poi.poi, instance: state.poi.instance });
           }
           // SPEC-048 §4.6: a replay's stages pass in silence.
@@ -6292,6 +7172,9 @@ export class SurfaceScene extends UiScene<'surface'> {
     const spawn = this.#spawn;
     if (missions === null || spawn === null) return;
     spawn.setObjectiveEnemies(missions.objectiveEnemies());
+    // SPEC-054 §4.9 (E83): below, a stage's defence, follower and waves wait
+    // for the ascent, whose swap runs this again.
+    if (this.#level?.id === 'underground') return;
     const defend = missions.defendStage();
     const defendKey = defend === null ? null : `${defend.poi}:${defend.wave}:${defend.seconds}`;
     if (defendKey !== this.#defendKey) {

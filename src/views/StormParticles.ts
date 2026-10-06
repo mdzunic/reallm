@@ -3,11 +3,15 @@
 // — with the fixed camera's quaternion as a build-time billboard (the camera
 // never rotates, SPEC-012 §4.3). Positions keep the deterministic
 // index-plus-time drift: no randomness per frame, no allocation in `sync`.
+//
+// SPEC-054 §4.4 adds `dust`: the motes that hang in a cave's air. They are no
+// storm — nothing blows or falls — so their drift is anchored in the world and
+// only wraps round the player, where every other kind rides along with him.
 import * as THREE from 'three';
 import { hash01 } from '@/core/Noise';
 import { particleSprite, type SpriteKind } from '@/views/ProceduralTextures';
 
-export type ParticleKind = 'sand' | 'snow' | 'spores' | 'ash' | 'heat' | 'none';
+export type ParticleKind = 'sand' | 'snow' | 'spores' | 'ash' | 'heat' | 'dust' | 'none';
 
 interface StormLook {
   sprite: SpriteKind;
@@ -30,6 +34,9 @@ export const STORM_LOOK: Record<Exclude<ParticleKind, 'none'>, StormLook> = {
   snow: { sprite: 'flake', width: 0.3, height: 0.3, speed: 4, falling: true, color: '#e6ecf2', opacity: 0.8, additive: false, tint: [0.92, 0.97, 1.06] },
   ash: { sprite: 'dot', width: 0.25, height: 0.25, speed: 3, falling: true, color: '#909090', opacity: 0.8, additive: false, tint: [1, 0.94, 0.9] },
   spores: { sprite: 'dot', width: 0.35, height: 0.35, speed: 2, falling: true, color: '#b0e080', opacity: 0.8, additive: true, tint: [0.95, 1.05, 0.9] },
+  // SPEC-054 §4.4: a cave's motes. The grade below is the cave's own, so the
+  // tint is neutral — the storm grade is never forwarded below.
+  dust: { sprite: 'dot', width: 0.12, height: 0.12, speed: 0.3, falling: false, color: '#b8c0cc', opacity: 0.35, additive: true, tint: [1, 1, 1] },
 };
 
 /** The §4.9 ember accent: one ash particle in ten, via instanceColor. */
@@ -37,11 +44,39 @@ const EMBER_COLOR = '#ff8a3a';
 const EMBER_FRACTION = 0.1;
 /** The drift box around the player, matching SPEC-012's cloud. */
 const BOX = 44;
+/**
+ * SPEC-054 §4.4 (*initial tuning*): the motes' box — tighter than a storm's,
+ * so the 60 of them fill what the rig shows round the salvager — the band of
+ * air they hang in, and how far and how fast each one bobs.
+ */
+export const DUST_BOX = 30;
+export const DUST_FLOOR = 0.3;
+export const DUST_BAND = 2.4;
+const DUST_BOB = 0.12;
+const DUST_BOB_RATE = 0.7;
 
 const scratchMatrix = new THREE.Matrix4();
 const scratchPosition = new THREE.Vector3();
 const scratchScale = new THREE.Vector3();
 const scratchColor = new THREE.Color();
+
+/** `value` wrapped into [0, period), negatives included. */
+function wrap(value: number, period: number): number {
+  return ((value % period) + period) % period;
+}
+
+/**
+ * The fixed rig's orientation (SPEC-012 §4.3: pitch 55°, yaw 45°, and the
+ * camera never rotates) — the quaternion `SurfaceView` hands its storm, for
+ * a view that has no camera of its own to read it from (SPEC-054's cave).
+ */
+export function rigBillboard(pitchDeg = 55, yawDeg = 45): THREE.Quaternion {
+  const pitch = (pitchDeg * Math.PI) / 180;
+  const yaw = (yawDeg * Math.PI) / 180;
+  scratchPosition.set(Math.cos(pitch) * Math.sin(yaw), Math.sin(pitch), Math.cos(pitch) * Math.cos(yaw));
+  scratchMatrix.lookAt(scratchPosition, scratchScale.set(0, 0, 0), THREE.Object3D.DEFAULT_UP);
+  return new THREE.Quaternion().setFromRotationMatrix(scratchMatrix);
+}
 
 export class StormParticles {
   readonly #mesh: THREE.InstancedMesh;
@@ -109,6 +144,15 @@ export class StormParticles {
         x = ((seedA * 37) % BOX) - half;
         z = ((seedB * 17) % BOX) - half;
         y = 0.4 + ((seedA * 5 + time * 1.5) % 4); // the rising shimmer
+      } else if (this.#kind === 'dust') {
+        // SPEC-054 §4.4: each mote has a place in the world that drifts at
+        // `speed`; the box wraps that lattice round the player instead of
+        // carrying it, so walking leaves the motes hanging where they were.
+        // Each keeps its own height in the band and bobs a few centimetres.
+        const dustHalf = DUST_BOX / 2;
+        x = wrap(seedA * 37 + time * look.speed - px + dustHalf, DUST_BOX) - dustHalf;
+        z = wrap(seedB * 17 + time * look.speed * 0.6 - pz + dustHalf, DUST_BOX) - dustHalf;
+        y = DUST_FLOOR + wrap(seedA * 5, DUST_BAND) + DUST_BOB * Math.sin(seedB + time * DUST_BOB_RATE);
       } else {
         x = ((seedA * 37 + time * look.speed) % BOX) - half;
         z = ((seedB * 17 + time * look.speed * 0.6) % BOX) - half;

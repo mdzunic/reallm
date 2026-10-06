@@ -157,7 +157,8 @@ export function pickupSound(resource: ResourceId): SoundId {
  * The 19 events of §5.2 (SPEC-029 §4.12 adds four, SPEC-035 §4.11 two more,
  * SPEC-038 §4.10 the dash and the windup cue, SPEC-041 §4.10 a boss move
  * landing and a flight hit, SPEC-042 §4.2 an item picked up, SPEC-050 §4.8 an
- * exhaustion) that make a sound.
+ * exhaustion, SPEC-054 §4.13 the flashlight's click and a cache opening) that
+ * make a sound.
  */
 export type ReactedEvent =
   | 'combat:blast'
@@ -191,7 +192,10 @@ export type ReactedEvent =
   | 'ship:damaged'
   | 'shop:purchased'
   | 'dialogue:started'
-  | 'flight:arrived';
+  | 'flight:arrived'
+  // SPEC-054 §4.13: the flashlight's click, and a cache opening.
+  | 'light:toggled'
+  | 'cache:opened';
 
 /**
  * The 38 events of §5.4 that deliberately make none (and those later specs
@@ -257,6 +261,8 @@ const SILENT_EVENTS = [
   // toast that rides with each of them already plays the UI blip.
   'app:update-ready',
   'app:install-hint',
+  // SPEC-054 §4.2, §4.9: a level swap carries no sound of its own.
+  'level:changed',
 ] as const satisfies readonly (keyof GameEvents)[];
 
 export type SilentEvent = (typeof SILENT_EVENTS)[number];
@@ -355,6 +361,10 @@ export const AUDIO_REACTIONS: { [K in ReactedEvent]: Reaction<K> } = {
   'dialogue:started': (p) =>
     GLITCH_DIALOGUE_IDS.has(p.id) ? { id: 'ui_glitch', opts: { priority: 2 } } : { id: 'ui_dialogue_open' },
   'flight:arrived': () => ({ id: 'landing_thrusters' }),
+  /** SPEC-054 §4.13: the switch click, unpositioned — it is the player's own hand. */
+  'light:toggled': () => ({ id: 'light_click', opts: { volume: 0.6 } }),
+  /** SPEC-054 §4.13: positioned at the cache, like every other x/z event here. */
+  'cache:opened': (p) => ({ id: 'cache_open', opts: { x: p.x, z: p.z, priority: 1 } }),
 };
 
 /** The runtime key list, for the subscription loop and the exhaustiveness test. */

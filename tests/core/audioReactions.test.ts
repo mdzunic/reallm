@@ -41,10 +41,11 @@ type Assert<T extends true> = T;
 type Equal<A, B> = (<T>() => T extends A ? 1 : 2) extends <T>() => T extends B ? 1 : 2 ? true : false;
 
 /**
- * The 59 sound ids — the 29 of §2.2, the story films' 15 (SPEC-021 §6.3), the
+ * The 61 sound ids — the 29 of §2.2, the story films' 15 (SPEC-021 §6.3), the
  * seven weapon, impact and blast sprites of SPEC-035 §4.11, the dash and
  * three windup cues of SPEC-038 §4.10, SPEC-041 §4.10's boss windup, boss
- * slam and flight hit tick, and SPEC-050 §4.8's exhale —
+ * slam and flight hit tick, SPEC-050 §4.8's exhale, and SPEC-054 §4.13's
+ * flashlight click and cache opening —
  * pinned as an explicit literal (SPEC-001: pinned constants in tests are
  * literals). `SoundId` is derived from the sprite keys, so this is what makes
  * AC-5 a compile error rather than a surprise: recutting a bank without
@@ -116,6 +117,9 @@ const SOUND_IDS = [
   'film_static',
   'film_beam',
   'film_dissolve',
+  // SPEC-054 §4.13: the flashlight's click, and a loose cache opening.
+  'light_click',
+  'cache_open',
 ] as const;
 
 /** Exported so `noUnusedLocals` keeps it; it exists purely to be compiled. */
@@ -207,6 +211,11 @@ const EVENT_KEYS = [
   'flight:arrived',
   'flight:recalled',
   'flight:hazardHit',
+  // SPEC-054 §4.2, §4.5, §4.8: a level swap (silent), the flashlight toggle
+  // and a cache opening (both reacted).
+  'level:changed',
+  'light:toggled',
+  'cache:opened',
   'ui:toast',
   'ui:orientation',
   // SPEC-015 §10: the service-worker update signal (D-10) and the iOS install
@@ -261,14 +270,14 @@ describe('the audio manifest (SPEC-006 §2)', () => {
     expect(Object.keys(ASSETS.audio).sort()).toEqual([...SFX_BANKS, ...MUSIC_BANKS].sort());
   });
 
-  it('the sprite keys across the banks are the 59 sound ids (AC-5; SPEC-035 §4.11 adds seven, SPEC-038 §4.10 four, SPEC-041 §4.10 three, SPEC-050 §4.8 one)', () => {
+  it('the sprite keys across the banks are the 61 sound ids (AC-5; SPEC-035 §4.11 adds seven, SPEC-038 §4.10 four, SPEC-041 §4.10 three, SPEC-050 §4.8 one, SPEC-054 §4.13 two)', () => {
     const sprites = Object.values(ASSETS.audio).flatMap((entry) =>
       Object.keys((entry as { sprite?: object }).sprite ?? {}),
     );
     expect(sprites.slice().sort()).toEqual([...SOUND_IDS].sort());
-    expect(sprites).toHaveLength(59);
+    expect(sprites).toHaveLength(61);
     // No id appears in two banks: `SoundId` → bank has to be a function.
-    expect(new Set(sprites).size).toBe(59);
+    expect(new Set(sprites).size).toBe(61);
   });
 
   it('the SPEC-038 cues sit in the surface bank inside §4.10’s lengths', () => {
@@ -290,6 +299,11 @@ describe('the audio manifest (SPEC-006 §2)', () => {
 
   it('the SPEC-050 exhale sits in the surface bank, at most 350 ms long (§4.8)', () => {
     expect(ASSETS.audio.surface.sprite.exhale[1]).toBeLessThanOrEqual(350);
+  });
+
+  it('the SPEC-054 sprites sit in the surface bank inside §4.13’s lengths', () => {
+    expect(ASSETS.audio.surface.sprite.light_click[1]).toBeLessThanOrEqual(80);
+    expect(ASSETS.audio.surface.sprite.cache_open[1]).toBeLessThanOrEqual(600);
   });
 
   it('every sprite is a forward [offset, duration] span that does not overlap its neighbour', () => {
@@ -499,8 +513,8 @@ describe('the ramp curve (SPEC-006 §4.3, §4.5)', () => {
 // ------------------------------------------------------------ reactions table
 
 describe('the reactions table is exhaustive over GameEvents (SPEC-006 §5)', () => {
-  it('covers the 27 reacted events of §5.2 (AC-38; SPEC-029 §4.12 adds four, SPEC-035 §4.11 two, SPEC-038 §4.10 two, SPEC-041 §4.10 two, SPEC-042 §4.2 one, SPEC-050 §4.8 one)', () => {
-    expect(REACTED_EVENTS).toHaveLength(27);
+  it('covers the 29 reacted events of §5.2 (AC-38; SPEC-029 §4.12 adds four, SPEC-035 §4.11 two, SPEC-038 §4.10 two, SPEC-041 §4.10 two, SPEC-042 §4.2 one, SPEC-050 §4.8 one, SPEC-054 §4.13 two)', () => {
+    expect(REACTED_EVENTS).toHaveLength(29);
     expect(REACTED_EVENTS.slice().sort()).toEqual(
       [
         'combat:blast',
@@ -530,22 +544,26 @@ describe('the reactions table is exhaustive over GameEvents (SPEC-006 §5)', () 
         'shop:purchased',
         'dialogue:started',
         'flight:arrived',
+        'light:toggled',
+        'cache:opened',
       ].sort(),
     );
   });
 
-  it('silences exactly the 46 events of §5.4 (AC-39; SPEC-015 added the two app: signals)', () => {
+  it('silences exactly the 47 events of §5.4 (AC-39; SPEC-015 added the two app: signals)', () => {
     // SPEC-034 added `player:recalled`, `enemy:dismissed` and `item:noRoom`;
     // SPEC-042 §4.2 `item:blocked`, whose warn toast is its sound; SPEC-043
     // §4.7 `mission:bonus`; SPEC-048 §4.9 `story:clue` — a clue is quiet by
-    // design, and the reacted and sprite counts do not move.
-    expect(AUDIO_SILENT.size).toBe(46);
+    // design, and the reacted and sprite counts do not move; SPEC-054 §4.13
+    // `level:changed` — a level swap has no sound of its own.
+    expect(AUDIO_SILENT.size).toBe(47);
     expect(AUDIO_SILENT.has('mission:bonus')).toBe(true);
     expect(AUDIO_SILENT.has('story:clue')).toBe(true);
+    expect(AUDIO_SILENT.has('level:changed')).toBe(true);
   });
 
-  it('gives every one of the 73 event keys exactly one home (AC-40)', () => {
-    expect(EVENT_KEYS).toHaveLength(73);
+  it('gives every one of the 76 event keys exactly one home (AC-40)', () => {
+    expect(EVENT_KEYS).toHaveLength(76);
     const reacted = new Set<string>(REACTED_EVENTS);
     for (const key of EVENT_KEYS) {
       const hasSound = reacted.has(key);
@@ -814,6 +832,19 @@ describe('reaction outcomes (SPEC-006 §5.2)', () => {
     expect(AUDIO_REACTIONS['weather:warning']({ weather: 'sandstorm', inSeconds: 20 })?.id).toBe('alarm_weather');
     expect(AUDIO_REACTIONS['shop:purchased']({ kind: 'gear', id: 'rifle_t1' })?.id).toBe('ui_purchase');
     expect(AUDIO_REACTIONS['flight:arrived']({ planet: 'cinder4' })?.id).toBe('landing_thrusters');
+  });
+
+  it('light:toggled clicks at 0.6, unpositioned, on or off (SPEC-054 §4.13)', () => {
+    const react = AUDIO_REACTIONS['light:toggled'];
+    expect(react({ on: true })).toEqual({ id: 'light_click', opts: { volume: 0.6 } });
+    expect(react({ on: false })).toEqual({ id: 'light_click', opts: { volume: 0.6 } });
+  });
+
+  it('cache:opened creaks where the cache sits, at priority 1 (SPEC-054 §4.13)', () => {
+    expect(AUDIO_REACTIONS['cache:opened']({ cache: 'cinder4_loose_a', x: 5, z: -2 })).toEqual({
+      id: 'cache_open',
+      opts: { x: 5, z: -2, priority: 1 },
+    });
   });
 
   it('every sound a reaction can name exists in a bank', () => {

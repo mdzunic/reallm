@@ -227,6 +227,8 @@ export function runCampaign(options: RunOptions): RunReport {
     heldResource: (resource) => save.resources[resource],
     nearPoi: (poi) => stub(poi),
     follower: { x: 0, z: 0, alive: true },
+    // SPEC-054 §3: the campaign harness never descends (§4.13's pins hold).
+    level: 'surface',
   };
 
   const run: Run = {
