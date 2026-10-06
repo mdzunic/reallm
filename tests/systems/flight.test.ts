@@ -573,6 +573,59 @@ describe('waves, arrival and holding', () => {
 
 // ---------------------------------------------------------------- ram damage
 
+// ------------------------------------------------------ SPEC-063 §4.5, §6.2
+
+describe('flight:groupSpawned (SPEC-063 §4.5, §6.2)', () => {
+  interface Trip {
+    groups: Array<GameEvents['flight:groupSpawned']>;
+    /** The step each event came on, and the step `hostiles` first rose above 0. */
+    eventSteps: number[];
+    firstHostileStep: number;
+    phase: string;
+  }
+
+  /**
+   * One trip at throttle 1, stepped a frame at a time until it lands. The hull
+   * is topped up every step so a ram or a burst cannot end the trip early —
+   * what is under test is which groups announce themselves, and when.
+   */
+  function flyToArrival(planet: PlanetDef): Trip {
+    const w = world({ planet: wavesOnly(planet), ship: { engine: 0 } });
+    const eventSteps: number[] = [];
+    let firstHostileStep = -1;
+    for (let i = 0; i < 600 / DT && w.flight.phase !== 'arrived' && w.flight.phase !== 'recalled'; i++) {
+      const before = w.of('flight:groupSpawned').length;
+      w.flight.update(DT, IDLE);
+      w.flight.ship.hull = w.flight.ship.maxHull;
+      if (w.of('flight:groupSpawned').length > before) eventSteps.push(i);
+      if (firstHostileStep < 0 && w.flight.hostiles > 0) firstHostileStep = i;
+    }
+    return { groups: w.of('flight:groupSpawned'), eventSteps, firstHostileStep, phase: w.flight.phase };
+  }
+
+  it('a Vetra trip emits one, for its two scav fighters, on the step the hostiles first rise', () => {
+    const trip = flyToArrival(PLANETS.vetra);
+    expect(trip.phase).toBe('arrived');
+    expect(trip.groups).toEqual([{ enemy: 'scav_fighter', count: 2 }]);
+    expect(trip.firstHostileStep).toBeGreaterThan(0);
+    expect(trip.eventSteps).toEqual([trip.firstHostileStep]);
+  });
+
+  it('a Cinder-4 trip emits none', () => {
+    const trip = flyToArrival(PLANETS.cinder4);
+    expect(trip.phase).toBe('arrived');
+    expect(trip.groups).toEqual([]);
+  });
+
+  it('a Hive trip emits five, in the table’s order: 4, 6, 6, 8 and 6 interceptors', () => {
+    const trip = flyToArrival(PLANETS.hive);
+    expect(trip.phase).toBe('arrived');
+    expect(trip.groups).toEqual([4, 6, 6, 8, 6].map((count) => ({ enemy: 'hive_interceptor', count })));
+    expect(trip.eventSteps).toHaveLength(5);
+    expect(trip.eventSteps[0]).toBe(trip.firstHostileStep);
+  });
+});
+
 describe('interceptor ram', () => {
   it('rams at hitDepth for a flat 15 through the shield (AC-10)', () => {
     const w = world({ planet: quietPlanet(PLANETS.hive, 300) });

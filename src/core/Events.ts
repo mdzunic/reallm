@@ -216,6 +216,12 @@ export type GameEvents = {
    */
   'flight:hazardHit': { kind: 'asteroid' | 'fighter' | 'interceptor'; x: number; y: number; lethal: boolean };
   /**
+   * SPEC-063 §4.5: a wave group's ships are in the sky — once per group, right
+   * after its last ship spawns. The flight scene's contact card and line hang
+   * off it (silent).
+   */
+  'flight:groupSpawned': { enemy: EnemyId; count: number };
+  /**
    * SPEC-054 §4.2, §4.9: a level swap landed — the surface going down or the
    * underground coming back up. `core/` may not import `scenes/`, so the
    * `LevelId` union is spelled out rather than imported (silent).

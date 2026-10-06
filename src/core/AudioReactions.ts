@@ -262,6 +262,8 @@ const SILENT_EVENTS = [
   'story:clue',
   'dialogue:ended',
   'flight:recalled',
+  // SPEC-063 §4.5: a wave group in the sky — the contact line is its sound.
+  'flight:groupSpawned',
   'ui:orientation',
   // SPEC-015 §10: the update banner and the iOS explainer are visual only; the
   // toast that rides with each of them already plays the UI blip.

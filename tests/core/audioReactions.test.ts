@@ -216,6 +216,8 @@ const EVENT_KEYS = [
   'flight:arrived',
   'flight:recalled',
   'flight:hazardHit',
+  // SPEC-063 §4.5: a wave group in the sky (silent — the contact line speaks).
+  'flight:groupSpawned',
   // SPEC-054 §4.2, §4.5, §4.8: a level swap (silent), the flashlight toggle
   // and a cache opening (both reacted).
   'level:changed',
@@ -572,7 +574,7 @@ describe('the reactions table is exhaustive over GameEvents (SPEC-006 §5)', () 
     );
   });
 
-  it('silences exactly the 49 events of §5.4 (AC-39; SPEC-015 added the two app: signals)', () => {
+  it('silences exactly the 50 events of §5.4 (AC-39; SPEC-015 added the two app: signals)', () => {
     // SPEC-034 added `player:recalled`, `enemy:dismissed` and `item:noRoom`;
     // SPEC-042 §4.2 `item:blocked`, whose warn toast is its sound; SPEC-043
     // §4.7 `mission:bonus`; SPEC-048 §4.9 `story:clue` — a clue is quiet by
@@ -580,17 +582,19 @@ describe('the reactions table is exhaustive over GameEvents (SPEC-006 §5)', () 
     // `level:changed` — a level swap has no sound of its own. SPEC-055 §4.9's
     // two puzzle events are both reacted, so this count does not move.
     // SPEC-057 §4.8 silences `remains:created` and `remains:lost`; its
-    // `remains:recovered` plays the existing `pickup_generic`.
-    expect(AUDIO_SILENT.size).toBe(49);
+    // `remains:recovered` plays the existing `pickup_generic`. SPEC-063 §4.5
+    // silences `flight:groupSpawned` — the contact line is what is heard.
+    expect(AUDIO_SILENT.size).toBe(50);
     expect(AUDIO_SILENT.has('remains:created')).toBe(true);
     expect(AUDIO_SILENT.has('remains:lost')).toBe(true);
     expect(AUDIO_SILENT.has('mission:bonus')).toBe(true);
     expect(AUDIO_SILENT.has('story:clue')).toBe(true);
     expect(AUDIO_SILENT.has('level:changed')).toBe(true);
+    expect(AUDIO_SILENT.has('flight:groupSpawned')).toBe(true);
   });
 
-  it('gives every one of the 81 event keys exactly one home (AC-40; SPEC-055 §4.9 adds two, SPEC-057 §4.8 three)', () => {
-    expect(EVENT_KEYS).toHaveLength(81);
+  it('gives every one of the 82 event keys exactly one home (AC-40; SPEC-055 §4.9 adds two, SPEC-057 §4.8 three, SPEC-063 §4.5 one)', () => {
+    expect(EVENT_KEYS).toHaveLength(82);
     const reacted = new Set<string>(REACTED_EVENTS);
     for (const key of EVENT_KEYS) {
       const hasSound = reacted.has(key);
