@@ -2393,3 +2393,38 @@ ratchet at the spawn.
 - [ ] on Cinder-4, Vetra, Ferrum and the Hive, the walk between objectives passes set pieces, and the ground no longer shows its tile;
 - [ ] compare `low` and `medium` in the grove;
 - [ ] a screenshot per planet, the grove's and the orchard's `?perf` rows on `medium`, and the phone's feel.
+
+## SPEC-057 — remains: death leaves a pack, then a body (M7j)
+
+- **Build:** `spec/SPEC-057` — untagged
+- **Devices:**
+  - desktop — headless Chromium at 1280 × 720 (Playwright, Linux container, **software GL / SwiftShader**)
+  - phone — _no handset in the build container_ (§7's pass is owed, below)
+
+Recorded from the container the branch was built in: `npm run check` — 123
+files and 3,029 tests, none skipped — and the e2e files the spec touches:
+`e2e/SPEC-057.spec.ts` (§6.2's seven cases, plus another planet and the
+underground, a death below, a boss stage's death and the tip — eleven tests),
+`e2e/surface-env.spec.ts` (ten tests, one new: the medium frame with the body
+on screen) and `e2e/SPEC-006.spec.ts`'s reactions case (32 reacted, 49 silent).
+
+| Area | What the container showed |
+|---|---|
+| Drop | on Cinder-4 (seed 123) a death 5 m out from the pad on normal took 20 of 200 oil; `death-remains` read `Your pack holds 20 oil — reach it before you fall again.`, and `progress.remains` and `stats.lastDeath.cinder4` named the same point |
+| Guidance | after the respawn at the spawn, 7 m off: `mmRemains` 1, `tracker-remains` `Recover your pack — 7 m`, the tag `Vance's pack` over the crate |
+| Recover | `surface-goto-remains` stood the salvager 1 m from them; the next step took the 20 oil back, toasted `Recovered: 20 oil`, nulled the remains and raised `recoveries` to 1 |
+| E91 | a second death at the wall before the walk back toasted `Your earlier pack is gone: 20 oil.`; the new set held 18 (10 % of 180) |
+| E93 | at 395 of 400 the walk back took 5 and left 15 with `— the rest stays with your pack`; with room made while standing there, the next 1 s retry took the rest |
+| E92 | a death in `c1_m3`'s boss stage left the remains 25–27 m from the nest's centre — the arena mouth — and the respawn took them back on its first step; a death below left them at the descent on the surface |
+| The body | with `signal_decoded` the remains were the tinted salvager frozen on `Death`'s last frame (`remainsPosedAt` > 0), tagged `instance/62 · restart 1` |
+| Casual | a death took nothing, left a set already lying untouched, and `death-remains` stayed empty |
+| Persistence | the remains survived a reload, the station and a landing on Vetra, where nothing showed; below on Cinder-4 the view, the icon, the tag and the row hid, and came back above |
+| Budget | the remains drew ≤ 3 calls and ≤ 2,700 triangles (the body 2,616 + the pillar 24); the medium frame with the body on screen stayed ≤ 96 draws and ≤ 120 k triangles |
+
+**Owed on hardware (§7).** On the laptop (`high`) and the reference phone:
+
+- [ ] die in a Vetra blizzard, recall, come back, and walk to the pack;
+- [ ] die twice in a row and read what was lost;
+- [ ] die to a boss and see the pack recovered at the arena entrance;
+- [ ] after Ferrum's `c4_m3`, die again and see your own body in your colours;
+- [ ] on a phone, read the tag and the tracker row at arm's length.
