@@ -322,11 +322,6 @@ export class PuzzleSites {
     this.#drawPlates(state.puzzle);
   }
 
-  /** The panel is open — the scene's hold is ours. */
-  get panelOpen(): boolean {
-    return this.#open !== null;
-  }
-
   // -------------------------------------------------------------- prompts
 
   /** §4.4, §4.6: the prompt an interactable of ours raises, or `null` for one that offers nothing. */
