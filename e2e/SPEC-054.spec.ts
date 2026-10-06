@@ -195,6 +195,7 @@ test.describe('SPEC-054 the underground', () => {
     await descend(page);
     await page.keyboard.press('Escape');
     await page.locator('[data-testid="pause-recall"]').click();
+    await page.locator('[data-testid="confirm-yes"]').click();
     await untilInfo(page, 'level', 'surface');
     expect((await info(page))['recalls']).toBe(Number(recalls) + 1);
   });
