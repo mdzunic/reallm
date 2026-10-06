@@ -79,11 +79,11 @@ declare global {
 const info = async (page: Page): Promise<Record<string, number | string>> =>
   (await page.evaluate(() => window.__reallm.stats())).sceneInfo ?? {};
 
-/** `sceneInfo.contacts`, comma-separated in the debug row, as the list it is. */
+/** `sceneInfo.contacts`, comma-separated in the debug row (`-` for none), as the list it is. */
 const contacts = async (page: Page): Promise<string[]> =>
   String((await info(page))['contacts'] ?? '')
     .split(',')
-    .filter((id) => id !== '');
+    .filter((id) => id !== '' && id !== '-');
 
 /** True once a line the dialogue layer typed reads `text` whole. */
 const lineShown = (page: Page, text: string): Promise<boolean> =>

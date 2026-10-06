@@ -1304,8 +1304,9 @@ export class FlightScene extends UiScene<'flight'> {
       // SPEC-041 §4.7: 1 while the lead pip is up.
       info['lead'] = this.#leadShown ? 1 : 0;
       // SPEC-063 §4.5: the enemies whose contact fired on this trip, in order,
-      // card or not — comma-separated, the row's values being flat.
-      info['contacts'] = this.#contacts.join(',');
+      // card or not — comma-separated, the row's values being flat, and '-'
+      // before any has (the debug row has no empty values).
+      info['contacts'] = this.#contacts.length === 0 ? '-' : this.#contacts.join(',');
     }
     return info;
   }
