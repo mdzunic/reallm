@@ -2670,7 +2670,16 @@ export class SurfaceScene extends UiScene<'surface'> {
     info['puzzleMoves'] = 0;
     info['puzzlesSolved'] = 0;
     this.#puzzles?.info(info);
+    // §4.1: the relic terminal on the map — `relic` once landmark 0 is discovered, `spent` once solved.
+    info['relicMark'] = this.#relicMarked(level) ? ((this.#puzzles?.relicMark()?.spent ?? false) ? 'spent' : 'relic') : '-';
     return info;
+  }
+
+  /** SPEC-055 §4.1: the relic terminal shows on the surface's map once its landmark — instance 0 — is discovered. */
+  #relicMarked(level: Level | null): boolean {
+    if (level === null || level.id !== 'surface' || (this.#puzzles?.relicMark() ?? null) === null) return false;
+    for (const state of level.pois) if (state.poi.kind === 'landmark' && state.poi.instance === 0 && state.discovered) return true;
+    return false;
   }
 
   /** SPEC-054 §3: the level, the cave, the light, the caches and the descent. */
@@ -6554,10 +6563,8 @@ export class SurfaceScene extends UiScene<'surface'> {
       this.#markAt(descent.x, descent.z, 'descent', 'Descent');
     }
     // SPEC-055 §4.1: the relic terminal, once landmark instance 0 is discovered (hollow once spent).
-    const relic = level.id === 'surface' ? (this.#puzzles?.relicMark() ?? null) : null;
-    if (relic !== null && level.pois.some((state) => state.poi.kind === 'landmark' && state.poi.instance === 0 && state.discovered)) {
-      this.#markAt(relic.x, relic.z, 'relic', 'Relic terminal').hollow = relic.spent;
-    }
+    const relic = this.#puzzles?.relicMark() ?? null;
+    if (relic !== null && this.#relicMarked(level)) this.#markAt(relic.x, relic.z, 'relic', 'Relic terminal').hollow = relic.spent;
     const cave = level.id === 'underground' ? this.#cave : null;
     if (cave !== null) {
       this.#markAt(cave.exit.x, cave.exit.z, 'descent', 'Surface');

@@ -147,8 +147,11 @@ test.describe('SPEC-055 puzzles', () => {
     const events = recordEvents(page);
     await start(page, '/?debug');
     await land(page, 'cinder4');
+    expect((await info(page))['relicMark']).toBe('-');
     await tap(page, 'surface-goto-puzzle');
     await expect(page.locator('[data-testid="hud-interact"]')).toContainText('Use terminal', SLOW);
+    // §4.1: beside it, landmark 0 is discovered, and the relic joins the map.
+    await untilInfo(page, 'relicMark', 'relic');
     await press(page, 'KeyE');
     const panel = page.locator('[data-testid="puzzle-panel"]');
     await expect(panel).toBeVisible(SLOW);
@@ -175,8 +178,12 @@ test.describe('SPEC-055 puzzles', () => {
     expect(solved).toContainEqual({ site: 'cinder4_relic', hints: 1, bypassed: false });
     expect(events.texts('cache:opened').some((line) => line.includes('cinder4_relic'))).toBe(true);
     expect((await info(page))['puzzlesSolved']).toBe(1);
-    // §4.8: spent — the terminal prompts Unlocked, and E opens nothing.
+    // §4.8: spent — the terminal prompts Unlocked, and E opens nothing; the map's icon goes hollow.
     await expect(page.locator('[data-testid="hud-interact"]')).toContainText('Unlocked', SLOW);
+    expect((await info(page))['relicMark']).toBe('spent');
+    await press(page, 'KeyE');
+    await frames(page, 10);
+    await expect(panel).toHaveCount(0);
   });
 
   test('2: Escape closes a vault panel, releases the hold and leaves the site unsolved', async ({ page }) => {

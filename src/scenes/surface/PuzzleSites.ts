@@ -38,6 +38,7 @@ import {
   isSolved,
   PLATE_RADIUS,
   poweredCells,
+  PUZZLE_BYPASS_SECONDS,
   puzzleFork,
   relicSpot,
   solvePuzzle,
@@ -137,8 +138,8 @@ interface OpenPanel {
   /** Counting down to the close that claims the cache; −1 while the board is open. */
   closeIn: number;
   bypassed: boolean;
-  /** The note last drawn, so the countdown redraws only when its seconds move. */
-  shownNote: string | null;
+  /** The bypass countdown's whole seconds last drawn (0 once open), so it redraws only when they move. */
+  shownLeft: number;
 }
 
 /** What the scene lends the runtime: its services, its holds and the few writes a solve makes. */
@@ -180,6 +181,11 @@ function sideAngle(side: Side): number {
   }
 }
 
+/** §4.5: the whole seconds the bypass note counts down — 0 once the bypass is open. Allocates nothing. */
+function bypassLeft(state: SiteState): number {
+  return bypassOpen(state.openSeconds, state.hints) ? 0 : Math.ceil(PUZZLE_BYPASS_SECONDS - state.openSeconds);
+}
+
 /** §4.10: `cell:3`, `choice:1`, `plate:0`, `mirror:2`, or `-`. */
 function moveText(move: PuzzleMove | null): string {
   if (move === null) return '-';
@@ -197,6 +203,7 @@ export class PuzzleSites {
   readonly #vault: PuzzleSiteDef | null;
   readonly #world: PuzzleSiteDef | null;
   readonly #relicSpot: { x: number; z: number; facing: number } | null;
+  readonly #relicMark: { x: number; z: number; spent: boolean } | null;
   #vaultSpot: { x: number; z: number; facing: number } | null = null;
   #cave: UndergroundLayout | null = null;
   #surfaceView: PuzzleView | null = null;
@@ -232,6 +239,7 @@ export class PuzzleSites {
     // §4.1: the relic terminal stands LANDMARK_FOOTPRINT + 1.5 m from landmark
     // instance 0 toward the pad, inside the landmark's own clearing.
     this.#relicSpot = this.#relic === null ? null : relicSpot(layout, LANDMARK_FOOTPRINT[host.planet.biome]);
+    this.#relicMark = this.#relicSpot === null ? null : { x: this.#relicSpot.x, z: this.#relicSpot.z, spent: false };
     if (host.viewRoot !== null) {
       this.#surfaceView = new PuzzleView(host.viewRoot, '#7ee0c3', host.services.assets);
       this.#drawSurface();
@@ -422,7 +430,7 @@ export class PuzzleSites {
         redraw = true;
       }
     }
-    if (state.def.family !== 'human' && bypassNote(state.openSeconds, state.hints) !== open.shownNote) redraw = true;
+    if (state.def.family !== 'human' && bypassLeft(state) !== open.shownLeft) redraw = true;
     if (redraw) open.panel.refresh();
   }
 
@@ -454,7 +462,7 @@ export class PuzzleSites {
       verdict: null,
       closeIn: -1,
       bypassed: false,
-      shownNote: null,
+      shownLeft: -1,
     };
     this.#open = open;
     open.panel = openPuzzlePanel(this.#host.ui, () => this.#view(open, state), handlers);
@@ -496,7 +504,7 @@ export class PuzzleSites {
       ? PUZZLE_SOLVED_TEXT
       : (open.flash ?? (state.moves === 0 && state.hints === 0 ? puzzleSubtitle(p.kind) : puzzleStatus(state.moves, state.hints)));
     const note = human ? null : bypassNote(state.openSeconds, state.hints);
-    open.shownNote = note;
+    open.shownLeft = bypassLeft(state);
     const view: PuzzlePanelView = {
       title: puzzleTitle(p.kind, this.#host.planet.chapter, human),
       status,
@@ -898,12 +906,17 @@ export class PuzzleSites {
     return stonesText(state.puzzle);
   }
 
-  /** §4.1: the relic terminal for the map — once its landmark is discovered — and whether it is spent. */
-  relicMark(): { x: number; z: number; spent: boolean } | null {
+  /**
+   * §4.1: the relic terminal for the map, and whether it is spent — one object
+   * for the visit, written in place, so a repaint allocates nothing (SPEC-026
+   * §4.9); `null` on a planet without one.
+   */
+  relicMark(): { readonly x: number; readonly z: number; readonly spent: boolean } | null {
     const relic = this.#relic;
-    const spot = this.#relicSpot;
-    if (relic === null || spot === null) return null;
-    return { x: spot.x, z: spot.z, spent: this.#claimed(relic) };
+    const mark = this.#relicMark;
+    if (relic === null || mark === null) return null;
+    mark.spent = this.#claimed(relic);
+    return mark;
   }
 
   // -------------------------------------------------------------- sceneInfo
