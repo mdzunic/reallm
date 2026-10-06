@@ -193,12 +193,21 @@ interface Warped {
   contactUp: boolean;
 }
 
-/** `warp(5)` until the first group is in the sky (§6.3 case 2), and what was up at that moment. */
+/**
+ * §6.3 case 2's warp until the first group is in the sky, and what was up at
+ * that moment. Half a second at a time rather than five, with the sky cleared
+ * before each step: on the Hive's 0.9 rocks a second an idle ship is holed
+ * long before 15 s, and an interceptor rams 3 s after it spawns — inside one
+ * 5 s step — so the step that brings the group in stops with it 130 m out.
+ */
 async function warpToFirstGroup(page: Page): Promise<Warped> {
   await page.waitForFunction(() => (window as unknown as { __reallmFlight?: unknown }).__reallmFlight !== undefined);
   return page.evaluate(() => {
     const hook = (window as unknown as { __reallmFlight: FlightHook }).__reallmFlight;
-    for (let i = 0; i < 60 && hook.state().hostiles === 0; i++) hook.warp(5);
+    for (let i = 0; i < 600 && hook.state().hostiles === 0 && hook.phase() !== 'recalled'; i++) {
+      hook.clearSky();
+      hook.warp(0.5);
+    }
     return {
       hostiles: hook.state().hostiles,
       chapterUp: document.querySelector('[data-testid="chapter-card"]') !== null,
