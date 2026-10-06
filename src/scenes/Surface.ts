@@ -4136,10 +4136,14 @@ export class SurfaceScene extends UiScene<'surface'> {
       await settleWithin(kit, CAVE_KIT_WAIT_MS);
       if (!this.#alive) return;
     }
-    this.#applySwap(world, to);
+    const left = this.#applySwap(world, to);
     await this.services.ui.fadeIn(ms);
     if (!this.#alive) return;
     this.#swapping = false;
+    // E86: said once the cave is in sight. A toast raised under the black
+    // would spend its time where nobody can read it — on a slow device, all of
+    // it, while the first frame with the flashlight's programs is drawn.
+    if (to === 'underground' && left > 0) this.services.events.emit('ui:toast', { kind: 'warn', text: LOOT_LEFT_TEXT });
   }
 
   /**
@@ -4147,11 +4151,12 @@ export class SurfaceScene extends UiScene<'surface'> {
    * below runs on its own (E84). Going down clears what the surface leaves
    * behind: its waves stop, its enemies go silently, every shot, telegraph and
    * deployable is freed with no blast and no refund (54-a), and its loot is
-   * cleared — with a toast when any lay near (E86). Coming up does the same
-   * for the cave. Then the level, the world, the view, the light, the map and
-   * the grade change over, the player lands, and `level:changed` fires.
+   * cleared. Coming up does the same for the cave. Then the level, the world,
+   * the view, the light, the map and the grade change over, the player lands,
+   * and `level:changed` fires. Returns how many pickups lay within 10 m — the
+   * swap's caller toasts them going down (E86).
    */
-  #applySwap(world: CombatWorld, to: LevelId): void {
+  #applySwap(world: CombatWorld, to: LevelId): number {
     const levels = this.#levels;
     const view = this.#view;
     const spawn = this.#spawn;
@@ -4159,14 +4164,13 @@ export class SurfaceScene extends UiScene<'surface'> {
     const pickups = this.#pickups;
     const save = this.#save;
     const from = this.#level;
-    if (levels === null || view === null || spawn === null || combat === null || pickups === null || save === null) return;
-    if (from === null || from.id === to) return;
+    if (levels === null || view === null || spawn === null || combat === null || pickups === null || save === null) return 0;
+    if (from === null || from.id === to) return 0;
     const p = world.player;
     if (to === 'underground') this.#stopMissionWaves();
     spawn.despawnNear(p.x, p.z, Infinity);
     combat.clearLevel();
     const left = pickups.clear(p.x, p.z, LOOT_LEFT_RADIUS);
-    if (to === 'underground' && left > 0) this.services.events.emit('ui:toast', { kind: 'warn', text: LOOT_LEFT_TEXT });
     this.#closeTerminal();
 
     const level = to === 'underground' ? this.#ensureCave(levels, save) : levels.surface;
@@ -4251,6 +4255,7 @@ export class SurfaceScene extends UiScene<'surface'> {
     }
     this.#swapUndrawn = true;
     this.services.events.emit('level:changed', { planet: this.#planet.id, level: to });
+    return left;
   }
 
   /**

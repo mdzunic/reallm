@@ -94,6 +94,37 @@ async function descend(page: Page): Promise<void> {
   await untilInfo(page, 'held', 0);
 }
 
+/**
+ * Every toast the rack shows, recorded the moment it lands with its classes,
+ * its text and whether it is visible. A toast lives 2.5 s, and on this
+ * GPU-less container a few slow frames can outlast it before a poll looks, so
+ * the suite asks what was shown rather than what is still up.
+ */
+async function recordToasts(page: Page): Promise<void> {
+  await page.evaluate(() => {
+    const rack = document.querySelector('[data-testid="toasts"]');
+    if (rack === null) throw new Error('no toast rack');
+    const shown: string[] = [];
+    Object.assign(window, { __toastsShown: shown });
+    new MutationObserver(() => {
+      for (const node of Array.from(rack.children)) if (node.checkVisibility()) shown.push(`${node.className}|${node.textContent ?? ''}`);
+    }).observe(rack, { childList: true });
+  });
+}
+
+/** Waits until the rack has shown a `kind` toast whose text holds `text`. */
+async function toastShown(page: Page, kind: string, text: string): Promise<void> {
+  await page.waitForFunction(
+    ({ cls, want }) =>
+      ((window as unknown as { __toastsShown?: string[] }).__toastsShown ?? []).some((entry) => {
+        const [classes = '', shownText = ''] = entry.split('|');
+        return classes.split(' ').includes(cls) && shownText.includes(want);
+      }),
+    { cls: `toast-${kind}`, want: text },
+    SLOW,
+  );
+}
+
 function eventLines(messages: ConsoleMessage[], name: string): string[] {
   return messages.filter((m) => m.type() === 'debug' && m.text().startsWith(`[events] ${name}`)).map((m) => m.text());
 }
@@ -160,13 +191,14 @@ test.describe('SPEC-054 the underground', () => {
     page.on('console', (message) => void messages.push(message));
     await start(page, '/?debug');
     await land(page, 'cinder4');
+    await recordToasts(page);
     await descend(page);
     await tap(page, 'surface-goto-cache');
     await expect(page.locator('[data-testid="hud-interact"]')).toContainText('Open cache', SLOW);
     await press(page, 'KeyE');
     await untilInfo(page, 'claimed', 1);
     expect(eventLines(messages, 'cache:opened').some((line) => line.includes('cinder4_loose_a'))).toBe(true);
-    await expect(page.locator('.toast-rack .toast-good').filter({ hasText: 'Cache opened' }).first()).toBeVisible();
+    await toastShown(page, 'good', 'Cache opened · ');
     expect(await page.evaluate(() => window.__reallm.save().current?.progress.claimed ?? [])).toContain('cinder4_loose_a');
     await press(page, 'KeyE');
     await frames(page, 10);
@@ -240,14 +272,15 @@ test.describe('SPEC-054 the underground', () => {
     page.on('console', (message) => void messages.push(message));
     await start(page, '/?debug');
     await land(page, 'cinder4');
+    await recordToasts(page);
     // 9: an item at the feet, and a descent before the step that would collect it.
     await page.evaluate(() => {
       (document.querySelector('[data-testid="surface-drop-item"]') as HTMLElement).click();
       (document.querySelector('[data-testid="surface-descend"]') as HTMLElement).click();
     });
-    await expect(page.locator('.toast-rack .toast-warn').filter({ hasText: 'Loot left behind' }).first()).toBeVisible(SLOW);
     await untilInfo(page, 'level', 'underground');
     await untilInfo(page, 'held', 0);
+    await toastShown(page, 'warn', 'Loot left behind');
     const before = eventLines(messages, 'poi:reached').length;
     await tap(page, 'surface-goto-origin');
     await frames(page, 30);
