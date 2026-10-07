@@ -589,6 +589,41 @@ Specs:
 
 (§4, §5, §10, §12, §13)
 
+**R26 — 2026-10-07 (the Relay depot).** The cargo cap binds every resource at 400 to 1,200 units, and once a resource reaches it, every orb of it bounces. The only thing a player can do with a full hold is spend it at the station or carry it until a death takes a tenth. Command Relay already takes surplus home, but only while a collect objective wants it (R17, E56). A playtest asked for the plain version: send the rest of the cargo back from the ship. Decisions:
+1. **The pad terminal ships surplus home (SPEC-065, §4, §13 E117).**
+   - PAD TERMINAL gains a Cargo section with a row per resource: what the hold carries against its cap, a reserve, and `Ship N home`.
+   - The reserve runs from 0 to the cap in steps of 50, starts at 100, and is remembered per resource in the save.
+   - `N` is what the hold carries above the larger of the reserve and what this planet's active deliver objectives still need (E117). At 0 the button is disabled.
+   - Shipping is free and immediate: the tug's cargo pod flies the units to Command Relay.
+   - Collect objectives are untouched, since shipped units were pickups and were already counted. Items and gear are never shipped.
+2. **Command Relay keeps a depot (SPEC-065, §4, §13 E118, E119).**
+   - The depot has no cap, and its contents are kept until drawn.
+   - The station gains a Depot tab with a row per resource: the depot's amount and `Draw N`. `N` is the lesser of the depot's amount and the hold's room (E118).
+   - A death never touches the depot; the remains carry only what the hold lost (R21).
+   - Deliver objectives and crafting spend the hold only.
+3. **Fuel counts the depot (SPEC-065, §13 E119).**
+   - A departure can be paid from the hold and the depot together. It takes from the hold first.
+   - The station subsidy grants only what the hold and the depot together cannot pay. Oil parked in the depot therefore never earns free oil.
+   - Crafting and upgrades still pay from the hold, so the player draws first.
+4. **Save v4 (SPEC-065, §8, §13 E120).**
+   - The save gains `depot: { held; keep }`, two records over the resources.
+   - v3 saves migrate with an empty depot and every reserve at 100.
+   - An older build refuses a v4 save, with Export (E9), as E73 does for v3.
+5. **Nothing is sold.** The depot gives back only the resources put into it. SPEC-010's "no selling economy" stands, and the token model, the sinks and SPEC-016's invariants do not move.
+6. **Milestone M7n** carries SPEC-065.
+7. **Not now.**
+   - Shipping from the station.
+   - The depot paying for crafting and upgrades directly.
+   - Automatic overflow shipping.
+   - Shipping items or gear.
+   - A depot cap, fee or delay.
+
+Specs:
+- SPEC-065 (decisions 1–4).
+- SPEC-000's queue and build order.
+
+(§4, §8, §10, §13)
+
 ---
 
 ## 1. Vision & Inspiration
@@ -681,6 +716,7 @@ tests/      unit tests mirror src/ (economy, save, combat, missions, rng, conten
   - lithium = energy weapons + reactor (tier-3 upgrades)
 - **Tokens** earned by leveling up (25 per level; XP from kills, missions) and by mission rewards. Tokens buy **assistants**, **upgrades**, and **gear**; **tier-3** upgrades also consume resources so resource sinks exist late-game.
 - **Cargo cap** per resource: 400 base, ship cargo tiers → 600 / 800 / 1200. Pickups stop at the cap with a HUD warning.
+- **The Relay depot (R26).** At the landing pad, the pad terminal ships whatever the hold carries above a reserve home to Command Relay's depot. The depot has no cap. At the station, the Depot tab draws its contents back into the hold, as far as the cap allows. Fuel for a departure can come from the depot, and the station's subsidy counts it. Nothing is ever sold.
 - **Crafting** at the station (6 recipes): wheat ration (10 wheat), medkit (10 wheat + 10 water), coolant pack (15 water), and since R10 frag grenade (10 oil + 5 water), proximity mine (20 oil), demolition charge (15 oil + 10 lithium). Since R20 two more recipes unlock from cave blueprints: the flare (a thrown light) and the stim (a full stamina refill).
 
 ### Assistants (companions)
@@ -911,7 +947,7 @@ Balance invariants (unit-tested, see [SPEC-010](https://github.com/mdzunic/reall
 
 ---
 
-## 8. Save Schema (versioned, migratable) — refined in R1, R10 and R20
+## 8. Save Schema (versioned, migratable) — refined in R1, R10, R20 and R26
 
 ```ts
 interface SaveV2 {   // version 1 until R10; v1 saves migrate (SPEC-025)
@@ -945,6 +981,14 @@ interface SaveV3 {   // since R20 (SPEC-047): v2 saves migrate with empty values
     exploredBelow: Partial<Record<PlanetId, string>>;   // the underground's explored ground (R20)
     remains: { planet; x; z; resources; restart } | null;   // R21
     resume: { planet; at } | null;                      // R21: where a quit or an interruption left the salvager
+  };
+}
+interface SaveV4 {   // since R26 (SPEC-065): v3 saves migrate with an empty depot and reserves of 100; an older build refuses a v4 save (E9)
+  version: 4;
+  /* every SaveV3 field, unchanged */
+  depot: {
+    held: Record<ResourceId, number>;   // what Command Relay keeps for this slot; no cap
+    keep: Record<ResourceId, number>;   // the pad terminal's reserve per resource: 0 to the cap, steps of 50, default 100
   };
 }
 // A slot may also hold one archived predecessor (`reallm:slot:N:archive`, R21). Settings gain, since R18–R21: sharpRender, sprintToggle, stickSprint, unlocks, commendations, installed, among others.
@@ -990,6 +1034,7 @@ Storage rules: 3 slots, key per slot plus a `.bak` copy of the previous good sav
 | M7i | The world (R20): props in their own colours and shading, on every landing, culled to the screen; save v3; real trees, groves, orchards, dressing clusters, landmarks, ground cover and a ground pass; Eden too perfect; the underground with a flashlight, packs, caches and the machine room; five kinds of puzzle; vault tokens, relics, blueprints, swatches and archive shards (SPEC-046, SPEC-047, SPEC-052…SPEC-056) | A stranger names each biome from a screenshot without the HUD; Thessaly's grove frame stays ≤ 80 scene draws and ≤ 130 k triangles on `medium`; every planet has a reachable descent and a watertight cave; every puzzle kind is solved by keyboard, mouse and touch, and a bypass opens after 90 s; a claimed vault pays nothing a second time; the completionist's tokens read 1,279 and SPEC-039's sink still holds; checked on desktop and the reference phone; tag `m7i` |
 | M7j | The next instance (R21): remains; Iteration 63 with the archive, the lineage, containment steps and the world that remembers; the endings' payoff; resume on the planet; a story difficulty; commendations and the evaluation log; the Selection card; link previews and install (SPEC-057…SPEC-059) | A death's loss is recovered from the remains, and a second death loses them; a finished save begins instance/63 in the same slot and restores 62 from the archive; the Vetra log in run 2 names the player's own run; a phone session interrupted on a planet resumes there; the Selection card shares a PNG from a phone; no record is kept in a `?debug` or story session; checked on desktop and the reference phone; tag `m7j` |
 | M7m | Who flies them (R24, R25): "Wreckers", a film of the scavengers' hulk after the first departure to Vetra; a scav fighter rebuilt from the tug; contact cards and comms for the first scav fighters at Vetra and the first interceptors at the Hive; Cinder-4's scav raiders in the salvager's suit (SPEC-063, SPEC-064) | On a new save the first departure to Vetra plays "Outbound", then "Wreckers"; the first fighters on that trip bring the contact card, the scav hail and ARIA's answer, and the flight never stops for them; the first interceptors at the Hive bring theirs; a fighter within 20 m reads as a rebuilt tug at the phone preset; on Cinder-4 the raiders are suited people who aim, fire amber tracers, flinch and fall, and the surface stays inside its draw and triangle pins; the films stay within 12 MB and the precache within 25 MB; checked on desktop and the reference phone; tag `m7m` |
+| M7n | The Relay depot (R26): the pad terminal ships what the hold carries above a reserve home to Command Relay; the station's Depot tab draws it back; departures and the subsidy count the depot's oil; save v4 (SPEC-065) | On a full hold, the pad terminal ships the oil above a reserve of 100 and the hold reads 100. The station's Depot tab shows it and draws it back up to the cap. A departure is paid from the depot when the hold is short, and no subsidy is granted while the depot can pay. A v3 save loads with an empty depot, and an older build refuses a v4 save. Checked on desktop and the reference phone; tag `m7n` |
 | M7 | Polish: mobile tuning, quality presets, balancing pass, PWA/offline, storage persistence, reduce-motion, save migration harness | 30+ fps on mid-tier phone; installable; full manual checklist green |
 
 ---
@@ -1137,6 +1182,10 @@ Each entry names the owning spec. "Casual" = casual difficulty.
 | E114 | More than 8 raiders are alive or falling at once (only a cave can reach it) | The oldest falling raider is dropped first; past that, the newest live raiders are drawn with the `scav` stand-in until a slot frees | SPEC-064 |
 | E115 | A raider is killed mid-aim, mid-recoil or mid-flinch, or the scene exits while one falls | The falling copy crossfades into Death from its current pose; a scene exit disposes it with the scene. It is a view only: nothing collides with it and nothing targets it | SPEC-064 |
 | E116 | A raider is elite, has an affix, is invulnerable, or is underground | The instanced rules apply unchanged: elite colour, emissive, 1.3× scale and plate; invulnerable at half colour; `rimOf` underground. Only the 1.15× windup swell is replaced, by the aim and the muzzle glint | SPEC-064 |
+| E117 | Shipping cargo home while a deliver objective on this planet still needs that resource | `Ship N home` never takes the hold below what the planet's active deliver objectives still need, whatever the reserve says | SPEC-065 |
+| E118 | Drawing from the depot into a full hold, or more than the hold has room for | `Draw N` draws the lesser of the depot's amount and the hold's room; at 0 the button is disabled and nothing moves | SPEC-065 |
+| E119 | Oil parked in the depot when the hold cannot pay for a jump | A departure counts the hold and the depot together and takes from the hold first; the station subsidy grants only what both together lack, so parked oil never earns free oil | SPEC-065 |
+| E120 | A v3 save is loaded after R26, or a v4 save by an older build | v3 migrates to v4 with an empty depot and every reserve at 100; an older build refuses a v4 save as a save from a newer version, with Export (E9) | SPEC-065 |
 
 ---
 
