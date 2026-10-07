@@ -71,7 +71,8 @@ export const DIALOGUE = {
     id: 'c1_m1_accept',
     lines: [
       // SPEC-048 §4.7: SPEC-046 parks the tug on the pad; the player still spawns 12 m out.
-      { speaker: 'aria', text: 'I put the tug on the pad. You were out of the hatch twelve metres early. Walk it off — I want to see you move before anything else does.' },
+      // Review 2026-10 S-24: the first line of play says so plainly.
+      { speaker: 'aria', text: 'Tug is on the pad. You climbed out twelve metres short of it. Walk over — I want to see you move before anything else does.' },
     ],
   },
   c1_m1_stage2: {

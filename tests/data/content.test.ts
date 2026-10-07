@@ -2435,7 +2435,8 @@ describe('main-path echoes, continuity and the text sweep (SPEC-048 §4.7)', () 
     expect(wall?.describe).toBe('The Selection wall again: every card shows the same visored helmet. Card 62’s visor clears; the helmet is empty.');
     expect(MISSIONS.c1_m1.brief).toBe('Walk to the pad, survey the dune sea, and sit out the first sandstorm Cinder-4 sends your way.');
     const accept = DIALOGUE.c1_m1_accept.lines[0].text;
-    expect(accept).toBe('I put the tug on the pad. You were out of the hatch twelve metres early. Walk it off — I want to see you move before anything else does.');
+    // Review 2026-10 S-24.
+    expect(accept).toBe('Tug is on the pad. You climbed out twelve metres short of it. Walk over — I want to see you move before anything else does.');
     for (const text of [MISSIONS.c1_m1.brief, accept]) expect(text).not.toMatch(/short of the pad|off the pad|Touchdown/);
   });
 
