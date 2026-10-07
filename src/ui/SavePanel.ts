@@ -18,10 +18,10 @@
 // a save from a newer version is named as one and offered only Export (E9 —
 // "Corrupt" with Delete one click away is how it gets lost); and Delete asks
 // first, with Cancel focused, because it takes the backup with it.
-import { STORAGE_UNAVAILABLE_TEXT, type SaveStore, type SlotId, type SlotSummary } from '@/core/Save';
+import { CROSS_TAB_BANNER_TEXT, STORAGE_UNAVAILABLE_TEXT, type SaveStore, type SlotId, type SlotSummary } from '@/core/Save';
 import { slotLine } from '@/systems/UiHelpers';
 import { confirmSheet } from '@/ui/ConfirmSheet';
-import { el, keepFocus, testId, uiLayers, type UiRoot } from '@/ui/dom';
+import { el, h, keepFocus, testId, uiLayers, type UiRoot } from '@/ui/dom';
 
 /** One line per slot: what `list()` knows, in the words the Load list uses. */
 function rowText(summary: SlotSummary): string {
@@ -39,6 +39,10 @@ export class SavePanel {
 
   /** The E8 banner, when there is one; removed with the panel. */
   #banner: HTMLElement | null = null;
+  /** Where the banners go: the frame footer, else the panel. */
+  readonly #bannerHost: HTMLElement;
+  /** 07-a's banner while another tab holds a slot (review 2026-10, B-04). */
+  #crossTab: HTMLElement | null = null;
 
   constructor(root: HTMLElement, save: SaveStore, opts?: { bannerHost?: HTMLElement; ui?: UiRoot }) {
     this.#save = save;
@@ -46,6 +50,7 @@ export class SavePanel {
     this.#ui = opts?.ui ?? (host === null ? null : uiLayers(host));
     this.#root = testId(el('section', 'save-panel'), 'save-panel');
     this.#root.setAttribute('aria-label', 'Saves');
+    this.#bannerHost = opts?.bannerHost ?? this.#root;
     // E8/AC-17: the banner, and only when there is something to say. The store
     // has already logged and toasted; the banner is what is still on screen
     // when the toast has gone. SPEC-031 §4.8: the menu sends it to the frame
@@ -54,7 +59,7 @@ export class SavePanel {
       const banner = testId(el('p', 'save-banner', STORAGE_UNAVAILABLE_TEXT), 'storage-banner');
       banner.setAttribute('role', 'status');
       this.#banner = banner;
-      (opts?.bannerHost ?? this.#root).append(banner);
+      this.#bannerHost.append(banner);
     }
     this.#list = el('ul', 'slot-list');
     this.#root.append(this.#list);
@@ -68,11 +73,35 @@ export class SavePanel {
    */
   refresh(): void {
     keepFocus(this.#list, () => this.#list.replaceChildren(...this.#save.list().map((summary) => this.#row(summary))));
+    this.#syncCrossTab();
   }
 
   dispose(): void {
     this.#banner?.remove();
+    this.#crossTab?.remove();
     this.#root.remove();
+  }
+
+  /**
+   * 07-a: once another tab has written a slot this tab had bound, this tab
+   * writes it no more until a reload — and Continue would still enter the
+   * older copy it holds. The toast is gone in eight seconds; the banner and
+   * its Reload stay (review 2026-10, B-04).
+   */
+  #syncCrossTab(): void {
+    const refusing = this.#save.refusingAutosaves;
+    if (!refusing) {
+      this.#crossTab?.remove();
+      this.#crossTab = null;
+      return;
+    }
+    if (this.#crossTab !== null) return;
+    const reload = testId(h('button', { class: 'ui-btn', type: 'button', click: () => globalThis.location.reload() }, 'Reload'), 'cross-tab-reload');
+    const banner = testId(el('p', 'save-banner', CROSS_TAB_BANNER_TEXT), 'cross-tab-banner');
+    banner.setAttribute('role', 'status');
+    banner.append(' ', reload);
+    this.#crossTab = banner;
+    this.#bannerHost.append(banner);
   }
 
   #row(summary: SlotSummary): HTMLLIElement {

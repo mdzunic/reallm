@@ -106,6 +106,10 @@ export const SAVE_FAILED_TEXT = 'Save failed — export your save code';
 export const BACKUP_RESTORED_TEXT = 'Restored backup save';
 export const STORAGE_UNAVAILABLE_TEXT = 'Storage is unavailable — this run will not be saved. Export your code to keep it.';
 export const CROSS_TAB_TEXT = 'Save changed in another tab';
+/** 07-a: the menu's banner while a slot is refused, the toast long gone (review 2026-10, B-04). */
+export const CROSS_TAB_BANNER_TEXT = 'A save changed in another tab — reload to play it here.';
+/** E8: an import with nowhere to write it (review 2026-10, B-20). */
+export const IMPORT_UNAVAILABLE_TEXT = 'Storage is unavailable — nothing was imported';
 export const CODE_DAMAGED_TEXT = 'Code is damaged';
 export const CODE_NEWER_TEXT = 'Code is from a newer version';
 export const CODE_NOT_REALLM_TEXT = 'Not a ReaLLM save';
@@ -2040,8 +2044,12 @@ export class SaveStore {
   #transitioning = false;
   /** When that hold started, so a transition that never lands cannot outlast it. */
   #transitionSince = 0;
-  /** 07-a: another tab wrote our slot; autosaves stop until the page reloads. */
-  #foreignWrite = false;
+  /**
+   * 07-a: the slots another tab wrote while this one had them bound. Nothing
+   * this tab holds for them reaches storage until the page reloads — except a
+   * new run or a next instance begun on one, which takes it back (B-04).
+   */
+  readonly #foreign = new Set<SlotId>();
   #unavailableReported = false;
   #persistAsked = false;
 
@@ -2108,12 +2116,16 @@ export class SaveStore {
    * and, when its archive key parses, the archived predecessor.
    */
   list(): SlotSummary[] {
+    const bound = this.#current;
     return SLOTS.map((slot) => {
       const result = this.load(slot);
       if (result.ok) {
         const archive = this.loadArchive(slot);
         return slotSummaryOf(slot, result.data, archive.ok ? archive.data : null);
       }
+      // E8: a memory-only session's run is on no disk, but it is in this slot
+      // — so New Game over it asks first (review 2026-10, B-20).
+      if (result.reason === 'unavailable' && bound?.meta.slot === slot) return slotSummaryOf(slot, bound, null);
       // E8/E9: "Corrupt" and "newer version" are both slots with something in
       // them — never a silent overwrite. SPEC-044 §4.10: a newer save says so,
       // and the storage block offers it Export rather than Delete.
@@ -2180,6 +2192,9 @@ export class SaveStore {
     const resolved = seed ?? seedFromLocation() ?? randomSeed();
     const data = newSave(slot, creation, resolved, this.#stamp());
     this.bind(data);
+    // 07-a: a new run is this tab's own write, and the newest — the other tab
+    // is the one that stops now (review 2026-10, B-04).
+    this.#foreign.delete(slot);
     this.#flush('new');
     return data;
   }
@@ -2250,22 +2265,30 @@ export class SaveStore {
    */
   beginNextIteration(slot: SlotId, creation: CharacterCreation): Save | null {
     const result = this.load(slot);
-    if (!result.ok || !nextInstanceOffered(result.data)) return null;
-    const old = result.data;
-    const key = this.#archiveKey(slot);
-    const previous = this.#read(key);
-    const error = this.#writeVerified(key, JSON.stringify(old));
-    if (error !== null) {
-      // A torn write must not cost the archive the slot already had.
-      this.#putBack(key, previous);
-      log.warn('save', `slot ${slot}: the archive write failed; the slot is unchanged`, error);
-      // PLAN R19 decision 1: run N is instance/(61 + N).
-      this.#events.emit('ui:toast', { kind: 'error', text: archiveFailedText(61 + old.meta.iteration), ms: 8000 });
-      return null;
+    // E8: a memory-only session's run is the bound one. With no disk there is
+    // no archive to write, and the successor is bound in memory like the run
+    // before it (review 2026-10, B-20).
+    const memoryOnly = !result.ok && result.reason === 'unavailable' && this.#current?.meta.slot === slot;
+    const old = result.ok ? result.data : memoryOnly ? this.#current : null;
+    if (old === null || !nextInstanceOffered(old)) return null;
+    if (!memoryOnly) {
+      const key = this.#archiveKey(slot);
+      const previous = this.#read(key);
+      const error = this.#writeVerified(key, JSON.stringify(old));
+      if (error !== null) {
+        // A torn write must not cost the archive the slot already had.
+        this.#putBack(key, previous);
+        log.warn('save', `slot ${slot}: the archive write failed; the slot is unchanged`, error);
+        // PLAN R19 decision 1: run N is instance/(61 + N).
+        this.#events.emit('ui:toast', { kind: 'error', text: archiveFailedText(61 + old.meta.iteration), ms: 8000 });
+        return null;
+      }
     }
     const next = nextInstance(old, creation, this.#stamp());
     next.meta.slot = slot;
     this.bind(next);
+    // 07-a, as for `create`: the successor is the slot's newest write (B-04).
+    this.#foreign.delete(slot);
     this.#flush('new');
     return next;
   }
@@ -2324,10 +2347,7 @@ export class SaveStore {
 
   /** §4.5. `pagehide` and `manual` skip the debounce; everything else waits. */
   request(reason: SaveReason): void {
-    if (this.#foreignWrite) {
-      log.warn('save', `autosave (${reason}) refused: another tab owns this slot`);
-      return;
-    }
+    if (this.#refused(reason)) return;
     if (IMMEDIATE_REASONS.includes(reason)) {
       this.#flush(reason);
       return;
@@ -2335,6 +2355,19 @@ export class SaveStore {
     if (this.#pending !== null) return; // already inside a window; one write covers both
     this.#pending = reason;
     this.#pendingSince = this.#now();
+  }
+
+  /**
+   * 07-a: whether the bound slot is one another tab wrote. Every write of it
+   * is refused — the debounced ones, and `flush()` too, which the surface's
+   * exit, Save & Quit and the station's quit call outright: the copy this tab
+   * holds is the older one (review 2026-10, B-04).
+   */
+  #refused(reason: SaveReason): boolean {
+    const slot = this.#current?.meta.slot;
+    if (slot === undefined || !this.#foreign.has(slot)) return false;
+    log.warn('save', `write (${reason}) refused: another tab wrote slot ${slot}`);
+    return true;
   }
 
   /**
@@ -2375,6 +2408,7 @@ export class SaveStore {
     this.#pending = null;
     if (data === null) return false;
     const slot = data.meta.slot;
+    if (this.#refused(reason)) return false;
 
     if (!this.available) {
       // E8: once per session — a toast every autosave would be unplayable, and
@@ -2398,13 +2432,19 @@ export class SaveStore {
     if (first === null) return this.#succeed(slot, reason, data);
     // §4.2: a full quota is usually the backup's fault, so drop it and retry.
     if (isQuota(first) && this.#read(this.#key(slot) + BAK_SUFFIX) !== null) {
+      // With `:bak` gone, the main JSON on disk is the slot's one copy. A
+      // retry Safari truncates would leave nothing, so that copy is held here
+      // and put back if the retry does not verify (review 2026-10, B-19).
+      const previous = this.#read(this.#key(slot));
       try {
         this.#storage?.removeItem(this.#key(slot) + BAK_SUFFIX);
       } catch (error) {
         log.warn('save', 'could not drop the backup', error);
       }
       const second = this.#writeWithBackup(slot, json, false);
-      return second === null ? this.#succeed(slot, reason, data) : this.#fail(slot, second);
+      if (second === null) return this.#succeed(slot, reason, data);
+      this.#putBack(this.#key(slot), previous);
+      return this.#fail(slot, second);
     }
     return this.#fail(slot, first);
   }
@@ -2513,17 +2553,24 @@ export class SaveStore {
   }
 
   /**
-   * §4.6. Exports whatever the slot holds — including raw JSON a validator
-   * rejected, so a corrupt slot is still recoverable by hand (E8) — and falls
-   * back to the bound save, which is all a memory-only session has (E8).
+   * §4.6. The slot in play exports the live run: after a failed write — the
+   * moment `Save failed — export your save code` says to — storage holds the
+   * previous save or a truncated one, and mid-visit it is behind by everything
+   * since the last safe point (review 2026-10, B-05). Any other slot exports
+   * whatever it holds, including raw JSON a validator rejected, so a corrupt
+   * slot is still recoverable by hand (E8); so does a slot another tab wrote
+   * (07-a), whose stored save is the newer one. A memory-only session has
+   * only the bound save (E8).
    */
   async exportCode(slot: SlotId): Promise<string> {
     if (!codesSupported()) {
       this.#events.emit('ui:toast', { kind: 'warn', text: CODES_UNSUPPORTED_TEXT });
       throw new SaveCodeError('unsupported', 'CompressionStream is unavailable');
     }
-    const stored = this.available ? this.#read(this.#key(slot)) : null;
-    const json = stored ?? (this.#current?.meta.slot === slot ? JSON.stringify(this.#current) : null);
+    const bound = this.#current?.meta.slot === slot ? this.#current : null;
+    const live = bound !== null && !this.#foreign.has(slot) ? JSON.stringify(bound) : null;
+    const stored = live === null && this.available ? this.#read(this.#key(slot)) : null;
+    const json = live ?? stored ?? (bound === null ? null : JSON.stringify(bound));
     if (json === null) throw new SaveCodeError('empty', `slot ${slot} is empty`);
     return encodeSave(json);
   }
@@ -2548,7 +2595,11 @@ export class SaveStore {
     // The code came from another slot, or another browser: it belongs to this
     // one now.
     parsed.data.meta.slot = slot;
-    if (!this.available) return { ok: false, reason: 'unavailable' };
+    if (!this.available) {
+      // E8: every caller leaves the telling to the store (review 2026-10, B-20).
+      this.#events.emit('ui:toast', { kind: 'warn', text: IMPORT_UNAVAILABLE_TEXT });
+      return { ok: false, reason: 'unavailable' };
+    }
     // SPEC-034 §4.13: the in-memory run is what used to overwrite the import on
     // the next autosave, so the import takes the binding *before* the write —
     // nothing the running character does can reach the slot after this point.
@@ -2607,28 +2658,30 @@ export class SaveStore {
 
   /**
    * 07-a: two tabs of the same game would otherwise ping-pong their autosaves
-   * over each other. Last write wins, and this tab stops writing until it is
-   * reloaded.
+   * over each other. Last write wins, and this tab stops writing that slot
+   * until it is reloaded. Only that slot: a run in another one has nothing to
+   * lose to the other tab (review 2026-10, B-04).
    */
   #watchOtherTabs(source: SaveStoreOptions['window']): void {
     const target = source === undefined ? (globalThis as unknown as EventTarget) : source;
     if (target === null || typeof target.addEventListener !== 'function') return;
     const handler = (event: Event): void => {
       const key = (event as StorageEvent).key;
-      if (this.#current === null || this.#foreignWrite) return;
-      if (key !== this.#key(this.#current.meta.slot)) return;
-      this.#foreignWrite = true;
+      const slot = this.#current?.meta.slot;
+      if (slot === undefined || this.#foreign.has(slot)) return;
+      if (key !== this.#key(slot)) return;
+      this.#foreign.add(slot);
       this.#pending = null;
-      log.warn('save', 'another tab wrote this slot; autosaves are off until reload');
+      log.warn('save', `another tab wrote slot ${slot}; this tab stops writing it until reload`);
       this.#events.emit('ui:toast', { kind: 'warn', text: CROSS_TAB_TEXT, ms: 8000 });
     };
     target.addEventListener('storage', handler);
     this.#release.push(() => target.removeEventListener('storage', handler));
   }
 
-  /** Whether 07-a has fired; the menu offers a reload when it has. */
+  /** Whether 07-a holds any slot; the menu shows `CROSS_TAB_BANNER_TEXT` and a Reload while it does. */
   get refusingAutosaves(): boolean {
-    return this.#foreignWrite;
+    return this.#foreign.size > 0;
   }
 
   dispose(): void {

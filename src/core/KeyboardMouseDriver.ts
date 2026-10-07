@@ -246,13 +246,18 @@ export class KeyboardMouseDriver implements InputDriver {
   }
 
   #onKeyUp(event: KeyboardEvent): void {
-    if (isEditable(event.target)) return;
+    // AC-7 guards the press only. A key held in play and let go while a
+    // field has focus — D held through Pause → Settings, released on a slider
+    // — still lets go, or the salvager walks on after Resume (review 2026-10,
+    // B-14). A key that never pressed here stays the field's.
+    const editable = isEditable(event.target);
+    if (editable && !this.#pressed.has(event.code)) return;
     this.#input.setScheme(SCHEME);
     // SPEC-050 §4.5: the key lets go of what it pressed, whatever the mode is now.
     const binding = this.#pressed.get(event.code) ?? KEY_BINDINGS[event.code];
     this.#pressed.delete(event.code);
     if (binding === undefined) return;
-    if (this.#input.gameplayActive && this.#input.enabled) event.preventDefault();
+    if (!editable && this.#input.gameplayActive && this.#input.enabled) event.preventDefault();
     if (isMoveAxis(binding)) {
       this.#axes.delete(binding);
       this.#pushMove();

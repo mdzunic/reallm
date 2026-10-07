@@ -20,7 +20,7 @@ import { BRIGHTNESS_LIMIT, reduceMotionPreset, type Settings, type SettingsStore
 import { log } from '@/core/Log';
 import { offlineStatus, offlineText } from '@/core/Updates';
 import type { SaveStore, SlotId } from '@/core/Save';
-import { SLOTS } from '@/core/Save';
+import { SaveCodeError, SLOTS } from '@/core/Save';
 import type { Difficulty } from '@/data/index';
 import { multPercent } from '@/systems/Format';
 import { DIFFICULTY_LINES } from '@/systems/UiHelpers';
@@ -65,6 +65,8 @@ type RowKey = Exclude<SettingsRowDef['key'], 'difficulty' | null>;
 
 /** SPEC-034 §4.13: what an import into the slot in play says on its way out. */
 export const IMPORT_REBOUND_TEXT = 'Save imported — returning to the main menu.';
+/** E8: Copy code or Share with no run bound and no slot written (review 2026-10, B-20). */
+export const EXPORT_EMPTY_TEXT = 'No save to export yet';
 
 export class SettingsPanel {
   readonly #ui: UiRoot;
@@ -601,13 +603,16 @@ export class SettingsPanel {
           class: 'ui-btn',
           type: 'button',
           click: () => {
-            void save.exportCode(slot).then((code) => {
-              out.value = code;
-              void navigator.clipboard?.writeText(code).then(
-                () => this.#ui.toast('Save code copied', 'good'),
-                () => this.#ui.toast('Copy the code from the field below', 'info'),
-              );
-            });
+            void save
+              .exportCode(slot)
+              .then((code) => {
+                out.value = code;
+                void navigator.clipboard?.writeText(code).then(
+                  () => this.#ui.toast('Save code copied', 'good'),
+                  () => this.#ui.toast('Copy the code from the field below', 'info'),
+                );
+              })
+              .catch((error: unknown) => this.#exportRefused(error));
           },
         },
         'Copy code',
@@ -624,10 +629,13 @@ export class SettingsPanel {
             class: 'ui-btn',
             type: 'button',
             click: () => {
-              void save.exportCode(slot).then((code) => {
-                out.value = code;
-                void navigator.share({ title: 'ReaLLM save', text: code }).catch(() => undefined);
-              });
+              void save
+                .exportCode(slot)
+                .then((code) => {
+                  out.value = code;
+                  void navigator.share({ title: 'ReaLLM save', text: code }).catch(() => undefined);
+                })
+                .catch((error: unknown) => this.#exportRefused(error));
             },
           },
           'Share',
@@ -674,6 +682,17 @@ export class SettingsPanel {
     );
     box.append(h('div', { class: 'settings-row' }, out, actions), h('div', { class: 'settings-row' }, paste, importBtn));
     return box;
+  }
+
+  /**
+   * §4.6: `exportCode` rejects with nothing to export — no run bound and no
+   * slot written, a memory-only session's usual state (E8) — and that press
+   * says so rather than nothing. `unsupported` has toasted already (review
+   * 2026-10, B-20).
+   */
+  #exportRefused(error: unknown): void {
+    if (error instanceof SaveCodeError && error.reason === 'empty') this.#ui.toast(EXPORT_EMPTY_TEXT, 'info');
+    else if (!(error instanceof SaveCodeError)) log.warn('settings', 'the save code could not be made', error);
   }
 
   // ------------------------------------------------------------------ reset

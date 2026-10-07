@@ -458,6 +458,30 @@ describe('a second go() while one is running', () => {
     await expect(nested as unknown as Promise<boolean>).resolves.toBe(false);
     expect(h.manager.current?.id).toBe('station');
   });
+
+  /**
+   * Review 2026-10, B-16: creation's next-mode refusal left from a
+   * `scene:entered` handler, which runs inside the transition, so its go() was
+   * refused like the one above and the player sat on a blank form. It leaves
+   * from the first update() now: none is forwarded until the transition has
+   * settled, and a go() from there reaches the menu.
+   */
+  it('takes a go() from the first update() after entering (B-16)', async () => {
+    let leave: Promise<boolean> | null = null;
+    const h: Harness = harness({
+      creation: {
+        update: () => {
+          leave ??= h.manager.go('menu', { reason: 'quit' });
+        },
+      },
+    });
+    await atMenu(h);
+    await h.manager.go('creation', { slot: 0, next: true });
+    expect(h.manager.transitioning).toBe(false);
+    h.manager.update(1 / 60);
+    await expect(leave as unknown as Promise<boolean>).resolves.toBe(true);
+    expect(h.manager.current?.id).toBe('menu');
+  });
 });
 
 // ------------------------------------------------------------ update/render

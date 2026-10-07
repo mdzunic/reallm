@@ -30,6 +30,8 @@ import {
   CODES_UNSUPPORTED_TEXT,
   CROSS_TAB_TEXT,
   clampKeep,
+  decodeSave,
+  IMPORT_UNAVAILABLE_TEXT,
   crc32,
   DEPOT_KEEP_DEFAULT,
   DEPOT_KEEP_MAX,
@@ -452,6 +454,37 @@ describe('slots (§4.2)', () => {
     expect(events.toasts).toEqual([SAVE_FAILED_TEXT]);
   });
 
+  /**
+   * Review 2026-10, B-19: the retry runs with the backup already dropped, so
+   * the main JSON on disk is the slot's one copy. When Safari cuts that retry
+   * short, the old copy goes back rather than leaving the slot unreadable.
+   */
+  it('puts the previous main back when the quota retry is silently truncated (B-19)', () => {
+    const fake = fakeStorage();
+    const saves = store(fake, recorder());
+    const data = saves.create(0, CREATION);
+    data.player.tokens = 10;
+    expect(saves.flush()).toBe(true); // main: 10 tokens; :bak: the fresh save
+    const before = fake.data.get('reallm:slot:0') as string;
+
+    // Safari at quota: the backup's write throws, and a main value longer than
+    // the room left is cut short without a word. The old save fits the room it
+    // already had; the new one, a digit longer, does not.
+    const room = before.length;
+    const original = fake.storage.setItem.bind(fake.storage);
+    fake.storage.setItem = (key: string, value: string): void => {
+      if (key.endsWith(BAK_SUFFIX)) throw new DOMException('quota exceeded', 'QuotaExceededError');
+      original(key, value.slice(0, room));
+    };
+
+    data.player.tokens = 100;
+    expect(saves.flush()).toBe(false);
+    expect(fake.data.has(`reallm:slot:0${BAK_SUFFIX}`)).toBe(false);
+    expect(fake.data.get('reallm:slot:0')).toBe(before);
+    const reloaded = new SaveStore(recorder(), fake.storage, { window: null }).load(0);
+    expect(reloaded.ok && reloaded.data.player.tokens).toBe(10);
+  });
+
   it('deletes both the main key and the backup (AC-58, AC-63)', () => {
     const fake = fakeStorage();
     const saves = store(fake, recorder());
@@ -568,6 +601,48 @@ describe('storage that will not cooperate (E8, E9)', () => {
     saves.addPlaytime(10);
     expect(saves.current).toBeNull();
     await expect(saves.exportCode(0)).rejects.toThrow();
+  });
+
+  /**
+   * Review 2026-10, B-20: a memory-only session's run is in no slot on disk,
+   * but it is in one. The menu's New Game reads `list()`, so the slot has to
+   * say so, or a new game wipes the only copy without asking.
+   */
+  it('lists the bound run in its slot when memory-only, so New Game over it asks (B-20)', () => {
+    const saves = new SaveStore(recorder(), null, { window: null });
+    saves.create(1, CREATION);
+    const list = saves.list();
+    expect(list[0]).toEqual({ slot: 0, empty: true });
+    expect(list[1]).toMatchObject({ slot: 1, empty: false, name: 'Vance', level: 1 });
+    expect(list[2]).toEqual({ slot: 2, empty: true });
+  });
+
+  it('begins the next instance from the bound run when memory-only (B-20)', () => {
+    // Every load is `unavailable` here, so the run the session has is the
+    // bound one; there is no disk to archive it to.
+    const saves = new SaveStore(recorder(), null, { window: null });
+    const run = saves.create(0, CREATION, 5);
+    run.progress.flags.push('campaign_done', 'ending_escape');
+    run.progress.endingSeen = true;
+    const next = saves.beginNextIteration(0, CREATION);
+    expect(next?.meta.iteration).toBe(2);
+    expect(next?.meta.seed).toBe(5);
+    expect(next?.meta.lineage[0]).toMatchObject({ iteration: 1, ending: 'escape', name: 'Vance' });
+    expect(saves.current).toBe(next);
+    // Another slot's run is not this one's to continue.
+    expect(saves.beginNextIteration(1, CREATION)).toBeNull();
+  });
+
+  it('says why an import did nothing when memory-only (B-20)', async () => {
+    const fake = fakeStorage();
+    fake.failAlways();
+    const events = recorder();
+    const saves = store(fake, events);
+    events.clear();
+    const code = await encodeJson(JSON.stringify(newSave(0, CREATION, 1, 1_700_000_000_000)));
+    expect(await saves.importCode(code, 0)).toEqual({ ok: false, reason: 'unavailable' });
+    expect(saves.current).toBeNull();
+    expect(events.toasts).toEqual([IMPORT_UNAVAILABLE_TEXT]);
   });
 
   it('loads the backup when main is unusable, rewrites main and toasts (AC-19)', () => {
@@ -1284,6 +1359,43 @@ describe('export and import codes (§4.6)', () => {
   });
 
   /**
+   * Review 2026-10, B-05: `Save failed — export your save code` is the advice
+   * after a write that did not land, so the code has to carry the run that
+   * failed to write — not the truncated or older JSON left on disk.
+   */
+  it('exports the live run after a silently truncated write (B-05)', async () => {
+    const fake = fakeStorage();
+    const events = recorder();
+    const saves = store(fake, events);
+    const data = saves.create(0, CREATION);
+    data.player.tokens = 500;
+    fake.truncate();
+    expect(saves.flush()).toBe(false);
+    expect(events.toasts).toContain(SAVE_FAILED_TEXT);
+    const json = await decodeSave(await saves.exportCode(0));
+    expect(JSON.parse(json)).toEqual(JSON.parse(JSON.stringify(data)));
+  });
+
+  it('exports the live run after a quota failure, not the stored one (B-05)', async () => {
+    const fake = fakeStorage();
+    const saves = store(fake, recorder());
+    const data = saves.create(0, CREATION);
+    data.player.tokens = 500;
+    fake.failWrites();
+    expect(saves.flush()).toBe(false);
+    expect(JSON.parse(fake.data.get('reallm:slot:0') as string).player.tokens).toBe(0);
+    const json = await decodeSave(await saves.exportCode(0));
+    expect(JSON.parse(json).player.tokens).toBe(500);
+  });
+
+  it('exports what another slot holds, raw, while a run is bound elsewhere (B-05)', async () => {
+    const fake = fakeStorage({ 'reallm:slot:1': '{"version":1,"player":' });
+    const saves = store(fake, recorder());
+    saves.create(0, CREATION);
+    expect(await decodeSave(await saves.exportCode(1))).toBe('{"version":1,"player":');
+  });
+
+  /**
    * SPEC-034 §4.13, §6.1 — the review's `import.test.ts`.
    *
    * Importing into the slot the game was playing wrote the code to storage and
@@ -1622,7 +1734,7 @@ describe('autosave (§4.5)', () => {
 // ---------------------------------------------------------------- other tabs
 
 describe('two tabs of the same game (07-a, AC-65)', () => {
-  function tabs(): { saves: SaveStore; events: Recorder; fire: (key: string | null) => void } {
+  function tabs(): { saves: SaveStore; events: Recorder; fake: FakeStorage; fire: (key: string | null) => void } {
     const listeners: Array<(event: Event) => void> = [];
     const target = {
       addEventListener: (_type: string, handler: EventListenerOrEventListenerObject) =>
@@ -1630,15 +1742,26 @@ describe('two tabs of the same game (07-a, AC-65)', () => {
       removeEventListener: () => {},
     };
     const events = recorder();
-    const saves = new SaveStore(events, fakeStorage().storage, { window: target });
+    const fake = fakeStorage();
+    const saves = new SaveStore(events, fake.storage, { window: target });
     saves.bind(newSave(0, CREATION, 1, 1_700_000_000_000));
     return {
       saves,
       events,
+      fake,
       fire: (key) => {
         for (const handler of listeners) handler({ key } as unknown as Event);
       },
     };
+  }
+
+  /** The other tab's newer run, written to slot 0 the way its own store writes it. */
+  function theirs(fake: FakeStorage): string {
+    const other = newSave(0, { ...CREATION, name: 'OtherTab' }, 1, 1_700_000_000_000);
+    other.player.tokens = 999;
+    const json = JSON.stringify(other);
+    fake.data.set(`${SLOT_KEY_PREFIX}0`, json);
+    return json;
   }
 
   it('toasts and refuses further autosaves when another tab writes our slot', () => {
@@ -1664,6 +1787,67 @@ describe('two tabs of the same game (07-a, AC-65)', () => {
     fire(null);
     expect(events.toasts).toEqual([]);
     expect(saves.refusingAutosaves).toBe(false);
+  });
+
+  /**
+   * Review 2026-10, B-04: the surface's exit, Save & Quit and the station's
+   * quit call `flush()` outright. It used to write anyway, so the stale tab's
+   * run went over the newer one the guard was there to protect.
+   */
+  it('refuses flush() too, so the stale run never overwrites the newer one (B-04)', () => {
+    const { saves, fake, fire } = tabs();
+    const newer = theirs(fake);
+    fire(`${SLOT_KEY_PREFIX}0`);
+    saves.current!.player.tokens = 1;
+    expect(saves.flush()).toBe(false);
+    saves.request('pagehide');
+    expect(fake.data.get(`${SLOT_KEY_PREFIX}0`)).toBe(newer);
+    expect(fake.data.has(`${SLOT_KEY_PREFIX}0${BAK_SUFFIX}`)).toBe(false);
+  });
+
+  it('refuses only the slot the other tab wrote: a run in another slot autosaves (B-04)', () => {
+    const { saves, fake, fire } = tabs();
+    fire(`${SLOT_KEY_PREFIX}0`);
+    const other = saves.create(1, { ...CREATION, name: 'SlotOne' }, 2);
+    other.player.tokens = 123;
+    saves.request('pagehide');
+    expect(JSON.parse(fake.data.get(`${SLOT_KEY_PREFIX}1`) as string).player.tokens).toBe(123);
+    // The refusal is still there for slot 0, so the menu still offers a reload.
+    expect(saves.refusingAutosaves).toBe(true);
+  });
+
+  it('lets a new run on the refused slot take it back, and autosave after (B-04)', () => {
+    const { saves, fake, fire } = tabs();
+    theirs(fake);
+    fire(`${SLOT_KEY_PREFIX}0`);
+    const fresh = saves.create(0, { ...CREATION, name: 'Fresh' }, 3);
+    expect(JSON.parse(fake.data.get(`${SLOT_KEY_PREFIX}0`) as string).player.name).toBe('Fresh');
+    expect(saves.refusingAutosaves).toBe(false);
+    fresh.player.tokens = 5;
+    expect(saves.flush()).toBe(true);
+    expect(JSON.parse(fake.data.get(`${SLOT_KEY_PREFIX}0`) as string).player.tokens).toBe(5);
+  });
+
+  it('lets a next instance begun on the refused slot write through (B-04, 58-l)', () => {
+    const { saves, fake, fire } = tabs();
+    // The other tab finished the run and saw its ending; this one begins the next.
+    const ended = newSave(0, { ...CREATION, name: 'OtherTab' }, 1, 1_700_000_000_000);
+    ended.progress.flags.push('campaign_done', 'ending_stay');
+    ended.progress.endingSeen = true;
+    fake.data.set(`${SLOT_KEY_PREFIX}0`, JSON.stringify(ended));
+    fire(`${SLOT_KEY_PREFIX}0`);
+    const next = saves.beginNextIteration(0, CREATION);
+    expect(next?.meta.iteration).toBe(2);
+    expect(JSON.parse(fake.data.get(`${SLOT_KEY_PREFIX}0`) as string).meta.iteration).toBe(2);
+    expect(JSON.parse(fake.data.get(`${SLOT_KEY_PREFIX}0${ARCHIVE_SUFFIX}`) as string).player.name).toBe('OtherTab');
+    expect(saves.refusingAutosaves).toBe(false);
+  });
+
+  it('exports the stored save of a slot another tab wrote: it is the newer one (B-04, B-05)', async () => {
+    const { saves, fake, fire } = tabs();
+    const newer = theirs(fake);
+    fire(`${SLOT_KEY_PREFIX}0`);
+    expect(await decodeSave(await saves.exportCode(0))).toBe(newer);
   });
 });
 

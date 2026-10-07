@@ -374,3 +374,27 @@ test('6 — films off: the sequence runs dialogue → overlay, with no film at a
   await settled(page, 'surface');
   expect(await endingSeen(page)).toBe(true);
 });
+
+test('8 — Save & Quit on the decision line: the menu, and no ending film over it (review 2026-10, B-06)', async ({ page }) => {
+  await landOnEden(page);
+  await finishTheDefence(page);
+  await readLines(page, INTRO_LINES);
+
+  await page.locator('[data-testid="dialogue-choice-1"]').click();
+  await expect(page.locator(DIALOGUE)).toContainText(ESCAPE_LINES[0] as string, { timeout: 20_000 });
+  // A story line is no back-stack entry, so Escape pauses over it (SPEC-044 1c).
+  await page.waitForTimeout(350);
+  await page.keyboard.press('Escape');
+  await expect(page.locator('[data-testid="pause-menu"]')).toBeVisible();
+  await page.locator('[data-testid="pause-quit"]').click();
+  await page.locator('[data-testid="confirm-yes"]').click();
+
+  // The quit clears the line on `scene:transition`; the film used to start
+  // there, under the fade, and play its 36 s over the menu.
+  await settled(page, 'menu');
+  await page.waitForTimeout(800);
+  await expect(page.locator(FILM)).toHaveCount(0);
+  await expect(page.locator(ESCAPE)).toHaveCount(0);
+  // The ending is still owed, so the station replays it (SPEC-024 §4.5).
+  expect(await storedEndingSeen(page)).toBe(false);
+});

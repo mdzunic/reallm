@@ -243,6 +243,20 @@ test('2. begin: the sheet, creation restored from the profile, a logged variant,
   expect(archived?.progress.flags).toContain('ending_stay');
 });
 
+test('2b. a run that cannot continue is refused back to the menu, with nothing written (review 2026-10, B-16)', async ({ page }) => {
+  await start(page, DEBUG_URL);
+  // The ending is still owed, so the run does not qualify (§4.1).
+  await endedRun(page, 'ending_stay', false);
+  expect(await page.evaluate(() => window.__reallm.go('creation', { slot: 0, next: true }, { force: true }))).toBe(true);
+  // The refusal used to come inside the transition in, where `go()` is
+  // ignored: the toast showed over a blank form, and Confirm overwrote the slot.
+  await expect(page.getByTestId('toasts')).toContainText('This run cannot continue as a new instance', SLOW);
+  await settled(page, 'menu');
+  expect((await stored(page))?.meta.iteration).toBe(1);
+  expect((await stored(page))?.player.level).toBe(18);
+  expect(await archiveKey(page)).toBeNull();
+});
+
 // ------------------------------------------------------------ 3. containment
 
 test('3. containment: the header reads level 2, and the Wurm spawns with ×1.15 HP', async ({ page }) => {

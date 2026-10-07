@@ -23,6 +23,7 @@ import { ASSETS } from '@/data/assets';
 import type { DialogueId } from '@/data/index';
 import { GAME_SCENES } from '@/scenes/index';
 import { BootOverlay } from '@/ui/BootOverlay';
+import { cancelSheets, sheetOpen } from '@/ui/ConfirmSheet';
 import { ContextLostOverlay } from '@/ui/ContextLostOverlay';
 import { dialogueLayer } from '@/ui/DialogueUI';
 import { uiLayers } from '@/ui/dom';
@@ -375,10 +376,23 @@ function onKeyDown(event: KeyboardEvent): void {
   // P while typing a name is a letter, not a pause (36-h).
   if (event.target instanceof HTMLInputElement || event.target instanceof HTMLTextAreaElement) return;
   if (game.scenes.current?.pausable !== true) return;
-  if (game.scenes.paused) game.requestResume();
-  else game.scenes.pause();
+  if (game.scenes.paused) {
+    // A sheet over the pause menu — Recall, Save & Quit, a reset — has the
+    // keys until it is answered; resuming under it left it on screen over the
+    // game, eating clicks (review 2026-10, B-15).
+    if (sheetOpen(ui)) return;
+    game.requestResume();
+  } else game.scenes.pause();
 }
 document.addEventListener('keydown', onKeyDown);
+
+/**
+ * A sheet belongs to no scene, so one still open as a transition starts — a
+ * flight's Quit sheet as the landing begins — is answered as a cancel rather
+ * than carried into the next scene (review 2026-10, B-15).
+ */
+const sheetsOwner = {};
+events.on('scene:transition', () => cancelSheets(ui), sheetsOwner);
 
 /**
  * §4.4: the history guard. While any scene but the menu is up — or the menu

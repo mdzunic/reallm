@@ -934,6 +934,44 @@ describe('KeyboardMouseDriver', () => {
     expect(input.state.move).toEqual({ x: 0, y: 0 });
   });
 
+  /**
+   * Review 2026-10, B-14: D held in play, Pause → Settings, and D let go while
+   * a slider has focus. AC-7 is about typing, so it guards the press only; the
+   * release still lets go, or the salvager walks on after Resume.
+   */
+  it('releases a key pressed in play even when it is let go over a form control (B-14)', () => {
+    const { input, win } = harness();
+    input.setGameplayActive(true);
+    win.fire('keydown', keyEvent('KeyD'));
+    win.fire('keydown', keyEvent('Space'));
+    input.beginFrame(DT);
+    expect(input.state.move.x).toBeGreaterThan(0);
+    expect(input.state.buttons.fire.down).toBe(true);
+    input.endFrame();
+
+    const slider = { tagName: 'INPUT' };
+    const upD = keyEvent('KeyD', { target: slider });
+    win.fire('keyup', upD);
+    win.fire('keyup', keyEvent('Space', { target: { tagName: 'SELECT' } }));
+    input.beginFrame(DT);
+    expect(input.state.move.x).toBe(0);
+    expect(input.state.buttons.fire.down).toBe(false);
+    // The field keeps its own key: nothing is prevented on it.
+    expect(upD.prevented).toBe(false);
+  });
+
+  it('leaves a key that never pressed in play to the field it is typed in (AC-7, B-14)', () => {
+    const { input, win } = harness();
+    input.setGameplayActive(true);
+    const field = { tagName: 'INPUT' };
+    win.fire('keydown', keyEvent('KeyW', { target: field }));
+    const up = keyEvent('KeyW', { target: field });
+    win.fire('keyup', up);
+    expect(up.prevented).toBe(false);
+    input.beginFrame(DT);
+    expect(input.state.move).toEqual({ x: 0, y: 0 });
+  });
+
   it('maps mouse button 0 to fire and button 2 to dash (AC-23, SPEC-038 §4.1)', () => {
     const { input, canvas, win } = harness();
     canvas.fire('pointerdown', pointerEvent({ button: 0 }));

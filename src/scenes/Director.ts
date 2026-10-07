@@ -71,14 +71,22 @@ function createDirector(services: GameServices): StoryDirector {
 
   // 22-c: a scene transition during a film skips it. Scenes start films only
   // when they will wait for them, so this fires only on error or dev paths.
+  // A film asked for after the transition has started — between
+  // `scene:transition` and `scene:entered`, when the scene that asked is on
+  // its way out — is skipped before it starts: it would play over the next
+  // scene (review 2026-10, B-06). The station's films are asked for from
+  // `scene:entered` itself, after this handler has run.
+  let leaving = false;
   const owner = {};
   services.events.on(
     'scene:transition',
     () => {
+      leaving = true;
       if (player.busy) player.skip();
     },
     owner,
   );
+  services.events.on('scene:entered', () => void (leaving = false), owner);
 
   const manifest = (): Promise<FilmManifest | null> => {
     manifestPromise ??= fetch('assets/films/manifest.json')
@@ -88,8 +96,9 @@ function createDirector(services: GameServices): StoryDirector {
   };
 
   const playFilm = (id: FilmId, opts: PlayFilmOptions): Promise<FilmResult> => {
-    // §4.11: with films off, nothing is shown and nothing is touched.
-    if (!enabled) return Promise.resolve('skipped');
+    // §4.11: with films off, nothing is shown and nothing is touched — nor
+    // while a scene transition is under way (22-c).
+    if (!enabled || leaving) return Promise.resolve('skipped');
     const turn = chain.then(async (): Promise<FilmResult> => {
       const def = FILMS[id];
       const wasEnabled = services.input.enabled;
