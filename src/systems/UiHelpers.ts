@@ -928,13 +928,21 @@ export function deliveryNeedsText(need: number): string {
 }
 
 /**
+ * SPEC-065 §4.6 (E118): the draw button with no room in the hold. SPEC-045
+ * §4.6 retired these words — a full hold's toasts say cargo — and this is the
+ * one place they come back, where the Depot tab sets the hold against the
+ * depot beside it (`tests/data/glossary.test.ts` allows this line alone).
+ */
+export const HOLD_FULL_TEXT = 'Hold full';
+
+/**
  * SPEC-065 §4.6's table (E118): the Depot tab's button over what the depot
  * holds and what a draw would bring back — `Draw N`, `Hold full` with no room
  * in the hold, `Empty` with nothing at the depot. Only `Draw N` is pressable.
  */
 export function depotDrawLabel(depot: number, drawable: number): { text: string; enabled: boolean } {
   if (depot <= 0) return { text: 'Empty', enabled: false };
-  if (drawable <= 0) return { text: 'Hold full', enabled: false };
+  if (drawable <= 0) return { text: HOLD_FULL_TEXT, enabled: false };
   return { text: `Draw ${drawable}`, enabled: true };
 }
 

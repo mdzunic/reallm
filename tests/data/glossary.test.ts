@@ -15,6 +15,7 @@ const SOURCES: Record<string, string> = Object.fromEntries(
   Object.entries(RAW).map(([file, source]) => [file, stripComments(source)]),
 );
 const GLOSSARY = '../../src/data/glossary.ts';
+const UI_HELPERS = '../../src/systems/UiHelpers.ts';
 
 describe('GLYPHS (SPEC-045 §4.6)', () => {
   it('gives each glyph one meaning', () => {
@@ -62,12 +63,18 @@ describe('GLYPHS (SPEC-045 §4.6)', () => {
 });
 
 describe('the words (SPEC-045 §4.6)', () => {
-  it('no string literal under src/ says Hull points, Hold full or utility slot', () => {
+  it('no string literal under src/ says Hull points, Hold full or utility slot, but the Depot tab’s one label', () => {
     const retired = ['Hull points', 'Hold full', 'utility slot', 'Utility slot'];
+    // SPEC-065 §4.6 (E118): the Depot tab's draw button reads `Hold full` — the
+    // hold set against the depot beside it. That one declaration is the only
+    // place the words may come back; the full-hold toasts still say cargo.
+    const exception = "export const HOLD_FULL_TEXT = 'Hold full';";
+    expect(SOURCES[UI_HELPERS]).toContain(exception);
     const offenders: string[] = [];
     for (const [file, source] of Object.entries(SOURCES)) {
+      const scanned = file === UI_HELPERS ? source.replace(exception, '') : source;
       for (const words of retired) {
-        if (source.includes(words)) offenders.push(`${file}: ${words}`);
+        if (scanned.includes(words)) offenders.push(`${file}: ${words}`);
       }
     }
     expect(offenders).toEqual([]);

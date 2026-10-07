@@ -29,8 +29,13 @@ import {
   CODE_PREFIX,
   CODES_UNSUPPORTED_TEXT,
   CROSS_TAB_TEXT,
+  clampKeep,
   crc32,
+  DEPOT_KEEP_DEFAULT,
+  DEPOT_KEEP_MAX,
+  DEPOT_KEEP_STEP,
   DIFFICULTIES,
+  emptyDepot,
   crcText,
   createNullSave,
   decodeBits,
@@ -70,7 +75,7 @@ import {
   type SlotId,
   type SlotSummary,
 } from '@/core/Save';
-import { BELOW_HALF_SIZE, CACHE_IDS, PLANET_IDS, type PlanetId } from '@/data/index';
+import { BELOW_HALF_SIZE, CACHE_IDS, COMPANIONS, PLANET_IDS, UPGRADES, type PlanetId } from '@/data/index';
 import { slotLine } from '@/systems/UiHelpers';
 
 // --------------------------------------------------------------- test doubles
@@ -258,11 +263,13 @@ describe('newSave (§4.1)', () => {
 
   it('matches the §3 shape, and validates without a single warning (AC-1)', () => {
     expect(fresh.version).toBe(SAVE_VERSION);
-    expect(SAVE_VERSION).toBe(3);
+    // SPEC-065 §3: version 4 adds the Relay depot.
+    expect(SAVE_VERSION).toBe(4);
     expect(Object.keys(fresh).sort()).toEqual(
       [
         'activeWeapon',
         'companions',
+        'depot',
         'equipped',
         'inventory',
         'meta',
@@ -1117,7 +1124,7 @@ describe('migrations (§4.3)', () => {
     const validated = validateSave(migrated.data);
     expect(validated.ok && validated.warnings).toEqual([]);
     if (!validated.ok) return;
-    expect(validated.data.version).toBe(3);
+    expect(validated.data.version).toBe(SAVE_VERSION);
     expect(validated.data.equipped).toEqual({
       // The fixture's own weapon and armor, untouched.
       armor: 'armor_composite',
@@ -1166,17 +1173,34 @@ describe('migrations (§4.3)', () => {
     expect(validated.ok && validated.warnings.join('\n')).toContain('equipped.primary');
   });
 
-  it('the v3 fixture is the current shape and validates with no warnings', () => {
-    const raw = FIXTURES['../fixtures/save-v3.json'];
+  /**
+   * SPEC-065 §4.1 (E120): the v3 fixture was the current shape until R26. It
+   * is the one before it now — refused unmigrated — and comes through the
+   * v3 → v4 step with every v3 value as it was and the depot empty.
+   */
+  it('E120: the v3 fixture migrates to v4 with every v3 value kept and the default depot', () => {
+    const raw = FIXTURES['../fixtures/save-v3.json'] as { version: number } & Record<string, unknown>;
     expect(raw).toBeDefined();
-    expect(raw?.['version']).toBe(SAVE_VERSION);
-    const validated = validateSave(raw);
+    expect(raw['version']).toBe(3);
+    const before = JSON.parse(JSON.stringify(raw)) as Record<string, unknown>;
+    expect(validateSave(raw).ok).toBe(false);
+    const migrated = migrate(raw);
+    expect(migrated.ok && migrated.from).toBe(3);
+    if (!migrated.ok) return;
+    const validated = validateSave(migrated.data);
     expect(validated.ok && validated.warnings).toEqual([]);
     if (!validated.ok) return;
-    expect(validated.data).toEqual(raw);
+    // Every v3 field as it was, the version moved on, and the depot added.
+    expect(validated.data).toEqual({ ...before, version: 4, depot: emptyDepot() });
+    expect(validated.data.depot).toEqual({
+      held: { oil: 0, wheat: 0, water: 0, lithium: 0 },
+      keep: { oil: 100, wheat: 100, water: 100, lithium: 100 },
+    });
+    // The step reshapes a copy: the stored object is not touched.
+    expect(raw).toEqual(before);
   });
 
-  it('E74: the v2 fixture migrates to v3 with every v2 value kept and the new fields empty', () => {
+  it('E74: the v2 fixture migrates up the chain with every v2 value kept and the new fields empty', () => {
     const raw = FIXTURES['../fixtures/save-v2.json'] as { version: number } & Record<string, unknown>;
     const before = JSON.parse(JSON.stringify(raw)) as Record<string, unknown>;
     const migrated = migrate(raw);
@@ -1186,15 +1210,16 @@ describe('migrations (§4.3)', () => {
     expect(validated.ok && validated.warnings).toEqual([]);
     if (!validated.ok) return;
     const data = validated.data;
-    expect(data.version).toBe(3);
-    // Every v2 field as it was…
-    expect(Object.keys(data).sort()).toEqual(Object.keys(before).sort());
+    expect(data.version).toBe(SAVE_VERSION);
+    // Every v2 field as it was, and SPEC-065's depot beside them…
+    expect(Object.keys(data).sort()).toEqual([...Object.keys(before), 'depot'].sort());
     for (const key of ['player', 'resources', 'inventory', 'equipped', 'activeWeapon', 'quick', 'ship', 'companions'] as const) {
       expect(data[key], key).toEqual(before[key]);
     }
-    // …and the six new ones empty (§4.1).
+    // …and the six v3 fields empty (§4.1), and the depot too (SPEC-065 §4.1).
     expect(data.meta).toEqual({ ...(before['meta'] as object), lineage: [], stats: emptyRunStats() });
     expect(data.progress).toEqual({ ...(before['progress'] as object), claimed: [], exploredBelow: {}, remains: null, resume: null });
+    expect(data.depot).toEqual(emptyDepot());
     // The step reshapes a copy: the stored object is not touched.
     expect(raw).toEqual(before);
   });
@@ -1924,12 +1949,13 @@ describe('version 3 (SPEC-047)', () => {
 
   // ---------------------------------------------------------------- §4.3
 
-  it('E9, E73: migrate({ version: 4 }) is newer_version', () => {
-    expect(migrate({ version: 4 })).toEqual({ ok: false, reason: 'newer_version' });
+  it('E9, E73: a version past the build is newer_version — 5 here, since SPEC-065 made 4 the current one', () => {
+    expect(migrate({ version: 5 })).toEqual({ ok: false, reason: 'newer_version' });
+    expect(migrate({ version: 4 }).ok).toBe(true);
     expect(migrate({ version: 3 }).ok).toBe(true);
   });
 
-  it('the v0 and v1 fixtures run every step to v3, with the new fields empty', () => {
+  it('the v0 and v1 fixtures run every step to the current version, with the v3 fields empty', () => {
     for (const path of ['../fixtures/save-v0.json', '../fixtures/save-v1.json']) {
       const migrated = migrate(FIXTURES[path] as { version: number } & Record<string, unknown>);
       expect(migrated.ok, path).toBe(true);
@@ -1937,7 +1963,7 @@ describe('version 3 (SPEC-047)', () => {
       const validated = validateSave(migrated.data);
       expect(validated.ok && validated.warnings, path).toEqual([]);
       if (!validated.ok) continue;
-      expect(validated.data.version).toBe(3);
+      expect(validated.data.version).toBe(SAVE_VERSION);
       expect(validated.data.meta.lineage).toEqual([]);
       expect(validated.data.meta.stats).toEqual(emptyRunStats());
       expect(validated.data.progress).toMatchObject({ claimed: [], exploredBelow: {}, remains: null, resume: null });
@@ -1955,31 +1981,32 @@ describe('version 3 (SPEC-047)', () => {
     expect(raw.progress.resume).not.toBeNull();
   });
 
-  // ------------------------------------------------- E73: version 4 refused
+  // -------------------------------- E73: a version past the build refused
+  // SPEC-065 made version 4 this build's own, so the newer save is a 5 now.
 
-  it('E73: a stored version-4 save is refused as newer_version, and its Load row says so', () => {
-    const fake = fakeStorage({ 'reallm:slot:1': JSON.stringify({ version: 4, player: {} }) });
+  it('E73: a stored version-5 save is refused as newer_version, and its Load row says so', () => {
+    const fake = fakeStorage({ 'reallm:slot:1': JSON.stringify({ version: 5, player: {} }) });
     const saves = store(fake, recorder());
-    expect(saves.load(1)).toEqual({ ok: false, reason: 'newer_version', foundVersion: 4 });
+    expect(saves.load(1)).toEqual({ ok: false, reason: 'newer_version', foundVersion: 5 });
     const row = saves.list()[1] as SlotSummary;
     expect(row).toEqual({ slot: 1, empty: false, corrupt: true, newer: true });
     expect(slotLine(row)).toBe('Save from a newer version');
     // Nothing rewrote it: it is still there to export.
-    expect(JSON.parse(fake.data.get('reallm:slot:1') as string).version).toBe(4);
+    expect(JSON.parse(fake.data.get('reallm:slot:1') as string).version).toBe(5);
   });
 
-  it('E73: a version-4 export code is refused as newer_version, naming version 4', async () => {
+  it('E73: a version-5 export code is refused as newer_version, naming version 5', async () => {
     const fake = fakeStorage();
     const events = recorder();
     const saves = store(fake, events);
-    const code = await encodeJson(JSON.stringify({ version: 4, player: {} }));
+    const code = await encodeJson(JSON.stringify({ version: 5, player: {} }));
     const result = await saves.importCode(code, 0);
-    expect(result).toEqual({ ok: false, reason: 'newer_version', foundVersion: 4 });
+    expect(result).toEqual({ ok: false, reason: 'newer_version', foundVersion: 5 });
     expect(events.toasts).toEqual([CODE_NEWER_TEXT]);
     expect(fake.data.has('reallm:slot:0')).toBe(false);
   });
 
-  it('47-a: a v2 export code imports into a slot as version 3', async () => {
+  it('47-a: a v2 export code imports into a slot as the current version', async () => {
     const fake = fakeStorage();
     const saves = store(fake, recorder());
     const v2 = FIXTURES['../fixtures/save-v2.json'] as Record<string, unknown>;
@@ -1988,12 +2015,12 @@ describe('version 3 (SPEC-047)', () => {
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     expect(result.migratedFrom).toBe(2);
-    expect(result.data.version).toBe(3);
+    expect(result.data.version).toBe(SAVE_VERSION);
     expect(result.data.player).toEqual(v2['player']);
     expect(result.data.meta.lineage).toEqual([]);
     expect(result.data.progress).toMatchObject({ claimed: [], exploredBelow: {}, remains: null, resume: null });
     const stored = JSON.parse(fake.data.get('reallm:slot:2') as string) as Save;
-    expect(stored.version).toBe(3);
+    expect(stored.version).toBe(SAVE_VERSION);
     expect(stored.meta.slot).toBe(2);
     expect(stored.meta.stats).toEqual(emptyRunStats());
   });
@@ -2229,9 +2256,11 @@ describe('version 3 (SPEC-047)', () => {
    * underground masks, a full set of remains and a resume point. `longest`
    * writes every number §4.6 leaves open as long as the game can write it; the
    * other build writes each at its shortest (0, `null`, the shortest class and
-   * planet), which is the floor of that growth. Returns both serialisations.
+   * planet), which is the floor of that growth. Returns the serialisations:
+   * `asV3` leaves out SPEC-065's depot, which the v3 → v4 step adds after it
+   * (a `version` of 4 is as long as a 3), and `asV4` is the whole save.
    */
-  function worstCase(longest: boolean): { asV2: string; asV3: string } {
+  function worstCase(longest: boolean): { asV2: string; asV3: string; asV4: string } {
     const v2 = JSON.parse(JSON.stringify(FIXTURES['../fixtures/save-v2.json'])) as Record<string, Record<string, unknown>>;
     // The arena-sized masks a long v2 run carries, so the whole-save check is honest.
     for (const planet of PLANET_IDS) {
@@ -2278,7 +2307,8 @@ describe('version 3 (SPEC-047)', () => {
     expect(worst.meta.lineage.every((entry) => Object.keys(entry.lastDeath).length === PLANET_IDS.length)).toBe(true);
     expect(worst.progress.claimed).toHaveLength(29);
     expect(Object.values(worst.progress.exploredBelow).every((mask) => mask.length === 96)).toBe(true);
-    return { asV2: JSON.stringify(v2), asV3: JSON.stringify(worst) };
+    const { depot: _depot, ...v3 } = worst;
+    return { asV2: JSON.stringify(v2), asV3: JSON.stringify(v3), asV4: JSON.stringify(worst) };
   }
 
   /**
@@ -2298,6 +2328,165 @@ describe('version 3 (SPEC-047)', () => {
     expect(floor.asV3.length - floor.asV2.length).toBe(4_439);
     expect(worst.asV3.length - worst.asV2.length).toBe(5_397);
     expect(worst.asV3.length).toBeLessThan(100_000 / 4);
+    // SPEC-065 §4.1: the empty depot the v3 → v4 step adds, pinned the same way.
+    expect(floor.asV4.length - floor.asV3.length).toBe(116);
+    expect(worst.asV4.length - worst.asV3.length).toBe(116);
+    expect(worst.asV4.length).toBeLessThan(100_000 / 4);
+  });
+});
+
+// ------------------------------------------------------------------ SPEC-065
+
+describe('version 4: the Relay depot (SPEC-065 §4.1)', () => {
+  const EMPTY = {
+    held: { oil: 0, wheat: 0, water: 0, lithium: 0 },
+    keep: { oil: 100, wheat: 100, water: 100, lithium: 100 },
+  };
+
+  /** A valid fresh save whose `depot` is `depot`, or has none at all when it is `undefined`. */
+  function withDepot(depot: unknown): Record<string, unknown> {
+    const base = JSON.parse(JSON.stringify(newSave(0, CREATION, 1, 1000))) as Record<string, unknown>;
+    if (depot === undefined) {
+      delete base['depot'];
+      return base;
+    }
+    return { ...base, depot };
+  }
+
+  function expectOk(raw: unknown): { data: Save; warnings: string[] } {
+    const result = validateSave(raw);
+    if (!result.ok) throw new Error(`expected a valid save, got: ${result.errors.join('; ')}`);
+    return result;
+  }
+
+  // ---------------------------------------------------------------- §3, §4.1
+
+  it('pins the constants of §3: a reserve of 100, steps of 50, and the largest cap rounded up to a step', () => {
+    expect(DEPOT_KEEP_DEFAULT).toBe(100);
+    expect(DEPOT_KEEP_STEP).toBe(50);
+    // The Cargo Hold's tier 3 (1,200) plus the Quartermaster's level-3 bonus (300).
+    const largest = UPGRADES.cargo.metrics.cargoCap[3] + COMPANIONS.quartermaster.levels[2].cargoBonus;
+    expect(largest).toBe(1_500);
+    expect(DEPOT_KEEP_MAX).toBe(Math.ceil(largest / DEPOT_KEEP_STEP) * DEPOT_KEEP_STEP);
+    expect(DEPOT_KEEP_MAX).toBe(1_500);
+  });
+
+  it('a fresh save holds nothing at the depot, with every reserve at DEPOT_KEEP_DEFAULT', () => {
+    const fresh = newSave(0, CREATION, 42, 1_700_000_000_000);
+    expect(fresh.depot).toEqual(EMPTY);
+    expect(fresh.depot).toEqual(emptyDepot());
+    expect(validateSave(fresh)).toMatchObject({ ok: true, warnings: [] });
+    // Two saves never share one depot.
+    expect(newSave(1, CREATION, 42, 0).depot.held).not.toBe(fresh.depot.held);
+    expect(emptyDepot().keep).not.toBe(emptyDepot().keep);
+  });
+
+  it('a depot that is all there survives the validator exactly, with no cap on what it holds', () => {
+    const depot = { held: { oil: 300, wheat: 0, water: 2_500_000, lithium: 15 }, keep: { oil: 0, wheat: 1_500, water: 350, lithium: 100 } };
+    const ok = expectOk(withDepot(depot));
+    expect(ok.data.depot).toEqual(depot);
+    expect(ok.warnings).toEqual([]);
+  });
+
+  // ---------------------------------------------------------------- E120
+
+  it('E120: a v4 bag is refused as newer_version by a build whose SAVE_VERSION is 3 (E73’s rule)', () => {
+    const v4 = withDepot(EMPTY) as { version: number } & Record<string, unknown>;
+    expect(v4.version).toBe(4);
+    // The version-3 build: its own saves still read, and the v4 one is refused.
+    expect(migrate(v4, 3)).toEqual({ ok: false, reason: 'newer_version' });
+    expect(migrate(FIXTURES['../fixtures/save-v3.json'] as { version: number } & Record<string, unknown>, 3)).toMatchObject({ ok: true, from: 3 });
+    // This build reads it as its own: nothing to migrate.
+    expect(migrate(v4)).toMatchObject({ ok: true, from: 4 });
+  });
+
+  it('E120: a stored v3 save loads as v4 with an empty depot, and the next write is v4 with :bak keeping the v3', () => {
+    const v3 = FIXTURES['../fixtures/save-v3.json'] as Record<string, unknown>;
+    const fake = fakeStorage({ 'reallm:slot:0': JSON.stringify(v3) });
+    const saves = store(fake, recorder());
+    const loaded = saves.load(0);
+    expect(loaded).toMatchObject({ ok: true, migratedFrom: 3, source: 'main' });
+    if (!loaded.ok) return;
+    expect(loaded.data.version).toBe(4);
+    expect(loaded.data.depot).toEqual(EMPTY);
+    expect(loaded.data.resources).toEqual(v3['resources']);
+    saves.bind(loaded.data);
+    expect(saves.flush()).toBe(true);
+    expect(JSON.parse(fake.data.get('reallm:slot:0') as string)).toMatchObject({ version: 4, depot: EMPTY });
+    expect(JSON.parse(fake.data.get(`reallm:slot:0${BAK_SUFFIX}`) as string).version).toBe(3);
+  });
+
+  it('the depot rides the save: a flush and a load bring it back, and an export code carries it unchanged', async () => {
+    const fake = fakeStorage();
+    const saves = store(fake, recorder());
+    const data = saves.create(0, CREATION);
+    data.depot.held.oil = 300;
+    data.depot.keep.water = 250;
+    saves.flush();
+    const loaded = store(fake, recorder()).load(0);
+    expect(loaded.ok && loaded.data.depot).toEqual({ held: { ...EMPTY.held, oil: 300 }, keep: { ...EMPTY.keep, water: 250 } });
+    const code = await saves.exportCode(0);
+    const imported = await store(fake, recorder()).importCode(code, 1);
+    expect(imported.ok && imported.data.depot).toEqual({ held: { ...EMPTY.held, oil: 300 }, keep: { ...EMPTY.keep, water: 250 } });
+  });
+
+  // ---------------------------------------------------------- the validator
+
+  it('held: a negative, fractional or non-numeric amount reads 0 with a warning', () => {
+    const ok = expectOk(withDepot({ held: { oil: -5, wheat: 12.5, water: 'lots', lithium: Number.NaN }, keep: EMPTY.keep }));
+    expect(ok.data.depot.held).toEqual(EMPTY.held);
+    const warnings = ok.warnings.join('\n');
+    for (const resource of ['oil', 'wheat', 'water', 'lithium']) expect(warnings, resource).toContain(`depot.held.${resource}`);
+    // A missing amount reads 0 as well, and says so.
+    const missing = expectOk(withDepot({ held: { oil: 40 }, keep: EMPTY.keep }));
+    expect(missing.data.depot.held).toEqual({ ...EMPTY.held, oil: 40 });
+    expect(missing.warnings.join('\n')).toContain('depot.held.wheat');
+    expect(missing.warnings.join('\n')).not.toContain('depot.held.oil');
+  });
+
+  it('keep: clamped to [0, DEPOT_KEEP_MAX] and floored to a step; a missing or non-numeric one reads 100, each with a warning', () => {
+    const ok = expectOk(withDepot({ held: EMPTY.held, keep: { oil: DEPOT_KEEP_MAX + 400, wheat: 120, water: -50, lithium: 149.9 } }));
+    expect(ok.data.depot.keep).toEqual({ oil: DEPOT_KEEP_MAX, wheat: 100, water: 0, lithium: 100 });
+    const warnings = ok.warnings.join('\n');
+    for (const resource of ['oil', 'wheat', 'water', 'lithium']) expect(warnings, resource).toContain(`depot.keep.${resource}`);
+    // On a step and inside the range: kept, and nothing said.
+    const kept = expectOk(withDepot({ held: EMPTY.held, keep: { oil: 0, wheat: 50, water: DEPOT_KEEP_MAX, lithium: 1_200 } }));
+    expect(kept.data.depot.keep).toEqual({ oil: 0, wheat: 50, water: DEPOT_KEEP_MAX, lithium: 1_200 });
+    expect(kept.warnings).toEqual([]);
+    // Missing, a string, infinite or null: the default.
+    const fallback = expectOk(withDepot({ held: EMPTY.held, keep: { oil: '200', wheat: Number.POSITIVE_INFINITY, water: null } }));
+    expect(fallback.data.depot.keep).toEqual(EMPTY.keep);
+    for (const resource of ['oil', 'wheat', 'water', 'lithium']) expect(fallback.warnings.join('\n'), resource).toContain(`depot.keep.${resource}`);
+  });
+
+  it('a missing or broken record falls back to the defaults with a warning, and an unknown resource is dropped', () => {
+    const missing = expectOk(withDepot(undefined));
+    expect(missing.data.depot).toEqual(EMPTY);
+    expect(missing.warnings.join('\n')).toContain('depot: missing');
+    for (const broken of ['a depot', 42, null, [1, 2]]) {
+      const ok = expectOk(withDepot(broken));
+      expect(ok.data.depot, JSON.stringify(broken)).toEqual(EMPTY);
+      expect(ok.warnings.join('\n'), JSON.stringify(broken)).toContain('depot: not a record');
+    }
+    // One broken record leaves the other one as it was.
+    const half = expectOk(withDepot({ held: 'none', keep: { ...EMPTY.keep, oil: 300 } }));
+    expect(half.data.depot).toEqual({ held: EMPTY.held, keep: { ...EMPTY.keep, oil: 300 } });
+    expect(half.warnings).toEqual(['depot.held: not a record; read as the defaults']);
+    const unknown = expectOk(withDepot({ held: { ...EMPTY.held, plutonium: 9 }, keep: { ...EMPTY.keep, uranium: 50 }, extra: true }));
+    expect(unknown.data.depot).toEqual(EMPTY);
+    expect(Object.keys(unknown.data.depot)).toEqual(['held', 'keep']);
+    expect(unknown.warnings).toEqual(['depot.held.plutonium: unknown resource dropped', 'depot.keep.uranium: unknown resource dropped']);
+  });
+
+  it('clampKeep is the one rule the validator and Economy.setKeep store a reserve by', () => {
+    expect(clampKeep(0)).toBe(0);
+    expect(clampKeep(49)).toBe(0);
+    expect(clampKeep(50)).toBe(50);
+    expect(clampKeep(199.99)).toBe(150);
+    expect(clampKeep(-1)).toBe(0);
+    expect(clampKeep(DEPOT_KEEP_MAX + 1)).toBe(DEPOT_KEEP_MAX);
+    expect(clampKeep(Number.NaN)).toBe(DEPOT_KEEP_DEFAULT);
+    expect(clampKeep(Number.POSITIVE_INFINITY)).toBe(DEPOT_KEEP_DEFAULT);
   });
 });
 
