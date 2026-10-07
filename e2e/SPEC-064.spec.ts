@@ -1,9 +1,10 @@
 // SPEC-064 §6.3 — Cinder-4's raiders in the salvager's suit, in the browser.
 // Six spawned raiders are skinned and the medium frame stays inside 96 draws
-// and 130 k triangles; smitten, they fall, and are gone within two seconds,
-// the budget holding throughout; their shots are drawn as amber tracers; and
-// without the salvager model every raider is the procedural stand-in. Case 5,
-// the existing pins, is `surface-env.spec.ts`'s spawn-heavy case and
+// and 130 k triangles, and so does the full pool, six live and two falling;
+// smitten, they fall and are gone within two seconds, the budget holding
+// throughout; their shots are drawn as amber tracers; and without the
+// salvager model every raider is the procedural stand-in. Case 5, the
+// existing pins, is `surface-env.spec.ts`'s spawn-heavy case and
 // `SPEC-048.spec.ts`'s case 8b, which this spec leaves unmoved.
 //
 // Times are read on `sceneInfo.viewTime`, the clock the raiders' mixers run on.
@@ -131,6 +132,26 @@ test('1. six raiders render skinned, and the medium frame stays within 96 draws 
   const stats = await page.evaluate(() => window.__reallm.stats());
   expect(stats.preset).toBe('medium');
   expect(stats.drawCalls).toBeGreaterThan(10); // the surface actually drew
+});
+
+test('1b. the full pool — six live raiders and two falling — stays within 96 draws and 130 k triangles (§4.6)', async ({
+  page,
+}) => {
+  test.setTimeout(150_000);
+  await start(page, URL);
+  await clearAndSpawn(page, 8);
+  await expect.poll(async () => (await raiders(page)).live, { timeout: 30_000 }).toBe(8);
+  await expect.poll(async () => (await raiders(page)).falling, { timeout: 30_000 }).toBe(0);
+  // Two smitten: their copies fall for 1.6 s while the other six stand.
+  const { samples } = await sampleFrames(page, 1, 2);
+  const full = samples.filter((sample) => sample.live === 6 && sample.falling === 2);
+  expect(full.length).toBeGreaterThan(0);
+  for (const sample of samples) {
+    expect(sample.live + sample.falling).toBeLessThanOrEqual(8);
+    expect(sample.drawCalls).toBeLessThanOrEqual(96); // 80 scene + 16 post
+    expect(sample.triangles).toBeLessThanOrEqual(130_000);
+  }
+  expect((await page.evaluate(() => window.__reallm.stats())).preset).toBe('medium');
 });
 
 // ---------------------------------------------------------------- 2: they fall
