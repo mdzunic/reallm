@@ -200,7 +200,11 @@ export type Settings = {
   /** SPEC-045 §4.9: the keys' and the stick's up / down steering inverted in flight; default off. */
   invertFlightY: boolean;
   autoFire: AutoFireMode;
-  /** SPEC-029 §4.4: the locked-primary sidearm fallback; default `'touch'`. */
+  /**
+   * SPEC-029 §4.4: the locked-primary sidearm fallback; default `'on'` since
+   * review 2026-10 (G-04) — it was `'touch'`, which left the sidearm dead on
+   * the keyboard scheme.
+   */
   weaponAutoSwap: WeaponAutoSwapMode;
   joystickSide: JoystickSide;
   /** Flight only: blend keyboard steering toward the mouse reticle (SPEC-005 AC-29). */
@@ -384,7 +388,9 @@ export function defaultSettings(): Settings {
     // SPEC-038 §4.7: on for every scheme; only keys a player changed persist,
     // so a stored `'touch'` or `'off'` keeps its choice (38-l).
     autoFire: 'on',
-    weaponAutoSwap: 'touch',
+    // SPEC-029 §4.4 (review 2026-10, G-04): on for every scheme too, like
+    // auto-fire — a stored `'touch'` or `'off'` keeps its choice.
+    weaponAutoSwap: 'on',
     joystickSide: 'left',
     flightMouseSteer: true,
     // SPEC-050 §4.5: Shift holds the run; the stick runs past its ring.

@@ -485,9 +485,10 @@ export class Combat {
   readonly telegraphs: Pool<TelegraphEntity> = new Pool(makeTelegraph);
   /**
    * SPEC-029 §4.4: the scene mirrors `settings.weaponAutoSwap` here — Combat
-   * has no settings port, and the test harnesses set it directly.
+   * has no settings port, and the test harnesses set it directly. It starts
+   * at the setting's default, `'on'` (review 2026-10, G-04).
    */
-  weaponAutoSwap: WeaponAutoSwapMode = 'touch';
+  weaponAutoSwap: WeaponAutoSwapMode = 'on';
 
   readonly #world: CombatWorld;
   readonly #save: Save;
