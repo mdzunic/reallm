@@ -18,7 +18,7 @@ import * as THREE from 'three';
 import type { Assets } from '@/core/Assets';
 import { latticeHash } from '@/core/Noise';
 import { hash32 } from '@/core/Rng';
-import type { GroundLayerId } from '@/data/ids';
+import type { DecalKind, GroundLayerId } from '@/data/ids';
 import type { PlanetDef } from '@/data/index';
 import type { TextureId } from '@/data/assets';
 
@@ -497,6 +497,278 @@ export function decalAtlas(): THREE.DataTexture {
   }
   atlasCache = dataTexture(data, size, true);
   return atlasCache;
+}
+
+// ------------------------------------------------------------ patch atlas
+
+/** PLAN R28 / SPEC-067: the ground-patch atlas — 4 × 4 tiles of the old atlas's 256 px. */
+export const PATCH_ATLAS_SIZE = 1024;
+const PATCH_TILE_SIZE = PATCH_ATLAS_SIZE / 4;
+
+/**
+ * SPEC-067: each decal kind's tile in the patch atlas, row-major from v = 0.
+ * Tiles 0–3 are SPEC-018's four, copied texel for texel; `frost` shares
+ * `slick`'s, as before.
+ */
+export const PATCH_TILE: Readonly<Record<DecalKind, number>> = {
+  crater: 0,
+  scorch: 1,
+  cracks: 2,
+  slick: 3,
+  frost: 3,
+  gravel: 4,
+  ripples: 5,
+  mudflat: 6,
+  ice_sheet: 7,
+  snowdrift: 8,
+  leaf_litter: 9,
+  ash: 10,
+  lava_pool: 11,
+  goo: 12,
+  trail: 13,
+  tread: 14,
+  footprints: 15,
+};
+
+let patchCache: THREE.DataTexture | null = null;
+/** Which of the sixteen tiles hold their texels yet. */
+const patchBuilt = new Set<number>();
+
+/** The patch's ragged rim: 1 inside, 0 by r = 0.85 at the most wobbled — before the tile's edge (r = 1). */
+function patchRim(r: number, noise: number): number {
+  return 1 - smoothstep(0.45, 0.85, r + (noise - 0.5) * 0.3);
+}
+
+const patchTexel = { r: 0, g: 0, b: 0, a: 0 };
+
+/**
+ * SPEC-067: one texel of a new tile at (lx, ly) in [0, 1)² of the tile.
+ * Greys are tinted per patch by the decal's vertex colour (the ground's hue
+ * or the trail's); the frozen, molten, gooey and littered tiles carry their
+ * own colours. Every tile reaches alpha 0 well inside its border, so the
+ * mipmaps never bleed one tile into the next.
+ */
+function patchTexelAt(tile: number, seed: number, lx: number, ly: number): typeof patchTexel {
+  const out = patchTexel;
+  const dx = lx * 2 - 1;
+  const dy = ly * 2 - 1;
+  const r = Math.hypot(dx, dy);
+  const noise = 0.5 + 0.5 * pFbm(seed + tile, lx * 4, ly * 4, 4, 4, 3);
+  const rim = patchRim(r, noise);
+  switch (tile) {
+    case 4: {
+      // Gravel: pebbles of every grey in a dusty bed.
+      const vor = pVoronoi(seed + 40, lx * 12, ly * 12, 12, 12);
+      const keep = (vor.id & 0xff) / 255 < 0.7;
+      const stone = keep ? smoothstep(0.02, 0.1, vor.edge) : 0;
+      const shade = 0.45 + 0.5 * ((vor.id >>> 8) & 0xff) / 255;
+      const lit = shade * (1.1 - vor.dist * 0.5);
+      const v = stone > 0 ? lit : 0.55 + 0.1 * noise;
+      out.r = out.g = out.b = v;
+      out.a = rim * (0.3 + 0.65 * stone);
+      return out;
+    }
+    case 5: {
+      // A sand drift: pale, wind-rippled, crest-lit.
+      const ripple = 0.5 + 0.5 * Math.sin((ly * 16 + noise * 2.2) * Math.PI * 2);
+      const v = 0.95 + 0.25 * ripple;
+      out.r = out.g = out.b = v;
+      out.a = rim * (0.35 + 0.3 * ripple) * (0.7 + 0.3 * noise);
+      return out;
+    }
+    case 6: {
+      // Dried mud: small curled plates on a warped lattice, so no two cells
+      // line up, dark cracks between and the plates' rims lifted pale.
+      const warpX = pFbm(seed + 61, lx * 3, ly * 3, 3, 3, 2) * 0.6;
+      const warpY = pFbm(seed + 62, lx * 3, ly * 3, 3, 3, 2) * 0.6;
+      const vor = pVoronoi(seed + 60, lx * 11 + warpX, ly * 11 + warpY, 11, 11);
+      const plate = smoothstep(0.02, 0.09, vor.edge);
+      const shade = 0.7 + 0.3 * ((vor.id & 0xff) / 255);
+      const v = 0.2 + (shade * (0.85 + 0.35 * vor.dist) - 0.2) * plate;
+      out.r = out.g = out.b = v;
+      out.a = rim * (0.55 + 0.4 * (1 - plate)) * (0.75 + 0.25 * noise);
+      return out;
+    }
+    case 7: {
+      // A blue ice sheet: glassy, a pale sheen across it, white fractures.
+      const vor = pVoronoi(seed + 70, lx * 3, ly * 3, 3, 3);
+      const crack = 1 - smoothstep(0, 0.035, vor.edge);
+      const sheen = Math.exp(-((dx + dy * 0.6 - 0.15) ** 2) / 0.08);
+      out.r = 0.5 + 0.25 * noise + 0.3 * sheen + 0.4 * crack;
+      out.g = 0.72 + 0.15 * noise + 0.22 * sheen + 0.25 * crack;
+      out.b = 0.92 + 0.08 * noise + 0.1 * sheen;
+      out.a = rim * (0.78 + 0.2 * crack);
+      return out;
+    }
+    case 8: {
+      // A snow drift: bright, wind-streaked, soft.
+      // Blue in the lee of each streak, white on its crest.
+      const streak = 0.5 + 0.5 * pFbm(seed + 80, lx * 2, ly * 10, 2, 10, 3);
+      out.r = 0.74 + 0.26 * streak;
+      out.g = 0.84 + 0.16 * streak;
+      out.b = 0.97 + 0.03 * streak;
+      out.a = rim * (0.55 + 0.35 * Math.abs(streak - 0.5) * 2);
+      return out;
+    }
+    case 9: {
+      // Leaf litter: leaves of four colours over dark soil.
+      const vor = pVoronoi(seed + 90, lx * 14, ly * 14, 14, 14);
+      const leaf = smoothstep(0.03, 0.14, vor.edge) * (((vor.id >>> 4) & 0xff) / 255 < 0.8 ? 1 : 0);
+      const pick = (vor.id & 0x3) as 0 | 1 | 2 | 3;
+      const colours = [
+        [0.42, 0.28, 0.12],
+        [0.62, 0.48, 0.18],
+        [0.24, 0.32, 0.12],
+        [0.5, 0.22, 0.1],
+      ] as const;
+      const c = colours[pick];
+      const lit = 0.8 + 0.4 * (1 - vor.dist);
+      out.r = 0.14 + (c[0] * lit - 0.14) * leaf;
+      out.g = 0.11 + (c[1] * lit - 0.11) * leaf;
+      out.b = 0.07 + (c[2] * lit - 0.07) * leaf;
+      out.a = rim * (0.6 + 0.35 * leaf);
+      return out;
+    }
+    case 10: {
+      // An ash drift: pale grey, streaked.
+      const streak = 0.5 + 0.5 * pFbm(seed + 100, lx * 3, ly * 9, 3, 9, 3);
+      const v = 0.5 + 0.18 * streak;
+      out.r = v;
+      out.g = v * 0.98;
+      out.b = v * 0.96;
+      out.a = rim * (0.5 + 0.4 * streak);
+      return out;
+    }
+    case 11: {
+      // A cooling lava pool: black crust plates on a molten core — the
+      // decal's glow lights the bright texels.
+      const vor = pVoronoi(seed + 110, lx * 5, ly * 5, 5, 5);
+      const crack = 1 - smoothstep(0.01, 0.09, vor.edge);
+      const core = 1 - smoothstep(0.1, 0.5, r + (noise - 0.5) * 0.3);
+      const hot = Math.min(1, crack * 0.9 + core * (0.55 + 0.45 * crack));
+      out.r = 0.08 + 0.92 * hot;
+      out.g = 0.06 + 0.42 * hot * hot;
+      out.b = 0.05 + 0.06 * hot * hot * hot;
+      out.a = rim * 0.95;
+      return out;
+    }
+    case 12: {
+      // A goo pool: glossy violet, a bright meniscus and bubbles.
+      const bubbles = pVoronoi(seed + 120, lx * 9, ly * 9, 9, 9);
+      const bubble = ((bubbles.id & 0xff) / 255 < 0.35 ? 1 : 0) * (1 - smoothstep(0.08, 0.16, bubbles.dist));
+      const meniscus = Math.exp(-((r + (noise - 0.5) * 0.3 - 0.62) ** 2) / 0.01);
+      const lit = 0.5 + 0.5 * noise;
+      out.r = 0.32 * lit + 0.22 * meniscus + 0.35 * bubble;
+      out.g = 0.5 * lit * lit + 0.25 * meniscus + 0.55 * bubble;
+      out.b = 0.38 * lit + 0.2 * meniscus + 0.35 * bubble;
+      out.a = rim * 0.88;
+      return out;
+    }
+    case 13: {
+      // A worn trail: a band along u, ragged at the sides, open at the ends
+      // so a chain of patches reads as one path.
+      const across = 1 - smoothstep(0.35, 0.9, Math.abs(dy) + (noise - 0.5) * 0.35);
+      const along = 1 - smoothstep(0.6, 0.98, Math.abs(dx));
+      const grain = 0.5 + 0.5 * pFbm(seed + 130, lx * 16, ly * 16, 16, 16, 2);
+      const v = 0.8 + 0.25 * grain;
+      out.r = out.g = out.b = v;
+      out.a = across * along * (0.55 + 0.35 * noise);
+      return out;
+    }
+    case 14: {
+      // Tread marks: two lugged bands along u.
+      const band = Math.abs(Math.abs(dy) - 0.4) < 0.16 ? 1 : 0;
+      const lug = Math.sin((lx * 14 + Math.abs(dy) * 2.5) * Math.PI * 2) > 0 ? 1 : 0.35;
+      const along = 1 - smoothstep(0.7, 0.98, Math.abs(dx));
+      out.r = out.g = out.b = 0.28 + 0.1 * noise;
+      out.a = band * lug * along * 0.75;
+      return out;
+    }
+    case 15: {
+      // Footprints: six boots, left and right, along u.
+      let print = 0;
+      for (let i = 0; i < 6; i++) {
+        const px = 0.14 + i * 0.145;
+        const py = 0.5 + (i % 2 === 0 ? 0.11 : -0.11);
+        const ex = (lx - px) / 0.05;
+        const ey = (ly - py) / 0.028;
+        print = Math.max(print, 1 - smoothstep(0.7, 1, Math.hypot(ex, ey)));
+      }
+      out.r = out.g = out.b = 0.3;
+      out.a = print * 0.7;
+      return out;
+    }
+    default:
+      out.r = out.g = out.b = 1;
+      out.a = 0;
+      return out;
+  }
+}
+
+/** Copies one quadrant of SPEC-018's 512² atlas into a patch tile, texel for texel. */
+function copyDecalTile(target: Uint8Array, tile: number): void {
+  const source = decalAtlas().image.data as Uint8Array;
+  const quadrant = tile; // crater, scorch, cracks, slick — the old row-major order
+  const sx0 = (quadrant % 2) * PATCH_TILE_SIZE;
+  const sy0 = Math.floor(quadrant / 2) * PATCH_TILE_SIZE;
+  const tx0 = (tile % 4) * PATCH_TILE_SIZE;
+  const ty0 = Math.floor(tile / 4) * PATCH_TILE_SIZE;
+  for (let y = 0; y < PATCH_TILE_SIZE; y++) {
+    const from = ((sy0 + y) * ATLAS_SIZE + sx0) * 4;
+    const to = ((ty0 + y) * PATCH_ATLAS_SIZE + tx0) * 4;
+    target.set(source.subarray(from, from + PATCH_TILE_SIZE * 4), to);
+  }
+}
+
+/**
+ * PLAN R28 / SPEC-067: the shared patch atlas, with at least `kinds`' tiles
+ * filled. Tiles are computed the first time a planet asks for them — a
+ * planet uses six or seven — and the texture re-uploads only when one was
+ * added. Session-cached and `shared`, like the decal atlas.
+ */
+export function patchAtlas(kinds: readonly DecalKind[]): THREE.DataTexture {
+  if (patchCache === null) {
+    patchCache = dataTexture(new Uint8Array(PATCH_ATLAS_SIZE * PATCH_ATLAS_SIZE * 4), PATCH_ATLAS_SIZE, true);
+    // A decal stretches its tile, never repeats it.
+    patchCache.wrapS = THREE.ClampToEdgeWrapping;
+    patchCache.wrapT = THREE.ClampToEdgeWrapping;
+  }
+  const data = patchCache.image.data as Uint8Array;
+  const seed = hash32('tex', 'patches');
+  let added = false;
+  for (const kind of kinds) {
+    const tile = PATCH_TILE[kind];
+    if (patchBuilt.has(tile)) continue;
+    patchBuilt.add(tile);
+    added = true;
+    if (tile < 4) {
+      copyDecalTile(data, tile);
+      continue;
+    }
+    const tx0 = (tile % 4) * PATCH_TILE_SIZE;
+    const ty0 = Math.floor(tile / 4) * PATCH_TILE_SIZE;
+    for (let y = 0; y < PATCH_TILE_SIZE; y++) {
+      const ly = (y + 0.5) / PATCH_TILE_SIZE;
+      for (let x = 0; x < PATCH_TILE_SIZE; x++) {
+        const texel = patchTexelAt(tile, seed, (x + 0.5) / PATCH_TILE_SIZE, ly);
+        const o = ((ty0 + y) * PATCH_ATLAS_SIZE + tx0 + x) * 4;
+        data[o] = Math.round(clamp01(texel.r) * 255);
+        data[o + 1] = Math.round(clamp01(texel.g) * 255);
+        data[o + 2] = Math.round(clamp01(texel.b) * 255);
+        data[o + 3] = Math.round(clamp01(texel.a) * 255);
+      }
+    }
+  }
+  if (added) patchCache.needsUpdate = true;
+  return patchCache;
+}
+
+/** SPEC-067: the tiles every planet draws — its trails and the landing site's scuffs. */
+export const ALWAYS_PATCHES: readonly DecalKind[] = ['trail', 'tread', 'footprints'];
+
+/** SPEC-067: fill a planet's patch tiles ahead of the landing, beside `prewarm`. */
+export function prewarmPatches(kinds: readonly DecalKind[]): void {
+  patchAtlas([...kinds, ...ALWAYS_PATCHES]);
 }
 
 export type SpriteKind = 'dot' | 'streak' | 'flake' | 'ember';

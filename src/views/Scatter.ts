@@ -3,15 +3,20 @@
 // every pebble in the same place, and placed only where nothing gameplay-
 // relevant lives: outside POI rings, the pad clearing, obstacle skirts and
 // node harvesting spots.
+//
+// PLAN R28 / SPEC-067 grows the decals into ground patches — gravel, drifts,
+// mud flats, ice sheets, litter, ash, lava and goo pools on the patch atlas,
+// about three to a spawn frame — plus worn trails toward the objectives and
+// the landing site's scuffs, still one merged mesh and one draw.
 import * as THREE from 'three';
 import type { HeightField } from '@/core/HeightField';
 import { hash01 } from '@/core/Noise';
 import { hash32 } from '@/core/Rng';
 import type { QualityPreset } from '@/core/Quality';
-import type { ScatterKind } from '@/data/ids';
+import type { DecalKind, ScatterKind } from '@/data/ids';
 import type { SurfaceLook } from '@/data/planets';
-import { decalAtlas } from '@/views/ProceduralTextures';
-import type { ViewLayout } from '@/views/SurfaceView';
+import { ALWAYS_PATCHES, PATCH_TILE, patchAtlas } from '@/views/ProceduralTextures';
+import type { ViewFeature, ViewLayout } from '@/views/SurfaceView';
 
 export const SCATTER_CAP = { low: 300, medium: 600, high: 900 } as const;
 
@@ -340,32 +345,204 @@ export function buildScatter(
 // ----------------------------------------------------------------- decals
 
 const DECAL_HOVER = 0.03;
-const DECAL_SEGMENTS = 4;
+/**
+ * SPEC-067: a patch's grid cell is at most this many metres, and a side at
+ * most this many cells — a 3 m patch is one quad, a 12 m sheet 4 × 3. Relief
+ * of ≤ 0.5 m over 20–30 m bends less than the 3 cm hover across a cell, and
+ * the 600-odd patches keep to about 6 k triangles (*initial tuning*).
+ */
+const DECAL_CELL = 3;
+const DECAL_MAX_SEGMENTS = 5;
 /** SPEC-053 §4.9: decals keep this far outside an orchard's rectangle. */
 const ORCHARD_DECAL_MARGIN = 2;
 
-/** Atlas quadrant per kind; frost shares the slick tile (§4.5). */
-const DECAL_TILE: Record<string, readonly [number, number]> = {
-  crater: [0, 0],
-  scorch: [0.5, 0],
-  cracks: [0, 0.5],
-  slick: [0.5, 0.5],
-  frost: [0.5, 0.5],
+/**
+ * PLAN R28 / SPEC-067 (*initial tuning*): ground patches per 1,000 m² on
+ * `medium` and `high` — about three in every spawn frame. `low` keeps
+ * SPEC-018's `min(80, 20 × kinds)`.
+ */
+export const DECAL_DENSITY = 3.4;
+/** SPEC-067: a lava pool's emission, × its texel squared — bright enough to bloom. */
+export const DECAL_GLOW = 4;
+/** SPEC-067: the landing site's tread marks and footprints, 7–14 m from the pad's centre. */
+export const SCUFFS = 8;
+const SCUFF_RING: readonly [number, number] = [7, 14];
+/** SPEC-067: a trail starts this far from the pad's centre and stops this far short of its POI's ring. */
+const TRAIL_START = 6.5;
+const TRAIL_SHORT = 1;
+
+/** SPEC-067: how one decal kind is laid — its length range, its tint, glow and aspect. */
+interface DecalStyle {
+  /** Length along the tile's u, in metres. */
+  readonly size: readonly [number, number];
+  /** Nothing (the tile's own colours), the ground's hue, or the planet's trail colour. */
+  readonly tint: 'none' | 'ground' | 'trail';
+  /** Multiplies a ground tint. */
+  readonly shade: number;
+  readonly glow: number;
+  /** Length over width. */
+  readonly stretch: number;
+}
+
+const ROUND: DecalStyle = { size: [3, 7], tint: 'none', shade: 1, glow: 0, stretch: 1 };
+
+/** SPEC-018's five kinds keep their 3–7 m round patches; SPEC-067's follow (*initial tuning*). */
+const DECAL_STYLE: Readonly<Record<DecalKind, DecalStyle>> = {
+  crater: ROUND,
+  scorch: ROUND,
+  cracks: ROUND,
+  slick: ROUND,
+  frost: ROUND,
+  gravel: { size: [2.5, 5.5], tint: 'ground', shade: 1, glow: 0, stretch: 1 },
+  ripples: { size: [8, 14], tint: 'ground', shade: 1.05, glow: 0, stretch: 1.5 },
+  mudflat: { size: [5, 10], tint: 'trail', shade: 1, glow: 0, stretch: 1.2 },
+  ice_sheet: { size: [6, 13], tint: 'none', shade: 1, glow: 0, stretch: 1.3 },
+  snowdrift: { size: [5, 10], tint: 'none', shade: 1, glow: 0, stretch: 1.6 },
+  leaf_litter: { size: [3, 7], tint: 'none', shade: 1, glow: 0, stretch: 1 },
+  ash: { size: [5, 10], tint: 'none', shade: 1, glow: 0, stretch: 1.5 },
+  lava_pool: { size: [2.5, 5], tint: 'none', shade: 1, glow: DECAL_GLOW, stretch: 1.15 },
+  goo: { size: [2.5, 5.5], tint: 'none', shade: 1, glow: 1.6, stretch: 1.15 },
+  trail: { size: [5.5, 7.5], tint: 'trail', shade: 1, glow: 0, stretch: 3 },
+  tread: { size: [4, 6], tint: 'none', shade: 1, glow: 0, stretch: 2.6 },
+  footprints: { size: [2.6, 3.2], tint: 'none', shade: 1, glow: 0, stretch: 2.2 },
 };
+
+/** SPEC-053 §4.9: (x, z) lies on an orchard's lawn — its rectangle, plus 2 m. */
+function onOrchard(orchards: readonly ViewFeature[], x: number, z: number): boolean {
+  for (const orchard of orchards) {
+    const halfW = (orchard.halfW ?? orchard.radius) + ORCHARD_DECAL_MARGIN;
+    const halfD = (orchard.halfD ?? orchard.radius) + ORCHARD_DECAL_MARGIN;
+    if (Math.abs(x - orchard.x) <= halfW && Math.abs(z - orchard.z) <= halfD) return true;
+  }
+  return false;
+}
+
+/** SPEC-067: how many field patches a look lays on a preset. */
+export function decalTarget(look: SurfaceLook, halfSize: number, preset: QualityPreset): number {
+  const floor = Math.min(80, 20 * look.decals.length);
+  if (preset === 'low') return floor;
+  return Math.max(floor, Math.round((DECAL_DENSITY * (2 * halfSize) ** 2) / 1000));
+}
+
+/**
+ * SPEC-067: a ground tint — the palette's ground hue at full channel, dimmed
+ * toward the ground's own lightness so a pebble bed on basalt stays dark.
+ */
+function groundTint(ground: string, shade: number, out: THREE.Color): THREE.Color {
+  out.set(ground);
+  const max = Math.max(out.r, out.g, out.b, 1e-4);
+  const level = Math.min(1, Math.max(0.12, Math.sqrt(max) * 1.15));
+  return out.multiplyScalar((shade * level) / max);
+}
+
+/** The merged decal geometry as it grows: one terrain-conformed grid per patch. */
+class DecalSheet {
+  readonly positions: number[] = [];
+  readonly normals: number[] = [];
+  readonly uvs: number[] = [];
+  readonly colors: number[] = [];
+  readonly glows: number[] = [];
+  readonly indices: number[] = [];
+  /** x, z per patch — what the orchard rule and the tests read. */
+  readonly centres: number[] = [];
+  readonly #field: HeightField;
+  readonly #normal = { x: 0, y: 1, z: 0 };
+
+  constructor(field: HeightField) {
+    this.#field = field;
+  }
+
+  /** One patch: `length` along `rot`, `width` across, its tile's UVs, tint and glow on every vertex. */
+  add(cx: number, cz: number, length: number, width: number, rot: number, kind: DecalKind, tint: THREE.Color): void {
+    const tile = PATCH_TILE[kind];
+    const tileU = (tile % 4) / 4;
+    const tileV = Math.floor(tile / 4) / 4;
+    const glow = DECAL_STYLE[kind].glow;
+    const segU = Math.min(DECAL_MAX_SEGMENTS, Math.max(1, Math.ceil(length / DECAL_CELL)));
+    const segV = Math.min(DECAL_MAX_SEGMENTS, Math.max(1, Math.ceil(width / DECAL_CELL)));
+    const cos = Math.cos(rot);
+    const sin = Math.sin(rot);
+    const base = (this.positions.length / 3) | 0;
+    for (let gv = 0; gv <= segV; gv++) {
+      for (let gu = 0; gu <= segU; gu++) {
+        const lx = (gu / segU - 0.5) * length;
+        const lz = (gv / segV - 0.5) * width;
+        const x = cx + lx * cos - lz * sin;
+        const z = cz + lx * sin + lz * cos;
+        this.positions.push(x, this.#field.heightAt(x, z) + DECAL_HOVER, z);
+        this.#field.normalAt(x, z, this.#normal);
+        this.normals.push(this.#normal.x, this.#normal.y, this.#normal.z);
+        this.uvs.push(tileU + (gu / segU) * 0.25, tileV + (gv / segV) * 0.25);
+        this.colors.push(tint.r, tint.g, tint.b);
+        this.glows.push(glow);
+      }
+    }
+    for (let gv = 0; gv < segV; gv++) {
+      for (let gu = 0; gu < segU; gu++) {
+        const a = base + gv * (segU + 1) + gu;
+        const b = a + 1;
+        const c = a + segU + 1;
+        const d = c + 1;
+        this.indices.push(a, c, b, b, c, d);
+      }
+    }
+    this.centres.push(cx, cz);
+  }
+}
+
+/**
+ * SPEC-067: the decal material — the patch atlas, each patch's tint as its
+ * vertex colour, and the stock emissive replaced by the lit texel squared ×
+ * the patch's `glow`, so a lava pool's cracks bloom in the one draw.
+ */
+function decalMaterial(kinds: readonly DecalKind[]): THREE.MeshStandardMaterial {
+  const material = new THREE.MeshStandardMaterial({
+    map: patchAtlas([...kinds, ...ALWAYS_PATCHES]),
+    transparent: true,
+    depthWrite: false,
+    polygonOffset: true,
+    polygonOffsetFactor: -2,
+    polygonOffsetUnits: -2,
+    roughness: 1,
+    vertexColors: true,
+  });
+  material.onBeforeCompile = (shader) => {
+    shader.vertexShader = shader.vertexShader
+      .replace('#include <common>', 'attribute float glow;\nvarying float vGlow;\n#include <common>')
+      .replace('#include <begin_vertex>', '#include <begin_vertex>\nvGlow = glow;');
+    shader.fragmentShader = shader.fragmentShader
+      .replace('#include <common>', 'varying float vGlow;\n#include <common>')
+      .replace(
+        '#include <emissivemap_fragment>',
+        '#include <emissivemap_fragment>\ntotalEmissiveRadiance += diffuseColor.rgb * diffuseColor.rgb * vGlow;',
+      );
+  };
+  material.customProgramCacheKey = () => 'decals/2';
+  return material;
+}
+
+const scratchTintDecal = new THREE.Color();
+const WHITE = new THREE.Color(1, 1, 1);
 
 /**
  * All decal patches merged into one terrain-conformed geometry at
- * `heightAt + 0.03`, atlas UVs cycling through the planet's kinds.
+ * `heightAt + 0.03`. SPEC-018 §4.6's field patches cycle through the planet's
+ * kinds — `decalTarget` of them; PLAN R28 / SPEC-067 adds the worn trails from
+ * the pad toward every objective POI and the landing site's scuffs, on every
+ * preset, and draws them all from the patch atlas in the one draw.
  */
-export function buildDecals(layout: ViewLayout, field: HeightField, look: SurfaceLook): THREE.Mesh {
-  const seed = hash32(layout.hash, 'decals');
-  const target = Math.min(80, 20 * look.decals.length);
-  const positions: number[] = [];
-  const normals: number[] = [];
-  const uvs: number[] = [];
-  const indices: number[] = [];
-  const scratchNormal = { x: 0, y: 1, z: 0 };
+export function buildDecals(
+  layout: ViewLayout,
+  field: HeightField,
+  look: SurfaceLook,
+  preset: QualityPreset = 'medium',
+  palette: { ground: string } = { ground: '#888888' },
+): THREE.Mesh {
+  const sheet = new DecalSheet(field);
 
+  // SPEC-018 §4.6, SPEC-067: the field patches.
+  const seed = hash32(layout.hash, 'decals');
+  const target = decalTarget(look, layout.halfSize, preset);
   // SPEC-053 §4.9: nothing scuffs an orchard's lawn — its rectangle, plus 2 m.
   const orchards = (layout.features ?? []).filter((f) => f.kind === 'orchard');
   let placed = 0;
@@ -373,72 +550,98 @@ export function buildDecals(layout: ViewLayout, field: HeightField, look: Surfac
     const reach = layout.halfSize - 8;
     const cx = (hash01(seed, i, 0) * 2 - 1) * reach;
     const cz = (hash01(seed, i, 1) * 2 - 1) * reach;
-    if (Math.hypot(cx, cz) < PAD_CLEARANCE) continue;
+    const kind = look.decals[placed % look.decals.length] as DecalKind;
+    const style = DECAL_STYLE[kind];
+    const length = style.size[0] + hash01(seed, i, 2) * (style.size[1] - style.size[0]);
+    // SPEC-067: SPEC-018's kinds keep the 15 m clearing; a ground patch may
+    // reach into it as far as the landing site's ring, never onto the pad.
+    const pad = DECAL_STYLE[kind] === ROUND ? PAD_CLEARANCE : SCUFF_RING[0] + length / 2;
+    if (Math.hypot(cx, cz) < pad) continue;
     let clear = true;
     for (const poi of layout.pois) {
-      if (Math.hypot(cx - poi.x, cz - poi.z) < poi.radius) {
+      // A patch past SPEC-018's 7 m keeps its extra half-length off the ring too.
+      if (Math.hypot(cx - poi.x, cz - poi.z) < poi.radius + Math.max(0, (length - ROUND.size[1]) * 0.5)) {
         clear = false;
         break;
       }
     }
-    for (const orchard of orchards) {
-      const halfW = (orchard.halfW ?? orchard.radius) + ORCHARD_DECAL_MARGIN;
-      const halfD = (orchard.halfD ?? orchard.radius) + ORCHARD_DECAL_MARGIN;
-      if (Math.abs(cx - orchard.x) <= halfW && Math.abs(cz - orchard.z) <= halfD) clear = false;
-    }
-    if (!clear) continue;
-
-    const size = 3 + hash01(seed, i, 2) * 4;
+    if (!clear || onOrchard(orchards, cx, cz)) continue;
     const rot = hash01(seed, i, 3) * Math.PI * 2;
-    const cos = Math.cos(rot);
-    const sin = Math.sin(rot);
-    const kind = look.decals[placed % look.decals.length] as string;
-    const [tileU, tileV] = DECAL_TILE[kind] as readonly [number, number];
-    const base = (positions.length / 3) | 0;
-
-    for (let gz = 0; gz <= DECAL_SEGMENTS; gz++) {
-      for (let gx = 0; gx <= DECAL_SEGMENTS; gx++) {
-        const lx = (gx / DECAL_SEGMENTS - 0.5) * size;
-        const lz = (gz / DECAL_SEGMENTS - 0.5) * size;
-        const x = cx + lx * cos - lz * sin;
-        const z = cz + lx * sin + lz * cos;
-        positions.push(x, field.heightAt(x, z) + DECAL_HOVER, z);
-        field.normalAt(x, z, scratchNormal);
-        normals.push(scratchNormal.x, scratchNormal.y, scratchNormal.z);
-        uvs.push(tileU + (gx / DECAL_SEGMENTS) * 0.5, tileV + (gz / DECAL_SEGMENTS) * 0.5);
-      }
-    }
-    for (let gz = 0; gz < DECAL_SEGMENTS; gz++) {
-      for (let gx = 0; gx < DECAL_SEGMENTS; gx++) {
-        const a = base + gz * (DECAL_SEGMENTS + 1) + gx;
-        const b = a + 1;
-        const c = a + DECAL_SEGMENTS + 1;
-        const d = c + 1;
-        indices.push(a, c, b, b, c, d);
-      }
-    }
+    const tint =
+      style.tint === 'ground'
+        ? groundTint(palette.ground, style.shade, scratchTintDecal)
+        : style.tint === 'trail'
+          ? scratchTintDecal.set(look.dressing.trail).multiplyScalar(style.shade)
+          : scratchTintDecal.copy(WHITE);
+    sheet.add(cx, cz, length, length / style.stretch, rot, kind, tint);
     placed++;
   }
 
+  // SPEC-067: worn trails from the pad toward every objective — a chain of
+  // overlapping strips along the corridor the layout keeps clear, wobbling a
+  // little, with gaps further out where fewer feet have been.
+  const pad = layout.pois.find((poi) => poi.kind === 'landing_pad');
+  const trailTint = scratchTintDecal.set(look.dressing.trail);
+  if (pad !== undefined) {
+    const trailSeed = hash32(layout.hash, 'trails');
+    layout.pois.forEach((poi, p) => {
+      if (poi.kind === 'landing_pad' || poi.kind === 'landmark') return;
+      const dx = poi.x - pad.x;
+      const dz = poi.z - pad.z;
+      const span = Math.hypot(dx, dz);
+      const end = span - poi.radius - TRAIL_SHORT;
+      if (end <= TRAIL_START) return;
+      const ux = dx / span;
+      const uz = dz / span;
+      const heading = Math.atan2(uz, ux);
+      let t = TRAIL_START;
+      for (let k = 0; t < end; k++) {
+        const style = DECAL_STYLE.trail;
+        const length = style.size[0] + hash01(trailSeed, p, k, 0) * (style.size[1] - style.size[0]);
+        const along = Math.min(end - length * 0.4, t + length * 0.5);
+        // Past 40 m, one strip in five is missing; none crosses an orchard's lawn.
+        const gap = t > 40 && hash01(trailSeed, p, k, 1) < 0.2;
+        const wobble = (hash01(trailSeed, p, k, 2) * 2 - 1) * 0.6;
+        const cx = pad.x + ux * along - uz * wobble;
+        const cz = pad.z + uz * along + ux * wobble;
+        if (!gap && !onOrchard(orchards, cx, cz)) {
+          const rot = heading + (hash01(trailSeed, p, k, 3) * 2 - 1) * 0.12;
+          sheet.add(cx, cz, length, length / style.stretch, rot, 'trail', trailTint);
+        }
+        t += length * 0.78;
+      }
+    });
+
+    // SPEC-067: the landing site's scuffs — tread marks and boot prints in
+    // the 7–14 m ring the pad clearing keeps flat.
+    const scuffSeed = hash32(layout.hash, 'scuffs');
+    for (let i = 0; i < SCUFFS; i++) {
+      const kind: DecalKind = i % 2 === 0 ? 'tread' : 'footprints';
+      const style = DECAL_STYLE[kind];
+      const angle = ((i + hash01(scuffSeed, i, 0) * 0.7) / SCUFFS) * Math.PI * 2;
+      const d = SCUFF_RING[0] + hash01(scuffSeed, i, 1) * (SCUFF_RING[1] - SCUFF_RING[0]);
+      const length = style.size[0] + hash01(scuffSeed, i, 2) * (style.size[1] - style.size[0]);
+      // Tread runs roughly round the pad, boots roughly out from it.
+      const rot = angle + (kind === 'tread' ? Math.PI / 2 : 0) + (hash01(scuffSeed, i, 3) * 2 - 1) * 0.5;
+      const cx = pad.x + Math.cos(angle) * d;
+      const cz = pad.z + Math.sin(angle) * d;
+      if (!onOrchard(orchards, cx, cz)) sheet.add(cx, cz, length, length / style.stretch, rot, kind, WHITE);
+    }
+  }
+
   const geometry = new THREE.BufferGeometry();
-  geometry.setAttribute('position', new THREE.BufferAttribute(new Float32Array(positions), 3));
-  geometry.setAttribute('normal', new THREE.BufferAttribute(new Float32Array(normals), 3));
-  geometry.setAttribute('uv', new THREE.BufferAttribute(new Float32Array(uvs), 2));
-  geometry.setIndex(indices);
+  geometry.setAttribute('position', new THREE.BufferAttribute(new Float32Array(sheet.positions), 3));
+  geometry.setAttribute('normal', new THREE.BufferAttribute(new Float32Array(sheet.normals), 3));
+  geometry.setAttribute('uv', new THREE.BufferAttribute(new Float32Array(sheet.uvs), 2));
+  geometry.setAttribute('color', new THREE.BufferAttribute(new Float32Array(sheet.colors), 3));
+  geometry.setAttribute('glow', new THREE.BufferAttribute(new Float32Array(sheet.glows), 1));
+  geometry.setIndex(sheet.indices);
   geometry.computeBoundingSphere();
 
-  const material = new THREE.MeshStandardMaterial({
-    map: decalAtlas(),
-    transparent: true,
-    depthWrite: false,
-    polygonOffset: true,
-    polygonOffsetFactor: -2,
-    polygonOffsetUnits: -2,
-    roughness: 1,
-  });
-  const mesh = new THREE.Mesh(geometry, material);
+  const mesh = new THREE.Mesh(geometry, decalMaterial(look.decals));
   mesh.name = 'decals';
   mesh.receiveShadow = true;
   mesh.castShadow = false;
+  mesh.userData['centres'] = new Float32Array(sheet.centres);
   return mesh;
 }

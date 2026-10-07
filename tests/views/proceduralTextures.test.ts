@@ -5,7 +5,18 @@ import { describe, expect, it } from 'vitest';
 import * as THREE from 'three';
 import { GROUND_LAYER_IDS } from '@/data/ids';
 import { PLANET_IDS, PLANETS } from '@/data/index';
-import { buildGroundLayer, decalAtlas, groundLayer, particleSprite, planetDisc, prewarm } from '@/views/ProceduralTextures';
+import type { DecalKind } from '@/data/ids';
+import {
+  PATCH_ATLAS_SIZE,
+  PATCH_TILE,
+  buildGroundLayer,
+  decalAtlas,
+  groundLayer,
+  particleSprite,
+  patchAtlas,
+  planetDisc,
+  prewarm,
+} from '@/views/ProceduralTextures';
 
 const SIZE = 64; // small grids keep the suite fast; the shape rules are size-free
 
@@ -167,6 +178,68 @@ describe('planetDisc (SPEC-020 §4.4)', () => {
       }
       expect(poleSum / (SIZE * 3), `${id} pole`).toBeGreaterThan(180);
       expect(bandSum, `${id} equator`).toBeLessThan(poleSum);
+    }
+  });
+});
+
+describe('patchAtlas (PLAN R28 / SPEC-067)', () => {
+  const ALL = Object.keys(PATCH_TILE) as DecalKind[];
+
+  it('is one cached 1024² sRGB texture that clamps, with sixteen tiles of 256 px', () => {
+    const atlas = patchAtlas(ALL);
+    expect(patchAtlas([])).toBe(atlas);
+    expect(PATCH_ATLAS_SIZE).toBe(1024);
+    expect(atlas.image.width).toBe(1024);
+    expect(atlas.image.height).toBe(1024);
+    expect(atlas.colorSpace).toBe(THREE.SRGBColorSpace);
+    expect(atlas.wrapS).toBe(THREE.ClampToEdgeWrapping);
+    expect(atlas.userData['shared']).toBe(true);
+    expect(new Set(Object.values(PATCH_TILE)).size).toBe(16); // frost shares slick's
+    expect(PATCH_TILE.frost).toBe(PATCH_TILE.slick);
+  });
+
+  it("copies SPEC-018's four tiles texel for texel", () => {
+    const patches = bytes(patchAtlas(ALL));
+    const decals = bytes(decalAtlas());
+    for (let tile = 0; tile < 4; tile++) {
+      const sx = (tile % 2) * 256;
+      const sy = Math.floor(tile / 2) * 256;
+      for (let y = 0; y < 256; y += 17) {
+        for (let x = 0; x < 256; x += 13) {
+          const from = ((sy + y) * 512 + sx + x) * 4;
+          const to = (y * 1024 + tile * 256 + x) * 4;
+          expect([...patches.subarray(to, to + 4)]).toEqual([...decals.subarray(from, from + 4)]);
+        }
+      }
+    }
+  });
+
+  it('gives every new tile coverage in its middle and none at its border, so the mips never bleed', () => {
+    const data = bytes(patchAtlas(ALL));
+    for (let tile = 4; tile < 16; tile++) {
+      const x0 = (tile % 4) * 256;
+      const y0 = Math.floor(tile / 4) * 256;
+      let border = 0;
+      for (let i = 0; i < 256; i++) {
+        for (const [x, y] of [
+          [i, 0],
+          [i, 255],
+          [0, i],
+          [255, i],
+        ] as const) {
+          for (let inset = 0; inset < 4; inset++) {
+            const px = x === 0 ? inset : x === 255 ? 255 - inset : x;
+            const py = y === 0 ? inset : y === 255 ? 255 - inset : y;
+            border = Math.max(border, data[((y0 + py) * 1024 + x0 + px) * 4 + 3] as number);
+          }
+        }
+      }
+      expect(border, `tile ${tile} border`).toBeLessThanOrEqual(2);
+      let middle = 0;
+      for (let dy = -60; dy <= 60; dy += 6) {
+        for (let dx = -60; dx <= 60; dx += 6) middle = Math.max(middle, data[((y0 + 128 + dy) * 1024 + x0 + 128 + dx) * 4 + 3] as number);
+      }
+      expect(middle, `tile ${tile} middle`).toBeGreaterThan(40);
     }
   });
 });

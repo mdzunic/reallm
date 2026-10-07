@@ -70,7 +70,7 @@ import { PauseMenu, withComms } from '@/ui/PauseMenu';
 import { RotateOverlay } from '@/ui/RotateOverlay';
 import { TouchControls } from '@/ui/TouchControls';
 import { FlightView } from '@/views/FlightView';
-import { prewarm } from '@/views/ProceduralTextures';
+import { prewarm, prewarmPatches } from '@/views/ProceduralTextures';
 import type { Look } from '@/core/Quality';
 import type { Voice } from '@/core/Audio';
 import { UiScene, uiRootEl } from '@/scenes/base';
@@ -231,6 +231,8 @@ export class FlightScene extends UiScene<'flight'> {
     // SPEC-018 §4.5: build the destination's procedural ground layers during
     // the trip, so the landing's `SurfaceView` construction has no hitch.
     prewarm(this.#planet.surface.look.ground.layers);
+    // PLAN R28 / SPEC-067: and its ground patches' atlas tiles.
+    prewarmPatches(this.#planet.surface.look.decals);
     // A dev `?scene=flight` jump has no save; the demo pilot flies in memory
     // and nothing is written back (same pattern as the SPEC-011 harness).
     const bound = services.save.current;
