@@ -441,7 +441,7 @@ export class ScavRaiderViews {
     }
     const action = own ?? slot.actions.idle;
     if (action === null) return;
-    action.timeScale = pose.anim === 'run' ? pose.timeScale : 1;
+    action.timeScale = action === slot.actions.run ? pose.timeScale : 1;
     if (action !== slot.current) this.#start(slot, action, false);
   }
 
