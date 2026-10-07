@@ -155,6 +155,10 @@ describe('SpawnDirector — population (AC-12)', () => {
     // The Hive's 15 is the one design count a preset cuts: 12 on low.
     expect(populationTarget(PLANETS.hive, QUALITY.low)).toBe(12);
     expect(populationTarget(PLANETS.hive, QUALITY.medium)).toBe(15);
+    // Review 2026-10 (G-07): Vetra 11 → 13, out of its trough; `low` caps it
+    // at 12, as it does Ferrum's 13.
+    expect(populationTarget(PLANETS.vetra, QUALITY.medium)).toBe(13);
+    expect(populationTarget(PLANETS.vetra, QUALITY.low)).toBe(12);
     const h = harness('cinder4', 'low');
     h.run(30);
     expect(h.director.alive).toBeGreaterThanOrEqual(populationTarget(PLANETS.cinder4, QUALITY.low));

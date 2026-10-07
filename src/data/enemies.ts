@@ -481,7 +481,9 @@ export const ENEMIES = {
     phases: [
       { hpFraction: 1, damageMult: 1, speedMult: 1 },
       { hpFraction: 0.6, damageMult: 1.2, speedMult: 1 },
-      { hpFraction: 0.3, damageMult: 1.44, speedMult: 1 },
+      // Review 2026-10 (G-07, *initial tuning*): ×1.3 (was ×1.44) — its
+      // worst hit was 29 % of a chapter-4 player's HP.
+      { hpFraction: 0.3, damageMult: 1.3, speedMult: 1 },
     ],
     eliteAllowed: false,
     moves: [

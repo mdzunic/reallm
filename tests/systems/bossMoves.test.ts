@@ -393,3 +393,15 @@ describe('the queen (SPEC-041 §4.1)', () => {
     expect(queen.moveCd).toBeCloseTo(2.4, 6);
   });
 });
+
+describe('the review 2026-10 boss retunes (initial tuning)', () => {
+  // G-07: the Titan's phase 3 hit ×1.44, its worst blow 29 % of a chapter-4
+  // player's HP — the spike of the curve.
+  it('the Ash Titan hits ×1.2 below 60 % and ×1.3 below 30 %', () => {
+    expect(ENEMIES.ash_titan.phases.map((phase) => [phase.hpFraction, phase.damageMult])).toEqual([
+      [1, 1],
+      [0.6, 1.2],
+      [0.3, 1.3],
+    ]);
+  });
+});
