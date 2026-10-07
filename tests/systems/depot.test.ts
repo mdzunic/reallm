@@ -12,7 +12,10 @@ import { EventBus, type GameEvents } from '@/core/Events';
 import { setLogSink, type LogSink } from '@/core/Log';
 import { DEPOT_KEEP_DEFAULT, DEPOT_KEEP_MAX, DEPOT_KEEP_STEP, newSave, type CharacterCreation, type Save } from '@/core/Save';
 import { COMPANIONS, PLANETS, RESOURCE_SOURCES, TUNING } from '@/data/index';
+import { QUALITY } from '@/core/Renderer';
+import { Rng } from '@/core/Rng';
 import { Economy } from '@/systems/Economy';
+import { Flight, LAUNCH_SECONDS, type FlightConfig } from '@/systems/Flight';
 import type { LayoutPoi } from '@/systems/Layout';
 import { Missions, type MissionContext } from '@/systems/Missions';
 import { Progression } from '@/systems/Progression';
@@ -515,6 +518,27 @@ describe('hard’s death reaches the depot (SPEC-066 §4.8, E124)', () => {
     expect(data.resources).toEqual({ oil: 160, wheat: 8, water: 8, lithium: 0 });
     const { created } = dropRemains(data, 'cinder4', { x: 12, z: -8 }, lost);
     expect(created?.resources).toEqual({ oil: 40, wheat: 2, water: 2 });
+  });
+
+  it('E5: a death in flight on hard takes nothing from the hold or the depot', () => {
+    const { economy, data, bus } = HARD();
+    const missions = new Missions(data, economy, bus, 'flight', 'cinder4');
+    const progression = new Progression(data, bus);
+    const cfg: FlightConfig = {
+      planet: PLANETS.cinder4,
+      ship: data.ship,
+      companions: data.companions,
+      quality: QUALITY.medium,
+      difficulty: data.meta.difficulty,
+    };
+    const flight = new Flight(cfg, economy, progression, missions, bus, new Rng(7));
+    const idle = { steerX: 0, steerY: 0, fire: false, aimX: 0, aimY: 0, throttleUp: false, throttleDown: false };
+    for (let t = 0; t < LAUNCH_SECONDS + 0.1; t += 1 / 60) flight.update(1 / 60, idle);
+    flight.hit(10_000, 'asteroid', { kind: 'asteroid' });
+    expect(flight.phase).toBe('recalled');
+    expect(data.resources).toEqual({ oil: 200, wheat: 10, water: 10, lithium: 0 });
+    expect(data.depot.held).toEqual({ oil: 300, wheat: 9, water: 0, lithium: 95 });
+    missions.dispose();
   });
 
   it('the difficulty is read at death: switched off hard, the next death leaves the depot alone', () => {
