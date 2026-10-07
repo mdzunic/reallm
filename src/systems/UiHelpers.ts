@@ -74,7 +74,7 @@ import { GLYPHS } from '@/data/glossary';
 import type { EnemyEntity } from '@/entities/Enemy';
 import type { PlayerEntity } from '@/entities/Player';
 import { LOADOUT_CHAPTERS, RECOMMENDED_LOADOUT, type LoadoutEntry } from '@/systems/Balance';
-import { damageReduction, playerDamageMult } from '@/systems/Combat';
+import { damageReduction, droneDps, playerDamageMult } from '@/systems/Combat';
 import {
   discountTokens,
   missingRequirements,
@@ -625,13 +625,16 @@ export function failText(reason: FailReason): string {
  * AC-39: one line per companion level, straight off the effect table.
  * SPEC-045 §4.7: shares and rates print through the formatter —
  * `−10 % shop prices`, `1 %/s regen in combat`, `+2/s shield regen`.
+ * SPEC-066 §4.3: a drone level reads its DPS against `primary` at multiplier
+ * 1 (`drone 7/s`), as the weapon cards print theirs — no share of "your damage".
  */
-export function companionEffectText(effect: CompanionEffect): string {
+export function companionEffectText(effect: CompanionEffect, primary: ItemId | null = null): string {
   const parts: string[] = [];
   if (effect.autoCollectRadius !== undefined) parts.push(`collects within ${effect.autoCollectRadius} m`);
   if (effect.nodeRadar === true) parts.push('node radar');
-  if (effect.droneDamageFraction !== undefined) parts.push(`drone at ${percent(effect.droneDamageFraction)} of your damage`);
-  if (effect.droneFireRate !== undefined) parts.push(`${rate(effect.droneFireRate)} drone fire`);
+  if (effect.droneDamageFraction !== undefined || effect.droneFireRate !== undefined) {
+    parts.push(`drone ${rate(droneDps(primary, effect))}`);
+  }
   if (effect.regenOutOfCombat !== undefined) parts.push(`${percent(effect.regenOutOfCombat)}/s regen out of combat`);
   if (effect.regenInCombat !== undefined) parts.push(`${percent(effect.regenInCombat)}/s regen in combat`);
   if (effect.cargoBonus !== undefined) parts.push(`+${effect.cargoBonus} cargo`);

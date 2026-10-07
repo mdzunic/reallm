@@ -182,3 +182,16 @@ test('2. one stack per fight: an emptied slot stays dry, refuses the picker, and
   await expect(healCount(page)).toHaveText('×2');
   expect(await packCount(page, 'wheat_ration')).toBe(2);
 });
+
+test('6. the drone card: with the Kinetic Repeater equipped, L1 reads drone 7/s', async ({ page }) => {
+  await start(page, URL);
+  await page.evaluate((creation) => void window.__reallm.save().create(0, creation, 123), CREATION);
+  expect(await page.evaluate(() => window.__reallm.save().current?.equipped.primary)).toBe('weapon_kinetic');
+  expect(await page.evaluate(() => window.__reallm.go('station', {}))).toBe(true);
+  await expect(page.getByTestId('scene-label')).toHaveText('station', COLD_START);
+  await page.getByTestId('station-tab-shop').click();
+  await page.getByTestId('shop-tab-companions').click();
+  // The level lines carry the DPS and no percentage; the blurb is unchanged.
+  const lines = page.getByTestId('shop-companion-combat_drone').locator('.shop-effect');
+  await expect(lines).toHaveText(['L1: drone 7/s', 'L2: drone 10/s', 'L3: drone 19.5/s']);
+});

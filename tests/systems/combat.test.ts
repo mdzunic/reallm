@@ -8,6 +8,7 @@ import {
   AFFIX_IDS,
   AFFIXES,
   BULWARK_DAMAGE_MULT,
+  COMPANIONS,
   DRONE_SHOT,
   ENEMIES,
   FLARE_SHOT,
@@ -32,6 +33,9 @@ import {
   computePlayerStats,
   DAMAGE_PER_LEVEL,
   damageReduction,
+  DRONE_SUSTAINED_SHARE,
+  droneDps,
+  droneShotDamage,
   ELITE_XP_MULT,
   enemyHitDamage,
   EXPLOSIVE_FALLOFF,
@@ -41,6 +45,7 @@ import {
   healLockLeft,
   healLockSeconds,
   MEDIC_WEATHER_PAUSE,
+  MUZZLE_OFFSET,
   playerDamageMult,
   rollAffixes,
   rollElite,
@@ -62,7 +67,7 @@ import { resetTelegraph } from '@/entities/Telegraph';
 import { DARK_SIGHT, FLARE_RADIUS, inFlare } from '@/systems/Light';
 import { cumulativeXp } from '@/systems/Progression';
 import { SPRINT_DRAW_SECONDS, STAMINA_MAX, stepStamina } from '@/systems/Stamina';
-import { SWITCH_SECONDS, type SlotView } from '@/systems/Loadout';
+import { SWITCH_SECONDS, weaponDps, type SlotView } from '@/systems/Loadout';
 import { makePlayer } from '@/entities/Player';
 import { STEP, harness, MARINE, SCOUT, type Harness } from './combatFixtures';
 
@@ -647,7 +652,9 @@ describe('combat drone (§4.3)', () => {
     const p = h.world.projectiles.at(0);
     expect(p.owner).toBe('drone');
     const stats = h.world.stats;
-    expect(p.damage).toBe(Math.max(1, Math.round(12 * stats.damageMult * 0.5 * stats.companionMult)));
+    // SPEC-066 §4.3: the Kinetic's sustained 36 DPS × 0.4, not its 12 a shot.
+    expect(p.damage).toBe(Math.max(1, Math.round(36 * 0.4 * stats.damageMult * 0.5 * stats.companionMult)));
+    expect(p.damage).toBe(droneShotDamage(36, 0.5, stats.damageMult * stats.companionMult));
     // Every 1/droneFireRate seconds (L1: 1/s) — shots at t≈0 and t≈1 within 1.6 s.
     h.run(1.6);
     expect(h.of('enemy:spawned').length).toBe(1); // sanity: still just the egg
@@ -678,9 +685,109 @@ describe('combat drone (§4.3)', () => {
     const p = h.world.projectiles.at(0);
     expect(p.owner).toBe('drone');
     const stats = h.world.stats;
-    // 12 is the Kinetic Repeater's damage — not the pistol's 9.
-    expect(p.damage).toBe(Math.max(1, Math.round(12 * stats.damageMult * 0.5 * stats.companionMult)));
+    // 36 is the Kinetic Repeater's sustained DPS — not the pistol's.
+    expect(p.damage).toBe(Math.max(1, Math.round(36 * 0.4 * stats.damageMult * 0.5 * stats.companionMult)));
     expect(p.vx).toBeCloseTo(22, 5); // …and the repeater's projectile speed
+  });
+});
+
+describe('the drone follows the gun (SPEC-066 §4.3)', () => {
+  const DRONE = (level: 1 | 2 | 3) => (s: Save): void => void s.companions.push({ id: 'combat_drone', level, enabled: true });
+  const LEVELS = COMPANIONS.combat_drone.levels;
+
+  /** One step; the drone shot it spawned (one still within a step of the muzzle), or `null`. */
+  function stepShot(h: Harness): { damage: number } | null {
+    h.step();
+    const p = h.world.player;
+    for (let i = 0; i < h.world.projectiles.size; i++) {
+      const shot = h.world.projectiles.at(i);
+      const reach = MUZZLE_OFFSET + Math.hypot(shot.vx, shot.vz) * STEP * 1.5;
+      if (shot.owner === 'drone' && Math.hypot(shot.x - p.x, shot.z - p.z) <= reach) return shot;
+    }
+    return null;
+  }
+
+  /** Steps until the drone fires; how many steps that took (∞ past `max`). */
+  function stepsToShot(h: Harness, max = 600): number {
+    for (let n = 1; n <= max; n++) if (stepShot(h) !== null) return n;
+    return Infinity;
+  }
+
+  it('takes 0.4 of the primary\'s sustained DPS: the §4.3 table at L1 and multiplier 1', () => {
+    expect(DRONE_SUSTAINED_SHARE).toBe(0.4);
+    const l1: Array<[ItemId, number]> = [
+      ['weapon_kinetic', 7],
+      ['weapon_laser', 14],
+      ['weapon_plasma', 17],
+      ['weapon_lithium', 20],
+      ['mg_scrap', 13],
+      ['mg_rotary', 17],
+    ];
+    for (const [id, shot] of l1) expect(droneShotDamage(weaponDps(id)?.sustained ?? 0, 0.5, 1), id).toBe(shot);
+    // The Edge's three levels equal its old shots (40 × 0.5 / 0.7 / 0.9).
+    const edge = weaponDps('weapon_lithium')?.sustained ?? 0;
+    expect(LEVELS.map((level) => droneShotDamage(edge, level.droneDamageFraction ?? 0, 1))).toEqual([20, 28, 36]);
+    expect(LEVELS.map((level) => droneShotDamage(36, level.droneDamageFraction ?? 0, 1))).toEqual([7, 10, 13]);
+    // AC-5's floor.
+    expect(droneShotDamage(0, 0.5, 1)).toBe(1);
+  });
+
+  it('droneDps is the card\'s number: a shot at multiplier 1 × the fire rate, 0 with no primary', () => {
+    expect(LEVELS.map((level) => droneDps('weapon_kinetic', level))).toEqual([7, 10, 19.5]);
+    expect(droneDps('mg_rotary', LEVELS[0])).toBe(17);
+    expect(droneDps(null, LEVELS[0])).toBe(0);
+  });
+
+  it('an Engineer at tech 8 scales the shot by companionMult', () => {
+    const h = harness({
+      creation: { ...MARINE, classId: 'engineer', attributes: { might: 1, vigor: 2, agility: 2, tech: 8 } },
+      patch: DRONE(1),
+    });
+    h.spawn('hive_egg', 11, 0).aggro = true;
+    const shot = stepShot(h);
+    expect(h.world.stats.companionMult).toBeCloseTo(2.25, 12);
+    expect(shot?.damage).toBe(droneShotDamage(36, 0.5, h.world.stats.damageMult * 2.25));
+  });
+
+  it('follows a gear:equipped to the Laser from the next shot', () => {
+    const h = harness({ patch: DRONE(1) });
+    h.spawn('hive_egg', 11, 0).aggro = true;
+    const before = stepShot(h);
+    const mult = h.world.stats.damageMult * h.world.stats.companionMult;
+    expect(before?.damage).toBe(droneShotDamage(36, 0.5, mult));
+    h.save.equipped.primary = 'weapon_laser';
+    h.events.emit('gear:equipped', { slot: 'primary', itemId: 'weapon_laser' });
+    let after: { damage: number } | null = null;
+    for (let n = 0; n < 120 && after === null; n++) after = stepShot(h);
+    expect(after?.damage).toBe(droneShotDamage(72, 0.5, h.world.stats.damageMult * h.world.stats.companionMult));
+  });
+
+  it('fires nothing while the player sprints or draws, and its clock stands still', () => {
+    const h = harness({ patch: DRONE(1) });
+    h.spawn('hive_egg', 11, 0).aggro = true;
+    const p = h.world.player;
+    expect(stepShot(h)).not.toBeNull(); // armed: it fires at once, then waits 1 s
+    for (let n = 0; n < 30; n++) expect(stepShot(h)).toBeNull(); // 0.5 s of it left
+    p.sprinting = true;
+    for (let n = 0; n < 180; n++) expect(stepShot(h)).toBeNull();
+    p.sprinting = false;
+    p.drawAt = h.world.time + SPRINT_DRAW_SECONDS;
+    for (let n = 0; n < 14; n++) expect(stepShot(h)).toBeNull();
+    // The 0.5 s left when the holster began is still left when the draw ends.
+    const steps = stepsToShot(h);
+    expect(steps).toBeGreaterThanOrEqual(29);
+    expect(steps).toBeLessThanOrEqual(33);
+  });
+
+  it('a dash does not hold it', () => {
+    const h = harness({ patch: DRONE(1) });
+    h.spawn('hive_egg', 11, 0).aggro = true;
+    const p = h.world.player;
+    p.dashUntil = h.world.time + 0.5;
+    expect(stepShot(h)).not.toBeNull();
+    for (let n = 0; n < 59; n++) stepShot(h);
+    p.dashUntil = h.world.time + 0.5;
+    expect(stepsToShot(h)).toBeLessThanOrEqual(2);
   });
 });
 
@@ -1915,7 +2022,7 @@ describe('classes and attributes (SPEC-039 §4.3)', () => {
     egg.aggro = true;
     h.step();
     const stats = h.world.stats;
-    expect(h.world.projectiles.at(0).damage).toBe(Math.max(1, Math.round(12 * stats.damageMult * 0.5 * 2.25)));
+    expect(h.world.projectiles.at(0).damage).toBe(Math.max(1, Math.round(36 * 0.4 * stats.damageMult * 0.5 * 2.25)));
     // One shot a second at L1, whatever the multiplier.
     h.run(1.5);
     expect(egg.maxHp - egg.hp).toBe(2 * h.world.projectiles.at(0).damage);
@@ -2485,12 +2592,20 @@ describe('the holstered gun (SPEC-050 §4.2)', () => {
     expect(slotView(rocket, 'heavy').charges).toBe(1);
   });
 
-  it('the combat drone keeps firing while the player runs', () => {
+  // SPEC-066 §4.3 (PLAN R27 decision 3): running holsters the drone too.
+  it('the combat drone holds fire while the player runs', () => {
     const h = harness({ patch: (s) => s.companions.push({ id: 'combat_drone', level: 1, enabled: true }) });
     const egg = h.spawn('hive_egg', 6, 0);
     egg.aggro = true;
     h.world.player.sprinting = true;
-    h.step();
+    h.run(2);
+    expect(h.world.projectiles.size).toBe(0);
+    // The gun's draw holds it too; the step after, it fires.
+    h.world.player.sprinting = false;
+    h.world.player.drawAt = h.world.time + SPRINT_DRAW_SECONDS;
+    h.run(SPRINT_DRAW_SECONDS - STEP);
+    expect(h.world.projectiles.size).toBe(0);
+    h.run(2 * STEP);
     expect(h.world.projectiles.size).toBe(1);
     expect(h.world.projectiles.at(0).owner).toBe('drone');
   });
