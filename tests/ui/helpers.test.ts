@@ -80,6 +80,7 @@ import {
   requirementText,
   starmapFuelText,
   companionEffectText,
+  healLockedText,
   failText,
   gearCompare,
   gearCompareText,
@@ -902,6 +903,14 @@ describe('companionEffectText (AC-39)', () => {
   it('covers station and flight domains', () => {
     expect(companionEffectText({ cargoBonus: 100, shopDiscount: 0.1 })).toBe('+100 cargo · −10 % shop prices');
     expect(companionEffectText({ shieldRegen: 2, autoAim: true, hullBonus: 20 })).toBe('+2/s shield regen · auto-aim · +20 hull');
+  });
+});
+
+describe('healLockedText (SPEC-066 §4.1, E121)', () => {
+  it('says the whole seconds left, rounded up', () => {
+    expect(healLockedText(7.2)).toBe('Heal ready in 8 s');
+    expect(healLockedText(0.1)).toBe('Heal ready in 1 s');
+    expect(healLockedText(8)).toBe('Heal ready in 8 s');
   });
 });
 

@@ -13,6 +13,10 @@
 // its `V` and a cooldown ring — ahead of the weapon group and outside both
 // groups. The arc has DASH in its own corner cell, so `moveTo` takes the cell
 // out of the bar there and puts it back on the keyboard.
+//
+// SPEC-066 §4.1: the heal slot wears the heal lock as the same `--cd` sweep —
+// `setHealLock` is its only writer, since `render` never writes `--cd` on a
+// quick slot — and the bar moves whole into the arc, so both schemes show it.
 import type { Scheme } from '@/core/Input';
 import { QUICK_SLOT_NAMES } from '@/data/glossary';
 import {
@@ -86,6 +90,9 @@ export class QuickBar {
   #healQty = 0;
   /** SPEC-050 §4.6: the weapon slots are dimmed while the gun is holstered. */
   #holstered = false;
+  /** SPEC-066 §4.1: the heal lock's ring, and the value last written to it. */
+  #healLock = 0;
+  #lastHealLock = '';
 
   constructor(host: HTMLElement, handlers: QuickBarHandlers) {
     this.#handlers = handlers;
@@ -118,9 +125,29 @@ export class QuickBar {
   }
 
   /**
+   * SPEC-066 §4.1: the heal lock's ring — `--cd` on `qb-heal` from 1 at the use
+   * to 0 when the slot is ready, with `.is-cooling` while it runs. 0 clears
+   * both. Writes only on a change.
+   */
+  setHealLock(cd: number): void {
+    const clamped = Math.max(0, Math.min(1, cd));
+    const value = clamped > 0 ? clamped.toFixed(3) : '';
+    this.#healLock = clamped;
+    if (value !== this.#lastHealLock) {
+      this.#lastHealLock = value;
+      const root = this.#quick.heal.root;
+      if (value === '') root.style.removeProperty('--cd');
+      else root.style.setProperty('--cd', value);
+      root.classList.toggle('is-cooling', value !== '');
+    }
+    this.#applyUrgent();
+  }
+
+  /**
    * SPEC-042 §4.4: below a quarter of HP the heal slot asks to be used —
    * `is-urgent`, a static outline — while it holds a heal with a count above 0.
    * An empty slot stays quiet (42-i): there is nothing for it to ask.
+   * SPEC-066 §4.1: nor does a locked one — it cannot be used yet.
    */
   setUrgent(on: boolean): void {
     this.#urgent = on;
@@ -128,7 +155,7 @@ export class QuickBar {
   }
 
   #applyUrgent(): void {
-    this.#quick.heal.root.classList.toggle('is-urgent', this.#urgent && this.#healQty > 0);
+    this.#quick.heal.root.classList.toggle('is-urgent', this.#urgent && this.#healQty > 0 && this.#healLock <= 0);
   }
 
   /**

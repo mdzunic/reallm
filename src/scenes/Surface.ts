@@ -97,7 +97,7 @@ import { makeProjectile } from '@/entities/Projectile';
 import { resetTelegraph, TELEGRAPH_CAPACITY } from '@/entities/Telegraph';
 import { ARENA_RESPAWN_OUTSET, clampToSeal, type ArenaState } from '@/entities/World';
 import { ClueTracker, clueFound, FlagView, type ClueScene } from '@/systems/Clues';
-import { Combat, computePlayerStats, ELITE_SCALE, staminaFull, type CombatWorld, type HitMemory } from '@/systems/Combat';
+import { Combat, computePlayerStats, ELITE_SCALE, healLockLeft, staminaFull, type CombatWorld, type HitMemory } from '@/systems/Combat';
 import { containment, containmentSteps } from '@/systems/Containment';
 import { DASH_DISTANCE, dashCooldown, isDashing, pressDash, stepDash } from '@/systems/Dash';
 import { Economy } from '@/systems/Economy';
@@ -198,6 +198,7 @@ import {
   firstSentence,
   deathTip,
   hasNodeRadar,
+  healLockedText,
   HP_FULL_TEXT,
   occludes,
   OCCLUDER_OPACITY,
@@ -1023,7 +1024,7 @@ export class SurfaceScene extends UiScene<'surface'> {
     { kind: 'slot', slot: 'sidearm' },
   ];
   #qbLength = 0;
-  /** §4.4: `world.time` of the last toast per text — one per 3 s each. */
+  /** §4.4: `world.time` of the last toast per key (the text by default) — one per 3 s each. */
   readonly #quickToastAt = new Map<string, number>();
   /** §4.6: the open picker's close function, or `null`. */
   #pickerClose: (() => void) | null = null;
@@ -2866,6 +2867,8 @@ export class SurfaceScene extends UiScene<'surface'> {
       info['exhausted'] = p.exhausted ? 1 : 0;
       info['loud'] = isLoud(p, this.#world.time) ? 1 : 0;
       info['burrowRing'] = this.#burrowRing(this.#world);
+      // SPEC-066 §4.1: the heal lock's seconds left.
+      info['healLockLeft'] = Math.round(healLockLeft(p, this.#world.time) * 100) / 100;
     }
     info['speed'] = Math.round(this.#speed * 100) / 100;
     info['shots'] = this.#shots;
@@ -4110,6 +4113,9 @@ export class SurfaceScene extends UiScene<'surface'> {
    * §4.4: spend one item from a quick slot — refill a run-out slot first,
    * refuse an empty one or a heal at full HP with a throttled toast, and keep
    * the id when the last one is spent so the bar reads `×0`.
+   *
+   * SPEC-066 §4.1: the refusals run in order — an empty slot, then the heal
+   * lock, then a heal at full HP.
    */
   #useQuick(slot: QuickSlot): void {
     const world = this.#world;
@@ -4130,6 +4136,15 @@ export class SurfaceScene extends UiScene<'surface'> {
     if (id === null || economy.count(id) === 0) {
       this.#quickToast(QUICK_EMPTY_TEXT[slot]);
       return;
+    }
+    // SPEC-066 §4.1 (E121): a locked heal spends nothing and says how long is
+    // left — under one throttle key, since every second reads a new text.
+    if (slot === 'heal') {
+      const left = healLockLeft(world.player, world.time);
+      if (left > 0) {
+        this.#quickToast(healLockedText(left), 'heal-lock');
+        return;
+      }
     }
     // E40: the most common waste on a phone — a heal at full HP spends nothing.
     if (slot === 'heal' && world.player.hp >= world.stats.maxHp) {
@@ -4267,12 +4282,15 @@ export class SurfaceScene extends UiScene<'surface'> {
     return best;
   }
 
-  /** §4.4: one toast per text per 3 s, on the world clock. */
-  #quickToast(text: string): void {
+  /**
+   * §4.4: one toast per text per 3 s, on the world clock. SPEC-066 §4.1: `key`
+   * throttles texts that change with the clock under one name (E121).
+   */
+  #quickToast(text: string, key: string = text): void {
     const time = this.#world?.time ?? 0;
-    const last = this.#quickToastAt.get(text);
+    const last = this.#quickToastAt.get(key);
     if (last !== undefined && time - last < QUICK_TOAST_SECONDS) return;
-    this.#quickToastAt.set(text, time);
+    this.#quickToastAt.set(key, time);
     this.services.events.emit('ui:toast', { text, kind: 'warn' });
   }
 
@@ -4412,6 +4430,9 @@ export class SurfaceScene extends UiScene<'surface'> {
     p.invulnUntil = world.time + TUNING.INVULN_AFTER_RESPAWN;
     p.fireCooldown = 0;
     p.healOverTime = null;
+    // SPEC-066 §4.1 (66-a): the respawn's full HP is not a heal item, and the lock goes.
+    p.healLockUntil = 0;
+    p.healLockSeconds = 0;
     p.boosts.length = 0;
     p.hazardImmuneUntil = 0;
     // SPEC-038 §4.1: a respawn or a recall resets the dash.
@@ -6417,6 +6438,9 @@ export class SurfaceScene extends UiScene<'surface'> {
     // SPEC-038 §4.1: the ring runs from 1 at the press to 0 when ready.
     const dashLeft = world.player.dashReadyAt - world.time;
     m.dash = dashLeft > 0 ? Math.round(Math.min(1, dashLeft / Math.max(1e-6, this.#dashCooldown)) * 1000) / 1000 : 0;
+    // SPEC-066 §4.1: the heal lock's ring, the same way.
+    const lockLeft = healLockLeft(world.player, world.time);
+    m.healLock = lockLeft > 0 ? Math.round(Math.min(1, lockLeft / Math.max(1e-6, world.player.healLockSeconds)) * 1000) / 1000 : 0;
 
     // SPEC-050 §4.6: the stamina ring's model, through one reused object, and
     // the holstered weapon slots — sprinting, or drawing after a sprint.

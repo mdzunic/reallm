@@ -85,7 +85,7 @@ import {
   type FailReason,
 } from '@/systems/Economy';
 import type { SkipRefusal } from '@/systems/Flight';
-import { clock, duration, MINUS, multPercent, percent, percentChange, rate } from '@/systems/Format';
+import { clock, duration, MINUS, multPercent, percent, percentChange, rate, seconds } from '@/systems/Format';
 import { weaponDps, type SlotView } from '@/systems/Loadout';
 import { campaignLocked, contractFor } from '@/systems/Missions';
 import { cumulativeXp, LEVEL_CAP, xpToNext } from '@/systems/Progression';
@@ -1023,6 +1023,11 @@ export const HP_FULL_TEXT = 'HP full';
 
 /** SPEC-056 §4.5 (56-g): what a stim at a full, unexhausted pool says — throttled like E40's. */
 export const STAMINA_FULL_TEXT = 'Stamina is full';
+
+/** SPEC-066 §4.1 (E121): a heal pressed during the lock — `Heal ready in 7 s`, the seconds rounded up. */
+export function healLockedText(left: number): string {
+  return `Heal ready in ${seconds(left)}`;
+}
 
 /** SPEC-056 56-a: a relic's equip refused because the piece it would displace has no room in the pack. */
 export function makeRoomText(displaced: ItemId): string {
@@ -2028,6 +2033,8 @@ export interface HudModel {
   walletLit: boolean;
   /** SPEC-038 §4.1: the dash's cooldown ring — 1 at the press, 0 when ready. */
   dash: number;
+  /** SPEC-066 §4.1: the heal slot's lock ring — `healLockLeft / healLockSeconds`, 1 at the use, 0 when ready. */
+  healLock: number;
   /**
    * SPEC-050 §4.6: the stamina ring beside the salvager — the rounded pool, its
    * max, the two states it shows, and whether it is up at all (`staminaShown`).
@@ -2088,6 +2095,7 @@ export function createHudModel(): HudModel {
     interactAction: false,
     walletLit: false,
     dash: 0,
+    healLock: 0,
     stamina: null,
     holstered: false,
     light: null,
@@ -2120,6 +2128,7 @@ const HUD_KEY_TABLE = {
   interactAction: true,
   walletLit: true,
   dash: true,
+  healLock: true,
   stamina: true,
   holstered: true,
   light: true,

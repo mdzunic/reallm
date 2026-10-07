@@ -36,6 +36,10 @@ import {
   enemyHitDamage,
   EXPLOSIVE_FALLOFF,
   gearAt,
+  HEAL_LOCK_SECONDS,
+  HEAL_OVER_TIME_LOCK_SECONDS,
+  healLockLeft,
+  healLockSeconds,
   MEDIC_WEATHER_PAUSE,
   playerDamageMult,
   rollAffixes,
@@ -59,6 +63,7 @@ import { DARK_SIGHT, FLARE_RADIUS, inFlare } from '@/systems/Light';
 import { cumulativeXp } from '@/systems/Progression';
 import { SPRINT_DRAW_SECONDS, STAMINA_MAX, stepStamina } from '@/systems/Stamina';
 import { SWITCH_SECONDS, type SlotView } from '@/systems/Loadout';
+import { makePlayer } from '@/entities/Player';
 import { STEP, harness, MARINE, SCOUT, type Harness } from './combatFixtures';
 
 const KINETIC = ITEMS.weapon_kinetic as WeaponDef;
@@ -549,6 +554,84 @@ describe('consumables and healing (§4.8)', () => {
     const h = harness({ patch: (s) => s.companions.push({ id: 'field_medic', level: 3, enabled: true }) });
     h.run(3);
     expect(h.world.player.hp).toBe(184);
+  });
+});
+
+// ------------------------------------------------- SPEC-066 §4.1: the heal lock
+
+describe('the heal lock (SPEC-066 §4.1)', () => {
+  const MEDKIT = ITEMS.medkit;
+  const RATION = ITEMS.wheat_ration;
+  if (MEDKIT.kind !== 'consumable' || MEDKIT.effect.kind !== 'heal') throw new Error('the medkit heals');
+  if (RATION.kind !== 'consumable' || RATION.effect.kind !== 'heal') throw new Error('the ration heals');
+  const medkit = MEDKIT.effect;
+  const ration = RATION.effect;
+
+  it('makePlayer starts unlocked, at 0 and 0', () => {
+    const p = makePlayer(0, 0, 100);
+    expect(p.healLockUntil).toBe(0);
+    expect(p.healLockSeconds).toBe(0);
+    expect(healLockLeft(p, 0)).toBe(0);
+  });
+
+  it('a medkit locks the heal slot for 8 s and a ration for 5 s', () => {
+    expect(HEAL_LOCK_SECONDS).toBe(8);
+    expect(HEAL_OVER_TIME_LOCK_SECONDS).toBe(5);
+    expect(healLockSeconds(medkit)).toBe(8);
+    expect(healLockSeconds(ration)).toBe(5);
+
+    const h = harness();
+    h.run(1);
+    const at = h.world.time;
+    h.combat.applyConsumable(medkit);
+    expect(h.world.player.healLockSeconds).toBe(8);
+    expect(h.world.player.healLockUntil).toBeCloseTo(at + 8, 12);
+
+    const r = harness();
+    r.combat.applyConsumable(ration);
+    expect(r.world.player.healLockSeconds).toBe(5);
+    expect(r.world.player.healLockUntil).toBeCloseTo(5, 12);
+  });
+
+  it('healLockLeft counts down on the world clock, to 0 and no further', () => {
+    const h = harness();
+    h.combat.applyConsumable(medkit);
+    expect(healLockLeft(h.world.player, h.world.time)).toBeCloseTo(8, 12);
+    h.run(3);
+    expect(healLockLeft(h.world.player, h.world.time)).toBeCloseTo(5, 6);
+    h.run(5);
+    expect(healLockLeft(h.world.player, h.world.time)).toBeCloseTo(0, 6);
+    h.run(1);
+    expect(healLockLeft(h.world.player, h.world.time)).toBe(0);
+  });
+
+  it('applyConsumable still heals during a lock, and restarts it — the scene is what refuses', () => {
+    const h = harness();
+    h.combat.damagePlayer(150, { kind: 'fall' });
+    h.combat.applyConsumable(medkit);
+    expect(h.world.player.hp).toBe(34 + 92);
+    h.run(2);
+    h.combat.applyConsumable(medkit);
+    expect(h.world.player.hp).toBe(184);
+    expect(h.world.player.healLockUntil).toBeCloseTo(h.world.time + 8, 12);
+    expect(h.of('player:healed')).toHaveLength(2);
+  });
+
+  it('a non-heal effect leaves the lock alone', () => {
+    const h = harness();
+    h.combat.applyConsumable(ration);
+    const until = h.world.player.healLockUntil;
+    h.run(1);
+    h.combat.applyConsumable({ kind: 'damage_boost', mult: 1.4, seconds: 5 });
+    h.combat.applyConsumable({ kind: 'hazard_immunity', seconds: 30 });
+    h.combat.applyConsumable({ kind: 'stamina' });
+    expect(h.world.player.healLockUntil).toBe(until);
+    expect(h.world.player.healLockSeconds).toBe(5);
+
+    const fresh = harness();
+    fresh.combat.applyConsumable({ kind: 'damage_boost', mult: 1.4, seconds: 5 });
+    expect(fresh.world.player.healLockUntil).toBe(0);
+    expect(fresh.world.player.healLockSeconds).toBe(0);
   });
 });
 

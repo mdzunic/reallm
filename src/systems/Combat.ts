@@ -210,6 +210,23 @@ export function staminaFull(p: Pick<PlayerEntity, 'stamina' | 'exhausted'>): boo
   return p.stamina >= STAMINA_MAX && !p.exhausted;
 }
 
+// ------------------------------------------------- SPEC-066 §4.1: the heal lock
+
+/** SPEC-066 §4.1: the heal slot locks this long after an instant heal (the medkit). */
+export const HEAL_LOCK_SECONDS = 8;
+/** SPEC-066 §4.1: …and this long after a heal over time (the wheat ration). */
+export const HEAL_OVER_TIME_LOCK_SECONDS = 5;
+
+/** SPEC-066 §4.1: the lock a heal sets, keyed by the effect's shape rather than by item. */
+export function healLockSeconds(effect: Extract<ConsumableEffect, { kind: 'heal' }>): number {
+  return effect.overSeconds === 0 ? HEAL_LOCK_SECONDS : HEAL_OVER_TIME_LOCK_SECONDS;
+}
+
+/** SPEC-066 §4.1: the seconds before the heal slot may be used again; 0 when it is ready. */
+export function healLockLeft(p: PlayerEntity, time: number): number {
+  return Math.max(0, p.healLockUntil - time);
+}
+
 // --------------------------------------------------------------- pure pieces
 
 export interface PlayerStats {
@@ -747,7 +764,11 @@ export class Combat {
 
   // ------------------------------------------------------------ consumables
 
-  /** §4.8. Also recomputes stats (AC-66). */
+  /**
+   * §4.8. Also recomputes stats (AC-66). SPEC-066 §4.1: a heal also locks the
+   * heal slot — it refuses nothing itself, since the item is already spent;
+   * the scene and the boss bots read `healLockLeft` before they spend one.
+   */
   applyConsumable(effect: ConsumableEffect): void {
     const p = this.#world.player;
     const time = this.#world.time;
@@ -755,6 +776,8 @@ export class Combat {
       const total = effect.fraction * this.#world.stats.maxHp;
       if (effect.overSeconds === 0) this.#heal(total, true);
       else p.healOverTime = { remaining: total, perSecond: total / effect.overSeconds };
+      p.healLockSeconds = healLockSeconds(effect);
+      p.healLockUntil = time + p.healLockSeconds;
     } else if (effect.kind === 'damage_boost') {
       p.boosts.push({ damageMult: effect.mult, until: time + effect.seconds });
     } else if (effect.kind === 'hazard_immunity') {
