@@ -2535,17 +2535,24 @@ export class SaveStore {
   }
 
   /**
-   * §4.6. Exports whatever the slot holds — including raw JSON a validator
-   * rejected, so a corrupt slot is still recoverable by hand (E8) — and falls
-   * back to the bound save, which is all a memory-only session has (E8).
+   * §4.6. The slot in play exports the live run: after a failed write — the
+   * moment `Save failed — export your save code` says to — storage holds the
+   * previous save or a truncated one, and mid-visit it is behind by everything
+   * since the last safe point (review 2026-10, B-05). Any other slot exports
+   * whatever it holds, including raw JSON a validator rejected, so a corrupt
+   * slot is still recoverable by hand (E8); so does a slot another tab wrote
+   * (07-a), whose stored save is the newer one. A memory-only session has
+   * only the bound save (E8).
    */
   async exportCode(slot: SlotId): Promise<string> {
     if (!codesSupported()) {
       this.#events.emit('ui:toast', { kind: 'warn', text: CODES_UNSUPPORTED_TEXT });
       throw new SaveCodeError('unsupported', 'CompressionStream is unavailable');
     }
-    const stored = this.available ? this.#read(this.#key(slot)) : null;
-    const json = stored ?? (this.#current?.meta.slot === slot ? JSON.stringify(this.#current) : null);
+    const bound = this.#current?.meta.slot === slot ? this.#current : null;
+    const live = bound !== null && !this.#foreign.has(slot) ? JSON.stringify(bound) : null;
+    const stored = live === null && this.available ? this.#read(this.#key(slot)) : null;
+    const json = live ?? stored ?? (bound === null ? null : JSON.stringify(bound));
     if (json === null) throw new SaveCodeError('empty', `slot ${slot} is empty`);
     return encodeSave(json);
   }

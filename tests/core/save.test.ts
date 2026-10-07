@@ -1285,6 +1285,43 @@ describe('export and import codes (§4.6)', () => {
   });
 
   /**
+   * Review 2026-10, B-05: `Save failed — export your save code` is the advice
+   * after a write that did not land, so the code has to carry the run that
+   * failed to write — not the truncated or older JSON left on disk.
+   */
+  it('exports the live run after a silently truncated write (B-05)', async () => {
+    const fake = fakeStorage();
+    const events = recorder();
+    const saves = store(fake, events);
+    const data = saves.create(0, CREATION);
+    data.player.tokens = 500;
+    fake.truncate();
+    expect(saves.flush()).toBe(false);
+    expect(events.toasts).toContain(SAVE_FAILED_TEXT);
+    const json = await decodeSave(await saves.exportCode(0));
+    expect(JSON.parse(json)).toEqual(JSON.parse(JSON.stringify(data)));
+  });
+
+  it('exports the live run after a quota failure, not the stored one (B-05)', async () => {
+    const fake = fakeStorage();
+    const saves = store(fake, recorder());
+    const data = saves.create(0, CREATION);
+    data.player.tokens = 500;
+    fake.failWrites();
+    expect(saves.flush()).toBe(false);
+    expect(JSON.parse(fake.data.get('reallm:slot:0') as string).player.tokens).toBe(0);
+    const json = await decodeSave(await saves.exportCode(0));
+    expect(JSON.parse(json).player.tokens).toBe(500);
+  });
+
+  it('exports what another slot holds, raw, while a run is bound elsewhere (B-05)', async () => {
+    const fake = fakeStorage({ 'reallm:slot:1': '{"version":1,"player":' });
+    const saves = store(fake, recorder());
+    saves.create(0, CREATION);
+    expect(await decodeSave(await saves.exportCode(1))).toBe('{"version":1,"player":');
+  });
+
+  /**
    * SPEC-034 §4.13, §6.1 — the review's `import.test.ts`.
    *
    * Importing into the slot the game was playing wrote the code to storage and
