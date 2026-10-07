@@ -610,6 +610,8 @@ const NAMES: Record<keyof GameEvents, true> = {
   'flight:recalled': true,
   // SPEC-041 §4.9: every player hit on a flight hazard.
   'flight:hazardHit': true,
+  // SPEC-063 §4.5: a wave group's ships are in the sky.
+  'flight:groupSpawned': true,
   // SPEC-054 §4.2, §4.5, §4.8: a level swap, the flashlight toggle and a cache opening.
   'level:changed': true,
   'light:toggled': true,
@@ -644,8 +646,8 @@ describe('GameEvents (§3.2)', () => {
     // `player:exhausted`; SPEC-054 §4.13 `level:changed`, `light:toggled` and
     // `cache:opened`; SPEC-055 §4.9 `puzzle:moved` and `puzzle:solved`;
     // SPEC-057 §4.8 `remains:created`, `remains:recovered` and `remains:lost`;
-    // SPEC-059 §4.4.3 `commendation:earned`.
-    expect(Object.keys(NAMES)).toHaveLength(82);
+    // SPEC-059 §4.4.3 `commendation:earned`; SPEC-063 §4.5 `flight:groupSpawned`.
+    expect(Object.keys(NAMES)).toHaveLength(83);
   });
 
   it('still carries the nine names SPEC-002 and SPEC-003 already emit', () => {

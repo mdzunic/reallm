@@ -812,12 +812,16 @@ export class Flight {
     this.#spawnGroups();
   }
 
-  /** §4.4: wave groups fire at their trip fraction — throttle-scaled seconds. */
+  /**
+   * §4.4: wave groups fire at their trip fraction — throttle-scaled seconds.
+   * SPEC-063 §4.5: each group says so once, after its last ship is in.
+   */
   #spawnGroups(): void {
     for (const group of this.#groups) {
       if (group.spawned || this.progress < group.frac) continue;
       group.spawned = true;
       for (let i = 0; i < group.count; i++) this.#spawnShip(group.enemy);
+      this.#events.emit('flight:groupSpawned', { enemy: group.enemy, count: group.count });
     }
   }
 
