@@ -632,7 +632,7 @@ function patchTexelAt(tile: number, seed: number, lx: number, ly: number): typeo
     case 10: {
       // An ash drift: pale grey, streaked.
       const streak = 0.5 + 0.5 * pFbm(seed + 100, lx * 3, ly * 9, 3, 9, 3);
-      const v = 0.5 + 0.18 * streak;
+      const v = 0.55 + 0.25 * streak;
       out.r = v;
       out.g = v * 0.98;
       out.b = v * 0.96;
@@ -657,11 +657,12 @@ function patchTexelAt(tile: number, seed: number, lx: number, ly: number): typeo
       const bubbles = pVoronoi(seed + 120, lx * 9, ly * 9, 9, 9);
       const bubble = ((bubbles.id & 0xff) / 255 < 0.35 ? 1 : 0) * (1 - smoothstep(0.08, 0.16, bubbles.dist));
       const meniscus = Math.exp(-((r + (noise - 0.5) * 0.3 - 0.62) ** 2) / 0.01);
-      const lit = 0.5 + 0.5 * noise;
-      out.r = 0.32 * lit + 0.22 * meniscus + 0.35 * bubble;
-      out.g = 0.5 * lit * lit + 0.25 * meniscus + 0.55 * bubble;
-      out.b = 0.38 * lit + 0.2 * meniscus + 0.35 * bubble;
-      out.a = rim * 0.88;
+      // Filled to the brim: a bright body, the meniscus only a little brighter.
+      const lit = 0.6 + 0.4 * noise;
+      out.r = 0.3 * lit + 0.12 * meniscus + 0.3 * bubble;
+      out.g = 0.62 * lit + 0.15 * meniscus + 0.35 * bubble;
+      out.b = 0.45 * lit + 0.12 * meniscus + 0.3 * bubble;
+      out.a = rim * (0.8 + 0.15 * lit);
       return out;
     }
     case 13: {

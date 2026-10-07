@@ -244,7 +244,7 @@ export const PLANETS = {
         // PLAN R28 / SPEC-067 (*initial tuning*): rust-red and bleached-grey
         // sand, cracked-earth flats, a dead wurm's ribs and the scavs' leavings.
         dressing: {
-          macro: { hues: ['#e07040', '#d8d4cc'], strength: 0.6, value: 0.3, patches: 0.6 },
+          macro: { hues: ['#e07040', '#d8d4cc'], strength: 0.6, value: 0.38, patches: 0.6 },
           rubble: ['#a88e6c', '#6a5442'],
           kinds: ['wurm_ribs', 'scav_barrels', 'pipe_run'],
           trail: '#7a5434',
@@ -477,7 +477,7 @@ export const PLANETS = {
         // ash drifts and cooling pools, hex stumps and obsidian.
         dressing: {
           macro: { hues: ['#c0704a', '#8a8890'], strength: 0.55, value: 0.25, patches: 0.3 },
-          rubble: ['#4a403a', '#2a2420'],
+          rubble: ['#7a6a5e', '#463c36'],
           kinds: ['basalt_stumps', 'obsidian_shards', 'lava_blobs'],
           trail: '#8a7e74',
         },

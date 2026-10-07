@@ -444,7 +444,7 @@ function basaltStumps(seed: number): THREE.BufferGeometry {
     column.translate(0, height / 2 - 0.05, 0);
     column.rotateX((hash01(seed, i, 2) - 0.5) * 0.12);
     column.translate(x, 0, z);
-    parts.push(topColour(part(column, '#3c3734'), 0.9, '#62584f'));
+    parts.push(topColour(part(column, '#5a534e'), 0.9, '#8a7c70'));
   });
   return mergeParts(parts);
 }
@@ -460,7 +460,8 @@ function obsidianShards(seed: number): THREE.BufferGeometry {
     shard.rotateZ((hash01(seed, i, 2) - 0.5) * 0.9);
     shard.rotateY(hash01(seed, i, 3) * Math.PI);
     shard.translate((hash01(seed, i, 4) - 0.5) * 1.2, 0, (hash01(seed, i, 5) - 0.5) * 1.2);
-    parts.push(part(shard, i % 2 === 0 ? '#1c1820' : '#2e2638'));
+    // Glassy black, a violet sheen on alternate shards and a faint ember in the cleft ones.
+    parts.push(part(shard, i % 2 === 0 ? '#2a2430' : '#4a3a5c', i === 2 ? 0.08 : 0));
   }
   return mergeParts(parts);
 }
@@ -475,7 +476,7 @@ function lavaBlobs(seed: number): THREE.BufferGeometry {
     blob.scale(size, size * 0.38, size * 0.8);
     blob.rotateY(hash01(seed, i, 1) * Math.PI);
     blob.translate(i === 0 ? 0 : (hash01(seed, i, 2) - 0.5) * 2, 0.05, i === 0 ? 0 : (hash01(seed, i, 3) - 0.5) * 2);
-    const crust = part(blob, '#2a1d16');
+    const crust = part(blob, '#3a2a20');
     crust.computeVertexNormals();
     parts.push(seams(crust, seed + 10 + i, 0.12, '#ff7a30'));
   }

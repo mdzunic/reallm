@@ -104,7 +104,7 @@ describe('the geometry kit (SPEC-067)', () => {
   });
 
   it('the lit kinds glow and the rest do not', () => {
-    const lit = new Set<DressingKind>(['ice_shards', 'frozen_pipe', 'lava_blobs', 'glow_pods', 'resin_mound', 'marker_post']);
+    const lit = new Set<DressingKind>(['ice_shards', 'frozen_pipe', 'obsidian_shards', 'lava_blobs', 'glow_pods', 'resin_mound', 'marker_post']);
     for (const kind of Object.keys(DRESSING) as DressingKind[]) {
       const glow = dressingGeometry(kind, 7).getAttribute('glow') as THREE.BufferAttribute;
       let any = false;
