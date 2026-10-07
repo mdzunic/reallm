@@ -471,3 +471,61 @@ describe('everything else reads and spends the hold only (§4.4)', () => {
     expect(created?.resources).toEqual({ oil: 20, wheat: 2, water: 2 });
   });
 });
+
+// ------------------------------------------------------------- SPEC-066 §4.8
+
+describe('hard’s death reaches the depot (SPEC-066 §4.8, E124)', () => {
+  const HARD = (patch?: (save: Save) => void) =>
+    rig((save) => {
+      save.meta.difficulty = 'hard';
+      save.resources = { oil: 200, wheat: 10, water: 10, lithium: 0 };
+      save.depot.held = { oil: 300, wheat: 9, water: 0, lithium: 95 };
+      patch?.(save);
+    });
+
+  it('applyDepotDeathLoss on hard takes floor(held / 10) of each depot resource, and emits nothing', () => {
+    const { economy, data, names, clear } = HARD();
+    clear();
+    expect(economy.applyDepotDeathLoss()).toEqual({ oil: 30, lithium: 9 });
+    expect(data.depot.held).toEqual({ oil: 270, wheat: 9, water: 0, lithium: 86 });
+    expect(names()).toEqual([]);
+    // The hold and the reserve are not its business.
+    expect(data.resources).toEqual({ oil: 200, wheat: 10, water: 10, lithium: 0 });
+    expect(data.depot.keep).toEqual({ oil: 100, wheat: 100, water: 100, lithium: 100 });
+  });
+
+  it('on story, casual and normal it takes nothing', () => {
+    for (const difficulty of ['story', 'casual', 'normal'] as const) {
+      const { economy, data, names, clear } = HARD((save) => {
+        save.meta.difficulty = difficulty;
+      });
+      clear();
+      expect(economy.applyDepotDeathLoss(), difficulty).toEqual({});
+      expect(data.depot.held, difficulty).toEqual({ oil: 300, wheat: 9, water: 0, lithium: 95 });
+      expect(names(), difficulty).toEqual([]);
+    }
+  });
+
+  it('a hard death still takes 20 % of the hold, and the remains carry only that', () => {
+    const { economy, data } = HARD();
+    const lost = economy.applyDeathPenalty();
+    const depotLost = economy.applyDepotDeathLoss();
+    expect(lost).toEqual({ oil: 40, wheat: 2, water: 2 });
+    expect(depotLost).toEqual({ oil: 30, lithium: 9 });
+    expect(data.resources).toEqual({ oil: 160, wheat: 8, water: 8, lithium: 0 });
+    const { created } = dropRemains(data, 'cinder4', { x: 12, z: -8 }, lost);
+    expect(created?.resources).toEqual({ oil: 40, wheat: 2, water: 2 });
+  });
+
+  it('the difficulty is read at death: switched off hard, the next death leaves the depot alone', () => {
+    const { economy, data } = HARD();
+    economy.applyDepotDeathLoss();
+    data.meta.difficulty = 'normal';
+    expect(economy.applyDepotDeathLoss()).toEqual({});
+    expect(data.depot.held.oil).toBe(270);
+    // On hard again, a tenth of what is left, rounded down.
+    data.meta.difficulty = 'hard';
+    expect(economy.applyDepotDeathLoss()).toEqual({ oil: 27, lithium: 8 });
+    expect(data.depot.held).toEqual({ oil: 243, wheat: 9, water: 0, lithium: 78 });
+  });
+});

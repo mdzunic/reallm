@@ -2041,7 +2041,7 @@ describe('the boss frame, the target frame and the panel lines (SPEC-042 §4.7, 
 import { hash32 } from '@/core/Rng';
 import { CONTRACT_IDS, CONTRACTS, type MissionBonus } from '@/data/index';
 import { contractFor } from '@/systems/Missions';
-import { bonusLine, bonusRewardText, bonusText, contractLabel, timeText } from '@/systems/UiHelpers';
+import { bonusLine, bonusRewardText, bonusText, contractLabel, depotLossText, timeText } from '@/systems/UiHelpers';
 
 /** A save with chapter 1 finished and `c1_m2` among the done. */
 function chapterOneDone(): Save {
@@ -2146,6 +2146,16 @@ describe('a boss contract pays half its tokens (SPEC-066 §4.5)', () => {
     expect(completionLines(MISSIONS.c1_m2, true, null, { contract: 'swarm' }).rewards).toBe(
       '+112 XP · +11 tokens · +20 lithium · contract',
     );
+  });
+});
+
+describe('depotLossText (SPEC-066 §4.8, E124)', () => {
+  it('reads Depot lost: and the list in resource order, and null when nothing was taken', () => {
+    expect(depotLossText({ oil: 30, lithium: 9 })).toBe('Depot lost: 30 oil · 9 lithium');
+    expect(depotLossText({ lithium: 9, oil: 30 })).toBe('Depot lost: 30 oil · 9 lithium');
+    expect(depotLossText({ oil: 30 })).toBe('Depot lost: 30 oil');
+    expect(depotLossText({})).toBeNull();
+    expect(depotLossText({ wheat: 0 })).toBeNull();
   });
 });
 

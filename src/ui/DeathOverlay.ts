@@ -14,6 +14,10 @@
 // Review 2026-10 S-14: the last line speaks the fiction — the medical frame,
 // or the instance restarting — and the scene that knows the save writes it
 // (`setRespawn`, from `systems/Home.respawnText`).
+//
+// SPEC-066 §4.8 (E124): under what was lost, what a `hard` death took from the
+// Relay depot — `death-depot`, written by the scene after `show`
+// (`setDepotLoss`, from `depotLossText`), empty when nothing was taken.
 import { DEATH_RESPAWN, type ResourceId } from '@/data/index';
 import { el, testId } from '@/ui/dom';
 
@@ -23,6 +27,7 @@ export class DeathOverlay {
   readonly #tip: HTMLParagraphElement;
   readonly #restarts: HTMLParagraphElement;
   readonly #lost: HTMLParagraphElement;
+  readonly #depot: HTMLParagraphElement;
   readonly #remains: HTMLParagraphElement;
   readonly #respawn: HTMLParagraphElement;
 
@@ -33,6 +38,7 @@ export class DeathOverlay {
     this.#tip = testId(el('p', 'death-tip is-hidden'), 'death-tip');
     this.#restarts = testId(el('p', 'death-restarts'), 'death-restarts');
     this.#lost = el('p', 'death-lost');
+    this.#depot = testId(el('p', 'death-depot'), 'death-depot');
     this.#remains = testId(el('p', 'death-remains'), 'death-remains');
     this.#respawn = testId(el('p', 'death-respawn', DEATH_RESPAWN.cover), 'death-respawn');
     this.#root.append(
@@ -41,6 +47,7 @@ export class DeathOverlay {
       this.#tip,
       this.#restarts,
       this.#lost,
+      this.#depot,
       this.#remains,
       this.#respawn,
     );
@@ -76,6 +83,11 @@ export class DeathOverlay {
     this.#remains.textContent = line ?? '';
   }
 
+  /** SPEC-066 §4.8: `Depot lost: <list>` (`depotLossText`); `null` empties it. */
+  setDepotLoss(line: string | null): void {
+    this.#depot.textContent = line ?? '';
+  }
+
   /** Review 2026-10 S-14: the last line — `respawnText` of the save's story context. */
   setRespawn(text: string): void {
     this.#respawn.textContent = text;
@@ -85,6 +97,7 @@ export class DeathOverlay {
     this.#root.classList.remove('is-visible');
     this.setRestarts(null);
     this.setRemains(null);
+    this.setDepotLoss(null);
   }
 
   dispose(): void {

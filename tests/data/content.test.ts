@@ -4185,6 +4185,8 @@ describe('the story row (SPEC-059 §4.2.1)', () => {
       weatherMult: 0,
       allyDamageMult: 0,
       assisted: true,
+      // SPEC-066 §4.8: a death never reaches the depot below hard.
+      depotLoss: 0,
     });
     // Its elite chance is normal's; its enemy HP is below every other row's.
     expect(DIFFICULTY_RULES.story.eliteChanceMult).toBe(DIFFICULTY_RULES.normal.eliteChanceMult);

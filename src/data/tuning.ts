@@ -49,6 +49,8 @@ export interface DifficultyRules {
   readonly allyDamageMult: number;
   /** SPEC-059 §4.2.1: the assists SPEC-038 and SPEC-050 gave casual alone: windups ×1.25, dash cooldown ×0.8, stamina regeneration ×1.25. */
   readonly assisted: boolean;
+  /** SPEC-066 §4.8: the share of each depot resource a surface death takes. */
+  readonly depotLoss: number;
 }
 
 export const TUNING = {
@@ -95,12 +97,34 @@ export const BELOW_HALF_SIZE = 48;
  * (G-13): story's enemy HP is ×0.6 — at normal's, a plot-first player on the
  * starter rifle stood still in front of a boss for one to two minutes.
  *
+ * SPEC-066 §4.8 (PLAN R27 decision 8): `depotLoss` is the share of each
+ * resource held at the Relay depot that a surface death takes — a tenth on
+ * hard, and nothing on every other difficulty (R26's rule stands there).
+ *
  * Keyed by the four names; `tests/data/tuning.test.ts` pins the keys to
  * `DIFFICULTIES`, which keeps this file free of imports.
  */
 export const DIFFICULTY_RULES = {
-  story: { enemyHpMult: 0.6, enemyDamageMult: 0, eliteChanceMult: 1, deathLoss: 0, weatherMult: 0, allyDamageMult: 0, assisted: true },
-  casual: { enemyHpMult: 1, enemyDamageMult: 0.7, eliteChanceMult: 1, deathLoss: 0, weatherMult: 0.7, allyDamageMult: 1, assisted: true },
+  story: {
+    enemyHpMult: 0.6,
+    enemyDamageMult: 0,
+    eliteChanceMult: 1,
+    deathLoss: 0,
+    weatherMult: 0,
+    allyDamageMult: 0,
+    assisted: true,
+    depotLoss: 0,
+  },
+  casual: {
+    enemyHpMult: 1,
+    enemyDamageMult: 0.7,
+    eliteChanceMult: 1,
+    deathLoss: 0,
+    weatherMult: 0.7,
+    allyDamageMult: 1,
+    assisted: true,
+    depotLoss: 0,
+  },
   normal: {
     enemyHpMult: 1,
     enemyDamageMult: 1,
@@ -109,8 +133,18 @@ export const DIFFICULTY_RULES = {
     weatherMult: 1,
     allyDamageMult: 1,
     assisted: false,
+    depotLoss: 0,
   },
-  hard: { enemyHpMult: 1.25, enemyDamageMult: 1.3, eliteChanceMult: 2, deathLoss: 0.2, weatherMult: 1, allyDamageMult: 1, assisted: false },
+  hard: {
+    enemyHpMult: 1.25,
+    enemyDamageMult: 1.3,
+    eliteChanceMult: 2,
+    deathLoss: 0.2,
+    weatherMult: 1,
+    allyDamageMult: 1,
+    assisted: false,
+    depotLoss: 0.1,
+  },
 } as const satisfies {
   readonly story: DifficultyRules;
   readonly casual: DifficultyRules;

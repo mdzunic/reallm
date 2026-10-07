@@ -1779,6 +1779,16 @@ export function remainsOverlayLine(look: RemainsLook, lost: Partial<Record<Resou
 }
 
 /**
+ * SPEC-066 §4.8 (E124) — the death overlay's `death-depot` line on `hard`:
+ * `Depot lost: 30 oil · 9 lithium`, in `RESOURCE_IDS` order, or `null` when
+ * the death took nothing from the depot.
+ */
+export function depotLossText(lost: Partial<Record<ResourceId, number>>): string | null {
+  const list = remainsListText(lost);
+  return list === '' ? null : `Depot lost: ${list}`;
+}
+
+/**
  * SPEC-057 §4.4 (E93) — the recovery's toast: `Recovered: <list>`, with
  * ` — the rest stays with your pack` (or `body`) while some is left.
  */

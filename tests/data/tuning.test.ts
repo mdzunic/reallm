@@ -56,12 +56,13 @@ describe('DIFFICULTY_RULES (SPEC-043 §4.4)', () => {
   it('casual and normal keep their numbers, and hard multiplies what exists', () => {
     // SPEC-059 §4.2.1: every row carries the three new columns; casual, normal
     // and hard keep every value they had, and their new ones are what SPEC-038
-    // applied for casual alone.
+    // applied for casual alone. SPEC-066 §4.8: every row gains `depotLoss` —
+    // a tenth of the depot on hard, nothing elsewhere.
     expect(DIFFICULTY_RULES).toEqual({
-      story: { enemyHpMult: 0.6, enemyDamageMult: 0, eliteChanceMult: 1, deathLoss: 0, weatherMult: 0, allyDamageMult: 0, assisted: true },
-      casual: { enemyHpMult: 1, enemyDamageMult: 0.7, eliteChanceMult: 1, deathLoss: 0, weatherMult: 0.7, allyDamageMult: 1, assisted: true },
-      normal: { enemyHpMult: 1, enemyDamageMult: 1, eliteChanceMult: 1, deathLoss: 0.1, weatherMult: 1, allyDamageMult: 1, assisted: false },
-      hard: { enemyHpMult: 1.25, enemyDamageMult: 1.3, eliteChanceMult: 2, deathLoss: 0.2, weatherMult: 1, allyDamageMult: 1, assisted: false },
+      story: { enemyHpMult: 0.6, enemyDamageMult: 0, eliteChanceMult: 1, deathLoss: 0, weatherMult: 0, allyDamageMult: 0, assisted: true, depotLoss: 0 },
+      casual: { enemyHpMult: 1, enemyDamageMult: 0.7, eliteChanceMult: 1, deathLoss: 0, weatherMult: 0.7, allyDamageMult: 1, assisted: true, depotLoss: 0 },
+      normal: { enemyHpMult: 1, enemyDamageMult: 1, eliteChanceMult: 1, deathLoss: 0.1, weatherMult: 1, allyDamageMult: 1, assisted: false, depotLoss: 0 },
+      hard: { enemyHpMult: 1.25, enemyDamageMult: 1.3, eliteChanceMult: 2, deathLoss: 0.2, weatherMult: 1, allyDamageMult: 1, assisted: false, depotLoss: 0.1 },
     });
     expect(DIFFICULTY_RULES.normal.deathLoss).toBe(TUNING.DEATH_RESOURCE_LOSS);
   });

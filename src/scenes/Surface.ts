@@ -194,6 +194,7 @@ import {
   darkFogRange,
   descentRefusal,
   deathCause,
+  depotLossText,
   deliveryNeedsText,
   firstSentence,
   deathTip,
@@ -7617,6 +7618,9 @@ export class SurfaceScene extends UiScene<'surface'> {
           // SPEC-041 §4.4: a death opens the seal at once; the respawn clears the arena.
           if (this.#arena !== null) this.#arena.sealed = false;
           const lost = this.#economy?.applyDeathPenalty() ?? {};
+          // SPEC-066 §4.8 (E124): on hard a tenth of the depot goes too — gone,
+          // never into the remains, which carry the hold's loss only.
+          const depotLost = this.#economy?.applyDepotDeathLoss() ?? {};
           // SPEC-057 §4.1 steps 3–4: what was taken stays where they fell.
           const remainsLine = this.#dropRemains(lost);
           // SPEC-042 §4.5: what killed the player, and the one tip that applies.
@@ -7628,6 +7632,7 @@ export class SurfaceScene extends UiScene<'surface'> {
             healsCarried: this.#healsCarried(),
           });
           this.#death?.show(lost, deathCause(cause), tip);
+          this.#death?.setDepotLoss(depotLossText(depotLost));
           // SPEC-057 §4.1 step 5: and where it went.
           this.#death?.setRemains(remainsLine);
           // Review 2026-10 S-14: the last line in the fiction, by the save's story.

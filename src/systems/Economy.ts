@@ -1046,6 +1046,28 @@ export class Economy {
     return lost;
   }
 
+  /**
+   * SPEC-066 §4.8 (E124): a surface death on `hard` also takes
+   * `floor(held × depotLoss)` of each resource held at the Relay depot — a
+   * tenth — read at death as `applyDeathPenalty` reads its own. The share is
+   * gone, not added to the remains. It emits nothing (the hold does not
+   * change), and every other difficulty takes nothing. Returns what was taken,
+   * for the death overlay.
+   */
+  applyDepotDeathLoss(): Partial<Record<ResourceId, number>> {
+    const lost: Partial<Record<ResourceId, number>> = {};
+    const share = DIFFICULTY_RULES[this.#save.meta.difficulty].depotLoss;
+    if (share <= 0) return lost;
+    const held = this.#save.depot.held;
+    for (const resource of RESOURCE_IDS) {
+      const loss = Math.floor(held[resource] * share);
+      if (loss <= 0) continue;
+      held[resource] -= loss;
+      lost[resource] = loss;
+    }
+    return lost;
+  }
+
   // ------------------------------------------------------------------ caches
 
   /**
