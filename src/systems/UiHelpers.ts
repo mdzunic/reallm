@@ -389,8 +389,8 @@ export interface WalletModel {
 }
 
 /**
- * SPEC-031 §4.11: the cargo cap the wallet strip prints against — the cargo
- * tier's capacity plus the quartermaster's bonus, the same sum
+ * SPEC-031 §4.11: the cargo cap the wallet strip prints against — SPEC-066
+ * §4.7: `TUNING.CARGO_BASE` plus the quartermaster's bonus, the same sum
  * `Economy.cargoCap()` charges by, computed purely over the save so the strip
  * needs no `Economy` instance.
  */
@@ -402,7 +402,7 @@ function walletCap(save: Save): number {
     const effect = COMPANIONS[companion.id].levels[companion.level - 1] as CompanionEffect | undefined;
     bonus += effect?.cargoBonus ?? 0;
   }
-  return (UPGRADES.cargo.metrics['cargoCap']?.[save.ship.cargo] ?? TUNING.CARGO_BASE) + bonus;
+  return TUNING.CARGO_BASE + bonus;
 }
 
 /** SPEC-031 §3: what the wallet strip renders — one read of the save, no totals of its own. */
@@ -1557,7 +1557,7 @@ const SHIP_ROLES: Readonly<Record<ShipSystem, string>> = {
   shield: 'Flight: shield points',
   weapon: 'Flight: nose guns',
   engine: 'Flight time and fuel per jump',
-  cargo: 'The hold, on every planet',
+  cargo: 'Pack slots, on every planet',
 };
 
 export function shipRoleText(system: ShipSystem): string {
@@ -2504,8 +2504,8 @@ export function upgradeDeltaText(metric: string, from: number, to: number): stri
       return `Hull ${metricValue(from)} → ${metricValue(to)}`;
     case 'shieldHp':
       return `Shield ${metricValue(from)} → ${metricValue(to)}`;
-    case 'cargoCap':
-      return `Cargo ${metricValue(from)} → ${metricValue(to)}`;
+    case 'packSlots':
+      return `Pack slots ${metricValue(from)} → ${metricValue(to)}`;
     case 'damage':
       return `Gun damage ${metricValue(from)} → ${metricValue(to)}`;
     case 'fireRate':
@@ -2516,7 +2516,7 @@ export function upgradeDeltaText(metric: string, from: number, to: number): stri
 }
 
 /** The metric keys `upgradeDeltaText` names outright — the fallback test's list. */
-export const UPGRADE_METRIC_KEYS = ['speedMult', 'fuelMult', 'hullHp', 'shieldHp', 'cargoCap', 'damage', 'fireRate'] as const;
+export const UPGRADE_METRIC_KEYS = ['speedMult', 'fuelMult', 'hullHp', 'shieldHp', 'packSlots', 'damage', 'fireRate'] as const;
 
 // -------------------------------------------------------------- tint contrast
 

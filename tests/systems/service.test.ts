@@ -135,7 +135,9 @@ describe('applySupplies (SPEC-032 §4.7)', () => {
     });
     applySupplies(w.save, w.economy);
     expect(w.save.resources.water).toBe(cargoCap(w.save.ship));
-    expect(cargoCap(w.save.ship)).toBe(600);
+    // SPEC-066 §4.7: the Cargo Racks add pack slots; the cap is 400 at every tier.
+    expect(cargoCap(w.save.ship)).toBe(400);
+    expect(w.save.resources.water).toBe(400);
   });
 
   it('adds no field to the save (§4.9)', () => {

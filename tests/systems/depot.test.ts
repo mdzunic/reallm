@@ -11,7 +11,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { EventBus, type GameEvents } from '@/core/Events';
 import { setLogSink, type LogSink } from '@/core/Log';
 import { DEPOT_KEEP_DEFAULT, DEPOT_KEEP_MAX, DEPOT_KEEP_STEP, newSave, type CharacterCreation, type Save } from '@/core/Save';
-import { COMPANIONS, PLANETS, RESOURCE_SOURCES, UPGRADES } from '@/data/index';
+import { COMPANIONS, PLANETS, RESOURCE_SOURCES, TUNING } from '@/data/index';
 import { Economy } from '@/systems/Economy';
 import type { LayoutPoi } from '@/systems/Layout';
 import { Missions, type MissionContext } from '@/systems/Missions';
@@ -176,13 +176,15 @@ describe('the reserve (§4.5)', () => {
     expect(data.depot.keep).toMatchObject({ oil: 100, water: 100, lithium: 100 });
   });
 
-  it('at the largest hold the ceiling is the cap itself: the Cargo Hold at tier 3 with a level-3 Quartermaster', () => {
+  it('at the largest hold the ceiling is the cap itself: the Cargo Racks at tier 3 with a level-3 Quartermaster', () => {
     const { economy, data } = rig((save) => {
       save.ship.cargo = 3;
       save.companions.push({ id: 'quartermaster', level: 3, enabled: true });
     });
     const cap = economy.cargoCap();
-    expect(cap).toBe(UPGRADES.cargo.metrics.cargoCap[3] + COMPANIONS.quartermaster.levels[2].cargoBonus);
+    // SPEC-066 §4.7: the cap is TUNING.CARGO_BASE at every tier — 400 + 300.
+    expect(cap).toBe(TUNING.CARGO_BASE + COMPANIONS.quartermaster.levels[2].cargoBonus);
+    expect(cap).toBe(700);
     expect(cap).toBe(DEPOT_KEEP_MAX);
     expect(economy.setKeep('oil', cap + DEPOT_KEEP_STEP)).toBe(cap);
     expect(economy.setKeep('oil', cap - DEPOT_KEEP_STEP)).toBe(cap - DEPOT_KEEP_STEP);
@@ -192,7 +194,7 @@ describe('the reserve (§4.5)', () => {
   it('65-a: a reserve above a smaller hold’s cap is stored as a load would keep it — the terminal is what shows it at the cap', () => {
     const { economy, data } = rig();
     expect(economy.cargoCap()).toBe(400);
-    expect(economy.setKeep('oil', 1_000)).toBe(1_000);
+    expect(economy.setKeep('oil', 700)).toBe(700);
     data.resources.oil = 400;
     expect(economy.shippable('oil', 0)).toBe(0);
   });
@@ -405,7 +407,7 @@ describe('everything else reads and spends the hold only (§4.4)', () => {
     data.resources.wheat = 0;
     data.depot.held.wheat = 500;
     expect(economy.craft('wheat_ration')).toEqual({ ok: false, reason: 'insufficient_resources' });
-    // The Cargo Hold's tier 3 wants 40 water on top of its tokens.
+    // The Cargo Racks' tier 3 wants 40 water on top of its tokens.
     data.resources.water = 0;
     data.depot.held.water = 100;
     expect(economy.buyShipTier('cargo')).toEqual({ ok: false, reason: 'insufficient_resources' });

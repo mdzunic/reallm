@@ -302,12 +302,13 @@ describe('priceText (AC-113, SPEC-031 §4.12)', () => {
 });
 
 describe('walletModel (SPEC-031 §4.11)', () => {
-  it('reads a fresh save: four entries in order, capped by the cargo tier', () => {
+  it('reads a fresh save: four entries in order, capped by the cargo cap', () => {
     const data = save();
     const model = walletModel(data);
     expect(model.tokens).toBe(data.player.tokens);
     expect(model.resources.map((entry) => entry.id)).toEqual(['oil', 'wheat', 'water', 'lithium']);
-    const cap = UPGRADES.cargo.metrics['cargoCap']?.[data.ship.cargo];
+    // SPEC-066 §4.7: TUNING.CARGO_BASE at every Cargo tier.
+    const cap = TUNING.CARGO_BASE;
     for (const entry of model.resources) {
       expect(entry.cap).toBe(cap);
       expect(entry.value).toBe(data.resources[entry.id]);
@@ -325,13 +326,15 @@ describe('walletModel (SPEC-031 §4.11)', () => {
     expect(model.resources.find((entry) => entry.id === 'wheat')?.atCap).toBe(false);
   });
 
-  it('follows the cargo tier and the quartermaster bonus', () => {
+  it('follows the quartermaster bonus, and not the cargo tier (SPEC-066 §4.7)', () => {
     const data = save((s) => {
       s.ship.cargo = 2;
       s.companions.push({ id: 'quartermaster', level: 1, enabled: true });
     });
     const bonus = COMPANIONS.quartermaster.levels[0]?.cargoBonus ?? 0;
-    expect(walletModel(data).resources[0]?.cap).toBe((UPGRADES.cargo.metrics['cargoCap']?.[2] ?? 0) + bonus);
+    expect(walletModel(data).resources[0]?.cap).toBe(TUNING.CARGO_BASE + bonus);
+    data.companions.length = 0;
+    expect(walletModel(data).resources[0]?.cap).toBe(400);
   });
 
   it('counts a disabled quartermaster, exactly as Economy.cargoCap does', () => {
@@ -342,7 +345,7 @@ describe('walletModel (SPEC-031 §4.11)', () => {
       s.companions.push({ id: 'quartermaster', level: 1, enabled: false });
     });
     const bonus = COMPANIONS.quartermaster.levels[0]?.cargoBonus ?? 0;
-    const base = UPGRADES.cargo.metrics['cargoCap']?.[data.ship.cargo] ?? 0;
+    const base = TUNING.CARGO_BASE;
     expect(walletModel(data).resources[0]?.cap).toBe(base + bonus);
   });
 });
@@ -1269,7 +1272,7 @@ describe('upgradeDeltaText (SPEC-035 §4.12)', () => {
     expect(upgradeDeltaText('fuelMult', 1, 0.9)).toBe('Fuel use −10 %');
     expect(upgradeDeltaText('hullHp', 100, 150)).toBe('Hull 100 → 150');
     expect(upgradeDeltaText('shieldHp', 40, 80)).toBe('Shield 40 → 80');
-    expect(upgradeDeltaText('cargoCap', 400, 600)).toBe('Cargo 400 → 600');
+    expect(upgradeDeltaText('packSlots', 20, 22)).toBe('Pack slots 20 → 22');
     expect(upgradeDeltaText('damage', 10, 13)).toBe('Gun damage 10 → 13');
     expect(upgradeDeltaText('fireRate', 4, 5)).toBe('Fire rate 4 → 5/s');
   });
@@ -1518,7 +1521,7 @@ describe('ship role and gate lines (SPEC-039 §4.5)', () => {
     expect(shipRoleText('shield')).toBe('Flight: shield points');
     expect(shipRoleText('weapon')).toBe('Flight: nose guns');
     expect(shipRoleText('engine')).toBe('Flight time and fuel per jump');
-    expect(shipRoleText('cargo')).toBe('The hold, on every planet');
+    expect(shipRoleText('cargo')).toBe('Pack slots, on every planet');
   });
 
   it('marks the shield Required for Ferrum until the save meets the gate', () => {

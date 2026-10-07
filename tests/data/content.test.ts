@@ -11,6 +11,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { LAUNCH_SECONDS, THROTTLES } from '@/systems/Flight';
 import { DASH_IFRAMES } from '@/systems/Dash';
 import { SPRINT_MULT } from '@/systems/Stamina';
+import { INVENTORY_SLOTS } from '@/systems/Economy';
 import {
   AFFIX_IDS,
   AFFIXES,
@@ -394,8 +395,12 @@ describe('content invariants (SPEC-009 §7)', () => {
   });
 
   it('7. collect and deliver amounts fit the hold, and the ground holds three times the largest collect', () => {
-    // §4.13: the base cap is the un-upgraded cargo metric, in one place only.
-    expect(TUNING.CARGO_BASE).toBe(UPGRADES.cargo.metrics.cargoCap[0]);
+    // SPEC-066 §4.7: the Cargo Racks' first tier is the base pack, and each
+    // tier adds slots; the cap is TUNING.CARGO_BASE at every tier.
+    const packSlots: readonly number[] = UPGRADES.cargo.metrics.packSlots;
+    expect(packSlots[0]).toBe(INVENTORY_SLOTS);
+    for (let tier = 1; tier < packSlots.length; tier++) expect(packSlots[tier]).toBeGreaterThan(packSlots[tier - 1] as number);
+    expect(Object.keys(UPGRADES.cargo.metrics)).toEqual(['packSlots']);
 
     const problems: string[] = [];
     /** planet → resource → largest collect objective (E3). */

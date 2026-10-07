@@ -173,8 +173,8 @@ const PLANET_TABLE: Readonly<Record<PlanetId, PlanetDef>> = PLANETS;
 const RECIPE_TABLE: Readonly<Record<RecipeId, Recipe>> = RECIPES;
 const CLASS_TABLE: Readonly<Record<ClassId, Class>> = CLASSES;
 
-/** SPEC-009 §4.10: 400 / 600 / 800 / 1200 per resource, by cargo tier. */
-const CARGO_BY_TIER = UPGRADES.cargo.metrics.cargoCap;
+/** SPEC-066 §4.7: the pack's slots by Cargo Racks tier — 20 / 22 / 24 / 26. */
+const PACK_SLOTS_BY_TIER: readonly number[] = UPGRADES.cargo.metrics.packSlots;
 const FUEL_MULT = UPGRADES.engine.metrics.fuelMult;
 
 function fail(reason: FailReason): Fail {
@@ -329,9 +329,17 @@ export class Economy {
 
   // ------------------------------------------------------------- resources
 
-  /** §4.5: the cargo tier's cap plus the quartermaster's bonus, per resource. */
+  /**
+   * §4.5: the cap plus the quartermaster's bonus, per resource. SPEC-066 §4.7:
+   * the cap is `TUNING.CARGO_BASE` at every Cargo tier — the tiers are pack slots.
+   */
   cargoCap(): number {
-    return CARGO_BY_TIER[this.#save.ship.cargo] + (this.#quartermaster()?.cargoBonus ?? 0);
+    return TUNING.CARGO_BASE + (this.#quartermaster()?.cargoBonus ?? 0);
+  }
+
+  /** SPEC-066 §4.7: the pack's slots at the save's Cargo Racks tier — 20 / 22 / 24 / 26. */
+  packSlots(): number {
+    return PACK_SLOTS_BY_TIER[this.#save.ship.cargo] ?? INVENTORY_SLOTS;
   }
 
   /**
@@ -436,9 +444,12 @@ export class Economy {
    * SPEC-065 §4.2: what the pad terminal would send home — whatever the hold
    * carries above the larger of the reserve and `deliverNeed`, which is what
    * this planet's active deliver objectives still need of it (E117).
+   * SPEC-066 §4.7: the reserve reads at most the cap — the value the terminal
+   * shows — so a hold above the cap (E123) ships down to it; the stored
+   * reserve is kept as it is (65-a).
    */
   shippable(resource: ResourceId, deliverNeed: number): number {
-    const floor = Math.max(this.#save.depot.keep[resource], deliverNeed);
+    const floor = Math.max(Math.min(this.#save.depot.keep[resource], this.cargoCap()), deliverNeed);
     return Math.max(0, this.#save.resources[resource] - floor);
   }
 
@@ -770,12 +781,12 @@ export class Economy {
     return item.kind === 'consumable' ? item.stack : 1;
   }
 
-  /** How many more of `itemId` fit: the open stack, plus the free slots. */
+  /** How many more of `itemId` fit: the open stack, plus the free slots (SPEC-066 §4.7: of `packSlots()`). */
   #roomFor(itemId: ItemId): number {
     const stack = this.#stackOf(itemId);
     const held = this.count(itemId);
     const headroom = Math.ceil(held / stack) * stack - held;
-    return headroom + Math.max(0, INVENTORY_SLOTS - this.usedSlots()) * stack;
+    return headroom + Math.max(0, this.packSlots() - this.usedSlots()) * stack;
   }
 
   /**

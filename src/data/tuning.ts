@@ -12,7 +12,7 @@ export interface Tuning {
   readonly XP_PER_LEVEL: number;
   readonly LEVEL_CAP: number;
   readonly TOKENS_PER_LEVEL: number;
-  /** Must equal UPGRADES.cargo.metrics.cargoCap[0] (SPEC-009). */
+  /** The per-resource cargo cap at every Cargo tier, before the Quartermaster (SPEC-066 §4.7). */
   readonly CARGO_BASE: number;
   /** Must equal the fresh save's oil (SPEC-007 §4.1). */
   readonly START_OIL: number;
