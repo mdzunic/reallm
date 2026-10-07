@@ -15,7 +15,16 @@ import { Pool } from '@/core/Pool';
 import { PressEdges } from '@/core/PressEdges';
 import { holdWakeLock } from '@/core/WakeLock';
 import { DEFAULT_LOOK, type Look } from '@/core/Quality';
-import { EXPLORE_CELL, LINEAGE_CLAIM_PATTERN, lineageClaimId, newSave, type CharacterCreation, type LineageEntry, type Save } from '@/core/Save';
+import {
+  DEPOT_KEEP_STEP,
+  EXPLORE_CELL,
+  LINEAGE_CLAIM_PATTERN,
+  lineageClaimId,
+  newSave,
+  type CharacterCreation,
+  type LineageEntry,
+  type Save,
+} from '@/core/Save';
 import { ZONES_SHOWN_MAX, type GuidanceLevel } from '@/core/Settings';
 import type { GameServices } from '@/core/Services';
 import { fadeMs, type SceneParams } from '@/core/StateMachine';
@@ -185,6 +194,7 @@ import {
   darkFogRange,
   descentRefusal,
   deathCause,
+  deliveryNeedsText,
   firstSentence,
   deathTip,
   hasNodeRadar,
@@ -203,6 +213,8 @@ import {
   rewardsText,
   SEARCH_BODY_TEXT,
   SEARCHED_TEXT,
+  shipHomeText,
+  shippedHomeText,
   stageResetText,
   STAMINA_FULL_HIDE_SECONDS,
   STAMINA_FULL_TEXT,
@@ -5826,6 +5838,9 @@ export class SurfaceScene extends UiScene<'surface'> {
     // 12-k: a terminal with nothing on it reads as a broken terminal. Say what
     // is holding the planet's work back, and where that work is taken.
     if (rows.length === 1 && save !== null) rows.push(el('p', 'terminal-empty', padEmptyText(save, this.#planet.id)));
+    // SPEC-065 §4.5: the Cargo section sits above the footer row.
+    const cargo = this.#terminalCargo(missions);
+    if (cargo !== null) rows.push(cargo);
 
     rows.push(
       h(
@@ -5836,6 +5851,97 @@ export class SurfaceScene extends UiScene<'surface'> {
       ),
     );
     terminal.replaceChildren(...rows);
+  }
+
+  /**
+   * SPEC-065 §4.5: one row per resource, in `RESOURCE_IDS` order — what the
+   * hold carries against its cap, the reserve between its two steps, and
+   * `Ship N home` for everything above the reserve and above what this
+   * planet's deliver objectives still need, which the row names while it is
+   * the higher of the two (E117).
+   */
+  #terminalCargo(missions: Missions): HTMLElement | null {
+    const economy = this.#economy;
+    const save = this.#save;
+    if (economy === null || save === null) return null;
+    const cap = economy.cargoCap();
+    const rows = RESOURCE_IDS.map((resource) => {
+      // 65-a: a reserve above the hold's cap shows, and steps, at the cap; the
+      // stored value is kept until the player steps it.
+      const keep = Math.min(save.depot.keep[resource], cap);
+      const need = missions.deliverDemand(resource);
+      const ship = economy.shippable(resource, need);
+      return testId(
+        h(
+          'div',
+          { class: 'terminal-cargo-row' },
+          testId(h('span', { class: 'terminal-cargo-held' }, `${resource} ${save.resources[resource]} / ${cap}`), `terminal-held-${resource}`),
+          h(
+            'div',
+            { class: 'terminal-keep' },
+            testId(
+              h(
+                'button',
+                {
+                  class: 'ui-btn attr-btn',
+                  type: 'button',
+                  'aria-label': `Keep less ${resource}`,
+                  disabled: keep <= 0,
+                  click: () => this.#stepKeep(resource, keep - DEPOT_KEEP_STEP),
+                },
+                '−',
+              ),
+              `terminal-keep-less-${resource}`,
+            ),
+            testId(h('span', { class: 'terminal-keep-value' }, `Keep ${keep}`), `terminal-keep-${resource}`),
+            testId(
+              h(
+                'button',
+                {
+                  class: 'ui-btn attr-btn',
+                  type: 'button',
+                  'aria-label': `Keep more ${resource}`,
+                  disabled: keep >= cap,
+                  click: () => this.#stepKeep(resource, keep + DEPOT_KEEP_STEP),
+                },
+                '+',
+              ),
+              `terminal-keep-more-${resource}`,
+            ),
+          ),
+          testId(
+            h('button', { class: 'ui-btn', type: 'button', disabled: ship <= 0, click: () => this.#shipHome(resource) }, shipHomeText(ship)),
+            `terminal-ship-${resource}`,
+          ),
+          need > keep ? h('p', { class: 'terminal-cargo-need' }, deliveryNeedsText(need)) : null,
+        ),
+        `terminal-cargo-${resource}`,
+      );
+    });
+    // SPEC-045 §2: the heading is written in sentence case; the CSS capitalises it.
+    return testId(h('section', { class: 'terminal-cargo', 'aria-label': 'Cargo' }, el('p', 'terminal-heading', 'Cargo'), ...rows), 'terminal-cargo');
+  }
+
+  /** SPEC-065 §4.5: one step of a reserve, inside [0, cap]; the economy stores it. */
+  #stepKeep(resource: ResourceId, value: number): void {
+    const economy = this.#economy;
+    if (economy === null) return;
+    economy.setKeep(resource, Math.max(0, Math.min(economy.cargoCap(), value)));
+    this.#renderTerminal();
+  }
+
+  /**
+   * SPEC-065 §4.5: a ship press sends the row's surplus to Command Relay, says
+   * how much, and re-renders through `#renderTerminal`, so focus keeps its
+   * place (SPEC-044 §4.2).
+   */
+  #shipHome(resource: ResourceId): void {
+    const economy = this.#economy;
+    const missions = this.#missions;
+    if (economy === null || missions === null) return;
+    const result = economy.shipHome(resource, missions.deliverDemand(resource));
+    if (result.ok) this.ui.toast(shippedHomeText(result.shipped, resource), 'good');
+    this.#renderTerminal();
   }
 
   /**
