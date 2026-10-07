@@ -624,6 +624,78 @@ Specs:
 
 (§4, §8, §10, §13)
 
+**R27 — 2026-10-07 (the fourth review, step 2: pressure that holds).** The fourth design review (`docs/review-2026-10/`, of `main` at `dfe6f04`) found that the threat tuned since R18 has no budget under it:
+- A medkit heals half the bar at once with no cooldown, and the heal slot refills itself from the pack mid-fight.
+- Frags could be thrown every half second. Step 1 slowed that to 1.2 s.
+- Resources are always in surplus, so from chapter 3 a boss can be out-healed. Hard and the no-death bonuses then mean nothing.
+
+Fights also stop paying from chapter 3:
+- Kill XP is flat.
+- A boss contract pays 75 tokens every three minutes, which bypasses the decision sink.
+- The R26 depot leaves the Cargo Hold tiers and Hard's death loss with almost nothing to do.
+
+The first ten minutes hold a 90 s flight with nothing in it, then 60 s of harmless sand. Step 1 shipped the review's easy wins (game #106–#110, specs #99). This entry takes the ones PLAN locks, and records the two Step 1 changes PLAN states. Decisions:
+
+1. **A heal has a cooldown (SPEC-066, §4, §13 E121).**
+   - After a heal item is used, the heal slot locks: 8 s after a medkit (50 % at once), 5 s after a wheat ration (30 % over 5 s).
+   - A ring on the heal slot shows the time left, on both schemes.
+   - A press during the lock spends nothing and says how long is left (E121).
+   - The Field Medic and the death respawn are not heal items, and they are unchanged.
+2. **A quick slot refills from the pack only out of combat (SPEC-066, §4, §13 E122).**
+   - When a quick slot's stack runs out while the player is in combat (SPEC-011's `inCombat` window: an aggroed enemy within 20 m in the last 4 s), the slot stays empty until the window closes. Then it refills as E40 says.
+   - Nothing else reassigns a quick slot mid-fight.
+   - The pack merges stacks, so the slot holds every medkit carried. Within a fight, decision 1's cooldown is the budget: one medkit every eight seconds. When the medkits run out, the slot does not fall back to rations until the fight is over.
+   - Explosives keep step 1's 1.2 s between uses.
+3. **The combat drone follows the gun (SPEC-066, §4).**
+   - A drone shot's damage is taken from the primary's *sustained* DPS (SPEC-039) instead of its per-shot damage: `sustained × 0.4 × droneDamageFraction × the damage and companion multipliers`, at the level's fire rate.
+   - The Lithium Edge's drone keeps its strength. The machine guns' drones reach it: the Rotary's level-1 drone goes from 6.5 to about 17 a second.
+   - The drone holds fire while the player sprints, and its shot clock stops with it. Running holsters the gun (R19 decision 3), and now it holsters the drone too. Without the stopped clock, SPEC-050's "the run costs the gun" fails: the Scout's sprint ratio falls below its 1.25 bound. With it, the ratio is 1.27.
+   - The drone's card shows its DPS, not a percentage.
+4. **Kill XP grows with the chapter (SPEC-066, §4).**
+   - A surface kill of a non-boss pays `round(base × 1.15^(chapter − 1))`, where the chapter is the planet's. A Hive drone pays 7, a warrior 14 and a spitter 17.
+   - Bosses, flight kills and mission XP are unchanged.
+   - With decision 6, SPEC-016's completionist pins move: XP 11,135 → 11,771, level 19 → 20, tokens earned 1,224 → 1,249. The worst case and `balance.test.ts` do not move.
+5. **A boss mission's contract pays half its tokens (SPEC-066).**
+   - A contract on a mission with a boss objective pays 0.5 of its tokens. Its XP stays at 0.75, and the 20 lithium stays.
+   - Every other contract keeps R18's 0.75. A replay of the Queen then pays 50 tokens, not 75.
+6. **Egg Hunt asks for ten eggs (SPEC-066, §6).** `c5_s1` kills 10 `hive_egg` (was 15), and its par is 240 s (was 360). The reward is unchanged.
+7. **Cargo racks: the Cargo Hold upgrade becomes pack space (SPEC-066, §4, §13 E123).**
+   - The three Cargo tiers add 2 pack slots each: 20 → 22 / 24 / 26. The pack is the capacity a player still feels.
+   - The cargo cap is 400 per resource at every tier, plus the Quartermaster's bonus, which is unchanged. That still covers the largest collect objective (300) + 100.
+   - Prices and the save are unchanged: `ship.cargo` keeps its tier.
+   - A hold already above 400 keeps everything in it (E123).
+8. **Hard's death reaches the depot (SPEC-066, §4, §13 E124).**
+   - On `hard`, a death also takes a tenth of each resource held at the depot (rounded down). That share is gone and is not in the remains.
+   - R26's "a death never touches the depot" stands on every other difficulty.
+9. **The first ten minutes (SPEC-066, §6, §13 E125).**
+   - `c1_m1`'s storm stage asks for 30 s (was 60).
+   - The first trip to Cinder-4 carries a scripted asteroid field from 20 s to 45 s of the trip, on top of its 0.2 density: a lane to steer through.
+   - On every trip, an asteroid of radius ≥ 3 m destroyed by the ship's guns drops 2 oil into the hold, at most 20 a trip. A pickup's cargo cap applies (E125). The first trip's flight tip says so.
+10. **Step 1's PLAN-visible changes, recorded.**
+    - Auto-swap is on by default on every scheme (SPEC-029, review G-04), so a locked machine gun hands fire to the sidearm on desktop too.
+    - `story` difficulty gives hostiles 60 % of their HP (SPEC-059, review G-13).
+11. **The boss suite gets a second budget (SPEC-066, §11).**
+    - SPEC-041's boss bots also run with unlimited medkits under the cooldown.
+    - The kite bot with three medkits must keep every boss inside 100 % of max HP lost.
+    - On `a15fbeb` that bound already failed for the Dune Wurm (71–101 %) and the Ash Titan (93–102 %). Decision 3's drone fixes the Titan (80–98 %) but lifts the Hive Queen to 107 %.
+    - So two *initial tuning* numbers move:
+      - the Wurm's burrow hit drops from ×1.5 to ×1.3;
+      - the Queen's HP drops from 8,400 to 8,000 (R18 decision 6's list).
+12. **Milestone M7o** carries SPEC-066.
+13. **Not now.**
+    - A guaranteed elite pack per landing.
+    - A higher in-combat sprint drain.
+    - The Reactive Harness in chapter 5's recommended loadout: it costs more than the pinned margin allows.
+    - A cap or fee on the depot.
+    - Fighter counts on the early trips.
+
+Specs:
+- SPEC-066 (decisions 1–9 and 11).
+- SPEC-029 and SPEC-059 were already amended for decision 10 (specs #99).
+- SPEC-000's queue and build order.
+
+(§4, §6, §10, §11, §13)
+
 ---
 
 ## 1. Vision & Inspiration
@@ -704,7 +776,7 @@ tests/      unit tests mirror src/ (economy, save, combat, missions, rng, conten
 
 - **3 classes**: *Marine* (+damage/HP), *Engineer* (cheaper ship upgrades, drone bonuses), *Scout* (speed, resource detection radar). Since R18 the Engineer's discount also covers companions and its bonus reaches every companion effect, and the Scout dashes 20 % more often.
 - **Customization**: name, portrait, color scheme, **5 attribute points** over class base across `might` (damage), `vigor` (HP), `agility` (speed; since R18 also crit chance and dash cooldown), `tech` (companion effect, upgrade discount). Allocated at creation; levels grant flat +4 max HP and +2 % damage, and since R18 one more point at every fifth level, derived from the level. Since R19 the personnel file names the next of kin — Iris (sister), Shelter Nine, Block C — the same for everyone. Since R20 a Locker at the station changes the colours and the portrait at any time.
-- **Difficulty**: `casual` (enemy damage ×0.7, no death penalty; since R18 also weather ×0.7 and windups ×1.25), `normal`, or since R18 `hard` (enemy HP ×1.25, damage ×1.3, elite chance ×2, 20 % death loss), or since R21 `story` (no damage taken from enemies or weather, no death loss, records off). Changeable in Settings at any time.
+- **Difficulty**: `casual` (enemy damage ×0.7, no death penalty; since R18 also weather ×0.7 and windups ×1.25), `normal`, or since R18 `hard` (enemy HP ×1.25, damage ×1.3, elite chance ×2, 20 % death loss), or since R21 `story` (no damage taken from enemies or weather, no death loss, records off; since R27 hostiles have 60 % of their HP). Since R27 a death on `hard` also takes a tenth of each resource at the depot. Changeable in Settings at any time.
 - Class defines starting gear + passive.
 
 ### Resources & economy
@@ -715,7 +787,7 @@ tests/      unit tests mirror src/ (economy, save, combat, missions, rng, conten
   - water = support item crafting + survival (coolant packs)
   - lithium = energy weapons + reactor (tier-3 upgrades)
 - **Tokens** earned by leveling up (25 per level; XP from kills, missions) and by mission rewards. Tokens buy **assistants**, **upgrades**, and **gear**; **tier-3** upgrades also consume resources so resource sinks exist late-game.
-- **Cargo cap** per resource: 400 base, ship cargo tiers → 600 / 800 / 1200. Pickups stop at the cap with a HUD warning.
+- **Cargo cap** per resource: 400 at every ship tier since R27 (600 / 800 / 1200 before), plus the Quartermaster's bonus. Pickups stop at the cap with a HUD warning. Since R27 the Cargo tiers are racks: each adds 2 pack slots (20 → 22 / 24 / 26).
 - **The Relay depot (R26).** At the landing pad, the pad terminal ships whatever the hold carries above a reserve home to Command Relay's depot. The depot has no cap. At the station, the Depot tab draws its contents back into the hold, as far as the cap allows. Fuel for a departure can come from the depot, and the station's subsidy counts it. Nothing is ever sold.
 - **Crafting** at the station (6 recipes): wheat ration (10 wheat), medkit (10 wheat + 10 water), coolant pack (15 water), and since R10 frag grenade (10 oil + 5 water), proximity mine (20 oil), demolition charge (15 oil + 10 lithium). Since R20 two more recipes unlock from cave blueprints: the flare (a thrown light) and the stim (a full stamina refill).
 
@@ -726,14 +798,14 @@ Purchasable, upgradable followers (levels 1–3) that persist across scenes; eac
 | Assistant | Domain | Effect |
 |---|---|---|
 | Scanner Drone | surface | Auto-collect radius + resource nodes on minimap |
-| Combat Drone | surface | Auto-fires at nearest enemy |
+| Combat Drone | surface | Auto-fires at nearest enemy; since R27 its shots follow the primary's sustained DPS, and it holds fire while the player sprints |
 | Field Medic | surface | HP regen over time out of combat, then in combat at L3; pauses while weather is hurting the player (R18) |
 | Quartermaster | station | +cargo capacity, discounts on ship, gear and companion prices (R18) |
 | Ship AI "ARIA" | flight | Free at start; upgrades add shield regen / auto-aim assist |
 
 ### Upgrades
 
-- **Ship**: engine, hull, shield, cargo hold, lasers — tiers 0 → 3, used in the flight scene (cargo/engine also affect economy).
+- **Ship**: engine, hull, shield, cargo (racks since R27: pack slots), lasers — tiers 0 → 3, used in the flight scene (cargo/engine also affect economy).
 - **Gear**: weapon tiers (kinetic → laser → plasma → lithium-edged) and armor tiers (scrap → composite → reactive → ablative). Tiers 1–2 cost tokens; tier 3 costs tokens + lithium. Since R10 weapons come in lines that fill three slots: handguns (sidearm — the free Service Pistol every class carries, the Hand Cannon), rifles (primary — the ladder above), machine guns (primary — Scrap Chaingun, Rotary Cannon) and launchers (heavy — Rocket Launcher, Grenade Launcher).
 
 ### Combat
@@ -741,7 +813,7 @@ Purchasable, upgradable followers (levels 1–3) that persist across scenes; eac
 - **Ground**: real-time ARPG — move/aim, attack, enemy AI (melee rushers, ranged spitters, swarm bugs, static targets), loot drops, elites (5 %, ×3 HP) + planet boss with phases. Since R18 the salvager can dash, enemy attacks commit behind ground telegraphs, enemies come in packs led by elites with affixes, each boss has a move list and drops one signature weapon on its first kill, and bosses and elites no longer drop the rifle and armour ladder. Since R19 the salvager can run (×1.35): running holsters the gun and is loud, and in combat it spends stamina (100; 25/s, refilled at 20/s after 0.8 s), which the dash also draws on (30). Since R20 relics — arsenal side-grades with one twist each, found in cave vaults — hang on a rack, not in the pack.
 - **Space**: arcade first-person **rail** flight — constant forward motion, lateral steering, laser fire, asteroid dodging, enemy ship waves, shield/hull damage. Fuel is charged **per jump, up front**; the return trip is instant autopilot. Since R24 the enemy ships say who they are: scavengers fly tugs rebuilt as fighters, and the Hive grows its interceptors. Each kind is introduced by a contact card on its first trip.
 - **Death**: surface → respawn at the landing pad, lose 10 % of carried resources (normal difficulty), timed stages restart, enemies near the pad despawn, boss resets. Since R21 the loss waits in the remains where the salvager fell, until it is recovered or a second death takes it. Flight → emergency recall to the station, fuel is lost, cargo is kept.
-- **Loadout (R10)**: three weapon slots — sidearm, primary, heavy — switched with 1 / 2 / 3, R or the wheel, or a tap on the quick bar (0.25 s to switch). Handguns and rifles fire freely; machine guns heat up and lock until they cool; launchers hold one or three charges and recharge. Cooldowns run while a weapon is holstered, so fights are won by combining them. Auto-fire never fires the heavy slot; on touch a locked machine gun hands fire to the sidearm. Since R18 auto-fire is on by default on every scheme, and on touch a tap on the launcher's slot fires one charge at the nearest enemy. Three quick slots on the HUD — heal (Q), explosive (G), utility (C) — show what they hold and how many. Explosives are consumables: frag grenades (thrown), proximity mines and demolition charges (placed). Blasts never hurt the player.
+- **Loadout (R10)**: three weapon slots — sidearm, primary, heavy — switched with 1 / 2 / 3, R or the wheel, or a tap on the quick bar (0.25 s to switch). Handguns and rifles fire freely; machine guns heat up and lock until they cool; launchers hold one or three charges and recharge. Cooldowns run while a weapon is holstered, so fights are won by combining them. Auto-fire never fires the heavy slot; a locked machine gun hands fire to the sidearm (on touch only until R27, on every scheme since). Since R18 auto-fire is on by default on every scheme, and on touch a tap on the launcher's slot fires one charge at the nearest enemy. Three quick slots on the HUD — heal (Q), explosive (G), utility (C) — show what they hold and how many. Since R27 a heal locks the heal slot for 8 s (medkit) or 5 s (ration), and a slot emptied in combat refills from the pack only once the fight is over. Explosives are consumables: frag grenades (thrown), proximity mines and demolition charges (placed). Blasts never hurt the player.
 
 ### Weather system
 
@@ -850,7 +922,7 @@ Notation below: `[a; b]` = one stage (any order), `→` = next stage. Main missi
 
 | ID | Title | Stages | Rewards |
 |---|---|---|---|
-| c1_m1 | "Dry Land" | [reach `landing_pad`] → [scan `dune_sea`] → [survive 60 s, sandstorm] | 100 XP, 10 tokens, 20 oil |
+| c1_m1 | "Dry Land" | [reach `landing_pad`] → [scan `dune_sea`] → [survive 30 s, sandstorm] (60 s before R27) | 100 XP, 10 tokens, 20 oil |
 | c1_m2 | "Black Gold" | [collect 150 oil; kill 6 `scav_raider`] | 150 XP, 15 tokens, flag `c1_oil` |
 | c1_m3 | "Worm Sign" (BOSS) | [boss `dune_wurm`] → [deliver 100 oil to `beacon`] | 250 XP, 30 tokens, flag `chapter1_done` (unlocks Vetra) |
 | c1_s1 | "Grain Silo" (side) | [collect 80 wheat; scan `silo_ruin`] | 80 XP, 5 tokens, 3× wheat ration |
@@ -901,7 +973,7 @@ Beat: ARIA decodes alien signal — the Hive knows Earth's location. The decoded
 | c5_m1 | "Gauntlet" (**flight**) | [survive 180 s asteroid field; kill 6 `hive_interceptor`] during the outbound flight (10 kills until R17) | 350 XP, 30 tokens |
 | c5_m2 | "Lair" | [reach `queen_chamber`; kill 25 `hive_drone`] | 400 XP, 35 tokens |
 | c5_m3 | "Her Majesty" (FINAL BOSS) | [boss `hive_queen` (2 phases)] | 600 XP, 100 tokens, flag `chapter5_done` (unlocks Eden-Prime) |
-| c5_s1 | "Egg Hunt" (side) | [kill 15 `hive_egg`] | 200 XP, 20 tokens |
+| c5_s1 | "Egg Hunt" (side) | [kill 10 `hive_egg`] (15 before R27) | 200 XP, 20 tokens |
 
 Landing at The Hive requires clearing the arrival wave and finishing `c5_m1`, so the gauntlet completes naturally on arrival however fast the ship is flown (§13 E12, R16).
 
@@ -1035,6 +1107,7 @@ Storage rules: 3 slots, key per slot plus a `.bak` copy of the previous good sav
 | M7j | The next instance (R21): remains; Iteration 63 with the archive, the lineage, containment steps and the world that remembers; the endings' payoff; resume on the planet; a story difficulty; commendations and the evaluation log; the Selection card; link previews and install (SPEC-057…SPEC-059) | A death's loss is recovered from the remains, and a second death loses them; a finished save begins instance/63 in the same slot and restores 62 from the archive; the Vetra log in run 2 names the player's own run; a phone session interrupted on a planet resumes there; the Selection card shares a PNG from a phone; no record is kept in a `?debug` or story session; checked on desktop and the reference phone; tag `m7j` |
 | M7m | Who flies them (R24, R25): "Wreckers", a film of the scavengers' hulk after the first departure to Vetra; a scav fighter rebuilt from the tug; contact cards and comms for the first scav fighters at Vetra and the first interceptors at the Hive; Cinder-4's scav raiders in the salvager's suit (SPEC-063, SPEC-064) | On a new save the first departure to Vetra plays "Outbound", then "Wreckers"; the first fighters on that trip bring the contact card, the scav hail and ARIA's answer, and the flight never stops for them; the first interceptors at the Hive bring theirs; a fighter within 20 m reads as a rebuilt tug at the phone preset; on Cinder-4 the raiders are suited people who aim, fire amber tracers, flinch and fall, and the surface stays inside its draw and triangle pins; the films stay within 12 MB and the precache within 25 MB; checked on desktop and the reference phone; tag `m7m` |
 | M7n | The Relay depot (R26): the pad terminal ships what the hold carries above a reserve home to Command Relay; the station's Depot tab draws it back; departures and the subsidy count the depot's oil; save v4 (SPEC-065) | On a full hold, the pad terminal ships the oil above a reserve of 100 and the hold reads 100. The station's Depot tab shows it and draws it back up to the cap. A departure is paid from the depot when the hold is short, and no subsidy is granted while the depot can pay. A v3 save loads with an empty depot, and an older build refuses a v4 save. Checked on desktop and the reference phone; tag `m7n` |
+| M7o | Pressure that holds (R27): a heal cooldown, quick slots that refill only out of combat, a drone that follows the gun, kill XP by chapter, half-paid boss contracts, a ten-egg Egg Hunt, cargo racks, Hard's death at the depot, and a first ten minutes with something in them (SPEC-066) | A medkit cannot be used twice within 8 s; a medkit stack emptied mid-fight refills only after the fight; the kite bot keeps the Ash Titan inside 100 % of max HP; a Hive drone kill pays 7 XP; a Queen contract pays 50 tokens; Dry Land's storm lasts 30 s and the first trip to Cinder-4 has an asteroid lane whose big rocks drop oil. Checked on desktop and the reference phone; tag `m7o` |
 | M7 | Polish: mobile tuning, quality presets, balancing pass, PWA/offline, storage persistence, reduce-motion, save migration harness | 30+ fps on mid-tier phone; installable; full manual checklist green |
 
 ---
@@ -1045,6 +1118,7 @@ Storage rules: 3 slots, key per slot plus a `.bak` copy of the previous good sav
 - Unit tests target pure systems: economy math, save migration/corruption, combat formulas, mission runtime, seeded level generation determinism.
 - **Content invariants** test: every id referenced by missions/planets/loot exists; requirement graph is acyclic; each planet layout contains every POI its missions need (with counts); kill targets exist in the planet spawn table; flight missions fit inside the flight duration. Story films (R9): shots tile each film on whole frames, captions sit inside their shots and stay long enough to read, every cue sound and flag exists, one chapter card per planet and one reveal per boss, and the rendered films match the data (SPEC-021).
 - **Campaign simulation** test: drives the mission runtime and economy with a scripted main-path player and asserts every gate (flags, shield-2, fuel) is satisfiable with guaranteed rewards only.
+- **Boss suite** (SPEC-041, since R27 with a second budget): bot fights against every boss with three medkits and with unlimited medkits under the heal cooldown; the kite bot keeps every boss inside 100 % of max HP lost.
 - Manual playtest checklist per scene (desktop keyboard/mouse + mobile touch).
 
 ---
@@ -1186,6 +1260,11 @@ Each entry names the owning spec. "Casual" = casual difficulty.
 | E118 | Drawing from the depot into a full hold, or more than the hold has room for | `Draw N` draws the lesser of the depot's amount and the hold's room; at 0 the button is disabled and nothing moves | SPEC-065 |
 | E119 | Oil parked in the depot when the hold cannot pay for a jump | A departure counts the hold and the depot together and takes from the hold first; the station subsidy grants only what both together lack, so parked oil never earns free oil | SPEC-065 |
 | E120 | A v3 save is loaded after R26, or a v4 save by an older build | v3 migrates to v4 with an empty depot and every reserve at 100; an older build refuses a v4 save as a save from a newer version, with Export (E9) | SPEC-065 |
+| E121 | The heal key or slot is pressed while the heal slot is locked (R27) | Nothing is spent; a throttled toast says how many seconds are left; the ring on the slot shows the same | SPEC-066 |
+| E122 | A quick slot's stack runs out during a fight (R27) | The slot stays empty while `inCombat` holds; when the window closes it refills from the pack as E40 says; no other path reassigns it mid-fight | SPEC-066 |
+| E123 | A save with Cargo tier ≥ 1 and more than 400 of a resource is loaded after R27 | Nothing is removed: the hold keeps what it carries, pickups of that resource stop until it is under the cap, the pad terminal can ship the rest home, and the pack gains its slots at once | SPEC-066 |
+| E124 | A player dies on `hard` with resources at the depot (R27) | A tenth of each depot resource, rounded down, is lost — not added to the remains; the hold's 20 % goes to the remains as R21 says; no other difficulty touches the depot | SPEC-066 |
+| E125 | A big asteroid is destroyed with the hold full of oil, or after 20 oil of salvage on this trip (R27) | A full hold takes nothing, as a pickup would; past 20 a trip the rock drops nothing; neither is announced in flight | SPEC-066 |
 
 ---
 
