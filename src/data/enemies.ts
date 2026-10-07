@@ -224,9 +224,12 @@ export const ENEMIES = {
     xp: 200,
     loot: 'cinder4_boss',
     look: { recipe: 'worm_boss', scale: 2.5, tint: '#a06a3a', emissive: '#e08a3a' },
+    // Review 2026-10 (G-06, *initial tuning*): phase 2 from 55 % (was 40 %)
+    // and the burrow every 6 s (was 9), so a player on the station's Laser
+    // still meets the listening burrow more than once.
     phases: [
       { hpFraction: 1, damageMult: 1, speedMult: 1 },
-      { hpFraction: 0.4, damageMult: 1.2, speedMult: 1.2, summon: { enemy: 'wurmling', count: 6 } },
+      { hpFraction: 0.55, damageMult: 1.2, speedMult: 1.2, summon: { enemy: 'wurmling', count: 6 } },
     ],
     eliteAllowed: false,
     moves: [
@@ -235,7 +238,7 @@ export const ENEMIES = {
       // Timed, never weighted: it starts at phase-2 entry and comes back
       // `every` s after each one ends (§4.1). SPEC-050 §4.4: it listens — a
       // loud player cuts the dig to 0.6 of its length and pulls the circle.
-      { id: 'burrow', kind: 'burrow', phaseMin: 2, range: [0, Infinity], weight: 0, windup: 1.2, dig: 2.5, every: 9, radius: 3.5, damageMult: 1.5, cooldown: 0, recover: 0, trackLoud: 12, loudDigMult: 0.6 },
+      { id: 'burrow', kind: 'burrow', phaseMin: 2, range: [0, Infinity], weight: 0, windup: 1.2, dig: 2.5, every: 6, radius: 3.5, damageMult: 1.5, cooldown: 0, recover: 0, trackLoud: 12, loudDigMult: 0.6 },
     ],
   },
 

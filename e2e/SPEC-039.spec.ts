@@ -140,11 +140,21 @@ test("2. card: the Scrap Chaingun's card shows 64 sustained and compares against
   await expect(card).toHaveCount(0);
 });
 
-test('3. refit: a new save reads Vetra and its loadout, and ready once the three are bought', async ({ page }) => {
+test('3. refit: a new save reads no line before the Wurm, then Vetra and its loadout, and ready once the three are bought', async ({ page }) => {
   await start(page, '/?debug');
   await newSave(page);
   await station(page, 'shop');
   const refit = page.locator('[data-testid="shop-refit"]');
+  // Review 2026-10 (G-06): no next-chapter gear before the current chapter's
+  // boss is down — the Laser before the Wurm halved the fight.
+  await expect(refit).toHaveCount(0);
+  await page.evaluate(() => {
+    const data = window.__reallm.save().current;
+    if (data === null) throw new Error('no save');
+    data.progress.flags.push('chapter1_done');
+  });
+  // The line refreshes with the tabs.
+  await page.locator('[data-testid="shop-tab-ship"]').click();
   await expect(refit).toHaveText('Refit for Vetra: Composite Weave 39 · Scanner Drone 20 · Laser Carbine 39');
   for (const part of ['Vetra', 'Composite Weave', 'Scanner Drone', 'Laser Carbine']) await expect(refit).toContainText(part);
 
