@@ -699,6 +699,61 @@ describe('shot sweep', () => {
     expect(w.save.player.xp).toBe(xpBefore + ENEMIES.scav_fighter.xp);
   });
 
+  // Review 2026-10 (G-20): flight kills paid XP only — `flight_salvage` was
+  // never rolled.
+  describe('salvage (review 2026-10, G-20)', () => {
+    /** Shoot down `count` weak fighters, one at a time, straight ahead. */
+    const downFighters = (w: World, count: number): void => {
+      for (let i = 0; i < count; i++) {
+        inject(w.flight, {
+          kind: 'fighter',
+          depth: 60,
+          def: ENEMIES.scav_fighter,
+          radius: ENEMIES.scav_fighter.radius,
+          hp: 5,
+          ttl: 30,
+          holdDepth: 40,
+        });
+        const before = w.of('enemy:killed').length;
+        for (let t = 0; t < 3 && w.of('enemy:killed').length === before; t += DT) step(w.flight, DT, { fire: true, aimX: 0, aimY: 0 });
+        expect(w.of('enemy:killed').length).toBe(before + 1);
+      }
+    };
+
+    it('a downed ship rolls flight_salvage into the hold as a pickup: oil and lithium, in the table\'s ranges', () => {
+      const w = world();
+      step(w.flight, LAUNCH_SECONDS + DT);
+      const oil = w.save.resources.oil;
+      const lithium = w.save.resources.lithium;
+      downFighters(w, 12);
+      const salvage = w.of('resource:collected');
+      expect(salvage.length).toBeGreaterThan(0);
+      for (const drop of salvage) {
+        expect(drop.source).toBe('pickup');
+        expect(['oil', 'lithium']).toContain(drop.resource);
+      }
+      const gotOil = w.save.resources.oil - oil;
+      const gotLithium = w.save.resources.lithium - lithium;
+      expect(gotOil).toBeGreaterThan(0);
+      expect(gotOil).toBeLessThanOrEqual(12 * 3);
+      expect(gotLithium).toBeLessThanOrEqual(12 * 2);
+      expect(gotOil + gotLithium).toBe(salvage.reduce((sum, drop) => sum + drop.amount, 0));
+    });
+
+    it('the cargo cap applies: a full hold takes nothing', () => {
+      const w = world();
+      const cap = w.economy.cargoCap();
+      w.save.resources.oil = cap;
+      w.save.resources.lithium = cap;
+      step(w.flight, LAUNCH_SECONDS + DT);
+      downFighters(w, 12);
+      expect(w.save.resources.oil).toBe(cap);
+      expect(w.save.resources.lithium).toBe(cap);
+      expect(w.of('resource:collected').length).toBeGreaterThan(0);
+      for (const drop of w.of('resource:collected')) expect(drop.blocked).toBe('cargo_full');
+    });
+  });
+
   /**
    * SPEC-034 §4.3, §6.1 — the tunnelling case.
    *

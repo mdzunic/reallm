@@ -147,8 +147,8 @@ export const WAVES = {
     ],
     spawnBand: [120, 200],
   },
-  /** 30 interceptors against `c5_m1`'s 10; the last group is the arrival wave
-   *  that blocks landing until it is cleared (E12). */
+  /** 30 interceptors against `c5_m1`'s 6 (10 before PLAN R17); the last group
+   *  is the arrival wave that blocks landing until it is cleared (E12). */
   hive_flight: {
     id: 'hive_flight',
     domain: 'flight',

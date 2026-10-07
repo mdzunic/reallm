@@ -451,6 +451,20 @@ describe('content invariants (SPEC-009 §7)', () => {
     expect(problems).toEqual([]);
   });
 
+  // Review 2026-10 (G-20): a downed ship's salvage goes straight into the
+  // hold, so a flight enemy's table holds resource rows only.
+  it('8 (G-20). a flight enemy\'s loot table holds resource rows only', () => {
+    const problems: string[] = [];
+    for (const enemy of enemies) {
+      if (enemy.domain !== 'flight') continue;
+      for (const entry of lootTables[enemy.loot]) {
+        if (entry.kind !== 'resource') problems.push(`${enemy.id}: ${enemy.loot} has a ${entry.kind} row`);
+      }
+    }
+    expect(problems).toEqual([]);
+    expect(enemies.filter((enemy) => enemy.domain === 'flight').map((enemy) => enemy.loot)).toEqual(['flight_salvage', 'flight_salvage']);
+  });
+
   // SPEC-039 §4.1: invariant 8's signature rules. Each boss table carries
   // exactly one signature row and no other table any; each names a priced
   // weapon of the handgun, machine-gun or launcher line; the five pieces are

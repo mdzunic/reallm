@@ -27,6 +27,7 @@ import {
   COMPANIONS,
   DIFFICULTY_RULES,
   ENEMIES,
+  LOOT_TABLES,
   MISSIONS,
   TUNING,
   UPGRADES,
@@ -344,6 +345,11 @@ export class Flight {
   readonly #events: FlightEvents;
   readonly #rng: Rng;
   readonly #stormRng: Rng;
+  /**
+   * Review 2026-10 (G-20): a downed ship's salvage rolls here — a fork, so
+   * the trip's hazards and waves draw exactly as they did before it.
+   */
+  readonly #salvageRng: Rng;
   readonly #cfg: FlightConfig;
 
   readonly #speedMult: number;
@@ -379,6 +385,7 @@ export class Flight {
     this.#events = events;
     this.#rng = rng;
     this.#stormRng = rng.fork('storm');
+    this.#salvageRng = rng.fork('salvage');
     this.#stormEdgeAt = this.#stormRng.float(STORM_GAP[0], STORM_GAP[1]);
 
     this.#speedMult = UPGRADES.engine.metrics['speedMult']?.[cfg.ship.engine] ?? 1;
@@ -799,8 +806,24 @@ export class Flight {
       // §4.4: kills pay XP and the event missions count.
       this.#events.emit('enemy:killed', { enemyId: def.id as EnemyId, elite: false, x: hazard.x, z: hazard.depth, xp: def.xp });
       this.#progression.addXp(def.xp, 'flight');
+      this.#salvage(def);
     }
     this.hazards.free(index);
+  }
+
+  /**
+   * Review 2026-10 (G-20): a downed fighter or interceptor rolls its `loot`
+   * table (`flight_salvage`), and each resource it pays goes straight into the
+   * hold as a pickup — the cargo cap applies, and `resource:collected` plays
+   * the pickup chime. Flight kills paid XP only. A flight table holds resource
+   * rows only (content invariant); any other row is skipped.
+   */
+  #salvage(def: EnemyDef): void {
+    const rng = this.#salvageRng;
+    for (const entry of LOOT_TABLES[def.loot]) {
+      if (entry.kind !== 'resource' || !rng.chance(entry.chance)) continue;
+      this.economy.addResource(entry.resource, rng.int(entry.min, entry.max), 'pickup');
+    }
   }
 
   // ------------------------------------------------------------------- spawns
