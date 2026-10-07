@@ -552,6 +552,8 @@ const NAMES: Record<keyof GameEvents, true> = {
   'player:dashed': true,
   // SPEC-050 §4.1: once per exhaustion.
   'player:exhausted': true,
+  // Review 2026-10 (G-17): once per sprint.
+  'player:sprinted': true,
   'player:xp': true,
   'player:leveledUp': true,
   'tokens:changed': true,
@@ -646,8 +648,9 @@ describe('GameEvents (§3.2)', () => {
     // `player:exhausted`; SPEC-054 §4.13 `level:changed`, `light:toggled` and
     // `cache:opened`; SPEC-055 §4.9 `puzzle:moved` and `puzzle:solved`;
     // SPEC-057 §4.8 `remains:created`, `remains:recovered` and `remains:lost`;
-    // SPEC-059 §4.4.3 `commendation:earned`; SPEC-063 §4.5 `flight:groupSpawned`.
-    expect(Object.keys(NAMES)).toHaveLength(83);
+    // SPEC-059 §4.4.3 `commendation:earned`; SPEC-063 §4.5 `flight:groupSpawned`;
+    // review 2026-10 (G-17) `player:sprinted`.
+    expect(Object.keys(NAMES)).toHaveLength(84);
   });
 
   it('still carries the nine names SPEC-002 and SPEC-003 already emit', () => {

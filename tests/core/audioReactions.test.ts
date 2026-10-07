@@ -162,6 +162,8 @@ const EVENT_KEYS = [
   'enemy:windup',
   // SPEC-050 §4.8: reacted — the breath out.
   'player:exhausted',
+  // Review 2026-10 (G-17): silent — a sprint has no sound of its own.
+  'player:sprinted',
   'player:xp',
   'player:leveledUp',
   'tokens:changed',
@@ -588,7 +590,7 @@ describe('the reactions table is exhaustive over GameEvents (SPEC-006 §5)', () 
     );
   });
 
-  it('silences exactly the 50 events of §5.4 (AC-39; SPEC-015 added the two app: signals)', () => {
+  it('silences exactly the 51 events of §5.4 (AC-39; SPEC-015 added the two app: signals)', () => {
     // SPEC-034 added `player:recalled`, `enemy:dismissed` and `item:noRoom`;
     // SPEC-042 §4.2 `item:blocked`, whose warn toast is its sound; SPEC-043
     // §4.7 `mission:bonus`; SPEC-048 §4.9 `story:clue` — a clue is quiet by
@@ -598,7 +600,9 @@ describe('the reactions table is exhaustive over GameEvents (SPEC-006 §5)', () 
     // SPEC-057 §4.8 silences `remains:created` and `remains:lost`; its
     // `remains:recovered` plays the existing `pickup_generic`. SPEC-063 §4.5
     // silences `flight:groupSpawned` — the contact line is what is heard.
-    expect(AUDIO_SILENT.size).toBe(50);
+    // Review 2026-10 (G-17) silences `player:sprinted`.
+    expect(AUDIO_SILENT.size).toBe(51);
+    expect(AUDIO_SILENT.has('player:sprinted')).toBe(true);
     expect(AUDIO_SILENT.has('remains:created')).toBe(true);
     expect(AUDIO_SILENT.has('remains:lost')).toBe(true);
     expect(AUDIO_SILENT.has('mission:bonus')).toBe(true);
@@ -607,8 +611,8 @@ describe('the reactions table is exhaustive over GameEvents (SPEC-006 §5)', () 
     expect(AUDIO_SILENT.has('flight:groupSpawned')).toBe(true);
   });
 
-  it('gives every one of the 83 event keys exactly one home (AC-40; SPEC-055 §4.9 adds two, SPEC-057 §4.8 three, SPEC-059 §4.4.4 one, SPEC-063 §4.5 one)', () => {
-    expect(EVENT_KEYS).toHaveLength(83);
+  it('gives every one of the 84 event keys exactly one home (AC-40; SPEC-055 §4.9 adds two, SPEC-057 §4.8 three, SPEC-059 §4.4.4 one, SPEC-063 §4.5 one, review 2026-10 G-17 one)', () => {
+    expect(EVENT_KEYS).toHaveLength(84);
     const reacted = new Set<string>(REACTED_EVENTS);
     for (const key of EVENT_KEYS) {
       const hasSound = reacted.has(key);

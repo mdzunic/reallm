@@ -20,7 +20,8 @@ export type CommendationRule =
   | { readonly kind: 'mission'; readonly mission: MissionId }
   | { readonly kind: 'bonus'; readonly mission: MissionId }
   | { readonly kind: 'contract' }
-  | { readonly kind: 'boss'; readonly boss: EnemyId; readonly without: 'dash' | 'hit' }
+  /** Review 2026-10 (G-17): `run` holds when the fight saw no sprint and no dash (it was `dash`, dashes only). */
+  | { readonly kind: 'boss'; readonly boss: EnemyId; readonly without: 'run' | 'hit' }
   | { readonly kind: 'ending'; readonly ending: 'stay' | 'escape'; readonly grade?: 'a good run' | 'an acceptable run' | 'a noisy run' }
   | { readonly kind: 'flag'; readonly flag: FlagId }
   | { readonly kind: 'offTask'; readonly min: number }
@@ -56,8 +57,8 @@ export const COMMENDATIONS = {
   walked_not_ran: {
     id: 'walked_not_ran',
     title: 'Walked, did not run',
-    detail: 'Kill the Dune Wurm without a single dash.',
-    rule: { kind: 'boss', boss: 'dune_wurm', without: 'dash' },
+    detail: 'Kill the Dune Wurm without running or dashing.',
+    rule: { kind: 'boss', boss: 'dune_wurm', without: 'run' },
   },
   said_before: {
     id: 'said_before',

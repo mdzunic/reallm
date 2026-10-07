@@ -3124,6 +3124,8 @@ export class SurfaceScene extends UiScene<'surface'> {
     if (p.sprinting && !wasSprinting) {
       this.#sprintStartedAt = world.time;
       this.#sprintInCombat = inCombat;
+      // Review 2026-10 (G-17): "Walked, did not run" hears every run.
+      this.services.events.emit('player:sprinted', {});
       if (inCombat) {
         this.#sprints++;
         this.#requestTip('sprint');
