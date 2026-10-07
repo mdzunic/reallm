@@ -1761,6 +1761,15 @@ export function remainsRecoveredText(look: RemainsLook, taken: Partial<Record<Re
   return rest ? `${line} — the rest stays with your ${look}` : line;
 }
 
+/**
+ * SPEC-057 §4.4 (E93) — an attempt that took nothing, because the hold is
+ * full: `Hold full — <n> left in your pack` (or `body`), `n` the units the
+ * remains still hold (review 2026-10, B-21).
+ */
+export function remainsFullText(look: RemainsLook, left: number): string {
+  return `Hold full — ${left} left in your ${look}`;
+}
+
 /** SPEC-057 §4.1 (E91) — the forfeit's toast: `Your earlier pack is gone: <list>.` (or `body`). */
 export function remainsLostText(look: RemainsLook, resources: Partial<Record<ResourceId, number>>): string {
   return `Your earlier ${look} is gone: ${remainsListText(resources)}.`;

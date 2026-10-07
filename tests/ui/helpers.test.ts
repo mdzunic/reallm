@@ -2617,7 +2617,7 @@ describe('the treasure\'s words (SPEC-056 §4.1, §4.4, §4.5, §4.6)', () => {
 
 // ------------------------------------------------------------- SPEC-057 §4.7
 
-import { remainsLostText, remainsOverlayLine, remainsRecoveredText, remainsTrackerText } from '@/systems/UiHelpers';
+import { remainsFullText, remainsLostText, remainsOverlayLine, remainsRecoveredText, remainsTrackerText } from '@/systems/UiHelpers';
 
 describe('the remains lines (SPEC-057 §4.1, §4.4, §4.5, §4.7)', () => {
   it('the overlay line names what the pack or the body holds, and is null when nothing was taken', () => {
@@ -2631,6 +2631,11 @@ describe('the remains lines (SPEC-057 §4.1, §4.4, §4.5, §4.7)', () => {
     expect(remainsRecoveredText('pack', { oil: 20 }, false)).toBe('Recovered: 20 oil');
     expect(remainsRecoveredText('pack', { oil: 5, wheat: 0 }, true)).toBe('Recovered: 5 oil — the rest stays with your pack');
     expect(remainsRecoveredText('body', { oil: 5, water: 3 }, true)).toBe('Recovered: 5 oil · 3 water — the rest stays with your body');
+  });
+
+  it('an attempt that took nothing says the hold is full, and what is left (E93, review B-21)', () => {
+    expect(remainsFullText('pack', 15)).toBe('Hold full — 15 left in your pack');
+    expect(remainsFullText('body', 1)).toBe('Hold full — 1 left in your body');
   });
 
   it('the forfeit toast names the lost set', () => {

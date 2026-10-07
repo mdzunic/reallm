@@ -205,6 +205,7 @@ import {
   pickupText,
   predecessorCacheText,
   quitNote,
+  remainsFullText,
   remainsLostText,
   remainsOverlayLine,
   remainsRecoveredText,
@@ -730,6 +731,8 @@ export class SurfaceScene extends UiScene<'surface'> {
   readonly #remainsTaken: Record<ResourceId, number> = { oil: 0, wheat: 0, water: 0, lithium: 0 };
   #remainsInside = false;
   #remainsRetryIn = 0;
+  /** SPEC-057 §4.4 (B-21): the full hold was said on this stay inside the recovery circle. */
+  #remainsFullSaid = false;
   /** The tracker row's text, rebuilt only when the whole metre changes. */
   #remainsRowText: string | null = null;
   #remainsRowMetres = -1;
@@ -4521,6 +4524,7 @@ export class SurfaceScene extends UiScene<'surface'> {
     if (!this.#remainsInside) {
       this.#remainsInside = true;
       this.#remainsRetryIn = 0;
+      this.#remainsFullSaid = false;
     }
     this.#remainsRetryIn -= dt;
     if (this.#remainsRetryIn > 0) return;
@@ -4539,7 +4543,17 @@ export class SurfaceScene extends UiScene<'surface'> {
     const planet = save.progress.remains?.planet ?? null;
     if (economy === null || planet === null) return;
     const taken = this.#remainsTaken;
-    if (!recoverRemains(save, economy, taken)) return;
+    if (!recoverRemains(save, economy, taken)) {
+      // E93 (review 2026-10, B-21): nothing fit, and a 'recovered' unit never
+      // flags `blocked`, so nothing else says why. Once per stay inside the
+      // circle — the 1 s retries do not repeat it.
+      const left = remainsHeld(save.progress.remains);
+      if (left > 0 && !this.#remainsFullSaid) {
+        this.#remainsFullSaid = true;
+        this.services.events.emit('ui:toast', { kind: 'warn', text: remainsFullText(this.#remainsLook, left) });
+      }
+      return;
+    }
     const rest = save.progress.remains !== null;
     const bus = this.services.events;
     bus.emit('remains:recovered', { planet, resources: taken });
