@@ -64,13 +64,15 @@ describe('who may offer an update (AC-52)', () => {
 
   it('never reloads the page off the back of a worker', () => {
     // 15-c: an auto-reload mid-mission would be a data-loss bug. The only
-    // `location.reload` in the tree is the context-lost offer of SPEC-002 E7
-    // and the dev-server hot-update guard, neither of which is an update.
+    // `location.reload` in the tree is the context-lost offer of SPEC-002 E7,
+    // the dev-server hot-update guard and the menu's Reload while another tab
+    // holds a slot (SPEC-007 07-a, review 2026-10 B-04) — a press, at the
+    // menu — none of which is an update.
     const reloaders = Object.entries(SOURCES)
       .filter(([, source]) => /location\s*\.\s*reload\s*\(/.test(source))
       .map(([file]) => file)
       .sort();
-    expect(reloaders).toEqual(['../../src/core/Game.ts', '../../src/main.ts']);
+    expect(reloaders).toEqual(['../../src/core/Game.ts', '../../src/main.ts', '../../src/ui/SavePanel.ts']);
     for (const file of reloaders) expect(SOURCES[file], file).not.toMatch(/serviceWorker/);
   });
 

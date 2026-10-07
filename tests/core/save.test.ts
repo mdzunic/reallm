@@ -30,6 +30,7 @@ import {
   CODES_UNSUPPORTED_TEXT,
   CROSS_TAB_TEXT,
   clampKeep,
+  decodeSave,
   crc32,
   DEPOT_KEEP_DEFAULT,
   DEPOT_KEEP_MAX,
@@ -1622,7 +1623,7 @@ describe('autosave (§4.5)', () => {
 // ---------------------------------------------------------------- other tabs
 
 describe('two tabs of the same game (07-a, AC-65)', () => {
-  function tabs(): { saves: SaveStore; events: Recorder; fire: (key: string | null) => void } {
+  function tabs(): { saves: SaveStore; events: Recorder; fake: FakeStorage; fire: (key: string | null) => void } {
     const listeners: Array<(event: Event) => void> = [];
     const target = {
       addEventListener: (_type: string, handler: EventListenerOrEventListenerObject) =>
@@ -1630,15 +1631,26 @@ describe('two tabs of the same game (07-a, AC-65)', () => {
       removeEventListener: () => {},
     };
     const events = recorder();
-    const saves = new SaveStore(events, fakeStorage().storage, { window: target });
+    const fake = fakeStorage();
+    const saves = new SaveStore(events, fake.storage, { window: target });
     saves.bind(newSave(0, CREATION, 1, 1_700_000_000_000));
     return {
       saves,
       events,
+      fake,
       fire: (key) => {
         for (const handler of listeners) handler({ key } as unknown as Event);
       },
     };
+  }
+
+  /** The other tab's newer run, written to slot 0 the way its own store writes it. */
+  function theirs(fake: FakeStorage): string {
+    const other = newSave(0, { ...CREATION, name: 'OtherTab' }, 1, 1_700_000_000_000);
+    other.player.tokens = 999;
+    const json = JSON.stringify(other);
+    fake.data.set(`${SLOT_KEY_PREFIX}0`, json);
+    return json;
   }
 
   it('toasts and refuses further autosaves when another tab writes our slot', () => {
@@ -1664,6 +1676,67 @@ describe('two tabs of the same game (07-a, AC-65)', () => {
     fire(null);
     expect(events.toasts).toEqual([]);
     expect(saves.refusingAutosaves).toBe(false);
+  });
+
+  /**
+   * Review 2026-10, B-04: the surface's exit, Save & Quit and the station's
+   * quit call `flush()` outright. It used to write anyway, so the stale tab's
+   * run went over the newer one the guard was there to protect.
+   */
+  it('refuses flush() too, so the stale run never overwrites the newer one (B-04)', () => {
+    const { saves, fake, fire } = tabs();
+    const newer = theirs(fake);
+    fire(`${SLOT_KEY_PREFIX}0`);
+    saves.current!.player.tokens = 1;
+    expect(saves.flush()).toBe(false);
+    saves.request('pagehide');
+    expect(fake.data.get(`${SLOT_KEY_PREFIX}0`)).toBe(newer);
+    expect(fake.data.has(`${SLOT_KEY_PREFIX}0${BAK_SUFFIX}`)).toBe(false);
+  });
+
+  it('refuses only the slot the other tab wrote: a run in another slot autosaves (B-04)', () => {
+    const { saves, fake, fire } = tabs();
+    fire(`${SLOT_KEY_PREFIX}0`);
+    const other = saves.create(1, { ...CREATION, name: 'SlotOne' }, 2);
+    other.player.tokens = 123;
+    saves.request('pagehide');
+    expect(JSON.parse(fake.data.get(`${SLOT_KEY_PREFIX}1`) as string).player.tokens).toBe(123);
+    // The refusal is still there for slot 0, so the menu still offers a reload.
+    expect(saves.refusingAutosaves).toBe(true);
+  });
+
+  it('lets a new run on the refused slot take it back, and autosave after (B-04)', () => {
+    const { saves, fake, fire } = tabs();
+    theirs(fake);
+    fire(`${SLOT_KEY_PREFIX}0`);
+    const fresh = saves.create(0, { ...CREATION, name: 'Fresh' }, 3);
+    expect(JSON.parse(fake.data.get(`${SLOT_KEY_PREFIX}0`) as string).player.name).toBe('Fresh');
+    expect(saves.refusingAutosaves).toBe(false);
+    fresh.player.tokens = 5;
+    expect(saves.flush()).toBe(true);
+    expect(JSON.parse(fake.data.get(`${SLOT_KEY_PREFIX}0`) as string).player.tokens).toBe(5);
+  });
+
+  it('lets a next instance begun on the refused slot write through (B-04, 58-l)', () => {
+    const { saves, fake, fire } = tabs();
+    // The other tab finished the run and saw its ending; this one begins the next.
+    const ended = newSave(0, { ...CREATION, name: 'OtherTab' }, 1, 1_700_000_000_000);
+    ended.progress.flags.push('campaign_done', 'ending_stay');
+    ended.progress.endingSeen = true;
+    fake.data.set(`${SLOT_KEY_PREFIX}0`, JSON.stringify(ended));
+    fire(`${SLOT_KEY_PREFIX}0`);
+    const next = saves.beginNextIteration(0, CREATION);
+    expect(next?.meta.iteration).toBe(2);
+    expect(JSON.parse(fake.data.get(`${SLOT_KEY_PREFIX}0`) as string).meta.iteration).toBe(2);
+    expect(JSON.parse(fake.data.get(`${SLOT_KEY_PREFIX}0${ARCHIVE_SUFFIX}`) as string).player.name).toBe('OtherTab');
+    expect(saves.refusingAutosaves).toBe(false);
+  });
+
+  it('exports the stored save of a slot another tab wrote: it is the newer one (B-04, B-05)', async () => {
+    const { saves, fake, fire } = tabs();
+    const newer = theirs(fake);
+    fire(`${SLOT_KEY_PREFIX}0`);
+    expect(await decodeSave(await saves.exportCode(0))).toBe(newer);
   });
 });
 

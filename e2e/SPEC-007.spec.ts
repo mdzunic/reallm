@@ -686,6 +686,8 @@ test('a second tab writing our slot stops this one autosaving (AC-65)', async ({
     };
     save.request('stage');
     save.request('pagehide');
+    // Review 2026-10, B-04: and so does a flush — Save & Quit, a surface exit.
+    save.flush();
     return new Promise<number>((resolve) =>
       setTimeout(() => {
         Storage.prototype.setItem = realSet;
@@ -697,6 +699,15 @@ test('a second tab writing our slot stops this one autosaving (AC-65)', async ({
   expect(await page.evaluate(() => JSON.parse(localStorage.getItem('reallm:slot:0') ?? '{}').player.name)).toBe(
     'TabTwo',
   );
+
+  // The menu, built again, keeps saying so after the toast has gone, and
+  // offers the reload that ends the refusal (review 2026-10, B-04).
+  await page.evaluate(() => window.__reallm.go('menu', { reason: 'quit' }, { force: true }));
+  const banner = page.getByTestId('cross-tab-banner');
+  await expect(banner).toBeVisible();
+  await expect(banner).toContainText('A save changed in another tab — reload to play it here.');
+  await Promise.all([page.waitForEvent('load'), page.getByTestId('cross-tab-reload').click()]);
+  await expect(page.getByTestId('cross-tab-banner')).toHaveCount(0);
 });
 
 test('iOS Safari outside standalone is told to add to the Home Screen, at most fortnightly (AC-53, AC-54)', async ({

@@ -106,6 +106,8 @@ export const SAVE_FAILED_TEXT = 'Save failed — export your save code';
 export const BACKUP_RESTORED_TEXT = 'Restored backup save';
 export const STORAGE_UNAVAILABLE_TEXT = 'Storage is unavailable — this run will not be saved. Export your code to keep it.';
 export const CROSS_TAB_TEXT = 'Save changed in another tab';
+/** 07-a: the menu's banner while a slot is refused, the toast long gone (review 2026-10, B-04). */
+export const CROSS_TAB_BANNER_TEXT = 'A save changed in another tab — reload to play it here.';
 export const CODE_DAMAGED_TEXT = 'Code is damaged';
 export const CODE_NEWER_TEXT = 'Code is from a newer version';
 export const CODE_NOT_REALLM_TEXT = 'Not a ReaLLM save';
@@ -2040,8 +2042,12 @@ export class SaveStore {
   #transitioning = false;
   /** When that hold started, so a transition that never lands cannot outlast it. */
   #transitionSince = 0;
-  /** 07-a: another tab wrote our slot; autosaves stop until the page reloads. */
-  #foreignWrite = false;
+  /**
+   * 07-a: the slots another tab wrote while this one had them bound. Nothing
+   * this tab holds for them reaches storage until the page reloads — except a
+   * new run or a next instance begun on one, which takes it back (B-04).
+   */
+  readonly #foreign = new Set<SlotId>();
   #unavailableReported = false;
   #persistAsked = false;
 
@@ -2180,6 +2186,9 @@ export class SaveStore {
     const resolved = seed ?? seedFromLocation() ?? randomSeed();
     const data = newSave(slot, creation, resolved, this.#stamp());
     this.bind(data);
+    // 07-a: a new run is this tab's own write, and the newest — the other tab
+    // is the one that stops now (review 2026-10, B-04).
+    this.#foreign.delete(slot);
     this.#flush('new');
     return data;
   }
@@ -2266,6 +2275,8 @@ export class SaveStore {
     const next = nextInstance(old, creation, this.#stamp());
     next.meta.slot = slot;
     this.bind(next);
+    // 07-a, as for `create`: the successor is the slot's newest write (B-04).
+    this.#foreign.delete(slot);
     this.#flush('new');
     return next;
   }
@@ -2324,10 +2335,7 @@ export class SaveStore {
 
   /** §4.5. `pagehide` and `manual` skip the debounce; everything else waits. */
   request(reason: SaveReason): void {
-    if (this.#foreignWrite) {
-      log.warn('save', `autosave (${reason}) refused: another tab owns this slot`);
-      return;
-    }
+    if (this.#refused(reason)) return;
     if (IMMEDIATE_REASONS.includes(reason)) {
       this.#flush(reason);
       return;
@@ -2335,6 +2343,19 @@ export class SaveStore {
     if (this.#pending !== null) return; // already inside a window; one write covers both
     this.#pending = reason;
     this.#pendingSince = this.#now();
+  }
+
+  /**
+   * 07-a: whether the bound slot is one another tab wrote. Every write of it
+   * is refused — the debounced ones, and `flush()` too, which the surface's
+   * exit, Save & Quit and the station's quit call outright: the copy this tab
+   * holds is the older one (review 2026-10, B-04).
+   */
+  #refused(reason: SaveReason): boolean {
+    const slot = this.#current?.meta.slot;
+    if (slot === undefined || !this.#foreign.has(slot)) return false;
+    log.warn('save', `write (${reason}) refused: another tab wrote slot ${slot}`);
+    return true;
   }
 
   /**
@@ -2375,6 +2396,7 @@ export class SaveStore {
     this.#pending = null;
     if (data === null) return false;
     const slot = data.meta.slot;
+    if (this.#refused(reason)) return false;
 
     if (!this.available) {
       // E8: once per session — a toast every autosave would be unplayable, and
@@ -2607,28 +2629,30 @@ export class SaveStore {
 
   /**
    * 07-a: two tabs of the same game would otherwise ping-pong their autosaves
-   * over each other. Last write wins, and this tab stops writing until it is
-   * reloaded.
+   * over each other. Last write wins, and this tab stops writing that slot
+   * until it is reloaded. Only that slot: a run in another one has nothing to
+   * lose to the other tab (review 2026-10, B-04).
    */
   #watchOtherTabs(source: SaveStoreOptions['window']): void {
     const target = source === undefined ? (globalThis as unknown as EventTarget) : source;
     if (target === null || typeof target.addEventListener !== 'function') return;
     const handler = (event: Event): void => {
       const key = (event as StorageEvent).key;
-      if (this.#current === null || this.#foreignWrite) return;
-      if (key !== this.#key(this.#current.meta.slot)) return;
-      this.#foreignWrite = true;
+      const slot = this.#current?.meta.slot;
+      if (slot === undefined || this.#foreign.has(slot)) return;
+      if (key !== this.#key(slot)) return;
+      this.#foreign.add(slot);
       this.#pending = null;
-      log.warn('save', 'another tab wrote this slot; autosaves are off until reload');
+      log.warn('save', `another tab wrote slot ${slot}; this tab stops writing it until reload`);
       this.#events.emit('ui:toast', { kind: 'warn', text: CROSS_TAB_TEXT, ms: 8000 });
     };
     target.addEventListener('storage', handler);
     this.#release.push(() => target.removeEventListener('storage', handler));
   }
 
-  /** Whether 07-a has fired; the menu offers a reload when it has. */
+  /** Whether 07-a holds any slot; the menu shows `CROSS_TAB_BANNER_TEXT` and a Reload while it does. */
   get refusingAutosaves(): boolean {
-    return this.#foreignWrite;
+    return this.#foreign.size > 0;
   }
 
   dispose(): void {
