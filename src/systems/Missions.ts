@@ -620,6 +620,9 @@ export class Missions {
             if (this.#done(state, objective, index)) break;
             // SPEC-054 §4.11 (E83): the clock holds below, the same as survive.
             if (ctx.level === 'underground') break;
+            // And while the player is dead, as survive's does (review 2026-10,
+            // B-08): the death reset it, and the respawn restarts the wave.
+            if (!ctx.player.alive) break;
             state.timers[key] = (state.timers[key] ?? 0) + dt;
             if ((state.timers[key] as number) >= objective.seconds) {
               this.#markDone(state, index);

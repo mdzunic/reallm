@@ -239,6 +239,38 @@ describe('Missions — defend resets when the POI dies (AC-34, AC-42)', () => {
     for (let i = 0; i < Math.round(240.1 / STEP); i++) missions.update(STEP, ctx);
     expect(missions.choiceStage('c6_m2')).not.toBeNull();
   });
+
+  it('the clock holds while the player is dead, as survive’s does (review B-08)', () => {
+    const save = newSave(0, MARINE, 42, 1_700_000_000_000);
+    save.progress.missionsDone.push('c6_m1');
+    const events = new EventBus<GameEvents>({ dev: false });
+    const progression = new Progression(save, events);
+    const missions = new Missions(save, new Economy(save, events, progression), events, 'surface', 'eden');
+    missions.accept('c6_m2');
+    const ctx: MissionContext = {
+      player: { x: 0, z: 0, alive: true },
+      poiAt: () => [],
+      heldResource: () => 0,
+      nearPoi: () => null,
+      follower: null,
+      level: 'surface',
+    };
+    const timer = () => missions.currentObjectives('c6_m2').find((o) => o.objective.kind === 'defend')?.value ?? 0;
+    for (let i = 0; i < Math.round(30 / STEP); i++) missions.update(STEP, ctx);
+    expect(timer()).toBeGreaterThan(29);
+
+    // A death resets the clock; under the 2.5 s death overlay it stays at 0.
+    events.emit('player:died', { cause: { kind: 'fall' }, scene: 'surface' });
+    expect(timer()).toBe(0);
+    ctx.player.alive = false;
+    for (let i = 0; i < Math.round(2.5 / STEP); i++) missions.update(STEP, ctx);
+    expect(timer()).toBe(0);
+
+    // The respawn: alive again, it counts from 0.
+    ctx.player.alive = true;
+    for (let i = 0; i < Math.round(1 / STEP); i++) missions.update(STEP, ctx);
+    expect(timer()).toBeCloseTo(1, 6);
+  });
 });
 
 describe('Missions — deliver (AC-35)', () => {
