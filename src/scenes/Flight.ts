@@ -276,6 +276,9 @@ export class FlightScene extends UiScene<'flight'> {
         iteration: save.meta.iteration,
         // SPEC-039 §4.3: ARIA's shield regeneration is a companion effect.
         companionMult: computePlayerStats(save).companionMult,
+        // SPEC-066 §4.9: the first trip to a planet with a field flies its lane
+        // — the same test as the first landing, so a recall keeps it (66-j).
+        firstTrip: visits === 0,
       },
       economy,
       progression,

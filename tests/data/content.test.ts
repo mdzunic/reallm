@@ -1557,6 +1557,26 @@ describe('the first ten minutes (SPEC-066 §4.6, §4.9)', () => {
     expect(MISSIONS.c1_m1.stages[2]).toEqual([{ kind: 'survive', seconds: 30, weather: 'sandstorm' }]);
     expect(MISSION_HINTS.c1_m1?.[2]).toBe('Thirty seconds of sand. Stay alive — heal when it bites.');
   });
+
+  it('only Cinder-4 has a first-trip field, and its window lies inside the trip', () => {
+    const withField = PLANET_IDS.filter((id) => planetsById[id].flight.firstTripField !== undefined);
+    expect(withField).toEqual(['cinder4']);
+    const field = planetsById.cinder4.flight.firstTripField;
+    expect(field).toEqual({ fromSecond: 20, toSecond: 45 });
+    if (field === undefined) return;
+    expect(field.fromSecond).toBeGreaterThan(0);
+    expect(field.toSecond).toBeGreaterThan(field.fromSecond);
+    expect(field.toSecond).toBeLessThan(PLANETS.cinder4.travelSeconds);
+  });
+
+  it('the first flight tip says a big rock shot down drops oil, on both schemes, inside 160 characters', () => {
+    expect(TIPS.flight_steer.keyboard).toBe('WASD or the mouse steers. Space or a click fires the nose guns — big rocks you shoot down drop oil.');
+    expect(TIPS.flight_steer.touch).toBe('Drag to steer — the guns fire on their own, and big rocks they break drop oil.');
+    for (const text of [TIPS.flight_steer.keyboard, TIPS.flight_steer.touch]) {
+      expect(text).toMatch(/big rocks .* drop oil\.$/);
+      expect(text.length).toBeLessThanOrEqual(160);
+    }
+  });
 });
 
 describe('the dash in words (SPEC-038 §4.9)', () => {

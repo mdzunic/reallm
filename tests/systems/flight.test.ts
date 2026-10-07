@@ -37,6 +37,14 @@ import {
 import { Missions } from '@/systems/Missions';
 import { Progression } from '@/systems/Progression';
 import { engineVolume, runSkip, THROTTLES } from '@/systems/Flight';
+import {
+  FIELD_LANE_HALF_WIDTH,
+  FIELD_ROCK_RADIUS,
+  fieldLaneX,
+  ROCK_SALVAGE_OIL,
+  ROCK_SALVAGE_PER_TRIP,
+  type FlightPhase,
+} from '@/systems/Flight';
 
 const DT = 1 / 60;
 
@@ -79,6 +87,10 @@ interface WorldOptions {
   companionMult?: number;
   /** SPEC-058 §4.4: the save's iteration, as the flight scene passes it. */
   iteration?: number;
+  /** SPEC-066 §4.9: `visits === 0`, as the flight scene passes it. */
+  firstTrip?: boolean;
+  /** The quality preset; medium when absent. */
+  quality?: FlightConfig['quality'];
 }
 
 function world(options: WorldOptions = {}): World {
@@ -99,10 +111,11 @@ function world(options: WorldOptions = {}): World {
     planet,
     ship: save.ship,
     companions: save.companions,
-    quality: QUALITY.medium,
+    quality: options.quality ?? QUALITY.medium,
     difficulty: save.meta.difficulty,
     ...(options.companionMult === undefined ? {} : { companionMult: options.companionMult }),
     ...(options.iteration === undefined ? {} : { iteration: options.iteration }),
+    ...(options.firstTrip === undefined ? {} : { firstTrip: options.firstTrip }),
   };
   const flight = new Flight(cfg, economy, progression, missions, events, new Rng(options.seed ?? 7));
   return {
@@ -1622,5 +1635,290 @@ describe('flight hit feedback (SPEC-041 §4.9)', () => {
     expect(rock.hitFlash).toBeGreaterThan(0);
     step(w.flight, HAZARD_FLASH_SECONDS);
     expect(rock.hitFlash).toBe(0);
+  });
+});
+
+// ------------------------------------------------------- SPEC-066 §4.9, §6.3
+
+describe('the first trip’s asteroid lane (SPEC-066 §4.9)', () => {
+  const FIELD = PLANETS.cinder4.flight.firstTripField;
+  if (FIELD === undefined) throw new Error('cinder4 has no firstTripField');
+
+  /** The trip second the flight has covered — `#covered`, read through `progress`. */
+  const tripSecond = (flight: Flight): number => flight.progress * PLANETS.cinder4.travelSeconds;
+
+  /** Cinder-4 with its field and waves, without the ambient rocks: every asteroid is a field rock. */
+  const fieldOnly: PlanetDef = { ...PLANETS.cinder4, flight: { ...PLANETS.cinder4.flight, asteroidDensity: 0 } };
+
+  it('fieldLaneX swings once across the window: 0, +4, 0 and 0 at its start, quarter, half and end', () => {
+    expect(fieldLaneX(FIELD, 20)).toBeCloseTo(0, 9);
+    expect(fieldLaneX(FIELD, 26.25)).toBeCloseTo(4, 9);
+    expect(fieldLaneX(FIELD, 32.5)).toBeCloseTo(0, 9);
+    expect(fieldLaneX(FIELD, 45)).toBeCloseTo(0, 9);
+  });
+
+  for (const seed of [1, 2, 3, 4]) {
+    it(`seed ${seed}: rocks spawn only in [20, 45] s, never drift, sit outside the lane on arrival, and miss a ship that holds it`, () => {
+      const w = world({ planet: fieldOnly, seed, firstTrip: true });
+      const live = new Set<Hazard>();
+      const tracked: Array<{ rock: Hazard; x: number; radius: number; arrived: number | null }> = [];
+      const spawnedAt: number[] = [];
+      while (w.flight.phase !== 'arrived' && w.flight.phase !== 'recalled' && w.flight.time < 200) {
+        // Hold the lane: the centre at the trip second now.
+        w.flight.ship.x = fieldLaneX(FIELD, tripSecond(w.flight));
+        w.flight.ship.vx = 0;
+        w.flight.update(DT, IDLE);
+        const now = new Set<Hazard>();
+        for (let i = 0; i < w.flight.hazards.size; i++) {
+          const hazard = w.flight.hazards.at(i);
+          now.add(hazard);
+          if (hazard.kind !== 'asteroid' || live.has(hazard)) continue;
+          spawnedAt.push(tripSecond(w.flight));
+          expect(hazard.vx).toBe(0);
+          expect(hazard.vy).toBe(0);
+          expect(hazard.radius).toBeGreaterThanOrEqual(FIELD_ROCK_RADIUS[0]);
+          expect(hazard.radius).toBeLessThanOrEqual(FIELD_ROCK_RADIUS[1]);
+          tracked.push({ rock: hazard, x: hazard.x, radius: hazard.radius, arrived: null });
+        }
+        for (const entry of tracked) {
+          if (entry.arrived === null && now.has(entry.rock) && entry.rock.depth <= RAIL.hitDepth) {
+            entry.arrived = tripSecond(w.flight);
+            expect(entry.rock.x).toBe(entry.x); // never drifted
+          }
+        }
+        live.clear();
+        for (const hazard of now) live.add(hazard);
+      }
+      expect(w.flight.phase).toBe('arrived');
+      expect(w.flight.fieldRocks).toBeGreaterThan(0);
+      expect(spawnedAt).toHaveLength(w.flight.fieldRocks);
+      for (const at of spawnedAt) {
+        expect(at).toBeGreaterThanOrEqual(FIELD.fromSecond);
+        expect(at).toBeLessThanOrEqual(FIELD.toSecond);
+      }
+      // Every rock reached the ship's plane (none was rammed), outside the
+      // lane by its own radius at the second it got there — inside one step.
+      for (const entry of tracked) {
+        expect(entry.arrived).not.toBeNull();
+        const gap = Math.abs(entry.x - fieldLaneX(FIELD, entry.arrived as number));
+        expect(gap).toBeGreaterThanOrEqual(FIELD_LANE_HALF_WIDTH + entry.radius - 0.05);
+      }
+      expect(w.of('ship:damaged')).toEqual([]);
+    });
+  }
+
+  it('holds the lane at the fast throttle and on a faster engine too (66-k)', () => {
+    for (const engine of [0, 3] as const) {
+      const w = world({ planet: fieldOnly, seed: 5, firstTrip: true, ship: { engine } });
+      step(w.flight, DT, { throttleUp: true });
+      while (w.flight.phase !== 'arrived' && w.flight.phase !== 'recalled' && w.flight.time < 200) {
+        w.flight.ship.x = fieldLaneX(FIELD, tripSecond(w.flight));
+        w.flight.ship.vx = 0;
+        w.flight.update(DT, IDLE);
+      }
+      expect(w.flight.phase).toBe('arrived');
+      expect(w.flight.fieldRocks).toBeGreaterThan(0);
+      expect(w.of('ship:damaged')).toEqual([]);
+    }
+  });
+
+  it('field rocks count against the preset’s asteroidCap', () => {
+    const cap = 3;
+    const { flight } = world({ seed: 2, firstTrip: true, quality: { ...QUALITY.medium, asteroidCap: cap } });
+    let most = 0;
+    while (flight.phase !== 'arrived' && flight.phase !== 'recalled' && flight.time < 200) {
+      flight.update(DT, IDLE);
+      let rocks = 0;
+      for (let i = 0; i < flight.hazards.size; i++) if (flight.hazards.at(i).kind === 'asteroid') rocks++;
+      most = Math.max(most, rocks);
+    }
+    expect(flight.fieldRocks).toBeGreaterThan(0);
+    expect(most).toBe(cap);
+  });
+
+  /**
+   * A running FNV-1a over every step's sky — each hazard's kind, position and
+   * size — and the ship, for a pilot who sits still with auto-fire on.
+   */
+  const KIND_CODE = { asteroid: 1, fighter: 2, interceptor: 3, enemy_shot: 4 } as const;
+  function tripDigest(flight: Flight): string {
+    let hash = 0x811c9dc5;
+    const fold = (value: number): void => {
+      hash = Math.imul(hash ^ (Math.round(value * 1e4) | 0), 0x01000193) >>> 0;
+    };
+    let steps = 0;
+    while (steps < 200 * 60 && flight.phase !== 'arrived' && flight.phase !== 'recalled') {
+      flight.update(DT, { ...IDLE, autoFire: true });
+      steps++;
+      fold(flight.hazards.size);
+      for (let i = 0; i < flight.hazards.size; i++) {
+        const hazard = flight.hazards.at(i);
+        fold(KIND_CODE[hazard.kind]);
+        fold(hazard.x);
+        fold(hazard.y);
+        fold(hazard.depth);
+        fold(hazard.radius);
+      }
+      fold(flight.ship.x);
+      fold(flight.ship.hull);
+      fold(flight.ship.shield);
+    }
+    return `${flight.phase}/${steps}/0x${hash.toString(16)}`;
+  }
+
+  // Measured on `a15fbeb`, before the field existed: the trips as they were.
+  const TODAY = {
+    cinder4: ['arrived/5582/0x2d3476fd', 'arrived/5582/0x5e43634a', 'arrived/5582/0x3697bc6', 'arrived/5582/0xe8202369'],
+    vetra: ['recalled/3392/0x81190751', 'recalled/3275/0x9cdd5b9c', 'recalled/3416/0xd54fecd7', 'recalled/3413/0xa17a04f8'],
+  } as const;
+
+  it('without firstTrip, a later Cinder-4 trip and a Vetra first trip spawn no field rock and fly today’s sky step for step', () => {
+    for (const seed of [1, 2, 3, 4]) {
+      for (const firstTrip of [false, undefined]) {
+        const later = world({ seed, ...(firstTrip === undefined ? {} : { firstTrip }) });
+        expect(tripDigest(later.flight), `cinder4 seed ${seed} firstTrip ${String(firstTrip)}`).toBe(TODAY.cinder4[seed - 1]);
+        expect(later.flight.fieldRocks).toBe(0);
+      }
+      const vetra = world({ planet: PLANETS.vetra, seed, firstTrip: true });
+      expect(tripDigest(vetra.flight), `vetra seed ${seed}`).toBe(TODAY.vetra[seed - 1]);
+      expect(vetra.flight.fieldRocks).toBe(0);
+    }
+  });
+
+  it('the field fork draws nothing from the trip’s stream, and the first trip flies today’s sky until the field opens', () => {
+    const rng = new Rng(3);
+    const w = world({ seed: 3 });
+    // Construction forks 'field' (and 'storm', 'salvage') without a draw.
+    new Flight(
+      { planet: PLANETS.cinder4, ship: w.save.ship, companions: w.save.companions, quality: QUALITY.medium, difficulty: 'normal', firstTrip: true },
+      w.economy,
+      w.progression,
+      w.missions,
+      w.events,
+      rng,
+    );
+    expect(rng.next()).toBe(new Rng(3).next());
+
+    const first = world({ seed: 3, firstTrip: true }).flight;
+    const later = world({ seed: 3, firstTrip: false }).flight;
+    const sky = (flight: Flight): string =>
+      Array.from({ length: flight.hazards.size }, (_, i) => flight.hazards.at(i))
+        .map((hazard) => `${hazard.kind}:${hazard.x}:${hazard.y}:${hazard.depth}`)
+        .join('|');
+    while (tripSecond(first) < FIELD.fromSecond - 0.5) {
+      first.update(DT, { ...IDLE, autoFire: true });
+      later.update(DT, { ...IDLE, autoFire: true });
+      expect(sky(first)).toBe(sky(later));
+    }
+    expect(first.fieldRocks).toBe(0);
+  });
+
+  it('an idle pilot with auto-fire on who reaches Cinder-4 without the field, on seeds 1–16, reaches it with the field', () => {
+    const fly = (seed: number, firstTrip: boolean): { phase: FlightPhase; fieldRocks: number } => {
+      const { flight } = world({ seed, firstTrip });
+      while (flight.phase !== 'arrived' && flight.phase !== 'recalled' && flight.time < 200) flight.update(DT, { ...IDLE, autoFire: true });
+      return { phase: flight.phase, fieldRocks: flight.fieldRocks };
+    };
+    const lost: number[] = [];
+    let arrivedWithout = 0;
+    for (let seed = 1; seed <= 16; seed++) {
+      const without = fly(seed, false);
+      if (without.phase !== 'arrived') continue;
+      arrivedWithout++;
+      const withField = fly(seed, true);
+      expect(withField.fieldRocks, `seed ${seed}`).toBeGreaterThan(0);
+      if (withField.phase !== 'arrived') lost.push(seed);
+    }
+    expect(arrivedWithout).toBe(16);
+    expect(lost).toEqual([]);
+  });
+});
+
+describe('rock salvage (SPEC-066 §4.9, E125)', () => {
+  /** A quiet sky, so the only rocks are the test's own. */
+  const quiet = (): World => {
+    const w = world({ planet: quietPlanet(PLANETS.cinder4, 300) });
+    step(w.flight, LAUNCH_SECONDS + DT);
+    return w;
+  };
+
+  /** Shoot down one rock of `radius`, straight ahead at depth 60. */
+  const downRock = (w: World, radius: number): void => {
+    inject(w.flight, { kind: 'asteroid', depth: 60, x: 0, y: 0, radius, hp: 1, vDepth: 0 });
+    const lethal = (): number => w.of('flight:hazardHit').filter((hit) => hit.lethal).length;
+    const before = lethal();
+    for (let i = 0; i < 180 && lethal() === before; i++) w.flight.update(DT, { ...IDLE, fire: true });
+    expect(lethal()).toBe(before + 1);
+  };
+
+  it('a radius-3.5 rock shot down adds 2 oil, through one pickup resource:collected', () => {
+    const w = quiet();
+    const oil = w.save.resources.oil;
+    downRock(w, 3.5);
+    expect(w.save.resources.oil).toBe(oil + ROCK_SALVAGE_OIL);
+    expect(w.of('resource:collected')).toEqual([{ resource: 'oil', amount: 2, total: oil + 2, source: 'pickup' }]);
+    expect(w.flight.rockSalvage).toBe(2);
+  });
+
+  it('a radius-2.5 rock adds nothing', () => {
+    const w = quiet();
+    const oil = w.save.resources.oil;
+    downRock(w, 2.5);
+    expect(w.save.resources.oil).toBe(oil);
+    expect(w.of('resource:collected')).toEqual([]);
+    expect(w.flight.rockSalvage).toBe(0);
+  });
+
+  it('the eleventh big rock of a trip adds nothing: 20 a trip', () => {
+    const w = quiet();
+    const oil = w.save.resources.oil;
+    for (let i = 0; i < 10; i++) downRock(w, 3.5);
+    expect(w.flight.rockSalvage).toBe(ROCK_SALVAGE_PER_TRIP);
+    expect(w.save.resources.oil).toBe(oil + 20);
+    downRock(w, 3.5);
+    expect(w.flight.rockSalvage).toBe(20);
+    expect(w.save.resources.oil).toBe(oil + 20);
+    expect(w.of('resource:collected')).toHaveLength(10);
+  });
+
+  it('with oil one under the cap a rock adds 1, and the count rises by 1', () => {
+    const w = quiet();
+    const cap = w.economy.cargoCap();
+    w.save.resources.oil = cap - 1;
+    downRock(w, 3.5);
+    expect(w.save.resources.oil).toBe(cap);
+    expect(w.flight.rockSalvage).toBe(1);
+  });
+
+  it('a full hold adds nothing and uses none of the 20 (E125)', () => {
+    const w = quiet();
+    const cap = w.economy.cargoCap();
+    w.save.resources.oil = cap;
+    downRock(w, 3.5);
+    downRock(w, 3.9);
+    expect(w.save.resources.oil).toBe(cap);
+    expect(w.flight.rockSalvage).toBe(0);
+    // Room again: the trip's count was never spent.
+    w.save.resources.oil = cap - 10;
+    downRock(w, 3.5);
+    expect(w.save.resources.oil).toBe(cap - 8);
+    expect(w.flight.rockSalvage).toBe(2);
+  });
+
+  it('a rammed big rock adds nothing, and still hurts (66-l)', () => {
+    const w = quiet();
+    const oil = w.save.resources.oil;
+    inject(w.flight, { kind: 'asteroid', depth: RAIL.hitDepth + 0.5, vDepth: -60, radius: 3.5, hp: 53 });
+    step(w.flight, 3 * DT);
+    expect(w.of('ship:damaged')).toHaveLength(1);
+    expect(w.save.resources.oil).toBe(oil);
+    expect(w.of('resource:collected')).toEqual([]);
+    expect(w.flight.rockSalvage).toBe(0);
+  });
+
+  it('a new Flight starts at 0 rock salvage and 0 field rocks', () => {
+    const { flight } = world({ firstTrip: true });
+    expect(flight.rockSalvage).toBe(0);
+    expect(flight.fieldRocks).toBe(0);
   });
 });

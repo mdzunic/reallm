@@ -148,10 +148,11 @@ export const TIPS: Readonly<Record<TipId, TipText>> = {
     keyboard: 'Your gun fires on its own at the nearest enemy. Hold the left mouse button to pick the target yourself.',
     touch: 'Your gun fires on its own at the nearest enemy. Drag on the right to pick the target yourself.',
   },
-  // SPEC-035 §4.8: shown when the first flight's launch shot ends…
+  // SPEC-035 §4.8: shown when the first flight's launch shot ends… SPEC-066
+  // §4.9: the first trip's lane is just ahead, and a big rock shot down drops oil.
   flight_steer: {
-    keyboard: 'WASD or the mouse steers. Space or a click fires the nose guns.',
-    touch: 'Drag to steer — the guns fire on their own.',
+    keyboard: 'WASD or the mouse steers. Space or a click fires the nose guns — big rocks you shoot down drop oil.',
+    touch: 'Drag to steer — the guns fire on their own, and big rocks they break drop oil.',
   },
   // …and 12 s later, on the same trip. SPEC-036 §4.11: on touch the throttle
   // is the + − pair — a drag on the right is the fire zone, not a throttle.
