@@ -31,20 +31,32 @@ const KIND_ORDER: Readonly<Record<InteractKind, number>> = {
  * The interactable whose circle holds `(x, z)` (its rim included), nearest
  * centre first; at the same distance the kind listed first in `InteractKind`
  * wins, then the earlier entry. `null` outside every circle. Never allocates.
+ *
+ * SPEC-058's body never hides a way: anywhere inside a `descent`'s or an
+ * `exit`'s own circle, that wins over a body, however near the body's centre.
+ * A predecessor who last died below lies at the descent, and nearest-centre
+ * gave about half the descent's circle to "Search the body" (review 2026-10,
+ * B-17).
  */
 export function nearestInteractable(list: readonly Interactable[], x: number, z: number): Interactable | null {
   let best: Interactable | null = null;
   let bestD = Infinity;
+  let way: Interactable | null = null;
+  let wayD = Infinity;
   for (let i = 0; i < list.length; i++) {
     const it = list[i] as Interactable;
     const dx = it.x - x;
     const dz = it.z - z;
     const d = dx * dx + dz * dz;
     if (d > it.radius * it.radius) continue;
+    if ((it.kind === 'descent' || it.kind === 'exit') && d < wayD) {
+      way = it;
+      wayD = d;
+    }
     if (d < bestD || (d === bestD && best !== null && KIND_ORDER[it.kind] < KIND_ORDER[best.kind])) {
       best = it;
       bestD = d;
     }
   }
-  return best;
+  return best !== null && best.kind === 'body' && way !== null ? way : best;
 }
