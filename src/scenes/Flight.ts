@@ -41,7 +41,7 @@ import { ClueTracker, FlagView, type ClueScene } from '@/systems/Clues';
 import { computePlayerStats } from '@/systems/Combat';
 import { Economy } from '@/systems/Economy';
 import { tipDue, tipKey } from '@/systems/Guidance';
-import { CARD, cardDue, cardKey, contactDue, contactKey, LINE_LEDGER, missionLinePlays } from '@/systems/StoryBeats';
+import { CARD, cardDue, cardKey, contactDue, contactKey, flightEchoDue, LINE_LEDGER, missionLinePlays } from '@/systems/StoryBeats';
 import { showChapterCard } from '@/ui/ChapterCard';
 import { showContactCard } from '@/ui/ContactCard';
 import { dialogueLayer } from '@/ui/DialogueUI';
@@ -1197,6 +1197,31 @@ export class FlightScene extends UiScene<'flight'> {
       hasShelter: () => false,
     };
     this.disposer.add(bus.on('enemy:killed', ({ enemyId }) => this.#playClue(tracker, tracker.onKill(enemyId, scene)), this));
+    // Review 2026-10 S-04: a flight echo — its clue's line on a group of its
+    // enemy, one at a time, until the line's start finds the clue.
+    let echoOut = false;
+    this.disposer.add(
+      bus.on(
+        'flight:groupSpawned',
+        ({ enemy }) => {
+          if (echoOut) return;
+          const line = flightEchoDue(enemy, this.#planet.id, scene.flags);
+          if (line === null) return;
+          echoOut = true;
+          void dialogueLayer(this.services.uiRoot, this.services.events, {
+            input: this.services.input,
+            saveKey: () => this.services.save.current,
+            typewriter: () => this.services.settings.get().typewriter,
+            speed: () => this.services.settings.get().dialogueSpeed,
+          })
+            .play(line, { modal: false })
+            .then(() => {
+              echoOut = false;
+            });
+        },
+        this,
+      ),
+    );
     this.disposer.add(
       bus.on(
         'dialogue:started',

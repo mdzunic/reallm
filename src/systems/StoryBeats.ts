@@ -9,6 +9,7 @@
 import {
   BOSS_REVEALS,
   CONTACTS,
+  FLIGHT_ECHOES,
   INTERLUDES,
   type CaptionDef,
   type ContactDef,
@@ -17,8 +18,8 @@ import {
   type FilmId,
   type ShotPan,
 } from '@/data/films';
-import type { DialogueId, EnemyId, FlagId, PlanetId } from '@/data/index';
-import { commandRating, offTaskCount, ratingGrade } from '@/systems/Clues';
+import { CLUES, type DialogueId, type EnemyId, type FlagId, type PlanetId } from '@/data/index';
+import { clueFound, commandRating, offTaskCount, ratingGrade } from '@/systems/Clues';
 import { instanceNumber } from '@/systems/StoryContext';
 
 export type FilmMode = 'video' | 'stills' | 'text';
@@ -282,6 +283,20 @@ export function contactDue(
 export function contactFilm(planet: PlanetId): FilmId | null {
   for (const contact of Object.values(CONTACTS) as readonly ContactDef[]) {
     if (contact.planet === planet && contact.film !== undefined) return contact.film;
+  }
+  return null;
+}
+
+/**
+ * Review 2026-10 S-04: the line a group of `enemy` on a flight to `planet`
+ * owes (`FLIGHT_ECHOES`) — while the clue that owns it is unfound, so once a
+ * save — or null.
+ */
+export function flightEchoDue(enemy: EnemyId, planet: PlanetId, flags: ReadonlySet<string>): DialogueId | null {
+  for (const echo of FLIGHT_ECHOES) {
+    if (echo.enemy !== enemy || echo.planet !== planet) continue;
+    const clue = CLUES.find((def) => def.lines.includes(echo.line));
+    if (clue !== undefined && !clueFound(clue, flags)) return echo.line;
   }
   return null;
 }

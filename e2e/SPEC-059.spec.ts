@@ -455,6 +455,9 @@ test('10. the Records panel: the title, the count, an earned row, a classified o
   await expect(page.getByTestId('records-dry_land')).toContainText('Earned 2026-09-21');
   await expect(page.getByTestId('records-sixty_one_times')).toContainText('— classified —');
   await expect(page.getByTestId('records-untouched')).toContainText('Not yet earned');
+  // Review 2026-10 S-08: the clue rows are classified, and the grades read Command's words.
+  await expect(page.getByTestId('records-off_task')).toContainText('— classified —');
+  await expect(page.getByTestId('records-good_run')).toContainText('File the Eden survey.');
   await page.keyboard.press('Escape');
   await expect(panel).toHaveCount(0);
 
@@ -463,6 +466,7 @@ test('10. the Records panel: the title, the count, an earned row, a classified o
   await start(page, URL);
   await page.getByTestId('menu-records').click();
   await expect(page.getByTestId('records-title')).toHaveText('Evaluation log — instance/62');
+  await expect(page.getByTestId('records-good_run')).toContainText('command rating of 0.94 or better');
 });
 
 // ----------------------------------------------- 11–13: the Selection card

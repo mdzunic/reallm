@@ -106,7 +106,7 @@ async function dismiss(page: Page): Promise<void> {
  * one — so the cases that play behind it run at Manual and move it on here.
  */
 async function passAcceptLine(page: Page): Promise<void> {
-  await expect(page.locator('[data-testid="dialogue"] .dialogue-text')).toContainText('I put the tug on the pad.', COLD_START);
+  await expect(page.locator('[data-testid="dialogue"] .dialogue-text')).toContainText('Tug is on the pad.', COLD_START);
   await dismiss(page);
 }
 
@@ -339,7 +339,7 @@ test('7. a replay of c1_m1 plays its accept line only, and its banner still show
   await page.waitForTimeout(500);
   await pauseComms(page);
   const lines = (await commsLines(page)).join('\n');
-  expect(lines).toContain('I put the tug on the pad. You were out of the hatch twelve metres early.');
+  expect(lines).toContain('Tug is on the pad. You climbed out twelve metres short of it.');
   expect(lines).not.toContain('Off-worlder. Listen.');
   expect(lines).not.toContain('Dune sea logged, storm survived.');
 });

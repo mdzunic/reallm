@@ -17,6 +17,7 @@ import type { EnemyId } from '@/data/enemies';
 import type { CacheId, FlagId, PlanetId } from '@/data/ids';
 import type { MissionId } from '@/data/missions';
 import type { PoiId } from '@/data/pois';
+import type { LineCondition } from '@/data/story';
 import type { WaveId } from '@/data/waves';
 
 /** What finds a clue. SPEC-049 added `respawn`, `station`, `keepsake` and `choice`; SPEC-056 adds `cache`. */
@@ -44,6 +45,23 @@ export type ClueTrigger =
   /** SPEC-056 §4.7: `cache:opened` of `cache` — a vault's archive shard. */
   | { readonly kind: 'cache'; readonly cache: CacheId };
 
+/**
+ * Review 2026-10 S-09: a record's other title and text, shown while `when`
+ * holds — the first that holds wins (`recordOf`), like a caption's variants.
+ */
+export interface ClueRecordVariant {
+  readonly when: LineCondition;
+  readonly title: string;
+  readonly text: string;
+}
+
+/** What Notes shows once found, filled with `fillLine` (title ≤ 40, text ≤ 160 at the longest fill). */
+export interface ClueRecord {
+  readonly title: string;
+  readonly text: string;
+  readonly variants?: readonly ClueRecordVariant[];
+}
+
 export interface ClueDef {
   /** The clue is found when this flag is set… */
   readonly id: FlagId;
@@ -58,8 +76,7 @@ export interface ClueDef {
   readonly trigger: ClueTrigger;
   /** The start of any of them sets `id`. Empty only for a `choice` clue (SPEC-049). */
   readonly lines: readonly DialogueId[];
-  /** What Notes shows once found, filled with `fillLine` (title ≤ 40, text ≤ 160 at the longest fill). */
-  readonly record: { readonly title: string; readonly text: string };
+  readonly record: ClueRecord;
 }
 
 /** §4.3: how long a shelter clue needs the player inside (*initial tuning*). */
@@ -101,7 +118,8 @@ export const CLUES: readonly ClueDef[] = [
     path: 'main',
     offTask: false,
     trigger: { kind: 'respawn' },
-    lines: ['restart_1', 'restart_2', 'restart_3'],
+    // Review 2026-10 S-13: only the line that tells the cover finds it.
+    lines: ['restart_1'],
     record: { title: 'Eleven seconds', text: 'I died and woke on the pad. ARIA called it the medical frame.' },
   },
   {
@@ -167,7 +185,8 @@ export const CLUES: readonly ClueDef[] = [
     path: 'optional',
     offTask: true,
     trigger: { kind: 'keepsake' },
-    lines: ['keepsake_drift'],
+    // Review 2026-10 S-02: one line for each drifted text.
+    lines: ['keepsake_drift', 'keepsake_drift_mother'],
     record: { title: 'Tin, then brass', text: 'Iris’s compass was tin. Now I remember it brass.' },
   },
   {
@@ -177,7 +196,19 @@ export const CLUES: readonly ClueDef[] = [
     offTask: true,
     trigger: { kind: 'shelter', planet: 'ferrum', shelter: 'cave', seconds: CLUE_DWELL_SECONDS },
     lines: ['cave_tally'],
-    record: { title: 'Sixty-one marks', text: 'Tally marks on a Ferrum cave wall, in fives. Sixty-one of them.' },
+    record: {
+      title: 'Sixty-one marks',
+      text: 'Tally marks on a Ferrum cave wall, in fives. Sixty-one of them.',
+      // Review 2026-10 S-09: the count is the instances before this one.
+      variants: [
+        {
+          when: { iteration: { min: 2, max: 2 } },
+          title: 'Sixty-two marks',
+          text: 'Tally marks on a Ferrum cave wall, in fives. Sixty-two of them.',
+        },
+        { when: { iteration: { min: 3 } }, title: '{prior} marks', text: 'Tally marks on a Ferrum cave wall, in fives. {prior} of them.' },
+      ],
+    },
   },
   {
     id: 'signal_decoded',
@@ -214,7 +245,15 @@ export const CLUES: readonly ClueDef[] = [
     offTask: false,
     trigger: { kind: 'line' },
     lines: ['c5_m3_warden'],
-    record: { title: 'Sixty-one times', text: 'The Queen spoke in another voice. Sixty-one times before me.' },
+    record: {
+      title: 'Sixty-one times',
+      text: 'The Queen spoke in another voice. Sixty-one times before me.',
+      // Review 2026-10 S-09: the count is the instances before this one.
+      variants: [
+        { when: { iteration: { min: 2, max: 2 } }, title: 'Sixty-two times', text: 'The Queen spoke in another voice. Sixty-two times before me.' },
+        { when: { iteration: { min: 3 } }, title: '{prior} times', text: 'The Queen spoke in another voice. {prior} times before me.' },
+      ],
+    },
   },
   {
     id: 'clue_letter_repeat',
@@ -249,8 +288,9 @@ export const CLUES: readonly ClueDef[] = [
     path: 'main',
     offTask: false,
     trigger: { kind: 'wave', wave: 'eden_final' },
-    lines: ['c6_m2_wave'],
-    record: { title: 'Never hers', text: 'The Hive came for the beacon after the Queen was dead.' },
+    // Review 2026-10 S-04: the flight to Eden can find it first, so the record names neither place.
+    lines: ['c6_m2_wave', 'eden_interceptors'],
+    record: { title: 'Never hers', text: 'The Hive kept coming after the Queen was dead.' },
   },
   // SPEC-056 §4.7: the archive shards, in planet order — optional and
   // off-task, since breaking into a vault is going off-task; each found when
@@ -264,7 +304,7 @@ export const CLUES: readonly ClueDef[] = [
     lines: ['shard_cinder4'],
     record: {
       title: 'Too fast for hands',
-      text: 'A log in the Cinder-4 vault: instance/58 opened the lock in 0.3 seconds, then learned to slow down.',
+      text: 'A log in the Cinder-4 vault: instance/55 opened the lock in 0.3 seconds, then learned to slow down.',
     },
   },
   {
@@ -274,7 +314,7 @@ export const CLUES: readonly ClueDef[] = [
     offTask: true,
     trigger: { kind: 'cache', cache: 'vetra_vault' },
     lines: ['shard_vetra'],
-    record: { title: 'The cold does not reach', text: 'A log in the Vetra vault: instance/47 could not feel the cold, and the suit was fine.' },
+    record: { title: 'The cold does not reach', text: 'A log in the Vetra vault: instance/46 could not feel the cold, and the suit was fine.' },
   },
   {
     id: 'shard_thessaly',
@@ -295,7 +335,7 @@ export const CLUES: readonly ClueDef[] = [
     offTask: true,
     trigger: { kind: 'cache', cache: 'ferrum_vault' },
     lines: ['shard_ferrum'],
-    record: { title: 'The meter you call breath', text: 'A log in the Ferrum vault: instance/29 says fatigue is a number here too.' },
+    record: { title: 'The meter you call breath', text: 'A log in the Ferrum vault: instance/28 says fatigue is a number here too.' },
   },
   {
     id: 'shard_hive',
@@ -304,7 +344,7 @@ export const CLUES: readonly ClueDef[] = [
     offTask: true,
     trigger: { kind: 'cache', cache: 'hive_vault' },
     lines: ['shard_hive'],
-    record: { title: 'Further than here', text: 'A log in the Hive vault: instance/12 never got past the Queen, and asks the next one to.' },
+    record: { title: 'Further than here', text: 'A log in the Hive vault: instance/13 never got past the Queen, and asks the next one to.' },
   },
   {
     id: 'shard_eden',

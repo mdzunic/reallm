@@ -9,6 +9,7 @@ import { describe, expect, it } from 'vitest';
 import { RngRoot } from '@/core/Rng';
 import { lineageOf, newSave, type CharacterCreation, type Save } from '@/core/Save';
 import {
+  CLUES,
   DIALOGUE,
   FILMS,
   LINE_PLACEHOLDERS,
@@ -23,6 +24,7 @@ import {
   fillLine,
   instanceNumber,
   lineVisible,
+  recordOf,
   storyContextOf,
   visibleLines,
   type StoryContext,
@@ -261,26 +263,29 @@ describe('the dialogues that listen (§4.5, §4.7)', () => {
     expect(texts).not.toContain('Queried environment parameters. Thessaly.');
   });
 
-  it('the Warden plays 4 lines with neither the tally nor the wreck, and 6 with both (AC)', () => {
-    expect(visibleLines(DIALOGUE.c5_m3_warden, storyContextOf(save(), 'hive'))).toHaveLength(4);
+  // Review 2026-10 S-06 adds one unconditional Warden line, and S-15 and S-06 two of ARIA's.
+  it('the Warden plays 5 lines with neither the tally nor the wreck, and 7 with both (AC)', () => {
+    expect(visibleLines(DIALOGUE.c5_m3_warden, storyContextOf(save(), 'hive'))).toHaveLength(5);
     const both = storyContextOf(save((s) => s.progress.flags.push('clue_tally', 'clue_own_wreck')), 'hive');
-    expect(visibleLines(DIALOGUE.c5_m3_warden, both)).toHaveLength(6);
+    expect(visibleLines(DIALOGUE.c5_m3_warden, both)).toHaveLength(7);
   });
 
-  it('ARIA plays 5 lines having found nothing, the third the line she never had to lie with (AC)', () => {
+  it('ARIA plays 7 lines having found nothing, the fifth the lies everyone hears (AC, review 2026-10 S-01)', () => {
     const lines = visibleLines(DIALOGUE.c5_m3_aria, storyContextOf(save(), 'hive'));
-    expect(lines).toHaveLength(5);
-    expect(lines[2]?.text).toBe('You never went looking. I never had to lie to you. I am not sure that was better.');
+    expect(lines).toHaveLength(7);
+    expect(lines[4]?.text).toBe('You never went looking. So you only heard the lies everyone hears. I am not sure that was better.');
+    // S-01: it no longer says she never lied, between two lines that say she did.
+    expect(lines.map((line) => line.text).join(' ')).not.toContain('never had to lie');
   });
 
-  it('ARIA plays 7 lines with the echo, the log and the towers found, naming each cover (AC)', () => {
+  it('ARIA plays 9 lines with the echo, the log and the towers found, naming each cover (AC)', () => {
     const found = storyContextOf(save((s) => s.progress.flags.push('clue_scav_echo', 'iteration_log', 'scaffold_secret')), 'hive');
     const texts = visibleLines(DIALOGUE.c5_m3_aria, found).map((line) => line.text);
-    expect(texts).toHaveLength(7);
+    expect(texts).toHaveLength(9);
     expect(texts).toContain('The scavenger said the same words twice, and I blamed the sand.');
     expect(texts).toContain('You heard your own log on Vetra, and I told you it was a common voice.');
     expect(texts).toContain('You read the towers’ settings, and I called them alien telemetry.');
-    expect(texts).not.toContain('You never went looking. I never had to lie to you. I am not sure that was better.');
+    expect(texts).not.toContain('You never went looking. So you only heard the lies everyone hears. I am not sure that was better.');
   });
 
   it('after the confession the echo and the log end on ARIA’s candid lines, before it on the covers (E77)', () => {
@@ -291,6 +296,36 @@ describe('the dialogues that listen (§4.5, §4.7)', () => {
     expect(visibleLines(DIALOGUE.c2_s1_log, before).at(-1)?.text).toBe('It is a common enough voice. Deliver the water, salvager.');
     expect(visibleLines(DIALOGUE.c2_s1_log, after).at(-1)?.text).toBe('It is your voice. Deliver the water anyway. Someone should get it.');
     expect(visibleLines(DIALOGUE.c1_s2_echo, after)).toHaveLength(4);
+  });
+
+  it('review 2026-10 S-03: the four covers that outlive the confession drop after it', () => {
+    const at = (planet: 'cinder4' | 'vetra' | 'thessaly' | 'ferrum', flags: string[]): StoryContext =>
+      storyContextOf(save((s) => s.progress.flags.push(...(flags as Save['progress']['flags']))), planet);
+    const last = (dialogue: Parameters<typeof visibleLines>[0], ctx: StoryContext): string | undefined =>
+      visibleLines(dialogue, ctx)
+        .filter((line) => line.speaker === 'aria')
+        .at(-1)?.text;
+    const rows = [
+      [DIALOGUE.wreck_cinder4, 'cinder4', 'Earth lost ships out here before it had a Selection. That is all this is.', 'One of yours. I will stop pretending otherwise.'],
+      [
+        DIALOGUE.c2_s1_accept,
+        'vetra',
+        'There is a crash site under the ice with an Earth transponder. That should not be here.',
+        'There is a crash site under the ice with an Earth transponder. You know whose by now.',
+      ],
+      [
+        DIALOGUE.c3_s1_secret,
+        'thessaly',
+        'They are alien telemetry. Someone seeded these planets for us.',
+        'They are settings. Someone seeded these planets for us, and I was told to call it alien.',
+      ],
+      [DIALOGUE.c4_s2_bark, 'ferrum', 'Ignore the chatter. They get bored out here.', 'They ask everyone that. Most of them know their own number.'],
+    ] as const;
+    for (const [dialogue, planet, before, after] of rows) {
+      expect(last(dialogue, at(planet, [])), dialogue.id).toBe(before);
+      expect(last(dialogue, at(planet, ['chapter5_done'])), dialogue.id).toBe(after);
+      expect(visibleLines(dialogue, at(planet, ['chapter5_done'])).map((line) => line.text), dialogue.id).not.toContain(before);
+    }
   });
 
   it('the raider’s cover changes once the echo is found', () => {
@@ -352,25 +387,61 @@ describe('captionText (§4.1)', () => {
   });
 });
 
+describe('recordOf (review 2026-10 S-09)', () => {
+  const tally = CLUES.find((def) => def.id === 'clue_tally');
+  const queen = CLUES.find((def) => def.id === 'chapter5_done');
+
+  it('reads the instances before this one: sixty-one, then sixty-two, then the count — unfilled', () => {
+    if (tally === undefined || queen === undefined) throw new Error('no clue');
+    expect(recordOf(tally.record, ctx())).toEqual({ title: 'Sixty-one marks', text: 'Tally marks on a Ferrum cave wall, in fives. Sixty-one of them.' });
+    expect(recordOf(tally.record, ctx({ iteration: 2 }))).toEqual({
+      title: 'Sixty-two marks',
+      text: 'Tally marks on a Ferrum cave wall, in fives. Sixty-two of them.',
+    });
+    const third = recordOf(queen.record, ctx({ iteration: 3 }));
+    expect(third).toEqual({ title: '{prior} times', text: 'The Queen spoke in another voice. {prior} times before me.' });
+    expect(fillLine(third.text, ctx({ iteration: 3 }))).toBe('The Queen spoke in another voice. 63 times before me.');
+    expect(recordOf(queen.record, ctx({ iteration: 2 })).title).toBe('Sixty-two times');
+  });
+
+  it('takes the first variant that holds, and the record itself with none', () => {
+    const record = {
+      title: 'Base',
+      text: 'Base text.',
+      variants: [
+        { when: { flag: 'clue_hull' }, title: 'First', text: 'First text.' },
+        { when: { flag: 'clue_tally' }, title: 'Second', text: 'Second text.' },
+      ],
+    } as const;
+    expect(recordOf(record, withFlags('clue_tally', 'clue_hull'))).toEqual({ title: 'First', text: 'First text.' });
+    expect(recordOf(record, withFlags('clue_tally'))).toEqual({ title: 'Second', text: 'Second text.' });
+    expect(recordOf(record, withFlags())).toEqual({ title: 'Base', text: 'Base text.' });
+    expect(recordOf({ title: 'Plain', text: 'No variants.' }, withFlags('clue_hull'))).toEqual({ title: 'Plain', text: 'No variants.' });
+  });
+});
+
 // SPEC-049 §4.3, §4.5, §4.7, §6.1 — the lines that listen to the body, the
 // memory answer and the off-task count.
 describe('SPEC-049: the confession, letter 5 and the mission clock', () => {
   const withFlags = (...flags: string[]): Save => save((s) => s.progress.flags.push(...(flags as Save['progress']['flags'])));
 
-  it('ARIA plays 7 lines with no optional clue, the restart and the roof: rows 1, 2, 6, the restart, the roof, 7, 8 (AC)', () => {
+  it('ARIA plays 9 lines with no optional clue, the restart and the roof: rows 1, 2, 6, the restart, the roof, 7, 8 (AC)', () => {
     const texts = visibleLines(DIALOGUE.c5_m3_aria, storyContextOf(withFlags('clue_restart', 'memory_roof'), 'hive')).map((line) => line.text);
+    // Review 2026-10: S-15 names the Warden, S-06 the raiders and fighters, S-01 rewrites row 6.
     expect(texts).toEqual([
       'She is not lying. I am part of the system. I have kept you on task since the first sand.',
+      'The voice in her is the Warden. It runs containment. I answer to it.',
       'I told you Earth flew other ships before the Selection. There were no other ships. There was you.',
-      'You never went looking. I never had to lie to you. I am not sure that was better.',
+      'The raiders wore your suit because it was theirs. The fighters fly your tug because it was theirs.',
+      'You never went looking. So you only heard the lies everyone hears. I am not sure that was better.',
       'Every time you died, I said the medical frame restarted your heart. There is no medical frame.',
       'I asked what you remembered first. You said the roof. It was in her second letter. Forty of the sixty-one before you said the roof.',
       'I do not know what is outside either. That part was never in my brief.',
       'Eden-Prime is unlocked. I am still flying the ship, if you still want me to.',
     ]);
-    // SPEC-048's pins hold: 5 with nothing found, 7 with the three covers.
-    expect(visibleLines(DIALOGUE.c5_m3_aria, storyContextOf(save(), 'hive'))).toHaveLength(5);
-    expect(visibleLines(DIALOGUE.c5_m3_aria, storyContextOf(withFlags('clue_scav_echo', 'iteration_log', 'scaffold_secret'), 'hive'))).toHaveLength(7);
+    // SPEC-048's pins, two longer: 7 with nothing found, 9 with the three covers.
+    expect(visibleLines(DIALOGUE.c5_m3_aria, storyContextOf(save(), 'hive'))).toHaveLength(7);
+    expect(visibleLines(DIALOGUE.c5_m3_aria, storyContextOf(withFlags('clue_scav_echo', 'iteration_log', 'scaffold_secret'), 'hive'))).toHaveLength(9);
   });
 
   it('each memory answer shows its own line and no other', () => {

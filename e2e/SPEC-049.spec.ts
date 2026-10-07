@@ -37,8 +37,10 @@ const KEEPSAKE = {
   t4: 'A compass. It points at your next objective. It has never once pointed home.',
   t5: 'A compass. Standard kit. Every salvager was issued one, and a letter.',
 };
-const DRIFT = 'You called it tin last time. And last time it was hers, not your mother’s.';
-const RESTART_1 = 'Medical frame restarted your heart. Eleven seconds of nothing. Walk it off.';
+// Review 2026-10 S-02: the drift line on T2 names the stair and the roof; on T3, the mother.
+const DRIFT = 'You called it tin last time. And last time she gave it to you at the stair, not on the roof.';
+// Review 2026-10 S-14: the cover explains the walk back.
+const RESTART_1 = 'Medical frame restarted your heart. Eleven seconds of nothing, and the suit walked you back. Do not ask me how.';
 
 interface Prep {
   flags?: string[];
@@ -388,6 +390,8 @@ test('7. the session’s first respawn plays the restart line and finds its clue
       await page.waitForTimeout(400);
     }
     await expect(death).toBeVisible();
+    // Review 2026-10 S-14: before the notice the overlay speaks the cover.
+    await expect(page.getByTestId('death-respawn')).toHaveText('Medical frame…');
     await expect(death).toBeHidden({ timeout: 15_000 });
   };
 
@@ -415,18 +419,21 @@ test('8. with the restart and the roof on file, the confession names the medical
   await page.evaluate(() => window.__reallm.playDialogue('c5_m3_aria'));
   await expect(dialogue(page)).toHaveClass(/is-modal/);
   await expect(text(page)).toHaveText('She is not lying. I am part of the system. I have kept you on task since the first sand.');
-  // Enter through it: seven lines with no optional clue, the restart and the roof.
+  // Enter through it: nine lines with no optional clue, the restart and the roof
+  // (review 2026-10 S-15 and S-06 name the Warden, the raiders and the fighters).
   let presses = 0;
-  while ((await dialogue(page).isVisible()) && presses < 12) {
+  while ((await dialogue(page).isVisible()) && presses < 14) {
     await enter(page);
     presses++;
   }
   await expect(dialogue(page)).toBeHidden();
-  expect(presses).toBe(7);
+  expect(presses).toBe(9);
   await page.getByTestId('station-tab-comms').click();
   const lines = (await commsLines(page)).join('\n');
   expect(lines).toContain('There is no medical frame.');
   expect(lines).toContain('Forty of the sixty-one before you said the roof.');
+  expect(lines).toContain('The voice in her is the Warden.');
+  expect(lines).toContain('So you only heard the lies everyone hears.');
   expect(lines).not.toContain('You said the tap.');
   expect(lines).not.toContain('You said the stair.');
 });

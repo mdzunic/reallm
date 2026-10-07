@@ -23,6 +23,8 @@ export const COMMS_LOG_MAX = 50;
 export interface LoggedLine {
   readonly speaker: SpeakerId;
   readonly text: string;
+  /** Review 2026-10 S-15: the label as shown, where it is not the cast's own (the named Warden). */
+  readonly name?: string;
 }
 
 /** §4.1: the lines shown since the main menu was last entered, oldest first. */
@@ -30,8 +32,8 @@ export class CommsLog {
   readonly #lines: LoggedLine[] = [];
 
   /** Records a line as it is shown — before any typing, so a cleared line is whole here (45-e). */
-  push(speaker: SpeakerId, text: string): void {
-    this.#lines.push({ speaker, text });
+  push(speaker: SpeakerId, text: string, name?: string): void {
+    this.#lines.push(name === undefined || name === SPEAKER_NAMES[speaker] ? { speaker, text } : { speaker, text, name });
     if (this.#lines.length > COMMS_LOG_MAX) this.#lines.splice(0, this.#lines.length - COMMS_LOG_MAX);
   }
 
@@ -94,7 +96,7 @@ export function openCommsLog(
             h(
               'li',
               { class: 'comms-line', 'data-speaker': line.speaker },
-              h('span', { class: 'comms-speaker' }, SPEAKER_NAMES[line.speaker]),
+              h('span', { class: 'comms-speaker' }, line.name ?? SPEAKER_NAMES[line.speaker]),
               h('span', { class: 'comms-text' }, line.text),
             ),
           ),

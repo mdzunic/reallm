@@ -37,6 +37,15 @@ export const KEEPSAKE = {
   t5: 'A compass. Standard kit. Every salvager was issued one, and a letter.',
 } as const;
 
+/**
+ * Review 2026-10 S-14: the death overlay's last line (SPEC-014 §4.9), in the
+ * fiction — `systems/Home.respawnText` picks one.
+ */
+export const DEATH_RESPAWN = {
+  cover: 'Medical frame…',
+  instance: 'Restarting instance…',
+} as const;
+
 /** §4.5: the question `station_memory` leads to. */
 export const MEMORY_PROMPT = 'What is the first thing you remember from before the Selection?';
 

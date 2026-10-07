@@ -3,10 +3,11 @@
 // the page-session memory behind the last two. Pure, so every rule pins in
 // node; `e2e/SPEC-049.spec.ts` proves the wiring.
 import { describe, expect, it } from 'vitest';
-import { CLUES, KEEPSAKE, type ClueDef } from '@/data/index';
+import { CLUES, DEATH_RESPAWN, KEEPSAKE, type ClueDef } from '@/data/index';
 import { ClueTracker, clueFound, isClueFlag, offTaskCount } from '@/systems/Clues';
 import {
   asideDue,
+  driftLine,
   HOME_SESSION,
   isDriftedKeepsake,
   keepsakeText,
@@ -14,6 +15,7 @@ import {
   letterOf,
   lettersDone,
   memoryAnswered,
+  respawnText,
   restartLine,
 } from '@/systems/Home';
 import { DEFAULT_STORY_CONTEXT, type StoryContext } from '@/systems/StoryContext';
@@ -89,6 +91,19 @@ describe('restartLine (§4.5)', () => {
   });
 });
 
+describe('respawnText (review 2026-10 S-14)', () => {
+  it('the medical frame before the notice, the instance after it — and on a next instance from the start', () => {
+    expect(DEATH_RESPAWN).toEqual({ cover: 'Medical frame…', instance: 'Restarting instance…' });
+    expect(respawnText(ctx())).toBe('Medical frame…');
+    expect(respawnText(ctx('chapter3_done', 'clue_restart'))).toBe('Medical frame…');
+    expect(respawnText(ctx('signal_decoded'))).toBe('Restarting instance…');
+    expect(respawnText(ctx('signal_decoded', 'chapter5_done'))).toBe('Restarting instance…');
+    expect(respawnText({ ...ctx(), iteration: 2 })).toBe('Restarting instance…');
+    // Neither is the game's word the cover was written to replace.
+    for (const text of Object.values(DEATH_RESPAWN)) expect(text).not.toMatch(/respawn/i);
+  });
+});
+
 describe('keepsakeText (§4.4)', () => {
   const views = (state: StoryContext): string[] => [0, 1, 2, 3].map((view) => keepsakeText(state, view));
   const { t1, t2, t3, t4, t5 } = KEEPSAKE;
@@ -113,6 +128,20 @@ describe('keepsakeText (§4.4)', () => {
   it('isDriftedKeepsake is T2 or T3, and nothing else', () => {
     expect([t1, t2, t3, t4, t5].map(isDriftedKeepsake)).toEqual([false, true, true, false, false]);
     expect(isDriftedKeepsake('')).toBe(false);
+  });
+
+  it('driftLine answers the text on screen: T2 the stair and the roof, T3 the mother (review 2026-10 S-02)', () => {
+    expect([t1, t2, t3, t4, t5].map(driftLine)).toEqual([null, 'keepsake_drift', 'keepsake_drift_mother', null, null]);
+    for (const text of [t1, t2, t3, t4, t5]) expect(driftLine(text) !== null, text).toBe(isDriftedKeepsake(text));
+    // A session's first drifted view follows a T1 one: the views before chapter2_done all read T1,
+    // and from it view 0 does — so either drift line compares against T1.
+    for (const before of [0, 1, 2, 3]) {
+      const openings = Array.from({ length: before }, (_, view) => keepsakeText(ctx('chapter1_done'), view));
+      const after = [before, before + 1].map((view) => keepsakeText(ctx('chapter1_done', 'chapter2_done'), view));
+      const all = [...openings, ...after];
+      const first = all.findIndex((text) => isDriftedKeepsake(text));
+      expect(all[first - 1], `${before} openings before chapter2_done`).toBe(t1);
+    }
   });
 });
 
@@ -145,12 +174,15 @@ describe('HOME_SESSION (§3)', () => {
 describe('the five clues as the tracker sees them (§4.6)', () => {
   it('a restart line, the awake aside, the drift and letter 5 each find their clue as they start', () => {
     const tracker = new ClueTracker();
-    for (const line of ['restart_1', 'restart_2', 'restart_3'] as const) expect(tracker.started(line, flags())?.id, line).toBe('clue_restart');
+    // Review 2026-10 S-13: only restart_1 tells the medical frame, so only it finds the clue.
+    expect(tracker.started('restart_1', flags())?.id).toBe('clue_restart');
+    for (const line of ['restart_2', 'restart_3'] as const) expect(tracker.started(line, flags()), line).toBeNull();
     expect(tracker.started('station_awake', flags())?.id).toBe('clue_awake');
     expect(tracker.started('keepsake_drift', flags())?.id).toBe('clue_keepsake');
+    expect(tracker.started('keepsake_drift_mother', flags())?.id).toBe('clue_keepsake');
     expect(tracker.started('letter_5', flags())?.id).toBe('clue_letter_repeat');
     // A later session's restart line sets nothing new (§4.5).
-    expect(tracker.started('restart_2', flags('clue_restart'))).toBeNull();
+    expect(tracker.started('restart_1', flags('clue_restart'))).toBeNull();
     // Letters 1–4 and the memory lines are no clue's.
     for (const line of ['letter_1', 'letter_4', 'station_memory', 'station_memory_reply'] as const) expect(tracker.started(line, flags()), line).toBeNull();
   });

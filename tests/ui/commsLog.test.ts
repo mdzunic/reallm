@@ -49,6 +49,20 @@ describe('CommsLog (SPEC-045 §4.1)', () => {
     expect(log.lines()).toEqual(first);
     expect(log.size).toBe(2);
   });
+
+  it('keeps a label only where it is not the cast’s own — the named Warden (review 2026-10 S-15)', () => {
+    const log = new CommsLog();
+    log.push('warden', 'You keep doing this.', '???');
+    log.push('warden', 'A good run. Logged. Rest.', 'WARDEN');
+    log.push('aria', 'Rest.', 'ARIA');
+    expect(log.lines()).toEqual([
+      { speaker: 'warden', text: 'You keep doing this.' },
+      { speaker: 'warden', text: 'A good run. Logged. Rest.', name: 'WARDEN' },
+      { speaker: 'aria', text: 'Rest.' },
+    ]);
+    const sheet = SOURCES['../../src/ui/CommsLog.ts'] as string;
+    expect(sheet).toContain("h('span', { class: 'comms-speaker' }, line.name ?? SPEAKER_NAMES[line.speaker])");
+  });
 });
 
 // SPEC-048 §4.4 — the Notes tab. Its sheet is DOM, driven by `e2e/SPEC-048.spec.ts`

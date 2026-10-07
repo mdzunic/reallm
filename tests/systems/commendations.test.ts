@@ -13,6 +13,7 @@ import {
   commendationToastText,
   CommendationTracker,
   earnedText,
+  recordsRevealed,
   recordsRows,
   recordsRowStatus,
   recordsTitle,
@@ -439,6 +440,48 @@ describe('the Records panel’s rows (§4.4.5)', () => {
     expect(status('untouched')).toBe('Not yet earned');
     expect(status('sixty_one_times')).toBeNull();
     expect(earnedText(Date.UTC(2026, 0, 2, 23, 59))).toBe('Earned 2026-01-02');
+  });
+
+  it('hides the clue rows until earned, and covers the run grades until the list is revealed (review 2026-10 S-08)', () => {
+    const fresh = new Map(recordsRows({}).map((row) => [row.id, row]));
+    for (const id of ['said_before', 'common_hand', 'scaffold', 'off_task', 'every_reading'] as const) {
+      expect(fresh.get(id), id).toEqual({ id, title: '— classified —', detail: 'Not yet on record.', earnedAt: null });
+    }
+    // A fresh install shows no word of the loop: no off-task, no towers, no command rating.
+    const shown = [...fresh.values()].flatMap((row) => [row.title, row.detail]).join(' | ');
+    expect(shown).not.toMatch(/Off-task|irregular reading|towers|command rating|flight log|scavengers/);
+    for (const id of ['good_run', 'acceptable_run', 'noisy_run'] as const) {
+      expect(fresh.get(id)?.detail, id).toBe('File the Eden survey.');
+      expect(recordsRows({}, true).find((row) => row.id === id)?.detail, id).toBe(COMMENDATIONS[id].detail);
+    }
+    // Earned, a hidden row reads as itself.
+    expect(recordsRows({ off_task: NOW }).find((row) => row.id === 'off_task')).toEqual({
+      id: 'off_task',
+      title: 'Off-task',
+      detail: 'Record five irregular readings.',
+      earnedAt: NOW,
+    });
+  });
+
+  it('recordsRevealed is what re-titles the list: a revealed save, or sixty_one_times', () => {
+    expect(recordsRevealed([], {})).toBe(false);
+    const plain = newSave(0, CREATION, 62, 0);
+    expect(recordsRevealed([plain], { dry_land: NOW })).toBe(false);
+    const done = newSave(1, CREATION, 62, 0);
+    done.progress.flags.push('chapter5_done');
+    expect(recordsRevealed([plain, done], {})).toBe(true);
+    const second = newSave(2, CREATION, 62, 0);
+    second.meta.iteration = 2;
+    expect(recordsRevealed([second], {})).toBe(true);
+    expect(recordsRevealed([], { sixty_one_times: NOW })).toBe(true);
+    for (const [saves, earned] of [
+      [[], {}],
+      [[plain], {}],
+      [[plain, done], {}],
+      [[], { sixty_one_times: NOW }],
+    ] as const) {
+      expect(recordsRevealed(saves, earned)).toBe(recordsTitle(saves, earned) !== 'Commendations — Earth Command');
+    }
   });
 
   it('bestTimeRows in MISSIONS order', () => {

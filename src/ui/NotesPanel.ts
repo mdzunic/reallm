@@ -14,7 +14,7 @@ import type { Save } from '@/core/Save';
 import { DIALOGUE, type DialogueDef, type DialogueId } from '@/data/index';
 import { notesModel, type NotesModel } from '@/systems/Clues';
 import { lettersDone } from '@/systems/Home';
-import { fillLine, storyContextOf } from '@/systems/StoryContext';
+import { fillLine, recordOf, storyContextOf, type StoryContext } from '@/systems/StoryContext';
 import { h, testId } from '@/ui/dom';
 
 const DIALOGUE_TABLE: Readonly<Record<DialogueId, DialogueDef>> = DIALOGUE;
@@ -128,7 +128,8 @@ export function renderLetters(flags: ReadonlySet<string>, fill: (text: string) =
 
 /**
  * §4.4: what the comms log's Notes tab reads for `save` — the model up to
- * `chapter()`, and the records filled from the save's story context. Reading
+ * `chapter()`, its records picked (a variant, where one holds) and filled
+ * from the save's story context. Reading
  * the model is opening the tab, so it clears the save's unseen mark and then
  * tells `seen`, which takes the `notes-new` dot down.
  */
@@ -141,9 +142,20 @@ export function notesFor(
     notes: () => {
       NOTES_UNSEEN.clear(save);
       seen?.();
-      return notesModel(new Set(save.progress.flags), chapter());
+      return withRecords(notesModel(new Set(save.progress.flags), chapter()), storyContextOf(save));
     },
     fill: (text) => fillLine(text, storyContextOf(save)),
+  };
+}
+
+/** Review 2026-10 S-09: the model with each found record as `ctx` reads it — a variant, where one holds. */
+function withRecords(model: NotesModel, ctx: StoryContext): NotesModel {
+  return {
+    ...model,
+    chapters: model.chapters.map((chapter) => ({
+      ...chapter,
+      found: chapter.found.map((def) => (def.record.variants === undefined ? def : { ...def, record: recordOf(def.record, ctx) })),
+    })),
   };
 }
 

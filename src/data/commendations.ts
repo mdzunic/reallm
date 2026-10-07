@@ -1,6 +1,9 @@
 // Commendations (SPEC-059 §4.4.1): the in-fiction achievement list. The
-// visible titles read as Earth Command's commendations; the six hidden ones
-// name the loop, and read `— classified —` until they are earned. Earned per
+// visible titles read as Earth Command's commendations; the hidden ones name
+// the loop, and read `— classified —` until they are earned. Review 2026-10
+// S-08 hides five more — the echo, the log, the towers and the two off-task
+// counts — and gives the three run grades Command's words until the list is
+// revealed (`cover`), so a fresh install spoils nothing. Earned per
 // device (`settings.commendations`), never per save, so a New Game, a deleted
 // slot or Iteration 63 keeps them (§4.4.2).
 //
@@ -37,6 +40,8 @@ export interface CommendationDef<Id extends string = string> {
   readonly detail: string;
   /** Reads `— classified —` until earned. */
   readonly hidden?: true;
+  /** Review 2026-10 S-08: the detail Command gives until the list is revealed (§4.4.4); ≤ 80 characters. */
+  readonly cover?: string;
   readonly rule: CommendationRule;
 }
 
@@ -64,12 +69,14 @@ export const COMMENDATIONS = {
     id: 'said_before',
     title: 'Said before',
     detail: 'Hear the same warning from two scavengers.',
+    hidden: true,
     rule: { kind: 'flag', flag: 'clue_scav_echo' },
   },
   common_hand: {
     id: 'common_hand',
     title: 'A common hand',
     detail: "Recover the flight log under Vetra's ice.",
+    hidden: true,
     rule: { kind: 'flag', flag: 'iteration_log' },
   },
   steady_hands: {
@@ -82,6 +89,7 @@ export const COMMENDATIONS = {
     id: 'scaffold',
     title: 'Scaffold',
     detail: 'Read what the towers of Thessaly stream.',
+    hidden: true,
     rule: { kind: 'flag', flag: 'scaffold_secret' },
   },
   signal_decoded: {
@@ -114,18 +122,21 @@ export const COMMENDATIONS = {
     id: 'good_run',
     title: 'A good run',
     detail: 'File the report with a command rating of 0.94 or better.',
+    cover: 'File the Eden survey.',
     rule: { kind: 'ending', ending: 'stay', grade: 'a good run' },
   },
   acceptable_run: {
     id: 'acceptable_run',
     title: 'An acceptable run',
     detail: 'File the report with a command rating from 0.85 to 0.91.',
+    cover: 'File the Eden survey.',
     rule: { kind: 'ending', ending: 'stay', grade: 'an acceptable run' },
   },
   noisy_run: {
     id: 'noisy_run',
     title: 'A noisy run',
     detail: 'File the report with a command rating under 0.85.',
+    cover: 'File the Eden survey.',
     rule: { kind: 'ending', ending: 'stay', grade: 'a noisy run' },
   },
   disconnected: {
@@ -139,12 +150,14 @@ export const COMMENDATIONS = {
     id: 'off_task',
     title: 'Off-task',
     detail: 'Record five irregular readings.',
+    hidden: true,
     rule: { kind: 'offTask', min: 5 },
   },
   every_reading: {
     id: 'every_reading',
     title: 'Every irregular reading',
     detail: 'Record every irregular reading on every world.',
+    hidden: true,
     rule: { kind: 'offTask', min: 15 },
   },
   below: {

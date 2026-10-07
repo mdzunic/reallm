@@ -36,6 +36,7 @@ import {
   departureDue,
   endingPending,
   filmDuration,
+  flightEchoDue,
   FILM_LOAD_CAP,
   FILM_LOAD_TIMEOUT,
   filmLoadDeadline,
@@ -281,6 +282,38 @@ describe('contactKey, contactDue and contactFilm (SPEC-063 §3, §6.1)', () => {
   it('Vetra’s departure plays wreckers second, and no other planet plays a second film', () => {
     expect(contactFilm('vetra')).toBe('wreckers');
     for (const planet of ['cinder4', 'thessaly', 'ferrum', 'hive', 'eden'] as const) expect(contactFilm(planet), planet).toBeNull();
+  });
+});
+
+describe('flightEchoDue (review 2026-10 S-04)', () => {
+  it('Eden’s interceptors owe ARIA’s line until clue_never_hers is found, whoever found it', () => {
+    expect(flightEchoDue('hive_interceptor', 'eden', new Set())).toBe('eden_interceptors');
+    expect(flightEchoDue('hive_interceptor', 'eden', new Set(['chapter5_done', 'interlude5_seen']))).toBe('eden_interceptors');
+    // The line's own start finds the clue, and so does the beacon's wave: once a save.
+    expect(flightEchoDue('hive_interceptor', 'eden', new Set(['clue_never_hers']))).toBeNull();
+  });
+
+  it('only that enemy on that planet', () => {
+    expect(flightEchoDue('hive_interceptor', 'hive', new Set())).toBeNull();
+    expect(flightEchoDue('scav_fighter', 'eden', new Set())).toBeNull();
+    expect(flightEchoDue('dust_skitter', 'eden', new Set())).toBeNull();
+  });
+
+  it('the flight plays it off a group’s spawn, one at a time, and its start finds the clue', () => {
+    const flight = SOURCES['../../src/scenes/Flight.ts'] as string;
+    expect(flight).toMatch(/'flight:groupSpawned',[\s\S]*?if \(echoOut\) return;\s*const line = flightEchoDue\(enemy, this\.#planet\.id, scene\.flags\);/);
+    expect(flight).toMatch(/\.play\(line, \{ modal: false \}\)\s*\.then\(\(\) => \{\s*echoOut = false;/);
+    // The flight's clue tracker sets the flag as a clue line starts.
+    expect(flight).toContain('const def = tracker.started(id, scene.flags);');
+  });
+
+  it('the line is clue_never_hers’s, after the beacon’s own', () => {
+    const clue = CLUES.find((def) => def.id === 'clue_never_hers');
+    expect(clue?.lines).toEqual(['c6_m2_wave', 'eden_interceptors']);
+    expect(DIALOGUE.eden_interceptors.lines.map((line) => line.text)).toEqual([
+      'Interceptors. Command said the Hive went quiet. Nobody told these.',
+      'The Queen is dead and they are still coming. They were never hers.',
+    ]);
   });
 });
 

@@ -32,7 +32,7 @@ import type { SceneParams } from '@/core/StateMachine';
 import { DIALOGUE, MEMORY_ANSWERS, MEMORY_PROMPT, PLANET_IDS, PLANETS, type DialogueId, type PlanetId } from '@/data/index';
 import { ClueTracker } from '@/systems/Clues';
 import { Economy } from '@/systems/Economy';
-import { asideDue, HOME_SESSION, isDriftedKeepsake, keepsakeText, letterDue, letterOf } from '@/systems/Home';
+import { asideDue, driftLine, HOME_SESSION, keepsakeText, letterDue, letterOf } from '@/systems/Home';
 import { applySupplies } from '@/systems/Service';
 import { containmentLevel } from '@/systems/Containment';
 import { Progression } from '@/systems/Progression';
@@ -437,14 +437,16 @@ export class StationScene extends UiScene<'station'> {
    * SPEC-049 §4.4: an opening of the Character tab whose compass reads T2 or
    * T3 while `clue_keepsake` is unset plays ARIA's drift line, non-modal; its
    * start finds the clue (`#watchClues`), so later views never play it again.
+   * Review 2026-10 S-02: the line answers the text on screen (`driftLine`).
    */
   #keepsakeDrift(data: Save): void {
     const ctx = storyContextOf(data);
     if (this.#driftQueued || ctx.flags.has('clue_keepsake')) return;
-    if (!isDriftedKeepsake(keepsakeText(ctx, HOME_SESSION.keepsakeView(data)))) return;
+    const line = driftLine(keepsakeText(ctx, HOME_SESSION.keepsakeView(data)));
+    if (line === null) return;
     this.#driftQueued = true;
     void this.#dialogueLayer()
-      .play('keepsake_drift')
+      .play(line)
       .then(() => {
         this.#driftQueued = false;
       });

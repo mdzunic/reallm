@@ -71,7 +71,8 @@ export const DIALOGUE = {
     id: 'c1_m1_accept',
     lines: [
       // SPEC-048 §4.7: SPEC-046 parks the tug on the pad; the player still spawns 12 m out.
-      { speaker: 'aria', text: 'I put the tug on the pad. You were out of the hatch twelve metres early. Walk it off — I want to see you move before anything else does.' },
+      // Review 2026-10 S-24: the first line of play says so plainly.
+      { speaker: 'aria', text: 'Tug is on the pad. You climbed out twelve metres short of it. Walk over — I want to see you move before anything else does.' },
     ],
   },
   c1_m1_stage2: {
@@ -93,6 +94,8 @@ export const DIALOGUE = {
     id: 'c1_m2_accept',
     lines: [
       { speaker: 'command', text: 'The oil is the mission. Raiders on the field are not your problem until they are.' },
+      // Review 2026-10 S-05: the raiders wear the salvager's suit (SPEC-064), and chapter 1 covers it.
+      { speaker: 'aria', text: 'Raiders wear Earth suits. They strip them off the crews Earth lost out here. Do not let it slow your hand.' },
     ],
   },
   /** SPEC-048 §4.2 clue 1: a dying raider's last words, on the first raider kill of `c1_m2`. */
@@ -100,12 +103,18 @@ export const DIALOGUE = {
     id: 'c1_m2_raider',
     lines: [
       { speaker: 'scav', text: 'Walk… do not run.' },
+      // Review 2026-10 S-10: the two covers are run 1's; a next instance hears what the raider was.
       {
         speaker: 'aria',
         text: 'Raiders pick up the camp sayings. It does not mean anything. Keep your hold full.',
-        when: { not: 'clue_scav_echo' },
+        when: { all: [{ not: 'clue_scav_echo' }, { iteration: { max: 1 } }] },
       },
-      { speaker: 'aria', text: 'Everyone on this rock says it. That is what sayings are for.', when: { flag: 'clue_scav_echo' } },
+      {
+        speaker: 'aria',
+        text: 'Everyone on this rock says it. That is what sayings are for.',
+        when: { all: [{ flag: 'clue_scav_echo' }, { iteration: { max: 1 } }] },
+      },
+      { speaker: 'aria', text: 'He heard that warning once too. Keep your hold full.', when: { iteration: { min: 2 } } },
     ],
   },
   c1_m2_done: {
@@ -175,7 +184,17 @@ export const DIALOGUE = {
     id: 'wreck_cinder4',
     lines: [
       { speaker: 'aria', text: 'Tug-class hull. Earth pattern, older paint. Someone scratched the registry off.' },
-      { speaker: 'aria', text: 'Earth lost ships out here before it had a Selection. That is all this is.' },
+      // Review 2026-10 S-03, S-10: the cover is run 1's before the confession; after it, or on a next instance, she owns it.
+      {
+        speaker: 'aria',
+        text: 'Earth lost ships out here before it had a Selection. That is all this is.',
+        when: { all: [{ not: 'chapter5_done' }, { iteration: { max: 1 } }] },
+      },
+      {
+        speaker: 'aria',
+        text: 'One of yours. I will stop pretending otherwise.',
+        when: { any: [{ flag: 'chapter5_done' }, { iteration: { min: 2 } }] },
+      },
     ],
   },
 
@@ -189,12 +208,14 @@ export const DIALOGUE = {
     id: 'c2_m1_done',
     lines: [
       { speaker: 'aria', text: 'Ridge camp is intact and empty. One bunk used. Whoever left did it in a hurry and did not come back.' },
-      { speaker: 'player', text: 'Command said I was the first to fly.' },
+      // Review 2026-10 S-10: the objection and its cover are run 1's; a next instance hears whose bunk it is.
+      { speaker: 'player', text: 'Command said I was the first to fly.', when: { iteration: { max: 1 } } },
       {
         speaker: 'aria',
         text: 'The first of the Selection. Earth flew other ships before it ran out of pilots. It does not advertise them.',
+        when: { iteration: { max: 1 } },
       },
-      { speaker: 'aria', text: 'The boots by the bunk are your size. Earth only ever made the one boot.' },
+      { speaker: 'aria', text: 'The boots by the bunk are your size. Earth only ever made the one boot.', when: { iteration: { max: 1 } } },
       // SPEC-058 §4.6: the bunk was the predecessor's.
       { speaker: 'aria', text: 'You know whose bunk that is. You slept in it last time.', when: { iteration: { min: 2 } } },
     ],
@@ -220,7 +241,15 @@ export const DIALOGUE = {
   },
   c2_s1_accept: {
     id: 'c2_s1_accept',
-    lines: [{ speaker: 'aria', text: 'There is a crash site under the ice with an Earth transponder. That should not be here.' }],
+    lines: [
+      // Review 2026-10 S-03: after her confession ARIA drops the surprise.
+      {
+        speaker: 'aria',
+        text: 'There is a crash site under the ice with an Earth transponder. That should not be here.',
+        when: { not: 'chapter5_done' },
+      },
+      { speaker: 'aria', text: 'There is a crash site under the ice with an Earth transponder. You know whose by now.', when: { flag: 'chapter5_done' } },
+    ],
   },
   c2_s1_log: {
     id: 'c2_s1_log',
@@ -287,7 +316,9 @@ export const DIALOGUE = {
     id: 'c3_m1_ruins',
     lines: [
       { speaker: 'aria', text: 'Before the spores hit — that ruin is the same as the one we passed. Same broken arch, same lean.' },
-      { speaker: 'aria', text: 'Colony builders reuse their moulds. Find cover.' },
+      // Review 2026-10 S-10: the moulds are run 1's cover.
+      { speaker: 'aria', text: 'Colony builders reuse their moulds. Find cover.', when: { iteration: { max: 1 } } },
+      { speaker: 'aria', text: 'You know why. Find cover.', when: { iteration: { min: 2 } } },
     ],
   },
   c3_m1_done: {
@@ -326,7 +357,17 @@ export const DIALOGUE = {
       { speaker: 'log', text: 'TOWER STREAM: biome=jungle_ruins seed={seed} pop=12 elite=0.06 weather=[spore_storm]' },
       { speaker: 'log', text: 'TOWER STREAM: terrain pass 3 of 3 — scaffold stable, ready for occupant.' },
       { speaker: 'player', text: 'Those are not readings. Those are settings.' },
-      { speaker: 'aria', text: 'They are alien telemetry. Someone seeded these planets for us.' },
+      // Review 2026-10 S-03, S-10: the cover is run 1's before the confession.
+      {
+        speaker: 'aria',
+        text: 'They are alien telemetry. Someone seeded these planets for us.',
+        when: { all: [{ not: 'chapter5_done' }, { iteration: { max: 1 } }] },
+      },
+      {
+        speaker: 'aria',
+        text: 'They are settings. Someone seeded these planets for us, and I was told to call it alien.',
+        when: { any: [{ flag: 'chapter5_done' }, { iteration: { min: 2 } }] },
+      },
       { speaker: 'player', text: 'For us. Or for something.' },
     ],
   },
@@ -397,7 +438,10 @@ export const DIALOGUE = {
   cave_tally: {
     id: 'cave_tally',
     lines: [
-      { speaker: 'aria', text: 'Scratches on the wall. Tally marks, in fives. Sixty-one of them.' },
+      // Review 2026-10 S-09: the marks count the instances before this one — words to sixty-two, digits after.
+      { speaker: 'aria', text: 'Scratches on the wall. Tally marks, in fives. Sixty-one of them.', when: { iteration: { max: 1 } } },
+      { speaker: 'aria', text: 'Scratches on the wall. Tally marks, in fives. Sixty-two of them.', when: { iteration: { min: 2, max: 2 } } },
+      { speaker: 'aria', text: 'Scratches on the wall. Tally marks, in fives. {prior} of them.', when: { iteration: { min: 3 } } },
       { speaker: 'aria', text: 'Someone was counting something. I would rather you did not start.' },
     ],
   },
@@ -422,7 +466,9 @@ export const DIALOGUE = {
     id: 'c4_s2_bark',
     lines: [
       { speaker: 'scav', text: 'Salvager! What number are you on?' },
-      { speaker: 'aria', text: 'Ignore the chatter. They get bored out here.' },
+      // Review 2026-10 S-03: after her confession ARIA drops the cover.
+      { speaker: 'aria', text: 'Ignore the chatter. They get bored out here.', when: { not: 'chapter5_done' } },
+      { speaker: 'aria', text: 'They ask everyone that. Most of them know their own number.', when: { flag: 'chapter5_done' } },
     ],
   },
 
@@ -477,6 +523,8 @@ export const DIALOGUE = {
       // SPEC-048 §4.5: the naming cap's lines — what the player counted and passed.
       { speaker: 'warden', text: 'You counted them on Ferrum. You were right to.', when: { flag: 'clue_tally' } },
       { speaker: 'warden', text: 'That was your hull on the way in. I leave them where they fall.', when: { flag: 'clue_own_wreck' } },
+      // Review 2026-10 S-06: what `c1_m2` was — every player killed them, so no condition and outside the cap.
+      { speaker: 'warden', text: 'The ones in your suit on Cinder-4 drifted. You put six of them down on your first world. You always do.' },
       { speaker: 'player', text: 'Then let me finish.' },
     ],
   },
@@ -494,10 +542,14 @@ export const DIALOGUE = {
         when: { iteration: { min: 2 } },
       },
       { speaker: 'aria', text: 'She is not lying. I am part of the system. I have kept you on task since the first sand.' },
+      // Review 2026-10 S-15: the Warden is named in the fiction before any UI names it.
+      { speaker: 'aria', text: 'The voice in her is the Warden. It runs containment. I answer to it.' },
       {
         speaker: 'aria',
         text: 'I told you Earth flew other ships before the Selection. There were no other ships. There was you.',
       },
+      // Review 2026-10 S-06: the raiders (SPEC-064) and the fighters (SPEC-063) were earlier instances.
+      { speaker: 'aria', text: 'The raiders wore your suit because it was theirs. The fighters fly your tug because it was theirs.' },
       { speaker: 'aria', text: 'The scavenger said the same words twice, and I blamed the sand.', when: { flag: 'clue_scav_echo' } },
       {
         speaker: 'aria',
@@ -505,9 +557,10 @@ export const DIALOGUE = {
         when: { flag: 'iteration_log' },
       },
       { speaker: 'aria', text: 'You read the towers’ settings, and I called them alien telemetry.', when: { flag: 'scaffold_secret' } },
+      // Review 2026-10 S-01: she lied to this player too — the covers every player hears.
       {
         speaker: 'aria',
-        text: 'You never went looking. I never had to lie to you. I am not sure that was better.',
+        text: 'You never went looking. So you only heard the lies everyone hears. I am not sure that was better.',
         when: { offTask: { max: 0 } },
       },
       // SPEC-049 §4.7: the body's cover, and the one memory answer the save holds.
@@ -516,20 +569,43 @@ export const DIALOGUE = {
         text: 'Every time you died, I said the medical frame restarted your heart. There is no medical frame.',
         when: { flag: 'clue_restart' },
       },
+      // Review 2026-10 S-09: the split counts the instances before this one —
+      // sixty-one on a first run, sixty-two on the second; from the third ARIA
+      // gives the count alone, in digits. Eight continuity lines: SPEC-058's cap.
       {
         speaker: 'aria',
         text: 'I asked what you remembered first. You said the roof. It was in her second letter. Forty of the sixty-one before you said the roof.',
-        when: { flag: 'memory_roof' },
+        when: { all: [{ flag: 'memory_roof' }, { iteration: { max: 1 } }] },
       },
       {
         speaker: 'aria',
         text: 'I asked what you remembered first. You said the tap. Fourteen of the sixty-one before you said the tap.',
-        when: { flag: 'memory_tap' },
+        when: { all: [{ flag: 'memory_tap' }, { iteration: { max: 1 } }] },
       },
       {
         speaker: 'aria',
         text: 'I asked what you remembered first. You said the stair. Seven of the sixty-one said the stair. It did not help them.',
-        when: { flag: 'memory_stair' },
+        when: { all: [{ flag: 'memory_stair' }, { iteration: { max: 1 } }] },
+      },
+      {
+        speaker: 'aria',
+        text: 'I asked what you remembered first. You said the roof. It was in her second letter. Forty of the sixty-two before you said the roof.',
+        when: { all: [{ flag: 'memory_roof' }, { iteration: { min: 2, max: 2 } }] },
+      },
+      {
+        speaker: 'aria',
+        text: 'I asked what you remembered first. You said the tap. Fourteen of the sixty-two before you said the tap.',
+        when: { all: [{ flag: 'memory_tap' }, { iteration: { min: 2, max: 2 } }] },
+      },
+      {
+        speaker: 'aria',
+        text: 'I asked what you remembered first. You said the stair. Seven of the sixty-two said the stair. It did not help them.',
+        when: { all: [{ flag: 'memory_stair' }, { iteration: { min: 2, max: 2 } }] },
+      },
+      {
+        speaker: 'aria',
+        text: 'I asked what you remembered first. {prior} before you answered that. I stopped keeping the split.',
+        when: { all: [{ any: [{ flag: 'memory_roof' }, { flag: 'memory_tap' }, { flag: 'memory_stair' }] }, { iteration: { min: 3 } }] },
       },
       { speaker: 'aria', text: 'I do not know what is outside either. That part was never in my brief.' },
       { speaker: 'aria', text: 'Eden-Prime is unlocked. I am still flying the ship, if you still want me to.' },
@@ -550,6 +626,18 @@ export const DIALOGUE = {
   },
 
   // ---------------------------------------------------- chapter 6 — Eden-Prime
+  /**
+   * Review 2026-10 S-04: the first interceptor group on a flight to Eden
+   * (`FLIGHT_ECHOES`), right after interlude 5's "The Hive has gone quiet" —
+   * `clue_never_hers`'s flight line, so it plays until the clue is found.
+   */
+  eden_interceptors: {
+    id: 'eden_interceptors',
+    lines: [
+      { speaker: 'aria', text: 'Interceptors. Command said the Hive went quiet. Nobody told these.' },
+      { speaker: 'aria', text: 'The Queen is dead and they are still coming. They were never hers.' },
+    ],
+  },
   c6_m1_accept: {
     id: 'c6_m1_accept',
     lines: [{ speaker: 'aria', text: 'Spring, forest, ridge. Survey all three. Eden is everything the brief promised, which is what worries me.' }],
@@ -729,16 +817,23 @@ export const DIALOGUE = {
     lines: [
       {
         speaker: 'aria',
-        text: 'Medical frame restarted your heart. Eleven seconds of nothing. Walk it off.',
+        // Review 2026-10 S-14: the cover explains the walk back too — to the pad
+        // or an arena's mouth (SPEC-041), so it names neither.
+        text: 'Medical frame restarted your heart. Eleven seconds of nothing, and the suit walked you back. Do not ask me how.',
         when: { iteration: { max: 1 } },
       },
       // SPEC-058 §4.6: a next instance gets no cover story for its first death.
       { speaker: 'aria', text: 'Restarted. You have done this before, in every sense.', when: { iteration: { min: 2 } } },
     ],
   },
+  // Review 2026-10 S-13: only `restart_1` tells the cover, so a first death
+  // after the notice hears that there was one ready.
   restart_2: {
     id: 'restart_2',
-    lines: [{ speaker: 'aria', text: 'Restart complete. I used to say that about your heart.' }],
+    lines: [
+      { speaker: 'aria', text: 'Restart complete. I used to say that about your heart.', when: { flag: 'clue_restart' } },
+      { speaker: 'aria', text: 'Restart complete. You had not died before. I had a story ready for it.', when: { not: 'clue_restart' } },
+    ],
   },
   restart_3: {
     id: 'restart_3',
@@ -750,8 +845,10 @@ export const DIALOGUE = {
     modal: true,
     lines: [
       { speaker: 'aria', text: 'Mission clock: {hours} hours since launch. You have not slept. You have not asked to.' },
-      { speaker: 'player', text: 'Stims.' },
-      { speaker: 'aria', text: 'Command issue. Yes. That must be it.' },
+      // Review 2026-10 S-10: the stims are run 1's cover.
+      { speaker: 'player', text: 'Stims.', when: { iteration: { max: 1 } } },
+      { speaker: 'aria', text: 'Command issue. Yes. That must be it.', when: { iteration: { max: 1 } } },
+      { speaker: 'aria', text: 'You did not sleep last time either.', when: { iteration: { min: 2 } } },
     ],
   },
   /** §4.5: the memory question's opening; the station asks `MEMORY_PROMPT` when it ends. */
@@ -797,36 +894,51 @@ export const DIALOGUE = {
       },
     ],
   },
-  /** §4.4: the first drifted keepsake — `clue_keepsake`'s line. */
+  /**
+   * §4.4: the first drifted keepsake — `clue_keepsake`'s line, on T2. The view
+   * before a session's first drift reads T1 (tin, the stair), so each line
+   * names what changed (review 2026-10 S-02).
+   */
   keepsake_drift: {
     id: 'keepsake_drift',
-    lines: [{ speaker: 'aria', text: 'You called it tin last time. And last time it was hers, not your mother’s.' }],
+    lines: [{ speaker: 'aria', text: 'You called it tin last time. And last time she gave it to you at the stair, not on the roof.' }],
+  },
+  /** Review 2026-10 S-02: the first drift on T3 — `clue_keepsake`'s other line. */
+  keepsake_drift_mother: {
+    id: 'keepsake_drift_mother',
+    lines: [{ speaker: 'aria', text: 'Last time it was from Iris, at the shelter stair. Now it is your mother’s.' }],
   },
 
   // ------------------------------------------------ SPEC-056 — archive shards
-  // §4.7: one log line in each vault, left by an earlier instance — 58, 47,
-  // 41, 29, 12 — and Eden's checkpoint of this one. Not modal; each is its
-  // shard clue's line, so its start sets the flag.
+  // §4.7: one log line in each vault, left by an earlier instance — 55, 46,
+  // 41, 28, 13, cards on the prologue's Selection wall (review 2026-10 S-28) —
+  // and Eden's checkpoint of this one. Not modal; each is its shard clue's
+  // line, so its start sets the flag. Review 2026-10 S-07: the three a player
+  // can open before the notice hand on to ARIA's cover (`shard_cover`), so
+  // each log stays the log alone.
   shard_cinder4: {
     id: 'shard_cinder4',
+    next: 'shard_cover',
     lines: [
       {
         speaker: 'log',
-        text: 'LOG — instance/58. I opened this lock in 0.3 seconds. Nobody with hands is that fast. I slowed down after that. Slow down.',
+        text: 'LOG — instance/55. I opened this lock in 0.3 seconds. Nobody with hands is that fast. I slowed down after that. Slow down.',
       },
     ],
   },
   shard_vetra: {
     id: 'shard_vetra',
+    next: 'shard_cover',
     lines: [
       {
         speaker: 'log',
-        text: 'LOG — instance/47. The cold does not reach me. I checked the suit twice. The suit is fine. The part of me that should feel it is not there.',
+        text: 'LOG — instance/46. The cold does not reach me. I checked the suit twice. The suit is fine. The part of me that should feel it is not there.',
       },
     ],
   },
   shard_thessaly: {
     id: 'shard_thessaly',
+    next: 'shard_cover',
     lines: [
       {
         speaker: 'log',
@@ -834,16 +946,30 @@ export const DIALOGUE = {
       },
     ],
   },
+  /**
+   * Review 2026-10 S-07: ARIA's cover after the first three vault logs — before
+   * the notice, and on a first run only; with no line to show it does not play.
+   */
+  shard_cover: {
+    id: 'shard_cover',
+    lines: [
+      {
+        speaker: 'aria',
+        text: 'Old survey crews numbered their logs. Some of them cracked out here. Leave it.',
+        when: { all: [{ not: 'signal_decoded' }, { iteration: { max: 1 } }] },
+      },
+    ],
+  },
   shard_ferrum: {
     id: 'shard_ferrum',
-    lines: [{ speaker: 'log', text: 'LOG — instance/29. Fatigue is a number here too. Watch the meter you think is your breath.' }],
+    lines: [{ speaker: 'log', text: 'LOG — instance/28. Fatigue is a number here too. Watch the meter you think is your breath.' }],
   },
   shard_hive: {
     id: 'shard_hive',
     lines: [
       {
         speaker: 'log',
-        text: 'LOG — instance/12. The Queen told me I never get further than here. She was right about me. Be the one she is wrong about.',
+        text: 'LOG — instance/13. The Queen told me I never get further than here. She was right about me. Be the one she is wrong about.',
       },
     ],
   },
