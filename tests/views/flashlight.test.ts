@@ -172,6 +172,30 @@ describe('the flashlight’s builds (SPEC-054 §4.5)', () => {
     flashlight.dispose();
   });
 
+  it("'spot-shadow' renders its shadow map only while on (and below), with castShadow kept (review B-23)", () => {
+    const { scene, player } = hosted();
+    const flashlight = new Flashlight(player, 'spot-shadow', LOOK);
+    const spot = spotOf(scene);
+    // The view passes `on && below`: off, or on the surface, no shadow pass.
+    flashlight.setOn(false);
+    expect({ autoUpdate: spot.shadow.autoUpdate, castShadow: spot.castShadow }).toEqual({ autoUpdate: false, castShadow: true });
+    // On below: every frame again, and a fresh map on the first one.
+    flashlight.setOn(true);
+    expect(spot.shadow.autoUpdate).toBe(true);
+    expect(spot.shadow.needsUpdate).toBe(true);
+    expect(spot.castShadow).toBe(true);
+    flashlight.setOn(false);
+    expect(spot.shadow.autoUpdate).toBe(false);
+    flashlight.dispose();
+
+    // 'spot' casts no shadow, and setOn leaves its shadow alone.
+    const plain = hosted();
+    const light = new Flashlight(plain.player, 'spot', LOOK);
+    light.setOn(false);
+    expect(spotOf(plain.scene).castShadow).toBe(false);
+    light.dispose();
+  });
+
   it('the cookie is white at the core and black at the rim and corners, opaque throughout', () => {
     const cookie = flashlightCookie();
     const { data, width } = cookie.image as { data: Uint8Array; width: number };

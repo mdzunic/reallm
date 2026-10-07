@@ -202,10 +202,22 @@ export class Flashlight {
   /**
    * §4.5: on and off write the intensity — the opacities for 'fake' — and
    * nothing else, so the light count and every program stay as they are.
+   * The view passes `on && below`. In 'spot-shadow' the shadow map renders
+   * only while that holds: three's shadow pass skips a light on
+   * `shadow.autoUpdate`/`needsUpdate`, never on its intensity, so off it once
+   * drew 512² every frame on the surface too (review 2026-10, B-23).
+   * `castShadow` stays set, so the programs do not change.
    */
   setOn(on: boolean): void {
     this.#on = on;
-    if (this.#light !== null) this.#light.intensity = on ? this.#look.intensity : 0;
+    const light = this.#light;
+    if (light !== null) {
+      light.intensity = on ? this.#look.intensity : 0;
+      if (light.castShadow) {
+        light.shadow.autoUpdate = on;
+        if (on) light.shadow.needsUpdate = true;
+      }
+    }
     if (this.#cookieMaterial !== null) this.#cookieMaterial.opacity = on ? COOKIE_OPACITY : 0;
     if (this.#coneMaterial !== null) this.#coneMaterial.opacity = on ? CONE_OPACITY : 0;
   }
