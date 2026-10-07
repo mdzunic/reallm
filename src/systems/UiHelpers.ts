@@ -1763,11 +1763,12 @@ export function remainsRecoveredText(look: RemainsLook, taken: Partial<Record<Re
 
 /**
  * SPEC-057 §4.4 (E93) — an attempt that took nothing, because the hold is
- * full: `Hold full — <n> left in your pack` (or `body`), `n` the units the
- * remains still hold (review 2026-10, B-21).
+ * full: `Cargo full — <n> left in your pack` (or `body`), `n` the units the
+ * remains still hold (review 2026-10, B-21). SPEC-045 §4.6: resources
+ * carried are `Cargo`; `Hold full` is the Depot tab's one label.
  */
 export function remainsFullText(look: RemainsLook, left: number): string {
-  return `Hold full — ${left} left in your ${look}`;
+  return `Cargo full — ${left} left in your ${look}`;
 }
 
 /** SPEC-057 §4.1 (E91) — the forfeit's toast: `Your earlier pack is gone: <list>.` (or `body`). */

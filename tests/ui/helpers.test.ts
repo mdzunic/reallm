@@ -2634,8 +2634,8 @@ describe('the remains lines (SPEC-057 §4.1, §4.4, §4.5, §4.7)', () => {
   });
 
   it('an attempt that took nothing says the hold is full, and what is left (E93, review B-21)', () => {
-    expect(remainsFullText('pack', 15)).toBe('Hold full — 15 left in your pack');
-    expect(remainsFullText('body', 1)).toBe('Hold full — 1 left in your body');
+    expect(remainsFullText('pack', 15)).toBe('Cargo full — 15 left in your pack');
+    expect(remainsFullText('body', 1)).toBe('Cargo full — 1 left in your body');
   });
 
   it('the forfeit toast names the lost set', () => {
