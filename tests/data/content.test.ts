@@ -2095,12 +2095,12 @@ describe('the clue catalogue (SPEC-048 §4.2, §4.3)', () => {
       ['Four degrees', 'Eden: four degrees at every spring, and the same eleven trees in the same order.'],
       ['Same tree', 'The same tree, again and again, knot for knot.'],
       ['Never hers', 'The Hive kept coming after the Queen was dead.'],
-      // SPEC-056 §4.7.
-      ['Too fast for hands', 'A log in the Cinder-4 vault: instance/58 opened the lock in 0.3 seconds, then learned to slow down.'],
-      ['The cold does not reach', 'A log in the Vetra vault: instance/47 could not feel the cold, and the suit was fine.'],
+      // SPEC-056 §4.7; review 2026-10 S-28 takes the numbers from the prologue's Selection wall.
+      ['Too fast for hands', 'A log in the Cinder-4 vault: instance/55 opened the lock in 0.3 seconds, then learned to slow down.'],
+      ['The cold does not reach', 'A log in the Vetra vault: instance/46 could not feel the cold, and the suit was fine.'],
       ['Eleven arches', 'A log in the Thessaly vault: instance/41 counted the same eleven arches going in and coming out.'],
-      ['The meter you call breath', 'A log in the Ferrum vault: instance/29 says fatigue is a number here too.'],
-      ['Further than here', 'A log in the Hive vault: instance/12 never got past the Queen, and asks the next one to.'],
+      ['The meter you call breath', 'A log in the Ferrum vault: instance/28 says fatigue is a number here too.'],
+      ['Further than here', 'A log in the Hive vault: instance/13 never got past the Queen, and asks the next one to.'],
       ['Checkpoint written', 'The machine room under Eden logged a checkpoint of instance/{instance}. Loss: acceptable.'],
     ]);
     // Review 2026-10 S-09: the two counts follow the iteration — words to sixty-two, digits after.
@@ -3428,13 +3428,23 @@ describe('content invariant 24: the treasure (SPEC-056 §4.8)', () => {
 
   it('the shard logs read as §4.7 gives them, inside 220 characters, with no contraction', () => {
     const shards = PLANET_IDS.map((planet) => `shard_${planet}` as const);
+    // Review 2026-10 S-28: 55, 46, 41, 28, 13 — cards on the prologue's Selection wall.
     expect(shards.map((id) => DIALOGUE[id].lines.map((line) => line.text))).toEqual([
-      ['LOG — instance/58. I opened this lock in 0.3 seconds. Nobody with hands is that fast. I slowed down after that. Slow down.'],
-      ['LOG — instance/47. The cold does not reach me. I checked the suit twice. The suit is fine. The part of me that should feel it is not there.'],
+      ['LOG — instance/55. I opened this lock in 0.3 seconds. Nobody with hands is that fast. I slowed down after that. Slow down.'],
+      ['LOG — instance/46. The cold does not reach me. I checked the suit twice. The suit is fine. The part of me that should feel it is not there.'],
       ['LOG — instance/41. I counted the arches going in. Eleven. I counted them going out. Eleven, the same cracks. They reuse the ruins. They reuse us.'],
-      ['LOG — instance/29. Fatigue is a number here too. Watch the meter you think is your breath.'],
-      ['LOG — instance/12. The Queen told me I never get further than here. She was right about me. Be the one she is wrong about.'],
+      ['LOG — instance/28. Fatigue is a number here too. Watch the meter you think is your breath.'],
+      ['LOG — instance/13. The Queen told me I never get further than here. She was right about me. Be the one she is wrong about.'],
       ['Checkpoint written: instance/{instance}. Loss: acceptable.'],
+    ]);
+    // Review 2026-10 S-07: the three a player can open before the notice hand on to ARIA's cover.
+    expect(shards.map((id) => (DIALOGUE[id] as { next?: string }).next ?? null)).toEqual(['shard_cover', 'shard_cover', 'shard_cover', null, null, null]);
+    expect(table('shard_cover')).toEqual([
+      [
+        'aria',
+        'Old survey crews numbered their logs. Some of them cracked out here. Leave it.',
+        { all: [{ not: 'signal_decoded' }, { iteration: { max: 1 } }] },
+      ],
     ]);
     for (const id of shards) {
       const def = DIALOGUE[id] as { modal?: boolean; lines: readonly { text: string }[] };
@@ -3539,6 +3549,7 @@ const BEFORE_SPEC_058: Readonly<Record<string, readonly Row[]>> = {
     ['player', 'Stims.'],
     ['aria', 'Command issue. Yes. That must be it.'],
   ],
+  shard_cover: [['aria', 'Old survey crews numbered their logs. Some of them cracked out here. Leave it.', { not: 'signal_decoded' }]],
   c1_s2_echo: [
     ['scav', 'Off-worlder. Listen. The worms hunt by vibration — walk, do not run.'],
     ['player', 'Say that again.'],
@@ -3754,6 +3765,7 @@ describe('the next instance’s lines (SPEC-058 §4.6, §4.7)', () => {
     expect(lines('wreck_cinder4', second).at(-1)).toBe('aria: One of yours. I will stop pretending otherwise.');
     expect(lines('c3_s1_secret', second)).toContain('aria: They are settings. Someone seeded these planets for us, and I was told to call it alien.');
     expect(lines('c3_s1_secret', second)).not.toContain('aria: They are alien telemetry. Someone seeded these planets for us.');
+    expect(lines('shard_cover', second)).toEqual([]);
     expect(lines('cave_tally', contextOf([]))[0]).toBe('aria: Scratches on the wall. Tally marks, in fives. Sixty-one of them.');
     expect(lines('cave_tally', second)[0]).toBe('aria: Scratches on the wall. Tally marks, in fives. Sixty-two of them.');
     expect(lines('cave_tally', third)[0]).toBe('aria: Scratches on the wall. Tally marks, in fives. 63 of them.');

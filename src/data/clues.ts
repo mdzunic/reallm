@@ -302,7 +302,7 @@ export const CLUES: readonly ClueDef[] = [
     lines: ['shard_cinder4'],
     record: {
       title: 'Too fast for hands',
-      text: 'A log in the Cinder-4 vault: instance/58 opened the lock in 0.3 seconds, then learned to slow down.',
+      text: 'A log in the Cinder-4 vault: instance/55 opened the lock in 0.3 seconds, then learned to slow down.',
     },
   },
   {
@@ -312,7 +312,7 @@ export const CLUES: readonly ClueDef[] = [
     offTask: true,
     trigger: { kind: 'cache', cache: 'vetra_vault' },
     lines: ['shard_vetra'],
-    record: { title: 'The cold does not reach', text: 'A log in the Vetra vault: instance/47 could not feel the cold, and the suit was fine.' },
+    record: { title: 'The cold does not reach', text: 'A log in the Vetra vault: instance/46 could not feel the cold, and the suit was fine.' },
   },
   {
     id: 'shard_thessaly',
@@ -333,7 +333,7 @@ export const CLUES: readonly ClueDef[] = [
     offTask: true,
     trigger: { kind: 'cache', cache: 'ferrum_vault' },
     lines: ['shard_ferrum'],
-    record: { title: 'The meter you call breath', text: 'A log in the Ferrum vault: instance/29 says fatigue is a number here too.' },
+    record: { title: 'The meter you call breath', text: 'A log in the Ferrum vault: instance/28 says fatigue is a number here too.' },
   },
   {
     id: 'shard_hive',
@@ -342,7 +342,7 @@ export const CLUES: readonly ClueDef[] = [
     offTask: true,
     trigger: { kind: 'cache', cache: 'hive_vault' },
     lines: ['shard_hive'],
-    record: { title: 'Further than here', text: 'A log in the Hive vault: instance/12 never got past the Queen, and asks the next one to.' },
+    record: { title: 'Further than here', text: 'A log in the Hive vault: instance/13 never got past the Queen, and asks the next one to.' },
   },
   {
     id: 'shard_eden',

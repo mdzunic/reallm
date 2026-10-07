@@ -893,29 +893,35 @@ export const DIALOGUE = {
   },
 
   // ------------------------------------------------ SPEC-056 — archive shards
-  // §4.7: one log line in each vault, left by an earlier instance — 58, 47,
-  // 41, 29, 12 — and Eden's checkpoint of this one. Not modal; each is its
-  // shard clue's line, so its start sets the flag.
+  // §4.7: one log line in each vault, left by an earlier instance — 55, 46,
+  // 41, 28, 13, cards on the prologue's Selection wall (review 2026-10 S-28) —
+  // and Eden's checkpoint of this one. Not modal; each is its shard clue's
+  // line, so its start sets the flag. Review 2026-10 S-07: the three a player
+  // can open before the notice hand on to ARIA's cover (`shard_cover`), so
+  // each log stays the log alone.
   shard_cinder4: {
     id: 'shard_cinder4',
+    next: 'shard_cover',
     lines: [
       {
         speaker: 'log',
-        text: 'LOG — instance/58. I opened this lock in 0.3 seconds. Nobody with hands is that fast. I slowed down after that. Slow down.',
+        text: 'LOG — instance/55. I opened this lock in 0.3 seconds. Nobody with hands is that fast. I slowed down after that. Slow down.',
       },
     ],
   },
   shard_vetra: {
     id: 'shard_vetra',
+    next: 'shard_cover',
     lines: [
       {
         speaker: 'log',
-        text: 'LOG — instance/47. The cold does not reach me. I checked the suit twice. The suit is fine. The part of me that should feel it is not there.',
+        text: 'LOG — instance/46. The cold does not reach me. I checked the suit twice. The suit is fine. The part of me that should feel it is not there.',
       },
     ],
   },
   shard_thessaly: {
     id: 'shard_thessaly',
+    next: 'shard_cover',
     lines: [
       {
         speaker: 'log',
@@ -923,16 +929,30 @@ export const DIALOGUE = {
       },
     ],
   },
+  /**
+   * Review 2026-10 S-07: ARIA's cover after the first three vault logs — before
+   * the notice, and on a first run only; with no line to show it does not play.
+   */
+  shard_cover: {
+    id: 'shard_cover',
+    lines: [
+      {
+        speaker: 'aria',
+        text: 'Old survey crews numbered their logs. Some of them cracked out here. Leave it.',
+        when: { all: [{ not: 'signal_decoded' }, { iteration: { max: 1 } }] },
+      },
+    ],
+  },
   shard_ferrum: {
     id: 'shard_ferrum',
-    lines: [{ speaker: 'log', text: 'LOG — instance/29. Fatigue is a number here too. Watch the meter you think is your breath.' }],
+    lines: [{ speaker: 'log', text: 'LOG — instance/28. Fatigue is a number here too. Watch the meter you think is your breath.' }],
   },
   shard_hive: {
     id: 'shard_hive',
     lines: [
       {
         speaker: 'log',
-        text: 'LOG — instance/12. The Queen told me I never get further than here. She was right about me. Be the one she is wrong about.',
+        text: 'LOG — instance/13. The Queen told me I never get further than here. She was right about me. Be the one she is wrong about.',
       },
     ],
   },

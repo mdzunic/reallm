@@ -176,7 +176,7 @@ async function untilLine(page: Page, text: string): Promise<void> {
 test.describe('SPEC-056 treasure', () => {
   test.setTimeout(240_000);
 
-  test('1, 2, 6: the Cinder-4 vault pays 5 tokens and a relic, plays instance/58’s log, pays nothing twice (E89), and Notes records the shard', async ({
+  test('1, 2, 6: the Cinder-4 vault pays 5 tokens and a relic, plays instance/55’s log, pays nothing twice (E89), and Notes records the shard', async ({
     page,
   }) => {
     await start(page, '/?debug');
@@ -200,11 +200,14 @@ test.describe('SPEC-056 treasure', () => {
     await toastShown(page, 'Archive shard');
     await untilInfo(page, 'relics', 1);
     // The log line, and the flag it sets as it starts.
-    await untilLine(page, 'LOG — instance/58');
+    // Review 2026-10 S-28: the number is a card on the prologue's Selection wall.
+    await untilLine(page, 'LOG — instance/55');
     await expect(page.locator('[data-testid="dialogue"] .dialogue-text')).toHaveText(
-      'LOG — instance/58. I opened this lock in 0.3 seconds. Nobody with hands is that fast. I slowed down after that. Slow down.',
+      'LOG — instance/55. I opened this lock in 0.3 seconds. Nobody with hands is that fast. I slowed down after that. Slow down.',
     );
     await expect.poll(() => flags(page), SLOW).toContain('shard_cinder4');
+    // Review 2026-10 S-07: before the notice, ARIA's cover follows the log.
+    await untilLine(page, 'Old survey crews numbered their logs. Some of them cracked out here. Leave it.');
     await dismiss(page);
 
     // Case 2: up and down again — the vault draws opened, and nothing pays twice.
@@ -234,12 +237,12 @@ test.describe('SPEC-056 treasure', () => {
     await page.getByTestId('pause-comms').click();
     await expect(page.getByTestId('comms-log')).toBeVisible();
     const logLines = await page.evaluate(
-      () => [...document.querySelectorAll('[data-testid="comms-log"] .comms-text')].filter((node) => (node.textContent ?? '').includes('instance/58')).length,
+      () => [...document.querySelectorAll('[data-testid="comms-log"] .comms-text')].filter((node) => (node.textContent ?? '').includes('instance/55')).length,
     );
     expect(logLines).toBe(1);
     await page.getByTestId('comms-tab-notes').click();
     await expect(page.getByTestId('notes-clue-shard_cinder4')).toContainText('Too fast for hands');
-    await expect(page.getByTestId('notes-clue-shard_cinder4')).toContainText('instance/58 opened the lock in 0.3 seconds');
+    await expect(page.getByTestId('notes-clue-shard_cinder4')).toContainText('instance/55 opened the lock in 0.3 seconds');
     await expect(page.getByTestId('notes-count')).toHaveText(/^Recorded [1-9]\d* of 26$/);
   });
 
