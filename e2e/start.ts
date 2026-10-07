@@ -167,6 +167,8 @@ export interface SaveSnapshot {
     remains: { planet: string; x: number; z: number; resources: Record<string, number>; restart: number } | null;
     resume: { planet: string; at: number } | null;
   };
+  /** SPEC-065 §3: what Command Relay keeps for this slot, and the pad terminal's reserve per resource. */
+  depot: { held: Record<string, number>; keep: Record<string, number> };
 }
 
 /**
