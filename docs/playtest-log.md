@@ -2458,3 +2458,36 @@ all green.
 
 - [ ] fire each weapon you own on Cinder-4, and read its shot at arm's length;
 - [ ] watch a Grenade Launcher lob and a Seeker Tube turn in flight.
+
+## SPEC-064 — the scavengers are people: Cinder-4's raiders in the salvager's suit (M7m)
+
+- **Build:** `spec/SPEC-064` — untagged
+- **Devices:**
+  - desktop — headless Chromium at 1280 × 720 (Playwright, Linux container, **software GL / SwiftShader**)
+  - phone — _no handset in the build container_ (§7's pass is owed, below)
+
+Recorded from the container the branch was built in: `npm run check` — 131
+files and 3,311 tests, none skipped — and the e2e files the spec names:
+`e2e/SPEC-064.spec.ts` (§6.3's cases 1–4, plus the full pool's budget — five
+tests), `e2e/surface-env.spec.ts` (ten tests, the spawn-heavy case among
+them), `e2e/SPEC-048.spec.ts` case 8b, `e2e/SPEC-041.spec.ts` AC-37 and
+`e2e/SPEC-038.spec.ts` AC-39. Times below are on `sceneInfo.viewTime`.
+
+| Area | What the container showed |
+|---|---|
+| Raiders | six presses of `surface-spawn-raider` on Cinder-4 (`medium`): `scavRaiders` `{"live":6,"falling":0,"standIn":0}`; six people in the dusty suit with dark visors and the hostile rim, rifles held, turning to face the salvager |
+| Aim and fire | strafing raiders raised their rifles toward the salvager before each shot; `tracers` read 2 with two shots converging on the salvager |
+| Fall | six smitten at once: `falling` read 6 on the next frame (+0.09 s), the copies fell backwards from where they stood, and `falling` read 0 from +1.67 s on |
+| Budget | six live: ≤ 49 draws and ≤ 54.7 k triangles; six live and two falling (the full pool): ≤ 54 draws and ≤ 65.6 k triangles; six falling: ≤ 53 draws and ≤ 55.3 k triangles — the pins are 96 and 130 k |
+| No model | with `character.glb` answered by the crate (an aborted request holds the boot on Retry, SPEC-003 D-30): `{"live":0,"falling":0,"standIn":6}`, every raider the procedural stand-in, the salvager drawn as the crate; 43 draws, 17.4 k triangles |
+| Pins | `surface-env` (all six planets, the spawn-heavy field, the remains), SPEC-048 8b, SPEC-041 AC-37 and SPEC-038 AC-39 green and unmoved |
+| Stand-in | its visor is the recipe's `inner` part and keeps the instanced rules (§4.1), so it pulses ±20 % about the feet with every `inner` part and rides up past the helmet at the top of the pulse |
+
+**Owed on hardware (§7).** On the laptop and the reference phone, at `medium`, on Cinder-4:
+
+- [ ] the raiders read as suited people at the surface camera's distance;
+- [ ] they raise their rifles before a shot, and the shot reads as an amber tracer;
+- [ ] a killed raider falls and fades;
+- [ ] the hostile rim and the elite gold show on the suit;
+- [ ] beside the dying scavenger's body on the pad, the raiders are visibly the same suit;
+- [ ] a screenshot of each, recorded here.
