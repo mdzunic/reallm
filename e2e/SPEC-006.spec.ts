@@ -1175,6 +1175,8 @@ test('the reactions table is what the game actually hears (AC-38 … AC-50, AC-5
     const name = async (emit: () => void): Promise<string> => (await fire(emit)).map((row) => row.sprite).join(',') || '(silence)';
 
     const out: Record<string, unknown> = {};
+    // 06-l: a refused pickup is silent; its CARGO FULL toast is the warning.
+    out['pickup blocked'] = await name(() => bus.emit('resource:collected', { resource: 'oil', amount: 0, total: 2, blocked: 'cargo_full' }));
     out['toast warn'] = await name(() => bus.emit('ui:toast', { text: 'x', kind: 'warn' }));
     out['toast error'] = await name(() => bus.emit('ui:toast', { text: 'x', kind: 'error' }));
     out['toast info'] = await name(() => bus.emit('ui:toast', { text: 'x', kind: 'info' }));
@@ -1190,7 +1192,6 @@ test('the reactions table is what the game actually hears (AC-38 … AC-50, AC-5
     out['killed at 100 m'] = await name(() => bus.emit('enemy:killed', { enemyId: 'magma_wraith', elite: false, x: 100, z: 0, xp: 1 }));
     out['pickup oil'] = await name(() => bus.emit('resource:collected', { resource: 'oil', amount: 1, total: 1 }));
     out['pickup unknown'] = await name(() => bus.emit('resource:collected', { resource: 'no_such_resource', amount: 1, total: 2 }));
-    out['pickup blocked'] = await name(() => bus.emit('resource:collected', { resource: 'oil', amount: 0, total: 2, blocked: 'cargo_full' }));
     out['scanned'] = await name(() => bus.emit('poi:scanned', { poi: 'p', instance: 0 }));
     out['weather'] = await name(() => bus.emit('weather:warning', { weather: 'storm', inSeconds: 5 }));
     out['ship shielded'] = await name(() => bus.emit('ship:damaged', { shield: 4, hull: 10, source: 'enemy' }));
@@ -1257,7 +1258,7 @@ test('the reactions table is what the game actually hears (AC-38 … AC-50, AC-5
   expect(r['killed at 100 m']).toBe('(silence)');
   expect(r['pickup oil']).toBe('pickup_oil'); // AC-44
   expect(r['pickup unknown']).toBe('pickup_generic');
-  expect(r['pickup blocked']).toBe('ui_warn'); // AC-45
+  expect(r['pickup blocked']).toBe('(silence)'); // AC-45, 06-l: the toast warns
   expect(r['scanned']).toBe('scan_done'); // AC-38
   expect(r['weather']).toBe('alarm_weather');
   expect(r['ship shielded']).toBe('ship_hit_shield'); // AC-47

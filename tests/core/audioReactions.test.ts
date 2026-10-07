@@ -843,10 +843,11 @@ describe('reaction outcomes (SPEC-006 §5.2)', () => {
     expect(pickupSound('oil')).toBe('pickup_oil');
   });
 
-  it('resource:collected warns when the hold is full (AC-45)', () => {
+  it('resource:collected does not chime when the hold is full — its toast warns (AC-45, 06-l)', () => {
     expect(
-      AUDIO_REACTIONS['resource:collected']({ resource: 'oil', amount: 1, total: 5, blocked: 'cargo_full', source: 'pickup' }),
-    ).toEqual({ id: 'ui_warn', opts: { minIntervalMs: 80 } });
+      AUDIO_REACTIONS['resource:collected']({ resource: 'oil', amount: 0, total: 400, blocked: 'cargo_full', source: 'pickup' }),
+    ).toBeNull();
+    expect(AUDIO_REACTIONS['ui:toast']({ text: 'CARGO FULL', kind: 'warn' })?.id).toBe('ui_warn');
   });
 
   it('ship:damaged tells shield from hull (AC-47)', () => {

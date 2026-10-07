@@ -129,7 +129,7 @@ import { DARK_RIM_SCALE, DARK_SIGHT, lit } from '@/systems/Light';
 import { isHidden, SHELTER_INSET, shelterAt, STORM_SHELTER_FACTOR } from '@/systems/Shelter';
 import { nodeIcon, poiIcon } from '@/systems/MapModel';
 import { contractFor, Missions, type MissionContext, type ObjectiveProgress } from '@/systems/Missions';
-import { CARGO_TOAST_SECONDS, Nodes, Pickups, SHIPPED_TOAST_TEXT } from '@/systems/Pickups';
+import { Nodes, Pickups, SHIPPED_TOAST_TEXT } from '@/systems/Pickups';
 import { cumulativeXp, LEVEL_CAP, Progression, xpToNext } from '@/systems/Progression';
 import {
   PREDECESSOR_SEARCH_RADIUS,
@@ -1031,8 +1031,8 @@ export class SurfaceScene extends UiScene<'surface'> {
   /** SPEC-059 §4.1.3: entered from the menu on a resume point — no flight, no jump. */
   #resumed = false;
   #summonsDismissed = 0;
-  /** SPEC-034 §4.12: world-clock time the shipped-home toast last showed. */
-  #shippedToastAt = -CARGO_TOAST_SECONDS;
+  /** SPEC-034 §4.12, 12-l: the resources the shipped-home toast has been said for since each last fit. */
+  readonly #shippedWarned = new Set<ResourceId>();
   /** SPEC-034 §4.6: true while the next `#syncDefend` ends a *finished* defence. */
   #dismissDefendWave = false;
   /** SPEC-034 §4.8: the mission-level wave of each active mission that has one. */
@@ -7707,14 +7707,15 @@ export class SurfaceScene extends UiScene<'surface'> {
         this,
       ),
       // SPEC-034 §4.12: the hold is full and a collect objective still wants it,
-      // so it goes to Command Relay instead of bouncing. Throttled like CARGO FULL.
+      // so it goes to Command Relay instead of bouncing. 12-l: said once per
+      // resource, like CARGO FULL, until units of it go into the hold again.
       bus.on(
         'resource:collected',
-        ({ shipped }) => {
-          if (shipped === undefined || shipped <= 0) return;
-          const now = this.#world?.time ?? 0;
-          if (now - this.#shippedToastAt < CARGO_TOAST_SECONDS) return;
-          this.#shippedToastAt = now;
+        ({ resource, amount, shipped }) => {
+          const sent = shipped ?? 0;
+          if (amount - sent > 0) this.#shippedWarned.delete(resource);
+          if (sent <= 0 || this.#shippedWarned.has(resource)) return;
+          this.#shippedWarned.add(resource);
           this.services.events.emit('ui:toast', { kind: 'warn', text: SHIPPED_TOAST_TEXT });
         },
         this,

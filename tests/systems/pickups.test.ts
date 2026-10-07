@@ -1,12 +1,13 @@
 // SPEC-012 §4.4 — pickups and nodes (AC-18..AC-24, E3, E25, 12-e, 12-f),
 // against the real Economy so the cargo cap is the shipped one.
 import { describe, expect, it } from 'vitest';
+import { RateLimiter } from '@/core/AudioMix';
+import { AUDIO_REACTIONS } from '@/core/AudioReactions';
 import { EventBus, type GameEvents } from '@/core/Events';
 import { newSave, type Save } from '@/core/Save';
 import { type ResourceId } from '@/data/index';
 import { Economy } from '@/systems/Economy';
 import {
-  CARGO_TOAST_SECONDS,
   CARGO_TOAST_TEXT,
   HARVEST_RADIUS,
   HARVEST_RATE,
@@ -122,29 +123,65 @@ describe('Pickups — clear (SPEC-054 §4.2, E86)', () => {
 });
 
 describe('Pickups — cargo cap (AC-19, E3)', () => {
-  it('bounces blocked units back and throttles CARGO FULL to one per 3 s', () => {
+  it('bounces blocked units back and says CARGO FULL once until the resource fits again (12-l)', () => {
     const h = harness((save) => {
       save.resources.oil = 395; // cap 400: room for 5
     });
+    const full = (): number => h.toasts.filter((t) => t === CARGO_TOAST_TEXT).length;
     const orb = h.pickups.spawn({ kind: 'resource', resource: 'oil', amount: 8, x: 0.2, z: 0 });
     h.run(0.5);
     expect(h.save.resources.oil).toBe(400);
     expect(orb.amount).toBe(3); // the blocked remainder persists on the ground
     expect(h.pickups.pool.size).toBe(1);
-    expect(h.toasts.filter((t) => t === CARGO_TOAST_TEXT)).toHaveLength(1);
+    expect(full()).toBe(1);
 
-    // Standing on it keeps refusing, but the toast stays throttled…
-    h.run(CARGO_TOAST_SECONDS - 1);
-    expect(h.toasts.filter((t) => t === CARGO_TOAST_TEXT)).toHaveLength(1);
-    // …until the window passes.
-    h.run(1.2);
-    expect(h.toasts.filter((t) => t === CARGO_TOAST_TEXT)).toHaveLength(2);
+    // Standing on it keeps refusing, and new orbs bounce too — but nothing more is said.
+    h.pickups.spawn({ kind: 'resource', resource: 'oil', amount: 2, x: -0.2, z: 0 });
+    h.run(10);
+    expect(h.pickups.pool.size).toBe(2);
+    expect(full()).toBe(1);
 
-    // Room opens: the remainder collects and the orb goes.
+    // Another resource filling up is news of its own.
+    h.save.resources.water = 400;
+    h.pickups.spawn({ kind: 'resource', resource: 'water', amount: 1, x: 0, z: 0.2 });
+    h.run(0.5);
+    expect(full()).toBe(2);
+
+    // Room opens: the remainders collect and the orbs go…
     h.save.resources.oil = 100;
     h.run(1);
-    expect(h.save.resources.oil).toBe(103);
-    expect(h.pickups.pool.size).toBe(0);
+    expect(h.save.resources.oil).toBe(105);
+    // …and the next time oil fills the hold, it is said once more.
+    h.save.resources.oil = 400;
+    h.pickups.spawn({ kind: 'resource', resource: 'oil', amount: 1, x: 0.2, z: 0 });
+    h.run(5);
+    expect(full()).toBe(3);
+  });
+
+  it('a full hold warns once, not with every retry (06-l, 12-l)', () => {
+    const h = harness((save) => {
+      save.resources.oil = 400; // the cap
+    });
+    // Three bounced orbs at the player's feet, each retrying every 0.5 s.
+    for (const x of [0.2, -0.2, 0]) h.pickups.spawn({ kind: 'resource', resource: 'oil', amount: 2, x, z: 0.1 });
+    // The mixer's floor, as `Audio.play` applies it to what the table names.
+    const limiter = new RateLimiter();
+    let now = 0;
+    const warns: number[] = [];
+    const hear = (reaction: ReturnType<(typeof AUDIO_REACTIONS)['ui:toast']>): void => {
+      if (reaction === null || limiter.blocked(reaction.id, now, reaction.opts?.minIntervalMs)) return;
+      limiter.mark(reaction.id, now);
+      if (reaction.id === 'ui_warn') warns.push(now);
+    };
+    h.events.on('resource:collected', (p) => hear(AUDIO_REACTIONS['resource:collected'](p)));
+    h.events.on('ui:toast', (p) => hear(AUDIO_REACTIONS['ui:toast'](p)));
+    for (let i = 0; i < Math.round(30 / STEP); i++) {
+      now = i * STEP * 1000;
+      h.pickups.update(STEP, h.player, RADIUS);
+    }
+    expect(h.pickups.pool.size).toBe(3); // still refused, still retrying
+    // Thirty seconds of a 0.5 s retry on three orbs: one warning, not 180 beeps.
+    expect(warns).toHaveLength(1);
   });
 });
 

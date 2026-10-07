@@ -353,14 +353,12 @@ export const AUDIO_REACTIONS: { [K in ReactedEvent]: Reaction<K> } = {
   'flight:hazardHit': () => ({ id: 'ship_hit_tick', opts: { minIntervalMs: 60 } }),
   'boss:defeated': () => ({ id: 'boss_death', opts: { priority: 2 } }),
   /**
-   * A full hold warns instead of chiming (AC-45). Both branches keep the 80 ms
-   * cooldown of §5.2: running over a resource field with a full hold is exactly
-   * the case that would otherwise machine-gun the warning.
+   * A full hold warns instead of chiming (AC-45) — through its CARGO FULL
+   * toast, once per resource until it fits again (SPEC-012 12-l). 06-l: the
+   * refusal itself is silent, because a bounced orb follows the magnet and
+   * retries every 0.5 s for its 60 s. The chime keeps the 80 ms of §5.2.
    */
-  'resource:collected': (p) =>
-    p.blocked === 'cargo_full'
-      ? { id: 'ui_warn', opts: { minIntervalMs: 80 } }
-      : { id: pickupSound(p.resource), opts: { minIntervalMs: 80 } },
+  'resource:collected': (p) => (p.blocked === 'cargo_full' ? null : { id: pickupSound(p.resource), opts: { minIntervalMs: 80 } }),
   /**
    * SPEC-042 §4.2: the generic chime, on the 80 ms floor a resource pickup
    * keeps — an elite's drop and its stack can land in the same step.
