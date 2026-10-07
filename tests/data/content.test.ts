@@ -4000,8 +4000,20 @@ describe('shot looks (SPEC-019 §4.5)', () => {
 
 import { COMMENDATION_IDS, COMMENDATIONS, DIFFICULTY_RULES, type CommendationRule } from '@/data/index';
 
-/** §4.4.1: the six rows that name the loop. */
-const HIDDEN_COMMENDATIONS = ['sixty_one_marks', 'sixty_one_times', 'disconnected', 'verification_failed', 'deviation_zero', 'instance_65'];
+/** §4.4.1: the six rows that name the loop — and review 2026-10 S-08's five that name its clues. */
+const HIDDEN_COMMENDATIONS = [
+  'said_before',
+  'common_hand',
+  'scaffold',
+  'sixty_one_marks',
+  'sixty_one_times',
+  'disconnected',
+  'off_task',
+  'every_reading',
+  'verification_failed',
+  'deviation_zero',
+  'instance_65',
+];
 
 /** What each rule names, if anything, that must exist in the content. */
 function ruleProblems(id: string, rule: CommendationRule): string[] {
@@ -4072,9 +4084,20 @@ describe('the commendations (SPEC-059 §4.4.1)', () => {
     expect(offTaskCount(new Set(CLUES.filter((clue) => clue.path === 'optional').map((clue) => clue.id)))).toBe(optional);
   });
 
-  it('exactly the six rows marked hidden in §4.4.1 are hidden', () => {
+  it('exactly the eleven rows marked hidden in §4.4.1 are hidden', () => {
     const hidden = COMMENDATION_IDS.filter((id) => (COMMENDATIONS[id] as { hidden?: true }).hidden === true);
     expect(hidden).toEqual(HIDDEN_COMMENDATIONS);
+  });
+
+  it('the three run grades carry Command’s cover until the list is revealed, and nothing else does (review 2026-10 S-08)', () => {
+    const covered = COMMENDATION_IDS.filter((id) => (COMMENDATIONS[id] as { cover?: string }).cover !== undefined);
+    expect(covered).toEqual(['good_run', 'acceptable_run', 'noisy_run']);
+    for (const id of covered) {
+      const cover = (COMMENDATIONS[id] as { cover?: string }).cover ?? '';
+      expect(cover, id).toBe('File the Eden survey.');
+      expect(cover.length, id).toBeLessThanOrEqual(80);
+      expect(CONTRACTION_PATTERN.test(cover), id).toBe(false);
+    }
   });
 
   it('every ending grade is a value ratingGrade returns', () => {

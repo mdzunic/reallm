@@ -15,7 +15,7 @@ import { applyUpdate, updateReady } from '@/core/Updates';
 import { nextInstanceOffered, slotSummaryOf, SLOTS, type Save, type SlotId } from '@/core/Save';
 import type { SceneParams } from '@/core/StateMachine';
 import { COMMENDATION_IDS, CREDITS, CREDITS_VERSION_LINE } from '@/data/index';
-import { bestTimeRows, recordsRows, recordsRowStatus, recordsTitle } from '@/systems/Commendations';
+import { bestTimeRows, recordsRevealed, recordsRows, recordsRowStatus, recordsTitle } from '@/systems/Commendations';
 import { Economy } from '@/systems/Economy';
 import { Progression } from '@/systems/Progression';
 import { applySupplies, EMPTY_CODE, pushCode } from '@/systems/Service';
@@ -901,7 +901,7 @@ export class MenuScene extends UiScene<'menu'> {
     }
     const count = COMMENDATION_IDS.filter((id) => earned[id] !== undefined).length;
     const reason = RECORDS.reason;
-    const rows = recordsRows(earned).map((row) => {
+    const rows = recordsRows(earned, recordsRevealed(saves, earned)).map((row) => {
       const status = recordsRowStatus(row);
       return testId(
         h(

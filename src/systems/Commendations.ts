@@ -74,13 +74,26 @@ export interface RecordsRow {
   readonly earnedAt: number | null;
 }
 
-/** §4.4.5: one row per commendation, in table order; an unearned hidden one is classified. */
-export function recordsRows(earned: Settings['commendations']): readonly RecordsRow[] {
+/**
+ * Review 2026-10 S-08: whether the Records list is revealed — what makes
+ * `recordsTitle` read `Evaluation log`: a revealed save, or `sixty_one_times`.
+ */
+export function recordsRevealed(saves: readonly Pick<Save, 'meta' | 'progress'>[], earned: Settings['commendations']): boolean {
+  return earned.sixty_one_times !== undefined || saves.some(revealed);
+}
+
+/**
+ * §4.4.5: one row per commendation, in table order; an unearned hidden one is
+ * classified. Review 2026-10 S-08: until the list is revealed, a row with a
+ * `cover` shows Command's words for its detail.
+ */
+export function recordsRows(earned: Settings['commendations'], listRevealed = false): readonly RecordsRow[] {
   return COMMENDATION_IDS.map((id) => {
     const def = TABLE[id];
     const earnedAt = earned[id] ?? null;
     if (earnedAt === null && def.hidden === true) return { id, title: CLASSIFIED_TITLE, detail: CLASSIFIED_DETAIL, earnedAt };
-    return { id, title: def.title, detail: def.detail, earnedAt };
+    const detail = !listRevealed && def.cover !== undefined ? def.cover : def.detail;
+    return { id, title: def.title, detail, earnedAt };
   });
 }
 
