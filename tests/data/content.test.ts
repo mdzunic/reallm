@@ -2325,11 +2325,14 @@ describe('the Warden’s notice and ARIA’s confession (SPEC-048 §4.5)', () =>
       null,
       { flag: 'clue_tally' },
       { flag: 'clue_own_wreck' },
+      // Review 2026-10 S-06: the six in the salvager's suit, said to everyone.
+      null,
       null,
     ]);
-    expect(firstRun(DIALOGUE_LINES['c5_m3_aria']?.lines ?? [])[5]).toEqual({
+    // Review 2026-10 S-01: the zero-clue line owns the covers every player heard.
+    expect(firstRun(DIALOGUE_LINES['c5_m3_aria']?.lines ?? [])[7]).toEqual({
       speaker: 'aria',
-      text: 'You never went looking. I never had to lie to you. I am not sure that was better.',
+      text: 'You never went looking. So you only heard the lies everyone hears. I am not sure that was better.',
       when: { offTask: { max: 0 } },
     });
   });
@@ -2404,6 +2407,13 @@ describe('main-path echoes, continuity and the text sweep (SPEC-048 §4.7)', () 
     const accept = DIALOGUE.c1_m1_accept.lines[0].text;
     expect(accept).toBe('I put the tug on the pad. You were out of the hatch twelve metres early. Walk it off — I want to see you move before anything else does.');
     for (const text of [MISSIONS.c1_m1.brief, accept]) expect(text).not.toMatch(/short of the pad|off the pad|Touchdown/);
+  });
+
+  it('review 2026-10 S-05: chapter 1 covers the raiders’ suit', () => {
+    expect(said('c1_m2_accept')).toEqual([
+      'command: The oil is the mission. Raiders on the field are not your problem until they are.',
+      'aria: Raiders wear Earth suits. They strip them off the crews Earth lost out here. Do not let it slow your hand.',
+    ]);
   });
 });
 
@@ -2692,10 +2702,11 @@ describe('the keepsake and the body (SPEC-049 §4.4, §4.5)', () => {
 describe('ARIA remembers (SPEC-049 §4.7)', () => {
   it('c5_m3_aria gains four rows after “You never went looking” and before “I do not know what is outside”', () => {
     // SPEC-058 §4.6: as a first run hears it; a next instance's ARIA opens with one more.
+    // Review 2026-10 S-15 and S-06 add two unconditional rows ahead of them.
     const lines = firstRun(DIALOGUE_LINES['c5_m3_aria']?.lines ?? []);
-    expect(lines).toHaveLength(12);
-    expect(lines[5]?.text).toBe('You never went looking. I never had to lie to you. I am not sure that was better.');
-    expect(lines.slice(6, 10).map((line) => [line.speaker, line.text, line.when])).toEqual([
+    expect(lines).toHaveLength(14);
+    expect(lines[7]?.text).toBe('You never went looking. So you only heard the lies everyone hears. I am not sure that was better.');
+    expect(lines.slice(8, 12).map((line) => [line.speaker, line.text, line.when])).toEqual([
       ['aria', 'Every time you died, I said the medical frame restarted your heart. There is no medical frame.', { flag: 'clue_restart' }],
       [
         'aria',
@@ -2709,9 +2720,26 @@ describe('ARIA remembers (SPEC-049 §4.7)', () => {
         { flag: 'memory_stair' },
       ],
     ]);
-    expect(lines[10]?.text).toBe('I do not know what is outside either. That part was never in my brief.');
+    expect(lines[12]?.text).toBe('I do not know what is outside either. That part was never in my brief.');
     // The answers' counts are the sixty-one runs before this one: 40 + 14 + 7.
     expect(40 + 14 + 7).toBe(61);
+  });
+
+  it('the confession names the Warden, and the raiders and the fighters as earlier instances (review 2026-10 S-15, S-06)', () => {
+    const lines = firstRun(DIALOGUE_LINES['c5_m3_aria']?.lines ?? []);
+    expect(lines.slice(0, 4).map((line) => [line.speaker, line.text, line.when ?? null])).toEqual([
+      ['aria', 'She is not lying. I am part of the system. I have kept you on task since the first sand.', null],
+      ['aria', 'The voice in her is the Warden. It runs containment. I answer to it.', null],
+      ['aria', 'I told you Earth flew other ships before the Selection. There were no other ships. There was you.', null],
+      ['aria', 'The raiders wore your suit because it was theirs. The fighters fly your tug because it was theirs.', null],
+    ]);
+    const warden = firstRun(DIALOGUE_LINES['c5_m3_warden']?.lines ?? []);
+    expect(warden.slice(-2).map((line) => `${line.speaker}: ${line.text}`)).toEqual([
+      'warden: The ones in your suit on Cinder-4 drifted. You put six of them down on your first world. You always do.',
+      'player: Then let me finish.',
+    ]);
+    // The six are c1_m2's kill count.
+    expect(MISSIONS.c1_m2.stages.flat().find((objective) => objective.kind === 'kill')).toMatchObject({ enemy: 'scav_raider', amount: 6 });
   });
 });
 
@@ -3448,15 +3476,18 @@ const BEFORE_SPEC_058: Readonly<Record<string, readonly Row[]>> = {
     ['warden', 'Sixty-one times I have watched you kill this body and file the report and start again.'],
     ['warden', 'You counted them on Ferrum. You were right to.', { flag: 'clue_tally' }],
     ['warden', 'That was your hull on the way in. I leave them where they fall.', { flag: 'clue_own_wreck' }],
+    ['warden', 'The ones in your suit on Cinder-4 drifted. You put six of them down on your first world. You always do.'],
     ['player', 'Then let me finish.'],
   ],
   c5_m3_aria: [
     ['aria', 'She is not lying. I am part of the system. I have kept you on task since the first sand.'],
+    ['aria', 'The voice in her is the Warden. It runs containment. I answer to it.'],
     ['aria', 'I told you Earth flew other ships before the Selection. There were no other ships. There was you.'],
+    ['aria', 'The raiders wore your suit because it was theirs. The fighters fly your tug because it was theirs.'],
     ['aria', 'The scavenger said the same words twice, and I blamed the sand.', { flag: 'clue_scav_echo' }],
     ['aria', 'You heard your own log on Vetra, and I told you it was a common voice.', { flag: 'iteration_log' }],
     ['aria', 'You read the towers’ settings, and I called them alien telemetry.', { flag: 'scaffold_secret' }],
-    ['aria', 'You never went looking. I never had to lie to you. I am not sure that was better.', { offTask: { max: 0 } }],
+    ['aria', 'You never went looking. So you only heard the lies everyone hears. I am not sure that was better.', { offTask: { max: 0 } }],
     ['aria', 'Every time you died, I said the medical frame restarted your heart. There is no medical frame.', { flag: 'clue_restart' }],
     ['aria', 'I asked what you remembered first. You said the roof. It was in her second letter. Forty of the sixty-one before you said the roof.', { flag: 'memory_roof' }],
     ['aria', 'I asked what you remembered first. You said the tap. Fourteen of the sixty-one before you said the tap.', { flag: 'memory_tap' }],

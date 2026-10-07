@@ -142,6 +142,19 @@ export const SPEAKER_NAMES: Record<SpeakerId, string> = {
   home: 'Iris',
 };
 
+/** Review 2026-10 S-15: the Warden's label once ARIA has named it in her confession. */
+export const WARDEN_NAMED = 'WARDEN';
+
+/**
+ * Review 2026-10 S-15: the label a line's speaker shows — `SPEAKER_NAMES`,
+ * but the Warden reads `WARDEN` once `chapter5_done` is set: from the Queen's
+ * death, whose chain ends with ARIA naming it. The dialogue layer reads the
+ * flags as a job starts, so a job keeps one label for the Warden throughout.
+ */
+export function speakerLabel(speaker: SpeakerId, flags: ReadonlySet<string>): string {
+  return speaker === 'warden' && flags.has('chapter5_done') ? WARDEN_NAMED : SPEAKER_NAMES[speaker];
+}
+
 /**
  * `saveKey`, `typewriter` and `speed` are read through, not captured: `dialogueLayer`
  * hands back one page-lifetime instance and the first caller's options win, so
@@ -172,6 +185,8 @@ interface Job {
   resolve: () => void;
   /** SPEC-048 §4.1: the visible lines, filled — chosen when the job starts. */
   lines?: readonly DialogueLine[];
+  /** Review 2026-10 S-15: the flags its labels read — taken when the job starts, with its lines. */
+  flags?: ReadonlySet<string>;
 }
 
 /**
@@ -443,8 +458,10 @@ export class DialogueUI {
       return;
     }
     // SPEC-048 §4.1: the lines are chosen now, from the save as it is now.
-    const lines = visibleLines(DIALOGUE_TABLE[job.id], this.#storyContext());
+    const ctx = this.#storyContext();
+    const lines = visibleLines(DIALOGUE_TABLE[job.id], ctx);
     job.lines = lines;
+    job.flags = ctx.flags;
     if (lines.length === 0) {
       // Nothing to say: no `dialogue:started`, no hold, and a `once` dialogue
       // stays unheard, so a later trigger can still play it. Its `next` is not
@@ -480,10 +497,11 @@ export class DialogueUI {
       return;
     }
     this.#setStyle(line.speaker);
-    this.#speaker.textContent = SPEAKER_NAMES[line.speaker];
+    const name = speakerLabel(line.speaker, job.flags ?? DEFAULT_STORY_CONTEXT.flags);
+    this.#speaker.textContent = name;
     // SPEC-045 §4.1: logged as it is shown, whole, before any typing — a line
     // a scene change clears mid-type is still in the log (45-e).
-    this.log.push(line.speaker, line.text);
+    this.log.push(line.speaker, line.text, name);
     const reveal = lineReveal(line.text, this.#typewriter?.() === false);
     this.#shown = reveal.chars;
     this.#lineDone = false;

@@ -93,6 +93,8 @@ export const DIALOGUE = {
     id: 'c1_m2_accept',
     lines: [
       { speaker: 'command', text: 'The oil is the mission. Raiders on the field are not your problem until they are.' },
+      // Review 2026-10 S-05: the raiders wear the salvager's suit (SPEC-064), and chapter 1 covers it.
+      { speaker: 'aria', text: 'Raiders wear Earth suits. They strip them off the crews Earth lost out here. Do not let it slow your hand.' },
     ],
   },
   /** SPEC-048 §4.2 clue 1: a dying raider's last words, on the first raider kill of `c1_m2`. */
@@ -477,6 +479,8 @@ export const DIALOGUE = {
       // SPEC-048 §4.5: the naming cap's lines — what the player counted and passed.
       { speaker: 'warden', text: 'You counted them on Ferrum. You were right to.', when: { flag: 'clue_tally' } },
       { speaker: 'warden', text: 'That was your hull on the way in. I leave them where they fall.', when: { flag: 'clue_own_wreck' } },
+      // Review 2026-10 S-06: what `c1_m2` was — every player killed them, so no condition and outside the cap.
+      { speaker: 'warden', text: 'The ones in your suit on Cinder-4 drifted. You put six of them down on your first world. You always do.' },
       { speaker: 'player', text: 'Then let me finish.' },
     ],
   },
@@ -494,10 +498,14 @@ export const DIALOGUE = {
         when: { iteration: { min: 2 } },
       },
       { speaker: 'aria', text: 'She is not lying. I am part of the system. I have kept you on task since the first sand.' },
+      // Review 2026-10 S-15: the Warden is named in the fiction before any UI names it.
+      { speaker: 'aria', text: 'The voice in her is the Warden. It runs containment. I answer to it.' },
       {
         speaker: 'aria',
         text: 'I told you Earth flew other ships before the Selection. There were no other ships. There was you.',
       },
+      // Review 2026-10 S-06: the raiders (SPEC-064) and the fighters (SPEC-063) were earlier instances.
+      { speaker: 'aria', text: 'The raiders wore your suit because it was theirs. The fighters fly your tug because it was theirs.' },
       { speaker: 'aria', text: 'The scavenger said the same words twice, and I blamed the sand.', when: { flag: 'clue_scav_echo' } },
       {
         speaker: 'aria',
@@ -505,9 +513,10 @@ export const DIALOGUE = {
         when: { flag: 'iteration_log' },
       },
       { speaker: 'aria', text: 'You read the towers’ settings, and I called them alien telemetry.', when: { flag: 'scaffold_secret' } },
+      // Review 2026-10 S-01: she lied to this player too — the covers every player hears.
       {
         speaker: 'aria',
-        text: 'You never went looking. I never had to lie to you. I am not sure that was better.',
+        text: 'You never went looking. So you only heard the lies everyone hears. I am not sure that was better.',
         when: { offTask: { max: 0 } },
       },
       // SPEC-049 §4.7: the body's cover, and the one memory answer the save holds.

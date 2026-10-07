@@ -17,6 +17,8 @@ import {
   LINE_KEY_GRACE,
   MODAL_ADVANCE_KEYS,
   SPEAKER_NAMES,
+  speakerLabel,
+  WARDEN_NAMED,
 } from '@/ui/DialogueUI';
 import { stripComments } from '../architecture/source';
 
@@ -200,7 +202,8 @@ describe('the hold (SPEC-045 §4.1)', () => {
 
   it('logs each line as it is shown, and clears the log when the main menu is entered', () => {
     const advance = /#advanceLine\(\): void \{[\s\S]*?\n {2}\}/.exec(source)?.[0] ?? '';
-    expect(advance).toContain('this.log.push(line.speaker, line.text);');
+    // Review 2026-10 S-15: with the label it showed, so a named Warden is named in the log too.
+    expect(advance).toContain('this.log.push(line.speaker, line.text, name);');
     // Before any typing: the push comes before the reveal.
     expect(advance.indexOf('this.log.push(')).toBeLessThan(advance.indexOf('lineReveal('));
     expect(source).toMatch(/'scene:transition',\s*\(\{ to \}\) => \{\s*if \(to === 'menu'\) this\.log\.clear\(\);/);
@@ -218,7 +221,10 @@ describe('lines chosen as a job starts (SPEC-048 §4.1)', () => {
   const next = /#next\(\): void \{[\s\S]*?\n {2}\}/.exec(source)?.[0] ?? '';
 
   it('#next() chooses and fills the lines from the bound save’s context, or the default with none', () => {
-    expect(next).toContain('visibleLines(DIALOGUE_TABLE[job.id], this.#storyContext())');
+    expect(next).toContain('const ctx = this.#storyContext();');
+    expect(next).toContain('visibleLines(DIALOGUE_TABLE[job.id], ctx)');
+    // Review 2026-10 S-15: the labels read the same flags, taken with the lines.
+    expect(next).toContain('job.flags = ctx.flags;');
     expect(source).toMatch(/#storyContext\(\): StoryContext \{[\s\S]*?save === null \? DEFAULT_STORY_CONTEXT : storyContextOf\(save\)/);
     expect(source).toContain('saveKey?: () => Save | null;');
   });
@@ -248,6 +254,22 @@ describe('the home speaker (SPEC-049 §4.1)', () => {
   it('names every speaker, and home is Iris', () => {
     expect(SPEAKER_NAMES.home).toBe('Iris');
     expect(Object.keys(SPEAKER_NAMES)).toEqual(['aria', 'command', 'scav', 'log', 'player', 'warden', 'home']);
+  });
+
+  it('the Warden is ??? until chapter5_done, then WARDEN; no one else changes (review 2026-10 S-15)', () => {
+    expect(SPEAKER_NAMES.warden).toBe('???');
+    expect(WARDEN_NAMED).toBe('WARDEN');
+    expect(speakerLabel('warden', new Set())).toBe('???');
+    expect(speakerLabel('warden', new Set(['signal_decoded', 'chapter4_done']))).toBe('???');
+    expect(speakerLabel('warden', new Set(['chapter5_done']))).toBe('WARDEN');
+    for (const speaker of Object.keys(SPEAKER_NAMES) as (keyof typeof SPEAKER_NAMES)[]) {
+      if (speaker === 'warden') continue;
+      expect(speakerLabel(speaker, new Set(['chapter5_done'])), speaker).toBe(SPEAKER_NAMES[speaker]);
+    }
+    // The line on screen and its log entry read the label, not the cast table.
+    const layer = SOURCES['../../src/ui/DialogueUI.ts'] as string;
+    expect(layer).toContain('const name = speakerLabel(line.speaker, job.flags ?? DEFAULT_STORY_CONTEXT.flags);');
+    expect(layer).toContain('this.#speaker.textContent = name;');
   });
 
   it('#setStyle puts dialogue-letter on a home line and takes it off every other', () => {
