@@ -581,7 +581,22 @@ export class MenuScene extends UiScene<'menu'> {
       );
       return h('div', { class: 'menu-row' }, button);
     });
-    this.#sub.replaceChildren(h('div', { class: 'menu-list panel' }, h('p', { class: 'menu-list-title' }, 'New game — pick a slot'), ...rows));
+    // Review 2026-10 P-15: a sheet like the confirm sheets — the menu dims
+    // behind it, a tap on the dim closes it, and Cancel says how to back out.
+    // Both close the sub-panel, so its back-stack entry goes with it.
+    const close = (): void => this.#toggleSub(null);
+    const backdrop = testId(h('div', { class: 'menu-sheet-backdrop', click: close }), 'new-backdrop');
+    const cancel = testId(h('button', { class: 'ui-btn', type: 'button', click: close }, 'Cancel'), 'new-cancel');
+    this.#sub.replaceChildren(
+      backdrop,
+      h(
+        'div',
+        { class: 'menu-list panel' },
+        h('p', { class: 'menu-list-title' }, 'New game — pick a slot'),
+        ...rows,
+        h('div', { class: 'sheet-actions' }, cancel),
+      ),
+    );
   }
 
   /**

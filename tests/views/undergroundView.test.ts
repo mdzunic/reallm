@@ -15,7 +15,7 @@ import { UNDERGROUND, type UndergroundDef } from '@/data/caves';
 import type { CacheId } from '@/data/ids';
 import { PLANETS } from '@/data/planets';
 import { groundLayer } from '@/views/ProceduralTextures';
-import { DUST_BAND, DUST_BOX, DUST_FLOOR, STORM_LOOK } from '@/views/StormParticles';
+import { DUST_BAND, DUST_BOX, DUST_DARK, DUST_FLOOR, DUST_LIT, dustFade, STORM_LOOK } from '@/views/StormParticles';
 import {
   CUTAWAY_HEIGHT,
   DUST_MOTES,
@@ -560,7 +560,8 @@ describe('Eden’s machine room (SPEC-054 §4.12)', () => {
 describe('the cave’s dust (SPEC-054 §4.4)', () => {
   it('pins the particle kinds and the dust’s look', () => {
     expect(Object.keys(STORM_LOOK).sort()).toEqual(['ash', 'dust', 'heat', 'sand', 'snow', 'spores']);
-    expect(STORM_LOOK.dust).toMatchObject({ sprite: 'dot', width: 0.12, height: 0.12, speed: 0.3, color: '#b8c0cc', opacity: 0.35, additive: true, falling: false });
+    // Review 2026-10 P-11: dimmer and warm (was '#b8c0cc' at 0.35).
+    expect(STORM_LOOK.dust).toMatchObject({ sprite: 'dot', width: 0.12, height: 0.12, speed: 0.3, color: '#a09482', opacity: 0.25, additive: true, falling: false });
   });
 
   it('hangs 60 additive motes round the salvager, anchored in the world and drifting slowly', () => {
@@ -571,7 +572,7 @@ describe('the cave’s dust (SPEC-054 §4.4)', () => {
     expect(motes.instanceMatrix.count).toBe(DUST_MOTES);
     const material = motes.material as THREE.MeshBasicMaterial;
     expect(material.blending).toBe(THREE.AdditiveBlending);
-    expect(material.opacity).toBeCloseTo(0.35, 6);
+    expect(material.opacity).toBeCloseTo(0.25, 6);
     const at = (slot: number): THREE.Vector3 => instance(motes, slot).position;
 
     view.sync(10, -5, 20);
@@ -608,6 +609,35 @@ describe('the cave’s dust (SPEC-054 §4.4)', () => {
       }
     }
     expect(kept).toBeGreaterThan(DUST_MOTES / 2);
+    view.dispose();
+  });
+
+  it('lights a mote only near the salvager, so none hangs over the void as a star (review 2026-10 P-11)', () => {
+    expect(dustFade(0)).toBe(1);
+    expect(dustFade(DUST_LIT)).toBe(1);
+    expect(dustFade((DUST_LIT + DUST_DARK) / 2)).toBeCloseTo(0.5, 6);
+    expect(dustFade(DUST_DARK)).toBe(0);
+    expect(dustFade(DUST_BOX)).toBe(0);
+    const view = new UndergroundView(new THREE.Group(), fixture('cinder4'), CINDER, 'desert');
+    const motes = meshesUnder(view.root).find((mesh) => (mesh as THREE.InstancedMesh).isInstancedMesh === true && mesh.name === '') as THREE.InstancedMesh;
+    view.sync(10, -5, 20);
+    const colour = new THREE.Color();
+    let near = 0;
+    let far = 0;
+    for (let i = 0; i < DUST_MOTES; i++) {
+      const p = instance(motes, i).position;
+      const d = Math.hypot(p.x - 10, p.z + 5);
+      motes.getColorAt(i, colour);
+      expect(colour.r, `mote ${i} at ${d.toFixed(2)} m`).toBeCloseTo(dustFade(d), 5);
+      if (d <= DUST_LIT) near++;
+      if (d >= DUST_DARK) {
+        expect(colour.r).toBe(0);
+        far++;
+      }
+    }
+    // The 30 m box holds both kinds of mote.
+    expect(near).toBeGreaterThan(0);
+    expect(far).toBeGreaterThan(0);
     view.dispose();
   });
 });

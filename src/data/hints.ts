@@ -15,6 +15,7 @@
 // Data modules are plain objects: no imports but other data, no functions
 // (SPEC-001 §4, §8).
 import type { MissionId, Objective } from '@/data/missions';
+import type { PuzzleKind } from '@/data/puzzles';
 
 /** §3 — the tip universe; SPEC-029 appends its own ids. */
 export const TIP_IDS = [
@@ -52,8 +53,13 @@ export const TIP_IDS = [
   // SPEC-054 §4.2, §4.5: the first descent prompt, and the first descent itself.
   'descent',
   'dark',
-  // SPEC-055 §4.4: the first puzzle panel opened.
+  // SPEC-055 §4.4: the first puzzle panel opened. Review 2026-10 P-08: one tip
+  // per kind — `puzzle` is the conduit's, and the four below the others'.
   'puzzle',
+  'puzzle_calibration',
+  'puzzle_sequence',
+  'puzzle_plates',
+  'puzzle_beam',
   // SPEC-057 §4.7: the first death that leaves remains.
   'remains',
 ] as const;
@@ -187,9 +193,28 @@ export const TIPS: Readonly<Record<TipId, TipText>> = {
   },
   // SPEC-055 §4.4: shown at the first open of a puzzle panel — over the panel,
   // which holds the world, so the scene shows it at once rather than queueing it.
+  // Review 2026-10 P-08: each kind teaches its own controls (`PUZZLE_TIPS`); this
+  // one is the conduit's. The world puzzles' show as the player first enters
+  // their room, since they have no panel.
   puzzle: {
     keyboard: 'Arrows move, Enter turns a tile. H asks ARIA for a hint — hints are free.',
     touch: 'Tap a tile to turn it. HINT asks ARIA — hints are free.',
+  },
+  puzzle_calibration: {
+    keyboard: 'Arrows move, Enter presses a cell and flips its neighbours too. Clear the board. H asks ARIA for a hint — hints are free.',
+    touch: 'Tap a cell to flip it and its neighbours. Clear the board. HINT asks ARIA — hints are free.',
+  },
+  puzzle_sequence: {
+    keyboard: 'Arrows pick an answer, Enter chooses it. A wrong pick deals a new sequence. H asks ARIA for a hint — hints are free.',
+    touch: 'Tap what comes next. A wrong pick deals a new sequence. HINT asks ARIA — hints are free.',
+  },
+  puzzle_plates: {
+    keyboard: 'E at the panel reads the order. Step on the stones in it — a wrong stone starts it again.',
+    touch: 'Tap USE at the panel to read the order. Step on the stones in it — a wrong stone starts it again.',
+  },
+  puzzle_beam: {
+    keyboard: 'Your light is the beam: L switches it. E turns a mirror. Guide the beam into the receiver.',
+    touch: 'Your light is the beam: tap LIGHT to switch it. Tap USE to turn a mirror. Guide the beam into the receiver.',
   },
   // SPEC-057 §4.7: shown at the first death that leaves remains — one wording
   // for both schemes, since walking back is the same on each.
@@ -197,6 +222,15 @@ export const TIPS: Readonly<Record<TipId, TipText>> = {
     keyboard: 'What you carried stays where you fell. Walk back to it. Fall again first and it is gone.',
     touch: 'What you carried stays where you fell. Walk back to it. Fall again first and it is gone.',
   },
+};
+
+/** Review 2026-10 P-08: the tip each puzzle kind shows the first time the player meets it. */
+export const PUZZLE_TIPS: Readonly<Record<PuzzleKind, TipId>> = {
+  conduit: 'puzzle',
+  calibration: 'puzzle_calibration',
+  sequence: 'puzzle_sequence',
+  plates: 'puzzle_plates',
+  beam: 'puzzle_beam',
 };
 
 /**

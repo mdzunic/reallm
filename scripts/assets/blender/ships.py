@@ -94,13 +94,15 @@ def tug(preview=None):
     p.decal(nac & (np.abs(pos[..., 1] - 0.02) < 0.06), '#d4621c')
     for side in (-1, 1):
         p.soot((0.52 * side, 0.9, 0.05), 0.42)
-        # registration on the wing tops, upright to a viewer ahead of the nose
+        # registration on the wing tops, upright to a viewer ahead of the nose:
+        # CR-62, the tug Command hails on the first run (review 2026-10 P-02;
+        # the dialogue's CR-{instance} moves on with the run, the paint does not)
         ang = math.radians(-13 * side)
         right = np.array((math.cos(ang), math.sin(ang), 0.0))
         up = np.array((-math.sin(ang), math.cos(ang), 0.0))
         width, tall = 29 * 0.1 / 7, 0.1
         origin = np.array((0.74 * side, 0.26, 0.0175)) - right * width / 2 + up * tall / 2
-        p.decal(B.text(F, 'RL-07', origin, right, up, tall, axis=2, sign=1) * hull, '#1d2126', rough=0.4)
+        p.decal(B.text(F, 'CR-62', origin, right, up, tall, axis=2, sign=1) * hull, '#1d2126', rough=0.4)
     p.glow(F.decal_is(B.DECAL_LAMP), '#7fe0ff')
     p.glass(F.slot == GLASS, (0, -0.44, 0.27))
     obj.data.materials[0] = p.finish('Hull', emissive_strength=1.6)

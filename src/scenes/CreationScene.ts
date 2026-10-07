@@ -32,6 +32,7 @@ import {
   ATTRIBUTE_MAX,
   CLASSES,
   CREATION_POINTS,
+  DIFFICULTIES,
   KIN_ROW,
   PRIMARY_SWATCHES,
   SECONDARY_SWATCHES,
@@ -500,6 +501,9 @@ export class CreationScene extends UiScene<'creation'> {
           {
             class: `class-card${this.#classId === id ? ' is-selected' : ''}`,
             type: 'button',
+            // Review 2026-10 P-16: the card is named by its class, not by the
+            // run-on of every line inside it.
+            'aria-label': cls.name,
             'aria-pressed': String(this.#classId === id),
             click: () => {
               this.#classId = id;
@@ -527,7 +531,7 @@ export class CreationScene extends UiScene<'creation'> {
   }
 
   #portraitRow(): HTMLDivElement {
-    const tiles = this.#portraitChoices().map((index) => {
+    const tiles = this.#portraitChoices().map((index, place) => {
       const source = portraitSource(index, this.#portraits);
       return testId(
         h(
@@ -535,7 +539,9 @@ export class CreationScene extends UiScene<'creation'> {
           {
             class: `portrait${this.#portrait === index ? ' is-selected' : ''}`,
             type: 'button',
-            'aria-label': `Portrait ${index + 1}`,
+            // Review 2026-10 P-16: numbered as the row shows them, 1–6, not by
+            // the file each one draws (which read "1, 2, 3, 10, 11, 12").
+            'aria-label': `Portrait ${place + 1}`,
             'aria-pressed': String(this.#portrait === index),
             click: () => {
               this.#portrait = index;
@@ -657,9 +663,11 @@ export class CreationScene extends UiScene<'creation'> {
   /**
    * AC-18: three positions since SPEC-043 §4.4 added `hard`, and one honest
    * line. SPEC-059 §4.2.3: `story` joins them, first; the default stays normal.
+   * The segments run easiest to hardest, as `DIFFICULTIES` does (review
+   * 2026-10 P-09).
    */
   #difficultyRow(): HTMLDivElement {
-    const seg = (['story', 'normal', 'casual', 'hard'] as const satisfies readonly Difficulty[]).map((choice) =>
+    const seg = DIFFICULTIES.map((choice) =>
       testId(
         h(
           'button',

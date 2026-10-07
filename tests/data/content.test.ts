@@ -1366,7 +1366,7 @@ describe('the boot manifest stays five files (SPEC-019 AC-34 … AC-36, PLAN R6-
 
 // ------------------------------------------------------------- SPEC-027 §4.10
 
-import { DEATH_TIPS, HINTS, HINT_PLACEHOLDERS, MISSION_HINTS, TIPS, TIP_IDS } from '@/data/index';
+import { DEATH_TIPS, HINTS, HINT_PLACEHOLDERS, MISSION_HINTS, PUZZLE_TIPS, TIPS, TIP_IDS } from '@/data/index';
 
 /** Every line the guidance layer can print, with the key that produced it. */
 function guidanceTemplates(): Array<[string, string]> {
@@ -3135,6 +3135,26 @@ describe('puzzles: the phrases and the human lock (SPEC-055 §4.3, §4.7)', () =
       touch: 'Tap a tile to turn it. HINT asks ARIA — hints are free.',
     });
   });
+
+  it('each puzzle kind has its own tip, and only the conduit’s talks of turning tiles (review 2026-10 P-08)', () => {
+    const kinds = ['conduit', 'calibration', 'sequence', 'plates', 'beam'] as const;
+    expect(Object.keys(PUZZLE_TIPS).sort()).toEqual([...kinds].sort());
+    const ids = kinds.map((kind) => PUZZLE_TIPS[kind]);
+    expect(new Set(ids).size).toBe(kinds.length);
+    expect(PUZZLE_TIPS.conduit).toBe('puzzle');
+    for (const kind of kinds) {
+      const id = PUZZLE_TIPS[kind];
+      expect(TIP_IDS, kind).toContain(id);
+      const tip = TIPS[id];
+      expect(/turns? a tile/i.test(tip.keyboard) || /turns? a tile|turn it/i.test(tip.touch), kind).toBe(kind === 'conduit');
+    }
+    expect(TIPS.puzzle_sequence.keyboard).toBe(
+      'Arrows pick an answer, Enter chooses it. A wrong pick deals a new sequence. H asks ARIA for a hint — hints are free.',
+    );
+    expect(TIPS.puzzle_beam.touch).toBe(
+      'Your light is the beam: tap LIGHT to switch it. Tap USE to turn a mirror. Guide the beam into the receiver.',
+    );
+  });
 });
 
 // ------------------------------------------------------------- SPEC-056 §4.8
@@ -3782,6 +3802,10 @@ describe('the next instance’s lines (SPEC-058 §4.6, §4.7)', () => {
   });
 });
 
+import { DRONE_SHOT, FLARE_SHOT, THROWN_SHOT, type ShotLook } from '@/data/index';
+import { HOSTILE_RIM, HOSTILE_RIM_COLOUR_BLIND } from '@/views/ProceduralMeshes';
+import { deltaE76 } from '../fixtures/colourVision';
+
 describe('shot looks (SPEC-019 §4.5)', () => {
   type WeaponItem = Extract<Item, { kind: 'weapon' }>;
   const weapons = (Object.values(ITEMS) as readonly Item[]).filter((item): item is WeaponItem => item.kind === 'weapon');
@@ -3824,6 +3848,25 @@ describe('shot looks (SPEC-019 §4.5)', () => {
       if (shape !== null) expect(weapon.shot.shape, weapon.id).toBe(shape);
       else expect(['ball', 'rocket'], weapon.id).not.toContain(weapon.shot.shape);
     }
+  });
+
+  it('no player shot wears the hostile hue: every colour and trail is ΔE76 25 or more from both rims (review 2026-10 V-03)', () => {
+    const looks: Array<[string, ShotLook]> = [
+      ['DRONE_SHOT', DRONE_SHOT],
+      ['THROWN_SHOT', THROWN_SHOT],
+      ['FLARE_SHOT', FLARE_SHOT],
+      ...weapons.map((weapon): [string, ShotLook] => [weapon.id, weapon.shot]),
+    ];
+    const near: string[] = [];
+    for (const [id, look] of looks) {
+      for (const colour of look.trail === undefined ? [look.color] : [look.color, look.trail]) {
+        for (const hostile of [HOSTILE_RIM, HOSTILE_RIM_COLOUR_BLIND]) {
+          const d = deltaE76(colour, hostile);
+          if (d < 25) near.push(`${id} ${colour} is ΔE ${d.toFixed(1)} from ${hostile}`);
+        }
+      }
+    }
+    expect(near).toEqual([]);
   });
 });
 

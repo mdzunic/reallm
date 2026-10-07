@@ -318,6 +318,20 @@ describe('FlightView fx (SPEC-020 §4.3)', () => {
     const off = setup({ ...QUALITY, post: 'off' } as unknown as QualitySettings);
     expect(off.scene.children.some((node) => node instanceof THREE.DirectionalLight && node.children.length > 0)).toBe(false);
 
+    // Review 2026-10 V-17: through MSAA the flare's framebuffer copy is a
+    // WebGL error every frame, so `full` at a low dpr hangs no flare.
+    const scene = new THREE.Scene();
+    const camera = new THREE.PerspectiveCamera(70, 16 / 9, 0.1, 600);
+    const msaa = new FlightView(scene, camera, {
+      planet: PLANETS.cinder4,
+      quality: { ...QUALITY, post: 'full' } as unknown as QualitySettings,
+      reduceMotion: false,
+      rng: new Rng(7),
+      msaa: true,
+    });
+    expect(scene.children.some((node) => node instanceof THREE.DirectionalLight && node.children.length > 0)).toBe(false);
+    msaa.dispose();
+
     // The flare's framebuffer textures and its elements' maps are outside the
     // geometry/material walk `disposeObject3D` does, so the view frees them.
     const releasable = flare as unknown as { dispose: () => void };

@@ -120,7 +120,7 @@ FILMS = [
         S('earth_unmade', 14, 22, 18, X.earth_unmade, deps=(PL, X.clay), plates=(CITY_PLATE, STRANDED_PLATE, SHELTER_PLATE),
           checks=(F.unmake_check(X.UNMAKE),)),
         S('wall_same', 22, 29, 26, X.wall_same, deps=(P.selection_wall,), plates=CARDS + (PL.VISOR_EMPTY,)),
-        S('point', 29, 36, 30, X.point, deps=(X.clay,)),
+        S('point', 29, 36, 32, X.point, deps=(X.clay,)),   # review 2026-10 V-13: the point of light, not the blockout
     ]),
 ]
 ORDER = ['prologue', 'departure', 'wreckers', 'interlude_c1', 'interlude_c2', 'interlude_c3', 'interlude_c4', 'interlude_c5',

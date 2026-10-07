@@ -19,9 +19,11 @@ import {
   HUMAN_LOCK,
   PUZZLE_SITE_IDS,
   PUZZLE_SITES,
+  PUZZLE_TIPS,
   TIPS,
   type CacheId,
   type PlanetDef,
+  type PuzzleKind,
   type PuzzleSiteDef,
   type PuzzleSiteId,
 } from '@/data/index';
@@ -217,6 +219,8 @@ export class PuzzleSites {
   // §4.5 — the world puzzle's clock in its room, the beam's next pulse, and
   // when ARIA next offers to force it.
   #nextBeamHint = BEAM_HINT_SECONDS;
+  /** Review 2026-10 P-08: the world puzzle's tip is offered once a visit, at the room's threshold. */
+  #roomTipped = false;
   /** The room seconds from which ARIA may ask again — `Not yet` pushes it 60 s on. */
   #askAt = 0;
   #asking = false;
@@ -388,6 +392,12 @@ export class PuzzleSites {
     const cave = this.#cave;
     const room = cave?.rooms[cave.puzzleRoom];
     if (room === undefined || !p.alive || Math.hypot(p.x - room.x, p.z - room.z) > room.r) return;
+    // Review 2026-10 P-08: a world puzzle has no panel to open, so its tip
+    // shows as the player first walks into its room.
+    if (!this.#roomTipped) {
+      this.#roomTipped = true;
+      this.#tipNow(puzzle.kind);
+    }
     state.openSeconds += dt;
     // §4.5: every 45 s in the room, the beam's next mirror pulses and counts as a hint.
     if (puzzle.kind === 'beam' && state.openSeconds >= this.#nextBeamHint) {
@@ -461,8 +471,9 @@ export class PuzzleSites {
     };
     this.#open = open;
     open.panel = openPuzzlePanel(this.#host.ui, () => this.#view(open, state), handlers);
-    // §4.4: the `puzzle` tip at the first open — over the panel, so now.
-    this.#tipNow();
+    // §4.4: the kind's tip at its first open — over the panel, so now. The
+    // human lock asks for no skill and takes no hint, so it teaches nothing.
+    if (def.family !== 'human') this.#tipNow(def.kind);
   }
 
   /**
@@ -606,15 +617,20 @@ export class PuzzleSites {
     open.panel.refresh();
   }
 
-  /** §4.4: the `puzzle` tip, shown over the panel at once — the queue waits out every hold. */
-  #tipNow(): void {
+  /**
+   * §4.4: the kind's tip, shown at once — over a panel the queue would wait
+   * out every hold. Review 2026-10 P-08: one tip per kind (`PUZZLE_TIPS`), so
+   * whichever puzzle comes first no longer spends the others' tip.
+   */
+  #tipNow(kind: PuzzleKind): void {
     const services = this.#host.services;
     if (services.perf === true) return;
     const settings = services.settings;
     const scheme = services.input.state.scheme;
-    if (settings.get().guidance !== 'full' || !tipDue(settings.get().tipsSeen, 'puzzle', scheme)) return;
-    this.#host.ariaLine(scheme === 'touch' ? TIPS.puzzle.touch : TIPS.puzzle.keyboard, PANEL_LINE_MS);
-    settings.set({ tipsSeen: [...settings.get().tipsSeen, tipKey('puzzle', scheme)] });
+    const id = PUZZLE_TIPS[kind];
+    if (settings.get().guidance !== 'full' || !tipDue(settings.get().tipsSeen, id, scheme)) return;
+    this.#host.ariaLine(scheme === 'touch' ? TIPS[id].touch : TIPS[id].keyboard, PANEL_LINE_MS);
+    settings.set({ tipsSeen: [...settings.get().tipsSeen, tipKey(id, scheme)] });
   }
 
   // -------------------------------------------------------------- the world

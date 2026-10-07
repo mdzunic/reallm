@@ -17,10 +17,13 @@ import { makeDeployable, type DeployableEntity } from '@/entities/Deployable';
 import { INSTANCES_PER_PART } from '@/views/ProceduralMeshes';
 import { groundLayer } from '@/views/ProceduralTextures';
 import {
+  GEAR_PICKUP_COLOR,
   GHOST_COVER,
   HEAD_COVER,
+  ITEM_PICKUP_COLOR,
   lobLift,
   presetOf,
+  RESOURCE_GLOW,
   SHOT_DRAW,
   shotHeadGain,
   SurfaceView,
@@ -2390,6 +2393,70 @@ describe('the descent’s shaft mouth (SPEC-054 §4.2)', () => {
     expect(mouths[0]?.position.x).toBe(-3);
     view.setDescent(null, BEACON);
     expect(mouthOf(scene)).toBeUndefined();
+    view.dispose();
+  });
+});
+
+describe('nodes and pickups read on their ground (review 2026-10 V-09)', () => {
+  /** The program a material would compile, as far as the injection goes. */
+  function compiled(material: THREE.MeshStandardMaterial): string {
+    const shader = {
+      uniforms: {},
+      vertexShader: '#include <common>',
+      fragmentShader: '#include <common>\n#include <emissivemap_fragment>',
+    };
+    material.onBeforeCompile(shader as unknown as THREE.WebGLProgramParametersWithUniforms, undefined as unknown as THREE.WebGLRenderer);
+    return shader.fragmentShader;
+  }
+
+  function instanced(scene: THREE.Scene, test: (mesh: THREE.InstancedMesh) => boolean): THREE.InstancedMesh[] {
+    const out: THREE.InstancedMesh[] = [];
+    scene.traverse((node) => {
+      const mesh = node as THREE.InstancedMesh;
+      if (mesh.isInstancedMesh === true && test(mesh)) out.push(mesh);
+    });
+    return out;
+  }
+
+  it('the node crystals and the pickups glow in their instance colour × 0.5 with a rim, in the meshes they already had', () => {
+    const { scene, view } = setup();
+    const f = frame(new Pool(makeEnemy));
+    const before = instanced(scene, () => true).length;
+    view.sync(f);
+    expect(RESOURCE_GLOW).toBe(0.5);
+    const crystals = instanced(scene, (mesh) => mesh.geometry.type === 'OctahedronGeometry' && mesh.instanceMatrix.count === LAYOUT.nodes.length);
+    expect(crystals).toHaveLength(1);
+    const glow = compiled((crystals[0] as THREE.InstancedMesh).material as THREE.MeshStandardMaterial);
+    expect(glow).toContain('totalEmissiveRadiance += vColor.rgb * 0.500');
+    expect(glow).toContain('glowRim');
+    // The old near-black emissive is gone; the material still draws its instance colours.
+    const material = (crystals[0] as THREE.InstancedMesh).material as THREE.MeshStandardMaterial;
+    expect(material.emissive.getHex()).toBe(0x000000);
+    // The orbs share the glow, and no mesh was added for it.
+    const orbs = instanced(scene, (mesh) => mesh.geometry.type === 'OctahedronGeometry' && mesh.instanceMatrix.count === 128);
+    expect(orbs).toHaveLength(1);
+    expect(compiled((orbs[0] as THREE.InstancedMesh).material as THREE.MeshStandardMaterial)).toContain('glowRim');
+    expect(instanced(scene, () => true).length).toBe(before);
+    view.dispose();
+  });
+
+  it('a gear pickup is gold, an item stays blue, and an orb wears its resource', () => {
+    const { scene, view } = setup();
+    const f = frame(new Pool(makeEnemy));
+    for (const [kind, x] of [['resource', 1], ['item', 2], ['gear', 3]] as const) {
+      Object.assign(f.pickups.alloc(), { kind, x, z: 0, seed: 0, resource: 'water' });
+    }
+    view.sync(f);
+    const colourOf = (geometry: string): number => {
+      // The item and gear meshes hold 64 each (§4.10).
+      const mesh = instanced(scene, (m) => m.geometry.type === geometry && m.count > 0 && m.instanceMatrix.count === 64)[0] as THREE.InstancedMesh;
+      const colour = new THREE.Color();
+      mesh.getColorAt(0, colour);
+      return colour.getHex();
+    };
+    expect(colourOf('ConeGeometry')).toBe(new THREE.Color(GEAR_PICKUP_COLOR).getHex());
+    expect(colourOf('BoxGeometry')).toBe(new THREE.Color(ITEM_PICKUP_COLOR).getHex());
+    expect(GEAR_PICKUP_COLOR).not.toBe(ITEM_PICKUP_COLOR);
     view.dispose();
   });
 });

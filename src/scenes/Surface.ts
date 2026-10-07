@@ -275,7 +275,7 @@ import { RotateOverlay } from '@/ui/RotateOverlay';
 import { ScanRing } from '@/ui/ScanRing';
 import { StaminaRing } from '@/ui/StaminaRing';
 import { TouchControls } from '@/ui/TouchControls';
-import { Waypoint } from '@/ui/Waypoint';
+import { placeWaypoint, Waypoint } from '@/ui/Waypoint';
 
 /**
  * §4.3 — the fixed camera. Its distance is SPEC-035 §4.2's, by input scheme and,
@@ -495,9 +495,6 @@ const MINIMAP_INTERVAL = 0.25;
 // Mission guidance: the waypoint's inset ellipse, the tip queue's clocks, the
 // route's recompute rules, and the ranges the map marks and the tips watch.
 
-/** §4.3: the ellipse's inset from the viewport edge, and its floor (27-k). */
-const WAYPOINT_INSET = 56;
-const WAYPOINT_MIN_AXIS = 40;
 /** The marker sits this far above the ground at the target (§4.3). */
 const WAYPOINT_LIFT = 1.6;
 /** §4.5: a tip holds the line for 8 s, a stuck hint for 7 s. */
@@ -709,6 +706,9 @@ export class SurfaceScene extends UiScene<'surface'> {
   #level: Level | null = null;
   #world: CombatWorld | null = null;
   #combat: Combat | null = null;
+  /** V-08: the weapon whose shot colour `#sparkHex` holds. */
+  #sparkWeapon: string | null = null;
+  #sparkHex = 0;
   #economy: Economy | null = null;
   #missions: Missions | null = null;
   #spawn: SpawnDirector | null = null;
@@ -1719,6 +1719,8 @@ export class SurfaceScene extends UiScene<'surface'> {
           // size (`main.ts`, subscribed at boot, has already written
           // `--ui-scale`), so its backing store is measured off the new box.
           if (patch.uiScale !== undefined) this.#minimap?.measure();
+          // Review 2026-10 V-04: both move the boxes the waypoint keeps out of.
+          if (patch.uiScale !== undefined || patch.joystickSide !== undefined) this.#waypoint?.measure();
         },
         this,
       ),
@@ -6592,7 +6594,7 @@ export class SurfaceScene extends UiScene<'surface'> {
   #buildGuidance(world: CombatWorld, save: Save, layout: Layout): void {
     const layer = el('div', 'guide-layer');
     this.ui.mount(layer, 'hud');
-    const waypoint = new Waypoint(layer);
+    const waypoint = new Waypoint(layer, this.ui.root);
     const scanRing = new ScanRing(layer);
     const aria = new AriaHint(layer);
     this.#waypoint = waypoint;
@@ -7026,27 +7028,11 @@ export class SurfaceScene extends UiScene<'surface'> {
         this.#waypointState = 'off';
       } else {
         const behind = this.#projectGuide(target.x, target.z, WAYPOINT_LIFT);
-        const cx = this.services.renderer.width / 2;
-        const cy = this.services.renderer.height / 2;
-        let sx = this.#screenPoint.x;
-        let sy = this.#screenPoint.y;
-        // A point behind the camera projects mirrored; put it back on the side
-        // the target actually lies, then treat it as off-screen (§4.3).
-        if (behind) {
-          sx = cx - (sx - cx);
-          sy = cy - (sy - cy);
-        }
-        const ax = Math.max(WAYPOINT_MIN_AXIS, cx - WAYPOINT_INSET);
-        const by = Math.max(WAYPOINT_MIN_AXIS, cy - WAYPOINT_INSET);
-        const dx = sx - cx;
-        const dy = sy - cy;
-        const norm = Math.hypot(dx / ax, dy / by);
-        const onScreen = !behind && norm <= 1;
-        if (!onScreen && norm > 0) {
-          sx = cx + dx / norm;
-          sy = cy + dy / norm;
-        }
-        waypoint.set(sx, sy, distance, onScreen, pulse);
+        // §4.3 and review 2026-10 V-04: the inset ellipse, kept clear of the
+        // quick bar and the thumb arc (`ui/Waypoint.ts`).
+        const point = this.#screenPoint;
+        const onScreen = placeWaypoint(point, behind, this.services.renderer.width, this.services.renderer.height, waypoint.bounds);
+        waypoint.set(point.x, point.y, distance, onScreen, pulse);
         this.#waypointState = onScreen ? 'on' : 'edge';
       }
     }
@@ -7074,6 +7060,21 @@ export class SurfaceScene extends UiScene<'surface'> {
     frame.routeLength = this.#routeLength;
     frame.pulse = !settings.reduceMotion;
     view.setGuide(frame);
+  }
+
+  /**
+   * V-08: the active weapon's shot colour (its trail where it has one, so a
+   * white-hot head still sparks in its hue), parsed once per weapon change —
+   * nothing allocates per hit.
+   */
+  #sparkColor(combat: Combat): number {
+    const weapon = combat.loadout.weaponIn(combat.loadout.active);
+    if (weapon === null) return HIT_BURST_COLOR;
+    if (weapon.id !== this.#sparkWeapon) {
+      this.#sparkWeapon = weapon.id;
+      this.#sparkHex = Number.parseInt((weapon.shot.trail ?? weapon.shot.color).slice(1), 16);
+    }
+    return this.#sparkHex;
   }
 
   /** Like `#project`, but reporting a point behind the camera (§4.3). */
@@ -7765,6 +7766,16 @@ export class SurfaceScene extends UiScene<'surface'> {
             this.#project(p.x, p.z, 1.6);
             this.#numbers.show(this.#screenPoint.x, this.#screenPoint.y, shown, 'player');
           }
+        },
+        this,
+      ),
+      // Review 2026-10 V-08: a spark where a shot lands on an enemy, in the
+      // weapon's colour; `CombatFx.spark` holds it to one per 50 ms.
+      bus.on(
+        'enemy:hit',
+        ({ x, z }) => {
+          const combat = this.#combat;
+          if (combat !== null) this.#view?.fx.spark(x, z, this.#sparkColor(combat));
         },
         this,
       ),
