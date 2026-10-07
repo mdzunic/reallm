@@ -18,7 +18,8 @@ const CREATION = {
 
 /** The game runs at a fraction of the wall clock on a GPU-less container. */
 const SLOW = { timeout: 90_000 } as const;
-const TIP_KEYBOARD = 'Arrows move, Enter turns a tile. H asks ARIA for a hint — hints are free.';
+/** Review 2026-10 P-08: the relic is a sequence, so its first open shows the sequence's own tip. */
+const TIP_KEYBOARD = 'Arrows pick an answer, Enter chooses it. A wrong pick deals a new sequence. H asks ARIA for a hint — hints are free.';
 const STONES_LINE = 'Step on the stones in this order. Do not deviate.';
 
 async function info(page: Page): Promise<Record<string, number | string>> {

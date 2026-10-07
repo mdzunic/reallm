@@ -389,7 +389,7 @@ test('10. a death in a boss stage leaves the remains at the arena’s mouth, and
 const OTHER_TIPS = [
   'move', 'map', 'track', 'pad', 'scan', 'harvest', 'deliver', 'storm', 'boss', 'death', 'quickbar', 'overheat',
   'heavy', 'explosives', 'shelter', 'combat', 'flight_steer', 'flight_throttle', 'zones', 'dash', 'sprint', 'wurm',
-  'descent', 'dark', 'puzzle',
+  'descent', 'dark', 'puzzle', 'puzzle_calibration', 'puzzle_sequence', 'puzzle_plates', 'puzzle_beam',
 ];
 
 const REMAINS_TIP = 'What you carried stays where you fell. Walk back to it. Fall again first and it is gone.';

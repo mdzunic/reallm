@@ -1352,7 +1352,7 @@ describe('the boot manifest stays five files (SPEC-019 AC-34 … AC-36, PLAN R6-
 
 // ------------------------------------------------------------- SPEC-027 §4.10
 
-import { DEATH_TIPS, HINTS, HINT_PLACEHOLDERS, MISSION_HINTS, TIPS, TIP_IDS } from '@/data/index';
+import { DEATH_TIPS, HINTS, HINT_PLACEHOLDERS, MISSION_HINTS, PUZZLE_TIPS, TIPS, TIP_IDS } from '@/data/index';
 
 /** Every line the guidance layer can print, with the key that produced it. */
 function guidanceTemplates(): Array<[string, string]> {
@@ -3120,6 +3120,26 @@ describe('puzzles: the phrases and the human lock (SPEC-055 §4.3, §4.7)', () =
       keyboard: 'Arrows move, Enter turns a tile. H asks ARIA for a hint — hints are free.',
       touch: 'Tap a tile to turn it. HINT asks ARIA — hints are free.',
     });
+  });
+
+  it('each puzzle kind has its own tip, and only the conduit’s talks of turning tiles (review 2026-10 P-08)', () => {
+    const kinds = ['conduit', 'calibration', 'sequence', 'plates', 'beam'] as const;
+    expect(Object.keys(PUZZLE_TIPS).sort()).toEqual([...kinds].sort());
+    const ids = kinds.map((kind) => PUZZLE_TIPS[kind]);
+    expect(new Set(ids).size).toBe(kinds.length);
+    expect(PUZZLE_TIPS.conduit).toBe('puzzle');
+    for (const kind of kinds) {
+      const id = PUZZLE_TIPS[kind];
+      expect(TIP_IDS, kind).toContain(id);
+      const tip = TIPS[id];
+      expect(/turns? a tile/i.test(tip.keyboard) || /turns? a tile|turn it/i.test(tip.touch), kind).toBe(kind === 'conduit');
+    }
+    expect(TIPS.puzzle_sequence.keyboard).toBe(
+      'Arrows pick an answer, Enter chooses it. A wrong pick deals a new sequence. H asks ARIA for a hint — hints are free.',
+    );
+    expect(TIPS.puzzle_beam.touch).toBe(
+      'Your light is the beam: tap LIGHT to switch it. Tap USE to turn a mirror. Guide the beam into the receiver.',
+    );
   });
 });
 
