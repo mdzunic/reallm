@@ -924,6 +924,25 @@ test('10b. in flight the sheet says the jump’s fuel is already spent', async (
   await expect(page.getByTestId('pause-menu')).toBeVisible();
 });
 
+test('10c. P under the quit sheet: the sheet keeps it, and the game stays paused (review 2026-10, B-15)', async ({ page }) => {
+  await start(page, URL);
+  await prepare(page, {});
+  await land(page);
+  await page.keyboard.press('KeyP');
+  await expect(page.getByTestId('pause-menu')).toBeVisible();
+  await page.getByTestId('pause-quit').click();
+  const sheet = page.getByTestId('confirm-sheet');
+  await expect(sheet).toContainText('Quit to the main menu?');
+  await page.keyboard.press('KeyP');
+  await expect(sheet).toBeVisible();
+  await expect(page.getByTestId('pause-menu')).toBeVisible();
+  // Answered, the sheet is gone and P resumes as it always has.
+  await page.getByTestId('confirm-no').click();
+  await expect(sheet).toHaveCount(0);
+  await page.keyboard.press('KeyP');
+  await expect(page.getByTestId('pause-menu')).toBeHidden();
+});
+
 test('10d. Reset save from the pause menu leaves for the menu, with the slot gone (review 2026-10, B-13)', async ({ page }) => {
   await start(page, URL);
   await prepare(page, {});

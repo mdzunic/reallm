@@ -20,6 +20,26 @@ export interface ConfirmOptions {
 }
 
 /**
+ * The sheets open on each `#ui` root, each by its cancel. A sheet belongs to
+ * no scene — it mounts in the shared overlay layer — so the composition root
+ * asks here whether one is up, and cancels any still open when a scene
+ * transition starts, so none rides into the next scene (review 2026-10, B-15).
+ */
+const OPEN_SHEETS = new WeakMap<UiRoot, Set<() => void>>();
+
+/** Whether a sheet on `ui` is waiting for its answer; P does not resume under one. */
+export function sheetOpen(ui: UiRoot): boolean {
+  return (OPEN_SHEETS.get(ui)?.size ?? 0) > 0;
+}
+
+/** Answers every sheet still open on `ui` as a cancel. */
+export function cancelSheets(ui: UiRoot): void {
+  const open = OPEN_SHEETS.get(ui);
+  if (open === undefined) return;
+  for (const cancel of [...open]) cancel();
+}
+
+/**
  * SPEC-032 §3: a confirm sheet with an optional second action beside the
  * primary — the depart sheet's `Skip the run`. `reason`, when set, disables
  * the secondary and prints under it; that is how a refused choice explains
@@ -54,6 +74,8 @@ export function choiceSheet(
     let releaseBack: (() => void) | null = null;
     // SPEC-044 §4.3: the modal's close gives focus back to what opened it.
     let closeModal: (() => void) | null = null;
+    const open = OPEN_SHEETS.get(ui) ?? new Set<() => void>();
+    OPEN_SHEETS.set(ui, open);
     const close = (answer: 'primary' | 'secondary' | null): void => {
       if (settled) return;
       settled = true;
@@ -63,8 +85,10 @@ export function choiceSheet(
       backdrop.remove();
       releaseBack?.();
       closeModal?.();
+      open.delete(dismiss);
       resolve(answer);
     };
+    const dismiss = (): void => close(null);
 
     const confirm = testId(
       h(
@@ -111,6 +135,7 @@ export function choiceSheet(
 
     backdrop.append(sheet);
     ui.mount(backdrop, 'overlay');
+    open.add(dismiss);
     releaseBack = ui.pushBack(() => close(null));
     const focus = options.focus ?? (options.danger === true ? 'cancel' : 'confirm');
     closeModal = openModal(sheet, { label: options.title, initialFocus: focus === 'cancel' ? cancel : confirm });
