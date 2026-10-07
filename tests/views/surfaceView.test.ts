@@ -394,7 +394,10 @@ describe('the environment (SPEC-018)', () => {
     scene.traverse((node) => {
       if ((node as THREE.Mesh).isMesh === true) meshes++;
     });
-    expect(meshes).toBeLessThanOrEqual(60);
+    // PLAN R28 / SPEC-067 moves the cap from 60 by its five layers — the
+    // rubble, three dressing kinds and the landing site. Culled layers with
+    // nothing on screen do not draw; the draw budget itself is e2e's.
+    expect(meshes).toBeLessThanOrEqual(65);
     view.dispose();
   });
 
@@ -2460,3 +2463,62 @@ describe('nodes and pickups read on their ground (review 2026-10 V-09)', () => {
     view.dispose();
   });
 });
+
+// ---------------------------------------------------------- PLAN R28 / SPEC-067
+
+describe('the dressing (PLAN R28 / SPEC-067)', () => {
+  const layout: ViewLayout = { ...LAYOUT, halfSize: 120 };
+
+  function named(scene: THREE.Scene): Map<string, THREE.Mesh> {
+    const found = new Map<string, THREE.Mesh>();
+    scene.traverse((node) => {
+      if ((node as THREE.Mesh).isMesh === true && /^(rubble|dressing:|landing-site|decals)/.test(node.name)) found.set(node.name, node as THREE.Mesh);
+    });
+    return found;
+  }
+
+  it('draws the rubble, the planet’s three kinds and the landing site on one material, casting on high only', () => {
+    for (const [quality, casts] of [
+      [QUALITY.medium, false],
+      [QUALITY.high, true],
+    ] as const) {
+      const scene = new THREE.Scene();
+      const view = new SurfaceView(scene, layout, PLANETS.cinder4, quality);
+      const meshes = named(scene);
+      // A 240 m test arena may not fit the rare wurm ribs; the barrels and pipes always fit.
+      for (const name of ['decals', 'dressing:pipe_run', 'dressing:scav_barrels', 'landing-site', 'rubble']) expect(meshes.has(name), name).toBe(true);
+      expect([...meshes.keys()].every((name) => !name.startsWith('dressing:') || PLANETS.cinder4.surface.look.dressing.kinds.some((k) => name === `dressing:${k}`))).toBe(true);
+      const rubble = meshes.get('rubble') as THREE.InstancedMesh;
+      const site = meshes.get('landing-site') as THREE.Mesh;
+      expect(rubble.count).toBeGreaterThan(100);
+      expect(rubble.castShadow).toBe(false);
+      expect(site.castShadow).toBe(casts);
+      expect(site.material).toBe(rubble.material);
+      for (const [name, mesh] of meshes) {
+        if (!name.startsWith('dressing:')) continue;
+        expect(mesh.material).toBe(rubble.material);
+        expect(mesh.castShadow).toBe(casts);
+      }
+      view.dispose();
+    }
+  });
+
+  it('a preset change across low rebuilds the layers at half the rubble and SPEC-018’s decals', () => {
+    const scene = new THREE.Scene();
+    const view = new SurfaceView(scene, layout, PLANETS.vetra, QUALITY.medium);
+    const before = named(scene);
+    const rubble = (before.get('rubble') as THREE.InstancedMesh).count;
+    const decals = (before.get('decals') as THREE.Mesh).geometry.index?.count ?? 0;
+    view.applyQuality(QUALITY.low);
+    const low = named(scene);
+    expect(low.get('rubble')).not.toBe(before.get('rubble'));
+    expect((low.get('rubble') as THREE.InstancedMesh).count / rubble).toBeGreaterThan(0.4);
+    expect((low.get('rubble') as THREE.InstancedMesh).count / rubble).toBeLessThan(0.6);
+    expect((low.get('decals') as THREE.Mesh).geometry.index?.count ?? 0).toBeLessThan(decals);
+    expect(low.size).toBe(before.size);
+    view.applyQuality(QUALITY.medium);
+    expect((named(scene).get('rubble') as THREE.InstancedMesh).count).toBe(rubble);
+    view.dispose();
+  });
+});
+
