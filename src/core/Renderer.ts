@@ -10,7 +10,7 @@
 //
 // `core/Renderer.ts` is one of the four core modules allowed to import `three`
 // (SPEC-001 §4).
-import { ACESFilmicToneMapping, PCFSoftShadowMap, SRGBColorSpace, WebGLRenderer, type Camera, type Object3D } from 'three';
+import { ACESFilmicToneMapping, PCFShadowMap, SRGBColorSpace, WebGLRenderer, type Camera, type Object3D } from 'three';
 import type { EventBus } from '@/core/Services';
 import { log } from '@/core/Log';
 import { PostChain } from '@/core/PostChain';
@@ -225,7 +225,9 @@ class CanvasRenderer implements Renderer {
     this.gl.outputColorSpace = SRGBColorSpace;
     this.gl.toneMapping = ACESFilmicToneMapping;
     this.gl.toneMappingExposure = DEFAULT_LOOK.exposure;
-    this.gl.shadowMap.type = PCFSoftShadowMap;
+    // PCF, named outright: three r185 deprecated `PCFSoftShadowMap`, and warned
+    // on every load before substituting this very type (review 2026-10 P-14).
+    this.gl.shadowMap.type = PCFShadowMap;
     this.gl.shadowMap.enabled = QUALITY[options.preset].shadowMapSize > 0;
     // The frame is counted here, not by three: with the composer on, one frame
     // is a dozen draws and an auto-reset per `render()` would count the last
