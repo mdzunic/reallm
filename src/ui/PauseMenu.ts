@@ -163,6 +163,13 @@ export class PauseMenu {
         this.hide();
         void this.#deps.go('menu', { reason: 'quit' });
       },
+      // AC-95: a reset deleted the run behind this menu, so there is nothing
+      // to resume into — leave to the menu, as the station's reset does
+      // (review 2026-10, B-13).
+      onReset: () => {
+        this.hide();
+        void this.#deps.go('menu', { reason: 'quit' });
+      },
     });
 
     // SPEC-045 §4.8: a plain `ui-btn`, so it is styled like Settings beside it.

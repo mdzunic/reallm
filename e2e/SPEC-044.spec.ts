@@ -924,6 +924,25 @@ test('10b. in flight the sheet says the jump’s fuel is already spent', async (
   await expect(page.getByTestId('pause-menu')).toBeVisible();
 });
 
+test('10d. Reset save from the pause menu leaves for the menu, with the slot gone (review 2026-10, B-13)', async ({ page }) => {
+  await start(page, URL);
+  await prepare(page, {});
+  await land(page);
+  await page.keyboard.press('Escape');
+  await expect(page.getByTestId('pause-menu')).toBeVisible();
+  await page.getByTestId('pause-settings').click();
+  await page.getByTestId('settings-reset').click();
+  const sheet = page.getByTestId('confirm-sheet');
+  await expect(sheet).toContainText('Reset save — delete slot 1?');
+  await page.getByTestId('confirm-yes').click();
+  await expect(sheet).toContainText('Really delete? This cannot be undone.');
+  await page.getByTestId('confirm-yes').click();
+  await settle(page, 'menu');
+  expect(await slotKeys(page)).toEqual([]);
+  expect(await page.evaluate(() => window.__reallm.save().current)).toBeNull();
+  await expect(page.getByTestId('go-station')).toHaveCount(0);
+});
+
 // ------------------------------------------------------------- 11: credits
 
 test('11. the credits are written for players: Google Gemini, the licences link, no file names or spec ids', async ({ page }) => {
