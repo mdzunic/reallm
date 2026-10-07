@@ -96,7 +96,7 @@ import { containment, type Containment } from '@/systems/Containment';
 import { isDashing } from '@/systems/Dash';
 import { BOSS_FIRST_MOVE_SECONDS, updateEnemy, type AiHooks, type WindupKind } from '@/systems/EnemyAi';
 import { inFlare, lit, type FlareState } from '@/systems/Light';
-import { FIRE_CARRY, Loadout } from '@/systems/Loadout';
+import { FIRE_CARRY, Loadout, SWITCH_SECONDS } from '@/systems/Loadout';
 import { updateProjectiles, type ProjectileHooks } from '@/systems/Projectiles';
 import { isHolstered, isLoud, STAMINA_MAX } from '@/systems/Stamina';
 
@@ -1930,7 +1930,12 @@ export class Combat {
     this.#lastShotLook = weapon.shot;
     this.#events.emit('weapon:fired', { line: FIRED_LINE[weapon.line], x: shot.x, z: shot.z });
     this.loadout.fired(slot, time);
-    p.fireCooldown = 1 / weapon.fireRate;
+    // Review 2026-10 (G-12): the tap costs the gun in hand what the desktop
+    // rotation's switch does — `SWITCH_SECONDS`, not the launcher's whole
+    // `1 / fireRate` (a second for the Rocket), which left the Rocket and the
+    // Seeker DPS-neutral or worse beside a tier 2–3 rifle on touch. The
+    // launcher's own burst interval is its slot's (`loadout.ready`).
+    p.fireCooldown = Math.max(p.fireCooldown, SWITCH_SECONDS);
     return 'fired';
   }
 
