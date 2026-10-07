@@ -838,18 +838,20 @@ describe('Missions.collectDemand (SPEC-034 §4.12)', () => {
 
 /**
  * SPEC-065 §4.2 (E117): what the pad terminal never ships below — the open
- * deliver objectives of the current stages, read as `collectDemand` reads
- * collect ones. A delivery is all or nothing (E16), so an open one needs its
- * whole amount.
+ * deliver objectives of every remaining stage of the active missions, read as
+ * `collectDemand` reads collect ones. A delivery is all or nothing (E16), so
+ * an open one needs its whole amount.
  */
 describe('Missions.deliverDemand (SPEC-065 §4.2, E117)', () => {
-  it('counts an open deliver objective of the current stage, and not a later stage’s', () => {
+  it('counts an open deliver objective of the current stage, and a later stage’s too (review B-10)', () => {
     // c1_m3: stage 0 kills the dune wurm, stage 1 runs 100 oil to the beacon.
     const h = harness((save) => {
       save.progress.missionsDone.push('c1_m1', 'c1_m2');
       save.progress.missionsActive.push({ id: 'c1_m3', stage: 0, counters: {} });
     });
-    expect(h.missions.deliverDemand('oil')).toBe(0);
+    // Accepted at the pad, the beacon's 100 oil is already spoken for: the
+    // terminal must not ship it home before the wurm is down.
+    expect(h.missions.deliverDemand('oil')).toBe(100);
     h.events.emit('boss:defeated', { boss: 'dune_wurm' });
     expect(h.missions.active[0]?.stage).toBe(1);
     expect(h.missions.deliverDemand('oil')).toBe(100);
@@ -902,6 +904,25 @@ describe('Missions.deliverDemand (SPEC-065 §4.2, E117)', () => {
       'vetra',
     );
     expect(vetra.missions.deliverDemand('water')).toBe(40);
+  });
+
+  it('every delivery in the game is spoken for from its mission’s first stage (review B-10)', () => {
+    // c2_s1 scans before it carries 40 water; c4_m3 kills before 100 lithium.
+    const vetra = harness(
+      (save) => {
+        save.progress.missionsDone.push('c1_m1', 'c1_m2', 'c1_m3', 'c2_m1');
+        save.progress.missionsActive.push({ id: 'c2_s1', stage: 0, counters: {} });
+      },
+      'surface',
+      'vetra',
+    );
+    expect(vetra.missions.deliverDemand('water')).toBe(40);
+    const ferrum = harness(
+      (save) => save.progress.missionsActive.push({ id: 'c4_m3', stage: 0, counters: {} }),
+      'surface',
+      'ferrum',
+    );
+    expect(ferrum.missions.deliverDemand('lithium')).toBe(100);
   });
 });
 
