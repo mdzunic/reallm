@@ -1239,8 +1239,12 @@ export class SurfaceScene extends UiScene<'surface'> {
       this.#caveKit = null;
     });
     // SPEC-055 §4.1: the relic terminal's `cave_terminal` loads with the
-    // surface's lazy set, and leaves with it.
-    const terminal = { models: { cave_terminal: CAVE_ASSETS.models.cave_terminal }, textures: {} };
+    // surface's lazy set, and leaves with it; so does the descent's mouth,
+    // SPEC-054 §4.2's `cave_shaft`.
+    const terminal = {
+      models: { cave_terminal: CAVE_ASSETS.models.cave_terminal, cave_shaft: CAVE_ASSETS.models.cave_shaft },
+      textures: {},
+    };
     this.disposer.add(() => void assets.release(terminal));
     // SPEC-053 §4.1: the shared set's atlas and detail normal ride along.
     this.#planetAssets = assets.load({
@@ -1507,6 +1511,8 @@ export class SurfaceScene extends UiScene<'surface'> {
     view.reduceMotion = services.settings.get().reduceMotion;
     this.#view = view;
     this.disposer.add(() => view.dispose());
+    // SPEC-054 §4.2: a shaft mouth marks the descent, glowing in the colour of the cave below.
+    view.setDescent(this.#descent, this.#caveDef.look.beacons.color);
     // SPEC-057 §4.6: the look is chosen here, at entry — a reveal mid-visit
     // changes it from the next landing on (57-g).
     this.#remainsLook = remainsLook(save);
@@ -2635,6 +2641,8 @@ export class SurfaceScene extends UiScene<'surface'> {
     info['occluders'] = this.#view?.fadedOccluders ?? 0;
     // SPEC-040 §4.6: whether every modelled prop kind draws its GLB yet.
     info['propSource'] = this.#view?.propSource ?? 'procedural';
+    // SPEC-054 §4.2: whether the descent's mouth draws `cave_shaft` yet.
+    info['descentMouth'] = this.#view?.descentMouth ?? '-';
     // SPEC-046 §4.6, §4.8: the instances the culled layers draw, the last
     // refresh's cost, and whether the tug stands on the pad.
     info['instancesDrawn'] = this.#view?.instancesDrawn ?? 0;
