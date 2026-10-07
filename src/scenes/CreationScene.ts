@@ -110,6 +110,8 @@ export class CreationScene extends UiScene<'creation'> {
   #startName = '';
   /** SPEC-058 §4.2: `creation-variant`, toggled as the name is typed without a re-render. */
   #variant: HTMLElement | null = null;
+  /** SPEC-058 §4.2: next mode was refused; the first update says so and leaves. */
+  #refused = false;
 
   #root: HTMLDivElement | null = null;
   #form: HTMLDivElement | null = null;
@@ -162,29 +164,28 @@ export class CreationScene extends UiScene<'creation'> {
   }
 
   protected override onUpdate(_dt: number): void {
+    // SPEC-058 §4.2: the refusal leaves from here. `scene:entered` is emitted
+    // inside the transition, where `go()` is ignored, so leaving from it never
+    // reached the menu; the first update runs only once the transition in has
+    // settled (review 2026-10, B-16).
+    if (this.#refused && !this.#leaving) {
+      this.#refused = false;
+      this.ui.toast(NEXT_REFUSED_TEXT, 'warn');
+      this.#leave();
+    }
     if (this.#model) this.#model.rotation.y = this.elapsed * 0.5;
   }
 
   /**
    * SPEC-058 §4.2: next mode loads the slot. A run that does not qualify (§4.1)
-   * is refused with a toast, back to the menu — once the transition in has
-   * landed, since `go()` is ignored inside one. Otherwise the form opens on
-   * `nextCreation(save)`.
+   * is refused with a toast, back to the menu — on the first update, once the
+   * transition in has landed, since `go()` is ignored inside one. Otherwise the
+   * form opens on `nextCreation(save)`.
    */
   #prefill(slot: SlotId): void {
     const result = this.services.save.load(slot);
     if (!result.ok || !nextInstanceOffered(result.data)) {
-      this.disposer.add(
-        this.services.events.on(
-          'scene:entered',
-          ({ id }) => {
-            if (id !== 'creation') return;
-            this.ui.toast(NEXT_REFUSED_TEXT, 'warn');
-            this.#leave();
-          },
-          this,
-        ),
-      );
+      this.#refused = true;
       return;
     }
     const fill = nextCreation(result.data);
