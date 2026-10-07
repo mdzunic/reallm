@@ -215,7 +215,8 @@ test.describe('SPEC-010 — the economy in a browser', () => {
     });
     expect(digest.balance.budgets).toEqual([105, 225, 360, 515, 730]);
     // SPEC-039 §4.2: the Laser Carbine moves into the chapter-2 loadout.
-    expect(digest.balance.loadouts).toEqual([100, 180, 300, 470, 620]);
+    // Review 2026-10, G-09: chapter 6 no longer recommends Ship Guns T1 (−40).
+    expect(digest.balance.loadouts).toEqual([100, 180, 300, 470, 580]);
     for (const [index, cost] of digest.balance.loadouts.entries()) {
       expect(cost).toBeLessThanOrEqual(digest.balance.budgets[index] ?? 0);
     }
