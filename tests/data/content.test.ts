@@ -1780,7 +1780,7 @@ describe('side rewards and bonuses (SPEC-043 §4.1, §4.2)', () => {
       c4_s1: { kind: 'no_shelter', reward: lithium(30) },
       c5_m2: { kind: 'par', seconds: 300, reward: items('demo_charge', 2) },
       c5_m3: { kind: 'no_death', reward: items('plasma_cell', 3) },
-      c5_s1: { kind: 'par', seconds: 360, reward: lithium(40) },
+      c5_s1: { kind: 'par', seconds: 240, reward: lithium(40) },
       c6_m1: { kind: 'par', seconds: 270, reward: items('medkit', 3) },
     } as Partial<Record<MissionId, MissionBonus>>;
     expect(Object.keys(table)).toHaveLength(22);

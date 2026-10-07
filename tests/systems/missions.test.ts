@@ -8,7 +8,7 @@ import { describe, expect, it } from 'vitest';
 import { EventBus, type GameEvents } from '@/core/Events';
 import { hash32 } from '@/core/Rng';
 import { newSave, type Save } from '@/core/Save';
-import { CONTRACT_IDS, CONTRACT_LITHIUM, MISSIONS, TUNING, type ContractId, type MissionId, type PlanetId } from '@/data/index';
+import { CONTRACT_IDS, CONTRACT_LITHIUM, DIALOGUE, MISSIONS, TUNING, type ContractId, type MissionId, type PlanetId } from '@/data/index';
 import { Economy } from '@/systems/Economy';
 import { contractFor, Missions, type MissionContext } from '@/systems/Missions';
 import type { LayoutPoi } from '@/systems/Layout';
@@ -1221,6 +1221,52 @@ describe('Missions — judging a bonus (SPEC-043 §4.2)', () => {
     expect(h.of('mission:completed')).toEqual([{ id: 'c1_m3', replay: true, seconds: 1 }]);
     expect(h.of('mission:bonus')).toEqual([{ id: 'c1_m3', bonus: 'no_death', earned: true }]);
     expect(h.economy.count('demo_charge')).toBe(1);
+  });
+});
+
+describe('Missions — Egg Hunt asks for ten eggs (SPEC-066 §4.6)', () => {
+  const eggHunt = (): Harness => {
+    const h = harness((save) => save.progress.missionsDone.push('c5_m1'), 'surface', 'hive');
+    expect(h.missions.accept('c5_s1').ok).toBe(true);
+    return h;
+  };
+  const egg = (h: Harness): void =>
+    h.events.emit('enemy:killed', { enemyId: 'hive_egg', elite: false, x: 0, z: 0, xp: 9 });
+
+  it('completes on the tenth hive_egg kill, not the ninth, and pays its unchanged rewards', () => {
+    expect(MISSIONS.c5_s1.stages).toEqual([[{ kind: 'kill', enemy: 'hive_egg', amount: 10 }]]);
+    expect(MISSIONS.c5_s1.rewards).toEqual({ xp: 200, tokens: 20, items: [{ itemId: 'plasma_cell', qty: 2 }] });
+    const h = eggHunt();
+    const xp = h.save.player.xp;
+    for (let i = 0; i < 9; i++) egg(h);
+    expect(h.of('mission:completed')).toEqual([]);
+    egg(h);
+    expect(h.of('mission:completed').map((c) => c.id)).toEqual(['c5_s1']);
+    // The kill events carry XP the scene pays; the runtime pays the mission's own.
+    expect(h.save.player.xp - xp).toBe(200);
+    expect(h.economy.count('plasma_cell')).toBe(2);
+  });
+
+  it('its par is 240 s: earned at 239 s, missed at 241 s', () => {
+    expect(MISSIONS.c5_s1.bonus).toEqual({ kind: 'par', seconds: 240, reward: { resources: { lithium: 40 } } });
+    const outcome = (seconds: number): boolean | undefined => {
+      const h = eggHunt();
+      h.run(seconds);
+      for (let i = 0; i < 10; i++) egg(h);
+      expect(h.of('mission:completed').at(-1)?.id).toBe('c5_s1');
+      return h.of('mission:bonus').at(-1)?.earned;
+    };
+    expect(outcome(10)).toBe(true);
+    expect(outcome(239)).toBe(true);
+    expect(outcome(241)).toBe(false);
+  });
+
+  it('its brief and accept line say "Ten", not "Fifteen"', () => {
+    expect(MISSIONS.c5_s1.brief).toContain('Ten of them');
+    expect(MISSIONS.c5_s1.brief).not.toContain('Fifteen');
+    expect(DIALOGUE.c5_s1_accept.lines.map((l) => l.text)).toEqual([
+      'Egg clusters line the tunnels. Ten of them and the next generation does not happen.',
+    ]);
   });
 });
 
