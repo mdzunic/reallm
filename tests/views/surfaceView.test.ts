@@ -2263,3 +2263,133 @@ describe('SPEC-053 — trees through the foliage seam, the canopy fade, the cut-
     view.dispose();
   });
 });
+
+import { UNDERGROUND } from '@/data/index';
+import { DESCENT_MOUTH_SCALE } from '@/views/SurfaceView';
+
+describe('the descent’s shaft mouth (SPEC-054 §4.2)', () => {
+  const SPOT = { x: 14, z: -9 };
+  const BEACON = UNDERGROUND.vetra.look.beacons.color;
+
+  function mouthOf(scene: THREE.Scene): THREE.Mesh | undefined {
+    return scene.getObjectByName('descent-mouth') as THREE.Mesh | undefined;
+  }
+
+  /** Drawn only if it and every parent up to the scene are visible. */
+  function drawn(node: THREE.Object3D): boolean {
+    for (let at: THREE.Object3D | null = node; at !== null; at = at.parent) if (!at.visible) return false;
+    return true;
+  }
+
+  /** `cave_shaft` once `land()` runs: a GLB-like body and glow, as SPEC-052 commits them. */
+  function shaftAssets(): { assets: Assets; land(): void } {
+    let landed = false;
+    const shaft = (): THREE.Group => {
+      const root = new THREE.Group();
+      for (const [name, size, y] of [
+        ['Body', [2.8, 0.4, 2.8], 0],
+        ['Glow', [2.2, 0.05, 2.2], 0.4],
+      ] as const) {
+        const geometry = new THREE.BoxGeometry(...size);
+        geometry.translate(0, y + size[1] / 2, 0);
+        const material = new THREE.MeshStandardMaterial();
+        material.name = name;
+        root.add(new THREE.Mesh(geometry, material));
+      }
+      return root;
+    };
+    const assets = {
+      hasModel: (id: string) => landed && id === 'cave_shaft',
+      model: () => shaft(),
+    } as unknown as Assets;
+    return {
+      assets,
+      land: () => {
+        landed = true;
+      },
+    };
+  }
+
+  it('draws nothing until the scene names a descent, and nothing for a seed without one (E87)', () => {
+    const { scene, view } = setup();
+    expect(mouthOf(scene)).toBeUndefined();
+    expect(view.descentMouth).toBe('-');
+    view.setDescent(null, BEACON);
+    expect(mouthOf(scene)).toBeUndefined();
+    expect(view.descentMouth).toBe('-');
+    view.dispose();
+  });
+
+  it('stands the stand-in ring on the ground at the descent, at 60 %, glowing in the cave’s beacon colour', () => {
+    const { scene, view } = setup(QUALITY.medium, PLANETS.vetra);
+    view.setDescent(SPOT, BEACON);
+    const mouth = mouthOf(scene);
+    expect(mouth).toBeDefined();
+    if (mouth === undefined) return;
+    expect(view.descentMouth).toBe('procedural');
+    expect(mouth.position.x).toBe(SPOT.x);
+    expect(mouth.position.z).toBe(SPOT.z);
+    expect(mouth.position.y).toBeCloseTo(view.field.heightAt(SPOT.x, SPOT.z), 6);
+    expect(mouth.scale.toArray()).toEqual([DESCENT_MOUTH_SCALE, DESCENT_MOUTH_SCALE, DESCENT_MOUTH_SCALE]);
+    const material = mouth.material as THREE.MeshStandardMaterial;
+    expect(material.emissive.getHexString()).toBe(new THREE.Color(BEACON).getHexString());
+    expect(material.emissiveIntensity).toBeGreaterThan(0);
+    expect(drawn(mouth)).toBe(true);
+    view.dispose();
+  });
+
+  it('goes with the surface below and comes back with it', () => {
+    const { scene, view } = setup(QUALITY.medium, PLANETS.vetra);
+    view.setDescent(SPOT, BEACON);
+    const mouth = mouthOf(scene) as THREE.Mesh;
+    view.setLevel('underground', null, UNDERGROUND.vetra.look);
+    expect(drawn(mouth)).toBe(false);
+    view.setLevel('surface', null, null);
+    expect(drawn(mouth)).toBe(true);
+    view.dispose();
+  });
+
+  it('swaps the stand-in for `cave_shaft` when the planet’s lazy set lands, freeing the old geometry', () => {
+    const scene = new THREE.Scene();
+    const fake = shaftAssets();
+    const view = new SurfaceView(scene, LAYOUT, PLANETS.vetra, QUALITY.medium, fake.assets);
+    view.setDescent(SPOT, BEACON);
+    const mouth = mouthOf(scene) as THREE.Mesh;
+    const standIn = mouth.geometry;
+    let freed = false;
+    standIn.addEventListener('dispose', () => {
+      freed = true;
+    });
+    view.setPropModels(fake.assets);
+    expect(view.descentMouth).toBe('procedural');
+    fake.land();
+    view.setPropModels(fake.assets);
+    expect(view.descentMouth).toBe('glb');
+    expect(mouth.geometry).not.toBe(standIn);
+    expect(freed).toBe(true);
+    // Once is enough: a later landing leaves the model's geometry alone.
+    const model = mouth.geometry;
+    view.setPropModels(fake.assets);
+    expect(mouth.geometry).toBe(model);
+    view.dispose();
+  });
+
+  it('draws the model at once when the set has already landed, and a new descent replaces the old mouth', () => {
+    const scene = new THREE.Scene();
+    const fake = shaftAssets();
+    fake.land();
+    const view = new SurfaceView(scene, LAYOUT, PLANETS.vetra, QUALITY.medium, fake.assets);
+    view.setDescent(SPOT, BEACON);
+    expect(view.descentMouth).toBe('glb');
+    view.setDescent({ x: -3, z: 5 }, BEACON);
+    const mouths: THREE.Object3D[] = [];
+    scene.traverse((node) => {
+      if (node.name === 'descent-mouth') mouths.push(node);
+    });
+    expect(mouths).toHaveLength(1);
+    expect(mouths[0]?.position.x).toBe(-3);
+    view.setDescent(null, BEACON);
+    expect(mouthOf(scene)).toBeUndefined();
+    view.dispose();
+  });
+});

@@ -97,6 +97,7 @@ import {
   terrainUniforms,
   type TerrainOptions,
 } from '@/views/TerrainMesh';
+import { injectVertexGlow, kitGeometry, KIT_GLOW } from '@/views/UndergroundView';
 
 export type { ObstacleKind, PoiKind } from '@/views/SurfaceProps';
 export type { ParticleKind } from '@/views/StormParticles';
@@ -687,6 +688,11 @@ function injectInstanceFade(material: THREE.MeshStandardMaterial): void {
  */
 const ROCK_LIFT = 0.5;
 
+/** SPEC-054 §4.2: the shaft mouth on the descent is `cave_shaft` at this share of its size… */
+export const DESCENT_MOUTH_SCALE = 0.6;
+/** …with its front (+z) turned toward the fixed rig, as the shaft below stands. */
+const DESCENT_MOUTH_YAW = Math.PI / 4;
+
 /**
  * SPEC-046 §4.8: the parked tug — the boot set's ship model, scaled to sit on
  * the pad (*initial tuning*). Nose toward world +z, as the glTF faces.
@@ -968,6 +974,9 @@ export class SurfaceView {
   #flashlight: Flashlight | null = null;
   #flashlightLook: DarkLook['flashlight'] | null = null;
   #flashlightOn = false;
+  /** SPEC-054 §4.2: the shaft mouth on the descent, and whether it draws `cave_shaft` yet. */
+  #descentMouth: THREE.Mesh | null = null;
+  #descentFromModel = false;
   readonly #sunDir: { x: number; y: number; z: number };
   readonly #palette: PlanetDef['surface']['palette'];
   readonly #lightningSeed: number;
@@ -1973,6 +1982,49 @@ export class SurfaceView {
   }
 
   /**
+   * SPEC-054 §4.2: the shaft mouth on the descent — `cave_shaft` at 60 %, its
+   * glow in the cave's beacon colour, on the ground under the environment, so
+   * it hides with the surface below. The stand-in ring draws until the
+   * planet's lazy set lands, and `setPropModels` swaps the model in. `null`
+   * (a seed with no shelter, E87) takes it away.
+   */
+  setDescent(spot: { x: number; z: number } | null, beacon: string): void {
+    const old = this.#descentMouth;
+    if (old !== null) {
+      this.#envRoot.remove(old);
+      old.geometry.dispose();
+      (old.material as THREE.Material).dispose();
+      this.#descentMouth = null;
+    }
+    if (spot === null) return;
+    const material = new THREE.MeshStandardMaterial({
+      color: '#ffffff',
+      vertexColors: true,
+      roughness: 0.7,
+      metalness: 0.2,
+      emissive: beacon,
+      emissiveIntensity: KIT_GLOW,
+    });
+    injectVertexGlow(material);
+    this.#descentFromModel = this.#assets?.hasModel('cave_shaft') === true;
+    const mouth = new THREE.Mesh(kitGeometry('cave_shaft', this.#assets), material);
+    mouth.name = 'descent-mouth';
+    mouth.position.set(spot.x, this.field.heightAt(spot.x, spot.z), spot.z);
+    mouth.rotation.y = DESCENT_MOUTH_YAW;
+    mouth.scale.setScalar(DESCENT_MOUTH_SCALE);
+    mouth.castShadow = true;
+    mouth.receiveShadow = true;
+    this.#envRoot.add(mouth);
+    this.#descentMouth = mouth;
+  }
+
+  /** SPEC-054 §4.2: what the descent's mouth draws (`sceneInfo.descentMouth`); `'-'` with no descent. */
+  get descentMouth(): 'glb' | 'procedural' | '-' {
+    if (this.#descentMouth === null) return '-';
+    return this.#descentFromModel ? 'glb' : 'procedural';
+  }
+
+  /**
    * §4.5: the torch widens to 10 over 10 m while the `fake` flashlight shines
    * below — the fake mode adds no light of its own — and is the surface's
    * 6 over 14 m everywhere else. Intensity and distance are uniforms.
@@ -2388,6 +2440,13 @@ export class SurfaceView {
     if (this.#buildGroundClumps()) rebuilt = true;
     if (this.#swapLandmarks(assets)) rebuilt = true;
     if (rebuilt) this.#refreshCulled();
+    // SPEC-054 §4.2: the descent's mouth takes `cave_shaft` once it lands.
+    const mouth = this.#descentMouth;
+    if (mouth !== null && !this.#descentFromModel && assets.hasModel('cave_shaft')) {
+      mouth.geometry.dispose();
+      mouth.geometry = kitGeometry('cave_shaft', assets);
+      this.#descentFromModel = true;
+    }
   }
 
   /**
