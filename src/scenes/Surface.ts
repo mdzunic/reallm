@@ -100,7 +100,7 @@ import { ClueTracker, clueFound, FlagView, type ClueScene } from '@/systems/Clue
 import { Combat, computePlayerStats, ELITE_SCALE, staminaFull, type CombatWorld, type HitMemory } from '@/systems/Combat';
 import { containment, containmentSteps } from '@/systems/Containment';
 import { DASH_DISTANCE, dashCooldown, isDashing, pressDash, stepDash } from '@/systems/Dash';
-import { Economy } from '@/systems/Economy';
+import { contractTokenFraction, Economy } from '@/systems/Economy';
 import { seconds, stage as stageText } from '@/systems/Format';
 import { EXPLORE_RADIUS_BELOW, ExploreMask, REVEAL_CAPACITY } from '@/systems/Exploration';
 import {
@@ -194,6 +194,7 @@ import {
   darkFogRange,
   descentRefusal,
   deathCause,
+  depotLossText,
   deliveryNeedsText,
   firstSentence,
   deathTip,
@@ -1334,6 +1335,8 @@ export class SurfaceScene extends UiScene<'surface'> {
       time: 0,
       // SPEC-030 §4.7: enemies, the follower and shots stop at the wall line.
       bounds: layout.halfSize - WALL_INSET,
+      // SPEC-066 §4.4: a non-boss kill pays at the planet's chapter.
+      planetChapter: planet.chapter,
     };
     world.player.facing = layout.playerSpawn.facing;
     this.#world = world;
@@ -5869,7 +5872,11 @@ export class SurfaceScene extends UiScene<'surface'> {
                   ? h('span', { class: 'badge badge-replay' }, 'Replay · 50 %')
                   : null,
             ),
-            h('p', { class: 'terminal-rewards' }, rewardsText(def.rewards, replay, contract !== null) || '—'),
+            h(
+              'p',
+              { class: 'terminal-rewards' },
+              rewardsText(def.rewards, replay, contract !== null, contractTokenFraction(def)) || '—',
+            ),
             testId(h('p', { class: 'terminal-brief' }, full ? def.brief : firstSentence(def.brief)), `terminal-brief-${def.id}`),
             testId(
               h('button', { class: 'ui-btn is-primary', type: 'button', click: () => this.#acceptAtTerminal(id) }, 'Accept'),
@@ -7611,6 +7618,9 @@ export class SurfaceScene extends UiScene<'surface'> {
           // SPEC-041 §4.4: a death opens the seal at once; the respawn clears the arena.
           if (this.#arena !== null) this.#arena.sealed = false;
           const lost = this.#economy?.applyDeathPenalty() ?? {};
+          // SPEC-066 §4.8 (E124): on hard a tenth of the depot goes too — gone,
+          // never into the remains, which carry the hold's loss only.
+          const depotLost = this.#economy?.applyDepotDeathLoss() ?? {};
           // SPEC-057 §4.1 steps 3–4: what was taken stays where they fell.
           const remainsLine = this.#dropRemains(lost);
           // SPEC-042 §4.5: what killed the player, and the one tip that applies.
@@ -7622,6 +7632,7 @@ export class SurfaceScene extends UiScene<'surface'> {
             healsCarried: this.#healsCarried(),
           });
           this.#death?.show(lost, deathCause(cause), tip);
+          this.#death?.setDepotLoss(depotLossText(depotLost));
           // SPEC-057 §4.1 step 5: and where it went.
           this.#death?.setRemains(remainsLine);
           // Review 2026-10 S-14: the last line in the fiction, by the save's story.

@@ -613,7 +613,7 @@ export const DIALOGUE = {
   },
   c5_s1_accept: {
     id: 'c5_s1_accept',
-    lines: [{ speaker: 'command', text: 'Egg clusters line the tunnels. Fifteen of them and the next generation does not happen.' }],
+    lines: [{ speaker: 'command', text: 'Egg clusters line the tunnels. Ten of them and the next generation does not happen.' }],
   },
   c5_s1_done: {
     id: 'c5_s1_done',

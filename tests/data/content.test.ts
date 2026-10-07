@@ -11,6 +11,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { LAUNCH_SECONDS, THROTTLES } from '@/systems/Flight';
 import { DASH_IFRAMES } from '@/systems/Dash';
 import { SPRINT_MULT } from '@/systems/Stamina';
+import { INVENTORY_SLOTS } from '@/systems/Economy';
 import {
   AFFIX_IDS,
   AFFIXES,
@@ -394,8 +395,12 @@ describe('content invariants (SPEC-009 §7)', () => {
   });
 
   it('7. collect and deliver amounts fit the hold, and the ground holds three times the largest collect', () => {
-    // §4.13: the base cap is the un-upgraded cargo metric, in one place only.
-    expect(TUNING.CARGO_BASE).toBe(UPGRADES.cargo.metrics.cargoCap[0]);
+    // SPEC-066 §4.7: the Cargo Racks' first tier is the base pack, and each
+    // tier adds slots; the cap is TUNING.CARGO_BASE at every tier.
+    const packSlots: readonly number[] = UPGRADES.cargo.metrics.packSlots;
+    expect(packSlots[0]).toBe(INVENTORY_SLOTS);
+    for (let tier = 1; tier < packSlots.length; tier++) expect(packSlots[tier]).toBeGreaterThan(packSlots[tier - 1] as number);
+    expect(Object.keys(UPGRADES.cargo.metrics)).toEqual(['packSlots']);
 
     const problems: string[] = [];
     /** planet → resource → largest collect objective (E3). */
@@ -1809,7 +1814,7 @@ describe('side rewards and bonuses (SPEC-043 §4.1, §4.2)', () => {
       c4_s1: { kind: 'no_shelter', reward: lithium(30) },
       c5_m2: { kind: 'par', seconds: 300, reward: items('demo_charge', 2) },
       c5_m3: { kind: 'no_death', reward: items('plasma_cell', 3) },
-      c5_s1: { kind: 'par', seconds: 360, reward: lithium(40) },
+      c5_s1: { kind: 'par', seconds: 240, reward: lithium(40) },
       c6_m1: { kind: 'par', seconds: 270, reward: items('medkit', 3) },
     } as Partial<Record<MissionId, MissionBonus>>;
     expect(Object.keys(table)).toHaveLength(22);
@@ -4209,6 +4214,8 @@ describe('the story row (SPEC-059 §4.2.1)', () => {
       weatherMult: 0,
       allyDamageMult: 0,
       assisted: true,
+      // SPEC-066 §4.8: a death never reaches the depot below hard.
+      depotLoss: 0,
     });
     // Its elite chance is normal's; its enemy HP is below every other row's.
     expect(DIFFICULTY_RULES.story.eliteChanceMult).toBe(DIFFICULTY_RULES.normal.eliteChanceMult);

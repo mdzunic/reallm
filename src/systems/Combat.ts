@@ -162,6 +162,8 @@ export const LOOT_SCATTER_MAX = 1.5;
 export const ELITE_SCALE = 1.3;
 export const ELITE_SPEED_MULT = 1.1;
 export const ELITE_XP_MULT = 3;
+/** SPEC-066 §4.4: a non-boss kill's XP grows by this per chapter of the planet. */
+export const KILL_XP_GROWTH = 1.15;
 /** SPEC-039 §4.3: the crit chance before agility's per-point share. */
 export const BASE_CRIT_CHANCE = 0.05;
 /** SPEC-039 §4.3: +2 % damage a level, the `(1 + 0.02 × (L − 1))` factor. */
@@ -315,6 +317,14 @@ function hitDamage(base: number, elite: boolean, stats: PlayerStats, difficulty:
   return Math.max(1, Math.round(raw));
 }
 
+/**
+ * SPEC-066 §4.4: a kill's base XP on a planet of `planetChapter` — a boss pays
+ * its `xp` everywhere, every other enemy `round(xp × 1.15^(chapter − 1))`.
+ */
+export function killXp(def: Enemy, planetChapter: number): number {
+  return def.archetype === 'boss' ? def.xp : Math.round(def.xp * KILL_XP_GROWTH ** (planetChapter - 1));
+}
+
 /** §4.6: the spawn-time elite roll. Callers pass the planet's `eliteChance`. */
 export function rollElite(def: Enemy, eliteChance: number, rng: Rng): boolean {
   return def.eliteAllowed && rng.chance(eliteChance);
@@ -427,6 +437,8 @@ export interface CombatWorld {
    * not fall on (`DARK_SIGHT`, 9 m). `undefined` on the surface: unrestricted.
    */
   sight?: number;
+  /** SPEC-066 §4.4: the planet's chapter, which scales a non-boss kill's XP. Absent reads as 1. */
+  planetChapter?: number;
 }
 
 /**
@@ -1329,6 +1341,7 @@ export class Combat {
    * SPEC-039 §4.1: a boss of a replayed stage pays `REPLAY_REWARD_FRACTION` of
    * its XP (39-e); every other kill pays what it always did. SPEC-041 §4.6: an
    * elite pays ×(3 + its affixes), and a volatile one leaves its circle.
+   * SPEC-066 §4.4: the base is `killXp` at the world's planet chapter.
    */
   killEnemy(e: EnemyEntity, cause: 'player' | 'drone' | 'script'): void {
     if (e.state === 'dead') return;
@@ -1340,7 +1353,9 @@ export class Combat {
     e.moveIndex = -1;
     const def = e.def;
     const xp = Math.floor(
-      def.xp * (e.elite ? ELITE_XP_MULT + affixCount(e) : 1) * (e.replay ? TUNING.REPLAY_REWARD_FRACTION : 1),
+      killXp(def, this.#world.planetChapter ?? 1) *
+        (e.elite ? ELITE_XP_MULT + affixCount(e) : 1) *
+        (e.replay ? TUNING.REPLAY_REWARD_FRACTION : 1),
     );
     if (hasAffix(e, 'volatile')) this.#volatileBurst(e);
     this.#events.emit('enemy:killed', { enemyId: def.id, elite: e.elite, x: e.x, z: e.z, xp });

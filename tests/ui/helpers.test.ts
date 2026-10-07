@@ -302,12 +302,13 @@ describe('priceText (AC-113, SPEC-031 §4.12)', () => {
 });
 
 describe('walletModel (SPEC-031 §4.11)', () => {
-  it('reads a fresh save: four entries in order, capped by the cargo tier', () => {
+  it('reads a fresh save: four entries in order, capped by the cargo cap', () => {
     const data = save();
     const model = walletModel(data);
     expect(model.tokens).toBe(data.player.tokens);
     expect(model.resources.map((entry) => entry.id)).toEqual(['oil', 'wheat', 'water', 'lithium']);
-    const cap = UPGRADES.cargo.metrics['cargoCap']?.[data.ship.cargo];
+    // SPEC-066 §4.7: TUNING.CARGO_BASE at every Cargo tier.
+    const cap = TUNING.CARGO_BASE;
     for (const entry of model.resources) {
       expect(entry.cap).toBe(cap);
       expect(entry.value).toBe(data.resources[entry.id]);
@@ -325,13 +326,15 @@ describe('walletModel (SPEC-031 §4.11)', () => {
     expect(model.resources.find((entry) => entry.id === 'wheat')?.atCap).toBe(false);
   });
 
-  it('follows the cargo tier and the quartermaster bonus', () => {
+  it('follows the quartermaster bonus, and not the cargo tier (SPEC-066 §4.7)', () => {
     const data = save((s) => {
       s.ship.cargo = 2;
       s.companions.push({ id: 'quartermaster', level: 1, enabled: true });
     });
     const bonus = COMPANIONS.quartermaster.levels[0]?.cargoBonus ?? 0;
-    expect(walletModel(data).resources[0]?.cap).toBe((UPGRADES.cargo.metrics['cargoCap']?.[2] ?? 0) + bonus);
+    expect(walletModel(data).resources[0]?.cap).toBe(TUNING.CARGO_BASE + bonus);
+    data.companions.length = 0;
+    expect(walletModel(data).resources[0]?.cap).toBe(400);
   });
 
   it('counts a disabled quartermaster, exactly as Economy.cargoCap does', () => {
@@ -342,7 +345,7 @@ describe('walletModel (SPEC-031 §4.11)', () => {
       s.companions.push({ id: 'quartermaster', level: 1, enabled: false });
     });
     const bonus = COMPANIONS.quartermaster.levels[0]?.cargoBonus ?? 0;
-    const base = UPGRADES.cargo.metrics['cargoCap']?.[data.ship.cargo] ?? 0;
+    const base = TUNING.CARGO_BASE;
     expect(walletModel(data).resources[0]?.cap).toBe(base + bonus);
   });
 });
@@ -1269,7 +1272,7 @@ describe('upgradeDeltaText (SPEC-035 §4.12)', () => {
     expect(upgradeDeltaText('fuelMult', 1, 0.9)).toBe('Fuel use −10 %');
     expect(upgradeDeltaText('hullHp', 100, 150)).toBe('Hull 100 → 150');
     expect(upgradeDeltaText('shieldHp', 40, 80)).toBe('Shield 40 → 80');
-    expect(upgradeDeltaText('cargoCap', 400, 600)).toBe('Cargo 400 → 600');
+    expect(upgradeDeltaText('packSlots', 20, 22)).toBe('Pack slots 20 → 22');
     expect(upgradeDeltaText('damage', 10, 13)).toBe('Gun damage 10 → 13');
     expect(upgradeDeltaText('fireRate', 4, 5)).toBe('Fire rate 4 → 5/s');
   });
@@ -1518,7 +1521,7 @@ describe('ship role and gate lines (SPEC-039 §4.5)', () => {
     expect(shipRoleText('shield')).toBe('Flight: shield points');
     expect(shipRoleText('weapon')).toBe('Flight: nose guns');
     expect(shipRoleText('engine')).toBe('Flight time and fuel per jump');
-    expect(shipRoleText('cargo')).toBe('The hold, on every planet');
+    expect(shipRoleText('cargo')).toBe('Pack slots, on every planet');
   });
 
   it('marks the shield Required for Ferrum until the save meets the gate', () => {
@@ -2038,7 +2041,7 @@ describe('the boss frame, the target frame and the panel lines (SPEC-042 §4.7, 
 import { hash32 } from '@/core/Rng';
 import { CONTRACT_IDS, CONTRACTS, type MissionBonus } from '@/data/index';
 import { contractFor } from '@/systems/Missions';
-import { bonusLine, bonusRewardText, bonusText, contractLabel, timeText } from '@/systems/UiHelpers';
+import { bonusLine, bonusRewardText, bonusText, contractLabel, depotLossText, timeText } from '@/systems/UiHelpers';
 
 /** A save with chapter 1 finished and `c1_m2` among the done. */
 function chapterOneDone(): Save {
@@ -2106,6 +2109,53 @@ describe('bonus, contract and time texts (SPEC-043 §4.2, §4.3, §4.5)', () => 
     expect(rewardsText(MISSIONS.c1_m2.rewards, true)).toBe('+75 XP · +7 ◈');
     expect(rewardsText(MISSIONS.c1_m2.rewards, true, false)).toBe('+75 XP · +7 ◈');
     expect(rewardsText(MISSIONS.c1_s2.rewards)).toBe('+70 XP · +5 ◈ · Proximity Mine ×2');
+  });
+});
+
+describe('a boss contract pays half its tokens (SPEC-066 §4.5)', () => {
+  /** A save with chapter 5 finished and the Queen among the done. */
+  function chapterFiveDone(): Save {
+    const save = newSave(0, CREATION, 42, 0);
+    save.progress.missionsDone.push('c5_m1', 'c5_m2', 'c5_m3');
+    save.progress.flags.push('chapter5_done');
+    return save;
+  }
+
+  it('contractLabel names both shares on a boss mission, and keeps the single share elsewhere', () => {
+    const save = chapterFiveDone();
+    for (let landing = 1; landing <= 6; landing++) {
+      const id = contractFor(save, MISSIONS.c5_m3, landing);
+      expect(id).not.toBeNull();
+      expect(contractLabel(save, MISSIONS.c5_m3, landing)).toBe(
+        `Contract · ${CONTRACTS[id as keyof typeof CONTRACTS].name} · 75 % XP, 50 % tokens + 20 lithium`,
+      );
+      expect(contractLabel(save, MISSIONS.c5_m3, landing)).toMatch(/^Contract · .+ · 75 % XP, 50 % tokens \+ 20 lithium$/);
+    }
+    const one = chapterOneDone();
+    const id = contractFor(one, MISSIONS.c1_m2, 1);
+    expect(contractLabel(one, MISSIONS.c1_m2, 1)).toBe(`Contract · ${CONTRACTS[id as keyof typeof CONTRACTS].name} · 75 % + 20 lithium`);
+  });
+
+  it('rewardsText and the banner print the boss contract’s 50 % token share', () => {
+    expect(rewardsText(MISSIONS.c5_m3.rewards, true, true, 0.5)).toBe('+450 XP · +50 ◈ · +20 lithium');
+    // The default share is the 0.75 every other contract pays.
+    expect(rewardsText(MISSIONS.c1_m2.rewards, true, true)).toBe('+112 XP · +11 ◈ · +20 lithium');
+    expect(completionLines(MISSIONS.c5_m3, true, null, { contract: 'swarm' }).rewards).toBe(
+      '+450 XP · +50 tokens · +20 lithium · contract',
+    );
+    expect(completionLines(MISSIONS.c1_m2, true, null, { contract: 'swarm' }).rewards).toBe(
+      '+112 XP · +11 tokens · +20 lithium · contract',
+    );
+  });
+});
+
+describe('depotLossText (SPEC-066 §4.8, E124)', () => {
+  it('reads Depot lost: and the list in resource order, and null when nothing was taken', () => {
+    expect(depotLossText({ oil: 30, lithium: 9 })).toBe('Depot lost: 30 oil · 9 lithium');
+    expect(depotLossText({ lithium: 9, oil: 30 })).toBe('Depot lost: 30 oil · 9 lithium');
+    expect(depotLossText({ oil: 30 })).toBe('Depot lost: 30 oil');
+    expect(depotLossText({})).toBeNull();
+    expect(depotLossText({ wheat: 0 })).toBeNull();
   });
 });
 

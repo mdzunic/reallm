@@ -537,15 +537,16 @@ export const MISSIONS = {
   c5_s1: {
     id: 'c5_s1',
     title: 'Egg Hunt',
-    brief: 'Egg clusters line the side tunnels. Fifteen of them and there is no next generation to come looking for Eden.',
+    brief: 'Egg clusters line the side tunnels. Ten of them and there is no next generation to come looking for Eden.',
     type: 'side',
     chapter: 5,
     planet: 'hive',
     scene: 'surface',
     requires: [{ kind: 'mission', id: 'c5_m1' }],
-    stages: [[{ kind: 'kill', enemy: 'hive_egg', amount: 15 }]],
+    // SPEC-066 §4.6: ten eggs, par 240 s (was fifteen and 360 s); rewards unchanged.
+    stages: [[{ kind: 'kill', enemy: 'hive_egg', amount: 10 }]],
     rewards: { xp: 200, tokens: 20, items: [{ itemId: 'plasma_cell', qty: 2 }] },
-    bonus: { kind: 'par', seconds: 360, reward: { resources: { lithium: 40 } } },
+    bonus: { kind: 'par', seconds: 240, reward: { resources: { lithium: 40 } } },
     dialogue: { onAccept: 'c5_s1_accept', onComplete: 'c5_s1_done' },
   },
 
