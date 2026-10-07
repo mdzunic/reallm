@@ -123,7 +123,7 @@ import {
   type PathGrid,
 } from '@/systems/Guidance';
 import { nearestInteractable, type Interactable } from '@/systems/Interactables';
-import { fillQuickFromPickup, quickEligible, refillQuick, type SlotView } from '@/systems/Loadout';
+import { fillQuickFromPickup, quickEligible, quickSlotEmpty, refillQuick, stepQuickDry, type SlotView } from '@/systems/Loadout';
 import {
   featurePieces,
   generateLayout,
@@ -205,6 +205,8 @@ import {
   padEmptyText,
   pickupText,
   predecessorCacheText,
+  QUICK_DRY_TEXT,
+  QUICK_PICK_IN_COMBAT_TEXT,
   quitNote,
   remainsFullText,
   remainsLostText,
@@ -1026,6 +1028,11 @@ export class SurfaceScene extends UiScene<'surface'> {
   #qbLength = 0;
   /** §4.4: `world.time` of the last toast per key (the text by default) — one per 3 s each. */
   readonly #quickToastAt = new Map<string, number>();
+  /**
+   * SPEC-066 §4.2 (E122): the slots that ran dry in this fight — they stay
+   * empty while `combat.inCombat` holds, and refill once it closes.
+   */
+  readonly #quickDry: Record<QuickSlot, boolean> = { heal: false, explosive: false, utility: false };
   /** §4.6: the open picker's close function, or `null`. */
   #pickerClose: (() => void) | null = null;
   /** SPEC-029 §4.8: world time the next explosive use is allowed. */
@@ -2867,7 +2874,8 @@ export class SurfaceScene extends UiScene<'surface'> {
       info['exhausted'] = p.exhausted ? 1 : 0;
       info['loud'] = isLoud(p, this.#world.time) ? 1 : 0;
       info['burrowRing'] = this.#burrowRing(this.#world);
-      // SPEC-066 §4.1: the heal lock's seconds left.
+      // SPEC-066 §4.2: the fight window, and the heal lock's seconds left.
+      info['inCombat'] = this.#combat?.inCombat === true ? 1 : 0;
       info['healLockLeft'] = Math.round(healLockLeft(p, this.#world.time) * 100) / 100;
     }
     info['speed'] = Math.round(this.#speed * 100) / 100;
@@ -4056,6 +4064,8 @@ export class SurfaceScene extends UiScene<'surface'> {
       this.#qbLength = 0;
       return;
     }
+    // SPEC-066 §4.2: the in-combat rule, before any press of this step.
+    if (this.#save !== null) stepQuickDry(this.#save, this.#quickDry, combat.inCombat);
     const loadout = combat.loadout;
     const time = world.time;
     const touch = this.services.input.state.scheme === 'touch';
@@ -4114,8 +4124,9 @@ export class SurfaceScene extends UiScene<'surface'> {
    * refuse an empty one or a heal at full HP with a throttled toast, and keep
    * the id when the last one is spent so the bar reads `×0`.
    *
-   * SPEC-066 §4.1: the refusals run in order — an empty slot, then the heal
-   * lock, then a heal at full HP.
+   * SPEC-066 §4.1, §4.2: the refusals run in order — a dry slot (or an empty
+   * one in a fight), then the heal lock, then a heal at full HP — and in a
+   * fight nothing here writes `save.quick` (E122).
    */
   #useQuick(slot: QuickSlot): void {
     const world = this.#world;
@@ -4125,6 +4136,12 @@ export class SurfaceScene extends UiScene<'surface'> {
     if (world === null || economy === null || combat === null || save === null) return;
     if (!world.player.alive) return;
 
+    const inCombat = combat.inCombat;
+    // SPEC-066 §4.2: a dry slot waits for the fight to end, whatever the pack holds.
+    if (this.#quickDry[slot] || (inCombat && quickSlotEmpty(save, slot))) {
+      this.#quickToast(refillQuick(save, slot) !== null ? QUICK_DRY_TEXT : QUICK_EMPTY_TEXT[slot]);
+      return;
+    }
     let id = save.quick[slot];
     if (id === null || economy.count(id) === 0) {
       const refill = refillQuick(save, slot);
@@ -4177,7 +4194,8 @@ export class SurfaceScene extends UiScene<'surface'> {
     combat.applyConsumable(result.effect);
     this.services.events.emit('quick:used', { slot, itemId: id });
     // §4.4: the id stays when nothing replaces it, so the bar reads `×0`.
-    if (economy.count(id) === 0) save.quick[slot] = refillQuick(save, slot) ?? id;
+    // SPEC-066 §4.2: in a fight it stays regardless, and goes dry next step.
+    if (economy.count(id) === 0 && !inCombat) save.quick[slot] = refillQuick(save, slot) ?? id;
   }
 
   /**
@@ -4231,7 +4249,8 @@ export class SurfaceScene extends UiScene<'surface'> {
     this.#throwReadyAt = world.time + EXPLOSIVE_USE_SECONDS;
     this.services.events.emit('quick:used', { slot: 'utility', itemId: id });
     // §4.4: the id stays when nothing replaces it, so the bar reads `×0`.
-    if (economy.count(id) === 0) save.quick.utility = refillQuick(save, 'utility') ?? id;
+    // SPEC-066 §4.2: in a fight it stays regardless, and goes dry next step.
+    if (economy.count(id) === 0 && !combat.inCombat) save.quick.utility = refillQuick(save, 'utility') ?? id;
   }
 
   /**
@@ -4262,7 +4281,8 @@ export class SurfaceScene extends UiScene<'surface'> {
     this.#throwReadyAt = world.time + EXPLOSIVE_USE_SECONDS;
     this.services.events.emit('quick:used', { slot: 'explosive', itemId: id });
     // §4.4: the id stays when nothing replaces it, so the bar reads `×0`.
-    if (economy.count(id) === 0) save.quick.explosive = refillQuick(save, 'explosive') ?? id;
+    // SPEC-066 §4.2: in a fight it stays regardless, and goes dry next step.
+    if (economy.count(id) === 0 && !combat.inCombat) save.quick.explosive = refillQuick(save, 'explosive') ?? id;
   }
 
   /** §4.8 (touch): the nearest live enemy within `range` with a clear line. */
@@ -4306,6 +4326,11 @@ export class SurfaceScene extends UiScene<'surface'> {
     const world = this.#world;
     if (save === null || economy === null || world === null) return;
     if (this.#modalOpen > 0 || this.#terminalOpen || this.#holds > 0 || this.#deathAt !== null) return;
+    // SPEC-066 §4.2: the picker reassigns a slot, and nothing does that mid-fight.
+    if (this.#combat?.inCombat === true) {
+      this.#quickToast(QUICK_PICK_IN_COMBAT_TEXT);
+      return;
+    }
 
     const choices: QuickChoice[] = [];
     for (const entry of save.inventory) {
@@ -6430,7 +6455,8 @@ export class SurfaceScene extends UiScene<'surface'> {
         const id = save.quick[slot];
         const entry = this.#quickScratch[slot];
         entry.itemId = id;
-        entry.qty = id === null ? 0 : economy.count(id);
+        // SPEC-066 §4.2 (66-d): a dry slot reads `×0` whatever the pack holds.
+        entry.qty = id === null || this.#quickDry[slot] ? 0 : economy.count(id);
       }
       m.quick = this.#quickScratch;
     }
@@ -7747,11 +7773,12 @@ export class SurfaceScene extends UiScene<'surface'> {
       ),
       // SPEC-028 §4.4: a pickup of an eligible item fills an empty or run-out
       // quick slot (28-f: a reward spilled on the ground fills it on pickup).
+      // SPEC-066 §4.2 (E122): not in a fight — the slot waits for it to end.
       bus.on(
         'inventory:changed',
         ({ itemId, qty }) => {
           const save = this.#save;
-          if (qty > 0 && save !== null) fillQuickFromPickup(save, itemId);
+          if (qty > 0 && save !== null && this.#combat?.inCombat !== true) fillQuickFromPickup(save, itemId);
         },
         this,
       ),

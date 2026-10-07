@@ -8,10 +8,13 @@ import {
   fillQuickFromPickup,
   Loadout,
   quickEligible,
+  quickSlotEmpty,
   refillQuick,
+  stepQuickDry,
   SWITCH_SECONDS,
   type SlotView,
 } from '@/systems/Loadout';
+import type { QuickSlot } from '@/data/index';
 import { harness, MARINE, STEP } from './combatFixtures';
 
 function make(patch?: (save: Save) => void): { save: Save; events: EventBus<GameEvents>; loadout: Loadout } {
@@ -176,6 +179,96 @@ describe('quick slots (§4.4)', () => {
     // A stocked slot is left alone.
     save.inventory.push({ itemId: 'wheat_ration', qty: 3 });
     expect(fillQuickFromPickup(save, 'wheat_ration')).toBe(false);
+    expect(save.quick.heal).toBe('medkit');
+  });
+});
+
+describe('quick slots in a fight (SPEC-066 §4.2)', () => {
+  /** A save carrying exactly `inventory`, its slots set to `quick`. */
+  function carrying(
+    inventory: Save['inventory'],
+    quick: Partial<Save['quick']> = {},
+  ): { save: Save; dry: Record<QuickSlot, boolean> } {
+    const { save } = make((s) => {
+      s.inventory.length = 0;
+      s.inventory.push(...inventory);
+      Object.assign(s.quick, { heal: null, explosive: null, utility: null }, quick);
+    });
+    return { save, dry: { heal: false, explosive: false, utility: false } };
+  }
+
+  it('quickSlotEmpty: no item, or its item at count 0', () => {
+    const { save } = carrying([{ itemId: 'medkit', qty: 2 }, { itemId: 'frag_grenade', qty: 0 }], {
+      heal: 'medkit',
+      explosive: 'frag_grenade',
+      utility: null,
+    });
+    expect(quickSlotEmpty(save, 'utility')).toBe(true);
+    expect(quickSlotEmpty(save, 'explosive')).toBe(true);
+    expect(quickSlotEmpty(save, 'heal')).toBe(false);
+    save.quick.heal = 'wheat_ration'; // carried nowhere at all
+    expect(quickSlotEmpty(save, 'heal')).toBe(true);
+  });
+
+  it('in combat an empty slot turns dry and a full one does not, and nothing is written', () => {
+    const { save, dry } = carrying([{ itemId: 'medkit', qty: 0 }, { itemId: 'wheat_ration', qty: 2 }, { itemId: 'frag_grenade', qty: 1 }], {
+      heal: 'medkit',
+      explosive: 'frag_grenade',
+    });
+    stepQuickDry(save, dry, true);
+    expect(dry).toEqual({ heal: true, explosive: false, utility: true });
+    // E122: the rations do not move into the slot while the fight lasts.
+    expect(save.quick).toEqual({ heal: 'medkit', explosive: 'frag_grenade', utility: null });
+  });
+
+  it('a dry slot whose own item reappears stays dry while in combat (66-d)', () => {
+    const { save, dry } = carrying([{ itemId: 'medkit', qty: 0 }], { heal: 'medkit' });
+    stepQuickDry(save, dry, true);
+    expect(dry.heal).toBe(true);
+    (save.inventory[0] as { qty: number }).qty = 1; // a medkit picked up mid-fight
+    stepQuickDry(save, dry, true);
+    expect(dry.heal).toBe(true);
+    expect(save.quick.heal).toBe('medkit');
+  });
+
+  it('out of combat a dry, empty heal slot refills in QUICK_PREFERENCE order, and keeps its id when nothing is eligible', () => {
+    const { save, dry } = carrying([{ itemId: 'medkit', qty: 0 }, { itemId: 'wheat_ration', qty: 2 }], { heal: 'medkit' });
+    stepQuickDry(save, dry, true);
+    stepQuickDry(save, dry, false);
+    expect(dry.heal).toBe(false);
+    expect(save.quick.heal).toBe('wheat_ration');
+
+    // A medkit outranks the ration once the window closes.
+    const both = carrying([{ itemId: 'medkit', qty: 1 }, { itemId: 'wheat_ration', qty: 2 }], { heal: null });
+    stepQuickDry(both.save, both.dry, true);
+    expect(both.dry.heal).toBe(true);
+    stepQuickDry(both.save, both.dry, false);
+    expect(both.save.quick.heal).toBe('medkit');
+
+    // Nothing eligible: the id stays, so the bar reads `×0`.
+    const none = carrying([{ itemId: 'medkit', qty: 0 }], { heal: 'medkit' });
+    stepQuickDry(none.save, none.dry, true);
+    stepQuickDry(none.save, none.dry, false);
+    expect(none.dry.heal).toBe(false);
+    expect(none.save.quick.heal).toBe('medkit');
+  });
+
+  it('a dry slot that holds its item again is cleared without a reassignment', () => {
+    const { save, dry } = carrying([{ itemId: 'wheat_ration', qty: 0 }, { itemId: 'medkit', qty: 3 }], { heal: 'wheat_ration' });
+    stepQuickDry(save, dry, true);
+    (save.inventory[0] as { qty: number }).qty = 1;
+    stepQuickDry(save, dry, false);
+    expect(dry.heal).toBe(false);
+    expect(save.quick.heal).toBe('wheat_ration'); // the medkits wait for it to run out again
+  });
+
+  it('a slot that was never dry is never written', () => {
+    // An empty slot out of combat stays as it is: the press-time refill and the
+    // pickup fill are SPEC-028's, and they run out of combat as before.
+    const { save, dry } = carrying([{ itemId: 'medkit', qty: 0 }, { itemId: 'wheat_ration', qty: 2 }], { heal: 'medkit' });
+    stepQuickDry(save, dry, false);
+    stepQuickDry(save, dry, false);
+    expect(dry).toEqual({ heal: false, explosive: false, utility: false });
     expect(save.quick.heal).toBe('medkit');
   });
 });

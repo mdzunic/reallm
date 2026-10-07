@@ -128,3 +128,57 @@ test('1. the heal lock: a second heal waits 8 s, says so, and the slot wears the
   await page.keyboard.press('KeyQ');
   await expect(healCount(page)).toHaveText('×1');
 });
+
+test('2. one stack per fight: an emptied slot stays dry, refuses the picker, and refills after', async ({ page }) => {
+  test.setTimeout(150_000);
+  await autoFireOff(page);
+  await land(page, {
+    inventory: [
+      { itemId: 'medkit', qty: 1 },
+      { itemId: 'wheat_ration', qty: 2 },
+    ],
+    quick: { heal: 'medkit' },
+  });
+  await expect(page.getByTestId('qb-heal')).toContainText('Medkit');
+
+  for (let i = 0; i < 10 && (await sceneInfo(page))['inCombat'] !== 1; i++) {
+    await press(page, 'surface-spawn-charger');
+    await page.waitForTimeout(300);
+  }
+  expect((await sceneInfo(page))['inCombat']).toBe(1);
+  await hurt(page, 1);
+  await page.keyboard.press('KeyQ');
+  await expect(healCount(page)).toHaveText('×0');
+  await expect(page.getByTestId('qb-heal')).toContainText('Medkit');
+
+  // E122: the rations wait in the pack, and the press says why.
+  await page.keyboard.press('KeyQ');
+  await expect.poll(async () => toastTexts(page)).toContain('Refills after the fight');
+  expect(await packCount(page, 'wheat_ration')).toBe(2);
+  await expect(healCount(page)).toHaveText('×0');
+
+  // The picker would reassign the slot, so it does not open mid-fight.
+  await page.evaluate(() => {
+    const heal = document.querySelector('[data-testid="qb-heal"]');
+    if (heal === null) throw new Error('qb-heal missing');
+    heal.dispatchEvent(new PointerEvent('pointerdown', { button: 2, bubbles: true }));
+    heal.dispatchEvent(new PointerEvent('pointerup', { button: 2, bubbles: true }));
+    heal.dispatchEvent(new MouseEvent('contextmenu', { button: 2, bubbles: true }));
+  });
+  await expect.poll(async () => toastTexts(page)).toContain('Swap items after the fight');
+  await expect(page.getByTestId('quick-picker')).toHaveCount(0);
+
+  // The fight ends: no aggroed enemy within 20 m for 4 s. Then the slot refills.
+  await expect
+    .poll(
+      async () => {
+        await press(page, 'surface-smite');
+        return (await sceneInfo(page))['inCombat'];
+      },
+      { timeout: 60_000, intervals: [300] },
+    )
+    .toBe(0);
+  await expect(page.getByTestId('qb-heal')).toContainText('Ration');
+  await expect(healCount(page)).toHaveText('×2');
+  expect(await packCount(page, 'wheat_ration')).toBe(2);
+});

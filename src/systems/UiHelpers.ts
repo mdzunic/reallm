@@ -1029,6 +1029,12 @@ export function healLockedText(left: number): string {
   return `Heal ready in ${seconds(left)}`;
 }
 
+/** SPEC-066 §4.2 (E122): a press on a slot that ran dry in this fight, with something in the pack to refill it. */
+export const QUICK_DRY_TEXT = 'Refills after the fight';
+
+/** SPEC-066 §4.2: the picker refused while `inCombat` holds — nothing reassigns a slot mid-fight. */
+export const QUICK_PICK_IN_COMBAT_TEXT = 'Swap items after the fight';
+
 /** SPEC-056 56-a: a relic's equip refused because the piece it would displace has no room in the pack. */
 export function makeRoomText(displaced: ItemId): string {
   return `Pack full — make room for ${ITEM_TABLE[displaced].name} first`;
