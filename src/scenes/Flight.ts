@@ -15,6 +15,7 @@ import { clampTexture } from '@/core/Assets';
 import type { EventBus, GameEvents } from '@/core/Events';
 import type { InputState } from '@/core/Input';
 import { log } from '@/core/Log';
+import { PressEdges } from '@/core/PressEdges';
 import { holdWakeLock } from '@/core/WakeLock';
 import { newSave, type CharacterCreation, type Save } from '@/core/Save';
 import type { GameServices } from '@/core/Services';
@@ -209,6 +210,12 @@ export class FlightScene extends UiScene<'flight'> {
     mouseSteer: false,
   };
   readonly #aimScratch = new THREE.Vector3();
+  /**
+   * SPEC-012 §4.3's press-edge sampler (review 2026-10, B-03): `justPressed`
+   * is a per-frame latch, so read per step it moved the throttle two notches
+   * on every two-step frame (the 30 fps phone floor).
+   */
+  readonly #edges = new PressEdges();
 
   constructor(services: GameServices) {
     super(services, 'flight', 'flight');
@@ -818,9 +825,10 @@ export class FlightScene extends UiScene<'flight'> {
     const flight = this.#flight;
     if (flight === null) return;
     const input = this.services.input.state;
+    this.#edges.beginStep(input.buttons, this.services.loop.stats.frame);
     // SPEC-014 AC-82: the touch pause button pauses through the input action;
     // Escape/P stay with the composition root's toggle.
-    if (input.scheme === 'touch' && input.buttons.pause.justPressed) {
+    if (input.scheme === 'touch' && this.#edges.pressed('pause')) {
       this.services.scenes.pause();
     }
     // SPEC-036 §4.3, E65: the rotate block holds the trip — no `flight.update`,
@@ -887,8 +895,8 @@ export class FlightScene extends UiScene<'flight'> {
     frame.steerY = this.services.settings.get().invertFlightY ? -state.move.y : state.move.y;
     frame.fire = state.buttons.fire.down;
     frame.autoFire = state.autoFire;
-    frame.throttleUp = state.buttons.throttleUp.justPressed;
-    frame.throttleDown = state.buttons.throttleDown.justPressed;
+    frame.throttleUp = this.#edges.pressed('throttleUp');
+    frame.throttleDown = this.#edges.pressed('throttleDown');
     frame.mouseSteer = this.services.settings.flightMouseSteer && state.scheme === 'keyboard' && state.aim.hasPointer;
     // SPEC-036 §4.1: only the keyboard scheme aims by the mouse. A finger has
     // no hover, so on touch the guns look down the ship's own lane — the

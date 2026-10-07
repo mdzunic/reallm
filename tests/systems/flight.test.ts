@@ -9,6 +9,8 @@
 // `Rng(7)`; the loop steps a fixed 1/60 s like the game's own update.
 import { describe, expect, it } from 'vitest';
 import { EventBus, type GameEvents } from '@/core/Events';
+import { Input } from '@/core/Input';
+import { PressEdges } from '@/core/PressEdges';
 import { QUALITY } from '@/core/Renderer';
 import { Rng } from '@/core/Rng';
 import { newSave, type CharacterCreation, type Save } from '@/core/Save';
@@ -196,6 +198,57 @@ describe('duration by engine tier and throttle', () => {
     expect(w.flight.phase).toBe('arrived');
     expect(w.of('flight:arrived')).toEqual([{ planet: 'cinder4' }]);
     expect(w.flight.time).toBeCloseTo(LAUNCH_SECONDS + 90, 0);
+  });
+
+  // Review 2026-10, B-03: the flight scene reads the throttle through
+  // `PressEdges`, as the surface reads its presses. `justPressed` is a
+  // per-frame latch, so a frame of two fixed steps (30 fps rAF, every frame on
+  // a phone in Low Power Mode) once moved the throttle two notches per tap.
+  it('one tap is one notch on a two-step frame: 0.8 → 1, not 1.2 (PressEdges)', () => {
+    /** `Game.#frame` with the scene's own wiring: begin, N steps, end. */
+    function frames(flight: Flight, direct: boolean): (steps: number) => void {
+      const input = new Input();
+      const edges = new PressEdges();
+      let frame = 0;
+      const tap = (steps: number): void => {
+        input.beginFrame(1 / 30);
+        for (let i = 0; i < steps; i++) {
+          edges.beginStep(input.state.buttons, frame);
+          const buttons = input.state.buttons;
+          flight.update(DT, {
+            ...IDLE,
+            throttleUp: direct ? buttons.throttleUp.justPressed : edges.pressed('throttleUp'),
+            throttleDown: direct ? buttons.throttleDown.justPressed : edges.pressed('throttleDown'),
+          });
+        }
+        input.endFrame(steps > 0);
+        frame++;
+      };
+      return (steps: number): void => {
+        input.pressAction('throttleDown', 'touch');
+        tap(steps);
+        input.releaseAction('throttleDown', 'touch');
+        tap(1);
+        expect(flight.ship.throttle).toBe(0.8);
+        input.pressAction('throttleUp', 'touch');
+        tap(steps);
+        input.releaseAction('throttleUp', 'touch');
+        tap(1);
+      };
+    }
+
+    const sampled = world().flight;
+    step(sampled, LAUNCH_SECONDS + DT);
+    frames(sampled, false)(2);
+    expect(sampled.ship.throttle).toBe(1);
+
+    // The latch read straight off the buttons is the hazard PressEdges exists for.
+    const direct = world().flight;
+    step(direct, LAUNCH_SECONDS + DT);
+    frames(direct, true)(1);
+    expect(direct.ship.throttle).toBe(1);
+    frames(direct, true)(2);
+    expect(direct.ship.throttle).toBe(1.2);
   });
 
   it('lerps a throttle change in over one second, not instantly (AC-55)', () => {
