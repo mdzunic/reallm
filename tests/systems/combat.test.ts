@@ -1531,8 +1531,12 @@ describe('the story difficulty (SPEC-059 §4.2.2)', () => {
     }
   });
 
-  it('keeps normal’s enemy HP and casual and hard their hits', () => {
-    expect(on('story').spawn('dune_wurm', 50, 0).maxHp).toBe(ENEMIES.dune_wurm.hp);
+  // Review 2026-10 (G-13): story kept normal's enemy HP, so a boss on the
+  // starter rifle was one to two minutes of shooting at no risk.
+  it('spawns surface enemies at round(hp × 0.6), and keeps casual and hard their hits', () => {
+    expect(on('story').spawn('dune_wurm', 50, 0).maxHp).toBe(Math.round(ENEMIES.dune_wurm.hp * 0.6));
+    expect(on('story').spawn('wurmling', 50, 0, true).maxHp).toBe(Math.round(ENEMIES.wurmling.hp * TUNING.ELITE_HP_MULT * 0.6));
+    expect(on('normal').spawn('dune_wurm', 50, 0).maxHp).toBe(ENEMIES.dune_wurm.hp);
     expect(CASUAL_WEATHER_MULT).toBe(0.7);
     const casual = on('casual');
     casual.combat.damagePlayer(10, { kind: 'enemy', enemyId: 'dune_wurm' });

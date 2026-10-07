@@ -91,13 +91,15 @@ export const BELOW_HALF_SIZE = 48;
  * SPEC-059 §4.2.1 (*initial tuning* for the story row): the three columns that
  * were casual's alone — the weather's share, the allies' share of enemy damage
  * and the assists — and `story`, which zeroes every hit on the player and the
- * allies but keeps enemy HP and the elite chance: the fights still happen.
+ * allies but keeps the elite chance: the fights still happen. Review 2026-10
+ * (G-13): story's enemy HP is ×0.6 — at normal's, a plot-first player on the
+ * starter rifle stood still in front of a boss for one to two minutes.
  *
  * Keyed by the four names; `tests/data/tuning.test.ts` pins the keys to
  * `DIFFICULTIES`, which keeps this file free of imports.
  */
 export const DIFFICULTY_RULES = {
-  story: { enemyHpMult: 1, enemyDamageMult: 0, eliteChanceMult: 1, deathLoss: 0, weatherMult: 0, allyDamageMult: 0, assisted: true },
+  story: { enemyHpMult: 0.6, enemyDamageMult: 0, eliteChanceMult: 1, deathLoss: 0, weatherMult: 0, allyDamageMult: 0, assisted: true },
   casual: { enemyHpMult: 1, enemyDamageMult: 0.7, eliteChanceMult: 1, deathLoss: 0, weatherMult: 0.7, allyDamageMult: 1, assisted: true },
   normal: {
     enemyHpMult: 1,

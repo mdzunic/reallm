@@ -3906,7 +3906,8 @@ describe('the commendations (SPEC-059 §4.4.1)', () => {
 describe('the story row (SPEC-059 §4.2.1)', () => {
   it('zeroes every hit on the player and the allies and keeps the fights', () => {
     expect(DIFFICULTY_RULES.story).toEqual({
-      enemyHpMult: 1,
+      // Review 2026-10 (G-13): ×0.6, so a threat-free boss is not two minutes of filler.
+      enemyHpMult: 0.6,
       enemyDamageMult: 0,
       eliteChanceMult: 1,
       deathLoss: 0,
@@ -3914,8 +3915,8 @@ describe('the story row (SPEC-059 §4.2.1)', () => {
       allyDamageMult: 0,
       assisted: true,
     });
-    // Its enemy HP and elite chance are normal's.
-    expect(DIFFICULTY_RULES.story.enemyHpMult).toBe(DIFFICULTY_RULES.normal.enemyHpMult);
+    // Its elite chance is normal's; its enemy HP is below every other row's.
     expect(DIFFICULTY_RULES.story.eliteChanceMult).toBe(DIFFICULTY_RULES.normal.eliteChanceMult);
+    expect(DIFFICULTY_RULES.story.enemyHpMult).toBeLessThan(DIFFICULTY_RULES.casual.enemyHpMult);
   });
 });
