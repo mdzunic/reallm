@@ -12,6 +12,7 @@ import {
   chitinNormalMap,
   EnemyMeshes,
   INSTANCES_PER_PART,
+  RECIPE_DISPLACEMENT,
   RECIPE_TRIANGLE_CAP,
 } from '@/views/ProceduralMeshes';
 
@@ -53,6 +54,54 @@ describe('sculpted recipes (AC-37 … AC-40)', () => {
       dispose();
     });
   }
+});
+
+describe('the scav stand-in (SPEC-064 §4.1, §6.2)', () => {
+  it('is a person in at most 4 parts and 400 triangles, never sculpted', () => {
+    expect(MESH_RECIPE_IDS.indexOf('scav')).toBe(MESH_RECIPE_IDS.indexOf('egg') + 1);
+    expect(RECIPE_TRIANGLE_CAP.scav).toBe(400);
+    expect(RECIPE_DISPLACEMENT.scav).toBe(0);
+    const { parts, dispose } = partsOf('scav');
+    expect(parts).toHaveLength(4);
+    const triangles = parts.reduce((n, part) => n + (part.geometry.index as THREE.BufferAttribute).count / 3, 0);
+    expect(triangles).toBeLessThanOrEqual(400);
+    // About 1.8 m tall, from the ground up, the rifle out in front along +X.
+    const bounds = new THREE.Box3();
+    for (const part of parts) {
+      part.geometry.computeBoundingBox();
+      bounds.union(part.geometry.boundingBox as THREE.Box3);
+    }
+    expect(bounds.min.y).toBeCloseTo(0, 6);
+    expect(bounds.max.y).toBeGreaterThan(1.75);
+    expect(bounds.max.y).toBeLessThan(1.85);
+    expect(bounds.max.x).toBeCloseTo(0.45 + 0.65 / 2, 6);
+    dispose();
+  });
+
+  it('keeps its box corners where §4.1 puts them — displacement 0 moves no vertex', () => {
+    const { parts, dispose } = partsOf('scav');
+    // The rifle: a 0.65 × 0.07 × 0.1 m box at (0.45, 1.08, −0.12), corners exact.
+    const rifle = parts.find((part) => {
+      part.geometry.computeBoundingBox();
+      const box = part.geometry.boundingBox as THREE.Box3;
+      return Math.abs(box.max.x - box.min.x - 0.65) < 1e-6;
+    }) as THREE.InstancedMesh;
+    const box = rifle.geometry.boundingBox as THREE.Box3;
+    expect(box.min.toArray().map((v) => Number(v.toFixed(6)))).toEqual([0.125, 1.045, -0.17]);
+    expect(box.max.toArray().map((v) => Number(v.toFixed(6)))).toEqual([0.775, 1.115, -0.07]);
+    dispose();
+  });
+
+  it('wears a dark visor that does not glow, and the body material elsewhere', () => {
+    const { parts, dispose } = partsOf('scav');
+    const materials = new Set(parts.map((part) => part.material as THREE.MeshStandardMaterial));
+    expect(materials.size).toBe(2); // the body, and the visor's own
+    const visor = [...materials].find((material) => material.color.getHex() !== 0xffffff) as THREE.MeshStandardMaterial;
+    expect(visor.color.r + visor.color.g + visor.color.b).toBeLessThan(0.05);
+    expect(visor.emissive.getHex()).toBe(0);
+    expect(visor.customProgramCacheKey()).toBe('enemy/3');
+    dispose();
+  });
 });
 
 describe('the shared chitin normal map (AC-41)', () => {

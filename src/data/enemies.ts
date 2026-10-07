@@ -203,7 +203,9 @@ export const ENEMIES = {
     leashRadius: 45,
     xp: 10,
     loot: 'cinder4_ranged',
-    look: { recipe: 'spitter', scale: 1, tint: '#4f4a3d' },
+    // SPEC-064 §3: a person, not a spitter. The scavenger bodies' tint; with
+    // the character model in, `views/ScavRaiders.ts` draws it in the suit.
+    look: { recipe: 'scav', scale: 1, tint: '#4f4a3d' },
     eliteAllowed: true,
   },
   dune_wurm: {

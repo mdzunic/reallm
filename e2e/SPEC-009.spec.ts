@@ -241,7 +241,10 @@ test.describe('SPEC-009 content data layer', () => {
     expect(c.idUnions['STORY_FLAGS']).toHaveLength(47);
     expect(c.idUnions['STORY_FLAGS']).toContain('chapter1_done');
     expect(c.idUnions['SPEAKERS']).toEqual(['aria', 'command', 'scav', 'log', 'player', 'warden', 'home']);
-    expect(c.idUnions['MESH_RECIPE_IDS']).toHaveLength(10);
+    // SPEC-064 §3 appends `scav`, the human stand-in Cinder-4's raiders wear
+    // past the skinned pool or with no character model (10 → 11) — a
+    // deliberate pin change.
+    expect(c.idUnions['MESH_RECIPE_IDS']).toHaveLength(11);
     expect(c.idUnions['MUSIC_IDS'].length).toBeGreaterThan(0);
 
     // AC-2: every §4 table is reachable through the barrel. AC-3's `keyof typeof`

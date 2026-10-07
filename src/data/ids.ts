@@ -181,7 +181,9 @@ export type SpeakerId = (typeof SPEAKERS)[number];
 /**
  * Procedural mesh recipes (SPEC-009 §4.3). They live here rather than in
  * `views/` because enemies must compile before any view exists; SPEC-012 §4.9
- * builds the actual meshes from these ids.
+ * builds the actual meshes from these ids. SPEC-064 §3 appends `scav`: the
+ * human stand-in Cinder-4's raiders wear past the skinned pool, or with no
+ * character model.
  */
 export const MESH_RECIPE_IDS = [
   'bug',
@@ -194,6 +196,7 @@ export const MESH_RECIPE_IDS = [
   'titan',
   'queen',
   'egg',
+  'scav',
 ] as const;
 export type ProceduralRecipeId = (typeof MESH_RECIPE_IDS)[number];
 
