@@ -320,6 +320,12 @@ interface ViewOptions {
    * a clone the view owns. Missing (or null) flies a primitive hull (32-a).
    */
   tug?: THREE.Object3D | null;
+  /**
+   * The post chain renders through a multisampled target (`post.samples > 0`).
+   * Three's `Lensflare` copies the framebuffer to test the sun's occlusion,
+   * which a multisampled target refuses, so no flare is hung then (V-17).
+   */
+  msaa?: boolean;
 }
 
 /** An 8×8 tinted noise texture from the planet's palette — no asset behind it. */
@@ -581,8 +587,10 @@ export class FlightView {
 
     // §4.3 / 20-a: the sun past the planet's far shoulder wears a two-element
     // lens flare — but only where the post chain's bloom is there to make it
-    // read; on `low` it would be a hard disc pasted over the sky.
-    if (quality.post !== 'off') {
+    // read; on `low` it would be a hard disc pasted over the sky. Not through
+    // MSAA either: the flare's occlusion test copies the framebuffer, a WebGL
+    // error on a multisampled target every frame (review 2026-10 V-17).
+    if (quality.post !== 'off' && options.msaa !== true) {
       const sun = new THREE.DirectionalLight(0xfff4e2, 0.35);
       sun.position.copy(SUN_POSITION);
       const flare = new Lensflare();

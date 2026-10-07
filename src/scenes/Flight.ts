@@ -298,6 +298,7 @@ export class FlightScene extends UiScene<'flight'> {
       reduceMotion: services.settings.get().reduceMotion,
       rng: visitRng.fork('flight_view'),
       tug,
+      msaa: services.renderer.post.samples > 0,
     });
     this.#view.setLaunch(0);
     // SPEC-032 §4.4: a run skipped at the star map starts on the first update.
