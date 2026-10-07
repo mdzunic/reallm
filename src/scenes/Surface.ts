@@ -4882,6 +4882,8 @@ export class SurfaceScene extends UiScene<'surface'> {
     if (to === 'underground') this.#stopMissionWaves();
     spawn.despawnNear(p.x, p.z, Infinity);
     combat.clearLevel();
+    // Review 2026-10, B-22: the bursts and scorches belong to the floor they fell on.
+    view.fx.clear();
     const left = pickups.clear(p.x, p.z, LOOT_LEFT_RADIUS);
     this.#closeTerminal();
 
