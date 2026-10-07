@@ -31,6 +31,7 @@ import {
   CROSS_TAB_TEXT,
   clampKeep,
   decodeSave,
+  IMPORT_UNAVAILABLE_TEXT,
   crc32,
   DEPOT_KEEP_DEFAULT,
   DEPOT_KEEP_MAX,
@@ -600,6 +601,48 @@ describe('storage that will not cooperate (E8, E9)', () => {
     saves.addPlaytime(10);
     expect(saves.current).toBeNull();
     await expect(saves.exportCode(0)).rejects.toThrow();
+  });
+
+  /**
+   * Review 2026-10, B-20: a memory-only session's run is in no slot on disk,
+   * but it is in one. The menu's New Game reads `list()`, so the slot has to
+   * say so, or a new game wipes the only copy without asking.
+   */
+  it('lists the bound run in its slot when memory-only, so New Game over it asks (B-20)', () => {
+    const saves = new SaveStore(recorder(), null, { window: null });
+    saves.create(1, CREATION);
+    const list = saves.list();
+    expect(list[0]).toEqual({ slot: 0, empty: true });
+    expect(list[1]).toMatchObject({ slot: 1, empty: false, name: 'Vance', level: 1 });
+    expect(list[2]).toEqual({ slot: 2, empty: true });
+  });
+
+  it('begins the next instance from the bound run when memory-only (B-20)', () => {
+    // Every load is `unavailable` here, so the run the session has is the
+    // bound one; there is no disk to archive it to.
+    const saves = new SaveStore(recorder(), null, { window: null });
+    const run = saves.create(0, CREATION, 5);
+    run.progress.flags.push('campaign_done', 'ending_escape');
+    run.progress.endingSeen = true;
+    const next = saves.beginNextIteration(0, CREATION);
+    expect(next?.meta.iteration).toBe(2);
+    expect(next?.meta.seed).toBe(5);
+    expect(next?.meta.lineage[0]).toMatchObject({ iteration: 1, ending: 'escape', name: 'Vance' });
+    expect(saves.current).toBe(next);
+    // Another slot's run is not this one's to continue.
+    expect(saves.beginNextIteration(1, CREATION)).toBeNull();
+  });
+
+  it('says why an import did nothing when memory-only (B-20)', async () => {
+    const fake = fakeStorage();
+    fake.failAlways();
+    const events = recorder();
+    const saves = store(fake, events);
+    events.clear();
+    const code = await encodeJson(JSON.stringify(newSave(0, CREATION, 1, 1_700_000_000_000)));
+    expect(await saves.importCode(code, 0)).toEqual({ ok: false, reason: 'unavailable' });
+    expect(saves.current).toBeNull();
+    expect(events.toasts).toEqual([IMPORT_UNAVAILABLE_TEXT]);
   });
 
   it('loads the backup when main is unusable, rewrites main and toasts (AC-19)', () => {

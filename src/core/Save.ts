@@ -108,6 +108,8 @@ export const STORAGE_UNAVAILABLE_TEXT = 'Storage is unavailable — this run wil
 export const CROSS_TAB_TEXT = 'Save changed in another tab';
 /** 07-a: the menu's banner while a slot is refused, the toast long gone (review 2026-10, B-04). */
 export const CROSS_TAB_BANNER_TEXT = 'A save changed in another tab — reload to play it here.';
+/** E8: an import with nowhere to write it (review 2026-10, B-20). */
+export const IMPORT_UNAVAILABLE_TEXT = 'Storage is unavailable — nothing was imported';
 export const CODE_DAMAGED_TEXT = 'Code is damaged';
 export const CODE_NEWER_TEXT = 'Code is from a newer version';
 export const CODE_NOT_REALLM_TEXT = 'Not a ReaLLM save';
@@ -2114,12 +2116,16 @@ export class SaveStore {
    * and, when its archive key parses, the archived predecessor.
    */
   list(): SlotSummary[] {
+    const bound = this.#current;
     return SLOTS.map((slot) => {
       const result = this.load(slot);
       if (result.ok) {
         const archive = this.loadArchive(slot);
         return slotSummaryOf(slot, result.data, archive.ok ? archive.data : null);
       }
+      // E8: a memory-only session's run is on no disk, but it is in this slot
+      // — so New Game over it asks first (review 2026-10, B-20).
+      if (result.reason === 'unavailable' && bound?.meta.slot === slot) return slotSummaryOf(slot, bound, null);
       // E8/E9: "Corrupt" and "newer version" are both slots with something in
       // them — never a silent overwrite. SPEC-044 §4.10: a newer save says so,
       // and the storage block offers it Export rather than Delete.
@@ -2259,18 +2265,24 @@ export class SaveStore {
    */
   beginNextIteration(slot: SlotId, creation: CharacterCreation): Save | null {
     const result = this.load(slot);
-    if (!result.ok || !nextInstanceOffered(result.data)) return null;
-    const old = result.data;
-    const key = this.#archiveKey(slot);
-    const previous = this.#read(key);
-    const error = this.#writeVerified(key, JSON.stringify(old));
-    if (error !== null) {
-      // A torn write must not cost the archive the slot already had.
-      this.#putBack(key, previous);
-      log.warn('save', `slot ${slot}: the archive write failed; the slot is unchanged`, error);
-      // PLAN R19 decision 1: run N is instance/(61 + N).
-      this.#events.emit('ui:toast', { kind: 'error', text: archiveFailedText(61 + old.meta.iteration), ms: 8000 });
-      return null;
+    // E8: a memory-only session's run is the bound one. With no disk there is
+    // no archive to write, and the successor is bound in memory like the run
+    // before it (review 2026-10, B-20).
+    const memoryOnly = !result.ok && result.reason === 'unavailable' && this.#current?.meta.slot === slot;
+    const old = result.ok ? result.data : memoryOnly ? this.#current : null;
+    if (old === null || !nextInstanceOffered(old)) return null;
+    if (!memoryOnly) {
+      const key = this.#archiveKey(slot);
+      const previous = this.#read(key);
+      const error = this.#writeVerified(key, JSON.stringify(old));
+      if (error !== null) {
+        // A torn write must not cost the archive the slot already had.
+        this.#putBack(key, previous);
+        log.warn('save', `slot ${slot}: the archive write failed; the slot is unchanged`, error);
+        // PLAN R19 decision 1: run N is instance/(61 + N).
+        this.#events.emit('ui:toast', { kind: 'error', text: archiveFailedText(61 + old.meta.iteration), ms: 8000 });
+        return null;
+      }
     }
     const next = nextInstance(old, creation, this.#stamp());
     next.meta.slot = slot;
@@ -2583,7 +2595,11 @@ export class SaveStore {
     // The code came from another slot, or another browser: it belongs to this
     // one now.
     parsed.data.meta.slot = slot;
-    if (!this.available) return { ok: false, reason: 'unavailable' };
+    if (!this.available) {
+      // E8: every caller leaves the telling to the store (review 2026-10, B-20).
+      this.#events.emit('ui:toast', { kind: 'warn', text: IMPORT_UNAVAILABLE_TEXT });
+      return { ok: false, reason: 'unavailable' };
+    }
     // SPEC-034 §4.13: the in-memory run is what used to overwrite the import on
     // the next autosave, so the import takes the binding *before* the write —
     // nothing the running character does can reach the slot after this point.

@@ -180,16 +180,19 @@ export class CreationScene extends UiScene<'creation'> {
    * SPEC-058 §4.2: next mode loads the slot. A run that does not qualify (§4.1)
    * is refused with a toast, back to the menu — on the first update, once the
    * transition in has landed, since `go()` is ignored inside one. Otherwise the
-   * form opens on `nextCreation(save)`.
+   * form opens on `nextCreation(save)`. A memory-only session (E8) reads its
+   * bound run, which is all it has (review 2026-10, B-20).
    */
   #prefill(slot: SlotId): void {
-    const result = this.services.save.load(slot);
-    if (!result.ok || !nextInstanceOffered(result.data)) {
+    const save = this.services.save;
+    const result = save.load(slot);
+    const data = result.ok ? result.data : !save.available && save.current?.meta.slot === slot ? save.current : null;
+    if (data === null || !nextInstanceOffered(data)) {
       this.#refused = true;
       return;
     }
-    const fill = nextCreation(result.data);
-    this.#restored = { fill, iteration: result.data.meta.iteration };
+    const fill = nextCreation(data);
+    this.#restored = { fill, iteration: data.meta.iteration };
     const base = CLASSES[fill.classId].baseAttributes;
     this.#classId = fill.classId;
     this.#portrait = fill.appearance.portrait;
