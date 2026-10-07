@@ -149,7 +149,8 @@ describe('the relics (SPEC-056 §4.3)', () => {
     ['relic_cold_coil', 69, 'mg_scrap'],
     ['relic_seed_drum', 14, 'launcher_grenade'],
     ['relic_slag_vent', 73, 'mg_rotary'],
-    ['relic_seeker', 13, 'launcher_rocket'],
+    // Review 2026-10 (G-18): 80 → 95 damage, 13 → 16 sustained.
+    ['relic_seeker', 16, 'launcher_rocket'],
   ];
 
   it('weaponDps(relic).sustained / weaponDps(reference).sustained lies in 0.6…1.1 for each pair', () => {
@@ -160,11 +161,19 @@ describe('the relics (SPEC-056 §4.3)', () => {
     }
   });
 
-  it('reads §4.3\'s sustained values — 35, 69, 14, 73 and 13 — and ratios 0.73, 1.08, 0.75, 0.87, 0.89', () => {
-    expect(RELICS.map(([relic]) => Math.round(sustained(relic)))).toEqual([35, 69, 14, 73, 13]);
+  it('reads §4.3\'s sustained values — 35, 69, 14, 73 and 16 — and ratios 0.73, 1.08, 0.75, 0.87, 1.06', () => {
+    expect(RELICS.map(([relic]) => Math.round(sustained(relic)))).toEqual([35, 69, 14, 73, 16]);
     expect(RELICS.map(([relic, , reference]) => Math.round((sustained(relic) / sustained(reference)) * 100) / 100)).toEqual([
-      0.73, 1.08, 0.75, 0.87, 0.89,
+      0.73, 1.08, 0.75, 0.87, 1.06,
     ]);
+  });
+
+  // Review 2026-10 (G-18): at 80 the chapter-5 vault's relic hit softer than
+  // the chapter-1 Wurm's Rocket on the same 6 s charge and read as a downgrade.
+  it('the Seeker Tube out-damages the Rocket on the same charge', () => {
+    expect(weapon('relic_seeker').damage).toBeGreaterThan(weapon('launcher_rocket').damage);
+    expect(weapon('relic_seeker').cooldown).toEqual(weapon('launcher_rocket').cooldown);
+    expect(sustained('relic_seeker')).toBeGreaterThan(sustained('launcher_rocket'));
   });
 
   it('each relic sits in its reference\'s slot and line', () => {

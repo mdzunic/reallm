@@ -117,7 +117,8 @@ export interface TrackerDeps {
 interface FightRecord {
   readonly boss: EnemyId;
   open: boolean;
-  dashed: boolean;
+  /** Review 2026-10 (G-17): a sprint or a dash while the fight was open. */
+  ran: boolean;
   hit: boolean;
 }
 
@@ -211,7 +212,7 @@ export class CommendationTracker {
     this.#deps = deps;
     for (const index of BOSS_RULES) {
       const boss = ruleAt<'boss'>(index).boss;
-      if (!this.#fights.some((fight) => fight.boss === boss)) this.#fights.push({ boss, open: false, dashed: false, hit: false });
+      if (!this.#fights.some((fight) => fight.boss === boss)) this.#fights.push({ boss, open: false, ran: false, hit: false });
     }
     this.#subscribe();
   }
@@ -257,11 +258,16 @@ export class CommendationTracker {
       const fight = this.#fight(enemyId);
       if (fight === null || fight.open) return;
       fight.open = true;
-      fight.dashed = false;
+      fight.ran = false;
       fight.hit = false;
     });
+    // Review 2026-10 (G-17): the Wurm hunts by vibration, so a sprint breaks
+    // "Walked, did not run" as a dash does — it used to hear dashes only.
     add('player:dashed', () => {
-      for (const fight of this.#fights) if (fight.open) fight.dashed = true;
+      for (const fight of this.#fights) if (fight.open) fight.ran = true;
+    });
+    add('player:sprinted', () => {
+      for (const fight of this.#fights) if (fight.open) fight.ran = true;
     });
     add('player:damaged', ({ source }) => {
       if (source.kind !== 'enemy' && source.kind !== 'projectile') return;
@@ -276,7 +282,7 @@ export class CommendationTracker {
       for (const index of BOSS_RULES) {
         const rule = ruleAt<'boss'>(index);
         if (rule.boss !== boss) continue;
-        if (rule.without === 'dash' ? !fight.dashed : !fight.hit) this.#queue(index);
+        if (rule.without === 'run' ? !fight.ran : !fight.hit) this.#queue(index);
       }
     });
 

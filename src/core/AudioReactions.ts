@@ -230,6 +230,8 @@ const SILENT_EVENTS = [
   // SPEC-034 §4.6: a dismissal is not a death — it has no sting of its own.
   'enemy:dismissed',
   'player:xp',
+  // Review 2026-10 (G-17): a sprint has no sound of its own; the tracker hears it.
+  'player:sprinted',
   'tokens:changed',
   'resource:spent',
   'inventory:changed',

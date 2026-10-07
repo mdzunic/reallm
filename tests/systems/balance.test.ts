@@ -43,11 +43,12 @@ describe('the worst-case model (§5)', () => {
 
   it('prices the recommended loadout the way the table does', () => {
     // Per chapter: armor+drone+laser · hull+shield · shield 2+drone ·
-    // plasma+hull 2+engine · armor 2+ship guns+medic (§5, SPEC-039 §4.2).
+    // plasma+hull 2+engine · armor 2+medic (§5, SPEC-039 §4.2). Review
+    // 2026-10 (G-09) took Ship Guns tier 1 (40) out of chapter 6: 150 → 110.
     expect(LOADOUT_CHAPTERS.map((c) => RECOMMENDED_LOADOUT[c].reduce((sum, entry) => sum + entryCost(entry), 0))).toEqual([
-      100, 80, 120, 170, 150,
+      100, 80, 120, 170, 110,
     ]);
-    expect(LOADOUT_CHAPTERS.map(loadoutCost)).toEqual([100, 180, 300, 470, 620]);
+    expect(LOADOUT_CHAPTERS.map(loadoutCost)).toEqual([100, 180, 300, 470, 580]);
   });
 
   it('SPEC-039 §4.2: the laser closes chapter 2, after the scanner, and chapter 3 is the ship', () => {
@@ -63,6 +64,21 @@ describe('the worst-case model (§5)', () => {
   });
 });
 
+describe('review 2026-10 (G-09)', () => {
+  // Eden's flight carries only 20 HP interceptors: two hits at Ship Guns
+  // tier 0 and still two at tier 1, so the advice spent 40 tokens on nothing.
+  it('chapter 6 recommends the Reactive Harness and the Field Medic, and no ship guns anywhere', () => {
+    expect(RECOMMENDED_LOADOUT[6]).toEqual([
+      { kind: 'gear', id: 'armor_reactive' },
+      { kind: 'companion', id: 'field_medic' },
+    ]);
+    const guns = LOADOUT_CHAPTERS.flatMap((chapter) => RECOMMENDED_LOADOUT[chapter]).filter(
+      (entry) => entry.kind === 'ship' && entry.id === 'weapon',
+    );
+    expect(guns).toEqual([]);
+  });
+});
+
 describe('the invariants (§7)', () => {
   it('1. the recommended loadout fits inside the worst case, chapter by chapter', () => {
     const over = LOADOUT_CHAPTERS.filter((chapter) => loadoutCost(chapter) > worstCaseTokensBefore(chapter)).map(
@@ -70,7 +86,8 @@ describe('the invariants (§7)', () => {
     );
     expect(over).toEqual([]);
     // The margins, pinned: the design is not meant to be knife-edge anywhere.
-    expect(LOADOUT_CHAPTERS.map((c) => worstCaseTokensBefore(c) - loadoutCost(c))).toEqual([5, 45, 60, 45, 110]);
+    // Review 2026-10 (G-09): chapter 6's 110 → 150.
+    expect(LOADOUT_CHAPTERS.map((c) => worstCaseTokensBefore(c) - loadoutCost(c))).toEqual([5, 45, 60, 45, 150]);
   });
 
   it('2. the Ferrum shield gate stays under 80 % of the chapter-4 budget (E2)', () => {

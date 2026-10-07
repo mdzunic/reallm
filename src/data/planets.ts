@@ -288,7 +288,9 @@ export const PLANETS = {
         { enemy: 'ice_crawler', weight: 3, maxAlive: 6, pack: [1, 2] },
         { enemy: 'ice_spitter', weight: 2, maxAlive: 4 },
       ],
-      population: 11,
+      // Review 2026-10 (G-07, *initial tuning*): 13 (was 11) — Vetra was the
+      // quietest field of the five, a trough right after the first boss.
+      population: 13,
       eliteChance: 0.05,
     },
     music: { calm: 'calm_ice', combat: 'combat_light' },

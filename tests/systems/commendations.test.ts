@@ -315,6 +315,19 @@ describe('the fight record (§4.4.3)', () => {
     expect(walked.earned).toEqual(['walked_not_ran']);
   });
 
+  // Review 2026-10 (G-17): the Wurm hunts a runner, but only a dash broke the
+  // rule, so a player who sprinted the whole fight earned "did not run".
+  it('a sprint during the Dune Wurm fight misses walked_not_ran too; one before it does not count', () => {
+    const ran = rig();
+    fight(ran, (r) => r.events.emit('player:sprinted', {}));
+    expect(ran.earned).toEqual([]);
+    const before = rig();
+    before.events.emit('player:sprinted', {});
+    fight(before, () => {});
+    expect(before.earned).toEqual(['walked_not_ran']);
+    expect(COMMENDATIONS.walked_not_ran.detail).toBe('Kill the Dune Wurm without running or dashing.');
+  });
+
   it('a dash before the boss spawned does not count, and a later spawn keeps the record open', () => {
     const r = rig();
     r.events.emit('player:dashed', { x: 0, z: 0, dirX: 0, dirZ: 1 });

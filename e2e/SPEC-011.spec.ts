@@ -210,8 +210,9 @@ test('the dune wurm burrows into phase 2 and is untouchable while under (AC-39)'
   await page.locator('[data-testid="surface-goto-boss"]').click();
   await expect(page.locator('[data-testid="hud-boss"]')).toBeVisible({ timeout: 15_000 });
 
-  // Three 25 % wounds cross the 0.4 threshold and the wurm burrows.
-  for (let i = 0; i < 3; i++) {
+  // Two 25 % wounds cross the 0.55 threshold and the wurm burrows (review
+  // 2026-10, G-06: it was 0.4, and took three).
+  for (let i = 0; i < 2; i++) {
     await page.locator('[data-testid="surface-wound-boss"]').click();
     await page.waitForTimeout(300);
   }

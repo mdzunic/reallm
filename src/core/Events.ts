@@ -96,6 +96,11 @@ export type GameEvents = {
   'player:dashed': { x: number; z: number; dirX: number; dirZ: number };
   /** SPEC-050 §4.1: once per exhaustion — the stamina pool reached 0. */
   'player:exhausted': Record<string, never>;
+  /**
+   * Review 2026-10 (G-17): once per sprint, on its first sprinting step, in
+   * combat or not — what SPEC-059's "Walked, did not run" listens for.
+   */
+  'player:sprinted': Record<string, never>;
   'player:xp': { amount: number; total: number };
   'player:leveledUp': { level: number; tokens: number };
   'tokens:changed': { delta: number; total: number; reason: string };

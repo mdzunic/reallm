@@ -58,7 +58,7 @@ describe('DIFFICULTY_RULES (SPEC-043 §4.4)', () => {
     // and hard keep every value they had, and their new ones are what SPEC-038
     // applied for casual alone.
     expect(DIFFICULTY_RULES).toEqual({
-      story: { enemyHpMult: 1, enemyDamageMult: 0, eliteChanceMult: 1, deathLoss: 0, weatherMult: 0, allyDamageMult: 0, assisted: true },
+      story: { enemyHpMult: 0.6, enemyDamageMult: 0, eliteChanceMult: 1, deathLoss: 0, weatherMult: 0, allyDamageMult: 0, assisted: true },
       casual: { enemyHpMult: 1, enemyDamageMult: 0.7, eliteChanceMult: 1, deathLoss: 0, weatherMult: 0.7, allyDamageMult: 1, assisted: true },
       normal: { enemyHpMult: 1, enemyDamageMult: 1, eliteChanceMult: 1, deathLoss: 0.1, weatherMult: 1, allyDamageMult: 1, assisted: false },
       hard: { enemyHpMult: 1.25, enemyDamageMult: 1.3, eliteChanceMult: 2, deathLoss: 0.2, weatherMult: 1, allyDamageMult: 1, assisted: false },

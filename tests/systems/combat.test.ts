@@ -58,7 +58,7 @@ import { resetTelegraph } from '@/entities/Telegraph';
 import { DARK_SIGHT, FLARE_RADIUS, inFlare } from '@/systems/Light';
 import { cumulativeXp } from '@/systems/Progression';
 import { SPRINT_DRAW_SECONDS, STAMINA_MAX, stepStamina } from '@/systems/Stamina';
-import type { SlotView } from '@/systems/Loadout';
+import { SWITCH_SECONDS, type SlotView } from '@/systems/Loadout';
 import { STEP, harness, MARINE, SCOUT, type Harness } from './combatFixtures';
 
 const KINETIC = ITEMS.weapon_kinetic as WeaponDef;
@@ -1331,8 +1331,24 @@ describe('fireSlotOnce — the launcher on touch (SPEC-036 §4.6)', () => {
     expect(shell.lob).toBe(true);
     expect(shell.targetX).toBeCloseTo(skitter.x, 6);
     expect(shell.targetZ).toBeCloseTo(skitter.z, 6);
-    // The burst interval applies to the next tap, as it does to a held trigger.
-    expect(h.world.player.fireCooldown).toBeCloseTo(1 / 2.5, 6);
+    // Review 2026-10 (G-12): the gun in hand waits a switch's 0.25 s, the
+    // desktop rotation's cost; the burst interval is the slot's own (below).
+    expect(h.world.player.fireCooldown).toBeCloseTo(SWITCH_SECONDS, 6);
+  });
+
+  // Review 2026-10 (G-12): the tap set the shared cooldown to the launcher's
+  // 1 / fireRate, so a Rocket tap held the primary for a whole second.
+  it('a Rocket tap holds the primary for 0.25 s, not the Rocket\'s 1 s, and never cuts a longer wait short', () => {
+    const h = harness({ patch: (s) => void (s.equipped.heavy = 'launcher_rocket') });
+    h.spawn('dust_skitter', 8, 0);
+    expect(h.combat.fireSlotOnce('heavy')).toBe('fired');
+    expect(h.world.player.fireCooldown).toBeCloseTo(0.25, 6);
+    expect(h.world.player.fireCooldown).toBeLessThan(1 / ITEMS.launcher_rocket.fireRate);
+    // A wait already longer than the switch stands.
+    const slow = harness({ patch: (s) => void (s.equipped.heavy = 'launcher_rocket') });
+    slow.world.player.fireCooldown = 0.6;
+    expect(slow.combat.fireSlotOnce('heavy')).toBe('fired');
+    expect(slow.world.player.fireCooldown).toBeCloseTo(0.6, 6);
   });
 
   it('with no enemy in range, the shot lands 10 m along facing (36-k)', () => {
@@ -1515,8 +1531,12 @@ describe('the story difficulty (SPEC-059 §4.2.2)', () => {
     }
   });
 
-  it('keeps normal’s enemy HP and casual and hard their hits', () => {
-    expect(on('story').spawn('dune_wurm', 50, 0).maxHp).toBe(ENEMIES.dune_wurm.hp);
+  // Review 2026-10 (G-13): story kept normal's enemy HP, so a boss on the
+  // starter rifle was one to two minutes of shooting at no risk.
+  it('spawns surface enemies at round(hp × 0.6), and keeps casual and hard their hits', () => {
+    expect(on('story').spawn('dune_wurm', 50, 0).maxHp).toBe(Math.round(ENEMIES.dune_wurm.hp * 0.6));
+    expect(on('story').spawn('wurmling', 50, 0, true).maxHp).toBe(Math.round(ENEMIES.wurmling.hp * TUNING.ELITE_HP_MULT * 0.6));
+    expect(on('normal').spawn('dune_wurm', 50, 0).maxHp).toBe(ENEMIES.dune_wurm.hp);
     expect(CASUAL_WEATHER_MULT).toBe(0.7);
     const casual = on('casual');
     casual.combat.damagePlayer(10, { kind: 'enemy', enemyId: 'dune_wurm' });

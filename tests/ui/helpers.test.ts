@@ -1432,16 +1432,43 @@ describe('bossDropText (SPEC-039 §4.6)', () => {
 });
 
 describe('the Refit line (SPEC-039 §4.6)', () => {
-  it('a new marine 6/5/1/1 reads Vetra and the chapter-2 loadout at its discounted prices', () => {
-    const data = save();
+  /** Review 2026-10 (G-06): the chapter's own gear waits for the chapter before it. */
+  const wurmDown = (s: Save): void => void s.progress.flags.push('chapter1_done');
+
+  it('a marine 6/5/1/1 past the Wurm reads Vetra and the chapter-2 loadout at its discounted prices', () => {
+    const data = save(wurmDown);
     expect(refitText(data, economyOf(data))).toBe('Refit for Vetra: Composite Weave 39 · Scanner Drone 20 · Laser Carbine 39');
     expect(refitLine(data, economyOf(data))?.planet).toBe('vetra');
   });
 
+  // Review 2026-10 (G-06): a new save read the Laser before the Wurm, which
+  // halved the fight it was tuned for on the Kinetic.
+  it('recommends no next-chapter gear before the current chapter\'s boss is down', () => {
+    const fresh = save();
+    expect(refitLine(fresh, economyOf(fresh))).toBeNull();
+    expect(refitText(fresh, economyOf(fresh))).toBeNull();
+    // On Vetra, before the Matriarch: what chapter 2 asked for and is still
+    // missing lists, Thessaly's ship tiers do not.
+    const vetra = save((s) => {
+      s.progress.visits = { cinder4: 2, vetra: 1 };
+      s.progress.flags.push('chapter1_done');
+      s.equipped.armor = 'armor_composite';
+      s.companions.push({ id: 'scanner_drone', level: 1, enabled: true });
+    });
+    expect(refitText(vetra, economyOf(vetra))).toBe('Refit for Thessaly: Laser Carbine 39');
+    // And once the Matriarch is down, chapter 3's own.
+    vetra.progress.flags.push('chapter2_done');
+    expect(refitText(vetra, economyOf(vetra))).toBe('Refit for Thessaly: Laser Carbine 39 · Hull tier 1 30 · Shield tier 1 49');
+  });
+
   it('drops what the save owns, and reads ready with nothing missing', () => {
-    const laser = save((s) => void s.inventory.push({ itemId: 'weapon_laser', qty: 1 }));
+    const laser = save((s) => {
+      wurmDown(s);
+      s.inventory.push({ itemId: 'weapon_laser', qty: 1 });
+    });
     expect(refitText(laser, economyOf(laser))).toBe('Refit for Vetra: Composite Weave 39 · Scanner Drone 20');
     const ready = save((s) => {
+      wurmDown(s);
       s.inventory.push({ itemId: 'weapon_laser', qty: 1 });
       s.equipped.armor = 'armor_composite';
       s.companions.push({ id: 'scanner_drone', level: 1, enabled: true });
@@ -1452,6 +1479,7 @@ describe('the Refit line (SPEC-039 §4.6)', () => {
   it('before Ferrum with shield 1, the shield tier the gate names is marked required', () => {
     const data = save((s) => {
       s.progress.visits = { cinder4: 3, vetra: 1, thessaly: 1 };
+      s.progress.flags.push('chapter1_done', 'chapter2_done', 'chapter3_done');
       s.inventory.push({ itemId: 'weapon_laser', qty: 1 });
       s.equipped.armor = 'armor_composite';
       s.companions.push({ id: 'scanner_drone', level: 1, enabled: true });
@@ -1465,6 +1493,7 @@ describe('the Refit line (SPEC-039 §4.6)', () => {
 
   it('prices every entry through the economy, discounts and all', () => {
     const data = save((s) => {
+      wurmDown(s);
       s.player.classId = 'engineer';
       s.player.attributes = { ...CLASSES.engineer.baseAttributes, tech: 8 };
     });
@@ -1953,7 +1982,8 @@ describe('compareDeltas (SPEC-042 §4.8)', () => {
 
 describe('the boss frame, the target frame and the panel lines (SPEC-042 §4.7, §4.9)', () => {
   it('bossPhaseMarks: each later phase’s hpFraction, one cached array per boss', () => {
-    expect(bossPhaseMarks('dune_wurm')).toEqual([0.4]);
+    // Review 2026-10 (G-06): the Wurm's phase 2 starts at 55 % (was 40 %).
+    expect(bossPhaseMarks('dune_wurm')).toEqual([0.55]);
     expect(bossPhaseMarks('dune_wurm')).toBe(bossPhaseMarks('dune_wurm'));
     expect(bossPhaseMarks('ash_titan')).toEqual([0.6, 0.3]);
     expect(bossPhaseMarks('dust_skitter')).toEqual([]);

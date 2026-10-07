@@ -320,10 +320,12 @@ describe('landing and cancelling (SPEC-041 §4.1)', () => {
 });
 
 describe('the wurm’s burrow (SPEC-041 §4.1)', () => {
-  it('digs 2.5 s, circles the player’s spot for 1.2 s at radius 3.5, surfaces there, and is due again 9 s later', () => {
+  it('digs 2.5 s, circles the player’s spot for 1.2 s at radius 3.5, surfaces there, and is due again 6 s later', () => {
     const h = harness();
     const wurm = fighting(h, 'dune_wurm', 10, 0);
-    wurm.hp = wurm.maxHp * 0.35;
+    // Review 2026-10 (G-06): phase 2 starts at 55 % — it was 40 %, so half
+    // its HP left would still have been phase 1.
+    wurm.hp = wurm.maxHp * 0.5;
     h.step();
     // Phase-2 entry starts it in place of the 1.5 s special.
     expect(h.of('boss:phase')).toEqual([{ boss: 'dune_wurm', phase: 2 }]);
@@ -362,11 +364,12 @@ describe('the wurm’s burrow (SPEC-041 §4.1)', () => {
     expect(h.of('boss:move').at(-1)).toEqual({ boss: 'dune_wurm', move: 'burrow', kind: 'burrow', x: -4, z: 3 });
     h.step();
     expect(h.of('player:damaged').length).toBeGreaterThan(before);
-    expect(wurm.timedMoveAt).toBeCloseTo(surfaced + 9, 6);
+    // Review 2026-10 (G-06): every 6 s — it was 9.
+    expect(wurm.timedMoveAt).toBeCloseTo(surfaced + 6, 6);
 
-    // Nine seconds later it goes under again (after any cast in between, 41-d).
-    expect(runUntil(h, 14, () => wurm.specialKind === 'burrow_dig')).toBeGreaterThan(0);
-    expect(h.world.time).toBeGreaterThanOrEqual(surfaced + 9 - 1e-6);
+    // Six seconds later it goes under again (after any cast in between, 41-d).
+    expect(runUntil(h, 11, () => wurm.specialKind === 'burrow_dig')).toBeGreaterThan(0);
+    expect(h.world.time).toBeGreaterThanOrEqual(surfaced + 6 - 1e-6);
   });
 });
 
@@ -388,5 +391,17 @@ describe('the queen (SPEC-041 §4.1)', () => {
     expect(Math.max(...angles) - Math.min(...angles)).toBeCloseTo(0.6, 6);
     expect(h.of('boss:move')).toEqual([{ boss: 'hive_queen', move: 'acid_volley', kind: 'volley', x: queen.x, z: queen.z }]);
     expect(queen.moveCd).toBeCloseTo(2.4, 6);
+  });
+});
+
+describe('the review 2026-10 boss retunes (initial tuning)', () => {
+  // G-07: the Titan's phase 3 hit ×1.44, its worst blow 29 % of a chapter-4
+  // player's HP — the spike of the curve.
+  it('the Ash Titan hits ×1.2 below 60 % and ×1.3 below 30 %', () => {
+    expect(ENEMIES.ash_titan.phases.map((phase) => [phase.hpFraction, phase.damageMult])).toEqual([
+      [1, 1],
+      [0.6, 1.2],
+      [0.3, 1.3],
+    ]);
   });
 });

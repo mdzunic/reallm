@@ -138,7 +138,7 @@ describe('Worst case', () => {
       'ship:hull:2@59',
       'ship:engine:1@30',
       'gear:armor_reactive@78',
-      'ship:weapon:1@39',
+      // Review 2026-10 (G-09): Ship Guns tier 1 left chapter 6's loadout.
       'companion:field_medic@30',
     ]);
     // The Ferrum gate is the one the whole model exists for (E2).
@@ -165,8 +165,10 @@ describe('Worst case', () => {
 
   it('earns and spends exactly what the books say', () => {
     expect(run.tokensEarned).toBe(970);
-    expect(run.tokensSpent).toBe(609);
-    expect(run.save.player.tokens).toBe(361);
+    // Review 2026-10 (G-09): 609 → 570 spent, 361 → 400 left — the 39-token
+    // Ship Guns tier 1 is no longer bought.
+    expect(run.tokensSpent).toBe(570);
+    expect(run.save.player.tokens).toBe(400);
   });
 
   it('starts every collect objective inside the base hold (E3)', () => {
@@ -228,18 +230,18 @@ describe('Worst case, iteration 2 (SPEC-058 §4.9)', () => {
     expect(run.serviceModeSeen).toBe(false);
   });
 
-  it('lands on the iteration-1 literals: 5,480 XP and level 13; 970 earned, 609 spent, 361 left', () => {
+  it('lands on the iteration-1 literals: 5,480 XP and level 13; 970 earned, 570 spent, 400 left', () => {
     expect(run.save.player.xp).toBe(5480);
     expect(run.save.player.level).toBe(13);
     expect(run.tokensEarned).toBe(970);
-    expect(run.tokensSpent).toBe(609);
-    expect(run.save.player.tokens).toBe(361);
+    expect(run.tokensSpent).toBe(570);
+    expect(run.save.player.tokens).toBe(400);
   });
 
-  it('buys the same thirteen purchases, at the same prices, in the same order', () => {
-    expect(run.purchases).toHaveLength(13);
+  it('buys the same twelve purchases, at the same prices, in the same order', () => {
+    expect(run.purchases).toHaveLength(12);
     expect(run.purchases).toEqual(first.purchases);
-    expect(tokensOf(run.purchases)).toBe(609);
+    expect(tokensOf(run.purchases)).toBe(570);
   });
 
   it('pays the same jumps and vouchers, and never needs the subsidy', () => {
@@ -335,7 +337,7 @@ describe('Completionist', () => {
     expect(run.save.player.xp).toBe(11135);
     expect(run.save.player.level).toBe(19);
     expect(run.tokensEarned).toBe(1224);
-    expect(run.tokensSpent).toBe(683);
+    expect(run.tokensSpent).toBe(644); // 683 before review 2026-10 (G-09)
     expect(run.subsidyOil).toBe(0);
     expect(run.vouchers).toBe(5);
   });
@@ -377,7 +379,7 @@ describe('Completionist, base hold', () => {
     expect(run.save.player.xp).toBe(11135);
     expect(run.save.player.level).toBe(19);
     expect(run.tokensEarned).toBe(1224);
-    expect(run.tokensSpent).toBe(609);
+    expect(run.tokensSpent).toBe(570); // 609 before review 2026-10 (G-09)
     expect(run.subsidyOil).toBe(0);
     expect(run.vouchers).toBe(5);
   });

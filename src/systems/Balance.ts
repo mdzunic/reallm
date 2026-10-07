@@ -75,6 +75,10 @@ export type LoadoutEntry =
  * SPEC-039 §4.2: the Laser Carbine closes chapter 2 — no boss hands it out any
  * more, and the threat past Cinder-4 is tuned for it. Appended after the
  * scanner, so the order the loadout is bought in does not move.
+ *
+ * Review 2026-10 (G-09): chapter 6 no longer asks for Ship Guns tier 1. Eden's
+ * flight carries only 20 HP interceptors, two hits at tier 0 and at tier 1,
+ * so the advice spent 40 tokens on nothing.
  */
 export const RECOMMENDED_LOADOUT: Record<LoadoutChapter, readonly LoadoutEntry[]> = {
   2: [
@@ -97,7 +101,6 @@ export const RECOMMENDED_LOADOUT: Record<LoadoutChapter, readonly LoadoutEntry[]
   ],
   6: [
     { kind: 'gear', id: 'armor_reactive' },
-    { kind: 'ship', id: 'weapon', tier: 1 },
     { kind: 'companion', id: 'field_medic' },
   ],
 };

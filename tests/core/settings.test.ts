@@ -170,6 +170,17 @@ describe('createSettings', () => {
     expect(settings.flightMouseSteer).toBe(true);
   });
 
+  it('defaults the sidearm fallback to on, and a stored choice keeps it (SPEC-029 §4.4, review 2026-10 G-04)', () => {
+    muteLog();
+    // It was 'touch', which left the sidearm dead on the keyboard scheme.
+    expect(createSettings(fakeStorage().storage).get().weaponAutoSwap).toBe('on');
+    // No migration: a player who stored 'touch' or 'off' keeps it.
+    expect(createSettings(fakeStorage('{"weaponAutoSwap":"touch"}').storage).get().weaponAutoSwap).toBe('touch');
+    expect(createSettings(fakeStorage('{"weaponAutoSwap":"off"}').storage).get().weaponAutoSwap).toBe('off');
+    // Content the store cannot use falls back to the default.
+    expect(createSettings(fakeStorage('{"weaponAutoSwap":"always"}').storage).get().weaponAutoSwap).toBe('on');
+  });
+
   it('reads, validates and persists the control options', () => {
     muteLog();
     const fake = fakeStorage('{"autoFire":"on","joystickSide":"right","flightMouseSteer":true,"buttonScale":1.5}');
@@ -326,7 +337,8 @@ describe('the settings object (SPEC-007 §3)', () => {
       invertFlightY: false,
       // SPEC-038 §4.7: auto-fire is on by default.
       autoFire: 'on',
-      weaponAutoSwap: 'touch',
+      // SPEC-029 §4.4 (review 2026-10, G-04): so is the sidearm fallback.
+      weaponAutoSwap: 'on',
       joystickSide: 'left',
       // §3 annotates this one `default true`. SPEC-005 owns the aim-assist
       // itself and only requires that it apply while the setting is on.

@@ -330,6 +330,23 @@ export class Missions {
     return out;
   }
 
+  /**
+   * Review 2026-10 (G-14): the elite kills a clean, open mission's `elites`
+   * bonus still wants — the most over the active missions here, since one
+   * kill counts for each. The surface forces that many ambient pack leaders
+   * elite when a stage starts, so the bonus pays on play, not on the roll.
+   */
+  elitesOwed(): number {
+    let owed = 0;
+    for (const state of this.#states) {
+      const def: MissionDef = MISSIONS[state.id];
+      const bonus = def.bonus;
+      if (state.complete || !state.clean || bonus?.kind !== 'elites') continue;
+      owed = Math.max(owed, bonus.count - state.elites);
+    }
+    return owed;
+  }
+
   /** A completed mission may be accepted again; its rewards then pay 50 % (AC-43). */
   isReplay(id: MissionId): boolean {
     return this.#save.progress.missionsDone.includes(id);

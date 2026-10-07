@@ -1477,6 +1477,12 @@ function refitLabel(entry: LoadoutEntry): string {
  * `economy` charges now — so tech, the refit discount and the Quartermaster
  * all apply — and `required` when a planet of chapter ≤ target names it in its
  * unlock (the Ferrum shield).
+ *
+ * Review 2026-10 (G-06): the target chapter's own entries wait until the
+ * chapter before it is done (`chapter{N−1}_done`, its boss down) — the line
+ * advertised the Laser before the Wurm, which halved the fight it was tuned
+ * for. Until then only earlier chapters' missing entries list, and with none
+ * there is no line: `ready` would send the player on before the boss.
  */
 export function refitLine(
   save: Save,
@@ -1490,13 +1496,14 @@ export function refitLine(
   }
   if (target === null) return null;
   const chapter = target.chapter;
+  const bossDown = save.progress.flags.includes(`chapter${chapter - 1}_done`);
   const gates: Requirement[] = [];
   for (const id of PLANET_IDS) {
     if (PLANET_TABLE[id].chapter <= chapter) gates.push(...PLANET_TABLE[id].unlock);
   }
   const entries: RefitEntry[] = [];
   for (const step of LOADOUT_CHAPTERS) {
-    if (step > chapter) continue;
+    if (step > chapter || (step === chapter && !bossDown)) continue;
     for (const entry of RECOMMENDED_LOADOUT[step]) {
       if (refitHas(save, entry)) continue;
       const price =
@@ -1511,6 +1518,7 @@ export function refitLine(
       entries.push({ label: refitLabel(entry), tokens: price?.tokens ?? 0, required });
     }
   }
+  if (!bossDown && entries.length === 0) return null;
   return { planet: target.id, entries };
 }
 

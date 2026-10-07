@@ -451,6 +451,20 @@ describe('content invariants (SPEC-009 §7)', () => {
     expect(problems).toEqual([]);
   });
 
+  // Review 2026-10 (G-20): a downed ship's salvage goes straight into the
+  // hold, so a flight enemy's table holds resource rows only.
+  it('8 (G-20). a flight enemy\'s loot table holds resource rows only', () => {
+    const problems: string[] = [];
+    for (const enemy of enemies) {
+      if (enemy.domain !== 'flight') continue;
+      for (const entry of lootTables[enemy.loot]) {
+        if (entry.kind !== 'resource') problems.push(`${enemy.id}: ${enemy.loot} has a ${entry.kind} row`);
+      }
+    }
+    expect(problems).toEqual([]);
+    expect(enemies.filter((enemy) => enemy.domain === 'flight').map((enemy) => enemy.loot)).toEqual(['flight_salvage', 'flight_salvage']);
+  });
+
   // SPEC-039 §4.1: invariant 8's signature rules. Each boss table carries
   // exactly one signature row and no other table any; each names a priced
   // weapon of the handgun, machine-gun or launcher line; the five pieces are
@@ -3286,7 +3300,8 @@ describe('content invariant 24: the treasure (SPEC-056 §4.8)', () => {
       ['relic_cold_coil', 'Cold Coil', 'Coil', 'primary', 'machine_gun', 2, 10, 9, 32, 14],
       ['relic_seed_drum', 'Seed Drum', 'SeedDrum', 'heavy', 'launcher', 2, 45, 2.5, 16, 16],
       ['relic_slag_vent', 'Slag Vent', 'SlagVent', 'primary', 'machine_gun', 3, 13, 11, 34, 15],
-      ['relic_seeker', 'Seeker Tube', 'Seeker', 'heavy', 'launcher', 3, 80, 1, 18, 22],
+      // Review 2026-10 (G-18): 95 (was 80), past the Rocket's 90.
+      ['relic_seeker', 'Seeker Tube', 'Seeker', 'heavy', 'launcher', 3, 95, 1, 18, 22],
     ]);
     expect(relics.map((item) => (item.kind === 'weapon' ? [item.price, item.model, item.pierce, item.twist] : []))).toEqual([
       [null, 'procedural', 0, { kind: 'execute', belowHp: 0.3, mult: 2 }],
@@ -3906,7 +3921,8 @@ describe('the commendations (SPEC-059 §4.4.1)', () => {
 describe('the story row (SPEC-059 §4.2.1)', () => {
   it('zeroes every hit on the player and the allies and keeps the fights', () => {
     expect(DIFFICULTY_RULES.story).toEqual({
-      enemyHpMult: 1,
+      // Review 2026-10 (G-13): ×0.6, so a threat-free boss is not two minutes of filler.
+      enemyHpMult: 0.6,
       enemyDamageMult: 0,
       eliteChanceMult: 1,
       deathLoss: 0,
@@ -3914,8 +3930,8 @@ describe('the story row (SPEC-059 §4.2.1)', () => {
       allyDamageMult: 0,
       assisted: true,
     });
-    // Its enemy HP and elite chance are normal's.
-    expect(DIFFICULTY_RULES.story.enemyHpMult).toBe(DIFFICULTY_RULES.normal.enemyHpMult);
+    // Its elite chance is normal's; its enemy HP is below every other row's.
     expect(DIFFICULTY_RULES.story.eliteChanceMult).toBe(DIFFICULTY_RULES.normal.eliteChanceMult);
+    expect(DIFFICULTY_RULES.story.enemyHpMult).toBeLessThan(DIFFICULTY_RULES.casual.enemyHpMult);
   });
 });
