@@ -40,10 +40,15 @@ import { isBuried, type EnemyEntity } from '@/entities/Enemy';
  */
 export const INSTANCES_PER_PART = 64;
 
-const ELITE_SCALE = 1.3;
+/**
+ * An elite's scale, and the gold its tint is lerped halfway toward. Exported
+ * for SPEC-064 §4.4: the skinned raiders wear exactly these cues.
+ */
+export const ELITE_SCALE = 1.3;
+export const ELITE_TINT = '#e0b34a';
 const WINDUP_SCALE = 1.15;
 const FLASH_COLOR = new THREE.Color('#ffffff');
-const ELITE_COLOR = new THREE.Color('#e0b34a');
+const ELITE_COLOR = new THREE.Color(ELITE_TINT);
 
 /** §4.7: the enemy-part surface — chalky, barely metallic, faceted. */
 const PART_ROUGHNESS = 0.7;
@@ -56,11 +61,11 @@ const PART_EMISSIVE_INTENSITY = 2;
 // ------------------------------------------------- SPEC-019 §4.3 (emissive)
 
 /** The hit flash as emissive light, past the bloom threshold. */
-const FLASH_EMISSIVE = 2.5;
+export const FLASH_EMISSIVE = 2.5;
 /** The definition tint's share of the resting glow. */
-const TINT_EMISSIVE = 0.15;
+export const TINT_EMISSIVE = 0.15;
 /** Elite gold, added on top of the tinted base (§4.3). */
-const ELITE_GOLD: readonly [number, number, number] = [0.9 * 0.3, 0.7 * 0.3, 0.3 * 0.3];
+export const ELITE_GOLD: readonly [number, number, number] = [0.9 * 0.3, 0.7 * 0.3, 0.3 * 0.3];
 
 // ----------------------------------------------- SPEC-035 §4.1 (the hostile rim)
 
@@ -103,6 +108,8 @@ export const RECIPE_TRIANGLE_CAP: Record<ProceduralRecipeId, number> = {
   titan: 1200,
   queen: 1800,
   egg: 300,
+  // SPEC-064 §4.1: the human stand-in.
+  scav: 400,
 };
 
 /** Extras (legs, spikes, cores) take a gentler share of the recipe's k. */
@@ -219,6 +226,12 @@ interface PartDef {
   geometry: THREE.BufferGeometry;
   /** Emissive parts (the wraith core, eyes, vein bands) get their own material. */
   emissive?: string;
+  /**
+   * A part's own base colour under the instance tint, on a material of its
+   * own that does not glow — SPEC-064 §4.1's dark visor. Unset, a part wears
+   * the body material.
+   */
+  color?: string;
 }
 
 /** What an `EnemyDef.look` carries that the meshes care about (SPEC-012 §4.9). */
@@ -302,7 +315,26 @@ function veinBand(radius: number, tube: number, y: number): THREE.BufferGeometry
   return g;
 }
 
-/** §4.2 — the ten recipes of `MESH_RECIPE_IDS`, sculpted. */
+/** A one-segment box — the scav stand-in is never sculpted, so it needs no bevel to take. */
+function slab(w: number, h: number, d: number, x: number, y: number, z: number): THREE.BufferGeometry {
+  const g = new THREE.BoxGeometry(w, h, d);
+  g.translate(x, y, z);
+  return g;
+}
+
+/** A square-section limb of `thickness` from one point to another. */
+function limb(thickness: number, from: THREE.Vector3, to: THREE.Vector3): THREE.BufferGeometry {
+  const direction = to.clone().sub(from);
+  const g = new THREE.BoxGeometry(thickness, thickness, direction.length());
+  g.lookAt(direction); // the box's length (+Z) along the limb
+  g.translate((from.x + to.x) / 2, (from.y + to.y) / 2, (from.z + to.z) / 2);
+  return g;
+}
+
+/** SPEC-064 §4.1: the stand-in's visor — dark under the suit's tint, and no glow. */
+const SCAV_VISOR = '#15171b';
+
+/** §4.2 — the recipes of `MESH_RECIPE_IDS`, sculpted. */
 function buildRecipe(id: ProceduralRecipeId): Recipe {
   const seed = hash32('enemy', id);
   const raw = rawRecipe(id);
@@ -318,7 +350,7 @@ function buildRecipe(id: ProceduralRecipeId): Recipe {
 }
 
 /** §4.2's per-recipe displacement amplitudes, in metres (*initial tuning*). */
-const RECIPE_DISPLACEMENT: Record<ProceduralRecipeId, number> = {
+export const RECIPE_DISPLACEMENT: Record<ProceduralRecipeId, number> = {
   bug: 0.08,
   hound: 0.06,
   spitter: 0.1,
@@ -329,6 +361,8 @@ const RECIPE_DISPLACEMENT: Record<ProceduralRecipeId, number> = {
   titan: 0.04,
   queen: 0.1,
   egg: 0.06,
+  // SPEC-064 §4.1: a person is not sculpted like chitin.
+  scav: 0,
 };
 
 function rawRecipe(id: ProceduralRecipeId): Recipe {
@@ -465,6 +499,29 @@ function rawRecipe(id: ProceduralRecipeId): Recipe {
         { role: 'body', geometry: ellipsoid(0.45, 0.6, 0.45, 0.6) },
         { role: 'inner', geometry: veinBand(0.44, 0.035, 0.6), emissive: '#b4ff5a' },
       ];
+    case 'scav': {
+      // SPEC-064 §4.1: a human silhouette about 1.8 m tall, facing +X — so a
+      // box's width runs along z and its depth along x. The torso is 0.42 m
+      // across, 0.55 m tall and 0.26 m deep; the legs stand from the ground to
+      // 0.9 m; the arms angle forward from the shoulders to the hands at 1.07 m,
+      // on the rifle.
+      const body: THREE.BufferGeometry[] = [slab(0.26, 0.55, 0.42, 0, 1.15, 0)];
+      for (const side of [-1, 1]) body.push(slab(0.14, 0.9, 0.14, 0, 0.45, side * 0.1));
+      body.push(limb(0.12, new THREE.Vector3(0, 1.36, 0.27), new THREE.Vector3(0.5, 1.07, -0.08)));
+      body.push(limb(0.12, new THREE.Vector3(0, 1.36, -0.27), new THREE.Vector3(0.3, 1.07, -0.16)));
+      const helmet = new THREE.SphereGeometry(0.17, 10, 7);
+      helmet.translate(0, 1.62, 0);
+      const visor = new THREE.SphereGeometry(1, 8, 5);
+      visor.scale(0.08, 0.075, 0.13); // flattened front to back, wide across
+      visor.translate(0.1, 1.6, 0);
+      return [
+        { role: 'body', geometry: mergeGeometries(body) },
+        { role: 'head', geometry: helmet },
+        { role: 'inner', geometry: visor, color: SCAV_VISOR },
+        // `crown` has no role animation, so the rifle stays still.
+        { role: 'crown', geometry: slab(0.65, 0.07, 0.1, 0.45, 1.08, -0.12) },
+      ];
+    }
   }
 }
 
@@ -524,10 +581,18 @@ function glsl(value: number): string {
  * are both in scope by `<emissivemap_fragment>`, and `saturate` is three's own.
  * SPEC-045 §4.5: the colour is the `uHostileRim` uniform, no longer a baked
  * `vec3` literal, so the colour-blind preset retints it without a recompile.
+ *
+ * SPEC-064 §4.4: `scale` is the GLSL expression the rim is scaled by — the
+ * per-instance `w` here, a per-material uniform on a skinned raider — so both
+ * draw the one rim from the one source.
  */
-const RIM_CHUNK = `
+export function hostileRimChunk(scale: string): string {
+  return `
   float hostileRim = pow( 1.0 - saturate( dot( normal, normalize( vViewPosition ) ) ), ${glsl(RIM_POWER)} );
-  totalEmissiveRadiance += uHostileRim * ${glsl(RIM_INTENSITY)} * hostileRim * vInstanceEmissive.w;`;
+  totalEmissiveRadiance += uHostileRim * ${glsl(RIM_INTENSITY)} * hostileRim * ${scale};`;
+}
+
+const RIM_CHUNK = hostileRimChunk('vInstanceEmissive.w');
 
 /**
  * §4.3: the `instanceEmissive` attribute, injected around the standard chunks
@@ -608,13 +673,23 @@ export class EnemyMeshes {
     return n;
   }
 
-  /** `ground` (SPEC-018 §4.3) lifts every part onto the height field; optional so callers without terrain keep compiling. */
-  sync(enemies: Pool<EnemyEntity>, time: number, ground?: (x: number, z: number) => number): void {
+  /**
+   * `ground` (SPEC-018 §4.3) lifts every part onto the height field; optional so callers without terrain keep compiling.
+   * SPEC-064 §3: `skip` holds the enemy ids another view drew this frame — the
+   * skinned raiders — which draw no instance here. Absent, every enemy draws.
+   */
+  sync(
+    enemies: Pool<EnemyEntity>,
+    time: number,
+    ground?: (x: number, z: number) => number,
+    skip?: ReadonlySet<number>,
+  ): void {
     for (const recipe of this.#recipes.values()) recipe.count = 0;
 
     for (let i = 0; i < enemies.size; i++) {
       const e = enemies.at(i);
       if (e.state === 'dead' || isBuried(e)) continue;
+      if (skip !== undefined && skip.has(e.id)) continue;
       const recipe = this.#recipeFor(e.def.look);
       const slot = recipe.count;
       if (slot >= INSTANCES_PER_PART) continue; // clamped, never crashed
@@ -735,6 +810,20 @@ export class EnemyMeshes {
           metalness: PART_METALNESS,
           emissive: new THREE.Color(def.emissive),
           emissiveIntensity: PART_EMISSIVE_INTENSITY,
+          normalMap: chitinNormalMap(),
+          normalScale: new THREE.Vector2(0.5, 0.5),
+        });
+        injectInstanceEmissive(material);
+      } else if (def.color !== undefined) {
+        // SPEC-064 §4.1: the body material in a colour of its own — the
+        // instance tint multiplies it, the instance emissive still rides it.
+        material = new THREE.MeshStandardMaterial({
+          color: new THREE.Color(def.color),
+          flatShading: true,
+          roughness: PART_ROUGHNESS,
+          metalness: PART_METALNESS,
+          emissive: new THREE.Color(look.emissive ?? '#000000'),
+          emissiveIntensity: LOOK_EMISSIVE_INTENSITY,
           normalMap: chitinNormalMap(),
           normalScale: new THREE.Vector2(0.5, 0.5),
         });
