@@ -4,8 +4,8 @@
 //
 // Cargo behaviour is SPEC-010's: `addResource('pickup')` stops at the cap and
 // reports what would not fit — blocked units bounce back to the ground here
-// (the pickup persists) and the HUD's "CARGO FULL" toast is throttled to one
-// per 3 s (AC-19, E3). Items and gear that do not fit stay where they lie
+// (the pickup persists) and the HUD's "CARGO FULL" toast says so once per
+// resource until it fits again (AC-19, E3, 12-l). Items and gear that do not fit stay where they lie
 // (E25); everything on the ground expires after 60 s (AC-20).
 import type { EventBus, GameEvents } from '@/core/Events';
 import { Pool } from '@/core/Pool';
@@ -25,12 +25,11 @@ export const MAGNET_SPEED = 12;
 export const MAGNET_BONUS = 2;
 /** Contact distance: the player's radius plus the orb's visual size. */
 export const CONTACT_DISTANCE = 0.8;
-export const CARGO_TOAST_SECONDS = 3;
 export const CARGO_TOAST_TEXT = 'CARGO FULL';
 /**
  * SPEC-034 §4.12: what a full hold says when a collect objective still wants
- * the units it cannot carry — they count, and they go home instead. Throttled
- * on the same 3 s as CARGO FULL, because a resource field would machine-gun it.
+ * the units it cannot carry — they count, and they go home instead. Said once
+ * per resource until the hold takes it again, like CARGO FULL (12-l).
  * SPEC-045 §4.6: resources carried are cargo, so it says so.
  */
 export const SHIPPED_TOAST_TEXT = 'Cargo full — surplus shipped to Command Relay.';
@@ -66,7 +65,8 @@ export class Pickups {
   readonly #economy: PickupEconomy;
   readonly #events: EventBus<GameEvents>;
   #time = 0;
-  #toastAt = -Infinity;
+  /** 12-l: the resources CARGO FULL has been said for since each last fit. */
+  readonly #cargoWarned = new Set<ResourceId>();
   #nextSeed = 0;
 
   constructor(economy: PickupEconomy, events: EventBus<GameEvents>) {
@@ -132,10 +132,13 @@ export class Pickups {
       // SPEC-034 §4.12: an orb whose units were all added *or shipped home* is
       // consumed; only what is blocked bounces.
       const { added, blocked } = this.#economy.addResource(p.resource, p.amount, 'pickup');
+      // 12-l: units that went into the hold mean it had room, so the next
+      // refusal of this resource is news again.
+      if (added > 0) this.#cargoWarned.delete(p.resource);
       if (blocked > 0) {
         // E3: what did not fit bounces back to the ground as the same orb.
         p.amount = blocked;
-        this.#toastCargoFull();
+        this.#toastCargoFull(p.resource);
         return false;
       }
       return added >= 0; // fully added, shipped (or a zero-amount orb) is done
@@ -157,10 +160,14 @@ export class Pickups {
     return true;
   }
 
-  /** AC-19: at most one CARGO FULL toast per 3 s, however many orbs bounce. */
-  #toastCargoFull(): void {
-    if (this.#time - this.#toastAt < CARGO_TOAST_SECONDS) return;
-    this.#toastAt = this.#time;
+  /**
+   * AC-19, 12-l: one CARGO FULL toast per resource until that resource fits
+   * again, however many orbs bounce and however often they retry. The toast's
+   * warn tone is the only sound a full hold makes (SPEC-006 06-l).
+   */
+  #toastCargoFull(resource: ResourceId): void {
+    if (this.#cargoWarned.has(resource)) return;
+    this.#cargoWarned.add(resource);
     this.#events.emit('ui:toast', { text: CARGO_TOAST_TEXT, kind: 'warn' });
   }
 

@@ -203,7 +203,7 @@ test('mouse aim projects onto the ground plane (AC-10)', async ({ page }) => {
     .toBe(true);
 });
 
-test('a full hold bounces the pickup with one throttled CARGO FULL toast (AC-19, AC-70)', async ({ page }) => {
+test('a full hold bounces the pickup with one CARGO FULL toast (AC-19, AC-70, 12-l)', async ({ page }) => {
   test.setTimeout(150_000);
   await land(page, { fresh: true });
 
@@ -237,8 +237,8 @@ test('a full hold bounces the pickup with one throttled CARGO FULL toast (AC-19,
     return (await cargoFull.count()) > 0;
   });
   await expect(cargoFull.first()).toBeVisible();
-  // AC-19: the blocked orb keeps knocking every frame, yet the throttle admits
-  // one toast per 3 s — a single rack row right after the first appears.
+  // AC-19, 12-l: the blocked orb keeps knocking every 0.5 s, yet CARGO FULL
+  // is said once per resource until it fits again — a single rack row.
   expect(await cargoFull.count()).toBe(1);
 });
 
