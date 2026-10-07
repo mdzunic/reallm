@@ -1334,6 +1334,8 @@ export class SurfaceScene extends UiScene<'surface'> {
       time: 0,
       // SPEC-030 §4.7: enemies, the follower and shots stop at the wall line.
       bounds: layout.halfSize - WALL_INSET,
+      // SPEC-066 §4.4: a non-boss kill pays at the planet's chapter.
+      planetChapter: planet.chapter,
     };
     world.player.facing = layout.playerSpawn.facing;
     this.#world = world;

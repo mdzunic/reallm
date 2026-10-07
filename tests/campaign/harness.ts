@@ -33,7 +33,7 @@ import {
   type ResourceId,
 } from '@/data/index';
 import { LOADOUT_CHAPTERS, RECOMMENDED_LOADOUT, type LoadoutChapter, type LoadoutEntry } from '@/systems/Balance';
-import { computePlayerStats } from '@/systems/Combat';
+import { computePlayerStats, killXp } from '@/systems/Combat';
 import { Economy, refuelVoucherText } from '@/systems/Economy';
 import { Flight, type FlightInput } from '@/systems/Flight';
 import type { LayoutPoi } from '@/systems/Layout';
@@ -529,7 +529,8 @@ function satisfy(run: Run, missions: Missions, id: MissionId, progress: Objectiv
       return pickUp(run, id, objective.resource, amount);
     }
     case 'kill':
-      killMany(run, objective.enemy, progress.target - progress.value);
+      // SPEC-066 §6.6: a surface kill pays at its planet's chapter.
+      killMany(run, objective.enemy, progress.target - progress.value, PLANETS[MISSIONS[id].planet].chapter);
       return true;
     case 'boss':
       kill(run, objective.enemy, 1);
@@ -567,13 +568,17 @@ function pickUp(run: Run, id: MissionId, resource: ResourceId, need: number): bo
   return false;
 }
 
-function killMany(run: Run, enemy: EnemyId, count: number): void {
-  for (let n = 0; n < count; n++) kill(run, enemy, KILL_XP_MULT);
+function killMany(run: Run, enemy: EnemyId, count: number, chapter?: number): void {
+  for (let n = 0; n < count; n++) kill(run, enemy, KILL_XP_MULT, chapter);
 }
 
-/** `Combat.killEnemy`'s order: the kill, then its XP (§4.2 — only with `killXp`). */
-function kill(run: Run, enemy: EnemyId, xpMult: number): void {
-  const xp = ENEMIES[enemy].xp;
+/**
+ * `Combat.killEnemy`'s order: the kill, then its XP (§4.2 — only with `killXp`).
+ * SPEC-066 §6.6: with a `chapter` (a surface kill) the XP is `killXp` at it;
+ * without one (a flight kill, the boss) it is the def's own.
+ */
+function kill(run: Run, enemy: EnemyId, xpMult: number, chapter?: number): void {
+  const xp = chapter === undefined ? ENEMIES[enemy].xp : killXp(ENEMIES[enemy], chapter);
   run.bus.emit('enemy:killed', { enemyId: enemy, elite: false, x: 0, z: 0, xp });
   if (run.killXp) run.progression.addXp(xpMult * xp, 'kill');
 }

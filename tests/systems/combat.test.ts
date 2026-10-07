@@ -33,6 +33,8 @@ import {
   DAMAGE_PER_LEVEL,
   damageReduction,
   ELITE_XP_MULT,
+  KILL_XP_GROWTH,
+  killXp,
   enemyHitDamage,
   EXPLOSIVE_FALLOFF,
   gearAt,
@@ -54,6 +56,7 @@ import {
   twistOf,
 } from '@/systems/Combat';
 import { DEPLOYABLE_CAPACITY, MAX_ARMED_MINES } from '@/entities/Deployable';
+import { affixCount } from '@/entities/Enemy';
 import { resetTelegraph } from '@/entities/Telegraph';
 import { DARK_SIGHT, FLARE_RADIUS, inFlare } from '@/systems/Light';
 import { cumulativeXp } from '@/systems/Progression';
@@ -719,6 +722,70 @@ describe('kills, elites and loot (§4.6, §4.7)', () => {
     expect(gearAt('rifle', 1)).toBe('weapon_laser');
     expect(gearAt('handgun', 0)).toBe('pistol_service');
     expect(gearAt('armor', 3)).toBe('armor_ablative');
+  });
+});
+
+// -------------------------------------------------- kill XP by chapter
+
+describe('kill XP by chapter (SPEC-066 §4.4)', () => {
+  it('grows ×1.15 a chapter for a swarm, rusher, ranged and static enemy', () => {
+    expect(KILL_XP_GROWTH).toBe(1.15);
+    const byChapter = (id: EnemyId): number[] => [1, 2, 3, 4, 5, 6].map((c) => killXp(ENEMIES[id], c));
+    expect(byChapter('dust_skitter')).toEqual([4, 5, 5, 6, 7, 8]);
+    expect(byChapter('wurmling')).toEqual([8, 9, 11, 12, 14, 16]);
+    expect(byChapter('scav_raider')).toEqual([10, 12, 13, 15, 17, 20]);
+    expect(byChapter('hive_egg')).toEqual([5, 6, 7, 8, 9, 10]);
+  });
+
+  it('a boss pays its def.xp at every chapter', () => {
+    for (const boss of ['dune_wurm', 'frost_matriarch', 'hive_broodlord', 'ash_titan', 'hive_queen'] as const) {
+      for (let c = 1; c <= 6; c++) expect(killXp(ENEMIES[boss], c)).toBe(ENEMIES[boss].xp);
+    }
+  });
+
+  it('on the Hive (chapter 5) a drone pays 7, a warrior 14, a spitter 17 and an egg 9', () => {
+    const h = harness();
+    h.world.planetChapter = 5;
+    for (const id of ['hive_drone', 'hive_warrior', 'hive_spitter', 'hive_egg'] as const) {
+      h.combat.killEnemy(h.spawn(id, 5, 0), 'player');
+    }
+    expect(h.of('enemy:killed').map((k) => k.xp)).toEqual([7, 14, 17, 9]);
+    expect(h.save.player.xp).toBe(7 + 14 + 17 + 9);
+  });
+
+  it('66-h: on Eden (chapter 6) a drone pays 8, a warrior 16, a spitter 20', () => {
+    const h = harness();
+    h.world.planetChapter = 6;
+    for (const id of ['hive_drone', 'hive_warrior', 'hive_spitter'] as const) {
+      h.combat.killEnemy(h.spawn(id, 5, 0), 'player');
+    }
+    expect(h.of('enemy:killed').map((k) => k.xp)).toEqual([8, 16, 20]);
+  });
+
+  it('66-g: an elite drone pays killXp × (3 + affixes), and a replay halves it after', () => {
+    const h = harness();
+    h.world.planetChapter = 5;
+    const elite = h.combat.spawnEnemy('hive_drone', 5, 0, true, 'swift', 'mender');
+    expect(affixCount(elite)).toBe(2);
+    h.combat.killEnemy(elite, 'player');
+    const replayed = h.combat.spawnEnemy('hive_drone', 5, 0, true, 'swift');
+    replayed.replay = true;
+    h.combat.killEnemy(replayed, 'player');
+    expect(h.of('enemy:killed').map((k) => k.xp)).toEqual([7 * 5, Math.floor(7 * 4 * TUNING.REPLAY_REWARD_FRACTION)]);
+  });
+
+  it('an absent planetChapter pays def.xp, and a boss pays def.xp on any planet', () => {
+    const h = harness();
+    expect(h.world.planetChapter).toBeUndefined();
+    h.combat.killEnemy(h.spawn('hive_drone', 5, 0), 'player');
+    h.combat.killEnemy(h.spawn('hive_spitter', 5, 0), 'player');
+    h.world.planetChapter = 5;
+    h.combat.killEnemy(h.spawn('hive_queen', 10, 0), 'player');
+    expect(h.of('enemy:killed').map((k) => k.xp)).toEqual([
+      ENEMIES.hive_drone.xp,
+      ENEMIES.hive_spitter.xp,
+      ENEMIES.hive_queen.xp,
+    ]);
   });
 });
 
