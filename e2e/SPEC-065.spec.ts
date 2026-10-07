@@ -25,6 +25,8 @@ interface Prep {
   water?: number;
   /** What Command Relay already keeps, per resource. */
   depot?: Record<string, number>;
+  /** The pad terminal's reserve, per resource. */
+  keep?: Record<string, number>;
   done?: string[];
   active?: Array<{ id: string; stage: number }>;
 }
@@ -39,6 +41,7 @@ async function prepare(page: Page, prep: Prep): Promise<void> {
       if (prep.oil !== undefined) save.resources['oil'] = prep.oil;
       if (prep.water !== undefined) save.resources['water'] = prep.water;
       for (const [resource, amount] of Object.entries(prep.depot ?? {})) save.depot.held[resource] = amount;
+      for (const [resource, amount] of Object.entries(prep.keep ?? {})) save.depot.keep[resource] = amount;
       if (prep.done !== undefined) save.progress.missionsDone = [...prep.done];
       if (prep.active !== undefined) save.progress.missionsActive = prep.active.map(({ id, stage }) => ({ id, stage, counters: {} }));
     },
@@ -135,7 +138,8 @@ const walletOil = (page: Page) => page.getByTestId('wallet-oil').locator('.walle
 test('1–3. the pad terminal ships the oil above the reserve home, and the Depot tab draws it back', async ({ page }) => {
   test.setTimeout(150_000);
   await start(page, DEBUG_URL);
-  await prepare(page, { oil: 400 });
+  // 65-a: water's reserve was set on a bigger hold than this one's 400.
+  await prepare(page, { oil: 400, keep: { water: 1_000 } });
   await land(page);
   await openTerminal(page);
 
@@ -185,6 +189,22 @@ test('1–3. the pad terminal ships the oil above the reserve home, and the Depo
   await expect(ship).toHaveText('Ship 100 home');
   await expect(page.getByTestId('terminal-keep-less-oil')).toBeDisabled();
   expect(await tank(page)).toEqual({ hold: 100, depot: 300, keep: 0 });
+  // A step up and back again.
+  await page.getByTestId('terminal-keep-more-oil').click();
+  await expect(page.getByTestId('terminal-keep-oil')).toHaveText('Keep 50');
+  await expect(ship).toHaveText('Ship 50 home');
+  await page.getByTestId('terminal-keep-less-oil').click();
+  await expect(page.getByTestId('terminal-keep-oil')).toHaveText('Keep 0');
+
+  // 65-a: a reserve above the cap shows, and steps, at the cap; the stored one
+  // waits for the step.
+  await expect(page.getByTestId('terminal-keep-water')).toHaveText('Keep 400');
+  await expect(page.getByTestId('terminal-keep-more-water')).toBeDisabled();
+  expect((await tank(page, 'water')).keep).toBe(1_000);
+  await page.getByTestId('terminal-keep-less-water').click();
+  await expect(page.getByTestId('terminal-keep-water')).toHaveText('Keep 350');
+  await expect(page.getByTestId('terminal-keep-more-water')).toBeEnabled();
+  expect((await tank(page, 'water')).keep).toBe(350);
 
   // Step 3: home through the terminal. 100 aboard and 300 at the depot need no subsidy.
   await page.getByTestId('terminal-return').click();
