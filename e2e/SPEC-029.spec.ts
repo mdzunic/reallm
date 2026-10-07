@@ -34,7 +34,8 @@ function aimPoint(page: Page): { x: number; y: number } {
  *
  * The press is a DOM event the game consumes on its next frame, so a count read
  * in the same step that pressed still reads the state from *before* it; and a
- * press inside the 0.5 s explosive cooldown (§4.8) is refused silently. Pressing
+ * press inside the 1.2 s explosive cooldown (§4.8; 0.5 s before review 2026-10,
+ * G-01) is refused silently. Pressing
  * inside a poll predicate combines the two badly: once the poll's backoff grew
  * past the cooldown, every retry spent another mine while the poll was still
  * comparing a stale count, so six placements could spend all seven mines and the
@@ -49,8 +50,8 @@ function aimPoint(page: Page): { x: number; y: number } {
 async function plant(page: Page, expected: number): Promise<void> {
   for (let attempt = 0; attempt < 4; attempt++) {
     if ((await info(page))['qExplosive'] === expected) return;
-    // Let the 0.5 s cooldown from the previous placement run out first.
-    await page.waitForTimeout(700);
+    // Let the 1.2 s cooldown from the previous placement run out first.
+    await page.waitForTimeout(1_400);
     await page.keyboard.press('KeyG');
     try {
       await expect.poll(async () => (await info(page))['qExplosive'], { timeout: 2_500 }).toBe(expected);
@@ -206,7 +207,16 @@ test('the seventh mine is refused at the six-mine limit and spends nothing (§6.
   expect((await info(page))['qExplosive']).toBe(7);
 
   // Six placements, each spending exactly one mine.
-  for (let placed = 1; placed <= 6; placed++) await plant(page, 7 - placed);
+  await plant(page, 6);
+  // Review 2026-10 (G-01): any explosive use waits 1.2 s after the last — it
+  // was 0.5 s. A press 0.6 s after the placement is refused and spends
+  // nothing; game time never runs ahead of the wall clock, so a slow frame
+  // only makes the wait longer.
+  await page.waitForTimeout(600);
+  await page.keyboard.press('KeyG');
+  await page.waitForTimeout(200);
+  expect((await info(page))['qExplosive']).toBe(6);
+  for (let placed = 2; placed <= 6; placed++) await plant(page, 7 - placed);
   await expect.poll(async () => (await info(page))['mines'], { timeout: 10_000 }).toBe(6);
 
   // The seventh is refused whole — pressed until it lands outside the

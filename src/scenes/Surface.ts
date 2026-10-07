@@ -461,8 +461,12 @@ const DASH_STREAK_COLOR = 0xbfe6ff;
 const SHORT_SPRINT_SECONDS = 0.5;
 /** SPEC-050 §4.6: the stamina ring is placed off the salvager's head, this far above the ground. */
 const STAMINA_HEAD_LIFT = 1.6;
-/** SPEC-029 §4.8: any explosive use waits this long after the last. */
-const EXPLOSIVE_USE_SECONDS = 0.5;
+/**
+ * SPEC-029 §4.8: any explosive use waits this long after the last — a flare
+ * too (SPEC-056 §4.5). Review 2026-10 (G-01): 0.5 → 1.2 s, so frags no longer
+ * add 110 × the damage multiplier a second on top of the gun.
+ */
+const EXPLOSIVE_USE_SECONDS = 1.2;
 /** SPEC-029 §4.12: the blast camera shake. */
 const BLAST_SHAKE_AMPLITUDE = 0.3;
 const BLAST_SHAKE_SECONDS = 0.3;
@@ -4180,8 +4184,8 @@ export class SurfaceScene extends UiScene<'surface'> {
 
   /**
    * SPEC-056 §4.5: a flare from the utility slot — aimed as a frag is
-   * (`#throwTarget`, clamped to its 12 m), waiting out the same 0.5 s, and
-   * spending one only when it flies.
+   * (`#throwTarget`, clamped to its 12 m), waiting out the same
+   * `EXPLOSIVE_USE_SECONDS`, and spending one only when it flies.
    */
   #throwFlare(id: ItemId, effect: LightEffect): void {
     const world = this.#world;
@@ -4202,8 +4206,8 @@ export class SurfaceScene extends UiScene<'surface'> {
   /**
    * SPEC-029 §4.8: throw toward the aim point (keyboard) or the nearest enemy
    * with a clear line (touch), clamped to range; plant a mine or a charge at
-   * the player's feet. Any use waits 0.5 s after the last and spends exactly
-   * one item — a refused deploy spends nothing.
+   * the player's feet. Any use waits `EXPLOSIVE_USE_SECONDS` (1.2 s) after
+   * the last and spends exactly one item — a refused deploy spends nothing.
    */
   #useExplosive(id: ItemId, effect: ExplosiveEffect): void {
     const world = this.#world;
