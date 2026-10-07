@@ -3,6 +3,7 @@
 // the table to its promises: every stored setting has a control or is named
 // bookkeeping, every testid follows one rule, and the rows follow the scheme.
 import { describe, expect, it } from 'vitest';
+import { DIFFICULTIES } from '@/core/Save';
 import { defaultSettings, type Settings } from '@/core/Settings';
 import {
   BOOKKEEPING_KEYS,
@@ -189,6 +190,12 @@ describe('the settings row table (SPEC-045 §4.2)', () => {
     expect(visibleRows(TOUCH).find((row) => row.key === 'haptics')?.section).toBe('audio');
     // Gameplay opens with the difficulty row while a save is bound.
     expect(section('gameplay')[0]).toBe('settings-difficulty');
+  });
+
+  it('offers the difficulties easiest to hardest, as creation does (review 2026-10 P-09)', () => {
+    const row = SETTINGS_ROWS.find((r) => r.key === 'difficulty') as SettingsRowDef;
+    expect(row.choices?.map((choice) => choice.label)).toEqual(['Story', 'Casual', 'Normal', 'Hard']);
+    expect(row.choices?.map((choice) => choice.value)).toEqual([...DIFFICULTIES]);
   });
 
   it('holds the two run rows in Controls, each shown on its scheme (SPEC-050 §4.5)', () => {
