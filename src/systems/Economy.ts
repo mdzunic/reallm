@@ -849,10 +849,11 @@ export class Economy {
   }
 
   /**
-   * E1, called on every station `enter()`: if the hold cannot pay for the
-   * cheapest unlocked jump, top it up by exactly the shortfall. Unlimited on
-   * purpose — the campaign is never blocked, and grinding Cinder-4 stays the
-   * honest path. Returns the oil granted, 0 for nothing; the station shows
+   * E1, called on every station arrival (not the star map's Back, review
+   * 2026-10 B-07): if the hold cannot pay for the cheapest unlocked jump, top
+   * it up by exactly the shortfall. Unlimited on purpose — the campaign is
+   * never blocked, and grinding Cinder-4 stays the honest path. Returns the
+   * oil granted, 0 for nothing; the station shows
    * ARIA's line off that number (§4.6), which is why nothing is said here.
    *
    * SPEC-065 §4.4 (E119): the shortfall is of the hold and the depot

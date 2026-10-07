@@ -145,6 +145,35 @@ test.describe('depart confirm sheet', () => {
   });
 });
 
+test.describe('the station subsidy (E1)', () => {
+  test.use({ reducedMotion: 'reduce' });
+
+  // Review 2026-10, B-07: the subsidy re-granted on every Back from the star
+  // map, so crafting or upgrading with the free oil and opening the map farmed it.
+  test('arriving tops the hold up; Back from the star map is a return and grants nothing', async ({ page }) => {
+    await start(page);
+    await page.evaluate((creation) => {
+      const data = window.__reallm.save().create(0, creation);
+      data.resources['oil'] = 0;
+    }, CREATION);
+    const oil = (): Promise<number | undefined> => page.evaluate(() => window.__reallm.save().current?.resources['oil']);
+    expect(await go(page, 'station', {})).toBe(true);
+    // The arrival: Cinder-4's 40 for the cheapest unlocked jump.
+    expect(await oil()).toBe(40);
+
+    // The oil goes into a craft; the star map, then Back.
+    await page.evaluate(() => {
+      const data = window.__reallm.save().current;
+      if (data !== null) data.resources['oil'] = 0;
+    });
+    expect(await go(page, 'starmap', undefined)).toBe(true);
+    await page.locator('[data-testid="starmap-back"]').click();
+    await expect.poll(() => page.evaluate(() => window.__reallm.scene())).toBe('station');
+    await expect(page.locator('[data-testid="station-root"]')).toBeVisible();
+    expect(await oil()).toBe(0);
+  });
+});
+
 test.describe('the toast layer', () => {
   // The rack is the one piece of UI every system talks to, and the only path a
   // browser has to two of its four kinds is the DEV bridge (SPEC-014 §4.6).

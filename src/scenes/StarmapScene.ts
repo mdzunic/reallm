@@ -660,7 +660,8 @@ export class StarmapScene extends UiScene<'starmap'> {
   #back(): void {
     if (this.#leaving) return;
     this.#leaving = true;
-    void this.services.go('station', {}).then((went) => {
+    // SPEC-010 §4.6: Back is a return to the station, not an arrival.
+    void this.services.go('station', { fromStarmap: true }).then((went) => {
       if (!went) this.#leaving = false;
     });
   }
