@@ -566,7 +566,15 @@ export const HOSTILE_RIM_UNIFORM: { value: THREE.Color } = { value: RIM_STANDARD
  * it on enter and on a `settings:changed` that carries `colourPreset`.
  */
 export function setHostileRim(preset: ColourPreset): void {
+  rimPreset = preset;
   HOSTILE_RIM_UNIFORM.value.copy(preset === 'colour-blind' ? RIM_COLOUR_BLIND : RIM_STANDARD);
+}
+
+let rimPreset: ColourPreset = 'standard';
+
+/** The preset `setHostileRim` last applied — what a planet's telegraph override keys on (review 2026-10 V-02). */
+export function hostileRimPreset(): ColourPreset {
+  return rimPreset;
 }
 
 /** A GLSL float literal — `3` on its own is an int and will not compile. */

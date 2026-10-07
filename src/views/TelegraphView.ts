@@ -14,21 +14,51 @@
 // SPEC-045 §4.5: the colour is read from `HOSTILE_RIM_UNIFORM` on every sync,
 // so the colour-blind preset retints the live decals on the next frame, as it
 // does the enemies' rims. An elite's gold outline is not the rim and stays.
+//
+// Review 2026-10 V-02: the outline wears the waypoint's treatment — a dark
+// band on its outer edge and a pale one on its inner edge — so a decal reads
+// on lava and on snow alike, still in the one draw. Where a planet's ground
+// glows in the rim's own hue (Ferrum's cracks; the Hive's under the
+// colour-blind magenta) the decal takes that planet's override colour.
 import * as THREE from 'three';
+import type { ColourPreset } from '@/core/Settings';
 import type { Pool } from '@/core/Pool';
+import type { PlanetId } from '@/data/ids';
 import { ringRadius, TELEGRAPH_CAPACITY, telegraphProgress, type TelegraphEntity, type TelegraphKind } from '@/entities/Telegraph';
-import { HOSTILE_RIM_UNIFORM } from '@/views/ProceduralMeshes';
+import { HOSTILE_RIM_UNIFORM, hostileRimPreset } from '@/views/ProceduralMeshes';
 
 /** §4.2: an elite's decal outline is gold. */
 export const ELITE_OUTLINE = '#e0b34a';
 /** §4.2: decals sit this far over the height field. */
 export const TELEGRAPH_LIFT = 0.05;
-/** The outline's width, in metres. */
-const OUTLINE_WIDTH = 0.14;
+/** The outline's width, in metres: V-02 widened it from 0.14 to hold its two edges. */
+const OUTLINE_WIDTH = 0.2;
 /** §4.2: outline 0.6, fill 0.35, a ring's travelling band 0.5. */
 const OUTLINE_ALPHA = 0.6;
 const FILL_ALPHA = 0.35;
 const BAND_ALPHA = 0.5;
+/**
+ * V-02: the outline's outer dark band and inner pale edge, in metres, with
+ * their opacities — `.waypoint-mark`'s 2 px dark stroke and 1 px pale rim,
+ * on the ground. The dark is the theme's `#0b0f14`.
+ */
+const DARK_WIDTH = 0.06;
+const DARK_ALPHA = 0.7;
+const PALE_WIDTH = 0.04;
+const PALE_ALPHA = 0.85;
+const PALE_MIX = 0.7;
+
+/**
+ * V-02: a planet whose ground glows in the rim's hue, and the colour its
+ * decals take instead under that preset. Ferrum's emissive cracks `#ff6a2a`
+ * sit ΔE 13 from the standard rim; the Hive's `#c04ad0` sit ΔE 22 from the
+ * colour-blind magenta. A hot white-yellow and a cyan stand off both grounds.
+ * Enemy rims keep the preset's colour; an elite outline stays gold.
+ */
+export const TELEGRAPH_OVERRIDES: Readonly<Partial<Record<PlanetId, Partial<Record<ColourPreset, string>>>>> = {
+  ferrum: { standard: '#fff0b0' },
+  hive: { 'colour-blind': '#4fe3ff' },
+};
 /** The outline's breathing, in rad/s — gone under reduce motion. */
 const PULSE_RATE = 9;
 
@@ -49,24 +79,31 @@ const SHAPE_CHUNK = /* glsl */ `
   float edgeWidth = ${OUTLINE_WIDTH.toFixed(3)};
   vec3 shapeColor = diffuseColor.rgb;
   float shapeAlpha = 0.0;
+  // V-02: how far in from the outline's outer edge this fragment lies; under
+  // edgeWidth it is the outline — dark outside, pale inside, coloured between.
+  float edgeIn = edgeWidth;
 #if TELEGRAPH_KIND == 0
   float radius = vShape.x;
   float d = length(vTelegraphUv - 0.5) * 2.0 * radius;
   if (d > radius) discard;
-  if (d >= radius - edgeWidth) { shapeColor = vOutline; shapeAlpha = outlineAlpha; }
-  else if (d >= radius * (1.0 - vShape.y)) { shapeAlpha = ${FILL_ALPHA.toFixed(3)}; }
+  edgeIn = radius - d;
+  if (edgeIn >= edgeWidth && d >= radius * (1.0 - vShape.y)) { shapeAlpha = ${FILL_ALPHA.toFixed(3)}; }
 #elif TELEGRAPH_KIND == 1
   float along = vTelegraphUv.x * vShape.x;
   float across = abs(vTelegraphUv.y - 0.5) * vShape.y;
-  if (along < edgeWidth || along > vShape.x - edgeWidth || across > vShape.y * 0.5 - edgeWidth) {
-    shapeColor = vOutline;
-    shapeAlpha = outlineAlpha;
-  } else if (vTelegraphUv.x <= vShape.z) {
-    shapeAlpha = ${FILL_ALPHA.toFixed(3)};
-  }
+  edgeIn = min(min(along, vShape.x - along), vShape.y * 0.5 - across);
+  if (edgeIn >= edgeWidth && vTelegraphUv.x <= vShape.z) { shapeAlpha = ${FILL_ALPHA.toFixed(3)}; }
 #else
   float d = length(vTelegraphUv - 0.5) * 2.0 * vShape.x;
-  if (abs(d - vShape.y) <= edgeWidth * 0.5) { shapeColor = vOutline; shapeAlpha = outlineAlpha; }
+  edgeIn = vShape.y + edgeWidth * 0.5 - d;
+  if (edgeIn > edgeWidth) edgeIn = edgeWidth;
+#endif
+  if (edgeIn >= 0.0 && edgeIn < edgeWidth) {
+    if (edgeIn < ${DARK_WIDTH.toFixed(3)}) { shapeColor = vec3(0.0044, 0.0056, 0.0070); shapeAlpha = ${DARK_ALPHA.toFixed(3)}; }
+    else if (edgeIn >= edgeWidth - ${PALE_WIDTH.toFixed(3)}) { shapeColor = mix(vOutline, vec3(1.0), ${PALE_MIX.toFixed(3)}); shapeAlpha = ${PALE_ALPHA.toFixed(3)}; }
+    else { shapeColor = vOutline; shapeAlpha = outlineAlpha; }
+  }
+#if TELEGRAPH_KIND == 2
   if (vShape.z >= 0.0 && abs(d - vShape.z) <= vShape.w * 0.5) { shapeColor = diffuseColor.rgb; shapeAlpha = ${BAND_ALPHA.toFixed(3)}; }
 #endif
   if (shapeAlpha <= 0.0) discard;
@@ -115,10 +152,16 @@ export class TelegraphView {
   readonly #kinds: Partial<Record<TelegraphKind, KindMesh>> = {};
   readonly #pulse = { value: 1 };
   readonly #clock = { value: 0 };
+  /** V-02: this planet's override per preset, in working space, or null where the rim stands. */
+  readonly #standard: THREE.Color | null;
+  readonly #colourBlind: THREE.Color | null;
 
-  constructor(parent: THREE.Object3D, capacity: number = TELEGRAPH_CAPACITY) {
+  constructor(parent: THREE.Object3D, capacity: number = TELEGRAPH_CAPACITY, planet: PlanetId | null = null) {
     this.#parent = parent;
     this.#capacity = capacity;
+    const override = planet === null ? undefined : TELEGRAPH_OVERRIDES[planet];
+    this.#standard = override?.standard === undefined ? null : new THREE.Color(override.standard);
+    this.#colourBlind = override?.['colour-blind'] === undefined ? null : new THREE.Color(override['colour-blind']);
   }
 
   /**
@@ -130,7 +173,7 @@ export class TelegraphView {
     const built = this.#kinds[kind];
     if (built !== undefined) return built;
     const material = new THREE.MeshBasicMaterial({
-      color: HOSTILE_RIM_UNIFORM.value,
+      color: this.#colour(),
       transparent: true,
       depthWrite: false,
       polygonOffset: true,
@@ -188,7 +231,8 @@ export class TelegraphView {
     this.#clock.value = time;
     // SPEC-045 §4.5: the rim's colour as it is this frame — copied into each
     // kind's fill and written into each non-elite outline, never allocated.
-    const rim = HOSTILE_RIM_UNIFORM.value;
+    // V-02: unless this planet overrides it under the preset in force.
+    const rim = this.#colour();
     for (const kind of KINDS) {
       const built = this.#kinds[kind];
       if (built === undefined) continue;
@@ -239,6 +283,12 @@ export class TelegraphView {
       target.shape.needsUpdate = true;
       target.outline.needsUpdate = true;
     }
+  }
+
+  /** The decals' colour this frame: the rim of the moment, or V-02's override for this planet and preset. */
+  #colour(): THREE.Color {
+    const override = hostileRimPreset() === 'colour-blind' ? this.#colourBlind : this.#standard;
+    return override ?? HOSTILE_RIM_UNIFORM.value;
   }
 
   /** The highest ground under a disc — the centre and four points on its rim. */

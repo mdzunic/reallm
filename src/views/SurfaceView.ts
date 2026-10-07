@@ -29,7 +29,7 @@ import { isBuried, type EnemyEntity } from '@/entities/Enemy';
 import type { FollowerEntity } from '@/entities/Follower';
 import type { PlayerEntity } from '@/entities/Player';
 import type { ProjectileEntity } from '@/entities/Projectile';
-import type { TelegraphEntity } from '@/entities/Telegraph';
+import { TELEGRAPH_CAPACITY, type TelegraphEntity } from '@/entities/Telegraph';
 import { DEPLOYABLE_CAPACITY, type DeployableEntity } from '@/entities/Deployable';
 import { CharacterView } from '@/views/CharacterView';
 import { CombatFx, type TimedCloud, type TimedGround } from '@/views/CombatFx';
@@ -1442,7 +1442,7 @@ export class SurfaceView {
     this.#billboard = cameraBillboard();
     this.#fxCapacity = Math.min(FX_CAPACITY_MAX, FX_CAPACITY_PER_PARTICLE * quality.maxParticles);
     this.#fx = new CombatFx(this.#actorRoot, this.#billboard, this.#fxCapacity);
-    this.#telegraphs = new TelegraphView(this.#actorRoot);
+    this.#telegraphs = new TelegraphView(this.#actorRoot, TELEGRAPH_CAPACITY, planet.id);
 
     // The player: capsule body + nose cone showing facing. `transparent` stays
     // on so the invulnerability blink can keep writing `opacity` (§4.7).

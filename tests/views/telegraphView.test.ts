@@ -7,7 +7,10 @@ import * as THREE from 'three';
 import { Pool } from '@/core/Pool';
 import { makeTelegraph, resetTelegraph, type TelegraphEntity } from '@/entities/Telegraph';
 import { HOSTILE_RIM, HOSTILE_RIM_COLOUR_BLIND, setHostileRim } from '@/views/ProceduralMeshes';
-import { ELITE_OUTLINE, TELEGRAPH_LIFT, TelegraphView } from '@/views/TelegraphView';
+import type { PlanetId } from '@/data/ids';
+import { PLANETS, type PlanetDef } from '@/data/planets';
+import { ELITE_OUTLINE, TELEGRAPH_LIFT, TELEGRAPH_OVERRIDES, TelegraphView } from '@/views/TelegraphView';
+import { DEFICIENCIES, deltaE76 } from '../fixtures/colourVision';
 
 const flat = (): number => 0;
 
@@ -143,5 +146,82 @@ describe('the decals follow the colour preset (SPEC-045 §4.5, AC-24)', () => {
       setHostileRim('standard');
       view.dispose();
     }
+  });
+});
+
+describe('telegraphs read on any ground (review 2026-10 V-02)', () => {
+  function decalColours(view: TelegraphView, root: THREE.Group): { fill: number; outline: number; elite: number } {
+    const pool = new Pool(makeTelegraph);
+    add(pool, { kind: 'circle', x: 0, z: 0 });
+    add(pool, { kind: 'circle', x: 6, z: 0, elite: true });
+    view.sync(pool, 0.5, flat, false);
+    const mesh = root.children.find((node) => node.name === 'telegraph-circle') as THREE.InstancedMesh;
+    const outline = mesh.geometry.attributes['aOutline'] as THREE.InstancedBufferAttribute;
+    const hex = (slot: number): number => new THREE.Color(outline.getX(slot), outline.getY(slot), outline.getZ(slot)).getHex();
+    return { fill: (mesh.material as THREE.MeshBasicMaterial).color.getHex(), outline: hex(0), elite: hex(1) };
+  }
+
+  it('takes the planet’s override under its preset — Ferrum on standard, the Hive on colour-blind — and keeps elites gold', () => {
+    const cases = [
+      ['ferrum', 'standard', '#fff0b0'],
+      ['ferrum', 'colour-blind', HOSTILE_RIM_COLOUR_BLIND],
+      ['hive', 'standard', HOSTILE_RIM],
+      ['hive', 'colour-blind', '#4fe3ff'],
+      ['cinder4', 'standard', HOSTILE_RIM],
+      ['cinder4', 'colour-blind', HOSTILE_RIM_COLOUR_BLIND],
+    ] as const;
+    try {
+      for (const [planet, preset, expected] of cases) {
+        setHostileRim(preset);
+        const root = new THREE.Group();
+        const view = new TelegraphView(root, undefined, planet);
+        const colours = decalColours(view, root);
+        const want = new THREE.Color(expected).getHex();
+        expect(colours.fill, `${planet} ${preset} fill`).toBe(want);
+        expect(colours.outline, `${planet} ${preset} outline`).toBe(want);
+        expect(colours.elite, `${planet} ${preset} elite`).toBe(new THREE.Color(ELITE_OUTLINE).getHex());
+        view.dispose();
+      }
+    } finally {
+      setHostileRim('standard');
+    }
+  });
+
+  it('each override stands off the ground glow it replaces the rim on, under every colour vision', () => {
+    // Ferrum's cracks against the standard rim: ΔE 13 — the clash the review measured.
+    expect(deltaE76(HOSTILE_RIM, PLANETS.ferrum.surface.look.ground.cracks?.color ?? '')).toBeLessThan(15);
+    for (const [planet, presets] of Object.entries(TELEGRAPH_OVERRIDES)) {
+      const def: PlanetDef = PLANETS[planet as PlanetId];
+      const cracks = def.surface.look.ground.cracks?.color;
+      expect(cracks, planet).toBeDefined();
+      for (const colour of Object.values(presets)) {
+        for (const type of [null, ...DEFICIENCIES]) {
+          expect(deltaE76(colour, cracks as string, type), `${planet} ${colour} ${type ?? 'normal'}`).toBeGreaterThan(25);
+        }
+        // Still apart from an elite's gold outline.
+        expect(deltaE76(colour, ELITE_OUTLINE), `${planet} ${colour} vs gold`).toBeGreaterThan(25);
+      }
+    }
+  });
+
+  it('draws the outline with a dark outer band and a pale inner edge, in the same one program per kind', () => {
+    const root = new THREE.Group();
+    const view = new TelegraphView(root);
+    const pool = new Pool(makeTelegraph);
+    add(pool, { kind: 'line', x: 0, z: 0 });
+    view.sync(pool, 0.5, flat, false);
+    const mesh = root.children.find((node) => node.name === 'telegraph-line') as THREE.InstancedMesh;
+    const material = mesh.material as THREE.MeshBasicMaterial;
+    const shader = {
+      uniforms: {} as Record<string, unknown>,
+      vertexShader: '#include <common>\n#include <begin_vertex>',
+      fragmentShader: '#include <common>\nvec4 diffuseColor = vec4( diffuse, opacity );',
+    };
+    material.onBeforeCompile(shader as unknown as THREE.WebGLProgramParametersWithUniforms, undefined as unknown as THREE.WebGLRenderer);
+    // The theme's #0b0f14 on the outer edge, the outline mixed toward white on the inner one.
+    expect(shader.fragmentShader).toContain('shapeColor = vec3(0.0044, 0.0056, 0.0070)');
+    expect(shader.fragmentShader).toContain('mix(vOutline, vec3(1.0)');
+    expect(view.drawCalls).toBe(1);
+    view.dispose();
   });
 });
