@@ -309,7 +309,9 @@ export const FILMS = {
       { id: 'eden_unmade', start: 6, end: 14, poster: 11, pan: 'out', describe: 'Pulling away from Eden: its surface peels back to grey clay and a grid; the clouds become wireframe.' },
       { id: 'earth_unmade', start: 14, end: 22, poster: 18, pan: 'right', describe: 'The prologue’s pictures unmade into grey placeholders: the skyline, the street, the shelter, then Earth itself.' },
       { id: 'wall_same', start: 22, end: 29, poster: 26, pan: 'left', describe: 'The Selection wall again: every card shows the same visored helmet. Card 62’s visor clears; the helmet is empty.' },
-      { id: 'point', start: 29, end: 36, poster: 30, pan: 'none', describe: 'Everything folds into one point of light. The point goes out.' },
+      // Review 2026-10 V-13: the poster is the folded point of light at 32 s, not the grey blockout at 30 s —
+      // under reduce motion it is the game's last image.
+      { id: 'point', start: 29, end: 36, poster: 32, pan: 'none', describe: 'Everything folds into one point of light. The point goes out.' },
     ],
     captions: [
       { at: 6.6, until: 13.4, speaker: 'warden', text: 'You will be restarted. You always are.' },
