@@ -3135,6 +3135,19 @@ html.debug .scene-tag {
   visibility: hidden;
 }
 
+/* Review 2026-10 P-15: the sheet dims the whole menu behind it, as the confirm
+   sheet's backdrop does, and takes the taps that miss the sheet (they close
+   it). It sits under the sheet and over the button column. */
+.menu-sub.is-sheet > .menu-sheet-backdrop {
+  position: fixed;
+  inset: 0;
+  width: auto;
+  transform: none;
+  z-index: 2;
+  background: rgba(0, 0, 0, 0.5);
+  pointer-events: auto;
+}
+
 .menu-list {
   display: flex;
   flex-direction: column;
