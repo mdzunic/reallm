@@ -691,17 +691,20 @@ export function generateLayout(planet: PlanetDef, rng: Rng): Layout {
       if (placed.some((s) => distance(x, z, s.x, s.z) < SHELTER_SEPARATION)) continue;
       if (pois.some((poi) => segmentDistance(x, z, pad.x, pad.z, poi.x, poi.z) < maxR + SHELTER_CORRIDOR_MARGIN)) continue;
       // §4.2: the entrance faces the pad within ±60°; a wreck's snaps to the
-      // nearer long side and the snap stays inside that window (AC-7).
+      // nearer long side and the snap stays inside that window (AC-7). Where
+      // that side faces farther off than 60°, the hull turns by the excess, so
+      // the gap stays on the long side's normal — where the hull draws its
+      // breach — rather than sliding toward one end of it.
       const padBearing = Math.atan2(pad.z - z, pad.x - x);
       let angle = 0;
       let gapAngle = wrapAngle(padBearing + jitter);
       if (kind === 'wreck') {
-        angle = shellAngle;
         const n1 = wrapAngle(shellAngle + Math.PI / 2);
         const n2 = wrapAngle(shellAngle - Math.PI / 2);
         const near = Math.abs(wrapAngle(n1 - padBearing)) <= Math.abs(wrapAngle(n2 - padBearing)) ? n1 : n2;
         const off = Math.max(-GAP_JITTER, Math.min(GAP_JITTER, wrapAngle(near - padBearing)));
         gapAngle = wrapAngle(padBearing + off);
+        angle = wrapAngle(shellAngle + wrapAngle(gapAngle - near));
       }
       return { kind, index: 0, x, z, rx, rz, angle, gapAngle, gapWidth };
     }
