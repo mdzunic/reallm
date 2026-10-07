@@ -561,7 +561,7 @@ describe('content invariants (SPEC-009 §7)', () => {
       frost_matriarch: 4600,
       hive_broodlord: 5200,
       ash_titan: 6800,
-      hive_queen: 8400,
+      hive_queen: 8000, // SPEC-066 §4.10 (was 8,400)
     };
     expect(enemies.filter((enemy) => enemy.archetype === 'boss').map((enemy) => enemy.id).sort()).toEqual(
       Object.keys(bossHp).sort(),

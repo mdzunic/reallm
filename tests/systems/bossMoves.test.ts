@@ -350,7 +350,7 @@ describe('the wurm’s burrow (SPEC-041 §4.1)', () => {
     expect(h.combat.telegraphs.size).toBe(1);
     const circle = h.combat.telegraphs.at(0);
     expect(circle).toMatchObject({ kind: 'circle', x: -4, z: 3, radius: 3.5 });
-    expect(circle.damage).toBeCloseTo(wurm.damage * 1.5, 6);
+    expect(circle.damage).toBeCloseTo(wurm.damage * 1.3, 6); // SPEC-066 §4.10: ×1.3 (was ×1.5)
     expect(circle.hitAt - circle.startAt).toBeCloseTo(1.2, 6);
     expect(wurm.invulnerable).toBe(true);
 
