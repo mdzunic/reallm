@@ -31,7 +31,15 @@ import { Progression } from '@/systems/Progression';
 import { contactFilm, departureDue, departureKey } from '@/systems/StoryBeats';
 import { activeFlightMission, runSkip } from '@/systems/Flight';
 import { duration } from '@/systems/Format';
-import { departReason, missionStatus, requirementText, skipRefusalText, starmapPreselect } from '@/systems/UiHelpers';
+import {
+  departFuelText,
+  departReason,
+  missionStatus,
+  requirementText,
+  skipRefusalText,
+  starmapFuelText,
+  starmapPreselect,
+} from '@/systems/UiHelpers';
 import { director } from '@/scenes/Director';
 import { choiceSheet } from '@/ui/ConfirmSheet';
 import { el, h, keepFocus, testId } from '@/ui/dom';
@@ -459,9 +467,10 @@ export class StarmapScene extends UiScene<'starmap'> {
     }
     const fuel = economy.fuelCost(this.#selected);
     const oil = data.resources.oil;
+    const depot = economy.depotHeld('oil');
     // SPEC-065 §4.4 (E119): the depot pays what the hold cannot, so the line
-    // is short only when both together are.
-    const short = oil + economy.depotHeld('oil') < fuel;
+    // is short only when both together are, and `have` counts both.
+    const short = oil + depot < fuel;
     // Travel shortens as the engine speeds up: seconds / speedMult[tier].
     // SPEC-045 §4.7: a `duration`, so a 90 s trip reads `1 min 30 s`.
     const speed = ENGINE.metrics['speedMult']?.[data.ship.engine] ?? 1;
@@ -519,7 +528,7 @@ export class StarmapScene extends UiScene<'starmap'> {
           h(
             'p',
             { class: `starmap-line${short && !this.#leaving ? ' is-short' : ''}` },
-            `Fuel: ${fuel} oil (have ${oil})`,
+            starmapFuelText(fuel, oil, depot),
           ),
           'starmap-fuel',
         ),
@@ -564,8 +573,9 @@ export class StarmapScene extends UiScene<'starmap'> {
     const skip = runSkip(data, planet, { service });
     const waived = service && activeFlightMission(data, planet) !== null;
     const lines = [
-      // SPEC-031 §4.12: the tank is named next to the charge (AC-31).
-      `Fuel: ${fuel} oil, charged now — you hold ${data.resources.oil}. The return trip is free.`,
+      // SPEC-031 §4.12: the tank is named next to the charge (AC-31); E119:
+      // the depot's oil is in it.
+      departFuelText(fuel, data.resources.oil, economy.depotHeld('oil')),
       active.length > 0 ? `Active: ${active.join(', ')}` : null,
       waived ? 'Objectives that need a flown run will not advance.' : null,
     ].filter((line): line is string => line !== null);

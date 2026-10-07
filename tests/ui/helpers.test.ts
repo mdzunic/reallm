@@ -67,6 +67,7 @@ import {
   copyHudInto,
   computePlayerStats,
   createHudModel,
+  departFuelText,
   departReason,
   diffHud,
   diffHudInto,
@@ -77,6 +78,7 @@ import {
   pruneToasts,
   pushToast,
   requirementText,
+  starmapFuelText,
   companionEffectText,
   failText,
   gearCompare,
@@ -468,6 +470,21 @@ describe('departReason (AC-114)', () => {
     ).toBe('Complete Chapter 2');
     expect(departReason({ ok: false, reason: 'locked', missing: [{ kind: 'level', level: 8 }] })).toBe(
       'Requires level 8',
+    );
+  });
+});
+
+describe('the star map’s fuel lines count the depot (SPEC-065 §4.4, E119; review B-12)', () => {
+  it('the info line’s `have` is the hold and the depot together', () => {
+    expect(starmapFuelText(40, 180, 0)).toBe('Fuel: 40 oil (have 180)');
+    // 0 aboard, 120 at the depot: the jump is paid, and the line says so.
+    expect(starmapFuelText(40, 0, 120)).toBe('Fuel: 40 oil (have 120)');
+  });
+
+  it('the depart sheet names the tank, and the depot’s share when it holds any', () => {
+    expect(departFuelText(40, 180, 0)).toBe('Fuel: 40 oil, charged now — you hold 180. The return trip is free.');
+    expect(departFuelText(40, 20, 100)).toBe(
+      'Fuel: 40 oil, charged now — you hold 120 (100 at the depot). The return trip is free.',
     );
   });
 });

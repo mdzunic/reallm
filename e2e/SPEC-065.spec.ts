@@ -291,7 +291,10 @@ test('4. a jump the depot can pay departs with no fuel refusal, and the station 
   await expect(page.getByTestId('starmap-depart')).toBeEnabled();
   await expect(page.getByTestId('depart-reason')).toHaveCount(0);
   await expect(page.getByTestId('starmap-fuel')).not.toHaveClass(/is-short/);
+  // Review 2026-10, B-12: the fuel text counts what pays — the depot too.
+  await expect(page.getByTestId('starmap-fuel')).toHaveText('Fuel: 40 oil (have 40)');
   await page.getByTestId('starmap-depart').click();
+  await expect(page.locator('.sheet-body')).toContainText('charged now — you hold 40 (40 at the depot).');
   await page.getByTestId('confirm-yes').click();
   await expect(page.getByTestId('scene-label')).toHaveText('flight', COLD_START);
   // The hold had nothing to give, so the depot paid the fare.
