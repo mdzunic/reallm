@@ -72,6 +72,7 @@ import {
   type PoiId,
   type QuickSlot,
   type ResourceId,
+  type ShotLook,
   type TipId,
   type UndergroundDef,
   type WaveId,
@@ -144,6 +145,7 @@ import {
   remainsTag,
   type RemainsLook,
 } from '@/systems/Remains';
+import { RECORDS } from '@/systems/Records';
 import { watchRunStats } from '@/systems/RunStats';
 import { SpawnDirector, WAVE_CEILING_BONUS, type FrustumXZ, type SpawnRamp, type WaveHandle } from '@/systems/Spawn';
 import {
@@ -197,6 +199,7 @@ import {
   remainsOverlayLine,
   remainsRecoveredText,
   remainsTrackerText,
+  resumedText,
   rewardsText,
   SEARCH_BODY_TEXT,
   SEARCHED_TEXT,
@@ -240,6 +243,7 @@ import { confirmSheet } from '@/ui/ConfirmSheet';
 import { DamageNumbers } from '@/ui/DamageNumbers';
 import { ELITE_PLATE_SLOTS, ElitePlates } from '@/ui/ElitePlates';
 import { RemainsTag } from '@/ui/RemainsTag';
+import { prepareSaveCard } from '@/ui/ShareCard';
 import { DeathOverlay } from '@/ui/DeathOverlay';
 import { dialogueLayer, type DialogueUI } from '@/ui/DialogueUI';
 import { el, h, keepFocus, openModal, shortScreen, testId } from '@/ui/dom';
@@ -342,6 +346,8 @@ const ARENA_DISENGAGE_DISTANCE = 45;
 const FOLLOWER_RESPAWN_SECONDS = 3;
 /** Defend POIs take contact damage from enemies inside `radius + this`. */
 const DEFEND_CONTACT_MARGIN = 2;
+/** SPEC-059 §4.1.3: how long the resumed landing's toast stays up. */
+const RESUMED_TOAST_MS = 6000;
 
 // --------------------------------------------------------------- SPEC-054
 
@@ -536,6 +542,18 @@ function remembered(memory: HitMemory, time: number): EnemyEntity | null {
 /** `'#rrggbb'` → the number `CombatFx.burst` takes; no allocation. */
 function hexColor(color: string): number {
   return Number.parseInt(color.slice(1), 16);
+}
+
+/** SPEC-019 §4.5: the muzzle flash in the last shot's colour, cached per look. */
+const muzzleColors = new Map<ShotLook, number>();
+function muzzleColor(look: ShotLook | null): number {
+  if (look === null) return MUZZLE_COLOR;
+  let color = muzzleColors.get(look);
+  if (color === undefined) {
+    color = hexColor(look.color);
+    muzzleColors.set(look, color);
+  }
+  return color;
 }
 
 /** SPEC-027: the rows of a scene with nothing tracked — shared, never written. */
@@ -1008,6 +1026,8 @@ export class SurfaceScene extends UiScene<'surface'> {
   readonly #resolved = { x: 0, z: 0 };
   /** SPEC-034 §4.2: recalls taken this visit, and summons a boss death sent away. */
   #recalls = 0;
+  /** SPEC-059 §4.1.3: entered from the menu on a resume point — no flight, no jump. */
+  #resumed = false;
   #summonsDismissed = 0;
   /** SPEC-034 §4.12: world-clock time the shipped-home toast last showed. */
   #shippedToastAt = -CARGO_TOAST_SECONDS;
@@ -1266,6 +1286,10 @@ export class SurfaceScene extends UiScene<'surface'> {
 
     save.progress.location = 'surface';
     save.progress.currentPlanet = planet.id;
+    // SPEC-059 §4.1.1: the resume point, so the landing save carries it — a
+    // crash with no later write still lands the next Continue on this pad.
+    this.#resumed = params.resumed === true;
+    this.#markResume();
 
     // SPEC-046 §4.8: the combat world's grid holds the parked tug's hull too —
     // the layout, its hash, the map and the route grid never see it (46-l).
@@ -1880,7 +1904,10 @@ export class SurfaceScene extends UiScene<'surface'> {
     this.#buildTerminal();
     this.#subscribe(bus);
     this.#syncMissionStages();
-    if (new URLSearchParams(globalThis.location.search).has('debug')) this.#buildDebugStrip();
+    // SPEC-059 §4.3.4: a dev build only — every control changes the world, and
+    // Smite pays XP and loot, so a production `?debug` keeps the stats overlay
+    // and builds no strip (`tests/architecture/debugStrip.test.ts`).
+    if (import.meta.env.DEV && new URLSearchParams(globalThis.location.search).has('debug')) this.#buildDebugStrip();
 
     // SPEC-036 §4.12: the first two touch landings show where the thumbs go —
     // never in a `?perf` run — and teach it in words with the `zones` tip.
@@ -1901,6 +1928,9 @@ export class SurfaceScene extends UiScene<'surface'> {
 
     // §4.1 step 5: the landing save, and held-back accept dialogue.
     services.save.request('landing');
+    // SPEC-059 §4.1.3: a landing from the menu's resume says where it put the
+    // salvager, and that the timed stages started again (E19).
+    if (this.#resumed) services.events.emit('ui:toast', { kind: 'info', text: resumedText(planet.name), ms: RESUMED_TOAST_MS });
     // SPEC-034 §4.10: the ledger, not a set of its own, so the station's debrief
     // knows what the surface has already said. A mission already past stage 0
     // gets its *stage* line here — its accept was two scenes ago.
@@ -2001,8 +2031,25 @@ export class SurfaceScene extends UiScene<'surface'> {
     this.services.requestResume();
   }
 
-  /** SPEC-026 §4.6: the map is not a second pause — it closes before this one. */
+  /**
+   * SPEC-059 §4.1.1: the resume point — this planet's pad, stamped now. Set at
+   * entry and at every pause, so Save & Quit's flush and a hidden tab's
+   * `pagehide` save both carry it.
+   */
+  #markResume(): void {
+    const save = this.#save;
+    if (save === null) return;
+    save.progress.resume = { planet: this.#planet.id, at: Date.now() };
+  }
+
+  /**
+   * SPEC-026 §4.6: the map is not a second pause — it closes before this one.
+   * SPEC-059 §4.1.1: the pause menu, `app:paused` from a hidden tab (before
+   * `Game` requests its `pagehide` save) and SPEC-036's pause on blur all land
+   * here, so each stamps the resume point first.
+   */
   pause(): void {
+    this.#markResume();
     this.#closeMap();
     // SPEC-055 §4.4: a puzzle panel closes with the scene pausing; the site keeps its board.
     this.#puzzles?.closePanel();
@@ -2309,7 +2356,8 @@ export class SurfaceScene extends UiScene<'surface'> {
         'muzzle',
         p.x + Math.cos(p.facing) * MUZZLE_OFFSET,
         p.z + Math.sin(p.facing) * MUZZLE_OFFSET,
-        MUZZLE_COLOR,
+        // SPEC-019 §4.5: the flash takes the colour of the shot it fired.
+        muzzleColor(this.#combat?.lastShotLook ?? null),
       );
     }
     this.#lastFireCooldown = p.fireCooldown;
@@ -2547,6 +2595,8 @@ export class SurfaceScene extends UiScene<'surface'> {
     // view clock that keeps running while `world.time` stands still.
     info['held'] = this.#holdReason() === null ? 0 : 1;
     info['recalls'] = this.#recalls;
+    // SPEC-059 §3: 1 on a landing the menu resumed, else 0.
+    info['resumed'] = this.#resumed ? 1 : 0;
     info['summonsDismissed'] = this.#summonsDismissed;
     info['viewTime'] = Math.round(this.#viewTime * 100) / 100;
     // SPEC-015 AC-39: how far the shake and the walk bob actually moved the
@@ -3181,8 +3231,12 @@ export class SurfaceScene extends UiScene<'surface'> {
     return WEATHER_EFFECTS[current].moveMult;
   }
 
-  /** SPEC-043 §4.5: a clean run's time, kept when it is this device's first or its fastest (43-j). */
+  /**
+   * SPEC-043 §4.5: a clean run's time, kept when it is this device's first or
+   * its fastest (43-j). SPEC-059 §4.3.2: only while the page's records are open.
+   */
   #recordBest(id: MissionId, seconds: number): void {
+    if (!RECORDS.open) return;
     const settings = this.services.settings;
     const times = settings.get().bestTimes;
     const stored = times[id];
@@ -3776,6 +3830,8 @@ export class SurfaceScene extends UiScene<'surface'> {
   #updateDefend(world: CombatWorld, dt: number): void {
     const poi = this.#defendPoi;
     if (poi === null || this.#defendHp <= 0) return;
+    // SPEC-059 §4.2.2: on story the structure takes no enemy damage.
+    if (DIFFICULTY_RULES[this.#save?.meta.difficulty ?? 'normal'].allyDamageMult === 0) return;
     let pressure = 0;
     for (let i = 0; i < world.enemies.size; i++) {
       const e = world.enemies.at(i);
@@ -3902,11 +3958,15 @@ export class SurfaceScene extends UiScene<'surface'> {
       // SPEC-058 §4.7: the Selection card stamps the next number with the
       // player's own name, and only after it is the ending seen — a reload
       // during it replays the film, the report and the card at the station.
-      await overlay.playSelectionCard({
-        number: instanceNumber(save.meta.iteration) + 1,
-        name: save.player.name,
-        portrait: save.player.appearance.portrait,
-      });
+      // SPEC-059 §4.5.5: with the run's own card to share, drawn as it mounts.
+      await overlay.playSelectionCard(
+        {
+          number: instanceNumber(save.meta.iteration) + 1,
+          name: save.player.name,
+          portrait: save.player.appearance.portrait,
+        },
+        prepareSaveCard(save, services.settings.get().commendations),
+      );
       if (!this.#alive) return;
       save.progress.endingSeen = true;
       services.save.request('mission');
@@ -3917,6 +3977,8 @@ export class SurfaceScene extends UiScene<'surface'> {
     await overlay.playEscape(save.meta.iteration);
     if (!this.#alive) return;
     save.progress.endingSeen = true;
+    // SPEC-059 §4.1.1: the escape leaves no planet to resume on.
+    save.progress.resume = null;
     // The last write of the run, before the scene goes: `manual` skips the
     // autosave debounce, so the slot holds the ending even if the tab dies on
     // the way to the menu.
@@ -4355,17 +4417,19 @@ export class SurfaceScene extends UiScene<'surface'> {
   }
 
   /**
-   * §4.1 step 4 (E91): unless the difficulty is casual, forfeit whatever set
-   * lies anywhere — `remains:lost` and its toast — and leave this death's loss
-   * at the placed point (`remains:created`). Returns the overlay's line, or
-   * `null` when nothing was left (casual, or an empty hold).
+   * §4.1 step 4 (E91): unless the difficulty takes nothing (casual, story),
+   * forfeit whatever set lies anywhere — `remains:lost` and its toast — and
+   * leave this death's loss at the placed point (`remains:created`). Returns
+   * the overlay's line, or `null` when nothing was left (a zero `deathLoss`,
+   * or an empty hold).
    */
   #dropRemains(lost: Partial<Record<ResourceId, number>>): string | null {
     const save = this.#save;
     const world = this.#world;
     if (save === null || world === null) return null;
-    // §2: casual takes nothing, so nothing is at stake — neither created nor forfeited.
-    if (save.meta.difficulty === 'casual') return null;
+    // §2: casual takes nothing, so nothing is at stake — neither created nor
+    // forfeited. SPEC-059 §4.2.2: nor does story; a zero `deathLoss` leaves none.
+    if (DIFFICULTY_RULES[save.meta.difficulty].deathLoss <= 0) return null;
     // `watchRunStats` placed it a moment ago; placing again reads the same inputs.
     this.#placeRemains(world);
     const planet = this.#planet.id;

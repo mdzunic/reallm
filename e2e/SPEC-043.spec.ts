@@ -21,6 +21,11 @@ const CREATION = {
 } as const;
 
 const URL = '/?debug&seed=123';
+/**
+ * SPEC-059 §4.3: a `?debug` page closes records for the session, so the case
+ * that records a best time reopens them with `?records` (a dev build's flag).
+ */
+const RECORDS_URL = '/?debug&records&seed=123';
 
 /** `CONTRACTS`' names by id — `e2e/` may not import `src/`. */
 const CONTRACT_NAMES: Readonly<Record<string, string>> = {
@@ -96,8 +101,8 @@ async function landNow(page: Page): Promise<void> {
 }
 
 /** A fresh save prepared by `prep`, landed on Cinder-4 with the debug strip up. */
-async function land(page: Page, prep: Prep = {}): Promise<void> {
-  await start(page, URL);
+async function land(page: Page, prep: Prep = {}, url = URL): Promise<void> {
+  await start(page, url);
   await prepare(page, prep);
   await landNow(page);
 }
@@ -284,7 +289,7 @@ test('6. creation’s difficulty-hard makes a hard save', async ({ page }) => {
 
 test('7. c1_m2 accepted on the pad and finished records a best time, which the board then shows', async ({ page }) => {
   test.setTimeout(150_000);
-  await land(page, { done: ['c1_m1'] });
+  await land(page, { done: ['c1_m1'] }, RECORDS_URL);
   await press(page, 'surface-goto-pad');
   const terminal = page.getByTestId('pad-terminal');
   for (let i = 0; i < 5 && !(await terminal.isVisible()); i++) {

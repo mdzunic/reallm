@@ -44,27 +44,27 @@ test('a transition outside the table throws in this dev build and leaves current
   page,
 }) => {
   await atMenu(page);
+  // SPEC-059 §4.7: `menu → surface` joined the graph, so the transition
+  // outside it is `menu → flight`.
   const result = await page.evaluate(() => {
     let threw: string | null = null;
     try {
-      window.__reallm.go('surface', { planet: 'cinder4', firstLanding: true });
+      window.__reallm.go('flight', { destination: 'cinder4' });
     } catch (error) {
       threw = error instanceof Error ? error.message : String(error);
     }
     return { threw, scene: window.__reallm.scene() };
   });
-  expect(result.threw).toMatch(/menu → surface is not in the scene graph/);
+  expect(result.threw).toMatch(/menu → flight is not in the scene graph/);
   expect(result.scene).toBe('menu');
   await expect(page.locator('[data-testid="scene-label"]')).toHaveText('menu');
 });
 
 test('{ force: true } skips the table check in this dev build (AC-30)', async ({ page }) => {
   await atMenu(page);
-  const ok = await page.evaluate(() =>
-    window.__reallm.go('surface', { planet: 'cinder4', firstLanding: true }, { force: true }),
-  );
+  const ok = await page.evaluate(() => window.__reallm.go('flight', { destination: 'cinder4' }, { force: true }));
   expect(ok).toBe(true);
-  await expect(page.locator('[data-testid="scene-label"]')).toHaveText('surface');
+  await expect(page.locator('[data-testid="scene-label"]')).toHaveText('flight');
 });
 
 test('prefers-reduced-motion collapses both fades to 0 ms without changing the outcome (AC-40, AC-41)', async ({

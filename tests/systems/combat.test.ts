@@ -8,13 +8,16 @@ import {
   AFFIX_IDS,
   AFFIXES,
   BULWARK_DAMAGE_MULT,
+  DRONE_SHOT,
   ENEMIES,
+  FLARE_SHOT,
   ITEMS,
   MENDER_HEAL_FRACTION,
   MENDER_PULSE_SECONDS,
   SIGNATURE_FALLBACK_LITHIUM,
   SWIFT_SPEED_MULT,
   SWIFT_WINDUP_SCALE,
+  THROWN_SHOT,
   TUNING,
   VOLATILE_DAMAGE_MULT,
   VOLLEY_SPEED_MULT,
@@ -43,6 +46,7 @@ import {
   type WeaponDef,
   AUTO_LEAD_MAX,
   CASUAL_WEATHER_MULT,
+  CASUAL_WINDUP_MULT,
   MAX_FLARES,
   MAX_LINGER_CLOUDS,
   staminaFull,
@@ -1411,6 +1415,115 @@ describe('difficulty is read live (SPEC-038 §4.6)', () => {
     casual.combat.damagePlayer(100, { kind: 'weather', weather: 'heatwave' }, true);
     expect(hp0 - normal.world.player.hp).toBe(Math.floor(100 * (1 - resist)));
     expect(hp1 - casual.world.player.hp).toBe(Math.floor(100 * (1 - resist) * CASUAL_WEATHER_MULT));
+  });
+});
+
+// ------------------------------------------------------------- SPEC-059
+
+describe('the story difficulty (SPEC-059 §4.2.2)', () => {
+  /** A harness on `difficulty`, with nothing but the player in it. */
+  const on = (difficulty: Save['meta']['difficulty'], follower = false): Harness => {
+    const h = harness({ follower });
+    h.save.meta.difficulty = difficulty;
+    return h;
+  };
+  /** What a hit may touch: HP, the i-frames and the events it emits. */
+  const touched = (h: Harness): { hp: number; invulnUntil: number; events: number } => ({
+    hp: h.world.player.hp,
+    invulnUntil: h.world.player.invulnUntil,
+    events: h.of('player:damaged').length + h.of('player:died').length,
+  });
+
+  it('a melee blow leaves HP, the i-frames and the events alone — and still pushes', () => {
+    const blow = (h: Harness): void => {
+      const e = h.spawn('wurmling', 1.8, 0);
+      e.aggro = true;
+      e.state = 'windup';
+      e.stateTime = 1;
+      h.step();
+      h.step();
+    };
+    const story = on('story');
+    const before = touched(story);
+    blow(story);
+    expect(touched(story)).toEqual(before);
+    // Knockback is unchanged: a push is not damage.
+    const normal = on('normal');
+    blow(normal);
+    expect(normal.of('player:damaged')).toHaveLength(1);
+    expect(story.world.player.x).not.toBe(0);
+    expect(story.world.player.x).toBeCloseTo(normal.world.player.x, 10);
+  });
+
+  it('an enemy shot and a telegraph hit change nothing either', () => {
+    const story = on('story');
+    const before = touched(story);
+    story.shot({ x: -0.4, z: 0, vx: 40, owner: 'enemy', damage: 20, enemyId: 'dust_skitter', ttl: 1 });
+    story.step();
+    const t = story.combat.telegraphs.alloc();
+    resetTelegraph(t);
+    Object.assign(t, {
+      kind: 'circle',
+      x: 0.5,
+      z: 0,
+      radius: 1.5,
+      startAt: story.world.time,
+      hitAt: story.world.time + 0.1,
+      lockAt: story.world.time + 0.1,
+      damage: 20,
+      source: 'wurmling',
+    });
+    for (let i = 0; i < 12; i++) story.step();
+    expect(touched(story)).toEqual(before);
+    // The same direct calls the debug strip and SPEC-041's moves make.
+    story.combat.damagePlayer(30, { kind: 'enemy', enemyId: 'dune_wurm' });
+    story.combat.damagePlayer(30, { kind: 'projectile', enemyId: 'scav_raider' });
+    expect(touched(story)).toEqual(before);
+  });
+
+  it('ten seconds of weather deal nothing, and a fall still hurts', () => {
+    const story = on('story');
+    const before = touched(story);
+    for (let i = 0; i < 600; i++) story.combat.damagePlayer(4 * STEP, { kind: 'weather', weather: 'heatwave' }, true);
+    expect(touched(story)).toEqual(before);
+    story.combat.damagePlayer(60, { kind: 'fall' });
+    expect(story.world.player.hp).toBe(before.hp - 60);
+  });
+
+  it('the escort follower takes no enemy damage', () => {
+    const story = on('story', true);
+    const f = story.world.follower;
+    if (f === null) throw new Error('follower missing');
+    const hp = f.hp;
+    story.shot({ x: f.x - 2, z: f.z, vx: 40, owner: 'enemy', damage: 500, enemyId: 'scav_raider', ttl: 1 });
+    story.run(0.2);
+    expect(f.alive).toBe(true);
+    expect(f.hp).toBe(hp);
+    expect(story.of('follower:died')).toEqual([]);
+  });
+
+  it('assists like casual: windups ×1.25, while normal and hard stay at 1', () => {
+    for (const [difficulty, mult] of [
+      ['story', CASUAL_WINDUP_MULT],
+      ['casual', CASUAL_WINDUP_MULT],
+      ['normal', 1],
+      ['hard', 1],
+    ] as const) {
+      const h = on(difficulty);
+      h.step();
+      expect(h.world.windupMult, difficulty).toBe(mult);
+    }
+  });
+
+  it('keeps normal’s enemy HP and casual and hard their hits', () => {
+    expect(on('story').spawn('dune_wurm', 50, 0).maxHp).toBe(ENEMIES.dune_wurm.hp);
+    expect(CASUAL_WEATHER_MULT).toBe(0.7);
+    const casual = on('casual');
+    casual.combat.damagePlayer(10, { kind: 'enemy', enemyId: 'dune_wurm' });
+    expect(casual.of('player:damaged')).toHaveLength(1);
+    const hard = on('hard');
+    hard.combat.damagePlayer(10, { kind: 'projectile', enemyId: 'scav_raider' });
+    expect(hard.of('player:damaged')[0]?.amount).toBe(10);
   });
 });
 
@@ -2857,5 +2970,59 @@ describe('containment (SPEC-058 §4.4)', () => {
     expect(enemyHitDamage(wurmling, flatStats(), 'normal', 1.15)).toBe(Math.round(9 * 1.15));
     expect(enemyHitDamage(wurmling, flatStats(), 'casual', 1.15)).toBe(Math.round(9 * 0.7 * 1.15));
     expect(enemyHitDamage(wurmling, flatStats(), 'normal')).toBe(9);
+  });
+});
+
+// ------------------------------------------------------------- shot looks
+
+describe('shot looks (SPEC-019 §4.5)', () => {
+  it('a held trigger stamps the weapon\'s look on its shot and on lastShotLook', () => {
+    const h = harness({ patch: (s) => void (s.equipped.primary = 'weapon_laser') });
+    expect(h.combat.lastShotLook).toBeNull();
+    h.input.buttons.fire.down = true;
+    h.aim = { x: 10, z: 0 };
+    h.step();
+    expect(h.world.projectiles.size).toBe(1);
+    expect(h.world.projectiles.at(0).shot).toBe(ITEMS.weapon_laser.shot);
+    expect(h.combat.lastShotLook).toBe(ITEMS.weapon_laser.shot);
+  });
+
+  it('a launcher tap stamps the launcher\'s look, not the weapon in hand', () => {
+    const h = harness({ patch: (s) => void (s.equipped.heavy = 'launcher_rocket') });
+    expect(h.combat.fireSlotOnce('heavy')).toBe('fired');
+    expect(h.world.projectiles.at(0).shot).toBe(ITEMS.launcher_rocket.shot);
+    expect(h.combat.lastShotLook).toBe(ITEMS.launcher_rocket.shot);
+  });
+
+  it('the drone fires its own look, and a frag and a flare theirs', () => {
+    const h = harness({ patch: (s) => s.companions.push({ id: 'combat_drone', level: 1, enabled: true }) });
+    const egg = h.spawn('hive_egg', 6, 0);
+    egg.aggro = true;
+    h.step();
+    expect(h.world.projectiles.at(0).owner).toBe('drone');
+    expect(h.world.projectiles.at(0).shot).toBe(DRONE_SHOT);
+    expect(h.combat.lastShotLook).toBeNull(); // the drone is not the player's muzzle
+
+    const t = harness();
+    t.combat.throwExplosive(FRAG, 6, 0);
+    expect(t.world.projectiles.at(0).shot).toBe(THROWN_SHOT);
+    expect(t.combat.throwFlare(ITEMS.flare.effect, 6, 0)).toBe(true);
+    expect(t.world.projectiles.at(1).shot).toBe(FLARE_SHOT);
+  });
+
+  it('an enemy shot reusing a player shot\'s pooled slot carries no look', () => {
+    const h = harness();
+    h.input.buttons.fire.down = true;
+    h.aim = { x: -10, z: 0 };
+    h.step();
+    h.input.buttons.fire.down = false;
+    expect(h.world.projectiles.at(0).shot).not.toBeNull();
+    h.run(1.5); // the repeater's shot runs out of range and returns to the pool
+    expect(h.world.projectiles.size).toBe(0);
+    h.spawn('scav_raider', 10, 0);
+    for (let i = 0; i < 300 && h.world.projectiles.size === 0; i++) h.step();
+    const p = h.world.projectiles.at(0);
+    expect(p.owner).toBe('enemy');
+    expect(p.shot).toBeNull();
   });
 });

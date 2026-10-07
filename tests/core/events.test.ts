@@ -624,6 +624,8 @@ const NAMES: Record<keyof GameEvents, true> = {
   'remains:recovered': true,
   'remains:lost': true,
   'ui:toast': true,
+  // SPEC-059 §4.4.3: a commendation granted on this device.
+  'commendation:earned': true,
   'ui:orientation': true,
   // SPEC-015 §10 / AC-51: the `prompt`-mode update signal, and AC-55's hint.
   'app:update-ready': true,
@@ -644,8 +646,8 @@ describe('GameEvents (§3.2)', () => {
     // `player:exhausted`; SPEC-054 §4.13 `level:changed`, `light:toggled` and
     // `cache:opened`; SPEC-055 §4.9 `puzzle:moved` and `puzzle:solved`;
     // SPEC-057 §4.8 `remains:created`, `remains:recovered` and `remains:lost`;
-    // SPEC-063 §4.5 `flight:groupSpawned`.
-    expect(Object.keys(NAMES)).toHaveLength(82);
+    // SPEC-059 §4.4.3 `commendation:earned`; SPEC-063 §4.5 `flight:groupSpawned`.
+    expect(Object.keys(NAMES)).toHaveLength(83);
   });
 
   it('still carries the nine names SPEC-002 and SPEC-003 already emit', () => {

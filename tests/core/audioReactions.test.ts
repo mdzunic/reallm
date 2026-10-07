@@ -125,6 +125,8 @@ const SOUND_IDS = [
   'cache_open',
   // SPEC-055 §4.9: a puzzle site solved.
   'puzzle_solved',
+  // SPEC-059 §4.4.4: a commendation granted, in the ui bank.
+  'commend',
 ] as const;
 
 /** Exported so `noUnusedLocals` keeps it; it exists purely to be compiled. */
@@ -232,6 +234,8 @@ const EVENT_KEYS = [
   'remains:recovered',
   'remains:lost',
   'ui:toast',
+  // SPEC-059 §4.4.4: a commendation granted (reacted).
+  'commendation:earned',
   'ui:orientation',
   // SPEC-015 §10: the service-worker update signal (D-10) and the iOS install
   // explainer — both added to `GameEvents` by that spec, both silent.
@@ -285,14 +289,23 @@ describe('the audio manifest (SPEC-006 §2)', () => {
     expect(Object.keys(ASSETS.audio).sort()).toEqual([...SFX_BANKS, ...MUSIC_BANKS].sort());
   });
 
-  it('the sprite keys across the banks are the 63 sound ids (AC-5; SPEC-035 §4.11 adds seven, SPEC-038 §4.10 four, SPEC-041 §4.10 three, SPEC-050 §4.8 one, SPEC-054 §4.13 two, SPEC-055 §4.9 one, SPEC-063 §4.2 one)', () => {
+  it('the sprite keys across the banks are the 64 sound ids (AC-5; SPEC-035 §4.11 adds seven, SPEC-038 §4.10 four, SPEC-041 §4.10 three, SPEC-050 §4.8 one, SPEC-054 §4.13 two, SPEC-055 §4.9 one, SPEC-063 §4.2 one, SPEC-059 §4.4.4 one)', () => {
     const sprites = Object.values(ASSETS.audio).flatMap((entry) =>
       Object.keys((entry as { sprite?: object }).sprite ?? {}),
     );
     expect(sprites.slice().sort()).toEqual([...SOUND_IDS].sort());
-    expect(sprites).toHaveLength(63);
+    expect(sprites).toHaveLength(64);
     // No id appears in two banks: `SoundId` → bank has to be a function.
-    expect(new Set(sprites).size).toBe(63);
+    expect(new Set(sprites).size).toBe(64);
+  });
+
+  it('SPEC-059 §4.4.4: `commend` sits in the ui bank, at most 900 ms, after every other ui sprite', () => {
+    const ui = ASSETS.audio.ui.sprite;
+    const [at, length] = ui.commend;
+    expect(length).toBeLessThanOrEqual(900);
+    for (const [id, [offset, duration]] of Object.entries(ui)) {
+      if (id !== 'commend') expect(offset + duration, id).toBeLessThan(at);
+    }
   });
 
   it('the SPEC-038 cues sit in the surface bank inside §4.10’s lengths', () => {
@@ -534,8 +547,8 @@ describe('the ramp curve (SPEC-006 §4.3, §4.5)', () => {
 // ------------------------------------------------------------ reactions table
 
 describe('the reactions table is exhaustive over GameEvents (SPEC-006 §5)', () => {
-  it('covers the 32 reacted events of §5.2 (AC-38; SPEC-029 §4.12 adds four, SPEC-035 §4.11 two, SPEC-038 §4.10 two, SPEC-041 §4.10 two, SPEC-042 §4.2 one, SPEC-050 §4.8 one, SPEC-054 §4.13 two, SPEC-055 §4.9 two, SPEC-057 §4.8 one)', () => {
-    expect(REACTED_EVENTS).toHaveLength(32);
+  it('covers the 33 reacted events of §5.2 (AC-38; SPEC-029 §4.12 adds four, SPEC-035 §4.11 two, SPEC-038 §4.10 two, SPEC-041 §4.10 two, SPEC-042 §4.2 one, SPEC-050 §4.8 one, SPEC-054 §4.13 two, SPEC-055 §4.9 two, SPEC-057 §4.8 one, SPEC-059 §4.4.4 one)', () => {
+    expect(REACTED_EVENTS).toHaveLength(33);
     expect(REACTED_EVENTS.slice().sort()).toEqual(
       [
         'combat:blast',
@@ -570,6 +583,7 @@ describe('the reactions table is exhaustive over GameEvents (SPEC-006 §5)', () 
         'puzzle:moved',
         'puzzle:solved',
         'remains:recovered',
+        'commendation:earned',
       ].sort(),
     );
   });
@@ -593,8 +607,8 @@ describe('the reactions table is exhaustive over GameEvents (SPEC-006 §5)', () 
     expect(AUDIO_SILENT.has('flight:groupSpawned')).toBe(true);
   });
 
-  it('gives every one of the 82 event keys exactly one home (AC-40; SPEC-055 §4.9 adds two, SPEC-057 §4.8 three, SPEC-063 §4.5 one)', () => {
-    expect(EVENT_KEYS).toHaveLength(82);
+  it('gives every one of the 83 event keys exactly one home (AC-40; SPEC-055 §4.9 adds two, SPEC-057 §4.8 three, SPEC-059 §4.4.4 one, SPEC-063 §4.5 one)', () => {
+    expect(EVENT_KEYS).toHaveLength(83);
     const reacted = new Set<string>(REACTED_EVENTS);
     for (const key of EVENT_KEYS) {
       const hasSound = reacted.has(key);
@@ -899,6 +913,12 @@ describe('reaction outcomes (SPEC-006 §5.2)', () => {
     const react = AUDIO_REACTIONS['remains:recovered'];
     expect(react({ planet: 'cinder4', resources: { oil: 20 } })).toEqual({ id: 'pickup_generic', opts: { minIntervalMs: 80 } });
     expect(AUDIO_SILENT.has('remains:recovered')).toBe(false);
+  });
+
+  it('commendation:earned plays commend, at most once per 600 ms (SPEC-059 §4.4.4)', () => {
+    const react = AUDIO_REACTIONS['commendation:earned'];
+    expect(react({ id: 'dry_land' })).toEqual({ id: 'commend', opts: { minIntervalMs: 600 } });
+    expect(AUDIO_SILENT.has('commendation:earned')).toBe(false);
   });
 
   it('every sound a reaction can name exists in a bank', () => {

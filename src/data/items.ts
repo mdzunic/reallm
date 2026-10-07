@@ -71,6 +71,30 @@ export type WeaponCooldown =
   | { readonly kind: 'heat'; readonly perShot: number; readonly coolPerSec: number; readonly resumeAt: number }
   | { readonly kind: 'charges'; readonly charges: number; readonly rechargeSeconds: number; readonly burstInterval: number };
 
+/**
+ * SPEC-019 §4.5: how a shot is drawn. Only the view reads it; nothing in the
+ * simulation does. `tracer` is a thin streak, `dart` a short machine-gun
+ * round, `slug` a heavy round, `needle` a long thin beam, `bolt` a fat energy
+ * glob, `rocket` a hot head with a widening exhaust and `ball` a round lob.
+ */
+export type ShotShape = 'tracer' | 'dart' | 'slug' | 'needle' | 'bolt' | 'rocket' | 'ball';
+
+export interface ShotLook {
+  readonly shape: ShotShape;
+  /** `#rrggbb`. The view pushes it × 2.5 so it clears the bloom threshold. */
+  readonly color: string;
+  /** `#rrggbb` for the ghosts when they are not `color`, such as a rocket's exhaust. */
+  readonly trail?: string;
+}
+
+/**
+ * SPEC-019 §4.5: the shots no weapon fires. The drone borrows the primary's
+ * numbers but not its look, and a thrown frag or flare is a ball.
+ */
+export const DRONE_SHOT = { shape: 'tracer', color: '#dfe8ff' } as const satisfies ShotLook;
+export const THROWN_SHOT = { shape: 'ball', color: '#ff5a3c' } as const satisfies ShotLook;
+export const FLARE_SHOT = { shape: 'ball', color: '#ffcf8a' } as const satisfies ShotLook;
+
 export type GearTier = 0 | 1 | 2 | 3;
 
 /**
@@ -133,6 +157,8 @@ export type ItemDef<Id extends string = string> =
       readonly relic?: true;
       /** SPEC-056 §4.4: the relic's twist; no other item carries one. */
       readonly twist?: WeaponTwist;
+      /** SPEC-019 §4.5: how its shot is drawn; no two weapons share one. */
+      readonly shot: ShotLook;
       readonly price: Price | null;
       readonly model: ModelId | 'procedural';
       readonly blurb: string;
@@ -184,6 +210,7 @@ export const ITEMS = {
     pierce: 0,
     energy: false,
     cooldown: { kind: 'none' },
+    shot: { shape: 'tracer', color: '#ffe9a0' },
     price: null,
     model: 'procedural',
     blurb: 'Earth Command issue. It will not win a fight, but it will never be the reason you lost one.',
@@ -203,6 +230,7 @@ export const ITEMS = {
     pierce: 0,
     energy: false,
     cooldown: { kind: 'none' },
+    shot: { shape: 'slug', color: '#fff6d8' },
     price: null,
     model: 'procedural',
     blurb: 'Salvage-yard slug thrower. Loud, slow, and it has never once failed to fire.',
@@ -222,6 +250,7 @@ export const ITEMS = {
     pierce: 0,
     energy: true,
     cooldown: { kind: 'none' },
+    shot: { shape: 'needle', color: '#ff4a4a' },
     price: { tokens: 40 },
     model: 'procedural',
     blurb: 'Focused beam, no recoil, no ammunition. The cell hums when the sand gets in.',
@@ -241,6 +270,7 @@ export const ITEMS = {
     pierce: 1,
     energy: true,
     cooldown: { kind: 'none' },
+    shot: { shape: 'bolt', color: '#4fd0ff' },
     price: { tokens: 80 },
     model: 'procedural',
     blurb: 'A bolt heavy enough to punch through the first thing it meets and keep going.',
@@ -260,6 +290,7 @@ export const ITEMS = {
     pierce: 2,
     energy: true,
     cooldown: { kind: 'none' },
+    shot: { shape: 'needle', color: '#b98cff' },
     price: { tokens: 130, resources: { lithium: 120 } },
     model: 'procedural',
     blurb: 'Reactor-grade lithium spun into a cutting field. Two bodies deep, on a good day.',
@@ -284,6 +315,7 @@ export const ITEMS = {
     pierce: 1,
     energy: false,
     cooldown: { kind: 'none' },
+    shot: { shape: 'slug', color: '#ffd84a' },
     price: { tokens: 50 },
     model: 'procedural',
     blurb: 'A revolver scaled for wurm hide. Slow, loud, and it goes through the first body.',
@@ -310,6 +342,7 @@ export const ITEMS = {
     energy: false,
     cooldown: { kind: 'heat', perShot: 0.035, coolPerSec: 0.2, resumeAt: 0.35 },
     spread: 0.08,
+    shot: { shape: 'dart', color: '#ff6a3a' },
     price: { tokens: 50 },
     model: 'procedural',
     blurb: 'Six salvaged barrels on one bearing. Glorious for five seconds, then a kettle.',
@@ -335,6 +368,7 @@ export const ITEMS = {
     energy: false,
     cooldown: { kind: 'heat', perShot: 0.035, coolPerSec: 0.22, resumeAt: 0.35 },
     spread: 0.06,
+    shot: { shape: 'dart', color: '#ffe45c' },
     price: { tokens: 120, resources: { lithium: 60 } },
     model: 'procedural',
     blurb: 'Reactor-cooled and still too hot. Nothing on six planets outlasts the spin-up.',
@@ -360,6 +394,7 @@ export const ITEMS = {
     energy: false,
     cooldown: { kind: 'charges', charges: 1, rechargeSeconds: 6, burstInterval: 0 },
     blast: { radius: 3.5, falloff: 0.4 },
+    shot: { shape: 'rocket', color: '#fff2d6', trail: '#ff7a2e' },
     price: { tokens: 60 },
     model: 'procedural',
     blurb: 'One tube, one answer. Whatever the question was, it stops asking.',
@@ -385,6 +420,7 @@ export const ITEMS = {
     cooldown: { kind: 'charges', charges: 3, rechargeSeconds: 9, burstInterval: 0.4 },
     blast: { radius: 3, falloff: 0.5 },
     lob: true,
+    shot: { shape: 'ball', color: '#ff4040' },
     price: { tokens: 90 },
     model: 'procedural',
     blurb: 'Three shells on a rotary drum. They go over the rock; the raiders were behind it.',
@@ -534,6 +570,7 @@ export const ITEMS = {
     cooldown: { kind: 'none' },
     relic: true,
     twist: { kind: 'execute', belowHp: 0.3, mult: 2 },
+    shot: { shape: 'slug', color: '#ff3d7f' },
     price: null,
     model: 'procedural',
     blurb: 'Instance/58 kept it for the last one standing. It finishes what the others start.',
@@ -556,6 +593,7 @@ export const ITEMS = {
     spread: 0.07,
     relic: true,
     twist: { kind: 'chill', slow: 0.25, seconds: 1, bossSlow: 0.1 },
+    shot: { shape: 'dart', color: '#6fdcff' },
     price: null,
     model: 'procedural',
     blurb: 'Instance/47 packed the barrels with Vetra ice. Whatever it hits forgets how to run.',
@@ -579,6 +617,7 @@ export const ITEMS = {
     lob: true,
     relic: true,
     twist: { kind: 'linger', radius: 3, seconds: 3, dps: 8 },
+    shot: { shape: 'ball', color: '#c6e84a' },
     price: null,
     model: 'procedural',
     blurb: 'Instance/41 loaded the drum with Thessaly spores. The shell bursts, and then the air keeps working.',
@@ -601,6 +640,7 @@ export const ITEMS = {
     spread: 0.06,
     relic: true,
     twist: { kind: 'vent', radius: 3.5, damage: 60 },
+    shot: { shape: 'bolt', color: '#ff5a1f' },
     price: null,
     model: 'procedural',
     blurb: 'Instance/29 wrapped the jacket in Ferrum slag. When it overheats, everything near you finds out.',
@@ -623,6 +663,7 @@ export const ITEMS = {
     blast: { radius: 3.5, falloff: 0.4 },
     relic: true,
     twist: { kind: 'seek', turnRate: 2.1, cone: 0.7 },
+    shot: { shape: 'rocket', color: '#ffe0f6', trail: '#ff4fd8' },
     price: null,
     model: 'procedural',
     blurb: 'Instance/12 wired Hive guidance into the tube. It looks for the thing you meant.',

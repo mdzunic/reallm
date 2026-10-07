@@ -3,7 +3,7 @@
 // per pooled object and cleared on reuse, so piercing shots never allocate in
 // the loop.
 import type { EnemyId } from '@/data/enemies';
-import type { WeaponTwist } from '@/data/items';
+import type { ShotLook, WeaponTwist } from '@/data/items';
 
 export type ProjectileOwner = 'player' | 'enemy' | 'drone';
 
@@ -55,6 +55,12 @@ export interface ProjectileEntity {
   twist: WeaponTwist | null;
   /** A thrown flare's burn, in seconds — it lands as a flare, not a blast; 0 for none. */
   flareSeconds: number;
+  /**
+   * SPEC-019 §4.5: how the view draws it — the firing weapon's look, the
+   * drone's, a thrown frag's or a flare's. `null` for an enemy shot, which the
+   * view colours by its shooter. The simulation never reads it.
+   */
+  shot: ShotLook | null;
 }
 
 export function makeProjectile(): ProjectileEntity {
@@ -83,5 +89,6 @@ export function makeProjectile(): ProjectileEntity {
     seekTurn: 0,
     twist: null,
     flareSeconds: 0,
+    shot: null,
   };
 }

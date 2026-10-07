@@ -158,8 +158,8 @@ export function pickupSound(resource: ResourceId): SoundId {
  * SPEC-038 §4.10 the dash and the windup cue, SPEC-041 §4.10 a boss move
  * landing and a flight hit, SPEC-042 §4.2 an item picked up, SPEC-050 §4.8 an
  * exhaustion, SPEC-054 §4.13 the flashlight's click and a cache opening,
- * SPEC-055 §4.9 a puzzle move and a puzzle solved, SPEC-057 §4.8 a recovery
- * — 32 in all) that make a sound.
+ * SPEC-055 §4.9 a puzzle move and a puzzle solved, SPEC-057 §4.8 a recovery,
+ * SPEC-059 §4.4.4 a commendation — 33 in all) that make a sound.
  */
 export type ReactedEvent =
   | 'combat:blast'
@@ -201,7 +201,9 @@ export type ReactedEvent =
   | 'puzzle:moved'
   | 'puzzle:solved'
   // SPEC-057 §4.8: remains taken back.
-  | 'remains:recovered';
+  | 'remains:recovered'
+  // SPEC-059 §4.4.4: a commendation granted.
+  | 'commendation:earned';
 
 /**
  * The 38 events of §5.4 that deliberately make none (and those later specs
@@ -387,6 +389,11 @@ export const AUDIO_REACTIONS: { [K in ReactedEvent]: Reaction<K> } = {
   'puzzle:solved': () => ({ id: 'puzzle_solved', opts: { priority: 2 } }),
   /** SPEC-057 §4.8: the existing generic chime — no new sprite (62 stay 62). */
   'remains:recovered': () => ({ id: 'pickup_generic', opts: { minIntervalMs: 80 } }),
+  /**
+   * SPEC-059 §4.4.4: a soft rising chime from the `ui` bank, at most once per
+   * 600 ms — an ending can grant several at one write (59-g), one toast each.
+   */
+  'commendation:earned': () => ({ id: 'commend', opts: { minIntervalMs: 600 } }),
 };
 
 /** The runtime key list, for the subscription loop and the exhaustiveness test. */

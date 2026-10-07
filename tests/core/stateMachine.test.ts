@@ -289,6 +289,8 @@ describe('the scene graph (§4.2)', () => {
     // SPEC-014 AC-29: the station's Quit tab added its route to the menu.
     // SPEC-058 §4.1: `Next instance` goes from the station straight to creation.
     expect(ALLOWED_TRANSITIONS.station).toEqual(['starmap', 'menu', 'creation']);
+    // SPEC-059 §4.1.6: Continue lands a resume point on its planet's pad.
+    expect(ALLOWED_TRANSITIONS.menu).toEqual(['creation', 'station', 'surface']);
     expect(BOOT_SCENE).toBe('menu');
   });
 
@@ -540,14 +542,14 @@ describe('a failing enter()', () => {
 
 // --------------------------------------------------------------- validation
 
+// SPEC-059 §4.7: `menu → surface` joined the graph (§4.1.6), so the transition
+// outside it these cases use is `menu → flight`.
 describe('the transition table', () => {
   it('throws on a disallowed transition in a dev build (AC-25)', async () => {
     vi.stubEnv('DEV', true);
     const h = harness();
     await atMenu(h);
-    expect(() => h.manager.go('surface', { planet: 'cinder4', firstLanding: true })).toThrow(
-      /menu → surface is not in the scene graph/,
-    );
+    expect(() => h.manager.go('flight', { destination: 'cinder4' })).toThrow(/menu → flight is not in the scene graph/);
     expect(h.manager.current?.id).toBe('menu');
     expect(h.manager.transitioning).toBe(false);
   });
@@ -556,8 +558,8 @@ describe('the transition table', () => {
     const h = harness();
     await atMenu(h);
     vi.stubEnv('DEV', false);
-    await expect(h.manager.go('surface', { planet: 'cinder4', firstLanding: true })).resolves.toBe(false);
-    expect(warnings(h).join('\n')).toContain('menu → surface is not in the scene graph');
+    await expect(h.manager.go('flight', { destination: 'cinder4' })).resolves.toBe(false);
+    expect(warnings(h).join('\n')).toContain('menu → flight is not in the scene graph');
     expect(h.manager.current?.id).toBe('menu');
     expect(h.emitted).toEqual([]);
     expect(h.trace).toEqual([]);
@@ -567,19 +569,15 @@ describe('the transition table', () => {
     vi.stubEnv('DEV', true);
     const h = harness();
     await atMenu(h);
-    await expect(
-      h.manager.go('surface', { planet: 'cinder4', firstLanding: true }, { force: true }),
-    ).resolves.toBe(true);
-    expect(h.manager.current?.id).toBe('surface');
+    await expect(h.manager.go('flight', { destination: 'cinder4' }, { force: true })).resolves.toBe(true);
+    expect(h.manager.current?.id).toBe('flight');
   });
 
   it('ignores force in a production build, with a warning (AC-31, AC-32)', async () => {
     const h = harness();
     await atMenu(h);
     vi.stubEnv('DEV', false);
-    await expect(
-      h.manager.go('surface', { planet: 'cinder4', firstLanding: true }, { force: true }),
-    ).resolves.toBe(false);
+    await expect(h.manager.go('flight', { destination: 'cinder4' }, { force: true })).resolves.toBe(false);
     const logged = warnings(h).join('\n');
     expect(logged).toContain('force');
     expect(logged).toContain('not in the scene graph');

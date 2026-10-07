@@ -61,9 +61,11 @@ test('2. E74: the v2 fixture loads as version 3, every v2 value kept and the new
   expect(data.progress).toMatchObject({ claimed: [], exploredBelow: {}, remains: null, resume: null });
 
   // Through the Load menu: the station's first autosave writes it as v3, and
-  // `:bak` keeps the v2 JSON it replaced.
+  // `:bak` keeps the v2 JSON it replaced. SPEC-059 §4.1.3: the fixture was last
+  // written long ago, so the "previously" card comes first.
   await page.getByTestId('menu-load').click();
   await page.getByTestId('load-slot-0').click();
+  await page.getByTestId('resume-continue').click();
   await expect(page.locator('[data-testid="scene-label"]')).toHaveText('station');
   await expect
     .poll(async () => page.evaluate(() => JSON.parse(localStorage.getItem('reallm:slot:0') ?? '{}').version), { timeout: 10_000 })

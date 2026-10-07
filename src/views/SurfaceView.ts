@@ -24,7 +24,7 @@ import { hash32 } from '@/core/Rng';
 import type { Look, QualityPreset, QualitySettings } from '@/core/Quality';
 import type { Pool } from '@/core/Pool';
 import type { ModelId } from '@/data/assets';
-import type { DarkLook, PlanetDef, ResourceId } from '@/data/index';
+import type { DarkLook, PlanetDef, ResourceId, ShotLook, ShotShape } from '@/data/index';
 import { isBuried, type EnemyEntity } from '@/entities/Enemy';
 import type { FollowerEntity } from '@/entities/Follower';
 import type { PlayerEntity } from '@/entities/Player';
@@ -334,14 +334,148 @@ export const LOB_ARC_PER_METRE = 0.25;
 /** SPEC-029 §4.12: deployable blink periods — armed mine, and a charge's last second. */
 const MINE_BLINK_SECONDS = 0.5;
 const CHARGE_BLINK_SECONDS = 0.25;
-/** §4.5: projectile head/ghost instancing caps. */
-const PROJECTILE_CAPACITY = 256;
-const GHOST_CAPACITY = 512;
-/** §4.5: the two trailing ghosts, seconds behind the head along −v. */
-const GHOST_LAG_A = 0.03;
-const GHOST_LAG_B = 0.06;
-const GHOST_GAIN_A = 1.2;
-const GHOST_GAIN_B = 0.6;
+/** §4.5: the shot meshes' caps, heads and ghosts together — streaks, then round shots. */
+const STREAK_CAPACITY = 768;
+const ROUND_SHOT_CAPACITY = 256;
+/** §4.5: the first ghost's colour gain; each later one takes the shape's `fade`. */
+const GHOST_GAIN = 1.2;
+/**
+ * §4.5: how much of the ground a shot covers. The shot material blends
+ * premultiplied (`src + dst · (1 − cover)`), so a head at 1 keeps its own hue
+ * on bright sand, where additive light washes every colour to white, and a
+ * ghost at 0.3 and below is still mostly glow.
+ */
+export const HEAD_COVER = 1;
+export const GHOST_COVER = 0.3;
+/**
+ * §4.5: a head's gain falls from × 2.5 with its colour's chroma — a pale look
+ * stays hot enough to bloom, a saturated one keeps its hue through ACES.
+ */
+const CHROMA_DIM = 2;
+const HEAD_GAIN_MIN = 1;
+
+/**
+ * SPEC-019 §4.5: how each `ShotShape` is drawn. A `round` shape is an
+ * ellipsoid on the round-shot mesh, with radii in metres. The others are
+ * capsules, scaled from the 1.14 m × 0.14 m capsule. The head's length along
+ * the velocity is `length + stretch · speed` and its thickness is `thick`,
+ * both × the shot's radius bulk. Ghost k (1…`ghosts`) sits at
+ * `p − v · lag · k`, at gain `1.2 · fade^(k−1)` and scale `1 + grow · k`.
+ * `tracer` is the look every shot had before, unchanged.
+ */
+export interface ShotDraw {
+  readonly round: boolean;
+  readonly length: number;
+  readonly stretch: number;
+  readonly thick: number;
+  readonly ghosts: number;
+  readonly lag: number;
+  readonly fade: number;
+  readonly grow: number;
+}
+
+export const SHOT_DRAW = {
+  tracer: { round: false, length: 0.6, stretch: 0.02, thick: 1, ghosts: 2, lag: 0.03, fade: 0.5, grow: 0 },
+  dart: { round: false, length: 0.3, stretch: 0.015, thick: 0.75, ghosts: 1, lag: 0.025, fade: 0.5, grow: 0 },
+  needle: { round: false, length: 0.8, stretch: 0.04, thick: 0.8, ghosts: 2, lag: 0.02, fade: 0.5, grow: 0 },
+  slug: { round: true, length: 0.12, stretch: 0.004, thick: 0.11, ghosts: 2, lag: 0.03, fade: 0.5, grow: -0.25 },
+  bolt: { round: true, length: 0.16, stretch: 0.004, thick: 0.17, ghosts: 2, lag: 0.04, fade: 0.55, grow: -0.2 },
+  rocket: { round: true, length: 0.28, stretch: 0, thick: 0.11, ghosts: 5, lag: 0.03, fade: 0.7, grow: 0.18 },
+  ball: { round: true, length: 0.15, stretch: 0, thick: 0.15, ghosts: 2, lag: 0.05, fade: 0.5, grow: -0.3 },
+} as const satisfies Record<ShotShape, ShotDraw>;
+
+/** §4.5: an enemy shot (its look is `null`), and a player shot with no look. */
+const ENEMY_SHOT = { shape: 'tracer', color: '#7fff8a' } as const satisfies ShotLook;
+const PLAIN_SHOT = { shape: 'tracer', color: '#ffe9a0' } as const satisfies ShotLook;
+
+/** §4.5: a look's head gain — `2.5 − 2 · chroma` of its sRGB colour, at least 1. */
+export function shotHeadGain(look: ShotLook): number {
+  const r = Number.parseInt(look.color.slice(1, 3), 16);
+  const g = Number.parseInt(look.color.slice(3, 5), 16);
+  const b = Number.parseInt(look.color.slice(5, 7), 16);
+  const chroma = (Math.max(r, g, b) - Math.min(r, g, b)) / 255;
+  return Math.max(HEAD_GAIN_MIN, PROJECTILE_GAIN - CHROMA_DIM * chroma);
+}
+
+/** A look's head colour (× its gain) and ghost base colour, linear. */
+interface ShotColors {
+  readonly head: THREE.Color;
+  readonly trail: THREE.Color;
+}
+
+/** Each look's colours, worked out once, so the shot pass allocates nothing after. */
+const shotColorCache = new Map<ShotLook, ShotColors>();
+function shotColors(look: ShotLook): ShotColors {
+  let colors = shotColorCache.get(look);
+  if (colors === undefined) {
+    colors = {
+      head: new THREE.Color(look.color).multiplyScalar(shotHeadGain(look)),
+      trail: new THREE.Color(look.trail ?? look.color),
+    };
+    shotColorCache.set(look, colors);
+  }
+  return colors;
+}
+
+/**
+ * §4.5: the shot material — premultiplied blending with a per-instance
+ * `shotCover` as the alpha, so heads cover the ground and ghosts glow over
+ * it. One program, shared by both shot meshes.
+ */
+function shotMaterial(): THREE.MeshBasicMaterial {
+  const material = new THREE.MeshBasicMaterial({
+    transparent: true,
+    depthWrite: false,
+    blending: THREE.CustomBlending,
+    blendEquation: THREE.AddEquation,
+    blendSrc: THREE.OneFactor,
+    blendDst: THREE.OneMinusSrcAlphaFactor,
+  });
+  material.onBeforeCompile = (shader) => {
+    shader.vertexShader = shader.vertexShader
+      .replace('#include <common>', 'attribute float shotCover;\nvarying float vShotCover;\n#include <common>')
+      .replace('#include <begin_vertex>', '#include <begin_vertex>\nvShotCover = shotCover;');
+    shader.fragmentShader = shader.fragmentShader
+      .replace('#include <common>', 'varying float vShotCover;\n#include <common>')
+      .replace('#include <dithering_fragment>', '#include <dithering_fragment>\ngl_FragColor.a = vShotCover;');
+  };
+  material.customProgramCacheKey = () => 'shot';
+  return material;
+}
+
+/** An instanced shot mesh over its own geometry, with its `shotCover` attribute. */
+function shotMesh(geometry: THREE.BufferGeometry, material: THREE.Material, capacity: number): THREE.InstancedMesh {
+  const cover = new THREE.InstancedBufferAttribute(new Float32Array(capacity), 1);
+  cover.setUsage(THREE.DynamicDrawUsage);
+  geometry.setAttribute('shotCover', cover);
+  return new THREE.InstancedMesh(geometry, material, capacity);
+}
+
+function setCover(mesh: THREE.InstancedMesh, index: number, cover: number): void {
+  (mesh.geometry.getAttribute('shotCover') as THREE.InstancedBufferAttribute).setX(index, cover);
+}
+
+/**
+ * SPEC-029 §4.6: a lob's lift `lag` seconds behind its head — `4·H·t·(1−t)`
+ * with `H = min(4, 0.25 · distance)` and `t = 1 − (ttl + lag) / flight`. 0 for
+ * a shot that does not lob.
+ */
+export function lobLift(shot: ProjectileEntity, speed: number, lag: number): number {
+  if (!shot.lob || shot.flight <= 0) return 0;
+  const t = Math.min(1, Math.max(0, 1 - (shot.ttl + lag) / shot.flight));
+  const arc = Math.min(LOB_ARC_MAX, LOB_ARC_PER_METRE * speed * shot.flight);
+  return 4 * arc * t * (1 - t);
+}
+
+function showShots(mesh: THREE.InstancedMesh, count: number): void {
+  mesh.count = count;
+  mesh.visible = count > 0;
+  if (count > 0) {
+    mesh.instanceMatrix.needsUpdate = true;
+    if (mesh.instanceColor !== null) mesh.instanceColor.needsUpdate = true;
+    mesh.geometry.getAttribute('shotCover').needsUpdate = true;
+  }
+}
 
 /** Node/pickup colours per resource; the scene reuses them for pickup sparkles. */
 export const RESOURCE_COLORS: Record<ResourceId, string> = {
@@ -380,7 +514,7 @@ const BLOB_SCALE_ENEMY = 1.6;
 const BLOB_SCALE_ELITE = 1.3;
 /** How far the planet's fog colour pulls the grade off neutral (§4.1). */
 const TINT_TOWARD_FOG = 0.08;
-/** Projectile base colour: past 1, so the shots clear the bloom threshold (§4.7). */
+/** A pale shot head's gain: past 1, so it clears the bloom threshold (§4.7); `shotHeadGain` lowers it with chroma. */
 const PROJECTILE_GAIN = 2.5;
 /** Image-based lighting on the surface is a fill light, not the key (§4.4). */
 const ENVIRONMENT_INTENSITY = 0.6;
@@ -426,11 +560,6 @@ const scratchPosition2 = new THREE.Vector3();
 const scratchQuat = new THREE.Quaternion();
 const scratchScale2 = new THREE.Vector3();
 const Y_AXIS = new THREE.Vector3(0, 1, 0);
-/** §4.5: the two ghost taps — seconds behind the head, colour gain. */
-const GHOST_TRAIL: readonly (readonly [number, number])[] = [
-  [GHOST_LAG_A, GHOST_GAIN_A],
-  [GHOST_LAG_B, GHOST_GAIN_B],
-];
 
 /**
  * AC-24: fill (0..1) → the node crystal's scale — height is the visible fill
@@ -894,9 +1023,9 @@ export class SurfaceView {
 
   readonly #nodeCrystals: THREE.InstancedMesh;
   readonly #pickupMeshes: Record<'resource' | 'item' | 'gear', THREE.InstancedMesh>;
-  readonly #projectileMesh: THREE.InstancedMesh;
+  readonly #streakMesh: THREE.InstancedMesh;
   readonly #deployableMesh: THREE.InstancedMesh;
-  readonly #ghostMesh: THREE.InstancedMesh;
+  readonly #roundShotMesh: THREE.InstancedMesh;
   #storm: StormParticles;
   #stormCapacity: number;
   readonly #billboard: THREE.Quaternion;
@@ -1244,21 +1373,20 @@ export class SurfaceView {
       this.#actorRoot.add(mesh);
     }
 
-    // Projectiles (SPEC-019 §4.5): emissive capsules oriented along their
-    // velocity, plus a second instanced mesh of trailing ghosts. The owner
-    // colour is pushed × 2.5 through `instanceColor` (the material stays
-    // white) so the product clears the bloom threshold; on `low` there is no
-    // bloom and the clamp to white in the framebuffer is the whole effect.
+    // Projectiles (SPEC-019 §4.5): two instanced meshes, each holding heads
+    // and their trailing ghosts — emissive capsules for the streaks (tracers,
+    // darts, needles) and ellipsoids for the round shots (slugs, bolts,
+    // rockets, lobs), both oriented along the velocity. Each shot's look
+    // colour goes through `instanceColor` (the material stays white), a pale
+    // one pushed toward × 2.5 so it clears the bloom threshold, and its
+    // `shotCover` says how much of the ground it hides (`shotMaterial`). A
+    // mesh with nothing in flight does not draw.
     const capsule = new THREE.CapsuleGeometry(0.07, 1, 2, 6);
     capsule.rotateZ(-Math.PI / 2); // axis +X, so the velocity yaw orients it
-    const shotMaterial = new THREE.MeshBasicMaterial({
-      transparent: true,
-      depthWrite: false,
-      blending: THREE.AdditiveBlending,
-    });
-    this.#projectileMesh = new THREE.InstancedMesh(capsule, shotMaterial, PROJECTILE_CAPACITY);
-    this.#ghostMesh = new THREE.InstancedMesh(capsule, shotMaterial, GHOST_CAPACITY);
-    for (const mesh of [this.#projectileMesh, this.#ghostMesh]) {
+    const material = shotMaterial();
+    this.#streakMesh = shotMesh(capsule, material, STREAK_CAPACITY);
+    this.#roundShotMesh = shotMesh(new THREE.IcosahedronGeometry(1, 1), material, ROUND_SHOT_CAPACITY);
+    for (const mesh of [this.#streakMesh, this.#roundShotMesh]) {
       mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
       mesh.setColorAt(0, scratchColor.set('#ffffff'));
       mesh.count = 0;
@@ -3088,58 +3216,64 @@ export class SurfaceView {
   }
 
   /**
-   * SPEC-019 §4.5: capsule heads oriented along velocity, two trailing ghosts
-   * each at `p − v · 0.03` / `p − v · 0.06`. A zero-velocity shot (spawned
-   * this frame) takes its yaw from the owner's facing and its ghosts collapse
-   * onto the head (19-j).
+   * SPEC-019 §4.5: each shot drawn in its look — the firing weapon's, else an
+   * enemy's green or the plain tracer — oriented along its velocity, its head
+   * followed by its ghosts in the same mesh: capsules for streaks, ellipsoids
+   * for round shots. Ghost k trails at `p − v · lag · k` (`SHOT_DRAW`). A
+   * zero-velocity shot (spawned this frame) takes its yaw from the owner's
+   * facing and its ghosts collapse onto the head (19-j). A full mesh drops
+   * the shot's last ghosts, then whole shots. Allocates nothing once each
+   * colour has been seen.
    */
   #syncProjectiles(frame: SurfaceFrame): void {
     const pool = frame.projectiles;
-    const heads = this.#projectileMesh;
-    const ghosts = this.#ghostMesh;
-    const headCount = Math.min(pool.size, heads.instanceMatrix.count);
-    let ghostCount = 0;
-    for (let i = 0; i < headCount; i++) {
+    const streaks = this.#streakMesh;
+    const rounds = this.#roundShotMesh;
+    let streakCount = 0;
+    let roundCount = 0;
+    for (let i = 0; i < pool.size; i++) {
       const shot = pool.at(i);
+      const look: ShotLook = shot.shot ?? (shot.owner === 'enemy' ? ENEMY_SHOT : PLAIN_SHOT);
+      const draw: ShotDraw = SHOT_DRAW[look.shape];
+      const mesh = draw.round ? rounds : streaks;
+      const capacity = mesh.instanceMatrix.count;
+      let n = draw.round ? roundCount : streakCount;
+      if (n >= capacity) continue;
       const speed = Math.hypot(shot.vx, shot.vz);
       const yaw = speed > 0 ? -Math.atan2(shot.vz, shot.vx) : -(shot.owner === 'enemy' ? 0 : frame.player.facing);
       const bulk = Math.max(0.12, shot.radius) / 0.12;
-      let y = 0.9 + this.#ground(shot.x, shot.z);
-      // SPEC-029 §4.6: a lob arcs — `0.9 + h + 4·H·t·(1−t)` with
-      // `H = min(4, 0.25 · distance)` and `t = 1 − ttl / flight`.
-      if (shot.lob && shot.flight > 0) {
-        const t = Math.min(1, Math.max(0, 1 - shot.ttl / shot.flight));
-        const arc = Math.min(LOB_ARC_MAX, LOB_ARC_PER_METRE * speed * shot.flight);
-        y += 4 * arc * t * (1 - t);
-      }
-      scratchPosition2.set(shot.x, y, shot.z);
+      const length = (draw.length + draw.stretch * speed) * bulk;
+      const thick = draw.thick * bulk;
+      const baseY = 0.9 + this.#ground(shot.x, shot.z);
+      scratchPosition2.set(shot.x, baseY + lobLift(shot, speed, 0), shot.z);
       scratchQuat.setFromAxisAngle(Y_AXIS, yaw);
-      scratchScale2.set((0.6 + 0.02 * speed) * bulk, bulk, bulk);
+      scratchScale2.set(length, thick, thick);
       scratchMatrix.compose(scratchPosition2, scratchQuat, scratchScale2);
-      heads.setMatrixAt(i, scratchMatrix);
-      scratchColor.set(shot.owner === 'enemy' ? '#7fff8a' : '#ffe9a0');
-      heads.setColorAt(i, scratchColor2.copy(scratchColor).multiplyScalar(PROJECTILE_GAIN));
-      for (const [lag, gain] of GHOST_TRAIL) {
-        if (ghostCount >= ghosts.instanceMatrix.count) break;
-        scratchPosition2.set(shot.x - shot.vx * lag, y, shot.z - shot.vz * lag);
+      mesh.setMatrixAt(n, scratchMatrix);
+      const colors = shotColors(look);
+      mesh.setColorAt(n, colors.head);
+      setCover(mesh, n, HEAD_COVER);
+      n++;
+      let gain = GHOST_GAIN;
+      let cover = GHOST_COVER;
+      for (let k = 1; k <= draw.ghosts && n < capacity; k++) {
+        const lag = draw.lag * k;
+        const grow = 1 + draw.grow * k;
+        scratchPosition2.set(shot.x - shot.vx * lag, baseY + lobLift(shot, speed, lag), shot.z - shot.vz * lag);
+        scratchScale2.set(length * grow, thick * grow, thick * grow);
         scratchMatrix.compose(scratchPosition2, scratchQuat, scratchScale2);
-        ghosts.setMatrixAt(ghostCount, scratchMatrix);
-        ghosts.setColorAt(ghostCount, scratchColor2.copy(scratchColor).multiplyScalar(gain));
-        ghostCount++;
+        mesh.setMatrixAt(n, scratchMatrix);
+        mesh.setColorAt(n, scratchColor2.copy(colors.trail).multiplyScalar(gain));
+        setCover(mesh, n, cover);
+        n++;
+        gain *= draw.fade;
+        cover *= draw.fade;
       }
+      if (draw.round) roundCount = n;
+      else streakCount = n;
     }
-    heads.count = headCount;
-    heads.visible = headCount > 0;
-    ghosts.count = ghostCount;
-    ghosts.visible = ghostCount > 0;
-    if (headCount > 0) {
-      heads.instanceMatrix.needsUpdate = true;
-      if (heads.instanceColor !== null) heads.instanceColor.needsUpdate = true;
-    }
-    if (ghostCount > 0) {
-      ghosts.instanceMatrix.needsUpdate = true;
-      if (ghosts.instanceColor !== null) ghosts.instanceColor.needsUpdate = true;
-    }
+    showShots(streaks, streakCount);
+    showShots(rounds, roundCount);
   }
 
   /**

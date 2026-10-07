@@ -969,6 +969,14 @@ html[data-play] .overlay-panel:not(.overlay-rotate) {
   cursor: default;
 }
 
+/* SPEC-059 §4.5.4: a share button waiting for its card reads dim rather than
+   faded, so its label keeps the panel's 4.5:1 while the canvas draws. */
+.ui-btn.share-btn:disabled {
+  opacity: 1;
+  color: var(--ink-dim);
+  border-color: var(--rule);
+}
+
 .ui-btn.is-primary {
   background: color-mix(in srgb, var(--accent) 18%, var(--key-face));
   border-color: var(--accent);
@@ -1164,6 +1172,27 @@ html[data-play] .toast {
 
 @keyframes sheet-in {
   from { opacity: 0; transform: translateY(16px); }
+}
+
+/* SPEC-059 §4.1.4: the "previously" card — the chapter, where the salvager
+   resumes, the missions in progress and the next step, on a sheet. */
+.resume-chapter {
+  margin: 0 0 6px;
+}
+
+.resume-where {
+  margin: 0 0 10px;
+  color: var(--ink-dim);
+}
+
+.resume-missions {
+  margin: 0 0 10px;
+  padding-left: 18px;
+}
+
+.resume-next {
+  margin: 0 0 14px;
+  color: var(--accent);
 }
 
 /* Every animated affordance goes static when the player asked for less motion
@@ -2993,6 +3022,14 @@ html.reduce-motion .selection-stamp {
   color: var(--ink-dim);
 }
 
+/* SPEC-059 §4.5.5: the card's share, left of its Continue. */
+.selection-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 10px;
+}
+
 html.reduce-motion .overlay-loading::before {
   animation: none;
 }
@@ -3061,6 +3098,17 @@ html.debug .scene-tag {
 }
 
 .menu-buttons .ui-btn {
+  pointer-events: auto;
+}
+
+/* SPEC-059 §4.5.5: the escaped run's Selection card, under the button column. */
+.menu-share {
+  display: flex;
+  justify-content: center;
+  min-width: min(280px, 80vw);
+}
+
+.menu-share .ui-btn {
   pointer-events: auto;
 }
 
@@ -3177,6 +3225,62 @@ html.debug .scene-tag {
   max-height: 40dvh;
   user-select: text;
   -webkit-user-select: text;
+}
+
+/* SPEC-059 §4.4.5: the Records panel — the count, the closed-session line,
+   one row per commendation (an earned one in the good colour) and the best
+   times, in the menu list's scroll. */
+.records-count {
+  margin: 0;
+  color: var(--ink-dim);
+}
+
+.records-off {
+  margin: 0;
+  color: var(--warn);
+}
+
+.records-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.records-row {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  border-top: 1px solid var(--panel-edge);
+  padding-top: 8px;
+}
+
+.records-row-title {
+  font-weight: 600;
+}
+
+.records-row-detail {
+  margin: 0;
+  color: var(--ink-dim);
+  font-size: var(--type-sm);
+}
+
+.records-row-status {
+  color: var(--ink-dim);
+  font-size: var(--type-sm);
+}
+
+.records-row.is-earned .records-row-status {
+  color: var(--good);
+}
+
+.records-heading {
+  margin: 8px 0 0;
+  font-size: var(--type-sm);
+  letter-spacing: var(--track);
+  text-transform: uppercase;
 }
 
 /* E22: menus reflow to one column on a portrait phone; no rotate wall here. */
@@ -3757,6 +3861,19 @@ html.debug .scene-tag {
 .char-title {
   margin: 0;
   font-weight: 700;
+}
+
+/* SPEC-059 §4.5.5: the Selection card's share, in the panel's title row. */
+.char-title .share-btn {
+  margin-left: 12px;
+  vertical-align: middle;
+  font-weight: 400;
+}
+
+/* SPEC-059 §4.5.5: after an interlude, in the station's head. */
+.screen-head-text .share-btn {
+  align-self: flex-start;
+  margin-top: 4px;
 }
 
 .char-stats {

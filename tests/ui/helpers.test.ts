@@ -109,6 +109,7 @@ import {
   firstSentence,
   needsLine,
   quitNote,
+  resumedText,
   requirementItem,
   starmapPreselect,
   STAMINA_FULL_HIDE_SECONDS,
@@ -803,6 +804,10 @@ describe('DIFFICULTY_LINES (SPEC-038 §4.6)', () => {
     expect(DIFFICULTY_LINES.hard).toBe(
       'Hard — tougher, deadlier hostiles and twice the elites; a death costs a fifth of your cargo.',
     );
+  });
+
+  it('SPEC-059 §4.2.3: story says what it spares and that records are off', () => {
+    expect(DIFFICULTY_LINES.story).toBe('Story — hostiles and storms cannot hurt you; the fights still happen. Records are off.');
   });
 });
 
@@ -2077,10 +2082,13 @@ describe('completionLines’ extras (SPEC-043 §4.6)', () => {
 // ------------------------------------------------------------------ SPEC-044
 
 describe('quitNote (SPEC-044 §4.8)', () => {
-  it('on the surface: the jump back costs the planet\'s fuel, and timed objectives restart', () => {
-    expect(quitNote('surface', 'Ferrum', 100)).toBe(
-      'You will resume at Command Relay. Flying back to Ferrum costs 100 oil, and timed objectives restart.',
-    );
+  it('on the surface: the planet\'s pad, with no jump, and timed objectives restart (SPEC-059 §4.1.5)', () => {
+    expect(quitNote('surface', 'Ferrum', 100)).toBe('You will resume at the Ferrum landing pad. Timed objectives restart.');
+  });
+
+  it('resumedText names the pad and the restarted timers (SPEC-059 §4.1.3)', () => {
+    expect(resumedText('Vetra')).toBe('Resumed at the Vetra landing pad. Timed objectives restart.');
+    expect(resumedText(PLANETS.cinder4.name)).toBe('Resumed at the Cinder-4 landing pad. Timed objectives restart.');
   });
 
   it('in flight: this jump\'s fuel is already spent (44-i)', () => {
@@ -2090,7 +2098,8 @@ describe('quitNote (SPEC-044 §4.8)', () => {
   it('the oil is Economy.fuelCost — the engine-discounted jump', () => {
     const data = save();
     expect(economyOf(data).fuelCost('ferrum')).toBe(100);
-    expect(quitNote('surface', PLANETS.ferrum.name, economyOf(data).fuelCost('ferrum'))).toContain('Flying back to Ferrum costs 100 oil');
+    // SPEC-059 §4.1.5: the surface's note names no fuel — a resume costs none.
+    expect(quitNote('surface', PLANETS.ferrum.name, economyOf(data).fuelCost('ferrum'))).not.toContain('oil');
     data.ship.engine = 1;
     expect(quitNote('flight', PLANETS.ferrum.name, economyOf(data).fuelCost('ferrum'))).toContain('(90 oil)');
   });

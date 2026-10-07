@@ -14,12 +14,19 @@ import type { GameServices } from '@/core/Services';
 import { applyUpdate, updateReady } from '@/core/Updates';
 import { nextInstanceOffered, slotSummaryOf, SLOTS, type Save, type SlotId } from '@/core/Save';
 import type { SceneParams } from '@/core/StateMachine';
-import { CREDITS, CREDITS_VERSION_LINE } from '@/data/index';
+import { COMMENDATION_IDS, CREDITS, CREDITS_VERSION_LINE } from '@/data/index';
+import { bestTimeRows, recordsRows, recordsRowStatus, recordsTitle } from '@/systems/Commendations';
 import { Economy } from '@/systems/Economy';
 import { Progression } from '@/systems/Progression';
 import { applySupplies, EMPTY_CODE, pushCode } from '@/systems/Service';
+import { RECORDS, recordsOffText } from '@/systems/Records';
+import { awayMs, previouslyCard, RESUME_WINDOW_MS, resumeTarget } from '@/systems/Resume';
+import { shareAtMenu } from '@/systems/Share';
 import { archiveLine, beginInstanceText, NEWER_SAVE_TEXT, nextInstanceSheet, restoreArchiveSheet, slotLine } from '@/systems/UiHelpers';
 import { confirmSheet } from '@/ui/ConfirmSheet';
+import { installAvailable, onInstallChange, promptInstall } from '@/ui/InstallButton';
+import { openResumeCard } from '@/ui/ResumeCard';
+import { prepareSaveCard, shareButton } from '@/ui/ShareCard';
 import { el, h, keepFocus, testId, topModal } from '@/ui/dom';
 import { SavePanel } from '@/ui/SavePanel';
 import { SettingsPanel } from '@/ui/SettingsPanel';
@@ -59,7 +66,8 @@ function colourMapSpace(root: THREE.Object3D): string {
   return space;
 }
 
-type SubPanel = 'new' | 'load' | 'credits' | null;
+/** SPEC-059 §4.4.5 adds `records`, the fourth. */
+type SubPanel = 'new' | 'load' | 'credits' | 'records' | null;
 
 export class MenuScene extends UiScene<'menu'> {
   /** §4.4: every mesh this screen draws hangs off this one group. */
@@ -81,6 +89,10 @@ export class MenuScene extends UiScene<'menu'> {
   /** Which slot has its import paste field open in the Load list. */
   #importing: SlotId | null = null;
   #leaving = false;
+  /** SPEC-059 §4.1.3: the "previously" card is up, waiting for its answer. */
+  #asking = false;
+  /** SPEC-059 §4.5.5: the escaped save's share, keyed by the save it was drawn for. */
+  #share: { key: string; box: HTMLDivElement } | null = null;
 
   constructor(services: GameServices) {
     super(services, 'menu', 'menu');
@@ -108,6 +120,10 @@ export class MenuScene extends UiScene<'menu'> {
     }
     this.#mountUi();
     this.#watchServiceGestures();
+    // SPEC-059 §4.1.4: a "previously" card still up when the menu goes leaves with it, loading nothing.
+    this.disposer.add(() => {
+      if (this.#asking) this.ui.root.querySelector<HTMLButtonElement>('[data-testid="resume-back"]')?.click();
+    });
   }
 
   /**
@@ -325,6 +341,7 @@ export class MenuScene extends UiScene<'menu'> {
     this.disposer.add(() => {
       this.#releaseSub?.();
       this.#releaseSub = null;
+      this.#share = null;
       this.ui.unmount(screen.root);
       screen.dispose();
       this.#root = null;
@@ -345,6 +362,8 @@ export class MenuScene extends UiScene<'menu'> {
     // SPEC-015 §10: a build that lands while the menu is open adds its button
     // without the screen having to poll for it.
     this.disposer.add(this.services.events.on('app:update-ready', () => this.#refresh(), this));
+    // SPEC-059 §4.6.5 (59-n): so does a kept install prompt, and an install takes it away.
+    this.disposer.add(onInstallChange(() => this.#refresh()));
 
     this.#refresh();
     this.#buttons.querySelector('button')?.focus();
@@ -364,6 +383,7 @@ export class MenuScene extends UiScene<'menu'> {
   #rebuild(): void {
     if (this.#buttons === null) return;
     const continueTarget = this.#continueTarget();
+    this.#syncShare(continueTarget);
     const buttons = [
       // AC-2: hidden — not built at all — when there is nothing to continue.
       continueTarget === null
@@ -371,8 +391,15 @@ export class MenuScene extends UiScene<'menu'> {
         : testId(h('button', { class: 'ui-btn is-primary', type: 'button', click: () => this.#continue() }, 'Continue'), 'go-station'),
       testId(h('button', { class: 'ui-btn', type: 'button', click: () => this.#toggleSub('new') }, 'New Game'), 'menu-new'),
       testId(h('button', { class: 'ui-btn', type: 'button', click: () => this.#toggleSub('load') }, 'Load'), 'menu-load'),
+      // SPEC-059 §4.4.5: this device's commendations and best times, after Load.
+      testId(h('button', { class: 'ui-btn', type: 'button', click: () => this.#toggleSub('records') }, 'Records'), 'menu-records'),
       testId(h('button', { class: 'ui-btn', type: 'button', click: () => this.#settings?.show() }, 'Settings'), 'menu-settings'),
       testId(h('button', { class: 'ui-btn', type: 'button', click: () => this.#toggleSub('credits') }, 'Credits'), 'menu-credits'),
+      // SPEC-059 §4.6.5: while the browser's install prompt is kept. A press
+      // spends it, whatever the answer, and the button goes with it.
+      installAvailable()
+        ? testId(h('button', { class: 'ui-btn', type: 'button', click: () => void promptInstall() }, 'Install'), 'menu-install')
+        : null,
       // SPEC-015 AC-52: offered here and at the station only, and only while a
       // build is actually waiting. `applyUpdate` is `updateSW(true)` — nothing
       // reloads the page on its own (15-c).
@@ -383,6 +410,32 @@ export class MenuScene extends UiScene<'menu'> {
     this.#buttons.replaceChildren(...buttons.filter((button): button is HTMLButtonElement => button !== null));
     this.#renderSub();
     this.#savePanel?.refresh();
+  }
+
+  /**
+   * SPEC-059 §4.5.5: `ending-share` under the button column while the save
+   * Continue would enter has escaped and not yet played its restore lines
+   * (`shareAtMenu`). The card is drawn on the first render that shows it and
+   * kept while the same save is the one shown; the element is in the column
+   * only while it shows, so the buttons never move for an empty slot.
+   */
+  #syncShare(target: { slot: SlotId; data: Save } | 'bound' | null): void {
+    const data = target === null ? null : target === 'bound' ? this.services.save.current : target.data;
+    const buttons = this.#buttons;
+    if (data === null || buttons === null || !shareAtMenu(data)) {
+      this.#share?.box.remove();
+      this.#share = null;
+      return;
+    }
+    const key = `${data.meta.slot}:${data.meta.updatedAt}`;
+    if (this.#share?.key !== key) {
+      this.#share?.box.remove();
+      const card = prepareSaveCard(data, this.services.settings.get().commendations);
+      const box = el('div', 'menu-share');
+      box.append(shareButton('ending-share', card, this.ui));
+      this.#share = { key, box };
+    }
+    if (this.#share.box.previousElementSibling !== buttons) buttons.after(this.#share.box);
   }
 
   /**
@@ -432,6 +485,9 @@ export class MenuScene extends UiScene<'menu'> {
       case 'credits':
         this.#renderCredits();
         return;
+      case 'records':
+        this.#renderRecords();
+        return;
     }
   }
 
@@ -458,10 +514,38 @@ export class MenuScene extends UiScene<'menu'> {
     if (this.#leaving) return;
     const target = this.#continueTarget();
     if (target === null) return;
-    if (target !== 'bound') this.services.save.bind(target.data);
+    const data = target === 'bound' ? this.services.save.current : target.data;
+    if (data !== null) void this.#enterSave(data);
+  }
+
+  /**
+   * SPEC-059 §4.1.3: Continue and `load-slot-<n>` share one path. The save's
+   * resume target first; after a day away the "previously" card, whose Back
+   * ends it with nothing bound (59-p); then the bind, and the planet's pad —
+   * with the point cleared in memory, so a landing that fails to enter leaves
+   * the next Continue at the station (59-e) — or the station, as before.
+   */
+  async #enterSave(data: Save): Promise<void> {
+    if (this.#leaving || this.#asking) return;
+    const services = this.services;
+    const target = resumeTarget(data, services.settings.serviceMode);
+    if (awayMs(data, Date.now()) >= RESUME_WINDOW_MS) {
+      this.#asking = true;
+      const go = await openResumeCard(this.ui, previouslyCard(data, target));
+      this.#asking = false;
+      if (!go || this.#root === null || this.#leaving) return;
+    }
+    if (services.save.current !== data) services.save.bind(data);
     this.#leaving = true;
-    void this.services.go('station', {}).then((went) => {
-      if (!went) this.#leaving = false;
+    let went: Promise<boolean>;
+    if (target.scene === 'surface') {
+      data.progress.resume = null;
+      went = services.go('surface', { planet: target.planet, firstLanding: false, resumed: true });
+    } else {
+      went = services.go('station', {});
+    }
+    void went.then((entered) => {
+      if (!entered) this.#leaving = false;
     });
   }
 
@@ -548,14 +632,8 @@ export class MenuScene extends UiScene<'menu'> {
               {
                 class: 'ui-btn is-primary',
                 type: 'button',
-                click: () => {
-                  if (this.#leaving) return;
-                  save.bind(result.data);
-                  this.#leaving = true;
-                  void this.services.go('station', {}).then((went) => {
-                    if (!went) this.#leaving = false;
-                  });
-                },
+                // SPEC-059 §4.1.3: the same path as Continue.
+                click: () => void this.#enterSave(result.data),
               },
               'Load',
             ),
@@ -801,6 +879,57 @@ export class MenuScene extends UiScene<'menu'> {
         h('p', { class: 'menu-list-title' }, 'Credits'),
         h('div', { class: 'credits-actions' }, replay, licences),
         body,
+      ),
+    );
+  }
+
+  // --------------------------------------------------------------- records
+
+  /**
+   * SPEC-059 §4.4.5: the Records panel — the title the slots and one
+   * commendation decide (§4.4.6), the count, `records-off` while the page's
+   * gate is closed, one row per commendation (a hidden one classified until
+   * earned), and the best times. Per device, like the list itself (59-t).
+   */
+  #renderRecords(): void {
+    if (this.#sub === null) return;
+    const { commendations: earned, bestTimes } = this.services.settings.get();
+    const saves: Save[] = [];
+    for (const slot of SLOTS) {
+      const result = this.services.save.load(slot);
+      if (result.ok) saves.push(result.data);
+    }
+    const count = COMMENDATION_IDS.filter((id) => earned[id] !== undefined).length;
+    const reason = RECORDS.reason;
+    const rows = recordsRows(earned).map((row) => {
+      const status = recordsRowStatus(row);
+      return testId(
+        h(
+          'li',
+          { class: `records-row${row.earnedAt !== null ? ' is-earned' : ''}` },
+          h('span', { class: 'records-row-title' }, row.title),
+          h('span', { class: 'records-row-detail' }, row.detail),
+          status === null ? null : h('span', { class: 'records-row-status' }, status),
+        ),
+        `records-${row.id}`,
+      );
+    });
+    const best = bestTimeRows(bestTimes);
+    this.#sub.replaceChildren(
+      testId(
+        h(
+          'div',
+          { class: 'menu-list panel records' },
+          testId(h('p', { class: 'menu-list-title' }, recordsTitle(saves, earned)), 'records-title'),
+          testId(h('p', { class: 'records-count' }, `${count} of ${COMMENDATION_IDS.length}`), 'records-count'),
+          reason === null ? null : testId(h('p', { class: 'records-off' }, recordsOffText(reason)), 'records-off'),
+          h('ul', { class: 'records-list' }, ...rows),
+          h('p', { class: 'records-heading' }, 'Best times'),
+          best.length === 0
+            ? h('p', { class: 'records-row-detail' }, 'No best times yet.')
+            : h('ul', { class: 'records-list' }, ...best.map((row) => testId(h('li', { class: 'records-best' }, row.text), `records-best-${row.id}`))),
+        ),
+        'records-panel',
       ),
     );
   }

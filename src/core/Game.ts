@@ -135,6 +135,8 @@ export interface DevFlags {
    * or `null` without the flag (D-14). SPEC-035 §4.8 keeps the tips out of it.
    */
   readonly perf: number | null;
+  /** SPEC-059 §4.3.3, `?records`: reopens records against `?debug`, in dev builds only. */
+  readonly records: boolean;
 }
 
 const PRESETS: readonly string[] = ['low', 'medium', 'high'];
@@ -202,6 +204,7 @@ export function parseFlags(search: string): DevFlags {
     seed,
     quality,
     perf: parsePerfSeconds(rawPerf),
+    records: params.has('records'),
   };
 }
 
@@ -1167,8 +1170,18 @@ export class Game implements GameServices {
    * `?scene=surface&planet=cinder4` (SPEC-001 §9) — the one use of `force`
    * (SPEC-003 D-11). SPEC-016 D-16: `?perf` without `?scene=` opens the
    * surface, and `?scene=menu` opens nothing, since the boot has landed there.
+   *
+   * SPEC-059 §4.1.6: a dev build only, so no production URL rides the
+   * `menu → surface` edge onto a planet (59-u) — the e2e fleet runs on the dev
+   * server, where the flag keeps working. A `?perf` session is the exception
+   * SPEC-016 D-26 made: the deployed build is the one a phone measures, and
+   * its forced transition never needed the edge.
    */
   #applySceneFlag(): void {
+    if (!import.meta.env.DEV && this.#flags.perf === null) {
+      if (this.#flags.scene !== null) log.warn('boot', `?scene=${this.#flags.scene} opens nothing outside development`);
+      return;
+    }
     const target = this.#flags.scene ?? (this.#flags.perf !== null ? 'surface' : null);
     if (target === null || target === BOOT_SCENE) return;
     if (!(FLAG_SCENES as readonly string[]).includes(target)) {

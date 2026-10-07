@@ -986,6 +986,15 @@ describe('the death penalty (E4)', () => {
     data.meta.difficulty = 'normal';
     expect(economy.applyDeathPenalty()).toEqual({ oil: 10, wheat: 10, water: 10, lithium: 10 });
   });
+
+  it('costs nothing on story: floor(0 × have) is nothing, and nothing is spent (SPEC-059 §4.2.2)', () => {
+    const { economy, data, events } = world({ ...MARINE, difficulty: 'story' }, (save) => {
+      save.resources = { oil: 100, wheat: 100, water: 100, lithium: 100 };
+    });
+    expect(economy.applyDeathPenalty()).toEqual({});
+    expect(data.resources).toEqual({ oil: 100, wheat: 100, water: 100, lithium: 100 });
+    expect(events.of('resource:spent')).toEqual([]);
+  });
 });
 
 // ---------------------------------------------------------------- derived

@@ -27,7 +27,9 @@ import {
   CLASSES,
   COMPANIONS,
   DIFFICULTY_RULES,
+  DRONE_SHOT,
   ENEMIES,
+  FLARE_SHOT,
   ITEMS,
   LOOT_TABLES,
   MENDER_HEAL_FRACTION,
@@ -36,6 +38,7 @@ import {
   SIGNATURE_FALLBACK_LITHIUM,
   SWIFT_SPEED_MULT,
   SWIFT_WINDUP_SCALE,
+  THROWN_SHOT,
   TUNING,
   VOLATILE_DAMAGE_MULT,
   VOLATILE_FUSE,
@@ -60,6 +63,7 @@ import {
   type LightEffect,
   type LootTableId,
   type ResourceId,
+  type ShotLook,
   type WeaponLine,
   type WeaponSlot,
   type WeaponTwist,
@@ -167,10 +171,16 @@ export const MEDIC_WEATHER_PAUSE = 1;
 
 // ------------------------------------------------ SPEC-038 (initial tuning)
 
-/** §4.6: on casual every windup and every telegraph's lead time lasts ×1.25. */
+/**
+ * §4.6: on casual every windup and every telegraph's lead time lasts ×1.25.
+ * SPEC-059 §4.2.2: on every `assisted` difficulty — casual and story.
+ */
 export const CASUAL_WINDUP_MULT = 1.25;
-/** §4.6: on casual weather damage is ×0.7, after `hazardResist`. */
-export const CASUAL_WEATHER_MULT = 0.7;
+/**
+ * §4.6: on casual weather damage is ×0.7, after `hazardResist`. SPEC-059
+ * §3: the name and the value stay; the literal moved to the table's column.
+ */
+export const CASUAL_WEATHER_MULT = DIFFICULTY_RULES.casual.weatherMult;
 /** §4.7: the most auto-fire leads a strafing target by, in metres. */
 export const AUTO_LEAD_MAX = 3;
 /** §4.2: a telegraph hit knocks the player this far — from a centre, or across a lane. */
@@ -500,6 +510,7 @@ export class Combat {
   #nextEnemyId = 1;
   #aimedThisStep = false;
   #lastShotAt = -Infinity;
+  #lastShotLook: ShotLook | null = null;
   /** SPEC-039 §4.5: world time of the last weather damage past the immunity check. */
   #weatherHitAt = -Infinity;
   #signatureDrops = 0;
@@ -580,6 +591,11 @@ export class Combat {
   /** SPEC-029 §3: world time of the last player shot (SPEC-030 reads it). */
   get lastShotAt(): number {
     return this.#lastShotAt;
+  }
+
+  /** SPEC-019 §4.5: the look of the last player shot, so the muzzle flash matches it. */
+  get lastShotLook(): ShotLook | null {
+    return this.#lastShotLook;
   }
 
   readonly #aiHooks: AiHooks;
@@ -772,20 +788,25 @@ export class Combat {
    * comes in with `ignoreInvuln` and fractional amounts, which accumulate in a
    * float and land as whole points (AC-67). Weather is skipped entirely under
    * hazard immunity (§4.8).
+   *
+   * SPEC-059 §4.2.2: on a difficulty whose `enemyDamageMult` is 0 (story), an
+   * `enemy` or `projectile` hit returns before it touches HP, the i-frames or
+   * any event — and weather does the same when `weatherMult` is 0. Read live.
    */
   damagePlayer(amount: number, source: DamageSource, ignoreInvuln = false, from?: { x: number; z: number }): void {
     const p = this.#world.player;
     const time = this.#world.time;
     if (!p.alive) return;
+    const rules = DIFFICULTY_RULES[this.#save.meta.difficulty];
+    if ((source.kind === 'enemy' || source.kind === 'projectile') && rules.enemyDamageMult === 0) return;
+    if (source.kind === 'weather' && rules.weatherMult === 0) return;
     if (source.kind === 'weather' && time < p.hazardImmuneUntil) return;
     // SPEC-012 §4.6: weather damage is reduced by hazardResist before the
     // fractional accumulator. The resist comes from a single armor slot capped
     // at 0.75 (data/items.ts), so the product can never go negative. SPEC-038
-    // §4.6: casual takes ×0.7 of what is left, read live.
-    const incoming =
-      source.kind === 'weather'
-        ? amount * (1 - this.#world.stats.hazardResist) * (this.#save.meta.difficulty === 'casual' ? CASUAL_WEATHER_MULT : 1)
-        : amount;
+    // §4.6: casual takes ×0.7 of what is left, read live — SPEC-059 §4.2.2:
+    // the difficulty's `weatherMult`.
+    const incoming = source.kind === 'weather' ? amount * (1 - this.#world.stats.hazardResist) * rules.weatherMult : amount;
     // SPEC-039 §4.5: weather that got past the immunity check pauses the
     // Field Medic, whether or not this step's fraction lands as a whole point.
     if (source.kind === 'weather' && incoming > 0) this.#weatherHitAt = time;
@@ -946,6 +967,8 @@ export class Combat {
     p.seekTurn = 0;
     p.twist = null;
     p.flareSeconds = 0;
+    // SPEC-019 §4.5: the view colours an enemy shot by its shooter.
+    p.shot = null;
   }
 
   /** §4.5: phase summons appear in a ring at 6 m around the boss. Never elite. */
@@ -1486,6 +1509,7 @@ export class Combat {
     p.seekTurn = 0;
     p.twist = null;
     p.flareSeconds = 0;
+    p.shot = THROWN_SHOT;
   }
 
   /**
@@ -1532,6 +1556,7 @@ export class Combat {
     p.seekTurn = 0;
     p.twist = null;
     p.flareSeconds = effect.seconds;
+    p.shot = FLARE_SHOT;
     return true;
   }
 
@@ -1714,10 +1739,17 @@ export class Combat {
     this.#damageFollower(Math.max(1, Math.round(p.damage * (p.elite ? TUNING.ELITE_DMG_MULT : 1))));
   }
 
+  /**
+   * Enemy damage into the escort follower — no armour, and no difficulty but
+   * SPEC-059 §4.2.2's `allyDamageMult`: on story the product is 0 and the
+   * follower takes nothing.
+   */
   #damageFollower(amount: number): void {
     const f = this.#world.follower;
     if (f === null || !f.alive) return;
-    f.hp -= amount;
+    const scaled = amount * DIFFICULTY_RULES[this.#save.meta.difficulty].allyDamageMult;
+    if (scaled <= 0) return;
+    f.hp -= scaled;
     if (f.hp <= 0) {
       f.hp = 0;
       f.alive = false;
@@ -1840,6 +1872,7 @@ export class Combat {
       shot.ttl = shot.flight;
     }
     this.#lastShotAt = this.#world.time;
+    this.#lastShotLook = weapon.shot;
     // SPEC-035 §4.11: one event per shot, at the muzzle, with the weapon's line.
     this.#events.emit('weapon:fired', { line: FIRED_LINE[weapon.line], x: shot.x, z: shot.z });
     this.loadout.fired(slot, this.#world.time);
@@ -1893,6 +1926,7 @@ export class Combat {
       shot.ttl = shot.flight;
     }
     this.#lastShotAt = time;
+    this.#lastShotLook = weapon.shot;
     this.#events.emit('weapon:fired', { line: FIRED_LINE[weapon.line], x: shot.x, z: shot.z });
     this.loadout.fired(slot, time);
     p.fireCooldown = 1 / weapon.fireRate;
@@ -1980,6 +2014,8 @@ export class Combat {
     p.seekTarget = twist?.kind === 'seek' ? this.#seekQuarry(dirX, dirZ, weapon.range, twist.cone) : -1;
     p.seekTurn = twist?.kind === 'seek' ? twist.turnRate : 0;
     p.flareSeconds = 0;
+    // SPEC-019 §4.5: the drone fires its own look, not the primary's.
+    p.shot = owner === 'player' ? weapon.shot : DRONE_SHOT;
     return p;
   }
 
@@ -2048,8 +2084,9 @@ export class Combat {
     const w = this.#world;
     w.time += dt;
     const p = w.player;
-    // SPEC-038 §4.6: the casual windup stretch, read live every step.
-    w.windupMult = this.#save.meta.difficulty === 'casual' ? CASUAL_WINDUP_MULT : 1;
+    // SPEC-038 §4.6: the casual windup stretch, read live every step —
+    // SPEC-059 §4.2.2: on every `assisted` difficulty.
+    w.windupMult = DIFFICULTY_RULES[this.#save.meta.difficulty].assisted ? CASUAL_WINDUP_MULT : 1;
     // SPEC-038 §4.1: while the dash's movement runs nothing fires, nothing
     // pushes the player out of a body and the step's knockback is dropped.
     const dashing = isDashing(p, w.time);

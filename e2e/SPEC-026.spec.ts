@@ -50,19 +50,17 @@ async function land(page: Page): Promise<void> {
 /**
  * A real page reload, then back onto the planet the way a returning player
  * gets there: the menu's Load button binds the stored save (`load()` alone only
- * parses it), and the station is where a loaded run stands.
+ * parses it) and — SPEC-059 §4.1.3 — a run that stood on a planet resumes at
+ * its pad, with no flight, where it used to stand at the station.
  */
 async function reload(page: Page): Promise<void> {
   await start(page, '/?debug&seed=123');
   await expect(page.locator('[data-testid="scene-label"]')).toHaveText('menu');
   await page.getByTestId('menu-load').click();
   await page.getByTestId('load-slot-0').click();
-  await expect(page.locator('[data-testid="scene-label"]')).toHaveText('station');
-  await expect(page.locator('[data-testid="transition-fade"]')).toHaveCSS('pointer-events', 'none');
-  expect(
-    await page.evaluate(() => window.__reallm.go('surface', { planet: 'cinder4', firstLanding: false }, { force: true })),
-  ).toBe(true);
   await expect(page.locator('[data-testid="scene-label"]')).toHaveText('surface');
+  await expect(page.locator('[data-testid="transition-fade"]')).toHaveCSS('pointer-events', 'none');
+  expect((await page.evaluate(() => window.__reallm.stats())).sceneInfo?.['resumed']).toBe(1);
 }
 
 /** Click through any open dialogue: the first tap fills the line, the next advances. */

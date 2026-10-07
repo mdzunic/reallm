@@ -45,8 +45,21 @@ describe('the settings row table (SPEC-045 §4.2)', () => {
       expect(inRows || kept, `${key} has no row and is not bookkeeping`).toBe(true);
       expect(inRows && kept, `${key} is both a row and bookkeeping`).toBe(false);
     }
+    // SPEC-059 §4.4.2, §4.6.5: `commendations` and `installed` join them.
     expect([...BOOKKEEPING_KEYS].sort()).toEqual(
-      ['benchmark', 'bestTimes', 'installHintShownAt', 'lastSlot', 'persistGranted', 'tipsSeen', 'unlocks', 'version', 'zonesShown'].sort(),
+      [
+        'benchmark',
+        'bestTimes',
+        'commendations',
+        'installed',
+        'installHintShownAt',
+        'lastSlot',
+        'persistGranted',
+        'tipsSeen',
+        'unlocks',
+        'version',
+        'zonesShown',
+      ].sort(),
     );
   });
 

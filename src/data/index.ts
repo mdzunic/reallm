@@ -19,6 +19,7 @@ export * from '@/data/assets';
 export * from '@/data/caves';
 export * from '@/data/characters';
 export * from '@/data/clues';
+export * from '@/data/commendations';
 export * from '@/data/companions';
 export * from '@/data/contracts';
 export * from '@/data/cosmetics';

@@ -1,10 +1,10 @@
 // The dash (SPEC-038 §4.1): a 5 m burst in 0.2 s with 0.3 s of i-frames from
 // the press, on a cooldown that falls with agility, is ×0.8 for the Scout and
-// ×0.8 on casual, and never drops below 0.8 s. Pure: the surface step moves the
+// ×0.8 on casual (and story, SPEC-059 §4.2.2), and never drops below 0.8 s. Pure: the surface step moves the
 // player along `dashX/dashZ` while `isDashing`, and `Combat` reads the same
 // clock to hold its fire, its push-out and its knockback. SPEC-050 §4.2 makes
 // it draw on the sprint's stamina (`pressDash`).
-import { ATTRIBUTE_EFFECTS, type ClassPassive, type Difficulty } from '@/data/index';
+import { ATTRIBUTE_EFFECTS, DIFFICULTY_RULES, type ClassPassive, type Difficulty } from '@/data/index';
 import type { PlayerEntity } from '@/entities/Player';
 import { canSpend, DASH_STAMINA, spend } from '@/systems/Stamina';
 
@@ -26,20 +26,21 @@ export const DASH_COOLDOWN = 1.4;
 export const DASH_AGILITY_CUT = ATTRIBUTE_EFFECTS.agility.dashCooldownCut;
 /** The floor: invulnerable time stays at or below 37.5 % of the clock. */
 export const DASH_COOLDOWN_MIN = 0.8;
-/** Casual's dash cooldown multiplier (§4.6). */
+/** Casual's dash cooldown multiplier (§4.6); SPEC-059 §4.2.2: every `assisted` difficulty's. */
 export const CASUAL_DASH_MULT = 0.8;
 
 /**
  * `max(0.8, 1.4 × (1 − 0.03 × agility) × (passive.dashCooldownMult ?? 1) ×
- * (casual ? 0.8 : 1))` — a Marine at agility 1 on normal waits 1.358 s, a Scout
- * at 4 waits 0.9856 s, and a Scout at 10 sits on the 0.8 s floor.
+ * (assisted ? 0.8 : 1))` — a Marine at agility 1 on normal waits 1.358 s, a
+ * Scout at 4 waits 0.9856 s, and a Scout at 10 sits on the 0.8 s floor.
+ * SPEC-059 §4.2.2: `assisted` is casual's and story's.
  */
 export function dashCooldown(passive: ClassPassive, agility: number, difficulty: Difficulty): number {
   const raw =
     DASH_COOLDOWN *
     (1 - DASH_AGILITY_CUT * agility) *
     (passive.dashCooldownMult ?? 1) *
-    (difficulty === 'casual' ? CASUAL_DASH_MULT : 1);
+    (DIFFICULTY_RULES[difficulty].assisted ? CASUAL_DASH_MULT : 1);
   return Math.max(DASH_COOLDOWN_MIN, raw);
 }
 
