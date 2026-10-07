@@ -286,8 +286,9 @@ export const CLUES: readonly ClueDef[] = [
     path: 'main',
     offTask: false,
     trigger: { kind: 'wave', wave: 'eden_final' },
-    lines: ['c6_m2_wave'],
-    record: { title: 'Never hers', text: 'The Hive came for the beacon after the Queen was dead.' },
+    // Review 2026-10 S-04: the flight to Eden can find it first, so the record names neither place.
+    lines: ['c6_m2_wave', 'eden_interceptors'],
+    record: { title: 'Never hers', text: 'The Hive kept coming after the Queen was dead.' },
   },
   // SPEC-056 §4.7: the archive shards, in planet order — optional and
   // off-task, since breaking into a vault is going off-task; each found when

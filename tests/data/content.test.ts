@@ -1907,7 +1907,7 @@ describe('cache ids and the underground (SPEC-047 §4.2)', () => {
 
 // ------------------------------------------------------------ SPEC-048 §4–§6
 
-import { CLUE_DWELL_SECONDS, CLUES, FILMS, LINE_PLACEHOLDERS, PLACEHOLDER_LONGEST, type ClueDef, type LineCondition } from '@/data/index';
+import { CLUE_DWELL_SECONDS, CLUES, FILMS, FLIGHT_ECHOES, LINE_PLACEHOLDERS, PLACEHOLDER_LONGEST, type ClueDef, type LineCondition } from '@/data/index';
 import { newSave, validateSave } from '@/core/Save';
 
 /** §4.1: a text as long as it can get — every placeholder at its longest fill (SPEC-058's are camelCase). */
@@ -2022,7 +2022,8 @@ describe('the clue catalogue (SPEC-048 §4.2, §4.3)', () => {
       ['clue_letter_repeat', 5, 'main', '—', 'station', 'letter_5'],
       ['clue_eden', 6, 'main', '—', 'line', 'c6_m1_forest'],
       ['clue_grove', 6, 'optional', '—', 'reach', 'eden_grove'],
-      ['clue_never_hers', 6, 'main', '—', 'wave', 'c6_m2_wave'],
+      // Review 2026-10 S-04: the flight to Eden can find it first.
+      ['clue_never_hers', 6, 'main', '—', 'wave', 'c6_m2_wave eden_interceptors'],
       ['shard_cinder4', 1, 'optional', '—', 'cache', 'shard_cinder4'],
       ['shard_vetra', 2, 'optional', '—', 'cache', 'shard_vetra'],
       ['shard_thessaly', 3, 'optional', '—', 'cache', 'shard_thessaly'],
@@ -2093,7 +2094,7 @@ describe('the clue catalogue (SPEC-048 §4.2, §4.3)', () => {
       ['The first letter, again', 'Her fifth letter is her first, word for word. None of them is dated.'],
       ['Four degrees', 'Eden: four degrees at every spring, and the same eleven trees in the same order.'],
       ['Same tree', 'The same tree, again and again, knot for knot.'],
-      ['Never hers', 'The Hive came for the beacon after the Queen was dead.'],
+      ['Never hers', 'The Hive kept coming after the Queen was dead.'],
       // SPEC-056 §4.7.
       ['Too fast for hands', 'A log in the Cinder-4 vault: instance/58 opened the lock in 0.3 seconds, then learned to slow down.'],
       ['The cold does not reach', 'A log in the Vetra vault: instance/47 could not feel the cold, and the suit was fine.'],
@@ -2448,6 +2449,24 @@ describe('main-path echoes, continuity and the text sweep (SPEC-048 §4.7)', () 
       ['aria', 'There is a crash site under the ice with an Earth transponder. That should not be here.', { not: 'chapter5_done' }],
       ['aria', 'There is a crash site under the ice with an Earth transponder. You know whose by now.', { flag: 'chapter5_done' }],
     ]);
+  });
+
+  it('review 2026-10 S-04: the flight line that finds clue_never_hers, and a brief that leaves the Hive to it', () => {
+    expect(table('eden_interceptors')).toEqual([
+      ['aria', 'Interceptors. Command said the Hive went quiet. Nobody told these.', null],
+      ['aria', 'The Queen is dead and they are still coming. They were never hers.', null],
+    ]);
+    expect(DIALOGUE_LINES['eden_interceptors']?.modal).toBeUndefined();
+    expect(DIALOGUE_LINES['eden_interceptors']?.once).toBeUndefined();
+    expect(MISSIONS.c6_m2.brief).toBe('Hold the survey beacon for four minutes while it uplinks. Then file the verdict — or do not.');
+    expect(MISSIONS.c6_m2.brief).not.toMatch(/Hive/);
+    expect(FLIGHT_ECHOES).toEqual([{ planet: 'eden', enemy: 'hive_interceptor', line: 'eden_interceptors' }]);
+    // The echo's planet sends that enemy in flight, and its line is a clue's.
+    for (const echo of FLIGHT_ECHOES) {
+      const groups = planetsById[echo.planet].flight.waves.flatMap((wave) => waves[wave].groups.map((group) => group.enemy));
+      expect(groups, echo.line).toContain(echo.enemy);
+      expect(CLUES.filter((def) => def.lines.includes(echo.line)).map((def) => def.id), echo.line).toEqual(['clue_never_hers']);
+    }
   });
 });
 

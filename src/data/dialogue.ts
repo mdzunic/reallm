@@ -625,6 +625,18 @@ export const DIALOGUE = {
   },
 
   // ---------------------------------------------------- chapter 6 — Eden-Prime
+  /**
+   * Review 2026-10 S-04: the first interceptor group on a flight to Eden
+   * (`FLIGHT_ECHOES`), right after interlude 5's "The Hive has gone quiet" —
+   * `clue_never_hers`'s flight line, so it plays until the clue is found.
+   */
+  eden_interceptors: {
+    id: 'eden_interceptors',
+    lines: [
+      { speaker: 'aria', text: 'Interceptors. Command said the Hive went quiet. Nobody told these.' },
+      { speaker: 'aria', text: 'The Queen is dead and they are still coming. They were never hers.' },
+    ],
+  },
   c6_m1_accept: {
     id: 'c6_m1_accept',
     lines: [{ speaker: 'aria', text: 'Spring, forest, ridge. Survey all three. Eden is everything the brief promised, which is what worries me.' }],

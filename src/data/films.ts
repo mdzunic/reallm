@@ -387,6 +387,21 @@ export const CONTACTS: Readonly<Record<FlightEnemyId, ContactDef>> = {
   hive_interceptor: { planet: 'hive', epithet: 'Grown, not flown', line: 'contact_hive_interceptor' },
 };
 
+/** Review 2026-10 S-04: a clue's line that a flight enemy's group can play. */
+export interface FlightEchoDef {
+  readonly planet: PlanetId;
+  readonly enemy: FlightEnemyId;
+  /** One of its clue's `lines` — its start finds the clue, so it plays until the clue is found. */
+  readonly line: DialogueId;
+}
+
+/**
+ * Review 2026-10 S-04: the first group of `enemy` on a flight to `planet`
+ * plays `line` while its clue is unfound — the Hive's interceptors on the way
+ * to Eden, after interlude 5 says the Hive has gone quiet.
+ */
+export const FLIGHT_ECHOES: readonly FlightEchoDef[] = [{ planet: 'eden', enemy: 'hive_interceptor', line: 'eden_interceptors' }];
+
 export interface InterludeDef {
   readonly chapter: 1 | 2 | 3 | 4 | 5;
   readonly film: FilmId;
