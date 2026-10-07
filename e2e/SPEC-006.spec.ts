@@ -1175,8 +1175,7 @@ test('the reactions table is what the game actually hears (AC-38 … AC-50, AC-5
     const name = async (emit: () => void): Promise<string> => (await fire(emit)).map((row) => row.sprite).join(',') || '(silence)';
 
     const out: Record<string, unknown> = {};
-    // 06-l: the full-hold warning keeps a 3 s floor on `ui_warn`, so it goes
-    // before the warn toasts, whose own `ui_warn` would still be inside it.
+    // 06-l: a refused pickup is silent; its CARGO FULL toast is the warning.
     out['pickup blocked'] = await name(() => bus.emit('resource:collected', { resource: 'oil', amount: 0, total: 2, blocked: 'cargo_full' }));
     out['toast warn'] = await name(() => bus.emit('ui:toast', { text: 'x', kind: 'warn' }));
     out['toast error'] = await name(() => bus.emit('ui:toast', { text: 'x', kind: 'error' }));
@@ -1259,7 +1258,7 @@ test('the reactions table is what the game actually hears (AC-38 … AC-50, AC-5
   expect(r['killed at 100 m']).toBe('(silence)');
   expect(r['pickup oil']).toBe('pickup_oil'); // AC-44
   expect(r['pickup unknown']).toBe('pickup_generic');
-  expect(r['pickup blocked']).toBe('ui_warn'); // AC-45
+  expect(r['pickup blocked']).toBe('(silence)'); // AC-45, 06-l: the toast warns
   expect(r['scanned']).toBe('scan_done'); // AC-38
   expect(r['weather']).toBe('alarm_weather');
   expect(r['ship shielded']).toBe('ship_hit_shield'); // AC-47

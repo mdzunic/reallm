@@ -22,7 +22,7 @@ import type { SlotState, SlotView } from '@/systems/Loadout';
 import { discountTokens, Economy } from '@/systems/Economy';
 import type { CalibrationPuzzle, ConduitPuzzle, PlatesPuzzle } from '@/systems/Puzzles';
 import { Progression, type EventSink } from '@/systems/Progression';
-import { CARGO_TOAST_SECONDS, SHIPPED_TOAST_TEXT } from '@/systems/Pickups';
+import { SHIPPED_TOAST_TEXT } from '@/systems/Pickups';
 import {
   surfaceHoldReason,
   abandonMission,
@@ -956,9 +956,8 @@ describe('one max HP (SPEC-034 §4.14)', () => {
  * units it cannot carry.
  */
 describe('the shipped-home toast (SPEC-034 §4.12)', () => {
-  it('reads as §4.12 gives it, and shares CARGO FULL’s throttle', () => {
+  it('reads as §4.12 gives it', () => {
     expect(SHIPPED_TOAST_TEXT).toBe('Cargo full — surplus shipped to Command Relay.');
-    expect(CARGO_TOAST_SECONDS).toBe(3);
   });
 });
 
