@@ -23,6 +23,7 @@ import {
 import {
   AUDIO_REACTIONS,
   AUDIO_SILENT,
+  CARGO_FULL_WARN_MS,
   ENEMY_DEATH_DEFAULT,
   ENEMY_DEATH_SOUNDS,
   enemyDeathSound,
@@ -843,10 +844,11 @@ describe('reaction outcomes (SPEC-006 §5.2)', () => {
     expect(pickupSound('oil')).toBe('pickup_oil');
   });
 
-  it('resource:collected warns when the hold is full (AC-45)', () => {
+  it('resource:collected warns when the hold is full, on the toast’s 3 s (AC-45, 06-l)', () => {
+    expect(CARGO_FULL_WARN_MS).toBe(3000);
     expect(
       AUDIO_REACTIONS['resource:collected']({ resource: 'oil', amount: 1, total: 5, blocked: 'cargo_full', source: 'pickup' }),
-    ).toEqual({ id: 'ui_warn', opts: { minIntervalMs: 80 } });
+    ).toEqual({ id: 'ui_warn', opts: { minIntervalMs: CARGO_FULL_WARN_MS } });
   });
 
   it('ship:damaged tells shield from hull (AC-47)', () => {

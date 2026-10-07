@@ -1,6 +1,8 @@
 // SPEC-012 §4.4 — pickups and nodes (AC-18..AC-24, E3, E25, 12-e, 12-f),
 // against the real Economy so the cargo cap is the shipped one.
 import { describe, expect, it } from 'vitest';
+import { RateLimiter } from '@/core/AudioMix';
+import { AUDIO_REACTIONS } from '@/core/AudioReactions';
 import { EventBus, type GameEvents } from '@/core/Events';
 import { newSave, type Save } from '@/core/Save';
 import { type ResourceId } from '@/data/index';
@@ -145,6 +147,35 @@ describe('Pickups — cargo cap (AC-19, E3)', () => {
     h.run(1);
     expect(h.save.resources.oil).toBe(103);
     expect(h.pickups.pool.size).toBe(0);
+  });
+
+  it('a full hold beeps with the toast, not with every retry (06-l)', () => {
+    const h = harness((save) => {
+      save.resources.oil = 400; // the cap
+    });
+    // Three bounced orbs at the player's feet, each retrying every 0.5 s.
+    for (const x of [0.2, -0.2, 0]) h.pickups.spawn({ kind: 'resource', resource: 'oil', amount: 2, x, z: 0.1 });
+    // The mixer's floor, as `Audio.play` applies it to what the table names.
+    const limiter = new RateLimiter();
+    let now = 0;
+    const warns: number[] = [];
+    const hear = (reaction: ReturnType<(typeof AUDIO_REACTIONS)['ui:toast']>): void => {
+      if (reaction === null || limiter.blocked(reaction.id, now, reaction.opts?.minIntervalMs)) return;
+      limiter.mark(reaction.id, now);
+      if (reaction.id === 'ui_warn') warns.push(now);
+    };
+    h.events.on('resource:collected', (p) => hear(AUDIO_REACTIONS['resource:collected'](p)));
+    h.events.on('ui:toast', (p) => hear(AUDIO_REACTIONS['ui:toast'](p)));
+    for (let i = 0; i < Math.round(12 / STEP); i++) {
+      now = i * STEP * 1000;
+      h.pickups.update(STEP, h.player, RADIUS);
+    }
+    expect(h.pickups.pool.size).toBe(3); // still refused, still retrying
+    // Twelve seconds of a 0.5 s retry on three orbs used to be ~70 beeps.
+    expect(warns.length).toBeLessThanOrEqual(Math.ceil(12 / CARGO_TOAST_SECONDS));
+    for (let k = 1; k < warns.length; k++) {
+      expect((warns[k] as number) - (warns[k - 1] as number)).toBeGreaterThanOrEqual(CARGO_TOAST_SECONDS * 1000 - 1);
+    }
   });
 });
 

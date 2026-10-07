@@ -91,6 +91,13 @@ export const SHOT_INTERVAL_MS: Readonly<Record<GameEvents['weapon:fired']['line'
 };
 
 /**
+ * 06-l — the full-hold warning's floor: the CARGO FULL toast's 3 s window
+ * (SPEC-012 AC-19), so the beep and the toast keep one cadence however many
+ * bounced orbs retry under the player.
+ */
+export const CARGO_FULL_WARN_MS = 3000;
+
+/**
  * SPEC-038 §4.10 — the cue per windup kind. SPEC-041 §4.10: a boss's ground
  * moves rumble (`windup_boss`), and its volley draws breath like a spitter.
  */
@@ -353,13 +360,14 @@ export const AUDIO_REACTIONS: { [K in ReactedEvent]: Reaction<K> } = {
   'flight:hazardHit': () => ({ id: 'ship_hit_tick', opts: { minIntervalMs: 60 } }),
   'boss:defeated': () => ({ id: 'boss_death', opts: { priority: 2 } }),
   /**
-   * A full hold warns instead of chiming (AC-45). Both branches keep the 80 ms
-   * cooldown of §5.2: running over a resource field with a full hold is exactly
-   * the case that would otherwise machine-gun the warning.
+   * A full hold warns instead of chiming (AC-45). The chime keeps the 80 ms
+   * cooldown of §5.2. 06-l: the warning keeps the CARGO FULL toast's 3 s,
+   * because a bounced orb follows the magnet and retries every 0.5 s for its
+   * 60 s — on 80 ms, a few of them beeped without pause.
    */
   'resource:collected': (p) =>
     p.blocked === 'cargo_full'
-      ? { id: 'ui_warn', opts: { minIntervalMs: 80 } }
+      ? { id: 'ui_warn', opts: { minIntervalMs: CARGO_FULL_WARN_MS } }
       : { id: pickupSound(p.resource), opts: { minIntervalMs: 80 } },
   /**
    * SPEC-042 §4.2: the generic chime, on the 80 ms floor a resource pickup
