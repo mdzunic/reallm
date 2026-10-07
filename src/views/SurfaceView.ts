@@ -39,6 +39,7 @@ import { FollowerView } from '@/views/FollowerView';
 import { EnemyMeshes, INSTANCES_PER_PART } from '@/views/ProceduralMeshes';
 import { RemainsView, type RemainsModel } from '@/views/RemainsView';
 import { ScavBody } from '@/views/ScavBody';
+import { RAIDER_TRACER, ScavRaiderViews } from '@/views/ScavRaiders';
 import { groundLayer, type GroundLayer } from '@/views/ProceduralTextures';
 import { buildScatter, buildDecals } from '@/views/Scatter';
 import { buildArenaWall } from '@/views/ArenaWall';
@@ -199,6 +200,12 @@ export interface SurfaceFrame {
    * frame; absent, the head cut-out is off.
    */
   screen?: { camera: THREE.PerspectiveCamera; width: number; height: number };
+  /**
+   * SPEC-038 §4.6: the world's windup multiplier (1.25 on casual), so a
+   * raider's muzzle glint grows over the whole windup (SPEC-064 §4.3).
+   * Absent reads as 1.
+   */
+  windupMult?: number;
 }
 
 // ------------------------------------------------------------- SPEC-019 §4.7
@@ -387,6 +394,10 @@ export const SHOT_DRAW = {
 /** §4.5: an enemy shot (its look is `null`), and a player shot with no look. */
 const ENEMY_SHOT = { shape: 'tracer', color: '#7fff8a' } as const satisfies ShotLook;
 const PLAIN_SHOT = { shape: 'tracer', color: '#ffe9a0' } as const satisfies ShotLook;
+/** SPEC-064 §4.6: a raider's shot — gunfire, not spit. Drawn only; the shot itself is unchanged. */
+const RAIDER_SHOT = { shape: 'tracer', color: RAIDER_TRACER } as const satisfies ShotLook;
+/** SPEC-064 §4.3: a raider's muzzle flash takes its tracer's colour, as the player's takes its shot's. */
+const RAIDER_MUZZLE_COLOR = Number.parseInt(RAIDER_TRACER.slice(1), 16);
 
 /** §4.5: a look's head gain — `2.5 − 2 · chroma` of its sRGB colour, at least 1. */
 export function shotHeadGain(look: ShotLook): number {
@@ -974,6 +985,13 @@ export class SurfaceView {
   #followerView: FollowerView | null = null;
   /** SPEC-048 §4.8: the scavenger bodies placed this visit — the pad's, then the echo's. */
   readonly #scavBodies: ScavBody[] = [];
+  /**
+   * SPEC-064 §4.2: Cinder-4's raiders in the salvager's suit — `null` without
+   * the character model, when every raider is the `scav` stand-in (E113).
+   */
+  #raiders: ScavRaiderViews | null = null;
+  /** SPEC-064 §4.5: the counts `sceneInfo.scavRaiders` reads while there is no raider view. */
+  readonly #raiderCounts = { live: 0, falling: 0, standIn: 0, tracers: 0 };
   /** SPEC-057 §4.6: the remains, built on the first `setRemains` that shows them. */
   #remains: RemainsView | null = null;
   /** SPEC-058 §4.5: the predecessor's body — a view of its own, never the remains' (58-f). */
@@ -1490,6 +1508,20 @@ export class SurfaceView {
     this.#actorRoot.add(this.#blobs);
 
     this.enemies = new EnemyMeshes(this.#actorRoot, { shadows: quality.shadowMapSize > 0 });
+    // SPEC-064 §4.2: the raiders in the salvager's suit, beside the instanced
+    // enemies, once the boot set's character model is in — the guard
+    // `addScavBody` uses. Without it there is no raider view at all, and every
+    // raider is the procedural stand-in (E113).
+    if (assets !== undefined && assets.loaded && assets.hasModel('character')) {
+      try {
+        const raiders = new ScavRaiderViews(this.#actorRoot, assets, { shadows: quality.shadowMapSize > 0 });
+        // Through `this.#fx` as it is when the shot leaves: a preset change can rebuild the pool.
+        raiders.onMuzzle = (x, z) => this.#fx.burst('muzzle', x, z, RAIDER_MUZZLE_COLOR);
+        this.#raiders = raiders;
+      } catch (cause) {
+        log.warn('view', 'the scav raiders could not be built; they stay procedural', cause);
+      }
+    }
     this.applyQuality(quality);
   }
 
@@ -1721,6 +1753,7 @@ export class SurfaceView {
       this.#key.shadow.dispose();
     }
     this.enemies.setShadows(size > 0);
+    this.#raiders?.setShadows(size > 0);
     this.#character?.setShadows(size > 0);
     this.#shadowsOn = size > 0;
     for (const body of this.#scavBodies) body.setShadows(size > 0);
@@ -2812,6 +2845,26 @@ export class SurfaceView {
     return this.#scavBodies.length;
   }
 
+  // ------------------------------------------------------- SPEC-064 §4.5
+
+  /**
+   * Enemy `id`, a raider, died: the clone it was drawn with falls where it
+   * stood. A raider drawn as the stand-in, or a visit without the model, has
+   * nothing to fall.
+   */
+  fallRaider(id: number): void {
+    this.#raiders?.fall(id);
+  }
+
+  /**
+   * The skinned live raiders, the falling copies, the live raiders drawn as
+   * the stand-in, and the shots drawn in `RAIDER_TRACER` — all on the last
+   * frame — for `sceneInfo.scavRaiders`.
+   */
+  get scavRaiders(): Readonly<{ live: number; falling: number; standIn: number; tracers: number }> {
+    return this.#raiders?.counts ?? this.#raiderCounts;
+  }
+
   // ------------------------------------------------------- SPEC-057 §4.6
 
   /**
@@ -3099,7 +3152,24 @@ export class SurfaceView {
     }
     this.#followerView?.sync(follower, frame.time, follower === null ? 0 : ground(follower.x, follower.z));
 
-    this.enemies.sync(frame.enemies, frame.time, ground);
+    // SPEC-064 §4.2: the skinned raiders first; the instanced meshes skip every
+    // one placed, and draw the rest — past the pool, or with no model — as the
+    // `scav` stand-in. The raiders' rims follow the enemies' rule below.
+    const raiders = this.#raiders;
+    let placed: ReadonlySet<number> | undefined;
+    if (raiders !== null) {
+      raiders.rimOf = this.enemies.rimOf;
+      raiders.windupMult = frame.windupMult ?? 1;
+      placed = raiders.sync(frame.enemies, frame.dt, frame.time, ground);
+    } else {
+      let standIn = 0;
+      for (let i = 0; i < frame.enemies.size; i++) {
+        const e = frame.enemies.at(i);
+        if (e.def.look.recipe === 'scav' && e.state !== 'dead' && !isBuried(e)) standIn++;
+      }
+      this.#raiderCounts.standIn = standIn;
+    }
+    this.enemies.sync(frame.enemies, frame.time, ground, placed);
 
     // Nodes: fill drives crystal height (AC-24); a harvested node glows white.
     frame.nodes.forEach((node, i) => {
@@ -3217,9 +3287,10 @@ export class SurfaceView {
 
   /**
    * SPEC-019 §4.5: each shot drawn in its look — the firing weapon's, else an
-   * enemy's green or the plain tracer — oriented along its velocity, its head
-   * followed by its ghosts in the same mesh: capsules for streaks, ellipsoids
-   * for round shots. Ghost k trails at `p − v · lag · k` (`SHOT_DRAW`). A
+   * enemy's green (a raider's amber, SPEC-064 §4.6) or the plain tracer —
+   * oriented along its velocity, its head followed by its ghosts in the same
+   * mesh: capsules for streaks, ellipsoids for round shots. Ghost k trails at
+   * `p − v · lag · k` (`SHOT_DRAW`). A
    * zero-velocity shot (spawned this frame) takes its yaw from the owner's
    * facing and its ghosts collapse onto the head (19-j). A full mesh drops
    * the shot's last ghosts, then whole shots. Allocates nothing once each
@@ -3231,14 +3302,17 @@ export class SurfaceView {
     const rounds = this.#roundShotMesh;
     let streakCount = 0;
     let roundCount = 0;
+    let tracers = 0;
     for (let i = 0; i < pool.size; i++) {
       const shot = pool.at(i);
-      const look: ShotLook = shot.shot ?? (shot.owner === 'enemy' ? ENEMY_SHOT : PLAIN_SHOT);
+      const look: ShotLook =
+        shot.shot ?? (shot.owner === 'enemy' ? (shot.enemyId === 'scav_raider' ? RAIDER_SHOT : ENEMY_SHOT) : PLAIN_SHOT);
       const draw: ShotDraw = SHOT_DRAW[look.shape];
       const mesh = draw.round ? rounds : streaks;
       const capacity = mesh.instanceMatrix.count;
       let n = draw.round ? roundCount : streakCount;
       if (n >= capacity) continue;
+      if (look === RAIDER_SHOT) tracers++;
       const speed = Math.hypot(shot.vx, shot.vz);
       const yaw = speed > 0 ? -Math.atan2(shot.vz, shot.vx) : -(shot.owner === 'enemy' ? 0 : frame.player.facing);
       const bulk = Math.max(0.12, shot.radius) / 0.12;
@@ -3274,6 +3348,9 @@ export class SurfaceView {
     }
     showShots(streaks, streakCount);
     showShots(rounds, roundCount);
+    // SPEC-064 §4.5: the shots drawn in the raiders' amber, reported to their view.
+    this.#raiderCounts.tracers = tracers;
+    if (this.#raiders !== null) this.#raiders.counts.tracers = tracers;
   }
 
   /**
@@ -3323,6 +3400,9 @@ export class SurfaceView {
     this.#flashlight = null;
     this.#cave = null;
     this.enemies.dispose();
+    // SPEC-064 E115: a copy still falling goes with the scene.
+    this.#raiders?.dispose();
+    this.#raiders = null;
     this.#storm.dispose();
     this.#fx.dispose();
     // SPEC-053: the cover's mesh, the LOD geometry a foliage layer is not

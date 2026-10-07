@@ -441,6 +441,8 @@ const GOTO_BODY_DISTANCE = 1;
 const PREDECESSOR_LABEL = "A salvager's body";
 /** SPEC-038 §4.11: the debug charger stands this far along the player's facing. */
 const CHARGER_DISTANCE = 8;
+/** SPEC-064 §4.5: `surface-spawn-raider` stands its raider this far in front of the player. */
+const RAIDER_DISTANCE = 8;
 /** SPEC-038 §4.1: the dash streaks' colour — the salvager's cool white. */
 const DASH_STREAK_COLOR = 0xbfe6ff;
 /** SPEC-050 §4.2: an in-combat sprint shorter than this is a short one (`sceneInfo.sprintsShort`). */
@@ -2304,6 +2306,8 @@ export class SurfaceScene extends UiScene<'surface'> {
         time,
         dt,
         screen,
+        // SPEC-064 §4.3: the raiders' glint grows over the windup as the difficulty sets it.
+        windupMult: world.windupMult ?? 1,
       });
       // SPEC-041 §4.4: the ring shows while the arena is armed — and so while sealed.
       view.setArena(world.arena ?? (this.#arena?.sealed === true ? this.#arena : null));
@@ -2790,6 +2794,10 @@ export class SurfaceScene extends UiScene<'surface'> {
     // SPEC-048 §4.3, §4.8: the bodies on the ground, the clues found and the
     // shelter clue's dwell, in seconds to one decimal.
     info['scavBodies'] = this.#view?.scavBodies ?? 0;
+    // SPEC-064 §4.5: `{ live, falling, standIn, tracers }`, as compact JSON —
+    // a row value carries no whitespace (`surface-env.spec.ts` pins the shape).
+    const raiders = this.#view?.scavRaiders;
+    info['scavRaiders'] = raiders === undefined ? '-' : JSON.stringify(raiders);
     // SPEC-057 §3, §4.6: where the remains lie (`-` with none), what they
     // hold, the look chosen at entry, what the view draws for them and
     // whether the tag is up.
@@ -5248,6 +5256,8 @@ export class SurfaceScene extends UiScene<'surface'> {
     button('surface-spawn-elite', 'Spawn elite', () => this.#debugSpawnElite());
     // SPEC-038 §4.11: a charge on demand — the planet's rusher, aggroed.
     button('surface-spawn-charger', 'Spawn charger', () => this.#debugSpawnCharger());
+    // SPEC-064 §4.5: a raider on demand, so the pool and its budget are a few presses away.
+    button('surface-spawn-raider', 'Spawn raider', () => this.#debugSpawnRaider());
     // SPEC-050 §4.10: an empty pool, as a spend would leave it — exhausted,
     // with `player:exhausted` on the way in.
     button('surface-exhaust', 'Exhaust', () => {
@@ -5511,6 +5521,31 @@ export class SurfaceScene extends UiScene<'surface'> {
     e.aggro = true;
     e.state = 'chase';
     e.stateTime = 0;
+  }
+
+  /**
+   * SPEC-064 §4.5: one `scav_raider` 8 m along the player's facing — or the
+   * nearest bearing to it that is clear of obstacles — spawned as the director
+   * spawns one. Inside its 22 m aggro radius, it takes the player up itself.
+   */
+  #debugSpawnRaider(): void {
+    const world = this.#world;
+    const combat = this.#combat;
+    if (world === null || combat === null || !world.player.alive) return;
+    const p = world.player;
+    const radius = ENEMIES.scav_raider.radius;
+    let x = p.x + Math.cos(p.facing) * RAIDER_DISTANCE;
+    let z = p.z + Math.sin(p.facing) * RAIDER_DISTANCE;
+    for (let k = 0; k < 16; k++) {
+      const turn = (k % 2 === 0 ? 1 : -1) * Math.ceil(k / 2) * (Math.PI / 8);
+      const cx = p.x + Math.cos(p.facing + turn) * RAIDER_DISTANCE;
+      const cz = p.z + Math.sin(p.facing + turn) * RAIDER_DISTANCE;
+      if (world.obstacles.hitsCircle(cx, cz, radius + 0.5)) continue;
+      x = cx;
+      z = cz;
+      break;
+    }
+    combat.spawnEnemy('scav_raider', x, z, false);
   }
 
   /**
@@ -7875,6 +7910,16 @@ export class SurfaceScene extends UiScene<'surface'> {
           if (view !== null) {
             view.fx.burst('death', x, z, hexColor(def.look.tint));
             view.fx.scorch(x, z);
+            // SPEC-064 §4.5: a skinned raider falls where it died. The event
+            // names the species, not the entity; the body is still in the
+            // pool — the end-of-step sweep reclaims it after this.
+            const world = this.#world;
+            if (def.look.recipe === 'scav' && world !== null) {
+              for (let i = 0; i < world.enemies.size; i++) {
+                const e = world.enemies.at(i);
+                if (e.state === 'dead' && e.def === def && e.x === x && e.z === z) view.fallRaider(e.id);
+              }
+            }
           }
           if (elite || def.archetype === 'boss') this.#hitStop.frames = 2;
         },

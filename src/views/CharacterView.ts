@@ -24,11 +24,14 @@ export interface CharacterAssets {
   animations(id: ModelId): THREE.AnimationClip[];
 }
 
-/** §4.1 (*initial tuning*): crossfade, run-speed mapping, blink opacity. */
-const CROSSFADE_SECONDS = 0.12;
-const RUN_FULL_SPEED = 6;
-const RUN_TIMESCALE_MIN = 0.6;
-const RUN_TIMESCALE_MAX = 1.6;
+/**
+ * §4.1 (*initial tuning*): crossfade, run-speed mapping, blink opacity. The
+ * first four are exported for SPEC-064's raiders, which animate by the same rules.
+ */
+export const CROSSFADE_SECONDS = 0.12;
+export const RUN_FULL_SPEED = 6;
+export const RUN_TIMESCALE_MIN = 0.6;
+export const RUN_TIMESCALE_MAX = 1.6;
 const BLINK_OPACITY = 0.35;
 
 const ANIMS: readonly CharacterAnim[] = ['idle', 'run', 'attack', 'hit', 'death'];
