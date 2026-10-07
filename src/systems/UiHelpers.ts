@@ -76,6 +76,7 @@ import type { PlayerEntity } from '@/entities/Player';
 import { LOADOUT_CHAPTERS, RECOMMENDED_LOADOUT, type LoadoutEntry } from '@/systems/Balance';
 import { damageReduction, playerDamageMult } from '@/systems/Combat';
 import {
+  contractTokenFraction,
   discountTokens,
   missingRequirements,
   ownsItem,
@@ -647,9 +648,16 @@ export function companionEffectText(effect: CompanionEffect): string {
  * The rewards line of a mission row (§4.3): XP, tokens, resources, items. A
  * replay halves the XP and tokens and drops the rest (E2); SPEC-043 §4.3: a
  * contract replay reads its own payout — 75 % of each, then the lithium.
+ * SPEC-066 §4.5: `tokenFraction` is the contract's token share
+ * (`contractTokenFraction`, 0.5 on a boss mission).
  */
-export function rewardsText(rewards: MissionDef['rewards'], replay = false, contract = false): string {
-  if (replay && contract) return contractPayout(rewards, GLYPHS.tokens);
+export function rewardsText(
+  rewards: MissionDef['rewards'],
+  replay = false,
+  contract = false,
+  tokenFraction = CONTRACT_REWARD_FRACTION,
+): string {
+  if (replay && contract) return contractPayout(rewards, GLYPHS.tokens, tokenFraction);
   const half = (value: number): number => (replay ? Math.floor(value / 2) : value);
   const parts: string[] = [];
   if (rewards.xp > 0) parts.push(`+${half(rewards.xp)} XP`);
@@ -668,12 +676,13 @@ export function rewardsText(rewards: MissionDef['rewards'], replay = false, cont
 /**
  * SPEC-043 §4.3: `+<xp> XP · +<tokens> <unit> · +20 lithium` — the floored 75 %
  * of the mission's XP and tokens, and the contract's lithium. The board prints
- * tokens as `◈`, the banner as `tokens`.
+ * tokens as `◈`, the banner as `tokens`. SPEC-066 §4.5: the tokens are the
+ * floored `tokenFraction` (0.5 on a boss mission).
  */
-function contractPayout(rewards: MissionDef['rewards'], unit: string): string {
+function contractPayout(rewards: MissionDef['rewards'], unit: string, tokenFraction: number): string {
   const parts: string[] = [];
   const xp = Math.floor(rewards.xp * CONTRACT_REWARD_FRACTION);
-  const tokens = Math.floor(rewards.tokens * CONTRACT_REWARD_FRACTION);
+  const tokens = Math.floor(rewards.tokens * tokenFraction);
   if (xp > 0) parts.push(`+${xp} XP`);
   if (tokens > 0) parts.push(`+${tokens} ${unit}`);
   parts.push(`+${CONTRACT_LITHIUM} lithium`);
@@ -797,12 +806,18 @@ export function availableSwatches(part: 'primary' | 'secondary', unlocks: readon
 /**
  * SPEC-043 §4.3: `Contract · <name> · 75 % + 20 lithium` when `def` runs as a
  * contract on that landing, else `null`. The board asks for the next landing
- * (`visits + 1`), the pad terminal for this one (`visits`).
+ * (`visits + 1`), the pad terminal for this one (`visits`). SPEC-066 §4.5: a
+ * boss mission's reads `75 % XP, 50 % tokens + 20 lithium`.
  */
 export function contractLabel(save: Save, def: MissionDef, landing: number): string | null {
   const contract = contractFor(save, def, landing);
   if (contract === null) return null;
-  return `Contract · ${CONTRACTS[contract].name} · ${percent(CONTRACT_REWARD_FRACTION)} + ${CONTRACT_LITHIUM} lithium`;
+  const tokens = contractTokenFraction(def);
+  const shares =
+    tokens === CONTRACT_REWARD_FRACTION
+      ? percent(CONTRACT_REWARD_FRACTION)
+      : `${percent(CONTRACT_REWARD_FRACTION)} XP, ${percent(tokens)} tokens`;
+  return `Contract · ${CONTRACTS[contract].name} · ${shares} + ${CONTRACT_LITHIUM} lithium`;
 }
 
 // ------------------------------------------------------------------ missions
@@ -1615,7 +1630,10 @@ export function completionLines(
   const seconds = extras?.seconds ?? null;
   return {
     title: def.title,
-    rewards: contract !== null ? `${contractPayout(def.rewards, 'tokens')} · contract` : bannerRewards(def, replay),
+    rewards:
+      contract !== null
+        ? `${contractPayout(def.rewards, 'tokens', contractTokenFraction(def))} · contract`
+        : bannerRewards(def, replay),
     next: next === null ? null : `Next: ${next.title} — at the pad terminal`,
     bonus:
       judged === null

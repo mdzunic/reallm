@@ -2109,6 +2109,43 @@ describe('bonus, contract and time texts (SPEC-043 §4.2, §4.3, §4.5)', () => 
   });
 });
 
+describe('a boss contract pays half its tokens (SPEC-066 §4.5)', () => {
+  /** A save with chapter 5 finished and the Queen among the done. */
+  function chapterFiveDone(): Save {
+    const save = newSave(0, CREATION, 42, 0);
+    save.progress.missionsDone.push('c5_m1', 'c5_m2', 'c5_m3');
+    save.progress.flags.push('chapter5_done');
+    return save;
+  }
+
+  it('contractLabel names both shares on a boss mission, and keeps the single share elsewhere', () => {
+    const save = chapterFiveDone();
+    for (let landing = 1; landing <= 6; landing++) {
+      const id = contractFor(save, MISSIONS.c5_m3, landing);
+      expect(id).not.toBeNull();
+      expect(contractLabel(save, MISSIONS.c5_m3, landing)).toBe(
+        `Contract · ${CONTRACTS[id as keyof typeof CONTRACTS].name} · 75 % XP, 50 % tokens + 20 lithium`,
+      );
+      expect(contractLabel(save, MISSIONS.c5_m3, landing)).toMatch(/^Contract · .+ · 75 % XP, 50 % tokens \+ 20 lithium$/);
+    }
+    const one = chapterOneDone();
+    const id = contractFor(one, MISSIONS.c1_m2, 1);
+    expect(contractLabel(one, MISSIONS.c1_m2, 1)).toBe(`Contract · ${CONTRACTS[id as keyof typeof CONTRACTS].name} · 75 % + 20 lithium`);
+  });
+
+  it('rewardsText and the banner print the boss contract’s 50 % token share', () => {
+    expect(rewardsText(MISSIONS.c5_m3.rewards, true, true, 0.5)).toBe('+450 XP · +50 ◈ · +20 lithium');
+    // The default share is the 0.75 every other contract pays.
+    expect(rewardsText(MISSIONS.c1_m2.rewards, true, true)).toBe('+112 XP · +11 ◈ · +20 lithium');
+    expect(completionLines(MISSIONS.c5_m3, true, null, { contract: 'swarm' }).rewards).toBe(
+      '+450 XP · +50 tokens · +20 lithium · contract',
+    );
+    expect(completionLines(MISSIONS.c1_m2, true, null, { contract: 'swarm' }).rewards).toBe(
+      '+112 XP · +11 tokens · +20 lithium · contract',
+    );
+  });
+});
+
 describe('completionLines’ extras (SPEC-043 §4.6)', () => {
   const bonus = MISSIONS.c1_m3.bonus as MissionBonus;
 

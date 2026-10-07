@@ -25,7 +25,7 @@ import type { Save, SaveStore } from '@/core/Save';
 import type { BestTimes } from '@/core/Settings';
 import { CONTRACTS, MISSIONS, PLANET_IDS, PLANETS, type ContractId, type MissionDef, type MissionId, type PlanetId } from '@/data/index';
 import { clueFound, irregularClue } from '@/systems/Clues';
-import type { Economy } from '@/systems/Economy';
+import { contractTokenFraction, type Economy } from '@/systems/Economy';
 import { contractFor } from '@/systems/Missions';
 import type { EventSink } from '@/systems/Progression';
 import {
@@ -203,8 +203,9 @@ export class MissionBoard {
     row.append(head);
 
     // AC-31: rewards, always visible; halved and marked on a replay row, and
-    // a contract's own payout on a contract (SPEC-043 §4.3).
-    const rewards = rewardsText(def.rewards, status === 'replayable', contract !== null);
+    // a contract's own payout on a contract (SPEC-043 §4.3) — SPEC-066 §4.5:
+    // with a boss mission's half token share.
+    const rewards = rewardsText(def.rewards, status === 'replayable', contract !== null, contractTokenFraction(def));
     row.append(h('p', { class: 'board-rewards' }, rewards === '' ? '—' : rewards));
     // SPEC-043 §4.2: the bonus — what it asks and what it pays — on every row that has one.
     if (def.bonus !== undefined) {

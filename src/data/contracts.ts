@@ -70,5 +70,10 @@ export const CONTRACT_IDS = ['elite_surge', 'swarm', 'storm_front', 'no_cover'] 
 
 /** §4.3: a contract pays this share of the mission's XP and tokens, floored. */
 export const CONTRACT_REWARD_FRACTION = 0.75;
+/**
+ * SPEC-066 §4.5 (PLAN R27 decision 5): a contract on a boss mission — one with
+ * a `boss` objective in any stage — pays this share of its tokens instead.
+ */
+export const CONTRACT_BOSS_TOKEN_FRACTION = 0.5;
 /** §4.3: and this much lithium on top, as a reward — past the cargo cap. */
 export const CONTRACT_LITHIUM = 20;

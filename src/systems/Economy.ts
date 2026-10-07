@@ -38,6 +38,7 @@ import {
   CLASSES,
   COMPANIONS,
   COMPANION_IDS,
+  CONTRACT_BOSS_TOKEN_FRACTION,
   CONTRACT_LITHIUM,
   CONTRACT_REWARD_FRACTION,
   DIFFICULTY_RULES,
@@ -137,6 +138,18 @@ export const PREDECESSOR_CACHE: readonly { readonly itemId: ItemId; readonly qty
   { itemId: 'medkit', qty: 2 },
   { itemId: 'frag_grenade', qty: 2 },
 ];
+
+/**
+ * SPEC-066 §4.5: the share of a contract's tokens — `CONTRACT_BOSS_TOKEN_FRACTION`
+ * for a mission with a `boss` objective in any stage, else
+ * `CONTRACT_REWARD_FRACTION`. The XP share is 0.75 either way.
+ */
+export function contractTokenFraction(mission: MissionDef): number {
+  for (const stage of mission.stages) {
+    for (const objective of stage) if (objective.kind === 'boss') return CONTRACT_BOSS_TOKEN_FRACTION;
+  }
+  return CONTRACT_REWARD_FRACTION;
+}
 
 /** §4.6: the boss-mission voucher that pays for the next chapter's jump. */
 export function refuelVoucherText(oil: number): string {
@@ -912,14 +925,15 @@ export class Economy {
    *
    * SPEC-043 §4.3: a replay run as a contract pays 75 % of the XP and the
    * tokens, floored, and 20 lithium as a reward (past the cap) — and still
-   * none of the mission's items, resources or flags.
+   * none of the mission's items, resources or flags. SPEC-066 §4.5: a boss
+   * mission's contract pays 50 % of its tokens (`contractTokenFraction`).
    */
   applyRewards(mission: MissionDef, replay: boolean, contract = false): void {
     const rewards = mission.rewards;
     const reason = `mission:${mission.id}`;
     if (replay && contract) {
       this.#progression.addXp(Math.floor(rewards.xp * CONTRACT_REWARD_FRACTION), reason);
-      this.#progression.addTokens(Math.floor(rewards.tokens * CONTRACT_REWARD_FRACTION), reason);
+      this.#progression.addTokens(Math.floor(rewards.tokens * contractTokenFraction(mission)), reason);
       this.addResource('lithium', CONTRACT_LITHIUM, 'reward');
       this.#saves?.request('mission');
       return;

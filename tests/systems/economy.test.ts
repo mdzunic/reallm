@@ -12,6 +12,7 @@ import { newSave, type CharacterCreation, type Save } from '@/core/Save';
 import {
   CACHES,
   COMPANIONS,
+  CONTRACT_BOSS_TOKEN_FRACTION,
   CONTRACT_LITHIUM,
   ITEMS,
   MISSIONS,
@@ -23,6 +24,7 @@ import {
   type RecipeId,
 } from '@/data/index';
 import {
+  contractTokenFraction,
   Economy,
   INVENTORY_SLOTS,
   TECH_DISCOUNT_PER_POINT,
@@ -1587,5 +1589,38 @@ describe('claimBody (SPEC-058 §4.5)', () => {
       { itemId: 'frag_grenade', qty: 2 },
     ]);
     expect(events.toasts()).toEqual([noRoomText(ITEMS.medkit, 2), noRoomText(ITEMS.frag_grenade, 2)]);
+  });
+});
+
+// ------------------------------------------------------------- SPEC-066 §6.4
+
+describe('a boss contract pays half its tokens (SPEC-066 §4.5)', () => {
+  const BOSS_MISSIONS = ['c1_m3', 'c2_m3', 'c3_m3', 'c4_m3', 'c5_m3'];
+
+  it('contractTokenFraction is 0.5 for the five boss missions and 0.75 for every other', () => {
+    expect(CONTRACT_BOSS_TOKEN_FRACTION).toBe(0.5);
+    for (const mission of Object.values(MISSIONS) as MissionDef[]) {
+      expect(contractTokenFraction(mission), mission.id).toBe(BOSS_MISSIONS.includes(mission.id) ? 0.5 : 0.75);
+    }
+  });
+
+  it('applyRewards(c5_m3, true, true) pays 450 XP, 50 tokens and 20 lithium past the cap', () => {
+    const { economy, data, events } = world(MARINE, (save) => {
+      save.resources.lithium = 400;
+    });
+    economy.applyRewards(MISSIONS.c5_m3 as MissionDef, true, true);
+    expect(data.player.xp).toBe(450);
+    // The mission's own token grant, apart from any level-up's.
+    expect(events.of('tokens:changed').filter((t) => t.reason === 'mission:c5_m3').map((t) => t.delta)).toEqual([50]);
+    expect(data.resources.lithium).toBe(400 + CONTRACT_LITHIUM);
+    expect(data.progress.flags).toEqual([]);
+  });
+
+  it('a c1_m2 contract still pays 112 XP and 11 tokens', () => {
+    const { economy, data, progression } = world();
+    economy.applyRewards(MISSIONS.c1_m2 as MissionDef, true, true);
+    expect(data.player.xp).toBe(112);
+    expect(progression.tokens).toBe(11);
+    expect(data.resources.lithium).toBe(CONTRACT_LITHIUM);
   });
 });

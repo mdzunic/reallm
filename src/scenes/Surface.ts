@@ -100,7 +100,7 @@ import { ClueTracker, clueFound, FlagView, type ClueScene } from '@/systems/Clue
 import { Combat, computePlayerStats, ELITE_SCALE, staminaFull, type CombatWorld, type HitMemory } from '@/systems/Combat';
 import { containment, containmentSteps } from '@/systems/Containment';
 import { DASH_DISTANCE, dashCooldown, isDashing, pressDash, stepDash } from '@/systems/Dash';
-import { Economy } from '@/systems/Economy';
+import { contractTokenFraction, Economy } from '@/systems/Economy';
 import { seconds, stage as stageText } from '@/systems/Format';
 import { EXPLORE_RADIUS_BELOW, ExploreMask, REVEAL_CAPACITY } from '@/systems/Exploration';
 import {
@@ -5871,7 +5871,11 @@ export class SurfaceScene extends UiScene<'surface'> {
                   ? h('span', { class: 'badge badge-replay' }, 'Replay · 50 %')
                   : null,
             ),
-            h('p', { class: 'terminal-rewards' }, rewardsText(def.rewards, replay, contract !== null) || '—'),
+            h(
+              'p',
+              { class: 'terminal-rewards' },
+              rewardsText(def.rewards, replay, contract !== null, contractTokenFraction(def)) || '—',
+            ),
             testId(h('p', { class: 'terminal-brief' }, full ? def.brief : firstSentence(def.brief)), `terminal-brief-${def.id}`),
             testId(
               h('button', { class: 'ui-btn is-primary', type: 'button', click: () => this.#acceptAtTerminal(id) }, 'Accept'),
