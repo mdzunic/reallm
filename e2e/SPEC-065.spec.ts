@@ -123,7 +123,7 @@ async function tabTo(page: Page, id: string, most = 40): Promise<void> {
   expect(await focused(page), `Tab reached ${id}`).toBe(id);
 }
 
-/** The testids under `selector`'s prefix, in document order. */
+/** The testids that start with `prefix`, in document order. */
 async function testIds(page: Page, prefix: string): Promise<string[]> {
   return page.evaluate(
     (start) => [...document.querySelectorAll<HTMLElement>(`[data-testid^="${start}"]`)].map((node) => node.dataset['testid'] ?? ''),
@@ -133,10 +133,36 @@ async function testIds(page: Page, prefix: string): Promise<string[]> {
 
 const walletOil = (page: Page) => page.getByTestId('wallet-oil').locator('.wallet-value');
 
+/**
+ * Records every toast the page shows from now on, kept after the toast itself
+ * has expired — the subsidy's line is raised as the station enters, and a slow
+ * container's fade can outlast it.
+ */
+async function watchToasts(page: Page): Promise<void> {
+  await page.evaluate(() => {
+    const seen: string[] = [];
+    (window as unknown as { __seenToasts: string[] }).__seenToasts = seen;
+    const rack = document.querySelector('[data-testid="toasts"]');
+    if (rack === null) throw new Error('no toast rack');
+    new MutationObserver((records) => {
+      for (const record of records) {
+        for (const node of record.addedNodes) if (node instanceof HTMLElement) seen.push(node.textContent ?? '');
+      }
+    }).observe(rack, { childList: true, subtree: true });
+  });
+}
+
+/** Whether any toast since `watchToasts` said `text`. */
+async function toastSeen(page: Page, text: string): Promise<boolean> {
+  return page.evaluate((words) => ((window as unknown as { __seenToasts?: string[] }).__seenToasts ?? []).some((toast) => toast.includes(words)), text);
+}
+
 // ------------------------------------------------------------ §6.3 steps 1–3
 
 test('1–3. the pad terminal ships the oil above the reserve home, and the Depot tab draws it back', async ({ page }) => {
-  test.setTimeout(150_000);
+  // A landing, the terminal, a return and the station: on a starved container
+  // the two scene loads alone can take a minute.
+  test.setTimeout(240_000);
   await start(page, DEBUG_URL);
   // 65-a: water's reserve was set on a bigger hold than this one's 400.
   await prepare(page, { oil: 400, keep: { water: 1_000 } });
@@ -170,9 +196,10 @@ test('1–3. the pad terminal ships the oil above the reserve home, and the Depo
   await expect(cargo).not.toContainText('Delivery needs');
 
   // By keyboard: the terminal re-renders through keepFocus, so focus stays in it.
+  await watchToasts(page);
   await ship.focus();
   await page.keyboard.press('Enter');
-  await expect(page.getByTestId('toasts')).toContainText('Shipped 300 oil to Command Relay.');
+  await expect.poll(() => toastSeen(page, 'Shipped 300 oil to Command Relay.')).toBe(true);
   await expect(page.getByTestId('terminal-held-oil')).toHaveText('oil 100 / 400');
   await expect(ship).toHaveText('Nothing to ship');
   await expect(ship).toBeDisabled();
@@ -207,9 +234,10 @@ test('1–3. the pad terminal ships the oil above the reserve home, and the Depo
   expect((await tank(page, 'water')).keep).toBe(350);
 
   // Step 3: home through the terminal. 100 aboard and 300 at the depot need no subsidy.
+  await watchToasts(page);
   await page.getByTestId('terminal-return').click();
   await settle(page, 'station');
-  await expect(page.getByTestId('toasts')).not.toContainText('Docking subsidy');
+  expect(await toastSeen(page, 'Docking subsidy')).toBe(false);
   await expect(walletOil(page)).toHaveText('100');
   await page.getByTestId('station-tab-depot').click();
   await expect(page.getByTestId('station-tab-depot')).toHaveAttribute('aria-selected', 'true');
@@ -250,10 +278,11 @@ test('1–3. the pad terminal ships the oil above the reserve home, and the Depo
 test('4. a jump the depot can pay departs with no fuel refusal, and the station entry grants no subsidy (E119)', async ({ page }) => {
   await start(page, URL);
   await prepare(page, { oil: 0, depot: { oil: 40 } });
+  await watchToasts(page);
   await station(page);
   // Cinder-4 costs 40: the hold and the depot together cover it, so no line plays.
   await expect(page.getByTestId('station-root')).toBeVisible();
-  await expect(page.getByTestId('toasts')).not.toContainText('Docking subsidy');
+  expect(await toastSeen(page, 'Docking subsidy')).toBe(false);
   expect(await tank(page)).toMatchObject({ hold: 0, depot: 40 });
 
   await page.getByTestId('station-tab-starmap').click();
@@ -272,15 +301,16 @@ test('4. a jump the depot can pay departs with no fuel refusal, and the station 
 test('E119: with the depot short too, the station grants only what the hold and the depot together lack', async ({ page }) => {
   await start(page, URL);
   await prepare(page, { oil: 0, depot: { oil: 10 } });
+  await watchToasts(page);
   await station(page);
-  await expect(page.getByTestId('toasts')).toContainText('Docking subsidy logged — +30 oil');
+  await expect.poll(() => toastSeen(page, 'Docking subsidy logged — +30 oil')).toBe(true);
   expect(await tank(page)).toMatchObject({ hold: 30, depot: 10 });
 });
 
 // ------------------------------------------------------------------- E117
 
 test('E117: a deliver need above the reserve stays aboard, and the row says so', async ({ page }) => {
-  test.setTimeout(150_000);
+  test.setTimeout(180_000);
   await start(page, DEBUG_URL);
   // c1_m3's second stage: run 100 oil out to the beacon.
   await prepare(page, { oil: 400, done: ['c1_m1', 'c1_m2'], active: [{ id: 'c1_m3', stage: 1 }] });
@@ -298,8 +328,9 @@ test('E117: a deliver need above the reserve stays aboard, and the row says so',
   // Under the need, the need is the floor, and the row names it.
   await expect(row).toContainText('Delivery needs 100');
   await expect(ship).toHaveText('Ship 300 home');
+  await watchToasts(page);
   await ship.click();
-  await expect(page.getByTestId('toasts')).toContainText('Shipped 300 oil to Command Relay.');
+  await expect.poll(() => toastSeen(page, 'Shipped 300 oil to Command Relay.')).toBe(true);
   expect(await tank(page)).toEqual({ hold: 100, depot: 300, keep: 0 });
   await expect(ship).toHaveText('Nothing to ship');
   await expect(ship).toBeDisabled();
