@@ -20,7 +20,7 @@ const CREATION = {
 } as const;
 
 /** The e2e seed's pins (`e2e/` may not import `src/`; tests/systems/underground.test.ts derives them). */
-const LAYOUT_HASH = 2726625427;
+const LAYOUT_HASH = 1872424201;
 const CAVE_HASH = { cinder4: 2655388326, eden: 2449418380 } as const;
 const SEALED = 'Sealed — finish "Dry Land" first';
 /** The game runs at a fraction of the wall clock on a GPU-less container. */

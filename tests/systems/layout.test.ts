@@ -35,14 +35,17 @@ const layoutFor = (planet: PlanetId, seed: number): Layout =>
  * Pinned per planet for the current data (§6 `deterministic`; SPEC-030 D-16).
  * SPEC-053 §4.3 moved every pin once, deliberately: trunk radii, and the
  * groves, orchards and clusters placed before the scattered obstacles.
+ * SPEC-030 §4.2's wreck snap moved five again: a wreck whose nearer long side
+ * faced more than 60° off the pad now turns by the excess (the Hive's seed has
+ * no such wreck).
  */
 const PINNED: Record<PlanetId, number> = {
-  cinder4: 4002393954,
-  vetra: 659373692,
-  thessaly: 2252960167,
-  ferrum: 2206317975,
+  cinder4: 2433649644,
+  vetra: 2595620609,
+  thessaly: 317138955,
+  ferrum: 1447334759,
   hive: 587259144,
-  eden: 331058040,
+  eden: 246903147,
 };
 
 describe('generateLayout — determinism (AC-1)', () => {
@@ -431,6 +434,12 @@ describe('SPEC-030 — shelter placement (AC-4..AC-7)', () => {
           // AC-7: the gap faces the pad within ±60°.
           const padBearing = Math.atan2(layout.pad.z - s.z, layout.pad.x - s.x);
           expect(Math.abs(angleDiff(s.gapAngle, padBearing)), label).toBeLessThanOrEqual(Math.PI / 3 + 1e-9);
+          // §4.2: a wreck's gap sits on a long side's normal, where the hull
+          // draws its breach — never slid toward one end of it.
+          if (s.kind === 'wreck') {
+            const fromNormal = Math.abs(angleDiff(s.gapAngle, s.angle)) - Math.PI / 2;
+            expect(Math.abs(fromNormal), label).toBeLessThan(1e-9);
+          }
         }
         // AC-6: every pair on one planet is ≥ 40 m apart.
         for (let i = 0; i < layout.shelters.length; i++) {
