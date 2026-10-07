@@ -3438,7 +3438,10 @@ export class SurfaceScene extends UiScene<'surface'> {
 
     // AC-26 / 12-i: an active survive stage forces its storm, after the grace.
     // SPEC-054 §4.9 (E83): not below — a stage that starts there forces its
-    // storm on the ascent, with its waves and its clock.
+    // storm on the ascent, with its waves and its clock. E15: an engaged
+    // arena outranks it — not merely another mission's boss stage, which
+    // once let a survive stage run (and its `no_shelter` bonus pay) in calm
+    // weather (review 2026-10, B-09).
     const below = this.#level?.id === 'underground';
     const required = missions.requiredWeather();
     if (
@@ -3446,7 +3449,6 @@ export class SurfaceScene extends UiScene<'surface'> {
       !below &&
       this.elapsed >= FORCED_WEATHER_GRACE &&
       weather.current !== required.weather &&
-      missions.bossStage() === null &&
       this.#bossId === null
     ) {
       weather.force(required.weather, required.seconds);
