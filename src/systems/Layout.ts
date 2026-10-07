@@ -57,6 +57,12 @@ export interface LayoutObstacle {
   kind: ObstacleKind;
   /** SPEC-053 §4.3: the feature that placed it. Never hashed. */
   feature?: FeatureKind;
+  /**
+   * SPEC-068 §4.3: a hazard's body that burst no longer blocks anything. Only
+   * the combat grid's appended hazard bodies set it; `layout.obstacles` never
+   * does, and the hash never reads it.
+   */
+  gone?: boolean;
 }
 
 /** SPEC-053 §3: one placed feature. `radius` is a grove's or cluster's disc; an orchard also has its half-extents. */
@@ -120,7 +126,7 @@ const NODE_TRIES = 60;
 const OBSTACLE_POI_CLEARANCE = 6;
 const OBSTACLE_NODE_CLEARANCE = 4;
 const OBSTACLE_OBSTACLE_CLEARANCE = 3;
-const PAD_CLEARING = 15;
+export const PAD_CLEARING = 15;
 /** E17: the corridor half-width every pad→POI segment keeps clear. */
 export const CORRIDOR = 8;
 /** §4.2: repair removes at most this many obstacles before giving up loudly. */
@@ -321,6 +327,7 @@ export class ObstacleGrid implements ObstacleQueries {
         if (bucket === undefined) continue;
         for (let i = 0; i < bucket.length; i++) {
           const o = this.obstacles[bucket[i] as number] as LayoutObstacle;
+          if (o.gone === true) continue;
           const dx = o.x - x;
           const dz = o.z - z;
           const reach = o.radius + r;
@@ -341,6 +348,7 @@ export class ObstacleGrid implements ObstacleQueries {
     let best: LayoutObstacle | null = null;
     let bestD = Infinity;
     for (const o of this.obstacles) {
+      if (o.gone === true) continue;
       const d = distance(o.x, o.z, x, z) - o.radius;
       if (d < bestD) {
         best = o;
@@ -413,6 +421,7 @@ export class ObstacleGrid implements ObstacleQueries {
         for (let i = 0; i < bucket.length; i++) {
           const index = bucket[i] as number;
           const o = this.obstacles[index] as LayoutObstacle;
+          if (o.gone === true) continue;
           const dx = x - o.x;
           const dz = z - o.z;
           const reach = o.radius + radius;
@@ -435,6 +444,7 @@ export class ObstacleGrid implements ObstacleQueries {
     const dz = z1 - z0;
     const lenSq = dx * dx + dz * dz;
     for (const o of this.obstacles) {
+      if (o.gone === true) continue;
       const fx = x0 - o.x;
       const fz = z0 - o.z;
       const rSq = o.radius * o.radius;

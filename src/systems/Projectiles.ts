@@ -22,6 +22,12 @@ export interface ProjectileHooks {
   explode(p: ProjectileEntity, x: number, z: number): void;
   /** SPEC-056 §4.5: a thrown flare (`flareSeconds > 0`) lands at `(x, z)` instead of exploding. */
   landFlare(p: ProjectileEntity, x: number, z: number): void;
+  /**
+   * SPEC-068 §4.3: a shot that reached an obstacle stopped at `(x, z)` on its
+   * edge — never one a body consumed first, never at the wall line. A rocket
+   * calls it before its blast.
+   */
+  shotStopped?(p: ProjectileEntity, x: number, z: number): void;
 }
 
 /**
@@ -157,15 +163,19 @@ export function updateProjectiles(world: CombatWorld, hash: SpatialHash, dt: num
       tObstacle === null ? tWall : tWall === null ? tObstacle : Math.min(tObstacle, tWall);
     const tEnd = tCut ?? 1;
 
+    let consumed = false;
     if (p.owner === 'enemy') {
-      if (enemyShotStep(world, p, x0, z0, dx, dz, tEnd, hooks)) despawn = true;
+      if (enemyShotStep(world, p, x0, z0, dx, dz, tEnd, hooks)) consumed = true;
     } else if (playerShotStep(world, p, hash, x0, z0, dx, dz, tEnd, hooks)) {
-      despawn = true;
+      consumed = true;
     }
+    if (consumed) despawn = true;
 
     if (tCut !== null) {
       p.x = x0 + dx * tCut;
       p.z = z0 + dz * tCut;
+      // SPEC-068 §4.3: the shot reached the obstacle itself, not a body first.
+      if (!consumed && tCut === tObstacle) hooks.shotStopped?.(p, p.x, p.z);
       // SPEC-029 §4.6 / 29-a: a rocket detonates at the truncation point —
       // an obstacle and the wall line alike (SPEC-030 E45).
       if (p.blastRadius > 0) {

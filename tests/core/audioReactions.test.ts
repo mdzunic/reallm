@@ -186,6 +186,9 @@ const EVENT_KEYS = [
   'weapon:fired',
   'enemy:hit',
   'mine:armed',
+  // SPEC-068 §4.4: a hazard's warning and its landing, both reacted.
+  'hazard:warn',
+  'hazard:burst',
   'shop:purchased',
   'enemy:spawned',
   'enemy:killed',
@@ -549,8 +552,8 @@ describe('the ramp curve (SPEC-006 §4.3, §4.5)', () => {
 // ------------------------------------------------------------ reactions table
 
 describe('the reactions table is exhaustive over GameEvents (SPEC-006 §5)', () => {
-  it('covers the 33 reacted events of §5.2 (AC-38; SPEC-029 §4.12 adds four, SPEC-035 §4.11 two, SPEC-038 §4.10 two, SPEC-041 §4.10 two, SPEC-042 §4.2 one, SPEC-050 §4.8 one, SPEC-054 §4.13 two, SPEC-055 §4.9 two, SPEC-057 §4.8 one, SPEC-059 §4.4.4 one)', () => {
-    expect(REACTED_EVENTS).toHaveLength(33);
+  it('covers the 35 reacted events of §5.2 (AC-38; SPEC-029 §4.12 adds four, SPEC-035 §4.11 two, SPEC-038 §4.10 two, SPEC-041 §4.10 two, SPEC-042 §4.2 one, SPEC-050 §4.8 one, SPEC-054 §4.13 two, SPEC-055 §4.9 two, SPEC-057 §4.8 one, SPEC-059 §4.4.4 one, SPEC-068 §4.4 two)', () => {
+    expect(REACTED_EVENTS).toHaveLength(35);
     expect(REACTED_EVENTS.slice().sort()).toEqual(
       [
         'combat:blast',
@@ -586,6 +589,8 @@ describe('the reactions table is exhaustive over GameEvents (SPEC-006 §5)', () 
         'puzzle:solved',
         'remains:recovered',
         'commendation:earned',
+        'hazard:warn',
+        'hazard:burst',
       ].sort(),
     );
   });
@@ -611,8 +616,8 @@ describe('the reactions table is exhaustive over GameEvents (SPEC-006 §5)', () 
     expect(AUDIO_SILENT.has('flight:groupSpawned')).toBe(true);
   });
 
-  it('gives every one of the 84 event keys exactly one home (AC-40; SPEC-055 §4.9 adds two, SPEC-057 §4.8 three, SPEC-059 §4.4.4 one, SPEC-063 §4.5 one, review 2026-10 G-17 one)', () => {
-    expect(EVENT_KEYS).toHaveLength(84);
+  it('gives every one of the 86 event keys exactly one home (AC-40; SPEC-055 §4.9 adds two, SPEC-057 §4.8 three, SPEC-059 §4.4.4 one, SPEC-063 §4.5 one, review 2026-10 G-17 one, SPEC-068 §4.4 two)', () => {
+    expect(EVENT_KEYS).toHaveLength(86);
     const reacted = new Set<string>(REACTED_EVENTS);
     for (const key of EVENT_KEYS) {
       const hasSound = reacted.has(key);

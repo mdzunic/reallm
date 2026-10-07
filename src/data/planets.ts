@@ -19,6 +19,7 @@
 // (SPEC-001 §4, §8).
 import type { ModelId } from '@/data/assets';
 import type { EnemyId } from '@/data/enemies';
+import type { HazardPlacement } from '@/data/hazards';
 import type {
   BoundaryKind,
   DecalKind,
@@ -172,6 +173,11 @@ export interface PlanetDef {
      */
     readonly population: number;
     readonly eliteChance: number;
+    /**
+     * SPEC-068 §4.1 (*initial tuning*): the planet's trap and two helpers —
+     * groups placed from the layout seed in the open, and helpers in the arena.
+     */
+    readonly hazards: readonly HazardPlacement[];
   };
   readonly music: { readonly calm: MusicId; readonly combat: MusicId };
 }
@@ -233,6 +239,11 @@ export const PLANETS = {
       ],
       population: 10,
       eliteChance: 0.05,
+      hazards: [
+        { id: 'scav_mine', groups: 6, per: [2, 4], arena: 0 },
+        { id: 'balanced_rock', groups: 9, per: [1, 1], arena: 2 },
+        { id: 'fuel_drum', groups: 8, per: [2, 3], arena: 2 },
+      ],
     },
     music: { calm: 'calm_desert', combat: 'combat_light' },
   },
@@ -292,6 +303,11 @@ export const PLANETS = {
       // quietest field of the five, a trough right after the first boss.
       population: 13,
       eliteChance: 0.05,
+      hazards: [
+        { id: 'cryo_geyser', groups: 6, per: [2, 3], arena: 0 },
+        { id: 'ice_pillar', groups: 9, per: [1, 1], arena: 2 },
+        { id: 'coolant_tank', groups: 8, per: [1, 3], arena: 2 },
+      ],
     },
     music: { calm: 'calm_ice', combat: 'combat_light' },
   },
@@ -364,6 +380,11 @@ export const PLANETS = {
       ],
       population: 12,
       eliteChance: 0.06,
+      hazards: [
+        { id: 'spore_pod', groups: 6, per: [2, 4], arena: 0 },
+        { id: 'ruin_column', groups: 9, per: [1, 2], arena: 2 },
+        { id: 'gas_bloom', groups: 8, per: [2, 3], arena: 2 },
+      ],
     },
     music: { calm: 'calm_jungle', combat: 'combat_heavy' },
   },
@@ -424,6 +445,11 @@ export const PLANETS = {
       ],
       population: 13,
       eliteChance: 0.07,
+      hazards: [
+        { id: 'lava_vent', groups: 7, per: [2, 3], arena: 0 },
+        { id: 'basalt_column', groups: 9, per: [1, 1], arena: 2 },
+        { id: 'magma_blister', groups: 8, per: [2, 3], arena: 2 },
+      ],
     },
     music: { calm: 'calm_volcanic', combat: 'combat_heavy' },
   },
@@ -482,6 +508,11 @@ export const PLANETS = {
       ],
       population: 15,
       eliteChance: 0.08,
+      hazards: [
+        { id: 'bile_geyser', groups: 6, per: [2, 3], arena: 0 },
+        { id: 'chitin_spire', groups: 8, per: [1, 1], arena: 2 },
+        { id: 'spore_sac', groups: 8, per: [2, 3], arena: 2 },
+      ],
     },
     music: { calm: 'calm_hive', combat: 'combat_swarm' },
   },
@@ -551,6 +582,11 @@ export const PLANETS = {
       spawn: [],
       population: 0,
       eliteChance: 0.1,
+      hazards: [
+        { id: 'water_main', groups: 5, per: [1, 2], arena: 0 },
+        { id: 'dead_oak', groups: 7, per: [1, 1], arena: 2 },
+        { id: 'fertiliser_tank', groups: 7, per: [1, 2], arena: 2 },
+      ],
     },
     music: { calm: 'calm_temperate', combat: 'combat_swarm' },
   },

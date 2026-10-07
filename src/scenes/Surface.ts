@@ -46,6 +46,7 @@ import {
   DIFFICULTY_RULES,
   ENEMIES,
   FOLLOWERS,
+  HAZARDS,
   HINTS,
   HINT_PLACEHOLDERS,
   ITEMS,
@@ -122,6 +123,7 @@ import {
   type GuideTarget,
   type PathGrid,
 } from '@/systems/Guidance';
+import { Hazards, placeHazards, type HazardCounts } from '@/systems/Hazards';
 import { nearestInteractable, type Interactable } from '@/systems/Interactables';
 import { fillQuickFromPickup, quickEligible, refillQuick, type SlotView } from '@/systems/Loadout';
 import {
@@ -251,6 +253,7 @@ import {
   type ShakeState,
 } from '@/views/SurfaceView';
 import { UndergroundView } from '@/views/UndergroundView';
+import { HazardView } from '@/views/HazardView';
 import { AriaHint } from '@/ui/AriaHint';
 import { confirmSheet } from '@/ui/ConfirmSheet';
 import { DamageNumbers } from '@/ui/DamageNumbers';
@@ -506,6 +509,15 @@ const TIP_QUEUE_MAX = 3;
 /** §4.5 triggers: surface seconds before the map tip, and the node range. */
 const MAP_TIP_SECONDS = 20;
 const HARVEST_TIP_RANGE = 6;
+/** SPEC-068 §4.9: the helpers tip at the first standing helper this close, the traps tip at the first warning. */
+const HELPER_TIP_RANGE = 14;
+const TRAP_TIP_RANGE = 12;
+/** SPEC-068 §4.7: a hazard's landing shakes the camera within this range, a toppler's harder. */
+const HAZARD_SHAKE_RANGE = 25;
+const HAZARD_SHAKE_AMPLITUDE = 0.25;
+const TOPPLE_SHAKE_AMPLITUDE = 0.45;
+/** SPEC-068 §4.6: the debug strip stands the player this far from the nearest hazard of a kind. */
+const HAZARD_DEBUG_STAND = 7;
 /** §4.7: at most one path search per 2 s, and what makes one worth running. */
 const ROUTE_INTERVAL = 2;
 const ROUTE_OFF_PATH_METRES = 8;
@@ -817,6 +829,10 @@ export class SurfaceScene extends UiScene<'surface'> {
   #caveKit: Promise<void> | null = null;
   /** SPEC-055: the visit's puzzles — the relic above, the vault terminal and the world puzzle below. */
   #puzzles: PuzzleSites | null = null;
+  /** SPEC-068 §4.4: the visit's traps and helpers, and their view. */
+  #hazards: Hazards | null = null;
+  #hazardView: HazardView | null = null;
+  readonly #hazardCounts: HazardCounts = { traps: 0, helpers: 0, spent: 0, live: 0, bursts: 0 };
   /** SPEC-041 §4.4: the arena's radius — the ring, the seal and the entrance. */
   #arenaRadius = 0;
   #arena: ArenaState | null = null;
@@ -1318,7 +1334,14 @@ export class SurfaceScene extends UiScene<'surface'> {
 
     // SPEC-046 §4.8: the combat world's grid holds the parked tug's hull too —
     // the layout, its hash, the map and the route grid never see it (46-l).
-    const grid = new ObstacleGrid({ obstacles: [...layout.obstacles, tugObstacle(layout)], halfSize: layout.halfSize });
+    // SPEC-068 §4.1, §4.3: the traps and helpers from the layout seed — the
+    // helpers' bodies join the combat grid as the tug's does, never the layout.
+    const hazards = new Hazards(placeHazards(layout, planet), services.events as EventBus<GameEvents>, visit.fork('hazards'));
+    this.#hazards = hazards;
+    const grid = new ObstacleGrid({
+      obstacles: [...layout.obstacles, tugObstacle(layout), ...hazards.bodies],
+      halfSize: layout.halfSize,
+    });
 
     // §4.1 step 3: landing always restores HP (SPEC-011 §4.8).
     const stats = computePlayerStats(save);
@@ -1337,6 +1360,7 @@ export class SurfaceScene extends UiScene<'surface'> {
     };
     world.player.facing = layout.playerSpawn.facing;
     this.#world = world;
+    hazards.bind(world);
 
     const bus = services.events as EventBus<GameEvents>;
     // SPEC-047 §4.5: this run's counts, ahead of every other subscriber, so a
@@ -1373,6 +1397,11 @@ export class SurfaceScene extends UiScene<'surface'> {
     combat.weaponAutoSwap = services.settings.get().weaponAutoSwap;
     this.#combat = combat;
     this.disposer.add(() => combat.dispose());
+    // SPEC-068 §4.4: combat steps the hazards on the surface level.
+    combat.hazards = hazards;
+    this.disposer.add(() => {
+      this.#hazards = null;
+    });
 
     // SPEC-048 §4.3: the clue tracker subscribes before the missions do, so the
     // kill that completes a kill clue's mission still counts as made during it.
@@ -1521,6 +1550,13 @@ export class SurfaceScene extends UiScene<'surface'> {
     this.disposer.add(() => view.dispose());
     // SPEC-054 §4.2: a shaft mouth marks the descent, glowing in the colour of the cave below.
     view.setDescent(this.#descent, this.#caveDef.look.beacons.color);
+    // SPEC-068 §4.7: the hazards hang under the view's root, on the surface's ground.
+    const hazardView = new HazardView(view.levelRoot, hazards.list, planet.id, (x, z) => view.heightAt(x, z));
+    this.#hazardView = hazardView;
+    this.disposer.add(() => {
+      hazardView.dispose();
+      this.#hazardView = null;
+    });
     // SPEC-057 §4.6: the look is chosen here, at entry — a reveal mid-visit
     // changes it from the next landing on (57-g).
     this.#remainsLook = remainsLook(save);
@@ -2335,6 +2371,9 @@ export class SurfaceScene extends UiScene<'surface'> {
         // SPEC-064 §4.3: the raiders' glint grows over the windup as the difficulty sets it.
         windupMult: world.windupMult ?? 1,
       });
+      // SPEC-068 §4.7: the traps and helpers near the player, on the world clock.
+      const hazards = this.#hazards;
+      if (hazards !== null) this.#hazardView?.sync(hazards.warnings, world.time, world.player.x, world.player.z, this.#frustum, view.reduceMotion);
       // SPEC-041 §4.4: the ring shows while the arena is armed — and so while sealed.
       view.setArena(world.arena ?? (this.#arena?.sealed === true ? this.#arena : null));
       // SPEC-030 D-22: the wall chunks against this frame's frustum.
@@ -2628,6 +2667,9 @@ export class SurfaceScene extends UiScene<'surface'> {
     // SPEC-059 §3: 1 on a landing the menu resumed, else 0.
     info['resumed'] = this.#resumed ? 1 : 0;
     info['summonsDismissed'] = this.#summonsDismissed;
+    // SPEC-068 §4.6: traps/helpers/spent/live/bursts — `12/18/0/0/0`.
+    const counts = this.#hazards?.counts(this.#hazardCounts);
+    info['hazards'] = counts === undefined ? 'none' : `${counts.traps}/${counts.helpers}/${counts.spent}/${counts.live}/${counts.bursts}`;
     info['viewTime'] = Math.round(this.#viewTime * 100) / 100;
     // SPEC-015 AC-39: how far the shake and the walk bob actually moved the
     // camera on the last frame, for the same reason SPEC-020 20-g publishes
@@ -4906,6 +4948,9 @@ export class SurfaceScene extends UiScene<'surface'> {
 
     const level = to === 'underground' ? this.#ensureCave(levels, save) : levels.surface;
     this.#level = level;
+    // SPEC-068 E130: hazards live on the surface level only.
+    combat.hazards = to === 'surface' ? this.#hazards : null;
+    if (this.#hazardView !== null) this.#hazardView.root.visible = to === 'surface';
     world.obstacles = level.grid;
     world.bounds = level.bounds;
     spawn.setObstacles(level.grid);
@@ -5358,6 +5403,16 @@ export class SurfaceScene extends UiScene<'surface'> {
         this.#pickups?.spawn({ kind: 'item', itemId: 'coolant_pack', qty: 1, x: world.player.x, z: world.player.z });
       });
     }
+    // SPEC-068 §4.6: the nearest standing toppler, volatile or trap, a pack
+    // past the nearest helper or on the nearest trap, and a shot into the
+    // helper from where the player stands. Last on the strip, so every
+    // earlier control keeps its place on screen for the suites that click it.
+    button('surface-goto-topple', 'To toppler', () => this.#debugGotoHazard('topple'));
+    button('surface-goto-volatile', 'To volatile', () => this.#debugGotoHazard('volatile'));
+    button('surface-goto-trap', 'To trap', () => this.#debugGotoHazard('trap'));
+    button('surface-hazard-pack', 'Pack past helper', () => this.#debugHazardPack());
+    button('surface-trap-pack', 'Pack on trap', () => this.#debugTrapPack());
+    button('surface-hazard-fire', 'Shoot helper', () => this.#debugHazardFire());
     this.services.uiRoot.append(strip);
     this.disposer.add(() => strip.remove());
   }
@@ -5518,6 +5573,123 @@ export class SurfaceScene extends UiScene<'surface'> {
   }
 
   /** SPEC-029 §4.13: 5 skitters in a 1.5 m ring at the aim point or 7 m ahead. */
+  // ------------------------------------------------------- SPEC-068 hazards
+
+  /**
+   * §4.7: a hazard's landing — the burst in its glow colour and a scorch for
+   * a mine or a volatile, a ring of dust for a vent (its plume is the view's),
+   * dust down a toppler's lane — and a shake when it lands close.
+   */
+  #hazardBurst(burst: GameEvents['hazard:burst']): void {
+    const view = this.#view;
+    if (view === null) return;
+    const { hazard, archetype, x, z, dirX, dirZ, reach } = burst;
+    const look = HAZARDS[hazard].look;
+    const glow = Number.parseInt(look.glow.slice(1), 16);
+    if (archetype === 'topple') {
+      const dust = Number.parseInt(look.body.slice(1), 16);
+      for (let k = 0; k < 4; k++) {
+        const f = ((k + 0.5) / 4) * reach;
+        view.fx.burst('dust_ring', x + dirX * f, z + dirZ * f, dust, 0.9);
+      }
+      view.fx.burst('death', x + dirX * reach * 0.7, z + dirZ * reach * 0.7, dust, 1.2);
+    } else if (archetype === 'vent') {
+      view.fx.burst('dust_ring', x, z, glow, reach / BLAST_BURST_BASE_RADIUS);
+    } else {
+      view.fx.burst('blast', x, z, glow, reach / BLAST_BURST_BASE_RADIUS);
+      view.fx.scorch(x, z, reach / BLAST_SCORCH_BASE);
+    }
+    const p = this.#world?.player;
+    if (p !== undefined && Math.hypot(p.x - x, p.z - z) <= HAZARD_SHAKE_RANGE) {
+      this.#triggerShake(archetype === 'topple' ? TOPPLE_SHAKE_AMPLITUDE : HAZARD_SHAKE_AMPLITUDE, BLAST_SHAKE_SECONDS);
+    }
+  }
+
+  /** §4.6: stand `HAZARD_DEBUG_STAND` m short of the nearest standing hazard of a kind, facing it. */
+  #debugGotoHazard(kind: 'topple' | 'volatile' | 'trap'): void {
+    const world = this.#world;
+    const hazards = this.#hazards;
+    if (world === null || hazards === null || !world.player.alive || this.#level?.id !== 'surface') return;
+    const p = world.player;
+    const h =
+      kind === 'trap'
+        ? (hazards.nearest(p.x, p.z, 'vent') ?? hazards.nearest(p.x, p.z, 'mine'))
+        : hazards.nearest(p.x, p.z, kind);
+    if (h === null) return;
+    // From the pad's side, so the hazard stands between the player and open ground.
+    const pad = this.#level.pad;
+    let dx = h.x - (pad?.x ?? 0);
+    let dz = h.z - (pad?.z ?? 0);
+    const len = Math.hypot(dx, dz) || 1;
+    dx /= len;
+    dz /= len;
+    for (let k = 0; k < 16; k++) {
+      const turn = (k % 2 === 0 ? 1 : -1) * Math.ceil(k / 2) * (Math.PI / 8);
+      const ax = Math.cos(turn) * dx - Math.sin(turn) * dz;
+      const az = Math.sin(turn) * dx + Math.cos(turn) * dz;
+      const x = h.x - ax * HAZARD_DEBUG_STAND;
+      const z = h.z - az * HAZARD_DEBUG_STAND;
+      if (world.obstacles.hitsCircle(x, z, p.radius)) continue;
+      p.x = x;
+      p.z = z;
+      p.facing = Math.atan2(az, ax);
+      return;
+    }
+  }
+
+  /** §4.6: five of the planet's swarm species 3 m past the nearest standing helper, seen from the player. */
+  #debugHazardPack(): void {
+    const world = this.#world;
+    const combat = this.#combat;
+    const hazards = this.#hazards;
+    if (world === null || combat === null || hazards === null) return;
+    const p = world.player;
+    const h = hazards.nearest(p.x, p.z);
+    if (h === null) return;
+    const row = this.#planet.surface.spawn.find((entry) => ENEMIES[entry.enemy].archetype === 'swarm');
+    const id: EnemyId = row === undefined ? 'hive_drone' : row.enemy;
+    const len = Math.hypot(h.x - p.x, h.z - p.z) || 1;
+    const ux = (h.x - p.x) / len;
+    const uz = (h.z - p.z) / len;
+    const cx = h.x + ux * (h.def.radius + 3);
+    const cz = h.z + uz * (h.def.radius + 3);
+    for (let k = 0; k < 5; k++) {
+      const angle = (k / 5) * Math.PI * 2;
+      combat.spawnEnemy(id, cx + Math.cos(angle) * 1.2, cz + Math.sin(angle) * 1.2, false);
+    }
+  }
+
+  /** §4.6: five of the planet's swarm species on the nearest trap — a mine trips on them. */
+  #debugTrapPack(): void {
+    const world = this.#world;
+    const combat = this.#combat;
+    const hazards = this.#hazards;
+    if (world === null || combat === null || hazards === null) return;
+    const p = world.player;
+    const h = hazards.nearest(p.x, p.z, 'mine') ?? hazards.nearest(p.x, p.z, 'vent');
+    if (h === null) return;
+    const row = this.#planet.surface.spawn.find((entry) => ENEMIES[entry.enemy].archetype === 'swarm');
+    const id: EnemyId = row === undefined ? 'hive_drone' : row.enemy;
+    for (let k = 0; k < 5; k++) {
+      const angle = (k / 5) * Math.PI * 2;
+      combat.spawnEnemy(id, h.x + Math.cos(angle) * 0.8, h.z + Math.sin(angle) * 0.8, false);
+    }
+  }
+
+  /** §4.6: a shot from the player into the nearest standing helper — the path a real shot takes. */
+  #debugHazardFire(): void {
+    const world = this.#world;
+    const hazards = this.#hazards;
+    if (world === null || hazards === null) return;
+    const p = world.player;
+    const h = hazards.nearest(p.x, p.z);
+    if (h === null) return;
+    const len = Math.hypot(h.x - p.x, h.z - p.z) || 1;
+    const ux = (h.x - p.x) / len;
+    const uz = (h.z - p.z) / len;
+    hazards.shotAt(h.x - ux * h.def.radius, h.z - uz * h.def.radius, ux, uz);
+  }
+
   #debugSpawnPack(): void {
     const world = this.#world;
     const combat = this.#combat;
@@ -6921,6 +7093,10 @@ export class SurfaceScene extends UiScene<'surface'> {
     if (missions.active.length >= 2) this.#requestTip('track');
     if (this.#atPad(world) && !this.#terminalOpen) this.#requestTip('pad');
     if (missions.bossStage() !== null) this.#requestTip('boss');
+    // SPEC-068 §4.9: the first standing helper within 14 m.
+    if (this.#level?.id === 'surface' && this.#hazards?.helperWithin(world.player.x, world.player.z, HELPER_TIP_RANGE) === true) {
+      this.#requestTip('helpers');
+    }
     const nodes = this.#level?.nodes ?? null;
     if (nodes === null) return;
     for (const node of nodes.states) {
@@ -7676,6 +7852,19 @@ export class SurfaceScene extends UiScene<'surface'> {
           view.fx.burst('blast', x, z, BLAST_COLOR, radius / BLAST_BURST_BASE_RADIUS);
           view.fx.scorch(x, z, radius / BLAST_SCORCH_BASE);
           this.#triggerShake(BLAST_SHAKE_AMPLITUDE, BLAST_SHAKE_SECONDS);
+        },
+        this,
+      ),
+      // SPEC-068 §4.7: a hazard's landing — a burst and a scorch, dust down a
+      // toppler's lane, a shake when it is close. A vent's plume is the view's.
+      bus.on('hazard:burst', (burst) => this.#hazardBurst(burst), this),
+      // SPEC-068 §4.9: the first trap warning near the player teaches the circle.
+      bus.on(
+        'hazard:warn',
+        ({ archetype, x, z }) => {
+          if (archetype !== 'vent' && archetype !== 'mine') return;
+          const p = this.#world?.player;
+          if (p !== undefined && Math.hypot(p.x - x, p.z - z) <= TRAP_TIP_RANGE) this.#requestTip('traps');
         },
         this,
       ),

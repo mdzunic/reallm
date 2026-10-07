@@ -1892,6 +1892,8 @@ describe('deathCause and deathTip (SPEC-042 §4.5)', () => {
     expect(deathCause({ kind: 'fall' })).toBe('Killed by a fall');
     expect(deathCause({ kind: 'asteroid' })).toBe('Killed by an asteroid');
     expect(deathCause({ kind: 'storm' })).toBe('Killed by the ion storm');
+    // SPEC-068 §4.9: a trap or a helper, by the name its table gives it.
+    expect(deathCause({ kind: 'hazard', hazard: 'fuel_drum' })).toBe('Killed by a fuel drum');
   });
 
   it('picks the first row that applies, in the scheme’s wording', () => {
@@ -1910,6 +1912,12 @@ describe('deathCause and deathTip (SPEC-042 §4.5)', () => {
     expect(deathTip(enemy, { ...touch, healsCarried: 0 })).toBe('Craft medkits at the station: wheat and water.');
     // A gamepad reads the keyboard's words; `touch` auto-fire is not `off`.
     expect(deathTip(enemy, { ...keyboard, scheme: 'gamepad', autoFire: 'touch' })).toBe('Heal with Q before the bar turns red.');
+    // SPEC-068 §4.9: a hazard's death teaches the warning and the dash, whatever is carried.
+    const hazard = { kind: 'hazard', hazard: 'lava_vent' } as const;
+    expect(deathTip(hazard, { ...keyboard, healsCarried: 0 })).toBe(
+      'Traps warn before they go off: step out of the circle, or dash through it with V or a right-click.',
+    );
+    expect(deathTip(hazard, touch)).toBe('Traps warn before they go off: step out of the circle, or dash through it.');
   });
 
   it('has no tip for a fall, an asteroid or the ion storm', () => {

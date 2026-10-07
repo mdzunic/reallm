@@ -1388,7 +1388,8 @@ function guidanceTemplates(): Array<[string, string]> {
 describe('the death tips (SPEC-042 §4.5)', () => {
   it('every DEATH_TIPS entry has both wordings, each at most 160 characters', () => {
     const ids = Object.keys(DEATH_TIPS).sort();
-    expect(ids).toEqual(['autofire', 'craft', 'heal', 'shelter']);
+    // SPEC-068 §4.9 adds `hazard`: a trap or a helper killed the player.
+    expect(ids).toEqual(['autofire', 'craft', 'hazard', 'heal', 'shelter']);
     for (const [id, tip] of Object.entries(DEATH_TIPS)) {
       expect(tip.keyboard.length, `${id}.keyboard`).toBeGreaterThan(0);
       expect(tip.touch.length, `${id}.touch`).toBeGreaterThan(0);
@@ -1398,6 +1399,7 @@ describe('the death tips (SPEC-042 §4.5)', () => {
     // §4.5's table: the two rows that name a key or a slot differ by scheme.
     expect(DEATH_TIPS.heal.touch).not.toBe(DEATH_TIPS.heal.keyboard);
     expect(DEATH_TIPS.autofire.touch).not.toBe(DEATH_TIPS.autofire.keyboard);
+    expect(DEATH_TIPS.hazard.touch).not.toBe(DEATH_TIPS.hazard.keyboard);
   });
 });
 

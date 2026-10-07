@@ -77,6 +77,14 @@ export const SHOT_SOUNDS: Readonly<Record<GameEvents['weapon:fired']['line'], So
   ship: 'ship_laser',
 };
 
+/** SPEC-068 §4.4 — a hazard's warning, by archetype, from the surface bank's windup cues. */
+export const HAZARD_WARN_SOUNDS: Readonly<Record<GameEvents['hazard:warn']['archetype'], SoundId>> = {
+  vent: 'windup_shot',
+  mine: 'windup_melee',
+  volatile: 'windup_charge',
+  topple: 'windup_charge',
+};
+
 /**
  * SPEC-035 §4.11 — how close together two shots of one line may sound. A
  * launcher fires slowly enough to need no floor at all; the machine gun needs
@@ -159,7 +167,8 @@ export function pickupSound(resource: ResourceId): SoundId {
  * landing and a flight hit, SPEC-042 §4.2 an item picked up, SPEC-050 §4.8 an
  * exhaustion, SPEC-054 §4.13 the flashlight's click and a cache opening,
  * SPEC-055 §4.9 a puzzle move and a puzzle solved, SPEC-057 §4.8 a recovery,
- * SPEC-059 §4.4.4 a commendation — 33 in all) that make a sound.
+ * SPEC-059 §4.4.4 a commendation, SPEC-068 §4.4 a hazard's warning and its
+ * landing — 35 in all) that make a sound.
  */
 export type ReactedEvent =
   | 'combat:blast'
@@ -203,7 +212,10 @@ export type ReactedEvent =
   // SPEC-057 §4.8: remains taken back.
   | 'remains:recovered'
   // SPEC-059 §4.4.4: a commendation granted.
-  | 'commendation:earned';
+  | 'commendation:earned'
+  // SPEC-068 §4.4: a hazard's warning, and its landing.
+  | 'hazard:warn'
+  | 'hazard:burst';
 
 /**
  * The 38 events of §5.4 that deliberately make none (and those later specs
@@ -334,6 +346,17 @@ export const AUDIO_REACTIONS: { [K in ReactedEvent]: Reaction<K> } = {
   'weapon:locked': () => ({ id: 'ui_warn' }),
   'weapon:switched': () => ({ id: 'ui_blip' }),
   'mine:armed': (p) => ({ id: 'scan_done', opts: { x: p.x, z: p.z, priority: 0 } }),
+  /**
+   * SPEC-068 §4.4: the warning reuses the windup cues — a vent hisses like a
+   * shot's charge, a mine clicks like a blow, a fuse or a tipping pillar winds
+   * up like a charge. Positioned, at most one a tenth of a second.
+   */
+  'hazard:warn': (p) => ({ id: HAZARD_WARN_SOUNDS[p.archetype], opts: { x: p.x, z: p.z, minIntervalMs: 100 } }),
+  /** SPEC-068 §4.4: a toppler lands like a boss's slam; everything else bursts, a vent at 0.6. */
+  'hazard:burst': (p) =>
+    p.archetype === 'topple'
+      ? { id: 'boss_slam', opts: { x: p.x, z: p.z, priority: 1 } }
+      : { id: 'explosion', opts: { x: p.x, z: p.z, priority: 1, minIntervalMs: 60, volume: p.archetype === 'vent' ? 0.6 : 1 } },
   /** `warn` and `error` are the two kinds a player has to notice (AC-46). */
   'ui:toast': (p) => ({ id: p.kind === 'warn' || p.kind === 'error' ? 'ui_warn' : 'ui_blip' }),
   /**
