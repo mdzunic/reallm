@@ -3958,8 +3958,8 @@ export class SurfaceScene extends UiScene<'surface'> {
    * the hold is released and free roam carries on. Escape ends the session:
    * the veil strips the HUD, the save is written immediately, and the menu
    * transition disposes this scene. Each await comes back to a scene that may
-   * have been disposed under it (a quit, a recall), which is what `#alive`
-   * answers.
+   * have been disposed under it (a quit, a recall), or be on its way out,
+   * which is what `gone()` answers.
    */
   async #runEnding(ending: Ending): Promise<void> {
     const services = this.services;
@@ -3969,12 +3969,20 @@ export class SurfaceScene extends UiScene<'surface'> {
       this.#endEnding();
       return;
     }
+    // A quit during a step resolves it on `scene:transition` — the line
+    // clears, the film skips — while this scene is still alive under the
+    // fade-out, so `#alive` alone let the next step start over the menu: the
+    // ending film after a Save & Quit on the decision line. Every await comes
+    // back to `gone()` (review 2026-10, B-06).
+    let leaving = false;
+    this.disposer.add(services.events.on('scene:transition', () => void (leaving = true), this));
+    const gone = (): boolean => !this.#alive || leaving;
     await dialogue.play(`ending_${ending}`, { modal: true });
-    if (!this.#alive) return;
+    if (gone()) return;
     // §4.11 of SPEC-022: with films off this resolves at once, so the endings
     // stay testable without the 36 s film (24-b).
     await director(services).playFilm(`ending_${ending}`, { musicAfter: ending === 'stay' ? 'surface_calm' : null });
-    if (!this.#alive) return;
+    if (gone()) return;
     const overlay = new EndingOverlay(services.uiRoot);
     // The overlay lives on the shared `#ui` root and takes itself down when it
     // resolves; a quit from the pause menu while the card is up has to take it
@@ -3982,7 +3990,7 @@ export class SurfaceScene extends UiScene<'surface'> {
     this.disposer.add(() => clearEndingOverlays(services.uiRoot));
     if (ending === 'stay') {
       await overlay.playStay(stayReport(save));
-      if (!this.#alive) return;
+      if (gone()) return;
       // SPEC-058 §4.7: the Selection card stamps the next number with the
       // player's own name, and only after it is the ending seen — a reload
       // during it replays the film, the report and the card at the station.
@@ -3995,7 +4003,7 @@ export class SurfaceScene extends UiScene<'surface'> {
         },
         prepareSaveCard(save, services.settings.get().commendations),
       );
-      if (!this.#alive) return;
+      if (gone()) return;
       save.progress.endingSeen = true;
       services.save.request('mission');
       this.#endEnding();
@@ -4003,7 +4011,7 @@ export class SurfaceScene extends UiScene<'surface'> {
     }
     // SPEC-058 §4.7: the veil names this run's own instance.
     await overlay.playEscape(save.meta.iteration);
-    if (!this.#alive) return;
+    if (gone()) return;
     save.progress.endingSeen = true;
     // SPEC-059 §4.1.1: the escape leaves no planet to resume on.
     save.progress.resume = null;
