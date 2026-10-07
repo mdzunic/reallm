@@ -142,7 +142,8 @@ export const MISSIONS = {
     stages: [
       [{ kind: 'reach', poi: 'landing_pad' }],
       [{ kind: 'scan', poi: 'dune_sea', count: 1 }],
-      [{ kind: 'survive', seconds: 60, weather: 'sandstorm' }],
+      // SPEC-066 §4.6: the first storm is half a minute (was 60 s), still with no wave.
+      [{ kind: 'survive', seconds: 30, weather: 'sandstorm' }],
     ],
     rewards: { xp: 100, tokens: 10, resources: { oil: 20 } },
     dialogue: { onAccept: 'c1_m1_accept', onStage: { 1: 'c1_m1_stage2' }, onComplete: 'c1_m1_done' },

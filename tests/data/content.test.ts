@@ -1550,6 +1550,15 @@ describe('the three SPEC-035 tips (SPEC-035 §4.8)', () => {
   });
 });
 
+// SPEC-066 §4.6, §4.9: the first ten minutes — a 30 s first storm, and a
+// first trip with an asteroid lane whose big rocks drop oil.
+describe('the first ten minutes (SPEC-066 §4.6, §4.9)', () => {
+  it('Dry Land’s storm stage is 30 s of sandstorm with no wave, and its hint says thirty', () => {
+    expect(MISSIONS.c1_m1.stages[2]).toEqual([{ kind: 'survive', seconds: 30, weather: 'sandstorm' }]);
+    expect(MISSION_HINTS.c1_m1?.[2]).toBe('Thirty seconds of sand. Stay alive — heal when it bites.');
+  });
+});
+
 describe('the dash in words (SPEC-038 §4.9)', () => {
   it('adds the dash tip with both wordings', () => {
     expect(TIP_IDS).toContain('dash');

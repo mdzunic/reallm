@@ -322,7 +322,7 @@ export const MISSION_HINTS: Readonly<Partial<Record<MissionId, Readonly<Record<n
   c1_m1: {
     0: 'The pad is {dist} {dir}. Walk to it.',
     1: '{label} is {dist} {dir}. Stand in its ring until the scan completes.',
-    2: 'Sixty seconds of sand. Stay alive — heal when it bites.',
+    2: 'Thirty seconds of sand. Stay alive — heal when it bites.',
   },
   c1_m2: {
     0: 'Stand beside the oil derricks until your hold fills. Raiders keep their distance — close in.',
