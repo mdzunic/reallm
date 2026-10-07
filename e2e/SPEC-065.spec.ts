@@ -310,27 +310,85 @@ test('the Depot tab by keyboard: ArrowDown from Character, Enter, and a draw by 
   expect(await tank(page, 'water')).toEqual({ hold: 70, depot: 0, keep: 100 });
 });
 
+/** Where each of the station's four sections sits, and whether a press at its centre reaches it. */
+async function sectionTabs(page: Page): Promise<Array<{ id: string; top: number; left: number; right: number; bottom: number; topmost: boolean }>> {
+  return page.evaluate(() =>
+    ['missions', 'shop', 'character', 'depot'].map((section) => {
+      const id = `station-tab-${section}`;
+      const node = document.querySelector<HTMLElement>(`[data-testid="${id}"]`);
+      const box = node?.getBoundingClientRect();
+      const hit = box === undefined ? null : document.elementFromPoint(box.x + box.width / 2, box.y + box.height / 2);
+      return {
+        id,
+        top: box?.top ?? -1,
+        left: box?.left ?? -1,
+        right: box?.right ?? Number.POSITIVE_INFINITY,
+        bottom: box?.bottom ?? Number.POSITIVE_INFINITY,
+        topmost: node !== null && node !== undefined && hit !== null && (hit === node || node.contains(hit)),
+      };
+    }),
+  );
+}
+
+/** Through the gate by touch, so the input scheme is touch from the start. */
+async function startTouch(page: Page): Promise<void> {
+  await page.goto(gameUrl(URL));
+  await awaitGate(page);
+  await page.getByTestId('boot-start').tap();
+  await expect(page.getByTestId('boot-overlay')).toBeHidden();
+  await expect(page.getByTestId('scene-label')).toBeVisible(COLD_START);
+}
+
+/** A tap on the Depot tab, and a tap on a draw. */
+async function drawByTap(page: Page): Promise<void> {
+  await page.getByTestId('station-tab-depot').tap();
+  await expect(page.getByTestId('depot')).toBeVisible();
+  await expect(page.getByTestId('station-tab-depot')).toHaveAttribute('aria-selected', 'true');
+  await page.getByTestId('depot-draw-oil').tap();
+  await expect(page.getByTestId('depot-held-oil')).toHaveText('Depot 0');
+  await expect(walletOil(page)).toHaveText('400');
+}
+
 test.describe('the Depot tab by touch, on a landscape phone', () => {
   test.use({ viewport: { width: 844, height: 390 }, hasTouch: true, isMobile: true });
 
-  test('it sits in the strip beside the other three, and a tap draws', async ({ page }) => {
-    await page.goto(gameUrl(URL));
-    await awaitGate(page);
-    await page.getByTestId('boot-start').tap();
-    await expect(page.getByTestId('boot-overlay')).toBeHidden();
-    await expect(page.getByTestId('scene-label')).toBeVisible(COLD_START);
+  test('it sits in the strip beside the other three, the body keeps half the height, and a tap draws', async ({ page }) => {
+    await startTouch(page);
     await prepare(page, { oil: 100, depot: { oil: 300 } });
     await station(page);
-    for (const tab of ['missions', 'shop', 'character', 'depot']) {
-      const box = await page.getByTestId(`station-tab-${tab}`).boundingBox();
-      expect(box, tab).not.toBeNull();
-      expect((box?.y ?? -1) + (box?.height ?? 0), `${tab} inside the viewport`).toBeLessThanOrEqual(390.5);
-      expect(box?.x ?? -1, `${tab} inside the viewport`).toBeGreaterThanOrEqual(-0.5);
+    const tabs = await sectionTabs(page);
+    for (const tab of tabs) {
+      expect(tab.left, `${tab.id} left`).toBeGreaterThanOrEqual(-0.5);
+      expect(tab.right, `${tab.id} right`).toBeLessThanOrEqual(844.5);
+      expect(tab.bottom, `${tab.id} bottom`).toBeLessThanOrEqual(390.5);
+      expect(tab.topmost, `${tab.id} topmost at its centre`).toBe(true);
     }
-    await page.getByTestId('station-tab-depot').tap();
-    await expect(page.getByTestId('depot')).toBeVisible();
-    await page.getByTestId('depot-draw-oil').tap();
-    await expect(page.getByTestId('depot-held-oil')).toHaveText('Depot 0');
-    await expect(walletOil(page)).toHaveText('400');
+    // One strip: the four share a row.
+    expect(new Set(tabs.map((tab) => Math.round(tab.top))).size).toBe(1);
+    const share = await page.evaluate(() => (document.querySelector('[data-testid="station-root"]')?.closest('.screen-body')?.getBoundingClientRect().height ?? 0) / innerHeight);
+    expect(share).toBeGreaterThanOrEqual(0.5);
+    await drawByTap(page);
+  });
+});
+
+test.describe('the Depot tab by touch, on a portrait phone', () => {
+  test.use({ viewport: { width: 393, height: 851 }, hasTouch: true, isMobile: true });
+
+  test('the four sections sit two by two in the bottom rail, and a tap draws', async ({ page }) => {
+    await startTouch(page);
+    await prepare(page, { oil: 100, depot: { oil: 300 } });
+    await station(page);
+    const tabs = await sectionTabs(page);
+    for (const tab of tabs) {
+      expect(tab.left, `${tab.id} left`).toBeGreaterThanOrEqual(-0.5);
+      expect(tab.right, `${tab.id} right`).toBeLessThanOrEqual(393.5);
+      expect(tab.bottom, `${tab.id} bottom`).toBeLessThanOrEqual(851.5);
+      expect(tab.topmost, `${tab.id} topmost at its centre`).toBe(true);
+    }
+    // Two rows of two: Missions and Shop, then Character and Depot.
+    const rows = [...new Set(tabs.map((tab) => Math.round(tab.top)))];
+    expect(rows).toHaveLength(2);
+    expect(tabs.map((tab) => Math.round(tab.top))).toEqual([rows[0], rows[0], rows[1], rows[1]]);
+    await drawByTap(page);
   });
 });
