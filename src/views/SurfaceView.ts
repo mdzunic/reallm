@@ -497,6 +497,44 @@ export const RESOURCE_COLORS: Record<ResourceId, string> = {
   lithium: '#c8b8ff',
 };
 
+/** Review 2026-10 V-09: a dropped item's colour, and a gear piece's gold, so loot reads apart from a consumable. */
+export const ITEM_PICKUP_COLOR = '#8ad7ff';
+export const GEAR_PICKUP_COLOR = '#ffcf4a';
+
+/**
+ * Review 2026-10 V-09: the glow nodes and pickups wear so they read on the
+ * ground that holds them (oil on Ferrum's basalt was 1.14:1). Each instance
+ * glows at its own colour × `RESOURCE_GLOW`, with a fresnel rim at
+ * `RESOURCE_RIM` — and a colour too dark to carry a rim (oil) gets an
+ * iridescent edge instead, a slick on a dark crystal.
+ */
+export const RESOURCE_GLOW = 0.5;
+export const RESOURCE_RIM = 1;
+const RESOURCE_GLOW_CHUNK = /* glsl */ `
+  float glowRim = pow( 1.0 - saturate( dot( normal, normalize( vViewPosition ) ) ), 2.0 );
+  float glowLuma = dot( vColor.rgb, vec3( 0.2126, 0.7152, 0.0722 ) );
+  vec3 glowSheen = 0.5 + 0.5 * cos( 6.28318 * ( glowRim * 1.5 + vec3( 0.0, 0.33, 0.67 ) ) );
+  vec3 glowEdge = mix( glowSheen * 0.8, vColor.rgb, smoothstep( 0.02, 0.12, glowLuma ) );
+  totalEmissiveRadiance += vColor.rgb * ${RESOURCE_GLOW.toFixed(3)} + glowEdge * ${RESOURCE_RIM.toFixed(3)} * glowRim;`;
+
+/**
+ * V-09: the glow, injected after the standard emissive like the hostile rim
+ * (views/ProceduralMeshes.ts): `vColor` carries the instance colour, so one
+ * material serves every resource, and the draw count does not move.
+ */
+export function injectResourceGlow(material: THREE.MeshStandardMaterial): THREE.MeshStandardMaterial {
+  material.onBeforeCompile = (shader) => {
+    shader.fragmentShader = shader.fragmentShader.replace(
+      '#include <emissivemap_fragment>',
+      `#include <emissivemap_fragment>${RESOURCE_GLOW_CHUNK}`,
+    );
+  };
+  material.customProgramCacheKey = () => 'resource-glow/1';
+  return material;
+}
+
+const WHITE = new THREE.Color('#ffffff');
+
 // -------------------------------------------------------- SPEC-017 §4.5–§4.7
 
 /** How far along the sun direction the key light sits, in metres (§4.1). */
@@ -1370,14 +1408,15 @@ export class SurfaceView {
     // Nodes: crystals whose height shows the fill level (AC-24).
     const crystal = new THREE.OctahedronGeometry(0.7);
     crystal.translate(0, 0.7, 0);
+    // V-09: each crystal glows in its resource's colour, with a brighter rim.
     this.#nodeCrystals = new THREE.InstancedMesh(
       crystal,
-      new THREE.MeshStandardMaterial({
-        roughness: 0.25,
-        metalness: 0.1,
-        emissive: new THREE.Color(0x222233),
-        emissiveIntensity: 0.4,
-      }),
+      injectResourceGlow(
+        new THREE.MeshStandardMaterial({
+          roughness: 0.25,
+          metalness: 0.1,
+        }),
+      ),
       Math.max(1, layout.nodes.length),
     );
     this.#nodeCrystals.receiveShadow = true;
@@ -1385,7 +1424,8 @@ export class SurfaceView {
     this.#envRoot.add(this.#nodeCrystals);
 
     // Pickups: three instanced meshes (§4.10).
-    const pickupMaterial = new THREE.MeshStandardMaterial({ roughness: 0.3, metalness: 0.5 });
+    // V-09: the same glow as the nodes — a dropped orb reads as its resource.
+    const pickupMaterial = injectResourceGlow(new THREE.MeshStandardMaterial({ roughness: 0.3, metalness: 0.5 }));
     this.#pickupMeshes = {
       resource: new THREE.InstancedMesh(new THREE.OctahedronGeometry(0.28), pickupMaterial, 128),
       item: new THREE.InstancedMesh(new THREE.BoxGeometry(0.4, 0.4, 0.4), pickupMaterial, 64),
@@ -3238,7 +3278,7 @@ export class SurfaceView {
       scratchMatrix.setPosition(node.x, ground(node.x, node.z), node.z);
       this.#nodeCrystals.setMatrixAt(i, scratchMatrix);
       scratchColor.set(RESOURCE_COLORS[node.resource]);
-      if (node.harvesting) scratchColor.lerp(scratchColor.clone().set('#ffffff'), 0.4 + 0.2 * Math.sin(frame.time * 8));
+      if (node.harvesting) scratchColor.lerp(WHITE, 0.4 + 0.2 * Math.sin(frame.time * 8));
       this.#nodeCrystals.setColorAt(i, scratchColor);
     });
     this.#nodeCrystals.instanceMatrix.needsUpdate = true;
@@ -3331,7 +3371,10 @@ export class SurfaceView {
         scratchMatrix.makeRotationY(frame.time + pickup.seed);
         scratchMatrix.setPosition(pickup.x, bob + this.#ground(pickup.x, pickup.z), pickup.z);
         mesh.setMatrixAt(n, scratchMatrix);
-        mesh.setColorAt(n, scratchColor.set(kind === 'resource' ? RESOURCE_COLORS[pickup.resource] : '#8ad7ff'));
+        mesh.setColorAt(
+          n,
+          scratchColor.set(kind === 'resource' ? RESOURCE_COLORS[pickup.resource] : kind === 'gear' ? GEAR_PICKUP_COLOR : ITEM_PICKUP_COLOR),
+        );
         n++;
       }
       counts[kind] = n;
