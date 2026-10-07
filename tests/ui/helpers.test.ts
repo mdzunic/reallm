@@ -115,6 +115,12 @@ import {
   STAMINA_FULL_HIDE_SECONDS,
   staminaShown,
   STATUS_LABELS,
+  deliveryNeedsText,
+  depotDrawLabel,
+  HOLD_FULL_TEXT,
+  NOTHING_TO_SHIP_TEXT,
+  shipHomeText,
+  shippedHomeText,
   type DescentContext,
   type HudModel,
   type MissionStatus,
@@ -184,6 +190,32 @@ describe('padEmptyText (12-k)', () => {
     const before = JSON.stringify(data);
     padEmptyText(data, 'hive');
     expect(JSON.stringify(data)).toBe(before);
+  });
+});
+
+describe('the Relay depot’s words (SPEC-065 §4.5, §4.6)', () => {
+  it('the terminal’s ship button reads Ship N home, or Nothing to ship at 0 (65-b)', () => {
+    expect(shipHomeText(300)).toBe('Ship 300 home');
+    expect(shipHomeText(1)).toBe('Ship 1 home');
+    expect(shipHomeText(0)).toBe('Nothing to ship');
+    expect(NOTHING_TO_SHIP_TEXT).toBe('Nothing to ship');
+  });
+
+  it('a ship press toasts what went where, and a deliver need above the reserve is named (E117)', () => {
+    expect(shippedHomeText(300, 'oil')).toBe('Shipped 300 oil to Command Relay.');
+    expect(shippedHomeText(45, 'lithium')).toBe('Shipped 45 lithium to Command Relay.');
+    expect(deliveryNeedsText(100)).toBe('Delivery needs 100');
+  });
+
+  it('the Depot tab’s button follows §4.6’s table: Draw N, Hold full, Empty (E118)', () => {
+    // Room in the hold, some at the depot: draw what fits.
+    expect(depotDrawLabel(300, 300)).toEqual({ text: 'Draw 300', enabled: true });
+    expect(depotDrawLabel(300, 150)).toEqual({ text: 'Draw 150', enabled: true });
+    // A full hold, some at the depot: disabled.
+    expect(depotDrawLabel(300, 0)).toEqual({ text: 'Hold full', enabled: false });
+    expect(HOLD_FULL_TEXT).toBe('Hold full');
+    // Nothing at the depot: Empty, whatever the hold holds.
+    expect(depotDrawLabel(0, 0)).toEqual({ text: 'Empty', enabled: false });
   });
 });
 
