@@ -47,6 +47,13 @@ const BURSTS: Record<FxKind, BurstDef> = {
   dash: { count: 15, life: 0.3, speedMin: 0, speedMax: 0, spread: 'still', gravity: 0, size: 0.34, origin: 0.9 },
 };
 
+/**
+ * Review 2026-10 V-08: the floor between two enemy-hit sparks, in seconds —
+ * the impact thud's 50 ms (`core/AudioReactions.ts`), so a chaingun or a
+ * blast through a pack sparks no faster than it thuds.
+ */
+export const HIT_SPARK_INTERVAL = 0.05;
+
 /** SPEC-038 §4.1: three streaks, this many sprites each, this far apart across the path. */
 const DASH_STREAKS = 3;
 const DASH_STREAK_SPRITES = 5;
@@ -160,6 +167,8 @@ export class CombatFx {
 
   /** The last `sync` time — what a `burst` between frames is born at. */
   #time = 0;
+  /** V-08: when the last enemy-hit spark drew, on the `sync` clock. */
+  #lastSpark = Number.NEGATIVE_INFINITY;
 
   constructor(parent: THREE.Object3D, billboard: THREE.Quaternion, capacity: number = DEFAULT_CAPACITY) {
     this.#capacity = Math.max(1, capacity);
@@ -335,6 +344,19 @@ export class CombatFx {
       this.#lightX = x;
       this.#lightZ = z;
     }
+  }
+
+  /**
+   * Review 2026-10 V-08: a `hit` burst where a shot landed on an enemy, in the
+   * shot's colour — at most one per `HIT_SPARK_INTERVAL`, so many hits in one
+   * frame draw one. From the same pool as every burst; allocates nothing.
+   * Returns whether it drew.
+   */
+  spark(x: number, z: number, color: number): boolean {
+    if (this.#time - this.#lastSpark < HIT_SPARK_INTERVAL) return false;
+    this.#lastSpark = this.#time;
+    this.burst('hit', x, z, color);
+    return true;
   }
 
   /**

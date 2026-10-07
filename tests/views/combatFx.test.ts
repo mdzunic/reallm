@@ -3,7 +3,7 @@
 // buffer's wrap, and the muzzle light's 80 ms decay.
 import { describe, expect, it } from 'vitest';
 import * as THREE from 'three';
-import { CLOUD_CAPACITY, CombatFx, FLARE_CAPACITY, FLARE_DISC_RADIUS, type FxKind } from '@/views/CombatFx';
+import { CLOUD_CAPACITY, CombatFx, FLARE_CAPACITY, FLARE_DISC_RADIUS, HIT_SPARK_INTERVAL, type FxKind } from '@/views/CombatFx';
 
 const KINDS: readonly FxKind[] = ['hit', 'death', 'spawn', 'pickup', 'dust_ring', 'muzzle', 'blast'];
 
@@ -84,6 +84,35 @@ describe('the burst pool (AC-52 … AC-54)', () => {
     fx.sync(0.4, ground); // hit life is 0.35
     expect(sprites.count).toBe(0);
     expect(sprites.visible).toBe(false);
+  });
+});
+
+describe('the enemy-hit spark (review 2026-10 V-08)', () => {
+  it('bursts `hit` where the shot landed, in its colour, at most once per 50 ms, from the same pool', () => {
+    const { parent, fx } = build(64);
+    const meshes = instancedMeshes(parent).length;
+    expect(HIT_SPARK_INTERVAL).toBe(0.05);
+    fx.sync(1, ground);
+    // A chaingun's burst through a pack: many hits in one frame draw one spark.
+    expect(fx.spark(2, 3, 0xffb84d)).toBe(true);
+    expect(fx.spark(2.5, 3, 0xffb84d)).toBe(false);
+    expect(fx.spark(4, 1, 0xffb84d)).toBe(false);
+    fx.sync(1.03, ground);
+    expect(fx.spark(2, 3, 0xffb84d)).toBe(false);
+    const sprites = instancedMeshes(parent)[0] as THREE.InstancedMesh;
+    expect(sprites.count).toBe(6); // one `hit` burst
+    // Its colour is the shot's (the pool writes the hex's channels, faded alike).
+    const colour = new THREE.Color();
+    sprites.getColorAt(0, colour);
+    expect(colour.r / colour.g).toBeCloseTo(0xff / 0xb8, 2);
+    expect(colour.g / colour.b).toBeCloseTo(0xb8 / 0x4d, 2);
+    // 50 ms on, the next hit sparks again.
+    fx.sync(1.06, ground);
+    expect(fx.spark(2, 3, 0xffb84d)).toBe(true);
+    fx.sync(1.07, ground);
+    expect(sprites.count).toBe(12);
+    // No mesh of its own.
+    expect(instancedMeshes(parent)).toHaveLength(meshes);
   });
 });
 

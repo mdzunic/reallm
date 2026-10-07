@@ -701,6 +701,9 @@ export class SurfaceScene extends UiScene<'surface'> {
   #level: Level | null = null;
   #world: CombatWorld | null = null;
   #combat: Combat | null = null;
+  /** V-08: the weapon whose shot colour `#sparkHex` holds. */
+  #sparkWeapon: string | null = null;
+  #sparkHex = 0;
   #economy: Economy | null = null;
   #missions: Missions | null = null;
   #spawn: SpawnDirector | null = null;
@@ -7012,6 +7015,21 @@ export class SurfaceScene extends UiScene<'surface'> {
     view.setGuide(frame);
   }
 
+  /**
+   * V-08: the active weapon's shot colour (its trail where it has one, so a
+   * white-hot head still sparks in its hue), parsed once per weapon change —
+   * nothing allocates per hit.
+   */
+  #sparkColor(combat: Combat): number {
+    const weapon = combat.loadout.weaponIn(combat.loadout.active);
+    if (weapon === null) return HIT_BURST_COLOR;
+    if (weapon.id !== this.#sparkWeapon) {
+      this.#sparkWeapon = weapon.id;
+      this.#sparkHex = Number.parseInt((weapon.shot.trail ?? weapon.shot.color).slice(1), 16);
+    }
+    return this.#sparkHex;
+  }
+
   /** Like `#project`, but reporting a point behind the camera (§4.3). */
   #projectGuide(x: number, z: number, lift: number): boolean {
     const v = this.#projectScratch.set(x, lift + (this.#view?.heightAt(x, z) ?? 0), z);
@@ -7701,6 +7719,16 @@ export class SurfaceScene extends UiScene<'surface'> {
             this.#project(p.x, p.z, 1.6);
             this.#numbers.show(this.#screenPoint.x, this.#screenPoint.y, shown, 'player');
           }
+        },
+        this,
+      ),
+      // Review 2026-10 V-08: a spark where a shot lands on an enemy, in the
+      // weapon's colour; `CombatFx.spark` holds it to one per 50 ms.
+      bus.on(
+        'enemy:hit',
+        ({ x, z }) => {
+          const combat = this.#combat;
+          if (combat !== null) this.#view?.fx.spark(x, z, this.#sparkColor(combat));
         },
         this,
       ),
