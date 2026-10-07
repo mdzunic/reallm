@@ -11,10 +11,13 @@
 // A GPU-less container draws a medium frame in 60–140 ms, so the simulation
 // trails the wall clock (`e2e/start.ts`): "within 0.5 s" is the game's half
 // second, not the host's.
+import { fileURLToPath } from 'node:url';
 import { expect, test, type Page } from '@playwright/test';
 import { start } from './start';
 
-const URL = '/?scene=surface&planet=cinder4&debug&quality=medium';
+const SURFACE = '/?scene=surface&planet=cinder4&debug&quality=medium';
+/** A model that is not the salvager — no skin, no clips — for case 4. */
+const CRATE = fileURLToPath(new URL('../public/assets/models/crate.glb', import.meta.url));
 
 /**
  * At least `scav_raider`'s `maxAlive` on Cinder-4 (4): with that many raiders
@@ -118,7 +121,7 @@ async function sampleFrames(page: Page, viewSeconds: number, smites = 0): Promis
 
 test('1. six raiders render skinned, and the medium frame stays within 96 draws and 130 k triangles', async ({ page }) => {
   test.setTimeout(150_000);
-  await start(page, URL);
+  await start(page, SURFACE);
   await clearAndSpawn(page, RAIDERS);
   await expect.poll(async () => (await raiders(page)).live, { timeout: 30_000 }).toBe(6);
   expect((await raiders(page)).standIn).toBe(0);
@@ -138,7 +141,7 @@ test('1b. the full pool — six live raiders and two falling — stays within 96
   page,
 }) => {
   test.setTimeout(150_000);
-  await start(page, URL);
+  await start(page, SURFACE);
   await clearAndSpawn(page, 8);
   await expect.poll(async () => (await raiders(page)).live, { timeout: 30_000 }).toBe(8);
   await expect.poll(async () => (await raiders(page)).falling, { timeout: 30_000 }).toBe(0);
@@ -160,7 +163,7 @@ test('2. smitten, they fall: falling reads the number killed within 0.5 s and 0 
   page,
 }) => {
   test.setTimeout(150_000);
-  await start(page, URL);
+  await start(page, SURFACE);
   await clearAndSpawn(page, RAIDERS);
   await expect.poll(async () => (await raiders(page)).live, { timeout: 30_000 }).toBe(6);
   // Any raider the clear smote is still falling; let those copies go first.
@@ -190,7 +193,7 @@ test('2. smitten, they fall: falling reads the number killed within 0.5 s and 0 
 
 test('3. with raiders in range and the salvager standing still, tracers rise above 0 within 5 s', async ({ page }) => {
   test.setTimeout(150_000);
-  await start(page, URL);
+  await start(page, SURFACE);
   await clearAndSpawn(page, RAIDERS);
   await expect.poll(async () => (await raiders(page)).live, { timeout: 30_000 }).toBe(6);
   const from = (await raiders(page)).viewTime;
@@ -210,9 +213,9 @@ test('4. without the salvager model every raider is the stand-in, and none is sk
   let served = false;
   await page.route('**/models/character.glb', async (route) => {
     served = true;
-    await route.fulfill({ path: 'public/assets/models/crate.glb', contentType: 'model/gltf-binary' });
+    await route.fulfill({ path: CRATE, contentType: 'model/gltf-binary' });
   });
-  await start(page, URL);
+  await start(page, SURFACE);
   expect(served).toBe(true);
   await clearAndSpawn(page, RAIDERS);
   await expect.poll(async () => (await raiders(page)).standIn, { timeout: 30_000 }).toBe(RAIDERS);

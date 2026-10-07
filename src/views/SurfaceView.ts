@@ -3290,11 +3290,10 @@ export class SurfaceView {
    * enemy's green (a raider's amber, SPEC-064 §4.6) or the plain tracer —
    * oriented along its velocity, its head followed by its ghosts in the same
    * mesh: capsules for streaks, ellipsoids for round shots. Ghost k trails at
-   * `p − v · lag · k` (`SHOT_DRAW`). A
-   * zero-velocity shot (spawned this frame) takes its yaw from the owner's
-   * facing and its ghosts collapse onto the head (19-j). A full mesh drops
-   * the shot's last ghosts, then whole shots. Allocates nothing once each
-   * colour has been seen.
+   * `p − v · lag · k` (`SHOT_DRAW`). A zero-velocity shot (spawned this
+   * frame) takes its yaw from the owner's facing and its ghosts collapse onto
+   * the head (19-j). A full mesh drops the shot's last ghosts, then whole
+   * shots. Allocates nothing once each colour has been seen.
    */
   #syncProjectiles(frame: SurfaceFrame): void {
     const pool = frame.projectiles;
