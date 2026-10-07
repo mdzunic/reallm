@@ -612,6 +612,15 @@ describe('content invariants (SPEC-009 §7)', () => {
     expect(problems).toEqual([]);
   });
 
+  it('9c (SPEC-064 §3). the raider wears the scav recipe, and no one else does', () => {
+    expect(ENEMIES.scav_raider.look).toEqual({ recipe: 'scav', scale: 1, tint: '#4f4a3d' });
+    expect(enemies.filter((enemy) => enemy.look.recipe === 'scav').map((enemy) => enemy.id)).toEqual(['scav_raider']);
+    // The four spitters keep the spitter recipe they shared with it.
+    expect(enemies.filter((enemy) => enemy.look.recipe === 'spitter').map((enemy) => enemy.id).sort()).toEqual(
+      ['hive_spitter', 'ice_spitter', 'slag_spitter', 'spore_spitter'].sort(),
+    );
+  });
+
   it('9b (SPEC-038). every ranged surface enemy fires at 13 m with 15 m/s shots', () => {
     const ranged = enemies.filter((enemy) => enemy.domain === 'surface' && enemy.archetype === 'ranged');
     expect(ranged.map((enemy) => enemy.id).sort()).toEqual(

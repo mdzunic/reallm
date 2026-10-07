@@ -512,6 +512,7 @@ export class ScavRaiderViews {
 
   /** A free slot; else a new clone while the pool has room; else the oldest falling copy's (E114); else none. */
   #acquire(): RaiderSlot | null {
+    if (!this.#usable) return null;
     const slots = this.#slots;
     for (let s = 0; s < slots.length; s++) {
       const slot = slots[s] as RaiderSlot;
