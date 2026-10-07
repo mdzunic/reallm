@@ -5,7 +5,6 @@ import { RateLimiter } from '@/core/AudioMix';
 import { AUDIO_REACTIONS } from '@/core/AudioReactions';
 import { EventBus, type GameEvents } from '@/core/Events';
 import { newSave, type Save } from '@/core/Save';
-import { type ResourceId } from '@/data/index';
 import { Economy } from '@/systems/Economy';
 import {
   CARGO_TOAST_TEXT,
@@ -13,10 +12,10 @@ import {
   HARVEST_RATE,
   MAGNET_BONUS,
   MAGNET_SPEED,
+  nodeEconomy,
   Nodes,
   PICKUP_TTL,
   Pickups,
-  type NodeEconomy,
 } from '@/systems/Pickups';
 import { Progression } from '@/systems/Progression';
 import { MARINE } from './combatFixtures';
@@ -298,22 +297,13 @@ describe('Pickups — item:collected and item:blocked (SPEC-042 §4.2)', () => {
 
 // ---------------------------------------------------------------------- nodes
 
-function nodeEconomy(save: Save, economy: Economy): NodeEconomy {
-  return {
-    addResource: (r, n, s) => economy.addResource(r, n, s),
-    room: (r: ResourceId) => economy.cargoCap() - save.resources[r],
-    // SPEC-034 §4.12: the scene passes the active `Missions`' demand through.
-    collectDemand: (r: ResourceId) => economy.collectDemand(r),
-  };
-}
-
 describe('Nodes — harvest (AC-21..AC-24, 12-f)', () => {
   it('auto-harvests 5 units/s within 2.5 m, batching collection', () => {
     const h = harness();
     const nodes = new Nodes(
       [{ resource: 'oil', x: 0, z: 0, capacity: 100 }],
       () => 0.5,
-      nodeEconomy(h.save, h.economy),
+      nodeEconomy(h.economy, h.save),
     );
     const node = nodes.states[0] as (typeof nodes.states)[number];
     const oil = h.save.resources.oil;
@@ -336,7 +326,7 @@ describe('Nodes — harvest (AC-21..AC-24, 12-f)', () => {
 
   it('does nothing outside 2.5 m and depletes to empty without despawning', () => {
     const h = harness();
-    const nodes = new Nodes([{ resource: 'oil', x: 0, z: 0, capacity: 10 }], () => 0, nodeEconomy(h.save, h.economy));
+    const nodes = new Nodes([{ resource: 'oil', x: 0, z: 0, capacity: 10 }], () => 0, nodeEconomy(h.economy, h.save));
     const node = nodes.states[0] as (typeof nodes.states)[number];
 
     h.player.x = HARVEST_RADIUS + 0.5;
@@ -353,7 +343,7 @@ describe('Nodes — harvest (AC-21..AC-24, 12-f)', () => {
 
   it('regenerates while not harvested, up to capacity (AC-23)', () => {
     const h = harness();
-    const nodes = new Nodes([{ resource: 'oil', x: 0, z: 0, capacity: 100 }], () => 2, nodeEconomy(h.save, h.economy));
+    const nodes = new Nodes([{ resource: 'oil', x: 0, z: 0, capacity: 100 }], () => 2, nodeEconomy(h.economy, h.save));
     const node = nodes.states[0] as (typeof nodes.states)[number];
     node.remaining = 90;
 
@@ -368,7 +358,7 @@ describe('Nodes — harvest (AC-21..AC-24, 12-f)', () => {
     const h = harness((save) => {
       save.resources.oil = 400;
     });
-    const nodes = new Nodes([{ resource: 'oil', x: 0, z: 0, capacity: 100 }], () => 0, nodeEconomy(h.save, h.economy));
+    const nodes = new Nodes([{ resource: 'oil', x: 0, z: 0, capacity: 100 }], () => 0, nodeEconomy(h.economy, h.save));
     const node = nodes.states[0] as (typeof nodes.states)[number];
     for (let i = 0; i < Math.round(3 / STEP); i++) nodes.update(STEP, h.player);
     expect(node.remaining).toBe(100);
@@ -389,7 +379,7 @@ describe('Nodes — harvest (AC-21..AC-24, 12-f)', () => {
 describe('Nodes — an interrupted harvest refills (SPEC-034 §4.15)', () => {
   it('a fractional pending returns to the node when the player leaves', () => {
     const h = harness();
-    const nodes = new Nodes([{ resource: 'oil', x: 0, z: 0, capacity: 100 }], () => 2, nodeEconomy(h.save, h.economy));
+    const nodes = new Nodes([{ resource: 'oil', x: 0, z: 0, capacity: 100 }], () => 2, nodeEconomy(h.economy, h.save));
     const node = nodes.states[0] as (typeof nodes.states)[number];
 
     // 4.1 s of harvesting leaves whole units waiting for the next batch flush
@@ -422,7 +412,7 @@ describe('Nodes — an interrupted harvest refills (SPEC-034 §4.15)', () => {
     });
     let wanted = 30;
     h.economy.setCollectDemand((r) => (r === 'oil' ? wanted : 0));
-    const nodes = new Nodes([{ resource: 'oil', x: 0, z: 0, capacity: 100 }], () => 0, nodeEconomy(h.save, h.economy));
+    const nodes = new Nodes([{ resource: 'oil', x: 0, z: 0, capacity: 100 }], () => 0, nodeEconomy(h.economy, h.save));
     const node = nodes.states[0] as (typeof nodes.states)[number];
     const shipped: number[] = [];
     h.events.on('resource:collected', (p) => {

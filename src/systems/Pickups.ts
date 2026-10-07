@@ -204,6 +204,31 @@ export interface NodeEconomy {
   collectDemand?(resource: ResourceId): number;
 }
 
+/** What `nodeEconomy` reads; `Economy` satisfies it. */
+export interface NodeEconomySource {
+  addResource(resource: ResourceId, amount: number, source: 'pickup'): { added: number; shipped: number; blocked: number };
+  cargoCap(): number;
+  collectDemand(resource: ResourceId): number;
+}
+
+/**
+ * The one wiring of `Nodes` to the economy, which the scene and the unit suite
+ * both build here. The scene used to build its own and left `collectDemand`
+ * out, so a node stopped at a full hold while a collect objective still wanted
+ * its resource (SPEC-034 §4.12, E56) — and the suite, whose helper passed it,
+ * stayed green (docs/review-2026-10, B-01).
+ */
+export function nodeEconomy(
+  economy: NodeEconomySource,
+  save: { readonly resources: Readonly<Record<ResourceId, number>> },
+): NodeEconomy {
+  return {
+    addResource: (resource, amount, source) => economy.addResource(resource, amount, source),
+    room: (resource) => Math.max(0, economy.cargoCap() - (save.resources[resource] ?? 0)),
+    collectDemand: (resource) => economy.collectDemand(resource),
+  };
+}
+
 export interface NodeState {
   resource: ResourceId;
   x: number;
