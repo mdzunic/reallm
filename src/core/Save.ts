@@ -38,6 +38,7 @@ import {
   type ClassPassive,
   CLASS_IDS,
   COMPANION_IDS,
+  COMPANIONS,
   DIFFICULTIES,
   ITEMS,
   MISSIONS,
@@ -50,6 +51,7 @@ import {
   SHIP_SYSTEMS,
   STORY_FLAGS,
   TUNING,
+  UPGRADES,
   WEAPON_SLOTS,
   type ClassId,
   type Difficulty,
@@ -70,7 +72,7 @@ import {
  */
 export { DIFFICULTIES, type Difficulty } from '@/data/index';
 
-export const SAVE_VERSION = 3 as const;
+export const SAVE_VERSION = 4 as const;
 
 /** `reallm:slot:{n}` and `reallm:slot:{n}:bak`; settings live in their own key. */
 export const SLOT_KEY_PREFIX = 'reallm:slot:';
@@ -268,6 +270,7 @@ export interface ResumePoint {
  * and the claimed caches, the underground ground, the remains and the resume
  * point in `progress`. Built before any of its consumers, so an older build
  * refuses a v3 save (E73) rather than stripping the new fields and rewriting it.
+ * Like `SaveV2`, it is kept for the step of §4.3 that migrates from it.
  */
 export interface SaveV3 {
   version: 3;
@@ -291,11 +294,69 @@ export interface SaveV3 {
 }
 
 /**
+ * SPEC-065 §3. Version 4 is PLAN R26's bump: every `SaveV3` field, plus the
+ * Relay depot — what Command Relay keeps for this slot, and the pad terminal's
+ * reserve per resource. A bump rather than an optional v3 field: `validateSave`
+ * strips unknown keys, so an older build would delete a depot silently; this
+ * way it refuses the save instead (E73's rule, E120).
+ */
+export interface SaveV4 extends Omit<SaveV3, 'version'> {
+  version: 4;
+  depot: {
+    /** What Command Relay keeps for this slot. No cap. */
+    held: Record<ResourceId, number>;
+    /** The pad terminal's reserve per resource: 0 to the cap, a multiple of `DEPOT_KEEP_STEP`. */
+    keep: Record<ResourceId, number>;
+  };
+}
+
+/**
  * The version the game is written against (§2). A later bump moves this alias
  * instead of thirty imports, which is why nothing outside this module and its
  * own suite names a numbered save type.
  */
-export type Save = SaveV3;
+export type Save = SaveV4;
+
+/** SPEC-065 §3: a fresh reserve — the pad terminal ships what the hold carries above 100. */
+export const DEPOT_KEEP_DEFAULT = 100;
+/** SPEC-065 §3: the reserve moves, and is stored, in steps of 50. */
+export const DEPOT_KEEP_STEP = 50;
+
+/**
+ * SPEC-065 §3: the largest cargo cap — the Cargo Hold's tier 3 plus the
+ * Quartermaster's largest bonus — rounded up to a step. Read off the tables, so
+ * a retune of either moves it. The validator clamps a reserve to this rather
+ * than to the hold's current cap, so a reserve set on a bigger hold survives a
+ * load; the terminal is what clamps it to the cap (65-a).
+ */
+export const DEPOT_KEEP_MAX: number = ((): number => {
+  const tiers: readonly number[] = UPGRADES.cargo.metrics.cargoCap;
+  const bonus = Math.max(0, ...COMPANIONS.quartermaster.levels.map((level) => level.cargoBonus));
+  return Math.ceil(((tiers.at(-1) ?? TUNING.CARGO_BASE) + bonus) / DEPOT_KEEP_STEP) * DEPOT_KEEP_STEP;
+})();
+
+/** SPEC-065 §4.1: a depot that holds nothing, with every reserve at `DEPOT_KEEP_DEFAULT`. */
+export function emptyDepot(): Save['depot'] {
+  const held = {} as Record<ResourceId, number>;
+  const keep = {} as Record<ResourceId, number>;
+  for (const resource of RESOURCE_IDS) {
+    held[resource] = 0;
+    keep[resource] = DEPOT_KEEP_DEFAULT;
+  }
+  return { held, keep };
+}
+
+/**
+ * SPEC-065 §4.1: a reserve as the save keeps it — clamped to
+ * [0, `DEPOT_KEEP_MAX`] and floored to a multiple of `DEPOT_KEEP_STEP`; a value
+ * that is not a finite number reads `DEPOT_KEEP_DEFAULT`. The validator and
+ * `Economy.setKeep` both store through it, so a reserve the terminal sets is
+ * exactly the one a load keeps.
+ */
+export function clampKeep(value: number): number {
+  if (!Number.isFinite(value)) return DEPOT_KEEP_DEFAULT;
+  return Math.floor(clamp(value, 0, DEPOT_KEEP_MAX) / DEPOT_KEEP_STEP) * DEPOT_KEEP_STEP;
+}
 
 /** SPEC-047 §4.4: the most predecessors a slot remembers. */
 export const LINEAGE_MAX = 8;
@@ -458,7 +519,7 @@ export function nextCreation(save: Save): CharacterCreation {
  * `LINEAGE_MAX`). Nothing else carries: no level, XP, tokens, gear, ship,
  * companions, resources, flags, missions, visits, ground, claims or remains
  * (§4.2's second table), so every SPEC-010 invariant holds for it as for any
- * fresh run.
+ * fresh run. SPEC-065: nor the depot — `newSave` starts it empty.
  */
 export function nextInstance(old: Save, creation: CharacterCreation, now: number): Save {
   const next = newSave(old.meta.slot, creation, old.meta.seed, now);
@@ -819,6 +880,8 @@ export function newSave(slot: SlotId, creation: CharacterCreation, seed: number,
       remains: null,
       resume: null,
     },
+    // SPEC-065 §4.1: nothing at Command Relay yet, every reserve at 100.
+    depot: emptyDepot(),
   };
 }
 
@@ -906,6 +969,7 @@ export function validateSave(
     const activeWeapon = validateActiveWeapon(raw['activeWeapon'], equipped, warnings);
     const quick = validateQuick(bagAt(raw, 'quick'), content, warnings);
     const companions = validateCompanions(arrayAt(raw, 'companions'), warnings);
+    const depot = validateDepot(raw['depot'], warnings);
 
     // The hp cap depends on the rebuilt attributes and level, so it lands here.
     const cap2 = maxHp(classId, player.attributes, player.level);
@@ -928,6 +992,7 @@ export function validateSave(
         ship,
         companions,
         progress,
+        depot,
       },
       warnings,
     };
@@ -1178,6 +1243,48 @@ function validateResume(raw: unknown, warnings: string[]): ResumePoint | null {
     return null;
   }
   return { planet, at };
+}
+
+// ------------------------------------------------ SPEC-065 §4.1: version 4
+
+/**
+ * SPEC-065 §4.1, in the shape of `validateRemains`: each record is read
+ * resource by resource. A held amount is a whole number ≥ 0 — the depot has no
+ * cap — and anything else reads 0. A reserve is a finite number, clamped and
+ * stepped by `clampKeep`, and anything else reads `DEPOT_KEEP_DEFAULT`. A
+ * missing or broken record reads the defaults; every repair warns, and an
+ * unknown resource is dropped.
+ */
+function validateDepot(raw: unknown, warnings: string[]): Save['depot'] {
+  const depot = emptyDepot();
+  if (!isBag(raw)) {
+    warnings.push(`depot: ${raw === undefined ? 'missing' : 'not a record'}; read as an empty depot`);
+    return depot;
+  }
+  for (const field of ['held', 'keep'] as const) {
+    const record = raw[field];
+    if (!isBag(record)) {
+      warnings.push(`depot.${field}: ${record === undefined ? 'missing' : 'not a record'}; read as the defaults`);
+      continue;
+    }
+    for (const key of Object.keys(record)) {
+      if (!(RESOURCE_IDS as readonly string[]).includes(key)) warnings.push(`depot.${field}.${key}: unknown resource dropped`);
+    }
+    for (const resource of RESOURCE_IDS) {
+      const value = record[resource];
+      const path = `depot.${field}.${resource}`;
+      if (field === 'held') {
+        if (typeof value === 'number' && Number.isInteger(value) && value >= 0) depot.held[resource] = value;
+        else warnings.push(`${path}: ${JSON.stringify(value)} is not a whole number ≥ 0; read as 0`);
+      } else if (typeof value === 'number' && Number.isFinite(value)) {
+        depot.keep[resource] = clampKeep(value);
+        note(path, value, depot.keep[resource], warnings);
+      } else {
+        warnings.push(`${path}: ${JSON.stringify(value)} is not a number; read as ${DEPOT_KEEP_DEFAULT}`);
+      }
+    }
+  }
+  return depot;
 }
 
 function validatePlayer(raw: Bag, classId: ClassId, content: SaveContent, warnings: string[]): Save['player'] {
@@ -1623,16 +1730,25 @@ const MIGRATIONS: Record<number, (raw: Bag) => Bag> = {
     meta: { ...bagAt(raw, 'meta'), lineage: [], stats: emptyRunStats() },
     progress: { ...bagAt(raw, 'progress'), claimed: [], exploredBelow: {}, remains: null, resume: null },
   }),
+  // SPEC-065 §4.1 (E120): every v3 value stays as it was, and the depot starts
+  // empty with every reserve at `DEPOT_KEEP_DEFAULT`. A reshape, like the rest.
+  3: (raw: Bag): Bag => ({ ...raw, version: 4, depot: emptyDepot() }),
 };
 
+/**
+ * Runs the chain up to `target`, the version this build writes. It is a
+ * parameter only so a test can stand in for an older build: the refusal of a
+ * newer save is this same comparison there (E9, E73, E120's rule).
+ */
 export function migrate(
   raw: { version: number } & Record<string, unknown>,
+  target: number = SAVE_VERSION,
 ): { ok: true; data: Save; from: number } | { ok: false; reason: 'newer_version' | 'unknown_version' } {
   const from = raw.version;
   if (typeof from !== 'number' || !Number.isInteger(from) || from < 0) return { ok: false, reason: 'unknown_version' };
-  if (from > SAVE_VERSION) return { ok: false, reason: 'newer_version' };
+  if (from > target) return { ok: false, reason: 'newer_version' };
   let current: Bag = raw;
-  for (let version = from; version < SAVE_VERSION; version++) {
+  for (let version = from; version < target; version++) {
     const step = MIGRATIONS[version];
     if (step === undefined) return { ok: false, reason: 'unknown_version' };
     current = step(current);

@@ -6579,10 +6579,12 @@ a.credits-licences {
 }
 
 @media (max-width: 700px) {
+  /* SPEC-065 §4.6: the station's four sections, two by two — four abreast
+     would cut `Character` short on a 320 px phone. */
   .screen-tabs {
     grid-column: 1 / -1;
     display: grid;
-    grid-template-columns: repeat(3, minmax(0, 1fr));
+    grid-template-columns: repeat(2, minmax(0, 1fr));
     gap: 6px;
   }
 
@@ -6602,10 +6604,12 @@ a.credits-licences {
 }
 
 @media (orientation: landscape) and (max-height: 500px) {
+  /* SPEC-065 §4.6: one share per section, so each of the four tabs is as
+     wide as an action. */
   .screen-tabs {
     display: flex;
     flex-direction: row;
-    flex: 3 1 0;
+    flex: 4 1 0;
     min-width: 0;
     gap: 6px;
   }
@@ -7091,4 +7095,75 @@ html.scheme-touch .puzzle-panel {
 html.reduce-motion .puzzle-pipe,
 html.reduce-motion .puzzle-cell {
   transition: none;
+}
+
+/* ================================================================ SPEC-065 */
+/* §4.5: the pad terminal's Cargo section, above its footer row — a heading,
+   then one row per resource: the hold against its cap, the reserve between
+   its two steps, and the ship button, which wraps under them on a narrow
+   terminal. A deliver need above the reserve adds a line (E117). */
+.pad-terminal .terminal-cargo {
+  margin: 8px 0 4px;
+  padding-top: 8px;
+  border-top: 1px solid var(--panel-edge);
+}
+
+/* SPEC-045 §2: written in sentence case, capitalised here like a heading. */
+.pad-terminal .terminal-heading {
+  margin: 0 0 4px;
+  font-weight: 600;
+  letter-spacing: var(--track);
+  text-transform: uppercase;
+}
+
+.terminal-cargo-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 10px;
+  margin: 6px 0;
+}
+
+.terminal-cargo-held {
+  flex: 1 1 auto;
+  min-width: 9ch;
+  font-variant-numeric: tabular-nums;
+}
+
+.terminal-keep {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.terminal-keep-value {
+  min-width: 8ch;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+
+.terminal-cargo-row > .ui-btn {
+  margin-left: auto;
+}
+
+.terminal-cargo-need {
+  flex: 1 1 100%;
+  margin: 0;
+  color: var(--warn);
+  font-size: var(--type-sm);
+}
+
+/* §4.6: the Depot tab's row head — the resource, what the depot holds and the
+   hold against its cap. Nothing in it opens a card, unlike the shop's head. */
+.depot-row-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 12px;
+}
+
+.depot-amount {
+  color: var(--ink-dim);
+  font-size: var(--type-sm);
+  font-variant-numeric: tabular-nums;
 }

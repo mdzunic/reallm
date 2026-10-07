@@ -29,10 +29,13 @@ const info = async (page: Page): Promise<Record<string, number | string>> =>
 const stats = (page: Page): Promise<SaveSnapshot['meta']['stats'] | null> =>
   page.evaluate(() => window.__reallm.save().current?.meta.stats ?? null);
 
-test('1. a fresh save is version 3 with the new fields empty', async ({ page }) => {
+// SPEC-065 §4.1 moved the current version on to 4: what this suite pins of
+// version 3 — its fields — is unchanged, and the numbers it reads say 4.
+
+test('1. a fresh save is the current version with the version-3 fields empty', async ({ page }) => {
   await start(page, '/?debug');
   const fresh = await page.evaluate((creation) => window.__reallm.save().create(0, creation), CREATION);
-  expect(fresh.version).toBe(3);
+  expect(fresh.version).toBe(4);
   expect(fresh.meta.lineage).toEqual([]);
   expect(fresh.meta.stats).toEqual(EMPTY_STATS);
   expect(fresh.meta.iteration).toBe(1);
@@ -41,17 +44,17 @@ test('1. a fresh save is version 3 with the new fields empty', async ({ page }) 
   expect(fresh.progress.remains).toBeNull();
   expect(fresh.progress.resume).toBeNull();
   // …and that is what was written.
-  expect(await page.evaluate(() => JSON.parse(localStorage.getItem('reallm:slot:0') ?? '{}').version)).toBe(3);
+  expect(await page.evaluate(() => JSON.parse(localStorage.getItem('reallm:slot:0') ?? '{}').version)).toBe(4);
 });
 
-test('2. E74: the v2 fixture loads as version 3, every v2 value kept and the new fields empty', async ({ page }) => {
+test('2. E74: the v2 fixture loads as the current version, every v2 value kept and the new fields empty', async ({ page }) => {
   await start(page, '/?debug');
   await page.evaluate((fixture) => localStorage.setItem('reallm:slot:0', JSON.stringify(fixture)), V2_SAVE);
 
   const loaded = await page.evaluate(() => window.__reallm.save().load(0));
   expect(loaded.ok).toBe(true);
   const data = loaded.data as SaveSnapshot;
-  expect(data.version).toBe(3);
+  expect(data.version).toBe(4);
   expect(data.player).toEqual(V2_SAVE.player);
   expect(data.resources).toEqual(V2_SAVE.resources);
   expect(data.progress.missionsDone).toEqual(V2_SAVE.progress.missionsDone);
@@ -60,7 +63,7 @@ test('2. E74: the v2 fixture loads as version 3, every v2 value kept and the new
   expect(data.meta.stats).toEqual(EMPTY_STATS);
   expect(data.progress).toMatchObject({ claimed: [], exploredBelow: {}, remains: null, resume: null });
 
-  // Through the Load menu: the station's first autosave writes it as v3, and
+  // Through the Load menu: the station's first autosave writes it as v4, and
   // `:bak` keeps the v2 JSON it replaced. SPEC-059 §4.1.3: the fixture was last
   // written long ago, so the "previously" card comes first.
   await page.getByTestId('menu-load').click();
@@ -69,16 +72,16 @@ test('2. E74: the v2 fixture loads as version 3, every v2 value kept and the new
   await expect(page.locator('[data-testid="scene-label"]')).toHaveText('station');
   await expect
     .poll(async () => page.evaluate(() => JSON.parse(localStorage.getItem('reallm:slot:0') ?? '{}').version), { timeout: 10_000 })
-    .toBe(3);
+    .toBe(4);
   expect(await page.evaluate(() => JSON.parse(localStorage.getItem('reallm:slot:0:bak') ?? '{}').version)).toBe(2);
 });
 
-test('3. E73: a version-4 save is refused as newer, and its Load row offers Export', async ({ page }) => {
+test('3. E73: a version-5 save is refused as newer, and its Load row offers Export', async ({ page }) => {
   await start(page, '/?debug');
-  await page.evaluate(() => localStorage.setItem('reallm:slot:1', JSON.stringify({ version: 4, player: {} })));
+  await page.evaluate(() => localStorage.setItem('reallm:slot:1', JSON.stringify({ version: 5, player: {} })));
 
   const refused = await page.evaluate(() => window.__reallm.save().load(1));
-  expect(refused).toMatchObject({ ok: false, reason: 'newer_version', foundVersion: 4 });
+  expect(refused).toMatchObject({ ok: false, reason: 'newer_version', foundVersion: 5 });
 
   await page.getByTestId('menu-load').click();
   const row = page.getByTestId('load-row-1');
@@ -86,7 +89,7 @@ test('3. E73: a version-4 save is refused as newer, and its Load row offers Expo
   await expect(page.getByTestId('load-slot-1-export')).toBeVisible();
   await expect(page.getByTestId('load-slot-1')).toHaveCount(0);
   // Refused, never rewritten.
-  expect(await page.evaluate(() => localStorage.getItem('reallm:slot:1'))).toBe(JSON.stringify({ version: 4, player: {} }));
+  expect(await page.evaluate(() => localStorage.getItem('reallm:slot:1'))).toBe(JSON.stringify({ version: 5, player: {} }));
 });
 
 test('4. a kill and a death are counted, and the death is still counted after a reload', async ({ page }) => {
@@ -143,7 +146,7 @@ test('4. a kill and a death are counted, and the death is still counted after a 
   expect(reloaded.data?.meta.stats.lastDeath['cinder4']).toEqual(at);
 });
 
-test('5. 47-a: a code exported from slot 0 imports into slot 2 as the same version-3 save', async ({ page }) => {
+test('5. 47-a: a code exported from slot 0 imports into slot 2 as the same save, at the current version', async ({ page }) => {
   await start(page, '/?debug');
   const codesSupported = await page.evaluate(() => window.__reallm.save().codesSupported);
   test.skip(!codesSupported, 'this browser has no CompressionStream (07-f)');
@@ -172,7 +175,7 @@ test('5. 47-a: a code exported from slot 0 imports into slot 2 as the same versi
   expect(two.ok).toBe(true);
   const slot2 = two.data as SaveSnapshot;
   const slot0 = zero.data as SaveSnapshot;
-  expect(slot2.version).toBe(3);
+  expect(slot2.version).toBe(4);
   expect(slot2.meta.slot).toBe(2);
   expect({ ...slot2, meta: { ...slot2.meta, slot: 0 } }).toEqual(slot0);
   expect(slot2.meta.stats.kills).toBe(31);

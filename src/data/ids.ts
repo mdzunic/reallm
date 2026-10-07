@@ -96,9 +96,11 @@ export type Difficulty = (typeof DIFFICULTIES)[number];
  * (43-h). Declared here so `core/Events.ts` can name it on `resource:collected`;
  * `systems/Economy.ts` re-exports it. SPEC-057 §3 appends `'recovered'` — what
  * a salvager takes back from their remains: charged against the cap, never
- * shipped home, and never counted toward a collect.
+ * shipped home, and never counted toward a collect. SPEC-065 §3 appends
+ * `'depot'` — what the station's Depot tab draws back into the hold: under the
+ * same three rules as a recovery.
  */
-export const RESOURCE_SOURCES = ['pickup', 'reward', 'voucher', 'subsidy', 'recovered'] as const;
+export const RESOURCE_SOURCES = ['pickup', 'reward', 'voucher', 'subsidy', 'recovered', 'depot'] as const;
 export type ResourceSource = (typeof RESOURCE_SOURCES)[number];
 
 /** The five assistants of PLAN §4; `aria` is free from the first save. */

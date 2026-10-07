@@ -230,8 +230,15 @@ test('1, 9. a run in combat drains to exhaustion, the ring says so, and a fresh 
 
   // Every frame after it, inside the regen delay and still in combat: the run
   // is refused with Shift held, and the ring beside the salvager is up, amber
-  // and dashed — `is-exhausted` — and reads under the notch at 30.
-  const after = samples.slice(first + 1).filter((s) => s.viewTime <= exhausted.viewTime + 0.75);
+  // and dashed — `is-exhausted` — and reads under the notch at 30. A frame is
+  // after it once one has drawn past it: the view clock and the ring move only
+  // on a drawn frame, and a frame whose accumulator held less than a step runs
+  // none and draws nothing (SPEC-002 §4.1, SPEC-040 §4.2). CI's fast runners
+  // sample such a frame right behind the exhausting step — a sprinting step
+  // itself, the one that emptied the pool — and read that same step again.
+  const after = samples
+    .slice(first + 1)
+    .filter((s) => s.viewTime > exhausted.viewTime && s.viewTime <= exhausted.viewTime + 0.75);
   expect(after.length).toBeGreaterThan(0);
   for (const s of after) {
     const at = `${s.viewTime}`;

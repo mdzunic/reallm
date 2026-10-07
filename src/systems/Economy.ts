@@ -12,12 +12,17 @@
 //     SPEC-039 §4.3 the Engineer's refit discount covers ship and companion
 //     prices, and the Quartermaster's ship, gear and companion prices — a
 //     recipe has no token price, so crafting gets the tech share alone;
-//   - the cargo cap binds pickups and nothing else: a reward, a refuel voucher
-//     or the station subsidy must never be silently lost (E3, §2);
+//   - the cargo cap binds pickups (and SPEC-057's recoveries and SPEC-065's
+//     depot draws) and nothing else: a reward, a refuel voucher or the
+//     station subsidy must never be silently lost (E3, §2);
 //   - the two anti-softlock rules live here rather than in a scene, because
 //     they are the guarantee the balance tests prove — the station tops the
 //     hold up to the cheapest unlocked jump (E1) and every chapter's boss
-//     mission pays for the next one (§4.6).
+//     mission pays for the next one (§4.6);
+//   - SPEC-065's Relay depot only moves resources: the pad terminal ships the
+//     hold's surplus to it and the station draws it back. It is the station's
+//     tank, so a departure and the subsidy count its oil (E119), and nothing
+//     in it is ever sold.
 //
 // The content tables are read through their *schema* types (`Item`, `Upgrade`,
 // …) rather than the `as const` literal types they are declared with: on a
@@ -25,7 +30,7 @@
 // property at all (the pattern `tests/data/content.test.ts` uses).
 //
 // Pure: no `three`, no DOM, no `Math.random` (SPEC-001 §4, §7).
-import { maxHp, type Save, type SaveReason } from '@/core/Save';
+import { clampKeep, maxHp, type Save, type SaveReason } from '@/core/Save';
 import {
   ATTRIBUTE_EFFECTS,
   CACHE_IDS,
@@ -99,8 +104,8 @@ export type Result<T = {}> = ({ ok: true } & T) | Fail;
 export type PurchaseKind = 'ship' | 'gear' | 'companion' | 'craft';
 
 /**
- * Where a resource came from; only `'pickup'` (and SPEC-057's `'recovered'`)
- * is charged against the cap (§4.5). SPEC-043 §3 moved the union to `data/ids.ts`, so `core/Events.ts`
+ * Where a resource came from; only `'pickup'` (and SPEC-057's `'recovered'`
+ * and SPEC-065's `'depot'`) is charged against the cap (§4.5). SPEC-043 §3 moved the union to `data/ids.ts`, so `core/Events.ts`
  * can carry it on `resource:collected`; it is re-exported here.
  */
 export type { ResourceSource };
@@ -350,6 +355,10 @@ export class Economy {
    * never shipped home, and what does not fit stays in the remains: `blocked`
    * says how much, and the event never carries the flag, so no full-hold
    * warning plays.
+   *
+   * SPEC-065 §4.3: a `depot` unit is drawn at the station under the same rule
+   * as a recovery — charged against the cap, never shipped home, and what does
+   * not fit stays at the depot (`draw` only asks for what fits).
    */
   addResource(
     resource: ResourceId,
@@ -359,12 +368,13 @@ export class Economy {
     const want = Math.floor(amount);
     if (!Number.isFinite(want) || want <= 0) return { added: 0, shipped: 0, blocked: 0 };
     const have = this.#save.resources[resource];
-    const capped = source === 'pickup' || source === 'recovered';
+    const capped = source === 'pickup' || source === 'recovered' || source === 'depot';
     const added = capped ? Math.max(0, Math.min(want, this.cargoCap() - have)) : want;
     const shipped = source === 'pickup' ? Math.min(want - added, this.collectDemand(resource)) : 0;
     const blocked = want - added - shipped;
     // SPEC-057 §4.4: a recovery's rest stays in the remains — nothing bounced.
-    const bounced = source === 'recovered' ? 0 : blocked;
+    // SPEC-065 §4.3: a draw's stays at the depot.
+    const bounced = source === 'recovered' || source === 'depot' ? 0 : blocked;
     this.#save.resources[resource] = have + added;
     if (added > 0 || shipped > 0 || bounced > 0) {
       this.#events.emit('resource:collected', {
@@ -400,6 +410,74 @@ export class Economy {
       this.#events.emit('resource:spent', { resource, amount, total, reason });
     }
     return true;
+  }
+
+  // ------------------------------------------- the Relay depot (SPEC-065)
+
+  /** SPEC-065 §4.1: what Command Relay keeps of `resource` for this slot. */
+  depotHeld(resource: ResourceId): number {
+    return this.#save.depot.held[resource];
+  }
+
+  /**
+   * SPEC-065 §4.2: what the pad terminal would send home — whatever the hold
+   * carries above the larger of the reserve and `deliverNeed`, which is what
+   * this planet's active deliver objectives still need of it (E117).
+   */
+  shippable(resource: ResourceId, deliverNeed: number): number {
+    const floor = Math.max(this.#save.depot.keep[resource], deliverNeed);
+    return Math.max(0, this.#save.resources[resource] - floor);
+  }
+
+  /**
+   * SPEC-065 §4.2: moves exactly `shippable` units from the hold to the depot.
+   * Only the pad terminal calls it, and it asks for no write of its own: the
+   * scene's next safe point keeps it. Nothing is sold — the units only move.
+   */
+  shipHome(resource: ResourceId, deliverNeed: number): { ok: true; shipped: number } | { ok: false; reason: 'nothing' } {
+    const shipped = this.shippable(resource, deliverNeed);
+    if (shipped <= 0) return { ok: false, reason: 'nothing' };
+    const total = this.#save.resources[resource] - shipped;
+    this.#save.resources[resource] = total;
+    this.#save.depot.held[resource] += shipped;
+    this.#events.emit('resource:spent', { resource, amount: shipped, total, reason: 'depot' });
+    return { ok: true, shipped };
+  }
+
+  /**
+   * SPEC-065 §4.5: stores the pad terminal's reserve for `resource`, clamped
+   * and stepped as the validator does (`clampKeep`), and returns what it
+   * stored. The terminal is what keeps its steps inside the hold's cap (65-a).
+   */
+  setKeep(resource: ResourceId, value: number): number {
+    const kept = clampKeep(value);
+    this.#save.depot.keep[resource] = kept;
+    return kept;
+  }
+
+  /** SPEC-065 §4.3 (E118): what a draw would bring back — the depot's amount, as far as the hold has room. */
+  drawable(resource: ResourceId): number {
+    const room = this.cargoCap() - this.#save.resources[resource];
+    return Math.max(0, Math.min(this.#save.depot.held[resource], room));
+  }
+
+  /**
+   * SPEC-065 §4.3: draws `drawable` units back into the hold — the station's
+   * Depot tab is the only caller. They arrive through `addResource(…, 'depot')`,
+   * so `resource:collected` moves the wallet and plays the pickup chime, and a
+   * collect objective never counts them (43-h). Refused with nothing moved when
+   * the depot is empty or the hold has no room (E118).
+   */
+  draw(resource: ResourceId): { ok: true; drawn: number } | { ok: false; reason: 'empty' | 'cargo_full' } {
+    const held = this.#save.depot.held[resource];
+    if (held <= 0) return { ok: false, reason: 'empty' };
+    const want = this.drawable(resource);
+    if (want <= 0) return { ok: false, reason: 'cargo_full' };
+    this.#save.depot.held[resource] = held - want;
+    const { added } = this.addResource(resource, want, 'depot');
+    // `want` fits by construction; anything that did not would stay at the depot.
+    this.#save.depot.held[resource] += want - added;
+    return { ok: true, drawn: added };
   }
 
   // --------------------------------------------------------------- pricing
@@ -738,12 +816,16 @@ export class Economy {
     return missingRequirements(this.#save, reqs);
   }
 
-  /** §4.6. `needOil` is the shortfall, which is exactly what a subsidy grants. */
+  /**
+   * §4.6. `needOil` is the shortfall, which is exactly what a subsidy grants.
+   * SPEC-065 §4.4 (E119): the depot is the station's tank, so the hold's oil
+   * and the depot's count together.
+   */
   canDepart(planet: PlanetId): DepartResult {
     const missing: Requirement[] = this.serviceMode ? [] : this.missingRequirements(PLANET_TABLE[planet].unlock);
     if (missing.length > 0) return { ok: false, reason: 'locked', missing };
     const cost = this.fuelCost(planet);
-    const oil = this.#save.resources.oil;
+    const oil = this.#save.resources.oil + this.#save.depot.held.oil;
     if (oil < cost) return { ok: false, reason: 'fuel', needOil: cost - oil };
     return { ok: true };
   }
@@ -752,10 +834,18 @@ export class Economy {
    * §4.6: charged up front, on a confirmed departure, before the flight scene
    * starts — so an emergency recall loses the fuel rather than refunding it
    * (E5). The return trip is free.
+   *
+   * SPEC-065 §4.4 (E119): the hold pays first, through `spendResources` and
+   * its `resource:spent`; the depot pays the rest with no event, because the
+   * hold did not change.
    */
   payFuel(planet: PlanetId): boolean {
     if (!this.canDepart(planet).ok) return false;
-    return this.spendResources({ oil: this.fuelCost(planet) }, `fuel:${planet}`);
+    const cost = this.fuelCost(planet);
+    const fromHold = Math.min(cost, this.#save.resources.oil);
+    if (!this.spendResources({ oil: fromHold }, `fuel:${planet}`)) return false;
+    this.#save.depot.held.oil -= cost - fromHold;
+    return true;
   }
 
   /**
@@ -764,6 +854,9 @@ export class Economy {
    * purpose — the campaign is never blocked, and grinding Cinder-4 stays the
    * honest path. Returns the oil granted, 0 for nothing; the station shows
    * ARIA's line off that number (§4.6), which is why nothing is said here.
+   *
+   * SPEC-065 §4.4 (E119): the shortfall is of the hold and the depot
+   * together, so oil parked at the depot never earns free oil.
    */
   applyStationSubsidy(): number {
     let cheapest = Infinity;
@@ -780,7 +873,7 @@ export class Economy {
       if (mission === undefined || mission.scene !== 'flight' || mission.type !== 'main') continue;
       target = Math.max(target, this.fuelCost(mission.planet));
     }
-    const grant = target - this.#save.resources.oil;
+    const grant = target - this.#save.resources.oil - this.#save.depot.held.oil;
     if (grant <= 0) return 0;
     this.addResource('oil', grant, 'subsidy');
     return grant;

@@ -805,6 +805,75 @@ describe('Missions.collectDemand (SPEC-034 §4.12)', () => {
 });
 
 /**
+ * SPEC-065 §4.2 (E117): what the pad terminal never ships below — the open
+ * deliver objectives of the current stages, read as `collectDemand` reads
+ * collect ones. A delivery is all or nothing (E16), so an open one needs its
+ * whole amount.
+ */
+describe('Missions.deliverDemand (SPEC-065 §4.2, E117)', () => {
+  it('counts an open deliver objective of the current stage, and not a later stage’s', () => {
+    // c1_m3: stage 0 kills the dune wurm, stage 1 runs 100 oil to the beacon.
+    const h = harness((save) => {
+      save.progress.missionsDone.push('c1_m1', 'c1_m2');
+      save.progress.missionsActive.push({ id: 'c1_m3', stage: 0, counters: {} });
+    });
+    expect(h.missions.deliverDemand('oil')).toBe(0);
+    h.events.emit('boss:defeated', { boss: 'dune_wurm' });
+    expect(h.missions.active[0]?.stage).toBe(1);
+    expect(h.missions.deliverDemand('oil')).toBe(100);
+    // Only the resource it names.
+    for (const resource of ['wheat', 'water', 'lithium'] as const) expect(h.missions.deliverDemand(resource), resource).toBe(0);
+
+    // A short hold changes nothing: the need is the objective's, not the shortfall.
+    h.save.resources.oil = 40;
+    expect(h.missions.deliverDemand('oil')).toBe(100);
+
+    // Delivered, the mission is over and nothing is needed.
+    h.save.resources.oil = 120;
+    h.ctx.player.x = 50;
+    h.ctx.player.z = 20;
+    h.run(0.1);
+    expect(h.of('poi:delivered')).toHaveLength(1);
+    expect(h.missions.deliverDemand('oil')).toBe(0);
+  });
+
+  it('leaves out a finished deliver objective and a collect objective', () => {
+    // Rebuilt with the stage-1 delivery already counted done.
+    const finished = harness((save) => {
+      save.progress.missionsDone.push('c1_m1', 'c1_m2');
+      save.progress.missionsActive.push({ id: 'c1_m3', stage: 1, counters: { '1:0': 1 } });
+    });
+    expect(finished.missions.active[0]?.stage).toBe(1);
+    expect(finished.missions.currentObjectives('c1_m3')[0]?.done).toBe(true);
+    expect(finished.missions.deliverDemand('oil')).toBe(0);
+
+    // c1_m2 collects 150 oil: a collect objective is not a deliver one.
+    const collect = harness((save) => save.progress.missionsDone.push('c1_m1'));
+    expect(collect.missions.accept('c1_m2').ok).toBe(true);
+    expect(collect.missions.collectDemand('oil')).toBe(150);
+    expect(collect.missions.deliverDemand('oil')).toBe(0);
+  });
+
+  it('reads only this planet’s missions, as the runtime does', () => {
+    // c2_s1 delivers water on Vetra; a Cinder-4 runtime does not carry it.
+    const h = harness((save) => {
+      save.progress.missionsDone.push('c1_m1', 'c1_m2', 'c1_m3', 'c2_m1');
+      save.progress.missionsActive.push({ id: 'c2_s1', stage: 1, counters: {} });
+    });
+    expect(h.missions.deliverDemand('water')).toBe(0);
+    const vetra = harness(
+      (save) => {
+        save.progress.missionsDone.push('c1_m1', 'c1_m2', 'c1_m3', 'c2_m1');
+        save.progress.missionsActive.push({ id: 'c2_s1', stage: 1, counters: {} });
+      },
+      'surface',
+      'vetra',
+    );
+    expect(vetra.missions.deliverDemand('water')).toBe(40);
+  });
+});
+
+/**
  * SPEC-034 §4.15: the pin lives in `progress.missionsActive` order, which the
  * runtime already reads on the next landing — so it survives a reload with no
  * save field. The board's badge follows the front entry.

@@ -279,6 +279,28 @@ export class Missions {
     return Math.max(0, total);
   }
 
+  /**
+   * SPEC-065 §4.2 (E117): units the active deliver objectives of the *current*
+   * stages still need of `resource`, finished ones excluded, as
+   * `collectDemand` reads collect objectives. A delivery is all or nothing
+   * (E16), so an open one needs its whole amount. The pad terminal never ships
+   * the hold below it.
+   */
+  deliverDemand(resource: ResourceId): number {
+    let total = 0;
+    for (const state of this.#states) {
+      if (state.complete) continue;
+      const stage = MISSIONS[state.id].stages[state.stage] ?? [];
+      for (let index = 0; index < stage.length; index++) {
+        const objective = stage[index] as Objective;
+        if (objective.kind !== 'deliver' || objective.resource !== resource) continue;
+        if (this.#done(state, objective, index)) continue;
+        total += objective.amount;
+      }
+    }
+    return total;
+  }
+
   get active(): MissionState[] {
     return this.#states;
   }

@@ -459,6 +459,9 @@ export class StarmapScene extends UiScene<'starmap'> {
     }
     const fuel = economy.fuelCost(this.#selected);
     const oil = data.resources.oil;
+    // SPEC-065 §4.4 (E119): the depot pays what the hold cannot, so the line
+    // is short only when both together are.
+    const short = oil + economy.depotHeld('oil') < fuel;
     // Travel shortens as the engine speeds up: seconds / speedMult[tier].
     // SPEC-045 §4.7: a `duration`, so a 90 s trip reads `1 min 30 s`.
     const speed = ENGINE.metrics['speedMult']?.[data.ship.engine] ?? 1;
@@ -515,7 +518,7 @@ export class StarmapScene extends UiScene<'starmap'> {
         testId(
           h(
             'p',
-            { class: `starmap-line${oil < fuel && !this.#leaving ? ' is-short' : ''}` },
+            { class: `starmap-line${short && !this.#leaving ? ' is-short' : ''}` },
             `Fuel: ${fuel} oil (have ${oil})`,
           ),
           'starmap-fuel',

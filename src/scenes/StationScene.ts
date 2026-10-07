@@ -43,6 +43,7 @@ import { confirmSheet } from '@/ui/ConfirmSheet';
 import { director } from '@/scenes/Director';
 import { CharacterPanel } from '@/ui/CharacterPanel';
 import { openCommsLog } from '@/ui/CommsLog';
+import { DepotPanel } from '@/ui/DepotPanel';
 import { dialogueLayer, type DialogueUI } from '@/ui/DialogueUI';
 import { el, h, testId } from '@/ui/dom';
 import { clearEndingOverlays, EndingOverlay } from '@/ui/EndingOverlay';
@@ -67,7 +68,8 @@ const INSTALL_TOAST_MS = 10_000;
 export const RECALL_DETAIL_TEXT = "Hull breached — ARIA flew you home. The jump's fuel is spent; your cargo is safe.";
 const HUB_ENVIRONMENT_INTENSITY = 0.9;
 
-type StationTab = 'missions' | 'shop' | 'character';
+/** SPEC-065 §4.6: `depot` is Command Relay's store, after Character. */
+type StationTab = 'missions' | 'shop' | 'character' | 'depot';
 
 export class StationScene extends UiScene<'station'> {
   /** The three props that turn together; the lights and the window do not. */
@@ -624,9 +626,10 @@ export class StationScene extends UiScene<'station'> {
 
   /**
    * AC-28: the frame's rail — left on desktop, bottom on phones. SPEC-044
-   * §4.11: the three sections are its tablist; Star Map, Settings and Quit
-   * (and Update) act, after a rule. §4.6: while any mission is active the Star
-   * Map action is the primary — it is where an accepted mission goes next.
+   * §4.11: the sections are its tablist — SPEC-065 §4.6 adds Depot after
+   * Character, a fourth — and Star Map, Settings and Quit (and Update) act,
+   * after a rule. §4.6: while any mission is active the Star Map action is
+   * the primary — it is where an accepted mission goes next.
    */
   #renderRail(): void {
     const section = (id: StationTab, label: string): ScreenTab => ({
@@ -649,6 +652,7 @@ export class StationScene extends UiScene<'station'> {
       section('missions', 'Missions'),
       section('shop', 'Shop'),
       section('character', 'Character'),
+      section('depot', 'Depot'),
       action('starmap', 'Star Map ›', () => this.#starmap(), active),
       // SPEC-058 §4.1: an ended run, below the iteration cap, may begin its next instance.
       ...(save !== null && nextInstanceOffered(save) ? [action('next', 'Next instance', () => this.#nextInstance())] : []),
@@ -726,6 +730,10 @@ export class StationScene extends UiScene<'station'> {
           unlocks: () => this.services.settings.get().unlocks,
           ...(this.#charCard === null ? {} : { share: this.#charCard }),
         });
+        return;
+      case 'depot':
+        // SPEC-065 §4.6: draws only; the pad terminal is what ships here.
+        new DepotPanel(box, shared);
         return;
     }
   }

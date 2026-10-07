@@ -504,7 +504,8 @@ test('5. the station sections are a tablist: ArrowDown then Enter opens the Shop
   await start(page, URL);
   await prepare(page, {});
   await station(page);
-  await expect(page.locator('[role="tablist"] [role="tab"]')).toHaveCount(3);
+  // SPEC-065 §4.6: Depot is the fourth section, after Character.
+  await expect(page.locator('[role="tablist"] [role="tab"]')).toHaveCount(4);
   await expect(page.locator('[role="tablist"]')).toHaveAttribute('aria-label', 'Station');
 
   await page.getByTestId('station-tab-missions').focus();
@@ -527,11 +528,11 @@ test('5. the station sections are a tablist: ArrowDown then Enter opens the Shop
 
   // Home, End and the wrap; ArrowUp walks back.
   await page.keyboard.press('End');
-  expect(await focused(page)).toBe('station-tab-character');
+  expect(await focused(page)).toBe('station-tab-depot');
   await page.keyboard.press('ArrowRight');
   expect(await focused(page)).toBe('station-tab-missions');
   await page.keyboard.press('ArrowUp');
-  expect(await focused(page)).toBe('station-tab-character');
+  expect(await focused(page)).toBe('station-tab-depot');
   await page.keyboard.press('Home');
   expect(await focused(page)).toBe('station-tab-missions');
   await page.keyboard.press('Space');
