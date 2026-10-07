@@ -653,7 +653,9 @@ export const ITEMS = {
     slot: 'heavy',
     line: 'launcher',
     tier: 3,
-    damage: 80,
+    // Review 2026-10 (G-18, *initial tuning*): 95 (was 80) — less than the
+    // chapter-1 Rocket's 90 on the same cooldown read as a downgrade.
+    damage: 95,
     fireRate: 1,
     projectileSpeed: 18,
     range: 22,

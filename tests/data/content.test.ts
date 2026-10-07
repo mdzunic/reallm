@@ -3286,7 +3286,8 @@ describe('content invariant 24: the treasure (SPEC-056 §4.8)', () => {
       ['relic_cold_coil', 'Cold Coil', 'Coil', 'primary', 'machine_gun', 2, 10, 9, 32, 14],
       ['relic_seed_drum', 'Seed Drum', 'SeedDrum', 'heavy', 'launcher', 2, 45, 2.5, 16, 16],
       ['relic_slag_vent', 'Slag Vent', 'SlagVent', 'primary', 'machine_gun', 3, 13, 11, 34, 15],
-      ['relic_seeker', 'Seeker Tube', 'Seeker', 'heavy', 'launcher', 3, 80, 1, 18, 22],
+      // Review 2026-10 (G-18): 95 (was 80), past the Rocket's 90.
+      ['relic_seeker', 'Seeker Tube', 'Seeker', 'heavy', 'launcher', 3, 95, 1, 18, 22],
     ]);
     expect(relics.map((item) => (item.kind === 'weapon' ? [item.price, item.model, item.pierce, item.twist] : []))).toEqual([
       [null, 'procedural', 0, { kind: 'execute', belowHp: 0.3, mult: 2 }],
