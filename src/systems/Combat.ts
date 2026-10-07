@@ -1937,8 +1937,11 @@ export class Combat {
    * 11-j: nearest with a clear line wins; if every candidate is blocked, nearest
    * overall. SPEC-054 §4.6: below (`world.sight` set), a candidate farther than
    * the sight counts only while the light falls on it — you cannot shoot what
-   * you cannot see. SPEC-056 §4.5: or a burning flare does. A held pointer
-   * aim or an aim-drag never comes through here.
+   * you cannot see. SPEC-056 §4.5: or a burning flare does. Below, too, only a
+   * clear line counts (review 2026-10, B-02): an enemy in the next room is
+   * behind rock, and snapping the facing (and the beam) to it would empty the
+   * magazine into the wall. A held pointer aim or an aim-drag never comes
+   * through here.
    */
   #autoTarget(range: number): EnemyEntity | null {
     const p = this.#world.player;
@@ -1970,7 +1973,7 @@ export class Combat {
         bestClearD = d;
       }
     }
-    return bestClear ?? best;
+    return sight !== undefined ? bestClear : (bestClear ?? best);
   }
 
   #spawnPlayerProjectile(

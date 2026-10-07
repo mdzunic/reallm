@@ -394,6 +394,12 @@ function updateWander(e: EnemyEntity, world: CombatWorld, dt: number, rng: Rng, 
       if (acquires && e.placed && distance(e.spawnX, e.spawnZ, target.x, target.z) > e.leash) {
         acquires = false;
       }
+      // SPEC-054 §4.7 (review 2026-10, B-02): nor through rock — a cave pack
+      // in the next room would run at the wall and pin itself there. Only a
+      // clear line acquires, the rule a hidden player already gets.
+      if (acquires && e.placed && !world.obstacles.lineClear(e.x, e.z, target.x, target.z)) {
+        acquires = false;
+      }
       if (e.aggro || acquires) {
         e.aggro = true;
         enterState(e, 'chase');

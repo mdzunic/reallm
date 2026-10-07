@@ -2501,6 +2501,41 @@ describe('auto-fire in the dark (SPEC-054 §4.6)', () => {
     expect(shell.targetZ).toBeCloseTo(0, 6);
   });
 
+  it('below, an enemy behind rock is no target: no shot, and the facing (the beam) stays put (review B-02)', () => {
+    // A wall between this room and the next, at x = 4.
+    const wall = new CircleObstacles([{ x: 4, z: 0, radius: 1.5 }]);
+    const dark = harness({ obstacles: wall });
+    dark.world.light = { on: false };
+    dark.world.sight = DARK_SIGHT;
+    dark.world.player.facing = Math.PI;
+    dark.spawn('hive_egg', 7.5, 0); // inside the 9 m sight, but through the wall
+    dark.input.autoFire = true;
+    dark.run(0.5);
+    expect({ fired: dark.of('weapon:fired').length, facing: dark.world.player.facing }).toEqual({ fired: 0, facing: Math.PI });
+
+    // The light on and on it, 15 m off through the same wall: still no shot.
+    const lit = harness({ obstacles: wall });
+    lit.world.light = { on: true };
+    lit.world.sight = DARK_SIGHT;
+    lit.world.player.facing = 0;
+    lit.spawn('hive_egg', 15, 0);
+    lit.input.autoFire = true;
+    lit.run(0.5);
+    expect(lit.of('weapon:fired')).toHaveLength(0);
+    // One in the open beside it is still a target.
+    lit.spawn('hive_egg', 0, 6);
+    lit.step();
+    expect(lit.of('weapon:fired')).toHaveLength(1);
+    expect(lit.world.projectiles.at(0).vz).toBeCloseTo(22, 5);
+
+    // The surface keeps 11-j: a blocked-only target is still fired at.
+    const above = harness({ obstacles: wall });
+    above.spawn('hive_egg', 7.5, 0);
+    above.input.autoFire = true;
+    above.step();
+    expect(above.of('weapon:fired')).toHaveLength(1);
+  });
+
   it('on the surface (light and sight unset) nothing changes: a 12 m enemy behind is a target', () => {
     const h = harness();
     expect(h.world.light).toBeUndefined();
