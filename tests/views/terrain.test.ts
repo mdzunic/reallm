@@ -9,6 +9,10 @@ import { groundLayer } from '@/views/ProceduralTextures';
 import {
   CANOPY_SHADE,
   DETAIL_STRENGTH,
+  MACRO_PATCH_METRES,
+  macroPatchAt,
+  macroTintAt,
+  type TerrainMacro,
   DETAIL_TILE_METRES,
   TERRAIN_TILE,
   TERRAIN_TINT_AMOUNT,
@@ -335,5 +339,71 @@ describe('detail, anti-tiling, the seam and canopy shade (SPEC-053 §4.6)', () =
     // Overlapping canopies take the strongest, never the product.
     const twice = buildTerrainTiles(field, new THREE.MeshStandardMaterial(), { canopies: [{ x, z, r }, { x, z, r: r * 2 }] })[0] as THREE.Mesh;
     expect(tint(twice, centre) / tint(mesh, centre)).toBeCloseTo(0.7, 6);
+  });
+});
+
+// ---------------------------------------------------------- PLAN R28 / SPEC-067
+
+describe('the macro patch field (SPEC-067)', () => {
+  const MACRO: TerrainMacro = { seed: 0x6d61, hues: ['#e07040', '#d8d4cc'], strength: 0.6, value: 0.3, patches: 0.6 };
+  const tint = (m: THREE.Mesh): THREE.BufferAttribute => m.geometry.getAttribute('color') as THREE.BufferAttribute;
+  const splat = (m: THREE.Mesh): THREE.BufferAttribute => m.geometry.getAttribute('splat') as THREE.BufferAttribute;
+
+  it('multiplies each vertex tint by the field’s hue and value, and adds layer B’s patches to the splat', () => {
+    const plain = buildTerrainTiles(field, new THREE.MeshStandardMaterial());
+    const dressed = buildTerrainTiles(field, new THREE.MeshStandardMaterial(), undefined, MACRO);
+    const hueA = new THREE.Color(MACRO.hues[0]);
+    const hueB = new THREE.Color(MACRO.hues[1]);
+    hueA.multiplyScalar(1 / (0.2126 * hueA.r + 0.7152 * hueA.g + 0.0722 * hueA.b));
+    hueB.multiplyScalar(1 / (0.2126 * hueB.r + 0.7152 * hueB.g + 0.0722 * hueB.b));
+    const out = new THREE.Color();
+    let hued = 0;
+    let patched = 0;
+    for (let t = 0; t < plain.length; t++) {
+      const a = plain[t] as THREE.Mesh;
+      const b = dressed[t] as THREE.Mesh;
+      const position = a.geometry.getAttribute('position') as THREE.BufferAttribute;
+      for (let i = 0; i < position.count; i += 7) {
+        const x = position.getX(i);
+        const z = position.getZ(i);
+        const value = macroTintAt(MACRO, hueA, hueB, x, z, out);
+        expect(value).toBeGreaterThanOrEqual(1 - MACRO.value - 1e-9);
+        expect(value).toBeLessThanOrEqual(1 + MACRO.value + 1e-9);
+        expect(tint(b).getX(i)).toBeCloseTo(tint(a).getX(i) * value * out.r, 5);
+        expect(tint(b).getY(i)).toBeCloseTo(tint(a).getY(i) * value * out.g, 5);
+        expect(tint(b).getZ(i)).toBeCloseTo(tint(a).getZ(i) * value * out.b, 5);
+        if (Math.abs(out.r - out.b) > 0.05) hued++;
+        const patch = macroPatchAt(MACRO, x, z);
+        expect(patch).toBeGreaterThanOrEqual(0);
+        expect(patch).toBeLessThanOrEqual(MACRO.patches);
+        expect(splat(b).getX(i)).toBeCloseTo(Math.min(1, splat(a).getX(i) + patch), 6);
+        if (patch > 0.3) patched++;
+      }
+    }
+    // The field really varies: some ground is pulled warm, some carries layer B's patches.
+    expect(hued).toBeGreaterThan(0);
+    expect(patched).toBeGreaterThan(0);
+    expect(MACRO_PATCH_METRES).toBeGreaterThanOrEqual(20);
+  });
+
+  it('keeps tile borders in exact agreement, and leaves the material and its program key alone', () => {
+    const seen = new Map<string, [number, number, number, number]>();
+    let shared = 0;
+    for (const mesh of buildTerrainTiles(field, new THREE.MeshStandardMaterial(), undefined, MACRO)) {
+      const position = mesh.geometry.getAttribute('position') as THREE.BufferAttribute;
+      for (let i = 0; i < position.count; i++) {
+        const key = `${position.getX(i)}|${position.getZ(i)}`;
+        const entry: [number, number, number, number] = [tint(mesh).getX(i), tint(mesh).getY(i), tint(mesh).getZ(i), splat(mesh).getX(i)];
+        const before = seen.get(key);
+        if (before === undefined) seen.set(key, entry);
+        else {
+          shared++;
+          expect(entry).toEqual(before);
+        }
+      }
+    }
+    expect(shared).toBeGreaterThan(100);
+    const material = createTerrainMaterial(A, B, PLANETS.cinder4.surface.look, PLANETS.cinder4.surface.palette);
+    expect(material.customProgramCacheKey()).toBe('terrain/1');
   });
 });

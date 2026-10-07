@@ -10,12 +10,18 @@
 // emissive — with a height-weighted two-layer blend. Lights, shadows, fog,
 // IBL and tone mapping stay three's own.
 //
+// PLAN R28 / SPEC-067: the tiles also bake the planet's macro patch field —
+// two hues, light and dark patches and large patches of layer B — into their
+// vertex tint and splat, so the ground stops reading as one tiling plate. It
+// is vertex data, computed once: no define, no program key, no fetch.
+//
 // SPEC-053 §4.6: on `medium` and `high` the same chunks also add a 1.2 m
 // detail normal and a rotated second sample of layer A against the tile, and
 // Eden's look adds the seam on every preset. The tiles' vertex tint darkens
 // under every canopy, computed once when they are built.
 import * as THREE from 'three';
 import type { HeightField } from '@/core/HeightField';
+import { fbm2 } from '@/core/Noise';
 import type { SurfaceLook } from '@/data/planets';
 import type { GroundLayer } from '@/views/ProceduralTextures';
 
@@ -47,6 +53,29 @@ const ANTI_TILE_SCALE = 0.43;
 export interface TerrainShade {
   canopies: readonly { x: number; z: number; r: number }[];
 }
+
+/**
+ * PLAN R28 / SPEC-067: the macro patch field a planet's look asks for
+ * (`look.dressing.macro`), seeded from `hash32(layout.hash, 'macro')`.
+ */
+export interface TerrainMacro {
+  seed: number;
+  /** Two hues (sRGB) the tint drifts between, each used at luminance 1. */
+  hues: readonly [string, string];
+  /** 0..1: how far the tint moves toward the hue. */
+  strength: number;
+  /** ± how much the value patches lighten and darken. */
+  value: number;
+  /** 0..1: how much layer B the large patches add to the splat. */
+  patches: number;
+}
+
+/** SPEC-067: the hue patches' scale, in metres (*initial tuning*)… */
+export const MACRO_HUE_METRES = 46;
+/** …the light and dark patches'… */
+export const MACRO_VALUE_METRES = 15;
+/** …and layer B's patches' — cracked-earth flats, ice sheets, mud. */
+export const MACRO_PATCH_METRES = 30;
 
 const scratchNormal = { x: 0, y: 1, z: 0 };
 
@@ -97,17 +126,61 @@ function canopyCover(shade: TerrainShade, buckets: Map<number, number[]>, x: num
   return strongest;
 }
 
+/** SPEC-067: an sRGB hue in linear space, scaled to luminance 1 — a multiplier that shifts hue, not value. */
+function unitHue(color: string): THREE.Color {
+  const hue = new THREE.Color(color);
+  const luminance = 0.2126 * hue.r + 0.7152 * hue.g + 0.0722 * hue.b;
+  return luminance > 0 ? hue.multiplyScalar(1 / luminance) : hue.setScalar(1);
+}
+
+/**
+ * SPEC-067, pure: the macro field at (x, z) — the hue mix into `out` (a
+ * multiplier around 1) and the value factor as the return. Allocates nothing.
+ */
+export function macroTintAt(
+  macro: TerrainMacro,
+  hueA: THREE.Color,
+  hueB: THREE.Color,
+  x: number,
+  z: number,
+  out: THREE.Color,
+): number {
+  const h = smoothstep(-0.3, 0.3, fbm2(macro.seed, x / MACRO_HUE_METRES, z / MACRO_HUE_METRES, 3));
+  const k = macro.strength;
+  out.r = 1 + (hueA.r + (hueB.r - hueA.r) * h - 1) * k;
+  out.g = 1 + (hueA.g + (hueB.g - hueA.g) * h - 1) * k;
+  out.b = 1 + (hueA.b + (hueB.b - hueA.b) * h - 1) * k;
+  const v = Math.min(1, Math.max(-1, 1.8 * fbm2(macro.seed + 1, x / MACRO_VALUE_METRES, z / MACRO_VALUE_METRES, 3)));
+  return 1 + macro.value * v;
+}
+
+/** SPEC-067, pure: how much layer B the large patches add at (x, z), 0..`macro.patches`. */
+export function macroPatchAt(macro: TerrainMacro, x: number, z: number): number {
+  return macro.patches * smoothstep(0.06, 0.3, fbm2(macro.seed + 2, x / MACRO_PATCH_METRES, z / MACRO_PATCH_METRES, 3));
+}
+
+const scratchHue = new THREE.Color();
+
 /**
  * All tiles covering the field's square, vertices in world space with the mesh
  * at the origin — bounding spheres still cull, and border vertices land on the
  * same grid nodes from both sides. SPEC-053 §4.6: with `shade`, each vertex's
  * tint is multiplied by `1 − CANOPY_SHADE × s` for the canopies over it.
+ * PLAN R28 / SPEC-067: with `macro`, the tint also takes the hue and value
+ * patches, and the splat layer B's large patches — the same at every border.
  */
-export function buildTerrainTiles(field: HeightField, material: THREE.Material, shade?: TerrainShade): THREE.Mesh[] {
+export function buildTerrainTiles(
+  field: HeightField,
+  material: THREE.Material,
+  shade?: TerrainShade,
+  macro?: TerrainMacro,
+): THREE.Mesh[] {
   const side = (field.n - 1) * field.cell;
   const tiles = Math.ceil(side / TERRAIN_TILE);
   const meshes: THREE.Mesh[] = [];
   const buckets = shade === undefined || shade.canopies.length === 0 ? null : canopyBuckets(shade);
+  const hueA = macro === undefined ? null : unitHue(macro.hues[0]);
+  const hueB = macro === undefined ? null : unitHue(macro.hues[1]);
 
   for (let tz = 0; tz < tiles; tz++) {
     for (let tx = 0; tx < tiles; tx++) {
@@ -142,10 +215,19 @@ export function buildTerrainTiles(field: HeightField, material: THREE.Material, 
         const flat = field.flats[at] as number;
         let tint = (1 + (0.72 - 1) * occlusion) * (1 + (1.06 - 1) * flat);
         if (shade !== undefined && buckets !== null) tint *= 1 - CANOPY_SHADE * canopyCover(shade, buckets, x, z);
-        colors[i * 3] = tint;
-        colors[i * 3 + 1] = tint;
-        colors[i * 3 + 2] = tint;
-        splats[i] = field.splat[at] as number;
+        let splat = field.splat[at] as number;
+        if (macro !== undefined && hueA !== null && hueB !== null) {
+          tint *= macroTintAt(macro, hueA, hueB, x, z, scratchHue);
+          colors[i * 3] = tint * scratchHue.r;
+          colors[i * 3 + 1] = tint * scratchHue.g;
+          colors[i * 3 + 2] = tint * scratchHue.b;
+          splat = Math.min(1, splat + macroPatchAt(macro, x, z));
+        } else {
+          colors[i * 3] = tint;
+          colors[i * 3 + 1] = tint;
+          colors[i * 3 + 2] = tint;
+        }
+        splats[i] = splat;
       }
       position.needsUpdate = true;
       normal.needsUpdate = true;
