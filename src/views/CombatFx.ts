@@ -386,6 +386,22 @@ export class CombatFx {
     this.#scorchScale[slot] = scale;
   }
 
+  /**
+   * SPEC-054 §4.2 (review 2026-10, B-22): forget every live burst, scorch and
+   * the muzzle pulse — the level swap calls it, because they keep their XZ and
+   * would draw on the other level's floor, inside a cave wall or in an open
+   * field. The pools and meshes stay; the next `sync` draws nothing. Never
+   * allocates.
+   */
+  clear(): void {
+    this.#born.fill(-Infinity);
+    this.#head = 0;
+    this.#scorchHead = 0;
+    this.#scorchCount = 0;
+    this.#lightFiredAt = -Infinity;
+    this.#light.intensity = 0;
+  }
+
   #emit(
     def: BurstDef,
     x: number,

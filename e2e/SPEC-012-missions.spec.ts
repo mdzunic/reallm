@@ -284,3 +284,29 @@ test('all five Cinder-4 missions complete end to end, with the echo glitch burst
   // The rewards actually paid out (AC-63's readout has real numbers behind it).
   expect(progress?.tokens ?? 0).toBeGreaterThanOrEqual(65);
 });
+
+// Review 2026-10, B-09 (E15): only an engaged arena calls off a survive
+// stage's storm. Another mission merely sitting at its boss stage once did,
+// so `c1_s2` ran its 90 s (and paid its `no_shelter` bonus) in calm weather.
+test('a survive stage forces its storm while another mission waits at its boss stage (E15)', async ({ page }) => {
+  await start(page, '/?debug&seed=123');
+  await page.evaluate((creation) => {
+    const bridge = window.__reallm.save();
+    bridge.create(0, creation, 123);
+    const save = bridge.current;
+    if (save === null) throw new Error('no save bound');
+    save.progress.missionsDone.push('c1_m1', 'c1_m2');
+    // c1_m3 waits at the dune wurm; c1_s2's survive wants its heatwave.
+    save.progress.missionsActive.push({ id: 'c1_m3', stage: 0, counters: {} }, { id: 'c1_s2', stage: 1, counters: {} });
+  }, CREATION);
+  await page.evaluate(() => window.__reallm.go('surface', { planet: 'cinder4', firstLanding: false }, { force: true }));
+  await expect(page.locator('[data-testid="scene-label"]')).toHaveText('surface');
+  await expect(page.locator('[data-testid="transition-fade"]')).toHaveCSS('pointer-events', 'none');
+  await dismiss(page);
+  // The 3 s grace, then the heatwave: a calm Cinder-4 rolls 90 s at least, so
+  // an active phase inside 20 s of game time is the forced storm.
+  const running = await gameBudget(page, 20);
+  while ((await running()) && (await info(page))['weatherPhase'] !== 'active') await page.waitForTimeout(250);
+  expect((await info(page))['weatherPhase']).toBe('active');
+  expect((await info(page))['boss']).toBe('-'); // the arena was never engaged
+});

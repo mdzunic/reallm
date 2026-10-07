@@ -1279,6 +1279,47 @@ describe('placed enemies leash at their own 24 m (SPEC-054 §4.7)', () => {
       expect(e.state).not.toBe('wander');
     }
   });
+
+  /** A cave wall along x = 4, z −30…30, with an optional gap at z = 0. */
+  function caveWall(gap = false): { x: number; z: number; radius: number }[] {
+    const rocks: { x: number; z: number; radius: number }[] = [];
+    for (let z = -30; z <= 30; z += 1) if (!gap || Math.abs(z) > 2) rocks.push({ x: 4, z, radius: 1 });
+    return rocks;
+  }
+
+  it('acquires only with a clear line: a pack in the next room stays put behind the rock (review B-02)', () => {
+    // A skitter 9 m off with a wall between: inside its 18 m, light on, and
+    // still it never takes the player up — it would only pin itself on the rock.
+    const h = harness({ obstacles: new CircleObstacles(caveWall()) });
+    h.world.light = { on: true };
+    const e = h.spawn('dust_skitter', 9, 0);
+    e.placed = true;
+    e.leash = BELOW_LEASH;
+    faceAt(h, e);
+    for (let i = 0; i < Math.round(6 / STEP); i++) {
+      h.world.player.x = 0;
+      h.world.player.z = 0;
+      h.step();
+    }
+    expect(e.aggro).toBe(false);
+    expect(e.x).toBeGreaterThan(4); // still on the far side
+
+    // Through a gap in the wall: a clear line, and it comes.
+    const gap = harness({ obstacles: new CircleObstacles(caveWall(true)) });
+    gap.world.light = { on: true };
+    const seen = gap.spawn('dust_skitter', 9, 0);
+    seen.placed = true;
+    seen.leash = BELOW_LEASH;
+    faceAt(gap, seen);
+    gap.step();
+    expect(seen.aggro).toBe(true);
+
+    // An unplaced enemy (the surface) keeps the old rule and acquires through rock.
+    const g = harness({ obstacles: new CircleObstacles(caveWall()) });
+    const loose = g.spawn('dust_skitter', 9, 0);
+    g.step();
+    expect(loose.aggro).toBe(true);
+  });
 });
 
 // ------------------------------------------------------------- SPEC-056

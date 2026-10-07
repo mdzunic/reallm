@@ -205,6 +205,7 @@ import {
   pickupText,
   predecessorCacheText,
   quitNote,
+  remainsFullText,
   remainsLostText,
   remainsOverlayLine,
   remainsRecoveredText,
@@ -730,6 +731,8 @@ export class SurfaceScene extends UiScene<'surface'> {
   readonly #remainsTaken: Record<ResourceId, number> = { oil: 0, wheat: 0, water: 0, lithium: 0 };
   #remainsInside = false;
   #remainsRetryIn = 0;
+  /** SPEC-057 §4.4 (B-21): the full hold was said on this stay inside the recovery circle. */
+  #remainsFullSaid = false;
   /** The tracker row's text, rebuilt only when the whole metre changes. */
   #remainsRowText: string | null = null;
   #remainsRowMetres = -1;
@@ -2241,9 +2244,7 @@ export class SurfaceScene extends UiScene<'surface'> {
     // SPEC-016 D-21: the ambient spawner adds nothing while a perf run holds
     // the population itself. SPEC-043 §4.4: the elite roll reads the difficulty
     // live — a switch in Settings reaches the next spawn — times the surge.
-    const difficulty = this.#save?.meta.difficulty ?? 'normal';
-    spawn.eliteMult =
-      DIFFICULTY_RULES[difficulty].eliteChanceMult * (this.#eliteSurge ? CONTRACTS.elite_surge.eliteChanceMult : 1);
+    spawn.eliteMult = this.#eliteMult();
     // SPEC-054 §4.7: below, the director adds no ambient enemy.
     if (this.#level?.id === 'surface') spawn.update(dt, world.player, this.#frustumXZ, this.#stress === null);
     else spawn.update(dt, world.player, this.#frustumXZ, false);
@@ -3437,7 +3438,10 @@ export class SurfaceScene extends UiScene<'surface'> {
 
     // AC-26 / 12-i: an active survive stage forces its storm, after the grace.
     // SPEC-054 §4.9 (E83): not below — a stage that starts there forces its
-    // storm on the ascent, with its waves and its clock.
+    // storm on the ascent, with its waves and its clock. E15: an engaged
+    // arena outranks it — not merely another mission's boss stage, which
+    // once let a survive stage run (and its `no_shelter` bonus pay) in calm
+    // weather (review 2026-10, B-09).
     const below = this.#level?.id === 'underground';
     const required = missions.requiredWeather();
     if (
@@ -3445,7 +3449,6 @@ export class SurfaceScene extends UiScene<'surface'> {
       !below &&
       this.elapsed >= FORCED_WEATHER_GRACE &&
       weather.current !== required.weather &&
-      missions.bossStage() === null &&
       this.#bossId === null
     ) {
       weather.force(required.weather, required.seconds);
@@ -4528,6 +4531,7 @@ export class SurfaceScene extends UiScene<'surface'> {
     if (!this.#remainsInside) {
       this.#remainsInside = true;
       this.#remainsRetryIn = 0;
+      this.#remainsFullSaid = false;
     }
     this.#remainsRetryIn -= dt;
     if (this.#remainsRetryIn > 0) return;
@@ -4546,7 +4550,17 @@ export class SurfaceScene extends UiScene<'surface'> {
     const planet = save.progress.remains?.planet ?? null;
     if (economy === null || planet === null) return;
     const taken = this.#remainsTaken;
-    if (!recoverRemains(save, economy, taken)) return;
+    if (!recoverRemains(save, economy, taken)) {
+      // E93 (review 2026-10, B-21): nothing fit, and a 'recovered' unit never
+      // flags `blocked`, so nothing else says why. Once per stay inside the
+      // circle — the 1 s retries do not repeat it.
+      const left = remainsHeld(save.progress.remains);
+      if (left > 0 && !this.#remainsFullSaid) {
+        this.#remainsFullSaid = true;
+        this.services.events.emit('ui:toast', { kind: 'warn', text: remainsFullText(this.#remainsLook, left) });
+      }
+      return;
+    }
     const rest = save.progress.remains !== null;
     const bus = this.services.events;
     bus.emit('remains:recovered', { planet, resources: taken });
@@ -4875,6 +4889,8 @@ export class SurfaceScene extends UiScene<'surface'> {
     if (to === 'underground') this.#stopMissionWaves();
     spawn.despawnNear(p.x, p.z, Infinity);
     combat.clearLevel();
+    // Review 2026-10, B-22: the bursts and scorches belong to the floor they fell on.
+    view.fx.clear();
     const left = pickups.clear(p.x, p.z, LOOT_LEFT_RADIUS);
     this.#closeTerminal();
 
@@ -5044,6 +5060,10 @@ export class SurfaceScene extends UiScene<'surface'> {
     const spawn = this.#spawn;
     const visit = this.#visitRng;
     if (spawn === null || visit === null || u.packs.length === 0) return;
+    // §4.11: contracts do not reach below. The swap runs between steps, so the
+    // director still holds the surface step's multiplier — set it now
+    // (review 2026-10, B-18).
+    spawn.eliteMult = this.#eliteMult();
     const rows = this.#planet.surface.spawn
       .filter((row) => ENEMIES[row.enemy].archetype !== 'static')
       .map((row) => ({ item: row.enemy, weight: row.weight }));
@@ -5055,6 +5075,18 @@ export class SurfaceScene extends UiScene<'surface'> {
       if (cap <= 0) break;
       spawn.spawnPackAt(enemy, anchor.x, anchor.z, { placed: true, leash: BELOW_LEASH, cap });
     }
+  }
+
+  /**
+   * SPEC-043 §4.4: the elite roll's multiplier — the difficulty's, read live,
+   * times `elite_surge`'s on the surface only. SPEC-054 §4.11: contracts do
+   * not reach below, so a cave pack's leader rolls on the difficulty alone
+   * (review 2026-10, B-18).
+   */
+  #eliteMult(): number {
+    const difficulty = this.#save?.meta.difficulty ?? 'normal';
+    const surge = this.#eliteSurge && this.#level?.id !== 'underground';
+    return DIFFICULTY_RULES[difficulty].eliteChanceMult * (surge ? CONTRACTS.elite_surge.eliteChanceMult : 1);
   }
 
   /** §4.2: a descent stops the active missions' waves; the ascent's sync starts them again. */

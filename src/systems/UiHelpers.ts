@@ -568,6 +568,25 @@ export function departReason(result: DepartResult): string {
 }
 
 /**
+ * SPEC-014 §4.4: the star map's fuel line. SPEC-065 §4.4 (E119): `have`
+ * counts the hold and the depot together, as `canDepart` and `payFuel` do
+ * (review 2026-10, B-12).
+ */
+export function starmapFuelText(fuel: number, hold: number, depot: number): string {
+  return `Fuel: ${fuel} oil (have ${hold + depot})`;
+}
+
+/**
+ * SPEC-031 §4.12: the depart sheet's charge, with the tank named next to it.
+ * SPEC-065 §4.4 (E119): the tank is the hold and the depot together, and the
+ * depot's share is named when it holds any (review 2026-10, B-12).
+ */
+export function departFuelText(fuel: number, hold: number, depot: number): string {
+  const tank = depot > 0 ? `${hold + depot} (${depot} at the depot)` : `${hold}`;
+  return `Fuel: ${fuel} oil, charged now — you hold ${tank}. The return trip is free.`;
+}
+
+/**
  * SPEC-032 §4.3: why `Skip the run` is refused, in the line printed under the
  * disabled control. A flight mission is named by its title.
  */
@@ -1740,6 +1759,16 @@ export function remainsOverlayLine(look: RemainsLook, lost: Partial<Record<Resou
 export function remainsRecoveredText(look: RemainsLook, taken: Partial<Record<ResourceId, number>>, rest: boolean): string {
   const line = `Recovered: ${remainsListText(taken)}`;
   return rest ? `${line} — the rest stays with your ${look}` : line;
+}
+
+/**
+ * SPEC-057 §4.4 (E93) — an attempt that took nothing, because the hold is
+ * full: `Cargo full — <n> left in your pack` (or `body`), `n` the units the
+ * remains still hold (review 2026-10, B-21). SPEC-045 §4.6: resources
+ * carried are `Cargo`; `Hold full` is the Depot tab's one label.
+ */
+export function remainsFullText(look: RemainsLook, left: number): string {
+  return `Cargo full — ${left} left in your ${look}`;
 }
 
 /** SPEC-057 §4.1 (E91) — the forfeit's toast: `Your earlier pack is gone: <list>.` (or `body`). */

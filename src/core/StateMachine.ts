@@ -18,8 +18,12 @@ export interface SceneParams {
   menu: { reason?: 'start' | 'quit' | 'error' };
   /** SPEC-058 §4.1: `next` opens creation pre-filled from the slot's finished run, to begin its next instance. */
   creation: { slot: 0 | 1 | 2; next?: boolean };
-  /** The oil subsidy is computed in `Station.enter()` (SPEC-010 §4.6), never passed in. */
-  station: { arrivedFrom?: PlanetId; recalled?: boolean };
+  /**
+   * The oil subsidy is computed in `Station.enter()` (SPEC-010 §4.6), never
+   * passed in. `fromStarmap`: the star map's Back — a return, not an arrival,
+   * so no subsidy (review 2026-10, B-07).
+   */
+  station: { arrivedFrom?: PlanetId; recalled?: boolean; fromStarmap?: boolean };
   /** SPEC-044 §4.6: `planet` is preselected when it is unlocked; `undefined` lets the map choose. */
   starmap: { planet?: PlanetId } | undefined;
   /** `skipRun`: the depart sheet's `Skip the run` — autopilot to the landing (SPEC-032 §4.4). */

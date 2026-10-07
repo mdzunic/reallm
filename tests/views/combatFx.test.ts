@@ -116,6 +116,37 @@ describe('scorch decals (AC-55)', () => {
   });
 });
 
+describe('clear() — the level swap (SPEC-054 §4.2, review B-22)', () => {
+  it('forgets every live burst, scorch and the muzzle pulse; the pools stay and refill', () => {
+    const { parent, fx } = build(64);
+    const [sprites, scorches] = instancedMeshes(parent) as [THREE.InstancedMesh, THREE.InstancedMesh];
+    const light = pointLight(parent);
+    fx.sync(0, ground);
+    fx.burst('death', 0, 0, 0xffffff);
+    fx.burst('muzzle', 1, 0, 0xffe9a0);
+    fx.scorch(3, 3);
+    fx.scorch(4, 4);
+    fx.sync(0.02, ground);
+    expect(sprites.count).toBeGreaterThan(0);
+    expect(scorches.count).toBe(2);
+
+    // The swap: on the other level's floor, nothing of it draws.
+    fx.clear();
+    expect(light.intensity).toBe(0);
+    fx.sync(0.04, ground);
+    expect({ sprites: sprites.count, scorches: scorches.count, light: light.intensity }).toEqual({ sprites: 0, scorches: 0, light: 0 });
+    expect(sprites.visible).toBe(false);
+    expect(scorches.visible).toBe(false);
+
+    // The next fight below draws as usual.
+    fx.burst('hit', 0, 0, 0xffe9a0);
+    fx.scorch(1, 1);
+    fx.sync(0.05, ground);
+    expect(sprites.count).toBeGreaterThan(0);
+    expect(scorches.count).toBe(1);
+  });
+});
+
 describe('the muzzle light (AC-56)', () => {
   it('is created once, driven to 8 by burst(muzzle), and decays to 0 within 0.1 s', () => {
     const { parent, fx } = build(32);

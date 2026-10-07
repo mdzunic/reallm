@@ -202,6 +202,8 @@ test('4. a full hold takes what fits; the rest stays with the pack, retried whil
   expect((await current(page))?.resources.oil).toBe(400);
   await toastShown(page, 'Recovered: 5 oil — the rest stays with your pack');
   expect((await current(page))?.meta.stats.recoveries).toBe(1);
+  // Review 2026-10, B-21: the next retry fits nothing, and says so — once.
+  await toastShown(page, 'Cargo full — 15 left in your pack');
   // E93: room again while standing there — the next retry takes the rest.
   await page.evaluate(() => {
     const save = window.__reallm.save().current;

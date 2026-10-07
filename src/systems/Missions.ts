@@ -280,22 +280,28 @@ export class Missions {
   }
 
   /**
-   * SPEC-065 §4.2 (E117): units the active deliver objectives of the *current*
-   * stages still need of `resource`, finished ones excluded, as
-   * `collectDemand` reads collect objectives. A delivery is all or nothing
-   * (E16), so an open one needs its whole amount. The pad terminal never ships
-   * the hold below it.
+   * SPEC-065 §4.2 (E117): units the deliver objectives of *every remaining*
+   * stage of the active missions still need of `resource` — the current
+   * stage's finished ones excluded. Every delivery in the game is a stage 2
+   * after a boss or a scan, so the current stage alone read 0 at the moment
+   * the mission is accepted at the pad (review 2026-10, B-10). A delivery is
+   * all or nothing (E16), so an open one needs its whole amount. The pad
+   * terminal never ships the hold below it.
    */
   deliverDemand(resource: ResourceId): number {
     let total = 0;
     for (const state of this.#states) {
       if (state.complete) continue;
-      const stage = MISSIONS[state.id].stages[state.stage] ?? [];
-      for (let index = 0; index < stage.length; index++) {
-        const objective = stage[index] as Objective;
-        if (objective.kind !== 'deliver' || objective.resource !== resource) continue;
-        if (this.#done(state, objective, index)) continue;
-        total += objective.amount;
+      const stages = MISSIONS[state.id].stages;
+      for (let at = state.stage; at < stages.length; at++) {
+        const stage = stages[at] ?? [];
+        for (let index = 0; index < stage.length; index++) {
+          const objective = stage[index] as Objective;
+          if (objective.kind !== 'deliver' || objective.resource !== resource) continue;
+          // Only the current stage has counters; a later one is untouched.
+          if (at === state.stage && this.#done(state, objective, index)) continue;
+          total += objective.amount;
+        }
       }
     }
     return total;
@@ -620,6 +626,9 @@ export class Missions {
             if (this.#done(state, objective, index)) break;
             // SPEC-054 §4.11 (E83): the clock holds below, the same as survive.
             if (ctx.level === 'underground') break;
+            // And while the player is dead, as survive's does (review 2026-10,
+            // B-08): the death reset it, and the respawn restarts the wave.
+            if (!ctx.player.alive) break;
             state.timers[key] = (state.timers[key] ?? 0) + dt;
             if ((state.timers[key] as number) >= objective.seconds) {
               this.#markDone(state, index);

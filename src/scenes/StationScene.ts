@@ -128,7 +128,7 @@ export class StationScene extends UiScene<'station'> {
           this,
         ),
       );
-      this.#enterEffects(data);
+      this.#enterEffects(data, params);
       this.#watchClues(data);
       this.#watchHome();
       // SPEC-023 §4.3: the story the entry owes — an interlude, then the
@@ -285,11 +285,14 @@ export class StationScene extends UiScene<'station'> {
 
   // ---------------------------------------------------------- enter effects
 
-  #enterEffects(data: Save): void {
+  #enterEffects(data: Save, params: SceneParams['station']): void {
     const economy = this.#economy;
     if (economy === null) return;
-    // AC-21 / E1: the subsidy, and ARIA's line only when it granted oil.
-    const granted = economy.applyStationSubsidy();
+    // AC-21 / E1: the subsidy, and ARIA's line only when it granted oil. Only
+    // on an arrival — a landing, a recall, a Continue, a Load or a new game —
+    // never on the star map's Back, or crafting and the star map would farm
+    // it (review 2026-10, B-07).
+    const granted = params.fromStarmap === true ? 0 : economy.applyStationSubsidy();
     if (granted > 0) {
       this.ui.toast(`ARIA: Docking subsidy logged — +${granted} oil. Try to bring some back this time.`, 'info', 5000);
     }
