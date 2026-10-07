@@ -138,7 +138,7 @@ import { DARK_RIM_SCALE, DARK_SIGHT, lit } from '@/systems/Light';
 import { isHidden, SHELTER_INSET, shelterAt, STORM_SHELTER_FACTOR } from '@/systems/Shelter';
 import { nodeIcon, poiIcon } from '@/systems/MapModel';
 import { contractFor, Missions, type MissionContext, type ObjectiveProgress } from '@/systems/Missions';
-import { Nodes, Pickups, SHIPPED_TOAST_TEXT } from '@/systems/Pickups';
+import { nodeEconomy, Nodes, Pickups, SHIPPED_TOAST_TEXT } from '@/systems/Pickups';
 import { cumulativeXp, LEVEL_CAP, Progression, xpToNext } from '@/systems/Progression';
 import {
   PREDECESSOR_SEARCH_RADIUS,
@@ -1410,10 +1410,9 @@ export class SurfaceScene extends UiScene<'surface'> {
     this.#pickups = pickups;
     const regenOf = (resource: ResourceId): number =>
       planet.surface.nodes.find((n) => n.resource === resource)?.regenPerSec ?? 0;
-    const nodes = new Nodes(layout.nodes, regenOf, {
-      addResource: (r, n, s) => economy.addResource(r, n, s),
-      room: (r) => Math.max(0, economy.cargoCap() - (save.resources[r] ?? 0)),
-    });
+    // SPEC-034 §4.12: through the shared wiring, so the collect demand reaches
+    // the nodes and a full hold keeps pumping while an objective wants more.
+    const nodes = new Nodes(layout.nodes, regenOf, nodeEconomy(economy, save));
 
     // POI runtime state; discovery restores from the save (§4.12).
     const pois: PoiState[] = layout.pois.map((poi) => ({
