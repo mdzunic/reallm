@@ -453,6 +453,37 @@ describe('slots (§4.2)', () => {
     expect(events.toasts).toEqual([SAVE_FAILED_TEXT]);
   });
 
+  /**
+   * Review 2026-10, B-19: the retry runs with the backup already dropped, so
+   * the main JSON on disk is the slot's one copy. When Safari cuts that retry
+   * short, the old copy goes back rather than leaving the slot unreadable.
+   */
+  it('puts the previous main back when the quota retry is silently truncated (B-19)', () => {
+    const fake = fakeStorage();
+    const saves = store(fake, recorder());
+    const data = saves.create(0, CREATION);
+    data.player.tokens = 10;
+    expect(saves.flush()).toBe(true); // main: 10 tokens; :bak: the fresh save
+    const before = fake.data.get('reallm:slot:0') as string;
+
+    // Safari at quota: the backup's write throws, and a main value longer than
+    // the room left is cut short without a word. The old save fits the room it
+    // already had; the new one, a digit longer, does not.
+    const room = before.length;
+    const original = fake.storage.setItem.bind(fake.storage);
+    fake.storage.setItem = (key: string, value: string): void => {
+      if (key.endsWith(BAK_SUFFIX)) throw new DOMException('quota exceeded', 'QuotaExceededError');
+      original(key, value.slice(0, room));
+    };
+
+    data.player.tokens = 100;
+    expect(saves.flush()).toBe(false);
+    expect(fake.data.has(`reallm:slot:0${BAK_SUFFIX}`)).toBe(false);
+    expect(fake.data.get('reallm:slot:0')).toBe(before);
+    const reloaded = new SaveStore(recorder(), fake.storage, { window: null }).load(0);
+    expect(reloaded.ok && reloaded.data.player.tokens).toBe(10);
+  });
+
   it('deletes both the main key and the backup (AC-58, AC-63)', () => {
     const fake = fakeStorage();
     const saves = store(fake, recorder());

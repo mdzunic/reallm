@@ -2420,13 +2420,19 @@ export class SaveStore {
     if (first === null) return this.#succeed(slot, reason, data);
     // §4.2: a full quota is usually the backup's fault, so drop it and retry.
     if (isQuota(first) && this.#read(this.#key(slot) + BAK_SUFFIX) !== null) {
+      // With `:bak` gone, the main JSON on disk is the slot's one copy. A
+      // retry Safari truncates would leave nothing, so that copy is held here
+      // and put back if the retry does not verify (review 2026-10, B-19).
+      const previous = this.#read(this.#key(slot));
       try {
         this.#storage?.removeItem(this.#key(slot) + BAK_SUFFIX);
       } catch (error) {
         log.warn('save', 'could not drop the backup', error);
       }
       const second = this.#writeWithBackup(slot, json, false);
-      return second === null ? this.#succeed(slot, reason, data) : this.#fail(slot, second);
+      if (second === null) return this.#succeed(slot, reason, data);
+      this.#putBack(this.#key(slot), previous);
+      return this.#fail(slot, second);
     }
     return this.#fail(slot, first);
   }
