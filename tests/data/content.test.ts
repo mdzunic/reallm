@@ -3787,6 +3787,10 @@ describe('the next instance’s lines (SPEC-058 §4.6, §4.7)', () => {
   });
 });
 
+import { DRONE_SHOT, FLARE_SHOT, THROWN_SHOT, type ShotLook } from '@/data/index';
+import { HOSTILE_RIM, HOSTILE_RIM_COLOUR_BLIND } from '@/views/ProceduralMeshes';
+import { deltaE76 } from '../fixtures/colourVision';
+
 describe('shot looks (SPEC-019 §4.5)', () => {
   type WeaponItem = Extract<Item, { kind: 'weapon' }>;
   const weapons = (Object.values(ITEMS) as readonly Item[]).filter((item): item is WeaponItem => item.kind === 'weapon');
@@ -3829,6 +3833,25 @@ describe('shot looks (SPEC-019 §4.5)', () => {
       if (shape !== null) expect(weapon.shot.shape, weapon.id).toBe(shape);
       else expect(['ball', 'rocket'], weapon.id).not.toContain(weapon.shot.shape);
     }
+  });
+
+  it('no player shot wears the hostile hue: every colour and trail is ΔE76 25 or more from both rims (review 2026-10 V-03)', () => {
+    const looks: Array<[string, ShotLook]> = [
+      ['DRONE_SHOT', DRONE_SHOT],
+      ['THROWN_SHOT', THROWN_SHOT],
+      ['FLARE_SHOT', FLARE_SHOT],
+      ...weapons.map((weapon): [string, ShotLook] => [weapon.id, weapon.shot]),
+    ];
+    const near: string[] = [];
+    for (const [id, look] of looks) {
+      for (const colour of look.trail === undefined ? [look.color] : [look.color, look.trail]) {
+        for (const hostile of [HOSTILE_RIM, HOSTILE_RIM_COLOUR_BLIND]) {
+          const d = deltaE76(colour, hostile);
+          if (d < 25) near.push(`${id} ${colour} is ΔE ${d.toFixed(1)} from ${hostile}`);
+        }
+      }
+    }
+    expect(near).toEqual([]);
   });
 });
 

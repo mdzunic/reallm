@@ -90,9 +90,14 @@ export interface ShotLook {
 /**
  * SPEC-019 §4.5: the shots no weapon fires. The drone borrows the primary's
  * numbers but not its look, and a thrown frag or flare is a ball.
+ *
+ * Review 2026-10 V-03: red-orange (`#ff5a3c`) and the colour-blind magenta
+ * (`#ff4fd8`) mean "hostile", so no player look — these, a weapon's colour or
+ * its trail — sits within ΔE 25 of either (`tests/data/content.test.ts`). The
+ * hot weapons wear white-hot heads with warm trails instead.
  */
 export const DRONE_SHOT = { shape: 'tracer', color: '#dfe8ff' } as const satisfies ShotLook;
-export const THROWN_SHOT = { shape: 'ball', color: '#ff5a3c' } as const satisfies ShotLook;
+export const THROWN_SHOT = { shape: 'ball', color: '#ffd9a8' } as const satisfies ShotLook;
 export const FLARE_SHOT = { shape: 'ball', color: '#ffcf8a' } as const satisfies ShotLook;
 
 export type GearTier = 0 | 1 | 2 | 3;
@@ -250,7 +255,7 @@ export const ITEMS = {
     pierce: 0,
     energy: true,
     cooldown: { kind: 'none' },
-    shot: { shape: 'needle', color: '#ff4a4a' },
+    shot: { shape: 'needle', color: '#ffe0e0', trail: '#ff9db4' },
     price: { tokens: 40 },
     model: 'procedural',
     blurb: 'Focused beam, no recoil, no ammunition. The cell hums when the sand gets in.',
@@ -342,7 +347,7 @@ export const ITEMS = {
     energy: false,
     cooldown: { kind: 'heat', perShot: 0.035, coolPerSec: 0.2, resumeAt: 0.35 },
     spread: 0.08,
-    shot: { shape: 'dart', color: '#ff6a3a' },
+    shot: { shape: 'dart', color: '#ffb84d' },
     price: { tokens: 50 },
     model: 'procedural',
     blurb: 'Six salvaged barrels on one bearing. Glorious for five seconds, then a kettle.',
@@ -394,7 +399,7 @@ export const ITEMS = {
     energy: false,
     cooldown: { kind: 'charges', charges: 1, rechargeSeconds: 6, burstInterval: 0 },
     blast: { radius: 3.5, falloff: 0.4 },
-    shot: { shape: 'rocket', color: '#fff2d6', trail: '#ff7a2e' },
+    shot: { shape: 'rocket', color: '#fff2d6', trail: '#ffa94d' },
     price: { tokens: 60 },
     model: 'procedural',
     blurb: 'One tube, one answer. Whatever the question was, it stops asking.',
@@ -420,7 +425,7 @@ export const ITEMS = {
     cooldown: { kind: 'charges', charges: 3, rechargeSeconds: 9, burstInterval: 0.4 },
     blast: { radius: 3, falloff: 0.5 },
     lob: true,
-    shot: { shape: 'ball', color: '#ff4040' },
+    shot: { shape: 'ball', color: '#fff0d6', trail: '#ffb347' },
     price: { tokens: 90 },
     model: 'procedural',
     blurb: 'Three shells on a rotary drum. They go over the rock; the raiders were behind it.',
@@ -640,7 +645,7 @@ export const ITEMS = {
     spread: 0.06,
     relic: true,
     twist: { kind: 'vent', radius: 3.5, damage: 60 },
-    shot: { shape: 'bolt', color: '#ff5a1f' },
+    shot: { shape: 'bolt', color: '#fff1c2', trail: '#ffb02e' },
     price: null,
     model: 'procedural',
     blurb: 'Instance/29 wrapped the jacket in Ferrum slag. When it overheats, everything near you finds out.',
@@ -663,7 +668,7 @@ export const ITEMS = {
     blast: { radius: 3.5, falloff: 0.4 },
     relic: true,
     twist: { kind: 'seek', turnRate: 2.1, cone: 0.7 },
-    shot: { shape: 'rocket', color: '#ffe0f6', trail: '#ff4fd8' },
+    shot: { shape: 'rocket', color: '#ffe0f6', trail: '#ffb3c6' },
     price: null,
     model: 'procedural',
     blurb: 'Instance/12 wired Hive guidance into the tube. It looks for the thing you meant.',
