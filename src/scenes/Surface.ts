@@ -2242,9 +2242,7 @@ export class SurfaceScene extends UiScene<'surface'> {
     // SPEC-016 D-21: the ambient spawner adds nothing while a perf run holds
     // the population itself. SPEC-043 §4.4: the elite roll reads the difficulty
     // live — a switch in Settings reaches the next spawn — times the surge.
-    const difficulty = this.#save?.meta.difficulty ?? 'normal';
-    spawn.eliteMult =
-      DIFFICULTY_RULES[difficulty].eliteChanceMult * (this.#eliteSurge ? CONTRACTS.elite_surge.eliteChanceMult : 1);
+    spawn.eliteMult = this.#eliteMult();
     // SPEC-054 §4.7: below, the director adds no ambient enemy.
     if (this.#level?.id === 'surface') spawn.update(dt, world.player, this.#frustumXZ, this.#stress === null);
     else spawn.update(dt, world.player, this.#frustumXZ, false);
@@ -5039,6 +5037,10 @@ export class SurfaceScene extends UiScene<'surface'> {
     const spawn = this.#spawn;
     const visit = this.#visitRng;
     if (spawn === null || visit === null || u.packs.length === 0) return;
+    // §4.11: contracts do not reach below. The swap runs between steps, so the
+    // director still holds the surface step's multiplier — set it now
+    // (review 2026-10, B-18).
+    spawn.eliteMult = this.#eliteMult();
     const rows = this.#planet.surface.spawn
       .filter((row) => ENEMIES[row.enemy].archetype !== 'static')
       .map((row) => ({ item: row.enemy, weight: row.weight }));
@@ -5050,6 +5052,18 @@ export class SurfaceScene extends UiScene<'surface'> {
       if (cap <= 0) break;
       spawn.spawnPackAt(enemy, anchor.x, anchor.z, { placed: true, leash: BELOW_LEASH, cap });
     }
+  }
+
+  /**
+   * SPEC-043 §4.4: the elite roll's multiplier — the difficulty's, read live,
+   * times `elite_surge`'s on the surface only. SPEC-054 §4.11: contracts do
+   * not reach below, so a cave pack's leader rolls on the difficulty alone
+   * (review 2026-10, B-18).
+   */
+  #eliteMult(): number {
+    const difficulty = this.#save?.meta.difficulty ?? 'normal';
+    const surge = this.#eliteSurge && this.#level?.id !== 'underground';
+    return DIFFICULTY_RULES[difficulty].eliteChanceMult * (surge ? CONTRACTS.elite_surge.eliteChanceMult : 1);
   }
 
   /** §4.2: a descent stops the active missions' waves; the ascent's sync starts them again. */
