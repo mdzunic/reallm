@@ -35,8 +35,9 @@ export const STORM_LOOK: Record<Exclude<ParticleKind, 'none'>, StormLook> = {
   ash: { sprite: 'dot', width: 0.25, height: 0.25, speed: 3, falling: true, color: '#909090', opacity: 0.8, additive: false, tint: [1, 0.94, 0.9] },
   spores: { sprite: 'dot', width: 0.35, height: 0.35, speed: 2, falling: true, color: '#b0e080', opacity: 0.8, additive: true, tint: [0.95, 1.05, 0.9] },
   // SPEC-054 §4.4: a cave's motes. The grade below is the cave's own, so the
-  // tint is neutral — the storm grade is never forwarded below.
-  dust: { sprite: 'dot', width: 0.12, height: 0.12, speed: 0.3, falling: false, color: '#b8c0cc', opacity: 0.35, additive: true, tint: [1, 1, 1] },
+  // tint is neutral — the storm grade is never forwarded below. Review 2026-10
+  // P-11: dimmer and warm, lamplit dust rather than cold white points.
+  dust: { sprite: 'dot', width: 0.12, height: 0.12, speed: 0.3, falling: false, color: '#a09482', opacity: 0.25, additive: true, tint: [1, 1, 1] },
 };
 
 /** The §4.9 ember accent: one ash particle in ten, via instanceColor. */
@@ -54,6 +55,22 @@ export const DUST_FLOOR = 0.3;
 export const DUST_BAND = 2.4;
 const DUST_BOB = 0.12;
 const DUST_BOB_RATE = 0.7;
+/**
+ * Review 2026-10 P-11: a mote is lit only near the salvager — full within
+ * `DUST_LIT` m, gone by `DUST_DARK` m — so none hangs over the black past the
+ * walls, where crisp points read as stars. Additive, so a darker instance
+ * colour is a fainter mote and black is none.
+ */
+export const DUST_LIT = 5;
+export const DUST_DARK = 9;
+
+/** P-11: a mote's brightness at `d` m from the salvager — 1, then a smooth fall to 0. */
+export function dustFade(d: number): number {
+  if (d <= DUST_LIT) return 1;
+  if (d >= DUST_DARK) return 0;
+  const t = (d - DUST_LIT) / (DUST_DARK - DUST_LIT);
+  return 1 - t * t * (3 - 2 * t);
+}
 
 const scratchMatrix = new THREE.Matrix4();
 const scratchPosition = new THREE.Vector3();
@@ -153,6 +170,8 @@ export class StormParticles {
         x = wrap(seedA * 37 + time * look.speed - px + dustHalf, DUST_BOX) - dustHalf;
         z = wrap(seedB * 17 + time * look.speed * 0.6 - pz + dustHalf, DUST_BOX) - dustHalf;
         y = DUST_FLOOR + wrap(seedA * 5, DUST_BAND) + DUST_BOB * Math.sin(seedB + time * DUST_BOB_RATE);
+        // P-11: faded by how far it hangs from the salvager.
+        this.#mesh.setColorAt(i, scratchColor.setScalar(dustFade(Math.hypot(x, z))));
       } else {
         x = ((seedA * 37 + time * look.speed) % BOX) - half;
         z = ((seedB * 17 + time * look.speed * 0.6) % BOX) - half;
@@ -167,6 +186,7 @@ export class StormParticles {
     }
     this.#mesh.count = count;
     this.#mesh.instanceMatrix.needsUpdate = true;
+    if (this.#kind === 'dust' && this.#mesh.instanceColor !== null) this.#mesh.instanceColor.needsUpdate = true;
   }
 
   dispose(): void {
