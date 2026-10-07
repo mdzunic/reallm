@@ -217,6 +217,9 @@ interface DressingSpec {
   readonly row?: true;
 }
 
+/** SPEC-067: medium and high place this many times each kind's `clumps`; `low` the table itself, then every second. */
+export const DRESSING_DENSITY = 1.8;
+
 export const DRESSING: Readonly<Record<DressingKind, DressingSpec>> = {
   wurm_ribs: { clumps: 1.3, pieces: [1, 1], spread: 0, footprint: 2.4, corridor: 3 },
   scav_barrels: { clumps: 5, pieces: [1, 3], spread: 3.5, footprint: 1, corridor: 0.5 },
@@ -583,24 +586,35 @@ function markerPost(): THREE.BufferGeometry {
 
 /** Eden: a perfectly round flower bed — a stone ring, dark soil, twelve identical flowers and one in the middle. */
 function flowerBed(): THREE.BufferGeometry {
+  // A grey kerb round a bed packed with leaves and three colours of bloom —
+  // planted, not wild: Eden's beds are too neat (PLAN R20).
   const parts: THREE.BufferGeometry[] = [];
-  const ring = new THREE.TorusGeometry(1.3, 0.12, 4, 18);
-  ring.rotateX(Math.PI / 2);
-  ring.translate(0, 0.06, 0);
-  parts.push(part(ring, '#d8d0c0'));
-  const soil = new THREE.CylinderGeometry(1.24, 1.24, 0.06, 18);
-  soil.translate(0, 0.02, 0);
-  parts.push(part(soil, '#5a4030'));
-  for (let i = 0; i <= 12; i++) {
-    const angle = (i / 12) * Math.PI * 2;
-    const r = i === 12 ? 0 : 0.82;
-    const x = Math.cos(angle) * r;
-    const z = Math.sin(angle) * r;
-    const stalk = new THREE.CylinderGeometry(0.015, 0.015, 0.36, 3);
-    stalk.translate(x, 0.2, z);
-    const head = new THREE.IcosahedronGeometry(0.09, 0);
-    head.translate(x, 0.4, z);
-    parts.push(part(stalk, '#4a8a3a'), part(head, i === 12 ? '#f0e070' : i % 2 === 0 ? '#f06080' : '#f8f0f0'));
+  const kerb = new THREE.TorusGeometry(1.3, 0.11, 4, 14);
+  kerb.rotateX(Math.PI / 2);
+  kerb.translate(0, 0.06, 0);
+  parts.push(part(kerb, '#8c9088'));
+  const soil = new THREE.CylinderGeometry(1.22, 1.22, 0.08, 14);
+  soil.translate(0, 0.03, 0);
+  parts.push(part(soil, '#3e2e22'));
+  for (let i = 0; i < 6; i++) {
+    const angle = (i / 6) * Math.PI * 2 + 0.3;
+    const leaves = new THREE.IcosahedronGeometry(0.42, 0);
+    leaves.scale(1, 0.45, 1);
+    leaves.translate(Math.cos(angle) * 0.7, 0.14, Math.sin(angle) * 0.7);
+    parts.push(part(leaves, i % 2 === 0 ? '#3f7a32' : '#4d8a3a'));
+  }
+  const blooms = ['#b070e0', '#f2d048', '#f4a0b8'];
+  const rings: readonly [number, number][] = [[0.95, 10], [0.5, 6], [0, 3]];
+  let b = 0;
+  for (const [radius, count] of rings) {
+    for (let i = 0; i < count; i++) {
+      const angle = (i / count) * Math.PI * 2 + radius;
+      const r = radius === 0 ? 0.16 : radius;
+      const head = new THREE.IcosahedronGeometry(0.13, 0);
+      head.translate(Math.cos(angle) * r, 0.3 + (b % 3) * 0.03, Math.sin(angle) * r);
+      parts.push(part(head, blooms[b % 3] as string));
+      b++;
+    }
   }
   return mergeParts(parts);
 }
@@ -938,7 +952,10 @@ export function placeDressing(
 
   kinds.forEach((kind, k) => {
     const spec = DRESSING[kind];
-    const clumps = Math.round((spec.clumps * area) / 10_000);
+    // Review of the first pass: about one clump a screen read as sparse —
+    // medium and high draw `DRESSING_DENSITY` times the table, low the table.
+    const density = preset === 'low' ? 1 : DRESSING_DENSITY;
+    const clumps = Math.round((spec.clumps * area * density) / 10_000);
     const reach = layout.halfSize - 4;
     for (let c = 0, tries = 0; c < clumps && tries < clumps * 10; tries++) {
       const cx = (hash01(seed, k, tries, 0) * 2 - 1) * reach;

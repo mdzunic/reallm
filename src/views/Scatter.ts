@@ -370,6 +370,8 @@ const SCUFF_RING: readonly [number, number] = [7, 14];
 /** SPEC-067: a trail starts this far from the pad's centre and stops this far short of its POI's ring. */
 const TRAIL_START = 6.5;
 const TRAIL_SHORT = 1;
+/** SPEC-067: how far a trail meanders across its corridor, in metres (the corridor's half-width is 8). */
+export const TRAIL_SWAY = 2.6;
 
 /** SPEC-067: how one decal kind is laid — its length range, its tint, glow and aspect. */
 interface DecalStyle {
@@ -594,21 +596,30 @@ export function buildDecals(
       const ux = dx / span;
       const uz = dz / span;
       const heading = Math.atan2(uz, ux);
+      // The path meanders inside the corridor the layout keeps clear: two
+      // slow waves across it, growing in from the pad, so no trail is a ruler.
+      const phaseA = hash01(trailSeed, p, 0, 7) * Math.PI * 2;
+      const phaseB = hash01(trailSeed, p, 0, 8) * Math.PI * 2;
+      const sway = (s: number): number =>
+        TRAIL_SWAY * Math.min(1, s / 18) * (0.65 * Math.sin(s / 21 + phaseA) + 0.35 * Math.sin(s / 8.5 + phaseB));
       let t = TRAIL_START;
       for (let k = 0; t < end; k++) {
         const style = DECAL_STYLE.trail;
         const length = style.size[0] + hash01(trailSeed, p, k, 0) * (style.size[1] - style.size[0]);
         const along = Math.min(end - length * 0.4, t + length * 0.5);
-        // Past 40 m, one strip in five is missing; none crosses an orchard's lawn.
-        const gap = t > 40 && hash01(trailSeed, p, k, 1) < 0.2;
-        const wobble = (hash01(trailSeed, p, k, 2) * 2 - 1) * 0.6;
-        const cx = pad.x + ux * along - uz * wobble;
-        const cz = pad.z + uz * along + ux * wobble;
+        // Past 40 m, one strip in four is missing; none crosses an orchard's lawn.
+        const gap = t > 40 && hash01(trailSeed, p, k, 1) < 0.25;
+        const across = sway(along) + (hash01(trailSeed, p, k, 2) * 2 - 1) * 0.35;
+        const cx = pad.x + ux * along - uz * across;
+        const cz = pad.z + uz * along + ux * across;
         if (!gap && !onOrchard(orchards, cx, cz)) {
-          const rot = heading + (hash01(trailSeed, p, k, 3) * 2 - 1) * 0.12;
-          sheet.add(cx, cz, length, length / style.stretch, rot, 'trail', trailTint);
+          const bend = Math.atan2(sway(along + 1) - sway(along - 1), 2);
+          const rot = heading + bend + (hash01(trailSeed, p, k, 3) * 2 - 1) * 0.08;
+          // Narrower further out, where fewer feet have been.
+          const width = (length / style.stretch) * (along > 60 ? 0.8 : 1);
+          sheet.add(cx, cz, length, width, rot, 'trail', trailTint);
         }
-        t += length * 0.78;
+        t += length * 0.72;
       }
     });
 

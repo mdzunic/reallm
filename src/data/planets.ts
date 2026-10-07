@@ -479,7 +479,7 @@ export const PLANETS = {
           macro: { hues: ['#c0704a', '#8a8890'], strength: 0.55, value: 0.25, patches: 0.3 },
           rubble: ['#7a6a5e', '#463c36'],
           kinds: ['basalt_stumps', 'obsidian_shards', 'lava_blobs'],
-          trail: '#8a7e74',
+          trail: '#463c36',
         },
         // SPEC-053 §4.5 (*initial tuning*): ash fronds.
         cover: { kinds: [{ cell: 11, weight: 1, size: [0.5, 0.9] }], per1000m2: 10 },
@@ -554,7 +554,7 @@ export const PLANETS = {
           macro: { hues: ['#b070c8', '#5a88a8'], strength: 0.5, value: 0.22, patches: 0.55 },
           rubble: ['#5a4868', '#382c44'],
           kinds: ['chitin_ribs', 'glow_pods', 'resin_mound'],
-          trail: '#7a5a8a',
+          trail: '#3a2c48',
         },
         // SPEC-053 §4.5 (*initial tuning*): hive tendrils.
         cover: { kinds: [{ cell: 12, weight: 1, size: [0.5, 1.0] }], per1000m2: 40 },

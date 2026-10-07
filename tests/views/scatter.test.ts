@@ -6,7 +6,7 @@ import * as THREE from 'three';
 import { buildHeightField } from '@/core/HeightField';
 import { RngRoot } from '@/core/Rng';
 import { PLANETS, type PlanetId } from '@/data/index';
-import { generateLayout } from '@/systems/Layout';
+import { CORRIDOR, generateLayout } from '@/systems/Layout';
 import { patchAtlas } from '@/views/ProceduralTextures';
 import {
   DECAL_DENSITY,
@@ -18,6 +18,7 @@ import {
   buildScatter,
   decalTarget,
   tuftTexture,
+  TRAIL_SWAY,
 } from '@/views/Scatter';
 import type { ViewLayout } from '@/views/SurfaceView';
 
@@ -303,7 +304,8 @@ describe('buildDecals (SPEC-018 §4.6, SPEC-067)', () => {
       expect(Math.hypot(at.x, at.z)).toBeGreaterThanOrEqual(7 - 1e-6);
       expect(Math.hypot(at.x, at.z)).toBeLessThanOrEqual(14 + 1e-6);
     }
-    // Every trail strip lies within a metre of a pad → objective line, short of the POI's ring.
+    // Every trail strip meanders within its sway (plus 0.35 m of jitter) of a
+    // pad → objective line — well inside the 8 m corridor — short of the POI's ring.
     const trails = tail.slice(0, -SCUFFS);
     expect(trails.length).toBeGreaterThan(10);
     const objectives = LAYOUT.pois.filter((poi) => poi.kind !== 'landing_pad' && poi.kind !== 'landmark');
@@ -312,7 +314,7 @@ describe('buildDecals (SPEC-018 §4.6, SPEC-067)', () => {
         const length = Math.hypot(poi.x, poi.z);
         const t = (at.x * poi.x + at.z * poi.z) / length;
         const off = Math.abs(at.x * poi.z - at.z * poi.x) / length;
-        return off <= 0.6 + 1e-6 && t >= 6 && t <= length - poi.radius;
+        return off <= TRAIL_SWAY + 0.35 + 1e-6 && off < CORRIDOR && t >= 6 && t <= length - poi.radius;
       });
       expect(near, `${at.x}, ${at.z}`).toBe(true);
     }
