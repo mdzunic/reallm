@@ -208,6 +208,19 @@ collect at 350 + 300 wheat against a cap of 400, and finishes all 26 missions wi
 **Note on SPEC-016's own run.** SPEC-016's played campaign has landed, and its
 base-hold run reports `problems: []` and 26 missions, as predicted here.
 
+**2026-10-07 — the node half had not landed.** The fourth review
+(`docs/review-2026-10/audit-bugs.md`, B-01) found that the surface scene built its
+own `Nodes` wiring without `collectDemand`, so a node still stopped at a full hold
+while a collect objective wanted its resource. Orbs shipped home, nodes did not.
+Every test above stayed green: `pickups.test.ts` passed the demand through its own
+helper, and the campaign simulation calls `addResource` directly, never `Nodes`.
+In the browser, on Cinder-4 with 400 oil aboard and `c1_m2` active, standing on an
+oil node moved the collect counter 0 → 0 in 5 s; with the fix, 1 → 27, the hold
+staying at 400. The fix: the scene and the suite now build the wiring with one
+shared `nodeEconomy` (`src/systems/Pickups.ts`), and
+`tests/architecture/nodeWiring.test.ts` fails any `new Nodes(…)` in `src/` that
+does not go through it.
+
 ## 7. SPEC-036 §4.8 — short landscape phones lose the service long press (2026-09-27) — OPEN
 
 **Status:** open. Found on `main` at `8006f89` (SPEC-036, #52) in the in-app
