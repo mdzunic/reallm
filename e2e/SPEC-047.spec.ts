@@ -146,7 +146,7 @@ test('4. a kill and a death are counted, and the death is still counted after a 
   expect(reloaded.data?.meta.stats.lastDeath['cinder4']).toEqual(at);
 });
 
-test('5. 47-a: a code exported from slot 0 imports into slot 2 as the same version-3 save', async ({ page }) => {
+test('5. 47-a: a code exported from slot 0 imports into slot 2 as the same save, at the current version', async ({ page }) => {
   await start(page, '/?debug');
   const codesSupported = await page.evaluate(() => window.__reallm.save().codesSupported);
   test.skip(!codesSupported, 'this browser has no CompressionStream (07-f)');
