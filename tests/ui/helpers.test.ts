@@ -80,6 +80,7 @@ import {
   requirementText,
   starmapFuelText,
   companionEffectText,
+  healLockedText,
   failText,
   gearCompare,
   gearCompareText,
@@ -905,6 +906,25 @@ describe('companionEffectText (AC-39)', () => {
   it('covers station and flight domains', () => {
     expect(companionEffectText({ cargoBonus: 100, shopDiscount: 0.1 })).toBe('+100 cargo · −10 % shop prices');
     expect(companionEffectText({ shieldRegen: 2, autoAim: true, hullBonus: 20 })).toBe('+2/s shield regen · auto-aim · +20 hull');
+  });
+
+  // SPEC-066 §4.3: the drone's DPS against the equipped primary, at multiplier 1 — no percentage.
+  it('reads the combat drone as its DPS against the primary', () => {
+    const [l1, l2, l3] = COMPANIONS.combat_drone.levels;
+    expect(companionEffectText(l1, 'weapon_kinetic')).toBe('drone 7/s');
+    expect(companionEffectText(l2, 'weapon_kinetic')).toBe('drone 10/s');
+    expect(companionEffectText(l3, 'weapon_kinetic')).toBe('drone 19.5/s');
+    expect(companionEffectText(l1, 'mg_rotary')).toBe('drone 17/s');
+    expect(companionEffectText(l1, null)).toBe('drone 0/s');
+    expect(companionEffectText(l1)).toBe('drone 0/s');
+  });
+});
+
+describe('healLockedText (SPEC-066 §4.1, E121)', () => {
+  it('says the whole seconds left, rounded up', () => {
+    expect(healLockedText(7.2)).toBe('Heal ready in 8 s');
+    expect(healLockedText(0.1)).toBe('Heal ready in 1 s');
+    expect(healLockedText(8)).toBe('Heal ready in 8 s');
   });
 });
 

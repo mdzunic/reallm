@@ -10,6 +10,9 @@
 // SPEC-039 §4.4 adds the numbers a player reads off a weapon: `weaponDps`
 // steps the same cooldown model the loadout runs, with the same fire-rate
 // carry `Combat` applies, so the shop's DPS is the DPS the trigger delivers.
+//
+// SPEC-066 §4.2 adds the in-combat rule: a slot that runs out in a fight stays
+// dry — no refill, no pickup fill — until the fight is over (`stepQuickDry`).
 import type { EventBus, GameEvents } from '@/core/Events';
 import { DEFAULT_STEP } from '@/core/Loop';
 import type { Save } from '@/core/Save';
@@ -17,6 +20,7 @@ import {
   ITEMS,
   QUICK_PREFERENCE,
   QUICK_SLOT_OF_EFFECT,
+  QUICK_SLOTS,
   WEAPON_SLOTS,
   type ItemId,
   type QuickSlot,
@@ -420,4 +424,39 @@ export function fillQuickFromPickup(save: Save, itemId: ItemId): boolean {
     filled = true;
   }
   return filled;
+}
+
+/**
+ * SPEC-066 §3: no item in the slot, or its item at count 0. The surface asks
+ * every step in a fight, so it walks the pack without a closure (SPEC-001 §7).
+ */
+export function quickSlotEmpty(save: Save, slot: QuickSlot): boolean {
+  const id = save.quick[slot];
+  if (id === null) return true;
+  const inventory = save.inventory;
+  for (let i = 0; i < inventory.length; i++) {
+    const entry = inventory[i] as Save['inventory'][number];
+    if (entry.itemId === id) return entry.qty <= 0;
+  }
+  return true;
+}
+
+/**
+ * SPEC-066 §4.2 (E122): one step of the in-combat rule over the scene's dry
+ * record. In a fight every empty slot turns dry, and a dry slot stays dry
+ * whatever the pack gains. At the first step out of one, every dry slot clears,
+ * and each that is still empty refills as E40 says — keeping its id when
+ * nothing replaces it, so the bar reads `×0`. A slot that never went dry is
+ * never written. Allocates nothing.
+ */
+export function stepQuickDry(save: Save, dry: Record<QuickSlot, boolean>, inCombat: boolean): void {
+  for (let i = 0; i < QUICK_SLOTS.length; i++) {
+    const slot = QUICK_SLOTS[i] as QuickSlot;
+    if (inCombat) {
+      if (!dry[slot] && quickSlotEmpty(save, slot)) dry[slot] = true;
+    } else if (dry[slot]) {
+      dry[slot] = false;
+      if (quickSlotEmpty(save, slot)) save.quick[slot] = refillQuick(save, slot) ?? save.quick[slot];
+    }
+  }
 }

@@ -15,6 +15,11 @@
 // the real rules — the holstered gun and the noise — must pay for it in damage
 // per kill, and a free run (fast, still firing, silent) must be able to fail
 // the same check.
+//
+// SPEC-066 §4.10 gives the boss suite a budget: the kiter with three medkits
+// must keep every boss inside its max HP, and under the heal lock a bot with
+// unlimited medkits that stands and heals below half must not out-heal a boss
+// from chapter 3 on.
 import { describe, expect, it } from 'vitest';
 import { makeEnemy } from '@/entities/Enemy';
 import { makePlayer } from '@/entities/Player';
@@ -26,6 +31,7 @@ import { containment } from '@/systems/Containment';
 import {
   AGILE_SCOUT_CREATION,
   BOSS_LIMIT_SECONDS,
+  BOSS_MEDKITS,
   BOSSES,
   COMBAT_PLANETS,
   damagePerKill,
@@ -35,8 +41,10 @@ import {
   runField,
   sprintWanted,
   summarize,
+  UNLIMITED_HEAL_BELOW,
   WORST_CASE_CREATION,
   type BossBot,
+  type BossBudget,
   type BossResult,
   type FieldBot,
   type PlanetSummary,
@@ -47,6 +55,13 @@ import {
  * seeds, so a single death spiral decided the four-seed mean this began with.
  */
 const SEEDS = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16] as const;
+
+/** A boss suite's failure message: `seed: won/died/timed out, seconds, lost %, medkits` per run. */
+function row(runs: readonly BossResult[]): string {
+  return runs
+    .map((r) => `${r.seed}: ${r.won ? 'won' : r.died ? 'died' : 'timed out'} ${r.seconds.toFixed(0)} s, lost ${r.lost.toFixed(0)} %, ${r.medkits} medkits`)
+    .join('; ');
+}
 
 /** A bare world for the kite rule on its own. */
 function world(): CombatWorld {
@@ -156,8 +171,6 @@ describe('the boss suite (SPEC-041 §6.1)', () => {
     for (const bot of BOTS) fights.set(`${boss}/${bot}`, BOSS_SEEDS.map((seed) => runBoss(boss, bot, seed)));
   }
   const of = (boss: string, bot: BossBot): BossResult[] => fights.get(`${boss}/${bot}`) ?? [];
-  const row = (runs: readonly BossResult[]): string =>
-    runs.map((r) => `${r.seed}: ${r.won ? 'won' : r.died ? 'died' : 'timed out'} ${r.seconds.toFixed(0)} s, lost ${r.lost.toFixed(0)} %`).join('; ');
 
   for (const boss of BOSSES) {
     describe(ENEMIES[boss].name, () => {
@@ -168,6 +181,11 @@ describe('the boss suite (SPEC-041 §6.1)', () => {
           expect(run.seconds, row(of(boss, 'kite'))).toBeGreaterThanOrEqual(30);
           expect(run.seconds, row(of(boss, 'kite'))).toBeLessThanOrEqual(70);
         }
+      });
+
+      // SPEC-066 §4.10: three medkits are the budget, and a fight must fit in it.
+      it('the kite bot loses ≤ 100 % of its max HP', () => {
+        for (const run of of(boss, 'kite')) expect(run.lost, row(of(boss, 'kite'))).toBeLessThanOrEqual(100);
       });
 
       it('the reader loses ≤ 25 % of its max HP', () => {
@@ -185,6 +203,66 @@ describe('the boss suite (SPEC-041 §6.1)', () => {
   }
 });
 
+describe('the boss suite with unlimited medkits under the heal lock (SPEC-066 §4.10)', () => {
+  /** SPEC-041's seeds and bots, healing below half as often as the 8 s lock allows. */
+  const BOSS_SEEDS = [1, 2, 3, 4, 5, 6] as const;
+  const BOTS: readonly BossBot[] = ['kite', 'stand', 'reader', 'dasher'];
+  const BUDGET: BossBudget = 'unlimited';
+  const fights = new Map<string, BossResult[]>();
+  for (const boss of BOSSES) {
+    for (const bot of BOTS) {
+      fights.set(`${boss}/${bot}`, BOSS_SEEDS.map((seed) => runBoss(boss, bot, seed, BOSS_LIMIT_SECONDS, undefined, 1, BUDGET)));
+    }
+  }
+  const of = (boss: string, bot: BossBot): BossResult[] => fights.get(`${boss}/${bot}`) ?? [];
+  /** G-01's failure case: from chapter 3 a boss cannot be out-healed. */
+  const NOT_OUT_HEALED = new Set<string>(['hive_broodlord', 'ash_titan', 'hive_queen']);
+
+  it('heals below half, and more than three times when it needs to', () => {
+    expect(UNLIMITED_HEAL_BELOW).toBe(0.5);
+    const most = Math.max(...BOSSES.flatMap((boss) => of(boss, 'stand').map((run) => run.medkits)));
+    expect(most).toBeGreaterThan(BOSS_MEDKITS);
+  });
+
+  it('never heals twice inside the 8 s lock', () => {
+    const heals: number[] = [];
+    runBoss('ash_titan', 'stand', 1, BOSS_LIMIT_SECONDS, (world) => {
+      const p = world.player;
+      if (p.healLockUntil > 0 && heals[heals.length - 1] !== p.healLockUntil) heals.push(p.healLockUntil);
+    }, 1, BUDGET);
+    expect(heals.length).toBeGreaterThanOrEqual(2);
+    for (let i = 1; i < heals.length; i++) expect((heals[i] as number) - (heals[i - 1] as number)).toBeGreaterThanOrEqual(8 - 1e-9);
+  });
+
+  for (const boss of BOSSES) {
+    describe(ENEMIES[boss].name, () => {
+      it('the kite bot wins every fight, with no death, in 30–70 s, and loses ≤ 100 %', () => {
+        for (const run of of(boss, 'kite')) {
+          expect(run.won, row(of(boss, 'kite'))).toBe(true);
+          expect(run.died).toBe(false);
+          expect(run.seconds, row(of(boss, 'kite'))).toBeGreaterThanOrEqual(30);
+          expect(run.seconds, row(of(boss, 'kite'))).toBeLessThanOrEqual(70);
+          expect(run.lost, row(of(boss, 'kite'))).toBeLessThanOrEqual(100);
+        }
+      });
+
+      it('the reader loses ≤ 25 % of its max HP', () => {
+        for (const run of of(boss, 'reader')) expect(run.lost, row(of(boss, 'reader'))).toBeLessThanOrEqual(25);
+      });
+
+      it('the dasher loses ≤ 10 %', () => {
+        for (const run of of(boss, 'dasher')) expect(run.lost, row(of(boss, 'dasher'))).toBeLessThanOrEqual(10);
+      });
+
+      if (NOT_OUT_HEALED.has(boss)) {
+        it('the stand bot wins no fight', () => {
+          for (const run of of(boss, 'stand')) expect(run.won, row(of(boss, 'stand'))).toBe(false);
+        });
+      }
+    });
+  }
+});
+
 describe('the boss suite at containment(4) (SPEC-058 §4.4, initial tuning)', () => {
   /** SPEC-041's seeds, at the iteration whose containment is the cap: ×1.52 boss HP, ×1.52 every hit. */
   const BOSS_SEEDS = [1, 2, 3, 4, 5, 6] as const;
@@ -196,8 +274,6 @@ describe('the boss suite at containment(4) (SPEC-058 §4.4, initial tuning)', ()
     }
   }
   const of = (boss: string, bot: BossBot): BossResult[] => fights.get(`${boss}/${bot}`) ?? [];
-  const row = (runs: readonly BossResult[]): string =>
-    runs.map((r) => `${r.seed}: ${r.won ? 'won' : r.died ? 'died' : 'timed out'} ${r.seconds.toFixed(0)} s, lost ${r.lost.toFixed(0)} %`).join('; ');
 
   it('runs at the capped containment: the boss spawns with ×1.15³ HP', () => {
     expect(containment(ITERATION).hpMult).toBeCloseTo(1.520875, 12);

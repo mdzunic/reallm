@@ -705,6 +705,11 @@ export class Hud {
         }
         return;
       }
+      case 'healLock':
+        // SPEC-066 §4.1: the heal lock's ring on `qb-heal` — the one bar, on
+        // the keyboard and in the touch arc alike.
+        this.#quickBar?.setHealLock(m.healLock);
+        return;
       case 'stamina':
         // SPEC-050 §4.6: the scene draws the ring beside the salvager's head
         // in `render()`, off this field, as it does the scan ring.

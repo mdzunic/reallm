@@ -3,7 +3,8 @@
 // writes `vx/vz` from input and integrates position — while `systems/Combat.ts`
 // owns hp, i-frames, facing while firing, knockback and the consumable timers.
 // SPEC-038 adds the dash's clock and direction, which `systems/Dash.ts` writes;
-// SPEC-050 the stamina pool, the sprint and its noise (`systems/Stamina.ts`).
+// SPEC-050 the stamina pool, the sprint and its noise (`systems/Stamina.ts`);
+// SPEC-066 the heal lock, which `Combat.applyConsumable` sets.
 
 export interface PlayerEntity {
   x: number;
@@ -42,6 +43,12 @@ export interface PlayerEntity {
   drawAt: number;
   /** World time the player stops being loud; −Infinity when quiet. */
   loudUntil: number;
+  // SPEC-066 §3 — the heal lock. Reset by `makePlayer`, the respawn and the
+  // recall; never saved, so a new scene starts unlocked (66-b).
+  /** SPEC-066 §4.1: world time the heal slot unlocks; 0 from makePlayer, the respawn and the recall. */
+  healLockUntil: number;
+  /** SPEC-066 §4.1: the length of the lock that set healLockUntil — the ring's full sweep; 0 when none ran. */
+  healLockSeconds: number;
 }
 
 export function makePlayer(x: number, z: number, hp: number): PlayerEntity {
@@ -70,5 +77,7 @@ export function makePlayer(x: number, z: number, hp: number): PlayerEntity {
     sprinting: false,
     drawAt: 0,
     loudUntil: -Infinity,
+    healLockUntil: 0,
+    healLockSeconds: 0,
   };
 }

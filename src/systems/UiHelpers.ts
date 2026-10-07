@@ -74,7 +74,7 @@ import { GLYPHS } from '@/data/glossary';
 import type { EnemyEntity } from '@/entities/Enemy';
 import type { PlayerEntity } from '@/entities/Player';
 import { LOADOUT_CHAPTERS, RECOMMENDED_LOADOUT, type LoadoutEntry } from '@/systems/Balance';
-import { damageReduction, playerDamageMult } from '@/systems/Combat';
+import { damageReduction, droneDps, playerDamageMult } from '@/systems/Combat';
 import {
   contractTokenFraction,
   discountTokens,
@@ -86,7 +86,7 @@ import {
   type FailReason,
 } from '@/systems/Economy';
 import type { SkipRefusal } from '@/systems/Flight';
-import { clock, duration, MINUS, multPercent, percent, percentChange, rate } from '@/systems/Format';
+import { clock, duration, MINUS, multPercent, percent, percentChange, rate, seconds } from '@/systems/Format';
 import { weaponDps, type SlotView } from '@/systems/Loadout';
 import { campaignLocked, contractFor } from '@/systems/Missions';
 import { cumulativeXp, LEVEL_CAP, xpToNext } from '@/systems/Progression';
@@ -626,13 +626,16 @@ export function failText(reason: FailReason): string {
  * AC-39: one line per companion level, straight off the effect table.
  * SPEC-045 §4.7: shares and rates print through the formatter —
  * `−10 % shop prices`, `1 %/s regen in combat`, `+2/s shield regen`.
+ * SPEC-066 §4.3: a drone level reads its DPS against `primary` at multiplier
+ * 1 (`drone 7/s`), as the weapon cards print theirs — no share of "your damage".
  */
-export function companionEffectText(effect: CompanionEffect): string {
+export function companionEffectText(effect: CompanionEffect, primary: ItemId | null = null): string {
   const parts: string[] = [];
   if (effect.autoCollectRadius !== undefined) parts.push(`collects within ${effect.autoCollectRadius} m`);
   if (effect.nodeRadar === true) parts.push('node radar');
-  if (effect.droneDamageFraction !== undefined) parts.push(`drone at ${percent(effect.droneDamageFraction)} of your damage`);
-  if (effect.droneFireRate !== undefined) parts.push(`${rate(effect.droneFireRate)} drone fire`);
+  if (effect.droneDamageFraction !== undefined || effect.droneFireRate !== undefined) {
+    parts.push(`drone ${rate(droneDps(primary, effect))}`);
+  }
   if (effect.regenOutOfCombat !== undefined) parts.push(`${percent(effect.regenOutOfCombat)}/s regen out of combat`);
   if (effect.regenInCombat !== undefined) parts.push(`${percent(effect.regenInCombat)}/s regen in combat`);
   if (effect.cargoBonus !== undefined) parts.push(`+${effect.cargoBonus} cargo`);
@@ -1038,6 +1041,17 @@ export const HP_FULL_TEXT = 'HP full';
 
 /** SPEC-056 §4.5 (56-g): what a stim at a full, unexhausted pool says — throttled like E40's. */
 export const STAMINA_FULL_TEXT = 'Stamina is full';
+
+/** SPEC-066 §4.1 (E121): a heal pressed during the lock — `Heal ready in 7 s`, the seconds rounded up. */
+export function healLockedText(left: number): string {
+  return `Heal ready in ${seconds(left)}`;
+}
+
+/** SPEC-066 §4.2 (E122): a press on a slot that ran dry in this fight, with something in the pack to refill it. */
+export const QUICK_DRY_TEXT = 'Refills after the fight';
+
+/** SPEC-066 §4.2: the picker refused while `inCombat` holds — nothing reassigns a slot mid-fight. */
+export const QUICK_PICK_IN_COMBAT_TEXT = 'Swap items after the fight';
 
 /** SPEC-056 56-a: a relic's equip refused because the piece it would displace has no room in the pack. */
 export function makeRoomText(displaced: ItemId): string {
@@ -2056,6 +2070,8 @@ export interface HudModel {
   walletLit: boolean;
   /** SPEC-038 §4.1: the dash's cooldown ring — 1 at the press, 0 when ready. */
   dash: number;
+  /** SPEC-066 §4.1: the heal slot's lock ring — `healLockLeft / healLockSeconds`, 1 at the use, 0 when ready. */
+  healLock: number;
   /**
    * SPEC-050 §4.6: the stamina ring beside the salvager — the rounded pool, its
    * max, the two states it shows, and whether it is up at all (`staminaShown`).
@@ -2116,6 +2132,7 @@ export function createHudModel(): HudModel {
     interactAction: false,
     walletLit: false,
     dash: 0,
+    healLock: 0,
     stamina: null,
     holstered: false,
     light: null,
@@ -2148,6 +2165,7 @@ const HUD_KEY_TABLE = {
   interactAction: true,
   walletLit: true,
   dash: true,
+  healLock: true,
   stamina: true,
   holstered: true,
   light: true,

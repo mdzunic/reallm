@@ -15,8 +15,9 @@
 // enemy cannot silently shift every other one. SPEC-038 §4.4: every ranged row
 // fires at 13 m with 15 m/s shots — still 1 m inside the Kinetic Repeater's 14 m.
 // SPEC-041 §4.2: boss HP is a table of its own (1,800 / 4,600 / 5,200 / 6,800 /
-// 8,400, *initial tuning*), sized for the post-SPEC-039 kit rather than the
-// ×1.35 chapter factor, and each boss carries a move list.
+// 8,000, *initial tuning*; SPEC-066 §4.10 took the Queen from 8,400), sized for
+// the post-SPEC-039 kit rather than the ×1.35 chapter factor, and each boss
+// carries a move list.
 //
 // `hive_drone`, `hive_warrior` and `hive_spitter` are shared ids (09-a): one
 // stat block each, stored at the chapter it is introduced. Eden-Prime raises the
@@ -238,7 +239,9 @@ export const ENEMIES = {
       // Timed, never weighted: it starts at phase-2 entry and comes back
       // `every` s after each one ends (§4.1). SPEC-050 §4.4: it listens — a
       // loud player cuts the dig to 0.6 of its length and pulls the circle.
-      { id: 'burrow', kind: 'burrow', phaseMin: 2, range: [0, Infinity], weight: 0, windup: 1.2, dig: 2.5, every: 6, radius: 3.5, damageMult: 1.5, cooldown: 0, recover: 0, trackLoud: 12, loudDigMult: 0.6 },
+      // SPEC-066 §4.10 (*initial tuning*): ×1.3 (was ×1.5), so the kite bot
+      // with three medkits loses at most its max HP in the fight.
+      { id: 'burrow', kind: 'burrow', phaseMin: 2, range: [0, Infinity], weight: 0, windup: 1.2, dig: 2.5, every: 6, radius: 3.5, damageMult: 1.3, cooldown: 0, recover: 0, trackLoud: 12, loudDigMult: 0.6 },
     ],
   },
 
@@ -554,7 +557,9 @@ export const ENEMIES = {
     domain: 'surface',
     archetype: 'boss',
     chapter: 5,
-    hp: 8400,
+    // SPEC-066 §4.10 (*initial tuning*): 8,000 (was 8,400) — the sustained-DPS
+    // drone lifted the kite bot's loss past 100 %.
+    hp: 8000,
     damage: 51,
     speed: 4,
     radius: 2.5,
