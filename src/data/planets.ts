@@ -315,7 +315,7 @@ export const PLANETS = {
         // PLAN R28 / SPEC-067 (*initial tuning*): white snow against blue ice
         // sheets, blue-grey scree, and what the last expedition left behind.
         dressing: {
-          macro: { hues: ['#f4f2ee', '#8fb4dc'], strength: 0.6, value: 0.14, patches: 0.65 },
+          macro: { hues: ['#f4f2ee', '#78a2d6'], strength: 0.65, value: 0.22, patches: 0.65 },
           rubble: ['#8e9cac', '#546272'],
           kinds: ['ice_shards', 'buried_crate', 'frozen_pipe'],
           trail: '#a9bccf',
