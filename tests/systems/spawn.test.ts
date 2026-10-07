@@ -622,6 +622,37 @@ function churn(h: Harness, seconds: number, player = { x: 100, z: 40 }): void {
   }
 }
 
+// Review 2026-10 (G-14): an `elites` bonus paid on the planet's 6–7 % roll —
+// c3_s1's one elite about 60 % of the time, c4_m2's two about 40 %.
+describe('SpawnDirector — forced elites (review 2026-10, G-14)', () => {
+  it('forceElites(n) makes the next n ambient pack leaders elite, with their affixes, then rolls as before', () => {
+    const h = harness('thessaly', 'high', 9);
+    h.director.eliteMult = 0; // no roll can make an elite: each one below is forced
+    h.director.forceElites(2);
+    expect(h.director.forcedElites).toBe(2);
+    churn(h, 60);
+    const packs = rollsOf(h.spawned).filter((roll) => (roll[0]?.packId ?? 0) > 0);
+    expect(packs.length).toBeGreaterThan(4);
+    expect(packs.map((roll) => roll[0]?.elite)).toEqual(packs.map((_, k) => k < 2));
+    for (const roll of packs.slice(0, 2)) {
+      expect(roll[0]?.affixA).not.toBeNull();
+      for (const member of roll.slice(1)) expect(member.elite).toBe(false);
+    }
+    // A single (the ranged row) never spends one, and nothing else is elite.
+    expect(h.spawned.filter((s) => s.elite)).toHaveLength(2);
+    expect(h.director.forcedElites).toBe(0);
+  });
+
+  it('forceElites sets the count rather than adding to it, and never below 0', () => {
+    const h = harness('thessaly', 'high', 9);
+    h.director.forceElites(2);
+    h.director.forceElites(1);
+    expect(h.director.forcedElites).toBe(1);
+    h.director.forceElites(-3);
+    expect(h.director.forcedElites).toBe(0);
+  });
+});
+
 describe('SpawnDirector — packs (SPEC-041 §4.5)', () => {
   it('a pack row spawns between its min and max around one point, sharing one packId', () => {
     const h = harness('cinder4', 'high', 5, false);

@@ -181,6 +181,12 @@ export class SpawnDirector {
    * The surface sets it once, from the save's iteration.
    */
   eliteBonus = 0;
+  /**
+   * Review 2026-10 (G-14): ambient pack leaders still owed as elites — an
+   * `elites` bonus would otherwise pay on the planet's 6–7 % roll. Each forced
+   * leader spends one; `forceElites` sets it at a stage start.
+   */
+  #forcedElites = 0;
   #objectiveIds: readonly EnemyId[] = [];
   #time = 0;
   #spawnTimer = 0;
@@ -261,6 +267,20 @@ export class SpawnDirector {
     return Math.min(ELITE_CHANCE_CAP, (this.#planet.surface.eliteChance + this.eliteBonus) * this.eliteMult);
   }
 
+  /** Review 2026-10 (G-14): the ambient pack leaders still to be forced elite. */
+  get forcedElites(): number {
+    return this.#forcedElites;
+  }
+
+  /**
+   * Review 2026-10 (G-14): the next `count` ambient pack leaders spawn elite,
+   * whatever the roll — the surface sets it when a stage of a mission with an
+   * `elites` bonus starts. A leader that may not be elite spends nothing.
+   */
+  forceElites(count: number): void {
+    this.#forcedElites = Math.max(0, Math.floor(count));
+  }
+
   /** SPEC-035 §4.7: hold the ambient field down, or (`null`) let it back up. */
   setRamp(ramp: SpawnRamp | null): void {
     this.#ramp = ramp;
@@ -338,7 +358,10 @@ export class SpawnDirector {
     size = Math.min(size, row.maxAlive - (this.#aliveById.get(id) ?? 0));
     size = Math.max(1, Math.min(size, this.populationTarget + PACK_OVERSHOOT - this.#ambientAlive));
     const at = this.#place(player, def.radius, frustum);
-    this.#spawnPackAround(id, at.x, at.z, size, false, null);
+    // Review 2026-10 (G-14): an owed elite leads this pack.
+    const forced = this.#forcedElites > 0 && def.eliteAllowed;
+    if (forced) this.#forcedElites--;
+    this.#spawnPackAround(id, at.x, at.z, size, forced, null);
   }
 
   /**

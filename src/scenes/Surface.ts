@@ -1385,6 +1385,8 @@ export class SurfaceScene extends UiScene<'surface'> {
     spawn.eliteBonus = containment(save.meta.iteration).eliteBonus;
     spawn.setObstacles(grid);
     spawn.setObjectiveEnemies(missions.objectiveEnemies());
+    // Review 2026-10 (G-14): a clean mission rebuilt here keeps its owed elites.
+    spawn.forceElites(missions.elitesOwed());
     this.#spawn = spawn;
 
     // SPEC-043 §4.3: a landing that starts under `storm_front` starts on a short calm.
@@ -7870,6 +7872,8 @@ export class SurfaceScene extends UiScene<'surface'> {
           // SPEC-034 §4.6: the previous stage finished; its wave is dismissed.
           if (stage > 0) this.#dismissDefendWave = true;
           this.#syncMissionStages();
+          // Review 2026-10 (G-14): an `elites` bonus forces its elites.
+          if (this.#missions !== null) this.#spawn?.forceElites(this.#missions.elitesOwed());
           if (id === this.#missions?.pinned) this.#stuck.progress();
           // A reach objective for a POI the player is already standing in
           // completes now — entry is edge-triggered, and the edge is behind us

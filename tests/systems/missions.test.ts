@@ -1093,6 +1093,35 @@ describe('Missions — judging a bonus (SPEC-043 §4.2)', () => {
     expect(one.save.resources.lithium).toBe(30 + 20);
   });
 
+  // Review 2026-10 (G-14): the surface forces this many pack leaders elite
+  // at a stage start, so an `elites` bonus no longer pays on the roll.
+  it('elitesOwed is what a clean, open elites bonus still wants, and 0 otherwise', () => {
+    const h = harness((save) => save.progress.missionsDone.push('c3_m1'), 'surface', 'thessaly');
+    expect(h.missions.elitesOwed()).toBe(0);
+    h.missions.accept('c3_s1'); // elites ×1
+    expect(h.missions.elitesOwed()).toBe(1);
+    h.events.emit('enemy:killed', { enemyId: 'hive_drone', elite: true, x: 0, z: 0, xp: 5 });
+    expect(h.missions.elitesOwed()).toBe(0);
+
+    const ferrum = harness((save) => save.progress.missionsDone.push('c4_m1'), 'surface', 'ferrum');
+    ferrum.missions.accept('c4_m2'); // elites ×2
+    expect(ferrum.missions.elitesOwed()).toBe(2);
+    // A mission without an elites bonus owes none.
+    const cinder = harness((save) => save.progress.missionsDone.push('c1_m1'));
+    cinder.missions.accept('c1_m2');
+    expect(cinder.missions.elitesOwed()).toBe(0);
+    // Rebuilt with progress, a mission is not clean and can earn no bonus.
+    const rebuilt = harness(
+      (save) => {
+        save.progress.missionsDone.push('c3_m1');
+        save.progress.missionsActive.push({ id: 'c3_s1', stage: 0, counters: { '0:1': 3 } });
+      },
+      'surface',
+      'thessaly',
+    );
+    expect(rebuilt.missions.elitesOwed()).toBe(0);
+  });
+
   it('par is earned inside its seconds and missed past them', () => {
     const outcome = (seconds: number): boolean | undefined => {
       const h = harness((save) => save.progress.missionsDone.push('c1_m1'));
