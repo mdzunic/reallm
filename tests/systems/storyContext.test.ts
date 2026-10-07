@@ -9,6 +9,7 @@ import { describe, expect, it } from 'vitest';
 import { RngRoot } from '@/core/Rng';
 import { lineageOf, newSave, type CharacterCreation, type Save } from '@/core/Save';
 import {
+  CLUES,
   DIALOGUE,
   FILMS,
   LINE_PLACEHOLDERS,
@@ -23,6 +24,7 @@ import {
   fillLine,
   instanceNumber,
   lineVisible,
+  recordOf,
   storyContextOf,
   visibleLines,
   type StoryContext,
@@ -296,6 +298,36 @@ describe('the dialogues that listen (§4.5, §4.7)', () => {
     expect(visibleLines(DIALOGUE.c1_s2_echo, after)).toHaveLength(4);
   });
 
+  it('review 2026-10 S-03: the four covers that outlive the confession drop after it', () => {
+    const at = (planet: 'cinder4' | 'vetra' | 'thessaly' | 'ferrum', flags: string[]): StoryContext =>
+      storyContextOf(save((s) => s.progress.flags.push(...(flags as Save['progress']['flags']))), planet);
+    const last = (dialogue: Parameters<typeof visibleLines>[0], ctx: StoryContext): string | undefined =>
+      visibleLines(dialogue, ctx)
+        .filter((line) => line.speaker === 'aria')
+        .at(-1)?.text;
+    const rows = [
+      [DIALOGUE.wreck_cinder4, 'cinder4', 'Earth lost ships out here before it had a Selection. That is all this is.', 'One of yours. I will stop pretending otherwise.'],
+      [
+        DIALOGUE.c2_s1_accept,
+        'vetra',
+        'There is a crash site under the ice with an Earth transponder. That should not be here.',
+        'There is a crash site under the ice with an Earth transponder. You know whose by now.',
+      ],
+      [
+        DIALOGUE.c3_s1_secret,
+        'thessaly',
+        'They are alien telemetry. Someone seeded these planets for us.',
+        'They are settings. Someone seeded these planets for us, and I was told to call it alien.',
+      ],
+      [DIALOGUE.c4_s2_bark, 'ferrum', 'Ignore the chatter. They get bored out here.', 'They ask everyone that. Most of them know their own number.'],
+    ] as const;
+    for (const [dialogue, planet, before, after] of rows) {
+      expect(last(dialogue, at(planet, [])), dialogue.id).toBe(before);
+      expect(last(dialogue, at(planet, ['chapter5_done'])), dialogue.id).toBe(after);
+      expect(visibleLines(dialogue, at(planet, ['chapter5_done'])).map((line) => line.text), dialogue.id).not.toContain(before);
+    }
+  });
+
   it('the raider’s cover changes once the echo is found', () => {
     const lines = (flags: string[]): string[] =>
       visibleLines(DIALOGUE.c1_m2_raider, storyContextOf(save((s) => s.progress.flags.push(...(flags as Save['progress']['flags']))), 'cinder4')).map(
@@ -352,6 +384,39 @@ describe('captionText (§4.1)', () => {
     expect(captionText(caption, ctx({ name: 'Ash', flags: new Set(['clue_tally', 'clue_hull']) }))).toBe('First, Ash.');
     expect(captionText(caption, ctx({ name: 'Ash', flags: new Set(['clue_tally']) }))).toBe('Second.');
     expect(captionText(caption, ctx({ name: 'Ash' }))).toBe('Base, Ash.');
+  });
+});
+
+describe('recordOf (review 2026-10 S-09)', () => {
+  const tally = CLUES.find((def) => def.id === 'clue_tally');
+  const queen = CLUES.find((def) => def.id === 'chapter5_done');
+
+  it('reads the instances before this one: sixty-one, then sixty-two, then the count — unfilled', () => {
+    if (tally === undefined || queen === undefined) throw new Error('no clue');
+    expect(recordOf(tally.record, ctx())).toEqual({ title: 'Sixty-one marks', text: 'Tally marks on a Ferrum cave wall, in fives. Sixty-one of them.' });
+    expect(recordOf(tally.record, ctx({ iteration: 2 }))).toEqual({
+      title: 'Sixty-two marks',
+      text: 'Tally marks on a Ferrum cave wall, in fives. Sixty-two of them.',
+    });
+    const third = recordOf(queen.record, ctx({ iteration: 3 }));
+    expect(third).toEqual({ title: '{prior} times', text: 'The Queen spoke in another voice. {prior} times before me.' });
+    expect(fillLine(third.text, ctx({ iteration: 3 }))).toBe('The Queen spoke in another voice. 63 times before me.');
+    expect(recordOf(queen.record, ctx({ iteration: 2 })).title).toBe('Sixty-two times');
+  });
+
+  it('takes the first variant that holds, and the record itself with none', () => {
+    const record = {
+      title: 'Base',
+      text: 'Base text.',
+      variants: [
+        { when: { flag: 'clue_hull' }, title: 'First', text: 'First text.' },
+        { when: { flag: 'clue_tally' }, title: 'Second', text: 'Second text.' },
+      ],
+    } as const;
+    expect(recordOf(record, withFlags('clue_tally', 'clue_hull'))).toEqual({ title: 'First', text: 'First text.' });
+    expect(recordOf(record, withFlags('clue_tally'))).toEqual({ title: 'Second', text: 'Second text.' });
+    expect(recordOf(record, withFlags())).toEqual({ title: 'Base', text: 'Base text.' });
+    expect(recordOf({ title: 'Plain', text: 'No variants.' }, withFlags('clue_hull'))).toEqual({ title: 'Plain', text: 'No variants.' });
   });
 });
 

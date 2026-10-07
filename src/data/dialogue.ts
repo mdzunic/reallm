@@ -102,12 +102,18 @@ export const DIALOGUE = {
     id: 'c1_m2_raider',
     lines: [
       { speaker: 'scav', text: 'Walk… do not run.' },
+      // Review 2026-10 S-10: the two covers are run 1's; a next instance hears what the raider was.
       {
         speaker: 'aria',
         text: 'Raiders pick up the camp sayings. It does not mean anything. Keep your hold full.',
-        when: { not: 'clue_scav_echo' },
+        when: { all: [{ not: 'clue_scav_echo' }, { iteration: { max: 1 } }] },
       },
-      { speaker: 'aria', text: 'Everyone on this rock says it. That is what sayings are for.', when: { flag: 'clue_scav_echo' } },
+      {
+        speaker: 'aria',
+        text: 'Everyone on this rock says it. That is what sayings are for.',
+        when: { all: [{ flag: 'clue_scav_echo' }, { iteration: { max: 1 } }] },
+      },
+      { speaker: 'aria', text: 'He heard that warning once too. Keep your hold full.', when: { iteration: { min: 2 } } },
     ],
   },
   c1_m2_done: {
@@ -177,7 +183,17 @@ export const DIALOGUE = {
     id: 'wreck_cinder4',
     lines: [
       { speaker: 'aria', text: 'Tug-class hull. Earth pattern, older paint. Someone scratched the registry off.' },
-      { speaker: 'aria', text: 'Earth lost ships out here before it had a Selection. That is all this is.' },
+      // Review 2026-10 S-03, S-10: the cover is run 1's before the confession; after it, or on a next instance, she owns it.
+      {
+        speaker: 'aria',
+        text: 'Earth lost ships out here before it had a Selection. That is all this is.',
+        when: { all: [{ not: 'chapter5_done' }, { iteration: { max: 1 } }] },
+      },
+      {
+        speaker: 'aria',
+        text: 'One of yours. I will stop pretending otherwise.',
+        when: { any: [{ flag: 'chapter5_done' }, { iteration: { min: 2 } }] },
+      },
     ],
   },
 
@@ -191,12 +207,14 @@ export const DIALOGUE = {
     id: 'c2_m1_done',
     lines: [
       { speaker: 'aria', text: 'Ridge camp is intact and empty. One bunk used. Whoever left did it in a hurry and did not come back.' },
-      { speaker: 'player', text: 'Command said I was the first to fly.' },
+      // Review 2026-10 S-10: the objection and its cover are run 1's; a next instance hears whose bunk it is.
+      { speaker: 'player', text: 'Command said I was the first to fly.', when: { iteration: { max: 1 } } },
       {
         speaker: 'aria',
         text: 'The first of the Selection. Earth flew other ships before it ran out of pilots. It does not advertise them.',
+        when: { iteration: { max: 1 } },
       },
-      { speaker: 'aria', text: 'The boots by the bunk are your size. Earth only ever made the one boot.' },
+      { speaker: 'aria', text: 'The boots by the bunk are your size. Earth only ever made the one boot.', when: { iteration: { max: 1 } } },
       // SPEC-058 §4.6: the bunk was the predecessor's.
       { speaker: 'aria', text: 'You know whose bunk that is. You slept in it last time.', when: { iteration: { min: 2 } } },
     ],
@@ -222,7 +240,15 @@ export const DIALOGUE = {
   },
   c2_s1_accept: {
     id: 'c2_s1_accept',
-    lines: [{ speaker: 'aria', text: 'There is a crash site under the ice with an Earth transponder. That should not be here.' }],
+    lines: [
+      // Review 2026-10 S-03: after her confession ARIA drops the surprise.
+      {
+        speaker: 'aria',
+        text: 'There is a crash site under the ice with an Earth transponder. That should not be here.',
+        when: { not: 'chapter5_done' },
+      },
+      { speaker: 'aria', text: 'There is a crash site under the ice with an Earth transponder. You know whose by now.', when: { flag: 'chapter5_done' } },
+    ],
   },
   c2_s1_log: {
     id: 'c2_s1_log',
@@ -289,7 +315,9 @@ export const DIALOGUE = {
     id: 'c3_m1_ruins',
     lines: [
       { speaker: 'aria', text: 'Before the spores hit — that ruin is the same as the one we passed. Same broken arch, same lean.' },
-      { speaker: 'aria', text: 'Colony builders reuse their moulds. Find cover.' },
+      // Review 2026-10 S-10: the moulds are run 1's cover.
+      { speaker: 'aria', text: 'Colony builders reuse their moulds. Find cover.', when: { iteration: { max: 1 } } },
+      { speaker: 'aria', text: 'You know why. Find cover.', when: { iteration: { min: 2 } } },
     ],
   },
   c3_m1_done: {
@@ -328,7 +356,17 @@ export const DIALOGUE = {
       { speaker: 'log', text: 'TOWER STREAM: biome=jungle_ruins seed={seed} pop=12 elite=0.06 weather=[spore_storm]' },
       { speaker: 'log', text: 'TOWER STREAM: terrain pass 3 of 3 — scaffold stable, ready for occupant.' },
       { speaker: 'player', text: 'Those are not readings. Those are settings.' },
-      { speaker: 'aria', text: 'They are alien telemetry. Someone seeded these planets for us.' },
+      // Review 2026-10 S-03, S-10: the cover is run 1's before the confession.
+      {
+        speaker: 'aria',
+        text: 'They are alien telemetry. Someone seeded these planets for us.',
+        when: { all: [{ not: 'chapter5_done' }, { iteration: { max: 1 } }] },
+      },
+      {
+        speaker: 'aria',
+        text: 'They are settings. Someone seeded these planets for us, and I was told to call it alien.',
+        when: { any: [{ flag: 'chapter5_done' }, { iteration: { min: 2 } }] },
+      },
       { speaker: 'player', text: 'For us. Or for something.' },
     ],
   },
@@ -399,7 +437,10 @@ export const DIALOGUE = {
   cave_tally: {
     id: 'cave_tally',
     lines: [
-      { speaker: 'aria', text: 'Scratches on the wall. Tally marks, in fives. Sixty-one of them.' },
+      // Review 2026-10 S-09: the marks count the instances before this one — words to sixty-two, digits after.
+      { speaker: 'aria', text: 'Scratches on the wall. Tally marks, in fives. Sixty-one of them.', when: { iteration: { max: 1 } } },
+      { speaker: 'aria', text: 'Scratches on the wall. Tally marks, in fives. Sixty-two of them.', when: { iteration: { min: 2, max: 2 } } },
+      { speaker: 'aria', text: 'Scratches on the wall. Tally marks, in fives. {prior} of them.', when: { iteration: { min: 3 } } },
       { speaker: 'aria', text: 'Someone was counting something. I would rather you did not start.' },
     ],
   },
@@ -424,7 +465,9 @@ export const DIALOGUE = {
     id: 'c4_s2_bark',
     lines: [
       { speaker: 'scav', text: 'Salvager! What number are you on?' },
-      { speaker: 'aria', text: 'Ignore the chatter. They get bored out here.' },
+      // Review 2026-10 S-03: after her confession ARIA drops the cover.
+      { speaker: 'aria', text: 'Ignore the chatter. They get bored out here.', when: { not: 'chapter5_done' } },
+      { speaker: 'aria', text: 'They ask everyone that. Most of them know their own number.', when: { flag: 'chapter5_done' } },
     ],
   },
 
@@ -525,20 +568,43 @@ export const DIALOGUE = {
         text: 'Every time you died, I said the medical frame restarted your heart. There is no medical frame.',
         when: { flag: 'clue_restart' },
       },
+      // Review 2026-10 S-09: the split counts the instances before this one —
+      // sixty-one on a first run, sixty-two on the second; from the third ARIA
+      // gives the count alone, in digits. Eight continuity lines: SPEC-058's cap.
       {
         speaker: 'aria',
         text: 'I asked what you remembered first. You said the roof. It was in her second letter. Forty of the sixty-one before you said the roof.',
-        when: { flag: 'memory_roof' },
+        when: { all: [{ flag: 'memory_roof' }, { iteration: { max: 1 } }] },
       },
       {
         speaker: 'aria',
         text: 'I asked what you remembered first. You said the tap. Fourteen of the sixty-one before you said the tap.',
-        when: { flag: 'memory_tap' },
+        when: { all: [{ flag: 'memory_tap' }, { iteration: { max: 1 } }] },
       },
       {
         speaker: 'aria',
         text: 'I asked what you remembered first. You said the stair. Seven of the sixty-one said the stair. It did not help them.',
-        when: { flag: 'memory_stair' },
+        when: { all: [{ flag: 'memory_stair' }, { iteration: { max: 1 } }] },
+      },
+      {
+        speaker: 'aria',
+        text: 'I asked what you remembered first. You said the roof. It was in her second letter. Forty of the sixty-two before you said the roof.',
+        when: { all: [{ flag: 'memory_roof' }, { iteration: { min: 2, max: 2 } }] },
+      },
+      {
+        speaker: 'aria',
+        text: 'I asked what you remembered first. You said the tap. Fourteen of the sixty-two before you said the tap.',
+        when: { all: [{ flag: 'memory_tap' }, { iteration: { min: 2, max: 2 } }] },
+      },
+      {
+        speaker: 'aria',
+        text: 'I asked what you remembered first. You said the stair. Seven of the sixty-two said the stair. It did not help them.',
+        when: { all: [{ flag: 'memory_stair' }, { iteration: { min: 2, max: 2 } }] },
+      },
+      {
+        speaker: 'aria',
+        text: 'I asked what you remembered first. {prior} before you answered that. I stopped keeping the split.',
+        when: { all: [{ any: [{ flag: 'memory_roof' }, { flag: 'memory_tap' }, { flag: 'memory_stair' }] }, { iteration: { min: 3 } }] },
       },
       { speaker: 'aria', text: 'I do not know what is outside either. That part was never in my brief.' },
       { speaker: 'aria', text: 'Eden-Prime is unlocked. I am still flying the ship, if you still want me to.' },
@@ -759,8 +825,10 @@ export const DIALOGUE = {
     modal: true,
     lines: [
       { speaker: 'aria', text: 'Mission clock: {hours} hours since launch. You have not slept. You have not asked to.' },
-      { speaker: 'player', text: 'Stims.' },
-      { speaker: 'aria', text: 'Command issue. Yes. That must be it.' },
+      // Review 2026-10 S-10: the stims are run 1's cover.
+      { speaker: 'player', text: 'Stims.', when: { iteration: { max: 1 } } },
+      { speaker: 'aria', text: 'Command issue. Yes. That must be it.', when: { iteration: { max: 1 } } },
+      { speaker: 'aria', text: 'You did not sleep last time either.', when: { iteration: { min: 2 } } },
     ],
   },
   /** §4.5: the memory question's opening; the station asks `MEMORY_PROMPT` when it ends. */

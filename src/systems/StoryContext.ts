@@ -19,6 +19,7 @@ import type { Save } from '@/core/Save';
 import {
   PLANETS,
   type CaptionDef,
+  type ClueRecord,
   type DialogueDef,
   type DialogueLine,
   type LineCondition,
@@ -211,4 +212,15 @@ export function captionText(caption: CaptionDef, ctx: StoryContext): string {
     if (lineVisible(variant.when, ctx)) return fillLine(variant.text, ctx);
   }
   return fillLine(caption.text, ctx);
+}
+
+/**
+ * Review 2026-10 S-09: the record a clue shows in `ctx` — its first variant
+ * whose `when` holds, else its own title and text. Unfilled: Notes fills both.
+ */
+export function recordOf(record: ClueRecord, ctx: StoryContext): { readonly title: string; readonly text: string } {
+  for (const variant of record.variants ?? []) {
+    if (lineVisible(variant.when, ctx)) return { title: variant.title, text: variant.text };
+  }
+  return { title: record.title, text: record.text };
 }

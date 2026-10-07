@@ -2102,6 +2102,23 @@ describe('the clue catalogue (SPEC-048 §4.2, §4.3)', () => {
       ['Further than here', 'A log in the Hive vault: instance/12 never got past the Queen, and asks the next one to.'],
       ['Checkpoint written', 'The machine room under Eden logged a checkpoint of instance/{instance}. Loss: acceptable.'],
     ]);
+    // Review 2026-10 S-09: the two counts follow the iteration — words to sixty-two, digits after.
+    expect(CLUES.filter((def) => def.record.variants !== undefined).map((def) => [def.id, def.record.variants])).toEqual([
+      [
+        'clue_tally',
+        [
+          { when: { iteration: { min: 2, max: 2 } }, title: 'Sixty-two marks', text: 'Tally marks on a Ferrum cave wall, in fives. Sixty-two of them.' },
+          { when: { iteration: { min: 3 } }, title: '{prior} marks', text: 'Tally marks on a Ferrum cave wall, in fives. {prior} of them.' },
+        ],
+      ],
+      [
+        'chapter5_done',
+        [
+          { when: { iteration: { min: 2, max: 2 } }, title: 'Sixty-two times', text: 'The Queen spoke in another voice. Sixty-two times before me.' },
+          { when: { iteration: { min: 3 } }, title: '{prior} times', text: 'The Queen spoke in another voice. {prior} times before me.' },
+        ],
+      ],
+    ]);
   });
 
   it('every chapter 1–6 has a main clue', () => {
@@ -2239,9 +2256,12 @@ describe('lines, records and captions at the longest fill (SPEC-048 §4.1)', () 
       }
     }
     for (const def of CLUES) {
-      if (atLongest(def.record.title).length > 40) problems.push(`${def.id}: title`);
-      if (atLongest(def.record.text).length > 160) problems.push(`${def.id}: text`);
-      if (def.record.title.trim() === '' || def.record.text.trim() === '') problems.push(`${def.id}: empty record`);
+      // Review 2026-10 S-09: a record's variants are measured like the record.
+      for (const record of [def.record, ...(def.record.variants ?? [])]) {
+        if (atLongest(record.title).length > 40) problems.push(`${def.id}: title`);
+        if (atLongest(record.text).length > 160) problems.push(`${def.id}: text`);
+        if (record.title.trim() === '' || record.text.trim() === '') problems.push(`${def.id}: empty record`);
+      }
     }
     expect(problems).toEqual([]);
   });
@@ -2259,7 +2279,9 @@ describe('lines, records and captions at the longest fill (SPEC-048 §4.1)', () 
         }
       });
     }
-    for (const def of CLUES) texts.push([`${def.id} title`, def.record.title], [`${def.id} text`, def.record.text]);
+    for (const def of CLUES) {
+      for (const record of [def.record, ...(def.record.variants ?? [])]) texts.push([`${def.id} title`, record.title], [`${def.id} text`, record.text]);
+    }
     const problems = texts.flatMap(([where, text]) => unknownTokens(text).map((token) => `${where}: ${token}`));
     expect(problems).toEqual([]);
     // …and the check bites.
@@ -2363,7 +2385,12 @@ describe('main-path echoes, continuity and the text sweep (SPEC-048 §4.7)', () 
       onStage: { 1: 'c6_m1_spring', 2: 'c6_m1_forest' },
       onComplete: 'c6_m1_done',
     });
-    expect(DIALOGUE.c4_s2_bark.lines.map((line) => line.text)).toEqual(['Salvager! What number are you on?', 'Ignore the chatter. They get bored out here.']);
+    // Review 2026-10 S-03: the cover until the confession, and after it the truth.
+    expect(DIALOGUE.c4_s2_bark.lines.map((line) => [line.text, (line as Line).when ?? null])).toEqual([
+      ['Salvager! What number are you on?', null],
+      ['Ignore the chatter. They get bored out here.', { not: 'chapter5_done' }],
+      ['They ask everyone that. Most of them know their own number.', { flag: 'chapter5_done' }],
+    ]);
   });
 
   it('the rewritten lines read as §4.7 gives them', () => {
@@ -2413,6 +2440,13 @@ describe('main-path echoes, continuity and the text sweep (SPEC-048 §4.7)', () 
     expect(said('c1_m2_accept')).toEqual([
       'command: The oil is the mission. Raiders on the field are not your problem until they are.',
       'aria: Raiders wear Earth suits. They strip them off the crews Earth lost out here. Do not let it slow your hand.',
+    ]);
+  });
+
+  it('review 2026-10 S-03: the crash site’s surprise is a cover, until the confession', () => {
+    expect(table('c2_s1_accept')).toEqual([
+      ['aria', 'There is a crash site under the ice with an Earth transponder. That should not be here.', { not: 'chapter5_done' }],
+      ['aria', 'There is a crash site under the ice with an Earth transponder. You know whose by now.', { flag: 'chapter5_done' }],
     ]);
   });
 });
@@ -2723,6 +2757,24 @@ describe('ARIA remembers (SPEC-049 §4.7)', () => {
     expect(lines[12]?.text).toBe('I do not know what is outside either. That part was never in my brief.');
     // The answers' counts are the sixty-one runs before this one: 40 + 14 + 7.
     expect(40 + 14 + 7).toBe(61);
+  });
+
+  it('the memory split counts the instances before this one: sixty-one, sixty-two, then the count alone (review 2026-10 S-09)', () => {
+    const memory = (flag: string, iteration: number): string[] =>
+      visibleLines(DIALOGUE.c5_m3_aria, contextOf([flag], { iteration }))
+        .map((line) => line.text)
+        .filter((text) => text.startsWith('I asked what you remembered first.'));
+    expect(memory('memory_roof', 1)).toEqual([
+      'I asked what you remembered first. You said the roof. It was in her second letter. Forty of the sixty-one before you said the roof.',
+    ]);
+    expect(memory('memory_tap', 2)).toEqual(['I asked what you remembered first. You said the tap. Fourteen of the sixty-two before you said the tap.']);
+    expect(memory('memory_stair', 2)).toEqual([
+      'I asked what you remembered first. You said the stair. Seven of the sixty-two said the stair. It did not help them.',
+    ]);
+    for (const flag of ['memory_roof', 'memory_tap', 'memory_stair']) {
+      expect(memory(flag, 3)).toEqual(['I asked what you remembered first. 63 before you answered that. I stopped keeping the split.']);
+    }
+    expect(memory('clue_hull', 3)).toEqual([]);
   });
 
   it('the confession names the Warden, and the raiders and the fighters as earlier instances (review 2026-10 S-15, S-06)', () => {
@@ -3437,6 +3489,37 @@ const BEFORE_SPEC_058: Readonly<Record<string, readonly Row[]>> = {
     ['scav', 'Off-worlder. Listen. The worms hunt by vibration — walk, do not run.'],
     ['aria', 'He is dehydrated. Keep moving.'],
   ],
+  c1_m2_raider: [
+    ['scav', 'Walk… do not run.'],
+    ['aria', 'Raiders pick up the camp sayings. It does not mean anything. Keep your hold full.', { not: 'clue_scav_echo' }],
+    ['aria', 'Everyone on this rock says it. That is what sayings are for.', { flag: 'clue_scav_echo' }],
+  ],
+  wreck_cinder4: [
+    ['aria', 'Tug-class hull. Earth pattern, older paint. Someone scratched the registry off.'],
+    ['aria', 'Earth lost ships out here before it had a Selection. That is all this is.', { not: 'chapter5_done' }],
+    ['aria', 'One of yours. I will stop pretending otherwise.', { flag: 'chapter5_done' }],
+  ],
+  c3_m1_ruins: [
+    ['aria', 'Before the spores hit — that ruin is the same as the one we passed. Same broken arch, same lean.'],
+    ['aria', 'Colony builders reuse their moulds. Find cover.'],
+  ],
+  c3_s1_secret: [
+    ['log', 'TOWER STREAM: biome=jungle_ruins seed={seed} pop=12 elite=0.06 weather=[spore_storm]'],
+    ['log', 'TOWER STREAM: terrain pass 3 of 3 — scaffold stable, ready for occupant.'],
+    ['player', 'Those are not readings. Those are settings.'],
+    ['aria', 'They are alien telemetry. Someone seeded these planets for us.', { not: 'chapter5_done' }],
+    ['aria', 'They are settings. Someone seeded these planets for us, and I was told to call it alien.', { flag: 'chapter5_done' }],
+    ['player', 'For us. Or for something.'],
+  ],
+  cave_tally: [
+    ['aria', 'Scratches on the wall. Tally marks, in fives. Sixty-one of them.'],
+    ['aria', 'Someone was counting something. I would rather you did not start.'],
+  ],
+  station_awake: [
+    ['aria', 'Mission clock: {hours} hours since launch. You have not slept. You have not asked to.'],
+    ['player', 'Stims.'],
+    ['aria', 'Command issue. Yes. That must be it.'],
+  ],
   c1_s2_echo: [
     ['scav', 'Off-worlder. Listen. The worms hunt by vibration — walk, do not run.'],
     ['player', 'Say that again.'],
@@ -3634,6 +3717,30 @@ describe('the next instance’s lines (SPEC-058 §4.6, §4.7)', () => {
     ]);
   });
 
+  it('review 2026-10 S-09, S-10: a next instance hears no run-1 cover, and the counts it hears are its own', () => {
+    const second = contextOf([], { iteration: 2, prior: 'stay' });
+    const third = contextOf([], { iteration: 3, prior: 'stay' });
+    const lines = (id: keyof typeof DIALOGUE, ctx: StoryContext): string[] => shown(visibleLines(DIALOGUE[id], ctx));
+    expect(lines('c2_m1_done', second)).toEqual([
+      'aria: Ridge camp is intact and empty. One bunk used. Whoever left did it in a hurry and did not come back.',
+      'aria: You know whose bunk that is. You slept in it last time.',
+    ]);
+    expect(lines('c1_m2_raider', second)).toEqual(['scav: Walk… do not run.', 'aria: He heard that warning once too. Keep your hold full.']);
+    expect(lines('c1_m2_raider', contextOf(['clue_scav_echo'], { iteration: 2 }))).toEqual([
+      'scav: Walk… do not run.',
+      'aria: He heard that warning once too. Keep your hold full.',
+    ]);
+    expect(lines('c3_m1_ruins', second).at(-1)).toBe('aria: You know why. Find cover.');
+    expect(lines('station_awake', second).slice(1)).toEqual(['aria: You did not sleep last time either.']);
+    expect(lines('wreck_cinder4', second).at(-1)).toBe('aria: One of yours. I will stop pretending otherwise.');
+    expect(lines('c3_s1_secret', second)).toContain('aria: They are settings. Someone seeded these planets for us, and I was told to call it alien.');
+    expect(lines('c3_s1_secret', second)).not.toContain('aria: They are alien telemetry. Someone seeded these planets for us.');
+    expect(lines('cave_tally', contextOf([]))[0]).toBe('aria: Scratches on the wall. Tally marks, in fives. Sixty-one of them.');
+    expect(lines('cave_tally', second)[0]).toBe('aria: Scratches on the wall. Tally marks, in fives. Sixty-two of them.');
+    expect(lines('cave_tally', third)[0]).toBe('aria: Scratches on the wall. Tally marks, in fives. 63 of them.');
+    for (const ctx of [contextOf([]), second, third]) expect(lines('cave_tally', ctx), String(ctx.iteration)).toHaveLength(2);
+  });
+
   it('ng_notice, ng_body and the two aftermaths read as §4.6 and §4.7 give them', () => {
     expect(DIALOGUE.ng_notice).toMatchObject({ modal: true, once: true, glitch: true });
     expect(table('ng_notice')).toEqual([
@@ -3767,6 +3874,8 @@ describe('the next instance’s lines (SPEC-058 §4.6, §4.7)', () => {
     // SPEC-048's three are unchanged by the next instance's rows.
     expect(['c4_m3_signal', 'c5_m3_warden', 'c5_m3_aria'].map((id) => namingLines(DIALOGUE_LINES[id]?.lines ?? [], CLUES))).toEqual([4, 2, 4]);
     expect(continuityLines(DIALOGUE_LINES['ending_stay']?.lines ?? [])).toBe(8);
+    // Review 2026-10 S-09: the memory split's two later bands fill the confession to the cap.
+    expect(continuityLines(DIALOGUE_LINES['c5_m3_aria']?.lines ?? [])).toBe(8);
     expect(continuityLines(DIALOGUE_LINES['c4_m3_signal']?.lines ?? [])).toBe(6);
   });
 

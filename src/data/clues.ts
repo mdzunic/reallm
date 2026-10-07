@@ -17,6 +17,7 @@ import type { EnemyId } from '@/data/enemies';
 import type { CacheId, FlagId, PlanetId } from '@/data/ids';
 import type { MissionId } from '@/data/missions';
 import type { PoiId } from '@/data/pois';
+import type { LineCondition } from '@/data/story';
 import type { WaveId } from '@/data/waves';
 
 /** What finds a clue. SPEC-049 added `respawn`, `station`, `keepsake` and `choice`; SPEC-056 adds `cache`. */
@@ -44,6 +45,23 @@ export type ClueTrigger =
   /** SPEC-056 §4.7: `cache:opened` of `cache` — a vault's archive shard. */
   | { readonly kind: 'cache'; readonly cache: CacheId };
 
+/**
+ * Review 2026-10 S-09: a record's other title and text, shown while `when`
+ * holds — the first that holds wins (`recordOf`), like a caption's variants.
+ */
+export interface ClueRecordVariant {
+  readonly when: LineCondition;
+  readonly title: string;
+  readonly text: string;
+}
+
+/** What Notes shows once found, filled with `fillLine` (title ≤ 40, text ≤ 160 at the longest fill). */
+export interface ClueRecord {
+  readonly title: string;
+  readonly text: string;
+  readonly variants?: readonly ClueRecordVariant[];
+}
+
 export interface ClueDef {
   /** The clue is found when this flag is set… */
   readonly id: FlagId;
@@ -58,8 +76,7 @@ export interface ClueDef {
   readonly trigger: ClueTrigger;
   /** The start of any of them sets `id`. Empty only for a `choice` clue (SPEC-049). */
   readonly lines: readonly DialogueId[];
-  /** What Notes shows once found, filled with `fillLine` (title ≤ 40, text ≤ 160 at the longest fill). */
-  readonly record: { readonly title: string; readonly text: string };
+  readonly record: ClueRecord;
 }
 
 /** §4.3: how long a shelter clue needs the player inside (*initial tuning*). */
@@ -177,7 +194,19 @@ export const CLUES: readonly ClueDef[] = [
     offTask: true,
     trigger: { kind: 'shelter', planet: 'ferrum', shelter: 'cave', seconds: CLUE_DWELL_SECONDS },
     lines: ['cave_tally'],
-    record: { title: 'Sixty-one marks', text: 'Tally marks on a Ferrum cave wall, in fives. Sixty-one of them.' },
+    record: {
+      title: 'Sixty-one marks',
+      text: 'Tally marks on a Ferrum cave wall, in fives. Sixty-one of them.',
+      // Review 2026-10 S-09: the count is the instances before this one.
+      variants: [
+        {
+          when: { iteration: { min: 2, max: 2 } },
+          title: 'Sixty-two marks',
+          text: 'Tally marks on a Ferrum cave wall, in fives. Sixty-two of them.',
+        },
+        { when: { iteration: { min: 3 } }, title: '{prior} marks', text: 'Tally marks on a Ferrum cave wall, in fives. {prior} of them.' },
+      ],
+    },
   },
   {
     id: 'signal_decoded',
@@ -214,7 +243,15 @@ export const CLUES: readonly ClueDef[] = [
     offTask: false,
     trigger: { kind: 'line' },
     lines: ['c5_m3_warden'],
-    record: { title: 'Sixty-one times', text: 'The Queen spoke in another voice. Sixty-one times before me.' },
+    record: {
+      title: 'Sixty-one times',
+      text: 'The Queen spoke in another voice. Sixty-one times before me.',
+      // Review 2026-10 S-09: the count is the instances before this one.
+      variants: [
+        { when: { iteration: { min: 2, max: 2 } }, title: 'Sixty-two times', text: 'The Queen spoke in another voice. Sixty-two times before me.' },
+        { when: { iteration: { min: 3 } }, title: '{prior} times', text: 'The Queen spoke in another voice. {prior} times before me.' },
+      ],
+    },
   },
   {
     id: 'clue_letter_repeat',
