@@ -118,7 +118,8 @@ export const CLUES: readonly ClueDef[] = [
     path: 'main',
     offTask: false,
     trigger: { kind: 'respawn' },
-    lines: ['restart_1', 'restart_2', 'restart_3'],
+    // Review 2026-10 S-13: only the line that tells the cover finds it.
+    lines: ['restart_1'],
     record: { title: 'Eleven seconds', text: 'I died and woke on the pad. ARIA called it the medical frame.' },
   },
   {
@@ -184,7 +185,8 @@ export const CLUES: readonly ClueDef[] = [
     path: 'optional',
     offTask: true,
     trigger: { kind: 'keepsake' },
-    lines: ['keepsake_drift'],
+    // Review 2026-10 S-02: one line for each drifted text.
+    lines: ['keepsake_drift', 'keepsake_drift_mother'],
     record: { title: 'Tin, then brass', text: 'Iris’s compass was tin. Now I remember it brass.' },
   },
   {

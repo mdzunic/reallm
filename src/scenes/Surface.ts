@@ -177,7 +177,7 @@ import {
   type UndergroundLayout,
 } from '@/systems/Underground';
 import { Weather, WEATHER_EFFECTS, type WeatherEffects } from '@/systems/Weather';
-import { HOME_SESSION, restartLine } from '@/systems/Home';
+import { HOME_SESSION, respawnText, restartLine } from '@/systems/Home';
 import { LINE_LEDGER, missionLinePlays, revealCamera, revealDue, revealKey, stayReport, type Ending } from '@/systems/StoryBeats';
 import { instanceNumber } from '@/systems/StoryContext';
 import {
@@ -7576,6 +7576,11 @@ export class SurfaceScene extends UiScene<'surface'> {
           this.#death?.show(lost, deathCause(cause), tip);
           // SPEC-057 §4.1 step 5: and where it went.
           this.#death?.setRemains(remainsLine);
+          // Review 2026-10 S-14: the last line in the fiction, by the save's story.
+          const story = this.#save;
+          if (story !== null) {
+            this.#death?.setRespawn(respawnText({ flags: new Set(story.progress.flags), iteration: story.meta.iteration }));
+          }
           this.#onDeath(); // SPEC-027 §4.6: the first-death tip, the repeat hint
           // SPEC-057 §4.1 step 6: the first remains this device has seen.
           if (remainsLine !== null) this.#requestTip('remains');

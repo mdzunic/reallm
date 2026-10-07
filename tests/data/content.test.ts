@@ -2006,14 +2006,16 @@ describe('the clue catalogue (SPEC-048 §4.2, §4.3)', () => {
       ['clue_raider_echo', 1, 'main', '—', 'kill', 'c1_m2_raider'],
       ['clue_scav_echo', 1, 'optional', 'c1_s2', 'line', 'c1_s2_echo'],
       ['clue_hull', 1, 'optional', '—', 'shelter', 'wreck_cinder4'],
-      ['clue_restart', 1, 'main', '—', 'respawn', 'restart_1 restart_2 restart_3'],
+      // Review 2026-10 S-13: only the line that tells the cover finds it.
+      ['clue_restart', 1, 'main', '—', 'respawn', 'restart_1'],
       ['clue_ridge_camp', 2, 'main', '—', 'line', 'c2_m1_done'],
       ['iteration_log', 2, 'optional', 'c2_s1', 'line', 'c2_s1_log'],
       ['clue_ruins', 3, 'main', '—', 'line', 'c3_m1_ruins'],
       ['scaffold_secret', 3, 'optional', 'c3_s1', 'line', 'c3_s1_secret'],
       ['clue_awake', 3, 'main', '—', 'station', 'station_awake'],
       ['memory_roof', 3, 'main', '—', 'choice', ''],
-      ['clue_keepsake', 3, 'optional', '—', 'keepsake', 'keepsake_drift'],
+      // Review 2026-10 S-02: a drift line for T2 and one for T3.
+      ['clue_keepsake', 3, 'optional', '—', 'keepsake', 'keepsake_drift keepsake_drift_mother'],
       ['clue_tally', 4, 'optional', '—', 'shelter', 'cave_tally'],
       ['signal_decoded', 4, 'main', '—', 'line', 'c4_m3_signal'],
       ['clue_bark', 4, 'optional', 'c4_s2', 'kill', 'c4_s2_bark'],
@@ -2704,16 +2706,22 @@ describe('the keepsake and the body (SPEC-049 §4.4, §4.5)', () => {
       t4: 'A compass. It points at your next objective. It has never once pointed home.',
       t5: 'A compass. Standard kit. Every salvager was issued one, and a letter.',
     });
-    expect(said('keepsake_drift')).toEqual(['aria: You called it tin last time. And last time it was hers, not your mother’s.']);
+    // Review 2026-10 S-02: each drift line answers its own text, after a T1 view.
+    expect(said('keepsake_drift')).toEqual(['aria: You called it tin last time. And last time she gave it to you at the stair, not on the roof.']);
+    expect(said('keepsake_drift_mother')).toEqual(['aria: Last time it was from Iris, at the shelter stair. Now it is your mother’s.']);
     expect(DIALOGUE_LINES['keepsake_drift']?.modal).toBeUndefined();
+    expect(DIALOGUE_LINES['keepsake_drift_mother']?.modal).toBeUndefined();
   });
 
-  it('the restart lines are ARIA’s, one each, non-modal, by band', () => {
+  it('the restart lines are ARIA’s, one each, non-modal, by band — the second by whether the cover was told', () => {
+    // Review 2026-10 S-13, S-14: the cover explains the walk back, and the
+    // second band knows whether the cover was ever told.
     expect(['restart_1', 'restart_2', 'restart_3'].map(said)).toEqual([
-      ['aria: Medical frame restarted your heart. Eleven seconds of nothing. Walk it off.'],
-      ['aria: Restart complete. I used to say that about your heart.'],
+      ['aria: Medical frame restarted your heart. Eleven seconds of nothing, and the suit walked you back. Do not ask me how.'],
+      ['aria: Restart complete. I used to say that about your heart.', 'aria: Restart complete. You had not died before. I had a story ready for it.'],
       ['aria: Restarted. You know what that means now. So do I.'],
     ]);
+    expect(DIALOGUE_LINES['restart_2']?.lines.map((line) => line.when)).toEqual([{ flag: 'clue_restart' }, { not: 'clue_restart' }]);
     for (const id of ['restart_1', 'restart_2', 'restart_3']) {
       expect(DIALOGUE_LINES[id]?.modal, id).toBeUndefined();
       expect(DIALOGUE_LINES[id]?.once, id).toBeUndefined();
@@ -3507,6 +3515,11 @@ const asDialogue = (lines: readonly Line[]): { lines: readonly DialogueLine[] } 
  * The thirteen dialogues SPEC-058 §4.6 and §4.7 touch, exactly as they read
  * before it (the table of the commit before SPEC-058). At iteration 1, with no
  * lineage, each must show what this table shows.
+ *
+ * Review 2026-10 adds the seven whose run-1 lines it gated (S-07, S-09, S-10),
+ * as a first run reads them, and writes in its deliberate run-1 changes: the
+ * confession (S-01, S-06, S-15), the Warden's six (S-06), the restart's walk
+ * back (S-14) and the covers after it (S-03).
  */
 const BEFORE_SPEC_058: Readonly<Record<string, readonly Row[]>> = {
   intro_command: [
@@ -3625,7 +3638,7 @@ const BEFORE_SPEC_058: Readonly<Record<string, readonly Row[]>> = {
     ['home', 'Come back in one piece.'],
   ],
   restart_1: [
-    ['aria', 'Medical frame restarted your heart. Eleven seconds of nothing. Walk it off.'],
+    ['aria', 'Medical frame restarted your heart. Eleven seconds of nothing, and the suit walked you back. Do not ask me how.'],
   ],
   station_memory_reply: [
     ['aria', 'Thank you. It is on file now.'],
@@ -3742,7 +3755,7 @@ describe('the next instance’s lines (SPEC-058 §4.6, §4.7)', () => {
     ]);
     expect(table('letter_1').at(-1)).toEqual(['aria', 'Same letter, word for word. I will keep delivering them.', LATER]);
     expect(table('restart_1')).toEqual([
-      ['aria', 'Medical frame restarted your heart. Eleven seconds of nothing. Walk it off.', RUN_ONE],
+      ['aria', 'Medical frame restarted your heart. Eleven seconds of nothing, and the suit walked you back. Do not ask me how.', RUN_ONE],
       ['aria', 'Restarted. You have done this before, in every sense.', LATER],
     ]);
   });

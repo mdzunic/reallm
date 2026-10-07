@@ -7,7 +7,7 @@
 // save field: the letters, the asides and the drift read story flags, and the
 // once-a-session memories (`HOME_SESSION`) forget on reload, like the dialogue
 // layer's `once`.
-import { KEEPSAKE, LETTERS, MEMORY_ANSWERS, type DialogueId, type LetterDef } from '@/data/index';
+import { DEATH_RESPAWN, KEEPSAKE, LETTERS, MEMORY_ANSWERS, type DialogueId, type LetterDef } from '@/data/index';
 import type { StoryContext } from '@/systems/StoryContext';
 
 /** `chapter<N>_done` for a letter's chapter. */
@@ -79,6 +79,28 @@ export function keepsakeText(ctx: StoryContext, view: number): string {
 /** §4.4: T2 or T3 — the texts the drift line answers. */
 export function isDriftedKeepsake(text: string): boolean {
   return text === KEEPSAKE.t2 || text === KEEPSAKE.t3;
+}
+
+/**
+ * Review 2026-10 S-02: the drift line for the text on screen — T2's
+ * (`keepsake_drift`, the stair and the roof) or T3's (`keepsake_drift_mother`)
+ * — or null for any other text. A session's first drifted view always follows
+ * a T1 view, so each line names what changed since it.
+ */
+export function driftLine(text: string): 'keepsake_drift' | 'keepsake_drift_mother' | null {
+  if (text === KEEPSAKE.t2) return 'keepsake_drift';
+  if (text === KEEPSAKE.t3) return 'keepsake_drift_mother';
+  return null;
+}
+
+/**
+ * Review 2026-10 S-14: the death overlay's last line — the medical frame's
+ * cover until the notice (`signal_decoded`), the restart after it; a next
+ * instance, which hears no cover for its first death (SPEC-058 §4.6), reads
+ * the restart from the start.
+ */
+export function respawnText(ctx: Pick<StoryContext, 'flags' | 'iteration'>): string {
+  return ctx.flags.has('signal_decoded') || ctx.iteration > 1 ? DEATH_RESPAWN.instance : DEATH_RESPAWN.cover;
 }
 
 const RESTARTED = new WeakSet<object>();

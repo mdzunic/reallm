@@ -37,8 +37,10 @@ const KEEPSAKE = {
   t4: 'A compass. It points at your next objective. It has never once pointed home.',
   t5: 'A compass. Standard kit. Every salvager was issued one, and a letter.',
 };
-const DRIFT = 'You called it tin last time. And last time it was hers, not your mother’s.';
-const RESTART_1 = 'Medical frame restarted your heart. Eleven seconds of nothing. Walk it off.';
+// Review 2026-10 S-02: the drift line on T2 names the stair and the roof; on T3, the mother.
+const DRIFT = 'You called it tin last time. And last time she gave it to you at the stair, not on the roof.';
+// Review 2026-10 S-14: the cover explains the walk back.
+const RESTART_1 = 'Medical frame restarted your heart. Eleven seconds of nothing, and the suit walked you back. Do not ask me how.';
 
 interface Prep {
   flags?: string[];
@@ -388,6 +390,8 @@ test('7. the session’s first respawn plays the restart line and finds its clue
       await page.waitForTimeout(400);
     }
     await expect(death).toBeVisible();
+    // Review 2026-10 S-14: before the notice the overlay speaks the cover.
+    await expect(page.getByTestId('death-respawn')).toHaveText('Medical frame…');
     await expect(death).toBeHidden({ timeout: 15_000 });
   };
 

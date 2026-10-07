@@ -816,16 +816,23 @@ export const DIALOGUE = {
     lines: [
       {
         speaker: 'aria',
-        text: 'Medical frame restarted your heart. Eleven seconds of nothing. Walk it off.',
+        // Review 2026-10 S-14: the cover explains the walk back too — to the pad
+        // or an arena's mouth (SPEC-041), so it names neither.
+        text: 'Medical frame restarted your heart. Eleven seconds of nothing, and the suit walked you back. Do not ask me how.',
         when: { iteration: { max: 1 } },
       },
       // SPEC-058 §4.6: a next instance gets no cover story for its first death.
       { speaker: 'aria', text: 'Restarted. You have done this before, in every sense.', when: { iteration: { min: 2 } } },
     ],
   },
+  // Review 2026-10 S-13: only `restart_1` tells the cover, so a first death
+  // after the notice hears that there was one ready.
   restart_2: {
     id: 'restart_2',
-    lines: [{ speaker: 'aria', text: 'Restart complete. I used to say that about your heart.' }],
+    lines: [
+      { speaker: 'aria', text: 'Restart complete. I used to say that about your heart.', when: { flag: 'clue_restart' } },
+      { speaker: 'aria', text: 'Restart complete. You had not died before. I had a story ready for it.', when: { not: 'clue_restart' } },
+    ],
   },
   restart_3: {
     id: 'restart_3',
@@ -886,10 +893,19 @@ export const DIALOGUE = {
       },
     ],
   },
-  /** §4.4: the first drifted keepsake — `clue_keepsake`'s line. */
+  /**
+   * §4.4: the first drifted keepsake — `clue_keepsake`'s line, on T2. The view
+   * before a session's first drift reads T1 (tin, the stair), so each line
+   * names what changed (review 2026-10 S-02).
+   */
   keepsake_drift: {
     id: 'keepsake_drift',
-    lines: [{ speaker: 'aria', text: 'You called it tin last time. And last time it was hers, not your mother’s.' }],
+    lines: [{ speaker: 'aria', text: 'You called it tin last time. And last time she gave it to you at the stair, not on the roof.' }],
+  },
+  /** Review 2026-10 S-02: the first drift on T3 — `clue_keepsake`'s other line. */
+  keepsake_drift_mother: {
+    id: 'keepsake_drift_mother',
+    lines: [{ speaker: 'aria', text: 'Last time it was from Iris, at the shelter stair. Now it is your mother’s.' }],
   },
 
   // ------------------------------------------------ SPEC-056 — archive shards

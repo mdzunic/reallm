@@ -10,7 +10,11 @@
 //
 // SPEC-057 §4.7: under what was lost, where it went — `death-remains`, written
 // by the scene after `show` (`setRemains`), empty when nothing was taken.
-import type { ResourceId } from '@/data/index';
+//
+// Review 2026-10 S-14: the last line speaks the fiction — the medical frame,
+// or the instance restarting — and the scene that knows the save writes it
+// (`setRespawn`, from `systems/Home.respawnText`).
+import { DEATH_RESPAWN, type ResourceId } from '@/data/index';
 import { el, testId } from '@/ui/dom';
 
 export class DeathOverlay {
@@ -20,6 +24,7 @@ export class DeathOverlay {
   readonly #restarts: HTMLParagraphElement;
   readonly #lost: HTMLParagraphElement;
   readonly #remains: HTMLParagraphElement;
+  readonly #respawn: HTMLParagraphElement;
 
   constructor(root: HTMLElement) {
     this.#root = testId(el('div', 'overlay-panel overlay-death'), 'death-overlay');
@@ -29,6 +34,7 @@ export class DeathOverlay {
     this.#restarts = testId(el('p', 'death-restarts'), 'death-restarts');
     this.#lost = el('p', 'death-lost');
     this.#remains = testId(el('p', 'death-remains'), 'death-remains');
+    this.#respawn = testId(el('p', 'death-respawn', DEATH_RESPAWN.cover), 'death-respawn');
     this.#root.append(
       el('p', 'death-title', 'SIGNAL LOST'),
       this.#cause,
@@ -36,7 +42,7 @@ export class DeathOverlay {
       this.#restarts,
       this.#lost,
       this.#remains,
-      el('p', 'death-respawn', 'Respawning…'),
+      this.#respawn,
     );
     root.append(this.#root);
   }
@@ -68,6 +74,11 @@ export class DeathOverlay {
    */
   setRemains(line: string | null): void {
     this.#remains.textContent = line ?? '';
+  }
+
+  /** Review 2026-10 S-14: the last line — `respawnText` of the save's story context. */
+  setRespawn(text: string): void {
+    this.#respawn.textContent = text;
   }
 
   hide(): void {
