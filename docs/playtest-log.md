@@ -2491,3 +2491,32 @@ them), `e2e/SPEC-048.spec.ts` case 8b, `e2e/SPEC-041.spec.ts` AC-37 and
 - [ ] the hostile rim and the elite gold show on the suit;
 - [ ] beside the dying scavenger's body on the pad, the raiders are visibly the same suit;
 - [ ] a screenshot of each, recorded here.
+
+## PLAN R28 — the ground under the fight: SPEC-067 (the dressed ground) and SPEC-068 (traps and helpers) (M7p)
+
+- **Build:** `feat/surface-hazards` — untagged
+- **Devices:**
+  - desktop — headless full Chromium at 1280 × 720 on the Mac's GPU (Playwright, `--use-angle=metal`, 60 fps), `high` and `medium`
+  - phone — _not run_ (owed, below)
+
+Recorded on the branch: `npm run check` — 138 files and 3,484 tests — and
+the full e2e suite (results in the table). The frames are
+`docs/screenshots/spec-068/hazards-in-action.jpg`; the before/after
+dressing sheets were taken with the same stops on `main` and the branch.
+
+| Area | What the desktop showed |
+|---|---|
+| Ground | every planet's ground varies in hue and value at 15–46 m, with broad layer-B patches (cracked flats on Cinder-4, blue ice on Vetra, mud on Thessaly); field patches, ice sheets, leaf litter, ash, glowing lava pools and goo; trails meander from the pad to every objective |
+| Objects | rubble at the foot of every rock and landmark; three dressing kinds per biome (wurm ribs, scav barrels and pipe runs on Cinder-4; ice shards, buried crates, frozen pipes on Vetra; logs, pillar drums, root arches on Thessaly; basalt stumps, obsidian, cooling lava on Ferrum; chitin ribs, glow pods, resin mounds on the Hive; field walls, marker posts, flower beds on Eden); a landing site of crates, masts, barrels, a fuel bladder and a generator round the pad |
+| Budget (medium, spawn) | draws / triangles before → after the dressing: Cinder-4 36 / 24.1 k → 38 / 32.9 k; Vetra 40 / 23.5 k → 43 / 30.3 k; Thessaly 45 / 25.2 k → 47 / 33.6 k; Ferrum 39 / 22.3 k → 41 / 32.6 k; the Hive 43 / 30.8 k → 45 / 37.2 k; Eden 35 / 18.6 k → 37 / 25.6 k. Hazards add a handful of draws only when one is in frame |
+| Traps | Cinder-4: a pack walked onto a tripmine, its circle filled for 0.9 s, it burst and killed all five (`kills` +5). Ferrum, Vetra, the Hive: vents charged for 1.2 s under a filling circle and erupted in a plume, every 5–10 s while the player stood within 45 m |
+| Helpers | Cinder-4: a shot balanced rock tipped along the shot and crushed three of a pack behind it; a shot fuel drum swelled, burst and set off the drums and a mine beside it — four hazards, six kills. `hazards` read `15/33/…` (traps/helpers) |
+| Counting | every hazard kill raised `kills` as a player kill; story took no hazard damage; a chain of two mines hurt the player once (`tests/systems/hazards.test.ts`) |
+
+**Owed on hardware.** On the laptop and the reference phone, at `medium`:
+
+- [ ] each planet's landing frame shows dressing, and a walk to the first objective crosses rubble, patches and a trail;
+- [ ] a toppler and a drum are found, shot and used on a pack, on keyboard and on touch (aiming by the right stick);
+- [ ] a trap's circle reads on every ground (Vetra's snow and Cinder-4's sand are the weakest) and a dash through one takes nothing;
+- [ ] the frame holds on the phone with hazards and dressing in view;
+- [ ] a screenshot of each, recorded here.
