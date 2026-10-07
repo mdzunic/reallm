@@ -247,8 +247,55 @@ export type GroundLayerId = (typeof GROUND_LAYER_IDS)[number];
 /** The instanced detail kinds of SPEC-018 §4.6. */
 export type ScatterKind = 'pebbles' | 'tufts' | 'bones' | 'crystals' | 'spores' | 'slag';
 
-/** The decal atlas tiles of SPEC-018 §4.5 (`slick` and `frost` share one). */
-export type DecalKind = 'crater' | 'scorch' | 'cracks' | 'slick' | 'frost';
+/**
+ * The decal atlas tiles of SPEC-018 §4.5 (`slick` and `frost` share one), and
+ * PLAN R28 / SPEC-067's ground patches after them: stony, drifted, dried,
+ * frozen, littered, ashen, molten and gooey ground. `trail`, `tread` and
+ * `footprints` are placed by the view itself — worn paths toward the POIs and
+ * the landing site's scuffs — and never listed in a look.
+ */
+export type DecalKind =
+  | 'crater'
+  | 'scorch'
+  | 'cracks'
+  | 'slick'
+  | 'frost'
+  | 'gravel'
+  | 'ripples'
+  | 'mudflat'
+  | 'ice_sheet'
+  | 'snowdrift'
+  | 'leaf_litter'
+  | 'ash'
+  | 'lava_pool'
+  | 'goo'
+  | 'trail'
+  | 'tread'
+  | 'footprints';
+
+/**
+ * PLAN R28 / SPEC-067: the biome dressing pieces — view-only, never colliding,
+ * placed in clumps across the arena, three to a biome.
+ */
+export type DressingKind =
+  | 'wurm_ribs'
+  | 'scav_barrels'
+  | 'pipe_run'
+  | 'ice_shards'
+  | 'buried_crate'
+  | 'frozen_pipe'
+  | 'fallen_log'
+  | 'stone_drums'
+  | 'root_arch'
+  | 'basalt_stumps'
+  | 'obsidian_shards'
+  | 'lava_blobs'
+  | 'chitin_ribs'
+  | 'glow_pods'
+  | 'resin_mound'
+  | 'field_wall'
+  | 'marker_post'
+  | 'flower_bed';
 
 /** The silhouette-ring shapes of SPEC-018 §4.8. */
 export type BoundaryKind = 'dunes' | 'ice_wall' | 'jungle_bank' | 'lava_ridge' | 'chitin_wall' | 'hills';

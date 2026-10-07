@@ -1005,6 +1005,30 @@ describe('content invariants (SPEC-009 §7)', () => {
     expect(groundTintProblems([withTint(Number.NaN)])).toHaveLength(1);
   });
 
+  // PLAN R28 / SPEC-067: every planet is dressed — three distinct kinds of
+  // its own, colours the view can parse, fractions in range — and a look
+  // never lists the decals the view places itself.
+  it('18c. every surface look carries a dressing inside the SPEC-067 envelope', () => {
+    const hex = /^#[0-9a-f]{6}$/i;
+    const seen = new Map<string, string>();
+    for (const planet of planets) {
+      const dressing = planet.surface.look.dressing;
+      const { macro } = dressing;
+      for (const colour of [...macro.hues, ...dressing.rubble, dressing.trail]) expect(colour, planet.id).toMatch(hex);
+      for (const fraction of [macro.strength, macro.value, macro.patches]) {
+        expect(fraction, planet.id).toBeGreaterThanOrEqual(0);
+        expect(fraction, planet.id).toBeLessThanOrEqual(1);
+      }
+      expect(new Set(dressing.kinds).size, planet.id).toBe(3);
+      // A kind belongs to one biome: the six worlds never share a piece.
+      for (const kind of dressing.kinds) {
+        expect(seen.get(kind), `${kind} on ${planet.id}`).toBeUndefined();
+        seen.set(kind, planet.id);
+      }
+      for (const kind of ['trail', 'tread', 'footprints'] as const) expect(planet.surface.look.decals, planet.id).not.toContain(kind);
+    }
+  });
+
   // SPEC-025 §4.7. The slot/line split is only safe while the two agree: a
   // weapon hangs where its line says it does, both class starters are free
   // tier-0 pieces of the right slot, and every consumable has a quick slot to
