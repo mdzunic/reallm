@@ -771,7 +771,28 @@ test('17. Invert flight up / down turns W the other way (§4.9)', async ({ page 
   await page.keyboard.press('KeyX');
   await expect.poll(async () => Number((await sceneInfo(page))['launch']), { timeout: 20_000 }).toBe(1);
 
+  // A released key leaves the ship coasting (its speed decays as e^−6t), and a
+  // pause straight after the first hold freezes that drift for the second. On
+  // a loaded machine the 500 ms hold can be under half a second of game time,
+  // and a ship still climbing at 10 m/s then ends it higher even with W
+  // inverted. So each hold starts from rest: the move is the key's alone.
+  const atRest = async (): Promise<void> => {
+    let last = Number.NaN;
+    await expect
+      .poll(
+        async () => {
+          await frames(page, 3);
+          const y = Number((await sceneInfo(page))['shipY']);
+          const still = y === last;
+          last = y;
+          return still;
+        },
+        { timeout: 10_000 },
+      )
+      .toBe(true);
+  };
   const hold = async (): Promise<number> => {
+    await atRest();
     const before = Number((await sceneInfo(page))['shipY']);
     await page.keyboard.down('KeyW');
     await page.waitForTimeout(500);
