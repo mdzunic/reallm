@@ -617,7 +617,10 @@ test('6. death: the cause and a tip, and no respawn on a press inside the first 
           } else if (step === 2 && v >= at + 0.8) {
             out.upAfterEarly = up;
             step = 3;
-          } else if (step === 3 && v >= at + 1.2) {
+          } else if (step === 3 && v - at >= 1.2) {
+            // Tested as `v - at`, the difference `late` records: `v >= at + 1.2`
+            // rounds the other way at 72 fixed steps, and `late` came out
+            // 1.1999999999999993.
             key('keydown');
             out.late = v - at;
             step = 4;
