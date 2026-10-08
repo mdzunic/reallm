@@ -5,8 +5,10 @@
 //
 // `metrics` holds the *value at each tier*, index 0 being the un-upgraded ship,
 // so a system's effect is a table lookup rather than a formula: `speedMult` at
-// engine tier 2 is `UPGRADES.engine.metrics.speedMult[2]`. `cargoCap[0]` is the
-// same 400 as `TUNING.CARGO_BASE`, which invariant §7.7 pins.
+// engine tier 2 is `UPGRADES.engine.metrics.speedMult[2]`. SPEC-066 §4.7: the
+// cargo tiers are pack slots, and `packSlots[0]` is the base pack
+// (`INVENTORY_SLOTS`, 20), which invariant §7.7 pins; the cargo cap is
+// `TUNING.CARGO_BASE` at every tier.
 //
 // Data modules are plain objects: no imports but other data, no functions
 // (SPEC-001 §4, §8).
@@ -60,15 +62,16 @@ export const UPGRADES = {
     ],
     metrics: { shieldHp: [40, 80, 120, 160] },
   },
+  // SPEC-066 §4.7 (PLAN R27 decision 7): the racks add pack slots; prices unchanged.
   cargo: {
     system: 'cargo',
-    name: 'Cargo Hold',
+    name: 'Cargo Racks',
     tiers: [
-      { tokens: 25, blurb: 'Cleared the crew bunks. Six hundred per resource.' },
-      { tokens: 50, blurb: 'External pods. Eight hundred.' },
-      { tokens: 90, resources: { water: 40 }, blurb: 'Full hold conversion. Twelve hundred, and nowhere left to sit.' },
+      { tokens: 25, blurb: 'Racks where the crew bunks were. Two more slots in the pack.' },
+      { tokens: 50, blurb: 'Racks in the external pods. Two more.' },
+      { tokens: 90, resources: { water: 40 }, blurb: 'Every wall racked. Twenty-six slots, and nowhere left to sit.' },
     ],
-    metrics: { cargoCap: [400, 600, 800, 1200] },
+    metrics: { packSlots: [20, 22, 24, 26] },
   },
   weapon: {
     system: 'weapon',

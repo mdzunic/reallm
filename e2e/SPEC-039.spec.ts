@@ -193,7 +193,7 @@ test('4. ship rows: each says what it acts on, and the shield row names the Ferr
   await expect(page.locator('[data-testid="shop-ship-shield-role"]')).toHaveText('Flight: shield points');
   await expect(page.locator('[data-testid="shop-ship-weapon-role"]')).toHaveText('Flight: nose guns');
   await expect(page.locator('[data-testid="shop-ship-engine-role"]')).toHaveText('Flight time and fuel per jump');
-  await expect(page.locator('[data-testid="shop-ship-cargo-role"]')).toHaveText('The hold, on every planet');
+  await expect(page.locator('[data-testid="shop-ship-cargo-role"]')).toHaveText('Pack slots, on every planet');
   await expect(page.locator('[data-testid="shop-ship-shield-gate"]')).toHaveText('Required for Ferrum');
   await expect(page.locator('[data-testid="shop-ship-hull-gate"]')).toHaveCount(0);
 

@@ -8,7 +8,7 @@ import { describe, expect, it } from 'vitest';
 import { EventBus, type GameEvents } from '@/core/Events';
 import { hash32 } from '@/core/Rng';
 import { newSave, type Save } from '@/core/Save';
-import { CONTRACT_IDS, CONTRACT_LITHIUM, MISSIONS, TUNING, type ContractId, type MissionId, type PlanetId } from '@/data/index';
+import { CONTRACT_IDS, CONTRACT_LITHIUM, DIALOGUE, MISSIONS, TUNING, type ContractId, type MissionId, type PlanetId } from '@/data/index';
 import { Economy } from '@/systems/Economy';
 import { contractFor, Missions, type MissionContext } from '@/systems/Missions';
 import type { LayoutPoi } from '@/systems/Layout';
@@ -174,25 +174,25 @@ describe('Missions — survive (AC-33, AC-40, AC-44)', () => {
     h.events.emit('poi:reached', { poi: 'landing_pad', instance: 0 });
     h.events.emit('poi:scanned', { poi: 'dune_sea', instance: 0 });
     expect(h.missions.active[0]?.stage).toBe(2);
-    expect(h.missions.requiredWeather()).toEqual({ weather: 'sandstorm', seconds: 60 });
+    expect(h.missions.requiredWeather()).toEqual({ weather: 'sandstorm', seconds: 30 });
 
-    h.run(30);
+    h.run(15);
     const timer = () => h.missions.currentObjectives('c1_m1').find((o) => o.objective.kind === 'survive')?.value ?? 0;
-    expect(timer()).toBeGreaterThan(29);
+    expect(timer()).toBeGreaterThan(14);
 
     h.events.emit('player:died', { cause: { kind: 'fall' }, scene: 'surface' });
     expect(h.of('mission:stageReset').at(-1)).toEqual({ id: 'c1_m1', stage: 2, reason: 'death' });
     expect(timer()).toBe(0);
 
-    // A dead player accrues nothing; alive again, the full 60 s completes it.
+    // A dead player accrues nothing; alive again, the full 30 s completes it.
     h.ctx.player.alive = false;
     h.run(10);
     expect(timer()).toBe(0);
     h.ctx.player.alive = true;
-    h.run(60.1);
+    h.run(30.1);
     expect(h.missions.active).toHaveLength(0);
-    // SPEC-043 §4.5: the clock ran through the death and the dead seconds: 30 + 10 + 60.
-    expect(h.of('mission:completed')).toEqual([{ id: 'c1_m1', replay: false, seconds: 100 }]);
+    // SPEC-043 §4.5: the clock ran through the death and the dead seconds: 15 + 10 + 30.
+    expect(h.of('mission:completed')).toEqual([{ id: 'c1_m1', replay: false, seconds: 55 }]);
     expect(h.missions.requiredWeather()).toBeNull();
   });
 });
@@ -376,7 +376,7 @@ describe('Missions — rewards and replay (AC-43)', () => {
     h.missions.accept('c1_m1');
     h.events.emit('poi:reached', { poi: 'landing_pad', instance: 0 });
     h.events.emit('poi:scanned', { poi: 'dune_sea', instance: 0 });
-    h.run(60.1);
+    h.run(30.1);
     const def = MISSIONS.c1_m1;
     expect(h.save.player.xp).toBe(def.rewards.xp);
     expect(h.save.player.tokens).toBe(def.rewards.tokens);
@@ -387,9 +387,9 @@ describe('Missions — rewards and replay (AC-43)', () => {
     h.missions.accept('c1_m1');
     h.events.emit('poi:reached', { poi: 'landing_pad', instance: 0 });
     h.events.emit('poi:scanned', { poi: 'dune_sea', instance: 0 });
-    h.run(60.1);
-    // Accepted again here, so clean: the replay carries its own 60 s.
-    expect(h.of('mission:completed').at(-1)).toEqual({ id: 'c1_m1', replay: true, seconds: 60 });
+    h.run(30.1);
+    // Accepted again here, so clean: the replay carries its own 30 s.
+    expect(h.of('mission:completed').at(-1)).toEqual({ id: 'c1_m1', replay: true, seconds: 30 });
     expect(h.save.player.xp).toBe(def.rewards.xp + Math.floor(def.rewards.xp * TUNING.REPLAY_REWARD_FRACTION));
     expect(h.save.progress.missionsDone).toEqual(['c1_m1']); // not listed twice
   });
@@ -632,17 +632,17 @@ describe('Missions — debugFinishStage (SPEC-024 §4.8)', () => {
     played.missions.accept('c1_m1');
     played.events.emit('poi:reached', { poi: 'landing_pad', instance: 0 });
     played.events.emit('poi:scanned', { poi: 'dune_sea', instance: 0 });
-    played.run(60.1);
+    played.run(30.1);
     expect(played.save.progress.missionsDone).toEqual(['c1_m1']);
 
     const forced = harness();
     forced.missions.accept('c1_m1');
     forced.missions.debugFinishStage('c1_m1'); // reach
     forced.missions.debugFinishStage('c1_m1'); // scan
-    forced.missions.debugFinishStage('c1_m1'); // survive 60 s
+    forced.missions.debugFinishStage('c1_m1'); // survive 30 s
 
     expect(stream(forced)).toEqual(stream(played));
-    expect(played.of('mission:completed')[0]?.seconds).toBe(60);
+    expect(played.of('mission:completed')[0]?.seconds).toBe(30);
     expect(forced.of('mission:completed')[0]?.seconds).toBe(1);
     expect(forced.saveRequests).toEqual(played.saveRequests);
     expect(forced.save.player.xp).toBe(played.save.player.xp);
@@ -708,8 +708,8 @@ describe('Missions — recall and the escort restart (SPEC-034 §4.2, §4.9)', (
     h.events.emit('poi:reached', { poi: 'landing_pad', instance: 0 });
     h.events.emit('poi:scanned', { poi: 'dune_sea', instance: 0 });
     const timer = () => h.missions.currentObjectives('c1_m1').find((o) => o.objective.kind === 'survive')?.value ?? 0;
-    h.run(30);
-    expect(timer()).toBeGreaterThan(29);
+    h.run(15);
+    expect(timer()).toBeGreaterThan(14);
 
     h.events.emit('player:recalled', {});
     expect(h.of('mission:stageReset').at(-1)).toEqual({ id: 'c1_m1', stage: 2, reason: 'recall' });
@@ -718,9 +718,9 @@ describe('Missions — recall and the escort restart (SPEC-034 §4.2, §4.9)', (
     expect(h.missions.active[0]?.stage).toBe(2);
     expect(h.of('mission:completed')).toEqual([]);
     // …and it can still be finished from zero. SPEC-043 43-a: the recall
-    // forfeits nothing, and the clock kept running through it: 30 + 60.
-    h.run(60.1);
-    expect(h.of('mission:completed')).toEqual([{ id: 'c1_m1', replay: false, seconds: 90 }]);
+    // forfeits nothing, and the clock kept running through it: 15 + 30.
+    h.run(30.1);
+    expect(h.of('mission:completed')).toEqual([{ id: 'c1_m1', replay: false, seconds: 45 }]);
   });
 
   it('a recall restarts a defend stage with reason `recall`', () => {
@@ -991,7 +991,7 @@ describe('Missions — survive stages run their storm wave (SPEC-038 §4.5)', ()
     h.missions.accept('c1_m1');
     h.events.emit('poi:reached', { poi: 'landing_pad', instance: 0 });
     h.events.emit('poi:scanned', { poi: 'dune_sea', instance: 0 });
-    expect(h.missions.requiredWeather()).toEqual({ weather: 'sandstorm', seconds: 60 });
+    expect(h.missions.requiredWeather()).toEqual({ weather: 'sandstorm', seconds: 30 });
     expect(h.missions.surviveWave()).toBeNull();
   });
 });
@@ -1224,6 +1224,52 @@ describe('Missions — judging a bonus (SPEC-043 §4.2)', () => {
   });
 });
 
+describe('Missions — Egg Hunt asks for ten eggs (SPEC-066 §4.6)', () => {
+  const eggHunt = (): Harness => {
+    const h = harness((save) => save.progress.missionsDone.push('c5_m1'), 'surface', 'hive');
+    expect(h.missions.accept('c5_s1').ok).toBe(true);
+    return h;
+  };
+  const egg = (h: Harness): void =>
+    h.events.emit('enemy:killed', { enemyId: 'hive_egg', elite: false, x: 0, z: 0, xp: 9 });
+
+  it('completes on the tenth hive_egg kill, not the ninth, and pays its unchanged rewards', () => {
+    expect(MISSIONS.c5_s1.stages).toEqual([[{ kind: 'kill', enemy: 'hive_egg', amount: 10 }]]);
+    expect(MISSIONS.c5_s1.rewards).toEqual({ xp: 200, tokens: 20, items: [{ itemId: 'plasma_cell', qty: 2 }] });
+    const h = eggHunt();
+    const xp = h.save.player.xp;
+    for (let i = 0; i < 9; i++) egg(h);
+    expect(h.of('mission:completed')).toEqual([]);
+    egg(h);
+    expect(h.of('mission:completed').map((c) => c.id)).toEqual(['c5_s1']);
+    // The kill events carry XP the scene pays; the runtime pays the mission's own.
+    expect(h.save.player.xp - xp).toBe(200);
+    expect(h.economy.count('plasma_cell')).toBe(2);
+  });
+
+  it('its par is 240 s: earned at 239 s, missed at 241 s', () => {
+    expect(MISSIONS.c5_s1.bonus).toEqual({ kind: 'par', seconds: 240, reward: { resources: { lithium: 40 } } });
+    const outcome = (seconds: number): boolean | undefined => {
+      const h = eggHunt();
+      h.run(seconds);
+      for (let i = 0; i < 10; i++) egg(h);
+      expect(h.of('mission:completed').at(-1)?.id).toBe('c5_s1');
+      return h.of('mission:bonus').at(-1)?.earned;
+    };
+    expect(outcome(10)).toBe(true);
+    expect(outcome(239)).toBe(true);
+    expect(outcome(241)).toBe(false);
+  });
+
+  it('its brief and accept line say "Ten", not "Fifteen"', () => {
+    expect(MISSIONS.c5_s1.brief).toContain('Ten of them');
+    expect(MISSIONS.c5_s1.brief).not.toContain('Fifteen');
+    expect(DIALOGUE.c5_s1_accept.lines.map((l) => l.text)).toEqual([
+      'Egg clusters line the tunnels. Ten of them and the next generation does not happen.',
+    ]);
+  });
+});
+
 describe('contractFor (SPEC-043 §4.3)', () => {
   const finished = (patch?: (save: Save) => void): Save => {
     const save = newSave(0, MARINE, 42, 1_700_000_000_000);
@@ -1343,8 +1389,8 @@ describe('Missions — contracts on the surface (SPEC-043 §4.3)', () => {
     h.missions.accept('c1_m1');
     h.events.emit('poi:reached', { poi: 'landing_pad', instance: 0 });
     h.events.emit('poi:scanned', { poi: 'dune_sea', instance: 0 });
-    h.run(60.1);
-    expect(h.of('mission:completed')).toEqual([{ id: 'c1_m1', replay: true, seconds: 60 }]);
+    h.run(30.1);
+    expect(h.of('mission:completed')).toEqual([{ id: 'c1_m1', replay: true, seconds: 30 }]);
   });
 
   it('a chapter flag set while a replay runs makes it a contract at completion (43-d)', () => {

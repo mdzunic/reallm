@@ -11,8 +11,11 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { EventBus, type GameEvents } from '@/core/Events';
 import { setLogSink, type LogSink } from '@/core/Log';
 import { DEPOT_KEEP_DEFAULT, DEPOT_KEEP_MAX, DEPOT_KEEP_STEP, newSave, type CharacterCreation, type Save } from '@/core/Save';
-import { COMPANIONS, PLANETS, RESOURCE_SOURCES, UPGRADES } from '@/data/index';
+import { COMPANIONS, PLANETS, RESOURCE_SOURCES, TUNING } from '@/data/index';
+import { QUALITY } from '@/core/Renderer';
+import { Rng } from '@/core/Rng';
 import { Economy } from '@/systems/Economy';
+import { Flight, LAUNCH_SECONDS, type FlightConfig } from '@/systems/Flight';
 import type { LayoutPoi } from '@/systems/Layout';
 import { Missions, type MissionContext } from '@/systems/Missions';
 import { Progression } from '@/systems/Progression';
@@ -176,13 +179,15 @@ describe('the reserve (§4.5)', () => {
     expect(data.depot.keep).toMatchObject({ oil: 100, water: 100, lithium: 100 });
   });
 
-  it('at the largest hold the ceiling is the cap itself: the Cargo Hold at tier 3 with a level-3 Quartermaster', () => {
+  it('at the largest hold the ceiling is the cap itself: the Cargo Racks at tier 3 with a level-3 Quartermaster', () => {
     const { economy, data } = rig((save) => {
       save.ship.cargo = 3;
       save.companions.push({ id: 'quartermaster', level: 3, enabled: true });
     });
     const cap = economy.cargoCap();
-    expect(cap).toBe(UPGRADES.cargo.metrics.cargoCap[3] + COMPANIONS.quartermaster.levels[2].cargoBonus);
+    // SPEC-066 §4.7: the cap is TUNING.CARGO_BASE at every tier — 400 + 300.
+    expect(cap).toBe(TUNING.CARGO_BASE + COMPANIONS.quartermaster.levels[2].cargoBonus);
+    expect(cap).toBe(700);
     expect(cap).toBe(DEPOT_KEEP_MAX);
     expect(economy.setKeep('oil', cap + DEPOT_KEEP_STEP)).toBe(cap);
     expect(economy.setKeep('oil', cap - DEPOT_KEEP_STEP)).toBe(cap - DEPOT_KEEP_STEP);
@@ -192,7 +197,7 @@ describe('the reserve (§4.5)', () => {
   it('65-a: a reserve above a smaller hold’s cap is stored as a load would keep it — the terminal is what shows it at the cap', () => {
     const { economy, data } = rig();
     expect(economy.cargoCap()).toBe(400);
-    expect(economy.setKeep('oil', 1_000)).toBe(1_000);
+    expect(economy.setKeep('oil', 700)).toBe(700);
     data.resources.oil = 400;
     expect(economy.shippable('oil', 0)).toBe(0);
   });
@@ -405,7 +410,7 @@ describe('everything else reads and spends the hold only (§4.4)', () => {
     data.resources.wheat = 0;
     data.depot.held.wheat = 500;
     expect(economy.craft('wheat_ration')).toEqual({ ok: false, reason: 'insufficient_resources' });
-    // The Cargo Hold's tier 3 wants 40 water on top of its tokens.
+    // The Cargo Racks' tier 3 wants 40 water on top of its tokens.
     data.resources.water = 0;
     data.depot.held.water = 100;
     expect(economy.buyShipTier('cargo')).toEqual({ ok: false, reason: 'insufficient_resources' });
@@ -467,5 +472,84 @@ describe('everything else reads and spends the hold only (§4.4)', () => {
     expect(data.depot.held).toEqual({ oil: 300, wheat: 0, water: 0, lithium: 90 });
     const { created } = dropRemains(data, 'cinder4', { x: 12, z: -8 }, lost);
     expect(created?.resources).toEqual({ oil: 20, wheat: 2, water: 2 });
+  });
+});
+
+// ------------------------------------------------------------- SPEC-066 §4.8
+
+describe('hard’s death reaches the depot (SPEC-066 §4.8, E124)', () => {
+  const HARD = (patch?: (save: Save) => void) =>
+    rig((save) => {
+      save.meta.difficulty = 'hard';
+      save.resources = { oil: 200, wheat: 10, water: 10, lithium: 0 };
+      save.depot.held = { oil: 300, wheat: 9, water: 0, lithium: 95 };
+      patch?.(save);
+    });
+
+  it('applyDepotDeathLoss on hard takes floor(held / 10) of each depot resource, and emits nothing', () => {
+    const { economy, data, names, clear } = HARD();
+    clear();
+    expect(economy.applyDepotDeathLoss()).toEqual({ oil: 30, lithium: 9 });
+    expect(data.depot.held).toEqual({ oil: 270, wheat: 9, water: 0, lithium: 86 });
+    expect(names()).toEqual([]);
+    // The hold and the reserve are not its business.
+    expect(data.resources).toEqual({ oil: 200, wheat: 10, water: 10, lithium: 0 });
+    expect(data.depot.keep).toEqual({ oil: 100, wheat: 100, water: 100, lithium: 100 });
+  });
+
+  it('on story, casual and normal it takes nothing', () => {
+    for (const difficulty of ['story', 'casual', 'normal'] as const) {
+      const { economy, data, names, clear } = HARD((save) => {
+        save.meta.difficulty = difficulty;
+      });
+      clear();
+      expect(economy.applyDepotDeathLoss(), difficulty).toEqual({});
+      expect(data.depot.held, difficulty).toEqual({ oil: 300, wheat: 9, water: 0, lithium: 95 });
+      expect(names(), difficulty).toEqual([]);
+    }
+  });
+
+  it('a hard death still takes 20 % of the hold, and the remains carry only that', () => {
+    const { economy, data } = HARD();
+    const lost = economy.applyDeathPenalty();
+    const depotLost = economy.applyDepotDeathLoss();
+    expect(lost).toEqual({ oil: 40, wheat: 2, water: 2 });
+    expect(depotLost).toEqual({ oil: 30, lithium: 9 });
+    expect(data.resources).toEqual({ oil: 160, wheat: 8, water: 8, lithium: 0 });
+    const { created } = dropRemains(data, 'cinder4', { x: 12, z: -8 }, lost);
+    expect(created?.resources).toEqual({ oil: 40, wheat: 2, water: 2 });
+  });
+
+  it('E5: a death in flight on hard takes nothing from the hold or the depot', () => {
+    const { economy, data, bus } = HARD();
+    const missions = new Missions(data, economy, bus, 'flight', 'cinder4');
+    const progression = new Progression(data, bus);
+    const cfg: FlightConfig = {
+      planet: PLANETS.cinder4,
+      ship: data.ship,
+      companions: data.companions,
+      quality: QUALITY.medium,
+      difficulty: data.meta.difficulty,
+    };
+    const flight = new Flight(cfg, economy, progression, missions, bus, new Rng(7));
+    const idle = { steerX: 0, steerY: 0, fire: false, aimX: 0, aimY: 0, throttleUp: false, throttleDown: false };
+    for (let t = 0; t < LAUNCH_SECONDS + 0.1; t += 1 / 60) flight.update(1 / 60, idle);
+    flight.hit(10_000, 'asteroid', { kind: 'asteroid' });
+    expect(flight.phase).toBe('recalled');
+    expect(data.resources).toEqual({ oil: 200, wheat: 10, water: 10, lithium: 0 });
+    expect(data.depot.held).toEqual({ oil: 300, wheat: 9, water: 0, lithium: 95 });
+    missions.dispose();
+  });
+
+  it('the difficulty is read at death: switched off hard, the next death leaves the depot alone', () => {
+    const { economy, data } = HARD();
+    economy.applyDepotDeathLoss();
+    data.meta.difficulty = 'normal';
+    expect(economy.applyDepotDeathLoss()).toEqual({});
+    expect(data.depot.held.oil).toBe(270);
+    // On hard again, a tenth of what is left, rounded down.
+    data.meta.difficulty = 'hard';
+    expect(economy.applyDepotDeathLoss()).toEqual({ oil: 27, lithium: 8 });
+    expect(data.depot.held).toEqual({ oil: 243, wheat: 9, water: 0, lithium: 78 });
   });
 });

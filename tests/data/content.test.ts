@@ -11,6 +11,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { LAUNCH_SECONDS, THROTTLES } from '@/systems/Flight';
 import { DASH_IFRAMES } from '@/systems/Dash';
 import { SPRINT_MULT } from '@/systems/Stamina';
+import { INVENTORY_SLOTS } from '@/systems/Economy';
 import {
   AFFIX_IDS,
   AFFIXES,
@@ -394,8 +395,12 @@ describe('content invariants (SPEC-009 §7)', () => {
   });
 
   it('7. collect and deliver amounts fit the hold, and the ground holds three times the largest collect', () => {
-    // §4.13: the base cap is the un-upgraded cargo metric, in one place only.
-    expect(TUNING.CARGO_BASE).toBe(UPGRADES.cargo.metrics.cargoCap[0]);
+    // SPEC-066 §4.7: the Cargo Racks' first tier is the base pack, and each
+    // tier adds slots; the cap is TUNING.CARGO_BASE at every tier.
+    const packSlots: readonly number[] = UPGRADES.cargo.metrics.packSlots;
+    expect(packSlots[0]).toBe(INVENTORY_SLOTS);
+    for (let tier = 1; tier < packSlots.length; tier++) expect(packSlots[tier]).toBeGreaterThan(packSlots[tier - 1] as number);
+    expect(Object.keys(UPGRADES.cargo.metrics)).toEqual(['packSlots']);
 
     const problems: string[] = [];
     /** planet → resource → largest collect objective (E3). */
@@ -561,7 +566,7 @@ describe('content invariants (SPEC-009 §7)', () => {
       frost_matriarch: 4600,
       hive_broodlord: 5200,
       ash_titan: 6800,
-      hive_queen: 8400,
+      hive_queen: 8000, // SPEC-066 §4.10 (was 8,400)
     };
     expect(enemies.filter((enemy) => enemy.archetype === 'boss').map((enemy) => enemy.id).sort()).toEqual(
       Object.keys(bossHp).sort(),
@@ -1550,6 +1555,35 @@ describe('the three SPEC-035 tips (SPEC-035 §4.8)', () => {
   });
 });
 
+// SPEC-066 §4.6, §4.9: the first ten minutes — a 30 s first storm, and a
+// first trip with an asteroid lane whose big rocks drop oil.
+describe('the first ten minutes (SPEC-066 §4.6, §4.9)', () => {
+  it('Dry Land’s storm stage is 30 s of sandstorm with no wave, and its hint says thirty', () => {
+    expect(MISSIONS.c1_m1.stages[2]).toEqual([{ kind: 'survive', seconds: 30, weather: 'sandstorm' }]);
+    expect(MISSION_HINTS.c1_m1?.[2]).toBe('Thirty seconds of sand. Stay alive — heal when it bites.');
+  });
+
+  it('only Cinder-4 has a first-trip field, and its window lies inside the trip', () => {
+    const withField = PLANET_IDS.filter((id) => planetsById[id].flight.firstTripField !== undefined);
+    expect(withField).toEqual(['cinder4']);
+    const field = planetsById.cinder4.flight.firstTripField;
+    expect(field).toEqual({ fromSecond: 20, toSecond: 45 });
+    if (field === undefined) return;
+    expect(field.fromSecond).toBeGreaterThan(0);
+    expect(field.toSecond).toBeGreaterThan(field.fromSecond);
+    expect(field.toSecond).toBeLessThan(PLANETS.cinder4.travelSeconds);
+  });
+
+  it('the first flight tip says a big rock shot down drops oil, on both schemes, inside 160 characters', () => {
+    expect(TIPS.flight_steer.keyboard).toBe('WASD or the mouse steers. Space or a click fires the nose guns — big rocks you shoot down drop oil.');
+    expect(TIPS.flight_steer.touch).toBe('Drag to steer — the guns fire on their own, and big rocks they break drop oil.');
+    for (const text of [TIPS.flight_steer.keyboard, TIPS.flight_steer.touch]) {
+      expect(text).toMatch(/big rocks .* drop oil\.$/);
+      expect(text.length).toBeLessThanOrEqual(160);
+    }
+  });
+});
+
 describe('the dash in words (SPEC-038 §4.9)', () => {
   it('adds the dash tip with both wordings', () => {
     expect(TIP_IDS).toContain('dash');
@@ -1780,7 +1814,7 @@ describe('side rewards and bonuses (SPEC-043 §4.1, §4.2)', () => {
       c4_s1: { kind: 'no_shelter', reward: lithium(30) },
       c5_m2: { kind: 'par', seconds: 300, reward: items('demo_charge', 2) },
       c5_m3: { kind: 'no_death', reward: items('plasma_cell', 3) },
-      c5_s1: { kind: 'par', seconds: 360, reward: lithium(40) },
+      c5_s1: { kind: 'par', seconds: 240, reward: lithium(40) },
       c6_m1: { kind: 'par', seconds: 270, reward: items('medkit', 3) },
     } as Partial<Record<MissionId, MissionBonus>>;
     expect(Object.keys(table)).toHaveLength(22);
@@ -4180,6 +4214,8 @@ describe('the story row (SPEC-059 §4.2.1)', () => {
       weatherMult: 0,
       allyDamageMult: 0,
       assisted: true,
+      // SPEC-066 §4.8: a death never reaches the depot below hard.
+      depotLoss: 0,
     });
     // Its elite chance is normal's; its enemy HP is below every other row's.
     expect(DIFFICULTY_RULES.story.eliteChanceMult).toBe(DIFFICULTY_RULES.normal.eliteChanceMult);

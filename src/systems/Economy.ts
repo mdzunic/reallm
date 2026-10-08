@@ -38,6 +38,7 @@ import {
   CLASSES,
   COMPANIONS,
   COMPANION_IDS,
+  CONTRACT_BOSS_TOKEN_FRACTION,
   CONTRACT_LITHIUM,
   CONTRACT_REWARD_FRACTION,
   DIFFICULTY_RULES,
@@ -138,6 +139,18 @@ export const PREDECESSOR_CACHE: readonly { readonly itemId: ItemId; readonly qty
   { itemId: 'frag_grenade', qty: 2 },
 ];
 
+/**
+ * SPEC-066 §4.5: the share of a contract's tokens — `CONTRACT_BOSS_TOKEN_FRACTION`
+ * for a mission with a `boss` objective in any stage, else
+ * `CONTRACT_REWARD_FRACTION`. The XP share is 0.75 either way.
+ */
+export function contractTokenFraction(mission: MissionDef): number {
+  for (const stage of mission.stages) {
+    for (const objective of stage) if (objective.kind === 'boss') return CONTRACT_BOSS_TOKEN_FRACTION;
+  }
+  return CONTRACT_REWARD_FRACTION;
+}
+
 /** §4.6: the boss-mission voucher that pays for the next chapter's jump. */
 export function refuelVoucherText(oil: number): string {
   return `Earth Command refuel voucher: +${oil} oil`;
@@ -160,8 +173,8 @@ const PLANET_TABLE: Readonly<Record<PlanetId, PlanetDef>> = PLANETS;
 const RECIPE_TABLE: Readonly<Record<RecipeId, Recipe>> = RECIPES;
 const CLASS_TABLE: Readonly<Record<ClassId, Class>> = CLASSES;
 
-/** SPEC-009 §4.10: 400 / 600 / 800 / 1200 per resource, by cargo tier. */
-const CARGO_BY_TIER = UPGRADES.cargo.metrics.cargoCap;
+/** SPEC-066 §4.7: the pack's slots by Cargo Racks tier — 20 / 22 / 24 / 26. */
+const PACK_SLOTS_BY_TIER: readonly number[] = UPGRADES.cargo.metrics.packSlots;
 const FUEL_MULT = UPGRADES.engine.metrics.fuelMult;
 
 function fail(reason: FailReason): Fail {
@@ -316,9 +329,17 @@ export class Economy {
 
   // ------------------------------------------------------------- resources
 
-  /** §4.5: the cargo tier's cap plus the quartermaster's bonus, per resource. */
+  /**
+   * §4.5: the cap plus the quartermaster's bonus, per resource. SPEC-066 §4.7:
+   * the cap is `TUNING.CARGO_BASE` at every Cargo tier — the tiers are pack slots.
+   */
   cargoCap(): number {
-    return CARGO_BY_TIER[this.#save.ship.cargo] + (this.#quartermaster()?.cargoBonus ?? 0);
+    return TUNING.CARGO_BASE + (this.#quartermaster()?.cargoBonus ?? 0);
+  }
+
+  /** SPEC-066 §4.7: the pack's slots at the save's Cargo Racks tier — 20 / 22 / 24 / 26. */
+  packSlots(): number {
+    return PACK_SLOTS_BY_TIER[this.#save.ship.cargo] ?? INVENTORY_SLOTS;
   }
 
   /**
@@ -423,9 +444,12 @@ export class Economy {
    * SPEC-065 §4.2: what the pad terminal would send home — whatever the hold
    * carries above the larger of the reserve and `deliverNeed`, which is what
    * this planet's active deliver objectives still need of it (E117).
+   * SPEC-066 §4.7: the reserve reads at most the cap — the value the terminal
+   * shows — so a hold above the cap (E123) ships down to it; the stored
+   * reserve is kept as it is (65-a).
    */
   shippable(resource: ResourceId, deliverNeed: number): number {
-    const floor = Math.max(this.#save.depot.keep[resource], deliverNeed);
+    const floor = Math.max(Math.min(this.#save.depot.keep[resource], this.cargoCap()), deliverNeed);
     return Math.max(0, this.#save.resources[resource] - floor);
   }
 
@@ -757,12 +781,12 @@ export class Economy {
     return item.kind === 'consumable' ? item.stack : 1;
   }
 
-  /** How many more of `itemId` fit: the open stack, plus the free slots. */
+  /** How many more of `itemId` fit: the open stack, plus the free slots (SPEC-066 §4.7: of `packSlots()`). */
   #roomFor(itemId: ItemId): number {
     const stack = this.#stackOf(itemId);
     const held = this.count(itemId);
     const headroom = Math.ceil(held / stack) * stack - held;
-    return headroom + Math.max(0, INVENTORY_SLOTS - this.usedSlots()) * stack;
+    return headroom + Math.max(0, this.packSlots() - this.usedSlots()) * stack;
   }
 
   /**
@@ -912,14 +936,15 @@ export class Economy {
    *
    * SPEC-043 §4.3: a replay run as a contract pays 75 % of the XP and the
    * tokens, floored, and 20 lithium as a reward (past the cap) — and still
-   * none of the mission's items, resources or flags.
+   * none of the mission's items, resources or flags. SPEC-066 §4.5: a boss
+   * mission's contract pays 50 % of its tokens (`contractTokenFraction`).
    */
   applyRewards(mission: MissionDef, replay: boolean, contract = false): void {
     const rewards = mission.rewards;
     const reason = `mission:${mission.id}`;
     if (replay && contract) {
       this.#progression.addXp(Math.floor(rewards.xp * CONTRACT_REWARD_FRACTION), reason);
-      this.#progression.addTokens(Math.floor(rewards.tokens * CONTRACT_REWARD_FRACTION), reason);
+      this.#progression.addTokens(Math.floor(rewards.tokens * contractTokenFraction(mission)), reason);
       this.addResource('lithium', CONTRACT_LITHIUM, 'reward');
       this.#saves?.request('mission');
       return;
@@ -1017,6 +1042,28 @@ export class Economy {
       this.#save.resources[resource] = total;
       lost[resource] = loss;
       this.#events.emit('resource:spent', { resource, amount: loss, total, reason: 'death' });
+    }
+    return lost;
+  }
+
+  /**
+   * SPEC-066 §4.8 (E124): a surface death on `hard` also takes
+   * `floor(held × depotLoss)` of each resource held at the Relay depot — a
+   * tenth — read at death as `applyDeathPenalty` reads its own. The share is
+   * gone, not added to the remains. It emits nothing (the hold does not
+   * change), and every other difficulty takes nothing. Returns what was taken,
+   * for the death overlay.
+   */
+  applyDepotDeathLoss(): Partial<Record<ResourceId, number>> {
+    const lost: Partial<Record<ResourceId, number>> = {};
+    const share = DIFFICULTY_RULES[this.#save.meta.difficulty].depotLoss;
+    if (share <= 0) return lost;
+    const held = this.#save.depot.held;
+    for (const resource of RESOURCE_IDS) {
+      const loss = Math.floor(held[resource] * share);
+      if (loss <= 0) continue;
+      held[resource] -= loss;
+      lost[resource] = loss;
     }
     return lost;
   }

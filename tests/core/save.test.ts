@@ -77,7 +77,7 @@ import {
   type SlotId,
   type SlotSummary,
 } from '@/core/Save';
-import { BELOW_HALF_SIZE, CACHE_IDS, COMPANIONS, PLANET_IDS, UPGRADES, type PlanetId } from '@/data/index';
+import { BELOW_HALF_SIZE, CACHE_IDS, COMPANIONS, PLANET_IDS, TUNING, type PlanetId } from '@/data/index';
 import { slotLine } from '@/systems/UiHelpers';
 
 // --------------------------------------------------------------- test doubles
@@ -2548,11 +2548,12 @@ describe('version 4: the Relay depot (SPEC-065 §4.1)', () => {
   it('pins the constants of §3: a reserve of 100, steps of 50, and the largest cap rounded up to a step', () => {
     expect(DEPOT_KEEP_DEFAULT).toBe(100);
     expect(DEPOT_KEEP_STEP).toBe(50);
-    // The Cargo Hold's tier 3 (1,200) plus the Quartermaster's level-3 bonus (300).
-    const largest = UPGRADES.cargo.metrics.cargoCap[3] + COMPANIONS.quartermaster.levels[2].cargoBonus;
-    expect(largest).toBe(1_500);
+    // SPEC-066 §4.7: the cap is TUNING.CARGO_BASE (400) at every Cargo tier,
+    // plus the Quartermaster's level-3 bonus (300).
+    const largest = TUNING.CARGO_BASE + COMPANIONS.quartermaster.levels[2].cargoBonus;
+    expect(largest).toBe(700);
     expect(DEPOT_KEEP_MAX).toBe(Math.ceil(largest / DEPOT_KEEP_STEP) * DEPOT_KEEP_STEP);
-    expect(DEPOT_KEEP_MAX).toBe(1_500);
+    expect(DEPOT_KEEP_MAX).toBe(700);
   });
 
   it('a fresh save holds nothing at the depot, with every reserve at DEPOT_KEEP_DEFAULT', () => {
@@ -2566,10 +2567,15 @@ describe('version 4: the Relay depot (SPEC-065 §4.1)', () => {
   });
 
   it('a depot that is all there survives the validator exactly, with no cap on what it holds', () => {
-    const depot = { held: { oil: 300, wheat: 0, water: 2_500_000, lithium: 15 }, keep: { oil: 0, wheat: 1_500, water: 350, lithium: 100 } };
+    const depot = { held: { oil: 300, wheat: 0, water: 2_500_000, lithium: 15 }, keep: { oil: 0, wheat: 700, water: 350, lithium: 100 } };
     const ok = expectOk(withDepot(depot));
     expect(ok.data.depot).toEqual(depot);
     expect(ok.warnings).toEqual([]);
+    // SPEC-066 §6.9: a reserve of 1,200 (a tier-3 hold's, before R27) is above
+    // the new DEPOT_KEEP_MAX, so it is clamped to 700 with a warning.
+    const big = expectOk(withDepot({ ...depot, keep: { ...depot.keep, wheat: 1_200 } }));
+    expect(big.data.depot.keep.wheat).toBe(700);
+    expect(big.warnings.join('\n')).toContain('depot.keep.wheat');
   });
 
   // ---------------------------------------------------------------- E120
@@ -2634,9 +2640,13 @@ describe('version 4: the Relay depot (SPEC-065 §4.1)', () => {
     const warnings = ok.warnings.join('\n');
     for (const resource of ['oil', 'wheat', 'water', 'lithium']) expect(warnings, resource).toContain(`depot.keep.${resource}`);
     // On a step and inside the range: kept, and nothing said.
-    const kept = expectOk(withDepot({ held: EMPTY.held, keep: { oil: 0, wheat: 50, water: DEPOT_KEEP_MAX, lithium: 1_200 } }));
-    expect(kept.data.depot.keep).toEqual({ oil: 0, wheat: 50, water: DEPOT_KEEP_MAX, lithium: 1_200 });
+    const kept = expectOk(withDepot({ held: EMPTY.held, keep: { oil: 0, wheat: 50, water: DEPOT_KEEP_MAX, lithium: 650 } }));
+    expect(kept.data.depot.keep).toEqual({ oil: 0, wheat: 50, water: DEPOT_KEEP_MAX, lithium: 650 });
     expect(kept.warnings).toEqual([]);
+    // SPEC-066 §6.9: a stored 1,200 is now above the 700 ceiling — clamped, and said.
+    const clamped = expectOk(withDepot({ held: EMPTY.held, keep: { ...EMPTY.keep, lithium: 1_200 } }));
+    expect(clamped.data.depot.keep.lithium).toBe(700);
+    expect(clamped.warnings.join('\n')).toContain('depot.keep.lithium');
     // Missing, a string, infinite or null: the default.
     const fallback = expectOk(withDepot({ held: EMPTY.held, keep: { oil: '200', wheat: Number.POSITIVE_INFINITY, water: null } }));
     expect(fallback.data.depot.keep).toEqual(EMPTY.keep);

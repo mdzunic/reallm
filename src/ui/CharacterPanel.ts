@@ -28,7 +28,7 @@ import {
   type WeaponSlot,
 } from '@/data/index';
 import { GLYPHS, QUICK_SLOT_NAMES } from '@/data/glossary';
-import { INVENTORY_SLOTS, type Economy } from '@/systems/Economy';
+import type { Economy } from '@/systems/Economy';
 import { percent } from '@/systems/Format';
 import { HOME_SESSION, keepsakeText } from '@/systems/Home';
 import { quickEligible } from '@/systems/Loadout';
@@ -398,10 +398,13 @@ export class CharacterPanel {
 
   // -------------------------------------------------------------- inventory
 
-  /** AC-48: twenty slots; a tap opens Equip / Use / Discard for that stack. */
+  /**
+   * AC-48: twenty slots — SPEC-066 §4.7: the Cargo Racks' `packSlots()`; a tap
+   * opens Equip / Use / Discard for that stack.
+   */
   #inventoryBlock(): HTMLElement {
     const inventory = this.#deps.data.inventory;
-    const cells = Array.from({ length: INVENTORY_SLOTS }, (_, index) => {
+    const cells = Array.from({ length: this.#deps.economy.packSlots() }, (_, index) => {
       const entry = inventory[index];
       if (entry === undefined) {
         return h('div', { class: 'inv-cell is-empty' });

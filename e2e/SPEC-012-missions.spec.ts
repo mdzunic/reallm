@@ -149,7 +149,7 @@ test('all five Cinder-4 missions complete end to end, with the echo glitch burst
   }
   expect((await missionState(page, 'c1_m1'))?.stage).toBe(2);
 
-  // Stage 2: survive 60 s of the forced sandstorm.
+  // Stage 2: survive 30 s of the forced sandstorm (SPEC-066 §4.6).
   {
     const running = await gameBudget(page, 110);
     while ((await running()) && !(await isDone(page, 'c1_m1'))) {

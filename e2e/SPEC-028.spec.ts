@@ -86,8 +86,10 @@ test('the heal slot refuses at full HP, spends when hurt, and C toasts empty (§
   await page.keyboard.press('KeyQ');
   await expect.poll(async () => (await info(page))['qHeal']).toBe(2);
 
-  // A tap on the consumable slot uses it too (§4.5: acts on release).
+  // A tap on the consumable slot uses it too (§4.5: acts on release) — once
+  // the ration's 5 s heal lock has run out (SPEC-066 §4.1).
   await page.getByTestId('surface-hurt').click();
+  await expect.poll(async () => Number((await info(page))['healLockLeft']), { timeout: 30_000 }).toBe(0);
   await page.getByTestId('qb-heal').click();
   await expect.poll(async () => (await info(page))['qHeal']).toBe(1);
 

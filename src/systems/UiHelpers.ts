@@ -74,8 +74,9 @@ import { GLYPHS } from '@/data/glossary';
 import type { EnemyEntity } from '@/entities/Enemy';
 import type { PlayerEntity } from '@/entities/Player';
 import { LOADOUT_CHAPTERS, RECOMMENDED_LOADOUT, type LoadoutEntry } from '@/systems/Balance';
-import { damageReduction, playerDamageMult } from '@/systems/Combat';
+import { damageReduction, droneDps, playerDamageMult } from '@/systems/Combat';
 import {
+  contractTokenFraction,
   discountTokens,
   missingRequirements,
   ownsItem,
@@ -85,7 +86,7 @@ import {
   type FailReason,
 } from '@/systems/Economy';
 import type { SkipRefusal } from '@/systems/Flight';
-import { clock, duration, MINUS, multPercent, percent, percentChange, rate } from '@/systems/Format';
+import { clock, duration, MINUS, multPercent, percent, percentChange, rate, seconds } from '@/systems/Format';
 import { weaponDps, type SlotView } from '@/systems/Loadout';
 import { campaignLocked, contractFor } from '@/systems/Missions';
 import { cumulativeXp, LEVEL_CAP, xpToNext } from '@/systems/Progression';
@@ -388,8 +389,8 @@ export interface WalletModel {
 }
 
 /**
- * SPEC-031 §4.11: the cargo cap the wallet strip prints against — the cargo
- * tier's capacity plus the quartermaster's bonus, the same sum
+ * SPEC-031 §4.11: the cargo cap the wallet strip prints against — SPEC-066
+ * §4.7: `TUNING.CARGO_BASE` plus the quartermaster's bonus, the same sum
  * `Economy.cargoCap()` charges by, computed purely over the save so the strip
  * needs no `Economy` instance.
  */
@@ -401,7 +402,7 @@ function walletCap(save: Save): number {
     const effect = COMPANIONS[companion.id].levels[companion.level - 1] as CompanionEffect | undefined;
     bonus += effect?.cargoBonus ?? 0;
   }
-  return (UPGRADES.cargo.metrics['cargoCap']?.[save.ship.cargo] ?? TUNING.CARGO_BASE) + bonus;
+  return TUNING.CARGO_BASE + bonus;
 }
 
 /** SPEC-031 §3: what the wallet strip renders — one read of the save, no totals of its own. */
@@ -625,13 +626,16 @@ export function failText(reason: FailReason): string {
  * AC-39: one line per companion level, straight off the effect table.
  * SPEC-045 §4.7: shares and rates print through the formatter —
  * `−10 % shop prices`, `1 %/s regen in combat`, `+2/s shield regen`.
+ * SPEC-066 §4.3: a drone level reads its DPS against `primary` at multiplier
+ * 1 (`drone 7/s`), as the weapon cards print theirs — no share of "your damage".
  */
-export function companionEffectText(effect: CompanionEffect): string {
+export function companionEffectText(effect: CompanionEffect, primary: ItemId | null = null): string {
   const parts: string[] = [];
   if (effect.autoCollectRadius !== undefined) parts.push(`collects within ${effect.autoCollectRadius} m`);
   if (effect.nodeRadar === true) parts.push('node radar');
-  if (effect.droneDamageFraction !== undefined) parts.push(`drone at ${percent(effect.droneDamageFraction)} of your damage`);
-  if (effect.droneFireRate !== undefined) parts.push(`${rate(effect.droneFireRate)} drone fire`);
+  if (effect.droneDamageFraction !== undefined || effect.droneFireRate !== undefined) {
+    parts.push(`drone ${rate(droneDps(primary, effect))}`);
+  }
   if (effect.regenOutOfCombat !== undefined) parts.push(`${percent(effect.regenOutOfCombat)}/s regen out of combat`);
   if (effect.regenInCombat !== undefined) parts.push(`${percent(effect.regenInCombat)}/s regen in combat`);
   if (effect.cargoBonus !== undefined) parts.push(`+${effect.cargoBonus} cargo`);
@@ -647,9 +651,16 @@ export function companionEffectText(effect: CompanionEffect): string {
  * The rewards line of a mission row (§4.3): XP, tokens, resources, items. A
  * replay halves the XP and tokens and drops the rest (E2); SPEC-043 §4.3: a
  * contract replay reads its own payout — 75 % of each, then the lithium.
+ * SPEC-066 §4.5: `tokenFraction` is the contract's token share
+ * (`contractTokenFraction`, 0.5 on a boss mission).
  */
-export function rewardsText(rewards: MissionDef['rewards'], replay = false, contract = false): string {
-  if (replay && contract) return contractPayout(rewards, GLYPHS.tokens);
+export function rewardsText(
+  rewards: MissionDef['rewards'],
+  replay = false,
+  contract = false,
+  tokenFraction = CONTRACT_REWARD_FRACTION,
+): string {
+  if (replay && contract) return contractPayout(rewards, GLYPHS.tokens, tokenFraction);
   const half = (value: number): number => (replay ? Math.floor(value / 2) : value);
   const parts: string[] = [];
   if (rewards.xp > 0) parts.push(`+${half(rewards.xp)} XP`);
@@ -668,12 +679,13 @@ export function rewardsText(rewards: MissionDef['rewards'], replay = false, cont
 /**
  * SPEC-043 §4.3: `+<xp> XP · +<tokens> <unit> · +20 lithium` — the floored 75 %
  * of the mission's XP and tokens, and the contract's lithium. The board prints
- * tokens as `◈`, the banner as `tokens`.
+ * tokens as `◈`, the banner as `tokens`. SPEC-066 §4.5: the tokens are the
+ * floored `tokenFraction` (0.5 on a boss mission).
  */
-function contractPayout(rewards: MissionDef['rewards'], unit: string): string {
+function contractPayout(rewards: MissionDef['rewards'], unit: string, tokenFraction: number): string {
   const parts: string[] = [];
   const xp = Math.floor(rewards.xp * CONTRACT_REWARD_FRACTION);
-  const tokens = Math.floor(rewards.tokens * CONTRACT_REWARD_FRACTION);
+  const tokens = Math.floor(rewards.tokens * tokenFraction);
   if (xp > 0) parts.push(`+${xp} XP`);
   if (tokens > 0) parts.push(`+${tokens} ${unit}`);
   parts.push(`+${CONTRACT_LITHIUM} lithium`);
@@ -797,12 +809,18 @@ export function availableSwatches(part: 'primary' | 'secondary', unlocks: readon
 /**
  * SPEC-043 §4.3: `Contract · <name> · 75 % + 20 lithium` when `def` runs as a
  * contract on that landing, else `null`. The board asks for the next landing
- * (`visits + 1`), the pad terminal for this one (`visits`).
+ * (`visits + 1`), the pad terminal for this one (`visits`). SPEC-066 §4.5: a
+ * boss mission's reads `75 % XP, 50 % tokens + 20 lithium`.
  */
 export function contractLabel(save: Save, def: MissionDef, landing: number): string | null {
   const contract = contractFor(save, def, landing);
   if (contract === null) return null;
-  return `Contract · ${CONTRACTS[contract].name} · ${percent(CONTRACT_REWARD_FRACTION)} + ${CONTRACT_LITHIUM} lithium`;
+  const tokens = contractTokenFraction(def);
+  const shares =
+    tokens === CONTRACT_REWARD_FRACTION
+      ? percent(CONTRACT_REWARD_FRACTION)
+      : `${percent(CONTRACT_REWARD_FRACTION)} XP, ${percent(tokens)} tokens`;
+  return `Contract · ${CONTRACTS[contract].name} · ${shares} + ${CONTRACT_LITHIUM} lithium`;
 }
 
 // ------------------------------------------------------------------ missions
@@ -1023,6 +1041,17 @@ export const HP_FULL_TEXT = 'HP full';
 
 /** SPEC-056 §4.5 (56-g): what a stim at a full, unexhausted pool says — throttled like E40's. */
 export const STAMINA_FULL_TEXT = 'Stamina is full';
+
+/** SPEC-066 §4.1 (E121): a heal pressed during the lock — `Heal ready in 7 s`, the seconds rounded up. */
+export function healLockedText(left: number): string {
+  return `Heal ready in ${seconds(left)}`;
+}
+
+/** SPEC-066 §4.2 (E122): a press on a slot that ran dry in this fight, with something in the pack to refill it. */
+export const QUICK_DRY_TEXT = 'Refills after the fight';
+
+/** SPEC-066 §4.2: the picker refused while `inCombat` holds — nothing reassigns a slot mid-fight. */
+export const QUICK_PICK_IN_COMBAT_TEXT = 'Swap items after the fight';
 
 /** SPEC-056 56-a: a relic's equip refused because the piece it would displace has no room in the pack. */
 export function makeRoomText(displaced: ItemId): string {
@@ -1542,7 +1571,7 @@ const SHIP_ROLES: Readonly<Record<ShipSystem, string>> = {
   shield: 'Flight: shield points',
   weapon: 'Flight: nose guns',
   engine: 'Flight time and fuel per jump',
-  cargo: 'The hold, on every planet',
+  cargo: 'Pack slots, on every planet',
 };
 
 export function shipRoleText(system: ShipSystem): string {
@@ -1615,7 +1644,10 @@ export function completionLines(
   const seconds = extras?.seconds ?? null;
   return {
     title: def.title,
-    rewards: contract !== null ? `${contractPayout(def.rewards, 'tokens')} · contract` : bannerRewards(def, replay),
+    rewards:
+      contract !== null
+        ? `${contractPayout(def.rewards, 'tokens', contractTokenFraction(def))} · contract`
+        : bannerRewards(def, replay),
     next: next === null ? null : `Next: ${next.title} — at the pad terminal`,
     bonus:
       judged === null
@@ -1758,6 +1790,16 @@ export function deathCause(cause: DamageSource): string {
 export function remainsOverlayLine(look: RemainsLook, lost: Partial<Record<ResourceId, number>>): string | null {
   const list = remainsListText(lost);
   return list === '' ? null : `Your ${look} holds ${list} — reach it before you fall again.`;
+}
+
+/**
+ * SPEC-066 §4.8 (E124) — the death overlay's `death-depot` line on `hard`:
+ * `Depot lost: 30 oil · 9 lithium`, in `RESOURCE_IDS` order, or `null` when
+ * the death took nothing from the depot.
+ */
+export function depotLossText(lost: Partial<Record<ResourceId, number>>): string | null {
+  const list = remainsListText(lost);
+  return list === '' ? null : `Depot lost: ${list}`;
 }
 
 /**
@@ -2028,6 +2070,8 @@ export interface HudModel {
   walletLit: boolean;
   /** SPEC-038 §4.1: the dash's cooldown ring — 1 at the press, 0 when ready. */
   dash: number;
+  /** SPEC-066 §4.1: the heal slot's lock ring — `healLockLeft / healLockSeconds`, 1 at the use, 0 when ready. */
+  healLock: number;
   /**
    * SPEC-050 §4.6: the stamina ring beside the salvager — the rounded pool, its
    * max, the two states it shows, and whether it is up at all (`staminaShown`).
@@ -2088,6 +2132,7 @@ export function createHudModel(): HudModel {
     interactAction: false,
     walletLit: false,
     dash: 0,
+    healLock: 0,
     stamina: null,
     holstered: false,
     light: null,
@@ -2120,6 +2165,7 @@ const HUD_KEY_TABLE = {
   interactAction: true,
   walletLit: true,
   dash: true,
+  healLock: true,
   stamina: true,
   holstered: true,
   light: true,
@@ -2486,8 +2532,8 @@ export function upgradeDeltaText(metric: string, from: number, to: number): stri
       return `Hull ${metricValue(from)} → ${metricValue(to)}`;
     case 'shieldHp':
       return `Shield ${metricValue(from)} → ${metricValue(to)}`;
-    case 'cargoCap':
-      return `Cargo ${metricValue(from)} → ${metricValue(to)}`;
+    case 'packSlots':
+      return `Pack slots ${metricValue(from)} → ${metricValue(to)}`;
     case 'damage':
       return `Gun damage ${metricValue(from)} → ${metricValue(to)}`;
     case 'fireRate':
@@ -2498,7 +2544,7 @@ export function upgradeDeltaText(metric: string, from: number, to: number): stri
 }
 
 /** The metric keys `upgradeDeltaText` names outright — the fallback test's list. */
-export const UPGRADE_METRIC_KEYS = ['speedMult', 'fuelMult', 'hullHp', 'shieldHp', 'cargoCap', 'damage', 'fireRate'] as const;
+export const UPGRADE_METRIC_KEYS = ['speedMult', 'fuelMult', 'hullHp', 'shieldHp', 'packSlots', 'damage', 'fireRate'] as const;
 
 // -------------------------------------------------------------- tint contrast
 

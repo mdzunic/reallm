@@ -2741,6 +2741,16 @@ html.reduce-motion .dialogue-dim {
   display: none;
 }
 
+/* SPEC-066 §4.8: what a hard death took from the depot — a loss, so warn. */
+.death-depot {
+  margin: 0;
+  color: var(--warn);
+}
+
+.death-depot:empty {
+  display: none;
+}
+
 /* SPEC-042 §4.5: what killed the player, one tip for next time, and the
    stage the death restarted — each line only when it has something to say. */
 .death-cause {

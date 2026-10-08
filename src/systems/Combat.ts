@@ -96,7 +96,7 @@ import { containment, type Containment } from '@/systems/Containment';
 import { isDashing } from '@/systems/Dash';
 import { BOSS_FIRST_MOVE_SECONDS, updateEnemy, type AiHooks, type WindupKind } from '@/systems/EnemyAi';
 import { inFlare, lit, type FlareState } from '@/systems/Light';
-import { FIRE_CARRY, Loadout, SWITCH_SECONDS } from '@/systems/Loadout';
+import { FIRE_CARRY, Loadout, SWITCH_SECONDS, weaponDps } from '@/systems/Loadout';
 import { updateProjectiles, type ProjectileHooks } from '@/systems/Projectiles';
 import { isHolstered, isLoud, STAMINA_MAX } from '@/systems/Stamina';
 
@@ -162,6 +162,8 @@ export const LOOT_SCATTER_MAX = 1.5;
 export const ELITE_SCALE = 1.3;
 export const ELITE_SPEED_MULT = 1.1;
 export const ELITE_XP_MULT = 3;
+/** SPEC-066 §4.4: a non-boss kill's XP grows by this per chapter of the planet. */
+export const KILL_XP_GROWTH = 1.15;
 /** SPEC-039 §4.3: the crit chance before agility's per-point share. */
 export const BASE_CRIT_CHANCE = 0.05;
 /** SPEC-039 §4.3: +2 % damage a level, the `(1 + 0.02 × (L − 1))` factor. */
@@ -208,6 +210,48 @@ export interface LingerCloud {
  */
 export function staminaFull(p: Pick<PlayerEntity, 'stamina' | 'exhausted'>): boolean {
   return p.stamina >= STAMINA_MAX && !p.exhausted;
+}
+
+// ------------------------------------------------- SPEC-066 §4.1: the heal lock
+
+/** SPEC-066 §4.1: the heal slot locks this long after an instant heal (the medkit). */
+export const HEAL_LOCK_SECONDS = 8;
+/** SPEC-066 §4.1: …and this long after a heal over time (the wheat ration). */
+export const HEAL_OVER_TIME_LOCK_SECONDS = 5;
+
+/** SPEC-066 §4.1: the lock a heal sets, keyed by the effect's shape rather than by item. */
+export function healLockSeconds(effect: Extract<ConsumableEffect, { kind: 'heal' }>): number {
+  return effect.overSeconds === 0 ? HEAL_LOCK_SECONDS : HEAL_OVER_TIME_LOCK_SECONDS;
+}
+
+/** SPEC-066 §4.1: the seconds before the heal slot may be used again; 0 when it is ready. */
+export function healLockLeft(p: PlayerEntity, time: number): number {
+  return Math.max(0, p.healLockUntil - time);
+}
+
+// ------------------------------------------------ SPEC-066 §4.3: the combat drone
+
+/**
+ * SPEC-066 §4.3: a drone shot is this share of the primary's *sustained* DPS
+ * (SPEC-039 §4.4), × the level's `droneDamageFraction` — so a machine gun's
+ * drone is worth what the gun is worth, not what one of its bullets is.
+ */
+export const DRONE_SUSTAINED_SHARE = 0.4;
+
+/** SPEC-066 §4.3: `max(1, round(sustained × DRONE_SUSTAINED_SHARE × fraction × mult))` (AC-5's floor). */
+export function droneShotDamage(sustained: number, fraction: number, mult: number): number {
+  return Math.max(1, Math.round(sustained * DRONE_SUSTAINED_SHARE * fraction * mult));
+}
+
+/**
+ * SPEC-066 §4.3: the card's number — a shot at multiplier 1 against `primary`,
+ * × the level's fire rate; 0 with no primary. Station UI and tests only:
+ * `weaponDps` steps 18,000 times on a weapon's first call.
+ */
+export function droneDps(primary: ItemId | null, level: CompanionEffect): number {
+  const dps = primary === null ? null : weaponDps(primary);
+  if (dps === null) return 0;
+  return droneShotDamage(dps.sustained, level.droneDamageFraction ?? 0, 1) * (level.droneFireRate ?? 1);
 }
 
 // --------------------------------------------------------------- pure pieces
@@ -313,6 +357,14 @@ function hitDamage(base: number, elite: boolean, stats: PlayerStats, difficulty:
     damageMult *
     (1 - damageReduction(stats.armor));
   return Math.max(1, Math.round(raw));
+}
+
+/**
+ * SPEC-066 §4.4: a kill's base XP on a planet of `planetChapter` — a boss pays
+ * its `xp` everywhere, every other enemy `round(xp × 1.15^(chapter − 1))`.
+ */
+export function killXp(def: Enemy, planetChapter: number): number {
+  return def.archetype === 'boss' ? def.xp : Math.round(def.xp * KILL_XP_GROWTH ** (planetChapter - 1));
 }
 
 /** §4.6: the spawn-time elite roll. Callers pass the planet's `eliteChance`. */
@@ -427,6 +479,8 @@ export interface CombatWorld {
    * not fall on (`DARK_SIGHT`, 9 m). `undefined` on the surface: unrestricted.
    */
   sight?: number;
+  /** SPEC-066 §4.4: the planet's chapter, which scales a non-boss kill's XP. Absent reads as 1. */
+  planetChapter?: number;
 }
 
 /**
@@ -508,6 +562,12 @@ export class Combat {
   #kbX = 0;
   #kbZ = 0;
   #droneCooldown = 0;
+  /**
+   * SPEC-066 §4.3: the equipped primary's sustained DPS, which the drone's shot
+   * follows — read at construction and on every `gear:equipped`, never in
+   * `update` (`weaponDps` steps 18,000 times on its first call).
+   */
+  #droneSustained = 0;
   #nextEnemyId = 1;
   #aimedThisStep = false;
   #lastShotAt = -Infinity;
@@ -623,6 +683,7 @@ export class Combat {
     // SPEC-028 §3: the scene may hand over the loadout it drives; the test
     // harnesses that pass none get one built from the save.
     this.loadout = loadout ?? new Loadout(save, events);
+    this.#readDroneSustained();
     this.#recomputeStats();
 
     // §4.1: recomputed on level-up and equip; consumables and weather go
@@ -641,6 +702,8 @@ export class Combat {
       // SPEC-028 §4.2: the loadout re-reads the save, so the weapon in hand
       // follows whichever slot moved; armor still moves the derived stats.
       this.loadout.refresh();
+      // SPEC-066 §4.3: the drone follows the primary from the next shot.
+      this.#readDroneSustained();
       this.#recomputeStats();
     }, this);
     // SPEC-028 §4.2: a switch resets the per-shot cooldown — the 0.25 s
@@ -738,6 +801,12 @@ export class Combat {
     return mult;
   }
 
+  /** SPEC-066 §4.3: a relic primary counts like any weapon; no primary reads 0. */
+  #readDroneSustained(): void {
+    const primary = this.#save.equipped.primary;
+    this.#droneSustained = primary === null ? 0 : (weaponDps(primary)?.sustained ?? 0);
+  }
+
   #recomputeStats(): void {
     this.#world.stats = computePlayerStats(this.#save, {
       damageMult: this.#boostMult(),
@@ -747,7 +816,11 @@ export class Combat {
 
   // ------------------------------------------------------------ consumables
 
-  /** §4.8. Also recomputes stats (AC-66). */
+  /**
+   * §4.8. Also recomputes stats (AC-66). SPEC-066 §4.1: a heal also locks the
+   * heal slot — it refuses nothing itself, since the item is already spent;
+   * the scene and the boss bots read `healLockLeft` before they spend one.
+   */
   applyConsumable(effect: ConsumableEffect): void {
     const p = this.#world.player;
     const time = this.#world.time;
@@ -755,6 +828,8 @@ export class Combat {
       const total = effect.fraction * this.#world.stats.maxHp;
       if (effect.overSeconds === 0) this.#heal(total, true);
       else p.healOverTime = { remaining: total, perSecond: total / effect.overSeconds };
+      p.healLockSeconds = healLockSeconds(effect);
+      p.healLockUntil = time + p.healLockSeconds;
     } else if (effect.kind === 'damage_boost') {
       p.boosts.push({ damageMult: effect.mult, until: time + effect.seconds });
     } else if (effect.kind === 'hazard_immunity') {
@@ -1329,6 +1404,7 @@ export class Combat {
    * SPEC-039 §4.1: a boss of a replayed stage pays `REPLAY_REWARD_FRACTION` of
    * its XP (39-e); every other kill pays what it always did. SPEC-041 §4.6: an
    * elite pays ×(3 + its affixes), and a volatile one leaves its circle.
+   * SPEC-066 §4.4: the base is `killXp` at the world's planet chapter.
    */
   killEnemy(e: EnemyEntity, cause: 'player' | 'drone' | 'script'): void {
     if (e.state === 'dead') return;
@@ -1340,7 +1416,9 @@ export class Combat {
     e.moveIndex = -1;
     const def = e.def;
     const xp = Math.floor(
-      def.xp * (e.elite ? ELITE_XP_MULT + affixCount(e) : 1) * (e.replay ? TUNING.REPLAY_REWARD_FRACTION : 1),
+      killXp(def, this.#world.planetChapter ?? 1) *
+        (e.elite ? ELITE_XP_MULT + affixCount(e) : 1) *
+        (e.replay ? TUNING.REPLAY_REWARD_FRACTION : 1),
     );
     if (hasAffix(e, 'volatile')) this.#volatileBurst(e);
     this.#events.emit('enemy:killed', { enemyId: def.id, elite: e.elite, x: e.x, z: e.z, xp });
@@ -2053,16 +2131,23 @@ export class Combat {
     return best;
   }
 
-  /** §4.3: the combat drone, every `1/droneFireRate` s at the nearest aggroed enemy ≤ 12 m. */
+  /**
+   * §4.3: the combat drone, every `1/droneFireRate` s at the nearest aggroed
+   * enemy ≤ 12 m. SPEC-066 §4.3: its shot follows the primary's sustained DPS,
+   * and it holsters with the gun — while `isHolstered` it fires nothing and its
+   * clock stands still, so a run costs the drone too (SPEC-050 §4.9). A dash
+   * does not hold it.
+   */
   #updateDrone(dt: number): void {
     const drone = companionEffect(this.#save, 'combat_drone');
     if (drone === null) return;
     // SPEC-028 §4.2: the drone keeps the primary's damage, whatever is in hand.
     const weapon = this.loadout.weaponIn('primary');
     if (weapon === null) return;
+    const p = this.#world.player;
+    if (isHolstered(p, this.#world.time)) return;
     this.#droneCooldown -= dt;
     if (this.#droneCooldown > 0) return;
-    const p = this.#world.player;
     const enemies = this.#world.enemies;
     let best: EnemyEntity | null = null;
     let bestD = Infinity;
@@ -2079,7 +2164,7 @@ export class Combat {
     this.#droneCooldown = 1 / (drone.droneFireRate ?? 1);
     const stats = this.#world.stats;
     // AC-5: every damage calculation floors at 1, this path included.
-    const damage = Math.max(1, Math.round(weapon.damage * stats.damageMult * (drone.droneDamageFraction ?? 0) * stats.companionMult));
+    const damage = droneShotDamage(this.#droneSustained, drone.droneDamageFraction ?? 0, stats.damageMult * stats.companionMult);
     const dx = best.x - p.x;
     const dz = best.z - p.z;
     const len = Math.hypot(dx, dz);
@@ -2101,7 +2186,7 @@ export class Combat {
     const dashing = isDashing(p, w.time);
     // SPEC-050 §4.2: a sprint holsters the gun, through its draw — no auto-fire
     // and no held fire, as during a dash; cooldowns, heat and charges still
-    // tick below, and the drone still fires.
+    // tick below. SPEC-066 §4.3: the drone holsters with it.
     const holstered = isHolstered(p, w.time);
 
     // Expired damage boosts drop and the cache recomputes (§4.8).

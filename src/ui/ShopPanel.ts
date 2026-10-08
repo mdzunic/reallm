@@ -342,8 +342,13 @@ export class ShopPanel {
         h('span', { class: 'badge' }, def.domain),
       ),
       h('p', { class: 'shop-note' }, def.blurb),
+      // SPEC-066 §4.3: a drone level prints its DPS against the equipped primary.
       ...def.levels.map((effect, at) =>
-        h('p', { class: `shop-effect${level === at + 1 ? ' is-current' : ''}` }, `L${at + 1}: ${companionEffectText(effect)}`),
+        h(
+          'p',
+          { class: `shop-effect${level === at + 1 ? ' is-current' : ''}` },
+          `L${at + 1}: ${companionEffectText(effect, this.#deps.data.equipped.primary)}`,
+        ),
       ),
     );
     if (entry !== undefined) {

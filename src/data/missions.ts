@@ -142,7 +142,8 @@ export const MISSIONS = {
     stages: [
       [{ kind: 'reach', poi: 'landing_pad' }],
       [{ kind: 'scan', poi: 'dune_sea', count: 1 }],
-      [{ kind: 'survive', seconds: 60, weather: 'sandstorm' }],
+      // SPEC-066 §4.6: the first storm is half a minute (was 60 s), still with no wave.
+      [{ kind: 'survive', seconds: 30, weather: 'sandstorm' }],
     ],
     rewards: { xp: 100, tokens: 10, resources: { oil: 20 } },
     dialogue: { onAccept: 'c1_m1_accept', onStage: { 1: 'c1_m1_stage2' }, onComplete: 'c1_m1_done' },
@@ -536,15 +537,16 @@ export const MISSIONS = {
   c5_s1: {
     id: 'c5_s1',
     title: 'Egg Hunt',
-    brief: 'Egg clusters line the side tunnels. Fifteen of them and there is no next generation to come looking for Eden.',
+    brief: 'Egg clusters line the side tunnels. Ten of them and there is no next generation to come looking for Eden.',
     type: 'side',
     chapter: 5,
     planet: 'hive',
     scene: 'surface',
     requires: [{ kind: 'mission', id: 'c5_m1' }],
-    stages: [[{ kind: 'kill', enemy: 'hive_egg', amount: 15 }]],
+    // SPEC-066 §4.6: ten eggs, par 240 s (was fifteen and 360 s); rewards unchanged.
+    stages: [[{ kind: 'kill', enemy: 'hive_egg', amount: 10 }]],
     rewards: { xp: 200, tokens: 20, items: [{ itemId: 'plasma_cell', qty: 2 }] },
-    bonus: { kind: 'par', seconds: 360, reward: { resources: { lithium: 40 } } },
+    bonus: { kind: 'par', seconds: 240, reward: { resources: { lithium: 40 } } },
     dialogue: { onAccept: 'c5_s1_accept', onComplete: 'c5_s1_done' },
   },
 
