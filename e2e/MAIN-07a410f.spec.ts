@@ -51,12 +51,18 @@ test('new game through creation, the station, a flight and landing on the surfac
   await expect(page.locator('[data-testid="scene-label"]')).toHaveText('station', COLD_START);
 
   // The station opens with an ARIA transmission; clear it the way a player
-  // taps through dialogue, then head to the star map.
-  const dialogue = page.locator('[data-testid="dialogue"]');
-  for (let i = 0; i < 10 && (await dialogue.isVisible().catch(() => false)); i++) {
-    await dialogue.click({ force: true }).catch(() => undefined);
+  // taps through dialogue, then head to the star map. The line is modal and
+  // opens a beat after the scene label flips (the station's entry effects run
+  // after the scene settles), so wait for its dim first — a fast runner would
+  // otherwise look before it opens, skip the loop, and have the dim take the
+  // tab click.
+  const dim = page.locator('.dialogue-dim.is-visible');
+  await expect(dim).toBeVisible(COLD_START);
+  for (let i = 0; i < 20 && (await dim.count()) > 0; i++) {
+    await page.locator('[data-testid="dialogue"]').click({ force: true }).catch(() => undefined);
     await page.waitForTimeout(150);
   }
+  await expect(dim).toHaveCount(0);
   await page.getByTestId('station-tab-starmap').click();
   await expect(page.locator('[data-testid="scene-label"]')).toHaveText('starmap', COLD_START);
 
@@ -71,12 +77,17 @@ test('new game through creation, the station, a flight and landing on the surfac
 
   // The surface simulation is live: holding a movement key actually moves
   // the player, not just a scene swap with a frozen world.
-  const before = await page.evaluate(() => window.__reallm.stats().sceneInfo);
-  await page.keyboard.down('d');
-  await page.waitForTimeout(600);
-  await page.keyboard.up('d');
-  const after = await page.evaluate(() => window.__reallm.stats().sceneInfo);
+  // Retried as a whole: on a fast runner the first press can land while the
+  // landing still holds input, and a dropped press says nothing about whether
+  // the world is live.
+  await expect(async () => {
+    const before = await page.evaluate(() => window.__reallm.stats().sceneInfo);
+    await page.keyboard.down('d');
+    await page.waitForTimeout(600);
+    await page.keyboard.up('d');
+    const after = await page.evaluate(() => window.__reallm.stats().sceneInfo);
 
-  const moved = Math.hypot(Number(after?.['px']) - Number(before?.['px']), Number(after?.['pz']) - Number(before?.['pz']));
-  expect(moved).toBeGreaterThan(1);
+    const moved = Math.hypot(Number(after?.['px']) - Number(before?.['px']), Number(after?.['pz']) - Number(before?.['pz']));
+    expect(moved).toBeGreaterThan(1);
+  }).toPass({ timeout: 20_000 });
 });
