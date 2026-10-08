@@ -203,7 +203,17 @@ test('5. a canopy over the pack thins, and never counts a holder it has not fade
   await expect.poll(async () => (await sceneInfo(page))['treeSource'], COLD_START).toBe('glb');
   await press(page, 'surface-goto-grove');
   await expect.poll(() => info(page, 'groveR'), { timeout: 15_000 }).toBeGreaterThan(0);
-  await afterFrames(page, 5);
+  // The pack spawns where the pointer meets the ground, and the camera eases
+  // after the jump (an eighth of a second's time constant), so wait until that
+  // point has caught up with the salvager under the canopy. Five frames were
+  // a sixth of a second on CI's runner but half that at 60 fps, where the pack
+  // landed tens of metres short of the grove and no canopy ever held it.
+  await expect
+    .poll(async () => {
+      const at = await sceneInfo(page);
+      return Math.hypot(Number(at['aimX']) - Number(at['px']), Number(at['aimZ']) - Number(at['pz']));
+    }, { timeout: 15_000 })
+    .toBeLessThan(3);
   await press(page, 'surface-spawn-pack');
   const samples = await page.evaluate(
     () =>
