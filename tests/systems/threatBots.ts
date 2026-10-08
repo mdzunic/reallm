@@ -16,7 +16,7 @@ import { makeProjectile, type ProjectileEntity } from '@/entities/Projectile';
 import { ringRadius, telegraphCovers, type TelegraphEntity } from '@/entities/Telegraph';
 import { clampToSeal, NO_OBSTACLES, type ArenaState } from '@/entities/World';
 import { LOADOUT_CHAPTERS, RECOMMENDED_LOADOUT } from '@/systems/Balance';
-import { Combat, computePlayerStats, type CombatWorld, type EconomyPort, type ProgressionPort } from '@/systems/Combat';
+import { Combat, computePlayerStats, healLockLeft, type CombatWorld, type EconomyPort, type ProgressionPort } from '@/systems/Combat';
 import { containment } from '@/systems/Containment';
 import { DASH_DISTANCE, DASH_IFRAMES, dashCooldown, isDashing, stepDash, tryDash } from '@/systems/Dash';
 import { ATTACK_REACH_BONUS, CHARGE, WINDUP_SECONDS } from '@/systems/EnemyAi';
@@ -563,6 +563,14 @@ export const BOSS_START_INSET = 5;
 /** §6.1: three medkits, each used below 35 % HP. */
 export const BOSS_MEDKITS = 3;
 export const MEDKIT_BELOW = 0.35;
+/**
+ * SPEC-066 §4.10: the medkit budget of a fight — SPEC-041's `'three'`, or
+ * `'unlimited'`: any number, each used below `UNLIMITED_HEAL_BELOW` (G-01's
+ * player, who presses heal whenever the bar is under half). Under both a
+ * medkit waits for the heal lock (§4.1).
+ */
+export type BossBudget = 'three' | 'unlimited';
+export const UNLIMITED_HEAL_BELOW = 0.5;
 /** §6.1: a fight that has not ended by then is a loss. */
 export const BOSS_LIMIT_SECONDS = 240;
 
@@ -594,6 +602,10 @@ export interface BossResult {
  * the boss spawns with ×1.15 HP a step and hits ×1.15 a step, capped at three.
  * The bot heals with the same margin in hits: below `MEDKIT_BELOW` times the
  * containment's damage multiplier (35 % at iteration 1, as SPEC-041 tuned it).
+ *
+ * SPEC-066 §4.10: `budget` picks the medkits — three below 35 %, or any number
+ * below 50 % — each × that multiplier, and each only once `healLockLeft` is 0.
+ * `applyConsumable` sets the lock, as the scene's heal does.
  */
 export function runBoss(
   boss: BossId,
@@ -602,11 +614,13 @@ export function runBoss(
   limit = BOSS_LIMIT_SECONDS,
   observe?: (world: CombatWorld, combat: Combat) => void,
   iteration = 1,
+  budget: BossBudget = 'three',
 ): BossResult {
   const chapter = ENEMIES[boss].chapter;
   const save = kitSave(referenceKit(chapter), seed);
   save.meta.iteration = iteration;
-  const medkitBelow = MEDKIT_BELOW * containment(iteration).damageMult;
+  const unlimited = budget === 'unlimited';
+  const medkitBelow = (unlimited ? UNLIMITED_HEAL_BELOW : MEDKIT_BELOW) * containment(iteration).damageMult;
   const radius = arenaRadius(boss);
   const arena: ArenaState = { x: 0, z: 0, radius, locked: true, sealed: true };
   const events = new EventBus<GameEvents>({ dev: false });
@@ -643,15 +657,20 @@ export function runBoss(
   const passive = CLASSES[save.player.classId].passive;
   const cooldown = dashCooldown(passive, save.player.attributes.agility, save.meta.difficulty);
   const scratch = { x: 0, z: 0 };
-  let medkits = BOSS_MEDKITS;
+  let used = 0;
   let dashes = 0;
   const medkit = ITEMS.medkit;
   const steps = Math.round(limit / STEP);
   let step = 0;
   for (; step < steps && !died && !killed; step++) {
-    if (p.hp < medkitBelow * world.stats.maxHp && medkits > 0 && medkit.kind === 'consumable') {
+    if (
+      p.hp < medkitBelow * world.stats.maxHp &&
+      (unlimited || used < BOSS_MEDKITS) &&
+      healLockLeft(p, world.time) === 0 &&
+      medkit.kind === 'consumable'
+    ) {
       combat.applyConsumable(medkit.effect);
-      medkits--;
+      used++;
     }
     // The scene's order: the player moves, then combat runs.
     dir.x = 0;
@@ -685,7 +704,7 @@ export function runBoss(
     maxHp: world.stats.maxHp,
     damage,
     lost: (damage / world.stats.maxHp) * 100,
-    medkits: BOSS_MEDKITS - medkits,
+    medkits: used,
     dashes,
   };
 }

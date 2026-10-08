@@ -51,7 +51,6 @@ import {
   SHIP_SYSTEMS,
   STORY_FLAGS,
   TUNING,
-  UPGRADES,
   WEAPON_SLOTS,
   type ClassId,
   type Difficulty,
@@ -327,16 +326,16 @@ export const DEPOT_KEEP_DEFAULT = 100;
 export const DEPOT_KEEP_STEP = 50;
 
 /**
- * SPEC-065 §3: the largest cargo cap — the Cargo Hold's tier 3 plus the
- * Quartermaster's largest bonus — rounded up to a step. Read off the tables, so
- * a retune of either moves it. The validator clamps a reserve to this rather
- * than to the hold's current cap, so a reserve set on a bigger hold survives a
- * load; the terminal is what clamps it to the cap (65-a).
+ * SPEC-065 §3: the largest cargo cap — SPEC-066 §4.7: `TUNING.CARGO_BASE`
+ * (the cap at every Cargo tier) plus the Quartermaster's largest bonus —
+ * rounded up to a step: 700. Read off the tables, so a retune of either moves
+ * it. The validator clamps a reserve to this rather than to the hold's current
+ * cap, so a reserve set with a bigger bonus survives a load; the terminal is
+ * what clamps it to the cap (65-a).
  */
 export const DEPOT_KEEP_MAX: number = ((): number => {
-  const tiers: readonly number[] = UPGRADES.cargo.metrics.cargoCap;
   const bonus = Math.max(0, ...COMPANIONS.quartermaster.levels.map((level) => level.cargoBonus));
-  return Math.ceil(((tiers.at(-1) ?? TUNING.CARGO_BASE) + bonus) / DEPOT_KEEP_STEP) * DEPOT_KEEP_STEP;
+  return Math.ceil((TUNING.CARGO_BASE + bonus) / DEPOT_KEEP_STEP) * DEPOT_KEEP_STEP;
 })();
 
 /** SPEC-065 §4.1: a depot that holds nothing, with every reserve at `DEPOT_KEEP_DEFAULT`. */
@@ -743,17 +742,16 @@ export const CREATION_POINTS = 5;
 /** SPEC-039 §4.7: the 4 of `maxHp`'s 4 · (level − 1); the level-up toast reads it too. */
 export const HP_PER_LEVEL = 4;
 
-/**
- * PLAN §4: 400 base, ship cargo tiers 600 / 800 / 1200. The per-resource cap
- * `validateSave` clamps to (§4.4) and SPEC-010 charges pickups against.
- */
-const CARGO_BY_TIER: readonly number[] = [TUNING.CARGO_BASE, 600, 800, 1200];
-
 /** SPEC-034 §4.13: the validator's resource ceiling — a sanity bound, not a cap. */
 export const RESOURCE_CEILING = 99_999;
 
-export function cargoCap(ship: Pick<Save['ship'], 'cargo'>): number {
-  return CARGO_BY_TIER[ship.cargo] ?? TUNING.CARGO_BASE;
+/**
+ * The per-resource cargo cap before the Quartermaster: SPEC-066 §4.7 (PLAN R27
+ * decision 7) made it `TUNING.CARGO_BASE` at every Cargo tier — the tiers are
+ * pack slots now. The flight HUD, the placeholders and the service supplies read it.
+ */
+export function cargoCap(_ship: Pick<Save['ship'], 'cargo'>): number {
+  return TUNING.CARGO_BASE;
 }
 
 /**

@@ -8,10 +8,11 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { EventBus, type GameEvents } from '@/core/Events';
 import { setLogSink, type LogSink } from '@/core/Log';
-import { newSave, type CharacterCreation, type Save } from '@/core/Save';
+import { cargoCap, newSave, validateSave, type CharacterCreation, type Save } from '@/core/Save';
 import {
   CACHES,
   COMPANIONS,
+  CONTRACT_BOSS_TOKEN_FRACTION,
   CONTRACT_LITHIUM,
   ITEMS,
   MISSIONS,
@@ -23,6 +24,7 @@ import {
   type RecipeId,
 } from '@/data/index';
 import {
+  contractTokenFraction,
   Economy,
   INVENTORY_SLOTS,
   TECH_DISCOUNT_PER_POINT,
@@ -549,11 +551,12 @@ describe('cargo and resources (§4.5)', () => {
     expect(economy.cargoCap()).toBe(TUNING.CARGO_BASE);
     expect(TUNING.CARGO_BASE).toBe(400);
 
+    // SPEC-066 §4.7: the Cargo Racks add pack slots, not cap.
     data.ship.cargo = 2;
-    expect(economy.cargoCap()).toBe(UPGRADES.cargo.metrics.cargoCap[2]);
+    expect(economy.cargoCap()).toBe(400);
     data.companions.push({ id: 'quartermaster', level: 2, enabled: true });
-    expect(economy.cargoCap()).toBe(800 + (COMPANIONS.quartermaster.levels[1].cargoBonus ?? 0));
-    expect(economy.cargoCap()).toBe(1000);
+    expect(economy.cargoCap()).toBe(400 + (COMPANIONS.quartermaster.levels[1].cargoBonus ?? 0));
+    expect(economy.cargoCap()).toBe(600);
   });
 
   it('pickups stop at the cap and report blocked (E3)', () => {
@@ -1587,5 +1590,139 @@ describe('claimBody (SPEC-058 §4.5)', () => {
       { itemId: 'frag_grenade', qty: 2 },
     ]);
     expect(events.toasts()).toEqual([noRoomText(ITEMS.medkit, 2), noRoomText(ITEMS.frag_grenade, 2)]);
+  });
+});
+
+// ------------------------------------------------------------- SPEC-066 §6.4
+
+describe('a boss contract pays half its tokens (SPEC-066 §4.5)', () => {
+  const BOSS_MISSIONS = ['c1_m3', 'c2_m3', 'c3_m3', 'c4_m3', 'c5_m3'];
+
+  it('contractTokenFraction is 0.5 for the five boss missions and 0.75 for every other', () => {
+    expect(CONTRACT_BOSS_TOKEN_FRACTION).toBe(0.5);
+    for (const mission of Object.values(MISSIONS) as MissionDef[]) {
+      expect(contractTokenFraction(mission), mission.id).toBe(BOSS_MISSIONS.includes(mission.id) ? 0.5 : 0.75);
+    }
+  });
+
+  it('applyRewards(c5_m3, true, true) pays 450 XP, 50 tokens and 20 lithium past the cap', () => {
+    const { economy, data, events } = world(MARINE, (save) => {
+      save.resources.lithium = 400;
+    });
+    economy.applyRewards(MISSIONS.c5_m3 as MissionDef, true, true);
+    expect(data.player.xp).toBe(450);
+    // The mission's own token grant, apart from any level-up's.
+    expect(events.of('tokens:changed').filter((t) => t.reason === 'mission:c5_m3').map((t) => t.delta)).toEqual([50]);
+    expect(data.resources.lithium).toBe(400 + CONTRACT_LITHIUM);
+    expect(data.progress.flags).toEqual([]);
+  });
+
+  it('a c1_m2 contract still pays 112 XP and 11 tokens', () => {
+    const { economy, data, progression } = world();
+    economy.applyRewards(MISSIONS.c1_m2 as MissionDef, true, true);
+    expect(data.player.xp).toBe(112);
+    expect(progression.tokens).toBe(11);
+    expect(data.resources.lithium).toBe(CONTRACT_LITHIUM);
+  });
+});
+
+describe('cargo racks: a flat cap and more pack slots (SPEC-066 §4.7)', () => {
+  it('cargoCap() is 400 at tiers 0–3, and 400 + 100 / 200 / 300 with the Quartermaster', () => {
+    const { economy, data } = world();
+    for (const tier of [0, 1, 2, 3] as const) {
+      data.ship.cargo = tier;
+      expect(economy.cargoCap(), `tier ${tier}`).toBe(400);
+      expect(cargoCap(data.ship), `tier ${tier}`).toBe(400);
+    }
+    const quartermaster: Save['companions'][number] = { id: 'quartermaster', level: 1, enabled: true };
+    data.companions.push(quartermaster);
+    const caps: number[] = [];
+    for (const level of [1, 2, 3] as const) {
+      quartermaster.level = level;
+      caps.push(economy.cargoCap());
+    }
+    expect(caps).toEqual([500, 600, 700]);
+  });
+
+  it('packSlots() is 20 / 22 / 24 / 26 by tier, and the base pack is INVENTORY_SLOTS', () => {
+    const { economy, data } = world();
+    expect(UPGRADES.cargo.name).toBe('Cargo Racks');
+    expect(UPGRADES.cargo.metrics).toEqual({ packSlots: [20, 22, 24, 26] });
+    // Prices unchanged.
+    expect(UPGRADES.cargo.tiers.map((tier) => [tier.tokens, 'resources' in tier ? tier.resources : null])).toEqual([
+      [25, null],
+      [50, null],
+      [90, { water: 40 }],
+    ]);
+    const slots: number[] = [];
+    for (const tier of [0, 1, 2, 3] as const) {
+      data.ship.cargo = tier;
+      slots.push(economy.packSlots());
+    }
+    expect(slots).toEqual([20, 22, 24, 26]);
+    expect(slots[0]).toBe(INVENTORY_SLOTS);
+  });
+
+  it('at tier 1 a 21st and a 22nd stack fit, a 23rd is inventory_full, and the pack survives validateSave', () => {
+    const { economy, data } = world(MARINE, (save) => {
+      fillInventory(save);
+      save.ship.cargo = 1;
+      save.resources = { oil: 100, wheat: 100, water: 100, lithium: 0 };
+    });
+    expect(economy.usedSlots()).toBe(20);
+    expect(economy.craft('medkit')).toEqual({ ok: true, qty: 1 });
+    expect(economy.craft('frag_grenade')).toEqual({ ok: true, qty: 1 });
+    expect(economy.usedSlots()).toBe(22);
+    expect(economy.craft('coolant_pack')).toEqual({ ok: false, reason: 'inventory_full' });
+    expect(economy.addItem('landmine', 1)).toEqual({ added: 0, blocked: 1 });
+    // The validator does not limit pack slots: nothing is dropped on load.
+    const loaded = validateSave(JSON.parse(JSON.stringify(data)));
+    if (!loaded.ok) throw new Error(loaded.errors.join('; '));
+    expect(loaded.data.inventory).toEqual(data.inventory);
+    const reloaded = new Economy(loaded.data, recorder(), new Progression(loaded.data, recorder()));
+    expect(reloaded.usedSlots()).toBe(22);
+    // At tier 0 the same pack has no new slot, and keeps its 22 stacks.
+    data.ship.cargo = 0;
+    expect(economy.addItem('medkit', 1)).toEqual({ added: 1, blocked: 0 }); // the open medkit stack
+    expect(economy.addItem('landmine', 1)).toEqual({ added: 0, blocked: 1 });
+    expect(economy.usedSlots()).toBe(22);
+  });
+
+  it('E123: a tier-2 save with 700 oil keeps it — a pickup adds 0 and blocks 50, a reward adds past it', () => {
+    const { economy, data, events } = world(MARINE, (save) => {
+      save.ship.cargo = 2;
+      save.resources.oil = 700;
+    });
+    expect(economy.cargoCap()).toBe(400);
+    expect(economy.packSlots()).toBe(24);
+    expect(economy.addResource('oil', 50, 'pickup')).toEqual({ added: 0, shipped: 0, blocked: 50 });
+    expect(economy.addResource('oil', 20, 'recovered')).toEqual({ added: 0, shipped: 0, blocked: 20 });
+    expect(data.resources.oil).toBe(700);
+    expect(events.of('resource:collected')).toEqual([{ resource: 'oil', amount: 0, total: 700, blocked: 'cargo_full', source: 'pickup' }]);
+    economy.applyRewards({ ...MISSION_SHELL, rewards: { xp: 0, tokens: 0, resources: { oil: 30 } } }, false);
+    expect(data.resources.oil).toBe(730);
+    // Spent under the cap, pickups resume up to it.
+    data.resources.oil = 390;
+    expect(economy.addResource('oil', 50, 'pickup')).toEqual({ added: 10, shipped: 0, blocked: 40 });
+  });
+
+  it('E123: shippable reads the reserve at the cap, so a hold above it ships down to the reserve', () => {
+    const { economy, data } = world(MARINE, (save) => {
+      save.ship.cargo = 2;
+      save.resources.oil = 700;
+    });
+    expect(data.depot.keep.oil).toBe(100);
+    expect(economy.shippable('oil', 0)).toBe(600);
+    // 66-i: a stored reserve of 700 reads 400 — the hold ships down to the cap.
+    economy.setKeep('oil', 700);
+    expect(data.depot.keep.oil).toBe(700);
+    expect(economy.shippable('oil', 0)).toBe(300);
+    expect(economy.shipHome('oil', 0)).toEqual({ ok: true, shipped: 300 });
+    expect(data.resources.oil).toBe(400);
+    expect(economy.shippable('oil', 0)).toBe(0);
+    // The stored reserve is still kept (65-a); a deliver need above the cap still wins.
+    expect(data.depot.keep.oil).toBe(700);
+    data.resources.oil = 600;
+    expect(economy.shippable('oil', 500)).toBe(100);
   });
 });

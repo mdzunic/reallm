@@ -334,9 +334,10 @@ describe('Completionist', () => {
   });
 
   it('lands on §4.7 numbers', () => {
-    expect(run.save.player.xp).toBe(11135);
-    expect(run.save.player.level).toBe(19);
-    expect(run.tokensEarned).toBe(1224);
+    // SPEC-066 §6.9: kill XP by chapter and Egg Hunt’s ten eggs (11135, 19, 1224 before).
+    expect(run.save.player.xp).toBe(11771);
+    expect(run.save.player.level).toBe(20);
+    expect(run.tokensEarned).toBe(1249);
     expect(run.tokensSpent).toBe(644); // 683 before review 2026-10 (G-09)
     expect(run.subsidyOil).toBe(0);
     expect(run.vouchers).toBe(5);
@@ -376,9 +377,10 @@ describe('Completionist, base hold', () => {
   });
 
   it('lands on the completionist numbers, less the two cargo tiers', () => {
-    expect(run.save.player.xp).toBe(11135);
-    expect(run.save.player.level).toBe(19);
-    expect(run.tokensEarned).toBe(1224);
+    // SPEC-066 §6.9: kill XP by chapter and Egg Hunt’s ten eggs (11135, 19, 1224 before).
+    expect(run.save.player.xp).toBe(11771);
+    expect(run.save.player.level).toBe(20);
+    expect(run.tokensEarned).toBe(1249);
     expect(run.tokensSpent).toBe(570); // 609 before review 2026-10 (G-09)
     expect(run.subsidyOil).toBe(0);
     expect(run.vouchers).toBe(5);

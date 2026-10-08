@@ -98,10 +98,10 @@ import { makeProjectile } from '@/entities/Projectile';
 import { resetTelegraph, TELEGRAPH_CAPACITY } from '@/entities/Telegraph';
 import { ARENA_RESPAWN_OUTSET, clampToSeal, type ArenaState } from '@/entities/World';
 import { ClueTracker, clueFound, FlagView, type ClueScene } from '@/systems/Clues';
-import { Combat, computePlayerStats, ELITE_SCALE, staminaFull, type CombatWorld, type HitMemory } from '@/systems/Combat';
+import { Combat, computePlayerStats, ELITE_SCALE, healLockLeft, staminaFull, type CombatWorld, type HitMemory } from '@/systems/Combat';
 import { containment, containmentSteps } from '@/systems/Containment';
 import { DASH_DISTANCE, dashCooldown, isDashing, pressDash, stepDash } from '@/systems/Dash';
-import { Economy } from '@/systems/Economy';
+import { contractTokenFraction, Economy } from '@/systems/Economy';
 import { seconds, stage as stageText } from '@/systems/Format';
 import { EXPLORE_RADIUS_BELOW, ExploreMask, REVEAL_CAPACITY } from '@/systems/Exploration';
 import {
@@ -125,7 +125,7 @@ import {
 } from '@/systems/Guidance';
 import { Hazards, placeHazards, type HazardCounts } from '@/systems/Hazards';
 import { nearestInteractable, type Interactable } from '@/systems/Interactables';
-import { fillQuickFromPickup, quickEligible, refillQuick, type SlotView } from '@/systems/Loadout';
+import { fillQuickFromPickup, quickEligible, quickSlotEmpty, refillQuick, stepQuickDry, type SlotView } from '@/systems/Loadout';
 import {
   featurePieces,
   generateLayout,
@@ -196,16 +196,20 @@ import {
   darkFogRange,
   descentRefusal,
   deathCause,
+  depotLossText,
   deliveryNeedsText,
   firstSentence,
   deathTip,
   hasNodeRadar,
+  healLockedText,
   HP_FULL_TEXT,
   occludes,
   OCCLUDER_OPACITY,
   padEmptyText,
   pickupText,
   predecessorCacheText,
+  QUICK_DRY_TEXT,
+  QUICK_PICK_IN_COMBAT_TEXT,
   quitNote,
   remainsFullText,
   remainsLostText,
@@ -1039,8 +1043,13 @@ export class SurfaceScene extends UiScene<'surface'> {
     { kind: 'slot', slot: 'sidearm' },
   ];
   #qbLength = 0;
-  /** §4.4: `world.time` of the last toast per text — one per 3 s each. */
+  /** §4.4: `world.time` of the last toast per key (the text by default) — one per 3 s each. */
   readonly #quickToastAt = new Map<string, number>();
+  /**
+   * SPEC-066 §4.2 (E122): the slots that ran dry in this fight — they stay
+   * empty while `combat.inCombat` holds, and refill once it closes.
+   */
+  readonly #quickDry: Record<QuickSlot, boolean> = { heal: false, explosive: false, utility: false };
   /** §4.6: the open picker's close function, or `null`. */
   #pickerClose: (() => void) | null = null;
   /** SPEC-029 §4.8: world time the next explosive use is allowed. */
@@ -1357,6 +1366,8 @@ export class SurfaceScene extends UiScene<'surface'> {
       time: 0,
       // SPEC-030 §4.7: enemies, the follower and shots stop at the wall line.
       bounds: layout.halfSize - WALL_INSET,
+      // SPEC-066 §4.4: a non-boss kill pays at the planet's chapter.
+      planetChapter: planet.chapter,
     };
     world.player.facing = layout.playerSpawn.facing;
     this.#world = world;
@@ -2908,6 +2919,9 @@ export class SurfaceScene extends UiScene<'surface'> {
       info['exhausted'] = p.exhausted ? 1 : 0;
       info['loud'] = isLoud(p, this.#world.time) ? 1 : 0;
       info['burrowRing'] = this.#burrowRing(this.#world);
+      // SPEC-066 §4.2: the fight window, and the heal lock's seconds left.
+      info['inCombat'] = this.#combat?.inCombat === true ? 1 : 0;
+      info['healLockLeft'] = Math.round(healLockLeft(p, this.#world.time) * 100) / 100;
     }
     info['speed'] = Math.round(this.#speed * 100) / 100;
     info['shots'] = this.#shots;
@@ -4095,6 +4109,8 @@ export class SurfaceScene extends UiScene<'surface'> {
       this.#qbLength = 0;
       return;
     }
+    // SPEC-066 §4.2: the in-combat rule, before any press of this step.
+    if (this.#save !== null) stepQuickDry(this.#save, this.#quickDry, combat.inCombat);
     const loadout = combat.loadout;
     const time = world.time;
     const touch = this.services.input.state.scheme === 'touch';
@@ -4152,6 +4168,10 @@ export class SurfaceScene extends UiScene<'surface'> {
    * §4.4: spend one item from a quick slot — refill a run-out slot first,
    * refuse an empty one or a heal at full HP with a throttled toast, and keep
    * the id when the last one is spent so the bar reads `×0`.
+   *
+   * SPEC-066 §4.1, §4.2: the refusals run in order — a dry slot (or an empty
+   * one in a fight), then the heal lock, then a heal at full HP — and in a
+   * fight nothing here writes `save.quick` (E122).
    */
   #useQuick(slot: QuickSlot): void {
     const world = this.#world;
@@ -4161,6 +4181,12 @@ export class SurfaceScene extends UiScene<'surface'> {
     if (world === null || economy === null || combat === null || save === null) return;
     if (!world.player.alive) return;
 
+    const inCombat = combat.inCombat;
+    // SPEC-066 §4.2: a dry slot waits for the fight to end, whatever the pack holds.
+    if (this.#quickDry[slot] || (inCombat && quickSlotEmpty(save, slot))) {
+      this.#quickToast(refillQuick(save, slot) !== null ? QUICK_DRY_TEXT : QUICK_EMPTY_TEXT[slot]);
+      return;
+    }
     let id = save.quick[slot];
     if (id === null || economy.count(id) === 0) {
       const refill = refillQuick(save, slot);
@@ -4172,6 +4198,15 @@ export class SurfaceScene extends UiScene<'surface'> {
     if (id === null || economy.count(id) === 0) {
       this.#quickToast(QUICK_EMPTY_TEXT[slot]);
       return;
+    }
+    // SPEC-066 §4.1 (E121): a locked heal spends nothing and says how long is
+    // left — under one throttle key, since every second reads a new text.
+    if (slot === 'heal') {
+      const left = healLockLeft(world.player, world.time);
+      if (left > 0) {
+        this.#quickToast(healLockedText(left), 'heal-lock');
+        return;
+      }
     }
     // E40: the most common waste on a phone — a heal at full HP spends nothing.
     if (slot === 'heal' && world.player.hp >= world.stats.maxHp) {
@@ -4204,7 +4239,8 @@ export class SurfaceScene extends UiScene<'surface'> {
     combat.applyConsumable(result.effect);
     this.services.events.emit('quick:used', { slot, itemId: id });
     // §4.4: the id stays when nothing replaces it, so the bar reads `×0`.
-    if (economy.count(id) === 0) save.quick[slot] = refillQuick(save, slot) ?? id;
+    // SPEC-066 §4.2: in a fight it stays regardless, and goes dry next step.
+    if (economy.count(id) === 0 && !inCombat) save.quick[slot] = refillQuick(save, slot) ?? id;
   }
 
   /**
@@ -4258,7 +4294,8 @@ export class SurfaceScene extends UiScene<'surface'> {
     this.#throwReadyAt = world.time + EXPLOSIVE_USE_SECONDS;
     this.services.events.emit('quick:used', { slot: 'utility', itemId: id });
     // §4.4: the id stays when nothing replaces it, so the bar reads `×0`.
-    if (economy.count(id) === 0) save.quick.utility = refillQuick(save, 'utility') ?? id;
+    // SPEC-066 §4.2: in a fight it stays regardless, and goes dry next step.
+    if (economy.count(id) === 0 && !combat.inCombat) save.quick.utility = refillQuick(save, 'utility') ?? id;
   }
 
   /**
@@ -4289,7 +4326,8 @@ export class SurfaceScene extends UiScene<'surface'> {
     this.#throwReadyAt = world.time + EXPLOSIVE_USE_SECONDS;
     this.services.events.emit('quick:used', { slot: 'explosive', itemId: id });
     // §4.4: the id stays when nothing replaces it, so the bar reads `×0`.
-    if (economy.count(id) === 0) save.quick.explosive = refillQuick(save, 'explosive') ?? id;
+    // SPEC-066 §4.2: in a fight it stays regardless, and goes dry next step.
+    if (economy.count(id) === 0 && !combat.inCombat) save.quick.explosive = refillQuick(save, 'explosive') ?? id;
   }
 
   /** §4.8 (touch): the nearest live enemy within `range` with a clear line. */
@@ -4309,12 +4347,15 @@ export class SurfaceScene extends UiScene<'surface'> {
     return best;
   }
 
-  /** §4.4: one toast per text per 3 s, on the world clock. */
-  #quickToast(text: string): void {
+  /**
+   * §4.4: one toast per text per 3 s, on the world clock. SPEC-066 §4.1: `key`
+   * throttles texts that change with the clock under one name (E121).
+   */
+  #quickToast(text: string, key: string = text): void {
     const time = this.#world?.time ?? 0;
-    const last = this.#quickToastAt.get(text);
+    const last = this.#quickToastAt.get(key);
     if (last !== undefined && time - last < QUICK_TOAST_SECONDS) return;
-    this.#quickToastAt.set(text, time);
+    this.#quickToastAt.set(key, time);
     this.services.events.emit('ui:toast', { text, kind: 'warn' });
   }
 
@@ -4330,6 +4371,11 @@ export class SurfaceScene extends UiScene<'surface'> {
     const world = this.#world;
     if (save === null || economy === null || world === null) return;
     if (this.#modalOpen > 0 || this.#terminalOpen || this.#holds > 0 || this.#deathAt !== null) return;
+    // SPEC-066 §4.2: the picker reassigns a slot, and nothing does that mid-fight.
+    if (this.#combat?.inCombat === true) {
+      this.#quickToast(QUICK_PICK_IN_COMBAT_TEXT);
+      return;
+    }
 
     const choices: QuickChoice[] = [];
     for (const entry of save.inventory) {
@@ -4454,6 +4500,9 @@ export class SurfaceScene extends UiScene<'surface'> {
     p.invulnUntil = world.time + TUNING.INVULN_AFTER_RESPAWN;
     p.fireCooldown = 0;
     p.healOverTime = null;
+    // SPEC-066 §4.1 (66-a): the respawn's full HP is not a heal item, and the lock goes.
+    p.healLockUntil = 0;
+    p.healLockSeconds = 0;
     p.boosts.length = 0;
     p.hazardImmuneUntil = 0;
     // SPEC-038 §4.1: a respawn or a recall resets the dash.
@@ -6041,7 +6090,11 @@ export class SurfaceScene extends UiScene<'surface'> {
                   ? h('span', { class: 'badge badge-replay' }, 'Replay · 50 %')
                   : null,
             ),
-            h('p', { class: 'terminal-rewards' }, rewardsText(def.rewards, replay, contract !== null) || '—'),
+            h(
+              'p',
+              { class: 'terminal-rewards' },
+              rewardsText(def.rewards, replay, contract !== null, contractTokenFraction(def)) || '—',
+            ),
             testId(h('p', { class: 'terminal-brief' }, full ? def.brief : firstSentence(def.brief)), `terminal-brief-${def.id}`),
             testId(
               h('button', { class: 'ui-btn is-primary', type: 'button', click: () => this.#acceptAtTerminal(id) }, 'Accept'),
@@ -6581,7 +6634,8 @@ export class SurfaceScene extends UiScene<'surface'> {
         const id = save.quick[slot];
         const entry = this.#quickScratch[slot];
         entry.itemId = id;
-        entry.qty = id === null ? 0 : economy.count(id);
+        // SPEC-066 §4.2 (66-d): a dry slot reads `×0` whatever the pack holds.
+        entry.qty = id === null || this.#quickDry[slot] ? 0 : economy.count(id);
       }
       m.quick = this.#quickScratch;
     }
@@ -6589,6 +6643,9 @@ export class SurfaceScene extends UiScene<'surface'> {
     // SPEC-038 §4.1: the ring runs from 1 at the press to 0 when ready.
     const dashLeft = world.player.dashReadyAt - world.time;
     m.dash = dashLeft > 0 ? Math.round(Math.min(1, dashLeft / Math.max(1e-6, this.#dashCooldown)) * 1000) / 1000 : 0;
+    // SPEC-066 §4.1: the heal lock's ring, the same way.
+    const lockLeft = healLockLeft(world.player, world.time);
+    m.healLock = lockLeft > 0 ? Math.round(Math.min(1, lockLeft / Math.max(1e-6, world.player.healLockSeconds)) * 1000) / 1000 : 0;
 
     // SPEC-050 §4.6: the stamina ring's model, through one reused object, and
     // the holstered weapon slots — sprinting, or drawing after a sprint.
@@ -7787,6 +7844,9 @@ export class SurfaceScene extends UiScene<'surface'> {
           // SPEC-041 §4.4: a death opens the seal at once; the respawn clears the arena.
           if (this.#arena !== null) this.#arena.sealed = false;
           const lost = this.#economy?.applyDeathPenalty() ?? {};
+          // SPEC-066 §4.8 (E124): on hard a tenth of the depot goes too — gone,
+          // never into the remains, which carry the hold's loss only.
+          const depotLost = this.#economy?.applyDepotDeathLoss() ?? {};
           // SPEC-057 §4.1 steps 3–4: what was taken stays where they fell.
           const remainsLine = this.#dropRemains(lost);
           // SPEC-042 §4.5: what killed the player, and the one tip that applies.
@@ -7798,6 +7858,7 @@ export class SurfaceScene extends UiScene<'surface'> {
             healsCarried: this.#healsCarried(),
           });
           this.#death?.show(lost, deathCause(cause), tip);
+          this.#death?.setDepotLoss(depotLossText(depotLost));
           // SPEC-057 §4.1 step 5: and where it went.
           this.#death?.setRemains(remainsLine);
           // Review 2026-10 S-14: the last line in the fiction, by the save's story.
@@ -7912,11 +7973,12 @@ export class SurfaceScene extends UiScene<'surface'> {
       ),
       // SPEC-028 §4.4: a pickup of an eligible item fills an empty or run-out
       // quick slot (28-f: a reward spilled on the ground fills it on pickup).
+      // SPEC-066 §4.2 (E122): not in a fight — the slot waits for it to end.
       bus.on(
         'inventory:changed',
         ({ itemId, qty }) => {
           const save = this.#save;
-          if (qty > 0 && save !== null) fillQuickFromPickup(save, itemId);
+          if (qty > 0 && save !== null && this.#combat?.inCombat !== true) fillQuickFromPickup(save, itemId);
         },
         this,
       ),

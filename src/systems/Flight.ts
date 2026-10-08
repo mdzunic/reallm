@@ -1,7 +1,8 @@
 // The rail flight model (SPEC-013 §3–§4.8): constant forward motion, lateral
 // steering on a bounded XY plane, hazards approaching along depth, shields and
 // hull, ship weapons with aim assist, throttle-scaled waves, ion storms, the
-// arrival rule with its 90 s holding cap, and recall on death.
+// arrival rule with its 90 s holding cap, and recall on death. SPEC-066 §4.9
+// adds the first trip's asteroid lane and the oil a big rock drops when shot.
 //
 // Pure per SPEC-001 §4: no `three`, no DOM, no `Math.random` — every draw goes
 // through the `Rng` handed in (one per visit, SPEC-008), so a trip is
@@ -140,6 +141,12 @@ export interface FlightConfig {
    * when absent.
    */
   companionMult?: number;
+  /**
+   * SPEC-066 §4.9: the save has never landed on the destination (`visits ===
+   * 0`, the test `firstLanding` uses). With the planet's `firstTripField`, the
+   * trip carries its scripted asteroid lane. Absent reads as false.
+   */
+  firstTrip?: boolean;
 }
 
 export interface FlightInput {
@@ -247,6 +254,32 @@ const STORM_LENGTH: readonly [number, number] = [15, 25];
 const STORM_GAP: readonly [number, number] = [40, 70];
 const STORM_TICK_SECONDS = 5;
 
+// ------------------------------------------------------- SPEC-066 §4.9
+
+/** The first trip's field: rocks a second, × the live throttle (*initial tuning*). */
+export const FIELD_ROCKS_PER_SECOND = 2;
+/** Half the lane's width: a field rock's centre keeps this plus its own radius from the lane's centre (*initial tuning*, metres). */
+export const FIELD_LANE_HALF_WIDTH = 4.5;
+/** How far the lane's centre swings either side of the middle (*initial tuning*, metres). */
+export const FIELD_LANE_SWING = 4;
+/** A field rock's radius, drawn uniformly in this range (*initial tuning*, metres). */
+export const FIELD_ROCK_RADIUS = [2, 4] as const;
+/** An asteroid at least this big drops oil when the ship's guns destroy it. */
+export const ROCK_SALVAGE_RADIUS = 3;
+/** …this much, as a pickup… */
+export const ROCK_SALVAGE_OIL = 2;
+/** …until the oil the rocks put in reaches this, each trip (E125). */
+export const ROCK_SALVAGE_PER_TRIP = 20;
+
+/**
+ * SPEC-066 §4.9: the lane's centre at trip second `tripSecond` —
+ * `FIELD_LANE_SWING × sin(2π (s − fromSecond) / (toSecond − fromSecond))`, one
+ * full swing across the field's window.
+ */
+export function fieldLaneX(field: { fromSecond: number; toSecond: number }, tripSecond: number): number {
+  return FIELD_LANE_SWING * Math.sin((2 * Math.PI * (tripSecond - field.fromSecond)) / (field.toSecond - field.fromSecond));
+}
+
 const DEG_TO_RAD = Math.PI / 180;
 const ASSIST_CONE_COS = Math.cos(ASSIST_CONE_DEG * DEG_TO_RAD);
 
@@ -350,6 +383,13 @@ export class Flight {
    * the trip's hazards and waves draw exactly as they did before it.
    */
   readonly #salvageRng: Rng;
+  /**
+   * SPEC-066 §4.9: every draw of the first trip's field — a fork, so the
+   * trip's other streams draw exactly as they would without it.
+   */
+  readonly #fieldRng: Rng;
+  /** The planet's field when this is its first trip, else null. */
+  readonly #field: { readonly fromSecond: number; readonly toSecond: number } | null;
   readonly #cfg: FlightConfig;
 
   readonly #speedMult: number;
@@ -376,6 +416,10 @@ export class Flight {
   #stormEdgeAt: number;
   #stormClock = 0;
   #stormTick = 0;
+  /** SPEC-066 §4.9: field rocks spawned this trip. */
+  #fieldRocks = 0;
+  /** SPEC-066 §4.9: oil the ship's guns have salvaged from rocks this trip. */
+  #rockOil = 0;
 
   constructor(cfg: FlightConfig, economy: Economy, progression: Progression, missions: Missions, events: FlightEvents, rng: Rng) {
     this.#cfg = cfg;
@@ -386,6 +430,8 @@ export class Flight {
     this.#rng = rng;
     this.#stormRng = rng.fork('storm');
     this.#salvageRng = rng.fork('salvage');
+    this.#fieldRng = rng.fork('field');
+    this.#field = cfg.firstTrip === true ? (cfg.planet.flight.firstTripField ?? null) : null;
     this.#stormEdgeAt = this.#stormRng.float(STORM_GAP[0], STORM_GAP[1]);
 
     this.#speedMult = UPGRADES.engine.metrics['speedMult']?.[cfg.ship.engine] ?? 1;
@@ -462,6 +508,16 @@ export class Flight {
   /** Sim seconds since launch started; the regen delay runs on this clock. */
   get time(): number {
     return this.#time;
+  }
+
+  /** SPEC-066 §4.9: field rocks spawned this trip; 0 on any trip without the field. */
+  get fieldRocks(): number {
+    return this.#fieldRocks;
+  }
+
+  /** SPEC-066 §4.9: the oil the rocks the guns destroyed put in this trip (E125: what entered the hold). */
+  get rockSalvage(): number {
+    return this.#rockOil;
   }
 
   /**
@@ -807,8 +863,24 @@ export class Flight {
       this.#events.emit('enemy:killed', { enemyId: def.id as EnemyId, elite: false, x: hazard.x, z: hazard.depth, xp: def.xp });
       this.#progression.addXp(def.xp, 'flight');
       this.#salvage(def);
+    } else if (kind === 'asteroid' && hazard.radius >= ROCK_SALVAGE_RADIUS) {
+      this.#rockSalvage();
     }
     this.hazards.free(index);
+  }
+
+  /**
+   * SPEC-066 §4.9, E125: a big rock the guns destroyed drops
+   * `ROCK_SALVAGE_OIL` into the hold as a pickup — the cargo cap applies —
+   * until the oil it put in reaches `ROCK_SALVAGE_PER_TRIP` this trip. Only
+   * what went in counts, so a full hold uses none of the 20. Separate from,
+   * and unlike, the uncapped fighter salvage above. A collision never calls it.
+   */
+  #rockSalvage(): void {
+    const want = Math.min(ROCK_SALVAGE_OIL, ROCK_SALVAGE_PER_TRIP - this.#rockOil);
+    if (want <= 0) return;
+    const { added, shipped } = this.economy.addResource('oil', want, 'pickup');
+    this.#rockOil += added + shipped;
   }
 
   /**
@@ -832,7 +904,57 @@ export class Flight {
     // §4.3: Poisson at `asteroidDensity × throttle` per second, capped per preset.
     const rate = this.#cfg.planet.flight.asteroidDensity * this.#throttleLive;
     if (this.#rng.next() < rate * dt && this.#asteroidCount() < this.#asteroidCap) this.spawnAsteroid();
+    // SPEC-066 §4.9: the first trip's field, on top of the ambient density and
+    // on its own fork — inside its window of covered trip seconds.
+    const field = this.#field;
+    if (field !== null && this.#covered >= field.fromSecond && this.#covered <= field.toSecond) {
+      const fieldRate = FIELD_ROCKS_PER_SECOND * this.#throttleLive;
+      if (this.#fieldRng.next() < fieldRate * dt && this.#asteroidCount() < this.#asteroidCap) this.#spawnFieldRock(field);
+    }
     this.#spawnGroups();
+  }
+
+  /**
+   * SPEC-066 §4.9: one field rock. It closes at the bare rail speed and never
+   * drifts, so it reaches the ship's plane at trip second
+   * `s = covered + (spawnDepth − hitDepth) / baseSpeed × speedMult` whatever
+   * the throttle does on the way (a change scales its `vDepth` and the trip's
+   * progress alike, 66-k). It sits outside the lane around `fieldLaneX(s)` by
+   * its own radius, on a side drawn in proportion to the room there.
+   */
+  #spawnFieldRock(field: { readonly fromSecond: number; readonly toSecond: number }): void {
+    const rng = this.#fieldRng;
+    const radius = rng.float(FIELD_ROCK_RADIUS[0], FIELD_ROCK_RADIUS[1]);
+    const arrival = this.#covered + ((RAIL.spawnDepth - RAIL.hitDepth) / RAIL.baseSpeed) * this.#speedMult;
+    const centre = fieldLaneX(field, arrival);
+    const clear = FIELD_LANE_HALF_WIDTH + radius;
+    const leftEnd = centre - clear;
+    const rightStart = centre + clear;
+    const left = Math.max(0, leftEnd + PLANE.halfW);
+    const right = Math.max(0, PLANE.halfW - rightStart);
+    if (left + right <= 0) return; // no room beside the lane — never at these numbers
+    const pick = rng.float(0, left + right);
+    const x = pick < left ? -PLANE.halfW + pick : rightStart + (pick - left);
+    const hazard = this.hazards.alloc();
+    hazard.kind = 'asteroid';
+    hazard.x = x;
+    hazard.y = rng.float(-PLANE.halfH, PLANE.halfH);
+    hazard.depth = RAIL.spawnDepth;
+    hazard.radius = radius;
+    hazard.hp = Math.round(radius * 15);
+    hazard.vDepth = -RAIL.baseSpeed * this.#throttleLive;
+    hazard.vx = 0;
+    hazard.vy = 0;
+    hazard.def = undefined;
+    hazard.ttl = undefined;
+    hazard.fireCooldown = undefined;
+    hazard.pattern = undefined;
+    hazard.holdDepth = undefined;
+    hazard.hitFlash = 0;
+    hazard.burstLeft = undefined;
+    hazard.burstAt = undefined;
+    hazard.shotDamage = undefined;
+    this.#fieldRocks++;
   }
 
   /**

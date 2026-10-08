@@ -144,6 +144,8 @@ export interface PlanetDef {
     readonly asteroidDensity: number;
     readonly waves: readonly WaveId[];
     readonly ionStorm: boolean;
+    /** SPEC-066 §4.9: the first trip's scripted asteroid lane, in trip seconds. */
+    readonly firstTripField?: { readonly fromSecond: number; readonly toSecond: number };
   };
   readonly surface: {
     /** Arena half-extent, in metres. */
@@ -222,7 +224,8 @@ export const PLANETS = {
     unlock: [],
     fuelCost: 40,
     travelSeconds: 90,
-    flight: { asteroidDensity: 0.2, waves: ['cinder4_flight'], ionStorm: false },
+    // SPEC-066 §4.9: the first trip carries a lane to steer through, 20–45 s in.
+    flight: { asteroidDensity: 0.2, waves: ['cinder4_flight'], ionStorm: false, firstTripField: { fromSecond: 20, toSecond: 45 } },
     surface: {
       halfSize: 180,
       palette: { ground: '#c19a5b', sky: '#e8b56a', fog: '#d8a866', accent: '#7a4a22' },
