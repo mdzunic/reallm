@@ -183,6 +183,10 @@ describe('placeDressing (SPEC-067)', () => {
   });
 
   it('keeps every piece off the pad clearing, the POI rings, the nodes, the obstacles, the other pieces and the walking lines', () => {
+    // Thousands of pieces against every POI, node, obstacle, line and earlier
+    // piece: compare in plain arithmetic and assert once on the list of breaches,
+    // so the test stays inside the timeout when the whole suite runs in parallel.
+    const breaches: string[] = [];
     for (const id of IDS) {
       const { layout, field } = world(id);
       const kinds = PLANETS[id].surface.look.dressing.kinds;
@@ -193,22 +197,31 @@ describe('placeDressing (SPEC-067)', () => {
         for (const piece of instances(placed.matrices)) {
           const foot = spec.footprint * piece.sx;
           const where = `${id} ${kinds[k]} at ${piece.x.toFixed(1)}, ${piece.z.toFixed(1)}`;
-          expect(Math.hypot(piece.x, piece.z), where).toBeGreaterThanOrEqual(16);
+          if (!(Math.hypot(piece.x, piece.z) >= 16)) breaches.push(`${where}: inside the pad clearing`);
           for (const poi of layout.pois) {
             if (poi.kind === 'landing_pad') continue;
-            expect(Math.hypot(piece.x - poi.x, piece.z - poi.z), where).toBeGreaterThanOrEqual(poi.radius + 2);
+            if (!(Math.hypot(piece.x - poi.x, piece.z - poi.z) >= poi.radius + 2)) breaches.push(`${where}: inside the ${poi.kind} ring`);
           }
-          for (const node of layout.nodes) expect(Math.hypot(piece.x - node.x, piece.z - node.z), where).toBeGreaterThanOrEqual(2.5);
-          for (const o of layout.obstacles) expect(Math.hypot(piece.x - o.x, piece.z - o.z), where).toBeGreaterThanOrEqual(o.radius);
+          for (const node of layout.nodes) {
+            if (!(Math.hypot(piece.x - node.x, piece.z - node.z) >= 2.5)) breaches.push(`${where}: on a node`);
+          }
+          for (const o of layout.obstacles) {
+            if (!(Math.hypot(piece.x - o.x, piece.z - o.z) >= o.radius)) breaches.push(`${where}: inside an obstacle`);
+          }
           for (const line of lines) {
-            expect(lineDistance(piece.x, piece.z, line.x, line.z), where).toBeGreaterThanOrEqual(spec.corridor + spec.footprint - 1e-6);
+            if (!(lineDistance(piece.x, piece.z, line.x, line.z) >= spec.corridor + spec.footprint - 1e-6)) {
+              breaches.push(`${where}: on the walking line to ${line.kind}`);
+            }
           }
-          expect(piece.y).toBeCloseTo(field.heightAt(piece.x, piece.z), 5);
-          for (const other of all) expect(Math.hypot(piece.x - other.x, piece.z - other.z), where).toBeGreaterThan(0.5 * (foot + other.foot));
+          if (!(Math.abs(piece.y - field.heightAt(piece.x, piece.z)) < 0.5e-5)) breaches.push(`${where}: off the ground`);
+          for (const other of all) {
+            if (!(Math.hypot(piece.x - other.x, piece.z - other.z) > 0.5 * (foot + other.foot))) breaches.push(`${where}: overlaps another piece`);
+          }
           all.push({ x: piece.x, z: piece.z, foot });
         }
       });
     }
+    expect(breaches).toEqual([]);
   });
 });
 
