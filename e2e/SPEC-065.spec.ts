@@ -384,13 +384,18 @@ async function sectionTabs(page: Page): Promise<Array<{ id: string; top: number;
   );
 }
 
-/** Through the gate by touch, so the input scheme is touch from the start. */
+/**
+ * Through the gate by touch, so the input scheme is touch from the start, and
+ * on into the menu with its fade let go: a `go()` issued while boot → menu is
+ * still fading is refused (SPEC-003 D-2), which on a slow runner left the
+ * phone tests waiting on the menu for the station.
+ */
 async function startTouch(page: Page): Promise<void> {
   await page.goto(gameUrl(URL));
   await awaitGate(page);
   await page.getByTestId('boot-start').tap();
   await expect(page.getByTestId('boot-overlay')).toBeHidden();
-  await expect(page.getByTestId('scene-label')).toBeVisible(COLD_START);
+  await settle(page, 'menu');
 }
 
 /** A tap on the Depot tab, and a tap on a draw. */
