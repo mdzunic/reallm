@@ -698,6 +698,60 @@ Specs:
 
 ---
 
+**R28 — 2026-10-07 (the ground under the fight: a dressed surface, traps, and terrain that fights back).** A player said the planets "look unfinished, like a plate", and asked for traps and for surroundings that help against the enemies, "like rocks that fall on enemies if you shoot them". Captures of every planet agree with the first half:
+- **The ground is one tiling texture with almost nothing on it.** The relief is at most 0.5 m. Each planet blends two ground layers by slope and one noise. Scatter runs at 2–6 pieces per 1,000 m², decals are capped at 80 patches per arena, and four planets have 10–20 clumps of cover per 1,000 m². On the 22 m camera that is a few objects per screen, and the landing frame is empty on five planets (review 2026-10, V-01).
+- **Nothing on the ground is a thing you can use.** Every obstacle is a wall, and the only damage that is not an enemy is the weather.
+
+The layout, its hash and every SPEC-010 invariant stay. Decisions:
+
+1. **A dressed ground (SPEC-067).** Everything here is drawn only: it is seeded from the layout hash, collides with nothing and moves no layout pin.
+   - The ground varies at 20–90 m. Macro patches lighten, darken, warm and cool it, and the second ground layer comes up in broad patches: cracked flats in the sand, blue ice in the snow, mud in the moss.
+   - Ground patches are richer and more numerous. New kinds per biome include gravel, drifts, ice sheets, mud, ash, cooling lava, resin pools and paths.
+   - Rubble rings the foot of every obstacle and landmark, lies in loose clumps in the open, and banks along the arena wall.
+   - Each biome gets three low dressing pieces in clumps: a dead wurm's ribs, scav barrels and pipe runs on Cinder-4; ice shards, buried crates and frozen pipes on Vetra; fallen logs, pillar drums and root arches on Thessaly; basalt stumps, obsidian and cooling lava on Ferrum; chitin ribs, glow pods and resin mounds on the Hive (green, so they never read as its magenta eggs); and field walls, marker posts and flower beds on Eden.
+   - Worn trails meander from the pad toward every objective, inside the corridor the layout keeps clear.
+   - A landing site rings the pad 6–15 m out: crates, cable runs, a lamp mast, barrels and tracks. This answers V-01.
+   - Budgets hold: 96 draws, and 60 k triangles at spawn on `medium`. `low` draws a reduced set.
+2. **Traps (SPEC-068, §4, §13 E126, E127, E130).** Each planet has one kind of trap, placed in fields of one to four, and a trap hurts whoever is in it: the player and enemies alike.
+   - **Vents** erupt on their own cycle of 5–10 s. Each eruption follows 1.2 s of warning, a circle that fills on the ground. These are Vetra's cryo geysers (they chill), Ferrum's lava vents, the Hive's bile geysers and Eden's burst water mains.
+   - **Mines** trigger when anything comes within 1.6 m. They burst 0.9 s later, under a filling circle, and a blast sets them off early. These are Cinder-4's scav tripmines and Thessaly's spore pods.
+   - Traps never lie in the pad clearing plus 10 m, in a pad-to-objective corridor, inside an arena, or within a margin of a POI, a node, a shelter or the descent.
+3. **Helpers you shoot (SPEC-068, §4, §13 E128, E129).** Each planet has two kinds. Each is a solid prop that stops shots and bodies, and any player shot or blast sets it off.
+   - **Topplers** are a pillar, a column, a spire or a dead trunk. They fall the way the shot was flying and crush an 8 m lane behind a 0.7 s warning. Everything in the lane is hit and slowed. On Cinder-4 it is a balanced rock, then an ice pillar, a ruin column, a basalt column, a chitin spire and a dead oak.
+   - **Volatiles** are drums, tanks, gas blooms, blisters and sacs. They burst 0.35 s after the hit, in a 4.5 m circle. Vetra's coolant chills.
+   - Helpers stand in groups beside the corridors and around objectives, where fights happen, and two of each stand in every boss arena.
+   - A burst sets off any helper or mine it reaches, so chains are possible. Each helper fires once a landing.
+4. **What a hazard deals (SPEC-068, §13 E127, E128).**
+   - To the player, a share of max HP: vent 15 %, mine 22 %, volatile 20 % and toppler 30 %, times the difficulty's `enemyDamageMult`. Story therefore deals nothing, and hard deals ×1.3. The 0.3 s i-frames apply, so a dash passes through.
+   - The player takes at most one hazard hit a second, so a chain of mines hurts once.
+   - Every hazard knocks back 1 m.
+   - The player's own explosives still never hurt them (E42), but a drum they set off does.
+   - To an enemy, a share of its max HP: vent 35 %, mine 60 %, volatile 70 % and toppler 100 %. An elite takes half of that and a boss 1.5–4 %.
+   - A kill by a hazard is the player's kill: XP, loot, kill objectives and run statistics count it.
+   - The escort follower, invulnerable enemies and burrowed enemies are never hit.
+5. **Hazards rest away from the player (SPEC-068, §13 E130, E131).**
+   - Beyond 45 m from the player, nothing fires: vents wait and mines sleep. Hazards also pause with the world in a hold.
+   - Hazards stay on the surface level. The descent drops any fuse or fall in progress without effect.
+   - Nothing is saved. Every helper and mine is back on the next landing, where the layout seed put it.
+6. **The game teaches them once.** The first trap warning within 12 m brings a tip, and so does the first helper within 14 m. The death overlay names the hazard: "Killed by a lava vent".
+7. **Milestone M7p "The ground under the fight"** carries SPEC-067 and SPEC-068.
+8. **Not now.**
+   - Hazards on the underground level.
+   - Enemies that steer around traps or use helpers.
+   - Hazards on the map.
+   - Damage-over-time fields, such as bramble or acid pools.
+   - New sounds: the cues reuse the surface bank.
+   - A Blender drop for the dressing and the hazards. They are procedural, like the enemies and the POIs.
+
+Specs:
+- SPEC-067 (decision 1).
+- SPEC-068 (decisions 2–6).
+- SPEC-000's queue and build order.
+
+(§4, §10, §13)
+
+---
+
 ## 1. Vision & Inspiration
 
 **ReaLLM** ("real" + "LLM"): a space post-apocalyptic ARPG whose hero slowly works out that he may be a language model running inside a machine.
@@ -826,6 +880,13 @@ Per-planet cycles (sandstorm / heatwave / blizzard / avalanche / spore storm / r
 - **Shelters and the wall**: caves and wrecks with an entrance. Inside, the weather does nothing, and enemies outside lose a player who hides and holds fire (bosses and waves excepted). The arena edge is a wall of rock and wrecked hulls where the player stops.
 - **The underground (R20)**: one cave per planet leads down to a dark level of 5–7 rooms, a level of the surface scene, generated from the layout seed. The salvager carries a flashlight with no battery: bugs flee its beam, hunters follow it, and the dark hides a player who turns it off. Caves hold the planet's packs, caches, puzzles and a vault, and add no mission, objective or requirement. Eden's underground is a machine room.
 - **Puzzles (R20)**: conduit routing, a calibration grid and "complete the sequence" at terminals; stepping plates and a beam of mirrors in caves. Every puzzle is generated solvable, hints are free, a bypass opens after 90 s, and no puzzle gates a mission.
+
+### The ground under the fight (R28)
+
+- **Dressing**: the surface ground varies in tone and material at 20–90 m and carries rubble, ground patches, biome dressing and a landing site. All of it is drawn from the layout seed and collides with nothing.
+- **Traps**: one kind per planet, in small fields — vents that erupt on a cycle (Vetra, Ferrum, the Hive, Eden) or mines that trigger on anything that comes close (Cinder-4, Thessaly). Each warns with a filling circle and hurts the player and enemies alike.
+- **Helpers**: solid props the player sets off with a shot or a blast. A toppler falls the way the shot flew and crushes a lane. A volatile bursts in a circle. Bursts set off other helpers and mines, and a hazard's kill is the player's.
+- **Damage**: a share of max HP — to the player scaled by difficulty (story takes none), to enemies halved for elites and a few per cent for bosses. Nothing beyond 45 m of the player fires, nothing fires underground, and every hazard is back on the next landing.
 
 ### Narrative layer
 
@@ -1108,6 +1169,7 @@ Storage rules: 3 slots, key per slot plus a `.bak` copy of the previous good sav
 | M7m | Who flies them (R24, R25): "Wreckers", a film of the scavengers' hulk after the first departure to Vetra; a scav fighter rebuilt from the tug; contact cards and comms for the first scav fighters at Vetra and the first interceptors at the Hive; Cinder-4's scav raiders in the salvager's suit (SPEC-063, SPEC-064) | On a new save the first departure to Vetra plays "Outbound", then "Wreckers"; the first fighters on that trip bring the contact card, the scav hail and ARIA's answer, and the flight never stops for them; the first interceptors at the Hive bring theirs; a fighter within 20 m reads as a rebuilt tug at the phone preset; on Cinder-4 the raiders are suited people who aim, fire amber tracers, flinch and fall, and the surface stays inside its draw and triangle pins; the films stay within 12 MB and the precache within 25 MB; checked on desktop and the reference phone; tag `m7m` |
 | M7n | The Relay depot (R26): the pad terminal ships what the hold carries above a reserve home to Command Relay; the station's Depot tab draws it back; departures and the subsidy count the depot's oil; save v4 (SPEC-065) | On a full hold, the pad terminal ships the oil above a reserve of 100 and the hold reads 100. The station's Depot tab shows it and draws it back up to the cap. A departure is paid from the depot when the hold is short, and no subsidy is granted while the depot can pay. A v3 save loads with an empty depot, and an older build refuses a v4 save. Checked on desktop and the reference phone; tag `m7n` |
 | M7o | Pressure that holds (R27): a heal cooldown, quick slots that refill only out of combat, a drone that follows the gun, kill XP by chapter, half-paid boss contracts, a ten-egg Egg Hunt, cargo racks, Hard's death at the depot, and a first ten minutes with something in them (SPEC-066) | A medkit cannot be used twice within 8 s; a medkit stack emptied mid-fight refills only after the fight; the kite bot keeps the Ash Titan inside 100 % of max HP; a Hive drone kill pays 7 XP; a Queen contract pays 50 tokens; Dry Land's storm lasts 30 s and the first trip to Cinder-4 has an asteroid lane whose big rocks drop oil. Checked on desktop and the reference phone; tag `m7o` |
+| M7p | The ground under the fight (R28): a ground that varies in tone and material, rubble, biome dressing and a landing site; traps on every planet; helpers the player sets off with a shot — topplers and volatiles; hazard kills credited to the player (SPEC-067, SPEC-068) | Every landing frame shows dressing on every planet; the surface stays within 96 draws and 60 k triangles at spawn on `medium`; on Cinder-4 a shot balanced rock falls the shot's way and kills the skitters in its lane, a drum chain clears a pack, and a tripmine hurts a player who walks onto it but not on story; a kill by a hazard counts for `c1_m2`; nothing fires underground or beyond 45 m; checked on desktop and the reference phone; tag `m7p` |
 | M7 | Polish: mobile tuning, quality presets, balancing pass, PWA/offline, storage persistence, reduce-motion, save migration harness | 30+ fps on mid-tier phone; installable; full manual checklist green |
 
 ---
@@ -1265,6 +1327,12 @@ Each entry names the owning spec. "Casual" = casual difficulty.
 | E123 | A save with Cargo tier ≥ 1 and more than 400 of a resource is loaded after R27 | Nothing is removed: the hold keeps what it carries, pickups of that resource stop until it is under the cap, the pad terminal can ship the rest home, and the pack gains its slots at once | SPEC-066 |
 | E124 | A player dies on `hard` with resources at the depot (R27) | A tenth of each depot resource, rounded down, is lost — not added to the remains; the hold's 20 % goes to the remains as R21 says; no other difficulty touches the depot | SPEC-066 |
 | E125 | A big asteroid is destroyed with the hold full of oil, or after 20 oil of salvage on this trip (R27) | A full hold takes nothing, as a pickup would; past 20 a trip the rock drops nothing; neither is announced in flight | SPEC-066 |
+| E126 | A trap or a helper would stand where the player must walk | None is placed in the pad clearing plus 10 m, a pad-to-objective corridor, an arena (traps), or within a margin of a POI, a node, a shelter or the descent. A helper keeps at least 1.2 m from every obstacle and every other helper, so no way through is sealed. The layout and its hash do not move | SPEC-068 |
+| E127 | The player stands in a trap's circle or a helper's lane or circle when it lands | The player takes the hazard's share of max HP × the difficulty's `enemyDamageMult` (nothing on story) and 1 m of knockback, through the 0.3 s i-frames, so a dash passes through, and at most one hazard hit a second, so a chain hurts once. The player's own explosives still never hurt them (E42), but a drum or a toppler they set off does | SPEC-068 |
+| E128 | A hazard hits an enemy, an elite, a boss, a burrowed or invulnerable enemy, or the escort | Enemies take their share of max HP (an elite half, a boss 1.5–4 %), and a kill is the player's: XP, loot, kill objectives and run statistics. Burrowed and invulnerable enemies and the follower are untouched | SPEC-068 |
+| E129 | A burst reaches another volatile, a mine or a standing toppler | It sets it off, and a toppler falls away from the burst. Each fires once a landing, so a chain always ends | SPEC-068 |
+| E130 | A hazard is more than 45 m from the player, the player descends, or the world is held | It rests: a vent waits, a mine sleeps, and a hold pauses everything. The descent drops a fuse, a warning or a fall in progress without effect | SPEC-068 |
+| E131 | The player lands again, or reloads mid-visit | Every helper and mine is back where the layout seed placed it, and every vent's cycle restarts. Nothing about hazards is saved | SPEC-068 |
 
 ---
 

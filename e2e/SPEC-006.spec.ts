@@ -1291,10 +1291,11 @@ test('the reactions table is what the game actually hears (AC-38 … AC-50, AC-5
   // `remains:lost`, both silent; SPEC-059 §4.4.4 added `commendation:earned`,
   // reacted; SPEC-063 §4.5 added `flight:groupSpawned`, silent — the contact
   // line is what is heard; review 2026-10 (G-17) added `player:sprinted`,
-  // silent — a sprint has no sound of its own). That the two halves cover
+  // silent — a sprint has no sound of its own; SPEC-068 §4.4 added
+  // `hazard:warn` and `hazard:burst`, both reacted). That the two halves cover
   // `GameEvents` exactly is a compile-time assertion in the module, and
   // `tests/core/audioReactions.test.ts` pins the same pair of counts in node.
-  expect(reactions.counts.reacted).toBe(33);
+  expect(reactions.counts.reacted).toBe(35);
   expect(reactions.counts.silent).toBe(51);
   expect(reactions.counts.overlap).toEqual([]);
   // SPEC-012 §4.12 populated the set from the dialogue table's `glitch` marks

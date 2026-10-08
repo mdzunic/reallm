@@ -23,6 +23,7 @@ import {
   CONTRACTS,
   DEATH_TIPS,
   ENEMIES,
+  HAZARDS,
   FOLLOWERS,
   HUMAN_LOCK,
   ITEMS,
@@ -1779,6 +1780,9 @@ export function deathCause(cause: DamageSource): string {
       return 'Killed by an asteroid';
     case 'storm':
       return 'Killed by the ion storm';
+    case 'hazard':
+      // SPEC-068 §4.9: `Killed by a lava vent`.
+      return `Killed by ${HAZARDS[cause.hazard].name}`;
   }
 }
 
@@ -1848,6 +1852,8 @@ export interface DeathContext {
 export function deathTip(cause: DamageSource, context: DeathContext): string | null {
   let id: DeathTipId | null = null;
   if (cause.kind === 'weather') id = 'shelter';
+  // SPEC-068 §4.9: a hazard's death teaches the warning and the dash.
+  else if (cause.kind === 'hazard') id = 'hazard';
   else if (cause.kind === 'enemy' || cause.kind === 'projectile') {
     id = context.autoFire === 'off' ? 'autofire' : context.healsCarried > 0 ? 'heal' : 'craft';
   }

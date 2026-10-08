@@ -28,6 +28,7 @@ export * from '@/data/dialogue';
 export * from '@/data/enemies';
 export * from '@/data/films';
 export * from '@/data/followers';
+export * from '@/data/hazards';
 export * from '@/data/hints';
 export * from '@/data/home';
 export * from '@/data/ids';
@@ -60,6 +61,7 @@ import { UPGRADES } from '@/data/upgrades';
 import { WAVES } from '@/data/waves';
 
 import type { EnemyId } from '@/data/enemies';
+import type { HazardId } from '@/data/hazards';
 import type { WeatherId } from '@/data/ids';
 
 /**
@@ -74,6 +76,8 @@ export type DamageSource =
   | { kind: 'weather'; weather: WeatherId }
   | { kind: 'projectile'; enemyId: EnemyId }
   | { kind: 'fall' }
+  // SPEC-068 §4.5: a trap or a helper on the surface (PLAN R28).
+  | { kind: 'hazard'; hazard: HazardId }
   // The two flight-only causes (SPEC-013 §4.3, §4.5): an asteroid has no
   // `EnemyId` and a storm is the ship's weather, not the suit's.
   | { kind: 'asteroid' }

@@ -33,6 +33,8 @@ import type {
   EnemyId,
   FlagId,
   FollowerId,
+  HazardArchetype,
+  HazardId,
   ItemId,
   MissionBonusKind,
   MissionId,
@@ -163,6 +165,26 @@ export type GameEvents = {
   };
   'weapon:locked': { slot: WeaponSlot; itemId: ItemId };
   'mine:armed': { x: number; z: number };
+  /**
+   * SPEC-068 §4.4: a hazard's warning began — a vent charging, a mine's or a
+   * volatile's fuse lit, a toppler tipping — at its own position.
+   */
+  'hazard:warn': { hazard: HazardId; archetype: HazardArchetype; x: number; z: number };
+  /**
+   * SPEC-068 §4.4: a hazard landed. A toppler's lane runs `reach` metres from
+   * `(x, z)` along `(dirX, dirZ)`; every other landing is a circle of `reach`
+   * with a zero direction. `hits` counts the enemies it struck.
+   */
+  'hazard:burst': {
+    hazard: HazardId;
+    archetype: HazardArchetype;
+    x: number;
+    z: number;
+    dirX: number;
+    dirZ: number;
+    reach: number;
+    hits: number;
+  };
   'shop:purchased': { kind: 'ship' | 'gear' | 'companion' | 'craft'; id: string; tier?: number };
   'enemy:spawned': { enemyId: EnemyId; elite: boolean };
   'enemy:killed': { enemyId: EnemyId; elite: boolean; x: number; z: number; xp: number };

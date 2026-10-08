@@ -19,9 +19,11 @@
 // (SPEC-001 §4, §8).
 import type { ModelId } from '@/data/assets';
 import type { EnemyId } from '@/data/enemies';
+import type { HazardPlacement } from '@/data/hazards';
 import type {
   BoundaryKind,
   DecalKind,
+  DressingKind,
   GroundLayerId,
   MusicId,
   PlanetId,
@@ -64,6 +66,33 @@ export interface CoverLook {
 }
 
 /**
+ * PLAN R28 / SPEC-067 (*initial tuning*): what keeps a planet from reading as
+ * a plate — a macro patch field in the ground's vertex colour, stone rubble,
+ * three biome dressing kinds and the worn trails toward the POIs. All of it is
+ * view-only and seeded from the layout hash.
+ */
+export interface DressingLook {
+  /**
+   * The ground's 20–90 m patch field: two hues (sRGB, used at luminance 1) it
+   * drifts between, how far it pulls toward them (0–1), how much the patches
+   * lighten and darken (± fraction), and how much layer B the large patches
+   * add to the splat (0–1).
+   */
+  readonly macro: {
+    readonly hues: readonly [string, string];
+    readonly strength: number;
+    readonly value: number;
+    readonly patches: number;
+  };
+  /** The rubble's two stone colours (sRGB); each piece lies between them. */
+  readonly rubble: readonly [string, string];
+  /** The biome's dressing kinds, placed in clumps across the arena. */
+  readonly kinds: readonly [DressingKind, DressingKind, DressingKind];
+  /** The worn trails' tint (sRGB). */
+  readonly trail: string;
+}
+
+/**
  * Everything the surface environment draws for one planet (SPEC-018 §4.1,
  * *initial tuning*): the lighting rig, the two-layer ground, the visual-only
  * relief, scatter, decals and the arena-edge boundary.
@@ -91,6 +120,8 @@ export interface SurfaceLook {
   readonly scatter: { readonly kind: ScatterKind; readonly density: number; readonly second?: ScatterKind };
   readonly decals: readonly DecalKind[];
   readonly boundary: BoundaryKind;
+  /** PLAN R28 / SPEC-067: the view-only dressing pass — every planet has one. */
+  readonly dressing: DressingLook;
   /** SPEC-053 §4.1: the leaves' colour and how hard the wind moves them (0–2); a planet with trees has one. */
   readonly foliage?: { readonly tint: string; readonly wind: number };
   /** SPEC-053 §4.4: atlas clumps placed once, denser under canopies. */
@@ -174,6 +205,11 @@ export interface PlanetDef {
      */
     readonly population: number;
     readonly eliteChance: number;
+    /**
+     * SPEC-068 §4.1 (*initial tuning*): the planet's trap and two helpers —
+     * groups placed from the layout seed in the open, and helpers in the arena.
+     */
+    readonly hazards: readonly HazardPlacement[];
   };
   readonly music: { readonly calm: MusicId; readonly combat: MusicId };
 }
@@ -206,8 +242,16 @@ export const PLANETS = {
         ground: { layers: ['sand', 'cracked_earth'], tileMetres: [4, 5.5] },
         relief: { amplitude: 0.5, wavelength: 30, ridged: 0.6, bermHeight: 5 },
         scatter: { kind: 'bones', density: 2.5, second: 'pebbles' },
-        decals: ['crater', 'scorch'],
+        decals: ['crater', 'scorch', 'ripples', 'mudflat', 'gravel'],
         boundary: 'dunes',
+        // PLAN R28 / SPEC-067 (*initial tuning*): rust-red and bleached-grey
+        // sand, cracked-earth flats, a dead wurm's ribs and the scavs' leavings.
+        dressing: {
+          macro: { hues: ['#e07040', '#d8d4cc'], strength: 0.6, value: 0.38, patches: 0.6 },
+          rubble: ['#a88e6c', '#6a5442'],
+          kinds: ['wurm_ribs', 'scav_barrels', 'pipe_run'],
+          trail: '#7a5434',
+        },
         // SPEC-053 §4.5 (*initial tuning*): dry grass.
         cover: { kinds: [{ cell: 8, weight: 1, size: [0.4, 0.7] }], per1000m2: 20 },
       },
@@ -236,6 +280,11 @@ export const PLANETS = {
       ],
       population: 10,
       eliteChance: 0.05,
+      hazards: [
+        { id: 'scav_mine', groups: 6, per: [2, 4], arena: 0 },
+        { id: 'balanced_rock', groups: 9, per: [1, 1], arena: 2 },
+        { id: 'fuel_drum', groups: 8, per: [2, 3], arena: 2 },
+      ],
     },
     music: { calm: 'calm_desert', combat: 'combat_light' },
   },
@@ -264,8 +313,16 @@ export const PLANETS = {
         ground: { layers: ['snow', 'ice'], tileMetres: [4, 6] },
         relief: { amplitude: 0.4, wavelength: 26, ridged: 0.3, bermHeight: 8 },
         scatter: { kind: 'crystals', density: 2.0, second: 'pebbles' },
-        decals: ['frost', 'cracks'],
+        decals: ['frost', 'cracks', 'ice_sheet', 'snowdrift', 'gravel'],
         boundary: 'ice_wall',
+        // PLAN R28 / SPEC-067 (*initial tuning*): white snow against blue ice
+        // sheets, blue-grey scree, and what the last expedition left behind.
+        dressing: {
+          macro: { hues: ['#f4f2ee', '#78a2d6'], strength: 0.65, value: 0.22, patches: 0.65 },
+          rubble: ['#8e9cac', '#546272'],
+          kinds: ['ice_shards', 'buried_crate', 'frozen_pipe'],
+          trail: '#a9bccf',
+        },
         // SPEC-053 §4.5 (*initial tuning*): frost fern.
         cover: { kinds: [{ cell: 10, weight: 1, size: [0.4, 0.8] }], per1000m2: 12 },
       },
@@ -295,6 +352,11 @@ export const PLANETS = {
       // quietest field of the five, a trough right after the first boss.
       population: 13,
       eliteChance: 0.05,
+      hazards: [
+        { id: 'cryo_geyser', groups: 6, per: [2, 3], arena: 0 },
+        { id: 'ice_pillar', groups: 9, per: [1, 1], arena: 2 },
+        { id: 'coolant_tank', groups: 8, per: [1, 3], arena: 2 },
+      ],
     },
     music: { calm: 'calm_ice', combat: 'combat_light' },
   },
@@ -325,8 +387,16 @@ export const PLANETS = {
         ground: { layers: ['moss', 'jungle_floor'], tileMetres: [3.5, 5] },
         relief: { amplitude: 0.45, wavelength: 22, ridged: 0.4, bermHeight: 6 },
         scatter: { kind: 'tufts', density: 4.0, second: 'spores' },
-        decals: ['slick', 'cracks'],
+        decals: ['slick', 'cracks', 'leaf_litter', 'mudflat', 'gravel'],
         boundary: 'jungle_bank',
+        // PLAN R28 / SPEC-067 (*initial tuning*): sunlit and deep moss, mud
+        // and leaf-litter floors, and the ruins' fallen stone.
+        dressing: {
+          macro: { hues: ['#b8c860', '#4c8070'], strength: 0.5, value: 0.22, patches: 0.6 },
+          rubble: ['#8a8a74', '#5c6450'],
+          kinds: ['fallen_log', 'stone_drums', 'root_arch'],
+          trail: '#6a5434',
+        },
         // SPEC-053 §4.1, §4.4, §4.5 (*initial tuning*): a humid canopy in a
         // steady wind, ferns and broad leaves under it, moss and grass between.
         foliage: { tint: '#e2ebcc', wind: 1 },
@@ -367,6 +437,11 @@ export const PLANETS = {
       ],
       population: 12,
       eliteChance: 0.06,
+      hazards: [
+        { id: 'spore_pod', groups: 6, per: [2, 4], arena: 0 },
+        { id: 'ruin_column', groups: 9, per: [1, 2], arena: 2 },
+        { id: 'gas_bloom', groups: 8, per: [2, 3], arena: 2 },
+      ],
     },
     music: { calm: 'calm_jungle', combat: 'combat_heavy' },
   },
@@ -399,8 +474,16 @@ export const PLANETS = {
         ground: { layers: ['basalt', 'lava_rock'], tileMetres: [4.5, 6], cracks: { color: '#ff6a2a', intensity: 3 } },
         relief: { amplitude: 0.5, wavelength: 28, ridged: 0.8, bermHeight: 7 },
         scatter: { kind: 'slag', density: 2.5 },
-        decals: ['scorch', 'cracks'],
+        decals: ['scorch', 'cracks', 'ash', 'lava_pool', 'gravel'],
         boundary: 'lava_ridge',
+        // PLAN R28 / SPEC-067 (*initial tuning*): rust and ash-grey basalt,
+        // ash drifts and cooling pools, hex stumps and obsidian.
+        dressing: {
+          macro: { hues: ['#c0704a', '#8a8890'], strength: 0.55, value: 0.25, patches: 0.3 },
+          rubble: ['#7a6a5e', '#463c36'],
+          kinds: ['basalt_stumps', 'obsidian_shards', 'lava_blobs'],
+          trail: '#463c36',
+        },
         // SPEC-053 §4.5 (*initial tuning*): ash fronds.
         cover: { kinds: [{ cell: 11, weight: 1, size: [0.5, 0.9] }], per1000m2: 10 },
       },
@@ -427,6 +510,11 @@ export const PLANETS = {
       ],
       population: 13,
       eliteChance: 0.07,
+      hazards: [
+        { id: 'lava_vent', groups: 7, per: [2, 3], arena: 0 },
+        { id: 'basalt_column', groups: 9, per: [1, 1], arena: 2 },
+        { id: 'magma_blister', groups: 8, per: [2, 3], arena: 2 },
+      ],
     },
     music: { calm: 'calm_volcanic', combat: 'combat_heavy' },
   },
@@ -461,8 +549,16 @@ export const PLANETS = {
         ground: { layers: ['chitin', 'flesh'], tileMetres: [5, 6.5], cracks: { color: '#c04ad0', intensity: 2.5 } },
         relief: { amplitude: 0.45, wavelength: 20, ridged: 0.5, bermHeight: 8 },
         scatter: { kind: 'spores', density: 2.0, second: 'crystals' },
-        decals: ['slick'],
+        decals: ['slick', 'goo', 'cracks', 'gravel'],
         boundary: 'chitin_wall',
+        // PLAN R28 / SPEC-067 (*initial tuning*): violet and cold teal flesh,
+        // goo pools, and the hive's ribs, pods and resin.
+        dressing: {
+          macro: { hues: ['#b070c8', '#5a88a8'], strength: 0.5, value: 0.22, patches: 0.55 },
+          rubble: ['#5a4868', '#382c44'],
+          kinds: ['chitin_ribs', 'glow_pods', 'resin_mound'],
+          trail: '#3a2c48',
+        },
         // SPEC-053 §4.5 (*initial tuning*): hive tendrils.
         cover: { kinds: [{ cell: 12, weight: 1, size: [0.5, 1.0] }], per1000m2: 40 },
       },
@@ -485,6 +581,11 @@ export const PLANETS = {
       ],
       population: 15,
       eliteChance: 0.08,
+      hazards: [
+        { id: 'bile_geyser', groups: 6, per: [2, 3], arena: 0 },
+        { id: 'chitin_spire', groups: 8, per: [1, 1], arena: 2 },
+        { id: 'spore_sac', groups: 8, per: [2, 3], arena: 2 },
+      ],
     },
     music: { calm: 'calm_hive', combat: 'combat_swarm' },
   },
@@ -516,8 +617,17 @@ export const PLANETS = {
         ground: { layers: ['grass', 'soil'], tileMetres: [3.5, 5], seam: { poi: 'eden_ridge', axis: 'x', shift: 1.75 } },
         relief: { amplitude: 0.4, wavelength: 32, ridged: 0.2, bermHeight: 5 },
         scatter: { kind: 'tufts', density: 5.0, second: 'pebbles' },
-        decals: ['crater'],
+        decals: ['crater', 'gravel', 'mudflat'],
         boundary: 'hills',
+        // PLAN R28 / SPEC-067 (*initial tuning*): the paradise is tended —
+        // gentle patches, straight gravel paths, field walls, survey posts and
+        // perfectly round flower beds.
+        dressing: {
+          macro: { hues: ['#c0d870', '#6aa078'], strength: 0.35, value: 0.12, patches: 0.45 },
+          rubble: ['#b4ac9c', '#8a8c80'],
+          kinds: ['field_wall', 'marker_post', 'flower_bed'],
+          trail: '#b8a88a',
+        },
         // SPEC-053 §4.1, §4.4, §4.5 (*initial tuning*): leaves exactly as
         // authored in a light breeze, broad leaves and flowers under them, and
         // the densest, greenest lawn in the game.
@@ -554,6 +664,11 @@ export const PLANETS = {
       spawn: [],
       population: 0,
       eliteChance: 0.1,
+      hazards: [
+        { id: 'water_main', groups: 5, per: [1, 2], arena: 0 },
+        { id: 'dead_oak', groups: 7, per: [1, 1], arena: 2 },
+        { id: 'fertiliser_tank', groups: 7, per: [1, 2], arena: 2 },
+      ],
     },
     music: { calm: 'calm_temperate', combat: 'combat_swarm' },
   },

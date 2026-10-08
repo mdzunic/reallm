@@ -155,9 +155,16 @@ export class TelegraphView {
   /** V-02: this planet's override per preset, in working space, or null where the rim stands. */
   readonly #standard: THREE.Color | null;
   readonly #colourBlind: THREE.Color | null;
+  /** SPEC-068 §4.7: a fixed colour for every preset — the hazards' caution layer — or null. */
+  readonly #fixed: THREE.Color | null;
 
-  constructor(parent: THREE.Object3D, capacity: number = TELEGRAPH_CAPACITY, planet: PlanetId | null = null) {
+  /**
+   * SPEC-068 §4.7: `fixed` paints every decal (fill and outline) one colour on
+   * every preset — the hazards' own layer wears caution, never the hostile rim.
+   */
+  constructor(parent: THREE.Object3D, capacity: number = TELEGRAPH_CAPACITY, planet: PlanetId | null = null, fixed: string | null = null) {
     this.#parent = parent;
+    this.#fixed = fixed === null ? null : new THREE.Color(fixed);
     this.#capacity = capacity;
     const override = planet === null ? undefined : TELEGRAPH_OVERRIDES[planet];
     this.#standard = override?.standard === undefined ? null : new THREE.Color(override.standard);
@@ -287,6 +294,7 @@ export class TelegraphView {
 
   /** The decals' colour this frame: the rim of the moment, or V-02's override for this planet and preset. */
   #colour(): THREE.Color {
+    if (this.#fixed !== null) return this.#fixed;
     const override = hostileRimPreset() === 'colour-blind' ? this.#colourBlind : this.#standard;
     return override ?? HOSTILE_RIM_UNIFORM.value;
   }

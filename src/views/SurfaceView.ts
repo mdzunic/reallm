@@ -14,6 +14,10 @@
 // canopies that thin over enemies and pickups), undergrowth, streamed ground
 // cover, contact shadows, landmark models, and a ground with detail, shade
 // under the canopies and Eden's seam.
+//
+// PLAN R28 / SPEC-067 dresses it: the ground's macro patch field, ground
+// patches and worn trails, rubble, three biome dressing kinds and the landing
+// site — five more culled or merged layers, all view-only.
 import * as THREE from 'three';
 import { disposeObject3D } from '@/core/Disposer';
 import type { Assets } from '@/core/Assets';
@@ -25,6 +29,7 @@ import type { Look, QualityPreset, QualitySettings } from '@/core/Quality';
 import type { Pool } from '@/core/Pool';
 import type { ModelId } from '@/data/assets';
 import type { DarkLook, PlanetDef, ResourceId, ShotLook, ShotShape } from '@/data/index';
+import type { DressingKind } from '@/data/ids';
 import { isBuried, type EnemyEntity } from '@/entities/Enemy';
 import type { FollowerEntity } from '@/entities/Follower';
 import type { PlayerEntity } from '@/entities/Player';
@@ -42,6 +47,14 @@ import { ScavBody } from '@/views/ScavBody';
 import { RAIDER_TRACER, ScavRaiderViews } from '@/views/ScavRaiders';
 import { groundLayer, type GroundLayer } from '@/views/ProceduralTextures';
 import { buildScatter, buildDecals } from '@/views/Scatter';
+import {
+  buildLandingSite,
+  createDressingMaterial,
+  dressingGeometry,
+  placeDressing,
+  placeRubble,
+  rubbleGeometry,
+} from '@/views/Dressing';
 import { buildArenaWall } from '@/views/ArenaWall';
 import {
   CANOPY_FADE,
@@ -1181,6 +1194,14 @@ export class SurfaceView {
   #groundDetail: THREE.Texture | null = null;
   readonly #seamAt: number | null;
 
+  // PLAN R28 / SPEC-067 — the dressing: the decals, the rubble, the biome
+  // kinds and the landing site, all on one material but the decals'.
+  readonly #dressingMaterial = createDressingMaterial();
+  #decals: THREE.Mesh | null = null;
+  #rubble: CulledInstances | null = null;
+  readonly #dressing: CulledInstances[] = [];
+  #landingSite: THREE.Mesh | null = null;
+
   /**
    * The ground sampler handed to enemies and the storm — bound once (§4.3).
    * SPEC-054 §4.4: below, the cave is flat, so every sample reads 0.
@@ -1274,7 +1295,9 @@ export class SurfaceView {
     this.#groundMaterial = createTerrainMaterial(a, b, look, palette, this.#terrainOptions());
     const canopies: { x: number; z: number; r: number }[] = [];
     for (const o of layout.obstacles) if (o.kind === 'tree') canopies.push({ x: o.x, z: o.z, r: o.radius / TRUNK_UNIT_RADIUS });
-    for (const tile of buildTerrainTiles(this.field, this.#groundMaterial, { canopies })) {
+    // PLAN R28 / SPEC-067: and the macro patch field, from `hash32(layout.hash, 'macro')`.
+    const macro = { seed: hash32(layout.hash, 'macro'), ...look.dressing.macro };
+    for (const tile of buildTerrainTiles(this.field, this.#groundMaterial, { canopies }, macro)) {
       this.#envRoot.add(tile);
       this.#tiles.push(tile);
     }
@@ -1379,7 +1402,8 @@ export class SurfaceView {
       const colors = mesh.instanceColor === null ? null : (mesh.instanceColor.array as Float32Array).slice(0, total * 3);
       this.#addCulled(mesh, colors === null ? { matrices } : { matrices, colors }, sphereOf(mesh.geometry));
     }
-    this.#envRoot.add(buildDecals(layout, this.field, look));
+    // PLAN R28 / SPEC-067: the decals and the dressing, at the preset in force.
+    this.#buildDressing();
     // SPEC-053 §4.4, §4.5: undergrowth and ground cover, on the atlas.
     this.#buildGroundClumps();
 
@@ -1813,6 +1837,9 @@ export class SurfaceView {
     for (const mesh of this.#wallChunks) mesh.castShadow = size > 0;
     for (const mesh of this.#shelterMeshes) mesh.castShadow = size > 0;
     for (const mesh of this.#tugMeshes) mesh.castShadow = size > 0;
+    // SPEC-067: the dressing pieces and the landing site cast on `high` too; rubble never.
+    for (const layer of this.#dressing) layer.mesh.castShadow = size > 0;
+    if (this.#landingSite !== null) this.#landingSite.castShadow = size > 0;
     // SPEC-046 §4.6 (46-h): with a shadow map, a caster off screen can throw
     // its shadow on screen, so every layer's pad grows by its shadow's reach.
     const reach = size > 0 ? this.#sunSlope : 0;
@@ -1871,6 +1898,78 @@ export class SurfaceView {
         this.#cover = null;
       }
       this.#buildGroundClumps();
+      // SPEC-067: `low` lays half the rubble and dressing and SPEC-018's decals only.
+      if (lowChanged) {
+        this.#dropDressing();
+        this.#buildDressing();
+      }
+    }
+  }
+
+  /**
+   * PLAN R28 / SPEC-067: the decals, the rubble, the biome dressing and the
+   * landing site, at the preset in force — rubble and each kind one culled
+   * layer, the site one merged mesh, everything deterministic from the
+   * layout hash.
+   */
+  #buildDressing(): void {
+    const layout = this.#layout;
+    const look = this.#look;
+    const preset = this.#preset;
+    this.#decals = buildDecals(layout, this.field, look, preset, this.#palette);
+    this.#envRoot.add(this.#decals);
+
+    const rubble = placeRubble(layout, this.field, look.dressing, this.#biome, preset);
+    if (rubble.count > 0) {
+      const geometry = rubbleGeometry();
+      const mesh = new THREE.InstancedMesh(geometry, this.#dressingMaterial, rubble.count);
+      mesh.name = 'rubble';
+      mesh.castShadow = false;
+      mesh.receiveShadow = true;
+      this.#rubble = this.#addCulled(mesh, { matrices: rubble.matrices, colors: rubble.colors }, sphereOf(geometry));
+    }
+
+    const kinds = look.dressing.kinds;
+    placeDressing(layout, this.field, kinds, preset).forEach((placed, k) => {
+      if (placed.count === 0) return;
+      const kind = kinds[k] as DressingKind;
+      const geometry = dressingGeometry(kind, hash32(layout.hash, 'dressing', kind));
+      const mesh = new THREE.InstancedMesh(geometry, this.#dressingMaterial, placed.count);
+      mesh.name = `dressing:${kind}`;
+      mesh.castShadow = this.#shadowsOn;
+      mesh.receiveShadow = true;
+      this.#dressing.push(this.#addCulled(mesh, { matrices: placed.matrices, colors: placed.colors }, sphereOf(geometry)));
+    });
+
+    const site = buildLandingSite(layout, this.field);
+    if (site !== null) {
+      const mesh = new THREE.Mesh(site, this.#dressingMaterial);
+      mesh.name = 'landing-site';
+      mesh.castShadow = this.#shadowsOn;
+      mesh.receiveShadow = true;
+      mesh.matrixAutoUpdate = false;
+      this.#envRoot.add(mesh);
+      this.#landingSite = mesh;
+    }
+  }
+
+  /** SPEC-067: takes every dressing layer out, freeing its geometry (and the decals' own material). */
+  #dropDressing(): void {
+    if (this.#decals !== null) {
+      this.#envRoot.remove(this.#decals);
+      this.#decals.geometry.dispose();
+      (this.#decals.material as THREE.Material).dispose();
+      this.#decals = null;
+    }
+    if (this.#rubble !== null) {
+      this.#dropLayer(this.#rubble, false);
+      this.#rubble = null;
+    }
+    for (const layer of this.#dressing.splice(0)) this.#dropLayer(layer, false);
+    if (this.#landingSite !== null) {
+      this.#envRoot.remove(this.#landingSite);
+      this.#landingSite.geometry.dispose();
+      this.#landingSite = null;
     }
   }
 
@@ -3517,6 +3616,8 @@ export class SurfaceView {
     this.#foliageMaterial?.dispose();
     this.#coverMaterial?.dispose();
     this.#landmarkMaterial.dispose();
+    // SPEC-067: shared by every dressing layer, so freed once here.
+    this.#dressingMaterial.dispose();
     this.#telegraphs.dispose();
     this.#character?.dispose();
     this.#character = null;

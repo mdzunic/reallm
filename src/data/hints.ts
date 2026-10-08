@@ -62,6 +62,9 @@ export const TIP_IDS = [
   'puzzle_beam',
   // SPEC-057 §4.7: the first death that leaves remains.
   'remains',
+  // SPEC-068 §4.9: the first trap warning near the player, and the first helper.
+  'traps',
+  'helpers',
 ] as const;
 
 export type TipId = (typeof TIP_IDS)[number];
@@ -223,6 +226,15 @@ export const TIPS: Readonly<Record<TipId, TipText>> = {
     keyboard: 'What you carried stays where you fell. Walk back to it. Fall again first and it is gone.',
     touch: 'What you carried stays where you fell. Walk back to it. Fall again first and it is gone.',
   },
+  // SPEC-068 §4.9: one wording for both schemes — stepping out is the same on each.
+  traps: {
+    keyboard: 'A circle filling on the ground is a trap about to go off. Step out, or dash through. Enemies are not so careful.',
+    touch: 'A circle filling on the ground is a trap about to go off. Step out, or dash through. Enemies are not so careful.',
+  },
+  helpers: {
+    keyboard: 'Shoot pillars and drums near enemies. A pillar falls the way your shot flies; a drum blows up what stands near it.',
+    touch: 'Shoot pillars and drums near enemies. A pillar falls the way your shot flies; a drum blows up what stands near it.',
+  },
 };
 
 /** Review 2026-10 P-08: the tip each puzzle kind shows the first time the player meets it. */
@@ -239,7 +251,7 @@ export const PUZZLE_TIPS: Readonly<Record<PuzzleKind, TipId>> = {
  * (systems/UiHelpers.ts) picks the first row that applies to the cause; the
  * wording pairs like the tips above, ≤ 160 characters (content test).
  */
-export type DeathTipId = 'shelter' | 'autofire' | 'heal' | 'craft';
+export type DeathTipId = 'shelter' | 'autofire' | 'heal' | 'craft' | 'hazard';
 
 export const DEATH_TIPS: Readonly<Record<DeathTipId, TipText>> = {
   shelter: {
@@ -257,6 +269,11 @@ export const DEATH_TIPS: Readonly<Record<DeathTipId, TipText>> = {
   craft: {
     keyboard: 'Craft medkits at the station: wheat and water.',
     touch: 'Craft medkits at the station: wheat and water.',
+  },
+  // SPEC-068 §4.9: a trap or a helper killed the player.
+  hazard: {
+    keyboard: 'Traps warn before they go off: step out of the circle, or dash through it with V or a right-click.',
+    touch: 'Traps warn before they go off: step out of the circle, or dash through it.',
   },
 };
 

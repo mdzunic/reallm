@@ -570,6 +570,8 @@ const NAMES: Record<keyof GameEvents, true> = {
   'quick:used': true,
   // SPEC-029 §3: blasts, heat locks and armed mines.
   'combat:blast': true,
+  'hazard:warn': true,
+  'hazard:burst': true,
   // SPEC-035 §4.11: one event per shot and per landed hit.
   'weapon:fired': true,
   'enemy:hit': true,
@@ -649,8 +651,9 @@ describe('GameEvents (§3.2)', () => {
     // `cache:opened`; SPEC-055 §4.9 `puzzle:moved` and `puzzle:solved`;
     // SPEC-057 §4.8 `remains:created`, `remains:recovered` and `remains:lost`;
     // SPEC-059 §4.4.3 `commendation:earned`; SPEC-063 §4.5 `flight:groupSpawned`;
-    // review 2026-10 (G-17) `player:sprinted`.
-    expect(Object.keys(NAMES)).toHaveLength(84);
+    // review 2026-10 (G-17) `player:sprinted`; SPEC-068 §4.4 `hazard:warn` and
+    // `hazard:burst`.
+    expect(Object.keys(NAMES)).toHaveLength(86);
   });
 
   it('still carries the nine names SPEC-002 and SPEC-003 already emit', () => {

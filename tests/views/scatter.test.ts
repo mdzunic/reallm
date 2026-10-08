@@ -6,8 +6,20 @@ import * as THREE from 'three';
 import { buildHeightField } from '@/core/HeightField';
 import { RngRoot } from '@/core/Rng';
 import { PLANETS, type PlanetId } from '@/data/index';
-import { generateLayout } from '@/systems/Layout';
-import { SCATTER_CAP, TUFT_TINT, TUFT_TINT_AMOUNT, buildDecals, buildScatter, tuftTexture } from '@/views/Scatter';
+import { CORRIDOR, generateLayout } from '@/systems/Layout';
+import { patchAtlas } from '@/views/ProceduralTextures';
+import {
+  DECAL_DENSITY,
+  SCATTER_CAP,
+  SCUFFS,
+  TUFT_TINT,
+  TUFT_TINT_AMOUNT,
+  buildDecals,
+  buildScatter,
+  decalTarget,
+  tuftTexture,
+  TRAIL_SWAY,
+} from '@/views/Scatter';
 import type { ViewLayout } from '@/views/SurfaceView';
 
 const LAYOUT: ViewLayout = {
@@ -235,40 +247,86 @@ describe('the scatter fixes (SPEC-046 §4.4)', () => {
   });
 });
 
-describe('buildDecals (SPEC-018 §4.6)', () => {
-  it('is one merged geometry conformed to heightAt + 0.03, off POIs and the pad', () => {
-    const mesh = buildDecals(LAYOUT, field, LOOK);
+describe('buildDecals (SPEC-018 §4.6, SPEC-067)', () => {
+  /** x, z of every patch, in laying order: field patches, then trails, then the landing scuffs. */
+  const centres = (layout: ViewLayout, preset: 'low' | 'medium' = 'medium'): { x: number; z: number }[] => {
+    const flat = buildDecals(layout, field, LOOK, preset, PALETTE).userData['centres'] as Float32Array;
+    const out: { x: number; z: number }[] = [];
+    for (let i = 0; i < flat.length; i += 2) out.push({ x: flat[i] as number, z: flat[i + 1] as number });
+    return out;
+  };
+
+  it('is one merged geometry conformed to heightAt + 0.03 on the patch atlas, tinted and glowing per vertex', () => {
+    const mesh = buildDecals(LAYOUT, field, LOOK, 'medium', PALETTE);
     const position = mesh.geometry.getAttribute('position') as THREE.BufferAttribute;
     expect(position.count).toBeGreaterThan(0);
-    // cinder4 has two decal kinds → ≤ 40 patches of 25 vertices.
-    expect(position.count).toBeLessThanOrEqual(Math.min(80, 20 * LOOK.decals.length) * 25);
     for (let i = 0; i < position.count; i++) {
       const x = position.getX(i);
       const z = position.getZ(i);
       expect(position.getY(i)).toBeCloseTo(field.heightAt(x, z) + 0.03, 5);
     }
+    expect((mesh.geometry.getAttribute('color') as THREE.BufferAttribute).count).toBe(position.count);
+    expect((mesh.geometry.getAttribute('glow') as THREE.BufferAttribute).count).toBe(position.count);
     const material = mesh.material as THREE.MeshStandardMaterial;
     expect(material.transparent).toBe(true);
     expect(material.depthWrite).toBe(false);
     expect(material.polygonOffset).toBe(true);
-    expect(material.map).not.toBeNull();
+    expect(material.vertexColors).toBe(true);
+    expect(material.map).toBe(patchAtlas([]));
+    expect(material.customProgramCacheKey()).toBe('decals/2');
     expect(mesh.castShadow).toBe(false);
   });
 
+  it('lays DECAL_DENSITY patches per 1,000 m² on medium and SPEC-018’s min(80, 20 × kinds) on low (SPEC-067)', () => {
+    // cinder4 has five kinds: low keeps 80; medium 3.4 × (2 · 200)² / 1000 = 544.
+    expect(DECAL_DENSITY).toBe(3.4);
+    expect(decalTarget(LOOK, 200, 'low')).toBe(80);
+    expect(decalTarget(LOOK, 200, 'medium')).toBe(544);
+    expect(decalTarget(LOOK, 200, 'high')).toBe(544);
+    // Trails and scuffs do not depend on the preset, so the totals differ by the field patches alone.
+    expect(centres(LAYOUT).length - centres(LAYOUT, 'low').length).toBe(544 - 80);
+    // The field patches come first, off the pad and outside every POI ring.
+    for (const at of centres(LAYOUT).slice(0, 544)) {
+      expect(Math.hypot(at.x, at.z)).toBeGreaterThanOrEqual(7);
+      for (const poi of LAYOUT.pois) {
+        if (poi.kind === 'landing_pad') continue;
+        expect(Math.hypot(at.x - poi.x, at.z - poi.z)).toBeGreaterThanOrEqual(poi.radius);
+      }
+    }
+  });
+
+  it('wears a trail from the pad toward every objective and scuffs the landing ring (SPEC-067)', () => {
+    const all = centres(LAYOUT);
+    const tail = all.slice(544);
+    const scuffs = tail.slice(-SCUFFS);
+    expect(scuffs).toHaveLength(SCUFFS);
+    for (const at of scuffs) {
+      expect(Math.hypot(at.x, at.z)).toBeGreaterThanOrEqual(7 - 1e-6);
+      expect(Math.hypot(at.x, at.z)).toBeLessThanOrEqual(14 + 1e-6);
+    }
+    // Every trail strip meanders within its sway (plus 0.35 m of jitter) of a
+    // pad → objective line — well inside the 8 m corridor — short of the POI's ring.
+    const trails = tail.slice(0, -SCUFFS);
+    expect(trails.length).toBeGreaterThan(10);
+    const objectives = LAYOUT.pois.filter((poi) => poi.kind !== 'landing_pad' && poi.kind !== 'landmark');
+    for (const at of trails) {
+      const near = objectives.some((poi) => {
+        const length = Math.hypot(poi.x, poi.z);
+        const t = (at.x * poi.x + at.z * poi.z) / length;
+        const off = Math.abs(at.x * poi.z - at.z * poi.x) / length;
+        return off <= TRAIL_SWAY + 0.35 + 1e-6 && off < CORRIDOR && t >= 6 && t <= length - poi.radius;
+      });
+      expect(near, `${at.x}, ${at.z}`).toBe(true);
+    }
+  });
+
   it('is deterministic', () => {
-    const a = buildDecals(LAYOUT, field, LOOK).geometry.getAttribute('position') as THREE.BufferAttribute;
-    const b = buildDecals(LAYOUT, field, LOOK).geometry.getAttribute('position') as THREE.BufferAttribute;
+    const a = buildDecals(LAYOUT, field, LOOK, 'medium', PALETTE).geometry.getAttribute('position') as THREE.BufferAttribute;
+    const b = buildDecals(LAYOUT, field, LOOK, 'medium', PALETTE).geometry.getAttribute('position') as THREE.BufferAttribute;
     expect(a.array).toEqual(b.array);
   });
 
-  it('leaves an orchard’s rectangle, plus 2 m, without a decal (SPEC-053 §4.9)', () => {
-    /** Each 5 × 5 patch's middle vertex is its centre. */
-    const centres = (layout: ViewLayout): { x: number; z: number }[] => {
-      const position = buildDecals(layout, field, LOOK).geometry.getAttribute('position') as THREE.BufferAttribute;
-      const out: { x: number; z: number }[] = [];
-      for (let i = 12; i < position.count; i += 25) out.push({ x: position.getX(i), z: position.getZ(i) });
-      return out;
-    };
+  it('leaves an orchard’s rectangle, plus 2 m, without a decal — trails included (SPEC-053 §4.9)', () => {
     // A big orchard over the east half, so its rectangle would catch decals.
     const orchard = { kind: 'orchard' as const, x: 100, z: 0, radius: 120, halfW: 80, halfD: 150, pieces: 35 };
     const inside = (c: { x: number; z: number }): boolean =>

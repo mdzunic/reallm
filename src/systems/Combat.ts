@@ -58,6 +58,8 @@ import {
   type ExplosiveEffect,
   type GearLine,
   type GearTier,
+  type HazardDef,
+  type HazardId,
   type Item,
   type ItemId,
   type LightEffect,
@@ -95,6 +97,13 @@ import { clampToSeal, type ArenaState, type ObstacleGrid } from '@/entities/Worl
 import { containment, type Containment } from '@/systems/Containment';
 import { isDashing } from '@/systems/Dash';
 import { BOSS_FIRST_MOVE_SECONDS, updateEnemy, type AiHooks, type WindupKind } from '@/systems/EnemyAi';
+import {
+  HAZARD_ELITE_SHARE,
+  HAZARD_KNOCKBACK,
+  HAZARD_PLAYER_GRACE,
+  type HazardHost,
+  type Hazards,
+} from '@/systems/Hazards';
 import { inFlare, lit, type FlareState } from '@/systems/Light';
 import { FIRE_CARRY, Loadout, SWITCH_SECONDS, weaponDps } from '@/systems/Loadout';
 import { updateProjectiles, type ProjectileHooks } from '@/systems/Projectiles';
@@ -661,6 +670,16 @@ export class Combat {
 
   readonly #aiHooks: AiHooks;
   readonly #projectileHooks: ProjectileHooks;
+  readonly #hazardHost: HazardHost;
+
+  /**
+   * SPEC-068 §4.4: the surface's traps and helpers, stepped after the spore
+   * clouds. The scene sets it on the surface level and clears it below
+   * (E130); a harness without hazards leaves it `null`.
+   */
+  hazards: Hazards | null = null;
+  /** SPEC-068 §4.5: world time of the player's last hazard hit. */
+  #hazardHitAt = -Infinity;
 
   constructor(
     world: CombatWorld,
@@ -754,6 +773,14 @@ export class Combat {
         if (p.twist?.kind === 'linger') this.#spawnCloud(x, z, p.twist);
       },
       landFlare: (p, x, z) => this.#landFlare(x, z, p.flareSeconds),
+      // SPEC-068 §4.3: a player or drone shot that stopped on a helper sets it off.
+      shotStopped: (p, x, z) => {
+        if (p.owner !== 'enemy') this.hazards?.shotAt(x, z, p.vx, p.vz);
+      },
+    };
+    this.#hazardHost = {
+      hitEnemies: (def, zone) => this.#hazardHitEnemies(def, zone),
+      hitPlayer: (id, def, fromX, fromZ) => this.#hazardHitPlayer(id, def, fromX, fromZ),
     };
   }
 
@@ -777,6 +804,8 @@ export class Combat {
     for (const f of this.#flares) f.until = -Infinity;
     for (const c of this.#clouds) c.until = -Infinity;
     this.#ventPending = false;
+    // SPEC-068 E130: a fuse, a warning or a fall in progress goes without effect.
+    this.hazards?.suspend();
   }
 
   // ------------------------------------------------------------------ stats
@@ -874,7 +903,8 @@ export class Combat {
     const time = this.#world.time;
     if (!p.alive) return;
     const rules = DIFFICULTY_RULES[this.#save.meta.difficulty];
-    if ((source.kind === 'enemy' || source.kind === 'projectile') && rules.enemyDamageMult === 0) return;
+    // SPEC-068 E127: a hazard is hostile ground, and story spares the player it too.
+    if ((source.kind === 'enemy' || source.kind === 'projectile' || source.kind === 'hazard') && rules.enemyDamageMult === 0) return;
     if (source.kind === 'weather' && rules.weatherMult === 0) return;
     if (source.kind === 'weather' && time < p.hazardImmuneUntil) return;
     // SPEC-012 §4.6: weather damage is reduced by hazardResist before the
@@ -1550,8 +1580,82 @@ export class Combat {
       this.#damageEnemy(e, amount, 'player');
       count++;
     }
+    // SPEC-068 §4.3, E129: the blast sets off the helpers and mines it reaches.
+    this.hazards?.blastAt(x, z, radius);
     this.#events.emit('combat:blast', { x, z, radius });
     return count;
+  }
+
+  /**
+   * SPEC-068 §4.4, E128: a hazard lands on the enemies its zone covers. Each
+   * takes its share of max HP (an elite half, a boss the boss share), with no
+   * crit and no damage multiplier, and dies as the player's kill. Bosses and
+   * statics are not pushed; the rest go 1 m out of a circle or across a lane.
+   * A chill slows a boss at half the effect. Burrowed and invulnerable
+   * enemies are untouched, and the follower is never tested.
+   */
+  #hazardHitEnemies(def: HazardDef, zone: TelegraphEntity): number {
+    const w = this.#world;
+    let cx = zone.x;
+    let cz = zone.z;
+    let reach = zone.radius;
+    if (zone.kind === 'line') {
+      cx += zone.dirX * zone.length * 0.5;
+      cz += zone.dirZ * zone.length * 0.5;
+      reach = zone.length * 0.5 + zone.width * 0.5;
+    }
+    this.#hash.query(cx, cz, reach + 3, blastCandidates);
+    let count = 0;
+    for (let c = 0; c < blastCandidates.length; c++) {
+      const e = w.enemies.at(blastCandidates[c] as number);
+      if (e.state === 'dead' || e.invulnerable || isBuried(e)) continue;
+      if (!telegraphCovers(zone, e.x, e.z, e.radius, w.time)) continue;
+      const boss = e.def.archetype === 'boss';
+      const share = boss ? def.boss : def.enemy * (e.elite ? HAZARD_ELITE_SHARE : 1);
+      const amount = Math.max(1, Math.round(share * e.maxHp));
+      if (!boss && e.def.archetype !== 'static') {
+        let pushX: number;
+        let pushZ: number;
+        if (zone.kind === 'line') {
+          const across = (e.z - zone.z) * zone.dirX - (e.x - zone.x) * zone.dirZ;
+          const side = across >= 0 ? 1 : -1;
+          pushX = -zone.dirZ * side * HAZARD_KNOCKBACK;
+          pushZ = zone.dirX * side * HAZARD_KNOCKBACK;
+        } else {
+          const d = Math.hypot(e.x - zone.x, e.z - zone.z);
+          pushX = d > 1e-6 ? ((e.x - zone.x) / d) * HAZARD_KNOCKBACK : 0;
+          pushZ = d > 1e-6 ? ((e.z - zone.z) / d) * HAZARD_KNOCKBACK : 0;
+        }
+        if (!w.obstacles.hitsCircle(e.x + pushX, e.z, e.radius)) e.x += pushX;
+        if (!w.obstacles.hitsCircle(e.x, e.z + pushZ, e.radius)) e.z += pushZ;
+      }
+      if (def.chill !== undefined) {
+        e.slowUntil = w.time + def.chill.seconds;
+        e.slowMult = boss ? 1 - (1 - def.chill.mult) / 2 : def.chill.mult;
+      }
+      this.#damageEnemy(e, amount, 'player');
+      count++;
+    }
+    return count;
+  }
+
+  /**
+   * SPEC-068 §4.5, E127: the player in a hazard's zone takes its share of
+   * max HP × the difficulty's `enemyDamageMult` — no armour, no containment —
+   * and 1 m of knockback from `(fromX, fromZ)`, through the i-frames (so a
+   * dash passes through), with the hazard named as the source. At most one
+   * hazard hit lands per `HAZARD_PLAYER_GRACE`, so a chain hurts once (68-b).
+   */
+  #hazardHitPlayer(id: HazardId, def: HazardDef, fromX: number, fromZ: number): void {
+    const w = this.#world;
+    const p = w.player;
+    if (w.time < p.invulnUntil || w.time < this.#hazardHitAt + HAZARD_PLAYER_GRACE) return;
+    const mult = DIFFICULTY_RULES[this.#save.meta.difficulty].enemyDamageMult;
+    if (mult === 0) return;
+    this.#hazardHitAt = w.time;
+    this.#knockbackPlayer(p.x - fromX, p.z - fromZ, HAZARD_KNOCKBACK);
+    const amount = Math.max(1, Math.round(def.player * w.stats.maxHp * mult));
+    this.damagePlayer(amount, { kind: 'hazard', hazard: id }, false, { x: fromX, z: fromZ });
   }
 
   /** §4.8: a thrown explosive — a 14 m/s lob that detonates at its target. */
@@ -2246,6 +2350,8 @@ export class Combat {
     this.#updateDeployables();
     // SPEC-056 §4.4: the spore clouds, on the same hash.
     this.#updateClouds(dt);
+    // SPEC-068 §4.4: the traps and helpers, on the same hash.
+    this.hazards?.step(this.#hazardHost);
 
     if (p.alive && !dashing) this.#pushPlayerOut();
     if (dashing) {
