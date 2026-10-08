@@ -6,7 +6,7 @@
 // boots to its main screen, and the primary flow — new game through character
 // creation, the station, the star map, a flight and landing on a planet's
 // surface — still runs end to end with live, responsive gameplay.
-import { expect, test } from '@playwright/test';
+import { expect, test, type Page } from '@playwright/test';
 import { COLD_START, gameUrl, passGate, start } from './start';
 
 const CREATION = {
@@ -16,6 +16,17 @@ const CREATION = {
   attributes: { might: 6, vigor: 5, agility: 1, tech: 1 },
   difficulty: 'normal',
 } as const;
+
+/**
+ * Waits until `scene` is on screen *and* its transition has settled — the
+ * fade still runs after the label flips (SPEC-003 AC-14) and a `go()` issued
+ * during it is refused (D-2), so every click that leaves a scene waits here
+ * first. The same pair of assertions `start()` makes.
+ */
+async function settled(page: Page, scene: string): Promise<void> {
+  await expect(page.locator('[data-testid="scene-label"]')).toHaveText(scene, COLD_START);
+  await expect(page.locator('[data-testid="transition-fade"]')).toHaveCSS('pointer-events', 'none', COLD_START);
+}
 
 test('the shell boots to the main menu with no console errors (AC-1)', async ({ page }) => {
   const errors: string[] = [];
@@ -41,14 +52,14 @@ test('new game through creation, the station, a flight and landing on the surfac
   // Menu → New Game → slot 1 (no prologue film in the suite's URL).
   await page.locator('[data-testid="menu-new"]').click();
   await page.locator('[data-testid="new-slot-0"]').click();
-  await expect(page.locator('[data-testid="scene-label"]')).toHaveText('creation');
+  await settled(page, 'creation');
 
   // Character creation: pick a class and confirm.
   await page.getByTestId('class-marine').click();
   const confirm = page.getByTestId('creation-confirm');
   await expect(confirm).toBeEnabled();
   await confirm.click();
-  await expect(page.locator('[data-testid="scene-label"]')).toHaveText('station', COLD_START);
+  await settled(page, 'station');
 
   // The station opens with an ARIA transmission; clear it the way a player
   // taps through dialogue, then head to the star map. The line is modal and
@@ -64,16 +75,16 @@ test('new game through creation, the station, a flight and landing on the surfac
   }
   await expect(dim).toHaveCount(0);
   await page.getByTestId('station-tab-starmap').click();
-  await expect(page.locator('[data-testid="scene-label"]')).toHaveText('starmap', COLD_START);
+  await settled(page, 'starmap');
 
   // Cinder-4 is pre-selected with enough fuel for a new save; depart.
   await page.getByTestId('starmap-depart').click();
   await page.getByTestId('confirm-yes').click();
-  await expect(page.locator('[data-testid="scene-label"]')).toHaveText('flight', COLD_START);
+  await settled(page, 'flight');
 
   // Fly the trip out via the dev skip (SPEC-001 §9) and land.
   await page.getByTestId('dev-skip-flight').click();
-  await expect(page.locator('[data-testid="scene-label"]')).toHaveText('surface', { timeout: 20_000 });
+  await settled(page, 'surface');
 
   // The surface simulation is live: holding a movement key actually moves
   // the player, not just a scene swap with a frozen world.
