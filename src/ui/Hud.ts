@@ -67,6 +67,12 @@ export const HIT_DIR_MAX = 3;
 /** SPEC-013 §4.1: the two things a holding pattern can be waiting on. */
 const HOLD_HOSTILES = 'Holding pattern — clear the hostiles';
 const HOLD_OBJECTIVE = 'Holding pattern — the objective is not done';
+/** SPEC-069 §4.3, E134: the landing wants the ship back within 30 m of the line. */
+export const HOLD_APPROACH = 'Off approach — return to the course';
+/** SPEC-069 §4.5: the tank's bar reads low under this share. */
+const FUEL_LOW_FRACTION = 0.25;
+/** SPEC-070 §4.6: how long a refused missile's line stays under the reticle. */
+const REFUSAL_MS = 600;
 
 /** SPEC-037 §4.1: the thumb arc's three cells, as `hud.arc` exposes them. */
 export interface ThumbArc {
@@ -121,6 +127,8 @@ export class Hud {
   readonly #shield = bar('shield', GLYPHS.shield, 'Shield');
   /** SPEC-035 §4.9: the ship's hull has its own glyph — two hearts read as one bar. */
   readonly #hull = bar('hull', GLYPHS.hull, 'Hull');
+  /** SPEC-069 §4.5: the tank — the jump's oil, so oil's glyph. */
+  readonly #fuel = bar('fuel', RESOURCE_GLYPHS.oil, 'Fuel');
   readonly #level = el('span', 'hud-level');
   readonly #tokens = el('span', 'hud-tokens');
   readonly #resources = {} as Record<ResourceId, HTMLSpanElement>;
@@ -215,6 +223,15 @@ export class Hud {
   /** SPEC-034 §4.11: the warning *pill*, not the surface's storm vignette. */
   readonly #storm = testId(el('div', 'hud-storm-warn'), 'storm-warning');
   readonly #holding = testId(el('div', 'hud-holding'), 'holding-banner');
+  /** SPEC-070 §4.6: the rack — two pips, filled for loaded. */
+  readonly #missiles = testId(el('span', 'hud-missiles'), 'hud-missiles');
+  readonly #missilePips = [el('span', 'hud-missile-pip'), el('span', 'hud-missile-pip')];
+  /** SPEC-070 §4.6: the lock bracket on the locked ship — hidden until shown. */
+  readonly #lock = testId(el('div', 'hud-lock is-hidden'), 'hud-lock');
+  #lockShown = false;
+  /** SPEC-070 §4.6: a refused missile's line, under the reticle. */
+  readonly #refusal = testId(el('div', 'hud-refusal is-hidden'), 'hud-refusal');
+  #refusalTimer: ReturnType<typeof setTimeout> | null = null;
 
   /**
    * `onCycleMission` is SPEC-027 AC-22: a tap on the tracker cycles the tracked
@@ -234,6 +251,10 @@ export class Hud {
         hostiles: 0,
         storm: false,
         holding: false,
+        fuel: [1, 1],
+        burning: false,
+        offApproach: false,
+        missiles: 0,
       };
     }
     this.#last = copyHudInto(createHudModel(), this.model);
@@ -260,7 +281,12 @@ export class Hud {
       // the hull is. The bar stays in the DOM (the SPEC-011 selector resolves)
       // and is hidden, so the two identical hearts are gone.
       this.#hp.root.classList.add('is-hidden');
-      tl.append(this.#shield.root, testId(this.#hull.root, 'hud-hull'), this.#throttle);
+      // SPEC-069 §4.5: the tank under the hull; SPEC-070 §4.6: the rack beside the throttle.
+      this.#missiles.setAttribute('aria-label', 'Missiles');
+      this.#missiles.append(el('span', 'hud-missile-label', 'MSL'), ...this.#missilePips);
+      const drive = el('div', 'hud-drive');
+      drive.append(this.#throttle, this.#missiles);
+      tl.append(this.#shield.root, testId(this.#hull.root, 'hud-hull'), testId(this.#fuel.root, 'hud-fuel'), drive);
     }
     // SPEC-027 §4.2: the tracker sits under the level/XP row, in the same corner.
     if (mode === 'surface') this.#tracker = new Tracker(tl, onCycleMission ?? ((): void => undefined));
@@ -364,7 +390,7 @@ export class Hud {
       this.#root.append(thumbArc);
       this.arc = { primary, action, slots };
     }
-    if (mode === 'flight') this.#root.append(this.#ion, this.#leadPip, this.#reticle);
+    if (mode === 'flight') this.#root.append(this.#ion, this.#leadPip, this.#lock, this.#reticle, this.#refusal);
     root.mount(this.#root, 'hud');
     this.#unregister = root.register(this);
     // SPEC-037 §4.2: the top centre's height, for the dialogue and the tip strip
@@ -431,6 +457,35 @@ export class Hud {
     if (this.#leadPipShown) return;
     this.#leadPipShown = true;
     pip.classList.remove('is-hidden');
+  }
+
+  /** SPEC-070 §4.6: the lock bracket at NDC (y up), placed like the reticle. */
+  setLock(ndcX: number, ndcY: number): void {
+    const lock = this.#lock;
+    lock.style.left = `${(ndcX * 0.5 + 0.5) * 100}%`;
+    lock.style.top = `${(-ndcY * 0.5 + 0.5) * 100}%`;
+    if (this.#lockShown) return;
+    this.#lockShown = true;
+    lock.classList.remove('is-hidden');
+  }
+
+  /** SPEC-070 §4.6: no lock, or an empty rack — no bracket. Writes nothing once hidden. */
+  hideLock(): void {
+    if (!this.#lockShown) return;
+    this.#lockShown = false;
+    this.#lock.classList.add('is-hidden');
+  }
+
+  /** SPEC-070 §4.6, E136: `No lock` or `Rack empty` under the reticle for 0.6 s. */
+  flashRefusal(reason: 'no_lock' | 'empty'): void {
+    const node = this.#refusal;
+    node.textContent = reason === 'empty' ? 'Rack empty' : 'No lock';
+    node.classList.remove('is-hidden');
+    if (this.#refusalTimer !== null) clearTimeout(this.#refusalTimer);
+    this.#refusalTimer = setTimeout(() => {
+      this.#refusalTimer = null;
+      node.classList.add('is-hidden');
+    }, REFUSAL_MS);
   }
 
   /** SPEC-041 §4.7, 41-k: no cone target, or ARIA disabled — no pip. Writes nothing once hidden. */
@@ -557,6 +612,7 @@ export class Hud {
     if (this.#staticTimer !== null) clearTimeout(this.#staticTimer);
     if (this.#levelTimer !== null) clearTimeout(this.#levelTimer);
     if (this.#bossPhaseTimer !== null) clearTimeout(this.#bossPhaseTimer);
+    if (this.#refusalTimer !== null) clearTimeout(this.#refusalTimer);
     while (this.#hitDirs.length > 0) this.#dropHitDirection(0);
     this.#tracker?.dispose();
     this.#tracker = null;
@@ -734,6 +790,18 @@ export class Hud {
         if (m.flight === undefined || this.#mode !== 'flight') return;
         this.#setBar(this.#shield, m.flight.shield);
         this.#setBar(this.#hull, m.flight.hull);
+        // The tank reads in per cent: it is a share of the jump's oil, not a count.
+        this.#setBar(this.#fuel, m.flight.fuel, false);
+        const tank = `${Math.round((100 * m.flight.fuel[0]) / Math.max(1e-6, m.flight.fuel[1]))} %`;
+        if (this.#fuel.text.textContent !== tank) this.#fuel.text.textContent = tank;
+        this.#fuel.root.classList.toggle('is-low', m.flight.fuel[0] / Math.max(1e-6, m.flight.fuel[1]) < FUEL_LOW_FRACTION);
+        this.#fuel.root.classList.toggle('is-burning', m.flight.burning);
+        const loaded = m.flight.missiles;
+        if (this.#missiles.dataset['count'] !== String(loaded)) {
+          this.#missiles.dataset['count'] = String(loaded);
+          this.#missilePips.forEach((pip, i) => pip.classList.toggle('is-loaded', i < loaded));
+          this.#missiles.classList.toggle('is-empty', loaded <= 0);
+        }
         // SPEC-045 §4.7: the word, not `THR` — `Throttle 1.0×`.
         const throttle = `Throttle ${multiplier(m.flight.throttle)}`;
         if (this.#throttle.textContent !== throttle) this.#throttle.textContent = throttle;
@@ -746,7 +814,8 @@ export class Hud {
         // SPEC-013 §4.1 (E12, PLAN R16): the hold has two reasons — hostiles on
         // the tail, or a main flight objective still open — and an empty sky
         // must not be captioned "clear the hostiles".
-        const hold = m.flight.hostiles > 0 ? HOLD_HOSTILES : HOLD_OBJECTIVE;
+        // SPEC-069 §4.3: an empty sky off approach is waiting on the pilot.
+        const hold = m.flight.hostiles > 0 ? HOLD_HOSTILES : m.flight.offApproach ? HOLD_APPROACH : HOLD_OBJECTIVE;
         if (this.#holding.textContent !== hold) this.#holding.textContent = hold;
         this.#holding.classList.toggle('is-hidden', !m.flight.holding);
         // SPEC-042 §4.4: one signal for "you are about to die", whatever you

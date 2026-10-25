@@ -65,6 +65,9 @@ export const TIP_IDS = [
   // SPEC-068 §4.9: the first trap warning near the player, and the first helper.
   'traps',
   'helpers',
+  // SPEC-069 §4.5: the first extra burn off the course line; SPEC-070 §4.6: the first lock with a missile loaded.
+  'flight_fuel',
+  'flight_missile',
 ] as const;
 
 export type TipId = (typeof TIP_IDS)[number];
@@ -234,6 +237,16 @@ export const TIPS: Readonly<Record<TipId, TipText>> = {
   helpers: {
     keyboard: 'Shoot pillars and drums near enemies. A pillar falls the way your shot flies; a drum blows up what stands near it.',
     touch: 'Shoot pillars and drums near enemies. A pillar falls the way your shot flies; a drum blows up what stands near it.',
+  },
+  // SPEC-069 §4.5: once, the first time the tank burns extra on a trip.
+  flight_fuel: {
+    keyboard: 'Off the course line the tank drains faster. The marker points back to it.',
+    touch: 'Off the course line the tank drains faster. The marker points back to it.',
+  },
+  // SPEC-070 §4.6: once, the first time a lock is up with a missile loaded.
+  flight_missile: {
+    keyboard: 'Missile locked — press F or the right mouse button.',
+    touch: 'Missile locked — tap MSL.',
   },
 };
 

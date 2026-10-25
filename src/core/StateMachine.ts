@@ -23,7 +23,8 @@ export interface SceneParams {
    * passed in. `fromStarmap`: the star map's Back — a return, not an arrival,
    * so no subsidy (review 2026-10, B-07).
    */
-  station: { arrivedFrom?: PlanetId; recalled?: boolean; fromStarmap?: boolean };
+  /** SPEC-069 §4.5: `towed` with `recalled` when an empty tank ended the trip. */
+  station: { arrivedFrom?: PlanetId; recalled?: boolean; towed?: boolean; fromStarmap?: boolean };
   /** SPEC-044 §4.6: `planet` is preselected when it is unlocked; `undefined` lets the map choose. */
   starmap: { planet?: PlanetId } | undefined;
   /** `skipRun`: the depart sheet's `Skip the run` — autopilot to the landing (SPEC-032 §4.4). */

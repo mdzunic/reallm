@@ -66,6 +66,24 @@ export interface FrameBurst {
   size: number;
 }
 
+/** SPEC-069 §4.6: a salvage canister or a drop in flight. */
+export interface FramePickup {
+  kind: 'fuel' | 'oil' | 'missile';
+  x: number;
+  y: number;
+  depth: number;
+}
+
+/** SPEC-070 §4.7: a missile in flight — position and velocity in plane metres and depth. */
+export interface FrameMissile {
+  x: number;
+  y: number;
+  depth: number;
+  vx: number;
+  vy: number;
+  vDepth: number;
+}
+
 export interface FlightFrame {
   ship: FrameShip;
   hazards: Pool<FrameHazard>;
@@ -76,6 +94,10 @@ export interface FlightFrame {
   stormActive: boolean;
   throttleLive: number;
   time: number;
+  /** SPEC-069 §4.6: canisters in flight; absent reads as none. */
+  pickups?: Pool<FramePickup>;
+  /** SPEC-070 §4.7: missiles in flight; absent reads as none. */
+  missiles?: Pool<FrameMissile>;
 }
 
 // ------------------------------------------------------------------ the art
@@ -195,6 +217,35 @@ export const HIT_FLASH_NAME = 'hit-flash';
 const SUN_POSITION = new THREE.Vector3(-70, 34, -440);
 /** 20-f: the flare fades away over the landing's last 30 %. */
 const FLARE_FADE_FROM = 0.7;
+
+// ------------------------------------------- SPEC-069 §4.6, SPEC-070 §4.7
+
+/**
+ * SPEC-069 §4.1's corridor and SPEC-013's lateral top speed, restated because
+ * views may not import systems (SPEC-001 §4); `tests/views/flightView.test.ts`
+ * pins them to `COURSE.corridor` and `RAIL.lateralSpeed`.
+ */
+export const VIEW_CORRIDOR = 16;
+export const VIEW_LATERAL_SPEED = 22;
+/** §4.6: nav beacons in pairs beside the line, every `BEACON_SPACING` metres. */
+export const BEACON_PAIRS = 7;
+const BEACON_SPACING = 60;
+const BEACON_NEAR = 30;
+/** Each pair sits this far either side of the line, and this far below it. */
+const BEACON_SIDE = 6;
+const BEACON_DROP = 3;
+const BEACON_SIZE = 1.1;
+/** §4.6: pickups are drawn to this depth, at most this many at once. */
+const PICKUP_DRAW_DEPTH = 450;
+const MAX_PICKUPS = 16;
+/** §4.6: each kind's tint — fuel amber, oil teal, missile red. */
+export const PICKUP_TINTS: Readonly<Record<FramePickup['kind'], number>> = { fuel: 0xffb347, oil: 0x46c2b4, missile: 0xff6a55 };
+const PICKUP_LIGHT_SIZE = 1.8;
+/** SPEC-070 §4.7: at most this many missiles are drawn. */
+const MAX_MISSILES = 6;
+const MISSILE_GLOW_SIZE = 0.7;
+const MISSILE_TINT = 0xff9a3c;
+const FORWARD = new THREE.Vector3(0, 0, 1);
 
 /** 20-g: how fast the sky window reaches full storm tint (per second). */
 const STORM_TINT_PER_S = 2;
@@ -452,6 +503,16 @@ export class FlightView {
   readonly #hitFlashInterceptors: THREE.InstancedMesh;
   /** §4.3: one additive quad per ship, at its nozzle plane. */
   readonly #glows: THREE.InstancedMesh;
+  /** SPEC-069 §4.6: the nav beacons, the canisters and their blinking lights. */
+  readonly #beacons: THREE.InstancedMesh;
+  #beaconPhase = 0;
+  readonly #pickupBodies: THREE.InstancedMesh;
+  readonly #pickupLights: THREE.InstancedMesh;
+  /** SPEC-070 §4.7: the missiles, their exhaust glows, and the trail's every-other-frame toggle. */
+  readonly #missileBodies: THREE.InstancedMesh;
+  readonly #missileGlows: THREE.InstancedMesh;
+  #trailToggle = false;
+  readonly #velocity = new THREE.Vector3();
   readonly #shots: THREE.InstancedMesh;
   readonly #enemyShots: THREE.InstancedMesh;
   readonly #planet: THREE.Mesh;
@@ -644,6 +705,54 @@ export class FlightView {
     this.#glows.frustumCulled = false;
     this.#glows.count = 0;
     scene.add(this.#glows);
+
+    // SPEC-069 §4.6: nav beacons in pairs beside the line, one additive draw.
+    this.#beacons = this.#spriteMesh(0x9fe3ff, BEACON_SIZE, BEACON_PAIRS * 2);
+    this.#beacons.name = 'nav-beacons';
+    (this.#beacons.material as THREE.MeshBasicMaterial).map = particleSprite('dot');
+    // The canisters: one instanced body coloured per kind, and its light.
+    const canister = new THREE.CylinderGeometry(0.45, 0.45, 1.2, 10);
+    canister.rotateZ(Math.PI / 2);
+    this.#pickupBodies = new THREE.InstancedMesh(
+      canister,
+      new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.45, metalness: 0.5, emissive: 0x222222 }),
+      MAX_PICKUPS,
+    );
+    this.#pickupBodies.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+    this.#pickupBodies.frustumCulled = false;
+    this.#pickupBodies.count = 0;
+    this.#pickupBodies.visible = false;
+    this.#pickupBodies.setColorAt(0, this.#color.setScalar(1));
+    this.#pickupBodies.name = 'pickups';
+    scene.add(this.#pickupBodies);
+    this.#pickupLights = this.#spriteMesh(0xffffff, PICKUP_LIGHT_SIZE, MAX_PICKUPS);
+    this.#pickupLights.name = 'pickup-lights';
+    (this.#pickupLights.material as THREE.MeshBasicMaterial).map = particleSprite('dot');
+    this.#pickupLights.visible = false;
+    // SPEC-070 §4.7: the missile — a slim body with a nose, along +Z — and its glow.
+    const body = new THREE.CylinderGeometry(0.1, 0.12, 0.8, 6);
+    body.rotateX(Math.PI / 2);
+    const nose = new THREE.ConeGeometry(0.1, 0.25, 6);
+    nose.rotateX(Math.PI / 2);
+    nose.translate(0, 0, 0.52);
+    const missile = mergeGeometries([body, nose]) as THREE.BufferGeometry;
+    body.dispose();
+    nose.dispose();
+    this.#missileBodies = new THREE.InstancedMesh(
+      missile,
+      new THREE.MeshStandardMaterial({ color: 0xd9dde2, roughness: 0.4, metalness: 0.6 }),
+      MAX_MISSILES,
+    );
+    this.#missileBodies.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+    this.#missileBodies.frustumCulled = false;
+    this.#missileBodies.count = 0;
+    this.#missileBodies.visible = false;
+    this.#missileBodies.name = 'missiles';
+    scene.add(this.#missileBodies);
+    this.#missileGlows = this.#spriteMesh(MISSILE_TINT, MISSILE_GLOW_SIZE, MAX_MISSILES);
+    this.#missileGlows.name = 'missile-glows';
+    (this.#missileGlows.material as THREE.MeshBasicMaterial).map = particleSprite('dot');
+    this.#missileGlows.visible = false;
 
     // Shots: instanced capsules for ours, instanced spheres for theirs (§4.9),
     // each carrying §4.3's head and two ghosts — hence the × 3 capacity and the
@@ -852,6 +961,9 @@ export class FlightView {
     this.#updateParticles(frame, dt);
     this.#updatePlanet(frame);
     this.#updateSky(frame, dt);
+    this.#updateBeacons(frame, dt);
+    this.#updatePickups(frame);
+    this.#updateMissiles(frame);
     const fog = this.#scene.fog as THREE.FogExp2;
     fog.density = this.#fogDensity * (frame.stormActive ? 3 : 1); // §4.5
   }
@@ -1005,7 +1117,8 @@ export class FlightView {
     rig.z = CAMERA_Z;
     camera.position.copy(rig);
     let roll = cameraRoll(frame.ship.bank, this.#reduceMotion); // bank right → horizon rolls left
-    let pitch = (frame.ship.vy / 14) * 15 * DEG;
+    // SPEC-069 §4.1: 15° of pitch at the lateral top speed.
+    let pitch = (frame.ship.vy / VIEW_LATERAL_SPEED) * 15 * DEG;
     pitch += this.#landing * -24 * DEG; // the cutscene noses down (§4.1)
     if (this.#shake > 0) {
       this.#shake = Math.max(0, this.#shake - 3 * dt);
@@ -1275,6 +1388,115 @@ export class FlightView {
       drawn++;
     }
     this.#writeCount(mesh, drawn, true);
+  }
+
+  /**
+   * SPEC-069 §4.6: the beacon pairs stream at the stars' speed and wrap; they
+   * brighten while the ship is outside the corridor, so the line is easy to find.
+   */
+  #updateBeacons(frame: FlightFrame, dt: number): void {
+    const span = BEACON_PAIRS * BEACON_SPACING;
+    this.#beaconPhase = (this.#beaconPhase + 60 * frame.throttleLive * dt * launchRunUp(this.#launch)) % span;
+    const gain = Math.hypot(frame.ship.x, frame.ship.y) > VIEW_CORRIDOR ? 1.8 : 1;
+    this.#quaternion.identity();
+    this.#scale.setScalar(1);
+    let slot = 0;
+    for (let pair = 0; pair < BEACON_PAIRS; pair++) {
+      // Near ones first: a beacon that passes the camera wraps to the far end.
+      const depth = BEACON_NEAR + ((pair * BEACON_SPACING - this.#beaconPhase + span) % span);
+      for (const side of [-1, 1]) {
+        this.#position.set(side * BEACON_SIDE, -BEACON_DROP, -depth);
+        this.#matrix.compose(this.#position, this.#quaternion, this.#scale);
+        this.#beacons.setMatrixAt(slot, this.#matrix);
+        // Fade in from the far end, so a wrap never pops.
+        const fade = Math.min(1, (span + BEACON_NEAR - depth) / BEACON_SPACING);
+        this.#beacons.setColorAt(slot, this.#color.setScalar(gain * fade));
+        slot++;
+      }
+    }
+    this.#writeCount(this.#beacons, slot, true);
+  }
+
+  /** SPEC-069 §4.6: the canisters, tinted by kind, each under a light that blinks at 2 Hz. */
+  #updatePickups(frame: FlightFrame): void {
+    const pickups = frame.pickups;
+    let count = 0;
+    const blink = this.#reduceMotion ? 1 : 0.55 + 0.45 * Math.sin(frame.time * Math.PI * 4);
+    if (pickups !== undefined) {
+      for (let i = 0; i < pickups.size && count < MAX_PICKUPS; i++) {
+        const pickup = pickups.at(i);
+        if (pickup.depth > PICKUP_DRAW_DEPTH) continue;
+        this.#position.set(pickup.x, pickup.y, -pickup.depth);
+        this.#euler.set(frame.time * 0.9 + i, frame.time * 0.6, 0, 'XYZ');
+        this.#quaternion.setFromEuler(this.#euler);
+        this.#scale.setScalar(1);
+        this.#matrix.compose(this.#position, this.#quaternion, this.#scale);
+        this.#pickupBodies.setMatrixAt(count, this.#matrix);
+        this.#color.set(PICKUP_TINTS[pickup.kind]);
+        this.#pickupBodies.setColorAt(count, this.#color);
+        this.#quaternion.identity();
+        this.#matrix.compose(this.#position, this.#quaternion, this.#scale);
+        this.#pickupLights.setMatrixAt(count, this.#matrix);
+        this.#pickupLights.setColorAt(count, this.#color.multiplyScalar(1.6 * blink));
+        count++;
+      }
+    }
+    this.#writeVisibleCount(this.#pickupBodies, count);
+    this.#writeVisibleCount(this.#pickupLights, count);
+  }
+
+  /**
+   * SPEC-070 §4.7: each missile along its velocity, its exhaust glow behind
+   * it, and a spark from the explosion pool every other frame as its trail.
+   */
+  #updateMissiles(frame: FlightFrame): void {
+    const missiles = frame.missiles;
+    let count = 0;
+    this.#trailToggle = !this.#trailToggle;
+    if (missiles !== undefined) {
+      for (let i = 0; i < missiles.size && count < MAX_MISSILES; i++) {
+        const missile = missiles.at(i);
+        this.#position.set(missile.x, missile.y, -missile.depth);
+        // World +Z is toward the camera, so depth runs along −Z.
+        this.#velocity.set(missile.vx, missile.vy, -missile.vDepth);
+        if (this.#velocity.lengthSq() > 0) this.#quaternion.setFromUnitVectors(FORWARD, this.#velocity.normalize());
+        else this.#quaternion.identity();
+        this.#scale.setScalar(1);
+        this.#matrix.compose(this.#position, this.#quaternion, this.#scale);
+        this.#missileBodies.setMatrixAt(count, this.#matrix);
+        // The glow 0.5 m behind the tail, facing the camera.
+        this.#position.addScaledVector(this.#velocity, -0.5);
+        this.#quaternion.identity();
+        this.#matrix.compose(this.#position, this.#quaternion, this.#scale);
+        this.#missileGlows.setMatrixAt(count, this.#matrix);
+        this.#missileGlows.setColorAt(count, this.#color.setScalar(1.8));
+        if (this.#trailToggle) this.#trailSpark(this.#position);
+        count++;
+      }
+    }
+    this.#writeVisibleCount(this.#missileBodies, count);
+    this.#writeVisibleCount(this.#missileGlows, count);
+  }
+
+  /** SPEC-070 §4.7: one slow, short-lived spark from the explosion pool at `at` (world space). */
+  #trailSpark(at: THREE.Vector3): void {
+    const index = this.#nextParticle;
+    this.#nextParticle = (this.#nextParticle + 1) % this.#maxParticles;
+    const data = this.#particleData;
+    const positions = this.#particlePositions;
+    data[index * 4] = Math.sin(index * 1.7) * 0.6;
+    data[index * 4 + 1] = Math.cos(index * 2.3) * 0.6;
+    data[index * 4 + 2] = 0;
+    data[index * 4 + 3] = PARTICLE_LIFE * 0.6;
+    positions[index * 3] = at.x;
+    positions[index * 3 + 1] = at.y;
+    positions[index * 3 + 2] = at.z;
+  }
+
+  /** An instanced mesh that draws `count` and hides when empty — no draw for nothing. */
+  #writeVisibleCount(mesh: THREE.InstancedMesh, count: number): void {
+    mesh.visible = count > 0;
+    this.#writeCount(mesh, count, true);
   }
 
   /** 20-g: the sky window drifts toward the planet's accent while a storm blows. */

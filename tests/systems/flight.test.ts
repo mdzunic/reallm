@@ -18,7 +18,14 @@ import { ENEMIES, MISSIONS, PLANETS, TUNING, UPGRADES, type Difficulty, type Mis
 import { Economy } from '@/systems/Economy';
 import {
   burstAim,
+  COAST_DAMPING,
   CONVERGE_DEPTH,
+  COURSE,
+  FUEL,
+  MISSILE,
+  NAV_LIMIT,
+  PICKUP,
+  SIGNALS,
   ENEMY_SHOT_RADIUS,
   enemyShotEta,
   FIGHTER_BURST,
@@ -149,6 +156,7 @@ function step(flight: Flight, seconds: number, input: Partial<FlightInput> = {})
 function inject(flight: Flight, fields: Partial<Hazard> & Pick<Hazard, 'kind' | 'depth'>): Hazard {
   const hazard = flight.hazards.alloc();
   Object.assign(hazard, {
+    id: flight.newHazardId(),
     x: 0,
     y: 0,
     vx: 0,
@@ -319,20 +327,37 @@ describe('duration by engine tier and throttle', () => {
 // ----------------------------------------------------------------- steering
 
 describe('steering', () => {
-  it('accelerates, caps at lateralSpeed, and damps by e^(−6 dt) (AC-57, AC-58)', () => {
+  it('accelerates, caps at lateralSpeed, and coasts by e^(−2.5 dt) (AC-57, AC-58; SPEC-069 §4.1)', () => {
     const { flight } = world();
     step(flight, 1, { steerX: 1 });
+    expect(RAIL.lateralSpeed).toBe(22);
     expect(flight.ship.vx).toBeCloseTo(RAIL.lateralSpeed, 1);
     const before = flight.ship.vx;
     step(flight, DT);
-    expect(flight.ship.vx).toBeCloseTo(before * Math.exp(-6 * DT), 5);
+    expect(COAST_DAMPING).toBe(2.5);
+    expect(flight.ship.vx).toBeCloseTo(before * Math.exp(-COAST_DAMPING * DT), 5);
   });
 
-  it('clamps to the plane with a soft bounce (velocity × −0.3) (AC-59)', () => {
-    const { flight } = world();
-    step(flight, 3, { steerX: 1 });
-    expect(flight.ship.x).toBe(PLANE.halfW);
-    expect(flight.ship.vx).toBeLessThanOrEqual(0);
+  it('has no pull toward the line: a ship at rest off it stays put (SPEC-069 §4.1)', () => {
+    const { flight } = world({ planet: quietPlanet(PLANETS.cinder4, 300) });
+    step(flight, LAUNCH_SECONDS + DT);
+    Object.assign(flight.ship, { x: 30, y: -12, vx: 0, vy: 0 });
+    step(flight, 5);
+    expect(flight.ship.x).toBe(30);
+    expect(flight.ship.y).toBe(-12);
+  });
+
+  it('stops at the nav limit with no bounce, keeping the slide along it (E132)', () => {
+    const { flight } = world({ planet: quietPlanet(PLANETS.cinder4, 600), difficulty: 'story' });
+    step(flight, LAUNCH_SECONDS + DT);
+    step(flight, 14, { steerX: 1 });
+    expect(flight.offLine).toBeCloseTo(NAV_LIMIT, 6);
+    expect(flight.ship.vx).toBeGreaterThanOrEqual(0); // no bounce back
+    // Pressing out and up: the outward part is removed, the slide along stays.
+    Object.assign(flight.ship, { x: NAV_LIMIT, y: 0, vx: 10, vy: 10 });
+    step(flight, DT, { steerX: 1, steerY: 1 });
+    expect(flight.offLine).toBeCloseTo(NAV_LIMIT, 6);
+    expect(flight.ship.vy).toBeGreaterThan(0);
   });
 
   it('banks at −vx / lateralSpeed × 35° (AC-61)', () => {
@@ -542,7 +567,8 @@ describe('hull 0', () => {
     expect(w.flight.phase).toBe('recalled');
     expect(w.flight.ship.alive).toBe(false);
     expect(w.of('player:died')).toEqual([{ cause: { kind: 'asteroid' }, scene: 'flight' }]);
-    expect(w.of('flight:recalled')).toEqual([{ planet: 'cinder4' }]);
+    expect(w.of('flight:recalled')).toEqual([{ planet: 'cinder4', cause: 'hull' }]);
+    expect(w.flight.recallCause).toBe('hull');
     expect(w.save.resources.wheat).toBe(120); // cargo kept (E5)
     // Dead ship: nothing advances any more.
     step(w.flight, 1);
@@ -1088,8 +1114,9 @@ describe('missions in flight', () => {
 
 describe('flight enemies', () => {
   it('spawns no elites (AC-70)', () => {
-    const w = world({ planet: PLANETS.ferrum, ship: { shield: 2 } });
-    step(w.flight, LAUNCH_SECONDS + 25, { steerX: 1 });
+    // Story takes no damage, so the ship is still flying when the wave is in.
+    const w = world({ planet: PLANETS.ferrum, ship: { shield: 2 }, difficulty: 'story' });
+    step(w.flight, LAUNCH_SECONDS + 25);
     expect(w.flight.hostiles).toBeGreaterThan(0);
     for (let i = 0; i < w.flight.hazards.size; i++) {
       expect(w.flight.hazards.at(i).elite).not.toBe(true);
@@ -1513,7 +1540,7 @@ describe('fighter bursts (SPEC-041 §4.8)', () => {
     const ship = w.flight.ship;
     // x(t) = −8 + 10 t at 10 m/s: written so that the step's own damping and
     // integration (no steer input) land the ship exactly on the line.
-    const damping = Math.exp(-6 * DT);
+    const damping = Math.exp(-COAST_DAMPING * DT);
     for (let i = 1; i <= 114; i++) {
       ship.vx = 10 / damping;
       ship.x = -8 + 10 * (i - 1) * DT;
@@ -1920,5 +1947,399 @@ describe('rock salvage (SPEC-066 §4.9, E125)', () => {
     const { flight } = world({ firstTrip: true });
     expect(flight.rockSalvage).toBe(0);
     expect(flight.fieldRocks).toBe(0);
+  });
+});
+
+// ------------------------------------------------------------ SPEC-069
+
+/** A fighter that holds its depth dead still, never fires and never leaves. */
+function stillFighter(flight: Flight, x: number, y: number, depth: number, hp: number = ENEMIES.scav_fighter.hp): Hazard {
+  return inject(flight, {
+    kind: 'fighter',
+    x,
+    y,
+    depth,
+    def: { ...ENEMIES.scav_fighter, speed: 0 },
+    radius: ENEMIES.scav_fighter.radius,
+    hp,
+    ttl: Number.POSITIVE_INFINITY,
+    fireCooldown: Number.POSITIVE_INFINITY,
+    pattern: 0,
+    holdDepth: depth,
+    burstLeft: 0,
+    burstAt: 0,
+  });
+}
+
+/** Where `item` sits in `flight.hazards` now (the pool swap-removes), or −1. */
+function indexIn(pool: Flight['hazards'], item: Hazard): number {
+  for (let i = 0; i < pool.size; i++) if (pool.at(i) === item) return i;
+  return -1;
+}
+
+/** Steps until the trip is over or `limit` seconds have passed. */
+function flyOut(flight: Flight, limit: number, input: Partial<FlightInput> = {}): void {
+  for (let t = 0; t < limit && flight.phase !== 'arrived' && flight.phase !== 'recalled'; t += 1) step(flight, 1, input);
+}
+
+describe('free flight — spawns around the ship (SPEC-069 §4.1)', () => {
+  it('draws the same asteroid, offset by the ship, wherever the ship is', () => {
+    const a = world();
+    const b = world();
+    Object.assign(b.flight.ship, { x: 80, y: -40 });
+    for (let i = 0; i < 50; i++) {
+      const ra = a.flight.spawnAsteroid();
+      const rb = b.flight.spawnAsteroid();
+      expect(rb.x - ra.x).toBeCloseTo(80, 9);
+      expect(rb.y - ra.y).toBeCloseTo(-40, 9);
+      expect(rb.radius).toBe(ra.radius);
+    }
+  });
+
+  it('keeps every asteroid in the window around a ship far off the line', () => {
+    const { flight } = world();
+    Object.assign(flight.ship, { x: 80, y: -40 });
+    for (let i = 0; i < 1000; i++) {
+      const rock = flight.spawnAsteroid();
+      expect(Math.abs(rock.x - 80)).toBeLessThanOrEqual(PLANE.halfW);
+      expect(Math.abs(rock.y + 40)).toBeLessThanOrEqual(PLANE.halfH);
+      flight.hazards.clear();
+    }
+  });
+
+  it('drags a holding fighter along with a ship that leaves the line', () => {
+    const w = world({ planet: quietPlanet(PLANETS.cinder4, 300), difficulty: 'story' });
+    step(w.flight, LAUNCH_SECONDS + DT);
+    const fighter = stillFighter(w.flight, 0, 0, 60);
+    Object.assign(w.flight.ship, { x: 100, y: 30, vx: 0, vy: 0 });
+    step(w.flight, DT);
+    expect(Math.abs(fighter.x - 100)).toBeLessThanOrEqual(PLANE.halfW);
+    expect(Math.abs(fighter.y - 30)).toBeLessThanOrEqual(PLANE.halfH);
+  });
+});
+
+describe('free flight — the tank (SPEC-069 §4.2)', () => {
+  it('arrives with 35 % on the line on every planet, every throttle and engine tier', () => {
+    const cases: Array<[PlanetDef, 0 | 3, -1 | 0 | 1]> = [
+      ...Object.values(PLANETS).map((planet) => [planet, 0, 0] as [PlanetDef, 0, 0]),
+      [PLANETS.cinder4, 0, -1],
+      [PLANETS.cinder4, 0, 1],
+      [PLANETS.cinder4, 3, 1],
+      [PLANETS.hive, 3, -1],
+    ];
+    for (const [planet, engine, notch] of cases) {
+      const w = world({ planet, ship: { engine }, difficulty: 'story' });
+      step(w.flight, DT, { throttleUp: notch > 0, throttleDown: notch < 0 });
+      flyOut(w.flight, 600);
+      expect(w.flight.phase, `${planet.id} e${engine} t${notch}`).toBe('arrived');
+      expect(w.flight.ship.fuel, `${planet.id} e${engine} t${notch}`).toBeCloseTo(FUEL.reserve, 2);
+      expect(Math.abs(w.flight.ship.fuel - FUEL.reserve)).toBeLessThan(0.005);
+    }
+  });
+
+  it('burns nothing extra inside the corridor, and 0.6 % a second at 66 m', () => {
+    const w = world({ planet: quietPlanet(PLANETS.cinder4, 300) });
+    step(w.flight, LAUNCH_SECONDS + DT);
+    Object.assign(w.flight.ship, { x: COURSE.corridor - 1, vx: 0 });
+    let before = w.flight.ship.fuel;
+    step(w.flight, 10);
+    expect(w.flight.fuelBurn).toBe(0);
+    expect(before - w.flight.ship.fuel).toBeCloseTo((1 - FUEL.reserve) * (10 / 300), 4);
+    Object.assign(w.flight.ship, { x: 66, vx: 0 });
+    before = w.flight.ship.fuel;
+    step(w.flight, 10);
+    expect(w.flight.fuelBurn).toBeCloseTo(0.006, 9);
+    expect(before - w.flight.ship.fuel).toBeCloseTo(0.06 + (1 - FUEL.reserve) * (10 / 300), 3);
+  });
+
+  it('warns once at 25 %', () => {
+    const w = world({ planet: quietPlanet(PLANETS.cinder4, 600) });
+    step(w.flight, LAUNCH_SECONDS + DT);
+    w.flight.ship.fuel = 0.26;
+    Object.assign(w.flight.ship, { x: 80, vx: 0 });
+    step(w.flight, 3);
+    Object.assign(w.flight.ship, { x: 0, vx: 0 });
+    w.flight.ship.fuel = 0.3;
+    Object.assign(w.flight.ship, { x: 80, vx: 0 });
+    step(w.flight, 3);
+    expect(w.of('flight:fuelLow')).toHaveLength(1);
+  });
+
+  it('tows a ship that runs dry: no death, a recall reset, cause fuel (E133)', () => {
+    const w = world({ planet: quietPlanet(PLANETS.hive, 600), accept: ['c5_m1'] });
+    step(w.flight, LAUNCH_SECONDS + DT);
+    w.save.resources.wheat = 77;
+    Object.assign(w.flight.ship, { x: 150, vx: 0 });
+    flyOut(w.flight, 60);
+    expect(w.flight.phase).toBe('recalled');
+    expect(w.flight.recallCause).toBe('fuel');
+    expect(w.flight.ship.fuel).toBe(0);
+    expect(w.flight.ship.alive).toBe(true);
+    expect(w.of('flight:recalled')).toEqual([{ planet: 'hive', cause: 'fuel' }]);
+    expect(w.of('player:died')).toEqual([]);
+    expect(w.of('mission:stageReset').map((e) => e.reason).at(-1)).toBe('recall');
+    expect(w.of('mission:stageReset').map((e) => e.reason)).not.toContain('death');
+    expect(w.save.resources.wheat).toBe(77);
+    expect(w.flight.bursts.size).toBe(0);
+  });
+
+  it('never runs a story tank below 5 %', () => {
+    const w = world({ planet: quietPlanet(PLANETS.cinder4, 600), difficulty: 'story' });
+    step(w.flight, LAUNCH_SECONDS + DT);
+    Object.assign(w.flight.ship, { x: 200, vx: 0 });
+    step(w.flight, 90);
+    expect(w.flight.phase).toBe('cruise');
+    expect(w.flight.ship.fuel).toBe(FUEL.storyFloor);
+  });
+
+  it('fast-forwards from far off the line on a low tank without burning (69-k)', () => {
+    const w = world({ planet: quietPlanet(PLANETS.cinder4, 90) });
+    step(w.flight, LAUNCH_SECONDS + 10);
+    Object.assign(w.flight.ship, { x: 150, y: 20 });
+    w.flight.ship.fuel = 0.1;
+    w.flight.fastForward(1200);
+    expect(w.flight.phase).toBe('arrived');
+    expect(w.flight.ship.fuel).toBe(0.1);
+    expect(w.flight.offLine).toBe(0);
+  });
+});
+
+describe('free flight — arrival on approach (SPEC-069 §4.3)', () => {
+  it('holds off approach and lands once back within 30 m (E134)', () => {
+    const w = world({ planet: quietPlanet(PLANETS.cinder4, 20) });
+    step(w.flight, LAUNCH_SECONDS + DT);
+    Object.assign(w.flight.ship, { x: 40, vx: 0 });
+    step(w.flight, 21);
+    expect(w.flight.phase).toBe('holding');
+    expect(w.flight.onApproach).toBe(false);
+    Object.assign(w.flight.ship, { x: COURSE.approach - 1, vx: 0 });
+    step(w.flight, DT);
+    expect(w.flight.phase).toBe('arrived');
+  });
+
+  it('lands at the holding cap from anywhere (E12)', () => {
+    const w = world({ planet: quietPlanet(PLANETS.cinder4, 20), difficulty: 'story' });
+    step(w.flight, LAUNCH_SECONDS + DT);
+    Object.assign(w.flight.ship, { x: 100, vx: 0 });
+    step(w.flight, 21);
+    expect(w.flight.phase).toBe('holding');
+    step(w.flight, TUNING.HOLD_PATTERN_MAX_SECONDS + 1);
+    expect(w.flight.phase).toBe('arrived');
+  });
+});
+
+describe('free flight — salvage signals (SPEC-069 §4.4)', () => {
+  it('plans 3–5 signals in their slots and offsets, on a fork of their own', () => {
+    for (let seed = 1; seed <= 40; seed++) {
+      const { flight } = world({ seed });
+      const plan = flight.signalPlan;
+      expect(plan.length).toBeGreaterThanOrEqual(SIGNALS.min);
+      expect(plan.length).toBeLessThanOrEqual(SIGNALS.max);
+      const slot = (SIGNALS.to - SIGNALS.from) / plan.length;
+      plan.forEach((signal, i) => {
+        const frac = signal.at / PLANETS.cinder4.travelSeconds;
+        expect(frac).toBeGreaterThanOrEqual(SIGNALS.from + slot * i - 1e-9);
+        expect(frac).toBeLessThanOrEqual(SIGNALS.from + slot * (i + 1) + 1e-9);
+        const r = Math.hypot(signal.x, signal.y / SIGNALS.vertical);
+        expect(r).toBeGreaterThanOrEqual(SIGNALS.offset[0] - 1e-9);
+        expect(r).toBeLessThanOrEqual(SIGNALS.offset[1] + 1e-9);
+      });
+    }
+    // The asteroid stream draws exactly what a trip with no signals would.
+    const a = world({ seed: 9 }).flight.spawnAsteroid();
+    const rng = new Rng(9);
+    expect(a.radius).toBeGreaterThanOrEqual(1);
+    expect(rng.seed).toBe(new Rng(9).seed);
+  });
+
+  it('spawns 12 trip seconds ahead and reaches the plane on its trip second at any throttle (69-i)', () => {
+    for (const notch of [-1, 1] as const) {
+      const w = world({ planet: quietPlanet(PLANETS.cinder4, 90), difficulty: 'story', seed: 3 });
+      const first = w.flight.signalPlan[0];
+      if (first === undefined) throw new Error('no signal');
+      step(w.flight, DT, { throttleUp: notch > 0, throttleDown: notch < 0 });
+      let spawnedAt = -1;
+      let crossedAt = -1;
+      let tracked: { depth: number } | null = null;
+      for (let i = 0; i < 60 * 120 && crossedAt < 0; i++) {
+        w.flight.update(DT, IDLE);
+        const covered = w.flight.progress * 90;
+        if (tracked === null && w.flight.pickups.size > 0) {
+          tracked = w.flight.pickups.at(0);
+          spawnedAt = covered;
+        }
+        if (tracked !== null && tracked.depth <= RAIL.hitDepth) crossedAt = covered;
+      }
+      expect(w.of('flight:signal').length).toBeGreaterThan(0);
+      expect(spawnedAt).toBeCloseTo(first.at - SIGNALS.lead, 0);
+      expect(Math.abs(crossedAt - first.at)).toBeLessThan(0.1);
+    }
+  });
+
+  it('takes a canister within reach, draws a near one in, and lets a far one pass', () => {
+    const w = world({ planet: quietPlanet(PLANETS.cinder4, 300) });
+    step(w.flight, LAUNCH_SECONDS + DT);
+    const put = (x: number, depth: number, kind: 'fuel' | 'oil' | 'missile' = 'fuel'): void => {
+      Object.assign(w.flight.pickups.alloc(), { kind, source: 'signal', x, y: 0, depth, vDepth: -60 });
+    };
+    w.flight.ship.fuel = 0.5;
+    put(2.9, RAIL.hitDepth + 0.5);
+    step(w.flight, 0.1);
+    expect(w.flight.ship.fuel).toBeCloseTo(0.5 + FUEL.cell, 2);
+    put(PICKUP.tractorRadius - 1, 30);
+    step(w.flight, 1);
+    expect(w.of('flight:pickup')).toHaveLength(2);
+    put(PICKUP.tractorRadius + 1, 30);
+    step(w.flight, 1);
+    expect(w.of('flight:pickup')).toHaveLength(2);
+    expect(w.flight.pickups.size).toBe(0);
+  });
+
+  it('reports a full tank, a full rack and a full hold as not taken (E135)', () => {
+    const w = world({ planet: quietPlanet(PLANETS.cinder4, 300) });
+    step(w.flight, LAUNCH_SECONDS + DT);
+    const take = (kind: 'fuel' | 'oil' | 'missile'): GameEvents['flight:pickup'] | undefined => {
+      Object.assign(w.flight.pickups.alloc(), { kind, source: 'signal', x: 0, y: 0, depth: RAIL.hitDepth, vDepth: -60 });
+      step(w.flight, DT);
+      return w.of('flight:pickup').at(-1);
+    };
+    w.flight.ship.fuel = 1;
+    expect(take('fuel')?.taken).toBe(false);
+    expect(w.flight.ship.missiles).toBe(MISSILE.loaded);
+    expect(take('missile')?.taken).toBe(true);
+    expect(w.flight.ship.missiles).toBe(MISSILE.rack);
+    expect(take('missile')?.taken).toBe(false);
+    expect(w.flight.ship.missiles).toBe(MISSILE.rack);
+    const oil = w.save.resources.oil;
+    expect(take('oil')?.taken).toBe(true);
+    expect(w.save.resources.oil).toBe(oil + SIGNALS.oil);
+    w.save.resources.oil = 100_000;
+    expect(take('oil')?.taken).toBe(false);
+  });
+});
+
+// ------------------------------------------------------------ SPEC-070
+
+describe('homing missiles (SPEC-070)', () => {
+  function cruising(): World {
+    const w = world({ planet: quietPlanet(PLANETS.cinder4, 300), difficulty: 'story' });
+    step(w.flight, LAUNCH_SECONDS + DT);
+    return w;
+  }
+
+  it('locks the ship nearest the reticle inside 20°, between 8 and 200 m', () => {
+    const w = cruising();
+    const near = stillFighter(w.flight, 0, 5, 60);
+    stillFighter(w.flight, 32, 0, 60); // 28° off
+    stillFighter(w.flight, 0, 0, 210); // too deep
+    step(w.flight, DT);
+    expect(w.flight.lock.active).toBe(true);
+    expect(w.flight.lock.id).toBe(near.id);
+  });
+
+  it('fires with a lock and downs the fighter as a kill; refuses with none or an empty rack (E136)', () => {
+    const w = cruising();
+    expect(w.flight.ship.missiles).toBe(1);
+    step(w.flight, DT, { missile: true });
+    expect(w.of('flight:missileRefused')).toEqual([{ reason: 'no_lock' }]);
+    expect(w.flight.ship.missiles).toBe(1);
+    stillFighter(w.flight, 2, 1, 60);
+    step(w.flight, DT);
+    step(w.flight, DT, { missile: true });
+    expect(w.flight.ship.missiles).toBe(0);
+    expect(w.flight.missiles.size).toBe(1);
+    expect(w.of('flight:missileFired')).toHaveLength(1);
+    step(w.flight, 1.5);
+    expect(w.of('enemy:killed').map((e) => e.enemyId)).toEqual(['scav_fighter']);
+    expect(w.of('flight:missileHit')).toEqual([expect.objectContaining({ kill: true })]);
+    step(w.flight, DT, { missile: true });
+    expect(w.of('flight:missileRefused').at(-1)).toEqual({ reason: 'empty' });
+  });
+
+  it('fires nothing during the launch (70-a)', () => {
+    const w = world({ planet: quietPlanet(PLANETS.cinder4, 300) });
+    step(w.flight, 1, { missile: true });
+    expect(w.flight.ship.missiles).toBe(1);
+    expect(w.of('flight:missileRefused')).toEqual([]);
+  });
+
+  it('sweeps a diving interceptor, and splashes 40 on a ship beside the target', () => {
+    const w = cruising();
+    const diver = inject(w.flight, {
+      kind: 'interceptor',
+      x: 0,
+      y: 0,
+      depth: 100,
+      vDepth: -55,
+      def: ENEMIES.hive_interceptor,
+      radius: ENEMIES.hive_interceptor.radius,
+      hp: ENEMIES.hive_interceptor.hp,
+      pattern: 1,
+    });
+    // Where the missile meets the dive: 100 m closed at 75 + 55 m/s, ≈ 58 m out.
+    const beside = stillFighter(w.flight, 0, 2.5, 58, 100);
+    step(w.flight, DT);
+    expect(w.flight.lock.id).toBe(diver.id);
+    step(w.flight, DT, { missile: true });
+    step(w.flight, 1);
+    expect(w.of('flight:missileHit')).toHaveLength(1);
+    expect(w.of('enemy:killed').map((e) => e.enemyId)).toContain('hive_interceptor');
+    expect(beside.hp).toBe(100 - MISSILE.splash);
+  });
+
+  it('retargets once when its target dies, and burns out with no target (70-d)', () => {
+    const w = cruising();
+    w.flight.ship.missiles = 2;
+    const first = stillFighter(w.flight, 0, 0, 150);
+    const second = stillFighter(w.flight, 6, 0, 120);
+    step(w.flight, DT);
+    expect(w.flight.lock.id).toBe(first.id);
+    step(w.flight, DT, { missile: true });
+    first.hp = 0;
+    w.flight.hazards.free(indexIn(w.flight.hazards, first));
+    step(w.flight, 2.5);
+    expect(w.of('flight:missileHit')).toHaveLength(1);
+    expect(second.hp).toBeLessThanOrEqual(0);
+    // Alone in the sky: straight on, and gone after its 4 s with no damage.
+    const lone = stillFighter(w.flight, 0, 0, 150);
+    step(w.flight, DT);
+    step(w.flight, DT, { missile: true });
+    lone.hp = 0;
+    w.flight.hazards.free(indexIn(w.flight.hazards, lone));
+    step(w.flight, MISSILE.life + 0.1);
+    expect(w.flight.missiles.size).toBe(0);
+    expect(w.of('flight:missileHit')).toHaveLength(1);
+  });
+
+  it('never follows a pool slot reused by another hazard', () => {
+    const w = cruising();
+    const target = stillFighter(w.flight, 0, 0, 150);
+    step(w.flight, DT);
+    step(w.flight, DT, { missile: true });
+    const slot = indexIn(w.flight.hazards, target);
+    w.flight.hazards.free(slot);
+    // The reused object, far off the missile's nose.
+    const reused = stillFighter(w.flight, 60, 0, 10, 100);
+    expect(reused).toBe(target);
+    step(w.flight, MISSILE.life + 0.1);
+    expect(reused.hp).toBe(100);
+    expect(w.of('flight:missileHit')).toEqual([]);
+  });
+
+  it('drops a missile canister from about 15 % of kills', () => {
+    const w = cruising();
+    let drops = 0;
+    for (let i = 0; i < 200; i++) {
+      const fighter = stillFighter(w.flight, 50, 0, 30, 1);
+      Object.assign(w.flight.shots.alloc(), { x: 50, y: 0, depth: fighter.depth - 1, vDepth: RAIL.laserSpeed, damage: 10, vx: 0, vy: 0 });
+      const before = w.flight.pickups.size;
+      step(w.flight, DT);
+      drops += w.flight.pickups.size - before;
+      w.flight.pickups.clear();
+      w.flight.hazards.clear();
+    }
+    expect(w.of('enemy:killed')).toHaveLength(200);
+    expect(drops).toBeGreaterThanOrEqual(18);
+    expect(drops).toBeLessThanOrEqual(42);
   });
 });

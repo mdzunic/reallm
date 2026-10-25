@@ -3,6 +3,10 @@
 // hull, ship weapons with aim assist, throttle-scaled waves, ion storms, the
 // arrival rule with its 90 s holding cap, and recall on death. SPEC-066 §4.9
 // adds the first trip's asteroid lane and the oil a big rock drops when shot.
+// SPEC-069 (PLAN R29) opens the plane: the ship steers freely off the course
+// line out to a nav limit, the fight spawns around it, the jump's oil fills a
+// tank that straying drains (an empty tank is a tow home), the landing wants
+// the ship on approach, and salvage signals fly in off the line.
 //
 // Pure per SPEC-001 §4: no `three`, no DOM, no `Math.random` — every draw goes
 // through the `Rng` handed in (one per visit, SPEC-008), so a trip is
@@ -72,10 +76,16 @@ export interface ShipState {
   throttle: 0.8 | 1 | 1.2;
   fireCooldown: number;
   alive: boolean;
+  /** SPEC-069 §4.2: 0…1 of the tank — full at launch, empty is a tow. */
+  fuel: number;
+  /** SPEC-070 §4.1: missiles in the rack, 0…`MISSILE.rack`. */
+  missiles: number;
 }
 
 export interface Hazard {
   kind: 'asteroid' | 'fighter' | 'interceptor' | 'enemy_shot';
+  /** SPEC-070 §4.3: a serial per spawn, so a missile never follows a reused pool slot. */
+  id: number;
   x: number;
   y: number;
   depth: number;
@@ -122,6 +132,24 @@ export interface Burst {
   size: number;
 }
 
+/** SPEC-069 §4.4: what a salvage signal or a drop holds. */
+export type PickupKind = 'fuel' | 'oil' | 'missile';
+/** A planned salvage signal (SPEC-069) or a downed ship's drop (SPEC-070). */
+export type PickupSource = 'signal' | 'drop';
+
+/** SPEC-069 §4.4: a canister closing along depth, taken by flying into it. */
+export interface Pickup {
+  kind: PickupKind;
+  source: PickupSource;
+  x: number;
+  y: number;
+  depth: number;
+  vDepth: number;
+}
+
+/** SPEC-069 §4.2: why a trip ended at the station — the hull, or an empty tank. */
+export type RecallCause = 'hull' | 'fuel';
+
 export interface FlightConfig {
   planet: PlanetDef;
   ship: Save['ship'];
@@ -163,14 +191,104 @@ export interface FlightInput {
   autoFire?: boolean;
   /** `settings.flightMouseSteer`: steer = clamp((reticle − ship) / 4) (§4.2). */
   mouseSteer?: boolean;
+  /** SPEC-070 §4.5: an edge — one missile per press, and only with a lock. */
+  missile?: boolean;
 }
 
 export type FlightPhase = 'launch' | 'cruise' | 'holding' | 'arrived' | 'recalled';
 
 // ------------------------------------------------------------------- constants
 
+/**
+ * SPEC-069 §4.1: the combat window around the ship — hazards spawn in it and
+ * fighters stay in it. It bounded the ship itself before PLAN R29.
+ */
 export const PLANE = { halfW: 12, halfH: 7 } as const;
-export const RAIL = { baseSpeed: 60, lateralSpeed: 14, lateralAccel: 40, spawnDepth: 220, hitDepth: 2.5, laserSpeed: 120 } as const;
+export const RAIL = { baseSpeed: 60, lateralSpeed: 22, lateralAccel: 36, spawnDepth: 220, hitDepth: 2.5, laserSpeed: 120 } as const;
+
+// ------------------------------------------------------------ SPEC-069
+
+/** §4.1: a released axis coasts at e^(−COAST_DAMPING × dt) (*initial tuning*). */
+export const COAST_DAMPING = 2.5;
+/** §4.1: how far from the course line the ship may go, in metres. */
+export const NAV_LIMIT = 220;
+/**
+ * The course line's bands, in metres from it: no extra burn inside the
+ * corridor (§4.2), the landing only on approach (§4.3), and the course marker
+ * drawn this far ahead on the line (§4.5).
+ */
+export const COURSE = { corridor: 16, approach: 30, markerDepth: 80 } as const;
+/**
+ * §4.2 (*initial tuning* but `reserve`, which the arrival test pins): the line
+ * leaves `reserve` at arrival; past the corridor the tank burns `offlineBurn`
+ * a second at `offlineRef` metres beyond it, growing with the square; ARIA
+ * warns at `low`; story never falls below `storyFloor`; a fuel cell adds `cell`.
+ */
+export const FUEL = { reserve: 0.35, offlineBurn: 0.006, offlineRef: 50, low: 0.25, storyFloor: 0.05, cell: 0.2 } as const;
+/**
+ * §4.4 (*initial tuning*): `min`…`max` signals a trip, one per equal slot of
+ * `from`…`to` of the trip, `offset` metres off the line on an ellipse
+ * flattened by `vertical`, spawned `lead` trip seconds ahead; an oil pod holds
+ * `oil`.
+ */
+export const SIGNALS = {
+  min: 3,
+  max: 5,
+  from: 0.12,
+  to: 0.88,
+  offset: [40, 110],
+  vertical: 0.6,
+  lead: 12,
+  oil: 4,
+  weights: { fuel: 0.4, oil: 0.35, missile: 0.25 },
+} as const;
+/** §4.4: a pickup crossing within `radius` is taken; the tractor draws it in. */
+export const PICKUP = { radius: 3, tractorRadius: 8, tractorDepth: 40, tractorSpeed: 16 } as const;
+/** §4.5: how long the tow card holds the screen before the station. */
+export const TOW_SECONDS = 2.5;
+
+// ------------------------------------------------------------ SPEC-070
+
+/**
+ * The homing missiles (*initial tuning* but the rack): the rack holds `rack`
+ * and launches with `loaded` (§4.1); the lock takes the enemy ship nearest the
+ * reticle inside `lockConeDeg` between `lockMinDepth` and `lockMaxDepth`
+ * (§4.2); a missile flies at `speed`, turns at `turnRate` rad/s, burns out
+ * after `life` s or past `maxDepth`, hits within `hitRadius` of its target's
+ * circle for `damage`, `splash` to others within `splashRadius`, and
+ * retargets once inside `retargetConeDeg` (§4.3); a downed ship drops one
+ * with `dropChance` (§4.4).
+ */
+export const MISSILE = {
+  rack: 2,
+  loaded: 1,
+  speed: 75,
+  turnRate: 4,
+  life: 4,
+  damage: 80,
+  splash: 40,
+  splashRadius: 4,
+  hitRadius: 0.6,
+  lockConeDeg: 20,
+  lockMinDepth: 8,
+  lockMaxDepth: 200,
+  retargetConeDeg: 40,
+  maxDepth: 260,
+  dropChance: 0.15,
+} as const;
+
+/** SPEC-070 §3: a missile in flight; `target` is a hazard `id`, −1 for none. */
+export interface Missile {
+  x: number;
+  y: number;
+  depth: number;
+  vx: number;
+  vy: number;
+  vDepth: number;
+  target: number;
+  retargeted: boolean;
+  age: number;
+}
 
 /** The launch phase: cockpit shake, no hazards, HUD boot (§4.1). */
 export const LAUNCH_SECONDS = 3;
@@ -276,6 +394,8 @@ export function fieldLaneX(field: { fromSecond: number; toSecond: number }, trip
 
 const DEG_TO_RAD = Math.PI / 180;
 const ASSIST_CONE_COS = Math.cos(ASSIST_CONE_DEG * DEG_TO_RAD);
+const LOCK_CONE_COS = Math.cos(MISSILE.lockConeDeg * DEG_TO_RAD);
+const RETARGET_CONE_COS = Math.cos(MISSILE.retargetConeDeg * DEG_TO_RAD);
 
 /** One scheduled wave group; `frac` is its place in the trip (§4.4). */
 interface WaveGroup {
@@ -350,10 +470,19 @@ export function runSkip(save: Save, planet: PlanetId, options?: SkipOptions): Sk
 
 export class Flight {
   readonly ship: ShipState;
-  readonly hazards = new Pool<Hazard>(() => ({ kind: 'asteroid', x: 0, y: 0, depth: 0, vx: 0, vy: 0, vDepth: 0, radius: 1, hp: 1 }));
+  readonly hazards = new Pool<Hazard>(() => ({ kind: 'asteroid', id: 0, x: 0, y: 0, depth: 0, vx: 0, vy: 0, vDepth: 0, radius: 1, hp: 1 }));
   readonly shots = new Pool<Shot>(() => ({ x: 0, y: 0, depth: 0, vDepth: 0, damage: 0, vx: 0, vy: 0 }));
   /** Explosion bursts since the view last drained; the scene calls `bursts.clear()`. */
   readonly bursts = new Pool<Burst>(() => ({ x: 0, y: 0, depth: 0, size: 1 }));
+  /** SPEC-069 §4.4: salvage canisters and drops in flight. */
+  readonly pickups = new Pool<Pickup>(() => ({ kind: 'fuel', source: 'signal', x: 0, y: 0, depth: 0, vDepth: 0 }));
+  /** SPEC-070 §4.3: missiles in flight. */
+  readonly missiles = new Pool<Missile>(() => ({ x: 0, y: 0, depth: 0, vx: 0, vy: 0, vDepth: 0, target: -1, retargeted: false, age: 0 }));
+  /**
+   * SPEC-070 §4.2: the enemy ship nearest the reticle inside the lock cone —
+   * its `id` and position — or `active: false`. The HUD's bracket sits on it.
+   */
+  readonly lock = { active: false, id: -1, x: 0, y: 0, depth: 0 };
   /** Where the shots actually go: the raw aim, or the assist's captured target (§4.7). */
   readonly reticle = { x: 0, y: 0 };
   /**
@@ -384,6 +513,26 @@ export class Flight {
   readonly #fieldRng: Rng;
   /** The planet's field when this is its first trip, else null. */
   readonly #field: { readonly fromSecond: number; readonly toSecond: number } | null;
+  /** SPEC-069 §4.4: the trip's planned signals, drawn on a fork of their own. */
+  readonly #signals: Array<{ at: number; x: number; y: number; kind: PickupKind; spawned: boolean }> = [];
+  #signalsSpawned = 0;
+  #signalsTaken = 0;
+  /** SPEC-070 §4.4: the drop rolls — a fork, so every other stream draws as before. */
+  readonly #missileRng: Rng;
+  /** SPEC-070 §4.3: the next hazard's serial. */
+  #nextId = 1;
+  /** SPEC-069 §4.2: what ended the trip at the station, or null. */
+  #recallCause: RecallCause | null = null;
+  /** SPEC-069 §4.2: the extra burn per second on the last step. */
+  #fuelBurn = 0;
+  /** SPEC-069 §4.2: ARIA's low-fuel line has gone this trip. */
+  #fuelLowSaid = false;
+  /** SPEC-069 §4.2: `fastForward` flies the line and burns nothing. */
+  #fastForwarding = false;
+  /** Scratch for the missiles' steering (no allocation per step). */
+  readonly #dir = { x: 0, y: 0, z: 0 };
+  /** Scratch for a missile's splash victims, by id. */
+  readonly #splash: number[] = [];
   readonly #cfg: FlightConfig;
 
   readonly #speedMult: number;
@@ -425,6 +574,7 @@ export class Flight {
     this.#stormRng = rng.fork('storm');
     this.#salvageRng = rng.fork('salvage');
     this.#fieldRng = rng.fork('field');
+    this.#missileRng = rng.fork('missile');
     this.#field = cfg.firstTrip === true ? (cfg.planet.flight.firstTripField ?? null) : null;
     this.#stormEdgeAt = this.#stormRng.float(STORM_GAP[0], STORM_GAP[1]);
 
@@ -458,6 +608,8 @@ export class Flight {
       throttle: 1,
       fireCooldown: 0,
       alive: true,
+      fuel: 1,
+      missiles: MISSILE.loaded,
     };
 
     // The wave script, placed by trip fraction so throttle and engine scale it
@@ -471,6 +623,32 @@ export class Flight {
           spawned: false,
         });
       }
+    }
+    this.#planSignals(rng.fork('signals'));
+  }
+
+  /**
+   * SPEC-069 §4.4: `min`…`max` signals, one per equal slot of `from`…`to` of
+   * the trip, each `offset` metres off the line on a flattened ellipse, with a
+   * weighted kind. Their own fork, so the trip's other streams are untouched.
+   */
+  #planSignals(rng: Rng): void {
+    const count = rng.int(SIGNALS.min, SIGNALS.max);
+    const slot = (SIGNALS.to - SIGNALS.from) / count;
+    const weights = SIGNALS.weights;
+    for (let i = 0; i < count; i++) {
+      const frac = SIGNALS.from + slot * (i + rng.next());
+      const angle = rng.angle();
+      const r = rng.float(SIGNALS.offset[0], SIGNALS.offset[1]);
+      const roll = rng.next();
+      const kind: PickupKind = roll < weights.fuel ? 'fuel' : roll < weights.fuel + weights.oil ? 'oil' : 'missile';
+      this.#signals.push({
+        at: frac * this.#cfg.planet.travelSeconds,
+        x: r * Math.cos(angle),
+        y: r * Math.sin(angle) * SIGNALS.vertical,
+        kind,
+        spawned: false,
+      });
     }
   }
 
@@ -523,6 +701,36 @@ export class Flight {
     return this.#ariaEnabled;
   }
 
+  /** SPEC-069 §4.1: the ship's distance from the course line, in metres. */
+  get offLine(): number {
+    return Math.hypot(this.ship.x, this.ship.y);
+  }
+
+  /** SPEC-069 §4.3: close enough to the line to land. */
+  get onApproach(): boolean {
+    return this.offLine <= COURSE.approach;
+  }
+
+  /** SPEC-069 §4.2: the extra burn per second on the last step — 0 inside the corridor. */
+  get fuelBurn(): number {
+    return this.#fuelBurn;
+  }
+
+  /** SPEC-069 §4.2: what ended the trip at the station — `null` while it runs or after a landing. */
+  get recallCause(): RecallCause | null {
+    return this.#recallCause;
+  }
+
+  /** SPEC-069 §4.4: the trip's signals — planned, spawned so far, and taken. */
+  get signalCounts(): { planned: number; spawned: number; taken: number } {
+    return { planned: this.#signals.length, spawned: this.#signalsSpawned, taken: this.#signalsTaken };
+  }
+
+  /** SPEC-069 §4.5: the signals planned for this trip, for the dev hook and the tests. */
+  get signalPlan(): ReadonlyArray<{ readonly at: number; readonly x: number; readonly y: number; readonly kind: PickupKind }> {
+    return this.#signals;
+  }
+
   /** Live enemy ships — the HUD's "hostiles: n" (§4.10). */
   get hostiles(): number {
     let count = 0;
@@ -531,6 +739,14 @@ export class Flight {
       if (kind === 'fighter' || kind === 'interceptor') count++;
     }
     return count;
+  }
+
+  /**
+   * SPEC-070 §4.3: a fresh hazard serial, for a hazard allocated outside the
+   * spawners (the dev hook's still fighter, the tests).
+   */
+  newHazardId(): number {
+    return this.#nextId++;
   }
 
   /** Trip fractions of the wave groups, for the HUD's progress-bar markers. */
@@ -555,6 +771,9 @@ export class Flight {
       this.#launchT += dt;
       this.#updateReticle(dt, input); // empty sky: the raw aim owns the reticle
       this.#steer(dt, input);
+      // SPEC-069 §4.2: the launch steers, so straying burns in it too.
+      this.#burn(dt);
+      if (this.#phase !== 'launch') return; // towed
       // §4.8: survive timers are flight time while alive — launch counts too.
       this.#missions.update(dt, FLIGHT_MISSION_CONTEXT);
       if (this.#launchT >= LAUNCH_SECONDS) this.#phase = 'cruise';
@@ -562,7 +781,11 @@ export class Flight {
     }
 
     if (this.#phase === 'cruise') {
+      const from = this.progress;
       this.#covered += dt * this.#speedMult * this.#throttleLive;
+      // SPEC-069 §4.2: the base burn follows the trip's progress, so the line
+      // leaves `FUEL.reserve` at arrival whatever the throttle or the engine.
+      if (!this.#fastForwarding) this.ship.fuel -= (1 - FUEL.reserve) * (this.progress - from);
       if (this.progress >= 1) {
         // A group placed at the trip's very end (frac 1) fires before the
         // arrival check, so it can never be skipped past.
@@ -586,16 +809,61 @@ export class Flight {
 
     const coneTarget = this.#updateReticle(dt, input);
     this.#steer(dt, input); // after the reticle, so mouse steer chases this frame's
+    this.#updateLock();
     this.#updateWeapons(dt, input, coneTarget);
+    this.#fireMissile(input);
     this.#updateShots(dt);
+    this.#updateMissiles(dt);
     if (this.#phase === 'cruise') this.#spawn(dt);
     this.#updateHazards(dt);
     if (!this.ship.alive) return; // a ram or a collision above may have ended the trip
+    this.#updatePickups(dt);
     this.#updateStorm(dt);
     if (!this.ship.alive) return;
     this.#regenShield(dt);
+    // SPEC-069 §4.2, 69-c: after the hazards, so a hull at 0 on the same step wins.
+    this.#burn(dt);
+    if (this.#recallCause !== null) return; // towed
     // §4.8: survive timers are real seconds while alive — cruise and holding.
     this.#missions.update(dt, FLIGHT_MISSION_CONTEXT);
+  }
+
+  /**
+   * SPEC-069 §4.2: the extra burn past the corridor — `offlineBurn × e²` a
+   * second, `e` the metres beyond the corridor over `offlineRef` — then
+   * story's floor, ARIA's one low-fuel line, and the tow at empty. The base
+   * burn is the cruise step's, where the progress is.
+   */
+  #burn(dt: number): void {
+    const ship = this.ship;
+    const past = Math.max(0, this.offLine - COURSE.corridor) / FUEL.offlineRef;
+    this.#fuelBurn = FUEL.offlineBurn * past * past;
+    if (this.#fastForwarding) return;
+    ship.fuel -= this.#fuelBurn * dt;
+    if (this.#cfg.difficulty === 'story' && ship.fuel < FUEL.storyFloor) ship.fuel = FUEL.storyFloor;
+    if (!this.#fuelLowSaid && ship.fuel <= FUEL.low) {
+      this.#fuelLowSaid = true;
+      this.#events.emit('flight:fuelLow', {});
+    }
+    if (ship.fuel <= 0) {
+      ship.fuel = 0;
+      this.#tow();
+    }
+  }
+
+  /**
+   * SPEC-069 §4.2, E133: an empty tank is a tow, not a death. The jump's oil
+   * stays spent and the cargo aboard (E5); the stage resets as on a recall;
+   * no `player:died`, no burst — the engines simply die.
+   */
+  #tow(): void {
+    this.#phase = 'recalled';
+    this.#recallCause = 'fuel';
+    this.lead.active = false;
+    this.lock.active = false;
+    this.missiles.clear();
+    this.#events.emit('flight:recalled', { planet: this.#cfg.planet.id, cause: 'fuel' });
+    this.#missions.resetStages('recall');
   }
 
   /**
@@ -607,12 +875,21 @@ export class Flight {
    * Returns the seconds simulated; 0 for a trip that is already over.
    */
   fastForward(limitSeconds: number): number {
+    // SPEC-069 §4.2, 69-k: the autopilot flies the line and burns nothing,
+    // so a skip from anywhere, on any tank, is never towed and lands on approach.
+    const ship = this.ship;
+    if (this.#phase !== 'arrived' && this.#phase !== 'recalled') {
+      ship.x = 0;
+      ship.y = 0;
+      ship.vx = 0;
+      ship.vy = 0;
+    }
     const idle: FlightInput = {
       steerX: 0,
       steerY: 0,
       fire: false,
-      aimX: this.ship.x,
-      aimY: this.ship.y,
+      aimX: 0,
+      aimY: 0,
       throttleUp: false,
       throttleDown: false,
       autoFire: false,
@@ -620,12 +897,17 @@ export class Flight {
     };
     const dt = 1 / 60;
     let simulated = 0;
+    this.#fastForwarding = true;
     while (simulated < limitSeconds && this.#phase !== 'arrived' && this.#phase !== 'recalled') {
       this.hazards.clear();
-      this.ship.shield = this.ship.maxShield; // storms only bite through an empty shield (§4.5)
+      // SPEC-069 §4.4: a skipped run collects nothing; SPEC-070: fires nothing.
+      this.pickups.clear();
+      this.missiles.clear();
+      ship.shield = ship.maxShield; // storms only bite through an empty shield (§4.5)
       this.update(dt, idle);
       simulated += dt;
     }
+    this.#fastForwarding = false;
     return simulated;
   }
 
@@ -643,6 +925,9 @@ export class Flight {
       // §4.1: the change scales hazard `vDepth` proportionally, so hazards per
       // second stay put while hazards per trip-meter thin out or thicken.
       const factor = this.#throttleLive / before;
+      // SPEC-069 §4.4, 69-i: pickups close like field rocks, so they still
+      // reach the plane at their planned trip second.
+      for (let i = 0; i < this.pickups.size; i++) this.pickups.at(i).vDepth *= factor;
       for (let i = 0; i < this.hazards.size; i++) {
         const hazard = this.hazards.at(i);
         if (hazard.kind === 'asteroid' || hazard.kind === 'enemy_shot') {
@@ -672,7 +957,8 @@ export class Flight {
       steerX = clamp(input.steerX, -1, 1);
       steerY = clamp(input.steerY, -1, 1);
     }
-    const damping = Math.exp(-6 * dt);
+    // SPEC-069 §4.1: a released axis coasts; nothing pulls toward the line.
+    const damping = Math.exp(-COAST_DAMPING * dt);
     if (steerX !== 0) ship.vx += steerX * RAIL.lateralAccel * dt;
     else ship.vx *= damping;
     if (steerY !== 0) ship.vy += steerY * RAIL.lateralAccel * dt;
@@ -685,20 +971,19 @@ export class Flight {
     }
     ship.x += ship.vx * dt;
     ship.y += ship.vy * dt;
-    // §4.2: clamped to the plane with a soft bounce (velocity × −0.3).
-    if (ship.x > PLANE.halfW) {
-      ship.x = PLANE.halfW;
-      ship.vx *= -0.3;
-    } else if (ship.x < -PLANE.halfW) {
-      ship.x = -PLANE.halfW;
-      ship.vx *= -0.3;
-    }
-    if (ship.y > PLANE.halfH) {
-      ship.y = PLANE.halfH;
-      ship.vy *= -0.3;
-    } else if (ship.y < -PLANE.halfH) {
-      ship.y = -PLANE.halfH;
-      ship.vy *= -0.3;
+    // SPEC-069 §4.1, E132: the nav limit stops outward motion with no bounce;
+    // the tangential part stays, so the ship slides along the circle.
+    const r = Math.hypot(ship.x, ship.y);
+    if (r > NAV_LIMIT) {
+      const nx = ship.x / r;
+      const ny = ship.y / r;
+      ship.x = nx * NAV_LIMIT;
+      ship.y = ny * NAV_LIMIT;
+      const outward = ship.vx * nx + ship.vy * ny;
+      if (outward > 0) {
+        ship.vx -= outward * nx;
+        ship.vy -= outward * ny;
+      }
     }
     ship.bank = (-ship.vx / RAIL.lateralSpeed) * 35;
   }
@@ -792,6 +1077,285 @@ export class Flight {
     this.#events.emit('weapon:fired', { line: 'ship', x: gx, z: gy });
   }
 
+  // ------------------------------------------------------- SPEC-070: missiles
+
+  /**
+   * §4.2: the enemy ship nearest the reticle's ray inside the lock cone,
+   * between `lockMinDepth` and `lockMaxDepth`, or none.
+   */
+  #updateLock(): void {
+    const lock = this.lock;
+    lock.active = false;
+    const ship = this.ship;
+    const rx = this.reticle.x - ship.x;
+    const ry = this.reticle.y - ship.y;
+    const rlen = Math.hypot(rx, ry, CONVERGE_DEPTH);
+    let best = LOCK_CONE_COS;
+    for (let i = 0; i < this.hazards.size; i++) {
+      const hazard = this.hazards.at(i);
+      if (hazard.kind !== 'fighter' && hazard.kind !== 'interceptor') continue;
+      if (hazard.depth < MISSILE.lockMinDepth || hazard.depth > MISSILE.lockMaxDepth) continue;
+      const hx = hazard.x - ship.x;
+      const hy = hazard.y - ship.y;
+      const cos = (rx * hx + ry * hy + CONVERGE_DEPTH * hazard.depth) / (rlen * Math.hypot(hx, hy, hazard.depth));
+      if (cos < best) continue;
+      best = cos;
+      lock.active = true;
+      lock.id = hazard.id;
+      lock.x = hazard.x;
+      lock.y = hazard.y;
+      lock.depth = hazard.depth;
+    }
+  }
+
+  /** §4.1–§4.2, E136: one missile per press, with a lock and a missile in the rack. */
+  #fireMissile(input: FlightInput): void {
+    const ship = this.ship;
+    if (input.missile !== true || !ship.alive) return;
+    if (ship.missiles <= 0) {
+      this.#events.emit('flight:missileRefused', { reason: 'empty' });
+      return;
+    }
+    const lock = this.lock;
+    if (!lock.active) {
+      this.#events.emit('flight:missileRefused', { reason: 'no_lock' });
+      return;
+    }
+    ship.missiles--;
+    const missile = this.missiles.alloc();
+    missile.x = ship.x;
+    missile.y = ship.y - 0.5;
+    missile.depth = 0;
+    const dx = lock.x - missile.x;
+    const dy = lock.y - missile.y;
+    const length = Math.hypot(dx, dy, lock.depth) || 1;
+    missile.vx = (dx / length) * MISSILE.speed;
+    missile.vy = (dy / length) * MISSILE.speed;
+    missile.vDepth = (lock.depth / length) * MISSILE.speed;
+    missile.target = lock.id;
+    missile.retargeted = false;
+    missile.age = 0;
+    this.#events.emit('flight:missileFired', { x: missile.x, y: missile.y });
+  }
+
+  /** The live hazard with serial `id`, as a pool index, or −1. */
+  #hazardIndex(id: number): number {
+    if (id < 0) return -1;
+    for (let i = 0; i < this.hazards.size; i++) if (this.hazards.at(i).id === id) return i;
+    return -1;
+  }
+
+  /** §4.3: the enemy ship nearest a missile's nose inside the retarget cone, as an id, or −1. */
+  #retarget(missile: Missile): number {
+    const speed = Math.hypot(missile.vx, missile.vy, missile.vDepth) || 1;
+    let best = RETARGET_CONE_COS;
+    let id = -1;
+    for (let i = 0; i < this.hazards.size; i++) {
+      const hazard = this.hazards.at(i);
+      if (hazard.kind !== 'fighter' && hazard.kind !== 'interceptor') continue;
+      const hx = hazard.x - missile.x;
+      const hy = hazard.y - missile.y;
+      const hz = hazard.depth - missile.depth;
+      const cos = (missile.vx * hx + missile.vy * hy + missile.vDepth * hz) / (speed * (Math.hypot(hx, hy, hz) || 1));
+      if (cos < best) continue;
+      best = cos;
+      id = hazard.id;
+    }
+    return id;
+  }
+
+  /**
+   * §4.3: each missile turns toward its target by at most `turnRate × dt`,
+   * moves, and sweeps the step's relative motion against the target's circle
+   * — a diving interceptor closes at well over a hit diameter a step. A lost
+   * target is replaced once; past its life or its depth the missile burns out.
+   */
+  #updateMissiles(dt: number): void {
+    const dir = this.#dir;
+    for (let m = this.missiles.size - 1; m >= 0; m--) {
+      const missile = this.missiles.at(m);
+      missile.age += dt;
+      if (missile.age >= MISSILE.life || missile.depth > MISSILE.maxDepth || missile.depth < -10) {
+        this.missiles.free(m);
+        continue;
+      }
+      let index = this.#hazardIndex(missile.target);
+      if (index < 0 && !missile.retargeted) {
+        missile.retargeted = true;
+        missile.target = this.#retarget(missile);
+        index = this.#hazardIndex(missile.target);
+      }
+      if (index < 0) missile.target = -1;
+      const target = index >= 0 ? this.hazards.at(index) : null;
+      if (target !== null) {
+        // Turn the velocity toward the target, at most `turnRate × dt` radians.
+        const speed = MISSILE.speed;
+        const vx = missile.vx / speed;
+        const vy = missile.vy / speed;
+        const vz = missile.vDepth / speed;
+        const tx = target.x - missile.x;
+        const ty = target.y - missile.y;
+        const tz = target.depth - missile.depth;
+        const tl = Math.hypot(tx, ty, tz) || 1;
+        dir.x = tx / tl;
+        dir.y = ty / tl;
+        dir.z = tz / tl;
+        const angle = Math.acos(clamp(vx * dir.x + vy * dir.y + vz * dir.z, -1, 1));
+        const most = MISSILE.turnRate * dt;
+        if (angle > most && Math.sin(angle) > 1e-6) {
+          const sin = Math.sin(angle);
+          const a = Math.sin(angle - most) / sin;
+          const b = Math.sin(most) / sin;
+          dir.x = a * vx + b * dir.x;
+          dir.y = a * vy + b * dir.y;
+          dir.z = a * vz + b * dir.z;
+          const length = Math.hypot(dir.x, dir.y, dir.z) || 1;
+          dir.x /= length;
+          dir.y /= length;
+          dir.z /= length;
+        }
+        missile.vx = dir.x * speed;
+        missile.vy = dir.y * speed;
+        missile.vDepth = dir.z * speed;
+      }
+      // The relative position before the step, then the step's relative motion.
+      const r0x = target === null ? 0 : missile.x - target.x;
+      const r0y = target === null ? 0 : missile.y - target.y;
+      const r0z = target === null ? 0 : missile.depth - target.depth;
+      missile.x += missile.vx * dt;
+      missile.y += missile.vy * dt;
+      missile.depth += missile.vDepth * dt;
+      if (target === null || index < 0) continue;
+      const dx = (missile.vx - target.vx) * dt;
+      const dy = (missile.vy - target.vy) * dt;
+      const dz = (missile.vDepth - target.vDepth) * dt;
+      const span = dx * dx + dy * dy + dz * dz;
+      const t = span > 0 ? clamp(-(r0x * dx + r0y * dy + r0z * dz) / span, 0, 1) : 0;
+      const miss = Math.hypot(r0x + t * dx, r0y + t * dy, r0z + t * dz);
+      if (miss > target.radius + MISSILE.hitRadius) continue;
+      this.#missileHit(index);
+      this.missiles.free(m);
+    }
+  }
+
+  /**
+   * §4.3: the target takes `damage`, every other hazard within `splashRadius`
+   * of the impact `splash` — through `#damageHazard`, so kills, XP, salvage
+   * and drops are a laser's. Victims are found by id, since a kill frees.
+   */
+  #missileHit(index: number): void {
+    const target = this.hazards.at(index);
+    const x = target.x;
+    const y = target.y;
+    const depth = target.depth;
+    const id = target.id;
+    const splash = this.#splash;
+    splash.length = 0;
+    for (let i = 0; i < this.hazards.size; i++) {
+      const other = this.hazards.at(i);
+      if (other.id === id) continue;
+      if (Math.hypot(other.x - x, other.y - y, other.depth - depth) <= MISSILE.splashRadius) splash.push(other.id);
+    }
+    this.#damageHazard(index, MISSILE.damage);
+    const kill = this.#hazardIndex(id) < 0;
+    for (const victim of splash) {
+      const at = this.#hazardIndex(victim);
+      if (at >= 0) this.#damageHazard(at, MISSILE.splash);
+    }
+    this.#burst(x, y, depth, 2.5);
+    this.#events.emit('flight:missileHit', { x, y, depth, kill });
+  }
+
+  // ------------------------------------------------------- SPEC-069: pickups
+
+  /**
+   * §4.4: the tractor draws a close canister in, then it closes along depth;
+   * crossing the plane within `PICKUP.radius` of the ship takes it.
+   */
+  #updatePickups(dt: number): void {
+    const ship = this.ship;
+    for (let i = this.pickups.size - 1; i >= 0; i--) {
+      const pickup = this.pickups.at(i);
+      if (pickup.depth < PICKUP.tractorDepth) {
+        const dx = ship.x - pickup.x;
+        const dy = ship.y - pickup.y;
+        const gap = Math.hypot(dx, dy);
+        if (gap > 0 && gap < PICKUP.tractorRadius) {
+          const step = Math.min(gap, PICKUP.tractorSpeed * dt);
+          pickup.x += (dx / gap) * step;
+          pickup.y += (dy / gap) * step;
+        }
+      }
+      pickup.depth += pickup.vDepth * dt;
+      if (pickup.depth <= RAIL.hitDepth && ship.alive && Math.hypot(ship.x - pickup.x, ship.y - pickup.y) <= PICKUP.radius) {
+        this.#take(pickup);
+        this.pickups.free(i);
+        continue;
+      }
+      if (pickup.depth < -5) this.pickups.free(i); // missed — gone (E135)
+    }
+  }
+
+  /**
+   * §4.4, E135: a fuel cell tops the tank, an oil pod goes into the hold as a
+   * pickup (the cargo cap applies), a missile into the rack. A full tank, a
+   * full rack or a hold that took nothing reports `taken: false`.
+   */
+  #take(pickup: Pickup): void {
+    const ship = this.ship;
+    let taken = false;
+    switch (pickup.kind) {
+      case 'fuel':
+        // A tank within 1 % of full has no room for a cell (E135).
+        taken = ship.fuel < 0.99;
+        ship.fuel = Math.min(1, ship.fuel + FUEL.cell);
+        break;
+      case 'oil': {
+        const { added, shipped } = this.economy.addResource('oil', SIGNALS.oil, 'pickup');
+        taken = added + shipped > 0;
+        break;
+      }
+      case 'missile':
+        taken = ship.missiles < MISSILE.rack;
+        if (taken) ship.missiles++;
+        break;
+    }
+    if (taken && pickup.source === 'signal') this.#signalsTaken++;
+    this.#events.emit('flight:pickup', { kind: pickup.kind, source: pickup.source, taken });
+  }
+
+  /** SPEC-070 §4.4: a missile canister where a ship went down, closing like the rest. */
+  #spawnDrop(x: number, y: number, depth: number): void {
+    const pickup = this.pickups.alloc();
+    pickup.kind = 'missile';
+    pickup.source = 'drop';
+    pickup.x = x;
+    pickup.y = y;
+    pickup.depth = depth;
+    pickup.vDepth = -RAIL.baseSpeed * this.#throttleLive;
+  }
+
+  /**
+   * SPEC-069 §4.4: each planned signal spawns once, `lead` trip seconds ahead,
+   * at the depth that brings it to the plane at its planned trip second.
+   */
+  #spawnSignals(): void {
+    if (this.#fastForwarding) return; // a skipped run collects none
+    for (const signal of this.#signals) {
+      if (signal.spawned || this.#covered < signal.at - SIGNALS.lead) continue;
+      signal.spawned = true;
+      this.#signalsSpawned++;
+      const pickup = this.pickups.alloc();
+      pickup.kind = signal.kind;
+      pickup.source = 'signal';
+      pickup.x = signal.x;
+      pickup.y = signal.y;
+      pickup.depth = RAIL.hitDepth + ((signal.at - this.#covered) * RAIL.baseSpeed) / this.#speedMult;
+      pickup.vDepth = -RAIL.baseSpeed * this.#throttleLive;
+      this.#events.emit('flight:signal', { kind: signal.kind });
+    }
+  }
+
   /** §4.7: touch auto-fire also covers an asteroid drifting within 3 m in XY. */
   #asteroidNear(): boolean {
     for (let i = 0; i < this.hazards.size; i++) {
@@ -857,6 +1421,8 @@ export class Flight {
       this.#events.emit('enemy:killed', { enemyId: def.id as EnemyId, elite: false, x: hazard.x, z: hazard.depth, xp: def.xp });
       this.#progression.addXp(def.xp, 'flight');
       this.#salvage(def);
+      // SPEC-070 §4.4, E137: sometimes a missile canister, on a stream of its own.
+      if (this.#missileRng.chance(MISSILE.dropChance)) this.#spawnDrop(hazard.x, hazard.y, hazard.depth);
     } else if (kind === 'asteroid' && hazard.radius >= ROCK_SALVAGE_RADIUS) {
       this.#rockSalvage();
     }
@@ -906,6 +1472,7 @@ export class Flight {
       if (this.#fieldRng.next() < fieldRate * dt && this.#asteroidCount() < this.#asteroidCap) this.#spawnFieldRock(field);
     }
     this.#spawnGroups();
+    this.#spawnSignals();
   }
 
   /**
@@ -922,17 +1489,22 @@ export class Flight {
     const arrival = this.#covered + ((RAIL.spawnDepth - RAIL.hitDepth) / RAIL.baseSpeed) * this.#speedMult;
     const centre = fieldLaneX(field, arrival);
     const clear = FIELD_LANE_HALF_WIDTH + radius;
-    const leftEnd = centre - clear;
-    const rightStart = centre + clear;
-    const left = Math.max(0, leftEnd + PLANE.halfW);
-    const right = Math.max(0, PLANE.halfW - rightStart);
-    if (left + right <= 0) return; // no room beside the lane — never at these numbers
+    // SPEC-069 §4.1: the lane stays on the line; the rocks fill the window
+    // around the ship outside it (the old plane, with the ship at the origin).
+    const windowLeft = this.ship.x - PLANE.halfW;
+    const windowRight = this.ship.x + PLANE.halfW;
+    const leftTo = Math.min(windowRight, centre - clear);
+    const rightFrom = Math.max(windowLeft, centre + clear);
+    const left = Math.max(0, leftTo - windowLeft);
+    const right = Math.max(0, windowRight - rightFrom);
+    if (left + right <= 0) return; // the window is all lane
     const pick = rng.float(0, left + right);
-    const x = pick < left ? -PLANE.halfW + pick : rightStart + (pick - left);
+    const x = pick < left ? windowLeft + pick : rightFrom + (pick - left);
     const hazard = this.hazards.alloc();
     hazard.kind = 'asteroid';
+    hazard.id = this.#nextId++;
     hazard.x = x;
-    hazard.y = rng.float(-PLANE.halfH, PLANE.halfH);
+    hazard.y = this.ship.y + rng.float(-PLANE.halfH, PLANE.halfH);
     hazard.depth = RAIL.spawnDepth;
     hazard.radius = radius;
     hazard.hp = Math.round(radius * 15);
@@ -972,18 +1544,21 @@ export class Flight {
 
   /**
    * §4.3: 70 % inside the threat box around the ship, else uniform on the
-   * plane. Public so the spawn-bias test can draw 1,000 without flying a trip.
+   * window around it (SPEC-069 §4.1). Public so the spawn-bias test can draw
+   * 1,000 without flying a trip.
    */
   spawnAsteroid(): Hazard {
     const rng = this.#rng;
     const hazard = this.hazards.alloc();
     hazard.kind = 'asteroid';
+    hazard.id = this.#nextId++;
     if (rng.chance(THREAT_BOX_CHANCE)) {
       hazard.x = this.ship.x + rng.float(-THREAT_BOX, THREAT_BOX);
       hazard.y = this.ship.y + rng.float(-THREAT_BOX, THREAT_BOX);
     } else {
-      hazard.x = rng.float(-PLANE.halfW, PLANE.halfW);
-      hazard.y = rng.float(-PLANE.halfH, PLANE.halfH);
+      // SPEC-069 §4.1: the window around the ship, wherever it is.
+      hazard.x = this.ship.x + rng.float(-PLANE.halfW, PLANE.halfW);
+      hazard.y = this.ship.y + rng.float(-PLANE.halfH, PLANE.halfH);
     }
     hazard.depth = RAIL.spawnDepth;
     hazard.radius = rng.float(1, 4);
@@ -1007,12 +1582,14 @@ export class Flight {
     const def = ENEMIES[enemyId];
     const rng = this.#rng;
     const hazard = this.hazards.alloc();
+    hazard.id = this.#nextId++;
     hazard.def = def;
     hazard.elite = false; // §4.4: no elites in flight
     hazard.radius = def.radius;
     hazard.hp = def.hp;
-    hazard.x = rng.float(-PLANE.halfW, PLANE.halfW);
-    hazard.y = rng.float(-PLANE.halfH, PLANE.halfH);
+    // SPEC-069 §4.1: ships enter in the window around the ship.
+    hazard.x = this.ship.x + rng.float(-PLANE.halfW, PLANE.halfW);
+    hazard.y = this.ship.y + rng.float(-PLANE.halfH, PLANE.halfH);
     hazard.vx = 0;
     hazard.vy = 0;
     hazard.fireCooldown = undefined;
@@ -1090,8 +1667,10 @@ export class Flight {
             }
             this.#fireBurst(hazard);
           }
-          hazard.x = clamp(hazard.x + hazard.vx * dt, -PLANE.halfW, PLANE.halfW);
-          hazard.y = clamp(hazard.y + hazard.vy * dt, -PLANE.halfH, PLANE.halfH);
+          // SPEC-069 §4.1: fighters stay in the window around the ship, which
+          // drags them along when it strays.
+          hazard.x = clamp(hazard.x + hazard.vx * dt, ship.x - PLANE.halfW, ship.x + PLANE.halfW);
+          hazard.y = clamp(hazard.y + hazard.vy * dt, ship.y - PLANE.halfH, ship.y + PLANE.halfH);
           continue;
         }
         case 'interceptor': {
@@ -1176,6 +1755,7 @@ export class Flight {
   #fireEnemyShot(fighter: Hazard, k: number): void {
     const shot = this.hazards.alloc();
     shot.kind = 'enemy_shot';
+    shot.id = this.#nextId++;
     shot.def = fighter.def;
     shot.elite = false;
     shot.x = fighter.x;
@@ -1240,10 +1820,13 @@ export class Flight {
     // scene holds the explosion for 1.5 s before the station.
     ship.alive = false;
     this.#phase = 'recalled';
+    this.#recallCause = 'hull';
     this.lead.active = false; // the trip is over: nothing left to lead
+    this.lock.active = false;
+    this.missiles.clear(); // SPEC-070 70-g: removed without effect
     this.#burst(ship.x, ship.y, 0, 4);
     this.#events.emit('player:died', { cause, scene: 'flight' });
-    this.#events.emit('flight:recalled', { planet: this.#cfg.planet.id });
+    this.#events.emit('flight:recalled', { planet: this.#cfg.planet.id, cause: 'hull' });
     this.#missions.resetStages('death');
   }
 
@@ -1306,6 +1889,8 @@ export class Flight {
    */
   #clearToLand(): boolean {
     if (!this.#waveClear()) return false;
+    // SPEC-069 §4.3, E134: the landing wants the ship on approach.
+    if (!this.onApproach) return false;
     const active = this.#missions.active; // the scene's own list — no copy, no iterator
     for (let i = 0; i < active.length; i++) {
       const state = active[i];
@@ -1317,6 +1902,8 @@ export class Flight {
   #arrive(): void {
     this.#phase = 'arrived';
     this.lead.active = false;
+    this.lock.active = false;
+    this.missiles.clear(); // SPEC-070 70-g
     this.#events.emit('flight:arrived', { planet: this.#cfg.planet.id });
   }
 

@@ -67,6 +67,15 @@ export const SURFACE_KEY_OVERRIDES: Readonly<Record<string, Action>> = {
   ShiftRight: 'sprint',
 };
 
+/**
+ * SPEC-070 §4.5: the keys that mean something else in flight, read only while
+ * `input.mode` is `'flight'` — there is nothing to interact with in the sky,
+ * so F fires a missile there. `KEY_BINDINGS` itself is unchanged.
+ */
+export const FLIGHT_KEY_OVERRIDES: Readonly<Record<string, Action>> = {
+  KeyF: 'missile',
+};
+
 /** SPEC-028 §4.1: wheel notches closer than this are one flick of the wheel. */
 export const WHEEL_INTERVAL_MS = 120;
 
@@ -231,8 +240,10 @@ export class KeyboardMouseDriver implements InputDriver {
     if (event.repeat) return; // AC-5: auto-repeat is not a new press
     if (isEditable(event.target)) return; // AC-7
     this.#input.setScheme(SCHEME); // AC-19: any key event, bound or not
-    // SPEC-050 §4.5: on the surface the overrides come first.
-    const binding = (this.#input.mode === 'surface' ? SURFACE_KEY_OVERRIDES[event.code] : undefined) ?? KEY_BINDINGS[event.code];
+    // SPEC-050 §4.5: on the surface the overrides come first; SPEC-070 §4.5
+    // likewise in flight.
+    const overrides = this.#input.mode === 'surface' ? SURFACE_KEY_OVERRIDES : FLIGHT_KEY_OVERRIDES;
+    const binding = overrides[event.code] ?? KEY_BINDINGS[event.code];
     if (binding === undefined) return; // AC-6: browser shortcuts keep working
     // AC-6/AC-21: only a live gameplay scene may swallow a key.
     if (this.#input.gameplayActive && this.#input.enabled) event.preventDefault();
@@ -284,15 +295,20 @@ export class KeyboardMouseDriver implements InputDriver {
     this.#input.setScheme(schemeOf(event));
     if (event.pointerType !== 'mouse') return; // the touch layer owns touch (AC-14)
     // AC-23: button 0 fires. SPEC-038 §4.1 ends button 2's reservation: it
-    // holds `dash`, and the context menu it would open is already prevented above.
+    // holds `dash`, and the context menu it would open is already prevented
+    // above. SPEC-070 §4.5: in flight it fires a missile instead.
     if (event.button === 0) this.#hold('fire', 'mouse:0');
-    else if (event.button === 2) this.#hold('dash', 'mouse:2');
+    else if (event.button === 2) this.#hold(this.#input.mode === 'flight' ? 'missile' : 'dash', 'mouse:2');
   }
 
   #onPointerUp(event: PointerEvent): void {
     if (event.pointerType !== 'mouse') return;
     if (event.button === 0) this.#drop('fire', 'mouse:0');
-    else if (event.button === 2) this.#drop('dash', 'mouse:2');
+    else if (event.button === 2) {
+      // Whatever the mode is now, the button lets go of what it pressed.
+      this.#drop('dash', 'mouse:2');
+      this.#drop('missile', 'mouse:2');
+    }
   }
 
   /**
@@ -344,6 +360,7 @@ export class KeyboardMouseDriver implements InputDriver {
     if (event.pointerType !== 'mouse') return;
     this.#drop('fire', 'mouse:0');
     this.#drop('dash', 'mouse:2');
+    this.#drop('missile', 'mouse:2');
   }
 
   #onVisibility(doc: EventTarget): void {

@@ -66,6 +66,9 @@ const STATION_LOOK: Partial<Look> = { vignette: 0.35, bloomStrength: 0.3, tint: 
 const INSTALL_TOAST_MS = 10_000;
 /** SPEC-042 §4.5: what a flight death cost — the jump's fuel — and what it kept (E5). */
 export const RECALL_DETAIL_TEXT = "Hull breached — ARIA flew you home. The jump's fuel is spent; your cargo is safe.";
+/** SPEC-069 §4.5, E133: the tow's banner and detail — an empty tank, not a breach. */
+export const TOW_BANNER_TEXT = 'Towed home';
+export const TOW_DETAIL_TEXT = "Out of fuel. The jump's oil is spent; your cargo is aboard.";
 const HUB_ENVIRONMENT_INTENSITY = 0.9;
 
 /** SPEC-065 §4.6: `depot` is Command Relay's store, after Character. */
@@ -589,8 +592,8 @@ export class StationScene extends UiScene<'station'> {
     // what the recall cost — and did not — goes on the line beside it.
     if (params.recalled === true) {
       headText?.append(
-        testId(el('p', 'station-recall', 'Emergency recall'), 'recall-banner'),
-        testId(el('p', 'station-recall-detail', RECALL_DETAIL_TEXT), 'recall-detail'),
+        testId(el('p', 'station-recall', params.towed === true ? TOW_BANNER_TEXT : 'Emergency recall'), 'recall-banner'),
+        testId(el('p', 'station-recall-detail', params.towed === true ? TOW_DETAIL_TEXT : RECALL_DETAIL_TEXT), 'recall-detail'),
       );
     }
     if (data !== null) {

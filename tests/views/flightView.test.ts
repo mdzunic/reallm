@@ -16,11 +16,17 @@ import {
   launchRunUp,
   mergeModel,
   SKY_WINDOW,
+  VIEW_CORRIDOR,
+  VIEW_LATERAL_SPEED,
+  wrapAround,
   type FlightFrame,
   type FrameBurst,
   type FrameHazard,
+  type FrameMissile,
+  type FramePickup,
   type FrameShot,
 } from '@/views/FlightView';
+import { COURSE, RAIL } from '@/systems/Flight';
 
 const QUALITY = { starfieldPoints: 40, asteroidCap: 12, maxParticles: 24, post: 'lite' } as unknown as QualitySettings;
 
@@ -280,7 +286,8 @@ describe('FlightView fx (SPEC-020 §4.3)', () => {
     expect(points).toHaveLength(1);
 
     const pool = instanced(scene).filter(
-      (mesh) => mesh.geometry instanceof THREE.PlaneGeometry && (mesh.material as THREE.MeshBasicMaterial).depthTest !== false,
+      // SPEC-069/070's beacons, canister lights and missile glows are named sprite meshes of their own.
+      (mesh) => mesh.geometry instanceof THREE.PlaneGeometry && (mesh.material as THREE.MeshBasicMaterial).depthTest !== false && mesh.name === '',
     );
     expect(pool.map((mesh) => mesh.instanceMatrix.count)).toEqual([QUALITY.maxParticles, 16]);
     for (const mesh of pool) expect((mesh.material as THREE.MeshBasicMaterial).blending).toBe(THREE.AdditiveBlending);
@@ -549,5 +556,65 @@ describe('FlightView cockpit kick (SPEC-045 §4.3)', () => {
     const half = Math.abs(rollAfter(0.5, 20) - still);
     expect(half).toBeGreaterThan(0);
     expect(half).toBeLessThanOrEqual(full / 2);
+  });
+});
+
+// SPEC-069 §4.6 — the view keeps up with a ship anywhere on its plane.
+describe('FlightView free flight (SPEC-069 §4.6)', () => {
+  it('restates the corridor and the lateral top speed it reads', () => {
+    expect(VIEW_CORRIDOR).toBe(COURSE.corridor);
+    expect(VIEW_LATERAL_SPEED).toBe(RAIL.lateralSpeed);
+  });
+
+  it('wraps a value into centre ± half by whole periods', () => {
+    expect(wrapAround(5, 0, 70)).toBe(5);
+    expect(wrapAround(75, 0, 70)).toBe(-65);
+    expect(wrapAround(-75, 0, 70)).toBe(65);
+    expect(wrapAround(10, 200, 70)).toBe(150);
+    for (const v of [-1000, -3, 0, 42, 999]) {
+      const w = wrapAround(v, 123, 70);
+      expect(w).toBeGreaterThanOrEqual(123 - 70);
+      expect(w).toBeLessThan(123 + 70);
+    }
+  });
+
+  it('keeps every star around a camera 200 m off the line', () => {
+    const { scene, camera, view } = setup();
+    const f = frame();
+    f.ship.x = 200;
+    f.ship.y = -90;
+    for (let i = 0; i < 120; i++) view.update(f, 1 / 60);
+    const stars = scene.children.find((node) => (node as THREE.Points).isPoints === true) as THREE.Points;
+    const data = stars.geometry.getAttribute('position').array as Float32Array;
+    for (let i = 0; i < data.length; i += 3) {
+      const worldX = (data[i] as number) + stars.position.x;
+      const worldY = (data[i + 1] as number) + stars.position.y;
+      expect(Math.abs(worldX - camera.position.x)).toBeLessThanOrEqual(70.001);
+      expect(Math.abs(worldY - camera.position.y)).toBeLessThanOrEqual(45.001);
+    }
+  });
+
+  it('draws the beacons always, and pickups and missiles only while there are some', () => {
+    const { scene, view } = setup();
+    const f = frame();
+    f.pickups = new Pool<FramePickup>(() => ({ kind: 'fuel', x: 0, y: 0, depth: 0 }));
+    f.missiles = new Pool<FrameMissile>(() => ({ x: 0, y: 0, depth: 0, vx: 0, vy: 0, vDepth: 0 }));
+    view.update(f, 1 / 60);
+    const instanced = (): THREE.InstancedMesh[] =>
+      scene.children.filter((node): node is THREE.InstancedMesh => (node as THREE.InstancedMesh).isInstancedMesh === true);
+    const visible = (): number => instanced().filter((mesh) => mesh.visible && mesh.count > 0).length;
+    const before = visible();
+    Object.assign(f.pickups.alloc(), { kind: 'missile', x: 3, y: 0, depth: 80 });
+    Object.assign(f.missiles.alloc(), { x: 0, y: 0, depth: 20, vx: 0, vy: 0, vDepth: 75 });
+    view.update(f, 1 / 60);
+    expect(visible()).toBe(before + 4); // canister + light, missile + glow
+    f.pickups.clear();
+    f.missiles.clear();
+    view.update(f, 1 / 60);
+    expect(visible()).toBe(before);
+    // A canister past the draw depth is not drawn.
+    Object.assign(f.pickups.alloc(), { kind: 'oil', x: 3, y: 0, depth: 700 });
+    view.update(f, 1 / 60);
+    expect(visible()).toBe(before);
   });
 });

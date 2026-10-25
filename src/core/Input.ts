@@ -44,7 +44,9 @@ export type Action =
   | 'dash'
   | 'sprint'
   // SPEC-054 §4.5: the flashlight toggle below; does nothing above or in flight.
-  | 'light';
+  | 'light'
+  // SPEC-070 §4.5: a homing missile in flight; nothing reads it on the surface.
+  | 'missile';
 export type Scheme = 'keyboard' | 'touch' | 'gamepad';
 /** The four movement half-axes a key can bind to; they are not actions (AC-4). */
 export type MoveAxis = 'moveUp' | 'moveDown' | 'moveLeft' | 'moveRight';
@@ -82,6 +84,8 @@ export const ACTIONS = [
   'sprint',
   // SPEC-054 §4.5: the flashlight toggle below.
   'light',
+  // SPEC-070 §4.5: a homing missile — F and the right mouse button in flight, MSL on touch.
+  'missile',
 ] as const satisfies readonly Action[];
 
 // ------------------------------------------------------------------ tunables

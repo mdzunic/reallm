@@ -543,11 +543,27 @@ describe('diffHud (AC-115, AC-62)', () => {
   it('notices the flight block appearing and its fields moving', () => {
     const a: HudModel = createHudModel();
     const b = cloneHud(a);
-    b.flight = { shield: [40, 40], hull: [100, 100], throttle: 1, progress: 0, hostiles: 0, storm: false, holding: false };
+    b.flight = {
+      shield: [40, 40],
+      hull: [100, 100],
+      throttle: 1,
+      progress: 0,
+      hostiles: 0,
+      storm: false,
+      holding: false,
+      fuel: [1, 1],
+      burning: false,
+      offApproach: false,
+      missiles: 1,
+    };
     expect(diffHud(a, b)).toEqual(new Set(['flight']));
     const c = cloneHud(b);
     c.flight = { ...c.flight!, progress: 0.5 };
     expect(diffHud(b, c)).toEqual(new Set(['flight']));
+    // SPEC-069/070: the tank and the rack are fields of the same block.
+    const d = cloneHud(c);
+    d.flight = { ...d.flight!, fuel: [0.4, 1], missiles: 0 };
+    expect(diffHud(c, d)).toEqual(new Set(['flight']));
   });
 
   it('is pure: neither model is written', () => {

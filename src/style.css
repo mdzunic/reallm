@@ -7190,3 +7190,200 @@ html.reduce-motion .puzzle-cell {
   font-size: var(--type-sm);
   font-variant-numeric: tabular-nums;
 }
+
+/* ------------------------------------------- SPEC-069: free flight (PLAN R29) */
+/* The tank under the hull: oil's amber-brown, a red edge when low, and a
+   pulse along its edge while straying burns extra (a still edge under reduce
+   motion). */
+.bar-fuel { background: linear-gradient(90deg, #c9853a, #e3a857); }
+
+.bar-row.is-low .bar-fuel { background: linear-gradient(90deg, #ff5a4a, #e5484d); }
+
+.bar-row.is-burning .bar {
+  box-shadow: 0 0 0 1px var(--warn);
+  animation: hud-pulse 0.8s ease-in-out infinite;
+}
+
+html.reduce-motion .bar-row.is-burning .bar {
+  animation: none;
+}
+
+/* The throttle readout and the missile rack share a row. */
+.hud-drive {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+/* SPEC-070 §4.6: MSL and two pips — filled for loaded. */
+.hud-missiles {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 12px;
+  letter-spacing: 0.08em;
+  color: var(--ink);
+  text-shadow: var(--hud-halo);
+}
+
+.hud-missile-label {
+  margin-right: 2px;
+}
+
+.hud-missile-pip {
+  width: 6px;
+  height: 14px;
+  border: 1px solid var(--ink-dim);
+  border-radius: 0;
+  box-shadow: 0 0 2px #000;
+}
+
+.hud-missile-pip.is-loaded {
+  border-color: #ff6a55;
+  background: #ff6a55;
+}
+
+.hud-missiles.is-empty {
+  color: var(--ink-dim);
+}
+
+/* SPEC-070 §4.6: the lock bracket — four corners around the locked ship,
+   placed like the reticle; colour only, so it stands under reduce motion. */
+.hud-lock {
+  position: absolute;
+  box-sizing: border-box;
+  width: 40px;
+  height: 40px;
+  margin: -20px 0 0 -20px;
+  border: 2px solid #ff6a55;
+  clip-path: polygon(0 0, 35% 0, 35% 4px, 4px 4px, 4px 35%, 0 35%, 0 65%, 4px 65%, 4px calc(100% - 4px), 35% calc(100% - 4px), 35% 100%, 65% 100%, 65% calc(100% - 4px), calc(100% - 4px) calc(100% - 4px), calc(100% - 4px) 65%, 100% 65%, 100% 35%, calc(100% - 4px) 35%, calc(100% - 4px) 4px, 65% 4px, 65% 0, 100% 0, 100% 100%, 0 100%);
+  filter: drop-shadow(0 0 2px #000);
+}
+
+.hud-lock.is-hidden {
+  display: none;
+}
+
+/* SPEC-070 §4.6: a refused missile's line, just under the screen centre (the
+   margin keeps it off the reticle; centred, it touches no viewport edge). */
+.hud-refusal {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  margin-top: 34px;
+  transform: translateX(-50%);
+  font-size: 14px;
+  letter-spacing: 0.08em;
+  color: var(--warn);
+  text-shadow: var(--hud-halo);
+  white-space: nowrap;
+}
+
+.hud-refusal.is-hidden {
+  display: none;
+}
+
+/* SPEC-069 §4.5: the course and signal markers — the waypoint's shape, the
+   ship's blue for the course, each canister's tint for a signal. */
+.flight-marker-layer {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.flight-marker {
+  --marker: #7fc4ff;
+
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 18px;
+  height: 18px;
+  margin: -9px 0 0 -9px;
+  will-change: transform;
+}
+
+.flight-marker.is-hidden {
+  display: none;
+}
+
+.flight-marker[data-kind='fuel'] { --marker: #ffb347; }
+.flight-marker[data-kind='oil'] { --marker: #46c2b4; }
+.flight-marker[data-kind='missile'] { --marker: #ff6a55; }
+
+.flight-marker-mark {
+  position: absolute;
+  inset: 0;
+  background: var(--marker);
+  outline: 2px solid #0b0f14;
+  box-shadow: inset 0 0 0 1px #fff;
+}
+
+.flight-marker[data-state='on'] .flight-marker-mark {
+  transform: rotate(45deg) scale(0.8);
+}
+
+.flight-marker.flight-course[data-state='on'] .flight-marker-mark {
+  background: transparent;
+  border: 2px solid var(--marker);
+  transform: rotate(45deg);
+}
+
+.flight-marker[data-state='edge'] .flight-marker-mark {
+  clip-path: polygon(50% 0%, 100% 100%, 0% 100%);
+}
+
+.flight-marker-label {
+  position: absolute;
+  left: -61px;
+  top: 22px;
+  width: 140px;
+  text-align: center;
+  font-size: 13px;
+  color: var(--marker);
+  text-shadow: var(--hud-halo);
+  white-space: nowrap;
+}
+
+/* SPEC-069 §4.5, E133: the tow card — no explosion, a dark cover and two lines. */
+.flight-towed {
+  position: absolute;
+  inset: 0;
+  display: none;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  background: rgba(4, 7, 11, 0.9);
+  color: var(--ink);
+  z-index: 53;
+}
+
+.flight-towed.is-visible {
+  display: flex;
+}
+
+.flight-towed-title {
+  margin: 0;
+  font-size: calc(22px * var(--text-scale));
+  letter-spacing: 0.3em;
+  color: var(--warn);
+}
+
+.flight-towed-line {
+  margin: 0;
+  font-size: var(--type-sm);
+  color: var(--ink-dim);
+}
+
+/* SPEC-070 §4.5: MSL wears the missile red, and dims while the rack is empty
+   (still pressable, so the refusal can say why). */
+button.touch-button.touch-missile {
+  border-color: #ff6a55;
+}
+
+button.touch-button.is-empty {
+  opacity: 0.45;
+}

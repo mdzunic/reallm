@@ -66,11 +66,12 @@ export const MODE_BUTTONS: Readonly<Record<InputMode, readonly Action[]>> = {
   // SPEC-054 §4.5: LIGHT, mounted beside USE in `arc-action` — below only,
   // and only while USE itself is hidden (§4.5's visibility rule, `#applyMode`).
   surface: ['interact', 'dash', 'light', 'pause'],
-  flight: ['throttleUp', 'throttleDown', 'pause'],
+  // SPEC-070 §4.5: MSL beside the throttle pair, on the fire side.
+  flight: ['throttleUp', 'throttleDown', 'missile', 'pause'],
 };
 
 /** Every button the layer builds: the union of `MODE_BUTTONS`, and nothing else. */
-const BUILT_BUTTONS = ['interact', 'dash', 'light', 'throttleUp', 'throttleDown', 'pause'] as const;
+const BUILT_BUTTONS = ['interact', 'dash', 'light', 'throttleUp', 'throttleDown', 'missile', 'pause'] as const;
 
 const BUTTON_LABELS: Readonly<Record<Action, string>> = {
   fire: 'FIRE',
@@ -97,6 +98,8 @@ const BUTTON_LABELS: Readonly<Record<Action, string>> = {
   sprint: 'RUN',
   // SPEC-054 §4.5: shown beside USE, below only (`#applyMode`'s visibility rule).
   light: 'LIGHT',
+  // SPEC-070 §4.5: in flight only, dimmed while the rack is empty.
+  missile: 'MSL',
 };
 
 export class TouchControls {
@@ -251,6 +254,19 @@ export class TouchControls {
    */
   setSprinting(on: boolean): void {
     this.#stick.classList.toggle('is-sprint', on);
+  }
+
+  /**
+   * SPEC-070 §4.5: the MSL button wears the rack — `is-empty` (dimmed, still
+   * pressable, so the refusal can say why) and `data-count` for the e2e.
+   */
+  setMissiles(count: number): void {
+    const button = this.#buttons.get('missile');
+    if (button === undefined) return;
+    const text = String(count);
+    if (button.dataset['count'] === text) return;
+    button.dataset['count'] = text;
+    button.classList.toggle('is-empty', count <= 0);
   }
 
   /** The interact button only exists while the scene offers something (AC-17). */

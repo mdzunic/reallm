@@ -49,19 +49,27 @@ import { director } from '@/scenes/Director';
 import {
   AUTOPILOT_SECONDS,
   CONVERGE_DEPTH,
+  COURSE,
   EXPLOSION_SECONDS,
   engineVolume,
   Flight,
+  FUEL,
   LANDING_SECONDS,
   LAUNCH_SECONDS,
+  MISSILE,
+  RAIL,
   runSkip,
+  SIGNALS,
+  TOW_SECONDS,
   type FlightInput,
+  type PickupKind,
 } from '@/systems/Flight';
 import { Missions } from '@/systems/Missions';
 import { cumulativeXp, LEVEL_CAP, Progression, xpToNext } from '@/systems/Progression';
 import { watchRunStats } from '@/systems/RunStats';
 import { completionLines, quitNote } from '@/systems/UiHelpers';
 import { AriaHint } from '@/ui/AriaHint';
+import { FlightMarkers } from '@/ui/FlightMarkers';
 import { el, h, shortScreen, testId } from '@/ui/dom';
 import { Hud } from '@/ui/Hud';
 import { MissionBanner } from '@/ui/MissionBanner';
@@ -120,6 +128,18 @@ function tripOver(flight: Flight): boolean {
   return flight.phase === 'arrived' || flight.phase === 'recalled';
 }
 
+/** SPEC-069 §4.4, E135: the toast a canister leaves — what it held, or why it held nothing. */
+function pickupLine(kind: PickupKind, taken: boolean): string {
+  switch (kind) {
+    case 'fuel':
+      return taken ? `Fuel cell: +${Math.round(FUEL.cell * 100)} % tank` : 'Fuel cell: the tank is full';
+    case 'oil':
+      return taken ? `Oil pod: +${SIGNALS.oil} oil` : 'Oil pod: the hold is full';
+    case 'missile':
+      return taken ? 'Missile loaded' : `Missile: the rack is full (${MISSILE.rack})`;
+  }
+}
+
 export class FlightScene extends UiScene<'flight'> {
   override readonly pausable = true;
   /** FlightView brings its own key, rim and ambient (PLAN R8). */
@@ -146,6 +166,18 @@ export class FlightScene extends UiScene<'flight'> {
   #explosionT = -1;
   #leaving = false;
   #explosionEl: HTMLDivElement | null = null;
+  /** SPEC-069 §4.5: the tow card, and the seconds it has been up (−1: not yet). */
+  #towEl: HTMLDivElement | null = null;
+  #towT = -1;
+  /** SPEC-069 §4.5: the course marker and the signal markers. */
+  #markers: FlightMarkers | null = null;
+  /** SPEC-070 §4.5: the touch layer, for the MSL button's rack. */
+  #touch: TouchControls | null = null;
+  /** SPEC-069 §4.5, SPEC-070 §4.6: each first-time tip is asked once a trip. */
+  #fuelTipAsked = false;
+  #missileTipAsked = false;
+  /** SPEC-070 §4.6: the lock bracket is up — `sceneInfo.lock`. */
+  #lockShown = false;
   #skipHint: HTMLParagraphElement | null = null;
 
   /** SPEC-071: the launch's run-up has ended (run out, or skipped). */
@@ -193,6 +225,7 @@ export class FlightScene extends UiScene<'flight'> {
     throttleDown: false,
     autoFire: false,
     mouseSteer: false,
+    missile: false,
   };
   readonly #aimScratch = new THREE.Vector3();
   /**
@@ -314,6 +347,16 @@ export class FlightScene extends UiScene<'flight'> {
       // (which reduce motion sets) nothing moves.
       this.#view?.kick(this.services.settings.get().cameraShake);
     }, this));
+    // SPEC-070 §4.6, E136: a refused missile says why under the reticle.
+    this.disposer.add(this.services.events.on('flight:missileRefused', ({ reason }) => this.#hud?.flashRefusal(reason), this));
+    // SPEC-069 §4.2: ARIA's one low-fuel line a trip.
+    this.disposer.add(
+      this.services.events.on('flight:fuelLow', () => this.ui.toast('ARIA: Fuel low — get back on the course line.', 'warn', 4000), this),
+    );
+    // SPEC-069 §4.4, E135: what a canister held — or why it held nothing.
+    this.disposer.add(
+      this.services.events.on('flight:pickup', ({ kind, taken }) => this.ui.toast(pickupLine(kind, taken), taken ? 'good' : 'info', 2500), this),
+    );
     // SPEC-034 §4.10 step 2: a flight mission that finishes in flight is
     // debriefed in flight, and the ledger keeps the station from saying it again.
     // SPEC-042 §4.1: the banner goes up first, and the line waits behind its
@@ -386,8 +429,9 @@ export class FlightScene extends UiScene<'flight'> {
           const hazard = flight.hazards.alloc();
           Object.assign(hazard, {
             kind: 'fighter',
-            x: 0,
-            y: 0,
+            id: flight.newHazardId(),
+            x: flight.ship.x,
+            y: flight.ship.y,
             depth: 60,
             vx: 0,
             vy: 0,
@@ -407,6 +451,29 @@ export class FlightScene extends UiScene<'flight'> {
           });
         },
         clearSky: () => flight.hazards.clear(),
+        // SPEC-069 §6.3: put the ship somewhere on its plane, at rest.
+        park: (x: number, y: number) => {
+          Object.assign(flight.ship, { x, y, vx: 0, vy: 0 });
+        },
+        // SPEC-069 §6.3: set the tank (0…1).
+        setFuel: (fuel: number) => {
+          flight.ship.fuel = fuel;
+        },
+        // SPEC-069 §6.3: a canister `depth` metres ahead, `dx`/`dy` off the ship.
+        dropPickup: (kind: PickupKind, dx: number, dy: number, depth: number) => {
+          Object.assign(flight.pickups.alloc(), {
+            kind,
+            source: 'signal',
+            x: flight.ship.x + dx,
+            y: flight.ship.y + dy,
+            depth,
+            vDepth: -RAIL.baseSpeed * flight.throttleLive,
+          });
+        },
+        // SPEC-070 §6.2: set the rack.
+        setMissiles: (count: number) => {
+          flight.ship.missiles = count;
+        },
       };
       this.disposer.add(() => {
         delete scope.__reallmFlight;
@@ -634,7 +701,11 @@ export class FlightScene extends UiScene<'flight'> {
     // §4.10: steer zone left 60 %, fire hold right, throttle and pause buttons.
     const touch = new TouchControls(uiRootEl(), services.input, services.settings);
     touch.show('flight');
-    this.disposer.add(() => touch.dispose());
+    this.#touch = touch;
+    this.disposer.add(() => {
+      touch.dispose();
+      this.#touch = null;
+    });
 
     // SPEC-015 §6 / E22: the same auto-pause the surface takes on a rotation
     // into portrait, through the pause button's own path (AC-32).
@@ -655,6 +726,17 @@ export class FlightScene extends UiScene<'flight'> {
     // The recall flash and the landing skip hint are the scene's own layers —
     // flight shows no death panel and declines the shared overlay (SPEC-014).
     this.#explosionEl = testId(el('div', 'flight-explosion'), 'flight-explosion');
+    // SPEC-069 §4.5, E133: the tow — no explosion, a card and the station.
+    this.#towEl = testId(
+      h(
+        'div',
+        { class: 'flight-towed', role: 'status', 'aria-live': 'assertive' },
+        h('p', { class: 'flight-towed-title' }, 'OUT OF FUEL'),
+        h('p', { class: 'flight-towed-line' }, 'Command is towing you home.'),
+      ),
+      'flight-towed',
+    );
+    this.ui.mount(this.#towEl, 'overlay');
     this.#skipHint = testId(el('p', 'flight-skip-hint is-hidden', 'Tap or press any key to skip'), 'skip-landing');
     this.ui.mount(this.#explosionEl, 'overlay');
     this.ui.mount(this.#skipHint, 'hud');
@@ -663,6 +745,15 @@ export class FlightScene extends UiScene<'flight'> {
     // hides the strip between lines.
     const guide = el('div', 'guide-layer');
     this.ui.mount(guide, 'hud');
+    // SPEC-069 §4.5: the course and signal markers, on a pass-through layer of their own.
+    const markerLayer = el('div', 'flight-marker-layer');
+    this.ui.mount(markerLayer, 'hud');
+    this.#markers = new FlightMarkers(markerLayer, this.#planet.name);
+    this.disposer.add(() => {
+      this.#markers?.dispose();
+      this.#markers = null;
+      this.ui.unmount(markerLayer);
+    });
     const aria = new AriaHint(guide);
     this.#aria = aria;
     this.disposer.add(() => {
@@ -688,6 +779,8 @@ export class FlightScene extends UiScene<'flight'> {
     this.ui.mount(this.#autopilotEl, 'overlay');
     this.disposer.add(() => {
       if (this.#explosionEl) this.ui.unmount(this.#explosionEl);
+      if (this.#towEl) this.ui.unmount(this.#towEl);
+      this.#towEl = null;
       if (this.#skipHint) this.ui.unmount(this.#skipHint);
       if (this.#autopilotEl) this.ui.unmount(this.#autopilotEl);
       this.#explosionEl = null;
@@ -847,7 +940,9 @@ export class FlightScene extends UiScene<'flight'> {
         this.#advanceLanding(dt);
         break;
       case 'recalled':
-        this.#advanceRecall(dt);
+        // SPEC-069 §4.5: an empty tank is a tow, not an explosion.
+        if (flight.recallCause === 'fuel') this.#advanceTow(dt);
+        else this.#advanceRecall(dt);
         break;
       default:
         break;
@@ -857,6 +952,16 @@ export class FlightScene extends UiScene<'flight'> {
     if (this.#throttleTipIn > 0) {
       this.#throttleTipIn -= dt;
       if (this.#throttleTipIn <= 0) this.#showTip('flight_throttle');
+    }
+    // SPEC-069 §4.5: the fuel tip, the first time the tank burns extra.
+    if (!this.#fuelTipAsked && flight.fuelBurn > 0 && this.#launchDone) {
+      this.#fuelTipAsked = true;
+      this.#showTip('flight_fuel');
+    }
+    // SPEC-070 §4.6: the missile tip, the first time a lock is up with one loaded.
+    if (!this.#missileTipAsked && flight.lock.active && flight.ship.missiles > 0) {
+      this.#missileTipAsked = true;
+      this.#showTip('flight_missile');
     }
     // SPEC-035 §4.11: the hum rides the throttle.
     this.#stepEngineHum(dt, flight.ship.throttle);
@@ -877,6 +982,8 @@ export class FlightScene extends UiScene<'flight'> {
     frame.autoFire = state.autoFire;
     frame.throttleUp = this.#edges.pressed('throttleUp');
     frame.throttleDown = this.#edges.pressed('throttleDown');
+    // SPEC-070 §4.5: one missile per press, sampled like the throttle (B-03).
+    frame.missile = this.#edges.pressed('missile');
     frame.mouseSteer = this.services.settings.flightMouseSteer && state.scheme === 'keyboard' && state.aim.hasPointer;
     // SPEC-036 §4.1: only the keyboard scheme aims by the mouse. A finger has
     // no hover, so on touch the guns look down the ship's own lane — the
@@ -927,7 +1034,15 @@ export class FlightScene extends UiScene<'flight'> {
       flightModel.hostiles = flight.hostiles;
       flightModel.storm = flight.stormActive;
       flightModel.holding = flight.phase === 'holding';
+      // SPEC-069 §4.5: the tank and its extra burn; §4.3: off approach.
+      flightModel.fuel[0] = flight.ship.fuel;
+      flightModel.fuel[1] = 1;
+      flightModel.burning = flight.fuelBurn > 0;
+      flightModel.offApproach = !flight.onApproach;
+      // SPEC-070 §4.6: the rack.
+      flightModel.missiles = flight.ship.missiles;
     }
+    this.#touch?.setMissiles(flight.ship.missiles);
 
     // §4.8: the objective row, with the throttle hint when the survive
     // objective cannot fit the remaining trip (13-b, AC-89).
@@ -960,6 +1075,56 @@ export class FlightScene extends UiScene<'flight'> {
     } else {
       hud.hideLeadPip();
     }
+
+    // SPEC-070 §4.6: the lock bracket, on the locked ship while one is loaded.
+    const lock = flight.lock;
+    this.#lockShown = lock.active && flight.ship.missiles > 0;
+    if (this.#lockShown) {
+      scratch.set(lock.x, lock.y, -lock.depth).project(this.camera);
+      hud.setLock(scratch.x, scratch.y);
+    } else {
+      hud.hideLock();
+    }
+    this.#feedMarkers(flight);
+  }
+
+  /**
+   * SPEC-069 §4.5: the course point on the line `COURSE.markerDepth` ahead and
+   * every signal canister in flight, projected through the camera into CSS
+   * pixels for `FlightMarkers`. Hidden once the trip is over.
+   */
+  #feedMarkers(flight: Flight): void {
+    const markers = this.#markers;
+    if (markers === null) return;
+    if (tripOver(flight) || !this.#launchDone) {
+      markers.hideCourse();
+      markers.beginSignals();
+      markers.endSignals();
+      return;
+    }
+    const width = globalThis.innerWidth;
+    const height = globalThis.innerHeight;
+    const scratch = this.#aimScratch;
+    const offLine = flight.offLine;
+    // Every anchor is ahead on the rail, so none is ever behind the camera —
+    // only past its far plane, where the projection's x and y still hold.
+    scratch.set(0, 0, -COURSE.markerDepth).project(this.camera);
+    markers.setCourse((scratch.x * 0.5 + 0.5) * width, (-scratch.y * 0.5 + 0.5) * height, false, offLine, offLine > COURSE.corridor);
+    markers.beginSignals();
+    const ship = flight.ship;
+    for (let i = 0; i < flight.pickups.size; i++) {
+      const pickup = flight.pickups.at(i);
+      if (pickup.source !== 'signal' || pickup.depth < RAIL.hitDepth) continue;
+      scratch.set(pickup.x, pickup.y, -pickup.depth).project(this.camera);
+      markers.addSignal(
+        pickup.kind,
+        (scratch.x * 0.5 + 0.5) * width,
+        (-scratch.y * 0.5 + 0.5) * height,
+        false,
+        Math.hypot(pickup.x - ship.x, pickup.y - ship.y),
+      );
+    }
+    markers.endSignals();
   }
 
   /**
@@ -1266,6 +1431,23 @@ export class FlightScene extends UiScene<'flight'> {
     void this.services.go('station', { recalled: true });
   }
 
+  /**
+   * SPEC-069 §4.5, E133: the tow — the card for `TOW_SECONDS`, the hum cut,
+   * then the station with `towed`, whose banner names it. No explosion.
+   */
+  #advanceTow(dt: number): void {
+    if (this.#towT < 0) {
+      this.#towT = 0;
+      this.#towEl?.classList.add('is-visible');
+      this.#skipHint?.classList.add('is-hidden');
+      this.#stopEngineHum();
+    }
+    this.#towT += dt;
+    if (this.#towT < TOW_SECONDS || this.#leaving) return;
+    this.#leaving = true;
+    void this.services.go('station', { recalled: true, towed: true });
+  }
+
   // -------------------------------------------------------------- pause hooks
 
   pause(): void {
@@ -1321,6 +1503,18 @@ export class FlightScene extends UiScene<'flight'> {
       // card or not — comma-separated, the row's values being flat, and '-'
       // before any has (the debug row has no empty values).
       info['contacts'] = this.#contacts.length === 0 ? '-' : this.#contacts.join(',');
+      // SPEC-069 §4.5: the tank, the distance off the line, on approach, the
+      // signals (planned/spawned/taken) and what ended the trip ('-' while it runs).
+      info['fuel'] = Number(flight.ship.fuel.toFixed(3));
+      info['offLine'] = Number(flight.offLine.toFixed(2));
+      info['approach'] = flight.onApproach ? 1 : 0;
+      const signals = flight.signalCounts;
+      info['signals'] = `${signals.planned}/${signals.spawned}/${signals.taken}`;
+      info['recallCause'] = flight.recallCause ?? '-';
+      // SPEC-070 §4.6: the rack, the lock bracket, and missiles in flight.
+      info['missiles'] = flight.ship.missiles;
+      info['lock'] = this.#lockShown ? 1 : 0;
+      info['missilesFlying'] = flight.missiles.size;
     }
     return info;
   }
