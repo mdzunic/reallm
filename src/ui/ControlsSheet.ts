@@ -39,6 +39,8 @@ export const CONTROL_ROWS: Readonly<Record<'keyboard' | 'touch', readonly Contro
     { what: 'Choose what a slot holds', how: 'right-click the slot on the bar' },
     // SPEC-034 §4.16: X, not Ctrl — Ctrl+W closes the tab next to WASD.
     { what: 'Throttle (flight)', how: 'Shift up · X down', actions: ['throttleUp', 'throttleDown'] },
+    // SPEC-070 §4.5: F and the right button, through the flight's key overrides.
+    { what: 'Missile (flight)', how: 'F or Right mouse — with a lock', actions: ['missile'] },
     // SPEC-026 §4.5, §4.7: M opens the surface map, + and − zoom it.
     { what: 'Map', how: 'M · zoom + / −', actions: ['map'] },
     { what: 'Track mission', how: 'T', actions: ['track'] },
@@ -61,6 +63,8 @@ export const CONTROL_ROWS: Readonly<Record<'keyboard' | 'touch', readonly Contro
     { what: 'Run', how: 'Push the stick past its ring' },
     // SPEC-045 §4.6: the buttons read + and −, as they are drawn.
     { what: 'Throttle (flight)', how: '+ / − buttons' },
+    // SPEC-070 §4.5: beside the throttle pair.
+    { what: 'Missile (flight)', how: 'MSL button — with a lock' },
     // SPEC-028 §4.5: the bar doubles as the touch buttons. SPEC-037 §4.10:
     // it is the only way now — the weapon-cycle and item buttons are gone.
     { what: 'Switch weapon', how: 'Tap a weapon on the bar' },

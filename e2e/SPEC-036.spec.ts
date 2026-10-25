@@ -267,7 +267,8 @@ test.describe('1. the flight aims straight ahead on touch (§4.1)', () => {
     await startTouch(page, '/?scene=flight&planet=cinder4');
     await settle(page, 'flight');
     expect((await input(page)).scheme).toBe('touch');
-    // A tap on the play surface ends the launch shot (SPEC-032 §4.2).
+    // A tap on the play surface during the launch steers nothing and ends nothing
+    // (SPEC-071): the launch runs its 3 s and reads 1 after them.
     await fingers(page, [
       { type: 'pointerdown', id: 9, x: 700, y: 120 },
       { type: 'pointerup', id: 9, x: 700, y: 120 },

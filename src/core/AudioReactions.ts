@@ -215,7 +215,15 @@ export type ReactedEvent =
   | 'commendation:earned'
   // SPEC-068 §4.4: a hazard's warning, and its landing.
   | 'hazard:warn'
-  | 'hazard:burst';
+  | 'hazard:burst'
+  // SPEC-069 §4.7: a signal in range, a canister taken, the tank low.
+  | 'flight:signal'
+  | 'flight:pickup'
+  | 'flight:fuelLow'
+  // SPEC-070 §4.7: a missile away, refused, and on target.
+  | 'flight:missileFired'
+  | 'flight:missileRefused'
+  | 'flight:missileHit';
 
 /**
  * The 38 events of §5.4 that deliberately make none (and those later specs
@@ -398,6 +406,22 @@ export const AUDIO_REACTIONS: { [K in ReactedEvent]: Reaction<K> } = {
   'dialogue:started': (p) =>
     GLITCH_DIALOGUE_IDS.has(p.id) ? { id: 'ui_glitch', opts: { priority: 2 } } : { id: 'ui_dialogue_open' },
   'flight:arrived': () => ({ id: 'landing_thrusters' }),
+  /** SPEC-069 §4.7: the UI blip as a signal's marker comes up. */
+  'flight:signal': () => ({ id: 'ui_blip', opts: { minIntervalMs: 200 } }),
+  /**
+   * SPEC-069 §4.7: the generic chime for a fuel cell or a missile taken. An
+   * oil pod already chimes through `resource:collected`, and a canister with
+   * no room makes no sound of its own.
+   */
+  'flight:pickup': (p) => (p.taken && p.kind !== 'oil' ? { id: 'pickup_generic', opts: { minIntervalMs: 80 } } : null),
+  /** SPEC-069 §4.7: the warn, loud enough to hold a voice — once a trip. */
+  'flight:fuelLow': () => ({ id: 'ui_warn', opts: { priority: 2 } }),
+  /** SPEC-070 §4.7: the launcher's thump as a missile leaves the rack. */
+  'flight:missileFired': () => ({ id: 'shot_launcher', opts: { priority: 1 } }),
+  /** SPEC-070 §4.7: a refusal warns, 300 ms apart at most. */
+  'flight:missileRefused': () => ({ id: 'ui_warn', opts: { minIntervalMs: 300 } }),
+  /** SPEC-070 §4.7: the explosion of a missile on its target. */
+  'flight:missileHit': () => ({ id: 'explosion', opts: { minIntervalMs: 60 } }),
   /** SPEC-054 §4.13: the switch click, unpositioned — it is the player's own hand. */
   'light:toggled': () => ({ id: 'light_click', opts: { volume: 0.6 } }),
   /** SPEC-054 §4.13: positioned at the cache, like every other x/z event here. */

@@ -236,7 +236,24 @@ export type GameEvents = {
   'dialogue:ended': { id: DialogueId };
   'ship:damaged': { shield: number; hull: number; source: 'asteroid' | 'enemy' | 'storm' };
   'flight:arrived': { planet: PlanetId };
-  'flight:recalled': { planet: PlanetId };
+  /** SPEC-069 §4.2: `hull` for a ship shot down, `fuel` for an empty tank's tow (E133). */
+  'flight:recalled': { planet: PlanetId; cause: 'hull' | 'fuel' };
+  /** SPEC-069 §4.4: a salvage signal came into range — its marker is up. */
+  'flight:signal': { kind: 'fuel' | 'oil' | 'missile' };
+  /**
+   * SPEC-069 §4.4: a canister crossed the ship's plane within reach — a
+   * signal's or a downed ship's (SPEC-070). `taken` is false when the tank,
+   * the rack or the hold had no room for it (E135).
+   */
+  'flight:pickup': { kind: 'fuel' | 'oil' | 'missile'; source: 'signal' | 'drop'; taken: boolean };
+  /** SPEC-069 §4.2: the tank reached `FUEL.low` — once a trip. */
+  'flight:fuelLow': Record<string, never>;
+  /** SPEC-070 §4.2: a missile left the rack toward the lock. */
+  'flight:missileFired': { x: number; y: number };
+  /** SPEC-070 §4.2, E136: a press with no lock or an empty rack fired nothing. */
+  'flight:missileRefused': { reason: 'no_lock' | 'empty' };
+  /** SPEC-070 §4.3: a missile reached its target; `kill` when the target died of it. */
+  'flight:missileHit': { x: number; y: number; depth: number; kill: boolean };
   /**
    * SPEC-041 §4.9: every player shot that hits a hazard, on the steering plane
    * — `lethal` when it was the kill. The reticle flashes and `ship_hit_tick`

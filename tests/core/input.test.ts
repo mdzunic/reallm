@@ -24,7 +24,7 @@ import {
   TOUCH_SPRINT_TRAVEL,
   zoneFor,
 } from '@/core/Input';
-import { KEY_BINDINGS, KeyboardMouseDriver, SURFACE_KEY_OVERRIDES } from '@/core/KeyboardMouseDriver';
+import { FLIGHT_KEY_OVERRIDES, KEY_BINDINGS, KeyboardMouseDriver, SURFACE_KEY_OVERRIDES } from '@/core/KeyboardMouseDriver';
 import type { EventBus } from '@/core/Services';
 import { createSettings } from '@/core/Settings';
 
@@ -857,7 +857,7 @@ describe('KeyboardMouseDriver', () => {
       input.setMode(mode);
       for (const [code, bound] of Object.entries(KEY_BINDINGS)) {
         if (bound.startsWith('move')) continue;
-        const action = (mode === 'surface' ? SURFACE_KEY_OVERRIDES[code] : undefined) ?? (bound as 'fire');
+        const action = (mode === 'surface' ? SURFACE_KEY_OVERRIDES[code] : FLIGHT_KEY_OVERRIDES[code]) ?? (bound as 'fire');
         win.fire('keydown', keyEvent(code));
         input.beginFrame(DT);
         expect(input.state.buttons[action].down, `${mode} ${code}`).toBe(true);
@@ -1166,11 +1166,16 @@ describe('KeyboardMouseDriver', () => {
 
 describe('the sprint action (SPEC-050 §4.5)', () => {
   it('is the eighteenth action, and every state carries it', () => {
-    // SPEC-054 §4.5 appends `light` after it, so `sprint` is no longer last —
-    // its own index is what this pins now.
-    expect(ACTIONS).toHaveLength(19);
+    // SPEC-054 §4.5 appends `light` after it, and SPEC-070 §4.5 `missile`, so
+    // `sprint` is no longer last — its own index is what this pins now.
+    expect(ACTIONS).toHaveLength(20);
     expect(ACTIONS.indexOf('sprint')).toBe(17);
     expect(new Input().state.buttons.sprint).toEqual({ down: false, justPressed: false, justReleased: false, heldFor: 0 });
+  });
+
+  it('FLIGHT_KEY_OVERRIDES is F to a missile (SPEC-070 §4.5), and F still interacts on the surface', () => {
+    expect(FLIGHT_KEY_OVERRIDES).toEqual({ KeyF: 'missile' });
+    expect(KEY_BINDINGS['KeyF']).toBe('interact');
   });
 
   it('SURFACE_KEY_OVERRIDES is both Shifts to sprint, and KEY_BINDINGS is unchanged', () => {
@@ -1249,9 +1254,10 @@ describe('the sprint action (SPEC-050 §4.5)', () => {
 });
 
 describe('the light action (SPEC-054 §4.5)', () => {
-  it('is the nineteenth and last action, and every state carries it', () => {
-    expect(ACTIONS).toHaveLength(19);
-    expect(ACTIONS.at(-1)).toBe('light');
+  it('is the nineteenth action, and every state carries it', () => {
+    // SPEC-070 §4.5 appends `missile` after it.
+    expect(ACTIONS).toHaveLength(20);
+    expect(ACTIONS.indexOf('light')).toBe(18);
     expect(new Input().state.buttons.light).toEqual({ down: false, justPressed: false, justReleased: false, heldFor: 0 });
   });
 

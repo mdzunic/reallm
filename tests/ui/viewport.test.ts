@@ -107,6 +107,8 @@ const NOT_VIEWPORT_ANCHORED: Readonly<Record<string, string>> = {
   '.starmap-info': 'inside .starmap-root, in the console frame body',
   '.hud-reticle::after': 'inside .hud-reticle (position: absolute)',
   '.waypoint-dist': 'inside .waypoint (position: absolute)',
+  // SPEC-069 §4.5: a marker's label hangs off its marker, like the waypoint's.
+  '.flight-marker-label': 'inside .flight-marker (position: absolute)',
 };
 
 /** A centring or pull-back offset, not a gutter: `0`, `auto`, `50%`, negatives. */

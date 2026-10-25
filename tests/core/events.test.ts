@@ -616,6 +616,14 @@ const NAMES: Record<keyof GameEvents, true> = {
   'flight:hazardHit': true,
   // SPEC-063 §4.5: a wave group's ships are in the sky.
   'flight:groupSpawned': true,
+  // SPEC-069 §3: a signal in range, a canister taken or passed, the low tank.
+  'flight:signal': true,
+  'flight:pickup': true,
+  'flight:fuelLow': true,
+  // SPEC-070 §3: a missile away, refused and on target.
+  'flight:missileFired': true,
+  'flight:missileRefused': true,
+  'flight:missileHit': true,
   // SPEC-054 §4.2, §4.5, §4.8: a level swap, the flashlight toggle and a cache opening.
   'level:changed': true,
   'light:toggled': true,
@@ -652,8 +660,10 @@ describe('GameEvents (§3.2)', () => {
     // SPEC-057 §4.8 `remains:created`, `remains:recovered` and `remains:lost`;
     // SPEC-059 §4.4.3 `commendation:earned`; SPEC-063 §4.5 `flight:groupSpawned`;
     // review 2026-10 (G-17) `player:sprinted`; SPEC-068 §4.4 `hazard:warn` and
-    // `hazard:burst`.
-    expect(Object.keys(NAMES)).toHaveLength(86);
+    // `hazard:burst`; SPEC-069 §3 `flight:signal`, `flight:pickup` and
+    // `flight:fuelLow`; SPEC-070 §3 `flight:missileFired`,
+    // `flight:missileRefused` and `flight:missileHit`.
+    expect(Object.keys(NAMES)).toHaveLength(92);
   });
 
   it('still carries the nine names SPEC-002 and SPEC-003 already emit', () => {

@@ -2099,6 +2099,14 @@ export interface HudModel {
     hostiles: number;
     storm: boolean;
     holding: boolean;
+    /** SPEC-069 §4.5: the tank, 0…1 of 1. */
+    fuel: [number, number];
+    /** SPEC-069 §4.5: the extra burn is running — the ship is past the corridor. */
+    burning: boolean;
+    /** SPEC-069 §4.3: holding because the ship is off approach. */
+    offApproach: boolean;
+    /** SPEC-070 §4.6: missiles in the rack. */
+    missiles: number;
   };
 }
 

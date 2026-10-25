@@ -752,6 +752,79 @@ Specs:
 
 ---
 
+**R29 — 2026-10-25 (free flight: open steering, a fuel tank, salvage off the line, homing missiles, a launch from the cockpit and an armoured tug).** Players sent four points about the trip to a planet:
+- "Flights to the planets are not intuitive." The ship cannot move freely on X and Y, and the "autopilot always oversteers to the middle". They asked to move freely, with a pointer to the target when it is out of sight, and a fuel bar that runs out for a pilot who strays too far.
+- They want missiles that track enemy ships, only one or two at a time, which kills sometimes drop.
+- The start of a trip flickers: the ship shows from outside for a moment, then the cockpit.
+- The ship looks like a toy.
+
+The code agrees with all four:
+- **The steering plane is ±12 × ±7 m.** At 14 m/s the ship crosses half of it in under a second and bounces off the edge at −0.3 × its velocity. A released stick stops the ship within a tenth of a second (damping e^(−6 dt)). That edge is the "autopilot" that pulls to the middle.
+- **There is nowhere to go and nothing to go for.** The planet sits on the line, and hazards spawn on the same small plane.
+- **The launch shot (SPEC-032 §4.1) cuts.** It holds 1.1 s behind the tug, then pushes into the cockpit. A tap or a fresh steering key skips it at once, so most launches cut from outside to inside.
+- **The tug is 2 m long.** It has a bubble canopy, rounded boxes and tube engines, and from close up it reads as a toy.
+
+The rail, the trip's duration formula, the waves, the arrival rule and every SPEC-010 invariant stay. Decisions:
+
+1. **Open steering (SPEC-069, §4, §13 E132).**
+   - The ±12 × ±7 m box goes. The ship moves anywhere on its plane up to a nav limit 220 m from the course line, where it stops without a bounce.
+   - Nothing pulls it back. The ship coasts: a released stick damps at e^(−2.5 dt). Lateral speed rises to 22 m/s and acceleration to 36 m/s² (*initial tuning*).
+   - The keys always steer. Before, mouse steer (on by default) ignored them for good once the mouse had moved, even for the click on Start. A held steering key now wins over mouse steer, and mouse steer ignores a pointer within 2.5 m of the ship (about 2°), so a pointer near the centre holds the ship still rather than creeping it off the line.
+   - The ideal line is the straight course to the planet, through the plane's origin. The planet is drawn on it, so a ship that strays sees the planet move aside.
+   - The fight comes with the ship. Asteroids, fighters and interceptors spawn in the ±12 × ±7 m window around the ship rather than around the line, and fighters follow the ship.
+   - The first trip's asteroid lane (SPEC-066 §4.9) stays on the line. Its rocks fill the window around the ship, except the lane.
+2. **The course marker (SPEC-069).**
+   - A diamond named for the destination marks the line 80 m ahead of the ship.
+   - When that point is off screen, the marker rides the edge as an arrow toward the line, with the distance back to it.
+   - Nav beacons stream past along the line, so the line itself can be seen.
+3. **The fuel tank (SPEC-069, §13 E133, E134).**
+   - Fuel is still oil paid at departure (§4, E5). In flight it fills the ship's tank, which a bar under the hull shows.
+   - Flying the line burns the tank in proportion to the trip's progress. Whatever the throttle, a ship that keeps to the line arrives with 35 % left.
+   - Off the line the tank burns faster. Inside a 16 m corridor nothing extra burns. Beyond it the extra burn grows with the square of the distance past the corridor: 0.6 % a second at 66 m, 2.4 % a second at 116 m (*initial tuning*). The bar shows the extra burn, and at 25 % ARIA warns once.
+   - Holding burns no base fuel, but straying while holding still burns.
+   - The ship lands only within 30 m of the line. A ship off approach at the trip's end holds until it is back. The 90 s holding cap still lands it (E12).
+   - An empty tank means a tow: the engines die and Command tows the ship home. As with a recall (E5), the jump's oil stays spent, cargo stays aboard and the flight mission's stage resets. It is not a death: no death is counted, nothing goes to remains and hard keeps the depot whole. The station says "Towed home — out of fuel".
+   - On story the tank never falls below 5 %.
+   - Nothing about the tank is saved. Every trip starts full, and the return trip stays instant.
+4. **Salvage signals (SPEC-069, §13 E135).**
+   - Each trip carries 3–5 signals, seeded from the visit, 40–110 m off the line between 12 % and 88 % of the trip.
+   - A signal shows 12 trip seconds before the ship reaches it, as a marker with its distance, and arrives as a canister. Flying within 3 m takes it, and an 8 m tractor helps.
+   - A signal holds a fuel cell (+20 % of the tank, 40 % of signals), an oil pod (+4 oil into the hold as a pickup, 35 %) or a missile (+1, 25 %).
+   - No signal comes in the holding pattern, and a skipped run (SPEC-032 §4.5) collects none.
+5. **Homing missiles (SPEC-070, §13 E136, E137).**
+   - The ship carries a rack of two, and every trip launches with one loaded. Nothing about the rack is saved.
+   - A missile fires on `F`, the right mouse button or the touch MSL button, and only with a lock. The lock is the enemy ship nearest the reticle inside a 20° cone, and a bracket marks it.
+   - A missile flies at 75 m/s and turns at 4 rad/s toward its target. If the target dies first it retargets once, and otherwise flies straight for 4 s. It deals 80, which downs any flight enemy, and 40 to others within 4 m.
+   - A downed fighter or interceptor drops a missile canister 15 % of the time (*initial tuning*), drawn on a stream of its own. A full rack leaves the canister.
+   - A missile kill is a kill: XP, salvage and kill objectives count it.
+6. **The launch from the cockpit (SPEC-071, supersedes SPEC-032 §4.1).**
+   - The exterior shot is gone. Every trip opens in the cockpit, in the cruise pose, with no cut.
+   - The 3 s launch keeps its rules: no hazards and no weapons. The stars run up from still to cruise speed, the engine hum fades in with them, and the cockpit settles out of a light shake.
+   - The chapter card, the accept lines and the tips keep their times. With nothing left to skip, the launch's "tap to skip" hint goes.
+   - Under reduce motion there is no shake; the stars still run up.
+7. **The armoured tug (SPEC-072).**
+   - The salvager's ship is still the tug CR-62, and the story still calls it one.
+   - Its model is rebuilt as an armoured salvage tug: an angular hull in layered armour plates, a slit-windowed cockpit in place of the bubble, a dorsal gun turret, the missile rack's two pods, recessed engine bells that glow, running lights, antennas, a grapple boom, and finer panel detail that gives it scale.
+   - It keeps its bounding box, its origin and its skids, so the menu, the station and the pad place it unchanged.
+8. **Milestone M7q "Free flight"** carries SPEC-069 to SPEC-072.
+9. **Not now.**
+   - Turning the ship. The heading stays forward, on the rail.
+   - Missiles on the surface, in the shop or in the save.
+   - A bigger tank or a lower burn bought as an upgrade.
+   - Re-rendering the films that show the tug, and rebuilding the scav fighter from the new tug. Both keep the old tug until a later drop.
+   - New sounds: the cues reuse the ship and UI banks.
+
+Specs:
+- SPEC-069 (decisions 1–4).
+- SPEC-070 (decision 5).
+- SPEC-071 (decision 6).
+- SPEC-072 (decision 7).
+- SPEC-000's queue and build order.
+
+(§3, §4, §10, §13)
+
+---
+
 ## 1. Vision & Inspiration
 
 **ReaLLM** ("real" + "LLM"): a space post-apocalyptic ARPG whose hero slowly works out that he may be a language model running inside a machine.
@@ -800,7 +873,7 @@ Language: English UI. Art: **stylised PBR** (R6) — procedural + CC0 low-poly m
 - **Data-driven content**: planets, enemies, items, upgrades, missions, dialogue as TS data files — content without code changes. A content-invariant test validates every cross-reference (§11).
 - **Event bus** (typed pub/sub) decouples UI ↔ gameplay (e.g. `resource:collected`, `player:leveledUp`). Subscriptions are owned by the scene and released on exit.
 - **Entity pooling** for projectiles/particles/asteroids; **instanced meshes** for swarms; **seeded RNG** per planet for reproducible procedural layout (layout stream is deterministic from save seed + planet; runtime streams are re-seeded per visit).
-- Gameplay simulation on the surface is **2D on the XZ plane** (circle collisions); Y is visual only. Flight is a bounded 2D steering plane with depth-sorted hazards. No 3D physics anywhere.
+- Gameplay simulation on the surface is **2D on the XZ plane** (circle collisions); Y is visual only. Flight is a 2D steering plane with depth-sorted hazards, free of the course line since R29 out to a 220 m nav limit. No 3D physics anywhere.
 - Pure logic (economy, combat math, missions, save) lives in framework-free modules → unit-testable. Three.js only appears in `scenes/`, `views/`, and the `core/` render modules (`Renderer`, `PostChain`, `Assets`, `Disposer`, `Benchmark`); every scene draws through the one `Renderer.render()` seam, which owns the post-processing chain (R6).
 
 ### Project structure
@@ -865,7 +938,7 @@ Purchasable, upgradable followers (levels 1–3) that persist across scenes; eac
 ### Combat
 
 - **Ground**: real-time ARPG — move/aim, attack, enemy AI (melee rushers, ranged spitters, swarm bugs, static targets), loot drops, elites (5 %, ×3 HP) + planet boss with phases. Since R18 the salvager can dash, enemy attacks commit behind ground telegraphs, enemies come in packs led by elites with affixes, each boss has a move list and drops one signature weapon on its first kill, and bosses and elites no longer drop the rifle and armour ladder. Since R19 the salvager can run (×1.35): running holsters the gun and is loud, and in combat it spends stamina (100; 25/s, refilled at 20/s after 0.8 s), which the dash also draws on (30). Since R20 relics — arsenal side-grades with one twist each, found in cave vaults — hang on a rack, not in the pack.
-- **Space**: arcade first-person **rail** flight — constant forward motion, lateral steering, laser fire, asteroid dodging, enemy ship waves, shield/hull damage. Fuel is charged **per jump, up front**; the return trip is instant autopilot. Since R24 the enemy ships say who they are: scavengers fly tugs rebuilt as fighters, and the Hive grows its interceptors. Each kind is introduced by a contact card on its first trip.
+- **Space**: arcade first-person **rail** flight — constant forward motion, lateral steering, laser fire, asteroid dodging, enemy ship waves, shield/hull damage. Fuel is charged **per jump, up front**; the return trip is instant autopilot. Since R24 the enemy ships say who they are: scavengers fly tugs rebuilt as fighters, and the Hive grows its interceptors. Each kind is introduced by a contact card on its first trip. Since R29 the ship steers freely off the course line, a course marker points back to it, and the jump's oil fills a tank that straying drains; an empty tank is a tow home. Salvage signals off the line hold fuel cells, oil and missiles, and the ship carries a rack of two homing missiles that kills sometimes refill. Every trip opens in the cockpit.
 - **Death**: surface → respawn at the landing pad, lose 10 % of carried resources (normal difficulty), timed stages restart, enemies near the pad despawn, boss resets. Since R21 the loss waits in the remains where the salvager fell, until it is recovered or a second death takes it. Flight → emergency recall to the station, fuel is lost, cargo is kept.
 - **Loadout (R10)**: three weapon slots — sidearm, primary, heavy — switched with 1 / 2 / 3, R or the wheel, or a tap on the quick bar (0.25 s to switch). Handguns and rifles fire freely; machine guns heat up and lock until they cool; launchers hold one or three charges and recharge. Cooldowns run while a weapon is holstered, so fights are won by combining them. Auto-fire never fires the heavy slot; a locked machine gun hands fire to the sidearm (on touch only until R27, on every scheme since). Since R18 auto-fire is on by default on every scheme, and on touch a tap on the launcher's slot fires one charge at the nearest enemy. Three quick slots on the HUD — heal (Q), explosive (G), utility (C) — show what they hold and how many. Since R27 a heal locks the heal slot for 8 s (medkit) or 5 s (ration), and a slot emptied in combat refills from the pack only once the fight is over. Explosives are consumables: frag grenades (thrown), proximity mines and demolition charges (placed). Blasts never hurt the player.
 
@@ -1170,6 +1243,7 @@ Storage rules: 3 slots, key per slot plus a `.bak` copy of the previous good sav
 | M7n | The Relay depot (R26): the pad terminal ships what the hold carries above a reserve home to Command Relay; the station's Depot tab draws it back; departures and the subsidy count the depot's oil; save v4 (SPEC-065) | On a full hold, the pad terminal ships the oil above a reserve of 100 and the hold reads 100. The station's Depot tab shows it and draws it back up to the cap. A departure is paid from the depot when the hold is short, and no subsidy is granted while the depot can pay. A v3 save loads with an empty depot, and an older build refuses a v4 save. Checked on desktop and the reference phone; tag `m7n` |
 | M7o | Pressure that holds (R27): a heal cooldown, quick slots that refill only out of combat, a drone that follows the gun, kill XP by chapter, half-paid boss contracts, a ten-egg Egg Hunt, cargo racks, Hard's death at the depot, and a first ten minutes with something in them (SPEC-066) | A medkit cannot be used twice within 8 s; a medkit stack emptied mid-fight refills only after the fight; the kite bot keeps the Ash Titan inside 100 % of max HP; a Hive drone kill pays 7 XP; a Queen contract pays 50 tokens; Dry Land's storm lasts 30 s and the first trip to Cinder-4 has an asteroid lane whose big rocks drop oil. Checked on desktop and the reference phone; tag `m7o` |
 | M7p | The ground under the fight (R28): a ground that varies in tone and material, rubble, biome dressing and a landing site; traps on every planet; helpers the player sets off with a shot — topplers and volatiles; hazard kills credited to the player (SPEC-067, SPEC-068) | Every landing frame shows dressing on every planet; the surface stays within 96 draws and 60 k triangles at spawn on `medium`; on Cinder-4 a shot balanced rock falls the shot's way and kills the skitters in its lane, a drum chain clears a pack, and a tripmine hurts a player who walks onto it but not on story; a kill by a hazard counts for `c1_m2`; nothing fires underground or beyond 45 m; checked on desktop and the reference phone; tag `m7p` |
+| M7q | Free flight (R29): open steering out to a 220 m nav limit with nothing pulling back; a course marker with an edge arrow and nav beacons on the line; a fuel tank that straying drains and an empty tank that tows the ship home; salvage signals off the line; a rack of two homing missiles that kills refill; every trip opens in the cockpit; the armoured tug (SPEC-069 to SPEC-072) | On keyboard and on touch a trip flown on the line arrives with 35 % of the tank; a ship held 100 m off the line runs dry and is towed home, not killed; the course marker points back from any side; a fuel cell, an oil pod and a missile are each picked up; a locked missile downs a scav fighter and a fighter's drop refills the rack; no frame of a launch shows the ship from outside; the menu, the station and the pad show the armoured tug; checked on desktop and the reference phone; tag `m7q` |
 | M7 | Polish: mobile tuning, quality presets, balancing pass, PWA/offline, storage persistence, reduce-motion, save migration harness | 30+ fps on mid-tier phone; installable; full manual checklist green |
 
 ---
@@ -1333,6 +1407,13 @@ Each entry names the owning spec. "Casual" = casual difficulty.
 | E129 | A burst reaches another volatile, a mine or a standing toppler | It sets it off, and a toppler falls away from the burst. Each fires once a landing, so a chain always ends | SPEC-068 |
 | E130 | A hazard is more than 45 m from the player, the player descends, or the world is held | It rests: a vent waits, a mine sleeps, and a hold pauses everything. The descent drops a fuse, a warning or a fall in progress without effect | SPEC-068 |
 | E131 | The player lands again, or reloads mid-visit | Every helper and mine is back where the layout seed placed it, and every vent's cycle restarts. Nothing about hazards is saved | SPEC-068 |
+| E132 | The ship strays far from the course line, or reaches the 220 m nav limit (R29) | Nothing pulls it back; at the limit it stops moving outward, with no bounce. Hazards spawn in the window around the ship wherever it is and fighters follow it, so the fight never stays behind on the line. The planet stays on the line and the course marker points back to it | SPEC-069 |
+| E133 | The fuel tank runs dry in cruise or in the holding pattern (R29) | The engines die and Command tows the ship home: the jump's oil stays spent, cargo stays aboard and the flight mission's stage resets, as in a recall (E5). It is not a death: no death is counted, nothing goes to remains, hard keeps the depot whole and no explosion plays. The station says "Towed home — out of fuel". On story the tank stops at 5 %. A skipped run never runs dry, because it flies the line | SPEC-069 |
+| E134 | The trip's time is up with the ship more than 30 m off the line (R29) | It holds, burning off-line fuel, until it is within 30 m of the line; the banner says "Off approach — return to the course". The arrival wave and an accepted main flight mission still hold it as before (E12), and the 90 s holding cap still lands it wherever it is | SPEC-069 |
+| E135 | A salvage signal is missed, or taken with a full hold, a full rack or a full tank (R29) | A missed canister passes and is gone. An oil pod puts in what fits, as any pickup does, and says CARGO FULL for the rest; a missile with the rack full and a fuel cell with the tank full are lost. Signals stop in the holding pattern, and a skipped run collects none. Nothing about signals is saved, so a recalled trip flies its signals again | SPEC-069 |
+| E136 | A missile is fired with no lock or an empty rack, or its target dies before it arrives (R29) | No lock or no missile: nothing fires, and the HUD flashes "No lock" or the empty rack. A missile whose target dies retargets once, to the enemy ship nearest its nose inside 40°, and otherwise flies straight and burns out after 4 s with no damage. A missile still flying at arrival, at a recall or at a tow is removed without effect | SPEC-070 |
+| E137 | A downed ship drops a missile with the rack full, or the canister is missed (R29) | The canister flies either way. A full rack leaves it, and a missed canister passes and is gone. Drops draw on a stream of their own, so the trip's other streams draw as they did before | SPEC-070 |
+| E138 | The game is paused, rotated upright or skipped during the launch (R29) | The run-up holds with the trip and resumes where it stopped. A skip ends the launch at once and goes to the autopilot card; there is no exterior shot to drop | SPEC-071 |
 
 ---
 

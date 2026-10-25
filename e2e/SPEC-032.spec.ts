@@ -1,12 +1,9 @@
-// SPEC-032 §6.2: travel and service mode in a real browser — the launch shot
-// (its progress, its skip, its reduce-motion form and its draw budget), the
-// skippable run from the depart sheet and the pause menu with the autopilot
-// card, and the hidden service override: the menu code, the badge, the
-// station's supplies, the unlocks on the star map and the off switch.
-//
-// The launch shot runs on the launch phase's 3 s clock, which is real time
-// here; the cases that need it read `sceneInfo.launch` straight after the
-// scene is up, well inside that window.
+// SPEC-032 §6.2: travel and service mode in a real browser — the skippable
+// run from the depart sheet and the pause menu with the autopilot card, and
+// the hidden service override: the menu code, the badge, the station's
+// supplies, the unlocks on the star map and the off switch. The launch shot
+// of §4.1–§4.2 is gone (SPEC-071 supersedes it; its cases live in
+// `e2e/SPEC-071.spec.ts`).
 import { expect, test, type Page } from '@playwright/test';
 import { start } from './start';
 
@@ -57,10 +54,6 @@ async function sceneInfo(page: Page): Promise<Record<string, number | string>> {
   return page.evaluate(() => window.__reallm.stats().sceneInfo ?? {});
 }
 
-async function launch(page: Page): Promise<number> {
-  return Number((await sceneInfo(page))['launch'] ?? Number.NaN);
-}
-
 /** Resolve after `count` animation frames. */
 async function frames(page: Page, count: number): Promise<void> {
   await page.evaluate(async (n) => {
@@ -81,54 +74,6 @@ async function openDepartSheet(page: Page, planet = 'cinder4'): Promise<void> {
   await page.locator('[data-testid="starmap-depart"]').click();
   await expect(page.locator('[data-testid="confirm-sheet"]')).toBeVisible();
 }
-
-test.describe('the launch shot', () => {
-  test('runs from outside to the cockpit inside the draw budget (1)', async ({ page }) => {
-    await start(page, '/?debug&scene=flight&planet=cinder4&quality=medium');
-    expect(await launch(page)).toBeLessThan(1);
-    // Inside the shot the tug is drawn: the frame still fits 40 + 16 draws.
-    const during = await page.evaluate(() => window.__reallm.stats());
-    expect(Number(during.sceneInfo?.['launch'])).toBeLessThan(1);
-    expect(during.drawCalls).toBeLessThanOrEqual(56);
-    expect(during.triangles).toBeLessThanOrEqual(80_000);
-    await page.waitForFunction(() => Number(window.__reallm.stats().sceneInfo?.['launch']) === 1, undefined, { timeout: 10_000 });
-    const after = await page.evaluate(() => window.__reallm.stats());
-    expect(after.drawCalls).toBeLessThanOrEqual(56);
-  });
-
-  test('a fresh key ends it at once; Space never does (2)', async ({ page }) => {
-    await start(page, '/?debug&scene=flight&planet=cinder4');
-    expect(await launch(page)).toBeLessThan(1);
-    await expect(page.locator('[data-testid="skip-landing"]')).toBeVisible();
-    await page.keyboard.press('KeyF');
-    await frames(page, 2);
-    expect(await launch(page)).toBe(1);
-    await expect(page.locator('[data-testid="skip-landing"]')).toBeHidden();
-
-    // A fresh run: Space leaves the shot running.
-    expect(await page.evaluate(() => window.__reallm.go('flight', { destination: 'cinder4' }, { force: true }))).toBe(true);
-    await frames(page, 1);
-    expect(await launch(page)).toBeLessThan(1);
-    await page.keyboard.press('Space');
-    await frames(page, 2);
-    expect(await launch(page)).toBeLessThan(1);
-  });
-
-  test.describe('reduce motion', () => {
-    test.use({ reducedMotion: 'reduce' });
-
-    test('holds the camera still through the shot (3)', async ({ page }) => {
-      await start(page, '/?debug&scene=flight&planet=cinder4');
-      const seen = new Set<number>();
-      for (let i = 0; i < 30 && (await launch(page)) < 1; i++) {
-        seen.add(Number((await sceneInfo(page))['cameraZ']));
-        await frames(page, 4);
-      }
-      expect(seen.size).toBe(1);
-      expect([...seen][0]).toBe(2.5);
-    });
-  });
-});
 
 test.describe('skippable runs', () => {
   test('a route never landed on refuses the skip (4)', async ({ page }) => {
