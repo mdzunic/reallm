@@ -769,11 +769,12 @@ The rail, the trip's duration formula, the waves, the arrival rule and every SPE
 1. **Open steering (SPEC-069, §4, §13 E132).**
    - The ±12 × ±7 m box goes. The ship moves anywhere on its plane up to a nav limit 220 m from the course line, where it stops without a bounce.
    - Nothing pulls it back. The ship coasts: a released stick damps at e^(−2.5 dt). Lateral speed rises to 22 m/s and acceleration to 36 m/s² (*initial tuning*).
+   - The keys always steer. Before, mouse steer (on by default) ignored them for good once the mouse had moved, even for the click on Start. A held steering key now wins over mouse steer, and mouse steer ignores a pointer within 2.5 m of the ship (about 2°), so a pointer near the centre holds the ship still rather than creeping it off the line.
    - The ideal line is the straight course to the planet, through the plane's origin. The planet is drawn on it, so a ship that strays sees the planet move aside.
    - The fight comes with the ship. Asteroids, fighters and interceptors spawn in the ±12 × ±7 m window around the ship rather than around the line, and fighters follow the ship.
    - The first trip's asteroid lane (SPEC-066 §4.9) stays on the line. Its rocks fill the window around the ship, except the lane.
 2. **The course marker (SPEC-069).**
-   - A diamond named for the destination marks the line 120 m ahead of the ship.
+   - A diamond named for the destination marks the line 80 m ahead of the ship.
    - When that point is off screen, the marker rides the edge as an arrow toward the line, with the distance back to it.
    - Nav beacons stream past along the line, so the line itself can be seen.
 3. **The fuel tank (SPEC-069, §13 E133, E134).**

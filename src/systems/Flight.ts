@@ -305,6 +305,22 @@ export const CONVERGE_DEPTH = 80;
 /** The three throttle notches; changes lerp at one notch per second (§4.1). */
 export const THROTTLES = [0.8, 1, 1.2] as const;
 const THROTTLE_LERP_PER_S = 0.2;
+/**
+ * SPEC-069 §4.1 (*initial tuning*): mouse steer ignores a reticle this close
+ * to the ship, in plane metres at the convergence depth (about 1.8°).
+ */
+export const MOUSE_STEER_DEAD_ZONE = 2.5;
+
+/**
+ * SPEC-013 §4.2's mouse steer on one axis, `clamp(d / 4)`, measured from the
+ * edge of SPEC-069's dead zone — 0 inside it, so the axis coasts to rest.
+ */
+export function mouseSteerAxis(offset: number): number {
+  const past = Math.abs(offset) - MOUSE_STEER_DEAD_ZONE;
+  if (past <= 0) return 0;
+  return clamp((Math.sign(offset) * past) / 4, -1, 1);
+}
+
 /** The asteroid threat box around the ship: 70 % of spawns land inside (§4.3). */
 export const THREAT_BOX = 6;
 const THREAT_BOX_CHANCE = 0.7;
@@ -949,10 +965,15 @@ export class Flight {
     if (!ship.alive) return;
     let steerX: number;
     let steerY: number;
-    if (input.mouseSteer === true) {
+    // SPEC-069 §4.1: a held steering key wins over mouse steer — before, a
+    // mouse that had moved once (a click on Start) silenced the keys for good.
+    const keyed = input.steerX !== 0 || input.steerY !== 0;
+    if (input.mouseSteer === true && !keyed) {
       // §4.2: mouse steer chases the reticle: clamp((reticle − ship) / 4).
-      steerX = clamp((this.reticle.x - ship.x) / 4, -1, 1);
-      steerY = clamp((this.reticle.y - ship.y) / 4, -1, 1);
+      // SPEC-069 §4.1: past a dead zone, so a pointer near the centre holds
+      // the ship still instead of creeping it off the line with no wall to stop it.
+      steerX = mouseSteerAxis(this.reticle.x - ship.x);
+      steerY = mouseSteerAxis(this.reticle.y - ship.y);
     } else {
       steerX = clamp(input.steerX, -1, 1);
       steerY = clamp(input.steerY, -1, 1);

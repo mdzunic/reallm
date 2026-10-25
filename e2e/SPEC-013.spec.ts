@@ -194,6 +194,12 @@ test.describe('holding pattern HUD', () => {
   test('a live wave enemy raises the holding banner and the hostile count; clearing it lands (AC-25, AC-40, AC-42)', async ({ page }) => {
     await start(page);
     await createPilot(page);
+    // Story takes no damage: idle for 95 s on a random seed, about one trip in
+    // twelve used to die to the rocks before the hold (a recall, not a hold).
+    await page.evaluate(() => {
+      const save = window.__reallm.save().current;
+      if (save !== null) save.meta.difficulty = 'story';
+    });
     expect(await go(page, 'station', {})).toBe(true);
     expect(await go(page, 'starmap', undefined)).toBe(true);
     await page.locator('[data-testid="starmap-depart"]').click();

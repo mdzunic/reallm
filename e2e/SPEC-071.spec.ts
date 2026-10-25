@@ -48,10 +48,12 @@ test.describe('the launch from the cockpit', () => {
 
   test('a key pressed during the launch steers and ends nothing (2)', async ({ page }) => {
     await start(page, '/?debug&scene=flight&planet=cinder4');
+    // The scene's fade-in holds the input; the launch is still running after it.
+    await expect(page.locator('[data-testid="transition-fade"]')).toHaveCSS('pointer-events', 'none');
     expect(await launch(page)).toBeLessThan(1);
     const x0 = Number((await sceneInfo(page))['shipX']);
     await page.keyboard.down('KeyD');
-    await frames(page, 12);
+    await expect.poll(async () => Number((await sceneInfo(page))['shipX']), { intervals: [50] }).toBeGreaterThan(x0);
     await page.keyboard.up('KeyD');
     const info = await sceneInfo(page);
     expect(Number(info['launch'])).toBeLessThan(1);

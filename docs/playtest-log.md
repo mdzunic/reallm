@@ -2520,3 +2520,39 @@ dressing sheets were taken with the same stops on `main` and the branch.
 - [ ] a trap's circle reads on every ground (Vetra's snow and Cinder-4's sand are the weakest) and a dash through one takes nothing;
 - [ ] the frame holds on the phone with hazards and dressing in view;
 - [ ] a screenshot of each, recorded here.
+
+## PLAN R29 — free flight: SPEC-069 (free flight), SPEC-070 (homing missiles), SPEC-071 (the launch from the cockpit), SPEC-072 (the armoured tug) (M7q)
+
+- **Build:** `feat/free-flight`, untagged
+- **Devices:**
+  - desktop: headless full Chromium at 1280 × 720 on the Mac's GPU (Playwright, `--use-angle=metal`), `high` and `medium`
+  - phone: _not run_ (owed, below)
+
+Recorded on the branch: `npm run check` (141 files, 3,610 tests) and the flight, station, pad and touch e2e suites, with results in the table. The frames are in `docs/screenshots/r29/`:
+- `flight.jpg`: Thessaly, the course marker, two signals and a missile away;
+- `pad.jpg`: the armoured tug on Cinder-4's pad;
+- `tug-old.jpg` and `tug-new.jpg`: the model before and after, from the generator's preview renders.
+
+| Area | What the desktop showed |
+|---|---|
+| Steering | `D` held took the ship past 40 m off the line. After release it coasted and stayed put, with no pull back. The fuel bar wore `is-burning` past 16 m |
+| Course marker | `Cinder-4` on the line, dead ahead. Parked 140 m right, it became an edge arrow on the left reading `140 m` |
+| Tank | A trip warped idle on the line arrived with 35 %. At 5 %, parked 150 m off, the trip ended on the tow card (`OUT OF FUEL`, no explosion), then the station read `Towed home` |
+| Signals | A fuel canister dropped ahead was taken: `signals …/1`, the tank rose by 20 %, and the toast read `Fuel cell: +20 % tank`. Signal markers showed their glyph and lateral metres |
+| Missiles | The still fighter ahead took the lock bracket. `F` fired: the rack read 0, the fighter died and the bracket went. A second `F` flashed `Rack empty`. The right mouse button fired too. On a touch phone, `MSL` stood beside the throttle pair and dimmed at 0 |
+| Launch | `cameraZ` stayed 2.5 on every sampled frame, under reduce motion too. No `launch-tug` was in the scene. A key held during the launch steered the ship and ended nothing |
+| Tug | The menu, the station and the pad show the armoured tug: 5,243 triangles, 787 KB, two draws. On the pad its skids now touch the slab |
+
+**Owed on hardware.** On the laptop and the reference phone, at `medium`:
+
+- [ ] steer far off the line and back, on keyboard and on touch, with no sense of being pulled;
+- [ ] find the course marker's arrow from each side of the line;
+- [ ] take a fuel cell, an oil pod and a missile canister;
+- [ ] run a trip dry on purpose and see the tow and the station's banner;
+- [ ] fly a whole trip on the line and land with about a third of the tank;
+- [ ] lock and down a fighter with a missile on keyboard (`F`, right button) and on touch (`MSL`);
+- [ ] depart from the station several times, with and without a steering key held, and see no frame from outside;
+- [ ] see the armoured tug in the menu, at the station and on a pad;
+- [ ] record a screenshot of each here.
+
+**Not this pass.** The films that import `ship.glb` still show the old tug until a later drop: the prologue's liftoff, "Outbound", "Wreckers" and the Eden interlude.

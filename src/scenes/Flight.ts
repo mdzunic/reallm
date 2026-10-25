@@ -88,6 +88,8 @@ import { UiScene, uiRootEl } from '@/scenes/base';
 /** §4.8: how long a tip stays up, and how long after `flight_steer` the second one comes. */
 const TIP_MS = 8000;
 const THROTTLE_TIP_DELAY = 12;
+/** SPEC-069 §4.5: how often a tip that found the strip busy looks again, in seconds. */
+const TIP_RETRY_SECONDS = 0.5;
 
 // ------------------------------------------------------------- SPEC-035 §4.11
 
@@ -949,17 +951,22 @@ export class FlightScene extends UiScene<'flight'> {
     }
 
     // SPEC-035 §4.8: the throttle tip, 12 s after the steer tip, same trip.
+    // SPEC-069 §4.5: a tip still on the strip keeps it waiting its turn.
     if (this.#throttleTipIn > 0) {
       this.#throttleTipIn -= dt;
-      if (this.#throttleTipIn <= 0) this.#showTip('flight_throttle');
+      if (this.#throttleTipIn <= 0) {
+        if (this.#aria?.visible === true) this.#throttleTipIn = TIP_RETRY_SECONDS;
+        else this.#showTip('flight_throttle');
+      }
     }
-    // SPEC-069 §4.5: the fuel tip, the first time the tank burns extra.
-    if (!this.#fuelTipAsked && flight.fuelBurn > 0 && this.#launchDone) {
+    // SPEC-069 §4.5: the fuel tip, the first time the tank burns extra — and
+    // SPEC-070 §4.6: the missile tip, the first time a lock is up with one
+    // loaded. Neither cuts in on a tip already up; each waits for the strip.
+    const stripFree = this.#launchDone && this.#aria?.visible !== true;
+    if (stripFree && !this.#fuelTipAsked && flight.fuelBurn > 0) {
       this.#fuelTipAsked = true;
       this.#showTip('flight_fuel');
-    }
-    // SPEC-070 §4.6: the missile tip, the first time a lock is up with one loaded.
-    if (!this.#missileTipAsked && flight.lock.active && flight.ship.missiles > 0) {
+    } else if (stripFree && !this.#missileTipAsked && flight.lock.active && flight.ship.missiles > 0) {
       this.#missileTipAsked = true;
       this.#showTip('flight_missile');
     }
