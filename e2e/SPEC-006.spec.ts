@@ -1204,6 +1204,16 @@ test('the reactions table is what the game actually hears (AC-38 … AC-50, AC-5
     out['mission'] = await name(() => bus.emit('mission:completed', { id: 'm', replay: false }));
     out['boss phase'] = await name(() => bus.emit('boss:phase', { boss: 'ash_titan', phase: 2 }));
     out['boss dead'] = await name(() => bus.emit('boss:defeated', { boss: 'ash_titan' }));
+    // SPEC-069 §4.7 and SPEC-070 §4.7: the free flight's cues, from the banks
+    // already loaded — no new sprite.
+    out['signal'] = await name(() => bus.emit('flight:signal', { kind: 'fuel' }));
+    out['fuel cell taken'] = await name(() => bus.emit('flight:pickup', { kind: 'fuel', source: 'signal', taken: true }));
+    out['oil pod taken'] = await name(() => bus.emit('flight:pickup', { kind: 'oil', source: 'signal', taken: true }));
+    out['missile no room'] = await name(() => bus.emit('flight:pickup', { kind: 'missile', source: 'drop', taken: false }));
+    out['fuel low'] = await name(() => bus.emit('flight:fuelLow', {}));
+    out['missile fired'] = await name(() => bus.emit('flight:missileFired', { x: 0, y: 0 }));
+    out['missile hit'] = await name(() => bus.emit('flight:missileHit', { x: 0, y: 0, depth: 40, kill: true }));
+    out['missile refused'] = await name(() => bus.emit('flight:missileRefused', { reason: 'no_lock' }));
     // The cooldowns of §5.2, in one frame each.
     out['three hits'] = await name(() => {
       for (let i = 0; i < 3; i++) bus.emit('player:damaged', { amount: 1, source: 'enemy', hp: 9 - i });
@@ -1271,6 +1281,14 @@ test('the reactions table is what the game actually hears (AC-38 … AC-50, AC-5
   expect(r['mission']).toBe('mission_done');
   expect(r['boss phase']).toBe('boss_roar');
   expect(r['boss dead']).toBe('boss_death');
+  expect(r['signal']).toBe('ui_blip'); // SPEC-069 §4.7
+  expect(r['fuel cell taken']).toBe('pickup_generic');
+  expect(r['oil pod taken']).toBe('(silence)'); // its resource:collected chimes instead
+  expect(r['missile no room']).toBe('(silence)');
+  expect(r['fuel low']).toBe('ui_warn');
+  expect(r['missile fired']).toBe('shot_launcher'); // SPEC-070 §4.7
+  expect(r['missile hit']).toBe('explosion');
+  expect(r['missile refused']).toBe('ui_warn');
   expect(r['three hits']).toBe('hit_player'); // AC-48, 120 ms
   expect(r['two oils and a water']).toBe('pickup_oil,pickup_water'); // AC-44, 80 ms per id
   expect(r['silent']).toBe('(silence)'); // AC-39
@@ -1292,10 +1310,13 @@ test('the reactions table is what the game actually hears (AC-38 … AC-50, AC-5
   // reacted; SPEC-063 §4.5 added `flight:groupSpawned`, silent — the contact
   // line is what is heard; review 2026-10 (G-17) added `player:sprinted`,
   // silent — a sprint has no sound of its own; SPEC-068 §4.4 added
-  // `hazard:warn` and `hazard:burst`, both reacted). That the two halves cover
+  // `hazard:warn` and `hazard:burst`, both reacted; SPEC-069 §4.7 added
+  // `flight:signal`, `flight:pickup` and `flight:fuelLow`, and SPEC-070 §4.7
+  // `flight:missileFired`, `flight:missileRefused` and `flight:missileHit`,
+  // all six reacted — `flight:recalled` only gained a `cause`, still silent). That the two halves cover
   // `GameEvents` exactly is a compile-time assertion in the module, and
   // `tests/core/audioReactions.test.ts` pins the same pair of counts in node.
-  expect(reactions.counts.reacted).toBe(35);
+  expect(reactions.counts.reacted).toBe(41);
   expect(reactions.counts.silent).toBe(51);
   expect(reactions.counts.overlap).toEqual([]);
   // SPEC-012 §4.12 populated the set from the dialogue table's `glitch` marks
