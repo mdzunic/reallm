@@ -223,6 +223,13 @@ export function starStreakLength(throttle: number, reduceMotion: boolean): numbe
 
 const DEG = Math.PI / 180;
 
+/** SPEC-069 §4.6: `value` moved by whole periods into `centre ± half`. */
+export function wrapAround(value: number, centre: number, half: number): number {
+  const span = half * 2;
+  const offset = value - (centre - half);
+  return centre - half + (offset - Math.floor(offset / span) * span);
+}
+
 /**
  * AC-42: the radians the horizon is rolled by this frame. A bank to the right
  * rolls the horizon left, and reduce motion holds it inside ±8° either way —
@@ -235,71 +242,27 @@ export function cameraRoll(bankDeg: number, reduceMotion: boolean): number {
   return Math.max(-limit, Math.min(limit, roll));
 }
 
-// ------------------------------------------------ SPEC-032 §4.1: the launch shot
+// ------------------------------------------- SPEC-071: the launch from the cockpit
 
 /**
- * The shot's timeline, in seconds of the launch phase. `views/` may not import
- * `systems/` (SPEC-001 §4), so SPEC-013's `LAUNCH_SECONDS` and SPEC-032's
- * `LAUNCH_HOLD_SECONDS` / `LAUNCH_PUSH_SECONDS` are restated here, and
- * `tests/views/flightView.test.ts` pins the two copies together.
+ * SPEC-071 (*initial tuning*): the cockpit's shake at the launch's start, in
+ * radians of pitch and roll. It settles to nothing over the launch, and reduce
+ * motion leaves it out.
  */
-export const LAUNCH_SHOT = {
-  /** SPEC-013's launch phase, which the shot fits inside. */
-  total: 3,
-  /** The exterior hold behind and above the tug. */
-  hold: 1.1,
-  /** The eased push into the cockpit. */
-  push: 1.5,
-  /** The tug fades over the push's last stretch, as the camera passes it. */
-  tugFade: 0.35,
-  /** Reduce motion: a static exterior, then a cross-fade — no camera move. */
-  reducedHold: 1.5,
-  reducedFade: 0.4,
-} as const;
-/** Where the tug rides and where the camera starts, looking at it (§4.1). */
-const TUG_POSITION = new THREE.Vector3(0, -0.15, -2.6);
-/** A half-radian yaw so the three-quarter reads; the extra π turns the nose (+Z in glTF) away along the rail. */
-const TUG_YAW = Math.PI + 0.5;
-const LAUNCH_CAMERA_START = new THREE.Vector3(1.15, 0.75, 2.6);
-/** The tug's two nozzles, in model space (`scripts/assets/blender/ships.py`, glTF axes). */
-const TUG_NOZZLES: ReadonlyArray<readonly [number, number, number]> = [
-  [-0.52, 0.05, -0.95],
-  [0.52, 0.05, -0.95],
-];
-const PLUME_SIZE = 0.55;
+export const LAUNCH_SHAKE = 0.01;
 
 function clamp01(value: number): number {
   return value <= 0 ? 0 : value >= 1 ? 1 : value;
 }
 
-export interface LaunchPose {
-  /** 0 → the exterior start, 1 → the cruise rig (smoothstepped). */
-  readonly push: number;
-  /** The tug's opacity. */
-  readonly tug: number;
-  /** The cockpit's opacity. */
-  readonly cockpit: number;
-}
-
 /**
- * SPEC-032 §4.1: where the shot is at `progress` (0…1 of the launch phase).
- * A 1.1 s hold, a 1.5 s smoothstepped push with the tug fading over its last
- * 0.35 s, and a 0.4 s settle while the cockpit fades in. Under reduce motion
- * the camera never leaves the rig: a 1.5 s exterior, then a 0.4 s cross-fade.
+ * SPEC-071: the run-up's weight at `progress` (0…1 of the launch phase) — a
+ * smoothstep, so the stars leave still and arrive at cruise speed without a
+ * jolt at either end. Anything not finite reads as the launch being over.
  */
-export function launchPose(progress: number, reduceMotion: boolean): LaunchPose {
-  const t = clamp01(Number.isFinite(progress) ? progress : 1) * LAUNCH_SHOT.total;
-  if (reduceMotion) {
-    const fade = clamp01((t - LAUNCH_SHOT.reducedHold) / LAUNCH_SHOT.reducedFade);
-    return { push: 1, tug: 1 - fade, cockpit: fade };
-  }
-  const pushEnd = LAUNCH_SHOT.hold + LAUNCH_SHOT.push;
-  const x = clamp01((t - LAUNCH_SHOT.hold) / LAUNCH_SHOT.push);
-  return {
-    push: x * x * (3 - 2 * x),
-    tug: 1 - clamp01((t - (pushEnd - LAUNCH_SHOT.tugFade)) / LAUNCH_SHOT.tugFade),
-    cockpit: clamp01((t - pushEnd) / (LAUNCH_SHOT.total - pushEnd)),
-  };
+export function launchRunUp(progress: number): number {
+  const x = clamp01(Number.isFinite(progress) ? progress : 1);
+  return x * x * (3 - 2 * x);
 }
 
 /** SPEC-017 §4.4: image-based lighting is a fill in space, not the key. */
@@ -315,11 +278,6 @@ interface ViewOptions {
   reduceMotion: boolean;
   /** Star positions and texture noise only — never simulation state. */
   rng: Rng;
-  /**
-   * SPEC-032 §4.1: the tug the launch shot opens on — `assets.model('ship')`,
-   * a clone the view owns. Missing (or null) flies a primitive hull (32-a).
-   */
-  tug?: THREE.Object3D | null;
   /**
    * The post chain renders through a multisampled target (`post.samples > 0`).
    * Three's `Lensflare` copies the framebuffer to test the sun's occlusion,
@@ -527,21 +485,10 @@ export class FlightView {
   #shake = 0;
   #landing = 0;
 
-  /** SPEC-032 §4.1: the cruise rig the camera chases the ship with. */
+  /** The cruise rig the camera chases the ship with. */
   readonly #rig = new THREE.Vector3();
-  /** 0…1 through the launch shot; 1 = no shot (never started, or over). */
+  /** SPEC-071: 0…1 through the launch's run-up; 1 = over (or never started). */
   #launch = 1;
-  /** The tug and its plumes, alive until `skipLaunch()`. */
-  #tug: THREE.Group | null = null;
-  /** Everything the tug owns (its faded material copies, the plume, the primitive hull). */
-  readonly #tugOwned: Array<THREE.Material | THREE.BufferGeometry> = [];
-  readonly #tugMaterials: THREE.Material[] = [];
-  /** The cockpit's own materials, while fade copies stand in for them. */
-  readonly #cockpitOriginals = new Map<THREE.Mesh, THREE.Material | THREE.Material[]>();
-  readonly #cockpitFades = new Map<THREE.Material, THREE.Material>();
-  readonly #launchTarget = new THREE.Vector3();
-  /** The rig's rotation on the last frame — where a skip leaves the camera. */
-  readonly #rigQuaternion = new THREE.Quaternion();
 
   readonly #matrix = new THREE.Matrix4();
   readonly #position = new THREE.Vector3();
@@ -743,67 +690,8 @@ export class FlightView {
     // The camera renders as part of the scene graph only if it is in it.
     scene.add(camera);
     this.#rig.set(camera.position.x, camera.position.y, CAMERA_Z);
-
-    this.#tug = this.#buildTug(options.tug ?? null);
-  }
-
-  /**
-   * SPEC-032 §4.1: the tug of the launch shot, hidden until `setLaunch()`
-   * starts it. The model's materials are shared with the asset cache, so the
-   * tug fades copies of them; the geometry stays shared and untouched. The
-   * hull (≤ 2 draws) and one merged plume quad pair (1 draw) keep it inside
-   * the three draws the budget allows.
-   */
-  #buildTug(model: THREE.Object3D | null): THREE.Group {
-    const tug = new THREE.Group();
-    tug.name = 'launch-tug';
-    tug.visible = false;
-    tug.position.copy(TUG_POSITION);
-    tug.rotation.y = TUG_YAW;
-    let hull = model;
-    if (hull === null) {
-      // 32-a: no ship model — a box hull of the tug's proportions flies the shot.
-      const geometry = new THREE.BoxGeometry(1.25, 0.45, 2);
-      const material = new THREE.MeshStandardMaterial({ color: 0x8a97a3, roughness: 0.5, metalness: 0.3 });
-      this.#tugOwned.push(geometry, material);
-      hull = new THREE.Mesh(geometry, material);
-    }
-    hull.traverse((node) => {
-      const mesh = node as THREE.Mesh;
-      if (mesh.isMesh !== true) return;
-      mesh.frustumCulled = false;
-      const fade = (material: THREE.Material): THREE.Material => {
-        const copy = material.clone();
-        // The copy is this view's, not the cache's (D-33): it must be freed.
-        delete copy.userData['shared'];
-        copy.transparent = true;
-        this.#tugOwned.push(copy);
-        this.#tugMaterials.push(copy);
-        return copy;
-      };
-      mesh.material = Array.isArray(mesh.material) ? mesh.material.map(fade) : fade(mesh.material);
-    });
-    tug.add(hull);
-
-    const quads = TUG_NOZZLES.map(([x, y, z]) => new THREE.PlaneGeometry(PLUME_SIZE, PLUME_SIZE).translate(x, y, z));
-    const plumeGeometry = mergeGeometries(quads) as THREE.BufferGeometry;
-    for (const quad of quads) quad.dispose();
-    const plumeMaterial = new THREE.MeshBasicMaterial({
-      color: GLOW_COLOR,
-      map: particleSprite('ember'),
-      transparent: true,
-      blending: THREE.AdditiveBlending,
-      depthWrite: false,
-      side: THREE.DoubleSide,
-      fog: false,
-    });
-    this.#tugOwned.push(plumeGeometry, plumeMaterial);
-    this.#tugMaterials.push(plumeMaterial);
-    const plume = new THREE.Mesh(plumeGeometry, plumeMaterial);
-    plume.frustumCulled = false;
-    tug.add(plume);
-    this.#scene.add(tug);
-    return tug;
+    // SPEC-071: the camera is on the cruise rig from the first frame.
+    camera.position.copy(this.#rig);
   }
 
   #rockMesh(geometry: THREE.BufferGeometry, material: THREE.Material, capacity: number): THREE.InstancedMesh {
@@ -910,44 +798,25 @@ export class FlightView {
   }
 
   /**
-   * SPEC-032 §4.1: 0…1 through the launch shot. The scene feeds it from the
-   * launch phase's own clock, so a pause holds the shot where it is (32-e);
-   * 1 (or never calling it) means no shot.
+   * SPEC-071: 0…1 through the launch's run-up. The scene feeds it from the
+   * launch phase's own clock, so a pause holds it where it is (E138); 1 or
+   * more ends it.
    */
   setLaunch(progress: number): void {
-    if (this.#tug === null) return;
     const p = Number.isFinite(progress) ? progress : 1;
     if (p >= 1) {
-      this.skipLaunch();
+      this.endLaunch();
       return;
     }
     this.#launch = Math.max(0, p);
-    const pose = launchPose(this.#launch, this.#reduceMotion);
-    for (const material of this.#tugMaterials) material.opacity = pose.tug;
-    this.#tug.visible = pose.tug > 0;
-    this.#setCockpitOpacity(pose.cockpit);
   }
 
-  /**
-   * End the shot now (E50): the tug is dropped and freed, the cockpit is
-   * opaque, and the camera is on the cruise rig — the state a scene without
-   * the shot starts in. Safe to call more than once.
-   */
-  skipLaunch(): void {
+  /** SPEC-071: the launch is over — the stars at cruise, no shake. Safe to call more than once. */
+  endLaunch(): void {
     this.#launch = 1;
-    this.#setCockpitOpacity(1);
-    const tug = this.#tug;
-    if (tug === null) return;
-    this.#tug = null;
-    this.#scene.remove(tug);
-    for (const owned of this.#tugOwned) owned.dispose();
-    this.#tugOwned.length = 0;
-    this.#tugMaterials.length = 0;
-    this.#camera.position.copy(this.#rig);
-    this.#camera.quaternion.copy(this.#rigQuaternion);
   }
 
-  /** 0…1 through the launch shot; 1 once it is over (or never ran). */
+  /** 0…1 through the launch's run-up; 1 once it is over (or never ran). */
   get launch(): number {
     return this.#launch;
   }
@@ -1004,8 +873,6 @@ export class FlightView {
   }
 
   dispose(): void {
-    // E50: a scene that leaves mid-shot frees the tug here.
-    this.skipLaunch();
     this.#camera.remove(this.#cockpit);
     disposeObject3D(this.#cockpit);
     // The flare owns two framebuffer textures and its elements' own maps, and
@@ -1118,8 +985,6 @@ export class FlightView {
   }
 
   #useCockpit(model: THREE.Object3D): void {
-    // Mid-shot, the fade copies go first; the next `setLaunch` fades the model.
-    this.#restoreCockpit();
     for (const child of [...this.#cockpit.children]) {
       this.#cockpit.remove(child);
       disposeObject3D(child);
@@ -1132,8 +997,8 @@ export class FlightView {
   #updateCamera(frame: FlightFrame, dt: number): void {
     const camera = this.#camera;
     const chase = Math.min(1, CAMERA_LERP_PER_S * dt);
-    // The rig chases the ship; the camera sits on it except during the
-    // launch shot, which starts elsewhere and pushes in (SPEC-032 §4.1).
+    // The rig chases the ship and the camera sits on it (SPEC-071: from the
+    // first frame, launch included).
     const rig = this.#rig;
     rig.x += (frame.ship.x - rig.x) * chase;
     rig.y += (frame.ship.y - rig.y) * chase;
@@ -1147,89 +1012,43 @@ export class FlightView {
       pitch += Math.sin(frame.time * 43) * 0.012 * this.#shake;
       roll += Math.sin(frame.time * 61) * 0.012 * this.#shake;
     }
+    // SPEC-071: the cockpit settles out of the launch's shake; none under reduce motion.
+    if (this.#launch < 1 && !this.#reduceMotion) {
+      const settle = LAUNCH_SHAKE * (1 - this.#launch);
+      pitch += Math.sin(frame.time * 37) * settle;
+      roll += Math.sin(frame.time * 53) * settle;
+    }
     this.#cameraRoll = roll;
     this.#euler.set(pitch, 0, roll, 'ZYX');
     camera.quaternion.setFromEuler(this.#euler);
-    this.#rigQuaternion.copy(camera.quaternion);
-    if (this.#tug !== null && this.#launch < 1) this.#applyLaunchCamera();
-  }
-
-  /**
-   * SPEC-032 §4.1: blend from the exterior start to the rig pose just set —
-   * position and look-at target along the smoothstep, then the rig's own
-   * rotation (its roll and pitch) folded in by the same weight, so the push
-   * starts and ends still and lands exactly on the cruise camera.
-   */
-  #applyLaunchCamera(): void {
-    const pose = launchPose(this.#launch, this.#reduceMotion);
-    if (pose.push >= 1) return;
-    const camera = this.#camera;
-    const s = pose.push;
-    const end = this.#rigQuaternion;
-    // Where the rig looks: straight down its own forward axis, as far off as the tug.
-    const target = this.#launchTarget
-      .set(0, 0, -TUG_POSITION.distanceTo(LAUNCH_CAMERA_START))
-      .applyQuaternion(end)
-      .add(this.#rig);
-    target.lerpVectors(TUG_POSITION, target, s);
-    camera.position.lerpVectors(LAUNCH_CAMERA_START, this.#rig, s);
-    camera.lookAt(target);
-    camera.quaternion.slerp(end, s);
-  }
-
-  /** The cockpit's opacity through fade copies of its materials; 1 restores the originals. */
-  #setCockpitOpacity(alpha: number): void {
-    const cockpit = this.#cockpit;
-    if (alpha >= 1) {
-      this.#restoreCockpit();
-      cockpit.visible = true;
-      return;
-    }
-    cockpit.visible = alpha > 0;
-    if (alpha <= 0) return;
-    const fades = this.#cockpitFades;
-    const copy = (material: THREE.Material): THREE.Material => {
-      let fade = fades.get(material);
-      if (fade === undefined) {
-        fade = material.clone();
-        delete fade.userData['shared'];
-        fade.userData['baseOpacity'] = material.opacity;
-        fade.transparent = true;
-        fades.set(material, fade);
-      }
-      return fade;
-    };
-    cockpit.traverse((node) => {
-      const mesh = node as THREE.Mesh;
-      if (mesh.isMesh !== true) return;
-      if (!this.#cockpitOriginals.has(mesh)) {
-        this.#cockpitOriginals.set(mesh, mesh.material);
-        mesh.material = Array.isArray(mesh.material) ? mesh.material.map(copy) : copy(mesh.material);
-      }
-    });
-    for (const fade of fades.values()) fade.opacity = ((fade.userData['baseOpacity'] as number | undefined) ?? 1) * alpha;
-  }
-
-  #restoreCockpit(): void {
-    for (const [mesh, material] of this.#cockpitOriginals) mesh.material = material;
-    this.#cockpitOriginals.clear();
-    for (const fade of this.#cockpitFades.values()) fade.dispose();
-    this.#cockpitFades.clear();
   }
 
   #updateStars(frame: FlightFrame, dt: number): void {
     const positions = this.#starPositions.array as Float32Array;
     const streaks = this.#streakPositions.array as Float32Array;
-    const advance = 60 * frame.throttleLive * dt;
+    // SPEC-071: the launch runs the field up from still to cruise.
+    const runUp = launchRunUp(this.#launch);
+    const advance = 60 * frame.throttleLive * dt * runUp;
     // AC-45: the streak trails *behind* the head, which is toward −z, because
     // the field streams toward the camera at +z.
-    const streak = starStreakLength(frame.throttleLive, this.#reduceMotion);
+    const streak = starStreakLength(frame.throttleLive, this.#reduceMotion) * runUp;
+    // Parallax by ship offset (§4.9): the field slides against the steer.
+    const offsetX = -frame.ship.x * 0.35;
+    const offsetY = -frame.ship.y * 0.35;
+    this.#stars.position.x = offsetX;
+    this.#stars.position.y = offsetY;
+    // SPEC-069 §4.6: each star wraps into the spread around the camera, so the
+    // field surrounds a ship however far it strays from the line.
+    const centreX = this.#camera.position.x - offsetX;
+    const centreY = this.#camera.position.y - offsetY;
     for (let i = 0, s = 0; i < positions.length; i += 3, s += 6) {
       let z = (positions[i + 2] as number) + advance;
       if (z > 5) z -= STARFIELD_DEPTH;
       positions[i + 2] = z;
-      const x = positions[i] as number;
-      const y = positions[i + 1] as number;
+      const x = wrapAround(positions[i] as number, centreX, STAR_SPREAD_X);
+      const y = wrapAround(positions[i + 1] as number, centreY, STAR_SPREAD_Y);
+      positions[i] = x;
+      positions[i + 1] = y;
       streaks[s] = x;
       streaks[s + 1] = y;
       streaks[s + 2] = z;
@@ -1239,9 +1058,6 @@ export class FlightView {
     }
     this.#starPositions.needsUpdate = true;
     this.#streakPositions.needsUpdate = true;
-    // Parallax by ship offset (§4.9): the field slides against the steer.
-    this.#stars.position.x = -frame.ship.x * 0.35;
-    this.#stars.position.y = -frame.ship.y * 0.35;
   }
 
   #updateHazards(frame: FlightFrame): void {

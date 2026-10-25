@@ -174,12 +174,6 @@ export const RAIL = { baseSpeed: 60, lateralSpeed: 14, lateralAccel: 40, spawnDe
 
 /** The launch phase: cockpit shake, no hazards, HUD boot (§4.1). */
 export const LAUNCH_SECONDS = 3;
-/**
- * SPEC-032 §4.1: the launch shot inside `LAUNCH_SECONDS` — the hold behind the
- * tug, then the eased push into the cockpit; the remaining 0.4 s settles.
- */
-export const LAUNCH_HOLD_SECONDS = 1.1;
-export const LAUNCH_PUSH_SECONDS = 1.5;
 /** SPEC-032 §4.5: how long the autopilot card covers a skipped run. */
 export const AUTOPILOT_SECONDS = 1.2;
 /** How long the recall explosion holds the screen before the station (§4.1). */

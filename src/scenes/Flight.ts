@@ -69,7 +69,7 @@ import { NOTES_UNSEEN } from '@/ui/NotesPanel';
 import { PauseMenu, withComms } from '@/ui/PauseMenu';
 import { RotateOverlay } from '@/ui/RotateOverlay';
 import { TouchControls } from '@/ui/TouchControls';
-import { FlightView } from '@/views/FlightView';
+import { FlightView, launchRunUp } from '@/views/FlightView';
 import { prewarm, prewarmPatches } from '@/views/ProceduralTextures';
 import type { Look } from '@/core/Quality';
 import type { Voice } from '@/core/Audio';
@@ -112,21 +112,6 @@ const DEMO_CREATION: CharacterCreation = {
  */
 const DEV_SKIP_LIMIT_SECONDS = 1200;
 
-/**
- * SPEC-032 §4.2: does this event end the launch shot? A tap, or a fresh key
- * press that is not Space (E33: Space never skips). A tap on a control — the
- * pause button, the dev skip — is that control's, and the pause keys belong to
- * the pause toggle, so a pause mid-shot holds the shot (32-e).
- */
-function skipsLaunch(event: Event): boolean {
-  if (event.type === 'pointerdown') {
-    const target = event.target;
-    return !(target instanceof Element && target.closest('button, a, input, select, textarea, [role="dialog"]') !== null);
-  }
-  if (!(event instanceof KeyboardEvent) || event.repeat) return false;
-  return event.code !== 'Space' && event.key !== ' ' && event.key !== 'Escape' && event.key.toLowerCase() !== 'p';
-}
-
 /** SPEC-017 §4.1 (*initial tuning*): engine glow and shots carry the trip. */
 const FLIGHT_LOOK: Partial<Look> = { bloomStrength: 0.55, bloomThreshold: 0.75, vignette: 0.3 };
 
@@ -163,7 +148,7 @@ export class FlightScene extends UiScene<'flight'> {
   #explosionEl: HTMLDivElement | null = null;
   #skipHint: HTMLParagraphElement | null = null;
 
-  /** SPEC-032 §4.1: the launch shot has ended (run out, or skipped). */
+  /** SPEC-071: the launch's run-up has ended (run out, or skipped). */
   #launchDone = false;
   // SPEC-035 §4.8 — the two tips the first flight needs. The hint strip is the
   // surface's `AriaHint`, mounted here the same way; `flight_throttle` follows
@@ -294,22 +279,13 @@ export class FlightScene extends UiScene<'flight'> {
     this.camera.fov = 70;
     this.camera.far = 600;
     this.camera.updateProjectionMatrix();
-    // SPEC-032 §4.1: the tug the launch shot opens on — the hull the station
-    // docks. `ship.glb` is a boot-manifest model; a primitive stands in if not.
-    let tug: THREE.Object3D | null = null;
-    if (services.assets.loaded) {
-      try {
-        tug = services.assets.model('ship');
-      } catch (error) {
-        log.warn('scene', 'the launch shot could not load the ship model; the primitive hull flies it', error);
-      }
-    }
+    // SPEC-071: no exterior shot — the trip opens in the cockpit, and the
+    // launch is a run-up from still to cruise.
     this.#view = new FlightView(this.scene, this.camera, {
       planet: this.#planet,
       quality: services.renderer.quality,
       reduceMotion: services.settings.get().reduceMotion,
       rng: visitRng.fork('flight_view'),
-      tug,
       msaa: services.renderer.post.samples > 0,
     });
     this.#view.setLaunch(0);
@@ -694,10 +670,10 @@ export class FlightScene extends UiScene<'flight'> {
       this.ui.unmount(guide);
       this.#aria = null;
     });
-    // SPEC-035 §4.11: the hum runs until the scene does not.
+    // SPEC-035 §4.11: the hum runs until the scene does not. SPEC-071: it
+    // starts with the launch, silent, and rises with the run-up.
     this.disposer.add(() => this.#stopEngineHum());
-    // SPEC-032 §4.2: the hint shows over the launch shot as over the landing.
-    this.#skipHint.classList.remove('is-hidden');
+    this.#startEngineHum();
     // SPEC-032 §4.5: the autopilot card, over the fast-forwarded frame.
     this.#autopilotEl = testId(
       h(
@@ -732,13 +708,11 @@ export class FlightScene extends UiScene<'flight'> {
     }
 
     // 13-f: the cutscene skips on any key or tap; the fade still runs (AC-102).
-    // SPEC-032 §4.2: the same listener ends the launch shot — a tap, or a
-    // fresh key that is not Space — and leaves the simulation alone.
-    const skip = (event: Event): void => {
+    // SPEC-071: the launch has nothing to skip — keys and taps steer it.
+    const skip = (): void => {
       // SPEC-036 §4.3: a tap on the rotate overlay is not a skip.
       if (this.#rotate?.blocked === true) return;
       if (this.#landingT >= 0) this.#landingSkipped = true;
-      else if (!this.#launchDone && this.#pauseMenu?.open !== true && skipsLaunch(event)) this.#endLaunch();
     };
     document.addEventListener('keydown', skip);
     document.addEventListener('pointerdown', skip);
@@ -855,7 +829,7 @@ export class FlightScene extends UiScene<'flight'> {
       flight.update(dt, this.#readInput(input));
     }
 
-    // SPEC-032 §4.1: the shot rides the launch phase's own clock (32-e) and
+    // SPEC-071: the run-up rides the launch phase's own clock (E138) and
     // ends once, when the phase does or on a skip.
     if (!this.#launchDone) {
       if (flight.phase === 'launch') this.#view?.setLaunch(flight.time / LAUNCH_SECONDS);
@@ -1095,12 +1069,11 @@ export class FlightScene extends UiScene<'flight'> {
     this.#autopilotEl?.classList.add('is-visible');
   }
 
-  /** SPEC-032 §4.2: end the launch shot once — the tug dropped, the cockpit in. */
+  /** SPEC-071: end the launch once — the stars at cruise, the shake settled. */
   #endLaunch(): void {
     if (this.#launchDone) return;
     this.#launchDone = true;
-    this.#view?.skipLaunch();
-    if (this.#landingT < 0) this.#skipHint?.classList.add('is-hidden');
+    this.#view?.endLaunch();
     this.#playAcceptLines();
     // SPEC-035 §4.8: the rail explained nothing at all. The steer tip lands the
     // moment the player has control, the throttle tip 12 s later.
@@ -1110,8 +1083,8 @@ export class FlightScene extends UiScene<'flight'> {
     // so nothing can surface 12 s later without the steer tip having had its
     // turn first. A returning player who saw only the steer tip still gets it.
     if (this.#tipsOn()) this.#throttleTipIn = THROTTLE_TIP_DELAY;
-    // SPEC-035 §4.11: the engine comes up with the cockpit.
-    this.#startEngineHum();
+    // SPEC-071: the hum reaches its cruise volume with the run-up.
+    this.#engineVoice?.setVolume(engineVolume(this.#flight?.ship.throttle ?? 1));
   }
 
   /**
@@ -1135,25 +1108,27 @@ export class FlightScene extends UiScene<'flight'> {
     return this.#aria !== null && this.services.perf !== true && this.services.settings.get().guidance === 'full';
   }
 
-  /** SPEC-035 §4.11: the looping hum, at priority 0 so nothing else loses a voice. */
+  /**
+   * SPEC-035 §4.11: the looping hum, at priority 0 so nothing else loses a
+   * voice. SPEC-071: it starts with the launch at volume 0.
+   */
   #startEngineHum(): void {
     if (this.#engineVoice !== null) return;
-    this.#engineVoice = this.services.audio.play('engine_hum', {
-      loop: true,
-      priority: 0,
-      volume: engineVolume(this.#flight?.ship.throttle ?? 1),
-    });
+    this.#engineVoice = this.services.audio.play('engine_hum', { loop: true, priority: 0, volume: 0 });
     this.#engineVolumeIn = ENGINE_VOLUME_INTERVAL;
   }
 
-  /** §4.11: re-read the throttle four times a second, not every frame. */
+  /**
+   * §4.11: re-read the throttle four times a second, not every frame.
+   * SPEC-071: during the launch the volume rides the run-up.
+   */
   #stepEngineHum(dt: number, throttle: number): void {
     const voice = this.#engineVoice;
     if (voice === null) return;
     this.#engineVolumeIn -= dt;
     if (this.#engineVolumeIn > 0) return;
     this.#engineVolumeIn = ENGINE_VOLUME_INTERVAL;
-    voice.setVolume(engineVolume(throttle));
+    voice.setVolume(engineVolume(throttle) * (this.#launchDone ? 1 : launchRunUp(this.#view?.launch ?? 1)));
   }
 
   #stopEngineHum(): void {
@@ -1331,7 +1306,7 @@ export class FlightScene extends UiScene<'flight'> {
       // SPEC-015 AC-39: the degrees the horizon is rolled by, after the
       // reduce-motion clamp — 8° is the ceiling the criterion names.
       info['roll'] = Number((this.#view?.cameraRollDeg ?? 0).toFixed(2));
-      // SPEC-032 AC: how far through the launch shot, 1 once it is over.
+      // SPEC-071: how far through the launch's run-up, 1 once it is over.
       info['launch'] = this.#launchDone ? 1 : Number(Math.min(1, this.#view?.launch ?? 1).toFixed(3));
       info['cameraZ'] = Number(this.camera.position.z.toFixed(3));
       // SPEC-036 §4.1: where the guns look and where the ship is, in metres —
