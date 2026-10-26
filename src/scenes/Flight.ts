@@ -77,7 +77,7 @@ import { NOTES_UNSEEN } from '@/ui/NotesPanel';
 import { PauseMenu, withComms } from '@/ui/PauseMenu';
 import { RotateOverlay } from '@/ui/RotateOverlay';
 import { TouchControls } from '@/ui/TouchControls';
-import { FlightView, launchRunUp } from '@/views/FlightView';
+import { FlightView, hitBearing, launchRunUp } from '@/views/FlightView';
 import { prewarm, prewarmPatches } from '@/views/ProceduralTextures';
 import type { Look } from '@/core/Quality';
 import type { Voice } from '@/core/Audio';
@@ -353,10 +353,16 @@ export class FlightScene extends UiScene<'flight'> {
     this.#showChapterCard(save);
     this.#watchContacts(bus);
 
-    this.disposer.add(this.services.events.on('ship:damaged', ({ source }) => {
+    this.disposer.add(this.services.events.on('ship:damaged', ({ source, from }) => {
       // SPEC-037 §4.6: an ion-storm tick never flashes — the storm pill and the
       // static already say it — but the view still kicks.
       if (source !== 'storm') this.#hud?.damageFlash();
+      // SPEC-075 §4.4: and a wedge on the edge the rock or the shot struck from.
+      const ship = this.#flight?.ship;
+      if (from !== undefined && ship !== undefined) {
+        const bearing = hitBearing(from.x - ship.x, from.y - ship.y, ((this.#view?.cameraRollDeg ?? 0) * Math.PI) / 180);
+        if (bearing !== null) this.#hud?.showHitDirection(bearing, this.services.settings.get().reduceMotion);
+      }
       // SPEC-045 §4.3: the kick follows Camera shake — half at 0.5, and at 0
       // (which reduce motion sets) nothing moves.
       this.#view?.kick(this.services.settings.get().cameraShake);
@@ -411,7 +417,8 @@ export class FlightScene extends UiScene<'flight'> {
           hostiles: flight.hostiles,
           holding: flight.phase === 'holding',
         }),
-        hit: (amount: number) => flight.hit(amount, 'asteroid', { kind: 'asteroid' }),
+        // SPEC-075 §4.4: `from`, on the steering plane, is where the rock struck.
+        hit: (amount: number, from?: { x: number; y: number }) => flight.hit(amount, 'asteroid', { kind: 'asteroid' }, from),
         warp: (seconds: number) => {
           const dt = 1 / 60;
           for (let t = 0; t < seconds; t += dt) {

@@ -427,7 +427,8 @@ describe('asteroid collision', () => {
     step(w.flight, 3 * DT);
     const hits = w.of('ship:damaged');
     expect(hits.length).toBe(1);
-    expect(hits[0]).toEqual({ shield: w.flight.ship.maxShield - 24, hull: w.flight.ship.maxHull, source: 'asteroid' });
+    // SPEC-075 §4.4: with where the rock struck, for the HUD's wedge.
+    expect(hits[0]).toEqual({ shield: w.flight.ship.maxShield - 24, hull: w.flight.ship.maxHull, source: 'asteroid', from: { x: 0, y: 0 } });
   });
 
   it('does not collide when passing beside, and is removed past depth −5 (AC-66)', () => {
@@ -798,7 +799,7 @@ describe('interceptor ram', () => {
     // SPEC-009's chapter scaling owns, nor the 12 §4.4 annotates.
     expect(w.flight.ship.shield).toBe(w.flight.ship.maxShield - 15);
     expect(w.flight.ship.hull).toBe(w.flight.ship.maxHull);
-    expect(w.of('ship:damaged').at(-1)).toEqual({ shield: w.flight.ship.maxShield - 15, hull: w.flight.ship.maxHull, source: 'enemy' });
+    expect(w.of('ship:damaged').at(-1)).toEqual({ shield: w.flight.ship.maxShield - 15, hull: w.flight.ship.maxHull, source: 'enemy', from: { x: 0, y: 0 } });
     expect(w.of('enemy:killed')).toEqual([]); // a ram is not a player kill
   });
 });

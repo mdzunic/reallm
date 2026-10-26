@@ -17,6 +17,7 @@ import {
 import { log } from '@/core/Log';
 import type { ModelId } from '@/data/assets';
 import type { PlayerEntity } from '@/entities/Player';
+import { figureEdgeChunk, PLAYER_EDGE_UNIFORM } from '@/views/FigureEdge';
 
 /** The slice of `Assets` these views need; `Assets` satisfies it (Decisions #4). */
 export interface CharacterAssets {
@@ -56,6 +57,22 @@ export function tintSalvager(material: THREE.MeshStandardMaterial, primary: stri
   }
 }
 
+/**
+ * SPEC-075 §4.1: the figure edge on the salvager's clones — the shared
+ * `uPlayerEdge`, mixed in just before three writes the fragment. One program
+ * for every clone; the edge fades with the blink, so a blinking salvager
+ * still blinks.
+ */
+function injectPlayerEdge(material: THREE.MeshStandardMaterial): void {
+  material.onBeforeCompile = (shader) => {
+    shader.uniforms['uPlayerEdge'] = PLAYER_EDGE_UNIFORM;
+    shader.fragmentShader = shader.fragmentShader
+      .replace('#include <common>', 'uniform vec4 uPlayerEdge;\n#include <common>')
+      .replace('#include <opaque_fragment>', figureEdgeChunk('uPlayerEdge', 'opacity'));
+  };
+  material.customProgramCacheKey = () => 'salvager/1';
+}
+
 export class CharacterView {
   readonly root: THREE.Object3D;
   readonly #prev: CharacterPrev;
@@ -91,6 +108,7 @@ export class CharacterView {
       for (const clone of clones) {
         clone.transparent = true;
         tintSalvager(clone, appearance.primary, appearance.secondary);
+        injectPlayerEdge(clone);
         this.#materials.push(clone);
       }
       mesh.material = Array.isArray(source) ? clones : (clones[0] as THREE.MeshStandardMaterial);

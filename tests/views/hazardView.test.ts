@@ -12,6 +12,7 @@ import { Hazards, type HazardSpot } from '@/systems/Hazards';
 import { hazardGeometry, hazardTriangles, HAZARD_TRIANGLE_CAP } from '@/views/HazardMeshes';
 import { HAZARD_CAUTION, HAZARD_CAUTION_OVERRIDES, HAZARD_DRAW_RADIUS, HazardView } from '@/views/HazardView';
 import { HOSTILE_RIM, HOSTILE_RIM_COLOUR_BLIND } from '@/views/ProceduralMeshes';
+import { CAUTION_EDGE, TELEGRAPH_EDGE } from '@/views/TelegraphView';
 import { deltaE76 } from '../fixtures/colourVision';
 
 const flat = (): number => 0;
@@ -120,6 +121,25 @@ describe('HazardView (§4.7)', () => {
       if (o instanceof THREE.InstancedMesh && o.visible) visible.push(o.name);
     });
     expect(visible.sort()).toEqual(['hazard-balanced_rock', 'hazard-contact']);
+    view.dispose();
+  });
+
+  it('rings a warning with the wide dark caution edge, in the enemies’ own program (SPEC-075 §4.3)', () => {
+    const root = new THREE.Group();
+    const list = hazards([spot('scav_mine', 0, 0)]);
+    const view = new HazardView(root, list.list, 'cinder4', flat);
+    Object.assign(list.warnings.alloc(), { kind: 'circle', x: 0, z: 0, radius: 3.5, startAt: 0, hitAt: 0.9, elite: false });
+    view.sync(list.warnings, 0.3, 0, 0, null, false);
+    const circle = root.getObjectByName('telegraph-circle') as THREE.InstancedMesh;
+    expect(circle.visible).toBe(true);
+    const shader = { uniforms: {} as Record<string, { value: unknown }>, vertexShader: '#include <common>\n#include <begin_vertex>', fragmentShader: '#include <common>\nvec4 diffuseColor = vec4( diffuse, opacity );' };
+    (circle.material as THREE.MeshBasicMaterial).onBeforeCompile(shader as unknown as THREE.WebGLProgramParametersWithUniforms, null as never);
+    const edge = shader.uniforms['uEdge']?.value as THREE.Vector3;
+    expect(edge.toArray()).toEqual([CAUTION_EDGE.width, CAUTION_EDGE.dark, CAUTION_EDGE.darkAlpha]);
+    // Three times V-02's dark band, and darker.
+    expect(CAUTION_EDGE.dark).toBeGreaterThanOrEqual(3 * TELEGRAPH_EDGE.dark);
+    expect(CAUTION_EDGE.darkAlpha).toBeGreaterThan(TELEGRAPH_EDGE.darkAlpha);
+    expect((circle.material as THREE.MeshBasicMaterial).customProgramCacheKey()).toBe('telegraph/circle');
     view.dispose();
   });
 

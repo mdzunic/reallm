@@ -31,6 +31,7 @@ import { hash32 } from '@/core/Rng';
 import type { ColourPreset } from '@/core/Settings';
 import type { ProceduralRecipeId } from '@/data/ids';
 import { isBuried, type EnemyEntity } from '@/entities/Enemy';
+import { figureEdgeChunk, HOSTILE_EDGE_UNIFORM } from '@/views/FigureEdge';
 
 /**
  * Per-part instance capacity. Sized for the worst legal field: the population
@@ -607,7 +608,8 @@ const RIM_CHUNK = hostileRimChunk('vInstanceEmissive.w');
  * so everything else about the material — lights, shadow, normal map — is
  * stock three. One cache key for every enemy material: same program, whatever
  * the variant, because SPEC-035's rim is on every preset and every recipe.
- * SPEC-045 §4.5 moved it to `'enemy/3'` when the rim's colour became a uniform.
+ * SPEC-045 §4.5 moved it to `'enemy/3'` when the rim's colour became a uniform,
+ * and SPEC-075 §4.1 to `'enemy/4'` with the figure edge.
  *
  * The attribute is a `vec4`: `rgb` is the emissive of SPEC-019 §4.3, `w` the
  * rim scale of SPEC-035 §4.1.
@@ -617,17 +619,20 @@ function injectInstanceEmissive(material: THREE.MeshStandardMaterial): void {
     // SPEC-045 §4.5: the shared object itself, the same one for every material
     // and every compile, so one write to its value retints them all.
     shader.uniforms['uHostileRim'] = HOSTILE_RIM_UNIFORM;
+    // SPEC-075 §4.1: the figure edge round the rim, from the planet's ground.
+    shader.uniforms['uHostileEdge'] = HOSTILE_EDGE_UNIFORM;
     shader.vertexShader = shader.vertexShader
       .replace('#include <common>', 'attribute vec4 instanceEmissive;\nvarying vec4 vInstanceEmissive;\n#include <common>')
       .replace('#include <begin_vertex>', '#include <begin_vertex>\nvInstanceEmissive = instanceEmissive;');
     shader.fragmentShader = shader.fragmentShader
-      .replace('#include <common>', 'uniform vec3 uHostileRim;\nvarying vec4 vInstanceEmissive;\n#include <common>')
+      .replace('#include <common>', 'uniform vec3 uHostileRim;\nuniform vec4 uHostileEdge;\nvarying vec4 vInstanceEmissive;\n#include <common>')
       .replace(
         '#include <emissivemap_fragment>',
         `#include <emissivemap_fragment>\ntotalEmissiveRadiance += vInstanceEmissive.rgb;${RIM_CHUNK}`,
-      );
+      )
+      .replace('#include <opaque_fragment>', figureEdgeChunk('uHostileEdge', 'min( vInstanceEmissive.w, 1.0 )'));
   };
-  material.customProgramCacheKey = () => 'enemy/3';
+  material.customProgramCacheKey = () => 'enemy/4';
 }
 
 export class EnemyMeshes {

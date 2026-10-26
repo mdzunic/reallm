@@ -761,6 +761,11 @@ button.debug-button {
   --ink-dim: #8a97a3;
   /* SPEC-034 §4.9: the red a defended structure's health falls to. */
   --danger: #e5484d;
+  /* SPEC-075 §4.5: the missile red — the rack's pips, the lock bracket, MSL's
+     border and the missile signal's marker. It is identity, not danger, and
+     holds ΔE ≥ 20 from the fuel, oil and course markers under every colour
+     vision, so the colour-blind preset leaves it where it is. */
+  --missile: #ff6a55;
 
   /* SPEC-020 §4.5 — the dark sci-fi theme (*initial tuning*). Every rule below
      is expressed through these, so a retheme is a token swap and never a
@@ -7532,7 +7537,17 @@ html.reduce-motion .puzzle-cell {
    motion). */
 .bar-fuel { background: linear-gradient(90deg, #c9853a, #e3a857); }
 
-.bar-row.is-low .bar-fuel { background: linear-gradient(90deg, #ff5a4a, #e5484d); }
+/* SPEC-075 §4.5: low is hatched in the danger colour, and a ▲ follows the
+   percentage — pattern and marker, so it reads under the colour-blind preset
+   too, where danger is an orange beside the tank's amber. */
+.bar-row.is-low .bar-fuel {
+  background: repeating-linear-gradient(-45deg, rgba(0, 0, 0, 0.45) 0 3px, transparent 3px 7px), var(--danger);
+}
+
+.bar-row.is-low .bar-text::after {
+  content: ' ▲';
+  color: var(--danger);
+}
 
 .bar-row.is-burning .bar {
   box-shadow: 0 0 0 1px var(--warn);
@@ -7574,8 +7589,8 @@ html.reduce-motion .bar-row.is-burning .bar {
 }
 
 .hud-missile-pip.is-loaded {
-  border-color: #ff6a55;
-  background: #ff6a55;
+  border-color: var(--missile);
+  background: var(--missile);
 }
 
 .hud-missiles.is-empty {
@@ -7590,7 +7605,7 @@ html.reduce-motion .bar-row.is-burning .bar {
   width: 40px;
   height: 40px;
   margin: -20px 0 0 -20px;
-  border: 2px solid #ff6a55;
+  border: 2px solid var(--missile);
   clip-path: polygon(0 0, 35% 0, 35% 4px, 4px 4px, 4px 35%, 0 35%, 0 65%, 4px 65%, 4px calc(100% - 4px), 35% calc(100% - 4px), 35% 100%, 65% 100%, 65% calc(100% - 4px), calc(100% - 4px) calc(100% - 4px), calc(100% - 4px) 65%, 100% 65%, 100% 35%, calc(100% - 4px) 35%, calc(100% - 4px) 4px, 65% 4px, 65% 0, 100% 0, 100% 100%, 0 100%);
   filter: drop-shadow(0 0 2px #000);
 }
@@ -7646,7 +7661,7 @@ html.reduce-motion .bar-row.is-burning .bar {
 
 .flight-marker[data-kind='fuel'] { --marker: #ffb347; }
 .flight-marker[data-kind='oil'] { --marker: #46c2b4; }
-.flight-marker[data-kind='missile'] { --marker: #ff6a55; }
+.flight-marker[data-kind='missile'] { --marker: var(--missile); }
 
 .flight-marker-mark {
   position: absolute;
@@ -7716,7 +7731,7 @@ html.reduce-motion .bar-row.is-burning .bar {
 /* SPEC-070 §4.5: MSL wears the missile red, and dims while the rack is empty
    (still pressable, so the refusal can say why). */
 button.touch-button.touch-missile {
-  border-color: #ff6a55;
+  border-color: var(--missile);
 }
 
 button.touch-button.is-empty {

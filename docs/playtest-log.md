@@ -2621,3 +2621,29 @@ Recorded on the branch: `npm run check` (144 files, 3,640 tests) and the full e2
 - [ ] the phone station's opening lines leave the board clear;
 - [ ] MSL reaches under the thumb in flight, on both stick sides;
 - [ ] a screenshot of each, recorded here.
+
+## PLAN R32 — read the fight: SPEC-075 (M7t)
+
+- **Build:** `feat/read-the-fight`, untagged
+- **Devices:**
+  - desktop: headless full Chromium on the Mac's GPU (Playwright, `--use-angle=metal`), 1440 × 900, `medium` and `high`
+  - hardware: _not run_ (owed, below)
+
+Recorded on the branch: `npm run check` (145 files, 3,656 tests) and the full e2e suite, 4 workers: 800 passed, 6 skipped, 2 failed — SPEC-005's AC-19 and AC-10 cases, whose 5 s wait for the first scene label ran out at the run's cold start; the file re-run alone passed 17 of 17. Each "before" frame is the same build without this branch, on the same seed. The frames are in `docs/screenshots/r32/`.
+
+| Area | What the headless run showed |
+|---|---|
+| Figure edge | `sceneInfo.figureEdge` read `dark` on Cinder-4, Vetra and Eden and `pale` on Thessaly, Ferrum and the Hive. A pack spawned beside the player stood off the ground on all six in a greyscale capture: dark-edged on sand, snow and lawn, pale-edged on moss, basalt and chitin. Before, the skitters on Cinder-4 were a mid grey on a mid grey, and on Ferrum the player and pack were dark on dark (`figure-cinder4-grey-before.jpg` / `-after.jpg`, `figure-ferrum-before.jpg` / `-after.jpg`) |
+| Trails | With the shadow map off, Cinder-4's dark band from the pad was still there: it was the trail, not a shadow. At `#a8784a` it reads as a worn path (`trail-cinder4-before.jpg` / `-after.jpg`) |
+| Trap rings | A tripmine set off by a pack on Cinder-4 drew its circle with a dark outer ring; a cryo geyser's on Vetra held its ring through the whiteout fog (`trap-cinder4-before.jpg` / `-after.jpg`, `trap-vetra-after.jpg`) |
+| Cockpit | The console screens show their readouts instead of white blooms, and the cruise's streaks are short once the launch is over. A rock struck 3 m right and 1 m low put a wedge at 108° (`cockpit-before.jpg` / `-after.jpg`, `flight-hit-wedge.jpg`) |
+| Reds | A tank at 10 % is hatched in the danger colour with a ▲ after the percentage (`cockpit-after.jpg`, standard preset). Under the colour-blind preset the hatch is danger's orange; `e2e/SPEC-075` case 3 checks it |
+
+**Owed on hardware.** On the laptop and the reference phone, at `medium`:
+
+- [ ] on each planet, the salvager and a pack are easy to pick out mid-fight, the edge reads as an edge and not a glow, and the hostile rim still reads inside it;
+- [ ] a descent turns the edges off and the climb turns them on again;
+- [ ] a trap's warning circle reads on Cinder-4's sand and Vetra's snow;
+- [ ] in the cockpit the screens show, the cruise reads as space, and a rock that hits shows where it struck;
+- [ ] under the colour-blind preset, a low tank and an arena ring on the minimap read as danger;
+- [ ] a screenshot of each, recorded here.

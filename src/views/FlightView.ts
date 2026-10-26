@@ -151,6 +151,19 @@ const STAR_SPREAD_Y = 45;
  */
 export const STAR_STREAK_LENGTH = 6;
 export const REDUCED_STREAK_SCALE = 0.5;
+/**
+ * SPEC-075 §4.4 (*initial tuning*): the streaks sell the launch, then settle
+ * to this share of their length over `STREAK_SETTLE_SECONDS`, so the cruise
+ * reads as space and a rock against it reads as a rock.
+ */
+export const CRUISE_STREAK_SCALE = 0.35;
+export const STREAK_SETTLE_SECONDS = 2.5;
+/**
+ * SPEC-075 §4.4 (*initial tuning*): the cockpit model's emissive ceiling. The
+ * console screens shipped at 1.8, over flight's 0.75 bloom threshold, and
+ * bloomed to white; under it they show their readouts.
+ */
+export const COCKPIT_EMISSIVE_MAX = 0.45;
 /** Base planet radius; §4.1's 0.2 → 6 scale rides on top of it. */
 const PLANET_RADIUS = 30;
 const PLANET_Z = -320;
@@ -272,6 +285,16 @@ export function starStreakLength(throttle: number, reduceMotion: boolean): numbe
   return STAR_STREAK_LENGTH * safe * (reduceMotion ? REDUCED_STREAK_SCALE : 1);
 }
 
+/**
+ * SPEC-075 §4.4: the share of the streak a cruise draws `seconds` after the
+ * launch ended — 1 at the end of the run-up, easing to `CRUISE_STREAK_SCALE`.
+ */
+export function cruiseStreakScale(seconds: number): number {
+  const t = clamp01(Number.isFinite(seconds) ? seconds / STREAK_SETTLE_SECONDS : 1);
+  const ease = t * t * (3 - 2 * t);
+  return 1 - (1 - CRUISE_STREAK_SCALE) * ease;
+}
+
 const DEG = Math.PI / 180;
 
 /** SPEC-069 §4.6: `value` moved by whole periods into `centre ± half`. */
@@ -291,6 +314,24 @@ export function cameraRoll(bankDeg: number, reduceMotion: boolean): number {
   if (!reduceMotion) return roll;
   const limit = REDUCED_ROLL_DEG * DEG;
   return Math.max(-limit, Math.min(limit, roll));
+}
+
+/**
+ * SPEC-075 §4.4: a hit within this far of the nose, on the steering plane,
+ * came from dead ahead — the vignette says it, and no wedge points anywhere.
+ */
+export const HIT_BEARING_DEAD_AHEAD = 0.25;
+
+/**
+ * SPEC-075 §4.4: the HUD wedge's bearing for a hit that struck `(dx, dy)` off
+ * the ship's centre on the steering plane (x right, y up), clockwise from
+ * screen-up as `Hud.showHitDirection` takes it. `roll` is the camera's, in
+ * radians: a camera rolled anticlockwise turns the picture, and the bearing
+ * with it, clockwise. `null` from dead ahead.
+ */
+export function hitBearing(dx: number, dy: number, roll: number): number | null {
+  if (!Number.isFinite(dx) || !Number.isFinite(dy) || Math.hypot(dx, dy) < HIT_BEARING_DEAD_AHEAD) return null;
+  return Math.atan2(dx, dy) + (Number.isFinite(roll) ? roll : 0);
 }
 
 // ------------------------------------------- SPEC-071: the launch from the cockpit
@@ -536,6 +577,8 @@ export class FlightView {
   #stormTint = 0;
   /** AC-39: the radians the last frame rolled the camera by, after the clamp. */
   #cameraRoll = 0;
+  /** SPEC-075 §4.4: seconds since the launch ended — what settles the streaks. */
+  #cruising = 0;
   readonly #accent: THREE.Color;
   #flare: Lensflare | null = null;
   readonly #flareElements: LensflareElement[] = [];
@@ -1101,6 +1144,15 @@ export class FlightView {
       this.#cockpit.remove(child);
       disposeObject3D(child);
     }
+    // SPEC-075 §4.4: the console screens glow under the bloom, not into it.
+    model.traverse((node) => {
+      const mesh = node as THREE.Mesh;
+      if (mesh.isMesh !== true) return;
+      for (const material of Array.isArray(mesh.material) ? mesh.material : [mesh.material]) {
+        const standard = material as THREE.MeshStandardMaterial;
+        if (standard.isMeshStandardMaterial === true) standard.emissiveIntensity = Math.min(standard.emissiveIntensity, COCKPIT_EMISSIVE_MAX);
+      }
+    });
     this.#cockpit.add(model);
   }
 
@@ -1144,7 +1196,9 @@ export class FlightView {
     const advance = 60 * frame.throttleLive * dt * runUp;
     // AC-45: the streak trails *behind* the head, which is toward −z, because
     // the field streams toward the camera at +z.
-    const streak = starStreakLength(frame.throttleLive, this.#reduceMotion) * runUp;
+    // SPEC-075 §4.4: then settles to the cruise's share once the launch is over.
+    if (this.#launch >= 1) this.#cruising += dt;
+    const streak = starStreakLength(frame.throttleLive, this.#reduceMotion) * runUp * cruiseStreakScale(this.#cruising);
     // Parallax by ship offset (§4.9): the field slides against the steer.
     const offsetX = -frame.ship.x * 0.35;
     const offsetY = -frame.ship.y * 0.35;

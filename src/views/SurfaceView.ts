@@ -41,6 +41,7 @@ import { CombatFx, type TimedCloud, type TimedGround } from '@/views/CombatFx';
 import { Flashlight, type FlashlightMode } from '@/views/Flashlight';
 import { buildEnvironment, skyParamsFor } from '@/views/Environment';
 import { FollowerView } from '@/views/FollowerView';
+import { clearFigureEdges, setFigureEdges, type EdgeTone } from '@/views/FigureEdge';
 import { EnemyMeshes, INSTANCES_PER_PART } from '@/views/ProceduralMeshes';
 import { RemainsView, type RemainsModel } from '@/views/RemainsView';
 import { ScavBody } from '@/views/ScavBody';
@@ -1030,6 +1031,8 @@ export class SurfaceView {
   #descentFromModel = false;
   readonly #sunDir: { x: number; y: number; z: number };
   readonly #palette: PlanetDef['surface']['palette'];
+  /** SPEC-075 §4.1: the figure edge in force — the ground's tone, or off below. */
+  #figureEdge: EdgeTone | 'off' = 'off';
   readonly #lightningSeed: number;
   #environment: THREE.DataTexture | null = null;
 
@@ -1282,6 +1285,8 @@ export class SurfaceView {
     rim.position.set(-30, 20, -24);
     this.#rim = rim;
     this.#lightRig.add(this.#hemi, this.#key, this.#keyTarget, rim);
+    // SPEC-075 §4.1: the figure edges stand off this planet's ground.
+    this.#figureEdge = setFigureEdges(palette.ground);
 
     // SPEC-018 §4.3–§4.4: terrain tiles under one splat material. Procedural
     // layers first; the lazy asset drop swaps them through `setGroundTextures`.
@@ -2045,6 +2050,11 @@ export class SurfaceView {
     return this.#root;
   }
 
+  /** SPEC-075 §4.1: the figure edge in force, for `sceneInfo.figureEdge`. */
+  get figureEdge(): EdgeTone | 'off' {
+    return this.#figureEdge;
+  }
+
   /** The level on show. */
   get level(): 'surface' | 'underground' {
     return this.#level;
@@ -2085,6 +2095,13 @@ export class SurfaceView {
     this.#key.intensity = below ? 0 : colors.key;
     this.#rim.intensity = below ? look.rim : RIM_INTENSITY;
     this.#scene.environmentIntensity = below ? look.ibl : ENVIRONMENT_INTENSITY;
+    // SPEC-075 §4.1: no figure edge below, where the dark is the point.
+    if (below) {
+      clearFigureEdges();
+      this.#figureEdge = 'off';
+    } else {
+      this.#figureEdge = setFigureEdges(this.#palette.ground);
+    }
     this.#applyTorch();
   }
 

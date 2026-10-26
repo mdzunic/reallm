@@ -1745,10 +1745,11 @@ export class Flight {
           if (hazard.depth <= RAIL.hitDepth && ship.alive && Math.hypot(hazard.x - ship.x, hazard.y - ship.y) < hazard.radius + SHIP_RADIUS) {
             const def = hazard.def;
             this.#burst(hazard.x, hazard.y, hazard.depth, hazard.radius);
+            const from = { x: hazard.x, y: hazard.y };
             this.hazards.free(i);
             // The ram costs a flat 15 and the interceptor with it (see the
             // constant for why §4.4's `def.damage` cannot apply).
-            this.hit(INTERCEPTOR_RAM_DAMAGE, 'enemy', def === undefined ? { kind: 'asteroid' } : { kind: 'enemy', enemyId: def.id as EnemyId });
+            this.hit(INTERCEPTOR_RAM_DAMAGE, 'enemy', def === undefined ? { kind: 'asteroid' } : { kind: 'enemy', enemyId: def.id as EnemyId }, from);
             continue;
           }
           if (hazard.depth < -5) this.hazards.free(i);
@@ -1763,8 +1764,9 @@ export class Flight {
             // SPEC-041 §4.8: a burst round deals its own share; `hit()` still
             // applies casual's ×0.7 on top (41-l).
             const damage = hazard.shotDamage ?? def?.damage ?? 10;
+            const from = { x: hazard.x, y: hazard.y };
             this.hazards.free(i);
-            this.hit(damage, 'enemy', def === undefined ? { kind: 'asteroid' } : { kind: 'projectile', enemyId: def.id as EnemyId });
+            this.hit(damage, 'enemy', def === undefined ? { kind: 'asteroid' } : { kind: 'projectile', enemyId: def.id as EnemyId }, from);
             continue;
           }
           if (hazard.depth < -5) this.hazards.free(i);
@@ -1778,8 +1780,9 @@ export class Flight {
           if (hazard.depth <= RAIL.hitDepth && ship.alive && Math.hypot(hazard.x - ship.x, hazard.y - ship.y) < hazard.radius + SHIP_RADIUS) {
             this.#burst(hazard.x, hazard.y, hazard.depth, hazard.radius);
             const damage = Math.round(10 * hazard.radius);
+            const from = { x: hazard.x, y: hazard.y };
             this.hazards.free(i);
-            this.hit(damage, 'asteroid', { kind: 'asteroid' });
+            this.hit(damage, 'asteroid', { kind: 'asteroid' }, from);
             continue;
           }
           if (hazard.depth < -5) this.hazards.free(i); // passed — removed silently
@@ -1862,8 +1865,10 @@ export class Flight {
    * the tests route through the same door. SPEC-059 §4.2.2: a hit worth
    * nothing (story's multiplier is 0) changes nothing and emits nothing, so
    * damage never recalls the ship.
+   * SPEC-075 §4.4: `from` — where it struck, on the steering plane — rides
+   * the event for the HUD's hit wedge.
    */
-  hit(amount: number, source: 'asteroid' | 'enemy' | 'storm', cause: DamageSource): void {
+  hit(amount: number, source: 'asteroid' | 'enemy' | 'storm', cause: DamageSource, from?: { x: number; y: number }): void {
     const ship = this.ship;
     if (!ship.alive || amount <= 0) return;
     let damage = amount * this.#damageMult;
@@ -1875,7 +1880,7 @@ export class Flight {
     }
     if (damage > 0) ship.hull = Math.max(0, ship.hull - damage);
     ship.shieldRegenAt = this.#time + TUNING.SHIELD_REGEN_DELAY;
-    this.#events.emit('ship:damaged', { shield: ship.shield, hull: ship.hull, source });
+    this.#events.emit('ship:damaged', from === undefined ? { shield: ship.shield, hull: ship.hull, source } : { shield: ship.shield, hull: ship.hull, source, from });
     if (ship.hull > 0) return;
     // §4.1: hull 0 → recall. Fuel stays spent, cargo stays aboard (E5); the
     // scene holds the explosion for 1.5 s before the station.
