@@ -1036,6 +1036,17 @@ describe('content invariants (SPEC-009 §7)', () => {
     }
   });
 
+  // PLAN R32 / SPEC-075 §4.2: a worn trail is ground a little darker or
+  // lighter than the rest, not a band of shade. Cinder-4's 2.5 : 1 trail ran
+  // from the pad across two screens and read as a long shadow (the fifth
+  // audit's VI-03); held at 1.6 : 1, every trail stays worn ground.
+  it('18d. every planet’s trail tint stays within 1.6 : 1 of its ground', () => {
+    for (const planet of planets) {
+      const ratio = contrastRatio(planet.surface.look.dressing.trail, planet.surface.palette.ground);
+      expect(ratio, planet.id).toBeLessThanOrEqual(1.6);
+    }
+  });
+
   // SPEC-025 §4.7. The slot/line split is only safe while the two agree: a
   // weapon hangs where its line says it does, both class starters are free
   // tier-0 pieces of the right slot, and every consumable has a quick slot to

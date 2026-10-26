@@ -182,7 +182,7 @@ The story, the planets, the missions' roster and rewards, the token totals (670 
 9. **The first hour (SPEC-035).**
    - **Camera.** It comes closer: 22 m on the keyboard scheme and 17 m on touch. This supersedes R6-4's "the camera keeps SPEC-012 §4.3's numbers" for the distance only; pitch, yaw and field of view stay.
    - **Fog and bloom.** Surface fog starts at the player instead of at the camera, and the surface grade no longer blooms sunlit ground.
-   - **Enemies.** Every enemy wears a hostile rim, and chapter 1–2 tints reach 3:1 luminance contrast against their ground.
+   - **Enemies.** Every enemy wears a hostile rim, and chapter 1–2 tints reach 3:1 luminance contrast against their ground. (R32: a figure edge stands round the rim, and round the player.)
    - **Visibility.** Props between the camera and the player fade, and a hit from off screen shows where it came from.
    - **First visit to Cinder-4.** It ramps in: no ambient storm, half the ambient population and no rushers until `c1_m1` is done.
    - **Tips** teach the first flight and the first fight.
@@ -709,7 +709,7 @@ The layout, its hash and every SPEC-010 invariant stay. Decisions:
    - Ground patches are richer and more numerous. New kinds per biome include gravel, drifts, ice sheets, mud, ash, cooling lava, resin pools and paths.
    - Rubble rings the foot of every obstacle and landmark, lies in loose clumps in the open, and banks along the arena wall.
    - Each biome gets three low dressing pieces in clumps: a dead wurm's ribs, scav barrels and pipe runs on Cinder-4; ice shards, buried crates and frozen pipes on Vetra; fallen logs, pillar drums and root arches on Thessaly; basalt stumps, obsidian and cooling lava on Ferrum; chitin ribs, glow pods and resin mounds on the Hive (green, so they never read as its magenta eggs); and field walls, marker posts and flower beds on Eden.
-   - Worn trails meander from the pad toward every objective, inside the corridor the layout keeps clear.
+   - Worn trails meander from the pad toward every objective, inside the corridor the layout keeps clear. (R32: within 1.6 : 1 of the ground, so none reads as a shadow.)
    - A landing site rings the pad 6–15 m out: crates, cable runs, a lamp mast, barrels and tracks. This answers V-01.
    - Budgets hold: 96 draws, and 60 k triangles at spawn on `medium`. `low` draws a reduced set.
 2. **Traps (SPEC-068, §4, §13 E126, E127, E130).** Each planet has one kind of trap, placed in fields of one to four, and a trap hurts whoever is in it: the player and enemies alike.
@@ -919,6 +919,46 @@ Specs:
 - SPEC-000's queue and build order.
 
 (§4, §6, §10, §13)
+
+**R32 — 2026-10-26 (the fifth audit, step 2: read the fight).** The audit's surface and flight frames, checked again on the Step 1 build, show where a fight is hard to read:
+- **Figure against ground (VI-02).** The default rust suit and the Dust Skitters sit on Cinder-4's orange sand. On Ferrum the player and a pack are dark shapes on dark rock. SPEC-035's hostile rim is a red-orange glow, the sand's own hue and the hue of Ferrum's cracks.
+- **The long shadow bands are trails (VI-03).** The audit read them as mast shadows at a low sun, but they stay with the shadow map off. They are SPEC-067's worn trails: on Cinder-4 a tint 2.5 : 1 darker than the sand runs from the pad across two screens. Cinder-4's sun stands at 52°, where a 3.6 m mast throws 2.8 m.
+- **Trap circles fade into sand and snow (VI-09).** A tripmine's warning is lemon on Cinder-4 and orange on Vetra, each about as light as its ground, and V-02's dark band is 6 cm wide.
+- **The cockpit hides the fight (VI-08).** The console screens bloom to white, full-length warp streaks run the whole trip, and a rock that hits leaves no sign of where it struck.
+- **The colour-blind preset stops at three tokens (UX-11).** The low tank, the missile pips, the lock bracket, MSL's border, the missile marker and the minimap's arena rings are literal reds. The preset itself already holds its pairs apart under protan, deutan and tritan simulation (SPEC-045 AC-25), so it needs reach, not more presets.
+
+Decisions:
+
+1. **A figure edge (SPEC-075, §13 E145).**
+   - The player and every enemy, raiders included, wear a band on the outer edge of the silhouette: dark (the theme's `#0b0f14`) on a light ground, pale on a dark one.
+   - The planet's palette ground decides. A relative luminance of 0.15 or more is light: Cinder-4, Vetra and Eden. Thessaly, Ferrum and the Hive are dark.
+   - On an enemy the hostile rim stays inside the edge, so the hue band reads with an edge round it.
+   - Below ground there is no edge. SPEC-054's dark is the point.
+   - The default suit stays rust. It is the salvager of the films and the portraits, and the edge carries every suit on every ground.
+2. **Trails stay worn ground (SPEC-075).** Cinder-4's trail tint moves from `#7a5434` to `#a8784a`, and every planet's trail stays within 1.6 : 1 of its ground. No shadow changes.
+3. **Trap warnings take a caution edge (SPEC-075).** A hazard's warning wears a dark outer band three times V-02's, 0.18 m at 0.9 inside a 0.34 m outline. The enemies' telegraphs keep V-02's.
+4. **The cockpit reads in a fight (SPEC-075, §13 E146).**
+   - The cockpit model's emissive is capped at 0.45, under flight's 0.75 bloom threshold, so the screens show their readouts.
+   - After the launch the streaks settle to 35 % of their length over 2.5 s.
+   - A hit by a rock, a ram or a shot puts SPEC-035's wedge on the screen edge it struck from. A hit from dead ahead, within 0.25 m of the nose, has the vignette only.
+5. **The preset reaches the reds (SPEC-075).**
+   - The missile red becomes one token, `--missile`, and both presets keep it. It means the rack, not danger, and it holds ΔE ≥ 20 from the fuel, oil and course markers under every colour vision; the preset's magenta would not.
+   - A low tank is hatched in `--danger`, and its percentage gains a ▲.
+   - The minimap's arena rings take the preset's `--danger`.
+   - No protan or tritan preset: the one preset already passes all three simulations.
+6. **Milestone M7t "Read the fight"** carries SPEC-075.
+7. **Not now.**
+   - Inverted-hull outlines, which cost a draw per figure.
+   - A default suit per planet.
+   - A shadow cap for a low sun (Ferrum's is 25°).
+   - Art on the console screens, which belongs to the audit's step 5 re-render.
+   - A shape per flight signal kind; the label's icon already names it.
+
+Specs:
+- SPEC-075 (decisions 1–5).
+- SPEC-000's queue and build order.
+
+(§4, §10, §13)
 
 ---
 
@@ -1343,6 +1383,7 @@ Storage rules: 3 slots, key per slot plus a `.bak` copy of the previous good sav
 | M7q | Free flight (R29): open steering out to a 220 m nav limit with nothing pulling back; a course marker with an edge arrow and nav beacons on the line; a fuel tank that straying drains and an empty tank that tows the ship home; salvage signals off the line; a rack of two homing missiles that kills refill; every trip opens in the cockpit; the armoured tug (SPEC-069 to SPEC-072) | On keyboard and on touch a trip flown on the line arrives with 35 % of the tank; a ship held 100 m off the line runs dry and is towed home, not killed; the course marker points back from any side; a fuel cell, an oil pod and a missile are each picked up; a locked missile downs a scav fighter and a fighter's drop refills the rack; no frame of a launch shows the ship from outside; the menu, the station and the pad show the armoured tug; checked on desktop and the reference phone; tag `m7q` |
 | M7r | The Refit (R30): drawn wordmark and reticle, one drawn icon set in place of emoji, lit frame chamfers, sheets instead of stacked frames, one HUD plate, notched vital bars, an icon rail on touch, compact mission rows under a planet header, emblem class cards, a 15° star map lens (SPEC-073) | No emoji or Unicode pictograph shows in any screen or HUD, and every glyph's text is unchanged in the DOM; the boot card and the menu show the drawn wordmark; settings opens as a sheet; on the 667 px phone no station tab label is cut short; every star map planet draws round; `npm run check`, the UI suites and the e2e suite are green; before and after screenshots at 1440 × 900 and 844 × 390 are recorded; checked on desktop and the reference phone; tag `m7r` |
 | M7s | The first ten minutes (R31): a skitter wave in Dry Land's first storm, a tutorial trip that burns no extra fuel off the line and says why, one Depart when there is no choice, a creation Confirm that stays in view, a phone station with room for its board, and a flight HUD without the salvager's progress (SPEC-074) | On a new save the first pack reaches the player in Dry Land's storm, about a minute after the first landing; the first trip to Cinder-4 cannot end in a tow, flown by mouse, keys or touch; a first trip departs on one Depart; at 1440 × 900 creation's Confirm is on screen without a scroll; at 844 × 390 a line at the station leaves the first mission row clear; the flight HUD shows no Lv or XP, and on touch MSL is in the thumb's corner; checked on desktop and the reference phone; tag `m7s` |
+| M7t | Read the fight (R32): a figure edge on the player and every enemy that stands off the ground, trails that stay worn ground, trap warnings with a dark caution edge, a cockpit whose screens show and whose streaks settle, a hit wedge in flight, and a colour-blind preset that reaches the low tank and the arena rings (SPEC-075) | On every planet at `medium` the player and a spawned pack separate from the ground in a greyscale capture; a trap circle reads on Cinder-4's sand and Vetra's snow; the cockpit's screens show their readouts; a rock that hits shows where it struck; checked on desktop and the reference phone; tag `m7t` |
 | M7 | Polish: mobile tuning, quality presets, balancing pass, PWA/offline, storage persistence, reduce-motion, save migration harness | 30+ fps on mid-tier phone; installable; full manual checklist green |
 
 ---
@@ -1519,6 +1560,8 @@ Each entry names the owning spec. "Casual" = casual difficulty.
 | E142 | The player dies, or shelters, during Dry Land's first storm (R31) | The wave behaves as every storm wave: a death dismisses its survivors with no XP and the restarted stage restarts it (SPEC-038 38-h, 38-i); a shelter is no hiding place from skitters, which follow the player to the mouth | SPEC-074 |
 | E143 | The tutorial trip strays, is recalled or is skipped (R31) | Off the line it burns only the base fuel, so it cannot be towed; story's floor and the tank's other rules are unchanged. A recall re-flies it as the tutorial trip again (`visits` is still 0), and a skip flies the line as every skip does | SPEC-074 |
 | E144 | Depart is pressed with no sheet and the charge is refused, or pressed twice (R31) | A refused charge toasts its reason and nothing leaves, as the sheet's Depart did. The second press finds the map already leaving and does nothing | SPEC-074 |
+| E145 | The player descends, or comes up, with the figure edge on (R32) | The level swap clears both edges below ground and sets them from the planet's ground again on the way up. Both are uniforms, so the swap compiles nothing | SPEC-075 |
+| E146 | A hit in flight lands while the camera is rolled, from dead ahead, or with three wedges already up (R32) | The wedge turns with the camera's roll. Within 0.25 m of the nose there is no wedge; the vignette says it. A fourth wedge replaces the oldest (SPEC-035 35-d) | SPEC-075 |
 
 ---
 

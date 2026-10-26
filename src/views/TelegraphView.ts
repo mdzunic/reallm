@@ -31,19 +31,31 @@ import { HOSTILE_RIM_UNIFORM, hostileRimPreset } from '@/views/ProceduralMeshes'
 export const ELITE_OUTLINE = '#e0b34a';
 /** §4.2: decals sit this far over the height field. */
 export const TELEGRAPH_LIFT = 0.05;
-/** The outline's width, in metres: V-02 widened it from 0.14 to hold its two edges. */
-const OUTLINE_WIDTH = 0.2;
 /** §4.2: outline 0.6, fill 0.35, a ring's travelling band 0.5. */
 const OUTLINE_ALPHA = 0.6;
 const FILL_ALPHA = 0.35;
 const BAND_ALPHA = 0.5;
 /**
- * V-02: the outline's outer dark band and inner pale edge, in metres, with
- * their opacities — `.waypoint-mark`'s 2 px dark stroke and 1 px pale rim,
- * on the ground. The dark is the theme's `#0b0f14`.
+ * V-02: the outline's width and its outer dark band, in metres, with the
+ * band's opacity — `.waypoint-mark`'s 2 px dark stroke, on the ground. The
+ * dark is the theme's `#0b0f14`. V-02 widened the outline from 0.14 to hold
+ * its two edges.
  */
-const DARK_WIDTH = 0.06;
-const DARK_ALPHA = 0.7;
+export interface TelegraphEdge {
+  readonly width: number;
+  readonly dark: number;
+  readonly darkAlpha: number;
+}
+
+export const TELEGRAPH_EDGE: TelegraphEdge = { width: 0.2, dark: 0.06, darkAlpha: 0.7 };
+/**
+ * SPEC-075 §4.3 (*initial tuning*): a trap's warning wears a wider, darker
+ * outer band — three times V-02's — so its circle holds its edge on
+ * Cinder-4's sand and Vetra's snow, where the caution colour is as light as
+ * the ground.
+ */
+export const CAUTION_EDGE: TelegraphEdge = { width: 0.34, dark: 0.18, darkAlpha: 0.9 };
+/** V-02: the outline's inner pale edge, in metres — `.waypoint-mark`'s 1 px pale rim. */
 const PALE_WIDTH = 0.04;
 const PALE_ALPHA = 0.85;
 const PALE_MIX = 0.7;
@@ -76,7 +88,7 @@ const KIND_INDEX: Readonly<Record<TelegraphKind, number>> = { circle: 0, line: 1
  */
 const SHAPE_CHUNK = /* glsl */ `
   float outlineAlpha = ${OUTLINE_ALPHA.toFixed(3)} * (1.0 - 0.18 * uPulse * (0.5 + 0.5 * sin(uTime * ${PULSE_RATE.toFixed(3)})));
-  float edgeWidth = ${OUTLINE_WIDTH.toFixed(3)};
+  float edgeWidth = uEdge.x;
   vec3 shapeColor = diffuseColor.rgb;
   float shapeAlpha = 0.0;
   // V-02: how far in from the outline's outer edge this fragment lies; under
@@ -99,7 +111,7 @@ const SHAPE_CHUNK = /* glsl */ `
   if (edgeIn > edgeWidth) edgeIn = edgeWidth;
 #endif
   if (edgeIn >= 0.0 && edgeIn < edgeWidth) {
-    if (edgeIn < ${DARK_WIDTH.toFixed(3)}) { shapeColor = vec3(0.0044, 0.0056, 0.0070); shapeAlpha = ${DARK_ALPHA.toFixed(3)}; }
+    if (edgeIn < uEdge.y) { shapeColor = vec3(0.0044, 0.0056, 0.0070); shapeAlpha = uEdge.z; }
     else if (edgeIn >= edgeWidth - ${PALE_WIDTH.toFixed(3)}) { shapeColor = mix(vOutline, vec3(1.0), ${PALE_MIX.toFixed(3)}); shapeAlpha = ${PALE_ALPHA.toFixed(3)}; }
     else { shapeColor = vOutline; shapeAlpha = outlineAlpha; }
   }
@@ -109,12 +121,23 @@ const SHAPE_CHUNK = /* glsl */ `
   if (shapeAlpha <= 0.0) discard;
   diffuseColor = vec4(shapeColor, diffuseColor.a * shapeAlpha);`;
 
-/** Adds the per-instance shape to a basic material; one program per kind. */
-function injectShape(material: THREE.MeshBasicMaterial, kind: TelegraphKind, pulse: { value: number }, clock: { value: number }): void {
+/**
+ * Adds the per-instance shape to a basic material; one program per kind.
+ * SPEC-075 §4.3: the edge's widths are a uniform, so the hazards' wider
+ * caution edge shares the enemies' programs.
+ */
+function injectShape(
+  material: THREE.MeshBasicMaterial,
+  kind: TelegraphKind,
+  pulse: { value: number },
+  clock: { value: number },
+  edge: { value: THREE.Vector3 },
+): void {
   material.defines = { TELEGRAPH_KIND: KIND_INDEX[kind] };
   material.onBeforeCompile = (shader) => {
     shader.uniforms['uPulse'] = pulse;
     shader.uniforms['uTime'] = clock;
+    shader.uniforms['uEdge'] = edge;
     shader.vertexShader = shader.vertexShader
       .replace(
         '#include <common>',
@@ -124,7 +147,7 @@ function injectShape(material: THREE.MeshBasicMaterial, kind: TelegraphKind, pul
     shader.fragmentShader = shader.fragmentShader
       .replace(
         '#include <common>',
-        'uniform float uPulse;\nuniform float uTime;\nvarying vec2 vTelegraphUv;\nvarying vec4 vShape;\nvarying vec3 vOutline;\n#include <common>',
+        'uniform float uPulse;\nuniform float uTime;\nuniform vec3 uEdge;\nvarying vec2 vTelegraphUv;\nvarying vec4 vShape;\nvarying vec3 vOutline;\n#include <common>',
       )
       .replace('vec4 diffuseColor = vec4( diffuse, opacity );', `vec4 diffuseColor = vec4( diffuse, opacity );${SHAPE_CHUNK}`);
   };
@@ -152,6 +175,8 @@ export class TelegraphView {
   readonly #kinds: Partial<Record<TelegraphKind, KindMesh>> = {};
   readonly #pulse = { value: 1 };
   readonly #clock = { value: 0 };
+  /** SPEC-075 §4.3: this layer's edge — (width, dark band, its opacity). */
+  readonly #edge: { value: THREE.Vector3 };
   /** V-02: this planet's override per preset, in working space, or null where the rim stands. */
   readonly #standard: THREE.Color | null;
   readonly #colourBlind: THREE.Color | null;
@@ -161,9 +186,17 @@ export class TelegraphView {
   /**
    * SPEC-068 §4.7: `fixed` paints every decal (fill and outline) one colour on
    * every preset — the hazards' own layer wears caution, never the hostile rim.
+   * SPEC-075 §4.3: `edge` is the outline's widths — the hazards pass `CAUTION_EDGE`.
    */
-  constructor(parent: THREE.Object3D, capacity: number = TELEGRAPH_CAPACITY, planet: PlanetId | null = null, fixed: string | null = null) {
+  constructor(
+    parent: THREE.Object3D,
+    capacity: number = TELEGRAPH_CAPACITY,
+    planet: PlanetId | null = null,
+    fixed: string | null = null,
+    edge: TelegraphEdge = TELEGRAPH_EDGE,
+  ) {
     this.#parent = parent;
+    this.#edge = { value: new THREE.Vector3(edge.width, edge.dark, edge.darkAlpha) };
     this.#fixed = fixed === null ? null : new THREE.Color(fixed);
     this.#capacity = capacity;
     const override = planet === null ? undefined : TELEGRAPH_OVERRIDES[planet];
@@ -188,7 +221,7 @@ export class TelegraphView {
       polygonOffsetUnits: -3,
       side: THREE.DoubleSide,
     });
-    injectShape(material, kind, this.#pulse, this.#clock);
+    injectShape(material, kind, this.#pulse, this.#clock, this.#edge);
     const geometry = new THREE.PlaneGeometry(1, 1);
     geometry.rotateX(-Math.PI / 2);
     const shape = new THREE.InstancedBufferAttribute(new Float32Array(this.#capacity * 4), 4);

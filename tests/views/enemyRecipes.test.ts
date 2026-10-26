@@ -99,7 +99,7 @@ describe('the scav stand-in (SPEC-064 §4.1, §6.2)', () => {
     const visor = [...materials].find((material) => material.color.getHex() !== 0xffffff) as THREE.MeshStandardMaterial;
     expect(visor.color.r + visor.color.g + visor.color.b).toBeLessThan(0.05);
     expect(visor.emissive.getHex()).toBe(0);
-    expect(visor.customProgramCacheKey()).toBe('enemy/3');
+    expect(visor.customProgramCacheKey()).toBe('enemy/4');
     dispose();
   });
 });
@@ -135,8 +135,9 @@ describe('the instanceEmissive attribute (AC-45, AC-46)', () => {
         expect(attribute.count).toBe(INSTANCES_PER_PART);
         expect(attribute.usage).toBe(THREE.DynamicDrawUsage);
         const material = part.material as THREE.MeshStandardMaterial;
-        // SPEC-045 §4.10: the rim's colour became a uniform, so the key moved.
-        expect(material.customProgramCacheKey()).toBe('enemy/3');
+        // SPEC-045 §4.10: the rim's colour became a uniform, so the key moved;
+        // SPEC-075 §4.1 moved it again with the figure edge.
+        expect(material.customProgramCacheKey()).toBe('enemy/4');
       }
       dispose();
     }

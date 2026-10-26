@@ -250,7 +250,7 @@ export const PLANETS = {
           macro: { hues: ['#e07040', '#d8d4cc'], strength: 0.6, value: 0.38, patches: 0.6 },
           rubble: ['#a88e6c', '#6a5442'],
           kinds: ['wurm_ribs', 'scav_barrels', 'pipe_run'],
-          trail: '#7a5434',
+          trail: '#a8784a',
         },
         // SPEC-053 §4.5 (*initial tuning*): dry grass.
         cover: { kinds: [{ cell: 8, weight: 1, size: [0.4, 0.7] }], per1000m2: 20 },

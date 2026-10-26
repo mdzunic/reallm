@@ -10,6 +10,7 @@ import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { PLANETS } from '@/data/index';
 import { compositeOver, contrastRatio } from '@/systems/UiHelpers';
+import { ARENA_RING } from '@/ui/Minimap';
 import { DEFICIENCIES, deltaE76 } from '../fixtures/colourVision';
 
 const CSS = readFileSync(new URL('../../src/style.css', import.meta.url).pathname, 'utf8');
@@ -641,5 +642,53 @@ describe('Iris’s letters (SPEC-049 §3, §4.1)', () => {
       expect(rules, selector).toHaveLength(1);
       expect(rules[0]?.body, selector).toMatch(/color:\s*var\(--letter-ink\)/);
     }
+  });
+});
+
+// SPEC-075 §4.5 (PLAN R32) — the reds the colour-blind preset never reached:
+// the missile red becomes one token, the low tank a hatch and a ▲, and the
+// minimap's arena rings the danger colour of the preset in force.
+describe('the reds the preset reaches (SPEC-075 §4.5)', () => {
+  it('declares the missile red once, as a token, and paints the rack, the lock, MSL and the marker with it', () => {
+    expect(declarations('--missile')).toBe(1);
+    expect(tokenValue('--missile')).toBe('#ff6a55');
+    expect(CSS.match(/#ff6a55/gi)).toHaveLength(1);
+    expect(declared('.hud-missile-pip.is-loaded', 'background')).toBe('var(--missile)');
+    expect(declared('.hud-lock', 'border')).toBe('2px solid var(--missile)');
+    expect(declared('button.touch-button.touch-missile', 'border-color')).toBe('var(--missile)');
+    expect(CSS).toContain(".flight-marker[data-kind='missile'] { --marker: var(--missile); }");
+  });
+
+  it('keeps the missile red apart from the fuel, oil and course markers under every colour vision, so no preset moves it', () => {
+    const marker = (kind: string): string => {
+      const match = new RegExp(`\\.flight-marker\\[data-kind='${kind}'\\] \\{ --marker: (#[0-9a-f]{6}); \\}`, 'i').exec(CSS);
+      expect(match, kind).not.toBeNull();
+      return match?.[1] ?? '';
+    };
+    const course = declared('.flight-marker', '--marker') ?? '';
+    const missile = hexToken('--missile');
+    for (const other of [marker('fuel'), marker('oil'), course]) {
+      for (const type of [null, ...DEFICIENCIES]) {
+        expect(deltaE76(missile, other, type), `${other}, ${type ?? 'typical'}`).toBeGreaterThanOrEqual(20);
+      }
+    }
+    expect(colourBlind()['--missile']).toBeUndefined();
+  });
+
+  it('hatches a low tank in the danger colour and follows its percentage with a ▲', () => {
+    const fill = declared('.bar-row.is-low .bar-fuel', 'background') ?? '';
+    expect(fill).toContain('repeating-linear-gradient(');
+    expect(fill.endsWith('var(--danger)')).toBe(true);
+    expect(declared('.bar-row.is-low .bar-text::after', 'content')).toBe("' ▲'");
+    expect(declared('.bar-row.is-low .bar-text::after', 'color')).toBe('var(--danger)');
+  });
+
+  it('rings the minimap’s arenas in each preset’s --danger, at 0.8', () => {
+    const at = (hex: string): string => {
+      const [r, g, b] = parseColor(hex);
+      return `rgba(${r}, ${g}, ${b}, 0.8)`;
+    };
+    expect(ARENA_RING.standard).toBe(at(hexToken('--danger')));
+    expect(ARENA_RING['colour-blind']).toBe(at(colourBlind()['--danger'] as string));
   });
 });

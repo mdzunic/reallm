@@ -11,9 +11,16 @@ import type { QualitySettings } from '@/core/Renderer';
 import { Rng } from '@/core/Rng';
 import { PLANETS } from '@/data/index';
 import {
+  COCKPIT_EMISSIVE_MAX,
+  CRUISE_STREAK_SCALE,
+  cruiseStreakScale,
   FlightView,
+  HIT_BEARING_DEAD_AHEAD,
   HIT_FLASH_NAME,
+  hitBearing,
   launchRunUp,
+  STAR_STREAK_LENGTH,
+  STREAK_SETTLE_SECONDS,
   mergeModel,
   SKY_WINDOW,
   VIEW_CORRIDOR,
@@ -616,5 +623,58 @@ describe('FlightView free flight (SPEC-069 §4.6)', () => {
     Object.assign(f.pickups.alloc(), { kind: 'oil', x: 3, y: 0, depth: 700 });
     view.update(f, 1 / 60);
     expect(visible()).toBe(before);
+  });
+});
+
+// SPEC-075 §4.4 (PLAN R32) — the cockpit reads in a fight: screens under the
+// bloom, streaks that settle after the launch, and a wedge toward a hit.
+describe('reading a fight from the cockpit (SPEC-075 §4.4)', () => {
+  it('points the hit wedge clockwise from screen-up, turned with the camera’s roll, and nowhere from dead ahead', () => {
+    expect(hitBearing(3, 0, 0)).toBeCloseTo(Math.PI / 2, 9); // struck from the right
+    expect(hitBearing(0, 2, 0)).toBeCloseTo(0, 9); // from above
+    expect(hitBearing(0, -2, 0)).toBeCloseTo(Math.PI, 9);
+    expect(hitBearing(-1, 0, 0)).toBeCloseTo(-Math.PI / 2, 9);
+    // A camera rolled anticlockwise turns the picture, and the wedge, clockwise.
+    expect(hitBearing(3, 0, 0.2)).toBeCloseTo(Math.PI / 2 + 0.2, 9);
+    expect(hitBearing(0.1, 0.1, 0)).toBeNull();
+    expect(hitBearing(HIT_BEARING_DEAD_AHEAD, 0, 0)).not.toBeNull();
+    expect(hitBearing(Number.NaN, 1, 0)).toBeNull();
+  });
+
+  it('settles the streaks from full at the launch’s end to the cruise share', () => {
+    expect(cruiseStreakScale(0)).toBe(1);
+    expect(cruiseStreakScale(STREAK_SETTLE_SECONDS)).toBeCloseTo(CRUISE_STREAK_SCALE, 9);
+    expect(cruiseStreakScale(60)).toBeCloseTo(CRUISE_STREAK_SCALE, 9);
+    expect(cruiseStreakScale(Number.NaN)).toBeCloseTo(CRUISE_STREAK_SCALE, 9);
+    let last = 1;
+    for (let t = 0; t <= STREAK_SETTLE_SECONDS; t += 0.25) {
+      const scale = cruiseStreakScale(t);
+      expect(scale).toBeLessThanOrEqual(last);
+      last = scale;
+    }
+    expect(CRUISE_STREAK_SCALE).toBeGreaterThan(0);
+    expect(CRUISE_STREAK_SCALE).toBeLessThan(0.5);
+  });
+
+  it('draws the cruise’s streaks at the settled share once the launch is long over', () => {
+    const { scene, view } = setup();
+    const f = frame();
+    view.endLaunch();
+    for (let i = 0; i < 4 * 60; i++) view.update(f, 1 / 60);
+    const lines = scene.getObjectsByProperty('type', 'LineSegments')[0] as THREE.LineSegments;
+    const data = lines.geometry.getAttribute('position').array as Float32Array;
+    const length = Math.abs((data[2] as number) - (data[5] as number));
+    expect(length).toBeCloseTo(STAR_STREAK_LENGTH * f.throttleLive * CRUISE_STREAK_SCALE, 4);
+  });
+
+  it('caps the cockpit model’s emissive under flight’s 0.75 bloom threshold', () => {
+    const { view } = setup();
+    const cockpit = model([[new THREE.BoxGeometry(2, 0.3, 0.3), 'Cockpit']]);
+    const screen = (cockpit.children[0] as THREE.Mesh).material as THREE.MeshStandardMaterial;
+    screen.emissiveIntensity = 1.8;
+    view.useArt({ cockpit });
+    expect(screen.emissiveIntensity).toBe(COCKPIT_EMISSIVE_MAX);
+    expect(COCKPIT_EMISSIVE_MAX).toBeLessThan(0.75);
+    view.dispose();
   });
 });

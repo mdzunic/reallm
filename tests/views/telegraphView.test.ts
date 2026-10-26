@@ -220,6 +220,8 @@ describe('telegraphs read on any ground (review 2026-10 V-02)', () => {
     material.onBeforeCompile(shader as unknown as THREE.WebGLProgramParametersWithUniforms, undefined as unknown as THREE.WebGLRenderer);
     // The theme's #0b0f14 on the outer edge, the outline mixed toward white on the inner one.
     expect(shader.fragmentShader).toContain('shapeColor = vec3(0.0044, 0.0056, 0.0070)');
+    // SPEC-075 §4.3: the widths are a uniform — V-02's on the enemies' layer.
+    expect((shader.uniforms['uEdge'] as { value: THREE.Vector3 }).value.toArray()).toEqual([0.2, 0.06, 0.7]);
     expect(shader.fragmentShader).toContain('mix(vOutline, vec3(1.0)');
     expect(view.drawCalls).toBe(1);
     view.dispose();

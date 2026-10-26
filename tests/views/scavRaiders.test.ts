@@ -494,7 +494,7 @@ describe('tint and rim (§4.2, §4.4)', () => {
     views.dispose();
   });
 
-  it('its program cache key is raider/1, and the rim is the enemies’ own: shared colour, after the emissive', async () => {
+  it('its program cache key is raider/2, and the rim is the enemies’ own: shared colour, after the emissive', async () => {
     const parent = new THREE.Group();
     const views = new ScavRaiderViews(parent, (await loaded()).assets, { shadows: false });
     const pool = new Pool(makeEnemy);
@@ -503,8 +503,8 @@ describe('tint and rim (§4.2, §4.4)', () => {
     views.sync(pool, 0.1, 0, flat);
     const [a, b] = clones(parent).map(materialOf) as [THREE.MeshStandardMaterial, THREE.MeshStandardMaterial];
     expect(a).not.toBe(b);
-    expect(a.customProgramCacheKey()).toBe('raider/1');
-    expect(b.customProgramCacheKey()).toBe('raider/1');
+    expect(a.customProgramCacheKey()).toBe('raider/2');
+    expect(b.customProgramCacheKey()).toBe('raider/2');
     const { fragment, uniforms } = compiled(a);
     expect(uniforms['uHostileRim']).toBe(HOSTILE_RIM_UNIFORM);
     const emissiveAt = fragment.indexOf('totalEmissiveRadiance += uRaiderEmissive;');

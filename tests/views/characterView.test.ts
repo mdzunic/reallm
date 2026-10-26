@@ -7,6 +7,7 @@ import * as THREE from 'three';
 import { setLogSink, type LogSink } from '@/core/Log';
 import { makePlayer, type PlayerEntity } from '@/entities/Player';
 import { CharacterView, tintSalvager, type CharacterAssets } from '@/views/CharacterView';
+import { PLAYER_EDGE_UNIFORM } from '@/views/FigureEdge';
 
 const APPEARANCE = { primary: '#b7472a', secondary: '#2a3b4c' };
 
@@ -204,5 +205,26 @@ describe('tintSalvager (AC-21 … AC-23)', () => {
     tintSalvager(material, '#ffffff', '#000000');
     expect(material.emissive.getHex()).toBe(0x000000);
     expect(material.emissiveIntensity).toBe(0);
+  });
+});
+
+describe('the salvager’s figure edge (SPEC-075 §4.1)', () => {
+  it('patches every clone with the shared player edge, faded by the blink, in one program', () => {
+    const parent = new THREE.Group();
+    const { assets, template } = fake(['Idle']);
+    new CharacterView(parent, assets, 'character', APPEARANCE, false);
+    const clone = (parent.children[0]?.children[0] as THREE.Mesh).material as THREE.MeshStandardMaterial;
+    expect(clone).not.toBe(template);
+    const shader = {
+      uniforms: {} as Record<string, unknown>,
+      vertexShader: '',
+      fragmentShader: '#include <common>\n#include <opaque_fragment>\n',
+    };
+    clone.onBeforeCompile(shader as unknown as THREE.WebGLProgramParametersWithUniforms, null as never);
+    expect(shader.uniforms['uPlayerEdge']).toBe(PLAYER_EDGE_UNIFORM);
+    expect(shader.fragmentShader).toContain('figureEdge * uPlayerEdge.a * opacity');
+    expect(clone.customProgramCacheKey()).toBe('salvager/1');
+    // The cached template is never patched (AC-25).
+    expect(template.customProgramCacheKey()).not.toBe('salvager/1');
   });
 });

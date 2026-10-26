@@ -15,7 +15,7 @@ import type { PlanetId } from '@/data/ids';
 import type { HazardEntity } from '@/entities/Hazard';
 import type { TelegraphEntity } from '@/entities/Telegraph';
 import { hazardGeometry } from '@/views/HazardMeshes';
-import { TelegraphView } from '@/views/TelegraphView';
+import { CAUTION_EDGE, TelegraphView } from '@/views/TelegraphView';
 
 /** §4.7: the hazards' warnings wear caution amber on every preset — never the hostile rim. */
 export const HAZARD_CAUTION = '#ffc23a';
@@ -204,7 +204,8 @@ export class HazardView {
     this.#shadows.renderOrder = -1;
     this.root.add(this.#shadows);
 
-    this.#warnings = new TelegraphView(this.root, WARNING_CAPACITY, planet, HAZARD_CAUTION_OVERRIDES[planet] ?? HAZARD_CAUTION);
+    // SPEC-075 §4.3: with the wider, darker outer band that holds on sand and snow.
+    this.#warnings = new TelegraphView(this.root, WARNING_CAPACITY, planet, HAZARD_CAUTION_OVERRIDES[planet] ?? HAZARD_CAUTION, CAUTION_EDGE);
   }
 
   /** Draw calls this layer issues this frame (for the budget pins). */

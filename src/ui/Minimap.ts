@@ -7,6 +7,7 @@
 // it reads the same at every resolution. All the projection maths is
 // `systems/MapModel` — pure and unit-tested; this file strokes pixels, and
 // exports the two shape painters the full map and its legend share.
+import type { ColourPreset } from '@/core/Settings';
 import { MINIMAP_ENEMY_RANGE } from '@/systems/UiHelpers';
 import {
   MAP_ICONS,
@@ -61,10 +62,19 @@ const COLORS = {
   background: 'rgba(8, 12, 18, 0.72)',
   rim: 'rgba(150, 180, 210, 0.45)',
   north: 'rgba(220, 235, 250, 0.9)',
-  arena: 'rgba(255, 85, 51, 0.8)',
   outline: 'rgba(4, 6, 10, 0.85)',
   route: 'rgba(255, 200, 87, 0.7)',
 } as const;
+
+/**
+ * SPEC-075 §4.5: the arena rings in the danger colour of each Colours preset —
+ * `--danger`'s two values at 0.8 — so the colour-blind preset turns them with
+ * the rest of the UI.
+ */
+export const ARENA_RING: Readonly<Record<ColourPreset, string>> = {
+  standard: 'rgba(229, 72, 77, 0.8)',
+  'colour-blind': 'rgba(255, 138, 31, 0.8)',
+};
 
 /** §4.3: the rim inset, in CSS px, that keeps an edge arrow off the border. */
 const RIM_INSET = 6;
@@ -402,6 +412,8 @@ export class Minimap {
   readonly #point: MapPoint = { x: 0, y: 0, inside: true, angle: 0 };
   /** CSS px of the box, re-measured on `renderer:resized` (§4.3). */
   #cssSize = 0;
+  /** SPEC-075 §4.5: the arena rings' colour under the preset in force. */
+  #arena: string = ARENA_RING.standard;
 
   /**
    * What the last `draw()` actually put on the canvas — the scene's
@@ -430,6 +442,11 @@ export class Minimap {
    */
   setLayers(layers: MapLayers): void {
     this.#layers = layers;
+  }
+
+  /** SPEC-075 §4.5: the Colours preset — the next `draw()` rings arenas in its danger colour. */
+  setPreset(preset: ColourPreset): void {
+    this.#arena = ARENA_RING[preset];
   }
 
   /** §4.3: the backing store is `round(css × min(dpr, 2))` of the CSS box. */
@@ -487,7 +504,7 @@ export class Minimap {
     ctx.translate(half, half);
 
     // 4. arena rings.
-    ctx.strokeStyle = COLORS.arena;
+    ctx.strokeStyle = this.#arena;
     ctx.lineWidth = Math.max(1, scale);
     for (const mark of frame.marks) {
       if (mark.ring <= 0) continue;

@@ -30,6 +30,7 @@ import {
   tintSalvager,
   type CharacterAssets,
 } from '@/views/CharacterView';
+import { figureEdgeChunk, HOSTILE_EDGE_UNIFORM } from '@/views/FigureEdge';
 import {
   ELITE_GOLD,
   ELITE_SCALE,
@@ -75,7 +76,7 @@ const FALL_EPSILON = 1e-6;
 const GLINT_SIZE = 0.06;
 const GLINT_GAIN = 3;
 /** §4.4: every raider material compiles to one program. */
-const RAIDER_PROGRAM = 'raider/1';
+const RAIDER_PROGRAM = 'raider/2';
 /** A clone's bounding sphere, as a share of the model's height — wide enough for a body lying in any direction. */
 const BOUNDS_PER_HEIGHT = 1.5;
 /** At most this many raiders wait for a slot in one frame; the rest are stand-ins. */
@@ -143,12 +144,18 @@ function injectRaiderCues(material: THREE.MeshStandardMaterial, uniforms: Raider
     shader.uniforms['uHostileRim'] = HOSTILE_RIM_UNIFORM;
     shader.uniforms['uRaiderEmissive'] = uniforms.emissive;
     shader.uniforms['uRimScale'] = uniforms.rimScale;
+    // SPEC-075 §4.1: and the figure edge round it, as on every other enemy.
+    shader.uniforms['uHostileEdge'] = HOSTILE_EDGE_UNIFORM;
     shader.fragmentShader = shader.fragmentShader
-      .replace('#include <common>', 'uniform vec3 uHostileRim;\nuniform vec3 uRaiderEmissive;\nuniform float uRimScale;\n#include <common>')
+      .replace(
+        '#include <common>',
+        'uniform vec3 uHostileRim;\nuniform vec3 uRaiderEmissive;\nuniform float uRimScale;\nuniform vec4 uHostileEdge;\n#include <common>',
+      )
       .replace(
         '#include <emissivemap_fragment>',
         `#include <emissivemap_fragment>\ntotalEmissiveRadiance += uRaiderEmissive;${hostileRimChunk('uRimScale')}`,
-      );
+      )
+      .replace('#include <opaque_fragment>', figureEdgeChunk('uHostileEdge', 'min( uRimScale, 1.0 )'));
   };
   material.customProgramCacheKey = () => RAIDER_PROGRAM;
 }

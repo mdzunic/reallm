@@ -234,7 +234,12 @@ export type GameEvents = {
   'story:clue': { id: FlagId };
   'dialogue:started': { id: DialogueId };
   'dialogue:ended': { id: DialogueId };
-  'ship:damaged': { shield: number; hull: number; source: 'asteroid' | 'enemy' | 'storm' };
+  /**
+   * SPEC-075 §4.4: `from` is where the rock, the ram or the shot struck, on
+   * the steering plane — what the flight HUD's hit wedge points at. A storm
+   * tick has none.
+   */
+  'ship:damaged': { shield: number; hull: number; source: 'asteroid' | 'enemy' | 'storm'; from?: { x: number; y: number } };
   'flight:arrived': { planet: PlanetId };
   /** SPEC-069 §4.2: `hull` for a ship shot down, `fuel` for an empty tank's tow (E133). */
   'flight:recalled': { planet: PlanetId; cause: 'hull' | 'fuel' };

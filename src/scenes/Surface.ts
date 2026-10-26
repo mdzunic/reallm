@@ -1796,6 +1796,17 @@ export class SurfaceScene extends UiScene<'surface'> {
     if (hud.minimapCanvas !== null) {
       const minimap = new Minimap(hud.minimapCanvas, layers);
       this.#minimap = minimap;
+      // SPEC-075 §4.5: the arena rings in the preset's danger colour, now and on each change.
+      minimap.setPreset(services.settings.get().colourPreset);
+      this.disposer.add(
+        services.events.on(
+          'settings:changed',
+          ({ patch }) => {
+            if (patch.colourPreset !== undefined) minimap.setPreset(patch.colourPreset);
+          },
+          this,
+        ),
+      );
       // §4.3: a tap on the minimap opens the full map (the pin moved to `T`).
       const open = (): void => this.#openMap();
       minimap.canvas.addEventListener('click', open);
@@ -2733,6 +2744,8 @@ export class SurfaceScene extends UiScene<'surface'> {
     // (0.85) is not — a whiteout is otherwise a claim about a post uniform
     // nothing outside the chain can read.
     info['bloomThreshold'] = this.#view?.look.bloomThreshold ?? DEFAULT_LOOK.bloomThreshold;
+    // SPEC-075 §4.1: the figure edge in force.
+    info['figureEdge'] = this.#view?.figureEdge ?? 'off';
     info['ramp'] = this.#ramp ? 1 : 0;
     // §4.7: what the ramp is supposed to be holding down — the ambient weather
     // phase and how many rushers are alive. Without these the ramp is a claim

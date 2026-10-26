@@ -521,7 +521,7 @@ describe('the colour-blind rim (SPEC-045 §4.5, AC-24, AC-25)', () => {
       const blind = compiled(material);
       expect(blind.vertex).toBe(standard.vertex);
       expect(blind.fragment).toBe(standard.fragment);
-      expect(material.customProgramCacheKey()).toBe('enemy/3');
+      expect(material.customProgramCacheKey()).toBe('enemy/4');
     } finally {
       setHostileRim('standard');
       meshes.dispose();
