@@ -217,8 +217,11 @@ test('7. the first flight teaches its controls, and a second session says nothin
   await page.evaluate(() => window.__reallm.go('flight', { destination: 'cinder4' }, { force: true }));
   await expect(page.locator('[data-testid="scene-label"]')).toHaveText('flight');
   const hint = page.locator('[data-testid="aria-hint"]');
-  // The launch shot ends on a tap; the steer tip lands with the controls.
-  await page.locator('canvas#game').click({ position: { x: 400, y: 300 }, force: true });
+  // The steer tip lands with the controls. A tap on the canvas's centre, on
+  // the ship's nose: since SPEC-071 a tap during the launch steers it, and
+  // off the nose mouse steer (SPEC-069 §4.1) would fly the ship off the line
+  // and tow it home before the throttle tip.
+  await page.locator('canvas#game').click({ force: true });
   await expect(hint).toContainText(/steers/i, { timeout: 30_000 });
   // …and the throttle tip 12 s of game time later.
   await expect(hint).toContainText(/slows down|change speed/i, { timeout: 90_000 });
@@ -227,7 +230,7 @@ test('7. the first flight teaches its controls, and a second session says nothin
   await start(page, '/?debug&seed=123');
   await page.evaluate(() => window.__reallm.go('flight', { destination: 'cinder4' }, { force: true }));
   await expect(page.locator('[data-testid="scene-label"]')).toHaveText('flight');
-  await page.locator('canvas#game').click({ position: { x: 400, y: 300 }, force: true });
+  await page.locator('canvas#game').click({ force: true });
   await page.waitForTimeout(3000);
   await expect(hint).toHaveText('');
   await expect(hint).toHaveClass(/is-hidden/);
