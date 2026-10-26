@@ -761,7 +761,7 @@ export class FlightScene extends UiScene<'flight'> {
     // SPEC-069 §4.5: the course and signal markers, on a pass-through layer of their own.
     const markerLayer = el('div', 'flight-marker-layer');
     this.ui.mount(markerLayer, 'hud');
-    this.#markers = new FlightMarkers(markerLayer, this.#planet.name);
+    this.#markers = new FlightMarkers(markerLayer, this.#planet.name, this.ui.root);
     this.disposer.add(() => {
       this.#markers?.dispose();
       this.#markers = null;

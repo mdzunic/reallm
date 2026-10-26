@@ -658,6 +658,14 @@ test('7. the pad terminal: E opens it on the first Accept, Enter accepts, Tab st
   await expect(terminal.locator('.terminal-active')).toContainText('Tracked');
   await expect(terminal.locator('.terminal-active')).not.toContainText('◈');
   expect(await page.evaluate(() => document.querySelector('[data-testid="pad-terminal"]')?.contains(document.activeElement) === true)).toBe(true);
+  // Audit 2026-10-26 DK-01: focus rests on the title, not on the next Accept,
+  // so the Enter a player presses for the accept line takes nothing else.
+  expect(await focused(page)).toBe('terminal-title');
+  const offers = await page.locator('[data-testid^="terminal-accept-"]').count();
+  await page.keyboard.press('Enter');
+  await page.waitForTimeout(300);
+  await expect(page.locator('[data-testid^="terminal-accept-"]')).toHaveCount(offers);
+  expect(await page.evaluate(() => window.__reallm.save().current?.progress.missionsActive.map((entry) => entry.id))).toEqual(['c1_m2']);
 
   for (let i = 0; i < 20; i++) {
     await page.keyboard.press('Tab');

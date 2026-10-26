@@ -1419,7 +1419,9 @@ html:not(.scheme-touch) .hud-interact {
 /* SPEC-037 §4.2: the wallet strip heads the top centre — tokens, then oil,
    wheat, water and lithium, each a glyph and its count, one 13 px row on the
    plate. Lit for 5 s after a count moves and while a collect or deliver
-   objective is open, at 0.6 otherwise; it never takes a pointer. */
+   objective is open; it never takes a pointer. Audit 2026-10-26 UX-04: it
+   stays at full opacity — at 0.6 the plate thinned too, and the amber counts
+   read about 2.2:1 over snow — and the light is the edge, in the token amber. */
 .hud-wallet {
   display: flex;
   align-items: center;
@@ -1431,13 +1433,12 @@ html:not(.scheme-touch) .hud-interact {
   font-size: 13px;
   line-height: 16px;
   white-space: nowrap;
-  opacity: 0.6;
-  transition: opacity 150ms linear;
+  transition: border-color 150ms linear;
   pointer-events: none;
 }
 
 .hud-wallet.is-lit {
-  opacity: 1;
+  border-color: var(--accent-2);
 }
 
 html.reduce-motion .hud-wallet {
@@ -2076,6 +2077,11 @@ html.reduce-motion .hud-vignette {
   max-height: 70vh;
   overflow-y: auto;
   z-index: 12;
+  /* Audit 2026-10-26 VI-01: `.panel` brings the frame but no padding, so the
+     title and rows ran into the corner cut; and on glass the tug on the pad
+     showed through the text. Inset past the cut, and opaque. */
+  padding: 14px 20px 16px;
+  background: var(--panel);
 }
 
 .pad-terminal.is-hidden {
@@ -3228,6 +3234,16 @@ html.debug .scene-tag {
   padding: 14px;
   max-height: 46dvh;
   overflow-y: auto;
+}
+
+/* Audit 2026-10-26 PH-01: the slot picker centres on the screen, not on the
+   menu body below the header, and takes the screen's height, so a 390 px tall
+   phone shows Slot 3 and Cancel without a scroll. Opaque, as the confirm
+   sheets are: on glass the menu's labels showed between its rows (P-15). */
+.menu-sub.is-sheet > .menu-list {
+  position: fixed;
+  max-height: calc(100dvh - 24px);
+  background: var(--panel);
 }
 
 .menu-list-title {
@@ -5922,6 +5938,9 @@ html.reduce-motion .screen-body > * {
   width: min(320px, 100%);
   height: auto;
   max-height: 100%;
+  /* Audit 2026-10-26 UX-14: opaque, as the sheets are — on glass a dialogue
+     line behind the pause read through PAUSED. */
+  background: var(--panel);
 }
 
 .screen-pause .screen-frame:has(.pause-sheet:not(.is-hidden)) {
@@ -6750,10 +6769,14 @@ html.reduce-motion .tracker-row.is-bumped {
   pointer-events: auto;
 }
 
+/* Audit 2026-10-26 VI-01: rewards in the station board's amber (.board-rewards),
+   not a second colour for the same thing. */
 .terminal-rewards {
   margin: 0;
-  color: var(--good);
+  color: var(--accent-2);
   font-size: var(--type-sm);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
 }
 
 .terminal-brief {

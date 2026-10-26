@@ -13,6 +13,11 @@
 // touch. Their boxes are read on `resize`, when either changes size, and when
 // the scene says the UI scale or the stick's side moved them; `placeWaypoint`
 // then works from those numbers alone, so the loop reads no DOM.
+//
+// Audit 2026-10-26 UX-09: and out of every other HUD plate — the corner
+// stacks and ARIA's tip strip (`HUD_PLATES`). A storm warning under the wallet
+// put the arrow on "Sandstorm"; a ResizeObserver hears the stacks grow, shrink
+// and hide, so they are measured the same way.
 import { distanceText } from '@/systems/Guidance';
 import { el, testId } from '@/ui/dom';
 
@@ -173,6 +178,39 @@ export function placeWaypoint(point: { x: number; y: number }, behind: boolean, 
 const BAR_SELECTOR = '.hud .quickbar';
 const ARC_SELECTOR = '.hud .thumb-arc';
 
+/**
+ * UX-09: the surface HUD's other plates. Each corner stack is sized to what it
+ * holds, so its box is its plates' box: the vitals and tracker (top left), the
+ * wallet, weather and storm warning (top centre), the top-right column, the
+ * bottom corners and ARIA's tip strip.
+ */
+export const HUD_PLATES: readonly string[] = ['.hud .hud-tl', '.hud .hud-tc', '.hud .hud-tr', '.hud .hud-bl', '.hud .hud-br', '.aria-hint'];
+
+/**
+ * UX-09: push the drawn box of each selector's first match under `root` onto
+ * `boxes`, as left, top, right, bottom. A hidden or zero-size node is not there.
+ * Off the loop: called on `resize` and from a ResizeObserver.
+ */
+export function pushHudBoxes(root: ParentNode, selectors: readonly string[], boxes: number[]): void {
+  for (const selector of selectors) {
+    const node = root.querySelector(selector);
+    if (node === null || node.classList.contains('is-hidden')) continue;
+    const box = node.getBoundingClientRect();
+    if (box.width > 0 && box.height > 0) boxes.push(box.left, box.top, box.right, box.bottom);
+  }
+}
+
+/** UX-09: a ResizeObserver on each selector's node under `root` that exists now, calling `measure`. */
+export function observeHud(root: ParentNode, selectors: readonly string[], measure: () => void): ResizeObserver | null {
+  if (typeof ResizeObserver !== 'function') return null;
+  const observer = new ResizeObserver(() => measure());
+  for (const selector of selectors) {
+    const node = root.querySelector(selector);
+    if (node !== null) observer.observe(node);
+  }
+  return observer;
+}
+
 export class Waypoint {
   readonly #root: HTMLDivElement;
   readonly #mark: HTMLSpanElement;
@@ -189,6 +227,7 @@ export class Waypoint {
   readonly bounds: WaypointBounds = waypointBounds();
   readonly #hud: ParentNode | null;
   #observer: ResizeObserver | null = null;
+  #disposed = false;
 
   /**
    * `hud` is where the quick bar and the thumb arc live (the UI root); with
@@ -206,14 +245,16 @@ export class Waypoint {
     this.measure();
     globalThis.addEventListener('resize', this.measure);
     // V-04: the bar changes size when it moves into the arc, and the arc when
-    // it shows; a ResizeObserver callback is an event, not the loop.
-    if (hud !== null && typeof ResizeObserver === 'function') {
-      const observer = new ResizeObserver(() => this.measure());
-      for (const selector of [BAR_SELECTOR, ARC_SELECTOR]) {
-        const node = hud.querySelector(selector);
-        if (node !== null) observer.observe(node);
-      }
-      this.#observer = observer;
+    // it shows; UX-09: the plates when a warning or a tip comes and goes. A
+    // ResizeObserver callback is an event, not the loop. The scene mounts
+    // ARIA's tip strip just after the marker, so the watch starts once this
+    // mount has run.
+    if (hud !== null) {
+      queueMicrotask(() => {
+        if (this.#disposed) return;
+        this.#observer = observeHud(hud, [BAR_SELECTOR, ARC_SELECTOR, ...HUD_PLATES], this.measure);
+        this.measure();
+      });
     }
   }
 
@@ -262,6 +303,7 @@ export class Waypoint {
   }
 
   dispose(): void {
+    this.#disposed = true;
     globalThis.removeEventListener('resize', this.measure);
     this.#observer?.disconnect();
     this.#observer = null;
@@ -271,9 +313,10 @@ export class Waypoint {
   /**
    * The viewport centre, and V-04's bounds: on touch the arc's box, which the
    * mark and its label stay out of; on the keyboard the quick bar's band, which
-   * lifts the ellipse's bottom to the bar's top less the gap. A box that is not
-   * drawn (zero size) is not there. Called on `resize`, from the observer, and
-   * by the scene when the UI scale or the stick's side moves the HUD.
+   * lifts the ellipse's bottom to the bar's top less the gap; and UX-09's
+   * plates on both. A box that is not drawn (zero size) is not there. Called on
+   * `resize`, from the observer, and by the scene when the UI scale or the
+   * stick's side moves the HUD.
    */
   readonly measure = (): void => {
     const width = globalThis.innerWidth;
@@ -288,6 +331,7 @@ export class Waypoint {
     bounds.boxes.length = 0;
     const hud = this.#hud;
     if (hud === null) return;
+    pushHudBoxes(hud, HUD_PLATES, bounds.boxes);
     const arc = hud.querySelector(ARC_SELECTOR)?.getBoundingClientRect();
     if (arc !== undefined && arc.width > 0 && arc.height > 0) {
       bounds.boxes.push(arc.left, arc.top, arc.right, arc.bottom);

@@ -109,6 +109,28 @@ describe('placeWaypoint (review 2026-10 V-04)', () => {
     expect(markBox(south.x, south.y).b).toBeCloseTo(BAR_720.t - WAYPOINT_HUD_GAP, 6);
   });
 
+  it('keeps the arrow and its label off every HUD plate at 1280 × 720, at every bearing (audit 2026-10-26 UX-09)', () => {
+    // The plates `HUD_PLATES` measures besides the bar, as the 1280 × 720
+    // frames draw them: the vitals and tracker (top left), the wallet with a
+    // storm warning under it (top centre), and the minimap's corner.
+    const TL: Box = { l: 10, t: 10, r: 346, b: 131 };
+    const TC: Box = { l: 540, t: 10, r: 740, b: 76 };
+    const BR: Box = { l: 1090, t: 526, r: 1270, b: 710 };
+    const bounds = keyboardBounds(720, BAR_720);
+    for (const box of [TL, TC, BR]) bounds.boxes.push(box.l, box.t, box.r, box.b);
+    for (const angle of ANGLES) {
+      const p = place(angle, 1280, 720, bounds);
+      for (const [name, box] of [['the bar', BAR_720], ['top left', TL], ['top centre', TC], ['bottom right', BR]] as const) {
+        expect(overlaps(markBox(p.x, p.y), box), `mark on ${name} at ${angle.toFixed(3)}`).toBe(false);
+        expect(overlaps(labelBox(p.x, p.y, 640, 360, p.on), box), `label on ${name} at ${angle.toFixed(3)}`).toBe(false);
+      }
+    }
+    // Due north — the audit's case: the arrow sits under the storm warning, not on it.
+    const north = place(-Math.PI / 2, 1280, 720, bounds);
+    expect(north.x).toBeCloseTo(640, 6);
+    expect(markBox(north.x, north.y).t).toBeGreaterThanOrEqual(TC.b + WAYPOINT_HUD_GAP - 0.5);
+  });
+
   it('keeps the arrow and its label out of the thumb arc at 844 × 390, either side, at every bearing', () => {
     for (const arc of [ARC_844, ARC_844_LEFT]) {
       const bounds = touchBounds(arc);
