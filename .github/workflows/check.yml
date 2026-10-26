@@ -6,10 +6,10 @@
 # (product.postMergeHealth.mode "checks" in the factory's project profile).
 # Without a workflow no check runs exist, and the factory refuses to spend
 # anything on a spec it could never revert — so this file is load-bearing, not
-# optional. Keep it fast: the watcher waits revertWatchMinutes (22) for a verdict.
+# optional. Keep it fast: the watcher waits revertWatchMinutes (25) for a verdict.
 #
 # Only a check run that concluded `failure` is a verdict to the watcher. One
-# still running at minute 22 reads as healthy, and so does one that ended
+# still running at minute 25 reads as healthy, and so does one that ended
 # `cancelled` — which is what a job that runs past its own `timeout-minutes`
 # ends as, not `timed_out`. That is how the single 15-minute job left main
 # unverified: its e2e step was still going when the job ran out, every time.
@@ -57,7 +57,7 @@ jobs:
   e2e:
     name: e2e ${{ matrix.part }}
     runs-on: macos-15
-    timeout-minutes: 19
+    timeout-minutes: 22
     strategy:
       # A cancelled part is no verdict, and every part's failures are worth
       # having, so one red part does not stop the others.
@@ -95,19 +95,22 @@ jobs:
       # the factory's gate, which runs its own re-run protocol, and without one
       # here a contention flake the gate forgave would revert a good merge. The
       # global timeout fails a part that overruns with its unfinished tests
-      # named, early enough for the watcher to see it. Thirteen minutes leaves
-      # a part planned at seven room for its retries, SPEC-012-missions' three
-      # and a half included. A longer budget needs a longer watcher window
-      # (revertWatchMinutes, above): queueing, setup and this step's fifteen
-      # minutes must end inside it.
+      # named, early enough for the watcher to see it. Sixteen minutes leaves a
+      # part planned at ten room for a slow day's runners and for its retries.
+      # On 2026-10-08 the suite planned at 10.1 minutes a part, and the same
+      # tests ran 15–20 % longer on main and on #115 than on the run the timings
+      # came from, so three parts ran out of thirteen with no test failing.
+      # A longer budget needs a longer watcher window (revertWatchMinutes,
+      # above): queueing, setup and this step's eighteen minutes must end
+      # inside it.
       - name: playwright test ${{ matrix.part }}
-        timeout-minutes: 15
+        timeout-minutes: 18
         env:
           PART: ${{ matrix.part }}
           PLAYWRIGHT_JSON_OUTPUT_FILE: e2e-report.json
         run: |
-          node scripts/e2e/shard.mjs --part "$PART" --out "$RUNNER_TEMP/e2e-part.txt" --budget-ms 780000
-          npx playwright test --test-list "$RUNNER_TEMP/e2e-part.txt" --workers=2 --retries=1 --global-timeout=780000 --add-reporter=github,json
+          node scripts/e2e/shard.mjs --part "$PART" --out "$RUNNER_TEMP/e2e-part.txt" --budget-ms 960000
+          npx playwright test --test-list "$RUNNER_TEMP/e2e-part.txt" --workers=2 --retries=1 --global-timeout=960000 --add-reporter=github,json
       # The traces of whatever failed (trace: 'retain-on-failure').
       - if: failure()
         uses: actions/upload-artifact@v7
