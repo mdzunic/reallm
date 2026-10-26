@@ -484,13 +484,13 @@ test.describe('isolated Input/TouchControls (no scene wires these yet)', () => {
   });
 });
 
-test.describe('flight aim-assist (AC-29)', () => {
-  test('mouse aim blends keyboard steering toward the reticle only when the setting is on', async ({ page }) => {
+test.describe('flight mouse steer (AC-29, SPEC-069 §4.1)', () => {
+  test('with mouse steer on, a held key still reads as the key alone', async ({ page }) => {
     await page.addInitScript(() => localStorage.setItem('reallm:settings', JSON.stringify({ flightMouseSteer: true })));
     await start(page, '/?scene=flight');
     await settle(page, 'flight');
 
-    const withAssist = await page.evaluate(() => {
+    const withMouseSteer = await page.evaluate(() => {
       const canvas = document.getElementById('game') as HTMLCanvasElement;
       const rect = canvas.getBoundingClientRect();
       canvas.dispatchEvent(
@@ -501,17 +501,15 @@ test.describe('flight aim-assist (AC-29)', () => {
       window.dispatchEvent(new KeyboardEvent('keyup', { code: 'KeyW', bubbles: true, cancelable: true }));
       return move;
     });
-    // Pure keyboard-up would be (0, 1); the reticle in the top-right corner
-    // pulls it away from a pure axis on both components.
-    expect(withAssist.x).toBeGreaterThan(0.01);
-    expect(withAssist.y).toBeLessThan(1);
-    expect(withAssist.y).toBeGreaterThan(0.5);
+    // The pointer in the top-right corner once bent `move` 35 % toward it, so
+    // every off-centre pointer read as a held key (PC-01). Mouse steer now
+    // lives in the flight system, and a held key wins over it there.
+    expect(withMouseSteer).toEqual({ x: 0, y: 1 });
   });
 
   test('turning the setting off leaves keyboard steering alone', async ({ page }) => {
     // Written out rather than relying on the default: SPEC-007 §3 ships
-    // `flightMouseSteer` on, and what AC-29 asks is that the blend follow the
-    // setting — so both halves of it name the value they are testing.
+    // `flightMouseSteer` on, so both halves name the value they are testing.
     await page.addInitScript(() => localStorage.setItem('reallm:settings', JSON.stringify({ flightMouseSteer: false })));
     await start(page, '/?scene=flight');
     await settle(page, 'flight');

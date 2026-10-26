@@ -189,8 +189,17 @@ export interface FlightInput {
   throttleDown: boolean;
   /** SPEC-005 §4.3: fire while a target sits under the cone (§4.7). */
   autoFire?: boolean;
-  /** `settings.flightMouseSteer`: steer = clamp((reticle − ship) / 4) (§4.2). */
+  /** `settings.flightMouseSteer`: steer = `mouseSteerAxis(noseOffset)` (SPEC-069 §4.1). */
   mouseSteer?: boolean;
+  /**
+   * SPEC-069 §4.1: the pointer's offset from the ship's nose, in plane metres
+   * at the convergence depth, read through the lens alone — never through the
+   * cockpit's chase, pitch or roll, which follow the ship's own motion. Mouse
+   * steer measures from here, not from the (possibly snapped) reticle. 0 when
+   * absent.
+   */
+  noseOffsetX?: number;
+  noseOffsetY?: number;
   /** SPEC-070 §4.5: an edge — one missile per press, and only with a lock. */
   missile?: boolean;
 }
@@ -306,19 +315,27 @@ export const CONVERGE_DEPTH = 80;
 export const THROTTLES = [0.8, 1, 1.2] as const;
 const THROTTLE_LERP_PER_S = 0.2;
 /**
- * SPEC-069 §4.1 (*initial tuning*): mouse steer ignores a reticle this close
- * to the ship, in plane metres at the convergence depth (about 1.8°).
+ * SPEC-069 §4.1 (*initial tuning*): mouse steer ignores a pointer this close
+ * to the ship's nose, in plane metres at the convergence depth (about 2.9°;
+ * some 30 px from the centre of a 900 px tall window).
  */
-export const MOUSE_STEER_DEAD_ZONE = 2.5;
+export const MOUSE_STEER_DEAD_ZONE = 4;
+/**
+ * SPEC-069 §4.1 (*initial tuning*): the metres past the dead zone at which
+ * mouse steer reaches full deflection (about 17° off the nose in all; some
+ * 190 px on a 900 px tall window). The mouse aims the guns too, so a short
+ * aim off to the side must not throw the ship at full speed.
+ */
+export const MOUSE_STEER_RAMP = 20;
 
 /**
- * SPEC-013 §4.2's mouse steer on one axis, `clamp(d / 4)`, measured from the
- * edge of SPEC-069's dead zone — 0 inside it, so the axis coasts to rest.
+ * Mouse steer on one axis, `clamp(past / MOUSE_STEER_RAMP)`, measured from
+ * the edge of the dead zone — 0 inside it, so the axis coasts to rest.
  */
 export function mouseSteerAxis(offset: number): number {
   const past = Math.abs(offset) - MOUSE_STEER_DEAD_ZONE;
   if (past <= 0) return 0;
-  return clamp((Math.sign(offset) * past) / 4, -1, 1);
+  return clamp((Math.sign(offset) * past) / MOUSE_STEER_RAMP, -1, 1);
 }
 
 /** The asteroid threat box around the ship: 70 % of spawns land inside (§4.3). */
@@ -969,11 +986,13 @@ export class Flight {
     // mouse that had moved once (a click on Start) silenced the keys for good.
     const keyed = input.steerX !== 0 || input.steerY !== 0;
     if (input.mouseSteer === true && !keyed) {
-      // §4.2: mouse steer chases the reticle: clamp((reticle − ship) / 4).
-      // SPEC-069 §4.1: past a dead zone, so a pointer near the centre holds
-      // the ship still instead of creeping it off the line with no wall to stop it.
-      steerX = mouseSteerAxis(this.reticle.x - ship.x);
-      steerY = mouseSteerAxis(this.reticle.y - ship.y);
+      // §4.2: mouse steer leans toward the pointer, ramping up past a dead
+      // zone (SPEC-069 §4.1), so a pointer near the centre holds the ship
+      // still instead of creeping it off the line with no wall to stop it. The
+      // offset is the pointer's from the nose: a reticle read through the
+      // chasing, pitching camera led the ship's own motion and ran it away.
+      steerX = mouseSteerAxis(input.noseOffsetX ?? 0);
+      steerY = mouseSteerAxis(input.noseOffsetY ?? 0);
     } else {
       steerX = clamp(input.steerX, -1, 1);
       steerY = clamp(input.steerY, -1, 1);

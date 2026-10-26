@@ -227,9 +227,20 @@ export class FlightScene extends UiScene<'flight'> {
     throttleDown: false,
     autoFire: false,
     mouseSteer: false,
+    noseOffsetX: 0,
+    noseOffsetY: 0,
     missile: false,
   };
   readonly #aimScratch = new THREE.Vector3();
+  /**
+   * SPEC-069 §4.1: where the pointer rested when the trip began (NaN: it had
+   * never moved). Until it moves again it neither aims nor steers — the click
+   * on Depart leaves it wherever that button was.
+   */
+  #pointerRestX = Number.NaN;
+  #pointerRestY = Number.NaN;
+  #pointerRestTaken = false;
+  #pointerLive = false;
   /**
    * SPEC-012 §4.3's press-edge sampler (review 2026-10, B-03): `justPressed`
    * is a per-frame latch, so read per step it moved the throttle two notches
@@ -983,7 +994,7 @@ export class FlightScene extends UiScene<'flight'> {
     const frame = this.#frameInput;
     frame.steerX = state.move.x;
     // SPEC-045 §4.9: Invert flight up / down flips the keys' and the stick's
-    // axis. Mouse steer chases the reticle instead and is unaffected (45-t).
+    // axis. Mouse steer reads the pointer instead and is unaffected (45-t).
     frame.steerY = this.services.settings.get().invertFlightY ? -state.move.y : state.move.y;
     frame.fire = state.buttons.fire.down;
     frame.autoFire = state.autoFire;
@@ -991,22 +1002,47 @@ export class FlightScene extends UiScene<'flight'> {
     frame.throttleDown = this.#edges.pressed('throttleDown');
     // SPEC-070 §4.5: one missile per press, sampled like the throttle (B-03).
     frame.missile = this.#edges.pressed('missile');
-    frame.mouseSteer = this.services.settings.flightMouseSteer && state.scheme === 'keyboard' && state.aim.hasPointer;
+    // SPEC-069 §4.1: a pointer still where the trip found it is no pointer.
+    const aim = state.aim;
+    if (!this.#pointerRestTaken) {
+      this.#pointerRestTaken = true;
+      if (aim.hasPointer) {
+        this.#pointerRestX = aim.screenX;
+        this.#pointerRestY = aim.screenY;
+      }
+    }
+    if (!this.#pointerLive && aim.hasPointer && (aim.screenX !== this.#pointerRestX || aim.screenY !== this.#pointerRestY)) {
+      this.#pointerLive = true;
+    }
     // SPEC-036 §4.1: only the keyboard scheme aims by the mouse. A finger has
     // no hover, so on touch the guns look down the ship's own lane — the
     // reticle, ARIA's assist cone and touch auto-fire all key off it.
-    if (state.scheme === 'keyboard' && state.aim.hasPointer) {
-      // The pointer's ray, dropped onto the convergence plane (§4.7).
+    const pointer = state.scheme === 'keyboard' && aim.hasPointer && this.#pointerLive;
+    frame.mouseSteer = this.services.settings.flightMouseSteer && pointer;
+    if (pointer) {
+      const camera = this.camera;
+      // The pointer's ray, dropped onto the convergence plane (§4.7): the
+      // reticle and the guns go where the pointer is on screen.
       const scratch = this.#aimScratch;
-      scratch.set(state.aim.ndcX, state.aim.ndcY, 0.5).unproject(this.camera).sub(this.camera.position);
-      const along = -CONVERGE_DEPTH - this.camera.position.z;
+      scratch.set(aim.ndcX, aim.ndcY, 0.5).unproject(camera).sub(camera.position);
+      const along = -CONVERGE_DEPTH - camera.position.z;
       const t = scratch.z !== 0 ? along / scratch.z : 0;
-      frame.aimX = this.camera.position.x + scratch.x * t;
-      frame.aimY = this.camera.position.y + scratch.y * t;
+      frame.aimX = camera.position.x + scratch.x * t;
+      frame.aimY = camera.position.y + scratch.y * t;
+      // SPEC-069 §4.1: mouse steer measures from the ship's nose through the
+      // lens alone. FlightView chases the ship and pitches and rolls the
+      // cockpit with its speed, so the posed camera's centre leads the ship's
+      // own motion; read through it, a pointer steered the ship further the
+      // way it already went, out to the nav limit.
+      const halfHeight = (CONVERGE_DEPTH + camera.position.z) * Math.tan(THREE.MathUtils.degToRad(camera.fov) / 2);
+      frame.noseOffsetX = aim.ndcX * halfHeight * camera.aspect;
+      frame.noseOffsetY = aim.ndcY * halfHeight;
     } else {
       // Straight ahead; the assist and auto-fire do the rest (§4.7).
       frame.aimX = flight.ship.x;
       frame.aimY = flight.ship.y;
+      frame.noseOffsetX = 0;
+      frame.noseOffsetY = 0;
     }
     return frame;
   }

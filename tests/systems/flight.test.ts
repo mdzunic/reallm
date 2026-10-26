@@ -24,6 +24,7 @@ import {
   FUEL,
   MISSILE,
   MOUSE_STEER_DEAD_ZONE,
+  MOUSE_STEER_RAMP,
   mouseSteerAxis,
   NAV_LIMIT,
   PICKUP,
@@ -368,29 +369,51 @@ describe('steering', () => {
     expect(flight.ship.bank).toBeCloseTo((-flight.ship.vx / RAIL.lateralSpeed) * 35, 5);
   });
 
-  it('mouse steer accelerates by clamp((reticle − ship) / 4) past the dead zone (AC-60; SPEC-069 §4.1)', () => {
-    // Far reticle: (8 − 2.5) / 4 clamps to 1 — full deflection.
+  it('mouse steer ramps over 20 m past a 4 m dead zone (AC-60; SPEC-069 §4.1)', () => {
+    // The pinned tuning: a pointer near the nose holds, a short aim off to
+    // the side leans, and only a pointer far out steers at full speed.
+    expect(MOUSE_STEER_DEAD_ZONE).toBe(4);
+    expect(MOUSE_STEER_RAMP).toBe(20);
+    // A pointer 30 m off the nose: (30 − 4) / 20 clamps to 1 — full deflection.
     const far = world().flight;
-    step(far, 2 * DT, { mouseSteer: true, aimX: 8, aimY: 0 });
+    step(far, 2 * DT, { mouseSteer: true, noseOffsetX: 30 });
     expect(far.ship.vx).toBeCloseTo(2 * DT * RAIL.lateralAccel, 1);
-    // Near reticle: 1 m past the dead zone — a quarter of it.
+    // 5 m past the dead zone — a quarter of it.
     const near = world().flight;
-    step(near, 2 * DT, { mouseSteer: true, aimX: MOUSE_STEER_DEAD_ZONE + 1, aimY: 0 });
+    step(near, 2 * DT, { mouseSteer: true, noseOffsetX: MOUSE_STEER_DEAD_ZONE + 5 });
     expect(near.ship.vx).toBeCloseTo(2 * DT * RAIL.lateralAccel * 0.25, 1);
     // Inside the dead zone the ship holds still — no creep off the line.
     const still = world().flight;
-    step(still, 1, { mouseSteer: true, aimX: MOUSE_STEER_DEAD_ZONE - 0.5, aimY: -1 });
+    step(still, 1, { mouseSteer: true, noseOffsetX: MOUSE_STEER_DEAD_ZONE - 0.5, noseOffsetY: -1 });
     expect(still.ship.vx).toBe(0);
     expect(still.ship.vy).toBe(0);
-    expect(mouseSteerAxis(-10)).toBe(-1);
+    expect(mouseSteerAxis(-30)).toBe(-1);
+    expect(mouseSteerAxis(-(MOUSE_STEER_DEAD_ZONE + MOUSE_STEER_RAMP))).toBe(-1);
+    expect(mouseSteerAxis(MOUSE_STEER_DEAD_ZONE + 10)).toBeCloseTo(0.5, 10);
     expect(mouseSteerAxis(0)).toBe(0);
-    // A held key wins over mouse steer, whatever the reticle says.
+    // A held key wins over mouse steer, wherever the pointer is.
     const keyed = world().flight;
-    step(keyed, 2 * DT, { mouseSteer: true, aimX: -8, aimY: 0, steerX: 1 });
+    step(keyed, 2 * DT, { mouseSteer: true, noseOffsetX: -30, steerX: 1 });
     expect(keyed.ship.vx).toBeCloseTo(2 * DT * RAIL.lateralAccel, 1);
-    // And the chase actually moves the ship toward the reticle.
-    step(far, 2, { mouseSteer: true, aimX: 8, aimY: 0 });
+    // And a steady pointer actually moves the ship its way.
+    step(far, 2, { mouseSteer: true, noseOffsetX: 30 });
     expect(far.ship.x).toBeGreaterThan(2);
+  });
+
+  it('mouse steer measures from the nose, not the reticle, so a centred pointer settles a tapped ship (PC-01)', () => {
+    // A reticle 30 m out — where ARIA's assist or a led camera might put it —
+    // steers nothing while the pointer sits on the nose.
+    const aimed = world().flight;
+    step(aimed, 1, { mouseSteer: true, aimX: 30, aimY: 30, noseOffsetX: 0, noseOffsetY: 0 });
+    expect(aimed.ship.vx).toBe(0);
+    expect(aimed.ship.vy).toBe(0);
+    // A quarter-second tap, then the pointer on the nose: the ship coasts to
+    // rest a few metres off the line instead of running to the nav limit.
+    const tapped = world().flight;
+    step(tapped, 0.25, { mouseSteer: true, steerY: 1 });
+    step(tapped, 3, { mouseSteer: true, noseOffsetX: 0, noseOffsetY: 0 });
+    expect(Math.abs(tapped.ship.vy)).toBeLessThan(0.01);
+    expect(tapped.offLine).toBeLessThan(COURSE.corridor);
   });
 });
 
