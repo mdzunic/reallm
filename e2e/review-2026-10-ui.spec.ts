@@ -65,14 +65,17 @@ test.describe('1. V-04: the waypoint keeps off the quick bar', () => {
     await page.getByTestId('surface-goto-pad').click();
     await expect(page.getByTestId('quickbar')).toBeVisible();
     // Walk up the screen until the pad is below the frame, so the arrow sits
-    // where the bar is — the review's due-south case.
+    // where the bar is — the review's due-south case. The player starts beside
+    // the pad, not above it, so the bearing only swings toward due south as the
+    // walk goes on: stop once it is there, not at the first edge frame, or a
+    // slow runner stops early with the arrow still 200 px off centre.
     await page.keyboard.down('KeyW');
     try {
       await expect
         .poll(
           async () => {
             const read = await waypointBoxes(page);
-            return read.state === 'edge' && centre(read.mark).y > 720 / 2 + 150;
+            return read.state === 'edge' && centre(read.mark).y > 720 / 2 + 150 && Math.abs(centre(read.mark).x - 640) < 150;
           },
           { timeout: 20_000 },
         )
