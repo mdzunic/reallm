@@ -104,8 +104,6 @@ export const JOYSTICK_RADIUS_PX = 56;
 export const FLOAT_DRIFT = 1.6;
 /** The minimum hit size of a touch button, in CSS px (AC-16). */
 export const TOUCH_BUTTON_PX = 56;
-/** How far mouse aim pulls keyboard steering in flight (initial tuning, AC-29). */
-export const FLIGHT_AIM_ASSIST = 0.35;
 /**
  * SPEC-036 §4.7: the touch stick reaches full speed at this share of
  * `JOYSTICK_RADIUS_PX` (*initial tuning*). Thumbs rarely hold full deflection,
@@ -517,8 +515,6 @@ export class Input {
     aim.ndcX = this.#width > 0 ? (screenX / this.#width) * 2 - 1 : 0;
     aim.ndcY = this.#height > 0 ? -((screenY / this.#height) * 2 - 1) : 0;
     aim.hasPointer = true;
-    // Flight aim-assist reads the reticle, so a moved reticle re-steers (AC-29).
-    if (this.#assisting()) this.#applyMove();
   }
 
   /** The direction of a touch aim-drag, and whether one is running (AC-13). */
@@ -565,7 +561,11 @@ export class Input {
     return () => void this.#schemeListeners.delete(listener);
   }
 
-  /** Surface or flight; picks the zone split and the flight aim-assist (AC-27 … AC-29). */
+  /**
+   * Surface or flight; picks the zone split (AC-27, AC-28). Flight's mouse
+   * steer is the flight system's (SPEC-069 §4.1), so `move` stays the keys'
+   * and the stick's alone and a held key can win over it.
+   */
   setMode(mode: InputMode): void {
     if (mode === this.#mode) return;
     this.#mode = mode;
@@ -662,20 +662,10 @@ export class Input {
     return this.#state.scheme === 'touch';
   }
 
-  /** True while flight steering should be pulled toward the mouse reticle (AC-29). */
-  #assisting(): boolean {
-    return (
-      this.#mode === 'flight' &&
-      this.#state.scheme === 'keyboard' &&
-      this.#settings?.flightMouseSteer === true &&
-      this.#state.aim.hasPointer
-    );
-  }
-
   /**
-   * Shape each source by its own response, sum, clamp to unit length, then
-   * blend in the flight aim-assist. The touch stick takes `shapeTouchStick`
-   * (SPEC-036 §4.7); every other source is summed first and keeps `shapeMove`.
+   * Shape each source by its own response, sum and clamp to unit length. The
+   * touch stick takes `shapeTouchStick` (SPEC-036 §4.7); every other source is
+   * summed first and keeps `shapeMove`.
    */
   #applyMove(): void {
     const touchRaw = this.#rawMove.get('touch');
@@ -697,15 +687,6 @@ export class Input {
       move.x /= length;
       move.y /= length;
     }
-    if (!this.#assisting()) return;
-    const aim = this.#state.aim;
-    // The reticle's NDC is already in [-1, 1] with y up, which is exactly the
-    // steer space; clamp its length so a corner reticle cannot exceed full
-    // deflection on its own.
-    const magnitude = Math.hypot(aim.ndcX, aim.ndcY);
-    const scale = magnitude > 1 ? 1 / magnitude : 1;
-    move.x += (aim.ndcX * scale - move.x) * FLIGHT_AIM_ASSIST;
-    move.y += (aim.ndcY * scale - move.y) * FLIGHT_AIM_ASSIST;
   }
 }
 

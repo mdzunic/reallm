@@ -8,7 +8,6 @@ import {
   COARSE_POINTER_QUERY,
   createNullInput,
   DEAD_ZONE,
-  FLIGHT_AIM_ASSIST,
   FLIGHT_STEER_FRACTION,
   FLOAT_DRIFT,
   initialScheme,
@@ -650,26 +649,23 @@ describe('aim (AC-13, AC-24)', () => {
   });
 });
 
-describe('flight aim-assist (AC-29)', () => {
-  it('blends keyboard steering toward the reticle only when the setting is on', () => {
+describe('flight mouse steer (AC-29, SPEC-069 §4.1)', () => {
+  it('leaves `move` to the keys: the pointer steers inside the flight system, so a held key can win', () => {
     const settings = createSettings();
-    // SPEC-007 §3 ships the setting on, so the "off" half says so out loud.
-    settings.setFlightMouseSteer(false);
+    settings.setFlightMouseSteer(true);
     const input = new Input(null, null, settings);
     input.setViewport(800, 600);
     input.setMode('flight');
-    input.setAimPointer(800, 300, 'keyboard'); // the reticle at NDC x = 1
+    input.setAimPointer(800, 300, 'keyboard'); // the pointer at NDC x = 1
     input.setMove(0, 0, 'keyboard');
+    // Before, `move` leaned 35 % toward the pointer, so any off-centre pointer
+    // read as a held key and steered the ship at a constant rate (PC-01).
     expect(input.state.move.x).toBe(0);
+    expect(input.state.move.y).toBe(0);
+    expect(input.state.aim.ndcX).toBe(1);
 
-    settings.setFlightMouseSteer(true);
-    input.setAimPointer(800, 300, 'keyboard');
-    expect(input.state.move.x).toBeCloseTo(FLIGHT_AIM_ASSIST, 10);
-
-    // Not on the surface, and not while the player is on touch.
-    input.setMode('surface');
-    input.setMove(0, 0, 'keyboard');
-    expect(input.state.move.x).toBe(0);
+    input.setMove(-1, 0, 'keyboard');
+    expect(input.state.move.x).toBe(-1);
   });
 });
 
