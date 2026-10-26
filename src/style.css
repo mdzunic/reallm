@@ -2407,7 +2407,7 @@ html.reduce-motion .hud.is-static .hud-static {
 
 .dialogue-speaker {
   display: block;
-  font-size: var(--type-xs);
+  font-size: var(--type-sm);
   font-weight: 700;
   letter-spacing: 0.2em;
   text-transform: uppercase;
@@ -3505,7 +3505,7 @@ html.debug .scene-tag {
   border: 1px solid var(--good);
   border-radius: var(--radius);
   color: var(--good);
-  font-size: var(--type-xs);
+  font-size: var(--type-sm);
   font-weight: 600;
   white-space: nowrap;
 }
@@ -3749,7 +3749,7 @@ html.debug .scene-tag {
 }
 
 .board-planet-chapter {
-  font-size: var(--type-xs);
+  font-size: var(--type-sm);
   letter-spacing: 0.2em;
   text-transform: uppercase;
   color: var(--ink-dim);
@@ -3861,7 +3861,7 @@ html.debug .scene-tag {
   border: 1px solid var(--panel-edge);
   border-radius: var(--radius);
   color: var(--ink-dim);
-  font-size: var(--type-xs);
+  font-size: var(--type-sm);
   white-space: nowrap;
 }
 

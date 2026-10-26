@@ -237,7 +237,6 @@ export function glyphNodes(text: string): Array<string | HTMLSpanElement> {
 
 /** Writes `text` into `node` through `glyphNodes`, skipping the work when the text is unchanged. */
 export function setGlyphText(node: HTMLElement, text: string): void {
-  if (node.textContent === text && node.dataset['glyphText'] === text) return;
-  node.dataset['glyphText'] = text;
+  if (node.textContent === text) return;
   node.replaceChildren(...glyphNodes(text));
 }
