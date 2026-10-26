@@ -276,7 +276,11 @@ test.describe('4. a clue line dropped by a full queue fires again at its next dw
     await expect(page.locator('[data-testid="dialogue"] .dialogue-text')).toContainText('Rations pressed and stowed.');
     await tap(page, 'surface-goto-wreck');
     // The dwell reaches the trigger, which fires into the full queue and starts its count again.
-    await expect.poll(async () => Number((await info(page))['clueDwell']), { timeout: 20_000 }).toBeGreaterThanOrEqual(3.5);
+    // It sits at 3.5 s or more for only the last half second of each 4 s count, so poll fast:
+    // at the default one-second step the reads can keep landing on the same phase and miss it.
+    await expect
+      .poll(async () => Number((await info(page))['clueDwell']), { timeout: 20_000, intervals: [50] })
+      .toBeGreaterThanOrEqual(3.5);
     await expect.poll(async () => Number((await info(page))['clueDwell']), { timeout: 10_000 }).toBeLessThan(3);
     await page.waitForTimeout(1_000);
     expect(await flags(page)).not.toContain('clue_hull');
