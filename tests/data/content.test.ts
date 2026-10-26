@@ -159,7 +159,8 @@ function stormWaveProblems(
           continue;
         }
         if (objective.waves === undefined) {
-          if (objective.weather !== undefined && mission.id !== 'c1_m1') {
+          // PLAN R31: no exception — Dry Land's first storm runs a wave too.
+          if (objective.weather !== undefined) {
             problems.push(`${where}: a ${objective.weather} survive names no storm wave`);
           }
           continue;
@@ -729,7 +730,8 @@ describe('content invariants (SPEC-009 §7)', () => {
       expect(wave.spawnBand, id).toEqual([18, 30]);
       expect(wave.loopAfterSeconds, id).toBeUndefined();
     }
-    // The six stages that name their planet's wave, and the tutorial that names none.
+    // The six stages that name their planet's wave, and since PLAN R31 the
+    // tutorial's, which names its own small one (SPEC-074 §4.1).
     const stormOf = (id: MissionId): Array<WaveId | undefined> =>
       MISSIONS[id].stages.flat().flatMap((objective: Objective) => (objective.kind === 'survive' ? [objective.waves] : []));
     expect(stormOf('c1_s2')).toEqual(['cinder4_storm']);
@@ -738,7 +740,7 @@ describe('content invariants (SPEC-009 §7)', () => {
     expect(stormOf('c3_m1')).toEqual(['thessaly_storm']);
     expect(stormOf('c4_m1')).toEqual(['ferrum_storm']);
     expect(stormOf('c4_s1')).toEqual(['ferrum_storm']);
-    expect(stormOf('c1_m1')).toEqual([undefined]);
+    expect(stormOf('c1_m1')).toEqual(['cinder4_first_storm']);
   });
 
   it('11c (SPEC-038). the storm-wave invariant fails on each of the three things it guards', () => {
@@ -1584,9 +1586,17 @@ describe('the three SPEC-035 tips (SPEC-035 §4.8)', () => {
 // SPEC-066 §4.6, §4.9: the first ten minutes — a 30 s first storm, and a
 // first trip with an asteroid lane whose big rocks drop oil.
 describe('the first ten minutes (SPEC-066 §4.6, §4.9)', () => {
-  it('Dry Land’s storm stage is 30 s of sandstorm with no wave, and its hint says thirty', () => {
-    expect(MISSIONS.c1_m1.stages[2]).toEqual([{ kind: 'survive', seconds: 30, weather: 'sandstorm' }]);
-    expect(MISSION_HINTS.c1_m1?.[2]).toBe('Thirty seconds of sand. Stay alive — heal when it bites.');
+  it('Dry Land’s storm stage is 30 s of sandstorm with the first fight in it, and its hint says so (PLAN R31, SPEC-074 §4.1)', () => {
+    expect(MISSIONS.c1_m1.stages[2]).toEqual([{ kind: 'survive', seconds: 30, weather: 'sandstorm', waves: 'cinder4_first_storm' }]);
+    expect(MISSION_HINTS.c1_m1?.[2]).toBe('Thirty seconds of sand, and skitters come with it. Fight or find a wall — heal when it bites.');
+    // Two packs of three skitters, both inside the 30 s stage, close enough to find the player.
+    expect(waves.cinder4_first_storm.domain).toBe('surface');
+    expect(waves.cinder4_first_storm.groups).toEqual([
+      { enemy: 'dust_skitter', count: 3, atSecond: 4 },
+      { enemy: 'dust_skitter', count: 3, atSecond: 18 },
+    ]);
+    expect(waves.cinder4_first_storm.spawnBand).toEqual([16, 24]);
+    for (const group of waves.cinder4_first_storm.groups) expect(group.atSecond).toBeLessThan(30);
   });
 
   it('only Cinder-4 has a first-trip field, and its window lies inside the trip', () => {
@@ -1598,6 +1608,14 @@ describe('the first ten minutes (SPEC-066 §4.6, §4.9)', () => {
     expect(field.fromSecond).toBeGreaterThan(0);
     expect(field.toSecond).toBeGreaterThan(field.fromSecond);
     expect(field.toSecond).toBeLessThan(PLANETS.cinder4.travelSeconds);
+  });
+
+  it('the tutorial trip’s corridor tip says why its tank stays full, on both schemes, inside 160 characters (PLAN R31, SPEC-074 §3)', () => {
+    expect(TIP_IDS).toContain('flight_corridor');
+    const text = "Relay keeps a first run's tank full. From the next trip, straying off the course line burns fuel — the marker points back.";
+    expect(TIPS.flight_corridor.keyboard).toBe(text);
+    expect(TIPS.flight_corridor.touch).toBe(text);
+    expect(text.length).toBeLessThanOrEqual(160);
   });
 
   it('the first flight tip says a big rock shot down drops oil, on both schemes, inside 160 characters', () => {

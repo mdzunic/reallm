@@ -61,6 +61,19 @@ export const WAVES = {
   // stages. Each runs once, from the stage's start, around the player — waves
   // ignore hiding, so the shelter's mouth is where the storm is fought. A stage
   // shorter than a wave's last group never sees that group.
+  /**
+   * PLAN R31 (SPEC-074 §4.1): Dry Land's 30 s first storm — the first fight of
+   * the game, two small packs a new player can take with the starting rifle.
+   */
+  cinder4_first_storm: {
+    id: 'cinder4_first_storm',
+    domain: 'surface',
+    groups: [
+      { enemy: 'dust_skitter', count: 3, atSecond: 4 },
+      { enemy: 'dust_skitter', count: 3, atSecond: 18 },
+    ],
+    spawnBand: [16, 24],
+  },
   /** `c1_s2`'s 90 s heatwave. */
   cinder4_storm: {
     id: 'cinder4_storm',

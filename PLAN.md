@@ -248,7 +248,7 @@ The story, the planets, the 26 missions and their stages, the token totals (670 
    - Swarms keep closing through their windup. Rushers charge: a 6 m trigger, a 0.5 s windup, 20 m/s over 10 m, and a punish window after a whiff.
    - Trash base HP is swarm 26, rusher 70 and ranged 45, keeping ×1.35 per chapter. Ranged enemies reach 13 m with 15 m/s shots (*initial tuning*).
    - The ambient population is the design count on every quality preset, capped by the preset's enemy limit.
-   - Every surface survive stage except `c1_m1` runs a storm wave, so the shelter mouth becomes the fight. Forced storms ramp to full strength over 10 s, and Cinder-4's weather deals ×0.65.
+   - Every surface survive stage except `c1_m1` runs a storm wave, so the shelter mouth becomes the fight. (R31: `c1_m1`'s storm runs one too, the small `cinder4_first_storm`.) Forced storms ramp to full strength over 10 s, and Cinder-4's weather deals ×0.65.
    - Difficulty can be changed in Settings at any time and takes effect at once; casual also scales weather ×0.7 and stretches windups ×1.25.
    - Auto-fire is on by default on every scheme, a held mouse aim overrides it, and it leads strafing targets. This answers the first review's question 4 and supersedes R17 decision 9's hold-to-fire teaching.
    - Critical hits show as their own damage numbers.
@@ -873,6 +873,53 @@ Specs:
 
 (§4, §9, §10, §13)
 
+**R31 — 2026-10-26 (the fifth audit, step 1: the first ten minutes).** An audit played a new game on the live site at desktop and phone sizes (the report is the Claude Doc "ReaLLM game audit — October 2026", https://claude.ai/artifact/NDQZidix6KMdsjZ2NUsGux). Its step 0 shipped by hand: the mouse-steer runaway (PC-01, reallm #122, SPEC-069 amended), the pad terminal's Enter chain and look, HUD markers that keep off every plate, the wallet, the pause frame, the slot picker and four story lines (#123–#125, specs #113, #114). What the first session still shows:
+- **The first enemy comes about ten minutes in.** Dry Land is a walk, a scan and 30 s of storm with nothing in it, so a player meets the first pack on Black Gold (PC-02, the fourth review's G-08 half-done by R27).
+- **The first trip can still end in a tow.** The tank burns off the course line from the first second of the first trip, before anything has said that it does.
+- **Departing takes two Departs.** The star map's Depart opens a sheet whose second Depart is the only thing on it to press on a first trip; Skip the run is refused there, since autopilot needs a route (DK-05).
+- **Creation hides its Confirm.** At 1440 × 900 the form is 1,119 px tall in a 759 px body, and Confirm sits below it. On a phone it is 3.5 screens. The form also names itself three times (DK-03, PH-02).
+- **The phone station has no room.** At 844 × 390 the build label takes a footer row, and a line at the station covers the first mission row and its Accept (PH-03).
+- **The flight HUD carries the salvager's progress.** Lv and XP sit in the flight column, which fills 38 % of a 390 px screen, and on touch the time-critical MSL is the innermost button (UX-10, PH-06).
+
+Decisions:
+
+1. **A first fight on the first landing (SPEC-074, §6, §13 E142).**
+   - `c1_m1`'s storm stage runs a small wave, `cinder4_first_storm`: three Dust Skitters 4 s into the storm and three more at 18 s, 16–24 m from the player.
+   - R18's rule that every surface survive stage runs a storm wave now has no exception.
+   - The first-visit ramp (R17) still holds the ambient population. Waves ignore it (SPEC-035 §4.7).
+   - The stage's hint says the skitters come with the sand.
+   - The campaign simulation counts objective kills only, so no XP or token pin moves.
+2. **The tutorial trip spares the tank (SPEC-074, §13 E143).**
+   - The first trip to Cinder-4, the one that flies SPEC-066's field, burns no extra fuel off the course line. The base burn runs as on every trip, so the tank still reads true and the trip arrives with 35 % on the line.
+   - The first time that trip leaves the corridor, ARIA's tip `flight_corridor` (once per device) says that Relay keeps a first run's tank full, and that straying burns fuel from the next trip on.
+   - `flight_fuel` keeps its moment: the first trip that does burn.
+3. **One Depart when there is no choice (SPEC-074, §13 E144).**
+   - On a route never flown, the departure sheet has nothing to offer: `Skip the run` can only say "fly this run once". There Depart pays and flies at once. The fuel charge and the active mission are already on the info card beside it.
+   - Every route flown before keeps the sheet, with its skip or the skip's refusal (a flight mission that needs a flown run), and so does a service-mode waiver.
+4. **Creation keeps Confirm in view (SPEC-074).**
+   - Back, the reason and Confirm are pinned to the foot of the form on every screen.
+   - The form's own "New salvager" title goes; the frame's head already says it.
+   - On a window at least 1200 × 700, the class cards span the form, and portrait and colours sit beside attributes, stats and difficulty.
+5. **The station on a short landscape screen (SPEC-074).**
+   - At 430 px tall and under (was 360), a footer that holds only the build label goes.
+   - Out of play, on a screen 500 px tall or less, a line docks at the top, over the frame's head, not over the body.
+6. **The flight HUD keeps to the flight (SPEC-074).**
+   - In flight the level row and the XP bar are hidden, as the salvager's HP already is (SPEC-035 §4.9). A level gained in flight still toasts.
+   - On touch, MSL takes the thumb's corner at 64 px, and + and − stand as a pair beside it, + over −. The left-handed layout mirrors it.
+7. **Milestone M7s "The first ten minutes"** carries SPEC-074.
+8. **Not now.**
+   - A stepper for creation on phones.
+   - A preselected class.
+   - A larger, lit creation preview.
+   - The tow's own station line (the audit's ST-03, second half).
+   - A shorter prologue.
+
+Specs:
+- SPEC-074 (decisions 1–6).
+- SPEC-000's queue and build order.
+
+(§4, §6, §10, §13)
+
 ---
 
 ## 1. Vision & Inspiration
@@ -1106,7 +1153,7 @@ Notation below: `[a; b]` = one stage (any order), `→` = next stage. Main missi
 
 | ID | Title | Stages | Rewards |
 |---|---|---|---|
-| c1_m1 | "Dry Land" | [reach `landing_pad`] → [scan `dune_sea`] → [survive 30 s, sandstorm] (60 s before R27) | 100 XP, 10 tokens, 20 oil |
+| c1_m1 | "Dry Land" | [reach `landing_pad`] → [scan `dune_sea`] → [survive 30 s, sandstorm, wave `cinder4_first_storm`] (60 s before R27; the wave since R31) | 100 XP, 10 tokens, 20 oil |
 | c1_m2 | "Black Gold" | [collect 150 oil; kill 6 `scav_raider`] | 150 XP, 15 tokens, flag `c1_oil` |
 | c1_m3 | "Worm Sign" (BOSS) | [boss `dune_wurm`] → [deliver 100 oil to `beacon`] | 250 XP, 30 tokens, flag `chapter1_done` (unlocks Vetra) |
 | c1_s1 | "Grain Silo" (side) | [collect 80 wheat; scan `silo_ruin`] | 80 XP, 5 tokens, 3× wheat ration |
@@ -1175,7 +1222,7 @@ Beats: **stay** — the report is filed, Earth is saved, the loop closes ("a goo
 ### Mission content policy (locked)
 
 - Mission set above is locked as-is for the campaign.
-- "Survive X seconds" objectives are reused deliberately: one cheap mechanic, many hazards (weather changes the feel). Since R18 every surface survive stage except `c1_m1` also runs a storm wave, so the shelter mouth becomes the fight.
+- "Survive X seconds" objectives are reused deliberately: one cheap mechanic, many hazards (weather changes the feel). Since R18 every surface survive stage except `c1_m1` also runs a storm wave, so the shelter mouth becomes the fight; since R31 `c1_m1`'s does too, with two packs of three skitters.
 - Extra tiers (hardmode variants, NG+, bounties) are pure data additions — deferred to post-M7 polish. Mission replay at 50 % is the only repeatable content in v1 and exists for anti-softlock reasons. Since R18 (SPEC-043), with the 26 missions and their token rewards unchanged: side missions also pay an item or a resource; a mission may carry an optional bonus objective paying items or resources; a replay in a finished chapter is a contract with one modifier, paying 0.75 plus 20 lithium; and a `hard` difficulty exists.
 - Since R19 a replayed mission plays its accept line only: the story's beats belong to the first run.
 - Since R20 caves, puzzles and treasure are optional content outside the mission set: they add no mission, stage, objective or requirement, and nothing a requirement reads sits behind a puzzle. Collect objectives count pickups only, so a bonus, a contract, a reward or a cache never advances one (SPEC-043, amended).
@@ -1295,6 +1342,7 @@ Storage rules: 3 slots, key per slot plus a `.bak` copy of the previous good sav
 | M7p | The ground under the fight (R28): a ground that varies in tone and material, rubble, biome dressing and a landing site; traps on every planet; helpers the player sets off with a shot — topplers and volatiles; hazard kills credited to the player (SPEC-067, SPEC-068) | Every landing frame shows dressing on every planet; the surface stays within 96 draws and 60 k triangles at spawn on `medium`; on Cinder-4 a shot balanced rock falls the shot's way and kills the skitters in its lane, a drum chain clears a pack, and a tripmine hurts a player who walks onto it but not on story; a kill by a hazard counts for `c1_m2`; nothing fires underground or beyond 45 m; checked on desktop and the reference phone; tag `m7p` |
 | M7q | Free flight (R29): open steering out to a 220 m nav limit with nothing pulling back; a course marker with an edge arrow and nav beacons on the line; a fuel tank that straying drains and an empty tank that tows the ship home; salvage signals off the line; a rack of two homing missiles that kills refill; every trip opens in the cockpit; the armoured tug (SPEC-069 to SPEC-072) | On keyboard and on touch a trip flown on the line arrives with 35 % of the tank; a ship held 100 m off the line runs dry and is towed home, not killed; the course marker points back from any side; a fuel cell, an oil pod and a missile are each picked up; a locked missile downs a scav fighter and a fighter's drop refills the rack; no frame of a launch shows the ship from outside; the menu, the station and the pad show the armoured tug; checked on desktop and the reference phone; tag `m7q` |
 | M7r | The Refit (R30): drawn wordmark and reticle, one drawn icon set in place of emoji, lit frame chamfers, sheets instead of stacked frames, one HUD plate, notched vital bars, an icon rail on touch, compact mission rows under a planet header, emblem class cards, a 15° star map lens (SPEC-073) | No emoji or Unicode pictograph shows in any screen or HUD, and every glyph's text is unchanged in the DOM; the boot card and the menu show the drawn wordmark; settings opens as a sheet; on the 667 px phone no station tab label is cut short; every star map planet draws round; `npm run check`, the UI suites and the e2e suite are green; before and after screenshots at 1440 × 900 and 844 × 390 are recorded; checked on desktop and the reference phone; tag `m7r` |
+| M7s | The first ten minutes (R31): a skitter wave in Dry Land's first storm, a tutorial trip that burns no extra fuel off the line and says why, one Depart when there is no choice, a creation Confirm that stays in view, a phone station with room for its board, and a flight HUD without the salvager's progress (SPEC-074) | On a new save the first pack reaches the player in Dry Land's storm, about a minute after the first landing; the first trip to Cinder-4 cannot end in a tow, flown by mouse, keys or touch; a first trip departs on one Depart; at 1440 × 900 creation's Confirm is on screen without a scroll; at 844 × 390 a line at the station leaves the first mission row clear; the flight HUD shows no Lv or XP, and on touch MSL is in the thumb's corner; checked on desktop and the reference phone; tag `m7s` |
 | M7 | Polish: mobile tuning, quality presets, balancing pass, PWA/offline, storage persistence, reduce-motion, save migration harness | 30+ fps on mid-tier phone; installable; full manual checklist green |
 
 ---
@@ -1468,6 +1516,9 @@ Each entry names the owning spec. "Casual" = casual difficulty.
 | E139 | A glyph has no drawn icon, or the browser cannot draw CSS masks (R30) | The glyph's own character shows, as it did before: the span keeps the text and only an `@supports (mask-image: …)` rule hides it under the icon. A glyph outside the table is left as plain text | SPEC-073 |
 | E140 | A station tab's label does not fit the touch rail at the player's text size (R30) | The label wraps to a second line inside its tab, and the rail grows. It is never ellipsised, and every tab keeps its 56 px floor | SPEC-073 |
 | E141 | The star map's viewport is very wide or very tall (R30) | The 15° lens changes only how far back the camera sits. `#frameCamera` still fits every node and its label inside the map area beside or above the info panel, so no hit area leaves the screen | SPEC-073 |
+| E142 | The player dies, or shelters, during Dry Land's first storm (R31) | The wave behaves as every storm wave: a death dismisses its survivors with no XP and the restarted stage restarts it (SPEC-038 38-h, 38-i); a shelter is no hiding place from skitters, which follow the player to the mouth | SPEC-074 |
+| E143 | The tutorial trip strays, is recalled or is skipped (R31) | Off the line it burns only the base fuel, so it cannot be towed; story's floor and the tank's other rules are unchanged. A recall re-flies it as the tutorial trip again (`visits` is still 0), and a skip flies the line as every skip does | SPEC-074 |
+| E144 | Depart is pressed with no sheet and the charge is refused, or pressed twice (R31) | A refused charge toasts its reason and nothing leaves, as the sheet's Depart did. The second press finds the map already leaving and does nothing | SPEC-074 |
 
 ---
 

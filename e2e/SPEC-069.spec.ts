@@ -8,7 +8,7 @@
 // `window.__reallmFlight` (dev builds only) warps the simulation and places the
 // ship and canisters, so a 90 s trip costs milliseconds.
 import { expect, test, type Page } from '@playwright/test';
-import { start } from './start';
+import { depart, start } from './start';
 
 interface FlightHook {
   phase(): string;
@@ -49,7 +49,14 @@ async function tap(page: Page, code: string): Promise<void> {
 /** The flight scene on Cinder-4, past its 3 s launch, with an empty sky. */
 async function cruise(page: Page): Promise<void> {
   await page.addInitScript(() => localStorage.setItem('reallm:settings', JSON.stringify({ autoFire: 'off', flightMouseSteer: false })));
-  await start(page, '/?debug&scene=flight&planet=cinder4&quality=medium');
+  // A save that has landed on Cinder-4 once: the tank's rules below are every
+  // trip's, and a first trip there is the tutorial one, which burns nothing
+  // off the line (PLAN R31, SPEC-074 §4.2).
+  await start(page, '/?debug&quality=medium');
+  await page.evaluate((creation) => {
+    window.__reallm.save().create(0, creation).progress.visits['cinder4'] = 1;
+  }, CREATION);
+  expect(await page.evaluate(() => window.__reallm.go('flight', { destination: 'cinder4' }, { force: true }))).toBe(true);
   await page.waitForFunction(() => (window as unknown as { __reallmFlight?: unknown }).__reallmFlight !== undefined);
   await page.evaluate(() => {
     const flight = (window as unknown as { __reallmFlight: FlightHook }).__reallmFlight;
@@ -135,10 +142,9 @@ test.describe('free flight (SPEC-069)', () => {
     for (const id of ['station', 'starmap']) {
       expect(await page.evaluate(async (id) => window.__reallm.go(id, id === 'station' ? {} : undefined), id)).toBe(true);
     }
-    // Real clicks, as a player departs: the pointer is left on the confirm
-    // sheet's Depart, well off the centre of the screen.
-    await page.locator('[data-testid="starmap-depart"]').click();
-    await page.locator('[data-testid="confirm-yes"]').click();
+    // Real clicks, as a player departs: the pointer is left on Depart, well
+    // off the centre of the screen (a first trip has no sheet, SPEC-074 §4.3).
+    await depart(page);
     await expect(page.locator('[data-testid="scene-label"]')).toHaveText('flight', { timeout: 20_000 });
     await page.waitForFunction(() => (window as unknown as { __reallmFlight?: unknown }).__reallmFlight !== undefined);
     const clear = (): Promise<void> => page.evaluate(() => (window as unknown as { __reallmFlight: FlightHook }).__reallmFlight.clearSky());

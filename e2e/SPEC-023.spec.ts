@@ -8,7 +8,7 @@
 // the pictures are SPEC-022's business, and what is under test here is which
 // beat fires, when, and what it leaves behind in the save.
 import { expect, test, type Page } from '@playwright/test';
-import { start } from './start';
+import { depart, start } from './start';
 
 test.use({ reducedMotion: 'no-preference' });
 
@@ -93,8 +93,7 @@ async function departForCinder4(page: Page): Promise<void> {
   await page.locator('[data-testid="station-tab-starmap"]').click();
   await settled(page, 'starmap');
   await page.locator('[data-testid="map-node-cinder4"]').click();
-  await page.locator('[data-testid="starmap-depart"]').click();
-  await page.locator('[data-testid="confirm-yes"]').click();
+  await depart(page);
 }
 
 test('1 — departure and card: the first trip to Cinder-4 plays the film, then the chapter card', async ({ page }) => {

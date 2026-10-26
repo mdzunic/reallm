@@ -450,23 +450,27 @@ export class CreationScene extends UiScene<'creation'> {
       this.#variant = variant;
       nextRows.push(testId(h('p', { class: 'creation-next' }, creationNextText(restored.iteration)), 'creation-next'), variant);
     }
+    // PLAN R31 (SPEC-074 §4.4): no title of its own — the frame's head names
+    // the screen — and the looks and the build in two blocks, side by side on
+    // a wide window; the foot with Confirm is pinned in view by the CSS.
     form.replaceChildren(
-      h('p', { class: 'creation-title' }, 'New salvager'),
       ...nextRows,
       h('label', { class: 'creation-row' }, h('span', {}, 'Name'), this.#nameField),
       this.#kinRow(),
       this.#classCards(),
-      this.#portraitRow(),
-      // SPEC-056 §4.6: the base eight, then the colours this device unlocked.
-      this.#swatchRow('Primary', availableSwatches('primary', this.services.settings.get().unlocks), this.#primary, (colour) => {
-        this.#primary = colour;
-      }),
-      this.#swatchRow('Secondary', availableSwatches('secondary', this.services.settings.get().unlocks), this.#secondary, (colour) => {
-        this.#secondary = colour;
-      }),
-      this.#attributeRows(),
-      this.#statsPreview(),
-      this.#difficultyRow(),
+      h(
+        'div',
+        { class: 'creation-col creation-looks' },
+        this.#portraitRow(),
+        // SPEC-056 §4.6: the base eight, then the colours this device unlocked.
+        this.#swatchRow('Primary', availableSwatches('primary', this.services.settings.get().unlocks), this.#primary, (colour) => {
+          this.#primary = colour;
+        }),
+        this.#swatchRow('Secondary', availableSwatches('secondary', this.services.settings.get().unlocks), this.#secondary, (colour) => {
+          this.#secondary = colour;
+        }),
+      ),
+      h('div', { class: 'creation-col creation-build' }, this.#attributeRows(), this.#statsPreview(), this.#difficultyRow()),
       this.#previewAndConfirm(),
     );
     this.#syncVariant();

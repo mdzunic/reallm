@@ -175,9 +175,10 @@ export class FlightScene extends UiScene<'flight'> {
   #markers: FlightMarkers | null = null;
   /** SPEC-070 §4.5: the touch layer, for the MSL button's rack. */
   #touch: TouchControls | null = null;
-  /** SPEC-069 §4.5, SPEC-070 §4.6: each first-time tip is asked once a trip. */
+  /** SPEC-069 §4.5, SPEC-070 §4.6, SPEC-074 §4.2: each first-time tip is asked once a trip. */
   #fuelTipAsked = false;
   #missileTipAsked = false;
+  #corridorTipAsked = false;
   /** SPEC-070 §4.6: the lock bracket is up — `sceneInfo.lock`. */
   #lockShown = false;
   #skipHint: HTMLParagraphElement | null = null;
@@ -977,6 +978,11 @@ export class FlightScene extends UiScene<'flight'> {
     if (stripFree && !this.#fuelTipAsked && flight.fuelBurn > 0) {
       this.#fuelTipAsked = true;
       this.#showTip('flight_fuel');
+    } else if (stripFree && !this.#corridorTipAsked && flight.tutorialTrip && flight.offLine > COURSE.corridor) {
+      // PLAN R31 (SPEC-074 §4.2): the tutorial trip strays and burns nothing
+      // extra — say why, and what the next trip will do.
+      this.#corridorTipAsked = true;
+      this.#showTip('flight_corridor');
     } else if (stripFree && !this.#missileTipAsked && flight.lock.active && flight.ship.missiles > 0) {
       this.#missileTipAsked = true;
       this.#showTip('flight_missile');

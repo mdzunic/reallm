@@ -438,6 +438,38 @@ html.quality-low button.boot-start {
   flex-direction: row;
 }
 
+/* PLAN R31 (SPEC-074 §4.6): in flight MSL — the press that cannot wait —
+   takes the thumb's corner at 64 px, and the throttle stands beside it as a
+   pair, + over −. The left-handed layout mirrors the columns. */
+.touch-controls[data-mode='flight'] .touch-buttons {
+  display: grid;
+  grid-template-areas:
+    'up msl'
+    'down msl';
+  align-items: end;
+  justify-items: center;
+}
+
+.touch-controls[data-mode='flight'][data-side='right'] .touch-buttons {
+  grid-template-areas:
+    'msl up'
+    'msl down';
+}
+
+.touch-controls[data-mode='flight'] .touch-throttleUp {
+  grid-area: up;
+}
+
+.touch-controls[data-mode='flight'] .touch-throttleDown {
+  grid-area: down;
+}
+
+.touch-controls[data-mode='flight'] button.touch-missile {
+  grid-area: msl;
+  width: calc(64px * var(--touch-scale));
+  height: calc(64px * var(--touch-scale));
+}
+
 /* AC-16: never below the 56 px base, `buttonScale` only ever grows it, and a
    long press neither selects text nor opens the iOS callout. */
 button.touch-button {
@@ -2539,6 +2571,16 @@ html[data-play] .dialogue.dialogue-letter {
   }
 }
 
+/* PLAN R31 (SPEC-074 §4.5): out of play on a short screen — the station, the
+   star map — a line docks at the top, over the frame's head, instead of over
+   the body: at 844 × 390 it covered the board's first mission and its Accept. */
+@media (max-height: 500px) {
+  html:not([data-play]) .dialogue {
+    top: max(6px, env(safe-area-inset-top));
+    bottom: auto;
+  }
+}
+
 @keyframes dialogue-glitch-docked {
   25% { transform: translateX(1px); }
   75% { transform: translateX(-1px); }
@@ -3419,10 +3461,34 @@ html.debug .scene-tag {
   padding: 16px;
 }
 
-.creation-title {
-  margin: 0;
-  font-weight: 700;
-  font-size: var(--type-lg);
+/* PLAN R31 (SPEC-074 §4.4): the looks (portrait, colours) and the build
+   (attributes, stats, difficulty) are blocks of rows — stacked on a narrow
+   screen, side by side under the full-width class cards on a wide one, so
+   1440 × 900 shows the whole form with almost no scroll. */
+.creation-col {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-width: 0;
+}
+
+@media (min-width: 1200px) and (min-height: 700px) {
+  .creation-form {
+    width: min(900px, 100%);
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    column-gap: 24px;
+    row-gap: 12px;
+    align-content: start;
+  }
+
+  .creation-form > * {
+    grid-column: 1 / -1;
+  }
+
+  .creation-form > .creation-col {
+    grid-column: auto;
+  }
 }
 
 .creation-subtitle {
@@ -3642,12 +3708,25 @@ html.debug .scene-tag {
   gap: 6px;
 }
 
+/* PLAN R31 (SPEC-074 §4.4): Back, the reason and Confirm are pinned to the
+   bottom of the frame's body while the form scrolls under them — Confirm was
+   below the fold at 1440 × 900 and 3.5 screens down on a phone. The bar spans
+   the form's padding and sits flush on its bottom edge. */
 .creation-foot {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
   justify-content: flex-end;
   gap: 10px;
+  position: sticky;
+  /* The frame body's 14 px padding: a sticky bar stops at the scrollport's
+     content edge, which would leave a strip of the form showing under it. */
+  bottom: -14px;
+  z-index: 1;
+  margin: 0 -16px -16px;
+  padding: 10px 16px 12px;
+  background: var(--panel);
+  border-top: 1px solid var(--rule);
 }
 
 /* AC-19: the scissor viewport tracks this box; the canvas shows through it,
@@ -5896,9 +5975,10 @@ html.quality-low .screen::before {
   }
 }
 
-/* …and at 360 px and under, a footer that holds only the build label goes;
-   the menu's E8 storage banner keeps its footer. */
-@media (orientation: landscape) and (max-height: 360px) {
+/* …and at 430 px and under (PLAN R31, SPEC-074 §4.5: was 360), a footer that
+   holds only the build label goes, so an 844 × 390 phone's station gets the row
+   back for its board; the menu's E8 storage banner keeps its footer. */
+@media (orientation: landscape) and (max-height: 430px) {
   .screen-foot:not(:has(.save-banner)) {
     display: none;
   }

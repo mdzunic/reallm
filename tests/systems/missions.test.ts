@@ -986,13 +986,13 @@ describe('Missions — survive stages run their storm wave (SPEC-038 §4.5)', ()
     expect(h.missions.surviveWave()).toBeNull();
   });
 
-  it('the tutorial’s sandstorm names no wave (SPEC-035’s ramp is the first landing)', () => {
+  it('the tutorial’s sandstorm runs the game’s first fight (PLAN R31; SPEC-035’s ramp still holds the ambient field)', () => {
     const h = harness();
     h.missions.accept('c1_m1');
     h.events.emit('poi:reached', { poi: 'landing_pad', instance: 0 });
     h.events.emit('poi:scanned', { poi: 'dune_sea', instance: 0 });
     expect(h.missions.requiredWeather()).toEqual({ weather: 'sandstorm', seconds: 30 });
-    expect(h.missions.surviveWave()).toBeNull();
+    expect(h.missions.surviveWave()).toEqual({ mission: 'c1_m1', stage: 2, wave: 'cinder4_first_storm' });
   });
 });
 

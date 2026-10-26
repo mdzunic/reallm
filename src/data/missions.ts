@@ -142,8 +142,9 @@ export const MISSIONS = {
     stages: [
       [{ kind: 'reach', poi: 'landing_pad' }],
       [{ kind: 'scan', poi: 'dune_sea', count: 1 }],
-      // SPEC-066 §4.6: the first storm is half a minute (was 60 s), still with no wave.
-      [{ kind: 'survive', seconds: 30, weather: 'sandstorm' }],
+      // SPEC-066 §4.6: the first storm is half a minute (was 60 s). PLAN R31
+      // (SPEC-074 §4.1): and the game's first fight comes with it.
+      [{ kind: 'survive', seconds: 30, weather: 'sandstorm', waves: 'cinder4_first_storm' }],
     ],
     rewards: { xp: 100, tokens: 10, resources: { oil: 20 } },
     dialogue: { onAccept: 'c1_m1_accept', onStage: { 1: 'c1_m1_stage2' }, onComplete: 'c1_m1_done' },
