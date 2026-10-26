@@ -95,7 +95,8 @@ export const DIALOGUE = {
     lines: [
       { speaker: 'command', text: 'The oil is the mission. Raiders on the field are not your problem until they are.' },
       // Review 2026-10 S-05: the raiders wear the salvager's suit (SPEC-064), and chapter 1 covers it.
-      { speaker: 'aria', text: 'Raiders wear Earth suits. They strip them off the crews Earth lost out here. Do not let it slow your hand.' },
+      // Audit 2026-10-26 ST-01: without "the crews Earth lost out here", which spent chapter 2's echo.
+      { speaker: 'aria', text: 'Raiders. Same suit as yours — they strip what they find. Do not let it slow your hand.' },
     ],
   },
   /** SPEC-048 §4.2 clue 1: a dying raider's last words, on the first raider kill of `c1_m2`. */

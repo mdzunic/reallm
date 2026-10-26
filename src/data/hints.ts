@@ -123,8 +123,8 @@ export const TIPS: Readonly<Record<TipId, TipText>> = {
     touch: 'The boss arena is marked in red. Stock up on medkits before you step in.',
   },
   death: {
-    keyboard: 'You respawn at the pad. Timed objectives restart; your counts are kept.',
-    touch: 'You respawn at the pad. Timed objectives restart; your counts are kept.',
+    keyboard: 'You wake at the pad. Timed objectives restart; your counts are kept.',
+    touch: 'You wake at the pad. Timed objectives restart; your counts are kept.',
   },
   quickbar: {
     keyboard: '1, 2 and 3 switch weapons. Q heals, G throws, C uses gadgets — the bar shows what is left.',

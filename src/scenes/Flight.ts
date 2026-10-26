@@ -745,7 +745,7 @@ export class FlightScene extends UiScene<'flight'> {
         'div',
         { class: 'flight-towed', role: 'status', 'aria-live': 'assertive' },
         h('p', { class: 'flight-towed-title' }, 'OUT OF FUEL'),
-        h('p', { class: 'flight-towed-line' }, 'Command is towing you home.'),
+        h('p', { class: 'flight-towed-line' }, 'Relay has you on a line. Hold still.'),
       ),
       'flight-towed',
     );
