@@ -113,6 +113,8 @@ test.describe('depart confirm sheet', () => {
       const data = window.__reallm.save().create(0, creation);
       // A fresh save's 60 oil covers one trip; the bug needs room for three.
       data.resources['oil'] = 200;
+      // A route flown once, so Depart opens the sheet (PLAN R31, SPEC-074 §4.3).
+      data.progress.visits['cinder4'] = 1;
     }, CREATION);
     expect(await go(page, 'station', {})).toBe(true);
     expect(await go(page, 'starmap', undefined)).toBe(true);

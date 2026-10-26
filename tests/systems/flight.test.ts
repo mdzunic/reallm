@@ -46,7 +46,7 @@ import {
 } from '@/systems/Flight';
 import { Missions } from '@/systems/Missions';
 import { Progression } from '@/systems/Progression';
-import { engineVolume, runSkip, THROTTLES } from '@/systems/Flight';
+import { departSheetDue, engineVolume, runSkip, THROTTLES } from '@/systems/Flight';
 import {
   FIELD_LANE_HALF_WIDTH,
   FIELD_ROCK_RADIUS,
@@ -1165,6 +1165,19 @@ describe('flight enemies', () => {
 describe('runSkip (SPEC-032 §4.3)', () => {
   const fresh = (): Save => newSave(0, PILOT, 42, 1_700_000_000_000);
 
+  it('skips the departure sheet only on a route never flown (PLAN R31, SPEC-074 §4.3)', () => {
+    // A first trip: the skip can only say "fly this run once", so Depart leaves at once.
+    expect(departSheetDue(runSkip(fresh(), 'cinder4'), false)).toBe(false);
+    expect(departSheetDue({ ok: false, reason: 'never_flown' }, false)).toBe(false);
+    // A route flown before keeps the sheet, with its skip…
+    const flown = fresh();
+    flown.progress.visits.cinder4 = 1;
+    expect(departSheetDue(runSkip(flown, 'cinder4'), false)).toBe(true);
+    // …or the skip's refusal for a flight mission, and a service-mode waiver keeps it too.
+    expect(departSheetDue({ ok: false, reason: 'flight_mission', mission: 'c5_m1' }, false)).toBe(true);
+    expect(departSheetDue({ ok: false, reason: 'never_flown' }, true)).toBe(true);
+  });
+
   it('refuses a route that was never landed on', () => {
     const save = fresh();
     expect(runSkip(save, 'cinder4')).toEqual({ ok: false, reason: 'never_flown' });
@@ -2086,6 +2099,30 @@ describe('free flight — the tank (SPEC-069 §4.2)', () => {
     step(w.flight, 10);
     expect(w.flight.fuelBurn).toBeCloseTo(0.006, 9);
     expect(before - w.flight.ship.fuel).toBeCloseTo(0.06 + (1 - FUEL.reserve) * (10 / 300), 3);
+  });
+
+  it('spares the tutorial trip the off-line burn, so it cannot be towed (PLAN R31, SPEC-074 §4.2, E143)', () => {
+    // The first trip to a planet with SPEC-066's field is the tutorial trip.
+    const quiet = quietPlanet(PLANETS.cinder4, 300);
+    const withField: PlanetDef = { ...quiet, flight: { ...quiet.flight, firstTripField: PLANETS.cinder4.flight.firstTripField } };
+    const tutorial = world({ planet: withField, firstTrip: true });
+    expect(tutorial.flight.tutorialTrip).toBe(true);
+    step(tutorial.flight, LAUNCH_SECONDS + DT);
+    // Parked 150 m off for 15 s, before the field opens at 20 s: the base burn only.
+    Object.assign(tutorial.flight.ship, { x: 150, vx: 0 });
+    const before = tutorial.flight.ship.fuel;
+    step(tutorial.flight, 15);
+    expect(tutorial.flight.fuelBurn).toBe(0);
+    expect(before - tutorial.flight.ship.fuel).toBeCloseTo((1 - FUEL.reserve) * (15 / 300), 4);
+    expect(tutorial.flight.phase).toBe('cruise');
+    // A later trip there, or a first trip to a planet with no field, burns as SPEC-069 §4.2 says.
+    expect(world({ planet: withField }).flight.tutorialTrip).toBe(false);
+    expect(world({ planet: quietPlanet(PLANETS.vetra, 300), firstTrip: true }).flight.tutorialTrip).toBe(false);
+    const later = world({ planet: withField });
+    step(later.flight, LAUNCH_SECONDS + DT);
+    Object.assign(later.flight.ship, { x: 150, vx: 0 });
+    step(later.flight, 1);
+    expect(later.flight.fuelBurn).toBeGreaterThan(0);
   });
 
   it('warns once at 25 %', () => {

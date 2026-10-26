@@ -68,6 +68,8 @@ export const TIP_IDS = [
   // SPEC-069 §4.5: the first extra burn off the course line; SPEC-070 §4.6: the first lock with a missile loaded.
   'flight_fuel',
   'flight_missile',
+  // PLAN R31 (SPEC-074 §4.2): the tutorial trip's first time off the course line.
+  'flight_corridor',
 ] as const;
 
 export type TipId = (typeof TIP_IDS)[number];
@@ -248,6 +250,13 @@ export const TIPS: Readonly<Record<TipId, TipText>> = {
     keyboard: 'Missile locked — press F or the right mouse button.',
     touch: 'Missile locked — tap MSL.',
   },
+  // PLAN R31 (SPEC-074 §4.2): the tutorial trip burns no extra fuel off the
+  // line, and says so the first time it strays; `flight_fuel` waits for the
+  // first trip that does burn.
+  flight_corridor: {
+    keyboard: "Relay keeps a first run's tank full. From the next trip, straying off the course line burns fuel — the marker points back.",
+    touch: "Relay keeps a first run's tank full. From the next trip, straying off the course line burns fuel — the marker points back.",
+  },
 };
 
 /** Review 2026-10 P-08: the tip each puzzle kind shows the first time the player meets it. */
@@ -353,7 +362,8 @@ export const MISSION_HINTS: Readonly<Partial<Record<MissionId, Readonly<Record<n
   c1_m1: {
     0: 'The pad is {dist} {dir}. Walk to it.',
     1: '{label} is {dist} {dir}. Stand in its ring until the scan completes.',
-    2: 'Thirty seconds of sand. Stay alive — heal when it bites.',
+    // PLAN R31: the storm brings the first fight (SPEC-074 §3).
+    2: 'Thirty seconds of sand, and skitters come with it. Fight or find a wall — heal when it bites.',
   },
   c1_m2: {
     0: 'Stand beside the oil derricks until your hold fills. Raiders keep their distance — close in.',

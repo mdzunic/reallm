@@ -283,6 +283,10 @@ export class Hud {
       // the hull is. The bar stays in the DOM (the SPEC-011 selector resolves)
       // and is hidden, so the two identical hearts are gone.
       this.#hp.root.classList.add('is-hidden');
+      // PLAN R31 (SPEC-074 §4.6): so are the salvager's level and XP — the
+      // column is the ship's, and a level gained in flight still toasts.
+      this.#xp.root.classList.add('is-hidden');
+      levelRow.classList.add('is-hidden');
       // SPEC-069 §4.5: the tank under the hull; SPEC-070 §4.6: the rack beside the throttle.
       this.#missiles.setAttribute('aria-label', 'Missiles');
       this.#missiles.append(el('span', 'hud-missile-label', 'MSL'), ...this.#missilePips);

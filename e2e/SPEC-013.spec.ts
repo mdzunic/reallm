@@ -9,7 +9,7 @@
 // mounted by the scene next to `window.__reallm`) warps the simulation and
 // lands deterministic hits, so a 90 s trip costs milliseconds.
 import { expect, test, type Page } from '@playwright/test';
-import { start } from './start';
+import { depart, start } from './start';
 
 const CREATION = {
   name: 'Vance',
@@ -67,8 +67,7 @@ test.describe('station → star map → Cinder-4 (desktop)', () => {
     expect(await go(page, 'starmap', undefined)).toBe(true);
 
     const oilBefore = await page.evaluate(() => window.__reallm.save().current?.resources['oil']);
-    await page.locator('[data-testid="starmap-depart"]').click();
-    await page.locator('[data-testid="confirm-yes"]').click();
+    await depart(page);
     await expect(page.locator('[data-testid="scene-label"]')).toHaveText('flight');
 
     // Fuel paid once, at the map (SPEC-010); the flight never touches it.
@@ -96,8 +95,7 @@ test.describe('recall on death', () => {
     await createPilot(page);
     expect(await go(page, 'station', {})).toBe(true);
     expect(await go(page, 'starmap', undefined)).toBe(true);
-    await page.locator('[data-testid="starmap-depart"]').click();
-    await page.locator('[data-testid="confirm-yes"]').click();
+    await depart(page);
     await expect(page.locator('[data-testid="scene-label"]')).toHaveText('flight');
     const oilInFlight = await page.evaluate(() => window.__reallm.save().current?.resources['oil']);
 
@@ -127,8 +125,7 @@ test.describe('arrival and landing', () => {
     await createPilot(page);
     expect(await go(page, 'station', {})).toBe(true);
     expect(await go(page, 'starmap', undefined)).toBe(true);
-    await page.locator('[data-testid="starmap-depart"]').click();
-    await page.locator('[data-testid="confirm-yes"]').click();
+    await depart(page);
     await expect(page.locator('[data-testid="scene-label"]')).toHaveText('flight');
 
     // Warp through launch and the whole 90 s cruise; Cinder-4 has no arrival
@@ -165,8 +162,7 @@ test.describe('flight on a phone', () => {
     await createPilot(page);
     expect(await go(page, 'station', {})).toBe(true);
     expect(await go(page, 'starmap', undefined)).toBe(true);
-    await page.locator('[data-testid="starmap-depart"]').tap();
-    await page.locator('[data-testid="confirm-yes"]').tap();
+    await depart(page, { tap: true });
     await expect(page.locator('[data-testid="scene-label"]')).toHaveText('flight');
 
     // A touch on the play surface flips the scheme and mounts the layer.
@@ -202,8 +198,7 @@ test.describe('holding pattern HUD', () => {
     });
     expect(await go(page, 'station', {})).toBe(true);
     expect(await go(page, 'starmap', undefined)).toBe(true);
-    await page.locator('[data-testid="starmap-depart"]').click();
-    await page.locator('[data-testid="confirm-yes"]').click();
+    await depart(page);
     await expect(page.locator('[data-testid="scene-label"]')).toHaveText('flight');
     await expect(page.locator('[data-testid="holding-banner"]')).toBeHidden();
 

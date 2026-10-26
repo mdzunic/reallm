@@ -488,6 +488,17 @@ export function activeFlightMission(save: Save, planet: PlanetId): MissionId | n
 }
 
 /**
+ * PLAN R31 (SPEC-074 §4.3): the star map's departure sheet opens unless it
+ * has nothing to offer — a route never flown, where `Skip the run` can only
+ * say "fly this run once" and the sheet's Depart was the one thing to press.
+ * There Depart pays and leaves at once. Every route flown before keeps the
+ * sheet, with its skip or the skip's refusal; a service-mode waiver keeps it.
+ */
+export function departSheetDue(skip: SkipResult, waived: boolean): boolean {
+  return waived || skip.ok || skip.reason !== 'never_flown';
+}
+
+/**
  * SPEC-032 §4.3: may the run to `planet` be skipped? Only a route the save has
  * landed on (`visits ≥ 1`), and never one an active flight-scene mission for
  * that planet *is* — `c4_s2` and `c5_m1` would otherwise complete by not
@@ -749,6 +760,15 @@ export class Flight {
     return this.#fuelBurn;
   }
 
+  /**
+   * PLAN R31 (SPEC-074 §4.2): a trip that flies its planet's first-trip field
+   * (SPEC-066 §4.9) is the tutorial trip. It burns no extra fuel off the line,
+   * so nothing it does can tow it home before anything has said the tank drains.
+   */
+  get tutorialTrip(): boolean {
+    return this.#field !== null;
+  }
+
   /** SPEC-069 §4.2: what ended the trip at the station — `null` while it runs or after a landing. */
   get recallCause(): RecallCause | null {
     return this.#recallCause;
@@ -869,7 +889,8 @@ export class Flight {
    */
   #burn(dt: number): void {
     const ship = this.ship;
-    const past = Math.max(0, this.offLine - COURSE.corridor) / FUEL.offlineRef;
+    // PLAN R31 (SPEC-074 §4.2): the tutorial trip burns only its base fuel.
+    const past = this.tutorialTrip ? 0 : Math.max(0, this.offLine - COURSE.corridor) / FUEL.offlineRef;
     this.#fuelBurn = FUEL.offlineBurn * past * past;
     if (this.#fastForwarding) return;
     ship.fuel -= this.#fuelBurn * dt;

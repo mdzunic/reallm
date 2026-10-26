@@ -5,7 +5,7 @@
 // of §4.1–§4.2 is gone (SPEC-071 supersedes it; its cases live in
 // `e2e/SPEC-071.spec.ts`).
 import { expect, test, type Page } from '@playwright/test';
-import { start } from './start';
+import { depart, start } from './start';
 
 const CREATION = {
   name: 'Vance',
@@ -76,12 +76,16 @@ async function openDepartSheet(page: Page, planet = 'cinder4'): Promise<void> {
 }
 
 test.describe('skippable runs', () => {
-  test('a route never landed on refuses the skip (4)', async ({ page }) => {
+  test('a route never landed on has no skip to offer, so Depart leaves at once (4; PLAN R31, SPEC-074 §4.3)', async ({ page }) => {
     await start(page);
     await createPilot(page, { visits: { cinder4: 0 } });
-    await openDepartSheet(page);
-    await expect(page.locator('[data-testid="depart-skip"]')).toBeDisabled();
-    await expect(page.locator('[data-testid="depart-skip-reason"]')).toHaveText('Autopilot needs a route — fly this run once.');
+    expect(await go(page, 'station', {})).toBe(true);
+    expect(await go(page, 'starmap', undefined)).toBe(true);
+    await page.locator('[data-testid="map-node-cinder4"]').click();
+    await page.locator('[data-testid="starmap-depart"]').click();
+    // The sheet would only have said "Autopilot needs a route — fly this run once."
+    await expect(page.locator('[data-testid="confirm-sheet"]')).toHaveCount(0);
+    await expect(page.locator('[data-testid="scene-label"]')).toHaveText('flight', { timeout: 20_000 });
   });
 
   test('a skip pays the fuel, shows the autopilot card and lands on the surface (5)', async ({ page }) => {
@@ -136,8 +140,10 @@ test.describe('skippable runs', () => {
   test('the pause menu hides the entry when the rule refuses', async ({ page }) => {
     await start(page);
     await createPilot(page, { oil: 200 });
-    await openDepartSheet(page);
-    await page.locator('[data-testid="confirm-yes"]').click();
+    expect(await go(page, 'station', {})).toBe(true);
+    expect(await go(page, 'starmap', undefined)).toBe(true);
+    // A route never flown departs on one Depart (PLAN R31, SPEC-074 §4.3).
+    await depart(page);
     await expect(page.locator('[data-testid="scene-label"]')).toHaveText('flight');
     await page.keyboard.press('Escape');
     await expect(page.locator('[data-testid="pause-menu"]')).toBeVisible();

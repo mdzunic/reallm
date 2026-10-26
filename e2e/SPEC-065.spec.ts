@@ -278,6 +278,11 @@ test('1–3. the pad terminal ships the oil above the reserve home, and the Depo
 test('4. a jump the depot can pay departs with no fuel refusal, and the station entry grants no subsidy (E119)', async ({ page }) => {
   await start(page, URL);
   await prepare(page, { oil: 0, depot: { oil: 40 } });
+  // A route flown once, so Depart opens the sheet that names the depot (PLAN R31, SPEC-074 §4.3).
+  await page.evaluate(() => {
+    const save = window.__reallm.save().current;
+    if (save !== null) save.progress.visits['cinder4'] = 1;
+  });
   await watchToasts(page);
   await station(page);
   // Cinder-4 costs 40: the hold and the depot together cover it, so no line plays.

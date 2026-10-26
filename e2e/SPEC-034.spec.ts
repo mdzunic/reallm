@@ -7,7 +7,7 @@
 // are pinned in node — `tests/systems/layout.test.ts`, `missions.test.ts`,
 // `defend.test.ts`, `tests/ui/surfaceHold.test.ts`, `tests/systems/gauntlet.test.ts`.
 import { expect, test, type Page } from '@playwright/test';
-import { start } from './start';
+import { depart, start } from './start';
 
 const SURFACE = '/?debug&scene=surface&planet=cinder4&seed=123';
 
@@ -182,8 +182,8 @@ test('5. the star map is veiled from the departure film to the flight scene', as
   const veil = page.locator('[data-testid="depart-veil"]');
   const panel = page.locator('[data-testid="starmap-depart"]');
   await expect(veil).toHaveCount(0);
-  await panel.click();
-  await page.locator('[data-testid="confirm-yes"]').click();
+  // A first trip departs on one Depart (PLAN R31, SPEC-074 §4.3).
+  await depart(page);
 
   // From the film's end to the flight scene, the map is behind black — and it
   // never reads back the fuel it has just paid as a shortfall (§4.16).

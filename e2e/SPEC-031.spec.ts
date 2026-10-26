@@ -326,7 +326,12 @@ test('wallet: the strip follows the save across tabs and purchases (AC-26, AC-28
   await page.locator('[data-testid="confirm-yes"]').click();
   await expect(tokens).not.toContainText('340');
 
-  // The depart sheet names the tank (AC-31).
+  // The depart sheet names the tank (AC-31). A route flown once, since a
+  // first trip departs with no sheet (PLAN R31, SPEC-074 §4.3).
+  await page.evaluate(() => {
+    const save = window.__reallm.save().current;
+    if (save !== null) save.progress.visits['cinder4'] = 1;
+  });
   expect(await go(page, 'starmap', undefined)).toBe(true);
   await page.locator('[data-testid="starmap-depart"]').click();
   await expect(page.locator('.sheet-body')).toContainText(/Fuel: \d+ oil, charged now — you hold 180\. The return trip is free\./);

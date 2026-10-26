@@ -414,3 +414,19 @@ export async function frames(page: Page, count = 2): Promise<void> {
     for (let i = 0; i < n; i++) await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
   }, count);
 }
+
+/**
+ * PLAN R31 (SPEC-074 §4.3): Depart on the star map, and the departure sheet's
+ * Depart when one opens. A route never flown leaves on the first press; any
+ * other opens the sheet. The sheet is built in the click's own handler, so it
+ * is in the DOM, or not, when the click resolves.
+ */
+export async function depart(page: Page, options: { tap?: boolean } = {}): Promise<void> {
+  const button = page.locator('[data-testid="starmap-depart"]');
+  if (options.tap === true) await button.tap();
+  else await button.click();
+  const yes = page.locator('[data-testid="confirm-yes"]');
+  if ((await yes.count()) === 0) return;
+  if (options.tap === true) await yes.tap();
+  else await yes.click();
+}

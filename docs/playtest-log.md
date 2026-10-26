@@ -2592,3 +2592,32 @@ The retry ran `SPEC-014`, `020`, `034`, `039`, `043`, `044`, `045`, `049` and `0
 - [ ] the board and the class cards read at a glance, and a hover or long press shows a chip's full line;
 - [ ] the star map's planets are round and in colour on both;
 - [ ] record a screenshot of each here.
+
+## PLAN R31 — the first ten minutes: SPEC-074 (M7s)
+
+- **Build:** `feat/first-ten-minutes`, untagged
+- **Devices:**
+  - desktop: headless full Chromium on the Mac's GPU (Playwright, `--use-angle=metal`), 1440 × 900 and 1280 × 720, `high` and `medium`
+  - phone: the Pixel 5 profile on its side, 844 × 390 at 2×, with touch, headless
+  - hardware: _not run_ (owed, below)
+
+Recorded on the branch: `npm run check` (144 files, 3,640 tests) and the full e2e suite, 4 workers: 798 passed, 6 skipped, 1 failed — SPEC-034's veil case, which clicked the old sheet on a first trip and passes after the fix. The frames are in `docs/screenshots/r31/`.
+
+| Area | What the headless run showed |
+|---|---|
+| First fight | Dry Land's storm started `cinder4_first_storm`: three Dust Skitters came in from 23 m and were on the salvager 5 s after the stage began; auto-fire killed three, and the salvager lost 4 HP. The first landing's ramp still read 1 (`dry-land-first-storm.jpg`) |
+| Tutorial trip | A first trip parked 150 m off the line showed no `is-burning`, the tank kept its base burn, and ARIA's strip said "Relay keeps a first run's tank full…" once the steer tip had gone. The trip stayed in `cruise` |
+| One Depart | On a new save the star map's Depart went straight to the flight with no sheet. A route flown once still opens the sheet with Skip the run |
+| Creation | At 1440 × 900 the class cards span the form and the looks sit beside the build; Confirm's bottom is at 842 of 900 with no scroll. At 844 × 390 Back and Confirm stay pinned at the foot while the form scrolls (`creation-1440x900.jpg`, `creation-844x390.jpg`) |
+| Phone station | At 844 × 390 the build label is gone, and a line docks over the header: Dry Land's row and its Accept stay clear (`station-844x390-line.jpg`) |
+| Flight HUD | No Lv or XP in flight. On touch MSL is 64 px in the corner, with + over − beside it (`flight-844x390-touch.jpg`) |
+
+**Owed on hardware.** On the laptop and the reference phone, at `medium`:
+
+- [ ] a new save meets the first skitters in Dry Land's storm, about a minute after landing;
+- [ ] a first trip flown by mouse, by keys and by touch, steered off the line on purpose, lands without a tow and shows the corridor tip;
+- [ ] a first trip departs on one Depart; a second trip there opens the sheet;
+- [ ] creation's Confirm is on screen at the laptop's size, and pinned on the phone;
+- [ ] the phone station's opening lines leave the board clear;
+- [ ] MSL reaches under the thumb in flight, on both stick sides;
+- [ ] a screenshot of each, recorded here.

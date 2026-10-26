@@ -4,7 +4,7 @@
 // and lands at once. Production builds do not carry it (`import.meta.env.DEV`);
 // this suite runs against the dev server, like every other.
 import { expect, test, type Page } from '@playwright/test';
-import { start } from './start';
+import { depart, start } from './start';
 
 const CREATION = {
   name: 'Vance',
@@ -34,8 +34,7 @@ test('the dev skip button flies the trip out and lands with the visit counted', 
   }, CREATION);
   expect(await go(page, 'station', {})).toBe(true);
   expect(await go(page, 'starmap', undefined)).toBe(true);
-  await page.locator('[data-testid="starmap-depart"]').click();
-  await page.locator('[data-testid="confirm-yes"]').click();
+  await depart(page);
   await expect(page.locator('[data-testid="scene-label"]')).toHaveText('flight');
 
   await page.locator('[data-testid="dev-skip-flight"]').click();
@@ -64,8 +63,7 @@ test('the dev skip finishes the flight mission it skipped, and the pad has work'
   expect(await go(page, 'starmap', undefined)).toBe(true);
   await page.locator('[data-testid="map-node-hive"]').click();
   await expect(page.locator('[data-testid="starmap-info-name"]')).toHaveText('The Hive');
-  await page.locator('[data-testid="starmap-depart"]').click();
-  await page.locator('[data-testid="confirm-yes"]').click();
+  await depart(page);
   await expect(page.locator('[data-testid="scene-label"]')).toHaveText('flight');
 
   await page.locator('[data-testid="dev-skip-flight"]').click();

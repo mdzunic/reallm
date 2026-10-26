@@ -13,6 +13,7 @@
 // fly to (`starmapPreselect`), with Depart focused, and a ◆ marks every world
 // with work waiting.
 import * as THREE from 'three';
+import type { Save } from '@/core/Save';
 import type { GameServices } from '@/core/Services';
 import type { SceneParams } from '@/core/StateMachine';
 import {
@@ -29,7 +30,7 @@ import { GLYPHS } from '@/data/glossary';
 import { Economy } from '@/systems/Economy';
 import { Progression } from '@/systems/Progression';
 import { contactFilm, departureDue, departureKey } from '@/systems/StoryBeats';
-import { activeFlightMission, runSkip } from '@/systems/Flight';
+import { activeFlightMission, departSheetDue, runSkip } from '@/systems/Flight';
 import { duration } from '@/systems/Format';
 import {
   departFuelText,
@@ -638,6 +639,13 @@ export class StarmapScene extends UiScene<'starmap'> {
       }
       return true;
     };
+    // PLAN R31 (SPEC-074 §4.3, E144): with no choice to offer, the sheet's
+    // Depart was the only thing on it — the charge and the active mission are
+    // already on the info card — so Depart pays and leaves at once.
+    if (!departSheetDue(skip, waived)) {
+      if (pay()) void this.#leave(planet, data, false);
+      return;
+    }
     void choiceSheet(
       this.ui,
       {
@@ -653,36 +661,41 @@ export class StarmapScene extends UiScene<'starmap'> {
       { onPrimary: pay, onSecondary: pay },
     ).then(async (choice) => {
       if (choice === null) return;
-      this.#leaving = true;
-      this.#renderInfo(); // AC-56: Depart greys out for the ride
-      // SPEC-023 §4.1: the departure film plays here — after the fuel is paid,
-      // before the flight — on the first trip to a world. The star map has
-      // nothing to hold and no timeline of its own, and the Depart button is
-      // already disabled for the ride, so the film is simply awaited. The
-      // flight scene starts its own bed, so the film's music fades to nothing.
-      // SPEC-063 §4.4: the contact planet's film follows under the same check
-      // — "Wreckers" after "Outbound" to Vetra — and each skips on its own.
-      const beats = director(this.services);
-      if (beats.enabled && departureDue(planet, data.progress.visits, beats.session)) {
-        beats.session.add(departureKey(planet));
-        await beats.playFilm('departure', { musicAfter: null });
-        const film = contactFilm(planet);
-        if (film !== null) await beats.playFilm(film, { musicAfter: null });
+      await this.#leave(planet, data, choice === 'secondary');
+    });
+  }
+
+  /** Paid for: the departure films, the veil, then the flight (`skipRun` for SPEC-032's skip). */
+  async #leave(planet: PlanetId, data: Save, skipRun: boolean): Promise<void> {
+    this.#leaving = true;
+    this.#renderInfo(); // AC-56: Depart greys out for the ride
+    // SPEC-023 §4.1: the departure film plays here — after the fuel is paid,
+    // before the flight — on the first trip to a world. The star map has
+    // nothing to hold and no timeline of its own, and the Depart button is
+    // already disabled for the ride, so the film is simply awaited. The
+    // flight scene starts its own bed, so the film's music fades to nothing.
+    // SPEC-063 §4.4: the contact planet's film follows under the same check
+    // — "Wreckers" after "Outbound" to Vetra — and each skips on its own.
+    const beats = director(this.services);
+    if (beats.enabled && departureDue(planet, data.progress.visits, beats.session)) {
+      beats.session.add(departureKey(planet));
+      await beats.playFilm('departure', { musicAfter: null });
+      const film = contactFilm(planet);
+      if (film !== null) await beats.playFilm(film, { musicAfter: null });
+    }
+    // SPEC-034 §4.16: from the moment the film settles until the flight scene
+    // has entered, the star map is behind a black veil. It used to re-render
+    // for five seconds while the next scene loaded — and read the fuel it had
+    // just paid as a shortfall, so the map looked broken. With films off the
+    // veil is mounted at the same point.
+    this.#mountDepartVeil();
+    const params = skipRun ? { destination: planet, skipRun: true } : { destination: planet };
+    void this.services.go('flight', params).then((went) => {
+      if (!went) {
+        this.#leaving = false;
+        this.#removeDepartVeil();
+        this.#renderInfo();
       }
-      // SPEC-034 §4.16: from the moment the film settles until the flight scene
-      // has entered, the star map is behind a black veil. It used to re-render
-      // for five seconds while the next scene loaded — and read the fuel it had
-      // just paid as a shortfall, so the map looked broken. With films off the
-      // veil is mounted at the same point.
-      this.#mountDepartVeil();
-      const params = choice === 'secondary' ? { destination: planet, skipRun: true } : { destination: planet };
-      void this.services.go('flight', params).then((went) => {
-        if (!went) {
-          this.#leaving = false;
-          this.#removeDepartVeil();
-          this.#renderInfo();
-        }
-      });
     });
   }
 

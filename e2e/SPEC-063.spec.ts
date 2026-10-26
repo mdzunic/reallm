@@ -22,7 +22,7 @@
 // dialogue queue — before the lines have played; the contact has fired by
 // then, and the trip runs on underneath.
 import { expect, test, type Page } from '@playwright/test';
-import { start } from './start';
+import { depart as departNow, start } from './start';
 
 test.use({ reducedMotion: 'no-preference' });
 
@@ -172,11 +172,10 @@ async function newSaveAtStarmap(page: Page, setup: Setup): Promise<void> {
   await settled(page, 'starmap');
 }
 
-/** Select `planet` on the map, Depart, confirm — the fuel is paid. */
+/** Select `planet` on the map, Depart, and confirm when a sheet opens — the fuel is paid. */
 async function depart(page: Page, planet: string): Promise<void> {
   await page.locator(`[data-testid="map-node-${planet}"]`).click();
-  await page.locator('[data-testid="starmap-depart"]').click();
-  await page.locator('[data-testid="confirm-yes"]').click();
+  await departNow(page);
 }
 
 /** Waits for `id` to be the film on screen, then skips it past the pointer grace (SPEC-022 §4.5). */
