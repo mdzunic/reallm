@@ -9,9 +9,21 @@
 // Per-frame discipline (SPEC-027 AC-27): a marker moves through `transform`
 // alone and rewrites its label only when the rounded text changes; the
 // viewport is measured on `resize`, never in the loop.
+//
+// Audit 2026-10-26 UX-09: the header promised the waypoint's HUD boxes, but
+// `bounds` was never filled, so an edge arrow could sit on the vitals or the
+// touch buttons. The flight's plates are measured now, on `resize` and from a
+// ResizeObserver, as the waypoint's are.
 import { distanceText } from '@/systems/Guidance';
 import { el, testId } from '@/ui/dom';
-import { placeWaypoint, waypointBounds, type WaypointBounds } from '@/ui/Waypoint';
+import { observeHud, placeWaypoint, pushHudBoxes, waypointBounds, type WaypointBounds } from '@/ui/Waypoint';
+
+/**
+ * UX-09: the flight HUD's plates — the vitals (top left), the trip's progress
+ * with its storm and holding banners (top centre), the top-right column, ARIA's
+ * tip strip, and the touch row of throttle and missile buttons.
+ */
+export const FLIGHT_HUD_PLATES: readonly string[] = ['.hud .hud-tl', '.hud .hud-tc', '.hud .hud-tr', '.aria-hint', '.touch-buttons'];
 
 /** SPEC-069 §4.5: the most signal markers drawn at once (a trip plans at most five). */
 export const MAX_SIGNAL_MARKERS = 5;
@@ -110,10 +122,18 @@ export class FlightMarkers {
   #height = 0;
   /** Signals placed since `beginSignals()`. */
   #used = 0;
+  readonly #hud: ParentNode | null;
+  #observer: ResizeObserver | null = null;
+  #disposed = false;
 
-  /** `name` is the destination's, for the course marker's label. */
-  constructor(host: HTMLElement, name: string) {
+  /**
+   * `name` is the destination's, for the course marker's label. `hud` is
+   * where the flight HUD and the touch row live (the UI root); with none, the
+   * markers keep the plain inset ellipse.
+   */
+  constructor(host: HTMLElement, name: string, hud: ParentNode | null = null) {
     this.#name = name;
+    this.#hud = hud;
     this.#course = new Marker(host, 'flight-course');
     this.#course.root.classList.add('flight-course');
     for (let i = 0; i < MAX_SIGNAL_MARKERS; i++) {
@@ -123,6 +143,15 @@ export class FlightMarkers {
     }
     this.measure();
     globalThis.addEventListener('resize', this.measure);
+    // The scene mounts ARIA's tip strip just after the markers, so the watch
+    // starts once this mount has run.
+    if (hud !== null) {
+      queueMicrotask(() => {
+        if (this.#disposed) return;
+        this.#observer = observeHud(hud, FLIGHT_HUD_PLATES, this.measure);
+        this.measure();
+      });
+    }
   }
 
   /**
@@ -175,14 +204,19 @@ export class FlightMarkers {
   }
 
   dispose(): void {
+    this.#disposed = true;
     globalThis.removeEventListener('resize', this.measure);
+    this.#observer?.disconnect();
+    this.#observer = null;
     this.#course.root.remove();
     for (const marker of this.#signals) marker.root.remove();
   }
 
-  /** The viewport, measured on `resize` only. */
+  /** The viewport and the HUD's plates, measured on `resize` and from the observer only. */
   readonly measure = (): void => {
     this.#width = globalThis.innerWidth;
     this.#height = globalThis.innerHeight;
+    this.bounds.boxes.length = 0;
+    if (this.#hud !== null) pushHudBoxes(this.#hud, FLIGHT_HUD_PLATES, this.bounds.boxes);
   };
 }

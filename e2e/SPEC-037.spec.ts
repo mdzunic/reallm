@@ -379,25 +379,29 @@ test('7. at the pad the prompt sits centred above the bar and leads with an E ca
 
 // ------------------------------------------------------------------ 8: wallet
 
-test.describe('8. the wallet strip lights on a change and dims 5 s later (§4.2)', () => {
+test.describe('8. the wallet strip lights on a change and goes quiet 5 s later (§4.2)', () => {
   test.use({ reducedMotion: 'reduce' });
 
-  test('raising oil by 10 lights it, and six seconds on it is back at 0.6', async ({ page }) => {
+  test('raising oil by 10 lights its edge, six seconds on it is quiet again, and it never fades', async ({ page }) => {
     // A bound save — a `?scene=` jump plays on an in-memory one the bridge cannot reach.
     await start(page, '/?debug&seed=123');
     await goWithSave(page, 'surface', { planet: 'cinder4' });
     await settle(page);
     const wallet = page.getByTestId('hud-wallet');
-    await expect(wallet).toHaveCSS('opacity', '0.6', { timeout: 15_000 });
+    // Audit 2026-10-26 UX-04: full opacity at rest; at 0.6 the counts read about 2.2:1 over snow.
+    await expect(wallet).not.toHaveClass(/is-lit/, { timeout: 15_000 });
+    await expect(wallet).toHaveCSS('opacity', '1');
     await page.evaluate(() => {
       const data = window.__reallm.save().current;
       if (data === null) throw new Error('no save');
       data.resources['oil'] = (data.resources['oil'] ?? 0) + 10;
     });
-    await expect(wallet).toHaveCSS('opacity', '1');
+    await expect(wallet).toHaveClass(/is-lit/);
+    await expect(wallet).toHaveCSS('border-top-color', 'rgb(245, 166, 35)');
     await page.waitForTimeout(6000);
     // Five seconds of *game* time; a starved tab stretches it past the wall's.
-    await expect(wallet).toHaveCSS('opacity', '0.6', { timeout: 15_000 });
+    await expect(wallet).not.toHaveClass(/is-lit/, { timeout: 15_000 });
+    await expect(wallet).toHaveCSS('opacity', '1');
   });
 });
 

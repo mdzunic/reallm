@@ -4,6 +4,8 @@
 //      quick bar — on the keyboard at 1280 × 720, and in the thumb arc on a
 //      touch phone at 844 × 390. The geometry is pinned in node
 //      (`tests/ui/waypoint.test.ts`); this reads the boxes the browser drew.
+//      1b. Audit 2026-10-26 UX-09: nor on any other plate — the storm warning
+//      in the top centre, the flight's vitals in the top left.
 //   2. P-09: the difficulty segments run Story · Casual · Normal · Hard.
 //   3. P-16: the class cards and the portraits have names a screen reader says.
 //   4. P-15: the New Game sheet dims the menu, and Cancel or the dim close it.
@@ -162,6 +164,70 @@ test.describe('1. V-04: the waypoint keeps off the quick bar', () => {
         expect(intersects(read.label, box), `the distance is on ${name}`).toBe(false);
       }
     });
+  });
+});
+
+// ------------------------------------- 1b: audit 2026-10-26 UX-09, every plate
+
+test.describe('1b. UX-09: the markers keep off every HUD plate', () => {
+  test('at 1280 × 720, a target due north draws its arrow under the storm warning, not on it', async ({ page }) => {
+    test.setTimeout(90_000);
+    await page.setViewportSize({ width: 1280, height: 720 });
+    await start(page, '/?debug&scene=surface&planet=cinder4&seed=123');
+    await expect(page.getByTestId('scene-label')).toHaveText('surface');
+    await expect(page.getByTestId('transition-fade')).toHaveCSS('pointer-events', 'none');
+    await dismiss(page);
+    await page.getByTestId('surface-goto-pad').click();
+    // A storm puts its warning under the wallet, in the top centre.
+    await page.getByTestId('surface-storm').click();
+    await expect(page.getByTestId('hud-weather')).toBeVisible({ timeout: 10_000 });
+    // Walk down the screen until the pad lies due north of the frame.
+    await page.keyboard.down('KeyS');
+    try {
+      await expect
+        .poll(
+          async () => {
+            const read = await waypointBoxes(page);
+            return read.state === 'edge' && centre(read.mark).y < 720 / 2 - 150 && Math.abs(centre(read.mark).x - 640) < 150;
+          },
+          { timeout: 20_000 },
+        )
+        .toBe(true);
+    } finally {
+      await page.keyboard.up('KeyS');
+    }
+    await frames(page, 3);
+    const read = await waypointBoxes(page);
+    const top = await boxOf(page, '.hud .hud-tc');
+    expect(read.state).toBe('edge');
+    expect(intersects(read.mark, top), 'the arrow is on the wallet or the storm warning').toBe(false);
+    expect(intersects(read.label, top), 'the distance is on the wallet or the storm warning').toBe(false);
+  });
+
+  test('in flight, the course arrow pointing up and left keeps off the vitals', async ({ page }) => {
+    test.setTimeout(60_000);
+    await page.setViewportSize({ width: 1280, height: 720 });
+    await page.addInitScript(() => localStorage.setItem('reallm:settings', JSON.stringify({ autoFire: 'off', flightMouseSteer: false })));
+    await start(page, '/?debug&scene=flight&planet=cinder4&quality=medium');
+    await page.waitForFunction(() => (window as unknown as { __reallmFlight?: unknown }).__reallmFlight !== undefined);
+    type Hook = { warp(seconds: number): void; clearSky(): void; park(x: number, y: number): void };
+    await page.evaluate(() => {
+      const flight = (window as unknown as { __reallmFlight: Hook }).__reallmFlight;
+      flight.warp(3.1);
+      flight.clearSky();
+      // Right of the line and below it: the line lies up and to the left.
+      flight.park(150, -90);
+    });
+    const course = page.getByTestId('flight-course');
+    await expect(course).toHaveAttribute('data-state', 'edge');
+    await frames(page, 3);
+    const mark = await boxOf(page, '[data-testid="flight-course"] .flight-marker-mark');
+    const label = await boxOf(page, '[data-testid="flight-course"] .flight-marker-label');
+    const vitals = await boxOf(page, '.hud .hud-tl');
+    expect(centre(mark).x, 'the arrow points left').toBeLessThan(640);
+    expect(centre(mark).y, 'the arrow points up').toBeLessThan(360);
+    expect(intersects(mark, vitals), 'the arrow is on the vitals').toBe(false);
+    expect(intersects(label, vitals), 'the label is on the vitals').toBe(false);
   });
 });
 

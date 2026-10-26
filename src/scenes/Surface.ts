@@ -6044,7 +6044,8 @@ export class SurfaceScene extends UiScene<'surface'> {
     const missions = this.#missions;
     if (missions === null) return;
     const rows: HTMLElement[] = [];
-    rows.push(el('p', 'terminal-title', 'PAD TERMINAL'));
+    // tabindex −1: out of the Tab order, but somewhere for focus to rest after an Accept.
+    rows.push(testId(h('p', { class: 'terminal-title', tabindex: -1 }, 'PAD TERMINAL'), 'terminal-title'));
 
     const save = this.#save;
     // SPEC-043 §4.3: a replay this landing runs as a contract says so — read
@@ -6247,6 +6248,11 @@ export class SurfaceScene extends UiScene<'surface'> {
     // SPEC-044 §4.7: the board's toast, at the pad too.
     this.ui.toast(acceptedText(def.title, replay, contract === null ? null : CONTRACTS[contract].name), 'good');
     this.#renderTerminal();
+    // Audit 2026-10-26 DK-01: the accepted row is gone, and `keepFocus` would
+    // hand its focus to the next Accept — where the Enter a player presses for
+    // the accept line lands, taking that mission too, and the next. Focus
+    // rests on the terminal's title instead; Tab moves on from there.
+    this.#terminal?.querySelector<HTMLElement>('[data-testid="terminal-title"]')?.focus({ preventScroll: true });
   }
 
   /** §4.11: confirm when a timed stage is running, then save and go. */
