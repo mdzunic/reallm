@@ -72,6 +72,8 @@ export class SettingsPanel {
   readonly #ui: UiRoot;
   readonly #deps: SettingsDeps;
   readonly #root: HTMLDivElement;
+  /** SPEC-073 §4.3: the dim under the sheet, shown and hidden with it. */
+  readonly #scrim = el('div', 'settings-scrim is-hidden');
   #open = false;
   /** SPEC-036 §4.4: this panel's back-stack entry while it is open. */
   #releaseBack: (() => void) | null = null;
@@ -85,6 +87,9 @@ export class SettingsPanel {
     this.#root.setAttribute('role', 'dialog');
     this.#root.setAttribute('aria-label', 'Settings');
     this.#root.classList.add('is-hidden');
+    // SPEC-073 §4.3: a sheet sits on a scrim over the frame behind it — the
+    // dim only, so nothing under it changes how it is pressed.
+    ui.mount(this.#scrim, 'overlay');
     ui.mount(this.#root, 'overlay');
   }
 
@@ -96,6 +101,7 @@ export class SettingsPanel {
     this.#open = true;
     this.#render();
     this.#root.classList.remove('is-hidden');
+    this.#scrim.classList.remove('is-hidden');
     // SPEC-036 §4.4: Escape and the system Back close the panel, and only it.
     this.#releaseBack ??= this.#ui.pushBack(() => this.hide());
     // SPEC-044 §4.3: a modal on Close; closing gives focus back to what opened it.
@@ -108,6 +114,7 @@ export class SettingsPanel {
   hide(): void {
     this.#open = false;
     this.#root.classList.add('is-hidden');
+    this.#scrim.classList.add('is-hidden');
     this.#releaseBack?.();
     this.#releaseBack = null;
     this.#releaseModal();
@@ -118,6 +125,7 @@ export class SettingsPanel {
     this.#releaseBack = null;
     this.#releaseModal();
     this.#ui.unmount(this.#root);
+    this.#ui.unmount(this.#scrim);
   }
 
   #releaseModal(): void {

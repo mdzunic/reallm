@@ -10,6 +10,7 @@ import { RESOURCE_IDS, type ResourceId } from '@/data/index';
 import { walletModel } from '@/systems/UiHelpers';
 import { el, testId } from '@/ui/dom';
 import { RESOURCE_GLYPHS } from '@/ui/glyphs';
+import { glyphEl } from '@/ui/iconset';
 
 interface WalletCell {
   readonly root: HTMLSpanElement;
@@ -83,7 +84,7 @@ export class Wallet {
     const root = testId(el('span', 'wallet-cell'), `wallet-${id}`);
     const value = el('span', 'wallet-value');
     const cap = withCap ? el('span', 'wallet-cap') : null;
-    root.append(el('span', 'glyph', glyph), value);
+    root.append(glyphEl(glyph), value);
     if (cap !== null) root.append(cap);
     this.root.append(root);
     const cell: WalletCell = { root, value, cap };

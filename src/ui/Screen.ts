@@ -7,7 +7,9 @@
 // SPEC-044 §4.11: the rail's sections are a real tablist — arrow keys between
 // them, the panel their tabpanel — and its actions (Star Map, Settings, Quit)
 // follow a rule as plain buttons: a tab that navigates away is not a tab.
+import { brandHeading, reticle } from '@/ui/brand';
 import { el, h, keepFocus, testId } from '@/ui/dom';
+import { iconEl, type IconName } from '@/ui/iconset';
 
 export type ScreenId = 'menu' | 'creation' | 'station' | 'starmap' | 'pause';
 
@@ -20,6 +22,8 @@ export interface ScreenTab {
   readonly kind?: 'section' | 'action';
   /** SPEC-044 §4.6: an action styled as the screen's next step. */
   readonly primary?: boolean;
+  /** SPEC-073 §4.5: the tab's picture, before its label (over it on touch). */
+  readonly icon?: IconName;
   onSelect(): void;
 }
 
@@ -86,6 +90,12 @@ export function tabPanelId(id: ScreenId): string {
   return `${id}-panel`;
 }
 
+/** SPEC-073 §4.5: a tab's icon (when it has one) and its label, the label in its own span so it can wrap. */
+function tabFace(tab: ScreenTab): (HTMLElement | string)[] {
+  if (tab.icon === undefined) return [tab.label];
+  return [iconEl(tab.icon), el('span', 'screen-tab-label', tab.label)];
+}
+
 /**
  * SPEC-044 §4.11: the rail — the `section` tabs as a `role="tablist"` (roving
  * focus: `tabindex` 0 on the selected tab, −1 on the rest; arrows, Home and End
@@ -112,7 +122,7 @@ function railChildren(id: ScreenId, tabs: readonly ScreenTab[]): HTMLElement[] {
             tabindex: tab === selected ? 0 : -1,
             click: () => tab.onSelect(),
           },
-          tab.label,
+          ...tabFace(tab),
         ),
         tab.id,
       ),
@@ -153,7 +163,7 @@ function railChildren(id: ScreenId, tabs: readonly ScreenTab[]): HTMLElement[] {
         h(
           'button',
           { class: `ui-btn screen-action${tab.primary === true ? ' is-primary' : ''}`, type: 'button', click: () => tab.onSelect() },
-          tab.label,
+          ...tabFace(tab),
         ),
         tab.id,
       ),
@@ -167,7 +177,11 @@ export function createScreen(options: ScreenOptions): Screen {
   const root = testId(el('div', `screen screen-${options.id}${options.wide === true ? ' is-wide' : ''}`), 'screen');
   const frame = el('div', 'screen-frame');
 
-  const title = h('h1', { class: 'screen-title' }, options.title ?? screenTitle(options.id));
+  // SPEC-073 §4.1: the menu's title is the drawn lockup; every other title
+  // starts with the reticle. The heading's text is the title either way.
+  const title = h('h1', { class: 'screen-title' });
+  if (options.id === 'menu' && options.title === undefined) brandHeading(title);
+  else title.append(reticle('screen-mark'), options.title ?? screenTitle(options.id));
   const channel = el('p', 'screen-channel');
   const headText = el('div', 'screen-head-text');
   headText.append(title, channel);

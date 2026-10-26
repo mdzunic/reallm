@@ -32,11 +32,14 @@ import {
   abandonMission,
   acceptedText,
   acceptMission,
+  bonusChip,
   bonusLine,
+  bossDropChip,
   bossDropText,
   contractLabel,
   missionStatus,
   needsLine,
+  needsShort,
   pinMission,
   pinnedMission,
   rewardsText,
@@ -46,6 +49,7 @@ import {
 } from '@/systems/UiHelpers';
 import { confirmSheet } from '@/ui/ConfirmSheet';
 import { el, h, keepFocus, testId, type UiRoot } from '@/ui/dom';
+import { glyphNodes, iconEl, type IconName } from '@/ui/iconset';
 
 export { pinnedMission } from '@/systems/UiHelpers';
 
@@ -64,6 +68,24 @@ export interface BoardDeps {
 }
 
 const MISSION_IDS = Object.keys(MISSIONS) as MissionId[];
+
+/** SPEC-073 §4.6: the bonus chip's icon — a clock for par, a heart for no deaths. */
+const BONUS_ICONS: Readonly<Record<NonNullable<MissionDef['bonus']>['kind'], IconName>> = {
+  par: 'timer',
+  no_death: 'health',
+  no_shelter: 'hazard',
+  elites: 'boss',
+};
+
+/** SPEC-073 §4.6: the biome in the planet head's words. */
+const BIOME_WORDS: Readonly<Record<(typeof PLANETS)[PlanetId]['biome'], string>> = {
+  desert: 'Desert',
+  ice: 'Ice',
+  jungle: 'Jungle ruins',
+  volcanic: 'Volcanic',
+  hive: 'Hive',
+  temperate: 'Temperate',
+};
 
 /**
  * SPEC-035 §4.12 — the row order inside a planet. A replay sorting above new
@@ -129,7 +151,7 @@ export class MissionBoard {
         h(
           'section',
           { class: 'board-group' },
-          h('p', { class: 'board-planet' }, PLANETS[planet].name),
+          this.#planetHead(planet, ordered),
           ...rows,
           done.length === 0 ? null : this.#fold(planet, done),
         ),
@@ -138,6 +160,27 @@ export class MissionBoard {
     const board = testId(el('div', 'board'), 'mission-board');
     board.append(...groups);
     this.#container.replaceChildren(board);
+  }
+
+  /**
+   * SPEC-073 §4.6: the planet a group's missions are on — its disc in the
+   * planet's own colours, its name, `Chapter N · biome`, and what is open.
+   */
+  #planetHead(planet: PlanetId, missions: readonly { readonly status: MissionStatus }[]): HTMLElement {
+    const def = PLANETS[planet];
+    const { sky, ground, accent } = def.surface.palette;
+    const disc = h('span', { class: 'board-planet-disc', 'aria-hidden': 'true' });
+    disc.style.background = `radial-gradient(circle at 34% 30%, ${sky}, ${ground} 55%, ${accent})`;
+    const open = missions.filter((m) => m.status === 'available' || m.status === 'active').length;
+    const locked = missions.filter((m) => m.status === 'locked').length;
+    return h(
+      'div',
+      { class: 'board-planet' },
+      disc,
+      h('span', { class: 'board-planet-name' }, def.name),
+      h('span', { class: 'board-planet-chapter' }, `Chapter ${def.chapter} · ${BIOME_WORDS[def.biome]}`),
+      h('span', { class: 'board-planet-count' }, `${open} open · ${locked} locked`),
+    );
   }
 
   /** SPEC-044 §4.11: `Completed (<n>)`, closed by default; the player's open state persists. */
@@ -198,35 +241,50 @@ export class MissionBoard {
       best === undefined ? null : testId(h('span', { class: 'board-best' }, `Best ${timeText(best)}`), `mission-${def.id}-best`),
       // SPEC-044 §4.11: words, never the status id. A contract row is done
       // work offered again on SPEC-043's own terms, which its button states.
-      h('span', { class: 'board-status' }, contract === null ? STATUS_LABELS[status] : STATUS_LABELS.done),
     );
-    row.append(head);
+    // SPEC-073 §4.6: one line — the head, then the rewards and the chips,
+    // then the status (or, on a locked row, what it is waiting for).
+    const line = el('div', 'board-line');
+    row.append(line);
+    line.append(head);
 
     // AC-31: rewards, always visible; halved and marked on a replay row, and
     // a contract's own payout on a contract (SPEC-043 §4.3) — SPEC-066 §4.5:
     // with a boss mission's half token share.
     const rewards = rewardsText(def.rewards, status === 'replayable', contract !== null, contractTokenFraction(def));
-    row.append(h('p', { class: 'board-rewards' }, rewards === '' ? '—' : rewards));
-    // SPEC-043 §4.2: the bonus — what it asks and what it pays — on every row that has one.
+    line.append(h('p', { class: 'board-rewards' }, ...glyphNodes(rewards === '' ? '—' : rewards)));
+    // SPEC-043 §4.2: the bonus — what it asks and what it pays — on every row
+    // that has one; SPEC-073 §4.6: as a chip, the full line its title.
     if (def.bonus !== undefined) {
-      row.append(testId(h('p', { class: 'board-bonus' }, bonusLine(def.bonus)), `mission-${def.id}-bonus`));
+      line.append(
+        testId(
+          h('span', { class: 'board-chip board-bonus', title: bonusLine(def.bonus) }, iconEl(BONUS_ICONS[def.bonus.kind]), bonusChip(def.bonus)),
+          `mission-${def.id}-bonus`,
+        ),
+      );
     }
     // SPEC-039 §4.6: a boss mission says what its boss drops — the piece on a
     // first kill the save does not own, else the lithium in its place.
     const drop = bossDropText(data, def);
-    if (drop !== null) row.append(testId(h('p', { class: 'board-drop' }, drop), `mission-${def.id}-drop`));
+    if (drop !== null) {
+      line.append(
+        testId(h('span', { class: 'board-chip board-drop', title: drop }, iconEl('boss'), bossDropChip(drop)), `mission-${def.id}-drop`),
+      );
+    }
+    line.append(h('span', { class: 'board-status' }, contract === null ? STATUS_LABELS[status] : STATUS_LABELS.done));
+
+    if (status === 'locked') {
+      // AC-35: say what is missing, in the data's own order — SPEC-044 §4.11's
+      // one grammar, shortened by SPEC-073 §4.6 to `After Black Gold`.
+      const missing = this.#deps.economy.missingRequirements(def.requires);
+      line.append(h('p', { class: 'board-locked', title: needsLine(missing) }, iconEl('lock'), needsShort(missing)));
+    }
 
     if (this.#briefOpen(def, status)) {
       row.append(h('p', { class: 'board-brief' }, def.brief));
     }
 
-    if (status === 'locked') {
-      // AC-35: say what is missing, in the data's own order — SPEC-044 §4.11:
-      // in one grammar, `Needs: Complete 'Black Gold' · Level 3`.
-      const missing = this.#deps.economy.missingRequirements(def.requires);
-      row.append(h('p', { class: 'board-locked' }, needsLine(missing)));
-      return row;
-    }
+    if (status === 'locked') return row;
 
     if (status === 'active') {
       // SPEC-044 §4.6: the next step, named — and a flight mission says where it runs.
@@ -275,7 +333,7 @@ export class MissionBoard {
         ),
       );
     }
-    if (actions.childElementCount > 0) row.append(actions);
+    if (actions.childElementCount > 0) (status === 'available' ? line : row).append(actions);
     return row;
   }
 

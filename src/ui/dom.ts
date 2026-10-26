@@ -16,6 +16,7 @@ import {
   type ToastEntry,
   type ToastKind,
 } from '@/systems/UiHelpers';
+import { glyphEl, glyphNodes } from '@/ui/iconset';
 
 /**
  * SPEC-045 §4.5: the glyph each toast kind leads with, so the kind never rests
@@ -440,8 +441,9 @@ export class UiRoot {
         return h(
           'div',
           { class: `toast toast-${entry.kind}` },
-          glyph === null ? null : el('span', 'glyph', glyph),
-          entry.text,
+          glyph === null ? null : glyphEl(glyph),
+          // SPEC-073 §4.9: a glyph inside the text draws as its icon too.
+          ...glyphNodes(entry.text),
           entry.count > 1 ? el('span', 'toast-count', `×${entry.count}`) : null,
         );
       }),

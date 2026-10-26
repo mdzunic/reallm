@@ -33,6 +33,7 @@ import { el, h, openModal, testId, uiLayers } from '@/ui/dom';
 import { notesFor, NOTES_UNSEEN, syncNotesDot } from '@/ui/NotesPanel';
 import { createScreen, type Screen } from '@/ui/Screen';
 import { SettingsPanel, type QualityTarget } from '@/ui/SettingsPanel';
+import { iconEl } from '@/ui/iconset';
 
 /** What the menu needs from the services container; structural on purpose. */
 export interface PauseDeps {
@@ -173,19 +174,19 @@ export class PauseMenu {
     });
 
     // SPEC-045 §4.8: a plain `ui-btn`, so it is styled like Settings beside it.
-    this.#resume = testId(el('button', 'ui-btn', 'Resume'), 'pause-resume');
-    this.#resume.type = 'button';
+    // SPEC-073 §4.4: each key leads with its icon.
+    this.#resume = testId(h('button', { class: 'ui-btn', type: 'button' }, iconEl('resume'), 'Resume'), 'pause-resume');
     this.#resume.addEventListener('click', onResume);
 
-    const settings = testId(h('button', { class: 'ui-btn', type: 'button', click: () => this.#openSettings() }, 'Settings'), 'pause-settings');
-    const controls = testId(h('button', { class: 'ui-btn', type: 'button', click: () => this.#toggleControls() }, 'Controls'), 'pause-controls');
+    const settings = testId(h('button', { class: 'ui-btn', type: 'button', click: () => this.#openSettings() }, iconEl('settings'), 'Settings'), 'pause-settings');
+    const controls = testId(h('button', { class: 'ui-btn', type: 'button', click: () => this.#toggleControls() }, iconEl('controls'), 'Controls'), 'pause-controls');
     const log = deps.comms;
     const comms =
       log === undefined
         ? null
-        : testId(h('button', { class: 'ui-btn', type: 'button', click: () => this.#openComms(log) }, 'Comms log'), 'pause-comms');
+        : testId(h('button', { class: 'ui-btn', type: 'button', click: () => this.#openComms(log) }, iconEl('comms'), 'Comms log'), 'pause-comms');
     this.#commsButton = comms;
-    const quitButton = testId(h('button', { class: 'ui-btn', type: 'button', click: () => this.#quitPressed() }, 'Save & Quit'), 'pause-quit');
+    const quitButton = testId(h('button', { class: 'ui-btn', type: 'button', click: () => this.#quitPressed() }, iconEl('quit'), 'Save & Quit'), 'pause-quit');
 
     this.#controls = testId(el('div', 'pause-sheet is-hidden'), 'pause-sheet');
 

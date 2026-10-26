@@ -39,6 +39,10 @@ export interface ClassDef<Id extends string = string> {
   readonly id: Id;
   readonly name: string;
   readonly blurb: string;
+  /** SPEC-073 §4.7: the class card's one line — at most 32 characters; the blurb is its description. */
+  readonly tagline: string;
+  /** SPEC-073 §4.7: the card's two perk chips — at most 16 characters each. */
+  readonly perks: readonly [string, string];
   readonly baseAttributes: Attributes;
   readonly passive: ClassPassive;
   readonly startingWeapon: ItemId;
@@ -75,6 +79,8 @@ export const CLASSES = {
     id: 'marine',
     name: 'Marine',
     blurb: 'Line infantry, reassigned to salvage. Hits harder and takes more before it matters.',
+    tagline: 'Hits harder, lasts longer.',
+    perks: ['+10 % damage', '+20 HP'],
     baseAttributes: { might: 3, vigor: 3, agility: 1, tech: 1 },
     passive: { damageMult: 1.1, maxHpBonus: 20 },
     startingWeapon: 'weapon_kinetic',
@@ -86,6 +92,8 @@ export const CLASSES = {
     id: 'engineer',
     name: 'Engineer',
     blurb: 'Ship-side technician. Refits cost less and the drones listen better.',
+    tagline: 'Cheaper refits, better drones.',
+    perks: ['−15 % prices', '+25 % drones'],
     baseAttributes: { might: 1, vigor: 2, agility: 2, tech: 3 },
     passive: { refitDiscount: 0.15, companionEffectMult: 1.25 },
     startingWeapon: 'weapon_kinetic',
@@ -97,6 +105,8 @@ export const CLASSES = {
     id: 'scout',
     name: 'Scout',
     blurb: 'Survey specialist. Moves fast, picks up wide, and reads the ground for nodes.',
+    tagline: 'Fast, wide reach, finds nodes.',
+    perks: ['+15 % speed', 'Radar'],
     baseAttributes: { might: 2, vigor: 1, agility: 4, tech: 1 },
     passive: { moveSpeedMult: 1.15, pickupRadiusMult: 1.25, nodeRadar: true, dashCooldownMult: 0.8, sprintDrainMult: 0.8 },
     startingWeapon: 'weapon_kinetic',

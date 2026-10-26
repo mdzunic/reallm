@@ -59,6 +59,7 @@ import { addHubLights, hubSkyMesh, loadHubArt, proceduralDock, proceduralRing, s
 import { UiScene, bindTouchScheme } from '@/scenes/base';
 import { channelText, createScreen, tabPanelId, type Screen, type ScreenTab } from '@/ui/Screen';
 import { Wallet } from '@/ui/Wallet';
+import type { IconName } from '@/ui/iconset';
 
 /** SPEC-017 §4.1 (*initial tuning*): the station reads cool and clean. */
 const STATION_LOOK: Partial<Look> = { vignette: 0.35, bloomStrength: 0.3, tint: [0.96, 1, 1.04] };
@@ -640,16 +641,19 @@ export class StationScene extends UiScene<'station'> {
    * the primary — it is where an accepted mission goes next.
    */
   #renderRail(): void {
+    // SPEC-073 §4.5: every tab carries its icon; a tab's id names it.
     const section = (id: StationTab, label: string): ScreenTab => ({
       id: `station-tab-${id}`,
       label,
+      icon: id,
       kind: 'section',
       active: this.#tab === id,
       onSelect: () => this.#openTab(id),
     });
-    const action = (id: string, label: string, onSelect: () => void, primary = false): ScreenTab => ({
+    const action = (id: string, label: string, onSelect: () => void, primary = false, icon?: IconName): ScreenTab => ({
       id: `station-tab-${id}`,
       label,
+      ...(icon === undefined ? {} : { icon }),
       kind: 'action',
       primary,
       onSelect,
@@ -661,13 +665,13 @@ export class StationScene extends UiScene<'station'> {
       section('shop', 'Shop'),
       section('character', 'Character'),
       section('depot', 'Depot'),
-      action('starmap', 'Star Map ›', () => this.#starmap(), active),
+      action('starmap', 'Star Map ›', () => this.#starmap(), active, 'starmap'),
       // SPEC-058 §4.1: an ended run, below the iteration cap, may begin its next instance.
       ...(save !== null && nextInstanceOffered(save) ? [action('next', 'Next instance', () => this.#nextInstance())] : []),
-      action('settings', 'Settings', () => this.#settings?.show()),
+      action('settings', 'Settings', () => this.#settings?.show(), false, 'settings'),
       // SPEC-045 §4.1: the lines the dialogue layer showed this run.
-      action('comms', 'Comms log', () => this.#openComms()),
-      action('quit', 'Quit to menu', () => this.#quit(true)),
+      action('comms', 'Comms log', () => this.#openComms(), false, 'comms'),
+      action('quit', 'Quit to menu', () => this.#quit(true), false, 'quit'),
       // SPEC-015 AC-52: the station is the other safe moment to restart into a
       // new build; the row only exists while one is waiting (15-c).
       ...(updateReady() ? [action('update', 'Update', () => applyUpdate())] : []),

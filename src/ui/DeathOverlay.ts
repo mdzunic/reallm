@@ -19,7 +19,8 @@
 // Relay depot — `death-depot`, written by the scene after `show`
 // (`setDepotLoss`, from `depotLossText`), empty when nothing was taken.
 import { DEATH_RESPAWN, type ResourceId } from '@/data/index';
-import { el, testId } from '@/ui/dom';
+import { el, h, testId } from '@/ui/dom';
+import { iconEl } from '@/ui/iconset';
 
 export class DeathOverlay {
   readonly #root: HTMLDivElement;
@@ -42,7 +43,8 @@ export class DeathOverlay {
     this.#remains = testId(el('p', 'death-remains'), 'death-remains');
     this.#respawn = testId(el('p', 'death-respawn', DEATH_RESPAWN.cover), 'death-respawn');
     this.#root.append(
-      el('p', 'death-title', 'SIGNAL LOST'),
+      // SPEC-073 §4.9: the error icon leads the title.
+      h('p', { class: 'death-title' }, iconEl('error'), el('span', 'death-title-text', 'SIGNAL LOST')),
       this.#cause,
       this.#tip,
       this.#restarts,

@@ -50,6 +50,7 @@ import { particleSprite, planetDisc } from '@/views/ProceduralTextures';
 import { UiScene, bindTouchScheme } from '@/scenes/base';
 import { createScreen } from '@/ui/Screen';
 import { Wallet } from '@/ui/Wallet';
+import { glyphEl, glyphNodes } from '@/ui/iconset';
 
 const MISSION_IDS = Object.keys(MISSIONS) as MissionId[];
 const ENGINE: ShipSystemDef = UPGRADES.engine;
@@ -75,6 +76,14 @@ const NODE_ROOM = { side: 48, top: 32, bottom: 60 } as const;
 
 /** The gap the map area keeps from the info panel's edge, in px. */
 const PANEL_GAP_PX = 10;
+
+/**
+ * The map's lens, in degrees of vertical field of view. Looking straight down
+ * through the shared 60° camera, a planet off the axis stretched toward the
+ * corners — Eden-Prime and The Hive read as eggs. A long lens keeps every
+ * sphere round; `#frameCamera` sizes the shot from it, so the framing holds.
+ */
+const MAP_FOV = 15;
 
 /** A box in viewport px. */
 interface Area {
@@ -242,8 +251,9 @@ export class StarmapScene extends UiScene<'starmap'> {
   #frameCamera(): void {
     const { width, height } = this.services.renderer;
     const aspect = width / Math.max(1, height);
-    if (this.camera.aspect !== aspect) {
+    if (this.camera.aspect !== aspect || this.camera.fov !== MAP_FOV) {
       this.camera.aspect = aspect;
+      this.camera.fov = MAP_FOV;
       this.camera.updateProjectionMatrix();
     }
     let minX = Infinity;
@@ -281,6 +291,46 @@ export class StarmapScene extends UiScene<'starmap'> {
     // this the projection still uses the orientation `base.enter()` left
     // behind and every button lands off-screen.
     this.camera.updateMatrixWorld(true);
+  }
+
+  /**
+   * SPEC-073 §4.8, E141: the lens, and the worst planet's projected outline as
+   * |width ÷ height − 1| — 0 for a round planet. Debug only, so it allocates.
+   */
+  override debugInfo(): Record<string, number | string> {
+    return { ...super.debugInfo(), fov: this.camera.fov, roundness: Number(this.#roundness().toFixed(3)) };
+  }
+
+  #roundness(): number {
+    const { width, height } = this.services.renderer;
+    const point = new THREE.Vector3();
+    let worst = 0;
+    for (const mesh of this.#nodeMeshes.values()) {
+      const radius = (mesh.geometry as THREE.SphereGeometry).parameters.radius;
+      let minX = Infinity;
+      let maxX = -Infinity;
+      let minY = Infinity;
+      let maxY = -Infinity;
+      for (let i = 0; i < 32; i++) {
+        for (let j = 1; j < 16; j++) {
+          const theta = (i / 32) * Math.PI * 2;
+          const phi = (j / 16) * Math.PI;
+          point
+            .set(Math.sin(phi) * Math.cos(theta), Math.cos(phi), Math.sin(phi) * Math.sin(theta))
+            .multiplyScalar(radius)
+            .add(mesh.position)
+            .project(this.camera);
+          const x = ((point.x + 1) / 2) * width;
+          const y = ((1 - point.y) / 2) * height;
+          minX = Math.min(minX, x);
+          maxX = Math.max(maxX, x);
+          minY = Math.min(minY, y);
+          maxY = Math.max(maxY, y);
+        }
+      }
+      worst = Math.max(worst, Math.abs((maxX - minX) / Math.max(1e-6, maxY - minY) - 1));
+    }
+    return worst;
   }
 
   /**
@@ -408,7 +458,7 @@ export class StarmapScene extends UiScene<'starmap'> {
           },
           h('span', { class: 'starmap-node-name' }, PLANETS[planet].name),
           // AC-50: the lock glyph on dim nodes.
-          unlocked ? null : h('span', { class: 'starmap-lock' }, '🔒'),
+          unlocked ? null : h('span', { class: 'starmap-lock' }, glyphEl('🔒')),
           // SPEC-044 §4.6: work waits here — an active or an open mission.
           missions ? testId(h('span', { class: 'starmap-node-missions', 'aria-hidden': 'true' }, '◆'), `map-node-${planet}-missions`) : null,
         ),
@@ -480,13 +530,13 @@ export class StarmapScene extends UiScene<'starmap'> {
     const missing = economy.missingRequirements(planet.unlock);
     const requirements =
       planet.unlock.length === 0
-        ? [h('li', { class: 'req-met' }, `${GLYPHS.good} Open approach`)]
+        ? [h('li', { class: 'req-met' }, ...glyphNodes(`${GLYPHS.good} Open approach`))]
         : planet.unlock.map((requirement) => {
             const met = !missing.includes(requirement);
             return h(
               'li',
               { class: met ? 'req-met' : 'req-unmet' },
-              `${met ? GLYPHS.good : GLYPHS.error} ${requirementText(requirement)}`,
+              ...glyphNodes(`${met ? GLYPHS.good : GLYPHS.error} ${requirementText(requirement)}`),
             );
           });
     const missions = MISSION_IDS.filter((id) => MISSIONS[id].planet === this.#selected)

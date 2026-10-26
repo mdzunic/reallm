@@ -49,6 +49,7 @@ import { el, h, keepFocus, testId, type UiRoot } from '@/ui/dom';
 import { itemIcon } from '@/ui/ItemIcon';
 import { portraitManifest, portraitSource } from '@/ui/portraits';
 import { shareButton, type PreparedCard } from '@/ui/ShareCard';
+import { glyphNodes } from '@/ui/iconset';
 
 /** SPEC-039 §4.7: the `char-attrs` line's order and names. */
 const ATTRIBUTE_NAMES: readonly [keyof Attributes, string][] = [
@@ -154,11 +155,11 @@ export class CharacterPanel {
         h(
           'div',
           { class: 'char-stats' },
-          h('span', {}, `${GLYPHS.health} ${player.hp}/${maxHp(player.classId, a, player.level)} HP`),
+          h('span', {}, ...glyphNodes(`${GLYPHS.health} ${player.hp}/${maxHp(player.classId, a, player.level)} HP`)),
           h('span', {}, `⚔ ${stats.damage} damage`),
           h('span', {}, `➤ ${stats.speed} m/s`),
-          h('span', {}, `${GLYPHS.armor} ${armor.kind === 'armor' ? armor.armor : 0} armor`),
-          h('span', {}, `${GLYPHS.tokens} ${player.tokens} tokens`),
+          h('span', {}, ...glyphNodes(`${GLYPHS.armor} ${armor.kind === 'armor' ? armor.armor : 0} armor`)),
+          h('span', {}, ...glyphNodes(`${GLYPHS.tokens} ${player.tokens} tokens`)),
         ),
         'character-stats',
       ),

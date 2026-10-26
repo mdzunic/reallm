@@ -1036,7 +1036,9 @@ test('13. the board speaks words: no status ids, a closed Completed fold, and a 
   await expect(page.getByTestId('mission-c1_m2').locator('.board-status')).toHaveText('In progress');
   await expect(page.getByTestId('mission-c1_s1').locator('.board-status')).toHaveText('New');
   await expect(page.getByTestId('mission-c1_m3').locator('.board-status')).toHaveText('Locked');
-  await expect(page.getByTestId('mission-c1_m3').locator('.board-locked')).toHaveText("Needs: Complete 'Black Gold'");
+  // SPEC-073 §4.6: the board's short form; SPEC-044's full line is its title.
+  await expect(page.getByTestId('mission-c1_m3').locator('.board-locked')).toHaveText('After Black Gold');
+  await expect(page.getByTestId('mission-c1_m3').locator('.board-locked')).toHaveAttribute('title', "Needs: Complete 'Black Gold'");
   await expect(page.getByTestId('mission-c1_m1').locator('.board-status')).toHaveText('Done · replay for 50 %');
   await expect(page.getByTestId('mission-c1_m2').locator('.badge-main')).toHaveText('Main');
   await expect(page.getByTestId('mission-c1_s1').locator('.badge-side')).toHaveText('Side');
