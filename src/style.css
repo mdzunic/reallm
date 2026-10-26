@@ -14,7 +14,7 @@ body {
   overscroll-behavior: none;
   background: #0b0f14;
   color: #e6edf3;
-  font: 14px/1.4 system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  font: 14px/1.4 var(--font-ui);
 }
 
 /* The one canvas, full viewport; the renderer sizes its backing store, CSS owns
@@ -602,7 +602,7 @@ html.reduce-motion .touch-zone {
   border-radius: 6px;
   font-size: 12px;
   line-height: 1.35;
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-family: var(--font-mono);
   /* The event log's height is data-dependent — twelve entries whose lines wrap
      when a `frame:order` trace is long, which a slow frame makes it — so the
      panel can grow far enough down the screen to sit over the version label.
@@ -760,6 +760,15 @@ button.debug-button {
   --type-xl: calc(clamp(22px, 4.2vmin, 34px) * var(--text-scale));
   --track: 0.12em;
   --key-face: rgba(18, 26, 36, 0.92);
+
+  /* SPEC-073 §4.2 — the Refit (PLAN R30). The page's ground (body and the
+     theme-color meta keep the literal SPEC-015 D-9 pins);
+     the lit face of a primary or active key, once a mixed colour; and the two
+     font stacks every rule now reads. No webfont: SPEC-020 AC-26 stands. */
+  --ground: #0b0f14;
+  --key-lit: rgba(76, 154, 255, 0.18);
+  --font-ui: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  --font-mono: ui-monospace, 'Cascadia Mono', 'SF Mono', Menlo, Consolas, monospace;
 
   /* SPEC-037 §3 — one HUD for every screen (*initial tuning*). The plate backs
      HUD text wherever it sits over the world, dark enough that --ink, --warn
@@ -977,8 +986,9 @@ html[data-play] .overlay-panel:not(.overlay-rotate) {
   border-color: var(--rule);
 }
 
+/* SPEC-073 §4.2: the lit face; the accent border stays. */
 .ui-btn.is-primary {
-  background: color-mix(in srgb, var(--accent) 18%, var(--key-face));
+  background: var(--key-lit);
   border-color: var(--accent);
 }
 
@@ -1131,7 +1141,8 @@ html[data-play] .toast {
 .sheet-backdrop {
   position: absolute;
   inset: 0;
-  background: rgba(0, 0, 0, 0.5);
+  /* SPEC-073 §4.3: the scrim every sheet sits on. */
+  background: rgba(5, 8, 12, 0.66);
   pointer-events: auto;
   display: flex;
   align-items: flex-end;
@@ -1143,6 +1154,8 @@ html[data-play] .toast {
   width: min(480px, 100vw - 24px);
   margin-bottom: max(12px, env(safe-area-inset-bottom));
   padding: 16px;
+  background: var(--panel);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
   animation: sheet-in 150ms ease-out;
 }
 
@@ -1244,6 +1257,7 @@ html.reduce-motion .sheet {
   width: var(--hud-tl-w);
   box-sizing: border-box;
   padding: 6px 8px;
+  border: 1px solid var(--rule);
   border-radius: var(--radius);
   background: var(--hud-plate);
 }
@@ -1411,6 +1425,7 @@ html:not(.scheme-touch) .hud-interact {
   align-items: center;
   gap: 6px;
   padding: 3px 8px;
+  border: 1px solid var(--rule);
   border-radius: var(--radius);
   background: var(--hud-plate);
   font-size: 13px;
@@ -1457,6 +1472,7 @@ html.reduce-motion .hud-wallet {
    sit on the plate, and their text is --ink, --warn or --good only. */
 .hud-weather {
   padding: 4px 12px;
+  border: 1px solid var(--rule);
   border-radius: var(--radius);
   background: var(--hud-plate);
   color: var(--warn);
@@ -2347,6 +2363,10 @@ html.reduce-motion .hud.is-static .hud-static {
   width: min(560px, 100vw - 24px);
   padding: 12px 16px;
   z-index: 40;
+  /* SPEC-073 §4.9: the lit top edge — the speaker's channel is open. */
+  box-shadow:
+    inset 0 2px 0 var(--accent),
+    0 8px 24px rgba(0, 0, 0, 0.45);
 }
 
 /* SPEC-037 §4.3: a non-modal line lets every pointer through to the play
@@ -2387,7 +2407,10 @@ html.reduce-motion .hud.is-static .hud-static {
 
 .dialogue-speaker {
   display: block;
+  font-size: var(--type-sm);
   font-weight: 700;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
   margin-bottom: 4px;
 }
 
@@ -2407,7 +2430,7 @@ html.reduce-motion .hud.is-static .hud-static {
 
 /* AC-70: `log` reads as a terminal readout. */
 .dialogue-log {
-  font-family: ui-monospace, 'Cascadia Mono', 'SF Mono', Menlo, Consolas, monospace;
+  font-family: var(--font-mono);
   background: #04140a;
   border-color: var(--good);
 }
@@ -2429,6 +2452,9 @@ html[data-play] .dialogue.dialogue-letter {
 /* AC-70: `warden` glitches; AC-71 pins it still under reduce-motion. */
 .dialogue-warden {
   border-color: var(--hp);
+  box-shadow:
+    inset 0 2px 0 var(--hp),
+    0 8px 24px rgba(0, 0, 0, 0.45);
   animation: dialogue-glitch 240ms steps(2) infinite;
 }
 
@@ -2533,6 +2559,24 @@ html.reduce-motion .dialogue-dim {
   width: min(520px, 100vw - 20px);
   overflow-y: auto;
   z-index: 45;
+  /* SPEC-073 §4.3: a sheet — opaque and lifted, over `.settings-scrim`. */
+  background: var(--panel);
+  border-color: var(--frame-edge);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+}
+
+/* SPEC-073 §4.3: the dim over the frame behind the settings sheet. It takes
+   no pointer events, so nothing under it changes how it is pressed. */
+.settings-scrim {
+  position: absolute;
+  inset: 0;
+  background: rgba(5, 8, 12, 0.66);
+  pointer-events: none;
+  z-index: 44;
+}
+
+.settings-scrim.is-hidden {
+  display: none;
 }
 
 .settings.is-hidden {
@@ -2673,6 +2717,14 @@ html.reduce-motion .dialogue-dim {
   min-width: 220px;
 }
 
+/* SPEC-073 §4.4: each key leads with its icon, the label beside it. */
+.pause-actions .ui-btn {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 10px;
+}
+
 .pause-sheet {
   margin-top: 12px;
   display: flex;
@@ -2723,11 +2775,21 @@ html.reduce-motion .dialogue-dim {
   flex-direction: column;
   gap: 8px;
   background: rgba(10, 4, 6, 0.82);
+  /* SPEC-073 §4.9: a loss card — the danger edge and its lit top. */
+  border-color: var(--hp);
+  box-shadow:
+    inset 0 3px 0 var(--hp),
+    0 8px 24px rgba(0, 0, 0, 0.45);
 }
 
 .death-title {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
   margin: 0;
   font-size: calc(clamp(22px, 4vmin, 34px) * var(--text-scale));
+  font-weight: 700;
   letter-spacing: 0.3em;
   color: var(--hp);
 }
@@ -2918,7 +2980,7 @@ html.reduce-motion .dialogue-dim {
   display: flex;
   flex-direction: column;
   gap: 10px;
-  font-family: ui-monospace, 'Cascadia Mono', 'SF Mono', Menlo, Consolas, monospace;
+  font-family: var(--font-mono);
 }
 
 .ending-report-head {
@@ -2946,7 +3008,7 @@ html.reduce-motion .dialogue-dim {
 
 .overlay-ending-escape .ending-prompt {
   margin: 0;
-  font-family: ui-monospace, 'Cascadia Mono', 'SF Mono', Menlo, Consolas, monospace;
+  font-family: var(--font-mono);
   color: var(--good);
   opacity: 0;
   transition: opacity 2s linear 1s;
@@ -2970,7 +3032,7 @@ html.reduce-motion .dialogue-dim {
   align-items: center;
   gap: 10px;
   text-align: center;
-  font-family: ui-monospace, 'Cascadia Mono', 'SF Mono', Menlo, Consolas, monospace;
+  font-family: var(--font-mono);
 }
 
 .selection-number {
@@ -3104,7 +3166,8 @@ html.debug .scene-tag {
   display: flex;
   flex-direction: column;
   gap: 10px;
-  min-width: min(280px, 80vw);
+  /* SPEC-073 §4.4: a 240 px column (it was a 280 px floor). */
+  width: min(240px, 80vw);
 }
 
 .menu-buttons .ui-btn {
@@ -3381,11 +3444,12 @@ html.debug .scene-tag {
   flex: 1;
   display: flex;
   flex-direction: column;
+  align-items: flex-start;
   gap: 6px;
   text-align: left;
-  padding: 10px;
+  padding: 12px;
   min-height: 44px;
-  background: #1a232e;
+  background: var(--panel);
   color: var(--ink);
   border: 1px solid var(--panel-edge);
   border-radius: var(--radius);
@@ -3394,12 +3458,56 @@ html.debug .scene-tag {
 }
 
 .class-card.is-selected {
-  border-color: var(--shield);
-  background: #24435e;
+  border-color: var(--accent);
+  background: var(--key-lit);
+  box-shadow: inset 0 0 0 1px var(--edge-glow);
 }
 
 .class-name {
   font-weight: 700;
+}
+
+/* SPEC-073 §4.7: the card's face — an emblem, a tagline and two perk chips. */
+.class-emblem {
+  display: grid;
+  place-items: center;
+  width: 48px;
+  height: 48px;
+  border: 1px solid var(--frame-edge);
+  border-radius: var(--radius);
+  background: var(--key-face);
+  color: var(--ink);
+}
+
+.class-card.is-selected .class-emblem {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.class-emblem .ico {
+  width: 30px;
+  height: 30px;
+}
+
+.class-tagline {
+  color: var(--ink-dim);
+  font-size: var(--type-sm);
+}
+
+.class-perks {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.class-perk {
+  padding: 2px 7px;
+  border: 1px solid var(--good);
+  border-radius: var(--radius);
+  color: var(--good);
+  font-size: var(--type-sm);
+  font-weight: 600;
+  white-space: nowrap;
 }
 
 .class-blurb,
@@ -3611,26 +3719,75 @@ html.debug .scene-tag {
 .board-group {
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 8px;
 }
 
+/* SPEC-073 §4.6: the planet a group's missions are on — its disc in the
+   planet's own colours, the name, chapter and biome, and what is open. */
 .board-planet {
-  margin: 0;
-  font-weight: 700;
-  color: var(--shield);
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+  margin: 4px 0 2px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--rule);
 }
 
+.board-planet-disc {
+  width: 32px;
+  height: 32px;
+  flex: none;
+  border-radius: 50%;
+  box-shadow: 0 0 12px rgba(245, 166, 35, 0.25);
+}
+
+.board-planet-name {
+  font-size: var(--type-lg);
+  font-weight: 700;
+  letter-spacing: 0.06em;
+}
+
+.board-planet-chapter {
+  font-size: var(--type-sm);
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  color: var(--ink-dim);
+}
+
+.board-planet-count {
+  margin-left: auto;
+  font-size: var(--type-sm);
+  color: var(--ink-dim);
+}
+
+/* SPEC-073 §4.6: one compact row — the brief only when it is open. */
 .board-row {
+  position: relative;
   border: 1px solid var(--panel-edge);
   border-radius: var(--radius);
-  padding: 10px;
+  background: var(--panel);
+  padding: 4px 12px;
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 4px;
 }
 
-.board-row.is-locked {
-  opacity: 0.7;
+.board-row.is-available,
+.board-row.is-active {
+  border-color: var(--accent);
+  box-shadow: inset 0 0 0 1px var(--edge-glow);
+}
+
+.board-row.is-locked .board-title {
+  color: var(--ink-dim);
+}
+
+.board-line {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px 12px;
 }
 
 .board-head {
@@ -3653,8 +3810,19 @@ html.debug .scene-tag {
 }
 
 .board-status {
-  margin-left: auto;
   color: var(--ink-dim);
+  font-size: var(--type-sm);
+}
+
+/* A locked row names what it waits for; its status word stays for assistive
+   tech and the suites, out of sight. */
+.board-row.is-locked .board-status {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
 }
 
 .badge {
@@ -3674,24 +3842,27 @@ html.debug .scene-tag {
 .badge-owned { color: var(--good); border-color: var(--good); }
 .badge-equipped { color: var(--shield); border-color: var(--shield); }
 
+/* SPEC-073 §4.6: rewards are the economy — the token amber, tabular. */
 .board-rewards {
-  margin: 0;
-  color: var(--good);
+  margin: 0 0 0 auto;
+  color: var(--accent-2);
   font-size: var(--type-sm);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
 }
 
-/* SPEC-039 §4.6: the boss's signature piece, or the lithium in its place. */
-.board-drop {
-  margin: 0;
+/* SPEC-043 §4.2's bonus and SPEC-039 §4.6's boss drop, as chips; the full
+   sentence is each chip's title. */
+.board-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 2px 8px;
+  border: 1px solid var(--panel-edge);
+  border-radius: var(--radius);
   color: var(--ink-dim);
   font-size: var(--type-sm);
-}
-
-/* SPEC-043 §4.2: the optional objective and what it pays. */
-.board-bonus {
-  margin: 0;
-  color: var(--ink-dim);
-  font-size: var(--type-sm);
+  white-space: nowrap;
 }
 
 /* SPEC-043 §4.5: this device's record, beside the status. */
@@ -3702,11 +3873,15 @@ html.debug .scene-tag {
 
 /* 14-e: long briefs scroll inside the panel, never the body. */
 .board-brief {
-  margin: 0;
+  margin: 0 0 4px;
   color: var(--ink-dim);
+  font-size: var(--type-sm);
 }
 
 .board-locked {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
   margin: 0;
   color: var(--warn);
   font-size: var(--type-sm);
@@ -4116,6 +4291,10 @@ html.debug .scene-tag {
   transform: translateY(26px);
   text-shadow: 0 1px 3px rgba(0, 0, 0, 0.9);
   white-space: nowrap;
+  /* SPEC-073 §4.8: each name on a HUD plate. */
+  padding: 1px 6px;
+  border-radius: var(--radius);
+  background: var(--hud-plate);
 }
 
 .starmap-node.is-locked {
@@ -4142,6 +4321,10 @@ html.debug .scene-tag {
   display: flex;
   flex-direction: column;
   gap: 6px;
+  /* SPEC-073 §4.8: a card — opaque, with the lit edge. */
+  background: var(--panel);
+  border-color: var(--frame-edge);
+  box-shadow: inset 0 0 0 1px var(--edge-glow);
 }
 
 /* AC-24: only the reading matter scrolls — the depart line below it stays in
@@ -4657,7 +4840,7 @@ html.reduce-motion .autopilot-bar-fill {
 
 /* `log` reads as a terminal, as in the dialogue panel. */
 .film-caption[data-speaker='log'] {
-  font-family: ui-monospace, 'Cascadia Mono', 'SF Mono', Menlo, Consolas, monospace;
+  font-family: var(--font-mono);
   background: #04140a;
   border-color: var(--good);
 }
@@ -4815,7 +4998,7 @@ html.reduce-motion .film-describe {
 }
 
 .chapter-card-containment {
-  font-family: ui-monospace, 'Cascadia Mono', 'SF Mono', Menlo, Consolas, monospace;
+  font-family: var(--font-mono);
   color: var(--hp);
   animation: card-glitch 240ms steps(2) 1;
 }
@@ -5192,7 +5375,7 @@ html.reduce-motion .tracker.is-stuck {
   position: absolute;
   inset: 0;
   background: var(--accent-2);
-  outline: 2px solid #0b0f14;
+  outline: 2px solid var(--ground);
   box-shadow: inset 0 0 0 1px #fff;
 }
 
@@ -5418,8 +5601,9 @@ html.quality-low .screen::before {
    empty right column, so the body's centre is the frame's centre at every
    width (§4.4: the header's and the body's centres agree). */
 .screen.has-rail .screen-frame {
-  /* SPEC-045 §4.4: the rail widens with the text size it is read at. */
-  --rail-w: calc(148px * var(--text-scale));
+  /* SPEC-045 §4.4: the rail widens with the text size it is read at.
+     SPEC-073 §4.5: 164 px, so an icon and CHARACTER share a line. */
+  --rail-w: calc(164px * var(--text-scale));
 }
 
 /* §4.4: the star map widens and lets the backdrop through the frame. */
@@ -5510,6 +5694,12 @@ html.quality-low .screen::before {
   width: 100%;
   padding-left: 8px;
   padding-right: 8px;
+  /* SPEC-073 §4.5: the icon before a left-aligned label. */
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 8px;
+  text-align: left;
 }
 
 /* --------------------------------------------------------------- the body */
@@ -5602,14 +5792,15 @@ html.quality-low .screen::before {
     padding: 8px;
   }
 
+  /* SPEC-073 §4.5, E140: a label that does not fit wraps, never ellipsised. */
   .screen-tab {
     width: auto;
     min-width: 0;
     padding-left: 4px;
     padding-right: 4px;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
+    justify-content: center;
+    text-align: center;
+    overflow-wrap: anywhere;
   }
 }
 
@@ -5650,17 +5841,27 @@ html.quality-low .screen::before {
     border-top: 1px solid var(--rule);
   }
 
-  /* Heights stay the 44 px floor, 56 px under `.screen.is-touch`. */
+  /* Heights stay the 44 px floor, 56 px under `.screen.is-touch`.
+     SPEC-073 §4.5, E140: the icon over the label, and a label that does not
+     fit wraps to a second line — it is never cut short. */
   .screen-tab {
     flex: 1 1 0;
+    flex-direction: column;
+    justify-content: center;
+    gap: 3px;
     width: auto;
     min-width: 0;
-    padding-left: 4px;
-    padding-right: 4px;
+    padding: 4px 2px;
+    font-size: calc(11px * var(--text-scale));
     letter-spacing: 0.04em;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
+    line-height: 1.1;
+    text-align: center;
+    white-space: normal;
+    overflow-wrap: anywhere;
+  }
+
+  .screen-rail .screen-tab.is-active {
+    box-shadow: inset 0 -3px 0 var(--accent);
   }
 
   .screen-head {
@@ -5715,6 +5916,19 @@ html.reduce-motion .screen-body > * {
   display: grid;
 }
 
+/* SPEC-073 §4.4: a compact frame as tall as its keys, until the Controls
+   sheet opens beside them and takes the whole shell again. */
+.screen-pause .screen-frame {
+  width: min(320px, 100%);
+  height: auto;
+  max-height: 100%;
+}
+
+.screen-pause .screen-frame:has(.pause-sheet:not(.is-hidden)) {
+  width: min(1100px, 100%);
+  height: 100%;
+}
+
 .screen-pause .screen-body {
   display: flex;
   flex-direction: column;
@@ -5728,6 +5942,11 @@ html.reduce-motion .screen-body > * {
 /* SPEC-036 §4.8: on a short landscape screen the actions form two columns and
    the Controls sheet opens beside them, so Resume stays in reach. */
 @media (orientation: landscape) and (max-height: 500px) {
+  /* SPEC-073 §4.4: two columns of keys need a wider compact frame. */
+  .screen-pause .screen-frame {
+    width: min(520px, 100%);
+  }
+
   .screen-pause .screen-body {
     flex-direction: row;
     align-items: flex-start;
@@ -6032,7 +6251,7 @@ html.reduce-motion .screen-body > * {
   padding: 6px 8px;
   overflow-x: auto;
   white-space: pre;
-  font-family: ui-monospace, 'Cascadia Mono', 'SF Mono', Menlo, Consolas, monospace;
+  font-family: var(--font-mono);
   font-size: var(--type-xs);
   background: var(--key-face);
   border: 1px solid var(--rule);
@@ -6595,6 +6814,12 @@ a.credits-licences {
   width: 100%;
   padding-left: 8px;
   padding-right: 8px;
+  /* SPEC-073 §4.5: laid out as the tabs are. */
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 8px;
+  text-align: left;
 }
 
 .screen.is-touch .screen-action {
@@ -6615,14 +6840,15 @@ a.credits-licences {
     display: none;
   }
 
+  /* SPEC-073 §4.5, E140: a label that does not fit wraps, never ellipsised. */
   .screen-action {
     width: auto;
     min-width: 0;
     padding-left: 4px;
     padding-right: 4px;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
+    justify-content: center;
+    text-align: center;
+    overflow-wrap: anywhere;
   }
 }
 
@@ -6646,16 +6872,22 @@ a.credits-licences {
     border-left: 1px solid var(--rule);
   }
 
+  /* SPEC-073 §4.5, E140: the icon over the label, which wraps rather than
+     being cut short. */
   .screen-action {
     flex: 1 1 0;
+    flex-direction: column;
+    justify-content: center;
+    gap: 3px;
     width: auto;
     min-width: 0;
-    padding-left: 4px;
-    padding-right: 4px;
+    padding: 4px 2px;
+    font-size: calc(11px * var(--text-scale));
     letter-spacing: 0.04em;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
+    line-height: 1.1;
+    text-align: center;
+    white-space: normal;
+    overflow-wrap: anywhere;
   }
 }
 
@@ -6855,7 +7087,7 @@ html.plain-text #ui :is(.screen-body, .settings, .sheet, .comms-log, .dialogue, 
 .creation-next {
   margin: 0;
   color: var(--good);
-  font-family: ui-monospace, 'Cascadia Mono', 'SF Mono', Menlo, Consolas, monospace;
+  font-family: var(--font-mono);
 }
 
 .creation-variant {
@@ -7317,7 +7549,7 @@ html.reduce-motion .bar-row.is-burning .bar {
   position: absolute;
   inset: 0;
   background: var(--marker);
-  outline: 2px solid #0b0f14;
+  outline: 2px solid var(--ground);
   box-shadow: inset 0 0 0 1px #fff;
 }
 
@@ -7387,3 +7619,161 @@ button.touch-button.touch-missile {
 button.touch-button.is-empty {
   opacity: 0.45;
 }
+
+/* ================================================================ SPEC-073 */
+/* The Refit (PLAN R30): the drawn marks, the icon set's masks, the lit
+   chamfers and the station rail's icons. Colours and lengths come from the
+   tokens; the icon paths come from `ui/iconset.ts` as each span's `--icon`. */
+
+/* Visually hidden, still read: the brand heading's "ReaLLM", the class
+   cards' descriptions. */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* §4.1: the lockup — the reticle and the drawn wordmark, sized by the
+   heading's font size: the wordmark is 1 em tall, the reticle 1.6 em. */
+.brand-lockup {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45em;
+}
+
+.brand-lockup .brand-mark {
+  flex: none;
+  width: 1.6em;
+  height: 1.6em;
+}
+
+.brand-mark .ring,
+.brand-mark .ticks {
+  fill: none;
+  stroke: var(--accent);
+  stroke-width: 4;
+}
+
+.brand-mark .ticks {
+  stroke-linecap: round;
+}
+
+.brand-mark .pip {
+  fill: var(--ink);
+}
+
+.brand-wordmark {
+  flex: none;
+  width: 5.125em;
+  height: 1em;
+  fill: none;
+  stroke: var(--ink);
+  stroke-width: 6;
+  stroke-linejoin: miter;
+  filter: drop-shadow(0 0 0.2em rgba(76, 154, 255, 0.45));
+}
+
+/* §4.1: every other screen title starts with the reticle. */
+.screen-mark {
+  width: 0.8em;
+  height: 0.8em;
+  margin-right: 0.4em;
+  vertical-align: -0.08em;
+}
+
+.screen-mark .ring,
+.screen-mark .ticks {
+  fill: none;
+  stroke: var(--accent);
+  stroke-width: 5;
+}
+
+.screen-mark .pip {
+  fill: var(--ink);
+}
+
+/* §3: an inline icon, stroked in the text's colour. */
+.ico {
+  flex: none;
+  width: 1.15em;
+  height: 1.15em;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2;
+  stroke-linecap: square;
+  stroke-linejoin: miter;
+  vertical-align: -0.2em;
+}
+
+/* §3, E139: a glyph drawn as its icon. The span keeps the glyph as its text,
+   so what systems print and the suites read is unchanged; only where masks
+   exist is that text pushed out of the box and the icon painted over it. */
+@supports (mask-image: none) or (-webkit-mask-image: none) {
+  .glyph[data-icon] {
+    display: inline-block;
+    flex: none;
+    width: 1.15em;
+    height: 1.15em;
+    overflow: hidden;
+    vertical-align: -0.2em;
+    white-space: nowrap;
+    text-indent: 2em;
+    background-color: currentColor;
+    -webkit-mask: var(--icon) center / contain no-repeat;
+    mask: var(--icon) center / contain no-repeat;
+  }
+}
+
+/* §4.2: the four chamfers lit in the accent. The clip leaves them no edge;
+   a 4 px line on each diagonal shows the half inside the clip. */
+.screen-frame::after {
+  content: '';
+  position: absolute;
+  inset: -1px;
+  pointer-events: none;
+  background:
+    linear-gradient(135deg, transparent calc(50% - 2px), var(--accent) calc(50% - 2px) calc(50% + 2px), transparent calc(50% + 2px)) left top / var(--frame-cut) var(--frame-cut) no-repeat,
+    linear-gradient(225deg, transparent calc(50% - 2px), var(--accent) calc(50% - 2px) calc(50% + 2px), transparent calc(50% + 2px)) right top / var(--frame-cut) var(--frame-cut) no-repeat,
+    linear-gradient(45deg, transparent calc(50% - 2px), var(--accent) calc(50% - 2px) calc(50% + 2px), transparent calc(50% + 2px)) left bottom / var(--frame-cut) var(--frame-cut) no-repeat,
+    linear-gradient(315deg, transparent calc(50% - 2px), var(--accent) calc(50% - 2px) calc(50% + 2px), transparent calc(50% + 2px)) right bottom / var(--frame-cut) var(--frame-cut) no-repeat;
+}
+
+/* §4.5: on the column rail the active tab wears a leading bar, not the
+   underline; the touch row keeps its underline. */
+.screen-rail .screen-tab.is-active {
+  border-color: var(--accent);
+  background: var(--key-lit);
+  box-shadow: inset 3px 0 0 var(--accent);
+}
+
+/* §4.8: the star map's backdrop is dark space and its nodes carry their own
+   name plates, so only the edges are dimmed — the planets keep their colour. */
+.screen.is-wide::before {
+  background: radial-gradient(ellipse at 50% 45%, rgba(5, 8, 12, 0), rgba(5, 8, 12, 0.6) 85%);
+}
+
+/* §4.4: the menu's storage list, under the 240 px key column. */
+.menu-root .menu-storage {
+  width: min(420px, 100%);
+}
+
+/* §4.10: the vitals are notched every tenth, so a quarter reads at a glance. */
+.bar.is-notched {
+  position: relative;
+}
+
+.bar.is-notched::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: repeating-linear-gradient(90deg, transparent 0 calc(10% - 1px), rgba(4, 6, 10, 0.55) calc(10% - 1px) 10%);
+}
+
+/* SPEC-073:end */

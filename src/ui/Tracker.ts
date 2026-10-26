@@ -21,6 +21,7 @@ import { percent } from '@/systems/Format';
 import { distanceText } from '@/systems/Guidance';
 import type { HudModel } from '@/systems/UiHelpers';
 import { el, testId } from '@/ui/dom';
+import { setGlyphText } from '@/ui/iconset';
 
 type TrackerModel = NonNullable<HudModel['tracker']>;
 
@@ -117,7 +118,7 @@ export class Tracker {
       // HUD holds exactly one of them at any moment (AC-17).
       row.text.classList.toggle('hud-objective', data.focus);
       const check = data.done ? GLYPHS.good : '';
-      if (row.check.textContent !== check) row.check.textContent = check;
+      setGlyphText(row.check, check);
       if (row.text.textContent !== data.text) row.text.textContent = data.text;
       this.#setDefendHp(row, data.defendHp);
       if (data.focus) focus = row;

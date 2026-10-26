@@ -34,11 +34,12 @@ import {
 import { GLYPHS } from '@/data/glossary';
 import { RESOURCE_IDS, type ResourceId } from '@/data/index';
 import { multiplier, seconds } from '@/systems/Format';
-import { el, testId, type UiRoot } from '@/ui/dom';
+import { el, h, testId, type UiRoot } from '@/ui/dom';
 import { RESOURCE_GLYPHS } from '@/ui/glyphs';
 import { EFFECT_GLYPHS } from '@/ui/icons';
 import { QuickBar, type QuickBarHandlers } from '@/ui/QuickBar';
 import { Tracker } from '@/ui/Tracker';
+import { glyphEl, glyphNodes, setGlyphText } from '@/ui/iconset';
 
 export type HudMode = 'surface' | 'flight';
 
@@ -96,9 +97,10 @@ function bar(kind: string, glyph: string, label: string): { root: HTMLDivElement
   const text = el('span', 'bar-text');
   const root = el('div', 'bar-row');
   root.setAttribute('aria-label', label);
-  const track = el('div', 'bar');
+  // SPEC-073 §4.10: the vitals are notched every tenth; fuel is not a vital.
+  const track = el('div', kind === 'fuel' ? 'bar' : 'bar is-notched');
   track.append(fill);
-  root.append(el('span', 'glyph', glyph), track, text);
+  root.append(glyphEl(glyph), track, text);
   return { root, fill, text };
 }
 
@@ -139,7 +141,7 @@ export class Hud {
   /** SPEC-030 D-11: always in the DOM, hidden while `shelter === 'none'`. */
   readonly #shelter = testId(el('div', 'hud-shelter is-hidden'), 'sheltered');
   /** SPEC-042 §4.6: `▲ Wave incoming`, on the weather banner's pill, under the shelter chip. */
-  readonly #wave = testId(el('div', 'hud-wave is-hidden', `${GLYPHS.warn} Wave incoming`), 'hud-wave');
+  readonly #wave = testId(h('div', { class: 'hud-wave is-hidden' }, ...glyphNodes(`${GLYPHS.warn} Wave incoming`)), 'hud-wave');
   /**
    * SPEC-054 §4.5: the flashlight chip — a top-centre row, shown below only.
    * It follows the wave line, which SPEC-042 §4.6 keeps right under the shelter chip.
@@ -303,12 +305,12 @@ export class Hud {
       const wallet = testId(el('div', 'hud-wallet'), 'hud-wallet');
       wallet.setAttribute('aria-label', 'Wallet');
       const tokens = el('span', 'res res-tokens');
-      tokens.append(el('span', 'glyph', GLYPHS.tokens), this.#tokens);
+      tokens.append(glyphEl(GLYPHS.tokens), this.#tokens);
       wallet.append(tokens);
       for (const resource of RESOURCE_IDS) {
         const row = el('span', 'res');
         const count = testId(el('span', 'res-count'), `res-${resource}`);
-        row.append(el('span', 'glyph', RESOURCE_GLYPHS[resource]), count);
+        row.append(glyphEl(RESOURCE_GLYPHS[resource]), count);
         this.#resources[resource] = count;
         this.#resourceRows[resource] = row;
         wallet.append(row);
@@ -334,7 +336,7 @@ export class Hud {
     if (mode === 'flight') {
       this.#progress.append(this.#progressFill, this.#markers);
       this.#progress.setAttribute('aria-label', 'Trip progress');
-      this.#storm.textContent = `${GLYPHS.warn} Ion storm`;
+      setGlyphText(this.#storm, `${GLYPHS.warn} Ion storm`);
       this.#holding.textContent = HOLD_HOSTILES;
       this.#hostiles.classList.add('is-hidden');
       this.#storm.classList.add('is-hidden');
@@ -723,7 +725,7 @@ export class Hud {
             : warning !== null
               ? `${GLYPHS.warn} ${label(warning)} in ${seconds(secondsLeft)}`
               : '';
-        this.#weather.textContent = text;
+        setGlyphText(this.#weather, text);
         this.#weather.classList.toggle('is-hidden', text === '');
         return;
       }
@@ -845,7 +847,7 @@ export class Hud {
       if (left === chip.seconds) continue;
       chip.node.classList.toggle('is-hidden', left < 0);
       if (left >= 0) {
-        chip.node.textContent = `${EFFECT_GLYPHS[kind]} ${seconds(left)}`;
+        setGlyphText(chip.node, `${EFFECT_GLYPHS[kind]} ${seconds(left)}`);
         chip.node.setAttribute('aria-label', `${EFFECT_WORDS[kind]}, ${left} seconds`);
       }
       chip.seconds = left;

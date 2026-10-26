@@ -10,15 +10,16 @@
 import { GLYPHS } from '@/data/glossary';
 import type { ItemId } from '@/data/index';
 import { compareDeltas } from '@/systems/UiHelpers';
-import { el } from '@/ui/dom';
+import { el, h } from '@/ui/dom';
+import { glyphNodes } from '@/ui/iconset';
 
 /** The line's nodes, ready to append; empty when the two compare as nothing. */
 export function compareNodes(worn: ItemId, candidate: ItemId): Node[] {
   const out: Node[] = [];
   for (const part of compareDeltas(worn, candidate)) {
     if (out.length > 0) out.push(document.createTextNode(' · '));
-    if (part.better > 0) out.push(el('span', 'compare-up', `${GLYPHS.better} ${part.text}`));
-    else if (part.better < 0) out.push(el('span', 'compare-down', `${GLYPHS.worse} ${part.text}`));
+    if (part.better > 0) out.push(h('span', { class: 'compare-up' }, ...glyphNodes(`${GLYPHS.better} ${part.text}`)));
+    else if (part.better < 0) out.push(h('span', { class: 'compare-down' }, ...glyphNodes(`${GLYPHS.worse} ${part.text}`)));
     else out.push(el('span', 'compare-plain', part.text));
   }
   return out;

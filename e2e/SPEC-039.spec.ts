@@ -212,7 +212,9 @@ test('5. board: the Wurm mission names its drop, and 25 lithium once the piece i
   await start(page, '/?debug');
   await newSave(page);
   await station(page, 'missions');
-  await expect(page.locator('[data-testid="mission-c1_m3-drop"]')).toHaveText('Boss drop: Rocket Launcher');
+  // SPEC-073 §4.6: the chip drops the `Boss drop:` prefix; the full line is its title.
+  await expect(page.locator('[data-testid="mission-c1_m3-drop"]')).toHaveText('Rocket Launcher');
+  await expect(page.locator('[data-testid="mission-c1_m3-drop"]')).toHaveAttribute('title', 'Boss drop: Rocket Launcher');
   // A mission with no boss objective has no drop line.
   await expect(page.locator('[data-testid="mission-c1_m1-drop"]')).toHaveCount(0);
 
@@ -222,7 +224,7 @@ test('5. board: the Wurm mission names its drop, and 25 lithium once the piece i
     data.inventory.push({ itemId: 'launcher_rocket', qty: 1 });
   });
   await page.locator('[data-testid="station-tab-missions"]').click();
-  await expect(page.locator('[data-testid="mission-c1_m3-drop"]')).toHaveText('Boss drop: 25 lithium');
+  await expect(page.locator('[data-testid="mission-c1_m3-drop"]')).toHaveText('25 lithium');
 });
 
 test('6. the drop: a first kill drops the Rocket Launcher, an owned one pays lithium instead', async ({ page }) => {

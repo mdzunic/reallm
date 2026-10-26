@@ -2556,3 +2556,39 @@ Recorded on the branch: `npm run check` (141 files, 3,610 tests) and the flight,
 - [ ] record a screenshot of each here.
 
 **Not this pass.** The films that import `ship.glb` still show the old tug until a later drop: the prologue's liftoff, "Outbound", "Wreckers" and the Eden interlude.
+
+## PLAN R30 — the Refit: SPEC-073 (M7r)
+
+- **Build:** `feat/ui-redesign`, untagged
+- **Devices:**
+  - desktop: headless full Chromium on the Mac's GPU (Playwright, `--use-angle=metal`), 1440 × 900 at `medium`
+  - phone: the Pixel 5 profile on its side, 844 × 390 at 2×, with touch, headless
+  - hardware: _not run_ (owed, below)
+
+Recorded on the branch: `npm run check` (144 files, 3,635 tests), `node scripts/assets/check.mjs`, and the full e2e suite in the desktop, mobile and phone projects. The first run passed 776 of 785 (6 skipped). Three failed, and the retries settle all three:
+
+- `SPEC-020` AC-25: the font floor. Four Refit labels were 12 px under a panel; they now read `--type-sm`.
+- `SPEC-045` 6a: the quick bar had not laid out yet. It passes alone and with the suites touched since.
+- `cold-start`: it failed only against a dev server that had served a long session of hot edits, and passes on a fresh one.
+
+The retry ran `SPEC-014`, `020`, `034`, `039`, `043`, `044`, `045`, `049` and `073`: 106 passed. `SPEC-073.phone` passed at every `PHONE_VIEWPORTS` size. The frames are in `docs/screenshots/r30/`: 34 `before/` (`main` at 759fe78) and 34 `after/`, from the same script.
+
+| Area | What the headless run showed |
+|---|---|
+| Brand | The boot card and the menu show the drawn wordmark beside the reticle. Both titles still read `ReaLLM`. Every other screen title leads with the reticle |
+| Icons | No emoji is drawn anywhere: on the station's four tabs, the star map, the surface HUD with a toast, and the flight HUD, every glyph is a `.glyph[data-icon]` with its mask painted |
+| Shell | The chamfers are lit. Settings sits on a scrim over the menu, with one frame visible. Pause is 322 px wide with icon keys. The menu column is 240 px |
+| Station rail | On the desktop column, CHARACTER fits beside its icon. On touch the row puts each icon over a whole label: no tab under 56 px and none clipped, at 844, 800, 750, 802, 667 and 1180 wide |
+| Board | Cinder-4 heads its group with its disc, `Chapter 1 · Desert` and `1 open · 4 locked`. Rows read `Under 4:00 → +2 Frag Grenade`, `Rocket Launcher` and `After Black Gold` |
+| Creation | Emblem, `Hits harder, lasts longer.`, `+10 % damage` and `+20 HP`. The blurb is the card's title and description |
+| Star map | `fov` reads 15. `roundness` (the worst planet's \|w ÷ h − 1\|) is 0.012 at 1440 × 900 and 0.021 at 844 × 390. At 60° it was 0.13 and 0.309 |
+| Death | The error icon leads SIGNAL LOST, and the card has its red edge and top light |
+
+**Owed on hardware.** On the laptop and the reference phone, at `medium`:
+
+- [ ] the wordmark and every icon are crisp at the device's ratio, and none shows as a filled square;
+- [ ] the touch rail reads at arm's length, and every tab takes a tap;
+- [ ] settings over the menu and over the station, and pause from the surface and from flight;
+- [ ] the board and the class cards read at a glance, and a hover or long press shows a chip's full line;
+- [ ] the star map's planets are round and in colour on both;
+- [ ] record a screenshot of each here.

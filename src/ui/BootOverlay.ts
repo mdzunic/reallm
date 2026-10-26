@@ -9,6 +9,7 @@
 import type { BootGateUi } from '@/core/Game';
 import { percent } from '@/systems/Format';
 import { el, testId } from '@/ui/dom';
+import { brandHeading } from '@/ui/brand';
 
 export const ASSET_LOAD_FAILED_TEXT = 'Could not load assets — check connection';
 export const START_TEXT = 'START THE GAME';
@@ -54,7 +55,9 @@ export class BootOverlay implements BootGateUi {
 
     // §4.1: the column, in order — wordmark, tagline, bar, status, slow line,
     // error block, start control, foot.
-    const title = el('h1', 'boot-title', 'ReaLLM');
+    // SPEC-073 §4.1: the drawn lockup; the heading's text stays "ReaLLM".
+    const title = el('h1', 'boot-title');
+    brandHeading(title);
     const tagline = el('p', 'boot-tagline', TAGLINE);
 
     const track = el('div', 'boot-bar-track');

@@ -145,7 +145,7 @@ sprite offsets in `src/data/assets.ts`, keep music loops seamless, encode
 ## 5. App icons (SPEC-015 §10.1)
 
 The three PWA icons are **not** Blender's and not new art: they are the shipped
-`public/favicon.svg` mark — a `#0b0f14` field, a `#39c5cf` ring at r 18/64 with
+`public/favicon.svg` mark — a `#0b0f14` field, a `#4c9aff` ring (`--accent`, PLAN R30) at r 18/64 with
 stroke 4/64, an `#e6edf3` core at r 6/64 and four cardinal ticks from r 18/64 to
 r 26/64 — rasterized at three sizes by pure Node.
 

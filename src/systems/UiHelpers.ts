@@ -356,6 +356,17 @@ export function needsLine(reqs: readonly Requirement[]): string {
 }
 
 /**
+ * SPEC-073 §4.6: the board's short form of `needsLine` — `After Black Gold`
+ * for a mission, every other requirement in `requirementItem`'s words —
+ * `After Black Gold · Level 3`. The full line stays the row's `title`.
+ */
+export function needsShort(reqs: readonly Requirement[]): string {
+  return reqs
+    .map((req) => (req.kind === 'mission' ? `After ${MISSIONS[req.id as MissionId]?.title ?? req.id}` : requirementItem(req)))
+    .join(' · ');
+}
+
+/**
  * `"40 → 34 tokens"` (SPEC-031 §4.12): the base token price and what this save
  * actually pays, via the same `discountTokens` the purchase runs (SPEC-010
  * §4.2), so the label can never disagree with the charge — and every amount
@@ -730,6 +741,19 @@ export function bonusRewardText(reward: BonusReward): string {
 /** SPEC-043 §4.2: the board's bonus row — `Bonus: Under 4:00 → +2 Frag Grenade`. */
 export function bonusLine(bonus: MissionBonus): string {
   return `Bonus: ${bonusText(bonus)} → ${bonusRewardText(bonus.reward)}`;
+}
+
+/** SPEC-073 §4.6: the board's bonus chip — `bonusLine` without its `Bonus: ` prefix. */
+export function bonusChip(bonus: MissionBonus): string {
+  return `${bonusText(bonus)} → ${bonusRewardText(bonus.reward)}`;
+}
+
+/** SPEC-039 §4.6: the words `bossDropText` leads with. */
+const BOSS_DROP_PREFIX = 'Boss drop: ';
+
+/** SPEC-073 §4.6: the board's boss-drop chip — `bossDropText` without its `Boss drop: ` prefix. */
+export function bossDropChip(text: string): string {
+  return text.startsWith(BOSS_DROP_PREFIX) ? text.slice(BOSS_DROP_PREFIX.length) : text;
 }
 
 // ------------------------------------------------------- SPEC-056: treasure
@@ -1472,8 +1496,8 @@ export function bossDropText(save: Save, def: MissionDef): string | null {
       const signature = LOOT_TABLE[ENEMIES[objective.enemy].loot].find((entry) => entry.kind === 'signature');
       if (signature === undefined || signature.kind !== 'signature') return null;
       const replay = (save.progress.missionsDone as readonly string[]).includes(def.id);
-      if (replay || ownsItem(save, signature.itemId)) return `Boss drop: ${SIGNATURE_FALLBACK_LITHIUM} lithium`;
-      return `Boss drop: ${ITEM_TABLE[signature.itemId].name}`;
+      if (replay || ownsItem(save, signature.itemId)) return `${BOSS_DROP_PREFIX}${SIGNATURE_FALLBACK_LITHIUM} lithium`;
+      return `${BOSS_DROP_PREFIX}${ITEM_TABLE[signature.itemId].name}`;
     }
   }
   return null;

@@ -29,7 +29,7 @@ export const MARK = {
   /** The design square every radius below is measured on. */
   units: 64,
   field: '#0b0f14',
-  accent: '#39c5cf',
+  accent: '#4c9aff',
   ink: '#e6edf3',
   /** `<circle r="18" stroke-width="4">` — no fill. */
   ring: { radius: 18, stroke: 4 },

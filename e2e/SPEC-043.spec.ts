@@ -145,8 +145,10 @@ test('1. a new save’s board shows c1_m2’s bonus, and none on c1_m1', async (
   await start(page, URL);
   await prepare(page, {});
   await board(page);
-  await expect(page.getByTestId('mission-c1_m2-bonus')).toHaveText('Bonus: Under 4:00 → +2 Frag Grenade');
-  await expect(page.getByTestId('mission-c1_m3-bonus')).toHaveText('Bonus: No deaths → +1 Demolition Charge');
+  // SPEC-073 §4.6: the board's chip drops the `Bonus:` prefix; the full line is its title.
+  await expect(page.getByTestId('mission-c1_m2-bonus')).toHaveText('Under 4:00 → +2 Frag Grenade');
+  await expect(page.getByTestId('mission-c1_m2-bonus')).toHaveAttribute('title', 'Bonus: Under 4:00 → +2 Frag Grenade');
+  await expect(page.getByTestId('mission-c1_m3-bonus')).toHaveText('No deaths → +1 Demolition Charge');
   await expect(page.getByTestId('mission-c1_m1-bonus')).toHaveCount(0);
 });
 

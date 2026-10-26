@@ -62,6 +62,7 @@ import { NEUTRAL_SKY } from '@/views/Environment';
 import { addHubLights, hubSkyMesh, loadHubSky } from '@/views/HubBackdrop';
 import { UiScene, bindTouchScheme } from '@/scenes/base';
 import { createScreen } from '@/ui/Screen';
+import { glyphNodes, iconSvg } from '@/ui/iconset';
 
 const CLASS_IDS = Object.keys(CLASSES) as ClassId[];
 const ATTRIBUTES = ['might', 'vigor', 'agility', 'tech'] as const;
@@ -490,11 +491,16 @@ export class CreationScene extends UiScene<'creation'> {
     );
   }
 
-  /** AC-14: three cards — name, blurb, passive, base attributes; tap selects. */
+  /**
+   * AC-14: three cards; tap selects. SPEC-073 §4.7: the face is the emblem,
+   * the name, the tagline and two perk chips — the blurb, the passive and the
+   * base attributes are the card's description, and the blurb its title.
+   */
   #classCards(): HTMLDivElement {
     const cards = CLASS_IDS.map((id) => {
       const cls = CLASSES[id];
       const base = cls.baseAttributes;
+      const description = `class-${id}-description`;
       return testId(
         h(
           'button',
@@ -504,6 +510,8 @@ export class CreationScene extends UiScene<'creation'> {
             // Review 2026-10 P-16: the card is named by its class, not by the
             // run-on of every line inside it.
             'aria-label': cls.name,
+            'aria-describedby': description,
+            title: cls.blurb,
             'aria-pressed': String(this.#classId === id),
             click: () => {
               this.#classId = id;
@@ -512,11 +520,20 @@ export class CreationScene extends UiScene<'creation'> {
               this.#renderForm();
             },
           },
+          h('span', { class: 'class-emblem', 'aria-hidden': 'true' }, iconSvg(id)),
           h('span', { class: 'class-name' }, cls.name),
-          h('span', { class: 'class-blurb' }, cls.blurb),
-          h('span', { class: 'class-passive' }, passiveText(cls.passive)),
-          // SPEC-044 §4.4: the names spelled out — `Might 3 · Vigor 3 · Agility 1 · Tech 1`.
-          h('span', { class: 'class-base' }, attributeLine(base)),
+          h('span', { class: 'class-tagline' }, cls.tagline),
+          h('span', { class: 'class-perks' }, ...cls.perks.map((perk) => h('span', { class: 'class-perk' }, perk))),
+          h(
+            'span',
+            { class: 'sr-only', id: description },
+            h('span', { class: 'class-blurb' }, cls.blurb),
+            ' ',
+            h('span', { class: 'class-passive' }, passiveText(cls.passive)),
+            ' ',
+            // SPEC-044 §4.4: the names spelled out — `Might 3 · Vigor 3 · Agility 1 · Tech 1`.
+            h('span', { class: 'class-base' }, attributeLine(base)),
+          ),
         ),
         `class-${id}`,
       );
@@ -652,7 +669,7 @@ export class CreationScene extends UiScene<'creation'> {
       h(
         'div',
         { class: 'creation-stats' },
-        h('span', {}, `${GLYPHS.health} ${stats.hp} HP`),
+        h('span', {}, ...glyphNodes(`${GLYPHS.health} ${stats.hp} HP`)),
         h('span', {}, `⚔ ${stats.damage} damage`),
         h('span', {}, `➤ ${stats.speed} m/s`),
       ),

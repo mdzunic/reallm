@@ -76,7 +76,7 @@ describe('the mark (SPEC-015 D-14)', () => {
 
   it('is the favicon colours, which are the app colours (D-9)', () => {
     expect(MARK.field).toBe('#0b0f14');
-    expect(MARK.accent).toBe('#39c5cf');
+    expect(MARK.accent).toBe('#4c9aff');
     expect(MARK.ink).toBe('#e6edf3');
   });
 
@@ -138,10 +138,10 @@ describe('the rasterizer', () => {
     // Between the core and the ring: the field.
     expect(at(Math.round(centre + 12 * unit), centre)).toEqual([0x0b, 0x0f, 0x14, 255]);
     // On the ring.
-    expect(at(Math.round(centre + MARK.ring.radius * unit), centre)).toEqual([0x39, 0xc5, 0xcf, 255]);
+    expect(at(Math.round(centre + MARK.ring.radius * unit), centre)).toEqual([0x4c, 0x9a, 0xff, 255]);
     // On a tick, between ring and tip.
-    expect(at(Math.round(centre + 22 * unit), centre)).toEqual([0x39, 0xc5, 0xcf, 255]);
-    expect(at(centre, Math.round(centre - 22 * unit))).toEqual([0x39, 0xc5, 0xcf, 255]);
+    expect(at(Math.round(centre + 22 * unit), centre)).toEqual([0x4c, 0x9a, 0xff, 255]);
+    expect(at(centre, Math.round(centre - 22 * unit))).toEqual([0x4c, 0x9a, 0xff, 255]);
     // The rounded corner is cut away.
     expect(at(0, 0)[3]).toBe(0);
     // …and the middle of an edge is not.
