@@ -2514,10 +2514,10 @@ describe('main-path echoes, continuity and the text sweep (SPEC-048 §4.7)', () 
     for (const text of [MISSIONS.c1_m1.brief, accept]) expect(text).not.toMatch(/short of the pad|off the pad|Touchdown/);
   });
 
-  it('review 2026-10 S-05: chapter 1 covers the raiders’ suit', () => {
+  it('review 2026-10 S-05, audit 2026-10-26 ST-01: chapter 1 covers the raiders’ suit, and says nothing of lost crews', () => {
     expect(said('c1_m2_accept')).toEqual([
       'command: The oil is the mission. Raiders on the field are not your problem until they are.',
-      'aria: Raiders wear Earth suits. They strip them off the crews Earth lost out here. Do not let it slow your hand.',
+      'aria: Raiders. Same suit as yours — they strip what they find. Do not let it slow your hand.',
     ]);
   });
 
@@ -2535,7 +2535,7 @@ describe('main-path echoes, continuity and the text sweep (SPEC-048 §4.7)', () 
     ]);
     expect(DIALOGUE_LINES['eden_interceptors']?.modal).toBeUndefined();
     expect(DIALOGUE_LINES['eden_interceptors']?.once).toBeUndefined();
-    expect(MISSIONS.c6_m2.brief).toBe('Hold the survey beacon for four minutes while it uplinks. Then file the verdict — or do not.');
+    expect(MISSIONS.c6_m2.brief).toBe('Hold the survey beacon for four minutes while it uplinks, then file the verdict.');
     expect(MISSIONS.c6_m2.brief).not.toMatch(/Hive/);
     expect(FLIGHT_ECHOES).toEqual([{ planet: 'eden', enemy: 'hive_interceptor', line: 'eden_interceptors' }]);
     // The echo's planet sends that enemy in flight, and its line is a clue's.

@@ -574,7 +574,7 @@ export const MISSIONS = {
     id: 'c6_m2',
     title: 'The Verdict',
     // Review 2026-10 S-04: the brief no longer announces the Hive — that is `c6_m2_wave`'s, or the flight's.
-    brief: 'Hold the survey beacon for four minutes while it uplinks. Then file the verdict — or do not.',
+    brief: 'Hold the survey beacon for four minutes while it uplinks, then file the verdict.',
     type: 'main',
     chapter: 6,
     planet: 'eden',
