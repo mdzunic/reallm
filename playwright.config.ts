@@ -19,6 +19,15 @@ const port = Number(process.env.PORT ?? 5173);
 const previewPort = Number(process.env.PREVIEW_PORT ?? 4173);
 const PWA_SPEC = /SPEC-015-pwa\.spec\.ts/;
 /**
+ * That build is a typecheck and a full `vite build` (about 25 s) before the
+ * first test of the run, charged to its global timeout — most of the 20–45 s a
+ * CI part spends before its first test. Only the `pwa` project reads it, so a
+ * CI part whose planned tests include none of that project sets
+ * `E2E_PREVIEW=0` and starts the dev server alone (.github/workflows/check.yml).
+ * Unset, as in `npm run e2e` and the factory's gate, both servers start.
+ */
+const preview = process.env.E2E_PREVIEW !== '0';
+/**
  * SPEC-015 D-8: the specs that need a *phone*, not a narrow desktop window.
  * §12 runs `SPEC-015.spec.ts` in both projects — the shipped rotate heuristic
  * reads `navigator.maxTouchPoints` (D-5), which a Desktop Chrome context
@@ -112,14 +121,18 @@ export default defineConfig({
       reuseExistingServer: true,
       timeout: 120_000,
     },
-    {
-      // A real build, served the way a deploy would serve it. `--strictPort`
-      // so a preview already on 4173 is reused rather than silently answered
-      // from somewhere else.
-      command: `npm run build && npx vite preview --port ${previewPort} --strictPort`,
-      url: `http://localhost:${previewPort}`,
-      reuseExistingServer: true,
-      timeout: 300_000,
-    },
+    ...(preview
+      ? [
+          {
+            // A real build, served the way a deploy would serve it. `--strictPort`
+            // so a preview already on 4173 is reused rather than silently answered
+            // from somewhere else.
+            command: `npm run build && npx vite preview --port ${previewPort} --strictPort`,
+            url: `http://localhost:${previewPort}`,
+            reuseExistingServer: true,
+            timeout: 300_000,
+          },
+        ]
+      : []),
   ],
 });

@@ -103,6 +103,13 @@ jobs:
       # A longer budget needs a longer watcher window (revertWatchMinutes,
       # above): queueing, setup and this step's eighteen minutes must end
       # inside it.
+      #
+      # The global timeout also pays for the web servers, and the preview one
+      # is a full `npm run build` (playwright.config.ts) that only the `pwa`
+      # project reads. The four parts planned without it skip that build
+      # (`E2E_PREVIEW=0`): on 2026-10-26 part 2/5 passed all 159 of its tests
+      # and still failed, its last test ending 2 s inside the sixteen minutes,
+      # with about 25 s of a build it never used charged to them.
       - name: playwright test ${{ matrix.part }}
         timeout-minutes: 18
         env:
@@ -110,6 +117,7 @@ jobs:
           PLAYWRIGHT_JSON_OUTPUT_FILE: e2e-report.json
         run: |
           node scripts/e2e/shard.mjs --part "$PART" --out "$RUNNER_TEMP/e2e-part.txt" --budget-ms 960000
+          grep -q '^\[pwa\] ' "$RUNNER_TEMP/e2e-part.txt" || export E2E_PREVIEW=0
           npx playwright test --test-list "$RUNNER_TEMP/e2e-part.txt" --workers=2 --retries=1 --global-timeout=960000 --add-reporter=github,json
       # The traces of whatever failed (trace: 'retain-on-failure').
       - if: failure()
