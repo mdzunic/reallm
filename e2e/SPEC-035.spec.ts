@@ -365,7 +365,8 @@ test('13. the station header says each thing once, and the footer is not an engi
   const head = page.locator('.screen-head');
   await expect(page.locator('[data-testid="containment-level"]')).toHaveCount(1);
   await expect(head.locator('.containment-level')).toHaveCount(1);
-  expect((await head.innerText()).match(/Containment level/gi) ?? []).toHaveLength(1);
+  // PLAN R33 (P-01): the level's one line, under either of its names.
+  expect((await head.innerText()).match(/(Threat|Containment) level/gi) ?? []).toHaveLength(1);
   expect((await head.innerText()).match(/Command Relay/gi) ?? []).toHaveLength(1);
   await expect(page.locator('.screen-channel')).toHaveText('SUPPLY · REFIT · DISPATCH');
   await expect(page.locator('[data-testid="version-label"]')).not.toContainText('M0 engine');

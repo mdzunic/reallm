@@ -159,7 +159,8 @@ async function walkFrames(page: Page, width: number, height: number, touch = fal
   // Relay` and the line below it carries the one `Containment level`, so the
   // channel said both of them twice. It names what the station is for instead.
   await expect(page.locator('.screen-channel')).toContainText('SUPPLY · REFIT · DISPATCH');
-  await expect(page.locator('[data-testid="containment-level"]')).toHaveText('Containment level 1');
+  // PLAN R33 (P-01): "Threat level" until the notice names it.
+  await expect(page.locator('[data-testid="containment-level"]')).toHaveText('Threat level 1');
   for (const tab of ['shop', 'character', 'missions']) {
     await press(page.locator(`[data-testid="station-tab-${tab}"]`));
     await checkFrame(page, width, height, touch);

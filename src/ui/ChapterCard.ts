@@ -22,13 +22,15 @@ import { el, testId } from '@/ui/dom';
  * containment line does not glitch (§4.2, Motion).
  *
  * SPEC-058 §4.4: the containment line reads `containmentLevel(chapter,
- * iteration)` — the chapter itself on a first run.
+ * iteration)` — the chapter itself on a first run. PLAN R33 (P-01): it is
+ * named by `label` — `containmentLabel`'s "Threat level" before the notice.
  */
 export function showChapterCard(
   host: HTMLElement,
   card: Pick<ChapterCardDef, 'chapter' | 'title' | 'line'>,
   reduceMotion: boolean,
   iteration = 1,
+  label: 'Threat level' | 'Containment level' = 'Containment level',
 ): () => void {
   const layer = testId(el('div', 'chapter-card'), 'chapter-card');
   layer.setAttribute('aria-live', 'polite');
@@ -38,7 +40,7 @@ export function showChapterCard(
     el('p', 'chapter-card-chapter', `CHAPTER ${card.chapter}`),
     el('p', 'chapter-card-title', card.title),
     el('p', 'chapter-card-line', card.line),
-    el('p', 'chapter-card-containment', `containment level ${containmentLevel(card.chapter, iteration)}`),
+    el('p', 'chapter-card-containment', `${label.toLowerCase()} ${containmentLevel(card.chapter, iteration)}`),
   );
   host.append(layer);
   // The class flips after the initial state has committed, so the opacity

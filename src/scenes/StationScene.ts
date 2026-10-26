@@ -29,12 +29,22 @@ import { maxHp, nextInstanceOffered, type Save } from '@/core/Save';
 import type { GameServices } from '@/core/Services';
 import { applyUpdate, updateReady } from '@/core/Updates';
 import type { SceneParams } from '@/core/StateMachine';
-import { DIALOGUE, MEMORY_ANSWERS, MEMORY_PROMPT, PLANET_IDS, PLANETS, type DialogueId, type PlanetId } from '@/data/index';
+import {
+  DIALOGUE,
+  MEMORY_ANSWERS,
+  MEMORY_PROMPT,
+  PLANET_IDS,
+  PLANETS,
+  REPLY_ANSWERS,
+  REPLY_PROMPT,
+  type DialogueId,
+  type PlanetId,
+} from '@/data/index';
 import { ClueTracker } from '@/systems/Clues';
 import { Economy } from '@/systems/Economy';
-import { asideDue, driftLine, HOME_SESSION, keepsakeText, letterDue, letterOf } from '@/systems/Home';
+import { asideDue, driftLine, HOME_SESSION, keepsakeText, letterDue, letterOf, replyDue } from '@/systems/Home';
 import { applySupplies } from '@/systems/Service';
-import { containmentLevel } from '@/systems/Containment';
+import { containmentLabel, containmentLevel, containmentTearDue } from '@/systems/Containment';
 import { Progression } from '@/systems/Progression';
 import { aftermathDue, endingPending, interludeToPlay, LINE_LEDGER, stayReport } from '@/systems/StoryBeats';
 import { instanceNumber, storyContextOf } from '@/systems/StoryContext';
@@ -70,6 +80,8 @@ export const RECALL_DETAIL_TEXT = "Hull breached — ARIA flew you home. The jum
 /** SPEC-069 §4.5, E133: the tow's banner and detail — an empty tank, not a breach. */
 export const TOW_BANNER_TEXT = 'Towed home';
 export const TOW_DETAIL_TEXT = "Out of fuel. The jump's oil is spent; your cargo is aboard.";
+/** PLAN R33 (P-01, *initial tuning*): how long the header reads "Threat level" before it tears. */
+export const CONTAINMENT_TEAR_MS = 1200;
 const HUB_ENVIRONMENT_INTENSITY = 0.9;
 
 /** SPEC-065 §4.6: `depot` is Command Relay's store, after Character. */
@@ -334,6 +346,13 @@ export class StationScene extends UiScene<'station'> {
     // lines are queued now, so the film that follows plays over a dialogue
     // layer that already holds them rather than the other way round.
     this.#debrief(data, params);
+    // PLAN R33 (audit 2026-10-26 ST-03): a tow gets ARIA's word on it — one of
+    // the two, by the notice — queued behind the debrief.
+    if (params.towed === true) {
+      const layer = this.#dialogueLayer();
+      void layer.play('station_towed');
+      void layer.play('station_towed_after');
+    }
     const economy = this.#economy;
     const beats = director(this.services);
     const interlude = interludeToPlay(new Set(data.progress.flags));
@@ -393,6 +412,30 @@ export class StationScene extends UiScene<'station'> {
   }
 
   /**
+   * PLAN R33 (P-01): the header reads "Threat level" for `CONTAINMENT_TEAR_MS`,
+   * then tears into "Containment level" — the chapter card's 240 ms glitch,
+   * once — and `containment_named` keeps it from tearing again. Under reduce
+   * motion the words change with no tear.
+   */
+  #tearContainment(line: HTMLElement, level: number): void {
+    const reduceMotion = this.services.settings.get().reduceMotion;
+    const swap = (): void => {
+      if (!this.#alive) return;
+      line.textContent = `Containment level ${level}`;
+      if (!reduceMotion) line.classList.add('is-torn');
+      if (this.#economy === null) return;
+      this.#economy.setFlag('containment_named');
+      this.services.save.request('mission');
+    };
+    if (reduceMotion) {
+      swap();
+      return;
+    }
+    const timer = setTimeout(swap, CONTAINMENT_TEAR_MS);
+    this.disposer.add(() => clearTimeout(timer));
+  }
+
+  /**
    * SPEC-049 §4.3, §4.5: steps 4 and 5 of the entry — the oldest letter the
    * flags owe (one per entry, E78), then the aside, queued behind it on the
    * shared dialogue layer. Never after an escape (`#storyOnEntry` has returned
@@ -402,18 +445,40 @@ export class StationScene extends UiScene<'station'> {
     if (!this.#alive || !this.#present) return;
     const flags = new Set(data.progress.flags);
     const letter = letterDue(flags);
+    // PLAN R33 (review 2026-10 S-11): letter 3 asks for a reply, right after it
+    // — or at the next entry, when a quit came first (`replyDue`).
+    const reply = letter === 'letter_3' || replyDue(flags);
     const aside = asideDue(flags, this.#awakeQueued);
     // Nothing owed, nothing built: a plain entry leaves the page-lifetime layer
     // as the debrief left it (SPEC-020's font floor measures the panels).
-    if (letter === null && aside === null) return;
+    if (letter === null && aside === null && !reply) return;
     const dialogue = this.#dialogueLayer();
-    if (letter !== null) void dialogue.play(letter);
+    const read = letter !== null ? dialogue.play(letter) : Promise.resolve();
+    if (reply) await this.#askReply(dialogue, read);
     if (aside === 'station_awake') {
       this.#awakeQueued = true;
       void dialogue.play('station_awake');
     } else if (aside === 'station_memory') {
       await this.#askMemory(data, dialogue);
     }
+  }
+
+  /**
+   * PLAN R33 (review 2026-10 S-11): once letter 3 has played, Iris's "Write
+   * back." gets an answer — a `playChoice` like the memory question's, with no
+   * `onBack`. The answer's flag is the reply, ARIA confirms it, and nothing
+   * else changes: letter 4 reads the same whatever was sent.
+   */
+  async #askReply(dialogue: DialogueUI, read: Promise<void>): Promise<void> {
+    await read;
+    if (!this.#alive || !this.#present) return;
+    const index = await dialogue.playChoice(REPLY_PROMPT, REPLY_ANSWERS.map((answer) => answer.label));
+    const answer = REPLY_ANSWERS[index];
+    const economy = this.#economy;
+    if (answer === undefined || economy === null || !this.#alive) return;
+    economy.setFlag(answer.flag);
+    void dialogue.play('reply_sent');
+    this.services.save.request('mission');
   }
 
   /**
@@ -587,7 +652,17 @@ export class StationScene extends UiScene<'station'> {
     const headText = screen.root.querySelector('.screen-head-text');
     // §4.12: one containment line in the header, carrying the `containment-level`
     // name as both a class and a test id (AC-37) — `station-containment` styles it.
-    headText?.append(testId(h('p', { class: 'station-containment containment-level' }, `Containment level ${containment}`), 'containment-level'));
+    // PLAN R33 (P-01): the fiction's "Threat level" until the notice names it;
+    // the first entry after the notice tears it into the Warden's word, once.
+    const flags = new Set<string>(data?.progress.flags ?? []);
+    const iteration = data?.meta.iteration ?? 1;
+    const tear = containmentTearDue(flags, iteration);
+    const levelLine = testId(
+      h('p', { class: 'station-containment containment-level' }, `${tear ? 'Threat level' : containmentLabel(flags, iteration)} ${containment}`),
+      'containment-level',
+    );
+    headText?.append(levelLine);
+    if (tear) this.#tearContainment(levelLine, containment);
     // AC-25 / SPEC-031 §4.5: a recall is named under the channel line.
     // SPEC-042 §4.5: the banner keeps its words (SPEC-013's e2e pins them), and
     // what the recall cost — and did not — goes on the line beside it.

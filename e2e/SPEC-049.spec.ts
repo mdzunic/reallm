@@ -278,7 +278,9 @@ test('4. letter 5 is letter 1 again, then ARIA, the date, and the rating with an
 test('5. chapter 3 done: the mission clock, then the memory question on the next entry, then neither (§4.5)', async ({ page }) => {
   await start(page, URL);
   await prepare(page, {
-    flags: ['chapter1_done', 'chapter2_done', 'chapter3_done', 'letter1_read', 'letter2_read', 'letter3_read'],
+    // PLAN R33 (SPEC-076 §4.2): letter 3 read before chapter 4 owes a reply, so
+    // the asides' saves have answered it; `e2e/SPEC-076` plays the reply itself.
+    flags: ['chapter1_done', 'chapter2_done', 'chapter3_done', 'letter1_read', 'letter2_read', 'letter3_read', 'reply_none'],
     playtimeSec: 9000,
   });
   await station(page);
@@ -419,15 +421,16 @@ test('8. with the restart and the roof on file, the confession names the medical
   await page.evaluate(() => window.__reallm.playDialogue('c5_m3_aria'));
   await expect(dialogue(page)).toHaveClass(/is-modal/);
   await expect(text(page)).toHaveText('She is not lying. I am part of the system. I have kept you on task since the first sand.');
-  // Enter through it: nine lines with no optional clue, the restart and the roof
-  // (review 2026-10 S-15 and S-06 name the Warden, the raiders and the fighters).
+  // Enter through it: ten lines with no optional clue, the restart and the roof
+  // (review 2026-10 S-15 and S-06 name the Warden, the raiders and the fighters;
+  // PLAN R33 gives Earth Command one line at the turn).
   let presses = 0;
   while ((await dialogue(page).isVisible()) && presses < 14) {
     await enter(page);
     presses++;
   }
   await expect(dialogue(page)).toBeHidden();
-  expect(presses).toBe(9);
+  expect(presses).toBe(10);
   await page.getByTestId('station-tab-comms').click();
   const lines = (await commsLines(page)).join('\n');
   expect(lines).toContain('There is no medical frame.');
@@ -508,7 +511,7 @@ test('10. the keepsake reads T4 on every view after the signal and T5 after chap
 
   // `min(9999, floor(playtimeSec / 60))`: a very long run reads the cap.
   await prepare(page, {
-    flags: ['chapter1_done', 'chapter2_done', 'chapter3_done', 'letter1_read', 'letter2_read', 'letter3_read'],
+    flags: ['chapter1_done', 'chapter2_done', 'chapter3_done', 'letter1_read', 'letter2_read', 'letter3_read', 'reply_none'],
     playtimeSec: 10_000_000,
   });
   await station(page);
@@ -522,7 +525,7 @@ test('10. the keepsake reads T4 on every view after the signal and T5 after chap
 test('11. Enter on a focused answer sets only its flag, and the reply waits on screen (§4.5)', async ({ page }) => {
   await start(page, URL);
   await prepare(page, {
-    flags: ['chapter1_done', 'chapter2_done', 'chapter3_done', 'letter1_read', 'letter2_read', 'letter3_read', 'clue_awake'],
+    flags: ['chapter1_done', 'chapter2_done', 'chapter3_done', 'letter1_read', 'letter2_read', 'letter3_read', 'reply_none', 'clue_awake'],
   });
   await station(page);
   await readModal(page, ['Can I ask you something, for the file?']);

@@ -12,7 +12,7 @@
 // is done, so a letter the station has not played yet still has its place.
 import type { Save } from '@/core/Save';
 import { DIALOGUE, type DialogueDef, type DialogueId } from '@/data/index';
-import { notesModel, type NotesModel } from '@/systems/Clues';
+import { notesModel, type NotesModel, type RatingGrade } from '@/systems/Clues';
 import { lettersDone } from '@/systems/Home';
 import { fillLine, recordOf, storyContextOf, type StoryContext } from '@/systems/StoryContext';
 import { h, testId } from '@/ui/dom';
@@ -51,6 +51,15 @@ export const NOTES_UNSEEN: { mark(save: object): void; clear(save: object): void
  * order and then a blank line per clue still missing. With nothing found, only
  * `notes-empty`.
  */
+/**
+ * SPEC-048 §4.4: the rating line — `Command rating 0.91 — an acceptable run`.
+ * PLAN R33 (review 2026-10 S-16): before the notice there is no grade, and the
+ * rating reads `(provisional)`, so the stay ending's words are not spent early.
+ */
+export function ratingText(rating: number, grade: RatingGrade | null): string {
+  return grade === null ? `Command rating ${rating.toFixed(2)} (provisional)` : `Command rating ${rating.toFixed(2)} — ${grade}`;
+}
+
 export function renderNotes(model: NotesModel, fill: (text: string) => string): HTMLElement {
   // SPEC-049 §4.3: absent until a chapter is done; with nothing found, under the empty line.
   const letters = lettersDone(model.flags).length === 0 ? null : renderLetters(model.flags, fill);
@@ -61,9 +70,7 @@ export function renderNotes(model: NotesModel, fill: (text: string) => string): 
     'div',
     { class: 'notes' },
     testId(h('p', { class: 'notes-count' }, `Recorded ${model.found} of ${model.total}`), 'notes-count'),
-    model.rating === null || model.grade === null
-      ? null
-      : testId(h('p', { class: 'notes-rating' }, `Command rating ${model.rating.toFixed(2)} — ${model.grade}`), 'notes-rating'),
+    model.rating === null ? null : testId(h('p', { class: 'notes-rating' }, ratingText(model.rating, model.grade)), 'notes-rating'),
     ...model.chapters.map((chapter) =>
       testId(
         h(

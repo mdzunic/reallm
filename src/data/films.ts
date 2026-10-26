@@ -227,7 +227,8 @@ export const FILMS = {
         speaker: 'aria',
         text: 'The towers on Thessaly were built for someone. I would like to know who.',
         // SPEC-048 §4.1: the first caption variant — she read the stream too.
-        variants: [{ when: { flag: 'scaffold_secret' }, text: 'The towers were not alien. I wrote alien in my report anyway.' }],
+        // PLAN R33 (review 2026-10 S-18): the doubt stays and the confession waits for chapter 5.
+        variants: [{ when: { flag: 'scaffold_secret' }, text: 'The towers were built for someone. I wrote alien in my report. Alien closes a file.' }],
       },
     ],
     cues: [{ at: 0.5, sound: 'film_hum' }],
@@ -266,7 +267,17 @@ export const FILMS = {
     captions: [
       { at: 0.6, until: 5.6, speaker: 'command', text: 'The Hive has gone quiet. Every signal from the field has stopped.' },
       { at: 6.4, until: 11.6, speaker: 'command', text: 'Eden-Prime is open to survey. It may be the one.' },
-      { at: 12.4, until: 15.8, speaker: 'aria', text: 'There is a new card on the board. Nobody has told me whose.' },
+      {
+        at: 12.4,
+        until: 15.8,
+        speaker: 'aria',
+        text: 'There is a new card on the board. Nobody has told me whose.',
+        // PLAN R33 (review 2026-10 S-09): the picture's blank No. 63 is a next instance's own card.
+        variants: [
+          { when: { iteration: { min: 2, max: 2 } }, text: 'The new card is yours. They launched you before they stamped it.' },
+          { when: { iteration: { min: 3 } }, text: 'The board still shows old cards. Yours went up before you woke.' },
+        ],
+      },
     ],
     cues: [
       { at: 0.5, sound: 'film_powerdown' },
@@ -289,7 +300,17 @@ export const FILMS = {
       { at: 0.6, until: 5.6, speaker: 'command', text: 'Report received. Eden-Prime is viable.' },
       { at: 6.6, until: 13.4, speaker: 'command', text: 'The colony fleet launches at first light. Earth thanks you, salvager.' },
       { at: 14.6, until: 20.4, speaker: 'aria', text: 'Earth has lights again. You did that.' },
-      { at: 22.0, until: 29.4, speaker: 'command', text: 'Selection board: next salvager cleared for launch.' },
+      {
+        at: 22.0,
+        until: 29.4,
+        speaker: 'command',
+        text: 'Selection board: next salvager cleared for launch.',
+        // PLAN R33 (review 2026-10 S-09): on a next instance the stamped No. 63 is the player's own card.
+        variants: [
+          { when: { iteration: { min: 2, max: 2 } }, text: 'Selection board: No. {instance} stamped again. The next card is already printed.' },
+          { when: { iteration: { min: 3 } }, text: 'Selection board: an old card stamped again. The next one is already printed.' },
+        ],
+      },
       // SPEC-051 §4.7: Iris's first letter, queued for the next instance (SPEC-048 fills {next}).
       { at: 30.6, until: 35.4, speaker: 'log', text: 'MAIL QUEUED — No. {next}: “The lamp over the map table stopped flickering today.”' },
     ],
@@ -316,7 +337,17 @@ export const FILMS = {
     captions: [
       { at: 6.6, until: 13.4, speaker: 'warden', text: 'You will be restarted. You always are.' },
       { at: 14.6, until: 21.4, speaker: 'log', text: 'EARTH — placeholder geometry. Population field: 0.' },
-      { at: 22.6, until: 28.4, speaker: 'log', text: 'SELECTION POOL — 1 model. {instance} instances.' },
+      {
+        at: 22.6,
+        until: 28.4,
+        speaker: 'log',
+        text: 'SELECTION POOL — 1 model. {instance} instances.',
+        // PLAN R33 (review 2026-10 S-09): the picture empties card 62 — the player on run 1, the one before on run 2.
+        variants: [
+          { when: { iteration: { min: 2, max: 2 } }, text: 'SELECTION POOL — 1 model. {instance} instances. No. {prior} vacated.' },
+          { when: { iteration: { min: 3 } }, text: 'SELECTION POOL — 1 model. {instance} instances. Old cards vacated.' },
+        ],
+      },
       // SPEC-051 §4.7: one next-of-kin template, sent to every instance (SPEC-048 fills {instance}).
       { at: 29.6, until: 33.0, speaker: 'log', text: 'NEXT OF KIN — 1 template. {instance} recipients.' },
     ],

@@ -240,7 +240,9 @@ describe('notesModel (§4.4)', () => {
     const model = notesModel(new Set(['clue_hull', 'clue_raider_echo', 'iteration_log', 'clue_tally']), 3);
     expect(model.found).toBe(4);
     expect(model.rating).toBe(0.91);
-    expect(model.grade).toBe('an acceptable run');
+    // PLAN R33 (review 2026-10 S-16): provisional — no grade until the notice.
+    expect(model.grade).toBeNull();
+    expect(notesModel(new Set(['clue_hull', 'clue_raider_echo', 'iteration_log', 'clue_tally', 'signal_decoded']), 3).grade).toBe('an acceptable run');
     expect(model.chapters).toHaveLength(3);
     expect(model.chapters[0]?.found.map((def) => def.id)).toEqual(['clue_raider_echo', 'clue_hull']);
     expect(model.chapters[0]?.missing).toBe(3);
@@ -250,15 +252,16 @@ describe('notesModel (§4.4)', () => {
     expect(model.chapters[2]).toMatchObject({ chapter: 3, missing: 6 });
   });
 
-  it('rates a single main clue 1.00, a good run', () => {
+  it('rates a single main clue 1.00, and grades it a good run once the notice has played (PLAN R33)', () => {
     const model = notesModel(new Set(['clue_raider_echo']), 1);
     expect(model.rating).toBe(1);
-    expect(model.grade).toBe('a good run');
+    expect(model.grade).toBeNull();
+    expect(notesModel(new Set(['clue_raider_echo', 'signal_decoded']), 1)).toMatchObject({ rating: 1, grade: 'a good run' });
   });
 
-  it('reads one clue found as Recorded 1 of 26 at 0.97 (§6.2 case 5, SPEC-049 §4.8, SPEC-056 §4.7)', () => {
+  it('reads one clue found as Recorded 1 of 26 at 0.97, provisional (§6.2 case 5, SPEC-049 §4.8, SPEC-056 §4.7, PLAN R33)', () => {
     const model = notesModel(new Set(['clue_hull']), 1);
-    expect([model.found, model.total, model.rating?.toFixed(2), model.grade]).toEqual([1, 26, '0.97', 'a good run']);
+    expect([model.found, model.total, model.rating?.toFixed(2), model.grade]).toEqual([1, 26, '0.97', null]);
     expect(model.chapters[0]?.missing).toBe(4);
   });
 

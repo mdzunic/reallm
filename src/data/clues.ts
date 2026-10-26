@@ -305,6 +305,14 @@ export const CLUES: readonly ClueDef[] = [
     record: {
       title: 'Too fast for hands',
       text: 'A log in the Cinder-4 vault: instance/55 opened the lock in 0.3 seconds, then learned to slow down.',
+      // PLAN R33 (audit 2026-10-26 ST-07): before the notice, a number and no `instance/`.
+      variants: [
+        {
+          when: { all: [{ not: 'signal_decoded' }, { iteration: { max: 1 } }] },
+          title: 'Too fast for hands',
+          text: 'A log in the Cinder-4 vault, numbered 55. Whoever wrote it opened the lock in 0.3 seconds, then learned to slow down.',
+        },
+      ],
     },
   },
   {
@@ -314,7 +322,17 @@ export const CLUES: readonly ClueDef[] = [
     offTask: true,
     trigger: { kind: 'cache', cache: 'vetra_vault' },
     lines: ['shard_vetra'],
-    record: { title: 'The cold does not reach', text: 'A log in the Vetra vault: instance/46 could not feel the cold, and the suit was fine.' },
+    record: {
+      title: 'The cold does not reach',
+      text: 'A log in the Vetra vault: instance/46 could not feel the cold, and the suit was fine.',
+      variants: [
+        {
+          when: { all: [{ not: 'signal_decoded' }, { iteration: { max: 1 } }] },
+          title: 'The cold does not reach',
+          text: 'A log in the Vetra vault, numbered 46. Its writer could not feel the cold, and the suit was fine.',
+        },
+      ],
+    },
   },
   {
     id: 'shard_thessaly',
@@ -326,6 +344,13 @@ export const CLUES: readonly ClueDef[] = [
     record: {
       title: 'Eleven arches',
       text: 'A log in the Thessaly vault: instance/41 counted the same eleven arches going in and coming out.',
+      variants: [
+        {
+          when: { all: [{ not: 'signal_decoded' }, { iteration: { max: 1 } }] },
+          title: 'Eleven arches',
+          text: 'A log in the Thessaly vault, numbered 41. Its writer counted the same eleven arches going in and coming out.',
+        },
+      ],
     },
   },
   {
@@ -335,7 +360,11 @@ export const CLUES: readonly ClueDef[] = [
     offTask: true,
     trigger: { kind: 'cache', cache: 'ferrum_vault' },
     lines: ['shard_ferrum'],
-    record: { title: 'The meter you call breath', text: 'A log in the Ferrum vault: instance/28 says fatigue is a number here too.' },
+    record: {
+      title: 'The meter you call breath',
+      text: 'A log in the Ferrum vault: instance/28 says fatigue is a number here too.',
+      variants: [{ when: { all: [{ not: 'signal_decoded' }, { iteration: { max: 1 } }] }, title: 'The meter you call breath', text: 'A log in the Ferrum vault, numbered 28. It says fatigue is a number here too.' }],
+    },
   },
   {
     id: 'shard_hive',
@@ -356,3 +385,10 @@ export const CLUES: readonly ClueDef[] = [
     record: { title: 'Checkpoint written', text: 'The machine room under Eden logged a checkpoint of instance/{instance}. Loss: acceptable.' },
   },
 ];
+
+/**
+ * PLAN R33 (audit 2026-10-26 ST-05): the line a wave plays when its clue was
+ * found before it — `clue_never_hers` on the flight to Eden leaves the
+ * beacon's wave with nothing to say, so it says this instead.
+ */
+export const WAVE_FOUND_LINES: Readonly<Partial<Record<WaveId, DialogueId>>> = { eden_final: 'c6_m2_hold' };

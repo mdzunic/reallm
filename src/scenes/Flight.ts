@@ -39,6 +39,7 @@ import {
 } from '@/data/index';
 import { ClueTracker, FlagView, type ClueScene } from '@/systems/Clues';
 import { computePlayerStats } from '@/systems/Combat';
+import { containmentLabel } from '@/systems/Containment';
 import { Economy } from '@/systems/Economy';
 import { tipDue, tipKey } from '@/systems/Guidance';
 import { CARD, cardDue, cardKey, contactDue, contactKey, flightEchoDue, LINE_LEDGER, missionLinePlays } from '@/systems/StoryBeats';
@@ -57,6 +58,7 @@ import {
   LANDING_SECONDS,
   LAUNCH_SECONDS,
   MISSILE,
+  NAV_LIMIT,
   RAIL,
   runSkip,
   SIGNALS,
@@ -179,6 +181,8 @@ export class FlightScene extends UiScene<'flight'> {
   #fuelTipAsked = false;
   #missileTipAsked = false;
   #corridorTipAsked = false;
+  /** PLAN R33 (audit 2026-10-26 ST-06): this trip has reached the nav limit and asked for ARIA's line. */
+  #navLimitAsked = false;
   /** SPEC-070 §4.6: the lock bracket is up — `sceneInfo.lock`. */
   #lockShown = false;
   #skipHint: HTMLParagraphElement | null = null;
@@ -297,6 +301,7 @@ export class FlightScene extends UiScene<'flight'> {
     // SPEC-048 §4.3: the clue tracker hears a kill before the missions do, so
     // the kill that completes a kill clue's mission still counts as made during it.
     this.#watchClues(save, economy, bus);
+    this.#watchAriaLines(save, economy, bus);
     const missions = new Missions(save, economy, bus, 'flight', this.#planet.id);
     this.#missions = missions;
     const flight = new Flight(
@@ -527,7 +532,14 @@ export class FlightScene extends UiScene<'flight'> {
     let remove: (() => void) | null = null;
     const timer = setTimeout(() => {
       // SPEC-058 §4.4: the containment line reads the save's capped level.
-      remove = showChapterCard(host, CHAPTER_CARDS[planet], reduceMotion, save.meta.iteration);
+      remove = showChapterCard(
+        host,
+        CHAPTER_CARDS[planet],
+        reduceMotion,
+        save.meta.iteration,
+        // PLAN R33 (P-01): "threat level" until the notice names it.
+        containmentLabel(new Set(save.progress.flags), save.meta.iteration),
+      );
     }, CARD.delay * 1000);
     // SPEC-063 §4.5: the moment the card will be gone, for a contact card due under it.
     this.#chapterCardGoneAt = performance.now() + (CARD.delay + CARD.show + CARD.fade) * 1000;
@@ -994,6 +1006,11 @@ export class FlightScene extends UiScene<'flight'> {
       this.#missileTipAsked = true;
       this.#showTip('flight_missile');
     }
+    // PLAN R33 (audit 2026-10-26 ST-06): the nav limit, once a trip; its line plays once a save.
+    if (!this.#navLimitAsked && Math.hypot(flight.ship.x, flight.ship.y) >= NAV_LIMIT - 0.5) {
+      this.#navLimitAsked = true;
+      this.#ariaLine('flight_nav_limit');
+    }
     // SPEC-035 §4.11: the hum rides the throttle.
     this.#stepEngineHum(dt, flight.ship.throttle);
 
@@ -1375,6 +1392,46 @@ export class FlightScene extends UiScene<'flight'> {
       if (id === undefined) continue;
       this.#playLine(save, id);
     }
+  }
+
+  /**
+   * PLAN R33 (audit 2026-10-26 ST-06): ARIA's word on the salvage signals and
+   * the nav limit, the first time a save meets each. Each line is gated on its
+   * flag, and the flag is set as the line starts — the clue rule — so a line
+   * dropped by a full queue is heard the next time.
+   */
+  #watchAriaLines(save: Save | null, economy: Economy, bus: EventBus<GameEvents>): void {
+    this.disposer.add(
+      bus.on(
+        'flight:signal',
+        () => {
+          if (save !== null && !save.progress.flags.includes('aria_signals')) this.#ariaLine('flight_signals');
+        },
+        this,
+      ),
+    );
+    this.disposer.add(
+      bus.on(
+        'dialogue:started',
+        ({ id }) => {
+          const flag = id === 'flight_signals' ? 'aria_signals' : id === 'flight_nav_limit' ? 'aria_nav_limit' : null;
+          if (flag === null) return;
+          economy.setFlag(flag);
+          this.services.save.request('checkpoint');
+        },
+        this,
+      ),
+    );
+  }
+
+  /** PLAN R33: one of ARIA's flight lines, non-modal, on the shared dialogue layer. */
+  #ariaLine(id: DialogueId): void {
+    void dialogueLayer(this.services.uiRoot, this.services.events, {
+      input: this.services.input,
+      saveKey: () => this.services.save.current,
+      typewriter: () => this.services.settings.get().typewriter,
+      speed: () => this.services.settings.get().dialogueSpeed,
+    }).play(id, { modal: false });
   }
 
   /**

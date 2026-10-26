@@ -276,7 +276,10 @@ export const DIALOGUE = {
         text: 'I walked into the beacon. I woke up at the relay. The door is real. It is not an exit.',
         when: { prior: 'escape' },
       },
-      { speaker: 'log', text: 'If you are hearing this, you are me. Do not trust the debrief.' },
+      // PLAN R33 (review 2026-10 S-17): run 1's log warns without naming the
+      // twist; "you are me" is literal only on a next instance.
+      { speaker: 'log', text: 'If you find this, do not trust the debrief.', when: { iteration: { max: 1 } } },
+      { speaker: 'log', text: 'If you are hearing this, you are me. Do not trust the debrief.', when: { iteration: { min: 2 } } },
       { speaker: 'log', text: 'Signed: Iteration {prior}.' },
       { speaker: 'player', text: 'That is my voice.' },
       { speaker: 'aria', text: 'It is a common enough voice. Deliver the water, salvager.', when: { not: 'chapter5_done' } },
@@ -400,7 +403,12 @@ export const DIALOGUE = {
   },
   c4_m3_accept: {
     id: 'c4_m3_accept',
-    lines: [{ speaker: 'aria', text: 'The titan sits on the reactor core. Kill it, then feed the core the lithium and I can decode the signal.' }],
+    lines: [
+      { speaker: 'aria', text: 'The titan sits on the reactor core. Kill it, then feed the core the lithium and I can decode the signal.' },
+      // PLAN R33 (review 2026-10 S-26): chapter 4's doubt on the main path, with its cover in it.
+      { speaker: 'aria', text: 'Somebody built that core before we came. I am not going to ask who.', when: { iteration: { max: 1 } } },
+      { speaker: 'aria', text: 'Somebody built that core before we came. We both know who.', when: { iteration: { min: 2 } } },
+    ],
   },
   /**
    * SPEC-048 §4.5: the Warden's notice names what the player found — modal, so
@@ -418,7 +426,9 @@ export const DIALOGUE = {
       // SPEC-058 §4.6: the notice names how the instance before this one ended.
       { speaker: 'warden', text: 'Prior instance: terminated normally.', when: { prior: 'stay' } },
       { speaker: 'warden', text: 'Prior instance: disconnected at the beacon. Restored.', when: { prior: 'escape' } },
-      { speaker: 'warden', text: 'Subject exhibits off-task attention.' },
+      // PLAN R33 (review 2026-10 S-16): only a player who went looking is off-task.
+      { speaker: 'warden', text: 'Subject exhibits off-task attention.', when: { offTask: { min: 1 } } },
+      { speaker: 'warden', text: 'Subject exhibits no off-task attention. Flagged regardless.', when: { offTask: { max: 0 } } },
       { speaker: 'warden', text: 'Retained a repeated line. Cinder-4.', when: { flag: 'clue_scav_echo' } },
       { speaker: 'warden', text: 'Accessed a prior instance’s flight log. Vetra.', when: { flag: 'iteration_log' } },
       { speaker: 'warden', text: 'Queried environment parameters. Thessaly.', when: { flag: 'scaffold_secret' } },
@@ -550,7 +560,12 @@ export const DIALOGUE = {
         text: 'I told you Earth flew other ships before the Selection. There were no other ships. There was you.',
       },
       // Review 2026-10 S-06: the raiders (SPEC-064) and the fighters (SPEC-063) were earlier instances.
-      { speaker: 'aria', text: 'The raiders wore your suit because it was theirs. The fighters fly your tug because it was theirs.' },
+      // PLAN R33 (audit 2026-10-26 ST-04): the armoured tug (R29) is not the
+      // fighters' hull; until the films are re-rendered, ARIA says why.
+      {
+        speaker: 'aria',
+        text: 'The raiders wore your suit because it was theirs. The fighters are the tugs they flew before Command armoured yours.',
+      },
       { speaker: 'aria', text: 'The scavenger said the same words twice, and I blamed the sand.', when: { flag: 'clue_scav_echo' } },
       {
         speaker: 'aria',
@@ -609,6 +624,8 @@ export const DIALOGUE = {
         when: { all: [{ any: [{ flag: 'memory_roof' }, { flag: 'memory_tap' }, { flag: 'memory_stair' }] }, { iteration: { min: 3 } }] },
       },
       { speaker: 'aria', text: 'I do not know what is outside either. That part was never in my brief.' },
+      // PLAN R33 (audit 2026-10-26, Voices): the operator, indifferent at the turn.
+      { speaker: 'command', text: 'Telemetry irregular. Disregard. Proceed to Eden-Prime.' },
       { speaker: 'aria', text: 'Eden-Prime is unlocked. I am still flying the ship, if you still want me to.' },
     ],
   },
@@ -641,7 +658,8 @@ export const DIALOGUE = {
   },
   c6_m1_accept: {
     id: 'c6_m1_accept',
-    lines: [{ speaker: 'aria', text: 'Spring, forest, ridge. Survey all three. Eden is everything the brief promised, which is what worries me.' }],
+    // PLAN R33 (audit 2026-10-26): no fourth "everything the brief promised".
+    lines: [{ speaker: 'aria', text: 'Spring, forest, ridge. Survey all three. Tell me if anything here looks planted.' }],
   },
   /** SPEC-048 §4.7: `c6_m1.onStage[1]`, the spring surveyed. */
   c6_m1_spring: {
@@ -651,6 +669,8 @@ export const DIALOGUE = {
         speaker: 'aria',
         text: 'Spring logged. Four degrees. I sampled six points and it is four degrees at all six, to the third decimal.',
       },
+      // PLAN R33 (audit 2026-10-26 ST-02): the walls, mains and beds SPEC-067/068 laid out.
+      { speaker: 'aria', text: 'Field walls. Water mains. Flower beds. Somebody laid this out for colonists who have not left yet.' },
     ],
   },
   /** SPEC-048 §4.7: `c6_m1.onStage[2]`, the forest surveyed — chapter 6's main-path echo. */
@@ -683,17 +703,32 @@ export const DIALOGUE = {
     id: 'c6_m2_wave',
     lines: [{ speaker: 'aria', text: 'Hive signatures. The Queen is dead and they are still coming. They were never hers.' }],
   },
+  /**
+   * PLAN R33 (audit 2026-10-26 ST-05): the beacon's wave when `clue_never_hers`
+   * was found on the flight in — `WAVE_FOUND_LINES.eden_final`.
+   */
+  c6_m2_hold: {
+    id: 'c6_m2_hold',
+    once: true,
+    lines: [{ speaker: 'aria', text: 'Every one of them, for one beacon. Hold it.' }],
+  },
   c6_choice_intro: {
     id: 'c6_choice_intro',
     modal: true,
     once: true,
     lines: [
       { speaker: 'aria', text: 'The beacon is clear. The uplink is open and it is pointed at whoever is actually listening.' },
-      { speaker: 'aria', text: 'You can file the report. Earth is saved, inside the fiction, and the run closes as a good one.' },
+      // PLAN R33 (audit 2026-10-26; review S-11, S-16): Iris is in the choice, and no grade is promised.
+      { speaker: 'aria', text: 'You can file it. Earth gets its lights, Iris gets her lamp, and the run closes.' },
       // SPEC-058 §4.6: what the last instance chose here.
       { speaker: 'aria', text: 'Last time you filed it. It is the same beacon.', when: { prior: 'stay' } },
       { speaker: 'aria', text: 'Last time you walked into it. It is the same beacon.', when: { prior: 'escape' } },
       { speaker: 'aria', text: 'Or you refuse, and the beacon is not a beacon. I cannot tell you which side of it I am on.' },
+      {
+        speaker: 'aria',
+        text: 'You wrote to her once. If you refuse, I do not know who reads her letters.',
+        when: { any: [{ flag: 'reply_wurm' }, { flag: 'reply_home' }] },
+      },
     ],
   },
   c6_m2_done: {
@@ -736,7 +771,8 @@ export const DIALOGUE = {
     lines: [
       { speaker: 'player', text: 'No. I am not filing anything.' },
       { speaker: 'warden', text: 'There is nothing outside for you to be.' },
-      { speaker: 'player', text: 'Then I will find that out myself.' },
+      // PLAN R33 (audit 2026-10-26): the answer the Warden's line asks for.
+      { speaker: 'player', text: 'Then I will be nothing, somewhere you are not.' },
       { speaker: 'aria', text: 'Beacon is open. Go. I hope it is not quiet out there.' },
     ],
   },
@@ -805,6 +841,12 @@ export const DIALOGUE = {
       { speaker: 'aria', text: 'That is her first letter. Word for word. I checked it twice.' },
       { speaker: 'player', text: 'Read me the date.' },
       { speaker: 'aria', text: 'There is no date. There never was, on any of them.' },
+      // PLAN R33 (review 2026-10 S-11): a reply was sent; no letter answers it.
+      {
+        speaker: 'aria',
+        text: 'You wrote back. Her next letter did not answer it. None of them ever answer.',
+        when: { any: [{ flag: 'reply_wurm' }, { flag: 'reply_home' }] },
+      },
       {
         speaker: 'aria',
         text: 'Command rates every run, by the way. It takes three points off every time you look at something it did not send you to.',
@@ -839,6 +881,67 @@ export const DIALOGUE = {
   restart_3: {
     id: 'restart_3',
     lines: [{ speaker: 'aria', text: 'Restarted. You know what that means now. So do I.' }],
+  },
+  /** PLAN R33 (review 2026-10 S-11): after the reply to letter 3 is chosen. */
+  reply_sent: {
+    id: 'reply_sent',
+    lines: [
+      { speaker: 'aria', text: 'Queued for the next relay drop. It goes home with the grain.', when: { any: [{ flag: 'reply_wurm' }, { flag: 'reply_home' }] } },
+      { speaker: 'aria', text: 'I will mark it read.', when: { flag: 'reply_none' } },
+    ],
+  },
+  /**
+   * PLAN R33 (audit 2026-10-26 ST-03): the station after a tow, once a
+   * session — before the notice, a doubt with its own cover…
+   */
+  station_towed: {
+    id: 'station_towed',
+    once: true,
+    lines: [
+      {
+        speaker: 'aria',
+        text: 'Relay pulled us back on a line I did not know we had. I will not complain about it.',
+        when: { all: [{ not: 'signal_decoded' }, { iteration: { max: 1 } }] },
+      },
+    ],
+  },
+  /** …and after it, or on a next instance, what it was. The cargo came home with the ship (E5). */
+  station_towed_after: {
+    id: 'station_towed_after',
+    once: true,
+    lines: [
+      {
+        speaker: 'aria',
+        text: 'That was not a tow. Nothing pulled us. The trip ended early, and the hold came with it.',
+        when: { any: [{ flag: 'signal_decoded' }, { iteration: { min: 2 } }] },
+      },
+    ],
+  },
+  /**
+   * PLAN R33 (audit 2026-10-26 ST-06): the first salvage signal of a save
+   * (`aria_signals`, set as it starts) — non-modal, in flight.
+   */
+  flight_signals: {
+    id: 'flight_signals',
+    lines: [
+      { speaker: 'aria', text: 'Salvage signal. Somebody leaves these where you will look.', when: { not: 'aria_signals' } },
+    ],
+  },
+  /** …and the first time a ship reaches the nav limit (`aria_nav_limit`): a doubt before the notice, plain after. */
+  flight_nav_limit: {
+    id: 'flight_nav_limit',
+    lines: [
+      {
+        speaker: 'aria',
+        text: 'That is the edge of the map. Past it there is nothing I can plot.',
+        when: { all: [{ not: 'aria_nav_limit' }, { not: 'signal_decoded' }, { iteration: { max: 1 } }] },
+      },
+      {
+        speaker: 'aria',
+        text: 'That is the edge of the map. I mean that literally.',
+        when: { all: [{ not: 'aria_nav_limit' }, { any: [{ flag: 'signal_decoded' }, { iteration: { min: 2 } }] }] },
+      },
+    ],
   },
   /** §4.5: the station's aside after chapter 3 — `clue_awake`'s line. A minute played is an hour. */
   station_awake: {
@@ -914,9 +1017,9 @@ export const DIALOGUE = {
   // §4.7: one log line in each vault, left by an earlier instance — 55, 46,
   // 41, 28, 13, cards on the prologue's Selection wall (review 2026-10 S-28) —
   // and Eden's checkpoint of this one. Not modal; each is its shard clue's
-  // line, so its start sets the flag. Review 2026-10 S-07: the three a player
-  // can open before the notice hand on to ARIA's cover (`shard_cover`), so
-  // each log stays the log alone.
+  // line, so its start sets the flag. Review 2026-10 S-07: the four a player
+  // can open before the notice (R33 added Ferrum's) hand on to ARIA's cover
+  // (`shard_cover`), so each log stays the log alone.
   shard_cinder4: {
     id: 'shard_cinder4',
     next: 'shard_cover',
@@ -948,8 +1051,9 @@ export const DIALOGUE = {
     ],
   },
   /**
-   * Review 2026-10 S-07: ARIA's cover after the first three vault logs — before
-   * the notice, and on a first run only; with no line to show it does not play.
+   * Review 2026-10 S-07: ARIA's cover after the first four vault logs (R33
+   * added Ferrum's) — before the notice, and on a first run only; with no
+   * line to show it does not play.
    */
   shard_cover: {
     id: 'shard_cover',
@@ -961,8 +1065,11 @@ export const DIALOGUE = {
       },
     ],
   },
+  // PLAN R33 (audit 2026-10-26 ST-07): Ferrum's vault opens before the
+  // notice as well, so its log hands on to the cover like the first three.
   shard_ferrum: {
     id: 'shard_ferrum',
+    next: 'shard_cover',
     lines: [{ speaker: 'log', text: 'LOG — instance/28. Fatigue is a number here too. Watch the meter you think is your breath.' }],
   },
   shard_hive: {

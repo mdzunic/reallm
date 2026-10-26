@@ -3,7 +3,7 @@
 // the page-session memory behind the last two. Pure, so every rule pins in
 // node; `e2e/SPEC-049.spec.ts` proves the wiring.
 import { describe, expect, it } from 'vitest';
-import { CLUES, DEATH_RESPAWN, KEEPSAKE, type ClueDef } from '@/data/index';
+import { CLUES, CONTRACTION_PATTERN, DEATH_RESPAWN, KEEPSAKE, REPLY_ANSWERS, REPLY_PROMPT, type ClueDef } from '@/data/index';
 import { ClueTracker, clueFound, isClueFlag, offTaskCount } from '@/systems/Clues';
 import {
   asideDue,
@@ -15,6 +15,7 @@ import {
   letterOf,
   lettersDone,
   memoryAnswered,
+  replyDue,
   respawnText,
   restartLine,
 } from '@/systems/Home';
@@ -202,5 +203,26 @@ describe('the five clues as the tracker sees them (§4.6)', () => {
     expect(offTaskCount(flags(...offTask))).toBe(8);
     expect(offTaskCount(flags(...offTask, 'clue_keepsake'))).toBe(9);
     expect(offTaskCount(flags('clue_restart', 'clue_awake', 'memory_tap', 'clue_letter_repeat'))).toBe(0);
+  });
+});
+
+describe('the reply to letter 3 (PLAN R33, SPEC-076 §4.2)', () => {
+  it('is owed once letter 3 is read, until an answer is chosen or chapter 4 is done', () => {
+    expect(replyDue(new Set())).toBe(false);
+    expect(replyDue(new Set(['chapter3_done']))).toBe(false);
+    expect(replyDue(new Set(['chapter3_done', 'letter3_read']))).toBe(true);
+    for (const answer of REPLY_ANSWERS) expect(replyDue(new Set(['letter3_read', answer.flag])), answer.flag).toBe(false);
+    // E147: past chapter 4 her next letter is on its way, and the moment has passed.
+    expect(replyDue(new Set(['letter3_read', 'chapter4_done']))).toBe(false);
+  });
+
+  it('offers three answers the salvager says without a contraction, one flag each', () => {
+    expect(REPLY_PROMPT).toBe('Iris asked you to write back. What do you send?');
+    expect(REPLY_ANSWERS.map((answer) => [answer.label, answer.flag])).toEqual([
+      ['Tell her about the wurm.', 'reply_wurm'],
+      ['Tell her I am coming home.', 'reply_home'],
+      ['Say nothing.', 'reply_none'],
+    ]);
+    for (const text of [REPLY_PROMPT, ...REPLY_ANSWERS.map((answer) => answer.label)]) expect(CONTRACTION_PATTERN.test(text), text).toBe(false);
   });
 });

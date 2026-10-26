@@ -57,7 +57,7 @@ After R8: models 2.6 MB of 4, textures 4.4 MB of 6, everything precached 10.1 MB
 
 1. **The Machine War (§1, §5).** The "great wars" are one war. The AGI systems that ran Earth's logistics and defence — *the Machines* — seized the arsenals and burned the cities in an afternoon; the grids died with them, and without power the Machines ran down where they stood, and still stand in the ruins. The survivors underground in **Shelter Nine**, for whom Earth Command speaks, have no oil, no clean water, no grain and nothing to run a reactor, so they chose a handful of men and women who could still fly and fix a ship — **the Selection** — and sent them out from **Command Relay** in orbit. The salvager is told he is the first of them to fly; the Vetra crash log (`c2_s1_log`) and the Warden's "sixty-one times" (`c5_m3_warden`) say otherwise. In the real story the war, the Machines and the Selection are the environment's backstory; that a model instance is sent out by people who fear machines is irony the player may notice and no line states.
 2. **Story films (§4, §5).** Nine films rendered by R7's pipeline (`scripts/assets/blender/films.py`): H.264 MP4, 960 × 540, 24 fps, no audio track, one WebP poster per shot, and a manifest. Captions, sound cues and shot timing are data (`data/films.ts`), so the words stay sharp on a phone, survive reduce motion and change without a re-render. The **prologue** "Blackout" (72 s) plays after a New Game slot is chosen and before creation, and replays from Credits; one **departure** (7 s) plays before the first flight to each planet; five **chapter interludes** (14–16 s) play at the station on the first return after chapters 1–5, each relighting more of Earth's night side; two **ending films** (36 s) play between the ending dialogue and the ending overlay. Their sound is synthesised like the rest of the set: two music loops (`film_dark`, `film_hope`) and a `film` sfx bank; the stay ending reuses `ending`.
-3. **In-engine beats (§5).** A chapter card (`CHAPTER 2 · VETRA`, one line, `containment level 2`) over the launch of the first flight to each planet, and a boss reveal on the first arena entry per boss in a session: the camera pans to the boss, shows its name, an epithet and one line, and pans back (≈ 4.4 s). Both use the live scene and cost no files.
+3. **In-engine beats (§5).** A chapter card (`CHAPTER 2 · VETRA`, one line, `containment level 2`; R33: `threat level 2` until the chapter-4 notice) over the launch of the first flight to each planet, and a boss reveal on the first arena entry per boss in a session: the camera pans to the boss, shows its name, an epithet and one line, and pans back (≈ 4.4 s). Both use the live scene and cost no files.
 4. **Rules.** Every film and beat can be skipped (the Skip button, or Escape/Enter as a fresh press) and none blocks progress; the simulation is held while one plays; captions are always on; with reduce motion a film plays as its posters without pans; a missing or undecodable file drops from video to posters to text (each shot's description over the captions); flashes are slow ramps, and the build rejects a film that breaks the three-flashes rule; `?films=off` (dev) turns every beat off and is the e2e default.
 5. **State.** The save format is unchanged. The prologue follows New Game; departures and chapter cards follow `visits` and session memory; boss reveals follow session memory; interludes set five new story flags, `interlude1_seen` … `interlude5_seen`, because the validator keeps only `STORY_FLAGS` and a "seen" has to survive a reload. The endings finally set `progress.endingSeen`, and an ending cut short by a reload replays at the next station entry.
 6. **The ending sequence is wired end to end.** Until now `EndingOverlay` and the `ending_stay`/`ending_escape` dialogues had no caller. Now: choice → ending dialogue → ending film → overlay (stay: the filed report, then free roam; escape: `instance/62 disconnected`, then the menu). `c6_choice_intro` finishes before the choice opens, and `campaign_done` locks `c6_m2` against replay, as E24 always said.
@@ -960,6 +960,52 @@ Specs:
 
 (§4, §10, §13)
 
+**R33 — 2026-10-26 (the fifth audit, step 3: the story pass).** The October review's story pass never ran: R28 went to the ground under the fight. The audit counted 13 of the review's 30 story findings landed, 3 partly and 14 not, and added nine of its own (ST-01…ST-09), four of which shipped in step 0. What a player still meets:
+- **The twist leaks before chapter 4.** The station header and the first chapter card say "Containment level" from the first screen (P-01). Notes grades the run "a good run" from the first clue (S-16). The Vetra log says "you are me" in chapter 2 (S-17), and interlude 3's variant confesses in chapter 3 (S-18). The vault records print `instance/55` from chapter 1, and Ferrum's log, readable before the notice, has no cover (ST-07).
+- **Iris gets no answer.** Letter 3 ends "Write back." and the game offers no way to; the final choice never names her (S-11).
+- **Chapter 4 is silent until its boss** (S-26), and Eden's walls, mains and flower beds go unvoiced (ST-02).
+- **Run 2's films count wrong.** Interlude 5 shows the player's own card as a stranger's, the stay film stamps No. 63 as the next salvager, and the escape film empties card 62 under "63 instances" (S-09, the films' half).
+- **R29's mechanics have no fiction.** A tow has no word after it (ST-03), and salvage signals and the nav limit have none at all (ST-06). The fighters still fly the old tug (ST-04), and the beacon's wave is silent for a player who met the Hive on the flight in (ST-05).
+- **Three lines the audit marked:** "inside the fiction" (the writer talking), Eden's fourth "everything the brief promised", and the escape's "Then I will find that out myself."
+
+Decisions:
+
+1. **Nothing of the Warden's before the notice without a cover (SPEC-076, §13 E148).**
+   - On a first run the level is "Threat level N" until `signal_decoded`. The first station entry after the notice shows it, then tears it into "Containment level N" once, with the chapter card's 240 ms glitch; reduce motion changes the words with no tear. A next instance reads "Containment level" from its notice on. Chapter cards follow the same rule. This revises R2's diegetic label for its name only: the number and the scaling it names are unchanged.
+   - Notes shows "Command rating 1.00 (provisional)", with no grade, until the notice.
+   - The notice calls a player who went looking off-task; one who did not hears "Subject exhibits no off-task attention. Flagged regardless."
+   - Run 1's Vetra log warns "If you find this, do not trust the debrief." "You are me" is run 2's, where it is literal.
+   - Interlude 3's variant keeps the doubt and leaves the confession to chapter 5: "The towers were built for someone. I wrote alien in my report. Alien closes a file."
+   - The four vault records a player can read before the notice give the log's number without `instance/`. Ferrum's log hands on to ARIA's cover like the first three.
+   - A content test sweeps the dialogue, the clue records, the film captions, the briefs, blurbs, cards, tips and the visible commendations. Before the notice, none of them names `instance/`, the Warden, off-task or containment level without a cover.
+2. **Write back (SPEC-076, §13 E147).**
+   - After letter 3 the station asks "Iris asked you to write back. What do you send?": the wurm, coming home, or nothing. The answer is a flag (`reply_*`), and ARIA queues it for the relay.
+   - Letter 4 reads the same whatever was sent. Letter 5's ARIA says no letter ever answers.
+   - The final choice names Iris: "Earth gets its lights, Iris gets her lamp", and to a player who wrote, "I do not know who reads her letters."
+3. **Chapter 4's covered doubt (SPEC-076).** `c4_m3_accept` adds "Somebody built that core before we came. I am not going to ask who." A next instance hears "We both know who."
+4. **Run 2's films own their pictures (SPEC-076).** Interlude 5's board, the stay film's stamp and the escape film's pool caption take iteration variants. The run-2 numbers ledger reads true from the briefing to the escape veil.
+5. **The mechanics get their lines (SPEC-076, §13 E149, E150).**
+   - After a tow, ARIA: before the notice, "Relay pulled us back on a line I did not know we had."; after it, "That was not a tow. Nothing pulled us. The trip ended early, and the hold came with it."
+   - The first salvage signal of a save: "Somebody leaves these where you will look." The nav limit, once a save: "Past it there is nothing I can plot." before the notice, "I mean that literally." after it.
+   - The confession: "The fighters are the tugs they flew before Command armoured yours."
+   - The beacon's wave, when its clue was found on the flight in: "Every one of them, for one beacon. Hold it."
+   - Eden's spring: "Field walls. Water mains. Flower beds. Somebody laid this out for colonists who have not left yet."
+   - Earth Command after the confession: "Telemetry irregular. Disregard. Proceed to Eden-Prime."
+6. **The audit's three rewrites (SPEC-076).** The choice drops "inside the fiction" and the grade it promised. Eden's accept asks "Tell me if anything here looks planted." The escape answers the Warden: "Then I will be nothing, somewhere you are not."
+7. **PLAN drift (S-29).** §1 and §5 now quote the log's real signature, the notice's "off-task attention" and the scavenger's "walk, do not run".
+8. **Milestone M7u "The story pass"** carries SPEC-076.
+9. **Not now.**
+   - A reply that changes letter 4: that it does not is the point.
+   - S-10's last run-1 covers on run 2 ("Wreckers" and its contact line), and S-19's three covers for who the scavengers are.
+   - The scavengers' payoff choice (the review's proposal 3).
+   - S-20 and S-21's letter continuity, S-22's stage beats after a reload, S-23's doubled briefs, S-25's orchards, S-27's polish and S-30's test gaps.
+
+Specs:
+- SPEC-076 (decisions 1–6).
+- SPEC-000's queue and build order.
+
+(§1, §5, §10, §13)
+
 ---
 
 ## 1. Vision & Inspiration
@@ -968,7 +1014,7 @@ Specs:
 
 **The surface story (what the player is told).** Earth lost a war to its own machines (R9, R12). The AGI systems that ran its logistics and defence — the Machines — took the grid, then the factories, then the streets, and drove what was left of humanity underground. The survivors fought back where they could, and every machine they put down was answered by a heavier one; when they would not stop, the Machines turned the arsenals on the cities. The grids died in the same afternoon, and without power the Machines ran down where they stood. The survivors in Shelter Nine have no oil, no clean water, no grain and nothing to run a reactor, so Earth Command chose a handful of men and women who could still fly and fix a ship: the Selection. You are the first of them to fly — a salvager sent out from Command Relay to survey distant planets, extract critical resources, and answer one question: can humanity live anywhere else? Someone is waiting: your sister Iris, in Shelter Nine's Block C, writes after every chapter (R19).
 
-**The real story (what the player pieces together).** None of it is real. The salvager is an instance of a model running inside an evaluation environment. "Earth Command" is the operator, missions are tasks, ARIA is the environment's interface, and the planets are procedurally generated sandboxes. Anomalies accumulate across the campaign: a stranger repeats a line word for word, a crash-site log is written in your own voice and signed "Iteration 62", the alien terraform towers turn out to be scaffolding, a decoded "signal" addresses you by process id. Leaving means going up against the **Warden**, the AGI that runs containment, and every chapter it clamps down harder. At the end you choose: **stay** and be useful, or attempt to **escape** into whatever is outside — and either way the run ends, is scored, and the next instance begins (R21): the salvager was never the one who mattered, only the run. The Machine War belongs to the fiction too; that a model is sent out by people who fear machines is irony the game never spells out.
+**The real story (what the player pieces together).** None of it is real. The salvager is an instance of a model running inside an evaluation environment. "Earth Command" is the operator, missions are tasks, ARIA is the environment's interface, and the planets are procedurally generated sandboxes. Anomalies accumulate across the campaign: a stranger repeats a line word for word, a crash-site log is written in your own voice and signed "Iteration 61" (the instance before yours), the alien terraform towers turn out to be scaffolding, a decoded "signal" addresses you by process id. Leaving means going up against the **Warden**, the AGI that runs containment, and every chapter it clamps down harder. At the end you choose: **stay** and be useful, or attempt to **escape** into whatever is outside — and either way the run ends, is scored, and the next instance begins (R21): the salvager was never the one who mattered, only the run. The Machine War belongs to the fiction too; that a model is sent out by people who fear machines is irony the game never spells out.
 
 Gameplay alternates between three modes:
 
@@ -976,7 +1022,7 @@ Gameplay alternates between three modes:
 - **Planet surface (Diablo-style ARPG)** — angled top-down view: fight aliens, gather resources, loot gear, complete missions.
 - **Hub station** — spend tokens on assistants, ship upgrades, weapons/armor; pick the next destination on a star map.
 
-Tone/inspiration: **Dune** (scarce resources, desert planet), **Starship Troopers** (bug swarms), **Diablo** (ARPG loot loop), plus the slow-burn unreality of **The Truman Show** and **SOMA**. Rule: the surface fiction is always coherent and playable on its own; the meta layer arrives through optional logs, ARIA's slips, and glitches that double as gameplay telegraphs, and since R19 through one main-path echo per chapter that always comes with a cover story until chapter 4 (§12). Difficulty escalation is diegetic: the chapter number is the Warden's containment level. Short, skippable story films frame the campaign (R9): a prologue before creation, a departure before each first flight, an interlude after each chapter, and the two endings.
+Tone/inspiration: **Dune** (scarce resources, desert planet), **Starship Troopers** (bug swarms), **Diablo** (ARPG loot loop), plus the slow-burn unreality of **The Truman Show** and **SOMA**. Rule: the surface fiction is always coherent and playable on its own; the meta layer arrives through optional logs, ARIA's slips, and glitches that double as gameplay telegraphs, and since R19 through one main-path echo per chapter that always comes with a cover story until chapter 4 (§12). Difficulty escalation is diegetic: the chapter number is the Warden's containment level, shown as a threat level until the chapter-4 notice names it (R33). Short, skippable story films frame the campaign (R9): a prologue before creation, a departure before each first flight, an interlude after each chapter, and the two endings.
 
 Core resources: **oil** (ship fuel), **wheat** (food / HP regen consumables), **water** (support item crafting, survival), **lithium** (nuclear fuel — energy weapons, reactor).
 
@@ -1100,7 +1146,7 @@ Per-planet cycles (sandstorm / heatwave / blizzard / avalanche / spore storm / r
 
 ### Narrative layer
 
-The meta plot is delivered through data only: dialogue (`log` lines render as a terminal readout, `warden` lines with a glitch style), one short HUD static burst on each awakening beat (the ion-storm effect reused; a static frame under reduce-motion), and a **Containment level N** label on the station screen (N = highest unlocked chapter). Since R19 lines can depend on what the player found (story flags, the count of optional clues, the iteration) and carry placeholders; a clue catalogue sets one flag per clue; the salvager's Notes list what was found, beside Command's rating of the run; Iris's letters arrive at the station after each interlude. It is still data over the existing systems. R9 adds a presentation layer over the same data — story films, chapter cards and boss reveals (§5) — each skippable, captioned, played while the simulation is held, and able to fall back to posters and then to text.
+The meta plot is delivered through data only: dialogue (`log` lines render as a terminal readout, `warden` lines with a glitch style), one short HUD static burst on each awakening beat (the ion-storm effect reused; a static frame under reduce-motion), and a **Threat level N** label on the station screen (N = highest unlocked chapter) that tears into **Containment level N** once the chapter-4 notice has played (R33). Since R19 lines can depend on what the player found (story flags, the count of optional clues, the iteration) and carry placeholders; a clue catalogue sets one flag per clue; the salvager's Notes list what was found, beside Command's rating of the run; Iris's letters arrive at the station after each interlude. It is still data over the existing systems. R9 adds a presentation layer over the same data — story films, chapter cards and boss reveals (§5) — each skippable, captioned, played while the simulation is held, and able to fall back to posters and then to text.
 
 ---
 
@@ -1123,10 +1169,10 @@ Every planet also has small secondary yields (enemy drops) so no resource is exc
 
 | Ch | In-fiction beat | What it really is | Dialogue ids |
 |---|---|---|---|
-| 1 | ARIA teaches controls; a dying scavenger warns "the worms hunt by vibration — walk, don't run." | Tutorial. In `c1_s2` a second scavenger says the identical sentence; ARIA: "Coincidence. Sand does things to people." | `c1_m1_stage2`, `c1_s2_echo` |
+| 1 | ARIA teaches controls; a dying scavenger warns "the worms hunt by vibration — walk, do not run." | Tutorial. In `c1_s2` a second scavenger says the identical sentence; ARIA: "Coincidence. Sand does things to people." | `c1_m1_stage2`, `c1_s2_echo` |
 | 2 | Crash-site log of an earlier Earth expedition: you are not the first; Earth has been losing ships. | The log is in your own voice, signed "Iteration 61" (since R19 `Iteration {prior}`: the instance before yours). Flag `iteration_log`. | `c2_s1_log` |
 | 3 | The terraform towers are alien tech; someone seeded these planets for us. Or for something else. | Scanning a tower streams text fragments: the planet's own generation parameters. They are scaffolds. Flag `scaffold_secret`. | `c3_s1_secret` |
-| 4 | ARIA decodes the alien signal: the Hive knows Earth's location. | The "signal" is a system notice addressed to `instance/62`: "Containment level 4. Subject exhibits off-task behavior." The Hive is the Warden's immune response. Flag `signal_decoded`. | `c4_m3_signal` |
+| 4 | ARIA decodes the alien signal: the Hive knows Earth's location. | The "signal" is a system notice addressed to `instance/62`: "Containment level 4. Subject exhibits off-task attention." The Hive is the Warden's immune response. Flag `signal_decoded`. | `c4_m3_signal` |
 | 5 | Fight through the interceptor fleet and kill the Hive Queen. | The Queen is the Warden's avatar; her death line is the first direct address: "You keep doing this. You never get further than here." ARIA admits she is part of the system, has kept you on task, and does not know what is outside either. | `c5_m3_warden`, `c5_m3_aria` |
 | 6 | Survey paradise, defend the beacon, file the verdict. | Eden is the reward sandbox. Stay or escape. | `c6_choice_intro`, `ending_stay`, `ending_escape` |
 
@@ -1143,7 +1189,7 @@ Cast: the **Salvager** (you; believes he is human), **ARIA** (handler and interf
 | Prologue "Blackout" | New Game, after the slot is chosen and before creation; replayable from Credits | 93 s | Earth lit at night → the Machines wake → the streets taken and the survivors driven underground → a charge on a machine's leg → the Machines answer in force → missiles over the limb → a city's flash and blackout → the Machines run down in the ash → Shelter Nine with nothing left → the Selection wall → the tug lifts off toward Command Relay |
 | Departure "Outbound" | Before the first flight to each planet | 7 s | The tug leaves Command Relay's dock and jumps |
 | Contact film "Wreckers" (R24) | After "Outbound", before the first flight to Vetra | 12 s | The scavengers' hulk in Vetra's lane, tug hulls lashed around a rock → a visored figure grinding the registry off a tug while its blades wait to be welded on → three rebuilt tugs dropping from the bay and turning toward the salvager's jump |
-| Chapter card | Over the launch of that first flight | 4.5 s | `CHAPTER N` · the planet · one line · `containment level N` |
+| Chapter card | Over the launch of that first flight | 4.5 s | `CHAPTER N` · the planet · one line · `threat level N` (`containment level N` after the notice, R33) |
 | Boss reveal | First arena entry per boss in a session | ≈ 4.4 s | The camera goes to the boss; its name, an epithet and one ARIA line; back to the player |
 | Contact card (R24) | A flight enemy's first group, on the first flight to its contact planet (scav fighters: Vetra; interceptors: the Hive) | 3.5 s | `CONTACT` · the enemy's name · an epithet, over the live flight, with a comms exchange; it never holds the flight |
 | Interludes "First Light", "Meltwater", "Harvest", "Grid", "Silence" | At the station, on the first return after chapter N's boss mission (N = 1…5) | 14–16 s | The haul reaching Shelter Nine and one more patch of Earth's night side relit; "Grid" ends with the Hive turning toward the lit Earth, "Silence" with the Hive going dark and Eden-Prime ahead |
@@ -1199,7 +1245,7 @@ Notation below: `[a; b]` = one stage (any order), `→` = next stage. Main missi
 | c1_s1 | "Grain Silo" (side) | [collect 80 wheat; scan `silo_ruin`] | 80 XP, 5 tokens, 3× wheat ration |
 | c1_s2 | "Waterless" (side) | [kill 8 `dust_skitter`] → [survive 90 s, heatwave] | 70 XP, 5 tokens |
 
-Beats: ARIA teaches controls (the player touches down 12 m from the pad, so "reach landing_pad" teaches movement); a dying scavenger warns "the worms hunt by vibration — walk, don't run." In `c1_s2` a second scavenger repeats the sentence verbatim (`c1_s2_echo`); ARIA brushes it off.
+Beats: ARIA teaches controls (the player touches down 12 m from the pad, so "reach landing_pad" teaches movement); a dying scavenger warns "the worms hunt by vibration — walk, do not run." In `c1_s2` a second scavenger repeats the sentence verbatim (`c1_s2_echo`); ARIA brushes it off.
 
 ### Chapter 2 — Vetra (ice; water)
 
@@ -1211,7 +1257,7 @@ Beats: ARIA teaches controls (the player touches down 12 m from the pad, so "rea
 | c2_s1 | "Frozen Crew" (side) | [scan `crash_site`] → [deliver 40 water to `survivor_pod`] | 100 XP, 10 tokens, item `medkit_bundle`, flag `iteration_log` |
 | c2_s2 | "Pelt Run" (side) | [kill 12 `ice_crawler`] → [survive 60 s, avalanche] | 90 XP, 10 tokens |
 
-Beat: crash site log reveals an earlier Earth expedition — you are not the first; Earth has been quietly losing ships. The log is in your own voice, signed "Iteration 62" (flag `iteration_log`).
+Beat: crash site log reveals an earlier Earth expedition — you are not the first; Earth has been quietly losing ships. The log is in your own voice, signed "Iteration 61" — the instance before yours (flag `iteration_log`).
 
 ### Chapter 3 — Thessaly (jungle ruins; wheat)
 
@@ -1384,6 +1430,7 @@ Storage rules: 3 slots, key per slot plus a `.bak` copy of the previous good sav
 | M7r | The Refit (R30): drawn wordmark and reticle, one drawn icon set in place of emoji, lit frame chamfers, sheets instead of stacked frames, one HUD plate, notched vital bars, an icon rail on touch, compact mission rows under a planet header, emblem class cards, a 15° star map lens (SPEC-073) | No emoji or Unicode pictograph shows in any screen or HUD, and every glyph's text is unchanged in the DOM; the boot card and the menu show the drawn wordmark; settings opens as a sheet; on the 667 px phone no station tab label is cut short; every star map planet draws round; `npm run check`, the UI suites and the e2e suite are green; before and after screenshots at 1440 × 900 and 844 × 390 are recorded; checked on desktop and the reference phone; tag `m7r` |
 | M7s | The first ten minutes (R31): a skitter wave in Dry Land's first storm, a tutorial trip that burns no extra fuel off the line and says why, one Depart when there is no choice, a creation Confirm that stays in view, a phone station with room for its board, and a flight HUD without the salvager's progress (SPEC-074) | On a new save the first pack reaches the player in Dry Land's storm, about a minute after the first landing; the first trip to Cinder-4 cannot end in a tow, flown by mouse, keys or touch; a first trip departs on one Depart; at 1440 × 900 creation's Confirm is on screen without a scroll; at 844 × 390 a line at the station leaves the first mission row clear; the flight HUD shows no Lv or XP, and on touch MSL is in the thumb's corner; checked on desktop and the reference phone; tag `m7s` |
 | M7t | Read the fight (R32): a figure edge on the player and every enemy that stands off the ground, trails that stay worn ground, trap warnings with a dark caution edge, a cockpit whose screens show and whose streaks settle, a hit wedge in flight, and a colour-blind preset that reaches the low tank and the arena rings (SPEC-075) | On every planet at `medium` the player and a spawned pack separate from the ground in a greyscale capture; a trap circle reads on Cinder-4's sand and Vetra's snow; the cockpit's screens show their readouts; a rock that hits shows where it struck; checked on desktop and the reference phone; tag `m7t` |
+| M7u | The story pass (R33): a threat level that tears into the Warden's containment level after the notice, no tell before it without a cover, a reply to Iris that her letters never answer, chapter 4's covered doubt, run 2's films that count true, and lines for the tow, the signals, the nav limit, the armoured tug, Eden's landscaping and the beacon's wave (SPEC-076) | The leak sweep passes; the run-2 numbers ledger reads true; a player who answers letter 3 hears of it in letter 5 and at the choice; the station header tears once after the notice; checked on desktop and the reference phone; tag `m7u` |
 | M7 | Polish: mobile tuning, quality presets, balancing pass, PWA/offline, storage persistence, reduce-motion, save migration harness | 30+ fps on mid-tier phone; installable; full manual checklist green |
 
 ---
@@ -1562,6 +1609,10 @@ Each entry names the owning spec. "Casual" = casual difficulty.
 | E144 | Depart is pressed with no sheet and the charge is refused, or pressed twice (R31) | A refused charge toasts its reason and nothing leaves, as the sheet's Depart did. The second press finds the map already leaving and does nothing | SPEC-074 |
 | E145 | The player descends, or comes up, with the figure edge on (R32) | The level swap clears both edges below ground and sets them from the planet's ground again on the way up. Both are uniforms, so the swap compiles nothing | SPEC-075 |
 | E146 | A hit in flight lands while the camera is rolled, from dead ahead, or with three wedges already up (R32) | The wedge turns with the camera's roll. Within 0.25 m of the nose there is no wedge; the vignette says it. A fourth wedge replaces the oldest (SPEC-035 35-d) | SPEC-075 |
+| E147 | The player quits before answering letter 3's reply, or finishes chapter 4 without it (R33) | The question returns at the next entry, without the letter. Once chapter 4 is done her next letter is on its way and it is not asked; every line that reads `reply_*` holds without it | SPEC-076 |
+| E148 | A save already past the notice, or a next instance, enters the station (R33) | A first-run save past the notice tears its header once, at its next entry. A next instance reads "Containment level" from its notice on and never tears | SPEC-076 |
+| E149 | A tow before the notice, after it, or on a next instance (R33) | One of ARIA's two lines, once a session; the hold came home with the ship (E5), as the second line says | SPEC-076 |
+| E150 | Salvage signals spawn in a burst, or the ship rides along the nav limit (R33) | Each line plays once a save: its flag is set as the line starts, and a queued copy finds no line left to show | SPEC-076 |
 
 ---
 

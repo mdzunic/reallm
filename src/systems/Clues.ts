@@ -116,6 +116,10 @@ export interface NotesModel {
   readonly total: number;
   /** Null, like `grade`, while nothing is found. */
   readonly rating: number | null;
+  /**
+   * PLAN R33 (review 2026-10 S-16): also null until the notice — before it,
+   * the rating is provisional and the stay ending's words are not spent.
+   */
   readonly grade: RatingGrade | null;
   readonly chapters: readonly NotesChapter[];
   /** The flags the model was built from — Notes' Letters section reads them (SPEC-049 §4.3). */
@@ -134,7 +138,8 @@ export function notesModel(flags: ReadonlySet<string>, chapterReached: number): 
     const here = all.filter((def) => clueFound(def, flags));
     chapters.push({ chapter, found: here, missing: all.length - here.length });
   }
-  return { found, total: CLUES.length, rating, grade: rating === null ? null : ratingGrade(rating), chapters, flags };
+  const graded = rating !== null && flags.has('signal_decoded');
+  return { found, total: CLUES.length, rating, grade: graded ? ratingGrade(rating) : null, chapters, flags };
 }
 
 /**

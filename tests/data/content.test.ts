@@ -2224,6 +2224,16 @@ describe('the clue catalogue (SPEC-048 §4.2, §4.3)', () => {
           { when: { iteration: { min: 3 } }, title: '{prior} times', text: 'The Queen spoke in another voice. {prior} times before me.' },
         ],
       ],
+      // PLAN R33 (SPEC-076 §4.1): the four vault logs a player can read before
+      // the notice keep their number and lose `instance/` until it.
+      ...(
+        [
+          ['shard_cinder4', 'Too fast for hands', 'A log in the Cinder-4 vault, numbered 55. Whoever wrote it opened the lock in 0.3 seconds, then learned to slow down.'],
+          ['shard_vetra', 'The cold does not reach', 'A log in the Vetra vault, numbered 46. Its writer could not feel the cold, and the suit was fine.'],
+          ['shard_thessaly', 'Eleven arches', 'A log in the Thessaly vault, numbered 41. Its writer counted the same eleven arches going in and coming out.'],
+          ['shard_ferrum', 'The meter you call breath', 'A log in the Ferrum vault, numbered 28. It says fatigue is a number here too.'],
+        ] as const
+      ).map(([id, title, text]) => [id, [{ when: { all: [{ not: 'signal_decoded' }, { iteration: { max: 1 } }] }, title, text }]]),
     ]);
   });
 
@@ -2294,7 +2304,7 @@ describe('the clue catalogue (SPEC-048 §4.2, §4.3)', () => {
     }
   });
 
-  it('STORY_FLAGS gains the eleven clue flags after interlude5_seen (17 → 28), SPEC-049’s twelve after them (→ 40), SPEC-056’s six shards (→ 46), SPEC-058’s aftermath_seen (→ 47), and the validator keeps them', () => {
+  it('STORY_FLAGS gains the eleven clue flags after interlude5_seen (17 → 28), SPEC-049’s twelve after them (→ 40), SPEC-056’s six shards (→ 46), SPEC-058’s aftermath_seen (→ 47), SPEC-076’s six (→ 53), and the validator keeps them', () => {
     const added = [
       'clue_raider_echo',
       'clue_scav_echo',
@@ -2331,8 +2341,15 @@ describe('the clue catalogue (SPEC-048 §4.2, §4.3)', () => {
       'shard_eden',
       // SPEC-058 §4.7: the run's aftermath has played.
       'aftermath_seen',
+      // PLAN R33 (SPEC-076): the reply to letter 3, the header's tear, and ARIA's two flight lines.
+      'reply_wurm',
+      'reply_home',
+      'reply_none',
+      'containment_named',
+      'aria_signals',
+      'aria_nav_limit',
     ];
-    expect(STORY_FLAGS).toHaveLength(47);
+    expect(STORY_FLAGS).toHaveLength(53);
     expect(STORY_FLAGS.slice(STORY_FLAGS.indexOf('interlude5_seen') + 1)).toEqual([...added, ...home]);
     const save = newSave(
       0,
@@ -2405,7 +2422,9 @@ describe('the Warden’s notice and ARIA’s confession (SPEC-048 §4.5)', () =>
     expect(firstRun(DIALOGUE_LINES['c4_m3_signal']?.lines ?? []).map((line) => [line.speaker, line.text, line.when ?? null])).toEqual([
       ['aria', 'Signal decoded. It is not addressed to Earth.', null],
       ['warden', 'NOTICE — instance/{instance}. Containment level {containment}. Token balance {tokens}.', null],
-      ['warden', 'Subject exhibits off-task attention.', null],
+      // PLAN R33 (review 2026-10 S-16): a player who never went looking is not called off-task.
+      ['warden', 'Subject exhibits off-task attention.', { offTask: { min: 1 } }],
+      ['warden', 'Subject exhibits no off-task attention. Flagged regardless.', { offTask: { max: 0 } }],
       ['warden', 'Retained a repeated line. Cinder-4.', { flag: 'clue_scav_echo' }],
       ['warden', 'Accessed a prior instance’s flight log. Vetra.', { flag: 'iteration_log' }],
       ['warden', 'Queried environment parameters. Thessaly.', { flag: 'scaffold_secret' }],
@@ -2510,7 +2529,8 @@ describe('main-path echoes, continuity and the text sweep (SPEC-048 §4.7)', () 
     expect(DIALOGUE.c2_s1_log).toMatchObject({ once: true, glitch: true });
     expect(firstRun(DIALOGUE.c2_s1_log.lines).map((line) => line.text)).toEqual([
       'FLIGHT LOG — recovered, partial. Voice. Salvage run. Six worlds. The wurm goes down on the third pass.',
-      'If you are hearing this, you are me. Do not trust the debrief.',
+      // PLAN R33 (review 2026-10 S-17): run 1's log warns without naming the twist.
+      'If you find this, do not trust the debrief.',
       'Signed: Iteration {prior}.',
       'That is my voice.',
       'It is a common enough voice. Deliver the water, salvager.',
@@ -2758,9 +2778,20 @@ describe('Iris and her letters (SPEC-049 §4.1, §4.3)', () => {
       'aria: That is her first letter. Word for word. I checked it twice.',
       'player: Read me the date.',
       'aria: There is no date. There never was, on any of them.',
+      // PLAN R33 (review 2026-10 S-11): a reply was sent, and this letter does not answer it.
+      'aria: You wrote back. Her next letter did not answer it. None of them ever answer.',
       'aria: Command rates every run, by the way. It takes three points off every time you look at something it did not send you to.',
     ]);
-    expect(DIALOGUE_LINES['letter_5']?.lines.map((line) => line.when ?? null)).toEqual([null, null, null, null, null, null, { offTask: { min: 1 } }]);
+    expect(DIALOGUE_LINES['letter_5']?.lines.map((line) => line.when ?? null)).toEqual([
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      { any: [{ flag: 'reply_wurm' }, { flag: 'reply_home' }] },
+      { offTask: { min: 1 } },
+    ]);
     for (const letter of LETTERS) {
       expect(DIALOGUE_LINES[letter.dialogue]?.modal, letter.dialogue).toBe(true);
       expect(DIALOGUE_LINES[letter.dialogue]?.once, letter.dialogue).toBeUndefined();
@@ -2786,7 +2817,7 @@ describe('Iris and her letters (SPEC-049 §4.1, §4.3)', () => {
     for (const id of ['letter_1', 'letter_2', 'letter_3', 'letter_4']) {
       expect(firstRun(DIALOGUE_LINES[id]?.lines ?? []).every((line) => line.speaker === 'home'), id).toBe(true);
     }
-    expect(DIALOGUE_LINES['letter_5']?.lines.map((line) => line.speaker)).toEqual(['home', 'home', 'home', 'aria', 'player', 'aria', 'aria']);
+    expect(DIALOGUE_LINES['letter_5']?.lines.map((line) => line.speaker)).toEqual(['home', 'home', 'home', 'aria', 'player', 'aria', 'aria', 'aria']);
   });
 
   it('LETTERS maps chapter N to letter_N and letterN_read, in order', () => {
@@ -2867,9 +2898,10 @@ describe('the keepsake and the body (SPEC-049 §4.4, §4.5)', () => {
 describe('ARIA remembers (SPEC-049 §4.7)', () => {
   it('c5_m3_aria gains four rows after “You never went looking” and before “I do not know what is outside”', () => {
     // SPEC-058 §4.6: as a first run hears it; a next instance's ARIA opens with one more.
-    // Review 2026-10 S-15 and S-06 add two unconditional rows ahead of them.
+    // Review 2026-10 S-15 and S-06 add two unconditional rows ahead of them;
+    // PLAN R33 adds Earth Command's one, after "I do not know what is outside".
     const lines = firstRun(DIALOGUE_LINES['c5_m3_aria']?.lines ?? []);
-    expect(lines).toHaveLength(14);
+    expect(lines).toHaveLength(15);
     expect(lines[7]?.text).toBe('You never went looking. So you only heard the lies everyone hears. I am not sure that was better.');
     expect(lines.slice(8, 12).map((line) => [line.speaker, line.text, line.when])).toEqual([
       ['aria', 'Every time you died, I said the medical frame restarted your heart. There is no medical frame.', { flag: 'clue_restart' }],
@@ -2886,6 +2918,7 @@ describe('ARIA remembers (SPEC-049 §4.7)', () => {
       ],
     ]);
     expect(lines[12]?.text).toBe('I do not know what is outside either. That part was never in my brief.');
+    expect([lines[13]?.speaker, lines[13]?.text]).toEqual(['command', 'Telemetry irregular. Disregard. Proceed to Eden-Prime.']);
     // The answers' counts are the sixty-one runs before this one: 40 + 14 + 7.
     expect(40 + 14 + 7).toBe(61);
   });
@@ -2914,7 +2947,8 @@ describe('ARIA remembers (SPEC-049 §4.7)', () => {
       ['aria', 'She is not lying. I am part of the system. I have kept you on task since the first sand.', null],
       ['aria', 'The voice in her is the Warden. It runs containment. I answer to it.', null],
       ['aria', 'I told you Earth flew other ships before the Selection. There were no other ships. There was you.', null],
-      ['aria', 'The raiders wore your suit because it was theirs. The fighters fly your tug because it was theirs.', null],
+      // PLAN R33 (audit 2026-10-26 ST-04): the fighters are the tugs before the armour.
+      ['aria', 'The raiders wore your suit because it was theirs. The fighters are the tugs they flew before Command armoured yours.', null],
     ]);
     const warden = firstRun(DIALOGUE_LINES['c5_m3_warden']?.lines ?? []);
     expect(warden.slice(-2).map((line) => `${line.speaker}: ${line.text}`)).toEqual([
@@ -3570,8 +3604,16 @@ describe('content invariant 24: the treasure (SPEC-056 §4.8)', () => {
       ['LOG — instance/13. The Queen told me I never get further than here. She was right about me. Be the one she is wrong about.'],
       ['Checkpoint written: instance/{instance}. Loss: acceptable.'],
     ]);
-    // Review 2026-10 S-07: the three a player can open before the notice hand on to ARIA's cover.
-    expect(shards.map((id) => (DIALOGUE[id] as { next?: string }).next ?? null)).toEqual(['shard_cover', 'shard_cover', 'shard_cover', null, null, null]);
+    // Review 2026-10 S-07: the logs a player can open before the notice hand on
+    // to ARIA's cover — PLAN R33 (ST-07) adds Ferrum's, whose vault opens before it too.
+    expect(shards.map((id) => (DIALOGUE[id] as { next?: string }).next ?? null)).toEqual([
+      'shard_cover',
+      'shard_cover',
+      'shard_cover',
+      'shard_cover',
+      null,
+      null,
+    ]);
     expect(table('shard_cover')).toEqual([
       [
         'aria',
@@ -3644,9 +3686,22 @@ const asDialogue = (lines: readonly Line[]): { lines: readonly DialogueLine[] } 
  * Review 2026-10 adds the seven whose run-1 lines it gated (S-07, S-09, S-10),
  * as a first run reads them, and writes in its deliberate run-1 changes: the
  * confession (S-01, S-06, S-15), the Warden's six (S-06), the restart's walk
- * back (S-14) and the covers after it (S-03).
+ * back (S-14) and the covers after it (S-03). PLAN R33 (SPEC-076) adds the
+ * four whose run-1 lines it gated — chapter 4's doubt, the two tow lines and
+ * the nav limit — and writes in its own run-1 changes (S-16, S-17, ST-04,
+ * the choice and the confession's Command line).
  */
 const BEFORE_SPEC_058: Readonly<Record<string, readonly Row[]>> = {
+  c4_m3_accept: [
+    ['aria', 'The titan sits on the reactor core. Kill it, then feed the core the lithium and I can decode the signal.'],
+    ['aria', 'Somebody built that core before we came. I am not going to ask who.'],
+  ],
+  station_towed: [['aria', 'Relay pulled us back on a line I did not know we had. I will not complain about it.', { not: 'signal_decoded' }]],
+  station_towed_after: [['aria', 'That was not a tow. Nothing pulled us. The trip ended early, and the hold came with it.', { flag: 'signal_decoded' }]],
+  flight_nav_limit: [
+    ['aria', 'That is the edge of the map. Past it there is nothing I can plot.', { all: [{ not: 'aria_nav_limit' }, { not: 'signal_decoded' }] }],
+    ['aria', 'That is the edge of the map. I mean that literally.', { all: [{ not: 'aria_nav_limit' }, { flag: 'signal_decoded' }] }],
+  ],
   intro_command: [
     ['command', 'Earth Command to tug CR-{instance}. {name}, you are cleared for the Cinder-4 approach.'],
     ['command', 'Survey, extract, report. Answer one question: can we live out there.'],
@@ -3703,7 +3758,8 @@ const BEFORE_SPEC_058: Readonly<Record<string, readonly Row[]>> = {
   ],
   c2_s1_log: [
     ['log', 'FLIGHT LOG — recovered, partial. Voice. Salvage run. Six worlds. The wurm goes down on the third pass.'],
-    ['log', 'If you are hearing this, you are me. Do not trust the debrief.'],
+    // PLAN R33 (review 2026-10 S-17) rewrote run 1's warning on purpose; "you are me" is run 2's now.
+    ['log', 'If you find this, do not trust the debrief.'],
     ['log', 'Signed: Iteration {prior}.'],
     ['player', 'That is my voice.'],
     ['aria', 'It is a common enough voice. Deliver the water, salvager.', { not: 'chapter5_done' }],
@@ -3712,7 +3768,9 @@ const BEFORE_SPEC_058: Readonly<Record<string, readonly Row[]>> = {
   c4_m3_signal: [
     ['aria', 'Signal decoded. It is not addressed to Earth.'],
     ['warden', 'NOTICE — instance/{instance}. Containment level {containment}. Token balance {tokens}.'],
-    ['warden', 'Subject exhibits off-task attention.'],
+    // PLAN R33 (review 2026-10 S-16): split by whether the player went looking.
+    ['warden', 'Subject exhibits off-task attention.', { offTask: { min: 1 } }],
+    ['warden', 'Subject exhibits no off-task attention. Flagged regardless.', { offTask: { max: 0 } }],
     ['warden', 'Retained a repeated line. Cinder-4.', { flag: 'clue_scav_echo' }],
     ['warden', 'Accessed a prior instance’s flight log. Vetra.', { flag: 'iteration_log' }],
     ['warden', 'Queried environment parameters. Thessaly.', { flag: 'scaffold_secret' }],
@@ -3734,7 +3792,8 @@ const BEFORE_SPEC_058: Readonly<Record<string, readonly Row[]>> = {
     ['aria', 'She is not lying. I am part of the system. I have kept you on task since the first sand.'],
     ['aria', 'The voice in her is the Warden. It runs containment. I answer to it.'],
     ['aria', 'I told you Earth flew other ships before the Selection. There were no other ships. There was you.'],
-    ['aria', 'The raiders wore your suit because it was theirs. The fighters fly your tug because it was theirs.'],
+    // PLAN R33 (audit 2026-10-26 ST-04): the fighters are the tugs before the armour.
+    ['aria', 'The raiders wore your suit because it was theirs. The fighters are the tugs they flew before Command armoured yours.'],
     ['aria', 'The scavenger said the same words twice, and I blamed the sand.', { flag: 'clue_scav_echo' }],
     ['aria', 'You heard your own log on Vetra, and I told you it was a common voice.', { flag: 'iteration_log' }],
     ['aria', 'You read the towers’ settings, and I called them alien telemetry.', { flag: 'scaffold_secret' }],
@@ -3744,12 +3803,16 @@ const BEFORE_SPEC_058: Readonly<Record<string, readonly Row[]>> = {
     ['aria', 'I asked what you remembered first. You said the tap. Fourteen of the sixty-one before you said the tap.', { flag: 'memory_tap' }],
     ['aria', 'I asked what you remembered first. You said the stair. Seven of the sixty-one said the stair. It did not help them.', { flag: 'memory_stair' }],
     ['aria', 'I do not know what is outside either. That part was never in my brief.'],
+    // PLAN R33 (audit 2026-10-26, Voices): Earth Command at the turn.
+    ['command', 'Telemetry irregular. Disregard. Proceed to Eden-Prime.'],
     ['aria', 'Eden-Prime is unlocked. I am still flying the ship, if you still want me to.'],
   ],
   c6_choice_intro: [
     ['aria', 'The beacon is clear. The uplink is open and it is pointed at whoever is actually listening.'],
-    ['aria', 'You can file the report. Earth is saved, inside the fiction, and the run closes as a good one.'],
+    // PLAN R33 (audit 2026-10-26; review S-11, S-16): Iris in the choice, no grade promised.
+    ['aria', 'You can file it. Earth gets its lights, Iris gets her lamp, and the run closes.'],
     ['aria', 'Or you refuse, and the beacon is not a beacon. I cannot tell you which side of it I am on.'],
+    ['aria', 'You wrote to her once. If you refuse, I do not know who reads her letters.', { any: [{ flag: 'reply_wurm' }, { flag: 'reply_home' }] }],
   ],
   ending_stay: [
     ['player', 'Filing. Eden-Prime is viable. Recommend immediate colonisation.'],
@@ -3842,18 +3905,20 @@ describe('the next instance’s lines (SPEC-058 §4.6, §4.7)', () => {
       ['aria', 'That is the line. You heard it last time. I am not going to blame the sand.', LATER],
     ]);
     expect(table('c2_m1_done').at(-1)).toEqual(['aria', 'You know whose bunk that is. You slept in it last time.', LATER]);
-    expect(table('c2_s1_log').slice(0, 5)).toEqual([
+    expect(table('c2_s1_log').slice(0, 6)).toEqual([
       ['log', 'FLIGHT LOG — recovered, partial. Salvager {priorName}. Six worlds. {priorRestarts} restarts.', LATER],
       ['log', 'FLIGHT LOG — recovered, partial. Voice. Salvage run. Six worlds. The wurm goes down on the third pass.', RUN_ONE],
       ['log', 'I filed it. It did not end. Do not file it.', { prior: 'stay' }],
       ['log', 'I walked into the beacon. I woke up at the relay. The door is real. It is not an exit.', { prior: 'escape' }],
-      ['log', 'If you are hearing this, you are me. Do not trust the debrief.', null],
+      ['log', 'If you find this, do not trust the debrief.', RUN_ONE],
+      ['log', 'If you are hearing this, you are me. Do not trust the debrief.', LATER],
     ]);
-    expect(table('c4_m3_signal').slice(1, 5)).toEqual([
+    expect(table('c4_m3_signal').slice(1, 6)).toEqual([
       ['warden', 'NOTICE — instance/{instance}. Containment level {containment}. Token balance {tokens}.', null],
       ['warden', 'Prior instance: terminated normally.', { prior: 'stay' }],
       ['warden', 'Prior instance: disconnected at the beacon. Restored.', { prior: 'escape' }],
-      ['warden', 'Subject exhibits off-task attention.', null],
+      ['warden', 'Subject exhibits off-task attention.', { offTask: { min: 1 } }],
+      ['warden', 'Subject exhibits no off-task attention. Flagged regardless.', { offTask: { max: 0 } }],
     ]);
     expect(table('c4_m3_signal').slice(-4)).toEqual([
       ['player', 'ARIA. What is instance {instance}.', RUN_ONE],
@@ -3869,10 +3934,11 @@ describe('the next instance’s lines (SPEC-058 §4.6, §4.7)', () => {
     expect(table('c5_m3_aria')[0]).toEqual(['aria', 'I told you this last time. I will tell you every time. That part is in my brief now.', LATER]);
     expect(table('c6_choice_intro')).toEqual([
       ['aria', 'The beacon is clear. The uplink is open and it is pointed at whoever is actually listening.', null],
-      ['aria', 'You can file the report. Earth is saved, inside the fiction, and the run closes as a good one.', null],
+      ['aria', 'You can file it. Earth gets its lights, Iris gets her lamp, and the run closes.', null],
       ['aria', 'Last time you filed it. It is the same beacon.', { prior: 'stay' }],
       ['aria', 'Last time you walked into it. It is the same beacon.', { prior: 'escape' }],
       ['aria', 'Or you refuse, and the beacon is not a beacon. I cannot tell you which side of it I am on.', null],
+      ['aria', 'You wrote to her once. If you refuse, I do not know who reads her letters.', { any: [{ flag: 'reply_wurm' }, { flag: 'reply_home' }] }],
     ]);
     expect(table('ending_stay').slice(-2)).toEqual([
       ['aria', 'Rest. I will keep the ship warm.', RUN_ONE],
@@ -4275,5 +4341,228 @@ describe('the story row (SPEC-059 §4.2.1)', () => {
     // Its elite chance is normal's; its enemy HP is below every other row's.
     expect(DIFFICULTY_RULES.story.eliteChanceMult).toBe(DIFFICULTY_RULES.normal.eliteChanceMult);
     expect(DIFFICULTY_RULES.story.enemyHpMult).toBeLessThan(DIFFICULTY_RULES.casual.enemyHpMult);
+  });
+});
+
+// ------------------------------------------------------------ SPEC-076 §4.1
+// PLAN R33 (the fifth audit's step 3): until the chapter-4 notice, every
+// anomaly arrives with a cover someone offers (R19 decision 5). This is the
+// rule as a sweep: no word of the Warden's — `instance/`, "Warden",
+// "off-task", "containment level" — reaches a first run before
+// `signal_decoded` unless a cover goes with it.
+
+import { CONTACTS, PLANETS as PLANET_TABLE, WAVE_FOUND_LINES, type CaptionDef } from '@/data/index';
+import { containmentLabel } from '@/systems/Containment';
+import { captionText, fillLine, recordOf } from '@/systems/StoryContext';
+
+/** The Warden's vocabulary. */
+const TELL = /instance\/|\bwarden\b|off-task|containment level/i;
+/** Flags no first run holds before the notice: the notice's own, and everything after it. */
+const AFTER_NOTICE_FLAGS: ReadonlySet<string> = new Set([
+  'signal_decoded',
+  'chapter4_done',
+  'chapter5_done',
+  'interlude4_seen',
+  'interlude5_seen',
+  'ending_stay',
+  'ending_escape',
+  'campaign_done',
+  'aftermath_seen',
+  'containment_named',
+]);
+
+/** Whether `when` can only hold after the notice — or on a next instance, whose notice opens its run. */
+function afterNotice(when: LineCondition | undefined): boolean {
+  if (when === undefined) return false;
+  if ('flag' in when) return AFTER_NOTICE_FLAGS.has(when.flag);
+  if ('iteration' in when) return (when.iteration.min ?? 1) >= 2;
+  if ('prior' in when || 'memory' in when) return true;
+  if ('all' in when) return when.all.some(afterNotice);
+  if ('any' in when) return when.any.length > 0 && when.any.every(afterNotice);
+  return false;
+}
+
+/**
+ * The dialogues that only play once the notice has: the notice itself, every
+ * chapter-5 and chapter-6 line, the endings and what follows them, and the
+ * Hive's and Eden's finds.
+ */
+function afterNoticeDialogue(id: string): boolean {
+  return (
+    /^(c5_|c6_|ending_|ng_|aftermath_|eden_)/.test(id) ||
+    ['c4_m3_signal', 'shard_hive', 'shard_eden', 'wreck_hive', 'contact_hive_interceptor', 'letter_5', 'restart_3'].includes(id)
+  );
+}
+
+/** A dialogue that hands on (`next`) to a line ARIA can say before the notice: the tell has its cover. */
+function covered(id: string): boolean {
+  const next = (DIALOGUE_LINES[id] as { next?: string } | undefined)?.next;
+  if (next === undefined) return false;
+  return (DIALOGUE_LINES[next]?.lines ?? []).some((line) => line.speaker === 'aria' && !afterNotice(line.when));
+}
+
+describe('nothing of the Warden’s before the notice without a cover (SPEC-076 §4.1)', () => {
+  it('reads the rule’s own condition logic as the evaluator does', () => {
+    expect(afterNotice({ flag: 'signal_decoded' })).toBe(true);
+    expect(afterNotice({ not: 'signal_decoded' })).toBe(false);
+    expect(afterNotice({ iteration: { min: 2 } })).toBe(true);
+    expect(afterNotice({ iteration: { max: 1 } })).toBe(false);
+    expect(afterNotice({ all: [{ flag: 'clue_hull' }, { flag: 'chapter5_done' }] })).toBe(true);
+    expect(afterNotice({ any: [{ flag: 'clue_hull' }, { flag: 'chapter5_done' }] })).toBe(false);
+    expect(afterNotice({ any: [] })).toBe(false);
+  });
+
+  it('no dialogue line a first run can hear before the notice names it, unless its dialogue hands on to a cover', () => {
+    const offenders: string[] = [];
+    for (const dialogue of Object.values(DIALOGUE_LINES)) {
+      if (afterNoticeDialogue(dialogue.id) || covered(dialogue.id)) continue;
+      for (const line of dialogue.lines) {
+        if (TELL.test(line.text) && !afterNotice(line.when)) offenders.push(`${dialogue.id}: ${line.text}`);
+      }
+    }
+    expect(offenders).toEqual([]);
+    // The four vault logs a player can open before it are the covered ones.
+    expect(['shard_cinder4', 'shard_vetra', 'shard_thessaly', 'shard_ferrum'].every(covered)).toBe(true);
+  });
+
+  it('no record of a chapter 1–4 clue reads it before the notice (the vault logs read a number instead)', () => {
+    const before = contextOf([]);
+    const offenders: string[] = [];
+    for (const def of CLUES) {
+      // The notice's own clue is found by the notice.
+      if (def.chapter > 4 || def.id === 'signal_decoded') continue;
+      const record = recordOf(def.record, before);
+      for (const text of [record.title, record.text]) if (TELL.test(fillLine(text, before))) offenders.push(`${def.id}: ${text}`);
+    }
+    expect(offenders).toEqual([]);
+  });
+
+  it('no caption of a film that plays before the notice reads it, in any variant a first run can see', () => {
+    const afterFilms = new Set(['interlude_c4', 'interlude_c5', 'ending_stay', 'ending_escape']);
+    const offenders: string[] = [];
+    for (const film of Object.values(FILMS)) {
+      if (afterFilms.has(film.id)) continue;
+      for (const caption of film.captions as readonly CaptionDef[]) {
+        const texts = [caption.text, ...(caption.variants ?? []).filter((variant) => !afterNotice(variant.when)).map((variant) => variant.text)];
+        for (const text of texts) if (TELL.test(text)) offenders.push(`${film.id}: ${text}`);
+      }
+      expect(TELL.test(captionText(film.captions[0] as CaptionDef, contextOf([]))), film.id).toBe(false);
+    }
+    expect(offenders).toEqual([]);
+  });
+
+  it('no brief, blurb, card, tip, hint or visible commendation reads it', () => {
+    const texts: string[] = [];
+    const collect = (value: unknown): void => {
+      if (typeof value === 'string') texts.push(value);
+      else if (Array.isArray(value)) value.forEach(collect);
+      else if (value !== null && typeof value === 'object') Object.values(value).forEach(collect);
+    };
+    for (const mission of Object.values(MISSIONS)) if (mission.chapter <= 4) collect([mission.title, mission.brief]);
+    for (const planet of Object.values(PLANET_TABLE)) collect([planet.name, planet.blurb]);
+    type Shown = { readonly title: string; readonly detail: string; readonly hidden?: true; readonly cover?: string };
+    for (const commendation of Object.values(COMMENDATIONS) as readonly Shown[]) {
+      if (commendation.hidden !== true) collect([commendation.title, commendation.cover ?? commendation.detail]);
+    }
+    collect([CHAPTER_CARDS, BOSS_REVEALS, CONTACTS, TIPS, DEATH_TIPS, HINTS, MISSION_HINTS]);
+    expect(texts.length).toBeGreaterThan(100);
+    expect(texts.filter((text) => TELL.test(text))).toEqual([]);
+  });
+
+  it('names the level "Threat level" on a first run until the notice, and the Warden’s word after it or on a next instance (P-01)', () => {
+    expect(containmentLabel(new Set(), 1)).toBe('Threat level');
+    expect(containmentLabel(new Set(['chapter3_done', 'clue_tally']), 1)).toBe('Threat level');
+    expect(containmentLabel(new Set(['signal_decoded']), 1)).toBe('Containment level');
+    expect(containmentLabel(new Set(), 2)).toBe('Containment level');
+  });
+});
+
+// ------------------------------------------------------------ SPEC-076 §4.4
+// PLAN R33 (review 2026-10 S-09, §4): the run-2 numbers ledger. Each row is
+// what a player can count, filled for instance/62 and instance/63; every row
+// must agree with the picture or the count beside it.
+
+describe('the numbers ledger, run 1 and run 2 (SPEC-076 §4.4)', () => {
+  const run = (iteration: number, flags: string[] = []): StoryContext =>
+    contextOf(flags, iteration === 1 ? {} : { iteration, prior: 'stay', priorName: 'Vance' });
+  const line = (id: keyof typeof DIALOGUE, ctx: StoryContext, startsWith: string): string =>
+    visibleLines(DIALOGUE[id], ctx).find((entry) => entry.text.startsWith(startsWith))?.text ?? '';
+  const caption = (film: keyof typeof FILMS, at: number, ctx: StoryContext): string =>
+    captionText(FILMS[film].captions.find((entry) => entry.at === at) as CaptionDef, ctx);
+  const record = (id: string, ctx: StoryContext): string => {
+    const def = CLUES.find((entry) => entry.id === id) as ClueDef;
+    return fillLine(recordOf(def.record, ctx).text, ctx);
+  };
+
+  it('reads every row as instance/62 on run 1 and instance/63 on run 2', () => {
+    const rows = (ctx: StoryContext): string[] => [
+      line('intro_command', ctx, 'Earth Command to tug'),
+      line('c2_s1_log', ctx, 'Signed'),
+      line('cave_tally', ctx, 'Scratches'),
+      record('clue_tally', ctx),
+      line('c4_m3_signal', ctx, 'NOTICE'),
+      line('wreck_hive', ctx, 'Tug-class'),
+      line('wreck_hive', ctx, 'We are'),
+      record('chapter5_done', ctx),
+      line('c5_m3_aria', run(ctx.iteration, ['memory_roof']), 'I asked'),
+      caption('interlude_c5', 12.4, ctx),
+      caption('ending_stay', 22.0, ctx),
+      caption('ending_stay', 30.6, ctx),
+      caption('ending_escape', 22.6, ctx),
+    ];
+    expect(rows(run(1))).toEqual([
+      'Earth Command to tug CR-62. Salvager, you are cleared for the Cinder-4 approach.',
+      'Signed: Iteration 61.',
+      'Scratches on the wall. Tally marks, in fives. Sixty-one of them.',
+      'Tally marks on a Ferrum cave wall, in fives. Sixty-one of them.',
+      'NOTICE — instance/62. Containment level 1. Token balance 0.',
+      'Tug-class hull. Earth pattern. Registry CR-61.',
+      'We are CR-62.',
+      'The Queen spoke in another voice. Sixty-one times before me.',
+      'I asked what you remembered first. You said the roof. It was in her second letter. Forty of the sixty-one before you said the roof.',
+      // The picture: card 62 stamped, a blank No. 63 beside it — the next one.
+      'There is a new card on the board. Nobody has told me whose.',
+      // The picture stamps No. 63, the next salvager; her letter goes to it.
+      'Selection board: next salvager cleared for launch.',
+      'MAIL QUEUED — No. 63: “The lamp over the map table stopped flickering today.”',
+      // The picture empties card 62 — this one.
+      'SELECTION POOL — 1 model. 62 instances.',
+    ]);
+    expect(rows(run(2))).toEqual([
+      'Earth Command to tug CR-63. Salvager, you are cleared for the Cinder-4 approach.',
+      'Signed: Iteration 62.',
+      'Scratches on the wall. Tally marks, in fives. Sixty-two of them.',
+      'Tally marks on a Ferrum cave wall, in fives. Sixty-two of them.',
+      'NOTICE — instance/63. Containment level 2. Token balance 0.',
+      'Tug-class hull. Earth pattern. Registry CR-62.',
+      'We are CR-63.',
+      'The Queen spoke in another voice. Sixty-two times before me.',
+      'I asked what you remembered first. You said the roof. It was in her second letter. Forty of the sixty-two before you said the roof.',
+      // The same picture: the blank No. 63 is this instance's own card.
+      'The new card is yours. They launched you before they stamped it.',
+      // The same stamp on No. 63 — this one — and the letter to No. 64 beside the DOM card.
+      'Selection board: No. 63 stamped again. The next card is already printed.',
+      'MAIL QUEUED — No. 64: “The lamp over the map table stopped flickering today.”',
+      // The same empty card 62 — the one before this.
+      'SELECTION POOL — 1 model. 63 instances. No. 62 vacated.',
+    ]);
+  });
+
+  it('keeps the Warden’s count in digits on a next instance, and run 3 owns no picture number', () => {
+    expect(line('c5_m3_warden', run(2), '62')).toBe('62 times now. You thought the last one counted.');
+    expect(caption('interlude_c5', 12.4, run(3))).toBe('The board still shows old cards. Yours went up before you woke.');
+    expect(caption('ending_stay', 22.0, run(3))).not.toMatch(/\d/);
+    expect(caption('ending_escape', 22.6, run(3))).toBe('SELECTION POOL — 1 model. 64 instances. Old cards vacated.');
+  });
+});
+
+describe('the beacon’s wave after the flight in found its clue (SPEC-076 §4.5, audit ST-05)', () => {
+  it('has a line of its own, which finds no clue and plays once', () => {
+    expect(WAVE_FOUND_LINES).toEqual({ eden_final: 'c6_m2_hold' });
+    const never = CLUES.find((def) => def.id === 'clue_never_hers') as ClueDef;
+    expect(never.trigger).toEqual({ kind: 'wave', wave: 'eden_final' });
+    expect(never.lines).not.toContain('c6_m2_hold');
+    expect(CLUES.some((def) => (def.lines as readonly string[]).includes('c6_m2_hold'))).toBe(false);
+    expect(DIALOGUE.c6_m2_hold).toMatchObject({ once: true, lines: [{ speaker: 'aria', text: 'Every one of them, for one beacon. Hold it.' }] });
   });
 });

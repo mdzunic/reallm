@@ -227,7 +227,8 @@ test('3, 5. four seconds in a Cinder-4 wreck find the older tug, and Notes recor
   await page.getByTestId('comms-tab-notes').click();
   // SPEC-049 §4.6: the catalogue holds 20 clues; SPEC-056 §4.7's shards make it 26.
   await expect(page.getByTestId('notes-count')).toHaveText('Recorded 1 of 26');
-  await expect(page.getByTestId('notes-rating')).toHaveText('Command rating 0.97 — a good run');
+  // PLAN R33 (review 2026-10 S-16): before the notice the rating has no grade.
+  await expect(page.getByTestId('notes-rating')).toHaveText('Command rating 0.97 (provisional)');
   await expect(page.getByTestId('notes-clue-clue_hull')).toContainText('An older tug');
   await expect(page.getByTestId('notes-clue-clue_hull')).toContainText('A tug like ours in the dunes.');
   // SPEC-049 §4.6: chapter 1 holds `clue_restart` too; SPEC-056 §4.7: and the Cinder-4 shard.
@@ -446,7 +447,8 @@ test('10. interlude_c3’s ARIA caption takes its variant with the towers read, 
     await page.evaluate(() => (window as unknown as { __reallmFilm: FilmBridge }).__reallmFilm.seek(8));
   };
   await playAt8();
-  await expect(caption).toContainText('The towers were not alien.');
+  // PLAN R33 (review 2026-10 S-18): the doubt, with the confession left for chapter 5.
+  await expect(caption).toContainText('The towers were built for someone. I wrote alien in my report.');
   await page.evaluate(() => (window as unknown as { __reallmFilm: FilmBridge }).__reallmFilm.seek(99));
   await expect(page.getByTestId('film')).toHaveCount(0, { timeout: 10_000 });
 

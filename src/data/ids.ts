@@ -170,6 +170,17 @@ export const STORY_FLAGS = [
   // SPEC-058 §4.7: the run's aftermath has played — `aftermath_stay` or
   // `aftermath_escape`, set as either starts.
   'aftermath_seen',
+  // PLAN R33 / SPEC-076: the answer to Iris's "Write back." (§4.2) — one of
+  // three, set by the choice after letter 3…
+  'reply_wurm',
+  'reply_home',
+  'reply_none',
+  // …the station header has torn from "Threat level" into "Containment
+  // level" once, after the notice (§4.1)…
+  'containment_named',
+  // …and ARIA's once-a-save flight lines on salvage signals and the nav limit (§4.5).
+  'aria_signals',
+  'aria_nav_limit',
 ] as const;
 export type FlagId = (typeof STORY_FLAGS)[number];
 

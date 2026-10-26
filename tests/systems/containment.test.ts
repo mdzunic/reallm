@@ -3,7 +3,7 @@
 // elite bonus at six points; iteration 1 is untouched, which is what keeps
 // every earlier pin, bot band and SPEC-016 literal where it was.
 import { describe, expect, it } from 'vitest';
-import { CONTAINMENT, containment, containmentLevel, containmentSteps } from '@/systems/Containment';
+import { CONTAINMENT, containment, containmentLabel, containmentLevel, containmentSteps, containmentTearDue } from '@/systems/Containment';
 
 describe('containment (SPEC-058 §4.4)', () => {
   it('CONTAINMENT is ×1.15 HP and damage and +2 points of elite chance a step, at most three steps', () => {
@@ -53,5 +53,22 @@ describe('containment (SPEC-058 §4.4)', () => {
     expect(containmentLevel(6, 9)).toBe(9);
     expect(containmentLevel(4, 1)).toBe(4);
     expect(containmentLevel(1, 99)).toBe(4);
+  });
+});
+
+describe('the label and its tear (PLAN R33, review 2026-10 P-01)', () => {
+  it('reads "Threat level" on a first run until the notice, and "Containment level" after it or on a next instance', () => {
+    expect(containmentLabel(new Set(), 1)).toBe('Threat level');
+    expect(containmentLabel(new Set(['signal_decoded']), 1)).toBe('Containment level');
+    expect(containmentLabel(new Set(), 2)).toBe('Containment level');
+    expect(containmentLabel(new Set(), 7)).toBe('Containment level');
+  });
+
+  it('tears once, on a first run, at the first entry after the notice', () => {
+    expect(containmentTearDue(new Set(), 1)).toBe(false);
+    expect(containmentTearDue(new Set(['signal_decoded']), 1)).toBe(true);
+    expect(containmentTearDue(new Set(['signal_decoded', 'containment_named']), 1)).toBe(false);
+    // A next instance's notice opens its run: there is nothing to tear.
+    expect(containmentTearDue(new Set(['signal_decoded']), 2)).toBe(false);
   });
 });

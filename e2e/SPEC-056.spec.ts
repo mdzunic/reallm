@@ -242,7 +242,8 @@ test.describe('SPEC-056 treasure', () => {
     expect(logLines).toBe(1);
     await page.getByTestId('comms-tab-notes').click();
     await expect(page.getByTestId('notes-clue-shard_cinder4')).toContainText('Too fast for hands');
-    await expect(page.getByTestId('notes-clue-shard_cinder4')).toContainText('instance/55 opened the lock in 0.3 seconds');
+    // PLAN R33 (SPEC-076 §4.1): before the notice the record gives the log's number, not `instance/`.
+    await expect(page.getByTestId('notes-clue-shard_cinder4')).toContainText('A log in the Cinder-4 vault, numbered 55.');
     await expect(page.getByTestId('notes-count')).toHaveText(/^Recorded [1-9]\d* of 26$/);
   });
 
