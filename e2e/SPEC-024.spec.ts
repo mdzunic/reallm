@@ -34,7 +34,8 @@ const CREATION = {
 } as const;
 
 /** The opening words of each line, in order; typing makes a prefix enough. */
-const INTRO_LINES = ['The beacon is clear', 'You can file the report', 'Or you refuse'];
+// PLAN R33 (audit 2026-10-26): the second line names Iris, and promises no grade.
+const INTRO_LINES = ['The beacon is clear', 'You can file it. Earth gets its lights', 'Or you refuse'];
 const STAY_LINES = ['Filing. Eden-Prime is viable', 'Received with thanks', 'A good run. Logged.', 'Rest. I will keep the ship warm'];
 /**
  * SPEC-034 §4.10, AC-42: `ending_escape` ends on ARIA's line. The terminal
@@ -45,7 +46,7 @@ const STAY_LINES = ['Filing. Eden-Prime is viable', 'Received with thanks', 'A g
 const ESCAPE_LINES = [
   'No. I am not filing anything',
   'There is nothing outside',
-  'Then I will find that out myself',
+  'Then I will be nothing, somewhere you are not',
   'Beacon is open',
 ];
 

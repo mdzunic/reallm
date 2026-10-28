@@ -116,7 +116,8 @@ test('1 — departure and card: the first trip to Cinder-4 plays the film, then 
   await expect(card).toContainText('CHAPTER 1');
   await expect(card).toContainText('CINDER-4');
   await expect(card).toContainText('Oil and grain under the dunes.');
-  await expect(card).toContainText('containment level 1');
+  // PLAN R33 (P-01): a first trip is before the notice, so the card reads the fiction's label.
+  await expect(card).toContainText('threat level 1');
   // The card does not hold the flight (§4.2, Decisions): the trip is running
   // under it — frames are ticking and the game is not paused behind a beat —
   // and the launch timeline runs out on its own further down.

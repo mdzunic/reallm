@@ -57,6 +57,18 @@ export const MEMORY_ANSWERS: readonly { readonly label: string; readonly flag: F
 ];
 
 /**
+ * PLAN R33 (review 2026-10 S-11): letter 3 ends "Write back." — the station
+ * asks after it, and each answer's flag is the reply. No letter answers it;
+ * letter 5's ARIA and the final choice remember that one was sent.
+ */
+export const REPLY_PROMPT = 'Iris asked you to write back. What do you send?';
+export const REPLY_ANSWERS: readonly { readonly label: string; readonly flag: FlagId }[] = [
+  { label: 'Tell her about the wurm.', flag: 'reply_wurm' },
+  { label: 'Tell her I am coming home.', flag: 'reply_home' },
+  { label: 'Say nothing.', flag: 'reply_none' },
+];
+
+/**
  * §4.2, the house rule: a contraction, over a straight or a curly apostrophe.
  * Only `home` may match it; possessives (`Earth’s`) never do. As data so the
  * content test — and nothing else — reads it.

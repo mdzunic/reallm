@@ -59,6 +59,7 @@ import {
   TIPS,
   TUNING,
   UNDERGROUND,
+  WAVE_FOUND_LINES,
   WAVES,
   type BossRevealDef,
   type CacheId,
@@ -7904,7 +7905,15 @@ export class SurfaceScene extends UiScene<'surface'> {
           // SPEC-048 §4.3: a wave clue — the Hive at Eden's beacon.
           const clues = this.#clues;
           const scene = this.#clueScene;
-          if (clues !== null && scene !== null) this.#playClue(clues.onWave(wave, scene));
+          if (clues === null || scene === null) return;
+          const def = clues.onWave(wave, scene);
+          if (def !== null) {
+            this.#playClue(def);
+            return;
+          }
+          // PLAN R33 (audit 2026-10-26 ST-05): the clue was found before the wave — on the flight in.
+          const found = WAVE_FOUND_LINES[wave];
+          if (found !== undefined) void this.#dialogue?.play(found, { modal: false });
         },
         this,
       ),

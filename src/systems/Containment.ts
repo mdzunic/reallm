@@ -45,3 +45,22 @@ export function containment(iteration: number): Containment {
 export function containmentLevel(chapter: number, iteration: number): number {
   return chapter + containmentSteps(iteration);
 }
+
+/**
+ * PLAN R33 (review 2026-10 P-01): what the level is called. Until the
+ * chapter-4 notice names it, a first run reads the fiction's "Threat level";
+ * from `signal_decoded`, or on any next instance (whose notice opens the
+ * run), the Warden's "Containment level". The number is the same either way.
+ */
+export function containmentLabel(flags: ReadonlySet<string>, iteration: number): 'Threat level' | 'Containment level' {
+  return iteration >= 2 || flags.has('signal_decoded') ? 'Containment level' : 'Threat level';
+}
+
+/**
+ * PLAN R33 (P-01): whether the station's header tears from the one label into
+ * the other on this entry — the first entry after the notice on a first run,
+ * once a save (`containment_named`).
+ */
+export function containmentTearDue(flags: ReadonlySet<string>, iteration: number): boolean {
+  return iteration === 1 && flags.has('signal_decoded') && !flags.has('containment_named');
+}

@@ -236,9 +236,10 @@ test.describe('SPEC-009 content data layer', () => {
     // PLAN R9 added the five interlude flags (SPEC-021 §4.7), PLAN R19 the
     // eleven clue flags (SPEC-048 §4.2), SPEC-049 §4.8 the letters, the
     // body's clues and the memory answers (28 → 40) and Iris, SPEC-056 §4.7
-    // the six archive shards (40 → 46), and SPEC-058 §4.7 `aftermath_seen`
-    // (46 → 47) — each a deliberate pin change.
-    expect(c.idUnions['STORY_FLAGS']).toHaveLength(47);
+    // the six archive shards (40 → 46), SPEC-058 §4.7 `aftermath_seen`
+    // (46 → 47), and SPEC-076 the reply, the header's tear and ARIA's two
+    // flight lines (47 → 53) — each a deliberate pin change.
+    expect(c.idUnions['STORY_FLAGS']).toHaveLength(53);
     expect(c.idUnions['STORY_FLAGS']).toContain('chapter1_done');
     expect(c.idUnions['SPEAKERS']).toEqual(['aria', 'command', 'scav', 'log', 'player', 'warden', 'home']);
     // SPEC-064 §3 appends `scav`, the human stand-in Cinder-4's raiders wear

@@ -2647,3 +2647,27 @@ Recorded on the branch: `npm run check` (145 files, 3,656 tests) and the full e2
 - [ ] in the cockpit the screens show, the cruise reads as space, and a rock that hits shows where it struck;
 - [ ] under the colour-blind preset, a low tank and an arena ring on the minimap read as danger;
 - [ ] a screenshot of each, recorded here.
+
+## PLAN R33 — the story pass: SPEC-076 (M7u)
+
+- **Build:** `feat/story-pass`, untagged
+- **Devices:**
+  - desktop: headless full Chromium on the Mac's GPU (Playwright, `--use-angle=metal`), 1440 × 900
+  - hardware: _not run_ (owed, below)
+
+Recorded on the branch: `npm run check` (145 files, 3,669 tests) and the full e2e suite, 4 workers: 806 passed, 6 skipped, 2 failed. SPEC-009 pinned the old flag count (47, now 53) and SPEC-056 the old pre-notice shard record. Both pins moved, and both files then passed 12 of 12. The new `e2e/SPEC-076.spec.ts` (6 cases) passes. The frames are in `docs/screenshots/r33/`.
+
+| Area | What the headless run showed |
+|---|---|
+| The level's name | A save past the notice entered the station on "Threat level 3", which tore into a red "Containment level 3" 1.2 s later; the next entry opened on it with no tear (`header-threat-level.jpg`, `header-containment-level.jpg`) |
+| Write back | Letter 3's three lines, then "Iris asked you to write back. What do you send?" with the three answers; the first set `reply_wurm`, and ARIA queued it (`write-back.jpg`) |
+| Notes | Two clues found before the notice read "Command rating 0.97 (provisional)" (`notes-provisional.jpg`) |
+| The leak sweep | The content suite's sweep passes, and it fails when a vault record is given its old `instance/46` text (a mutation check, reverted) |
+
+**Owed on hardware.** On the laptop and the reference phone:
+
+- [ ] a new save reads "Threat level" on the station and on the first chapter cards, and the first entry after Ferrum's notice tears it once;
+- [ ] letter 3's reply reads well as a choice on the phone, and letter 5 and the final choice remember it;
+- [ ] a tow, the first salvage signal and the nav limit each get ARIA's line once;
+- [ ] run 2's interlude 5 and ending captions agree with their pictures;
+- [ ] a screenshot of each, recorded here.

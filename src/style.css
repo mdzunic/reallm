@@ -3783,6 +3783,19 @@ html.debug .scene-tag {
   color: var(--warn);
 }
 
+/* PLAN R33 (P-01): the first entry after the notice, "Threat level" tears into
+   "Containment level" — the chapter card's one 240 ms pass, in the hostile red
+   the card's line wears. Reduce motion changes the words with no tear. */
+.station-containment.is-torn {
+  font-family: var(--font-mono);
+  color: var(--hp);
+  animation: card-glitch 240ms steps(2) 1;
+}
+
+html.reduce-motion .station-containment.is-torn {
+  animation: none;
+}
+
 .station-panel {
   padding: 12px;
   max-width: 720px;

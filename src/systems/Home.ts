@@ -7,7 +7,7 @@
 // save field: the letters, the asides and the drift read story flags, and the
 // once-a-session memories (`HOME_SESSION`) forget on reload, like the dialogue
 // layer's `once`.
-import { DEATH_RESPAWN, KEEPSAKE, LETTERS, MEMORY_ANSWERS, type DialogueId, type LetterDef } from '@/data/index';
+import { DEATH_RESPAWN, KEEPSAKE, LETTERS, MEMORY_ANSWERS, REPLY_ANSWERS, type DialogueId, type LetterDef } from '@/data/index';
 import type { StoryContext } from '@/systems/StoryContext';
 
 /** `chapter<N>_done` for a letter's chapter. */
@@ -42,6 +42,17 @@ export function lettersDone(flags: ReadonlySet<string>): readonly LetterDef[] {
 /** §4.5: whether the memory question has been answered — any of its three flags. */
 export function memoryAnswered(flags: ReadonlySet<string>): boolean {
   return MEMORY_ANSWERS.some((answer) => flags.has(answer.flag));
+}
+
+/**
+ * PLAN R33 (SPEC-076 §4.2): whether the reply to letter 3 is still owed —
+ * the letter read, none of `REPLY_ANSWERS`' flags set, and chapter 4 not yet
+ * done. A quit before the answer asks again at the next entry, as the memory
+ * question does (49-c); once chapter 4 is done her next letter is on its way,
+ * and the moment has passed (E147).
+ */
+export function replyDue(flags: ReadonlySet<string>): boolean {
+  return flags.has('letter3_read') && !flags.has('chapter4_done') && !REPLY_ANSWERS.some((answer) => flags.has(answer.flag));
 }
 
 /**

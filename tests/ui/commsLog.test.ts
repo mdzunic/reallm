@@ -2,7 +2,7 @@
 // for real by `e2e/SPEC-045.spec.ts` case 3; this pins what it lists.
 import { describe, expect, it } from 'vitest';
 import { COMMS_LOG_MAX, CommsLog } from '@/ui/CommsLog';
-import { LETTER_WAITING_TEXT, NOTES_EMPTY_TEXT, NOTES_MISSING_TEXT, NOTES_UNSEEN } from '@/ui/NotesPanel';
+import { LETTER_WAITING_TEXT, NOTES_EMPTY_TEXT, NOTES_MISSING_TEXT, NOTES_UNSEEN, ratingText } from '@/ui/NotesPanel';
 import { stripComments } from '../architecture/source';
 
 const RAW = import.meta.glob<string>('../../src/ui/*.ts', { query: '?raw', import: 'default', eager: true });
@@ -88,7 +88,9 @@ describe('Notes (SPEC-048 §4.4)', () => {
     expect(NOTES_MISSING_TEXT).toBe('— not recorded —');
     const panel = SOURCES['../../src/ui/NotesPanel.ts'] as string;
     expect(panel).toContain('`Recorded ${model.found} of ${model.total}`');
-    expect(panel).toContain('`Command rating ${model.rating.toFixed(2)} — ${model.grade}`');
+    expect(ratingText(0.91, 'an acceptable run')).toBe('Command rating 0.91 — an acceptable run');
+    // PLAN R33 (review 2026-10 S-16): before the notice, no grade.
+    expect(ratingText(1, null)).toBe('Command rating 1.00 (provisional)');
     for (const id of ['notes-empty', 'notes-count', 'notes-rating', 'notes-new']) expect(panel, id).toContain(`'${id}'`);
     expect(panel).toContain('`notes-chapter-${chapter.chapter}`');
     expect(panel).toContain('`notes-clue-${def.id}`');

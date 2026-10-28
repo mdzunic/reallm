@@ -211,18 +211,25 @@ describe('story films (SPEC-021 §8)', () => {
     expect(bytes).toBeLessThanOrEqual(12 * MB);
   });
 
-  it('4b (SPEC-048 §4.1). measures a filled caption, and the one variant interlude_c3 carries', () => {
+  it('4b (SPEC-048 §4.1). measures a filled caption, and the variants interlude_c3 and run 2 carry', () => {
+    // PLAN R33 (review 2026-10 S-09): the pool's caption owns the emptied card on a next instance.
     const pool = FILMS.ending_escape.captions.find((caption) => caption.text.startsWith('SELECTION POOL')) as CaptionDef;
-    expect(shownTexts(pool)).toEqual(['SELECTION POOL — 1 model. 160 instances.']);
+    expect(shownTexts(pool)).toEqual([
+      'SELECTION POOL — 1 model. 160 instances.',
+      'SELECTION POOL — 1 model. 160 instances. No. 159 vacated.',
+      'SELECTION POOL — 1 model. 160 instances. Old cards vacated.',
+    ]);
     const towers = FILMS.interlude_c3.captions[1] as CaptionDef;
     expect([towers.at, towers.until]).toEqual([7.4, 13.8]);
+    // PLAN R33 (review 2026-10 S-18): the doubt stays, the confession waits for chapter 5.
     expect(towers.variants).toEqual([
-      { when: { flag: 'scaffold_secret' }, text: 'The towers were not alien. I wrote alien in my report anyway.' },
+      { when: { flag: 'scaffold_secret' }, text: 'The towers were built for someone. I wrote alien in my report. Alien closes a file.' },
     ]);
-    // 61 characters: on screen for at least 3.03 s, and it has 6.4.
-    expect(shownTexts(towers)[1]).toHaveLength(61);
-    const withVariants = films.flatMap((film) => film.captions.filter((caption) => (caption.variants ?? []).length > 0));
-    expect(withVariants).toHaveLength(1);
+    // 83 characters: on screen for at least 3.58 s, and it has 6.4.
+    expect(shownTexts(towers)[1]).toHaveLength(83);
+    // The towers' variant, and run 2's three: the board, the stamp and the pool.
+    const withVariants = films.flatMap((film) => film.captions.filter((caption) => (caption.variants ?? []).length > 0).map(() => film.id));
+    expect(withVariants).toEqual(['interlude_c3', 'interlude_c5', 'ending_stay', 'ending_escape']);
   });
 
   it('11 (SPEC-051 §4.9). keeps films/ inside the retake wave’s 0.70 MB', () => {
